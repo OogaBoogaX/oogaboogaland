@@ -1571,7 +1571,7 @@
     ({ renderer, game, world, go, agentPlay } = ctx);
     camera = createCamera({ fov: 55, near: 0.3, far: 150 });
     root = createNode();
-    hud = hudMod.create({ roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
+    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
     hud.setAreaLabel("LF");
     if (window.matchMedia("(max-width: 720px), (max-height: 500px)").matches) hud.el.sheet.dataset.open = "false";
     hooks = {};
@@ -2239,15 +2239,19 @@
     return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...(remotes ? remotes.stats() : {}), feed: feed ? { ...feed.counts } : null, cooker: scene ? cookerStats(scene) : null };
   };
 
-  const factoryScene = {
+  const factoryScene = BL.deferred.scene("factory", {
     // Voice zone: the Factory group, which its tunnel on the island shares (`factory`).
     voiceZone: "factory.hall",
     micKey: true,
-    id: "factory", enter, update, overlay, onDonation, previewDonation, onSeen, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
+    id: "factory", buildSteps: () => FM.buildSteps(), enter, update, overlay, onDonation, previewDonation, onSeen, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null, agent: null, agentView: null, agentControls: null, agentHandoff: null,
     get inMotion() {
       return !!scene;
     }
+  });
+  factoryScene.prepare = () => {
+    const loading = BL.deferred.load("kiosk");
+    return loading ? loading.then(() => null) : null;
   };
   BL.scenes = BL.scenes || {};
   BL.scenes.factory = factoryScene;

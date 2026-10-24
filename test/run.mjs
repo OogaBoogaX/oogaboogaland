@@ -845,9 +845,9 @@ const cutawayBoundsProof = async () => {
 
 const visibilityStorageProof = async ({ compact = false, deferred = false } = {}) => {
   const context = { window: {}, performance };
-  for (const name of ["math", "scene", "models", "object-guides"]) {
+  for (const name of ["math", "scene", "models", "object-guides", "sight-guides"]) {
     let source = await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8");
-    if (name === "object-guides") source = source.replace("return { collect, clear,", "return { ownerRecords: () => ownerGroups, geometryRecords: () => geometries, entryRecords: () => registered, collect, clear,");
+    if (name === "object-guides") source = source.replace("return { collect, clear,", "return { contourScratchClear: () => !contoursPending && contourActor === null && contourRetained === null && contourRetainedCount === 0, ownerRecords: () => ownerGroups, geometryRecords: () => geometries, entryRecords: () => registered, collect, clear,");
     runInNewContext(source, context);
   }
   return runInNewContext(`(() => {
@@ -862,7 +862,20 @@ const visibilityStorageProof = async ({ compact = false, deferred = false } = {}
     const guides = B.objectGuides.create({ roots: [owner], crew: { cavemen: new Map() } });
     const initiallyUnbaked = guides.stats.triangles === 0 && guides.stats.samples === 0;
     const camera = S.createCamera({ near: 0.1, far: 100 }); Object.assign(camera.position, { x: 0, y: 0, z: 0 }); Object.assign(camera.target, { x: 0, y: 0, z: 8 });
-    S.updateWorld(root); guides.collect(actor, 0, 0, 8, camera, 1.6);
+    S.updateWorld(root);
+    const collected = guides.collect(actor, 0, 0, 8, camera, 1.6, [owner], 1, ${deferred});
+    let lazyContours = !${deferred} || collected.count === 0 && guides.stats.triangles === 0;
+    if (${deferred}) {
+      collected.ensureContours();
+      const version = collected.version;
+      collected.ensureContours();
+      lazyContours &&= version === collected.version && guides.contourScratchClear();
+      guides.collect(actor, 0, 0, 8, camera, 1.6, [owner], 1, true); guides.refresh();
+      lazyContours &&= guides.contourScratchClear();
+      guides.collect(actor, 0, 0, 8, camera, 1.6, [owner], 1, true);
+      guides.collect(actor, 0, 0, 8, camera, 1.6);
+      lazyContours &&= guides.contourScratchClear();
+    }
     guides.ownerBoundaryAt(owner, 0, 0.2, 8, 1, 0, 0);
     let values = 0, exact = true, tightBacking = true, bytes = 0, count = 0;
     for (const [source, geometry] of guides.geometryRecords()) {
@@ -900,7 +913,7 @@ const visibilityStorageProof = async ({ compact = false, deferred = false } = {}
     S.addChild(root, firstRoot, secondRoot);
     S.addChild(firstRoot, firstNode, removed); S.addChild(secondRoot, secondNode);
     const first = B.objectGuides.create({ roots: [firstRoot], crew: { cavemen: new Map() } }), second = B.objectGuides.create({ roots: [secondRoot], crew: { cavemen: new Map() } });
-    const query = (q, sceneRoot) => { S.updateWorld(sceneRoot); q.collect(actor, 0, 0, 8, camera, 1.6); q.ownerBoundaryAt(sceneRoot, 0, 0.2, 8, 1, 0, 0); };
+    const query = (q, sceneRoot) => { S.updateWorld(sceneRoot); q.collect(actor, 0, 0, 8, camera, 1.6, null, 0, ${deferred}); if (${deferred}) q.result.ensureContours(); q.ownerBoundaryAt(sceneRoot, 0, 0.2, 8, 1, 0, 0); };
     query(first, firstRoot); query(second, secondRoot);
     const sharedBake = first.geometryRecords().get(shared) === second.geometryRecords().get(shared);
     const sharedIndices = second.geometryRecords().get(shared).triangleIndices.slice();
@@ -964,7 +977,7 @@ const visibilityStorageProof = async ({ compact = false, deferred = false } = {}
     S.addChild(root, hiddenRoot); S.addChild(hiddenRoot, hiddenNode);
     const hidden = B.objectGuides.create({ roots: [hiddenRoot], crew: { cavemen: new Map() } }), hiddenCases = [];
     const hiddenSnapshot = q => {
-      S.updateWorld(hiddenRoot); q.collect(actor, 0, 0, 8, camera, 1.6);
+      S.updateWorld(hiddenRoot); q.collect(actor, 0, 0, 8, camera, 1.6, null, 0, ${deferred}); if (${deferred}) q.result.ensureContours();
       const rays = [], contours = [], v = hiddenNode.geometry.verts, w = hiddenNode.world;
       for (const x of [-2, -0.5, 0, 0.5, 2]) for (const y of [-0.75, -0.1, 0.3, 0.8, 1.5])
         rays.push(q.ownerClear(hiddenRoot, x, y, 0, x, y, 12), q.cameraClear(x, y, 0, x, y, 12, actor));
@@ -1000,7 +1013,37 @@ const visibilityStorageProof = async ({ compact = false, deferred = false } = {}
     hidden.register(hiddenNode, hiddenRoot); compareHidden("geometry replaced while parent hidden", false);
     hiddenRoot.visible = true; compareHidden("shown with replacement geometry", true);
     const hiddenTransitions = hiddenCases.every(row => row.pass); hidden.dispose();
-    return { exact, unchanged, bounded, tightBacking, storage, demand, nearBounds, nearCases, boundaryHits, gridQueries, values, count, bytes, lifecycle: sharedBake && removal && replacement && survivor && released && second.geometryRecords().size === 0 && hiddenTransitions, sharedBake, removal, replacement, survivor, released, hiddenTransitions, hiddenCases, disposed: guides.stats.registered === 0 };
+    // The production sight cadence must consume the latest deferred contours only when it recomputes.
+    // Compare its exact lines and owner phases against the eager registry throughout the existing motion/clip fixture.
+    if (${deferred}) {
+      const eager = B.objectGuides.create({ roots: [hiddenRoot], crew: { cavemen: new Map() } });
+      const delayed = B.objectGuides.create({ roots: [hiddenRoot], crew: { cavemen: new Map() } });
+      const sight = () => B.sightGuides.create({ segmentClear: () => true, objectClear: () => false,
+        ownerPerceived: () => true, ownerConcealed: () => true, ownerBoundary: () => true });
+      const a = sight(), b = sight();
+      let materializations = 0;
+      const ensure = delayed.result.ensureContours;
+      delayed.result.ensureContours = () => { materializations++; ensure(); };
+      const snapshot = q => JSON.stringify({ lines: Array.from(q.lines.subarray(0, q.count * 6)),
+        kinds: Array.from(q.kinds.subarray(0, q.count)), states: Array.from(q.ownerStates.subarray(0, q.ownerCount)),
+        alpha: Array.from(q.ownerAlphas.subarray(0, q.ownerCount)), retained: q.retainedCount, updates: q.updates });
+      for (let frame = 0; frame < 60; frame++) {
+        camera.position.x = Math.sin(frame * 0.1) * 0.5;
+        hiddenNode.geometry.clipMinY = frame < 30 ? 0 : 0.15;
+        S.updateWorld(hiddenRoot);
+        const x = eager.collect(actor, 0, 0, 8, camera, 1.6);
+        const y = delayed.collect(actor, 0, 0, 8, camera, 1.6, null, 0, true);
+        const enabled = frame >= 8;
+        const first = a.update(actor, null, x, camera, 1.6, 1 / 60, enabled, false, 15);
+        const second = b.update(actor, null, y, camera, 1.6, 1 / 60, enabled, false, 15);
+        lazyContours &&= snapshot(first) === snapshot(second);
+        if (!enabled) lazyContours &&= delayed.stats.triangles === 0;
+      }
+      lazyContours &&= materializations > 0 && materializations < 20;
+      delayed.refresh(); lazyContours &&= delayed.contourScratchClear();
+      eager.dispose(); delayed.dispose(); a.dispose(); b.dispose();
+    }
+    return { lazyContours, exact, unchanged, bounded, tightBacking, storage, demand, nearBounds, nearCases, boundaryHits, gridQueries, values, count, bytes, lifecycle: sharedBake && removal && replacement && survivor && released && second.geometryRecords().size === 0 && hiddenTransitions, sharedBake, removal, replacement, survivor, released, hiddenTransitions, hiddenCases, disposed: guides.stats.registered === 0 };
   })()`, context);
 };
 // Count descriptor users rather than timings, so the first-demand cost scales with actual users.
@@ -1810,6 +1853,20 @@ const { convexProbe } = (() => {
       return vertices;
     };
     const check = (kind, expected, actual, detail) => { if (expected !== actual && failures.length < 12) failures.push({ kind, expected, actual, ...detail }); };
+    const boxQuery = new Float64Array(14), boxBefore = new Float64Array(14);
+    let boxQueries = 0, boxHits = 0, boxInputsUnchanged = true;
+    // Reuse the independent box fixtures for the scalar API and caller-owned typed storage.
+    // Interleave both entries, then repeat the typed query to expose retained or overwritten inputs.
+    const checkBox = (kind, expected, x, y, z, dx, dy, dz, radius, height, minX, minY, minZ, maxX, maxY, maxZ) => {
+      boxQuery.set([x, y, z, dx, dy, dz, radius, height, minX, minY, minZ, maxX, maxY, maxZ]);
+      boxBefore.set(boxQuery);
+      check(kind + " typed box", expected, !window.BL.terrain.segmentBoxQueryClear(boxQuery));
+      check(kind + " scalar box", expected, !window.BL.terrain.segmentBoxClear(...boxBefore));
+      check(kind + " reversed scalar box", expected, !window.BL.terrain.segmentBoxClear(x + dx, y + dy, z + dz, -dx, -dy, -dz, radius, height, minX, minY, minZ, maxX, maxY, maxZ));
+      check(kind + " repeated typed box", expected, !window.BL.terrain.segmentBoxQueryClear(boxQuery));
+      for (let i = 0; i < boxQuery.length; i++) if (!Object.is(boxQuery[i], boxBefore[i])) boxInputsUnchanged = false;
+      boxQueries++; if (expected) boxHits++;
+    };
     for (let i = 0; i < 20000; i++) {
       const x0 = random() * 60 - 30, y0 = random() * 30 - 25, z0 = random() * 60 - 30, w = 0.025 + random() * 0.225, h = 0.025 + random() * 0.225, d = 0.025 + random() * 0.225;
       const x = x0 + random() * 1.2 - 0.6, y = y0 + random() * 2.2 - 1.5, z = z0 + random() * 1.2 - 0.6, radius = i % 13 ? random() * 0.7 : 0, height = i % 17 ? random() * 1.8 : 0;
@@ -1817,6 +1874,7 @@ const { convexProbe } = (() => {
       const horizontal = radius ? dx * dx + dz * dz < radius * radius : x > x0 && x < x0 + w && z > z0 && z < z0 + d;
       const vertical = height ? y < y0 + h && y + height > y0 : y > y0 && y < y0 + h;
       check("stationary box oracle", horizontal && vertical, collide(box(x0, y0, z0, w, h, d), x, y, z, x, y, z, radius, height), { x, y, z, radius, height, x0, y0, z0, w, h, d });
+      checkBox("stationary box oracle", horizontal && vertical, x, y, z, 0, 0, 0, radius, height, x0, y0, z0, x0 + w, y0 + h, z0 + d);
       stationary++;
     }
     const unit = box(-0.5, -0.5, -0.5, 1, 1, 1), thin = box(-0.002, -0.5, -0.5, 0.004, 1, 1);
@@ -1839,6 +1897,7 @@ const { convexProbe } = (() => {
     ];
     for (const [kind, expected, x, y, z, radius, height] of cases) {
       check(kind, expected, collide(unit, x, y, z, x, y, z, radius, height)); contacts++;
+      checkBox(kind, expected, x, y, z, 0, 0, 0, radius, height, -0.5, -0.5, -0.5, 0.5, 0.5, 0.5);
     }
     for (const [kind, expected, piece, x, y, z, tx, ty, tz, radius, height] of [
       ["thin wall tunneling", true, thin, -2, -0.25, 0, 2, -0.25, 0, 0.15, 0.5],
@@ -1849,13 +1908,18 @@ const { convexProbe } = (() => {
       ["parallel side just inside", true, unit, -2, -0.25, 0.75 - 1e-5, 2, -0.25, 0.75 - 1e-5, 0.25, 0.5],
       ["almost parallel outside", false, unit, -2, -0.25, 0.75001, 2, -0.25, 0.750001, 0.25, 0.5],
       ["almost parallel entry", true, unit, -2, -0.25, 0.75001, 2, -0.25, 0.74999, 0.25, 0.5]
-    ]) { check(kind, expected, collide(piece, x, y, z, tx, ty, tz, radius, height)); swept++; }
+    ]) {
+      check(kind, expected, collide(piece, x, y, z, tx, ty, tz, radius, height)); swept++;
+      const halfX = piece === thin ? 0.002 : 0.5;
+      checkBox(kind, expected, x, y, z, tx - x, ty - y, tz - z, radius, height, -halfX, -0.5, -0.5, halfX, 0.5, 0.5);
+    }
     // Random straight horizontal sweeps cross the X extent,
     // reducing the oracle to the exact cylinder-vs-box vertical interval and Z distance.
     for (let i = 0; i < 5000; i++) {
       const y = random() * 2 - 1, z = random() * 2 - 1, radius = random() * 0.4, height = random();
       const expected = y < 0.5 && y + height > -0.5 && Math.abs(z) < 0.5 + radius;
       check("swept box oracle", expected, collide(unit, -2, y, z, 2, y, z, radius, height), { y, z, radius, height }); swept++;
+      checkBox("swept box oracle", expected, -2, y, z, 4, 0, 0, radius, height, -0.5, -0.5, -0.5, 0.5, 0.5, 0.5);
     }
     // Y rotations preserve the cylinder, giving an exact independent oracle
     // for oblique rock faces and non-axis-aligned sweeps through thin fragments.
@@ -1899,7 +1963,7 @@ const { convexProbe } = (() => {
       check("window ceiling grazing", offset > 0, collide(fragment, x, y + offset, z, x, y + offset, z, radius, height), { offset }); ceiling++;
     }
     check("window ceiling crossing sweep", true, collide(fragment, x, y - 0.001, z, x, y + 0.001, z, radius, height)); ceiling++;
-    return { stationary, swept, contacts, rotated, tetrahedra, tilted, ceiling, failures };
+    return { stationary, swept, contacts, boxQueries, boxHits, boxQueryBytes: boxQuery.byteLength, boxInputsUnchanged, rotated, tetrahedra, tilted, ceiling, failures };
   };
   return { convexProbe };
 })();
@@ -2796,6 +2860,10 @@ const { autoQualityProbe } = (() => {
   const autoQualityProbe = () => {
     const source = readFileSync(new URL("../src/js/director.js", import.meta.url), "utf8");
     const controller = source.slice(source.indexOf("  const perf ="), source.indexOf("  const WARMUP"));
+    const policy = source.slice(source.indexOf("  // One opt-in override"), source.indexOf("  const mark ="));
+    const keepHub = (memory, mode = "auto") => runInNewContext(`${policy}\nKEEP_HUB`, { DEVICE_MEMORY: memory, params: new URLSearchParams({ hubcache: mode }) });
+    const hubMemory = [0.25, 1, 2, 4].every(gb => !keepHub(gb)) && [8, 16, 32, undefined, 0, NaN].every(gb => keepHub(gb))
+      && keepHub(4, "keep") && !keepHub(32, "release");
     const opening = source.slice(source.indexOf("  const COARSE ="), source.indexOf("  const $ ="));
     const initial = (deviceMemory, coarse = false) => runInNewContext(`${opening}\nINITIAL_QUALITY`, { navigator: { deviceMemory }, window: { matchMedia: () => ({ matches: coarse }) } });
     const create = (quality = "high", renderedFrames = 100, deviceMemory) => {
@@ -2836,7 +2904,7 @@ const { autoQualityProbe } = (() => {
       const slow = create("high", 100, gb); slow.boot(slow.low * 1.2);
       return limited.renderer.quality === "medium" && low.changes.length === 0 && slow.renderer.quality === "low";
     }) && [undefined, 0, NaN, 16].every((gb) => { const ample = create("high", 100, gb); ample.boot(0); return ample.changes.length === 0; });
-    return { memoryBoot, healthy: healthy.changes.length === 0, gpuBound: bound.changes[0] === "medium",
+    return { hubMemory, memoryBoot, healthy: healthy.changes.length === 0, gpuBound: bound.changes[0] === "medium",
       reactsIn: slowAt, reactsFast: slowAt <= 2500, ignoresSpikes: spike.changes.length === 0,
       bounded: bounded.changes.join("|") === "medium|low", warmup: warming.changes.length === 0,
       ignoresPauses: excluded.changes.length === 0, fallback: fallback.changes.length === 0,
@@ -3895,27 +3963,177 @@ const contributorActivityChecks = async () => {
   record("characters: every join key (github || handle) matches a login in the baked Oogatron snapshot, so no Ooga sleeps forever on a mismatch", unjoined.length === 0,
     unjoined.length ? `fix the handle, add github: "<login>" to the character file, or regenerate src/js/jumbotron-data.js: ${JSON.stringify(unjoined)}` : "");
 };
+const canvasSurfaceCacheChecks = async () => {
+  const source = await readFile(join(root, "src/js/canvas-renderer.js"), "utf8"), start = source.indexOf("  const createSurfaceShadeCache ="), end = source.indexOf("  const createRenderer =", start);
+  if (start < 0 || end < 0) throw new Error("Canvas surface shade cache not found");
+  const canvases = [], document = { createElement() { const canvas = { width: 0, height: 0, getContext: () => ({}) }; canvases.push(canvas); return canvas; } };
+  const create = new Function("document", `${source.slice(start, end)} return createSurfaceShadeCache;`)(document);
+  let paints = 0, failures = 0;
+  const cache = create(canvas => { canvas.serial = ++paints; });
+  const geometry = () => ({ imageSurface: { canvas: { width: 64, height: 32 }, version: 0, background: [10, 12, 10] } });
+  const a = geometry(), b = geometry(), rec = { canvasR: 0.8, canvasG: 0.9, canvasB: 1, canvasAddR: 0, canvasAddG: 0, canvasAddB: 0 };
+  const first = cache.get(a, rec), serial = first.serial; cache.get(b, rec);
+  if (cache.get(a, rec) !== first || first.serial !== serial || paints !== 2) failures++;
+  for (const key of Object.keys(rec)) {
+    const before = paints; rec[key] += 0.125;
+    const fresh = cache.get(a, rec), painted = fresh.serial;
+    if (paints !== before + 1 || cache.get(a, rec) !== fresh || fresh.serial !== painted) failures++;
+  }
+  const changed = mutate => { const before = paints; mutate(); cache.get(a, rec); if (paints !== before + 1) failures++; };
+  changed(() => a.imageSurface.version++);
+  changed(() => a.imageSurface.background[0]++);
+  changed(() => { a.imageSurface.background = null; });
+  changed(() => { a.imageSurface.canvas = { width: 64, height: 32 }; });
+  changed(() => { a.imageSurface.width = 60; });
+  changed(() => { a.imageSurface.height = 30; });
+  // A fixed crop does not hide changes in the source's native dimensions.
+  changed(() => { a.imageSurface.canvas.width++; });
+  changed(() => { a.imageSurface.canvas.height++; });
+  for (let i = 0; i < 40; i++) {
+    const g = geometry(); g.imageSurface.canvas.width = g.imageSurface.canvas.height = 512;
+    cache.get(g, rec);
+    if (cache.size > 8 || cache.pixels > 1024 * 1024) failures++;
+  }
+  const huge = geometry(); huge.imageSurface.canvas.width = huge.imageSurface.canvas.height = 2048;
+  const before = paints, size = cache.size, pixels = cache.pixels;
+  cache.get(huge, rec); cache.get(huge, rec);
+  if (paints !== before + 2 || cache.size !== size || cache.pixels !== pixels) failures++;
+  cache.release(new Set());
+  if (cache.size || cache.pixels) failures++;
+  cache.get(a, rec); cache.dispose();
+  if (cache.size || cache.pixels || canvases.some(c => c.width || c.height) || canvases.length > 9) failures++;
+  record("Canvas surface reuse: unchanged faces reuse exact shaded images, every content/lighting/dimension input invalidates, and eviction, scene release and disposal bound owned canvases", failures === 0, JSON.stringify({ failures, paints, canvases: canvases.length }));
+};
+const deferredLoadingChecks = async () => {
+  const source = await readFile(join(root, "src/js/deferred.js"), "utf8"), rows = [];
+  const fixture = () => {
+    const nodes = [], timers = new Map(); let serial = 0;
+    const document = { hidden: false, head: { appendChild(node) { nodes.push(node); return node; } },
+      createElement: tag => ({ tag, remove() { const i = nodes.indexOf(this); if (i >= 0) nodes.splice(i, 1); } }) };
+    const context = { window: { BL: { deferredScripts: { kiosk: "/kiosk.js", "factory-scene": "/factory.js" } } }, document,
+      setTimeout: fn => { timers.set(++serial, fn); return serial; }, clearTimeout: id => timers.delete(id) };
+    runInNewContext(source, context);
+    const BL = context.window.BL, shell = BL.deferred.scene("factory");
+    const scripts = () => nodes.filter(n => n.tag === "script"), links = () => nodes.filter(n => n.tag === "link");
+    const base = () => { BL.factoryKiosk = { create() {} }; scripts().find(n => n.src.startsWith("/kiosk.js")).onload(); };
+    const timeout = () => timers.values().next().value();
+    return { BL, shell, scripts, links, base, timeout, timers };
+  };
+  const rejected = promise => promise.then(() => false, () => true);
+  // A failed prerequisite never starts its scene; repeated retries must not grow the DOM.
+  {
+    const f = fixture(); let bounded = true; const addresses = new Set();
+    for (let i = 0; i < 8; i++) {
+      const pending = f.BL.deferred.load("factory-scene"), failed = rejected(pending);
+      bounded &&= f.BL.deferred.load("factory-scene") === pending && f.scripts().length === 1 && f.links().length === 1;
+      addresses.add(f.links()[0].href);
+      if (i % 2) f.timeout(); else f.scripts()[0].onerror();
+      bounded &&= await failed && !f.scripts().length && !f.links().length && !f.timers.size && f.BL.deferred.pending === 0;
+    }
+    rows.push({ path: "base error and timeout retries", ok: bounded && addresses.size === 8 });
+  }
+  for (const outcome of ["success", "error", "timeout", "missing definition"]) {
+    const f = fixture(), pending = f.BL.deferred.load("factory-scene"), failed = rejected(pending);
+    const beside = f.links().length === 1 && f.scripts().length === 1;
+    f.base(); await Promise.resolve();
+    const script = f.scripts().find(n => n.src.startsWith("/factory.js"));
+    const ordered = !!script && f.BL.deferred.present("kiosk");
+    if (outcome === "success") {
+      const enter = () => {}, original = f.BL.deferred.scene("factory", { enter, state: { active: true } });
+      f.BL.deferred.scene("factory", { enter() {}, state: { active: false } });
+      script.onload(); await pending;
+      rows.push({ path: "late definition keeps the active shell", ok: original === f.shell && f.shell.enter === enter && f.shell.state.active });
+    } else if (outcome === "timeout") f.timeout();
+    else if (outcome === "error") script.onerror();
+    else script.onload();
+    const didFail = await failed;
+    rows.push({ path: outcome, ok: beside && ordered && didFail === (outcome !== "success") && !f.links().length && !f.timers.size
+      && f.scripts().length === (outcome === "success" ? 2 : 1) });
+    if (outcome !== "success") {
+      const retry = f.BL.deferred.load("factory-scene"), next = f.scripts().find(n => n.src.startsWith("/factory.js"));
+      const fresh = next.src.endsWith("?r=1");
+      f.BL.deferred.scene("factory", { enter() {} }); next.onload(); await retry;
+      rows.push({ path: `${outcome} recovery`, ok: fresh && f.BL.deferred.load("factory-scene") === null && !f.links().length && !f.timers.size });
+    }
+  }
+  record("deferred loading: base and scene fetch together but execute in order, failed retries and timeouts release preloads, recovery fetches a fresh address and late definitions keep active state", rows.every(r => r.ok), JSON.stringify(rows));
+};
 // Every file in src/characters/ must register once and build a whole Ooga, so a
 // new contributor is covered without editing this suite.
 const characterChecks = async () => {
   const context = { window: {}, URLSearchParams, location: { search: "" } };
   for (const name of CONTRIBUTOR_SOURCES) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
-  const BL = context.window.BL, all = BL.characters.all(), hooks = ["torso", "club", "gear", "skull", "crown", "eyes", "mark", "hatY", "headgear", "extras", "tint"];
+  const BL = context.window.BL, all = BL.characters.all(), hooks = ["torso", "club", "gear", "skull", "crown", "eyes", "mark", "hatY", "headgear", "extras", "tint"], mirrorGeometries = new Set();
+  const collect = node => {
+    if (node.geometry) mirrorGeometries.add(node.geometry);
+    if (node.skins) for (const skin of Object.values(node.skins)) mirrorGeometries.add(skin);
+    for (const child of node.children) collect(child);
+  };
   const rows = all.map((c) => {
+    BL.models.setScope("character-rebuild");
     const traits = BL.contributors.traitsFor(c.handle), m = BL.models.caveman(traits);
     // A second colourway has to pair every voxel part both ways, heads included,
     // so crew.js changes the whole body and a second change puts it back.
     const parts = ["legR", "legL", "torso", "armR", "armL", "head"].map((key) => m.parts[key].geometry).concat([m.headOpen, m.headClosed]);
     const tint = !c.dress || !c.dress.tint ? !m.tint
       : !!m.tint && parts.every((geo) => m.tint.has(geo) && m.tint.get(m.tint.get(geo)) === geo && m.tint.get(geo).faces.length === geo.faces.length);
-    return { handle: c.handle, joined: c.joined > 1.7e9 && c.joined < 4e9, built: m.headOpen.faces.length > 0 && m.headClosed.faces.length > 0 && m.headOpen !== m.headClosed,
+    // Complete cache release rebuilds a palette; character hooks must not reuse slots from the previous build.
+    BL.models.release("character-rebuild", []);
+    const rebuilt = BL.models.caveman(BL.contributors.traitsFor(c.handle)), geometries = new Set([rebuilt.headOpen, rebuilt.headClosed, rebuilt.portraitHead]);
+    const visit = node => { if (node.geometry) geometries.add(node.geometry); for (const child of node.children) visit(child); };
+    visit(rebuilt.root);
+    if (rebuilt.tint) for (const [original, twin] of rebuilt.tint) geometries.add(original).add(twin);
+    collect(rebuilt.root);
+    for (const geo of geometries) mirrorGeometries.add(geo);
+    for (const weapon of Object.values(rebuilt.skins)) for (const skin of Object.values(weapon)) mirrorGeometries.add(skin);
+    const palette = [...geometries].every(geo => geo.faces.every(face => face.color && face.color.length === 3 && face.color.every(Number.isFinite)));
+    BL.models.release("character-rebuild", []); BL.models.setScope(null);
+    return { palette, handle: c.handle, joined: c.joined > 1.7e9 && c.joined < 4e9, built: m.headOpen.faces.length > 0 && m.headClosed.faces.length > 0 && m.headOpen !== m.headClosed,
       parts: ["legR", "legL", "torso", "armR", "armL", "head", "club", "gun"].every((key) => m.parts[key]), hooks: Object.keys(c.dress || {}).every((key) => hooks.includes(key) && typeof c.dress[key] === "function"),
       tint, voice: !c.voice || typeof c.voice.poke === "string" && Array.isArray(c.voice.idle),
       display: c.display === undefined || typeof c.display === "string" && !!c.display.trim() && c.display.length <= 39 };
   });
   const unique = new Set(all.map((c) => c.handle.toLowerCase())).size === all.length;
   const ordered = all.every((c, i) => !i || all[i - 1].joined <= c.joined);
-  record("characters: every src/characters file registers one handle, builds a whole Ooga and uses only known hooks", rows.length === CAST && CAST === BL.contributors.roster.length && unique && ordered && rows.every((r) => r.joined && r.built && r.parts && r.hooks && r.tint && r.voice && r.display), JSON.stringify(rows.filter((r) => !(r.joined && r.built && r.parts && r.hooks && r.tint && r.voice && r.display))));
+  record("characters: every src/characters file registers one handle, builds a whole Ooga and uses only known hooks", rows.length === CAST && CAST === BL.contributors.roster.length && unique && ordered && rows.every((r) => r.joined && r.built && r.parts && r.hooks && r.tint && r.voice && r.display && r.palette), JSON.stringify(rows.filter((r) => !(r.joined && r.built && r.parts && r.hooks && r.tint && r.voice && r.display && r.palette))));
+  for (const item of BL.models.SWAG) collect(item.buildNode());
+  Object.assign(BL, { pilot: { WALK: { speed: 2.8, gravity: 9.8 } }, crew: { JUMP_SPEED: 4 } });
+  for (const name of ["convex", "agent"]) runInNewContext(await readFile(join(root, `src/js/${name}.js`), "utf8"), context);
+  const mouth = { x: 0, z: 0, ry: 0, floorY: 0 }, coatClip = BL.agent.labCoatClip(mouth), suitClip = BL.agent.suitClip(mouth);
+  for (const clip of [coatClip, suitClip]) for (const part of Object.values(clip)) {
+    if (part?.ape) mirrorGeometries.add(part.ape).add(part.code);
+  }
+  for (const suit of suitClip.suits) for (const geo of Object.values(suit)) mirrorGeometries.add(geo);
+  for (const suitColor of [null, ...Array.from({ length: BL.agent.SUIT_COLORS }, (_, i) => i)]) {
+    const rig = BL.agent.create({ groundAt: () => 0, managed: true, coatClip, ...(suitColor === null ? {} : { suitClip, suitColor }) });
+    for (const form of ["ape", "code"]) { rig.setForm(form); collect(rig.root); }
+    rig.dispose();
+  }
+  for (const variant of [undefined, 0, 1]) {
+    const flask = BL.agent.labFlaskGeometry(variant);
+    mirrorGeometries.add(flask).add(flask.glassShell);
+  }
+  // Exercise the renderer's real reduced-capture decision on actual builder output, in both storage paths.
+  const source = await readFile(join(root, "src/js/gl-renderer.js"), "utf8"), start = source.indexOf("    const captureInstanceVisible ="), end = source.indexOf("    const drawCaptureRuns =", start);
+  if (start < 0 || end < 0) throw new Error("Reduced mirror capture predicate not found");
+  let inView = true;
+  const capture = new Function("boundsOf", "slotInFrustum", "sphereInFrustum", `${source.match(/const CULL_MARGIN = [^;]+;/)[0]}
+    ${source.match(/const INSTANCE_FLOATS = [^;]+;/)[0]} const MIRROR_FRUSTUM = [];
+    ${source.slice(start, end)} return { visible: captureInstanceVisible, margin: CULL_MARGIN, stride: INSTANCE_FLOATS };`)(BL.scene.boundsOf, () => inView, () => inView);
+  let small = 0, failures = 0;
+  const check = (geometry, expected) => {
+    const bounds = BL.scene.boundsOf(geometry), data = new Float32Array(capture.stride);
+    data[0] = data[5] = data[10] = data[15] = 1;
+    const node = { geometry, spheres: new Float32Array([0, 0, 0, bounds.radius + capture.margin]) }, batch = { geometry, batch: { instanceData: data } };
+    inView = true;
+    if (capture.visible(node, 0) !== expected || capture.visible(batch, 0) !== expected) failures++;
+    inView = false;
+    if (capture.visible(node, 0) || capture.visible(batch, 0)) failures++;
+    if (expected && bounds.radius < 1.25) small++;
+  };
+  for (const geo of mirrorGeometries) check(geo, true);
+  check(BL.models.box({ w: 0.1, h: 0.1, d: 0.1, color: "#ffffff" }), false);
+  record("mirror character ownership: reduced captures keep both weapon skins, tint and head swaps, swag and gorilla forms/clothing, while still culling small scenery and out-of-frustum parts", failures === 0 && small > 0, JSON.stringify({ geometries: mirrorGeometries.size, small, failures }));
 };
 // The mempool.space feed parser in Node: message shapes as the socket sends them, no socket.
 const mempoolFeedChecks = async () => {
@@ -4024,6 +4242,63 @@ const mempoolFeedChecks = async () => {
   record("mempool feed: a WebSocket constructor failure enters bounded retry instead of escaping startup", backedOff, JSON.stringify({ constructorSafe, enabled: blockedContext.window.BL.mempool.state.enabled, attempts: blockedContext.window.BL.mempool.state.attempts, retries }));
   record("mempool feed: the socket wants blocks, stats and projections and never every transaction, a silent link is dropped and redialled, a hidden tab holds no socket and its return reseeds the tip without a block",
     wants && stalled && hiddenClosed && heldWhileHidden && reseeded, JSON.stringify({ wants, stalled, hiddenClosed, heldWhileHidden, reseeded, asked, liveEvents }));
+};
+// The totems' feed in Node: the Worker's summary as the Worker answers it, and a host without it, no network.
+const totemFeedChecks = async () => {
+  const source = await readFile(new URL("../src/js/totem-feed.js", import.meta.url), "utf8");
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+  const reply = (status, body, headers = {}) => ({ status, ok: status >= 200 && status < 300, headers: { get: (k) => headers[k] ?? null }, json: async () => body });
+  const page = (protocol, answer) => {
+    const asked = [], events = [], ticks = [];
+    const context = { location: { protocol }, document: { hidden: false, addEventListener() {}, removeEventListener() {} },
+      window: { setInterval: (fn) => { ticks.push(fn); return 1; }, clearInterval() {} },
+      fetch: async (url, options = {}) => { asked.push({ url, tag: options.headers?.["if-none-match"] || "" }); return answer(url, asked.length); } };
+    runInNewContext(source, context);
+    const feed = context.window.BL.totemFeed;
+    feed.subscribe((e) => events.push(e));
+    return { feed, asked, events, ticks };
+  };
+  const hour = Date.now() - 3600000, JSON_TYPE = { "content-type": "application/json; charset=utf-8" };
+  let newer = false;
+  const summary = (url) => {
+    const i = Number(/\/api\/totems\/(\d)$/.exec(url)[1]), repo = ["bitcoin/bitcoin", "btcpayserver/btcpayserver", "lightningnetwork/lnd", "ElementsProject/lightning"][i];
+    const number = i === 0 ? (newer ? 43 : 42) : i === 1 ? 7 : 0, mergedAt = number ? hour + (newer ? 60000 : 0) : 0;
+    return { repo, number, mergedAt, etag: `"${i}-${number}-${mergedAt}"` };
+  };
+  const site = page("https:", (url, n) => {
+    const s = summary(url);
+    return n > 4 && !newer ? reply(304, null, { etag: s.etag }) : reply(200, { repo: s.repo, number: s.number, mergedAt: s.mergedAt }, { ...JSON_TYPE, etag: s.etag });
+  });
+  site.feed.start(); await settle();
+  const repos = site.feed.state.repos;
+  const firstQuiet = site.asked.length === 4 && site.asked.every((a, i) => a.url === `/api/totems/${i}` && !a.tag) && site.events.length === 2 && site.events.every((e) => !e.fresh)
+    && repos[0].number === 42 && repos[0].url === "https://github.com/bitcoin/bitcoin/pull/42" && repos[1].number === 7 && repos[2].number === 0 && repos[0].changedAt === hour;
+  site.ticks[0](); await settle();
+  const revalidated = site.asked[4].url === "/api/totems/0" && site.asked[4].tag === '"0-42-' + hour + '"' && site.events.length === 2 && repos[0].number === 42 && site.feed.state.failures === 0;
+  newer = true; for (let i = 0; i < 4; i++) { site.ticks[0](); await settle(); }
+  const fresh = site.events.length === 3 && site.events[2].index === 0 && site.events[2].fresh && repos[0].number === 43;
+  site.feed.dispose();
+  const stamp = new Date(hour).toISOString().slice(0, 19) + "Z";
+  const github = (url) => /\/api\/totems\//.test(url) ? reply(404, null, { "content-type": "text/html" })
+    : reply(200, [{ number: 9, html_url: `https://github.com/${/repos\/(.+)\/pulls/.exec(url)[1]}/pull/9`, updated_at: stamp, merged_at: stamp, base: { ref: "master" } }], JSON_TYPE);
+  const fallback = page("https:", github);
+  fallback.feed.start(); await settle(); fallback.ticks[0](); await settle();
+  const direct = fallback.asked.filter((a) => a.url.startsWith("/api/")).length === 1 && fallback.asked.length === 6 && fallback.asked.slice(1).every((a) => a.url.startsWith("https://api.github.com/repos/"))
+    && fallback.feed.state.repos.every((r) => r.number === 9) && fallback.events.length === 4 && fallback.events.every((e) => !e.fresh);
+  fallback.feed.dispose();
+  // A spent limit on the Worker is Cloudflare's shared budget: that turn reads GitHub itself, and the next asks the Worker again.
+  const limited = page("https:", (url) => /\/api\/totems\//.test(url)
+    ? reply(403, null, { ...JSON_TYPE, "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(Math.ceil(Date.now() / 1000) + 3600) }) : github(url));
+  limited.feed.start(); await settle(); limited.ticks[0](); await settle();
+  const shared = limited.asked[0].url === "/api/totems/0" && limited.asked[1].url.startsWith("https://api.github.com/repos/bitcoin/")
+    && limited.asked.filter((a) => a.url.startsWith("/api/")).length === 5 && limited.feed.state.limitedUntil === 0 && limited.feed.state.repos.every((r) => r.number === 9);
+  limited.feed.dispose();
+  const file = page("file:", github);
+  file.feed.start(); await settle();
+  const fileDirect = file.asked.length === 4 && file.asked.every((a) => a.url.startsWith("https://api.github.com/repos/"));
+  file.feed.dispose();
+  record("totem feed: the Worker's summary lights a totem without celebrating the first reading, its 304 keeps it, a newer merge is fresh, and a static host, a file page or a spent Worker limit reads GitHub itself",
+    firstQuiet && revalidated && fresh && direct && shared && fileDirect, JSON.stringify({ firstQuiet, revalidated, fresh, direct, shared, fileDirect, asked: site.asked.length, events: site.events, failures: site.feed.state.failures }));
 };
 // The chain snapshot in Node: real payload shapes from both providers, one code path, no sockets.
 const chainSnapshotChecks = async () => {
@@ -4748,10 +5023,10 @@ const gameRulesChecks = async () => {
     record("tickets: a spend refuses when the tickets fall short or the cost is no whole number above nothing, spending nothing, and one that goes through is saved", short && malformed && spent, JSON.stringify({ short, malformed, spent }));
   }
   {
-    // The jackpot wheel, from arcade-models.js on the builders it loads with: the house wins slowly, and every
+    // The jackpot wheel, from arcade-models.js and its scene half on the builders they load with: the house wins slowly, and every
     // wedge, from a turn at rest and one far round after many spins, stops under the clapper wherever in it the spin
     // aims, after its whole turns and less than one more.
-    for (const name of ["scene", "models", "contributor-identities", "activity-repos", "jumbotron", "hub-models", "arcade-models"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
+    for (const name of ["scene", "models", "contributor-identities", "activity-repos", "jumbotron", "hub-models", "arcade-models", "arcade-scene-models"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
     const { WHEEL_VALUES: V, WHEEL_COST: cost, wheelAt, wheelStop } = BL.arcadeModels;
     const ev = V.reduce((s, v) => s + v, 0) / V.length, jackpot = Math.max(...V), missed = [];
     for (const from of [0, -0.3, -1234.567]) for (let k = 0; k < V.length; k++) for (const at of [0.2, 0.5, 0.8]) {
@@ -5103,7 +5378,7 @@ const donationClientChecks = async () => {
   let now = Date.now(), detailsOpen = false;
   const kioskContext = { window: { BL: { jumbotron: { text: { GLYPH_W: 5, GLYPH_H: 7, TRACKING: 1 } }, qr: { encode: () => ({ size: 1, modules: [1] }) }, donations: D } },
     document: { createElement: () => ({ getContext: () => ({}) }) }, Date: class extends Date { static now() { return now; } } };
-  runInNewContext(await readFile(new URL("../src/js/factory-kiosk.js", import.meta.url), "utf8"), kioskContext);
+  for (const name of ["factory-kiosk-core", "factory-kiosk"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), kioskContext);
   const F = kioskContext.window.BL.factoryKiosk.create({ real: true, link: () => "/lightning", bananasFor: () => 1,
     invoice: async () => ({ request: "request", invoice: { id: "invoice", bolt11: "lntbs1", expires: now / 1000 + 10 }, bananas: { exact: 0.25, rounded: 0 }, rate: null }),
     open: () => true, testNetwork: () => "signet", account: () => ({ backend: true, me: null }), release: () => {},
@@ -5312,6 +5587,8 @@ const donationClientChecks = async () => {
   K.game = { bananasFor: () => 1 };
   K.chain = { snapshot: { priceUsd: 100000 } };
   K.net = { state: { backend: true, me: null }, login() {} };
+  // The kiosk is already loaded here, as it is inline in the portable page: no chunk to wait for.
+  K.deferred = { load: () => null };
   K.donations = { real: true, state: { open: true }, testNetwork: "signet", sanitize: D.sanitize, carried: (sats, message, bar = 1000) => D.carried(sats, message, bar),
     HANDLE_MAX: D.HANDLE_MAX, MESSAGE_MAX: D.MESSAGE_MAX, MESSAGE_MIN_SATS: 1000, messageMinSats: 1000,
     invoice: async options => { invoices.push(options); return { request: "request", invoice: { id: "popup", bolt11: "lntbs1", expires: now / 1000 + 900 }, bananas: { exact: 0.25, rounded: 0 }, rate: null }; },
@@ -5553,6 +5830,7 @@ const wallPerformance = async (b) => {
 };
 const adaptiveQualityChecks = async () => {
   const r = autoQualityProbe();
+  record("memory policy: devices below 8 GiB release the hub, 8 GiB or unknown memory retain it, and the explicit policy overrides either", r.hubMemory, JSON.stringify(r));
   record("adaptive quality: a GPU-bound machine is seen through delivered frames and loses a tier within two seconds", r.healthy && r.gpuBound && r.reactsFast, JSON.stringify(r));
   record("adaptive quality: warmup, transitions, background frames and isolated spikes do not lower quality", r.warmup && r.ignoresPauses && r.ignoresSpikes && r.fallback, JSON.stringify(r));
   record("adaptive quality: steps one tier at a time and stops at the lowest", r.bounded, JSON.stringify(r));
@@ -5563,7 +5841,8 @@ const adaptiveQualityChecks = async () => {
 // other picked scenes. Every step says why it exists; a step with `open` is a known, unfixed bug whose
 // failure prints OPEN and does not fail the run.
 const sceneUrl = (id, query = "") => `${src}?debug=1&nosim=1${id === "hub" ? "" : `&scene=${id}`}${process.env.TEST_CANVAS2D==="1"?"&canvas2d=1":""}${clock(query)}`;
-const tourGo = (b, id) => b.evaluate(`(() => { const B = window.__ooga; B.go("${id}"); for (let i = 0; i < 150 && (B.transitioning || B.scene !== "${id}"); i++) B.advance(1 / 30, 1 / 30); B.advance(0.3, 1 / 30); B.housekeep(); const s = B.stats(); return { scene: B.scene, records: B.renderer.stats.records, nodes: s.allNodes, targets: s.targets, dom: s.dom }; })()`);
+// A scene's construction slices run as real tasks while the fade holds black, so each step gives them one.
+const tourGo = (b, id) => b.evaluate(`(async () => { const B = window.__ooga, t0 = performance.now(); B.go("${id}"); while ((B.transitioning || B.scene !== "${id}") && performance.now() - t0 < 20000) { B.advance(1 / 30, 1 / 30); await new Promise(r => setTimeout(r, 0)); } B.advance(0.3, 1 / 30); B.housekeep(); const s = B.stats(); return { scene: B.scene, records: B.renderer.stats.records, nodes: s.allNodes, targets: s.targets, dom: s.dom }; })()`);
 const hubBedState = (fresh = false) => {
   const B = window.__ooga, actors = B.crew.list, beds = B.headquarters.mattresses, outdoors = B.headquarters.outdoorBeds, failures = [];
   const sphere = window.BL.scenes.hub.debug.timechainIsland;
@@ -5670,6 +5949,56 @@ const trip = (id) => ({ name: `${id} round trip`, why: "contract: a scene left a
   const donated = await b.evaluate(`(() => { const B = window.__ooga, g = B.game.state, before = { donations: g.donations, sats: g.totalSats, bananas: g.bananas }; window.BL.scenes[B.scene].onDonation({ id: "trip-${id}", sats: 2100, handle: "tester", message: "ooga", at: Date.now() }, { exact: 1.25, rounded: 1 }); B.advance(1, 1 / 30); return { scene: B.scene, donations: g.donations - before.donations, sats: g.totalSats - before.sats, bananas: g.bananas - before.bananas }; })()`);
   record(`${id} round trip: leaving and entering twice keeps the leave contract and holds nothing the first visit did not, and a donation mid-visit is taken`, grew.length === 0 && beds.every(state => !state.failures.length) && donated.scene === id && donated.donations === 1 && donated.sats === 2100 && donated.bananas === 1.25, JSON.stringify({ grew, beds, donated, first: laps[0], second: laps[1] }));
 } });
+// Keep the real sheet controls working while their rows survive a scene's lifetime.
+const hudVisit = { name: "hub HUD lifetime", why: "regression: scene visits recreated roster SVGs and donor rows; their handlers must end on leave while the attached rows keep their identity", run: async (b) => {
+  await b.evaluate(`(() => {
+    const H = window.__hudVisit = { rows: [...document.querySelectorAll("#roster [data-name]")], leaders: [...document.getElementById("banana-leaders").children], signals: [], calls: 0 }, S = BL.scenes;
+    H.keep = new URLSearchParams(location.search).get("hubcache") !== "release";
+    H.root = S.hub.root; H.pilot = __ooga.pilot; H.input = S.hub.input;
+    H.solids = __ooga.headquarters.solids.props; H.guides = __ooga.headquarters.objectGuides;
+    H.roof = S.hub.debug.terrainRampRoof; H.footsteps = __ooga.footsteps;
+    H.enters = [S.lab.enter, S.hub.enter];
+    for (const [i, id] of ["lab", "hub"].entries()) S[id].enter = ctx => {
+      H.signals.push(ctx.signal);
+      window.addEventListener("hud-lifetime-probe", () => H.calls++, { signal: ctx.signal });
+      return H.enters[i](ctx);
+    };
+  })()`);
+  try {
+    await tourGo(b, "lab");
+    const parked = await b.evaluate(`(() => {
+      const H = __hudVisit, S = BL.scenes.hub;
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "w", code: "KeyW" }));
+      const axes = H.pilot.controls.read(), quiet = axes.x === 0 && axes.y === 0 && axes.up === 0;
+      window.dispatchEvent(new KeyboardEvent("keyup", { key: "w", code: "KeyW" }));
+      return { policy: S.retained === H.keep, empty: !S.root.children.length && !S.input && !S.debug,
+        quiet, targets: H.input.targetCount, audio: H.footsteps.open };
+    })()`);
+    await tourGo(b, "hub");
+    const r = await b.evaluate(`(() => {
+      const H = window.__hudVisit, B = __ooga, leaders = document.getElementById("banana-leaders");
+      const painted = B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts) && B.renderer.stats.drawn > 0;
+      window.dispatchEvent(new Event("hud-lifetime-probe"));
+      B.game.recordDonation({ id: "hud-diff", sats: 987654, handle: "hud-diff", message: "hello", at: Date.now() });
+      BL.hud.setDonationStats(B.game.state);
+      document.querySelector('[data-donor-unit="sats"]').click();
+      const visible = [...leaders.children].filter(n => !n.hidden), rows = [...document.querySelectorAll("#roster [data-name]")];
+      const away = document.querySelector(".roster-away button"), closed = away.getAttribute("aria-expanded"); away.click();
+      const graph = BL.scenes.hub.root === H.root && B.pilot === H.pilot && B.headquarters.solids.props === H.solids
+        && B.headquarters.objectGuides === H.guides && BL.scenes.hub.debug.terrainRampRoof === H.roof;
+      return { painted, graph: graph === H.keep, ended: H.signals[0].aborted && !H.signals[1].aborted, calls: H.calls,
+        roster: rows.length === H.rows.length && rows.every(n => H.rows.includes(n)),
+        leaders: [...leaders.children].every((n, i) => n === H.leaders[i]),
+        visible: visible.length, ranked: visible[0].querySelector(".banana-donor").textContent === "@hud-diff",
+        sats: visible[0].querySelector(".banana-amount").textContent.replace(/[^0-9]/g, "") === "987654",
+        hidden: [...leaders.children].filter(n => n.hidden).every(n => getComputedStyle(n).display === "none"),
+        away: away.getAttribute("aria-expanded") !== closed };
+    })()`);
+    record("HUD lifetime: leaving releases input and audio, the chosen policy retains or rebuilds the graph, fresh visit handlers fire once, and reused rows retain sorting, units and the away toggle", parked.policy && parked.empty && parked.quiet && parked.targets === 0 && !parked.audio && r.painted && r.graph && r.ended && r.calls === 1 && r.roster && r.leaders && r.visible > 0 && r.ranked && r.sats && r.hidden && r.away, JSON.stringify({ parked, resumed: r }));
+  } finally {
+    await b.evaluate(`(() => { const H = window.__hudVisit; BL.scenes.lab.enter = H.enters[0]; BL.scenes.hub.enter = H.enters[1]; delete window.__hudVisit; })()`);
+  }
+} };
 const play = (id, what, code) => ({ name: `${id} playthrough`, why: "playthrough: the game reaches its result, shown and saved", run: async (b) => {
   const r = await b.evaluate(code);
   record(`${id} playthrough: ${what}`, r.ok, JSON.stringify(r));
@@ -5838,21 +6167,30 @@ const hostedSite = async () => {
 };
 // A refused bundle is logged by the browser as a failed resource; that line is the fixture's, not the page's.
 const dropRefusals = (b) => { for (let i = b.logs.length - 1; i >= 0; i--) if (b.logs[i].includes("status of 503")) b.logs.splice(i, 1); };
+// One group's file exactly: `drop` is not `drop-scene`, which shares its prefix.
+const chunkOf = (group) => (path) => new RegExp(`^/js/${group}-[0-9a-f]{16}\\.js$`).test(path);
 const orbitHosted = { name: "orbit hosted", why: "regression: Ooga Orbit read Ooga Drop's models at load, which a hosted page had deferred, so it threw on entry, cold and after a Drop visit", run: async (b, site) => {
   const cold = await b.evaluate(`({ scene: __ooga.scene, frames: __ooga.renderedFrames, models: !!BL.dropModels, diver: !!BL.skydiver })`);
+  // A whole flight on the cold page, to its log, before Drop's code has ever arrived.
+  await b.evaluate(`(() => { const O = window.__ooga.orbit; O.toBuild(); O.launch(); O.simulate(3.05); O.simulate(1.85); O.releaseClamps(); for (let t = 0; t < 400 && O.phase !== "results"; t += 0.25) O.simulate(0.25); })()`);
+  await b.sleep(200);
+  const flown = { ...await b.evaluate(orbitLog), diver: await b.evaluate(`!!BL.skydiver`) };
+  await b.evaluate(`document.querySelector('#orbit-results [data-action="orbit-again"]').click()`);
   await b.evaluate(`__ooga.go("drop")`);
   const drop = await untilPage(b, 'B.scene === "drop" && !B.transitioning', 15000);
   await b.evaluate(`__ooga.go("orbit")`);
   const orbit = await untilPage(b, 'B.scene === "orbit" && !B.transitioning', 15000);
   const after = await b.evaluate(`({ scene: __ooga.scene, frames: __ooga.renderedFrames })`);
-  record("orbit hosted: a cold /oogaorbit on the hosted page boots and draws with Drop's diver still unloaded, and Orbit opens again after a Drop visit", cold.scene === "orbit" && cold.frames > 2 && cold.models && !cold.diver
-    && drop && orbit && after.scene === "orbit" && site.fetched.filter(p => p.startsWith("/js/drop-")).length === 1, JSON.stringify({ cold, drop, orbit, after, fetched: site.fetched }));
+  record("orbit hosted: a cold /oogaorbit on the hosted page boots, draws and flies to its flight log with Drop's diver still unloaded, and Orbit opens again after a Drop visit", cold.scene === "orbit" && cold.frames > 2 && cold.models && !cold.diver
+    && flown.phase === "results" && flown.shown && flown.rows.some(([label]) => label === "Time") && !flown.diver
+    && drop && orbit && after.scene === "orbit" && site.fetched.filter(chunkOf("drop")).length === 1 && site.fetched.filter(chunkOf("drop-scene")).length === 1, JSON.stringify({ cold, flown: { phase: flown.phase, shown: flown.shown, rows: flown.rows, diver: flown.diver }, drop, orbit, after, fetched: site.fetched }));
 } };
-const arcadeHostedDrop = { name: "arcade hosted drop cabinet", why: "regression: a refused Ooga Drop download left the arcade's departure flags set, so no cabinet opened again and its Leave did nothing until a reload, also when Leave was pressed during the fade back", run: async (b, site) => {
+// Refused from the first request: entering the arcade prefetches its stage games, Drop included, before Space.
+const arcadeHostedDrop = { name: "arcade hosted drop cabinet", refuse: "/js/drop-", why: "regression: a refused Ooga Drop download left the arcade's departure flags set, so no cabinet opened again and its Leave did nothing until a reload, also when Leave was pressed during the fade back", run: async (b, site) => {
   await b.evaluate(`(() => { const B = window.__ooga, a = B.cavemen.get("portlandhodl"), s = window.BL.arcadeModels.CABINETS[1].play; if (B.crew.player !== a) B.pilot.possess(a); a.root.position.x = s.x; a.root.position.z = s.z; B.advance(0.2, 1 / 60); })()`);
-  site.refused.push("/js/drop-");
+  const drops = () => site.fetched.filter(chunkOf("drop")).length, before = drops();
   await b.key(" ");
-  for (let t = 0; t < 15000 && !site.fetched.some(p => p.startsWith("/js/drop-")); t += 50) await b.sleep(50);
+  for (let t = 0; t < 15000 && drops() === before; t += 50) await b.sleep(50);
   // Leave, pressed while the view fades back in (after the refusal's toast), is refused with the transition still running.
   const pressed = await b.evaluate(`new Promise(resolve => { const t0 = performance.now(), tick = () => {
     if (__ooga.transitioning && document.getElementById("toast").textContent.includes("could not be opened")) { document.querySelector('nav[data-scene="arcade"] .leave').click(); resolve(__ooga.transitioning); }
@@ -5862,13 +6200,30 @@ const arcadeHostedDrop = { name: "arcade hosted drop cabinet", why: "regression:
   dropRefusals(b);
   await b.key(" ");
   const opened = await untilPage(b, 'B.scene === "drop" && !B.transitioning', 15000);
-  const asked = site.fetched.filter(p => p.startsWith("/js/drop-")).length;
+  const asked = drops() - before;
   record("arcade hosted: a refused Ooga Drop download fades back to the arcade, Leave pressed during that fade is refused without locking the hall, and Space at the same cabinet asks again and opens the game", pressed === true && refused && opened && asked === 2, JSON.stringify({ pressed, refused, opened, asked, fetched: site.fetched }));
 } };
-for (const [id, step, path] of [["orbit", orbitHosted, "/oogaorbit"], ["arcade", arcadeHostedDrop, "/oogaarcade"]]) {
+// The factory's code refused while the Ooga walks into the 2 o'clock shield, as offline or after a redeploy.
+const factoryHostedShield = { name: "factory hosted shield", refuse: "/js/factory-scene-", why: "regression: a refused factory download sent the Ooga back still inside the shield, which entered again on the same step, looping fade, toast and fetch with no frame of control", run: async (b, site) => {
+  await b.evaluate(`(() => { const B = window.__ooga, a = B.cavemen.get("portlandhodl"), slot = window.BL.caves.slots.find((s) => s.scene === "factory"), m = B.mouths.find((m) => m.id === slot.id), along = window.BL.factoryModels.SHIELD_Z + 0.6; if (B.crew.player !== a) B.pilot.possess(a); B.pilot.navigate({ position: { x: m.x + Math.sin(m.ry) * along, y: m.floorY, z: m.z + Math.cos(m.ry) * along }, yaw: m.ry, pitch: 0.2, dist: 5 }); B.advance(0.5, 1 / 60); window.__mouth = { x: m.x, z: m.z, ry: m.ry }; })()`);
+  const inKey = await b.evaluate(`(() => { const m = window.__mouth; return [-Math.sin(m.ry), -Math.cos(m.ry)]; })()`);
+  const asked = () => site.fetched.filter(chunkOf("factory-scene")).length;
+  await walkToward(b, inKey[0], inKey[1], 0.8);
+  const notified = await untilPage(b, 'B.scene === "hub" && !B.transitioning && document.getElementById("toast").textContent.includes("could not be opened")', 15000);
+  await b.sleep(4000);
+  const refused = { asked: asked(), ...await b.evaluate(`({ scene: __ooga.scene, transitioning: __ooga.transitioning, driving: !!__ooga.pilot.player })`) };
+  site.refused.length = 0;
+  dropRefusals(b);
+  await walkToward(b, -inKey[0], -inKey[1], 0.8);
+  await walkToward(b, inKey[0], inKey[1], 0.8);
+  const entered = await untilPage(b, 'B.scene === "factory" && !B.transitioning', 15000);
+  record("factory hosted: a refused factory download sends the Ooga back once, driving, until it steps out of the shield, and walking back in opens the hall", notified && refused.asked >= 1 && refused.asked <= 2 && refused.scene === "hub" && !refused.transitioning && refused.driving && entered && asked() > refused.asked, JSON.stringify({ notified, refused, entered, fetched: site.fetched }));
+} };
+for (const [id, step, path] of [["orbit", orbitHosted, "/oogaorbit"], ["arcade", arcadeHostedDrop, "/oogaarcade"], ["factory", factoryHostedShield, "/"]]) {
   if (ONLY && !onlyMatches(step.name)) continue;
   tasks.push({ name: `${id} hosted`, scene: id, perf: false, run: async () => {
     const site = await hostedSite();
+    if (step.refuse) site.refused.push(step.refuse);
     try { await fold(`${site.origin}${path}?debug=1&nosim=1&net=0&hour=12&day=80&character=portlandhodl`, [[step.name, (b) => step.run(b, site)]]); }
     finally { await site.close(); }
   } });
@@ -6879,7 +7234,8 @@ const hubRainforestSteps = { name: "rainforest bridge steps", why: "regression: 
   record("rainforest bridge: hanging vines end at the gateways instead of extending through the stair rock", r.tails === 0, JSON.stringify({ tails: r.tails }));
 } };
 // The island opens Ooga Arcade with Space at its mouth; the Mempool is walked into.
-const WAIT_OUT = `(() => { const B = window.__ooga; for (let i = 0; i < 240 && (B.transitioning || B.scene === "hub"); i++) B.advance(1 / 30, 1 / 30); B.advance(0.3, 1 / 30); return B.scene; })()`;
+// A scene's construction slices run as real tasks while the fade holds black, so each step gives them one, as tourGo does.
+const WAIT_OUT = `(async () => { const B = window.__ooga, t0 = performance.now(); while ((B.transitioning || B.scene === "hub") && performance.now() - t0 < 20000) { B.advance(1 / 30, 1 / 30); await new Promise(r => setTimeout(r, 0)); } B.advance(0.3, 1 / 30); return B.scene; })()`;
 const hubRoutes = { name: "hub routes", why: "playthrough: every scene the island opens is reached the way a player gets there", run: async (b) => {
   await b.evaluate(`(() => { const B = window.__ooga, a = B.cavemen.get("portlandhodl"), slot = window.BL.caves.slots.find((s) => s.scene === "arcade"), m = B.mouths.find((m) => m.id === slot.id); if (B.crew.player !== a) B.pilot.possess(a); B.pilot.navigate({ position: { x: m.x - Math.sin(m.ry) * 1.2, y: m.floorY, z: m.z - Math.cos(m.ry) * 1.2 }, yaw: m.ry, pitch: 0.4, dist: 10 }); B.advance(0.5, 1 / 60); })()`);
   await b.key(" ");
@@ -7269,7 +7625,8 @@ const hubMirror = { name: "hub mirror", why: "rule: 500 damage shatters the mirr
 // The Canvas 2D fallback, for a device without WebGL2: every scene, entered in one page, paints real
 // colour (sampled small, after the arrival fade) and keeps the leave contract; the console stays clean.
 const canvasTour = { name: "canvas2d tour", why: "contract: the Canvas 2D fallback boots and draws every scene with the leave contract kept", run: async (b) => {
-  const r = await b.evaluate(`(() => { const B = window.__ooga, c = document.getElementById("scene"), t = document.createElement("canvas"); t.width = t.height = 8; const x = t.getContext("2d", { willReadFrequently: true }); const paint = () => { x.drawImage(c, 0, 0, 8, 8); const d = x.getImageData(0, 0, 8, 8).data, seen = new Set(); for (let i = 0; i < d.length; i += 4) seen.add(d[i] + "," + d[i + 1] + "," + d[i + 2]); return seen.size; }; const rows = { hub: { kind: B.renderer.kind, colours: paint() } }; for (const id of ["lab", "race", "drop", "orbit", "mine", "arcade", "hub"]) { B.go(id); let n = 0; while ((B.transitioning || B.scene !== id) && n++ < 600) B.advance(1 / 30, 1 / 30); B.advance(0.5, 1 / 30); rows[id === "hub" ? "back" : id] = { arrived: B.scene === id && !B.transitioning, colours: paint() }; } return rows; })()`);
+  // Construction slices and prepared builds run as real tasks, so each stepped frame yields one, as tourGo does.
+  const r = await b.evaluate(`(async () => { const B = window.__ooga, c = document.getElementById("scene"), t = document.createElement("canvas"); t.width = t.height = 8; const x = t.getContext("2d", { willReadFrequently: true }); const paint = () => { x.drawImage(c, 0, 0, 8, 8); const d = x.getImageData(0, 0, 8, 8).data, seen = new Set(); for (let i = 0; i < d.length; i += 4) seen.add(d[i] + "," + d[i + 1] + "," + d[i + 2]); return seen.size; }; const rows = { hub: { kind: B.renderer.kind, colours: paint() } }; for (const id of ["lab", "race", "drop", "orbit", "mine", "arcade", "hub"]) { B.go(id); const t0 = performance.now(); while ((B.transitioning || B.scene !== id) && performance.now() - t0 < 20000) { B.advance(1 / 30, 1 / 30); await new Promise(r => setTimeout(r, 0)); } B.advance(0.5, 1 / 30); rows[id === "hub" ? "back" : id] = { arrived: B.scene === id && !B.transitioning, colours: paint() }; } return rows; })()`);
   record("canvas2d tour: with WebGL2 unavailable every scene still boots, arrives and paints", r.hub.kind === "canvas2d" && Object.entries(r).every(([, row]) => row.colours >= 4 && row.arrived !== false), JSON.stringify(r));
 } };
 
@@ -7286,12 +7643,66 @@ const hubJumbotron = { name: "hub jumbotron", why: "rule: the island rotation st
   const r = await b.evaluate(`(() => {
     const B = window.__ooga, j = B.jumbotron, data = window.BL.jumbotronData;
     j.goToView(0);
+    j.update(0, B.renderer);
+    B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts);
+    const surfaceNode = j.node.children.find(node => node.geometry?.imageSurface?.canvas);
+    const surfaceGeometry = surfaceNode?.geometry, surfaceCanvas = surfaceGeometry?.imageSurface.canvas;
+    const initialRevision = surfaceGeometry?.imageSurface.version;
+    const chrome = j.node.children.find(node => node !== surfaceNode), variants = chrome.children.map(node => node.geometry);
+    const owned = variants.length === j.count && new Set(variants).size === j.count
+      && chrome.children.every(node => node.visible === false && node.geometry);
+    const gl = B.renderer.kind === "webgl2" ? document.getElementById("scene").getContext("webgl2") : null;
+    const create = gl?.createBuffer, remove = gl?.deleteBuffer;
+    let cycleCreates = 0, cycleDeletes = 0, rewarm = false;
+    if (gl) {
+      gl.createBuffer = function(...args) { cycleCreates++; return create.apply(this, args); };
+      gl.deleteBuffer = function(...args) { cycleDeletes++; return remove.apply(this, args); };
+    }
+    let cycleStable;
+    try {
+      for (let round = 0; round < 3; round++) for (let i = 0; i < j.count; i++) {
+        j.goToView(i); j.update(0, B.renderer);
+        B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts);
+      }
+      cycleStable = owned && cycleCreates === 0 && cycleDeletes === 0
+        && chrome.children.every((node, i) => node.geometry === variants[i]);
+      // Deliberate GPU pruning models a released visit or lost record. The unchanged selected index must rewarm
+      // every exact alternative, and preparing or selecting those alternatives again must remain idempotent.
+      const records = B.renderer.stats.records;
+      for (const geometry of variants) B.renderer.releaseGeometry(geometry);
+      const pruned = B.renderer.stats.records;
+      j.update(0, B.renderer);
+      const warmedCreates = cycleCreates, warmedDeletes = cycleDeletes;
+      rewarm = !gl || (pruned === records - variants.length && B.renderer.stats.records === records && warmedCreates > 0);
+      for (const geometry of variants) B.renderer.prepareGeometry(geometry);
+      for (let i = 0; i < j.count; i++) { j.goToView(i); j.update(0, B.renderer); }
+      rewarm &&= cycleCreates === warmedCreates && cycleDeletes === warmedDeletes;
+      j.goToView(0); j.update(0, B.renderer);
+      B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts);
+    } finally {
+      if (gl) { gl.createBuffer = create; gl.deleteBuffer = remove; }
+    }
+    let bufferCreates = 0, bufferDeletes = 0;
     const captions = [];
     for (let i = 0; i < j.count; i++) { captions.push(j.caption); j.nextView(); }
     const wrapped = j.caption;
     // Same single-row feed twice, the pr flagged draft and not: the ticker's type column must differ.
     const feed = (draft) => ({ ...data, recent: [{ login: data.contributors[0].login, repo: data.repos[0].name, type: "pr", occurred_at: data.meta.generated_at, draft }] });
-    const column = () => { j.setView("recent"); B.advance(0.2, 1 / 30); return j.canvas.getContext("2d").getImageData(126, 12, 60, 92).data.join(); };
+    const column = () => {
+      const gl = B.renderer.kind === "webgl2" ? document.getElementById("scene").getContext("webgl2") : null;
+      const create = gl?.createBuffer, remove = gl?.deleteBuffer;
+      if (gl) {
+        gl.createBuffer = function(...args) { bufferCreates++; return create.apply(this, args); };
+        gl.deleteBuffer = function(...args) { bufferDeletes++; return remove.apply(this, args); };
+      }
+      try {
+        j.setView("recent"); j.update(0, B.renderer);
+        B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts);
+      } finally {
+        if (gl) { gl.createBuffer = create; gl.deleteBuffer = remove; }
+      }
+      return j.canvas.getContext("2d").getImageData(126, 12, 60, 92).data.join();
+    };
     j.refreshData(feed(false));
     const plain = column();
     j.refreshData(feed(true));
@@ -7311,11 +7722,13 @@ const hubJumbotron = { name: "hub jumbotron", why: "rule: the island rotation st
       && reader.filters.users.length === 1 && reader.filters.users[0] === owner;
     reader.dispose(); restored.dispose(); j.refreshData(data);
     return { count: j.count, captions, wrapped, differs: plain !== drafted,
-      filtered, ownerOnly, restoredOwner };
+      filtered, ownerOnly, restoredOwner, bufferCreates, bufferDeletes, cycleStable, rewarm,
+      stable: !!surfaceGeometry && surfaceNode.geometry === surfaceGeometry && surfaceGeometry.imageSurface.canvas === surfaceCanvas
+        && surfaceGeometry.imageSurface.version > initialRevision };
   })()`);
   const orgBoards = ["commits", "prs", "reviews", "comments", "issues"].map((t) => "org · " + t);
   record("hub jumbotron: the island rotates org activity, readers filter repositories, and attributed users appear once with saved alias selections restored", r.count === 7 && r.captions[0] === "Recent activity" && r.captions[1] === "Org totals" && orgBoards.every((c, i) => r.captions[2 + i] === c) && r.wrapped === "Recent activity" && r.filtered && r.ownerOnly && r.restoredOwner, JSON.stringify(r));
-  record("hub jumbotron: a draft PR draws a different ticker row than the same PR undrafted", r.differs, JSON.stringify({ differs: r.differs }));
+  record("hub jumbotron: a draft PR changes the stable canvas ticker and exact chrome cycles without GPU buffer churn, including after records are pruned", r.differs && r.stable && r.bufferCreates === 0 && r.bufferDeletes === 0 && r.cycleStable && r.rewarm, JSON.stringify({ differs: r.differs, stable: r.stable, bufferCreates: r.bufferCreates, bufferDeletes: r.bufferDeletes, cycleStable: r.cycleStable, rewarm: r.rewarm }));
 } };
 const oogatronPopups = { name: "oogatron popups", why: "rule: Oogatron windows keep their displays apart during mouse or touch drags and remember their independent controls and layout after reload", run: async (b) => {
   const mobile = await b.evaluate("matchMedia('(pointer: coarse)').matches"), mode = mobile ? "phone" : "desktop";
@@ -9518,6 +9931,39 @@ const hubBirdsEyeProjection = { name: "birds-eye projection", why: "rule: overhe
     && state.filter(r => r.fallback).every(r => r.error < 0.002) && settled.every(r => r.aligned < 0.001 && r.parallel < 1e-6), JSON.stringify(state));
   record("birds-eye projection: rendered near and far objects follow projected positions, including a batch outside the old perspective frustum", samples.every(r => r.pixels[0]?.[0] > r.pixels[0]?.[1] + 40 && r.pixels[1]?.[2] > r.pixels[1]?.[1] + 40
     && (!r.pixels[2] || r.pixels[2][0] > r.pixels[2][1] + 40 && r.pixels[2][2] > r.pixels[2][1] + 40)) && settled.every(r => r.pixels[2]), JSON.stringify(samples.map(({ kind, mix, pixels }) => ({ kind, mix, pixels }))));
+  const culling = await b.evaluate(`(() => {
+    const B = __ooga, S = BL.scene, R = B.renderer, root = S.createNode(), rows = [];
+    const camera = S.createCamera({ near: 0.1, far: 80, orthoHeight: 10, orthoMix: 1 });
+    Object.assign(camera.position,{x:0,y:0,z:10}); Object.assign(camera.target,{x:0,y:0,z:0});
+    const geometry = BL.models.box({w:1,h:1,d:1,color:"#ff0000"});
+    const protectedGeometry = {...BL.models.box({w:1,h:1,d:1,color:"#00ff00"}),matrixGlyph:true};
+    const batchGeometry = BL.models.box({w:1,h:1,d:1,color:"#0000ff"});
+    const small = S.createNode({geometry,screenCull:true}), assembled = S.createNode({geometry});
+    const glyphs = new Float32Array(8*20), particles = new Float32Array(4*20), batch = S.createNode({geometry:batchGeometry,screenCull:true,instanceData:particles,instanceCount:4,instanceVersion:1});
+    const size = px => px*10/(Math.sqrt(3)*R.size.height);
+    const write = (data,i,px,x=0) => {const o=i*20,s=size(px);data[o]=data[o+5]=data[o+10]=s;data[o+15]=data[o+16]=1;data[o+12]=x;};
+    for(let i=0;i<8;i++)write(glyphs,i,.2,(i-4)*.2);
+    for(let i=0;i<4;i++)write(particles,i,.5,(i-2)*.3);
+    const mosaic = S.createNode({geometry:protectedGeometry,screenCull:true,instanceData:glyphs,instanceCount:8,instanceVersion:1});
+    Object.assign(assembled.scale,{x:size(.2),y:size(.2),z:size(.2)});
+    S.addChild(root,small,assembled,mosaic,batch);
+    const originalGlyphs = Array.from(glyphs), originalParticles = Array.from(particles), opts = {bloomStrength:0,shadowStrength:0,ambientFloor:1,directStrength:0};
+    try {
+      for(const pixels of [1,2,2.3,2,1.7,2,2.3]) {
+        const s=size(pixels);Object.assign(small.scale,{x:s,y:s,z:s});R.render(root,camera,opts);
+        rows.push({pixels,drawn:R.stats.drawn,smallCulled:R.stats.smallCulled});
+      }
+      // One visible individual preserves an explicit mixed batch's single draw and upload contract.
+      write(particles,2,3);batch.instanceVersion++;R.render(root,camera,opts);
+      const mixed={drawn:R.stats.drawn,smallCulled:R.stats.smallCulled,count:batch.instanceCount};
+      const preserved = root.children.every(n=>n.visible) && small.geometry===geometry && batch.instanceData===particles
+        && mosaic.instanceData===glyphs && glyphs.every((v,i)=>v===originalGlyphs[i]) && particles.every((v,i)=>i>=40&&i<60||v===originalParticles[i]);
+      return {rows,mixed,preserved,kind:R.kind};
+    } finally {for(const g of [geometry,protectedGeometry,batchGeometry])R.releaseGeometry(g);R.render(BL.scenes.hub.root,B.camera,B.renderOpts);}
+  })()`);
+  record("birds-eye projection: physical screen bounds cull only marked tiny props with hysteresis, preserve coherent glyph mosaics and assembled details, and retain an entire mixed batch", culling.kind === "webgl2"
+    && culling.rows.map(r=>r.drawn).join() === "9,9,10,10,9,9,10" && culling.rows.map(r=>r.smallCulled).join() === "5,5,4,4,5,5,4"
+    && culling.mixed.drawn === 14 && culling.mixed.smallCulled === 0 && culling.mixed.count === 4 && culling.preserved, JSON.stringify(culling));
   const anchors = await b.evaluate(`(() => {
     const B = __ooga, S = BL.scene, root = S.createNode(), actor = S.createNode({ position: { x: 4, y: 0, z: 0 } });
     const bodyGeometry = BL.models.box({ w: 1, h: 2, d: 1, color: "#999999" }), headGeometry = BL.models.box({ w: 1, h: 1, d: 1, color: "#ffffff" });
@@ -9917,9 +10363,9 @@ const factoryGreeter = { name: "factory greeter", why: "rule: the guide notices 
     const offered = await b.evaluate(`(() => { __ooga.pilot.release(true); return __ooga.factory.greeter.state.offered; })()`);
     if (offered) {
       await tourGo(b, "lab");
-      await b.evaluate(`(() => {
-        const B = __ooga; B.pilot.possess(B.cavemen.get("portlandhodl")); B.go("factory");
-        for (let i = 0; i < 150 && (B.transitioning || B.scene !== "factory"); i++) B.advance(1 / 30, 1 / 30);
+      await b.evaluate(`(async () => {
+        const B = __ooga, t0 = performance.now(); B.pilot.possess(B.cavemen.get("portlandhodl")); B.go("factory");
+        while ((B.transitioning || B.scene !== "factory") && performance.now() - t0 < 20000) { B.advance(1 / 30, 1 / 30); await new Promise(r => setTimeout(r, 0)); }
         B.pilot.release(true); B.advance(0.3, 1 / 30); B.housekeep();
       })()`);
     }
@@ -10700,7 +11146,8 @@ const factoryEntrance = { name: "factory entrance", why: "regression: flying abo
   await b.evaluate(`(() => { const B = window.__ooga, a = B.cavemen.get("portlandhodl"), slot = window.BL.caves.slots.find((s) => s.scene === "factory"), m = B.mouths.find((m) => m.id === slot.id), along = window.BL.factoryModels.SHIELD_Z + 0.6; if (B.crew.player !== a) B.pilot.possess(a); B.pilot.navigate({ position: { x: m.x + Math.sin(m.ry) * along, y: m.floorY, z: m.z + Math.cos(m.ry) * along }, yaw: m.ry, pitch: 0.2, dist: 5 }); B.advance(0.5, 1 / 60); B.crew.configureWeapon(a, 2, 23); B.crew.removeMagazines(a); B.crew.collectGroundMagazine(7, a); B.crew.collectGroundMagazine(11, a); window.__mouth = { x: m.x, z: m.z, ry: m.ry }; })()`);
   const inKey = await b.evaluate(`(() => { const m = window.__mouth; return [-Math.sin(m.ry), -Math.cos(m.ry)]; })()`);
   await walkToward(b, inKey[0], inKey[1], 0.8);
-  const arrived = await b.evaluate(`(() => { const B = window.__ooga; for (let i = 0; i < 240 && (B.transitioning || B.scene !== "factory"); i++) B.advance(1 / 30, 1 / 30); B.advance(0.3, 1 / 30); const a = B.crew.player; return { scene: B.scene, ooga: a ? a.traits.name : null, rifle: !!a && a.weapon.equipped && a.weapon.selectedSlot === 2, ammo: a && a.weapon.ammo, spares: a && a.weapon.spareAmmo.join(",") }; })()`);
+  // The hall's construction slices run as real tasks while the fade holds black, as tourGo allows for.
+  const arrived = await b.evaluate(`(async () => { const B = window.__ooga, t0 = performance.now(); while ((B.transitioning || B.scene !== "factory") && performance.now() - t0 < 20000) { B.advance(1 / 30, 1 / 30); await new Promise(r => setTimeout(r, 0)); } B.advance(0.3, 1 / 30); const a = B.crew.player; return { scene: B.scene, ooga: a ? a.traits.name : null, rifle: !!a && a.weapon.equipped && a.weapon.selectedSlot === 2, ammo: a && a.weapon.ammo, spares: a && a.weapon.spareAmmo.join(",") }; })()`);
   const outside = await b.evaluate(`(() => { const B = window.__ooga, e = window.BL.factoryModels.LAYOUT.entrance, rows = []; for (const [name, x, y] of [["beside", 10, e.y], ["below", 0, 0], ["above", 0, e.y + 12]]) { if (B.scene !== "factory" || B.transitioning) break; B.pilot.navigate({ position: { x, y, z: 29 }, yaw: Math.PI, pitch: 0.2, dist: 5 }); B.advance(1 / 60, 1 / 60); rows.push({ name, scene: B.scene, transitioning: B.transitioning }); } return rows; })()`);
   record("factory entrance: positions beside, below and above the exit doorway stay in the factory", outside.length === 3 && outside.every((r) => r.scene === "factory" && !r.transitioning), JSON.stringify(outside));
   await b.evaluate(`(() => { const B = window.__ooga, a = B.crew.player, e = window.BL.factoryModels.LAYOUT.entrance; B.pilot.navigate({ position: { x: 0, y: e.y, z: e.z + 2.2 }, yaw: 0, pitch: 0.2, dist: 5 }); B.crew.configureWeapon(a, 1, 17); if (B.pilot.aiming) B.pilot.modeAction("mode-toggle"); B.advance(0.5, 1 / 60); })()`);
@@ -10727,20 +11174,51 @@ const bifrostEntrance = { name: "bifrost entrance", why: "playthrough: an Ooga w
   record("bifrost entrance: from the pass stairs the roster's widest Ooga walks through the arch out onto the bridge's deck", arch.onDeck && Math.abs(arch.feet - arch.deck) < 0.3, JSON.stringify(arch));
   await b.evaluate(`(() => { const B = window.__ooga, p = B.bifrost.site.portal, sx = Math.sin(p.ry), sz = Math.cos(p.ry), x = p.x + sx * 0.9, z = p.z + sz * 0.9; B.pilot.navigate({ position: { x, y: p.floorY, z }, target: { x: x - sx * 6, y: p.floorY + 1, z: z - sz * 6 }, yaw: Math.atan2(sx, sz), pitch: 0.2, dist: 5 }); B.advance(0.5, 1 / 60); window.__portal = [-sx, -sz]; })()`);
   const inKey = await b.evaluate(`window.__portal`);
-  // The first crossing finds the chamber's deferred code refused, as a hosted page's bundle answering 503 would be: the
-  // view fades back to the island with the same Ooga driven and walking, and stepping out of the field and in again
-  // asks for the code once more and goes through.
-  await b.evaluate(`(() => { const load = BL.deferred.load; window.__loads = 0; BL.deferred.load = (group) => { if (group !== "dsb") return load(group); if (window.__loads++) { BL.deferred.load = load; return load(group); } return Promise.reject(new Error("503")); }; window.__portalStart = { ...__ooga.crew.player.root.position }; })()`);
-  await walkToward(b, inKey[0], inKey[1], 0.8);
-  const refused = await b.evaluate(`(() => { const B = window.__ooga; for (let i = 0; i < 240 && B.transitioning; i++) B.advance(1 / 30, 1 / 30); const a = B.crew.player; return { scene: B.scene, transitioning: B.transitioning, loads: window.__loads, ooga: a ? a.traits.name : null, at: a ? { x: a.root.position.x, z: a.root.position.z } : null }; })()`);
-  await walkToward(b, -inKey[0], -inKey[1], 0.5);
-  const moved = await b.evaluate(`(() => { const a = __ooga.crew.player, p = a && a.root.position; return { loads: window.__loads, scene: __ooga.scene, x: p ? p.x : null, z: p ? p.z : null }; })()`);
-  record("bifrost entrance: a refused chamber download fades back to the island with the same Ooga driven, walking again and not asking twice while it stands in the field", refused.scene === "hub" && !refused.transitioning && refused.loads === 1 && refused.ooga === "portlandhodl"
-    && moved.scene === "hub" && moved.loads === 1 && refused.at && Math.hypot(moved.x - refused.at.x, moved.z - refused.at.z) > 0.3, JSON.stringify({ refused, moved }));
-  await b.evaluate(`(() => { const B = window.__ooga, p = B.bifrost.site.portal, s = window.__portalStart, sx = Math.sin(p.ry), sz = Math.cos(p.ry); B.pilot.navigate({ position: s, target: { x: s.x - sx * 6, y: p.floorY + 1, z: s.z - sz * 6 }, yaw: Math.atan2(sx, sz), pitch: 0.2, dist: 5 }); B.advance(0.5, 1 / 60); })()`);
-  await walkToward(b, inKey[0], inKey[1], 0.8);
-  const arrived = await b.evaluate(`(() => { const B = window.__ooga; for (let i = 0; i < 240 && (B.transitioning || B.scene !== "bifrost"); i++) B.advance(1 / 30, 1 / 30); B.advance(0.3, 1 / 30); const d = B.bifrost; return { scene: B.scene, loads: window.__loads, ooga: B.crew && B.crew.player ? B.crew.player.traits.name : null, pictured: !!(d && d.pictured), outside: !!(d && d.outside) }; })()`);
-  record("bifrost entrance: walking through the portal's field takes the same Ooga into the chamber, which has DSB Land's picture and the island's view back out", arrived.scene === "bifrost" && arrived.loads === 2 && arrived.ooga === "portlandhodl" && arrived.pictured && arrived.outside, JSON.stringify(arrived));
+  // Count the critical path at enter itself: later idle preview work must not be mistaken for a blocking load.
+  await b.evaluate(`(() => {
+    const S = BL.scenes.bifrost;
+    const probe = window.__bifrostPreview = { load: BL.deferred.load, enter: S.enter, calls: [], entered: null };
+    BL.deferred.load = group => { probe.calls.push(group); return probe.load(group); };
+    S.enter = function(ctx) {
+      const start = probe.calls.length;
+      probe.enter.call(this, ctx);
+      const D = S.debug.bifrost;
+      probe.entered = {
+        criticalLoads: probe.calls.filter(group => group === "dsb" || group === "poker").length,
+        enterLoads: probe.calls.length - start, pictured: D.pictured, outside: D.outside,
+        windows: D.scene.windows.filter(w => w.kind === "travel").map(w => ({
+          scene: w.row.scene, owned: !!w.picture.owned, faces: w.picture.geometry?.faces.length || 0
+        }))
+      };
+    };
+  })()`);
+  try {
+    await walkToward(b, inKey[0], inKey[1], 0.8);
+    const arrived = await b.evaluate(`(() => {
+      const B = __ooga;
+      for (let i = 0; i < 240 && (B.transitioning || B.scene !== "bifrost"); i++) B.advance(1 / 30, 1 / 30);
+      const probe = window.__bifrostPreview; BL.scenes.bifrost.enter = probe.enter;
+      return { scene: B.scene, ooga: B.crew?.player?.traits.name || null, entered: probe.entered };
+    })()`);
+    record("bifrost entrance: the portal takes the same Ooga into the chamber with its authored stand-ins and island view, without loading either destination on the critical path",
+      arrived.scene === "bifrost" && arrived.ooga === "portlandhodl" && arrived.entered?.criticalLoads === 0
+      && arrived.entered.enterLoads === 0 && !arrived.entered.pictured && arrived.entered.outside
+      && arrived.entered.windows.length === 2 && arrived.entered.windows.every(w => !w.owned && w.faces > 0), JSON.stringify(arrived));
+    // Idle callbacks, deferred scripts and JPEG decode need real event-loop turns, rather than debug advance alone.
+    const pictured = await untilPage(b, 'B.scene === "bifrost" && !B.transitioning && B.bifrost.scene.windows.filter(w => w.kind === "travel").every(w => w.picture.owned)', 15000);
+    const previews = await b.evaluate(`(() => {
+      const B = __ooga, D = B.bifrost, calls = window.__bifrostPreview.calls;
+      return { scene: B.scene, ooga: B.crew?.player?.traits.name || null, pictured: !!D?.pictured, outside: !!D?.outside,
+        calls: { dsb: calls.filter(group => group === "dsb").length, poker: calls.filter(group => group === "poker").length },
+        windows: D.scene.windows.filter(w => w.kind === "travel").map(w => ({ scene: w.row.scene, owned: !!w.picture.owned })) };
+    })()`);
+    record("bifrost entrance: the chamber eventually hangs both destinations' photographs while preserving the same Ooga and the view back out",
+      pictured && previews.scene === "bifrost" && previews.ooga === "portlandhodl" && previews.pictured && previews.outside
+      && previews.calls.dsb > 0 && previews.calls.poker > 0 && previews.windows.length === 2
+      && previews.windows.every(w => w.owned), JSON.stringify(previews));
+  } finally {
+    await b.evaluate(`(() => { const probe = window.__bifrostPreview; if (probe) { BL.scenes.bifrost.enter = probe.enter; BL.deferred.load = probe.load; delete window.__bifrostPreview; } })()`);
+  }
 } };
 const walkingModeControls = async (b, scene) => {
   const state = await b.evaluate(`(() => {
@@ -10852,16 +11330,53 @@ const bifrostCanvas = { name: "bifrost canvas2d", why: "contract: the Canvas 2D 
 // DSB's way home while ₿IFRÖST is open: from the chamber through the DSB window, DSB Land's passage walked, and back
 // through DSB's own gate after its dialer.
 const bifrostDsb = { name: "bifrost dsb round trip", why: "playthrough: the same Ooga walks through the DSB window into DSB Land, and DSB's gate home brings it back into the chamber before the DSB window", run: async (b) => {
-  await b.evaluate(`(() => { const B = window.__ooga, r = window.BL.bifrostModels.HALL.r - 2.8, w = B.bifrost.scene.windows.find((w) => w.row.scene === "dsb"), x = w.sn * r, z = w.c * r; B.pilot.navigate({ position: { x, y: 0, z }, target: { x: x + w.sn * 4, y: 1, z: z + w.c * 4 }, yaw: Math.atan2(w.sn, w.c) + Math.PI, pitch: 0.2, dist: 5 }); B.advance(0.5, 1 / 60); window.__dsbWindow = [w.sn, w.c]; })()`);
-  const outKey = await b.evaluate(`window.__dsbWindow`);
-  await walkToward(b, outKey[0], outKey[1], 1.5);
-  const there = await b.evaluate(`(() => { const B = window.__ooga; for (let i = 0; i < 240 && (B.transitioning || B.scene !== "dsb"); i++) B.advance(1 / 30, 1 / 30); return { scene: B.scene, ooga: B.dsb ? B.dsb.avatar.traits.name : null }; })()`);
-  if (there.scene === "dsb") {
-    await b.evaluate(`(() => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); BL.scenes.dsb.update(__ooga.audio.duration + 1, 1); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" })); document.querySelector('[data-action="dsb-skip"]').click(); })()`);
-    await dsbExit(b, "bifrost");
+  // Finish the optional previews before counting only the actual destination's prepare request.
+  const pictured = await untilPage(b, 'B.scene === "bifrost" && !B.transitioning && B.bifrost.scene.windows.filter(w => w.kind === "travel").every(w => w.picture.owned)', 15000);
+  if (!pictured) throw new Error("Bifrost previews did not finish before the destination failure fixture");
+  await b.evaluate(`(() => {
+    const probe = window.__bifrostDsb = { load: BL.deferred.load, calls: 0 };
+    BL.deferred.load = group => {
+      if (group !== "dsb") return probe.load(group);
+      if (++probe.calls === 1) return Promise.reject(new Error("503"));
+      return probe.load(group);
+    };
+  })()`);
+  try {
+    await b.evaluate(`(() => { const B = window.__ooga, r = window.BL.bifrostModels.HALL.r - 2.8, w = B.bifrost.scene.windows.find((w) => w.row.scene === "dsb"), x = w.sn * r, z = w.c * r; B.pilot.navigate({ position: { x, y: 0, z }, target: { x: x + w.sn * 4, y: 1, z: z + w.c * 4 }, yaw: Math.atan2(w.sn, w.c) + Math.PI, pitch: 0.2, dist: 5 }); B.advance(0.5, 1 / 60); window.__dsbWindow = [w.sn, w.c]; })()`);
+    const outKey = await b.evaluate(`window.__dsbWindow`);
+    await walkToward(b, outKey[0], outKey[1], 1.5);
+    const recovered = await untilPage(b, 'B.scene === "bifrost" && !B.transitioning && window.__bifrostDsb.calls >= 1', 15000);
+    const refused = await b.evaluate(`(() => {
+      const B = __ooga;
+      B.advance(0.5, 1 / 60);
+      const a = B.crew?.player, p = a?.root.position;
+      return { scene: B.scene, transitioning: B.transitioning, loads: window.__bifrostDsb.calls,
+        ooga: a?.traits.name || null, at: p ? { x: p.x, z: p.z } : null };
+    })()`);
+    // Walk back through the real controls to release the failed window's crossing hold, then enter it again.
+    await walkToward(b, -outKey[0], -outKey[1], 0.5);
+    const moved = await b.evaluate(`(() => {
+      const B = __ooga, a = B.crew?.player, p = a?.root.position;
+      const w = B.scene === "bifrost" && B.bifrost.scene.windows.find(w => w.row.scene === "dsb");
+      return { scene: B.scene, loads: window.__bifrostDsb.calls, ooga: a?.traits.name || null,
+        x: p?.x ?? null, z: p?.z ?? null, inside: !!p && !!w && p.x * w.sn + p.z * w.c - BL.bifrostModels.HALL.r <= BL.bifrostModels.WINDOW.plane };
+    })()`);
+    await walkToward(b, outKey[0], outKey[1], 1.5);
+    const there = await b.evaluate(`(() => { const B = window.__ooga; for (let i = 0; i < 240 && (B.transitioning || B.scene !== "dsb"); i++) B.advance(1 / 30, 1 / 30); return { scene: B.scene, ooga: B.dsb ? B.dsb.avatar.traits.name : null, loads: window.__bifrostDsb.calls }; })()`);
+    record("bifrost dsb destination: a refused download returns control to the same Ooga without another attempt in the field, and walking back then crossing retries once",
+      recovered && refused.scene === "bifrost" && !refused.transitioning && refused.loads === 1 && refused.ooga === "portlandhodl"
+      && moved.scene === "bifrost" && moved.loads === 1 && moved.ooga === "portlandhodl" && moved.inside
+      && refused.at && Math.hypot(moved.x - refused.at.x, moved.z - refused.at.z) > 0.3
+      && there.scene === "dsb" && there.ooga === "portlandhodl" && there.loads === 2, JSON.stringify({ refused, moved, there }));
+    if (there.scene === "dsb") {
+      await b.evaluate(`(() => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); BL.scenes.dsb.update(__ooga.audio.duration + 1, 1); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" })); document.querySelector('[data-action="dsb-skip"]').click(); })()`);
+      await dsbExit(b, "bifrost");
+    }
+    const back = await b.evaluate(`(() => { const B = window.__ooga, d = B.scene === "bifrost" && B.bifrost, a = d && d.avatar, w = d && d.scene.windows.find((w) => w.row.scene === "dsb"), p = a && a.root.position; return { scene: B.scene, ooga: a ? a.traits.name : null, along: p ? +(p.x * w.sn + p.z * w.c - window.BL.bifrostModels.HALL.r).toFixed(2) : null, across: p ? +(p.x * w.c - p.z * w.sn).toFixed(2) : null }; })()`);
+    record("bifrost dsb round trip: walking through the DSB window takes the same Ooga into DSB Land, and DSB's gate home brings it back into the chamber, standing before the DSB window", there.scene === "dsb" && there.ooga === "portlandhodl" && back.scene === "bifrost" && back.ooga === "portlandhodl" && back.along > -3.5 && back.along < -2 && Math.abs(back.across) < 0.5, JSON.stringify({ there, back }));
+  } finally {
+    await b.evaluate(`(() => { const probe = window.__bifrostDsb; if (probe) { BL.deferred.load = probe.load; delete window.__bifrostDsb; } })()`);
   }
-  const back = await b.evaluate(`(() => { const B = window.__ooga, d = B.scene === "bifrost" && B.bifrost, a = d && d.avatar, w = d && d.scene.windows.find((w) => w.row.scene === "dsb"), p = a && a.root.position; return { scene: B.scene, ooga: a ? a.traits.name : null, along: p ? +(p.x * w.sn + p.z * w.c - window.BL.bifrostModels.HALL.r).toFixed(2) : null, across: p ? +(p.x * w.c - p.z * w.sn).toFixed(2) : null }; })()`);
-  record("bifrost dsb round trip: walking through the DSB window takes the same Ooga into DSB Land, and DSB's gate home brings it back into the chamber, standing before the DSB window", there.scene === "dsb" && there.ooga === "portlandhodl" && back.scene === "bifrost" && back.ooga === "portlandhodl" && back.along > -3.5 && back.along < -2 && Math.abs(back.across) < 0.5, JSON.stringify({ there, back }));
 } };
 // The poker room's window: from the chamber straight into the room, without the fade, as the room's mirror back does,
 // and out through that mirror before the window again. The scene changing on the step after the crossing starts is the
@@ -11188,7 +11703,9 @@ const hubDistantEffects = { name: "hub distant effects", why: "rule: distant por
       && animation.host.ooga >= 58 && animation.host.gorilla >= 58 && animation.network && animation.controlled >= 58, JSON.stringify(animation));
 } };
 scene("hub", { label: "distant effects", query: "pos=0", steps: [hubDistantEffects] });
-scene("hub", { opts: !ONLY || onlyMatches(hubArrival.name) ? { initScript: `(${hubSleepWire.toString()})()` } : {}, steps: [hubArrival, { name: `work movement lab lanes ${1 / RATES[0]}Hz`, why: "regression: work walkers left their facing-right side of the lab lane", open: "on about 4 boots in 30 the lane targets sit on the centre or far side; unfixed", run: labLanes }, donation("hub"), hubWalking, hubMapNavigation, hubRainforestSteps, hubRoutes, hubFall, hubGrounding, trip("hub"), factoryActivityRouting] });
+scene("hub", { opts: !ONLY || onlyMatches(hubArrival.name) ? { initScript: `(${hubSleepWire.toString()})()` } : {}, steps: [hubArrival, { name: `work movement lab lanes ${1 / RATES[0]}Hz`, why: "regression: work walkers left their facing-right side of the lab lane", open: "on about 4 boots in 30 the lane targets sit on the centre or far side; unfixed", run: labLanes }, donation("hub"), hubWalking, hudVisit, hubMapNavigation, hubRainforestSteps, hubRoutes, hubFall, hubGrounding, trip("hub"), factoryActivityRouting] });
+// The same ownership contract exercises complete destruction on memory-limited devices.
+scene("hub", { label: "release policy", query: "hubcache=release", steps: [hudVisit, trip("hub")] });
 scene("hub", { query: "ooga=portlandhodl:clank:lab,obl,lf&ooga=w-s-bitcoin:clank:lab,obl,lf&ooga=bc1gui:clank:lab,obl,lf&ooga=DrNeski:clank:lab,obl,lf&ooga=2140data:clank:lab,obl,lf", steps: [{ name: "work movement cave trips", why: "regression: off-lane cave traffic aimed through obstacles and started backwards detours", run: workCaveTrips }] });
 scene("hub", { label: "room sign", query: "pos=0", steps: [{ name: "room sign copies hash", why: "rule: tapping a room sign swings it and copies its displayed eight-character code with visible confirmation", run: async (b) => {
   const point = await b.evaluate(`(() => { const B = __ooga, sign = B.headquarters.roomSigns[0], n = sign.node; Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: (value) => { window.__roomHash = value; return Promise.resolve(); } } }); window.__roomSignBefore = sign.hits; B.pilot.release(true); B.pilot.navigate({ position: { x: n.position.x, y: n.position.y, z: n.position.z }, target: { x: n.position.x, y: n.position.y - 0.2, z: n.position.z }, yaw: n.rotation.y, pitch: 0, dist: 4 }); B.advance(0.6, 1 / 60); return B.project(n.position.x, n.position.y - 0.2, n.position.z, {}); })()`);
@@ -11255,6 +11772,122 @@ const timechainDataChecks = async () => {
   pending[2](); pending[3](); pending[4](); await loading; late.dispose();
   record("timechain API: late sibling metadata fills and repaints the holder view without changing its fetch time", gotHeight && gotBoth && changed.filter(i => i === 5).length >= 3 && late.boards.every(b => b.asof === "2026-09-23 / BLOCK 968330"));
 };
+// Regression: a rest-site probe kept its gorilla, whose groundAt closure held the departed hub's graph.
+const hubScratchChecks = async () => {
+  const source = await readFile(new URL("../src/js/scene-hub.js", import.meta.url), "utf8");
+  const start = source.indexOf("  const CLANKER_REST_SLOPE ="), end = source.indexOf("  const clankerClimbSolidAt =", start);
+  let fire = true, walkable = true, clear = true, thrown = false;
+  const failure = new Error("ground probe"), entry = {}, rows = [];
+  const probe = new Function("clankerFireClear", "clankerGroundPlaneAt", "clankerCylinderClear",
+    source.slice(start, end) + "; return { clear: clankerRestSiteClear, slope: CLANKER_REST_SLOPE };")(
+    () => fire, (_x, _y, _z, _heading, slope) => {
+      if (thrown) throw failure;
+      Object.assign(slope.groundRects.angled, { walkable, groundX: 0, groundZ: 0, uneven: 0 });
+    }, () => clear);
+  const sample = expected => rows.push(probe.clear(entry, 0, 0, 0, 0) === expected && probe.slope.supportEntry === null);
+  sample(true); walkable = false; sample(false); walkable = true; clear = false; sample(false);
+  clear = true; fire = false; sample(false); fire = true; thrown = true;
+  try { probe.clear(entry, 0, 0, 0, 0); rows.push(false); }
+  catch (error) { rows.push(error === failure && probe.slope.supportEntry === null); }
+  record("hub rest probes: valid, blocked and throwing ground queries never retain the gorilla in shared scratch", rows.every(Boolean), JSON.stringify(rows));
+};
+
+// Regression: Tess's hub-tagged cached meshes survived the last rig's departure.
+const tessCacheChecks = BL => {
+  const parent = BL.scene.createNode(), input = { add() {}, remove() {} }, fx = {};
+  const make = () => BL.tess.create({ parent, input, fx, coarse: false });
+  BL.models.setScope("tess-lifecycle");
+  const a = make(), b = make(), before = new Set(); a.liveGeometry(before);
+  const core = rig => rig.root.children[0].children[0].geometry;
+  const shared = core(a) === core(b); a.dispose();
+  const c = make(), held = core(c) === core(b); c.dispose(); b.dispose();
+  const d = make(), after = new Set(); d.liveGeometry(after);
+  const rebuilt = [...after].every(mesh => !before.has(mesh)); d.dispose();
+  BL.models.setScope(null);
+  record("Tess caches: live rigs share all tiers; the last disposal releases them and the next visit rebuilds every tier", shared && held && rebuilt && before.size === 36 && after.size === 36 && parent.children.length === 0,
+    JSON.stringify({ shared, held, rebuilt, tiers: before.size, children: parent.children.length }));
+};
+
+// Regression: one hub variant pinned every other index built by a later scene.
+const variantCacheChecks = BL => {
+  const M = BL.models, builds = new Map(), read = M.variants(i => ({ i, serial: builds.set(i, (builds.get(i) || 0) + 1).get(i) }));
+  M.setScope("hub"); const hub = read();
+  M.setScope("arcade"); const shared = read(), arcade = read(1), next = read("accent");
+  M.setScope("factory"); const held = read("accent");
+  M.release("arcade", ["hub", "factory"]);
+  M.setScope("hub"); const kept = read() === hub;
+  M.setScope("arcade"); const rebuilt = read(1) !== arcade && read(1).serial === 2;
+  const keptNext = read("accent") === next && held === next;
+  M.release("arcade", ["hub"]); M.release("factory", ["hub"]);
+  const releasedNext = read("accent") !== next;
+  M.release("arcade", []); M.release("hub", []); M.setScope(null);
+  record("variant caches: release drops scene-only indices while preserving the hub and next scene, including named indices", shared === hub && kept && rebuilt && keptNext && releasedNext,
+    JSON.stringify({ kept, rebuilt, keptNext, releasedNext }));
+  const foliage = M.variants(() => {
+    const high = M.box({ color: "#50a044" });
+    high.collisionGeometry = M.box({ color: "#000000" });
+    return M.foliageLods(high, M.box({ color: "#50a044" }));
+  });
+  M.setScope("foliage-cache"); const source = foliage(), bytes = JSON.stringify([source.verts, source.faces]);
+  const owned = M.addLods(new Set([source])), lods = source.foliageLods;
+  const borrowed = { ...source, verts: source.verts.slice(), faces: source.faces.slice() };
+  const coherent = lods.owner === source && M.addLods(new Set([borrowed])).size === 1
+    && owned.size === 3 && owned.has(lods.medium) && owned.has(lods.far)
+    && lods.medium.collisionGeometry === source.collisionGeometry && JSON.stringify([source.verts, source.faces]) === bytes
+    && lods.far.faces.reduce((sum, f) => sum + f.i.length - 2, 0) === 12 && lods.far.imageSurface.canvas === null;
+  M.release("foliage-cache", []); M.assertReleased("foliage-cache");
+  const nextFoliage = foliage();
+  record("foliage ownership: hidden render alternatives follow their source cache, preserve collision and geometry bytes, and rebuild after release", coherent && nextFoliage !== source && nextFoliage.foliageLods !== lods);
+  const rendererSource = readFileSync(join(root, "src/js/gl-renderer.js"), "utf8"), start = rendererSource.indexOf("    const prepareScene ="), end = rendererSource.indexOf("    // One owned texture per canvas surface", start);
+  if (start < 0 || end < 0) throw new Error("Scene resource preparation not found");
+  let paints = 0;
+  const prepareScene = new Function("BL", `${rendererSource.slice(start, end)} return prepareScene;`)({ models: { paintFoliageAtlas: surface => { paints++; return M.paintFoliageAtlas(surface); } } });
+  const alternatives = M.addLods(new Set([nextFoliage])), cold = !nextFoliage.foliageLods.far.imageSurface.canvas;
+  prepareScene(alternatives);
+  const warm = nextFoliage.foliageLods.far.imageSurface.canvas, once = paints === 1;
+  prepareScene(alternatives);
+  record("foliage preparation: all live far alternatives rasterize before first use, repeat preparation reuses the atlas and geometry-only construction stays DOM-free", cold && !!warm && once && paints === 1 && nextFoliage.foliageLods.far.imageSurface.canvas === warm);
+  M.release("foliage-cache", []); M.assertReleased("foliage-cache"); M.setScope(null);
+};
+
+// Regression: private model Maps and historical hub reads survived scene release.
+const modelResidencyChecks = BL => {
+  const M = BL.models, map = M.scopedMap(), a = {}, b = {}, key = {};
+  M.setScope("arcade"); map.set("hub", a).set(key, b).set("__proto__", 3).set(NaN, 4);
+  M.setScope("hub"); const shared = map.get("hub") === a;
+  M.release("arcade", ["hub"]);
+  const perKey = map.size === 1 && map.get("hub") === a && !map.has(key);
+  map.clear();
+  M.setScope("writer"); map.set(key, b).set("__proto__", 3).set(NaN, 4).set("empty", undefined);
+  M.setScope("reader");
+  const values = [...map.values()], entries = [...map], receiver = {}, seen = [];
+  let bound = true;
+  map.forEach(function(value, name, self) { bound &&= this === receiver && self === map; seen.push([name, value]); }, receiver);
+  M.release("writer", ["reader"]);
+  const native = map.size === 4 && values.length === 4 && entries.length === 4 && seen.length === 4 && bound
+    && map.get(key) === b && map.get("__proto__") === 3 && map.get(NaN) === 4 && map.has("empty")
+    && map.delete("empty") && !map.delete("empty");
+  map.clear(); M.assertReleased("reader");
+  record("keyed model caches: one hub key does not pin scene keys, and iteration, object/NaN keys, undefined values, deletion and clearing keep Map semantics", shared && perKey && native && map.size === 0,
+    JSON.stringify({ shared, perKey, native, size: map.size }));
+  const mesh = () => ({ verts: [], faces: [] }), main = M.cached(mesh), data = M.cached(() => ({ limit: 8, verts: 8, faces: 6 }));
+  const photo = M.cached(() => {
+    const value = { parts: [mesh()] }; value.cycle = value;
+    Object.defineProperty(value, "verts", { enumerable: true, get() { throw new Error("Cache eviction evaluated a builder"); } });
+    return value;
+  });
+  M.setScope("hub"); const live = main(), pure = data(), old = photo();
+  M.setScope("bifrost"); photo();
+  const wrapper = { ...live, projective: true };
+  M.setScope("hub"); M.release("bifrost", ["hub"], new Set([wrapper]));
+  const kept = main() === live && data() === pure, dropped = photo() !== old;
+  M.setScope("unreleased"); const unowned = M.cached(mesh); unowned();
+  let caught = false; try { M.assertReleased("unreleased"); } catch { caught = true; }
+  M.release("unreleased", []); M.assertReleased("unreleased"); M.release("hub", []); M.setScope(null);
+  record("model residency: a fresh hub retains arrays shared by a projective wrapper and data, releases a historical photograph's cyclic payload without invoking getters, and the debug guard catches an unreleased scene", kept && dropped && caught,
+    JSON.stringify({ kept, dropped, caught }));
+};
+
 // Rule: a room id is validated at every boundary, and the three sizes are one design whose doorway, arrival, button and
 // chairs keep human size while the architecture scales and the table grows to seat 4, 8 and 12.
 const timechainRoomChecks = async () => {
@@ -11288,6 +11921,29 @@ const timechainRoomChecks = async () => {
     rows.every(r => r.radius === 9 * r.s && Math.abs(r.wall - 5.4 * r.s) < 1e-9 && Math.abs(r.screenW - 3 * r.s) < 1e-9 && r.heading === Math.PI && r.symmetric && r.front && r.doorBehind && r.screensReach < 1.4
       && r.arrivalClear && r.buttonReach && r.tableSolid && r.doorShut && r.doorGuided && r.wallSolid && r.guided && r.gear && r.chairs)
       && rows.map(r => r.seats).join() === "4,8,12" && ["door", "arrival", "button", "table"].every(same), JSON.stringify(rows));
+  // These were untracked per-size Maps and eager module constants, retained even after a preview was cancelled.
+  for (const name of ["math", "scene", "models", "jumbotron", "timechain-room-models"])
+    runInNewContext(await readFile(join(root, "src/js/" + name + ".js"), "utf8"), context);
+  const M = context.window.BL.models, RM = context.window.BL.timechainRoomModels;
+  const expected = ["41ff2b0ba1c25d90d10c7d01fe03ebdd33702a46d62966389eaa1dcee6cda89a", "16a2ba26b673e221f8f844b2c95c82ee955eb40fb73483d2a2c700ed33a6cc7d", "c9519700334ea5f7e118a2c34be7146f1fd317686993a9e8b9b270135b7588a2"];
+  const hash = geos => createHash("sha256").update(JSON.stringify(geos.map(({ verts, faces, lines, normals }) => ({ verts, faces, lines, normals })))).digest("hex");
+  M.setScope("hub");
+  const meshes = R.SCALES.map(scale => RM.geometries(scale)), hashes = meshes.map(hash);
+  M.release("timechain", ["hub"]);
+  const rebuilt = R.SCALES.map(scale => RM.geometries(scale));
+  const released = rebuilt.every((geos, i) => geos.every((g, k) => g !== meshes[i][k]) && hash(geos) === expected[i]);
+  record("timechain room caches: previews called from the hub release every size and prop without changing any geometry bytes", released && hashes.every((h, i) => h === expected[i]), JSON.stringify({ released, hashes }));
+  let serial = 0;
+  const read = M.cached(() => ({ serial: ++serial })), outer = M.cached(() => ({})), first = outer(), failure = new Error("scope probe");
+  let threw = false;
+  try { M.withScope("timechain", () => { read(); M.withScope("nested", () => { throw failure; }); }); }
+  catch (error) { threw = error === failure; }
+  const restored = first === outer();
+  const before = await Promise.resolve().then(() => M.withScope("timechain", read));
+  M.release("timechain", ["hub"]);
+  const after = M.withScope("timechain", read);
+  record("model scopes: nested failures restore the caller and explicitly scoped async continuations release independently", threw && restored && before !== after && first === outer(), JSON.stringify({ threw, restored, rebuilt: before !== after }));
+  M.release("timechain", ["hub"]); M.release("hub", []); M.setScope(null);
 };
 // Rule: block and mining readings keep their units and windows, refuse what does not parse or chain, and the reader keeps
 // one request a dataset, backs off, honours Retry-After, keeps its last reading as STALE and cleans up.
@@ -14905,7 +15561,10 @@ const pokerTrip = (() => {
 // mirror does not ask again while the Ooga stands on it, and stepping off and back on goes through.
 const pokerExitRecovery = { name: "poker exit recovery", why: "regression: a refused way out to ₿IFRÖST left the poker room's leaving flag set, so neither its Return button nor its mirror worked again until a reload", run: async b => {
   await b.evaluate(`(() => { const go = document.querySelector('[data-intro="poker"] .game-intro-go'); if (go && go.offsetParent) go.click();
-    const load = BL.deferred.load; window.__pokerLoads = 0; BL.deferred.load = group => { if (group !== "dsb") return load(group); if (++window.__pokerLoads > 2) { BL.deferred.load = load; return load(group); } return Promise.reject(new Error("503")); }; })()`);
+    // ₿IFRÖST opens with stand-ins and loads its destinations after arrival, so nothing it fetches can refuse the way in;
+    // a prepare that rejects twice takes the director's real refusal path, as an unreachable chunk would.
+    const bifrost = BL.scenes.bifrost; window.__pokerLoads = 0;
+    bifrost.prepare = () => { if (++window.__pokerLoads > 2) { delete bifrost.prepare; return null; } return Promise.reject(new Error("503")); }; })()`);
   const settle = `(() => { const B = __ooga; for (let i = 0; i < 60 && B.transitioning; i++) B.advance(1 / 30, 1 / 30); return { scene: B.scene, transitioning: B.transitioning, loads: window.__pokerLoads }; })()`;
   await b.evaluate(`document.querySelector('[data-poker-action="exit"]').click()`);
   const button = await b.evaluate(settle);
@@ -15491,6 +16150,7 @@ scene("dsb", { label: "dsb character continuity", url: hubPage(dist), steps: [{ 
     if (!entered) throw Error("DSB scene handoff did not complete");
     const avatar = await b.evaluate(`(() => {
       const a = __ooga.dsb.avatar, canonical = BL.models.caveman(BL.contributors.traitsFor(${JSON.stringify(name)}));
+      window.__dsbHubRetained = BL.scenes.hub.retained;
       return { name: a.traits.name, rebuilt: a.root !== __dsbPreviousRoot, canonical: a.headOpen === canonical.headOpen };
     })()`);
     record("dsb character: " + name + " enters with the canonical model", avatar.name === name && avatar.rebuilt && avatar.canonical, JSON.stringify(avatar));
@@ -15498,9 +16158,11 @@ scene("dsb", { label: "dsb character continuity", url: hubPage(dist), steps: [{ 
     await dsbExit(b);
     await b.evaluate(`document.querySelector('[data-scene="bifrost"] [data-action="leave"]').click()`);
     await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
-    const returned = await b.evaluate(`({ name: __ooga.pilot.player?.traits.name, rebuilt: __ooga.pilot.player?.root !== __dsbPreviousRoot })`);
-    record("dsb character: " + name + " returns possessed", returned.name === name && returned.rebuilt, JSON.stringify(returned));
-    await b.evaluate('delete window.__dsbPreviousRoot');
+    // Keep mode returns the original hub actor; release mode rebuilds its canonical model.
+    const returned = await b.evaluate(`({ name: __ooga.pilot.player?.traits.name, reused: __ooga.pilot.player?.root === __dsbPreviousRoot,
+      retained: __dsbHubRetained, canonical: __ooga.pilot.player?.headOpen === BL.models.caveman(BL.contributors.traitsFor(${JSON.stringify(name)})).headOpen })`);
+    record("dsb character: " + name + " returns possessed", returned.name === name && returned.reused === returned.retained && returned.canonical, JSON.stringify(returned));
+    await b.evaluate('delete window.__dsbPreviousRoot; delete window.__dsbHubRetained');
   }
 } }] });
 
@@ -15633,7 +16295,8 @@ scene("dsb", { label: "lifecycle", exclusive: true, url: hubPage(src), steps: [{
   const after = await snapshot();
   const same = (key) => before.stats[key] === after.stats[key];
   record("soak: dsb cycles: six round trips retain node, target, tween and DOM counts", same("allNodes") && same("targets") && same("tweens") && same("dom") && after.stats.tweens === 0, JSON.stringify({ before: before.stats, after: after.stats }));
-  record("soak: dsb cycles: GPU records, listeners and heap remain bounded", Math.abs(after.stats.gl.records - before.stats.gl.records) <= 3 && before.nodes === after.nodes && before.listeners === after.listeners && within(before, after, 0.1), heapDetail(before, after));
+  record("soak: dsb cycles: GPU records, listeners and heap remain bounded", Math.abs(after.stats.gl.records - before.stats.gl.records) <= 3 && before.nodes === after.nodes && before.listeners === after.listeners && within(before, after, 0.1), heapDetail(before, after)
+    + `, GPU ${before.stats.gl.records} -> ${after.stats.gl.records}, DOM ${before.nodes} -> ${after.nodes}, listeners ${before.listeners} -> ${after.listeners}`);
 } }] });
 
 scene("factory", { label: "lifecycle", exclusive: true, url: hubPage(src), steps: [{ name: "factory lifecycle", why: "contract: repeated factory visits, each left with a tip's show in the air, release the hall's listeners, nodes and GPU resources while retaining one bounded shared node", run: async (b) => {
@@ -16151,23 +16814,55 @@ const waterGolden = W => {
 // alias a renderer record. Exercise the real collector/uploader against a byte-bounded GL sink;
 // shader compilation and pixels remain the separate, mandatory WebGL browser checkpoint.
 const waterUploadProbe = (BL, W) => {
-  const buffers=new Map(),bindings=new Map(),errors=[],uploads=new Map(),listeners=new Set();let serial=0,tier="",draws=0;
+  const buffers=new Map(),bindings=new Map(),attributes=new Map(),errors=[],uploads=new Map(),listeners=new Set();
+  const fields=new Map(),fieldBuffers=new Map(),vaoFields=new Map(),fieldVaos=new Map(),bits=new Map();let serial=0,tier="",draws=0,vao=null;
+  const associate=(v,data)=>{vaoFields.set(v,data);let list=fieldVaos.get(data);if(!list)fieldVaos.set(data,list=new Set());list.add(v);};
+  const exactSpan=(v,data,count,start=0)=>{
+    const expected=bits.get(data),attrs=attributes.get(v);if(!expected||!attrs||start+count>data.length/20)return false;
+    for(let loc=3;loc<=7;loc++){
+      const a=attrs.get(loc),storage=a&&buffers.get(a.buffer);if(!storage?.words)return false;
+      for(let i=0;i<count;i++)for(let j=0;j<4;j++)if(storage.words[(a.offset+i*a.stride)/4+j]!==expected[(start+i)*20+(loc-3)*4+j])return false;
+    }
+    return true;
+  };
+  const draw=count=>{
+    draws++;if(!count)return;
+    for(const a of attributes.get(vao)?.values()||[])if(a.offset+(count-1)*a.stride+a.size*4>buffers.get(a.buffer)?.size)errors.push({tier,drawCount:count,offset:a.offset,stride:a.stride,capacity:buffers.get(a.buffer)?.size});
+    const data=vaoFields.get(vao),field=data&&fields.get(data);
+    if(field){let found=false;for(let first=0;!found&&first+count<=field.instanceCount;first++)found=exactSpan(vao,data,count,first);if(!found)errors.push({tier,drawData:true,count,live:field.instanceCount});}
+  };
   const api={
     getExtension:()=>null,getProgramParameter:()=>true,getParameter:()=>4,
-    createBuffer:()=>{const b={id:++serial};buffers.set(b,0);return b;},
+    createBuffer:()=>{const b={id:++serial};buffers.set(b,{size:0,bytes:null,words:null});return b;},
     bindBuffer:(target,b)=>bindings.set(target,b),
-    bufferData:(target,data)=>buffers.set(bindings.get(target),typeof data==="number"?data:data.byteLength),
-    bufferSubData:(target,offset,data,start=0,length=0)=>{
-      const count=length||data.length-start,capacity=buffers.get(bindings.get(target)),end=offset+count*data.BYTES_PER_ELEMENT;
-      if(start<0||count<0||start+count>data.length||end>capacity)errors.push({tier,source:data.length,start,length:count,capacity,offset});
-      uploads.set(data,{count,capacity});
+    bufferData:(target,data,usage)=>{
+      const size=typeof data==="number"?data:data.byteLength,storage={size,bytes:null,words:null};
+      // Instance storage needs real contents; static vertex buffers need only their byte-bound here.
+      if(usage===gl.DYNAMIC_DRAW||usage===gl.STREAM_DRAW){storage.bytes=new Uint8Array(size);storage.words=new Uint32Array(storage.bytes.buffer);if(typeof data!=="number")storage.bytes.set(new Uint8Array(data.buffer,data.byteOffset,data.byteLength));}
+      buffers.set(bindings.get(target),storage);
     },
-    deleteBuffer:b=>buffers.delete(b),drawArraysInstanced:()=>draws++
+    bufferSubData:(target,offset,data,start=0,length=0)=>{
+      const count=length||data.length-start,handle=bindings.get(target),storage=buffers.get(handle),capacity=storage.size,end=offset+count*data.BYTES_PER_ELEMENT;
+      if(start<0||count<0||start+count>data.length||end>capacity)errors.push({tier,source:data.length,start,length:count,capacity,offset});
+      else{if(!storage.bytes){storage.bytes=new Uint8Array(capacity);storage.words=new Uint32Array(storage.bytes.buffer);}storage.bytes.set(new Uint8Array(data.buffer,data.byteOffset+start*data.BYTES_PER_ELEMENT,count*data.BYTES_PER_ELEMENT),offset);}
+      uploads.set(data,{count,capacity});
+      // First private uploads identify a field's VAOs. Later shared uploads must still fetch that exact field.
+      if(fields.has(data)){fieldBuffers.set(data,handle);for(const [v,attrs]of attributes)if(attrs.get(3)?.buffer===handle)associate(v,data);}
+    },
+    copyBufferSubData:(read,write,from,to,size)=>{
+      const source=buffers.get(bindings.get(read)),target=buffers.get(bindings.get(write)),capacity=target.size;
+      if(from<0||to<0||size<0||from+size>source.size||to+size>capacity||size&&!source.bytes)errors.push({tier,copySize:size,from,to,source:source.size,capacity});
+      else if(size){if(!target.bytes){target.bytes=new Uint8Array(capacity);target.words=new Uint32Array(target.bytes.buffer);}target.bytes.set(source.bytes.subarray(from,from+size),to);}
+    },
+    bindVertexArray:v=>{vao=v;if(v&&!attributes.has(v))attributes.set(v,new Map());},
+    vertexAttribPointer:(loc,size,type,normalized,stride,offset)=>{if(loc>=3&&loc<=7)attributes.get(vao).set(loc,{buffer:bindings.get(gl.ARRAY_BUFFER),size,stride,offset});},
+    deleteVertexArray:v=>{const data=vaoFields.get(v);if(data)fieldVaos.get(data).delete(v);vaoFields.delete(v);attributes.delete(v);},deleteBuffer:b=>buffers.delete(b),
+    drawArraysInstanced:(mode,first,count,instances)=>draw(instances),drawElementsInstanced:(mode,count,type,offset,instances)=>draw(instances)
   };
   const gl=new Proxy(api,{get:(o,k)=>k in o?o[k]:o[k]=/^[A-Z0-9_]+$/.test(k)?++serial:k.startsWith("create")||k==="getUniformLocation"?()=>({id:++serial}):()=>{}});
   const canvas={clientWidth:64,clientHeight:64,getContext:()=>gl,addEventListener:k=>listeners.add(k),removeEventListener:k=>listeners.delete(k)};
   const R=BL.glRenderer.createRenderer(canvas),opts={...BL.scenes.dsb.renderOpts,dsbWater:W.water},rows=[];
-  const arrays=new Map();BL.scene.traverseVisible(W.root,n=>{if(n.instanceData)arrays.set(n,n.instanceData);});
+  const arrays=new Map();BL.scene.traverseVisible(W.root,n=>{if(n.instanceData){arrays.set(n,n.instanceData);fields.set(n.instanceData,n);bits.set(n.instanceData,new Uint32Array(n.instanceData.buffer,n.instanceData.byteOffset,n.instanceData.length));}});
   for(tier of ["high","medium","low","high"]){
     W.renderer.quality=tier;R.setQuality(tier);
     for(const [x,y,z] of [[20,8,83],[-40,25,-8],[0,110,1]]){
@@ -16176,7 +16871,15 @@ const waterUploadProbe = (BL, W) => {
       let exclusive=true,bounded=true;
       for(const nodes of owners.values())for(const n of nodes)if(n.instanceData){exclusive&&=nodes.length===1;bounded&&=Number.isInteger(n.instanceCount)&&n.instanceCount>=0&&n.instanceCount*20<=n.instanceData.length&&n.instanceData===arrays.get(n)&&n.instanceData.every(Number.isFinite);}
       uploads.clear();const drawn=R.render(W.root,W.camera,opts);
-      let exact=true;for(const [n,data] of arrays)if(uploads.has(data)){const upload=uploads.get(data);exact&&=upload.count===n.instanceCount*20&&upload.capacity===data.byteLength;}
+      let exact=true;
+      for(const [n,data]of arrays){
+        if(uploads.has(data)){const upload=uploads.get(data);exact&&=upload.count===n.instanceCount*20&&upload.capacity===data.byteLength;}
+        if(n.instanceCount&&owners.get(n.geometry)?.includes(n)){
+          const privateBuffer=fieldBuffers.get(data),vaos=fieldVaos.get(data);
+          exact&&=!!privateBuffer&&buffers.get(privateBuffer)?.size===data.byteLength&&!!vaos?.size;
+          for(const v of vaos||[])exact&&=exactSpan(v,data,n.instanceCount);
+        }
+      }
       rows.push({tier,x,y,z,exclusive,bounded,drawn,exact});
     }
   }
@@ -16274,7 +16977,7 @@ const waterChecks = BL => {
   for(let i=0;i<3;i++){const next=BL.dsbWaterInteraction.create(W);next.update(.02,i,A);lifecycle&&=next.group.children.length===nodes&&next.stats.active<=24;next.dispose();lifecycle&&=next.group.children.length===0&&W.root.children.length===children-1;}
   record("DSB water lifecycle: indoor gating and repeat disposal/re-entry clear impulses without growing nodes",lifecycle);
   const upload=waterUploadProbe(BL,W);
-  record("DSB WebGL uploads: independent dressing fields own their records across tiers, views and disposal",upload.rows.every(r=>r.exclusive&&r.bounded&&r.drawn&&r.exact)&&!upload.errors.length&&upload.draws>0&&upload.released&&!upload.buffers&&!upload.listeners,JSON.stringify(upload));
+  record("DSB WebGL uploads: dressing records and instance offsets remain bounded across tiers, views and disposal",upload.rows.every(r=>r.exclusive&&r.bounded&&r.drawn&&r.exact)&&!upload.errors.length&&upload.draws>0&&upload.released&&!upload.buffers&&!upload.listeners,JSON.stringify(upload));
   W.dispose();
 };
 // Recorded from f578f9cda6e77468049b5e000e3002ce9711809b before applying the water extension.
@@ -17138,8 +17841,15 @@ const tileGpuChecks = async () => {
     ["WebKit WebGL", unmasked("Apple GPU"), false],
     ["WebKit WebGL", unmasked(null), false]
   ].map(([renderer, info, expected]) => ({ renderer, expected, got: tileBasedGpu(renderer, info) }));
-  record("tile-based GPU: only a named Apple silicon GPU skips the depth prepass; Intel, AMD, Safari's generic \"Apple GPU\" and a missing debug extension keep it",
-    rows.every(row => row.got === row.expected) && asked === 7, JSON.stringify(rows.filter(row => row.got !== row.expected)));
+  const enabled = new Function(`${helper}; return depthPrepassEnabled;`)();
+  const policy = [
+    [false, false, null, false, false], [false, true, null, false, false],
+    [true, false, null, false, true], [true, true, null, false, false],
+    [true, false, "0", false, false], [false, true, "1", false, true],
+    [true, false, "1", true, false]
+  ].map(([prepass, tile, override, rig, expected]) => ({ prepass, tile, override, rig, expected, got: enabled({ prepass }, tile, override, rig) }));
+  record("tile-based GPU: named Apple silicon skips the prepass on every tier, other GPUs keep it, explicit overrides apply and rigs retain their own path",
+    rows.every(row => row.got === row.expected) && asked === 7 && policy.every(row => row.got === row.expected), JSON.stringify({ classification: rows.filter(row => row.got !== row.expected), policy }));
 };
 const raceRigChecks = async () => {
   const context = { window: {}, location: { search: "?debug=1&rain=0" }, URLSearchParams, crypto: webcrypto };
@@ -17179,15 +17889,15 @@ const raceRigChecks = async () => {
     // bytes the depth-only and plain variants derive from, plus the untouched shadow path.
     "6bed3532a26c98c3e5a9218674dbe75c789324168104f6b0eb7fb5c88872a012",
     // 487d99ac909f added uObjectSlab2 for the Factory roof bore; removing its
-    // declaration and clipping predicate restores the previous b82d02f4 hash.
-    "f5f71f7931156d9329b39a13997433e2146fa367cee44e5ceb44ace6038a2be3",
+    // declaration plus the intentional canvas/foliage atlas sampling restores the previous b82d02f4 baseline (was f5f71f79).
+    "fb12fd53216aa902750f5bf315e44a6334c9b24fb58afb12f28a4f5e85233677",
     "37030f053de422aa157f017ceedef0812ed57a17c9e1b2af4aab017c0b645364"
   ];
   record("race rig strategy: ordinary mesh, fragment and shadow shader bytes retain the pre-rig fast path", ordinaryHashes.every((hash, i) => hash === expectedOrdinaryHashes[i]), JSON.stringify(ordinaryHashes));
   const extract = (name, next) => rendererSource.slice(rendererSource.indexOf(`    const ${name} =`), rendererSource.indexOf(next, rendererSource.indexOf(`    const ${name} =`))).trim();
   const cachedRig = {}, cachedGeometry = { meshRig: cachedRig }, cacheRecords = new Map([[cachedGeometry, {}]]), uniformCalls = [];
   const cacheMesh = { rig: cachedRig, u: { uRigCount: "mesh-count" } }, cacheShadow = { rig: cachedRig, u: { uRigCount: "shadow-count" } };
-  const cacheContext = { rigPrograms: { mesh: cacheMesh, shadow: cacheShadow }, programs: { mesh: cacheMesh, shadow: cacheShadow }, records: cacheRecords, res: { programs: { mesh: cacheMesh, shadow: cacheShadow } }, destroyReflector() {}, deleteRecord() {}, gl: { uniform1i: (...args) => uniformCalls.push(args) }, geometry: cachedGeometry };
+  const cacheContext = { rigPrograms: { mesh: cacheMesh, shadow: cacheShadow }, programs: { mesh: cacheMesh, shadow: cacheShadow }, records: cacheRecords, res: { programs: { mesh: cacheMesh, shadow: cacheShadow } }, destroyReflector() {}, deleteRecord() {}, destroyInstanceStream() {}, gl: { uniform1i: (...args) => uniformCalls.push(args) }, geometry: cachedGeometry };
   runInNewContext(`${extract("releaseGeometry", "    init();")}
 ${extract("applyRig", "    const uploadInstances =")}
 releaseGeometry(geometry); applyRig(res.programs.mesh, { geometry: {} }, 1); applyRig(res.programs.shadow, { geometry: {} }, 2);`, cacheContext);
@@ -17241,8 +17951,9 @@ const carriedReleaseProof = () => {
 const visibilitySourceBakeProof = () => {
   const math = readFileSync(new URL("../src/js/math.js", import.meta.url), "utf8");
   const source = readFileSync(new URL("../src/js/character-visibility.js", import.meta.url), "utf8");
+  const compact = readFileSync(new URL("../src/js/compact-geometry.js", import.meta.url), "utf8");
   const expose = source.slice(0, source.indexOf("  const create =")) + " window.__meshProof={meshOf,meshes};})();";
-  return runInNewContext(math + "\n" + expose + `
+  return runInNewContext(math + "\n" + compact + "\n" + expose + `
 (() => {
     const {meshOf}=window.__meshProof;
     const source={verts:new Float64Array([0,0,0, 1,0,0, 0,1,0, 0,0,1]),faces:[{i:[0,1,2]},{i:[0,2,3]}]};
@@ -17280,8 +17991,28 @@ const visibilitySourceBakeProof = () => {
     source.faces = [{i:[0,1,3]}];
     const later = wrapper();check(meshOf(later)!==baked,'Replaced source faces reused stale bake');
     const newBake=meshOf({verts:later.verts,faces:later.faces});check(JSON.stringify(Array.from(meshOf(later).indices))===JSON.stringify(Array.from(newBake.indices)),'Replaced source topology differs');
+    // Explicit immutable ownership keeps exact doubles/material data while the critical bake uses no legacy rows.
+    const C=window.BL.compactGeometry, metadata={owner:"fixture"};
+    const packed={verts:[-0,0,0, 1+Number.EPSILON,0,0, 0,1,0, 0,0,1],faces:[
+      {i:[0,1,2],color:[7,9,11,-1],emissive:.9,matrixCave:2,visibility:true,metadata},
+      {i:[0,2,3],color:[255,128,0],visibility:false,water:true}],lines:[]};
+    const original={verts:packed.verts.slice(),faces:packed.faces.slice()}, expected=meshOf(original);
+    C.pack(packed,{immutable:true,renderOnly:true,precision:64});
+    const data=C.storageOf(packed), cursor=C.createCursor(packed), actual=meshOf(packed);
+    check(data && packed.verts instanceof Float64Array && Array.isArray(packed.faces),'Compact storage lost its explicit representation');
+    check(packed.verts.every((v,i)=>Object.is(v,original.verts[i])),'Compact source doubles or signed zero changed');
+    check(JSON.stringify(Array.from(actual.indices))===JSON.stringify(Array.from(expected.indices)) && JSON.stringify(actual.nodes)===JSON.stringify(expected.nodes),'Compact visibility triangles differ');
+    const firstFace=C.readFace(packed,0,cursor);
+    check(firstFace.metadata===metadata && firstFace.matrixCave===2 && firstFace.emissive===.9 && firstFace.color.length===4 && firstFace.color[3]===-1,'Compact material metadata changed');
+    check(C.readFace(packed,1,cursor)===firstFace && cursor.visibility===false && cursor.water===true && cursor.color[0]===255,'Compact face cursor lost reuse or tags');
+    const packedAlias={...packed,matrixSourceGeometry:packed};
+    check(meshOf(packedAlias)===actual && data.legacy.size===0,'Compact source alias materialized legacy faces or failed to share');
+    const borrowed={...packed,verts:original.verts,faces:original.faces};
+    check(C.storageOf(borrowed)===null && C.readFace(borrowed,0,cursor)===original.faces[0],'Borrowed marker overrode replacement geometry');
+    const legacy=packed.faces[0];
+    check(packed.faces[0]===legacy && Object.isFrozen(legacy) && Object.isFrozen(legacy.i) && legacy.color[3]===-1 && data.legacy.size===1,'Legacy compact access is not stable and bounded');
     return { cases, failures: 0, wrapperVisits: 100, sharedSourceBVHs: 1 };
-  })()`, { window: { BL: { scene: { boundsOf() { throw Error("Unused"); } } } } });
+  })()`, { window: { location: { search: "?compactGeometry=1" }, BL: { scene: { boundsOf() { throw Error("Unused"); } } } }, URLSearchParams });
 };
 
 // Run the shipped driver with synthetic processes, discovery and sockets; never launch Chrome.
@@ -17709,8 +18440,8 @@ const rigFailureIsolationProof = async () => {
     const context = {
       failure: null, rigFailure: null, rigProgramsReady: false, rigMode: false, parallel: null,
       finishProgram() { linkAttempts++; if (linkFails) throw new Error("Program link failed: uniform pressure"); },
-      gl: { getProgramParameter: () => true },
-      rigPrograms: { mesh: {}, shadow: {} }, res: { programs: "ordinary" }, programs: null,
+      gl: { getProgramParameter: () => true, activeTexture() {}, bindTexture() {} },
+      rigPrograms: { mesh: {}, shadow: {} }, res: { programs: "ordinary", matrixTexture: {} }, programs: null,
       collect: "cpu", collectRig: "rig", writeCullSphere: "cpu-cull", writeRigCullSphere: "rig-cull",
       uploadInstances: "cpu-upload", uploadRigInstances: "rig-upload",
       meshRigs: true, collectForRender: null, cullForRender: null, uploadForRender: null,
@@ -17836,7 +18567,7 @@ const reviewCrowdAndFallbackProof = async () => {
   const blocked=c.occupied(body,0,0,0);near.root.visible=false;const hidden=!c.occupied(body,0,0,0);near.root.visible=true;near.root.position.y=3;const above=!c.occupied(body,0,0,0);
   const renderer=await readFile(join(root,"src/js/gl-renderer.js"),"utf8");
   const collect=renderer.slice(renderer.indexOf("    const collect ="),renderer.indexOf("    const updateRig ="));
-  const seen=[],r={rigMode:false,hiddenFromCutaway:()=>false,cutawayFade:0,recordFor:g=>{seen.push(g);return {active:true};},suppressed:0,CULL_MARGIN:0,sphereInFrustum:()=>true};
+  const seen=[],r={rigMode:false,hiddenFromCutaway:()=>false,cutawayFade:0,foliageGeometry:n=>n.geometry,screenVisible:()=>true,recordFor:g=>{seen.push(g);return {active:true};},suppressed:0,CULL_MARGIN:0,sphereInFrustum:()=>true};
   runInNewContext(collect+"this.collect=collect;this.collectRig=collectRig;",r);
   const geo={meshRig:{}},original={faces:[{}]},aggregate={geometry:geo,instanceData:[],instanceCount:1},part={geometry:original,meshRigSource:geo.meshRig,instanceData:[],instanceCount:1};
   r.collect(aggregate);r.collect(part);const cpu=seen.length===1&&seen[0]===original;
@@ -17845,6 +18576,7 @@ const reviewCrowdAndFallbackProof = async () => {
 };
 
 const unitChecks = async () => {
+  await canvasSurfaceCacheChecks();
   const rage = await gorillaRageProof();
   record("gorilla rage: distinct rolling hits, only agitating Oogas targeted, held capture through planning and swing, bounded throws, exact expiry, zero health and account/lifecycle cancellation", Object.values(rage).every(Boolean), JSON.stringify(rage));
   const reviewCrowd=await reviewCrowdAndFallbackProof();
@@ -17881,6 +18613,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   await raceRigChecks();
   await qualityFramebufferChecks();
   await tileGpuChecks();
+  await hubScratchChecks();
   const north = await northTrajectoryProof();
   record("birds-eye north: worst shortest arcs stay monotonic below the frame step limit and settle before the replay deadline", north.finite && north.monotonic && north.resets && north.variableSteps && north.maxStep < 0.25 && north.residual < 0.001, JSON.stringify(north));
   const northRebase = await northRebaseProof();
@@ -17888,7 +18621,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   const cutaway = await cutawayBoundsProof();
   record("cutaway visibility: active apertures reject remote meshes without vertex scans and retain cells, blends, children, global and rotated local cuts", Object.entries(cutaway).every(([key, value]) => key === "bytes" ? value === 160 : value), JSON.stringify(cutaway));
   const storage = await visibilityStorageProof({ compact: true, deferred: true });
-  record("visibility storage: exact source doubles and signed zero survive queries, demand and bounded screen BVHs", storage.exact && storage.unchanged && storage.bounded && storage.tightBacking && storage.storage && storage.demand && storage.nearBounds && storage.nearCases > 100 && storage.boundaryHits > 0 && storage.disposed && storage.values > 600, JSON.stringify(storage));
+  record("visibility storage: exact source doubles and signed zero survive queries, demand and bounded screen BVHs", storage.lazyContours && storage.exact && storage.unchanged && storage.bounded && storage.tightBacking && storage.storage && storage.demand && storage.nearBounds && storage.nearCases > 100 && storage.boundaryHits > 0 && storage.disposed && storage.values > 600, JSON.stringify(storage));
   record("visibility lifecycle: shared bakes survive removal and replacement; hidden transforms, clips and geometry restore exact queries", storage.lifecycle, JSON.stringify(storage));
   const demandUsers = await visibilityDemandUsersProof();
   record("visibility demand: first demand visits only descriptor users and releases replaced, removed and disposed entries", demandUsers.rows.every(row => row.visits === row.count && row.released && row.resolved) && demandUsers.boundsTracked && demandUsers.replacementReleased && demandUsers.bothResolved && demandUsers.disposed, JSON.stringify(demandUsers));
@@ -17937,14 +18670,24 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   // Every module the source page loads, deferred groups included: they are inline in the source tree and portable page.
   const order = [...readFileSync(join(root, "src/index.html"), "utf8").matchAll(/<script src="js\/([^"]+)"(?: data-defer="[a-z-]+")?><\/script>/g)].map((m) => m[1]);
   const skipped = [];
+  // The director boots in an async IIFE, so its failure in this DOM-less loader arrives as a rejection, not a throw.
+  let loading = "";
+  const rejected = (err) => skipped.push(`${loading}: ${String(err?.message).slice(0, 120)}`);
+  process.on("unhandledRejection", rejected);
   for (const file of order) {
+    loading = file;
     try {
       new Function(readFileSync(join(root, "src/js", file), "utf8"))();
     } catch (err) {
       skipped.push(`${file}: ${String(err.message).slice(0, 120)}`);
     }
+    await new Promise(setImmediate);
   }
+  process.off("unhandledRejection", rejected);
   const BL = globalThis.BL;
+  tessCacheChecks(BL);
+  variantCacheChecks(BL);
+  modelResidencyChecks(BL);
   if(ARGS.includes("water-baseline")){
     if(!process.env.DSB_BASELINE)throw Error("Provide the unmodified checkpoint source directory");
     for(const name of ["dsb-geography.js","dsb-olympus.js","dsb-water.js"])new Function(readFileSync(join(process.env.DSB_BASELINE,name),"utf8"))();
@@ -18122,7 +18865,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   tessAnswerChecks(BL);
   const clearance = claimClearanceProof();
   record("hub footprint clearance: conservative rejection preserves circular boundaries, live reservations and exceptional numbers", clearance.failures === 0 && clearance.cases >= 4000, JSON.stringify(clearance));
-  await characterChecks(); await contributorActivityChecks(); await mempoolFeedChecks(); await debugActivityStatusChecks(); await soloDebugChecks(); await adaptiveQualityChecks(); await chainSnapshotChecks(); await dsbSharedDataChecks(); await timechainDataChecks(); await timechainRoomChecks(); await timechainBlockChecks(); await weatherStepChecks(); await poolLayoutChecks(); await gameRulesChecks(); await ghostHuntChecks(); await donationClientChecks(); await poolWildlifeChecks();
+  await deferredLoadingChecks(); await characterChecks(); await contributorActivityChecks(); await mempoolFeedChecks(); await debugActivityStatusChecks(); await soloDebugChecks(); await adaptiveQualityChecks(); await chainSnapshotChecks(); await dsbSharedDataChecks(); await timechainDataChecks(); await timechainRoomChecks(); await timechainBlockChecks(); await weatherStepChecks(); await poolLayoutChecks(); await gameRulesChecks(); await ghostHuntChecks(); await donationClientChecks(); await poolWildlifeChecks(); await totemFeedChecks();
 
   // Scene state built directly instead of booted; seed 1 matches scene-hub.js.
   // Sealed cave guides need the hub's seal nodes, so probes reading them stay in the browser tier.
@@ -18943,7 +19686,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
 
   {
     const r = convexProbe();
-    record("convex collision: cylinder contact and swept thin-wall collisions agree with independent box oracles", r.stationary === 20000 && r.swept === 5008 && r.contacts === 15 && r.failures.length === 0, JSON.stringify(r));
+    record("convex collision: cylinder contact and swept thin-wall collisions agree with independent box oracles", r.stationary === 20000 && r.swept === 5008 && r.contacts === 15 && r.boxQueries === r.stationary + r.swept + r.contacts && r.boxHits > 0 && r.boxHits < r.boxQueries && r.boxQueryBytes === 112 && r.boxInputsUnchanged && r.failures.length === 0, JSON.stringify(r));
     record("convex collision: oblique fragments and tetrahedron interiors preserve exact contact boundaries", r.rotated === 10000 && r.tetrahedra === 5000 && r.failures.length === 0, JSON.stringify(r));
     record("convex collision: tilted ceilings clear grazing bodies and block penetrations and crossing sweeps", r.tilted === 10000 && r.ceiling === 4 && r.failures.length === 0, JSON.stringify(r));
   }
@@ -19131,6 +19874,23 @@ record("character visibility source bakes: ownership wrappers share exact immuta
     record("terrain camera witnesses: one four-byte slot per authored sample stays bounded and is released and rearmed across visits", bytes === expected && bytes > 0 && stable && released && renewed, JSON.stringify({ bytes, expected, stable, released, renewed }));
   }
 
+  {
+    const M = BL.models, factory = BL.caves.slots.find(slot => slot.scene === "factory");
+    const homeOptions = { seed: 1, roofHole: { id: factory.id, ...BL.factoryModels.ROOF_TUBE } };
+    M.setScope("hub"); const home = BL.terrain.island(homeOptions);
+    M.setScope("drop"); const bare = BL.terrain.island({ seed: 1 });
+    M.setScope("orbit"); const shared = BL.terrain.island({ seed: 1 }) === bare;
+    M.release("drop", ["hub", "orbit"]);
+    const keptNext = BL.terrain.island({ seed: 1 }) === bare;
+    M.release("orbit", ["hub"]);
+    M.setScope("hub"); const keptHome = BL.terrain.island(homeOptions) === home;
+    M.setScope("drop"); const rebuilt = BL.terrain.island({ seed: 1 });
+    const same = rebuilt.geometry.faces.length === bare.geometry.faces.length && rebuilt.geometry.verts.length === bare.geometry.verts.length
+      && [[0, 0], [12, 8], [-20, 14]].every(([x, z]) => rebuilt.surfaceAt(x, z) === bare.surfaceAt(x, z));
+    M.release("drop", ["hub"]); M.release("hub", []); M.setScope(null);
+    record("terrain residency: the roof-open hub stays cached, Drop and Orbit share their own live key, and their last departure releases that graph without changing its rebuilt shape", shared && keptNext && keptHome && rebuilt !== bare && same,
+      JSON.stringify({ shared, keptNext, keptHome, rebuilt: rebuilt !== bare, same }));
+  }
 };
 
 

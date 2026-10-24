@@ -12,8 +12,8 @@
 // walked on as a thin closed shell so nothing falls through it into the chamber), `crossing` is the plank bridge
 // that carries the ring path over a channel, and `nestBed` is a clearing's banana-leaf beds.
 //
-// `carve` cuts headline type from `hubModels.SIGN_GLYPHS` and `panelFrom` merges a canvas of the jumbotron's 5x7
-// font into bounded quads, which is how the chamber's wall paintings are set. `chainBoard`/`CHAIN_BOARD`
+// `carve` cuts headline type from `hubModels.SIGN_GLYPHS`; `panelFrom` retains a transparent canvas on one
+// stable surface for the jumbotron's 5x7 font, which is how the chamber's wall paintings are set. `chainBoard`/`CHAIN_BOARD`
 // is the curved stats board on the lake's far shore, whose panel follows the same arc, and `infoSign` the
 // weather key beside it. The plants, rocks, animals and bridge are cartoon geometry from the hub's kit (`leafy`,
 // `puff`, `limb`, `flatInto`), one cached build each shared by every copy; the solid ones keep their first block
@@ -83,9 +83,9 @@
 
   // The island's body: the layout's grid through the home island's greedy mesher, welded as the home island is.
   // The same grid is the cutaway's material source, so a cut through the rock is capped in its own stone.
-  const islet = cached(() => {
-    const grid = L.body(), palette = L.PALETTE.map((hex) => hex && hexToRgb(hex));
-    const geometry = BL.terrain.gridGeometry(grid, { unit: L.UNIT, palette, origin: L.ORIGIN });
+  const islet = models.cachedSteps(function* (slice = null) {
+    const grid = yield* L.bodySteps(slice), palette = L.PALETTE.map((hex) => hex && hexToRgb(hex));
+    const geometry = yield* BL.terrain.gridGeometrySteps(grid, { unit: L.UNIT, palette, origin: L.ORIGIN }, slice);
     // Centre-sampled shore voxels leave inward corners across the circular lake. Bevel just those
     // corners out of the water; the same mesh is used for collision. A small chord allowance keeps
     // the straight edges between bevelled vertices outside the circle too.
@@ -93,17 +93,17 @@
     // Split affected greedy quads at cell boundaries first: otherwise a long edge can bridge across
     // its neighbour's bevelled corner and leave a crack at the old T-junction.
     const shoreFaces = [];
-    for (const f of geometry.faces) {
+    for (const f of geometry.faces) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       const v = geometry.verts, ids = f.i;
       let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity, maxY = -Infinity;
-      for (const id of ids) {
+      for (const id of ids) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
         minX = Math.min(minX, v[id * 3]); maxX = Math.max(maxX, v[id * 3]);
         minZ = Math.min(minZ, v[id * 3 + 2]); maxZ = Math.max(maxZ, v[id * 3 + 2]);
         maxY = Math.max(maxY, v[id * 3 + 1]);
       }
       const nearX = Math.max(0, minX, -maxX), nearZ = Math.max(0, minZ, -maxZ);
       let mouth = false;
-      for (const channel of L.CHANNELS) {
+      for (const channel of L.CHANNELS) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
         const ux = Math.sin(channel.bearing), uz = Math.cos(channel.bearing), half = L.CHANNEL.low + 2 * L.UNIT;
         const x = (minX + maxX) / 2, z = (minZ + maxZ) / 2, rx = (maxX - minX) / 2, rz = (maxZ - minZ) / 2;
         if (x * ux + z * uz + Math.abs(ux) * rx + Math.abs(uz) * rz >= L.channelOutlet(channel) - (channel.inner ? 2 * L.UNIT : 0) &&
@@ -116,12 +116,12 @@
       const at = (u, w) => pushVert(geometry, v[a] + (v[b] - v[a]) * u + (v[d] - v[a]) * w,
         v[a + 1] + (v[b + 1] - v[a + 1]) * u + (v[d + 1] - v[a + 1]) * w,
         v[a + 2] + (v[b + 2] - v[a + 2]) * u + (v[d + 2] - v[a + 2]) * w);
-      for (let x = 0; x < nx; x++) for (let z = 0; z < nz; z++) {
+      for (let x = 0; x < nx; x++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } for (let z = 0; z < nz; z++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
         shoreFaces.push({ ...f, i: [at(x / nx, z / nz), at((x + 1) / nx, z / nz), at((x + 1) / nx, (z + 1) / nz), at(x / nx, (z + 1) / nz)] });
-      }
+      } }
     }
     geometry.faces = shoreFaces;
-    for (let i = 0; i < geometry.verts.length; i += 3) {
+    for (let i = 0; i < geometry.verts.length; i += 3) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       if (geometry.verts[i + 1] < underside) continue;
       const x = geometry.verts[i], z = geometry.verts[i + 2], r = Math.hypot(x, z);
       if (r > 0 && r < L.LAKE_R) {
@@ -131,9 +131,9 @@
     }
     // Flatten the narrow mouth into the cliff so the stream and vertical sheet meet on the rock face.
     // The outer half-metre blends back into the voxel cliff; cell-sized faces keep the cut watertight.
-    for (const channel of L.CHANNELS) {
+    for (const channel of L.CHANNELS) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       const ux = Math.sin(channel.bearing), uz = Math.cos(channel.bearing), end = L.channelOutlet(channel);
-      for (let i = 0; i < geometry.verts.length; i += 3) {
+      for (let i = 0; i < geometry.verts.length; i += 3) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
         const x = geometry.verts[i], z = geometry.verts[i + 2], along = x * ux + z * uz;
         const across = Math.abs(x * uz - z * ux), blend = Math.min(1, (L.CHANNEL.low + 2 * L.UNIT - across) / L.UNIT);
         if (blend <= 0) continue;
@@ -150,7 +150,7 @@
         }
       }
     }
-    BL.terrain.compactVertices(geometry);
+    yield* BL.terrain.compactVerticesSteps(geometry, slice);
     geometry.cutawaySource = { data: grid.data, sx: grid.sx, sy: grid.sy, sz: grid.sz, unit: L.UNIT, origin: L.ORIGIN, palette };
     return geometry;
   });
@@ -159,7 +159,7 @@
   // voxel steps, which are cut at or under it. Their edges are buried in the walls; the ledge's outer edge and
   // its end wear a skirt down to the step below, so the sheet never shows from the side as a floating plane.
   const EARTH = ["#6a5238", "#624b33"].map(hexToRgb), LEDGE_TONES = ["#7a6a52", "#6f6048"].map(hexToRgb), SKIRT = hexToRgb("#54544f");
-  const rampFloor = cached(() => {
+  const rampFloor = models.cachedSteps(function* (slice = null) {
     const geo = { verts: [], faces: [], lines: [] }, RAMP = L.RAMP, STEP = 1 / RAMP.r;
     const at = (bearing, r, y) => pushVert(geo, Math.sin(bearing) * r, y, Math.cos(bearing) * r);
     const SHEET = { emissive: 0 };
@@ -175,16 +175,16 @@
       return edge;
     };
     const fallCuts = [];
-    for (const channel of L.CHANNELS) if (channel.falls) {
+    for (const channel of L.CHANNELS) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } if (channel.falls) {
       const width = fallMouthHalf;
       let left = channel.bearing - width / L.edgeAt(channel.bearing);
       let right = channel.bearing + width / L.edgeAt(channel.bearing);
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < 4; i++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
         left = channel.bearing - width / L.edgeAt(left);
         right = channel.bearing + width / L.edgeAt(right);
       }
       fallCuts.push({ left, right, channel });
-    }
+    } }
     const cutInnerEdge = (bearing, inner) => {
       for (const cut of fallCuts) {
         if (Math.abs(bearing - cut.left) < 1e-6 || Math.abs(bearing - cut.right) < 1e-6)
@@ -227,7 +227,7 @@
     };
     let galleryEnd = null, ledgeEnd = null;
     const reach = RAMP.bay + 0.3;
-    for (let n = 0; n < L.RILL_STATIONS.length - 1; n++) {
+    for (let n = 0; n < L.RILL_STATIONS.length - 1; n++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       const a = L.RILL_STATIONS[n], to = L.RILL_STATIONS[n + 1];
       if (a >= L.RILL.end) {
         // The turn's floor patch replaces the inner landing; keep the outer walking lane at its grade.
@@ -255,13 +255,13 @@
           at(RAMP.start + from, r0 + G.half, y0)], SKIRT, SHEET);
       }
       // Through a door: from the descent's edge out to the ledge.
-      for (const door of L.DOORS) if (Math.abs((a + to) / 2 - door.at * RAMP.sweep) * 18 < L.DOOR.half + 0.4) {
+      for (const door of L.DOORS) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } if (Math.abs((a + to) / 2 - door.at * RAMP.sweep) * 18 < L.DOOR.half + 0.4) {
         quad(RAMP.start + a, RAMP.start + to, RAMP.r + reach, L.edgeAt(RAMP.start + (a + to) / 2) - 0.25, L.rampY(a), L.rampY(to), EARTH[n & 1]);
-      }
+      } }
       // Through a link: carry the descent's surface out through the mouths and along the gallery. Between
       // galleries only the exterior lip continues, with its inner edge buried in the intact cliff wall.
       const link = L.linkAt((a + to) / 2);
-      for (let h = 0; h < 2; h++) {
+      for (let h = 0; h < 2; h++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
         const a0 = a + (to - a) * h / 2, a1 = a + (to - a) * (h + 1) / 2, b0 = RAMP.start + a0, b1 = RAMP.start + a1;
         const draw = (start, end) => {
           const lip0 = L.lipAt(start), lip1 = L.lipAt(end);
@@ -286,7 +286,7 @@
     if (galleryEnd) capEnd(galleryEnd.b, galleryEnd.inner, galleryEnd.outer, galleryEnd.y, true);
     // Rebuild the narrow floor strip over the voxel recess around the bend and chamber.
     // Sample the union of both grooves at their join so neither bank dams the other stream.
-    for (const arc of L.RILL_TAIL) {
+    for (const arc of L.RILL_TAIL) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       if (arc.squeeze) {
         // A flat patch avoids folded offset banks on the tight hairpin's small inner radius.
         const half = arc.r + 0.95, reach = arc.r * arc.squeeze + 0.95;
@@ -299,9 +299,9 @@
           const cut = math.clamp((L.RILL.half - L.rillTailDistance(x, z)) / (L.RILL.half - L.RILL.bedHalf), 0, 1);
           return pushVert(geo, x, L.rillJunctionY(x, z) + 0.008 - L.RILL.depth * cut, z);
         };
-        for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) {
+        for (let i = 0; i < cols; i++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } for (let j = 0; j < rows; j++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
           face(geo, [point(i, j), point(i + 1, j), point(i + 1, j + 1), point(i, j + 1)], EARTH[0], SHEET);
-        }
+        } }
         continue;
       }
       const count = Math.ceil(Math.abs(arc.sweep) * arc.r / 0.2);
@@ -313,14 +313,14 @@
         const cut = math.clamp((L.RILL.half - L.rillTailDistance(x, z)) / (L.RILL.half - L.RILL.bedHalf), 0, 1);
         return pushVert(geo, x, L.FLOOR + 0.008 - L.RILL.depth * cut, z);
       };
-      for (let i = 0; i < count; i++) for (let j = 0; j < bands; j++) {
+      for (let i = 0; i < count; i++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } for (let j = 0; j < bands; j++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
         const ids = [point(i, j), point(i, j + 1), point(i + 1, j + 1), point(i + 1, j)];
         if (arc.sweep < 0) ids.reverse();
         face(geo, ids, Math.abs(j + 0.5 - bands / 2) < 2 ? SKIRT : EARTH[0], SHEET);
-      }
+      } }
     }
     const end = L.LEDGE.to * RAMP.sweep + L.LEDGE.tail, leadSteps = Math.ceil(L.LEDGE.lead / STEP) * 2;
-    for (let n = -leadSteps; n * STEP < end - 1e-6; n++) {
+    for (let n = -leadSteps; n * STEP < end - 1e-6; n++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       const a = n < 0 ? n * L.LEDGE.lead / leadSteps : n * STEP;
       const to = n < 0 ? (n + 1) * L.LEDGE.lead / leadSteps : Math.min(end, a + STEP);
       drySpans(RAMP.start + a, RAMP.start + to, (b0, b1) => {
@@ -340,13 +340,13 @@
     }
     if (ledgeEnd) capEnd(ledgeEnd.b, ledgeEnd.inner, ledgeEnd.outer, ledgeEnd.y, true);
     // Support only: a sheet is a floor to stand on, never a wall, a ceiling or the skin of a solid.
-    for (const f of geo.faces) f.supportOnly = true;
+    for (const f of geo.faces) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } f.supportOnly = true; }
     return geo;
   });
   // Behind the chamber's floor, wall and roof, inside the rock: where the mesher's faces meet at a T a pixel can
   // fall between them, and in a dark room it would show the sky beyond the island. The wall's pieces are laid
   // only where the layout is solid, so none stands in the window or where the descent comes in.
-  const chamberBacking = cached(() => {
+  const chamberBacking = models.cachedSteps(function* (slice = null) {
     const geo = { verts: [], faces: [], lines: [] }, N = 96, STEP = Math.PI * 2 / N, tone = hexToRgb(L.PALETTE[L.M.earthDark]);
     const wallR = L.CHAMBER_R + 0.6, low = L.FLOOR - 0.25, high = L.LEVEL.shore - 1.25;
     // The wall is tried a row of cells at a time, from the row under the floor.
@@ -356,14 +356,14 @@
       for (let k = 0; k <= 4; k++) if (!L.solidAt(Math.sin(b0 + STEP * k / 4) * wallR, y, Math.cos(b0 + STEP * k / 4) * wallR)) return false;
       return true;
     };
-    for (let n = 0; n < N; n++) {
+    for (let n = 0; n < N; n++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       const b0 = n * STEP, b1 = b0 + STEP;
       if (n % 3 === 0) {
         const c0 = b0, c1 = b0 + STEP * 3;
         face(geo, [at(c0, L.SHAFT_R + 0.6, low), at(c0, wallR, low), at(c1, wallR, low), at(c1, L.SHAFT_R + 0.6, low)], tone);
         face(geo, [at(c0, L.LAKE_R + 0.5, high), at(c1, L.LAKE_R + 0.5, high), at(c1, wallR, high), at(c0, wallR, high)], tone);
       }
-      for (let j = 0, from = -1; j <= rows; j++) {
+      for (let j = 0, from = -1; j <= rows; j++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
         const solid = j < rows && rock(b0, base + (j + 0.5) * L.UNIT);
         if (solid && from < 0) from = j;
         if (!solid && from >= 0) {
@@ -377,7 +377,7 @@
   });
   // Wall creepers root in the chamber's seams between its four reading panels, then trail over the outer floor.
   // Build the whole dressing once; it has no collision and never enters the shaft or covers the lettering.
-  const chamberVines = cached(() => {
+  const chamberVines = models.cachedSteps(function* (slice = null) {
     const geo = { verts: [], faces: [], lines: [], smooth: true, normals: [] }, rand = mulberry32(0x514a93);
     const tones = ["#173b25", "#295e32", "#397d3b", "#68a34a"].map(hexToRgb);
     const vine = hexToRgb("#35552b"), floorY = L.FLOOR + 0.055;
@@ -387,11 +387,11 @@
         if (L.solidAt(Math.sin(a) * r, y, Math.cos(a) * r)) return r - 0.1;
       return L.CHAMBER_R - 0.12;
     };
-    for (let quarter = 0; quarter < 4; quarter++) for (let k = 0; k < 5; k++) {
+    for (let quarter = 0; quarter < 4; quarter++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } for (let k = 0; k < 5; k++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       const a = quarter * Math.PI / 2 + (21 + k * 12 + (rand() - 0.5) * 5) * Math.PI / 180;
       const top = -4.8 - rand() * 0.5, end = floorY + (k % 3 === 0 ? 0 : 0.8 + rand() * 1.5);
       const points = [];
-      for (let j = 0; j <= 8; j++) {
+      for (let j = 0; j <= 8; j++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
         const t = j / 8, b = a + Math.sin(t * 4.5 + k) * 0.012;
         points.push(point(b, wallR(b, top + (end - top) * t) - 0.045, top + (end - top) * t));
       }
@@ -399,16 +399,16 @@
         out: [-Math.sin(a), 0, -Math.cos(a)], rand, tones });
       if (end > floorY + 0.1) continue;
       const root = points[points.length - 1], runners = 1 + (k % 2);
-      for (let branch = 0; branch < runners; branch++) {
+      for (let branch = 0; branch < runners; branch++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
         const floor = [root], reach = 1.8 + rand() * 1.2, bend = (branch ? 1 : -1) * (0.04 + rand() * 0.06);
-        for (let j = 1; j <= 6; j++) {
+        for (let j = 1; j <= 6; j++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
           const t = j / 6;
           floor.push(point(a + bend * t, Math.hypot(root[0], root[2]) - reach * t, floorY));
         }
         garland(geo, floor, { r: 0.027, color: vine, every: 0.39, size: 0.2 + rand() * 0.08, droop: 0.12,
           out: [0, 1, 0], rand, tones });
       }
-    }
+    } }
     geo.normals = Float32Array.from(padNormals(geo).normals);
     return noShadow(geo);
   });
@@ -514,29 +514,29 @@
   const DECK_START = SITE.deckStart, DECK_END = SITE.span + 0.25;
   const deckY = (t) => { t = Math.max(0, Math.min(1, t)); return -SITE.sag * 4 * t * (1 - t); };
   // The crossing as it was first built, kept as the bridge's collision shell so walking on it never changes.
-  const bridgeShell = cached(() => {
+  const bridgeShell = models.cachedSteps(function* (slice = null) {
     const geos = [], w = SITE.width, length = DECK_END - DECK_START, count = Math.ceil(length / 0.46), pitch = length / count;
-    for (let i = 0; i < count; i++) {
+    for (let i = 0; i < count; i++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       const z = DECK_START + (i + 0.5) * pitch;
       geos.push(bevelBox({ w, h: 0.18, d: pitch + 0.02, color: i % 3 === 0 ? BARK : BARK_LT, bevel: 0.04, offset: { y: deckY(z / SITE.span) - 0.05, z } }));
     }
     const steps = 24;
-    for (const side of [-1, 1]) {
+    for (const side of [-1, 1]) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       const rail = [], deck = [];
-      for (let i = 0; i <= steps; i++) {
+      for (let i = 0; i <= steps; i++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
         const t = i / steps;
         rail.push({ x: side * w / 2, y: deckY(t) + 0.95, z: t * SITE.span });
         deck.push({ x: side * w / 2, y: deckY(t) - 0.04, z: t * SITE.span });
       }
       geos.push(polyline({ points: rail, color: MOSS, emissive: 0 }), polyline({ points: deck, color: BARK, emissive: 0 }));
-      for (let i = 2; i < steps - 1; i += 3) {
+      for (let i = 2; i < steps - 1; i += 3) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
         const t = i / steps;
         geos.push(polyline({ points: [{ x: side * w / 2, y: deckY(t) - 0.04, z: t * SITE.span }, { x: side * w / 2, y: deckY(t) + 0.95, z: t * SITE.span }], color: MOSS, emissive: 0 }));
       }
     }
     // A gateway at each end: two posts, a lashed crossbeam and a lantern, so the crossing reads as a way in.
-    for (const z of [0, SITE.span]) {
-      for (const side of [-1, 1]) {
+    for (const z of [0, SITE.span]) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+      for (const side of [-1, 1]) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
         geos.push(bevelBox({ w: 0.36, h: 3.95 + (z === 0 ? L.UNIT : 0), d: 0.36, color: BARK, offset: { x: side * (w / 2 + 0.16), y: 1.7 - (z === 0 ? L.UNIT / 2 : 0), z } }));
         geos.push(bevelBox({ w: 0.46, h: 0.2, d: 0.46, color: MOSS, offset: { x: side * (w / 2 + 0.16), y: 3.68, z } }));
       }
@@ -544,9 +544,9 @@
       geos.push(box({ w: 0.26, h: 0.34, d: 0.26, color: "#ffb347", emissive: 1, offset: { y: 3.46, z } }));
     }
     // Vines slung under the deck, following its own sag.
-    for (const side of [-1, 1]) {
+    for (const side of [-1, 1]) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       const vine = [];
-      for (let i = 0; i <= 16; i++) {
+      for (let i = 0; i <= 16; i++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
         const t = i / 16;
         vine.push({ x: side * w * 0.32, y: deckY(t) - 0.5 - Math.sin(t * Math.PI) * 0.55, z: t * SITE.span });
       }
@@ -560,7 +560,7 @@
   // Drawn as a cartoon crossing: the same bevelled planks and gateways, with its rails, hangers and underslung
   // ropes as thick smooth vines, leaves sprouting along the rails and moss cushions on the post tops.
   const VINE = hexToRgb("#3f6b2a"), VINE_DK = hexToRgb("#2f5424"), LEAF_TONES = ["#2f6b2c", "#3f8a34", "#56a43f", "#74bd52"].map(hexToRgb);
-  const bridge = cached(() => {
+  const bridge = models.cachedSteps(function* (slice = null) {
     const rand = mulberry32(5561), w = SITE.width, length = DECK_END - DECK_START, count = Math.ceil(length / 0.46), pitch = length / count;
     const geo = { verts: [], faces: [], lines: [], smooth: true, normals: [] };
     const vine = (pts, r0, r1, color) => {
@@ -571,9 +571,9 @@
       padNormals(geo);
     };
     const steps = 16;
-    for (const side of [-1, 1]) {
+    for (const side of [-1, 1]) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       const x = side * w / 2, rail = [], deck = [], under = [];
-      for (let i = 0; i <= steps; i++) {
+      for (let i = 0; i <= steps; i++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
         const t = i / steps;
         rail.push({ x, y: deckY(t) + 0.95, z: t * SITE.span });
         deck.push({ x, y: deckY(t) - 0.04, z: t * SITE.span });
@@ -583,14 +583,14 @@
       vine(rail, 0.075, 0.075, VINE);
       vine(deck, 0.06, 0.06, VINE_DK);
       vine(under, 0.055, 0.055, VINE_DK);
-      for (let i = 2; i < steps - 1; i += 2) {
+      for (let i = 2; i < steps - 1; i += 2) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
         const t = i / steps;
         vine([{ x, y: deckY(t) - 0.04, z: t * SITE.span }, { x, y: deckY(t) + 0.95, z: t * SITE.span }], 0.035, 0.03, VINE_DK);
       }
       // Leaves in twos and threes along the rail, hanging out and down from it, lit as if the rail were a hedge.
-      for (let i = 1; i < 24; i++) {
+      for (let i = 1; i < 24; i++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
         const t = (i + rand() * 0.6) / 24, y = deckY(t) + 0.95, z = t * SITE.span;
-        for (let n = rand() < 0.5 ? 2 : 3; n > 0; n--) {
+        for (let n = rand() < 0.5 ? 2 : 3; n > 0; n--) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
           const out = side * (0.3 + rand() * 0.6), down = -0.3 - rand() * 0.7, along = (rand() - 0.5) * 0.8, l = Math.hypot(out, down, along);
           const ax = out / l, ay = down / l, az = along / l, wx = -az, wz = ax, wl = Math.hypot(wx, wz) || 1;
           const band = 1 + ((rand() * 3) | 0);
@@ -598,7 +598,7 @@
         }
       }
     }
-    for (let i = 0; i < count; i++) {
+    for (let i = 0; i < count; i++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       const z = DECK_START + (i + 0.5) * pitch;
       flatInto(geo, bevelBox({ w, h: 0.18, d: pitch + 0.02, color: i % 3 === 0 ? BARK : BARK_LT, bevel: 0.04, offset: { y: deckY(z / SITE.span) - 0.05, z } }));
       if (i % 6 === 1 || i % 9 === 5) {
@@ -607,8 +607,8 @@
           offset: { x: side * (w / 2 - 0.27 - rand() * 0.12), y: deckY(z / SITE.span) + 0.045, z: z + (rand() - 0.5) * pitch * 0.25 } }));
       }
     }
-    for (const z of [0, SITE.span]) {
-      for (const side of [-1, 1]) {
+    for (const z of [0, SITE.span]) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+      for (const side of [-1, 1]) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
         flatInto(geo, bevelBox({ w: 0.36, h: 3.95 + (z === 0 ? L.UNIT : 0), d: 0.36, color: BARK, offset: { x: side * (w / 2 + 0.16), y: 1.7 - (z === 0 ? L.UNIT / 2 : 0), z } }));
         puff(geo, side * (w / 2 + 0.16), 3.7, z, 0.3, 0.16, 0.3, MOSS_TONES, rand, 4, 8);
       }
@@ -620,7 +620,7 @@
       );
     }
     geo.normals = Float32Array.from(geo.normals);
-    geo.collisionGeometry = bridgeShell();
+    geo.collisionGeometry = yield* bridgeShell.steps(slice);
     return geo;
   });
 
@@ -664,7 +664,7 @@
   // Drawn as a cartoon rainforest tree: a tall tapered trunk on flared buttress roots, limbs reaching out to a wide
   // umbrella of leafy clumps (one broad crown and four lower satellites, so the layers of the old slabs survive),
   // and lianas hanging from the clumps' undersides as smooth cords.
-  const canopy = (seed, height, spread) => cached(() => {
+  const canopyGeometry = (seed, height, spread, lod = 0, collision = null) => {
     const lean = (mulberry32(seed)() - 0.5) * 0.25, top = height + 0.1, cx = lean * height;
     const rand = mulberry32(seed + 500), geo = { verts: [], faces: [], lines: [], smooth: true, normals: [], foliageVisibility: false };
     limb(geo, 0, -0.1, 0, cx * 0.8, height * 0.8, 0, 0.34, 0.2, 8, TRUNK);
@@ -685,7 +685,7 @@
     const canopyStart = geo.faces.length;
     for (let k = 0; k < crowns.length; k++) {
       const [x, y, z, rx, ry] = crowns[k];
-      leafy(geo, x, y, z, rx, ry, rx, JUNGLE, rand, Math.round(9 + rx * rx * 5), 0.4 + (k % 3) * 0.04);
+      leafy(geo, x, y, z, rx, ry, rx, JUNGLE, rand, Math.round(9 + rx * rx * 5), 0.4 + (k % 3) * 0.04, lod);
     }
     const canopyEnd = geo.faces.length;
     // Uneven leafy curtains soften the umbrella's bare underside, while pockets of epiphytes climb the trunk.
@@ -707,20 +707,24 @@
     // five limbs (from the trunk out to each lower crown), and a perch on top of every crown. `crowns` are the
     // clumps themselves (centre, then radius across and up), which the rain lands on.
     geo.climb = { lean: cx, height, branches, perches: crowns.map(([x, y, z, , ry]) => [x, y + ry * 0.9, z]), crowns };
-    geo.collisionGeometry = merge(canopyShell(seed, height, spread), canopySupport(geo, canopyStart, canopyEnd));
+    geo.collisionGeometry = collision || merge(canopyShell(seed, height, spread), canopySupport(geo, canopyStart, canopyEnd));
     return geo;
+  };
+  const canopy = (seed, height, spread) => cached(() => {
+    const high = canopyGeometry(seed, height, spread);
+    return models.foliageLods(high, canopyGeometry(seed, height, spread, 1, high.collisionGeometry));
   });
   const CANOPY = [canopy(71, 7.5, 3.2), canopy(72, 5.4, 2.6), canopy(73, 9.2, 3.8)];
 
   // Eight fronds arching out and down, each a row of paired leaflets shrinking to a tip.
   const FERN = ["#1e5237", "#347d42", "#66a84a", "#99c856"].map(hexToRgb);
-  const fern = cached(() => {
+  const fernGeometry = (lod = 0) => {
     const rand = mulberry32(88), geo = { verts: [], faces: [], lines: [], normals: [] };
     for (let i = 0; i < 8; i++) {
       const a = i / 8 * Math.PI * 2 + rand() * 0.3, len = 0.6 + rand() * 0.35, ca = Math.cos(a), sa = Math.sin(a), rise = 0.45 + rand() * 0.2;
       const at = (t, out) => { out[0] = ca * len * t; out[1] = 0.05 + Math.sin(t * Math.PI * 0.8) * len * rise; out[2] = sa * len * t; return out; };
       const p = [0, 0, 0], q = [0, 0, 0], light = FERN[2 + (i & 1)], dark = FERN[1 + (i & 1)];
-      for (let j = 0; j <= 6; j++) {
+      for (let j = 0; j <= 6; j += lod ? 2 : 1) {
         const t = (j + 0.6) / 6.6;
         at(Math.min(1, t), p); at(Math.min(1, t + 0.05), q);
         let fx = q[0] - p[0], fy = q[1] - p[1], fz = q[2] - p[2];
@@ -738,13 +742,14 @@
     }
     geo.normals = Float32Array.from(geo.normals);
     return Object.assign(noShadow(geo), { sway: 0.06 });
-  });
+  };
+  const fern = cached(() => models.foliageLods(fernGeometry(), fernGeometry(1)));
   // A jungle shrub: two leafy clumps over a skirt of broad elephant-ear leaves.
   const SHRUB = ["#16442e", "#286a3d", "#49904a", "#81b84d"].map(hexToRgb);
-  const shrub = cached(() => {
+  const shrubGeometry = (lod = 0) => {
     const rand = mulberry32(95), geo = { verts: [], faces: [], lines: [], normals: [] };
-    leafy(geo, 0, 0.4, 0, 0.56, 0.38, 0.56, SHRUB, rand, 18, 0.2);
-    leafy(geo, 0.12, 0.72, -0.08, 0.36, 0.26, 0.36, SHRUB, rand, 10, 0.17);
+    leafy(geo, 0, 0.4, 0, 0.56, 0.38, 0.56, SHRUB, rand, 18, 0.2, lod);
+    leafy(geo, 0.12, 0.72, -0.08, 0.36, 0.26, 0.36, SHRUB, rand, 10, 0.17, lod);
     for (let k = 0; k < 5; k++) {
       const a = k / 5 * Math.PI * 2 + rand() * 0.5, l = Math.hypot(0.8, 0.45);
       const ax = Math.cos(a) * 0.8 / l, ay = 0.45 / l, az = Math.sin(a) * 0.8 / l, n = faceUp(ax, ay, az);
@@ -752,16 +757,18 @@
     }
     geo.normals = Float32Array.from(geo.normals);
     return Object.assign(geo, { sway: 0.03 });
-  });
+  };
+  const shrub = cached(() => models.foliageLods(shrubGeometry(), shrubGeometry(1)));
   // Substantial understory, built at its natural proportions rather than stretching a small round shrub.
   // The broad blades arch in 3D with a folded midrib, notched edges and two painted halves. All three plants
   // share the same bounded footprint, but their leaf heights, fans and accents give the scatter different silhouettes.
   const UNDERLEAF = ["#123d2d", "#1d6040", "#368449", "#67a84d", "#a0c959"].map(hexToRgb);
   const PETIOLE = hexToRgb("#46713c"), VEIN = hexToRgb("#91af58"), CORAL = hexToRgb("#df6448"), CORAL_DK = hexToRgb("#a53639");
-  const broadBlade = (geo, ox, oy, oz, angle, reach, rise, width, arch, light, dark, split = false) => {
-    const ca = Math.cos(angle), sa = Math.sin(angle), rows = [], count = 6;
-    for (let j = 0; j <= count; j++) {
-      const t = j / count, wave = j === count ? 0 : Math.sin(t * Math.PI), edge = width * Math.pow(Math.max(0, wave), 0.68) * (split && (j === 2 || j === 4) ? 0.64 : 1);
+  const broadBlade = (geo, ox, oy, oz, angle, reach, rise, width, arch, light, dark, split = false, lod = 0) => {
+    // Coarse blades retain the root, tip, folded middle and both authored split notches.
+    const ca = Math.cos(angle), sa = Math.sin(angle), rows = [], count = 6, samples = lod ? [0, 2, 3, 4, 6] : [0, 1, 2, 3, 4, 5, 6];
+    for (let rowIndex = 0; rowIndex < samples.length; rowIndex++) {
+      const j = samples[rowIndex], t = j / count, wave = j === count ? 0 : Math.sin(t * Math.PI), edge = width * Math.pow(Math.max(0, wave), 0.68) * (split && (j === 2 || j === 4) ? 0.64 : 1);
       const x = ox + ca * reach * t, y = oy + rise * t + arch * wave, z = oz + sa * reach * t;
       const slope = rise + arch * Math.PI * Math.cos(t * Math.PI), nl = Math.hypot(reach, slope), nx = -ca * slope / nl, ny = reach / nl, nz = -sa * slope / nl;
       const row = [];
@@ -771,32 +778,32 @@
       }
       rows.push(row);
     }
-    for (let j = 0; j < count; j++) for (let side = 0; side < 2; side++) {
-      const ids = j === 0 ? [rows[j][side], rows[j + 1][side + 1], rows[j + 1][side]] : j === count - 1 ?
+    for (let j = 0; j < samples.length - 1; j++) for (let side = 0; side < 2; side++) {
+      const ids = j === 0 ? [rows[j][side], rows[j + 1][side + 1], rows[j + 1][side]] : j === samples.length - 2 ?
         [rows[j][side], rows[j][side + 1], rows[j + 1][side]] : [rows[j][side], rows[j][side + 1], rows[j + 1][side + 1], rows[j + 1][side]];
       const color = side ? light : dark;
       geo.faces.push({ i: ids, color, emissive: 0 }, { i: [ids[0], ...ids.slice(1).reverse()], color, emissive: 0 });
     }
     // A slender pale rib keeps the broad planes readable when the light is low.
-    for (let j = 0; j < count; j++) {
-      const ids = [];
-      for (const [t, side] of [[j / count, -1], [(j + 1) / count, -1], [(j + 1) / count, 1], [j / count, 1]]) {
+    for (let j = 0; j < samples.length - 1; j++) {
+      const ids = [], from = samples[j] / count, to = samples[j + 1] / count;
+      for (const [t, side] of [[from, -1], [to, -1], [to, 1], [from, 1]]) {
         const half = 0.012 * (1 - t), x = ox + ca * reach * t - sa * half * side, z = oz + sa * reach * t + ca * half * side;
         ids.push(pushVert(geo, x, oy + rise * t + arch * Math.sin(t * Math.PI) + 0.006, z));
         geo.normals.push(0, 1, 0);
       }
-      face(geo, j === count - 1 ? [ids[0], ids[3], ids[1]] : [ids[0], ids[3], ids[2], ids[1]], VEIN, { emissive: 0 });
+      face(geo, j === samples.length - 2 ? [ids[0], ids[3], ids[1]] : [ids[0], ids[3], ids[2], ids[1]], VEIN, { emissive: 0 });
     }
   };
-  const undergrowth = (kind) => cached(() => {
+  const undergrowthGeometry = (kind, lod = 0) => {
     const rand = mulberry32(741 + kind * 37), geo = { verts: [], faces: [], lines: [], smooth: true, normals: [] };
     // Offset stems and overlapping lower masses make one clump read as several plants growing together.
     for (const [x, z, h] of [[-0.23, 0.14, 1.95], [0.08, 0, 2.72], [0.28, -0.17, 2.5], [0.08, 0.31, 1.5]]) {
       limb(geo, x * 0.55, -0.08, z * 0.55, x, h, z, 0.055, 0.026, 5, PETIOLE);
     }
     padNormals(geo);
-    leafy(geo, -0.2, 0.75, 0.05, 0.62, 0.55, 0.65, UNDERLEAF, rand, 10, 0.32);
-    leafy(geo, 0.23, 1.65, -0.09, 0.66, 0.63, 0.6, UNDERLEAF, rand, 12, 0.38);
+    leafy(geo, -0.2, 0.75, 0.05, 0.62, 0.55, 0.65, UNDERLEAF, rand, 10, 0.32, lod);
+    leafy(geo, 0.23, 1.65, -0.09, 0.66, 0.63, 0.6, UNDERLEAF, rand, 12, 0.38, lod);
     if (kind !== 1) {
       // Giant elephant ears and tall heliconia both retain generous leaves well above the waterline.
       const count = kind ? 17 : 21;
@@ -806,7 +813,7 @@
         const width = kind ? 0.3 + rand() * 0.12 : 0.42 + rand() * 0.15, band = tier === 2 ? 3 : 2;
         limb(geo, 0.08 * y / 2.72, y - 0.18, 0, ox, y, oz, 0.025, 0.017, 5, PETIOLE);
         padNormals(geo);
-        broadBlade(geo, ox, y, oz, a, reach, rise, width, 0.21 + rand() * 0.15, UNDERLEAF[band], UNDERLEAF[band - 1], !kind);
+        broadBlade(geo, ox, y, oz, a, reach, rise, width, 0.21 + rand() * 0.15, UNDERLEAF[band], UNDERLEAF[band - 1], !kind, lod);
       }
       if (kind === 2) {
         // Two coral flower spires are accents in the greenery, not a carpet of flowers.
@@ -815,7 +822,7 @@
           padNormals(geo);
           for (let j = 0; j < 4; j++) {
             const a = j % 2 ? 0.3 : Math.PI + 0.3;
-            broadBlade(geo, x, y + j * 0.13, z, a, 0.28 - j * 0.035, 0.13, 0.06, 0.045, CORAL, CORAL_DK);
+            broadBlade(geo, x, y + j * 0.13, z, a, 0.28 - j * 0.035, 0.13, 0.06, 0.045, CORAL, CORAL_DK, false, lod);
           }
         }
       }
@@ -826,7 +833,8 @@
         const reach = 0.88 + rand() * 0.18, rise = 0.28 + rand() * 0.35, arch = 0.45 + rand() * 0.2, ox = ca * 0.14, oz = sa * 0.14;
         limb(geo, 0.08 * y / 2.72, y - 0.12, 0, ox, y, oz, 0.025, 0.014, 5, PETIOLE);
         let px = ox, py = y, pz = oz;
-        for (let j = 1; j <= 8; j++) {
+        // Keep every feathered fan and its terminal point; coarse stems join alternate authored stations.
+        for (let j = lod ? 2 : 1; j <= 8; j += lod ? 2 : 1) {
           const t = j / 8, x = ox + ca * reach * t, yy = y + rise * t + arch * Math.sin(t * Math.PI), z = oz + sa * reach * t;
           limb(geo, px, py, pz, x, yy, z, 0.014 * (1 - t * 0.65), 0.012 * (1 - t * 0.7), 4, PETIOLE);
           padNormals(geo);
@@ -840,7 +848,7 @@
       }
       for (let k = 0; k < 7; k++) {
         const a = k * 2.39996;
-        broadBlade(geo, 0, 0.75 + (k % 2) * 0.65, 0, a, 0.96, 0.4, 0.36, 0.2, UNDERLEAF[2], UNDERLEAF[1], true);
+        broadBlade(geo, 0, 0.75 + (k % 2) * 0.65, 0, a, 0.96, 0.4, 0.36, 0.2, UNDERLEAF[2], UNDERLEAF[1], true, lod);
       }
     }
     geo.normals = Float32Array.from(geo.normals);
@@ -850,6 +858,12 @@
       height = Math.max(height, geo.verts[i + 1]);
     }
     return Object.assign(geo, { sway: 0.0045, plantRadius: radius, plantHeight: height });
+  };
+  const undergrowth = (kind) => cached(() => {
+    const high = undergrowthGeometry(kind), coarse = undergrowthGeometry(kind, 1);
+    // Placement and thicket collision retain the original authored plant envelope at every render level.
+    coarse.plantRadius = high.plantRadius; coarse.plantHeight = high.plantHeight;
+    return models.foliageLods(high, coarse);
   });
   const UNDERGROWTH = [undergrowth(0), undergrowth(1), undergrowth(2)];
   // The hub's rounded boulder in its jungle variant, walked against as the old block rock.
@@ -1205,12 +1219,12 @@
   });
   const VEINS = [vein(0), vein(1)];
   // Roots hanging through a tunnel's roof by an opening, in a frame whose origin is on the roof: smooth cords.
-  const roots = cached(() => {
+  const roots = models.cachedSteps(function* (slice = null) {
     const rand = mulberry32(5521), geo = { verts: [], faces: [], lines: [], smooth: true, normals: [] };
-    for (let k = 0; k < 5; k++) {
+    for (let k = 0; k < 5; k++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       let x = (k - 2) * 0.55 + (rand() - 0.5) * 0.3, y = 0.1, z = (rand() - 0.5) * 0.6;
       const length = 0.7 + rand() * 0.9;
-      for (let j = 1; j <= 4; j++) {
+      for (let j = 1; j <= 4; j++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
         const nx = x + (rand() - 0.5) * 0.16, ny = 0.1 - j / 4 * length, nz = z + (rand() - 0.5) * 0.16;
         limb(geo, x, y, z, nx, ny, nz, 0.05 - j * 0.008, 0.042 - j * 0.008, 5, BARK_RGB);
         x = nx; y = ny; z = nz;
@@ -1248,42 +1262,31 @@
     return cursor;
   };
 
-  // A dense wall panel: the jumbotron's 5x7 font rendered into a canvas, then run-length merged into
-  // quads exactly as the big board does, so a wall of numbers is a few hundred faces and no texture.
-  const panelFrom = (ctx, w, h, px, py, background) => {
-    const geo = { verts: [], faces: [], lines: [] };
-    const data = ctx.getImageData(0, 0, w, h).data;
-    const bg = background;
-    const push = (x0, x1, y0, y1, color) => {
-      const base = geo.verts.length / 3;
-      geo.verts.push(x0, y0, 0, x1, y0, 0, x1, y1, 0, x0, y1, 0);
-      geo.faces.push({ i: [base, base + 1, base + 2, base + 3], color, emissive: 0.85 });
-    };
-    for (let y = 0; y < h; y++) {
-      const wy0 = (h - y - 1) * py, wy1 = (h - y) * py, row = y * w;
-      let x = 0;
-      while (x < w) {
-        const i = (row + x) * 4, r = data[i], g = data[i + 1], b = data[i + 2];
-        if (r === bg[0] && g === bg[1] && b === bg[2]) { x++; continue; }
-        let run = x + 1;
-        while (run < w) {
-          const j = (row + run) * 4;
-          if (data[j] !== r || data[j + 1] !== g || data[j + 2] !== b) break;
-          run++;
-        }
-        push(x * px, run * px, wy0, wy1, [r, g, b]);
-        x = run;
-      }
+  // One canvas-backed panel. Callers repaint transparent pixels and pass the existing geometry on a refresh.
+  // Each panel owns its canvas even when two boards use the same scratch painter.
+  const panelFrom = (ctx, w, h, px, py, background, previous = null) => {
+    const geo = previous || { verts: [0, 0, 0, w * px, 0, 0, w * px, h * py, 0, 0, h * py, 0],
+      faces: [{ i: [0, 1, 2, 3], color: [255, 255, 255], emissive: 0.85 }], lines: [], castShadow: false };
+    if (!geo.imageSurface) {
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      geo.imageSurface = { canvas, context: canvas.getContext("2d"), version: 0, rect: [0, 0, w * px, h * py], background, tessellated: false };
     }
-    geo.castShadow = false;
+    const surface = geo.imageSurface;
+    surface.context.clearRect(0, 0, w, h);
+    surface.context.drawImage(ctx.canvas, 0, 0, w, h, 0, 0, w, h);
+    surface.version++;
     return geo;
   };
 
-  // Live numbers sit just proud of the slate and bend with it, including the run-merged glyph faces.
-  const chainPanel = (ctx, w, h, background) => {
-    const B = CHAIN_BOARD;
-    return curveChainBoard(panelFrom(ctx, w, h, B.px, B.px, background),
-      -w * B.px / 2, B.y + (B.h - h * B.px) / 2, B.d / 2 + 0.02);
+  // Live numbers keep the same circular arc and a stable UV mapping back to their unbent canvas.
+  const chainPanel = (ctx, w, h, background, previous = null) => {
+    const B = CHAIN_BOARD, ox = -w * B.px / 2, oy = B.y + (B.h - h * B.px) / 2;
+    if (previous) return panelFrom(ctx, w, h, B.px, B.px, background, previous);
+    const geo = curveChainBoard(panelFrom(ctx, w, h, B.px, B.px, background), ox, oy, B.d / 2 + 0.02);
+    geo.imageSurface.curve = [B.r, ox, oy];
+    geo.imageSurface.tessellated = true;
+    return geo;
   };
 
   // The island as one group: its body, the smooth floors, the bridge, the lake's membrane, the plank crossings,
@@ -1318,7 +1321,13 @@
     return { node, ground: groundNode, floor: floorNode, bridge: bridgeNode, membrane: membraneNode, membraneRock: membraneRockNode, vines: vinesNode, sign: signNode, crossings, beds, torches };
   };
 
+  const prepareSteps = function* () {
+    const slice = { until: 0, budget: BL.buildTasks.SLICE_MS, work: 0 };
+    for (const build of [islet, rampFloor, bridgeShell, bridge, chamberBacking, chamberVines, roots]) yield* build.steps(slice);
+    return null;
+  };
   BL.poolModels = {
+    prepareSteps,
     SITE, UNIT, BEARING, DIR, WATER, FOAM, spot, build, latheBy, islet, rampFloor, membrane, membraneRock, chamberBacking, chamberVines, crossing, CROSSING, NEST_BEDS, bridge, caveSign, torchPost, wallTorch, VEINS, roots,
     TORCH_STEM_H, carve, carveCells, panelFrom, chainPanel, chainBoard, chainBoardLegs, CHAIN_BOARD, infoSign, infoSignLeg, INFO_SIGN, CANOPY, UNDERGROWTH, fern, shrub, mossRock, deckY,
     beastRig, flowers, log,

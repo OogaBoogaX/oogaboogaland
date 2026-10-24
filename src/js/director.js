@@ -1,6 +1,6 @@
-(() => {
+(async () => {
   "use strict";
-  const { scene, models, donations, glRenderer, canvasRenderer, game: gameMod, pile: pileMod, router: routerMod, scenes } = window.BL;
+  const { scene, models, donations, glRenderer, game: gameMod, pile: pileMod, router: routerMod, scenes } = window.BL;
   // The optional build-time Oogatron snapshot loads before the director.
   // Activity uses each contributor's timestamp, never the snapshot build time.
   if (window.BL.jumbotronData) window.BL.contributors.applySnapshot(window.BL.jumbotronData);
@@ -34,6 +34,10 @@
   const MEMORY_LIMITED = Number.isFinite(DEVICE_MEMORY) && DEVICE_MEMORY > 0 && DEVICE_MEMORY <= 8;
   const INITIAL_QUALITY = COARSE || MEMORY_LIMITED ? "medium" : "high";
   const $ = (id) => document.getElementById(id);
+  // One opt-in override makes both policies measurable; unknown memory keeps the built island.
+  const HUB_CACHE = params.get("hubcache") || "auto";
+  const KEEP_HUB = HUB_CACHE === "keep" || HUB_CACHE !== "release"
+    && !(Number.isFinite(DEVICE_MEMORY) && DEVICE_MEMORY > 0 && DEVICE_MEMORY < 8);
   const mark = (name) => performance.mark(`ooga:${name}`);
   mark("boot");
   let sceneCanvas = $("scene");
@@ -63,7 +67,21 @@
       sceneCanvas = fresh;
     }
   }
-  if (!renderer) renderer = canvasRenderer.createRenderer(sceneCanvas);
+  if (!renderer) {
+    try {
+      const ready = window.BL.deferred.load("canvas");
+      if (ready) await ready;
+      renderer = window.BL.canvasRenderer.createRenderer(sceneCanvas);
+    } catch {
+      overlayObserver.disconnect();
+      curtain.querySelector(".curtain-spinner").remove();
+      const retry = document.createElement("button"), saying = $("curtain-saying");
+      retry.type = "button"; retry.className = "link"; retry.textContent = "Try again";
+      retry.addEventListener("click", () => location.reload(), { once: true });
+      saying.textContent = "The island could not open. "; saying.appendChild(retry);
+      return;
+    }
+  }
   mark("renderer");
   const showQuality = () => {
     qualityLabel.textContent = `${renderer.kind} · ${renderer.quality}`;
@@ -82,7 +100,7 @@
   const debugMagazines = DEBUG ? (params.get("mag") === "2" ? 2 : params.get("mag") === "1" ? 1 : 0) : 0;
   world.magazine = { owned: debugMagazines > 0, count: debugMagazines, ammo: debugMagazines ? 30 : 0, carrier: null };
 
-  let active = null, activeMeshRigs = false;
+  let active = null, activeMeshRigs = false, visitController = null;
   let sceneTime = 0;
   let transition = null;
   let fade = 0;
@@ -189,18 +207,23 @@
   const settle = (t, answer) => {
     if (answer && typeof answer.then === "function") {
       t.ready = false;
-      answer.then((redirect) => { t.redirect = redirect || null; t.ready = true; }, (error) => { t.failed = error || new Error("Not ready"); t.ready = true; });
+      answer.then((redirect) => {
+        if (destroyed) { models.release(t.next.id, []); return; }
+        t.redirect = redirect || null; t.ready = true;
+      }, (error) => {
+        if (destroyed) { models.release(t.next.id, []); return; }
+        t.failed = error || new Error("Not ready"); t.ready = true;
+      });
     } else t.redirect = answer || null;
   };
   const go = (id, place = null, instant = false) => {
     const next = scenes[id];
     if (!next) throw new Error(`Unknown scene "${id}"`);
     if (transition) return false;
-    transition = { next, place, out: true, t: 0, instant, ready: true, redirect: null, failed: null };
+    transition = { next, place, out: true, t: 0, instant, ready: true, redirect: null, failed: null, controller: new AbortController() };
     if (next.prepare) {
-      window.BL.models.setScope(next.id);
-      settle(transition, next.prepare(place, ctx));
-      window.BL.models.setScope(active ? active.id : null);
+      try { settle(transition, models.withScope(next.id, () => next.prepare(place, { ...ctx, signal: transition.controller.signal }, next.id))); }
+      catch (error) { transition.failed = error; }
     }
     return true;
   };
@@ -213,7 +236,7 @@
     if (active && active.id !== "hub") go("hub");
   });
   const agentPlay = BL.agent.createPlay();
-  const ctx = { renderer, canvas: sceneCanvas, overlay: overlayCanvas, game, world, go, lootEnabled: LOOT_ENABLED, testBananas: TEST_BANANAS, agentPlay, from: null, place: null };
+  const ctx = { renderer, canvas: sceneCanvas, overlay: overlayCanvas, game, world, go, lootEnabled: LOOT_ENABLED, testBananas: TEST_BANANAS, agentPlay, hubPolicy: KEEP_HUB ? "keep" : "release", from: null, place: null, signal: null };
   const sceneSections = [...document.querySelectorAll("[data-scene]")];
   // The title cards of the games that have no phase of their own for one: shown on every arrival,
   // closed by their button, Enter, Space or Escape, and nothing else reaches the scene while one shows.
@@ -224,6 +247,7 @@
   // The microphone's note, which names M only in a scene whose M mutes the microphone (`micKey`).
   const showMic = () => window.BL.hud.showMic(window.BL.voice.stats, !!(active && active.micKey));
   const enter = (next, place = null) => {
+    const retainedTime = next.retained ? next.elapsed : 0;
     ctx.from = active ? active.id : null;
     ctx.place = place;
     positionDebug.removeEventListener("click", copyPositionDebug);
@@ -235,18 +259,23 @@
     // The scene's own zone (`voiceZone`), else one of its own; the island and DSB Land report theirs as they go.
     window.BL.net.setZone(next.voiceZone || (next.id === "dsb" ? "dsb-outside" : `scene-${next.id}`));
     window.BL.models.setScope(next.id);
-    next.enter(ctx);
+    visitController = new AbortController();
+    ctx.signal = visitController.signal;
+    try { next.enter(ctx); }
+    catch (error) { visitController.abort(); throw error; }
     activeMeshRigs = next.renderOpts?.meshRigs === true;
     active = next;
+    // Rasterize hidden render alternatives before the curtain lifts or the visitor can zoom out.
+    renderer.prepareScene(liveGeometry());
     showMic();
-    sceneTime = 0;
+    sceneTime = retainedTime;
     router.arrive(next.id, place, ctx.from === null);
     if (POSITION_DEBUG && next.id !== "hub") {
       positionDebug.hidden = false;
       positionDebug.setAttribute("aria-label", "Debug scene, character and camera state. Click to copy a debug snapshot.");
       positionDebugState = "";
       positionDebugNext = 0;
-      positionDebug.addEventListener("click", copyPositionDebug);
+      positionDebug.addEventListener("click", copyPositionDebug, { signal: ctx.signal });
       updatePositionDebug(true);
     }
   };
@@ -259,7 +288,8 @@
     live.clear();
     visit(active.root);
     active.liveGeometry(live);
-    return live;
+    if (scenes.hub.retained) scenes.hub.cachedGeometry(live);
+    return BL.models.addLods(live);
   };
   // The page's first AudioContext wakes the browser's audio, about 60 ms on the main thread; every later one costs well
   // under a millisecond, closed or not. Paid once here, behind the fade, so a scene's first sound never stalls a frame;
@@ -274,15 +304,21 @@
     const leaving = active;
     wakeAudio();
     agentPlay.stop(true);
-    const left = leaving.leave();
+    let left;
+    try { left = leaving.leave(); }
+    finally { visitController.abort(); }
     if (DEBUG && leaving.root.children.length) throw new Error(`${leaving.id}.leave left ${leaving.root.children.length} nodes in its root`);
     if (DEBUG && left.targets) throw new Error(`${leaving.id}.leave left ${left.targets} input targets`);
     clearTweens();
     if (DEBUG && tweenCount()) throw new Error(`${tweenCount()} tweens survived clearTweens`);
     enter(next, place);
-    // The builder caches only the scene just left used go too; the island's stay, since every route passes through it.
-    if (leaving.id !== "hub") window.BL.models.release(leaving.id, ["hub", next.id]);
-    renderer.releaseUnused(liveGeometry());
+    // Scene-only builder caches go with the visit; only the keep policy preserves the inactive hub's owners.
+    const retained = liveGeometry();
+    if (leaving.id !== "hub" || !KEEP_HUB) {
+      models.release(leaving.id, KEEP_HUB ? ["hub", next.id] : [next.id], retained);
+      if (DEBUG && leaving.id !== next.id) models.assertReleased(leaving.id);
+    }
+    renderer.releaseUnused(retained);
     if (DEBUG && renderer.stats.records > live.size) throw new Error(`${next.id}: ${renderer.stats.records} GPU records for ${live.size} live geometries`);
   };
   // Where a settled transition lands: its own scene, or where its preparation redirected it.
@@ -291,14 +327,42 @@
     window.BL.hud.toast("That place could not be opened · try again");
     router.abandon();
   };
+  // Pure model construction happens before leaving the complete old visit. Only a finished cache is published;
+  // no partial HUD, input, crew, or network state belongs to a scene that has not been entered.
+  const buildLanding = (t) => {
+    if (t.failed || t.buildStarted) return t.ready;
+    t.buildStarted = true;
+    const { next, place } = landing(t);
+    if (!next.buildSteps) return true;
+    t.building = true;
+    t.ready = false;
+    const buildCtx = { ...ctx, place, from: active.id, signal: t.controller.signal };
+    let steps;
+    try { steps = models.withScope(next.id, () => next.buildSteps(buildCtx)); }
+    catch (error) { t.failed = error; t.ready = true; t.building = false; return true; }
+    window.BL.buildTasks.run(steps, next.id, t.controller.signal).then(() => {
+      t.ready = true;
+      t.building = false;
+    }, error => {
+      t.failed = error;
+      t.ready = true;
+      t.building = false;
+      if (destroyed) { models.release(next.id, []); return; }
+      const keep = [active.id];
+      if (scenes.hub.retained && active.id !== "hub") keep.push("hub");
+      models.release(next.id, keep, liveGeometry());
+    });
+    return false;
+  };
   const settled = () => {
     const failed = transition.failed;
+    transition.controller.abort();
     transition = null;
     if (failed && active && active.stay) active.stay();
   };
   const stepTransition = (dt) => {
     if (transition.instant) {
-      if (!transition.ready) return;
+      if (!transition.ready || !buildLanding(transition)) { fade = 1; return; }
       if (transition.failed) abandon();
       else { const { next, place } = landing(transition); swap(next, place); }
       settled();
@@ -308,7 +372,7 @@
     transition.t += dt;
     if (transition.out) {
       fade = Math.min(1, transition.t / FADE);
-      if (fade < 1 || !transition.ready) return;
+      if (fade < 1 || !transition.ready || !buildLanding(transition)) return;
       if (transition.failed) abandon();
       else { const { next, place } = landing(transition); swap(next, place); }
       transition.out = false;
@@ -356,8 +420,8 @@
     showQuality();
   };
   // Boot time is a device probe no browser can refuse: Safari masks GPU strings, where thresholds matter most.
-  // BOOT_MEDIUM / BOOT_LOW measure building the first scene. Recalibrated 2026-09-24 against the hub as it now
-  // is: an M4 Max builds it in about 2.35 s, so the old 2200 started every machine at medium. The same ratio to
+  // BOOT_MEDIUM / BOOT_LOW measure synchronous CPU across prepare, construction slices and enter, without await
+  // delays. Recalibrated 2026-09-24 against the hub as it now is: an M4 Max builds it in about 2.35 s, so the old 2200 started every machine at medium. The same ratio to
   // that fast build is kept, and the frame-interval auto-tier still steps a slow device down while it plays.
   const BOOT_MEDIUM = 3600, BOOT_LOW = 5400;
   const tierFromBoot = (ms) => {
@@ -391,6 +455,8 @@
   const step = (dt, now) => {
     elapsed += dt;
     if (transition) stepTransition(dt);
+    // Hold the fully black frame while resumable pure builders run; the old visit keeps its graph and controls.
+    if (transition && transition.building) { drawFade(); return; }
     sceneTime += dt;
     // In real mode the API owns the pile, so every browser shows the same one: its last count less what has been
     // eaten since it arrived, in whole bananas.
@@ -655,28 +721,53 @@
   // Building the first scene holds the main thread with nothing painted yet.
   // Run boot from a task after the first frame so the leaf curtain is on screen, not the previous page.
   let destroyed = false;
+  const bootBuildController = new AbortController();
+  const terrainController = params.get("terrainworker") === "1" ? new AbortController() : null;
   const boot = async () => {
     // A signed-in newcomer must join before crew construction, including direct routes.
     // net.start is bounded; an unavailable backend leaves the static island usable.
     await accountReady;
     if (destroyed) return;
+    const constructionCPU = window.BL.buildTasks.cpu;
     let first = Object.hasOwn(scenes, sceneId) ? scenes[sceneId] : scenes[Object.keys(scenes)[0]], place = routed && routed.place;
+    if (terrainController && ["hub", "drop", "orbit"].includes(first.id)) {
+      try {
+        const ready = window.BL.deferred.load("terrain-cache"); if (ready) await ready;
+        const factory = first.id === "hub" && window.BL.caves.slots.find(slot => slot.status === "open" && slot.scene === "factory");
+        const roofHole = factory ? { id: factory.id, ...window.BL.factoryModels.ROOF_TUBE } : null;
+        await window.BL.terrainCache.prepare({ seed: 1, roofHole }, first.id, terrainController.signal);
+      } catch { /* A rejected opt-in build uses the ordinary path unless this page was destroyed. */ }
+      if (destroyed) { models.release(first.id, []); return; }
+    }
     if (first.prepare) {
       try {
-        window.BL.models.setScope(first.id);
-        const redirect = await first.prepare(place, ctx);
+        const redirect = await window.BL.buildTasks.measure(() => models.withScope(first.id, () => first.prepare(place, { ...ctx, signal: bootBuildController.signal }, first.id)));
         if (redirect) ({ next: first, place } = landing({ redirect }));
       } catch {
+        models.release(first.id, []);
+        if (destroyed) return;
         first = scenes[Object.keys(scenes)[0]];
         place = null;
         window.BL.hud.toast("That place could not be opened · here is the island");
       }
-      if (destroyed) return;
+      if (destroyed) { models.release(first.id, []); return; }
     }
-    const built = performance.now();
-    enter(first, place);
+    if (first.buildSteps) {
+      try {
+        const steps = window.BL.buildTasks.measure(() => models.withScope(first.id, () => first.buildSteps({ ...ctx, place, signal: bootBuildController.signal })));
+        await window.BL.buildTasks.run(steps, first.id, bootBuildController.signal);
+      } catch {
+        models.release(first.id, []);
+        if (destroyed) return;
+        first = scenes[Object.keys(scenes)[0]];
+        place = null;
+        window.BL.hud.toast("That place could not be opened · here is the island");
+      }
+      if (destroyed) { models.release(first.id, []); return; }
+    }
+    window.BL.buildTasks.measure(() => enter(first, place));
     mark("ready");
-    tierFromBoot(performance.now() - built);
+    tierFromBoot(window.BL.buildTasks.cpu - constructionCPU);
     raf = window.requestAnimationFrame(frame);
   };
   window.requestAnimationFrame(() => window.setTimeout(boot, 0));
@@ -733,6 +824,9 @@
   }
   const destroy = () => {
     destroyed = true;
+    bootBuildController.abort();
+    transition?.controller.abort();
+    terrainController?.abort();
     window.cancelAnimationFrame(raf);
     window.clearInterval(housekeepTimer);
     overlayObserver.disconnect();
@@ -758,8 +852,11 @@
     window.removeEventListener("blur", clearRightShift);
     document.removeEventListener("visibilitychange", onVisibility);
     positionDebug.removeEventListener("click", copyPositionDebug);
-    if (active) active.leave();
-    renderer.dispose();
+    try {
+      if (active) active.leave(true);
+      if (scenes.hub.retained) scenes.hub.leave(true);
+    }
+    finally { if (visitController) visitController.abort(); renderer.dispose(); }
   };
   window.addEventListener("pagehide", (e) => {
     if (!e.persisted) destroy();

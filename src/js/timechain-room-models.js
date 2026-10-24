@@ -33,9 +33,14 @@
   };
   const quad = (geo, a, b, c, d, color, emissive, normal) => face(geo, [a, b, c, d], color, emissive, normal);
   const blank = () => ({ verts: [], faces: [], lines: [] });
+  // Preview construction, liveGeometry and cancellation all run from the hub; these meshes belong to the room.
+  const own = (build) => {
+    const read = BL.models.cached(build);
+    return () => BL.models.withScope("timechain", read);
+  };
   const perScale = (build) => {
-    const made = new Map();
-    return (scale) => made.get(scale) || made.set(scale, build(scale)).get(scale);
+    const read = BL.models.variants(build);
+    return (scale) => BL.models.withScope("timechain", read, scale);
   };
   const UP = [0, 1, 0], DOWN = [0, -1, 0];
   // What of a convex polygon of [x, z] corners keeps nx·x + nz·z ≤ d (Sutherland–Hodgman against one half-plane).
@@ -275,18 +280,18 @@
     }
     return noShadow(geo);
   };
-  const leaves = [leaf(-1), leaf(1)], chains = [leafChain(-1), leafChain(1)];
+  const leaves = own(() => [leaf(-1), leaf(1)]), chains = own(() => [leafChain(-1), leafChain(1)]);
   // The Exit button's plate, its amber face and the play mark on it, facing -z and pointing right as seen from the room.
-  const button = (() => {
+  const button = own(() => {
     const geo = merge(box({ w: 0.38, h: 0.38, d: 0.06, color: C.trim }), box({ w: 0.28, h: 0.28, d: 0.02, color: C.amber, emissive: 0.85, offset: { z: -0.035 } }));
     const base = geo.verts.length / 3;
     geo.verts.push(0.06, 0.08, -0.047, 0.06, -0.08, -0.047, -0.08, 0, -0.047);
     geo.faces.push({ i: [base, base + 1, base + 2], color: hexToRgb(C.curtain), emissive: 0 });
     return geo;
-  })();
+  });
   // EXIT in the island's 5x7 letters (jumbotron.js), amber on the doorway's header, about its own middle and facing
   // -z, into the room: one face a run of lit cells in a row.
-  const exitWord = (() => {
+  const exitWord = own(() => {
     const T = BL.jumbotron.text, word = "EXIT", px = 0.036, geo = blank(), IN = [0, 0, -1];
     const cols = word.length * (T.GLYPH_W + T.TRACKING) - T.TRACKING;
     // Seen from the room the word reads toward -x.
@@ -303,7 +308,7 @@
       }
     }
     return noShadow(geo);
-  })();
+  });
   // The meeting table: a dark drum on a pedestal with an amber band, as wide as the room's layout makes it (`k` times
   // the smallest room's) at one height, and a flat ₿ in its top. The top is laid in squares a ₿ pixel across, cut to
   // the drum's rim, the ₿'s own lit, so nothing lies over anything (Canvas 2D sorts face by face).
@@ -329,46 +334,46 @@
   // How far Canvas 2D's depth sort pulls a mark in front of the face it lies on (the door's chain, EXIT).
   const MARK_BIAS = -0.3;
   // A blocky lounge chair, its front toward +z.
-  const chair = merge(
+  const chair = own(() => merge(
     box({ w: 0.86, h: 0.36, d: 0.82, color: C.seat, offset: { y: 0.18 } }),
     box({ w: 0.7, h: 0.1, d: 0.64, color: C.cushion, offset: { y: 0.41, z: 0.04 } }),
     box({ w: 0.86, h: 0.8, d: 0.2, color: C.seat, offset: { y: 0.76, z: -0.31 } }),
     ...[-1, 1].map((side) => box({ w: 0.14, h: 0.26, d: 0.74, color: C.cushion, offset: { x: side * 0.36, y: 0.49 } })),
     box({ w: 0.6, h: 0.03, d: 0.03, color: C.amber, emissive: 0.6, offset: { y: 0.04, z: 0.42 } })
-  );
+  ));
   // The holdings desk with its terminal, front toward +z; the terminal's picture hangs at `screen`.
-  const desk = merge(
+  const desk = own(() => merge(
     box({ w: 2, h: 0.06, d: 0.8, color: C.desk, offset: { y: 0.76 } }),
     ...[-1, 1].map((side) => box({ w: 0.06, h: 0.73, d: 0.72, color: C.leg, offset: { x: side * 0.93, y: 0.365 } })),
     box({ w: 0.12, h: 0.32, d: 0.12, color: C.leg, offset: { y: 0.95, z: -0.2 } }),
     box({ w: 1.24, h: 0.8, d: 0.07, color: C.bezel, offset: { y: 1.48, z: -0.2 } }),
     box({ w: 0.9, h: 0.03, d: 0.26, color: C.leg, offset: { y: 0.8, z: 0.12 } }),
     box({ w: 1.9, h: 0.02, d: 0.02, color: C.amber, emissive: 0.6, offset: { y: 0.735, z: 0.4 } })
-  );
+  ));
   const DESK_SCREEN = { y: 1.48, z: -0.16, w: 1.1, h: 0.68 };
   // Sani's recliner (base, swivelling seat, back) and his laptop, as the old sphere had them, in the room's colours.
-  const reclinerBase = merge(box({ w: 1.35, h: 0.12, d: 1.1, color: C.leg, offset: { y: 0.12 } }), box({ w: 0.22, h: 0.55, d: 0.22, color: C.trim, offset: { y: 0.38 } }));
-  const reclinerSeat = merge(
+  const reclinerBase = own(() => merge(box({ w: 1.35, h: 0.12, d: 1.1, color: C.leg, offset: { y: 0.12 } }), box({ w: 0.22, h: 0.55, d: 0.22, color: C.trim, offset: { y: 0.38 } })));
+  const reclinerSeat = own(() => merge(
     box({ w: 1.24, h: 0.22, d: 0.95, color: C.seat, offset: { y: 0.68 } }),
     box({ w: 1.04, h: 0.14, d: 0.85, color: C.cushion, offset: { y: 0.81 } }),
     box({ w: 1.08, h: 0.15, d: 0.4, color: C.cushion, offset: { y: 0.64, z: 0.52 } }),
     ...[-0.63, 0.63].map((x) => box({ w: 0.18, h: 0.18, d: 1.05, color: C.seat, offset: { x, y: 1.08 } }))
-  );
-  const reclinerBack = merge(
+  ));
+  const reclinerBack = own(() => merge(
     box({ w: 1.25, h: 1.25, d: 0.22, color: C.seat, offset: { y: 0.58 } }),
     box({ w: 1.05, h: 0.9, d: 0.17, color: C.cushion, offset: { y: 0.55, z: 0.15 } }),
     box({ w: 0.72, h: 0.06, d: 0.25, color: C.amber, emissive: 0.6, offset: { y: 1.07, z: 0.16 } })
-  );
-  const laptopBase = (() => {
+  ));
+  const laptopBase = own(() => {
     const parts = [box({ w: 1.04, h: 0.065, d: 0.65, color: "#3a3a40" })];
     for (let row = 0; row < 3; row++) for (let col = 0; col < 9; col++) parts.push(box({ w: 0.075, h: 0.015, d: 0.065, color: C.leg, offset: { x: (col - 4) * 0.1, y: 0.042, z: 0.06 + row * 0.08 } }));
     return merge(...parts);
-  })();
-  const laptopLid = merge(
+  });
+  const laptopLid = own(() => merge(
     box({ w: 1.04, h: 0.47, d: 0.055, color: "#3a3a40", offset: { y: 0.22 } }),
     box({ w: 0.94, h: 0.39, d: 0.015, color: "#0f1a12", emissive: 0.45, offset: { y: 0.23, z: -0.036 } }),
     ...[0, 1, 2, 3].map((i) => box({ w: 0.28 + (i % 3) * 0.13, h: 0.025, d: 0.01, color: i % 2 ? "#3ddc84" : "#f7931a", emissive: 0.85, offset: { x: -0.14, y: 0.34 - i * 0.075, z: -0.05 } }))
-  );
+  ));
 
   // A picture on a quad `w` by `h` about the origin, facing +z, from a decoded image `image` of `width` by `height`.
   const picture = (image, width, height, w, h) => {
@@ -383,31 +388,31 @@
     const L = ROOMS.layout(scale), root = createNode(), s = scale;
     addChild(root, createNode({ geometry: hall(scale) }), createNode({ geometry: glow(scale), sightHidden: true }),
       createNode({ geometry: vestibule(scale) }), createNode({ geometry: vestibuleGlow(scale), sightHidden: true }));
-    const doors = [-1, 1].map((side) => createNode({ geometry: leaves[side < 0 ? 0 : 1], position: { x: side * DOOR.halfW / 2, y: 0, z: L.doorZ + 0.06 } }));
-    doors.forEach((door, i) => addChild(door, createNode({ geometry: chains[i], depthBias: MARK_BIAS })));
+    const doors = [-1, 1].map((side) => createNode({ geometry: leaves()[side < 0 ? 0 : 1], position: { x: side * DOOR.halfW / 2, y: 0, z: L.doorZ + 0.06 } }));
+    doors.forEach((door, i) => addChild(door, createNode({ geometry: chains()[i], depthBias: MARK_BIAS })));
     addChild(root, ...doors);
     const facingIn = (p) => createNode({ position: { x: p.x, y: p.y, z: p.z }, rotation: { x: 0, y: -p.angle, z: 0 } });
     const screens = L.screens.map(facingIn), cards = L.ribbon.map(facingIn);
     addChild(root, ...screens, ...cards);
     const E = L.exitButton;
     // The button and the sign are built facing -z, into the room.
-    const exitButton = createNode({ geometry: button, position: { x: E.x, y: E.y, z: E.z } });
+    const exitButton = createNode({ geometry: button(), position: { x: E.x, y: E.y, z: E.z } });
     // EXIT on the header over the doorway.
-    const exitSign = createNode({ geometry: exitWord, depthBias: MARK_BIAS, position: { x: 0, y: DOOR.height + DOOR.frame + EXIT_HEADER.h / 2, z: L.doorZ - EXIT_HEADER.d + 0.016 } });
+    const exitSign = createNode({ geometry: exitWord(), depthBias: MARK_BIAS, position: { x: 0, y: DOOR.height + DOOR.frame + EXIT_HEADER.h / 2, z: L.doorZ - EXIT_HEADER.d + 0.016 } });
     addChild(root, exitButton, exitSign);
     const tableNode = createNode({ geometry: table(scale), position: { x: L.table.x, y: 0, z: L.table.z } });
-    const chairs = L.chairs.map((c) => createNode({ geometry: chair, position: { x: c.x, y: 0, z: c.z }, rotation: { x: 0, y: c.heading, z: 0 } }));
-    const deskNode = createNode({ geometry: desk, position: { x: L.desk.x, y: 0, z: L.desk.z }, rotation: { x: 0, y: L.desk.heading, z: 0 } });
+    const chairs = L.chairs.map((c) => createNode({ geometry: chair(), position: { x: c.x, y: 0, z: c.z }, rotation: { x: 0, y: c.heading, z: 0 } }));
+    const deskNode = createNode({ geometry: desk(), position: { x: L.desk.x, y: 0, z: L.desk.z }, rotation: { x: 0, y: L.desk.heading, z: 0 } });
     const terminal = createNode({ position: { x: 0, y: DESK_SCREEN.y, z: DESK_SCREEN.z } });
     addChild(deskNode, terminal);
     addChild(root, tableNode, ...chairs, deskNode);
     // Sani's corner, in the room's own frame: the recliner, and the node timechain-beer.js stands his gear in.
     const lounge = createNode();
-    const reclinerNode = createNode({ geometry: reclinerBase, position: { x: L.beer.chair.x, y: 0, z: L.beer.chair.z } });
-    const swivel = createNode({ geometry: reclinerSeat, rotation: { x: 0, y: Math.PI, z: 0 } });
-    const back = createNode({ geometry: reclinerBack, position: { x: 0, y: 0.82, z: -0.44 }, rotation: { x: -0.23, y: 0, z: 0 } });
-    const laptop = createNode({ geometry: laptopBase, position: { x: 0, y: 1, z: 0.58 } });
-    addChild(laptop, createNode({ geometry: laptopLid, position: { x: 0, y: 0.035, z: 0.3 }, rotation: { x: 0.14, y: 0, z: 0 } }));
+    const reclinerNode = createNode({ geometry: reclinerBase(), position: { x: L.beer.chair.x, y: 0, z: L.beer.chair.z } });
+    const swivel = createNode({ geometry: reclinerSeat(), rotation: { x: 0, y: Math.PI, z: 0 } });
+    const back = createNode({ geometry: reclinerBack(), position: { x: 0, y: 0.82, z: -0.44 }, rotation: { x: -0.23, y: 0, z: 0 } });
+    const laptop = createNode({ geometry: laptopBase(), position: { x: 0, y: 1, z: 0.58 } });
+    addChild(laptop, createNode({ geometry: laptopLid(), position: { x: 0, y: 0.035, z: 0.3 }, rotation: { x: 0.14, y: 0, z: 0 } }));
     addChild(swivel, back, laptop);
     addChild(reclinerNode, swivel);
     addChild(lounge, reclinerNode);
@@ -428,6 +433,6 @@
     };
   };
   // Every geometry a room of this size draws, for the scene's live set and for releasing a preview.
-  const geometries = (scale) => [hall(scale), glow(scale), vestibule(scale), vestibuleGlow(scale), ...leaves, ...chains, button, exitWord, table(scale), chair, desk, reclinerBase, reclinerSeat, reclinerBack, laptopBase, laptopLid];
+  const geometries = (scale) => [hall(scale), glow(scale), vestibule(scale), vestibuleGlow(scale), ...leaves(), ...chains(), button(), exitWord(), table(scale), chair(), desk(), reclinerBase(), reclinerSeat(), reclinerBack(), laptopBase(), laptopLid()];
   BL.timechainRoomModels = { build, picture, geometries, DESK_SCREEN, COLORS: C };
 })();

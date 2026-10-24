@@ -45,13 +45,25 @@
       knob.style.transform = "";
       el.classList.remove("live");
     };
+    let listening = true;
     el.addEventListener("pointerdown", onDown);
     el.addEventListener("pointermove", onMove);
     el.addEventListener("pointerup", onUp);
     el.addEventListener("pointercancel", onUp);
     el.addEventListener("lostpointercapture", onUp);
     s.reset = () => onUp({ pointerId: s.id });
+    s.resume = () => {
+      if (listening) return;
+      listening = true;
+      el.addEventListener("pointerdown", onDown);
+      el.addEventListener("pointermove", onMove);
+      el.addEventListener("pointerup", onUp);
+      el.addEventListener("pointercancel", onUp);
+      el.addEventListener("lostpointercapture", onUp);
+    };
     s.dispose = () => {
+      if (!listening) return;
+      listening = false;
       el.removeEventListener("pointerdown", onDown);
       el.removeEventListener("pointermove", onMove);
       el.removeEventListener("pointerup", onUp);
@@ -210,7 +222,10 @@
       shiftTap = 0;
       return axes;
     };
+    let listening = true;
     const dispose = () => {
+      if (!listening) return;
+      listening = false;
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);
@@ -243,7 +258,34 @@
       boostClick = false;
     };
     const reset = () => { onBlur(); if (moveStick) moveStick.reset(); if (lookStick) lookStick.reset(); };
-    return { read, axes, clearPointer, reset, consumeTab, dispose, get rightShift() { return !!held.peek; } };
+    const resume = () => {
+      if (listening) return;
+      listening = true;
+      window.addEventListener("keydown", onKeyDown);
+      window.addEventListener("keyup", onKeyUp);
+      window.addEventListener("blur", onBlur);
+      if (tabNavigation) {
+        window.addEventListener("keydown", captureKeyDown, true);
+        window.addEventListener("keyup", captureKeyUp, true);
+        window.addEventListener("blur", blurKeys);
+      }
+      if (boost) {
+        boost.addEventListener("pointerdown", onBoostDown);
+        boost.addEventListener("pointerup", onBoostUp);
+        boost.addEventListener("pointercancel", onBoostUp);
+        boost.addEventListener("pointerleave", onBoostUp);
+        if (pressActions) boost.addEventListener("click", onBoostClick, true);
+      }
+      if (chord) {
+        chord.addEventListener("pointerdown", onChord);
+        chord.addEventListener("pointermove", onChord);
+        chord.addEventListener("pointerup", onChord);
+        chord.addEventListener("pointercancel", onChord);
+      }
+      if (moveStick) moveStick.resume();
+      if (lookStick) lookStick.resume();
+    };
+    return { read, axes, clearPointer, reset, consumeTab, resume, dispose, get rightShift() { return !!held.peek; } };
   };
   BL.controls = { create, uiKey };
 })();

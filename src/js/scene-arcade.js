@@ -1637,13 +1637,14 @@
   };
 
   const enter = (ctx) => {
+    prefetchAt = 0;
     ({ renderer, game, world, go, agentPlay } = ctx);
     canvasEl = ctx.canvas;
-    window.addEventListener("keydown", armsKeys, true);
-    canvasEl.addEventListener("pointerdown", rightClick, true);
+    window.addEventListener("keydown", armsKeys, { capture: true, signal: ctx.signal });
+    canvasEl.addEventListener("pointerdown", rightClick, { capture: true, signal: ctx.signal });
     camera = createCamera({ fov: 55, near: 0.2, far: 60 });
     root = createNode();
-    hud = hudMod.create({ roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
+    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
     if (window.matchMedia("(max-width: 720px), (max-height: 500px)").matches) hud.el.sheet.dataset.open = "false";
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
@@ -1676,6 +1677,7 @@
     };
     Object.assign(hooks, {
       onHover: (hit, p) => {
+        if (hit?.owner.kind === "cabinet" && GAMES[hit.owner.game]) BL.deferred.prefetchScene(GAMES[hit.owner.game].id);
         if (hit) hud.tooltip.show(tipFor(hit), p.x, p.y);
         else hud.tooltip.hide();
       },
@@ -1705,7 +1707,7 @@
     const panel = document.getElementById("prize-panel");
     prizeUi = { panel, tickets: document.getElementById("prize-tickets"), items: [...panel.querySelectorAll(".prize")] };
     panel.hidden = true;
-    panel.addEventListener("click", onPrizeClick);
+    panel.addEventListener("click", onPrizeClick, { signal: ctx.signal });
     hud.dismissOutside(panel, closePrizes);
     addChild(root, ...BL.dressing.nodes(dressing(), { glow: 1 }));
     build();
@@ -1844,7 +1846,16 @@
 
   // Per frame, allocation-free: the walker and camera, the screens' loops, the carnival, the staff, the prompt at a
   // station, the lamps nearest the view, and the way out.
+  let prefetchAt = 0;
   const update = (dt, elapsed) => {
+    if (elapsed >= prefetchAt) {
+      prefetchAt = elapsed + 0.25;
+      const p = pilot.player ? pilot.player.root.position : camera.position;
+      for (let i = 0; i < live.length; i++) {
+        const c = live[i], dx = p.x - c.x, dy = p.y - c.y, dz = p.z - c.z;
+        if (GAMES[c.game] && dx * dx + dy * dy + dz * dz <= 225) BL.deferred.prefetchScene(GAMES[c.game].id);
+      }
+    }
     pilot.readInput(dt);
     if (people) people.update(dt, elapsed);
     pilot.update(dt);
@@ -1980,15 +1991,15 @@
     return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...(remotes ? remotes.stats() : {}) };
   };
 
-  const arcadeScene = {
+  const arcadeScene = BL.deferred.scene("arcade", {
     // Voice zone: the Arcade group, which its mouth on the island shares (`arcade`).
     voiceZone: "arcade.hall",
-    id: "arcade", enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry,
+    id: "arcade", buildSteps: () => AM.buildSteps(), enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null, agent: null, agentView: null, agentControls: null, agentHandoff: null,
     get inMotion() {
       return false;
     }
-  };
+  });
   arcadeScene.prepare = () => { const loading = BL.deferred.load("arcade"); return loading ? loading.then(() => null) : null; };
   BL.scenes = BL.scenes || {};
   BL.scenes.arcade = arcadeScene;

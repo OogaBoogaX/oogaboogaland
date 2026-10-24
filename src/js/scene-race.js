@@ -75,12 +75,12 @@
   // roster after this file loads.
   const cup = { active: false, round: 0, done: false, points: null };
   const nearestTorches = new Float32Array(LIGHT_CAPACITY * 2);
-  const raceScene = {
+  const raceScene = BL.deferred.scene("race", {
     id: "race", renderOpts: null, root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
     get inMotion() {
       return phase === "countdown" || phase === "racing" || fx.inMotion;
     }
-  };
+  });
 
   const buildTrack = (id) => {
     if (track) {
@@ -763,7 +763,7 @@
     hudMod.leaveTo("race", home);
     camera = createCamera({ fov: 50, near: 0.3, far: 280 });
     root = createNode();
-    hud = hudMod.create({ roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
+    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
     fx = fxMod.create({ root, renderer, camera, hud, overlay: ctx.overlay, tickerAt: TICKER_AT });
@@ -805,8 +805,8 @@
     screechAt = crewScreechAt = -9;
     quieted = false;
     rhud.el.mute.setAttribute("aria-pressed", String(audio.muted));
-    window.addEventListener("pointerdown", onGesture);
-    window.addEventListener("keydown", onGesture);
+    window.addEventListener("pointerdown", onGesture, { signal: ctx.signal });
+    window.addEventListener("keydown", onGesture, { signal: ctx.signal });
     hud.onAssign((entryId, name) => {
       if (game.assign(entryId, name)) renderLocker();
     });
@@ -876,7 +876,7 @@
       const pick = ownRacer() ? "a ride and a track" : "an Ooga, a ride and a track";
       hud.hint(COARSE ? `Tap ${pick}, then Race!` : `Pick ${pick}, then Race! (Enter)`);
     }, 1200);
-    window.addEventListener("blur", onBlur);
+    window.addEventListener("blur", onBlur, { signal: ctx.signal });
     unsubscribeAccount = BL.net.subscribe(accountChanged);
     Object.assign(raceScene, {
       root, camera, input,

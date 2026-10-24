@@ -123,12 +123,12 @@
   const planeState = { t: 0, speed: 0, yaw: 0, pitch: 0, roll: 0, angle: 0, alt: 0, vx: 0, vy: 0, vz: 0 };
   let jumpAngle = 0;
   const jumpT = ROLL_T + CLIMB_T;
-  const dropScene = {
+  const dropScene = BL.deferred.scene("drop", {
     id: "drop", renderOpts: RENDER_OPTS, root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
     get inMotion() {
       return phase === "climb" || phase === "air" || phase === "down" || phase === "lost" || fx.inMotion;
     }
-  };
+  });
 
   // Position along the climb at time t, written into out.
   const pathAt = (t, out) => {
@@ -841,7 +841,7 @@
     root = createNode();
     clock = daylight.createClock({ hour: hourParam, daylen: daylenParam, day: dayParam, time: timeParam, now: new Date() });
     island = terrain.island({ seed: SEED });
-    hud = hudMod.create({ roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
+    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
     fx = fxMod.create({ root, renderer, camera, hud, overlay: ctx.overlay, tickerAt: TICKER_AT });
@@ -935,8 +935,8 @@
     // Cleared per visit: a flare held at leave would suppress the next cue.
     flaringWas = quieted = false;
     dhud.el.mute.setAttribute("aria-pressed", String(audio.muted));
-    window.addEventListener("pointerdown", onGesture);
-    window.addEventListener("keydown", onGesture);
+    window.addEventListener("pointerdown", onGesture, { signal: ctx.signal });
+    window.addEventListener("keydown", onGesture, { signal: ctx.signal });
     hud.onAssign((entryId, name) => {
       if (game.assign(entryId, name)) renderLocker();
     });
@@ -1115,6 +1115,12 @@
   };
   Object.assign(dropScene, { enter, update, overlay, onDonation, onKey, onLootCleared, leave, stats, liveGeometry });
   BL.scenes = BL.scenes || {};
-  dropScene.prepare = () => { const loading = BL.deferred.load("drop"); return loading ? loading.then(() => null) : null; };
+  dropScene.prepare = async (_place, ctx) => {
+    const loading = BL.deferred.load("drop");
+    if (loading) await loading;
+    // The bare island is the cold visit's largest build; enter then adopts the completed, scene-owned cache entry.
+    await BL.buildTasks.run(terrain.islandSteps({ seed: SEED }), "drop", ctx.signal);
+    return null;
+  };
   BL.scenes.drop = dropScene;
 })();

@@ -21,6 +21,7 @@
     const hoverPoint = { x: -1, y: -1 };
     const C = new Float32Array(3);
     const aimView = BL.math.mat4.create(), aimInverse = BL.math.mat4.create(), aimUp = { x: 0, y: 1, z: 0 };
+    const aimCursors = new WeakMap();
     let hoverX = -1, hoverY = -1, hoverDirty = false, hovered = null;
     let hoverIgnored = null;
     let gesture = null;
@@ -115,8 +116,13 @@
       const dx = m[0] * ray.dx + m[4] * ray.dy + m[8] * ray.dz;
       const dy = m[1] * ray.dx + m[5] * ray.dy + m[9] * ray.dz;
       const dz = m[2] * ray.dx + m[6] * ray.dy + m[10] * ray.dz;
-      let nearest = Infinity;
-      for (const face of geometry.faces) {
+      let nearest = Infinity, cursor = null;
+      if (geometry.compactGeometry) {
+        cursor = aimCursors.get(geometry);
+        if (!cursor) { cursor = BL.compactGeometry.createCursor(geometry); aimCursors.set(geometry, cursor); }
+      }
+      for (let index = 0; index < geometry.faces.length; index++) {
+        const face = cursor ? BL.compactGeometry.readFace(geometry, index, cursor) : geometry.faces[index];
         const indices = face.i, a = indices[0] * 3;
         for (let i = 1; i + 1 < indices.length; i++) {
           const b = indices[i] * 3, c = indices[i + 1] * 3;
@@ -336,6 +342,7 @@
       call("onZoom", Math.exp(Math.max(-1200, Math.min(1200, delta)) * 2.5e-3), zoomGesture, p.x, p.y);
     };
     const onContextMenu = (e) => e.preventDefault();
+    let suspended = false;
     canvas.addEventListener("pointerdown", onPointerDown);
     canvas.addEventListener("pointermove", onPointerMove);
     canvas.addEventListener("pointerup", onPointerUp);
@@ -380,7 +387,9 @@
       hovered = null;
       canvas.style.cursor = "grab";
     };
-    const dispose = () => {
+    const suspend = () => {
+      if (suspended) return;
+      suspended = true;
       reset();
       canvas.removeEventListener("pointerdown", onPointerDown);
       canvas.removeEventListener("pointermove", onPointerMove);
@@ -389,11 +398,22 @@
       canvas.removeEventListener("pointerleave", onPointerLeave);
       canvas.removeEventListener("wheel", onWheel);
       canvas.removeEventListener("contextmenu", onContextMenu);
-      targets.length = 0;
     };
+    const resume = () => {
+      if (!suspended) return;
+      suspended = false;
+      canvas.addEventListener("pointerdown", onPointerDown);
+      canvas.addEventListener("pointermove", onPointerMove);
+      canvas.addEventListener("pointerup", onPointerUp);
+      canvas.addEventListener("pointercancel", onPointerCancel);
+      canvas.addEventListener("pointerleave", onPointerLeave);
+      canvas.addEventListener("wheel", onWheel, { passive: false });
+      canvas.addEventListener("contextmenu", onContextMenu);
+    };
+    const dispose = () => { suspend(); targets.length = 0; };
     return {
-      add, remove, pick, aimPoint, weaponTargets, groundPoint, update, reset, dispose, get targetCount() {
-        return targets.length;
+      add, remove, pick, aimPoint, weaponTargets, groundPoint, update, reset, suspend, resume, dispose, get targetCount() {
+        return suspended ? 0 : targets.length;
       },
       // A drag is still held, even if it has paused.
       get orbiting() {

@@ -139,12 +139,12 @@
   const cam = { x: 0, y: 0, z: 0, tx: 0, ty: 0, tz: 0, ox: 0, oy: 0, oz: 0, ax: 0, ay: 0, az: 0, warm: false, offset: 0, tilt: 0, dragAt: -9, buildYaw: -0.64, buildPitch: 0.18, buildZoom: 1, shake: 0 };
   const ctrl = { throttle: 0, lean: 0, pitch: 0, roll: 0, yaw: 0 };
   let inputLocked = false;
-  const orbitScene = {
+  const orbitScene = BL.deferred.scene("orbit", {
     id: "orbit", renderOpts: RENDER_OPTS, root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
     get inMotion() {
       return (phase !== "build" && phase !== "results") || fx.inMotion || smoke.count > 0;
     }
-  };
+  });
 
   // Islands, then the site's pad and deck, else the sea (the flight reads the sea from its own height).
   const groundAt = (x, z) => {
@@ -1890,7 +1890,7 @@
     clock = daylight.createClock({ hour: hourParam, daylen: daylenParam, day: dayParam, time: timeParam, now: new Date() });
     island = terrain.island({ seed: SEED });
     spot = rocketModels.siteSpot(island, {});
-    hud = hudMod.create({ roster: contributors.roster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
+    hud = hudMod.create({ signal: ctx.signal, roster: contributors.roster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
     fx = fxMod.create({ root, renderer, overlay: ctx.overlay, tickerAt: TICKER_AT });
@@ -1956,8 +1956,8 @@
     audio = rocketAudio.create();
     quieted = false;
     rhud.el.mute.setAttribute("aria-pressed", String(audio.muted));
-    window.addEventListener("pointerdown", onGesture);
-    window.addEventListener("keydown", onGesture);
+    window.addEventListener("pointerdown", onGesture, { signal: ctx.signal });
+    window.addEventListener("keydown", onGesture, { signal: ctx.signal });
     hud.onAssign((entryId, name) => {
       if (game.assign(entryId, name)) renderLocker();
     });

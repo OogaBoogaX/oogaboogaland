@@ -12,24 +12,38 @@
   const BL = window.BL = window.BL || {};
   const TIMEOUT_MS = 20000;
   // How each group shows it has arrived: the module that runs last in it.
-  const PRESENT = { timechain: () => !!BL.timechainInterior, dsb: () => !!BL.dsbCollision, arcade: () => !!BL.carnivalAudio, poker: () => !!BL.pokerHud, drop: () => !!BL.dropAudio,
+  const PRESENT = { "terrain-cache": () => !!BL.terrainCache, kiosk: () => typeof BL.factoryKiosk?.create === "function", "lab-wallpaper": () => !!BL.labWallpaper?.src, canvas: () => !!BL.canvasRenderer, timechain: () => !!BL.timechainInterior, dsb: () => !!BL.dsbCollision, arcade: () => !!BL.carnivalAudio, poker: () => !!BL.pokerHud, drop: () => !!BL.dropAudio,
     // HALLOWEEN: the hub's ghost hunt, and each track of its playlist.
     halloween: () => !!BL.halloween, ...Object.fromEntries(["boss", "colt", "martial", "nightmare", "synthed"].map((k) => [`halloween-track-${k}`, () => !!(BL.ghostMusic && BL.ghostMusic[k])])) };
-  const loading = new Map();
+  // Only scene implementation groups depend on a base group; no base group depends on a scene shell.
+  const SCENE_BASE = { "factory-scene": "kiosk", "arcade-scene": "arcade", "drop-scene": "drop" };
+  const loading = new Map(), attempts = new Map();
   const load = (group) => {
     if (PRESENT[group]()) return null;
     if (loading.has(group)) return loading.get(group);
-    const src = BL.deferredScripts && BL.deferredScripts[group];
-    if (!src) return Promise.reject(new Error(`No ${group} code on this page`));
-    const promise = new Promise((resolve, reject) => {
+    const file = BL.deferredScripts && BL.deferredScripts[group];
+    if (!file) return Promise.reject(new Error(`No ${group} code on this page`));
+    // A retry asks under its own address, so a failed response the page still holds (a refused preload) is never reused.
+    const tries = attempts.get(group) || 0, src = tries ? `${file}${file.includes("?") ? "&" : "?"}r=${tries}` : file;
+    const base = SCENE_BASE[group], prerequisite = base && typeof PRESENT[base] === "function" ? load(base) : null;
+    // The scene's chunk downloads beside its base's and still runs after it.
+    let preload = null;
+    if (prerequisite) {
+      preload = document.createElement("link");
+      preload.rel = "preload"; preload.as = "script"; preload.href = src;
+      document.head.appendChild(preload);
+    }
+    const start = () => new Promise((resolve, reject) => {
       const script = document.createElement("script");
       const finish = (error) => {
         clearTimeout(timer);
+        preload?.remove();
         script.onload = script.onerror = null;
         if (!error && !PRESENT[group]()) error = new Error(`The ${group} code did not start`);
         if (error) {
           script.remove();
           loading.delete(group);
+          attempts.set(group, tries + 1);
           reject(error);
         } else resolve(null);
       };
@@ -39,8 +53,45 @@
       script.src = src;
       document.head.appendChild(script);
     });
+    const promise = prerequisite ? prerequisite.then(start, (error) => { preload.remove(); loading.delete(group); attempts.set(group, tries + 1); throw error; }) : start();
     loading.set(group, promise);
     return promise;
   };
-  BL.deferred = { load, present: (group) => PRESENT[group](), get pending() { return loading.size; } };
+  const prefetching = new Set(), retryAt = new Map(), sceneGroups = Object.create(null);
+  // Hover/proximity can recur every frame. Attach just one completion handler, and back off optional failures;
+  // a deliberate prepare still retries immediately through load().
+  const prefetch = (group) => {
+    if (typeof PRESENT[group] !== "function" || document.hidden || PRESENT[group]() || prefetching.has(group) || Date.now() < (retryAt.get(group) || 0)) return;
+    prefetching.add(group);
+    const loading = load(group);
+    if (loading) loading.then(() => { prefetching.delete(group); retryAt.delete(group); }, () => {
+      prefetching.delete(group); retryAt.set(group, Date.now() + 60000);
+    });
+    else prefetching.delete(group);
+  };
+  const prefetchScene = (id) => {
+    const groups = sceneGroups[id];
+    if (groups) for (let i = 0; i < groups.length; i++) prefetch(groups[i]);
+    else prefetch(id);
+  };
+  // A hosted scene keeps its shell's identity while its implementation arrives: the director may already hold it.
+  // Portable builds evaluate the same modules inline and fill these shells before boot, so they still fetch nothing.
+  const scene = (id, definition = null) => {
+    const scenes = BL.scenes = BL.scenes || {}, target = scenes[id] || (scenes[id] = { id });
+    // A chunk that arrives after its load timed out and was retried must not redefine a scene already defined.
+    if (definition) { if (typeof target.enter !== "function") Object.defineProperties(target, Object.getOwnPropertyDescriptors(definition)); }
+    else {
+      const group = `${id}-scene`;
+      sceneGroups[id] = [group, id];
+      PRESENT[group] = () => typeof target.enter === "function";
+      const prepare = (place, ctx, scope) => {
+        const loading = load(group);
+        const prepared = () => target.prepare !== prepare ? BL.buildTasks.measure(() => BL.models.withScope(scope || id, () => target.prepare(place, ctx, scope))) : null;
+        return loading ? loading.then(prepared) : prepared();
+      };
+      target.prepare = prepare;
+    }
+    return target;
+  };
+  BL.deferred = { load, scene, prefetch, prefetchScene, isShell: (id) => !!sceneGroups[id], present: (group) => PRESENT[group](), get pending() { return loading.size; } };
 })();

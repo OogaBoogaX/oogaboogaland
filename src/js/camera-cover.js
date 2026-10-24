@@ -90,6 +90,7 @@
     let wallContexts = new Array(32), wallVersions = new Float64Array(32), wallCount = 0, wallFaces = 0, wallCached = false, wallContrast = 0, wallRockOnly = false;
     let surfacePoints = new Float32Array(0), surfaceCorners = new Uint8Array(0), surfaceNext = new Int32Array(0);
     const view = mat4.create(), triangle = new Float64Array(9), clipped = new Float64Array(12);
+    const faceCursors = new WeakMap();
     let actorDepth = new Float32Array(0), clipActor = false, actorMinX = 0, actorMinY = 0, actorMaxX = -1, actorMaxY = -1;
     let actorColumns = new Int32Array(0);
     // Search the small silhouette band nearest-first. Stable distance order
@@ -678,7 +679,13 @@
     const drawNode = (node) => {
       if (!node.visible || node.cameraHidden) return;
       const geometry = node.geometry, world = node.world;
-      if (geometry) for (const face of geometry.faces) {
+      let cursor = null;
+      if (geometry?.compactGeometry) {
+        cursor = faceCursors.get(geometry);
+        if (!cursor) { cursor = BL.compactGeometry.createCursor(geometry); faceCursors.set(geometry, cursor); }
+      }
+      if (geometry) for (let index = 0; index < geometry.faces.length; index++) {
+        const face = cursor ? BL.compactGeometry.readFace(geometry, index, cursor) : geometry.faces[index];
         // Triangles clip to at most four corners, so the scratch space stays fixed.
         for (let fan = 1; fan + 1 < face.i.length; fan++) {
           for (let n = 0; n < 3; n++) {
