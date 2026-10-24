@@ -37,6 +37,13 @@ test("regression: a production deploy keeps the donation binding and routes dona
   assert.ok(config.assets.run_worker_first.includes("/donations/*"));
 });
 
+test("every deploy that reaches bananapayserver runs this Worker first for purchases too", () => {
+  for (const file of ["wrangler.production.jsonc", "wrangler.staging.jsonc", "wrangler.local-donations.jsonc"]) {
+    const config = JSON.parse(readFileSync(new URL(`../../${file}`, import.meta.url), "utf8").replace(/^\s*\/\/.*$/gm, ""));
+    assert.ok(config.assets.run_worker_first.includes("/purchases/*"), file);
+  }
+});
+
 test("an invoice goes on with the page's body and type alone, the signed-in donor and the visitor's address", async () => {
   const DONATIONS = binding();
   const [request, url] = call("/donations/invoice", { headers: { ...json, cookie: "__Host-obl_session=tok", "x-client": "1.1.1.1" }, body: "{\"sats\":1000,\"anon\":false}" });
@@ -63,7 +70,7 @@ test("a visitor who isn't signed in gives as nobody, and a note or an on-chain s
 
 test("a purchase and the buyer's own purchases go on like an invoice, with the body, the signed-in buyer and the visitor's address", async () => {
   const DONATIONS = binding(), env = { SITE_ORIGIN: SITE, DONATIONS, DB: db };
-  const bodies = { "/donations/purchase": "{\"category\":\"firework\",\"item\":\"mega\"}", "/donations/purchases": "{\"category\":\"firework\"}" };
+  const bodies = { "/purchases/buy": "{\"category\":\"firework\",\"item\":\"mega\"}", "/purchases/mine": "{\"category\":\"firework\"}" };
   for (const cookie of ["__Host-obl_session=tok", ""]) {
     for (const [path, body] of Object.entries(bodies)) {
       const [request, url] = call(path, { headers: { ...json, cookie }, body });
@@ -72,10 +79,19 @@ test("a purchase and the buyer's own purchases go on like an invoice, with the b
   }
   const [buy, totals, anonBuy, anonTotals] = DONATIONS.calls;
   assert.deepEqual([buy.name, totals.name], ["purchase", "purchases"]);
-  assert.equal(await buy.args[0].text(), bodies["/donations/purchase"]);
-  assert.equal(await totals.args[0].text(), bodies["/donations/purchases"]);
+  assert.equal(await buy.args[0].text(), bodies["/purchases/buy"]);
+  assert.equal(await totals.args[0].text(), bodies["/purchases/mine"]);
   for (const c of [buy, totals]) assert.deepEqual(c.args.slice(1), [{ id: 4242, login: "ooga-dev" }, "203.0.113.7"]);
   for (const c of [anonBuy, anonTotals]) assert.deepEqual(c.args.slice(1), [null, "203.0.113.7"]);
+});
+
+test("purchases have their own prefix: the old paths under /donations/ answer 404 and reach nothing", async () => {
+  const DONATIONS = binding(), env = { SITE_ORIGIN: SITE, DONATIONS, DB: db };
+  for (const path of ["/donations/purchase", "/donations/purchases"]) {
+    const [request, url] = call(path, { headers: json, body: "{}" });
+    assert.equal((await handleDonations(request, env, url)).status, 404);
+  }
+  assert.equal(DONATIONS.calls.length, 0);
 });
 
 test("an old nonowner session cannot attach a signed-in donor identity to an invoice", async () => {

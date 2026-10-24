@@ -21,7 +21,7 @@ without paying and `__ooga.fireworks.openStand()` opens the stand. With no API b
 ## Buying one
 
 Space at the stand, or a tap on it, opens its screen in the donation popup's dialog: the four kinds at the API's
-prices (`status.catalogue.firework`). Choosing one asks for its Lightning invoice at once (`POST /donations/purchase`,
+prices (`status.catalogue.firework`). Choosing one asks for its Lightning invoice at once (`POST /purchases/buy`,
 the page sending only `{ category: "firework", item }`); the invoice offers the browser's own wallet in one click where it has one (WebLN, only
 ever inside the visitor's click), OPEN WALLET, the QR and COPY. While only signed-in visitors may buy, a signed-out
 visitor sees SIGN IN TO BUY; PREVIEW is free and only that visitor sees it.

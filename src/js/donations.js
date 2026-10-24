@@ -6,7 +6,7 @@
 // tips now and then, as it always has, for demos and for the suite. Purchases (fireworks first) ride the same socket
 // and are never donations (see "purchases" below).
 //
-// The page only ever calls its own address: its Worker passes /donations/* on to bananapayserver over a service binding
+// The page only ever calls its own address: its Worker passes /donations/* and /purchases/* on to bananapayserver over a service binding
 // and names the donor from its own GitHub sign-in, while the page supplies the editable display handle. Real mode starts once that Worker says
 // it has the binding (`useOrigin`, which the director calls when the account's look at /api/me reports `donations`), so
 // staging and production each find their own with nothing stamped into the build. The socket's status says which
@@ -255,7 +255,7 @@
     if (!CATEGORY.test(category) || !CATEGORY.test(item)) return { error: "invalid" };
     const body = { category, item };
     if (state.catalogue?.[category]?.buyers === "everyone") { body.nth = Math.min(999, boughtHere + 1); body.before = bucket(boughtBefore); }
-    const r = await call("/donations/purchase", body);
+    const r = await call("/purchases/buy", body);
     if (r.error) return r;
     const inv = r.invoice;
     if (typeof r.request !== "string" || !inv || typeof inv.id !== "string" || !inv.id || typeof inv.bolt11 !== "string" || !inv.bolt11 || !isNumber(inv.expires)) return { error: "invalid" };
@@ -266,7 +266,7 @@
   // What the signed-in visitor has bought in `category` (or every category without one): `{ items: { firework: { mega:
   // { quantity, sats } … } } }`, or `{ error }`.
   const purchaseTotals = async (category) => {
-    const r = await call("/donations/purchases", category ? { category } : {});
+    const r = await call("/purchases/mine", category ? { category } : {});
     if (r.error) return r;
     if (!r.items || typeof r.items !== "object" || Array.isArray(r.items)) return { error: "invalid" };
     const items = {};

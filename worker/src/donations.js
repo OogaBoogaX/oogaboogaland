@@ -1,4 +1,4 @@
-// /donations/*: the page's donation calls, passed on over the DONATIONS service binding to bananapayserver's PageApi
+// /donations/* and /purchases/*: the page's donation and purchase calls, passed on over the DONATIONS service binding to bananapayserver's PageApi
 // entrypoint, as its docs/protocol.md ("How OBL's Worker passes them on") asks. Who is giving comes from this Worker's
 // GitHub sign-in, independently of the page's editable display handle; only the body and type go on, never its request, whose
 // cookies carry the session. The visitor's address goes beside each call for bananapayserver's rate limits. Without the
@@ -7,7 +7,7 @@
 
 import { clientIp, fromSite, getSessionFromRequest, json } from "./http.js";
 
-const CALLS = { "/donations/invoice": "invoice", "/donations/note": "note", "/donations/onchain": "onchain", "/donations/purchase": "purchase", "/donations/purchases": "purchases" };
+const CALLS = { "/donations/invoice": "invoice", "/donations/note": "note", "/donations/onchain": "onchain", "/purchases/buy": "purchase", "/purchases/mine": "purchases" };
 // The calls that name who is giving or buying.
 const SIGNED = new Set(["invoice", "purchase", "purchases"]);
 const SOCKET_HEADERS = ["upgrade", "connection", "sec-websocket-key", "sec-websocket-version"];
