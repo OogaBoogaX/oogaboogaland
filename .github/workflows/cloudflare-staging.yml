@@ -27,6 +27,10 @@ jobs:
           OOGATRON_STATS_URL: https://oogatron.wickedsmartbitcoin.workers.dev/v2/stats
       - name: Build and stage site
         run: npm run build:site
+      # The Worker's own locked dependencies (the Anthropic SDK), which its checks and bundle import; wrangler-action
+      # brings its own wrangler.
+      - name: Install Worker dependencies
+        run: npm ci --prefix worker --omit=dev
       - name: Worker checks
         run: node --test "worker/test/*.test.mjs"
       - name: Apply D1 migrations
