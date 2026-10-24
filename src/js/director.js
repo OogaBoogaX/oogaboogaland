@@ -265,6 +265,8 @@
     catch (error) { visitController.abort(); throw error; }
     activeMeshRigs = next.renderOpts?.meshRigs === true;
     active = next;
+    // Rasterize hidden render alternatives before the curtain lifts or the visitor can zoom out.
+    renderer.prepareScene(liveGeometry());
     showMic();
     sceneTime = retainedTime;
     router.arrive(next.id, place, ctx.from === null);

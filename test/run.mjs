@@ -11797,6 +11797,15 @@ const variantCacheChecks = BL => {
   M.release("foliage-cache", []); M.assertReleased("foliage-cache");
   const nextFoliage = foliage();
   record("foliage ownership: hidden render alternatives follow their source cache, preserve collision and geometry bytes, and rebuild after release", coherent && nextFoliage !== source && nextFoliage.foliageLods !== lods);
+  const rendererSource = readFileSync(join(root, "src/js/gl-renderer.js"), "utf8"), start = rendererSource.indexOf("    const prepareScene ="), end = rendererSource.indexOf("    // One owned texture per canvas surface", start);
+  if (start < 0 || end < 0) throw new Error("Scene resource preparation not found");
+  let paints = 0;
+  const prepareScene = new Function("BL", `${rendererSource.slice(start, end)} return prepareScene;`)({ models: { paintFoliageAtlas: surface => { paints++; return M.paintFoliageAtlas(surface); } } });
+  const alternatives = M.addLods(new Set([nextFoliage])), cold = !nextFoliage.foliageLods.far.imageSurface.canvas;
+  prepareScene(alternatives);
+  const warm = nextFoliage.foliageLods.far.imageSurface.canvas, once = paints === 1;
+  prepareScene(alternatives);
+  record("foliage preparation: all live far alternatives rasterize before first use, repeat preparation reuses the atlas and geometry-only construction stays DOM-free", cold && !!warm && once && paints === 1 && nextFoliage.foliageLods.far.imageSurface.canvas === warm);
   M.release("foliage-cache", []); M.assertReleased("foliage-cache"); M.setScope(null);
 };
 
