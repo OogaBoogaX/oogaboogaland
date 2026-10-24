@@ -148,7 +148,7 @@
       bay: new Int8Array(SAT_CAP).fill(-1), dir: new Int8Array(SAT_CAP), next: new Int8Array(SAT_CAP), aim: new Int8Array(SAT_CAP), flags: new Uint8Array(SAT_CAP),
       t: new Float32Array(SAT_CAP), speed: new Float32Array(SAT_CAP), spin: new Float32Array(SAT_CAP)
     };
-    let glow = node.feed.reading.node === "ready" ? 1 : 0, surge = 0, heat = 0, flare = 0, time = 0;
+    let glow = node.feed.reading.node === "ready" ? 1 : 0, surge = 0, heat = 0, flare = 0, time = 0, paused = false;
 
     const launch = (bayIndex, dir, delay, next, flags, aim) => {
       for (let i = 0; i < SAT_CAP; i++) {
@@ -179,8 +179,10 @@
         if (big) surge = flags & HUGE ? 1.5 : 1;
       }
     };
-    // Placement is the node's: its listener has already moved it when this one hears the event.
+    // Placement is the node's: its listener has already moved it when this one hears the event. A resting window
+    // drops visual bursts; the feed keeps the latest state without queuing a show for the visitor's return.
     const onEvent = (ev) => {
+      if (paused) return;
       const p = ev.payload || NONE, place = node.at;
       switch (ev.type) {
         case "channel.opening": case "channel.closing": heat = HEAT; break;
@@ -193,7 +195,7 @@
     };
     const unsubscribe = node.feed.subscribe(onEvent);
 
-    // The show runs whether or not the window shows it, a frame at a time, as the hall runs it.
+    // The show advances only while nearby and shown, keeping its existing motion when it resumes.
     const step = (dt) => {
       time += dt;
       const state = node.feed.reading.node, want = state === "ready" ? 1 : state === "starting" ? 0.45 + Math.sin(time * 23) * 0.25 : 0;
@@ -232,8 +234,7 @@
     // Called once the camera is final for the frame. The projection centre is the eye, set back along the view by the
     // perspective blend's offset when there is one. The window hides with the eye behind or at the shield, past FAR,
     // looking straight down, or with the bird's-eye cutaway or the underground slice showing.
-    const update = (dt, camera, opts) => {
-      step(dt);
+    const update = (dt, camera, opts, active = true) => {
       const P = camera.position, mix = camera.orthoHeight > 0 ? Math.max(0, Math.min(1, camera.orthoMix || 0)) : 0;
       let x = P.x, y = P.y, z = P.z;
       if (mix > 0 && mix <= 0.99) {
@@ -246,7 +247,9 @@
         : mix <= 0.99 && ez - SHIELD_Z > NEAR && Math.hypot(ex, ey - MIDDLE, ez - SHIELD_Z) < FAR)
         && (roof ? opts.cutawayMaxY >= roof.y - DEPTH : opts.cutawayFade < 1 && opts.cutawayMaxY >= 1e5);
       root.visible = shown;
+      paused = !active || !shown;
       if (!shown) return;
+      if (!paused) step(dt);
       if (roof && mix > 0.99) {
         const T = camera.target, k = DEPTH / (FM.HALL.h + 5);
         mat4.transformPoint(TARGET, TO_MOUTH, T.x, T.y, T.z);

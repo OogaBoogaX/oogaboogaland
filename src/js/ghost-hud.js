@@ -18,14 +18,14 @@
 
   // How to play, on the lobby: each line its keys and what they do, for a keyboard and mouse or for touch.
   const INTRO = {
-    keys: [[["W", "A", "S", "D"], "Move your Ooga"], [["Mouse"], "Aim, and click to fire"], [["X"], "Switch to your weapon"]],
-    touch: [[["Left stick"], "Move your Ooga"], [["Combat"], "Switch to your weapon"], [["Hold fire"], "Shoot the ghosts"]]
+    keys: [[["W", "A", "S", "D"], "Move your Ooga"], [["Mouse"], "Aim, and click to fire"], [["G"], "Switch weapons"]],
+    touch: [[["Left stick"], "Move your Ooga"], [["Ready"], "Start in combat mode"], [["Hold fire"], "Shoot the ghosts"]]
   };
   /**
    * The HUD; `coarse` for touch words, `onMusic` when the visitor flips the mini player's switch, `onSkip` when they
-   * skip to the next track, `onReady` and `onDecline` from the lobby.
+   * skip to the next track, `onReady` and `onDecline` from the lobby, `onLobby` when its menu opens or closes.
    */
-  const create = ({ coarse = false, onMusic = null, onSkip = null, onReady = null, onDecline = null } = {}) => {
+  const create = ({ coarse = false, onMusic = null, onSkip = null, onReady = null, onDecline = null, onLobby = null } = {}) => {
     loadFace();
     const el = {
       hud: document.getElementById("ghost-hud"), top: document.getElementById("ghost-top"), lives: document.getElementById("ghost-lives"), health: document.getElementById("ghost-health"),
@@ -38,7 +38,8 @@
     };
     // The lobby's buttons, and its own keys (inside a dialog the island leaves keys alone): Enter or R readies, Escape
     // declines.
-    const readyUp = () => { if (onReady) onReady(); el.lobbyReady.blur(); };
+    el.lobby.tabIndex = -1;
+    const readyUp = () => { if (onReady) onReady(); if (!el.lobby.hidden) el.lobby.focus({ preventScroll: true }); else el.lobbyReady.blur(); };
     const decline = () => { if (onDecline) onDecline(); el.lobbyDecline.blur(); };
     const lobbyKey = (e) => {
       if (e.repeat) return;
@@ -129,11 +130,15 @@
     // shown, `meReady` whether this page's player is in, `signIn` the note for a visitor not signed in; null to hide.
     // The caller passes a fresh `key` only when something changed.
     let lobbyKey_ = null;
+    const hideLobby = (restore = true) => {
+      if (lobbyKey_ === null) return;
+      lobbyKey_ = null;
+      el.lobby.hidden = true;
+      if (el.lobby.contains(document.activeElement)) document.activeElement.blur();
+      if (onLobby) onLobby(false, restore);
+    };
     const lobby = (key, goal, rows, count, meReady, signIn) => {
-      if (key === null) {
-        if (lobbyKey_ !== null) { lobbyKey_ = null; el.lobby.hidden = true; el.lobbyReady.blur(); }
-        return;
-      }
+      if (key === null) { hideLobby(); return; }
       const opening = lobbyKey_ === null;
       if (key === lobbyKey_) return;
       lobbyKey_ = key;
@@ -157,7 +162,11 @@
       el.lobbyReady.textContent = meReady ? "You're in" : "Ready";
       el.lobbyReady.disabled = meReady;
       el.lobbyDecline.hidden = meReady;
-      if (opening) { el.lobby.hidden = false; if (!meReady) el.lobbyReady.focus({ preventScroll: true }); }
+      if (opening) {
+        el.lobby.hidden = false;
+        if (onLobby) onLobby(true);
+        (meReady ? el.lobby : el.lobbyReady).focus({ preventScroll: true });
+      }
     };
     // The boss's health, 0..1, or below 0 to hide the bar.
     const boss = (fraction) => {
@@ -183,7 +192,7 @@
       el.lobbyReady.removeEventListener("click", readyUp);
       el.lobbyDecline.removeEventListener("click", decline);
       el.lobby.removeEventListener("keydown", lobbyKey);
-      lobby(null);
+      hideLobby(false);
       el.playerToggle.removeEventListener("click", flip);
       el.playerSkip.removeEventListener("click", skip);
       el.health.removeEventListener("animationend", healed);

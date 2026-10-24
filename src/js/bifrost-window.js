@@ -117,7 +117,7 @@
     addChild(root, front, ...batches);
     addChild(group, root);
 
-    // The mechanism runs whether or not the window shows it: each angle and phase kept within a turn.
+    // The mechanism advances only while nearby and shown: each angle and phase kept within a turn.
     const turns = new Float64Array(rings.length);
     let spin = 0, bob = 0, flow = 0, breath = 0;
     const step = (dt) => {
@@ -131,8 +131,7 @@
     // Called once the camera is final for the frame. The projection centre is the eye, set back along the view by the
     // perspective blend's offset when there is one. The window hides with the eye behind or at the field, past FAR,
     // looking straight down, or with the bird's-eye cutaway or the underground slice showing.
-    const update = (dt, camera, opts) => {
-      step(dt);
+    const update = (dt, camera, opts, active = true) => {
       const P = camera.position, mix = camera.orthoHeight > 0 ? Math.max(0, Math.min(1, camera.orthoMix || 0)) : 0;
       let x = P.x, y = P.y, z = P.z;
       if (mix > 0 && mix <= 0.99) {
@@ -144,6 +143,7 @@
       const shown = mix <= 0.99 && ez - portal.fieldZ > NEAR && Math.hypot(ex, ey - MIDDLE, ez - portal.fieldZ) < FAR && opts.cutawayFade < 1 && opts.cutawayMaxY >= 1e5;
       root.visible = shown;
       if (!shown) return;
+      if (active) step(dt);
       mat4.multiply(TMP, relief(RELIEF, ex, ey, ez, axis), HALL);
       mat4.multiply(W, GROUP, TMP);
       hall.instanceData.set(W, 0);
