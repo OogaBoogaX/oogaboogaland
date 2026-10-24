@@ -1642,6 +1642,18 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
       </div>
     </section>
     <canvas class="ghost-minimap" id="ghost-minimap" aria-hidden="true" hidden></canvas>
+    <div class="ghost-spectate" id="ghost-spectate" role="group" aria-label="Watch while you're down" hidden>
+      <span class="ghost-spectate-head">You're down · watch from</span>
+      <div class="ghost-spectate-modes">
+        <button type="button" data-spec="grave" aria-pressed="true">My view</button>
+        <button type="button" data-spec="free" aria-pressed="false">Free camera</button>
+        <button type="button" data-spec="players" aria-pressed="false">Players</button>
+      </div>
+      <div class="ghost-spectate-watch" id="ghost-spectate-watch" hidden>
+        <span class="ghost-spectate-name" id="ghost-spectate-name"></span>
+        <button type="button" class="ghost-spectate-next" id="ghost-spectate-next" aria-label="Next player">Next ▶</button>
+      </div>
+    </div>
     <div class="ghost-player" id="ghost-player" hidden>
       <span class="ghost-player-note" aria-hidden="true">♪</span>
       <span class="ghost-player-title" id="ghost-player-title"></span>

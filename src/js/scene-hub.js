@@ -236,8 +236,10 @@
   let oogatronUnsub, renderer, game, world, go, lootEnabled, testBananas, root, camera, overlayCanvas, island, terrainRampRoof, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, mirrorCave, matrixCave, matrixControl, gateRain, fire, headquarters, dockStairs, jumbotron, positionDebug, remotes, npcSync;
   // GAME MODE (`setGameMode`): an island event holds the island still for play while it runs.
   let gameMode = false, gameCombatOnly = false;
-  // GAME MODE's ring (`updateGameRing`): the node, how far it has risen (0 to 1) and the seconds left before it starts up.
+  // GAME MODE's ring (`updateGameRing`): the group holding its veils, how far it has risen (0 to 1) and the seconds left
+  // before it starts up; the veils themselves, each with its ripples.
   let gameRing = null, gameRingK = 0, gameRingWait = 0;
+  const ringPanels = [];
   // Its floating lanterns (one node each over one geometry), and whether they showed last frame.
   const ringLanterns = [];
   let ringLanternsShown = false;
@@ -8466,18 +8468,55 @@
     mempoolIsland.site.node.visible = !on;
   };
   // GAME MODE's ring: a wall round the meadow just inside the foot of the bluff (the ground leaves the meadow about
-  // 22 m from the middle), so nobody playing climbs the cliffs. It grows up out of the ground over `riseS` and sinks
-  // over `sinkS`, and while it stands it refuses a step out across it at or above the meadow; anyone outside it (in a
-  // cave mouth, up the bluff) may still walk in. Half see-through black for now, to show the bounds.
+  // 22 m from the middle), so nobody playing climbs the cliffs. It stands up over `riseS` (the lanterns along its top
+  // rising with it) and sinks over `sinkS`, and while it stands it refuses a step out across it at or above the
+  // meadow; anyone outside it (in a cave mouth, up the bluff) may still walk in. The wall itself is unseen:
+  // `RING_PANELS` flat veils of B.C.A.'s kind, tangent to the ring, each its own geometry so the renderer draws each
+  // one's own ripples and outlines, glowing in glyphs where a body touches them (`ringBodies`, `touchGameRing`).
   const GAME_RING = { r: 21.5, height: 8, riseS: 1.5, sinkS: 1 };
   const GAME_RING_R2 = GAME_RING.r * GAME_RING.r;
-  const gameRingGeometry = models.cached(() => {
-    const geo = models.lathe({ profile: [[GAME_RING.r, -0.5], [GAME_RING.r, GAME_RING.height]], segments: 96, color: "#000000" });
-    geo.glass = 0.5;
-    geo.castShadow = false;
-    geo.twoSided = true; // Canvas 2D: seen from inside, as players see it
-    return geo;
+  const RING_PANELS = 32, RING_STEP = Math.PI * 2 / RING_PANELS;
+  const ringPanelGeometries = models.cached(() => {
+    const half = GAME_RING.r * Math.tan(RING_STEP / 2), top = GAME_RING.height, list = [];
+    for (let i = 0; i < RING_PANELS; i++) {
+      const color = [0, 0, 0];
+      list.push({
+        verts: [-half, -0.5, 0, half, -0.5, 0, half, top, 0, -half, top, 0],
+        faces: [{ i: [0, 1, 2, 3], color }, { i: [3, 2, 1, 0], color }],
+        lines: [], castShadow: false, mirrorRippleOnly: true
+      });
+    }
+    return list;
   });
+  // The veil a body at (x, z), feet at `feet`, touches from either side at the meadow's level, or -1.
+  const RING_PULSE_S = 0.14, RING_TOUCH = 0.08;
+  let ringPulseWait = 0;
+  const ringPanelAt = (x, z, feet, radius) => {
+    const d = Math.hypot(x, z);
+    if (d + radius < GAME_RING.r - RING_TOUCH || d - radius > GAME_RING.r || feet < -1 || feet > GAME_RING.height) return -1;
+    return (Math.round(Math.atan2(x, -z) / RING_STEP) % RING_PANELS + RING_PANELS) % RING_PANELS;
+  };
+  // The driven Ooga touching a veil shows its outline there in glyphs, with waves rolling off it, as anyone crossing
+  // B.C.A.'s veil does (mirror-body.js, over every Ooga of the crew). Each section's atlas is made the first time
+  // someone comes to it or to either side of it, a body at a seam meeting both: taken off the ring while it is made, so
+  // reading its veil's place walks no more than the veil (the ring's group and the island's root stand unmoved).
+  const ringBodies = (i) => {
+    for (let k = -1; k <= 1; k++) {
+      const node = ringPanels[(i + k + RING_PANELS) % RING_PANELS];
+      if (node.mirrorBody) continue;
+      removeChild(gameRing, node);
+      BL.mirrorBody.create(node, crew.cavemen);
+      addChild(gameRing, node);
+    }
+  };
+  // Another player against the wall (shown here by the remote pool, which no veil outlines) sends glyph ripples up it
+  // where they touch, every `RING_PULSE_S` while they stay.
+  const touchGameRing = (x, z, feet, radius) => {
+    const i = ringPanelAt(x, z, feet, radius);
+    if (i < 0) return;
+    const at = i * RING_STEP, k = GAME_RING.r / Math.max(Math.hypot(x, z), 1e-6);
+    ringPanels[i].mirrorRipples.pulse((x * Math.cos(at) + z * Math.sin(at)) * k, feet + 0.6 + Math.random() * 0.8, 0);
+  };
   // Paper lanterns floating over the ring's top as it stands, lit, each bobbing and turning slowly on its own beat.
   const RING_LANTERNS = 36, LANTERN_LIFT = 0.7, LANTERN_BOB = 0.18;
   const ringLanternGeometry = models.cached(() => models.noShadow(models.merge(
@@ -8498,11 +8537,29 @@
     if (gameRingK !== target) {
       if (gameRingK === 0 && target) bringInsideRing();
       gameRingK = target ? Math.min(1, gameRingK + dt / GAME_RING.riseS) : Math.max(0, gameRingK - dt / GAME_RING.sinkS);
-      gameRing.scale.y = ease.inOutQuad(gameRingK);
       gameRing.visible = gameRingK > 0;
     }
-    // The lanterns ride up and down with the wall's top.
     const shown = gameRingK > 0;
+    // A veil's outlines clear themselves once the ring is down (mirror-body.js stops sampling a hidden veil).
+    for (let i = 0; i < ringPanels.length; i++) {
+      const node = ringPanels[i], body = node.mirrorBody;
+      if (shown) node.mirrorRipples.update(dt);
+      if (body) { body.update(dt); body.time = node.mirrorRipples.time; }
+    }
+    if (shown) {
+      const own = pilot.player;
+      if (own) {
+        const p = own.root.position, i = ringPanelAt(p.x, p.z, p.y - own.baseY, own.bodyRadius);
+        if (i >= 0) ringBodies(i);
+      }
+      ringPulseWait -= dt;
+      if (ringPulseWait <= 0) {
+        ringPulseWait = RING_PULSE_S;
+        const outside = remotes?.actors();
+        if (outside) for (const body of outside) touchGameRing(body.x, body.z, body.y, body.radius);
+      }
+    }
+    // The lanterns ride up and down with the wall's top.
     if (!shown && !ringLanternsShown) return;
     ringLanternsShown = shown;
     const top = GAME_RING.height * ease.inOutQuad(gameRingK) + LANTERN_LIFT;
@@ -8550,12 +8607,10 @@
       pilot.setActive(!on); pilot.controls.reset(); input.reset();
       pilot.setExternalControl(on);
     },
-    // While the view is held, how the visitor is turning it (-1..1, positive to the left): A D,
-    // the arrows, Q E and either stick, read straight from the pilot's controls since the pilot itself is let go of.
-    heldTurn: () => {
-      const a = pilot.controls.read();
-      return clamp(a.orbitYaw + a.yaw - a.x, -1, 1);
-    },
+    // While the view is held, how the visitor is steering it, read straight from the pilot's controls since the pilot
+    // itself is let go of: `x` and `y` A D and W S (or the move stick), `yaw` and `orbitYaw` Q E and the arrows
+    // (positive to the left), `pitch` the look stick or arrows (positive down), `sprint` the run key.
+    heldAxes: () => pilot.controls.read(),
     // GAME MODE's ring wall's radius, for the minimap.
     ringRadius: GAME_RING.r,
     // Where each totem's elixir hangs: on its pole's front, facing the pile, at chest height.
@@ -10849,7 +10904,17 @@
     reflowScenery();
     buildSpots();
     buildClouds();
-    gameRing = createNode({ geometry: gameRingGeometry(), scale: { x: 1, y: 0, z: 1 }, visible: false, sightHidden: true });
+    // The ring's veils are laid in a group of their own before it joins the island, so each one's ripples, which read
+    // their veil's place once, walk only the group to find it.
+    gameRing = createNode({ visible: false, sightHidden: true });
+    ringPanelGeometries().forEach((geometry, i) => {
+      const a = i * RING_STEP;
+      const node = createNode({ geometry, position: { x: Math.sin(a) * GAME_RING.r, y: 0, z: -Math.cos(a) * GAME_RING.r }, rotation: { x: 0, y: -a, z: 0 },
+        mirrorRippleOnly: true, matrixNative: true, sightHidden: true, rippleTint: BCA_TINT });
+      addChild(gameRing, node);
+      BL.mirrorRipples.create(node);
+      ringPanels.push(node);
+    });
     addChild(root, gameRing);
     placed.push(gameRing);
     for (let i = 0; i < RING_LANTERNS; i++) {
@@ -11180,7 +11245,7 @@
       npcSync.recordShot(cave, from, to);
       if (ghosts && cave === crew.player) ghosts.shot(from, to); // HALLOWEEN: the visitor's banana rounds sound, and the orb fires with them
     };
-    shared.shotGeometry = () => ghosts && ghosts.hunting ? ghosts.rock : null; // HALLOWEEN: rifles fire rocks through the hunt
+    shared.shotGeometry = () => ghosts && ghosts.hunting ? ghosts.shotGeometry() : null; // HALLOWEEN: rifles fire rocks, then lasers, through the hunt
     BL.net.setHub(true);
     for (const cave of crew.list) crew.setJetpackOwnership(cave, true, hubModels.jetpack(), hubModels.jetFlame());
     // Sani hosts the island on ordinary visits; debug visits keep activity-derived states.
@@ -11780,8 +11845,9 @@
     ghostSeal = null;
     // GAME MODE ends with the visit; the island comes back built afresh.
     gameMode = gameCombatOnly = false;
+    for (const node of ringPanels) { node.mirrorRipples.dispose(); if (node.mirrorBody) node.mirrorBody.dispose(); }
     gameRing = null;
-    gameRingK = gameRingWait = ringLanterns.length = 0;
+    gameRingK = gameRingWait = ringLanterns.length = ringPanels.length = ringPulseWait = 0;
     ringLanternsShown = false;
     document.body.classList.remove("game-mode");
     RENDER_OPTS.windTime = NaN;
