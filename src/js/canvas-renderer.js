@@ -18,6 +18,62 @@
     const b = Math.round(lerp((odd ? 112 : 74) * emission, 226.95, head));
     RIPPLE_GREENS[(tip * 16 + gain) * 2 + odd] = `rgb(${r},${g},${b})`;
   }
+  // Exact-input reuse: no quantization of lighting or content. Eight reusable slots share a 1,048,576-pixel budget;
+  // oversized surfaces keep the former single scratch image and are never retained by the cache.
+  const createSurfaceShadeCache = (paint) => {
+    const MAX_PIXELS = 1024 * 1024;
+    const entries = Array.from({ length: 8 }, () => ({ canvas: null, context: null, geometry: null, source: null, pixels: 0, used: 0 }));
+    const fallback = { canvas: null, context: null };
+    let pixels = 0, clock = 0;
+    const clear = entry => {
+      if (entry.canvas) entry.canvas.width = entry.canvas.height = 0;
+      pixels -= entry.pixels; entry.pixels = entry.used = 0;
+      entry.geometry = entry.source = null;
+    };
+    const get = (geometry, rec, coverage) => {
+      const surface = geometry.imageSurface, source = surface.canvas, w = surface.width || source.width, h = surface.height || source.height;
+      const background = surface.background, br = background ? background[0] : -1, bg = background ? background[1] : -1, bb = background ? background[2] : -1;
+      for (const entry of entries) {
+        if (entry.geometry === geometry && entry.source === source && entry.version === surface.version && entry.w === w && entry.h === h
+          && entry.sourceW === source.width && entry.sourceH === source.height
+          && entry.br === br && entry.bg === bg && entry.bb === bb
+          && entry.r === rec.canvasR && entry.g === rec.canvasG && entry.b === rec.canvasB
+          && entry.ar === rec.canvasAddR && entry.ag === rec.canvasAddG && entry.ab === rec.canvasAddB) {
+          entry.used = ++clock; return entry.canvas;
+        }
+      }
+      let entry = fallback;
+      if (w * h <= MAX_PIXELS) {
+        entry = entries[0];
+        for (const candidate of entries) if (candidate.used < entry.used) entry = candidate;
+        clear(entry);
+        while (pixels + w * h > MAX_PIXELS) {
+          let oldest = null;
+          for (const candidate of entries) if (candidate.pixels && (!oldest || candidate.used < oldest.used)) oldest = candidate;
+          clear(oldest);
+        }
+      }
+      if (!entry.canvas) { entry.canvas = document.createElement("canvas"); entry.context = entry.canvas.getContext("2d"); }
+      if (entry === fallback) {
+        if (entry.canvas.width < w) entry.canvas.width = w;
+        if (entry.canvas.height < h) entry.canvas.height = h;
+      } else { entry.canvas.width = w; entry.canvas.height = h; }
+      paint(entry.canvas, entry.context, surface, rec, coverage);
+      if (entry !== fallback) {
+        entry.geometry = geometry; entry.source = source; entry.version = surface.version; entry.w = w; entry.h = h;
+        entry.sourceW = source.width; entry.sourceH = source.height;
+        entry.br = br; entry.bg = bg; entry.bb = bb;
+        entry.r = rec.canvasR; entry.g = rec.canvasG; entry.b = rec.canvasB;
+        entry.ar = rec.canvasAddR; entry.ag = rec.canvasAddG; entry.ab = rec.canvasAddB;
+        entry.pixels = entry.canvas.width * entry.canvas.height; pixels += entry.pixels; entry.used = ++clock;
+      }
+      return entry.canvas;
+    };
+    return { get,
+      release: live => { for (const entry of entries) if (entry.geometry && !live.has(entry.geometry)) clear(entry); },
+      dispose: () => { for (const entry of entries) clear(entry); if (fallback.canvas) fallback.canvas.width = fallback.canvas.height = 0; },
+      get pixels() { return pixels; }, get size() { let n = 0; for (const entry of entries) if (entry.geometry) n++; return n; } };
+  };
   const createRenderer = (canvas, { width: fixedW = 0, height: fixedH = 0, transparent = false, environmentCapture = false } = {}) => {
     const ctx = canvas.getContext("2d");
     let width = 0, height = 0, dpr = 1, backdrop = null, skyGradient = null, lastF = 1;
@@ -30,7 +86,7 @@
     const environment = { renderer: null, canvas: null, faces: [], contexts: [], source: null, next: 0, valid: 0, frame: 0, camera: null };
     const environmentVertices = new Float64Array((ENVIRONMENT_GRID + 1) ** 2 * 5), environmentClip = new Float64Array(40), environmentClipped = new Float64Array(40);
     const imageVertices = new Float64Array(13 * 9 * 5), imageView = mat4.create();
-    let canvasShade = null, canvasShadeContext = null, canvasMatrix = null, canvasMatrixContext = null;
+    let canvasMatrix = null, canvasMatrixContext = null;
     let canvasCoverage = new WeakMap();
     const active = [];
     let sortCapacity = 0, sortIds = new Uint32Array(0), sortKeys = new Float64Array(0), sortWork = sortScratch(0);
@@ -1657,16 +1713,9 @@
       }
       return canvas;
     };
-    const drawCanvasSurface = (node, rec) => {
-      const surface = node.geometry.imageSurface, source = surface.canvas, sw = surface.width || source.width, sh = surface.height || source.height;
-      if (!sw || !sh) return;
-      if (!canvasShade) { canvasShade = document.createElement("canvas"); canvasShadeContext = canvasShade.getContext("2d"); }
-      // One grow-only shade image per renderer. Apply the ordinary lighting/tip/Matrix color transform, then the
-      // revision-cached opaque coverage mask so stone shows between painted pixels, including through the wave.
-      if (canvasShade.width < sw) canvasShade.width = sw;
-      if (canvasShade.height < sh) canvasShade.height = sh;
-      const coverage = canvasMask(surface);
-      const paint = canvasShadeContext, gain = Math.max(rec.canvasR, rec.canvasG, rec.canvasB, 0.00001);
+    const paintCanvasSurface = (canvas, paint, surface, rec, coverage) => {
+      const source = surface.canvas, sw = surface.width || source.width, sh = surface.height || source.height;
+      const gain = Math.max(rec.canvasR, rec.canvasG, rec.canvasB, 0.00001);
       paint.globalCompositeOperation = "source-over"; paint.filter = "none";
       paint.clearRect(0, 0, sw, sh);
       const background = surface.background;
@@ -1676,12 +1725,18 @@
       paint.fillStyle = `rgb(${rec.canvasR / gain * 255},${rec.canvasG / gain * 255},${rec.canvasB / gain * 255})`;
       paint.fillRect(0, 0, sw, sh);
       paint.globalCompositeOperation = "copy"; paint.filter = `brightness(${gain})`;
-      paint.drawImage(canvasShade, 0, 0); paint.filter = "none";
+      paint.drawImage(canvas, 0, 0); paint.filter = "none";
       paint.globalCompositeOperation = "lighter";
       paint.fillStyle = `rgb(${rec.canvasAddR},${rec.canvasAddG},${rec.canvasAddB})`;
       paint.fillRect(0, 0, sw, sh);
       paint.globalCompositeOperation = "destination-in"; paint.drawImage(coverage, 0, 0);
       paint.globalCompositeOperation = "source-over";
+    };
+    const canvasShades = createSurfaceShadeCache(paintCanvasSurface);
+    const drawCanvasSurface = (node, rec) => {
+      const surface = node.geometry.imageSurface, source = surface.canvas, sw = surface.width || source.width, sh = surface.height || source.height;
+      if (!sw || !sh) return;
+      const coverage = canvasMask(surface), shaded = canvasShades.get(node.geometry, rec, coverage);
       mat4.multiply(imageView, view, node.world);
       const v = node.geometry.verts, a = rec.imageA * 3, b = rec.imageB * 3, c = rec.imageC * 3, d = rec.imageD * 3;
       const m = imageView, rect = surface.rect, curve = surface.curve;
@@ -1703,8 +1758,8 @@
       ctx.save(); ctx.clip(); ctx.imageSmoothingEnabled = false;
       for (let y = 0; y < rows; y++) for (let x = 0; x < columns; x++) {
         const a = (y * (columns + 1) + x) * 5, b = a + 5, c = a + (columns + 1) * 5, d = c + 5;
-        drawImageTriangle(canvasShade, imageVertices, a, b, d, 0, 0, width, height);
-        drawImageTriangle(canvasShade, imageVertices, a, d, c, 0, 0, width, height);
+        drawImageTriangle(shaded, imageVertices, a, b, d, 0, 0, width, height);
+        drawImageTriangle(shaded, imageVertices, a, d, c, 0, 0, width, height);
       }
       ctx.restore();
       if (rec.matrix && (matrixDensity > 0 || rec.matrixPartial)) {
@@ -2061,10 +2116,10 @@
       prepareScene: () => { },
       prepareGeometry: () => true,
       createRig: () => null,
-      releaseUnused: (live) => { BL.models.addLods(live); if (environment.source && !live.has(environment.source.geometry)) destroyEnvironment(); return 0; },
+      releaseUnused: (live) => { BL.models.addLods(live); canvasShades.release(live); if (environment.source && !live.has(environment.source.geometry)) destroyEnvironment(); return 0; },
       dispose: () => {
         destroyEnvironment();
-        if (canvasShade) canvasShade.width = canvasShade.height = 0;
+        canvasShades.dispose();
         if (canvasMatrix) canvasMatrix.width = canvasMatrix.height = 0;
         canvasCoverage = new WeakMap();
         if (!fixedW) {

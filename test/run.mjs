@@ -3963,6 +3963,47 @@ const contributorActivityChecks = async () => {
   record("characters: every join key (github || handle) matches a login in the baked Oogatron snapshot, so no Ooga sleeps forever on a mismatch", unjoined.length === 0,
     unjoined.length ? `fix the handle, add github: "<login>" to the character file, or regenerate src/js/jumbotron-data.js: ${JSON.stringify(unjoined)}` : "");
 };
+const canvasSurfaceCacheChecks = async () => {
+  const source = await readFile(join(root, "src/js/canvas-renderer.js"), "utf8"), start = source.indexOf("  const createSurfaceShadeCache ="), end = source.indexOf("  const createRenderer =", start);
+  if (start < 0 || end < 0) throw new Error("Canvas surface shade cache not found");
+  const canvases = [], document = { createElement() { const canvas = { width: 0, height: 0, getContext: () => ({}) }; canvases.push(canvas); return canvas; } };
+  const create = new Function("document", `${source.slice(start, end)} return createSurfaceShadeCache;`)(document);
+  let paints = 0, failures = 0;
+  const cache = create(canvas => { canvas.serial = ++paints; });
+  const geometry = () => ({ imageSurface: { canvas: { width: 64, height: 32 }, version: 0, background: [10, 12, 10] } });
+  const a = geometry(), b = geometry(), rec = { canvasR: 0.8, canvasG: 0.9, canvasB: 1, canvasAddR: 0, canvasAddG: 0, canvasAddB: 0 };
+  const first = cache.get(a, rec), serial = first.serial; cache.get(b, rec);
+  if (cache.get(a, rec) !== first || first.serial !== serial || paints !== 2) failures++;
+  for (const key of Object.keys(rec)) {
+    const before = paints; rec[key] += 0.125;
+    const fresh = cache.get(a, rec), painted = fresh.serial;
+    if (paints !== before + 1 || cache.get(a, rec) !== fresh || fresh.serial !== painted) failures++;
+  }
+  const changed = mutate => { const before = paints; mutate(); cache.get(a, rec); if (paints !== before + 1) failures++; };
+  changed(() => a.imageSurface.version++);
+  changed(() => a.imageSurface.background[0]++);
+  changed(() => { a.imageSurface.background = null; });
+  changed(() => { a.imageSurface.canvas = { width: 64, height: 32 }; });
+  changed(() => { a.imageSurface.width = 60; });
+  changed(() => { a.imageSurface.height = 30; });
+  // A fixed crop does not hide changes in the source's native dimensions.
+  changed(() => { a.imageSurface.canvas.width++; });
+  changed(() => { a.imageSurface.canvas.height++; });
+  for (let i = 0; i < 40; i++) {
+    const g = geometry(); g.imageSurface.canvas.width = g.imageSurface.canvas.height = 512;
+    cache.get(g, rec);
+    if (cache.size > 8 || cache.pixels > 1024 * 1024) failures++;
+  }
+  const huge = geometry(); huge.imageSurface.canvas.width = huge.imageSurface.canvas.height = 2048;
+  const before = paints, size = cache.size, pixels = cache.pixels;
+  cache.get(huge, rec); cache.get(huge, rec);
+  if (paints !== before + 2 || cache.size !== size || cache.pixels !== pixels) failures++;
+  cache.release(new Set());
+  if (cache.size || cache.pixels) failures++;
+  cache.get(a, rec); cache.dispose();
+  if (cache.size || cache.pixels || canvases.some(c => c.width || c.height) || canvases.length > 9) failures++;
+  record("Canvas surface reuse: unchanged faces reuse exact shaded images, every content/lighting/dimension input invalidates, and eviction, scene release and disposal bound owned canvases", failures === 0, JSON.stringify({ failures, paints, canvases: canvases.length }));
+};
 const deferredLoadingChecks = async () => {
   const source = await readFile(join(root, "src/js/deferred.js"), "utf8"), rows = [];
   const fixture = () => {
@@ -18535,6 +18576,7 @@ const reviewCrowdAndFallbackProof = async () => {
 };
 
 const unitChecks = async () => {
+  await canvasSurfaceCacheChecks();
   const rage = await gorillaRageProof();
   record("gorilla rage: distinct rolling hits, only agitating Oogas targeted, held capture through planning and swing, bounded throws, exact expiry, zero health and account/lifecycle cancellation", Object.values(rage).every(Boolean), JSON.stringify(rage));
   const reviewCrowd=await reviewCrowdAndFallbackProof();
