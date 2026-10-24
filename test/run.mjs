@@ -6030,13 +6030,19 @@ const dropRefusals = (b) => { for (let i = b.logs.length - 1; i >= 0; i--) if (b
 const chunkOf = (group) => (path) => new RegExp(`^/js/${group}-[0-9a-f]{16}\\.js$`).test(path);
 const orbitHosted = { name: "orbit hosted", why: "regression: Ooga Orbit read Ooga Drop's models at load, which a hosted page had deferred, so it threw on entry, cold and after a Drop visit", run: async (b, site) => {
   const cold = await b.evaluate(`({ scene: __ooga.scene, frames: __ooga.renderedFrames, models: !!BL.dropModels, diver: !!BL.skydiver })`);
+  // A whole flight on the cold page, to its log, before Drop's code has ever arrived.
+  await b.evaluate(`(() => { const O = window.__ooga.orbit; O.toBuild(); O.launch(); O.simulate(3.05); O.simulate(1.85); O.releaseClamps(); for (let t = 0; t < 400 && O.phase !== "results"; t += 0.25) O.simulate(0.25); })()`);
+  await b.sleep(200);
+  const flown = { ...await b.evaluate(orbitLog), diver: await b.evaluate(`!!BL.skydiver`) };
+  await b.evaluate(`document.querySelector('#orbit-results [data-action="orbit-again"]').click()`);
   await b.evaluate(`__ooga.go("drop")`);
   const drop = await untilPage(b, 'B.scene === "drop" && !B.transitioning', 15000);
   await b.evaluate(`__ooga.go("orbit")`);
   const orbit = await untilPage(b, 'B.scene === "orbit" && !B.transitioning', 15000);
   const after = await b.evaluate(`({ scene: __ooga.scene, frames: __ooga.renderedFrames })`);
-  record("orbit hosted: a cold /oogaorbit on the hosted page boots and draws with Drop's diver still unloaded, and Orbit opens again after a Drop visit", cold.scene === "orbit" && cold.frames > 2 && cold.models && !cold.diver
-    && drop && orbit && after.scene === "orbit" && site.fetched.filter(chunkOf("drop")).length === 1 && site.fetched.filter(chunkOf("drop-scene")).length === 1, JSON.stringify({ cold, drop, orbit, after, fetched: site.fetched }));
+  record("orbit hosted: a cold /oogaorbit on the hosted page boots, draws and flies to its flight log with Drop's diver still unloaded, and Orbit opens again after a Drop visit", cold.scene === "orbit" && cold.frames > 2 && cold.models && !cold.diver
+    && flown.phase === "results" && flown.shown && flown.rows.some(([label]) => label === "Time") && !flown.diver
+    && drop && orbit && after.scene === "orbit" && site.fetched.filter(chunkOf("drop")).length === 1 && site.fetched.filter(chunkOf("drop-scene")).length === 1, JSON.stringify({ cold, flown: { phase: flown.phase, shown: flown.shown, rows: flown.rows, diver: flown.diver }, drop, orbit, after, fetched: site.fetched }));
 } };
 // Refused from the first request: entering the arcade prefetches its stage games, Drop included, before Space.
 const arcadeHostedDrop = { name: "arcade hosted drop cabinet", refuse: "/js/drop-", why: "regression: a refused Ooga Drop download left the arcade's departure flags set, so no cabinet opened again and its Leave did nothing until a reload, also when Leave was pressed during the fade back", run: async (b, site) => {
