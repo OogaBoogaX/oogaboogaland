@@ -49,7 +49,6 @@
   // The page's one toast, which every scene's HUD and the director share: a new one replaces the last.
   let toastTimer = 0, toastHideTimer = 0;
   const toast = (text) => {
-    if (reloadOffered) return;
     const box = $("toast");
     window.clearTimeout(toastTimer);
     window.clearTimeout(toastHideTimer);
@@ -64,19 +63,15 @@
       }, MESSAGE_FADE_MS);
     }, 2800);
   };
-  // A deploy replaced the code this page still asks for: say so, and offer a reload that stays where the address is.
-  // It stays up, and no other toast replaces it, since nothing deferred will open until the page reloads.
+  // Page-owned recovery stays through scene visits, beside ordinary toasts such as payment notices.
   let reloadOffered = false;
-  const offerReload = () => {
+  const offerReload = (message = "Ooga Booga Land was updated") => {
     if (reloadOffered) return;
     reloadOffered = true;
-    const box = $("toast"), reload = document.createElement("button");
-    window.clearTimeout(toastTimer);
-    window.clearTimeout(toastHideTimer);
+    const box = $("reload-notice"), reload = document.createElement("button");
     reload.type = "button"; reload.className = "link"; reload.textContent = "Reload";
     reload.addEventListener("click", () => location.reload(), { once: true });
-    box.replaceChildren("Ooga Booga Land was updated · ", reload);
-    box.dataset.reload = "true";
+    box.replaceChildren(`${message} · `, reload);
     box.hidden = false;
     $("message-stack").append(box);
     box.classList.add("show");
@@ -2336,10 +2331,8 @@
       if (liveDonors === refreshDonors) liveDonors = null;
       // Page-owned roster and donation rows remain attached; the next visit reconciles their contents.
       el.inventory.replaceChildren();
-      if (!reloadOffered) {
-        el.toast.classList.remove("show");
-        el.toast.hidden = true;
-      }
+      el.toast.classList.remove("show");
+      el.toast.hidden = true;
       el.hint.classList.remove("show");
       el.hint.hidden = true;
       tooltip.hide();

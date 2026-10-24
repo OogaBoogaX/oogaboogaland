@@ -4170,6 +4170,65 @@ const deferredLoadingChecks = async () => {
   }
   record("deferred loading: base and scene fetch together but execute in order, failed retries and timeouts release preloads, only an error moves the address on, a chunk a deploy removed is reported stale, a chunk run twice keeps its first definition and module state, and shells carry their wip", rows.every(r => r.ok), JSON.stringify(rows));
 };
+const hudNoticeChecks = async () => {
+  const source = await readFile(join(root, "src/js/hud.js"), "utf8");
+  const fixture = () => {
+    const timers = new Map(); let serial = 0, reloads = 0;
+    const element = () => {
+      const classes = new Set(), listeners = new Map();
+      return { hidden: true, children: [],
+        classList: { add: name => classes.add(name), remove: name => classes.delete(name), contains: name => classes.has(name) },
+        get textContent() { return this.children.map(child => typeof child === "string" ? child : child.textContent).join(""); },
+        set textContent(text) { this.children = [text]; },
+        replaceChildren(...children) { this.children = children; },
+        append(child) { this.children = this.children.filter(value => value !== child); this.children.push(child); },
+        addEventListener(name, fn, options) { listeners.set(name, { fn, options }); },
+        click() {
+          const listener = listeners.get("click");
+          if (!listener) return;
+          if (listener.options?.once) listeners.delete("click");
+          listener.fn();
+        }
+      };
+    };
+    const nodes = Object.fromEntries(["toast", "reload-notice", "message-stack"].map(id => [id, element()]));
+    nodes["message-stack"].children = [nodes["reload-notice"], nodes.toast];
+    const BL = { game: {}, scene: {} };
+    runInNewContext(source, {
+      window: { BL, matchMedia: () => ({ matches: false }), setTimeout: (fn, ms) => { timers.set(++serial, { fn, ms }); return serial; }, clearTimeout: id => timers.delete(id) },
+      document: { getElementById: id => nodes[id], querySelectorAll: () => [], createElement: element,
+        createElementNS: () => ({ setAttribute() {}, append() {} }) },
+      location: { reload() { reloads++; } }
+    });
+    const expire = () => { const [id, timer] = timers.entries().next().value; timers.delete(id); timer.fn(); return timer.ms; };
+    return { hud: BL.hud, nodes, timers, expire, reloads: () => reloads };
+  };
+  const f = fixture(), toast = f.nodes.toast, notice = f.nodes["reload-notice"];
+  f.hud.toast("A message before the reload offer");
+  f.hud.offerReload();
+  const previous = toast.textContent === "A message before the reload offer" && toast.classList.contains("show") && f.timers.size === 1;
+  const reload = notice.children[1], words = notice.textContent;
+  f.hud.toast("Your on-chain tip is on its way · waiting for a block");
+  const seen = toast.textContent === "Your on-chain tip is on its way · waiting for a block" && !toast.hidden && toast.classList.contains("show")
+    && notice.textContent === words && notice.classList.contains("show") && !notice.hidden;
+  const fading = f.expire() === 2800 && !toast.classList.contains("show") && !toast.hidden;
+  // A confirmed payment replaces a fading notice without its old hide timer hiding the new one.
+  f.hud.toast("Your on-chain tip confirmed · 1,000 sats");
+  const confirmed = toast.textContent === "Your on-chain tip confirmed · 1,000 sats" && !toast.hidden
+    && toast.classList.contains("show") && f.timers.size === 1;
+  const expired = f.expire() === 2800 && f.expire() === 300 && toast.hidden && !f.timers.size;
+  f.hud.offerReload();
+  const persistent = notice.textContent === words && words === "Ooga Booga Land was updated · Reload" && !notice.hidden
+    && notice.classList.contains("show") && notice.children[1] === reload && f.nodes["message-stack"].children.length === 2;
+  reload.click(); reload.click();
+  const singleReload = reload.type === "button" && reload.textContent === "Reload" && f.reloads() === 1;
+  const failed = fixture();
+  failed.hud.offerReload("Ooga Booga Land could not be opened");
+  const accurate = failed.nodes["reload-notice"].textContent === "Ooga Booga Land could not be opened · Reload" && !failed.timers.size;
+  record("HUD reload notice: a lasting reload offer preserves preceding, seen and confirmed payment toasts and their fade timers, keeps one Reload action, and accepts accurate entry-failure wording",
+    previous && seen && fading && confirmed && expired && persistent && singleReload && accurate,
+    JSON.stringify({ previous, seen, fading, confirmed, expired, persistent, singleReload, accurate }));
+};
 // Every file in src/characters/ must register once and build a whole Ooga, so a
 // new contributor is covered without editing this suite.
 const characterChecks = async () => {
@@ -6420,15 +6479,18 @@ const factoryHostedShield = { name: "factory hosted shield", refuse: "/js/factor
 // After a deploy the tab's chunks are gone: the page says so once and offers a reload, never "try again".
 const orbitHostedDeploy = { name: "orbit hosted deploy", gone: "/js/drop", why: "regression: after a deploy replaced the chunks, an open tab asked again and again for its old chunk and said try again, which could never work", run: async (b, site) => {
   await b.evaluate(`__ooga.go("drop")`);
-  const offered = await untilPage(b, 'B.scene === "orbit" && !B.transitioning && document.getElementById("toast").textContent.includes("was updated")', 15000);
+  const offered = await untilPage(b, 'B.scene === "orbit" && !B.transitioning && document.getElementById("reload-notice").textContent.includes("was updated")', 15000);
+  const payment = await b.evaluate(`(() => { BL.hud.toast("Your on-chain tip confirmed · 1,000 sats"); const t = document.getElementById("toast"), r = document.getElementById("reload-notice"), a = t.getBoundingClientRect(), b = r.getBoundingClientRect(); return { text: t.textContent, shown: t.classList.contains("show") && !t.hidden, separate: a.bottom <= b.top || b.bottom <= a.top }; })()`);
   await b.sleep(4000);
-  const toast = await b.evaluate(`(() => { const t = document.getElementById("toast"), r = t.querySelector("button"); return { text: t.textContent, reload: !!r && r.textContent === "Reload", shown: t.classList.contains("show") && !t.hidden, pointer: getComputedStyle(t).pointerEvents, stale: BL.deferred.stale, scene: __ooga.scene }; })()`);
+  const toast = await b.evaluate(`(() => { const t = document.getElementById("reload-notice"), r = t.querySelector("button"); return { text: t.textContent, reload: !!r && r.textContent === "Reload", shown: t.classList.contains("show") && !t.hidden, pointer: getComputedStyle(t).pointerEvents, stale: BL.deferred.stale, scene: __ooga.scene, paymentHidden: document.getElementById("toast").hidden }; })()`);
   const heads = site.fetched.filter(chunkOf("drop")).length, probes = site.probed.filter(chunkOf("drop")).length;
   dropRefusals(b);
   // Drop's scene chunk was preloaded beside its removed base, so Chrome says it went unused: that is the deploy, not noise.
   for (let i = b.logs.length - 1; i >= 0; i--) if (/drop-scene-[0-9a-f]+\.js was preloaded using link preload but not used/.test(b.logs[i])) b.logs.splice(i, 1);
-  record("orbit hosted deploy: a chunk a deploy removed leaves the visitor where they were with a lasting \"Ooga Booga Land was updated · Reload\" offer",
-    offered && toast.reload && toast.shown && toast.pointer === "auto" && toast.stale && toast.scene === "orbit" && heads >= 1 && heads <= 2 && probes >= 1, JSON.stringify({ offered, toast, heads, probes, fetched: site.fetched }));
+  record("orbit hosted deploy: a chunk a deploy removed leaves the visitor where they were with a lasting reload offer beside payment toasts that still show and fade",
+    offered && toast.reload && toast.shown && toast.pointer === "auto" && toast.stale && toast.scene === "orbit" && toast.paymentHidden
+      && payment.text === "Your on-chain tip confirmed · 1,000 sats" && payment.shown && payment.separate && heads >= 1 && heads <= 2 && probes >= 1,
+    JSON.stringify({ offered, toast, payment, heads, probes, fetched: site.fetched }));
 } };
 for (const [id, step, path] of [["orbit", orbitHosted, "/oogaorbit"], ["orbit", orbitHostedDeploy, "/oogaorbit"], ["arcade", arcadeHostedDrop, "/oogaarcade"], ["factory", factoryHostedShield, "/"]]) {
   if (ONLY && !onlyMatches(step.name)) continue;
@@ -19197,7 +19259,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   tessAnswerChecks(BL);
   const clearance = claimClearanceProof();
   record("hub footprint clearance: conservative rejection preserves circular boundaries, live reservations and exceptional numbers", clearance.failures === 0 && clearance.cases >= 4000, JSON.stringify(clearance));
-  await deferredLoadingChecks(); await characterChecks(); await contributorActivityChecks(); await mempoolFeedChecks(); await debugActivityStatusChecks(); await soloDebugChecks(); await adaptiveQualityChecks(); await chainSnapshotChecks(); await dsbSharedDataChecks(); await timechainDataChecks(); await timechainRoomChecks(); await timechainBlockChecks(); await weatherStepChecks(); await poolLayoutChecks(); await gameRulesChecks(); await ghostHuntChecks(); await donationClientChecks(); await poolWildlifeChecks(); await totemFeedChecks();
+  await deferredLoadingChecks(); await hudNoticeChecks(); await characterChecks(); await contributorActivityChecks(); await mempoolFeedChecks(); await debugActivityStatusChecks(); await soloDebugChecks(); await adaptiveQualityChecks(); await chainSnapshotChecks(); await dsbSharedDataChecks(); await timechainDataChecks(); await timechainRoomChecks(); await timechainBlockChecks(); await weatherStepChecks(); await poolLayoutChecks(); await gameRulesChecks(); await ghostHuntChecks(); await donationClientChecks(); await poolWildlifeChecks(); await totemFeedChecks();
 
   // Scene state built directly instead of booted; seed 1 matches scene-hub.js.
   // Sealed cave guides need the hub's seal nodes, so probes reading them stay in the browser tier.
