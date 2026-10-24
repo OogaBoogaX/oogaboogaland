@@ -139,7 +139,7 @@
   let pictureEpoch = 0, pictureJob = 0, pictureIdle = false, pictureLoading = false, pictureIndex = 0;
   // DSB Land's geography (about 350 ms whole) is built for its picture in small slices during play, not in one task.
   const PLAY_SLICE_MS = 8;
-  let preparedDsb = null, pictureAbort = null;
+  let preparedDsb = null, pictureAbort = null, pictureShot = null;
   const NO_ACTORS = [];
   // On the Worker's page the island's driving rules hold in here too, and the Ooga driven is reported to the
   // room every frame, so signed-in players in the chamber hear each other (voice needs a driven Ooga).
@@ -162,15 +162,16 @@
   // the browser presents. The models' GPU records are released at once, so nothing of them stays behind.
   // The renderer can take a picture once its programs are ready and the canvas has a size: a hidden page's has none.
   const canPicture = () => renderer.ready && canvas.clientWidth > 0 && canvas.clientHeight > 0;
-  const takePicture = (look, P) => {
-    const views = world.windowViews || (world.windowViews = {});
-    if (views[look.key]) return true;
-    if (!canPicture()) return false;
+  // A photograph is four idle tasks, so none holds the main thread long: the world's models (`P.build`); the draw, read
+  // straight back and halved down, with the chamber drawn again before the browser presents; the grade; and a JPEG
+  // encode off the main thread (`toBlob`), read back as a data address, the only image source the page's policy allows.
+  const drawPicture = (shot) => {
+    const { P, look } = shot;
     const pic = BM.passage().picture, W = canvas.width, H = canvas.height, aspect = W / H;
     const across = P.up * pic.w / pic.h, t = Math.max(P.up, across / aspect);
-    const shot = createCamera({ fov: 2 * Math.atan(t) * 180 / Math.PI, near: 0.5, far: 260 });
-    Object.assign(shot.position, P.eye);
-    Object.assign(shot.target, P.look);
+    const lens = createCamera({ fov: 2 * Math.atan(t) * 180 / Math.PI, near: 0.5, far: 260 });
+    Object.assign(lens.position, P.eye);
+    Object.assign(lens.target, P.look);
     // A source model can share meshes with the chamber or its retained hub. Only the temporary source's
     // exclusive GPU records may go; removing a shared record would make the next frame upload it again.
     const kept = new Set();
@@ -180,7 +181,7 @@
     };
     keep(root); liveGeometry(kept);
     BL.scenes.hub.cachedGeometry(kept);
-    const land = P.build(look), drawn = renderer.render(land, shot, P.opts(look));
+    const land = shot.land, drawn = renderer.render(land, lens, P.opts(look));
     const release = (node) => {
       if (node.geometry && !kept.has(node.geometry)) renderer.releaseGeometry(node.geometry);
       for (const child of node.children) release(child);
@@ -202,18 +203,34 @@
     g.imageSmoothingQuality = "high";
     g.drawImage(src, sx, sy, sw, sh, 0, 0, w, h);
     release(land);
-    // The page grades what it draws, so a picture of a graded frame is graded twice: take back the saturation the
-    // grade adds (WebGL only; Canvas 2D has no grade), and mist it toward the field's blue.
+    Object.assign(shot, { land: null, out, g, width: w, height: h });
+    return true;
+  };
+  // The page grades what it draws, so a picture of a graded frame is graded twice: take back the saturation the
+  // grade adds (WebGL only; Canvas 2D has no grade), and mist it toward the field's blue.
+  const gradePicture = (shot) => {
+    const { P, g, width: w, height: h } = shot;
     const colour = renderer.kind === "webgl2" ? P.colour : 1, pixels = g.getImageData(0, 0, w, h), d = pixels.data;
     for (let i = 0; i < d.length; i += 4) {
       const l = 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
       for (let k = 0; k < 3; k++) d[i + k] = (l + (d[i + k] - l) * colour) * (1 - P.mist) + P.haze[k] * P.mist;
     }
     g.putImageData(pixels, 0, 0);
-    const image = new Image();
-    image.src = out.toDataURL("image/jpeg", 0.9);
-    views[look.key] = { width: w, height: h, load: () => image };
-    return true;
+    shot.graded = true;
+  };
+  const encodePicture = (out, done) => {
+    out.toBlob((blob) => {
+      if (!blob) { done(null); return; }
+      const reader = new FileReader();
+      reader.onload = () => {
+        const image = new Image();
+        image.onload = () => done(image);
+        image.onerror = () => done(null);
+        image.src = reader.result;
+      };
+      reader.onerror = () => done(null);
+      reader.readAsDataURL(blob);
+    }, "image/jpeg", 0.9);
   };
   // The open worlds of a visit, each row with its looks now, read once so the windows and their pictures agree.
   const openLooks = () => WINDOWS.filter((row) => row.kind === "travel" && BL.scenes[row.scene]).map((row) => ({ row, look: BM.lookOf(row) }));
@@ -239,9 +256,10 @@
     }
     pictureJob = 0; pictureLoading = false; pictureIndex = 0; pictureTries = 0; pictureWait = 0;
     if (pictureAbort) pictureAbort.abort();
-    pictureAbort = null; preparedDsb = null;
+    pictureAbort = null; preparedDsb = null; pictureShot = null;
   };
   const nextPicture = () => {
+    pictureShot = null;
     pictureIndex++;
     pictureTries = pictureIndex < scene.looks.length ? PICTURE_TRIES : 0;
     pictureWait = 0;
@@ -272,7 +290,7 @@
         } else queuePicture(true);
         return;
       }
-      if (row.scene === "dsb" && !preparedDsb && !(world.windowViews && world.windowViews[look.key])) {
+      if (row.scene === "dsb" && !preparedDsb && !pictureShot && !(world.windowViews && world.windowViews[look.key])) {
         pictureLoading = true;
         pictureAbort = new AbortController();
         BL.buildTasks.run(BL.dsbGeography.buildSteps({ until: 0, budget: PLAY_SLICE_MS, work: 0 }), "bifrost", pictureAbort.signal).then((geography) => {
@@ -286,20 +304,46 @@
         });
         return;
       }
+      const views = world.windowViews || (world.windowViews = {});
+      const hang = () => {
+        const hung = models.withScope("bifrost", () => {
+          let all = true;
+          for (const w of scene.windows) if (w.kind === "travel" && w.look.key === look.key && !hangPicture(w)) all = false;
+          return all;
+        });
+        if (hung || --pictureTries === 0) nextPicture();
+        else pictureWait = 0.5;
+      };
+      if (views[look.key]) { hang(); return; }
       if (!canPicture()) { pictureWait = 0.5; return; }
-      const pictured = models.withScope("bifrost", () => {
-        try {
-          if (!takePicture(look, SHOTS[row.scene])) return false;
-          let hung = true;
-          for (const w of scene.windows) if (w.kind === "travel" && w.look.key === look.key && !hangPicture(w)) hung = false;
-          return hung;
-        } finally {
+      let shot = pictureShot;
+      if (!shot || shot.look !== look) {
+        shot = pictureShot = { look, P: SHOTS[row.scene], land: null, out: null, g: null, graded: false, width: 0, height: 0 };
+        shot.land = models.withScope("bifrost", () => shot.P.build(look));
+        queuePicture(true);
+        return;
+      }
+      if (!shot.out) {
+        const drawn = models.withScope("bifrost", () => {
           // Idle work has no director render following it. Replace the source's frame before the browser presents.
-          renderer.render(root, camera, RENDER_OPTS);
-        }
+          try { return drawPicture(shot); } finally { renderer.render(root, camera, RENDER_OPTS); }
+        });
+        if (drawn) queuePicture(true);
+        else if (--pictureTries === 0) nextPicture();
+        else pictureWait = 0.5;
+        return;
+      }
+      if (!shot.graded) { gradePicture(shot); queuePicture(true); return; }
+      pictureLoading = true;
+      // The picture belongs to the page, so one finished after this visit ended is still kept.
+      encodePicture(shot.out, (image) => {
+        if (image && !views[look.key]) views[look.key] = { width: shot.width, height: shot.height, load: () => image };
+        if (epoch !== pictureEpoch || !scene || leaving) return;
+        pictureLoading = false; pictureShot = null;
+        if (image) hang();
+        else if (--pictureTries === 0) nextPicture();
+        else pictureWait = 0.5;
       });
-      if (pictured || --pictureTries === 0) nextPicture();
-      else pictureWait = 0.5;
     };
     pictureIdle = typeof requestIdleCallback === "function";
     pictureJob = pictureIdle ? requestIdleCallback(run, { timeout: 1000 }) : setTimeout(run, 0);
@@ -565,6 +609,8 @@
     ({ renderer, game, world, go, agentPlay } = ctx);
     canvas = ctx.canvas;
     const looks = openLooks();
+    // Each window's world starts downloading on arrival, so a step through one (an instant crossing) seldom waits on it.
+    for (let i = 0; i < looks.length; i++) BL.deferred.prefetchScene(looks[i].row.scene);
     pictureTries = PICTURE_TRIES;
     pictureWait = PICTURE_DELAY;
     camera = createCamera({ fov: 55, near: 0.3, far: 700 });
