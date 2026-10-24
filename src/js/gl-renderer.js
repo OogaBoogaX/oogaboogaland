@@ -3219,6 +3219,13 @@ void main() {
         program.cutCount = count;
       }
     };
+    // The director calls this behind the entry fade, including far LODs not visible in the starting view.
+    const prepareScene = (geometries) => {
+      for (const geometry of geometries) {
+        const surface = geometry.imageSurface;
+        if (surface?.atlas && !surface.canvas) BL.models.paintFoliageAtlas(surface);
+      }
+    };
     // One owned texture per canvas surface. Painting changes its revision; geometry and GPU buffers stay put.
     const bindCanvasSurface = (rec, program) => {
       const surface = rec.geometry.imageSurface;
@@ -4530,6 +4537,7 @@ void main() {
       ray,
       setQuality,
       releaseGeometry,
+      prepareScene,
       // Owners of bounded, alternating meshes may prepare every variant before their first visible swap.
       prepareGeometry: (geometry) => { if (lost || !pollPrograms()) return false; recordFor(geometry); return true; },
       createRig: createRendererRig,

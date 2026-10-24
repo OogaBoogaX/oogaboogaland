@@ -2113,6 +2113,7 @@
       ray,
       setQuality: () => { },
       releaseGeometry: () => { },
+      prepareScene: () => { },
       prepareGeometry: () => true,
       createRig: () => null,
       releaseUnused: (live) => { BL.models.addLods(live); canvasShades.release(live); if (environment.source && !live.has(environment.source.geometry)) destroyEnvironment(); return 0; },
