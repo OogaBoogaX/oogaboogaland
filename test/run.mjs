@@ -17697,7 +17697,7 @@ const tileGpuChecks = async () => {
     [true, false, "0", false, false], [false, true, "1", false, true],
     [true, false, "1", true, false]
   ].map(([prepass, tile, override, rig, expected]) => ({ prepass, tile, override, rig, expected, got: enabled({ prepass }, tile, override, rig) }));
-  record("tile-based GPU: named Apple silicon skips high prepass, lower tiers skip it on every GPU, explicit overrides apply and rigs retain their own path",
+  record("tile-based GPU: named Apple silicon skips the prepass on every tier, other GPUs keep it, explicit overrides apply and rigs retain their own path",
     rows.every(row => row.got === row.expected) && asked === 7 && policy.every(row => row.got === row.expected), JSON.stringify({ classification: rows.filter(row => row.got !== row.expected), policy }));
 };
 const raceRigChecks = async () => {

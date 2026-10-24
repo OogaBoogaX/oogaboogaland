@@ -4,6 +4,8 @@ All rows use one focused native Chrome155 tab at1440×900 on AC power, M1 Pro/AN
 
 ## 2.1 Depth prepass
 
+
+Revised after review: the tier change was measured only on Apple silicon, where the named-GPU rule already skipped the prepass, so it gave no gain there and could only cost other GPUs late-Z overdraw (the mesh shader discards). Every tier keeps the prepass again unless the GPU is named Apple silicon; `prepass=0|1` still overrides. The note below records the original change.
 Low and medium disable the prepass on every GPU. High retains the named-Apple-silicon policy. `prepass=0|1` overrides ordinary geometry in every tier; rigs retain their dedicated path. Existing classification coverage now also tests tier/override/rig policy. Global checks:268/268.
 
 | Tier | Before FPS | After FPS | Before total draws/frame | After total draws/frame |
