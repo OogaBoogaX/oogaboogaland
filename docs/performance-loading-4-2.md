@@ -12,6 +12,8 @@ The hosted page no longer carries the Lightning Factory, Ooga Arcade, Rally, Dro
 
 Cold hub boot on a local server is unchanged (ready at 4,468 / 4,457 ms before, 4,394 / 4,496 ms after): the island's own build dominates it, so the gain is transfer size, not boot time here. The 3 MB inline / 1 MB gzip targets remain unmet.
 
+Drop and Orbit release their island cache on departure, so each entry rebuilds it behind the fade. [The review](https://github.com/OogaBoogaX/oogaboogaland/pull/277#pullrequestreview-5637032827) reports about 1.6–1.9 seconds for that rebuild on the reviewer's machine. This is an entry cost, separate from the transfer-size saving above; it has not been independently remeasured here.
+
 Hosted behaviour, ARM64 Chrome against the staged site served as Pages serves it (`untracked/performance/loading-probe.mjs`):
 
 - A cold hub fetches only the Lab wallpaper, which it draws on the island; no scene, kiosk or Canvas chunk.
