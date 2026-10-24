@@ -27,15 +27,17 @@
     const tries = attempts.get(group) || 0, src = tries ? `${file}${file.includes("?") ? "&" : "?"}r=${tries}` : file;
     const base = SCENE_BASE[group], prerequisite = base && typeof PRESENT[base] === "function" ? load(base) : null;
     // The scene's chunk downloads beside its base's and still runs after it.
+    let preload = null;
     if (prerequisite) {
-      const link = document.createElement("link");
-      link.rel = "preload"; link.as = "script"; link.href = src;
-      document.head.appendChild(link);
+      preload = document.createElement("link");
+      preload.rel = "preload"; preload.as = "script"; preload.href = src;
+      document.head.appendChild(preload);
     }
     const start = () => new Promise((resolve, reject) => {
       const script = document.createElement("script");
       const finish = (error) => {
         clearTimeout(timer);
+        preload?.remove();
         script.onload = script.onerror = null;
         if (!error && !PRESENT[group]()) error = new Error(`The ${group} code did not start`);
         if (error) {
@@ -51,7 +53,7 @@
       script.src = src;
       document.head.appendChild(script);
     });
-    const promise = prerequisite ? prerequisite.then(start, (error) => { loading.delete(group); attempts.set(group, tries + 1); throw error; }) : start();
+    const promise = prerequisite ? prerequisite.then(start, (error) => { preload.remove(); loading.delete(group); attempts.set(group, tries + 1); throw error; }) : start();
     loading.set(group, promise);
     return promise;
   };

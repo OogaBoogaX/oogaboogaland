@@ -4004,12 +4004,71 @@ const canvasSurfaceCacheChecks = async () => {
   if (cache.size || cache.pixels || canvases.some(c => c.width || c.height) || canvases.length > 9) failures++;
   record("Canvas surface reuse: unchanged faces reuse exact shaded images, every content/lighting/dimension input invalidates, and eviction, scene release and disposal bound owned canvases", failures === 0, JSON.stringify({ failures, paints, canvases: canvases.length }));
 };
+const deferredLoadingChecks = async () => {
+  const source = await readFile(join(root, "src/js/deferred.js"), "utf8"), rows = [];
+  const fixture = () => {
+    const nodes = [], timers = new Map(); let serial = 0;
+    const document = { hidden: false, head: { appendChild(node) { nodes.push(node); return node; } },
+      createElement: tag => ({ tag, remove() { const i = nodes.indexOf(this); if (i >= 0) nodes.splice(i, 1); } }) };
+    const context = { window: { BL: { deferredScripts: { kiosk: "/kiosk.js", "factory-scene": "/factory.js" } } }, document,
+      setTimeout: fn => { timers.set(++serial, fn); return serial; }, clearTimeout: id => timers.delete(id) };
+    runInNewContext(source, context);
+    const BL = context.window.BL, shell = BL.deferred.scene("factory");
+    const scripts = () => nodes.filter(n => n.tag === "script"), links = () => nodes.filter(n => n.tag === "link");
+    const base = () => { BL.factoryKiosk = { create() {} }; scripts().find(n => n.src.startsWith("/kiosk.js")).onload(); };
+    const timeout = () => timers.values().next().value();
+    return { BL, shell, scripts, links, base, timeout, timers };
+  };
+  const rejected = promise => promise.then(() => false, () => true);
+  // A failed prerequisite never starts its scene; repeated retries must not grow the DOM.
+  {
+    const f = fixture(); let bounded = true; const addresses = new Set();
+    for (let i = 0; i < 8; i++) {
+      const pending = f.BL.deferred.load("factory-scene"), failed = rejected(pending);
+      bounded &&= f.BL.deferred.load("factory-scene") === pending && f.scripts().length === 1 && f.links().length === 1;
+      addresses.add(f.links()[0].href);
+      if (i % 2) f.timeout(); else f.scripts()[0].onerror();
+      bounded &&= await failed && !f.scripts().length && !f.links().length && !f.timers.size && f.BL.deferred.pending === 0;
+    }
+    rows.push({ path: "base error and timeout retries", ok: bounded && addresses.size === 8 });
+  }
+  for (const outcome of ["success", "error", "timeout", "missing definition"]) {
+    const f = fixture(), pending = f.BL.deferred.load("factory-scene"), failed = rejected(pending);
+    const beside = f.links().length === 1 && f.scripts().length === 1;
+    f.base(); await Promise.resolve();
+    const script = f.scripts().find(n => n.src.startsWith("/factory.js"));
+    const ordered = !!script && f.BL.deferred.present("kiosk");
+    if (outcome === "success") {
+      const enter = () => {}, original = f.BL.deferred.scene("factory", { enter, state: { active: true } });
+      f.BL.deferred.scene("factory", { enter() {}, state: { active: false } });
+      script.onload(); await pending;
+      rows.push({ path: "late definition keeps the active shell", ok: original === f.shell && f.shell.enter === enter && f.shell.state.active });
+    } else if (outcome === "timeout") f.timeout();
+    else if (outcome === "error") script.onerror();
+    else script.onload();
+    const didFail = await failed;
+    rows.push({ path: outcome, ok: beside && ordered && didFail === (outcome !== "success") && !f.links().length && !f.timers.size
+      && f.scripts().length === (outcome === "success" ? 2 : 1) });
+    if (outcome !== "success") {
+      const retry = f.BL.deferred.load("factory-scene"), next = f.scripts().find(n => n.src.startsWith("/factory.js"));
+      const fresh = next.src.endsWith("?r=1");
+      f.BL.deferred.scene("factory", { enter() {} }); next.onload(); await retry;
+      rows.push({ path: `${outcome} recovery`, ok: fresh && f.BL.deferred.load("factory-scene") === null && !f.links().length && !f.timers.size });
+    }
+  }
+  record("deferred loading: base and scene fetch together but execute in order, failed retries and timeouts release preloads, recovery fetches a fresh address and late definitions keep active state", rows.every(r => r.ok), JSON.stringify(rows));
+};
 // Every file in src/characters/ must register once and build a whole Ooga, so a
 // new contributor is covered without editing this suite.
 const characterChecks = async () => {
   const context = { window: {}, URLSearchParams, location: { search: "" } };
   for (const name of CONTRIBUTOR_SOURCES) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
-  const BL = context.window.BL, all = BL.characters.all(), hooks = ["torso", "club", "gear", "skull", "crown", "eyes", "mark", "hatY", "headgear", "extras", "tint"];
+  const BL = context.window.BL, all = BL.characters.all(), hooks = ["torso", "club", "gear", "skull", "crown", "eyes", "mark", "hatY", "headgear", "extras", "tint"], mirrorGeometries = new Set();
+  const collect = node => {
+    if (node.geometry) mirrorGeometries.add(node.geometry);
+    if (node.skins) for (const skin of Object.values(node.skins)) mirrorGeometries.add(skin);
+    for (const child of node.children) collect(child);
+  };
   const rows = all.map((c) => {
     BL.models.setScope("character-rebuild");
     const traits = BL.contributors.traitsFor(c.handle), m = BL.models.caveman(traits);
@@ -4024,6 +4083,9 @@ const characterChecks = async () => {
     const visit = node => { if (node.geometry) geometries.add(node.geometry); for (const child of node.children) visit(child); };
     visit(rebuilt.root);
     if (rebuilt.tint) for (const [original, twin] of rebuilt.tint) geometries.add(original).add(twin);
+    collect(rebuilt.root);
+    for (const geo of geometries) mirrorGeometries.add(geo);
+    for (const weapon of Object.values(rebuilt.skins)) for (const skin of Object.values(weapon)) mirrorGeometries.add(skin);
     const palette = [...geometries].every(geo => geo.faces.every(face => face.color && face.color.length === 3 && face.color.every(Number.isFinite)));
     BL.models.release("character-rebuild", []); BL.models.setScope(null);
     return { palette, handle: c.handle, joined: c.joined > 1.7e9 && c.joined < 4e9, built: m.headOpen.faces.length > 0 && m.headClosed.faces.length > 0 && m.headOpen !== m.headClosed,
@@ -4034,6 +4096,44 @@ const characterChecks = async () => {
   const unique = new Set(all.map((c) => c.handle.toLowerCase())).size === all.length;
   const ordered = all.every((c, i) => !i || all[i - 1].joined <= c.joined);
   record("characters: every src/characters file registers one handle, builds a whole Ooga and uses only known hooks", rows.length === CAST && CAST === BL.contributors.roster.length && unique && ordered && rows.every((r) => r.joined && r.built && r.parts && r.hooks && r.tint && r.voice && r.display && r.palette), JSON.stringify(rows.filter((r) => !(r.joined && r.built && r.parts && r.hooks && r.tint && r.voice && r.display && r.palette))));
+  for (const item of BL.models.SWAG) collect(item.buildNode());
+  Object.assign(BL, { pilot: { WALK: { speed: 2.8, gravity: 9.8 } }, crew: { JUMP_SPEED: 4 } });
+  for (const name of ["convex", "agent"]) runInNewContext(await readFile(join(root, `src/js/${name}.js`), "utf8"), context);
+  const mouth = { x: 0, z: 0, ry: 0, floorY: 0 }, coatClip = BL.agent.labCoatClip(mouth), suitClip = BL.agent.suitClip(mouth);
+  for (const clip of [coatClip, suitClip]) for (const part of Object.values(clip)) {
+    if (part?.ape) mirrorGeometries.add(part.ape).add(part.code);
+  }
+  for (const suit of suitClip.suits) for (const geo of Object.values(suit)) mirrorGeometries.add(geo);
+  for (const suitColor of [null, ...Array.from({ length: BL.agent.SUIT_COLORS }, (_, i) => i)]) {
+    const rig = BL.agent.create({ groundAt: () => 0, managed: true, coatClip, ...(suitColor === null ? {} : { suitClip, suitColor }) });
+    for (const form of ["ape", "code"]) { rig.setForm(form); collect(rig.root); }
+    rig.dispose();
+  }
+  for (const variant of [undefined, 0, 1]) {
+    const flask = BL.agent.labFlaskGeometry(variant);
+    mirrorGeometries.add(flask).add(flask.glassShell);
+  }
+  // Exercise the renderer's real reduced-capture decision on actual builder output, in both storage paths.
+  const source = await readFile(join(root, "src/js/gl-renderer.js"), "utf8"), start = source.indexOf("    const captureInstanceVisible ="), end = source.indexOf("    const drawCaptureRuns =", start);
+  if (start < 0 || end < 0) throw new Error("Reduced mirror capture predicate not found");
+  let inView = true;
+  const capture = new Function("boundsOf", "slotInFrustum", "sphereInFrustum", `${source.match(/const CULL_MARGIN = [^;]+;/)[0]}
+    ${source.match(/const INSTANCE_FLOATS = [^;]+;/)[0]} const MIRROR_FRUSTUM = [];
+    ${source.slice(start, end)} return { visible: captureInstanceVisible, margin: CULL_MARGIN, stride: INSTANCE_FLOATS };`)(BL.scene.boundsOf, () => inView, () => inView);
+  let small = 0, failures = 0;
+  const check = (geometry, expected) => {
+    const bounds = BL.scene.boundsOf(geometry), data = new Float32Array(capture.stride);
+    data[0] = data[5] = data[10] = data[15] = 1;
+    const node = { geometry, spheres: new Float32Array([0, 0, 0, bounds.radius + capture.margin]) }, batch = { geometry, batch: { instanceData: data } };
+    inView = true;
+    if (capture.visible(node, 0) !== expected || capture.visible(batch, 0) !== expected) failures++;
+    inView = false;
+    if (capture.visible(node, 0) || capture.visible(batch, 0)) failures++;
+    if (expected && bounds.radius < 1.25) small++;
+  };
+  for (const geo of mirrorGeometries) check(geo, true);
+  check(BL.models.box({ w: 0.1, h: 0.1, d: 0.1, color: "#ffffff" }), false);
+  record("mirror character ownership: reduced captures keep both weapon skins, tint and head swaps, swag and gorilla forms/clothing, while still culling small scenery and out-of-frustum parts", failures === 0 && small > 0, JSON.stringify({ geometries: mirrorGeometries.size, small, failures }));
 };
 // The mempool.space feed parser in Node: message shapes as the socket sends them, no socket.
 const mempoolFeedChecks = async () => {
@@ -6109,6 +6209,7 @@ const factoryHostedShield = { name: "factory hosted shield", refuse: "/js/factor
   const inKey = await b.evaluate(`(() => { const m = window.__mouth; return [-Math.sin(m.ry), -Math.cos(m.ry)]; })()`);
   const asked = () => site.fetched.filter(chunkOf("factory-scene")).length;
   await walkToward(b, inKey[0], inKey[1], 0.8);
+  const notified = await untilPage(b, 'B.scene === "hub" && !B.transitioning && document.getElementById("toast").textContent.includes("could not be opened")', 15000);
   await b.sleep(4000);
   const refused = { asked: asked(), ...await b.evaluate(`({ scene: __ooga.scene, transitioning: __ooga.transitioning, driving: !!__ooga.pilot.player })`) };
   site.refused.length = 0;
@@ -6116,7 +6217,7 @@ const factoryHostedShield = { name: "factory hosted shield", refuse: "/js/factor
   await walkToward(b, -inKey[0], -inKey[1], 0.8);
   await walkToward(b, inKey[0], inKey[1], 0.8);
   const entered = await untilPage(b, 'B.scene === "factory" && !B.transitioning', 15000);
-  record("factory hosted: a refused factory download sends the Ooga back once, driving, until it steps out of the shield, and walking back in opens the hall", refused.asked <= 2 && refused.scene === "hub" && !refused.transitioning && refused.driving && entered, JSON.stringify({ refused, entered, fetched: site.fetched }));
+  record("factory hosted: a refused factory download sends the Ooga back once, driving, until it steps out of the shield, and walking back in opens the hall", notified && refused.asked >= 1 && refused.asked <= 2 && refused.scene === "hub" && !refused.transitioning && refused.driving && entered && asked() > refused.asked, JSON.stringify({ notified, refused, entered, fetched: site.fetched }));
 } };
 for (const [id, step, path] of [["orbit", orbitHosted, "/oogaorbit"], ["arcade", arcadeHostedDrop, "/oogaarcade"], ["factory", factoryHostedShield, "/"]]) {
   if (ONLY && !onlyMatches(step.name)) continue;
@@ -18755,7 +18856,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   tessAnswerChecks(BL);
   const clearance = claimClearanceProof();
   record("hub footprint clearance: conservative rejection preserves circular boundaries, live reservations and exceptional numbers", clearance.failures === 0 && clearance.cases >= 4000, JSON.stringify(clearance));
-  await characterChecks(); await contributorActivityChecks(); await mempoolFeedChecks(); await debugActivityStatusChecks(); await soloDebugChecks(); await adaptiveQualityChecks(); await chainSnapshotChecks(); await dsbSharedDataChecks(); await timechainDataChecks(); await timechainRoomChecks(); await timechainBlockChecks(); await weatherStepChecks(); await poolLayoutChecks(); await gameRulesChecks(); await ghostHuntChecks(); await donationClientChecks(); await poolWildlifeChecks(); await totemFeedChecks();
+  await deferredLoadingChecks(); await characterChecks(); await contributorActivityChecks(); await mempoolFeedChecks(); await debugActivityStatusChecks(); await soloDebugChecks(); await adaptiveQualityChecks(); await chainSnapshotChecks(); await dsbSharedDataChecks(); await timechainDataChecks(); await timechainRoomChecks(); await timechainBlockChecks(); await weatherStepChecks(); await poolLayoutChecks(); await gameRulesChecks(); await ghostHuntChecks(); await donationClientChecks(); await poolWildlifeChecks(); await totemFeedChecks();
 
   // Scene state built directly instead of booted; seed 1 matches scene-hub.js.
   // Sealed cave guides need the hub's seal nodes, so probes reading them stay in the browser tier.
