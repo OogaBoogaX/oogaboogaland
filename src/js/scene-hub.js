@@ -10883,19 +10883,26 @@
   // registration are still created together by enter. No partly populated actor registry reaches a live scene.
   const preparedCharacters = models.scopedMap(), characterLocations = new Map();
   const rememberCharacterLocations = () => {
-    if (!LAZY_BEDDING || !crew) return;
+    if (!crew) return;
     characterLocations.clear();
     for (const cave of crew.list) {
       const p = cave.root.position;
       characterLocations.set(cave.traits.name, { x: p.x, y: p.y, z: p.z });
     }
   };
+  // A released hub comes back to an island its departure dropped, and to every hub-scoped model cache with it. The pure
+  // builds run here in slices behind the fade, not in the swap frame (seconds on a phone): the island, the Mempool
+  // island's meshes, the rock guides' walls (BL.rockGuides.prepareSteps) and every Ooga's rig. What is left for enter
+  // is placing the props, the crew and the outline registry. Boot (unless ?lazyhub=1) and a kept hub skip it.
   const prepareHubSteps = function* (ctx) {
-    if (heldHub || ctx.from === "hub") return null;
+    if (heldHub || ctx.from === "hub" || !ctx.from && !LAZY_BEDDING) return null;
     preparedCharacters.clear();
     const factory = caves.slots.find(slot => slot.status === "open" && slot.scene === "factory");
-    yield* terrain.islandSteps({ seed: SEED, roofHole: factory ? { id: factory.id, ...BL.factoryModels.ROOF_TUBE } : null }, { until: 0, budget: BL.buildTasks.SLICE_MS, work: 0 });
+    const options = { seed: SEED, roofHole: factory ? { id: factory.id, ...BL.factoryModels.ROOF_TUBE } : null };
+    const slice = { until: 0, budget: BL.buildTasks.SLICE_MS, work: 0 };
+    if (!terrain.hasIsland(options)) yield* terrain.islandSteps(options, slice);
     yield* poolModels.prepareSteps();
+    yield* BL.rockGuides.prepareSteps(terrain.island(options), slice);
     const roster = contributors.activeRoster, point = camera ? camera.position : PILE_VIEW.target;
     const requested = ctx.world.pilot || params.get("character")?.trim().toLowerCase();
     const distance = contributor => {
@@ -11417,7 +11424,7 @@
     // Signed-in visitors elsewhere, as the Oogas they drive; the crew walks round them.
     shared.outsideActors = () => remotes.actors();
     shared.outsideActorHeight = REMOTE_BODY_HEIGHT;
-    if (LAZY_BEDDING) shared.characterModel = takePreparedCharacter;
+    shared.characterModel = takePreparedCharacter;
     crew = shared.crew = crewMod.create(shared);
     remotes = BL.remotePlayers.create({
       root, crew, visible: remoteShown,
@@ -12280,16 +12287,6 @@
     }
   };
   BL.scenes = BL.scenes || {};
-  // A released hub comes back to an island its departure dropped: rebuild it in slices behind the fade, not in the
-  // swap frame (seconds on a phone). Boot and a kept hub have nothing to rebuild here.
-  const prepareIslandSteps = function* (ctx) {
-    if (heldHub || !ctx.from || ctx.from === "hub") return null;
-    const factory = caves.slots.find(slot => slot.status === "open" && slot.scene === "factory");
-    const options = { seed: SEED, roofHole: factory ? { id: factory.id, ...BL.factoryModels.ROOF_TUBE } : null };
-    if (terrain.hasIsland(options)) return null;
-    yield* terrain.islandSteps(options, { until: 0, budget: BL.buildTasks.SLICE_MS, work: 0 });
-    return null;
-  };
-  hubScene.buildSteps = LAZY_BEDDING ? prepareHubSteps : prepareIslandSteps;
+  hubScene.buildSteps = prepareHubSteps;
   BL.scenes.hub = hubScene;
 })();

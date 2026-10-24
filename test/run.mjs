@@ -12164,7 +12164,12 @@ scene("hub", { label: "sphere inner surface", query: "pos=0&view=timechain", ste
 // handover point, `handZ` in, `outZ` out; the room's from `entry` in, `exitEye` out), the last frame before and first
 // after each swap, and every held first-person frame whose camera stands off the Ooga (a third-person frame).
 const sphereLog = `(() => {
-  const H = window.__handover = { swapIn: null, swapOut: null, far: 0, farAt: null, frames: 0 };
+  // fadeMax: the darkest the director's fade went while the crossing ran; longest: the longest main-thread task seen.
+  const H = window.__handover = { swapIn: null, swapOut: null, far: 0, farAt: null, frames: 0, fadeMax: 0, longest: 0 };
+  if (typeof PerformanceObserver === "function" && PerformanceObserver.supportedEntryTypes.includes("longtask")) {
+    H.tasks = new PerformanceObserver((list) => { for (const e of list.getEntries()) H.longest = Math.max(H.longest, Math.round(e.duration)); });
+    H.tasks.observe({ type: "longtask" });
+  }
   const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
   let last = null;
   const step = () => {
@@ -12184,6 +12189,7 @@ const sphereLog = `(() => {
         body = D.avatar;
       }
       if (body && Math.hypot(p.x - body.root.position.x, p.z - body.root.position.z) > 0.6) { H.far++; H.farAt = row; }
+      if (row || B.transitioning) H.fadeMax = Math.max(H.fadeMax, B.fade);
       if (row) {
         if (last && last.scene !== row.scene) { if (row.scene === "room") H.swapIn = [last, row]; else H.swapOut = [last, row]; }
         last = row; H.frames++;
@@ -12311,15 +12317,17 @@ const sphereCrossing = { name: "timechain crossing", why: "playthrough: Enter wa
   const out = await untilPage(b, 'B.scene === "hub" && !B.transitioning && BL.scenes.hub.debug.timechainIsland.gate.debug.state === "idle"', 25000);
   const back = await b.evaluate(`(() => { const B = __ooga, ${sphereLocal}, G = T.gate, c = B.pilot.player; B.advance(1.2, 1 / 60);
     return { player: c && c.traits.name, fromDoors: c ? local(c.root.position) - SP.THRESHOLD : null, doors: G.debug.open, plug: T.site.plug.visible, view: B.pilot.mode, hash: location.hash, head: c ? !c.parts.head.cameraHidden : null, zone: BL.net.state.zone }; })()`);
-  const seams = await b.evaluate(`(() => { const H = window.__handover; cancelAnimationFrame(H.raf); return { swapIn: H.swapIn, swapOut: H.swapOut, far: H.far, farAt: H.farAt, frames: H.frames }; })()`);
+  const seams = await b.evaluate(`(() => { const H = window.__handover; cancelAnimationFrame(H.raf); if (H.tasks) H.tasks.disconnect();
+    return { swapIn: H.swapIn, swapOut: H.swapOut, far: H.far, farAt: H.farAt, frames: H.frames, fadeMax: H.fadeMax, longest: H.longest, policy: BL.scenes.hub.retained ? "kept" : "released" }; })()`);
   record("timechain crossing: Enter opens the doors, lifts the plug for the traveler alone and swoops into its eyes as it walks in",
     crossing && !passage.plug && !passage.popup && passage.lens === "eyes", JSON.stringify({ crossing, passage }));
   record("timechain crossing: the same Ooga arrives in a solo Room 3 in first person, the doors close behind it and the address names the room",
     inside && room.room === 3 && room.mode === "solo" && room.player === "portlandhodl" && room.view === "first-person" && room.doors === 0 && room.atArrival < 0.4 && room.hash === "#/sphere-3" && room.zone === "none", JSON.stringify(room));
   record("timechain crossing: Space at the Exit button walks it back out of the passage onto the bridge, the doors shut, the plug back and the view out of its eyes",
     out && back.player === "portlandhodl" && back.fromDoors > 1 && back.doors === 0 && back.plug && back.view !== "first-person" && back.hash === "#/sphere" && back.head, JSON.stringify(back));
-  record("timechain crossing: from the keypad into the room and from the Exit button out to the bridge every frame is the Ooga's own eye, and each scene swap is the same view on both sides",
-    seams.frames > 30 && seams.far === 0 && seamless(seams.swapIn) && seamless(seams.swapOut), JSON.stringify(seams));
+  // Under hubcache=release the island is rebuilt behind the walk-out; the room's last frame holds while it builds, never black.
+  record("timechain crossing: from the keypad into the room and from the Exit button out to the bridge every frame is the Ooga's own eye, never faded to black, and each scene swap is the same view on both sides",
+    seams.frames > 30 && seams.far === 0 && seams.fadeMax === 0 && seamless(seams.swapIn) && seamless(seams.swapOut), JSON.stringify(seams));
 } };
 const sphereAccount = { name: "timechain account", why: "regression: account Retry must keep the owned Ooga at the keypad; an unanswered account still offers a solo visit without guessing", run: async (b) => {
   await b.evaluate(`(() => { const B = __ooga, ${sphereLocal}; BL.net.state.resolved = false; ${sphereStand("0.7", "13.8")} })()`);
@@ -12386,6 +12394,8 @@ const sphereAccount = { name: "timechain account", why: "regression: account Ret
       && released.state === "idle" && released.selected === "portlandhodl" && released.refusal === null && released.near < 2, JSON.stringify({ retry, released }));
 } };
 scene("hub", { label: "timechain doorway", query: "solo=1&character=portlandhodl&view=timechain&pos=0", opts: { motion: true }, steps: [sphereApproach, sphereThreshold, sphereKeypad, sphereCrossing, sphereAccount, trip("hub")] });
+// The released hub (phones under 8 GB): the walk-out rebuilds the hub behind the room's held frame.
+scene("hub", { label: "timechain doorway release", query: "solo=1&character=portlandhodl&view=timechain&pos=0&hubcache=release", opts: { motion: true }, steps: [sphereApproach, sphereCrossing] });
 scene("hub", { label: "timechain doorway canvas2d", exclusive: true, query: "solo=1&character=portlandhodl&view=timechain&pos=0&canvas2d=1", steps: [sphereApproach, sphereCrossing] });
 scene("hub", { label: "timechain resident", steps: [{ name: "timechain resident", why: "regression: Sani slept in HQ on ordinary visits, leaving his island empty", run: async (b) => {
   const r = await b.evaluate(`(() => {
@@ -19436,6 +19446,9 @@ record("character visibility source bakes: ownership wrappers share exact immuta
         && hits[0].y > cave.root.position.y - cave.baseY + cave.bodyHeight, JSON.stringify({ before, health: cave.health, hits }));
     } finally { crew.dispose(); }
   }
+  // The walls come from the sliced build a released hub's return runs behind the fade, at its finest slicing, so every
+  // sight check below reads that build.
+  for (const walls = BL.rockGuides.prepareSteps(island, { until: 0, budget: 0, work: 0 }); !walls.next().done;);
   const rockGuides = BL.rockGuides.create({ island, sealed: [] });
   globalThis.__ooga = { island, headquarters: { rockGuides } };
 

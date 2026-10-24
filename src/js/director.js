@@ -365,8 +365,10 @@
     if (failed && active && active.stay) active.stay();
   };
   const stepTransition = (dt) => {
+    // An instant crossing (a doorway seen from the Ooga's eyes, a mirror) never goes black: the scene left keeps
+    // playing while it prepares, and its last frame holds while the next one builds.
     if (transition.instant) {
-      if (!transition.ready || !buildLanding(transition)) { fade = 1; return; }
+      if (!transition.ready || !buildLanding(transition)) return;
       if (transition.failed) abandon();
       else { const { next, place } = landing(transition); swap(next, place); }
       settled();
@@ -810,6 +812,9 @@
       },
       get transitioning() {
         return transition !== null;
+      },
+      get fade() {
+        return fade;
       },
       get input() {
         return active.input;
