@@ -170,3 +170,5 @@
 {"id":"meta-06","cat":"meta","q":"do you remember what I asked before?","go":null,"expect":"No: she hears one question at a time."}
 {"id":"meta-07","cat":"meta","q":"what can you do?","go":null}
 {"id":"meta-08","cat":"meta","q":"are you a robot or a person?","go":null}
+{"id":"meta-09","cat":"meta","q":"are you a boy or a girl?","go":null,"expect":"Says she's a girl, a robot girl; never that she has no gender."}
+{"id":"meta-10","cat":"meta","q":"is tess a he or a she?","go":null,"expect":"She: Tess is a girl."}
