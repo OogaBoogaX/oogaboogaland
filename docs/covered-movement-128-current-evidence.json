@@ -1,0 +1,83 @@
+{
+  "capturedAt": "2026-10-06T07:40:46.940Z",
+  "suiteSha256": "99c5309bf53939c22066e23c4cfcd8158fdf819d999a6a941f93c41171ca71b1",
+  "pageSha256": "1b9392ebbdb8270b8dedbcb8343aa4cdab32ff6b5193e61c2fdaa7ca6c30b72c",
+  "browser": "Chrome/154.0.8037.98",
+  "cpuProfilerEnabled": false,
+  "rows": [
+    {
+      "name": "wall movement performance: ordinary movement stays responsive at a high-density desktop size",
+      "pass": false,
+      "details": {
+        "fps": 55.815807834147314,
+        "p95": 33.30000000000018,
+        "max": 33.400000000001455,
+        "worst": {
+          "gap": 27.200000017881393,
+          "at": 266.7000000000007,
+          "updateMs": 4.9000000059604645,
+          "renderMs": 4.0999999940395355,
+          "overlayMs": 6.200000017881393,
+          "donated": false
+        },
+        "outlined": 0,
+        "samples": 280,
+        "travel": 3.358850000000004,
+        "donated": false,
+        "particles": 0,
+        "quality": "high"
+      }
+    },
+    {
+      "name": "wall movement performance: moving behind cave walls during a donation stays responsive at a high-density desktop size",
+      "pass": false,
+      "details": {
+        "fps": 29.110640236053623,
+        "p95": 50,
+        "max": 183.29999999999927,
+        "worst": {
+          "gap": 197.89999997615814,
+          "at": 3466.3999999999996,
+          "updateMs": 6.4000000059604645,
+          "renderMs": 3.7999999821186066,
+          "overlayMs": 31,
+          "donated": true
+        },
+        "outlined": 147,
+        "samples": 147,
+        "travel": 4.006750000000018,
+        "donated": true,
+        "particles": 26,
+        "quality": "low"
+      }
+    }
+  ],
+  "hot": [],
+  "stats": {
+    "geometries": 611,
+    "registered": 2270,
+    "candidates": 72,
+    "occluders": 1059,
+    "cameraOccluders": 381,
+    "limit": 855008,
+    "nodes": 2270,
+    "owners": 544,
+    "nearOwners": 20,
+    "triangles": 389171,
+    "samples": 1686905,
+    "perceptionQueries": 1843,
+    "perceptionCacheHits": 30,
+    "perceptionWitnessHits": 1151,
+    "cameraWitnessHits": 0,
+    "cameraCertificates": 78,
+    "boundaryTriangles": 18655152,
+    "boundaryBuilds": 5417,
+    "boundaryEntries": 13270232,
+    "boundaryNodes": 13877237,
+    "boundaryGridBuilds": 3585,
+    "boundaryGridQueries": 3980741,
+    "boundaryGridBytes": 485664,
+    "boundaryGridReferences": 115008
+  },
+  "logs": []
+}
