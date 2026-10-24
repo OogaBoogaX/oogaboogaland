@@ -18630,6 +18630,65 @@ const reviewCrowdAndFallbackProof = async () => {
   return {clear,filtered,blocked,hidden,above,cpu,gpu,fetches,gaps};
 };
 
+// terrain-snapshot.js is a hand-kept copy of terrain.js's queries, for the opt-in Worker build. The flag-off island
+// must keep its golden digest, and the snapshot's queries, rehydrated after a structured clone (the Worker's and
+// IndexedDB's codec), must answer exactly as the direct build does on a seeded sample of every query.
+// The golden is the island as it was built before the snapshot existed.
+const TERRAIN_GOLDEN = "cdfe1bb2820f5119";
+const terrainParityChecks = (BL, island) => {
+  const islandDigest = (built) => {
+    const h = createHash("sha256"), g = built.geometry, faces = g.faces;
+    h.update(new Uint8Array(Float64Array.from(g.verts).buffer));
+    const row = new Float64Array(80);
+    for (let n = 0; n < faces.length; n++) {
+      const f = faces[n], c = f.color || [];
+      row[0] = f.i.length; for (let k = 0; k < f.i.length; k++) row[1 + k] = f.i[k];
+      row[f.i.length + 1] = c[0] ?? -1; row[f.i.length + 2] = c[1] ?? -1; row[f.i.length + 3] = c[2] ?? -1; row[f.i.length + 4] = f.emissive || 0;
+      h.update(new Uint8Array(row.buffer, 0, (f.i.length + 5) * 8));
+    }
+    h.update(JSON.stringify({ mouths: built.mouths, hq: built.headquarters.rooms.length, path: built.path.geometry.faces.length }));
+    return h.digest("hex").slice(0, 16);
+  };
+  const direct = islandDigest(island);
+  const steps = BL.terrain.islandSnapshotSteps({ seed: 1 }, null);
+  let step; do { step = steps.next(); } while (!step.done);
+  const clone = structuredClone(step.value);
+  BL.terrainSnapshot.validate(clone);
+  const restored = BL.terrainSnapshot.create(clone), snapshotDigest = islandDigest(restored);
+  // A seeded sample over the grid's box (and a little past it), every query with its own argument shape.
+  let seed = 0x9e3779b9;
+  const rand = () => { seed = seed + 0x6d2b79f5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+  const [, ox, oy] = island.sightGrid, X = () => (rand() * 2 - 1) * (-ox + 2), Y = () => oy - 1 + rand() * 41, R = () => rand() * 1.2;
+  const out = () => ({});
+  const queries = {
+    heightAt: [6000, () => [X(), X()]], surfaceAt: [6000, () => [X(), X()]], onLand: [6000, () => [X(), X()]], isPath: [6000, () => [X(), X()]],
+    isGrassAt: [6000, () => [X(), X()]], frontageColumnAt: [4000, () => [X(), X()]], windowPiecesAt: [4000, () => [X(), X()]],
+    supportAt: [8000, () => [X(), X(), Y(), rand() * 1.2, rand() < 0.5 ? null : -Infinity, R()]],
+    smoothSupportAt: [4000, () => [X(), X(), Y(), rand() * 1.2, R()]],
+    clearAt: [8000, () => [X(), Y(), X(), R(), rand() * 2]], ceilingAt: [4000, () => [X(), Y(), X(), R()]],
+    cavityAt: [6000, () => [X(), X(), out(), [0, 1, 2, 3, 4, 5, 6, 7, 8][Math.floor(rand() * 9)], rand() < 0.3 ? Infinity : Y()]],
+    rampColumnAt: [4000, () => [X(), X(), rand() < 0.5, out()]],
+    solidAt: [8000, () => [X(), Y(), X()]], rockMaterialAt: [6000, () => [X(), Y(), X()]], rockCaveAt: [6000, () => [X(), Y(), X()]],
+    stairAt: [4000, () => [X(), Y(), X()]], overlapsStairs: [4000, () => [X(), X(), R()]], undersideDepthAt: [2000, () => [rand() * 45]],
+    voxelSegmentClearAt: [3000, () => { const x = X(), y = Y(), z = X(); return [x, y, z, x + rand() * 6 - 3, y + rand() * 4 - 2, z + rand() * 6 - 3, R(), rand() * 2]; }],
+    hullClearAt: [2000, () => { const x = X(), y = Y(), z = X(), v = []; for (let k = 0; k < 8; k++) v.push(x + rand() * 2, y + rand() * 2, z + rand() * 2); return [v]; }],
+    sightClearAt: [3000, () => { const x = X(), y = Y(), z = X(); return [x, y, z, x + rand() * 30 - 15, y + rand() * 12 - 6, z + rand() * 30 - 15]; }],
+    sightBoxClearAt: [3000, () => { const x = X(), y = Y(), z = X(); return [x, y, z, x + rand() * 3, y + rand() * 3, z + rand() * 3]; }],
+    sightBoxSolidAt: [3000, () => { const x = X(), y = Y(), z = X(); return [x, y, z, x + rand() * 3, y + rand() * 3, z + rand() * 3]; }]
+  };
+  const answer = (fn, args) => { try { const value = fn(...args); return JSON.stringify([value, args.find(a => a && typeof a === "object" && !Array.isArray(a)) || null]); } catch (error) { return `throw ${error.message}`; } };
+  let total = 0;
+  const mismatches = [], missing = Object.keys(island).filter(k => typeof island[k] === "function" && !(k in queries));
+  for (const [name, [count, args]] of Object.entries(queries)) for (let n = 0; n < count; n++) {
+    const a = args(), b = structuredClone(a);
+    total++;
+    const left = answer(island[name], a), right = answer(restored[name], b);
+    if (left !== right && mismatches.length < 5) mismatches.push({ name, args: a, left, right });
+  }
+  record("terrain parity: the flag-off island keeps its golden digest, its Worker snapshot survives a structured clone and validation with the same mesh, and every snapshot query answers a seeded sample exactly as terrain.js does",
+    direct === TERRAIN_GOLDEN && snapshotDigest === direct && !mismatches.length && !missing.length && total > 100000,
+    JSON.stringify({ direct, golden: TERRAIN_GOLDEN, snapshotDigest, total, missing, mismatches }));
+};
 const unitChecks = async () => {
   await canvasSurfaceCacheChecks();
   const rage = await gorillaRageProof();
@@ -18925,6 +18984,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   // Scene state built directly instead of booted; seed 1 matches scene-hub.js.
   // Sealed cave guides need the hub's seal nodes, so probes reading them stay in the browser tier.
   const island = BL.terrain.island({ seed: 1 });
+  terrainParityChecks(BL, island);
   {
     // These real c3 roof poses cover the threshold gap, unsafe interpolation,
     // and a rejected first target with a previously clear raised arm.
