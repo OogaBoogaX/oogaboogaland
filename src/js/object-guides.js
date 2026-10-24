@@ -629,6 +629,16 @@
       materializeContours(actor, contourAnchor[0], contourAnchor[1], contourAnchor[2], retained, count);
     };
     result.ensureContours = ensureContours;
+    // A deferred emission's lazy bakes, one a call (true while any is left), so a caller can spread a first emission
+    // over several tasks before `ensureContours`; the bakes are the ones the emission would make.
+    result.bakeNext = () => {
+      if (!contoursPending) return false;
+      for (let n = 0; n < candidateCount; n++) {
+        const geometry = candidates[n].geometry;
+        if (geometry.ready === false) { void geometry.lines; return true; }
+      }
+      return false;
+    };
     const collect = (actor, ex, ey, ez, camera = null, aspect = 1, retainedOwners = null, retainedCount = 0, deferContours = false) => {
       const actorRoot = actor && actor.root;
       let occlusionChanged = false, structuralChanged = false, perceptionChanged = false, providerChanged = false;

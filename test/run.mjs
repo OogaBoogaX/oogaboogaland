@@ -6087,12 +6087,14 @@ const hudVisit = { name: "hub HUD lifetime", why: "regression: scene visits recr
     H.root = S.hub.root; H.pilot = __ooga.pilot; H.input = S.hub.input;
     H.solids = __ooga.headquarters.solids.props; H.guides = __ooga.headquarters.objectGuides;
     H.roof = S.hub.debug.terrainRampRoof; H.footsteps = __ooga.footsteps;
-    H.enters = [S.lab.enter, S.hub.enter];
-    for (const [i, id] of ["lab", "hub"].entries()) S[id].enter = ctx => {
+    H.enters = [S.lab.enter, S.hub.enter]; H.hubSteps = S.hub.enterSteps;
+    const visited = (ctx) => {
       H.signals.push(ctx.signal);
       window.addEventListener("hud-lifetime-probe", () => H.calls++, { signal: ctx.signal });
-      return H.enters[i](ctx);
     };
+    for (const [i, id] of ["lab", "hub"].entries()) S[id].enter = ctx => { visited(ctx); return H.enters[i](ctx); };
+    // A released hub's return enters in slices.
+    S.hub.enterSteps = function* (ctx) { visited(ctx); return yield* H.hubSteps(ctx); };
   })()`);
   try {
     await tourGo(b, "lab");
@@ -6126,7 +6128,7 @@ const hudVisit = { name: "hub HUD lifetime", why: "regression: scene visits recr
     })()`);
     record("HUD lifetime: leaving releases input and audio, the chosen policy retains or rebuilds the graph, fresh visit handlers fire once, and reused rows retain sorting, units and the away toggle", parked.policy && parked.empty && parked.quiet && parked.targets === 0 && !parked.audio && r.painted && r.graph && r.ended && r.calls === 1 && r.roster && r.leaders && r.visible > 0 && r.ranked && r.sats && r.hidden && r.away, JSON.stringify({ parked, resumed: r }));
   } finally {
-    await b.evaluate(`(() => { const H = window.__hudVisit; BL.scenes.lab.enter = H.enters[0]; BL.scenes.hub.enter = H.enters[1]; delete window.__hudVisit; })()`);
+    await b.evaluate(`(() => { const H = window.__hudVisit; BL.scenes.lab.enter = H.enters[0]; BL.scenes.hub.enter = H.enters[1]; BL.scenes.hub.enterSteps = H.hubSteps; delete window.__hudVisit; })()`);
   }
 } };
 // A kept island left with fruit in the air and a tween running: both finish on the next visit, nothing hangs.
@@ -11917,7 +11919,45 @@ const hubDistantEffects = { name: "hub distant effects", why: "rule: distant por
 scene("hub", { label: "distant effects", query: "pos=0", steps: [hubDistantEffects] });
 scene("hub", { opts: !ONLY || onlyMatches(hubArrival.name) ? { initScript: `(${hubSleepWire.toString()})()` } : {}, steps: [hubArrival, { name: `work movement lab lanes ${1 / RATES[0]}Hz`, why: "regression: work walkers left their facing-right side of the lab lane", open: "on about 4 boots in 30 the lane targets sit on the centre or far side; unfixed", run: labLanes }, donation("hub"), hubWalking, hudVisit, hubKeptDelivery, hubMapNavigation, hubRainforestSteps, hubRoutes, hubFall, hubGrounding, hubKeypadRedirect, trip("hub"), factoryActivityRouting] });
 // The same ownership contract exercises complete destruction on memory-limited devices.
-scene("hub", { label: "release policy", query: "hubcache=release", steps: [hudVisit, trip("hub")] });
+// A released hub's return enters in slices (`enterSteps`), one at boot or with no slicing in one go (`enter`): the same
+// statements in the same order, so the island it builds, its targets, rock guides and outline registry must be equal.
+// The Oogas are left out: where each one stands draws on the crew's unseeded choices.
+const hubSlicedReturn = { name: "hub sliced return", why: "rule: a released hub rebuilt in slices behind the fade is the same island, with the same pick targets, rock guides and outlines, as one rebuilt at once", run: async (b) => {
+  await b.evaluate(`(() => {
+    const H = BL.scenes.hub, steps = H.enterSteps, enter = H.enter, S = window.__sliced = { digests: [], restore: () => { H.enterSteps = steps; H.enter = enter; } };
+    const digest = (slices) => {
+      const D = H.debug, top = H.root, skip = new Set(), geo = new Map();
+      for (const c of D.cavemen.values()) skip.add(c.root);
+      BL.scene.updateWorld(top);
+      const shape = (g) => { let h = geo.get(g); if (h) return h; const v = g.verts; let s = v.length * 31 + g.faces.length; for (let i = 0; i < v.length; i += 5) s = (s * 1000003 + Math.round(v[i] * 1000)) % 2147483647; geo.set(g, h = s + ":" + v.length + ":" + g.faces.length); return h; };
+      let nodes = 0, scene = 0;
+      const visit = (n) => {
+        if (skip.has(n)) return;
+        nodes++;
+        let line = (n.visible ? "v" : "h") + (n.geometry ? shape(n.geometry) : "-");
+        for (let i = 0; i < 16; i++) line += "," + Math.round(n.world[i] * 1000);
+        for (let i = 0; i < line.length; i++) scene = (scene * 31 + line.charCodeAt(i)) | 0;
+        for (const c of n.children) visit(c);
+      };
+      visit(top);
+      const Q = D.headquarters, og = Q.objectGuides.stats;
+      return { slices, nodes, scene, targets: H.input.targetCount, rock: JSON.stringify({ ...Q.rockGuides.stats, surfaceRays: 0, surfaceCertificates: 0 }),
+        objects: [og.geometries, og.registered, og.triangles, og.samples, og.owners, Q.objectGuides.result.count, Q.objectGuides.result.version].join() };
+    };
+    H.enterSteps = function* (ctx) { const it = steps(ctx); let slices = 0; for (let step = it.next(); !step.done; step = it.next()) { slices++; yield; } S.digests.push(digest(slices)); };
+    H.enter = (ctx) => { enter(ctx); S.digests.push(digest(0)); };
+  })()`);
+  try {
+    await tourGo(b, "lab"); await tourGo(b, "hub");
+    await b.evaluate(`BL.scenes.hub.enterSteps = undefined`);
+    await tourGo(b, "lab"); await tourGo(b, "hub");
+  } finally { await b.evaluate(`window.__sliced.restore()`); }
+  const [sliced, whole] = await b.evaluate(`window.__sliced.digests`);
+  const same = !!sliced && !!whole && ["nodes", "scene", "targets", "rock", "objects"].every(k => sliced[k] === whole[k]);
+  record("hub sliced return: a released hub rebuilt in slices is the same island, pick targets, rock guides and outline registry as one rebuilt at once",
+    same && sliced.slices > 10 && whole.slices === 0, JSON.stringify({ sliced, whole }));
+} };
+scene("hub", { label: "release policy", query: "hubcache=release", steps: [hudVisit, hubSlicedReturn, trip("hub")] });
 scene("hub", { query: "ooga=portlandhodl:clank:lab,obl,lf&ooga=w-s-bitcoin:clank:lab,obl,lf&ooga=bc1gui:clank:lab,obl,lf&ooga=DrNeski:clank:lab,obl,lf&ooga=2140data:clank:lab,obl,lf", steps: [{ name: "work movement cave trips", why: "regression: off-lane cave traffic aimed through obstacles and started backwards detours", run: workCaveTrips }] });
 scene("hub", { label: "room sign", query: "pos=0", steps: [{ name: "room sign copies hash", why: "rule: tapping a room sign swings it and copies its displayed eight-character code with visible confirmation", run: async (b) => {
   const point = await b.evaluate(`(() => { const B = __ooga, sign = B.headquarters.roomSigns[0], n = sign.node; Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: (value) => { window.__roomHash = value; return Promise.resolve(); } } }); window.__roomSignBefore = sign.hits; B.pilot.release(true); B.pilot.navigate({ position: { x: n.position.x, y: n.position.y, z: n.position.z }, target: { x: n.position.x, y: n.position.y - 0.2, z: n.position.z }, yaw: n.rotation.y, pitch: 0, dist: 4 }); B.advance(0.6, 1 / 60); return B.project(n.position.x, n.position.y - 0.2, n.position.z, {}); })()`);
