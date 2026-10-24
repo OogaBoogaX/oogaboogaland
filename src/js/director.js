@@ -398,7 +398,7 @@
     overlayCtx.fillStyle = "#000000";
     overlayCtx.fillRect(0, 0, overlayCssW, overlayCssH);
     overlayCtx.globalAlpha = 1;
-    if (!transition || transition.held < SPINNER_AFTER) return;
+    if (!transition || fade < 1 || transition.held < SPINNER_AFTER) return;
     const x = overlayCssW / 2, y = overlayCssH / 2, turn = elapsed / 0.9 % 1 * Math.PI * 2;
     overlayCtx.lineWidth = 3;
     overlayCtx.strokeStyle = "rgba(243, 239, 228, 0.18)";
