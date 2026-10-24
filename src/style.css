@@ -3475,6 +3475,14 @@ body.tess-touring #joy-look {
   visibility: hidden;
 }
 
+/* While the view watches a firework from the stand, its controls step aside for the show; the countdown stays. */
+body.fireworks-watching #act,
+body.fireworks-watching #hint,
+body.fireworks-watching #joy-move,
+body.fireworks-watching #joy-look {
+  visibility: hidden;
+}
+
 /* On tour the heading is two lines on purpose: where in the tour, then the stop's name. */
 .greeter-menu.greeter-tour .greeter-menu-title {
   white-space: pre-line;

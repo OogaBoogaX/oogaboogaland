@@ -11912,6 +11912,7 @@
     fireworkCountdown.until = fireworkCountdown.shown = 0;
     fireworkCountdown.texts = null;
     fireworkWatch.mode = 0;
+    document.body.classList.remove("fireworks-watching");
     fireworkStand.built = false;
     fireworkStand.plaqueNode = fireworkStand.plaqueCanvas = fireworkStand.board.canvas = null;
     fireworkStand.plaqueShown = undefined;
@@ -12081,7 +12082,7 @@
     S.ry = Math.atan2(-S.x, -S.z);
     if (!fireworkStandDressing) {
       const set = BL.dressing.set();
-      set.put("terminal", 0, 0, 0).put("crate", -1.05, 0, 0.1).put("crate", 1.05, 0, 0.1).put("crate", 1.05, 0.62, 0.1, 1).put("barrel", -1.05, 0, -0.85).put("lanternPost", -1.75, 0, 0.55);
+      set.put("terminal", 0, 0, 0).put("crate", -1.05, 0, 0.1).put("crate", 1.05, 0, 0.1).put("crate", 1.05, 0.62, 0.1, 1).put("barrel", -1.05, 0, -0.85).put("lanternPost", -2.15, 0, 0.45, 2);
       fireworkStandDressing = set.build();
     }
     const group = createNode({ position: { x: S.x, y: S.y, z: S.z }, rotation: { x: 0, y: S.ry, z: 0 } });
@@ -12119,7 +12120,7 @@
   // The plaque repaints only when the API's board changes; a repaint swaps the face's geometry, which the renderer
   // uploads once.
   const refreshFireworkPlaque = () => {
-    const S = fireworkStand, board = donations.state.fireworkBoard;
+    const S = fireworkStand, board = donations.state.purchaseBoards[donations.FIREWORK];
     if (!S.plaqueNode || board === S.plaqueShown) return;
     S.plaqueShown = board;
     BL.standKiosk.plaque(S.plaqueCanvas, board);
@@ -12127,28 +12128,34 @@
     S.plaqueNode.geometry = BL.standKiosk.plaqueFace(S.plaqueCanvas, 1.2, 0.9);
     S.board.version++;
   };
+  // The fireworks the API sells now (`status.catalogue`), or null while it sells none.
+  const fireworkCatalogue = () => donations.state.catalogue && donations.state.catalogue[donations.FIREWORK] || null;
   const fireworkItems = () => {
-    const prices = donations.real ? donations.state.fireworks && donations.state.fireworks.prices : FIREWORK_DEMO_PRICES;
-    for (const item of FIREWORK_ITEMS) item.price = prices ? prices[item.id] : null;
+    const prices = donations.real ? fireworkCatalogue() && fireworkCatalogue().prices : FIREWORK_DEMO_PRICES;
+    for (const item of FIREWORK_ITEMS) item.price = prices && Number.isSafeInteger(prices[item.id]) ? prices[item.id] : null;
     return FIREWORK_ITEMS;
   };
   const fireworkMayBuy = () => {
     if (!donations.real) return "yes";
-    const f = donations.state.fireworks;
+    const f = fireworkCatalogue();
     if (!f || donations.state.open === false) return "closed";
     return f.buyers === "signed-in" && !BL.net.state.me ? "sign-in" : "yes";
   };
   const openFireworkStand = () => {
     const real = donations.real;
     fireworkStand.note = "";
-    if (real && donations.state.fireworks && BL.net.state.me) donations.fireworkTotals().then((t) => {
-      if (!t.error && t.count) fireworkStand.note = `YOU'VE LAUNCHED ${t.count} · ${t.sats.toLocaleString("en-US")} SATS`;
+    if (real && fireworkCatalogue() && BL.net.state.me) donations.purchaseTotals(donations.FIREWORK).then((t) => {
+      const bought = !t.error && t.items[donations.FIREWORK];
+      if (!bought) return;
+      let quantity = 0, sats = 0;
+      for (const item of Object.values(bought)) { quantity += item.quantity; sats += item.sats; }
+      if (quantity) fireworkStand.note = `YOU'VE LAUNCHED ${quantity} · ${sats.toLocaleString("en-US")} SATS`;
     });
     BL.donationPopup.openStand({
       real, title: "FIREWORKS", heading: "Fireworks",
       label: "Firework stand. Up and Down choose, Enter buys, 1 to 4 buy that one, P previews it free, W pays with your wallet, C copies the invoice, Escape goes back.",
       items: fireworkItems, mayBuy: fireworkMayBuy, note: () => fireworkStand.note, testNetwork: () => donations.testNetwork,
-      buy: real ? (id) => donations.firework(id)
+      buy: real ? (id) => donations.purchase(donations.FIREWORK, id)
         : () => Promise.resolve({ invoice: { id: `sim-firework-${++fireworkDebugCount}`, bolt11: "lnbc1simulatedfireworkdonotpay", expires: Date.now() / 1000 + 300 } }),
       simulate: (id, invoiceId) => donations.simulateFirework(id, invoiceId),
       // The browser's own wallet (WebLN), only ever inside the visitor's click: the page never pays by itself.
@@ -12193,6 +12200,7 @@
       readWatchPose(w.home);
       pilot.setActive(false); pilot.controls.reset(); input.reset();
       pilot.setExternalControl(true);
+      document.body.classList.add("fireworks-watching");
     }
     readWatchPose(w.from);
     copyWatchPose(w.to, w.view);
@@ -12208,6 +12216,7 @@
   const releaseFireworkWatch = () => {
     if (!fireworkWatch.mode) return;
     fireworkWatch.mode = 0;
+    document.body.classList.remove("fireworks-watching");
     pilot.setExternalControl(false);
     pilot.setActive(true); pilot.controls.reset(); input.reset();
   };

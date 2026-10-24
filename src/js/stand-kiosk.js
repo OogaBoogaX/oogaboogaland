@@ -259,9 +259,11 @@
     };
     return flow;
   };
-  // The stand's plaque: its title and the top ten buyers, `[{ login, count, sats }]`, each with how many they bought and
+  // The stand's plaque: its title and the top ten buyers, `[{ login, quantity, sats }]`, each with how many they bought and
   // what they spent, or BE THE FIRST before anyone has; painted in the kiosk's letters on `canvas`, PLAQUE_W by PLAQUE_H.
   const PLAQUE_W = 384, PLAQUE_H = 288;
+  // `text` at scale `s`, cut to `room` pixels with an ellipsis when it would run over, as the kiosk cuts a name.
+  const clip = (text, s, room) => width(text, s) <= room ? text : text.slice(0, Math.max(1, Math.floor(room / (width("M", s) + s)) - 3)) + "...";
   const plaque = (canvas, entries, title = "TOP LAUNCHERS") => {
     if (canvas.width !== PLAQUE_W || canvas.height !== PLAQUE_H) { canvas.width = PLAQUE_W; canvas.height = PLAQUE_H; }
     const p = canvas.getContext("2d");
@@ -275,12 +277,16 @@
       write(p, "BE THE FIRST", PLAQUE_W / 2, 130, 3, INK.white, "center");
       return;
     }
+    // Three columns under their heads: who, how many they launched, and the sats they spent.
+    write(p, "PLAYER", 52, 42, 1, INK.dim);
+    write(p, "LAUNCHED", 272, 42, 1, INK.dim, "right");
+    write(p, "SATS", PLAQUE_W - 16, 42, 1, INK.dim, "right");
     for (let i = 0; i < entries.length && i < 10; i++) {
-      const e = entries[i], y = 48 + i * 23, color = i === 0 ? INK.gold : INK.white;
+      const e = entries[i], y = 56 + i * 22, color = i === 0 ? INK.gold : INK.white;
       write(p, String(i + 1).padStart(2, " "), 16, y, 2, INK.dim);
-      writeFit(p, `@${e.login}`, 52, y, 2, color, 190);
-      write(p, `${sats(e.sats)} SATS`, PLAQUE_W - 16, y, 2, color, "right");
-      write(p, `x${e.count}`, 262, y + 4, 1, INK.dim);
+      write(p, clip(`@${e.login}`, 2, 180), 52, y, 2, color);
+      write(p, String(e.quantity), 272, y, 2, INK.dim, "right");
+      write(p, sats(e.sats), PLAQUE_W - 16, y, 2, color, "right");
     }
   };
   // The plaque's picture on a face `w` by `h` metres about the origin, facing +z, for a node in the world. A fresh one
