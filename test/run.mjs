@@ -7133,7 +7133,8 @@ const hubRainforestSteps = { name: "rainforest bridge steps", why: "regression: 
   record("rainforest bridge: hanging vines end at the gateways instead of extending through the stair rock", r.tails === 0, JSON.stringify({ tails: r.tails }));
 } };
 // The island opens Ooga Arcade with Space at its mouth; the Mempool is walked into.
-const WAIT_OUT = `(() => { const B = window.__ooga; for (let i = 0; i < 240 && (B.transitioning || B.scene === "hub"); i++) B.advance(1 / 30, 1 / 30); B.advance(0.3, 1 / 30); return B.scene; })()`;
+// A scene's construction slices run as real tasks while the fade holds black, so each step gives them one, as tourGo does.
+const WAIT_OUT = `(async () => { const B = window.__ooga, t0 = performance.now(); while ((B.transitioning || B.scene === "hub") && performance.now() - t0 < 20000) { B.advance(1 / 30, 1 / 30); await new Promise(r => setTimeout(r, 0)); } B.advance(0.3, 1 / 30); return B.scene; })()`;
 const hubRoutes = { name: "hub routes", why: "playthrough: every scene the island opens is reached the way a player gets there", run: async (b) => {
   await b.evaluate(`(() => { const B = window.__ooga, a = B.cavemen.get("portlandhodl"), slot = window.BL.caves.slots.find((s) => s.scene === "arcade"), m = B.mouths.find((m) => m.id === slot.id); if (B.crew.player !== a) B.pilot.possess(a); B.pilot.navigate({ position: { x: m.x - Math.sin(m.ry) * 1.2, y: m.floorY, z: m.z - Math.cos(m.ry) * 1.2 }, yaw: m.ry, pitch: 0.4, dist: 10 }); B.advance(0.5, 1 / 60); })()`);
   await b.key(" ");
@@ -10261,9 +10262,9 @@ const factoryGreeter = { name: "factory greeter", why: "rule: the guide notices 
     const offered = await b.evaluate(`(() => { __ooga.pilot.release(true); return __ooga.factory.greeter.state.offered; })()`);
     if (offered) {
       await tourGo(b, "lab");
-      await b.evaluate(`(() => {
-        const B = __ooga; B.pilot.possess(B.cavemen.get("portlandhodl")); B.go("factory");
-        for (let i = 0; i < 150 && (B.transitioning || B.scene !== "factory"); i++) B.advance(1 / 30, 1 / 30);
+      await b.evaluate(`(async () => {
+        const B = __ooga, t0 = performance.now(); B.pilot.possess(B.cavemen.get("portlandhodl")); B.go("factory");
+        while ((B.transitioning || B.scene !== "factory") && performance.now() - t0 < 20000) { B.advance(1 / 30, 1 / 30); await new Promise(r => setTimeout(r, 0)); }
         B.pilot.release(true); B.advance(0.3, 1 / 30); B.housekeep();
       })()`);
     }
