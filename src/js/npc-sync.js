@@ -34,7 +34,7 @@
 
   const wrap = (d) => Math.atan2(Math.sin(d), Math.cos(d));
 
-  const create = ({ crew, fx, onPlan, onHit, onModelChange }) => {
+  const create = ({ crew, fx, onPlan, onHit, onModelChange, animationInterval }) => {
     const net = BL.net;
     const list = crew.list.filter((cave) => !cave.contributor.temporary), n = list.length;
     const index = new Map(list.map((cave, i) => [cave, i]));
@@ -46,7 +46,10 @@
     // Each puppet's own quaternions: the crew's are never written from here.
     const quats = list.map(() => ({ root: quat.create(), armL: quat.create(), armR: quat.create(), head: quat.create(), club: quat.create(), gun: quat.create() }));
     const TQ = quat.create();
-    let role = "solo", hostId = null, sendIn = 0, sinceSent = 0, sentFloats = -1, seen = -1, frames = 0, events = [];
+    let role = "solo", hostId = null, sendIn = 0, sinceSent = 0, sentFloats = -1, seen = -1, frames = 0, events = [], elapsed = 0;
+    const poseFlags = new Int32Array(n).fill(-1);
+    // HALLOWEEN: the ghost hunt rides the events as one `gh` record (ghost-sync.js): `write` on the host, `read` on a follower.
+    let extra = null;
 
     const driven = (cave) => cave === crew.player || !!cave.remoteControlled;
     const holders = list.map((cave) => [cave.parts.armL, cave.parts.armR, cave.root, cave.sleepWeapons]);
@@ -204,6 +207,8 @@
         k++;
       }
       const floats = HEADER + k * RECORD, bytes = floats * 4;
+      const hunt = extra && events.length < EVENTS_MAX ? extra.write() : null; // HALLOWEEN
+      if (hunt) events.push(hunt); // HALLOWEEN
       // Nothing moved and nothing happened: skip, but not for longer than KEEP_S.
       if (!events.length && floats === sentFloats && sinceSent < KEEP_S) {
         let same = true;
@@ -227,6 +232,7 @@
     };
 
     const replay = (event) => {
+      if (event.k === "gh") { if (extra) extra.read(event); return; } // HALLOWEEN
       const cave = event.i >= 0 && event.i < n ? list[event.i] : null;
       if (event.k === "b") {
         const geos = event.kind === "dust" ? BL.crew.LAND_DUST : event.kind === "sparks" ? BL.crew.JET_SPARKS : null;
@@ -302,14 +308,41 @@
     const apply = (i, cave, dt) => {
       const t = target, o = i * RECORD, r = cave.root, p = cave.parts, q = quats[i];
       const flags = t[o + 1];
-      const far = fresh[i] || Math.hypot(t[o + 2] - r.position.x, t[o + 3] - r.position.y, t[o + 4] - r.position.z) > SNAP;
-      const k = far ? 1 : 1 - Math.exp(-EASE * dt);
+      const distance = Math.hypot(t[o + 2] - r.position.x, t[o + 3] - r.position.y, t[o + 4] - r.position.z);
+      const far = fresh[i] || distance > SNAP;
+      let k = far ? 1 : 1 - Math.exp(-EASE * dt);
       fresh[i] = 0;
       r.visible = (flags & F_VISIBLE) !== 0;
       easeXYZ(r.position, t, o + 2, k);
       easeAngles(r.rotation, t, o + 5, k);
       poseQuat(r, q.root, t, o + 8, (flags & F_ROOT_Q) !== 0, k);
       r.scale.x = t[o + 12]; r.scale.y = t[o + 13]; r.scale.z = t[o + 14];
+      // The world position and work the gorillas read always follow the host
+      // at full rate. Only this visitor's settled limb interpolation may wait.
+      const state = STATES[t[o + 96]], phase = PHASES[t[o + 97]];
+      const changed = poseFlags[i] !== flags || cave.state !== state || cave.work.phase !== phase;
+      if (state !== undefined) cave.state = state;
+      if (phase !== undefined) cave.work.phase = phase;
+      cave.work.site = t[o + 98];
+      cave.work.plannedSite = t[o + 99];
+      crew.setTint(cave, t[o + 100]);
+      if (animationInterval && cave.animation) {
+        const a = cave.animation;
+        const resting = state === "sleeping" || state === "chilling" && !phase;
+        const still = distance < 0.001 && Math.abs(wrap(t[o + 6] - r.rotation.y)) < 0.001;
+        const holders = holderCode(i, p.club) === t[o + 52] && holderCode(i, p.gun) === t[o + 63];
+        const interval = resting && still && holders && !(flags & (F_STUNNED | F_FLAME | F_FLASH)) ? animationInterval(cave) : 0;
+        a.pending += dt;
+        a.due = far || changed || !interval || interval < a.interval || elapsed >= a.at;
+        a.dt = a.due ? a.pending : 0;
+        if (!a.due) return;
+        k = far || changed ? 1 : 1 - Math.exp(-EASE * a.dt);
+        a.pending = 0;
+        a.at = elapsed + interval * (a.interval ? 1 : 0.5 + i * 0.61803398875 % 0.5);
+        a.interval = interval;
+        a.updates++;
+      }
+      poseFlags[i] = flags;
       p.legL.rotation.x += wrap(t[o + 15] - p.legL.rotation.x) * k; p.legL.rotation.z += wrap(t[o + 16] - p.legL.rotation.z) * k;
       p.legR.rotation.x += wrap(t[o + 17] - p.legR.rotation.x) * k; p.legR.rotation.z += wrap(t[o + 18] - p.legR.rotation.z) * k;
       easeAngles(p.armL.rotation, t, o + 19, k);
@@ -361,15 +394,8 @@
         p.jetFlame.visible = (flags & F_FLAME) !== 0;
         p.jetFlame.scale.y = t[o + 95];
       }
-      cave.stunBirds.visible = (flags & F_STUNNED) !== 0;
+      cave.stunBirds.visible = crew.combatEnabled !== false && (flags & F_STUNNED) !== 0;
       if (cave.stunBirds.visible) cave.stunBirds.rotation.y += dt * 4;
-      crew.setTint(cave, t[o + 100]);
-      // The work the gorillas read: state, phase, the cave worked and the one planned.
-      const state = STATES[t[o + 96]], phase = PHASES[t[o + 97]];
-      if (state !== undefined) cave.state = state;
-      if (phase !== undefined) cave.work.phase = phase;
-      cave.work.site = t[o + 98];
-      cave.work.plannedSite = t[o + 99];
       if (moved) onModelChange(cave);
     };
 
@@ -377,11 +403,13 @@
       for (let i = 0; i < n; i++) list[i].puppet = false;
       have.fill(0);
       fresh.fill(0);
+      poseFlags.fill(-1);
       pendingEvents = null;
     };
 
     /** Once a frame, after crew.update: host sends, follower poses its puppets, solo does nothing. */
     const update = (dt) => {
+      elapsed += dt;
       const st = net.state;
       const next = st.room !== "live" || !st.hostId ? "solo" : st.hostId === st.selfId ? "host" : "follow";
       const hostChanged = hostId !== null && st.hostId !== hostId;
@@ -438,7 +466,8 @@
       resetEvents();
     };
 
-    return { update, dispose, fx: recordingFx, recordShot, recordPlan, recordHit, get role() { return role; }, get frames() { return frames; } };
+    return { update, dispose, fx: recordingFx, recordShot, recordPlan, recordHit, get role() { return role; }, get frames() { return frames; },
+      get extra() { return extra; }, set extra(value) { extra = value; } }; // HALLOWEEN: extra
   };
 
   BL.npcSync = { create, FORMAT, RECORD };

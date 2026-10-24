@@ -1104,11 +1104,14 @@ layout(location=3) in vec4 aM0;
 layout(location=4) in vec4 aM1;
 layout(location=5) in vec4 aM2;
 layout(location=6) in vec4 aM3;
+layout(location=7) in vec4 aParams;
 uniform mat4 uViewProj;
 uniform vec4 uRect;
 out vec2 vUv;
 out vec3 vWorld;
+flat out float vOpacity;
 void main() {
+  vOpacity = aParams.z < 0.0 ? -aParams.z - 1.0 : 1.0;
   vUv = (aPos.xy - uRect.xy) / uRect.zw;
   vUv.y = 1.0 - vUv.y;
   vec4 world = mat4(aM0, aM1, aM2, aM3) * vec4(aPos, 1.0);
@@ -1119,17 +1122,36 @@ void main() {
 precision highp float;
 in vec2 vUv;
 in vec3 vWorld;
+flat in float vOpacity;
 uniform sampler2D uImage;
 uniform bool uReady;
+uniform bool uCutout;
+uniform bool uSoft;
+uniform bool uBlend;
+uniform float uBright;
 uniform float uClipMaxY;
 ${CUTAWAY_GLSL}
 layout(location=0) out vec4 oColor;
 layout(location=1) out vec4 oBright;
 void main() {
-  if (cutaway(vWorld)) discard;
   bool inside = all(greaterThanEqual(vUv, vec2(0.0))) && all(lessThanEqual(vUv, vec2(1.0)));
-  oColor = vec4(uReady && inside ? texture(uImage, vUv).rgb : vec3(0.0), 1.0);
-  oBright = vec4(0.0);
+  // A cut-out picture (a sprite) has a hard edge where its alpha crosses a half, or when soft covers by its alpha;
+  // either way times the node's opacity, in the same ordered coverage a see-through node uses. An ordinary picture is
+  // an opaque screen.
+  if (uCutout && (!uReady || !inside)) discard;
+  vec4 texel = uReady && inside ? texture(uImage, vUv) : vec4(0.0, 0.0, 0.0, 1.0);
+  // A blended picture (drawn after everything opaque, depth read but not written) is truly see-through.
+  if (uBlend) {
+    if (cutaway(vWorld)) discard;
+    float alpha = texel.a * vOpacity;
+    oColor = vec4(texel.rgb, alpha);
+    oBright = vec4(texel.rgb * uBright, alpha);
+    return;
+  }
+  if (uCutout && !uSoft && texel.a < 0.5) discard;
+  if (cutaway(vWorld, uCutout ? (uSoft ? texel.a : 1.0) * vOpacity : 1.0)) discard;
+  oColor = vec4(texel.rgb, 1.0);
+  oBright = vec4(texel.rgb * uBright, 1.0);
 }`;
   const MIRROR_VS = `#version 300 es
 precision highp float;
@@ -1659,6 +1681,9 @@ void main() {
     // the depth alone, back faces first so a tube shows its far wall through its near one. `glassPass` is set while it
     // draws; every other pass leaves glass out.
     let glassPass = false;
+    // A picture with `blend` ("add" for light, "alpha" for a soft-edged one) draws only in its own pass after glass:
+    // blended, the depth read and left alone.
+    let blendPass = false;
     const mirrorDebug = {
       active: false, faux: false, portal: false, reveal: 0, surfaceDrawn: false, captureValid: false, width: 0, height: 0, textureWidth: 0, textureHeight: 0, samples: 0, allocationCount: 0, reflectionPassCount: 0, skippedPassCount: 0, resources: 0, captureExcluded: false, reflectionOnlyCount: 0, planeDistance: 0, ripples: 0, bodyContacts: 0, bodyWaves: 0,
       cameraPosition: new Float32Array(3), cameraTarget: new Float32Array(3), planeCenter: new Float32Array(3), planeNormal: new Float32Array(3), capturedViewProj: mirrorCapturedViewProj, shardsDrawn: 0, environmentPassCount: 0, environmentFaces: 0, environmentSize: 0, environmentResources: 0, skipReason: "none"
@@ -1732,7 +1757,7 @@ void main() {
       const matrixSampling = gl.getExtension("OES_shader_multisample_interpolation");
       const meshFragment = matrixSampling ? ORDINARY_MESH_FS.replace("#version 300 es", "#version 300 es\n#extension GL_OES_shader_multisample_interpolation : require\n#define MATRIX_SAMPLE_INTERPOLATION") : ORDINARY_MESH_FS;
       res.programs = {
-        image: compile(IMAGE_VS, IMAGE_FS, ["uViewProj", "uRect", "uImage", "uReady", "uClipMaxY"]),
+        image: compile(IMAGE_VS, IMAGE_FS, ["uViewProj", "uRect", "uImage", "uReady", "uCutout", "uSoft", "uBlend", "uBright", "uClipMaxY"]),
         mesh: compile(ORDINARY_MESH_VS, meshFragment, MESH_UNIFORMS),
         depth: compile(ORDINARY_MESH_VS, DEPTH_MESH_FS, MESH_UNIFORMS),
         plain: compile(ORDINARY_MESH_VS, meshFragment.replace("#version 300 es", "#version 300 es\n#define PLAIN"), MESH_UNIFORMS),
@@ -2889,12 +2914,33 @@ void main() {
       gl.uniform4fv(p.u.uRect, surface.rect);
       gl.uniform1i(p.u.uImage, 6);
       gl.uniform1i(p.u.uReady, rec.imageTexture ? 1 : 0);
+      gl.uniform1i(p.u.uCutout, surface.cutout ? 1 : 0);
+      gl.uniform1i(p.u.uSoft, surface.soft ? 1 : 0);
+      gl.uniform1i(p.u.uBlend, blendPass ? 1 : 0);
+      if (blendPass) gl.blendFunc(gl.SRC_ALPHA, surface.blend === "add" ? gl.ONE : gl.ONE_MINUS_SRC_ALPHA);
+      gl.uniform1f(p.u.uBright, surface.bright || 0);
       applyCutaway(p, rec.geometry);
       gl.uniform1f(p.u.uClipMaxY, Math.min(rec.geometry.cutawayPreserve ? 1e6 : cutawayMaxY, rec.geometry.clipMaxY ?? 1e6));
       gl.bindVertexArray(rec.mesh.vao);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, rec.mesh.count, count);
       gl.activeTexture(gl.TEXTURE0);
       gl.useProgram(resume.prog);
+    };
+    const drawBlended = (cull) => {
+      let any = false;
+      for (let i = 0; i < activeRecords.length; i++) {
+        const g = activeRecords[i].geometry;
+        if (g.imageSurface && g.imageSurface.blend && activeRecords[i].count) { any = true; break; }
+      }
+      if (!any) return;
+      gl.useProgram(programs.mesh.prog);
+      gl.enable(gl.BLEND);
+      gl.depthMask(false);
+      blendPass = true;
+      drawParts("mesh", "mesh", true, cull);
+      blendPass = false;
+      gl.depthMask(true);
+      gl.disable(gl.BLEND);
     };
     const drawGlass = (cull) => {
       let any = false;
@@ -2945,6 +2991,7 @@ void main() {
         if (excludeMirror && (rec === mirror.record || g.mirrorSource)) continue;
         if (g.reflector && (reflectorPass === null || rec === reflectorPass)) continue;
         if (meshPass && !g.glass !== !glassPass) continue;
+        if (meshPass && !(g.imageSurface && g.imageSurface.blend) !== !blendPass) continue;
         // A record drawn by another stage's pass drops out before any per-record uniform moves.
         const stage = kind === "mesh" && meshPass ? g.matrixRevealBacking ? 1 : g.matrixGlyph ? 2 : g.glassOpacity ? 3 : 0 : 0;
         if (stage !== matrixStage) continue;
@@ -3197,6 +3244,7 @@ void main() {
       drawParts("mesh", "mesh", true);
       if (skyOn) drawSky(mirrorInvViewProj, mirrorEye.y);
       drawGlass(false);
+      drawBlended(false);
       gl.useProgram(pg.mesh.prog);
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
@@ -3539,7 +3587,8 @@ void main() {
       if(opts.dsbWater && !dsbGPU)dsbGPU=BL.dsbWater.gpu(gl,opts.dsbWater);
       if(dsbGPU)dsbGPU.bind(programs.mesh);
       const fogColor = fog || NO_FOG, fogA = fog ? fogNear : FOG_OFF, fogB = fog ? fogFar : FOG_OFF + 1;
-      const windTime = performance.now() * 0.001 % 3600;
+      // `windTime` holds the sway where it stands (seconds; a scene's GAME MODE); otherwise the wind runs on the clock.
+      const windTime = Number.isFinite(opts.windTime) ? opts.windTime : performance.now() * 0.001 % 3600;
       gl.useProgram(programs.plain.prog);
       gl.uniform1f(programs.plain.u.uWindTime, windTime);
       gl.useProgram(programs.mesh.prog);
@@ -3843,6 +3892,7 @@ void main() {
       drawReflectors(camera);
       if (skyOn) drawSky(invViewProj, camera.position.y);
       drawGlass(true);
+      drawBlended(true);
       // Ordinary surfaces first, then the effect-only black liner and native voxel glyphs; alpha follows the backing
       // shader's wave, depth still rejects hidden faces.
       gl.useProgram(pg.mesh.prog);

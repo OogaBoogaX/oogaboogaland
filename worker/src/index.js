@@ -1,8 +1,8 @@
 // The Worker in front of Ooga Booga Land: the built page from static assets, GitHub sign-in under
-// /auth/*, the account API under /api/*, voice signalling under /api/voice/*, /room, the island's
-// live socket, and /donations/*, passed on to bananapayserver over the DONATIONS binding. Only those
-// paths run this code (`run_worker_first` in wrangler.<env>.jsonc); every other path is served
-// straight from _site.
+// /auth/*, the account API under /api/*, voice signalling under /api/voice/*, Tess's answers at
+// /api/tess, /room, the island's live socket, and /donations/*, passed on to bananapayserver over the
+// DONATIONS binding. Only those paths run this code (`run_worker_first` in wrangler.<env>.jsonc);
+// every other path is served straight from _site.
 
 import { handleApi } from "./api.js";
 import { handleAuth } from "./auth.js";
@@ -10,6 +10,7 @@ import { purgeExpiredSessions } from "./db.js";
 import { handleDonations } from "./donations.js";
 import { allowed, fromSite, getSessionFromRequest, text } from "./http.js";
 import { handlePoker } from "./poker.js";
+import { handleTess, pruneTess } from "./tess.js";
 
 export { Room } from "./room.js";
 
@@ -49,14 +50,17 @@ export default {
     if (url.pathname.startsWith("/poker/")) return handlePoker(request, env);
     if (url.pathname.startsWith("/auth/")) return handleAuth(request, env, url);
     if (url.pathname.startsWith("/api/voice/")) return handleVoice(request, env, url);
+    if (url.pathname === "/api/tess") return handleTess(request, env);
     if (url.pathname.startsWith("/api/")) return handleApi(request, env, url);
     if (url.pathname === "/room") return handleRoom(request, env);
     if (url.pathname.startsWith("/donations/")) return handleDonations(request, env, url);
     return env.ASSETS.fetch(request);
   },
 
-  // Daily: expired sessions are already refused on read; this keeps the table from growing.
+  // Daily: expired sessions are already refused on read; this keeps the table from growing. Tess's kept questions
+  // go 90 days after they were last asked.
   async scheduled(_controller, env, ctx) {
     ctx.waitUntil(purgeExpiredSessions(env.DB));
+    ctx.waitUntil(pruneTess(env.DB));
   },
 };

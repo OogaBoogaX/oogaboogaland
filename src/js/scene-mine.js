@@ -2026,6 +2026,7 @@
   const enter = (ctx) => {
     ({ renderer, game, world, go } = ctx);
     home = ctx.from === "arcade" ? "arcade" : "hub";
+    hudMod.leaveTo("mine", home);
     camera = createCamera({ fov: 58, near: 0.2, far: 120 });
     root = createNode();
     // The run lives on `world` for the page life, so walking out to the island does not end an hour's
@@ -2161,10 +2162,12 @@
     for (let i = 0; i < MOTES; i++) moteData[i * 20] = moteData[i * 20 + 5] = moteData[i * 20 + 10] = moteData[i * 20 + 15] = 1;
     motes = place(createNode({ geometry: models.particleGeometry("#e8d9b0", 0.035, 0.8), instanceData: moteData, instanceCount: MOTES, instanceVersion: 0, fixedInstanceCapacity: true }));
     sceneTime = 0;
-    // The player is whoever walked in; with nobody chosen, the Ooga this run already had, or one at random.
+    // The player is whoever walked in; with nobody chosen, the Ooga this run already had, or one at random. A
+    // signed-in visitor with an Ooga leads it, as they drive only it on the island.
     const names = contributors.activeRoster.length ? contributors.activeRoster : contributors.roster;
-    const known = (name) => names.some((c) => c.name === name);
-    if (known(world.pilot)) world.mineLead = world.pilot;
+    const known = (name) => names.some((c) => c.name === name), own = BL.net.ownAmong(names);
+    if (own) world.mineLead = own;
+    else if (known(world.pilot)) world.mineLead = world.pilot;
     else if (!known(world.mineLead)) world.mineLead = names[Math.floor(Math.random() * names.length)].name;
     world.pilot = null;
     crew = mineCrew.create({ root, fx, world: { inside, obstacles, station, spotOf, chamberAt, doorZ }, lead: world.mineLead });

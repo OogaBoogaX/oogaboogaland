@@ -12,7 +12,9 @@
   const BL = window.BL = window.BL || {};
   const TIMEOUT_MS = 20000;
   // How each group shows it has arrived: the module that runs last in it.
-  const PRESENT = { timechain: () => !!BL.timechainInterior, dsb: () => !!BL.dsbCollision, arcade: () => !!BL.carnivalAudio, poker: () => !!BL.pokerHud, drop: () => !!BL.dropAudio };
+  const PRESENT = { timechain: () => !!BL.timechainInterior, dsb: () => !!BL.dsbCollision, arcade: () => !!BL.carnivalAudio, poker: () => !!BL.pokerHud, drop: () => !!BL.dropAudio,
+    // HALLOWEEN: the hub's ghost hunt, and each track of its playlist.
+    halloween: () => !!BL.halloween, ...Object.fromEntries(["boss", "colt", "martial", "nightmare", "synthed"].map((k) => [`halloween-track-${k}`, () => !!(BL.ghostMusic && BL.ghostMusic[k])])) };
   const loading = new Map();
   const load = (group) => {
     if (PRESENT[group]()) return null;
