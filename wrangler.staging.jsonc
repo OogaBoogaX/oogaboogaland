@@ -41,7 +41,7 @@
     "bindings": [{ "name": "ROOM", "class_name": "Room" }]
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }],
-  // Namespaces are per account: staging counts in 2001-2003, production in 1001-1003.
+  // Namespaces are per account: staging counts in 2001-2005, production in 1001-1005.
   "ratelimits": [
     // Poker API and worker delivery per signed-in account.
     { "name": "POKER_LIMITER", "namespace_id": "2004", "simple": { "limit": 240, "period": 60 } },
@@ -50,8 +50,10 @@
     // Room connections per player: reconnect backoff stays far under it.
     { "name": "ROOM_LIMITER", "namespace_id": "2002", "simple": { "limit": 20, "period": 60 } },
     // Voice signalling per player: a join is four calls, each change of who is near one or two more.
-    { "name": "VOICE_LIMITER", "namespace_id": "2003", "simple": { "limit": 120, "period": 60 } }
+    { "name": "VOICE_LIMITER", "namespace_id": "2003", "simple": { "limit": 120, "period": 60 } },
+    // Questions to Tess per IP, the address used only for this count: the page answers most by itself.
+    { "name": "TESS_LIMITER", "namespace_id": "2005", "simple": { "limit": 5, "period": 60 } }
   ],
-  // Daily: purge expired sessions.
+  // Daily: purge expired sessions and Tess's questions not asked for 90 days.
   "triggers": { "crons": ["0 4 * * *"] }
 }

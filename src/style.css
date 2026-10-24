@@ -3343,6 +3343,7 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
   opacity: 0.7;
   letter-spacing: 0.04em;
   text-transform: none;
+  white-space: pre-line;
 }
 
 .greeter-choice,
@@ -3458,6 +3459,14 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
 .greeter-chip:focus-visible {
   background: #e2a04a;
   outline: none;
+}
+
+/* While she thinks over one question, Ask and the suggestions wait. */
+.greeter-choice:disabled,
+.greeter-chip:disabled {
+  opacity: 0.5;
+  cursor: default;
+  pointer-events: none;
 }
 
 /* While her tour holds the view the touch sticks do nothing, so they step aside for her panel. */
