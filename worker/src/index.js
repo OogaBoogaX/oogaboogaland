@@ -50,7 +50,7 @@ export default {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/poker/")) return handlePoker(request, env);
     if (url.pathname.startsWith("/auth/")) return handleAuth(request, env, url);
-    if (url.pathname.startsWith("/api/totems/")) return handleTotems(request, url);
+    if (url.pathname.startsWith("/api/totems/")) return handleTotems(request, url, env);
     if (url.pathname.startsWith("/api/voice/")) return handleVoice(request, env, url);
     if (url.pathname === "/api/tess") return handleTess(request, env);
     if (url.pathname.startsWith("/api/")) return handleApi(request, env, url);

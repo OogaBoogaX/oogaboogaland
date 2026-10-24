@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { compileFunction } from "node:vm";
 
-const fixture = (fetcher) => {
+const fixture = (fetcher, env = {}) => {
   let now = Date.parse("2026-10-22T12:00:00Z");
   const entries = new Map(), calls = [];
   const cache = {
@@ -17,7 +17,7 @@ const fixture = (fetcher) => {
   const { handleTotems } = compileFunction(`${source}\nreturn { handleTotems };`, ["fetch", "caches", "Date", "json"], { filename: "totems.js" })(async (...args) => { calls.push(args); return fetcher(...args); }, { default: cache }, Clock, json);
   return { calls, advance: ms => { now += ms; }, request: (path = "/api/totems/0", headers = {}, method = "GET") => {
     const request = new Request(`https://island.example${path}`, { headers, method });
-    return handleTotems(request, new URL(request.url));
+    return handleTotems(request, new URL(request.url), env);
   } };
 };
 const pull = (number, at = "2026-10-22T11:00:00Z", overrides = {}) => ({ number, html_url: `https://github.com/bitcoin/bitcoin/pull/${number}`,
@@ -70,4 +70,21 @@ test("totem routes accept only the four fixed repositories and GET", async () =>
   assert.equal((await f.request("/api/totems/https://attacker.example")).status, 404);
   assert.equal((await f.request(undefined, {}, "POST")).status, 405);
   assert.equal(f.calls.length, 0);
+});
+
+test("an optional GITHUB_TOKEN authorizes the GitHub scans and never leaves the Worker", async () => {
+  const token = "github_pat_test_only_0123456789";
+  const reset = Date.parse("2026-10-22T13:00:00Z") / 1000;
+  const leaked = async (response) => [...response.headers].some(([, value]) => value.includes(token)) || (await response.text()).includes(token);
+  const f = fixture(async () => new Response(JSON.stringify([pull(42)]), { headers: { etag: '"a"' } }), { GITHUB_TOKEN: token });
+  const ok = await f.request(); assert.equal(ok.status, 200);
+  const limited = fixture(async () => new Response("", { status: 403, headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(reset) } }), { GITHUB_TOKEN: token });
+  const refused = await limited.request(); assert.equal(refused.status, 403);
+  for (const call of [...f.calls, ...limited.calls]) assert.equal(call[1].headers.authorization, `Bearer ${token}`);
+  assert.equal(await leaked(ok), false); assert.equal(await leaked(refused), false);
+  for (const env of [{}, { GITHUB_TOKEN: "" }]) {
+    const plain = fixture(async () => new Response(JSON.stringify([pull(42)])), env);
+    assert.equal((await plain.request()).status, 200);
+    assert.equal("authorization" in plain.calls[0][1].headers, false);
+  }
 });

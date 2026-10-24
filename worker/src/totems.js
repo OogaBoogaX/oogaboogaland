@@ -1,5 +1,7 @@
 // Public, compact recent-merge summaries. A six-minute edge cache shares each GitHub scan between visitors.
 // Page validators retain only fields used here; unchanged upstream pages reuse their normalized records.
+// An optional GITHUB_TOKEN secret (no repository permissions) authorizes the scans: 5,000 requests an hour instead of
+// 60 per shared address, and 304s free. It goes only to api.github.com, never into a log, the cache or a reply.
 import { json } from "./http.js";
 
 const REPOS = ["bitcoin/bitcoin", "btcpayserver/btcpayserver", "lightningnetwork/lnd", "ElementsProject/lightning"];
@@ -18,7 +20,7 @@ const readTime = (value) => {
   if (!Number.isFinite(at)) throw new Error("Unexpected GitHub time");
   return at;
 };
-const scan = async (index, url, cache) => {
+const scan = async (index, url, cache, token) => {
   const now = Date.now(), cutoff = now - RECENT, repo = REPOS[index];
   const limited = await get(cache, cacheKey(url, "limit"));
   if (limited && limited.until > now) return limited;
@@ -27,6 +29,7 @@ const scan = async (index, url, cache) => {
     const key = cacheKey(url, `${index}/page/${page}`), previous = await get(cache, key);
     const headers = { accept: "application/vnd.github+json", "user-agent": "OogaBoogaLand-Totems", "x-github-api-version": "2022-11-28" };
     if (previous?.etag) headers["if-none-match"] = previous.etag;
+    if (typeof token === "string" && token) headers.authorization = `Bearer ${token}`;
     const response = await fetch(`https://api.github.com/repos/${repo}/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=${page}`, { headers, signal: AbortSignal.timeout(10000) });
     if (response.status === 403 || response.status === 429) {
       const reset = Number(response.headers.get("x-ratelimit-reset")) * 1000;
@@ -59,7 +62,7 @@ const scan = async (index, url, cache) => {
   throw new Error("GitHub scan exceeded its page budget");
 };
 
-export const handleTotems = async (request, url) => {
+export const handleTotems = async (request, url, env) => {
   const match = /^\/api\/totems\/([0-3])$/.exec(url.pathname);
   if (!match) return json({ error: "not found" }, 404);
   if (request.method !== "GET") return json({ error: "method not allowed" }, 405, { allow: "GET" });
@@ -68,7 +71,7 @@ export const handleTotems = async (request, url) => {
   if (!summary) {
     const id = `${url.origin}/${index}`;
     if (!running.has(id)) {
-      const job = scan(index, url, cache).catch(() => ({ status: 503, until: Date.now() + 60000 }))
+      const job = scan(index, url, cache, env.GITHUB_TOKEN).catch(() => ({ status: 503, until: Date.now() + 60000 }))
         .then(async result => {
           await put(cache, key, result, result.status ? Math.max(1, (result.until - Date.now()) / 1000) : TTL);
           return result;
