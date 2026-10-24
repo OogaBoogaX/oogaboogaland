@@ -1,5 +1,5 @@
 // Builds and stages the site (scripts/site.mjs into untracked/site) and serves it locally; --watch rebuilds
-// on every change under src/. Everything outside `/src/` is the staged site as GitHub Pages serves it, so
+// on every change under src/. Everything outside `/src/` uses Worker-style audio and picture assets, so
 // /rally answers from rally.html and an unknown path from 404.html; `/src/` is the unbundled source tree,
 // which gives DevTools real file names while the same flags apply to both.
 import { spawn } from "node:child_process";
