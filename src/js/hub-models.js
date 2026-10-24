@@ -12,7 +12,7 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const { hexToRgb, mulberry32 } = BL.math;
-  const { geometry, pushVert, face, box, bevelBox, lathe, glassVessel, ring, merge, cached, variants, makeVox: vox, voxelGeometry: voxGeo, voxCoords, moved, turnedX, turnedY, turnedZ, along, prism } = BL.models;
+  const { geometry, pushVert, face, box, bevelBox, lathe, glassVessel, ring, merge, cached, variants, characterGeometry, makeVox: vox, voxelGeometry: voxGeo, voxCoords, moved, turnedX, turnedY, turnedZ, along, prism } = BL.models;
   const blob = (v, { cx, cy, cz, rx, ry, rz, chip = 0, floor = -Infinity, rand, color }) => {
     for (let x = Math.floor(cx - rx); x <= Math.ceil(cx + rx); x++) {
       for (let y = Math.max(floor, Math.floor(cy - ry)); y <= Math.ceil(cy + ry); y++) {
@@ -678,7 +678,8 @@
     };
     return { node, solids, stations, equipment, displays, updateScreens };
   };
-  // Jetpack tanks and backplate only; the flame is a separate geometry.
+  // Jetpack tanks and backplate only; the flame is a separate geometry. Both are worn, so both are marked
+  // as character parts and stay in reduced reflections.
   const JET_UNIT = 0.075;
   const JET_ORIGIN = { x: -3 * JET_UNIT, y: 0, z: -2 * JET_UNIT };
   const jetpack = cached(() => {
@@ -690,7 +691,7 @@
     }
     v.fill(2, 3, 2, 5, 1, 1, 1);
     v.fill(2, 3, 4, 4, 0, 0, 2);
-    return voxGeo(v, { unit: JET_UNIT, palette: ["#c8552f", "#9aa1a8", "#3c3f44"], origin: JET_ORIGIN });
+    return characterGeometry(voxGeo(v, { unit: JET_UNIT, palette: ["#c8552f", "#9aa1a8", "#3c3f44"], origin: JET_ORIGIN }));
   });
   const jetFlame = cached(() => {
     const v = vox();
@@ -699,7 +700,7 @@
       v.set(x + (x ? 0 : 1), -2, 1, 1);
       v.set(x + (x ? 1 : 0), -2, 0, 1);
     }
-    return voxGeo(v, { unit: JET_UNIT, palette: ["#ffb13b", "#ffe9a8"], origin: JET_ORIGIN, emissive: { 0: 1, 1: 1 } });
+    return characterGeometry(voxGeo(v, { unit: JET_UNIT, palette: ["#ffb13b", "#ffe9a8"], origin: JET_ORIGIN, emissive: { 0: 1, 1: 1 } }));
   });
   const bedroll = cached(() => merge(box({ w: 1.9, h: 0.09, d: 0.85, color: "#2e2724" }), box({ w: 0.4, h: 0.16, d: 0.6, color: "#40342c", offset: { x: 0.65, y: 0.1 } })));
   // A cartoon puff: a low-poly ellipsoid (five rings of eight) with a seeded wobble on every inner vertex, shaded

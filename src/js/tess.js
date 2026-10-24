@@ -350,7 +350,13 @@
         }
         if (i % 12 === 6) round.push(turnedZ(moved(sphere(0.0018, COPPER), 0, r, 0.01), a));
       }
-      // The 0.35 mm fine ticks were subpixel even in her close view; the larger radial marks carry the scale.
+      if (fine) for (let i = 0; i < 192; i++) {
+        const a = i * TAU / 192;
+        marks.push(turnedZ(bevelBox({
+          w: 0.00035, h: 0.0025, d: 0.0004,
+          bevel: 0.0001, color: COPPER, offset: { y: r - 0.005, z: 0.0087 }
+        }), a));
+      }
       return shaded(round, marks);
     });
     return {
@@ -390,7 +396,16 @@
   // faces), whom she watches when she is not flying or beaming (`watching`
   // and `watch`), and her moods: `calm` while she talks, `steady` while she keeps by someone, so she does not turn to
   // her flight. Outline registries walk past her, as she moves every frame.
-  let instances = 0;
+  // Hub scope survives scene changes, but Tess's meshes need survive only while a Tess owns them. The director leaves
+  // one scene and enters the next in one task, so the caches go only once that task ends with no Tess: the Factory's
+  // greeter entered as the hub's guide leaves reuses every tier rather than rebuilding them in the swap frame.
+  let instances = 0, releasing = false;
+  const releaseIdle = () => {
+    releasing = false;
+    if (instances) return;
+    MESHES.clear(); FINE_MESHES.clear(); LIGHT_MESHES.clear();
+    BEAM.clear(); GLINT.clear(); SPARKS.clear(); MOTE.clear();
+  };
   const create = ({ parent, input, fx, camera, kind, coarse, quality = () => "high" }) => {
     // Prepare detail behind the scene transition, never in update. Touch and Low retain the lighter rig.
     const lightMeshes = LIGHT_MESHES(), eligible = !coarse && quality() !== "low",
@@ -636,11 +651,7 @@
         removeChild(parent, body);
         for (let i = 0; i < BEAMS; i++) { removeChild(parent, beams[i]); removeChild(parent, glints[i]); }
         for (let i = 0; i < FLECKS; i++) removeChild(parent, flecks[i].node);
-        // Hub scope survives scene changes, but Tess's meshes need survive only while a Tess owns them.
-        if (--instances === 0) {
-          MESHES.clear(); FINE_MESHES.clear(); LIGHT_MESHES.clear();
-          BEAM.clear(); GLINT.clear(); SPARKS.clear(); MOTE.clear();
-        }
+        if (--instances === 0 && !releasing) { releasing = true; queueMicrotask(releaseIdle); }
       }
     };
     instances++;

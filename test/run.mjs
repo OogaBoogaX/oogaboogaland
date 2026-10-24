@@ -2861,8 +2861,9 @@ const { autoQualityProbe } = (() => {
     const source = readFileSync(new URL("../src/js/director.js", import.meta.url), "utf8");
     const controller = source.slice(source.indexOf("  const perf ="), source.indexOf("  const WARMUP"));
     const policy = source.slice(source.indexOf("  // One opt-in override"), source.indexOf("  const mark ="));
-    const keepHub = (memory, mode = "auto") => runInNewContext(`${policy}\nKEEP_HUB`, { DEVICE_MEMORY: memory, params: new URLSearchParams({ hubcache: mode }) });
-    const hubMemory = [0.25, 1, 2, 4].every(gb => !keepHub(gb)) && [8, 16, 32, undefined, 0, NaN].every(gb => keepHub(gb))
+    const keepHub = (memory, mode = "auto", coarse = false) => runInNewContext(`${policy}\nKEEP_HUB`, { DEVICE_MEMORY: memory, COARSE: coarse, params: new URLSearchParams({ hubcache: mode }) });
+    const hubMemory = [0.25, 1, 2, 4].every(gb => !keepHub(gb) && !keepHub(gb, "auto", true)) && [8, 16, 32, undefined, 0, NaN].every(gb => keepHub(gb))
+      && [8, 16].every(gb => keepHub(gb, "auto", true)) && [undefined, 0, NaN].every(gb => !keepHub(gb, "auto", true) && keepHub(gb, "keep", true))
       && keepHub(4, "keep") && !keepHub(32, "release");
     const opening = source.slice(source.indexOf("  const COARSE ="), source.indexOf("  const $ ="));
     const initial = (deviceMemory, coarse = false) => runInNewContext(`${opening}\nINITIAL_QUALITY`, { navigator: { deviceMemory }, window: { matchMedia: () => ({ matches: coarse }) } });
@@ -3966,20 +3967,36 @@ const contributorActivityChecks = async () => {
 const canvasSurfaceCacheChecks = async () => {
   const source = await readFile(join(root, "src/js/canvas-renderer.js"), "utf8"), start = source.indexOf("  const createSurfaceShadeCache ="), end = source.indexOf("  const createRenderer =", start);
   if (start < 0 || end < 0) throw new Error("Canvas surface shade cache not found");
-  const canvases = [], document = { createElement() { const canvas = { width: 0, height: 0, getContext: () => ({}) }; canvases.push(canvas); return canvas; } };
+  // A backing store is allocated whenever a canvas dimension is assigned, even to the same value.
+  let allocations = 0;
+  const canvases = [], document = { createElement() {
+    let w = 0, h = 0;
+    const canvas = { get width() { return w; }, set width(v) { w = v; allocations++; }, get height() { return h; }, set height(v) { h = v; allocations++; }, getContext: () => ({}) };
+    canvases.push(canvas); return canvas;
+  } };
   const create = new Function("document", `${source.slice(start, end)} return createSurfaceShadeCache;`)(document);
   let paints = 0, failures = 0;
   const cache = create(canvas => { canvas.serial = ++paints; });
   const geometry = () => ({ imageSurface: { canvas: { width: 64, height: 32 }, version: 0, background: [10, 12, 10] } });
-  const a = geometry(), b = geometry(), rec = { canvasR: 0.8, canvasG: 0.9, canvasB: 1, canvasAddR: 0, canvasAddG: 0, canvasAddB: 0 };
+  const a = geometry(), b = geometry(), rec = { canvasR: 0.8, canvasG: 0.6, canvasB: 1, canvasAddR: 0, canvasAddG: 0, canvasAddB: 0 };
+  cache.frame();
   const first = cache.get(a, rec), serial = first.serial; cache.get(b, rec);
+  cache.frame();
   if (cache.get(a, rec) !== first || first.serial !== serial || paints !== 2) failures++;
+  // Light moves the 8-bit output: a step of one output level repaints in a later frame, a change under half a level
+  // does not, and within one frame the first face's light stands for the surface.
   for (const key of Object.keys(rec)) {
-    const before = paints; rec[key] += 0.125;
+    const step = key.startsWith("canvasAdd") ? 1 : 1 / 255;
+    cache.frame();
+    let before = paints; rec[key] += step;
     const fresh = cache.get(a, rec), painted = fresh.serial;
     if (paints !== before + 1 || cache.get(a, rec) !== fresh || fresh.serial !== painted) failures++;
+    cache.frame(); before = paints; rec[key] += step * 0.2;
+    if (cache.get(a, rec) !== fresh || paints !== before) failures++;
+    before = paints; rec[key] += step * 3;
+    if (cache.get(a, rec) !== fresh || paints !== before) failures++;
   }
-  const changed = mutate => { const before = paints; mutate(); cache.get(a, rec); if (paints !== before + 1) failures++; };
+  const changed = mutate => { cache.frame(); const before = paints; mutate(); cache.get(a, rec); if (paints !== before + 1) failures++; };
   changed(() => a.imageSurface.version++);
   changed(() => a.imageSurface.background[0]++);
   changed(() => { a.imageSurface.background = null; });
@@ -3991,18 +4008,38 @@ const canvasSurfaceCacheChecks = async () => {
   changed(() => { a.imageSurface.canvas.height++; });
   for (let i = 0; i < 40; i++) {
     const g = geometry(); g.imageSurface.canvas.width = g.imageSurface.canvas.height = 512;
-    cache.get(g, rec);
-    if (cache.size > 8 || cache.pixels > 1024 * 1024) failures++;
+    cache.frame(); cache.get(g, rec);
+    if (cache.size > 8 || cache.pixels > 2048 * 1024) failures++;
   }
-  const huge = geometry(); huge.imageSurface.canvas.width = huge.imageSurface.canvas.height = 2048;
+  const huge = geometry(); huge.imageSurface.canvas.width = 2048; huge.imageSurface.canvas.height = 2048;
   const before = paints, size = cache.size, pixels = cache.pixels;
-  cache.get(huge, rec); cache.get(huge, rec);
+  cache.frame(); cache.get(huge, rec); cache.frame(); cache.get(huge, rec);
   if (paints !== before + 2 || cache.size !== size || cache.pixels !== pixels) failures++;
   cache.release(new Set());
   if (cache.size || cache.pixels) failures++;
   cache.get(a, rec); cache.dispose();
   if (cache.size || cache.pixels || canvases.some(c => c.width || c.height) || canvases.length > 9) failures++;
   record("Canvas surface reuse: unchanged faces reuse exact shaded images, every content/lighting/dimension input invalidates, and eviction, scene release and disposal bound owned canvases", failures === 0, JSON.stringify({ failures, paints, canvases: canvases.length }));
+  // The curved jumbotron: a 1200x540 board drawn as ten faces a frame, each lit a little differently, under a sun
+  // that moves every frame. It shades at most once a frame, and a slot keeps its backing store across repaints.
+  const board = create(canvas => { canvas.serial = ++paints; }), slide = geometry();
+  slide.imageSurface.canvas.width = 1200; slide.imageSurface.canvas.height = 540; slide.imageSurface.tessellated = true;
+  const lit = { canvasR: 0, canvasG: 0, canvasB: 0, canvasAddR: 0, canvasAddG: 0, canvasAddB: 0 };
+  const curved = { paints: paints, allocations };
+  for (let frame = 0; frame < 60; frame++) {
+    board.frame();
+    for (let face = 0; face < 10; face++) {
+      lit.canvasR = 0.6 + face * 0.031 + frame * 0.0007; lit.canvasG = lit.canvasR * 0.97; lit.canvasB = lit.canvasR * 0.93;
+      board.get(slide, lit);
+    }
+  }
+  curved.paints = paints - curved.paints; curved.allocations = allocations - curved.allocations;
+  // Beside it, the four Mempool paintings and six Timechain boards each keep their own slot within the budget.
+  const small = Array.from({ length: 7 }, () => geometry()), still = { ...lit }, steady = { paints };
+  for (let frame = 0; frame < 10; frame++) { board.frame(); board.get(slide, still); for (const g of small) board.get(g, still); }
+  steady.paints = paints - steady.paints;
+  record("Canvas surface shading: a curved board drawn as ten faces under a moving sun shades at most once a frame and reallocates nothing, and the surfaces beside it keep their slots",
+    curved.paints <= 60 && curved.allocations <= 2 && steady.paints <= 8 && board.size === 8, JSON.stringify({ curved, steady, size: board.size }));
 };
 const deferredLoadingChecks = async () => {
   const source = await readFile(join(root, "src/js/deferred.js"), "utf8"), rows = [];
@@ -4168,6 +4205,11 @@ const characterChecks = async () => {
     const flask = BL.agent.labFlaskGeometry(variant);
     mirrorGeometries.add(flask).add(flask.glassShell);
   }
+  // The worn jetpack and its flame come from the hub's kit, not the caveman builder (#290 review).
+  Object.assign(context, { document: { createElement: () => ({ getContext: () => null }) }, performance, console });
+  for (const name of ["terrain", "hub-models"]) runInNewContext(await readFile(join(root, `src/js/${name}.js`), "utf8"), context);
+  const worn = [BL.hubModels.jetpack(), BL.hubModels.jetFlame()];
+  for (const geo of worn) mirrorGeometries.add(geo);
   // Exercise the renderer's real reduced-capture decision on actual builder output, in both storage paths.
   const source = await readFile(join(root, "src/js/gl-renderer.js"), "utf8"), start = source.indexOf("    const captureInstanceVisible ="), end = source.indexOf("    const drawCaptureRuns =", start);
   if (start < 0 || end < 0) throw new Error("Reduced mirror capture predicate not found");
@@ -4188,7 +4230,8 @@ const characterChecks = async () => {
   };
   for (const geo of mirrorGeometries) check(geo, true);
   check(BL.models.box({ w: 0.1, h: 0.1, d: 0.1, color: "#ffffff" }), false);
-  record("mirror character ownership: reduced captures keep both weapon skins, tint and head swaps, swag and gorilla forms/clothing, while still culling small scenery and out-of-frustum parts", failures === 0 && small > 0, JSON.stringify({ geometries: mirrorGeometries.size, small, failures }));
+  const jetpack = worn.every(geo => geo.characterPart === true && BL.scene.boundsOf(geo).radius < 1.25);
+  record("mirror character ownership: reduced captures keep both weapon skins, tint and head swaps, swag, gorilla forms/clothing and the worn jetpack and flame, while still culling small scenery and out-of-frustum parts", failures === 0 && small > 0 && jetpack, JSON.stringify({ geometries: mirrorGeometries.size, small, failures, jetpack }));
 };
 // The mempool.space feed parser in Node: message shapes as the socket sends them, no socket.
 const mempoolFeedChecks = async () => {
@@ -5131,7 +5174,12 @@ const ghostHuntChecks = async () => {
     // Compared while both still hunt: a finished hunt resets to IDLE and would hide any difference.
     play(a, at, 200000); play(handed, at, 200000);
     const same = JSON.stringify(a.snapshot()) === JSON.stringify(handed.snapshot()), hunting = a.state.state !== ST.IDLE;
-    record("ghost hunt: a seeded hunt repeats exactly, and one picked up from its snapshot mid-way (a new host) goes on the same", repeated && loaded && same && hunting && a.state.kills > 0, JSON.stringify({ repeated, loaded, same, hunting, kills: a.state.kills }));
+    // Pages either side of a deploy share a hunt: the player rows keep the 27 numbers (slot, presence, 25 fields) the
+    // deployed pages read, newer fields riding in `x`, and a snapshot without `x` (an older host's) still loads.
+    const snap = JSON.parse(JSON.stringify(a.snapshot())), rows = snap.p.length > 0 && snap.p.length % 27 === 0 && snap.x.length > 0;
+    delete snap.x;
+    const older = G.create({ seed: 5, spots, lapMs: 20000 }).load(snap);
+    record("ghost hunt: a seeded hunt repeats exactly, one picked up from its snapshot mid-way (a new host) goes on the same, and its rows stay readable across a deploy", repeated && loaded && same && hunting && a.state.kills > 0 && rows && older, JSON.stringify({ repeated, loaded, same, hunting, kills: a.state.kills, rows, older }));
   }
   {
     const sim = begin(11), rounds = [], drops = { 3: false, 4: false }, gorillas = [], skeletons = [], seenBrutes = new Set();
@@ -5185,7 +5233,8 @@ const ghostHuntChecks = async () => {
       JSON.stringify({ where, struck: struck.length, zapped }));
   }
   {
-    // A player takes the monkeys from where they fell; they stay with them until a ghost gets them.
+    // A player takes the monkeys from where they fell; they stay through the first hit and leave once the bar falls
+    // below POWER_KEEP_SEG.
     const z = begin(13);
     let now = T0;
     const tick = () => { now += FRAME; z.beginPresence(); z.present(1, 0, 0, 6); z.advance(now); };
@@ -5195,16 +5244,22 @@ const ghostHuntChecks = async () => {
     drop.x = 0; drop.z = 6;
     while (now < T0 + 120000 && drop.on) tick();
     const me = z.players.find((p) => p.id === 1), armed = me.monkeys === 1;
-    while (now < T0 + 600000 && me.seg === G.CONFIG.PLAYER_SEGMENTS) tick();
-    const lost = me.seg === G.CONFIG.PLAYER_SEGMENTS - 1 && me.monkeys === 0;
-    // Forty kills of their own bring them back; the next round's start makes them whole.
+    // Twenty kills of their own while still armed earn a pair that waits.
     z.debug.kills(1, G.CONFIG.MONKEY_EVERY_KILLS);
-    const gifted = me.monkeys === 1 && z.state.pickKind === G.MONKEY_DROP && z.state.pickBy === 1;
+    const held = me.monkeys === 1 && me.dropsGiven === 0;
+    while (now < T0 + 600000 && me.seg === G.CONFIG.PLAYER_SEGMENTS) tick();
+    const kept = me.seg === G.CONFIG.PLAYER_SEGMENTS - 1 && me.monkeys === 1;
+    while (now < T0 + 600000 && me.seg >= G.CONFIG.POWER_KEEP_SEG) tick();
+    const lost = me.seg === G.CONFIG.POWER_KEEP_SEG - 1 && me.monkeys === 0;
+    // The waiting pair comes down once the hit's blink is over; the next round's start makes them whole.
+    const blink = now + G.CONFIG.IFRAMES_MS + 500;
+    while (now < blink && !me.monkeys) tick();
+    const gifted = me.monkeys === 1 && me.dropsGiven === 1 && z.state.pickKind === G.MONKEY_DROP && z.state.pickBy === 1;
     z.debug.next();
     while (now < T0 + 900000 && z.state.state !== ST.COUNTDOWN) tick();
     const whole = me.frozenUntil > z.state.now || me.seg === G.CONFIG.PLAYER_SEGMENTS;
-    record("ghost hunt: the monkeys arm the player who takes them, the first hit takes them away, every 40 kills brings them back, and a round's start makes everyone standing whole",
-      armed && lost && gifted && whole, JSON.stringify({ armed, lost, gifted, whole, seg: me.seg, state: z.state.state }));
+    record("ghost hunt: the monkeys arm the player who takes them, stay through the first hit and leave once the bar is low, every 20 of their own kills brings them back (waiting while they are armed), and a round's start makes everyone standing whole",
+      armed && held && kept && lost && gifted && whole, JSON.stringify({ armed, held, kept, lost, gifted, whole, seg: me.seg, state: z.state.state }));
   }
   {
     // With every ghost slot held (dying ghosts keep theirs a moment), no ghost is counted as spawned; with every drop
@@ -5243,13 +5298,15 @@ const ghostHuntChecks = async () => {
   }
   {
     // A rescuer knocked down during an elixir revive must start a fresh hold after being brought back. A third
-    // hunter keeps the round alive while both are down.
+    // hunter keeps the round alive while both are down. The one being revived is found where they went down even once
+    // their page stops reporting them (a hidden Ooga under its grave), as on a shared island.
     const z = begin(29), C = G.CONFIG;
     z.ready(3);
-    let now = T0;
+    let now = T0, absent = 0;
     const tick = () => {
       now += C.TICK_MS; z.beginPresence();
       for (const [id, x, z0] of [[1, 0, 6], [2, 1, 6], [3, 21, 0]]) {
+        if (id === absent) continue;
         const p = z.present(id, x, 0, z0);
         if (p) p.invulnUntil = z.state.now + 60000;
       }
@@ -5257,7 +5314,8 @@ const ghostHuntChecks = async () => {
     };
     while (now < T0 + 60000 && z.state.state !== ST.ACTIVE) tick();
     const rescuer = z.playerById(1), down = z.playerById(2);
-    down.seg = 0; down.frozenUntil = C.DOWN_UNTIL; rescuer.elixir = 1;
+    down.seg = 0; down.frozenUntil = C.DOWN_UNTIL; down.downAt = z.state.now; down.downX = 1; down.downZ = 6; rescuer.elixir = 1;
+    absent = down.id;
     for (let i = 0; i < C.ELIXIR.reviveMs / C.TICK_MS / 2; i++) tick();
     const started = rescuer.reviveTarget === down.id && z.frozen(down);
     rescuer.seg = 0; rescuer.frozenUntil = C.DOWN_UNTIL;
@@ -5902,7 +5960,7 @@ const wallPerformance = async (b) => {
 };
 const adaptiveQualityChecks = async () => {
   const r = autoQualityProbe();
-  record("memory policy: devices below 8 GiB release the hub, 8 GiB or unknown memory retain it, and the explicit policy overrides either", r.hubMemory, JSON.stringify(r));
+  record("memory policy: devices below 8 GiB release the hub, 8 GiB retains it, unknown memory retains it with a fine pointer and releases it with a coarse one, and the explicit policy overrides either", r.hubMemory, JSON.stringify(r));
   record("adaptive quality: a GPU-bound machine is seen through delivered frames and loses a tier within two seconds", r.healthy && r.gpuBound && r.reactsFast, JSON.stringify(r));
   record("adaptive quality: warmup, transitions, background frames and isolated spikes do not lower quality", r.warmup && r.ignoresPauses && r.ignoresSpikes && r.fallback, JSON.stringify(r));
   record("adaptive quality: steps one tier at a time and stops at the lowest", r.bounded, JSON.stringify(r));
@@ -6025,7 +6083,7 @@ const trip = (id) => ({ name: `${id} round trip`, why: "contract: a scene left a
 const hudVisit = { name: "hub HUD lifetime", why: "regression: scene visits recreated roster SVGs and donor rows; their handlers must end on leave while the attached rows keep their identity", run: async (b) => {
   await b.evaluate(`(() => {
     const H = window.__hudVisit = { rows: [...document.querySelectorAll("#roster [data-name]")], leaders: [...document.getElementById("banana-leaders").children], signals: [], calls: 0 }, S = BL.scenes;
-    H.keep = new URLSearchParams(location.search).get("hubcache") !== "release";
+    H.keep = __ooga.hubPolicy === "keep";
     H.root = S.hub.root; H.pilot = __ooga.pilot; H.input = S.hub.input;
     H.solids = __ooga.headquarters.solids.props; H.guides = __ooga.headquarters.objectGuides;
     H.roof = S.hub.debug.terrainRampRoof; H.footsteps = __ooga.footsteps;
@@ -6070,6 +6128,45 @@ const hudVisit = { name: "hub HUD lifetime", why: "regression: scene visits recr
   } finally {
     await b.evaluate(`(() => { const H = window.__hudVisit; BL.scenes.lab.enter = H.enters[0]; BL.scenes.hub.enter = H.enters[1]; delete window.__hudVisit; })()`);
   }
+} };
+// A kept island left with fruit in the air and a tween running: both finish on the next visit, nothing hangs.
+const hubKeptDelivery = { name: "hub kept delivery", why: "regression: leaving a kept hub mid-delivery stranded its airborne bananas in mid-air for good (never landing, the pile stuck in motion) and left its other tweens, a prop's wobble among them, unfinished", run: async (b) => {
+  const start = await b.evaluate(`(() => {
+    const B = __ooga, D = B.delivery, H = window.__keptDelivery = { settled: false };
+    H.landed = D.totalLandedValue; H.owed = D.logicalOutstandingValue;
+    H.accepted = D.enqueue(12);
+    B.advance(0.3, 1 / 30);
+    BL.scene.addTween({ dur: 5, update() {}, done() { H.settled = true; } });
+    return { keep: B.hubPolicy === "keep", accepted: H.accepted, airborne: B.drops.filter(s => s.moving && s.node.visible).length };
+  })()`);
+  await tourGo(b, "lab");
+  await tourGo(b, "hub");
+  const r = await b.evaluate(`(() => {
+    const B = __ooga, D = B.delivery, H = window.__keptDelivery;
+    for (let i = 0; i < 600 && D.logicalOutstandingValue; i++) B.advance(1 / 30, 1 / 30);
+    const r = { landed: D.totalLandedValue - H.landed - H.owed, outstanding: D.logicalOutstandingValue, airborne: D.airborneVisualDropCount, moving: B.drops.filter(s => s.moving).length,
+      hanging: B.drops.filter(s => s.node.visible).length, settled: H.settled };
+    delete window.__keptDelivery;
+    return r;
+  })()`);
+  record("hub kept delivery: bananas in the air when a kept hub is left fall again on return and all land, none hangs, the pile comes to rest and the hub's running tweens finish",
+    start.airborne > 0 && start.accepted === 12 && r.outstanding === 0 && r.airborne === 0 && r.moving === 0 && r.hanging === 0
+      && (!start.keep || r.landed === 12 && r.settled), JSON.stringify({ start, r }));
+} };
+// A room's address redirected to the island (signed in, or the account still unknown) chooses that room at the keypad.
+const hubKeypadRedirect = { name: "hub keypad redirect", why: "regression: a kept hub resumed without reading the room a redirected room address chose, so the keypad ignored it and the choice lingered", run: async (b) => {
+  await tourGo(b, "lab");
+  const r = await b.evaluate(`(() => {
+    const B = __ooga, net = BL.net.state, resolved = net.resolved;
+    net.resolved = false;
+    try {
+      B.go("timechain", "3");
+      for (let i = 0; i < 150 && (B.transitioning || B.scene !== "hub"); i++) B.advance(1 / 30, 1 / 30);
+    } finally { net.resolved = resolved; }
+    B.advance(0.3, 1 / 30);
+    return { scene: B.scene, policy: B.hubPolicy, preselected: BL.scenes.hub.debug.timechainIsland.gate.preselected };
+  })()`);
+  record("hub keypad redirect: a room address redirected to the island, kept or rebuilt, has that room chosen at the keypad", r.scene === "hub" && r.preselected === 3, JSON.stringify(r));
 } };
 const play = (id, what, code) => ({ name: `${id} playthrough`, why: "playthrough: the game reaches its result, shown and saved", run: async (b) => {
   const r = await b.evaluate(code);
@@ -7707,6 +7804,23 @@ const hubMirror = { name: "hub mirror", why: "rule: 500 damage shatters the mirr
   record("hub mirror: an ordinary visitor can damage the glass with a real rifle shot without enabling character damage", physical.fired && physical.damage > 0 && physical.shots === 1 && physical.harmless, JSON.stringify(physical));
   const r = await b.evaluate(`(() => { const B = window.__ooga, M = B.mirrorCave, g = M.gate, w = M.node.world, G = B.matrixGate, m = M.mouth; const A = { x: m.x + Math.sin(m.ry) * 1.5, y: m.floorY, z: m.z + Math.cos(m.ry) * 1.5 }, E = { x: m.x - Math.sin(m.ry), y: m.floorY + 1.6, z: m.z - Math.cos(m.ry) }, dh = Math.hypot(E.x - A.x, E.z - A.z); B.pilot.navigate({ position: A, yaw: Math.atan2(E.x - A.x, E.z - A.z), pitch: Math.atan2(E.y - (A.y + 1.53), dh), dist: dh }); B.advance(1, 1 / 60); const before = { broken: M.damage.broken, locked: g.locked, hint: M.guides.state.doorway }; M.damage.hit(499 - M.damage.damage, w[12], w[13], w[14]); B.advance(1 / 60, 1 / 60); const whole = { broken: M.damage.broken, locked: g.locked }; M.damage.hit(1, w[12], w[13], w[14]); B.advance(1 / 60, 1 / 60); const u0 = M.guides.state.doorwayUpdates; B.advance(1, 1 / 60); const after = { broken: M.damage.broken, shattered: M.shattered, locked: g.locked, reveal: M.node.mirrorReveal, hint: M.guides.state.doorway, frozen: M.guides.state.doorwayUpdates === u0 }; B.go("lab"); let n = 0; while ((B.transitioning || B.scene !== "pool") && n++ < 600) B.advance(1 / 30, 1 / 30); B.go("hub"); n = 0; while ((B.transitioning || B.scene !== "hub") && n++ < 600) B.advance(1 / 30, 1 / 30); B.advance(0.5, 1 / 60); const N = B.mirrorCave; return { before, whole, after, back: { broken: N.damage.broken, shattered: N.shattered, locked: N.gate.locked, reveal: N.node.mirrorReveal, hint: N.guides.state.doorway } }; })()`);
   record("hub mirror: 499 damage leaves it whole and locked, 500 shatters it open with its gate unlocked and the glyph hint stopped, and it is still broken after a trip away", !r.before.broken && r.before.locked && r.before.hint && !r.whole.broken && r.whole.locked && r.after.broken && r.after.shattered && !r.after.locked && r.after.reveal === 1 && !r.after.hint && r.after.frozen && r.back.broken && r.back.shattered && !r.back.locked && r.back.reveal === 1 && !r.back.hint, JSON.stringify(r));
+} };
+// Medium captures the mirror only while its pane reads; one that shrinks below that must drop its capture.
+const hubMirrorMedium = { name: "hub mirror medium size", why: "regression: on medium a mirror whose pane shrank under the capture size kept drawing its last capture, frozen, instead of its authored face", run: async (b) => {
+  const r = await b.evaluate(`(() => {
+    const B = window.__ooga, R = B.renderer, M = B.mirrorCave, root = BL.scenes.hub.root;
+    if (R.kind !== "webgl2") return { kind: R.kind };
+    const tier = R.quality, w = M.node.world, n = Math.hypot(w[8], w[9], w[10]) || 1, cam = BL.scene.createCamera({ far: 120 });
+    cam.position.x = w[12] + w[8] / n * 3.5; cam.position.y = w[13] + w[9] / n * 3.5; cam.position.z = w[14] + w[10] / n * 3.5;
+    cam.target.x = w[12]; cam.target.y = w[13]; cam.target.z = w[14];
+    R.setQuality("medium");
+    // A wide lens at the same spot shrinks the pane on screen without moving the camera behind any rock.
+    const look = fov => { cam.fov = fov * Math.PI / 180; for (let i = 0; i < 4; i++) R.render(root, cam, B.renderOpts); const m = R.mirror; return { reason: m.skipReason, valid: m.captureValid, drawn: m.surfaceDrawn }; };
+    const near = look(50), small = look(170), back = look(50);
+    R.setQuality(tier);
+    return { kind: R.kind, near, small, back };
+  })()`);
+  record("hub mirror medium size: a readable pane captures and draws its reflection, shrunk below the capture size it drops the capture for its authored face, and it captures again when it reads", r.kind === "webgl2" && r.near.valid && r.near.drawn && r.small.reason === "quality-size" && !r.small.valid && !r.small.drawn && r.back.valid && r.back.drawn, JSON.stringify(r));
 } };
 // The Canvas 2D fallback, for a device without WebGL2: every scene, entered in one page, paints real
 // colour (sampled small, after the arrival fade) and keeps the leave contract; the console stays clean.
@@ -11789,7 +11903,7 @@ const hubDistantEffects = { name: "hub distant effects", why: "rule: distant por
       && animation.host.ooga >= 58 && animation.host.gorilla >= 58 && animation.network && animation.controlled >= 58, JSON.stringify(animation));
 } };
 scene("hub", { label: "distant effects", query: "pos=0", steps: [hubDistantEffects] });
-scene("hub", { opts: !ONLY || onlyMatches(hubArrival.name) ? { initScript: `(${hubSleepWire.toString()})()` } : {}, steps: [hubArrival, { name: `work movement lab lanes ${1 / RATES[0]}Hz`, why: "regression: work walkers left their facing-right side of the lab lane", open: "on about 4 boots in 30 the lane targets sit on the centre or far side; unfixed", run: labLanes }, donation("hub"), hubWalking, hudVisit, hubMapNavigation, hubRainforestSteps, hubRoutes, hubFall, hubGrounding, trip("hub"), factoryActivityRouting] });
+scene("hub", { opts: !ONLY || onlyMatches(hubArrival.name) ? { initScript: `(${hubSleepWire.toString()})()` } : {}, steps: [hubArrival, { name: `work movement lab lanes ${1 / RATES[0]}Hz`, why: "regression: work walkers left their facing-right side of the lab lane", open: "on about 4 boots in 30 the lane targets sit on the centre or far side; unfixed", run: labLanes }, donation("hub"), hubWalking, hudVisit, hubKeptDelivery, hubMapNavigation, hubRainforestSteps, hubRoutes, hubFall, hubGrounding, hubKeypadRedirect, trip("hub"), factoryActivityRouting] });
 // The same ownership contract exercises complete destruction on memory-limited devices.
 scene("hub", { label: "release policy", query: "hubcache=release", steps: [hudVisit, trip("hub")] });
 scene("hub", { query: "ooga=portlandhodl:clank:lab,obl,lf&ooga=w-s-bitcoin:clank:lab,obl,lf&ooga=bc1gui:clank:lab,obl,lf&ooga=DrNeski:clank:lab,obl,lf&ooga=2140data:clank:lab,obl,lf", steps: [{ name: "work movement cave trips", why: "regression: off-lane cave traffic aimed through obstacles and started backwards detours", run: workCaveTrips }] });
@@ -11879,7 +11993,7 @@ const hubScratchChecks = async () => {
 };
 
 // Regression: Tess's hub-tagged cached meshes survived the last rig's departure.
-const tessCacheChecks = BL => {
+const tessCacheChecks = async BL => {
   const parent = BL.scene.createNode(), input = { add() {}, remove() {} }, fx = {};
   const make = () => BL.tess.create({ parent, input, fx, coarse: false });
   BL.models.setScope("tess-lifecycle");
@@ -11887,11 +12001,16 @@ const tessCacheChecks = BL => {
   const core = rig => rig.root.children[0].children[0].geometry;
   const shared = core(a) === core(b); a.dispose();
   const c = make(), held = core(c) === core(b); c.dispose(); b.dispose();
+  // A scene change leaves one scene and enters the next in one task (the hub's guide, then the Factory's greeter).
+  const e = make(), swapped = new Set(); e.liveGeometry(swapped);
+  const reused = [...swapped].every(mesh => before.has(mesh)); e.dispose();
+  await Promise.resolve();
   const d = make(), after = new Set(); d.liveGeometry(after);
   const rebuilt = [...after].every(mesh => !before.has(mesh)); d.dispose();
+  await Promise.resolve();
   BL.models.setScope(null);
-  record("Tess caches: live rigs share all tiers; the last disposal releases them and the next visit rebuilds every tier", shared && held && rebuilt && before.size === 36 && after.size === 36 && parent.children.length === 0,
-    JSON.stringify({ shared, held, rebuilt, tiers: before.size, children: parent.children.length }));
+  record("Tess caches: live rigs share all tiers, a Tess entered as the last one leaves reuses them, and once a change of scene ends with none they are released and the next visit rebuilds every tier", shared && held && reused && rebuilt && before.size === 36 && swapped.size === 36 && after.size === 36 && parent.children.length === 0,
+    JSON.stringify({ shared, held, reused, rebuilt, tiers: before.size, children: parent.children.length }));
 };
 
 // Regression: one hub variant pinned every other index built by a later scene.
@@ -15701,7 +15820,7 @@ scene("hub", { label: "guide", query: "character=portlandhodl&jetpack=1", steps:
 scene("hub", { label: "birds-eye combat", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", exclusive: true, steps: [hubBirdsEye] });
 scene("hub", { label: "birds-eye combat projection and targets", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", steps: [hubBirdsEyeProjection, gameCombat(hubBirdsEyeTargets), hubCombatReplay] });
 scene("hub", { label: "birds-eye lower floors", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", steps: [hubBirdsEyeFloors] });
-scene("hub", { label: "mirror", steps: [hubJumbotron, hubMatrix, hubMirror] });
+scene("hub", { label: "mirror", steps: [hubJumbotron, hubMirrorMedium, hubMatrix, hubMirror] });
 scene("hub", { label: "oogatron popups", url: hubPage(dist, "pos=0"), steps: [oogatronPopups] });
 scene("hub", { label: "oogatron popups phone", url: hubPage(dist, "pos=0"), opts: PHONE_SIZE, steps: [oogatronPopups] });
 scene("hub", { label: "reset storage race", steps: [{ name: "reset storage race", why: "regression: a page timer or pagehide storage write once survived the pooled browser reset and leaked state into the next task", run: async () => {
@@ -17957,8 +18076,9 @@ const raceRigChecks = async () => {
     // Depth pre-pass "no image change" rendering core: the shared vertex and fragment
     // bytes the depth-only and plain variants derive from, plus the untouched shadow path.
     "6bed3532a26c98c3e5a9218674dbe75c789324168104f6b0eb7fb5c88872a012",
-    // 487d99ac909f added uObjectSlab2 for the Factory roof bore; removing its
-    // declaration plus the intentional canvas/foliage atlas sampling restores the previous b82d02f4 baseline (was f5f71f79).
+    // The fragment shader, re-baselined on purpose: 487d99ac909f added uObjectSlab2 for the Factory roof bore
+    // (b82d02f4 to f5f71f79), ab4ebcd sampled retained canvas surfaces (to c98cc70d) and e32e91e sampled the
+    // foliage LOD atlas (to fb12fd53). Removing those additions would not restore b82d02f4 alone.
     "fb12fd53216aa902750f5bf315e44a6334c9b24fb58afb12f28a4f5e85233677",
     "37030f053de422aa157f017ceedef0812ed57a17c9e1b2af4aab017c0b645364"
   ];
@@ -18819,7 +18939,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   }
   process.off("unhandledRejection", rejected);
   const BL = globalThis.BL;
-  tessCacheChecks(BL);
+  await tessCacheChecks(BL);
   variantCacheChecks(BL);
   modelResidencyChecks(BL);
   if(ARGS.includes("water-baseline")){

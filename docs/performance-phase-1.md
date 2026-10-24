@@ -28,7 +28,7 @@ Validation: `node --check` on changed JavaScript; unit tier 260/260. The focused
 
 ## 1.2 — Tess cache ownership
 
-Tess already used `models.cached`; the problem was the hub scope keeping its populated getters alive. Tracked entries now expose `clear`, and a cached getter forwards it. Tess counts live rigs and clears all seven private caches after the last rig is disposed. Multiple live rigs continue to share their tiers. The fine ring no longer builds 576 bevelled ticks only 0.35 mm wide; the larger marks, globe, animation and tier selection are unchanged.
+Tess already used `models.cached`; the problem was the hub scope keeping its populated getters alive. Tracked entries now expose `clear`, and a cached getter forwards it. Tess counts live rigs and clears all seven private caches once a scene change ends with no rig left (a microtask after the last disposal, since the director leaves one scene and enters the next in one task), so a Tess entered as another leaves, the Factory's greeter after the hub's guide, reuses every tier. Multiple live rigs continue to share their tiers. The measurements below also removed the fine ring's 576 bevelled ticks, 0.35 mm wide; that visual change has since been taken back out of this work, so the prepared-face row and about 3.5 MiB of the Factory floor no longer apply.
 
 Factory always creates a Tess rig, even before she is approached. Its snapshot is therefore not a Tess-free case. The Lab after hub → Factory → Lab is the zero-instance measurement.
 

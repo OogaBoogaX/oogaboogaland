@@ -431,7 +431,8 @@
     const exitNote = (signedOut) => ({ room: room.id, mode: signedOut ? "solo" : visit.mode, character: avatar ? avatar.traits.name : null, jetpack: visit.jetpack || null });
     // A walked-out exit hands over mid-stride without the fade, with where its eye stood from the handover point
     // (`pose`), so the island starts from the same view; any other way out (signed out, Leave far from the doors)
-    // fades as before.
+    // fades as before. Under the `release` hub policy the island is built again on the way out, so that build happens
+    // behind the fade too rather than freezing the room's last frame.
     const handOff = (signedOut = false, pose = null) => {
       if (leaving) return;
       world.sphereExit = { ...exitNote(signedOut), pose };
@@ -439,7 +440,7 @@
       world.pilotDetached = !avatar;
       BL.net.setBody(null);
       BL.net.setZone("none");
-      leaving = go("hub", "timechain", !!pose);
+      leaving = go("hub", "timechain", !!pose && ctx.hubPolicy === "keep");
       if (!leaving) world.sphereExit = null;
     };
     // A way out the island could not be built for (the director's `stay`): back in the room with the walk-out undone, so

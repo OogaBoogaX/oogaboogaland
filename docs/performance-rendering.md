@@ -6,7 +6,7 @@ All rows use one focused native Chrome155 tab at1440×900 on AC power, M1 Pro/AN
 
 
 Revised after review: the tier change was measured only on Apple silicon, where the named-GPU rule already skipped the prepass, so it gave no gain there and could only cost other GPUs late-Z overdraw (the mesh shader discards). Every tier keeps the prepass again unless the GPU is named Apple silicon; `prepass=0|1` still overrides. The note below records the original change.
-Low and medium disable the prepass on every GPU. High retains the named-Apple-silicon policy. `prepass=0|1` overrides ordinary geometry in every tier; rigs retain their dedicated path. Existing classification coverage now also tests tier/override/rig policy. Global checks:268/268.
+Low and medium disable the prepass on every GPU. High retains the named-Apple-silicon policy. `?debug=1&prepass=0|1` overrides ordinary geometry in every tier; rigs retain their dedicated path. Existing classification coverage now also tests tier/override/rig policy. Global checks:268/268.
 
 | Tier | Before FPS | After FPS | Before total draws/frame | After total draws/frame |
 |---|---:|---:|---:|---:|
@@ -18,7 +18,7 @@ Default M1 behavior was already off, so these results correctly show no default 
 
 ## 2.2 Reflection capture
 
-The small129×96 hub capture in the real baseline is the main mirror, not `reflectorNodes` (Factory/Bifrost). Changing only the named loop left the measured hub work unchanged. The same tier policy now covers both paths: low keeps authored pane materials without captures; medium needs at least150×150 CSS pixels and uses cadence2 plus large, reflection-frustum-visible instances, excluding sway/foliage, image surfaces and projective geometry. Existing instance buffers are reused through contiguous run offsets and restored in `finally`. High retains its previous capture set and cadence.
+The small129×96 hub capture in the real baseline is the main mirror, not `reflectorNodes` (Factory/Bifrost). Changing only the named loop left the measured hub work unchanged. The same tier policy now covers both paths: low keeps authored pane materials without captures; medium needs at least150×150 CSS pixels and uses cadence2 plus large, reflection-frustum-visible instances, excluding sway/foliage, image surfaces and projective geometry. Existing instance buffers are reused through contiguous run offsets and restored in `finally`. High keeps its full capture set and cadence for planar mirrors and reflectors, but environment cube captures (the shards) take the reduced set on every tier, high included. The reduced set keeps every geometry marked `characterPart` whatever its size: caveman parts, both weapon skins, head swaps and tint twins, swag, gorilla forms and clothing, and the worn jetpack and its flame; the unit check `mirror character ownership` runs the renderer's own predicate over that builder output.
 
 At pile, the before medium reflection submitted up to2,170,341 triangles on150/301 frames; low up to2,168,889 on101/301 frames. After, both submit **zero** capture frames because the pane is below threshold. High still captures every frame with up to2,170,461 triangles (before2,170,497), and all tiers remain60FPS. The clear-pane low/medium appearance is an intentional quality difference. Three-tier images are retained next to the raw runs.
 

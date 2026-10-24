@@ -18,38 +18,56 @@
     const b = Math.round(lerp((odd ? 112 : 74) * emission, 226.95, head));
     RIPPLE_GREENS[(tip * 16 + gain) * 2 + odd] = `rgb(${r},${g},${b})`;
   }
-  // Exact-input reuse: no quantization of lighting or content. Eight reusable slots share a 1,048,576-pixel budget;
-  // oversized surfaces keep the former single scratch image and are never retained by the cache.
+  // One shaded image per surface per frame: the first face drawn sets the surface's light for the frame, so a curved
+  // board tessellated into a strip of faces shades once, not once a face. Light is keyed as the 8-bit values the
+  // paint uses (`shade`), so a sun creeping across the sky repaints only when the pixels would change. Eight reusable
+  // slots share a 2,097,152-pixel budget, so the largest board (1200x540) fits beside the smaller ones; an evicted
+  // slot of the same size keeps its backing store. Oversized surfaces keep a single grow-only scratch image.
   const createSurfaceShadeCache = (paint) => {
-    const MAX_PIXELS = 1024 * 1024;
-    const entries = Array.from({ length: 8 }, () => ({ canvas: null, context: null, geometry: null, source: null, pixels: 0, used: 0 }));
+    const MAX_PIXELS = 2048 * 1024;
+    const entries = Array.from({ length: 8 }, () => ({ canvas: null, context: null, geometry: null, source: null, pixels: 0, used: 0, frame: -1,
+      version: 0, w: 0, h: 0, sourceW: 0, sourceH: 0, br: 0, bg: 0, bb: 0, r: 0, g: 0, b: 0, ar: 0, ag: 0, ab: 0 }));
     const fallback = { canvas: null, context: null };
-    let pixels = 0, clock = 0;
+    const shade = { r: 0, g: 0, b: 0, ar: 0, ag: 0, ab: 0 };
+    let pixels = 0, clock = 0, frame = 0;
     const clear = entry => {
       if (entry.canvas) entry.canvas.width = entry.canvas.height = 0;
       pixels -= entry.pixels; entry.pixels = entry.used = 0;
       entry.geometry = entry.source = null;
     };
+    const channel = value => value > 0 ? Math.round(value * 255) : 0;
+    const added = value => value > 0 ? Math.min(255, Math.round(value)) : 0;
     const get = (geometry, rec, coverage) => {
       const surface = geometry.imageSurface, source = surface.canvas, w = surface.width || source.width, h = surface.height || source.height;
       const background = surface.background, br = background ? background[0] : -1, bg = background ? background[1] : -1, bb = background ? background[2] : -1;
-      for (const entry of entries) {
+      shade.r = channel(rec.canvasR); shade.g = channel(rec.canvasG); shade.b = channel(rec.canvasB);
+      shade.ar = added(rec.canvasAddR); shade.ag = added(rec.canvasAddG); shade.ab = added(rec.canvasAddB);
+      for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i];
         if (entry.geometry === geometry && entry.source === source && entry.version === surface.version && entry.w === w && entry.h === h
           && entry.sourceW === source.width && entry.sourceH === source.height
           && entry.br === br && entry.bg === bg && entry.bb === bb
-          && entry.r === rec.canvasR && entry.g === rec.canvasG && entry.b === rec.canvasB
-          && entry.ar === rec.canvasAddR && entry.ag === rec.canvasAddG && entry.ab === rec.canvasAddB) {
-          entry.used = ++clock; return entry.canvas;
+          && (entry.frame === frame || entry.r === shade.r && entry.g === shade.g && entry.b === shade.b
+            && entry.ar === shade.ar && entry.ag === shade.ag && entry.ab === shade.ab)) {
+          entry.used = ++clock; entry.frame = frame; return entry.canvas;
         }
       }
       let entry = fallback;
       if (w * h <= MAX_PIXELS) {
+        // This surface's own slot first, else the least recently used: forgetting a key keeps its backing store.
         entry = entries[0];
-        for (const candidate of entries) if (candidate.used < entry.used) entry = candidate;
-        clear(entry);
+        for (let i = 0; i < entries.length; i++) {
+          const candidate = entries[i];
+          if (candidate.geometry === geometry) { entry = candidate; break; }
+          if (candidate.used < entry.used) entry = candidate;
+        }
+        pixels -= entry.pixels; entry.pixels = 0; entry.geometry = entry.source = null;
         while (pixels + w * h > MAX_PIXELS) {
           let oldest = null;
-          for (const candidate of entries) if (candidate.pixels && (!oldest || candidate.used < oldest.used)) oldest = candidate;
+          for (let i = 0; i < entries.length; i++) {
+            const candidate = entries[i];
+            if (candidate.pixels && (!oldest || candidate.used < oldest.used)) oldest = candidate;
+          }
           clear(oldest);
         }
       }
@@ -57,19 +75,24 @@
       if (entry === fallback) {
         if (entry.canvas.width < w) entry.canvas.width = w;
         if (entry.canvas.height < h) entry.canvas.height = h;
-      } else { entry.canvas.width = w; entry.canvas.height = h; }
-      paint(entry.canvas, entry.context, surface, rec, coverage);
+      } else {
+        if (entry.canvas.width !== w) entry.canvas.width = w;
+        if (entry.canvas.height !== h) entry.canvas.height = h;
+      }
+      paint(entry.canvas, entry.context, surface, shade, coverage);
       if (entry !== fallback) {
         entry.geometry = geometry; entry.source = source; entry.version = surface.version; entry.w = w; entry.h = h;
         entry.sourceW = source.width; entry.sourceH = source.height;
         entry.br = br; entry.bg = bg; entry.bb = bb;
-        entry.r = rec.canvasR; entry.g = rec.canvasG; entry.b = rec.canvasB;
-        entry.ar = rec.canvasAddR; entry.ag = rec.canvasAddG; entry.ab = rec.canvasAddB;
-        entry.pixels = entry.canvas.width * entry.canvas.height; pixels += entry.pixels; entry.used = ++clock;
+        entry.r = shade.r; entry.g = shade.g; entry.b = shade.b;
+        entry.ar = shade.ar; entry.ag = shade.ag; entry.ab = shade.ab;
+        entry.pixels = w * h; pixels += entry.pixels; entry.used = ++clock; entry.frame = frame;
       }
       return entry.canvas;
     };
     return { get,
+      // Called once a frame before any surface draws.
+      frame: () => { frame++; },
       release: live => { for (const entry of entries) if (entry.geometry && !live.has(entry.geometry)) clear(entry); },
       dispose: () => { for (const entry of entries) clear(entry); if (fallback.canvas) fallback.canvas.width = fallback.canvas.height = 0; },
       get pixels() { return pixels; }, get size() { let n = 0; for (const entry of entries) if (entry.geometry) n++; return n; } };
@@ -1713,21 +1736,35 @@
       }
       return canvas;
     };
-    const paintCanvasSurface = (canvas, paint, surface, rec, coverage) => {
-      const source = surface.canvas, sw = surface.width || source.width, sh = surface.height || source.height;
-      const gain = Math.max(rec.canvasR, rec.canvasG, rec.canvasB, 0.00001);
+    // The last style strings built, rebuilt only when their 8-bit values change.
+    const paintStyles = { br: -1, bg: -1, bb: -1, background: "#000", tint: -1, tintStyle: "", gain: -1, gainFilter: "", add: -1, addStyle: "" };
+    const paintCanvasSurface = (canvas, paint, surface, shade, coverage) => {
+      const source = surface.canvas, sw = surface.width || source.width, sh = surface.height || source.height, styles = paintStyles;
+      const gain = Math.max(shade.r, shade.g, shade.b, 1);
       paint.globalCompositeOperation = "source-over"; paint.filter = "none";
       paint.clearRect(0, 0, sw, sh);
       const background = surface.background;
-      paint.fillStyle = background ? `rgb(${background[0]},${background[1]},${background[2]})` : "#000";
+      if (!background) paint.fillStyle = "#000";
+      else {
+        if (background[0] !== styles.br || background[1] !== styles.bg || background[2] !== styles.bb) {
+          styles.br = background[0]; styles.bg = background[1]; styles.bb = background[2];
+          styles.background = `rgb(${styles.br},${styles.bg},${styles.bb})`;
+        }
+        paint.fillStyle = styles.background;
+      }
       paint.fillRect(0, 0, sw, sh); paint.drawImage(source, 0, 0);
       paint.globalCompositeOperation = "multiply";
-      paint.fillStyle = `rgb(${rec.canvasR / gain * 255},${rec.canvasG / gain * 255},${rec.canvasB / gain * 255})`;
+      const tr = Math.round(shade.r * 255 / gain), tg = Math.round(shade.g * 255 / gain), tb = Math.round(shade.b * 255 / gain), tint = (tr * 256 + tg) * 256 + tb;
+      if (tint !== styles.tint) { styles.tint = tint; styles.tintStyle = `rgb(${tr},${tg},${tb})`; }
+      paint.fillStyle = styles.tintStyle;
       paint.fillRect(0, 0, sw, sh);
-      paint.globalCompositeOperation = "copy"; paint.filter = `brightness(${gain})`;
+      if (gain !== styles.gain) { styles.gain = gain; styles.gainFilter = `brightness(${gain / 255})`; }
+      paint.globalCompositeOperation = "copy"; paint.filter = styles.gainFilter;
       paint.drawImage(canvas, 0, 0); paint.filter = "none";
       paint.globalCompositeOperation = "lighter";
-      paint.fillStyle = `rgb(${rec.canvasAddR},${rec.canvasAddG},${rec.canvasAddB})`;
+      const add = (shade.ar * 256 + shade.ag) * 256 + shade.ab;
+      if (add !== styles.add) { styles.add = add; styles.addStyle = `rgb(${shade.ar},${shade.ag},${shade.ab})`; }
+      paint.fillStyle = styles.addStyle;
       paint.fillRect(0, 0, sw, sh);
       paint.globalCompositeOperation = "destination-in"; paint.drawImage(coverage, 0, 0);
       paint.globalCompositeOperation = "source-over";
@@ -1823,6 +1860,7 @@
       ctx.restore();
     };
     const render = (root, camera, opts = {}) => {
+      canvasShades.frame();
       cutawayMaxY = opts.cutawayMaxY < 1e6 ? opts.cutawayMaxY : Infinity;
       cutawayFade = Math.max(0, Math.min(1, Number.isFinite(opts.cutawayFade) ? opts.cutawayFade : opts.birdsEyeCutaway ? 1 : 0));
       cutawayCloudY = opts.cutawayCloudY || 0;

@@ -589,12 +589,17 @@
       g.state = "idle";
       g.ask = 0; g.cycle = null;
     };
+    // A kept island's gate takes a room chosen in advance on resuming, as `create` does; true when one was.
     const resume = () => {
-      if (unsubscribeDoor) return;
+      const asked = ROOMS.parse(world.sphereKeypad) || 0;
+      world.sphereKeypad = null;
+      if (asked) preselect = asked;
+      if (unsubscribeDoor) return !!asked;
       unsubscribeDoor = BL.net.subscribeDoor(onDoor);
       window.addEventListener("keydown", onKey, true);
       document.addEventListener("visibilitychange", onVisibility);
       show();
+      return !!asked;
     };
     show();
     return {

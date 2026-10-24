@@ -66,8 +66,10 @@
   // The monkeys at a player's hips: how far out to each side (m), how high on the Ooga (a fraction of its height), how
   // tall they stand and how they bob; each shot of theirs, a rock from each aimed `MONKEY_AIM_SIDE` m to its own side
   // of theirs, in the air as long as a banana round is (`ROCK_FLIGHT_S`, the rifle's), a rifle round's damage
-  // (`ROCK_DAMAGE`), as far as `ROCK_RANGE`.
-  const MONKEY_OUT = 0.78, MONKEY_UP = 0.1, MONKEY_SIZE = 0.42, MONKEY_BOB = 0.04, MONKEY_AIM_SIDE = 1.2, ROCK_FLIGHT_S = 0.22, ROCK_DAMAGE = 2, ROCK_RANGE = 60;
+  // (`rifleDamage`), as far as `ROCK_RANGE`.
+  const MONKEY_OUT = 0.78, MONKEY_UP = 0.1, MONKEY_SIZE = 0.42, MONKEY_BOB = 0.04, MONKEY_AIM_SIDE = 1.2, ROCK_FLIGHT_S = 0.22, ROCK_RANGE = 60;
+  // What each rifle tier fires (ghost-sim.js `WEAPON`), for the round banner that hands it out.
+  const RIFLE_WORDS = ["", "yellow laser", "green laser", "red laser"];
   // The monkeys' shots: bursts of orange laser this long, each trailing a spark or two.
   const LASER_LEN = 1.1;
   const MAX_ROCKS = 16;
@@ -79,6 +81,10 @@
   const GRAVE_RISE_MS = 700, GRAVE_VIEW_BACK = 3.4, GRAVE_VIEW_UP = 1.5, GRAVE_PAN = 2.4;
   // How fast a player who is down turns their view round their grave (radians a second at full tilt).
   const GRAVE_TURN = 1.8;
+  // Watching while down (the spectator menu): the free camera's pace (m/s, twice that running), how fast it tilts, how
+  // far it stands off its point and how far from the middle that point may go; riding behind a hunter still standing,
+  // how far back and up the view stands and the height on them it looks at.
+  const FREE_SPEED = 9, FREE_TILT = 1.2, FREE_DIST = 9, FREE_R = 30, WATCH_BACK = 4.6, WATCH_UP = 2.4, WATCH_LOOK = 1.4;
   // The elixirs' orange: their glow, the light round one taken and round a player brought back.
   const ELIXIR_GLOW = [255, 140, 30];
   // The lightning drop over the pile: how high over the pile's top it spins and how fast; each bolt it calls down, how
@@ -139,7 +145,8 @@
     const group = createNode({ sightHidden: true });
     addChild(root, group);
     const audio = BL.ghostAudio.create(), hud = BL.ghostHud.create({ coarse: hub.coarse, onMusic: () => audio.toggleMusic(), onSkip: () => audio.skip(),
-      onReady: () => readyUp(), onDecline: () => { declined = true; hud.lobby(null); }, onLobby: hub.lobbyOpen });
+      onReady: () => readyUp(), onDecline: () => { declined = true; hud.lobby(null); }, onLobby: hub.lobbyOpen,
+      onSpectate: (mode) => watchFrom(mode), onSpectateNext: () => { specId = nextStanding(specId); } });
     // Every mesh the hunt has shown, kept on the GPU for the visit (`liveGeometry`): frames swap in and out.
     const used = [];
     const keep = (geometry) => {
@@ -227,13 +234,13 @@
     // Every wall rises at once, RISE_AT after the click; the dusk starts with the click.
     const lapMs = RISE_AT + RISE_MS + SETTLE_MS, nightAt = 0;
     for (const s of stops) s.riseAt = RISE_AT;
-    // The herald's idle drift: a slow wandering ring outside GAME MODE's wall (`HERALD_OUT` past it, give or take
-    // `HERALD_SWAY`), just off the ground over the bluff, a function of the room's clock so every page has it in the
-    // same place; a turn every two minutes or so.
-    const HERALD_OUT = 2.5, HERALD_SWAY = 1, HERALD_TURN = 0.05;
+    // The herald's idle drift: a slow wandering ring over the meadow where the Oogas walk, between the pile and the
+    // totems (`HERALD_R`, give or take `HERALD_SWAY`), just off the ground, a function of the room's clock so every page
+    // has it in the same place; a turn every two minutes or so.
+    const HERALD_R = 13, HERALD_SWAY = 3.5, HERALD_TURN = 0.05;
     const HERALD_AT = { x: 0, y: 0, z: 0 };
     const idlePoint = (now) => {
-      const T = now / 1000, a = T * HERALD_TURN, r = hub.ringRadius + HERALD_OUT + HERALD_SWAY * Math.sin(T * 0.37);
+      const T = now / 1000, a = T * HERALD_TURN, r = HERALD_R + HERALD_SWAY * Math.sin(T * 0.19);
       HERALD_AT.x = Math.sin(a) * r; HERALD_AT.z = -Math.cos(a) * r;
       HERALD_AT.y = island.surfaceAt(HERALD_AT.x, HERALD_AT.z) + 0.22 + 0.06 * Math.sin(T * 1.7);
       return HERALD_AT;
@@ -260,6 +267,9 @@
     const PILE = { x: 0, z: 0, r: hub.pileRadius() + 0.9 };
     const sim = SIM.create({ seed: fnv1a("ooga ghosts"), spots, lapMs, pile: PILE, elixirs: hub.elixirSpots });
     const S = sim.state;
+    // The rifles' tier as the hunt stands (it grows with the rounds, red for the boss), and a round's damage at it.
+    const rifleTier = () => SIM.weaponTier(S.round, S.state === ST.BOSS);
+    const rifleDamage = () => C.WEAPON.damage[rifleTier()];
 
     // ---------- nodes ----------
     const pool = (n, geometry, extra) => Array.from({ length: n }, () => {
@@ -379,6 +389,7 @@
     const ring = pool(1, MODELS.shockwave())[0], zapBeam = pool(1, MODELS.zap())[0];
     keep(MODELS.beam()); keep(MODELS.zap()); keep(MODELS.soul()); keep(MODELS.shockwave()); keep(MODELS.gravestone());
     keep(MODELS.orb(false)); keep(MODELS.orb(true)); keep(MODELS.rock()); keep(MODELS.laserBurst()); keep(MODELS.lightningBolt());
+    for (let i = 0; i < C.WEAPON.damage.length - 1; i++) keep(MODELS.laserBolt(i));
 
     // ---------- the hunt's place on this page ----------
     const sync = BL.ghostSync.create({
@@ -654,9 +665,13 @@
       if (bk !== bannerKey) {
         bannerKey = bk;
         if (S.paused) hud.banner("Paused", "P to go on");
-        else if (st === ST.COUNTDOWN) hud.banner(`Round ${S.round}`, secs >= 4 ? "get ready" : `${secs}`);
+        else if (st === ST.COUNTDOWN) {
+          // A round that hands out stronger rifles says so for the countdown's first two seconds.
+          const tier = rifleTier(), upgrade = S.round > 1 && tier !== SIM.weaponTier(S.round - 1, false);
+          hud.banner(`Round ${S.round}`, upgrade && secs >= 3 ? `rifles upgraded · ${RIFLE_WORDS[tier]}` : secs >= 4 ? "get ready" : `${secs}`);
+        }
         else if (st === ST.BREAK) hud.banner(`Round ${S.round} cleared!`, `next round in ${secs}`);
-        else if (bossIntro) hud.banner("THE BOSS is here", "he spits ghosts over the bluff");
+        else if (bossIntro) hud.banner("THE BOSS is here", `rifles upgraded · ${RIFLE_WORDS[rifleTier()]}`);
         else if (st === ST.VICTORY) hud.banner("The island is safe!", `${S.kills} ghosts busted`);
         else if (st === ST.DEFEAT) hud.banner("The ghosts took the island", "every Ooga down");
         else if (dawnWords) hud.banner("The ghosts drift away", "nobody was left to haunt");
@@ -1493,7 +1508,7 @@
         rockPath[o] = ox; rockPath[o + 1] = oy; rockPath[o + 2] = oz;
         rockPath[o + 3] = struck ? ROCK_HIT.x : ax; rockPath[o + 4] = struck ? ROCK_HIT.y : ay; rockPath[o + 5] = struck ? ROCK_HIT.z : az;
         rockAt[r] = clock() / 1000;
-        if (struck) hitAs(ROCK_HIT.role, ROCK_HIT.slot, ROCK_HIT.x, ROCK_HIT.y, ROCK_HIT.z, ROCK_DAMAGE);
+        if (struck) hitAs(ROCK_HIT.role, ROCK_HIT.slot, ROCK_HIT.x, ROCK_HIT.y, ROCK_HIT.z, rifleDamage());
       }
     };
     // The monkeys' laser bursts in the air, each along its line for as long as a banana round flies, sparks trailing.
@@ -1549,6 +1564,7 @@
     const letGo = () => {
       spectating = false;
       if (viewHeld) { viewHeld = false; hub.holdView(false); }
+      hud.spectate(null);
       if (hidMine) { hidMine.root.visible = true; hidMine = null; }
       downYaw = 0;
     };
@@ -1558,16 +1574,18 @@
         const isDown = q.on && down(q.id);
         if (isDown && graveFor[i] !== q.id) {
           // Gone down: the grave rises where they fell, facing the island's middle, their head set on its top.
-          if (!standing(q.id)) continue;
+          // Where the hunt says they went down (the same on every page, and where an elixir brings them back).
+          if (!q.downAt && !standing(q.id)) continue;
           graveFor[i] = q.id; graveRose[i] = t; graveSank[i] = 0;
-          const o = i * 3, yaw = Math.hypot(STANDS.x, STANDS.z) > 0.5 ? Math.atan2(-STANDS.x, -STANDS.z) : 0;
-          graveAt[o] = STANDS.x; graveAt[o + 1] = island.surfaceAt(STANDS.x, STANDS.z); graveAt[o + 2] = STANDS.z;
+          const o = i * 3, gx = q.downAt ? q.downX : STANDS.x, gz = q.downAt ? q.downZ : STANDS.z;
+          const yaw = Math.hypot(gx, gz) > 0.5 ? Math.atan2(-gx, -gz) : 0;
+          graveAt[o] = gx; graveAt[o + 1] = island.surfaceAt(gx, gz); graveAt[o + 2] = gz;
           grave.rotation.y = yaw;
           for (const c of holder.children.slice()) removeChild(holder, c);
           const head = headOf(q.id);
           if (head) { if (head.parent) removeChild(head.parent, head); addChild(holder, head); }
           audio.play("thump"); audio.play("rumble", 0.8); audio.play("down");
-          fx.burst(STANDS.x, graveAt[o + 1] + 0.2, STANDS.z, 14, DIRT, 2.4);
+          fx.burst(gx, graveAt[o + 1] + 0.2, gz, 14, DIRT, 2.4);
         }
         if (!isDown && graveFor[i] && !graveSank[i]) graveSank[i] = t;
         if (!graveFor[i]) { grave.visible = holder.visible = false; continue; }
@@ -1585,18 +1603,85 @@
       else if (hidMine) { hidMine.root.visible = true; hidMine = null; }
       let slot = -1;
       if (mine) for (let i = 0; i < MAX_GRAVES; i++) if (graveFor[i] === me.id) slot = i;
-      if (slot >= 0 && !viewHeld) { viewHeld = true; downYaw = 0; hub.holdView(true); }
+      // Each time they go down they start before their own grave, the spectator menu offering the other views.
+      if (slot >= 0 && !viewHeld) { viewHeld = true; downYaw = 0; specMode = "grave"; specId = 0; hub.holdView(true); }
       else if (slot < 0 && viewHeld) { viewHeld = false; hub.holdView(false); }
-      if (slot >= 0) {
-        // Down while others play on: the view stands before the grave, and the turn keys (or a stick) swing it round
-        // the grave to watch the hunt on every side.
-        downYaw += hub.heldTurn() * GRAVE_TURN * dt;
-        const o = slot * 3, yaw = graveNodes[slot].rotation.y + downYaw, k = 1 - Math.exp(-GRAVE_PAN * dt);
-        const ex = graveAt[o] + Math.sin(yaw) * GRAVE_VIEW_BACK, ey = graveAt[o + 1] + GRAVE_VIEW_UP, ez = graveAt[o + 2] + Math.cos(yaw) * GRAVE_VIEW_BACK;
-        const p = camera.position, tg = camera.target;
-        p.x += (ex - p.x) * k; p.y += (ey - p.y) * k; p.z += (ez - p.z) * k;
-        tg.x += (graveAt[o] - tg.x) * k; tg.y += (graveAt[o + 1] + MODELS.GRAVE_TOP * 0.8 - tg.y) * k; tg.z += (graveAt[o + 2] - tg.z) * k;
+      if (slot >= 0) watch(slot, dt);
+      hud.spectate(slot >= 0 ? specMode : null, specMode !== "players" ? "" : specId ? nameOf(specId) : "Nobody left standing");
+    };
+
+    // ---------- watching while down ----------
+    // The spectator menu's three views: "grave", before this player's own grave, the turn keys (or a stick) swinging
+    // it round to watch the hunt on every side; "free", moved about the island by hand as with no Ooga picked (W A S D
+    // or the move stick, Q E or the arrows to turn, the look stick or the arrows to tilt); "players", riding behind
+    // each hunter still standing in turn, on to the next whenever the one watched goes down (before the grave again
+    // while nobody is left).
+    let specMode = "grave", specId = 0;
+    const FREE = { x: 0, z: 0, yaw: 0, pitch: 0.5 };
+    // A hunter this page can watch: someone else in the hunt, standing, and still driving an Ooga in the arena, as the
+    // host counts them present (`presentRemote`); one who lets go of theirs is passed over as one who goes down is.
+    const watchable = (id) => {
+      if (!id || id === myId() || id === SIM.REVIVE_BOT || down(id) || !sim.playerById(id)?.inGame) return false;
+      const rec = net.remotes.get(id);
+      return !!rec && rec.bodyKind === "ooga" && rec.zone === "outside" && inArena(rec.x, rec.y, rec.z);
+    };
+    // The next hunter to watch after `id`, in the hunt's order and round again; 0 when there is none.
+    const nextStanding = (id) => {
+      let from = -1;
+      for (let i = 0; i < C.MAX_PLAYERS; i++) if (sim.players[i].on && sim.players[i].id === id) from = i;
+      for (let n = 1; n <= C.MAX_PLAYERS; n++) {
+        const q = sim.players[(from + n + C.MAX_PLAYERS) % C.MAX_PLAYERS];
+        if (q.on && watchable(q.id)) return q.id;
       }
+      return 0;
+    };
+    // A view picked from the menu: the free camera starts where the view stands now; "players" picked again moves on.
+    const watchFrom = (mode) => {
+      if (!viewHeld) return;
+      if (mode === "players") specId = specMode === "players" ? nextStanding(specId) : nextStanding(0);
+      if (mode === "free" && specMode !== "free") {
+        const p = camera.position, tg = camera.target;
+        FREE.x = tg.x; FREE.z = tg.z;
+        FREE.yaw = Math.atan2(p.x - tg.x, p.z - tg.z);
+        FREE.pitch = clamp(Math.atan2(p.y - tg.y, Math.hypot(p.x - tg.x, p.z - tg.z)), 0.15, 1.3);
+      }
+      specMode = mode;
+    };
+    // Eases the view toward standing at (ex, ey, ez) looking at (lx, ly, lz).
+    const ease3 = (ex, ey, ez, lx, ly, lz, k) => {
+      const p = camera.position, tg = camera.target;
+      p.x += (ex - p.x) * k; p.y += (ey - p.y) * k; p.z += (ez - p.z) * k;
+      tg.x += (lx - tg.x) * k; tg.y += (ly - tg.y) * k; tg.z += (lz - tg.z) * k;
+    };
+    const watch = (slot, dt) => {
+      const a = hub.heldAxes(), k = 1 - Math.exp(-GRAVE_PAN * dt);
+      if (specMode === "free") {
+        // Forward is from the view to its point, right is forward turned a quarter clockwise seen from above.
+        FREE.yaw += clamp(a.orbitYaw + a.yaw, -1, 1) * GRAVE_TURN * dt;
+        FREE.pitch = clamp(FREE.pitch + a.pitch * FREE_TILT * dt, 0.15, 1.3);
+        const step = FREE_SPEED * (a.sprint ? 2 : 1) * dt, fx = -Math.sin(FREE.yaw), fz = -Math.cos(FREE.yaw);
+        FREE.x += (fx * a.y - fz * a.x) * step;
+        FREE.z += (fz * a.y + fx * a.x) * step;
+        const r = Math.hypot(FREE.x, FREE.z);
+        if (r > FREE_R) { FREE.x *= FREE_R / r; FREE.z *= FREE_R / r; }
+        const ty = Math.max(0, island.surfaceAt(FREE.x, FREE.z)) + 1, flat = Math.cos(FREE.pitch) * FREE_DIST;
+        ease3(FREE.x + Math.sin(FREE.yaw) * flat, ty + Math.sin(FREE.pitch) * FREE_DIST, FREE.z + Math.cos(FREE.yaw) * flat, FREE.x, ty, FREE.z, 1 - Math.exp(-GRAVE_PAN * 3 * dt));
+        return;
+      }
+      downYaw += clamp(a.orbitYaw + a.yaw - a.x, -1, 1) * GRAVE_TURN * dt;
+      if (specMode === "players") {
+        if (!watchable(specId)) specId = nextStanding(specId);
+        const rec = specId ? net.remotes.get(specId) : null;
+        if (rec) {
+          // Behind them as their own view stands, the turn keys swinging it round them.
+          const yaw = rec.yaw + Math.PI + downYaw;
+          ease3(rec.x + Math.sin(yaw) * WATCH_BACK, rec.y + WATCH_UP, rec.z + Math.cos(yaw) * WATCH_BACK, rec.x, rec.y + WATCH_LOOK, rec.z, k);
+          return;
+        }
+      }
+      const o = slot * 3, yaw = graveNodes[slot].rotation.y + downYaw;
+      ease3(graveAt[o] + Math.sin(yaw) * GRAVE_VIEW_BACK, graveAt[o + 1] + GRAVE_VIEW_UP, graveAt[o + 2] + Math.cos(yaw) * GRAVE_VIEW_BACK,
+        graveAt[o], graveAt[o + 1] + MODELS.GRAVE_TOP * 0.8, graveAt[o + 2], k);
     };
 
     // ---------- the elixirs ----------
@@ -2032,11 +2117,12 @@
       drawReviveRings(ctx2d, project, huntTime());
       for (let i = 0; i < C.MAX_GHOSTS; i++) {
         const g = sim.ghosts[i];
-        if (!g.on || g.dying || g.hp >= C.HP[g.tier] || !ghostNodes[i].visible) continue;
+        const full = SIM.hpOf(C.HP[g.tier], S.round);
+        if (!g.on || g.dying || g.hp >= full || !ghostNodes[i].visible) continue;
         const v = i * 4, p = project(view[v], view[v + 3] + HEIGHT[g.tier] + 0.15, view[v + 2]);
         if (!p) continue;
         BAR.x = p.x; BAR.y = p.y;
-        const w = g.tier !== SIM.TIER.PLAIN ? 48 : 30, frac = g.hp / C.HP[g.tier];
+        const w = g.tier !== SIM.TIER.PLAIN ? 48 : 30, frac = g.hp / full;
         ctx2d.globalAlpha = 0.85;
         ctx2d.fillStyle = "rgba(0,0,0,0.55)";
         ctx2d.fillRect(BAR.x - w / 2 - 1, BAR.y - 4, w + 2, 6);
@@ -2045,7 +2131,7 @@
         ctx2d.globalAlpha = 1;
       }
       for (let i = 0; i < B.max; i++) {
-        const b = sim.brutes[i], root = b.kind ? skels[i].root : rigs[i].root, max = b.kind ? C.BONES.hp : B.hp;
+        const b = sim.brutes[i], root = b.kind ? skels[i].root : rigs[i].root, max = SIM.hpOf(b.kind ? C.BONES.hp : B.hp, S.round);
         if (!b.on || b.dying || b.hp >= max || !root.visible) continue;
         const r = root.position, p = project(r.x, r.y + (b.kind ? BONES_H : BRUTE_H) + 0.3, r.z);
         if (!p) continue;
@@ -2081,7 +2167,9 @@
       if (!byPlayer) return;
       // Only a shot wakes the herald; the rest of a burst must not ready the visitor in the lobby it just opened.
       if (o.role === "herald") { if (shot && S.state === ST.IDLE) tapHerald(); return; }
-      hitAs(o.role, o.slot, h.x, h.y, h.z, Math.max(1, Math.min(20, Math.round(power * 4))));
+      // A rifle round hits as hard as the hunt's tier makes it; a swing or a bash as it always has.
+      const scale = shot ? rifleDamage() / C.WEAPON.damage[0] : 1;
+      hitAs(o.role, o.slot, h.x, h.y, h.z, Math.max(1, Math.min(20, Math.round(power * 4 * scale))));
     };
     /** `damage` to the ghost or gorilla in `slot`, or the boss, landing at (x, y, z), for this page's player. */
     const hitAs = (role, slot, x, y, z, damage) => {
@@ -2198,7 +2286,7 @@
     };
 
     return {
-      update, drawOverlay, hit, shot, key, down, get waiting() { return spectating; }, rock: MODELS.rock(), hour, shade, shake, unshake, release, dispose, liveGeometry, refuseTravel, debug,
+      update, drawOverlay, hit, shot, key, down, get waiting() { return spectating; }, shotGeometry: () => { const tier = rifleTier(); return tier ? MODELS.laserBolt(tier - 1) : MODELS.rock(); }, hour, shade, shake, unshake, release, dispose, liveGeometry, refuseTravel, debug,
       get sealed() { return sealedCount > 0; },
       get hunting() { return !off(S.state); },
       get busy() { return busy(); },

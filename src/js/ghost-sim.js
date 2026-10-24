@@ -20,14 +20,19 @@
   // GATHER, the lobby before the walls rise, comes last in number so every LAP..DAWN range keeps its meaning.
   const STATE = { IDLE: 0, LAP: 1, NIGHT: 2, COUNTDOWN: 3, ACTIVE: 4, BREAK: 5, BOSS: 6, VICTORY: 7, DEFEAT: 8, DAWN: 9, GATHER: 10 };
   const OUTCOME = { NONE: 0, VICTORY: 1, DEFEAT: 2, ABANDON: 3 };
-  // Per round: total ghosts, most at once, seconds between spawn events, ghosts per event, speed (m/s).
+  // Per round: total ghosts, most at once, seconds between spawn events, ghosts per event, speed (m/s). Past the third
+  // round each round still climbs, by a quarter less than the lab's: 15 more ghosts and 0.3 m/s faster a round where it
+  // added 20 and 0.4 (80, 100, 120 ghosts at 3.2, 3.6, 4.0 m/s). The fifth and sixth rounds are eased further, for
+  // one player as much as many: three ghosts at a time where the lab sent four, every 0.75 and 0.65 s where it was 0.65
+  // and 0.55 (3.75, 4 and 4.6 a second through rounds 4 to 6, where round 5 leapt to 6.15), and at most 18 and 22 on
+  // the field at once where it allowed 24 and 28.
   const ROUNDS = [
     { ghosts: 20, cap: 6, interval: 2.0, group: 1, speed: 1.8 },
     { ghosts: 40, cap: 12, interval: 1.2, group: 2, speed: 2.3 },
     { ghosts: 60, cap: 16, interval: 0.9, group: 3, speed: 2.8 },
-    { ghosts: 80, cap: 20, interval: 0.8, group: 3, speed: 3.2 },
-    { ghosts: 100, cap: 24, interval: 0.65, group: 4, speed: 3.6 },
-    { ghosts: 120, cap: 28, interval: 0.55, group: 4, speed: 4.0 }
+    { ghosts: 75, cap: 20, interval: 0.8, group: 3, speed: 3.1 },
+    { ghosts: 90, cap: 18, interval: 0.75, group: 3, speed: 3.4 },
+    { ghosts: 105, cap: 22, interval: 0.65, group: 3, speed: 3.7 }
   ];
   // Rounds scale with the players counted as each starts (6+ play like 5).
   const PLAYER_SCALING = [null,
@@ -40,8 +45,8 @@
   // The drops; "tess" stands in the lab's monkey sidearm: Tess comes down, and whoever takes her has her at their side.
   // "lightning" is never a random drop: one comes over the banana pile in each round (LIGHTNING). "monkeys" is a random
   // drop like the first six, the lab's monkey sidearm: taken, a monkey floats at each of its player's hips and fires a
-  // rock with each of their shots (the hunt draws and aims them; the sim only keeps who has them, `monkeys`, until a
-  // ghost gets them).
+  // rock with each of their shots (the hunt draws and aims them; the sim only keeps who has them, `monkeys`, until
+  // their player's bar falls below `POWER_KEEP_SEG`).
   const DROP = ["bomb", "shield", "ice", "health", "double", "tess", "lightning", "monkeys"], TESS_DROP = 5, LIGHTNING_DROP = 6, MONKEY_DROP = 7;
   const DYING = { SHOT: 1, TAGGED: 2, BURNED: 3, PUMPKIN: 4, ZAPPED: 5 };
   // The debug stand-in a revive can be watched on alone (`debug.revive`): a player id no room hands out.
@@ -57,17 +62,28 @@
     // whole as it ends (a round cleared, the next one called, the sixth giving way to the boss); in the boss's fight,
     // until the hunt ends.
     DOWN_UNTIL: 1e12, PLAYER_SEGMENTS: 5, IFRAMES_MS: 1000,
+    // Tess and the monkeys stay through the first hits and leave a player once their bar falls below `POWER_KEEP_SEG`.
+    POWER_KEEP_SEG: 4,
     GHOST_RADIUS: 0.42, BIG: 1.5, PLAYER_RADIUS: 0.3, SHIELD_PAD: 0.4, BOUNCE_MS: 450, BOUNCE_SPEED: 2.5,
     KNOCK_MS: 140, KNOCK_SPEED: 8, HOVER: 0.3, CLIMB_RATE: 2,
     WEAVE_AMP: 0.85, WEAVE_HZ: 0.4, SEPARATION_PUSH: 1.7, RETARGET_MS: 500, DYING_MS: 1100,
     ARENA_R: 23, LAND_R: 20.5, DESCEND_MS: 1600, SPAWN_SAFE: 6.5, GOLDEN: 137.508 * Math.PI / 180, JITTER: 10 * Math.PI / 180, SPAWN_TRIES: 5,
     HP: [6, 12, 12], KILLS: [1, 2, 2],
+    // Every enemy but the boss grows tougher as the rounds go: `HP_SCALE[round - 1]` times its health (`hpOf`), on the
+    // rifles' sawtooth (`WEAPON`). A round that hands out a stronger rifle keeps the round before's toughness, so the
+    // upgrade is felt, and the next catches up: a plain ghost takes 3, 4, 3, 3, 2, 2 rifle rounds through rounds 1 to 6
+    // (3, 3, 2, 2, 1, 1 at the base health), a general or wraith 6, 7, 5, 6, 3, 4, a gorilla 40, 46, 31, 36, 20, 22.
+    HP_SCALE: [1, 1.15, 1.15, 1.35, 1.5, 1.65],
     GENERAL_EVERY: 5, GENERAL_FROM: 2, WRAITH_EVERY: 10, WRAITH_FROM: 3, WRAITH_SPEED: 1,
-    BEAM: { range: 6.4, breakRange: 9.4, ms: 3000, windMs: 350, cooldownMs: 4000 },
-    SOUL: { range: 8.5, breakRange: 17, ms: 1500, windMs: 300, cooldownMs: 4000 },
-    BOSS: { ring: 34, y: 8.5, speed: 8.5, spitEvery: 5000, spit: 3, launchMs: 700, launchSpeed: 4, burnMs: 600, kills: 5, hp: 100, hpPerPlayer: 50, hpMax: 300, radius: 2.4, height: 7.6, generals: 20, generalGroup: 4, generalEvery: 6000, generalFirst: 4000 },
-    // Every `MONKEY_EVERY_KILLS` of a player's own kills the monkeys come down on them, as though they had taken the drop.
-    FIRST_DROPS: 2, MONKEY_EVERY_KILLS: 40, ROUND_DROP_DELAY_MS: 6000, ROUND_DROP_GAP_MS: 150, FALL_MS: 850, PICKUP_R: 1.0,
+    // A general's eye beam and a wraith's soul pull: how near they must be to start one, and how far a player must get
+    // to break it (both 40% shorter than the lab's 6.4 and 9.4, 8.5 and 17).
+    BEAM: { range: 3.84, breakRange: 5.64, ms: 3000, windMs: 350, cooldownMs: 4000 },
+    SOUL: { range: 5.1, breakRange: 10.2, ms: 1500, windMs: 300, cooldownMs: 4000 },
+    BOSS: { ring: 34, y: 8.5, speed: 8.5, spitEvery: 5000, spit: 3, launchMs: 700, launchSpeed: 4, burnMs: 600, kills: 5, hp: 200, hpPerPlayer: 100, hpMax: 600, radius: 2.4, height: 7.6, generals: 20, generalGroup: 4, generalEvery: 6000, generalFirst: 4000 },
+    // Every `MONKEY_EVERY_KILLS` enemies a player kills themselves (one each, whatever its points: `foes`, never shared
+    // and never doubled) the monkeys come down on them, as though they had taken the drop; a gift earned while they
+    // still have a pair waits until a hit has taken those away (`giftMonkeys`).
+    FIRST_DROPS: 2, MONKEY_EVERY_KILLS: 20, ROUND_DROP_DELAY_MS: 6000, ROUND_DROP_GAP_MS: 150, FALL_MS: 850, PICKUP_R: 1.0,
     SHIELD_MS: 10000, ICE_MS: 5000, ICE_SLOW: 0.5, DOUBLE_MS: 10000, BOMB_BOSS: 0.1,
     PUMPKIN_KILLS: 40, SPLASH_R: 1.6,
     // A pause holds the hunt still (P) for `PAUSE_MAX_MS` at most, so one left paused cannot keep the island sealed.
@@ -79,7 +95,7 @@
     LIGHTNING: { at: 0.5, bossAt: 0.75, firstMs: 250, gapMs: 140, spreadMs: 1600, zapMs: 2000, boss: 0.25 },
     // Tess at a player's side zaps the nearest ghost within `range` (any but the boss) dead, or a gorilla for `brute` of
     // its health (two zaps), then rests `cooldownMs`;
-    // the first zap waits `firstMs`. A ghost that gets her player sends her away, as the lab's monkey went.
+    // the first zap waits `firstMs`. Her player's bar falling below `POWER_KEEP_SEG` sends her away, as it does the monkeys.
     TESS: { range: 8.5, reach: 4, cooldownMs: 2000, firstMs: 600, brute: 12 },
     // The gorillas: green, 80 health, sent when a round is down to its last two ghosts (never in the boss's
     // fight), `perRound[round - 1]` of them. Each is called down by a beam (`beamMs`), drops (`fallMs`) and lands
@@ -90,16 +106,23 @@
       splashR: 2.6, recoverMs: 1400, damage: 1, perRound: [1, 1, 1, 2, 2, 2], landMin: 4, landMax: 7, landR: 18, radius: 0.7 },
     // The elixirs: one glowing on each totem pole's front (`elixirs` where they hang), set out afresh as each round
     // starts. An active player who comes within `pickR` of one (carrying none) takes it; carrying one, standing within
-    // `reviveR` of a player who is down for `reviveMs` brings them back whole (`IFRAMES_MS` twice over to find their
-    // feet), and the elixir is spent.
-    ELIXIR: { max: 4, pickR: 1.3, reviveR: 1.8, reviveMs: 4000 },
+    // `reviveR` of where a player went down (their grave, `downX`, `downZ`) for `reviveMs` brings them back whole
+    // (`IFRAMES_MS` twice over to find their feet), and the elixir is spent.
+    ELIXIR: { max: 4, pickR: 1.3, reviveR: 1.8, reviveMs: 3000 },
     // The skeletons: a plain ghost's health, each in a gorilla's slot (`kind` 1, so the gorillas' beam, hits, bolts, bomb
     // and Tess all take it). From the second round, `perRound[round - 1]` of them and one more for every `perPlayers`
     // players past the first (`bonesFor`), each called down in a white beam at its own point in the round, spread
     // evenly through its ghosts' coming. One drops (`fallMs`) and crawls at the nearest player at once (only its upper
     // body, pulling itself along by its arms); within `reach` it lunges up at them and bites for `damage` segments (a
     // shield throws it back), then gathers itself (`recoverMs`).
-    BONES: { hp: 6, kills: 1, speed: 3.2, beamMs: 1300, fallMs: 450, fallFrom: 25, reach: 1.6, recoverMs: 1000, damage: 1, perRound: [0, 2, 3, 4, 5, 6], perPlayers: 2 }
+    BONES: { hp: 6, kills: 1, speed: 3.2, beamMs: 1300, fallMs: 450, fallFrom: 25, reach: 1.6, recoverMs: 1000, damage: 1, perRound: [0, 2, 3, 4, 5, 6], perPlayers: 2 },
+    // The hunters' rifles grow stronger every `every` rounds: the white rock, then yellow, green and, for the boss, red
+    // laser, each round's `damage` in OBL points (a plain ghost has 6, a general or wraith 12). Matched to the rounds'
+    // pressure: the ghosts coming each second (group over interval) times the rounds each takes rises tenfold from the
+    // first round to the sixth with the rock alone; the upgrades hold it near round two's from the third round on, while
+    // the ghosts' speed and numbers still climb. The boss's health (`BOSS`) was doubled with the red laser, so his
+    // fight takes half the rounds it did with the rock rather than a quarter.
+    WEAPON: { every: 2, damage: [2, 3, 6, 8] }
   };
   const C = CONFIG, TAU = Math.PI * 2;
 
@@ -114,6 +137,11 @@
     out.speed = r.speed * k.speed;
     return out;
   };
+  /** An enemy's health in `round` (the boss's fight keeps the sixth's) from its `base` (C.HP, BRUTE.hp, BONES.hp). */
+  const hpOf = (base, round) => Math.round(base * C.HP_SCALE[Math.min(C.HP_SCALE.length, Math.max(1, round)) - 1]);
+  /** The rifles' tier (0 the rock, 1 yellow, 2 green, 3 red) in `round`, or in the boss's fight. */
+  const weaponTier = (round, boss) => boss ? C.WEAPON.damage.length - 1
+    : Math.min(C.WEAPON.damage.length - 2, Math.floor((Math.max(1, round) - 1) / C.WEAPON.every));
   const isWraith = (n, round) => round >= C.WRAITH_FROM && n % C.WRAITH_EVERY === C.WRAITH_EVERY - 1;
   const ghostTier = (n, round) => isWraith(n, round) ? TIER.WRAITH : round >= C.GENERAL_FROM && n % C.GENERAL_EVERY === C.GENERAL_EVERY - 1 ? TIER.GENERAL : TIER.PLAIN;
   const radiusOf = (tier) => C.GHOST_RADIUS * (tier === TIER.PLAIN ? 1 : C.BIG);
@@ -129,6 +157,9 @@
     "beamTarget", "beamAt", "beamUntil", "beamHit", "beamReady", "soulTarget", "soulAt", "soulUntil", "soulHit", "soulReady", "hitAt", "struckAt"];
   const PLAYER_FIELDS = ["id", "x", "y", "z", "seg", "frozenUntil", "invulnUntil", "doubleUntil", "kills", "dropsGiven", "hitAt", "hitX", "hitZ",
     "tess", "tessReady", "zapAt", "zapX", "zapY", "zapZ", "monkeys", "ready", "inGame", "elixir", "reviveTarget", "reviveSince"];
+  // Fields added since that row was fixed, carried in a snapshot's own `x` rows (slot, then these) so pages on either
+  // side of a deploy still share a hunt: an older page skips `x`, a newer one reads its absence as zeros.
+  const PLAYER_EXTRA = ["foes", "downAt", "downX", "downZ"], PLAYER_ALL = PLAYER_FIELDS.concat(PLAYER_EXTRA);
   const DROP_FIELDS = ["id", "kind", "x", "z", "at"];
   // A gorilla's phase: 1 called down (the beam), 2 falling, 3 landed and shaking, 4 coming, 5 holding someone, 6 gathering.
   // A skeleton (`kind` 1) skips the shaking and the leap: it strikes from CHASE and gathers itself in RECOVER.
@@ -146,7 +177,7 @@
   };
   const newPlayer = () => {
     const p = { on: false, here: false };
-    for (const f of PLAYER_FIELDS) p[f] = 0;
+    for (const f of PLAYER_ALL) p[f] = 0;
     return p;
   };
   const newBrute = () => {
@@ -211,7 +242,7 @@
       if (p) return p;
       for (const q of players) if (!q.on) { p = q; break; }
       if (!p) return null;
-      for (const f of PLAYER_FIELDS) p[f] = 0;
+      for (const f of PLAYER_ALL) p[f] = 0;
       p.on = true;
       p.id = id;
       p.seg = C.PLAYER_SEGMENTS;
@@ -231,12 +262,17 @@
     const frozen = (p) => s.now < p.frozenUntil;
     const active = (p) => p.on && p.here && !frozen(p);
     const hurtPlayer = (p, gx, gz) => {
-      p.tess = 0;
-      p.monkeys = 0;
       p.seg = Math.max(0, p.seg - 1);
+      if (p.seg < C.POWER_KEEP_SEG) p.tess = p.monkeys = 0;
       p.invulnUntil = s.now + C.IFRAMES_MS;
       p.hitAt = s.now; p.hitX = gx; p.hitZ = gz;
-      if (p.seg === 0) p.frozenUntil = C.DOWN_UNTIL;
+      if (p.seg === 0) goDown(p);
+    };
+    // Down for the rest of the round where they stand: their grave rises there on every page and an elixir brings them
+    // back there, wherever their page reports them meanwhile.
+    const goDown = (p) => {
+      p.frozenUntil = C.DOWN_UNTIL;
+      p.downAt = s.now || 1; p.downX = p.x; p.downZ = p.z;
     };
 
     // A gorilla's slam: `n` segments at once, and the blink after it.
@@ -283,14 +319,22 @@
       const n = Math.max(0, 4 * s.round - 2);
       for (let i = 0; i < n && s.pendingCount < C.MAX_PENDING; i++) s.pending[s.pendingCount++] = s.now + C.ROUND_DROP_DELAY_MS + i * C.ROUND_DROP_GAP_MS;
     };
-    const addKills = (p, n) => {
+    // `n` kill points for player `p` (or nobody), from `foes` enemies killed.
+    const addKills = (p, n, foes = 1) => {
       if (n <= 0) return;
       if (p && s.now < p.doubleUntil) n *= 2;
       s.kills += n;
       if (!p) return;
       p.kills += n;
-      const earned = Math.floor(p.kills / C.MONKEY_EVERY_KILLS);
-      for (; p.dropsGiven < earned; p.dropsGiven++) { p.monkeys = 1; s.pickAt = s.now; s.pickKind = MONKEY_DROP; s.pickBy = p.id; }
+      p.foes += foes;
+      giftMonkeys(p);
+    };
+    // Player `p`'s next earned monkeys (`dropsGiven` counts those given), only while they have none and stand clear
+    // of a hit's blink; the rest wait their turn, one a pair lost.
+    const giftMonkeys = (p) => {
+      if (p.monkeys || frozen(p) || s.now < p.invulnUntil || p.dropsGiven >= Math.floor(p.foes / C.MONKEY_EVERY_KILLS)) return;
+      p.dropsGiven++;
+      p.monkeys = 1; s.pickAt = s.now; s.pickKind = MONKEY_DROP; s.pickBy = p.id;
     };
     const killValue = (g) => C.KILLS[g.tier];
     const kill = (g, kind) => {
@@ -298,19 +342,23 @@
       g.dyingAt = s.now;
       g.beamTarget = g.soulTarget = 0;
     };
+    // A drop a player walks over waits for someone else while it would do them no good: a health banana on a full bar,
+    // or Tess, the monkeys or double points while they already have them.
+    const wants = (p, kind) => kind === 3 ? p.seg < C.PLAYER_SEGMENTS
+      : kind === TESS_DROP ? !p.tess : kind === MONKEY_DROP ? !p.monkeys : kind === 4 ? s.now >= p.doubleUntil : true;
     const take = (d, p) => {
       d.on = false;
       s.pickAt = s.now; s.pickKind = d.kind; s.pickBy = p.id;
       if (d.kind === 0) {
         s.bombAt = s.now;
-        let points = 0;
-        for (const g of ghosts) if (g.on && !g.dying) { kill(g, DYING.BURNED); points += killValue(g); }
-        for (const b of brutes) if (b.on && !b.dying) { killBrute(b, DYING.BURNED); points += bruteKills(b); }
+        let points = 0, foes = 0;
+        for (const g of ghosts) if (g.on && !g.dying) { kill(g, DYING.BURNED); points += killValue(g); foes++; }
+        for (const b of brutes) if (b.on && !b.dying) { killBrute(b, DYING.BURNED); points += bruteKills(b); foes++; }
         if (s.bossOn && !s.bossDyingAt) {
           s.bossHp = Math.max(1, s.bossHp - Math.ceil(s.bossMax * C.BOMB_BOSS));
           s.bossHitAt = s.now;
         }
-        addKills(p, points);
+        addKills(p, points, foes);
       } else if (d.kind === 1) s.shieldUntil = s.now + C.SHIELD_MS;
       else if (d.kind === 2) s.slowUntil = s.now + C.ICE_MS;
       else if (d.kind === 3) { for (const q of players) if (q.on && !frozen(q)) q.seg = C.PLAYER_SEGMENTS; }
@@ -332,7 +380,7 @@
         g.lx = landX; g.lz = landZ;
         g.spawnAt = s.now;
         g.phase = rand() * TAU;
-        g.hp = C.HP[tier];
+        g.hp = hpOf(C.HP[tier], s.round);
         return g;
       }
       return null;
@@ -373,7 +421,7 @@
         let x = (p ? p.x : 0) + Math.sin(a) * r, z = (p ? p.z : 0) - Math.cos(a) * r;
         const out = Math.hypot(x, z);
         if (out > C.BRUTE.landR) { x *= C.BRUTE.landR / out; z *= C.BRUTE.landR / out; }
-        b.on = true; b.id = s.nextId++; b.x = x; b.z = z; b.kind = kind; b.y = kindOf(b).fallFrom; b.hp = kindOf(b).hp;
+        b.on = true; b.id = s.nextId++; b.x = x; b.z = z; b.kind = kind; b.y = kindOf(b).fallFrom; b.hp = hpOf(kindOf(b).hp, s.round);
         b.phase = BRUTE_PHASE.BEAM; b.phaseAt = s.now;
         b.heading = p ? Math.atan2(p.x - x, p.z - z) : 0;
         return b;
@@ -640,13 +688,14 @@
         if (dropsOf(LIGHTNING_DROP) || placeDrop(LIGHTNING_DROP)) s.lightningSent = 1;
       }
 
-      // Drops: the first player to walk into a landed one takes it; the lightning, the first to reach the pile under it.
+      // Drops: the first player to walk into a landed one who can use it takes it; the lightning, the first to reach
+      // the pile under it.
       if (fighting()) {
         for (const d of drops) {
           if (!d.on || now < d.at + C.FALL_MS) continue;
           const reach = d.kind === LIGHTNING_DROP ? pile.r : C.PICKUP_R + C.PLAYER_RADIUS;
           for (const p of players) {
-            if (!active(p) || Math.hypot(p.x - d.x, p.z - d.z) > reach) continue;
+            if (!active(p) || !wants(p, d.kind) || Math.hypot(p.x - d.x, p.z - d.z) > reach) continue;
             take(d, p);
             break;
           }
@@ -816,8 +865,8 @@
         }
         let near = null, best = C.ELIXIR.reviveR;
         for (const q of players) {
-          if (q === p || !q.on || !q.here || !frozen(q)) continue;
-          const d = Math.hypot(q.x - p.x, q.z - p.z);
+          if (q === p || !q.on || !frozen(q)) continue;
+          const d = q.downAt ? Math.hypot(q.downX - p.x, q.downZ - p.z) : q.here ? Math.hypot(q.x - p.x, q.z - p.z) : Infinity;
           if (d <= best) { best = d; near = q; }
         }
         if (!near) { p.reviveTarget = 0; continue; }
@@ -828,6 +877,8 @@
         s.reviveAt = now; s.reviveBy = p.id; s.reviveOf = near.id;
       }
 
+      // Monkeys earned while a player still had a pair come down once those are gone.
+      if (fighting()) for (const p of players) if (active(p)) giftMonkeys(p);
       // Tess, at her player's side: the nearest ghost in reach dies on her beam, then she rests.
       if (fighting()) for (const p of players) {
         if (!p.tess || !active(p) || now < p.tessReady) continue;
@@ -973,10 +1024,10 @@
       for (const q of ghosts) if (q.on && q.id === id) { g = q; break; }
       if (!g || g.dying) return "";
       const pumpkin = !!p && p.kills >= C.PUMPKIN_KILLS;
-      let points = 0;
+      let points = 0, foes = 0;
       const strike = (q, direct) => {
         q.hitAt = s.now;
-        if (q.hp <= damage) { kill(q, pumpkin ? DYING.PUMPKIN : DYING.SHOT); points += killValue(q); return; }
+        if (q.hp <= damage) { kill(q, pumpkin ? DYING.PUMPKIN : DYING.SHOT); points += killValue(q); foes++; return; }
         q.hp -= damage;
         if (direct && p) {
           const dx = q.x - p.x, dz = q.z - p.z, d = Math.hypot(dx, dz) || 1;
@@ -985,16 +1036,16 @@
       };
       strike(g, true);
       if (pumpkin) for (const q of ghosts) if (q.on && !q.dying && q !== g && Math.hypot(q.x - g.x, q.z - g.z) <= C.SPLASH_R) strike(q, false);
-      addKills(p, points);
+      addKills(p, points, foes);
       return g.dying ? "kill" : "hurt";
     };
 
     // ---------- snapshots ----------
     // A hunt as plain numbers: everything `load` needs to go on from here, timers relative to `epoch`.
-    const SNAP = { k: "gh", v: 1, e: 0, s: [], g: [], p: [], d: [], q: [], u: [] };
+    const SNAP = { k: "gh", v: 1, e: 0, s: [], g: [], p: [], d: [], q: [], u: [], x: [] };
     const snapshot = () => {
       SNAP.e = s.epoch;
-      SNAP.s.length = SNAP.g.length = SNAP.p.length = SNAP.d.length = SNAP.q.length = SNAP.u.length = 0;
+      SNAP.s.length = SNAP.g.length = SNAP.p.length = SNAP.d.length = SNAP.q.length = SNAP.u.length = SNAP.x.length = 0;
       for (const f of STATE_FIELDS) SNAP.s.push(s[f]);
       for (let i = 0; i < ghosts.length; i++) {
         const g = ghosts[i];
@@ -1007,6 +1058,8 @@
         if (!p.on) continue;
         SNAP.p.push(i, p.here ? 1 : 0);
         for (const f of PLAYER_FIELDS) SNAP.p.push(p[f]);
+        SNAP.x.push(i);
+        for (const f of PLAYER_EXTRA) SNAP.x.push(p[f]);
       }
       for (let i = 0; i < drops.length; i++) {
         const d = drops[i];
@@ -1049,6 +1102,13 @@
         p.on = true;
         p.here = snap.p[o + 1] === 1;
         for (let i = 0; i < PLAYER_FIELDS.length; i++) p[PLAYER_FIELDS[i]] = num(snap.p[o + 2 + i]);
+        for (const f of PLAYER_EXTRA) p[f] = 0;
+      }
+      const x = Array.isArray(snap.x) ? snap.x : [], xw = PLAYER_EXTRA.length + 1;
+      if (x.length % xw === 0) for (let o = 0; o < x.length; o += xw) {
+        const p = players[x[o]];
+        if (!p || !p.on) continue;
+        for (let i = 0; i < PLAYER_EXTRA.length; i++) p[PLAYER_EXTRA[i]] = num(x[o + 1 + i]);
       }
       for (const d of drops) d.on = false;
       for (let o = 0; o < snap.d.length; o += dw) {
@@ -1099,10 +1159,11 @@
         if (!b) {
           for (const q of players) if (!q.on) { b = q; break; }
           if (!b) return false;
-          for (const f of PLAYER_FIELDS) b[f] = 0;
+          for (const f of PLAYER_ALL) b[f] = 0;
           b.on = true; b.id = REVIVE_BOT; b.inGame = 1;
         }
-        b.here = true; b.x = x; b.y = me.y; b.z = z; b.seg = 0; b.frozenUntil = C.DOWN_UNTIL; b.elixir = b.reviveTarget = 0;
+        b.here = true; b.x = x; b.y = me.y; b.z = z; b.seg = 0; b.elixir = b.reviveTarget = 0;
+        goDown(b);
         me.elixir = 1; me.reviveTarget = 0;
         return true;
       },
@@ -1122,7 +1183,7 @@
       /** Player `id` thaws, back to a full bar. */
       unfreeze: (id) => { const p = playerById(id); if (p) { p.frozenUntil = 0; p.seg = C.PLAYER_SEGMENTS; } },
       /** Player `id` is credited `n` kills (drops and pumpkins follow). */
-      kills: (id, n) => addKills(playerById(id), n)
+      kills: (id, n) => addKills(playerById(id), n, n)
     };
     /** Moves straight to a state (debug): `round` sets the round for a countdown. */
     const jump = (state, toRound = s.round) => {
@@ -1141,5 +1202,5 @@
     };
   };
 
-  BL.ghostSim = { create, STATE, OUTCOME, TIER, DROP, TESS_DROP, LIGHTNING_DROP, MONKEY_DROP, DYING, BRUTE_PHASE, ROUNDS, CONFIG, roundSettings, ghostTier, radiusOf, bonesFor, REVIVE_BOT };
+  BL.ghostSim = { create, STATE, OUTCOME, TIER, DROP, TESS_DROP, LIGHTNING_DROP, MONKEY_DROP, DYING, BRUTE_PHASE, ROUNDS, CONFIG, roundSettings, weaponTier, hpOf, ghostTier, radiusOf, bonesFor, REVIVE_BOT };
 })();

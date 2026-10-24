@@ -1658,8 +1658,8 @@ void main() {
     const DRAW_BOTH = [gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1];
     let settings = QUALITY[quality] || QUALITY.high;
     let qualityName = QUALITY[quality] ? quality : "high";
-    // The explicit A/B override applies on every GPU and tier; rigs retain their own programs.
-    const prepassOverride = new URLSearchParams(location.search).get("prepass");
+    // The explicit A/B override, under debug only, applies on every GPU and tier; rigs retain their own programs.
+    const pageParams = new URLSearchParams(location.search), prepassOverride = pageParams.has("debug") ? pageParams.get("prepass") : null;
     let collectNear = 0.2;
     // Firefox names the GPU in RENDERER (and warns about the debug extension); Chrome and Safari mask it there and
     // answer through the extension.
@@ -1739,7 +1739,7 @@ void main() {
     const canvasSurfaces = new WeakMap();
     let canvasSurfaceSerial = 0;
     const res = { programs: {}, fbo: null, shadow: null, bloom: null, quadVao: null, matrixTexture: null };
-    const mirror = { node: null, record: null, geometry: null, program: null, programReady: false, fb: null, tex: null, depth: null, width: 0, height: 0, renderWidth: 0, renderHeight: 0, capturedWidth: 0, capturedHeight: 0, portal: false, reveal: 0, frontFacing: false, walkThrough: false, captureValid: false, bodyTex: null, bodyState: null, bodyVersion: -1, shards: 0, query: null, queryPending: false, occluded: false, frame: 0 };
+    const mirror = { node: null, record: null, geometry: null, program: null, programReady: false, fb: null, tex: null, depth: null, width: 0, height: 0, renderWidth: 0, renderHeight: 0, capturedWidth: 0, capturedHeight: 0, portal: false, reveal: 0, frontFacing: false, walkThrough: false, captureValid: false, readable: false, bodyTex: null, bodyState: null, bodyVersion: -1, shards: 0, query: null, queryPending: false, occluded: false, frame: 0 };
     const environment = { program: null, ready: false, fb: null, tex: null, depth: null, size: 0, next: 0, valid: 0, frame: 0, origin: new Float32Array(3) };
     // Reflectors: plain planar mirrors a scene may hold several of (the factory's peer shields), each with a capture
     // of its own, drawn with the mirror's program and their ripples. The mirror above stays the one mirror with
@@ -1961,7 +1961,7 @@ void main() {
     };
     const reflectorTarget = (geometry) => {
       let t = reflectorTargets.get(geometry);
-      if (!t) reflectorTargets.set(geometry, t = { fb: null, tex: null, depth: null, size: 0, renderWidth: 0, renderHeight: 0, viewProj: new Float32Array(16), valid: false, area: 0, screenWidth: 0, screenHeight: 0, record: null });
+      if (!t) reflectorTargets.set(geometry, t = { fb: null, tex: null, depth: null, size: 0, renderWidth: 0, renderHeight: 0, viewProj: new Float32Array(16), valid: false, readable: false, area: 0, screenWidth: 0, screenHeight: 0, record: null });
       return t;
     };
     // One square allocation per reflector at the tier's mirror size, as the mirror keeps.
@@ -2974,6 +2974,10 @@ void main() {
       mirrorDebug.portal = mirror.portal;
       mirrorDebug.reveal = mirror.reveal;
     };
+    // Medium captures a pane only while it reads: in at 150 CSS pixels on both axes, out under 130, so a pane near
+    // the line does not flicker between its reflection and its authored face.
+    const paneReadable = (target, paneWidth, paneHeight) => target.readable = target.readable
+      ? paneWidth >= 130 && paneHeight >= 130 : paneWidth >= 150 && paneHeight >= 150;
     // Readies the reflected camera for the mirror, or for a reflector when `target` is one; only the mirror's own
     // capture writes the debug readout.
     const prepareMirrorCamera = (camera, node = mirror.node, target = mirror) => {
@@ -2992,8 +2996,17 @@ void main() {
       }
       const area = (Math.min(1, MIRROR_RECT[2]) - Math.max(-1, MIRROR_RECT[0])) * width * 0.5 * (Math.min(1, MIRROR_RECT[3]) - Math.max(-1, MIRROR_RECT[1])) * height * 0.5;
       if (area < 16) return own && skipMirrorPass("negligible");
-      if (qualityName === "medium" && ((Math.min(1, MIRROR_RECT[2]) - Math.max(-1, MIRROR_RECT[0])) * width * 0.5 < 150
-          || (Math.min(1, MIRROR_RECT[3]) - Math.max(-1, MIRROR_RECT[1])) * height * 0.5 < 150)) return own && skipMirrorPass("quality-size");
+      if (qualityName === "medium" && !paneReadable(target, (Math.min(1, MIRROR_RECT[2]) - Math.max(-1, MIRROR_RECT[0])) * width * 0.5,
+          (Math.min(1, MIRROR_RECT[3]) - Math.max(-1, MIRROR_RECT[1])) * height * 0.5)) {
+        // A pane too small to read drops its capture, so it shows its authored face rather than a reflection frozen
+        // when it was last captured.
+        if (!own) {
+          target.valid = false;
+          return false;
+        }
+        mirror.captureValid = mirrorDebug.captureValid = false;
+        return skipMirrorPass("quality-size");
+      }
       reflectMirrorPoint(mirrorEye, camera.position, center, normal);
       reflectMirrorPoint(mirrorTarget, camera.target, center, normal);
       const up = camera.up || UP, upDot = up.x * normal[0] + up.y * normal[1] + up.z * normal[2];
@@ -3539,7 +3552,9 @@ void main() {
               program.lakeSurface = null;
             }
           }
-          const minimumY = g.clipMinY ?? -1e6, maximumY = Math.min(g.cutawayPreserve ? 1e6 : cutawayMaxY, g.clipMaxY ?? 1e6);
+          // The mirror's authored face, drawn while its pane cannot be, drains with the Matrix reveal as the pane does.
+          const minimumY = rec === mirror.record && mirror.reveal > 0 && useProgram !== "shadow" ? Math.max(g.clipMinY ?? -1e6, mirrorRevealFloor())
+            : g.clipMinY ?? -1e6, maximumY = Math.min(g.cutawayPreserve ? 1e6 : cutawayMaxY, g.clipMaxY ?? 1e6);
           if (minimumY !== program.clipMinY) {
             gl.uniform1f(program.u.uClipMinY, minimumY);
             program.clipMinY = minimumY;
@@ -3731,6 +3746,13 @@ void main() {
       mirror.captureValid = mirrorDebug.captureValid = true;
       mirrorDebug.reflectionPassCount++;
       mirrorDebug.captureExcluded = true;
+    };
+    // The world height under which the Matrix reveal has drained the pane, from its foot up, as Canvas 2D clips it.
+    const mirrorRevealFloor = () => {
+      const w = mirror.node.world, bounds = boundsOf(mirror.geometry), min = bounds.min, max = bounds.max;
+      const low = w[13] + Math.min(w[1] * min[0], w[1] * max[0]) + Math.min(w[5] * min[1], w[5] * max[1]) + Math.min(w[9] * min[2], w[9] * max[2]);
+      const high = w[13] + Math.max(w[1] * min[0], w[1] * max[0]) + Math.max(w[5] * min[1], w[5] * max[1]) + Math.max(w[9] * min[2], w[9] * max[2]);
+      return low + (high - low) * mirror.reveal;
     };
     // Whether the reflective pane draws this frame; when it cannot (low tier, or no capture yet), the camera pass
     // draws the mirror's authored face instead, as uncaptured reflectors keep theirs.
@@ -4217,25 +4239,28 @@ void main() {
           }
         }
       }
-      if (qualityName !== "low" && reflectorNodes.length && ensureMirrorProgram()
-          && (qualityName === "high" || reflectorFrame++ % settings.mirrorCadence === 0)) {
-        // High preserves best plus one every frame. Medium captures on its cadence and only for readable panes.
+      if (qualityName !== "low" && reflectorNodes.length && ensureMirrorProgram()) {
+        // High preserves best plus one every frame. Medium captures only readable panes, on its cadence unless the
+        // best fills a twenty-fifth of the view or more, as the mirror does.
         const n = reflectorNodes.length;
         let best = -1, bestArea = 16;
         for (let i = 0; i < n; i++) {
           const t = reflectorTarget(reflectorNodes[i].geometry);
           t.area = reflectorArea(reflectorNodes[i], camera, qualityName === "medium" ? t : null);
-          // On-screen CSS dimensions, not the capped texture dimensions or area alone.
-          if (qualityName === "medium" && (t.screenWidth < 150 || t.screenHeight < 150)) t.area = 0;
+          // On-screen CSS dimensions, not the capped texture dimensions or area alone; an unreadable pane drops its
+          // capture and shows its authored face.
+          if (qualityName === "medium" && t.area >= 16 && !paneReadable(t, t.screenWidth, t.screenHeight)) t.area = 0, t.valid = false;
           if (t.area > bestArea) { bestArea = t.area; best = i; }
         }
+        const due = qualityName === "high" || reflectorFrame++ % settings.mirrorCadence === 0;
+        if (!due && best >= 0 && reflectorTargets.get(reflectorNodes[best].geometry).valid && bestArea * 25 < width * height) best = -1;
         // One just come into view with nothing captured yet goes first.
         let turn = -1;
-        for (let i = 0; i < n && turn < 0; i++) {
+        for (let i = 0; due && i < n && turn < 0; i++) {
           const t = reflectorTargets.get(reflectorNodes[i].geometry);
           if (i !== best && t.area >= 16 && !t.valid) turn = i;
         }
-        for (let k = 0; k < n && turn < 0; k++) {
+        for (let k = 0; due && k < n && turn < 0; k++) {
           const i = (reflectorTurn + k) % n;
           if (i !== best && reflectorTargets.get(reflectorNodes[i].geometry).area >= 16) turn = i;
         }
