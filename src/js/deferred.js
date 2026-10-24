@@ -16,15 +16,22 @@
     // HALLOWEEN: the hub's ghost hunt, and each track of its playlist.
     halloween: () => !!BL.halloween, ...Object.fromEntries(["boss", "colt", "martial", "nightmare", "synthed"].map((k) => [`halloween-track-${k}`, () => !!(BL.ghostMusic && BL.ghostMusic[k])])) };
   // Only scene implementation groups depend on a base group; no base group depends on a scene shell.
-  // The race/mine/orbit predicates arrive with their independent module extraction; otherwise those modules are inline.
-  const SCENE_BASE = { "factory-scene": "kiosk", "arcade-scene": "arcade", "race-scene": "race", "drop-scene": "drop", "mine-scene": "mine", "orbit-scene": "orbit" };
-  const loading = new Map();
+  const SCENE_BASE = { "factory-scene": "kiosk", "arcade-scene": "arcade", "drop-scene": "drop" };
+  const loading = new Map(), attempts = new Map();
   const load = (group) => {
     if (PRESENT[group]()) return null;
     if (loading.has(group)) return loading.get(group);
-    const src = BL.deferredScripts && BL.deferredScripts[group];
-    if (!src) return Promise.reject(new Error(`No ${group} code on this page`));
+    const file = BL.deferredScripts && BL.deferredScripts[group];
+    if (!file) return Promise.reject(new Error(`No ${group} code on this page`));
+    // A retry asks under its own address, so a failed response the page still holds (a refused preload) is never reused.
+    const tries = attempts.get(group) || 0, src = tries ? `${file}${file.includes("?") ? "&" : "?"}r=${tries}` : file;
     const base = SCENE_BASE[group], prerequisite = base && typeof PRESENT[base] === "function" ? load(base) : null;
+    // The scene's chunk downloads beside its base's and still runs after it.
+    if (prerequisite) {
+      const link = document.createElement("link");
+      link.rel = "preload"; link.as = "script"; link.href = src;
+      document.head.appendChild(link);
+    }
     const start = () => new Promise((resolve, reject) => {
       const script = document.createElement("script");
       const finish = (error) => {
@@ -34,6 +41,7 @@
         if (error) {
           script.remove();
           loading.delete(group);
+          attempts.set(group, tries + 1);
           reject(error);
         } else resolve(null);
       };
@@ -43,7 +51,7 @@
       script.src = src;
       document.head.appendChild(script);
     });
-    const promise = prerequisite ? prerequisite.then(start, (error) => { loading.delete(group); throw error; }) : start();
+    const promise = prerequisite ? prerequisite.then(start, (error) => { loading.delete(group); attempts.set(group, tries + 1); throw error; }) : start();
     loading.set(group, promise);
     return promise;
   };
@@ -68,7 +76,8 @@
   // Portable builds evaluate the same modules inline and fill these shells before boot, so they still fetch nothing.
   const scene = (id, definition = null) => {
     const scenes = BL.scenes = BL.scenes || {}, target = scenes[id] || (scenes[id] = { id });
-    if (definition) Object.defineProperties(target, Object.getOwnPropertyDescriptors(definition));
+    // A chunk that arrives after its load timed out and was retried must not redefine a scene already defined.
+    if (definition) { if (typeof target.enter !== "function") Object.defineProperties(target, Object.getOwnPropertyDescriptors(definition)); }
     else {
       const group = `${id}-scene`;
       sceneGroups[id] = [group, id];
@@ -82,5 +91,5 @@
     }
     return target;
   };
-  BL.deferred = { load, scene, prefetch, prefetchScene, present: (group) => PRESENT[group](), get pending() { return loading.size; } };
+  BL.deferred = { load, scene, prefetch, prefetchScene, isShell: (id) => !!sceneGroups[id], present: (group) => PRESENT[group](), get pending() { return loading.size; } };
 })();
