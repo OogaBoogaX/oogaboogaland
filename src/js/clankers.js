@@ -50,6 +50,7 @@
   const OFFICE_WORK = { type: [5, 9], look: [1, 2], abacus: [3, 5] }, OFFICE_NEXT = { type: "look", look: "abacus", abacus: "type" };
   const create = (ctx) => {
     const { crew, sites, groundAt, clear } = ctx;
+    let combatEnabled = ctx.combatEnabled === true;
     const footprint = BL.agent.footprint, torso = BL.agent.torso;
     const pointSupportAt = ctx.pointSupportAt || groundAt;
     const climbSolidAt = ctx.climbSolidAt || ctx.solidAt, climbSurfaceAt = ctx.climbSurfaceAt || ctx.surfaceAt;
@@ -2078,6 +2079,7 @@
       gorilla.poseManaged(0.6, 0, 0, 0, i * 2.39996323, 0, false, false);
       const entry = {
         owner, cave: owner, tooltipOwner: owner, gorilla, root: gorilla.root, parts: gorilla.parts,
+        animation: { due: true, dt: 0, pending: 0, at: 0, interval: 0, settle: 0, phase: "", lounge: "", work: "", office: "", updates: 0 },
         health: { value: BL.crew.HEALTH_MAX * 2, max: BL.crew.HEALTH_MAX * 2, delay: 0 }, index: i,
         rage: BL.clankerRage.state(),
         radius: WALK_RADIUS, height: 2.7, foot: FOOT, minY: 0, biped: false, compact: owner.state === "working" && gorilla.compact, footprintMode: "walk",
@@ -5442,7 +5444,7 @@
     };
     const ignite = (value) => {
       const e = entryFor(value);
-      if (!e || !e.active || !e.root.visible || e.fire.burning || e.fire.rolling || e.fire.cooldown > 0) return false;
+      if (!combatEnabled || !e || !e.active || !e.root.visible || e.fire.burning || e.fire.rolling || e.fire.cooldown > 0) return false;
       const f = e.fire;
       f.burning = true; f.requested = f.escaping = false; f.retry = f.escapeRetry = 0; f.age = 0; f.heat = 0.05; f.reaction = 1 + e.random() * 2;
       f.panic.active = false; fireThreatsActive = true;
@@ -5470,7 +5472,7 @@
     const smashPower = (charge = 0, combo = quickSmash(player)) => (2.5 + 2.5 * clamp(charge, 0, 1)) * (combo ? 0.25 : 1);
     const smash = (charge = 0, combo = quickSmash(player), power = smashPower(charge, combo)) => {
       const e = player;
-      if (!e || sleeping(e) || e.climb.active || e.fire.rolling || e.parked || e.beat || e.pound > 0 && !e.poundHit) return false;
+      if (!combatEnabled || !e || sleeping(e) || e.climb.active || e.fire.rolling || e.parked || e.beat || e.pound > 0 && !e.poundHit) return false;
       if (e.recover > 0 && !combo) return false;
       if (ctx.canSmash ? !ctx.canSmash(e) : !expandGesture(e, 2.25)) return false;
       const duration = e.gorilla.pound(e.drive.airborne, charge, combo);
@@ -6104,8 +6106,34 @@
         e.motion.climbGripX = e.motion.climbGripY = e.motion.climbGripZ = NaN;
         e.motion.climbGripRelease = 0;
       }
-      e.gorilla.poseManaged(dt, p.x, p.y, p.z, e.heading, e.speed,
-        e.jump.active || e.drive.airborne && !e.drive.passiveFall, e.biped, e.lounge, e.motion);
+      // Route/contact transitions stay at the simulation rate. Only settled,
+      // stationary rests and desk gestures can sample their rig less often.
+      const animation = e.animation, work = e.motion.labWork, office = e.motion.officeWork;
+      const changed = animation.phase !== e.phase || animation.lounge !== e.lounge
+        || animation.work !== work || animation.office !== office;
+      animation.settle = changed ? 1.2 : Math.max(0, animation.settle - dt);
+      const stationary = p.x === beforeX && p.y === beforeY && p.z === beforeZ
+        && Math.abs(e.speed) < 0.01 && Math.abs(e.heading - e.root.rotation.y) < 1e-6;
+      const resting = e.sleep.stage === "asleep" || e.phase === "chill" && e.lounge && !e.roam.transition
+        || e.office.stage === "work" || e.lab.arrived && (work === "type" || work === "touch");
+      const quiet = stationary && resting && !animation.settle && !e.controlled && !e.remoteControlled
+        && !e.rage.active && !e.fire.burning && !e.fire.rolling && !e.fire.rollRecover
+        && !e.loungeDepart && !e.recover && !e.climb.active && !e.jump.active && !e.drive.airborne
+        && !e.gorilla.motionActive && !e.gorilla.pounding && !e.gorilla.beating && !e.gorilla.chewing;
+      const interval = quiet && ctx.animationInterval ? ctx.animationInterval(e) : 0;
+      animation.pending += dt;
+      animation.due = !interval || interval < animation.interval || changed || elapsed >= animation.at;
+      animation.dt = animation.due ? animation.pending : 0;
+      if (animation.due) {
+        e.gorilla.poseManaged(animation.dt, p.x, p.y, p.z, e.heading, e.speed,
+          e.jump.active || e.drive.airborne && !e.drive.passiveFall, e.biped, e.lounge, e.motion);
+        if (e.sleep.stage === "asleep") e.gorilla.chest.scale.y = 1 + Math.sin(elapsed * 1.4 + e.index) * 0.018;
+        animation.pending = 0;
+        animation.at = elapsed + interval * (animation.interval ? 1 : 0.5 + e.index * 0.61803398875 % 0.5);
+        animation.updates++;
+      }
+      animation.interval = interval; animation.phase = e.phase; animation.lounge = e.lounge;
+      animation.work = work; animation.office = office;
       if (e.climb.active && !e.climb.mountPending && !e.climb.handoffDirection
         && e.motion.climbBlend > 0.98 && e.motion.mantle < 0.01) {
         // The rendered palms, rather than the wall's coarse body samples,
@@ -6150,7 +6178,7 @@
       if (e.drive.motionEnvelope && !e.gorilla.motionActive && !e.drive.airborne
         && !e.drive.motionRecover && !e.fire.rolling && !e.fire.rollRecover) e.drive.motionEnvelope = false;
       labEnvelope(e);
-      if (ctx.fireContact && ctx.fireContact(e, beforeX, beforeY, beforeZ)) ignite(e);
+      if (combatEnabled && ctx.fireContact && ctx.fireContact(e, beforeX, beforeY, beforeZ)) ignite(e);
       if (ctx.onMove && (beforeX !== p.x || beforeY !== p.y || beforeZ !== p.z)) ctx.onMove(e, beforeX, beforeY, beforeZ, dt);
     };
     const shareLabStation = (e) => {
@@ -6456,7 +6484,6 @@
         e.speed = 0;
         if (e.controlled) e.lounge = s.pose;
         // Slow breath in the chest, and a mark of sleep from its mouth now and then.
-        e.gorilla.chest.scale.y = 1 + Math.sin(elapsed * 1.4 + e.index) * 0.018;
         if ((s.mark -= dt) <= 0 && ctx.sleep.mark) {
           s.mark = SLEEP_MARK;
           e.gorilla.mouth(SLEEP_MOUTH);
@@ -6718,13 +6745,15 @@
       if (e.remoteControlled) return;
       // Expiry, health and account/activity cancellation precede regeneration
       // and every movement controller, including swimming or climbing.
-      if (rage) rage.check(e, elapsed);
+      if (combatEnabled && rage) rage.check(e, elapsed);
       // A certified cliff warp during check starts a new local movement step;
       // its final pose must not sweep or roll back to the previous location.
       const p = e.root.position, beforeX = p.x, beforeY = p.y, beforeZ = p.z;
       const beforeSupportOffset = e.motion.supportOffset;
-      if (e.health.delay > 0) e.health.delay = Math.max(0, e.health.delay - dt);
-      else if (e.health.value < e.health.max) e.health.value = Math.min(e.health.max, e.health.value + BL.crew.HEALTH_REGEN_RATE * dt);
+      if (combatEnabled) {
+        if (e.health.delay > 0) e.health.delay = Math.max(0, e.health.delay - dt);
+        else if (e.health.value < e.health.max) e.health.value = Math.min(e.health.max, e.health.value + BL.crew.HEALTH_REGEN_RATE * dt);
+      }
       e.motion.labDt = dt;
       e.motion.walkPhase = NaN;
       e.motion.walkGait = e.controlled ? e.drive.run ? "gallop" : "knuckle" : e.rage.active ? "gallop" : "";
@@ -6765,8 +6794,8 @@
         || e.jump.active || e.drive.airborne || e.debugMove.active)) releaseOffice(e);
       if (e.sleep.stage && !sleeps(e.owner) && alive(e.owner) && !e.controlled && !e.drive.airborne && !e.fire.rolling && !e.fire.burning && !e.climb.active
         && updateWake(e, dt, beforeX, beforeY, beforeZ)) return;
-      if (ctx.fireContact && ctx.fireContact(e, p.x, p.y, p.z)) ignite(e);
-      updateFire(e, dt);
+      if (combatEnabled && ctx.fireContact && ctx.fireContact(e, p.x, p.y, p.z)) ignite(e);
+      if (combatEnabled) updateFire(e, dt);
       if (rage && e.rage.active && e.fire.burning) rage.check(e, elapsed);
       if (rage && e.rage.active && e.rage.warpWaiting && !e.climb.active && !e.jump.active && !e.drive.airborne) {
         // Failed endpoint admission keeps the last coherent pose in place.
@@ -6801,7 +6830,7 @@
       if (!e.jump.active && !e.fire.rolling && Number.isFinite(liveFloor)
         && liveFloor >= p.y - STEP && liveFloor <= p.y + PROP_STEP) setSupportY(e, liveFloor, p.x, p.z, e.heading, dt * 3);
       if (e.fire.rolling || escapeForRoll(e, dt)) { poseEntry(e, dt, beforeX, beforeY, beforeZ); return; }
-      if (fleeFire(e, dt)) { poseEntry(e, dt, beforeX, beforeY, beforeZ); return; }
+      if (combatEnabled && fleeFire(e, dt)) { poseEntry(e, dt, beforeX, beforeY, beforeZ); return; }
       if (rage && e.rage.active) {
         e.phase = "rage"; e.biped = false;
         let advanced = false;
@@ -7158,7 +7187,7 @@
     };
     const update = (dt) => {
       if (disposed || !(dt > 0)) return;
-      if (rage) rage.frame(elapsed);
+      if (combatEnabled && rage) rage.frame(elapsed);
       if (labEscape && (!labEscape.active || labEscape.controlled || labEscape.fire.burning
         || labEscape.climb.active || labEscape.jump.active || labEscape.drive.airborne)) {
         labEscape.stuck.escapeLeft = 0; labEscape = null;
@@ -7205,8 +7234,8 @@
       while (remaining > 1e-8) {
         const step = Math.min(remaining, 1 / 30); remaining -= step; elapsed += step;
         fireThreatsActive = false;
-        for (let i = 0; i < list.length; i++) if (list[i].active && list[i].fire.burning) { fireThreatsActive = true; break; }
-        if (!fireThreatsActive) for (let i = 0; i < crew.list.length; i++) {
+        for (let i = 0; combatEnabled && i < list.length; i++) if (list[i].active && list[i].fire.burning) { fireThreatsActive = true; break; }
+        if (combatEnabled && !fireThreatsActive) for (let i = 0; i < crew.list.length; i++) {
           if (crew.list[i].root.visible && crew.list[i].camp.burning) { fireThreatsActive = true; break; }
         }
         if (debugShuttle && debugShuttle.active && !debugShuttle.controlled && !debugShuttle.debugMove.active && debugShuttle.phase === "work"
@@ -7252,14 +7281,36 @@
       return true;
     };
     const damage = (entry, power) => {
-      if (!entry || !entry.active || !(power > 0)) return false;
+      if (!combatEnabled || !entry || !entry.active || !(power > 0)) return false;
       entry.health.value = Math.max(0, entry.health.value - power * 4);
       entry.health.delay = BL.crew.HEALTH_REGEN_DELAY;
       if (rage && entry.health.value === 0) rage.cancel(entry, "health");
       return true;
     };
-    const bananaHit = (entry, source, serial) => !!rage && !!entry && rage.bananaHit(entry, source, serial);
-    const debugRage = (entry, on = true) => !disposed && !!rage && rage.debugRage(entryFor(entry), on);
+    const bananaHit = (entry, source, serial) => combatEnabled && !!rage && !!entry && rage.bananaHit(entry, source, serial);
+    const debugRage = (entry, on = true) => !disposed && (!on || combatEnabled) && !!rage && rage.debugRage(entryFor(entry), on);
+    const setCombatEnabled = (on) => {
+      on = on === true;
+      if (on === combatEnabled) return;
+      combatEnabled = on;
+      if (on) return;
+      fireThreatsActive = false;
+      for (const e of list) {
+        if (rage) rage.cancel(e, "game-ended");
+        if (ctx.rageRelease) ctx.rageRelease(e);
+        e.health.value = e.health.max; e.health.delay = 0;
+        if (e.actionControlled || e.motion.smash) {
+          e.pound = e.recover = 0; e.poundHit = true;
+          e.actionControlled = e.motion.smash = false;
+          e.gorilla.cancelSmash();
+        }
+        const f = e.fire, m = e.motion;
+        f.burning = f.contactBurning = f.rolling = f.requested = f.escaping = f.panic.active = false;
+        f.retry = f.escapeRetry = f.age = f.heat = f.soot = f.cooldown = f.rollRecover = 0;
+        m.poundCharge = m.throwProgress = m.roll = m.rollAngle = m.rollSide = 0;
+        m.dragging = m.rage = false;
+      }
+    };
     const stats = () => {
       let active = 0, working = 0, chilling = 0, overflow = 0, airborne = 0, hits = 0, pounds = 0, beats = 0, stuck = 0, replans = 0, recoveries = 0;
       for (let i = 0; i < list.length; i++) {
@@ -7301,10 +7352,10 @@
       }
       return spots;
     };
-    return { list, sync, update, target, companionTarget, hit, damage, bananaHit, debugRage, plan, startLabShuttle, debugMove, cancelDebugMove, stats, liveGeometry, dispose, contactAt,
+    return { list, sync, update, target, companionTarget, hit, damage, bananaHit, debugRage, setCombatEnabled, plan, startLabShuttle, debugMove, cancelDebugMove, stats, liveGeometry, dispose, contactAt,
       debugLoungeSpots,
       possess, release, sleeping, wake, setAway, setRemote, createRemote, respawn, travelRefusal, travel, control, cancelInput, smash, smashPower, quickSmash, chestBeat, ignite, dropRoll, supportRemoved,
-      get player() { return player; } };
+      get combatEnabled() { return combatEnabled; }, get player() { return player; } };
   };
   BL.clankers = { create, rageCarrying, WALK_RADIUS, WALK_HEIGHT, PROP_STEP, RAGE_SPEED };
 })();

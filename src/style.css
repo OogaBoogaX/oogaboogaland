@@ -384,13 +384,32 @@ body[data-active-scene="hub"] .home-link {
   max-width: calc(100vw - 32px - var(--safe-left) - var(--safe-right));
   display: flex;
   flex-direction: column;
+  isolation: isolate;
+  border-radius: var(--radius);
+  color: var(--paper);
+  transition: transform 0.28s ease;
+}
+
+/* The opaque body covers the retracted tabs, including their inner borders. */
+.sheet-body {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   background: var(--planks);
   border: 3px solid var(--wood-edge);
-  border-radius: var(--radius);
+  border-radius: inherit;
   box-shadow: 0 6px 0 rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.35);
-  color: var(--paper);
   padding-bottom: 14px;
-  transition: transform 0.28s ease;
+}
+
+.sheet-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .sheet[data-open="false"] {
@@ -634,17 +653,35 @@ body[data-active-scene="arcade"] .magazine-hud {
 
 .sheet-toggle {
   position: absolute;
+  z-index: 0;
   top: 71px;
-  left: -47px;
+  left: -41px;
   width: 44px;
   height: 64px;
   margin-top: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  outline: none;
+}
+
+/* Keep the whole tab clickable while its face slides behind the panel body. */
+.sheet-tab-face {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
   padding: 0 4px 0 2px;
   border: 3px solid var(--wood-edge);
   border-right: 0;
   border-radius: 8px 0 0 8px;
   background: linear-gradient(90deg, var(--wood), var(--wood-dk));
   box-shadow: 0 4px 0 rgba(0, 0, 0, 0.35);
+  transform: translateX(var(--sheet-tab-slide, 0px));
+  opacity: var(--sheet-tab-opacity, 1);
+  transition: transform 0.2s ease, opacity 0.2s ease;
 }
 
 .sheet-toggle-bananas {
@@ -653,11 +690,10 @@ body[data-active-scene="arcade"] .magazine-hud {
   height: 56px;
 }
 
-.sheet-toggle:hover,
-.sheet-toggle.virtual-hover,
-.sheet-toggle:focus-visible {
+.sheet-toggle:hover .sheet-tab-face,
+.sheet-toggle.virtual-hover .sheet-tab-face,
+.sheet-toggle:focus-visible .sheet-tab-face {
   background: linear-gradient(90deg, var(--plank), var(--wood));
-  outline: none;
 }
 
 .sheet-panels { display: contents; }
@@ -665,8 +701,8 @@ body[data-active-scene="arcade"] .magazine-hud {
 .sheet-toggle-chat { top: var(--sheet-chat-top); height: 56px; }
 .sheet:has(.sheet-toggle-loot[hidden]) { --sheet-chat-top: 143px; --sheet-chat-left: 144px; }
 .sheet-toggle svg { display: block; width: 100%; height: auto; filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.5)); }
-.sheet[data-open="true"] .sheet-toggle[aria-selected="true"] { background: linear-gradient(90deg, #b8844a, var(--plank)); }
-.sheet-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+.sheet[data-open="true"] .sheet-toggle[aria-selected="true"] .sheet-tab-face { background: linear-gradient(90deg, #b8844a, var(--plank)); }
+.sheet-toggle:focus-visible .sheet-tab-face { outline: 2px solid var(--accent); outline-offset: -3px; }
 .sheet-toggle .tab-count { position: absolute; bottom: 3px; right: 3px; margin: 0; }
 
 .sheet-resize {
@@ -696,9 +732,76 @@ body[data-active-scene="arcade"] .magazine-hud {
 .sheet-resize:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
 .sheet[data-open="false"] .sheet-resize { display: none; }
 
+/* Docking follows three 380px panel widths; two widths fit Bananas and Oogas together. */
+.sheet[data-dock="bottom"] {
+  top: auto;
+  left: 0;
+  right: 0;
+  bottom: var(--chat-keyboard, 0px);
+  width: 100%;
+  max-width: none;
+  height: var(--sheet-height, 52vh);
+  max-height: max(0px, calc(var(--chat-viewport, 100vh) - 74px - var(--safe-top)));
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+
+.sheet[data-dock="bottom"] .sheet-body {
+  border-bottom: 0;
+  padding-top: 12px;
+  padding-bottom: var(--safe-bottom);
+  box-shadow: 0 -6px 30px rgba(0, 0, 0, 0.35);
+}
+
+.sheet[data-dock="bottom"][data-open="false"] { transform: translateY(100%); }
+.sheet[data-dock="bottom"] .sheet-resize { top: 3px; bottom: auto; }
+.sheet[data-dock="bottom"][data-open="true"]:not([hidden])~.joysticks,
+.sheet[data-dock="bottom"][data-open="true"]:not([hidden])~.bottom-hud>.act { display: none; }
+
+.sheet[data-dock="bottom"] .sheet-toggle {
+  top: -39px;
+  left: 72px;
+  width: 64px;
+  height: 42px;
+}
+
+.sheet[data-dock="bottom"] .sheet-tab-face {
+  padding: 2px 18px 0;
+  border: 3px solid var(--wood-edge);
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  background: linear-gradient(var(--wood), var(--wood-dk));
+  transform: translateY(var(--sheet-tab-slide, 0px));
+}
+
+.sheet[data-dock="bottom"] .sheet-toggle-bananas { left: 0; }
+.sheet[data-dock="bottom"] .sheet-toggle-bananas .sheet-tab-face { padding: 4px 18px 0; }
+.sheet[data-dock="bottom"] .sheet-toggle-loot { left: 144px; }
+.sheet[data-dock="bottom"] .sheet-toggle-chat { left: var(--sheet-chat-left); }
+.sheet[data-dock="bottom"][data-open="false"] .sheet-toggle { top: calc(-45px - var(--safe-bottom)); }
+
+.sheet[data-paired="true"] .sheet-content {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.sheet[data-paired="true"] #bananas-panel { grid-column: 1; grid-row: 1; }
+.sheet[data-paired="true"] #roster-panel { grid-column: 2; grid-row: 1; border-left: 2px solid var(--wood-edge); }
+.sheet[data-paired="true"] #roster-panel > .feed-open { display: none; }
+.sheet[data-paired="true"] .panel { min-width: 0; }
+
+/* Open: hidden at rest, fully out on panel or fixed tab-area hover.
+   Closed panels and touch devices keep the whole tab. */
+@media (hover: hover) and (pointer: fine) {
+  .sheet[data-open="true"] { --sheet-tab-slide: 100%; --sheet-tab-opacity: 0; }
+  .sheet[data-open="true"]:is(:hover, .virtual-hover) { --sheet-tab-slide: 0px; --sheet-tab-opacity: 1; }
+  .sheet-panels:hover,
+  .sheet-panels:has(.virtual-hover, :focus-visible) { --sheet-tab-slide: 0px; --sheet-tab-opacity: 1; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .sheet,
-  .sheet-toggle { transition: none !important; }
+  .sheet-tab-face { transition: none !important; }
 }
 
 .presets button:focus-visible,
@@ -2206,6 +2309,11 @@ body[data-active-scene="arcade"] .magazine-hud {
   display: none;
 }
 
+/* World labels sit above the island HUD, but never above the lobby's own player list. */
+.ghost-lobby:not([hidden]) ~ .tooltip {
+  visibility: hidden;
+}
+
 .ghost-lobby-players li {
   grid-template-columns: 22px 1fr;
 }
@@ -2724,6 +2832,9 @@ body.game-mode #message-stack {
   transform: translateY(-50%);
 }
 
+.mode-hud[data-health="false"] .mode-face-icon { left: calc(50% - 22px); }
+.mode-hud[data-health="false"][data-gorilla="true"] .mode-face-icon { left: calc(50% - 20px); }
+
 .gorilla-hud {
   flex: none;
   justify-content: flex-start;
@@ -2807,14 +2918,15 @@ body.game-mode #message-stack {
   transition-duration: 0s;
 }
 
-.jetpack-hud[data-equipped="true"] {
-  width: 164px;
+.jetpack-hud {
+  flex: none;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
 }
 
-.jetpack-hud {
-  gap: 8px;
-  padding: 0 4px;
-  cursor: pointer;
+.jetpack-hud[data-equipped="true"] .jetpack-icon {
+  transform: translateX(-13px);
 }
 
 .weapon-hud {
@@ -2977,15 +3089,18 @@ body.game-mode #message-stack {
   opacity: 0.8;
 }
 
-.weapon-hud[data-equipped="true"] .weapon-compact,
-.jetpack-hud[data-equipped="true"] .jetpack-compact {
+.weapon-hud[data-equipped="true"] .weapon-compact {
   opacity: 0;
   visibility: hidden;
   transition: opacity 0.1s ease, visibility 0s linear 0.1s;
 }
 
-.equipment-compact[data-level="empty"],
-.jetpack-hud:has(.jetpack-fuel[data-level="low"]) .jetpack-compact {
+.jetpack-hud:not([data-equipped="true"]) .jetpack-compact {
+  opacity: 0;
+  visibility: hidden;
+}
+
+.equipment-compact[data-level="empty"] {
   color: var(--danger);
 }
 
@@ -3128,77 +3243,21 @@ body.game-mode #message-stack {
   color: var(--accent-text);
 }
 
-.weapon-readout,
-.jetpack-readout {
+.weapon-readout {
   opacity: 0;
   visibility: hidden;
   transition: opacity 0.14s ease, visibility 0s linear 0.18s;
 }
 
-.jetpack-readout {
-  width: 88px;
-  flex: none;
-}
-
-.weapon-hud[data-equipped="true"] .weapon-readout,
-.jetpack-hud[data-equipped="true"] .jetpack-readout {
+.weapon-hud[data-equipped="true"] .weapon-readout {
   opacity: 1;
   visibility: visible;
   transition-delay: 0.06s, 0s;
 }
 
-.jetpack-label {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 5px;
-  font-size: 10px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  font-variant-numeric: tabular-nums;
-}
-
-.jetpack-fuel {
-  position: relative;
-  height: 8px;
-  overflow: hidden;
-  border-radius: 2px;
-  background: rgba(0, 0, 0, 0.45);
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.6);
-}
-
-.jetpack-fuel-fill {
-  display: block;
-  width: 100%;
-  height: 100%;
-  background: var(--accent);
-  transform-origin: left;
-}
-
-.jetpack-hud[data-equipped="true"] .jetpack-fuel-fill {
-  background: #ffd84a;
-}
-
-.jetpack-fuel[data-level="low"] .jetpack-fuel-fill {
-  background: var(--danger);
-}
-
-.jetpack-fuel::after {
-  content: "";
-  position: absolute;
-  left: 20%;
-  top: 0;
-  bottom: 0;
-  width: 1px;
-  z-index: 1;
-  background: rgba(0, 0, 0, 0.65);
-  pointer-events: none;
-}
-
 @media (max-width: 360px) {
   .equipment-hud { left: calc(8px + var(--safe-left)); }
   .weapon-equipment-row { gap: 4px; }
-  .jetpack-hud[data-equipped="true"] { width: 160px; }
 }
 .joysticks {
   display: none;
@@ -5633,6 +5692,81 @@ body.orbit-dragging #tooltip {
   }
 }
 
+/* Scale the HUB banner continuously from phone to desktop; hud.js fits the visible controls. */
+body[data-active-scene="hub"] {
+  --hub-title-font: clamp(13px, calc(8.62px + 1.2162vw), 22px);
+  --hub-meta-font: clamp(10.5px, calc(9.77px + 0.2027vw), 12px);
+  --hub-banner-gutter: clamp(8px, 1.5vw, 16px);
+}
+
+body[data-active-scene="hub"] .topbar {
+  min-height: calc(52px + var(--safe-top));
+  padding-left: calc(var(--hub-banner-gutter) + var(--safe-left));
+  padding-right: calc(var(--hub-banner-gutter) + var(--safe-right));
+}
+
+body[data-active-scene="hub"] .brand { width: max-content; }
+body[data-active-scene="hub"] .brand h1 { font-size: var(--hub-title-font); white-space: nowrap; }
+body[data-active-scene="hub"] .brand p { font-size: var(--hub-meta-font); }
+
+body[data-active-scene="hub"] .world-clock,
+body[data-active-scene="hub"] .world-block {
+  right: calc(var(--hub-banner-gutter) + var(--safe-right));
+  left: auto;
+  margin: 0;
+}
+
+body[data-active-scene="hub"] .world-clock { font-size: var(--hub-title-font); }
+body[data-active-scene="hub"] .world-block {
+  top: calc(15px + var(--hub-title-font) + var(--safe-top));
+  width: max-content;
+  justify-content: flex-end;
+  font-size: var(--hub-meta-font);
+}
+
+body[data-active-scene="hub"] #equipment-hud {
+  top: var(--hub-equipment-top, calc(62px + var(--safe-top)));
+  left: var(--hub-equipment-left, calc(var(--hub-banner-gutter) + var(--safe-left)));
+  grid-template-columns: max-content;
+}
+
+body[data-active-scene="hub"] .weapon-equipment-row {
+  width: max-content;
+  gap: clamp(4px, calc(2px + 0.55vw), 8px);
+  flex-wrap: nowrap;
+  transform: scale(var(--hub-equipment-scale, 0.85));
+  transform-origin: top left;
+}
+
+body[data-active-scene="hub"] .weapon-equipment-row .magazine-hud { margin-right: 0; }
+body[data-active-scene="hub"] .weapon-hud { transition: background 0.15s ease, transform 0.15s ease; }
+
+body[data-active-scene="hub"] .equipment-hud[data-banner="below"] .weapon-equipment-row {
+  width: var(--hub-equipment-width);
+  flex-wrap: wrap;
+}
+
+body[data-active-scene="hub"] .equipment-hud:is([data-banner="compact"], [data-banner="below"]) .weapon-hud[data-equipped="true"] { width: 78px; }
+body[data-active-scene="hub"] .equipment-hud:is([data-banner="compact"], [data-banner="below"]) .weapon-hud[data-equipped="true"] .weapon-readout {
+  opacity: 0;
+  visibility: hidden;
+}
+body[data-active-scene="hub"] .equipment-hud:is([data-banner="compact"], [data-banner="below"]) .weapon-hud[data-equipped="true"] .weapon-compact {
+  opacity: 1;
+  visibility: visible;
+  transition-delay: 0s;
+}
+
+body[data-active-scene="hub"] .sheet[data-dock="side"] { top: calc(72px + var(--safe-top)); }
+body[data-active-scene="hub"] .mic-note { top: var(--hub-equipment-bottom, calc(72px + var(--safe-top))); }
+
+@media (max-width: 720px) {
+  body[data-active-scene="hub"] #equipment-hud~.bottom-hud>#message-stack {
+    top: var(--hub-equipment-bottom, calc(118px + var(--safe-top)));
+    left: calc(var(--hub-banner-gutter) + var(--safe-left));
+  }
+}
+
 @media (max-width: 720px) {
   .topbar {
     grid-template-columns: auto 1fr;
@@ -5646,8 +5780,7 @@ body.orbit-dragging #tooltip {
     font-size: 10.5px;
   }
 
-  .brand h1,
-  .topbar:has(.presets[data-scene="hub"]:not([hidden])) .brand h1 {
+  .brand h1 {
     font-size: 13px;
   }
 
@@ -5699,56 +5832,6 @@ body.orbit-dragging #tooltip {
 
   .presets .leave span {
     display: none;
-  }
-
-  .sheet {
-    top: auto;
-    left: 0;
-    right: 0;
-    /* chat.js lifts the drawer over the keyboard while its input has focus. */
-    bottom: var(--chat-keyboard, 0px);
-    width: 100%;
-    max-width: none;
-    height: var(--sheet-height, 52vh);
-    max-height: max(0px, calc(var(--chat-viewport, 100vh) - 74px - var(--safe-top)));
-    border-radius: var(--radius) var(--radius) 0 0;
-    border-bottom: 0;
-    padding-bottom: var(--safe-bottom);
-    box-shadow: 0 -6px 30px rgba(0, 0, 0, 0.35);
-    transition: transform 0.28s ease;
-  }
-
-  .sheet[data-open="false"] {
-    transform: translateY(100%);
-  }
-
-  .sheet[data-open="false"] .sheet-toggle {
-    top: calc(-45px - var(--safe-bottom));
-  }
-
-  .sheet[data-open="true"]~.joysticks,
-  .sheet[data-open="true"]~.bottom-hud>.act {
-    display: none;
-  }
-
-  .sheet-toggle {
-    top: -39px;
-    left: 72px;
-    width: 64px;
-    height: 42px;
-    margin: 0;
-    padding: 2px 18px 0;
-    border: 3px solid var(--wood-edge);
-    border-bottom: 0;
-    border-radius: 8px 8px 0 0;
-    background: linear-gradient(var(--wood), var(--wood-dk));
-  }
-
-  .sheet-toggle-bananas {
-    left: 0;
-    margin: 0;
-    height: 42px;
-    padding: 4px 18px 0;
   }
 
   .panel {
@@ -5973,45 +6056,8 @@ body.orbit-dragging #tooltip {
     --equipment-height: 116px;
   }
 
-  .sheet {
-    top: auto;
-    left: auto;
-    right: 0;
-    bottom: var(--chat-keyboard, 0px);
-    width: 330px;
-    height: var(--sheet-height, 72vh);
-    max-height: max(0px, calc(var(--chat-viewport, 100vh) - 74px - var(--safe-top)));
-    border-radius: var(--radius) 0 0 0;
-    border-bottom: 0;
-    transition: transform 0.28s ease;
-  }
-
-  .sheet[data-open="false"] {
-    transform: translateY(calc(100% - 48px - var(--safe-bottom)));
-  }
-
-  .sheet-toggle {
-    top: -39px;
-    left: 72px;
-    width: 64px;
-    height: 42px;
-    margin: 0;
-    padding: 2px 18px 0;
-    border: 3px solid var(--wood-edge);
-    border-bottom: 0;
-    border-radius: 8px 8px 0 0;
-    background: linear-gradient(var(--wood), var(--wood-dk));
-  }
-
   .presets {
     grid-column: 3;
-  }
-
-  .sheet-toggle-bananas {
-    left: 0;
-    margin: 0;
-    height: 42px;
-    padding: 4px 18px 0;
   }
 
   .toast,
@@ -6033,12 +6079,6 @@ body.orbit-dragging #tooltip {
     bottom: calc(70px + var(--safe-bottom));
     width: 96px;
     height: 96px;
-  }
-
-  /* As in portrait: the sticks give way to the open sheet, so the look stick keeps to the right edge. */
-  .sheet[data-open="true"]~.joysticks,
-  .sheet[data-open="true"]~.bottom-hud>.act {
-    display: none;
   }
 
   .act {
@@ -6087,22 +6127,6 @@ body.orbit-dragging #tooltip {
 }
 
 @media (max-width: 720px) and (max-height: 500px) and (orientation: landscape) {
-  .sheet {
-    left: 0;
-    right: 0;
-    width: 100%;
-    max-width: none;
-    border-radius: var(--radius) var(--radius) 0 0;
-  }
-
-  .sheet[data-open="false"] {
-    transform: translateY(100%);
-  }
-
-  .sheet[data-open="false"] .sheet-toggle {
-    top: calc(-45px - var(--safe-bottom));
-  }
-
   .equipment-hud {
     top: calc(64px + var(--safe-top));
   }
@@ -9016,14 +9040,6 @@ body.dsb-menu-open :is(.bottom-hud,.top-hud,#joy-move,#joy-look,#act,.weapon-hud
   .svrn-menu nav button { flex: 1 0 42%; }
   .svrn-grid { grid-template-columns: 1fr; }
   .svrn-content { padding: 14px; }
-}
-
-/* Bottom-anchored drawers grow upward, with the resize grip just inside their top edge. */
-@media (max-width: 720px), (max-height: 500px) and (orientation: landscape) {
-  .sheet { padding-top: 12px; }
-  .sheet-resize { top: 3px; bottom: auto; }
-  .sheet-toggle-loot { top: -39px; left: 144px; height: 42px; }
-  .sheet-toggle-chat { top: -39px; left: var(--sheet-chat-left); height: 42px; }
 }
 
 .sphere-mode {

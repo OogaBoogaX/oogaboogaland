@@ -122,7 +122,7 @@
     const group = createNode({ sightHidden: true });
     addChild(root, group);
     const audio = BL.ghostAudio.create(), hud = BL.ghostHud.create({ coarse: hub.coarse, onMusic: () => audio.toggleMusic(), onSkip: () => audio.skip(),
-      onReady: () => readyUp(), onDecline: () => { declined = true; } });
+      onReady: () => readyUp(), onDecline: () => { declined = true; hud.lobby(null); }, onLobby: hub.lobbyOpen });
     // Every mesh the hunt has shown, kept on the GPU for the visit (`liveGeometry`): frames swap in and out.
     const used = [];
     const keep = (geometry) => {
@@ -358,7 +358,7 @@
 
     // ---------- the island cleared for the hunt ----------
     // Every Ooga nobody drives goes away (as one a remote player drives does) and comes back where it was; the visitor's
-    // own Ooga stays, and one picked during the hunt comes back for it (`release`). Boxes and barrels go with them.
+    // own Ooga stays, and one picked during the hunt comes back for it (`release`).
     const overrides = new Map();
     const clearIsland = () => {
       const own = net.ownCharacter(), mine = own && crew.cavemen.get(own.handle);
@@ -369,10 +369,8 @@
         cave.override = "away";
       }
       crew.refreshStates(false);
-      hub.clearProps(true, (x, y, z) => fx.burst(x, y + 0.4, z, 4, ECTO, 1.6));
     };
     const restoreIsland = () => {
-      hub.clearProps(false);
       if (!overrides.size) return;
       // An Ooga someone else took to drive meanwhile stays theirs: what it had before the hunt is what it goes back to
       // when they let go, not now.
@@ -392,6 +390,7 @@
       if (!cave || ammo.has(cave)) return;
       ammo.set(cave, cave.weapon.unlimited);
       cave.weapon.unlimited = true;
+      if (cave === crew.player && !hub.gorillaActive()) hub.readyGun();
     };
     const disarmHunters = () => {
       for (const [cave, was] of ammo) cave.weapon.unlimited = was;
@@ -423,7 +422,7 @@
       audio.open();
       if (npcSync.role === "follow") sync.ready();
       else sim.ready(myId());
-      // Ready means ready: the rifle out in combat (inside the press, so the mouse can be taken for aiming).
+      // Take the aiming view inside the press; the rifle becomes available when the hunt enables combat.
       if (crew.player && !hub.gorillaActive()) hub.readyGun();
     };
     let declined = false;

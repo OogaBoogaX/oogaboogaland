@@ -827,7 +827,7 @@
   // The visit's nodes under one group at the islet's middle, turned by `spot.ry`, with the gate standing on the terrace so
   // its flight climbs from the landing, and the records the hub places things by, in world space: the portal's frame
   // from the gate's, Heimdall on the landing, where an Ooga stands out of the chamber (on the landing, facing out), the
-  // view down the bridge, the clouds' keep-out, the ground the scatter must give up, and `groundAt`, the walking height
+  // view down the bridge, the islet and bridge extents, the ground the scatter must give up, and `groundAt`, the walking height
   // on the islet's top (the gate's flight, landing and passage by its own `floorAt`, every other level by the plan's),
   // the deck and the head, or -Infinity off them. The deck's warmth (`heat`, a tile each) and the walker's frame and lift (`walk`) are the
   // visit's, for `update`.

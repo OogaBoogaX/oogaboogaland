@@ -18,7 +18,7 @@
     const mask = new Uint8Array(count), union = new Uint8Array(count), lastUnion = new Uint8Array(count);
     const parity = new Uint8Array(count), rowParity = new Uint8Array(SIZE), distance = new Float32Array(count), glass = new Uint8Array(count);
     const actors = [], records = new WeakMap();
-    let vertices = new Float64Array(0), alive = true;
+    let vertices = new Float64Array(0), alive = true, paused = false;
     // Registration follows the scene's bounded actor and object pools. Only
     // model changes walk a subtree or resize scratch; sampling never scans the scene.
     function refresh(body) {
@@ -71,7 +71,7 @@
     mat4.invert(inverse, node.world);
     let next = 0, sampleTime = INTERVAL, bottom = minY, blocked = false, glassVersion = -1;
     const state = { width: SIZE, height: SIZE, layers: CAPACITY + 1, pixels, version: 0,
-      contacts: 0, active: 0, hits: 0, waves, time: 0, track, untrack, refresh, update, dispose,
+      contacts: 0, active: 0, hits: 0, waves, time: 0, track, untrack, refresh, pause, update, dispose,
       get tracked() { return actors.length; } };
     function clearLayer(layer) {
       const end = (layer + 1) * layerBytes;
@@ -284,8 +284,16 @@
       waves.fill(0); lastUnion.fill(0);
       for (const actor of actors) { actor.touching = actor.sampled = false; actor.lastMask.fill(0); }
     }
+    function pause(on) {
+      if (paused === !!on) return;
+      paused = !!on;
+      if (!paused) {
+        // Bodies kept moving while this view rested. Sample their current silhouettes, never a sweep across the gap.
+        clear(); sampleTime = INTERVAL;
+      }
+    }
     function update(dt) {
-      if (!alive) return;
+      if (!alive || paused) return;
       state.time += dt;
       if (!visible(node) || node.mirrorPortal || node.mirrorReveal >= 1) {
         if (!blocked) clear();

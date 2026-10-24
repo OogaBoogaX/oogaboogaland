@@ -118,13 +118,13 @@
   };
 
   const updateShowing = () => {
-    showing = !tab.hidden && !panel.hidden && sheet.dataset.open === "true";
+    showing = !sheet.hidden && !tab.hidden && !panel.hidden && sheet.dataset.open === "true";
     if (showing && !drawn) redraw();
   };
   const watch = new MutationObserver(updateShowing);
   watch.observe(panel, { attributes: true, attributeFilter: ["hidden"] });
   watch.observe(tab, { attributes: true, attributeFilter: ["hidden"] });
-  watch.observe(sheet, { attributes: true, attributeFilter: ["data-open"] });
+  watch.observe(sheet, { attributes: true, attributeFilter: ["data-open", "hidden"] });
 
   // What is left of a line once sanitized as the room will.
   const update = () => {

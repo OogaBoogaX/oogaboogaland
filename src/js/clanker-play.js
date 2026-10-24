@@ -6,7 +6,7 @@
   const THROW_CHARGE_TIME = 1, THROW_MIN_POWER = 1 / 3, THROW_RESULT_TIME = 0.35;
   const PITCH_LIMIT = Math.PI / 2 - 0.0001, ZOOM_PAUSE = 220;
   const create = ({ canvas, camera, renderer, pilot, hud, clankers, input = null, constrainCamera = null,
-    reticleTarget = null, sightClear = null, aimCeiling = null, groundAt = null, grabOoga = null, releaseOoga = null, mayPossess = null, birdsEyeMin = 5, maxDistance = 32 }) => {
+    reticleTarget = null, sightClear = null, aimCeiling = null, groundAt = null, grabOoga = null, releaseOoga = null, mayPossess = null, combatOnly = null, birdsEyeMin = 5, maxDistance = 32 }) => {
     const orbit = pilot.orbit, cameraHandoff = pilot.cameraHandoff, target = { x: 0, y: 0, z: 0 };
     const smashMin = clankers.smashPower(0, true), smashBase = clankers.smashPower(0, false);
     const smashMax = clankers.smashPower(1, false), smashRate = (smashMax - smashBase) / POUND_CHARGE_TIME;
@@ -90,7 +90,7 @@
         }
       } else { orbit.tDist = zoomDistance === null ? Math.max(SHOULDER_DISTANCE, orbit.dist) : zoomDistance; orbit.tPitch = orbitPitch; }
       camera.near = view === "first-person" ? 0.05 : savedNear;
-      syncCursor(); hud.setGorilla(player, view, isCombat());
+      syncCursor(); hud.setGorilla(player, view, isCombat(), clankers.combatEnabled);
     };
     const viewRay = () => {
       const size = renderer.size;
@@ -292,9 +292,12 @@
       hud.el.act.hidden = true;
       return true;
     };
+    const requireCombat = () => {
+      if (player && !combat && combatOnly?.()) action("mode-toggle");
+    };
     const possess = (entry, atBoot = false, transition = null) => {
       if (disposed || !entry || !entry.active || !entry.root.visible) return false;
-      if (entry === player) return true;
+      if (entry === player) { requireCombat(); return true; }
       const refusal = mayPossess && mayPossess(entry);
       if (refusal) { hud.toast(refusal); return false; }
       const incoming = transition || captureControl(controlState);
@@ -358,16 +361,18 @@
       camera.orthoHeight = Math.max(0.1, orbit.dist * 2 * Math.tan(camera.fov / 2));
       holdingFollow = handoffBefore = climbHandoff();
       if (!atBoot) cameraHandoff.begin(incoming);
-      hud.setGorilla(player, view, isCombat());
+      hud.setGorilla(player, view, isCombat(), clankers.combatEnabled);
       syncCursor();
       hud.tooltip.hide();
       showAct();
       if (!atBoot && incoming.focused) focusCombat();
+      requireCombat();
       return true;
     };
     const action = (name) => {
       if (!player) return false;
       if (name === "gorilla-smash") {
+        if (!clankers.combatEnabled) return false;
         if (grabHeld) return true;
         if (clankers.smash(0, clankers.quickSmash(player), smashMeter)) {
           smashMeter = smashMin;
@@ -376,7 +381,9 @@
       } else if (name === "gorilla-beat") clankers.chestBeat();
       else if (name === "mode-release") release();
       else if (name === "mode-toggle") {
-        if (clankers.sleeping(player)) { hud.hint("Wake this gorilla before entering shooter mode"); return true; }
+        const required = !!combatOnly?.();
+        if (required && combat) return true;
+        if (clankers.sleeping(player) && !required) { hud.hint("Wake this gorilla before entering shooter mode"); return true; }
         let entryView = null;
         if (!combat && view === "orbit") {
           // Choose from the displayed eye around the body, even while a
@@ -403,7 +410,7 @@
         if (combat) focusCombat();
         else blurCombat();
         syncCursor();
-        hud.setGorilla(player, view, isCombat());
+        hud.setGorilla(player, view, isCombat(), clankers.combatEnabled);
         if (entryView) {
           // Rebase the shared full-pose blend before solving the new boom so
           // X keeps the exact displayed eye, roll and projection at time zero.
@@ -443,6 +450,7 @@
         if (!jumpKey && !event.repeat) { jumpKey = true; beginJump(); }
       } else if (key === "shift" && event.code !== "ShiftRight" && event.location !== 2) { run = true; consume(event); }
       else if (key === "g") {
+        if (!clankers.combatEnabled) return;
         consume(event);
         if (clankers.sleeping(player)) return;
         if (!grabHeld && !event.repeat) {
@@ -600,7 +608,7 @@
       }
     };
     const beginSmash = (event, fromButton) => {
-      if (clankers.sleeping(player) || smashPointer >= 0 || throwPointer >= 0) return;
+      if (!clankers.combatEnabled || clankers.sleeping(player) || smashPointer >= 0 || throwPointer >= 0) return;
       if (grabHeld) {
         if (grabActive) {
           throwPointer = event.pointerId;
@@ -822,7 +830,7 @@
       if (!player) return;
       handoffBefore = climbHandoff();
       if (grabActive && !player.motion.dragging) grabActive = false;
-      if (!clankers.sleeping(player) && grabHeld && !grabActive && !grabSpent && smashPointer < 0) grabActive = !!(grabOoga && grabOoga(player));
+      if (clankers.combatEnabled && !clankers.sleeping(player) && grabHeld && !grabActive && !grabSpent && smashPointer < 0) grabActive = !!(grabOoga && grabOoga(player));
       if (throwPointer >= 0) {
         throwCharge = Math.min(1, throwCharge + dt / THROW_CHARGE_TIME);
         throwMeter = THROW_MIN_POWER + (1 - THROW_MIN_POWER) * throwCharge;
@@ -890,7 +898,7 @@
         if (Math.hypot(camera.position.x - eye[0], camera.position.y - eye[1], camera.position.z - eye[2]) > bounds.radius * scale + camera.near) restoreHead();
       }
       updateReticle(dt);
-      hud.setGorilla(player, view, isCombat());
+      hud.setGorilla(player, view, isCombat(), clankers.combatEnabled);
       showAct();
     };
     const update = (dt) => {
@@ -1049,12 +1057,29 @@
       update(0);
       return true;
     };
+    const refreshCombat = () => {
+      if (!player) return;
+      requireCombat();
+      if (!clankers.combatEnabled) {
+        if (grabActive && releaseOoga) releaseOoga(player, false);
+        grabHeld = grabActive = grabSpent = false;
+        const smash = smashPointer, throwing = throwPointer;
+        smashPointer = throwPointer = -1; smashFromButton = throwFromButton = false;
+        smashCharge = throwCharge = throwResult = 0; smashCombo = false;
+        player.motion.poundCharge = 0;
+        if (smash >= 0 && hud.el.gorillaSmash.hasPointerCapture(smash)) hud.el.gorillaSmash.releasePointerCapture(smash);
+        if (throwing >= 0 && hud.el.gorillaSmash.hasPointerCapture(throwing)) hud.el.gorillaSmash.releasePointerCapture(throwing);
+      }
+      shownPower = -1;
+      updateSmashGauge(); syncCursor();
+      hud.setGorilla(player, view, isCombat(), clankers.combatEnabled);
+    };
     const dispose = () => {
       if (disposed) return;
       release(); disposed = true;
       for (const off of listeners) off();
     };
-    return { possess, release, escape, respawn, travelRefusal, travel, freeCursor, resetCamera, captureControl, readInput, update, action, orbit: moveView, zoom, cancelInput, dispose,
+    return { possess, release, escape, respawn, travelRefusal, travel, freeCursor, resetCamera, captureControl, readInput, update, action, orbit: moveView, zoom, cancelInput, refreshCombat, dispose,
       get active() { return !!player; }, get player() { return player; }, get view() { return view; },
       get birdsEye() { return !!player && view === "birds-eye"; }, get birdsEyeMix() { return player ? camera.orthoMix || 0 : 0; },
       get firstPerson() { return !!player && view === "first-person"; },
