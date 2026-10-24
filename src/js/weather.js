@@ -31,7 +31,8 @@
 // engines and a strike is a few times the rain, never the page's loudest thing.
 //
 // Exports STEPS, stepFor, wetAt, cloudFor and create; an instance offers apply, strike, update,
-// setMuted, dispose, state, active and stats.
+// setMuted, pause, hold, dispose, state, active and stats. `pause` leaves a static cloud deck for a distant
+// view, stops the weather and sound, and resumes from the latest reading without replaying missed strikes.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -245,20 +246,22 @@
       clouds.push(cloud);
       addChild(root, cloud);
     }
-    let cloudCover = 0, cloudForm = "fair";
+    let cloudCover = 0, cloudForm = "fair", cloudShown = 0;
 
     // Sound: the context opens only after a real gesture, so weather on a fresh page stays silent.
     let audioLayer = null;
+    // Held (`hold`, the hub's GAME MODE): no rain, cloud deck or bolt drawn and no sound, while the hub stops updating it.
+    let held = false, paused = false;
     let ctx = null, master = null, noise = null, rainGain = null, windGain = null, surfGain = null, thunderGain = null, thunderFilter = null, muted = false, audioConnected = false;
     try {
       muted = localStorage.getItem(STORAGE_KEY) === "off";
     } catch {
     }
     const initAudio = () => {
-      if (!exterior || ctx || typeof AudioContext === "undefined" || navigator.userActivation && !navigator.userActivation.hasBeenActive) return false;
+      if (!exterior || held || paused || ctx || typeof AudioContext === "undefined" || navigator.userActivation && !navigator.userActivation.hasBeenActive) return false;
       ctx = new AudioContext();
       master = ctx.createGain();
-      master.gain.value = muted || !exterior ? 0 : MASTER;
+      master.gain.value = muted || !exterior || held || paused ? 0 : MASTER;
       master.connect(ctx.destination); audioConnected = true;
       const buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * NOISE_SECONDS), ctx.sampleRate);
       const data = buffer.getChannelData(0);
@@ -296,7 +299,7 @@
       }
       noise.start();
       // Optional scene source shares this context and the exact exterior master gate.
-      if (audioFactory) { audioLayer = audioFactory(ctx, master); audioLayer.setEnabled?.(exterior && !muted); }
+      if (audioFactory) { audioLayer = audioFactory(ctx, master); audioLayer.setEnabled?.(exterior && !muted && !held && !paused); }
       if (ctx.state === "suspended") ctx.resume().catch(() => {});
       return true;
     };
@@ -308,7 +311,7 @@
       return k * k * (1 - SHELTER_THUNDER * shelter);
     };
     const rumble = () => {
-      if (!exterior || muted || (!initAudio() && !ctx)) return;
+      if (!exterior || muted || held || paused || (!initAudio() && !ctx)) return;
       thunders++;
       const t = ctx.currentTime;
       // Distance takes the crack off a strike before it takes the roll: the opening band falls toward
@@ -355,6 +358,7 @@
       }
     };
     const strike = (landing = null) => {
+      if (held || paused) return;
       strikes++;
       flashT = 0;
       boltT = 0;
@@ -379,6 +383,14 @@
     const walk = (value, target, step) => value > target ? Math.max(target, value - step) : Math.min(target, value + step);
 
     const update = (dt, opts, sheltered = 0, now = Date.now()) => {
+      if (held || paused) {
+        // Daylight has just sampled these colours. A distant cell leaves only the ordinary clear-air haze.
+        if (opts) {
+          fog[0] = opts.horizon[0]; fog[1] = opts.horizon[1]; fog[2] = opts.horizon[2];
+          opts.fog = fog; opts.fogNear = FOG_OFF_NEAR; opts.fogFar = FOG_OFF_FAR; opts.clouds = 0.42;
+        }
+        return;
+      }
       const previousCount = node.instanceCount;
       const tierCap = Math.min(cap, canvas2d ? CAP_CANVAS : (CAP[renderer.quality] || CAP.medium));
       const tierClouds = Math.min(cloudN, canvas2d ? CLOUD_CANVAS : (CLOUD[renderer.quality] || CLOUD.medium));
@@ -420,10 +432,10 @@
         const geometry = wantForm === "fair" ? CLOUD_FAIR() : CLOUD_GREY();
         for (let i = 0; i < cloudN; i++) clouds[i].geometry = geometry;
       }
-      const shown = Math.round(tierClouds * clamp(cloudFloor + cloudCover * (1 - cloudFloor), 0, 1));
+      cloudShown = Math.round(tierClouds * clamp(cloudFloor + cloudCover * (1 - cloudFloor), 0, 1));
       for (let i = 0; i < cloudN; i++) {
         const cloud = clouds[i];
-        if (i >= shown) {
+        if (i >= cloudShown) {
           cloud.visible = false;
           continue;
         }
@@ -546,13 +558,13 @@
     const setMuted = (on) => {
       if (muted === !!on) return;
       muted = !!on;
-      audioLayer?.setEnabled?.(exterior && !muted);
-      if (master) master.gain.setTargetAtTime(muted || !exterior ? 0 : MASTER, ctx.currentTime, 0.05);
+      audioLayer?.setEnabled?.(exterior && !muted && !held && !paused);
+      if (master) master.gain.setTargetAtTime(muted || !exterior || held || paused ? 0 : MASTER, ctx.currentTime, 0.05);
     };
     const setExterior = (on) => {
       if (exterior === !!on) return;
       exterior = !!on;
-      audioLayer?.setEnabled?.(exterior && !muted);
+      audioLayer?.setEnabled?.(exterior && !muted && !held && !paused);
       if (!exterior) {
         thunderAt = -1; count = 0; node.instanceCount = node.drawInstanceCount = 0; node.instanceVersion++;
         if (thunderGain) { thunderGain.gain.cancelScheduledValues(ctx.currentTime); thunderGain.gain.setValueAtTime(0, ctx.currentTime); }
@@ -561,9 +573,54 @@
         // Disconnect the one exterior bus as well as zeroing its envelope. AudioParam.value
         // can lag a render quantum; a closed gate must not depend on that clock boundary.
         if (!exterior && audioConnected) { master.disconnect(); audioConnected = false; }
-        if (exterior && !audioConnected) { master.connect(ctx.destination); audioConnected = true; }
+        if (exterior && !held && !paused && !audioConnected) { master.connect(ctx.destination); audioConnected = true; }
         master.gain.cancelScheduledValues(ctx.currentTime);
-        master.gain.setValueAtTime(muted || !exterior ? 0 : MASTER, ctx.currentTime);
+        master.gain.setValueAtTime(muted || !exterior || held || paused ? 0 : MASTER, ctx.currentTime);
+      }
+    };
+    const clearEffects = () => {
+      if (count) node.instanceVersion++;
+      count = node.instanceCount = node.drawInstanceCount = 0;
+      flash = cloud = near = heard = 0;
+      flashT = boltT = thunderAt = -1;
+      boltNode.visible = false;
+      for (const cloud of clouds) cloud.glow = 0;
+      if (ctx) for (const gain of [rainGain, windGain, surfGain, thunderGain]) if (gain) {
+        gain.gain.cancelScheduledValues(ctx.currentTime);
+        gain.gain.setValueAtTime(0, ctx.currentTime);
+      }
+    };
+    const pause = (on, now = Date.now()) => {
+      if (paused === !!on) return;
+      paused = !!on;
+      node.visible = !held && !paused;
+      if (paused) clearEffects();
+      else {
+        // The feed kept its latest targets while we were away. Resume that weather, with a fresh rain pool.
+        fresh = heardAt > 0 && now - heardAt < ARRIVALS_FRESH_MS;
+        storm = manual ? soakTarget : fresh ? reading : 0;
+        gale = manual ? galeTarget : storm;
+        state = STEPS[stepAt = stepFor(storm, stepAt)];
+        wet = wetAt(storm);
+      }
+      audioLayer?.setEnabled?.(exterior && !muted && !held && !paused);
+      if (master) {
+        if (paused && audioConnected) { master.disconnect(); audioConnected = false; }
+        if (!paused && exterior && !held && !audioConnected) { master.connect(ctx.destination); audioConnected = true; }
+        master.gain.cancelScheduledValues(ctx.currentTime);
+        master.gain.setValueAtTime(muted || !exterior || held || paused ? 0 : MASTER, ctx.currentTime);
+      }
+    };
+    const hold = (on) => {
+      if (held === !!on) return;
+      held = !!on;
+      node.visible = !held && !paused;
+      if (held) clearEffects();
+      for (let i = 0; i < cloudN; i++) clouds[i].visible = !held && i < cloudShown;
+      audioLayer?.setEnabled?.(exterior && !muted && !held && !paused);
+      if (master) {
+        if (!held && exterior && !paused && !audioConnected) { master.connect(ctx.destination); audioConnected = true; }
+        master.gain.setTargetAtTime(muted || !exterior || held || paused ? 0 : MASTER, ctx.currentTime, 0.05);
       }
     };
     const dispose = () => {
@@ -620,13 +677,14 @@
       get applied() { return applied; },
       get audio() { return !!ctx; },
       get muted() { return muted; },
+      get paused() { return paused; },
       get exterior() { return exterior; },
       get masterLevel() { return master && audioConnected ? master.gain.value : 0; },
       drop: (i) => i < count ? { x: x[i], y: y[i], z: z[i], size: w[i], fall: vy[i] } : null
     };
     return {
-      apply, strike, update, setMuted, setExterior, dispose, state: state_,
-      get active() { return count > 0 || flashT >= 0 || boltT >= 0 || thunderAt >= 0; },
+      apply, strike, update, setMuted, setExterior, pause, hold, dispose, state: state_,
+      get active() { return !held && !paused && (count > 0 || flashT >= 0 || boltT >= 0 || thunderAt >= 0); },
       stats: () => ({ rainDrops: count, strikes })
     };
   };

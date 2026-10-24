@@ -11,32 +11,102 @@
   // The validated waypoint graph depends only on the island's architecture; later visits reuse it and map
   // fresh bed objects onto its nodes.
   const graphs = new WeakMap();
-  // Reserved sleeping rectangles on the rainforest terraces above the Mempool ramp.
-  // Sample the whole footprint, not just its centre, to reject channels, terrace
-  // edges and props. These are floor anchors, with no mattress or rendered items.
-  const outdoorBeds = (pool, clear = () => true) => {
-    const beds = [];
-    const L = pool.layout;
+  // Reserved sleeping rectangles on the rainforest terraces and dry forest floor, in one fixed order: the
+  // established ridge rows, then dry forest gaps outside the walking ring and gorilla nests, then a finer fill.
+  // Sample the whole footprint, not just its centre, to reject channels, terrace edges and props. These are
+  // floor anchors, with no mattress or rendered items. The layout and its seeded scenery never move, so the
+  // order is the same on every visit and page: it is searched only as far as sleepers need it.
+  function* anchorSearch(layout, place, test) {
+    const L = layout, footprints = [], cos = Math.cos(place.ry), sin = Math.sin(place.ry);
+    const worldX = (lx, lz) => place.x + lx * cos + lz * sin, worldZ = (lx, lz) => place.z - lx * sin + lz * cos;
+    const add = (radius, bearing, angle = bearing, extra = false) => {
+      const sr = Math.sin(angle), cr = Math.cos(angle), lx = Math.sin(bearing) * radius, lz = Math.cos(bearing) * radius;
+      // The four rectangle axes keep supplemental sleepers clear of the original rows and each other.
+      if (extra) for (const other of footprints) {
+        if (Math.hypot(lx - other.x, lz - other.z) < 1.8) return null;
+        let separate = false;
+        for (let axis = 0; axis < 4; axis++) {
+          const ax = axis === 0 ? sr : axis === 1 ? cr : axis === 2 ? other.sr : other.cr;
+          const az = axis === 0 ? cr : axis === 1 ? -sr : axis === 2 ? other.cr : -other.sr;
+          const reach = 0.75 * (Math.abs(ax * sr + az * cr) + Math.abs(ax * other.sr + az * other.cr))
+            + 1.5 * (Math.abs(ax * cr - az * sr) + Math.abs(ax * other.cr - az * other.sr)) + 0.1;
+          if (Math.abs((lx - other.x) * ax + (lz - other.z) * az) >= reach) { separate = true; break; }
+        }
+        if (!separate) return null;
+      }
+      let low = Infinity, high = -Infinity;
+      for (let a = -0.75; a <= 0.75; a += 0.25) for (let b = -1.5; b <= 1.5; b += 0.25) {
+        const px = lx + sr * a + cr * b, pz = lz + cr * a - sr * b, r = Math.hypot(px, pz);
+        if (extra) {
+          if (r < L.RING.path + 0.05) return null;
+          for (const nest of L.NESTS) if (Math.abs(r - L.NEST.r) < L.NEST.halfR + 0.05
+            && Math.abs(L.turn(Math.atan2(px, pz), nest.bearing) * r) < L.NEST.halfT + 0.05) return null;
+        }
+        const y = L.groundAt(px, pz);
+        low = Math.min(low, y); high = Math.max(high, y);
+      }
+      if (low < L.LEVEL.ground || high - low > 0.5 || !Number.isFinite(high)) return null;
+      for (let a = -0.75; a <= 0.75; a += 0.25) for (let b = -1.5; b <= 1.5; b += 0.25) {
+        if (!test.clear(worldX(lx + sr * a + cr * b, lz + cr * a - sr * b), place.y + high + 0.03,
+          worldZ(lx + sr * a + cr * b, lz + cr * a - sr * b))) return null;
+      }
+      footprints.push({ x: lx, z: lz, sr, cr });
+      return { x: worldX(lx, lz), y: place.y + high, z: worldZ(lx, lz), ry: place.ry + angle + Math.PI / 2 };
+    };
     for (let along = 4; along <= 38; along += 3.6) {
-      const bearing = L.RAMP.start + along / L.RAMP.r, sr = Math.sin(bearing), cr = Math.cos(bearing);
-      for (const radius of [13.9, 16.2, 18.5]) {
-        const lx = sr * radius, lz = cr * radius, x = pool.worldX(lx, lz), z = pool.worldZ(lx, lz);
-        let low = Infinity, high = -Infinity;
-        for (let a = -0.75; a <= 0.75; a += 0.25) for (let b = -1.5; b <= 1.5; b += 0.25) {
-          const y = L.groundAt(lx + sr * a + cr * b, lz + cr * a - sr * b);
-          low = Math.min(low, y); high = Math.max(high, y);
-        }
-        if (low < L.LEVEL.ground || high - low > 0.5 || !Number.isFinite(high)) continue;
-        let safe = true;
-        for (let a = -0.75; safe && a <= 0.75; a += 0.25) for (let b = -1.5; safe && b <= 1.5; b += 0.25) {
-          safe = clear(pool.worldX(lx + sr * a + cr * b, lz + cr * a - sr * b), pool.place.y + high + 0.03,
-            pool.worldZ(lx + sr * a + cr * b, lz + cr * a - sr * b));
-        }
-        if (safe) beds.push({ x, y: pool.place.y + high, z, outdoor: true, sleeper: null,
-          node: { rotation: { y: pool.place.ry + bearing + Math.PI / 2 } } });
+      const bearing = L.RAMP.start + along / L.RAMP.r;
+      for (const radius of [13.9, 16.2, 18.5]) { const anchor = add(radius, bearing); if (anchor) yield anchor; }
+    }
+    for (let radius = 13.9; radius < L.R; radius += 0.5) for (let along = 1; along < L.RAMP.length; along += 0.8) {
+      const bearing = L.RAMP.start + along / L.RAMP.r;
+      for (let turn = 0; turn < 4; turn++) {
+        const anchor = add(radius, bearing, turn < 2 ? bearing + turn * Math.PI / 2 : (turn - 2) * Math.PI / 2, true);
+        if (anchor) { yield anchor; break; }
       }
     }
-    return beds;
+    // Props can consume the coarse rows: fill the remaining dry gaps with the same full-footprint checks.
+    for (let radius = 13.75; radius < L.R; radius += 0.25) for (let along = 0; along < L.RAMP.length; along += 0.4) {
+      const bearing = L.RAMP.start + along / L.RAMP.r;
+      for (let turn = 0; turn < 8; turn++) {
+        const anchor = add(radius, bearing, turn * Math.PI / 8, true);
+        if (anchor) { yield anchor; break; }
+      }
+    }
+  }
+  // Anchors found so far, memoised per island (`key`) like the waypoint graph. Only plain numbers are kept,
+  // and the visit's clearance test is held only while the search runs, so no visit outlives its `leave`.
+  const anchorSources = new WeakMap();
+  // A visit's outdoor beds over the island's anchors: `beds` starts empty and `more()` appends the next bed in
+  // the fixed order (null once the forest has no more room), so the Nth overflow sleeper takes the Nth anchor.
+  const outdoor = (pool, clear = () => true, key = null) => {
+    let source = key && anchorSources.get(key);
+    if (!source) {
+      const test = { clear: null }, p = pool.place;
+      source = { anchors: [], done: false, test, search: anchorSearch(pool.layout, { x: p.x, y: p.y, z: p.z, ry: p.ry }, test) };
+      if (key) anchorSources.set(key, source);
+    }
+    const beds = [];
+    const more = () => {
+      if (beds.length === source.anchors.length) {
+        if (source.done) return null;
+        source.test.clear = clear;
+        const step = source.search.next();
+        source.test.clear = null;
+        if (step.done) { source.done = true; return null; }
+        source.anchors.push(step.value);
+      }
+      const a = source.anchors[beds.length];
+      const bed = { x: a.x, y: a.y, z: a.z, outdoor: true, sleeper: null, node: { rotation: { y: a.ry } } };
+      beds.push(bed);
+      return bed;
+    };
+    return { beds, more };
+  };
+  // The first `count` anchors as beds, searched afresh.
+  const outdoorBeds = (pool, clear = () => true, count = 0) => {
+    const forest = outdoor(pool, clear);
+    while (forest.beds.length < count && forest.more());
+    return forest.beds;
   };
   const create = ({ island, beds, walkable = null, surfaceRoute = null }) => {
     const cached = graphs.get(island), reuse = !!cached && cached.bedIds.length === beds.length;
@@ -246,5 +316,5 @@
     };
     return { route, plan, clearSegment: segment, points, radius: RADIUS, height: HEIGHT, nodeCount: size, edgeCount: edges.reduce((sum, list) => sum + list.length, 0) / 2 };
   };
-  BL.headquartersSleep = { create, outdoorBeds };
+  BL.headquartersSleep = { create, outdoor, outdoorBeds };
 })();

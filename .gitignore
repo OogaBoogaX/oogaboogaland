@@ -22,6 +22,7 @@ untracked/
 .wrangler/
 .dev.vars
 worker/src/characters.gen.json
+worker/src/tess-facts.gen.json
 
 # Test artifacts (screenshots written by test/ scripts)
 test/*.png

@@ -3,7 +3,8 @@
 // no backend behind it (GitHub Pages, a file, `npm run serve`) gets no JSON from /api/me and stays as it
 // always was: `backend` false, nothing shown, no socket. Like the live feeds it stays off under nosim and
 // can be disabled with net=0; the director starts it. The same look says whether the Worker takes real
-// donations (`state.donations`), which the director hands to donations.js.
+// donations (`state.donations`), which the director hands to donations.js, and whether it answers Tess's questions
+// (`state.tess`).
 //
 // The room answers who else is on the island: `remotes` (id → { login, display, body, zone, voice, muted, x, y, z, yaw }),
 // updated in place from its snapshots (up to 15 a second while anyone moves). A scene reports the actor the visitor drives with `setBody`
@@ -48,7 +49,7 @@
 // `recheck` looks at /api/me again after a look that went unanswered (the keypad's Retry), bounded as the first.
 // `setPokerVoice(table)` scopes Ember Den voice to one table, or the floor when null, without moving the body.
 // Exports start, recheck, subscribe, subscribeRoster, subscribeChat, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setPokerVoice, setHub,
-// setMuted, setHealth, sendNpc, sendChat, npcFrame, sendPose, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla,
+// setMuted, setHealth, sendNpc, sendChat, sendGhost and subscribeGhost (HALLOWEEN), npcFrame, sendPose, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla,
 // ownCharacter, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX and CHAT_KEEP.
 (() => {
   "use strict";
@@ -78,7 +79,7 @@
   // room: "off" (signed out or no backend), "connecting", "live", "paused" (hidden a while), or a kick that
 // stopped it ("replaced", "full").
   const offline = new URLSearchParams(location.search);
-  const state = { backend: false, me: null, donations: false, logoutEpoch: 0, started: false,
+  const state = { backend: false, me: null, donations: false, tess: false, logoutEpoch: 0, started: false,
     resolved: offline.has("nosim") || offline.get("net") === "0" || location.protocol !== "http:" && location.protocol !== "https:",
     room: "off", selfId: 0, online: 0, released: null, loopEpoch: 0, zone: "outside", body: null, bodyKind: null, bodyName: null, hostId: 0, followers: 0, npcVersion: 0, doorway: false };
   let ws = null, retry = 0, retryTimer = 0, pingTimer = 0, hiddenTimer = 0, stopped = false;
@@ -304,6 +305,8 @@
       if (chatIdValid(msg.cycle)) doorHeard({ t: "transit-end", cycle: msg.cycle });
     } else if (msg.t === "voice") {
       if (Array.isArray(msg.peers)) BL.voice.setPeers(msg.peers, Array.isArray(msg.gens) ? msg.gens : null);
+    } else if (msg.t === "ghost") {
+      if (ghostHeard) ghostHeard(msg); // HALLOWEEN
     } else if (msg.t === "release") {
       state.released = { name: String(msg.name), reason: String(msg.reason) };
       emit();
@@ -371,6 +374,7 @@
       state.backend = true;
       state.me = accept(data.player);
       state.donations = data.donations === true;
+      state.tess = data.tess === true;
       state.resolved = data.player === null || !!state.me;
       if (state.me) BL.contributors.addTemporary(data.character, state.me.login);
     } catch {
@@ -395,11 +399,10 @@
     return rechecking;
   };
 
-  // Sign-in is a full navigation through GitHub; the Worker brings the visitor back to this path.
+  // Sign-in is a full navigation through GitHub, then a fresh arrival beside the hub's pile.
   const login = () => {
     if (!state.backend) return;
-    if (BL.pilot && BL.pilot.saveLoginView) BL.pilot.saveLoginView();
-    location.assign(`/auth/login?next=${encodeURIComponent(location.pathname + location.search)}`);
+    location.assign("/auth/login?next=%2F");
   };
 
   const logout = async () => {
@@ -500,6 +503,16 @@
     close("paused");
   };
   document.addEventListener("visibilitychange", onVisibility);
+
+  // HALLOWEEN: the ghost hunt's word to the room's host (ghost-sync.js): a start or a hit, relayed to the host alone.
+  let ghostHeard = null;
+  const sendGhost = (msg) => {
+    if (state.room === "live" && state.hostId && state.hostId !== state.selfId) send(JSON.stringify(msg));
+  };
+  const subscribeGhost = (fn) => {
+    ghostHeard = fn;
+    return () => { if (ghostHeard === fn) ghostHeard = null; };
+  };
 
   // The host's frame of Oogas, sent as bytes (a typed array view is sent as just its own bytes).
   const sendNpc = (view) => {
@@ -602,6 +615,12 @@
     return character && loginOf(character) === String(login).toLowerCase() ? character : null;
   };
   const ownCharacter = () => state.me && characterOf(state.me.login);
+  // The signed-in visitor's own Ooga when it is among `list` (anything with a `name`, a game's cast or a
+  // roster), else null: the games hold a signed-in contributor to it, as `mayDrive` does on the island.
+  const ownAmong = (list) => {
+    const own = ownCharacter();
+    return own && list.some((entry) => entry.name === own.handle) ? own.handle : null;
+  };
 
   /** null when this visitor may drive the Ooga named `name`; otherwise the words that say why not. */
   const mayDrive = (name) => {
@@ -658,8 +677,9 @@
     rosterSubscribers.clear();
     chatSubscribers.clear();
     doorSubscribers.clear();
+    ghostHeard = null; // HALLOWEEN
     close("off");
   };
 
-  BL.net = { start, recheck, subscribe, subscribeRoster, subscribeChat, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendPose, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
+  BL.net = { start, recheck, subscribe, subscribeRoster, subscribeChat, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendGhost, subscribeGhost, sendPose, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
 })();

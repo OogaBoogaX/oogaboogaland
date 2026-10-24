@@ -386,6 +386,8 @@
     refreshBuilder();
     if (preset) hud.toast(`${preset.name} on the pad`);
   };
+  // A signed-in visitor with an Ooga flies it, as they drive only it on the island; the pilot button is for the rest.
+  const ownPilot = () => BL.net.ownAmong(contributors.roster);
   const cyclePilot = () => {
     const roster = contributors.roster, i = roster.findIndex((c) => c.name === selection.pilot);
     selection.pilot = roster[(i + 1) % roster.length].name;
@@ -525,6 +527,7 @@
 
   const toBuild = () => {
     phase = "build";
+    rhud.lockPilot(!!ownPilot());
     flight = null;
     release = null;
     igniteIn = 0;
@@ -1884,6 +1887,7 @@
     ({ rocketModels, rocketHud, rocketAudio } = BL);
     ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
     home = ctx.from === "arcade" ? "arcade" : "hub";
+    hudMod.leaveTo("orbit", home);
     camera = createCamera({ fov: 50, near: 0.3, far: 1600 });
     root = createNode();
     clock = daylight.createClock({ hour: hourParam, daylen: daylenParam, day: dayParam, time: timeParam, now: new Date() });
@@ -1934,6 +1938,8 @@
       selection.pilot = world.pilot;
       world.pilot = null;
     }
+    const own = ownPilot();
+    if (own) selection.pilot = own;
     rockNode = place(createNode({ geometry: rocketModels.spaceRock(), visible: false }));
     tetherNode = place(createNode({ geometry: rocketModels.tether(), quaternion: quat.create(), visible: false }));
     buildPassenger();

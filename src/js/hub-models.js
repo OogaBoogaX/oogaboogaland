@@ -1537,7 +1537,7 @@
     for (const [cx, rx, rz] of puffs) blob(v, { cx: cx - mid + 0.5, cy: 1, cz: 0.5, rx, ry: 1.6, rz, chip: 0.3, rand, color: (x, y) => y > 0 ? 0 : 1 });
     // A flat base under the puffs, the way a cumulus sits on the air, grown straight down from the
     // cells already there: every cell added sits under another, so the cloud gains body without a
-    // single new top face (the render mesh is the surface an Ooga lands on). The base rounds up toward
+    // single new top face. The base rounds up toward
     // the rim so the cloud does not end in a slab, and it is set by each puff's ellipse rather than
     // by the column heights, which the chipping makes ragged.
     const lows = new Map();

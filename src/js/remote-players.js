@@ -7,8 +7,8 @@
 // Who is shown is the scene's `visible(rec)`: the island shows players in its own zone (`onIsland` lists the
 // island's places), every other scene those in its zone (`sameZone`). The crew is optional, for a scene that
 // has none until the visitor drives, and `hide(name, on)` lets a scene hide its own decor copy of an Ooga
-// someone drives. A nameplate carries the name, a health bar from the room's `hp` (red while knocked out) and,
-// for a player in voice, the speaker: green while speaking, red with a cross when they muted their microphone.
+// someone drives. A nameplate carries the name and, for a player in voice, the speaker: green while speaking,
+// red with a cross when they muted their microphone. Games can opt into the room's `hp` bar.
 // One pool per scene visit: `create` in enter, `dispose` in leave, before the crew's.
 (() => {
   "use strict";
@@ -188,9 +188,9 @@
 
     const actors = () => actorList;
 
-    // Nameplates on the overlay, above each head, in the order the room sent them: the name, the health bar
-    // under it and the speaker right of the bar.
-    const drawNames = (ctx, project) => {
+    // Nameplates on the overlay, above each head, in the order the room sent them. Games can add the health
+    // bar under the name, with the speaker right of it; otherwise the speaker sits below the name alone.
+    const drawNames = (ctx, project, showHealth = false) => {
       if (!bodies.size) return;
       ctx.save();
       ctx.font = NAME_FONT;
@@ -210,14 +210,16 @@
         ctx.strokeText(rec.display, x, y);
         ctx.fillText(rec.display, x, y);
         const left = x - BAR_W / 2, top = y + BAR_GAP;
-        ctx.fillStyle = NAME_STROKE;
-        ctx.fillRect(left - 1, top - 1, BAR_W + 2, BAR_H + 2);
-        ctx.fillStyle = BAR_TRACK;
-        ctx.fillRect(left, top, BAR_W, BAR_H);
-        ctx.fillStyle = rec.ko ? BAR_KO : BAR_FILL;
-        ctx.fillRect(left, top, Math.round(BAR_W * Math.max(0, Math.min(100, rec.hp)) / 100), BAR_H);
+        if (showHealth) {
+          ctx.fillStyle = NAME_STROKE;
+          ctx.fillRect(left - 1, top - 1, BAR_W + 2, BAR_H + 2);
+          ctx.fillStyle = BAR_TRACK;
+          ctx.fillRect(left, top, BAR_W, BAR_H);
+          ctx.fillStyle = rec.ko ? BAR_KO : BAR_FILL;
+          ctx.fillRect(left, top, Math.round(BAR_W * Math.max(0, Math.min(100, rec.hp)) / 100), BAR_H);
+        }
         if (!rec.voice) continue;
-        const ix = left + BAR_W + ICON_GAP, iy = top + BAR_H / 2 - 4.5;
+        const ix = showHealth ? left + BAR_W + ICON_GAP : x - 4.5, iy = showHealth ? top + BAR_H / 2 - 4.5 : top;
         ctx.fillStyle = rec.muted ? ICON_MUTED : BL.voice.speaking(rec.id) ? ICON_SPEAKING : ICON_IDLE;
         runs(ctx, SPEAKER, ix, iy);
         runs(ctx, rec.muted ? CROSS : WAVES, ix, iy);
@@ -239,7 +241,14 @@
       actorList.length = 0;
     };
 
-    return { update, actors, drawNames, liveGeometry, stats, dispose };
+    // The override an Ooga hidden for its remote driver goes back to when they let go, for a scene that changed it
+    // meanwhile (HALLOWEEN: the hunt gives back what it cleared); false when nobody remote holds it.
+    const setUnderlying = (cave, override) => {
+      for (const entry of bodies.values()) if (entry.hidden === cave) { entry.hiddenOverride = override; return true; }
+      return false;
+    };
+
+    return { update, actors, drawNames, liveGeometry, stats, setUnderlying, dispose };
   };
 
   BL.remotePlayers = { create, onIsland, sameZone, MAX, BODY_HEIGHT };

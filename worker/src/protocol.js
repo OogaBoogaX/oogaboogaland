@@ -9,6 +9,7 @@
 //                 { t: "hp", v, ko }             the driven body's health (normalized 0-100) and knockout flag
 //                 pose.g                         optional gorilla locomotion: [flags, speed, stride, climb, side, swim]
 //                 { t: "chat", text, clientId? }            a line for Ooga Chat (see Chat below)
+//                 { t: "ghost", k, g?, d?, h? }  HALLOWEEN: the ghost hunt's `start`, `ready` or `pause`, or `hits` h, for the host
 //                 binary                         the NPC host's frame of every Ooga's pose, relayed as is
 // Room → client:  welcome { you, players, tickHz, now, loopEpoch }, join { p }, leave { id, reason },
 //                 body { id, name }, state { now, ps: [id, x, y, z, yaw, ...], gs? }, kick { reason },
@@ -25,6 +26,7 @@
 //                 chat-ack { clientId }     the sender's line was accepted, including a recognized retry
 //                 chat-rejected { clientId?, reason }  refused; rate retries keep the same id
 //                 chat-history { messages }  after welcome: the lines the room still holds, oldest first
+//                 ghost { k, g, d, from }    HALLOWEEN: a follower's start or hit, relayed to the NPC host alone
 // Zones: `<group>` or `<group>.<place>`. Voice is shared within a group; who is shown is matched on the whole
 // name, since a place inside a group can have coordinates of its own (the Factory's tunnel on the island and
 // its hall). `none` is nowhere: off the island's edge, or between scenes; it shares voice with nobody.
@@ -86,6 +88,19 @@ export const DOOR_TRANSIT_MS = 12000;
 export const DOOR_PASS_MS = 8000;
 export const DOOR_HZ = 4;
 export const DOOR_BURST = 6;
+// HALLOWEEN: the ghost hunt's reports to the host: a follower's hits, every target's summed damage a tenth of a second
+// at a time in one `hits` report (up to 60 a target), so any mix of rifle and monkey fire stays at ten reports a second;
+// the rest of the budget is for a start or pause.
+export const GHOST_HZ = 20;
+export const GHOST_BURST = 24;
+// A follower's batch: up to GHOST_BATCH targets, each a ghost id (0 the boss) and its summed damage, as one report.
+export const GHOST_BATCH = 16;
+const ghostHit = (g, d) => Number.isInteger(g) && g >= 0 && g < 65536 && Number.isInteger(d) && d >= 1 && d <= 60;
+const ghostHits = (h) => {
+  if (!Array.isArray(h) || h.length < 2 || h.length > GHOST_BATCH * 2 || h.length % 2) return null;
+  for (let i = 0; i < h.length; i += 2) if (!ghostHit(h[i], h[i + 1])) return null;
+  return { t: "ghost", k: "hits", h: h.slice() };
+};
 // The character set of donation messages (`donations.sanitize` in src/js/donations.js), checked against it in worker/test.
 export const CHAT_STRIP = /[^\w .,!?'@#:-]/g;
 export const sanitizeChat = (text) => String(text).replace(CHAT_STRIP, "").trim();
@@ -149,6 +164,12 @@ export const parseClientMessage = (text) => {
     if (msg.op === "pass") return typeof msg.door === "string" && DOOR_ROOM.test(msg.door) && (msg.dir === "in" || msg.dir === "out")
       ? { t: "door", op: "pass", door: msg.door, dir: msg.dir } : null;
     return null;
+  }
+  // HALLOWEEN: a follower's word to the ghost hunt's host.
+  if (msg.t === "ghost") {
+    if (msg.k === "start" || msg.k === "pause" || msg.k === "ready") return { t: "ghost", k: msg.k };
+    if (msg.k === "hits") return ghostHits(msg.h);
+    return msg.k === "hit" && ghostHit(msg.g, msg.d) ? { t: "ghost", k: "hit", g: msg.g, d: msg.d } : null;
   }
   if (msg.t === "poker-voice") return msg.table === null || Number.isInteger(msg.table) && msg.table >= 0 && msg.table < 10 ? { t: "poker-voice", table: msg.table } : null;
   return null;
@@ -255,12 +276,18 @@ export const voicePeers = (players) => {
   return out;
 };
 
-// NPC host: one page runs the Ooga crew for everyone and streams its poses; the others follow. The host is
-// the page longest in the room among those showing the island (`inHub`: in the hub scene and visible), so
-// it changes only when that page leaves, hides or closes. 0 when no page qualifies.
-export const electHost = (players) => {
+// NPC host: one page runs the Ooga crew (and the hub's events) for everyone and streams them; the others
+// follow. The sitting host (`incumbent`) keeps the role while it still shows the island (`inHub`: in the hub
+// scene and visible); otherwise it goes to the page longest in the room among those that do. So a page that
+// hides and comes back returns as a follower and catches up from the host's frames, never taking hosting
+// back with its own stale state. 0 when no page qualifies.
+export const electHost = (players, incumbent = 0) => {
   let best = null;
-  for (const p of players) if (p.inHub && (!best || p.joinedAt < best.joinedAt || (p.joinedAt === best.joinedAt && p.id < best.id))) best = p;
+  for (const p of players) {
+    if (!p.inHub) continue;
+    if (p.id === incumbent) return p.id;
+    if (!best || p.joinedAt < best.joinedAt || (p.joinedAt === best.joinedAt && p.id < best.id)) best = p;
+  }
   return best ? best.id : 0;
 };
 

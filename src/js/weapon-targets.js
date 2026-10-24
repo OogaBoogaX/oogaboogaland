@@ -399,7 +399,7 @@
         sweepContacts(data, before, after, index);
       }
     };
-    const strike = (out, previousWorld, currentWorld, geometry, ignore = null) => {
+    const strike = (out, previousWorld, currentWorld, geometry, ignore = null, accept = null) => {
       begin(out);
       originX = currentWorld[12]; originY = currentWorld[13]; originZ = currentWorld[14];
       let nearest = Infinity;
@@ -418,7 +418,7 @@
         }
       }
       for (const target of targets) {
-        if (!eligible(target, ignore)) continue;
+        if (!eligible(target, ignore) || accept && !accept(target.owner, target.node)) continue;
         const entry = sync(target.node);
         if (!entry || !overlaps(entry.box, sweepBox)) continue;
         stats.candidates++;
