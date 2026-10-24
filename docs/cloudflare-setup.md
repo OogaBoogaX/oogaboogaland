@@ -18,7 +18,7 @@ The two share code and nothing else: each has its own D1 database, room, OAuth A
 | Durable Object | `Room`, one named `island` | `durable_objects`, `migrations` |
 | Cron | daily 04:00 UTC, purges expired sessions and Tess's questions not asked for 90 days | `triggers` |
 | Service binding | `DONATIONS` → `bananapayserver-staging`'s `PageApi` on staging, `bananapayserver-production`'s on production | `services`, with `/donations/*` in `run_worker_first`. The bound Worker must exist before a deploy carries the binding |
-| Vars | `SITE_ORIGIN`, `GITHUB_CLIENT_ID`, `REALTIME_APP_ID`; optionally `TESS_DAILY_CENTS` (Tess's daily cap, 50 when unset) | `vars` |
+| Vars | `SITE_ORIGIN`, `GITHUB_CLIENT_ID`, `REALTIME_APP_ID`; optionally `TESS_DAILY_CENTS` (Tess's daily cap, 50 when unset) and `STUDIO_HOST_IDS`, the comma-separated numeric GitHub ids that may host DSB Studio (unset, empty or malformed: nobody; see `docs/dsb-studio-session.md`) | `vars` |
 | Worker secrets | `GITHUB_CLIENT_SECRET`, `REALTIME_SECRET`; optionally `ANTHROPIC_API_KEY` for Tess's answers | `wrangler secret put` |
 | Realtime SFU app | `oogaboogaland-staging`, `oogaboogaland-production` | Realtime → Serverless SFU |
 | GitHub OAuth App | one per Worker, no scopes | the OogaBoogaX org's Developer settings |

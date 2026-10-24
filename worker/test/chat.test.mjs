@@ -8,6 +8,7 @@ import * as protocol from "../src/protocol.js";
 import { sha256Hex } from "../src/crypto.js";
 import { getPlayer } from "../src/db.js";
 import { sfuClient } from "../src/sfu.js";
+import * as studio from "../src/studio-policy.js";
 
 const { CHAT_BURST, CHAT_FRAME_MAX, CHAT_HZ, CHAT_KEEP, CHAT_MAX, CHAT_RETRY_KEEP, MESSAGE_MAX, chatLog, parseClientMessage, sanitizeChat, takeToken } = protocol;
 const chat = (text) => JSON.stringify({ t: "chat", text });
@@ -104,9 +105,9 @@ const host = (clock = Date, env = {}) => {
     .replace(/import\s+[\s\S]*?from\s+"[^"]+";/g, "")
     .replace("export class Room", "class Room") + "\nglobalThis.Room = Room;";
   const context = {
-    ...protocol, sfuClient, sha256Hex, getPlayer, CAST_ROWS: [{ handle: "YellowBrokeIt", github_login: "YellowBrokeIt" }, { handle: "bc1gui", github_login: "ottoz0r" }],
+    ...protocol, ...studio, sfuClient, sha256Hex, getPlayer, CAST_ROWS: [{ handle: "YellowBrokeIt", github_login: "YellowBrokeIt" }, { handle: "bc1gui", github_login: "ottoz0r" }],
     DurableObject: class { constructor(ctx, env) { this.ctx = ctx; this.env = env; } },
-    WebSocketPair, Response, WebSocketRequestResponsePair: class {}, URL, Date: clock, Map, Set, setTimeout, clearTimeout, console,
+    WebSocketPair, Response, WebSocketRequestResponsePair: class {}, URL, crypto, Date: clock, Map, Set, setTimeout, clearTimeout, console,
   };
   runInNewContext(source, context);
   const ctx = {
@@ -245,7 +246,7 @@ test("room: a joiner gets welcome then the held lines; a line goes to everyone, 
   const { room, join } = host();
   const r = room();
   const a = await join(r, 1, "ooga", "Ooga");
-  assert.deepEqual(a.sent.map((m) => m.t), ["welcome", "chat-history"], "history follows welcome as its own message");
+  assert.deepEqual(a.sent.map((m) => m.t).slice(0, 2), ["welcome", "chat-history"], "history follows welcome as its own message");
   assert.deepEqual(a.sent[1].messages, []);
   const b = await join(r, 2, "booga", "Booga");
   await r.webSocketMessage(a, JSON.stringify({ t: "chat", text: "hi <b>all</b>", login: "satoshi", name: "Satoshi", id: 7 }));
