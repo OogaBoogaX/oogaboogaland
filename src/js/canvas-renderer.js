@@ -19,7 +19,8 @@
     RIPPLE_GREENS[(tip * 16 + gain) * 2 + odd] = `rgb(${r},${g},${b})`;
   }
   // One shaded image per surface per frame: the first face drawn sets the surface's light for the frame, so a curved
-  // board tessellated into a strip of faces shades once, not once a face. Light is keyed as the 8-bit values the
+  // board tessellated into a strip of faces shades once, not once a face. This also shares the first face's Matrix
+  // wave tint across that surface for the frame, an accepted Canvas quality trade-off. Light is keyed as the 8-bit values the
   // paint uses (`shade`), so a sun creeping across the sky repaints only when the pixels would change. Eight reusable
   // slots share a 2,097,152-pixel budget, so the largest board (1200x540) fits beside the smaller ones; an evicted
   // slot of the same size keeps its backing store. Oversized surfaces keep a single grow-only scratch image.

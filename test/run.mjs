@@ -4210,6 +4210,8 @@ const characterChecks = async () => {
   for (const name of ["terrain", "hub-models"]) runInNewContext(await readFile(join(root, `src/js/${name}.js`), "utf8"), context);
   const worn = [BL.hubModels.jetpack(), BL.hubModels.jetFlame()];
   for (const geo of worn) mirrorGeometries.add(geo);
+  const spare = BL.models.spareMagazine();
+  collect(spare.node);
   // Exercise the renderer's real reduced-capture decision on actual builder output, in both storage paths.
   const source = await readFile(join(root, "src/js/gl-renderer.js"), "utf8"), start = source.indexOf("    const captureInstanceVisible ="), end = source.indexOf("    const drawCaptureRuns =", start);
   if (start < 0 || end < 0) throw new Error("Reduced mirror capture predicate not found");
@@ -4231,7 +4233,8 @@ const characterChecks = async () => {
   for (const geo of mirrorGeometries) check(geo, true);
   check(BL.models.box({ w: 0.1, h: 0.1, d: 0.1, color: "#ffffff" }), false);
   const jetpack = worn.every(geo => geo.characterPart === true && BL.scene.boundsOf(geo).radius < 1.25);
-  record("mirror character ownership: reduced captures keep both weapon skins, tint and head swaps, swag, gorilla forms/clothing and the worn jetpack and flame, while still culling small scenery and out-of-frustum parts", failures === 0 && small > 0 && jetpack, JSON.stringify({ geometries: mirrorGeometries.size, small, failures, jetpack }));
+  const magazine = spare.node.geometry.characterPart === true;
+  record("mirror character ownership: reduced captures keep both weapon skins, tint and head swaps, swag, gorilla forms/clothing and the worn jetpack and flame, while still culling small scenery and out-of-frustum parts", failures === 0 && small > 0 && jetpack && magazine, JSON.stringify({ geometries: mirrorGeometries.size, small, failures, jetpack, magazine }));
 };
 // The mempool.space feed parser in Node: message shapes as the socket sends them, no socket.
 const mempoolFeedChecks = async () => {
