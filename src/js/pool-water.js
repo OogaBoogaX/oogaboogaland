@@ -1017,6 +1017,12 @@
     };
     return {
       apply, block, update, levelAt, rain, wake, dispose, state, picks,
+      resume() {
+        // The feed has updated the target while effects rested; return at that level without replaying the absence.
+        level = target;
+        stage = level > HYDRO.STAGE.highOn ? 2 : level > HYDRO.STAGE.on ? 1 : 0;
+        settle = true;
+      },
       liveGeometry(set) {
         set.add(surfaceNode.geometry).add(floodNode.geometry).add(site.membrane.geometry).add(site.membraneRock.geometry).add(rillNode.geometry);
         for (const fall of falls) {

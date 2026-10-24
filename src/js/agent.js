@@ -712,6 +712,7 @@
       state.pound = POUND_TIME * (1 - (combo ? 0.46 : 0.34 * clamp(charge, 0, 1)));
       return state.pound;
     };
+    const cancelSmash = () => { state.pound = state.poundCharge = 0; state.smash = false; };
     // Called with no route while idle; returns once a new walk is wanted.
     let onIdle = null;
     const steer = (dt) => {
@@ -2070,7 +2071,7 @@
     };
     const agent = {
       root, parts, hips, chest, update, setForm, setGait, walk, pace, place, poke, jump, reveal, setDriven, drive, toggleStyle, liveGeometry, dispose,
-      managed, poseManaged, climbPoseClear, climbHandContactMask, walkPoseClear, walkSupportAt, labPoseClear, mouth, bodyTarget, envelope, feed, pound, beat, holdLabItem, releaseLabItem,
+      managed, poseManaged, climbPoseClear, climbHandContactMask, walkPoseClear, walkSupportAt, labPoseClear, mouth, bodyTarget, envelope, feed, pound, cancelSmash, beat, holdLabItem, releaseLabItem,
       get climbBlockedArm() { return climbBlockedArm; },
       get climbContactMask() { return climbContactMask; },
       get labFlask() { return labFlask; },

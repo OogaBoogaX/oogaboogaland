@@ -319,18 +319,21 @@
       </nav>
     </header>
 
-    <aside class="sheet" id="sheet" data-open="false">
+    <aside class="sheet" id="sheet" data-open="false" data-dock="side" data-paired="false">
       <nav class="sheet-panels" role="tablist" aria-label="Island panels">
         <button type="button" class="sheet-toggle sheet-toggle-bananas" id="sheet-bananas" role="tab"
           data-tab="bananas" aria-selected="false" aria-controls="bananas-panel" aria-label="Bananas and top donors">
+          <span class="sheet-tab-face">
           <svg class="banana-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true">
             <path fill="#211b14" d="M0 0h1v5H0zM2 0h1v2H2zM3 2h1v2H3zM4 4h1v1H4zM1 5h1v2H1zM5 5h1v1H5zM6 6h1v1H6zM2 7h2v1H2zM7 7h1v1H7zM4 8h4v1H4z" />
             <path fill="#ffd84a" d="M1 2h2v2H1zM1 4h3v1H1zM2 5h3v1H2zM2 6h4v1H2zM4 7h3v1H4z" />
             <path fill="#789a3b" d="M1 0h1v2H1z" />
           </svg>
+          </span>
         </button>
         <button type="button" class="sheet-toggle" id="sheet-toggle" role="tab" data-tab="roster"
           aria-selected="true" aria-controls="roster-panel" aria-label="Ooga Boogas">
+          <span class="sheet-tab-face">
           <svg class="caveman-icon" viewBox="0 0 7 9" shape-rendering="crispEdges" aria-hidden="true">
             <path fill="#2b1b10" d="M1 0h5v1H1zM0 1h7v2H0zM0 3h1v2H0zM6 3h1v2H6z" />
             <path fill="#c98a5b" d="M1 3h5v3H1zM2 6h3v1H2z" />
@@ -338,25 +341,32 @@
             <path fill="#4a2c14" d="M1 6h1v1H1zM5 6h1v1H5zM1 7h5v1H1zM2 8h3v1H2z" />
             <path fill="#f2efe4" d="M1 8h1v1H1zM5 8h1v1H5z" />
           </svg>
+          </span>
         </button>
         <button type="button" class="sheet-toggle sheet-toggle-loot" role="tab" data-tab="loot"
           aria-selected="false" id="loot-tab" aria-controls="loot-panel" aria-label="Swag locker" hidden>
+          <span class="sheet-tab-face">
           <svg viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true">
             <path fill="#2b1b10" d="M0 2h9v7H0zM1 0h7v2H1z" />
             <path fill="#d6a45f" d="M1 3h7v5H1zM2 1h5v1H2z" />
             <path fill="#5c4425" d="M1 4h7v1H1zM4 3h1v5H4z" />
             <path fill="#f3efe4" d="M4 4h1v2H4z" />
           </svg><span class="tab-count" id="loot-count" hidden></span>
+          </span>
         </button>
         <button type="button" class="sheet-toggle sheet-toggle-chat" role="tab" data-tab="chat"
           aria-selected="false" id="chat-tab" aria-controls="chat-panel" aria-label="Ooga Chat" hidden>
+          <span class="sheet-tab-face">
           <svg viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true">
             <path fill="#2b1b10" d="M0 0h9v7H5v1H4v1H1V7H0z" />
             <path fill="#f3efe4" d="M1 1h7v5H4v1H3v1H2V6H1z" />
             <path fill="#5c4425" d="M2 3h1v1H2zM4 3h1v1H4zM6 3h1v1H6z" />
           </svg>
+          </span>
         </button>
       </nav>
+      <div class="sheet-body">
+      <div class="sheet-content">
       <section class="panel" data-panel="roster" id="roster-panel" role="tabpanel" aria-labelledby="sheet-toggle">
         <header class="panel-title">
           <h2><span data-sign>Ooga Boogas</span></h2>
@@ -457,6 +467,7 @@
           <button type="submit" class="chat-send" id="chat-send" disabled>Send</button>
         </form>
       </section>
+      </div>
       <footer class="sheet-foot">
         <span class="account" id="account" hidden>
           <span class="account-who">
@@ -479,6 +490,7 @@
       <div class="sheet-resize" id="sheet-resize" role="separator" tabindex="0" aria-label="Resize panel height"
         aria-orientation="horizontal" aria-valuemin="240" aria-valuemax="1000" aria-valuenow="520"
         title="Drag to resize · Up grows · Down shrinks · double-click to reset"></div>
+      </div>
     </aside>
 
     <div id="weapon-reticle" class="weapon-reticle" aria-hidden="true" hidden>
@@ -499,7 +511,7 @@
       <button type="button" class="mode-hud" id="own-ooga-hud" data-action="mode-retake" data-selected="true"
         aria-label="Return to your last character" title="Return to your last character" hidden>
         <canvas class="mode-face-icon" id="own-ooga-face-icon" width="48" height="48" aria-hidden="true"></canvas>
-        <span class="mode-health" id="own-ooga-health" role="progressbar" aria-label="Last character's health" aria-valuemin="0" aria-valuemax="25" aria-valuenow="25"><span id="own-ooga-health-fill"></span></span>
+        <span class="mode-health" id="own-ooga-health" role="progressbar" aria-label="Last character's health" aria-valuemin="0" aria-valuemax="25" aria-valuenow="25" hidden><span id="own-ooga-health-fill"></span></span>
       </button>
       <button type="button" class="mode-hud" id="mode-hud" data-action="mode-toggle" data-selected="false" data-shooter="false"
         aria-label="Character controls" title="Character controls" hidden>
@@ -522,13 +534,6 @@
             <span class="jetpack-compact-fuel-fill" id="jetpack-fuel-compact-fill"></span>
           </span>
         </span>
-        <div class="jetpack-readout">
-          <div class="jetpack-label"><span>Fuel</span><span id="jetpack-fuel-value" aria-hidden="true">100%</span></div>
-          <div class="jetpack-fuel" id="jetpack-fuel" role="progressbar" aria-label="Jetpack fuel"
-            aria-valuemin="0" aria-valuemax="100" aria-valuenow="100">
-            <span class="jetpack-fuel-fill" id="jetpack-fuel-fill"></span>
-          </div>
-        </div>
       </button>
       <button type="button" class="gorilla-hud" id="gorilla-smash-hud" data-action="gorilla-smash"
         aria-label="Ground smash; hold for double damage" title="Ground smash · hold for double damage (1)" hidden>
@@ -1619,9 +1624,6 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
     <output class="mic-note" id="mic-note" data-muted="false" hidden></output>
     <!-- HALLOWEEN: the ghost hunt's HUD (ghost-hud.js shows and hides it; no data-scene, or every arrival would show it). -->
     <div class="ghost-hud" id="ghost-hud" hidden>
-      <p class="ghost-top" id="ghost-top"></p>
-      <div class="ghost-health" id="ghost-health" role="meter" aria-label="Health" aria-valuemin="0" aria-valuemax="5" hidden><i></i><i></i><i></i><i></i><i></i></div>
-      <p class="ghost-lives" id="ghost-lives"></p>
       <div class="ghost-boss" id="ghost-boss" hidden><span class="ghost-boss-label">The boss</span><meter id="ghost-boss-bar" min="0" max="1" value="1"></meter></div>
     </div>
     <div class="ghost-banner" id="ghost-banner" hidden><strong id="ghost-banner-title"></strong><span id="ghost-banner-sub"></span></div>
@@ -1639,6 +1641,7 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
         <button type="button" id="ghost-lobby-decline">Not this time</button>
       </div>
     </section>
+    <canvas class="ghost-minimap" id="ghost-minimap" aria-hidden="true" hidden></canvas>
     <div class="ghost-player" id="ghost-player" hidden>
       <span class="ghost-player-note" aria-hidden="true">♪</span>
       <span class="ghost-player-title" id="ghost-player-title"></span>

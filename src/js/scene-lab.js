@@ -383,7 +383,7 @@
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
     pilot = pilotMod.create({ renderer, canvas: ctx.canvas, camera, hud, presets: PRESETS, landing: "pile", pitch: PITCH, dist: DIST, follow: FOLLOW, fly: FLY, clampTarget, clampCamera, ceilingAt: () => 4.3, coarse: COARSE, mayPossess: (cave) => cave.contributor ? BL.net.mayDrive(cave.traits.name) : null, close: { eyeHeight: 1.1, eyeRatio: 0.95, eyeForward: 0.16, pitch: [-1.35, 1.35], trailingDist: 4, orbitDist: 5, maxStep: 0.6, groundAt: () => 0 } });
-    const shared = { root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, tickerAt: TICKER_AT, buildSpots: BUILD_SPOTS.slice(), walkIn: WALK_IN, clampDrag, viewYaw: PRESETS.pile.yaw, bedrolls: lab.bedrolls, pileScale: 0.45, onShown: (shown) => { lab.equipment.abacus.setValue(shown); }, walkable, reticleTarget: () => "object" };
+    const shared = { root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, tickerAt: TICKER_AT, buildSpots: BUILD_SPOTS.slice(), walkIn: WALK_IN, clampDrag, viewYaw: PRESETS.pile.yaw, bedrolls: lab.bedrolls, pileScale: 0.45, weaponsEnabled: true, onShown: (shown) => { lab.equipment.abacus.setValue(shown); }, walkable, reticleTarget: () => "object" };
     shared.onWeaponImpact = (source, hit, dx, dy, dz, power) => {
       if (hit.owner.kind === "caveman") crew.damage(hit.owner.cave, power, source === crew.player);
     };

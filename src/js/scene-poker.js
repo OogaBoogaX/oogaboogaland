@@ -248,7 +248,7 @@
     const name = [world.pilot, requested].find(n => BL.contributors.activeRoster.some(c => c.name === n && mayPick(c))) || (BL.contributors.activeRoster.find(mayPick) || BL.contributors.activeRoster[0]).name;
     world.pilot = null;
     const playerWorld = { level: 0, weapons: new Map(), magazine: { owned: false, count: 0, ammo: 0, carrier: null } };
-    const shared = { root, input, hud, game: ctx.game, world: playerWorld, playerName: name, fx, viewYaw: 0, outsideActors: () => remotes ? remotes.actors() : NO_ACTORS, outsideActorHeight: BL.remotePlayers.BODY_HEIGHT, groundAt: () => 0, walkable: BL.pokerModels.walkable, useNear: () => select(selected) };
+    const shared = { root, input, hud, game: ctx.game, world: playerWorld, playerName: name, weaponsEnabled: true, fx, viewYaw: 0, outsideActors: () => remotes ? remotes.actors() : NO_ACTORS, outsideActorHeight: BL.remotePlayers.BODY_HEIGHT, groundAt: () => 0, walkable: BL.pokerModels.walkable, useNear: () => select(selected) };
     people = shared.crew = BL.crew.create(shared); pilot.bind(shared); avatar = people.cavemen.get(name);
     avatar.root.position.x = 0; avatar.root.position.y = avatar.baseY; avatar.root.position.z = 29;
     avatar.root.rotation.y = Math.PI; pilot.possess(avatar);

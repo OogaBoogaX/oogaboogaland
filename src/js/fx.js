@@ -58,7 +58,7 @@
   };
   // `text` is one row, or a beat's rows with `tw` the widest; `more` widens the bubble for the arrow, and `bob` lifts
   // it a pixel.
-  const drawBubble = (ctx, text, x, y, alpha, topSpace = 0, tw, more = false, bob = 0) => {
+  const drawBubble = (ctx, text, x, y, alpha, tw, more = false, bob = 0) => {
     ctx.globalAlpha = alpha;
     ctx.font = "bold 10px ui-monospace, monospace";
     if (tw === undefined) tw = ctx.measureText(text).width;
@@ -67,7 +67,7 @@
     const bw = Math.ceil((tw + 28 + (more ? MORE_W : 0)) / px) * px;
     const bh = 11 * px + (rows - 1) * ROW_H;
     const bx = Math.round(Math.max(8, Math.min(window.innerWidth - bw - 8, x - bw / 2)) / px) * px;
-    const by = Math.round(Math.max(8 + topSpace, Math.min(window.innerHeight - bh - 14, y - bh - 14)) / px) * px;
+    const by = Math.round(Math.max(8, Math.min(window.innerHeight - bh - 14, y - bh - 14)) / px) * px;
     const tx = Math.round(Math.max(bx + 2 * px, Math.min(bx + bw - 2 * px, x)) / px) * px;
     const bg = "rgba(18,18,18,0.95)";
     ctx.fillStyle = bg;
@@ -96,7 +96,7 @@
       ctx.fillRect(ax + 3, ay + 3, 1, 1);
     }
     ctx.globalAlpha = 1;
-    return by;
+    return by + bh + 2 * px;
   };
   const create = ({ root, renderer, camera, overlay, tickerAt, hud = null, overlayVisible = null, zzzVisible = null, characterOccluded = null, renderOpts = null }) => {
     const overlayCtx = overlay.getContext("2d");
@@ -312,8 +312,9 @@
       paintSpeech(ctx, text, x, y, alpha, cave, tw, more, bob);
     };
     const paintSpeech = (ctx, text, x, y, alpha, cave, tw, more, bob) => {
-      const top = drawBubble(ctx, text, x, y, alpha, hud ? hud.tooltip.speechSpace(cave) : 0, tw, more, bob);
-      if (hud) hud.tooltip.aboveSpeech(cave, top, alpha);
+      const space = hud ? hud.tooltip.speechSpace(cave) : 0;
+      const bottom = drawBubble(ctx, text, x, y - space, alpha, tw, more, bob);
+      if (hud) hud.tooltip.belowSpeech(cave, bottom);
     };
     // drawExtra paints between the bubbles and the ticker.
     const drawOverlay = (dt, drawExtra) => {

@@ -14,7 +14,7 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const { hexToRgb } = BL.math;
-  const { geometry, pushVert, face, box, lathe, merge, prism, moved, variants, cached, ring, noShadow, track } = BL.models;
+  const { geometry, pushVert, face, box, lathe, merge, prism, moved, variants, cached, ring, noShadow, track, tube, turn, shaded, along } = BL.models;
   const TIERS = { plain: 0, general: 1, wraith: 2, boss: 3, herald: 4 };
   const MODE = { normal: 0, flash: 1, iced: 2, tagged: 3 };
   // Each tier's wash and the outline standing for the lab's glow (draw.js); `bright` how much it blooms.
@@ -177,6 +177,17 @@
     if (!ready(d.art)) return null;
     return dropCache[kind] = glowing(sources[d.art], { glow: d.glow, blur: d.blur });
   };
+
+  // The elixir hung on each totem: EntropyLab's logo in a soft orange glow, as a drop is drawn. Null until decoded.
+  let elixirGeo = null;
+  const elixirEntry = track(() => { elixirGeo = null; });
+  const elixir = () => {
+    elixirEntry.use();
+    if (elixirGeo || !ready("elixir")) return elixirGeo;
+    return elixirGeo = glowing(sources.elixir, { glow: "rgba(255,140,30,0.85)", blur: 16 });
+  };
+  /** A decoded picture by name, for the overlay to draw (the elixir by the health bar); null until it has decoded. */
+  const picture = (name) => sources[name] || null;
 
   // ---------- light: the lab's gradients as sprites, one per colour ----------
   const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
@@ -392,6 +403,64 @@
   };
   // A grave for a player gone down: a rounded grey headstone with a cross cut in its face, on a mound of fresh earth;
   // the hunt sets the player's own head on its top. It stands on y 0, its face toward +z, `GRAVE_TOP` tall.
+  // A skeleton, the hunt's crawler: only its upper body, dragging a broken spine behind it, bones turned round and
+  // shaded smooth, a little lit so the hunt's night shows them, green fire deep in the skull's sockets. Each part hangs
+  // from its own pivot for the hunt's rig, facing +z: the chest's spine runs along +z on y 0 (its ribs below it) from the
+  // tail's root to the neck; the tail trails back along -z; the skull sits on the neck with its jaw hinged under it; an
+  // upper arm reaches down -y 0.3 m from its shoulder ball to the elbow, and the forearm 0.27 m on to the wrist, its
+  // fingers curling forward to their claws about 0.37 m down.
+  const BONE = "#e8dfc6", JOINT = "#b8aa86", TOOTH = "#f6f0de", SOCKET = "#120c08", EYE = "#3dff6a", GLOW = 0.22;
+  // A long bone, knobbed at both ends, `L` along +y from its foot; a ball; a vertebra's disc lying across +y.
+  const longBone = (L, r, color = BONE) => turn([[0, 0], [r * 1.7, L * 0.03], [r * 1.9, L * 0.1], [r, L * 0.22], [r * 0.85, L * 0.5], [r, L * 0.78], [r * 1.9, L * 0.9], [r * 1.7, L * 0.97], [0, L]], 10, color, GLOW);
+  const ball = (r, color = JOINT, emissive = GLOW) => turn(Array.from({ length: 9 }, (_, k) => [r * Math.sin(Math.PI * k / 8), -r * Math.cos(Math.PI * k / 8)]), 10, color, emissive);
+  const disc = (r, h, color = BONE) => turn([[0, -h], [r * 0.85, -h], [r, -h * 0.4], [r, h * 0.4], [r * 0.85, h], [0, h]], 10, color, GLOW);
+  // A bone from (ax, ay, az) to (bx, by, bz).
+  const span = (ax, ay, az, bx, by, bz, r, color) => along(longBone(Math.hypot(bx - ax, by - ay, bz - az), r, color), ax, ay, az, bx - ax, by - ay, bz - az);
+  const rib = (side, z, w, h) => tube({ path: (t) => { const a = t * Math.PI * 0.94; return { x: side * w * Math.sin(a), y: -h * (1 - Math.cos(a)) / 2, z: z + 0.035 * Math.sin(a) }; },
+    radius: (t) => 0.012 * (1 - 0.35 * t), rings: 12, segments: 6, colorFn: () => BONE, emissive: GLOW });
+  const skeletonParts = cached(() => {
+    const chest = [], flat = [];
+    for (let i = 0; i < 10; i++) {
+      const z = -0.1 + i * 0.062;
+      chest.push(along(disc(0.03, 0.016), 0, 0, z, 0, 0, 1), span(0, 0.01, z - 0.01, 0, 0.055, z - 0.04, 0.008, JOINT));
+    }
+    for (let i = 0; i < 6; i++) {
+      const k = Math.sin(Math.PI * (i + 0.8) / 6.6), z = 0.06 + i * 0.065, w = 0.1 + 0.07 * k, h = 0.19 + 0.07 * k;
+      chest.push(rib(1, z, w, h), rib(-1, z, w, h));
+    }
+    chest.push(span(0, -0.25, 0.2, 0, -0.22, 0.45, 0.014),
+      span(0.02, -0.21, 0.45, 0.17, -0.04, 0.38, 0.01), span(-0.02, -0.21, 0.45, -0.17, -0.04, 0.38, 0.01),
+      along(disc(0.075, 0.006, JOINT), 0.11, 0.02, 0.3, 0.6, 1, 0), along(disc(0.075, 0.006, JOINT), -0.11, 0.02, 0.3, -0.6, 1, 0));
+    const tail = [];
+    for (let i = 0; i < 8; i++) {
+      const k = 1 - i * 0.07, z = -0.04 - i * 0.058;
+      tail.push(along(disc(0.028 * k, 0.015 * k), 0, -0.004 * i, z, 0, 0, 1), span(0, 0.01 - 0.004 * i, z, 0, 0.045 * k - 0.004 * i, z - 0.03, 0.007 * k, JOINT));
+    }
+    // What is left of the pelvis: a broken wing of hip bone and the sacrum, dragged along.
+    tail.push(along(disc(0.09, 0.008, JOINT), 0.05, -0.04, -0.52, 0.8, 0.4, -0.3), span(0, -0.03, -0.48, 0, -0.06, -0.6, 0.02));
+    // The skull: a rounded cranium, the face below it reaching forward, cheekbones, sockets with embers in them, the nose.
+    const skull = [moved(turn([[0, 0], [0.07, 0.01], [0.1, 0.04], [0.115, 0.09], [0.105, 0.14], [0.075, 0.18], [0, 0.2]], 14, BONE, GLOW), 0, 0, -0.01),
+      along(turn([[0, 0], [0.06, 0.01], [0.072, 0.05], [0.058, 0.09], [0, 0.105]], 12, BONE, GLOW), 0, 0.06, 0.03, 0, -0.35, 1),
+      span(0.08, 0.08, 0.05, 0.055, 0.06, 0.11, 0.009, JOINT), span(-0.08, 0.08, 0.05, -0.055, 0.06, 0.11, 0.009, JOINT),
+      along(disc(0.033, 0.008, SOCKET), 0.045, 0.11, 0.093, 0.35, 0, 1), along(disc(0.033, 0.008, SOCKET), -0.045, 0.11, 0.093, -0.35, 0, 1),
+      moved(ball(0.019, EYE, 1), 0.045, 0.11, 0.098), moved(ball(0.019, EYE, 1), -0.045, 0.11, 0.098),
+      along(disc(0.016, 0.006, SOCKET), 0, 0.075, 0.126, 0, -0.2, 1)];
+    for (let i = 0; i < 6; i++) { const a = (i - 2.5) / 2.5 * 0.8; flat.push(box({ w: 0.013, h: 0.022, d: 0.012, color: TOOTH, emissive: GLOW, offset: { x: Math.sin(a) * 0.05, y: 0.025, z: 0.065 + Math.cos(a) * 0.06 } })); }
+    // The jaw, hinged at its back corners: a U of bone with its teeth along the front, and the two posts up to the hinge.
+    const jaw = [tube({ path: (t) => { const a = Math.PI * t; return { x: 0.065 * Math.cos(a), y: -0.02 - 0.015 * Math.sin(a), z: 0.02 + 0.085 * Math.sin(a) }; },
+      radius: () => 0.013, rings: 14, segments: 6, colorFn: () => BONE, emissive: GLOW }),
+      span(0.065, -0.02, 0.02, 0.07, 0.02, -0.005, 0.01, JOINT), span(-0.065, -0.02, 0.02, -0.07, 0.02, -0.005, 0.01, JOINT)];
+    const jawFlat = [];
+    for (let i = 0; i < 6; i++) { const a = (i - 2.5) / 2.5 * 0.8; jawFlat.push(box({ w: 0.012, h: 0.02, d: 0.011, color: TOOTH, emissive: GLOW, offset: { x: Math.sin(a) * 0.05, y: -0.002, z: 0.035 + Math.cos(a) * 0.06 } })); }
+    const upper = [ball(0.032), along(longBone(0.3, 0.017), 0, 0, 0, 0, -1, 0)];
+    const fore = [ball(0.026), span(0.012, 0, 0, 0.01, -0.27, 0.005, 0.011), span(-0.012, 0, 0, -0.008, -0.27, 0, 0.009), moved(ball(0.028, JOINT), 0, -0.285, 0.005)];
+    for (let i = 0; i < 4; i++) {
+      const x = (i - 1.5) * 0.02;
+      fore.push(span(x * 0.8, -0.29, 0.01, x * 1.2, -0.325, 0.05, 0.006), span(x * 1.2, -0.325, 0.05, x * 1.35, -0.355, 0.095, 0.005),
+        along(turn([[0, 0], [0.006, 0.004], [0, 0.03]], 6, JOINT, GLOW), x * 1.35, -0.355, 0.095, 0, -0.5, 1));
+    }
+    return { chest: shaded(chest), tail: shaded(tail), skull: shaded(skull, flat), jaw: shaded(jaw, jawFlat), upper: shaded(upper), fore: shaded(fore) };
+  });
   const GRAVE_TOP = 1.05;
   const gravestone = cached(() => {
     const arch = [];
@@ -409,5 +478,5 @@
   });
   const shockwave = cached(() => noShadow(ring({ r: 1, thickness: 0.05, segments: 40, color: "#7dff9a", emissive: 1 })));
 
-  BL.ghostModels = { TIERS, MODE, DROPS, prepare, ghost, viewOf, drop, glowDisc, ringOf, beamOf, scorch, bolt, bubble, wallGeometry, orb, beam, zap, soul, rock, laserBurst, lightningBolt, monkey, gravestone, GRAVE_TOP, shockwave };
+  BL.ghostModels = { TIERS, MODE, DROPS, prepare, ghost, viewOf, drop, glowDisc, ringOf, beamOf, scorch, bolt, bubble, wallGeometry, orb, beam, zap, soul, rock, laserBurst, lightningBolt, monkey, elixir, picture, skeletonParts, gravestone, GRAVE_TOP, shockwave };
 })();
