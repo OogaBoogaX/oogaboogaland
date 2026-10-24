@@ -6103,7 +6103,22 @@ const arcadeHostedDrop = { name: "arcade hosted drop cabinet", refuse: "/js/drop
   const asked = drops() - before;
   record("arcade hosted: a refused Ooga Drop download fades back to the arcade, Leave pressed during that fade is refused without locking the hall, and Space at the same cabinet asks again and opens the game", pressed === true && refused && opened && asked === 2, JSON.stringify({ pressed, refused, opened, asked, fetched: site.fetched }));
 } };
-for (const [id, step, path] of [["orbit", orbitHosted, "/oogaorbit"], ["arcade", arcadeHostedDrop, "/oogaarcade"]]) {
+// The factory's code refused while the Ooga walks into the 2 o'clock shield, as offline or after a redeploy.
+const factoryHostedShield = { name: "factory hosted shield", refuse: "/js/factory-scene-", why: "regression: a refused factory download sent the Ooga back still inside the shield, which entered again on the same step, looping fade, toast and fetch with no frame of control", run: async (b, site) => {
+  await b.evaluate(`(() => { const B = window.__ooga, a = B.cavemen.get("portlandhodl"), slot = window.BL.caves.slots.find((s) => s.scene === "factory"), m = B.mouths.find((m) => m.id === slot.id), along = window.BL.factoryModels.SHIELD_Z + 0.6; if (B.crew.player !== a) B.pilot.possess(a); B.pilot.navigate({ position: { x: m.x + Math.sin(m.ry) * along, y: m.floorY, z: m.z + Math.cos(m.ry) * along }, yaw: m.ry, pitch: 0.2, dist: 5 }); B.advance(0.5, 1 / 60); window.__mouth = { x: m.x, z: m.z, ry: m.ry }; })()`);
+  const inKey = await b.evaluate(`(() => { const m = window.__mouth; return [-Math.sin(m.ry), -Math.cos(m.ry)]; })()`);
+  const asked = () => site.fetched.filter(chunkOf("factory-scene")).length;
+  await walkToward(b, inKey[0], inKey[1], 0.8);
+  await b.sleep(4000);
+  const refused = { asked: asked(), ...await b.evaluate(`({ scene: __ooga.scene, transitioning: __ooga.transitioning, driving: !!__ooga.pilot.player })`) };
+  site.refused.length = 0;
+  dropRefusals(b);
+  await walkToward(b, -inKey[0], -inKey[1], 0.8);
+  await walkToward(b, inKey[0], inKey[1], 0.8);
+  const entered = await untilPage(b, 'B.scene === "factory" && !B.transitioning', 15000);
+  record("factory hosted: a refused factory download sends the Ooga back once, driving, until it steps out of the shield, and walking back in opens the hall", refused.asked <= 2 && refused.scene === "hub" && !refused.transitioning && refused.driving && entered, JSON.stringify({ refused, entered, fetched: site.fetched }));
+} };
+for (const [id, step, path] of [["orbit", orbitHosted, "/oogaorbit"], ["arcade", arcadeHostedDrop, "/oogaarcade"], ["factory", factoryHostedShield, "/"]]) {
   if (ONLY && !onlyMatches(step.name)) continue;
   tasks.push({ name: `${id} hosted`, scene: id, perf: false, run: async () => {
     const site = await hostedSite();
