@@ -6323,18 +6323,19 @@ const hostedSite = async () => {
   // A module's block in the built page runs from its marker to the next module's.
   const block = (src) => { const start = html.indexOf(`// ---- ${src} ----\n`); return html.slice(start, html.indexOf("\n\n// ---- ", start + 1)); };
   // `gone` answers 404, as a chunk a later deploy replaced does.
-  const page = externalizeModules(html, out, deferred, block), refused = [], gone = [], fetched = [];
+  const page = externalizeModules(html, out, deferred, block), refused = [], gone = [], fetched = [], probed = [];
   const server = createServer((req, res) => {
     const path = req.url.split("?")[0];
     if (!path.startsWith("/js/")) { res.setHeader("content-type", "text/html; charset=utf-8"); return res.end(page); }
-    fetched.push(path);
+    // The loader's HEAD probe after a failure is not a download; refusal counts read `fetched` alone.
+    (req.method === "HEAD" ? probed : fetched).push(path);
     if (refused.some(prefix => path.startsWith(prefix))) { res.writeHead(503); return res.end(); }
     if (gone.some(prefix => path.startsWith(prefix))) { res.writeHead(404); return res.end(); }
     res.setHeader("content-type", "text/javascript");
     res.end(readFileSync(join(out, path)));
   });
   await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
-  return { origin: `http://127.0.0.1:${server.address().port}`, refused, gone, fetched,
+  return { origin: `http://127.0.0.1:${server.address().port}`, refused, gone, fetched, probed,
     close: async () => { await new Promise(resolve => server.close(resolve)); rmSync(out, { recursive: true, force: true }); } };
 };
 // A refused bundle is logged by the browser as a failed resource; that line is the fixture's, not the page's.
@@ -6397,10 +6398,12 @@ const orbitHostedDeploy = { name: "orbit hosted deploy", gone: "/js/drop", why: 
   const offered = await untilPage(b, 'B.scene === "orbit" && !B.transitioning && document.getElementById("toast").textContent.includes("was updated")', 15000);
   await b.sleep(4000);
   const toast = await b.evaluate(`(() => { const t = document.getElementById("toast"), r = t.querySelector("button"); return { text: t.textContent, reload: !!r && r.textContent === "Reload", shown: t.classList.contains("show") && !t.hidden, pointer: getComputedStyle(t).pointerEvents, stale: BL.deferred.stale, scene: __ooga.scene }; })()`);
-  const heads = site.fetched.filter(chunkOf("drop")).length;
+  const heads = site.fetched.filter(chunkOf("drop")).length, probes = site.probed.filter(chunkOf("drop")).length;
   dropRefusals(b);
+  // Drop's scene chunk was preloaded beside its removed base, so Chrome says it went unused: that is the deploy, not noise.
+  for (let i = b.logs.length - 1; i >= 0; i--) if (/drop-scene-[0-9a-f]+\.js was preloaded using link preload but not used/.test(b.logs[i])) b.logs.splice(i, 1);
   record("orbit hosted deploy: a chunk a deploy removed leaves the visitor where they were with a lasting \"Ooga Booga Land was updated · Reload\" offer",
-    offered && toast.reload && toast.shown && toast.pointer === "auto" && toast.stale && toast.scene === "orbit" && heads >= 1 && heads <= 2, JSON.stringify({ offered, toast, heads, fetched: site.fetched }));
+    offered && toast.reload && toast.shown && toast.pointer === "auto" && toast.stale && toast.scene === "orbit" && heads >= 1 && heads <= 2 && probes >= 1, JSON.stringify({ offered, toast, heads, probes, fetched: site.fetched }));
 } };
 for (const [id, step, path] of [["orbit", orbitHosted, "/oogaorbit"], ["orbit", orbitHostedDeploy, "/oogaorbit"], ["arcade", arcadeHostedDrop, "/oogaarcade"], ["factory", factoryHostedShield, "/"]]) {
   if (ONLY && !onlyMatches(step.name)) continue;
