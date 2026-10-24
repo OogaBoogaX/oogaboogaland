@@ -5812,6 +5812,25 @@ const donationClientChecks = async () => {
   const closedDonate = routeHistory.url === "/" && routeDocument.title === "Home" && routeHistory.state.place === null;
   record("donate route: closing its popup replaces the place with hub home, including URL, title and history state",
     enteredDonate && closedDonate, JSON.stringify({ enteredDonate, closedDonate, url: routeHistory.url, title: routeDocument.title }));
+  // Back pressed while a trip is still building: the director refuses the second trip, so the router queues it and
+  // takes it once that trip settles, never dropping it.
+  {
+    const listeners = new Map(), trips = [];
+    let busy = true;
+    const popContext = { ...routeContext, window: { BL: {}, addEventListener: (type, fn) => listeners.set(type, fn), removeEventListener() {} } };
+    runInNewContext(await readFile(new URL("../src/js/router.js", import.meta.url), "utf8"), popContext);
+    const popRouter = popContext.window.BL.router.create({ hub: {}, lab: {} }, routes, (scene, place) => { trips.push({ scene, place, busy }); return !busy; });
+    popRouter.arrive("hub", null, true);
+    listeners.get("popstate")({ state: { scene: "lab", place: null } });
+    const refused = trips.length === 1 && trips[0].busy;
+    popRouter.settled();
+    busy = false;
+    const early = trips.length === 2;
+    popRouter.settled();
+    const taken = trips.length === 3 && trips[2].scene === "lab" && !trips[2].busy;
+    popRouter.settled();
+    record("router: Back or Forward pressed while a trip builds is queued and taken once the director settles, once", refused && early && taken && trips.length === 3, JSON.stringify(trips));
+  }
 };
 const wallPerformance = async (b) => {
   await b.send("Emulation.setDeviceMetricsOverride", { width: 1920, height: 1080, deviceScaleFactor: 2, mobile: false });

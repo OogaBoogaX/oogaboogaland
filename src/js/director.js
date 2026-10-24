@@ -363,6 +363,7 @@
     transition.controller.abort();
     transition = null;
     if (failed && active && active.stay) active.stay();
+    router.settled();
   };
   const stepTransition = (dt) => {
     // An instant crossing (a doorway seen from the Ooga's eyes, a mirror) never goes black: the scene left keeps
