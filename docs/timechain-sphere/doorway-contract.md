@@ -57,6 +57,7 @@ Room → client:
 - With `state.doorway`, a shared crossing asks and waits facing the doors; without it (or with no live socket for 6 s), it crosses locally. A lost socket while waiting falls back to the keypad. A grant first receives a server `started` acknowledgement and a fresh crossing deadline; a denial or lapsed grant never opens the doors locally.
 - The plug across the doorway (`timechain-models.js`) is lifted only for this page's own guided walk, so nobody tailgates through doors another player opened.
 - The walk goes through the doorway onto the passage's axis, and the room's scene takes over without a fade a step past the doors (out of sight from the bridge), from the same eye: the zone goes to `none` there and to the room's once its Ooga stands in it.
+- The no-fade return applies when the hub is kept. Under the release policy the way out uses the ordinary fade while the island is rebuilt, then resumes the same guided walk; `timechain doorway release` covers that exception. An instant transition keeps the left scene playing during preparation and holds its last frame during construction; it is not a promise that loading takes no time.
 - On the way out the room hands over in its vestibule; the hub enters with the Ooga in the passage in front of the curtain, behind the shut doors, in zone `sphere`, waits a beat, asks for `out` when shared, then walks onto the bridge and sends `done` once the doors can close. The island's ordinary camera returns only after they have.
 
 ## Zones, presence and voice
