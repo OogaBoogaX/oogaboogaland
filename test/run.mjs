@@ -4044,12 +4044,12 @@ const canvasSurfaceCacheChecks = async () => {
 const deferredLoadingChecks = async () => {
   const source = await readFile(join(root, "src/js/deferred.js"), "utf8"), rows = [];
   // `gone` names the files a deploy has removed: their HEAD probe answers 404, any other 200.
-  const fixture = (gone = []) => {
+  const fixture = (gone = [], stalled = false) => {
     const nodes = [], timers = new Map(), probes = []; let serial = 0;
     const document = { hidden: false, head: { appendChild(node) { nodes.push(node); return node; } },
       createElement: tag => ({ tag, remove() { const i = nodes.indexOf(this); if (i >= 0) nodes.splice(i, 1); } }) };
-    const fetch = (url, options) => { probes.push({ url, method: options.method }); return Promise.resolve({ status: gone.includes(url) ? 404 : 200 }); };
-    const context = { window: { BL: { deferredScripts: { drop: "/drop.js", "drop-scene": "/scene.js" } } }, document, fetch,
+    const fetch = (url, options) => { probes.push({ url, method: options.method, signal: options.signal }); return stalled ? new Promise(() => {}) : Promise.resolve({ status: gone.includes(url) ? 404 : 200 }); };
+    const context = { window: { BL: { deferredScripts: { drop: "/drop.js", "drop-scene": "/scene.js" } } }, document, fetch, AbortController,
       setTimeout: fn => { timers.set(++serial, fn); return serial; }, clearTimeout: id => timers.delete(id) };
     runInNewContext(source, context);
     const BL = context.window.BL, shell = BL.deferred.scene("drop");
@@ -4076,6 +4076,26 @@ const deferredLoadingChecks = async () => {
     }
     const moved = addresses.slice(1).map((a, i) => a !== addresses[i]);
     rows.push({ path: "base error and timeout retries", ok: bounded && moved.every((m, i) => m === (i % 2 === 0)), addresses });
+  }
+  // A HEAD that never answers used to hold the failed base, its scene preload and both loads forever.
+  {
+    const f = fixture([], true), pending = f.BL.deferred.load("drop-scene"), failed = pending.catch(error => error);
+    f.scripts()[0].onerror();
+    const bounded = f.timers.size === 1 && f.BL.deferred.load("drop-scene") === pending;
+    if (f.timers.size) f.timeout();
+    const error = bounded ? await failed : null;
+    const released = error && !error.timeout && !error.stale && !f.BL.deferred.stale && !f.links().length && !f.scripts().length
+      && !f.timers.size && f.BL.deferred.pending === 0 && f.probes.length === 1 && f.probes[0].signal.aborted;
+    let recovered = false;
+    if (released) {
+      const retry = f.BL.deferred.load("drop-scene");
+      const moved = f.scripts()[0].src === "/drop.js?r=1" && f.links()[0].href === "/scene.js?r=1";
+      f.base(); await Promise.resolve();
+      f.BL.deferred.scene("drop", { enter() {} });
+      f.scripts().find(n => n.src.startsWith("/scene.js")).onload(); await retry;
+      recovered = moved && f.BL.deferred.load("drop-scene") === null && !f.links().length && !f.timers.size;
+    }
+    rows.push({ path: "a stalled error probe releases the load and retries", ok: bounded && !!released && recovered });
   }
   for (const outcome of ["success", "error", "timeout", "missing definition"]) {
     const f = fixture(), pending = f.BL.deferred.load("drop-scene"), failed = rejected(pending);

@@ -25,13 +25,17 @@
   // A file that answers 404 is gone for good: the site was deployed since this page loaded.
   const probe = (file, error) => {
     if (typeof fetch !== "function") return Promise.reject(error);
-    return fetch(file, { method: "HEAD", cache: "no-store" }).then((response) => {
+    const controller = new AbortController();
+    let timer;
+    // A stalled HEAD must release the failed load too; only an answer from the probe can mark the page stale.
+    const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(error), TIMEOUT_MS); });
+    return Promise.race([fetch(file, { method: "HEAD", cache: "no-store", signal: controller.signal }), timeout]).then((response) => {
       if (response.status === 404 || response.status === 410) {
         error.stale = true;
         if (!stale) { stale = true; if (staleHandler) staleHandler(); }
       }
       throw error;
-    }, () => { throw error; });
+    }, () => { throw error; }).finally(() => { clearTimeout(timer); controller.abort(); });
   };
   const load = (group) => {
     if (PRESENT[group]()) return null;
