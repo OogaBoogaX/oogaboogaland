@@ -163,7 +163,7 @@
 
   let renderer, game, world, go, root, camera, hud, hooks, input, pilot, fx, agentPlay = null;
   // The page's one factory node (`world.factoryNode`), and its feed and demo node.
-  let shared = null, feed = null, mock = null, unsubscribe = null, leaving = false, dust = null;
+  let shared = null, feed = null, mock = null, unsubscribe = null, leaving = false, exitHeld = false, dust = null;
   // The Ooga the visitor walked in as: one playable actor from the shared crew, and the world it carries.
   let people = null, avatar = null, playerWorld = null, unsubscribeAccount = null, remotes = null, footsteps = null;
   // The hall's sound (factory-audio.js): what its bed follows, written in place each frame, and where its machines,
@@ -1070,9 +1070,11 @@
 
   const leaveCave = () => {
     if (leaving) return;
-    leaving = true;
-    go("hub");
+    leaving = go("hub");
   };
+  // The island could not be built for the way out (the director's `stay`): the Ooga walks again, and the gate waits for
+  // it to step back out of the opening before it tries again.
+  const stay = () => { leaving = false; exitHeld = true; };
   const onKey = (e) => {
     if (scene.booth.mode) return boothKey(scene, e);
     if (e.key === "0" && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) return pilot.resetCamera();
@@ -1736,7 +1738,7 @@
     shared.stands.forEach((p) => placeIn(scene, p));
     unsubscribe = feed.subscribe(onEvent);
     refreshBoards(scene);
-    leaving = false;
+    leaving = exitHeld = false;
     actPrompt = false;
     greeter = BL.factoryGreeter.create({ parent: root, input, fx, feed,
       visitor: () => people && people.player === avatar ? avatar : null,
@@ -1996,12 +1998,13 @@
     if (!leaving) {
       const driven = pilot.player, p = driven ? driven.root.position : camera.position, y = p.y - (driven ? driven.baseY : 0) - LAYOUT.entrance.y;
       const inOpening = p.x >= GATE_OPENING.minX && p.x <= GATE_OPENING.maxX && y >= GATE_OPENING.floorY - 0.12 && y < GATE_OPENING.ceilingY;
+      if (exitHeld && !(inOpening && p.z > HALL.front - 2.2)) exitHeld = false;
       if (driven) {
-        if (inOpening && p.z > HALL.front - 1.3) leaveCave();
+        if (!exitHeld && inOpening && p.z > HALL.front - 1.3) leaveCave();
         else peerPortal(s, previousX, previousY, previousZ);
       } else if (!avatar) {
         const a = pilot.controls.read();
-        if (inOpening && Math.hypot(a.x, a.y) > 0.05 && p.z > HALL.front - 2.2) leaveCave();
+        if (!exitHeld && inOpening && Math.hypot(a.x, a.y) > 0.05 && p.z > HALL.front - 2.2) leaveCave();
       }
     }
     const node = feed.reading.node, signal = feed.signal, running = node === "ready" || node === "starting";
@@ -2243,7 +2246,7 @@
     // Voice zone: the Factory group, which its tunnel on the island shares (`factory`).
     voiceZone: "factory.hall",
     micKey: true,
-    id: "factory", buildSteps: () => FM.buildSteps(), enter, update, overlay, onDonation, previewDonation, onSeen, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
+    id: "factory", buildSteps: () => FM.buildSteps(), enter, update, overlay, onDonation, previewDonation, onSeen, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null, agent: null, agentView: null, agentControls: null, agentHandoff: null,
     get inMotion() {
       return !!scene;
