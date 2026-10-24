@@ -127,6 +127,6 @@
     }
     return target;
   };
-  BL.deferred = { load, scene, prefetch, prefetchScene, isShell: (id) => !!sceneGroups[id], present: (group) => PRESENT[group](),
+  BL.deferred = { load, scene, prefetch, prefetchScene, present: (group) => PRESENT[group](),
     get stale() { return stale; }, onStale: (handler) => { staleHandler = handler; if (stale) handler(); }, get pending() { return loading.size; } };
 })();
