@@ -51,8 +51,9 @@
   const GATE_OPENING = { minX: -2.5, maxX: 2.5, floorY: 0, ceilingY: 3 }, OUTSIDE_DISTANCE = 34;
   // The gate's shield stands at the balcony's back edge, where the island's tunnel's shield lands in the hall; an Ooga
   // walking in through it comes on with the view no farther behind it than IN_VIEW and no higher than IN_PITCH, so the
-  // view stays in the tunnel.
-  const GATE_Z = HALL.front - 0.6, IN_VIEW = 3.4, IN_PITCH = 0.45;
+  // view starts in the tunnel. Walking out, the walk takes it no nearer the arrival's step than OUT_SLACK behind it, so a
+  // step back from there stays in the hall.
+  const GATE_Z = HALL.front - 0.6, IN_VIEW = 3.4, IN_PITCH = 0.45, OUT_SLACK = 1.2;
   // Paired peer mirrors share their arch coordinates. A half turn carries an
   // incoming walk out of the other face, retaining height and distance crossed.
   const PEER_OPENING = { minX: -2.1, maxX: 2.1, floorY: 0.1, ceilingY: 4.65 }, PEER_PLANE = 0.45, PEER_TINT = [0.3, 0.72, 1];
@@ -197,8 +198,10 @@
   // itself through, where the light fills the view and the island takes over in it, from the crossing it is handed
   // (`world.factoryCrossing`: across, how far past the shield, the view's pitch and distance). Which way, how long it has
   // walked, where the Ooga stood the frame before, whether it is through, and the light over the view.
+  // Once a walk is done the Ooga stands (`settle`) until the visitor lets go of moving, since the view has turned round
+  // behind it and a key still held may now mean the other way.
   const WALK_ON = 1, WALK_OFF = 2;
-  const walk = { phase: 0, t: 0, x: 0, z: 0, through: false, wash: 0, hold: 0 };
+  const walk = { phase: 0, t: 0, x: 0, z: 0, through: false, wash: 0, hold: 0, settle: false };
   // On the Worker's page the island's driving rules hold in here too, and the Ooga driven is reported to the
   // room every frame, so signed-in players in the hall hear each other (voice needs a driven Ooga).
   const mayPossess = (cave) => BL.net.mayDrive(cave.traits.name);
@@ -1081,22 +1084,27 @@
 
   const leaveCave = (instant = false) => {
     if (leaving) return;
-    leaving = true;
-    go("hub", null, instant);
+    leaving = go("hub", null, instant);
   };
   // On in through the gate's shield from the island: as far across and as far past it as the Ooga went through the
   // island's, facing in, the view square behind it, and the walk on.
   const walkIn = (c) => {
     const G = BL.factoryWindow.GLIDE, pitch = clamp(c.pitch, FOLLOW.pitch[0], IN_PITCH);
     pilot.navigate({ yaw: 0, pitch, dist: clamp(c.dist, FOLLOW.min, IN_VIEW), position: { x: clamp(c.across, -1.2, 1.2), y: LAYOUT.entrance.y, z: GATE_Z - clamp(c.past, 0, G.past) } });
+    // The view eases back out to where an arrival's stands as the Ooga walks on.
+    pilot.orbit.tDist = ARRIVAL.dist;
     const p = avatar.root.position;
-    Object.assign(walk, { phase: WALK_ON, t: 0, x: p.x, z: p.z, through: false, wash: 1, hold: G.washHold });
+    Object.assign(walk, { phase: WALK_ON, t: 0, x: p.x, z: p.z, through: false });
   };
-  // On foot, heading out across the balcony's last stretch before the gate's shield.
-  const walkingOut = (p, previousZ, dt) => Math.abs(p.y - avatar.baseY - LAYOUT.entrance.y) < 0.3 && Math.abs(p.x) < GATE_OPENING.maxX - 0.3
-    && p.z > GATE_Z - BL.factoryWindow.GLIDE.reach && p.z < GATE_Z && (p.z - previousZ) / Math.max(dt, 1e-3) > 0.4;
-  // The walk, a frame at a time, before the crew moves: the visitor's input set aside, the Ooga walks itself down the
-  // gate's middle at an even pace while the view follows as always, swinging round behind it. Out through the shield, its
+  // On foot, heading out across the balcony's last stretch before the gate's shield, or just through it in a long frame.
+  const walkingOut = (p, previousZ, dt) => {
+    const G = BL.factoryWindow.GLIDE;
+    return Math.abs(p.y - avatar.baseY - LAYOUT.entrance.y) < 0.3 && Math.abs(p.x) < GATE_OPENING.maxX - 0.3 && p.z < GATE_Z + 1
+      && p.z > Math.max(GATE_Z - G.reach, ARRIVAL.position.z + OUT_SLACK) && (p.z - previousZ) / Math.max(dt, 1e-3) > G.moving;
+  };
+  // The walk, a frame at a time, after the pilot has read the visitor's input and before the crew moves: the Ooga's
+  // steering set aside for the walk's own, it walks itself down the gate's middle at an even pace while the view follows
+  // as always, swinging round behind it. Out through the shield, its
   // light fills the view and the island takes over without a fade. Anything else moving the Ooga, or a walk that runs
   // long, lets go; so does reaching where an arrival stands.
   const walkStep = (dt) => {
@@ -1105,6 +1113,7 @@
     if (people.player !== avatar || Math.hypot(p.x - w.x, p.z - w.z) > 1.2 || w.t > G.limit || !off && p.z <= ARRIVAL.position.z) {
       w.phase = 0;
       w.through = false;
+      w.settle = people.player === avatar;
       people.steer(0, 0, 0, 0, 0);
       return;
     }
@@ -1123,6 +1132,8 @@
     w.phase = 0;
     people.steer(0, 0, 0, 0, 0);
     leaveCave(true);
+    // A switch the director refuses (another under way) leaves the Ooga in the hall, and the light clears.
+    if (!leaving) { world.factoryCrossing = null; w.through = false; }
   };
   const onKey = (e) => {
     if (scene.booth.mode) return boothKey(scene, e);
@@ -1608,10 +1619,13 @@
     openBooth(scene);
     return true;
   };
-  // The way out's tunnel, from the gate's shield to just short of its rim, where the view may follow an Ooga walking
-  // through the shield, as it may into the peer tunnels.
-  const exitPassage = (p) => Math.abs(p.x) < 1.8 && p.z > GATE_Z - 1 && p.z < FM.EXIT_Z - 0.4
-    && p.y >= LAYOUT.entrance.y + 0.5 && p.y <= LAYOUT.entrance.y + 2.9;
+  // How near the front the view may stand at (x, y): down the way out's tunnel (5 m wide and 3 m high at its rim) to just
+  // short of its rim, so it can follow an Ooga through the gate's shield, easing back to the hall's own front across the
+  // tunnel's walls, roof and floor, so a view swinging past them slides rather than jumps.
+  const exitReach = (x, y) => {
+    const e = LAYOUT.entrance.y, out = Math.max(clamp((Math.abs(x) - 1.6) / 0.6, 0, 1), clamp((y - e - 2.3) / 0.6, 0, 1), clamp((e + 0.6 - y) / 0.4, 0, 1));
+    return FM.EXIT_Z - 0.4 + (HALL.front - 1.2 - (FM.EXIT_Z - 0.4)) * out;
+  };
   const peerPassage = (p) => {
     for (const t of LAYOUT.tunnels) {
       const dx = p.x - t.x, dz = p.z - t.z, c = Math.cos(t.turn), sn = Math.sin(t.turn);
@@ -1639,11 +1653,11 @@
     };
     // Out of the walls, which lean in as they rise; only the tunnel out lets the eye nearer the front.
     const clampCamera = (p) => {
-      if (peerPassage(p) || exitPassage(p)) return;
+      if (peerPassage(p)) return;
       p.y = clamp(p.y, 0.6, HALL.h - 2);
       const lean = p.y / HALL.h * FM.WALL_LEAN;
       p.x = clamp(p.x, -HALL.halfW + 2 + lean, HALL.halfW - 2 - lean);
-      p.z = clamp(p.z, HALL.back + 2 + lean, HALL.front - (Math.abs(p.x) < 6 ? 1.2 : 2 + lean));
+      p.z = clamp(p.z, HALL.back + 2 + lean, Math.abs(p.x) < 6 ? exitReach(p.x, p.y) : HALL.front - 2 - lean);
     };
     pilot = pilotMod.create({
       renderer, canvas: ctx.canvas, camera, hud, presets: PRESETS, landing: "entrance", pitch: PITCH, dist: DIST,
@@ -1729,9 +1743,10 @@
     // control. A page that opens here takes `character=` instead, as the island does. With nobody, the view stays
     // free.
     const asked = ctx.from === null ? new URLSearchParams(location.search).get("character")?.trim().toLowerCase() : null;
+    // Walked in through the island's shield, the hall comes on in its light, which clears whoever is driven.
     const crossing = ctx.from === "hub" ? world.factoryCrossing : null;
     world.factoryCrossing = null;
-    Object.assign(walk, { phase: 0, through: false, wash: 0, hold: 0 });
+    Object.assign(walk, { phase: 0, through: false, wash: crossing ? 1 : 0, hold: crossing ? BL.factoryWindow.GLIDE.washHold : 0, settle: false });
     const named = asked ? contributors.roster.find((c) => c.name.toLowerCase() === asked) : null;
     const returningOwn = pilot.loginViewRestored && BL.net.ownCharacter();
     const picked = returningOwn ? contributors.roster.find(c => c.name === returningOwn.handle)
@@ -1823,7 +1838,7 @@
     factoryScene.input = input;
     factoryScene.debug = {
       hud, camera, controls: pilot.controls, pilot, crew: people, cavemen: people ? people.cavemen : null, demoTip, fx,
-      factory: { node: shared, feed, mock, greeter, kortik, get audio() { return audio; }, get scene() { return scene; }, simulate(seconds, dt = 1 / 30) { for (let t = 0; t < seconds; t += dt) shared.tick(dt); } }
+      factory: { node: shared, feed, mock, greeter, kortik, walk, get audio() { return audio; }, get scene() { return scene; }, simulate(seconds, dt = 1 / 30) { for (let t = 0; t < seconds; t += dt) shared.tick(dt); } }
     };
   };
 
@@ -2006,8 +2021,13 @@
     const previousX = avatar ? avatar.root.position.x : 0, previousY = avatar ? avatar.root.position.y : 0, previousZ = avatar ? avatar.root.position.z : 0;
     // The shield's light clears off the view once the Ooga is through on its way in.
     if (!walk.through && walk.wash > 0 && (walk.hold -= dt) <= 0) walk.wash = Math.max(0, walk.wash - dt / BL.factoryWindow.GLIDE.washOut);
+    pilot.readInput(dt);
     if (walk.phase) walkStep(dt);
-    else pilot.readInput(dt);
+    else if (walk.settle) {
+      const a = pilot.controls.read();
+      if (people && people.player === avatar && (a.x || a.y)) people.steer(0, 0, 0, 0, 0);
+      else walk.settle = false;
+    }
     if (people) people.update(dt, elapsed);
     pilot.update(dt);
     // The hall's sound hears from the Ooga driven here, or from the view's target.

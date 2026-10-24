@@ -420,7 +420,9 @@
   // walked, where the Ooga stood the frame before, whether it is through, and the shield's light over the view.
   // Coming back out, the Ooga walks on until it is OUT_WALK metres out of the mouth.
   const FACTORY_WALK_IN = 1, FACTORY_WALK_OUT = 2, OUT_WALK = 2;
-  const factoryWalk = { phase: 0, cave: null, t: 0, x: 0, z: 0, seen: false, through: false, wash: 0, hold: 0 };
+  // Once a walk is done the Ooga stands (`settle`) until the visitor lets go of moving, since the view has turned round
+  // behind it and a key still held may now mean the other way.
+  const factoryWalk = { phase: 0, cave: null, t: 0, x: 0, z: 0, seen: false, through: false, wash: 0, hold: 0, settle: false };
   // Tess, the island's guide, for the visit (`hub-guide.js`).
   let islandGuide = null;
   let stateTimer = 0, hintTimer = 0, now = 0, hour = 12, unsubscribeActivity = null, unsubscribeAccount = null, ownOogaClaimed = false;
@@ -6400,16 +6402,21 @@
     const w = factoryWalk, G = BL.factoryWindow.GLIDE;
     // The shield's light clears off the view once the Ooga is back out.
     if (!w.through && w.wash > 0 && (w.hold -= dt) <= 0) w.wash = Math.max(0, w.wash - dt / G.washOut);
-    if (!player || entering || !BL.scenes.factory) { w.phase = 0; w.seen = false; return; }
+    if (!player || entering || !BL.scenes.factory) { w.phase = 0; w.seen = false; w.settle = false; return; }
+    if (w.settle) {
+      const a = pilot.controls.read();
+      if (player === w.cave && (a.x || a.y)) crew.steer(0, 0, 0, 0, 0);
+      else w.settle = false;
+    }
     const p = player.root.position, sr = Math.sin(m.ry), cr = Math.cos(m.ry), shield = BL.factoryModels.SHIELD_Z;
     const along = (p.x - m.x) * sr + (p.z - m.z) * cr, across = (p.x - m.x) * cr - (p.z - m.z) * sr;
     const feet = p.y - player.baseY - m.floorY;
     if (w.phase) return factoryGlide(dt, player, along, across, feet);
     // Heading in on its feet down the tunnel's last stretch, the walk takes the Ooga through; a jump (a view preset,
-    // a respawn) is no walk.
-    const stepped = Math.hypot(p.x - w.x, p.z - w.z), inward = w.seen && stepped < 0.5 ? ((w.x - p.x) * sr + (w.z - p.z) * cr) / Math.max(dt, 1e-3) : 0;
+    // a respawn), further than a sprint goes in the frame, is no walk.
+    const stepped = Math.hypot(p.x - w.x, p.z - w.z), inward = w.seen && stepped < Math.max(0.5, dt * 12) ? ((w.x - p.x) * sr + (w.z - p.z) * cr) / Math.max(dt, 1e-3) : 0;
     w.x = p.x; w.z = p.z; w.seen = true;
-    if (along < shield + G.reach && along > shield && Math.abs(across) < o.maxX && Math.abs(feet - o.floorY) < 0.3 && inward > 0.4) {
+    if (along < shield + G.reach && along > shield && Math.abs(across) < o.maxX && Math.abs(feet - o.floorY) < 0.3 && inward > G.moving) {
       Object.assign(w, { phase: FACTORY_WALK_IN, cave: player, t: 0, through: false });
       pilot.controls.reset(); input.reset(); hud.tooltip.hide();
       return factoryGlide(dt, player, along, across, feet);
@@ -6425,8 +6432,8 @@
     go("factory");
   };
   // The walk through the Factory's shield, in the third person, as the Timechain Sphere's doorway walks its visitor
-  // through: the visitor's input set aside, the Ooga walks itself down the tunnel's middle at an even pace while the
-  // view follows as always, swinging round behind it. Going in, through the shield its light fills the view over
+  // through: after the pilot has read the visitor's input, the Ooga's steering is set aside for the walk's own, so it
+  // walks itself down the tunnel's middle at an even pace while the view follows as always, swinging round behind it. Going in, through the shield its light fills the view over
   // `washIn`, and the factory takes over in that light without a fade, with the same Ooga as far past its own shield
   // and the view's pitch and distance (`world.factoryCrossing`). Coming out (`arriveFromFactory`) the Ooga walks on out
   // of the mouth while the light clears. Anything else moving the Ooga, or a walk that runs long, lets go.
@@ -6435,7 +6442,7 @@
     const sr = Math.sin(m.ry), cr = Math.cos(m.ry), shield = BL.factoryModels.SHIELD_Z, going = w.phase === FACTORY_WALK_IN;
     w.t += dt;
     if (player !== w.cave || Math.hypot(p.x - w.x, p.z - w.z) > 1.2 || w.t > G.limit || !going && along > OUT_WALK) {
-      w.phase = 0; w.through = false; w.seen = false;
+      w.phase = 0; w.through = false; w.seen = false; w.settle = player === w.cave;
       crew.steer(0, 0, 0, 0, 0);
       return;
     }
@@ -6459,7 +6466,8 @@
     world.pilot = player.traits.name;
     factoryMouth.snap = true;
     pilot.controls.reset(); input.reset(); pilot.setActive(false); hud.tooltip.hide();
-    go("factory", null, true);
+    // A switch the director refuses (another under way) puts it all back, the light with it.
+    if (!go("factory", null, true)) { world.factoryCrossing = null; stay(); }
   };
   // Back out of the Factory's shield in its light: the Ooga at the mouth's rim facing out, as far across as it left,
   // the view behind it in the tunnel looking out, and the walk on out of the mouth.
@@ -8216,7 +8224,7 @@
     updateSleepingSolids();
     if (!chalkboard.openNow) {
       if (clankerPlay.active) clankerPlay.readInput(dt);
-      else if (!factoryWalk.phase) pilot.readInput(dt);
+      else pilot.readInput(dt);
     }
     mirrorCave.damage.update(dt, !mirrorCave.gate.open);
     syncMirrorDamage();
@@ -10713,7 +10721,7 @@
     poolEffectsActive = false; poolEffectsTime = 0;
     glCanvas = ctx.canvas;
     factoryDeparting = bifrostDeparting = bifrostHeld = false;
-    Object.assign(factoryWalk, { phase: 0, cave: null, seen: false, through: false, wash: 0, hold: 0 });
+    Object.assign(factoryWalk, { phase: 0, cave: null, seen: false, through: false, wash: 0, hold: 0, settle: false });
     overlayCanvas = ctx.overlay;
     magazineState = {
       get owned() { return !!crew && crew.hasMagazine(crew.player); },
@@ -11837,6 +11845,7 @@
   };
   const leave = () => {
     actorTransition.sourceRoot = actorTransition.sourceHead = null;
+    factoryWalk.cave = null;
     resetRageThrowMap(false);
     if (factoryMouth && factoryMouth.snap) snapFactoryView();
     if (bifrostIsle && bifrostIsle.snap) snapBifrostView();

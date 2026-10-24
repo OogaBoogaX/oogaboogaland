@@ -28,11 +28,12 @@
   // The shield's glyph crests in the emitters' cyan, the factory's CYAN.
   const TINT = hexToRgb("#5fe3ff").map((k) => k / 255);
   // The walk through the shield, either way (scene-hub.js and scene-factory.js): it takes the played Ooga over in the
-  // last `reach` metres before the shield and walks it at `speed` of a walk, aiming `ahead` metres down the middle. As
+  // last `reach` metres before the shield, on its feet and `moving` metres a second or more toward it, and walks it at
+  // `speed` of a walk, aiming `ahead` metres down the middle. As
   // it goes through, the shield's light fills the view over `washIn`; the scene on the far side takes over in that
   // light, holds it `washHold` while the switch settles, and clears it over `washOut`, with the Ooga no more than `past`
   // beyond its own shield, so it is seen coming through. `limit` lets go of a walk that runs long.
-  const GLIDE = { reach: 3, speed: 0.55, ahead: 1.6, washIn: 0.22, washHold: 0.1, washOut: 0.45, limit: 4, past: 0.5 };
+  const GLIDE = { reach: 3, moving: 0.2, speed: 0.55, ahead: 1.6, washIn: 0.22, washHold: 0.1, washOut: 0.45, limit: 4, past: 0.5 };
   // The light itself, the emitters' cyan half way to white, eased in and out.
   const WASH = `rgb(${TINT.map((k) => Math.round(255 * (k + 1) / 2)).join(", ")})`;
   const wash = (ctx, k) => {
