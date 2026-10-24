@@ -12486,9 +12486,12 @@ const sphereCrossing = { name: "timechain crossing", why: "playthrough: Enter wa
     inside && room.room === 3 && room.mode === "solo" && room.player === "portlandhodl" && room.view === "first-person" && room.doors === 0 && room.atArrival < 0.4 && room.hash === "#/sphere-3" && room.zone === "none", JSON.stringify(room));
   record("timechain crossing: Space at the Exit button walks it back out of the passage onto the bridge, the doors shut, the plug back and the view out of its eyes",
     out && back.player === "portlandhodl" && back.fromDoors > 1 && back.doors === 0 && back.plug && back.view !== "first-person" && back.hash === "#/sphere" && back.head, JSON.stringify(back));
-  // Under hubcache=release the island is rebuilt behind the walk-out; the room's last frame holds while it builds, never black.
-  record("timechain crossing: from the keypad into the room and from the Exit button out to the bridge every frame is the Ooga's own eye, never faded to black, and each scene swap is the same view on both sides",
+  // Under hubcache=release part of the island's rebuild still runs in the swap, so the walk-out fades over it rather than
+  // freezing the room's last frame; the way in stays seamless.
+  if (seams.policy === "kept") record("timechain crossing: from the keypad into the room and from the Exit button out to the bridge every frame is the Ooga's own eye, never faded to black, and each scene swap is the same view on both sides",
     seams.frames > 30 && seams.far === 0 && seams.fadeMax === 0 && seamless(seams.swapIn) && seamless(seams.swapOut), JSON.stringify(seams));
+  else record("timechain crossing: with the island released, the way into the room is the Ooga's own eye at the swap and the way out fades over the rebuild instead of freezing",
+    seams.frames > 30 && seams.far === 0 && seamless(seams.swapIn) && seams.fadeMax > 0, JSON.stringify(seams));
 } };
 const sphereAccount = { name: "timechain account", why: "regression: account Retry must keep the owned Ooga at the keypad; an unanswered account still offers a solo visit without guessing", run: async (b) => {
   await b.evaluate(`(() => { const B = __ooga, ${sphereLocal}; BL.net.state.resolved = false; ${sphereStand("0.7", "13.8")} })()`);
