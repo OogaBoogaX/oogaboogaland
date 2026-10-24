@@ -1,7 +1,9 @@
 // Public, compact recent-merge summaries. A six-minute edge cache shares each GitHub scan between visitors.
 // Page validators retain only fields used here; unchanged upstream pages reuse their normalized records.
 // An optional GITHUB_TOKEN secret (no repository permissions) authorizes the scans: 5,000 requests an hour instead of
-// 60 per shared address, and 304s free. It goes only to api.github.com, never into a log, the cache or a reply.
+// 60 per shared address, and 304s free. It goes only to api.github.com, never into a log, the cache or a reply, and never
+// follows a redirect. An expired or revoked token (401) is dropped for the rest of that scan, which carries on
+// unauthenticated, so a stale secret costs the shared limit rather than the feed.
 import { json } from "./http.js";
 
 const REPOS = ["bitcoin/bitcoin", "btcpayserver/btcpayserver", "lightningnetwork/lnd", "ElementsProject/lightning"];
@@ -29,8 +31,13 @@ const scan = async (index, url, cache, token) => {
     const key = cacheKey(url, `${index}/page/${page}`), previous = await get(cache, key);
     const headers = { accept: "application/vnd.github+json", "user-agent": "OogaBoogaLand-Totems", "x-github-api-version": "2022-11-28" };
     if (previous?.etag) headers["if-none-match"] = previous.etag;
-    if (typeof token === "string" && token) headers.authorization = `Bearer ${token}`;
-    const response = await fetch(`https://api.github.com/repos/${repo}/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=${page}`, { headers, signal: AbortSignal.timeout(10000) });
+    const address = `https://api.github.com/repos/${repo}/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=${page}`;
+    let response;
+    if (typeof token === "string" && token) {
+      response = await fetch(address, { headers: { ...headers, authorization: `Bearer ${token}` }, redirect: "error", signal: AbortSignal.timeout(10000) });
+      if (response.status === 401) token = null;
+    }
+    if (!response || response.status === 401) response = await fetch(address, { headers, signal: AbortSignal.timeout(10000) });
     if (response.status === 403 || response.status === 429) {
       const reset = Number(response.headers.get("x-ratelimit-reset")) * 1000;
       const retry = Number(response.headers.get("retry-after")) * 1000;
