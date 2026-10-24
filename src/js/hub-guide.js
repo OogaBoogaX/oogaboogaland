@@ -6,13 +6,16 @@
 // at each landmark: the view glides there each time the visitor goes on (the camera moves only on input), and she flies
 // ahead and points her soft beam at it. She greets once a page, and offers the island tour unasked only until this
 // browser has answered it; a tap on her brings it at any time. The view is the visitor's again when the tour ends.
+// Under her offer a visitor can type a question (#270). The page answers what it knows by itself (`answer`): a place
+// becomes a trip there and back, and a few common questions have their own lines; one it can't answer gets her
+// offline line.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
   const NAME = "Tess";
   const LINES = {
     greeting: "Hi! I'm Tess. New here? Want a quick look round the island?",
-    again: "Want a look round the island?",
+    again: "Want a look round the island? Or ask me about it.",
     declined: "No problem! Tap me any time for a tour.",
     pile: "This is the pile. Donations become bananas for the crew.",
     crew: "Every Ooga stands for one of the crew's contributors.",
@@ -41,6 +44,21 @@
     done: "That's the island! Off you go, and come find me any time.",
     newsDone: "That's what's new! Have fun out there.",
     cancelled: "All good. Back to work!",
+    hello: "Hi! Ask me where anything is, or for a tour.",
+    thanks: "Any time!",
+    whoAmI: "I'm Tess, the island's guide. I work its machines and show people round.",
+    donate: "Press Feed the Ooga Boogas in the island's drawer: Lightning or on-chain.",
+    donateKiosk: "Or tip at the Lightning Factory's kiosk and watch your sats cook into bananas.",
+    controls: "W A S D moves, drag looks round, scroll zooms, and Space jumps or uses things.",
+    controlsMore: "Double-click an Ooga to play it, and hold Left Shift to run.",
+    controlsPhone: "On a phone, the left stick moves and the right one looks.",
+    signIn: "Contributors sign in with GitHub at the foot of the drawer.",
+    signInPerks: "Then you drive your own Ooga, and can talk in voice and chat.",
+    newsIntro: "Here's what's new:",
+    takeThere: "Ask me to take you there!",
+    unknown: "I don't know that one yet. Try a place, or ask me for a tour.",
+    more: "Anything else? Ask away.",
+    later: "I'll be at work. Tap me any time!",
     newsKortik: "New in the Factory: Kortik's Switchboard, where a grumpy samurai routes Lightning by hand. Don't poke him!",
     newsSphereRooms: "The Timechain Sphere has nine rooms now. Pick one at the keypad by its doors!",
     newsBca: "New at 10 o'clock: B.C.A., Banana Certified Accounting. Suited gorillas count the bananas!",
@@ -165,6 +183,69 @@
     });
     return legs;
   };
+  // What a typed question asks, answered from what the page knows: the lines she says (`lines`), the stop a trip goes
+  // to (`go`), the place it is about (`place`, for a following "take me there"), or the island tour (`tour`); null
+  // when the page can't answer it. Words are matched whole, after folding case, accents and punctuation; a place is
+  // named by its longest matching alias. An alias that also names an idea (`IDEAS`: Lightning, the mempool, mining)
+  // takes the visitor there when they ask to go, but a question about it is left to the Worker, and "it" or "there"
+  // stands for the last place only in a trip ("take me there").
+  const PLACES = {
+    pile: ["pile", "banana pile", "bananas pile"],
+    totems: ["jumbotron", "oogatron", "totem", "totems"],
+    timechain: ["timechain", "timechain sphere", "sphere", "sani"],
+    bca: ["bca", "b c a", "banana certified accounting", "accounting"],
+    lab: ["lab", "entropylab", "entropy lab"],
+    bifrost: ["bifrost", "dsb", "dsb land", "poker", "banana poker", "portal", "arch", "north pass"],
+    factory: ["factory", "lightning factory", "lightning", "lightning node", "kiosk"],
+    arcade: ["arcade", "ooga arcade", "games", "game", "rally", "ooga rally", "drop", "orbit", "mine", "tickets", "prizes"],
+    mempool: ["mempool", "mempool island", "rainforest", "lake", "chamber", "vine bridge"]
+  };
+  const IDEAS = new Set(["lightning", "lightning node", "mempool", "mine", "game", "drop"]);
+  const WORDS = {
+    greet: ["hi", "hello", "hey", "hiya", "howdy", "yo", "gm", "good morning", "good evening"],
+    thanks: ["thanks", "thank you", "thx", "ty", "cheers"],
+    who: ["who are you", "what are you", "your name", "who is tess", "who s tess", "whos tess", "what is tess"],
+    tour: ["tour", "show me around", "show me round", "look around", "look round", "new here"],
+    trip: ["take me", "go to", "go there", "show me", "where", "how do i get", "how to get", "find", "bring me", "fly me",
+      "fly to", "lead me", "get to", "head to", "walk to", "visit"],
+    there: ["there", "it"],
+    donate: ["donate", "donation", "donating", "tip", "tips", "tipping", "feed", "zap", "pay"],
+    controls: ["the controls", "keyboard", "what keys", "which keys", "how do i play", "how to play", "how do i move", "how to move",
+      "move around", "how do i walk", "walk around", "how do i jump", "how do i run", "how do i fly", "camera"],
+    signIn: ["sign in", "signin", "sign up", "log in", "login", "account"],
+    news: ["whats new", "what s new", "what is new", "anything new", "news", "updates", "what changed"]
+  };
+  const fold = (text) => ` ${String(text).toLowerCase().replace(/₿/g, "b").normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ").trim()} `;
+  const has = (q, words) => words.some((w) => q.includes(` ${w} `));
+  const placeIn = (q, named) => {
+    let best = -1, length = 0;
+    STOPS.forEach((stop, i) => {
+      for (const alias of PLACES[stop.id]) {
+        if (alias.length > length && !(named && IDEAS.has(alias)) && q.includes(` ${alias} `)) { best = i; length = alias.length; }
+      }
+    });
+    return best;
+  };
+  const answer = (question, last = null) => {
+    const q = fold(question), words = q.trim() ? q.trim().split(" ").length : 0;
+    if (!words) return null;
+    const reply = (lines, go = null, place = null) => ({ lines, go, place, tour: false });
+    if (words <= 3 && has(q, WORDS.greet)) return reply(["hello"]);
+    if (words <= 4 && has(q, WORDS.thanks)) return reply(["thanks"]);
+    if (has(q, WORDS.who)) return reply(["whoAmI"]);
+    if (has(q, WORDS.tour)) return { lines: [], go: null, place: null, tour: true };
+    const any = placeIn(q, false), place = placeIn(q, true), trip = any >= 0 ? any : last !== null && has(q, WORDS.there) ? last : -1;
+    if (trip >= 0 && has(q, WORDS.trip)) return reply(STOPS[trip].lines, trip, trip);
+    if (has(q, WORDS.donate)) return reply(["donate", "donateKiosk"], null, STOPS.findIndex((stop) => stop.id === "factory"));
+    if (place < 0 && has(q, WORDS.controls)) return reply(["controls", "controlsMore", "controlsPhone"]);
+    if (has(q, WORDS.signIn)) return reply(["signIn", "signInPerks"]);
+    if (place < 0 && has(q, WORDS.news)) return reply(["newsIntro", ...NEWS.slice(0, 3).map((n) => n.line)]);
+    if (place >= 0) return reply([...STOPS[place].lines.slice(0, 2), "takeThere"], null, place);
+    return null;
+  };
+  // What the suggestions under her offer ask: each one the page answers by itself.
+  const SUGGESTIONS = ["Take me to the games", "How do I donate?", "What's the Mempool island?"];
   // The newest entry offered to each signed-in login in this browser. Kept in localStorage only; anything unreadable there
   // counts as none.
   const DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -206,7 +287,7 @@
     const state = {
       phase: "work", stage: "beam", timer: 3, site: 0, seen: 0, again: false, kind: "island", legs: ISLAND, welcome: null,
       stop: -1, arrived: false, closing: null, holding: false, tourGuest: false, glide: 0, glideTime: GLIDE,
-      login: null, newest: null, still: landing, settle: SETTLE, driven: null
+      login: null, newest: null, still: landing, settle: SETTLE, driven: null, asked: false, place: null
     };
     const spot = { x: 0, y: 0, z: 0 }, home = pose(), from = pose(), to = pose();
     position.x = WORK[0].at[0]; position.y = WORK[0].at[1]; position.z = WORK[0].at[2];
@@ -223,19 +304,43 @@
     row.className = "greeter-row";
     help.className = "greeter-menu-help";
     row.append(go, skip);
-    panel.append(heading, row, help);
+    // Under the offer, a question box and three suggestions. A question sends nothing anywhere: the page answers it.
+    const form = document.createElement("form"), field = document.createElement("input"), send = document.createElement("button");
+    form.className = "greeter-ask";
+    field.type = "text"; field.maxLength = 200; field.autocomplete = "off"; field.enterKeyHint = "send";
+    field.placeholder = coarse ? "Ask me anything" : "Ask me about the island";
+    field.setAttribute("aria-label", `Ask ${NAME} a question`);
+    send.type = "submit"; send.className = "greeter-choice"; send.textContent = "Ask";
+    form.append(field, send);
+    const chips = document.createElement("div");
+    chips.className = "greeter-chips";
+    for (const text of SUGGESTIONS) {
+      const chip = document.createElement("button");
+      chip.type = "button"; chip.className = "greeter-chip"; chip.textContent = text;
+      chip.addEventListener("click", () => { chip.blur(); question(text); });
+      chips.append(chip);
+    }
+    panel.append(heading, row, form, chips, help);
     document.body.append(panel);
     go.addEventListener("click", () => { go.blur(); forward(); });
     skip.addEventListener("click", () => { skip.blur(); back(); });
+    // Asking blurs the box, so the keyboard folds away and her answer shows; Escape there only leaves the box.
+    form.addEventListener("submit", (e) => { e.preventDefault(); const text = field.value; field.value = ""; field.blur(); question(text); });
+    field.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.preventDefault(); field.blur(); } });
     const show = (phase) => {
       state.phase = phase;
       panel.hidden = phase !== "offer" && phase !== "tour";
       panel.classList.toggle("greeter-tour", phase === "tour");
+      form.hidden = chips.hidden = phase !== "offer";
       const news = state.kind === "news";
       if (phase === "offer") {
         heading.textContent = news ? `${NAME} · what's new` : `${NAME} · island guide`;
         go.textContent = "Show me"; skip.textContent = "Not now";
-        help.textContent = coarse ? "Tap to choose" : "Enter starts · Esc closes";
+        help.textContent = coarse ? "Tap to choose, or ask" : "Enter starts · Esc closes";
+      } else if (phase === "tour" && state.kind === "trip") {
+        heading.textContent = `${NAME} · ${state.legs[state.stop].title}`;
+        label(); skip.textContent = "Back";
+        help.textContent = coarse ? "Tap to go on" : "Enter or → goes on · Esc goes back";
       } else if (phase === "tour") {
         heading.textContent = `${news ? "What's new" : "Island tour"} · ${state.stop + 1} / ${state.legs.length}\n${state.legs[state.stop].title}`;
         label(); skip.textContent = "End tour";
@@ -302,7 +407,7 @@
     const notice = () => { rig.flare(); show("notice"); state.timer = 1.1; };
     const approach = () => { placeBy(); flyTo(spot.x, spot.y, spot.z, pace(6, spot.x, spot.y, spot.z), true); show("approach"); };
     const offer = (text) => {
-      state.timer = OFFER_TIME;
+      state.timer = OFFER_TIME; state.asked = false;
       state.tourGuest = state.kind === "island" && !account();
       rig.clearPath(3, 1); rig.push(spot.x, spot.y, spot.z); rig.track();
       rig.nod(); show("offer"); rig.say(text);
@@ -399,19 +504,44 @@
       else if (state.phase === "tour") {
         // What she is saying here comes first, a bubble at a time.
         if (state.arrived && rig.next()) { label(); return; }
-        if (state.stop === state.legs.length - 1) endTour(state.kind === "news" ? "newsDone" : "done");
+        if (state.stop === state.legs.length - 1) endTour(state.kind === "news" ? "newsDone" : state.kind === "trip" ? "more" : "done");
         else visit(state.stop + 1);
       }
     };
     const back = () => {
-      if (state.phase === "offer") { answered(); say("declined"); toWork(); }
-      else if (state.phase === "tour") endTour("cancelled");
+      if (state.phase === "offer") { answered(); say(state.asked ? "later" : "declined"); toWork(); }
+      else if (state.phase === "tour") endTour(state.kind === "trip" ? "more" : "cancelled");
     };
     // Escape waves her off while she comes over or offers, and ends a tour, before the island's own Escape.
     const escape = () => {
       if (state.phase === "notice" || state.phase === "approach") { toWork(); return true; }
       if (state.phase === "offer" || state.phase === "tour") { back(); return true; }
       return state.phase === "returning" && state.holding;
+    };
+    // A typed question, answered by the page: a place is a trip there and back, a tour request starts the tour, and
+    // anything else she says where she is, or her offline line when the page can't answer it. Her offer then stands
+    // again for a follow-up.
+    const question = (text) => {
+      if (state.phase !== "offer" || !text.trim()) return;
+      // Another actor or panel may have taken the controls since she offered.
+      if (busy()) { toWork(); return; }
+      const a = answer(text, state.place);
+      state.asked = true; state.timer = OFFER_TIME;
+      if (!a) { say("unknown"); return; }
+      if (a.place !== null) state.place = a.place;
+      if (a.tour) {
+        if (state.kind === "island") answered();
+        state.kind = "island"; state.legs = ISLAND; startTour();
+      } else if (a.go !== null) {
+        state.kind = "trip"; state.legs = [legOf(a.go, STOPS[a.go].title, a.lines)]; startTour();
+      } else rig.say(a.lines.map((id) => LINES[id]).join("\n"));
+    };
+    // Back from a trip she offers again, ready for the next question, the island tour behind Show me.
+    const offerAgain = () => {
+      state.kind = "island"; state.legs = ISLAND; state.asked = true; state.timer = OFFER_TIME;
+      state.tourGuest = !account();
+      rig.clearPath(3, 1); rig.push(spot.x, spot.y, spot.z); rig.track();
+      show("offer");
     };
     // A tap on her at work brings her over with the island tour; her rings flare and she nods at once, so the tap
     // shows before she arrives.
@@ -428,6 +558,8 @@
       if (e.key !== "Enter" && e.key !== "ArrowRight") return;
       const target = e.target;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable || target.closest && target.closest("dialog"))) return;
+      // Enter on one of her own buttons (Ask, a suggestion, Show me, Not now) presses that button.
+      if (e.key === "Enter" && target instanceof Node && panel.contains(target)) return;
       e.preventDefault(); e.stopImmediatePropagation();
       if (!e.repeat) forward();
     };
@@ -482,8 +614,9 @@
           break;
         case "offer":
           placeBy(); rig.setLast(spot.x, spot.y, spot.z); rig.steer(dt);
-          // Her offer stands for a while once she has finished asking.
-          if (rig.said && (state.timer -= dt) <= 0) { say("declined"); toWork(); }
+          // Her offer stands for a while once she has finished asking, and for as long as a question is being written.
+          if (document.activeElement === field || field.value) state.timer = OFFER_TIME;
+          else if (rig.said && (state.timer -= dt) <= 0) { say(state.asked ? "later" : "declined"); toWork(); }
           break;
         case "tour": {
           // Where the visitor is, she keeps by them; at a stop, she flies there and starts once she is nearly in place.
@@ -502,7 +635,7 @@
           placeBy(); rig.setLast(spot.x, spot.y, spot.z); rig.steer(dt);
           if (!state.arrived) {
             if (rig.lastPoint && Math.hypot(spot.x - position.x, spot.y - position.y, spot.z - position.z) < 1.5) { state.arrived = true; say(state.closing); }
-          } else if (rig.said) toWork();
+          } else if (rig.said && !state.holding) { if (state.kind === "trip") offerAgain(); else toWork(); }
           break;
       }
       // The view: gliding to a stop, held there, and gliding home, written after the pilot's own every frame; home, it is
@@ -543,5 +676,5 @@
     };
     return { root: rig.root, state, update, escape, tap, dispose, liveGeometry: rig.liveGeometry, lend /* HALLOWEEN */, get holding() { return state.holding; }, get speech() { return rig.speech; } };
   };
-  BL.hubGuide = { create, NAME, LINES, STOPS, NEWS, freshAfter, legsOf };
+  BL.hubGuide = { create, NAME, LINES, STOPS, NEWS, freshAfter, legsOf, answer, SUGGESTIONS };
 })();
