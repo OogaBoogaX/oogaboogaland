@@ -126,7 +126,7 @@
   const SHOTS = {
     dsb: {
       width: 360, up: 0.36, eye: { x: 0, y: 40, z: 84 }, look: { x: 0, y: -3, z: 0 }, colour: 0.83, mist: 0.08, haze: [70, 120, 235],
-      build: () => BL.dsbGeography.build().root, opts: () => DSB_LIGHT
+      build: () => { const root = preparedDsb || BL.dsbGeography.build().root; preparedDsb = null; return root; }, opts: () => DSB_LIGHT
     },
     poker: {
       width: 360, up: 0.42, eye: { x: 0, y: 8.2, z: 33 }, look: { x: 0, y: 1.2, z: 6 }, colour: 0.83, mist: 0.05, haze: [70, 120, 235],
@@ -137,6 +137,9 @@
   let renderer, canvas, game, world, go, root, camera, hud, hooks, input, pilot, fx, agentPlay = null;
   let people = null, avatar = null, playerWorld = null, scene = null, leaving = false, dust = null, pictureTries = 0, pictureWait = 0, unsubscribeAccount = null, remotes = null, footsteps = null;
   let pictureEpoch = 0, pictureJob = 0, pictureIdle = false, pictureLoading = false, pictureIndex = 0;
+  // DSB Land's geography (about 350 ms whole) is built for its picture in small slices during play, not in one task.
+  const PLAY_SLICE_MS = 8;
+  let preparedDsb = null, pictureAbort = null;
   const NO_ACTORS = [];
   // On the Worker's page the island's driving rules hold in here too, and the Ooga driven is reported to the
   // room every frame, so signed-in players in the chamber hear each other (voice needs a driven Ooga).
@@ -235,6 +238,8 @@
       else clearTimeout(pictureJob);
     }
     pictureJob = 0; pictureLoading = false; pictureIndex = 0; pictureTries = 0; pictureWait = 0;
+    if (pictureAbort) pictureAbort.abort();
+    pictureAbort = null; preparedDsb = null;
   };
   const nextPicture = () => {
     pictureIndex++;
@@ -265,6 +270,20 @@
             nextPicture();
           });
         } else queuePicture(true);
+        return;
+      }
+      if (row.scene === "dsb" && !preparedDsb && !(world.windowViews && world.windowViews[look.key])) {
+        pictureLoading = true;
+        pictureAbort = new AbortController();
+        BL.buildTasks.run(BL.dsbGeography.buildSteps({ until: 0, budget: PLAY_SLICE_MS, work: 0 }), "bifrost", pictureAbort.signal).then((geography) => {
+          if (epoch !== pictureEpoch || !scene || leaving) return;
+          pictureLoading = false; pictureAbort = null; preparedDsb = geography.root;
+          queuePicture(true);
+        }, () => {
+          if (epoch !== pictureEpoch || !scene || leaving) return;
+          pictureLoading = false; pictureAbort = null;
+          nextPicture();
+        });
         return;
       }
       if (!canPicture()) { pictureWait = 0.5; return; }
