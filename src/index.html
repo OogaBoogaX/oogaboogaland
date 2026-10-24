@@ -1624,9 +1624,6 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
     <output class="mic-note" id="mic-note" data-muted="false" hidden></output>
     <!-- HALLOWEEN: the ghost hunt's HUD (ghost-hud.js shows and hides it; no data-scene, or every arrival would show it). -->
     <div class="ghost-hud" id="ghost-hud" hidden>
-      <p class="ghost-top" id="ghost-top"></p>
-      <div class="ghost-health" id="ghost-health" role="meter" aria-label="Health" aria-valuemin="0" aria-valuemax="5" hidden><i></i><i></i><i></i><i></i><i></i></div>
-      <p class="ghost-lives" id="ghost-lives"></p>
       <div class="ghost-boss" id="ghost-boss" hidden><span class="ghost-boss-label">The boss</span><meter id="ghost-boss-bar" min="0" max="1" value="1"></meter></div>
     </div>
     <div class="ghost-banner" id="ghost-banner" hidden><strong id="ghost-banner-title"></strong><span id="ghost-banner-sub"></span></div>
@@ -1644,6 +1641,7 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
         <button type="button" id="ghost-lobby-decline">Not this time</button>
       </div>
     </section>
+    <canvas class="ghost-minimap" id="ghost-minimap" aria-hidden="true" hidden></canvas>
     <div class="ghost-player" id="ghost-player" hidden>
       <span class="ghost-player-note" aria-hidden="true">♪</span>
       <span class="ghost-player-title" id="ghost-player-title"></span>

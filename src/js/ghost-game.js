@@ -55,12 +55,14 @@
   // A drop's light, the lab's (draw.js): its pulse, ring, beam and mist; a power-up's beam, flash, rings and sparks.
   const RING_MS = 1200, MIST_MS = 750, MISTS = 24, POWER_MS = 1300, POWER_LAND_MS = 220, POWERS = 2, BEAM_TOP = 30;
   const GREEN = { core: [230, 255, 235], mid: [60, 255, 110], edge: [40, 255, 90], ring: [90, 255, 130], spark: [120, 255, 150] };
+  // A skeleton's beam: white.
+  const WHITE = { core: [255, 255, 255], mid: [232, 238, 255], edge: [190, 205, 255] };
   const POWER_COLOURS = MODELS.DROPS.map((d, kind) => kind === 4 ? GREEN : { core: d.mist[0], mid: d.mist[1], edge: d.mist[2], ring: d.mist[1], spark: d.mist[1] });
   const hex = (c) => "#" + c.map((v) => v.toString(16).padStart(2, "0")).join("");
   const TIPS = ["Ghost · shoot it!", "Ghost general · beware its eye beam", "Wraith · it pulls at your soul"];
   const DROP_WORDS = ["Bomb! Every ghost burns", "Shield up for everyone", "Ice! The ghosts slow down", "Health banana! Everyone's bar is full", "Double points",
     "Tess joins you! She zaps any ghost that comes near", "Lightning Network! Bolts strike every enemy", "Monkeys! One at each side, shooting with you"];
-  const DROP_CUES = ["boom", "shield", "ice", "health", "double", "tess", "thunder", "shriek"];
+  const DROP_CUES = ["boom", "shield", "ice", "health", "double", "tess", "thunder", "monkeys"];
   // The monkeys at a player's hips: how far out to each side (m), how high on the Ooga (a fraction of its height), how
   // tall they stand and how they bob; each shot of theirs, a rock from each aimed `MONKEY_AIM_SIDE` m to its own side
   // of theirs, in the air as long as a banana round is (`ROCK_FLIGHT_S`, the rifle's), a rifle round's damage
@@ -75,6 +77,10 @@
   // come down on them; how long each takes to fade, how big round the Ooga, and the colours.
   const HEAL_GLOW_MS = 1800, GIFT_GLOW_MS = 2600, GLOW_SIZE = 1.9, HEAL_GLOW = [255, 150, 40], GIFT_GLOW = [180, 100, 255];
   const GRAVE_RISE_MS = 700, GRAVE_VIEW_BACK = 3.4, GRAVE_VIEW_UP = 1.5, GRAVE_PAN = 2.4;
+  // How fast a player who is down turns their view round their grave (radians a second at full tilt).
+  const GRAVE_TURN = 1.8;
+  // The elixirs' orange: their glow, the light round one taken and round a player brought back.
+  const ELIXIR_GLOW = [255, 140, 30];
   // The lightning drop over the pile: how high over the pile's top it spins and how fast; each bolt it calls down, how
   // long it shows, how wide and tall; how far a struck enemy shakes.
   const BOLT_OVER = 1.5, BOLT_SPIN = 3, STRIKE_MS = 300, STRIKE_W = 4.5, STRIKE_H = 40, STRIKE_SHAKE = 0.12;
@@ -84,10 +90,20 @@
   // The lab's debug keys, here with Shift held (the island's own keys take the bare ones): the drops, the next round,
   // a ghost, a general, a wraith, the boss, burn them all, thaw, ten kills.
   const DEBUG_KEYS = { Digit1: "drop", Digit2: "drop", Digit3: "drop", Digit4: "drop", Digit5: "drop", Digit6: "drop", Digit7: "drop", Digit8: "drop", KeyN: "next", KeyG: "ghost",
-    KeyJ: "general", KeyX: "wraith", KeyY: "gorilla", KeyO: "boss", KeyB: "nuke", KeyU: "unfreeze", KeyK: "kills" };
+    KeyJ: "general", KeyX: "wraith", KeyY: "gorilla", KeyH: "skeleton", KeyE: "revive", KeyO: "boss", KeyB: "nuke", KeyU: "unfreeze", KeyK: "kills" };
   // The gorillas' arrival: a green beam from the sky (the double points' colours), the landing's flash and rings twice a
-  // power-up's size, the land jolting under it; how tall it stands, and how far off its slam still shakes the view.
-  const BRUTE_H = 1.5, ARRIVAL = 2, ARRIVE_LAND_MS = 1100, SLAM_FELT = 14;
+  // power-up's size, the land shaking under it for `LAND_SHAKE_S` at `LAND_SHAKE` of the quake; how much larger than the
+  // island's gorillas it is, how tall it stands, and how far off its slam still shakes the view.
+  const BRUTE_SCALE = 1.25, BRUTE_H = 1.5 * BRUTE_SCALE, BONES_H = 0.7, ARRIVAL = 2, ARRIVE_LAND_MS = 1100, SLAM_FELT = 14, LAND_SHAKE_S = 1, LAND_SHAKE = 0.6;
+  // The skeleton's crawl (m, radians): its chest's pivot height and how far it leans up, the shoulders in the chest's
+  // frame and how wide its arms splay, the upper arm and forearm-to-claw lengths; each hand's path in the body's frame
+  // (from `front` to `back` planted at `plant` for `stance` of the cycle, then lifted `lift` forward again), how many
+  // cycles a metre crawled, and where both hands lunge to strike.
+  const CRAWL = { y: 0.36, pitch: 0.3, sx: 0.17, sy: -0.04, sz: 0.38, spread: 0.25, l1: 0.3, l2: 0.37,
+    front: 0.85, back: 0.42, plant: 0.02, lift: 0.14, stance: 0.6, rate: 1.2, strikeY: 0.8, strikeZ: 1.0 };
+  // Its lunge (ms, m, radians): how long, how far ahead and how high the body springs, how far the chest rears and
+  // rises, its jaw's rest (open), widest and the point of the lunge (0..1) where it snaps shut.
+  const LUNGE = { ms: 520, reach: 0.7, lift: 0.35, rear: 0.9, up: 0.12, open: 0.55, wide: 0.95, snap: 0.5 };
   // Lightning while the night is down: a strike every few seconds onto the bluff, its flash on the sky and its thunder.
   const STRIKE_GAP_MS = 5000, STRIKE_SPREAD_MS = 9000, BOLT_H = 46, BOLT_W = 9;
   const pg = (c, s, e = 1) => BL.models.particleGeometry(c, s, e);
@@ -107,6 +123,7 @@
     tagged: [pg("#cfe0ff", 0.09), pg("#96c8ff", 0.08), pg("#f4f7fb", 0.07)],
     zapped: [pg("#ffffff", 0.09), pg("#bfe0ff", 0.08), pg("#5aa8ff", 0.08), pg("#2a6cff", 0.07)],
     gorilla: [pg("#0f5a22", 0.12, 0.2), pg("#3dff66", 0.11), pg("#6dff8c", 0.1), pg("#093a15", 0.1, 0.1)],
+    skeleton: [pg("#ece4cf", 0.09), pg("#b9ad90", 0.08), pg("#fff8e6", 0.07), pg("#ff3b2f", 0.06)],
     boss: [pg("#f4f7fb", 0.22), pg("#dfe5ef", 0.18), pg("#c3ccdb", 0.15), pg("#ff3b2f", 0.15)],
     herald: [pg("#ff9a2e", 0.1), pg("#ffcf6b", 0.09), pg("#ff6a10", 0.08)]
   };
@@ -210,11 +227,13 @@
     // Every wall rises at once, RISE_AT after the click; the dusk starts with the click.
     const lapMs = RISE_AT + RISE_MS + SETTLE_MS, nightAt = 0;
     for (const s of stops) s.riseAt = RISE_AT;
-    // The herald's idle drift: a slow wandering ring round the pile, just off the ground, a function of the room's
-    // clock so every page has it in the same place.
+    // The herald's idle drift: a slow wandering ring outside GAME MODE's wall (`HERALD_OUT` past it, give or take
+    // `HERALD_SWAY`), just off the ground over the bluff, a function of the room's clock so every page has it in the
+    // same place; a turn every two minutes or so.
+    const HERALD_OUT = 2.5, HERALD_SWAY = 1, HERALD_TURN = 0.05;
     const HERALD_AT = { x: 0, y: 0, z: 0 };
     const idlePoint = (now) => {
-      const T = now / 1000, a = T * 0.13, r = 7.5 + 1.2 * Math.sin(T * 0.37);
+      const T = now / 1000, a = T * HERALD_TURN, r = hub.ringRadius + HERALD_OUT + HERALD_SWAY * Math.sin(T * 0.37);
       HERALD_AT.x = Math.sin(a) * r; HERALD_AT.z = -Math.cos(a) * r;
       HERALD_AT.y = island.surfaceAt(HERALD_AT.x, HERALD_AT.z) + 0.22 + 0.06 * Math.sin(T * 1.7);
       return HERALD_AT;
@@ -239,7 +258,7 @@
     const spots = Float64Array.from(spotList);
     // The banana pile, where the lightning drop hangs: reached within its platform and a step, as the platform grows.
     const PILE = { x: 0, z: 0, r: hub.pileRadius() + 0.9 };
-    const sim = SIM.create({ seed: fnv1a("ooga ghosts"), spots, lapMs, pile: PILE });
+    const sim = SIM.create({ seed: fnv1a("ooga ghosts"), spots, lapMs, pile: PILE, elixirs: hub.elixirSpots });
     const S = sim.state;
 
     // ---------- nodes ----------
@@ -252,9 +271,10 @@
     addChild(group, herald);
     const owner = (role, slot) => ({
       kind: "halloween", role, slot, priority: role === "herald" ? 3 : 2, weaponType: role === "herald" ? "object" : "enemy", active: role === "herald",
-      tooltip: () => role === "herald" ? coarse ? "A restless ghost · tap, club or shoot it to start the ghost hunt" : "A restless ghost · click, club or shoot it to start the ghost hunt"
-        : role === "boss" ? "THE BOSS · shoot him down" : role === "brute" ? "Gorilla · it leaps at you and slams the ground" : TIPS[sim.ghosts[slot].tier],
-      tap: () => { if (role === "herald") tapHerald(); }
+      tooltip: () => role === "herald" ? S.state === ST.GATHER ? coarse ? "The restless ghost · tap it to ready up" : "The restless ghost · click it to ready up" : "A restless ghost · shoot it to start the ghost hunt"
+        : role === "boss" ? "THE BOSS · shoot him down" : role === "brute" ? sim.brutes[slot].kind ? "Skeleton · it crawls after you" : "Gorilla · it leaps at you and slams the ground" : TIPS[sim.ghosts[slot].tier],
+      // Clicking the herald only readies a player in its lobby; only a shot wakes it (`hit`).
+      tap: () => { if (role === "herald" && S.state === ST.GATHER) tapHerald(); }
     });
     const heraldOwner = owner("herald", -1);
     hub.addTarget(herald, heraldOwner);
@@ -298,6 +318,8 @@
     const myMonkeys = new Float64Array(6);
     // Each player's glow (by their slot in the hunt), and when the monkeys last came to each.
     const playerGlows = pool(C.MAX_PLAYERS, null), giftAt = new Float64Array(C.MAX_PLAYERS).fill(-1e9);
+    // Whether each player held monkeys last frame, so losing them to a hit can shriek.
+    const monkeysHad = new Uint8Array(C.MAX_PLAYERS);
     let rockNext = 0, monkeysOn = false;
     // The graves: each player's gone down, the player it is for, where and which way it faces, when it rose and sank.
     const graveNodes = pool(MAX_GRAVES, MODELS.gravestone()), graveHeads = pool(MAX_GRAVES, null);
@@ -314,7 +336,7 @@
     const B = C.BRUTE, BP = SIM.BRUTE_PHASE;
     const rigs = [], bruteOwners = [];
     for (let i = 0; i < B.max; i++) {
-      const rig = BL.agent.create({ managed: true, form: "code", groundAt: () => 0 });
+      const rig = BL.agent.create({ managed: true, form: "code", groundAt: () => 0, scale: BRUTE_SCALE });
       rig.root.visible = false;
       rig.root.sightHidden = true;
       addChild(group, rig.root);
@@ -322,6 +344,33 @@
       for (const name in rig.parts) { const part = rig.parts[name]; if (part && part.geometry) hub.addTarget(part, o); }
       rigs.push(rig); bruteOwners.push(o);
     }
+    // The skeletons: a crawling upper body in each slot too (ghost-models.js `skeletonParts`), shown in place of the
+    // gorilla when the slot's `kind` is 1, every bone shootable. The chest leans up from the hips, its tail dragging and
+    // its arms pulling it along; `cycle` is the crawl's phase (0..1), the left arm half a cycle from the right.
+    const skels = [];
+    for (let i = 0; i < B.max; i++) {
+      const P = MODELS.skeletonParts(), o = bruteOwners[i];
+      const node = (geometry, x, y, z) => createNode({ geometry, position: { x, y, z } });
+      const root = createNode({ visible: false, sightHidden: true });
+      const torso = node(P.chest, 0, CRAWL.y, 0), tail = node(P.tail, 0, 0, -0.1), skull = node(P.skull, 0, 0.06, 0.5), jaw = node(P.jaw, 0, 0.03, 0);
+      const shL = node(P.upper, CRAWL.sx, CRAWL.sy, CRAWL.sz), shR = node(P.upper, -CRAWL.sx, CRAWL.sy, CRAWL.sz);
+      const foL = node(P.fore, 0, -CRAWL.l1, 0), foR = node(P.fore, 0, -CRAWL.l1, 0);
+      addChild(skull, jaw);
+      addChild(shL, foL);
+      addChild(shR, foR);
+      addChild(torso, tail, skull, shL, shR);
+      addChild(root, torso);
+      addChild(group, root);
+      for (const n of [torso, tail, skull, jaw, shL, shR, foL, foR]) hub.addTarget(n, o);
+      skels.push({ root, torso, tail, skull, jaw, shL, shR, foL, foR, cycle: 0 });
+    }
+    // The elixirs on the totems: each a sprite with its glow, and which were taken as last drawn.
+    const elixirNodes = pool(C.ELIXIR.max, null), elixirGlows = pool(C.ELIXIR.max, null);
+    let elixirsShown = 0, reviveShown = 0;
+    // A player brought back glows the elixir's orange for REVIVE_GLOW_MS, as a drop does where it lies: an aura round
+    // them and, on the ground at their feet, a pulsing glow with a ring rolling out of it.
+    const reviveAura = pool(1, null)[0], reviveHalo = pool(1, null)[0], revivePulse = pool(1, null)[0];
+    let reviveGlowFor = 0, reviveGlowAt = -1e9;
     const arriveBeams = pool(B.max, null), arriveGlows = pool(B.max, null), landFlashes = pool(B.max, null), landRings = pool(B.max * 2, null);
     const bruteShown = new Float64Array(B.max), brutePhase = new Int8Array(B.max), bruteLand = new Float64Array(B.max).fill(-1e9);
     const bruteSlam = new Float64Array(B.max), bruteX = new Float64Array(B.max), bruteZ = new Float64Array(B.max), bruteY = new Float64Array(B.max);
@@ -525,7 +574,11 @@
         if (hub.zoneOf(cave) === "outside" && inArena(p.x, feet, p.z)) { sim.present(myId(), p.x, feet, p.z); localHere = true; }
       }
       if (npcSync.role === "host") net.remotes.forEach(presentRemote);
+      // The debug stand-in (Shift+E) lies where it was laid until it is brought back (and a moment more), or the round ends.
+      if (bot.on && (!(S.state === ST.ACTIVE || S.state === ST.BOSS) || bot.dropAt && huntTime() >= bot.dropAt)) { bot.on = false; sim.debug.dropBot(); }
+      if (bot.on) sim.present(SIM.REVIVE_BOT, bot.x, bot.y, bot.z);
     };
+    const bot = { on: false, x: 0, y: 0, z: 0, dropAt: 0, head: "" };
 
     // ---------- this page's own Ooga in the hunt ----------
     let segShown = -1, knockT = 0, knockX = 0, knockZ = 0, groundedToast = false;
@@ -585,47 +638,12 @@
     };
 
     // ---------- HUD lines (rebuilt only when what they say changes) ----------
-    let topKey = -1, livesKey = -1, bannerKey = -1, bannerUp = false, hush = 0, healShown = 0;
-    const remaining = () => {
-      const r = sim.settings();
-      return r ? r.ghosts - S.spawned + sim.alive() : 0;
-    };
+    let bannerKey = -1, bannerUp = false, hush = 0;
     const drawHud = (t) => {
       const st = S.state;
       hud.show(st !== ST.IDLE && st !== ST.GATHER);
       drawLobby(t);
-      if (st === ST.IDLE) { topKey = livesKey = bannerKey = -1; return; }
-      // A round's start: the bar glows orange as it fills back.
-      if (S.healAt !== healShown) { healShown = S.healAt; if (S.healAt) hud.heal(); }
-      const left = st === ST.ACTIVE ? remaining() : 0;
-      const key = st * 100000 + S.round * 1000 + Math.min(999, left);
-      if (key !== topKey) {
-        topKey = key;
-        hud.top(st === ST.LAP ? "The ghost is sealing the island…" : st === ST.NIGHT ? "Night falls…" : st === ST.BOSS ? "The boss · shoot him down"
-          : st === ST.DAWN ? "Dawn comes back" : st === ST.ACTIVE ? `Round ${S.round} · ghosts ${left}` : `Round ${S.round}`);
-      }
-      const me = sim.playerById(myId()), cave = crew.player;
-      const frozenS = me && huntTime() < me.frozenUntil ? 1 : 0;
-      const shieldS = Math.max(0, Math.ceil((S.shieldUntil - t) / 1000)), slowS = Math.max(0, Math.ceil((S.slowUntil - t) / 1000));
-      const doubleS = me ? Math.max(0, Math.ceil((me.doubleUntil - t) / 1000)) : 0;
-      const where = waiting() ? 4 : !cave ? 1 : hub.gorillaActive() ? 2 : !localHere ? 3 : 0;
-      const lk = where * 1e9 + (me ? me.seg : 9) * 1e8 + frozenS * 1e6 + shieldS * 1e4 + slowS * 1e2 + doubleS + (me ? me.kills : 0) * 1e10;
-      if (lk !== livesKey) {
-        livesKey = lk;
-        hud.health(where ? -1 : frozenS ? 0 : me ? me.seg : C.PLAYER_SEGMENTS);
-        if (where === 4) hud.lives(coarse ? "Waiting room · you'll play the next game · drag to look round" : "Waiting room · you'll play the next game · W A S D to fly round", "away");
-        else if (where === 1) hud.lives("Pick an Ooga Booga to join the hunt", "away");
-        else if (where === 2) hud.lives("Gorillas can't hunt ghosts · pick an Ooga Booga", "away");
-        else if (where === 3) hud.lives("Behind a ghost wall · walk out to join", "away");
-        else if (frozenS) hud.lives(st === ST.BOSS ? "Down · until the hunt ends" : "Down · back when this round ends", "frozen");
-        else {
-          let line = `${me ? me.kills : 0} busted`;
-          if (shieldS) line += ` · shield ${shieldS} s`;
-          if (slowS) line += ` · ice ${slowS} s`;
-          if (doubleS) line += ` · double ${doubleS} s`;
-          hud.lives(line);
-        }
-      }
+      if (st === ST.IDLE) { bannerKey = -1; return; }
       const bossShow = st === ST.BOSS && S.bossOn;
       hud.boss(bossShow ? S.bossHp / Math.max(1, S.bossMax) : -1);
       const secs = st === ST.COUNTDOWN || st === ST.BREAK ? Math.max(0, Math.ceil((S.endsAt - t) / 1000)) : 0;
@@ -658,6 +676,8 @@
         guide.lend(driveTess);
         tessHolder = 0; tessGone = 0;
         clearIsland();
+        // GAME MODE's ring round the meadow stands up once the walls have risen.
+        hub.ringDelay((RISE_AT + RISE_MS) / 1000);
         hub.gameMode(true);
         cackled = beamed = rumbled = false;
         segShown = -1;
@@ -707,6 +727,12 @@
         if (S.pickKind === SIM.MONKEY_DROP) for (let i = 0; i < C.MAX_PLAYERS; i++) if (sim.players[i].on && sim.players[i].id === S.pickBy) giftAt[i] = S.pickAt;
         audio.play(DROP_CUES[S.pickKind]);
         hub.hud.toast(DROP_WORDS[S.pickKind]);
+      }
+      // A hit takes a player's monkeys away: the shriek. A slot reset (its `hitAt` back to 0) is no hit.
+      for (let i = 0; i < C.MAX_PLAYERS; i++) {
+        const q = sim.players[i], had = monkeysHad[i];
+        monkeysHad[i] = q.on && q.monkeys ? 1 : 0;
+        if (had && !monkeysHad[i] && q.on && q.hitAt) audio.play("shriek");
       }
       if (S.bombAt && S.bombAt !== bombShown) {
         bombShown = S.bombAt;
@@ -1107,8 +1133,8 @@
     // (`shake`, after every view is set) and put back before the next one (`unshake`).
     const SHAKE = { x: 0, y: 0, z: 0, tx: 0, ty: 0, tz: 0 };
     let quake = 0;
-    // A short jolt on top of the quake: a gorilla landing or slamming someone down.
-    let jolt = 0;
+    // A short jolt on top of the quake: a gorilla slamming someone down; and the seconds left of a gorilla's landing shake.
+    let jolt = 0, landShake = 0;
     const quakeOf = (t) => {
       const st = S.state;
       if (st === ST.LAP) {
@@ -1201,7 +1227,7 @@
       for (let i = 0; i < B.max; i++) {
         const b = sim.brutes[i], rig = rigs[i], o = bruteOwners[i], beam = arriveBeams[i], glow = arriveGlows[i], burst = landFlashes[i];
         if (!b.on) {
-          rig.root.visible = o.active = false;
+          rig.root.visible = skels[i].root.visible = o.active = false;
           beam.visible = glow.visible = burst.visible = landRings[i * 2].visible = landRings[i * 2 + 1].visible = false;
           bruteShown[i] = 0;
           continue;
@@ -1212,13 +1238,16 @@
           if (b.phase === BP.BEAM) audio.play("arrive");
         }
         const ground = island.surfaceAt(b.x, b.z);
-        // Dead, it bursts into green pixels.
+        // Dead, it bursts into green pixels (a skeleton into bone).
         if (b.dying) {
-          if (rig.root.visible) { explode(rig.root.position.x, rig.root.position.y, rig.root.position.z, BRUTE_H, PIXELS.gorilla, 40); audio.play("hit"); }
-          rig.root.visible = o.active = false;
+          const body = b.kind ? skels[i].root : rig.root;
+          if (body.visible) { explode(body.position.x, body.position.y, body.position.z, b.kind ? BONES_H : BRUTE_H, b.kind ? PIXELS.skeleton : PIXELS.gorilla, 40); audio.play("hit"); }
+          rig.root.visible = skels[i].root.visible = o.active = false;
           beam.visible = glow.visible = burst.visible = landRings[i * 2].visible = landRings[i * 2 + 1].visible = false;
           continue;
         }
+        if (b.kind) { rig.root.visible = false; drawSkeleton(i, b, ground, dt, t, now); continue; }
+        skels[i].root.visible = false;
         const since = t - b.phaseAt, pulse = 0.75 + 0.25 * Math.sin(now / 200);
         // The beam: down out of the sky to where it will land, held while it falls, gone soon after it lands.
         let column = 0, reach = 1;
@@ -1227,12 +1256,13 @@
         else if (b.phase === BP.SHAKE) column = Math.max(0, 1 - since / 600);
         sprite(beam, MODELS.beamOf(GREEN.core, GREEN.mid, GREEN.edge, false), b.x, ground + BEAM_TOP * (1 - reach), b.z, 1.4 * 4, BEAM_TOP * reach, column, false);
         sprite(glow, MODELS.glowDisc(GREEN.mid), b.x, ground + 0.03, b.z, 3.5, 3.5, b.phase <= BP.FALL ? 0.6 * pulse : 0, true);
-        // Landing: a double-points power-up twice the size, the land jolting under it.
+        // Dropping out of the beam it calls its "oogaa" on the way down.
+        if (brutePhase[i] < BP.FALL && b.phase >= BP.FALL) audio.play("oogaa");
+        // Landing: a double-points power-up twice the size, the land shaking under it.
         if (brutePhase[i] < BP.SHAKE && b.phase >= BP.SHAKE) {
           bruteLand[i] = t;
           audio.play("slam");
-          audio.play("oogaa");
-          jolt = Math.max(jolt, 0.6);
+          landShake = LAND_SHAKE_S;
           rig.beat();
           for (let k = 0; k < 24; k++) {
             const a = k * 0.9, rad = 0.6 + 0.12 * (k % 5);
@@ -1287,6 +1317,78 @@
       }
     };
 
+    // A skeleton: called down in a white beam, dropping with its arms flung up, landing in a puff of dust and crawling
+    // on, its jaw hanging open; in reach it lunges up at its player, arms out, and its jaw snaps shut on the bite. Each arm reaches its hand (two-bone IK in the chest's frame) along a path
+    // in the body's frame: planted and pulling back for `stance` of its cycle, lifted forward the rest.
+    const reachArm = (sh, fo, side, ty, tz, pitch, chestY) => {
+      const y = ty - chestY, c = Math.cos(pitch), s = Math.sin(pitch);
+      const dy = y * c - tz * s - CRAWL.sy, dz = y * s + tz * c - CRAWL.sz, L1 = CRAWL.l1, L2 = CRAWL.l2;
+      const d = clamp(Math.hypot(dy, dz), Math.abs(L1 - L2) + 1e-3, L1 + L2 - 1e-3);
+      const e = Math.acos((d * d - L1 * L1 - L2 * L2) / (2 * L1 * L2));
+      sh.rotation.x = Math.atan2(-dz, -dy) - Math.atan2(L2 * Math.sin(e), L1 + L2 * Math.cos(e));
+      sh.rotation.z = side * CRAWL.spread;
+      fo.rotation.x = e;
+    };
+    // Where a hand is `u` (0..1) through its cycle: HAND.y, HAND.z in the body's frame.
+    const HAND = { y: 0, z: 0 };
+    const handAt = (u) => {
+      if (u < CRAWL.stance) { HAND.z = CRAWL.front + (CRAWL.back - CRAWL.front) * (u / CRAWL.stance); HAND.y = CRAWL.plant; }
+      else { const k = (u - CRAWL.stance) / (1 - CRAWL.stance); HAND.z = CRAWL.back + (CRAWL.front - CRAWL.back) * k; HAND.y = CRAWL.plant + CRAWL.lift * Math.sin(Math.PI * k); }
+      return HAND;
+    };
+    const drawSkeleton = (i, b, ground, dt, t, now) => {
+      const k = skels[i], o = bruteOwners[i], since = t - b.phaseAt, pulse = 0.75 + 0.25 * Math.sin(now / 200);
+      let column = 0, reach = 1;
+      if (b.phase === BP.BEAM) { reach = Math.min(1, since / 300); column = 1; }
+      else if (b.phase === BP.FALL) column = 1;
+      else column = Math.max(0, 1 - (t - bruteLand[i]) / 600);
+      sprite(arriveBeams[i], MODELS.beamOf(WHITE.core, WHITE.mid, WHITE.edge, false), b.x, ground + BEAM_TOP * (1 - reach), b.z, 1.4 * 3, BEAM_TOP * reach, column, false);
+      sprite(arriveGlows[i], MODELS.glowDisc(WHITE.mid), b.x, ground + 0.03, b.z, 2.6, 2.6, b.phase <= BP.FALL ? 0.6 * pulse : 0, true);
+      landFlashes[i].visible = landRings[i * 2].visible = landRings[i * 2 + 1].visible = false;
+      if (brutePhase[i] <= BP.FALL && b.phase > BP.FALL) { bruteLand[i] = t; audio.play("thump"); fx.burst(b.x, ground + 0.1, b.z, 10, DIRT, 2.5); }
+      brutePhase[i] = b.phase;
+      const shown = b.phase >= BP.FALL;
+      k.root.visible = o.active = shown;
+      if (!shown) return;
+      const speed = dt > 0 ? Math.hypot(b.x - bruteX[i], b.z - bruteZ[i]) / dt : 0;
+      bruteX[i] = b.x; bruteZ[i] = b.z;
+      if (b.slamAt && b.slamAt !== bruteSlam[i]) { bruteSlam[i] = b.slamAt; audio.play("bite"); }
+      const zapped = b.struckAt > 0 && t >= b.struckAt, falling = b.phase === BP.FALL;
+      const crawling = b.phase === BP.CHASE && !zapped ? Math.min(1, speed / 1.5) : 0;
+      k.cycle = (k.cycle + Math.min(speed, 6) * dt * CRAWL.rate * (crawling > 0 ? 1 : 0)) % 1;
+      // The lunge: up and forward over LUNGE.ms and back down (`strike` its arc, 0..1..0), the jaw wide on the way up and
+      // snapping shut at the top.
+      const since0 = b.slamAt ? t - b.slamAt : Infinity, lunging = since0 < LUNGE.ms, u = lunging ? since0 / LUNGE.ms : 1;
+      const strike = lunging ? Math.sin(Math.PI * u) : 0, wave = Math.sin(k.cycle * Math.PI * 2);
+      // The chest rears up to strike; it rolls and lurches a little with each pull, and breathes while it waits.
+      const pitch = CRAWL.pitch + LUNGE.rear * strike, chestY = CRAWL.y + 0.025 * Math.abs(wave) * crawling + 0.012 * Math.sin(now / 420) * (1 - crawling) + LUNGE.up * strike;
+      k.torso.position.y = chestY;
+      k.torso.rotation.x = -pitch;
+      k.torso.rotation.z = 0.07 * wave * crawling;
+      k.tail.rotation.x = -0.35;
+      k.tail.rotation.y = -0.3 * Math.sin(k.cycle * Math.PI * 2 + 0.7) * crawling;
+      k.skull.rotation.x = pitch - 0.15;
+      k.skull.rotation.y = zapped ? (Math.random() - 0.5) * 0.6 : 0.12 * wave * crawling;
+      k.jaw.rotation.x = lunging ? (u < LUNGE.snap ? LUNGE.open + (LUNGE.wide - LUNGE.open) * u / LUNGE.snap : LUNGE.open * clamp((u - LUNGE.snap) / 0.3, 0, 1))
+        : LUNGE.open + (zapped ? Math.random() * 0.4 : 0.1 * Math.max(0, Math.sin(now / 90)));
+      if (falling) {
+        // Flung up as it drops.
+        k.shL.rotation.x = k.shR.rotation.x = -2.7; k.shL.rotation.z = CRAWL.spread; k.shR.rotation.z = -CRAWL.spread;
+        k.foL.rotation.x = k.foR.rotation.x = 0.3;
+      } else {
+        const hl = handAt(k.cycle), ly = hl.y, lz = hl.z, hr = handAt((k.cycle + 0.5) % 1);
+        reachArm(k.shL, k.foL, 1, ly + (CRAWL.strikeY - ly) * strike, lz + (CRAWL.strikeZ - lz) * strike, pitch, chestY);
+        reachArm(k.shR, k.foR, -1, hr.y + (CRAWL.strikeY - hr.y) * strike, hr.z + (CRAWL.strikeZ - hr.z) * strike, pitch, chestY);
+      }
+      const jit = zapped ? STRIKE_SHAKE * 2 : 0, r = k.root;
+      const ahead = LUNGE.reach * strike;
+      r.position.x = b.x + Math.sin(b.heading) * ahead + (Math.random() - 0.5) * jit; r.position.z = b.z + Math.cos(b.heading) * ahead + (Math.random() - 0.5) * jit;
+      r.position.y = ground + (falling ? Math.max(0, b.y) : LUNGE.lift * strike);
+      r.rotation.y = b.heading;
+      if (zapped && Math.random() < 0.4) fx.spawnParticle(ZAPS[Math.random() * 3 | 0], b.x + (Math.random() - 0.5) * 0.8, ground + Math.random() * BONES_H, b.z + (Math.random() - 0.5) * 0.8,
+        (Math.random() - 0.5) * 3, Math.random() * 2, (Math.random() - 0.5) * 3, 0.25, 4, 0, -50);
+    };
+
     // ---------- the monkeys ----------
     // Where a player stands and faces, and how tall their Ooga is: this page's own as it stands, another's as the room
     // last had it (false when nowhere).
@@ -1296,6 +1398,11 @@
       if (id === myId() && cave) {
         const p = cave.root.position;
         STANDS.x = p.x; STANDS.y = p.y - cave.baseY; STANDS.z = p.z; STANDS.yaw = cave.root.rotation.y; STANDS.h = cave.bodyHeight;
+        return true;
+      }
+      // The debug stand-in (Shift+E) lies where it was laid.
+      if (id === SIM.REVIVE_BOT && bot.on) {
+        STANDS.x = bot.x; STANDS.y = bot.y; STANDS.z = bot.z; STANDS.yaw = 0; STANDS.h = 1.5;
         return true;
       }
       const rec = net.remotes.get(id), body = rec && crew.cavemen.get(rec.body);
@@ -1358,8 +1465,10 @@
         test("ghost", i, view[i * 4], view[i * 4 + 3] + h * 0.5, view[i * 4 + 2], h * 0.45);
       }
       for (let i = 0; i < B.max; i++) {
-        const b = sim.brutes[i], r = rigs[i].root;
-        if (b.on && !b.dying && r.visible) test("brute", i, r.position.x, r.position.y + BRUTE_H * 0.5, r.position.z, BRUTE_H * 0.55);
+        const b = sim.brutes[i], r = b.kind ? skels[i].root : rigs[i].root, h = b.kind ? BONES_H : BRUTE_H;
+        // A skeleton is long and low: its sphere sits a little ahead of its hips, round its chest and arms.
+        const ahead = b.kind ? 0.25 : 0, x = r.position.x + Math.sin(b.heading) * ahead, z = r.position.z + Math.cos(b.heading) * ahead;
+        if (b.on && !b.dying && r.visible) test("brute", i, x, r.position.y + h * 0.5, z, b.kind ? 0.6 : h * 0.55);
       }
       if (bossNode.visible) test("boss", -1, S.bossX, BOSS_Y + BOSS_H * 0.5, S.bossZ, BOSS_H * 0.4);
       return ROCK_HIT.slot >= 0 || ROCK_HIT.role === "boss" && best < ROCK_RANGE;
@@ -1422,7 +1531,7 @@
       return node;
     };
     const headOf = (id) => {
-      const name = id === myId() && crew.player ? crew.player.traits.name : net.remotes.get(id)?.body;
+      const name = id === myId() && crew.player ? crew.player.traits.name : id === SIM.REVIVE_BOT ? bot.head : net.remotes.get(id)?.body;
       const cave = name && crew.cavemen.get(name);
       if (!cave || !cave.parts.head) return null;
       let head = heads.get(name);
@@ -1435,12 +1544,13 @@
       const p = sim.playerById(id);
       return !!p && S.state >= ST.COUNTDOWN && S.state <= ST.DEFEAT && huntTime() < p.frozenUntil;
     };
-    let viewHeld = false, hidMine = null;
+    let viewHeld = false, hidMine = null, downYaw = 0;
     // Gives the view and this page's Ooga back (a hunt ending, the island left).
     const letGo = () => {
       spectating = false;
       if (viewHeld) { viewHeld = false; hub.holdView(false); }
       if (hidMine) { hidMine.root.visible = true; hidMine = null; }
+      downYaw = 0;
     };
     const drawGraves = (dt, t) => {
       for (let i = 0; i < MAX_GRAVES; i++) {
@@ -1456,7 +1566,7 @@
           for (const c of holder.children.slice()) removeChild(holder, c);
           const head = headOf(q.id);
           if (head) { if (head.parent) removeChild(head.parent, head); addChild(holder, head); }
-          audio.play("thump"); audio.play("rumble", 0.8);
+          audio.play("thump"); audio.play("rumble", 0.8); audio.play("down");
           fx.burst(STANDS.x, graveAt[o + 1] + 0.2, STANDS.z, 14, DIRT, 2.4);
         }
         if (!isDown && graveFor[i] && !graveSank[i]) graveSank[i] = t;
@@ -1475,15 +1585,183 @@
       else if (hidMine) { hidMine.root.visible = true; hidMine = null; }
       let slot = -1;
       if (mine) for (let i = 0; i < MAX_GRAVES; i++) if (graveFor[i] === me.id) slot = i;
-      if (slot >= 0 && !viewHeld) { viewHeld = true; hub.holdView(true); }
+      if (slot >= 0 && !viewHeld) { viewHeld = true; downYaw = 0; hub.holdView(true); }
       else if (slot < 0 && viewHeld) { viewHeld = false; hub.holdView(false); }
       if (slot >= 0) {
-        const o = slot * 3, yaw = graveNodes[slot].rotation.y, k = 1 - Math.exp(-GRAVE_PAN * dt);
+        // Down while others play on: the view stands before the grave, and the turn keys (or a stick) swing it round
+        // the grave to watch the hunt on every side.
+        downYaw += hub.heldTurn() * GRAVE_TURN * dt;
+        const o = slot * 3, yaw = graveNodes[slot].rotation.y + downYaw, k = 1 - Math.exp(-GRAVE_PAN * dt);
         const ex = graveAt[o] + Math.sin(yaw) * GRAVE_VIEW_BACK, ey = graveAt[o + 1] + GRAVE_VIEW_UP, ez = graveAt[o + 2] + Math.cos(yaw) * GRAVE_VIEW_BACK;
         const p = camera.position, tg = camera.target;
         p.x += (ex - p.x) * k; p.y += (ey - p.y) * k; p.z += (ez - p.z) * k;
         tg.x += (graveAt[o] - tg.x) * k; tg.y += (graveAt[o + 1] + MODELS.GRAVE_TOP * 0.8 - tg.y) * k; tg.z += (graveAt[o + 2] - tg.z) * k;
       }
+    };
+
+    // ---------- the elixirs ----------
+    // Each untaken one glows on its totem's front while a round is fought, bobbing; one taken bursts into embers where
+    // it hung, and a player brought back stands up in a burst of its light.
+    const drawElixirs = (now) => {
+      const on = S.state === ST.ACTIVE || S.state === ST.BOSS, spots = hub.elixirSpots, gone = S.elixirsTaken & ~elixirsShown;
+      for (let i = 0; i < elixirNodes.length; i++) {
+        const at = spots[i];
+        if (gone & (1 << i) && at) { fx.burst(at.x, at.y, at.z, 16, EMBERS, 2.2); audio.play("elixir"); }
+        if (!on || !at || S.elixirsTaken & (1 << i)) { elixirNodes[i].visible = elixirGlows[i].visible = false; continue; }
+        const bob = Math.sin(now / 520 + i * 1.9) * 0.06, pulse = 0.75 + 0.25 * Math.sin(now / 260 + i);
+        sprite(elixirGlows[i], MODELS.glowDisc(ELIXIR_GLOW), at.x, at.y + bob - 0.45, at.z, 1.1 * pulse, 1.1 * pulse, 0.55 * pulse, false);
+        sprite(elixirNodes[i], MODELS.elixir(), at.x, at.y + bob - 0.25, at.z, 0.5, 0.5, 1, false);
+      }
+      elixirsShown = S.elixirsTaken;
+      if (S.reviveAt && S.reviveAt !== reviveShown) {
+        reviveShown = S.reviveAt;
+        const at = playerAt(S.reviveOf);
+        audio.play("revived");
+        reviveGlowFor = S.reviveOf; reviveGlowAt = now;
+        if (S.reviveOf === SIM.REVIVE_BOT) bot.dropAt = huntTime() + REVIVE_GLOW_MS;
+        if (at) fx.sayAt(at.x, at.y + 2.2, at.z, "I'm back!", 2);
+      }
+      drawReviveGlow(now);
+    };
+    const REVIVE_GLOW_MS = 3000;
+    const drawReviveGlow = (now) => {
+      const k = clamp(1 - (now - reviveGlowAt) / REVIVE_GLOW_MS, 0, 1);
+      if (k <= 0 || !standing(reviveGlowFor)) { reviveAura.visible = reviveHalo.visible = revivePulse.visible = false; return; }
+      // Full for its first two thirds, fading over the last.
+      const fade = Math.min(1, k * 3), pulse = 0.75 + 0.25 * Math.sin(now / 160), size = GLOW_SIZE * STANDS.h * 1.15 * pulse;
+      const ring = (now / RING_MS) % 1, ringR = 0.5 * (1.2 + 2.6 * ring), ground = STANDS.y;
+      sprite(reviveAura, MODELS.glowDisc(ELIXIR_GLOW), STANDS.x, ground + STANDS.h * 0.5, STANDS.z, size, size, 0.95 * fade, false);
+      sprite(reviveHalo, MODELS.glowDisc(ELIXIR_GLOW), STANDS.x, ground + 0.03, STANDS.z, 3.4 * pulse, 3.4 * pulse, 0.6 * fade, true);
+      sprite(revivePulse, MODELS.ringOf(ELIXIR_GLOW), STANDS.x, ground + 0.04, STANDS.z, ringR * 2 / 0.9, ringR * 2 / 0.9, 0.75 * (1 - ring) * fade, true);
+    };
+
+    // ---------- the minimap ----------
+    // An FPS radar, bottom left, turning with the view so where the camera looks is always up, centred on the visitor's
+    // Ooga (the camera's target when there is none, or under a grave): the island from above (painted once from the
+    // terrain), the game's wall, the pile, the untaken elixirs, a cone for the field of view, the other players (blue;
+    // grey while down), the ghosts (red, bigger for a general or wraith), the gorillas (green), the skeletons (bone) and
+    // the boss, with N E S W round the rim. Nothing it draws a frame allocates.
+    const MAP = { range: 26, half: 30, size: 192 };
+    const MAP_INK = { ring: "rgba(255,138,31,0.55)", pile: "#ffd23f", elixir: "#ff8a1f", player: "#4fa3ff", down: "#8a8f99", ghost: "#ff453a",
+      gorilla: "#3dff66", bones: "#ece4cf", boss: "#ff2a1f", me: "#ffffff", edge: "rgba(0,0,0,0.75)", letter: "#f3e9d2", north: "#ff8a1f" };
+    // The compass points: a letter and its way on the island (north is -z, the bearing's zero; east +x).
+    const COMPASS = [["N", 0, -1], ["E", 1, 0], ["S", 0, 1], ["W", -1, 0]];
+    let mapTerrain = null, mapCone = null, mapConeFor = 0;
+    // The island from above, once: open sky dark, the meadow a dark moss, paths a pale earth, rock lighter as it rises.
+    const terrainPicture = () => {
+      const n = MAP.size, canvas = document.createElement("canvas");
+      canvas.width = canvas.height = n;
+      const g = canvas.getContext("2d"), img = g.createImageData(n, n), d = img.data;
+      for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+        const x = -MAP.half + (i + 0.5) / n * MAP.half * 2, z = -MAP.half + (j + 0.5) / n * MAP.half * 2, o = (j * n + i) * 4;
+        if (!island.onLand(x, z)) { d[o + 3] = 0; continue; }
+        const h = island.surfaceAt(x, z), k = clamp(h / 8, 0, 1);
+        if (island.isPath(x, z)) { d[o] = 104; d[o + 1] = 96; d[o + 2] = 80; }
+        else if (h < 0.3) { d[o] = 46; d[o + 1] = 60; d[o + 2] = 48; }
+        else { d[o] = 72 + 90 * k; d[o + 1] = 74 + 88 * k; d[o + 2] = 76 + 84 * k; }
+        d[o + 3] = 235;
+      }
+      g.putImageData(img, 0, 0);
+      return canvas;
+    };
+    // Where (x, z) falls on the map: MAP_AT.x, MAP_AT.y in its pixels.
+    const MAP_AT = { x: 0, y: 0 };
+    let mapCx = 0, mapCz = 0, mapSin = 0, mapCos = 1, mapScale = 1, mapMid = 0;
+    const mapAt = (x, z) => {
+      const dx = x - mapCx, dz = z - mapCz;
+      MAP_AT.x = mapMid + (-dx * mapCos + dz * mapSin) * mapScale;
+      MAP_AT.y = mapMid - (dx * mapSin + dz * mapCos) * mapScale;
+      return MAP_AT;
+    };
+    const dot = (g, x, z, r, ink) => {
+      const p = mapAt(x, z), far = Math.hypot(p.x - mapMid, p.y - mapMid);
+      if (far > mapMid - 2) return;
+      g.beginPath();
+      g.arc(p.x, p.y, r, 0, TAU);
+      g.fillStyle = ink;
+      g.fill();
+      g.lineWidth = 1;
+      g.strokeStyle = MAP_INK.edge;
+      g.stroke();
+    };
+    const drawMinimap = (t) => {
+      const map = hud.map, canvas = map.canvas;
+      if (canvas.hidden || !canvas.width) return;
+      if (!mapTerrain) mapTerrain = terrainPicture();
+      const g = canvas.getContext("2d"), w = canvas.width, k = w / 180;
+      const cave = crew.player, mine = cave && cave.root.visible;
+      mapCx = mine ? cave.root.position.x : camera.target.x; mapCz = mine ? cave.root.position.z : camera.target.z;
+      const yaw = Math.atan2(camera.target.x - camera.position.x, camera.target.z - camera.position.z);
+      mapSin = Math.sin(yaw); mapCos = Math.cos(yaw); mapMid = w / 2; mapScale = mapMid / MAP.range;
+      g.setTransform(1, 0, 0, 1, 0, 0);
+      g.clearRect(0, 0, w, w);
+      g.save();
+      g.beginPath();
+      g.arc(mapMid, mapMid, mapMid, 0, TAU);
+      g.clip();
+      // The island, the wall and the pile in the world's own frame, turned and scaled onto the map.
+      const a = -mapCos * mapScale, b = -mapSin * mapScale, c = mapSin * mapScale, d = -mapCos * mapScale;
+      g.setTransform(a, b, c, d, mapMid - (a * mapCx + c * mapCz), mapMid - (b * mapCx + d * mapCz));
+      g.globalAlpha = 0.9;
+      g.drawImage(mapTerrain, -MAP.half, -MAP.half, MAP.half * 2, MAP.half * 2);
+      g.globalAlpha = 1;
+      g.beginPath();
+      g.arc(0, 0, hub.ringRadius, 0, TAU);
+      g.lineWidth = 2 / mapScale;
+      g.strokeStyle = MAP_INK.ring;
+      g.stroke();
+      g.setTransform(1, 0, 0, 1, 0, 0);
+      // The field of view: a cone up from the middle, as wide as the camera sees, fading out.
+      const aspect = renderer.size.height ? renderer.size.width / renderer.size.height : 1, half = Math.atan(Math.tan(camera.fov / 2) * aspect);
+      if (!mapCone || mapConeFor !== w) {
+        mapCone = g.createRadialGradient(mapMid, mapMid, 0, mapMid, mapMid, mapMid);
+        mapCone.addColorStop(0, "rgba(255,255,255,0.42)"); mapCone.addColorStop(1, "rgba(255,255,255,0)");
+        mapConeFor = w;
+      }
+      g.beginPath();
+      g.moveTo(mapMid, mapMid);
+      g.arc(mapMid, mapMid, mapMid, -Math.PI / 2 - half, -Math.PI / 2 + half);
+      g.closePath();
+      g.fillStyle = mapCone;
+      g.fill();
+      dot(g, 0, 0, 3.5 * k, MAP_INK.pile);
+      const fighting = S.state === ST.ACTIVE || S.state === ST.BOSS;
+      if (fighting) for (let i = 0; i < hub.elixirSpots.length && i < C.ELIXIR.max; i++) if (!(S.elixirsTaken & (1 << i))) dot(g, hub.elixirSpots[i].x, hub.elixirSpots[i].z, 3 * k, MAP_INK.elixir);
+      for (let i = 0; i < C.MAX_GHOSTS; i++) {
+        const q = sim.ghosts[i];
+        if (q.on && !q.dying && ghostNodes[i].visible) dot(g, view[i * 4], view[i * 4 + 2], (q.tier === SIM.TIER.PLAIN ? 2.6 : 3.6) * k, MAP_INK.ghost);
+      }
+      for (let i = 0; i < B.max; i++) {
+        const q = sim.brutes[i];
+        if (q.on && !q.dying && q.phase >= BP.FALL) dot(g, q.x, q.z, (q.kind ? 3 : 4.2) * k, q.kind ? MAP_INK.bones : MAP_INK.gorilla);
+      }
+      if (S.bossOn && !S.bossDyingAt) dot(g, S.bossX, S.bossZ, 6 * k, MAP_INK.boss);
+      const me = myId();
+      for (const q of sim.players) {
+        if (!q.on || q.id === me) continue;
+        const at = playerAt(q.id);
+        if (at) dot(g, at.x, at.z, 3.4 * k, t < q.frozenUntil ? MAP_INK.down : MAP_INK.player);
+      }
+      // The visitor: an arrow at the middle, pointing the way they look.
+      g.beginPath();
+      g.moveTo(mapMid, mapMid - 7 * k); g.lineTo(mapMid + 5 * k, mapMid + 5 * k); g.lineTo(mapMid, mapMid + 2.5 * k); g.lineTo(mapMid - 5 * k, mapMid + 5 * k);
+      g.closePath();
+      g.fillStyle = MAP_INK.me;
+      g.fill();
+      g.lineWidth = 1.5;
+      g.strokeStyle = MAP_INK.edge;
+      g.stroke();
+      // The compass round the rim.
+      g.font = map.font;
+      g.textAlign = "center";
+      g.textBaseline = "middle";
+      const rim = mapMid - 9 * k;
+      for (let i = 0; i < COMPASS.length; i++) {
+        const point = COMPASS[i], ex = point[1], ez = point[2], px = -ex * mapCos + ez * mapSin, py = -(ex * mapSin + ez * mapCos);
+        g.fillStyle = i ? MAP_INK.letter : MAP_INK.north;
+        g.fillText(point[0], mapMid + px * rim, mapMid + py * rim);
+      }
+      g.restore();
     };
 
     // ---------- the storm ----------
@@ -1538,7 +1816,7 @@
         strikeOne(i, g.on ? g.struckAt : 0, view[i * 4], view[i * 4 + 3], view[i * 4 + 2], t, now);
       }
       for (let i = 0; i < C.BRUTE.max; i++) {
-        const b = sim.brutes[i], p = rigs[i].root.position;
+        const b = sim.brutes[i], p = (b.kind ? skels[i] : rigs[i]).root.position;
         strikeOne(C.MAX_GHOSTS + i, b.on ? b.struckAt : 0, p.x, p.y, p.z, t, now);
       }
       strikeOne(STRIKES - 1, S.bossOn ? S.bossStruckAt : 0, S.bossX, BOSS_Y, S.bossZ, t, now);
@@ -1593,7 +1871,9 @@
       audio.music(musicTime);
       hud.player(musicTime ? audio.nowPlaying : null, audio.musicOn, audio.tracks > 1);
       jolt = Math.max(0, jolt - dt * 2.2);
-      quake = Math.max(quakeOf(t), jolt);
+      landShake = Math.max(0, landShake - dt);
+      // The landing shake holds for its second, easing off over the last quarter of one.
+      quake = Math.max(quakeOf(t), jolt, LAND_SHAKE * Math.min(1, landShake / 0.25));
       if (S.state >= ST.LAP && S.state <= ST.DEFEAT) armHunter(crew.player);
       dim += clamp((S.bossOn && S.state === ST.BOSS ? 1 : 0) - dim, -dt / 1.5, dt / 1.5);
       hush += clamp((bannerUp && S.state !== ST.IDLE ? 1 : 0) - hush, -dt / BANNER_OUT_S, dt / BANNER_IN_S);
@@ -1610,6 +1890,7 @@
         drawPowers(t);
         drawBeams(dt, t, now);
         drawGraves(dt, t);
+        drawElixirs(now);
         drawBubbles(t, now);
         drawBrutes(dt, t, now);
         drawMonkeys(now);
@@ -1620,11 +1901,13 @@
       } else {
         for (const n of ghostNodes) n.visible = false;
         bossNode.visible = false;
-        for (const list of [dropNodes, auras, halos, pulses, dropBeams, streaks, scorches, mists, powerColumns, powerFlashes, powerRings, orbNodes, arriveBeams, arriveGlows, landFlashes, landRings, dropColumns, bubbles, strikeNodes, strikeGlows, monkeyNodes, rockNodes, graveNodes, playerGlows]) for (const n of list) n.visible = false;
+        for (const list of [dropNodes, auras, halos, pulses, dropBeams, streaks, scorches, mists, powerColumns, powerFlashes, powerRings, orbNodes, arriveBeams, arriveGlows, landFlashes, landRings, dropColumns, bubbles, strikeNodes, strikeGlows, monkeyNodes, rockNodes, graveNodes, playerGlows, elixirNodes, elixirGlows]) for (const n of list) n.visible = false;
+        reviveAura.visible = reviveHalo.visible = revivePulse.visible = false;
         rockAt.fill(-1); graveFor.fill(0); giftAt.fill(-1e9);
         letGo();
         boltDrop.visible = false; strikeFlash = 0;
         for (const rig of rigs) rig.root.visible = false;
+        for (const k of skels) k.root.visible = false;
         boltNode.visible = boltGlow.visible = false;
         flash = 0;
         for (const n of beams) n.visible = false;
@@ -1638,6 +1921,7 @@
       }
       drawRing(dt);
       drawHud(t);
+      drawMinimap(t);
       const cave = crew.player;
       if (sealedCount && cave && cave.jet) {
         hub.dropJetpack(cave);
@@ -1649,8 +1933,103 @@
 
     // ---------- the hub's hooks ----------
     const BAR = { x: 0, y: 0 };
+    // The visitor's own health while a round is in play (a round, or the boss's fight): a cell a hit point on a little
+    // plank sign held over their Ooga's head in the lobby card's wood, green, red at two or fewer, filling back a cell
+    // at a time in an orange glow as a round starts. None for anyone not hunting with an Ooga, nor while down. An
+    // elixir carried bobs beside it (a revive under way shows as a ring over the grave, `drawReviveRings`). In first
+    // person, or with the head off screen, the same sign stays just below the crosshair.
+    const HEALTH = { cell: 13, cellH: 7, gap: 3, pad: 5, lift: 0.45, glowMs: 1800, stepMs: 200 };
+    const WOOD = { edge: "#4a3319", plank: "#a9773f", wood: "#8a6236", nail: "#3a2a18", empty: "rgba(0,0,0,0.5)", on: "#3ce65a", low: "#ff453a", glow: "#ff8a1f" };
+    const drawHealth = (ctx2d, project) => {
+      if (S.state !== ST.ACTIVE && S.state !== ST.BOSS) return;
+      const me = sim.playerById(myId()), t = huntTime();
+      if (me && t < me.frozenUntil) return;
+      if (!me || !crew.player || waiting() || hub.gorillaActive() || !localHere || !standing(me.id)) return;
+      const n = C.PLAYER_SEGMENTS, w = n * HEALTH.cell + (n - 1) * HEALTH.gap + HEALTH.pad * 2, h = HEALTH.cellH + HEALTH.pad * 2;
+      const img = me.elixir ? MODELS.picture("elixir") : null, ih = h + 16, iw = img ? ih * img.naturalWidth / img.naturalHeight : 0;
+      const p = crew.player.parts.head.cameraHidden ? null : project(STANDS.x, STANDS.y + STANDS.h + HEALTH.lift, STANDS.z);
+      const size = renderer.size, extra = img ? iw + 5 : 0, vertical = img ? 10 : 0;
+      const inView = p && p.x - w / 2 >= 12 && p.x + w / 2 + extra <= size.width - 12
+        && p.y - h - vertical >= 12 && p.y + vertical <= size.height - 12;
+      const x = Math.round((inView ? p.x : size.width / 2) - w / 2), y = Math.round(inView ? p.y - h : size.height / 2 + 48), half = Math.round(h / 2);
+      const since = S.healAt ? t - S.healAt : Infinity, glow = clamp(1 - since / HEALTH.glowMs, 0, 1);
+      if (glow > 0) {
+        ctx2d.globalAlpha = glow;
+        ctx2d.shadowColor = WOOD.glow;
+        ctx2d.shadowBlur = 18 * glow;
+        ctx2d.fillStyle = WOOD.glow;
+        ctx2d.fillRect(x - 2, y - 2, w + 4, h + 4);
+        ctx2d.shadowBlur = 0;
+        ctx2d.globalAlpha = 1;
+      }
+      // The sign: an edge, two planks with a seam between, a nail in each corner.
+      ctx2d.fillStyle = WOOD.edge;
+      ctx2d.fillRect(x, y, w, h);
+      ctx2d.fillStyle = WOOD.plank;
+      ctx2d.fillRect(x + 2, y + 2, w - 4, half - 2);
+      ctx2d.fillStyle = WOOD.wood;
+      ctx2d.fillRect(x + 2, y + half + 1, w - 4, h - half - 3);
+      ctx2d.fillStyle = WOOD.nail;
+      ctx2d.fillRect(x + 3, y + 3, 2, 2); ctx2d.fillRect(x + w - 5, y + 3, 2, 2);
+      ctx2d.fillRect(x + 3, y + h - 5, 2, 2); ctx2d.fillRect(x + w - 5, y + h - 5, 2, 2);
+      const lit = me.seg <= 2 ? WOOD.low : WOOD.on;
+      for (let i = 0; i < n; i++) {
+        const on = i < me.seg && (glow <= 0 || since >= i * HEALTH.stepMs);
+        ctx2d.fillStyle = on ? lit : WOOD.empty;
+        ctx2d.fillRect(x + HEALTH.pad + i * (HEALTH.cell + HEALTH.gap), y + HEALTH.pad, HEALTH.cell, HEALTH.cellH);
+      }
+      if (img) {
+        ctx2d.shadowColor = WOOD.glow;
+        ctx2d.shadowBlur = 10;
+        ctx2d.drawImage(img, x + w + 5, Math.round(y + h / 2 - ih / 2 + Math.sin(t / 300) * 2), iw, ih);
+        ctx2d.shadowBlur = 0;
+      }
+    };
+    // A revive under way, for everyone: over the grave of the one being brought back, a dark disc and an orange ring
+    // filling clockwise from the top over ELIXIR.reviveMs, the whole seconds left in its middle.
+    const COUNTDOWN = ["1", "2", "3", "4", "5", "6", "7", "8", "9"], RING_R = 18, RING_FONT = "700 15px sans-serif";
+    const drawReviveRings = (ctx2d, project, t) => {
+      for (const q of sim.players) {
+        if (!q.on || !q.elixir || !q.reviveTarget) continue;
+        let slot = -1;
+        for (let i = 0; i < MAX_GRAVES; i++) if (graveFor[i] === q.reviveTarget) slot = i;
+        if (slot < 0) continue;
+        const o = slot * 3, p = project(graveAt[o], graveAt[o + 1] + MODELS.GRAVE_TOP + 0.75, graveAt[o + 2]);
+        if (!p) continue;
+        const k = clamp((t - q.reviveSince) / C.ELIXIR.reviveMs, 0, 1), x = Math.round(p.x), y = Math.round(p.y);
+        const left = clamp(Math.ceil(C.ELIXIR.reviveMs * (1 - k) / 1000), 1, COUNTDOWN.length);
+        ctx2d.save();
+        ctx2d.beginPath();
+        ctx2d.arc(x, y, RING_R + 5, 0, TAU);
+        ctx2d.fillStyle = "rgba(20,12,4,0.72)";
+        ctx2d.fill();
+        ctx2d.lineWidth = 5;
+        ctx2d.beginPath();
+        ctx2d.arc(x, y, RING_R, 0, TAU);
+        ctx2d.strokeStyle = "rgba(255,138,31,0.25)";
+        ctx2d.stroke();
+        if (k > 0) {
+          ctx2d.lineCap = "round";
+          ctx2d.shadowColor = WOOD.glow;
+          ctx2d.shadowBlur = 10;
+          ctx2d.beginPath();
+          ctx2d.arc(x, y, RING_R, -Math.PI / 2, -Math.PI / 2 + TAU * k);
+          ctx2d.strokeStyle = WOOD.glow;
+          ctx2d.stroke();
+          ctx2d.shadowBlur = 0;
+        }
+        ctx2d.font = RING_FONT;
+        ctx2d.textAlign = "center";
+        ctx2d.textBaseline = "middle";
+        ctx2d.fillStyle = "#ffd9a8";
+        ctx2d.fillText(COUNTDOWN[left - 1], x, y + 1);
+        ctx2d.restore();
+      }
+    };
     const drawOverlay = (ctx2d, project) => {
       if (S.state === ST.IDLE) return;
+      drawHealth(ctx2d, project);
+      drawReviveRings(ctx2d, project, huntTime());
       for (let i = 0; i < C.MAX_GHOSTS; i++) {
         const g = sim.ghosts[i];
         if (!g.on || g.dying || g.hp >= C.HP[g.tier] || !ghostNodes[i].visible) continue;
@@ -1666,11 +2045,11 @@
         ctx2d.globalAlpha = 1;
       }
       for (let i = 0; i < B.max; i++) {
-        const b = sim.brutes[i], rig = rigs[i];
-        if (!b.on || b.dying || b.hp >= B.hp || !rig.root.visible) continue;
-        const r = rig.root.position, p = project(r.x, r.y + BRUTE_H + 0.3, r.z);
+        const b = sim.brutes[i], root = b.kind ? skels[i].root : rigs[i].root, max = b.kind ? C.BONES.hp : B.hp;
+        if (!b.on || b.dying || b.hp >= max || !root.visible) continue;
+        const r = root.position, p = project(r.x, r.y + (b.kind ? BONES_H : BRUTE_H) + 0.3, r.z);
         if (!p) continue;
-        const w = 48, frac = b.hp / B.hp;
+        const w = b.kind ? 30 : 48, frac = b.hp / max;
         ctx2d.globalAlpha = 0.85;
         ctx2d.fillStyle = "rgba(0,0,0,0.55)";
         ctx2d.fillRect(p.x - w / 2 - 1, p.y - 4, w + 2, 6);
@@ -1696,12 +2075,12 @@
       if (hitCount === HIT_SLOTS) { hitSentAt = 0; flushHits(clock()); }
       hitIds[hitCount] = id; hitDamage[hitCount++] = damage;
     };
-    /** A weapon landed on the herald, a ghost or the boss (the hub's weaponImpact). */
-    const hit = (source, h, power, byPlayer) => {
+    /** A weapon landed on the herald, a ghost or the boss (the hub's weaponImpact); `shot` when a round did it. */
+    const hit = (source, h, power, byPlayer, shot = false) => {
       const o = h.owner;
       if (!byPlayer) return;
-      // Clubbing or shooting the herald wakes it, as clicking it does.
-      if (o.role === "herald") { tapHerald(); return; }
+      // Only a shot wakes the herald; the rest of a burst must not ready the visitor in the lobby it just opened.
+      if (o.role === "herald") { if (shot && S.state === ST.IDLE) tapHerald(); return; }
       hitAs(o.role, o.slot, h.x, h.y, h.z, Math.max(1, Math.min(20, Math.round(power * 4))));
     };
     /** `damage` to the ghost or gorilla in `slot`, or the boss, landing at (x, y, z), for this page's player. */
@@ -1750,6 +2129,22 @@
       else if (what === "unfreeze") { sim.debug.unfreeze(me); hub.hud.toast("Debug · thawed"); }
       else if (what === "kills") { sim.debug.kills(me, 10); hub.hud.toast("Debug · +10 kills"); }
       else if (what === "gorilla") hub.hud.toast(sim.debug.gorilla(me) ? "Debug · a gorilla" : "Debug · gorillas come only while a round runs");
+      else if (what === "skeleton") hub.hud.toast(sim.debug.skeleton(me) ? "Debug · a skeleton" : "Debug · skeletons come only while a round runs");
+      else if (what === "revive") {
+        // An elixir, and a stand-in hunter down a step in front of the visitor's Ooga: stand still to watch the revive.
+        const cave = crew.player;
+        if (cave) {
+          const p = cave.root.position, h = cave.root.rotation.y;
+          bot.x = p.x + Math.sin(h) * 1.4; bot.y = p.y - cave.baseY; bot.z = p.z + Math.cos(h) * 1.4;
+        }
+        bot.on = !!cave && sim.debug.revive(me, bot.x, bot.z);
+        bot.dropAt = 0;
+        // Its grave wears another Ooga's head from the roster (any but the visitor's own).
+        if (bot.on && !bot.head) for (const name of crew.cavemen.keys()) if (name !== cave.traits.name) { bot.head = name; break; }
+        // Toasts stand down in GAME MODE, so the answer is said in the world.
+        if (bot.on) fx.sayAt(bot.x, bot.y + 2, bot.z, "Debug · down here! Stand by me with the elixir", 3);
+        else if (cave) fx.sayAt(cave.root.position.x, cave.root.position.y + 2.2, cave.root.position.z, "Debug · revives only while a round runs", 2.5);
+      }
       return true;
     };
     /** The visitor's own rifle fired, from `from` toward `to` (the hub's shot hook): its sound, and the monkeys' rocks. */

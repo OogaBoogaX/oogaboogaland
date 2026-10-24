@@ -26,7 +26,7 @@
     if (loading) loading.catch(() => {});
     return loading;
   };
-  const CLIPS = ["wave", "kaboom", "screech", "freeze", "apples", "double", "banana", "ooga", "landing", "network", "tessZap", "tessScream"];
+  const CLIPS = ["wave", "kaboom", "screech", "freeze", "apples", "double", "banana", "ooga", "landing", "network", "tessZap", "tessScream", "monkeyGet", "choir", "gameOver"];
 
   const decode = (ctx, base64) => {
     const raw = atob(base64), bytes = new Uint8Array(raw.length);
@@ -170,8 +170,26 @@
         burst(w, t + 0.08, 2.6, 520, 60, 0.45, 2.4);
         tone(w, t + 0.05, "sine", 55, 30, 2.4, 0.9, 0.15, 2.6);
       },
-      // The monkeys join you, the lab's shriek: a squeal that leaps up and breaks, with a rough edge (a saw with fast
-      // vibrato through a band-pass, a little noise under it).
+      // An elixir taken from a totem: a choir (`choir`, see ghost-audio-data.js).
+      elixir: () => clip("choir", 1.3),
+      // A player goes down: "Game over, man!" (`gameOver`, see ghost-audio-data.js).
+      down: () => clip("gameOver", 1.6),
+      // An elixir spent bringing someone back: the same choir, a fifth louder.
+      revived: () => clip("choir", 1.3 * 1.2),
+      // A skeleton lunges and bites: breath rushing up as it rises, then its teeth snapping shut twice, bright clacks of
+      // bone on bone, over a dry crunch.
+      bite: () => {
+        const t = ctx.currentTime, a = voice(), b = voice(), c = voice();
+        burst(a, t, 0.22, 900, 3200, 1.2, 0.7);
+        burst(b, t + 0.2, 0.05, 4200, 2600, 3, 2.2);
+        tone(b, t + 0.2, "square", 1800, 700, 0.03, 0.35, 0.002, 0.05, "bandpass", 2400, 2);
+        burst(c, t + 0.27, 0.06, 3600, 2000, 3, 2.4);
+        tone(c, t + 0.27, "triangle", 160, 60, 0.08, 1.2, 0.003, 0.12);
+      },
+      // The monkeys join you: a children's Spanish lesson saying "monkey" (`monkeyGet`, see ghost-audio-data.js).
+      monkeys: () => clip("monkeyGet", 1.6),
+      // A hit takes the monkeys away, the lab's shriek: a squeal that leaps up and breaks, with a rough edge (a saw
+      // with fast vibrato through a band-pass, a little noise under it).
       shriek: () => {
         const t = ctx.currentTime, v = voice();
         v.osc.type = "sawtooth";
@@ -344,14 +362,14 @@
         [523.25, 659.25, 783.99].forEach((f, i) => tone(voice(), t + i * 0.11, "sine", f, f, 0.5, 0.55 + 0.1 * i, 0.006, 0.55));
         clip("banana", 1.6, 0.32);
       },
-      // Double points: a beam of power sweeping up, a sparkle, then the announcer.
+      // Double points: a beam of power sweeping up, a sparkle, then the announcer, all at `k` (30% under the others).
       double: () => {
-        const t = ctx.currentTime, v = voice();
-        tone(v, t, "sawtooth", 180, 1400, 0.55, 0.35, 0.08, 0.7, "lowpass", 400, 8);
+        const t = ctx.currentTime, v = voice(), k = 0.7;
+        tone(v, t, "sawtooth", 180, 1400, 0.55, 0.35 * k, 0.08, 0.7, "lowpass", 400, 8);
         v.filter.frequency.exponentialRampToValueAtTime(6000, t + 0.55);
-        burst(v, t, 0.6, 500, 5000, 1.5, 0.6);
-        [880, 1109, 1319, 1760].forEach((f, i) => tone(voice(), t + 0.45 + i * 0.06, "sine", f, f, 0.3, 0.3, 0.01, 0.3));
-        clip("double", 1.6, 0.65);
+        burst(v, t, 0.6, 500, 5000, 1.5, 0.6 * k);
+        [880, 1109, 1319, 1760].forEach((f, i) => tone(voice(), t + 0.45 + i * 0.06, "sine", f, f, 0.3, 0.3 * k, 0.01, 0.3));
+        clip("double", 1.6 * k, 0.65);
       },
       // A gorilla hits the ground: the "oogaa" from the lab's landing page.
       oogaa: () => clip("landing", 1.6),
@@ -422,16 +440,10 @@
       advance();
       if (musicWanted && musicOn && !muted && live()) startMusic();
     };
-    // How often a hunt opens on `FIRST_PICK`, Colt Fingaz's track; the rest of the list follows shuffled.
-    const FIRST_PICK = TRACKS.findIndex((t) => t.key === "colt"), FIRST_ODDS = 0.75;
-    /** A hunt begins: the playlist in a new random order, from its top (Colt Fingaz's first, three times in four). */
+    /** A hunt begins: the playlist in a new random order, from its top. */
     const newPlaylist = () => {
       stopMusic();
       shuffle();
-      if (FIRST_PICK >= 0 && Math.random() < FIRST_ODDS) {
-        const at = order.indexOf(FIRST_PICK);
-        order[at] = order[0]; order[0] = FIRST_PICK;
-      }
     };
     /** The visitor's music switch (remembered in this browser): off stops it now, on plays from the track's top. */
     const toggleMusic = () => {

@@ -4804,7 +4804,7 @@ const ghostHuntChecks = async () => {
     record("ghost hunt: a seeded hunt repeats exactly, and one picked up from its snapshot mid-way (a new host) goes on the same", repeated && loaded && same && hunting && a.state.kills > 0, JSON.stringify({ repeated, loaded, same, hunting, kills: a.state.kills }));
   }
   {
-    const sim = begin(11), rounds = [], drops = { 3: false, 4: false }, gorillas = [], seenBrutes = new Set();
+    const sim = begin(11), rounds = [], drops = { 3: false, 4: false }, gorillas = [], skeletons = [], seenBrutes = new Set();
     let maxAlive = 0, round = 0, lapToNight = false;
     const settings = { ghosts: 0, cap: 0, interval: 0, group: 0, speed: 0 };
     const states = new Set();
@@ -4813,20 +4813,20 @@ const ghostHuntChecks = async () => {
       states.add(st.state);
       if (st.state === ST.NIGHT) lapToNight = true;
       if (st.state === ST.ACTIVE) {
-        if (st.round !== round) { round = st.round; rounds[round] = { total: G.roundSettings(round, st.players, settings).ghosts, cap: settings.cap, max: 0 }; }
+        if (st.round !== round) { round = st.round; rounds[round] = { total: G.roundSettings(round, st.players, settings).ghosts, cap: settings.cap, max: 0, players: st.players }; }
         rounds[round].max = Math.max(rounds[round].max, s.alive());
         rounds[round].spawned = st.spawned;
         if (round === 3 && s.drops.some((d) => d.on && d.kind === 1)) drops[3] = true;
-        for (const b of s.brutes) if (b.on && !seenBrutes.has(b.id)) { seenBrutes.add(b.id); gorillas[round] = (gorillas[round] || 0) + 1; }
+        for (const b of s.brutes) if (b.on && !seenBrutes.has(b.id)) { seenBrutes.add(b.id); const into = b.kind ? skeletons : gorillas; into[round] = (into[round] || 0) + 1; }
         if (round === 4 && s.drops.some((d) => d.on && d.kind === 2)) drops[4] = true;
       }
       maxAlive = Math.max(maxAlive, s.alive());
     } });
     const tables = rounds.slice(1).every((r) => r.spawned === r.total && r.max <= r.cap);
     const path = [ST.LAP, ST.NIGHT, ST.COUNTDOWN, ST.ACTIVE, ST.BREAK, ST.BOSS, ST.VICTORY, ST.DAWN].every((st) => states.has(st)) && !states.has(ST.DEFEAT);
-    record("ghost hunt: shooting every ghost clears each round's whole table within its cap, round 3 drops the shield and round 4 the ice, each ordinary round sends its gorillas, the sixth clears into the boss, his fall is victory and dawn hands the island back",
-      lapToNight && rounds.length === 7 && tables && drops[3] && drops[4] && gorillas.slice(1, 7).every((n, i) => n === G.CONFIG.BRUTE.perRound[i]) && path && sim.state.state === ST.IDLE && maxAlive <= G.CONFIG.MAX_GHOSTS,
-      JSON.stringify({ rounds: rounds.slice(1), drops, gorillas, states: [...states], end, maxAlive }));
+    record("ghost hunt: shooting every ghost clears each round's whole table within its cap, round 3 drops the shield and round 4 the ice, each ordinary round sends its gorillas and skeletons, the sixth clears into the boss, his fall is victory and dawn hands the island back",
+      lapToNight && rounds.length === 7 && tables && drops[3] && drops[4] && gorillas.slice(1, 7).every((n, i) => n === G.CONFIG.BRUTE.perRound[i]) && [1, 2, 3, 4, 5, 6].every((r) => (skeletons[r] || 0) === G.bonesFor(r, rounds[r].players)) && path && sim.state.state === ST.IDLE && maxAlive <= G.CONFIG.MAX_GHOSTS,
+      JSON.stringify({ rounds: rounds.slice(1), drops, gorillas, skeletons, states: [...states], end, maxAlive }));
   }
   {
     // Two players away from the pile, shooting what comes within 8 m, until the lightning comes over it; then one walks
@@ -4894,8 +4894,54 @@ const ghostHuntChecks = async () => {
     z.drops[0].on = false;
     for (let i = 0; i < 6; i++) tick();
     const came = !!z.state.lightningSent && z.drops.some((d) => d.on && d.kind === G.LIGHTNING_DROP);
-    record("ghost hunt: a full ghost pool counts no ghost as spawned, and a round's lightning waits for a free drop slot rather than being lost",
-      pooled && waited && came, JSON.stringify({ pooled, waited, came }));
+    // Skeletons and gorillas share a pool. A full one must hold the round open; one freed slot sends one gorilla,
+    // and the rest of both waves must still come once their slots free.
+    z.jump(ST.ACTIVE, 6);
+    z.state.spawned = z.settings().ghosts;
+    for (const b of z.brutes) { b.on = true; b.dying = G.DYING.SHOT; b.dyingAt = z.state.now; }
+    for (let i = 0; i < 6; i++) tick();
+    const enemiesWaited = z.state.state === ST.ACTIVE && z.state.brutesSent === 0 && z.state.bonesSent === 0;
+    z.brutes[0].on = false;
+    for (let i = 0; i < 6; i++) tick();
+    const partialWave = z.state.brutesSent === 1 && z.state.bonesSent === 0;
+    for (const b of z.brutes) if (b.dying) b.on = false;
+    for (let i = 0; i < 40; i++) tick();
+    const enemiesCame = z.state.state === ST.ACTIVE && z.brutes.filter((b) => b.on && !b.kind).length === G.CONFIG.BRUTE.perRound[5]
+      && z.brutes.filter((b) => b.on && b.kind).length === G.bonesFor(6, z.state.players);
+    record("ghost hunt: full pools defer ghosts, lightning, skeletons and gorillas until slots free, including a partly sent gorilla wave, without ending the round early",
+      pooled && waited && came && enemiesWaited && partialWave && enemiesCame, JSON.stringify({ pooled, waited, came, enemiesWaited, partialWave, enemiesCame }));
+  }
+  {
+    // A rescuer knocked down during an elixir revive must start a fresh hold after being brought back. A third
+    // hunter keeps the round alive while both are down.
+    const z = begin(29), C = G.CONFIG;
+    z.ready(3);
+    let now = T0;
+    const tick = () => {
+      now += C.TICK_MS; z.beginPresence();
+      for (const [id, x, z0] of [[1, 0, 6], [2, 1, 6], [3, 21, 0]]) {
+        const p = z.present(id, x, 0, z0);
+        if (p) p.invulnUntil = z.state.now + 60000;
+      }
+      z.advance(now);
+    };
+    while (now < T0 + 60000 && z.state.state !== ST.ACTIVE) tick();
+    const rescuer = z.playerById(1), down = z.playerById(2);
+    down.seg = 0; down.frozenUntil = C.DOWN_UNTIL; rescuer.elixir = 1;
+    for (let i = 0; i < C.ELIXIR.reviveMs / C.TICK_MS / 2; i++) tick();
+    const started = rescuer.reviveTarget === down.id && z.frozen(down);
+    rescuer.seg = 0; rescuer.frozenUntil = C.DOWN_UNTIL;
+    for (let i = 0; i < C.ELIXIR.reviveMs / C.TICK_MS + 1; i++) tick();
+    const interrupted = rescuer.reviveTarget === 0 && rescuer.reviveSince === 0 && z.frozen(down);
+    z.debug.unfreeze(rescuer.id);
+    tick();
+    const restarted = rescuer.reviveTarget === down.id && rescuer.reviveSince === z.state.now && z.frozen(down);
+    for (let i = 0; i < C.ELIXIR.reviveMs / C.TICK_MS - 1; i++) tick();
+    const held = z.frozen(down) && rescuer.elixir === 1;
+    tick();
+    const revived = !z.frozen(down) && down.seg === C.PLAYER_SEGMENTS && rescuer.elixir === 0;
+    record("ghost hunt: a knocked-down rescuer loses revive progress and must hold the elixir beside their teammate for a fresh full duration",
+      started && interrupted && restarted && held && revived, JSON.stringify({ started, interrupted, restarted, held, revived }));
   }
   {
     // The lobby: player 1 wakes the ghost (its host) and readies, player 2 is there but never readies; at the lobby's
@@ -7476,7 +7522,7 @@ const hubCombatGate = { name: "hub game-only combat", why: "rule: ordinary visit
   })()`);
   record("hub game-only combat: HUB weapons fire, swing, swap magazines and reload without damage; regeneration, knockouts, dropped gear, rage and grabbing stay off, X keeps both look modes, and game exit restores health and releases held Oogas", Object.values(r).every(Boolean), JSON.stringify(r));
 } };
-const hubGhostEntry = (melee) => ({ name: `ghost entry ${melee ? "melee" : "shooting"}`, why: "regression: harmless HUB weapons must still wake the herald, and its lobby must release mouse-look until it closes", run: async b => {
+const hubGhostEntry = (melee) => ({ name: `ghost entry ${melee ? "melee" : "shooting"}`, why: "regression: only a HUB rifle shot wakes the herald, and its lobby must release mouse-look until it closes", run: async b => {
   const loaded = await untilPage(b, "BL.scenes.hub.debug.halloween?.herald.geometry", 15000);
   record("ghost entry: the deferred herald loads", loaded);
   if (!loaded) return;
@@ -7498,8 +7544,8 @@ const hubGhostEntry = (melee) => ({ name: `ghost entry ${melee ? "melee" : "shoo
       aiming: B.pilot.aiming, reticle: document.getElementById("weapon-reticle").hidden,
       labelsHidden: getComputedStyle(document.getElementById("tooltip")).visibility === "hidden" };
   })()`);
-  record(`ghost entry: ${melee ? "a club" : "an AK burst"} opens the lobby without readying automatically or enabling HUB damage`, entry.accepted && entry.state === "GATHER" && entry.shown && entry.health && !entry.game && !entry.combat && (melee || entry.shots > 0 && entry.shots <= 3), JSON.stringify(entry));
-  if (!entry.shown) return;
+  record(`ghost entry: ${melee ? "a club leaves the herald idle" : "an AK burst opens the lobby without readying automatically"} and HUB damage stays off`, entry.accepted && entry.state === (melee ? "IDLE" : "GATHER") && entry.shown === !melee && entry.health && !entry.game && !entry.combat && (melee ? entry.shots === 0 : entry.shots > 0 && entry.shots <= 3), JSON.stringify(entry));
+  if (melee || !entry.shown) return;
   const released = await untilPage(b, '!document.pointerLockElement && !document.body.classList.contains("aim-cursor-focused") && document.getElementById("weapon-reticle").hidden');
   record("ghost lobby: the menu releases mouse-look and hides world names without changing carry/combat mode", released && entry.labelsHidden && entry.aiming === !melee, JSON.stringify(entry));
   const button = await b.evaluate(`(() => { const r = document.getElementById("ghost-lobby-${melee ? "decline" : "ready"}").getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);

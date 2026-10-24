@@ -236,6 +236,11 @@
   let oogatronUnsub, renderer, game, world, go, lootEnabled, testBananas, root, camera, overlayCanvas, island, terrainRampRoof, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, mirrorCave, matrixCave, matrixControl, gateRain, fire, headquarters, dockStairs, jumbotron, positionDebug, remotes, npcSync;
   // GAME MODE (`setGameMode`): an island event holds the island still for play while it runs.
   let gameMode = false, gameCombatOnly = false;
+  // GAME MODE's ring (`updateGameRing`): the node, how far it has risen (0 to 1) and the seconds left before it starts up.
+  let gameRing = null, gameRingK = 0, gameRingWait = 0;
+  // Its floating lanterns (one node each over one geometry), and whether they showed last frame.
+  const ringLanterns = [];
+  let ringLanternsShown = false;
   // HALLOWEEN: the ghost hunt (ghost-game.js) once its group has arrived, the visit it was asked for, and its walls' seal.
   let ghosts = null, ghostLoading = false, ghostVisit = 0, ghostSeal = null;
   let magazine, magazineState, clankers, clankerPlay, clankerMeshes, clankerPartOwners, grabSupportEntry = null, entropyLab, chalkboard, factoryMouth = null, arcadeMouth = null, bcaMouth = null, glCanvas = null;
@@ -3610,7 +3615,7 @@
   const weaponImpact = (source, hit, dx, dy, dz, power = 1, projectile = null) => {
     // Waking the herald opens a game; it is an interaction before combat exists.
     if (ghosts && hit.owner.kind === "halloween" && hit.owner.role === "herald") {
-      ghosts.hit(source, hit, power, isPlayerAttack(source));
+      ghosts.hit(source, hit, power, isPlayerAttack(source), !!projectile);
       return;
     }
     if (!gameMode) {
@@ -3633,7 +3638,7 @@
         clankers.bananaHit(hit.owner.entry, source, projectile.serial);
       return;
     }
-    if (hit.owner.kind === "halloween") { ghosts.hit(source, hit, power, isPlayerAttack(source)); return; } // HALLOWEEN
+    if (hit.owner.kind === "halloween") { ghosts.hit(source, hit, power, isPlayerAttack(source), !!projectile); return; } // HALLOWEEN
     if (hit.node === mirrorCave.node) {
       hitMirror(power, hit.x, hit.y, hit.z, source);
       return;
@@ -5356,6 +5361,7 @@
   };
   const crossesSealedCave = (fromX, fromZ, toX, toZ, y = 0) => {
     if (ghostSeal !== null && ghostSeal(fromX, fromZ, toX, toZ, y)) return true; // HALLOWEEN: the ghost walls
+    if (crossesGameRing(fromX, fromZ, toX, toZ, y)) return true;
     for (let i = 0; i < sealedCaves.length; i++) {
       const sealed = sealedCaves[i], m = sealed.mouth, sr = sealed.sr, cr = sealed.cr;
       if (y < m.floorY - STEP_MAX || y > m.floorY + PORTAL_MAX_Y) continue;
@@ -5715,10 +5721,13 @@
   };
 
   const celebrate = (donation, bananas) => {
-    for (const cave of crew.workingCavemen()) {
-      if (cave.build) continue;
-      cave.cheer = 1.6;
-      fx.say(cave, ["OOGA!", "BOOGA!", "BANANA!"][fnv1a(`${donation.id}/${cave.traits.name}`) % 3], 1.8);
+    // GAME MODE: hold the crew's cheer while an island event runs; the thanks still shows.
+    if (!gameMode) {
+      for (const cave of crew.workingCavemen()) {
+        if (cave.build) continue;
+        cave.cheer = 1.6;
+        fx.say(cave, ["OOGA!", "BOOGA!", "BANANA!"][fnv1a(`${donation.id}/${cave.traits.name}`) % 3], 1.8);
+      }
     }
     fx.showTicker(`THANKS ${donation.handle ? "@" + donation.handle.toUpperCase() : "ANON"} · ${gameMod.formatLarge(bananas)} BANANAS`, 4.5);
   };
@@ -8136,6 +8145,7 @@
     if (DEBUG) syncDaylightDebug(hour);
     critters.update(dt, elapsed, RENDER_OPTS.day, RENDER_OPTS.stars, fire.k, 1);
     if (!gameMode) updateClouds(dt);
+    updateGameRing(dt, elapsed);
     solids.sync();
     if (gameMode) updateRageThrowMap();
     updateSleepingSolids();
@@ -8429,11 +8439,14 @@
   // (the renderer's `windTime` held where it stood), the meadow's fire pit goes out (`updateLamps`),
   // the Timechain Sphere stops turning, the island's clouds and the Mempool island's weather go (`weather.hold`), and
   // the Mempool island itself is hidden and left unrun. All of it comes back when the event lets go, and in `leave`.
+  // The ring stands up `ringDelay` seconds after the event begins (the ghost hunt waits for its gates) and sinks as
+  // it ends.
   const setGameMode = (on, combatOnly = false) => {
     on = !!on;
     combatOnly = on && !!combatOnly;
     if (on === gameMode && combatOnly === gameCombatOnly) return;
     gameMode = on;
+    if (!on) gameRingWait = 0;
     gameCombatOnly = combatOnly;
     if (!on) for (const rec of clankerCaptures) if (rec.cave) finishClankerRider(rec.entry, false);
     crew.setCombatEnabled(on);
@@ -8452,6 +8465,54 @@
     updatePoolEffectsActivity();
     mempoolIsland.site.node.visible = !on;
   };
+  // GAME MODE's ring: a wall round the meadow just inside the foot of the bluff (the ground leaves the meadow about
+  // 22 m from the middle), so nobody playing climbs the cliffs. It grows up out of the ground over `riseS` and sinks
+  // over `sinkS`, and while it stands it refuses a step out across it at or above the meadow; anyone outside it (in a
+  // cave mouth, up the bluff) may still walk in. Half see-through black for now, to show the bounds.
+  const GAME_RING = { r: 21.5, height: 8, riseS: 1.5, sinkS: 1 };
+  const GAME_RING_R2 = GAME_RING.r * GAME_RING.r;
+  const gameRingGeometry = models.cached(() => {
+    const geo = models.lathe({ profile: [[GAME_RING.r, -0.5], [GAME_RING.r, GAME_RING.height]], segments: 96, color: "#000000" });
+    geo.glass = 0.5;
+    geo.castShadow = false;
+    geo.twoSided = true; // Canvas 2D: seen from inside, as players see it
+    return geo;
+  });
+  // Paper lanterns floating over the ring's top as it stands, lit, each bobbing and turning slowly on its own beat.
+  const RING_LANTERNS = 36, LANTERN_LIFT = 0.7, LANTERN_BOB = 0.18;
+  const ringLanternGeometry = models.cached(() => models.noShadow(models.merge(
+    models.lathe({ profile: [[0.12, 0], [0.2, 0.08], [0.22, 0.22], [0.18, 0.36], [0.1, 0.42]], segments: 8, color: "#ff9a3c", emissive: 1 }),
+    models.lathe({ profile: [[0.11, 0.42], [0.12, 0.46], [0.02, 0.48]], segments: 8, color: "#3a2a18" }),
+    models.lathe({ profile: [[0.02, -0.03], [0.13, -0.02], [0.12, 0]], segments: 8, color: "#3a2a18" }))));
+  const crossesGameRing = (fromX, fromZ, toX, toZ, y) => gameMode && gameRingK > 0 && y > -1
+    && fromX * fromX + fromZ * fromZ < GAME_RING_R2 && toX * toX + toZ * toZ >= GAME_RING_R2;
+  // As the ring starts up, the visitor's own Ooga outside it (up the bluff, in a cave mouth, out on a bridge or the
+  // Mempool island) is brought in to the pile, as a fall off the island is, so nobody begins an event shut out.
+  const bringInsideRing = () => {
+    const ooga = pilot.player;
+    if (ooga && Math.hypot(ooga.root.position.x, ooga.root.position.z) >= GAME_RING.r - 0.3) navigate("pile", true, true);
+  };
+  const updateGameRing = (dt, elapsed) => {
+    if (gameMode && gameRingWait > 0) gameRingWait -= dt;
+    const target = gameMode && gameRingWait <= 0 ? 1 : 0;
+    if (gameRingK !== target) {
+      if (gameRingK === 0 && target) bringInsideRing();
+      gameRingK = target ? Math.min(1, gameRingK + dt / GAME_RING.riseS) : Math.max(0, gameRingK - dt / GAME_RING.sinkS);
+      gameRing.scale.y = ease.inOutQuad(gameRingK);
+      gameRing.visible = gameRingK > 0;
+    }
+    // The lanterns ride up and down with the wall's top.
+    const shown = gameRingK > 0;
+    if (!shown && !ringLanternsShown) return;
+    ringLanternsShown = shown;
+    const top = GAME_RING.height * ease.inOutQuad(gameRingK) + LANTERN_LIFT;
+    for (let i = 0; i < ringLanterns.length; i++) {
+      const node = ringLanterns[i];
+      node.visible = shown;
+      node.position.y = top + Math.sin(elapsed * 0.9 + i * 1.7) * LANTERN_BOB;
+      node.rotation.y = elapsed * 0.3 + i;
+    }
+  };
   // HALLOWEEN: the ghost hunt arrives after the island is up (data-defer="halloween", ghost-game.js) and works the island
   // through this one adapter. A load that lands after the visit ended finds a newer `ghostVisit` and attaches nothing;
   // one that fails waits for the next visit.
@@ -8468,6 +8529,8 @@
     addTarget, selectOoga, mayDriveOoga, zoneOf,
     gorillaActive: () => !!(clankerPlay && clankerPlay.active),
     gameMode: on => setGameMode(on, true),
+    // Keep ring timing separate from the event's combat policy.
+    ringDelay: seconds => { gameRingWait = Math.max(0, seconds); },
     lobbyOpen: (on, restore) => pilot.setMenuOpen(on, restore),
     // The waiting room: the driven Ooga let go of (the free camera to watch from), and at the end the visitor's own
     // Ooga given back.
@@ -8487,6 +8550,19 @@
       pilot.setActive(!on); pilot.controls.reset(); input.reset();
       pilot.setExternalControl(on);
     },
+    // While the view is held, how the visitor is turning it (-1..1, positive to the left): A D,
+    // the arrows, Q E and either stick, read straight from the pilot's controls since the pilot itself is let go of.
+    heldTurn: () => {
+      const a = pilot.controls.read();
+      return clamp(a.orbitYaw + a.yaw - a.x, -1, 1);
+    },
+    // GAME MODE's ring wall's radius, for the minimap.
+    ringRadius: GAME_RING.r,
+    // Where each totem's elixir hangs: on its pole's front, facing the pile, at chest height.
+    elixirSpots: TOTEM_SPOTS.map(([x, z], i) => {
+      const d = Math.hypot(x, z), out = BL.totemModels.layout(i).reach + 0.12;
+      return { x: x - x / d * out, y: island.surfaceAt(x, z) + 1.35, z: z - z / d * out };
+    }),
     // The banana pile at the island's middle: its platform's reach and the top of the pile as it stands now.
     pileRadius: () => altar.platformRadius,
     pileTop: () => pile.core.position.y + pile.core.scale.y * pileTopY,
@@ -10773,6 +10849,16 @@
     reflowScenery();
     buildSpots();
     buildClouds();
+    gameRing = createNode({ geometry: gameRingGeometry(), scale: { x: 1, y: 0, z: 1 }, visible: false, sightHidden: true });
+    addChild(root, gameRing);
+    placed.push(gameRing);
+    for (let i = 0; i < RING_LANTERNS; i++) {
+      const a = i / RING_LANTERNS * Math.PI * 2;
+      const node = createNode({ geometry: ringLanternGeometry(), position: { x: Math.sin(a) * GAME_RING.r, y: 0, z: -Math.cos(a) * GAME_RING.r }, visible: false, sightHidden: true });
+      addChild(root, node);
+      placed.push(node);
+      ringLanterns.push(node);
+    }
     spawnMagazinePickup();
     critters = crittersMod.create({ root, renderer, flowers: scenery.filter((o) => o.prop === "flower" && o.active), fire: firePos, secondaryFire: { x: 0, y: island.headquarters.floor, z: 0 }, meadowRadius: MEADOW, heightAt: island.surfaceAt, activeAt: effectsActiveAt });
     mark("props");
@@ -11694,6 +11780,9 @@
     ghostSeal = null;
     // GAME MODE ends with the visit; the island comes back built afresh.
     gameMode = gameCombatOnly = false;
+    gameRing = null;
+    gameRingK = gameRingWait = ringLanterns.length = 0;
+    ringLanternsShown = false;
     document.body.classList.remove("game-mode");
     RENDER_OPTS.windTime = NaN;
     debugMovementTerrain = DEBUG_MOVE_HIT.node = DEBUG_MOVE_HIT.owner = null;

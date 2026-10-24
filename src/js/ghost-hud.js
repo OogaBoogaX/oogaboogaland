@@ -1,6 +1,6 @@
-// HALLOWEEN: the ghost hunt's HUD (`#ghost-hud`, `#ghost-flash` in index.html): the round line, the visitor's own
-// bar, the banners the lab showed ("Round 3", "THE BOSS is here", ...), the boss's health and the flash when a ghost
-// gets you. The markup carries no data-scene (the director would show it on every arrival); this module alone shows
+// HALLOWEEN: the ghost hunt's HUD (`#ghost-hud`, `#ghost-flash` in index.html): the banners the lab showed ("Round 3",
+// "THE BOSS is here", ...), the boss's health and the flash when a ghost gets you (the visitor's own health is drawn
+// over their Ooga, ghost-game.js `drawHealth`). The markup carries no data-scene (the director would show it on every arrival); this module alone shows
 // and hides it. Every setter writes the DOM only when its value changed, so calling them each frame costs nothing.
 // The banners are set in Creepster (ghost-font-data.js), the lab's face, added once from its bytes: a FontFace made from
 // a buffer fetches nothing, so the content policy needs no font source. Until it is ready they show in the fallback.
@@ -28,11 +28,12 @@
   const create = ({ coarse = false, onMusic = null, onSkip = null, onReady = null, onDecline = null, onLobby = null } = {}) => {
     loadFace();
     const el = {
-      hud: document.getElementById("ghost-hud"), top: document.getElementById("ghost-top"), lives: document.getElementById("ghost-lives"), health: document.getElementById("ghost-health"),
+      hud: document.getElementById("ghost-hud"),
       banner: document.getElementById("ghost-banner"), title: document.getElementById("ghost-banner-title"), sub: document.getElementById("ghost-banner-sub"),
       boss: document.getElementById("ghost-boss"), bar: document.getElementById("ghost-boss-bar"), flash: document.getElementById("ghost-flash"),
       player: document.getElementById("ghost-player"), playerTitle: document.getElementById("ghost-player-title"), playerToggle: document.getElementById("ghost-player-toggle"),
-      playerSkip: document.getElementById("ghost-player-skip"),
+      playerSkip: document.getElementById("ghost-player-skip"), minimap: document.getElementById("ghost-minimap"),
+      topbar: document.querySelector(".topbar"), equipment: document.getElementById("equipment-hud"),
       lobby: document.getElementById("ghost-lobby"), lobbyGoal: document.getElementById("ghost-lobby-goal"), lobbyPlayers: document.getElementById("ghost-lobby-players"),
       lobbyNote: document.getElementById("ghost-lobby-note"), lobbyHow: document.getElementById("ghost-lobby-how"), lobbyReady: document.getElementById("ghost-lobby-ready"), lobbyDecline: document.getElementById("ghost-lobby-decline")
     };
@@ -62,24 +63,41 @@
     el.playerToggle.addEventListener("click", flip);
     const skip = () => { if (onSkip) onSkip(); el.playerSkip.blur(); };
     el.playerSkip.addEventListener("click", skip);
-    const last = { shown: false, top: null, lives: null, title: null, sub: null, boss: -1, livesState: "", health: -2, player: null, playing: null, on: null, skips: null };
-    const cells = el.health.children;
+    const last = { shown: false, title: null, sub: null, boss: -1, player: null, playing: null, on: null, skips: null };
     const text = (node, key, value) => {
       if (last[key] === value) return;
       last[key] = value;
       node.textContent = value;
     };
+    // The minimap follows the actual banner and touch fire button, including a wrapped equipment row. Layout is
+    // measured on show and layout changes only, never by the hunt's frame loop; `map.font` is its canvas lettering.
+    const map = { canvas: el.minimap, font: "" };
+    let mapFrame = 0;
+    const layoutMap = () => {
+      mapFrame = 0;
+      if (el.minimap.hidden) return;
+      if (coarse) {
+        const top = `${Math.ceil(Math.max(el.topbar.getBoundingClientRect().bottom, el.equipment.getBoundingClientRect().bottom) + 12)}px`;
+        if (el.minimap.style.getPropertyValue("--ghost-map-top") !== top) el.minimap.style.setProperty("--ghost-map-top", top);
+      }
+      const k = Math.min(2, window.devicePixelRatio || 1), w = Math.round(el.minimap.clientWidth * k);
+      if (w > 0 && (el.minimap.width !== w || el.minimap.height !== w)) el.minimap.width = el.minimap.height = w;
+      map.font = `700 ${Math.round(10 * k)}px sans-serif`;
+    };
+    const scheduleMap = () => { if (!el.minimap.hidden && !mapFrame) mapFrame = window.requestAnimationFrame(layoutMap); };
+    const mapResize = new ResizeObserver(scheduleMap), mapEquipment = new MutationObserver(scheduleMap);
+    mapResize.observe(el.topbar);
+    mapResize.observe(el.equipment);
+    mapEquipment.observe(el.equipment, { attributes: true, attributeFilter: ["style", "data-banner"] });
+    window.addEventListener("resize", scheduleMap);
     const show = (on) => {
       if (last.shown === on) return;
       last.shown = on;
-      el.hud.hidden = !on;
-      if (!on) { banner(null); boss(-1); health(-1); player(null); el.flash.hidden = true; }
-    };
-    const top = (value) => text(el.top, "top", value);
-    // `state` styles the bar: "", "frozen" or "away".
-    const lives = (value, state = "") => {
-      text(el.lives, "lives", value);
-      if (last.livesState !== state) { last.livesState = state; el.lives.dataset.state = state; }
+      el.hud.hidden = el.minimap.hidden = !on;
+      window.cancelAnimationFrame(mapFrame);
+      mapFrame = 0;
+      if (on) layoutMap();
+      if (!on) { banner(null); boss(-1); player(null); el.flash.hidden = true; }
     };
     const banner = (title, sub = "") => {
       if (title === null) {
@@ -89,25 +107,6 @@
       if (last.title === null) el.banner.hidden = false;
       text(el.title, "title", title);
       text(el.sub, "sub", sub);
-    };
-    // The visitor's health, `filled` cells of the bar lit, or below 0 to hide it; two or fewer lit go red.
-    const health = (filled) => {
-      if (filled === last.health) return;
-      if ((filled < 0) !== (last.health < 0)) el.health.hidden = filled < 0;
-      last.health = filled;
-      if (filled < 0) return;
-      for (let i = 0; i < cells.length; i++) cells[i].toggleAttribute("data-on", i < filled);
-      el.health.toggleAttribute("data-low", filled <= 2);
-      el.health.setAttribute("aria-valuenow", String(filled));
-    };
-    // A round's start: the bar glows orange and its cells fill back one after another (the stagger only while it glows,
-    // so a hit after it empties a cell at once).
-    const healed = () => el.health.classList.remove("healing");
-    el.health.addEventListener("animationend", healed);
-    const heal = () => {
-      el.health.classList.remove("healing");
-      void el.health.offsetWidth;
-      el.health.classList.add("healing");
     };
     // The mini player: shown while the hunt's music runs (`track` its title and maker, null to hide), its switch `on`,
     // and its skip while the music is on and the list has more than one track (`skips`).
@@ -189,18 +188,21 @@
       else if (el.flash.dataset.kind === "soul" && !el.flash.hidden) el.flash.hidden = true;
     };
     const dispose = () => {
+      mapResize.disconnect();
+      mapEquipment.disconnect();
+      window.removeEventListener("resize", scheduleMap);
+      window.cancelAnimationFrame(mapFrame);
+      el.minimap.style.removeProperty("--ghost-map-top");
       el.lobbyReady.removeEventListener("click", readyUp);
       el.lobbyDecline.removeEventListener("click", decline);
       el.lobby.removeEventListener("keydown", lobbyKey);
       hideLobby(false);
       el.playerToggle.removeEventListener("click", flip);
       el.playerSkip.removeEventListener("click", skip);
-      el.health.removeEventListener("animationend", healed);
-      healed();
       show(false);
       el.flash.classList.remove("on");
     };
-    return { show, top, lives, health, heal, lobby, player, banner, boss, flash, soul, dispose };
+    return { show, map, lobby, player, banner, boss, flash, soul, dispose };
   };
 
   BL.ghostHud = { create };
