@@ -99,7 +99,8 @@
     clear: new Float32Array(3), horizon: new Float32Array(3), zenith: new Float32Array(3), sky: new Float32Array(3), ground: new Float32Array(3), sun: new Float32Array(3), direct: new Float32Array(3),
     light: { x: 0.55, y: 0.78, z: -0.25 }, sunDirection: { x: 0, y: 1, z: 0 }, moon: { x: 0, y: 1, z: 0 }, moonSun: { x: 0, y: -1, z: 0 }, celestialPole: { x: 0, y: Math.sin(20 * DEG), z: -Math.cos(20 * DEG) }, starMatrix: new Float32Array(9),
     stars: 0, torch: 0, day: 1, twilight: 0, lampFactor: 0, directStrength: 1, directionalLightStrength: 1, sunStrength: 1, moonStrength: 0, moonIllumination: 1, moonPhase: 0.5, ambientFloor: 0.18, diffuseFloor: 0, shadowStrength: 1, shadowFloor: 0, shadowBias: 0.002, outdoorDarkestSurfaceEstimate: 0.34, activeLightSource: "sun", latitude: 20, dayOfYear: 172, continuousDay: 171.5, solarDeclination: 0, siderealAngle: 0, sunAltitude: 90, sunAzimuth: 180, moonAltitude: -90, moonAzimuth: 0, sunriseHour: 6, sunsetHour: 18,
-    time: 0, bloomStrength: 0.5, lights: new Float32Array(BL.glRenderer.POINT_LIGHT_CAPACITY * 8), lightCount: 0, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 34, matrix: MATRIX_WORLD, sea: -70, cutawayMaxY: 1e6, birdsEyeCutaway: false, cutawayFade: 0, cutawayRockMix: 0, cutawayRegions: [], cutawayRegionCount: 0, cutawayCloudY: 0, cutawayCloudMix: 0
+    time: 0, bloomStrength: 0.5, lights: new Float32Array(BL.glRenderer.POINT_LIGHT_CAPACITY * 8), lightCount: 0, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 34, matrix: MATRIX_WORLD, sea: -70, cutawayMaxY: 1e6, birdsEyeCutaway: false, cutawayFade: 0, cutawayRockMix: 0, cutawayRegions: [], cutawayRegionCount: 0, cutawayCloudY: 0, cutawayCloudMix: 0,
+    sprites: null, flash: new Float32Array(8), glints: null, glintCount: 0
   };
   let viewPoseActor = null;
   RENDER_OPTS.beforeView = () => {
@@ -428,6 +429,40 @@
   let poolEffectsActive = false, poolEffectsTime = 0;
   // The driven Ooga's own footsteps, heard by this page alone (footsteps.js).
   let footsteps = null;
+  // Fireworks (fireworks.js, fireworks-audio.js), launched only through `__ooga.fireworks` for now. They open over the
+  // Timechain Sphere, seen up its stairs from the meadow where the stand goes: six slots on an arc FIREWORK_RANGE out
+  // along the Sphere's bearing and FIREWORK_HEIGHT up, so the lowest Pop still clears its top. Rockets leave the rock
+  // north of its stairs (FIREWORK_LAUNCH_ALONG out on that bearing, FIREWORK_LAUNCH_SIDE to its right): from the
+  // meadow every flight climbs too shallow to clear that 7 m wall, and from its top every flight to every slot clears
+  // the rock by 11 m and the Sphere by about 6. Their light reaches the island at FIREWORK_LIGHT of its summed
+  // strength, and a show darkens a daytime sky toward dusk by up to FIREWORK_DIM, the restored daylight fields only, so
+  // it reads and never adds up from frame to frame.
+  let fireworks = null, fireworksAudio = null, fireworkDebugCount = 0;
+  const FIREWORK_RANGE = 200, FIREWORK_HEIGHT = 150, FIREWORK_LIGHT = 0.08, FIREWORK_DIM = 0.7;
+  const FIREWORK_LAUNCH_ALONG = 23, FIREWORK_LAUNCH_SIDE = 9;
+  const FIREWORK_SLOTS = [0, 1, 2, 3, 4, 5].map((i) => {
+    const a = terrain.TIMECHAIN.bearing + (i - 2.5) * 12 * Math.PI / 180;
+    return { x: Math.sin(a) * FIREWORK_RANGE, y: FIREWORK_HEIGHT, z: -Math.cos(a) * FIREWORK_RANGE };
+  });
+  const FIREWORK_LAUNCH = (() => {
+    const b = terrain.TIMECHAIN.bearing, ax = Math.sin(b), az = -Math.cos(b);
+    return { x: ax * FIREWORK_LAUNCH_ALONG - az * FIREWORK_LAUNCH_SIDE, y: 0, z: az * FIREWORK_LAUNCH_ALONG + ax * FIREWORK_LAUNCH_SIDE };
+  })();
+  const FIREWORK_DUSK_KEYS = ["horizon", "zenith", "clear", "sky", "ground", "direct"];
+  const FIREWORK_DUSK = [[0.18, 0.21, 0.37], [0.07, 0.09, 0.18], [0.07, 0.09, 0.18], [0.33, 0.37, 0.5], [0.27, 0.28, 0.35], [0.22, 0.26, 0.4]];
+  const shadeForFireworks = () => {
+    const f = fireworks.flash, o = RENDER_OPTS.flash;
+    o[0] = f[0]; o[1] = f[1]; o[2] = f[2]; o[3] = f[3];
+    o[4] = f[4] * FIREWORK_LIGHT; o[5] = f[5] * FIREWORK_LIGHT; o[6] = f[6] * FIREWORK_LIGHT;
+    RENDER_OPTS.glintCount = fireworks.glintCount;
+    const k = fireworks.showLevel * FIREWORK_DIM * clamp(RENDER_OPTS.day, 0, 1);
+    if (k <= 0) return;
+    for (let j = 0; j < FIREWORK_DUSK_KEYS.length; j++) {
+      const a = RENDER_OPTS[FIREWORK_DUSK_KEYS[j]], t = FIREWORK_DUSK[j];
+      for (let i = 0; i < 3; i++) a[i] += (t[i] - a[i]) * k;
+    }
+    RENDER_OPTS.directStrength *= 1 - 0.5 * k;
+  };
   let weather = null, unsubscribeMempool = null, unsubscribeChain = null, mempoolIsland = null, timechainIsland = null, bifrostIsle = null;
   // Decorative motion follows the view or the driven character, with room between waking and resting.
   const effectPointNear = (p, x, y, z, radius2) => (p.x - x) ** 2 + (p.y - y) ** 2 + (p.z - z) ** 2 <= radius2;
@@ -8128,6 +8163,9 @@
       for (let i = 0; i < 3; i++) { RENDER_OPTS.sky[i] *= keep; RENDER_OPTS.ground[i] *= keep; }
     }
     if (ghosts) ghosts.shade(RENDER_OPTS); // HALLOWEEN: the boss dims the sky
+    fireworks.update(dt, now, camera.position);
+    fireworksAudio.update(camera.position.x, camera.position.y, camera.position.z, camera.position.z - camera.target.z, camera.target.x - camera.position.x);
+    shadeForFireworks();
     if (poolEffectsActive) {
       mempoolIsland.water.update(dt, poolEffectsTime, Date.now());
       mempoolIsland.paintings.update(dt);
@@ -10876,6 +10914,16 @@
     fx = shared.fx = fxMod.create(shared);
     weather = weatherMod.create({ root, renderer, camera, heightAt: mempoolIsland.rainAt, fx, onRain: mempoolIsland.rainHit, centre: mempoolIsland.centre });
     footsteps = BL.footsteps.create();
+    FIREWORK_LAUNCH.y = island.surfaceAt(FIREWORK_LAUNCH.x, FIREWORK_LAUNCH.z) + 0.5;
+    fireworksAudio = BL.fireworksAudio.create();
+    fireworks = BL.fireworks.create({
+      quality: () => renderer.kind === "webgl2" ? renderer.quality : "low",
+      launchPoint: FIREWORK_LAUNCH,
+      slots: FIREWORK_SLOTS,
+      onCue: (kind, at, x, y, z, size, rise, whistle) => fireworksAudio.cue(kind, at - now, x, y, z, size, rise, whistle)
+    });
+    RENDER_OPTS.sprites = fireworks.batch;
+    RENDER_OPTS.glints = fireworks.glints;
     // The snapshot outlives the visit, so a re-entered hub opens in the weather it left.
     weather.apply(chain.snapshot);
     mempoolIsland.water.apply(chain.snapshot);
@@ -11743,6 +11791,15 @@
       targets: { totems: totems.map((t) => { const p = t.owner.node.position; return { x: p.x, y: p.y + t.eyeTop, z: p.z }; }).sort((a, b) => a.x - b.x) }
     });
     hubScene.debug.tess = islandGuide;
+    hubScene.debug.fireworks = {
+      launch: (kind = "mega", id = `debug-${kind}-${++fireworkDebugCount}`, opts = {}) => fireworks.launch(kind, id, { eye: camera.position, ...opts }),
+      clear: () => fireworks.clear(),
+      stats: () => ({ ...fireworks.stats(), ...fireworksAudio.stats(), showLevel: fireworks.showLevel, glintCount: fireworks.glintCount }),
+      get live() { return fireworks.live; },
+      slots: FIREWORK_SLOTS,
+      launchPoint: FIREWORK_LAUNCH
+    };
+    Object.defineProperty(hubScene.debug, "fireworksPending", { get: () => fireworks ? fireworks.pending : 0, enumerable: true });
     Object.defineProperty(hubScene.debug, "halloween", { get: () => ghosts && ghosts.debug, enumerable: true }); // HALLOWEEN
     mark("visibility-start");
     fx.warmVisibility(crew);
@@ -11808,6 +11865,11 @@
     chainSign = null;
     weather.dispose();
     footsteps.dispose();
+    fireworks.dispose();
+    fireworksAudio.dispose();
+    RENDER_OPTS.sprites = RENDER_OPTS.glints = null;
+    RENDER_OPTS.glintCount = 0;
+    RENDER_OPTS.flash.fill(0);
     mempoolIsland.water.dispose();
     mempoolIsland.paintings.dispose();
     mempoolIsland.wildlife.dispose();
@@ -11941,7 +12003,7 @@
     // Drop every per-visit ref but the cached island.
     terrainRampRoof = pathNode = altar = lawn = life = hud = hooks = input = pilot = fx = cameraCover = bananaCover = solids = rockGuides = objectGuides = sightGuides = bananaGuides = pileGuides = platformGuides = mirrorGuides = pile = crew = crates = critters = clock = presets = mirrorCave = matrixCave = matrixControl = gateRain = fire = headquarters = positionDebug = dockStairs = overlayCanvas = null;
     beasts.clear();
-    magazine = magazineState = weather = footsteps = mempoolIsland = timechainIsland = clankers = clankerPlay = null;
+    magazine = magazineState = weather = footsteps = fireworks = fireworksAudio = mempoolIsland = timechainIsland = clankers = clankerPlay = null;
     hubScene.input = hubScene.debug = null;
     return { targets: count };
   };
@@ -11965,7 +12027,7 @@
     let nodes = 0;
     traverseVisible(root, () => nodes++);
     const all = (n) => 1 + n.children.reduce((sum, c) => sum + all(c), 0);
-    return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...crates.stats(), ...crew.stats(), ...pile.stats(), ...critters.stats(), ...mempoolIsland.water.stats(), ...weather.stats(), ...remotes.stats(), ghosts: ghosts ? ghosts.stats().ghosts : 0 /* HALLOWEEN */ };
+    return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...crates.stats(), ...crew.stats(), ...pile.stats(), ...critters.stats(), ...mempoolIsland.water.stats(), ...weather.stats(), ...remotes.stats(), ...fireworks.stats(), ...fireworksAudio.stats(), ghosts: ghosts ? ghosts.stats().ghosts : 0 /* HALLOWEEN */ };
   };
   const hubScene = {
     // The island reports its own zone as soon as an Ooga is driven (see `zoneOf`); until then it is nowhere.
@@ -11973,8 +12035,11 @@
     micKey: true,
     id: "hub", enter, update, overlay, onDonation, previewDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null,
+    // A show's frames are not evidence that the tier is too expensive: its caps bound it, and a step down lasts.
+    get holdTier() { return !!fireworks && fireworks.live; },
     get inMotion() {
       // A crossing through the Timechain Sphere's doors keeps full rate, so its walk and swoop finish smoothly.
+      if (fireworks && fireworks.live) return true;
       if (timechainIsland && timechainIsland.gate.busy) return true;
       if (ghosts && ghosts.inMotion) return true; // HALLOWEEN
       if (pile.inMotion || fx.inMotion || poolEffectsActive && (weather.active || mempoolIsland.water.active) || magazine && magazine.revealed || MATRIX_WORLD.active || mirrorGuides.state.doorway || mirrorCave.damage.active || mirrorCave.ripples.active || mirrorCave.body.active) return true;

@@ -337,8 +337,9 @@
     const idx = QUALITY_ORDER.indexOf(renderer.quality);
     // Stepping is one-way and stops at the bottom tier, so quality cannot oscillate.
     if (idx < 0 || idx >= QUALITY_ORDER.length - 1) return;
-    // An unfocused tab and a transition building the next scene are not evidence that the tier is too expensive.
-    if (!document.hasFocus() || transition) { perf.frames = perf.total = 0; perf.since = 0; return; }
+    // An unfocused tab, a transition building the next scene and a scene's show (`holdTier`, a fireworks show in the
+    // hub, bounded by its own caps) are not evidence that the tier is too expensive.
+    if (!document.hasFocus() || transition || active && active.holdTier) { perf.frames = perf.total = 0; perf.since = 0; return; }
     if (!perf.since) perf.since = now;
     perf.frames++;
     perf.total += intervalMs;
