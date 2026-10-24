@@ -4006,41 +4006,49 @@ const canvasSurfaceCacheChecks = async () => {
 };
 const deferredLoadingChecks = async () => {
   const source = await readFile(join(root, "src/js/deferred.js"), "utf8"), rows = [];
-  const fixture = () => {
-    const nodes = [], timers = new Map(); let serial = 0;
+  // `gone` names the files a deploy has removed: their HEAD probe answers 404, any other 200.
+  const fixture = (gone = []) => {
+    const nodes = [], timers = new Map(), probes = []; let serial = 0;
     const document = { hidden: false, head: { appendChild(node) { nodes.push(node); return node; } },
       createElement: tag => ({ tag, remove() { const i = nodes.indexOf(this); if (i >= 0) nodes.splice(i, 1); } }) };
-    const context = { window: { BL: { deferredScripts: { kiosk: "/kiosk.js", "factory-scene": "/factory.js" } } }, document,
+    const fetch = (url, options) => { probes.push({ url, method: options.method }); return Promise.resolve({ status: gone.includes(url) ? 404 : 200 }); };
+    const context = { window: { BL: { deferredScripts: { drop: "/drop.js", "drop-scene": "/scene.js" } } }, document, fetch,
       setTimeout: fn => { timers.set(++serial, fn); return serial; }, clearTimeout: id => timers.delete(id) };
     runInNewContext(source, context);
-    const BL = context.window.BL, shell = BL.deferred.scene("factory");
+    const BL = context.window.BL, shell = BL.deferred.scene("drop");
     const scripts = () => nodes.filter(n => n.tag === "script"), links = () => nodes.filter(n => n.tag === "link");
-    const base = () => { BL.factoryKiosk = { create() {} }; scripts().find(n => n.src.startsWith("/kiosk.js")).onload(); };
-    const timeout = () => timers.values().next().value();
-    return { BL, shell, scripts, links, base, timeout, timers };
+    const base = () => { BL.dropAudio = {}; scripts().find(n => n.src.startsWith("/drop.js")).onload(); };
+    const timeout = () => { const [id, fn] = timers.entries().next().value; timers.delete(id); fn(); };
+    return { BL, shell, scripts, links, base, timeout, timers, probes, context };
   };
   const rejected = promise => promise.then(() => false, () => true);
-  // A failed prerequisite never starts its scene; repeated retries must not grow the DOM.
+  // A failed prerequisite never starts its scene; repeated retries must not grow the DOM. Only an error moves the
+  // address on: a timed-out copy may still arrive, and the retry must not fetch a second one under a new address.
   {
-    const f = fixture(); let bounded = true; const addresses = new Set();
+    const f = fixture(); let bounded = true; const addresses = [];
     for (let i = 0; i < 8; i++) {
-      const pending = f.BL.deferred.load("factory-scene"), failed = rejected(pending);
-      bounded &&= f.BL.deferred.load("factory-scene") === pending && f.scripts().length === 1 && f.links().length === 1;
-      addresses.add(f.links()[0].href);
-      if (i % 2) f.timeout(); else f.scripts()[0].onerror();
-      bounded &&= await failed && !f.scripts().length && !f.links().length && !f.timers.size && f.BL.deferred.pending === 0;
+      const pending = f.BL.deferred.load("drop-scene"), failed = rejected(pending);
+      bounded &&= f.BL.deferred.load("drop-scene") === pending && f.links().length === 1;
+      addresses.push(f.links()[0].href);
+      const script = f.scripts().find(n => n.onerror);
+      if (i % 2) f.timeout(); else script.onerror();
+      bounded &&= await failed && !f.links().length && !f.timers.size && f.BL.deferred.pending === 0;
+      // A timed-out script waits for its late answer, then goes.
+      if (i % 2) { bounded &&= f.scripts().includes(script); script.onerror(); }
+      bounded &&= !f.scripts().length;
     }
-    rows.push({ path: "base error and timeout retries", ok: bounded && addresses.size === 8 });
+    const moved = addresses.slice(1).map((a, i) => a !== addresses[i]);
+    rows.push({ path: "base error and timeout retries", ok: bounded && moved.every((m, i) => m === (i % 2 === 0)), addresses });
   }
   for (const outcome of ["success", "error", "timeout", "missing definition"]) {
-    const f = fixture(), pending = f.BL.deferred.load("factory-scene"), failed = rejected(pending);
+    const f = fixture(), pending = f.BL.deferred.load("drop-scene"), failed = rejected(pending);
     const beside = f.links().length === 1 && f.scripts().length === 1;
     f.base(); await Promise.resolve();
-    const script = f.scripts().find(n => n.src.startsWith("/factory.js"));
-    const ordered = !!script && f.BL.deferred.present("kiosk");
+    const script = f.scripts().find(n => n.src.startsWith("/scene.js"));
+    const ordered = !!script && f.BL.deferred.present("drop");
     if (outcome === "success") {
-      const enter = () => {}, original = f.BL.deferred.scene("factory", { enter, state: { active: true } });
-      f.BL.deferred.scene("factory", { enter() {}, state: { active: false } });
+      const enter = () => {}, original = f.BL.deferred.scene("drop", { enter, state: { active: true } });
+      f.BL.deferred.scene("drop", { enter() {}, state: { active: false } });
       script.onload(); await pending;
       rows.push({ path: "late definition keeps the active shell", ok: original === f.shell && f.shell.enter === enter && f.shell.state.active });
     } else if (outcome === "timeout") f.timeout();
@@ -4048,15 +4056,62 @@ const deferredLoadingChecks = async () => {
     else script.onload();
     const didFail = await failed;
     rows.push({ path: outcome, ok: beside && ordered && didFail === (outcome !== "success") && !f.links().length && !f.timers.size
-      && f.scripts().length === (outcome === "success" ? 2 : 1) });
+      && f.scripts().length === (outcome === "success" || outcome === "timeout" ? 2 : 1) && !f.BL.deferred.stale });
     if (outcome !== "success") {
-      const retry = f.BL.deferred.load("factory-scene"), next = f.scripts().find(n => n.src.startsWith("/factory.js"));
-      const fresh = next.src.endsWith("?r=1");
-      f.BL.deferred.scene("factory", { enter() {} }); next.onload(); await retry;
-      rows.push({ path: `${outcome} recovery`, ok: fresh && f.BL.deferred.load("factory-scene") === null && !f.links().length && !f.timers.size });
+      const retry = f.BL.deferred.load("drop-scene"), next = f.scripts().filter(n => n.src.startsWith("/scene.js")).pop();
+      const address = outcome === "timeout" ? next.src === "/scene.js" : next.src.endsWith("?r=1");
+      f.BL.deferred.scene("drop", { enter() {} }); next.onload(); await retry;
+      rows.push({ path: `${outcome} recovery`, ok: address && f.BL.deferred.load("drop-scene") === null && !f.links().length && !f.timers.size });
     }
   }
-  record("deferred loading: base and scene fetch together but execute in order, failed retries and timeouts release preloads, recovery fetches a fresh address and late definitions keep active state", rows.every(r => r.ok), JSON.stringify(rows));
+  // After a deploy the hashed file is gone: the error is probed, found 404, marked stale and reported once.
+  {
+    const f = fixture(["/drop.js"]); let told = 0;
+    f.BL.deferred.onStale(() => told++);
+    const first = f.BL.deferred.load("drop").catch(e => e);
+    f.scripts()[0].onerror();
+    const error = await first;
+    const again = f.BL.deferred.load("drop").catch(e => e);
+    f.scripts()[0].onerror();
+    const second = await again;
+    let late = 0; f.BL.deferred.onStale(() => late++);
+    rows.push({ path: "deploy removed the chunk", ok: error.stale === true && second.stale === true && f.BL.deferred.stale && told === 1 && late === 1
+      && f.probes.length === 2 && f.probes.every(p => p.url === "/drop.js" && p.method === "HEAD") });
+    const g = fixture(), refused = g.BL.deferred.load("drop").catch(e => e);
+    g.scripts()[0].onerror();
+    rows.push({ path: "a refusal that still exists is not stale", ok: !(await refused).stale && !g.BL.deferred.stale });
+  }
+  // A real chunk, as `npm run site` wraps it, run twice: the second copy (a late arrival after a timeout) must not
+  // replace the defined scene's members or the group's live module state.
+  {
+    const out = mkdtempSync(join(tmpdir(), "ooga-chunk-"));
+    try {
+      const modules = {
+        "js/audio.js": `(() => { const BL = window.BL; BL.runs = (BL.runs || 0) + 1; BL.dropAudio = { serial: BL.runs }; })();`,
+        "js/scene.js": `(() => { const BL = window.BL; const enter = () => BL.runs; BL.deferred.scene("drop", { id: "drop", enter, update() {}, leave() { return { targets: 0 }; } }); })();`,
+      };
+      const body = Object.values(modules).join("\n\n"), policy = createHash("sha256").update(body, "utf8").digest("base64");
+      const html = `<meta http-equiv="Content-Security-Policy" content="script-src 'sha256-${policy}'"><script>${body}</script>`;
+      externalizeModules(html, out, new Map([["drop", ["js/audio.js"]], ["drop-scene", ["js/scene.js"]]]), src => modules[src]);
+      const chunk = group => readFileSync(join(out, "js", readdirSync(join(out, "js")).find(n => n.startsWith(`${group}-`))), "utf8");
+      const f = fixture();
+      for (let i = 0; i < 2; i++) { runInNewContext(chunk("drop"), f.context); runInNewContext(chunk("drop-scene"), f.context); }
+      const { BL } = f;
+      rows.push({ path: "a real chunk run twice", ok: BL.runs === 1 && BL.dropAudio.serial === 1 && f.shell.enter() === 1 && BL.scenes.drop === f.shell
+        && typeof f.shell.update === "function" && typeof f.shell.leave === "function" && f.BL.deferred.load("drop-scene") === null });
+    } finally { rmSync(out, { recursive: true, force: true }); }
+  }
+  // A shell declares its game's wip itself, since the director drops wip scenes before any definition arrives; a
+  // definition that disagrees throws, and one arriving for a dropped shell fills it without putting it back.
+  {
+    const f = fixture(), wip = f.BL.deferred.scene("mine", null, true);
+    let disagrees = false;
+    try { f.BL.deferred.scene("drop", { enter() {}, wip: true }); } catch { disagrees = true; }
+    delete f.BL.scenes.mine;
+    f.BL.deferred.scene("mine", { enter() {}, wip: true });
+    rows.push({ path: "wip shells", ok: wip.wip === true && disagrees && !f.BL.scenes.mine && typeof wip.enter === "function" });
+  }
+  record("deferred loading: base and scene fetch together but execute in order, failed retries and timeouts release preloads, only an error moves the address on, a chunk a deploy removed is reported stale, a chunk run twice keeps its first definition and module state, and shells carry their wip", rows.every(r => r.ok), JSON.stringify(rows));
 };
 // Every file in src/characters/ must register once and build a whole Ooga, so a
 // new contributor is covered without editing this suite.
@@ -5587,8 +5642,6 @@ const donationClientChecks = async () => {
   K.game = { bananasFor: () => 1 };
   K.chain = { snapshot: { priceUsd: 100000 } };
   K.net = { state: { backend: true, me: null }, login() {} };
-  // The kiosk is already loaded here, as it is inline in the portable page: no chunk to wait for.
-  K.deferred = { load: () => null };
   K.donations = { real: true, state: { open: true }, testNetwork: "signet", sanitize: D.sanitize, carried: (sats, message, bar = 1000) => D.carried(sats, message, bar),
     HANDLE_MAX: D.HANDLE_MAX, MESSAGE_MAX: D.MESSAGE_MAX, MESSAGE_MIN_SATS: 1000, messageMinSats: 1000,
     invoice: async options => { invoices.push(options); return { request: "request", invoice: { id: "popup", bolt11: "lntbs1", expires: now / 1000 + 900 }, bananas: { exact: 0.25, rounded: 0 }, rate: null }; },

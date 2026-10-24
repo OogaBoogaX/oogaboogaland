@@ -49,6 +49,7 @@
   // The page's one toast, which every scene's HUD and the director share: a new one replaces the last.
   let toastTimer = 0, toastHideTimer = 0;
   const toast = (text) => {
+    if (reloadOffered) return;
     const box = $("toast");
     window.clearTimeout(toastTimer);
     window.clearTimeout(toastHideTimer);
@@ -62,6 +63,23 @@
         if (!box.classList.contains("show")) box.hidden = true;
       }, MESSAGE_FADE_MS);
     }, 2800);
+  };
+  // A deploy replaced the code this page still asks for: say so, and offer a reload that stays where the address is.
+  // It stays up, and no other toast replaces it, since nothing deferred will open until the page reloads.
+  let reloadOffered = false;
+  const offerReload = () => {
+    if (reloadOffered) return;
+    reloadOffered = true;
+    const box = $("toast"), reload = document.createElement("button");
+    window.clearTimeout(toastTimer);
+    window.clearTimeout(toastHideTimer);
+    reload.type = "button"; reload.className = "link"; reload.textContent = "Reload";
+    reload.addEventListener("click", () => location.reload(), { once: true });
+    box.replaceChildren("Ooga Booga Land was updated · ", reload);
+    box.dataset.reload = "true";
+    box.hidden = false;
+    $("message-stack").append(box);
+    box.classList.add("show");
   };
   const SHEET_STATE_KEY = "oogaboogaland.sheet.v1";
   const BOARD_STATE_KEY = "oogaboogaland.oogatron.windows.v1";
@@ -2329,8 +2347,10 @@
       if (liveDonors === refreshDonors) liveDonors = null;
       // Page-owned roster and donation rows remain attached; the next visit reconciles their contents.
       el.inventory.replaceChildren();
-      el.toast.classList.remove("show");
-      el.toast.hidden = true;
+      if (!reloadOffered) {
+        el.toast.classList.remove("show");
+        el.toast.hidden = true;
+      }
       el.hint.classList.remove("show");
       el.hint.hidden = true;
       tooltip.hide();
@@ -2521,5 +2541,5 @@
       else b.textContent = `Back to ${place}`;
     }
   };
-  BL.hud = { create, renderIcon, signLettering, showAccount, showMic, showVoices, setDonationStats, donationValueText, toast, holdRow, leaveTo, STATE_LABELS, statusFor };
+  BL.hud = { create, renderIcon, signLettering, showAccount, showMic, showVoices, setDonationStats, donationValueText, toast, offerReload, holdRow, leaveTo, STATE_LABELS, statusFor };
 })();

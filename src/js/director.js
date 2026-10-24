@@ -228,6 +228,8 @@
     return true;
   };
   const router = routerMod.create(scenes, window.BL.routes, go);
+  // Any chunk found gone, a prefetch's or a picture's included, means every later one is too.
+  window.BL.deferred.onStale(() => window.BL.hud.offerReload());
   window.BL.donationPopup.onClose(() => router.dismissPlace("hub", "donate"));
   // The logo is the site's home link: from any scene it goes back to the island, as a website's logo goes home.
   document.querySelector(".home-link").addEventListener("click", (e) => {
@@ -323,8 +325,10 @@
   };
   // Where a settled transition lands: its own scene, or where its preparation redirected it.
   const landing = (t) => t.redirect ? { next: scenes[t.redirect.scene], place: t.redirect.place ?? null } : { next: t.next, place: t.place };
+  // A chunk a deploy removed can never load: the HUD's reload offer replaces "try again" (see deferred.js).
   const abandon = () => {
-    window.BL.hud.toast("That place could not be opened · try again");
+    if (window.BL.deferred.stale) window.BL.hud.offerReload();
+    else window.BL.hud.toast("That place could not be opened · try again");
     router.abandon();
   };
   // Pure model construction happens before leaving the complete old visit. Only a finished cache is published;

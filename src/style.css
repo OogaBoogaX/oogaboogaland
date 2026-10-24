@@ -2232,6 +2232,10 @@ body[data-active-scene="arcade"] .magazine-hud {
   text-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
 }
 
+.toast[data-reload] {
+  pointer-events: auto;
+}
+
 .toast.show,
 .hint.show {
   opacity: 1;

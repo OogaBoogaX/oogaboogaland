@@ -2249,10 +2249,6 @@
       return !!scene;
     }
   });
-  factoryScene.prepare = () => {
-    const loading = BL.deferred.load("kiosk");
-    return loading ? loading.then(() => null) : null;
-  };
   BL.scenes = BL.scenes || {};
   BL.scenes.factory = factoryScene;
 })();
