@@ -1071,6 +1071,11 @@
         tint.set(bake.geo, twin).set(twin, bake.geo);
       }
     }
+    // A reflection keeps characters whatever their size: the renderer's reduced capture otherwise drops small parts.
+    const markCharacter = (node) => { if (node.geometry) node.geometry.characterPart = true; for (const child of node.children) markCharacter(child); };
+    markCharacter(root);
+    headOpen.characterPart = headClosed.characterPart = portraitHead.characterPart = true;
+    if (tint) for (const twin of tint.keys()) twin.characterPart = true;
     // Only this builder's completed voxel bakes are immutable here. Dress hooks and both colourways finish
     // first; separately authored weapons, equipment and other geometry stay in their original representation.
     if (BL.compactGeometry?.enabled) {

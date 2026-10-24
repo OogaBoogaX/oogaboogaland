@@ -3339,13 +3339,13 @@ void main() {
     // The camera pass draws only the in-frustum front of each record; shadow and mirror draw all.
     // 1 draws only the records the plain variant can shade, -1 only the others, 0 all.
     let plainFilter = 0;
-    // A medium reflection keeps the large physical world. Camera and shadow order stay untouched: selected
+    // A medium reflection keeps the large physical world and every character. Camera and shadow order stay untouched: selected
     // instance runs read the existing buffer through a temporary base offset, restored before another pass.
     const captureInstanceVisible = (rec, index) => {
       if (!rec.batch) {
         const s = rec.spheres, o = index * 4;
         const radius = s[o + 3] - CULL_MARGIN - (rec.geometry.lakeWaves ? 0.18 : 0);
-        return radius >= 1.25 && slotInFrustum(s, o, MIRROR_FRUSTUM);
+        return (radius >= 1.25 || rec.geometry.characterPart === true) && slotInFrustum(s, o, MIRROR_FRUSTUM);
       }
       const b = boundsOf(rec.geometry), d = rec.batch.instanceData, o = index * INSTANCE_FLOATS;
       const x = d[o] * b.center[0] + d[o + 4] * b.center[1] + d[o + 8] * b.center[2] + d[o + 12];
@@ -3355,7 +3355,7 @@ void main() {
         d[o + 4] * d[o + 4] + d[o + 5] * d[o + 5] + d[o + 6] * d[o + 6],
         d[o + 8] * d[o + 8] + d[o + 9] * d[o + 9] + d[o + 10] * d[o + 10]);
       const radius = b.radius * Math.sqrt(scale);
-      return radius >= 1.25 && sphereInFrustum(x, y, z, radius + CULL_MARGIN, MIRROR_FRUSTUM);
+      return (radius >= 1.25 || rec.geometry.characterPart === true) && sphereInFrustum(x, y, z, radius + CULL_MARGIN, MIRROR_FRUSTUM);
     };
     const drawCaptureRuns = (part, rec, first, count, instances) => {
       try {
@@ -3397,7 +3397,8 @@ void main() {
         if (cull && rec.offscreen) continue;
         if (kind === "mesh" && useProgram === "shadow" && g.castShadow === false) continue;
         if (useProgram === "shadow" ? !rec.lightVisible || shadowSubset && rec.shadowStatic !== (shadowSubset === 1) : !cull && !rec.mirrorVisible) continue;
-        if (excludeMirror && (rec === mirror.record || g.mirrorSource && (!cull || environment.ready && environment.tex))) continue;
+        // Only the camera pass (the culled one) shows the authored face; a capture never sees the mirror itself.
+        if (excludeMirror && (rec === mirror.record && (!cull || mirror.portal || mirrorPaneReady()) || g.mirrorSource && (!cull || environment.ready && environment.tex))) continue;
         // Tiny first-use shards keep their authored material until a readable shard initializes the shared cube.
         if (g.reflector && (reflectorPass === null || rec === reflectorPass)) {
           // Uncaptured lower-tier panes retain their authored grey-blue face instead of disappearing.
@@ -3724,11 +3725,15 @@ void main() {
       mirrorDebug.reflectionPassCount++;
       mirrorDebug.captureExcluded = true;
     };
+    // Whether the reflective pane draws this frame; when it cannot (low tier, or no capture yet), the camera pass
+    // draws the mirror's authored face instead, as uncaptured reflectors keep theirs.
+    const mirrorPaneReady = () => qualityName !== "low" && !mirror.portal && mirror.frontFacing && !!(mirror.record && mirror.record.mesh)
+      && !!mirror.tex && mirror.programReady && mirror.captureValid;
     const drawMirrorSurface = (camera) => {
       const rec = mirror.record, part = rec && rec.mesh, pg = mirror.program;
       mirrorDebug.ripples = 0;
       mirrorDebug.bodyContacts = mirrorDebug.bodyWaves = 0;
-      const pane = qualityName !== "low" && !mirror.portal && mirror.frontFacing && part && mirror.tex && mirror.programReady && mirror.captureValid;
+      const pane = mirrorPaneReady();
       if (!mirror.node) return;
       if (pane) {
         gl.useProgram(pg.prog);
@@ -4192,7 +4197,7 @@ void main() {
           else if (mirror.occluded && mirror.captureValid) skipMirrorPass("occluded");
           // A mirror under a twenty-fifth of the view re-captures on the tier's cadence: the whole scene's draws for a
           // few hundred pixels, where a frame-old reflection does not show. Nearer, it captures every frame.
-          else if (mirror.captureValid && mirror.frame++ % settings.mirrorCadence && (qualityName === "medium" || mirror.renderWidth * mirror.renderHeight * 25 < pw * ph)) skipMirrorPass("cadence");
+          else if (mirror.captureValid && mirror.frame++ % settings.mirrorCadence && mirror.renderWidth * mirror.renderHeight * 25 < pw * ph) skipMirrorPass("cadence");
           else renderMirrorCapture(clear, sky, ground, direct, directStrength, ambientFloor, diffuseFloor, shadowStrength, shadowFloor, shadowBias, lx, ly, lz, sh, lights, nLights, skyOn, fogColor, fogA, fogB, matrix, spotLight);
         }
         if (mirror.shards && environmentCaptureVisible() && ensureShardProgram()) {
