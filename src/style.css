@@ -3297,6 +3297,7 @@ body.game-mode #message-stack {
   flex-direction: column;
   gap: 6px;
   min-width: 210px;
+  max-width: min(320px, calc(100vw - 32px));
   padding: 10px 12px;
   background: linear-gradient(var(--plank), var(--wood));
   border: 2px solid var(--wood-edge);
@@ -3363,6 +3364,76 @@ body.game-mode #message-stack {
 .greeter-row .greeter-choice {
   flex: 1;
   white-space: nowrap;
+}
+
+/* Asking her: the question box beside its Ask button, and the suggestions under it, each on one line. */
+.greeter-ask {
+  display: flex;
+  gap: 6px;
+}
+
+.greeter-ask[hidden],
+.greeter-chips[hidden] {
+  display: none;
+}
+
+.greeter-ask input {
+  flex: 1;
+  min-width: 0;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 2px solid var(--stone-dk);
+  border-radius: 7px 6px 8px 6px;
+  background: var(--tablet);
+  box-shadow: var(--tablet-shadow);
+  color: var(--paper);
+  font-size: 12px;
+  outline: none;
+}
+
+.greeter-ask input:focus-visible {
+  border-color: var(--accent);
+}
+
+/* On a touch screen the panel keeps to the room between the two sticks, the keyboard's send key asks, and the box
+   is 16px, under which a phone zooms into it. */
+@media (pointer: coarse) {
+  .greeter-menu {
+    max-width: 210px;
+  }
+
+  .greeter-ask .greeter-choice {
+    display: none;
+  }
+
+  .greeter-ask input {
+    font-size: 16px;
+  }
+}
+
+.greeter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+}
+
+.greeter-chip {
+  padding: 4px 8px;
+  border: 1px solid var(--wood-edge);
+  border-radius: 999px;
+  background: var(--plank);
+  color: var(--ink);
+  font-size: 10px;
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.greeter-chip:hover,
+.greeter-chip:focus-visible {
+  background: #e2a04a;
+  outline: none;
 }
 
 /* While her tour holds the view the touch sticks do nothing, so they step aside for her panel. */
