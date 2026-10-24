@@ -8067,7 +8067,6 @@
       const lamp = addLamp({ glow: 0, flare: 0, visible: true }, light, spot.x, L.apex * 0.35, spot.z, true, Infinity, `totem:${i}`);
       totems.push({ owner, runes, rings, features, flames, light, lamp, flare: 0, live: 0, pattern: BL.totemGlow.pattern(feed.REPOS[i].word), eyeTop: Math.max(...L.eyes.map((e) => e[1])) });
     });
-    totemUnsub = feed.subscribe(onTotem);
   };
   const updateTotems = (dt, elapsed) => {
     const at = Date.now(), repos = BL.totemFeed.state.repos;
@@ -11906,9 +11905,6 @@
     headquarters.sightGuides = sightGuides.state;
     headquarters.bananaGuides = bananaGuides.state;
     mark("guides");
-    hintTimer = window.setTimeout(() => {
-      if (!pilot.player && !clankerPlay.active && !matrixControl.promptAction) hud.hint(COARSE ? "Drag to look · pinch to eye level · sticks to fly · tap a cave" : "Drag to look · scroll to eye level · WASD to fly · tap a cave to enter");
-    }, 1200);
     Object.assign(hubScene, {
       root, camera, input,
       debug: {
@@ -12180,6 +12176,10 @@
     mark("covered-view-start");
     yield* prepareCoveredView(ctx.overlay, slice);
     mark("covered-view");
+    totemUnsub = BL.totemFeed.subscribe(onTotem);
+    hintTimer = window.setTimeout(() => {
+      if (!pilot.player && !clankerPlay.active && !matrixControl.promptAction) hud.hint(COARSE ? "Drag to look · pinch to eye level · sticks to fly · tap a cave" : "Drag to look · scroll to eye level · WASD to fly · tap a cave to enter");
+    }, 1200);
     if (DEBUG_GORILLA_MOVE) hud.toast("Gorilla movement debug · click a gorilla, then a destination");
   };
   const enter = (ctx) => { const steps = enterSteps(ctx); while (!steps.next().done); };

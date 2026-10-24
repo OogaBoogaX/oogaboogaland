@@ -286,6 +286,7 @@
       positionDebug.addEventListener("click", copyPositionDebug, { signal: ctx.signal });
       updatePositionDebug(true);
     }
+    holdInput(false);
   };
   const enter = (next, place = null) => {
     const retainedTime = arriving(next, place);
@@ -325,15 +326,21 @@
     renderer.releaseUnused(retained);
     if (DEBUG && renderer.stats.records > live.size) throw new Error(`${next.id}: ${renderer.stats.records} GPU records for ${live.size} live geometries`);
   };
-  // While a scene enters in slices its canvas listeners exist but its visit is half built: a press on the canvas
-  // stops at the window, in the capture phase, before any of them.
-  const HELD_EVENTS = ["pointerdown", "pointermove", "pointerup", "pointercancel", "pointerleave", "wheel", "contextmenu"];
-  const heldEvent = (e) => { if (e.target === sceneCanvas) e.stopImmediatePropagation(); };
+  // Registered once, before boot creates any scene's capture listeners. During enter even the HUD and bubbling
+  // controls belong to a half-built visit; only its recovery notice may take input.
+  const HELD_EVENTS = ["keydown", "keyup", "pointerdown", "pointermove", "pointerup", "pointercancel", "pointerleave", "mousedown", "mousemove", "mouseup", "click", "dblclick", "wheel", "contextmenu", "touchstart", "touchmove", "touchend", "touchcancel"];
+  const heldHud = [...sceneSections, ...intros, ...document.querySelectorAll("#sheet, #equipment-hud, .joysticks, #act")];
+  let inputHeld = false;
+  const heldEvent = (e) => {
+    if (!inputHeld || e.target.closest && e.target.closest("#reload-notice")) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  };
+  for (const type of HELD_EVENTS) window.addEventListener(type, heldEvent, { capture: true, passive: false });
   const holdInput = (on) => {
-    for (const type of HELD_EVENTS) {
-      if (on) window.addEventListener(type, heldEvent, true);
-      else window.removeEventListener(type, heldEvent, true);
-    }
+    if (inputHeld === on) return;
+    inputHeld = on;
+    for (const el of heldHud) el.inert = on;
   };
   // True once the next scene has entered. A scene with `enterSteps` (a released hub, rebuilding its island's whole
   // visit) enters in slices instead: the departed scene is gone, nothing updates, draws or takes a key, and the screen
@@ -355,6 +362,7 @@
       releaseLeft(leaving, next);
       return true;
     }
+    holdInput(true);
     const retainedTime = arriving(next, place);
     let steps, step;
     try {
@@ -366,7 +374,6 @@
     const t = transition;
     active = null;
     t.entering = t.building = true;
-    holdInput(true);
     // The rest of the enter, then the meshes its first frame draws, so that frame does not build them all at once.
     const rest = (function* () {
       yield* steps;
@@ -374,11 +381,20 @@
       yield* renderer.prepareSteps(next.root, next.renderOpts?.meshRigs === true, { until: performance.now() + window.BL.buildTasks.SLICE_MS / 2 });
     })();
     window.BL.buildTasks.run(rest, next.id, visitController.signal).then(() => {
-      t.entering = t.building = false;
-      holdInput(false);
       finish();
+      t.entering = t.building = false;
       done();
-    }, (error) => { if (!destroyed) reportError(error); });
+    }).catch((error) => {
+      if (destroyed) return;
+      // The previous visit has gone and leave cannot tear down a half-built one. Keep its controls held and offer
+      // a way out, with honest wording: an entry error says nothing about whether the deployment changed.
+      t.entering = t.building = t.entryFailed = true;
+      visitController.abort();
+      holdInput(true);
+      window.BL.hud.offerReload("Ooga Booga Land could not be opened");
+      $("reload-notice").querySelector("button").focus({ preventScroll: true });
+      reportError(error);
+    });
     return false;
   };
   // Where a settled transition lands: its own scene, or where its preparation redirected it.
@@ -426,13 +442,13 @@
   const stepTransition = (dt) => {
     // A scene entering in slices carries the transition on when its last slice is done (`swap`'s `done`).
     if (transition.entering) {
-      if (fade === 1) transition.held += dt;
+      if (fade === 1 || transition.instant) transition.held += dt;
       return;
     }
     // An instant crossing (a doorway seen from the Ooga's eyes, a mirror) never goes black: the scene left keeps
     // playing while it prepares, and its last frame holds while the next one builds.
     if (transition.instant) {
-      if (!transition.ready || !buildLanding(transition)) return;
+      if (!transition.ready || !buildLanding(transition)) { transition.held += dt; return; }
       const arrive = () => { settled(); fade = 0; };
       if (transition.failed) abandon();
       else { const { next, place } = landing(transition); if (!swap(next, place, arrive)) return; }
@@ -454,14 +470,15 @@
     if (fade === 0) settled();
   };
   // Fills in CSS pixels (clientWidth/clientHeight, cached above), not backing-store pixels.
-  // Black held past a second (a slow chunk, a long build) turns the boot curtain's spinner on the black.
+  // A second on black, or waiting for an instant crossing, turns on the boot curtain's spinner.
   const SPINNER_AFTER = 1, SPINNER_R = 13, SPINNER_ACCENT = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#ffd27a";
   const drawFade = () => {
     overlayCtx.globalAlpha = fade;
     overlayCtx.fillStyle = "#000000";
     overlayCtx.fillRect(0, 0, overlayCssW, overlayCssH);
     overlayCtx.globalAlpha = 1;
-    if (!transition || fade < 1 || transition.held < SPINNER_AFTER) return;
+    if (!transition || transition.entryFailed || transition.held < SPINNER_AFTER
+      || !(fade === 1 || transition.instant && (!transition.ready || transition.entering))) return;
     const x = overlayCssW / 2, y = overlayCssH / 2, turn = elapsed / 0.9 % 1 * Math.PI * 2;
     overlayCtx.lineWidth = 3;
     overlayCtx.strokeStyle = "rgba(243, 239, 228, 0.18)";
@@ -568,7 +585,7 @@
     }
     active.input.update();
     active.overlay(dt);
-    if (fade > 0) drawFade();
+    if (fade > 0 || transition && transition.instant && !transition.ready) drawFade();
   };
   const frame = (now) => {
     raf = window.requestAnimationFrame(frame);
@@ -593,6 +610,7 @@
     if (e.type === "blur" || e.key === "Shift" && (e.code === "ShiftRight" || e.location === 2)) rightShift = false;
   };
   const onKeyDown = (e) => {
+    if (transition && transition.entering) { e.stopImmediatePropagation(); return; }
     if (!active) return;
     if (e.key === "Shift" && (e.code === "ShiftRight" || e.location === 2)) rightShift = true;
     if (e.repeat) return;
@@ -937,6 +955,7 @@
     window.removeEventListener("keydown", onKeyDown);
     window.removeEventListener("keyup", clearRightShift);
     window.removeEventListener("blur", clearRightShift);
+    for (const type of HELD_EVENTS) window.removeEventListener(type, heldEvent, true);
     document.removeEventListener("visibilitychange", onVisibility);
     positionDebug.removeEventListener("click", copyPositionDebug);
     try {

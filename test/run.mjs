@@ -12042,7 +12042,111 @@ const hubSlicedReturn = { name: "hub sliced return", why: "rule: a released hub 
   record("hub sliced return: a released hub rebuilt in slices is the same island, pick targets, rock guides and outline registry as one rebuilt at once",
     same && sliced.slices > 10 && whole.slices === 0, JSON.stringify({ sliced, whole }));
 } };
-scene("hub", { label: "release policy", query: "hubcache=release", steps: [hudVisit, hubSlicedReturn, trip("hub")] });
+const hubEntryHold = { name: "hub entry hold", why: "regression: a released hub accepted HUD actions, canvas capture and bubbling keys before its sliced visit was ready", run: async (b) => {
+  await tourGo(b, "lab");
+  await b.evaluate(`(() => {
+    const H = BL.scenes.hub, createHud = BL.hud.create, createPilot = BL.pilot.create, subscribe = BL.totemFeed.subscribe, steps = H.enterSteps;
+    const S = window.__entryHold = { released: false, paused: false, callbacks: new Set(), captures: 0, actions: 0, registered: false };
+    BL.hud.create = (...args) => {
+      const hud = createHud(...args), onAction = hud.onAction;
+      hud.onAction = fn => {
+        onAction((...values) => { S.actions++; return fn(...values); }); S.registered = true;
+        // Make the next real entry pause yield here, immediately after the vulnerable handler is installed.
+        const now = performance.now;
+        performance.now = () => { performance.now = now; return now.call(performance) + 1000; };
+      };
+      return hud;
+    };
+    BL.pilot.create = (...args) => S.pilot = createPilot(...args);
+    BL.totemFeed.subscribe = fn => {
+      S.callbacks.add(fn);
+      const off = subscribe(fn);
+      return () => { S.callbacks.delete(fn); off(); };
+    };
+    H.enterSteps = function* (ctx) {
+      S.signal = ctx.signal;
+      // This capture listener is registered with the scene's first slice, as the real carry cursor is.
+      window.addEventListener("pointerdown", () => S.captures++, { capture: true, signal: ctx.signal });
+      const it = steps(ctx);
+      try {
+        for (let step = it.next(); !step.done; step = it.next()) {
+          if (S.registered && !S.released) { S.paused = true; while (!S.released) yield; }
+          yield;
+        }
+      } finally { it.return(); }
+    };
+    S.restore = () => { S.released = true; H.enterSteps = steps; BL.hud.create = createHud; BL.pilot.create = createPilot; BL.totemFeed.subscribe = subscribe; };
+    __ooga.go("hub");
+  })()`);
+  let held, pressed, resumed;
+  try {
+    const paused = await b.evaluate(`(async () => { const end = performance.now() + 20000; while (!__entryHold.paused && performance.now() < end) { __ooga.advance(1 / 30, 1 / 30); await new Promise(r => setTimeout(r, 0)); } return __entryHold.paused; })()`);
+    if (!paused) throw new Error("released entry did not reach its HUD-handler pause");
+    held = await b.evaluate(`(() => {
+      const S = __entryHold, map = document.getElementById("destination-hud"), mode = document.getElementById("mode-hud"), canvas = document.getElementById("scene");
+      S.before = JSON.stringify({ mode: S.pilot.mode, aiming: S.pilot.aiming, preset: document.getElementById("detached-destination-name").textContent });
+      map.click();
+      mode.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 91, pointerType: "mouse", button: 0, buttons: 1 }));
+      mode.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 91, pointerType: "mouse", button: 0, buttons: 0 }));
+      canvas.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 92, pointerType: "mouse", button: 0, buttons: 1 }));
+      canvas.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 92, pointerType: "mouse", button: 0, buttons: 0 }));
+      for (const fn of S.callbacks) fn({ type: "change", index: 0, fresh: true, changedAt: Date.now() });
+      return { scene: __ooga.scene, transitioning: __ooga.transitioning, captures: S.captures, actions: S.actions, subscriptions: S.callbacks.size,
+        inert: [...document.querySelectorAll('[data-scene="hub"], #sheet, #equipment-hud, .joysticks, #act')].every(el => el.inert) };
+    })()`);
+    await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "w", code: "KeyW" });
+    await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: " ", code: "Space", text: " " });
+    pressed = await b.evaluate(`(() => {
+      const S = __entryHold, a = S.pilot.controls.read();
+      return { quiet: a.x === 0 && a.y === 0 && a.up === 0 && a.yaw === 0 && a.pitch === 0,
+        unchanged: S.before === JSON.stringify({ mode: S.pilot.mode, aiming: S.pilot.aiming, preset: document.getElementById("detached-destination-name").textContent }) };
+    })()`);
+    await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: " ", code: "Space" });
+    await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "w", code: "KeyW" });
+    await b.evaluate(`__entryHold.released = true`);
+    await untilPage(b, 'B.scene === "hub" && !B.transitioning', 20000);
+    resumed = await b.evaluate(`(() => {
+      const S = __entryHold, map = document.getElementById("destination-hud");
+      map.click();
+      for (const fn of S.callbacks) fn({ type: "change", index: 0, fresh: true, changedAt: Date.now() });
+      return { scene: __ooga.scene, live: !document.getElementById("equipment-hud").inert, actions: S.actions,
+        subscriptions: S.callbacks.size, flare: __ooga.totems.list[0].flare, toast: document.getElementById("toast").textContent };
+    })()`);
+  } finally { await b.evaluate(`__entryHold.restore()`); }
+  record("hub entry hold: the real released visit refuses map/mode, canvas capture, Space/W and early totem callbacks, then restores its HUD and merge celebration when ready",
+    held.scene === null && held.transitioning && held.inert && held.captures === 0 && held.actions === 0 && held.subscriptions === 0 && pressed.quiet && pressed.unchanged
+      && resumed.scene === "hub" && resumed.live && resumed.actions === 1 && resumed.subscriptions === 1 && resumed.flare === 1 && resumed.toast.includes("Bitcoin Core just merged"), JSON.stringify({ held, pressed, resumed }));
+} };
+scene("hub", { label: "release policy", query: "hubcache=release", steps: [hudVisit, hubEntryHold, hubSlicedReturn, trip("hub")] });
+scene("hub", { label: "entry failure", query: "hubcache=release", steps: [{ name: "hub entry failure", why: "regression: an entry throwing after its first yield left a permanent black hold with no way to recover", run: async (b) => {
+  await tourGo(b, "lab");
+  await b.evaluate(`(() => {
+    const S = window.__entryFailure = { errors: [], report: window.reportError };
+    window.reportError = error => S.errors.push(error.message);
+    BL.scenes.hub.enterSteps = function* (ctx) { S.signal = ctx.signal; yield; throw new Error("entry failure fixture"); };
+    __ooga.go("hub");
+  })()`);
+  const failed = await b.evaluate(`(async () => {
+    const S = __entryFailure, end = performance.now() + 6000;
+    while (!S.errors.length && performance.now() < end) { __ooga.advance(1 / 30, 1 / 30); await new Promise(r => setTimeout(r, 0)); }
+    __ooga.advance(2, 1 / 30);
+    const notice = document.getElementById("reload-notice"), button = notice.querySelector("button"), rect = button.getBoundingClientRect();
+    window.reportError = S.report;
+    return { scene: __ooga.scene, transitioning: __ooga.transitioning, aborted: S.signal.aborted, errors: S.errors, message: notice.textContent,
+      visible: !notice.hidden && rect.width > 0 && rect.height > 0, usable: !button.closest("[inert]"), focused: document.activeElement === button,
+      x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+  })()`);
+  record("hub entry failure: a post-yield error aborts the partial visit, reports once and offers a usable, focused Reload with accurate could-not-open wording",
+    failed.scene === null && failed.transitioning && failed.aborted && failed.errors.length === 1 && failed.errors[0] === "entry failure fixture"
+      && failed.message.includes("could not be opened") && !failed.message.includes("was updated") && failed.visible && failed.usable && failed.focused, JSON.stringify(failed));
+  await b.click(failed.x, failed.y);
+  let reloaded = false;
+  for (let i = 0; i < 200 && !reloaded; i++) {
+    await b.sleep(100);
+    reloaded = await b.evaluate(`!!window.__ooga && !window.__entryFailure && __ooga.scene === "hub" && __ooga.renderedFrames > 0`);
+  }
+  record("hub entry failure: the offered Reload works through the retained input hold and opens a fresh playable island", reloaded);
+} }] });
 scene("hub", { query: "ooga=portlandhodl:clank:lab,obl,lf&ooga=w-s-bitcoin:clank:lab,obl,lf&ooga=bc1gui:clank:lab,obl,lf&ooga=DrNeski:clank:lab,obl,lf&ooga=2140data:clank:lab,obl,lf", steps: [{ name: "work movement cave trips", why: "regression: off-lane cave traffic aimed through obstacles and started backwards detours", run: workCaveTrips }] });
 scene("hub", { label: "room sign", query: "pos=0", steps: [{ name: "room sign copies hash", why: "rule: tapping a room sign swings it and copies its displayed eight-character code with visible confirmation", run: async (b) => {
   const point = await b.evaluate(`(() => { const B = __ooga, sign = B.headquarters.roomSigns[0], n = sign.node; Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: (value) => { window.__roomHash = value; return Promise.resolve(); } } }); window.__roomSignBefore = sign.hits; B.pilot.release(true); B.pilot.navigate({ position: { x: n.position.x, y: n.position.y, z: n.position.z }, target: { x: n.position.x, y: n.position.y - 0.2, z: n.position.z }, yaw: n.rotation.y, pitch: 0, dist: 4 }); B.advance(0.6, 1 / 60); return B.project(n.position.x, n.position.y - 0.2, n.position.z, {}); })()`);
