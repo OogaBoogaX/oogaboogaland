@@ -15638,32 +15638,6 @@ const pokerTrip = (() => {
     }
   } };
 })();
-// A poker room opened on its own (no ₿IFRÖST visit first) whose way out cannot fetch ₿IFRÖST's deferred DSB code: the
-// first refusal comes from the Return button, the second from walking onto the mirror. The room keeps working, the
-// mirror does not ask again while the Ooga stands on it, and stepping off and back on goes through.
-const pokerExitRecovery = { name: "poker exit recovery", why: "regression: a refused way out to ₿IFRÖST left the poker room's leaving flag set, so neither its Return button nor its mirror worked again until a reload", run: async b => {
-  await b.evaluate(`(() => { const go = document.querySelector('[data-intro="poker"] .game-intro-go'); if (go && go.offsetParent) go.click();
-    // ₿IFRÖST opens with stand-ins and loads its destinations after arrival, so nothing it fetches can refuse the way in;
-    // a prepare that rejects twice takes the director's real refusal path, as an unreachable chunk would.
-    const bifrost = BL.scenes.bifrost; window.__pokerLoads = 0;
-    bifrost.prepare = () => { if (++window.__pokerLoads > 2) { delete bifrost.prepare; return null; } return Promise.reject(new Error("503")); }; })()`);
-  const settle = `(() => { const B = __ooga; for (let i = 0; i < 60 && B.transitioning; i++) B.advance(1 / 30, 1 / 30); return { scene: B.scene, transitioning: B.transitioning, loads: window.__pokerLoads }; })()`;
-  await b.evaluate(`document.querySelector('[data-poker-action="exit"]').click()`);
-  const button = await b.evaluate(settle);
-  const toMirror = await b.evaluate(`(() => { const B = window.__ooga; B.pilot.navigate({ position: { x: 0, y: 0, z: 31 }, target: { x: 0, y: 1, z: 35 }, yaw: Math.PI, pitch: 0.15, dist: 4 }); B.advance(0.5, 1 / 60);
-    const c = BL.scenes.poker.camera, fx = c.target.x - c.position.x, fz = c.target.z - c.position.z, l = Math.hypot(fx, fz), f = [fx / l, fz / l], r = [-f[1], f[0]];
-    const score = { w: f[1], s: -f[1], d: -r[1], a: r[1] }; return Object.entries(score).sort((p, q) => q[1] - p[1])[0][0]; })()`);
-  const back = { w: "s", s: "w", a: "d", d: "a" }[toMirror];
-  await holdKey(b, toMirror, 2.5);
-  await b.evaluate(settle);
-  await b.evaluate(`__ooga.advance(1, 1 / 60)`);
-  const mirror = await b.evaluate(settle);
-  await holdKey(b, back, 1);
-  await holdKey(b, toMirror, 2.5);
-  const out = await b.evaluate(settle);
-  record("poker exit recovery: a cold room's refused way out to ₿IFRÖST from its Return button leaves the mirror working; a refusal there waits for the Ooga to step off, and walking back on goes through",
-    button.scene === "poker" && !button.transitioning && button.loads === 1 && mirror.scene === "poker" && !mirror.transitioning && mirror.loads === 2 && out.scene === "bifrost" && out.loads === 3, JSON.stringify({ button, mirror, out }));
-} };
 scene("poker", { query: "character=portlandhodl", steps: [{ name: "poker floor and play", why: "playthrough: a visitor walks the floor, fills a table, plays to settlement and stands without exposing hidden cards", run: async b => {
   await b.evaluate(`document.querySelector('[data-intro="poker"] .game-intro-go').click()`);
   const walking = await walkKeys(b, "portlandhodl", 0, 18, [0, 1.5], 0.45);
@@ -15694,7 +15668,6 @@ scene("poker", { query: "character=portlandhodl", steps: [{ name: "poker floor a
     await b.screenshot(join(process.env.POKER_SHOTS, "poker-floor.png"));
   }
 } }, pokerTrip] });
-scene("poker", { label: "exit recovery", query: "character=portlandhodl", steps: [pokerExitRecovery] });
 scene("poker", { label: "canvas2d", query: "canvas2d=1", steps: [{ name: "poker canvas2d", why: "rule: the floor and table controls work on the fallback renderer", run: async b => {
   await b.evaluate(`document.querySelector('[data-intro="poker"] .game-intro-go').click()`);
   const r = await b.evaluate(`(() => { const P = BL.scenes.poker.debug.poker; P.action("join"); P.action("bots"); P.action("start"); __ooga.advance(1); return { kind: __ooga.renderer.kind, phase: P.session.tables[0].snapshot().phase, nodes: __ooga.stats().visibleNodes }; })()`);

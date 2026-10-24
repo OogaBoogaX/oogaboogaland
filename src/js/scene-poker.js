@@ -9,7 +9,7 @@
     shadowCenter: { x: 0, y: 1.5, z: 0 }, shadowExtent: 35, bloomStrength: 0.24,
     lights: new Float32Array(BL.glRenderer.POINT_LIGHT_CAPACITY * 8), lightCount: 13 };
   let root, camera, input, hud, panel, pilot, fx, people, avatar, room, mirror, game, world, session, go;
-  let leaving = false, mirrorHeld = false, timer = 0, selected = 0, pendingStand = false, seatTable = -1, shownCountdown = -1;
+  let leaving = false, timer = 0, selected = 0, pendingStand = false, seatTable = -1, shownCountdown = -1;
   const targets = [], snapshots = new Array(10);
   let HERO = "local-player", connecting = false, unsubscribeAccount = null, remotes = null, footsteps = null;
   let visit = 0, pendingLive = null;
@@ -202,7 +202,7 @@
   };
   const enter = ctx => {
     visit++;
-    game = ctx.game; world = ctx.world; go = ctx.go; leaving = mirrorHeld = false; timer = 0; HERO = "local-player"; connecting = false;
+    game = ctx.game; world = ctx.world; go = ctx.go; leaving = false; timer = 0; HERO = "local-player"; connecting = false;
     if (ctx.from === "bifrost") document.querySelector('[data-intro="poker"]').hidden = true;
     session = world.poker || (world.poker = { tables: Array.from({ length: 10 }, () => BL.pokerRules.create()), selected: 0, pendingStand: false });
     if (!session.autoDeal) session.autoDeal = new Array(10).fill(true);
@@ -276,10 +276,8 @@
     remotes.update(dt);
     footsteps.update(drivenHere);
     mirror.phase.update(dt, elapsed); mirror.body.update(dt); mirror.body.time = mirror.phase.ripples.time;
-    // A way out that could not be opened waits for the Ooga to step back off the mirror before it tries again.
-    if (!(pilot.player && (seatTable < 0 || pendingStand) && Math.abs(avatar.root.position.x) < BL.bifrostModels.WINDOW.halfW
-      && avatar.root.position.z > BL.pokerModels.EXIT_Z)) mirrorHeld = false;
-    else if (!leaving && !mirrorHeld) leaveFloor();
+    if (pilot.player && (seatTable < 0 || pendingStand) && Math.abs(avatar.root.position.x) < BL.bifrostModels.WINDOW.halfW
+      && avatar.root.position.z > BL.pokerModels.EXIT_Z && !leaving) leaveFloor();
     // All ten table lights fit the lowest renderer tier; selected table goes first.
     const near = selected, lights = renderOpts.lights;
     for (let slot = 0; slot < 10; slot++) {
@@ -356,9 +354,7 @@
   const liveGeometry = set => { if (room) for (const t of room.tables) t.agent.liveGeometry(set); if (avatar) set.add(avatar.headOpen).add(avatar.headClosed); if (remotes) remotes.liveGeometry(set); };
   const stats = () => { let allNodes = 0, visibleNodes = 0; const walk = n => { allNodes++; for (const c of n.children) walk(c); }; walk(root); S.traverseVisible(root, () => visibleNodes++); return { allNodes, visibleNodes, targets: input.targetCount, tweens: S.tweenCount(), ...fx.stats(), ...(remotes ? remotes.stats() : {}) }; };
   // Voice zone: the Ember Den, a portal of its own off the Bifrost chamber.
-  // ₿IFRÖST's deferred code (DSB Land's, for its window) did not arrive: the room stays, and its ways out work again.
-  const stay = () => { leaving = false; mirrorHeld = true; };
-  const scene = { id: "poker", voiceZone: "ember-den", micKey: true, enter, update, stay, overlay: dt => fx.drawOverlay(dt, extra), onKey, leave, liveGeometry, stats, renderOpts,
+  const scene = { id: "poker", voiceZone: "ember-den", micKey: true, enter, update, overlay: dt => fx.drawOverlay(dt, extra), onKey, leave, liveGeometry, stats, renderOpts,
     onDonation(donation, counted = null) {
       game.recordDonation(donation, counted && counted.exact);
       world.level = Math.min(BL.pile.MAX_BANANAS, world.level + (counted ? counted.exact : BL.game.bananasFor(donation.sats)));

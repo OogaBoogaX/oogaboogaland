@@ -417,7 +417,7 @@
   const CLANKER_HIT = { node: null, owner: null, type: "none", distance: Infinity, x: 0, y: 0, z: 0 };
   const CLANKER_CAVITY = { floor: 0, ceiling: 0, caveIndex: 0 };
   const JETPACK_HUD_STATE = { owned: false, equipped: false, fuel: 1, blocked: false };
-  let enteringTween = null, factoryDeparting = false, bifrostDeparting = false, bifrostHeld = false, factoryHeld = false;
+  let enteringTween = null, factoryDeparting = false, bifrostDeparting = false, factoryHeld = false;
   // Tess, the island's guide, for the visit (`hub-guide.js`).
   let islandGuide = null;
   let reuseHub = false, heldHub = false, heldDebug = null;
@@ -6481,9 +6481,7 @@
     const sr = Math.sin(p.ry), cr = Math.cos(p.ry);
     const along = (at.x - p.x) * sr + (at.z - p.z) * cr, across = (at.x - p.x) * cr - (at.z - p.z) * sr;
     const feet = at.y - player.baseY - p.floorY;
-    if (along > p.fieldZ || along < p.fieldZ - 2 || Math.abs(across) > p.halfW || feet < o.floorY - 0.12 || feet >= o.ceilingY) { bifrostHeld = false; return; }
-    // A crossing the chamber could not be opened for waits until the Ooga has stepped back out of the field.
-    if (bifrostHeld) return;
+    if (along > p.fieldZ || along < p.fieldZ - 2 || Math.abs(across) > p.halfW || feet < o.floorY - 0.12 || feet >= o.ceilingY) return;
     b.phase.ripples.pulse(across, feet + 1, 0);
     entering = bifrostDeparting = true;
     world.pilot = player.traits.name;
@@ -10813,7 +10811,7 @@
     ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
     glCanvas = ctx.canvas; overlayCanvas = ctx.overlay;
     heldHub = false;
-    factoryDeparting = bifrostDeparting = bifrostHeld = factoryHeld = entering = false;
+    factoryDeparting = bifrostDeparting = factoryHeld = entering = false;
     if (factoryMouth) factoryMouth.snap = false;
     if (bifrostIsle) bifrostIsle.snap = false;
     hubScene.root = root; hubScene.camera = camera; hubScene.input = input; hubScene.debug = heldDebug;
@@ -10933,7 +10931,7 @@
     ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
     poolEffectsActive = false; poolEffectsTime = 0;
     glCanvas = ctx.canvas;
-    factoryDeparting = bifrostDeparting = bifrostHeld = factoryHeld = false;
+    factoryDeparting = bifrostDeparting = factoryHeld = false;
     overlayCanvas = ctx.overlay;
     magazineState = {
       get owned() { return !!crew && crew.hasMagazine(crew.player); },
@@ -12040,7 +12038,7 @@
   // The scene a departure was heading for could not be prepared (its deferred code did not arrive): the visitor stays on
   // the island, driving again, and nothing is photographed for a crossing that did not happen.
   const stay = () => {
-    bifrostHeld = bifrostDeparting; factoryHeld = factoryDeparting;
+    factoryHeld = factoryDeparting;
     entering = factoryDeparting = bifrostDeparting = false;
     if (factoryMouth) factoryMouth.snap = false;
     if (bifrostIsle) bifrostIsle.snap = false;
