@@ -10994,7 +10994,7 @@ const factoryCanvas = { name: "factory canvas2d", why: "contract: the Canvas 2D 
 // Fireworks over the hub through the debug hook: each kind and the show pack draw while they fly, and the hub holds
 // nothing for them before the first launch or once the sky has been empty a while. The engine's caps, determinism
 // and slots are checked in the global tier.
-const hubFireworks = { name: "hub fireworks", why: "rule: a firework anyone buys bursts in everyone's sky, and costs nothing before it or once it has gone", run: async (b) => {
+const hubFireworks = { name: "hub fireworks", why: "rule: a firework anyone buys at the stand bursts in everyone's sky, and costs nothing before it or once it has gone", run: async (b) => {
   const r = await b.evaluate(`(() => {
     const B = window.__ooga, F = B.fireworks;
     const state = () => { const s = B.stats(), g = s.gl || {}; return { program: !!g.spriteProgram, buffer: !!g.spriteBuffer, data: s.fireworkBuffer, live: F.live, pending: B.fireworksPending, audio: s.fireworkAudio }; };
@@ -11013,6 +11013,30 @@ const hubFireworks = { name: "hub fireworks", why: "rule: a firework anyone buys
   record("hub fireworks: before the first launch the hub holds no sprite program, sprite buffer, sprite data or audio", r.kind === "webgl2" && bare(r.before), JSON.stringify(r));
   record("hub fireworks: a Pop, a Bolt, a Mega and the show pack each draw while they fly, and then the sky is empty", Object.values(r.kinds).every((k) => k.drawn > 0 && k.emptied) && r.kinds.show.drawn > r.kinds.mega.drawn, JSON.stringify(r));
   record("hub fireworks: once the sky has been empty a while the sprite buffer and its data are released", r.after.program && !r.idle.buffer && !r.idle.data && !r.idle.live, JSON.stringify(r));
+  // The stand, simulated (no API behind the page): an Ooga at its counter, Space, a Mega Blast, PAY.
+  const stand = await b.evaluate(`(async () => {
+    const B = window.__ooga, F = B.fireworks, S = F.stand, tick = () => new Promise((r) => setTimeout(r, 30));
+    const actor = B.cavemen.get("portlandhodl") || [...B.cavemen.values()][0];
+    B.pilot.possess(actor);
+    B.pilot.navigate({ position: { x: S.use.x, y: S.y, z: S.use.z }, yaw: 0, pitch: 0.3, dist: 5 });
+    B.advance(0.6, 1 / 30);
+    const act = document.getElementById("act"), label = act && !act.hidden ? act.textContent.trim() : "";
+    for (const type of ["keydown", "keyup"]) window.dispatchEvent(new KeyboardEvent(type, { key: " ", code: "Space", bubbles: true }));
+    B.advance(0.1, 1 / 30);
+    const dialog = document.getElementById("donation-popup"), opened = dialog.open;
+    const screen = document.getElementById("donation-screen"), at = screen.getBoundingClientRect();
+    const tap = (u, v) => screen.dispatchEvent(new MouseEvent("click", { clientX: at.left + u * at.width / 400, clientY: at.top + v * at.height / 400, bubbles: true }));
+    // The screen lays out its buttons as it paints, on the dialog's own frames: give each screen a few to draw.
+    const before = S.launchesShown, settle = async () => { for (let n = 0; n < 8; n++) await tick(); };
+    await settle();
+    tap(200, 183); await settle();
+    tap(200, 274); await settle();
+    const closed = !dialog.open, watching = F.watch.mode > 0, launched = B.fireworksPending > 0;
+    let n = 0;
+    while ((F.watch.mode || F.live || B.fireworksPending) && n++ < 400) B.advance(0.1, 0.1);
+    return { label, opened, closed, watching, launched, home: F.watch.mode === 0, counted: S.simCounts.mega, repainted: S.launchesShown !== before };
+  })()`);
+  record("hub fireworks: Space at the stand's counter opens it, a firework bought there launches with the buyer's view gliding up to watch and home, and TOP LAUNCHES counts it", stand.label === "FIREWORKS" && stand.opened && stand.closed && stand.watching && stand.launched && stand.home && stand.counted === 1 && stand.repainted, JSON.stringify(stand));
 } };
 const hubDistantEffects = { name: "hub distant effects", why: "rule: distant portals and insects resume without catching up, daylight still changes populations, and horizon birds, boats and persistent decorative clouds keep moving", run: async (b) => {
   const state = await b.evaluate(`(() => {

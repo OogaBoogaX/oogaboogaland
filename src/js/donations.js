@@ -154,7 +154,7 @@
   // API's last word on whether donations are open, and `state.network` the network it takes payments on, each null
   // before it has said. `state.tally` is its latest tally, null before the first.
   const SOCKET_MIN = 1000, SOCKET_MAX = 60000, PLAYED = 64, RECENT_MAX = 10;
-  const state = { open: null, network: null, connected: false, attempts: 0, donations: 0, tally: null, board: null, boardSats: null, recent: null, limits: null, catalogue: null, purchaseBoards: {} };
+  const state = { open: null, network: null, connected: false, attempts: 0, donations: 0, tally: null, board: null, boardSats: null, recent: null, limits: null, catalogue: null, purchaseBoards: {}, purchaseCounts: {} };
   const limitsOf = (v) => v && Number.isSafeInteger(v.minSats) && v.minSats > 0
     && Number.isSafeInteger(v.maxSats) && v.maxSats >= v.minSats
     && Number.isSafeInteger(v.lightningMaxSats) && v.lightningMaxSats > 0 && v.lightningMaxSats <= v.maxSats
@@ -203,14 +203,16 @@
   // Anything an OBL experience sells is bought with one Lightning payment: `purchase(category, item)` asks for its
   // invoice, and the page never sends sats, since the API prices every item itself. `state.catalogue` is what it sells
   // now, `{ firework: { buyers, prices } }` (`buyers`, who may buy: `signed-in` or `everyone`; null while purchases are
-  // closed), `state.purchaseBoards` each category's top ten signed-in buyers (the stand's plaque for `firework`), and
+  // closed), `state.purchaseBoards` each category's top ten signed-in buyers, `state.purchaseCounts` each category's
+  // purchases of each item over the API's last few days (`{ days, items: { mega: 3 } }`, the stand's TOP LAUNCHES), and
   // `purchaseTotals(category)` what the signed-in visitor has bought. Fireworks are the first category: every page hears
   // each paid one as `{ id, kind, slot, launchAt, login, mine }` (`onFirework`), `launchAt` on the API's clock, which
   // `serverNow()` estimates from each purchase's `at`, keeping the fastest sample as the room's clock does. A purchase
   // never makes bananas or reaches the pile, the board or the tally.
   const FIREWORK = "firework", FIREWORK_KINDS = ["pop", "bolt", "mega", "show"], BUYERS = ["signed-in", "everyone"];
   const PURCHASE_PLAYED = 32, BOARD_MAX = 10, FIREWORK_LEAD_MS = 3000, FIREWORK_SLOTS = 6;
-  const CATEGORY = /^[a-z][a-z0-9-]{0,31}$/;
+  // Names as bananapayserver's catalogue and D1 allow them, so no category or item it sells is dropped here.
+  const CATEGORY = /^[a-z0-9-]{1,32}$/, ITEM = /^[a-z0-9-]{1,64}$/;
   const ownPurchases = new Set(), playedPurchases = new Array(PURCHASE_PLAYED).fill("");
   let playedPurchaseAt = 0, clockOffset = 0, clockKnown = false, boughtHere = 0;
   const clockSample = (serverMs) => {
@@ -226,7 +228,7 @@
     for (const [category, v] of Object.entries(c)) {
       if (!CATEGORY.test(category) || !v || !BUYERS.includes(v.buyers) || !v.prices || typeof v.prices !== "object") continue;
       const prices = {};
-      for (const [item, sats] of Object.entries(v.prices)) if (CATEGORY.test(item) && Number.isSafeInteger(sats) && sats > 0) prices[item] = sats;
+      for (const [item, sats] of Object.entries(v.prices)) if (ITEM.test(item) && Number.isSafeInteger(sats) && sats > 0) prices[item] = sats;
       out[category] = { buyers: v.buyers, prices };
     }
     return out;
@@ -252,7 +254,7 @@
   // An item's invoice: `{ request, invoice: { id, bolt11, expires } }`, Lightning only, or `{ error }` (`sign-in` when
   // only signed-in visitors may buy, `closed`, `network`).
   const purchase = async (category, item) => {
-    if (!CATEGORY.test(category) || !CATEGORY.test(item)) return { error: "invalid" };
+    if (!CATEGORY.test(category) || !ITEM.test(item)) return { error: "invalid" };
     const body = { category, item };
     if (state.catalogue?.[category]?.buyers === "everyone") { body.nth = Math.min(999, boughtHere + 1); body.before = bucket(boughtBefore); }
     const r = await call("/purchases/buy", body);
@@ -273,7 +275,7 @@
     for (const [cat, list] of Object.entries(r.items)) {
       if (!CATEGORY.test(cat) || !list || typeof list !== "object") continue;
       const kept = {};
-      for (const [item, e] of Object.entries(list)) if (CATEGORY.test(item) && e && Number.isSafeInteger(e.quantity) && e.quantity > 0 && Number.isSafeInteger(e.sats) && e.sats >= 0) kept[item] = { quantity: e.quantity, sats: e.sats };
+      for (const [item, e] of Object.entries(list)) if (ITEM.test(item) && e && Number.isSafeInteger(e.quantity) && e.quantity > 0 && Number.isSafeInteger(e.sats) && e.sats >= 0) kept[item] = { quantity: e.quantity, sats: e.sats };
       items[cat] = kept;
     }
     return { items };
@@ -361,11 +363,16 @@
     } else if (data.type === "purchase") {
       // Every category's purchases come to every page; only fireworks have an experience here yet.
       if (typeof data.id !== "string" || !data.id || data.id.length > 64 || typeof data.category !== "string" || !CATEGORY.test(data.category)
-        || typeof data.item !== "string" || !Number.isSafeInteger(data.quantity) || data.quantity < 1 || !isNumber(data.at) || data.login !== null && typeof data.login !== "string") return;
+        || typeof data.item !== "string" || !ITEM.test(data.item) || !Number.isSafeInteger(data.quantity) || data.quantity < 1 || !isNumber(data.at) || data.login !== null && typeof data.login !== "string") return;
       clockSample(data.at);
       const firework = data.category === FIREWORK ? fireworkOf(data) : null;
       if (data.category === FIREWORK && !firework) return;
       heardPurchase(data.id, firework);
+    } else if (data.type === "purchaseCounts" && typeof data.category === "string" && CATEGORY.test(data.category) && Number.isSafeInteger(data.days) && data.days > 0 && data.items && typeof data.items === "object") {
+      const items = {};
+      for (const [item, n] of Object.entries(data.items)) if (ITEM.test(item) && Number.isSafeInteger(n) && n >= 0) items[item] = n;
+      state.purchaseCounts = { ...state.purchaseCounts, [data.category]: { days: data.days, items } };
+      notify();
     } else if (data.type === "purchaseBoard" && typeof data.category === "string" && CATEGORY.test(data.category) && Array.isArray(data.entries)) {
       state.purchaseBoards = { ...state.purchaseBoards, [data.category]: purchaseBoardOf(data.entries) };
       notify();

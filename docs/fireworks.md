@@ -80,9 +80,33 @@ Rockets leave the rock north of the Sphere's stairs (`FIREWORK_LAUNCH`, 23 m out
 its right). From the meadow below, every flight climbs too shallow to clear that 7 m wall; from its top, every flight
 to every slot clears the rock by more than 20 m and the Sphere's shell by more than 8.
 
-The stand goes in that meadow, on the right of the stairs and about 10 m out from the wall, so a visitor standing at it
-looks up the stairs to the show above the Sphere. Pressed against the wall, the rock would fill the view. The buyer's
-view glides up from the stand to watch, with the Sphere at the foot of the frame.
+The stand stands in that meadow on open grass right of the stairs, its front to the path that runs down from them,
+on ground it claims so palms and scatter stay off it and off the strip before it (`FIREWORK_STAND_ALONG` and
+`FIREWORK_STAND_SIDE` in `scene-hub.js`). A visitor at its counter looks up the stairs to the show above the Sphere;
+the buyer's view glides up from the stand to watch, with the Sphere at the foot of the frame.
+
+## The stand
+
+A small attraction, readable from across the island (`stand-models.js`), built to the concept in
+`images/fireworks-concept-stand.webp`; the first concept sheet, with the three fireworks, is
+`images/fireworks-concept-sheet.webp`:
+
+- **Above:** the FIREWORKS sign in big gold letters with a marquee of bulbs chasing round it, LIGHT UP OBL under it,
+  four oversized voxel rockets standing on it, and gold starbursts either side that twinkle.
+- **In the middle:** a timber booth with a red and white striped canopy, a scalloped valance and bunting that rocks
+  in the wind; a merchant counter with the terminal (BUY HERE) and a painted cloth of the island under a burst;
+  shelves of firework boxes and bundles behind; and the vendor, an Ooga of no one's in a straw hat, looking about.
+- **Left:** BUY A FIREWORK, the three fireworks with their icons and the server's prices (the show pack is on the
+  terminal's screen, not the board), and how to buy.
+- **Right:** TOP LAUNCHES under a gold crown and a banner: the fireworks ranked by launches over the last seven days
+  (`purchaseCounts`), the show pack joining them once it has launches. A tap opens it in the board dialog, whose
+  second page is the top buyers (`purchaseBoard`). With no API behind the page it counts this page's own launches.
+- Lanterns at the canopy's corners light the counter at night; the boards' lanterns only glow.
+- Within 30 m its stars twinkle, the marquee chases and sparks now and then fly from a rocket's tip; beyond, nothing
+  of it moves. It adds 25 to 30 ms to the hub's build (of about 3 s), about 9,400 faces on 54 nodes, four pictures
+  (about half a million texels, uploaded once and repainted only when prices or counts change) and two lights.
+
+Space at the counter, or a tap on it or on the menu board, opens the stand's screen.
 
 ## Timing
 

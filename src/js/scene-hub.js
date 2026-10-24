@@ -440,18 +440,27 @@
   let fireworks = null, fireworksAudio = null, fireworkDebugCount = 0;
   // The toast's count to the latest paid firework's launch, in scene seconds: its three lines are made when it is heard.
   const fireworkCountdown = { until: 0, shown: 0, texts: null };
-  // The stand that sells them (stand-kiosk.js for its screen), in the meadow before the Sphere's stairs:
-  // FIREWORK_STAND_ALONG out on the Sphere's bearing and FIREWORK_STAND_SIDE to its right, about 10 m out from the rock
-  // wall, so a visitor at it looks up the stairs to the show (pressed against the wall, the rock would fill the view).
-  // Its counter faces the island's middle; Space within FIREWORK_STAND_REACH, or a tap, opens its screen. The plaque
-  // beside it is the API's top ten buyers. After a purchase, or a preview, the visitor's view glides up from the stand
-  // to the arc (FIREWORK_WATCH_UP over it) and holds there while the sky is lit, then comes home.
-  const FIREWORK_STAND_ALONG = 11, FIREWORK_STAND_SIDE = 6, FIREWORK_STAND_REACH = 2.4, FIREWORK_WATCH_UP = 9;
+  // The stand that sells them (stand-models.js for the attraction, stand-kiosk.js for its screen), in the meadow before
+  // the Sphere's stairs: FIREWORK_STAND_ALONG out on the Sphere's bearing and FIREWORK_STAND_SIDE to its right, on open
+  // grass with its whole footprint clear of the paths, rock, trees and palms, its front (FIREWORK_STAND_FACING, a world
+  // heading) to the diagonal path from the stairs a couple of metres off, which the old spot stood on. Space at its
+  // counter (stand-models.js LAYOUT.use) or a tap on it or its menu opens its screen; TOP LAUNCHES ranks the fireworks
+  // by launches over the API's last seven days (`purchaseCounts`), with the top buyers on its dialog's second page.
+  // After a purchase, or a preview, the visitor's view glides up from the stand to the arc (FIREWORK_WATCH_UP over
+  // it) and holds there while the sky is lit, then comes home. Within FIREWORK_STAND_NEAR its stars twinkle and sparks
+  // now and then fly from the rockets' tips.
+  const FIREWORK_STAND_ALONG = 12, FIREWORK_STAND_SIDE = 9, FIREWORK_STAND_FACING = 0, FIREWORK_WATCH_UP = 9, FIREWORK_STAND_NEAR = 30;
+  const STAND_SPARKS = [models.particleGeometry("#ffc21a", 0.11, 1), models.particleGeometry("#57c7ff", 0.11, 1), models.particleGeometry("#d65cff", 0.11, 1)];
   const FIREWORK_ITEMS = [{ id: "pop", name: "OOGA POP", price: null }, { id: "bolt", name: "LIGHTNING BOLT", price: null }, { id: "mega", name: "MEGA BLAST", price: null }, { id: "show", name: "SHOW PACK", price: null }];
   // What the stand asks with no API behind it, where it only simulates: the prices the API is configured with.
   const FIREWORK_DEMO_PRICES = { pop: 10, bolt: 69, mega: 100, show: 300 };
-  const fireworkStand = { action: { kind: "firework-stand" }, x: 0, y: 0, z: 0, ry: 0, built: false, plaqueNode: null, plaqueCanvas: null, plaqueShown: undefined, note: "",
-    board: { title: "Top launchers", help: "The ten signed-in players who have spent the most sats on fireworks, with how many they launched.", canvas: null, count: 1, index: 0, caption: "", note: "", version: 0, go() {} } };
+  const fireworkStand = { action: { kind: "firework-stand" }, x: 0, y: 0, z: 0, ry: 0, built: false, note: "",
+    use: { x: 0, z: 0 }, tips: [], stars: [], bulbs: [], vendor: null, sparkIn: 0, simCounts: { pop: 0, bolt: 0, mega: 0, show: 0 }, simVersion: 0,
+    menuNode: null, menuCanvas: null, menuShown: null, menuMay: "", launchesNode: null, launchesCanvas: null, launchesShown: null,
+    // The board dialog: TOP LAUNCHES, then the top buyers (stand-kiosk.js `plaque`), painted as it pages.
+    board: { title: "Top launches", help: "", canvas: null, count: 2, index: 0, page: -1, caption: "", note: "", version: 0, shown: null, go(i) { this.index = (i + this.count) % this.count; this.shown = null; } } };
+  // Each page's line under the board dialog's picture (its caption, which repaints with it).
+  const FIREWORK_BOARD_CAPTIONS = ["The fireworks launched most over the last seven days", "The signed-in players who have spent the most sats on fireworks"];
   const fireworkWatch = { mode: 0, t: 0, from: { x: 0, y: 0, z: 0, yaw: 0, pitch: 0 }, to: { x: 0, y: 0, z: 0, yaw: 0, pitch: 0 }, home: { x: 0, y: 0, z: 0, yaw: 0, pitch: 0 }, view: { x: 0, y: 0, z: 0, yaw: 0, pitch: 0 } };
   const WATCH_GOING = 1, WATCH_HOLDING = 2, WATCH_RETURNING = 3, WATCH_EASE = 1.6;
   const FIREWORK_RANGE = 200, FIREWORK_HEIGHT = 150, FIREWORK_LIGHT = 0.08, FIREWORK_DIM = 0.7;
@@ -6295,9 +6304,13 @@
         hud.toast("Bifröst hums underfoot. ₿IFRÖST is across.");
         break;
       case "fireworkstand":
+      case "fireworkmenu":
         openFireworkStand();
         break;
-      case "fireworkplaque":
+      case "fireworklaunches":
+        fireworkStand.board.index = 0;
+        fireworkStand.board.shown = null;
+        refreshFireworkBoards();
         hud.openBoard(fireworkStand.board);
         break;
       case "bifrostgate":
@@ -6376,7 +6389,7 @@
     }
     if (arcadeMouth && actionWithinReach(x, y, z, arcadeMouth.x, arcadeMouth.y, arcadeMouth.z, MOUTH_REACH)) return arcadeMouth;
     if (player && timechainIsland.gate && timechainIsland.gate.nearKeypad(x, y, z)) return timechainIsland.gate.action;
-    if (player && fireworkStand.built && Math.hypot(x - fireworkStand.x, z - fireworkStand.z) < FIREWORK_STAND_REACH && Math.abs(y - 1.1 - fireworkStand.y) < 1.5) return fireworkStand.action;
+    if (player && fireworkStand.built && Math.hypot(x - fireworkStand.use.x, z - fireworkStand.use.z) < BL.standModels.LAYOUT.use.reach && Math.abs(y - 1.1 - fireworkStand.y) < 1.5) return fireworkStand.action;
     return null;
   };
   const useNearbyAction = (action) => {
@@ -8370,7 +8383,7 @@
     // Tess moves after the view is set, so a tour's glide has the last word on it.
     islandGuide.update(dt, elapsed);
     fireworkWatchFrame(dt);
-    refreshFireworkPlaque();
+    fireworkStandFrame(dt, elapsed);
     timechainIsland.site.view(camera.position);
     for (let i = 0; i < signDetails.length; i++) {
       const sign = signDetails[i], dx = camera.position.x - sign.x, dy = camera.position.y - sign.y, dz = camera.position.z - sign.z;
@@ -11914,8 +11927,10 @@
     fireworkWatch.mode = 0;
     document.body.classList.remove("fireworks-watching");
     fireworkStand.built = false;
-    fireworkStand.plaqueNode = fireworkStand.plaqueCanvas = fireworkStand.board.canvas = null;
-    fireworkStand.plaqueShown = undefined;
+    fireworkStand.stars.length = fireworkStand.tips.length = fireworkStand.bulbs.length = 0;
+    fireworkStand.vendor = fireworkStand.menuNode = fireworkStand.launchesNode = null;
+    fireworkStand.menuCanvas = fireworkStand.launchesCanvas = fireworkStand.board.canvas = null;
+    fireworkStand.menuShown = fireworkStand.launchesShown = fireworkStand.board.shown = null;
     RENDER_OPTS.sprites = RENDER_OPTS.glints = null;
     RENDER_OPTS.glintCount = 0;
     RENDER_OPTS.flash.fill(0);
@@ -12072,61 +12087,165 @@
     remotes.liveGeometry(set);
     if (timechainIsland && timechainIsland.gate) timechainIsland.gate.liveGeometry(set);
   };
-  // The stand, built before the scenery is laid so its claim keeps trees and scatter off it.
-  let fireworkStandDressing = null;
+  // The stand, built before the scenery is laid so its claims keep trees and scatter off it: the attraction's models
+  // (stand-models.js) in its own frame, its two boards' faces, the terminal's glass and the counter's cloth as pictures,
+  // its lanterns from the kit (the canopy's two lit at night), the vendor, and picks for the counter and both boards.
+  const standToWorld = (lx, ly, lz, out) => {
+    const S = fireworkStand, c = Math.cos(S.ry), s = Math.sin(S.ry);
+    out.x = S.x + lx * c + lz * s; out.y = S.y + ly; out.z = S.z - lx * s + lz * c;
+    return out;
+  };
+  const hangStandLantern = (group, lx, ly, lz, id, light) => {
+    const baked = BL.dressing.set().put("hanging", lx, ly, lz).build(), at = standToWorld(lx, ly - 0.25, lz, { x: 0, y: 0, z: 0 });
+    for (const node of BL.dressing.nodes(baked, { living: true })) {
+      addChild(group, node);
+      if (node.geometry === baked.lampGlow || node.geometry === baked.swingLampGlow || node.geometry === baked.glow || node.geometry === baked.swingGlow) addLamp(node, LAMP.lantern, at.x, at.y, at.z, light, 0, `${id}:${lamps.length}`).nightOnly = true;
+    }
+  };
   const buildFireworkStand = () => {
-    const S = fireworkStand, b = terrain.TIMECHAIN.bearing, ax = Math.sin(b), az = -Math.cos(b);
+    const S = fireworkStand, M = BL.standModels, L = M.LAYOUT, b = terrain.TIMECHAIN.bearing, ax = Math.sin(b), az = -Math.cos(b);
     S.x = ax * FIREWORK_STAND_ALONG - az * FIREWORK_STAND_SIDE;
     S.z = az * FIREWORK_STAND_ALONG + ax * FIREWORK_STAND_SIDE;
     S.y = island.surfaceAt(S.x, S.z);
-    S.ry = Math.atan2(-S.x, -S.z);
-    if (!fireworkStandDressing) {
-      const set = BL.dressing.set();
-      set.put("terminal", 0, 0, 0).put("crate", -1.05, 0, 0.1).put("crate", 1.05, 0, 0.1).put("crate", 1.05, 0.62, 0.1, 1).put("barrel", -1.05, 0, -0.85).put("lanternPost", -2.15, 0, 0.45, 2);
-      fireworkStandDressing = set.build();
-    }
+    S.ry = FIREWORK_STAND_FACING;
     const group = createNode({ position: { x: S.x, y: S.y, z: S.z }, rotation: { x: 0, y: S.ry, z: 0 } });
     addChild(root, group);
     placed.push(group);
-    addDressing(fireworkStandDressing, group, S.x, S.y, S.z, "fireworkstand", false);
-    const wood = "#4a2f1a";
-    for (const x of [-1.45, 1.45]) addChild(group, createNode({ geometry: models.box({ w: 0.14, h: 2.75, d: 0.14, color: wood, offset: { x, y: 1.375, z: -0.25 } }) }));
-    addChild(group, createNode({ geometry: hubModels.caveSign("FIREWORKS"), position: { x: 0, y: 2.55, z: -0.18 }, scale: { x: 0.62, y: 0.62, z: 0.62 } }));
-    // The plaque on its own post beside the counter, facing the same way.
-    S.plaqueCanvas = document.createElement("canvas");
-    S.board.canvas = S.plaqueCanvas;
-    addChild(group, createNode({ geometry: models.box({ w: 0.12, h: 1.9, d: 0.12, color: wood, offset: { x: 2.45, y: 0.95, z: -0.05 } }) }));
-    S.plaqueNode = createNode({ position: { x: 2.45, y: 1.55, z: 0.03 } });
-    addChild(group, S.plaqueNode);
-    S.plaqueShown = undefined;
-    refreshFireworkPlaque();
-    // Picks off the scene graph, as the set pieces' are: the counter and its sign, and the plaque.
-    const cr = Math.cos(S.ry), sr = Math.sin(S.ry), px = S.x + cr * 2.45, pz = S.z - sr * 2.45;
-    for (const [kind, x, y, z, r] of [["fireworkstand", S.x, S.y + 1.4, S.z, 1.7], ["fireworkplaque", px, S.y + 1.55, pz, 0.75]]) {
-      const pick = createNode({ position: { x, y, z }, geometry: PICK_GEOMETRY });
-      BL.scene.updateWorld(pick);
-      addProp(kind, pick, x, z, r);
+    const parts = M.build(), node = (geometry, at = {}, rotation = {}) => {
+      const n = createNode({ geometry, position: { x: at.x || 0, y: at.y || 0, z: at.z || 0 }, rotation: { x: rotation.x || 0, y: rotation.y || 0, z: rotation.z || 0 } });
+      addChild(group, n);
+      return n;
+    };
+    solids.add(node(parts.timber));
+    node(parts.iron); node(parts.cloth); node(parts.dark); node(parts.swing); node(parts.glow);
+    // The sign's lettering: raised blocks in WebGL; on Canvas 2D one cut-out picture each, sorted well nearer than the
+    // planks it stands on (a negative bias, as the island's other signs use). The plank faces split at every knot, so
+    // a piece can sit a metre nearer than the picture's middle in an oblique view; seen from behind, a picture faces
+    // away and is culled, so the bias never shows it through the board.
+    if (renderer.kind === "webgl2") { node(parts.lettering.back); node(parts.lettering.face); }
+    else for (const [pic, [x, y, z]] of parts.letterPictures) node(M.pictureFace(pic.canvas, pic.w, pic.h, 0.8, true), { x, y, z }).depthBias = -2;
+    S.bulbs.length = 0;
+    for (const geometry of parts.bulbs) { const n = node(geometry); n.depthBias = -0.12; S.bulbs.push(n); }
+    const R = M.rockets();
+    for (const [x, y, z, lean, paint] of L.rockets) node(R[paint], { x, y, z }, { z: lean });
+    S.stars.length = 0;
+    for (const [x, y, z, size] of L.stars) {
+      const n = node(M.star(), { x, y, z });
+      n.scale.x = n.scale.y = n.scale.z = size;
+      S.stars.push(n);
     }
-    claim(S.x, S.z, 2.4);
-    claim(px, pz, 0.8);
+    // The pictures: the terminal's glass leaning back on its housing, the cloth in the counter's recess, the boards.
+    const G = L.screen;
+    node(M.pictureFace(M.screenCanvas(), G.w, G.h, 1), { x: G.x, y: G.y + 0.3 + Math.sin(-G.tilt) * 0.035, z: G.z - 0.08 + Math.cos(G.tilt) * 0.035 }, { x: G.tilt });
+    node(M.pictureFace(M.clothCanvas(), L.cloth.w, L.cloth.h, 0.25), { x: L.cloth.x, y: L.cloth.y, z: L.cloth.z });
+    S.menuCanvas = document.createElement("canvas");
+    S.launchesCanvas = document.createElement("canvas");
+    S.board.canvas = document.createElement("canvas");
+    S.menuNode = node(null, { x: L.menu.x, y: L.menu.y, z: L.menu.z });
+    S.launchesNode = node(null, { x: L.launches.x, y: L.launches.y, z: L.launches.z });
+    S.menuShown = S.launchesShown = S.board.shown = null;
+    refreshFireworkBoards();
+    // Lanterns: the canopy's, which light the counter at night, and the boards', which only glow.
+    L.lamps.forEach(([x, y, z], n) => hangStandLantern(group, x, y, z, `fireworkstand:lamp${n}`, true));
+    L.boardLamps.forEach(([x, y, z], n) => hangStandLantern(group, x, y, z, `fireworkstand:board${n}`, false));
+    // The vendor behind the counter in a straw hat: an Ooga of no one's, looking out over it.
+    const vendor = models.caveman(contributors.traitsFor("fireworks-vendor")), figure = vendor.root;
+    figure.position.x = L.vendor.x;
+    figure.position.y = L.vendor.y + vendor.traits.height * 5 / 16;
+    figure.position.z = L.vendor.z;
+    figure.sightHidden = true;
+    vendor.parts.club.visible = false;
+    vendor.parts.armR.rotation.x = vendor.parts.armL.rotation.x = -0.75;
+    addChild(vendor.parts.hat, createNode({ geometry: M.strawHat(), position: { x: 0, y: -0.02, z: 0 } }));
+    vendor.parts.hat.visible = true;
+    addChild(group, figure);
+    S.vendor = vendor;
+    // Where sparks fly from, and where a visitor stands to buy, in the island's frame.
+    S.tips.length = 0;
+    for (const [x, y, z] of L.tips) S.tips.push(standToWorld(x, y, z, { x: 0, y: 0, z: 0 }));
+    standToWorld(L.use.x, 0, L.use.z, S.use);
+    // Picks off the scene graph, as the set pieces' are: the counter, the menu, and TOP LAUNCHES.
+    for (const [kind, x, y, z, r] of [["fireworkstand", 0, 1.3, 0.6, 1.8], ["fireworkmenu", L.menu.x, L.menu.y, L.menu.z, 0.9], ["fireworklaunches", L.launches.x, L.launches.y, L.launches.z, 0.9]]) {
+      const at = standToWorld(x, y, z, { x: 0, y: 0, z: 0 }), pick = createNode({ position: at, geometry: PICK_GEOMETRY });
+      BL.scene.updateWorld(pick);
+      addProp(kind, pick, at.x, at.z, r);
+    }
+    // Its ground, claimed in circles along its width, so nothing is laid under it.
+    const F = L.footprint, mid = (F.z0 + F.z1) / 2;
+    for (let x = F.x0 + 1; x <= F.x1 - 0.99; x += 1.45) { const at = standToWorld(x, 0, mid, { x: 0, y: 0, z: 0 }); claim(at.x, at.z, 2.1); }
+    for (const [x, z, r] of L.apron) { const at = standToWorld(x, 0, z, { x: 0, y: 0, z: 0 }); claim(at.x, at.z, r); }
     // The buyer's view: up over the stand to the arc's middle.
-    const mid = FIREWORK_SLOTS[2], end = FIREWORK_SLOTS[3], v = fireworkWatch.view;
+    const arcMid = FIREWORK_SLOTS[2], arcEnd = FIREWORK_SLOTS[3], v = fireworkWatch.view;
     v.x = S.x; v.y = S.y + FIREWORK_WATCH_UP; v.z = S.z;
-    const tx = (mid.x + end.x) / 2 - v.x, ty = FIREWORK_HEIGHT - 20 - v.y, tz = (mid.z + end.z) / 2 - v.z;
+    const tx = (arcMid.x + arcEnd.x) / 2 - v.x, ty = FIREWORK_HEIGHT - 20 - v.y, tz = (arcMid.z + arcEnd.z) / 2 - v.z;
     v.yaw = Math.atan2(tx, tz);
     v.pitch = Math.atan2(ty, Math.hypot(tx, tz));
     S.built = true;
   };
-  // The plaque repaints only when the API's board changes; a repaint swaps the face's geometry, which the renderer
-  // uploads once.
-  const refreshFireworkPlaque = () => {
-    const S = fireworkStand, board = donations.state.purchaseBoards[donations.FIREWORK];
-    if (!S.plaqueNode || board === S.plaqueShown) return;
-    S.plaqueShown = board;
-    BL.standKiosk.plaque(S.plaqueCanvas, board);
-    if (S.plaqueNode.geometry) renderer.releaseGeometry(S.plaqueNode.geometry);
-    S.plaqueNode.geometry = BL.standKiosk.plaqueFace(S.plaqueCanvas, 1.2, 0.9);
-    S.board.version++;
+  // The menu's prices, TOP LAUNCHES' counts and the board dialog's page repaint only when what they show changes; a
+  // repaint swaps the face's geometry, which the renderer uploads once.
+  const swapStandFace = (n, canvas, w, h) => {
+    if (n.geometry) renderer.releaseGeometry(n.geometry);
+    n.geometry = BL.standModels.pictureFace(canvas, w, h);
+  };
+  const fireworkLaunchRows = () => {
+    const counts = donations.real ? donations.state.purchaseCounts[donations.FIREWORK] : null;
+    const of = (id) => donations.real ? counts && Number.isSafeInteger(counts.items[id]) ? counts.items[id] : 0 : fireworkStand.simCounts[id];
+    const rows = FIREWORK_ITEMS.filter((it) => it.id !== "show" || of("show") > 0).map((it) => ({ id: it.id, name: it.name, count: of(it.id) }));
+    return rows.sort((p, q) => q.count - p.count);
+  };
+  const refreshFireworkBoards = () => {
+    const S = fireworkStand, L = BL.standModels.LAYOUT;
+    if (!S.menuNode) return;
+    const may = fireworkMayBuy(), menuKey = donations.real ? donations.state.catalogue : FIREWORK_DEMO_PRICES;
+    if (menuKey !== S.menuShown || may !== S.menuMay) {
+      S.menuShown = menuKey; S.menuMay = may;
+      BL.standModels.menuFace(S.menuCanvas, fireworkItems().slice(0, 3), may === "sign-in" ? "SIGN IN TO BUY · PREVIEW IS FREE" : may === "closed" ? "THE STAND IS CLOSED FOR NOW" : "");
+      swapStandFace(S.menuNode, S.menuCanvas, L.menu.w, L.menu.h);
+    }
+    const launchesKey = donations.real ? donations.state.purchaseCounts[donations.FIREWORK] || null : S.simVersion;
+    if (launchesKey !== S.launchesShown || S.launchesNode.geometry === null) {
+      S.launchesShown = launchesKey;
+      const counts = donations.real ? donations.state.purchaseCounts[donations.FIREWORK] : null;
+      BL.standModels.launchesFace(S.launchesCanvas, fireworkLaunchRows(), counts && counts.days || 7);
+      swapStandFace(S.launchesNode, S.launchesCanvas, L.launches.w, L.launches.h);
+      S.board.shown = null;
+    }
+    // The dialog's page, painted only while it is open on it and what it shows has changed.
+    const page = S.board.index, key = page === 0 ? S.launchesShown : donations.state.purchaseBoards[donations.FIREWORK] || null;
+    if (S.board.shown !== key || S.board.page !== page) {
+      S.board.shown = key; S.board.page = page;
+      S.board.caption = FIREWORK_BOARD_CAPTIONS[page];
+      if (page === 0) {
+        const g = S.board.canvas, c = S.launchesCanvas;
+        g.width = c.width; g.height = c.height;
+        g.getContext("2d").drawImage(c, 0, 0);
+      } else BL.standKiosk.plaque(S.board.canvas, donations.state.purchaseBoards[donations.FIREWORK], "TOP LAUNCHERS");
+      S.board.version++;
+    }
+  };
+  // Every frame the stand is built: its boards when what they show changes, and, within FIREWORK_STAND_NEAR, its stars
+  // twinkling, sparks now and then from a rocket's tip and the vendor looking about. Allocation-free.
+  const fireworkStandFrame = (dt, elapsed) => {
+    const S = fireworkStand;
+    if (!S.built) return;
+    refreshFireworkBoards();
+    const p = camera.position;
+    if (Math.hypot(p.x - S.x, p.z - S.z) > FIREWORK_STAND_NEAR) return;
+    for (let i = 0; i < S.stars.length; i++) S.stars[i].glow = 0.72 + 0.48 * Math.sin(elapsed * 2.6 + i * 1.7);
+    // The marquee chases: each group in turn, a step every fifth of a second.
+    const step = Math.floor(elapsed * 5) % 3;
+    for (let i = 0; i < S.bulbs.length; i++) S.bulbs[i].glow = i === step ? 1.25 : 0.4;
+    if ((S.sparkIn -= dt) <= 0) {
+      S.sparkIn = 0.9 + Math.random() * 1.4;
+      const tip = S.tips[(Math.random() * S.tips.length) | 0];
+      fx.burst(tip.x, tip.y, tip.z, 5, STAND_SPARKS, 0.8);
+    }
+    const v = S.vendor;
+    if (v) {
+      v.parts.head.rotation.y = Math.sin(elapsed * 0.55) * 0.42;
+      v.root.rotation.y = Math.sin(elapsed * 0.23) * 0.12;
+    }
   };
   // The fireworks the API sells now (`status.catalogue`), or null while it sells none.
   const fireworkCatalogue = () => donations.state.catalogue && donations.state.catalogue[donations.FIREWORK] || null;
@@ -12237,6 +12356,8 @@
     if (!fireworks) return false;
     const lead = (firework.launchAt - BL.donations.serverNow()) / 1000, F = BL.fireworks;
     if (firework.mine) watchFireworks();
+    // With no API behind the page, TOP LAUNCHES counts this page's own.
+    if (!donations.real && Object.hasOwn(fireworkStand.simCounts, firework.kind)) { fireworkStand.simCounts[firework.kind]++; fireworkStand.simVersion++; }
     fireworks.launch(firework.kind, firework.id, { at: now + lead, slot: firework.slot === null ? -1 : firework.slot, eye: fireworkWatch.mode ? fireworkWatch.view : camera.position });
     const who = firework.mine ? `Your ${F.NAMES[firework.kind]} launches` : `${firework.login ? `@${firework.login}` : "Someone"} is launching ${F.aName(firework.kind)}`;
     fireworkCountdown.until = now + lead;
