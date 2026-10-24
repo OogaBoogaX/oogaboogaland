@@ -721,7 +721,7 @@
     lit.lanterns.glow = (party ? 1.25 : 0.94) + Math.sin(elapsed * 7.3) * 0.05 + Math.sin(elapsed * 13.1) * 0.03;
     // Each flame licks up and settles on its own clock, brighter and taller while the room celebrates.
     for (let i = 0; i < lit.flames.length; i++) {
-      const f = lit.flames[i], k = Math.sin(elapsed * 11 + i * 2.3) * 0.07 + Math.sin(elapsed * 17.3 + i * 1.1) * 0.05 + (party ? 0.15 : 0);
+      const f = lit.flames[i], k = BL.blaze.flare(elapsed, i * 2.3) + (party ? 0.15 : 0);
       f.node.scale.y = f.size * (1 + k);
       f.node.scale.x = f.node.scale.z = f.size * (1 - k * 0.4);
       f.node.glow = 1 + k * 1.5;

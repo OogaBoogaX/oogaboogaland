@@ -231,7 +231,7 @@
   };
 
   // One visit's state: created in enter, dropped in leave.
-  let jumbotronSpot, oogatronUnsub, renderer, game, world, go, lootEnabled, testBananas, root, camera, overlayCanvas, island, terrainRampRoof, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, mirrorCave, matrixCave, matrixControl, gateRain, fireBlaze, fire, headquarters, dockStairs, jumbotron, positionDebug, remotes, npcSync;
+  let jumbotronSpot, oogatronUnsub, renderer, game, world, go, lootEnabled, testBananas, root, camera, overlayCanvas, island, terrainRampRoof, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, mirrorCave, matrixCave, matrixControl, gateRain, fireRigs, firePitRig, fire, headquarters, dockStairs, jumbotron, positionDebug, remotes, npcSync;
   let magazine, magazineState, breakables, clankers, clankerPlay, clankerMeshes, clankerPartOwners, grabSupportEntry = null, entropyLab, chalkboard, factoryMouth = null, arcadeMouth = null, bcaMouth = null, glCanvas = null;
   const dragHand = new Float64Array(3), dragFoot = new Float64Array(3);
   const THROW_SWING_TIME = 0.28, THROW_SETTLE_TIME = 0.2, THROW_CARRY_SPEED_MAX = 8;
@@ -1593,6 +1593,11 @@
     const phaseNow = daylight.phaseAt(hour);
     const lanternsOn = phaseNow === "dusk" || phaseNow === "night" || phaseNow === "midnight";
     const coilLamp = coilCharge && coilCharge.lamp, coilActive = !!coilLamp && coilCharge.level > 0.02;
+    // The pits' lights follow their flames: the plaza lamp's gain and the HQ hearth's colour pulse with the flicker.
+    const plazaRig = firePitRig, hearthRig = headquarters && headquarters.hearth && headquarters.hearth.rig;
+    const plazaLamp = plazaRig ? plazaRig.lamp : null;
+    const plazaPulse = plazaRig ? 1 + (plazaRig.light - 1) * 1.5 : 1;
+    const hearthK = hearthRig ? 1 + (hearthRig.light - 1) * 1.2 : 1;
     let count = 0, approximated = 0, registered = 0;
     for (let i = 0; i < lamps.length; i++) {
       const l = lamps[i], node = l.node;
@@ -1621,7 +1626,7 @@
       if (l.reach > 0) {
         const away = Math.hypot(l.fromX - camera.target.x, l.fromY - camera.target.y, l.fromZ - camera.target.z);
         l.gain = Math.max(poolShade, poolUnder) * Math.min(1, Math.max(0, (l.reach - away) / l.fade));
-      } else l.gain = 1 - poolShade;
+      } else l.gain = (1 - poolShade) * (l === plazaLamp ? plazaPulse : 1);
       l.far = l.gain < 0.02;
       if (l.debug) {
         l.debug.factor = k;
@@ -1696,18 +1701,6 @@
       const o = coilLamp.slot * 8, s = coilLamp.k * coilLamp.gain * coilCharge.level;
       lights[o + 4] = coilLamp.kind.r * s; lights[o + 5] = coilLamp.kind.g * s; lights[o + 6] = coilLamp.kind.b * s;
     }
-    if (headquarters) {
-      // The underground hearth stays lit for the windowless common room.
-      // Its emissive flame still breathes with the same flicker as the campfire.
-      const hearth = headquarters.hearth;
-      hearth.node.glow = LAMP_OFF + LAMP.fire.glow + Math.sin(elapsed * 11 + hearth.phase) * 0.15;
-    }
-    if (fireBlaze) {
-      // The plaza's fire pit licks up and settles on its own clock, as the arcade hall's flames do.
-      const k = Math.sin(elapsed * 11) * 0.07 + Math.sin(elapsed * 17.3 + 1.1) * 0.05;
-      fireBlaze.scale.y = 1 + k;
-      fireBlaze.scale.x = fireBlaze.scale.z = 1 - k * 0.4;
-    }
     if (!keyHit && headquarters && camera.position.y < -1 && cameraCaveIndex && CAMERA_OPENINGS[cameraCaveIndex - 1].headquarters) {
       const underground = headquarters.sources;
       // The upper hearth cannot cast through the rock into the basement.
@@ -1722,14 +1715,15 @@
           if (!l.selected && d < distance) { nearest = l; distance = d; }
         }
         const l = nearest, o = i * 8, sky = l.daylight ? 0.12 + RENDER_OPTS.day * 0.88 : 1;
+        const kk = l.rig ? hearthK : 1;
         l.selected = true;
         lights[o] = l.x;
         lights[o + 1] = l.y;
         lights[o + 2] = l.z;
         lights[o + 3] = l.daylight ? 11 : 9;
-        lights[o + 4] = (l.daylight ? 0.8 : 1) * sky;
-        lights[o + 5] = (l.daylight ? 0.88 : 0.65) * sky;
-        lights[o + 6] = (l.daylight ? 1 : 0.3) * sky;
+        lights[o + 4] = (l.daylight ? 0.8 : 1) * sky * kk;
+        lights[o + 5] = (l.daylight ? 0.88 : 0.65) * sky * kk;
+        lights[o + 6] = (l.daylight ? 1 : 0.3) * sky * kk;
         lights[o + 7] = 0;
         LIGHTING_DEBUG.selectedIds[i] = l.id;
       }
@@ -1756,12 +1750,15 @@
     }
     if (!p) throw new Error("No clear spot for the fire pit");
     const pit = place(hubModels.firepit(), p.x, p.z, 0, 0, "firepit", 1.2);
-    // The arcade hall's flame stands in the plaza's pit, its tips swaying and its body flickered each frame.
-    const flame = createNode({ geometry: hubModels.fireBlaze(), matrixEmissiveLiving: true, sightHidden: true });
-    addChild(pit, flame);
-    fireBlaze = flame;
-    fireHazards.push({ node: flame, pit, x: p.x, y: pit.position.y, z: p.z, avoidRadius: FIRE_AVOID_RADIUS });
-    addLamp(flame, LAMP.fire, p.x, 0.6, p.z, true, 3, "firepit").always = true;
+    // The island's voxel flame: separate tongues stretching and leaning on their own clocks. The pit's embers are
+    // the hub's own critter ember batch drawn for the fire at `firePos`, the same style as the HQ hearth's.
+    const rig = BL.blaze.createVoxelRig({ scale: 1, sightHidden: true });
+    addChild(pit, rig.root);
+    rig.lamp = addLamp(rig.root, LAMP.fire, p.x, 0.6, p.z, true, 3, "firepit");
+    rig.lamp.always = true;
+    fireRigs.push(rig);
+    firePitRig = rig;
+    fireHazards.push({ node: rig.root, boxes: rig.boxes, pit, x: p.x, y: pit.position.y, z: p.z, avoidRadius: FIRE_AVOID_RADIUS });
     claim(p.x, p.z, 1.4);
     for (let i = 0; i < FIRE_SEATS; i++) {
       const a = (i + 0.5) / FIRE_SEATS * Math.PI * 2;
@@ -2636,12 +2633,14 @@
     }
     const firepit = createNode({ position: { x: 0, y: floor, z: 0 }, geometry: hubModels.firepit() });
     solids.add(firepit);
-    const flame = createNode({ geometry: hubModels.fireFlame(), glow: 0.9, matrixEmissiveLiving: true });
-    addChild(firepit, flame);
-    fireHazards.push({ node: flame, pit: firepit, x: 0, y: floor, z: 0, avoidRadius: FIRE_AVOID_RADIUS });
+    // The island's voxel flame burns in the HQ hearth too; its embers are the hub's critter batch at the hearth.
+    const rig = BL.blaze.createVoxelRig({ scale: 1, sightHidden: true });
+    addChild(firepit, rig.root);
+    fireRigs.push(rig);
+    fireHazards.push({ node: rig.root, boxes: rig.boxes, pit: firepit, x: 0, y: floor, z: 0, avoidRadius: FIRE_AVOID_RADIUS });
     addChild(root, firepit);
     placed.push(firepit);
-    const hearth = { id: "headquarters:hearth", node: flame, x: 0, y: floor + 0.6, z: 0, phase: 23 };
+    const hearth = { id: "headquarters:hearth", node: rig.root, rig, x: 0, y: floor + 0.6, z: 0, phase: 23 };
     lights.push(hearth);
     // The hearth is the only shared HQ point light.
     // Windows and ramp torches stay physical/emissive; no camera-proximity light spills into an unclaimed room.
@@ -8395,6 +8394,7 @@
     mempoolIsland.paintings.update(dt);
     updateTotems(dt, elapsed);
     if (coilCharge) updateCoilCharge(elapsed);
+    for (let i = 0; i < fireRigs.length; i++) fireRigs[i].update(dt, elapsed);
     updateLamps(dt, elapsed, phase !== null);
     if (jumbotron) {
       jumbotron.update(elapsed, renderer);
@@ -9447,7 +9447,9 @@
     for (let i = 0; i < fireHazards.length; i++) {
       const hazard = fireHazards[i];
       if (!hazard.node.visible) continue;
-      const boxes = hazard.node.geometry.fireBoxes, reach = entry.gorilla.bodyRadius + 0.5;
+      const boxes = hazard.boxes || (hazard.node.geometry && hazard.node.geometry.fireBoxes);
+      if (!boxes) continue;
+      const reach = entry.gorilla.bodyRadius + 0.5;
       for (let s = 0; s <= samples; s++) {
         const k = s / samples, x = lerp(fromX, p.x, k), y = lerp(fromY, p.y, k), z = lerp(fromZ, p.z, k);
         if (Math.hypot(x - hazard.x, z - hazard.z) > reach) continue;
@@ -10908,6 +10910,8 @@
     TICKER_AT.y = gate.position.y + (arch ? arch.top + 1 : 6);
     GATE_VIEW.target.y = gate.position.y + (arch ? arch.middle : 2.5);
     const archLamp = arch ? dressArch(gate, arch) : null;
+    fireRigs = [];
+    firePitRig = null;
     headquarters = buildHeadquarters();
     const bedrolls = headquarters.mattresses;
     headquarters.sleepAnchors = bedrolls;
@@ -12007,7 +12011,8 @@
     targets.length = placed.length = claimed.length = scenery.length = sceneryClaims.length = matrixInteriors.length = matrixGates.length = sealedCaves.length = clouds.length = cloudObstacles.length = lamps.length = pilePosts.length = fireSeats.length = sleepers.length = labels.length = signDetails.length = spots.length = chillSpots.length = headquartersRimLintels.length = climbMasonry.length = props.length = meadowPalms.length = 0;
     cloudRandom = null;
     fireHazards.length = 0;
-    fireBlaze = null;
+    fireRigs = null;
+    firePitRig = null;
     clankerFireReachable = null;
     workZones.length = entranceZones.length = 0;
     closedCaveZones.length = 0;

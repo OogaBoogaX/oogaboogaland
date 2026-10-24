@@ -1476,7 +1476,7 @@
   // The lawn's instanced batch takes the same tuft as its own geometry object, so it never shares a GPU record
   // with the scattered tufts.
   const lawnTuft = cached(() => ({ ...grassTuft() }));
-  // Firepit geometry only; the flame is fireFlame.
+  // Firepit geometry only; the fires themselves live in the blaze module.
   const firepit = cached(() => {
     const rand = mulberry32(131);
     return merge(
@@ -1501,34 +1501,8 @@
     }
     return geometry;
   });
-  // The arcade hall's flame (`arcadeModels.blaze`), copied for the plaza's fire pit: a fat teardrop licking up to a
-  // point with three smaller tongues leaning out round its foot, the whole twisted a little as it rises, white-gold
-  // at the root through yellow and orange to red at the tips. Smooth and unshadowed, its tips sway; the hub stands
-  // it in the pit and flickers it. Built at the hall's size and scaled to the pit's.
-  const FIRE_BLAZE_INKS = ["#fff2b8", "#ffd24a", "#ffa030", "#ff6420"];
-  const fireBlaze = cached(() => {
-    const ink = (t) => FIRE_BLAZE_INKS[Math.min(3, Math.floor(t * 4))];
-    const lick = (h, r) => turnPart([[0, 0], [r * 0.72, h * 0.05], [r, h * 0.2], [r * 0.9, h * 0.38], [r * 0.62, h * 0.58], [r * 0.3, h * 0.8], [0, h]], 8, ink, 0.9);
-    const parts = [lick(0.5, 0.13)];
-    for (let k = 0; k < 3; k++) parts.push(turnedY(moved(turnedZ(lick(0.3, 0.075), -0.45), 0.05, 0.02, 0), k * 2.09 + 0.5));
-    const geo = noShadow(shaded(parts)), v = geo.verts, S = 1.8;
-    for (let i = 0; i < v.length; i += 3) {
-      const a = v[i + 1] * 1.6, c = Math.cos(a), s = Math.sin(a), x = v[i] * S, z = v[i + 2] * S;
-      v[i + 1] *= S;
-      v[i] = x * c + z * s;
-      v[i + 2] = -x * s + z * c;
-    }
-    geo.sway = 0.15;
-    // ooga ignition boxes along the scaled flame's body, as the boxed flame carried them.
-    geo.fireBoxes = new Float32Array([
-      0, 0.09, 0, 0.19, 0.09, 0.19,
-      0, 0.27, 0, 0.23, 0.09, 0.23,
-      0, 0.45, 0, 0.21, 0.09, 0.21,
-      0, 0.63, 0, 0.15, 0.09, 0.15,
-      0, 0.81, 0, 0.07, 0.09, 0.07
-    ]);
-    return geo;
-  });
+  // The arcade hall's flame, at the pit's size, lives in the common blaze module now.
+  const fireBlaze = cached(() => BL.blaze.smoothPit());
   const WINGS = [["#f2c94c", "#e04a3a"], ["#f3efe4", "#6f9fca"]];
   const butterfly = variants((i) => {
     const [wing, spot] = WINGS[i];
@@ -1541,7 +1515,8 @@
     ));
   });
   const firefly = cached(() => noShadow(box({ w: 0.06, h: 0.06, d: 0.06, color: "#d9ff6a", emissive: 1 })));
-  const ember = cached(() => noShadow(box({ w: 0.05, h: 0.05, d: 0.05, color: "#ff8a2a", emissive: 1 })));
+  // The ember model lives in the blaze module now.
+  const ember = cached(() => BL.blaze.emberModel());
   const vine = cached(() => {
     const rand = mulberry32(53);
     const leaves = [];

@@ -712,7 +712,7 @@
     ...[[-0.25, -0.3, "#7fe0ff", 0.7], [0.2, -0.2, STONE_LIGHT, 0], [-0.1, 0.2, "#b58cff", 0.7], [0.3, 0.3, STONE, 0], [0, 0, "#f5c542", 0.7]].map(([x, z, color, emissive]) =>
       bx({ w: 0.36, h: 0.28, d: 0.36, color, emissive, offset: { x, y: 0.98, z } }))
   ));
-  const flame = cached(() => BL.hubModels.fireFlame());
+  const flame = cached(() => BL.blaze.tongueGeo(0));
   // A charge crystal, the panic power the trader sells by the bag.
   const crystal = cached(() => merge(
     lathe({ profile: [[0, 0], [0.14, 0.12], [0.1, 0.44], [0, 0.56]], segments: 6, color: "#7fe0ff", emissive: 0.8 }),
