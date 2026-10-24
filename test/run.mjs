@@ -6156,12 +6156,13 @@ const hubKeptDelivery = { name: "hub kept delivery", why: "regression: leaving a
 // A room's address redirected to the island (signed in, or the account still unknown) chooses that room at the keypad.
 const hubKeypadRedirect = { name: "hub keypad redirect", why: "regression: a kept hub resumed without reading the room a redirected room address chose, so the keypad ignored it and the choice lingered", run: async (b) => {
   await tourGo(b, "lab");
-  const r = await b.evaluate(`(() => {
-    const B = __ooga, net = BL.net.state, resolved = net.resolved;
+  // A scene change may build across tasks, so the wait yields between steps as `tourGo` does.
+  const r = await b.evaluate(`(async () => {
+    const B = __ooga, net = BL.net.state, resolved = net.resolved, t0 = performance.now();
     net.resolved = false;
     try {
       B.go("timechain", "3");
-      for (let i = 0; i < 150 && (B.transitioning || B.scene !== "hub"); i++) B.advance(1 / 30, 1 / 30);
+      while ((B.transitioning || B.scene !== "hub") && performance.now() - t0 < 20000) { B.advance(1 / 30, 1 / 30); await new Promise(r => setTimeout(r, 0)); }
     } finally { net.resolved = resolved; }
     B.advance(0.3, 1 / 30);
     return { scene: B.scene, policy: B.hubPolicy, preselected: BL.scenes.hub.debug.timechainIsland.gate.preselected };

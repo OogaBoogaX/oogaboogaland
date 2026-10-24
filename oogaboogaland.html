@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; script-src 'sha256-B4fYgGyrDAb4AXTs7PVtlJ/SNzys7P1vKVXF7GLvqPg=' 'sha256-sanX5MbaJsCDbCwTY/of/YGafQiCdZL/L7L3rJ+Xr9w='; style-src 'sha256-6tQp2jI1SM/lGahwVYmAWVt/hejsDaMQSKb6FF904pU='; img-src 'self' data:; media-src https://stream.noderunnersradio.com; connect-src 'self' https: wss:; worker-src 'self'; base-uri 'none'; form-action 'none'">
+    content="default-src 'none'; script-src 'sha256-QpQGGc0GilKPLiflSQTkfVBDR/+oZokYGzxq+9RQobY=' 'sha256-sanX5MbaJsCDbCwTY/of/YGafQiCdZL/L7L3rJ+Xr9w='; style-src 'sha256-IDTQKJ1niYfQBmDKLP/lhz7wUCOmPBYSZ41Cs/emUkk='; img-src 'self' data:; media-src https://stream.noderunnersradio.com; connect-src 'self' https: wss:; worker-src 'self'; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#0a0a0b">
@@ -1106,6 +1106,7 @@ body[data-active-scene="arcade"] .magazine-hud {
 .banana-board-labels span:last-child { text-align: right; }
 
 .banana-leaders { margin: 0; padding: 0; list-style: none; }
+.banana-leaders li[hidden] { display: none; }
 
 .banana-leaders li {
   padding: 6px 2px;
@@ -20202,34 +20203,127 @@ void main() {
   // frees their GPU side. A hand-rolled cache joins with `track(drop)` and calls `use()` on every read.
   const scopedCaches = new Set();
   let cacheScope = null;
-  const track = (drop) => {
-    const entry = { scenes: new Set(), last: undefined, drop, use: () => {
+  const track = (drop, peek = null) => {
+    const entry = { scenes: new Set(), last: undefined, drop, peek, use: () => {
       if (entry.last === cacheScope) return;
       entry.last = cacheScope;
       if (cacheScope !== null) entry.scenes.add(cacheScope);
       scopedCaches.add(entry);
-    } };
-    return entry;
-  };
-  const setScope = (id) => { cacheScope = id; };
-  const release = (id, keep) => {
-    for (const entry of scopedCaches) {
-      if (!entry.scenes.has(id) || keep.some((k) => entry.scenes.has(k))) continue;
+    }, clear: () => {
       entry.drop();
       entry.scenes.clear();
       entry.last = undefined;
       scopedCaches.delete(entry);
+    } };
+    return entry;
+  };
+  const setScope = (id) => { cacheScope = id; };
+  // Scope one synchronous build batch. Async builders call this again after each await, without borrowing the
+  // active scene's scope while their code, images or next frame are pending.
+  const withScope = (id, build, arg) => {
+    const previous = cacheScope;
+    cacheScope = id;
+    try { return build(arg); }
+    finally { cacheScope = previous; }
+  };
+  // Each keyed payload has its own owners, as variants do. Iteration counts as a read too; clearing a key removes
+  // its tracking entry, so the registry does not grow with one-off sign labels, room themes or colours.
+  class ScopedMap extends Map {
+    #owners = new Map();
+    constructor(values) {
+      super();
+      if (values) for (const [key, value] of values) this.set(key, value);
     }
+    get(key) { this.#owners.get(key)?.use(); return super.get(key); }
+    has(key) { this.#owners.get(key)?.use(); return super.has(key); }
+    set(key, value) {
+      let owner = this.#owners.get(key);
+      if (!owner) {
+        owner = track(() => { Map.prototype.delete.call(this, key); this.#owners.delete(key); }, () => Map.prototype.get.call(this, key));
+        this.#owners.set(key, owner);
+      }
+      owner.use();
+      return super.set(key, value);
+    }
+    delete(key) {
+      const owner = this.#owners.get(key);
+      if (!owner) return false;
+      owner.clear();
+      return true;
+    }
+    clear() { for (const owner of this.#owners.values()) owner.clear(); }
+    *entries() { for (const entry of super.entries()) { this.#owners.get(entry[0]).use(); yield entry; } }
+    *values() { for (const key of super.keys()) { this.#owners.get(key).use(); yield super.get(key); } }
+    [Symbol.iterator]() { return this.entries(); }
+    forEach(fn, receiver) { super.forEach((value, key) => { this.#owners.get(key).use(); fn.call(receiver, value, key, this); }); }
+  }
+  const scopedMap = (values) => new ScopedMap(values);
+  // A past hub read must not pin meshes absent from the newly built hub. Inspect payload containers, never their
+  // vertex/face arrays or lazy accessors; the scratch releases every reference even when a payload is cyclic.
+  const cacheProbe = [], cacheSeen = new Set();
+  const liveCache = (value, live, arrays) => {
+    let meshes = false;
+    cacheProbe.push(value);
+    try {
+      while (cacheProbe.length) {
+        const part = cacheProbe.pop();
+        if (!part || typeof part !== "object" || cacheSeen.has(part)) continue;
+        cacheSeen.add(part);
+        const verts = Object.getOwnPropertyDescriptor(part, "verts"), faces = Object.getOwnPropertyDescriptor(part, "faces");
+        if ((Array.isArray(verts?.value) || ArrayBuffer.isView(verts?.value)) && Array.isArray(faces?.value)) {
+          meshes = true;
+          if (live.has(part) || arrays.has(verts.value) || arrays.has(faces.value)) return 1;
+        } else if (part instanceof Map) {
+          for (const child of Map.prototype.values.call(part)) cacheProbe.push(child);
+        } else if (Array.isArray(part)) {
+          for (let i = 0; i < part.length; i++) if (part[i] && typeof part[i] === "object") cacheProbe.push(part[i]);
+        } else if (!ArrayBuffer.isView(part)) {
+          for (const key of Object.keys(part)) {
+            const child = Object.getOwnPropertyDescriptor(part, key).value;
+            if (child && typeof child === "object") cacheProbe.push(child);
+          }
+        }
+      }
+      return meshes ? 2 : 0;
+    } finally { cacheProbe.length = 0; cacheSeen.clear(); }
+  };
+  const release = (id, keep, live = null) => {
+    const returned = live && cacheScope === "hub", arrays = returned ? new Set() : null;
+    // Projective windows wrap a mesh without copying its arrays. Their source is live too, even when only the wrapper
+    // is a node's geometry; retain that cache rather than rebuilding a second copy beside the live window.
+    if (returned) for (const mesh of live) {
+      if (!mesh || typeof mesh !== "object") continue;
+      const verts = Object.getOwnPropertyDescriptor(mesh, "verts"), faces = Object.getOwnPropertyDescriptor(mesh, "faces");
+      if (verts?.value) arrays.add(verts.value);
+      if (faces?.value) arrays.add(faces.value);
+    }
+    for (const entry of scopedCaches) {
+      if (!entry.scenes.has(id) && !(returned && entry.scenes.has("hub"))) continue;
+      if (keep.some(k => entry.scenes.has(k))) {
+        if (!returned || !entry.peek || liveCache(entry.peek(), live, arrays) !== 2) continue;
+      }
+      entry.clear();
+    }
+  };
+  const assertReleased = (id) => {
+    for (const entry of scopedCaches) if (entry.scenes.size === 1 && entry.scenes.has(id)) throw new Error(`${id}: scene-only model cache survived release`);
   };
   const cached = (build) => {
     let value = null;
-    const entry = track(() => { value = null; });
-    return () => { entry.use(); return value || (value = build()); };
+    const entry = track(() => { value = null; }, () => value);
+    const read = () => { entry.use(); return value || (value = build()); };
+    // Owners with a shorter lifetime than their scene scope can release the same tracked entry explicitly.
+    read.clear = entry.clear;
+    return read;
   };
   const variants = (build) => {
-    const cache = [];
-    const entry = track(() => { cache.length = 0; });
-    return (i = 0) => { entry.use(); return cache[i] || (cache[i] = build(i)); };
+    const cache = [], entries = [];
+    return (i = 0) => {
+      // One hub cabinet must not make every cabinet built by the Arcade a hub resident.
+      const entry = entries[i] || (entries[i] = track(() => { cache[i] = null; }, () => cache[i]));
+      entry.use();
+      return cache[i] || (cache[i] = build(i));
+    };
   };
   const noShadow = (geo) => {
     geo.castShadow = false;
@@ -20338,7 +20432,7 @@ void main() {
     geo.pileFaceSize = faceSize;
     return geo;
   };
-  const particleCache = new Map();
+  const particleCache = scopedMap();
   const particleGeometry = (color, size = 0.07, emissive = 1) => {
     const key = `${color}/${size}/${emissive}`;
     let geo = particleCache.get(key);
@@ -20518,6 +20612,10 @@ void main() {
   //                     voxel part is baked again under it, paired in `tint`
   // `look` flags read here: slim, bald, cleanShaven, wideEyes, hairless, noBrow, noPupils,
   // face ("nose" | "smirk" | "beard" | "none"), eyeColor, eyeGlow, hatY.
+  // A character file may keep the slot numbers its first build was given; every later build registers that
+  // character's colours in the same order first, so after a released cache rebuilds the model those numbers
+  // still name the same colours. The base palette ahead of them comes from the same traits every time.
+  const colorOrders = new WeakMap();
   const buildCaveman = (traits) => {
     const { skin, hair, height: h, belly, rand } = traits;
     const dress = traits.dress || {};
@@ -20540,14 +20638,18 @@ void main() {
     ];
     // A character's own colours join the palette on first use.
     const colors = new Map();
+    let order = traits.dress ? colorOrders.get(traits.dress) : null;
+    if (traits.dress && !order) colorOrders.set(traits.dress, order = []);
     const color = (hex) => {
       let c = colors.get(hex);
       if (c === undefined) {
         colors.set(hex, c = palette.length);
         palette.push(hexToRgb(hex));
+        if (order) order.push(hex);
       }
       return c;
     };
+    if (order) for (let i = 0, n = order.length; i < n; i++) color(order[i]);
     const jit = (base, dark, p) => () => rand() < p ? dark : base;
     const skinJ = jit(P.skin, P.skinDk, 0.08);
     const hairJ = jit(P.hair, P.hairDk, 0.12);
@@ -20807,7 +20909,7 @@ void main() {
   };
   // Traits hash from the handle, so one handle always builds the same voxels.
   // Callers get fresh nodes over shared geometry: one build per contributor, GPU records survive a scene swap.
-  const cavemen = new Map();
+  const cavemen = scopedMap();
   const cloneNode = (node, copies) => {
     const copy = createNode({ ...node, position: { ...node.position }, rotation: { ...node.rotation }, scale: { ...node.scale }, parent: null, children: [], world: new Float32Array(node.world), local: new Float32Array(node.local) });
     if (node.quaternion) copy.quaternion = new Float32Array(node.quaternion);
@@ -21162,7 +21264,7 @@ void main() {
     })
   ];
   const TIER_COLORS = { common: "#9aa0a6", rare: "#6f9fca", epic: "#b16fd6", legendary: "#d8892b" };
-  const crateCache = new Map();
+  const crateCache = scopedMap();
   const crate = (tier) => {
     let geos = crateCache.get(tier);
     if (!geos) {
@@ -21183,7 +21285,7 @@ void main() {
     addChild(node, createNode({ geometry: geos.body }), lid);
     return { node, lid };
   };
-  const swagCache = new Map();
+  const swagCache = scopedMap();
   const swagGeo = (id, build) => {
     let geo = swagCache.get(id);
     if (!geo) {
@@ -21462,7 +21564,7 @@ void main() {
     }
     glass.push(box({ w: W, h: tall, d: W, color: tint, emissive: 1, offset: { x, y: mid, z } }));
   };
-  BL.models = { beam, forwardLathe, turn, shaded, torus, along, chain, railParts, columnParts, deckGrid, deckPosts, deckParts, stairParts, lanternParts, LANTERN_GLASS, geometry, pushVert, face, cutCylinder, voxCoords, box, bevelBox, panel, lathe, glassVessel, attachGlassShell, tube, ring, polyline, merge, forward, moved, turnedX, turnedY, turnedZ, prism, cached, variants, track, setScope, release, noShadow, makeVox, voxelGeometry, voxelFaces, banana, bananaGeometry, bananaTileGeometry, bananaPileCoreGeometry, bananaPileRadiusScale, bananaPileHeightOffset, BANANA_AMMO_SCALE, BANANA_PILE_PROFILE, particleGeometry, spareMagazine, caveman, CLUB_PALETTE, GOLD_CLUB_PALETTE, labRoom, buildableGeos, crate, die, dieRotationFor, SWAG, TIER_COLORS };
+  BL.models = { beam, forwardLathe, turn, shaded, torus, along, chain, railParts, columnParts, deckGrid, deckPosts, deckParts, stairParts, lanternParts, LANTERN_GLASS, geometry, pushVert, face, cutCylinder, voxCoords, box, bevelBox, panel, lathe, glassVessel, attachGlassShell, tube, ring, polyline, merge, forward, moved, turnedX, turnedY, turnedZ, prism, cached, variants, scopedMap, track, setScope, withScope, release, assertReleased, noShadow, makeVox, voxelGeometry, voxelFaces, banana, bananaGeometry, bananaTileGeometry, bananaPileCoreGeometry, bananaPileRadiusScale, bananaPileHeightOffset, BANANA_AMMO_SCALE, BANANA_PILE_PROFILE, particleGeometry, spareMagazine, caveman, CLUB_PALETTE, GOLD_CLUB_PALETTE, labRoom, buildableGeos, crate, die, dieRotationFor, SWAG, TIER_COLORS };
 })();
 
 // ---- js/banana-icon.js ----
@@ -22148,7 +22250,7 @@ void main() {
   const island = ({ seed = 1, roofHole = null } = {}) => {
     const cacheKey = roofHole ? `${seed}:${roofHole.id}:${roofHole.x}:${roofHole.z}:${roofHole.radius}` : seed;
     const hit = ISLANDS.get(cacheKey);
-    if (hit) return hit;
+    if (hit) { hit.scope.use(); return hit.value; }
     const rand = mulberry32(seed);
     const noise = valueNoise(rand);
     const spoke = (angle, axis = angle) => {
@@ -24186,7 +24288,11 @@ void main() {
       unit: UNIT,
       pathUnit: PATH_UNIT
     };
-    ISLANDS.set(cacheKey, built);
+    // Drop and Orbit use an unperforated island; the hub has the Factory roof opening. Track each key separately
+    // so the games' second full voxel/mesh graph does not stay resident after a return to the hub.
+    const scope = BL.models.track(() => ISLANDS.delete(cacheKey));
+    scope.use();
+    ISLANDS.set(cacheKey, { value: built, scope });
     return built;
   };
   BL.terrain = { makeGrid, gridGeometry, compactVertices, island, segmentBoxClear, cutawaySourceFromVox, PALETTE, MAX_HEIGHT, TIMECHAIN, POOL_APPROACH };
@@ -24839,7 +24945,7 @@ void main() {
   // The carved headline has room for both diagonals; a three-cell M reads too much like H at bridge distance.
   const CARVED_M = ["10001", "11011", "10101", "10001", "10001"];
   const SIGN_CELL = 0.075, SIGN_PAD = 0.855, SIGN_FRONT = 0.23;
-  const SIGN_CACHE = new Map();
+  const SIGN_CACHE = BL.models.scopedMap();
   // The emblem each cave flies, 5 by 7: on its sign either side of the name and on its banners.
   const SIGN_ICONS = {
     bolt: ["...##", "..##.", ".##..", "#####", "..##.", ".##..", "##..."],
@@ -24982,7 +25088,7 @@ void main() {
   };
   // A small name board on two chunky pegs, for the Drop and Orbit launch sites and the Mempool island: the cave
   // sign scaled down, its bottom `peg` above the ground. `signWidth` and `signHeight` are its scaled size.
-  const POST_SIGNS = new Map();
+  const POST_SIGNS = BL.models.scopedMap();
   const postSign = (text, scale, peg) => {
     const key = `${text}|${scale}|${peg}`;
     let geo = POST_SIGNS.get(key);
@@ -27387,7 +27493,9 @@ void main() {
   // from its foot), the crown's (centred at `crownY`), two sets of arcs to flicker between, and the gauge's needle,
   // pointing up from `pivot`, in kit cells from the gauge's origin. The band and crown are centred on their middles.
   let coilParts = null;
+  const coilScope = BL.models.track(() => { coilParts = null; }, () => coilParts);
   const coilRig = () => {
+    coilScope.use();
     if (coilParts) return coilParts;
     const glow = (v) => set().put("coilCharge", 0, 0, 0, 0, v).build().glow;
     const bands = [];
@@ -27402,7 +27510,9 @@ void main() {
   // Dust in lamplight: a fixed field of glowing motes that drifts and wraps round a moving centre (the view's
   // target), so there is always air to see near the camera and no mote is ever created or dropped. One draw.
   let moteGeometry = null;
+  const moteScope = BL.models.track(() => { moteGeometry = null; }, () => moteGeometry);
   const motes = ({ count = 220, span = 14, low = 0.4, high = 5 } = {}) => {
+    moteScope.use();
     if (!moteGeometry) moteGeometry = noShadow(BL.models.box({ w: 0.035, h: 0.035, d: 0.035, color: "#ffe2a8", emissive: 0.8 }));
     const rand = mulberry32(911), data = new Float32Array(count * 20);
     const bx = new Float32Array(count), by = new Float32Array(count), bz = new Float32Array(count), ph = new Float32Array(count);
@@ -27612,8 +27722,10 @@ void main() {
     data[o + 8] = s * sz; data[o + 9] = 0; data[o + 10] = c * sz; data[o + 11] = 0;
     data[o + 12] = x; data[o + 13] = y; data[o + 14] = z; data[o + 15] = 1;
   };
-  let gullGeometry = null, boatGeometry = [];
+  let gullGeometry = null;
+  const gullScope = BL.models.track(() => { gullGeometry = null; }, () => gullGeometry), boatGeometry = BL.models.scopedMap();
   const flock = ({ count = 18, cx = 0, cz = 0, radius = [26, 60], height = [14, 34], seed = 5, scale = 1.6 } = {}) => {
+    gullScope.use();
     if (!gullGeometry) gullGeometry = noShadow(set().put("gull", 0, 0, 0).build().solid);
     const node = instanceField(gullGeometry, count), rand = mulberry32(seed), data = node.instanceData;
     const r = new Float32Array(count), h = new Float32Array(count), w = new Float32Array(count), p = new Float32Array(count), f = new Float32Array(count);
@@ -27636,13 +27748,13 @@ void main() {
   const fleet = ({ sea = -70, spots = [], seed = 9 } = {}) => {
     const nodes = [], rand = mulberry32(seed);
     // Each variant bakes to a logs-and-mast mesh and its sail: two shared geometries (no glow layer).
-    for (let v = 0; v < 3; v++) if (!boatGeometry[v]) {
+    for (let v = 0; v < 3; v++) if (!boatGeometry.has(v)) {
       const baked = set().put("boat", 0, 0, 0, 0, v).build();
-      boatGeometry[v] = [baked.solid, baked.hang, baked.glow].filter(Boolean).map(noShadow);
+      boatGeometry.set(v, [baked.solid, baked.hang, baked.glow].filter(Boolean).map(noShadow));
     }
     const boats = spots.map(([r, a, s], i) => {
       const node = BL.scene.createNode({ scale: { x: s, y: s * 0.85, z: s }, sightHidden: true });
-      for (const geometry of boatGeometry[i % 3]) BL.scene.addChild(node, BL.scene.createNode({ geometry, sightHidden: true }));
+      for (const geometry of boatGeometry.get(i % 3)) BL.scene.addChild(node, BL.scene.createNode({ geometry, sightHidden: true }));
       const seated = (i & 1) === 0;
       const passenger = BL.models.caveman(BL.contributors.traitsFor(`boat-ooga-${i % 2}`));
       const figure = passenger.root, size = 1 / s, deck = 3 * U;
@@ -27678,7 +27790,7 @@ void main() {
     return { nodes, update };
   };
   // Shared static Studio furnishings: one merged mesh per kind, instanced by the renderer.
-  const studioCache=new Map();
+  const studioCache=BL.models.scopedMap();
   const studio=kind=>{
     if(studioCache.has(kind))return studioCache.get(kind);
     const bits=[],b=(c,x,y,z,w,h,d,e=0)=>bits.push(BL.models.box({w,h,d,color:c,emissive:e,offset:{x,y,z}}));
@@ -27733,7 +27845,7 @@ void main() {
 // thousand.
 (() => {
   "use strict";
-  const BL = window.BL, M = BL.models, H = BL.hubModels, cache = new Map();
+  const BL = window.BL, M = BL.models, H = BL.hubModels, cache = BL.models.scopedMap();
   const tones = list => list.map(BL.math.hexToRgb);
   const OLIVE = tones(["#55684b", "#6e8262", "#8b9e7c", "#acbb9b"]);
   const CYPRESS = tones(["#1d3829", "#284a33", "#35603e", "#467649"]);
@@ -27931,7 +28043,13 @@ void main() {
     const eraser = document.getElementById("chalk-eraser"), chalk = document.getElementById("chalk-chalk");
     const keyboard = document.getElementById("chalk-keyboard"), clean = document.getElementById("chalk-clean"), reset = document.getElementById("chalk-reset");
     const closeButton = document.getElementById("chalk-close");
-    const listeners = new AbortController();
+    let listeners = new AbortController();
+    const bindings = [];
+    const on = (target, type, fn, options) => {
+      const opts = { ...options }; delete opts.signal;
+      bindings.push([target, type, fn, opts]);
+      target.addEventListener(type, fn, { ...opts, signal: listeners.signal });
+    };
     const startingMarks = initial(), saved = read(KEY), legacy = saved === null ? read(OLD_KEY) : null;
     const marks = saved !== null ? saved : legacy !== null ? startingMarks.concat(legacy) : startingMarks.slice();
     const startingSegments = startingMarks.reduce((n, mark) => n + mark.p.length / 2 - 1, 0);
@@ -28134,7 +28252,7 @@ void main() {
       changed = true;
       markWorld();
     };
-    canvas.addEventListener("pointerdown", (e) => {
+    on(canvas, "pointerdown", (e) => {
       if (tool === "k") {
         if (!e.isPrimary || e.button !== 0) return;
         e.preventDefault();
@@ -28156,7 +28274,7 @@ void main() {
       canvas.setPointerCapture(e.pointerId);
       movePointer(e);
     }, { signal: listeners.signal });
-    canvas.addEventListener("pointermove", (e) => { movePointer(e); if (e.pointerId === activePointer) addPoint(e); }, { signal: listeners.signal });
+    on(canvas, "pointermove", (e) => { movePointer(e); if (e.pointerId === activePointer) addPoint(e); }, { signal: listeners.signal });
     const endStroke = (e) => {
       if (!stroke || e.pointerId !== activePointer) return;
       if (stroke.p.length === 2) {
@@ -28173,19 +28291,19 @@ void main() {
       activePointer = -1;
       if (e.pointerType === "touch") pointer.classList.remove("visible");
     };
-    canvas.addEventListener("pointerup", endStroke, { signal: listeners.signal });
-    canvas.addEventListener("pointercancel", endStroke, { signal: listeners.signal });
-    canvas.addEventListener("pointerleave", () => pointer.classList.remove("visible"), { signal: listeners.signal });
-    eraser.addEventListener("click", () => select("e"), { signal: listeners.signal });
-    chalk.addEventListener("click", () => select("c"), { signal: listeners.signal });
-    keyboard.addEventListener("click", () => select(tool === "k" ? "c" : "k"), { signal: listeners.signal });
+    on(canvas, "pointerup", endStroke, { signal: listeners.signal });
+    on(canvas, "pointercancel", endStroke, { signal: listeners.signal });
+    on(canvas, "pointerleave", () => pointer.classList.remove("visible"), { signal: listeners.signal });
+    on(eraser, "click", () => select("e"), { signal: listeners.signal });
+    on(chalk, "click", () => select("c"), { signal: listeners.signal });
+    on(keyboard, "click", () => select(tool === "k" ? "c" : "k"), { signal: listeners.signal });
     const receiveText = () => {
       const value = typeInput.value;
       typeInput.value = "";
       if (tool === "k" && !animation && value) typeText(value);
     };
-    typeInput.addEventListener("input", (e) => { if (!e.isComposing) receiveText(); }, { signal: listeners.signal });
-    typeInput.addEventListener("keydown", (e) => {
+    on(typeInput, "input", (e) => { if (!e.isComposing) receiveText(); }, { signal: listeners.signal });
+    on(typeInput, "keydown", (e) => {
       if (tool !== "k" || e.isComposing) return;
       if (e.key === "Enter") {
         e.preventDefault();
@@ -28193,13 +28311,13 @@ void main() {
         if (newTextLine()) typeHistory.push({ x, y, mark: null });
       } else if (e.key === "Backspace") { e.preventDefault(); backspaceText(); }
     }, { signal: listeners.signal });
-    typeInput.addEventListener("beforeinput", (e) => {
+    on(typeInput, "beforeinput", (e) => {
       if (tool === "k" && e.inputType === "deleteContentBackward") { e.preventDefault(); backspaceText(); }
     }, { signal: listeners.signal });
-    clean.addEventListener("click", () => startAnimation("clean"), { signal: listeners.signal });
-    reset.addEventListener("click", () => startAnimation("reset"), { signal: listeners.signal });
-    closeButton.addEventListener("click", () => dialog.close(), { signal: listeners.signal });
-    dialog.addEventListener("close", () => {
+    on(clean, "click", () => startAnimation("clean"), { signal: listeners.signal });
+    on(reset, "click", () => startAnimation("reset"), { signal: listeners.signal });
+    on(closeButton, "click", () => dialog.close(), { signal: listeners.signal });
+    on(dialog, "close", () => {
       finishAnimation();
       if (activePointer >= 0 && canvas.hasPointerCapture(activePointer)) canvas.releasePointerCapture(activePointer);
       activePointer = -1;
@@ -28218,7 +28336,19 @@ void main() {
       flushWorld();
       onClose();
     }, { signal: listeners.signal });
+    const suspend = () => {
+      listeners.abort();
+      if (animation) { cancelAnimationFrame(animation.raf); animation = null; }
+      if (liveTimer) { clearTimeout(liveTimer); liveTimer = 0; }
+      if (dialog.open) dialog.close();
+    };
+    const resume = () => {
+      if (!listeners.signal.aborted) return;
+      listeners = new AbortController();
+      for (const [target, type, fn, opts] of bindings) target.addEventListener(type, fn, { ...opts, signal: listeners.signal });
+    };
     return {
+      suspend, resume,
       attach(parent, x, y, z, angle = 0) {
         paint();
         node = BL.scene.createNode({ position: { x, y, z }, rotation: { x: 0, y: angle, z: 0 }, geometry: geometryFor(ctx), sightHidden: true });
@@ -28236,10 +28366,7 @@ void main() {
         dialog.showModal();
       },
       dispose() {
-        listeners.abort();
-        if (animation) { cancelAnimationFrame(animation.raf); animation = null; }
-        if (liveTimer) { clearTimeout(liveTimer); liveTimer = 0; }
-        if (dialog.open) dialog.close();
+        suspend();
         node = null;
       },
       get openNow() { return dialog.open; }
@@ -29637,14 +29764,10 @@ void main() {
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const { box, merge } = BL.models;
-  const cached = (build) => {
-    let value = null;
-    return () => value || (value = build());
-  };
+  const { box, merge, cached } = BL.models;
   const variants = (build) => {
-    const cache = new Array(11);
-    return (i = 0) => cache[i % 11] || (cache[i % 11] = build(i % 11));
+    const read = BL.models.variants(build);
+    return (i = 0) => read(i % 11);
   };
   const STONE = ["#7d6f61", "#5e5449", "#877869"];
   const MOSS = ["#6f7d3e", "#7b8945", "#65733a"];
@@ -29652,9 +29775,9 @@ void main() {
   const MATTRESS = { width: 1.45, depth: 2.45, height: 0.345, wallInset: 0.65, surface: 0.245, pillowTop: 0.345, pillowZ: -0.82 };
   // 19 room slots: eleven HQ plus eight basement.
   // Static geometry is reused across visits without retaining a departed room or scene.
-  const mattressCache = new Array(19);
-  const roomSignCache = new Array(19);
-  const rampMarkerCache = new Map();
+  const mattressCache = BL.models.scopedMap();
+  const roomSignCache = BL.models.scopedMap();
+  const rampMarkerCache = BL.models.scopedMap();
   const fabric = (pattern, width, depth, top, bottom, centerZ, kind) => {
     const geo = { verts: [], faces: [], lines: [] }, size = pattern.width, colors = pattern.colors;
     const cells = new Uint32Array(size * size), used = new Uint8Array(cells.length);
@@ -29700,7 +29823,7 @@ void main() {
   };
   const mattress = (room) => {
     const roomKey = [room.x, room.floor, room.z].map((n) => Number(n.toFixed(6))).join(",");
-    const slot = room.index + (room.basement ? 11 : 0), cached = mattressCache[slot];
+    const slot = room.index + (room.basement ? 11 : 0), cached = mattressCache.get(slot);
     if (cached && cached.mattress.roomKey === roomKey) return cached;
     const sheet = { seed: `room:${roomKey}:sheet` };
     sheet.pattern = BL.lifehash.make(sheet.seed);
@@ -29720,11 +29843,11 @@ void main() {
       fabric(pillow.pattern, 0.9, 0.5, MATTRESS.pillowTop, MATTRESS.surface, MATTRESS.pillowZ, "pillow")
     );
     geo.mattress = { roomKey, width: MATTRESS.width, depth: MATTRESS.depth, height: MATTRESS.height, sheet, pillow };
-    mattressCache[slot] = geo;
+    mattressCache.set(slot, geo);
     return geo;
   };
   const roomSign = (room) => {
-    const bedding = mattress(room).mattress, slot = room.index + (room.basement ? 11 : 0), cached = roomSignCache[slot];
+    const bedding = mattress(room).mattress, slot = room.index + (room.basement ? 11 : 0), cached = roomSignCache.get(slot);
     if (cached && cached.roomLifehashSign.roomKey === bedding.roomKey) return cached;
     const hash = bedding.sheet.pattern.hash, text = hash.slice(0, 8).toUpperCase(), width = 2.12, height = 0.72, cell = 0.055, pixel = 0.047;
     const geo = merge(
@@ -29757,7 +29880,7 @@ void main() {
     }
     geo.roomLifehashSign = { roomKey: bedding.roomKey, hash, lines: [text], width: width * size, height: height * size,
       board: new Float64Array([-width * size / 2, (-height / 2 - 0.63) * size, 0.04 * size, width * size / 2, (height / 2 - 0.63) * size, 0.1455 * size]) };
-    roomSignCache[slot] = geo;
+    roomSignCache.set(slot, geo);
     return geo;
   };
   const RAMP_MARKER_GLYPHS = {
@@ -39453,6 +39576,7 @@ void main() {
       call("onZoom", Math.exp(Math.max(-1200, Math.min(1200, delta)) * 2.5e-3), zoomGesture, p.x, p.y);
     };
     const onContextMenu = (e) => e.preventDefault();
+    let suspended = false;
     canvas.addEventListener("pointerdown", onPointerDown);
     canvas.addEventListener("pointermove", onPointerMove);
     canvas.addEventListener("pointerup", onPointerUp);
@@ -39497,7 +39621,9 @@ void main() {
       hovered = null;
       canvas.style.cursor = "grab";
     };
-    const dispose = () => {
+    const suspend = () => {
+      if (suspended) return;
+      suspended = true;
       reset();
       canvas.removeEventListener("pointerdown", onPointerDown);
       canvas.removeEventListener("pointermove", onPointerMove);
@@ -39506,11 +39632,22 @@ void main() {
       canvas.removeEventListener("pointerleave", onPointerLeave);
       canvas.removeEventListener("wheel", onWheel);
       canvas.removeEventListener("contextmenu", onContextMenu);
-      targets.length = 0;
     };
+    const resume = () => {
+      if (!suspended) return;
+      suspended = false;
+      canvas.addEventListener("pointerdown", onPointerDown);
+      canvas.addEventListener("pointermove", onPointerMove);
+      canvas.addEventListener("pointerup", onPointerUp);
+      canvas.addEventListener("pointercancel", onPointerCancel);
+      canvas.addEventListener("pointerleave", onPointerLeave);
+      canvas.addEventListener("wheel", onWheel, { passive: false });
+      canvas.addEventListener("contextmenu", onContextMenu);
+    };
+    const dispose = () => { suspend(); targets.length = 0; };
     return {
-      add, remove, pick, aimPoint, weaponTargets, groundPoint, update, reset, dispose, get targetCount() {
-        return targets.length;
+      add, remove, pick, aimPoint, weaponTargets, groundPoint, update, reset, suspend, resume, dispose, get targetCount() {
+        return suspended ? 0 : targets.length;
       },
       // A drag is still held, even if it has paused.
       get orbiting() {
@@ -39569,13 +39706,25 @@ void main() {
       knob.style.transform = "";
       el.classList.remove("live");
     };
+    let listening = true;
     el.addEventListener("pointerdown", onDown);
     el.addEventListener("pointermove", onMove);
     el.addEventListener("pointerup", onUp);
     el.addEventListener("pointercancel", onUp);
     el.addEventListener("lostpointercapture", onUp);
     s.reset = () => onUp({ pointerId: s.id });
+    s.resume = () => {
+      if (listening) return;
+      listening = true;
+      el.addEventListener("pointerdown", onDown);
+      el.addEventListener("pointermove", onMove);
+      el.addEventListener("pointerup", onUp);
+      el.addEventListener("pointercancel", onUp);
+      el.addEventListener("lostpointercapture", onUp);
+    };
     s.dispose = () => {
+      if (!listening) return;
+      listening = false;
       el.removeEventListener("pointerdown", onDown);
       el.removeEventListener("pointermove", onMove);
       el.removeEventListener("pointerup", onUp);
@@ -39734,7 +39883,10 @@ void main() {
       shiftTap = 0;
       return axes;
     };
+    let listening = true;
     const dispose = () => {
+      if (!listening) return;
+      listening = false;
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);
@@ -39767,7 +39919,34 @@ void main() {
       boostClick = false;
     };
     const reset = () => { onBlur(); if (moveStick) moveStick.reset(); if (lookStick) lookStick.reset(); };
-    return { read, axes, clearPointer, reset, consumeTab, dispose, get rightShift() { return !!held.peek; } };
+    const resume = () => {
+      if (listening) return;
+      listening = true;
+      window.addEventListener("keydown", onKeyDown);
+      window.addEventListener("keyup", onKeyUp);
+      window.addEventListener("blur", onBlur);
+      if (tabNavigation) {
+        window.addEventListener("keydown", captureKeyDown, true);
+        window.addEventListener("keyup", captureKeyUp, true);
+        window.addEventListener("blur", blurKeys);
+      }
+      if (boost) {
+        boost.addEventListener("pointerdown", onBoostDown);
+        boost.addEventListener("pointerup", onBoostUp);
+        boost.addEventListener("pointercancel", onBoostUp);
+        boost.addEventListener("pointerleave", onBoostUp);
+        if (pressActions) boost.addEventListener("click", onBoostClick, true);
+      }
+      if (chord) {
+        chord.addEventListener("pointerdown", onChord);
+        chord.addEventListener("pointermove", onChord);
+        chord.addEventListener("pointerup", onChord);
+        chord.addEventListener("pointercancel", onChord);
+      }
+      if (moveStick) moveStick.resume();
+      if (lookStick) lookStick.resume();
+    };
+    return { read, axes, clearPointer, reset, consumeTab, resume, dispose, get rightShift() { return !!held.peek; } };
   };
   BL.controls = { create, uiKey };
 })();
@@ -40096,6 +40275,7 @@ void main() {
         animateAimArrow();
       }
     };
+    let listening = true;
     window.addEventListener("pointerdown", onPointer, true);
     window.addEventListener("pointermove", onPointer, true);
     window.addEventListener("pointerup", onPointer, true);
@@ -40107,7 +40287,24 @@ void main() {
     window.addEventListener("contextmenu", onMouseButton, true);
     window.addEventListener("wheel", onWheel, { capture: true, passive: false });
     window.addEventListener("resize", onResize);
+    const resume = () => {
+      if (listening) return;
+      listening = true;
+      window.addEventListener("pointerdown", onPointer, true);
+      window.addEventListener("pointermove", onPointer, true);
+      window.addEventListener("pointerup", onPointer, true);
+      window.addEventListener("pointercancel", onPointer, true);
+      window.addEventListener("mousemove", onMouseMove, true);
+      window.addEventListener("mousedown", onMouseButton, true);
+      window.addEventListener("mouseup", onMouseButton, true);
+      window.addEventListener("click", onMouseButton, true);
+      window.addEventListener("contextmenu", onMouseButton, true);
+      window.addEventListener("wheel", onWheel, { capture: true, passive: false });
+      window.addEventListener("resize", onResize);
+    };
     const dispose = () => {
+      if (!listening) return;
+      listening = false;
       stop();
       window.removeEventListener("pointerdown", onPointer, true);
       window.removeEventListener("pointermove", onPointer, true);
@@ -40121,7 +40318,7 @@ void main() {
       window.removeEventListener("wheel", onWheel, true);
       window.removeEventListener("resize", onResize);
     };
-    return { start, stop, placeCanvas, beginAim, updateAim, rebaseAim, endAim, dispose, element,
+    return { start, stop, placeCanvas, beginAim, updateAim, rebaseAim, endAim, resume, dispose, element,
       get active() { return active; }, get visible() { return visible; }, get x() { return x; }, get y() { return y; } };
   };
   BL.cursor = { create };
@@ -40355,7 +40552,7 @@ void main() {
       ownOoga = character && crew && crew.cavemen ? crew.cavemen.get(character.handle) || null : null;
       if (hud.setOwnOoga) hud.setOwnOoga(ownOoga);
     };
-    const unsubscribeOwnOoga = BL.net.subscribe(syncOwnOoga);
+    let unsubscribeOwnOoga = BL.net.subscribe(syncOwnOoga);
     let restoredPose = null;
     const freeTarget = { x: 0, y: 0, z: 0 };
     const followTarget = { x: 0, y: 0, z: 0 };
@@ -43692,10 +43889,11 @@ void main() {
       }
       reticle.hidden = menuOpen || !value || !armed();
     };
-    const dispose = () => {
+    const dispose = (keep = false) => {
       handoff.cancel();
       if (saveActiveLoginView === saveLoginView) saveActiveLoginView = null;
-      unsubscribeOwnOoga();
+      if (unsubscribeOwnOoga) unsubscribeOwnOoga();
+      unsubscribeOwnOoga = null;
       ownAccount = ownCrew = ownOoga = null;
       if (hud.setOwnOoga) hud.setOwnOoga(null);
       restoredPose = null;
@@ -43730,7 +43928,31 @@ void main() {
       hud.setMagazine(0, 0, 0, false);
       if (hud.setMode) hud.setMode(null, false, "detached", false);
       controls.dispose();
-      crew = fx = input = null;
+      if (!keep) crew = fx = input = null;
+    };
+    const suspend = () => { release(true); setActive(false); dispose(true); };
+    const resume = () => {
+      disposed = false;
+      active = true;
+      controls.resume(); carryCursor.resume();
+      window.addEventListener("mousemove", aimMouseMove);
+      window.addEventListener("pointerup", aimMouseUp);
+      window.addEventListener("pointerdown", interruptRightGesture, true);
+      window.addEventListener("pointermove", interruptRightGesture, true);
+      window.addEventListener("pointerup", interruptRightGesture, true);
+      window.addEventListener("pointercancel", interruptRightGesture, true);
+      window.addEventListener("blur", unlockAim);
+      document.addEventListener("pointerlockchange", aimLockChanged);
+      document.addEventListener("pointerlockerror", aimLockFailed);
+      document.addEventListener("visibilitychange", aimVisibility);
+      canvas.addEventListener("pointerdown", aimPointer, true);
+      canvas.addEventListener("pointermove", aimPointer, true);
+      canvas.addEventListener("pointerup", aimPointer, true);
+      canvas.addEventListener("pointercancel", aimPointer, true);
+      window.addEventListener("keydown", aimKey, true);
+      ownAccount = ownCrew = null;
+      unsubscribeOwnOoga = BL.net.subscribe(syncOwnOoga);
+      saveActiveLoginView = saveLoginView;
     };
     // The first claim can precede the first frame. Give it the landing eye,
     // or the detached eye saved before OAuth navigated away from this route.
@@ -43792,7 +44014,7 @@ void main() {
       get birdsEye() { return birdsEye(); }, get birdsEyeMix() { return camera.orthoMix || 0; }, get birdsEyeHeight() { return overheadHeight; }, get birdsEyeNorthUp() { return overheadNorthUp; },
       get birdsEyeCeiling() { return overheadCeiling; },
       get shoulderEntryMix() { return aimMix; },
-      bind, setActive, refreshCombat, readInput, update, goPreset, resetCamera, freeCursor, navigate, travelRefusal, travel, transformView, pickCarryTarget, enterClose, exitClose, possess, release, escape, action, modeAction, weaponAction, weaponMode, showAct, dispose, get player() {
+      bind, setActive, refreshCombat, readInput, update, goPreset, resetCamera, freeCursor, navigate, travelRefusal, travel, transformView, pickCarryTarget, enterClose, exitClose, possess, release, escape, action, modeAction, weaponAction, weaponMode, showAct, suspend, resume, dispose, get player() {
       return player();
     }, get assistedTarget() {
       if (birdsEye() && assistedTargetActive) return assistedTargetHit;
@@ -44758,7 +44980,12 @@ void main() {
     renderer.render(root, camera);
     renderer.dispose();
   };
-  const create = ({ roster, catalog, tierColors, renderIcon, lootEnabled = false, healthEnabled = false }) => {
+  // The sheet belongs to the page. Reuse attached rows across visits; only current roster names stay in this map.
+  const rosterNodes = new Map();
+  let rosterAway = null, donorRows = null, donationRows = null;
+  const create = ({ roster, catalog, tierColors, renderIcon, lootEnabled = false, healthEnabled = false, signal = null }) => {
+    const lifetime = signal ? null : new AbortController();
+    signal = signal || lifetime.signal;
     const el = {
       roster: $("roster"), rosterCount: $("roster-count"),
       statDonations: $("stat-donations"),
@@ -44901,7 +45128,7 @@ void main() {
     el.jetpack.hidden = true;
     const listeners = [];
     const on = (target, type, fn, opts) => {
-      target.addEventListener(type, fn, opts);
+      target.addEventListener(type, fn, typeof opts === "boolean" ? { capture: opts, signal } : { ...opts, signal });
       listeners.push(() => target.removeEventListener(type, fn, opts));
     };
     // Fit the HUB controls between the title and clock when their actual visible widths allow it.
@@ -44964,11 +45191,16 @@ void main() {
     let hintTimer = 0, hintHideTimer = 0, copyTimer = 0;
     const rosterRows = new Map();
     let showAway = false, awayCount = 0, awayShownCount = -1, awayShownShow = null, onlineCount = 0, onlineShown = -1;
-    const awayRow = document.createElement("li"), awayButton = document.createElement("button");
-    awayRow.className = "roster-away";
-    awayButton.type = "button";
+    if (!rosterAway) {
+      const li = document.createElement("li"), button = document.createElement("button");
+      li.className = "roster-away"; button.type = "button"; li.append(button);
+      rosterAway = { li, button };
+    }
+    const awayRow = rosterAway.li, awayButton = rosterAway.button;
     awayButton.setAttribute("aria-expanded", "false");
-    awayRow.append(awayButton);
+    awayRow.remove();
+    const names = new Set(roster.map(contributor => contributor.name));
+    for (const [name, row] of rosterNodes) if (!names.has(name)) { row.li.remove(); rosterNodes.delete(name); }
     // countAway rescans on every roster state flip and online toggle; skip the writes until they change.
     // The title's chip counts the players online, or the cast while nobody is.
     const updateAwayButton = () => {
@@ -44988,43 +45220,35 @@ void main() {
       (b.lastContributionAt || b.lastCommitAt) - (a.lastContributionAt || a.lastCommitAt));
     for (let rosterIndex = 0; rosterIndex < orderedRoster.length; rosterIndex++) {
       const contributor = orderedRoster[rosterIndex];
-      const li = document.createElement("li");
-      li.dataset.name = contributor.name;
-      const presence = document.createElement("span");
-      presence.className = "roster-presence";
-      presence.dataset.online = "false";
-      presence.setAttribute("role", "img");
-      presence.setAttribute("aria-label", "Offline");
-      presence.title = "Offline";
-      const name = document.createElement("span");
-      name.className = "roster-name";
-      name.textContent = contributor.display;
-      // The signed-in player on this Ooga, when there is one: the room's host and their voice.
-      const marks = document.createElement("span"), host = document.createElement("span"), voice = document.createElement("button");
-      marks.className = "roster-marks";
-      host.className = "roster-host";
-      host.hidden = true;
-      host.setAttribute("role", "img");
-      host.setAttribute("aria-label", "Host: runs the Oogas for everyone");
-      host.title = "Host: runs the Oogas for everyone";
-      voice.className = "roster-voice";
-      voice.type = "button";
-      voice.hidden = true;
-      voice.append(voiceIcon.cloneNode(true));
-      marks.append(host, voice);
-      const age = document.createElement("span");
-      age.className = "roster-age";
-      age.append(BL.contributors.contributionAgeLabel(contributor));
-      const state = document.createElement("span");
-      state.className = "roster-state";
-      const activity = BL.contributors.contributionStateFor(contributor);
-      state.dataset.state = activity;
-      state.append(STATE_LABELS[activity]);
-      if (activity === "away") {
-        if (!awayRow.parentElement) el.roster.append(awayRow);
-        li.hidden = true; awayCount++;
+      let nodes = rosterNodes.get(contributor.name);
+      if (!nodes) {
+        const li = document.createElement("li"), presence = document.createElement("span"), name = document.createElement("span");
+        li.dataset.name = contributor.name;
+        presence.className = "roster-presence"; presence.setAttribute("role", "img");
+        name.className = "roster-name";
+        const marks = document.createElement("span"), host = document.createElement("span"), voice = document.createElement("button");
+        marks.className = "roster-marks"; host.className = "roster-host";
+        host.setAttribute("role", "img"); host.setAttribute("aria-label", "Host: runs the Oogas for everyone");
+        host.title = "Host: runs the Oogas for everyone";
+        voice.className = "roster-voice"; voice.type = "button"; voice.append(voiceIcon.cloneNode(true));
+        marks.append(host, voice);
+        const age = document.createElement("span"), state = document.createElement("span");
+        age.className = "roster-age"; age.append(""); state.className = "roster-state"; state.append("");
+        li.append(presence, name, marks, age, state);
+        nodes = { li, presence, name, host, voice, age, state };
+        rosterNodes.set(contributor.name, nodes);
       }
-      li.append(presence, name, marks, age, state);
+      const { li, presence, name, host, voice, age, state } = nodes;
+      if (name.textContent !== contributor.display) name.textContent = contributor.display;
+      presence.dataset.online = "false"; presence.setAttribute("aria-label", "Offline"); presence.title = "Offline";
+      host.hidden = voice.hidden = true; voice.disabled = false;
+      voice.dataset.voice = voice.dataset.login = ""; voice.dataset.self = "false";
+      const activity = BL.contributors.contributionStateFor(contributor), ageText = BL.contributors.contributionAgeLabel(contributor);
+      if (age.firstChild.data !== ageText) age.firstChild.data = ageText;
+      state.dataset.state = activity;
+      if (state.firstChild.data !== STATE_LABELS[activity]) state.firstChild.data = STATE_LABELS[activity];
+      li.hidden = activity === "away";
+      if (activity === "away") { if (!awayRow.parentElement) el.roster.append(awayRow); awayCount++; }
       el.roster.append(li);
       rosterRows.set(contributor.name, { li, presence, state, age, contributor, rosterIndex, online: false, sceneOnline: false, remoteOnline: false, netOnline: false, nextOnline: false, placedStamp: stampOf(contributor), host, voice, look: "", login: "", hostOn: false, blocked: false, self: false, nextLook: "", nextLogin: "", nextHost: false, nextSelf: false });
     }
@@ -45149,7 +45373,7 @@ void main() {
     });
     watchBananaRate();
     // A fixed pool, so the DOM never grows with donations.
-    const recentRows = Array.from({ length: BL.donations.RECENT_MAX }, () => {
+    const recentRows = donationRows || (donationRows = Array.from({ length: BL.donations.RECENT_MAX }, () => {
       const li = document.createElement("li"), name = document.createElement("span"), label = document.createTextNode("");
       const badge = document.createElement("span"), amount = document.createElement("strong"), message = document.createElement("p");
       // Every text node exists from the start, so filling a row later adds nothing to the DOM.
@@ -45171,7 +45395,16 @@ void main() {
       li.hidden = true;
       el.bananaRecent.append(li);
       return { li, name, label, badge, amountText, message, messageText };
-    });
+    }));
+    const leaderRows = donorRows || (donorRows = Array.from({ length: 10 }, (_, i) => {
+      const li = document.createElement("li"), rank = document.createElement("span"), name = document.createElement("span"), amount = document.createElement("strong");
+      const nameText = document.createTextNode(""), amountText = document.createTextNode("");
+      rank.className = "banana-rank"; rank.textContent = String(i + 1).padStart(2, "0");
+      name.className = "banana-donor"; name.append(nameText);
+      amount.className = "banana-amount"; amount.append(amountText);
+      li.append(rank, name, amount); li.hidden = true; el.bananaLeaders.append(li);
+      return { li, name, nameText, amountText };
+    }));
     // The recent list's checkbox keeps it to tips at or above the message bar, remembered in this browser.
     const RECENT_BAR_KEY = "ooga-recent-bar";
     let recentBarOnly = false;
@@ -45205,15 +45438,15 @@ void main() {
       const ranked = missingSats ? [] : real ? entries || [] : (entries || []).slice().sort((a, b) =>
         b[donorUnit] - a[donorUnit] || b[donorUnit === "bananas" ? "sats" : "bananas"] - a[donorUnit === "bananas" ? "sats" : "bananas"]
         || a.handle.localeCompare(b.handle));
-      el.bananaLeaders.replaceChildren();
-      for (let i = 0; i < Math.min(10, ranked.length); i++) {
-        const entry = ranked[i], row = document.createElement("li");
-        const rank = document.createElement("span"), name = document.createElement("span"), amount = document.createElement("strong");
-        rank.className = "banana-rank"; rank.textContent = String(i + 1).padStart(2, "0");
-        name.className = "banana-donor"; name.textContent = entry.handle ? `@${entry.handle}` : "Anonymous";
-        if (!entry.handle) name.dataset.anon = "true";
-        amount.className = "banana-amount"; amount.textContent = (donorUnit === "sats" ? BANANA_COUNT : DONOR_BANANAS).format(entry[donorUnit]);
-        row.append(rank, name, amount); el.bananaLeaders.append(row);
+      for (let i = 0; i < leaderRows.length; i++) {
+        const entry = ranked[i], row = leaderRows[i];
+        row.li.hidden = !entry;
+        if (!entry) continue;
+        const name = entry.handle ? `@${entry.handle}` : "Anonymous";
+        const amount = (donorUnit === "sats" ? BANANA_COUNT : DONOR_BANANAS).format(entry[donorUnit]);
+        if (row.nameText.data !== name) row.nameText.data = name;
+        if (row.amountText.data !== amount) row.amountText.data = amount;
+        row.name.dataset.anon = String(!entry.handle);
       }
       el.bananaEmpty.hidden = ranked.length > 0;
       el.bananaEmpty.textContent = missingSats ? "Sat totals are not available from the donation feed yet."
@@ -45708,7 +45941,7 @@ void main() {
       el.boardFilterTypes.setAttribute("aria-controls", el.boardFilterList.id);
       const boardListeners = [];
       const on = (target, type, fn, options) => {
-        target.addEventListener(type, fn, options);
+        target.addEventListener(type, fn, typeof options === "boolean" ? { capture: options, signal } : { ...options, signal });
         boardListeners.push(() => target.removeEventListener(type, fn, options));
       };
       // Each window copies a readable board's canvas and owns its controls.
@@ -46476,6 +46709,7 @@ void main() {
           tipVisibility = visibility;
           if (!visibility) tooltip.hide();
         },
+        get visibility() { return tipVisibility; },
         beginFrame: () => {
           tipSpeechBottom = -Infinity;
           tooltip.update(false);
@@ -46779,7 +47013,7 @@ void main() {
             chip.className = "chip";
             chip.title = `Take ${item.name} off ${BL.characters.displayOf(w.name)}`;
             chip.textContent = BL.characters.displayOf(w.name);
-            chip.addEventListener("click", () => unassignHandler && unassignHandler(w.name));
+            chip.addEventListener("click", () => unassignHandler && unassignHandler(w.name), { signal });
             chips.append(chip);
           }
           main.append(chips);
@@ -46805,12 +47039,12 @@ void main() {
           select.value = "";
           select.blur();
           if (target && free.length) assignHandler && assignHandler(free[0].id, target);
-        });
+        }, { signal });
         li.append(select);
         el.inventory.append(li);
       }
     };
-    // dispose removes only the rows and timers this instance added.
+    // End this visit; the attached sheet rows belong to the page.
     const dispose = () => {
       finishSheetResize();
       el.sheet.hidden = false;
@@ -46821,11 +47055,11 @@ void main() {
       window.clearTimeout(hintHideTimer);
       window.clearTimeout(copyTimer);
       for (const off of listeners) off();
+      listeners.length = 0;
+      if (lifetime) lifetime.abort();
       if (liveRows === rosterRows) liveRows = liveOnline = null;
       if (liveDonors === refreshDonors) liveDonors = null;
-      el.roster.replaceChildren();
-      el.bananaLeaders.replaceChildren();
-      el.bananaRecent.replaceChildren();
+      // Page-owned roster and donation rows remain attached; the next visit reconciles their contents.
       el.inventory.replaceChildren();
       el.toast.classList.remove("show");
       el.toast.hidden = true;
@@ -46854,7 +47088,16 @@ void main() {
       el.board.classList.remove("board-floating");
       el.board.removeAttribute("style");
     };
-    return { el, openFeed, openRecipe, closeRecipe, dismissOutside, openBoard, closeBoard, updateBoard, restoreBoards, setPanelsHidden, setRosterRow, setStats, setAct, setMode, setDestinations, setOwnOoga, get retakeActor() { return retake.actor ? retake : null; }, setGorilla, setGorillaSmashPower, setDetachedView, fadeDetachedName, setAreaLabel, setPrimary, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, hideHint, letterSign, selectTab, onPreset, setPileValueVisible, onAssign, onUnassign, renderInventory, dispose };
+    return {
+      // Engines keep this facade while a retained scene takes a fresh visit signal and sheet state.
+      renew(signal) {
+        const next = create({ roster, catalog, tierColors, renderIcon, lootEnabled, healthEnabled, signal });
+        next.tooltip.setVisibility(this.tooltip.visibility);
+        next.onAction(actionHandler); next.onPreset(presetHandler); next.onAssign(assignHandler); next.onUnassign(unassignHandler);
+        Object.defineProperties(this, Object.getOwnPropertyDescriptors(next));
+        return this;
+      },
+      el, openFeed, openRecipe, closeRecipe, dismissOutside, openBoard, closeBoard, updateBoard, restoreBoards, setPanelsHidden, setRosterRow, setStats, setAct, setMode, setDestinations, setOwnOoga, get retakeActor() { return retake.actor ? retake : null; }, setGorilla, setGorillaSmashPower, setDetachedView, fadeDetachedName, setAreaLabel, setPrimary, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, hideHint, letterSign, selectTab, onPreset, setPileValueVisible, onAssign, onUnassign, renderInventory, dispose };
   };
   // The account line in the sheet's foot is page-level: shown only when a backend answered, and
   // the director hands every change of `BL.net.state` here, whichever scene is active.
@@ -48823,10 +49066,8 @@ void main() {
       }
       trimPool();
     };
-    const dispose = () => {
-      sizeObserver.disconnect();
-      if (hud) hud.tooltip.setVisibility(null);
-      visibility.dispose();
+    // A parked scene keeps its sight cache and observer, but none of its transient effects.
+    const reset = () => {
       for (const p of particles) removeChild(root, p.node);
       for (const p of particlePool) removeChild(root, p.node);
       particles.length = 0;
@@ -48837,9 +49078,15 @@ void main() {
       damageCursor = damageCount = 0;
       ticker = null;
     };
+    const dispose = () => {
+      sizeObserver.disconnect();
+      if (hud) hud.tooltip.setVisibility(null);
+      visibility.dispose();
+      reset();
+    };
     const stats = () => ({ particles: particles.length, pool: particlePool.length, bubbles: bubbles.length, zzz: zzz.length, damageNumbers: damageCount });
     return {
-      spawnParticle, burst, puff, clearParticles, say, sayAt, next, more, said, hush, speech: bubbleOf, zzzAt, damageNumber, showTicker, drawOverlay, warmVisibility, warmBlockers: visibility.warm, update: stepParticles, trimPool, dispose, stats,
+      spawnParticle, burst, puff, clearParticles, say, sayAt, next, more, said, hush, speech: bubbleOf, zzzAt, damageNumber, showTicker, drawOverlay, warmVisibility, warmBlockers: visibility.warm, update: stepParticles, trimPool, reset, dispose, stats,
       get inMotion() {
         return particles.length > 0 || damageCount > 0;
       }
@@ -55919,6 +56166,7 @@ void main() {
       // Collision exclusions belong to this ordered update only; input and relocation see ordinary bodies.
       for (let i = 0; i < crewList.length; i++) crewList[i].riding.support = null;
     };
+    const pause = () => { window.clearTimeout(recipeTimer); recipeTimer = 0; };
     const setCombatEnabled = (on) => {
       on = on === true;
       if (on === combatEnabled) return;
@@ -55976,8 +56224,7 @@ void main() {
       }
     };
     const dispose = () => {
-      window.clearTimeout(recipeTimer);
-      recipeTimer = 0;
+      pause();
       planQueue.length = 0;
       player = null;
       for (let caveIndex = 0; caveIndex < crewList.length; caveIndex++) {
@@ -56024,7 +56271,7 @@ void main() {
       get combatEnabled() { return combatEnabled; },
       get weaponsEnabled() { return weaponsEnabled; },
       cavemen, list: crewList, fanSlots, stateOf, stateCounts, workingCavemen, eatingCavemen, workingCount, eatingCount, feedableCavemen, refreshStates, refreshRosterRow, updateFan, rush, headWorldOf, applyAllSwag, wornBy, renderLocker, pokeCave, idleSay, drawDrops,
-      throwTomato, clearProjectiles, control, release, relocatePlayer, sleepPlayer, wakePlayer, sitPlayer, standPlayer, clearHeadLook, prepareDragged, recoverDragged, ignite, dropRoll, damage, fireView, steer: steerPlayer, look: lookPlayer, elevate: elevatePlayer, playerAction, jumpPlayer, poseWeapon, wearJetpack, removeJetpack, setJetpackOwnership, thrust, holdRocketJump, update, dispose, stats,
+      throwTomato, clearProjectiles, control, release, relocatePlayer, sleepPlayer, wakePlayer, sitPlayer, standPlayer, clearHeadLook, prepareDragged, recoverDragged, ignite, dropRoll, damage, fireView, steer: steerPlayer, look: lookPlayer, elevate: elevatePlayer, playerAction, jumpPlayer, poseWeapon, wearJetpack, removeJetpack, setJetpackOwnership, thrust, holdRocketJump, update, pause, dispose, stats,
       actorClear, builtInJetpack, toggleTint, twirl, toggleWeapon, selectWeapon, configureWeapon, swingWeapon, bashWeapon, releaseSwing, fireWeapon, setWeaponTrigger, canFire, weaponOrigin, meleeReach, meleePower, nearReload, canReload, startReload, stopReload, stopBurst, canSwapMagazine, swapMagazine, collectMagazine, collectGroundMagazine, collectAmmo, removeMagazines, hasMagazine, magazineCount, magazineAmmo, totalAmmo, workSites,
       get sleeping() { return !!(player && player.bedTravel.manual && player.state === "sleeping"); },
       get player() {
@@ -56972,6 +57219,9 @@ void main() {
       if (!outstandingValue() && hatchTarget === 1) hatchTarget = 0;
       hatchOpen = damp(hatchOpen, hatchTarget, 7, dt);
     };
+    // A kept island leaving: the fruit in the air goes back to the queue, so it falls again on the next visit rather
+    // than hanging where the director's tween clear stopped it.
+    const suspend = () => cancelAirborne(true);
     const dispose = () => {
       cancelAirborne(true);
       for (const slot of pileSlots) {
@@ -57043,7 +57293,7 @@ void main() {
     // crew exists or starts walking.
     reflow(Math.max(0, Math.min(MAX_BANANAS, Math.floor(world.level))));
     return {
-      slots: pileSlots, drops: dropSlots, core, shell, syncPile, deliverBananas, pileEdge, eatFromPile, update, dispose, stats, setLevel, liveGeometry, delivery: deliveryDebug, spill, spillEffect,
+      slots: pileSlots, drops: dropSlots, core, shell, syncPile, deliverBananas, pileEdge, eatFromPile, update, suspend, dispose, stats, setLevel, liveGeometry, delivery: deliveryDebug, spill, spillEffect,
       get shown() {
         return counted;
       },
@@ -59040,7 +59290,7 @@ void main() {
   const lump = (geo, x, y, z, rx, ry, rz, hex, rand, rings = 5, segs = 9) => puff(geo, x, y, z, rx, ry, rz, tones(hex), rand, rings, segs);
   const ROPE = "#b89760";
   const keyed = (build) => {
-    const cache = new Map();
+    const cache = BL.models.scopedMap();
     return (key) => {
       let value = cache.get(key);
       if (!value) cache.set(key, value = build(key));
@@ -60010,7 +60260,7 @@ void main() {
   const { postSign, limb, padNormals, flatInto, puff: hubPuff } = BL.hubModels;
   const { rocketParts, rocket } = BL;
   const keyed = (build) => {
-    const cache = new Map();
+    const cache = BL.models.scopedMap();
     return (key) => {
       let value = cache.get(key);
       if (!value) cache.set(key, value = build(key));
@@ -65010,7 +65260,7 @@ void main() {
       g.stage = "load";
       Promise.resolve(BL.deferred.load("timechain")).then(() => {
         if (stamp !== g.prep) return null;
-        g.prepared = BL.timechainInterior.prepare(g.room.id, renderer);
+        g.prepared = BL.models.withScope("timechain", () => BL.timechainInterior.prepare(g.room.id, renderer));
         return g.prepared.ready;
       }).then(() => {
         if (stamp === g.prep) g.stage = "capture";
@@ -65021,7 +65271,10 @@ void main() {
     const dropPrepared = () => {
       g.prep++;
       g.stage = null;
-      if (g.prepared) { g.prepared.dispose(); g.prepared = null; }
+      if (g.prepared) {
+        g.prepared.dispose(); g.prepared = null;
+        BL.models.release("timechain", ["hub"]);
+      }
       if (g.picture) { site.picture.geometry = null; renderer.releaseGeometry(g.picture); g.picture = null; }
     };
     // A canvas's frame copied out at no more than 1280 pixels across, ready to hang as a picture: both renderers take
@@ -65105,7 +65358,7 @@ void main() {
         else { g.ask = 0; g.cycle = null; g.starting = false; }
       }
     };
-    const unsubscribeDoor = BL.net.subscribeDoor(onDoor);
+    let unsubscribeDoor = BL.net.subscribeDoor(onDoor);
     // Whether this crossing should wait its turn: shared, with a room that knows the doorway.
     const reserving = () => g.mode === "shared" && BL.net.state.doorway;
     const askDoor = (dir) => {
@@ -65362,7 +65615,8 @@ void main() {
     const dispose = () => {
       window.removeEventListener("keydown", onKey, true);
       document.removeEventListener("visibilitychange", onVisibility);
-      unsubscribeDoor();
+      if (unsubscribeDoor) unsubscribeDoor();
+      unsubscribeDoor = null;
       // Through the passage the crossing is done; anything short of that gives the doorway back.
       if (g.state === "gone" && g.cycle !== null) BL.net.doneDoor(g.cycle);
       else if (g.cycle !== null || g.ask) BL.net.cancelDoor();
@@ -65370,10 +65624,23 @@ void main() {
       dropPrepared();
       if (crew.player) hideHead(crew.player, false);
       g.state = "idle";
+      g.ask = 0; g.cycle = null;
+    };
+    // A kept island's gate takes a room chosen in advance on resuming, as `create` does; true when one was.
+    const resume = () => {
+      const asked = ROOMS.parse(world.sphereKeypad) || 0;
+      world.sphereKeypad = null;
+      if (asked) preselect = asked;
+      if (unsubscribeDoor) return !!asked;
+      unsubscribeDoor = BL.net.subscribeDoor(onDoor);
+      window.addEventListener("keydown", onKey, true);
+      document.addEventListener("visibilitychange", onVisibility);
+      show();
+      return !!asked;
     };
     show();
     return {
-      action, nearKeypad, engage, update, view, arrive, dispose, onKey, liveGeometry, get preselected() { return preselect; },
+      action, nearKeypad, engage, update, view, arrive, resume, dispose, onKey, liveGeometry, get preselected() { return preselect; },
       get busy() { return g.state !== "idle"; },
       get crossing() { return g.state === "opening" || g.state === "crossing" || g.state === "gone" || g.state === "leaving" || g.state === "arriving"; },
       debug: g, choose, commit, disengage, press
@@ -69339,7 +69606,7 @@ void main() {
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {}, M = BL.models, S = BL.scene;
-  const rings = new Map();
+  const rings = BL.models.scopedMap();
   const PORTAL_BLUE = "#287cae", RING_BLUE = "#41596c";
   let disc, surge, pedestal, rectangle, rectangularSurge;
   const build = (radius, outerRadius, aperture = null) => {
@@ -77916,7 +78183,7 @@ void main() {
     };
     const on = (node, type, callback, options) => {
       node.addEventListener(type, callback, options);
-      listeners.push(() => node.removeEventListener(type, callback, options));
+      listeners.push([node, type, callback, options]);
     };
     const consume = (event) => { event.preventDefault(); event.stopImmediatePropagation(); };
     const typing = BL.controls.uiKey;
@@ -78843,9 +79110,14 @@ void main() {
     const dispose = () => {
       if (disposed) return;
       release(); disposed = true;
-      for (const off of listeners) off();
+      for (const [node, type, callback, options] of listeners) node.removeEventListener(type, callback, options);
     };
-    return { possess, release, escape, respawn, travelRefusal, travel, freeCursor, resetCamera, captureControl, readInput, update, action, orbit: moveView, zoom, cancelInput, refreshCombat, dispose,
+    const resume = () => {
+      if (!disposed) return;
+      disposed = false;
+      for (const [node, type, callback, options] of listeners) node.addEventListener(type, callback, options);
+    };
+    return { possess, release, escape, respawn, travelRefusal, travel, freeCursor, resetCamera, captureControl, readInput, update, action, orbit: moveView, zoom, cancelInput, refreshCombat, resume, dispose,
       get active() { return !!player; }, get player() { return player; }, get view() { return view; },
       get birdsEye() { return !!player && view === "birds-eye"; }, get birdsEyeMix() { return player ? camera.orthoMix || 0 : 0; },
       get firstPerson() { return !!player && view === "first-person"; },
@@ -79567,6 +79839,7 @@ void main() {
   let enteringTween = null, factoryDeparting = false, bifrostDeparting = false, bifrostHeld = false;
   // Tess, the island's guide, for the visit (`hub-guide.js`).
   let islandGuide = null;
+  let reuseHub = false, heldHub = false, heldDebug = null;
   let stateTimer = 0, hintTimer = 0, now = 0, hour = 12, unsubscribeActivity = null, unsubscribeAccount = null, ownOogaClaimed = false;
   // The daylight inputs as last sampled; sampledDay starts at a never-true 0 so the first frame always samples.
   let sampledHour = 0, sampledDay = 0, sampledLatitude = NaN, sampledContinuousDay = 0, sampledUtcMs = 0;
@@ -87167,9 +87440,7 @@ void main() {
       const lamp = addLamp({ glow: 0, flare: 0, visible: true }, light, spot.x, L.apex * 0.35, spot.z, true, Infinity, `totem:${i}`);
       totems.push({ owner, runes, rings, features, flames, light, lamp, flare: 0, live: 0, pattern: BL.totemGlow.pattern(feed.REPOS[i].word), eyeTop: Math.max(...L.eyes.map((e) => e[1])) });
     });
-    totemUnsub = feed.subscribe((event) => {
-      if (event.fresh) flareTotem(event.index);
-    });
+    totemUnsub = feed.subscribe(onTotem);
   };
   const updateTotems = (dt, elapsed) => {
     const at = Date.now(), repos = BL.totemFeed.state.repos;
@@ -88861,7 +89132,8 @@ void main() {
     if (!clankerFireClear(entry, x, y, z, x, y, z, heading, heading)) return false;
     const slope = CLANKER_REST_SLOPE, angled = slope.groundRects.angled;
     slope.supportEntry = entry;
-    clankerGroundPlaneAt(x, y, z, heading, slope, slope);
+    try { clankerGroundPlaneAt(x, y, z, heading, slope, slope); }
+    finally { slope.supportEntry = null; }
     if (!angled.walkable || Math.hypot(angled.groundX, angled.groundZ) > 0.2 || angled.uneven > 0.3) return false;
     // Walking uses centre clearance; a settled body must also leave its rear,
     // middle and front clear of props, interactive items and other actors.
@@ -89843,7 +90115,162 @@ void main() {
     }
   };
 
+  const onOogatron = (event) => {
+    if (event.type === "stats") {
+      if (jumbotron) jumbotron.refreshData(event.stats);
+      contributors.applySnapshot(event.stats);
+    }
+  };
+  const onTotem = (event) => { if (event.fresh) flareTotem(event.index); };
+  const suspendHub = () => {
+    // A kept island ends its hunt and its game as a full leave does, and lowers the ring at once.
+    ghostVisit++;
+    if (ghosts) { ghosts.dispose(); ghosts = null; }
+    ghostLoading = false; ghostSeal = null;
+    setGameMode(false);
+    gameRingK = gameRingWait = ringPulseWait = 0; gameRing.visible = false;
+    // The veils' waves and glyph outlines end with the visit as leave ends them; an outline is made again where a body
+    // next touches its veil (`ringBodies`).
+    for (const node of ringPanels) {
+      const ripples = node.mirrorRipples;
+      ripples.waves.fill(0); ripples.active = 0; ripples.time = 0;
+      if (node.mirrorBody) node.mirrorBody.dispose();
+    }
+    for (const node of ringLanterns) node.visible = false;
+    ringLanternsShown = false;
+    actorTransition.sourceRoot = actorTransition.sourceHead = null;
+    if (factoryMouth && factoryMouth.snap) snapFactoryView();
+    if (bifrostIsle && bifrostIsle.snap) snapBifrostView();
+    if (factoryMouth) factoryMouth.snap = false;
+    if (bifrostIsle) bifrostIsle.snap = false;
+    // Heimdall's horn closes its sound as a full leave does; his next blast opens it again.
+    if (bifrostIsle) bifrostIsle.heimdall.dispose();
+    if (enteringTween) enteringTween.alive = false;
+    enteringTween = null;
+    // The director clears every tween after leave without running its `done`. The pile's fruit in the air goes back
+    // to its queue; the island's other tweens (a prop's wobble, a crate opening, a build coming down) finish now, so
+    // nothing is left tilted, busy or half-shrunk for the next visit.
+    pile.suspend();
+    for (let pass = 0; pass < 8 && tweenCount(); pass++) stepTweens(1e3);
+    clearCutawayHidden();
+    selectDebugGorilla(null);
+    window.clearInterval(stateTimer); stateTimer = 0;
+    window.clearTimeout(hintTimer); hintTimer = 0;
+    unsubscribeActivity(); unsubscribeActivity = null;
+    unsubscribeAccount(); unsubscribeAccount = null;
+    unsubscribeMempool(); unsubscribeMempool = null;
+    unsubscribeChain(); unsubscribeChain = null;
+    if (oogatronUnsub) oogatronUnsub(); oogatronUnsub = null;
+    if (totemUnsub) totemUnsub(); totemUnsub = null;
+    if (positionDebug) {
+      positionDebug.removeEventListener("click", copyPositionDebug);
+      positionDebug.hidden = true;
+    }
+    for (let i = 0; i < clankerCaptures.length; i++) finishClankerRider(clankerCaptures[i].entry, false);
+    clankerCaptures.length = 0;
+    timechainIsland.gate.dispose();
+    islandGuide.suspend();
+    chalkboard.suspend();
+    clankerPlay.dispose();
+    remotes.dispose();
+    npcSync.dispose();
+    pilot.suspend();
+    input.suspend();
+    crew.pause();
+    weather.dispose();
+    footsteps.dispose();
+    fx.reset();
+    if (factoryMouth?.hall) factoryMouth.hall.suspend();
+    if (factoryMouth?.roofWindow) factoryMouth.roofWindow.suspend();
+    hud.dispose();
+    BL.net.setBody(null); BL.net.setHub(false); zoneHeld = null;
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
+    CLANKER_REST_SLOPE.supportEntry = RAGE_WARP_MOTION.supportEntry = null;
+    CLANKER_HIT.node = CLANKER_HIT.owner = POOL_BLOCK_HIT.node = POOL_BLOCK_HIT.owner = null;
+    DEBUG_MOVE_HIT.node = DEBUG_MOVE_HIT.owner = DEBUG_GORILLA_HIT.node = DEBUG_GORILLA_HIT.owner = null;
+    viewPoseActor = grabSupportEntry = clankerSupportActor = clankerPassingEntry = preparingGuideActor = null;
+    poolBlockHovered = poolBlockHoverIgnore = null;
+    glCanvas = overlayCanvas = null;
+    heldDebug = hubScene.debug;
+    heldHub = true;
+    // The active graph is empty; the retained graph has a separate, explicit geometry owner.
+    hubScene.root = createNode(); hubScene.input = hubScene.debug = null;
+    return { targets: input.targetCount };
+  };
+  const resumeHub = (ctx) => {
+    ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
+    glCanvas = ctx.canvas; overlayCanvas = ctx.overlay;
+    heldHub = false;
+    factoryDeparting = bifrostDeparting = bifrostHeld = entering = false;
+    if (factoryMouth) factoryMouth.snap = false;
+    if (bifrostIsle) bifrostIsle.snap = false;
+    hubScene.root = root; hubScene.camera = camera; hubScene.input = input; hubScene.debug = heldDebug;
+    heldDebug = null;
+    hud.renew(ctx.signal);
+    hud.restoreBoards(jumbotronBoard);
+    hud.setDestinations(["pile", "lab", "mirror", "underground", "basement", "mempool", "factory", "arcade", "bca", "gate", "bifrost", "timechain"]);
+    input.resume(); pilot.resume(); clankerPlay.resume(); chalkboard.resume();
+    islandGuide.resume();
+    if (timechainIsland.gate.resume()) hud.toast(`Room ${timechainIsland.gate.preselected} is chosen at the keypad · walk up to it and press Enter to go in`);
+    if (factoryMouth?.hall) factoryMouth.hall.resume();
+    if (factoryMouth?.roofWindow) factoryMouth.roofWindow.resume();
+    weather = weatherMod.create({ root, renderer, camera, heightAt: mempoolIsland.rainAt, fx, onRain: mempoolIsland.rainHit, centre: mempoolIsland.centre });
+    footsteps = BL.footsteps.create();
+    hubScene.debug.weather = weather;
+    weather.apply(chain.snapshot); mempoolIsland.water.apply(chain.snapshot);
+    mempoolIsland.paintings.refresh(chain.snapshot); refreshChainSign();
+    // As enter does: the distant island rests until the first proximity check below wakes it.
+    poolEffectsActive = false; poolEffectsTime = 0;
+    if (factoryMouth) factoryMouth.roofEffectsActive = false;
+    weather.update(0, null);
+    weather.pause(true);
+    unsubscribeChain = chain.subscribe(onChain);
+    unsubscribeMempool = mempool.subscribe(onMempool);
+    oogatronUnsub = oogatronLive.subscribe(onOogatron);
+    totemUnsub = BL.totemFeed.subscribe(onTotem);
+    BL.net.setHub(true);
+    crew.refreshStates(true);
+    const handsBack = ctx.from === "dsb" || ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" || ctx.from === "lab" || ctx.from === "timechain";
+    const returningCharacter = handsBack ? world.pilot : null;
+    if (handsBack) world.pilot = null;
+    if (returningCharacter) {
+      const cave = crew.cavemen.get(returningCharacter);
+      if (!contributors.debugState && !contributors.debugRoster && crew.stateOf(cave) !== "working") {
+        cave.override = "working"; crew.refreshStates(true);
+      }
+      pilot.possess(cave);
+      if (ctx.from === "factory") crew.selectWeapon(cave.weapon.selectedSlot, cave);
+    }
+    ownOogaClaimed = !!world.pilotDetached || !!(returningCharacter && BL.net.state.me); world.pilotDetached = false;
+    claimOwnOoga();
+    unsubscribeActivity = contributors.subscribe(() => crew.refreshStates());
+    unsubscribeAccount = BL.net.subscribe(onAccountChange);
+    const donate = ctx.place === "donate", routedPlace = donate ? null : ctx.place;
+    const sphereExit = ctx.from === "timechain" ? world.sphereExit : null;
+    world.sphereExit = null;
+    if (returningCharacter && sphereExit && pilot.player) timechainIsland.gate.arrive(sphereExit);
+    else if (returningCharacter) navigate(ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" ? ctx.from : ctx.from === "timechain" ? "timechain" : "pile", false, false);
+    else navigate(routedPlace || (ctx.from === "bifrost" ? "bifrost" : "pile"), false, false);
+    if (donate) hud.openFeed();
+    clankers.sync(); clankerMeshes.sync();
+    for (let i = 0; i < crew.list.length; i++) crew.refreshRosterRow(crew.list[i]);
+    if (lootEnabled) { crew.applyAllSwag(); crew.renderLocker(); }
+    hud.setStats(game.state); pile.syncPile(true);
+    stateTimer = window.setInterval(() => { crew.refreshStates(); fx.trimPool(); }, 6e4);
+    lampSelValid = false; sampledDay = 0;
+    cameraPreviousValid = false; cameraTrailPlayer = caveEntryPlayer = null;
+    cameraTrailCount = cameraTrailNext = 0;
+    pilot.update(0);
+    if (POSITION_DEBUG) {
+      positionDebug.hidden = false;
+      positionDebug.addEventListener("click", copyPositionDebug, { signal: ctx.signal });
+      updatePositionDebug(true);
+    }
+    updatePoolEffectsActivity();
+  };
   const enter = (ctx) => {
+    reuseHub = ctx.hubPolicy === "keep";
+    if (heldHub) { resumeHub(ctx); return; }
     ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
     poolEffectsActive = false; poolEffectsTime = 0;
     glCanvas = ctx.canvas;
@@ -89866,7 +90293,7 @@ void main() {
     positionDebugNext = 0;
     positionDebugJSON = "";
     positionDebugState = "";
-    if (POSITION_DEBUG) positionDebug.addEventListener("click", copyPositionDebug);
+    if (POSITION_DEBUG) positionDebug.addEventListener("click", copyPositionDebug, { signal: ctx.signal });
     solids = BL.solidProps.create();
     clock = daylight.createClock({ hour: hourParam, daylen: daylenParam, day: dayParam, time: timeParam, now: new Date() });
     phase = null;
@@ -89907,7 +90334,7 @@ void main() {
       MATRIX_WORLD.caveNear = Math.min(MATRIX_WORLD.caveNear, MATRIX_WORLD.caves[offset + 3] - 4);
     }
     mark("island");
-    hud = hudMod.create({ roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
+    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks, preciseHover: true });
     presets = { pile: PILE_VIEW, gate: GATE_VIEW };
@@ -90030,12 +90457,7 @@ void main() {
       // times flow through contributors -> crew.refreshStates, which wakes a
       // sleeper into a walk out of the HQ (and the 60s state interval later
       // walks idled Oogas down to bed).
-      oogatronUnsub = oogatronLive.subscribe((event) => {
-        if (event.type === "stats") {
-          if (jumbotron) jumbotron.refreshData(event.stats);
-          contributors.applySnapshot(event.stats);
-        }
-      });
+      oogatronUnsub = oogatronLive.subscribe(onOogatron);
     }
     buildTotems();
     addDressingLights();
@@ -90424,8 +90846,10 @@ void main() {
     pilot.bind(shared);
     // The doorway draws the island once from inside the passage for the way back out (`renderView`), sets the
     // sphere's heartbeat going while a room readies slowly (`show`), and hands a crossing the island's own meshes to
-    // keep on the GPU while the visit lasts (`keep`).
+    // keep on the GPU while the visit lasts (`keep`). Only a kept island is worth keeping: under `release` the island
+    // and its caches are rebuilt on the way back out, so the old meshes would only sit pinned and unused.
     const keepGeometry = () => {
+      if (!reuseHub) return null;
       const kept = new Set(), walk = (node) => { if (node.geometry) kept.add(node.geometry); for (const child of node.children) walk(child); };
       walk(root);
       liveGeometry(kept);
@@ -90974,7 +91398,9 @@ void main() {
     if (bifrostIsle) bifrostIsle.snap = false;
     pilot.controls.reset(); input.reset(); pilot.setActive(true);
   };
-  const leave = () => {
+  const leave = (destroy = false) => {
+    if (reuseHub && !destroy) return suspendHub();
+    heldHub = false; heldDebug = null;
     actorTransition.sourceRoot = actorTransition.sourceHead = null;
     resetRageThrowMap(false);
     if (factoryMouth && factoryMouth.snap) snapFactoryView();
@@ -91007,13 +91433,13 @@ void main() {
     if (enteringTween) enteringTween.alive = false;
     enteringTween = null;
     window.clearInterval(stateTimer);
-    unsubscribeActivity();
+    if (unsubscribeActivity) unsubscribeActivity();
     unsubscribeActivity = null;
-    unsubscribeAccount();
+    if (unsubscribeAccount) unsubscribeAccount();
     unsubscribeAccount = null;
-    unsubscribeMempool();
+    if (unsubscribeMempool) unsubscribeMempool();
     unsubscribeMempool = null;
-    unsubscribeChain();
+    if (unsubscribeChain) unsubscribeChain();
     unsubscribeChain = null;
     timechainIsland.gate.dispose();
     hud.closeBoard(true);
@@ -91151,11 +91577,17 @@ void main() {
     const count = input.targetCount;
     input.dispose();
     hud.dispose();
+    // Shared query scratch must not keep an actor (and its groundAt closure) alive past this visit.
+    CLANKER_REST_SLOPE.supportEntry = RAGE_WARP_MOTION.supportEntry = null;
+    CLANKER_HIT.node = CLANKER_HIT.owner = null;
+    viewPoseActor = grabSupportEntry = clankerSupportActor = clankerPassingEntry = preparingGuideActor = null;
     // Drop every per-visit ref but the cached island.
     terrainRampRoof = pathNode = altar = lawn = life = hud = hooks = input = pilot = fx = cameraCover = bananaCover = solids = rockGuides = objectGuides = sightGuides = bananaGuides = pileGuides = platformGuides = mirrorGuides = pile = crew = crates = critters = clock = presets = mirrorCave = matrixCave = matrixControl = gateRain = fire = headquarters = positionDebug = dockStairs = overlayCanvas = null;
     beasts.clear();
     magazine = magazineState = weather = footsteps = mempoolIsland = timechainIsland = clankers = clankerPlay = null;
     hubScene.input = hubScene.debug = null;
+    island = chalkboardDressing = null;
+    guideSegmentClear.boxGrid = POOL_SEAMS[0].boxGrid = POOL_SEAMS[1].boxGrid = null;
     return { targets: count };
   };
   const liveGeometry = (set) => {
@@ -91174,6 +91606,11 @@ void main() {
     remotes.liveGeometry(set);
     if (timechainIsland && timechainIsland.gate) timechainIsland.gate.liveGeometry(set);
   };
+  const cachedGeometry = (set) => {
+    if (!heldHub) return;
+    const visit = (node) => { if (node.geometry) set.add(node.geometry); for (const child of node.children) visit(child); };
+    visit(root); liveGeometry(set);
+  };
   const stats = () => {
     let nodes = 0;
     traverseVisible(root, () => nodes++);
@@ -91184,7 +91621,8 @@ void main() {
     // The island reports its own zone as soon as an Ooga is driven (see `zoneOf`); until then it is nowhere.
     voiceZone: "none",
     micKey: true,
-    id: "hub", enter, update, overlay, onDonation, previewDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry,
+    id: "hub", enter, update, overlay, onDonation, previewDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry, cachedGeometry,
+    get retained() { return heldHub; }, get elapsed() { return now; },
     root: null, camera: null, input: null, debug: null,
     get inMotion() {
       // A crossing through the Timechain Sphere's doors keeps full rate, so its walk and swoop finish smoothly.
@@ -91583,7 +92021,7 @@ void main() {
     dust = BL.dressing.motes({ count: 160, span: 16, low: 0.5, high: 4.2 });
     addChild(lab.room, dust.node);
     mark("room");
-    hud = hudMod.create({ roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
+    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
     hud.setAreaLabel("LAB");
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
@@ -93818,7 +94256,7 @@ void main() {
   // A banner of the concept's blue (or `cloth`) with the bolt on both faces, hung from a rod: `h` tall, the rod at
   // the origin, facing +z. Cached by height and cloth and shared, so a builder that places one moves a copy
   // (`merge`), never the banner.
-  const bannerCache = new Map();
+  const bannerCache = BL.models.scopedMap();
   const banner = (h = 2, cloth = "#2b4fb0") => {
     const key = `${h}|${cloth}`;
     let geo = bannerCache.get(key);
@@ -93849,7 +94287,7 @@ void main() {
     plain: { board: "#0d0b0a", edge: "rgba(236,226,206,0.6)", title: "#f8f4ec", sub: "#d6cfc1", back: IRON_DK },
     gold: { board: "#1e140d", edge: "rgba(0,0,0,0)", title: "#fbe3a4", sub: "#e8c887", back: TIMBER_DK }
   };
-  const labelCache = new Map();
+  const labelCache = BL.models.scopedMap();
   const label = (title, sub = "", { height = 1.25, style = "plain", keep = true } = {}) => {
     const key = `${title}|${sub}|${height}|${style}`;
     let out = keep ? labelCache.get(key) : null;
@@ -95533,7 +95971,7 @@ void main() {
   });
   // A gear for the cooker's side: an iron disc with an orange hub, cut into `teeth` round its edge, with spokes on its
   // face; its axle along x, so the scene turns it by rotation.x. Cached by size.
-  const gearCache = new Map();
+  const gearCache = BL.models.scopedMap();
   const cookerGear = (r, teeth) => {
     const key = `${r}|${teeth}`;
     let geo = gearCache.get(key);
@@ -95719,7 +96157,7 @@ void main() {
     }
   };
   const BOARD_ROWS = [["coins", "TOTAL DONATED", 200], ["banana", "BANANAS DONATED", 285], ["calendar", "TODAY", 400], ["calendar", "THIS WEEK", 482], ["bolt", "CURRENT RATE", 564], ["figure", "LATEST DONATION", 646]], BOARD_RULE = 336;
-  const boardFaces = new Map();
+  const boardFaces = BL.models.scopedMap();
   const boardFace = (note) => boardFaces.get(note) || boardFaces.set(note, paintBoardFace(note)).get(note);
   const paintBoardFace = (note) => {
     const { w: W, h: H, px: P } = BOARD_FACE, canvas = document.createElement("canvas");
@@ -97187,6 +97625,7 @@ void main() {
   // its roof and across its width with MARGIN into the rock. Made once for the page, so every visit draws the same
   // geometries and one clip slab.
   let clipped = null;
+  const clippedScope = BL.models.track(() => { clipped = null; }, () => clipped);
   const clippedFor = (mouth, roof = null) => {
     if (roof) {
       const w = FM.hubWindow(), half = roof.radius + 0.02;
@@ -97196,6 +97635,7 @@ void main() {
       return { hall: clip(w.hall), chamber: clip(w.chamber), fire: clip(w.fire), sat: clip(w.sat), satRed: clip(w.satRed),
         blueDim: clip(w.tank.blueDim), blueLit: clip(w.tank.blueLit), orangeDim: clip(w.tank.orangeDim), orangeLit: clip(w.tank.orangeLit) };
     }
+    clippedScope.use();
     if (clipped && clipped.mouth === mouth) return clipped;
     const w = FM.hubWindow(), sr = Math.sin(mouth.ry), cr = Math.cos(mouth.ry), half = mouth.room.w / 2 + MARGIN;
     const clipSlab = new Float32Array([cr / half, 0, -sr / half, -(cr * mouth.x - sr * mouth.z) / half]);
@@ -97312,7 +97752,7 @@ void main() {
           break;
       }
     };
-    const unsubscribe = node.feed.subscribe(onEvent);
+    let unsubscribe = node.feed.subscribe(onEvent);
 
     // The show advances only while nearby and shown, keeping its existing motion when it resumes.
     const step = (dt) => {
@@ -97418,8 +97858,10 @@ void main() {
       }
     };
 
+    const suspend = () => { if (unsubscribe) unsubscribe(); unsubscribe = null; };
+    const resume = () => { if (!unsubscribe) unsubscribe = node.feed.subscribe(onEvent); };
     const dispose = () => {
-      unsubscribe();
+      suspend();
       root.visible = false;
       removeChild(group, root);
     };
@@ -97433,7 +97875,7 @@ void main() {
       },
       batches: { hall, chamber, fire, blueLit, blueDim, orangeLit, orangeDim, sat: gold, satRed: red }
     };
-    return { root, update, dispose, debug };
+    return { root, update, suspend, resume, dispose, debug };
   };
 
   BL.factoryWindow = { create, relief, AXIS, DEPTH, TINT };
@@ -97838,6 +98280,16 @@ void main() {
   // faces), whom she watches when she is not flying or beaming (`watching`
   // and `watch`), and her moods: `calm` while she talks, `steady` while she keeps by someone, so she does not turn to
   // her flight. Outline registries walk past her, as she moves every frame.
+  // Hub scope survives scene changes, but Tess's meshes need survive only while a Tess owns them. The director leaves
+  // one scene and enters the next in one task, so the caches go only once that task ends with no Tess: the Factory's
+  // greeter entered as the hub's guide leaves reuses every tier rather than rebuilding them in the swap frame.
+  let instances = 0, releasing = false;
+  const releaseIdle = () => {
+    releasing = false;
+    if (instances) return;
+    MESHES.clear(); FINE_MESHES.clear(); LIGHT_MESHES.clear();
+    BEAM.clear(); GLINT.clear(); SPARKS.clear(); MOTE.clear();
+  };
   const create = ({ parent, input, fx, camera, kind, coarse, quality = () => "high" }) => {
     // Prepare detail behind the scene transition, never in update. Touch and Low retain the lighter rig.
     const lightMeshes = LIGHT_MESHES(), eligible = !coarse && quality() !== "low",
@@ -98083,8 +98535,10 @@ void main() {
         removeChild(parent, body);
         for (let i = 0; i < BEAMS; i++) { removeChild(parent, beams[i]); removeChild(parent, glints[i]); }
         for (let i = 0; i < FLECKS; i++) removeChild(parent, flecks[i].node);
+        if (--instances === 0 && !releasing) { releasing = true; queueMicrotask(releaseIdle); }
       }
     };
+    instances++;
     return rig;
   };
   BL.tess = { create, HEIGHT, SCALE, RADIUS };
@@ -98803,14 +99257,26 @@ void main() {
       else { rig.watch.x = camera.position.x; rig.watch.y = camera.position.y; rig.watch.z = camera.position.z; }
       rig.update(dt, elapsed);
     };
-    const dispose = () => {
+    let suspended = false;
+    const suspend = () => {
+      if (suspended) return;
+      suspended = true;
       if (state.ask) { state.ask.abort(); pending(null); }
       window.removeEventListener("keydown", captureKey, true);
       if (state.holding) release();
-      rig.dispose();
+      state.still = false;
+      rig.hush();
+      show("work");
       panel.remove();
     };
-    return { root: rig.root, state, update, escape, tap, dispose, liveGeometry: rig.liveGeometry, lend /* HALLOWEEN */, get holding() { return state.holding; }, get speech() { return rig.speech; } };
+    const resume = () => {
+      if (!suspended) return;
+      suspended = false;
+      document.body.append(panel);
+      window.addEventListener("keydown", captureKey, true);
+    };
+    const dispose = () => { suspend(); rig.dispose(); };
+    return { root: rig.root, state, update, escape, tap, suspend, resume, dispose, liveGeometry: rig.liveGeometry, lend /* HALLOWEEN */, get holding() { return state.holding; }, get speech() { return rig.speech; } };
   };
   BL.hubGuide = { create, NAME, LINES, STOPS, NEWS, freshAfter, legsOf, answer, SUGGESTIONS };
 })();
@@ -103627,7 +104093,7 @@ void main() {
     ({ renderer, game, world, go, agentPlay } = ctx);
     camera = createCamera({ fov: 55, near: 0.3, far: 150 });
     root = createNode();
-    hud = hudMod.create({ roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
+    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
     hud.setAreaLabel("LF");
     if (window.matchMedia("(max-width: 720px), (max-height: 500px)").matches) hud.el.sheet.dataset.open = "false";
     hooks = {};
@@ -104534,7 +105000,7 @@ void main() {
   const SCORE_INK = "#ffb02e", BOARD_RIM = [0.12, 0.1], BOARD_STONE = ["#a08868", "#8f7a62"];
   const digit = variants((d) => unshadowed(brushWord(geometry(), String(d), 0, 0, 0.14, 0.026, SCORE_INK, 0.8, 0.004)));
   const DIGIT_W = (GLYPH_W + TRACKING) * 0.022 * 1.25;
-  const boardCache = new Map();
+  const boardCache = BL.models.scopedMap();
   const board = (title, digits, trim) => {
     const key = `${title}|${digits}|${trim}`;
     let out = boardCache.get(key);
@@ -106172,7 +106638,7 @@ void main() {
   // (x, y, z): three turns wrapped up the planks' face just outside the post, over the top and under the foot, the
   // middle one a shade darker, covering both plates and their rivets. Flat parts, built once per sign in its own
   // units (`bindings`).
-  const bindings = new Map();
+  const bindings = BL.models.scopedMap();
   const signBinding = (text, icon, width, x, y, z) => {
     const sign = BL.hubModels.caveSign(text, icon), b = BL.scene.boundsOf(sign), k = width / (b.max[0] - b.min[0]), key = `${text}|${icon}`;
     let turns = bindings.get(key);
@@ -107379,7 +107845,7 @@ void main() {
     if (spot) round.push(moved(turnedX(lathe({ profile: [[r * 0.42, 0], [r * 0.3, r * 0.07], [0, r * 0.11]], segments: 10, color: "#f6ecd2" }), Math.PI / 2), 0, 0, r * 0.9));
     return shaded(round);
   };
-  const nutCache = new Map();
+  const nutCache = BL.models.scopedMap();
   const coconutBall = (style = "husk", r = 0.075, spot = false) => {
     const key = `${style}|${r}|${spot}`;
     let geo = nutCache.get(key);
@@ -107781,7 +108247,7 @@ void main() {
   // front of it: a dry bamboo pole laid along the board's top, lashed near each end, a small bone tied on its middle,
   // and from each lashing a vine drooping over the rim to its corner (`tie`), where two feathers hang down the side of
   // the rim, splayed a little, each corner its own pair. Nothing crosses the board's face, and nothing glows.
-  const bulbCache = new Map();
+  const bulbCache = BL.models.scopedMap();
   const bulbFrame = (w, h) => {
     const key = `${w}|${h}`;
     let geo = bulbCache.get(key);
@@ -107801,7 +108267,7 @@ void main() {
   // A zone's name brushed in chalk on a board of two carved planks between bark ends, a bone brushed either side of it
   // and a handprint in the zone's colour at each end, a log laid across its top and a leafy liana slung from the log's
   // ends, facing +z. A name too long for the bay between two trunks is brushed smaller, so no board runs past `ZONE_W`.
-  const zoneCache = new Map(), ZONE_W = 3.2;
+  const zoneCache = BL.models.scopedMap(), ZONE_W = 3.2;
   const zoneSign = (text, color) => {
     const key = `${text}|${color}`;
     let out = zoneCache.get(key);
@@ -109138,7 +109604,7 @@ void main() {
   // lamps hung from it on three cords each: half a shell, husk outside, cupped open to the room so its pale meat
   // shows round the flame burning in it at `POOL_LAMP_Y`, three holes carved in its underside glowing down on the
   // table. One per `up`, so tables under the same spot share it.
-  const POOL_LAMP_Y = 2.25, poolLamps = new Map();
+  const POOL_LAMP_Y = 2.25, poolLamps = BL.models.scopedMap();
   const poolLamp = (up) => {
     let geo = poolLamps.get(up);
     if (geo) return geo;
@@ -119323,11 +119789,11 @@ void main() {
   const enter = (ctx) => {
     ({ renderer, game, world, go, agentPlay } = ctx);
     canvasEl = ctx.canvas;
-    window.addEventListener("keydown", armsKeys, true);
-    canvasEl.addEventListener("pointerdown", rightClick, true);
+    window.addEventListener("keydown", armsKeys, { capture: true, signal: ctx.signal });
+    canvasEl.addEventListener("pointerdown", rightClick, { capture: true, signal: ctx.signal });
     camera = createCamera({ fov: 55, near: 0.2, far: 60 });
     root = createNode();
-    hud = hudMod.create({ roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
+    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
     if (window.matchMedia("(max-width: 720px), (max-height: 500px)").matches) hud.el.sheet.dataset.open = "false";
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
@@ -119389,7 +119855,7 @@ void main() {
     const panel = document.getElementById("prize-panel");
     prizeUi = { panel, tickets: document.getElementById("prize-tickets"), items: [...panel.querySelectorAll(".prize")] };
     panel.hidden = true;
-    panel.addEventListener("click", onPrizeClick);
+    panel.addEventListener("click", onPrizeClick, { signal: ctx.signal });
     hud.dismissOutside(panel, closePrizes);
     addChild(root, ...BL.dressing.nodes(dressing(), { glow: 1 }));
     build();
@@ -121610,17 +122076,17 @@ void main() {
     slot = Number.isInteger(ctx.place) && KINDS[id].spots[ctx.place] ? ctx.place : 0;
     aim.x = aim.hold = aim.steps = aim.y = aim.stepsY = 0; held.left = held.right = held.up = held.down = DRAG.down = false;
     canvasEl = ctx.canvas;
-    window.addEventListener("keydown", onDown);
-    window.addEventListener("keyup", onUp);
-    canvasEl.addEventListener("pointermove", onPoint);
-    canvasEl.addEventListener("pointerdown", onPoint);
-    canvasEl.addEventListener("pointerup", onLift);
-    canvasEl.addEventListener("pointercancel", onLift);
+    window.addEventListener("keydown", onDown, { signal: ctx.signal });
+    window.addEventListener("keyup", onUp, { signal: ctx.signal });
+    canvasEl.addEventListener("pointermove", onPoint, { signal: ctx.signal });
+    canvasEl.addEventListener("pointerdown", onPoint, { signal: ctx.signal });
+    canvasEl.addEventListener("pointerup", onLift, { signal: ctx.signal });
+    canvasEl.addEventListener("pointercancel", onLift, { signal: ctx.signal });
     pressedBy = ""; steerId = -1;
     leaving = false;
     camera = createCamera({ fov: 52, near: 0.1, far: 50 });
     root = createNode();
-    hud = hudMod.create({ roster: BL.contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
+    hud = hudMod.create({ signal: ctx.signal, roster: BL.contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
     fx = fxMod.create({ root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, tickerAt: { x: 0, y: 4, z: -4 } });
@@ -121650,7 +122116,7 @@ void main() {
       combo: document.getElementById("carnival-combo"), coach: document.getElementById("carnival-coach"), note: document.getElementById("carnival-note"),
       help: document.getElementById("carnival-help"), starNeeds: [...document.querySelectorAll("#carnival-stars .carnival-star-need")]
     };
-    el.act.addEventListener("pointerdown", onActDown);
+    el.act.addEventListener("pointerdown", onActDown, { signal: ctx.signal });
     const star = (node) => made(node, STAR_IN, STAR_T);
     anim = {
       pop: [made(el.pop, CALL, CALL_T), made(el.pop, CALL, CALL_BIG_T)], score: [made(el.score, POP, POP_T), made(el.score, POP_BIG, POP_BIG_T), made(el.score, DROP, DROP_T)],
@@ -125443,7 +125909,7 @@ void main() {
     hudMod.leaveTo("race", home);
     camera = createCamera({ fov: 50, near: 0.3, far: 280 });
     root = createNode();
-    hud = hudMod.create({ roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
+    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
     fx = fxMod.create({ root, renderer, camera, hud, overlay: ctx.overlay, tickerAt: TICKER_AT });
@@ -125485,8 +125951,8 @@ void main() {
     screechAt = crewScreechAt = -9;
     quieted = false;
     rhud.el.mute.setAttribute("aria-pressed", String(audio.muted));
-    window.addEventListener("pointerdown", onGesture);
-    window.addEventListener("keydown", onGesture);
+    window.addEventListener("pointerdown", onGesture, { signal: ctx.signal });
+    window.addEventListener("keydown", onGesture, { signal: ctx.signal });
     hud.onAssign((entryId, name) => {
       if (game.assign(entryId, name)) renderLocker();
     });
@@ -125556,7 +126022,7 @@ void main() {
       const pick = ownRacer() ? "a ride and a track" : "an Ooga, a ride and a track";
       hud.hint(COARSE ? `Tap ${pick}, then Race!` : `Pick ${pick}, then Race! (Enter)`);
     }, 1200);
-    window.addEventListener("blur", onBlur);
+    window.addEventListener("blur", onBlur, { signal: ctx.signal });
     unsubscribeAccount = BL.net.subscribe(accountChanged);
     Object.assign(raceScene, {
       root, camera, input,
@@ -127228,7 +127694,7 @@ void main() {
     root = createNode();
     clock = daylight.createClock({ hour: hourParam, daylen: daylenParam, day: dayParam, time: timeParam, now: new Date() });
     island = terrain.island({ seed: SEED });
-    hud = hudMod.create({ roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
+    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
     fx = fxMod.create({ root, renderer, camera, hud, overlay: ctx.overlay, tickerAt: TICKER_AT });
@@ -127322,8 +127788,8 @@ void main() {
     // Cleared per visit: a flare held at leave would suppress the next cue.
     flaringWas = quieted = false;
     dhud.el.mute.setAttribute("aria-pressed", String(audio.muted));
-    window.addEventListener("pointerdown", onGesture);
-    window.addEventListener("keydown", onGesture);
+    window.addEventListener("pointerdown", onGesture, { signal: ctx.signal });
+    window.addEventListener("keydown", onGesture, { signal: ctx.signal });
     hud.onAssign((entryId, name) => {
       if (game.assign(entryId, name)) renderLocker();
     });
@@ -133274,7 +133740,7 @@ void main() {
     phase = s.over ? "results" : s.time > 0 ? "run" : "intro";
     clock = daylight.createClock({ hour: hourParam, daylen: daylenParam, day: dayParam, time: timeParam, now: new Date() });
 
-    hud = hudMod.create({ roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
+    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
     // Space and the WORK button both come through the pilot's action: whatever is beside the Ooga.
@@ -136323,7 +136789,7 @@ void main() {
     clock = daylight.createClock({ hour: hourParam, daylen: daylenParam, day: dayParam, time: timeParam, now: new Date() });
     island = terrain.island({ seed: SEED });
     spot = rocketModels.siteSpot(island, {});
-    hud = hudMod.create({ roster: contributors.roster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
+    hud = hudMod.create({ signal: ctx.signal, roster: contributors.roster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
     fx = fxMod.create({ root, renderer, overlay: ctx.overlay, tickerAt: TICKER_AT });
@@ -136389,8 +136855,8 @@ void main() {
     audio = rocketAudio.create();
     quieted = false;
     rhud.el.mute.setAttribute("aria-pressed", String(audio.muted));
-    window.addEventListener("pointerdown", onGesture);
-    window.addEventListener("keydown", onGesture);
+    window.addEventListener("pointerdown", onGesture, { signal: ctx.signal });
+    window.addEventListener("keydown", onGesture, { signal: ctx.signal });
     hud.onAssign((entryId, name) => {
       if (game.assign(entryId, name)) renderLocker();
     });
@@ -136651,7 +137117,7 @@ void main() {
   // Every lot's centre and half-size, for the stone courts the terrain paints around them.
   const PLOTS=[...properties,...hillside].map(q=>[q[1],q[2],Math.max(q[3],q[4])/2]).concat([[-61,27,5.5],[-48,25,3.5],[-35,26,4],[-68,38,3]]);
   let cached;
-  const scoped = M.track(() => { cached = undefined; });
+  const scoped = M.track(() => { cached = undefined; }, () => cached);
   const build = () => {
     scoped.use();
     if(!cached) {
@@ -136876,7 +137342,7 @@ void main() {
   const BL = window.BL = window.BL || {};
   const { createNode, addChild } = BL.scene;
   const { box, lathe, merge } = BL.models;
-  const geometries = new Map(), scoped = BL.models.track(() => geometries.clear());
+  const geometries = BL.models.scopedMap(), scoped = BL.models.track(() => geometries.clear());
   const cached = (key, build) => { scoped.use(); if (!geometries.has(key)) geometries.set(key, build()); return geometries.get(key); };
   const C = { ground: "#403054", stone: "#251c39", yellow: "#ffdf38", purple: "#a453ee", cyan: "#49ddd9", water: "#414dad", green: "#55b78d" };
   const cube = (color, emissive = 0) => cached(`dsb-cube-${color}-${emissive}`, () => box({ color, emissive }));
@@ -138406,7 +138872,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
 // Static Cycladic extension of the shared dressing kit. Geometry is cached across visits.
 (() => {
   "use strict";
-  const BL=window.BL,M=BL.models,cache=new Map();
+  const BL=window.BL,M=BL.models,cache=BL.models.scopedMap();
   const chora=kind=>{
     if(cache.has(kind))return cache.get(kind);
     if(kind==="crate"||kind==="barrel"){
@@ -138456,7 +138922,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
 // All geometry is opaque, cached and instanced by the DSB placement owner.
 (() => {
   "use strict";
-  const BL=window.BL,M=BL.models,cache=new Map();
+  const BL=window.BL,M=BL.models,cache=BL.models.scopedMap();
   const coastal=kind=>{
     if(cache.has(kind))return cache.get(kind);
     const simple=kind.endsWith("-low"),shape=simple?kind.slice(0,-4):kind;
@@ -140216,7 +140682,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
 // Maxis additions to the shared dressing kit. Every repeated prop shares one immutable mesh.
 (() => {
   "use strict";
-  const BL=window.BL,cache=new Map();
+  const BL=window.BL,cache=BL.models.scopedMap();
   BL.dressing.maxis=kind=>{
     if(cache.has(kind))return cache.get(kind);
     const bits=[],b=(c,x,y,z,w,h,d,e=0)=>bits.push(BL.models.box({w,h,d,color:c,emissive:e,offset:{x,y,z}}));
@@ -140465,7 +140931,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
 // Cached retail pieces extend the shared dressing kit; no textures or remote assets in the room.
 (() => {
   "use strict";
-  const BL=window.BL,M=BL.models,cache=new Map();
+  const BL=window.BL,M=BL.models,cache=BL.models.scopedMap();
   const C={ink:"#17191a",bone:"#e2d7bf",orange:"#ef8829",wood:"#886344",metal:"#383b3b"};
   BL.dressing.withoutRulers=(kind,tone="ink")=>{
     const key=kind+":"+tone;if(cache.has(key))return cache.get(key);
@@ -140978,7 +141444,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
 // Shared, cached workshop assemblies. Repeated stock uses the renderer's existing instancing.
 (() => {
   "use strict";
-  const BL=window.BL,M=BL.models,cache=new Map(),C={ink:"#202326",bone:"#d8cbb1",orange:"#e68a35",wood:"#876647",steel:"#42494b",sage:"#65735a"};
+  const BL=window.BL,M=BL.models,cache=BL.models.scopedMap(),C={ink:"#202326",bone:"#d8cbb1",orange:"#e68a35",wood:"#876647",steel:"#42494b",sage:"#65735a"};
   BL.dressing.proofOfInk=(kind,tone="ink")=>{
     const key=kind+":"+tone;if(cache.has(key))return cache.get(key);
     const parts=[],color=C[tone]||C.ink;
@@ -141253,7 +141719,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
 // Cached institutional dressing. Repeated furniture/stock is instanced by the shared renderer.
 (() => {
   "use strict";
-  const BL=window.BL,M=BL.models,cache=new Map();
+  const BL=window.BL,M=BL.models,cache=BL.models.scopedMap();
   const C={black:"#242326",stone:"#454044",red:"#9e2028",gold:"#b89a62",light:"#e3c88d",paper:"#cabfa5",wood:"#43312c"};
   BL.dressing.bigBitcoin=(kind,variant=0)=>{
     const key=kind+":"+variant;if(cache.has(key))return cache.get(key);
@@ -141612,8 +142078,8 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
 // Factory props extend the shared dressing kit, with one immutable mesh per kind.
 (() => {
   "use strict";
-  const BL=window.BL,M=BL.models,cache=new Map(),portraits=new Map();
-  const signs=new Map(),extra={"#":["101","111","101","111","101"],"$":["011","110","011","110","010"],"_":["000","000","000","000","111"]};
+  const BL=window.BL,M=BL.models,cache=BL.models.scopedMap(),portraits=BL.models.scopedMap();
+  const signs=BL.models.scopedMap(),extra={"#":["101","111","101","111","101"],"$":["011","110","011","110","010"],"_":["000","000","000","000","111"]};
   BL.memeFactorySign=(parent,text,x,y,z,size,color)=>{
     const key=text+color;let geometry=signs.get(key);
     if(!geometry){geometry={verts:[],faces:[],lines:[],castShadow:false};const width=(text.length*4-1)*.16,ink=BL.math.hexToRgb(color);
@@ -142134,7 +142600,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
 // Immutable newsroom kit. Repeated shelves, books, lamps and covers share geometry.
 (() => {
   "use strict";
-  const BL=window.BL,M=BL.models,S=BL.scene,cache=new Map(),covers=new Map();
+  const BL=window.BL,M=BL.models,S=BL.scene,cache=BL.models.scopedMap(),covers=BL.models.scopedMap();
   const sign=BL.memeFactorySign; // Existing cached glyph mesh; no new text/rendering framework.
   BL.dressing.stackchain=kind=>{
     if(cache.has(kind))return cache.get(kind);
@@ -142437,7 +142903,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
 // Boutique display studies, not replicas or claims about particular products. Immutable shared meshes.
 (() => {
   "use strict";
-  const BL=window.BL,M=BL.models,S=BL.scene,cache=new Map();
+  const BL=window.BL,M=BL.models,S=BL.scene,cache=BL.models.scopedMap();
   const geometry=(kind,tone="cream",motif="bitcoin")=>{
     const key=[kind,tone,motif].join(":");if(cache.has(key))return cache.get(key);
     const parts=[],b=(c,x,y,z,w,h,d,e=0)=>parts.push(M.box({color:c,w,h,d,emissive:e,offset:{x,y,z}}));
@@ -143141,7 +143607,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
     const own=BL.net.ownCharacter(),carried=world.pilot||asked;
     const allowed=c=>!BL.net.mayDrive(c.name);
     const name=own?.handle||BL.contributors.roster.find(c=>c.name===carried&&allowed(c))?.name||(!BL.net.state.backend?"YellowBrokeIt":BL.contributors.roster.find(allowed)?.name||"YellowBrokeIt");world.pilot=null;
-    hud=BL.hud.create({roster:BL.contributors.roster,catalog:BL.models.SWAG,tierColors:BL.models.TIER_COLORS,renderIcon:BL.hud.renderIcon,lootEnabled:false});
+    hud=BL.hud.create({signal:ctx.signal,roster:BL.contributors.roster,catalog:BL.models.SWAG,tierColors:BL.models.TIER_COLORS,renderIcon:BL.hud.renderIcon,lootEnabled:false});
     hud.setAreaLabel("DSB LAND · MASTER LAYOUT");
     const hooks={};input=BL.interact.create({canvas:ctx.canvas,renderer:ctx.renderer,camera,hooks});
     const STEP=BL.pilot.WALK.step;
@@ -143187,7 +143653,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
     crew.wearJetpack(avatar,BL.hubModels.jetpack(),BL.hubModels.jetFlame());
     remotes=BL.remotePlayers.create({root,crew,visible:rec=>rec.zone===voiceZone()&&(!entrance||entrance.phase==="done")});
     footsteps=BL.footsteps.create(); // The driven Ooga's own footsteps, heard by this page alone (footsteps.js).
-    hud.el.sheet.addEventListener("focusin",sheetFocus);
+    hud.el.sheet.addEventListener("focusin",sheetFocus,{signal:ctx.signal});
     Object.assign(avatar.root.position,{x:-45,y:land.heightAt(-45,-43)+avatar.baseY,z:-43});avatar.root.rotation.y=0;
     Object.assign(hooks,pilot.hooks);hud.onAction(action);hud.onPreset(()=>overviewView());
     // Shared timing/input/transport; DSB alone uses the marble's rectangular clear aperture.
@@ -143275,7 +143741,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
     const inkButton=document.createElement("button");inkButton.type="button";inkButton.textContent="Browse Proof of Ink";inkButton.onclick=openVenue;inkTools.appendChild(inkButton);document.body.appendChild(inkTools);
     inkLayoutObserver=new ResizeObserver(requestInkLayout);
     for(const el of [document.getElementById("act"),document.querySelector(".bottom-hud"),document.documentElement])inkLayoutObserver.observe(el);
-    window.addEventListener("resize",requestInkLayout);requestInkLayout();
+    window.addEventListener("resize",requestInkLayout,{signal:ctx.signal});requestInkLayout();
     studioTools=document.createElement("div");studioTools.className="dsb-studio-tools";studioTools.hidden=true;
     const tomato=document.createElement("button");tomato.type="button";tomato.textContent="Throw tomato · T";tomato.onclick=()=>{if(seatRoom())crew.throwTomato();};studioTools.appendChild(tomato);
     document.body.appendChild(studioTools);
@@ -143995,7 +144461,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
   // white-hot, which the scene climbs as someone comes near. Cached by tint and step.
   const RIM_STEPS = 8;
   const blend = (a, b, t) => "#" + hexToRgb(a).map((v, k) => Math.round(v + (hexToRgb(b)[k] - v) * t).toString(16).padStart(2, "0")).join("");
-  const rims = new Map();
+  const rims = BL.models.scopedMap();
   const portalRim = (tint, k) => {
     const key = `${tint}|${k}`;
     if (rims.has(key)) return rims.get(key);
@@ -144008,7 +144474,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
   };
   // A label's board hangs from the wall on two brass rods, `w` wide, its middle at y 0, the rods climbing `up` and back
   // `back` to the wall.
-  const hangers = new Map();
+  const hangers = BL.models.scopedMap();
   const hanger = (w, up, back) => {
     const key = `${w.toFixed(2)}|${up}|${back}`;
     if (!hangers.has(key)) hangers.set(key, merge(...[-w / 2 + 0.12, w / 2 - 0.12].map((x) => FM.beam(x, 0.3, -0.02, x, up, -back, 0.04, BRASS))));
@@ -144035,7 +144501,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
     return geo;
   };
   // A window's stand-in picture, as its `stand` describes it (see `DSB_STAND`), cached by the stand's key.
-  const stands = new Map();
+  const stands = BL.models.scopedMap();
   const standIn = (stand) => {
     if (stands.has(stand.key)) return stands.get(stand.key);
     const { w, h, z } = passage().picture, parts = [];
@@ -144122,7 +144588,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
   // The mechanism charging toward an open world takes on that world's colour: the beam's drum and the shockwave blended
   // from their gold toward its `tint` in `CHARGE_STEPS` steps, the first their own gold. Cached by tint.
   const CHARGE_STEPS = 6;
-  const chargedSets = new Map();
+  const chargedSets = BL.models.scopedMap();
   const charged = (tint) => {
     if (chargedSets.has(tint)) return chargedSets.get(tint);
     const beam = [coreBeam().geometry], shock = [shockwave()];
@@ -145121,7 +145587,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
   };
   // A line of runes `height` tall, centred on the origin and standing a tenth of their height proud of z 0, facing +z.
   // Cached by text, height and colour; merge before moving.
-  const words = new Map();
+  const words = BL.models.scopedMap();
   const runeWord = (text, height, color = ICE, emissive = 1) => {
     const key = `${text}|${height}|${color}|${emissive}`;
     if (!words.has(key)) {
@@ -145197,7 +145663,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
       ]
     }
   };
-  const bannerCache = new Map();
+  const bannerCache = BL.models.scopedMap();
   // Painted runes keep their own batch so the depth offset never pulls the cloth forward too.
   const bannerMarks = (parts) => {
     const geo = noShadow(merge(...parts));
@@ -147805,6 +148271,8 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
       ctx.close().catch(noop);
       ctx = gain = filter = lfo = null;
       oscs.length = 0;
+      // A kept island's Heimdall opens a fresh context on his next blast, whose clock starts again at zero.
+      until = 0; asleep = false;
     };
     return { activate, blow, update, dispose };
   };
@@ -148005,7 +148473,9 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
   // its roof and across its width with MARGIN into the stone. Made once for the page, and again only if the portal
   // stands somewhere else, so every visit draws the same geometries and one clip slab.
   let clipped = null;
+  const clippedScope = BL.models.track(() => { clipped = null; }, () => clipped);
   const clippedFor = (portal) => {
+    clippedScope.use();
     const { x, z, ry, floorY, room } = portal;
     if (clipped && clipped.x === x && clipped.z === z && clipped.ry === ry && clipped.floorY === floorY && clipped.w === room.w && clipped.h === room.h) return clipped;
     const stand = BM.gateWindow(), sr = Math.sin(ry), cr = Math.cos(ry), half = room.w / 2 + MARGIN;
@@ -148207,7 +148677,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
   const SPARKLES = ["#ffc83a", "#fff2b8", "#7fe0ff", "#ffffff"].map((c) => models.particleGeometry(c, 0.1, 1));
   // A burst charged toward an open world's window throws that world's sparkles instead: its colour, paler, warmed toward
   // gold, and white. Cached by colour.
-  const sparkleSets = new Map();
+  const sparkleSets = BL.models.scopedMap();
   const sparklesOf = (tint) => {
     if (!sparkleSets.has(tint)) sparkleSets.set(tint, [tint, BM.blend(tint, "#ffffff", 0.45), BM.blend(tint, "#ffc83a", 0.3), "#ffffff"].map((c) => models.particleGeometry(c, 0.1, 1)));
     return sparkleSets.get(tint);
@@ -148626,7 +149096,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
     pictureWait = 0;
     camera = createCamera({ fov: 55, near: 0.3, far: 700 });
     root = createNode();
-    hud = hudMod.create({ roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
+    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
     hooks = {};
     input = interactMod.create({ canvas, renderer, camera, hooks });
     const inTunnel = (p) => p.z > HALL.r - 1.5 && Math.abs(p.x) < ENTRY.halfW;
@@ -150313,9 +150783,14 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
   };
   const quad = (geo, a, b, c, d, color, emissive, normal) => face(geo, [a, b, c, d], color, emissive, normal);
   const blank = () => ({ verts: [], faces: [], lines: [] });
+  // Preview construction, liveGeometry and cancellation all run from the hub; these meshes belong to the room.
+  const own = (build) => {
+    const read = BL.models.cached(build);
+    return () => BL.models.withScope("timechain", read);
+  };
   const perScale = (build) => {
-    const made = new Map();
-    return (scale) => made.get(scale) || made.set(scale, build(scale)).get(scale);
+    const read = BL.models.variants(build);
+    return (scale) => BL.models.withScope("timechain", read, scale);
   };
   const UP = [0, 1, 0], DOWN = [0, -1, 0];
   // What of a convex polygon of [x, z] corners keeps nx·x + nz·z \u2264 d (Sutherland\u2013Hodgman against one half-plane).
@@ -150555,18 +151030,18 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
     }
     return noShadow(geo);
   };
-  const leaves = [leaf(-1), leaf(1)], chains = [leafChain(-1), leafChain(1)];
+  const leaves = own(() => [leaf(-1), leaf(1)]), chains = own(() => [leafChain(-1), leafChain(1)]);
   // The Exit button's plate, its amber face and the play mark on it, facing -z and pointing right as seen from the room.
-  const button = (() => {
+  const button = own(() => {
     const geo = merge(box({ w: 0.38, h: 0.38, d: 0.06, color: C.trim }), box({ w: 0.28, h: 0.28, d: 0.02, color: C.amber, emissive: 0.85, offset: { z: -0.035 } }));
     const base = geo.verts.length / 3;
     geo.verts.push(0.06, 0.08, -0.047, 0.06, -0.08, -0.047, -0.08, 0, -0.047);
     geo.faces.push({ i: [base, base + 1, base + 2], color: hexToRgb(C.curtain), emissive: 0 });
     return geo;
-  })();
+  });
   // EXIT in the island's 5x7 letters (jumbotron.js), amber on the doorway's header, about its own middle and facing
   // -z, into the room: one face a run of lit cells in a row.
-  const exitWord = (() => {
+  const exitWord = own(() => {
     const T = BL.jumbotron.text, word = "EXIT", px = 0.036, geo = blank(), IN = [0, 0, -1];
     const cols = word.length * (T.GLYPH_W + T.TRACKING) - T.TRACKING;
     // Seen from the room the word reads toward -x.
@@ -150583,7 +151058,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
       }
     }
     return noShadow(geo);
-  })();
+  });
   // The meeting table: a dark drum on a pedestal with an amber band, as wide as the room's layout makes it (`k` times
   // the smallest room's) at one height, and a flat \u20bf in its top. The top is laid in squares a \u20bf pixel across, cut to
   // the drum's rim, the \u20bf's own lit, so nothing lies over anything (Canvas 2D sorts face by face).
@@ -150609,46 +151084,46 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
   // How far Canvas 2D's depth sort pulls a mark in front of the face it lies on (the door's chain, EXIT).
   const MARK_BIAS = -0.3;
   // A blocky lounge chair, its front toward +z.
-  const chair = merge(
+  const chair = own(() => merge(
     box({ w: 0.86, h: 0.36, d: 0.82, color: C.seat, offset: { y: 0.18 } }),
     box({ w: 0.7, h: 0.1, d: 0.64, color: C.cushion, offset: { y: 0.41, z: 0.04 } }),
     box({ w: 0.86, h: 0.8, d: 0.2, color: C.seat, offset: { y: 0.76, z: -0.31 } }),
     ...[-1, 1].map((side) => box({ w: 0.14, h: 0.26, d: 0.74, color: C.cushion, offset: { x: side * 0.36, y: 0.49 } })),
     box({ w: 0.6, h: 0.03, d: 0.03, color: C.amber, emissive: 0.6, offset: { y: 0.04, z: 0.42 } })
-  );
+  ));
   // The holdings desk with its terminal, front toward +z; the terminal's picture hangs at `screen`.
-  const desk = merge(
+  const desk = own(() => merge(
     box({ w: 2, h: 0.06, d: 0.8, color: C.desk, offset: { y: 0.76 } }),
     ...[-1, 1].map((side) => box({ w: 0.06, h: 0.73, d: 0.72, color: C.leg, offset: { x: side * 0.93, y: 0.365 } })),
     box({ w: 0.12, h: 0.32, d: 0.12, color: C.leg, offset: { y: 0.95, z: -0.2 } }),
     box({ w: 1.24, h: 0.8, d: 0.07, color: C.bezel, offset: { y: 1.48, z: -0.2 } }),
     box({ w: 0.9, h: 0.03, d: 0.26, color: C.leg, offset: { y: 0.8, z: 0.12 } }),
     box({ w: 1.9, h: 0.02, d: 0.02, color: C.amber, emissive: 0.6, offset: { y: 0.735, z: 0.4 } })
-  );
+  ));
   const DESK_SCREEN = { y: 1.48, z: -0.16, w: 1.1, h: 0.68 };
   // Sani's recliner (base, swivelling seat, back) and his laptop, as the old sphere had them, in the room's colours.
-  const reclinerBase = merge(box({ w: 1.35, h: 0.12, d: 1.1, color: C.leg, offset: { y: 0.12 } }), box({ w: 0.22, h: 0.55, d: 0.22, color: C.trim, offset: { y: 0.38 } }));
-  const reclinerSeat = merge(
+  const reclinerBase = own(() => merge(box({ w: 1.35, h: 0.12, d: 1.1, color: C.leg, offset: { y: 0.12 } }), box({ w: 0.22, h: 0.55, d: 0.22, color: C.trim, offset: { y: 0.38 } })));
+  const reclinerSeat = own(() => merge(
     box({ w: 1.24, h: 0.22, d: 0.95, color: C.seat, offset: { y: 0.68 } }),
     box({ w: 1.04, h: 0.14, d: 0.85, color: C.cushion, offset: { y: 0.81 } }),
     box({ w: 1.08, h: 0.15, d: 0.4, color: C.cushion, offset: { y: 0.64, z: 0.52 } }),
     ...[-0.63, 0.63].map((x) => box({ w: 0.18, h: 0.18, d: 1.05, color: C.seat, offset: { x, y: 1.08 } }))
-  );
-  const reclinerBack = merge(
+  ));
+  const reclinerBack = own(() => merge(
     box({ w: 1.25, h: 1.25, d: 0.22, color: C.seat, offset: { y: 0.58 } }),
     box({ w: 1.05, h: 0.9, d: 0.17, color: C.cushion, offset: { y: 0.55, z: 0.15 } }),
     box({ w: 0.72, h: 0.06, d: 0.25, color: C.amber, emissive: 0.6, offset: { y: 1.07, z: 0.16 } })
-  );
-  const laptopBase = (() => {
+  ));
+  const laptopBase = own(() => {
     const parts = [box({ w: 1.04, h: 0.065, d: 0.65, color: "#3a3a40" })];
     for (let row = 0; row < 3; row++) for (let col = 0; col < 9; col++) parts.push(box({ w: 0.075, h: 0.015, d: 0.065, color: C.leg, offset: { x: (col - 4) * 0.1, y: 0.042, z: 0.06 + row * 0.08 } }));
     return merge(...parts);
-  })();
-  const laptopLid = merge(
+  });
+  const laptopLid = own(() => merge(
     box({ w: 1.04, h: 0.47, d: 0.055, color: "#3a3a40", offset: { y: 0.22 } }),
     box({ w: 0.94, h: 0.39, d: 0.015, color: "#0f1a12", emissive: 0.45, offset: { y: 0.23, z: -0.036 } }),
     ...[0, 1, 2, 3].map((i) => box({ w: 0.28 + (i % 3) * 0.13, h: 0.025, d: 0.01, color: i % 2 ? "#3ddc84" : "#f7931a", emissive: 0.85, offset: { x: -0.14, y: 0.34 - i * 0.075, z: -0.05 } }))
-  );
+  ));
 
   // A picture on a quad `w` by `h` about the origin, facing +z, from a decoded image `image` of `width` by `height`.
   const picture = (image, width, height, w, h) => {
@@ -150663,31 +151138,31 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
     const L = ROOMS.layout(scale), root = createNode(), s = scale;
     addChild(root, createNode({ geometry: hall(scale) }), createNode({ geometry: glow(scale), sightHidden: true }),
       createNode({ geometry: vestibule(scale) }), createNode({ geometry: vestibuleGlow(scale), sightHidden: true }));
-    const doors = [-1, 1].map((side) => createNode({ geometry: leaves[side < 0 ? 0 : 1], position: { x: side * DOOR.halfW / 2, y: 0, z: L.doorZ + 0.06 } }));
-    doors.forEach((door, i) => addChild(door, createNode({ geometry: chains[i], depthBias: MARK_BIAS })));
+    const doors = [-1, 1].map((side) => createNode({ geometry: leaves()[side < 0 ? 0 : 1], position: { x: side * DOOR.halfW / 2, y: 0, z: L.doorZ + 0.06 } }));
+    doors.forEach((door, i) => addChild(door, createNode({ geometry: chains()[i], depthBias: MARK_BIAS })));
     addChild(root, ...doors);
     const facingIn = (p) => createNode({ position: { x: p.x, y: p.y, z: p.z }, rotation: { x: 0, y: -p.angle, z: 0 } });
     const screens = L.screens.map(facingIn), cards = L.ribbon.map(facingIn);
     addChild(root, ...screens, ...cards);
     const E = L.exitButton;
     // The button and the sign are built facing -z, into the room.
-    const exitButton = createNode({ geometry: button, position: { x: E.x, y: E.y, z: E.z } });
+    const exitButton = createNode({ geometry: button(), position: { x: E.x, y: E.y, z: E.z } });
     // EXIT on the header over the doorway.
-    const exitSign = createNode({ geometry: exitWord, depthBias: MARK_BIAS, position: { x: 0, y: DOOR.height + DOOR.frame + EXIT_HEADER.h / 2, z: L.doorZ - EXIT_HEADER.d + 0.016 } });
+    const exitSign = createNode({ geometry: exitWord(), depthBias: MARK_BIAS, position: { x: 0, y: DOOR.height + DOOR.frame + EXIT_HEADER.h / 2, z: L.doorZ - EXIT_HEADER.d + 0.016 } });
     addChild(root, exitButton, exitSign);
     const tableNode = createNode({ geometry: table(scale), position: { x: L.table.x, y: 0, z: L.table.z } });
-    const chairs = L.chairs.map((c) => createNode({ geometry: chair, position: { x: c.x, y: 0, z: c.z }, rotation: { x: 0, y: c.heading, z: 0 } }));
-    const deskNode = createNode({ geometry: desk, position: { x: L.desk.x, y: 0, z: L.desk.z }, rotation: { x: 0, y: L.desk.heading, z: 0 } });
+    const chairs = L.chairs.map((c) => createNode({ geometry: chair(), position: { x: c.x, y: 0, z: c.z }, rotation: { x: 0, y: c.heading, z: 0 } }));
+    const deskNode = createNode({ geometry: desk(), position: { x: L.desk.x, y: 0, z: L.desk.z }, rotation: { x: 0, y: L.desk.heading, z: 0 } });
     const terminal = createNode({ position: { x: 0, y: DESK_SCREEN.y, z: DESK_SCREEN.z } });
     addChild(deskNode, terminal);
     addChild(root, tableNode, ...chairs, deskNode);
     // Sani's corner, in the room's own frame: the recliner, and the node timechain-beer.js stands his gear in.
     const lounge = createNode();
-    const reclinerNode = createNode({ geometry: reclinerBase, position: { x: L.beer.chair.x, y: 0, z: L.beer.chair.z } });
-    const swivel = createNode({ geometry: reclinerSeat, rotation: { x: 0, y: Math.PI, z: 0 } });
-    const back = createNode({ geometry: reclinerBack, position: { x: 0, y: 0.82, z: -0.44 }, rotation: { x: -0.23, y: 0, z: 0 } });
-    const laptop = createNode({ geometry: laptopBase, position: { x: 0, y: 1, z: 0.58 } });
-    addChild(laptop, createNode({ geometry: laptopLid, position: { x: 0, y: 0.035, z: 0.3 }, rotation: { x: 0.14, y: 0, z: 0 } }));
+    const reclinerNode = createNode({ geometry: reclinerBase(), position: { x: L.beer.chair.x, y: 0, z: L.beer.chair.z } });
+    const swivel = createNode({ geometry: reclinerSeat(), rotation: { x: 0, y: Math.PI, z: 0 } });
+    const back = createNode({ geometry: reclinerBack(), position: { x: 0, y: 0.82, z: -0.44 }, rotation: { x: -0.23, y: 0, z: 0 } });
+    const laptop = createNode({ geometry: laptopBase(), position: { x: 0, y: 1, z: 0.58 } });
+    addChild(laptop, createNode({ geometry: laptopLid(), position: { x: 0, y: 0.035, z: 0.3 }, rotation: { x: 0.14, y: 0, z: 0 } }));
     addChild(swivel, back, laptop);
     addChild(reclinerNode, swivel);
     addChild(lounge, reclinerNode);
@@ -150708,7 +151183,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
     };
   };
   // Every geometry a room of this size draws, for the scene's live set and for releasing a preview.
-  const geometries = (scale) => [hall(scale), glow(scale), vestibule(scale), vestibuleGlow(scale), ...leaves, ...chains, button, exitWord, table(scale), chair, desk, reclinerBase, reclinerSeat, reclinerBack, laptopBase, laptopLid];
+  const geometries = (scale) => [hall(scale), glow(scale), vestibule(scale), vestibuleGlow(scale), ...leaves(), ...chains(), button(), exitWord(), table(scale), chair(), desk(), reclinerBase(), reclinerSeat(), reclinerBack(), laptopBase(), laptopLid()];
   BL.timechainRoomModels = { build, picture, geometries, DESK_SCREEN, COLORS: C };
 })();
 
@@ -150753,7 +151228,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
   // The room's hum: a low drone and a soft fan hiss, pitched a little apart in each room, honouring the page-wide
   // mute and the tab's visibility; a context only after a gesture, closed on leaving.
   const STORAGE_KEY = "oogaboogaland.audio";
-  const ambience = (room) => {
+  const ambience = (room, signal) => {
     let context = null, bus = null, sources = [], nodes = [], connected = false, disposed = false, muted = false;
     try { muted = localStorage.getItem(STORAGE_KEY) === "off"; } catch { muted = false; }
     const gate = () => {
@@ -150786,9 +151261,9 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
       gate();
     };
     const gesture = () => { wake(); if (context && context.state === "suspended") context.resume().catch(() => {}); };
-    document.addEventListener("pointerdown", gesture);
-    document.addEventListener("keydown", gesture);
-    document.addEventListener("visibilitychange", gate);
+    document.addEventListener("pointerdown", gesture, { signal });
+    document.addEventListener("keydown", gesture, { signal });
+    document.addEventListener("visibilitychange", gate, { signal });
     wake();
     return {
       get stats() { return { contexts: context ? 1 : 0, sources: sources.length, connected }; },
@@ -150869,7 +151344,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
     const room = ROOMS.get(visit.room), L = ROOMS.layout(room.scale), shared = visit.mode === "shared";
     const camera = createCamera({ fov: 58, near: 0.12, far: L.radius * 3 + 20 });
     const root = createNode();
-    const hud = hudMod.create({ roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
+    const hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
     const hooks = {};
     const input = interactMod.create({ canvas, renderer, camera, hooks });
     // A room the island's doorway prepared for this visit (`prepare`) is taken as it stands: built, painted and already
@@ -151135,7 +151610,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
     } else { BL.net.setBody(null); BL.net.setZone("none"); }
     remotes = shared ? BL.remotePlayers.create({ root, crew: people, hide: (name, on) => { if (sani && name === "SaniExp") sani.root.visible = !on; } }) : null;
     const footsteps = BL.footsteps.create();
-    const sound = ambience(room);
+    const sound = ambience(room, ctx.signal);
     // Another player crossing this room's own doorway opens its doors here too (net.js `subscribeDoor`).
     const unsubscribeDoor = shared ? BL.net.subscribeDoor((event) => {
       if (event.t !== "transit" || event.door !== room.zone) return;
@@ -151146,7 +151621,8 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
     const exitNote = (signedOut) => ({ room: room.id, mode: signedOut ? "solo" : visit.mode, character: avatar ? avatar.traits.name : null, jetpack: visit.jetpack || null });
     // A walked-out exit hands over mid-stride without the fade, with where its eye stood from the handover point
     // (`pose`), so the island starts from the same view; any other way out (signed out, Leave far from the doors)
-    // fades as before.
+    // fades as before. Under the `release` hub policy the island is built again on the way out, so that build happens
+    // behind the fade too rather than freezing the room's last frame.
     const handOff = (signedOut = false, pose = null) => {
       if (leaving) return;
       world.sphereExit = { ...exitNote(signedOut), pose };
@@ -151154,7 +151630,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
       world.pilotDetached = !avatar;
       BL.net.setBody(null);
       BL.net.setZone("none");
-      leaving = go("hub", "timechain", !!pose);
+      leaving = go("hub", "timechain", !!pose && ctx.hubPolicy === "keep");
       if (!leaving) world.sphereExit = null;
     };
     const exitPose = () => {
@@ -151190,8 +151666,8 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
       e.preventDefault();
       e.stopImmediatePropagation();
     };
-    window.addEventListener("keydown", armsKeys, true);
-    canvas.addEventListener("pointerdown", rightClick, true);
+    window.addEventListener("keydown", armsKeys, { capture: true, signal: ctx.signal });
+    canvas.addEventListener("pointerdown", rightClick, { capture: true, signal: ctx.signal });
 
     const tipFor = (hit) => {
       const o = hit.owner;
@@ -152231,7 +152707,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
     if (glow) glow.castShadow = false;
     return { stone: M.merge(...stone), veins: glow };
   };
-  const cache = new Map(), scoped = M.track(() => cache.clear());
+  const cache = BL.models.scopedMap(), scoped = M.track(() => cache.clear());
   const geometry = (id = "gatsby") => {
     const theme = BL.pokerThemes.get(id), cave = theme.id !== "gatsby";
     scoped.use();
@@ -152908,7 +153384,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
     seatTable = session.tables.findIndex(t => t.snapshot().seats.some(s => s?.id === HERO));
     if (seatTable >= 0) selected = seatTable;
     root = S.createNode(); camera = S.createCamera({ fov: 55, near: 0.2, far: 110 });
-    hud = BL.hud.create({ roster: BL.contributors.activeRoster, catalog: BL.models.SWAG, tierColors: BL.models.TIER_COLORS, renderIcon: BL.hud.renderIcon, lootEnabled: ctx.lootEnabled });
+    hud = BL.hud.create({ signal: ctx.signal, roster: BL.contributors.activeRoster, catalog: BL.models.SWAG, tierColors: BL.models.TIER_COLORS, renderIcon: BL.hud.renderIcon, lootEnabled: ctx.lootEnabled });
     const hooks = {};
     input = BL.interact.create({ canvas: ctx.canvas, renderer: ctx.renderer, camera, hooks });
     pilot = BL.pilot.create({ renderer: ctx.renderer, canvas: ctx.canvas, camera, hud, presets, landing: "entrance", pitch: [-0.1, 1.3], dist: [3, 32],
@@ -157982,6 +158458,13 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
   const MEMORY_LIMITED = Number.isFinite(DEVICE_MEMORY) && DEVICE_MEMORY > 0 && DEVICE_MEMORY <= 8;
   const INITIAL_QUALITY = COARSE || MEMORY_LIMITED ? "medium" : "high";
   const $ = (id) => document.getElementById(id);
+  // One opt-in override makes both policies measurable. Chrome reports at most 8, so a report of 8 means 8 GiB or
+  // more: it starts the renderer at medium (`MEMORY_LIMITED`, which guards frame cost) but keeps the built island, and
+  // only a report below 8 releases it. Safari and Firefox report nothing: there a coarse pointer (phones and tablets,
+  // iOS among them, with the tightest per-tab memory) releases the island and a fine one keeps it.
+  const HUB_CACHE = params.get("hubcache") || "auto";
+  const MEMORY_REPORTED = Number.isFinite(DEVICE_MEMORY) && DEVICE_MEMORY > 0;
+  const KEEP_HUB = HUB_CACHE === "keep" || HUB_CACHE !== "release" && (MEMORY_REPORTED ? DEVICE_MEMORY >= 8 : !COARSE);
   const mark = (name) => performance.mark(`ooga:${name}`);
   mark("boot");
   let sceneCanvas = $("scene");
@@ -158030,7 +158513,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
   const debugMagazines = DEBUG ? (params.get("mag") === "2" ? 2 : params.get("mag") === "1" ? 1 : 0) : 0;
   world.magazine = { owned: debugMagazines > 0, count: debugMagazines, ammo: debugMagazines ? 30 : 0, carrier: null };
 
-  let active = null, activeMeshRigs = false;
+  let active = null, activeMeshRigs = false, visitController = null;
   let sceneTime = 0;
   let transition = null;
   let fade = 0;
@@ -158146,9 +158629,8 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
     if (transition) return false;
     transition = { next, place, out: true, t: 0, instant, ready: true, redirect: null, failed: null };
     if (next.prepare) {
-      window.BL.models.setScope(next.id);
-      settle(transition, next.prepare(place, ctx));
-      window.BL.models.setScope(active ? active.id : null);
+      try { settle(transition, models.withScope(next.id, () => next.prepare(place, ctx, next.id))); }
+      catch (error) { transition.failed = error; }
     }
     return true;
   };
@@ -158161,7 +158643,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
     if (active && active.id !== "hub") go("hub");
   });
   const agentPlay = BL.agent.createPlay();
-  const ctx = { renderer, canvas: sceneCanvas, overlay: overlayCanvas, game, world, go, lootEnabled: LOOT_ENABLED, testBananas: TEST_BANANAS, agentPlay, from: null, place: null };
+  const ctx = { renderer, canvas: sceneCanvas, overlay: overlayCanvas, game, world, go, lootEnabled: LOOT_ENABLED, testBananas: TEST_BANANAS, agentPlay, hubPolicy: KEEP_HUB ? "keep" : "release", from: null, place: null, signal: null };
   const sceneSections = [...document.querySelectorAll("[data-scene]")];
   // The title cards of the games that have no phase of their own for one: shown on every arrival,
   // closed by their button, Enter, Space or Escape, and nothing else reaches the scene while one shows.
@@ -158172,6 +158654,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
   // The microphone's note, which names M only in a scene whose M mutes the microphone (`micKey`).
   const showMic = () => window.BL.hud.showMic(window.BL.voice.stats, !!(active && active.micKey));
   const enter = (next, place = null) => {
+    const retainedTime = next.retained ? next.elapsed : 0;
     ctx.from = active ? active.id : null;
     ctx.place = place;
     positionDebug.removeEventListener("click", copyPositionDebug);
@@ -158183,18 +158666,21 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
     // The scene's own zone (`voiceZone`), else one of its own; the island and DSB Land report theirs as they go.
     window.BL.net.setZone(next.voiceZone || (next.id === "dsb" ? "dsb-outside" : `scene-${next.id}`));
     window.BL.models.setScope(next.id);
-    next.enter(ctx);
+    visitController = new AbortController();
+    ctx.signal = visitController.signal;
+    try { next.enter(ctx); }
+    catch (error) { visitController.abort(); throw error; }
     activeMeshRigs = next.renderOpts?.meshRigs === true;
     active = next;
     showMic();
-    sceneTime = 0;
+    sceneTime = retainedTime;
     router.arrive(next.id, place, ctx.from === null);
     if (POSITION_DEBUG && next.id !== "hub") {
       positionDebug.hidden = false;
       positionDebug.setAttribute("aria-label", "Debug scene, character and camera state. Click to copy a debug snapshot.");
       positionDebugState = "";
       positionDebugNext = 0;
-      positionDebug.addEventListener("click", copyPositionDebug);
+      positionDebug.addEventListener("click", copyPositionDebug, { signal: ctx.signal });
       updatePositionDebug(true);
     }
   };
@@ -158207,6 +158693,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
     live.clear();
     visit(active.root);
     active.liveGeometry(live);
+    if (scenes.hub.retained) scenes.hub.cachedGeometry(live);
     return live;
   };
   // The page's first AudioContext wakes the browser's audio, about 60 ms on the main thread; every later one costs well
@@ -158222,15 +158709,21 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
     const leaving = active;
     wakeAudio();
     agentPlay.stop(true);
-    const left = leaving.leave();
+    let left;
+    try { left = leaving.leave(); }
+    finally { visitController.abort(); }
     if (DEBUG && leaving.root.children.length) throw new Error(`${leaving.id}.leave left ${leaving.root.children.length} nodes in its root`);
     if (DEBUG && left.targets) throw new Error(`${leaving.id}.leave left ${left.targets} input targets`);
     clearTweens();
     if (DEBUG && tweenCount()) throw new Error(`${tweenCount()} tweens survived clearTweens`);
     enter(next, place);
-    // The builder caches only the scene just left used go too; the island's stay, since every route passes through it.
-    if (leaving.id !== "hub") window.BL.models.release(leaving.id, ["hub", next.id]);
-    renderer.releaseUnused(liveGeometry());
+    // Scene-only builder caches go with the visit; only the keep policy preserves the inactive hub's owners.
+    const retained = liveGeometry();
+    if (leaving.id !== "hub" || !KEEP_HUB) {
+      models.release(leaving.id, KEEP_HUB ? ["hub", next.id] : [next.id], retained);
+      if (DEBUG && leaving.id !== next.id) models.assertReleased(leaving.id);
+    }
+    renderer.releaseUnused(retained);
     if (DEBUG && renderer.stats.records > live.size) throw new Error(`${next.id}: ${renderer.stats.records} GPU records for ${live.size} live geometries`);
   };
   // Where a settled transition lands: its own scene, or where its preparation redirected it.
@@ -158611,8 +159104,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
     let first = Object.hasOwn(scenes, sceneId) ? scenes[sceneId] : scenes[Object.keys(scenes)[0]], place = routed && routed.place;
     if (first.prepare) {
       try {
-        window.BL.models.setScope(first.id);
-        const redirect = await first.prepare(place, ctx);
+        const redirect = await models.withScope(first.id, () => first.prepare(place, ctx, first.id));
         if (redirect) ({ next: first, place } = landing({ redirect }));
       } catch {
         first = scenes[Object.keys(scenes)[0]];
@@ -158633,6 +159125,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
       game,
       renderer,
       startLevel: START_BANANAS,
+      hubPolicy: ctx.hubPolicy,
       lootEnabled: LOOT_ENABLED,
       testBananas: TEST_BANANAS,
       project: renderer.project,
@@ -158706,8 +159199,11 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
     window.removeEventListener("blur", clearRightShift);
     document.removeEventListener("visibilitychange", onVisibility);
     positionDebug.removeEventListener("click", copyPositionDebug);
-    if (active) active.leave();
-    renderer.dispose();
+    try {
+      if (active) active.leave(true);
+      if (scenes.hub.retained) scenes.hub.leave(true);
+    }
+    finally { if (visitController) visitController.abort(); renderer.dispose(); }
   };
   window.addEventListener("pagehide", (e) => {
     if (!e.persisted) destroy();
