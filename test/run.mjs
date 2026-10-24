@@ -12479,7 +12479,7 @@ const sphereCrossing = { name: "timechain crossing", why: "playthrough: Enter wa
   const back = await b.evaluate(`(() => { const B = __ooga, ${sphereLocal}, G = T.gate, c = B.pilot.player; B.advance(1.2, 1 / 60);
     return { player: c && c.traits.name, fromDoors: c ? local(c.root.position) - SP.THRESHOLD : null, doors: G.debug.open, plug: T.site.plug.visible, view: B.pilot.mode, hash: location.hash, head: c ? !c.parts.head.cameraHidden : null, zone: BL.net.state.zone }; })()`);
   const seams = await b.evaluate(`(() => { const H = window.__handover; cancelAnimationFrame(H.raf); if (H.tasks) H.tasks.disconnect();
-    return { swapIn: H.swapIn, swapOut: H.swapOut, far: H.far, farAt: H.farAt, frames: H.frames, fadeMax: H.fadeMax, longest: H.longest, policy: BL.scenes.hub.retained ? "kept" : "released" }; })()`);
+    return { swapIn: H.swapIn, swapOut: H.swapOut, far: H.far, farAt: H.farAt, frames: H.frames, fadeMax: H.fadeMax, longest: H.longest, policy: __ooga.hubPolicy }; })()`);
   record("timechain crossing: Enter opens the doors, lifts the plug for the traveler alone and swoops into its eyes as it walks in",
     crossing && !passage.plug && !passage.popup && passage.lens === "eyes", JSON.stringify({ crossing, passage }));
   record("timechain crossing: the same Ooga arrives in a solo Room 3 in first person, the doors close behind it and the address names the room",
@@ -12488,7 +12488,7 @@ const sphereCrossing = { name: "timechain crossing", why: "playthrough: Enter wa
     out && back.player === "portlandhodl" && back.fromDoors > 1 && back.doors === 0 && back.plug && back.view !== "first-person" && back.hash === "#/sphere" && back.head, JSON.stringify(back));
   // Under hubcache=release part of the island's rebuild still runs in the swap, so the walk-out fades over it rather than
   // freezing the room's last frame; the way in stays seamless.
-  if (seams.policy === "kept") record("timechain crossing: from the keypad into the room and from the Exit button out to the bridge every frame is the Ooga's own eye, never faded to black, and each scene swap is the same view on both sides",
+  if (seams.policy === "keep") record("timechain crossing: from the keypad into the room and from the Exit button out to the bridge every frame is the Ooga's own eye, never faded to black, and each scene swap is the same view on both sides",
     seams.frames > 30 && seams.far === 0 && seams.fadeMax === 0 && seamless(seams.swapIn) && seamless(seams.swapOut), JSON.stringify(seams));
   else record("timechain crossing: with the island released, the way into the room is the Ooga's own eye at the swap and the way out fades over the rebuild instead of freezing",
     seams.frames > 30 && seams.far === 0 && seamless(seams.swapIn) && seams.fadeMax > 0, JSON.stringify(seams));
