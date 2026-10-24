@@ -2279,25 +2279,6 @@ body[data-active-scene="arcade"] .magazine-hud {
   display: none;
 }
 
-.ghost-top,
-.ghost-lives {
-  margin: 0;
-  padding: 5px 12px;
-  background: var(--tablet);
-  border: 2px solid var(--stone-dk);
-  border-radius: 6px;
-  box-shadow: var(--tablet-shadow);
-  color: #d8ffe8;
-  font-size: 12px;
-  letter-spacing: 0.06em;
-  white-space: nowrap;
-}
-
-.ghost-lives {
-  color: var(--paper);
-  font-size: 10px;
-}
-
 /* The hunt's lobby: the land's title card, lighter behind so the island shows through, its players as stone tablets. */
 .ghost-lobby {
   pointer-events: auto;
@@ -2346,7 +2327,48 @@ body.game-mode #message-stack {
   display: none;
 }
 
-/* The hunt's mini player, bottom right: what is playing and the music switch. */
+/* GAME MODE: the top left's controls stand down too (the map, the character and its modes, the jetpack, the melee
+   weapon, the magazine); on a touch screen the rifle stays, being how a finger fires. */
+body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
+  display: none;
+}
+
+@media (pointer: fine) {
+  body.game-mode .weapon-hud {
+    display: none;
+  }
+}
+
+/* The hunt's minimap, bottom left (top left on a touch screen, where the sticks take the foot): a round radar in the
+   wood's frame, drawn by ghost-game.js `drawMinimap`. */
+.ghost-minimap {
+  position: absolute;
+  left: calc(16px + var(--safe-left, 0px));
+  bottom: calc(16px + var(--safe-bottom, 0px));
+  width: 180px;
+  height: 180px;
+  border: 3px solid var(--wood-edge);
+  border-radius: 50%;
+  background: #0b0d0c;
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.35), 0 8px 20px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  z-index: 4;
+}
+
+.ghost-minimap[hidden] {
+  display: none;
+}
+
+@media (pointer: coarse) {
+  .ghost-minimap {
+    top: var(--ghost-map-top, calc(70px + var(--safe-top, 0px)));
+    bottom: auto;
+    width: 128px;
+    height: 128px;
+  }
+}
+
+/* The hunt's mini player, bottom right: what is playing and the music switch, on the lobby card's planks. */
 .ghost-player {
   position: absolute;
   right: 16px;
@@ -2355,11 +2377,11 @@ body.game-mode #message-stack {
   align-items: center;
   gap: 8px;
   max-width: min(300px, calc(100vw - 32px));
-  padding: 6px 8px 6px 10px;
-  background: var(--tablet);
-  border: 2px solid var(--stone-dk);
-  border-radius: 8px;
-  box-shadow: var(--tablet-shadow);
+  padding: 7px 9px 7px 11px;
+  background: var(--planks);
+  border: 3px solid var(--wood-edge);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.35), 0 8px 20px rgba(0, 0, 0, 0.35);
   color: var(--paper);
   pointer-events: auto;
   z-index: 4;
@@ -2451,63 +2473,6 @@ body.game-mode #message-stack {
   font-size: 10.5px;
   font-weight: 700;
   text-align: center;
-}
-
-/* The visitor's health, a cell a hit point; at a round's start it fills back a cell at a time in an orange glow. */
-.ghost-health {
-  display: flex;
-  gap: 4px;
-  padding: 5px 7px;
-  background: var(--tablet);
-  border: 2px solid var(--stone-dk);
-  border-radius: 6px;
-  box-shadow: var(--tablet-shadow);
-}
-
-.ghost-health[hidden] {
-  display: none;
-}
-
-.ghost-health i {
-  width: 28px;
-  height: 11px;
-  border-radius: 2px;
-  background: rgba(0, 0, 0, 0.5);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
-  transition: background-color 0.2s, box-shadow 0.2s;
-}
-
-.ghost-health i[data-on] {
-  background: #3ce65a;
-  box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.25), 0 0 6px rgba(60, 230, 90, 0.55);
-}
-
-.ghost-health[data-low] i[data-on] {
-  background: #ff453a;
-  box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.25), 0 0 6px rgba(255, 69, 58, 0.6);
-}
-
-.ghost-health.healing {
-  animation: ghost-heal 1.8s ease-out;
-}
-
-.ghost-health.healing i:nth-child(2) { transition-delay: 0.2s; }
-.ghost-health.healing i:nth-child(3) { transition-delay: 0.4s; }
-.ghost-health.healing i:nth-child(4) { transition-delay: 0.6s; }
-.ghost-health.healing i:nth-child(5) { transition-delay: 0.8s; }
-
-@keyframes ghost-heal {
-  0% { border-color: #ff8a1f; box-shadow: 0 0 0 2px #ff8a1f, 0 0 28px 10px rgba(255, 138, 31, 0.9); }
-  100% { border-color: var(--stone-dk); box-shadow: var(--tablet-shadow); }
-}
-
-.ghost-lives[data-state="frozen"] {
-  color: #c4f0ff;
-  border-color: #6fc6e8;
-}
-
-.ghost-lives[data-state="away"] {
-  color: var(--muted);
 }
 
 .ghost-boss {

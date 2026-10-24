@@ -44,6 +44,8 @@
   // ghost gets them).
   const DROP = ["bomb", "shield", "ice", "health", "double", "tess", "lightning", "monkeys"], TESS_DROP = 5, LIGHTNING_DROP = 6, MONKEY_DROP = 7;
   const DYING = { SHOT: 1, TAGGED: 2, BURNED: 3, PUMPKIN: 4, ZAPPED: 5 };
+  // The debug stand-in a revive can be watched on alone (`debug.revive`): a player id no room hands out.
+  const REVIVE_BOT = -7;
   const CONFIG = {
     TICK_MS: 50, MAX_GHOSTS: 32, MAX_DROPS: 12, MAX_PLAYERS: 16, MAX_PENDING: 24,
     // The lobby: how long players have to gather and ready up once the herald is woken.
@@ -79,13 +81,25 @@
     // its health (two zaps), then rests `cooldownMs`;
     // the first zap waits `firstMs`. A ghost that gets her player sends her away, as the lab's monkey went.
     TESS: { range: 8.5, reach: 4, cooldownMs: 2000, firstMs: 600, brute: 12 },
-    // The gorillas: green, twice a wraith's health, sent when a round is down to its last two ghosts (never in the boss's
+    // The gorillas: green, 80 health, sent when a round is down to its last two ghosts (never in the boss's
     // fight), `perRound[round - 1]` of them. Each is called down by a beam (`beamMs`), drops (`fallMs`) and lands
     // shaking (`shakeMs`), then comes at the nearest player; within `reach` it leaps at them (`leapMs`, `leapH` high),
     // lands `beside` them and slams the ground, every player within `splashR` of the slam losing `damage` segments, then
     // gathers itself (`recoverMs`).
-    BRUTE: { max: 4, hp: 24, kills: 3, speed: 6.2, beamMs: 1300, fallMs: 450, fallFrom: 25, shakeMs: 1000, reach: 5, leapMs: 650, leapH: 2.4, beside: 1,
-      splashR: 2.6, recoverMs: 1400, damage: 1, perRound: [1, 1, 1, 2, 2, 2], landMin: 4, landMax: 7, landR: 18, radius: 0.7 }
+    BRUTE: { max: 10, hp: 80, kills: 3, speed: 6.2, beamMs: 1300, fallMs: 450, fallFrom: 25, shakeMs: 1000, reach: 5, leapMs: 650, leapH: 2.4, beside: 1,
+      splashR: 2.6, recoverMs: 1400, damage: 1, perRound: [1, 1, 1, 2, 2, 2], landMin: 4, landMax: 7, landR: 18, radius: 0.7 },
+    // The elixirs: one glowing on each totem pole's front (`elixirs` where they hang), set out afresh as each round
+    // starts. An active player who comes within `pickR` of one (carrying none) takes it; carrying one, standing within
+    // `reviveR` of a player who is down for `reviveMs` brings them back whole (`IFRAMES_MS` twice over to find their
+    // feet), and the elixir is spent.
+    ELIXIR: { max: 4, pickR: 1.3, reviveR: 1.8, reviveMs: 4000 },
+    // The skeletons: a plain ghost's health, each in a gorilla's slot (`kind` 1, so the gorillas' beam, hits, bolts, bomb
+    // and Tess all take it). From the second round, `perRound[round - 1]` of them and one more for every `perPlayers`
+    // players past the first (`bonesFor`), each called down in a white beam at its own point in the round, spread
+    // evenly through its ghosts' coming. One drops (`fallMs`) and crawls at the nearest player at once (only its upper
+    // body, pulling itself along by its arms); within `reach` it lunges up at them and bites for `damage` segments (a
+    // shield throws it back), then gathers itself (`recoverMs`).
+    BONES: { hp: 6, kills: 1, speed: 3.2, beamMs: 1300, fallMs: 450, fallFrom: 25, reach: 1.6, recoverMs: 1000, damage: 1, perRound: [0, 2, 3, 4, 5, 6], perPlayers: 2 }
   };
   const C = CONFIG, TAU = Math.PI * 2;
 
@@ -103,21 +117,27 @@
   const isWraith = (n, round) => round >= C.WRAITH_FROM && n % C.WRAITH_EVERY === C.WRAITH_EVERY - 1;
   const ghostTier = (n, round) => isWraith(n, round) ? TIER.WRAITH : round >= C.GENERAL_FROM && n % C.GENERAL_EVERY === C.GENERAL_EVERY - 1 ? TIER.GENERAL : TIER.PLAIN;
   const radiusOf = (tier) => C.GHOST_RADIUS * (tier === TIER.PLAIN ? 1 : C.BIG);
+  /** How many skeletons a round sends with `players` counted in it. */
+  const bonesFor = (round, players) => {
+    const base = C.BONES.perRound[round - 1] || 0;
+    return base ? base + Math.floor((Math.max(1, players) - 1) / C.BONES.perPlayers) : 0;
+  };
 
   // The ghost's fields, in the order a snapshot carries them after its slot.
   const GHOST_FIELDS = ["id", "tier", "x", "y", "z", "age", "phase", "hp", "dying", "dyingAt", "target", "retargetAt",
     "spawnAt", "sx", "sy", "sz", "lx", "lz", "bounceUntil", "bvx", "bvz", "bounceSpeed", "knockUntil", "kvx", "kvz",
     "beamTarget", "beamAt", "beamUntil", "beamHit", "beamReady", "soulTarget", "soulAt", "soulUntil", "soulHit", "soulReady", "hitAt", "struckAt"];
   const PLAYER_FIELDS = ["id", "x", "y", "z", "seg", "frozenUntil", "invulnUntil", "doubleUntil", "kills", "dropsGiven", "hitAt", "hitX", "hitZ",
-    "tess", "tessReady", "zapAt", "zapX", "zapY", "zapZ", "monkeys", "ready", "inGame"];
+    "tess", "tessReady", "zapAt", "zapX", "zapY", "zapZ", "monkeys", "ready", "inGame", "elixir", "reviveTarget", "reviveSince"];
   const DROP_FIELDS = ["id", "kind", "x", "z", "at"];
   // A gorilla's phase: 1 called down (the beam), 2 falling, 3 landed and shaking, 4 coming, 5 holding someone, 6 gathering.
+  // A skeleton (`kind` 1) skips the shaking and the leap: it strikes from CHASE and gathers itself in RECOVER.
   const BRUTE_PHASE = { BEAM: 1, FALL: 2, SHAKE: 3, CHASE: 4, LEAP: 5, RECOVER: 6 };
-  const BRUTE_FIELDS = ["id", "x", "y", "z", "hp", "phase", "phaseAt", "target", "heading", "dying", "dyingAt", "hitAt", "slamAt", "fromX", "fromY", "fromZ", "toX", "toY", "toZ", "struckAt"];
+  const BRUTE_FIELDS = ["id", "x", "y", "z", "hp", "phase", "phaseAt", "target", "heading", "dying", "dyingAt", "hitAt", "slamAt", "fromX", "fromY", "fromZ", "toX", "toY", "toZ", "struckAt", "kind"];
   const STATE_FIELDS = ["state", "outcome", "round", "endsAt", "spawned", "players", "lapAt", "lapMs", "now", "rng", "seqN", "theta0",
     "lastSpawnAt", "nextId", "emptySince", "shieldUntil", "slowUntil", "kills", "bombAt", "pickAt", "pickKind", "pickBy", "pendingCount", "brutesSent",
     "bossOn", "bossA", "bossTa", "bossX", "bossZ", "bossHp", "bossMax", "bossNextSpit", "bossGenerals", "bossNextGeneral", "bossDyingAt", "bossHitAt", "spitAt", "startedBy", "paused", "pausedFor", "healAt",
-    "lightningSent", "boltAt", "boltBy", "bossStruckAt"];
+    "lightningSent", "boltAt", "boltBy", "bossStruckAt", "bonesSent", "elixirsTaken", "reviveAt", "reviveBy", "reviveOf"];
 
   const newGhost = () => {
     const g = { on: false };
@@ -143,9 +163,10 @@
   /**
    * One hunt. `seed` seeds its random draws; `spots` is the crest's spawn spots as [x, y, z, bearing] runs (bearing in
    * radians, increasing); `lapMs` how long the herald's lap takes on this island; `pile` where the banana pile stands and
-   * how near it a player takes the lightning drop (read as it is at each step, so the caller may grow it).
+   * how near it a player takes the lightning drop (read as it is at each step, so the caller may grow it); `elixirs`
+   * where each elixir hangs on its totem ({ x, z }, at most ELIXIR.max).
    */
-  const create = ({ seed = 1, spots, lapMs = 20000, pile = { x: 0, z: 0, r: 3 } } = {}) => {
+  const create = ({ seed = 1, spots, lapMs = 20000, pile = { x: 0, z: 0, r: 3 }, elixirs = [] } = {}) => {
     const s = { epoch: 0, pending: new Float64Array(C.MAX_PENDING) };
     for (const f of STATE_FIELDS) s[f] = 0;
     const ghosts = Array.from({ length: C.MAX_GHOSTS }, newGhost);
@@ -284,7 +305,7 @@
         s.bombAt = s.now;
         let points = 0;
         for (const g of ghosts) if (g.on && !g.dying) { kill(g, DYING.BURNED); points += killValue(g); }
-        for (const b of brutes) if (b.on && !b.dying) { killBrute(b, DYING.BURNED); points += C.BRUTE.kills; }
+        for (const b of brutes) if (b.on && !b.dying) { killBrute(b, DYING.BURNED); points += bruteKills(b); }
         if (s.bossOn && !s.bossDyingAt) {
           s.bossHp = Math.max(1, s.bossHp - Math.ceil(s.bossMax * C.BOMB_BOSS));
           s.bossHitAt = s.now;
@@ -318,6 +339,9 @@
     };
     // ---------- gorillas ----------
     const killBrute = (b, kind) => { b.dying = kind; b.dyingAt = s.now; };
+    // A gorilla's settings, or a skeleton's, and what killing it is worth.
+    const kindOf = (b) => b.kind ? C.BONES : C.BRUTE;
+    const bruteKills = (b) => kindOf(b).kills;
     // ---------- the lightning drop ----------
     // Every ghost and landed gorilla gets its bolt in turn, the boss his.
     const strikeAll = (p) => {
@@ -340,8 +364,8 @@
       for (const b of brutes) if (b.on && !b.dying) n++;
       return n;
     };
-    /** A gorilla called down beside player `p` (or anywhere when there is none). */
-    const addBrute = (p) => {
+    /** A gorilla (or with `kind` 1 a skeleton) called down beside player `p` (or anywhere when there is none). */
+    const addBrute = (p, kind = 0) => {
       for (const b of brutes) {
         if (b.on) continue;
         for (const f of BRUTE_FIELDS) b[f] = 0;
@@ -349,7 +373,7 @@
         let x = (p ? p.x : 0) + Math.sin(a) * r, z = (p ? p.z : 0) - Math.cos(a) * r;
         const out = Math.hypot(x, z);
         if (out > C.BRUTE.landR) { x *= C.BRUTE.landR / out; z *= C.BRUTE.landR / out; }
-        b.on = true; b.id = s.nextId++; b.x = x; b.z = z; b.y = C.BRUTE.fallFrom; b.hp = C.BRUTE.hp;
+        b.on = true; b.id = s.nextId++; b.x = x; b.z = z; b.kind = kind; b.y = kindOf(b).fallFrom; b.hp = kindOf(b).hp;
         b.phase = BRUTE_PHASE.BEAM; b.phaseAt = s.now;
         b.heading = p ? Math.atan2(p.x - x, p.z - z) : 0;
         return b;
@@ -460,15 +484,18 @@
           if (!p.on) continue;
           if (frozen(p)) { p.frozenUntil = 0; p.invulnUntil = s.now + C.IFRAMES_MS; }
           p.seg = C.PLAYER_SEGMENTS;
+          p.reviveTarget = p.reviveSince = 0;
         }
       }
-      if (state === STATE.COUNTDOWN || state === STATE.BOSS && prev === STATE.ACTIVE) s.healAt = s.now;
+      if (state === STATE.COUNTDOWN || state === STATE.BOSS && prev === STATE.ACTIVE) { s.healAt = s.now; s.elixirsTaken = 0; }
+      // A new hunt's first round: nobody carries one over from the last hunt.
+      if (state === STATE.COUNTDOWN && prev === STATE.NIGHT) for (const p of players) p.elixir = p.reviveTarget = 0;
       if (state === STATE.COUNTDOWN) { s.endsAt = s.now + C.COUNTDOWN_MS; s.spawned = 0; }
       else if (state === STATE.ACTIVE) {
         let n = 0;
         for (const p of players) if (p.on && p.here) n++;
         s.players = Math.max(1, n);
-        s.seqN = 0; s.theta0 = rand() * TAU; s.lastSpawnAt = -1e9; s.endsAt = 0; s.brutesSent = 0; s.lightningSent = 0;
+        s.seqN = 0; s.theta0 = rand() * TAU; s.lastSpawnAt = -1e9; s.endsAt = 0; s.brutesSent = 0; s.bonesSent = 0; s.lightningSent = 0;
         if (s.round === 1) for (let i = 0; i < C.FIRST_DROPS; i++) dropRandom();
         if (s.round === 3 && !dropsOf(1)) placeDrop(1);
         if (s.round === 4 && !dropsOf(2)) placeDrop(2);
@@ -680,28 +707,38 @@
       }
 
       // The gorillas: when a round is down to its last two ghosts they are called down, one beside each of the nearest
-      // players; then each falls, lands shaking, comes on, leaps and slams the ground beside them.
-      if (s.state === STATE.ACTIVE && !s.brutesSent && s.spawned >= r.ghosts && alive() <= 2) {
-        s.brutesSent = 1;
-        for (let i = 0; i < C.BRUTE.perRound[s.round - 1]; i++) {
+      // players; then each falls, lands shaking, comes on, leaps and slams the ground beside them. Only arrivals with
+      // a free slot count: skeletons share the pool, and dying bodies still hold their slots for a moment.
+      const gorillas = C.BRUTE.perRound[s.round - 1] || 0;
+      if (s.state === STATE.ACTIVE && s.brutesSent < gorillas && s.spawned >= r.ghosts && alive() <= 2) {
+        for (let i = s.brutesSent; i < gorillas; i++) {
           let best = null;
           for (const p of players) if (active(p) && (!best || rand() < 0.5)) best = p;
-          addBrute(best);
+          if (!addBrute(best)) break;
+          s.brutesSent++;
         }
+      }
+      // The skeletons, each at its own share of the round's ghosts having come (the k-th of n at k / (n + 1)), beside
+      // one of the players.
+      const bones = bonesFor(s.round, s.players);
+      if (s.state === STATE.ACTIVE && s.bonesSent < bones && s.spawned >= r.ghosts * (s.bonesSent + 1) / (bones + 1)) {
+        let best = null;
+        for (const p of players) if (active(p) && (!best || rand() < 0.5)) best = p;
+        if (addBrute(best, 1)) s.bonesSent++;
       }
       for (const b of brutes) {
         if (!b.on) continue;
         if (b.dying) { if (now - b.dyingAt >= C.DYING_MS) b.on = false; continue; }
         if (struck(b, now)) {
-          if (now >= b.struckAt + C.LIGHTNING.zapMs) { killBrute(b, DYING.ZAPPED); addKills(playerById(s.boltBy), C.BRUTE.kills); }
+          if (now >= b.struckAt + C.LIGHTNING.zapMs) { killBrute(b, DYING.ZAPPED); addKills(playerById(s.boltBy), bruteKills(b)); }
           continue;
         }
-        const since = now - b.phaseAt;
-        if (b.phase === BRUTE_PHASE.BEAM) { if (since >= C.BRUTE.beamMs) { b.phase = BRUTE_PHASE.FALL; b.phaseAt = now; } continue; }
+        const K = kindOf(b), since = now - b.phaseAt;
+        if (b.phase === BRUTE_PHASE.BEAM) { if (since >= K.beamMs) { b.phase = BRUTE_PHASE.FALL; b.phaseAt = now; } continue; }
         if (b.phase === BRUTE_PHASE.FALL) {
-          const k = Math.min(1, since / C.BRUTE.fallMs);
-          b.y = C.BRUTE.fallFrom * (1 - k * k);
-          if (k >= 1) { b.y = 0; b.phase = BRUTE_PHASE.SHAKE; b.phaseAt = now; }
+          const k = Math.min(1, since / K.fallMs);
+          b.y = K.fallFrom * (1 - k * k);
+          if (k >= 1) { b.y = 0; b.phase = b.kind ? BRUTE_PHASE.CHASE : BRUTE_PHASE.SHAKE; b.phaseAt = now; }
           continue;
         }
         if (b.phase === BRUTE_PHASE.SHAKE) { if (since >= C.BRUTE.shakeMs) { b.phase = BRUTE_PHASE.CHASE; b.phaseAt = now; } continue; }
@@ -718,14 +755,25 @@
           }
           continue;
         }
-        if (b.phase === BRUTE_PHASE.RECOVER) { if (since >= C.BRUTE.recoverMs) { b.phase = BRUTE_PHASE.CHASE; b.phaseAt = now; } continue; }
+        if (b.phase === BRUTE_PHASE.RECOVER) { if (since >= K.recoverMs) { b.phase = BRUTE_PHASE.CHASE; b.phaseAt = now; } continue; }
         // Coming on: at the nearest player, slowed by the ice, kept apart from the others.
         const t = nearestPlayer(b.x, b.z);
         b.target = t ? t.id : 0;
         if (!t || !fighting()) continue;
         let dx = t.x - b.x, dz = t.z - b.z;
         const d = Math.hypot(dx, dz);
-        if (d <= C.BRUTE.reach && Math.abs(t.y - b.y) < 1.5) {
+        // A skeleton within reach strikes them where they stand (a shield throws it back, a fresh hurt keeps them up).
+        if (b.kind && d <= C.BONES.reach && Math.abs(t.y - b.y) < 1.5) {
+          if (now < s.shieldUntil) { b.x -= dx / (d || 1) * 2; b.z -= dz / (d || 1) * 2; }
+          else {
+            b.slamAt = now;
+            if (active(t) && now >= t.invulnUntil) slamPlayer(t, C.BONES.damage, b.x, b.z);
+          }
+          b.heading = Math.atan2(dx, dz);
+          b.phase = BRUTE_PHASE.RECOVER; b.phaseAt = now;
+          continue;
+        }
+        if (!b.kind && d <= C.BRUTE.reach && Math.abs(t.y - b.y) < 1.5) {
           if (now < s.shieldUntil) {
             // The shield throws it back.
             b.x -= dx / (d || 1) * 2; b.z -= dz / (d || 1) * 2;
@@ -741,7 +789,7 @@
           continue;
         }
         dx /= d || 1; dz /= d || 1;
-        let vx = dx * C.BRUTE.speed * (slowed ? C.ICE_SLOW : 1), vz = dz * C.BRUTE.speed * (slowed ? C.ICE_SLOW : 1);
+        let vx = dx * K.speed * (slowed ? C.ICE_SLOW : 1), vz = dz * K.speed * (slowed ? C.ICE_SLOW : 1);
         for (const o of brutes) {
           if (o === b || !o.on || o.dying) continue;
           const ox = b.x - o.x, oz = b.z - o.z, od = Math.hypot(ox, oz);
@@ -752,6 +800,32 @@
         b.heading = Math.atan2(dx, dz);
         const out = Math.hypot(b.x, b.z);
         if (out > C.ARENA_R) { b.x *= C.ARENA_R / out; b.z *= C.ARENA_R / out; }
+      }
+
+      // The elixirs: taken from the totems by whoever reaches one empty-handed; carried, held beside someone down for
+      // ELIXIR.reviveMs, it brings them back.
+      for (const p of players) {
+        if (!fighting() || !active(p)) { p.reviveTarget = p.reviveSince = 0; continue; }
+        if (!p.elixir) {
+          for (let i = 0; i < elixirs.length && i < C.ELIXIR.max; i++) {
+            if (s.elixirsTaken & (1 << i) || Math.hypot(p.x - elixirs[i].x, p.z - elixirs[i].z) > C.ELIXIR.pickR) continue;
+            s.elixirsTaken |= 1 << i; p.elixir = 1;
+            break;
+          }
+          continue;
+        }
+        let near = null, best = C.ELIXIR.reviveR;
+        for (const q of players) {
+          if (q === p || !q.on || !q.here || !frozen(q)) continue;
+          const d = Math.hypot(q.x - p.x, q.z - p.z);
+          if (d <= best) { best = d; near = q; }
+        }
+        if (!near) { p.reviveTarget = 0; continue; }
+        if (p.reviveTarget !== near.id) { p.reviveTarget = near.id; p.reviveSince = now; continue; }
+        if (now - p.reviveSince < C.ELIXIR.reviveMs) continue;
+        near.frozenUntil = 0; near.seg = C.PLAYER_SEGMENTS; near.invulnUntil = now + C.IFRAMES_MS * 2;
+        p.elixir = 0; p.reviveTarget = 0;
+        s.reviveAt = now; s.reviveBy = p.id; s.reviveOf = near.id;
       }
 
       // Tess, at her player's side: the nearest ghost in reach dies on her beam, then she rests.
@@ -773,7 +847,7 @@
         if (brute) {
           brute.hitAt = now;
           if (brute.hp > C.TESS.brute) brute.hp -= C.TESS.brute;
-          else { brute.hp = 0; killBrute(brute, DYING.SHOT); addKills(p, C.BRUTE.kills); }
+          else { brute.hp = 0; killBrute(brute, DYING.SHOT); addKills(p, bruteKills(brute)); }
           p.zapX = brute.x; p.zapY = brute.y; p.zapZ = brute.z;
         }
         else { kill(target, DYING.SHOT); addKills(p, killValue(target)); p.zapX = target.x; p.zapY = target.y; p.zapZ = target.z; }
@@ -806,7 +880,7 @@
       else if (st === STATE.COUNTDOWN) { if (now >= s.endsAt) enter(STATE.ACTIVE); }
       else if (st === STATE.ACTIVE) {
         if (anyHere && !anyActive) enter(STATE.DEFEAT);
-        else if (s.spawned >= r.ghosts && alive() === 0 && brutesAlive() === 0 && (s.brutesSent || !C.BRUTE.perRound[s.round - 1])) enter(s.round >= ROUNDS.length ? STATE.BOSS : STATE.BREAK);
+        else if (s.spawned >= r.ghosts && alive() === 0 && brutesAlive() === 0 && s.brutesSent >= gorillas && s.bonesSent >= bones) enter(s.round >= ROUNDS.length ? STATE.BOSS : STATE.BREAK);
       } else if (st === STATE.BOSS) {
         if (anyHere && !anyActive) enter(STATE.DEFEAT);
         else if (s.bossDyingAt && now - s.bossDyingAt >= C.BOSS.burnMs) { s.bossOn = 0; enter(STATE.VICTORY); }
@@ -892,7 +966,7 @@
         b.hitAt = s.now;
         if (b.hp > damage) { b.hp -= damage; return "hurt"; }
         killBrute(b, p && p.kills >= C.PUMPKIN_KILLS ? DYING.PUMPKIN : DYING.SHOT);
-        addKills(p, C.BRUTE.kills);
+        addKills(p, bruteKills(b));
         return "kill";
       }
       let g = null;
@@ -991,6 +1065,7 @@
         if (!b) continue;
         b.on = true;
         for (let i = 0; i < BRUTE_FIELDS.length; i++) b[BRUTE_FIELDS[i]] = num(u[o + 1 + i]);
+        b.kind = b.kind ? 1 : 0;
       }
       const q = Array.isArray(snap.q) ? snap.q : [];
       s.pendingCount = Math.min(C.MAX_PENDING, q.length);
@@ -1011,9 +1086,35 @@
       ghost: (tier) => fighting() && spawnGroup(1, () => tier) > 0,
       /** A gorilla is called down beside player `id`. */
       gorilla: (id) => fighting() && !!addBrute(playerById(id) || null),
+      /** A skeleton is called down beside player `id`. */
+      skeleton: (id) => fighting() && !!addBrute(playerById(id) || null, 1),
+      /**
+       * An elixir's revive to watch alone: an elixir for player `id`, and a stand-in hunter (`REVIVE_BOT`, no page behind
+       * it, so its caller presents it) down at (x, z). Only while a round runs.
+       */
+      revive: (id, x, z) => {
+        const me = playerById(id);
+        if (!fighting() || !me) return false;
+        let b = playerById(REVIVE_BOT);
+        if (!b) {
+          for (const q of players) if (!q.on) { b = q; break; }
+          if (!b) return false;
+          for (const f of PLAYER_FIELDS) b[f] = 0;
+          b.on = true; b.id = REVIVE_BOT; b.inGame = 1;
+        }
+        b.here = true; b.x = x; b.y = me.y; b.z = z; b.seg = 0; b.frozenUntil = C.DOWN_UNTIL; b.elixir = b.reviveTarget = 0;
+        me.elixir = 1; me.reviveTarget = 0;
+        return true;
+      },
+      /** The stand-in hunter gone again. */
+      dropBot: () => { const b = playerById(REVIVE_BOT); if (b) b.on = b.here = false; },
       /** The round ends: everything spawned and gone (or the wait cut short). */
       next: () => {
-        if (s.state === STATE.ACTIVE) { s.spawned = settings().ghosts; s.brutesSent = 1; for (const g of ghosts) g.on = false; for (const b of brutes) b.on = false; }
+        if (s.state === STATE.ACTIVE) {
+          s.spawned = settings().ghosts; s.brutesSent = C.BRUTE.perRound[s.round - 1] || 0; s.bonesSent = bonesFor(s.round, s.players);
+          for (const g of ghosts) g.on = false;
+          for (const b of brutes) b.on = false;
+        }
         else if (s.state !== STATE.IDLE) s.endsAt = s.now;
       },
       /** Every ghost on the field burns, no kills credited. */
@@ -1040,5 +1141,5 @@
     };
   };
 
-  BL.ghostSim = { create, STATE, OUTCOME, TIER, DROP, TESS_DROP, LIGHTNING_DROP, MONKEY_DROP, DYING, BRUTE_PHASE, ROUNDS, CONFIG, roundSettings, ghostTier, radiusOf };
+  BL.ghostSim = { create, STATE, OUTCOME, TIER, DROP, TESS_DROP, LIGHTNING_DROP, MONKEY_DROP, DYING, BRUTE_PHASE, ROUNDS, CONFIG, roundSettings, ghostTier, radiusOf, bonesFor, REVIVE_BOT };
 })();
