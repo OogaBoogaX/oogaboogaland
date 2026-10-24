@@ -1573,6 +1573,11 @@
       b.node.visible = true; b.duration = b.life = .8; b.arc = 1.8; b.tomato = true; b.source = cave; b.feedback = b.workShot = b.visual = false;
       throwCooldown = .45; tomatoesThrown++; ctx.onTomatoThrow?.(b.from); return true;
     };
+    // HALLOWEEN: a `straight` round (the hunt's lasers) points along its line and never tumbles as a rock or banana does.
+    const aimRound = (node, dx, dy, dz) => {
+      if (node.geometry.straight) setVec(node.rotation, Math.atan2(-dy, Math.hypot(dx, dz)), Math.atan2(dx, dz), 0);
+      else setVec(node.rotation, 0, Math.atan2(dx, dz), 0.6);
+    };
     const fireBullet = (cave, spot) => {
       const bullet = bulletPool[bulletIdx++ % bulletPool.length], node = bullet.node;
       bullet.serial = ++bulletSerial;
@@ -1612,8 +1617,7 @@
         }
         to.x = lerp(from.x, to.x, lo); to.y = lerp(from.y, to.y, lo); to.z = lerp(from.z, to.z, lo);
       }
-      const dx = to.x - from.x, dz = to.z - from.z;
-      setVec(node.rotation, 0, Math.atan2(dx, dz), 0.6);
+      aimRound(node, to.x - from.x, to.y - from.y, to.z - from.z);
       setVec(node.position, from.x, from.y, from.z);
       node.visible = true;
       bullet.life = 0.22;
@@ -1630,7 +1634,7 @@
       bullet.duration = .22; bullet.arc = 0; bullet.tomato = false;
       setVec(bullet.from, fx, fy, fz);
       setVec(bullet.to, tx, ty, tz);
-      setVec(node.rotation, 0, Math.atan2(tx - fx, tz - fz), 0.6);
+      aimRound(node, tx - fx, ty - fy, tz - fz);
       setVec(node.position, fx, fy, fz);
       node.visible = true;
       bullet.life = 0.22;
@@ -1646,7 +1650,7 @@
         const k = 1 - bullet.life / bullet.duration, from = bullet.from, to = bullet.to;
         if (bullet.visual) {
           setVec(p, lerp(from.x, to.x, k), lerp(from.y, to.y, k), lerp(from.z, to.z, k));
-          bullet.node.rotation.x += dt * 24;
+          if (!bullet.node.geometry.straight) bullet.node.rotation.x += dt * 24;
           if (!bullet.life) bullet.node.visible = bullet.visual = false;
           continue;
         }
@@ -1687,7 +1691,7 @@
           if (ctx.onWeaponHit) ctx.onWeaponHit(bullet.source, weaponHit.type, power);
           if (ctx.onWeaponImpact) ctx.onWeaponImpact(bullet.source, weaponHit, dx / distance, dy / distance, dz / distance, power, bullet);
         }
-        bullet.node.rotation.x += dt * 24;
+        if (!bullet.node.geometry.straight) bullet.node.rotation.x += dt * 24;
         if (!bullet.life) {
           if (bullet.tomato) ctx.onTomatoImpact?.(p);
           if (bullet.workShot && ctx.workHit) ctx.workHit(bullet.source);
