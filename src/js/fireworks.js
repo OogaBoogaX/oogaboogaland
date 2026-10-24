@@ -22,6 +22,12 @@
   const MAX_BURSTS = 64, MAX_FLASHES = 32, MAX_DIRTY = 8, MAX_QUEUE = 32;
   const SLICE_MS = 1, IDLE_RELEASE_S = 30, COLOR_GAIN = 0.9, BRIGHT_GAIN = 0.3;
   const KINDS = ["pop", "bolt", "mega", "show"];
+  // As a toast names them: "Your ₿ Mega Blast", or with `aName` "@login is launching a ₿ Mega Blast".
+  const NAMES = { pop: "Ooga Pop", bolt: "Lightning Bolt", mega: "₿ Mega Blast", show: "show pack" };
+  const aName = (kind) => `${kind === "pop" ? "an" : "a"} ${NAMES[kind]}`;
+  // A shell heard this late has risen already on every page that heard it in time (the shortest rise is 1.45 s), so it
+  // is skipped rather than burst out of step; a show's later shells still launch.
+  const LATE_S = 1.4;
   // The board's own stat colours, as the old contribution shells used, at full saturation.
   const OBL = [[0.06, 1, 0.16], [0.08, 1, 0.88], [0.27, 0.59, 1], [1, 0.61, 0.06], [1, 0.09, 0.06]];
   const GOLDS = [[1, 0.72, 0.25], [1, 0.55, 0.12], [1, 0.84, 0.45]];
@@ -275,11 +281,14 @@
     const launch = (kind, id, { at = now, slot = -1, eye = null } = {}) => {
       if (!BUILD[kind] && kind !== "show") return false;
       if (queue.length >= MAX_QUEUE) return false;
+      if (kind !== "show" && at < now - LATE_S || kind === "show" && at + SHOW[SHOW.length - 1][1] < now - LATE_S) return false;
       if (eye) { eyeAt.x = eye.x; eyeAt.y = eye.y; eyeAt.z = eye.z; }
       // A show's three bursts take neighbouring slots, so it starts no later than the third slot from the end.
       const s = kind === "show" ? Math.min(slot >= 0 ? slot : nextSlot, Math.max(0, slots.length - 3)) : slot >= 0 ? slot : nextSlot;
       nextSlot = (s + (kind === "show" ? 3 : 1)) % slots.length;
-      if (kind === "show") for (let i = 0; i < SHOW.length; i++) queue.push({ kind: SHOW[i][0], id: `${id}/${i}`, at: at + SHOW[i][1], slot: s + SHOW[i][2] });
+      if (kind === "show") {
+        for (let i = 0; i < SHOW.length; i++) if (at + SHOW[i][1] >= now - LATE_S) queue.push({ kind: SHOW[i][0], id: `${id}/${i}`, at: at + SHOW[i][1], slot: s + SHOW[i][2] });
+      }
       else queue.push({ kind, id, at, slot: s });
       launched++;
       return true;
@@ -405,5 +414,5 @@
     };
   };
 
-  BL.fireworks = { create, KINDS, CAPS, SCALE, FLOATS, CAPACITY, flight };
+  BL.fireworks = { create, KINDS, NAMES, aName, CAPS, SCALE, FLOATS, CAPACITY, LATE_S, flight };
 })();

@@ -18,7 +18,7 @@ const binding = (fail = false) => {
     if (fail) throw new Error("unreachable");
     return Response.json({ from: name }, { status: name === "fetch" ? 200 : 201 });
   };
-  return { calls, invoice: answer("invoice"), note: answer("note"), onchain: answer("onchain"), fetch: answer("fetch") };
+  return { calls, invoice: answer("invoice"), note: answer("note"), onchain: answer("onchain"), firework: answer("firework"), fireworks: answer("fireworks"), fetch: answer("fetch") };
 };
 // D1 holding one signed-in player under any session token.
 const db = { prepare: () => ({ bind: () => ({ first: async () => ({ token_hash: "h", expires_at: FAR, last_used_at: FAR, id: 4242, login: "ooga-dev", banned_at: null }), run: async () => ({}) }) }), batch: async () => [] };
@@ -59,6 +59,23 @@ test("a visitor who isn't signed in gives as nobody, and a note or an on-chain s
   }
   assert.deepEqual(DONATIONS.calls.map((c) => [c.name, c.args.length, c.args.at(-1)]), [["invoice", 3, "203.0.113.7"], ["note", 2, "203.0.113.7"], ["onchain", 2, "203.0.113.7"]]);
   assert.equal(DONATIONS.calls[0].args[1], null);
+});
+
+test("a firework's invoice goes on like a donation's, with the signed-in buyer; the buyer's own totals carry the buyer alone", async () => {
+  const DONATIONS = binding(), env = { SITE_ORIGIN: SITE, DONATIONS, DB: db };
+  for (const cookie of ["__Host-obl_session=tok", ""]) {
+    for (const path of ["/donations/firework", "/donations/fireworks"]) {
+      const [request, url] = call(path, { headers: { ...json, cookie }, body: path.endsWith("firework") ? "{\"kind\":\"mega\"}" : "{}" });
+      assert.equal((await handleDonations(request, env, url)).status, 201);
+    }
+  }
+  const [buy, totals, anonBuy, anonTotals] = DONATIONS.calls;
+  assert.equal(buy.name, "firework");
+  assert.equal(await buy.args[0].text(), "{\"kind\":\"mega\"}");
+  assert.deepEqual(buy.args.slice(1), [{ id: 4242, login: "ooga-dev" }, "203.0.113.7"]);
+  assert.deepEqual([totals.name, totals.args], ["fireworks", [{ id: 4242, login: "ooga-dev" }]]);
+  assert.deepEqual(anonBuy.args.slice(1), [null, "203.0.113.7"]);
+  assert.deepEqual(anonTotals.args, [null]);
 });
 
 test("an old nonowner session cannot attach a signed-in donor identity to an invoice", async () => {

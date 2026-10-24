@@ -2,11 +2,14 @@
 // entrypoint, as its docs/protocol.md ("How OBL's Worker passes them on") asks. Who is giving comes from this Worker's
 // GitHub sign-in, independently of the page's editable display handle; only the body and type go on, never its request, whose
 // cookies carry the session. The visitor's address goes beside each call for bananapayserver's rate limits. Without the
-// binding, or when bananapayserver throws, the page hears that donations are closed.
+// binding, or when bananapayserver throws, the page hears that donations are closed. Fireworks, which are purchases, go
+// the same way: an invoice for one carries the signed-in buyer, and the buyer's own totals carry only the buyer.
 
 import { clientIp, fromSite, getSessionFromRequest, json } from "./http.js";
 
-const CALLS = { "/donations/invoice": "invoice", "/donations/note": "note", "/donations/onchain": "onchain" };
+const CALLS = { "/donations/invoice": "invoice", "/donations/note": "note", "/donations/onchain": "onchain", "/donations/firework": "firework", "/donations/fireworks": "fireworks" };
+// The calls that name who is giving or buying.
+const SIGNED = new Set(["invoice", "firework", "fireworks"]);
 const SOCKET_HEADERS = ["upgrade", "connection", "sec-websocket-key", "sec-websocket-version"];
 const BODY_MAX = 1024;
 
@@ -34,10 +37,12 @@ export const handleDonations = async (request, env, url) => {
     const body = await request.arrayBuffer();
     if (body.byteLength > BODY_MAX) return json({ error: "too large" }, 413);
     const call = new Request(url, { method: "POST", headers: { "content-type": request.headers.get("content-type") || "" }, body });
-    if (method !== "invoice") return await env.DONATIONS[method](call, visitor);
+    if (!SIGNED.has(method)) return await env.DONATIONS[method](call, visitor);
     // The donor: GitHub's numeric id, which survives a rename, and the login as GitHub gives it, or nobody.
     const found = await getSessionFromRequest(request, env);
-    return await env.DONATIONS.invoice(call, found ? { id: found.player.id, login: found.player.login } : null, visitor);
+    const donor = found ? { id: found.player.id, login: found.player.login } : null;
+    if (method === "fireworks") return await env.DONATIONS.fireworks(donor);
+    return await env.DONATIONS[method](call, donor, visitor);
   } catch {
     return closed();
   }

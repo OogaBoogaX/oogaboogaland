@@ -13,9 +13,28 @@ donation tally.
 
 ## What is here
 
-The engine, both renderers, the sound and the hub's wiring. Fireworks launch only under `?debug=1`, through
-`__ooga.fireworks.launch(kind, id, { slot, at })`. Buying them (bananapayserver's purchase path, the Worker's
-calls, the stand by the pile, its leaderboard plaque, the countdown toast and WebLN) is the next step.
+The engine, both renderers, the sound and the hub's wiring, and the stand that sells them: its screen, the page's
+side of the purchase path (the Worker's two calls, `donations.js`, the director's `onFirework`), the countdown toast,
+the plaque and the buyer's view. Under `?debug=1`, `__ooga.fireworks.launch(kind, id, { slot, at })` sets one off
+without paying and `__ooga.fireworks.openStand()` opens the stand. With no API behind the page the stand simulates.
+
+## Buying one
+
+Space at the stand, or a tap on it, opens its screen in the donation popup's dialog: the four kinds at the API's
+prices (`status.fireworks`). Choosing one asks for its Lightning invoice at once (`POST /donations/firework`, the
+page sending only the kind); the invoice offers the browser's own wallet in one click where it has one (WebLN, only
+ever inside the visitor's click), OPEN WALLET, the QR and COPY. While only signed-in visitors may buy, a signed-out
+visitor sees SIGN IN TO BUY; PREVIEW is free and only that visitor sees it.
+
+When it is paid, every page hears it on the donation socket (`firework`) and launches it at the server's `launchAt`,
+3 s after settlement, on its own estimate of the server's clock. The toast counts down to it, naming the buyer. The
+buyer's dialog closes and their view glides up from the stand to the arc over the Sphere, holds while the sky is lit
+(Escape comes back early) and glides home. A page that hears a firework after its shells have risen skips them, and
+a sound already past is dropped. The plaque on the stand's post is the API's top ten signed-in buyers
+(`fireworkBoard`), repainted only when it changes; a tap opens it in the board dialog.
+
+The stand is generic over its items, so it can become the island's store when there is demand; only the items and
+what happens after a payment (here, watching the show) are fireworks'.
 
 - `fireworks.js` plans a launch once, from its id: `mulberry32(fnv1a(id))` draws every spark, so two pages
   given the same id draw the same show. A planned launch is admitted while the tier's cap (`CAPS`) and the
