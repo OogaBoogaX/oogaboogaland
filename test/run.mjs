@@ -8183,11 +8183,18 @@ const hubGhostEntry = (melee) => ({ name: `ghost entry ${melee ? "melee" : "shoo
   if (!loaded) return;
   if (!melee) await b.key("x");
   const entry = await b.evaluate(`(() => {
-    const B = __ooga, H = BL.scenes.hub.debug, G = H.halloween, a = B.crew.player, p = G.herald.position;
-    const radius = Math.hypot(p.x, p.z), gap = ${melee ? 0.9 : 2.5}, k = (radius - gap) / radius;
-    const x = p.x * k, z = p.z * k, yaw = Math.atan2(p.x - x, p.z - z);
+    // The herald drifts on the room clock, which \`advance\` does not step, and is a picture turned to the camera: hold the
+    // clock, and shoot from between it and the camera, along the view, once the camera has followed, or the aim point
+    // goes stale by however long the steps take and a shot across the picture can slip past its edge.
+    const net = BL.net, serverNow = net.serverNow, held = serverNow();
+    net.serverNow = () => held;
+    try {
+    const B = __ooga, H = BL.scenes.hub.debug, G = H.halloween, a = B.crew.player, p = G.herald.position, cam = BL.scenes.hub.camera;
+    const vx = cam.position.x - cam.target.x, vz = cam.position.z - cam.target.z, gap = ${melee ? 0.9 : 2.5} / Math.hypot(vx, vz);
+    const x = p.x + vx * gap, z = p.z + vz * gap, yaw = Math.atan2(p.x - x, p.z - z);
     B.crew.relocatePlayer({ x, y: H.island.surfaceAt(x, z), z }, yaw);
     B.crew.configureWeapon(a, ${melee ? 1 : 2}, 30);
+    B.advance(0.5, 1 / 60);
     BL.scene.updateWorld(BL.scenes.hub.root);
     const center = BL.scene.boundsOf(G.herald.geometry).center, point = new Float64Array(3);
     BL.math.mat4.transformPoint(point, G.herald.world, center[0], center[1], center[2]);
@@ -8198,6 +8205,7 @@ const hubGhostEntry = (melee) => ({ name: `ghost entry ${melee ? "melee" : "shoo
       shots: a.weapon.shotsFired - before, shown: !document.getElementById("ghost-lobby").hidden,
       aiming: B.pilot.aiming, reticle: document.getElementById("weapon-reticle").hidden,
       labelsHidden: getComputedStyle(document.getElementById("tooltip")).visibility === "hidden" };
+    } finally { net.serverNow = serverNow; }
   })()`);
   record(`ghost entry: ${melee ? "a club leaves the herald idle" : "an AK burst opens the lobby without readying automatically"} and HUB damage stays off`, entry.accepted && entry.state === (melee ? "IDLE" : "GATHER") && entry.shown === !melee && entry.health && !entry.game && !entry.combat && (melee ? entry.shots === 0 : entry.shots > 0 && entry.shots <= 3), JSON.stringify(entry));
   if (melee || !entry.shown) return;
