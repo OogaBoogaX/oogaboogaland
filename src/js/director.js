@@ -220,7 +220,7 @@
     const next = scenes[id];
     if (!next) throw new Error(`Unknown scene "${id}"`);
     if (transition) return false;
-    transition = { next, place, out: true, t: 0, instant, ready: true, redirect: null, failed: null, controller: new AbortController() };
+    transition = { next, place, out: true, t: 0, held: 0, instant, ready: true, redirect: null, failed: null, controller: new AbortController() };
     if (next.prepare) {
       try { settle(transition, models.withScope(next.id, () => next.prepare(place, { ...ctx, signal: transition.controller.signal }, next.id))); }
       catch (error) { transition.failed = error; }
@@ -376,6 +376,7 @@
     transition.t += dt;
     if (transition.out) {
       fade = Math.min(1, transition.t / FADE);
+      if (fade === 1) transition.held += dt;
       if (fade < 1 || !transition.ready || !buildLanding(transition)) return;
       if (transition.failed) abandon();
       else { const { next, place } = landing(transition); swap(next, place); }
@@ -387,11 +388,20 @@
     if (fade === 0) settled();
   };
   // Fills in CSS pixels (clientWidth/clientHeight, cached above), not backing-store pixels.
+  // Black held past a second (a slow chunk, a long build) turns the boot curtain's spinner on the black.
+  const SPINNER_AFTER = 1, SPINNER_R = 13, SPINNER_ACCENT = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#ffd27a";
   const drawFade = () => {
     overlayCtx.globalAlpha = fade;
     overlayCtx.fillStyle = "#000000";
     overlayCtx.fillRect(0, 0, overlayCssW, overlayCssH);
     overlayCtx.globalAlpha = 1;
+    if (!transition || transition.held < SPINNER_AFTER) return;
+    const x = overlayCssW / 2, y = overlayCssH / 2, turn = elapsed / 0.9 % 1 * Math.PI * 2;
+    overlayCtx.lineWidth = 3;
+    overlayCtx.strokeStyle = "rgba(243, 239, 228, 0.18)";
+    overlayCtx.beginPath(); overlayCtx.arc(x, y, SPINNER_R, 0, Math.PI * 2); overlayCtx.stroke();
+    overlayCtx.strokeStyle = SPINNER_ACCENT;
+    overlayCtx.beginPath(); overlayCtx.arc(x, y, SPINNER_R, turn - Math.PI * 0.75, turn - Math.PI * 0.25); overlayCtx.stroke();
   };
 
   // Sampled from delivered frame intervals, never from the cost of issuing a frame.
