@@ -251,7 +251,9 @@
   const openIntro = () => intros.find((el) => !el.hidden) || null;
   // The microphone's note, which names M only in a scene whose M mutes the microphone (`micKey`).
   const showMic = () => window.BL.hud.showMic(window.BL.voice.stats, !!(active && active.micKey));
-  const enter = (next, place = null) => {
+  // An arrival in three parts: `arriving` before the scene's own enter, the enter, then `arrived`. A scene with
+  // `enterSteps` may run its enter in slices between them (see `swap`).
+  const arriving = (next, place) => {
     const retainedTime = next.retained ? next.elapsed : 0;
     ctx.from = active ? active.id : null;
     ctx.place = place;
@@ -266,8 +268,9 @@
     window.BL.models.setScope(next.id);
     visitController = new AbortController();
     ctx.signal = visitController.signal;
-    try { next.enter(ctx); }
-    catch (error) { visitController.abort(); throw error; }
+    return retainedTime;
+  };
+  const arrived = (next, place, retainedTime) => {
     activeMeshRigs = next.renderOpts?.meshRigs === true;
     active = next;
     // Rasterize hidden render alternatives before the curtain lifts or the visitor can zoom out.
@@ -283,6 +286,12 @@
       positionDebug.addEventListener("click", copyPositionDebug, { signal: ctx.signal });
       updatePositionDebug(true);
     }
+  };
+  const enter = (next, place = null) => {
+    const retainedTime = arriving(next, place);
+    try { next.enter(ctx); }
+    catch (error) { visitController.abort(); throw error; }
+    arrived(next, place, retainedTime);
   };
   const live = new Set();
   const visit = (node) => {
@@ -305,7 +314,32 @@
     audioAwake = true;
     new AudioContext().close().catch(() => {});
   };
-  const swap = (next, place) => {
+  // The swap's last part: the arrived scene's live set decides what of the departed one stays.
+  const releaseLeft = (leaving, next) => {
+    // Scene-only builder caches go with the visit; only the keep policy preserves the inactive hub's owners.
+    const retained = liveGeometry();
+    if (leaving.id !== "hub" || !KEEP_HUB) {
+      models.release(leaving.id, KEEP_HUB ? ["hub", next.id] : [next.id], retained);
+      if (DEBUG && leaving.id !== next.id) models.assertReleased(leaving.id);
+    }
+    renderer.releaseUnused(retained);
+    if (DEBUG && renderer.stats.records > live.size) throw new Error(`${next.id}: ${renderer.stats.records} GPU records for ${live.size} live geometries`);
+  };
+  // While a scene enters in slices its canvas listeners exist but its visit is half built: a press on the canvas
+  // stops at the window, in the capture phase, before any of them.
+  const HELD_EVENTS = ["pointerdown", "pointermove", "pointerup", "pointercancel", "pointerleave", "wheel", "contextmenu"];
+  const heldEvent = (e) => { if (e.target === sceneCanvas) e.stopImmediatePropagation(); };
+  const holdInput = (on) => {
+    for (const type of HELD_EVENTS) {
+      if (on) window.addEventListener(type, heldEvent, true);
+      else window.removeEventListener(type, heldEvent, true);
+    }
+  };
+  // True once the next scene has entered. A scene with `enterSteps` (a released hub, rebuilding its island's whole
+  // visit) enters in slices instead: the departed scene is gone, nothing updates, draws or takes a key, and the screen
+  // holds (black, or an instant crossing's last frame) until the last slice, when `done` carries the transition on.
+  // A first slice that finishes the enter (a kept hub resuming) completes in the same frame, as `enter` would.
+  const swap = (next, place, done) => {
     const leaving = active;
     wakeAudio();
     agentPlay.stop(true);
@@ -316,15 +350,36 @@
     if (DEBUG && left.targets) throw new Error(`${leaving.id}.leave left ${left.targets} input targets`);
     clearTweens();
     if (DEBUG && tweenCount()) throw new Error(`${tweenCount()} tweens survived clearTweens`);
-    enter(next, place);
-    // Scene-only builder caches go with the visit; only the keep policy preserves the inactive hub's owners.
-    const retained = liveGeometry();
-    if (leaving.id !== "hub" || !KEEP_HUB) {
-      models.release(leaving.id, KEEP_HUB ? ["hub", next.id] : [next.id], retained);
-      if (DEBUG && leaving.id !== next.id) models.assertReleased(leaving.id);
+    if (!next.enterSteps) {
+      enter(next, place);
+      releaseLeft(leaving, next);
+      return true;
     }
-    renderer.releaseUnused(retained);
-    if (DEBUG && renderer.stats.records > live.size) throw new Error(`${next.id}: ${renderer.stats.records} GPU records for ${live.size} live geometries`);
+    const retainedTime = arriving(next, place);
+    let steps, step;
+    try {
+      steps = models.withScope(next.id, () => next.enterSteps(ctx));
+      step = window.BL.buildTasks.measure(() => models.withScope(next.id, () => steps.next()));
+    } catch (error) { visitController.abort(); throw error; }
+    const finish = () => { arrived(next, place, retainedTime); releaseLeft(leaving, next); };
+    if (step.done) { finish(); return true; }
+    const t = transition;
+    active = null;
+    t.entering = t.building = true;
+    holdInput(true);
+    // The rest of the enter, then the meshes its first frame draws, so that frame does not build them all at once.
+    const rest = (function* () {
+      yield* steps;
+      yield;
+      yield* renderer.prepareSteps(next.root, next.renderOpts?.meshRigs === true, { until: performance.now() + window.BL.buildTasks.SLICE_MS / 2 });
+    })();
+    window.BL.buildTasks.run(rest, next.id, visitController.signal).then(() => {
+      t.entering = t.building = false;
+      holdInput(false);
+      finish();
+      done();
+    }, (error) => { if (!destroyed) reportError(error); });
+    return false;
   };
   // Where a settled transition lands: its own scene, or where its preparation redirected it.
   const landing = (t) => t.redirect ? { next: scenes[t.redirect.scene], place: t.redirect.place ?? null } : { next: t.next, place: t.place };
@@ -369,14 +424,19 @@
     router.settled();
   };
   const stepTransition = (dt) => {
+    // A scene entering in slices carries the transition on when its last slice is done (`swap`'s `done`).
+    if (transition.entering) {
+      if (fade === 1) transition.held += dt;
+      return;
+    }
     // An instant crossing (a doorway seen from the Ooga's eyes, a mirror) never goes black: the scene left keeps
     // playing while it prepares, and its last frame holds while the next one builds.
     if (transition.instant) {
       if (!transition.ready || !buildLanding(transition)) return;
+      const arrive = () => { settled(); fade = 0; };
       if (transition.failed) abandon();
-      else { const { next, place } = landing(transition); swap(next, place); }
-      settled();
-      fade = 0;
+      else { const { next, place } = landing(transition); if (!swap(next, place, arrive)) return; }
+      arrive();
       return;
     }
     transition.t += dt;
@@ -384,10 +444,10 @@
       fade = Math.min(1, transition.t / FADE);
       if (fade === 1) transition.held += dt;
       if (fade < 1 || !transition.ready || !buildLanding(transition)) return;
+      const t = transition, fadeIn = () => { t.out = false; t.t = 0; };
       if (transition.failed) abandon();
-      else { const { next, place } = landing(transition); swap(next, place); }
-      transition.out = false;
-      transition.t = 0;
+      else { const { next, place } = landing(transition); if (!swap(next, place, fadeIn)) return; }
+      fadeIn();
       return;
     }
     fade = 1 - Math.min(1, transition.t / FADE);
@@ -464,7 +524,7 @@
     });
     curtain.dataset.open = "true";
   };
-  const frameInterval = () => (elapsed > WARMUP && !document.hasFocus() && !active.inMotion ? UNFOCUSED_INTERVAL : 0);
+  const frameInterval = () => (elapsed > WARMUP && !document.hasFocus() && !(active && active.inMotion) ? UNFOCUSED_INTERVAL : 0);
 
   const housekeep = () => { if (active) renderer.releaseUnused(liveGeometry()); };
 
@@ -603,7 +663,7 @@
     if (document.hidden) {
       window.cancelAnimationFrame(raf);
       raf = 0;
-    } else if (!raf && active) {
+    } else if (!raf && (active || transition && transition.entering)) {
       lastTime = performance.now();
       raf = window.requestAnimationFrame(frame);
     }
@@ -812,8 +872,9 @@
         }
         lastTime = performance.now();
       },
+      // Null while a scene enters in slices: the departed one has gone and the next has not arrived.
       get scene() {
-        return active.id;
+        return active ? active.id : null;
       },
       get transitioning() {
         return transition !== null;
@@ -822,7 +883,7 @@
         return fade;
       },
       get input() {
-        return active.input;
+        return active && active.input;
       },
       get renderedFrames() {
         return renderedFrames;
@@ -836,13 +897,13 @@
       get timing() {
         return Object.fromEntries(performance.getEntriesByType("mark").filter((m) => m.name.startsWith("ooga:")).map((m) => [m.name.slice(5), Math.round(m.startTime)]));
       },
-      stats: () => ({ ...active.stats(), gl: renderer.stats || null, dom: document.getElementsByTagName("*").length }),
+      stats: () => ({ ...(active ? active.stats() : {}), gl: renderer.stats || null, dom: document.getElementsByTagName("*").length }),
       get level() {
         return world.level;
       }
     };
     for (const key of ["slots", "drops", "core", "shell", "delivery", "spillEffect", "cavemen", "crates", "lab", "headquarters", "hud", "applyAllSwag", "renderLocker", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "cameraCave", "crew", "fx", "controls", "props", "altar", "path", "scenery", "jetpack", "magazine", "mirrorCave", "matrixCave", "matrixGate", "pilot", "renderOpts", "lamps", "lighting", "fireSeats", "critters", "storm", "daylight", "setHour", "track", "racers", "items", "race", "audio", "weather", "drop", "diver", "plane", "course", "jumbotron", "totems", "fireworks", "fireworksPending", "orbit", "flight", "site", "agent", "poolIsland", "mine", "dsb", "clankers", "clankerPlay", "factory", "bifrost", "arcade", "carnival", "npcSync", "footsteps", "timechain", "halloween" /* HALLOWEEN */]) {
-      Object.defineProperty(ooga, key, { get: () => active.debug && active.debug[key], enumerable: true });
+      Object.defineProperty(ooga, key, { get: () => active && active.debug && active.debug[key], enumerable: true });
     }
     window.__ooga = ooga;
   }
@@ -850,6 +911,8 @@
     destroyed = true;
     bootBuildController.abort();
     transition?.controller.abort();
+    // A scene entering in slices stops at its next slice; the page is going, so nothing of it is entered.
+    if (transition && transition.entering) visitController.abort();
     terrainController?.abort();
     window.cancelAnimationFrame(raf);
     window.clearInterval(housekeepTimer);

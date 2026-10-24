@@ -4565,6 +4565,26 @@ void main() {
       prepareScene,
       // Owners of bounded, alternating meshes may prepare every variant before their first visible swap.
       prepareGeometry: (geometry) => { if (lost || !pollPrograms()) return false; recordFor(geometry); return true; },
+      // A scene entering in slices (a released hub's return) builds here, a slice at a time, the meshes its first frame
+      // would otherwise build all at once: every shown node's own mesh (with each of a foliage mesh's levels of detail,
+      // since its frame picks one by distance) and, as the frame does, a rig's parts when rigs are drawn and its rig when not.
+      prepareSteps: function* (root, rigs, slice) {
+        const stack = [root];
+        while (stack.length) {
+          const node = stack.pop();
+          if (!node.visible) continue;
+          for (let i = node.children.length - 1; i >= 0; i--) stack.push(node.children[i]);
+          const g = node.geometry;
+          if (!g || (rigs ? node.meshRigSource : g.meshRig)) continue;
+          const lods = g.foliageLods && g.foliageLods.owner === g ? g.foliageLods : null;
+          if (records.has(g) && (!lods || records.has(lods.medium) && records.has(lods.far))) continue;
+          if (lost || !pollPrograms()) return;
+          recordFor(g);
+          if (lods) { recordFor(lods.medium); recordFor(lods.far); }
+          // Half a construction slice: one large mesh can take as long again.
+          if (performance.now() >= slice.until) { yield; slice.until = performance.now() + BL.buildTasks.SLICE_MS / 2; }
+        }
+      },
       createRig: createRendererRig,
       releaseUnused,
       dispose,

@@ -2153,6 +2153,7 @@
       releaseGeometry: () => { },
       prepareScene: () => { },
       prepareGeometry: () => true,
+      prepareSteps: function* () { },
       createRig: () => null,
       releaseUnused: (live) => { BL.models.addLods(live); canvasShades.release(live); if (environment.source && !live.has(environment.source.geometry)) destroyEnvironment(); return 0; },
       dispose: () => {
