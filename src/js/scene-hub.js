@@ -422,7 +422,10 @@
   const FACTORY_WALK_IN = 1, FACTORY_WALK_OUT = 2, OUT_WALK = 2;
   // Once a walk is done the Ooga stands (`settle`) until the visitor lets go of moving, since the view has turned round
   // behind it and a key still held may now mean the other way.
-  const factoryWalk = { phase: 0, cave: null, t: 0, x: 0, z: 0, seen: false, through: false, wash: 0, hold: 0, settle: false };
+  // Across the switch, `grab` takes the island's last frame as it hands the Ooga over, and `still` is the Factory's last
+  // frame over the island's first (`hold` seconds full, then dissolving); `beat` is how long the Ooga still stands in
+  // the shield before a slow switch.
+  const factoryWalk = { phase: 0, cave: null, t: 0, x: 0, z: 0, seen: false, through: false, beat: 0, grab: false, still: 0, hold: 0, settle: false };
   // Tess, the island's guide, for the visit (`hub-guide.js`).
   let islandGuide = null;
   let stateTimer = 0, hintTimer = 0, now = 0, hour = 12, unsubscribeActivity = null, unsubscribeAccount = null, ownOogaClaimed = false;
@@ -6400,8 +6403,8 @@
     }
     f.node.tick(dt);
     const w = factoryWalk, G = BL.factoryWindow.GLIDE;
-    // The shield's light clears off the view once the Ooga is back out.
-    if (!w.through && w.wash > 0 && (w.hold -= dt) <= 0) w.wash = Math.max(0, w.wash - dt / G.washOut);
+    // The Factory's last frame dissolves away once the island has taken over.
+    if (w.still > 0 && (w.hold -= dt) <= 0) w.still = Math.max(0, w.still - dt / G.dissolve);
     if (!player || entering || !BL.scenes.factory) { w.phase = 0; w.seen = false; w.settle = false; return; }
     if (w.settle) {
       const a = pilot.controls.read();
@@ -6433,15 +6436,18 @@
   };
   // The walk through the Factory's shield, in the third person, as the Timechain Sphere's doorway walks its visitor
   // through: after the pilot has read the visitor's input, the Ooga's steering is set aside for the walk's own, so it
-  // walks itself down the tunnel's middle at an even pace while the view follows as always, swinging round behind it. Going in, through the shield its light fills the view over
-  // `washIn`, and the factory takes over in that light without a fade, with the same Ooga as far past its own shield
-  // and the view's pitch and distance (`world.factoryCrossing`). Coming out (`arriveFromFactory`) the Ooga walks on out
-  // of the mouth while the light clears. Anything else moving the Ooga, or a walk that runs long, lets go.
+  // walks itself down the tunnel's middle at an even pace while the view follows as always, swinging round behind it.
+  // Going in, a step through the shield the factory takes over with an instant switch, the island's last frame held
+  // over its first and dissolving away, with the same Ooga as far past its own shield and the view's pitch and distance
+  // (`world.factoryCrossing`); on a page's first walk in, whose switch builds the whole hall, the Ooga stands a beat in
+  // the shield first, so the switch lands on a still frame. Coming out (`arriveFromFactory`) the Ooga walks on out of
+  // the mouth while the Factory's last frame dissolves. Anything else moving the Ooga, or a walk that runs long, lets go.
   const factoryGlide = (dt, player, along, across, feet) => {
     const w = factoryWalk, G = BL.factoryWindow.GLIDE, m = factoryMouth.mouth, p = player.root.position, o = pilot.orbit;
     const sr = Math.sin(m.ry), cr = Math.cos(m.ry), shield = BL.factoryModels.SHIELD_Z, going = w.phase === FACTORY_WALK_IN;
     w.t += dt;
-    if (player !== w.cave || Math.hypot(p.x - w.x, p.z - w.z) > 1.2 || w.t > G.limit || !going && along > OUT_WALK) {
+    const moved = Math.hypot(p.x - w.x, p.z - w.z);
+    if (player !== w.cave || moved > 1.2 || w.t > G.limit || !going && along > OUT_WALK) {
       w.phase = 0; w.through = false; w.seen = false; w.settle = player === w.cave;
       crew.steer(0, 0, 0, 0, 0);
       return;
@@ -6456,28 +6462,39 @@
     if (!w.through && along <= shield) {
       w.through = true;
       factoryMouth.phase.ripples.pulse(across, feet + 1, 0);
+      w.beat = world.factoryKeep ? 0 : G.beat;
     }
-    if (!w.through || (w.wash = Math.min(1, w.wash + dt / G.washIn)) < 1) return;
-    // Through, in the light: still played, so the crew never stands it up and turns it back out to work.
+    // On a step past the shield, or as far as it gets.
+    if (!w.through || along > shield - G.through && moved > 0.005) return;
+    if (w.beat > 0) {
+      w.beat -= dt;
+      crew.steer(0, 0, 0, 0, 0);
+      return;
+    }
+    // Through: still played, so the crew never stands it up and turns it back out to work. The island's meshes stay on
+    // the GPU while the visit lasts (`world.islandKeep`), so walking back out uploads nothing, and this frame, once
+    // drawn, is held over the factory's first (`grab`).
     world.factoryCrossing = { across, past: shield - along, pitch: o.pitch, dist: o.dist };
+    world.islandKeep = islandMeshes();
     w.phase = 0;
+    w.grab = true;
     crew.steer(0, 0, 0, 0, 0);
     entering = factoryDeparting = true;
     world.pilot = player.traits.name;
     factoryMouth.snap = true;
     pilot.controls.reset(); input.reset(); pilot.setActive(false); hud.tooltip.hide();
-    // A switch the director refuses (another under way) puts it all back, the light with it.
-    if (!go("factory", null, true)) { world.factoryCrossing = null; stay(); }
+    // A switch the director refuses (another under way) puts it all back.
+    if (!go("factory", null, true)) { world.factoryCrossing = world.islandKeep = null; stay(); }
   };
-  // Back out of the Factory's shield in its light: the Ooga at the mouth's rim facing out, as far across as it left,
-  // the view behind it in the tunnel looking out, and the walk on out of the mouth.
+  // Back out of the Factory's shield: the Ooga at the mouth's rim facing out, as far across as it left, the view behind
+  // it in the tunnel looking out, the Factory's last frame dissolving off it, and the walk on out of the mouth.
   const arriveFromFactory = (c) => {
     const m = factoryMouth.mouth, sr = Math.sin(m.ry), cr = Math.cos(m.ry), G = BL.factoryWindow.GLIDE, player = pilot.player;
     const pitch = clamp(c.pitch, FOLLOW.pitch[0], FOLLOW.pitch[1]), along = BL.factoryModels.SHIELD_Z + Math.max(c.past, FOLLOW.min * Math.cos(pitch) + 0.4);
     const across = clamp(c.across, -1.2, 1.2), x = m.x + sr * along + cr * across, z = m.z + cr * along - sr * across;
     pilot.navigate({ position: { x, y: m.floorY, z }, yaw: m.ry + Math.PI, pitch, dist: FOLLOW.min });
     const p = player.root.position;
-    Object.assign(factoryWalk, { phase: FACTORY_WALK_OUT, cave: player, t: 0, x: p.x, z: p.z, seen: true, through: false, wash: 1, hold: G.washHold });
+    Object.assign(factoryWalk, { phase: FACTORY_WALK_OUT, cave: player, t: 0, x: p.x, z: p.z, seen: true, through: false, still: 1, hold: G.still });
   };
   // B.C.A.'s veil, in a banker's lamp amber, where the lab's stands, so the gorillas' suits show from where they cross.
   const BCA_TINT = [1, 0.78, 0.4], BCA_VEIL_Z = 0.5;
@@ -8783,8 +8800,10 @@
         ? "Continuous rage · Esc to stop" : "Click to redirect · Esc to deselect", x, y + 9);
       ctx2d.restore();
     }
-    // Over everything: the Factory's shield's light, while an Ooga walks through it.
-    BL.factoryWindow.wash(ctx2d, factoryWalk.wash);
+    // Over everything: the Factory's last frame, dissolving off the island's first; and the island's own, taken once
+    // drawn as the Ooga walks into the Factory.
+    BL.factoryWindow.still(ctx2d, factoryWalk.still);
+    if (factoryWalk.grab) { factoryWalk.grab = false; BL.factoryWindow.grab(glCanvas); }
   };
   const cameraPlatformAt = (x, y, z) => y >= 0 && y <= ALTAR_HEIGHT && Math.abs(x) <= altar.platformRadius && Math.abs(z) <= altar.platformRadius && Math.hypot(x, z) <= altar.platformRadius;
   // One solid mask spans both islands, the dais and fruit contact. A cheap extent check keeps the
@@ -10721,7 +10740,8 @@
     poolEffectsActive = false; poolEffectsTime = 0;
     glCanvas = ctx.canvas;
     factoryDeparting = bifrostDeparting = bifrostHeld = false;
-    Object.assign(factoryWalk, { phase: 0, cave: null, seen: false, through: false, wash: 0, hold: 0, settle: false });
+    Object.assign(factoryWalk, { phase: 0, cave: null, seen: false, through: false, beat: 0, grab: false, still: 0, hold: 0, settle: false });
+    world.islandKeep = null;
     overlayCanvas = ctx.overlay;
     magazineState = {
       get owned() { return !!crew && crew.hasMagazine(crew.player); },
@@ -11289,12 +11309,7 @@
     // The doorway draws the island once from inside the passage for the way back out (`renderView`), sets the
     // sphere's heartbeat going while a room readies slowly (`show`), and hands a crossing the island's own meshes to
     // keep on the GPU while the visit lasts (`keep`).
-    const keepGeometry = () => {
-      const kept = new Set(), walk = (node) => { if (node.geometry) kept.add(node.geometry); for (const child of node.children) walk(child); };
-      walk(root);
-      liveGeometry(kept);
-      return kept;
-    };
+    const keepGeometry = islandMeshes;
     timechainIsland.gate = BL.timechainGate.create({ site: timechainIsland.site, place: timechainIsland.place, pilot, crew, hud, camera, renderer, canvas: glCanvas, world, go, equipJetpack,
       show: timechainIsland.show, renderView: (view) => {
         timechainIsland.site.view(view.position);
@@ -11838,7 +11853,7 @@
   const stay = () => {
     bifrostHeld = bifrostDeparting;
     entering = factoryDeparting = bifrostDeparting = false;
-    factoryWalk.through = false; factoryWalk.wash = 0;
+    factoryWalk.through = factoryWalk.grab = false; factoryWalk.still = 0;
     if (factoryMouth) factoryMouth.snap = false;
     if (bifrostIsle) bifrostIsle.snap = false;
     pilot.controls.reset(); input.reset(); pilot.setActive(true);
@@ -12027,7 +12042,21 @@
     hubScene.input = hubScene.debug = null;
     return { targets: count };
   };
+  // Every mesh the island draws, for a scene it walks into to keep on the GPU while the visit lasts: only the island's
+  // own, so the Factory's kept meshes never ride along from one visit to the next.
+  const islandMeshes = () => {
+    const kept = new Set(), walk = (node) => { if (node.geometry) kept.add(node.geometry); for (const child of node.children) walk(child); };
+    walk(root);
+    islandGeometry(kept);
+    if (world.factoryKeep) for (const geometry of world.factoryKeep) kept.delete(geometry);
+    return kept;
+  };
   const liveGeometry = (set) => {
+    // The Lightning Factory's meshes stay on the GPU while the island runs, so walking back in uploads nothing.
+    if (world && world.factoryKeep) for (const geometry of world.factoryKeep) set.add(geometry);
+    islandGeometry(set);
+  };
+  const islandGeometry = (set) => {
     if (islandGuide) islandGuide.liveGeometry(set);
     if (ghosts) ghosts.liveGeometry(set); // HALLOWEEN
     mempoolIsland.water.liveGeometry(set);
@@ -12054,12 +12083,14 @@
     voiceZone: "none",
     micKey: true,
     id: "hub", enter, update, overlay, onDonation, previewDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry,
+    // The Lightning Factory's builders stay warm while the island runs (director.js), since its shield walks straight in.
+    keeps: ["factory"],
     root: null, camera: null, input: null, debug: null,
     get inMotion() {
       // A crossing through the Timechain Sphere's doors keeps full rate, so its walk and swoop finish smoothly, and so
-      // does a walk through the Factory's shield and its light.
+      // does a walk through the Factory's shield and its dissolve.
       if (timechainIsland && timechainIsland.gate.busy) return true;
-      if (factoryWalk.phase || factoryWalk.wash > 0) return true;
+      if (factoryWalk.phase || factoryWalk.still > 0) return true;
       if (ghosts && ghosts.inMotion) return true; // HALLOWEEN
       if (pile.inMotion || fx.inMotion || poolEffectsActive && (weather.active || mempoolIsland.water.active) || magazine && magazine.revealed || MATRIX_WORLD.active || mirrorGuides.state.doorway || mirrorCave.damage.active || mirrorCave.ripples.active || mirrorCave.body.active) return true;
       if (!entropyLab.phase.paused && (entropyLab.phase.ripples.active || entropyLab.phase.body.contacts || entropyLab.phase.body.active)) return true;

@@ -201,7 +201,11 @@
   // Once a walk is done the Ooga stands (`settle`) until the visitor lets go of moving, since the view has turned round
   // behind it and a key still held may now mean the other way.
   const WALK_ON = 1, WALK_OFF = 2;
-  const walk = { phase: 0, t: 0, x: 0, z: 0, through: false, wash: 0, hold: 0, settle: false };
+  // Across the switch, `grab` takes the hall's last frame as it hands the Ooga to the island, and `still` is the
+  // island's last frame over the hall's first (`hold` seconds full, then dissolving); `beat` is how long the Ooga stands
+  // in the shield before the island's rebuild. `canvas` is the scene's, to take the frame from.
+  const walk = { phase: 0, t: 0, x: 0, z: 0, through: false, beat: 0, grab: false, still: 0, hold: 0, settle: false };
+  let canvas = null;
   // On the Worker's page the island's driving rules hold in here too, and the Ooga driven is reported to the
   // room every frame, so signed-in players in the hall hear each other (voice needs a driven Ooga).
   const mayPossess = (cave) => BL.net.mayDrive(cave.traits.name);
@@ -1110,7 +1114,8 @@
   const walkStep = (dt) => {
     const w = walk, G = BL.factoryWindow.GLIDE, p = avatar.root.position, o = pilot.orbit, off = w.phase === WALK_OFF;
     w.t += dt;
-    if (people.player !== avatar || Math.hypot(p.x - w.x, p.z - w.z) > 1.2 || w.t > G.limit || !off && p.z <= ARRIVAL.position.z) {
+    const moved = Math.hypot(p.x - w.x, p.z - w.z);
+    if (people.player !== avatar || moved > 1.2 || w.t > G.limit || !off && p.z <= ARRIVAL.position.z) {
       w.phase = 0;
       w.through = false;
       w.settle = people.player === avatar;
@@ -1125,15 +1130,24 @@
     if (!off) return;
     if (!w.through && p.z >= GATE_Z) {
       w.through = true;
+      w.beat = G.beat;
       scene.gate.phase.ripples.pulse(p.x, feetOf() - LAYOUT.entrance.y + 1, 0);
     }
-    if (!w.through || (w.wash = Math.min(1, w.wash + dt / G.washIn)) < 1) return;
+    // A step into the shield, it stands a beat, as the Timechain Sphere's way out does, so the island's rebuild lands on
+    // a still frame; then the island takes over with this frame held over its first.
+    if (!w.through || p.z < GATE_Z + G.through / 2 && moved > 0.005) return;
+    if (w.beat > 0) {
+      w.beat -= dt;
+      people.steer(0, 0, 0, 0, 0);
+      return;
+    }
     world.factoryCrossing = { across: p.x, past: p.z - GATE_Z, pitch: o.pitch, dist: o.dist };
     w.phase = 0;
+    w.grab = true;
     people.steer(0, 0, 0, 0, 0);
     leaveCave(true);
-    // A switch the director refuses (another under way) leaves the Ooga in the hall, and the light clears.
-    if (!leaving) { world.factoryCrossing = null; w.through = false; }
+    // A switch the director refuses (another under way) leaves the Ooga in the hall.
+    if (!leaving) { world.factoryCrossing = null; w.through = w.grab = false; }
   };
   const onKey = (e) => {
     if (scene.booth.mode) return boothKey(scene, e);
@@ -1743,10 +1757,12 @@
     // control. A page that opens here takes `character=` instead, as the island does. With nobody, the view stays
     // free.
     const asked = ctx.from === null ? new URLSearchParams(location.search).get("character")?.trim().toLowerCase() : null;
-    // Walked in through the island's shield, the hall comes on in its light, which clears whoever is driven.
+    // Walked in through the island's shield, the hall comes on under the island's last frame, which dissolves whoever is
+    // driven.
     const crossing = ctx.from === "hub" ? world.factoryCrossing : null;
     world.factoryCrossing = null;
-    Object.assign(walk, { phase: 0, through: false, wash: crossing ? 1 : 0, hold: crossing ? BL.factoryWindow.GLIDE.washHold : 0, settle: false });
+    Object.assign(walk, { phase: 0, through: false, beat: 0, grab: false, still: crossing ? 1 : 0, hold: crossing ? BL.factoryWindow.GLIDE.still : 0, settle: false });
+    canvas = ctx.canvas;
     const named = asked ? contributors.roster.find((c) => c.name.toLowerCase() === asked) : null;
     const returningOwn = pilot.loginViewRestored && BL.net.ownCharacter();
     const picked = returningOwn ? contributors.roster.find(c => c.name === returningOwn.handle)
@@ -2019,8 +2035,8 @@
   const update = (dt, elapsed) => {
     const s = scene;
     const previousX = avatar ? avatar.root.position.x : 0, previousY = avatar ? avatar.root.position.y : 0, previousZ = avatar ? avatar.root.position.z : 0;
-    // The shield's light clears off the view once the Ooga is through on its way in.
-    if (!walk.through && walk.wash > 0 && (walk.hold -= dt) <= 0) walk.wash = Math.max(0, walk.wash - dt / BL.factoryWindow.GLIDE.washOut);
+    // The island's last frame dissolves away once the hall has taken over.
+    if (walk.still > 0 && (walk.hold -= dt) <= 0) walk.still = Math.max(0, walk.still - dt / BL.factoryWindow.GLIDE.dissolve);
     pilot.readInput(dt);
     if (walk.phase) walkStep(dt);
     else if (walk.settle) {
@@ -2260,11 +2276,22 @@
   const drawExtra = (ctx2d, project) => {
     remotes.drawNames(ctx2d, project);
     drawBooth(ctx2d);
-    BL.factoryWindow.wash(ctx2d, walk.wash);
+    // Over everything: the island's last frame, dissolving off the hall's first; and the hall's own, taken once drawn as
+    // the Ooga walks out.
+    BL.factoryWindow.still(ctx2d, walk.still);
+    if (walk.grab) { walk.grab = false; BL.factoryWindow.grab(canvas); }
   };
   const overlay = (dt) => fx.drawOverlay(dt, drawExtra);
 
   const leave = () => {
+    // The hall's meshes stay on the GPU while the island runs (`world.factoryKeep`, read by the island's liveGeometry),
+    // so walking back in uploads nothing; taken first, while every piece is still on the graph.
+    // Only the hall's own, so the island's kept meshes never ride along from one visit to the next.
+    const kept = new Set(), walk = (node) => { if (node.geometry) kept.add(node.geometry); for (const child of node.children) walk(child); };
+    walk(root);
+    hallGeometry(kept);
+    if (world.islandKeep) for (const geometry of world.islandKeep) kept.delete(geometry);
+    world.factoryKeep = kept;
     // A visitor at the kiosk steps away first, and a tip of theirs still on its screen goes into the cooker.
     endBooth(scene);
     // Whoever walked in walks back out as themselves: the island takes the same Ooga back at this mouth.
@@ -2304,12 +2331,17 @@
     input.dispose();
     hud.closeBoard();
     hud.dispose();
-    scene = shared = feed = mock = hud = hooks = input = pilot = fx = agentPlay = dust = people = avatar = playerWorld = null;
+    scene = shared = feed = mock = hud = hooks = input = pilot = fx = agentPlay = dust = people = avatar = playerWorld = canvas = null;
     factoryScene.input = factoryScene.debug = null;
     return { targets: count };
   };
-  // Geometry kept off the graph but swapped in when something flashes, so it stays on the GPU.
+  // Geometry kept off the graph but swapped in when something flashes, so it stays on the GPU; and the island's, handed
+  // over as the Ooga walked in through its shield, so walking back out uploads nothing.
   const liveGeometry = (set) => {
+    if (world && world.islandKeep) for (const geometry of world.islandKeep) set.add(geometry);
+    hallGeometry(set);
+  };
+  const hallGeometry = (set) => {
     for (const pair of [FM.coreChamber(), FM.forgeFire(), FM.forgeSign(), FM.forgeWave(), FM.switchScreens(), FM.rebalancerRing(), FM.rebalancerFlow(), FM.lookoutLamp(), FM.galleryCaps(), FM.capacitor().blue, FM.capacitor().orange, FM.cookerPort()]) {
       for (const k in pair) set.add(pair[k]);
     }
