@@ -16,7 +16,7 @@
     "html_handling": "drop-trailing-slash",
     "not_found_handling": "404-page",
     // Only these paths run the Worker (worker/src/index.js); every other path is served straight from _site.
-    "run_worker_first": ["/auth/*", "/api/*", "/poker/*", "/room", "/donations/*"]
+    "run_worker_first": ["/auth/*", "/api/*", "/poker/*", "/room", "/donations/*", "/purchases/*"]
   },
   "vars": {
     // Optional poker: set POKER_SERVICE_URL to the HTTPS service origin and POKER_SERVICE_TOKEN as a secret.
@@ -37,7 +37,7 @@
       "migrations_dir": "worker/migrations"
     }
   ],
-  // bananapayserver's production Worker, on mainnet: /donations/* goes to its PageApi entrypoint, and /api/me tells
+  // bananapayserver's production Worker, on mainnet: /donations/* and /purchases/* go to its PageApi entrypoint, and /api/me tells
   // the page donations are on. Deploy bananapayserver-production first, or this Worker's deploy fails on the binding.
   "services": [{ "binding": "DONATIONS", "service": "bananapayserver-production", "entrypoint": "PageApi" }],
   "durable_objects": {

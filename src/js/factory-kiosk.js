@@ -1030,5 +1030,7 @@
     return flow;
   };
 
-  BL.factoryKiosk = { W, H, MIN, MAX, EXPIRY, SETTLE, HOLD, create, still };
+  // The screen's painting, for the stand's screen (stand-kiosk.js) to draw in the same letters, glass and QR.
+  const kit = { W, H, INK, glyph, width, write, writeFit, face, panel, qrBox, bolt, coin, clock, sats };
+  BL.factoryKiosk = { W, H, MIN, MAX, EXPIRY, SETTLE, HOLD, create, still, kit };
 })();

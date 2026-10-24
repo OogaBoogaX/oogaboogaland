@@ -1640,6 +1640,43 @@
       }
       ctx.restore();
     };
+    // Fireworks (`opts.sprites`, see fireworks.js) on Canvas 2D: the heads of at most SPRITE_HEADS sparks as glowing
+    // squares over everything, no streaks, no sea glint or flash. Colours take the sprite shader's c/(1+c) and snap to
+    // 16 steps a channel, so a frame builds no style strings once those are cached.
+    const SPRITE_HEADS = 1500, SPRITE_STYLES = new Array(4096), SPRITE_AT = new Float32Array(3), SPRITE_SCREEN = { x: 0, y: 0, depth: 0 };
+    let spritesDrawn = 0;
+    const drawSpriteHeads = (sprites) => {
+      sprites.dirtyCount = 0;
+      sprites.dirtyAll = false;
+      // The sample is taken over the heads alight now: trail copies only shade in WebGL, and most of a show is
+      // written long before it bursts, so a stride over every record keeps too few of the sparks in the air.
+      const d = sprites.data, time = sprites.time;
+      let lit = 0, n = 0;
+      for (let r = 0; r < sprites.rangeCount; r++) {
+        const from = sprites.ranges[r * 2], to = from + sprites.ranges[r * 2 + 1];
+        for (let o = from * 16; o < to * 16; o += 16) if (d[o + 14] <= 0 && time >= d[o + 3] && time - d[o + 3] <= d[o + 7]) lit++;
+      }
+      if (!lit) return;
+      const every = Math.ceil(lit / SPRITE_HEADS);
+      ctx.globalCompositeOperation = "lighter";
+      for (let r = 0; r < sprites.rangeCount; r++) {
+        const from = sprites.ranges[r * 2], to = from + sprites.ranges[r * 2 + 1];
+        for (let i = from; i < to; i++) {
+          const o = i * 16;
+          if (d[o + 14] > 0 || time < d[o + 3] || time - d[o + 3] > d[o + 7] || n++ % every) continue;
+          const b = sprites.headAt(i, SPRITE_AT);
+          if (b <= 0.02 || !project(SPRITE_AT[0], SPRITE_AT[1], SPRITE_AT[2], SPRITE_SCREEN)) continue;
+          const cr = d[o + 8] * b, cg = d[o + 9] * b, cb = d[o + 10] * b, k = sprites.colorGain * 15;
+          const ri = Math.round(cr / (1 + cr) * k), gi = Math.round(cg / (1 + cg) * k), bi = Math.round(cb / (1 + cb) * k), key = ri * 256 + gi * 16 + bi;
+          if (!key) continue;
+          ctx.fillStyle = SPRITE_STYLES[key] || (SPRITE_STYLES[key] = `rgb(${ri * 17},${gi * 17},${bi * 17})`);
+          const px = Math.max(1, Math.min(6, d[o + 11] * lastF / -SPRITE_SCREEN.depth));
+          ctx.fillRect(SPRITE_SCREEN.x - px, SPRITE_SCREEN.y - px, px * 2, px * 2);
+          spritesDrawn++;
+        }
+      }
+      ctx.globalCompositeOperation = "source-over";
+    };
     const render = (root, camera, opts = {}) => {
       cutawayMaxY = opts.cutawayMaxY < 1e6 ? opts.cutawayMaxY : Infinity;
       cutawayFade = Math.max(0, Math.min(1, Number.isFinite(opts.cutawayFade) ? opts.cutawayFade : opts.birdsEyeCutaway ? 1 : 0));
@@ -1899,6 +1936,9 @@
         }
       }
       if (glyphBlend) { ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over"; }
+      const sprites = opts.sprites;
+      spritesDrawn = 0;
+      if (sprites && sprites.rangeCount > 0 && sprites.data) drawSpriteHeads(sprites);
       return true;
     };
     const P = new Float32Array(3);
@@ -1948,7 +1988,7 @@
         return "low";
       },
       get stats() {
-        return { waterTextures: 0, records: 0, active: 0, mirrorResources: mirrorDebug.resources, imageTextures: 0, rippleBodyTextures: 0, shadowResources: 0, shadowSize: 0, shadowPassCount: 0, shadowFinite: true, culled: matrixCulled, drawn: 0, suppressed, rippleSurfaces, rippleWaves, matrixSurfaces, matrixLivingSurfaces, matrixSamples, matrixSampleStep, matrixSampleBudget: MATRIX_SAMPLE_BUDGET, matrixTileBytes: matrixPixels.byteLength };
+        return { waterTextures: 0, records: 0, active: 0, mirrorResources: mirrorDebug.resources, imageTextures: 0, rippleBodyTextures: 0, shadowResources: 0, shadowSize: 0, shadowPassCount: 0, shadowFinite: true, culled: matrixCulled, drawn: 0, suppressed, rippleSurfaces, rippleWaves, matrixSurfaces, matrixLivingSurfaces, matrixSamples, matrixSampleStep, matrixSampleBudget: MATRIX_SAMPLE_BUDGET, matrixTileBytes: matrixPixels.byteLength, spriteProgram: false, spriteBuffer: false, spritesDrawn };
       },
       get mirror() {
         return mirrorDebug;

@@ -1,5 +1,6 @@
 // The kiosk flow on the mainland, real or simulated, and the name and message fields shared with the Factory's glass. The fields are
-// hidden: they only take the typing (and a phone's keyboard), which both kiosks draw on their own screens.
+// hidden: they only take the typing (and a phone's keyboard), which both kiosks draw on their own screens. The hub's stand
+// opens its own screen in the same dialog (`openStand`, stand-kiosk.js), which a paid purchase closes (`receivePurchase`).
 (() => {
   "use strict";
   const BL = window.BL;
@@ -9,6 +10,13 @@
     const handle = document.getElementById("donation-handle"), message = document.getElementById("donation-message"), closeButton = document.getElementById("donation-close");
     const status = document.getElementById("donation-details-status");
     const context = canvas.getContext("2d"), donations = BL.donations, help = dialog.querySelector(".help");
+    // The dialog's lettered title and the screen's spoken label, the donation's or the stand's.
+    const title = document.querySelector("#donation-title [data-sign]");
+    const donateTitle = title.getAttribute("aria-label") || title.textContent, donateLabel = canvas.getAttribute("aria-label");
+    const heading = (text, label) => {
+      if (title.getAttribute("aria-label") !== text) { title.setAttribute("aria-label", text); title.replaceChildren(BL.hud.signLettering(text)); }
+      canvas.setAttribute("aria-label", label);
+    };
     let flow = null, fieldFlow = null, frame = 0, previous = 0, clock = 0, saveTimer = 0, simulated = false, onClose = null;
     let historyOpen = false, historyAll = false, historyIndex = -1, historyPrefix = "";
     const historyMatches = [];
@@ -249,6 +257,7 @@
     const open = (demo = false) => {
       if (dialog.open) return;
       simulated = demo;
+      heading(donateTitle, donateLabel);
       // The page's own /donate address: a path where the router serves paths, a hash from disk or a named file.
       const link = BL.router && !BL.router.served ? `${location.href.split("#")[0]}#/donate` : `${location.origin}/donate`;
       help.textContent = simulated ? "This is a local simulation. No Bitcoin is sent." : "Pay with Lightning or on-chain. Your bananas arrive from the Factory when the payment confirms.";
@@ -286,10 +295,31 @@
       previous = performance.now(); clock = 0;
       frame = requestAnimationFrame(draw);
     };
+    // The stand's screen (stand-kiosk.js) in the same dialog, canvas, keys and close: `hooks` as that screen takes them,
+    // `help` the line under it.
+    const openStand = (hooks, helpText) => {
+      if (dialog.open) return;
+      simulated = !hooks.real;
+      help.textContent = helpText;
+      heading(hooks.heading, hooks.label);
+      flow = BL.standKiosk.create({ ...hooks, close });
+      flow.start();
+      if (document.pointerLockElement) document.exitPointerLock();
+      dialog.showModal();
+      canvas.focus({ preventScroll: true });
+      previous = performance.now(); clock = 0;
+      frame = requestAnimationFrame(draw);
+    };
+    // A paid purchase: true, closing the dialog, when it is the one the stand's screen is waiting for.
+    const receivePurchase = (id) => {
+      if (!flow || !flow.receive(id)) return false;
+      close();
+      return true;
+    };
     const key = (event) => {
       if (event.target === message || event.target === handle || event.metaKey || event.ctrlKey || event.altKey || event.isComposing || event.key === "Tab") return;
       if (!flow || event.target === closeButton) return;
-      if (event.key.length === 1 || ["Enter", "Escape", "Backspace", "Delete"].includes(event.key)) {
+      if (event.key.length === 1 || ["Enter", "Escape", "Backspace", "Delete", "ArrowUp", "ArrowDown"].includes(event.key)) {
         event.preventDefault(); event.stopPropagation();
         flow.key(event);
       }
@@ -322,7 +352,7 @@
       for (const type of ["keyup", "select", "focusin", "focusout"]) fields.removeEventListener(type, track);
       closeButton.removeEventListener("click", close); canvas.removeEventListener("click", tap);
     };
-    return { open, close, closeOutside, onClose: callback => { onClose = callback; }, receive, seen, dispose, defaults, details, typing: () => typed, restoreDetails, focusDetails, attachDetails, detachDetails, detailsState,
+    return { open, openStand, receivePurchase, close, closeOutside, onClose: callback => { onClose = callback; }, receive, seen, dispose, defaults, details, typing: () => typed, restoreDetails, focusDetails, attachDetails, detachDetails, detailsState,
       history: () => historyOpen ? historyMatches : null, historyCount: () => game.state.recentHandles.length, toggleHistory, chooseHistory, closeHistory: hideHistory };
   };
   BL.donationPopup = { create };

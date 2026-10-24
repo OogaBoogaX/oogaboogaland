@@ -2801,7 +2801,7 @@ const { autoQualityProbe } = (() => {
     const create = (quality = "high", renderedFrames = 100, deviceMemory) => {
       const changes = [], state = { focused: true, now: 0 };
       const renderer = { kind: "webgl2", quality, setQuality(value) { this.quality = value; changes.push(value); } };
-      const context = { renderer, navigator: { deviceMemory }, window: { matchMedia: () => ({ matches: false }) }, document: { hasFocus: () => state.focused }, transition: null, renderedFrames, showQuality() {} };
+      const context = { renderer, navigator: { deviceMemory }, window: { matchMedia: () => ({ matches: false }) }, document: { hasFocus: () => state.focused }, transition: null, active: null, renderedFrames, showQuality() {} };
       const tier = runInNewContext(`${opening}\n${controller}\n({ autoTier, tierFromBoot, BOOT_MEDIUM, BOOT_LOW })`, context);
       // The governor reads delivered intervals only, so a frame costs the probe nothing but the interval it took.
       const frames = (count, interval = 1000 / 60) => { for (let n = 0; n < count; n++) tier.autoTier(interval, state.now += interval); };
@@ -2820,6 +2820,10 @@ const { autoQualityProbe } = (() => {
     const excluded = create(); excluded.frames(600);
     excluded.state.focused = false; excluded.frames(600, 40);
     excluded.state.focused = true; excluded.context.transition = {}; excluded.frames(600, 40);
+    // A fireworks show is bounded by its own caps; the slow frames after it ends still count.
+    excluded.context.transition = null; excluded.context.active = { holdTier: true }; excluded.frames(600, 40);
+    const held = excluded.changes.length === 0;
+    excluded.context.active = { holdTier: false }; excluded.frames(600, 40);
     const fallback = create(); fallback.renderer.kind = "canvas2d"; fallback.frames(600, 40);
     // Boot cost is the only device signal Safari cannot mask, and it is read once, before any frame exists. The
     // boots sit inside the director's own bands, so recalibrating its thresholds never strands this check.
@@ -2839,7 +2843,7 @@ const { autoQualityProbe } = (() => {
     return { memoryBoot, healthy: healthy.changes.length === 0, gpuBound: bound.changes[0] === "medium",
       reactsIn: slowAt, reactsFast: slowAt <= 2500, ignoresSpikes: spike.changes.length === 0,
       bounded: bounded.changes.join("|") === "medium|low", warmup: warming.changes.length === 0,
-      ignoresPauses: excluded.changes.length === 0, fallback: fallback.changes.length === 0,
+      ignoresPauses: held, holdEnds: excluded.changes[0] === "medium", fallback: fallback.changes.length === 0,
       bootFast: fast.changes.length === 0, bootMedium: middling.changes.join("|") === "medium",
       bootLow: crawling.changes.join("|") === "low", bootOneWay: floor.changes.length === 0,
       bootKeepsCoarse: phone.changes.length === 0,
@@ -4277,6 +4281,43 @@ const dsbSharedDataChecks = async () => {
   record("dsb shared data: unobserved shared state keeps demo defaults and never enables disabled providers", unknown.state.backlog === 0.35 && unknown.state.fee === 4 && unknown.state.height === 0 && !unknown.state.priceFresh && !lifecycle && !sockets);
   unknown.dispose();
 };
+// The fireworks engine in Node: every page writes the same show from the same id, each tier holds its sprite cap
+// however much is bought at once, a show keeps to neighbouring slots, and the sky ends empty with its buffer released.
+const fireworksChecks = async () => {
+  const context = { window: {}, performance };
+  for (const f of ["math", "fireworks"]) runInNewContext(await readFile(new URL(`../src/js/${f}.js`, import.meta.url), "utf8"), context);
+  const { create, KINDS } = context.window.BL.fireworks;
+  const slots = [0, 1, 2, 3, 4, 5].map((i) => { const a = (i - 2.5) * 12 * Math.PI / 180; return { x: Math.sin(a) * 200, y: 115, z: Math.cos(a) * 200 }; });
+  const engine = (tier) => {
+    const bursts = [], fw = create({ quality: () => tier, launchPoint: { x: 7, y: 2, z: 24 }, slots, onCue: (kind, at, x, y, z) => { if (kind === "crackle") bursts.push(slots.reduce((best, s, i) => Math.hypot(s.x - x, s.z - z) < Math.hypot(slots[best].x - x, slots[best].z - z) ? i : best, 0)); } });
+    let t = 0, peak = 0, cap = 0;
+    const run = (seconds, dt = 1 / 60) => { for (let n = Math.round(seconds / dt); n > 0; n--) { t += dt; fw.update(dt, t, { x: 0, y: 8, z: 18 }); const s = fw.stats(); peak = Math.max(peak, s.fireworkSprites); cap = s.fireworkCap; } };
+    // Writing is sliced by wall time, so a slow machine takes more frames to finish a burst.
+    const settle = () => { for (let n = 0; n < 600; n++) { const s = fw.stats(); if (!s.fireworkQueued && s.fireworkSprites && s.fireworkWritten >= s.fireworkSprites) return; run(1 / 60); } };
+    return { fw, bursts, run, settle, get peak() { return peak; }, get cap() { return cap; } };
+  };
+  const a = engine("high"), b = engine("high"), other = engine("high");
+  a.fw.launch("mega", "inv_same"); b.fw.launch("mega", "inv_same"); other.fw.launch("mega", "inv_other");
+  a.settle(); b.settle(); other.settle();
+  const [da, db, dother] = [a, b, other].map((e) => e.fw.batch.data);
+  let same = a.fw.stats().fireworkWritten > 0, differs = false;
+  for (let i = 0; i < da.length; i++) { if (da[i] !== db[i]) same = false; if (da[i] !== dother[i]) differs = true; }
+  const tiers = Object.fromEntries(["high", "medium", "low"].map((tier) => {
+    const e = engine(tier);
+    // Three shows and every kind at once: more than any tier's cap.
+    for (const id of ["inv_show_a", "inv_show_b", "inv_show_c"]) e.fw.launch("show", id);
+    for (const kind of KINDS) if (kind !== "show") e.fw.launch(kind, `inv_${kind}`);
+    e.run(2);
+    const queued = e.fw.stats().fireworkQueued;
+    e.run(60, 1 / 20);
+    const s = e.fw.stats(), shows = [0, 7, 14].map((at) => e.bursts.slice(at, at + 7)).map((ids) => { const min = Math.min(...ids); return new Set(ids).size === 3 && ids.every((i) => i - min < 3); });
+    return [tier, { peak: e.peak, cap: e.cap, queued, launched: s.fireworkLaunched, bursts: e.bursts.length, shows: shows.every(Boolean), live: e.fw.live, sprites: s.fireworkSprites, buffer: s.fireworkBuffer, ranges: e.fw.batch.rangeCount }];
+  }));
+  record("fireworks engine: two pages write the same show from the same id, and another id writes another", same && differs, JSON.stringify({ same, differs }));
+  record("fireworks engine: each tier holds its sprite cap with three shows and every kind bought at once, queuing the rest until all of it bursts", Object.values(tiers).every((r) => r.peak > 0 && r.peak <= r.cap && r.queued > 0 && r.bursts === 24), JSON.stringify(tiers));
+  record("fireworks engine: a show bursts over three neighbouring slots, never split across the ends of the arc", Object.values(tiers).every((r) => r.shows), JSON.stringify(tiers));
+  record("fireworks engine: after the shows the sky is empty, nothing is queued and the sprite buffer is released", Object.values(tiers).every((r) => !r.live && !r.sprites && !r.buffer && !r.ranges), JSON.stringify(tiers));
+};
 // The six rain steps in Node: soak alone picks them, a step holds against a hover on its boundary, and
 // the amount that falls is continuous through them.
 const weatherStepChecks = async () => {
@@ -5483,18 +5524,22 @@ const donationClientChecks = async () => {
   record("donate route: closing its popup replaces the place with hub home, including URL, title and history state",
     enteredDonate && closedDonate, JSON.stringify({ enteredDonate, closedDonate, url: routeHistory.url, title: routeDocument.title }));
 };
-const wallPerformance = async (b) => {
+// The "show" pass holds a fireworks show pack in full view to the same floor: launched 5.5 s ahead, so the five
+// measured seconds take in the Bolts and both Megas, its peak.
+const wallPerformance = async (b, passes = ["ordinary", "covered"]) => {
   await b.send("Emulation.setDeviceMetricsOverride", { width: 1920, height: 1080, deviceScaleFactor: 2, mobile: false });
   await b.focus(true);
-  for (const covered of [false, true]) {
+  for (const pass of passes) {
+    const covered = pass === "covered", show = pass === "show";
     const r = await b.evaluate(`(async () => {
       const B = window.__ooga, actor = B.cavemen.get("portlandhodl");
       B.renderer.setQuality("high");
       if (B.crew.player !== actor) B.pilot.possess(actor);
       B.pilot.navigate({ position: { x: 10, y: B.island.surfaceAt(10, 0), z: 0 }, yaw: 0, pitch: 0.4, dist: ${covered ? 55 : 10} });
+      if (${show}) { B.fireworks.launch("show"); await new Promise(resolve => setTimeout(resolve, 5500)); }
       let start = null, first = 0;
       const p = actor.root.position, originX = p.x, originZ = p.z, frames = [];
-      let previous = 0, held = "", outlined = 0, travel = 0, donated = false, particles = 0;
+      let previous = 0, held = "", outlined = 0, travel = 0, donated = false, particles = 0, sprites = 0;
       const scene = window.BL.scenes.hub, update = scene.update, overlay = scene.overlay, render = B.renderer.render;
       let updateMs = 0, overlayMs = 0, renderMs = 0, wall = 0, worst = null;
       scene.update = function(...args) {
@@ -5507,6 +5552,11 @@ const wallPerformance = async (b) => {
           if (${covered}) {
             Object.assign(B.camera.position, { x: 0, y: 0, z: 10 });
             Object.assign(B.camera.target, { x: p.x, y: p.y + 0.7, z: p.z });
+          }
+          if (${show}) {
+            // From beside the pile, up over the Timechain Sphere to the arc's middle.
+            Object.assign(B.camera.position, { x: 2, y: 7, z: 4 });
+            Object.assign(B.camera.target, { x: -185, y: 115, z: 76 });
           }
           return result;
         } finally { updateMs = performance.now() - t; }
@@ -5536,6 +5586,7 @@ const wallPerformance = async (b) => {
             const completed = performance.now(), gap = completed - wall; wall = completed;
             if (!worst || gap > worst.gap) worst = { gap, at: now - start, updateMs, renderMs, overlayMs, donated };
             if (B.headquarters.sightGuides.objectsEnabled) outlined++;
+            sprites = Math.max(sprites, B.renderer.stats.spritesDrawn);
             travel = Math.max(travel, Math.hypot(p.x - originX, p.z - originZ));
             const next = Math.floor((now - start) / 420) % 2 ? "a" : "d";
             if (next !== held) { if (held) key(held, false); key(next, true); held = next; }
@@ -5546,15 +5597,15 @@ const wallPerformance = async (b) => {
         });
       } finally { if (held) key(held, false); scene.update = update; scene.overlay = overlay; B.renderer.render = render; }
       frames.sort((a, b) => a - b);
-      return { fps: (B.renderedFrames - first) * 1000 / (previous - start), p95: frames[Math.floor(frames.length * 0.95)], max: frames.at(-1), worst, outlined, samples: frames.length, travel, donated, particles, quality: B.renderer.quality };
+      return { fps: (B.renderedFrames - first) * 1000 / (previous - start), p95: frames[Math.floor(frames.length * 0.95)], max: frames.at(-1), worst, outlined, samples: frames.length, travel, donated, particles, sprites, quality: B.renderer.quality };
     })()`);
-    record(`wall movement performance: ${covered ? "moving behind cave walls during a donation" : "ordinary movement"} stays responsive at a high-density desktop size`, r.quality === "high" && r.fps >= 55 && r.p95 < 25 && r.max < 50 && r.worst.gap < 50 && r.travel > 1 && (covered ? r.outlined > r.samples * 0.9 && r.donated && r.particles >= 26 : r.outlined === 0), JSON.stringify(r));
+    record(`${show ? "fireworks show performance: moving under a show pack in full view" : `wall movement performance: ${covered ? "moving behind cave walls during a donation" : "ordinary movement"}`} stays responsive at a high-density desktop size`, r.quality === "high" && r.fps >= 55 && r.p95 < 25 && r.max < 50 && r.worst.gap < 50 && r.travel > 1 && (covered ? r.outlined > r.samples * 0.9 && r.donated && r.particles >= 26 : show ? r.sprites > 20000 : r.outlined === 0), JSON.stringify(r));
   }
 };
 const adaptiveQualityChecks = async () => {
   const r = autoQualityProbe();
   record("adaptive quality: a GPU-bound machine is seen through delivered frames and loses a tier within two seconds", r.healthy && r.gpuBound && r.reactsFast, JSON.stringify(r));
-  record("adaptive quality: warmup, transitions, background frames and isolated spikes do not lower quality", r.warmup && r.ignoresPauses && r.ignoresSpikes && r.fallback, JSON.stringify(r));
+  record("adaptive quality: warmup, transitions, background frames, a fireworks show and isolated spikes do not lower quality, and slow frames after the show do", r.warmup && r.ignoresPauses && r.holdEnds && r.ignoresSpikes && r.fallback, JSON.stringify(r));
   record("adaptive quality: steps one tier at a time and stops at the lowest", r.bounded, JSON.stringify(r));
   record("adaptive quality: boot cost seeds the opening tier, only ever downward", r.bootFast && r.bootMedium && r.bootLow && r.bootOneWay && r.bootKeepsCoarse && r.bootMemory && r.memoryBoot, JSON.stringify(r));
 };
@@ -7269,8 +7320,8 @@ const hubMirror = { name: "hub mirror", why: "rule: 500 damage shatters the mirr
 // The Canvas 2D fallback, for a device without WebGL2: every scene, entered in one page, paints real
 // colour (sampled small, after the arrival fade) and keeps the leave contract; the console stays clean.
 const canvasTour = { name: "canvas2d tour", why: "contract: the Canvas 2D fallback boots and draws every scene with the leave contract kept", run: async (b) => {
-  const r = await b.evaluate(`(() => { const B = window.__ooga, c = document.getElementById("scene"), t = document.createElement("canvas"); t.width = t.height = 8; const x = t.getContext("2d", { willReadFrequently: true }); const paint = () => { x.drawImage(c, 0, 0, 8, 8); const d = x.getImageData(0, 0, 8, 8).data, seen = new Set(); for (let i = 0; i < d.length; i += 4) seen.add(d[i] + "," + d[i + 1] + "," + d[i + 2]); return seen.size; }; const rows = { hub: { kind: B.renderer.kind, colours: paint() } }; for (const id of ["lab", "race", "drop", "orbit", "mine", "arcade", "hub"]) { B.go(id); let n = 0; while ((B.transitioning || B.scene !== id) && n++ < 600) B.advance(1 / 30, 1 / 30); B.advance(0.5, 1 / 30); rows[id === "hub" ? "back" : id] = { arrived: B.scene === id && !B.transitioning, colours: paint() }; } return rows; })()`);
-  record("canvas2d tour: with WebGL2 unavailable every scene still boots, arrives and paints", r.hub.kind === "canvas2d" && Object.entries(r).every(([, row]) => row.colours >= 4 && row.arrived !== false), JSON.stringify(r));
+  const r = await b.evaluate(`(() => { const B = window.__ooga, c = document.getElementById("scene"), t = document.createElement("canvas"); t.width = t.height = 8; const x = t.getContext("2d", { willReadFrequently: true }); const paint = () => { x.drawImage(c, 0, 0, 8, 8); const d = x.getImageData(0, 0, 8, 8).data, seen = new Set(); for (let i = 0; i < d.length; i += 4) seen.add(d[i] + "," + d[i + 1] + "," + d[i + 2]); return seen.size; }; B.fireworks.launch("show"); B.advance(3.2, 0.1); const rows = { hub: { kind: B.renderer.kind, colours: paint(), sparks: B.stats().gl.spritesDrawn } }; for (const id of ["lab", "race", "drop", "orbit", "mine", "arcade", "hub"]) { B.go(id); let n = 0; while ((B.transitioning || B.scene !== id) && n++ < 600) B.advance(1 / 30, 1 / 30); B.advance(0.5, 1 / 30); rows[id === "hub" ? "back" : id] = { arrived: B.scene === id && !B.transitioning, colours: paint() }; } return rows; })()`);
+  record("canvas2d tour: with WebGL2 unavailable every scene still boots, arrives and paints, and the hub draws a fireworks show it then leaves mid-air", r.hub.kind === "canvas2d" && r.hub.sparks > 0 && Object.entries(r).every(([, row]) => row.colours >= 4 && row.arrived !== false), JSON.stringify(r));
 } };
 
 // Weapons and the jetpack, through real keys with time driven by advance: melee breaks each prop in its
@@ -10940,6 +10991,29 @@ const factoryCanvas = { name: "factory canvas2d", why: "contract: the Canvas 2D 
   record("factory canvas2d: with WebGL2 unavailable the factory still boots and paints, a tip's show in the air", r.kind === "canvas2d" && r.scene === "factory" && r.colours >= 4 && r.flying > 0, JSON.stringify(r));
 } };
 
+// Fireworks over the hub through the debug hook: each kind and the show pack draw while they fly, and the hub holds
+// nothing for them before the first launch or once the sky has been empty a while. The engine's caps, determinism
+// and slots are checked in the global tier.
+const hubFireworks = { name: "hub fireworks", why: "rule: a firework anyone buys bursts in everyone's sky, and costs nothing before it or once it has gone", run: async (b) => {
+  const r = await b.evaluate(`(() => {
+    const B = window.__ooga, F = B.fireworks;
+    const state = () => { const s = B.stats(), g = s.gl || {}; return { program: !!g.spriteProgram, buffer: !!g.spriteBuffer, data: s.fireworkBuffer, live: F.live, pending: B.fireworksPending, audio: s.fireworkAudio }; };
+    const before = state(), kinds = {};
+    for (const kind of ["pop", "bolt", "mega", "show"]) {
+      F.launch(kind);
+      let drawn = 0, n = 0;
+      while ((F.live || B.fireworksPending) && n++ < 400) { B.advance(0.1, 0.1); drawn = Math.max(drawn, B.stats().gl.spritesDrawn); }
+      kinds[kind] = { drawn, emptied: !F.live && !B.fireworksPending };
+    }
+    const after = state();
+    B.advance(32, 0.5);
+    return { kind: B.renderer.kind, before, kinds, after, idle: state() };
+  })()`);
+  const bare = (s) => !s.program && !s.buffer && !s.data && !s.live && !s.pending && s.audio === "closed";
+  record("hub fireworks: before the first launch the hub holds no sprite program, sprite buffer, sprite data or audio", r.kind === "webgl2" && bare(r.before), JSON.stringify(r));
+  record("hub fireworks: a Pop, a Bolt, a Mega and the show pack each draw while they fly, and then the sky is empty", Object.values(r.kinds).every((k) => k.drawn > 0 && k.emptied) && r.kinds.show.drawn > r.kinds.mega.drawn, JSON.stringify(r));
+  record("hub fireworks: once the sky has been empty a while the sprite buffer and its data are released", r.after.program && !r.idle.buffer && !r.idle.data && !r.idle.live, JSON.stringify(r));
+} };
 const hubDistantEffects = { name: "hub distant effects", why: "rule: distant portals and insects resume without catching up, daylight still changes populations, and horizon birds, boats and persistent decorative clouds keep moving", run: async (b) => {
   const state = await b.evaluate(`(() => {
     const B = __ooga, root = BL.scenes.hub.root, nodes = [];
@@ -11187,7 +11261,7 @@ const hubDistantEffects = { name: "hub distant effects", why: "rule: distant por
       && animation.far.gorilla > 0 && animation.far.gorilla < 12 && animation.nearOoga.ooga >= 58 && animation.nearGorilla.gorilla >= 58
       && animation.host.ooga >= 58 && animation.host.gorilla >= 58 && animation.network && animation.controlled >= 58, JSON.stringify(animation));
 } };
-scene("hub", { label: "distant effects", query: "pos=0", steps: [hubDistantEffects] });
+scene("hub", { label: "distant effects", query: "pos=0", steps: [hubDistantEffects, hubFireworks] });
 scene("hub", { opts: !ONLY || onlyMatches(hubArrival.name) ? { initScript: `(${hubSleepWire.toString()})()` } : {}, steps: [hubArrival, { name: `work movement lab lanes ${1 / RATES[0]}Hz`, why: "regression: work walkers left their facing-right side of the lab lane", open: "on about 4 boots in 30 the lane targets sit on the centre or far side; unfixed", run: labLanes }, donation("hub"), hubWalking, hubMapNavigation, hubRainforestSteps, hubRoutes, hubFall, hubGrounding, trip("hub"), factoryActivityRouting] });
 scene("hub", { query: "ooga=portlandhodl:clank:lab,obl,lf&ooga=w-s-bitcoin:clank:lab,obl,lf&ooga=bc1gui:clank:lab,obl,lf&ooga=DrNeski:clank:lab,obl,lf&ooga=2140data:clank:lab,obl,lf", steps: [{ name: "work movement cave trips", why: "regression: off-lane cave traffic aimed through obstacles and started backwards detours", run: workCaveTrips }] });
 scene("hub", { label: "room sign", query: "pos=0", steps: [{ name: "room sign copies hash", why: "rule: tapping a room sign swings it and copies its displayed eight-character code with visible confirmation", run: async (b) => {
@@ -14826,7 +14900,7 @@ scene("hub", { label: "mirror clanker", query: "solo=1&character=portlandhodl&st
   const state = await b.evaluate(`(() => { const B = __ooga, C = B.clankers, siteIndex = C.sites.findIndex(s => s.mirrorRoom), site = C.sites[siteIndex], m = site.mouth, e = C.list[0], localX = p => (p.x - m.x) * site.cr - (p.z - m.z) * site.sr, localZ = p => (p.x - m.x) * site.sr + (p.z - m.z) * site.cr, place = (x, z) => ({ x: m.x + site.cr * x + site.sr * z, y: m.floorY, z: m.z - site.sr * x + site.cr * z }); e.owner.state = "working"; e.owner.work.site = e.owner.work.plannedSite = e.site = siteIndex; e.pendingSite = -1; e.hasSlot = true; e.slotIndex = 0; Object.assign(e, { slotX: place(0, -4.92).x, slotY: m.floorY, slotZ: place(0, -4.92).z, phase: "travel", route: "enter", fromSite: -1, entryTurn: false, blocked: 0, retry: 0 }); Object.assign(e.root.position, place(0, 0)); e.heading = m.ry + Math.PI; B.advance(0.25, 1 / 60); const entry = { turn: e.entryTurn, goal: localZ({ x: e.goalX, z: e.goalZ }) }; Object.assign(e.root.position, place(0, -4.92)); e.phase = "work"; e.route = ""; e.goalX = e.slotX; e.goalY = e.slotY; e.goalZ = e.slotZ; let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity, distance = 0, lastX = e.root.position.x, lastZ = e.root.position.z; for (let t = 0; t < 18; t += 1 / 30) { B.advance(1 / 30, 1 / 30); const x = localX(e.root.position), z = localZ(e.root.position); minX = Math.min(minX, x); maxX = Math.max(maxX, x); minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z); distance += Math.hypot(e.root.position.x - lastX, e.root.position.z - lastZ); lastX = e.root.position.x; lastZ = e.root.position.z; } const control = B.matrixGate.button, lever = B.matrixGate.lever; return { room: m.room, entry, minX, maxX, minZ, maxZ, distance, recoveries: e.stuck.recoveries, equipment: C.equipment.filter(item => item.site === siteIndex).length, leverY: control.position.y, leverScale: control.scale.y, leverZ: control.position.z, leverTagged: control.geometry.matrixCave !== undefined && control.children.every(node => node.geometry.matrixCave !== undefined) && lever.children.every(node => node.geometry.matrixCave !== undefined), leverNative: !!control.matrixNative, leverParts: control.children.filter(node => !node.matrixLiving).length, leverLabels: control.children.filter(node => node.matrixLiving && node.geometry.verts === BL.hubModels.matrixLeverLabels().verts).length, gripParts: lever.children.length }; })()`);
   record("mirror clanker: the safe chamber expands, entry continues straight inward, runs cross from side to side at varied depths behind the glass, and a compact glyphed lever is mounted within reach on the back wall", state.room.w > 6 && state.room.to > 6.5 && Math.abs(state.entry.goal + 3.5) < 0.01 && state.maxZ <= -1.85 + 1e-6 && state.minX < -0.8 && state.maxX > 0.8 && state.maxZ - state.minZ > 1 && state.distance > 8 && state.equipment === 0 && state.leverY >= 1 && state.leverY < 1.5 && state.leverScale < 1 && state.leverZ < -state.room.to + 0.3 && state.leverTagged && !state.leverNative && state.leverParts === 3 && state.leverLabels === 1 && state.gripParts === 1, JSON.stringify(state));
 } }] });
-scene("hub", { perf: true, query: "bananas=1000", opts: { w: 1920, h: 1080, perf: true, motion: true }, steps: [{ name: "wall movement performance", why: "regression: frame rate fell moving behind cave walls during a donation", run: wallPerformance }] });
+scene("hub", { perf: true, query: "bananas=1000", opts: { w: 1920, h: 1080, perf: true, motion: true }, steps: [{ name: "wall movement performance", why: "regression: frame rate fell moving behind cave walls during a donation", run: wallPerformance }, { name: "fireworks show performance", why: "rule: a fireworks show pack in full view holds the frame-rate floor while an Ooga moves", run: (b) => wallPerformance(b, ["show"]) }] });
 scene("lab", { steps: [donation("lab"), labWalking, labKeys, trip("lab")] });
 scene("race", { label:"optional rig link fallback",url:hubPage(src),steps:[{name:"race optional rig link fallback",why:"regression: an optional uniform-limited rig must preserve WebGL and every original CPU driver",run:async b=>{
   await b.evaluate(`(()=>{
@@ -18122,7 +18196,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   tessAnswerChecks(BL);
   const clearance = claimClearanceProof();
   record("hub footprint clearance: conservative rejection preserves circular boundaries, live reservations and exceptional numbers", clearance.failures === 0 && clearance.cases >= 4000, JSON.stringify(clearance));
-  await characterChecks(); await contributorActivityChecks(); await mempoolFeedChecks(); await debugActivityStatusChecks(); await soloDebugChecks(); await adaptiveQualityChecks(); await chainSnapshotChecks(); await dsbSharedDataChecks(); await timechainDataChecks(); await timechainRoomChecks(); await timechainBlockChecks(); await weatherStepChecks(); await poolLayoutChecks(); await gameRulesChecks(); await ghostHuntChecks(); await donationClientChecks(); await poolWildlifeChecks();
+  await characterChecks(); await contributorActivityChecks(); await mempoolFeedChecks(); await debugActivityStatusChecks(); await soloDebugChecks(); await adaptiveQualityChecks(); await chainSnapshotChecks(); await dsbSharedDataChecks(); await timechainDataChecks(); await timechainRoomChecks(); await timechainBlockChecks(); await weatherStepChecks(); await fireworksChecks(); await poolLayoutChecks(); await gameRulesChecks(); await ghostHuntChecks(); await donationClientChecks(); await poolWildlifeChecks();
 
   // Scene state built directly instead of booted; seed 1 matches scene-hub.js.
   // Sealed cave guides need the hub's seal nodes, so probes reading them stay in the browser tier.
