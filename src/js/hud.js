@@ -771,7 +771,9 @@
       actionHandler("mode-preset", destinationNames[destinationIndex]);
     };
     const prefetchDestination = () => {
-      if (destinationNames.length) BL.deferred.prefetchScene(destinationNames[(destinationIndex + 1) % destinationNames.length]);
+      // Views of the island name places, not scenes; only a deferred scene's code is worth fetching early.
+      const next = destinationNames.length ? destinationNames[(destinationIndex + 1) % destinationNames.length] : null;
+      if (next && BL.deferred.isShell(next)) BL.deferred.prefetchScene(next);
     };
     on(el.modeDestination, "pointerenter", prefetchDestination);
     on(el.modeDestination, "focus", prefetchDestination);
@@ -2191,7 +2193,7 @@
     let presetHandler = null;
     for (const b of el.presets) if (!b.closest(".hub-presets")) b.title = "Camera viewpoint · releases character control";
     for (const b of el.presets) {
-      const prefetch = () => BL.deferred.prefetchScene(b.dataset.preset);
+      const prefetch = () => { if (BL.deferred.isShell(b.dataset.preset)) BL.deferred.prefetchScene(b.dataset.preset); };
       on(b, "pointerenter", prefetch); on(b, "focus", prefetch);
     }
     for (const b of el.presets) on(b, "click", () => {
