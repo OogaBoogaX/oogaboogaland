@@ -14,12 +14,12 @@ The two share code and nothing else: each has its own D1 database, room, OAuth A
 | Thing | Name | Set where |
 |---|---|---|
 | D1 database | `oogaboogaland-staging`, `oogaboogaland-production` | `d1_databases` (`database_id`), migrations in `worker/migrations` |
-| Rate limiters | `AUTH_LIMITER` 10 sign-ins a minute per IP; `ROOM_LIMITER` 20 room connections and `VOICE_LIMITER` 120 voice calls a minute per player | `ratelimits` (staging namespaces 2001–2003, production 1001–1003) |
+| Rate limiters | `AUTH_LIMITER` 10 sign-ins a minute per IP; `ROOM_LIMITER` 20 room connections and `VOICE_LIMITER` 120 voice calls a minute per player; `TESS_LIMITER` 5 questions to Tess a minute per IP | `ratelimits` (staging namespaces 2001–2005, production 1001–1005) |
 | Durable Object | `Room`, one named `island` | `durable_objects`, `migrations` |
-| Cron | daily 04:00 UTC, purges expired sessions | `triggers` |
+| Cron | daily 04:00 UTC, purges expired sessions and Tess's questions not asked for 90 days | `triggers` |
 | Service binding | `DONATIONS` → `bananapayserver-staging`'s `PageApi` on staging, `bananapayserver-production`'s on production | `services`, with `/donations/*` in `run_worker_first`. The bound Worker must exist before a deploy carries the binding |
-| Vars | `SITE_ORIGIN`, `GITHUB_CLIENT_ID`, `REALTIME_APP_ID` | `vars` |
-| Worker secrets | `GITHUB_CLIENT_SECRET`, `REALTIME_SECRET` | `wrangler secret put` |
+| Vars | `SITE_ORIGIN`, `GITHUB_CLIENT_ID`, `REALTIME_APP_ID`; optionally `TESS_DAILY_CENTS` (Tess's daily cap, 50 when unset) | `vars` |
+| Worker secrets | `GITHUB_CLIENT_SECRET`, `REALTIME_SECRET`; optionally `ANTHROPIC_API_KEY` for Tess's answers | `wrangler secret put` |
 | Realtime SFU app | `oogaboogaland-staging`, `oogaboogaland-production` | Realtime → Serverless SFU |
 | GitHub OAuth App | one per Worker, no scopes | the OogaBoogaX org's Developer settings |
 | GitHub repo secret | `CLOUDFLARE_API_TOKEN` | OogaBoogaX repo Settings → Secrets and variables → Actions |
@@ -30,7 +30,7 @@ Workers, databases, rooms, rate limiters, secrets and Realtime apps belong to th
 - The deploy token is an **account-owned** API token (Manage Account → Account API Tokens), not a personal one.
 - The OAuth Apps belong to the **OogaBoogaX** GitHub org, where every org owner can manage them.
 
-Secrets cannot be read back once set; keep the OAuth client secrets and Realtime app secrets in a shared password manager. A lost one is regenerated and set again.
+Secrets cannot be read back once set; keep the OAuth client secrets, Realtime app secrets and the Anthropic key in a shared password manager. A lost one is regenerated and set again.
 
 ## One-time setup, per Worker
 
@@ -39,8 +39,9 @@ Run from `worker/` after `npm ci`, logged in with `npx wrangler login` as a memb
 1. **D1.** `npx wrangler d1 create oogaboogaland-<env>`; put its id in `database_id` (wrangler may offer to add a second binding: keep only `DB`).
 2. **GitHub OAuth App** (OogaBoogaX → Settings → Developer settings → OAuth Apps → New): homepage `https://oogaboogaland-<env>.wickedsmartbitcoin.workers.dev`, callback `https://oogaboogaland-<env>.wickedsmartbitcoin.workers.dev/auth/callback`. Put the client id in `vars.GITHUB_CLIENT_ID`, then `npx wrangler secret put GITHUB_CLIENT_SECRET --config ../wrangler.<env>.jsonc`.
 3. **Voice.** dash.cloudflare.com → Realtime → Serverless SFU → Create `oogaboogaland-<env>`; put the App ID in `vars.REALTIME_APP_ID`, then `npx wrangler secret put REALTIME_SECRET --config ../wrangler.<env>.jsonc` with the App token. Without it **Join voice** says voice is unavailable and everything else works.
-4. `npm run deploy:<env>`: builds `_site`, applies the D1 migrations and deploys.
-5. **Deploy token**, once for both: Manage Account → Account API Tokens → Create, with *Workers Scripts → Edit* and *D1 → Edit* on this account. Save it in the OogaBoogaX repo as `CLOUDFLARE_API_TOKEN`.
+4. **Tess's answers** (optional). An Anthropic API key from a workspace with a monthly spend limit, one key per Worker: `npx wrangler secret put ANTHROPIC_API_KEY --config ../wrangler.<env>.jsonc`. Without it `/api/tess` answers `closed` and Tess says only what the page knows by itself.
+5. `npm run deploy:<env>`: builds `_site`, applies the D1 migrations and deploys.
+6. **Deploy token**, once for both: Manage Account → Account API Tokens → Create, with *Workers Scripts → Edit* and *D1 → Edit* on this account. Save it in the OogaBoogaX repo as `CLOUDFLARE_API_TOKEN`.
 
 ## The oogabooga.land domain
 

@@ -6643,7 +6643,7 @@ const hubGuide = { name: "hub guide", why: "regression: Tess's offer showed only
   record("hub guide: a jetpack climbing as a tour starts lets go once Space is released, rising no more and spending no fuel through the tour", guide.reoffered && guide.climbing && !guide.thrusting && guide.rose <= 0 && guide.burned <= 0 && guide.released, JSON.stringify(guide));
 } };
 // Asking Tess (#270): what the page answers by itself, typed into the box under her offer, through the same page.
-const hubAsk = { name: "hub ask", why: "rule: a question typed to Tess is answered by the page: a place is a trip there and back to her offer, and one it can't answer gets her offline line; a question being written keeps her offer open, and Enter on her buttons presses them", run: async (b) => {
+const hubAsk = { name: "hub ask", why: "rule: a question typed to Tess is answered by the page: a place is a trip there and back to her offer, and one it can't answer gets her offline line; a question being written keeps her offer open, Enter on her buttons presses them, and a question asked while she is still thinking keeps its draft", run: async (b) => {
   const ask = await b.evaluate(`(() => {
     const B = __ooga, G = BL.scenes.hub.debug.tess, s = G.state;
     for (let t = 0; t < 12 && s.phase !== "work"; t += 1 / 30) B.advance(1 / 30, 1 / 30);
@@ -6707,6 +6707,48 @@ const hubAsk = { name: "hub ask", why: "rule: a question typed to Tess is answer
     skip.click();
     return trip;
   })()`);
+  // A second question asked while the Worker still holds her answer to the first: the draft stays in the box, Ask and
+  // the suggestions wait, and once her answer is in, Enter asks it. The Worker is the page's own fetch, held by hand.
+  await b.evaluate(`(() => {
+    const B = __ooga, G = BL.scenes.hub.debug.tess, s = G.state, real = window.fetch;
+    for (let t = 0; t < 12 && s.phase !== "work"; t += 1 / 30) B.advance(1 / 30, 1 / 30);
+    G.tap();
+    for (let t = 0; t < 15 && s.phase !== "offer"; t += 1 / 30) B.advance(1 / 30, 1 / 30);
+    BL.net.state.tess = true;
+    window.__held = { calls: 0, real };
+    window.fetch = (url, init) => url !== "/api/tess" ? real(url, init) : new Promise((resolve) => {
+      window.__held.calls++;
+      window.__held.release = () => resolve(new Response(JSON.stringify({ say: "Bitcoin is money nobody runs.", go: null }), { headers: { "content-type": "application/json" } }));
+    });
+    document.querySelector(".greeter-ask input").focus();
+  })()`);
+  await b.send("Input.insertText", { text: "what is bitcoin" });
+  await press("Enter", "Enter", 13, "\r");
+  await b.evaluate(`document.querySelector(".greeter-ask input").focus()`);
+  await b.send("Input.insertText", { text: "How do I donate?" });
+  await press("Enter", "Enter", 13, "\r");
+  const waiting = await b.evaluate(`({ calls: window.__held.calls, draft: document.querySelector(".greeter-ask input").value,
+    ask: document.querySelector(".greeter-ask button").disabled, chips: [...document.querySelectorAll(".greeter-chip")].every((chip) => chip.disabled) })`);
+  const thought = await b.evaluate(`(async () => {
+    const B = __ooga, G = BL.scenes.hub.debug.tess, s = G.state;
+    window.__held.release();
+    for (let i = 0; i < 40 && s.ask; i++) await new Promise((r) => setTimeout(r, 25));
+    B.advance(0.3, 1 / 30);
+    return { pending: !!s.ask, said: JSON.stringify(G.speech && G.speech.beats || "").includes("nobody runs"), ask: document.querySelector(".greeter-ask button").disabled };
+  })()`);
+  await b.evaluate(`document.querySelector(".greeter-ask input").focus()`);
+  await press("Enter", "Enter", 13, "\r");
+  const second = await b.evaluate(`(() => {
+    const B = __ooga, G = BL.scenes.hub.debug.tess, s = G.state;
+    B.advance(0.3, 1 / 30);
+    const r = { said: JSON.stringify(G.speech && G.speech.beats || "").includes("Feed the Ooga Boogas"), calls: window.__held.calls, draft: document.querySelector(".greeter-ask input").value };
+    window.fetch = window.__held.real; BL.net.state.tess = false; delete window.__held;
+    document.querySelector(".greeter-menu .greeter-row button:last-child").click();
+    return r;
+  })()`);
+  record("hub ask: a question asked while she is still thinking keeps its draft, Ask and the suggestions wait, and once her answer is in Enter asks it",
+    waiting.calls === 1 && waiting.draft === "How do I donate?" && waiting.ask && waiting.chips && !thought.pending && thought.said && !thought.ask
+      && second.said && second.calls === 1 && second.draft === "", JSON.stringify({ waiting, thought, second }));
   await b.focus(false);
   record("hub ask: a question being written holds her offer open, Tab reaches Ask and Enter there asks it, and Enter on a suggestion asks that one, never the island tour",
     held.phase === "offer" && held.shown && held.focused && held.draft === "How do I donate?" && onAsk && asked.phase === "offer" && !asked.holding && asked.said

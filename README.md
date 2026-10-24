@@ -81,6 +81,8 @@ Signed in, a room is shared with everyone who picks the same number (you see and
 
 ## Games
 
+Playing is free everywhere on the island; the only payments are ones you choose to make, a donation to feed the Oogas or a song request on DSB Land's radio. **Ooga Arcade** (3 o'clock) has a cabinet for each of Ooga Rally, Ooga Drop, Ooga Orbit and Ooga Mine, carnival machines (Thro-ball, Hoop Shot, Coconut Toss, the Claw Machine, Air Hockey, Pool, Darts, Pinball and the Beast Ride) and eight retro cabinets on the mezzanine. Its games pay out tickets, which you spend at the prize counter or on the jackpot wheel.
+
 - **The Ember Den:** walk through its window in ₿IFRÖST, beside DSB Land's, straight into a room of ten poker tables, nine seats each, suited gorilla dealers and five cave themes. Local practice plus an experimental encrypted-deck multiplayer service (`npm run poker:serve`), private dealing and downloadable hand verification. Free play chips, no payments or rake. See [status](docs/banana-poker.md) and [protocol and service instructions](docs/poker-protocol.md).
 - **Ooga Rally:** three laps on one of three tracks against fourteen rivals drawn from the roster, fresh each time you come back to the garage. **W** go, **S** brake, **A D** steer, hold **Space** to drift and release to boost, **E** throws your item. Win gold in the Cup to open Mirror.
 - **Ooga Drop:** jump from the plane, fly through eight hoops (**W S** pitch, **A D** roll, **Q E** turn), **Space** pulls the chute, land on the pile.
@@ -194,7 +196,7 @@ To add your Ooga, add one file to `src/characters/` named after your GitHub hand
 
 No analytics and no personal data. Read-only requests only, nothing about the visitor sent: mempool.space (falling back to Esplora), Coinbase and other public price feeds, the oogatron stats worker and Timechain Index. The donation handle and message stay in localStorage.
 
-On the Cloudflare site, signing in with GitHub is optional. A signed-in player's GitHub id, login, avatar URL, display name and session records are kept in the site's database until they sign out, the session expires or they delete the account (`DELETE /api/me`). The GitHub token is used once and never stored. Nothing is kept for visitors who don't sign in.
+On the Cloudflare site, signing in with GitHub is optional. A signed-in player's GitHub id, login, avatar URL, display name and session records are kept in the site's database until they sign out, the session expires or they delete the account (`DELETE /api/me`). The GitHub token is used once and never stored. Nothing is kept for visitors who don't sign in, except a question typed to Tess that the page can't answer by itself: it is sent to Anthropic for Claude to answer, and kept for 90 days with her answer and nothing that says who asked.
 
 DSB Land additionally contacts public Bitcoin feeds and radio/media services; payment is always an explicit action in the visitor's wallet. Zuzu uses local mock replies and deterministic fallback and sends no conversations to an AI provider. Its provider-neutral backend is prepared but not deployed.
 

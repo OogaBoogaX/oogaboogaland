@@ -7,8 +7,9 @@
 // ahead and points her soft beam at it. She greets once a page, and offers the island tour unasked only until this
 // browser has answered it; a tap on her brings it at any time. The view is the visitor's again when the tour ends.
 // Under her offer a visitor can type a question (#270). The page answers what it knows by itself (`answer`): a place
-// becomes a trip there and back, and a few common questions have their own lines; one it can't answer gets her
-// offline line.
+// becomes a trip there and back, and a few common questions have their own lines. One it can't answer goes to the
+// page's Worker, which asks Claude (`/api/tess`), where the Worker says it can (`net.state.tess`); elsewhere, and when
+// that fails, she says her offline line.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -59,6 +60,10 @@
     unknown: "I don't know that one yet. Try a place, or ask me for a tour.",
     more: "Anything else? Ask away.",
     later: "I'll be at work. Tap me any time!",
+    thinking: "Good question! Let me think...",
+    refused: "That one's not for me. Ask me about the island!",
+    resting: "I'm resting my voice until tomorrow. Ask me about a place!",
+    slowDown: "One at a time! Ask me again in a minute.",
     newsKortik: "New in the Factory: Kortik's Switchboard, where a grumpy samurai routes Lightning by hand. Don't poke him!",
     newsSphereRooms: "The Timechain Sphere has nine rooms now. Pick one at the keypad by its doors!",
     newsBca: "New at 10 o'clock: B.C.A., Banana Certified Accounting. Suited gorillas count the bananas!",
@@ -130,6 +135,8 @@
     { at: [-2.8, 5.2, 17], aim: [-4.6, 4.2, 19.3] }
   ];
   const NOTICE_AFTER = 2.5, OFFER_TIME = 12, GLIDE = 1.8, RETURN = 1.2, VISITS = "ooga-tess-visits", TOURED = "ooga-tess-tour";
+  // How long she waits on the Worker's answer, and her line for each way it can say no.
+  const ASK_TIME = 15000, FAILED = { refused: "refused", resting: "resting", busy: "slowDown" };
   // The view counts as moved past half a metre or about three degrees, after a second to settle on arrival and on an
   // Ooga handed to the visitor (the island hands a signed-in contributor their own).
   const SETTLE = 1, MOVED = 0.5, TURNED = 0.05;
@@ -287,7 +294,7 @@
     const state = {
       phase: "work", stage: "beam", timer: 3, site: 0, seen: 0, again: false, kind: "island", legs: ISLAND, welcome: null,
       stop: -1, arrived: false, closing: null, holding: false, tourGuest: false, glide: 0, glideTime: GLIDE,
-      login: null, newest: null, still: landing, settle: SETTLE, driven: null, asked: false, place: null
+      login: null, newest: null, still: landing, settle: SETTLE, driven: null, asked: false, place: null, ask: null
     };
     const spot = { x: 0, y: 0, z: 0 }, home = pose(), from = pose(), to = pose();
     position.x = WORK[0].at[0]; position.y = WORK[0].at[1]; position.z = WORK[0].at[2];
@@ -304,7 +311,7 @@
     row.className = "greeter-row";
     help.className = "greeter-menu-help";
     row.append(go, skip);
-    // Under the offer, a question box and three suggestions. A question sends nothing anywhere: the page answers it.
+    // Under the offer, a question box and three suggestions, each of which the page answers by itself.
     const form = document.createElement("form"), field = document.createElement("input"), send = document.createElement("button");
     form.className = "greeter-ask";
     field.type = "text"; field.maxLength = 200; field.autocomplete = "off"; field.enterKeyHint = "send";
@@ -322,13 +329,25 @@
     }
     panel.append(heading, row, form, chips, help);
     document.body.append(panel);
+    // A question out with the Worker: Ask and the suggestions wait until her answer is in.
+    const pending = (ask) => {
+      state.ask = ask; send.disabled = !!ask;
+      for (const chip of chips.children) chip.disabled = !!ask;
+    };
     go.addEventListener("click", () => { go.blur(); forward(); });
     skip.addEventListener("click", () => { skip.blur(); back(); });
-    // Asking blurs the box, so the keyboard folds away and her answer shows; Escape there only leaves the box.
-    form.addEventListener("submit", (e) => { e.preventDefault(); const text = field.value; field.value = ""; field.blur(); question(text); });
+    // Asking blurs the box, so the keyboard folds away and her answer shows; Escape there only leaves the box. While she
+    // thinks over one question, the box keeps the next as a draft.
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      if (state.ask) return;
+      const text = field.value; field.value = ""; field.blur(); question(text);
+    });
     field.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.preventDefault(); field.blur(); } });
     const show = (phase) => {
       state.phase = phase;
+      // Moving on from her offer drops a question still out with the Worker.
+      if (phase !== "offer" && state.ask) { state.ask.abort(); pending(null); }
       panel.hidden = phase !== "offer" && phase !== "tour";
       panel.classList.toggle("greeter-tour", phase === "tour");
       form.hidden = chips.hidden = phase !== "offer";
@@ -336,7 +355,7 @@
       if (phase === "offer") {
         heading.textContent = news ? `${NAME} · what's new` : `${NAME} · island guide`;
         go.textContent = "Show me"; skip.textContent = "Not now";
-        help.textContent = coarse ? "Tap to choose, or ask" : "Enter starts · Esc closes";
+        help.textContent = `${coarse ? "Tap to choose, or ask" : "Enter starts · Esc closes"}${BL.net.state.tess ? "\nWhat I can't answer goes to Claude" : ""}`;
       } else if (phase === "tour" && state.kind === "trip") {
         heading.textContent = `${NAME} · ${state.legs[state.stop].title}`;
         label(); skip.textContent = "Back";
@@ -519,15 +538,15 @@
       return state.phase === "returning" && state.holding;
     };
     // A typed question, answered by the page: a place is a trip there and back, a tour request starts the tour, and
-    // anything else she says where she is, or her offline line when the page can't answer it. Her offer then stands
-    // again for a follow-up.
+    // anything else she says where she is. One the page can't answer goes to the Worker, or gets her offline line. Her
+    // offer then stands again for a follow-up.
     const question = (text) => {
-      if (state.phase !== "offer" || !text.trim()) return;
+      if (state.phase !== "offer" || state.ask || !text.trim()) return;
       // Another actor or panel may have taken the controls since she offered.
       if (busy()) { toWork(); return; }
       const a = answer(text, state.place);
       state.asked = true; state.timer = OFFER_TIME;
-      if (!a) { say("unknown"); return; }
+      if (!a) { if (BL.net.state.tess) consult(text); else say("unknown"); return; }
       if (a.place !== null) state.place = a.place;
       if (a.tour) {
         if (state.kind === "island") answered();
@@ -535,6 +554,29 @@
       } else if (a.go !== null) {
         state.kind = "trip"; state.legs = [legOf(a.go, STOPS[a.go].title, a.lines)]; startTour();
       } else rig.say(a.lines.map((id) => LINES[id]).join("\n"));
+    };
+    // The Worker's answer: what she says, a line a bubble, and a place to fly the visitor to, or none. She thinks aloud
+    // while it comes; one that comes after she has moved on is dropped, and a failure gets one of her own lines.
+    const consult = async (text) => {
+      const ask = new AbortController(), timer = setTimeout(() => ask.abort(), ASK_TIME);
+      pending(ask);
+      rig.flare(); rig.say(LINES.thinking, true);
+      let reply = null;
+      try {
+        const res = await fetch("/api/tess", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ question: text, about: state.place === null ? null : STOPS[state.place].id }), signal: ask.signal });
+        reply = await res.json();
+      } catch { /* Offline, too slow, dropped or no JSON: her offline line. */ }
+      clearTimeout(timer);
+      if (state.ask !== ask) return;
+      pending(null); state.timer = OFFER_TIME;
+      if (!reply || typeof reply.say !== "string") { say(FAILED[reply && reply.error] || "unknown"); return; }
+      const go = STOPS.findIndex((stop) => stop.id === reply.go);
+      if (go < 0) { rig.say(reply.say); return; }
+      if (busy()) { rig.hush(); toWork(); return; }
+      state.place = go; state.kind = "trip";
+      state.legs = [{ stop: go, title: STOPS[go].title, text: reply.say, lineAt: BL.fx.beatsOf(reply.say).map(() => null) }];
+      startTour();
     };
     // Back from a trip she offers again, ready for the next question, the island tour behind Show me.
     const offerAgain = () => {
@@ -616,7 +658,7 @@
           placeBy(); rig.setLast(spot.x, spot.y, spot.z); rig.steer(dt);
           // Her offer stands for a while once she has finished asking, and for as long as a question is being written.
           if (document.activeElement === field || field.value) state.timer = OFFER_TIME;
-          else if (rig.said && (state.timer -= dt) <= 0) { say(state.asked ? "later" : "declined"); toWork(); }
+          else if (rig.said && !state.ask && (state.timer -= dt) <= 0) { say(state.asked ? "later" : "declined"); toWork(); }
           break;
         case "tour": {
           // Where the visitor is, she keeps by them; at a stop, she flies there and starts once she is nearly in place.
@@ -669,6 +711,7 @@
       rig.update(dt, elapsed);
     };
     const dispose = () => {
+      if (state.ask) { state.ask.abort(); pending(null); }
       window.removeEventListener("keydown", captureKey, true);
       if (state.holding) release();
       rig.dispose();
