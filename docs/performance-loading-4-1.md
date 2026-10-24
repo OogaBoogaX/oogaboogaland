@@ -22,7 +22,7 @@ The original policy already cached response bodies, but required a network valid
 
 All ten repeat responses after the change have `fromDiskCache: true`, `fromServiceWorker: false`, zero transferred bytes, and no network response status. Both `/` and `/robots.txt` still return `public, max-age=0, must-revalidate`. All five chunks retain `nosniff`, `X-Frame-Options: DENY`, and the original Permissions Policy. There is no visual change.
 
-These results validate the local Cloudflare assets runtime and Chrome's persisted HTTP cache. Production has not been deployed or measured. The complete response headers, content hashes and per-chunk metrics are in [performance-loading-4-1-evidence.json](performance-loading-4-1-evidence.json).
+These results validate the local Cloudflare assets runtime and Chrome's persisted HTTP cache. Production has not been deployed or measured. The complete response headers, content hashes and per-chunk metrics are in [`untracked/performance/evidence/performance-loading-4-1-evidence.json`](`untracked/performance/evidence/performance-loading-4-1-evidence.json`).
 
 ## Reproduce
 

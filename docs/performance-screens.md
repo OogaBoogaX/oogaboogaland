@@ -32,7 +32,7 @@ Same harness, now forced to ARM64 Chrome under ARM Node, base 51079c4, two runs 
 | Recent | 239,543 / 246,984 B | 158,300 / 168,875 B |
 | Totals | 244,048 / 231,715 B | 167,788 / 185,560 B |
 
-The whole sampled window is now 625–723 KB on recent, higher than the 411 KB above, because the renderer's share (`render`, about 453–467 KB per refresh on recent) is now led by `flushInstanceStream` and `uploadInstances` after task 2.6. The 100 KB whole-refresh target remains unmet. Raw rows: `performance-screens-normalize-evidence.json`. 269/269 global checks.
+The whole sampled window is now 625–723 KB on recent, higher than the 411 KB above, because the renderer's share (`render`, about 453–467 KB per refresh on recent) is now led by `flushInstanceStream` and `uploadInstances` after task 2.6. The 100 KB whole-refresh target remains unmet. Raw rows: `untracked/performance/evidence/performance-screens-normalize-evidence.json`. 269/269 global checks.
 
 ## Follow-up: the chalkboard keeps one textured quad
 
@@ -47,4 +47,4 @@ Real ARM64 Chrome, camera square to the board, five real mouse strokes through t
 | `texSubImage2D` | 0 | 11 |
 | Sampled bytes inside `syncWorld` | 27,760,256 | 4,104 |
 
-Screenshots match in texel colour on every tier and on Canvas 2D: the differing pixels are one-screen-pixel shifts where nearest texel boundaries round differently from the old quad edges, plus 0–1 level shading noise (Canvas 2D's board background averages about one level darker in blue). Low tier and the edited high-tier view differ on 105 and 118 of 365,750 board pixels. A kept hub only suspends the board; a full leave releases its geometry and empties its canvas. Raw numbers: `performance-screens-chalkboard-evidence.json`. 269/269 global checks; no suite check covers the chalkboard, so the play-test should draw on it.
+Screenshots match in texel colour on every tier and on Canvas 2D: the differing pixels are one-screen-pixel shifts where nearest texel boundaries round differently from the old quad edges, plus 0–1 level shading noise (Canvas 2D's board background averages about one level darker in blue). Low tier and the edited high-tier view differ on 105 and 118 of 365,750 board pixels. A kept hub only suspends the board; a full leave releases its geometry and empties its canvas. Raw numbers: `untracked/performance/evidence/performance-screens-chalkboard-evidence.json`. 269/269 global checks; no suite check covers the chalkboard, so the play-test should draw on it.

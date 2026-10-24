@@ -1,6 +1,6 @@
 # Performance work: where each target stands (23 Oct 2026)
 
-Every figure comes from the task note named beside it, measured in ARM64 Chrome on an M1 Pro unless the note says otherwise. Figures from different fixtures are not additive.
+Raw measurement rows stay outside the tree, under the ignored `untracked/performance/evidence/`: they hold machine-specific paths. Every figure comes from the task note named beside it, measured in ARM64 Chrome on an M1 Pro unless the note says otherwise. Figures from different fixtures are not additive.
 
 | Target | Now | Met | Where |
 |---|---|---|---|
