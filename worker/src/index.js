@@ -1,9 +1,8 @@
 // The Worker in front of Ooga Booga Land: the built page from static assets, GitHub sign-in under
 // /auth/*, the account API under /api/*, the totems' merge summaries under /api/totems/*, voice
-// signalling under /api/voice/*, Tess's answers at
-// /api/tess, /room, the island's live socket, and /donations/*, passed on to bananapayserver over the
-// DONATIONS binding. Only those paths run this code (`run_worker_first` in wrangler.<env>.jsonc);
-// every other path is served straight from _site.
+// signalling under /api/voice/*, Tess's answers at /api/tess, /room, the island's live socket, and
+// /donations/*, passed on to bananapayserver over the DONATIONS binding. Only those paths run this code
+// (`run_worker_first` in wrangler.<env>.jsonc); every other path is served straight from _site.
 
 import { handleApi } from "./api.js";
 import { handleAuth } from "./auth.js";

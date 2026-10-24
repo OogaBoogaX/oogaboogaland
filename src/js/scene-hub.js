@@ -10747,6 +10747,7 @@
   };
   const onTotem = (event) => { if (event.fresh) flareTotem(event.index); };
   const suspendHub = () => {
+    stopLazyBedding();
     // A kept island ends its hunt and its game as a full leave does, and lowers the ring at once.
     ghostVisit++;
     if (ghosts) { ghosts.dispose(); ghosts = null; }
@@ -10755,7 +10756,6 @@
     gameRingK = gameRingWait = 0; gameRing.scale.y = 0; gameRing.visible = false;
     for (const node of ringLanterns) node.visible = false;
     ringLanternsShown = false;
-    stopLazyBedding();
     actorTransition.sourceRoot = actorTransition.sourceHead = null;
     if (factoryMouth && factoryMouth.snap) snapFactoryView();
     if (bifrostIsle && bifrostIsle.snap) snapBifrostView();
