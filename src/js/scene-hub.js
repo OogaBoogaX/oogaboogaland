@@ -12280,6 +12280,16 @@
     }
   };
   BL.scenes = BL.scenes || {};
-  if (LAZY_BEDDING) hubScene.buildSteps = prepareHubSteps;
+  // A released hub comes back to an island its departure dropped: rebuild it in slices behind the fade, not in the
+  // swap frame (seconds on a phone). Boot and a kept hub have nothing to rebuild here.
+  const prepareIslandSteps = function* (ctx) {
+    if (heldHub || !ctx.from || ctx.from === "hub") return null;
+    const factory = caves.slots.find(slot => slot.status === "open" && slot.scene === "factory");
+    const options = { seed: SEED, roofHole: factory ? { id: factory.id, ...BL.factoryModels.ROOF_TUBE } : null };
+    if (terrain.hasIsland(options)) return null;
+    yield* terrain.islandSteps(options, { until: 0, budget: BL.buildTasks.SLICE_MS, work: 0 });
+    return null;
+  };
+  hubScene.buildSteps = LAZY_BEDDING ? prepareHubSteps : prepareIslandSteps;
   BL.scenes.hub = hubScene;
 })();
