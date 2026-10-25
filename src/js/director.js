@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  const { scene, models, donations, glRenderer, canvasRenderer, game: gameMod, pile: pileMod, router: routerMod, scenes } = window.BL;
+  const { scene, models, donations, glRenderer, canvasRenderer, game: gameMod, pile: pileMod, router: routerMod, scenes, gamepad } = window.BL;
   // The optional build-time Oogatron snapshot loads before the director.
   // Activity uses each contributor's timestamp, never the snapshot build time.
   if (window.BL.jumbotronData) window.BL.contributors.applySnapshot(window.BL.jumbotronData);
@@ -389,6 +389,7 @@
   let raf = 0;
   // Shared by the display loop and the debug `advance`, so a stepped frame is exactly a displayed one.
   const step = (dt, now) => {
+    gamepad.poll();
     elapsed += dt;
     if (transition) stepTransition(dt);
     sceneTime += dt;
