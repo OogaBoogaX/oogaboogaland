@@ -12671,18 +12671,38 @@ const sphereAccount = { name: "timechain account", why: "regression: account Ret
 } };
 scene("hub", { label: "timechain doorway", query: "solo=1&character=portlandhodl&view=timechain&pos=0", opts: { motion: true }, steps: [sphereApproach, sphereThreshold, sphereKeypad, sphereCrossing, sphereAccount, trip("hub")] });
 scene("hub", { label: "timechain doorway canvas2d", exclusive: true, query: "solo=1&character=portlandhodl&view=timechain&pos=0&canvas2d=1", steps: [sphereApproach, sphereCrossing] });
-scene("hub", { label: "timechain resident", steps: [{ name: "timechain resident", why: "regression: Sani slept in HQ on ordinary visits, leaving his island empty", run: async (b) => {
+scene("hub", { label: "timechain resident", steps: [{ name: "timechain resident", why: "regression: Sani belongs in the Sphere while sleeping or away, and on the mainland while working or chilling", run: async (b) => {
   const r = await b.evaluate(`(() => {
-    const B = __ooga, ${sphereLocal}, c = B.cavemen.get("SaniExp");
-    B.advance(0.5, 1 / 60);
-    const inside = { visible: c.root.visible, held: T.residentInside, fromMiddle: Math.hypot(c.root.position.x - T.place.x, c.root.position.z - T.place.z) };
-    B.pilot.possess(c); B.advance(0.3, 1 / 60);
-    const out = { driven: B.pilot.player === c, visible: c.root.visible, fromDoors: local(c.root.position) - SP.THRESHOLD };
-    B.pilot.release(true); B.refreshStates(); B.advance(0.5, 1 / 60);
-    return { inside, out, again: { visible: c.root.visible, held: T.residentInside } };
+    const B = __ooga, ${sphereLocal}, c = B.cavemen.get("SaniExp"), entry = c.contributor;
+    const saved = { lastCommitAt: entry.lastCommitAt, lastContributionAt: entry.lastContributionAt, override: c.override };
+    const sample = () => ({ state: c.state, visible: c.root.visible, held: T.residentInside,
+      fromMiddle: Math.hypot(c.root.position.x - T.place.x, c.root.position.z - T.place.z),
+      bed: !!c.bedroll || !!c.bedTravel.mode, walk: !!c.walk });
+    const activity = age => {
+      entry.lastCommitAt = entry.lastContributionAt = Date.now() - age;
+      B.refreshStates(); B.advance(0.5, 1 / 60);
+      return sample();
+    };
+    try {
+      c.override = null;
+      const away = activity(40 * 86400000), working = activity(1000), sleeping = activity(2 * 86400000);
+      B.pilot.possess(c); B.advance(0.3, 1 / 60);
+      const out = { driven: B.pilot.player === c, visible: c.root.visible, fromDoors: local(c.root.position) - SP.THRESHOLD };
+      B.pilot.release(true); B.refreshStates(); B.advance(0.5, 1 / 60);
+      const again = sample(), chilling = activity(2 * 3600000), back = activity(40 * 86400000);
+      return { away, working, sleeping, out, again, chilling, back };
+    } finally {
+      B.pilot.release(true);
+      entry.lastCommitAt = saved.lastCommitAt; entry.lastContributionAt = saved.lastContributionAt; c.override = saved.override;
+      B.refreshStates();
+    }
   })()`);
-  record("timechain resident: Sani lives in the Sphere's rooms, out of sight inside the closed ball, comes out onto the bridge when driven and goes back in when let go",
-    !r.inside.visible && r.inside.held && r.inside.fromMiddle < 0.5 && r.out.driven && r.out.visible && r.out.fromDoors > 1 && !r.again.visible && r.again.held, JSON.stringify(r));
+  const inside = row => !row.visible && row.held && row.fromMiddle < 0.5 && !row.bed && !row.walk;
+  const mainland = row => row.visible && !row.held && row.fromMiddle > 20 && !row.bed;
+  record("timechain resident: sleeping and away Sani lives inside the Sphere without a bed, emerges when driven and returns when released; working and chilling Sani joins the mainland crew",
+    r.away.state === "away" && inside(r.away) && r.sleeping.state === "sleeping" && inside(r.sleeping) && inside(r.again) && inside(r.back)
+      && r.working.state === "working" && mainland(r.working) && r.chilling.state === "chilling" && mainland(r.chilling)
+      && r.out.driven && r.out.visible && r.out.fromDoors > 1, JSON.stringify(r));
 } }] });
 const roomPage = (room, query = "") => `${src}?debug=1&nosim=1${clock(`character=portlandhodl&pos=0${query ? "&" + query : ""}`)}#/sphere-${room}`;
 const roomGo = (room) => `(() => { const B = window.__ooga; B.go("timechain", "${room}"); for (let i = 0; i < 150 && (B.transitioning || B.scene !== "timechain" || B.timechain.room.id !== ${room}); i++) B.advance(1 / 30, 1 / 30); B.advance(0.3, 1 / 30); B.housekeep(); const s = B.stats(); return { scene: B.scene, room: B.timechain.room.id, records: B.renderer.stats.records, nodes: s.allNodes, targets: s.targets, dom: s.dom, timers: s.timers, requests: s.requests }; })()`;
@@ -12696,11 +12716,12 @@ const timechainRoom = { name: "timechain room", why: "playthrough: a signed-out 
     const escaped = P.escape(), cave = P.player;
     return { room: D.room.id, scale: D.room.scale, radius: D.layout.radius, mode: D.visit.mode, zone: BL.net.state.zone, body: BL.net.state.body, chip: document.getElementById("sphere-mode").textContent,
       subtitle: document.getElementById("sphere-subtitle").textContent, before, zoomed, after: P.mode, escaped, player: cave && cave.traits.name, jet: !!(cave && cave.jet), jetHud: document.getElementById("jetpack-hud").hidden,
-      gun: cave && !cave.parts.gun.visible && !cave.weapon.secondaryOwned, requests: B.stats().requests, paused: D.reader.status("recent"), hash: location.hash, sani: !!D.sani && D.sani.root.visible, remotes: D.remotes === null };
+      gun: cave && !cave.parts.gun.visible && !cave.weapon.secondaryOwned, requests: B.stats().requests, paused: D.reader.status("recent"), hash: location.hash, sani: !!D.sani && D.sani.root.visible,
+      saniState: BL.contributors.stateFor(BL.contributors.roster.find(entry => entry.name === "SaniExp")), remotes: D.remotes === null };
   })()`);
   record("timechain room: a signed-out arrival at /sphere-3 is a solo copy of Room 3 at 1× that publishes nothing, with its mode named and every screen painted",
     painted && r.room === 3 && r.scale === 1 && r.radius === 9 && r.mode === "solo" && r.zone === "none" && r.body === null && r.chip.includes("Solo visit · not signed in") && r.subtitle === "Timechain Sphere · Room 3"
-      && r.hash === "#/sphere-3" && r.requests === 0 && r.paused === "PAUSED" && r.sani && r.remotes, JSON.stringify(r));
+      && r.hash === "#/sphere-3" && r.requests === 0 && r.paused === "PAUSED" && r.sani === (r.saniState === "sleeping" || r.saniState === "away") && r.remotes, JSON.stringify(r));
   record("timechain room: scroll, the mode buttons and Escape all keep the eye in first person, and the Ooga carries no rifle and no jetpack",
     [r.before, r.zoomed, r.after].every(m => m === "first-person") && r.escaped === false && r.player === "portlandhodl" && !r.jet && r.jetHud && r.gun, JSON.stringify(r));
   await b.evaluate(`(() => { const B = __ooga, L = B.timechain.layout; B.pilot.navigate({ position: { x: 0, y: 0, z: L.arrival.z }, yaw: Math.PI, pitch: 0.05, dist: 4 }); B.advance(0.2, 1 / 60); })()`);
@@ -12722,30 +12743,49 @@ const timechainSizes = { name: "timechain sizes", why: "rule: rooms 4–6 and 7�
       && ["door", "arrivalGap", "button", "table", "height"].every(same), JSON.stringify(rows));
 } };
 const timechainSani = { name: "timechain sani", why: "regression: Sani's recliner spins with his laptop independently of frame rate, and his half-litre refills, spills and is cleaned up in every room", run: async (b) => {
+  const presence = await b.evaluate(`(() => {
+    const B = __ooga, c = BL.contributors.roster.find(entry => entry.name === "SaniExp");
+    const saved = [c.lastCommitAt, c.lastContributionAt], rows = [];
+    try {
+      for (const age of [40 * 86400000, 1000, 2 * 86400000, 2 * 3600000]) {
+        c.lastCommitAt = c.lastContributionAt = Date.now() - age; B.advance(0.1, 1 / 60);
+        rows.push({ state: BL.contributors.stateFor(c), visible: B.timechain.sani.root.visible });
+      }
+      return rows;
+    } finally { [c.lastCommitAt, c.lastContributionAt] = saved; B.advance(0.1, 1 / 60); }
+  })()`);
+  record("timechain sani: the room seats sleeping and away Sani, leaving his recliner empty while he works or chills on the mainland",
+    presence.map(row => row.state).join(",") === "away,working,sleeping,chilling"
+      && presence.every(row => row.visible === (row.state === "sleeping" || row.state === "away")), JSON.stringify(presence));
   const r = await b.evaluate(`(() => {
     const B = __ooga, D = B.timechain, L = D.layout, s = D.seat, c = D.sani, beer = D.beer, lounge = D.built.lounge;
-    const spin = (rate) => { beer.pause(); s.angle = Math.PI; s.speed = 0; beer.act("spin", s); B.advance(2, rate); return { angle: s.angle, together: Math.abs(c.root.rotation.y - lounge.swivel.rotation.y) < 1e-8 && lounge.laptop.parent === lounge.swivel }; };
-    const slow = spin(1 / 30), fast = spin(1 / 120);
-    beer.pause();
-    const wall = [beer.dispenser, beer.cabinet, beer.bin].map(n => Math.hypot(lounge.node.position.x + n.position.x, lounge.node.position.z + n.position.z));
-    const cycle = (rate) => {
-      beer.pause(); Object.assign(beer.state, { litres: 0.5, sips: 0, refills: 0 });
-      let empty = false, filling = false, walked = false;
-      for (let i = 0; i < 130 * rate; i++) {
-        beer.update(c, s, 1 / rate);
-        const st = beer.state;
-        if (st.mode === "rise") empty ||= st.litres < 0.001;
-        if (st.mode === "walk") walked ||= Math.hypot(c.root.position.x - s.x, c.root.position.z - s.z) > 1;
-        if (st.mode === "fill") filling ||= beer.stream.visible && beer.mug.parent === beer.dispenser;
-      }
-      return { ...beer.state, empty, filling, walked, streamOff: !beer.stream.visible };
-    };
-    const slowCycle = cycle(30), fastCycle = cycle(120);
-    beer.pause(); Object.assign(beer.state, { litres: 0.5, sips: 0, refills: 0, cleaned: 0, replaced: 0 });
-    beer.act("spin", s);
-    const phases = new Set();
-    for (let i = 0; i < 40 * 60; i++) { beer.update(c, s, 1 / 60); phases.add(beer.state.mode); }
-    return { slow, fast, wall, radius: L.radius, slowCycle, fastCycle, spill: { phases: [...phases], ...beer.state, shardsHidden: !beer.shards.visible } };
+    const entry = BL.contributors.roster.find(entry => entry.name === "SaniExp"), saved = [entry.lastCommitAt, entry.lastContributionAt];
+    try {
+      entry.lastCommitAt = entry.lastContributionAt = Date.now() - 2 * 86400000;
+      B.advance(0.1, 1 / 60);
+      const spin = (rate) => { beer.pause(); s.angle = Math.PI; s.speed = 0; beer.act("spin", s); B.advance(2, rate); return { angle: s.angle, together: Math.abs(c.root.rotation.y - lounge.swivel.rotation.y) < 1e-8 && lounge.laptop.parent === lounge.swivel }; };
+      const slow = spin(1 / 30), fast = spin(1 / 120);
+      beer.pause();
+      const wall = [beer.dispenser, beer.cabinet, beer.bin].map(n => Math.hypot(lounge.node.position.x + n.position.x, lounge.node.position.z + n.position.z));
+      const cycle = (rate) => {
+        beer.pause(); Object.assign(beer.state, { litres: 0.5, sips: 0, refills: 0 });
+        let empty = false, filling = false, walked = false;
+        for (let i = 0; i < 130 * rate; i++) {
+          beer.update(c, s, 1 / rate);
+          const st = beer.state;
+          if (st.mode === "rise") empty ||= st.litres < 0.001;
+          if (st.mode === "walk") walked ||= Math.hypot(c.root.position.x - s.x, c.root.position.z - s.z) > 1;
+          if (st.mode === "fill") filling ||= beer.stream.visible && beer.mug.parent === beer.dispenser;
+        }
+        return { ...beer.state, empty, filling, walked, streamOff: !beer.stream.visible };
+      };
+      const slowCycle = cycle(30), fastCycle = cycle(120);
+      beer.pause(); Object.assign(beer.state, { litres: 0.5, sips: 0, refills: 0, cleaned: 0, replaced: 0 });
+      beer.act("spin", s);
+      const phases = new Set();
+      for (let i = 0; i < 40 * 60; i++) { beer.update(c, s, 1 / 60); phases.add(beer.state.mode); }
+      return { slow, fast, wall, radius: L.radius, slowCycle, fastCycle, spill: { phases: [...phases], ...beer.state, shardsHidden: !beer.shards.visible } };
+    } finally { [entry.lastCommitAt, entry.lastContributionAt] = saved; B.advance(0.1, 1 / 60); }
   })()`);
   record("timechain sani: Sani's recliner spins with his laptop independently of frame rate, and his beer gear stands against the room's wall",
     r.slow.together && r.fast.together && Math.abs(r.slow.angle - r.fast.angle) < 1e-7 && Math.abs(r.slow.angle - Math.PI) > 1 && r.wall.every(d => d > r.radius - 2.2 && d < r.radius - 0.5), JSON.stringify(r));
