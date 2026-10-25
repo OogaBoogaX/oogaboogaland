@@ -13,12 +13,13 @@
   const create = ({ npcSync, write, onSnapshot, onMessage }) => {
     const net = BL.net;
     npcSync.extra = { write, read: onSnapshot };
-    const unsubscribe = net.subscribeGhost((msg) => {
+    const receive = (msg) => {
       if (npcSync.role !== "host" || !Number.isSafeInteger(msg.from) || msg.from <= 0) return;
       if (msg.k === "start" || msg.k === "pause" || msg.k === "ready") onMessage({ k: msg.k, from: msg.from, g: 0, d: 0 });
       else if (msg.k === "hit" && fair(msg.g, msg.d)) onMessage({ k: "hit", from: msg.from, g: msg.g, d: msg.d });
       else if (msg.k === "hits" && Array.isArray(msg.h)) for (let i = 0; i + 1 < msg.h.length; i += 2) if (fair(msg.h[i], msg.h[i + 1])) onMessage({ k: "hit", from: msg.from, g: msg.h[i], d: msg.h[i + 1] });
-    });
+    };
+    const unsubscribe = net.subscribeGhost(receive);
     const START = { t: "ghost", k: "start" }, PAUSE = { t: "ghost", k: "pause" }, READY = { t: "ghost", k: "ready" }, HITS = { t: "ghost", k: "hits", h: [] };
     const start = () => net.sendGhost(START);
     const ready = () => net.sendGhost(READY);
@@ -33,7 +34,7 @@
       unsubscribe();
       if (npcSync.extra && npcSync.extra.write === write) npcSync.extra = null;
     };
-    return { start, ready, pause, hits, dispose, get role() { return npcSync.role; } };
+    return { start, ready, pause, hits, receive, dispose, get role() { return npcSync.role; } };
   };
 
   BL.ghostSync = { create };

@@ -244,8 +244,8 @@
   // Its floating lanterns (one node each over one geometry), and whether they showed last frame.
   const ringLanterns = [];
   let ringLanternsShown = false;
-  // HALLOWEEN: the ghost hunt (ghost-game.js) once its group has arrived, the visit it was asked for, and its walls' seal.
-  let ghosts = null, ghostLoading = false, ghostVisit = 0, ghostSeal = null;
+  // HALLOWEEN: the lightweight herald, the hunt once a player starts or joins, and its walls' seal.
+  let ghosts = null, ghostEntry = null, ghostSeal = null;
   let magazine, magazineState, clankers, clankerPlay, clankerMeshes, clankerPartOwners, grabSupportEntry = null, entropyLab, chalkboard, factoryMouth = null, arcadeMouth = null, bcaMouth = null, glCanvas = null;
   const dragHand = new Float64Array(3), dragFoot = new Float64Array(3);
   const THROW_SWING_TIME = 0.28, THROW_SETTLE_TIME = 0.2, THROW_CARRY_SPEED_MAX = 8;
@@ -686,6 +686,7 @@
     input.add(node, owner, opts);
     targets.push(node);
   };
+  const removeTarget = (node) => { input.remove(node); drop(targets, node); };
   // Poking the set dressing. Every piece a baked set placed (`baked.picks`) gets a pick sphere on a node kept off
   // the scene graph, over one shared faceless geometry: never drawn, never baked into outlines or the GPU, and
   // released with the visit's other targets. `toWorld` maps a piece's set coordinates to the island, or null to
@@ -3651,8 +3652,9 @@
   };
   const weaponImpact = (source, hit, dx, dy, dz, power = 1, projectile = null) => {
     // Waking the herald opens a game; it is an interaction before combat exists.
-    if (ghosts && hit.owner.kind === "halloween" && hit.owner.role === "herald") {
-      ghosts.hit(source, hit, power, isPlayerAttack(source), !!projectile);
+    if (hit.owner.kind === "halloween" && hit.owner.role === "herald") {
+      if (ghosts) ghosts.hit(source, hit, power, isPlayerAttack(source), !!projectile);
+      else if (ghostEntry) ghostEntry.hit(isPlayerAttack(source), !!projectile);
       return;
     }
     if (!gameMode) {
@@ -8358,7 +8360,7 @@
     shareDrivenActor(dt);
     remotes.update(dt);
     if (ghosts) ghosts.update(dt); // HALLOWEEN
-    else if (GHOSTS_WANTED && !ghostLoading && elapsed > 2) loadGhosts(); // HALLOWEEN
+    else if (ghostEntry) ghostEntry.update(dt); // HALLOWEEN
     if (poolEffectsActive) {
       mempoolIsland.wildlife.update(dt, poolEffectsTime);
       for (const cave of crew.list) if (cave.root.visible) {
@@ -8692,20 +8694,16 @@
       node.rotation.y = elapsed * 0.3 + i;
     }
   };
-  // HALLOWEEN: the ghost hunt arrives after the island is up (data-defer="halloween", ghost-game.js) and works the island
-  // through this one adapter. A load that lands after the visit ended finds a newer `ghostVisit` and attaches nothing;
-  // one that fails waits for the next visit.
-  const loadGhosts = () => {
-    ghostLoading = true;
-    const visit = ghostVisit, loading = BL.deferred.load("halloween");
-    const attach = () => { if (visit === ghostVisit) ghosts = BL.halloween.create(ghostHub()); };
-    if (loading) loading.then(attach, () => {});
-    else attach();
+  // HALLOWEEN: the entry owns its pending load and discovery subscriptions for this visit alone.
+  const createGhostEntry = () => {
+    if (!GHOSTS_WANTED) return;
+    ghostEntry = BL.ghostEntry.create({ root, camera, island, npcSync, addTarget, removeTarget, hud, fx,
+      attach: () => (ghosts = BL.halloween.create(ghostHub())) });
   };
   const ghostHub = () => ({
     root, camera, renderer, fx, hud, crew, island, npcSync, coarse: COARSE, closedZones: closedCaveZones, debug: DEBUG, params, guide: islandGuide,
     openMouths: island.mouths.filter((m) => !sealedCaves.some((sealed) => sealed.mouth === m)),
-    addTarget, selectOoga, mayDriveOoga, zoneOf,
+    addTarget, removeTarget, selectOoga, mayDriveOoga, zoneOf, heraldGeometry: ghostEntry && ghostEntry.herald.geometry,
     gorillaActive: () => !!(clankerPlay && clankerPlay.active),
     gameMode: on => setGameMode(on, true),
     // Keep ring timing separate from the event's combat policy.
@@ -10833,9 +10831,9 @@
   const onTotem = (event) => { if (event.fresh) flareTotem(event.index); };
   const suspendHub = () => {
     // A kept island ends its hunt and its game as a full leave does, and lowers the ring at once.
-    ghostVisit++;
+    if (ghostEntry) { ghostEntry.dispose(); ghostEntry = null; }
     if (ghosts) { ghosts.dispose(); ghosts = null; }
-    ghostLoading = false; ghostSeal = null;
+    ghostSeal = null;
     setGameMode(false);
     gameRingK = gameRingWait = ringPulseWait = 0; gameRing.visible = false;
     // The veils' waves and glyph outlines end with the visit as leave ends them; an outline is made again where a body
@@ -10982,6 +10980,7 @@
       updatePositionDebug(true);
     }
     updatePoolEffectsActivity();
+    createGhostEntry();
   };
   const enter = (ctx) => {
     reuseHub = ctx.hubPolicy === "keep";
@@ -11333,7 +11332,7 @@
       hitMirror(1, lerp(ax, bx, t), lerp(ay, by, t), lerp(az, bz, t), source);
     };
     shared.weaponInteraction = (owner, node) => node === mirrorCave.node
-      || !!ghosts && !ghosts.busy && owner.kind === "halloween" && owner.role === "herald" && owner.active;
+      || (!ghosts && !!ghostEntry || !!ghosts && !ghosts.busy) && owner.kind === "halloween" && owner.role === "herald" && owner.active;
     shared.onWeaponImpact = weaponImpact;
     shared.onMeleeStrike = mirrorCave.ripples.strike;
     shared.aimSurface = mirrorCave.ripples.aimAt;
@@ -12093,7 +12092,8 @@
       targets: { totems: totems.map((t) => { const p = t.owner.node.position; return { x: p.x, y: p.y + t.eyeTop, z: p.z }; }).sort((a, b) => a.x - b.x) }
     });
     hubScene.debug.tess = islandGuide;
-    Object.defineProperty(hubScene.debug, "halloween", { get: () => ghosts && ghosts.debug, enumerable: true }); // HALLOWEEN
+    createGhostEntry();
+    Object.defineProperty(hubScene.debug, "halloween", { get: () => ghosts ? ghosts.debug : ghostEntry && ghostEntry.debug, enumerable: true }); // HALLOWEEN
     mark("visibility-start");
     fx.warmVisibility(crew);
     fx.warmBlockers();
@@ -12127,10 +12127,9 @@
     selectDebugGorilla(null);
     islandGuide.dispose();
     islandGuide = null;
-    // HALLOWEEN: the hunt goes before the crew, fx and targets it uses; a load still under way finds a newer visit.
-    ghostVisit++;
+    // HALLOWEEN: the entry cancels its handoff before the hunt and the crew, fx and targets they use leave.
+    if (ghostEntry) { ghostEntry.dispose(); ghostEntry = null; }
     if (ghosts) { ghosts.dispose(); ghosts = null; }
-    ghostLoading = false;
     ghostSeal = null;
     // GAME MODE ends with the visit; the island comes back built afresh.
     gameMode = gameCombatOnly = false;
@@ -12325,6 +12324,7 @@
   const islandGeometry = (set) => {
     if (islandGuide) islandGuide.liveGeometry(set);
     if (ghosts) ghosts.liveGeometry(set); // HALLOWEEN
+    else if (ghostEntry) ghostEntry.liveGeometry(set); // HALLOWEEN
     mempoolIsland.water.liveGeometry(set);
     pile.liveGeometry(set);
     mirrorCave.damage.liveGeometry(set);
