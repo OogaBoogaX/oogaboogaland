@@ -6,7 +6,7 @@
 // down after the players, the boss circles outside it spitting more, and when he burns (or every player is down)
 // the dawn comes back, the walls sink away and everything returns.
 //
-// The hub loads this group after it is up (data-defer="halloween") and hands `create` one adapter (`ghostHub` in
+// The herald loads this group when a player starts or joins (data-defer="halloween") and hands `create` one adapter (`ghostHub` in
 // scene-hub.js); every hook the hub keeps for it is tagged HALLOWEEN, so the hunt comes out by deleting the group and
 // those lines. The rules are ghost-sim.js; the room's host page runs them and sends the hunt to the others
 // (ghost-sync.js); a page alone runs its own. Everything this file draws is pooled and built once a visit: the
@@ -34,7 +34,8 @@
   // While a banner is up (a round coming, a round cleared, the boss, the end, a pause) the island goes darker still, to
   // `BANNER_KEEP` of the hunt's night, over `BANNER_IN_S`, and lifts again over `BANNER_OUT_S` for play.
   const BANNER_KEEP = 0.4, BANNER_IN_S = 0.6, BANNER_OUT_S = 0.9;
-  const NIGHT_FADE_MS = 6000, NIGHT_HOUR = 23.25, COOLDOWN_MS = 30000, START_WAIT_MS = 4000, LOST_HOST_MS = 6000;
+  // An idle host may need the deferred loader's 20 s before it can answer a follower's first start.
+  const NIGHT_FADE_MS = 6000, NIGHT_HOUR = 23.25, COOLDOWN_MS = 30000, START_WAIT_MS = 24000, LOST_HOST_MS = 6000;
   const WALL_H = 3.3, MOUTH_W = 5.6, MOUTH_ALONG = 0.6;
   // Each bridge's wall stands up its steps where the rock rises well over head height at both sides, wide enough to bury
   // its ends in it, so there is no way round; `SINK` puts its foot a little into the tread it stands on.
@@ -145,6 +146,7 @@
     MODELS.prepare();
     const group = createNode({ sightHidden: true });
     addChild(root, group);
+    const targetNodes = [], target = (node, owner) => { hub.addTarget(node, owner); targetNodes.push(node); };
     const audio = BL.ghostAudio.create(), hud = BL.ghostHud.create({ coarse: hub.coarse, onMusic: () => audio.toggleMusic(), onSkip: () => audio.skip(),
       onReady: () => readyUp(), onDecline: () => decline(), onLobby: hub.lobbyOpen,
       onSpectate: (mode) => watchFrom(mode), onSpectateNext: () => { specId = nextStanding(specId); } });
@@ -278,7 +280,7 @@
       addChild(group, node);
       return node;
     });
-    const herald = createNode({ visible: true });
+    const herald = createNode({ visible: true, geometry: hub.heraldGeometry ? keep(hub.heraldGeometry) : null });
     addChild(group, herald);
     const owner = (role, slot) => ({
       kind: "halloween", role, slot, priority: role === "herald" ? 3 : 2, weaponType: role === "herald" ? "object" : "enemy", active: role === "herald",
@@ -288,7 +290,7 @@
       tap: () => { if (role === "herald" && S.state === ST.GATHER) tapHerald(); }
     });
     const heraldOwner = owner("herald", -1);
-    hub.addTarget(herald, heraldOwner);
+    target(herald, heraldOwner);
     const ghostNodes = [], ghostOwners = [];
     // Per slot: the id shown, its dying state, last hp, the flash's end, the sampled position and its velocity.
     const shown = new Float64Array(C.MAX_GHOSTS), dyingShown = new Float64Array(C.MAX_GHOSTS), hpShown = new Float64Array(C.MAX_GHOSTS);
@@ -300,12 +302,12 @@
       const node = createNode({ visible: false });
       addChild(group, node);
       const o = owner("ghost", i);
-      hub.addTarget(node, o);
+      target(node, o);
       ghostNodes.push(node); ghostOwners.push(o);
     }
     const bossNode = createNode({ visible: false }), bossOwner = owner("boss", -1);
     addChild(group, bossNode);
-    hub.addTarget(bossNode, bossOwner);
+    target(bossNode, bossOwner);
     // Each drop: the item, its aura, the halo and pulsing ring on the ground, the beam over it once landed, the streak
     // behind it while it falls, the scorch where it struck.
     const dropNodes = pool(C.MAX_DROPS, null), auras = pool(C.MAX_DROPS, null), halos = pool(C.MAX_DROPS, null), pulses = pool(C.MAX_DROPS, null);
@@ -352,7 +354,7 @@
       rig.root.sightHidden = true;
       addChild(group, rig.root);
       const o = owner("brute", i);
-      for (const name in rig.parts) { const part = rig.parts[name]; if (part && part.geometry) hub.addTarget(part, o); }
+      for (const name in rig.parts) { const part = rig.parts[name]; if (part && part.geometry) target(part, o); }
       rigs.push(rig); bruteOwners.push(o);
     }
     // The skeletons: a crawling upper body in each slot too (ghost-models.js `skeletonParts`), shown in place of the
@@ -372,7 +374,7 @@
       addChild(torso, tail, skull, shL, shR);
       addChild(root, torso);
       addChild(group, root);
-      for (const n of [torso, tail, skull, jaw, shL, shR, foL, foR]) hub.addTarget(n, o);
+      for (const n of [torso, tail, skull, jaw, shL, shR, foL, foR]) target(n, o);
       skels.push({ root, torso, tail, skull, jaw, shL, shR, foL, foR, cycle: 0 });
     }
     // The elixirs on the totems: each a sprite with its glow, and which were taken as last drawn.
@@ -393,12 +395,12 @@
     for (let i = 0; i < C.WEAPON.damage.length - 1; i++) keep(MODELS.laserBolt(i));
 
     // ---------- the hunt's place on this page ----------
+    const restore = (snap) => { if (sim.load(snap)) heardAt = clock(); };
     const sync = BL.ghostSync.create({
       npcSync,
       write: () => S.state !== ST.IDLE || clock() - idleAt < 3000 ? sim.snapshot() : null,
       onSnapshot: (snap) => {
-        if (npcSync.role !== "follow" || !sim.load(snap)) return;
-        heardAt = clock();
+        if (npcSync.role === "follow") restore(snap);
       },
       onMessage: (msg) => {
         if (msg.k === "pause") togglePause();
@@ -2257,6 +2259,8 @@
     };
     const dispose = () => {
       sync.dispose();
+      for (const node of targetNodes) hub.removeTarget(node);
+      targetNodes.length = 0;
       for (const rig of rigs) rig.dispose();
       hub.setSeal(null);
       hub.gameMode(false);
@@ -2295,6 +2299,7 @@
     };
 
     return {
+      start: () => { if (S.state === ST.IDLE) tapHerald(); }, receive: sync.receive, restore,
       update, drawOverlay, hit, shot, key, down, get waiting() { return spectating; }, shotGeometry: () => { const tier = rifleTier(); return tier ? MODELS.laserBolt(tier - 1) : MODELS.rock(); }, hour, shade, shake, unshake, release, dispose, liveGeometry, refuseTravel, debug,
       get sealed() { return sealedCount > 0; },
       get hunting() { return !off(S.state); },
