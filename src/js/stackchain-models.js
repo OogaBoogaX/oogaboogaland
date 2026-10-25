@@ -1,7 +1,7 @@
 // Immutable newsroom kit. Repeated shelves, books, lamps and covers share geometry.
 (() => {
   "use strict";
-  const BL=window.BL,M=BL.models,S=BL.scene,cache=new Map(),covers=new Map();
+  const BL=window.BL,M=BL.models,S=BL.scene,cache=BL.models.scopedMap(),covers=BL.models.scopedMap();
   const sign=BL.memeFactorySign; // Existing cached glyph mesh; no new text/rendering framework.
   BL.dressing.stackchain=kind=>{
     if(cache.has(kind))return cache.get(kind);

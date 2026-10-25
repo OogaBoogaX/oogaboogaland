@@ -1,7 +1,7 @@
 // Cached institutional dressing. Repeated furniture/stock is instanced by the shared renderer.
 (() => {
   "use strict";
-  const BL=window.BL,M=BL.models,cache=new Map();
+  const BL=window.BL,M=BL.models,cache=BL.models.scopedMap();
   const C={black:"#242326",stone:"#454044",red:"#9e2028",gold:"#b89a62",light:"#e3c88d",paper:"#cabfa5",wood:"#43312c"};
   BL.dressing.bigBitcoin=(kind,variant=0)=>{
     const key=kind+":"+variant;if(cache.has(key))return cache.get(key);

@@ -347,9 +347,11 @@
     }
     return lo < hi - 1e-9;
   };
-  // Exact moving vertical cylinder vs box: footprint is the box's two expanded strips plus four round corners,
-  // with no scratch arrays.
-  const segmentBoxClear = (x, y, z, dx, dy, dz, radius, height, minX, minY, minZ, maxX, maxY, maxZ) => {
+  // Exact moving vertical cylinder vs box: footprint is the box's two expanded strips plus four round corners.
+  // The typed entry reads caller-owned storage; the numeric adapter below retains the original API.
+  const segmentBoxQueryClear = (q) => {
+    let x = q[0], y = q[1], z = q[2], dx = q[3], dy = q[4], dz = q[5], radius = q[6], height = q[7];
+    let minX = q[8], minY = q[9], minZ = q[10], maxX = q[11], maxY = q[12], maxZ = q[13];
     radius = Math.max(0, radius - 1e-7);
     minY += 1e-7 - height; maxY -= 1e-7;
     let lo = 0, hi = 1;
@@ -370,6 +372,14 @@
       if (Math.max(lo, (-b - root) / span2) < Math.min(hi, (-b + root) / span2) - 1e-9) return false;
     }
     return true;
+  };
+  const BOX_SCALAR_QUERY = new Float64Array(14);
+  // Scalar callers keep the original API; repeated query owners can pass one typed record to the same arithmetic.
+  const segmentBoxClear = (x, y, z, dx, dy, dz, radius, height, minX, minY, minZ, maxX, maxY, maxZ) => {
+    const q = BOX_SCALAR_QUERY;
+    q[0] = x; q[1] = y; q[2] = z; q[3] = dx; q[4] = dy; q[5] = dz; q[6] = radius; q[7] = height;
+    q[8] = minX; q[9] = minY; q[10] = minZ; q[11] = maxX; q[12] = maxY; q[13] = maxZ;
+    return segmentBoxQueryClear(q);
   };
   // Build-time clipping keeps window stone inside the island shell; every remaining piece is convex and shares
   // one terrain mesh.
@@ -440,7 +450,7 @@
   const island = ({ seed = 1, roofHole = null } = {}) => {
     const cacheKey = roofHole ? `${seed}:${roofHole.id}:${roofHole.x}:${roofHole.z}:${roofHole.radius}` : seed;
     const hit = ISLANDS.get(cacheKey);
-    if (hit) return hit;
+    if (hit) { hit.scope.use(); return hit.value; }
     const rand = mulberry32(seed);
     const noise = valueNoise(rand);
     const spoke = (angle, axis = angle) => {
@@ -2478,8 +2488,12 @@
       unit: UNIT,
       pathUnit: PATH_UNIT
     };
-    ISLANDS.set(cacheKey, built);
+    // Drop and Orbit use an unperforated island; the hub has the Factory roof opening. Track each key separately
+    // so the games' second full voxel/mesh graph does not stay resident after a return to the hub.
+    const scope = BL.models.track(() => ISLANDS.delete(cacheKey));
+    scope.use();
+    ISLANDS.set(cacheKey, { value: built, scope });
     return built;
   };
-  BL.terrain = { makeGrid, gridGeometry, compactVertices, island, segmentBoxClear, cutawaySourceFromVox, PALETTE, MAX_HEIGHT, TIMECHAIN, POOL_APPROACH };
+  BL.terrain = { makeGrid, gridGeometry, compactVertices, island, segmentBoxClear, segmentBoxQueryClear, cutawaySourceFromVox, PALETTE, MAX_HEIGHT, TIMECHAIN, POOL_APPROACH };
 })();

@@ -530,6 +530,8 @@
       ctx.close().catch(noop);
       ctx = gain = filter = lfo = null;
       oscs.length = 0;
+      // A kept island's Heimdall opens a fresh context on his next blast, whose clock starts again at zero.
+      until = 0; asleep = false;
     };
     return { activate, blow, update, dispose };
   };

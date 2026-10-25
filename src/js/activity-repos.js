@@ -33,16 +33,23 @@
   const normalizeStats = (input, at = Date.now()) => {
     input = BL.contributorIdentities.normalizeStats(input, at);
     if (!input || input.meta?.schema_version !== 3 || !Array.isArray(input.repos)) return input;
-    const groups = new Map();
+    const groups = new Map(), names = new Map();
     for (const repo of input.repos) {
       const name = nameOf(repo.name);
+      names.set(repo.name, name);
       let group = groups.get(name);
       if (!group) { group = []; groups.set(name, group); }
       group.push(repo);
     }
-    const repos = [];
+    const repos = []; let reposChanged = false;
     for (const [name, group] of groups) {
-      if (group.length === 1) { repos.push({ ...group[0], name }); continue; }
+      if (group.length === 1) {
+        const repo = group[0];
+        if (repo.name === name) repos.push(repo);
+        else { repos.push({ ...repo, name }); reposChanged = true; }
+        continue;
+      }
+      reposChanged = true;
       const totals = {}, weeks = new Map(), contributors = new Map(), identities = new Set();
       const boards = Object.fromEntries(COUNTS.map(type => [type, new Map()]));
       let lastActivity = null, reportedContributors = 0;
@@ -82,8 +89,19 @@
           .sort((a, b) => b.count - a.count || a.login.localeCompare(b.login))])),
         contributors: [...contributors.values()] });
     }
-    return { ...input, repos, recent: Array.isArray(input.recent)
-      ? input.recent.map(row => ({ ...row, repo: nameOf(row.repo) })) : input.recent };
+    // Preserve unchanged rows; normalization copies only identities that actually change.
+    // A feed repeats a handful of repository names across hundreds of recent contributions.
+    let recent = input.recent;
+    if (Array.isArray(recent)) for (let i = 0; i < input.recent.length; i++) {
+      if (!(i in input.recent)) continue;
+      const row = input.recent[i];
+      let name = names.get(row.repo);
+      if (name === undefined) { name = nameOf(row.repo); names.set(row.repo, name); }
+      if (name === row.repo) continue;
+      if (recent === input.recent) recent = recent.slice();
+      recent[i] = { ...row, repo: name };
+    }
+    return reposChanged || recent !== input.recent ? { ...input, repos: reposChanged ? repos : input.repos, recent } : input;
   };
   BL.activityRepos = { FOUNDRY, nameOf, keyOf, normalizeStats };
 })();

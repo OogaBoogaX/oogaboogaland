@@ -61,7 +61,7 @@
   const SPARKLES = ["#ffc83a", "#fff2b8", "#7fe0ff", "#ffffff"].map((c) => models.particleGeometry(c, 0.1, 1));
   // A burst charged toward an open world's window throws that world's sparkles instead: its colour, paler, warmed toward
   // gold, and white. Cached by colour.
-  const sparkleSets = new Map();
+  const sparkleSets = BL.models.scopedMap();
   const sparklesOf = (tint) => {
     if (!sparkleSets.has(tint)) sparkleSets.set(tint, [tint, BM.blend(tint, "#ffffff", 0.45), BM.blend(tint, "#ffc83a", 0.3), "#ffffff"].map((c) => models.particleGeometry(c, 0.1, 1)));
     return sparkleSets.get(tint);
@@ -480,7 +480,7 @@
     pictureWait = 0;
     camera = createCamera({ fov: 55, near: 0.3, far: 700 });
     root = createNode();
-    hud = hudMod.create({ roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
+    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
     hooks = {};
     input = interactMod.create({ canvas, renderer, camera, hooks });
     const inTunnel = (p) => p.z > HALL.r - 1.5 && Math.abs(p.x) < ENTRY.halfW;

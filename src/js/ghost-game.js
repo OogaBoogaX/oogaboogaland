@@ -23,6 +23,7 @@
   const { clamp, ease, fnv1a } = BL.math;
   const { createNode, addChild, removeChild } = BL.scene;
   const SIM = BL.ghostSim, ST = SIM.STATE, C = SIM.CONFIG, MODELS = BL.ghostModels, TIERS = MODELS.TIERS;
+  const { BUTTON: PAD, state: pad } = BL.gamepad;
   const TAU = Math.PI * 2, DEG = Math.PI / 180;
   // The rising (ms): the orange beam held on the herald, its vanishing straight up, when the walls start up together, how
   // long they grind up and how the land shakes meanwhile (`QUAKE` metres at its height), then a moment before the dusk's
@@ -145,7 +146,7 @@
     const group = createNode({ sightHidden: true });
     addChild(root, group);
     const audio = BL.ghostAudio.create(), hud = BL.ghostHud.create({ coarse: hub.coarse, onMusic: () => audio.toggleMusic(), onSkip: () => audio.skip(),
-      onReady: () => readyUp(), onDecline: () => { declined = true; hud.lobby(null); }, onLobby: hub.lobbyOpen,
+      onReady: () => readyUp(), onDecline: () => decline(), onLobby: hub.lobbyOpen,
       onSpectate: (mode) => watchFrom(mode), onSpectateNext: () => { specId = nextStanding(specId); } });
     // Every mesh the hunt has shown, kept on the GPU for the visit (`liveGeometry`): frames swap in and out.
     const used = [];
@@ -486,10 +487,11 @@
       if (crew.player && !hub.gorillaActive()) hub.readyGun();
     };
     let declined = false;
+    const decline = () => { declined = true; hud.lobby(null); };
     // ---------- the lobby and the waiting room ----------
     // The lobby's rows (one a player there, pooled) and the key its card was last drawn for.
     const LOBBY_ROWS = Array.from({ length: C.MAX_PLAYERS }, () => ({ id: 0, name: "", ready: false, host: false }));
-    let lobbyShown = -1;
+    let lobbyShown = -1, padFrame = -1;
     const nameOf = (id) => {
       if (id === myId()) {
         const me = net.state.me;
@@ -514,6 +516,13 @@
         count++;
       }
       const signIn = !!net.state.backend && !net.state.me;
+      // A pad's A is the card's Ready and its B "Not this time", for presses made while the card is up.
+      if (lobbyShown === -1) padFrame = pad.frame;
+      else if (pad.frame !== padFrame) {
+        padFrame = pad.frame;
+        if (pad.pressed & PAD.a) readyUp();
+        else if (pad.pressed & PAD.b && !meReady) { decline(); return; }
+      }
       // One number for all of it: seconds, how many, which (a sum of ids by place), who is ready, and the two flags.
       const key = secs * 1e14 + count * 1e12 + (ids % 10000) * 1e8 + readyBits * 8 + (hostReady ? 4 : 0) + (meReady ? 2 : 0) + (signIn ? 1 : 0);
       if (key === lobbyShown) return;

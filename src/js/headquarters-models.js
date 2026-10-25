@@ -5,14 +5,10 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const { box, merge } = BL.models;
-  const cached = (build) => {
-    let value = null;
-    return () => value || (value = build());
-  };
+  const { box, merge, cached } = BL.models;
   const variants = (build) => {
-    const cache = new Array(11);
-    return (i = 0) => cache[i % 11] || (cache[i % 11] = build(i % 11));
+    const read = BL.models.variants(build);
+    return (i = 0) => read(i % 11);
   };
   const STONE = ["#7d6f61", "#5e5449", "#877869"];
   const MOSS = ["#6f7d3e", "#7b8945", "#65733a"];
@@ -20,9 +16,9 @@
   const MATTRESS = { width: 1.45, depth: 2.45, height: 0.345, wallInset: 0.65, surface: 0.245, pillowTop: 0.345, pillowZ: -0.82 };
   // 19 room slots: eleven HQ plus eight basement.
   // Static geometry is reused across visits without retaining a departed room or scene.
-  const mattressCache = new Array(19);
-  const roomSignCache = new Array(19);
-  const rampMarkerCache = new Map();
+  const mattressCache = BL.models.scopedMap();
+  const roomSignCache = BL.models.scopedMap();
+  const rampMarkerCache = BL.models.scopedMap();
   const fabric = (pattern, width, depth, top, bottom, centerZ, kind) => {
     const geo = { verts: [], faces: [], lines: [] }, size = pattern.width, colors = pattern.colors;
     const cells = new Uint32Array(size * size), used = new Uint8Array(cells.length);
@@ -68,7 +64,7 @@
   };
   const mattress = (room) => {
     const roomKey = [room.x, room.floor, room.z].map((n) => Number(n.toFixed(6))).join(",");
-    const slot = room.index + (room.basement ? 11 : 0), cached = mattressCache[slot];
+    const slot = room.index + (room.basement ? 11 : 0), cached = mattressCache.get(slot);
     if (cached && cached.mattress.roomKey === roomKey) return cached;
     const sheet = { seed: `room:${roomKey}:sheet` };
     sheet.pattern = BL.lifehash.make(sheet.seed);
@@ -88,11 +84,11 @@
       fabric(pillow.pattern, 0.9, 0.5, MATTRESS.pillowTop, MATTRESS.surface, MATTRESS.pillowZ, "pillow")
     );
     geo.mattress = { roomKey, width: MATTRESS.width, depth: MATTRESS.depth, height: MATTRESS.height, sheet, pillow };
-    mattressCache[slot] = geo;
+    mattressCache.set(slot, geo);
     return geo;
   };
   const roomSign = (room) => {
-    const bedding = mattress(room).mattress, slot = room.index + (room.basement ? 11 : 0), cached = roomSignCache[slot];
+    const bedding = mattress(room).mattress, slot = room.index + (room.basement ? 11 : 0), cached = roomSignCache.get(slot);
     if (cached && cached.roomLifehashSign.roomKey === bedding.roomKey) return cached;
     const hash = bedding.sheet.pattern.hash, text = hash.slice(0, 8).toUpperCase(), width = 2.12, height = 0.72, cell = 0.055, pixel = 0.047;
     const geo = merge(
@@ -125,7 +121,7 @@
     }
     geo.roomLifehashSign = { roomKey: bedding.roomKey, hash, lines: [text], width: width * size, height: height * size,
       board: new Float64Array([-width * size / 2, (-height / 2 - 0.63) * size, 0.04 * size, width * size / 2, (height / 2 - 0.63) * size, 0.1455 * size]) };
-    roomSignCache[slot] = geo;
+    roomSignCache.set(slot, geo);
     return geo;
   };
   const RAMP_MARKER_GLYPHS = {

@@ -1,7 +1,7 @@
 // Cached retail pieces extend the shared dressing kit; no textures or remote assets in the room.
 (() => {
   "use strict";
-  const BL=window.BL,M=BL.models,cache=new Map();
+  const BL=window.BL,M=BL.models,cache=BL.models.scopedMap();
   const C={ink:"#17191a",bone:"#e2d7bf",orange:"#ef8829",wood:"#886344",metal:"#383b3b"};
   BL.dressing.withoutRulers=(kind,tone="ink")=>{
     const key=kind+":"+tone;if(cache.has(key))return cache.get(key);

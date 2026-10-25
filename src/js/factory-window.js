@@ -27,6 +27,34 @@
   const AXIS = SHIELD_Z - 0.5, DEPTH = 0.8;
   // The shield's glyph crests in the emitters' cyan, the factory's CYAN.
   const TINT = hexToRgb("#5fe3ff").map((k) => k / 255);
+  // The walk through the shield, either way (scene-hub.js and scene-factory.js): it takes the played Ooga over in the
+  // last `reach` metres before the shield, on its feet and `moving` metres a second or more toward it, and walks it at
+  // `speed` of a walk, aiming `ahead` metres down the middle. The scene on the far side takes over with an instant
+  // switch, the last frame of the one left held over its first (`still`) and dissolved away over `dissolve`, with the
+  // Ooga no more than `past` beyond its own shield, so it is seen coming through. Where the switch will take long (the
+  // island's rebuild on the way out, the hall's first build of a page on the way in), the Ooga stands `beat` seconds at
+  // the shield first, as the Timechain Sphere's doorway does, so the switch lands on a still frame. `limit` lets go of
+  // a walk that runs long.
+  const GLIDE = { reach: 3, moving: 0.2, speed: 0.55, ahead: 1.6, through: 0.3, beat: 0.15, still: 0.1, dissolve: 0.45, limit: 4, past: 0.5 };
+  // The frame held over the switch: one canvas for the page, grabbed from the scene's canvas right after it is drawn
+  // (`grab`, from the scene's overlay pass in the frame the switch is asked for) and painted over the next scene's
+  // overlay at `k`, eased (`still`).
+  let held = null;
+  const grab = (source) => {
+    if (!held) held = document.createElement("canvas");
+    if (held.width !== source.width || held.height !== source.height) { held.width = source.width; held.height = source.height; }
+    const g = held.getContext("2d");
+    g.clearRect(0, 0, held.width, held.height);
+    g.drawImage(source, 0, 0);
+  };
+  const still = (ctx, k) => {
+    if (k <= 0 || !held) return;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = Math.min(1, k * k * (3 - 2 * k));
+    ctx.drawImage(held, 0, 0, ctx.canvas.width, ctx.canvas.height);
+    ctx.restore();
+  };
   // The window shows while the eye stands in front of the shield, and no farther from the middle of it than FAR.
   const NEAR = 0.05, FAR = 60, MIDDLE = 1.5;
   // How far past the chamber's walls, into the rock either side, the drawn relief may reach.
@@ -68,6 +96,7 @@
   // its roof and across its width with MARGIN into the rock. Made once for the page, so every visit draws the same
   // geometries and one clip slab.
   let clipped = null;
+  const clippedScope = BL.models.track(() => { clipped = null; }, () => clipped);
   const clippedFor = (mouth, roof = null) => {
     if (roof) {
       const w = FM.hubWindow(), half = roof.radius + 0.02;
@@ -77,6 +106,7 @@
       return { hall: clip(w.hall), chamber: clip(w.chamber), fire: clip(w.fire), sat: clip(w.sat), satRed: clip(w.satRed),
         blueDim: clip(w.tank.blueDim), blueLit: clip(w.tank.blueLit), orangeDim: clip(w.tank.orangeDim), orangeLit: clip(w.tank.orangeLit) };
     }
+    clippedScope.use();
     if (clipped && clipped.mouth === mouth) return clipped;
     const w = FM.hubWindow(), sr = Math.sin(mouth.ry), cr = Math.cos(mouth.ry), half = mouth.room.w / 2 + MARGIN;
     const clipSlab = new Float32Array([cr / half, 0, -sr / half, -(cr * mouth.x - sr * mouth.z) / half]);
@@ -193,7 +223,7 @@
           break;
       }
     };
-    const unsubscribe = node.feed.subscribe(onEvent);
+    let unsubscribe = node.feed.subscribe(onEvent);
 
     // The show advances only while nearby and shown, keeping its existing motion when it resumes.
     const step = (dt) => {
@@ -299,8 +329,10 @@
       }
     };
 
+    const suspend = () => { if (unsubscribe) unsubscribe(); unsubscribe = null; };
+    const resume = () => { if (!unsubscribe) unsubscribe = node.feed.subscribe(onEvent); };
     const dispose = () => {
-      unsubscribe();
+      suspend();
       root.visible = false;
       removeChild(group, root);
     };
@@ -314,8 +346,8 @@
       },
       batches: { hall, chamber, fire, blueLit, blueDim, orangeLit, orangeDim, sat: gold, satRed: red }
     };
-    return { root, update, dispose, debug };
+    return { root, update, suspend, resume, dispose, debug };
   };
 
-  BL.factoryWindow = { create, relief, AXIS, DEPTH, TINT };
+  BL.factoryWindow = { create, relief, grab, still, AXIS, DEPTH, TINT, GLIDE };
 })();
