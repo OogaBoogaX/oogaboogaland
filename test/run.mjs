@@ -12171,7 +12171,7 @@ const hubEntryFailure = async (b, stage) => {
   await b.evaluate(`((stage) => {
     const H = BL.scenes.hub, steps = H.enterSteps, S = window.__entryFailure = { errors: [], calls: 0, report: window.reportError, kept: H.retained };
     window.reportError = error => S.errors.push(error.message);
-    if (stage === "resume") __resumeHud.restoreBoards = () => { throw new Error("entry failure fixture"); };
+    if (stage === "resume") __resumeHud.renew = () => { throw new Error("entry failure fixture"); };
     H.enterSteps = function* (ctx) {
       S.calls++; S.signal = ctx.signal;
       if (stage === "resume") return yield* steps(ctx);
