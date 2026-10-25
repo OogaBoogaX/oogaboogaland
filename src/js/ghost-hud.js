@@ -16,16 +16,19 @@
     face.load().then(() => document.fonts.add(face), () => {});
   };
 
-  // How to play, on the lobby: each line its keys and what they do, for a keyboard and mouse or for touch.
+  // How to play, on the lobby: each line its keys and what they do, for a keyboard and mouse, for touch or for a pad.
   const INTRO = {
     keys: [[["W", "A", "S", "D"], "Move your Ooga"], [["Mouse"], "Aim, and click to fire"], [["G"], "Switch weapons"]],
-    touch: [[["Left stick"], "Move your Ooga"], [["Ready"], "Start in combat mode"], [["Hold fire"], "Shoot the ghosts"]]
+    touch: [[["Left stick"], "Move your Ooga"], [["Ready"], "Start in combat mode"], [["Hold fire"], "Shoot the ghosts"]],
+    pad: [[["Left stick"], "Move your Ooga"], [["Right stick", "RT"], "Aim, and pull to fire"], [["Y"], "Switch weapons"], [["A"], "Ready"]]
   };
+  const pad = BL.gamepad.state;
   /**
    * The HUD; `coarse` for touch words, `onMusic` when the visitor flips the mini player's switch, `onSkip` when they
-   * skip to the next track, `onReady` and `onDecline` from the lobby, `onLobby` when its menu opens or closes.
+   * skip to the next track, `onReady` and `onDecline` from the lobby, `onLobby` when its menu opens or closes,
+   * `onSpectate(mode)` and `onSpectateNext` from the spectator menu while the visitor is down.
    */
-  const create = ({ coarse = false, onMusic = null, onSkip = null, onReady = null, onDecline = null, onLobby = null } = {}) => {
+  const create = ({ coarse = false, onMusic = null, onSkip = null, onReady = null, onDecline = null, onLobby = null, onSpectate = null, onSpectateNext = null } = {}) => {
     loadFace();
     const el = {
       hud: document.getElementById("ghost-hud"),
@@ -35,8 +38,15 @@
       playerSkip: document.getElementById("ghost-player-skip"), minimap: document.getElementById("ghost-minimap"),
       topbar: document.querySelector(".topbar"), equipment: document.getElementById("equipment-hud"),
       lobby: document.getElementById("ghost-lobby"), lobbyGoal: document.getElementById("ghost-lobby-goal"), lobbyPlayers: document.getElementById("ghost-lobby-players"),
-      lobbyNote: document.getElementById("ghost-lobby-note"), lobbyHow: document.getElementById("ghost-lobby-how"), lobbyReady: document.getElementById("ghost-lobby-ready"), lobbyDecline: document.getElementById("ghost-lobby-decline")
+      lobbyNote: document.getElementById("ghost-lobby-note"), lobbyHow: document.getElementById("ghost-lobby-how"), lobbyReady: document.getElementById("ghost-lobby-ready"), lobbyDecline: document.getElementById("ghost-lobby-decline"),
+      spec: document.getElementById("ghost-spectate"), specModes: document.querySelectorAll("#ghost-spectate [data-spec]"),
+      specWatch: document.getElementById("ghost-spectate-watch"), specName: document.getElementById("ghost-spectate-name"), specNext: document.getElementById("ghost-spectate-next")
     };
+    // The spectator menu's buttons, let go of after a press so the turn keys keep working.
+    const pickSpec = (e) => { if (onSpectate) onSpectate(e.currentTarget.dataset.spec); e.currentTarget.blur(); };
+    const nextSpec = () => { if (onSpectateNext) onSpectateNext(); el.specNext.blur(); };
+    for (const b of el.specModes) b.addEventListener("click", pickSpec);
+    el.specNext.addEventListener("click", nextSpec);
     // The lobby's buttons, and its own keys (inside a dialog the island leaves keys alone): Enter or R readies, Escape
     // declines.
     el.lobby.tabIndex = -1;
@@ -50,20 +60,27 @@
     el.lobbyReady.addEventListener("click", readyUp);
     el.lobbyDecline.addEventListener("click", decline);
     el.lobby.addEventListener("keydown", lobbyKey);
-    // The lobby's player rows, made as needed and kept; its controls, written once.
+    // The lobby's player rows, made as needed and kept; its controls, written again only when the visitor's change:
+    // a pad's once one is connected, else touch or the keyboard's.
     const lobbyRows = [];
-    el.lobbyHow.replaceChildren(...(coarse ? INTRO.touch : INTRO.keys).map(([keys, what]) => {
-      const li = document.createElement("li");
-      for (const k of keys) { const kbd = document.createElement("kbd"); kbd.textContent = k; li.append(kbd); }
-      li.append(` ${what}`);
-      return li;
-    }));
+    let howShown = null;
+    const writeHow = () => {
+      const how = pad.connected ? INTRO.pad : coarse ? INTRO.touch : INTRO.keys;
+      if (how === howShown) return;
+      howShown = how;
+      el.lobbyHow.replaceChildren(...how.map(([keys, what]) => {
+        const li = document.createElement("li");
+        for (const k of keys) { const kbd = document.createElement("kbd"); kbd.textContent = k; li.append(kbd); }
+        li.append(` ${what}`);
+        return li;
+      }));
+    };
     // The switch, let go of after a press so the island's keys keep working.
     const flip = () => { if (onMusic) onMusic(); el.playerToggle.blur(); };
     el.playerToggle.addEventListener("click", flip);
     const skip = () => { if (onSkip) onSkip(); el.playerSkip.blur(); };
     el.playerSkip.addEventListener("click", skip);
-    const last = { shown: false, title: null, sub: null, boss: -1, player: null, playing: null, on: null, skips: null };
+    const last = { shown: false, title: null, sub: null, boss: -1, player: null, playing: null, on: null, skips: null, spec: null, specName: null };
     const text = (node, key, value) => {
       if (last[key] === value) return;
       last[key] = value;
@@ -97,7 +114,19 @@
       window.cancelAnimationFrame(mapFrame);
       mapFrame = 0;
       if (on) layoutMap();
-      if (!on) { banner(null); boss(-1); player(null); el.flash.hidden = true; }
+      if (!on) { banner(null); boss(-1); player(null); spectate(null); el.flash.hidden = true; }
+    };
+    // The spectator menu, bottom centre while the visitor is down: `mode` the view they watch from ("grave", "free" or
+    // "players"; null hides it) and, watching players, `name` the one watched.
+    const spectate = (mode, name = "") => {
+      if (mode === last.spec && name === last.specName) return;
+      if (mode !== last.spec) {
+        if (mode === null || last.spec === null) el.spec.hidden = mode === null;
+        for (const b of el.specModes) b.setAttribute("aria-pressed", b.dataset.spec === mode ? "true" : "false");
+        el.specWatch.hidden = mode !== "players";
+        last.spec = mode;
+      }
+      if (name !== last.specName) { last.specName = name; el.specName.textContent = name; }
     };
     const banner = (title, sub = "") => {
       if (title === null) {
@@ -141,6 +170,7 @@
       const opening = lobbyKey_ === null;
       if (key === lobbyKey_) return;
       lobbyKey_ = key;
+      writeHow();
       el.lobbyGoal.textContent = goal;
       while (lobbyRows.length < count) {
         const li = document.createElement("li"), mark = document.createElement("span"), name = document.createElement("b"), state = document.createElement("small");
@@ -196,13 +226,19 @@
       el.lobbyReady.removeEventListener("click", readyUp);
       el.lobbyDecline.removeEventListener("click", decline);
       el.lobby.removeEventListener("keydown", lobbyKey);
+      for (const b of el.specModes) b.removeEventListener("click", pickSpec);
+      el.specNext.removeEventListener("click", nextSpec);
+      spectate(null);
       hideLobby(false);
+      // The rows go with the visit: the next one's card makes its own, and these would stand beside them.
+      for (const r of lobbyRows) r.li.remove();
+      lobbyRows.length = 0;
       el.playerToggle.removeEventListener("click", flip);
       el.playerSkip.removeEventListener("click", skip);
       show(false);
       el.flash.classList.remove("on");
     };
-    return { show, map, lobby, player, banner, boss, flash, soul, dispose };
+    return { show, map, lobby, player, banner, boss, flash, soul, spectate, dispose };
   };
 
   BL.ghostHud = { create };

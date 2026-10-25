@@ -4842,7 +4842,12 @@ const ghostHuntChecks = async () => {
     // Compared while both still hunt: a finished hunt resets to IDLE and would hide any difference.
     play(a, at, 200000); play(handed, at, 200000);
     const same = JSON.stringify(a.snapshot()) === JSON.stringify(handed.snapshot()), hunting = a.state.state !== ST.IDLE;
-    record("ghost hunt: a seeded hunt repeats exactly, and one picked up from its snapshot mid-way (a new host) goes on the same", repeated && loaded && same && hunting && a.state.kills > 0, JSON.stringify({ repeated, loaded, same, hunting, kills: a.state.kills }));
+    // Pages either side of a deploy share a hunt: the player rows keep the 27 numbers (slot, presence, 25 fields) the
+    // deployed pages read, newer fields riding in `x`, and a snapshot without `x` (an older host's) still loads.
+    const snap = JSON.parse(JSON.stringify(a.snapshot())), rows = snap.p.length > 0 && snap.p.length % 27 === 0 && snap.x.length > 0;
+    delete snap.x;
+    const older = G.create({ seed: 5, spots, lapMs: 20000 }).load(snap);
+    record("ghost hunt: a seeded hunt repeats exactly, one picked up from its snapshot mid-way (a new host) goes on the same, and its rows stay readable across a deploy", repeated && loaded && same && hunting && a.state.kills > 0 && rows && older, JSON.stringify({ repeated, loaded, same, hunting, kills: a.state.kills, rows, older }));
   }
   {
     const sim = begin(11), rounds = [], drops = { 3: false, 4: false }, gorillas = [], skeletons = [], seenBrutes = new Set();
@@ -4896,7 +4901,8 @@ const ghostHuntChecks = async () => {
       JSON.stringify({ where, struck: struck.length, zapped }));
   }
   {
-    // A player takes the monkeys from where they fell; they stay with them until a ghost gets them.
+    // A player takes the monkeys from where they fell; they stay through the first hit and leave once the bar falls
+    // below POWER_KEEP_SEG.
     const z = begin(13);
     let now = T0;
     const tick = () => { now += FRAME; z.beginPresence(); z.present(1, 0, 0, 6); z.advance(now); };
@@ -4906,16 +4912,22 @@ const ghostHuntChecks = async () => {
     drop.x = 0; drop.z = 6;
     while (now < T0 + 120000 && drop.on) tick();
     const me = z.players.find((p) => p.id === 1), armed = me.monkeys === 1;
-    while (now < T0 + 600000 && me.seg === G.CONFIG.PLAYER_SEGMENTS) tick();
-    const lost = me.seg === G.CONFIG.PLAYER_SEGMENTS - 1 && me.monkeys === 0;
-    // Forty kills of their own bring them back; the next round's start makes them whole.
+    // Twenty kills of their own while still armed earn a pair that waits.
     z.debug.kills(1, G.CONFIG.MONKEY_EVERY_KILLS);
-    const gifted = me.monkeys === 1 && z.state.pickKind === G.MONKEY_DROP && z.state.pickBy === 1;
+    const held = me.monkeys === 1 && me.dropsGiven === 0;
+    while (now < T0 + 600000 && me.seg === G.CONFIG.PLAYER_SEGMENTS) tick();
+    const kept = me.seg === G.CONFIG.PLAYER_SEGMENTS - 1 && me.monkeys === 1;
+    while (now < T0 + 600000 && me.seg >= G.CONFIG.POWER_KEEP_SEG) tick();
+    const lost = me.seg === G.CONFIG.POWER_KEEP_SEG - 1 && me.monkeys === 0;
+    // The waiting pair comes down once the hit's blink is over; the next round's start makes them whole.
+    const blink = now + G.CONFIG.IFRAMES_MS + 500;
+    while (now < blink && !me.monkeys) tick();
+    const gifted = me.monkeys === 1 && me.dropsGiven === 1 && z.state.pickKind === G.MONKEY_DROP && z.state.pickBy === 1;
     z.debug.next();
     while (now < T0 + 900000 && z.state.state !== ST.COUNTDOWN) tick();
     const whole = me.frozenUntil > z.state.now || me.seg === G.CONFIG.PLAYER_SEGMENTS;
-    record("ghost hunt: the monkeys arm the player who takes them, the first hit takes them away, every 40 kills brings them back, and a round's start makes everyone standing whole",
-      armed && lost && gifted && whole, JSON.stringify({ armed, lost, gifted, whole, seg: me.seg, state: z.state.state }));
+    record("ghost hunt: the monkeys arm the player who takes them, stay through the first hit and leave once the bar is low, every 20 of their own kills brings them back (waiting while they are armed), and a round's start makes everyone standing whole",
+      armed && held && kept && lost && gifted && whole, JSON.stringify({ armed, held, kept, lost, gifted, whole, seg: me.seg, state: z.state.state }));
   }
   {
     // With every ghost slot held (dying ghosts keep theirs a moment), no ghost is counted as spawned; with every drop
@@ -4954,13 +4966,15 @@ const ghostHuntChecks = async () => {
   }
   {
     // A rescuer knocked down during an elixir revive must start a fresh hold after being brought back. A third
-    // hunter keeps the round alive while both are down.
+    // hunter keeps the round alive while both are down. The one being revived is found where they went down even once
+    // their page stops reporting them (a hidden Ooga under its grave), as on a shared island.
     const z = begin(29), C = G.CONFIG;
     z.ready(3);
-    let now = T0;
+    let now = T0, absent = 0;
     const tick = () => {
       now += C.TICK_MS; z.beginPresence();
       for (const [id, x, z0] of [[1, 0, 6], [2, 1, 6], [3, 21, 0]]) {
+        if (id === absent) continue;
         const p = z.present(id, x, 0, z0);
         if (p) p.invulnUntil = z.state.now + 60000;
       }
@@ -4968,7 +4982,8 @@ const ghostHuntChecks = async () => {
     };
     while (now < T0 + 60000 && z.state.state !== ST.ACTIVE) tick();
     const rescuer = z.playerById(1), down = z.playerById(2);
-    down.seg = 0; down.frozenUntil = C.DOWN_UNTIL; rescuer.elixir = 1;
+    down.seg = 0; down.frozenUntil = C.DOWN_UNTIL; down.downAt = z.state.now; down.downX = 1; down.downZ = 6; rescuer.elixir = 1;
+    absent = down.id;
     for (let i = 0; i < C.ELIXIR.reviveMs / C.TICK_MS / 2; i++) tick();
     const started = rescuer.reviveTarget === down.id && z.frozen(down);
     rescuer.seg = 0; rescuer.frozenUntil = C.DOWN_UNTIL;
@@ -10750,13 +10765,49 @@ const factoryEntrance = { name: "factory entrance", why: "regression: flying abo
   record("factory entrance: flying above the shield stays on the island", above.scene === "hub" && !above.transitioning && above.height > 3, JSON.stringify(above));
   await b.evaluate(`(() => { const B = window.__ooga, a = B.cavemen.get("portlandhodl"), slot = window.BL.caves.slots.find((s) => s.scene === "factory"), m = B.mouths.find((m) => m.id === slot.id), along = window.BL.factoryModels.SHIELD_Z + 0.6; if (B.crew.player !== a) B.pilot.possess(a); B.pilot.navigate({ position: { x: m.x + Math.sin(m.ry) * along, y: m.floorY, z: m.z + Math.cos(m.ry) * along }, yaw: m.ry, pitch: 0.2, dist: 5 }); B.advance(0.5, 1 / 60); B.crew.configureWeapon(a, 2, 23); B.crew.removeMagazines(a); B.crew.collectGroundMagazine(7, a); B.crew.collectGroundMagazine(11, a); window.__mouth = { x: m.x, z: m.z, ry: m.ry }; })()`);
   const inKey = await b.evaluate(`(() => { const m = window.__mouth; return [-Math.sin(m.ry), -Math.cos(m.ry)]; })()`);
-  await walkToward(b, inKey[0], inKey[1], 0.8);
-  const arrived = await b.evaluate(`(() => { const B = window.__ooga; for (let i = 0; i < 240 && (B.transitioning || B.scene !== "factory"); i++) B.advance(1 / 30, 1 / 30); B.advance(0.3, 1 / 30); const a = B.crew.player; return { scene: B.scene, ooga: a ? a.traits.name : null, rifle: !!a && a.weapon.equipped && a.weapon.selectedSlot === 2, ammo: a && a.weapon.ammo, spares: a && a.weapon.spareAmmo.join(",") }; })()`);
+  // In through the shield on a held key, a frame at a time and all in one page call, so the page's own frames between
+  // calls never walk it on: the walk takes the Ooga through, and the hall comes on under the island's last frame with
+  // it a step past its own shield and the view in the exit tunnel, walking on. A key pressed during that walk, once the
+  // walk is done, carries the Ooga no further until it is let go; a step back from where an arrival stands then stays
+  // in the hall.
+  const keys = `const toward = (dx, dz) => { const c = B.camera, fx = c.target.x - c.position.x, fz = c.target.z - c.position.z, l = Math.hypot(fx, fz), f = [fx / l, fz / l], r = [-f[1], f[0]]; const score = { w: f[0] * dx + f[1] * dz, s: -(f[0] * dx + f[1] * dz), d: -(r[0] * dx + r[1] * dz), a: r[0] * dx + r[1] * dz }; return Object.entries(score).sort((p, q) => q[1] - p[1])[0][0]; }; const key = (k, down) => window.dispatchEvent(new KeyboardEvent(down ? "keydown" : "keyup", { key: k, code: "Key" + k.toUpperCase(), bubbles: true })); const shot = () => { const W = B.factory.walk, p = B.crew.player.root.position; return { phase: W.phase, still: +W.still.toFixed(2), z: +p.z.toFixed(2), camZ: +B.camera.position.z.toFixed(2) }; };`;
+  const glideIn = await b.evaluate(`(() => { const B = window.__ooga, m = window.__mouth; ${keys}
+    const k = toward(-Math.sin(m.ry), -Math.cos(m.ry)); key(k, true); let first = null;
+    for (let i = 0; i < 300 && !first; i++) { B.advance(1 / 60, 1 / 60); if (B.scene === "factory" && !B.transitioning) first = shot(); }
+    key(k, false); if (!first) return { first };
+    const on2 = toward(0, -1); key(on2, true); let on = null;
+    for (let i = 0; i < 240 && !on; i++) { B.advance(1 / 60, 1 / 60); if (!B.factory.walk.phase) on = shot(); }
+    if (on) { B.advance(0.3, 1 / 60); on.held = +B.crew.player.root.position.z.toFixed(2); }
+    key(on2, false); B.advance(0.8, 1 / 60);
+    return { first, on };
+  })()`);
+  const first = glideIn.first, on = glideIn.on;
+  const arrived = await b.evaluate(`(() => { const B = window.__ooga; for (let i = 0; i < 240 && (B.transitioning || B.scene !== "factory"); i++) B.advance(1 / 30, 1 / 30); B.advance(0.3, 1 / 30); const a = B.crew.player, out = { scene: B.scene, ooga: a ? a.traits.name : null, rifle: !!a && a.weapon.equipped && a.weapon.selectedSlot === 2, ammo: a && a.weapon.ammo, spares: a && a.weapon.spareAmmo.join(","), z0: +a.root.position.z.toFixed(2) }; const key = (down) => window.dispatchEvent(new KeyboardEvent(down ? "keydown" : "keyup", { key: "s", code: "KeyS", bubbles: true })); key(true); B.advance(0.08, 1 / 60); key(false); B.advance(0.5, 1 / 60); out.back = { scene: B.scene, transitioning: B.transitioning, phase: B.factory.walk.phase, z: +a.root.position.z.toFixed(2) }; return out; })()`);
+  const F = await b.evaluate(`(() => { const F = window.BL.factoryModels; return { gate: F.HALL.front - 0.6, front: F.HALL.front, arrival: F.LAYOUT.entrance.z + 1, shield: F.SHIELD_Z }; })()`);
+  record("factory entrance: walking in, the Ooga walks itself through the shield, with no fade, the island's last frame dissolving off the hall's first: it comes on a step past the hall's own shield with the view behind it in the exit tunnel and walks on to where an arrival stands, a key pressed on the way carries it no further until let go, and a step back from there stays in the hall",
+    !!first && first.phase === 1 && first.still >= 0.9 && first.z <= F.gate && first.z >= F.gate - 0.8 && first.camZ > F.front - 1.2
+      && !!on && Math.abs(on.z - F.arrival) < 0.4 && Math.abs(on.held - on.z) < 0.05
+      && arrived.back.scene === "factory" && !arrived.back.transitioning && arrived.back.phase === 0 && arrived.back.z > arrived.z0 + 0.2, JSON.stringify({ first, on, back: arrived.back, z0: arrived.z0, F }));
   const outside = await b.evaluate(`(() => { const B = window.__ooga, e = window.BL.factoryModels.LAYOUT.entrance, rows = []; for (const [name, x, y] of [["beside", 10, e.y], ["below", 0, 0], ["above", 0, e.y + 12]]) { if (B.scene !== "factory" || B.transitioning) break; B.pilot.navigate({ position: { x, y, z: 29 }, yaw: Math.PI, pitch: 0.2, dist: 5 }); B.advance(1 / 60, 1 / 60); rows.push({ name, scene: B.scene, transitioning: B.transitioning }); } return rows; })()`);
   record("factory entrance: positions beside, below and above the exit doorway stay in the factory", outside.length === 3 && outside.every((r) => r.scene === "factory" && !r.transitioning), JSON.stringify(outside));
   await b.evaluate(`(() => { const B = window.__ooga, a = B.crew.player, e = window.BL.factoryModels.LAYOUT.entrance; B.pilot.navigate({ position: { x: 0, y: e.y, z: e.z + 2.2 }, yaw: 0, pitch: 0.2, dist: 5 }); B.crew.configureWeapon(a, 1, 17); if (B.pilot.aiming) B.pilot.modeAction("mode-toggle"); B.advance(0.5, 1 / 60); })()`);
-  await walkToward(b, 0, 1, 0.8);
+  // Out through the gate's shield the same way, a frame at a time in one page call: the island has the Ooga at the
+  // mouth's rim under the hall's last frame, the view behind it in the tunnel, and walks it on out of the mouth; a key
+  // pressed on the way that now means back in carries it no further until it is let go.
+  const glideOut = await b.evaluate(`(() => { const B = window.__ooga, m = window.__mouth, sr = Math.sin(m.ry), cr = Math.cos(m.ry), along = (q) => +((q.x - m.x) * sr + (q.z - m.z) * cr).toFixed(2); ${keys}
+    const k = toward(0, 1); key(k, true); let rim = null;
+    for (let i = 0; i < 300 && !rim; i++) { B.advance(1 / 60, 1 / 60); if (B.scene === "hub" && !B.transitioning) rim = { ooga: along(B.crew.player.root.position), view: along(B.camera.position) }; }
+    key(k, false); if (!rim) return { rim };
+    const back = toward(-sr, -cr); key(back, true); let last = along(B.crew.player.root.position);
+    for (let i = 0; i < 240; i++) { B.advance(1 / 60, 1 / 60); const now = along(B.crew.player.root.position); if (i > 10 && Math.abs(now - last) < 1e-4) break; last = now; }
+    const after = along(B.crew.player.root.position); B.advance(0.3, 1 / 60); const held = along(B.crew.player.root.position);
+    key(back, false); B.advance(0.5, 1 / 60);
+    return { rim, walkedOut: { after, held } };
+  })()`);
+  const rim = glideOut.rim, walkedOut = glideOut.walkedOut || {};
   const back = await b.evaluate(`(() => { const B = window.__ooga, m = window.__mouth; for (let i = 0; i < 240 && (B.transitioning || B.scene !== "hub"); i++) B.advance(1 / 30, 1 / 30); B.advance(0.3, 1 / 30); const p = B.crew.player && B.crew.player.root.position; return { scene: B.scene, ooga: B.crew.player ? B.crew.player.traits.name : null, fromMouth: p ? +Math.hypot(p.x - m.x, p.z - m.z).toFixed(1) : null, melee: !!p && B.crew.player.weapon.primaryEquipped && !B.crew.player.weapon.equipped && B.crew.player.weapon.selectedSlot === 1, ammo: p && B.crew.player.weapon.ammo, spares: p && B.crew.player.weapon.spareAmmo.join(","), carry: !B.pilot.aiming && document.getElementById("weapon-reticle").hidden }; })()`);
+  record("factory entrance: walking out, the walk takes the Ooga into the hall's shield and the island has it at the mouth's rim under the hall's last frame, the view behind it in the tunnel, walking on out of the mouth, and a key pressed on the way back toward the tunnel carries it no further until let go",
+    !!rim && rim.ooga > -0.6 && rim.ooga < 1.2 && rim.view < rim.ooga - 2 && rim.view > F.shield && walkedOut.after > rim.ooga + 0.8 && Math.abs(walkedOut.held - walkedOut.after) < 0.05, JSON.stringify({ rim, walkedOut }));
   record("factory doorway: the selected rifle, rounds and spare magazines survive entry; a switch to melee and carry inside survives the return", arrived.rifle && arrived.ammo === 23 && arrived.spares === "7,11" && back.melee && back.ammo === 17 && back.spares === "7,11" && back.carry, JSON.stringify({ arrived, back }));
   await tourGo(b, "factory");
   await b.key("Escape");

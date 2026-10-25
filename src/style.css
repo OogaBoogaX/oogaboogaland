@@ -2368,6 +2368,86 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
   }
 }
 
+/* The hunt's spectator menu, bottom centre while the visitor is down (above the thumb sticks on a touch screen): the
+   three views to watch from, and the hunter watched with a step on to the next. */
+.ghost-spectate {
+  position: absolute;
+  left: 50%;
+  bottom: calc(16px + var(--safe-bottom, 0px));
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100vw - 32px);
+  padding: 7px 10px 8px;
+  background: var(--planks);
+  border: 3px solid var(--wood-edge);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.35), 0 8px 20px rgba(0, 0, 0, 0.35);
+  color: var(--paper);
+  pointer-events: auto;
+  z-index: 5;
+}
+
+.ghost-spectate[hidden],
+.ghost-spectate-watch[hidden] {
+  display: none;
+}
+
+.ghost-spectate-head {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--accent-text);
+}
+
+.ghost-spectate-modes,
+.ghost-spectate-watch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ghost-spectate-modes button,
+.ghost-spectate-next {
+  flex: none;
+  padding: 5px 10px;
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--paper);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ghost-spectate-modes button[aria-pressed="true"] {
+  background: linear-gradient(#f0b05a, var(--accent));
+  color: var(--ink);
+}
+
+.ghost-spectate-name {
+  font-size: 10px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+@media (pointer: coarse) {
+  .ghost-spectate {
+    bottom: calc(216px + var(--safe-bottom, 0px));
+  }
+
+  .ghost-spectate-modes button,
+  .ghost-spectate-next {
+    min-height: 32px;
+  }
+}
+
 /* The hunt's mini player, bottom right: what is playing and the music switch, on the lobby card's planks. */
 .ghost-player {
   position: absolute;
