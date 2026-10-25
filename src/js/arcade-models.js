@@ -58,7 +58,8 @@
     ["#86582f", "#46ffd2", "#e8dcc0", 1, 0], ["#6a625a", "#e0452b", "#c8862c", 2, 1], ["#7c5230", "#c8ff5a", "#b8402e", 2, 0], ["#726758", "#ffd23a", "#b8402e", 0, 1],
     ["#8e5e34", "#7fe0ff", "#e8dcc0", 1, 0], ["#655c54", "#ffb02e", "#e8dcc0", 0, 1], ["#805430", "#2fd0c0", "#c8862c", 2, 0], ["#6c6258", "#ff5fa2", "#e8dcc0", 1, 1]
   ];
-  const CAB = { w: 1.24, d: 0.96, pitch: 1.5 };const ARC = { x: 0, z: -0.2, r: 8, step: 0.265 };
+  const CAB = { w: 1.24, d: 0.96, pitch: 1.5 };
+  const ARC = { x: 0, z: -0.2, r: 8, step: 0.265 };
   const CABINETS = PAINT.map(([body, trim, second, art, stone], i) => {
     const live = i < 4;
     const a = (i - 1.5) * ARC.step, x = live ? ARC.x + ARC.r * Math.sin(a) : (i - 4 - 3.5) * CAB.pitch;
@@ -138,8 +139,13 @@
     // its rail and under the right stair by a barrel, and a basket of coconuts by the left wall near the snack bar.
     stores: [[9.9, MEZZ.y, -18.9, 0, "wood", 0.375], [15.8, 0, -17.2, Math.PI / 2, "wood", 0.375], [-17.1, 0, 1.3, 0.4, "nuts", 0.31]],
     sign: { x: 0, y: 9, z: HALL.back + 0.62 }
-  };const TIMBER_DK = "#5c3a1e";const TIMBER_LT = "#a8703e";
-  const BONE = "#efe6d2";const BANANA = "#ffd23a";const RED = "#e0452b";const GLASS_DK = "#0b0d10";
+  };
+  const TIMBER_DK = "#5c3a1e";
+  const TIMBER_LT = "#a8703e";
+  const BONE = "#efe6d2";
+  const BANANA = "#ffd23a";
+  const RED = "#e0452b";
+  const GLASS_DK = "#0b0d10";
 
   // ---- small builders -------------------------------------------------------------------------------------
   // A flat bar from a to b in the (z, y) plane at x: its length along the line, `t` across it and `w` thick in x.
@@ -203,7 +209,8 @@
       }
     }
     return unshadowed(geo);
-  };const MAT_Y = 0.009;
+  };
+  const MAT_Y = 0.009;
   // A face's corners in the order that faces it along n (Newell's normal against n).
   const facing = (geo, ids, n) => {
     const v = geo.verts;
@@ -229,7 +236,11 @@
   // that runs the other way. Then the marks they draw, each `s` tall or long at (x, y): a banana, a coconut, a
   // footprint, a flame and a fire, an Ooga with a spear, dancing or carrying something over its head (`f` -1 turns
   // it to face left), a mammoth, and the four games as pictographs: a kart, a parachute, a rocket and a pick.
-  const EARTH_OCHRE = "#d9953a";const EARTH_RED = "#b8472c";const EARTH_BLACK = "#2b221d";const EARTH_CHALK = "#eadfc6";const EMBER_GLOW = "#ff8a2a";
+  const EARTH_OCHRE = "#d9953a";
+  const EARTH_RED = "#b8472c";
+  const EARTH_BLACK = "#2b221d";
+  const EARTH_CHALK = "#eadfc6";
+  const EMBER_GLOW = "#ff8a2a";
   const daubPoly = (g, pts, color, e = 0, z = 0) => {
     face(g, ccw(pts).map(([x, y]) => pushVert(g, x, y, z)), hexToRgb(color), { emissive: e });
     return g;
@@ -446,7 +457,8 @@
   // through every gap from the embers heaped inside; the scene stands a `blaze` in it `SPOT_FIRE` under the pivot.
   // `spotRods` the lianas the pivots hang from, a lashing where each ties on and leaves where each comes out of the
   // rock.
-  const SPOT_Y = HALL.h - 1.1;const SPOT_FIRE = 0.86;
+  const SPOT_Y = HALL.h - 1.1;
+  const SPOT_FIRE = 0.86;
   const SPOTS = [[-4.6, -3], [4.6, -3], [-3.2, -12.5], [3.2, -12.5]];
   // The jackpot wheel on its totem behind the stage, facing the doorway: `face` is the spinning millstone, a
   // thick disc of stone with twenty wedges daubed on it by hand in charcoal, ochre, umber and red earth (the
@@ -465,7 +477,8 @@
   // jackpot at ten spins' cost (gold) opposite the 1, the three at or near the cost spread round it, and the small ones
   // between, so small and big alternate round the face: 340 tickets in all, a spin pays back 17 of its 20 on average
   // (85%), and the house wins slowly.
-  const WHEEL_VALUES = [200, 2, 10, 5, 20, 2, 10, 2, 25, 2, 1, 2, 15, 5, 10, 2, 10, 5, 10, 2];const WHEEL_COST = 20;
+  const WHEEL_VALUES = [200, 2, 10, 5, 20, 2, 10, 2, 25, 2, 1, 2, 15, 5, 10, 2, 10, 5, 10, 2];
+  const WHEEL_COST = 20;
 
   // The frame round the big sign on the back wall, the Oogas' own: three rough stone slabs laid behind it, a log post
   // up each side and a log lintel across the top lashed to them, a mammoth's tusks set in stone lumps at the posts'
@@ -605,12 +618,17 @@
   const EDGE = [[0.45, 0.02], [0.45, 0.98], [0.15, 1.08], [0, 1.8], [0.32, 1.8], [0.32, 2.14], [-0.45, 2.14], [-0.45, 0.02]];
   const SCREEN = { y: 1.44, z: 0.09, lean: -0.21, w: 0.88, h: 0.66 };
   // Where each side's planks meet, bottom to top; a stone cabinet's three slabs meet only where its profile turns.
-  const PLANKS = [0, 0.29, 0.56, 0.82, 1.08, 1.45, 1.8, 2.14];const SLABS = [0, 1.08, 1.8, 2.14];const PLANK_TONES = [1, 1.1, 0.92, 1.05, 0.96, 1.12, 0.94];
-  const BARK = "#46301e";const ROPE = "#c9a36a";const STONE_LT = "#6b6259";
+  const PLANKS = [0, 0.29, 0.56, 0.82, 1.08, 1.45, 1.8, 2.14];
+  const SLABS = [0, 1.08, 1.8, 2.14];
+  const PLANK_TONES = [1, 1.1, 0.92, 1.05, 0.96, 1.12, 0.94];
+  const BARK = "#46301e";
+  const ROPE = "#c9a36a";
+  const STONE_LT = "#6b6259";
   // A colour mixed t of the way to another, and a game's bright colour as cave paint (earthed toward sienna) and as a
   // leather hide, nearly all the natural hide `base` with a touch of the colour in it.
   const blend = (a, b, t) => { const q = hexToRgb(b); return `#${hexToRgb(a).map((v, k) => Math.round(v + (q[k] - v) * t).toString(16).padStart(2, "0")).join("")}`; };
-  const earth = (hex) => blend(hex, "#a0643a", 0.35);const leather = (hex, base = "#6b4528") => blend(hex, base, 0.88);
+  const earth = (hex) => blend(hex, "#a0643a", 0.35);
+  const leather = (hex, base = "#6b4528") => blend(hex, base, 0.88);
   // The fronts' hides by their markings (leopard, tiger, spotted): tan, brown and near-black, duller than the `hide`
   // kit's furs (`HIDES`) so a touch of the game's colour shows in them.
   const HIDE_TONES = ["#b08a56", "#8e5a30", "#4e3a2c"];
@@ -867,7 +885,13 @@
     return geo;
   });
   // ---- the attract loops --------------------------------------------------------------------------------
-  const GRID_W = 40;const GRID_H = 30;const PIXEL = SCREEN.w / GRID_W;const FRAMES = 16;const FPS = 8;const ANIM_Y0 = 9;const ANIM_Y1 = 21;
+  const GRID_W = 40;
+  const GRID_H = 30;
+  const PIXEL = SCREEN.w / GRID_W;
+  const FRAMES = 16;
+  const FPS = 8;
+  const ANIM_Y0 = 9;
+  const ANIM_Y1 = 21;
   const PALETTES = {
     race: ["#0d1a0d", BANANA, "#4a4a52", "#f2efe8", RED, "#8a5a34", "#3a8f2a", "#1b1b1e", "#2e6b20"],
     drop: ["#123a66", "#5ec8ff", "#f2efe8", "#c7dcef", RED, "#c68642", BANANA, "#1b1b1e", "#ff9c86"],
@@ -1043,7 +1067,8 @@
   // A carnival game's meter: a dark timber stick with its window painted leaf green where the bead should stop
   // (`METER_WINDOW`, as a fraction of the track), the bead the scene slides along it, a little bone standing up; and
   // the aim marker, a knapped arrowhead of glowing bone pointing down, its shaft's stub bound on with sinew.
-  const METER_LEN = 0.9;const METER_WINDOW = [0.63, 0.77];
+  const METER_LEN = 0.9;
+  const METER_WINDOW = [0.63, 0.77];
 
   // ---- hides and cave paint -------------------------------------------------------------------------------
   // An animal hide stretched `w` by `h` in the (x, y) plane, its fur facing +z: its four legs pulled out to the
@@ -1205,7 +1230,8 @@
   // ochre, gold where the visitor holds it. `rows` are [game, initials, score, mine], laid out on the old board's grid
   // of `FAME_W` columns 4.5 cm apart and `FAME_ROW` a row. Kept while its rows read the same, so a visit bakes it
   // only when a best changed.
-  const FAME_W = 82;const FAME_ROW = 9;
+  const FAME_W = 82;
+  const FAME_ROW = 9;
   const FAME = { w: FAME_W * 0.045, h: (11 + 4 * FAME_ROW) * 0.045 };
   // The prize shelf by the counter: a timber shelf with a bark log along its front on timber brackets, a board of dark
   // timber behind it with each prize drawn on it in chalk at its slot, lit a little, so the shelf reads as a trophy

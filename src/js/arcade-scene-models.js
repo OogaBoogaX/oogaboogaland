@@ -5,7 +5,9 @@
 
   const LANTERN_Y = 7.4;
 
-  const TIMBER = "#8a5a32";const STONE = ["#3f3630", "#4a3f37", "#362e29"];const CREAM = "#f6ecd2";
+  const TIMBER = "#8a5a32";
+  const STONE = ["#3f3630", "#4a3f37", "#362e29"];
+  const CREAM = "#f6ecd2";
   const ball = (r, color, segments = 10) => lathe({ profile: [[0, -r], [r * 0.7, -r * 0.7], [r, 0], [r * 0.7, r * 0.7], [0, r]], segments, color });
   const smooth = (geo) => { geo.smooth = true; return geo; };
   const button = (r, color, emissive = 0.35) => lathe({ profile: [[r, 0], [r, 0.028], [r * 0.82, 0.042], [0, 0.042]], segments: 12, color, emissive });
@@ -19,7 +21,9 @@
   // shade lighter than their chipped sides, each corner knocked off at its own slant and each edge bowed out a little.
   // `board` returns the geometry, each slot's centre and the slab's outer size; the scene hangs a digit node on each
   // slot and swaps its geometry when the score changes.
-  const SCORE_INK = "#ffb02e";const BOARD_RIM = [0.12, 0.1];const BOARD_STONE = ["#a08868", "#8f7a62"];
+  const SCORE_INK = "#ffb02e";
+  const BOARD_RIM = [0.12, 0.1];
+  const BOARD_STONE = ["#a08868", "#8f7a62"];
   const digit = variants((d) => unshadowed(brushWord(geometry(), String(d), 0, 0, 0.14, 0.026, SCORE_INK, 0.8, 0.004)));
   const DIGIT_W = (GLYPH_W + TRACKING) * 0.022 * 1.25;
   const boardCache = BL.models.scopedMap();
@@ -92,8 +96,12 @@
   const WHEEL_FOOT = { z: -0.25, r: 0.56 };
   // The floor's heights over the packed earth, each layer a millimetre or so over the one under it: the flagstones'
   // tops, the mats and the hides.
-  const FLAG_Y = 0.008;const HIDE_Y = 0.0125;
-  const EARTH = ["#6c4e33", "#7d5f3f", "#8e6f4b", "#5a3f29"];const SAND = ["#a08058", "#b09064"];const FLAGS = ["#968672", "#887864", "#a2927c", "#7c6e5c"];const REEDS = ["#c2a05c", "#b0904e", "#caa864"];
+  const FLAG_Y = 0.008;
+  const HIDE_Y = 0.0125;
+  const EARTH = ["#6c4e33", "#7d5f3f", "#8e6f4b", "#5a3f29"];
+  const SAND = ["#a08058", "#b09064"];
+  const FLAGS = ["#968672", "#887864", "#a2927c", "#7c6e5c"];
+  const REEDS = ["#c2a05c", "#b0904e", "#caa864"];
   // The flagstone walks, [x0, x1, z0, z1]: in from the tunnel to the stone circle round the stage, from behind the
   // jackpot wheel's footing to the claws and along the gallery street under the deck, and out to the shy, the food
   // court and the snack bar, the skee lanes and the hoops.
@@ -108,12 +116,15 @@
   // `n` points out of it into the hall; `onWall` is the point `s` along a wall (x on the back and front walls, z on
   // the sides), `y` up and `d` out from its flat face, and `TO_WALL` the turn that stands art drawn facing +z on it.
   const WALLS = { B: { r: [1, 0, 0], n: [0, 0, 1] }, F: { r: [-1, 0, 0], n: [0, 0, -1] }, R: { r: [0, 0, 1], n: [-1, 0, 0] }, L: { r: [0, 0, -1], n: [1, 0, 0] } };
-  const TO_WALL = { B: 0, F: Math.PI, R: -Math.PI / 2, L: Math.PI / 2 };const UP = [0, 1, 0];
+  const TO_WALL = { B: 0, F: Math.PI, R: -Math.PI / 2, L: Math.PI / 2 };
+  const UP = [0, 1, 0];
   // The rock's blocks, [across, up] in metre cells, the walls' and the ceiling's (picked from at random, so a size
   // listed twice comes up twice as often), each laid `LAP` bigger than its cells and turned and tipped a little so
   // no two edges line up; and the ceiling's darker stone.
-  const WALL_BLOCKS = [[2, 2], [2, 2], [3, 2], [2, 1], [1, 2], [2, 1], [1, 1]];const CEILING_BLOCKS = [[3, 3], [3, 2], [2, 3], [2, 2], [4, 2], [2, 2]];
-  const CEILING = ["#342c26", "#2e2722", "#3a312a"];const LAP = 0.16;
+  const WALL_BLOCKS = [[2, 2], [2, 2], [3, 2], [2, 1], [1, 2], [2, 1], [1, 1]];
+  const CEILING_BLOCKS = [[3, 3], [3, 2], [2, 3], [2, 2], [4, 2], [2, 2]];
+  const CEILING = ["#342c26", "#2e2722", "#3a312a"];
+  const LAP = 0.16;
   const onWall = (wall, s, y, d) => wall === "B" ? [s, y, HALL.back + d] : wall === "F" ? [s, y, HALL.front - d] : wall === "R" ? [HALL.halfW - d, y, s] : [d - HALL.halfW, y, s];
   const daubSpiral = (g, x, y, r, w, color, e = 0, z = 0) => {
     daubStroke(g, Array.from({ length: 41 }, (_, k) => [x + Math.cos(k * 0.4) * r * k / 40, y + Math.sin(k * 0.4) * r * k / 40]), w, color, e, z);
@@ -364,7 +375,8 @@
   // log as the kit turns one (bark swelling a little at its middle over chamfered ends, pale end grain) in eight
   // segments, everything above its axis pressed down onto it, so the round bark and the end grain stay under a face of
   // split wood streaked along the grain. A round part, for treads and decks.
-  const SPLIT = ["#b8895a", "#a67a4c"].map(hexToRgb);const END_GRAIN = hexToRgb("#c9a06a");
+  const SPLIT = ["#b8895a", "#a67a4c"].map(hexToRgb);
+  const END_GRAIN = hexToRgb("#c9a06a");
   const halfLog = (ax, y, az, bx, bz, r, bark) => {
     const len = Math.hypot(bx - ax, bz - az), e = Math.min(r * 0.18, len * 0.2), grain = hexToRgb(tint(bark, 0.88));
     const geo = along(lathe({ profile: [[0, 0], [r * 0.84, 0], [r * 0.84, 0], [r, e], [r * 1.03, len / 2], [r, len - e], [r * 0.84, len], [r * 0.84, len], [0, len]], segments: 8, color: bark }), ax, 0, az, bx - ax, 0, bz - az), v = geo.verts;
@@ -392,7 +404,8 @@
   // over the palisade. Each keeps clear of the posters, zone signs, dart boards, speakers, paintings, the shy and the
   // hoops.
   const CURTAINS = [[-1, -11.9, 1.45], [-1, -16.4, 4.3], [-1, -20.3, 4.6], [1, -11.9, 1.45], [1, -17.1, 4.3], [1, -20.3, 4.6]];
-  const CREEPERS = [[-1, 2.3, 0.2], [1, -8.5, 0.2], [1, -1.1, 0.2], [-1, -22.4, MEZZ.y], [1, -22.4, MEZZ.y]];const PEEKS = [[-1, -19.6], [1, -19.6], [1, 0.45]];
+  const CREEPERS = [[-1, 2.3, 0.2], [1, -8.5, 0.2], [1, -1.1, 0.2], [-1, -22.4, MEZZ.y], [1, -22.4, MEZZ.y]];
+  const PEEKS = [[-1, -19.6], [1, -19.6], [1, 0.45]];
   const hall = BL.models.cachedSteps(function* (slice = null) {
     const rand = mulberry32(3303), timber = [], OUT = HALL.front + 4;
     const W = HALL.halfW * 2, D = HALL.front - HALL.back, WAIN = 1.3;
@@ -831,7 +844,8 @@
   // A gourd's profile, [radius, height] from its foot, 0.565 tall before `GOURD_S`; and the row of faces round its
   // belly carved in a band of triangles, one a face all pointing up like a row of teeth, so none reads as a face.
   const GOURD = [[0, 0], [0.09, 0.008], [0.16, 0.045], [0.195, 0.1], [0.2, 0.16], [0.185, 0.22], [0.15, 0.275], [0.1, 0.315], [0.075, 0.35], [0.085, 0.43], [0.075, 0.5], [0.042, 0.55], [0, 0.565]];
-  const GOURD_S = 1.3;const GOURD_BAND = 3;
+  const GOURD_S = 1.3;
+  const GOURD_BAND = 3;
   const lanterns = BL.models.cachedSteps(function* (slice = null) {
     const J = BL.hubModels, round = [], flat = [], glow = [], flames = [], lights = [], kinds = [], footprints = [], ties = [], leaf = mulberry32(1707);
     // Its light `lift` over the flame, and `out` in front of it along +z where a fire against the back wall spills.
@@ -952,7 +966,9 @@
     for (let k = 1; k < P.length; k++) if (P[k][0] >= z) return P[k - 1][1] + (P[k][1] - P[k - 1][1]) * (z - P[k - 1][0]) / (P[k][0] - P[k - 1][0]);
     return P[P.length - 1][1];
   };
-  const STALACTITE = ["#7a6656", "#8a7462", "#6e5c4e"];const ROOT_TONE = "#74502e";const MOSS = ["#2f4a22", "#3f5e2a", "#56753a", "#6b8a44"].map(hexToRgb);
+  const STALACTITE = ["#7a6656", "#8a7462", "#6e5c4e"];
+  const ROOT_TONE = "#74502e";
+  const MOSS = ["#2f4a22", "#3f5e2a", "#56753a", "#6b8a44"].map(hexToRgb);
   // A mammoth's tusk `len` long and `r` thick at its root on the origin, tapering to a blunt tip, in the (z, y) plane:
   // it leaves heading `dip` radians below +z, down and forward, and curls up through `curl` radians, tighter toward
   // the tip, so it sweeps forward, rises and hooks back over itself. A round part; the trim's `boneTusk` instead rises
@@ -1471,7 +1487,8 @@
   });
   // A bone lying along x, `len` long: a shaft between two double knobs.
   const boneBar = (len, r) => merge(turnedZ(turn([[0, -len / 2], [r, -len / 2], [r, len / 2], [0, len / 2]], 8, BONE), Math.PI / 2),
-    ...[-1, 1].flatMap((sx) => [-1, 1].map((sy) => moved(ball(r * 1.6, BONE, 6), sx * len / 2, sy * r, 0))));const BEST_Y = 23;
+    ...[-1, 1].flatMap((sx) => [-1, 1].map((sy) => moved(ball(r * 1.6, BONE, 6), sx * len / 2, sy * r, 0))));
+  const BEST_Y = 23;
   const attractStart = variants((i) => {
     const game = GAMES[i], palette = PALETTES[game.id];
     return [true, false].map((lit) => {
@@ -1797,7 +1814,8 @@
   // legs. A flat part, `seed` fixing the edge and the marks; the tawny keeps a faint warmth (`LEOPARD_WARM`) so it
   // still reads as fur in a counter's shadow. Not `hide("leopard")`, a stretched sheet (suede behind, broken
   // rosettes, able to sag or wrap): this is the whole skin, head, legs and tail, for the coconut shy's front.
-  const LEOPARD = ["#f0b052", "#c07830", "#2e1c0e"];const LEOPARD_WARM = 0.1;
+  const LEOPARD = ["#f0b052", "#c07830", "#2e1c0e"];
+  const LEOPARD_WARM = 0.1;
   const leopardPelt = (w, h, seed) => {
     const g = geometry(), rand = mulberry32(seed), rx = w * 0.38, ry = h * 0.36, [tawny, heart, ink] = LEOPARD, E = LEOPARD_WARM;
     const mid = pushVert(g, 0, 0, 0), rim = [];
@@ -2313,7 +2331,8 @@
   // reed straws, and the menu brushed on a stone slab in a frame of bamboo canes lashed at the corners, hung toward +x
   // (`MENU_X`) so the hall's wall post at x -0.4 stands clear beside it. `lit` is what glows (the oven's fire and
   // embers) and `glass` the flames licking out of the oven's mouth.
-  const MENU = ["OOGA SNACKS", "BANANA SPLIT 5", "COCONUT MILK 3", "GRUB STICK 2", "FIRE BANANA 4"];const MENU_X = 1.1;
+  const MENU = ["OOGA SNACKS", "BANANA SPLIT 5", "COCONUT MILK 3", "GRUB STICK 2", "FIRE BANANA 4"];
+  const MENU_X = 1.1;
   const snackBar = BL.models.cachedSteps(function* (slice = null) {
     const { withJungle, liana, sprig, bamboo, lashing, log } = BL.hubModels, parts = [], round = [], w = 4.2, leaf = mulberry32(57);
     if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
@@ -2467,7 +2486,8 @@
   // A zone's name brushed in chalk on a board of two carved planks between bark ends, a bone brushed either side of it
   // and a handprint in the zone's colour at each end, a log laid across its top and a leafy liana slung from the log's
   // ends, facing +z. A name too long for the bay between two trunks is brushed smaller, so no board runs past `ZONE_W`.
-  const zoneCache = BL.models.scopedMap();const ZONE_W = 3.2;
+  const zoneCache = BL.models.scopedMap();
+  const ZONE_W = 3.2;
   const zoneSign = (text, color) => {
     const key = `${text}|${color}`;
     let out = zoneCache.get(key);
@@ -3045,7 +3065,8 @@
   // a fan of feathers behind its crown with a banana on top. `FEATHERS` are the machines' feathers, [light, dark] rgb:
   // bone, red and ochre; the staff's (`FEATHER_TONES`) and the bunting's (`BUNTING`) are tones of their own.
   const FEATHERS = [["#efe6d2", "#b8ac94"], ["#c0402a", "#7a2618"], ["#e0a83a", "#9a6a1e"]].map((p) => p.map(hexToRgb));
-  const MUNCHER_ROCK = ["#7a716a", "#8b837b", "#9a9088", "#aaa198"].map(hexToRgb);const MUNCHER_BROW = ["#5d5650", "#6b625a", "#7a716a", "#8b837b"].map(hexToRgb);
+  const MUNCHER_ROCK = ["#7a716a", "#8b837b", "#9a9088", "#aaa198"].map(hexToRgb);
+  const MUNCHER_BROW = ["#5d5650", "#6b625a", "#7a716a", "#8b837b"].map(hexToRgb);
   const changer = variants((i) => {
     const { withJungle, pointedLeaf, bamboo, puff, log } = BL.hubModels, parts = [], round = [], lit = [], ember =(r) => glowing(moved(turnedX(lathe({ profile: [[r, 0], [0, r * 0.45]], segments: 8, color: "#ff8a2a" }), Math.PI / 2), 0, 0, 0), 1);
     const socket = (r) => moved(turnedX(lathe({ profile: [[r, 0], [r * 0.9, r * 0.3], [0, r * 0.35]], segments: 12, color: "#1a120c" }), Math.PI / 2), 0, 0, 0);
@@ -3105,7 +3126,9 @@
   // geometry, the hall's stores (`LAYOUT.stores`): a pile of firewood, three bundles of seven logs each lashed with
   // two ropes, two side by side and one in the groove over them, their ends ragged; and a woven basket heaped with
   // husk coconuts, its sides in a twill of two close straws under a rolled rim.
-  const WOOD_R = 0.059;const BUNDLE_R = WOOD_R * 3;const BILLET = ["#e0c08a", "#9a6a3a"].map(hexToRgb);
+  const WOOD_R = 0.059;
+  const BUNDLE_R = WOOD_R * 3;
+  const BILLET = ["#e0c08a", "#9a6a3a"].map(hexToRgb);
   // A billet of firewood `len` long up +y, radius r: bark in streaks of `bark` and a shade darker, and at each end pale
   // end grain inside a darker ring. About sixty triangles; the hub's `log` is too fine for a pile of them.
   const billet = (len, r, bark) => {
@@ -3154,7 +3177,8 @@
         for (const t of [0.25, 0.75]) sprig(g, x0 + (x1 - x0) * t, 0.72, z0 + (z1 - z0) * t, 0, -1, 0, 2, 0.2, leaf);
       }
     });
-  });const RIDE_R = 0.66;
+  });
+  const RIDE_R = 0.66;
   const ride = variants((i) => {
     const { withJungle, sprig, garland, bamboo, lashing, log, liana } = BL.hubModels, stone = !i, round = [], flat = [], leaf = mulberry32(140 + i), mix = mulberry32(150 + i), R = RIDE_R;
     const side = turn([[R - 0.02, 0], [R, 0.03], [R, 0.22], [R - 0.04, 0.26]], 28, "#000000"), grain = ["#6a625a", "#6b4a2b", "#5a3a22", "#634227"][i], rock = ["#6a625a", "#5d5650", "#7a716a"].map(hexToRgb);
@@ -3362,7 +3386,9 @@
       parts.push(moved(turnedX(box({ w: 0.06, h: 1 / 14 - 0.004, d: 0.004, color: k % 2 ? "#efe2c4" : "#c0583a" }), curl * 2), 0, y, curl * 0.4));
     }
     return unshadowed(merge(...parts));
-  });const FAME_GOLD = "#ffc83a";const FAME_EMBER = "#f0a040";
+  });
+  const FAME_GOLD = "#ffc83a";
+  const FAME_EMBER = "#f0a040";
   let fameKept = null;
   const fameBoard = (rows) => {
     if (fameKept && fameKept.rows.length === rows.length && fameKept.rows.every((r, i) => r.every((v, k) => v === rows[i][k]))) return fameKept.geo;
@@ -3699,7 +3725,8 @@
   // lamps hung from it on three cords each: half a shell, husk outside, cupped open to the room so its pale meat
   // shows round the flame burning in it at `POOL_LAMP_Y`, three holes carved in its underside glowing down on the
   // table. One per `up`, so tables under the same spot share it.
-  const POOL_LAMP_Y = 2.25;const poolLamps = BL.models.scopedMap();
+  const POOL_LAMP_Y = 2.25;
+  const poolLamps = BL.models.scopedMap();
   const poolLamp = (up) => {
     let geo = poolLamps.get(up);
     if (geo) return geo;
@@ -3906,7 +3933,9 @@
   // vest and change apron, 2 the mechanic's vest and tool belt, 3 the snack runner's vest under a long white apron,
   // 4 the staff vest itself (`uniformParts`); `staffProp` is what each one holds.
   const AU = 0.086;
-  const WEAR_HIDE = "#7a4a26";const WEAR_DARK = "#4a2e18";const WEAR_OCHRE = "#d9a441";
+  const WEAR_HIDE = "#7a4a26";
+  const WEAR_DARK = "#4a2e18";
+  const WEAR_OCHRE = "#d9a441";
   // The staff's feathers (and the prize crown's), [light, dark] rgb: red, bone-white, ochre and the charcoal a white
   // one is tipped in, a redder red and a paler white than the machines' `FEATHERS`.
   const FEATHER_TONES = [["#d8563a", "#8a2a1c"], ["#f2e8d0", "#b8a888"], ["#e0a040", "#9a6220"], ["#3a3432", "#1e1a18"]].map((p) => p.map(hexToRgb));
@@ -3949,7 +3978,11 @@
   // A tooth or fang `len` long hanging down from its top at the origin, a charm for the prize crown. A round part.
   const charmTooth = (len, r) => turn([[0, 0], [r, 0], [r * 0.85, -len * 0.4], [0, -len]], 6, BONE);
   // The staff's colours: hide dyed red, banana-gold braid, charcoal, and the canvas of shirts and aprons.
-  const STAFF_RED = "#b3322b";const STAFF_GOLD = "#f2b63e";const STAFF_INK = "#2b2421";const CANVAS = "#efe6cc";const APRON = "#f7f2e4";
+  const STAFF_RED = "#b3322b";
+  const STAFF_GOLD = "#f2b63e";
+  const STAFF_INK = "#2b2421";
+  const CANVAS = "#efe6cc";
+  const APRON = "#f7f2e4";
   // The arcade's token, the staff's badge: a gold coin with a red ring inset round a raised gold boss, `r` across,
   // facing +z from the origin. Round parts.
   const staffToken = (r) => [
