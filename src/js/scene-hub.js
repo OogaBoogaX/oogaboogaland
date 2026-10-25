@@ -8694,6 +8694,7 @@
       node.rotation.y = elapsed * 0.3 + i;
     }
   };
+  const delayGameRing = seconds => { gameRingWait = Math.max(0, seconds); };
   // HALLOWEEN: the entry owns its pending load and discovery subscriptions for this visit alone.
   const createGhostEntry = () => {
     if (!GHOSTS_WANTED) return;
@@ -8707,7 +8708,7 @@
     gorillaActive: () => !!(clankerPlay && clankerPlay.active),
     gameMode: on => setGameMode(on, true),
     // Keep ring timing separate from the event's combat policy.
-    ringDelay: seconds => { gameRingWait = Math.max(0, seconds); },
+    ringDelay: delayGameRing,
     lobbyOpen: (on, restore) => pilot.setMenuOpen(on, restore),
     // The waiting room: the driven Ooga let go of (the free camera to watch from), and at the end the visitor's own
     // Ooga given back.
@@ -11839,7 +11840,7 @@
     Object.assign(hubScene, {
       root, camera, input,
       debug: {
-        setGameMode, animationInterval,
+        setGameMode, delayGameRing, animationInterval,
         get gameMode() { return gameMode; },
         selectDebugGorilla,
         get timechainIsland() { return timechainIsland; },
