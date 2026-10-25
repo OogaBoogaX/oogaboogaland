@@ -2373,6 +2373,8 @@
     micKey: true,
     id: "factory", buildSteps: () => FM.buildSteps(), enter, update, overlay, onDonation, previewDonation, onSeen, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null, agent: null, agentView: null, agentControls: null, agentHandoff: null,
+    // Diagnostics observe the existing detached owner without reading model caches.
+    get retainedGeometry() { return world ? world.factoryKeep : null; },
     get inMotion() {
       return !!scene;
     }

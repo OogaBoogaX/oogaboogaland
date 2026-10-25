@@ -17060,9 +17060,20 @@ const mb = (bytes) => (bytes / 1048576).toFixed(2);
 // IDs are page-local and weak: taking a snapshot must not keep a geometry alive or warm a cache.
 const gpuGeometrySnapshot = (renderer, scenes, activeId, state) => {
   if (renderer.kind !== "webgl2") return [];
+  const sequence = state.sequence = (state.sequence || 0) + 1;
+  const observed = state.observed ||= new WeakMap();
+  const observe = (geometry, cpu) => {
+    if (!geometry || typeof geometry !== "object") return null;
+    if (!state.ids.has(geometry)) state.ids.set(geometry, state.nextId++);
+    let first = observed.get(geometry);
+    if (!first) { first = [null, null]; observed.set(geometry, first); }
+    const at = cpu ? 0 : 1;
+    if (first[at] === null) first[at] = sequence;
+    return first;
+  };
   const resident = new Map();
   for (const geometry of renderer.geometryRecords()) {
-    if (!state.ids.has(geometry)) state.ids.set(geometry, state.nextId++);
+    observe(geometry, false);
     resident.set(geometry, { id: state.ids.get(geometry), owners: [], references: 0, omittedOwners: 0, graphVisible: null });
   }
   const rooms = new Map();
@@ -17071,6 +17082,7 @@ const gpuGeometrySnapshot = (renderer, scenes, activeId, state) => {
   const visit = (node, scene, path, enabled) => {
     if (!node) return;
     if (scene === "dsb" && rooms.has(node)) path = `room[${rooms.get(node)}]`;
+    observe(node.geometry, true);
     const visible = !!(enabled && node.visible), row = resident.get(node.geometry);
     if (row) {
       row.references++;
@@ -17083,13 +17095,35 @@ const gpuGeometrySnapshot = (renderer, scenes, activeId, state) => {
   for (const [id, scene] of Object.entries(scenes)) visit(scene.root, id, "root", id === activeId);
   // cachedGeometry/liveGeometry can touch tracked cache readers; observing them can change ownership.
   visit(scenes.hub?.retainedRoot, "hub", "retained", false);
-  for (const row of resident.values()) if (!row.references) row.owners.push({ scene: "unattributed", path: null, graphVisible: null });
+  // This getter only exposes the existing Set; it neither warms nor registers a model-cache read.
+  const factoryKeep = scenes.factory?.retainedGeometry;
+  if (factoryKeep) for (const geometry of factoryKeep) observe(geometry, true);
+  const value = (geometry, key) => Object.getOwnPropertyDescriptor(geometry, key)?.value;
+  const length = (geometry, key) => {
+    const array = value(geometry, key);
+    return Array.isArray(array) || ArrayBuffer.isView(array) ? array.length : null;
+  };
+  for (const [geometry, row] of resident) {
+    if (!row.references) row.owners.push({ scene: "unattributed", path: null, graphVisible: null });
+    const first = observed.get(geometry);
+    const flags = (value(geometry, "characterPart") ? 1 : 0) | (value(geometry, "imageSurface") ? 2 : 0)
+      | (value(geometry, "projective") ? 4 : 0) | (value(geometry, "meshRig") ? 8 : 0);
+    row.observation = [first[0], first[1], length(geometry, "verts"), length(geometry, "faces"), length(geometry, "lines"), flags, factoryKeep?.has(geometry) ? 1 : 0];
+  }
   return [...resident.values()];
 };
 const gpuGeometryPageSnapshot = `(${gpuGeometrySnapshot})(__ooga.renderer, BL.scenes, __ooga.scene, window.__testGeometryIds ||= { ids: new WeakMap(), nextId: 1 })`;
 const gpuGeometryDelta = (before, after) => {
   const oldIds = new Set(before.map(row => row.id)), newIds = new Set(after.map(row => row.id));
-  return { before: before.length, after: after.length, added: after.filter(row => !oldIds.has(row.id)), removed: before.filter(row => !newIds.has(row.id)) };
+  const added = after.filter(row => !oldIds.has(row.id)), removed = before.filter(row => !newIds.has(row.id));
+  const plain = rows => rows.map(({ observation, ...row }) => row);
+  // Numeric columns keep large failure deltas small enough to share without repeating metadata keys per mesh.
+  const metadata = rows => rows.map(row => [row.id, ...row.observation]);
+  return { before: before.length, after: after.length, added: plain(added), removed: plain(removed), observations: {
+    columns: ["id", "firstCpuSnapshot", "firstResidentSnapshot", "vertexScalars", "faces", "lines", "flags", "factoryKeep"],
+    flags: { characterPart: 1, imageSurface: 2, projective: 4, meshRig: 8 },
+    added: metadata(added), removed: metadata(removed)
+  } };
 };
 const gpuGeometryDiagnosticChecks = async () => {
   const a = {}, b = {}, c = {}, d = {}, detached = {}, added = {}, privateText = "must-not-be-serialized";
@@ -17120,6 +17154,32 @@ const gpuGeometryDiagnosticChecks = async () => {
   const empty = gpuGeometryDelta(before, before);
   const safe = !JSON.stringify({ before, after, delta }).includes(privateText) && !JSON.stringify(before).includes("private-room-name");
   record("GPU record diagnostics: stable weak identities, exact additions/removals, shared/hidden/retained owners and bounded private-free paths without cache reads", shared && hidden && bounded && unknown && exact && stable && safe && canvasEmpty && released.retainedRoot === null && empty.added.length === 0 && empty.removed.length === 0 && gpuGeometrySnapshot({ kind: "canvas2d" }, {}, null, state).length === 0, JSON.stringify({ shared, hidden, bounded, unknown, exact, stable, safe, canvasEmpty }));
+  // Observe hidden CPU meshes before their first GPU record, and detached Factory owners without cache traversal.
+  const dormant = { verts: [0, 0, 0], faces: [], lines: [], characterPart: true }, heldMesh = {}, freshMesh = {};
+  Object.defineProperty(heldMesh, "faces", { get: touched });
+  const keep = new Set([heldMesh]), entries = new Map(), observations = { ids: new WeakMap(), nextId: 1 };
+  const factorySource = await readFile(join(root, "src/js/scene-factory.js"), "utf8");
+  const factory = new Function("world", `return { ${factorySource.match(/get retainedGeometry\(\) \{[^\n]+\}/)[0]} };`)({ factoryKeep: keep });
+  const graph = { hub: { root: node(null, true, [node(dormant, false)]), liveGeometry: touched, cachedGeometry: touched }, factory };
+  const gpu = { kind: "webgl2", geometryRecords: () => entries.keys() };
+  const cold = gpuGeometrySnapshot(gpu, graph, "hub", observations);
+  entries.set(dormant, {}); entries.set(heldMesh, {}); entries.set(freshMesh, {});
+  graph.hub.root.children.push(node(freshMesh));
+  const warm = gpuGeometrySnapshot(gpu, graph, "hub", observations), change = gpuGeometryDelta(cold, warm);
+  const metadata = mesh => warm.find(row => row.id === observations.ids.get(mesh)).observation;
+  const priorCpu = metadata(dormant)[0] === 1 && metadata(dormant)[1] === 2;
+  const freshCpu = metadata(freshMesh)[0] === 2 && metadata(freshMesh)[1] === 2;
+  const heldRow = warm.find(row => row.id === observations.ids.get(heldMesh));
+  const detachedKnown = heldRow.references === 0 && metadata(heldMesh)[0] === 1 && metadata(heldMesh)[6] === 1 && metadata(heldMesh)[3] === null;
+  const shape = metadata(dormant).slice(2, 6).join() === "3,0,0,1";
+  entries.delete(dormant); gpuGeometrySnapshot(gpu, graph, "hub", observations);
+  entries.set(dormant, {});
+  const again = gpuGeometrySnapshot(gpu, graph, "hub", observations).find(row => row.id === observations.ids.get(dormant));
+  const reappeared = again.observation[0] === 1 && again.observation[1] === 2;
+  const compact = change.added.length === 3 && change.observations.added.length === 3 && change.observations.columns.length === 8
+    && change.observations.added.every(row => row.length === 8) && !change.added.some(row => "observation" in row);
+  record("GPU record provenance: hidden and detached CPU owners precede residency, eviction preserves weak identity, safe shape metadata skips accessors and compact deltas preserve resident counts", cold.length === 0 && warm.length === 3 && priorCpu && freshCpu && detachedKnown && shape && reappeared && compact,
+    JSON.stringify({ priorCpu, freshCpu, detachedKnown, shape, reappeared, compact }));
 };
 const dsbSoak = async (b, { geometry = false } = {}) => {
   await b.send("HeapProfiler.enable");
