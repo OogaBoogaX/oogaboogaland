@@ -4897,6 +4897,7 @@
     }
     return ceiling;
   };
+  const BED_SWEEP = new Float64Array(14);
   const bedSegmentClear = (x, y, z, toX, toY, toZ, radius, height, all = false) => {
     if (!headquarters) return true;
     const dx = toX - x, dy = toY - y, dz = toZ - z;
@@ -4905,7 +4906,12 @@
         || !all && (!bed.node.visible || bed.node.parent !== root)) continue;
       const lx = (x - bed.x) * bed.cr - (z - bed.z) * bed.sr, lz = (x - bed.x) * bed.sr + (z - bed.z) * bed.cr;
       const vx = dx * bed.cr - dz * bed.sr, vz = dx * bed.sr + dz * bed.cr, boxes = bed.collisionBoxes;
-      for (let i = 0; i < boxes.length; i += 6) if (!terrain.segmentBoxClear(lx, y - bed.y, lz, vx, dy, vz, radius, height, boxes[i], boxes[i + 1], boxes[i + 2], boxes[i + 3], boxes[i + 4], boxes[i + 5])) return false;
+      const q = BED_SWEEP;
+      q[0] = lx; q[1] = y - bed.y; q[2] = lz; q[3] = vx; q[4] = dy; q[5] = vz; q[6] = radius; q[7] = height;
+      for (let i = 0; i < boxes.length; i += 6) {
+        for (let j = 0; j < 6; j++) q[j + 8] = boxes[i + j];
+        if (!terrain.segmentBoxQueryClear(q)) return false;
+      }
     }
     return true;
   };
@@ -7470,6 +7476,7 @@
   // Match the whole eye footprint at the sloping edge of an exterior window floor.
   const headquartersWindowAirAt = (x, y, z) => y < -CAMERA_RADIUS && cameraClearAt(x, y, z) && island.ceilingAt(x, y - CAMERA_RADIUS, z, CAMERA_RADIUS) < Infinity && island.supportAt(x, z, y - CAMERA_RADIUS, 0, ABYSS_FLOOR, CAMERA_RADIUS) > ABYSS_FLOOR;
   // Exact frame contacts can occur between the ordinary terrain substeps.
+  const ENTRANCE_SWEEP = new Float64Array(14);
   const entranceSegmentClear = (x, y, z, toX, toY, toZ, radius = CAMERA_RADIUS) => {
     const dx = toX - x, dy = toY - y, dz = toZ - z, span2 = dx * dx + dz * dz;
     for (let i = 0; i < headquarters.entrances.length; i++) {
@@ -7480,8 +7487,12 @@
       if (ox * ox + oz * oz > reach * reach) continue;
       const lx = (x - node.position.x) * entry.cr - (z - node.position.z) * entry.sr, lz = (x - node.position.x) * entry.sr + (z - node.position.z) * entry.cr;
       const vx = dx * entry.cr - dz * entry.sr, vz = dx * entry.sr + dz * entry.cr, boxes = node.geometry.collisionBoxes, scale = node.scale.x;
+      const q = ENTRANCE_SWEEP;
+      q[0] = lx; q[1] = y - node.position.y - radius; q[2] = lz; q[3] = vx; q[4] = dy; q[5] = vz; q[6] = radius; q[7] = radius * 2;
       for (let j = 0; j < boxes.length; j += 6) {
-        if (!terrain.segmentBoxClear(lx, y - node.position.y - radius, lz, vx, dy, vz, radius, radius * 2, boxes[j] * scale, boxes[j + 1], boxes[j + 2], boxes[j + 3] * scale, boxes[j + 4], boxes[j + 5])) return false;
+        q[8] = boxes[j] * scale; q[9] = boxes[j + 1]; q[10] = boxes[j + 2];
+        q[11] = boxes[j + 3] * scale; q[12] = boxes[j + 4]; q[13] = boxes[j + 5];
+        if (!terrain.segmentBoxQueryClear(q)) return false;
       }
     }
     return true;

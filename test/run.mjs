@@ -1853,6 +1853,20 @@ const { convexProbe } = (() => {
       return vertices;
     };
     const check = (kind, expected, actual, detail) => { if (expected !== actual && failures.length < 12) failures.push({ kind, expected, actual, ...detail }); };
+    const boxQuery = new Float64Array(14), boxBefore = new Float64Array(14);
+    let boxQueries = 0, boxHits = 0, boxInputsUnchanged = true;
+    // Reuse the independent box fixtures for the scalar API and caller-owned typed storage.
+    // Interleave both entries, then repeat the typed query to expose retained or overwritten inputs.
+    const checkBox = (kind, expected, x, y, z, dx, dy, dz, radius, height, minX, minY, minZ, maxX, maxY, maxZ) => {
+      boxQuery.set([x, y, z, dx, dy, dz, radius, height, minX, minY, minZ, maxX, maxY, maxZ]);
+      boxBefore.set(boxQuery);
+      check(kind + " typed box", expected, !window.BL.terrain.segmentBoxQueryClear(boxQuery));
+      check(kind + " scalar box", expected, !window.BL.terrain.segmentBoxClear(...boxBefore));
+      check(kind + " reversed scalar box", expected, !window.BL.terrain.segmentBoxClear(x + dx, y + dy, z + dz, -dx, -dy, -dz, radius, height, minX, minY, minZ, maxX, maxY, maxZ));
+      check(kind + " repeated typed box", expected, !window.BL.terrain.segmentBoxQueryClear(boxQuery));
+      for (let i = 0; i < boxQuery.length; i++) if (!Object.is(boxQuery[i], boxBefore[i])) boxInputsUnchanged = false;
+      boxQueries++; if (expected) boxHits++;
+    };
     for (let i = 0; i < 20000; i++) {
       const x0 = random() * 60 - 30, y0 = random() * 30 - 25, z0 = random() * 60 - 30, w = 0.025 + random() * 0.225, h = 0.025 + random() * 0.225, d = 0.025 + random() * 0.225;
       const x = x0 + random() * 1.2 - 0.6, y = y0 + random() * 2.2 - 1.5, z = z0 + random() * 1.2 - 0.6, radius = i % 13 ? random() * 0.7 : 0, height = i % 17 ? random() * 1.8 : 0;
@@ -1860,6 +1874,7 @@ const { convexProbe } = (() => {
       const horizontal = radius ? dx * dx + dz * dz < radius * radius : x > x0 && x < x0 + w && z > z0 && z < z0 + d;
       const vertical = height ? y < y0 + h && y + height > y0 : y > y0 && y < y0 + h;
       check("stationary box oracle", horizontal && vertical, collide(box(x0, y0, z0, w, h, d), x, y, z, x, y, z, radius, height), { x, y, z, radius, height, x0, y0, z0, w, h, d });
+      checkBox("stationary box oracle", horizontal && vertical, x, y, z, 0, 0, 0, radius, height, x0, y0, z0, x0 + w, y0 + h, z0 + d);
       stationary++;
     }
     const unit = box(-0.5, -0.5, -0.5, 1, 1, 1), thin = box(-0.002, -0.5, -0.5, 0.004, 1, 1);
@@ -1882,6 +1897,7 @@ const { convexProbe } = (() => {
     ];
     for (const [kind, expected, x, y, z, radius, height] of cases) {
       check(kind, expected, collide(unit, x, y, z, x, y, z, radius, height)); contacts++;
+      checkBox(kind, expected, x, y, z, 0, 0, 0, radius, height, -0.5, -0.5, -0.5, 0.5, 0.5, 0.5);
     }
     for (const [kind, expected, piece, x, y, z, tx, ty, tz, radius, height] of [
       ["thin wall tunneling", true, thin, -2, -0.25, 0, 2, -0.25, 0, 0.15, 0.5],
@@ -1892,13 +1908,18 @@ const { convexProbe } = (() => {
       ["parallel side just inside", true, unit, -2, -0.25, 0.75 - 1e-5, 2, -0.25, 0.75 - 1e-5, 0.25, 0.5],
       ["almost parallel outside", false, unit, -2, -0.25, 0.75001, 2, -0.25, 0.750001, 0.25, 0.5],
       ["almost parallel entry", true, unit, -2, -0.25, 0.75001, 2, -0.25, 0.74999, 0.25, 0.5]
-    ]) { check(kind, expected, collide(piece, x, y, z, tx, ty, tz, radius, height)); swept++; }
+    ]) {
+      check(kind, expected, collide(piece, x, y, z, tx, ty, tz, radius, height)); swept++;
+      const halfX = piece === thin ? 0.002 : 0.5;
+      checkBox(kind, expected, x, y, z, tx - x, ty - y, tz - z, radius, height, -halfX, -0.5, -0.5, halfX, 0.5, 0.5);
+    }
     // Random straight horizontal sweeps cross the X extent,
     // reducing the oracle to the exact cylinder-vs-box vertical interval and Z distance.
     for (let i = 0; i < 5000; i++) {
       const y = random() * 2 - 1, z = random() * 2 - 1, radius = random() * 0.4, height = random();
       const expected = y < 0.5 && y + height > -0.5 && Math.abs(z) < 0.5 + radius;
       check("swept box oracle", expected, collide(unit, -2, y, z, 2, y, z, radius, height), { y, z, radius, height }); swept++;
+      checkBox("swept box oracle", expected, -2, y, z, 4, 0, 0, radius, height, -0.5, -0.5, -0.5, 0.5, 0.5, 0.5);
     }
     // Y rotations preserve the cylinder, giving an exact independent oracle
     // for oblique rock faces and non-axis-aligned sweeps through thin fragments.
@@ -1942,7 +1963,7 @@ const { convexProbe } = (() => {
       check("window ceiling grazing", offset > 0, collide(fragment, x, y + offset, z, x, y + offset, z, radius, height), { offset }); ceiling++;
     }
     check("window ceiling crossing sweep", true, collide(fragment, x, y - 0.001, z, x, y + 0.001, z, radius, height)); ceiling++;
-    return { stationary, swept, contacts, rotated, tetrahedra, tilted, ceiling, failures };
+    return { stationary, swept, contacts, boxQueries, boxHits, boxQueryBytes: boxQuery.byteLength, boxInputsUnchanged, rotated, tetrahedra, tilted, ceiling, failures };
   };
   return { convexProbe };
 })();
@@ -19794,7 +19815,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
 
   {
     const r = convexProbe();
-    record("convex collision: cylinder contact and swept thin-wall collisions agree with independent box oracles", r.stationary === 20000 && r.swept === 5008 && r.contacts === 15 && r.failures.length === 0, JSON.stringify(r));
+    record("convex collision: cylinder contact and swept thin-wall collisions agree with independent box oracles", r.stationary === 20000 && r.swept === 5008 && r.contacts === 15 && r.boxQueries === r.stationary + r.swept + r.contacts && r.boxHits > 0 && r.boxHits < r.boxQueries && r.boxQueryBytes === 112 && r.boxInputsUnchanged && r.failures.length === 0, JSON.stringify(r));
     record("convex collision: oblique fragments and tetrahedron interiors preserve exact contact boundaries", r.rotated === 10000 && r.tetrahedra === 5000 && r.failures.length === 0, JSON.stringify(r));
     record("convex collision: tilted ceilings clear grazing bodies and block penetrations and crossing sweeps", r.tilted === 10000 && r.ceiling === 4 && r.failures.length === 0, JSON.stringify(r));
   }
