@@ -1,7 +1,7 @@
 // The page's fires in one place: the arcade hall's smooth `blaze` (the geometry every merged fire in the hall is
-// built from) and the island's voxel flame, a rig of separate tongue pieces with their own stretch, lean and sway.
+// built from) and the island's flame, a rig of glowing blocks that pour up off a pit's coals.
 // A rig also breathes its embers up out of the pit and reports a `light` level so the scene can pulse the pit's
-// light with the flame. Nothing here allocates per frame; the tongues and the ember pool are built once per rig.
+// light with the flame. Nothing here allocates per frame; a rig's blocks and ember pool are built once.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -44,8 +44,8 @@
   // The one flicker clock every fire in the page reads: the arcade's flames, the pits' tongues and lights.
   const flare = (t, phase = 0) => Math.sin(t * 11 + phase) * 0.07 + Math.sin(t * 17.3 + phase * 0.48 + 1.1) * 0.05;
 
-  // ---- the island's voxel flame -------------------------------------------------------------------------------
-  // Six thin tongues of stacked blocks, different heights, leans and offsets, so the flame is not two mirrored
+  // ---- the voxel tongues -------------------------------------------------------------------------------------
+  // The mine's `flame` model stands tongue 0; the pits burn the block flame further down. Six thin tongues of stacked blocks, different heights, leans and offsets, so the flame is not two mirrored
   // halves. Each tongue is its own node: it stretches and leans on its own clock. The central tongue keeps a 2x2
   // foot; the rest are one block wide. The drift within a tongue is a half block at most per level, so the stack
   // curves instead of standing straight.
@@ -92,19 +92,82 @@
   const emberGeometry = cached(() => noShadow(box({ w: 0.1, h: 0.1, d: 0.1, color: "#ffb347", emissive: 1 })));
   // A spark the fire throws off: the frequent little bits, its own geometry so a rig need not pass one.
   const sparkGeometry = cached(() => noShadow(box({ w: 0.12, h: 0.12, d: 0.12, color: "#ffd27a", emissive: 1 })));
+  // ---- the island's flame ---------------------------------------------------------------------------------------
+  // A fire reads as fire by how it moves: it pours upward, narrows and breaks into licks. So a pit's flame is a
+  // stream of small glowing blocks rather than fixed shapes: each rises off the coals, drifts in toward the flame's
+  // axis, tumbles, shrinks and dies, and is reborn at the foot. A block's colour is set by where it lives, not by
+  // its age: white-gold blocks stay low and short-lived, yellow and orange ones climb further, and small red licks
+  // start higher and break off at the top, so the stream shades white to red from root to tip. Each band shares
+  // one geometry (four instanced draws) and the bloom softens the edges. A slow gust and a quicker flutter lean the
+  // upper stream; nothing allocates per frame.
+  const FLAME_BANDS = [
+    { color: "#fff0a8", count: 6, y0: 0.18, y1: 0.26, r: 0.16, size0: 0.18, size1: 0.24, life0: 0.4, life1: 0.6, vy0: 0.41, vy1: 0.6, stretch: 0.2, glow: 2.6 },
+    { color: "#ffd03a", count: 12, y0: 0.19, y1: 0.3, r: 0.3, size0: 0.23, size1: 0.3, life0: 0.67, life1: 0.93, vy0: 0.56, vy1: 0.75, stretch: 0.5, glow: 2.2 },
+    { color: "#ff8a1e", count: 12, y0: 0.24, y1: 0.4, r: 0.3, size0: 0.19, size1: 0.25, life0: 0.8, life1: 1.13, vy0: 0.68, vy1: 0.86, stretch: 0.9, glow: 1.8 },
+    { color: "#e0381a", count: 9, y0: 0.55, y1: 0.72, r: 0.16, size0: 0.12, size1: 0.17, life0: 0.53, life1: 0.8, vy0: 0.75, vy1: 0.98, stretch: 1.4, glow: 1.4 }
+  ];
+  // A block a little taller than wide, so a rising one reads as a lick, not a cube.
+  // How fast a rising block is drawn in toward the flame's axis, per second: what narrows the stream to a point.
+  const FLAME_PULL = 1.2;
+  const flameBlock = variants((i) => noShadow(box({ w: 1, h: 1.8, d: 1, color: FLAME_BANDS[i].color, emissive: 1 })));
+  // The glowing bed the flame stands on: coals wedged in the gaps between the pit's three crossed logs (which lie
+  // at 0, 60 and 120 degrees, 0.12 to 0.29 up), and one bright coal where they cross.
+  const COALS = [0, 1, 2, 3, 4, 5].map((k) => {
+    const a = (30 + 60 * k) * Math.PI / 180, r = k % 2 ? 0.2 : 0.27;
+    return [Math.cos(a) * r, 0.09, Math.sin(a) * r, k % 2 ? 0.11 : 0.14, "#d8481a"];
+  }).concat([[0, 0.24, 0, 0.17, "#ff8a2a"]]);
+  const coalBed = cached(() => noShadow(BL.models.merge(...COALS.map(([x, y, z, s, color]) => moved(box({ w: s, h: s * 0.5, d: s, color, emissive: 1 }), x, y, z)))));
+  // The ignition volumes the block flame occupies, in the pit's frame (centre, then half extents): sized from the
+  // blocks' outer edges sampled over many seconds, widest just above the logs and narrowing to the licks.
+  const FLAME_BOXES = new Float32Array([
+    0, 0.29, 0, 0.28, 0.11, 0.28,
+    0, 0.5, 0, 0.26, 0.1, 0.26,
+    0, 0.7, 0, 0.2, 0.1, 0.2,
+    0, 0.9, 0, 0.17, 0.1, 0.17,
+    0, 1.12, 0, 0.15, 0.12, 0.15
+  ]);
   const EMBER_POOL = 6;
   // `opts`: x, y, z is the rig's own place in its parent; emitX/emitY/emitZ the pit's world place for the fx; scale;
   // sightHidden for the hub's outline registry; embers `{ fx, bits }` to breathe embers (the hub's ember model).
   const createVoxelRig = (opts) => {
-    const o = opts || {}, scale = o.scale || 1;
+    const o = opts || {}, scale = o.scale || 1, rand = mulberry32(o.seed || 7);
     const root = createNode({ position: { x: o.x || 0, y: o.y || 0, z: o.z || 0 }, scale: { x: scale, y: scale, z: scale } });
     if (o.sightHidden) root.sightHidden = true;
-    const tongues = [];
-    for (let i = 0; i < TONGUES.length; i++) {
-      const T = TONGUES[i], node = createNode({ position: { x: T.x, y: 0, z: T.z }, geometry: tongueGeo(i), matrixEmissiveLiving: true, glow: 1 });
-      if (o.sightHidden) node.sightHidden = true;
-      addChild(root, node);
-      tongues.push({ node, h: T.h, phase: T.phase, speed: T.speed, amp: T.amp, leanZ: T.leanZ, leanX: T.leanX, leanSpeed: T.leanSpeed, leanAmp: T.leanAmp, sway: T.sway === undefined ? 0.1 : T.sway });
+    const coals = createNode({ geometry: coalBed(), glow: 1 });
+    if (o.sightHidden) coals.sightHidden = true;
+    addChild(root, coals);
+    // A block is reborn at its band's foot with a fresh place, speed, size, life and spin.
+    const spawn = (p) => {
+      const B = p.band, a = rand() * Math.PI * 2, r = Math.sqrt(rand()) * B.r;
+      p.x = Math.cos(a) * r;
+      p.z = Math.sin(a) * r;
+      p.y = B.y0 + rand() * (B.y1 - B.y0);
+      p.vy = B.vy0 + rand() * (B.vy1 - B.vy0);
+      p.size = B.size0 + rand() * (B.size1 - B.size0);
+      p.life = B.life0 + rand() * (B.life1 - B.life0);
+      p.age = 0;
+      p.spin = (rand() - 0.5) * 4.5;
+      p.tilt = (rand() - 0.5) * 0.3;
+      p.wob = rand() * Math.PI * 2;
+      p.node.rotation.y = rand() * Math.PI * 2;
+    };
+    const blocks = [];
+    for (let b = 0; b < FLAME_BANDS.length; b++) {
+      const B = FLAME_BANDS[b], geo = flameBlock(b);
+      for (let i = 0; i < B.count; i++) {
+        const node = createNode({ geometry: geo, glow: B.glow });
+        if (o.sightHidden) node.sightHidden = true;
+        addChild(root, node);
+        const p = { node, band: B, age: 0, life: 1, x: 0, y: 0, z: 0, vy: 1, size: 0.1, spin: 0, tilt: 0, wob: 0 };
+        // Start part-way through a life, so the flame is whole from its first frame.
+        spawn(p);
+        p.age = rand() * p.life;
+        p.y += p.vy * p.age;
+        const k = Math.exp(-FLAME_PULL * p.age);
+        p.x *= k;
+        p.z *= k;
+        blocks.push(p);
+      }
     }
     const embers = [];
     if (o.embers) {
@@ -119,23 +182,37 @@
     const emberBits = o.embers ? (o.embers.bits || [sparkGeometry()]) : null;
     let timer = 0.3 + Math.random() * 0.6, sparkTimer = 0.1;
     const rig = {
-      root, tongues, boxes: FIRE_BOXES, light: 1,
+      root, blocks, boxes: FLAME_BOXES, light: 1,
       update(dt, elapsed) {
-        let flick = 0;
-        for (let i = 0; i < tongues.length; i++) {
-          const e = tongues[i], node = e.node;
-          const s = 1 + Math.sin(elapsed * e.speed + e.phase) * e.amp;
-          const lz = e.leanZ + Math.sin(elapsed * e.leanSpeed + e.phase * 1.3) * e.leanAmp;
-          const lx = e.leanX + Math.cos(elapsed * e.leanSpeed * 0.83 + e.phase) * e.leanAmp * 0.7;
-          node.scale.y = s;
-          node.scale.x = node.scale.z = 1 - (s - 1) * 0.35;
-          node.rotation.z = lz;
-          node.rotation.x = lx;
-          node.rotation.y = Math.sin(elapsed * 0.6 + e.phase * 0.5) * e.sway;
-          node.glow = 1.1 + s * 0.5;
-          flick += s - 1 + Math.abs(lz - e.leanZ) * 0.6;
+        // The whole flame leans with a slow gust and a quicker flutter, more the higher a block has climbed.
+        const gx = Math.sin(elapsed * 0.7) * 0.1 + Math.sin(elapsed * 2 + 1.3) * 0.04;
+        const gz = Math.cos(elapsed * 0.55 + 0.4) * 0.07 + Math.sin(elapsed * 2.3) * 0.03;
+        const pull = Math.exp(-FLAME_PULL * dt);
+        // A click on the pit flares it: the hub's lamp loop raises the root's `flare` and lets it fall back.
+        const flared = root.flare > 0 ? root.flare : 0, grow = 1 + flared * 0.35, bright = 1 + flared;
+        for (let i = 0; i < blocks.length; i++) {
+          const p = blocks[i], node = p.node;
+          p.age += dt;
+          if (p.age >= p.life) spawn(p);
+          const t = p.age / p.life, lift = p.y * p.y;
+          p.y += p.vy * dt;
+          p.x *= pull;
+          p.z *= pull;
+          node.position.x = p.x + gx * lift + Math.sin(elapsed * 6.8 + p.wob) * 0.025 * p.y;
+          node.position.y = p.y;
+          node.position.z = p.z + gz * lift + Math.cos(elapsed * 5.5 + p.wob) * 0.02 * p.y;
+          // Grows in over its first eighth, then shrinks away to nothing at the end of its life, drawn thinner and
+          // taller as it climbs so the upper blocks pull into licks.
+          const s = p.size * grow * Math.min(1, t * 8) * Math.pow(1 - t, 0.75), stretch = 1 + t * p.band.stretch;
+          node.scale.y = s * stretch;
+          node.scale.x = node.scale.z = s / Math.sqrt(stretch);
+          node.rotation.y += p.spin * dt;
+          node.rotation.x = Math.sin(elapsed * 3.8 + p.wob) * 0.1;
+          node.rotation.z = p.tilt + gx * 1.2;
+          node.glow = p.band.glow * bright * (0.75 + 0.5 * (1 - t));
         }
-        rig.light = 1 + flick * 0.9;
+        rig.light = 1 + flare(elapsed) + gx * 0.5;
+        coals.glow = 1.1 + Math.sin(elapsed * 1.7) * 0.15 + flare(elapsed, 2) * 1.5;
         if (!embers.length) return;
         const ex = o.emitX !== undefined ? o.emitX : root.position.x;
         const ey = o.emitY !== undefined ? o.emitY : root.position.y;
