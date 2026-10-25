@@ -18,6 +18,86 @@
     const b = Math.round(lerp((odd ? 112 : 74) * emission, 226.95, head));
     RIPPLE_GREENS[(tip * 16 + gain) * 2 + odd] = `rgb(${r},${g},${b})`;
   }
+  // One shaded image per surface per frame: the first face drawn sets the surface's light for the frame, so a curved
+  // board tessellated into a strip of faces shades once, not once a face. This also shares the first face's Matrix
+  // wave tint across that surface for the frame, an accepted Canvas quality trade-off. Light is keyed as the 8-bit values the
+  // paint uses (`shade`), so a sun creeping across the sky repaints only when the pixels would change. Eight reusable
+  // slots share a 2,097,152-pixel budget, so the largest board (1200x540) fits beside the smaller ones; an evicted
+  // slot of the same size keeps its backing store. Oversized surfaces keep a single grow-only scratch image.
+  const createSurfaceShadeCache = (paint) => {
+    const MAX_PIXELS = 2048 * 1024;
+    const entries = Array.from({ length: 8 }, () => ({ canvas: null, context: null, geometry: null, source: null, pixels: 0, used: 0, frame: -1,
+      version: 0, w: 0, h: 0, sourceW: 0, sourceH: 0, br: 0, bg: 0, bb: 0, r: 0, g: 0, b: 0, ar: 0, ag: 0, ab: 0 }));
+    const fallback = { canvas: null, context: null };
+    const shade = { r: 0, g: 0, b: 0, ar: 0, ag: 0, ab: 0 };
+    let pixels = 0, clock = 0, frame = 0;
+    const clear = entry => {
+      if (entry.canvas) entry.canvas.width = entry.canvas.height = 0;
+      pixels -= entry.pixels; entry.pixels = entry.used = 0;
+      entry.geometry = entry.source = null;
+    };
+    const channel = value => value > 0 ? Math.round(value * 255) : 0;
+    const added = value => value > 0 ? Math.min(255, Math.round(value)) : 0;
+    const get = (geometry, rec, coverage) => {
+      const surface = geometry.imageSurface, source = surface.canvas, w = surface.width || source.width, h = surface.height || source.height;
+      const background = surface.background, br = background ? background[0] : -1, bg = background ? background[1] : -1, bb = background ? background[2] : -1;
+      shade.r = channel(rec.canvasR); shade.g = channel(rec.canvasG); shade.b = channel(rec.canvasB);
+      shade.ar = added(rec.canvasAddR); shade.ag = added(rec.canvasAddG); shade.ab = added(rec.canvasAddB);
+      for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i];
+        if (entry.geometry === geometry && entry.source === source && entry.version === surface.version && entry.w === w && entry.h === h
+          && entry.sourceW === source.width && entry.sourceH === source.height
+          && entry.br === br && entry.bg === bg && entry.bb === bb
+          && (entry.frame === frame || entry.r === shade.r && entry.g === shade.g && entry.b === shade.b
+            && entry.ar === shade.ar && entry.ag === shade.ag && entry.ab === shade.ab)) {
+          entry.used = ++clock; entry.frame = frame; return entry.canvas;
+        }
+      }
+      let entry = fallback;
+      if (w * h <= MAX_PIXELS) {
+        // This surface's own slot first, else the least recently used: forgetting a key keeps its backing store.
+        entry = entries[0];
+        for (let i = 0; i < entries.length; i++) {
+          const candidate = entries[i];
+          if (candidate.geometry === geometry) { entry = candidate; break; }
+          if (candidate.used < entry.used) entry = candidate;
+        }
+        pixels -= entry.pixels; entry.pixels = 0; entry.geometry = entry.source = null;
+        while (pixels + w * h > MAX_PIXELS) {
+          let oldest = null;
+          for (let i = 0; i < entries.length; i++) {
+            const candidate = entries[i];
+            if (candidate.pixels && (!oldest || candidate.used < oldest.used)) oldest = candidate;
+          }
+          clear(oldest);
+        }
+      }
+      if (!entry.canvas) { entry.canvas = document.createElement("canvas"); entry.context = entry.canvas.getContext("2d"); }
+      if (entry === fallback) {
+        if (entry.canvas.width < w) entry.canvas.width = w;
+        if (entry.canvas.height < h) entry.canvas.height = h;
+      } else {
+        if (entry.canvas.width !== w) entry.canvas.width = w;
+        if (entry.canvas.height !== h) entry.canvas.height = h;
+      }
+      paint(entry.canvas, entry.context, surface, shade, coverage);
+      if (entry !== fallback) {
+        entry.geometry = geometry; entry.source = source; entry.version = surface.version; entry.w = w; entry.h = h;
+        entry.sourceW = source.width; entry.sourceH = source.height;
+        entry.br = br; entry.bg = bg; entry.bb = bb;
+        entry.r = shade.r; entry.g = shade.g; entry.b = shade.b;
+        entry.ar = shade.ar; entry.ag = shade.ag; entry.ab = shade.ab;
+        entry.pixels = w * h; pixels += entry.pixels; entry.used = ++clock; entry.frame = frame;
+      }
+      return entry.canvas;
+    };
+    return { get,
+      // Called once a frame before any surface draws.
+      frame: () => { frame++; },
+      release: live => { for (const entry of entries) if (entry.geometry && !live.has(entry.geometry)) clear(entry); },
+      dispose: () => { for (const entry of entries) clear(entry); if (fallback.canvas) fallback.canvas.width = fallback.canvas.height = 0; },
+      get pixels() { return pixels; }, get size() { let n = 0; for (const entry of entries) if (entry.geometry) n++; return n; } };
+  };
   const createRenderer = (canvas, { width: fixedW = 0, height: fixedH = 0, transparent = false, environmentCapture = false } = {}) => {
     const ctx = canvas.getContext("2d");
     let width = 0, height = 0, dpr = 1, backdrop = null, skyGradient = null, lastF = 1;
@@ -30,6 +110,8 @@
     const environment = { renderer: null, canvas: null, faces: [], contexts: [], source: null, next: 0, valid: 0, frame: 0, camera: null };
     const environmentVertices = new Float64Array((ENVIRONMENT_GRID + 1) ** 2 * 5), environmentClip = new Float64Array(40), environmentClipped = new Float64Array(40);
     const imageVertices = new Float64Array(13 * 9 * 5), imageView = mat4.create();
+    let canvasMatrix = null, canvasMatrixContext = null;
+    let canvasCoverage = new WeakMap();
     const active = [];
     let sortCapacity = 0, sortIds = new Uint32Array(0), sortKeys = new Float64Array(0), sortWork = sortScratch(0);
     const DEFAULT_LIGHT = { x: 0.45, y: 0.85, z: 0.3 };
@@ -75,7 +157,7 @@
     }
     const acquire = (vertices = 16) => {
       if (poolUsed === pool.length) {
-        pool.push({ pts: new Float32Array(32), n: 0, depth: 0, style: "", coreStyle: "", line: false, lineGlow: 0, smokeOpacity: 1, mirror: false, mirrorNode: null, imageNode: null, mirrorMinX: 0, mirrorMaxX: 0, mirrorMinY: 0, mirrorMaxY: 0, portal: false, matrix: 0, matrixGlyph: false, matrixGlyphOpacity: 1, matrixWall: 0, matrixNx: 0, matrixNy: 0, matrixNz: 0, matrixPlane: 0, matrixCenterDepth: 0, matrixMinX: 0, matrixMaxX: 0, matrixMinY: 0, matrixMaxY: 0, matrixRed: 0, matrixGreen: 0, matrixBlue: 0, matrixCave: 0, matrixLocal: false, matrixLiving: false, matrixDynamic: false, matrixPermanentOnly: false, matrixPartial: false, matrixBacking: false, matrixFaceNx: 0, matrixFaceNy: 0, matrixFaceNz: 0, matrixFacePlane: 0, scrMinX: 0, scrMinY: 0, scrMaxX: 0, scrMaxY: 0 });
+        pool.push({ pts: new Float32Array(32), n: 0, depth: 0, style: "", coreStyle: "", line: false, lineGlow: 0, smokeOpacity: 1, mirror: false, mirrorNode: null, imageNode: null, imageA: 0, imageB: 0, imageC: 0, imageD: 0, canvasR: 1, canvasG: 1, canvasB: 1, canvasAddR: 0, canvasAddG: 0, canvasAddB: 0, mirrorMinX: 0, mirrorMaxX: 0, mirrorMinY: 0, mirrorMaxY: 0, portal: false, matrix: 0, matrixGlyph: false, matrixGlyphOpacity: 1, matrixWall: 0, matrixNx: 0, matrixNy: 0, matrixNz: 0, matrixPlane: 0, matrixCenterDepth: 0, matrixMinX: 0, matrixMaxX: 0, matrixMinY: 0, matrixMaxY: 0, matrixRed: 0, matrixGreen: 0, matrixBlue: 0, matrixCave: 0, matrixLocal: false, matrixLiving: false, matrixDynamic: false, matrixPermanentOnly: false, matrixPartial: false, matrixBacking: false, matrixFaceNx: 0, matrixFaceNy: 0, matrixFaceNz: 0, matrixFacePlane: 0, scrMinX: 0, scrMinY: 0, scrMaxX: 0, scrMaxY: 0 });
       }
       const rec = pool[poolUsed++];
       if (rec.pts.length < vertices * 2) rec.pts = new Float32Array(CLIP_VERTICES * 2);
@@ -746,6 +828,9 @@
               rec.mirror = mirrorFace;
               rec.mirrorNode = mirrorFace ? node : null;
               rec.imageNode = node.geometry.imageSurface ? node : null;
+              if (node.geometry.imageSurface?.canvas) {
+                rec.imageA = face.i[0]; rec.imageB = face.i[1]; rec.imageC = face.i[2]; rec.imageD = face.i[3];
+              }
               rec.scrMinX = minX; rec.scrMinY = minY; rec.scrMaxX = maxX; rec.scrMaxY = maxY;
               if (mirrorFace) {
                 rec.mirrorMinX = rec.mirrorMinY = Infinity;
@@ -815,6 +900,15 @@
                 pointG += pointLights[o + 5] * strength;
                 pointB += pointLights[o + 6] * strength;
               }
+              if (node.geometry.imageSurface?.canvas) {
+                const tint = tip * 0.88;
+                rec.canvasR = (k + pointR + (beam ? beam * spotLight[8] : 0)) * scorch * (1 - tint) * (1 - fog);
+                rec.canvasG = (k + pointG + (beam ? beam * spotLight[9] : 0)) * scorch * (1 - tint) * (1 - fog);
+                rec.canvasB = (k + pointB + (beam ? beam * spotLight[10] : 0)) * scorch * (1 - tint) * (1 - fog);
+                rec.canvasAddR = 214 * tint * (1 - fog) + fogRgb[0] * fog;
+                rec.canvasAddG = 255 * tint * (1 - fog) + fogRgb[1] * fog;
+                rec.canvasAddB = 227 * tint * (1 - fog) + fogRgb[2] * fog;
+              }
               let red = lerp(lerp(cr * (k + pointR + (beam ? beam * spotLight[8] : 0)), 214, tip * 0.88), fogRgb[0], fog);
               let green = lerp(lerp(cg * (k + pointG + (beam ? beam * spotLight[9] : 0)), 255, tip * 0.88), fogRgb[1], fog);
               let blue = lerp(lerp(cb * (k + pointB + (beam ? beam * spotLight[10] : 0)), 227, tip * 0.88), fogRgb[2], fog);
@@ -883,6 +977,12 @@
                 red = lerp(red, mr, matrixAmount);
                 green = lerp(green, mg, matrixAmount);
                 blue = lerp(blue, mb, matrixAmount);
+                if (node.geometry.imageSurface?.canvas) {
+                  rec.canvasR *= 1 - matrixAmount; rec.canvasG *= 1 - matrixAmount; rec.canvasB *= 1 - matrixAmount;
+                  rec.canvasAddR = lerp(rec.canvasAddR, mr, matrixAmount);
+                  rec.canvasAddG = lerp(rec.canvasAddG, mg, matrixAmount);
+                  rec.canvasAddB = lerp(rec.canvasAddB, mb, matrixAmount);
+                }
               }
               if (!localMatrixGlyph) rec.style = rec.mirror ? mirrorStyle : styleFor(Math.min(255, Math.round(red)), Math.min(255, Math.round(green)), Math.min(255, Math.round(blue)));
               rec.matrix = 0;
@@ -1186,7 +1286,7 @@
         matrixSample[3] = area * front * 255;
       }
     };
-    const drawMatrix = (rec) => {
+    const drawMatrix = (rec, target = ctx) => {
       const step = matrixSampleStep, span = MATRIX_TILE_SIZE * step;
       const nx = rec.matrixNx, ny = rec.matrixNy, nz = rec.matrixNz, plane = rec.matrixPlane;
       const rx = view[0] / lastF, ry = view[4] / lastF, rz = view[8] / lastF;
@@ -1221,12 +1321,12 @@
           }
           if (!painted) continue;
           // Empty samples change no pixels and need no Canvas clipping state, so clip lazily.
-          if (!clipped) { ctx.save(); ctx.clip(); clipped = true; }
+          if (!clipped) { target.save(); target.clip(); clipped = true; }
           matrixCtx.putImageData(matrixImage, 0, 0, 0, 0, cols, rows);
-          ctx.drawImage(matrixTile, 0, 0, cols, rows, tx, ty, cols * step, rows * step);
+          target.drawImage(matrixTile, 0, 0, cols, rows, tx, ty, cols * step, rows * step);
         }
       }
-      if (clipped) ctx.restore();
+      if (clipped) target.restore();
     };
     const matrixPolygonCoverage = (rec, x, y, step) => {
       let count = rec.n, src = matrixClipA, dst = matrixClipB;
@@ -1544,7 +1644,7 @@
     // Both image screens and shard captures use the same clipped affine
     // triangles. A bounded grid supplies perspective without resampling or
     // quantizing the source image into generated geometry.
-    const drawImageTriangle = (image, vertices, a, b, c, minX, minY, maxX, maxY, direction = false) => {
+    const drawImageTriangle = (image, vertices, a, b, c, minX, minY, maxX, maxY, direction = false, target = ctx) => {
       const input = environmentClip, output = environmentClipped;
       for (let k = 0; k < 5; k++) { input[k] = vertices[a + k]; input[5 + k] = vertices[b + k]; input[10 + k] = vertices[c + k]; }
       let count = 0;
@@ -1570,14 +1670,14 @@
         const u0 = output[3], v0 = output[4], u1 = output[at + 3], v1 = output[at + 4], u2 = output[bt + 3], v2 = output[bt + 4];
         const det = u0 * (v1 - v2) + u1 * (v2 - v0) + u2 * (v0 - v1);
         if (Math.abs(det) < 1e-9) continue;
-        ctx.save(); ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.lineTo(x2, y2); ctx.closePath(); ctx.clip();
-        ctx.transform((x0 * (v1 - v2) + x1 * (v2 - v0) + x2 * (v0 - v1)) / det,
+        target.save(); target.beginPath(); target.moveTo(x0, y0); target.lineTo(x1, y1); target.lineTo(x2, y2); target.closePath(); target.clip();
+        target.transform((x0 * (v1 - v2) + x1 * (v2 - v0) + x2 * (v0 - v1)) / det,
           (y0 * (v1 - v2) + y1 * (v2 - v0) + y2 * (v0 - v1)) / det,
           (x0 * (u2 - u1) + x1 * (u0 - u2) + x2 * (u1 - u0)) / det,
           (y0 * (u2 - u1) + y1 * (u0 - u2) + y2 * (u1 - u0)) / det,
           (x0 * (u1 * v2 - u2 * v1) + x1 * (u2 * v0 - u0 * v2) + x2 * (u0 * v1 - u1 * v0)) / det,
           (y0 * (u1 * v2 - u2 * v1) + y1 * (u2 * v0 - u0 * v2) + y2 * (u0 * v1 - u1 * v0)) / det);
-        ctx.drawImage(image, 0, 0); ctx.restore();
+        target.drawImage(image, 0, 0); target.restore();
       }
     };
     const drawShardEnvironment = (node, opacity, minX, minY, maxX, maxY) => {
@@ -1604,6 +1704,122 @@
         }
       }
       ctx.globalAlpha = 1;
+    };
+    const canvasMask = (surface) => {
+      const source = surface.canvas;
+      let mask = canvasCoverage.get(source);
+      if (!mask) {
+        const canvas = document.createElement("canvas");
+        mask = { canvas, context: canvas.getContext("2d"), version: NaN };
+        canvasCoverage.set(source, mask);
+      }
+      const canvas = mask.canvas;
+      if (mask.version !== surface.version || canvas.width !== source.width || canvas.height !== source.height) {
+        if (canvas.width !== source.width) canvas.width = source.width;
+        if (canvas.height !== source.height) canvas.height = source.height;
+        const paint = mask.context;
+        paint.globalCompositeOperation = "source-over";
+        paint.clearRect(0, 0, canvas.width, canvas.height); paint.drawImage(source, 0, 0);
+        // Native canvases have 8-bit coverage. Eight additive doublings make every nonzero alpha opaque,
+        // matching the old opaque pixel quads without reading pixels or creating one canvas per face.
+        paint.globalCompositeOperation = "lighter";
+        for (let i = 0; i < 8; i++) paint.drawImage(canvas, 0, 0);
+        paint.globalCompositeOperation = "source-over";
+        mask.version = surface.version;
+      }
+      return canvas;
+    };
+    // The last style strings built, rebuilt only when their 8-bit values change.
+    const paintStyles = { br: -1, bg: -1, bb: -1, background: "#000", tint: -1, tintStyle: "", add: -1, addStyle: "" };
+    const paintCanvasSurface = (canvas, paint, surface, shade, coverage) => {
+      const source = surface.canvas, sw = surface.width || source.width, sh = surface.height || source.height, styles = paintStyles;
+      const gain = Math.max(shade.r, shade.g, shade.b, 255);
+      paint.globalCompositeOperation = "source-over";
+      paint.clearRect(0, 0, sw, sh);
+      const background = surface.background;
+      if (!background) paint.fillStyle = "#000";
+      else {
+        if (background[0] !== styles.br || background[1] !== styles.bg || background[2] !== styles.bb) {
+          styles.br = background[0]; styles.bg = background[1]; styles.bb = background[2];
+          styles.background = `rgb(${styles.br},${styles.bg},${styles.bb})`;
+        }
+        paint.fillStyle = styles.background;
+      }
+      paint.fillRect(0, 0, sw, sh); paint.drawImage(source, 0, 0);
+      paint.globalCompositeOperation = "multiply";
+      const tr = Math.round(shade.r * 255 / gain), tg = Math.round(shade.g * 255 / gain), tb = Math.round(shade.b * 255 / gain), tint = (tr * 256 + tg) * 256 + tb;
+      if (tint !== styles.tint) { styles.tint = tint; styles.tintStyle = `rgb(${tr},${tg},${tb})`; }
+      paint.fillStyle = styles.tintStyle;
+      paint.fillRect(0, 0, sw, sh);
+      // Multiply supplies all dimming without Canvas filters (absent in older Safari). Restore overbright gain
+      // by adding the image to itself: full doublings, then the remaining fraction, before the additive light.
+      paint.globalCompositeOperation = "lighter";
+      for (let boost = gain / 255; boost > 1; boost /= 2) {
+        paint.globalAlpha = Math.min(1, boost - 1);
+        paint.drawImage(canvas, 0, 0);
+      }
+      paint.globalAlpha = 1;
+      const add = (shade.ar * 256 + shade.ag) * 256 + shade.ab;
+      if (add !== styles.add) { styles.add = add; styles.addStyle = `rgb(${shade.ar},${shade.ag},${shade.ab})`; }
+      paint.fillStyle = styles.addStyle;
+      paint.fillRect(0, 0, sw, sh);
+      paint.globalCompositeOperation = "destination-in"; paint.drawImage(coverage, 0, 0);
+      paint.globalCompositeOperation = "source-over";
+    };
+    const canvasShades = createSurfaceShadeCache(paintCanvasSurface);
+    const drawCanvasSurface = (node, rec) => {
+      const surface = node.geometry.imageSurface, source = surface.canvas, sw = surface.width || source.width, sh = surface.height || source.height;
+      if (!sw || !sh) return;
+      const coverage = canvasMask(surface), shaded = canvasShades.get(node.geometry, rec, coverage);
+      mat4.multiply(imageView, view, node.world);
+      const v = node.geometry.verts, a = rec.imageA * 3, b = rec.imageB * 3, c = rec.imageC * 3, d = rec.imageD * 3;
+      const m = imageView, rect = surface.rect, curve = surface.curve;
+      const oblique = perspectiveWeight * (Math.abs(m[2] * rect[2]) + Math.abs(m[6] * rect[3])) > 0.0001;
+      const columns = oblique && !surface.tessellated ? 12 : 1, rows = oblique ? 8 : 1;
+      for (let y = 0; y <= rows; y++) for (let x = 0; x <= columns; x++) {
+        const u = x / columns, t = 1 - y / rows, at = (y * (columns + 1) + x) * 5;
+        const px = lerp(lerp(v[a], v[b], u), lerp(v[d], v[c], u), t);
+        const py = lerp(lerp(v[a + 1], v[b + 1], u), lerp(v[d + 1], v[c + 1], u), t);
+        const pz = lerp(lerp(v[a + 2], v[b + 2], u), lerp(v[d + 2], v[c + 2], u), t);
+        imageVertices[at] = m[0] * px + m[4] * py + m[8] * pz + m[12];
+        imageVertices[at + 1] = m[1] * px + m[5] * py + m[9] * pz + m[13];
+        imageVertices[at + 2] = m[2] * px + m[6] * py + m[10] * pz + m[14];
+        const localX = curve ? Math.atan2(px, curve[0] - pz) * curve[0] - curve[1] : px;
+        const localY = curve ? py - curve[2] : py;
+        imageVertices[at + 3] = (localX - rect[0]) / rect[2] * sw;
+        imageVertices[at + 4] = (1 - (localY - rect[1]) / rect[3]) * sh;
+      }
+      ctx.save(); ctx.clip(); ctx.imageSmoothingEnabled = false;
+      for (let y = 0; y < rows; y++) for (let x = 0; x < columns; x++) {
+        const a = (y * (columns + 1) + x) * 5, b = a + 5, c = a + (columns + 1) * 5, d = c + 5;
+        drawImageTriangle(shaded, imageVertices, a, b, d, 0, 0, width, height);
+        drawImageTriangle(shaded, imageVertices, a, d, c, 0, 0, width, height);
+      }
+      ctx.restore();
+      if (rec.matrix && (matrixDensity > 0 || rec.matrixPartial)) {
+        // The old sampler drew only over real pigment quads. Mask its unchanged screen-space result through
+        // the projected coverage, rather than letting a new coarse panel paint Matrix into transparent gaps.
+        if (!canvasMatrix) { canvasMatrix = document.createElement("canvas"); canvasMatrixContext = canvasMatrix.getContext("2d"); }
+        if (canvasMatrix.width < width) canvasMatrix.width = width;
+        if (canvasMatrix.height < height) canvasMatrix.height = height;
+        const target = canvasMatrixContext;
+        const left = Math.max(0, Math.floor(rec.scrMinX) - 1), top = Math.max(0, Math.floor(rec.scrMinY) - 1);
+        const w = Math.min(width, Math.ceil(rec.scrMaxX) + 1) - left, h = Math.min(height, Math.ceil(rec.scrMaxY) + 1) - top;
+        if (w <= 0 || h <= 0) return;
+        target.clearRect(left, top, w, h);
+        target.save(); target.beginPath(); target.moveTo(rec.pts[0], rec.pts[1]);
+        for (let i = 1; i < rec.n; i++) target.lineTo(rec.pts[i * 2], rec.pts[i * 2 + 1]);
+        target.closePath(); target.clip(); target.imageSmoothingEnabled = false;
+        drawMatrix(rec, target);
+        target.globalCompositeOperation = "destination-in";
+        for (let y = 0; y < rows; y++) for (let x = 0; x < columns; x++) {
+          const a = (y * (columns + 1) + x) * 5, b = a + 5, c = a + (columns + 1) * 5, d = c + 5;
+          drawImageTriangle(coverage, imageVertices, a, b, d, 0, 0, width, height, false, target);
+          drawImageTriangle(coverage, imageVertices, a, d, c, 0, 0, width, height, false, target);
+        }
+        target.restore();
+        ctx.drawImage(canvasMatrix, left, top, w, h, left, top, w, h);
+      }
     };
     const drawImageSurface = (node) => {
       const surface = node.geometry.imageSurface, asset = surface.asset, image = asset.load();
@@ -1641,6 +1857,7 @@
       ctx.restore();
     };
     const render = (root, camera, opts = {}) => {
+      canvasShades.frame();
       cutawayMaxY = opts.cutawayMaxY < 1e6 ? opts.cutawayMaxY : Infinity;
       cutawayFade = Math.max(0, Math.min(1, Number.isFinite(opts.cutawayFade) ? opts.cutawayFade : opts.birdsEyeCutaway ? 1 : 0));
       cutawayCloudY = opts.cutawayCloudY || 0;
@@ -1846,7 +2063,8 @@
           for (let k = 1; k < rec.n; k++) ctx.lineTo(rec.pts[k * 2], rec.pts[k * 2 + 1]);
           ctx.closePath();
           // A cut-out picture (a sprite) has no face of its own behind it.
-          if ((!rec.matrixBacking || !rec.matrixPartial) && !(rec.mirrorNode && (rec.mirrorNode.mirrorRippleOnly || rec.mirrorNode.mirrorShard && environment.valid === 63)) && !(rec.imageNode && rec.imageNode.geometry.imageSurface.cutout)) {
+          const canvasImage = rec.imageNode?.geometry.imageSurface.canvas;
+          if (!canvasImage && (!rec.matrixBacking || !rec.matrixPartial) && !(rec.mirrorNode && (rec.mirrorNode.mirrorRippleOnly || rec.mirrorNode.mirrorShard && environment.valid === 63)) && !(rec.imageNode && rec.imageNode.geometry.imageSurface.cutout)) {
             if (rec.smokeOpacity !== 1 && lastAlpha !== rec.smokeOpacity) { ctx.globalAlpha = rec.smokeOpacity; lastAlpha = rec.smokeOpacity; }
             if (lastFill !== rec.style) { ctx.fillStyle = rec.style; lastFill = rec.style; }
             ctx.fill();
@@ -1860,11 +2078,13 @@
             // Light adds onto what is behind it, as the WebGL renderer's blended pass does.
             const additive = rec.imageNode.geometry.imageSurface.blend === "add";
             if (additive) ctx.globalCompositeOperation = "lighter";
-            drawImageSurface(rec.imageNode); rec.imageNode = null;
+            if (rec.imageNode.geometry.imageSurface.canvas) drawCanvasSurface(rec.imageNode, rec);
+            else drawImageSurface(rec.imageNode);
+            rec.imageNode = null;
             if (additive) ctx.globalCompositeOperation = "source-over";
             if (lastAlpha !== 1) { ctx.globalAlpha = 1; lastAlpha = 1; }
           }
-          if (rec.matrix && (matrixDensity > 0 || rec.matrixPartial) && !rec.mirrorNode?.mirrorRippleOnly) {
+          if (!canvasImage && rec.matrix && (matrixDensity > 0 || rec.matrixPartial) && !rec.mirrorNode?.mirrorRippleOnly) {
             if (lastAlpha !== rec.smokeOpacity) { ctx.globalAlpha = rec.smokeOpacity; lastAlpha = rec.smokeOpacity; }
             drawMatrix(rec);
             if (lastAlpha !== 1) { ctx.globalAlpha = 1; lastAlpha = 1; }
@@ -1928,10 +2148,15 @@
       ray,
       setQuality: () => { },
       releaseGeometry: () => { },
+      prepareScene: () => { },
+      prepareGeometry: () => true,
       createRig: () => null,
-      releaseUnused: (live) => { if (environment.source && !live.has(environment.source.geometry)) destroyEnvironment(); return 0; },
+      releaseUnused: (live) => { BL.models.addLods(live); canvasShades.release(live); if (environment.source && !live.has(environment.source.geometry)) destroyEnvironment(); return 0; },
       dispose: () => {
         destroyEnvironment();
+        canvasShades.dispose();
+        if (canvasMatrix) canvasMatrix.width = canvasMatrix.height = 0;
+        canvasCoverage = new WeakMap();
         if (!fixedW) {
           window.removeEventListener("resize", onResize);
           if (window.visualViewport) window.visualViewport.removeEventListener("resize", onResize);

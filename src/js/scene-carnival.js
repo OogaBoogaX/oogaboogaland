@@ -940,17 +940,17 @@
     slot = Number.isInteger(ctx.place) && KINDS[id].spots[ctx.place] ? ctx.place : 0;
     aim.x = aim.hold = aim.steps = aim.y = aim.stepsY = 0; held.left = held.right = held.up = held.down = DRAG.down = false;
     canvasEl = ctx.canvas;
-    window.addEventListener("keydown", onDown);
-    window.addEventListener("keyup", onUp);
-    canvasEl.addEventListener("pointermove", onPoint);
-    canvasEl.addEventListener("pointerdown", onPoint);
-    canvasEl.addEventListener("pointerup", onLift);
-    canvasEl.addEventListener("pointercancel", onLift);
+    window.addEventListener("keydown", onDown, { signal: ctx.signal });
+    window.addEventListener("keyup", onUp, { signal: ctx.signal });
+    canvasEl.addEventListener("pointermove", onPoint, { signal: ctx.signal });
+    canvasEl.addEventListener("pointerdown", onPoint, { signal: ctx.signal });
+    canvasEl.addEventListener("pointerup", onLift, { signal: ctx.signal });
+    canvasEl.addEventListener("pointercancel", onLift, { signal: ctx.signal });
     pressedBy = ""; steerId = -1;
     leaving = false;
     camera = createCamera({ fov: 52, near: 0.1, far: 50 });
     root = createNode();
-    hud = hudMod.create({ roster: BL.contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
+    hud = hudMod.create({ signal: ctx.signal, roster: BL.contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
     fx = fxMod.create({ root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, tickerAt: { x: 0, y: 4, z: -4 } });
@@ -980,7 +980,7 @@
       combo: document.getElementById("carnival-combo"), coach: document.getElementById("carnival-coach"), note: document.getElementById("carnival-note"),
       help: document.getElementById("carnival-help"), starNeeds: [...document.querySelectorAll("#carnival-stars .carnival-star-need")]
     };
-    el.act.addEventListener("pointerdown", onActDown);
+    el.act.addEventListener("pointerdown", onActDown, { signal: ctx.signal });
     const star = (node) => made(node, STAR_IN, STAR_T);
     anim = {
       pop: [made(el.pop, CALL, CALL_T), made(el.pop, CALL, CALL_BIG_T)], score: [made(el.score, POP, POP_T), made(el.score, POP_BIG, POP_BIG_T), made(el.score, DROP, DROP_T)],

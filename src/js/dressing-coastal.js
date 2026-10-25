@@ -2,7 +2,7 @@
 // All geometry is opaque, cached and instanced by the DSB placement owner.
 (() => {
   "use strict";
-  const BL=window.BL,M=BL.models,cache=new Map();
+  const BL=window.BL,M=BL.models,cache=BL.models.scopedMap();
   const coastal=kind=>{
     if(cache.has(kind))return cache.get(kind);
     const simple=kind.endsWith("-low"),shape=simple?kind.slice(0,-4):kind;

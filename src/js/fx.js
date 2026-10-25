@@ -362,7 +362,7 @@
           continue;
         }
         const y = p.y + p.t * 0.45;
-        if (zzzVisible && !zzzVisible(p.cave, p.x, y, p.z)) continue;
+        if (zzzVisible && !zzzVisible(p.cave, p.x, y, p.z, p)) continue;
         const pos = project(p.x, y, p.z);
         if (!pos) continue;
         ctx.globalAlpha = (1 - p.t / 2.4) * 0.8;
@@ -419,10 +419,8 @@
       }
       trimPool();
     };
-    const dispose = () => {
-      sizeObserver.disconnect();
-      if (hud) hud.tooltip.setVisibility(null);
-      visibility.dispose();
+    // A parked scene keeps its sight cache and observer, but none of its transient effects.
+    const reset = () => {
       for (const p of particles) removeChild(root, p.node);
       for (const p of particlePool) removeChild(root, p.node);
       particles.length = 0;
@@ -433,9 +431,15 @@
       damageCursor = damageCount = 0;
       ticker = null;
     };
+    const dispose = () => {
+      sizeObserver.disconnect();
+      if (hud) hud.tooltip.setVisibility(null);
+      visibility.dispose();
+      reset();
+    };
     const stats = () => ({ particles: particles.length, pool: particlePool.length, bubbles: bubbles.length, zzz: zzz.length, damageNumbers: damageCount });
     return {
-      spawnParticle, burst, puff, clearParticles, say, sayAt, next, more, said, hush, speech: bubbleOf, zzzAt, damageNumber, showTicker, drawOverlay, warmVisibility, warmBlockers: visibility.warm, update: stepParticles, trimPool, dispose, stats,
+      spawnParticle, burst, puff, clearParticles, say, sayAt, next, more, said, hush, speech: bubbleOf, zzzAt, damageNumber, showTicker, drawOverlay, warmVisibility, warmBlockers: visibility.warm, update: stepParticles, trimPool, reset, dispose, stats,
       get inMotion() {
         return particles.length > 0 || damageCount > 0;
       }

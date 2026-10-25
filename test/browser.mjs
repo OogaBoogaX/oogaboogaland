@@ -99,7 +99,10 @@ const startChrome = async ({ w = 1440, h = 900, mobile = false, perf = false, mo
   let stopped;
   const closed = new Promise(resolve => { stopped = resolve; });
   let chrome;
-  try { chrome = spawn(CHROME, args, { stdio: ["ignore", "ignore", "pipe"] }); }
+  // A universal Chrome can inherit Rosetta selection even from an ARM Node process. Performance recordings
+  // may request an architecture explicitly; ordinary suite launches keep the existing platform default.
+  const chromeArch = process.platform === "darwin" ? process.env.CHROME_ARCH : null;
+  try { chrome = spawn(chromeArch ? "/usr/bin/arch" : CHROME, chromeArch ? [`-${chromeArch}`, CHROME, ...args] : args, { stdio: ["ignore", "ignore", "pipe"] }); }
   catch (err) { removeProfile(profile); throw driverError(`Chrome could not launch at ${CHROME}: ${err.message}`); }
   chrome.stderr?.on("data", data => { stderr = (stderr + data.toString()).slice(-2048); });
   chrome.on("error", err => {

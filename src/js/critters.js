@@ -12,7 +12,7 @@
   const BURST_MAX = 8;
   const BURST_DAMP = 2;
   const makeBatch = (geometry, cap, matrixLiving = false, proximity = false) => {
-    const node = createNode({ geometry, instanceData: new Float32Array(cap * 20), instanceCount: 0, instanceVersion: 0, matrixLiving });
+    const node = createNode({ geometry, screenCull: true, instanceData: new Float32Array(cap * 20), instanceCount: 0, instanceVersion: 0, matrixLiving });
     return { node, cap, shown: 0, fade: 0, matrixLiving, hx: new Float32Array(cap), hz: new Float32Array(cap), hy: new Float32Array(cap), phase: new Float32Array(cap), speed: new Float32Array(cap), time: proximity ? new Float64Array(cap) : null, active: proximity ? new Uint8Array(cap) : null };
   };
   // writeInstance args: yaw a about y, x-scale sx, translation, glow.

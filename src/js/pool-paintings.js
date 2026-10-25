@@ -2,8 +2,8 @@
 // reading stops, one on each flat face the layout cuts into the round wall (`poolLayout.STOPS`): what is waiting,
 // what it costs, the newest block, and the difficulty epoch.
 //
-// Every figure is set in the jumbotron's 5x7 font and merged into quads by `poolModels.panelFrom`, with no backing:
-// only the painted pixels become geometry, so the wall shows between the letters. Each row is a label, the reading
+// Every figure is set in the jumbotron's 5x7 font on a stable canvas surface from `poolModels.panelFrom`:
+// its transparent background leaves the wall showing between the letters. Each row is a label, the reading
 // itself at twice the size and its unit, sized to be read from the floor at an Ooga's eye height without opening
 // anything; the handprints, figures, bands and tallies beside them are bounded groups that repeat the reading and
 // never stand in for it. Ochre, red earth, charcoal and bone; a stop shimmers when its reading changes and settles
@@ -16,7 +16,7 @@
 // their own, so their age is said to be unknown. A new block's weight is held back until the reading that
 // belongs to that block arrives, so a height never stands over the last block's details.
 //
-// A stop's panel is rebuilt only when what it prints changes, and the geometry it replaces is released. Each stop
+// A stop repaints its retained canvas only when what it prints changes, advancing the texture revision. Each stop
 // also keeps a `board` for the shared board dialog: the same painting on dark stone, with its definitions.
 (() => {
   "use strict";
@@ -168,19 +168,15 @@
   ];
 
   const paint = (c2, page, def, background) => {
-    c2.fillStyle = background;
-    c2.fillRect(0, 0, W, H);
+    if (background) { c2.fillStyle = background; c2.fillRect(0, 0, W, H); }
+    else c2.clearRect(0, 0, W, H);
     heading(c2, def.title);
     def.extra(c2, page);
     for (let i = 0; i < page.lines.length; i++) row(c2, i, ...page.lines[i], page.spacing);
   };
 
   const create = ({ site, renderer }) => {
-    const canvas = document.createElement("canvas");
-    canvas.width = W; canvas.height = H;
-    // willReadFrequently: every rebuild reads the panel back, and without it Chrome warns.
-    const c2 = canvas.getContext("2d", { alpha: false, willReadFrequently: true });
-    const clear = `rgb(${CLEAR[0]},${CLEAR[1]},${CLEAR[2]})`, width = W * PX;
+    const width = W * PX;
     const detail = { height: 0, weight: 0, since: 0 };
     const stops = L.STOPS.map((bearing, i) => {
       const def = PAGES[i], sx = Math.sin(bearing), cz = Math.cos(bearing);
@@ -189,13 +185,16 @@
       const x = sx * WALL - cz * SHIFT, z = cz * WALL + sx * SHIFT;
       const node = createNode({ position: { x: x + cz * width / 2, y: FOOT, z: z - sx * width / 2 }, rotation: { x: 0, y: bearing + Math.PI, z: 0 }, sightHidden: true, glow: PIGMENT, depthBias: -0.6 });
       addChild(site.node, node);
+      const canvas = document.createElement("canvas");
+      canvas.width = W; canvas.height = H;
+      const worldContext = canvas.getContext("2d");
       const boardCanvas = document.createElement("canvas");
       boardCanvas.width = W; boardCanvas.height = H;
       const board = {
         title: def.caption, help: "", canvas: boardCanvas, count: 1, index: 0, version: 0, caption: def.caption, note: def.note, wide: true,
         go() {}
       };
-      return { index: i, bearing, node, def, printed: "", shimmer: 0, x, y: FOOT + H * PX / 2, z, width, height: H * PX, board, c2: boardCanvas.getContext("2d", { alpha: false }), owner: null };
+      return { index: i, bearing, node, def, printed: "", shimmer: 0, x, y: FOOT + H * PX / 2, z, width, height: H * PX, board, worldContext, c2: boardCanvas.getContext("2d", { alpha: false }), owner: null };
     });
     let wait = 0, snapshot = null;
     const refresh = (s, now = Date.now()) => {
@@ -210,9 +209,8 @@
         if (key === stop.printed) continue;
         const first = !stop.printed;
         stop.printed = key;
-        paint(c2, page, stop.def, clear);
-        if (stop.node.geometry) renderer.releaseGeometry(stop.node.geometry);
-        stop.node.geometry = P.panelFrom(c2, W, H, PX, PX, CLEAR);
+        paint(stop.worldContext, page, stop.def, null);
+        stop.node.geometry = P.panelFrom(stop.worldContext, W, H, PX, PX, CLEAR, stop.node.geometry);
         paint(stop.c2, page, stop.def, STONE);
         stop.board.version++;
         if (!first) stop.shimmer = 1;
