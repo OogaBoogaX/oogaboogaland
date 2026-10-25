@@ -570,7 +570,7 @@
         index: i,
         animation: { due: true, dt: 0, pending: 0, at: 0, interval: 0, state: "", kind: "", bed: "", updates: 0 },
         bedroll: null,
-        bedTravel: { mode: "", route: null, plan: null, index: 0, toBed: false, bed: null, manual: false, pose: "left", roll: 1, phase: 0, blocked: 0, retry: 0, fromX: 0, fromY: 0, fromZ: 0, fromYaw: 0, fromHeadX: 0, fromHeadY: 0, fromHeadZ: 0, fromArmRX: 0, fromArmLX: 0, fromArmRZ: 0, fromArmLZ: 0, armRX: 0, armLX: 0, armRZ: 0, armLZ: 0, compression: SLEEP_COMPRESSION, fromCompression: SLEEP_COMPRESSION, restY: 0, restZ: 0, pitch: 0, headDrop: 0, headDropX: 0, headDropY: 0, headDropZ: 0 },
+        bedTravel: { mode: "", route: null, plan: null, index: 0, surface: 0, toBed: false, bed: null, manual: false, pose: "left", roll: 1, phase: 0, blocked: 0, retry: 0, fromX: 0, fromY: 0, fromZ: 0, fromYaw: 0, fromHeadX: 0, fromHeadY: 0, fromHeadZ: 0, fromArmRX: 0, fromArmLX: 0, fromArmRZ: 0, fromArmLZ: 0, armRX: 0, armLX: 0, armRZ: 0, armLZ: 0, compression: SLEEP_COMPRESSION, fromCompression: SLEEP_COMPRESSION, restY: 0, restZ: 0, pitch: 0, headDrop: 0, headDropX: 0, headDropY: 0, headDropZ: 0 },
         sleepHead: { x: 0, y: 0, z: 0 },
         sleepWeapons: createNode({ visible: false }),
         headLookRotation: math.quat.create(), headLookPosition: { x: 0, y: 0, z: 0 },
@@ -1051,10 +1051,18 @@
     // that wakes every sleeper at once never stalls a frame. A grounded Ooga waits where it stands until its route is
     // ready; it is planned from that same spot, so it is the route an unbroken plan would have made.
     const PLAN_MS = 4, planQueue = [];
+    // The first waypoint of a route's tail that stays on the surface past every ramp, found once per route: a worker
+    // walking out of bed hands over to ordinary work routing there. Never past the last leg, which ends any route.
+    const surfaceTail = (route) => {
+      let i = route.length - 1;
+      while (i > 0 && route[i - 1].y >= -1e-7) i--;
+      return i;
+    };
     const finishBedRoute = (cave, route) => {
       const travel = cave.bedTravel;
       travel.plan = null;
       travel.route = route;
+      travel.surface = route ? surfaceTail(route) : 0;
       travel.mode = route ? "walk" : "waiting";
       travel.retry = 1;
     };
@@ -1096,6 +1104,7 @@
         return;
       }
       travel.route = airborne ? null : ctx.bedRoute(cave, bed, toBed);
+      travel.surface = travel.route ? surfaceTail(travel.route) : 0;
       if (airborne) cave.hop = Math.max(cave.hop, cave.root.position.y - ground);
       else cave.root.position.y = ground;
       travel.index = travel.phase = travel.blocked = 0;
@@ -1239,8 +1248,12 @@
           standFromBed(cave); releaseBedroll(cave);
           cave.state = "away"; applyState(cave, state, true); return;
         }
-        const bed = cave.bedroll;
+        const bed = cave.bedroll, lying = cave.bedTravel.mode === "rest" || cave.bedTravel.mode === "lie";
         standFromBed(cave);
+        // The lying pose is centered over the mattress. Start the return at its
+        // authored floor-side approach, clear of the next sleeper and the bed's collision shell.
+        // An Ooga still on its way to bed turns back from where it stands.
+        if (lying) setVec(cave.root.position, bed.walkAt.x, cave.baseY + bed.walkAt.y, bed.walkAt.z);
         releaseBedroll(cave);
         cave.state = state;
         cave.parts.head.geometry = cave.headOpen;
@@ -4083,8 +4096,10 @@
       }
       if (travel.mode === "walk") {
         if (cave.hop > 0 || cave.hopV > 0) { runPlayer(cave, dt, false); return; }
-        // The architectural route ends at the meadow. Only workers continue to a live eating slot.
-        if (!travel.toBed && cave.state !== "chilling" && travel.index >= travel.route.length - 1) {
+        // Past its last ramp the route runs on the meadow. A worker standing there leaves it for ordinary work routing
+        // to a live eating slot; a chiller walks on to the apron its route ends at.
+        if (!travel.toBed && cave.state !== "chilling" && travel.index >= travel.surface
+          && p.y - cave.baseY >= -1e-6) {
           travel.mode = ""; travel.route = null; travel.bed = null;
           if (cave.state === "working") { startMeal(cave); walkToSlot(cave, true); }
           else if (wanderSpot) startWander(cave);
@@ -4095,7 +4110,8 @@
         while (remaining > 1e-8 && travel.index < travel.route.length) {
           const target = travel.route[travel.index], dx = target.x - p.x, dz = target.z - p.z, distance = Math.hypot(dx, dz);
           if (distance < 1e-6) { travel.index++; continue; }
-          if (travel.index + 1 < travel.route.length && ctx.npcRouteBlocked && ctx.npcRouteBlocked(cave, target.x, target.y, target.z)) { travel.index++; continue; }
+          if (travel.index + 1 < travel.route.length && ctx.npcRouteBlocked && ctx.npcRouteBlocked(cave, target.x, target.y, target.z)
+            && ctx.bedRouteClear(cave, travel.route[travel.index + 1])) { travel.index++; continue; }
           // Scenery may cover an intermediate waypoint: aim around the prop toward the next one, never insist on it.
           // Keep the doorway turn until the shortcut is clear; temporary bodies still use local walking avoidance.
           if (distance < 3 && travel.index + 1 < travel.route.length && !npcWalkable(target.x, target.z, target.x, target.z, target.y, cave.bodyHeight, cave)) {
@@ -4116,6 +4132,15 @@
           standPose(cave);
           if (travel.toBed) lieDown(cave);
           else {
+            // Layered support can leave the feet below the meadow even when
+            // the final waypoint's x/z was reached. Never start work there.
+            if (p.y - cave.baseY < -1e-6 && underHome(p.x, p.z)) {
+              if (!ctx.initialWorkSpot || !ctx.initialWorkSpot(cave, NPC_RECOVERY_SPOT)) {
+                travel.mode = "waiting"; travel.route = null; travel.retry = 1;
+                return;
+              }
+              setVec(p, NPC_RECOVERY_SPOT.x, cave.baseY + NPC_RECOVERY_SPOT.y, NPC_RECOVERY_SPOT.z);
+            }
             travel.mode = ""; travel.route = null; travel.bed = null;
             if (cave.state === "chilling" && wanderSpot) startWander(cave);
             else { cave.root.rotation.y = Math.atan2(-p.x, -p.z); startMeal(cave); }
@@ -6268,6 +6293,7 @@
       // Collision exclusions belong to this ordered update only; input and relocation see ordinary bodies.
       for (let i = 0; i < crewList.length; i++) crewList[i].riding.support = null;
     };
+    const pause = () => { window.clearTimeout(recipeTimer); recipeTimer = 0; };
     const setCombatEnabled = (on) => {
       on = on === true;
       if (on === combatEnabled) return;
@@ -6325,8 +6351,7 @@
       }
     };
     const dispose = () => {
-      window.clearTimeout(recipeTimer);
-      recipeTimer = 0;
+      pause();
       planQueue.length = 0;
       player = null;
       for (let caveIndex = 0; caveIndex < crewList.length; caveIndex++) {
@@ -6373,7 +6398,7 @@
       get combatEnabled() { return combatEnabled; },
       get weaponsEnabled() { return weaponsEnabled; },
       cavemen, list: crewList, fanSlots, stateOf, stateCounts, workingCavemen, eatingCavemen, workingCount, eatingCount, feedableCavemen, refreshStates, refreshRosterRow, updateFan, rush, headWorldOf, applyAllSwag, wornBy, renderLocker, pokeCave, idleSay, drawDrops,
-      throwTomato, clearProjectiles, control, release, relocatePlayer, sleepPlayer, wakePlayer, sitPlayer, standPlayer, clearHeadLook, prepareDragged, recoverDragged, ignite, dropRoll, damage, fireView, steer: steerPlayer, look: lookPlayer, elevate: elevatePlayer, playerAction, jumpPlayer, poseWeapon, wearJetpack, removeJetpack, setJetpackOwnership, thrust, holdRocketJump, update, dispose, stats,
+      throwTomato, clearProjectiles, control, release, relocatePlayer, sleepPlayer, wakePlayer, sitPlayer, standPlayer, clearHeadLook, prepareDragged, recoverDragged, ignite, dropRoll, damage, fireView, steer: steerPlayer, look: lookPlayer, elevate: elevatePlayer, playerAction, jumpPlayer, poseWeapon, wearJetpack, removeJetpack, setJetpackOwnership, thrust, holdRocketJump, update, pause, dispose, stats,
       actorClear, builtInJetpack, toggleTint, twirl, toggleWeapon, selectWeapon, configureWeapon, swingWeapon, bashWeapon, releaseSwing, fireWeapon, setWeaponTrigger, canFire, weaponOrigin, meleeReach, meleePower, nearReload, canReload, startReload, stopReload, stopBurst, canSwapMagazine, swapMagazine, collectMagazine, collectGroundMagazine, collectAmmo, removeMagazines, hasMagazine, magazineCount, magazineAmmo, totalAmmo, workSites,
       get sleeping() { return !!(player && player.bedTravel.manual && player.state === "sleeping"); },
       get player() {

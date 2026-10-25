@@ -2,7 +2,7 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {}, M = BL.models, S = BL.scene;
-  const rings = new Map();
+  const rings = BL.models.scopedMap();
   const PORTAL_BLUE = "#287cae", RING_BLUE = "#41596c";
   let disc, surge, pedestal, rectangle, rectangularSurge;
   const build = (radius, outerRadius, aperture = null) => {

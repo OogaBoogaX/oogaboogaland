@@ -16,11 +16,13 @@
     face.load().then(() => document.fonts.add(face), () => {});
   };
 
-  // How to play, on the lobby: each line its keys and what they do, for a keyboard and mouse or for touch.
+  // How to play, on the lobby: each line its keys and what they do, for a keyboard and mouse, for touch or for a pad.
   const INTRO = {
     keys: [[["W", "A", "S", "D"], "Move your Ooga"], [["Mouse"], "Aim, and click to fire"], [["G"], "Switch weapons"]],
-    touch: [[["Left stick"], "Move your Ooga"], [["Ready"], "Start in combat mode"], [["Hold fire"], "Shoot the ghosts"]]
+    touch: [[["Left stick"], "Move your Ooga"], [["Ready"], "Start in combat mode"], [["Hold fire"], "Shoot the ghosts"]],
+    pad: [[["Left stick"], "Move your Ooga"], [["Right stick", "RT"], "Aim, and pull to fire"], [["Y"], "Switch weapons"], [["A"], "Ready"]]
   };
+  const pad = BL.gamepad.state;
   /**
    * The HUD; `coarse` for touch words, `onMusic` when the visitor flips the mini player's switch, `onSkip` when they
    * skip to the next track, `onReady` and `onDecline` from the lobby, `onLobby` when its menu opens or closes,
@@ -58,14 +60,21 @@
     el.lobbyReady.addEventListener("click", readyUp);
     el.lobbyDecline.addEventListener("click", decline);
     el.lobby.addEventListener("keydown", lobbyKey);
-    // The lobby's player rows, made as needed and kept; its controls, written once.
+    // The lobby's player rows, made as needed and kept; its controls, written again only when the visitor's change:
+    // a pad's once one is connected, else touch or the keyboard's.
     const lobbyRows = [];
-    el.lobbyHow.replaceChildren(...(coarse ? INTRO.touch : INTRO.keys).map(([keys, what]) => {
-      const li = document.createElement("li");
-      for (const k of keys) { const kbd = document.createElement("kbd"); kbd.textContent = k; li.append(kbd); }
-      li.append(` ${what}`);
-      return li;
-    }));
+    let howShown = null;
+    const writeHow = () => {
+      const how = pad.connected ? INTRO.pad : coarse ? INTRO.touch : INTRO.keys;
+      if (how === howShown) return;
+      howShown = how;
+      el.lobbyHow.replaceChildren(...how.map(([keys, what]) => {
+        const li = document.createElement("li");
+        for (const k of keys) { const kbd = document.createElement("kbd"); kbd.textContent = k; li.append(kbd); }
+        li.append(` ${what}`);
+        return li;
+      }));
+    };
     // The switch, let go of after a press so the island's keys keep working.
     const flip = () => { if (onMusic) onMusic(); el.playerToggle.blur(); };
     el.playerToggle.addEventListener("click", flip);
@@ -161,6 +170,7 @@
       const opening = lobbyKey_ === null;
       if (key === lobbyKey_) return;
       lobbyKey_ = key;
+      writeHow();
       el.lobbyGoal.textContent = goal;
       while (lobbyRows.length < count) {
         const li = document.createElement("li"), mark = document.createElement("span"), name = document.createElement("b"), state = document.createElement("small");

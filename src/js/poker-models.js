@@ -81,7 +81,7 @@
     if (glow) glow.castShadow = false;
     return { stone: M.merge(...stone), veins: glow };
   };
-  const cache = new Map(), scoped = M.track(() => cache.clear());
+  const cache = BL.models.scopedMap(), scoped = M.track(() => cache.clear());
   const geometry = (id = "gatsby") => {
     const theme = BL.pokerThemes.get(id), cave = theme.id !== "gatsby";
     scoped.use();

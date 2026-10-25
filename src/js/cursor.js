@@ -321,6 +321,7 @@
         animateAimArrow();
       }
     };
+    let listening = true;
     window.addEventListener("pointerdown", onPointer, true);
     window.addEventListener("pointermove", onPointer, true);
     window.addEventListener("pointerup", onPointer, true);
@@ -332,7 +333,24 @@
     window.addEventListener("contextmenu", onMouseButton, true);
     window.addEventListener("wheel", onWheel, { capture: true, passive: false });
     window.addEventListener("resize", onResize);
+    const resume = () => {
+      if (listening) return;
+      listening = true;
+      window.addEventListener("pointerdown", onPointer, true);
+      window.addEventListener("pointermove", onPointer, true);
+      window.addEventListener("pointerup", onPointer, true);
+      window.addEventListener("pointercancel", onPointer, true);
+      window.addEventListener("mousemove", onMouseMove, true);
+      window.addEventListener("mousedown", onMouseButton, true);
+      window.addEventListener("mouseup", onMouseButton, true);
+      window.addEventListener("click", onMouseButton, true);
+      window.addEventListener("contextmenu", onMouseButton, true);
+      window.addEventListener("wheel", onWheel, { capture: true, passive: false });
+      window.addEventListener("resize", onResize);
+    };
     const dispose = () => {
+      if (!listening) return;
+      listening = false;
       stop();
       window.removeEventListener("pointerdown", onPointer, true);
       window.removeEventListener("pointermove", onPointer, true);
@@ -346,7 +364,7 @@
       window.removeEventListener("wheel", onWheel, true);
       window.removeEventListener("resize", onResize);
     };
-    return { start, stop, placeCanvas, beginAim, updateAim, rebaseAim, endAim, dispose, element,
+    return { start, stop, placeCanvas, beginAim, updateAim, rebaseAim, endAim, resume, dispose, element,
       get active() { return active; }, get visible() { return visible; }, get x() { return x; }, get y() { return y; } };
   };
   BL.cursor = { create };

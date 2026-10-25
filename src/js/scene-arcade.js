@@ -1639,11 +1639,11 @@
   const enter = (ctx) => {
     ({ renderer, game, world, go, agentPlay } = ctx);
     canvasEl = ctx.canvas;
-    window.addEventListener("keydown", armsKeys, true);
-    canvasEl.addEventListener("pointerdown", rightClick, true);
+    window.addEventListener("keydown", armsKeys, { capture: true, signal: ctx.signal });
+    canvasEl.addEventListener("pointerdown", rightClick, { capture: true, signal: ctx.signal });
     camera = createCamera({ fov: 55, near: 0.2, far: 60 });
     root = createNode();
-    hud = hudMod.create({ roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
+    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
     if (window.matchMedia("(max-width: 720px), (max-height: 500px)").matches) hud.el.sheet.dataset.open = "false";
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
@@ -1705,7 +1705,7 @@
     const panel = document.getElementById("prize-panel");
     prizeUi = { panel, tickets: document.getElementById("prize-tickets"), items: [...panel.querySelectorAll(".prize")] };
     panel.hidden = true;
-    panel.addEventListener("click", onPrizeClick);
+    panel.addEventListener("click", onPrizeClick, { signal: ctx.signal });
     hud.dismissOutside(panel, closePrizes);
     addChild(root, ...BL.dressing.nodes(dressing(), { glow: 1 }));
     build();

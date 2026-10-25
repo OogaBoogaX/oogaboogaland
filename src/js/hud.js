@@ -237,7 +237,12 @@
     renderer.render(root, camera);
     renderer.dispose();
   };
-  const create = ({ roster, catalog, tierColors, renderIcon, lootEnabled = false, healthEnabled = false }) => {
+  // The sheet belongs to the page. Reuse attached rows across visits; only current roster names stay in this map.
+  const rosterNodes = new Map();
+  let rosterAway = null, donorRows = null, donationRows = null;
+  const create = ({ roster, catalog, tierColors, renderIcon, lootEnabled = false, healthEnabled = false, signal = null }) => {
+    const lifetime = signal ? null : new AbortController();
+    signal = signal || lifetime.signal;
     const el = {
       roster: $("roster"), rosterCount: $("roster-count"),
       statDonations: $("stat-donations"),
@@ -380,7 +385,7 @@
     el.jetpack.hidden = true;
     const listeners = [];
     const on = (target, type, fn, opts) => {
-      target.addEventListener(type, fn, opts);
+      target.addEventListener(type, fn, typeof opts === "boolean" ? { capture: opts, signal } : { ...opts, signal });
       listeners.push(() => target.removeEventListener(type, fn, opts));
     };
     // Fit the HUB controls between the title and clock when their actual visible widths allow it.
@@ -443,11 +448,16 @@
     let hintTimer = 0, hintHideTimer = 0, copyTimer = 0;
     const rosterRows = new Map();
     let showAway = false, awayCount = 0, awayShownCount = -1, awayShownShow = null, onlineCount = 0, onlineShown = -1;
-    const awayRow = document.createElement("li"), awayButton = document.createElement("button");
-    awayRow.className = "roster-away";
-    awayButton.type = "button";
+    if (!rosterAway) {
+      const li = document.createElement("li"), button = document.createElement("button");
+      li.className = "roster-away"; button.type = "button"; li.append(button);
+      rosterAway = { li, button };
+    }
+    const awayRow = rosterAway.li, awayButton = rosterAway.button;
     awayButton.setAttribute("aria-expanded", "false");
-    awayRow.append(awayButton);
+    awayRow.remove();
+    const names = new Set(roster.map(contributor => contributor.name));
+    for (const [name, row] of rosterNodes) if (!names.has(name)) { row.li.remove(); rosterNodes.delete(name); }
     // countAway rescans on every roster state flip and online toggle; skip the writes until they change.
     // The title's chip counts the players online, or the cast while nobody is.
     const updateAwayButton = () => {
@@ -467,43 +477,35 @@
       (b.lastContributionAt || b.lastCommitAt) - (a.lastContributionAt || a.lastCommitAt));
     for (let rosterIndex = 0; rosterIndex < orderedRoster.length; rosterIndex++) {
       const contributor = orderedRoster[rosterIndex];
-      const li = document.createElement("li");
-      li.dataset.name = contributor.name;
-      const presence = document.createElement("span");
-      presence.className = "roster-presence";
-      presence.dataset.online = "false";
-      presence.setAttribute("role", "img");
-      presence.setAttribute("aria-label", "Offline");
-      presence.title = "Offline";
-      const name = document.createElement("span");
-      name.className = "roster-name";
-      name.textContent = contributor.display;
-      // The signed-in player on this Ooga, when there is one: the room's host and their voice.
-      const marks = document.createElement("span"), host = document.createElement("span"), voice = document.createElement("button");
-      marks.className = "roster-marks";
-      host.className = "roster-host";
-      host.hidden = true;
-      host.setAttribute("role", "img");
-      host.setAttribute("aria-label", "Host: runs the Oogas for everyone");
-      host.title = "Host: runs the Oogas for everyone";
-      voice.className = "roster-voice";
-      voice.type = "button";
-      voice.hidden = true;
-      voice.append(voiceIcon.cloneNode(true));
-      marks.append(host, voice);
-      const age = document.createElement("span");
-      age.className = "roster-age";
-      age.append(BL.contributors.contributionAgeLabel(contributor));
-      const state = document.createElement("span");
-      state.className = "roster-state";
-      const activity = BL.contributors.contributionStateFor(contributor);
-      state.dataset.state = activity;
-      state.append(STATE_LABELS[activity]);
-      if (activity === "away") {
-        if (!awayRow.parentElement) el.roster.append(awayRow);
-        li.hidden = true; awayCount++;
+      let nodes = rosterNodes.get(contributor.name);
+      if (!nodes) {
+        const li = document.createElement("li"), presence = document.createElement("span"), name = document.createElement("span");
+        li.dataset.name = contributor.name;
+        presence.className = "roster-presence"; presence.setAttribute("role", "img");
+        name.className = "roster-name";
+        const marks = document.createElement("span"), host = document.createElement("span"), voice = document.createElement("button");
+        marks.className = "roster-marks"; host.className = "roster-host";
+        host.setAttribute("role", "img"); host.setAttribute("aria-label", "Host: runs the Oogas for everyone");
+        host.title = "Host: runs the Oogas for everyone";
+        voice.className = "roster-voice"; voice.type = "button"; voice.append(voiceIcon.cloneNode(true));
+        marks.append(host, voice);
+        const age = document.createElement("span"), state = document.createElement("span");
+        age.className = "roster-age"; age.append(""); state.className = "roster-state"; state.append("");
+        li.append(presence, name, marks, age, state);
+        nodes = { li, presence, name, host, voice, age, state };
+        rosterNodes.set(contributor.name, nodes);
       }
-      li.append(presence, name, marks, age, state);
+      const { li, presence, name, host, voice, age, state } = nodes;
+      if (name.textContent !== contributor.display) name.textContent = contributor.display;
+      presence.dataset.online = "false"; presence.setAttribute("aria-label", "Offline"); presence.title = "Offline";
+      host.hidden = voice.hidden = true; voice.disabled = false;
+      voice.dataset.voice = voice.dataset.login = ""; voice.dataset.self = "false";
+      const activity = BL.contributors.contributionStateFor(contributor), ageText = BL.contributors.contributionAgeLabel(contributor);
+      if (age.firstChild.data !== ageText) age.firstChild.data = ageText;
+      state.dataset.state = activity;
+      if (state.firstChild.data !== STATE_LABELS[activity]) state.firstChild.data = STATE_LABELS[activity];
+      li.hidden = activity === "away";
+      if (activity === "away") { if (!awayRow.parentElement) el.roster.append(awayRow); awayCount++; }
       el.roster.append(li);
       rosterRows.set(contributor.name, { li, presence, state, age, contributor, rosterIndex, online: false, sceneOnline: false, remoteOnline: false, netOnline: false, nextOnline: false, placedStamp: stampOf(contributor), host, voice, look: "", login: "", hostOn: false, blocked: false, self: false, nextLook: "", nextLogin: "", nextHost: false, nextSelf: false });
     }
@@ -628,7 +630,7 @@
     });
     watchBananaRate();
     // A fixed pool, so the DOM never grows with donations.
-    const recentRows = Array.from({ length: BL.donations.RECENT_MAX }, () => {
+    const recentRows = donationRows || (donationRows = Array.from({ length: BL.donations.RECENT_MAX }, () => {
       const li = document.createElement("li"), name = document.createElement("span"), label = document.createTextNode("");
       const badge = document.createElement("span"), amount = document.createElement("strong"), message = document.createElement("p");
       // Every text node exists from the start, so filling a row later adds nothing to the DOM.
@@ -650,7 +652,16 @@
       li.hidden = true;
       el.bananaRecent.append(li);
       return { li, name, label, badge, amountText, message, messageText };
-    });
+    }));
+    const leaderRows = donorRows || (donorRows = Array.from({ length: 10 }, (_, i) => {
+      const li = document.createElement("li"), rank = document.createElement("span"), name = document.createElement("span"), amount = document.createElement("strong");
+      const nameText = document.createTextNode(""), amountText = document.createTextNode("");
+      rank.className = "banana-rank"; rank.textContent = String(i + 1).padStart(2, "0");
+      name.className = "banana-donor"; name.append(nameText);
+      amount.className = "banana-amount"; amount.append(amountText);
+      li.append(rank, name, amount); li.hidden = true; el.bananaLeaders.append(li);
+      return { li, name, nameText, amountText };
+    }));
     // The recent list's checkbox keeps it to tips at or above the message bar, remembered in this browser.
     const RECENT_BAR_KEY = "ooga-recent-bar";
     let recentBarOnly = false;
@@ -684,15 +695,15 @@
       const ranked = missingSats ? [] : real ? entries || [] : (entries || []).slice().sort((a, b) =>
         b[donorUnit] - a[donorUnit] || b[donorUnit === "bananas" ? "sats" : "bananas"] - a[donorUnit === "bananas" ? "sats" : "bananas"]
         || a.handle.localeCompare(b.handle));
-      el.bananaLeaders.replaceChildren();
-      for (let i = 0; i < Math.min(10, ranked.length); i++) {
-        const entry = ranked[i], row = document.createElement("li");
-        const rank = document.createElement("span"), name = document.createElement("span"), amount = document.createElement("strong");
-        rank.className = "banana-rank"; rank.textContent = String(i + 1).padStart(2, "0");
-        name.className = "banana-donor"; name.textContent = entry.handle ? `@${entry.handle}` : "Anonymous";
-        if (!entry.handle) name.dataset.anon = "true";
-        amount.className = "banana-amount"; amount.textContent = (donorUnit === "sats" ? BANANA_COUNT : DONOR_BANANAS).format(entry[donorUnit]);
-        row.append(rank, name, amount); el.bananaLeaders.append(row);
+      for (let i = 0; i < leaderRows.length; i++) {
+        const entry = ranked[i], row = leaderRows[i];
+        row.li.hidden = !entry;
+        if (!entry) continue;
+        const name = entry.handle ? `@${entry.handle}` : "Anonymous";
+        const amount = (donorUnit === "sats" ? BANANA_COUNT : DONOR_BANANAS).format(entry[donorUnit]);
+        if (row.nameText.data !== name) row.nameText.data = name;
+        if (row.amountText.data !== amount) row.amountText.data = amount;
+        row.name.dataset.anon = String(!entry.handle);
       }
       el.bananaEmpty.hidden = ranked.length > 0;
       el.bananaEmpty.textContent = missingSats ? "Sat totals are not available from the donation feed yet."
@@ -1187,7 +1198,7 @@
       el.boardFilterTypes.setAttribute("aria-controls", el.boardFilterList.id);
       const boardListeners = [];
       const on = (target, type, fn, options) => {
-        target.addEventListener(type, fn, options);
+        target.addEventListener(type, fn, typeof options === "boolean" ? { capture: options, signal } : { ...options, signal });
         boardListeners.push(() => target.removeEventListener(type, fn, options));
       };
       // Each window copies a readable board's canvas and owns its controls.
@@ -1955,6 +1966,7 @@
           tipVisibility = visibility;
           if (!visibility) tooltip.hide();
         },
+        get visibility() { return tipVisibility; },
         beginFrame: () => {
           tipSpeechBottom = -Infinity;
           tooltip.update(false);
@@ -2258,7 +2270,7 @@
             chip.className = "chip";
             chip.title = `Take ${item.name} off ${BL.characters.displayOf(w.name)}`;
             chip.textContent = BL.characters.displayOf(w.name);
-            chip.addEventListener("click", () => unassignHandler && unassignHandler(w.name));
+            chip.addEventListener("click", () => unassignHandler && unassignHandler(w.name), { signal });
             chips.append(chip);
           }
           main.append(chips);
@@ -2284,12 +2296,12 @@
           select.value = "";
           select.blur();
           if (target && free.length) assignHandler && assignHandler(free[0].id, target);
-        });
+        }, { signal });
         li.append(select);
         el.inventory.append(li);
       }
     };
-    // dispose removes only the rows and timers this instance added.
+    // End this visit; the attached sheet rows belong to the page.
     const dispose = () => {
       finishSheetResize();
       el.sheet.hidden = false;
@@ -2300,11 +2312,11 @@
       window.clearTimeout(hintHideTimer);
       window.clearTimeout(copyTimer);
       for (const off of listeners) off();
+      listeners.length = 0;
+      if (lifetime) lifetime.abort();
       if (liveRows === rosterRows) liveRows = liveOnline = null;
       if (liveDonors === refreshDonors) liveDonors = null;
-      el.roster.replaceChildren();
-      el.bananaLeaders.replaceChildren();
-      el.bananaRecent.replaceChildren();
+      // Page-owned roster and donation rows remain attached; the next visit reconciles their contents.
       el.inventory.replaceChildren();
       el.toast.classList.remove("show");
       el.toast.hidden = true;
@@ -2333,7 +2345,16 @@
       el.board.classList.remove("board-floating");
       el.board.removeAttribute("style");
     };
-    return { el, openFeed, openRecipe, closeRecipe, dismissOutside, openBoard, closeBoard, updateBoard, restoreBoards, setPanelsHidden, setRosterRow, setStats, setAct, setMode, setDestinations, setOwnOoga, get retakeActor() { return retake.actor ? retake : null; }, setGorilla, setGorillaSmashPower, setDetachedView, fadeDetachedName, setAreaLabel, setPrimary, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, hideHint, letterSign, selectTab, onPreset, setPileValueVisible, onAssign, onUnassign, renderInventory, dispose };
+    return {
+      // Engines keep this facade while a retained scene takes a fresh visit signal and sheet state.
+      renew(signal) {
+        const next = create({ roster, catalog, tierColors, renderIcon, lootEnabled, healthEnabled, signal });
+        next.tooltip.setVisibility(this.tooltip.visibility);
+        next.onAction(actionHandler); next.onPreset(presetHandler); next.onAssign(assignHandler); next.onUnassign(unassignHandler);
+        Object.defineProperties(this, Object.getOwnPropertyDescriptors(next));
+        return this;
+      },
+      el, openFeed, openRecipe, closeRecipe, dismissOutside, openBoard, closeBoard, updateBoard, restoreBoards, setPanelsHidden, setRosterRow, setStats, setAct, setMode, setDestinations, setOwnOoga, get retakeActor() { return retake.actor ? retake : null; }, setGorilla, setGorillaSmashPower, setDetachedView, fadeDetachedName, setAreaLabel, setPrimary, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, hideHint, letterSign, selectTab, onPreset, setPileValueVisible, onAssign, onUnassign, renderInventory, dispose };
   };
   // The account line in the sheet's foot is page-level: shown only when a backend answered, and
   // the director hands every change of `BL.net.state` here, whichever scene is active.

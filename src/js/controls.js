@@ -2,6 +2,7 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const { clamp } = BL.math;
+  const { BUTTON: PAD, state: pad } = BL.gamepad;
   const KEYS = {
     w: "forward", s: "back", a: "left", d: "right", q: "yawLeft", e: "yawRight", r: "pitchDown", f: "pitchUp",
     z: "up", " ": "up", x: "down", arrowup: "forward", arrowdown: "back", arrowleft: "left", arrowright: "right", shift: "sprint"
@@ -45,13 +46,25 @@
       knob.style.transform = "";
       el.classList.remove("live");
     };
+    let listening = true;
     el.addEventListener("pointerdown", onDown);
     el.addEventListener("pointermove", onMove);
     el.addEventListener("pointerup", onUp);
     el.addEventListener("pointercancel", onUp);
     el.addEventListener("lostpointercapture", onUp);
     s.reset = () => onUp({ pointerId: s.id });
+    s.resume = () => {
+      if (listening) return;
+      listening = true;
+      el.addEventListener("pointerdown", onDown);
+      el.addEventListener("pointermove", onMove);
+      el.addEventListener("pointerup", onUp);
+      el.addEventListener("pointercancel", onUp);
+      el.addEventListener("lostpointercapture", onUp);
+    };
     s.dispose = () => {
+      if (!listening) return;
+      listening = false;
       el.removeEventListener("pointerdown", onDown);
       el.removeEventListener("pointermove", onMove);
       el.removeEventListener("pointerup", onUp);
@@ -66,6 +79,7 @@
     const held = { forward: 0, back: 0, left: 0, right: 0, yawLeft: 0, yawRight: 0, pitchDown: 0, pitchUp: 0, up: 0, space: 0, down: 0, boost: 0, chord: 0, sprint: 0, peek: 0 };
     const axes = { x: 0, y: 0, up: 0, yaw: 0, pitch: 0, orbitYaw: 0, sprint: 0, peek: 0, shiftTap: 0 };
     let spaceDown = false, boostPointer = null, boostClick = false, shiftAt = 0, shiftUsed = false, shiftTap = 0;
+    let padFrame = -1, padUp = 0, padSprint = 0;
     const downKeys = new Set(), blockedKeys = new Set();
     let tabConsumed = false;
     let pointerButtons = 0, blockedPointerButtons = 0;
@@ -143,6 +157,9 @@
       boostClick = false;
       shiftAt = shiftTap = 0;
       shiftUsed = false;
+      // A pad press not yet read is dropped too, so closing a menu never acts on the press made inside it.
+      padUp = padSprint = 0;
+      padFrame = pad.frame;
     };
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
@@ -195,22 +212,37 @@
       chord.addEventListener("pointerup", onChord);
       chord.addEventListener("pointercancel", onChord);
     }
+    // A pad's sticks are the touch sticks, its A is Space (each press acted on once, however often `read` runs) and a
+    // click of its left stick runs until the stick lets go.
+    const readPad = () => {
+      if (pad.frame !== padFrame) {
+        padFrame = pad.frame;
+        if (pad.pressed & PAD.a) padUp = onAction && onAction() ? 0 : 1;
+        if (pad.released & PAD.a) padUp = 0;
+        if (pad.pressed & PAD.ls) padSprint = 1;
+      }
+      if (!pad.lx && !pad.ly) padSprint = 0;
+    };
     // Sign convention: yaw positive is left, pitch positive is down.
     const read = () => {
-      axes.x = clamp(held.right - held.left + (moveStick ? moveStick.x : 0), -1, 1);
-      axes.y = clamp(held.forward - held.back + (shooter() ? 0 : held.chord) + (moveStick ? moveStick.y : 0), -1, 1);
-      axes.up = clamp(held.up + held.space + held.boost - (canDescend() ? held.down : 0), -1, 1);
+      readPad();
+      axes.x = clamp(held.right - held.left + (moveStick ? moveStick.x : 0) + pad.lx, -1, 1);
+      axes.y = clamp(held.forward - held.back + (shooter() ? 0 : held.chord) + (moveStick ? moveStick.y : 0) + pad.ly, -1, 1);
+      axes.up = clamp(held.up + held.space + held.boost + padUp - (canDescend() ? held.down : 0), -1, 1);
       // Bird's-eye combat rotates with Q/E while its look stick aims the pointer.
       axes.orbitYaw = held.yawLeft - held.yawRight;
-      axes.yaw = clamp((shooter() ? 0 : held.yawLeft - held.yawRight) - (lookStick ? lookStick.x : 0), -1, 1);
-      axes.pitch = clamp((shooter() ? 0 : held.pitchDown - held.pitchUp) - (lookStick ? lookStick.y : 0), -1, 1);
-      axes.sprint = held.sprint;
+      axes.yaw = clamp((shooter() ? 0 : held.yawLeft - held.yawRight) - (lookStick ? lookStick.x : 0) - pad.rx, -1, 1);
+      axes.pitch = clamp((shooter() ? 0 : held.pitchDown - held.pitchUp) - (lookStick ? lookStick.y : 0) - pad.ry, -1, 1);
+      axes.sprint = Math.max(held.sprint, padSprint);
       axes.peek = shooter() ? held.peek : 0;
       axes.shiftTap = shiftTap;
       shiftTap = 0;
       return axes;
     };
+    let listening = true;
     const dispose = () => {
+      if (!listening) return;
+      listening = false;
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);
@@ -243,7 +275,35 @@
       boostClick = false;
     };
     const reset = () => { onBlur(); if (moveStick) moveStick.reset(); if (lookStick) lookStick.reset(); };
-    return { read, axes, clearPointer, reset, consumeTab, dispose, get rightShift() { return !!held.peek; } };
+    const resume = () => {
+      if (listening) return;
+      reset();
+      listening = true;
+      window.addEventListener("keydown", onKeyDown);
+      window.addEventListener("keyup", onKeyUp);
+      window.addEventListener("blur", onBlur);
+      if (tabNavigation) {
+        window.addEventListener("keydown", captureKeyDown, true);
+        window.addEventListener("keyup", captureKeyUp, true);
+        window.addEventListener("blur", blurKeys);
+      }
+      if (boost) {
+        boost.addEventListener("pointerdown", onBoostDown);
+        boost.addEventListener("pointerup", onBoostUp);
+        boost.addEventListener("pointercancel", onBoostUp);
+        boost.addEventListener("pointerleave", onBoostUp);
+        if (pressActions) boost.addEventListener("click", onBoostClick, true);
+      }
+      if (chord) {
+        chord.addEventListener("pointerdown", onChord);
+        chord.addEventListener("pointermove", onChord);
+        chord.addEventListener("pointerup", onChord);
+        chord.addEventListener("pointercancel", onChord);
+      }
+      if (moveStick) moveStick.resume();
+      if (lookStick) lookStick.resume();
+    };
+    return { read, axes, clearPointer, reset, consumeTab, resume, dispose, get rightShift() { return !!held.peek; } };
   };
   BL.controls = { create, uiKey };
 })();
