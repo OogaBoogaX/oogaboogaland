@@ -7517,31 +7517,43 @@ const hubRainforestSteps = { name: "rainforest bridge steps", why: "regression: 
   const r = await b.evaluate(`(() => {
     const B = __ooga, P = BL.poolModels, D = P.DIR, rows = [];
     const key = (type, k) => window.dispatchEvent(new KeyboardEvent(type, { key: k, code: "Key" + k.toUpperCase() }));
-    for (const across of [-0.75, 0, 0.75, null]) {
-      const replay = across === null, a = B.cavemen.get(replay ? "w-s-bitcoin" : "portlandhodl");
-      B.pilot.possess(a);
-      if (B.pilot.aiming !== replay) B.pilot.modeAction("mode-toggle");
-      const x = replay ? 25.38348 : D.x * 25.5 + D.z * across, z = replay ? 8.36988 : D.z * 25.5 - D.x * across;
-      B.pilot.navigate({ position: { x, y: replay ? 4.58241 - a.baseY : B.island.surfaceAt(x, z), z }, yaw: replay ? 13.77019 - Math.PI : Math.atan2(D.x, D.z) + Math.PI, pitch: replay ? 0.105 : 0.25, dist: 8 });
-      B.advance(0.2, 1 / 60);
-      let stalled = 0, longest = 0, airborne = false;
-      key("keydown", "w");
-      // Stop at the bridge landing rather than running for the old walking
-      // duration, which now carries the faster Ooga beyond the diagonal test lane.
-      for (let i = 0; i < 90 && a.root.position.x * D.x + a.root.position.z * D.z < 33; i++) {
-        const p = a.root.position, before = p.x * D.x + p.z * D.z;
-        B.advance(1 / 60, 1 / 60);
-        stalled = p.x * D.x + p.z * D.z - before < 0.01 ? stalled + 1 : 0;
-        longest = Math.max(longest, stalled); airborne ||= a.hop > 0.01;
+    // This measures the bridge and stair collision shell. Earlier hub trips
+    // leave roaming gorillas in the lane; walking over one and falling off
+    // is valid character contact, not a broken bridge tread.
+    const clankers = B.clankers, update = clankers.update;
+    const traffic = clankers.list.map(entry => [entry, entry.active, entry.root.visible]);
+    clankers.update = () => {};
+    for (const [entry] of traffic) entry.active = entry.root.visible = false;
+    try {
+      for (const across of [-0.75, 0, 0.75, null]) {
+        const replay = across === null, a = B.cavemen.get(replay ? "w-s-bitcoin" : "portlandhodl");
+        B.pilot.possess(a);
+        if (B.pilot.aiming !== replay) B.pilot.modeAction("mode-toggle");
+        const x = replay ? 25.38348 : D.x * 25.5 + D.z * across, z = replay ? 8.36988 : D.z * 25.5 - D.x * across;
+        B.pilot.navigate({ position: { x, y: replay ? 4.58241 - a.baseY : B.island.surfaceAt(x, z), z }, yaw: replay ? 13.77019 - Math.PI : Math.atan2(D.x, D.z) + Math.PI, pitch: replay ? 0.105 : 0.25, dist: 8 });
+        B.advance(0.2, 1 / 60);
+        let stalled = 0, longest = 0, airborne = false;
+        key("keydown", "w");
+        // Stop at the bridge landing rather than running for the old walking
+        // duration, which now carries the faster Ooga beyond the diagonal test lane.
+        for (let i = 0; i < 90 && a.root.position.x * D.x + a.root.position.z * D.z < 33; i++) {
+          const p = a.root.position, before = p.x * D.x + p.z * D.z;
+          B.advance(1 / 60, 1 / 60);
+          stalled = p.x * D.x + p.z * D.z - before < 0.01 ? stalled + 1 : 0;
+          longest = Math.max(longest, stalled); airborne ||= a.hop > 0.01;
+        }
+        key("keyup", "w");
+        const top = a.root.position.x * D.x + a.root.position.z * D.z, feet = a.root.position.y - a.baseY;
+        key("keydown", "s");
+        for (let i = 0; i < 90 && a.root.position.x * D.x + a.root.position.z * D.z > 26; i++) {
+          B.advance(1 / 60, 1 / 60); airborne ||= a.hop > 0.01;
+        }
+        key("keyup", "s");
+        rows.push({ across, replay, top, feet, bottom: a.root.position.x * D.x + a.root.position.z * D.z, longest, airborne });
       }
-      key("keyup", "w");
-      const top = a.root.position.x * D.x + a.root.position.z * D.z, feet = a.root.position.y - a.baseY;
-      key("keydown", "s");
-      for (let i = 0; i < 90 && a.root.position.x * D.x + a.root.position.z * D.z > 26; i++) {
-        B.advance(1 / 60, 1 / 60); airborne ||= a.hop > 0.01;
-      }
-      key("keyup", "s");
-      rows.push({ across, replay, top, feet, bottom: a.root.position.x * D.x + a.root.position.z * D.z, longest, airborne });
+    } finally {
+      clankers.update = update;
+      for (const [entry, active, visible] of traffic) { entry.active = active; entry.root.visible = visible; }
     }
     const v = P.bridge().verts;
     let tails = 0;
