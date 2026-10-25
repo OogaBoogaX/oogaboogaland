@@ -704,7 +704,7 @@
         // Reserve vacancies for more recent sleepers even when their update
         // comes later in stable roster order. Never evict an occupied bed.
         if (available) for (const other of crewList) {
-          if (other !== cave && other !== player && (!other.bedroll || other.bedroll.outdoor) && !other.camp.burning && !other.camp.panic.active
+          if (other !== cave && other !== player && other.traits.name !== ctx.residentName && (!other.bedroll || other.bedroll.outdoor) && !other.camp.burning && !other.camp.panic.active
             && stateOf(other) === "sleeping" && sleepPriority(other, cave) < 0) available--;
         }
         if (available > 0) for (const bed of bedrolls) if (!bed.sleeper) {
@@ -1177,12 +1177,13 @@
       }
       if (cave.camp.burning || cave.camp.panic.active) return;
       const wasAwake = cave.state === "working" || cave.state === "chilling";
+      const resident = cave.traits.name === ctx.residentName && (state === "sleeping" || state === "away");
       if (cave.state === state) {
         // Same-state call still re-seats a moved eater; it must interrupt nothing else.
         if (state === "working") walkToSlot(cave);
         return;
       }
-      if (ctx.bedRoute && state === "sleeping") { startSleep(cave, settle && cave.state === "away"); return; }
+      if (ctx.bedRoute && state === "sleeping" && !resident) { startSleep(cave, settle && cave.state === "away"); return; }
       if (ctx.bedRoute && cave.state === "sleeping" && (state === "working" || state === "chilling")) { beginWalk(cave, state); return; }
       if (cave === player) release();
       if (ctx.bedRoute || cave.bedTravel.mode) { standFromBed(cave); cave.bedTravel.bed = null; }
@@ -1196,10 +1197,11 @@
       cave.parts.head.geometry = state === "sleeping" ? cave.headClosed : cave.headOpen;
       resetPose(cave);
       releaseBuild(cave);
-      if (state === "sleeping") claimBedroll(cave);
+      if (state === "sleeping" && !resident) claimBedroll(cave);
       else releaseBedroll(cave);
       const r = cave.root;
-      if (state === "working" || state === "chilling") {
+      if (resident) ctx.residentPose(cave, 0);
+      else if (state === "working" || state === "chilling") {
         r.visible = true;
         if (!wasAwake && state === "working") {
           if (settle && ctx.initialWorkSpot) {

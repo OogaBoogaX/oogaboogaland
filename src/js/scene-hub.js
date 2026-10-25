@@ -3399,20 +3399,21 @@
     BL.bifrostIsle.update(site, 0, 0, NaN, NaN, NaN);
     return { site, group, claimGround, phase: null, window: null, heimdall: null, hum: 0, effectsActive: false, effectsTime: 0 };
   };
-  // Sani lives in the Sphere's rooms, in his recliner (timechain-interior.js), so on the island he is inside its
-  // closed ball, out of sight, whatever his activity says. Driven, borrowed by someone else, away, or on a debug
-  // visit that sets states by hand, he comes back out, on the bridge before its doors.
+  // Sleeping or away, Sani lives in the Sphere's rooms rather than HQ. Active, he joins the mainland crew.
+  // Possessing him inside the ball brings him out onto the bridge before its doors.
   const timechainResidentPose = (cave) => {
     if (!timechainIsland || cave.traits.name !== "SaniExp") return false;
     const T = timechainIsland;
-    if (cave.state === "away" || cave === pilot?.player || cave.remoteControlled || contributors.debugState || contributors.debugRoster) {
+    if (cave.state === "working" || cave.state === "chilling" || cave === pilot?.player || cave.remoteControlled) {
       if (T.residentInside) {
         T.residentInside = false;
-        const W = BL.timechainModels.SPOTS.WAIT;
-        cave.root.position.x = T.worldX(W.x, W.z + 1.2); cave.root.position.z = T.worldZ(W.x, W.z + 1.2);
-        cave.root.position.y = T.place.y + cave.baseY;
-        cave.root.rotation.y = T.place.ry + Math.PI;
-        cave.root.visible = cave === pilot?.player || cave.state === "chilling" || cave.state === "working";
+        if (cave === pilot?.player) {
+          const W = BL.timechainModels.SPOTS.WAIT;
+          cave.root.position.x = T.worldX(W.x, W.z + 1.2); cave.root.position.z = T.worldZ(W.x, W.z + 1.2);
+          cave.root.position.y = T.place.y + cave.baseY;
+          cave.root.rotation.y = T.place.ry + Math.PI;
+          cave.root.visible = true;
+        }
       }
       return false;
     }
@@ -8694,6 +8695,7 @@
       node.rotation.y = elapsed * 0.3 + i;
     }
   };
+  const delayGameRing = seconds => { gameRingWait = Math.max(0, seconds); };
   // HALLOWEEN: the entry owns its pending load and discovery subscriptions for this visit alone.
   const createGhostEntry = () => {
     if (!GHOSTS_WANTED) return;
@@ -8707,7 +8709,7 @@
     gorillaActive: () => !!(clankerPlay && clankerPlay.active),
     gameMode: on => setGameMode(on, true),
     // Keep ring timing separate from the event's combat policy.
-    ringDelay: seconds => { gameRingWait = Math.max(0, seconds); },
+    ringDelay: delayGameRing,
     lobbyOpen: (on, restore) => pilot.setMenuOpen(on, restore),
     // The waiting room: the driven Ooga let go of (the free camera to watch from), and at the end the visitor's own
     // Ooga given back.
@@ -11486,6 +11488,7 @@
     shared.workHit = (cave) => clankers && clankers.hit(cave);
     shared.workPlanned = (cave, site) => clankers && clankers.plan(cave, site);
     mark("pile");
+    shared.residentName = "SaniExp";
     shared.residentPose = (cave, dt) => grabbedOogaPose(cave) || timechainResidentPose(cave, dt);
     shared.releaseGrabbed = (cave) => cave.grabbedBy && finishClankerRider(cave.grabbedBy, false);
     // Signed-in visitors elsewhere, as the Oogas they drive; the crew walks round them.
@@ -11533,9 +11536,6 @@
     shared.shotGeometry = () => ghosts && ghosts.hunting ? ghosts.shotGeometry() : null; // HALLOWEEN: rifles fire rocks, then lasers, through the hunt
     BL.net.setHub(true);
     for (const cave of crew.list) crew.setJetpackOwnership(cave, true, hubModels.jetpack(), hubModels.jetFlame());
-    // Sani hosts the island on ordinary visits; debug visits keep activity-derived states.
-    const sani = crew.cavemen.get("SaniExp");
-    if (sani && !DEBUG && preloadedCharacter !== "saniexp") sani.override = "chilling";
     mirrorCave.body = BL.mirrorBody.create(mirrorCave.node, crew.cavemen);
     for (const cave of crew.list) entropyLab.phase.body.track(cave.root, cave.traits.height * 2,
       Math.max(cave.headOpen.verts.length, cave.headClosed.verts.length));
@@ -11839,7 +11839,7 @@
     Object.assign(hubScene, {
       root, camera, input,
       debug: {
-        setGameMode, animationInterval,
+        setGameMode, delayGameRing, animationInterval,
         get gameMode() { return gameMode; },
         selectDebugGorilla,
         get timechainIsland() { return timechainIsland; },
