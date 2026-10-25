@@ -16809,7 +16809,69 @@ for (const backend of ["webgl2", "canvas2d"]) scene("dsb", { label: `dsb land ${
 } }] });
 
 const mb = (bytes) => (bytes / 1048576).toFixed(2);
-const dsbSoak = async (b) => {
+// Only geometry identity and structural owners cross DevTools, never nodes or app/user data.
+// IDs are page-local and weak: taking a snapshot must not keep a geometry alive or warm a cache.
+const gpuGeometrySnapshot = (renderer, scenes, activeId, state) => {
+  if (renderer.kind !== "webgl2") return [];
+  const resident = new Map();
+  for (const geometry of renderer.geometryRecords()) {
+    if (!state.ids.has(geometry)) state.ids.set(geometry, state.nextId++);
+    resident.set(geometry, { id: state.ids.get(geometry), owners: [], references: 0, omittedOwners: 0, graphVisible: null });
+  }
+  const rooms = new Map();
+  let roomIndex = 0;
+  for (const room of scenes.dsb?.debug?.dsb?.interiors?.rooms?.values() || []) rooms.set(room.root, roomIndex++);
+  const visit = (node, scene, path, enabled) => {
+    if (!node) return;
+    if (scene === "dsb" && rooms.has(node)) path = `room[${rooms.get(node)}]`;
+    const visible = !!(enabled && node.visible), row = resident.get(node.geometry);
+    if (row) {
+      row.references++;
+      row.graphVisible = row.graphVisible === true || visible;
+      if (row.owners.length < 8) row.owners.push({ scene, path: path.slice(0, 240), graphVisible: visible });
+      else row.omittedOwners++;
+    }
+    for (let i = 0; i < node.children.length; i++) visit(node.children[i], scene, `${path}/${i}`, visible);
+  };
+  for (const [id, scene] of Object.entries(scenes)) visit(scene.root, id, "root", id === activeId);
+  // cachedGeometry/liveGeometry can touch tracked cache readers; observing them can change ownership.
+  visit(scenes.hub?.retainedRoot, "hub", "retained", false);
+  for (const row of resident.values()) if (!row.references) row.owners.push({ scene: "unattributed", path: null, graphVisible: null });
+  return [...resident.values()];
+};
+const gpuGeometryPageSnapshot = `(${gpuGeometrySnapshot})(__ooga.renderer, BL.scenes, __ooga.scene, window.__testGeometryIds ||= { ids: new WeakMap(), nextId: 1 })`;
+const gpuGeometryDelta = (before, after) => {
+  const oldIds = new Set(before.map(row => row.id)), newIds = new Set(after.map(row => row.id));
+  return { before: before.length, after: after.length, added: after.filter(row => !oldIds.has(row.id)), removed: before.filter(row => !newIds.has(row.id)) };
+};
+const gpuGeometryDiagnosticChecks = async () => {
+  const a = {}, b = {}, c = {}, d = {}, detached = {}, added = {}, privateText = "must-not-be-serialized";
+  const node = (geometry, visible = true, children = []) => ({ geometry, visible, children, name: privateText, text: privateText });
+  const room = node(b, false, [node(c)]), held = node(a), sceneRoot = node(a, true, [room, ...Array.from({ length: 10 }, () => node(d))]);
+  const glSource = await readFile(join(root, "src/js/gl-renderer.js"), "utf8");
+  const hubSource = await readFile(join(root, "src/js/scene-hub.js"), "utf8");
+  const records = new Map([a, b, c, d, detached].map(geometry => [geometry, {}]));
+  const renderer = new Function("records", `return { kind: "webgl2", ${glSource.match(/geometryRecords: \(\) => records\.keys\(\),/)[0]} };`)(records);
+  const retained = new Function("root", "heldHub", `return { ${hubSource.match(/get retainedRoot\(\) \{[^\n]+\}/)[0]} };`)(held, true);
+  const released = new Function("root", "heldHub", `return { ${hubSource.match(/get retainedRoot\(\) \{[^\n]+\}/)[0]} };`)(held, false);
+  const touched = () => { throw new Error("Diagnostics touched a cache/lifetime reader"); };
+  const scenes = { dsb: { root: sceneRoot, debug: { dsb: { interiors: { rooms: new Map([["private-room-name", { root: room }]]) } } }, liveGeometry: touched }, hub: { root: node(null), get retainedRoot() { return retained.retainedRoot; }, liveGeometry: touched, cachedGeometry: touched } };
+  const state = { ids: new WeakMap(), nextId: 1 }, before = gpuGeometrySnapshot(renderer, scenes, "dsb", state);
+  const row = geometry => before.find(r => r.id === state.ids.get(geometry));
+  const shared = row(a).owners.some(o => o.scene === "dsb" && o.graphVisible) && row(a).owners.some(o => o.path === "retained" && !o.graphVisible);
+  const hidden = !row(b).graphVisible && !row(c).graphVisible && row(c).owners[0].path === "room[0]/0";
+  const bounded = row(d).references === 10 && row(d).owners.length === 8 && row(d).omittedOwners === 2;
+  const unknown = row(detached).graphVisible === null && row(detached).owners[0].scene === "unattributed";
+  records.delete(b); records.set(added, {});
+  const after = gpuGeometrySnapshot(renderer, scenes, "dsb", state), delta = gpuGeometryDelta(before, after);
+  const exact = delta.before === 5 && delta.after === 5 && delta.added.length === 1 && delta.added[0].id === state.ids.get(added) && delta.removed.length === 1 && delta.removed[0].id === state.ids.get(b);
+  records.set(b, {});
+  const stable = gpuGeometrySnapshot(renderer, scenes, "dsb", state).find(r => r.id === row(b).id)?.id === row(b).id;
+  const empty = gpuGeometryDelta(before, before);
+  const safe = !JSON.stringify({ before, after, delta }).includes(privateText) && !JSON.stringify(before).includes("private-room-name");
+  record("GPU record diagnostics: stable weak identities, exact additions/removals, shared/hidden/retained owners and bounded private-free paths without cache reads", shared && hidden && bounded && unknown && exact && stable && safe && released.retainedRoot === null && empty.added.length === 0 && empty.removed.length === 0 && gpuGeometrySnapshot({ kind: "canvas2d" }, {}, null, state).length === 0, JSON.stringify({ shared, hidden, bounded, unknown, exact, stable, safe }));
+};
+const dsbSoak = async (b, { geometry = false } = {}) => {
   await b.send("HeapProfiler.enable");
   const until = (cond, ms) => b.evaluate(`new Promise((resolve) => { const B = window.__ooga; const t0 = performance.now(); const tick = () => { const ok = !!(${cond}); if (ok || performance.now() - t0 > ${ms}) resolve(ok); else requestAnimationFrame(tick); }; tick(); })`);
   const rendered = (frames, ms = 6000) => b.evaluate(`new Promise((resolve) => { const B = window.__ooga; const start = B.renderedFrames; const t0 = performance.now(); const tick = () => { if (B.renderedFrames >= start + ${frames} || performance.now() - t0 > ${ms}) resolve(B.renderedFrames - start); else requestAnimationFrame(tick); }; requestAnimationFrame(tick); })`);
@@ -16860,6 +16922,10 @@ const dsbSoak = async (b) => {
     await b.focus(false);
     try {
       await b.send("Page.setWebLifecycleState", { state: "frozen" });
+      if (geometry) {
+        const state = await b.evaluate(`({ stats: window.__ooga.stats(), geometry: ${gpuGeometryPageSnapshot} })`);
+        return { ...state, stats: stats || state.stats, ...await heap() };
+      }
       return { stats: stats || await b.evaluate("window.__ooga.stats()"), ...await heap() };
     } finally {
       await b.send("Page.setWebLifecycleState", { state: "active" });
@@ -16875,7 +16941,7 @@ const dsbSoak = async (b) => {
 };
 
 scene("dsb", { label: "lifecycle", exclusive: true, url: hubPage(src), steps: [{ name: "dsb lifecycle", why: "contract: repeated DSB visits release nodes, listeners and GPU resources", run: async (b) => {
-  const { rendered, settled, snapshot, travel, heapDetail, within } = await dsbSoak(b);
+  const { rendered, settled, snapshot, travel, heapDetail, within } = await dsbSoak(b, { geometry: true });
   // The weather deck is sized by tier on each visit. Compare the same tier;
   // low is terminal, so the governor cannot change capacity during the soak.
   await b.evaluate('window.__ooga.renderer.setQuality("low")');
@@ -16886,8 +16952,10 @@ scene("dsb", { label: "lifecycle", exclusive: true, url: hubPage(src), steps: [{
   const after = await snapshot();
   const same = (key) => before.stats[key] === after.stats[key];
   record("soak: dsb cycles: six round trips retain node, target, tween and DOM counts", same("allNodes") && same("targets") && same("tweens") && same("dom") && after.stats.tweens === 0, JSON.stringify({ before: before.stats, after: after.stats }));
-  record("soak: dsb cycles: GPU records, listeners and heap remain bounded", Math.abs(after.stats.gl.records - before.stats.gl.records) <= 3 && before.nodes === after.nodes && before.listeners === after.listeners && within(before, after, 0.1), heapDetail(before, after)
-    + `, GPU ${before.stats.gl.records} -> ${after.stats.gl.records}, DOM ${before.nodes} -> ${after.nodes}, listeners ${before.listeners} -> ${after.listeners}`);
+  const bounded = Math.abs(after.stats.gl.records - before.stats.gl.records) <= 3 && before.nodes === after.nodes && before.listeners === after.listeners && within(before, after, 0.1);
+  record("soak: dsb cycles: GPU records, listeners and heap remain bounded", bounded, heapDetail(before, after)
+    + `, GPU ${before.stats.gl.records} -> ${after.stats.gl.records}, DOM ${before.nodes} -> ${after.nodes}, listeners ${before.listeners} -> ${after.listeners}`
+    + (bounded ? "" : `, geometry ${JSON.stringify(gpuGeometryDelta(before.geometry, after.geometry))}`));
 } }] });
 
 scene("factory", { label: "lifecycle", exclusive: true, url: hubPage(src), steps: [{ name: "factory lifecycle", why: "contract: repeated factory visits, each left with a tip's show in the air, release the hall's listeners, nodes and GPU resources while retaining one bounded shared node", run: async (b) => {
@@ -19234,6 +19302,7 @@ const terrainParityChecks = (BL, island) => {
 };
 const unitChecks = async () => {
   await canvasSurfaceCacheChecks();
+  await gpuGeometryDiagnosticChecks();
   const rage = await gorillaRageProof();
   record("gorilla rage: distinct rolling hits, only agitating Oogas targeted, held capture through planning and swing, bounded throws, exact expiry, zero health and account/lifecycle cancellation", Object.values(rage).every(Boolean), JSON.stringify(rage));
   const reviewCrowd=await reviewCrowdAndFallbackProof();
@@ -20985,18 +21054,19 @@ const dsbInteriorCheckpoint = { name: "dsb interior checkpoint", why: "rule: a r
   record("DSB interior: touch exit restores the same player/building and current night rain, not entry weather",isolation.same&&!isolation.exterior&&isolation.drops===0&&isolation.night===0&&!exit.active&&exit.same&&exit.distance<.01&&exit.cameraClear&&Math.abs(exit.floor)<.01&&exit.weather==="rain"&&exit.night===0&&exit.lamps>.9&&exit.drops>0&&exit.master>0&&!exit.audio.connected,JSON.stringify({isolation,exit}));
   await b.evaluate('__ooga.daylight.read=__interiorCheck.read');
   if(!await untilPage(b,'B.scene==="dsb"&&!B.transitioning&&!B.dsb.interiors.active&&(B.renderer.kind==="canvas2d"||B.renderer.ready)'))throw Error("DSB exterior did not draw after restoring daylight");
-  const snapshot=()=>b.evaluate(`(()=>{const B=__ooga,I=B.dsb.interiors;let nodes=0;const geometries=new Set();const visit=n=>{nodes++;if(n.geometry)geometries.add(n.geometry);for(const c of n.children)visit(c);};visit(BL.scenes.dsb.root);return {nodes,geometries:geometries.size,rooms:I.rooms.size,targets:BL.scenes.dsb.input.targetCount,audio:I.audio.stats.sources,contexts:I.audio.stats.contexts,radioSources:B.dsb.noderunner.audio?.stats.sources,radioStarts:B.dsb.noderunner.audio?.stats.starts,records:B.renderer.stats.records,room:I.active?.room.id||null,lights:B.renderOpts.lightCount,textures:B.renderer.stats.waterTextures||0,remotes:BL.scenes.dsb.stats().remotePlayers};})()`);
+  const snapshot=()=>b.evaluate(`(()=>{const B=__ooga,I=B.dsb.interiors;let nodes=0;const geometries=new Set();const visit=n=>{nodes++;if(n.geometry)geometries.add(n.geometry);for(const c of n.children)visit(c);};visit(BL.scenes.dsb.root);return {counts:{nodes,geometries:geometries.size,rooms:I.rooms.size,targets:BL.scenes.dsb.input.targetCount,audio:I.audio.stats.sources,contexts:I.audio.stats.contexts,radioSources:B.dsb.noderunner.audio?.stats.sources,radioStarts:B.dsb.noderunner.audio?.stats.starts,records:B.renderer.stats.records,room:I.active?.room.id||null,lights:B.renderOpts.lightCount,textures:B.renderer.stats.waterTextures||0,remotes:BL.scenes.dsb.stats().remotePlayers},geometry:${gpuGeometryPageSnapshot}};})()`);
   const listenerCount=async()=>{
     const obj=await b.send("Runtime.evaluate",{expression:"document"});
     const result=await b.send("DOMDebugger.getEventListeners",{objectId:obj.result.result.objectId});
     await b.send("Runtime.releaseObject",{objectId:obj.result.result.objectId});return result.result.listeners.length;
   };
-  const base=await snapshot(),listeners=await listenerCount();
+  const initial=await snapshot(),base=initial.counts,listeners=await listenerCount();
   let cycles=1;
   for(;cycles<10;cycles++){await tap();await tap();}
   if(!await untilPage(b,'B.scene==="dsb"&&!B.transitioning&&!B.dsb.interiors.active&&(B.renderer.kind==="canvas2d"||B.renderer.ready)'))throw Error("DSB exterior did not draw after ten door cycles");
-  const end=await snapshot(),listenersEnd=await listenerCount();
-  record("DSB interior: ten complete door cycles retain bounded nodes, geometry, handlers and audio sources",Object.keys(base).every(key=>key==="records"?end[key]<=base[key]:end[key]===base[key])&&listeners===listenersEnd,JSON.stringify({cycles,base,end,listeners,listenersEnd}));
+  const final=await snapshot(),end=final.counts,listenersEnd=await listenerCount();
+  const bounded=Object.keys(base).every(key=>key==="records"?end[key]<=base[key]:end[key]===base[key])&&listeners===listenersEnd;
+  record("DSB interior: ten complete door cycles retain bounded nodes, geometry, handlers and audio sources",bounded,JSON.stringify({cycles,base,end,listeners,listenersEnd,...(bounded?{}:{geometry:gpuGeometryDelta(initial.geometry,final.geometry)})}));
   await b.evaluate('window.__interiorCheck.old=__ooga.dsb.interiors;__ooga.go("dsb",null,true);__ooga.advance(.05)');
   const clean=await b.evaluate('({rooms:__interiorCheck.old.rooms.size,audio:__interiorCheck.old.audio.stats.contexts,fresh:__ooga.dsb.interiors.rooms.size,visible:__ooga.dsb.exterior.visible})');
   record("DSB interior: scene departure releases the room and its AudioContext",clean.rooms===0&&clean.audio===0&&clean.fresh===0&&clean.visible,JSON.stringify(clean));

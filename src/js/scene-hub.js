@@ -12420,6 +12420,7 @@
     micKey: true,
     id: "hub", enter, enterSteps, update, overlay, onDonation, previewDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry, cachedGeometry,
     get retained() { return heldHub; }, get elapsed() { return now; },
+    get retainedRoot() { return heldHub ? root : null; },
     root: null, camera: null, input: null, debug: null,
     get inMotion() {
       // A crossing through the Timechain Sphere's doors keeps full rate, so its walk and swoop finish smoothly.

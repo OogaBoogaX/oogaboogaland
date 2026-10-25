@@ -168,11 +168,14 @@ The scene contract, as `scene-lab.js` and `scene-hub.js` implement it:
 | `buildSteps(ctx)` | optional; a generator of pure construction the director runs in slices once the fade is black, before `leave` and `enter`; publishes only finished caches |
 | `enterSteps(ctx)` | optional; `enter` as a generator, which the director runs in slices after `leave` (then `renderer.prepareSteps` for its first frame): scene updates and draws pause, scene HUD controls are inert and input is held (except the recovery Reload button), `__ooga.scene` is null, and the screen holds (black, or an instant crossing's last frame) until its last slice. One that finishes in its first slice completes in the same frame. Every hub arrival through `swap` uses it: a kept hub resume finishes in its first slice; a rebuilt hub or its first visit after a non-hub boot is sliced under either policy. Only boot calls `enter`, which drains the same generator at once |
 | `retained` | the hub under the keep policy: `enter` resumes the kept visit instead of building one |
+| `retainedRoot` | the hub's suspended graph, or `null`; read-only diagnostics can traverse it without invoking cache readers |
 | `stats()` | `visibleNodes`, `allNodes`, `tweens`, `targets` plus the stats of fx, crates, crew, the pile and, in the hub, the critter counts |
 | `liveGeometry(set)` | add geometry kept off the graph but wanted on the GPU (the cavemen's swapped heads) |
 | `root`, `camera`, `input`, `debug` | set in `enter`; `input` and `debug` nulled in `leave` |
 | `agent`, `agentView`, `agentControls`, `agentHandoff` | the Agent hooks the director reads; the hub and lab set all four, the rally, drop and orbit only `agent` and `agentControls` |
 | `inMotion` | getter, true while the pile or fx animate; the governor keeps full rate for it even unfocused |
+
+The WebGL renderer exposes `geometryRecords()` as an on-demand, read-only iterator of resident geometry keys. Diagnostic traversal reports graph visibility, not frustum or draw visibility; it must not invoke tracked cache readers or change ownership.
 
 `ctx` is one object for the page life: `{ renderer, canvas, overlay, game, world, go, lootEnabled, testBananas, agentPlay, hubPolicy, from, place, signal }`. `signal` aborts when the visit ends, for listeners and fetches; `hubPolicy` is `keep` or `release` (`?hubcache=`). `go(id, place)` starts a transition and returns true (throws on an unknown id; ignored, returning false, while one runs); `from` is the scene being left, `null` on boot; `place` is the routed place to arrive at, or `null`. The hub ignores `from` and starts on its landing view, or on the `navigate` view `place` names.
 
