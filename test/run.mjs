@@ -4327,7 +4327,7 @@ const characterChecks = async () => {
   for (const geo of worn) mirrorGeometries.add(geo);
   const spare = BL.models.spareMagazine();
   collect(spare.node);
-  for (const name of ["jumbotron", "factory-kiosk", "factory-models", "kortik-models", "tess"])
+  for (const name of ["jumbotron", "factory-kiosk-core", "factory-kiosk", "factory-models", "kortik-models", "tess"])
     runInNewContext(await readFile(join(root, `src/js/${name}.js`), "utf8"), context);
   const kortik = BL.kortikModels.rig(), kortikHeads = ["headOpen", "headClosed", "headTalk", "redOpen", "redClosed", "redTalk"];
   collect(kortik.root);
