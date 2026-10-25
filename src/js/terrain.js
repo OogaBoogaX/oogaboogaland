@@ -13,14 +13,14 @@
     const count = geometry.verts.length / 3, source = Float64Array.from(geometry.verts), bits = new Uint32Array(source.buffer);
     const vertices = [], indices = new Uint32Array(count);
     let size = 1;
-    while (size < count * 2) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } size *= 2; }
+    while (size < count * 2) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; } size *= 2; }
     const table = new Int32Array(size).fill(-1), mask = size - 1;
-    for (let v = 0; v < count; v++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (let v = 0; v < count; v++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
       const at = v * 6;
       let hash = 0;
-      for (let k = 0; k < 6; k++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } hash = Math.imul(hash ^ bits[at + k], 0x9e3779b1) >>> 0; }
+      for (let k = 0; k < 6; k++) { hash = Math.imul(hash ^ bits[at + k], 0x9e3779b1) >>> 0; }
       let slot = (hash ^ hash >>> 15) & mask, index = -1;
-      for (;;) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+      for (;;) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
         const first = table[slot];
         if (first < 0) break;
         const other = first * 6;
@@ -35,8 +35,8 @@
       }
       indices[v] = index;
     }
-    for (const face of geometry.faces) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } for (let i = 0; i < face.i.length; i++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } face.i[i] = indices[face.i[i]]; } }
-    for (const line of geometry.lines) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } for (let i = 0; i < line.i.length; i++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } line.i[i] = indices[line.i[i]]; } }
+    for (const face of geometry.faces) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } for (let i = 0; i < face.i.length; i++) { face.i[i] = indices[face.i[i]]; } }
+    for (const line of geometry.lines) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } for (let i = 0; i < line.i.length; i++) { line.i[i] = indices[line.i[i]]; } }
     geometry.verts = new Float64Array(vertices);
   };
   const compactVertices = (...args) => finishBuild(compactVerticesSteps(...args));
@@ -90,7 +90,7 @@
     const floorDetails = floorRooms.map((room) => ({ ...room, cr: Math.cos(room.angle), sr: Math.sin(room.angle) }));
     // Rooms bucketed by the slice their floor lands on, so the y sweep never refilters the whole list.
     const floorsByRow = new Map();
-    for (const room of floorDetails) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (const room of floorDetails) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
       const row = Math.round((room.floor - origin.y) / unit);
       // Keep the 1e-7 tolerance: a floor landing between slices matched no slice and must not match the nearest.
       if (Math.abs(origin.y + row * unit - room.floor) > 1e-7) continue;
@@ -110,21 +110,21 @@
     // rowLo/rowHi hold the first and last solid cell per z-row so a slice reads only rows that can show a face.
     const rowLo = new Int16Array(sx * sy).fill(sz), rowHi = new Int16Array(sx * sy).fill(-1);
     const slabLo = new Int16Array(sx).fill(sz), slabHi = new Int16Array(sx).fill(-1);
-    for (let r = 0; r < sx * sy; r++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (let r = 0; r < sx * sy; r++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
       const base = r * sz, x = Math.floor(r / sy);
       let lo = 0, hi = sz - 1;
-      while (lo < sz && !data[base + lo]) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } lo++; }
+      while (lo < sz && !data[base + lo]) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; } lo++; }
       if (lo === sz) continue;
-      while (!data[base + hi]) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } hi--; }
+      while (!data[base + hi]) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; } hi--; }
       rowLo[r] = lo; rowHi[r] = hi;
       if (lo < slabLo[x]) slabLo[x] = lo;
       if (hi > slabHi[x]) slabHi[x] = hi;
     }
-    for (let d = 0; d < 3; d++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (let d = 0; d < 3; d++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
       const u = (d + 1) % 3, v = (d + 2) % 3;
       const nd = dims[d], nu = dims[u], nv = dims[v];
       const sd = strides[d], su = strides[u], sv = strides[v];
-      for (let k = 0; k <= nd; k++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+      for (let k = 0; k <= nd; k++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
         // Faces between cells k-1 and k along axis d.
         let i0 = nu, i1 = -1, j0 = nv, j1 = -1;
         const rooms = d === 1 ? floorsByRow.get(k) || NO_ROOMS : floorDetails;
@@ -164,22 +164,22 @@
         };
         if (d === 2) {
           // Rows run along z: one cell per row, in memory order.
-          for (let x = 0; x < sx; x++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } if (slabLo[x] <= k && slabHi[x] >= k - 1) for (let y = 0; y < sy; y++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+          for (let x = 0; x < sx; x++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; } if (slabLo[x] <= k && slabHi[x] >= k - 1) for (let y = 0; y < sy; y++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
             const r = x * sy + y;
             if (rowLo[r] <= k && rowHi[r] >= k - 1) cell(x, y);
           } }
         } else {
           // The two rows either side of the slice, over their joint solid span.
           const count = d === 0 ? sy : sx;
-          for (let m = 0; m < count; m++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+          for (let m = 0; m < count; m++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
             const near = d === 0 ? k * sy + m : m * sy + k, far = d === 0 ? near - sy : near - 1;
             const lo = Math.min(k < nd ? rowLo[near] : sz, k > 0 ? rowLo[far] : sz), hi = Math.max(k < nd ? rowHi[near] : -1, k > 0 ? rowHi[far] : -1);
-            for (let z = lo; z <= hi; z++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } if (d === 0) cell(m, z); else cell(z, m); }
+            for (let z = lo; z <= hi; z++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; } if (d === 0) cell(m, z); else cell(z, m); }
           }
         }
-        for (let j = j0; j <= j1; j++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+        for (let j = j0; j <= j1; j++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
           let n = j * nu + i0;
-          for (let i = i0; i <= i1;) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+          for (let i = i0; i <= i1;) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
             const c = mask[n];
             if (!c) {
               i++;
@@ -196,17 +196,17 @@
             // either renderer instead of approximating it with a rectangle.
             const span = pathKey || windowKey ? 1 : c & FLOOR_DETAIL_BIT ? Math.max(1, Math.round(1 / unit)) : Infinity;
             let w = 1;
-            while (w < span && i + w < nu && mask[n + w] === c && (!pathMask || pathMask[n + w] === pathKey)) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } w++; }
+            while (w < span && i + w < nu && mask[n + w] === c && (!pathMask || pathMask[n + w] === pathKey)) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; } w++; }
             let h = 1;
-            for (; h < span && j + h < nv; h++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+            for (; h < span && j + h < nv; h++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
               let same = true;
-              for (let x = 0; x < w && same; x++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } same = mask[n + x + h * nu] === c && (!pathMask || pathMask[n + x + h * nu] === pathKey); }
+              for (let x = 0; x < w && same; x++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; } same = mask[n + x + h * nu] === c && (!pathMask || pathMask[n + x + h * nu] === pathKey); }
               if (!same) break;
             }
             // (d, u, v) is cyclic, so this vertex order faces +d.
             const c0 = at(d, k, u, i, v, j), c1 = at(d, k, u, i + w, v, j), c2 = at(d, k, u, i + w, v, j + h), c3 = at(d, k, u, i, v, j + h);
             geo.faces.push({ i: c & DIR_BIT ? [c0, c1, c2, c3] : [c0, c3, c2, c1], color: palette[c & 0xff], emissive: 0, matrixCave: (c & ~FLOOR_DETAIL_BIT) >> 9, matrixLocalGlyphSurface: ((c & ~FLOOR_DETAIL_BIT) >> 9) !== 0, cutawayPathKey: pathKey, cutawayPathBottom: pathBottom, cutawayWindowMask: windowKey, cutawayWindowColumn: windowColumn });
-            for (let y = 0; y < h; y++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+            for (let y = 0; y < h; y++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
               mask.fill(0, n + y * nu, n + y * nu + w);
               if (pathMask) pathMask.fill(0, n + y * nu, n + y * nu + w);
               if (windowMask) { windowMask.fill(0, n + y * nu, n + y * nu + w); windowColumnMask.fill(0, n + y * nu, n + y * nu + w); }
@@ -225,32 +225,32 @@
   const compactCaveLabelsSteps = function* (labels, geometry, grid, unit, origin, slice = null) {
     if (slice && !slice.until) { slice.work = 0; slice.until = performance.now() + slice.budget; }
     const extents = new Int32Array(8 * 6), regions = [];
-    for (let cave = 0; cave < 8; cave++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (let cave = 0; cave < 8; cave++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
       const at = cave * 6;
       extents[at] = grid.sx; extents[at + 1] = grid.sy; extents[at + 2] = grid.sz;
       extents[at + 3] = extents[at + 4] = extents[at + 5] = -1;
     }
     const v = geometry.verts;
-    for (const face of geometry.faces) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (const face of geometry.faces) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
       const cave = face.matrixCave || 0;
       if (cave < 1 || cave > 8) continue;
       const at = (cave - 1) * 6;
-      for (const vertex of face.i) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+      for (const vertex of face.i) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
         const n = vertex * 3, x = Math.floor((v[n] - origin.x) / unit), y = Math.floor((v[n + 1] - origin.y) / unit), z = Math.floor((v[n + 2] - origin.z) / unit);
         extents[at] = Math.min(extents[at], x); extents[at + 1] = Math.min(extents[at + 1], y); extents[at + 2] = Math.min(extents[at + 2], z);
         extents[at + 3] = Math.max(extents[at + 3], x); extents[at + 4] = Math.max(extents[at + 4], y); extents[at + 5] = Math.max(extents[at + 5], z);
       }
     }
     let bytes = 0;
-    for (let cave = 0; cave < 8; cave++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (let cave = 0; cave < 8; cave++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
       const at = cave * 6;
       if (extents[at + 3] < 0) continue;
       const x = Math.max(0, extents[at] - 1), y = Math.max(0, extents[at + 1] - 1), z = Math.max(0, extents[at + 2] - 1);
       const sx = Math.min(grid.sx, extents[at + 3] + 2) - x, sy = Math.min(grid.sy, extents[at + 4] + 2) - y, sz = Math.min(grid.sz, extents[at + 5] + 2) - z;
       const data = new Uint8Array(sx * sy * sz);
-      for (let dx = 0; dx < sx; dx++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } for (let dy = 0; dy < sy; dy++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+      for (let dx = 0; dx < sx; dx++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } for (let dy = 0; dy < sy; dy++) {
         const source = ((x + dx) * grid.sy + y + dy) * grid.sz + z, target = (dx * sy + dy) * sz;
-        for (let dz = 0; dz < sz; dz++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+        for (let dz = 0; dz < sz; dz++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
           const label = labels[source + dz];
           if (label > 0 && label <= 8) data[target + dz] = label;
         }
@@ -627,15 +627,15 @@
       surfaces[i] = surface;
       bottoms[i] = Math.max(0, SURFACE - 1 - Math.floor(depth / UNIT));
     };
-    for (let gx = 0; gx < SX; gx++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (let gx = 0; gx < SX; gx++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
       const wx = (gx + 0.5) * UNIT + ORIGIN.x;
-      for (let gz = 0; gz < SZ; gz++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } shapeColumn(gx, gz, wx); }
+      for (let gz = 0; gz < SZ; gz++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; } shapeColumn(gx, gz, wx); }
     }
     const row = (j) => tops[j] === NONE ? -1 : SURFACE - 1 + Math.round(tops[j] / UNIT);
     const { data } = grid;
-    for (let gx = 0; gx < SX; gx++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (let gx = 0; gx < SX; gx++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
       const wx = (gx + 0.5) * UNIT + ORIGIN.x;
-      for (let gz = 0; gz < SZ; gz++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+      for (let gz = 0; gz < SZ; gz++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
         const i = gx * SZ + gz;
         const top = tops[i];
         if (top === NONE) continue;
@@ -645,7 +645,7 @@
         const edge = top > 0 && top - Math.min(tops[i - SZ], tops[i + SZ], tops[i - 1], tops[i + 1]) >= 1;
         const walled = Math.min(row(i - SZ), row(i + SZ), row(i - 1), row(i + 1));
         const column = (gx * SY) * SZ + gz;
-        for (let gy = bottoms[i]; gy <= gyTop; gy++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+        for (let gy = bottoms[i]; gy <= gyTop; gy++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
           data[column + gy * SZ] = gy === gyTop && !edge ? surfaces[i] : gy < SURFACE ? UNDER_BANDS[Math.floor((SURFACE - 1 - gy + band * 2) / 6) % 4] : gy <= walled && gy < gyTop ? P.stone : strata(wx, wz, gy);
         }
       }
@@ -679,7 +679,7 @@
         if (safe) { frame.room = { w, h: ROOM.h, from, to }; area = candidateArea; }
       }
     };
-    for (const frame of frames) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } if (frame.id !== "c730" && frame.id !== "c5") fitWorkRoom(frame); }
+    for (const frame of frames) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; } if (frame.id !== "c730" && frame.id !== "c5") fitWorkRoom(frame); }
     const carve = (f, caveIndex) => {
       const e = f.e, chamber = f.room || ROOM;
       const cx = f.x + f.ox * 4, cz = f.z + f.oz * 4;
@@ -719,7 +719,7 @@
         }
       }
     };
-    for (let i = 0; i < frames.length; i++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (let i = 0; i < frames.length; i++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
       if (frames[i].id !== "c730" && frames[i].id !== "c5") carve(frames[i], i + 1);
     }
     const headquartersRamps = headquartersFrames.map((f, i) => {
@@ -760,7 +760,7 @@
     }));
     // The two spare nooks open sideways off the window gallery, away from the
     // clear ramp landings. Their entrances face the gallery, not the island centre.
-    for (const side of [-1, 1]) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (const side of [-1, 1]) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
       const edge = side < 0 ? headquartersGallery.startAngle : headquartersGallery.endAngle, angle = edge + side * Math.PI / 2;
       const edgeRadius = 21.25, width = 7, depth = 6;
       const sx = Math.sin(angle), sz = -Math.cos(angle), edgeX = Math.sin(edge) * edgeRadius, edgeZ = -Math.cos(edge) * edgeRadius;
@@ -842,10 +842,10 @@
       return across < room.width / 2 && depth < room.depth / 2 && across + depth < (room.width + room.depth) / 2 - 0.55 || along > approach && along < -room.depth / 2 + 1.15 && across < (room.corridorWidth ?? room.width - 1.3) / 2;
     };
     // Stone tunnel walls keep their voxels; their walking surfaces are continuous slopes.
-    for (let ri = 0; ri < headquartersRamps.length; ri++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (let ri = 0; ri < headquartersRamps.length; ri++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
       const ramp = headquartersRamps[ri];
       let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
-      for (const sample of ramp.samples) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+      for (const sample of ramp.samples) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
         minX = Math.min(minX, sample.x - ramp.width / 2);
         maxX = Math.max(maxX, sample.x + ramp.width / 2);
         minZ = Math.min(minZ, sample.z - ramp.width / 2);
@@ -853,9 +853,9 @@
       }
       const gx0 = Math.max(0, Math.floor((minX - ORIGIN.x) / UNIT)), gx1 = Math.min(SX - 1, Math.ceil((maxX - ORIGIN.x) / UNIT));
       const gz0 = Math.max(0, Math.floor((minZ - ORIGIN.z) / UNIT)), gz1 = Math.min(SZ - 1, Math.ceil((maxZ - ORIGIN.z) / UNIT));
-      for (let gx = gx0; gx <= gx1; gx++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+      for (let gx = gx0; gx <= gx1; gx++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
         const wx = (gx + 0.5) * UNIT + ORIGIN.x;
-        for (let gz = gz0; gz <= gz1; gz++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+        for (let gz = gz0; gz <= gz1; gz++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
           const wz = (gz + 0.5) * UNIT + ORIGIN.z;
           sampleRamp(ramp, wx, wz, rampProbe);
           if (rampProbe.distance > ramp.width / 2 || (wx - ramp.from.x) * ramp.axis.x + (wz - ramp.from.z) * ramp.axis.z < -UNIT / 2) continue;
@@ -872,7 +872,7 @@
           carveHeadquartersColumn(gx, gz, Math.max(HEADQUARTERS_FLOOR - UNIT, Math.floor(floor / UNIT) * UNIT - UNIT), ceiling, false, ceilingMaterial);
           if (along > frame.e - 0.48 && along < ROOM.to && across < ROOM.w / 2) {
             const index = frames.indexOf(frame) + 1;
-            for (let gy = SURFACE + Math.floor(floor / UNIT) - 1; gy < SURFACE + Math.ceil((floor + 3.5) / UNIT); gy++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+            for (let gy = SURFACE + Math.floor(floor / UNIT) - 1; gy < SURFACE + Math.ceil((floor + 3.5) / UNIT); gy++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
               if (!grid.has(gx, gy, gz)) matrixCaves[grid.index(gx, gy, gz)] = index;
             }
           }
@@ -881,14 +881,14 @@
     }
     const roomGX0 = Math.floor((-RADIUS - ORIGIN.x) / UNIT), roomGX1 = Math.ceil((RADIUS - ORIGIN.x) / UNIT);
     const roomGZ0 = Math.floor((-RADIUS - ORIGIN.z) / UNIT), roomGZ1 = Math.ceil((RADIUS - ORIGIN.z) / UNIT);
-    for (let gx = roomGX0; gx <= roomGX1; gx++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (let gx = roomGX0; gx <= roomGX1; gx++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
       const wx = (gx + 0.5) * UNIT + ORIGIN.x;
-      for (let gz = roomGZ0; gz <= roomGZ1; gz++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+      for (let gz = roomGZ0; gz <= roomGZ1; gz++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
         const wz = (gz + 0.5) * UNIT + ORIGIN.z;
         const radius = Math.hypot(wx, wz), angle = Math.atan2(wx, -wz);
         let inside = radius < HEADQUARTERS_ROOM.radius || radius < headquartersGallery.radius && angle > headquartersGallery.startAngle && angle < headquartersGallery.endAngle;
-        for (const balcony of headquartersBalconies) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } if (tops[gx * SZ + gz] !== NONE && radius < balcony.radius && insideBalcony(balcony, radius, angle)) inside = true; }
-        for (const room of headquartersRooms) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+        for (const balcony of headquartersBalconies) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; } if (tops[gx * SZ + gz] !== NONE && radius < balcony.radius && insideBalcony(balcony, radius, angle)) inside = true; }
+        for (const room of headquartersRooms) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
           if (insideRoom(room, wx, wz)) inside = true;
         }
         if (!inside) continue;
@@ -902,49 +902,49 @@
         carveHeadquartersColumn(gx, gz, HEADQUARTERS_FLOOR, HEADQUARTERS_CEILING);
       }
     }
-    for (const balcony of headquartersBalconies) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } carveBalconyOpening(balcony); }
+    for (const balcony of headquartersBalconies) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; } carveBalconyOpening(balcony); }
     let rampGeometry = { verts: [], faces: [], lines: [] };
-    for (let gx = 0; gx <= SX; gx++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
-      for (let gz = 0; gz <= SZ; gz++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (let gx = 0; gx <= SX; gx++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
+      for (let gz = 0; gz <= SZ; gz++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
         const ri = (gx < SX && gz < SZ && rampCells[gx * SZ + gz]) || (gx > 0 && gz < SZ && rampCells[(gx - 1) * SZ + gz]) || (gx < SX && gz > 0 && rampCells[gx * SZ + gz - 1]) || (gx > 0 && gz > 0 && rampCells[(gx - 1) * SZ + gz - 1]);
         if (!ri) continue;
         sampleRamp(headquartersRamps[ri - 1], gx * UNIT + ORIGIN.x, gz * UNIT + ORIGIN.z, rampProbe);
         rampHeights[gx * (SZ + 1) + gz] = rampProbe.floor;
       }
     }
-    for (let gx = 0; gx < SX; gx++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
-      for (let gz = 0; gz < SZ; gz++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (let gx = 0; gx < SX; gx++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
+      for (let gz = 0; gz < SZ; gz++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
         if (!rampCells[gx * SZ + gz]) continue;
         const wx = gx * UNIT + ORIGIN.x, wz = gz * UNIT + ORIGIN.z, v = rampGeometry.verts.length / 3, i = gx * (SZ + 1) + gz;
         const ramp = headquartersRamps[rampCells[gx * SZ + gz] - 1];
         const corners = [[wx, rampHeights[i], wz], [wx, rampHeights[i + 1], wz + UNIT], [wx + UNIT, rampHeights[i + SZ + 2], wz + UNIT], [wx + UNIT, rampHeights[i + SZ + 1], wz]], clipped = [];
-        for (let n = 0; n < 4; n++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+        for (let n = 0; n < 4; n++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
           const a = corners[n], b = corners[(n + 1) % 4];
           const da = (a[0] - ramp.from.x) * ramp.axis.x + (a[2] - ramp.from.z) * ramp.axis.z, db = (b[0] - ramp.from.x) * ramp.axis.x + (b[2] - ramp.from.z) * ramp.axis.z;
           if (da >= 0) clipped.push(a);
           if ((da < 0) !== (db < 0)) { const t = da / (da - db); clipped.push([a[0] + (b[0] - a[0]) * t, 0, a[2] + (b[2] - a[2]) * t]); }
         }
         if (clipped.length < 3) continue;
-        for (const p of clipped) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } rampGeometry.verts.push(...p); }
+        for (const p of clipped) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; } rampGeometry.verts.push(...p); }
         const frame = headquartersFrames[rampCells[gx * SZ + gz] - 1], dx = wx + UNIT / 2 - frame.x, dz = wz + UNIT / 2 - frame.z;
         const along = dx * frame.ox + dz * frame.oz, across = Math.abs(dz * frame.ox - dx * frame.oz);
         const cave = along > frame.e - 0.48 && along < ROOM.to && across < ROOM.w / 2 ? frames.indexOf(frame) + 1 : 0;
         // Curving slopes are not coplanar quads: glyphs and collision use the renderer's exact triangles, including
         // the clipped doorway boundary.
         rampCollision[gx * SZ + gz] = (rampGeometry.faces.length << 2) | (clipped.length - 2);
-        for (let n = 1; n < clipped.length - 1; n++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } rampGeometry.faces.push({ i: [v, v + n, v + n + 1], color: PALETTE[(Math.floor(gx / 4) + Math.floor(gz / 4)) % 5 === 0 ? P.stoneDark : P.floor], emissive: 0, headquartersRamp: true, matrixCave: cave, matrixWorldGlyphSurface: cave !== 0 }); }
+        for (let n = 1; n < clipped.length - 1; n++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; } rampGeometry.faces.push({ i: [v, v + n, v + n + 1], color: PALETTE[(Math.floor(gx / 4) + Math.floor(gz / 4)) % 5 === 0 ? P.stoneDark : P.floor], emissive: 0, headquartersRamp: true, matrixCave: cave, matrixWorldGlyphSurface: cave !== 0 }); }
       }
     }
     // The curved ramp tops are separate from their stepped voxel supports.
     // Close exposed boundary edges so balcony cuts cannot reveal that seam.
-    for (let gx = 0; gx < SX; gx++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } for (let gz = 0; gz < SZ; gz++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (let gx = 0; gx < SX; gx++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } for (let gz = 0; gz < SZ; gz++) {
       const cell = gx * SZ + gz, ri = rampCells[cell];
       if (!ri) continue;
       const x = gx * UNIT + ORIGIN.x, z = gz * UNIT + ORIGIN.z, i = gx * (SZ + 1) + gz;
       const corners = [[x, rampHeights[i], z], [x, rampHeights[i + 1], z + UNIT], [x + UNIT, rampHeights[i + SZ + 2], z + UNIT], [x + UNIT, rampHeights[i + SZ + 1], z]];
       const base = (((lowerCavities[cell] >> 4) & 63) - 32) * UNIT;
       const neighbors = [gx ? rampCells[cell - SZ] : 0, gz + 1 < SZ ? rampCells[cell + 1] : 0, gx + 1 < SX ? rampCells[cell + SZ] : 0, gz ? rampCells[cell - 1] : 0];
-      for (let edge = 0; edge < 4; edge++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+      for (let edge = 0; edge < 4; edge++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
         if (neighbors[edge] === ri) continue;
         const a = corners[edge], b = corners[(edge + 1) % 4];
         if (a[1] <= base + 1e-7 && b[1] <= base + 1e-7) continue;
@@ -993,15 +993,15 @@
       const dz = (Math.floor((z - ORIGIN.z) / UNIT) + 0.5) * UNIT + ORIGIN.z - basementHole.z;
       return dx * dx + dz * dz < basementHole.radius * basementHole.radius;
     };
-    for (const [index, degrees] of [-50, -30, -10, 10, 30, 50, 146, 169, 191, 214].entries()) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (const [index, degrees] of [-50, -30, -10, 10, 30, 50, 146, 169, 191, 214].entries()) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
       const angle = degrees * Math.PI / 180, sx = Math.sin(angle), sz = -Math.cos(angle), radius = 18, width = Math.abs(degrees) <= 50 ? 5.5 : 5, depth = 5;
       basement.rooms.push({ index, basement: true, angle, radius, width, depth, corridorWidth: 2.6, height: HEADQUARTERS_HEIGHT, window: true, x: sx * radius, z: sz * radius, approach: { x: sx * 8.25, z: sz * 8.25 }, entrance: { x: sx * 9.25, z: sz * 9.25 }, back: { x: sx * (radius + depth / 2 - 0.2), z: sz * (radius + depth / 2 - 0.2) } });
     }
-    for (const [index, degrees, mainId] of [[1, 130, "c5"], [7, 230, "c730"]]) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (const [index, degrees, mainId] of [[1, 130, "c5"], [7, 230, "c730"]]) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
       const angle = degrees * Math.PI / 180, ramp = buildBasementRoute(headquartersRamps.find((entry) => entry.id === mainId), angle);
       ramp.basement = true; ramp.index = index; ramp.angle = angle;
       ramp.entrance = { x: Math.sin(angle) * 14.5, y: HEADQUARTERS_FLOOR, z: -Math.cos(angle) * 14.5 };
-      for (const sample of ramp.samples) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } sample.y = HEADQUARTERS_FLOOR; }
+      for (const sample of ramp.samples) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; } sample.y = HEADQUARTERS_FLOOR; }
       basement.ramps.push(ramp);
     }
     // Shallowest shared level comes from the full lower footprint, measured from the bottom of the actual upper
@@ -1014,12 +1014,12 @@
       }
       return bounds;
     });
-    for (let gx = 0; gx < SX; gx++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } for (let gz = 0; gz < SZ; gz++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (let gx = 0; gx < SX; gx++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } for (let gz = 0; gz < SZ; gz++) {
       const x = (gx + 0.5) * UNIT + ORIGIN.x, z = (gz + 0.5) * UNIT + ORIGIN.z, i = gx * SZ + gz;
       let inside = Math.hypot(x, z) < basement.room.radius;
-      for (const room of basement.rooms) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } if (insideRoom(room, x, z)) inside = true; }
+      for (const room of basement.rooms) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; } if (insideRoom(room, x, z)) inside = true; }
       if (inside) basementCells[i] = 3;
-      else for (let ri = 0; ri < basement.ramps.length; ri++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+      else for (let ri = 0; ri < basement.ramps.length; ri++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
         const ramp = basement.ramps[ri], bounds = basementRampBounds[ri];
         if (x < bounds.minX || x > bounds.maxX || z < bounds.minZ || z > bounds.maxZ) continue;
         sampleRamp(ramp, x, z, rampProbe);
@@ -1033,7 +1033,7 @@
     basement.floor = Math.floor(basement.floor / UNIT) * UNIT;
     basement.ceiling = basement.floor + HEADQUARTERS_HEIGHT;
     basementHole.floor = basement.floor;
-    for (const room of basement.rooms) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }  room.floor = basement.floor; room.ceiling = basement.ceiling; }
+    for (const room of basement.rooms) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }  room.floor = basement.floor; room.ceiling = basement.ceiling; }
     // Ease the grade at the ends, then solve each ramp's descent length; the starting doorway is a connection,
     // not two stacked rooms.
     const descentAt = (station, length) => {
@@ -1042,32 +1042,32 @@
       if (station >= length) return 1;
       return (station < ease ? station * station / (2 * ease) : station > length - ease ? length - ease - (length - station) * (length - station) / (2 * ease) : station - ease / 2) / (length - ease);
     };
-    for (let ri = 0; ri < basement.ramps.length; ri++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (let ri = 0; ri < basement.ramps.length; ri++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
       const ramp = basement.ramps[ri], constraints = [];
-      for (let gx = 0; gx < SX; gx++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } for (let gz = 0; gz < SZ; gz++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+      for (let gx = 0; gx < SX; gx++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } for (let gz = 0; gz < SZ; gz++) {
         const i = gx * SZ + gz;
         if (basementCells[i] !== ri + 1 || !lowerCavities[i]) continue;
         const x = gx * UNIT + ORIGIN.x, z = gz * UNIT + ORIGIN.z;
         let station = Infinity;
-        for (const [dx, dz] of [[0, 0], [UNIT, 0], [0, UNIT], [UNIT, UNIT]]) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+        for (const [dx, dz] of [[0, 0], [UNIT, 0], [0, UNIT], [UNIT, UNIT]]) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
           sampleRamp(ramp, x + dx, z + dz, rampProbe);
           station = Math.min(station, rampProbe.station);
         }
         if (station < 1) continue;
         const floor = (((lowerCavities[i] >> 4) & 63) - 32) * UNIT;
         let sample = 1;
-        while (sample < ramp.samples.length - 1 && ramp.samples[sample].s < station) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } sample++; }
+        while (sample < ramp.samples.length - 1 && ramp.samples[sample].s < station) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; } sample++; }
         const a = ramp.samples[sample - 1].s, b = ramp.samples[sample].s;
         constraints.push({ a, b, t: (station - a) / (b - a), ceiling: floor - UNIT - HEADQUARTERS_ROCK });
       } }
       let lo = 1, hi = ramp.length;
-      for (let n = 0; n < 24; n++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+      for (let n = 0; n < 24; n++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
         const length = (lo + hi) / 2;
         const clear = constraints.every((p) => HEADQUARTERS_FLOOR + (basement.floor - HEADQUARTERS_FLOOR) * (descentAt(p.a, length) * (1 - p.t) + descentAt(p.b, length) * p.t) + HEADQUARTERS_HEIGHT <= p.ceiling);
         if (clear) lo = length; else hi = length;
       }
       ramp.descentLength = lo;
-      for (const sample of ramp.samples) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } sample.y = HEADQUARTERS_FLOOR + (basement.floor - HEADQUARTERS_FLOOR) * descentAt(sample.s, lo); }
+      for (const sample of ramp.samples) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; } sample.y = HEADQUARTERS_FLOOR + (basement.floor - HEADQUARTERS_FLOOR) * descentAt(sample.s, lo); }
       sampleRamp(ramp, ramp.entrance.x, ramp.entrance.z, rampProbe);
       ramp.entrance.y = rampProbe.floor;
     }
@@ -1090,17 +1090,17 @@
     });
     basement.connectors = [];
     const basementRoutes = basement.ramps, basementCommon = 3;
-    for (let gx = 0; gx < SX; gx++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (let gx = 0; gx < SX; gx++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
       const x = (gx + 0.5) * UNIT + ORIGIN.x;
-      for (let gz = 0; gz < SZ; gz++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+      for (let gz = 0; gz < SZ; gz++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
         const z = (gz + 0.5) * UNIT + ORIGIN.z, cell = gx * SZ + gz, radius = Math.hypot(x, z), angle = Math.atan2(x, -z);
-        for (const balcony of basement.balconies) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } if (tops[cell] !== NONE && radius < balcony.radius && insideBalcony(balcony, radius, angle)) basementCells[cell] = basementCommon; }
+        for (const balcony of basement.balconies) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; } if (tops[cell] !== NONE && radius < balcony.radius && insideBalcony(balcony, radius, angle)) basementCells[cell] = basementCommon; }
       }
     }
     // Slopes use the same two triangles per voxel as their support queries.
-    for (let gx = 0; gx <= SX; gx++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } for (let gz = 0; gz <= SZ; gz++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (let gx = 0; gx <= SX; gx++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } for (let gz = 0; gz <= SZ; gz++) {
       let ri = 0;
-      for (let dx = -1; dx <= 0; dx++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } for (let dz = -1; dz <= 0; dz++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+      for (let dx = -1; dx <= 0; dx++) { for (let dz = -1; dz <= 0; dz++) {
         const x = gx + dx, z = gz + dz, cell = x >= 0 && z >= 0 && x < SX && z < SZ ? basementCells[x * SZ + z] : 0;
         if (cell && cell < basementCommon) ri = cell;
       } }
@@ -1108,7 +1108,7 @@
       sampleRamp(basementRoutes[ri - 1], gx * UNIT + ORIGIN.x, gz * UNIT + ORIGIN.z, rampProbe);
       basementHeights[gx * (SZ + 1) + gz] = rampProbe.floor;
     } }
-    for (let gx = 0; gx < SX; gx++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } for (let gz = 0; gz < SZ; gz++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (let gx = 0; gx < SX; gx++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } for (let gz = 0; gz < SZ; gz++) {
       const cell = gx * SZ + gz, ri = basementCells[cell];
       if (!ri) continue;
       const x = gx * UNIT + ORIGIN.x, z = gz * UNIT + ORIGIN.z, i = gx * (SZ + 1) + gz;
@@ -1130,7 +1130,7 @@
     // The wider openings expose the outer edge of each lower ramp. Continue
     // its visible sides down to the carved support instead of leaving slivers
     // of sky between the smooth ramp and its stepped voxel base.
-    for (let gx = 0; gx < SX; gx++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } for (let gz = 0; gz < SZ; gz++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (let gx = 0; gx < SX; gx++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } for (let gz = 0; gz < SZ; gz++) {
       const cell = gx * SZ + gz, ri = basementCells[cell];
       if (!ri || ri >= basementCommon) continue;
       const x = gx * UNIT + ORIGIN.x, z = gz * UNIT + ORIGIN.z, i = gx * (SZ + 1) + gz;
@@ -1139,7 +1139,7 @@
       const cutawayFloorChannel = ri + 1;
       const cutawayFloorStation = 1 + Math.round(clamp(basementStations[cell] / basementRoutes[ri - 1].length, 0, 1) * 254);
       const neighbors = [gx ? basementCells[cell - SZ] : 0, gz + 1 < SZ ? basementCells[cell + 1] : 0, gx + 1 < SX ? basementCells[cell + SZ] : 0, gz ? basementCells[cell - 1] : 0];
-      for (let edge = 0; edge < 4; edge++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+      for (let edge = 0; edge < 4; edge++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
         if (neighbors[edge] === ri) continue;
         const a = corners[edge], b = corners[(edge + 1) % 4];
         if (a[1] <= base + 1e-7 && b[1] <= base + 1e-7) continue;
@@ -1148,20 +1148,20 @@
         rampGeometry.faces.push({ i: [v, v + 1, v + 2, v + 3], color: PALETTE[P.stoneDark], emissive: 0, headquartersBasementRampSkirt: ri, cutawayFloorChannel, cutawayFloorStation });
       }
     } }
-    for (const balcony of basement.balconies) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } carveBalconyOpening(balcony); }
+    for (const balcony of basement.balconies) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; } carveBalconyOpening(balcony); }
     // Central shaft opens through the underside leaving a broad walking ring; two shallow voxel steps bevel its
     // mouth, and render faces and footing use those same cells, with no decorative collision lip.
     const holeGX0 = Math.floor((basementHole.x - basementHole.mouthRadius - UNIT - ORIGIN.x) / UNIT), holeGX1 = Math.ceil((basementHole.x + basementHole.mouthRadius + UNIT - ORIGIN.x) / UNIT);
     const holeGZ0 = Math.floor((basementHole.z - basementHole.mouthRadius - UNIT - ORIGIN.z) / UNIT), holeGZ1 = Math.ceil((basementHole.z + basementHole.mouthRadius + UNIT - ORIGIN.z) / UNIT);
     const basementFloorGy = SURFACE + Math.round(basement.floor / UNIT) - 1;
-    for (let gx = holeGX0; gx <= holeGX1; gx++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } for (let gz = holeGZ0; gz <= holeGZ1; gz++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (let gx = holeGX0; gx <= holeGX1; gx++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } for (let gz = holeGZ0; gz <= holeGZ1; gz++) {
       const x = (gx + 0.5) * UNIT + ORIGIN.x, z = (gz + 0.5) * UNIT + ORIGIN.z, radius = Math.hypot(x - basementHole.x, z - basementHole.z);
       if (radius >= basementHole.mouthRadius + UNIT) continue;
       if (radius >= basementHole.mouthRadius) { grid.set(gx, basementFloorGy, gz, P.stoneDark); continue; }
       const shaft = radius < basementHole.radius;
       const floor = basement.floor - Math.min(basementHole.rimDepth, Math.ceil((basementHole.mouthRadius - radius) / UNIT) * UNIT);
       const bottomGy = shaft ? 0 : SURFACE + Math.round(floor / UNIT);
-      for (let gy = bottomGy; gy <= basementFloorGy; gy++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } grid.set(gx, gy, gz, 0); }
+      for (let gy = bottomGy; gy <= basementFloorGy; gy++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; } grid.set(gx, gy, gz, 0); }
       if (!shaft) {
         grid.set(gx, bottomGy - 1, gz, P.stoneDark);
         basementCavities[gx * SZ + gz] = encodeCavity(HEADQUARTERS_CAVE, floor, basement.ceiling, 64);
@@ -1169,18 +1169,18 @@
     } }
     // Window openings cut through the cliff, with solid stone below each sill.
     const headquartersWindows = [];
-    for (let rampIndex = 0; rampIndex < headquartersRamps.length; rampIndex++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (let rampIndex = 0; rampIndex < headquartersRamps.length; rampIndex++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
       const ramp = headquartersRamps[rampIndex];
-      for (const sampleIndex of [18, 30, 43]) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+      for (const sampleIndex of [18, 30, 43]) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
         const sample = ramp.samples[sampleIndex], angle = Math.atan2(sample.x, -sample.z);
         headquartersWindows.push({ kind: "ramp", cutawayChannel: rampIndex, cutawayStation: sample.s,
           cutawayCeiling: Math.ceil((sample.y + 3.5) / UNIT) * UNIT,
           x: sample.x, z: sample.z, floor: sample.y, y: sample.y + 2, sill: Math.ceil((sample.y + 1.05) / UNIT) * UNIT, angle, width: 3, height: 1.75 });
       }
     }
-    for (let routeIndex = 0; routeIndex < basement.ramps.length; routeIndex++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (let routeIndex = 0; routeIndex < basement.ramps.length; routeIndex++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
       const ramp = basement.ramps[routeIndex];
-      for (const sampleIndex of [42, 56, 72]) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+      for (const sampleIndex of [42, 56, 72]) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
         const sample = ramp.samples[sampleIndex], angle = Math.atan2(sample.x, -sample.z), sill = Math.ceil((sample.y + 1.15) / UNIT) * UNIT, height = 1.75;
         headquartersWindows.push({ kind: "ramp", basement: true, rampIndex: ramp.index, sampleIndex, station: sample.s,
           cutawayChannel: routeIndex + 2, cutawayStation: sample.s,
@@ -1188,7 +1188,7 @@
           x: sample.x, z: sample.z, floor: sample.y, y: sill + height / 2, sill, angle, width: 3, height });
       }
     }
-    for (const room of [...headquartersRooms, ...basement.rooms]) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (const room of [...headquartersRooms, ...basement.rooms]) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
       if (!room.window) continue;
       const sill = room.floor + 1, height = 2, at = room.windowAt || room.back;
       headquartersWindows.push({ kind: "room", roomIndex: room.index, basement: !!room.basement, x: at.x, z: at.z, floor: room.floor, y: sill + height / 2, sill, angle: room.windowAngle ?? room.angle, width: 3.5, height });
@@ -1201,22 +1201,22 @@
     const birdseyeWindowMask = new Uint8Array(SX * SZ), birdseyeWindowTops = new Float32Array(SX * SZ * 2).fill(-Infinity);
     const windowSightIds = new Map(), windowSightExact = new Map(), windowSightValues = [], windowSightIndices = [];
     const windowFlareWidth = 2, windowFlareHeight = 1.3;
-    for (const [index, window] of headquartersWindows.entries()) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (const [index, window] of headquartersWindows.entries()) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
       const sx = Math.sin(window.angle), sz = -Math.cos(window.angle), start = Math.hypot(window.x, window.z);
       window.index = index;
       window.outer = { x: sx * 31, z: sz * 31 };
       let edge = start + UNIT;
       // Size the flare against this window's actual shell including top and bottom edges, not the island's nominal
       // maximum radius.
-      for (let radius = start; radius <= 31; radius += UNIT / 2) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } for (let y = window.sill - windowFlareHeight; y <= window.sill + window.height + windowFlareHeight; y += UNIT) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+      for (let radius = start; radius <= 31; radius += UNIT / 2) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } for (let y = window.sill - windowFlareHeight; y <= window.sill + window.height + windowFlareHeight; y += UNIT) {
         if (grid.has(Math.floor((sx * radius - ORIGIN.x) / UNIT), Math.floor((y - ORIGIN.y) / UNIT), Math.floor((sz * radius - ORIGIN.z) / UNIT))) edge = radius + UNIT;
       } }
       let innerRadius = start;
       if (window.kind === "ramp") {
         // Window marker sits on the ramp centerline; keep its rectangular opening unchanged through the corridor,
         // then flare past the real voxel wall at every corner of that opening.
-        for (let across = -window.width / 2; across <= window.width / 2 + 1e-7; across += UNIT / 2) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } for (const y of [window.sill + 0.025, window.y, window.sill + window.height - 0.025]) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
-          for (let radius = start; radius <= edge; radius += UNIT / 4) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+        for (let across = -window.width / 2; across <= window.width / 2 + 1e-7; across += UNIT / 2) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } for (const y of [window.sill + 0.025, window.y, window.sill + window.height - 0.025]) {
+          for (let radius = start; radius <= edge; radius += UNIT / 4) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
             const x = sx * radius - sz * across, z = sz * radius + sx * across;
             if (!grid.has(Math.floor((x - ORIGIN.x) / UNIT), Math.floor((y - ORIGIN.y) / UNIT), Math.floor((z - ORIGIN.z) / UNIT))) continue;
             innerRadius = Math.max(innerRadius, radius + UNIT * Math.SQRT2 / 2);
@@ -1228,7 +1228,7 @@
     }
     // Keep rock between neighbouring mouths and stacked levels: the inner frame is fixed, only the exterior
     // reveal widens.
-    for (let i = 0; i < headquartersWindows.length; i++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } for (let j = i + 1; j < headquartersWindows.length; j++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (let i = 0; i < headquartersWindows.length; i++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } for (let j = i + 1; j < headquartersWindows.length; j++) {
       const a = headquartersWindows[i], b = headquartersWindows[j], radius = Math.min(a.flare.edge, b.flare.edge);
       const angle = Math.abs(Math.atan2(Math.sin(a.angle - b.angle), Math.cos(a.angle - b.angle)));
       const aw = a.kind === "panorama" ? radius * (a.endAngle - a.startAngle) : a.width;
@@ -1297,9 +1297,9 @@
         else windowCuts.delete(id);
       }
     };
-    for (const window of headquartersWindows) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (const window of headquartersWindows) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
       const segments = window.kind === "panorama" ? 12 : 2;
-      for (let segment = 0; segment < segments; segment++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+      for (let segment = 0; segment < segments; segment++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
         const span = window.kind === "panorama" ? (window.endAngle - window.startAngle) / segments : 0;
         const inner = window.kind !== "panorama" && segment === 1;
         const angle = span ? window.startAngle + span * (segment + 0.5) : window.angle;
@@ -1324,7 +1324,7 @@
         const minZ = Math.min((start - UNIT) * sz, (end + UNIT) * sz) - spanZ, maxZ = Math.max((start - UNIT) * sz, (end + UNIT) * sz) + spanZ;
         const gx0 = Math.max(0, Math.floor((minX - ORIGIN.x) / UNIT) - 2), gx1 = Math.min(SX - 1, Math.ceil((maxX - ORIGIN.x) / UNIT) + 1);
         const gz0 = Math.max(0, Math.floor((minZ - ORIGIN.z) / UNIT) - 2), gz1 = Math.min(SZ - 1, Math.ceil((maxZ - ORIGIN.z) / UNIT) + 1);
-        for (let gx = gx0; gx <= gx1; gx++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } for (let gz = gz0; gz <= gz1; gz++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+        for (let gx = gx0; gx <= gx1; gx++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } for (let gz = gz0; gz <= gz1; gz++) {
           const x = gx * UNIT + ORIGIN.x, z = gz * UNIT + ORIGIN.z, cx = x + UNIT / 2, cz = z + UNIT / 2;
           if (cx * sx + cz * sz < start - UNIT || cx * sx + cz * sz > end + UNIT || Math.abs(cx * tx + cz * tz) > half + horizontal * (end - start) + UNIT) continue;
           cutColumn(window, planes, lower, upper, gx, gz, x, z, cx, cz);
@@ -1427,14 +1427,14 @@
       windowFragmentCount++;
     };
     const fragmentPool = { vertices: [], triangles: [], pieces: [] };
-    for (const cut of windowCuts.values()) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (const cut of windowCuts.values()) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
       const column = cut.gx * SZ + cut.gz;
       if (!windowColumns[column]) windowColumns[column] = [];
-      for (const polygons of cut.fragments) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } addFragment(cut, polygons, column, windowGeometry, fragmentPool); }
+      for (const polygons of cut.fragments) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; } addFragment(cut, polygons, column, windowGeometry, fragmentPool); }
     }
     // Pieces view one shared vertex and index buffer instead of each owning two small allocations.
     const vertexPool = new Float64Array(fragmentPool.vertices), trianglePool = new Uint16Array(fragmentPool.triangles), pieces = fragmentPool.pieces;
-    for (let n = 0; n < pieces.length; n += 5) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (let n = 0; n < pieces.length; n += 5) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
       pieces[n].vertices = vertexPool.subarray(pieces[n + 1], pieces[n + 2]);
       pieces[n].triangles.i = trianglePool.subarray(pieces[n + 3], pieces[n + 4]);
     }
@@ -1446,18 +1446,18 @@
     // Walkable height is the lowest run's top.
     const surface = new Float32Array(SX * SZ);
     const land = new Uint8Array(SX * SZ);
-    for (let gx = 0; gx < SX; gx++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
-      for (let gz = 0; gz < SZ; gz++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (let gx = 0; gx < SX; gx++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
+      for (let gz = 0; gz < SZ; gz++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
         const column = (gx * SY) * SZ + gz;
         let gy = 0;
-        while (gy < SY && !data[column + gy * SZ]) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } gy++; }
+        while (gy < SY && !data[column + gy * SZ]) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; } gy++; }
         if (gy === SY) continue;
-        while (gy < SY && data[column + gy * SZ]) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } gy++; }
+        while (gy < SY && data[column + gy * SZ]) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; } gy++; }
         const i = gx * SZ + gz;
         height[i] = (gy - SURFACE) * UNIT;
         land[i] = 1;
         let top = SY;
-        while (top > gy && !data[column + (top - 1) * SZ]) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } top--; }
+        while (top > gy && !data[column + (top - 1) * SZ]) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; } top--; }
         surface[i] = (top - SURFACE) * UNIT;
       }
     }
@@ -1793,22 +1793,22 @@
     const masterList = [];
     // Meet the nearer end of each frontage along its own tangent, keeping the doorway clear; rasterize these
     // fixed curves once, the ring only clips them.
-    for (const front of headquartersFronts) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (const front of headquartersFronts) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
       const side = front.center.x * front.tangent.x + front.center.z * front.tangent.z > 0 ? -1 : 1;
       const end = { x: front.center.x + front.tangent.x * side * (front.halfLength - 1), z: front.center.z + front.tangent.z * side * (front.halfLength - 1) };
       const radius = Math.hypot(end.x, end.z), start = { x: end.x * MASTER_PATH_CENTER / radius, z: end.z * MASTER_PATH_CENTER / radius };
       const bend = { x: end.x + front.tangent.x * side * 4, z: end.z + front.tangent.z * side * 4 };
       const control = { x: start.x + (bend.x - start.x) * 0.48 - end.z / radius * side * 0.9, z: start.z + (bend.z - start.z) * 0.48 + end.x / radius * side * 0.9 };
       const samples = front.connector = [];
-      for (let n = 0; n <= 48; n++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+      for (let n = 0; n <= 48; n++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
         const t = n / 48, u = 1 - t;
         samples.push({ x: u * u * u * start.x + 3 * u * u * t * control.x + 3 * u * t * t * bend.x + t * t * t * end.x, z: u * u * u * start.z + 3 * u * u * t * control.z + 3 * u * t * t * bend.z + t * t * t * end.z });
       }
-      for (let n = 1; n < samples.length; n++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+      for (let n = 1; n < samples.length; n++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
         const a = samples[n - 1], b = samples[n], dx = b.x - a.x, dz = b.z - a.z, length2 = dx * dx + dz * dz;
         const gx0 = Math.max(0, Math.floor((Math.min(a.x, b.x) - PATH_HALF - ORIGIN.x) / PATH_UNIT)), gx1 = Math.min(PX - 1, Math.floor((Math.max(a.x, b.x) + PATH_HALF - ORIGIN.x) / PATH_UNIT));
         const gz0 = Math.max(0, Math.floor((Math.min(a.z, b.z) - PATH_HALF - ORIGIN.z) / PATH_UNIT)), gz1 = Math.min(PZ - 1, Math.floor((Math.max(a.z, b.z) + PATH_HALF - ORIGIN.z) / PATH_UNIT));
-        for (let gx = gx0; gx <= gx1; gx++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } for (let gz = gz0; gz <= gz1; gz++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+        for (let gx = gx0; gx <= gx1; gx++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } for (let gz = gz0; gz <= gz1; gz++) {
           const x = (gx + 0.5) * PATH_UNIT + ORIGIN.x, z = (gz + 0.5) * PATH_UNIT + ORIGIN.z;
           const t = clamp(((x - a.x) * dx + (z - a.z) * dz) / length2, 0, 1);
           if ((x - a.x - dx * t) ** 2 + (z - a.z - dz * t) ** 2 < PATH_HALF * PATH_HALF && Math.hypot(x, z) >= MASTER_PATH_CENTER) masterPaths[gx * PZ + gz] = 1;
@@ -1859,9 +1859,9 @@
       masterPathCount++;
       masterHashValue = Math.imul(masterHashValue ^ i, 16777619);
     };
-    for (let gx = 0; gx < PX; gx++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (let gx = 0; gx < PX; gx++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
       const wx = (gx + 0.5) * PATH_UNIT + ORIGIN.x;
-      for (let gz = 0; gz < PZ; gz++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } masterCell(gx, gz, wx); }
+      for (let gz = 0; gz < PZ; gz++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; } masterCell(gx, gz, wx); }
     }
     // Column scaffolding is done: null it out so the closures the island hands out do not retain it.
     masterPaths = tops = surfaces = bottoms = null;
@@ -2002,24 +2002,24 @@
       }
       return points;
     });
-    for (const north of [true, false]) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (const north of [true, false]) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
       const points = [];
-      for (let r = MEADOW; r <= RADIUS; r += PATH_UNIT) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+      for (let r = MEADOW; r <= RADIUS; r += PATH_UNIT) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
         const x = north ? pass.wobble * Math.sin((r - MEADOW) / (-GATE_Z - MEADOW) * Math.PI * 2) : southStairCenter(r);
         points.push({ x, z: (north ? -1 : 1) * Math.sqrt(r * r - x * x) });
       }
       centerlines.push(points);
     }
     const timechainPath = [];
-    for (let r = MASTER_PATH_CENTER; r <= RADIUS; r += PATH_UNIT) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (let r = MASTER_PATH_CENTER; r <= RADIUS; r += PATH_UNIT) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
       const across = timechainStairCenter(r);
       timechainPath.push({ x: TIMECHAIN_X * r + TIMECHAIN_Z * across, z: TIMECHAIN_Z * r - TIMECHAIN_X * across });
     }
     centerlines.push(timechainPath);
-    for (const front of headquartersFronts) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (const front of headquartersFronts) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
       centerlines.push(front.connector);
       const points = [];
-      for (let n = -front.halfLength + PATH_HALF; n <= front.halfLength - PATH_HALF; n += PATH_UNIT) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } points.push({ x: front.center.x + front.tangent.x * n, z: front.center.z + front.tangent.z * n }); }
+      for (let n = -front.halfLength + PATH_HALF; n <= front.halfLength - PATH_HALF; n += PATH_UNIT) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; } points.push({ x: front.center.x + front.tangent.x * n, z: front.center.z + front.tangent.z * n }); }
       centerlines.push(points);
     }
     const path = {
@@ -2067,7 +2067,7 @@
     const cutawayPathLengths = new Float32Array(4);
     const cutawayPathInitial = new Uint8Array(4);
     const cutawayPathBottomByStation = new Float32Array(4 * 256).fill(Infinity);
-    for (let channel = 0; channel < 2; channel++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (let channel = 0; channel < 2; channel++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
       const ramp = headquartersRamps[channel];
       cutawayPathLengths[channel] = ramp.length;
       // At rest expose the authored mouth depth, independently of the shorter
@@ -2078,14 +2078,14 @@
       const initial = Math.min(ramp.length, ramp.cutawayEntranceLength);
       cutawayPathInitial[channel] = 1 + Math.round(initial / ramp.length * 254);
     }
-    for (let channel = 2; channel < 4; channel++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (let channel = 2; channel < 4; channel++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
       const ramp = basement.ramps[channel - 2];
       cutawayPathLengths[channel] = ramp.length;
       // One ramp-width of opening exposes the label and complete downhill
       // arrow, with a short margin before the retained ceiling begins.
       cutawayPathInitial[channel] = 1 + Math.round(Math.min(ramp.length, ramp.width) / ramp.length * 254);
     }
-    for (let cell = 0; cell < cutawayPathKeys.length; cell++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (let cell = 0; cell < cutawayPathKeys.length; cell++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
       let channel = -1, station = 0, cavity = 0, offset = 32;
       const upper = rampCells[cell];
       if (upper && upper <= 2) {
@@ -2106,12 +2106,12 @@
     // Extend the same route through only those authored cut columns so removing
     // the roof reveals the real aperture. Existing upper-ramp ownership wins;
     // a main-level window likewise wins over a lower route at a stacked cell.
-    for (let cell = 0; cell < windowCutawayChannels.length; cell++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (let cell = 0; cell < windowCutawayChannels.length; cell++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
       const owner = windowCutawayChannels[cell];
       if (!owner) continue;
       const channel = owner - 1, current = cutawayPathKeys[cell];
       let currentChannel = -1;
-      for (let index = 0; index < 4; index++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } if (current >>> (index * 8) & 255) { currentChannel = index; break; } }
+      for (let index = 0; index < 4; index++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; } if (current >>> (index * 8) & 255) { currentChannel = index; break; } }
       if (currentChannel >= 0 && (currentChannel < 2 || channel >= 2)) continue;
       const length = cutawayPathLengths[channel] || 1;
       const encoded = 1 + Math.round(clamp(windowCutawayStations[cell] / length, 0, 1) * 254);
@@ -2125,9 +2125,9 @@
     // station while other station bytes have no cell centre. Carry the lowest
     // known ceiling forward so the global floor scan advances one continuous
     // prefix instead of reopening a small skipped band.
-    for (let channel = 0; channel < 4; channel++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (let channel = 0; channel < 4; channel++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
       let bottom = Infinity;
-      for (let station = 1; station <= 255; station++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+      for (let station = 1; station <= 255; station++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
         const at = channel * 256 + station;
         if (Number.isFinite(cutawayPathBottomByStation[at])) bottom = Math.min(bottom, cutawayPathBottomByStation[at]);
         cutawayPathBottomByStation[at] = bottom;
@@ -2152,11 +2152,11 @@
     }
     const rampOffset = geometry.verts.length / 3;
     const rampFaceOffset = geometry.faces.length;
-    for (const v of rampGeometry.verts) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } geometry.verts.push(v); }
-    for (const face of rampGeometry.faces) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } geometry.faces.push({ ...face, i: face.i.map((i) => i + rampOffset) }); }
+    for (const v of rampGeometry.verts) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; } geometry.verts.push(v); }
+    for (const face of rampGeometry.faces) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; } geometry.faces.push({ ...face, i: face.i.map((i) => i + rampOffset) }); }
     const windowOffset = geometry.verts.length / 3;
-    for (const value of windowGeometry.verts) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } geometry.verts.push(value); }
-    for (const face of windowGeometry.faces) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (const value of windowGeometry.verts) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; } geometry.verts.push(value); }
+    for (const face of windowGeometry.faces) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
       const { cutawayColumn, ...renderFace } = face, pathKey = cutawayPathKeys[cutawayColumn];
       geometry.faces.push({ ...renderFace, i: face.i.map((i) => i + windowOffset),
         cutawayPathKey: pathKey, cutawayPathBottom: pathKey ? cutawayPathBottoms[cutawayColumn] : undefined,
@@ -2170,13 +2170,13 @@
     // fifth, horizontal bottom plane.
     const rampFaceCount = rampGeometry.faces.length;
     const rampSight = new Float64Array(rampFaceCount * 17);
-    for (let i = 0; i < rampFaceCount; i++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+    for (let i = 0; i < rampFaceCount; i++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
       const face = geometry.faces[rampFaceOffset + i], v = geometry.verts, a = face.i[0] * 3, b = face.i[1] * 3, c = face.i[2] * 3, at = i * 17;
       const ax = v[a], ay = v[a + 1], az = v[a + 2], bx = v[b] - ax, by = v[b + 1] - ay, bz = v[b + 2] - az, cx = v[c] - ax, cy = v[c + 1] - ay, cz = v[c + 2] - az;
       const determinant = bx * cz - bz * cx;
       if (Math.abs(determinant) < 1e-12) { rampSight[at + 16] = -Infinity; continue; }
       const sign = Math.sign(determinant), gradientX = (by * cz - cy * bz) / determinant, gradientZ = (bx * cy - cx * by) / determinant;
-      for (let edge = 0; edge < 3; edge++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } 
+      for (let edge = 0; edge < 3; edge++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
         const p = face.i[edge] * 3, q = face.i[(edge + 1) % 3] * 3, nx = (v[q + 2] - v[p + 2]) * sign, nz = (v[p] - v[q]) * sign, length = Math.hypot(nx, nz), k = at + edge * 4;
         rampSight[k] = nx / length; rampSight[k + 2] = nz / length; rampSight[k + 3] = (nx * v[p] + nz * v[p + 2]) / length;
       }
@@ -2302,7 +2302,7 @@
     // A point ray visits only the voxels it crosses, clipping window fragments and ramp prisms once per column;
     // most columns hold neither, so rays cross them on voxels alone.
     const sightColumnWork = new Uint8Array(SX * SZ);
-    for (let i = 0; i < SX * SZ; i++) { if (slice && (++slice.work & 63) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } if (windowColumns[i] || rampCollision[i] || basementCollision[i]) sightColumnWork[i] = 1; }
+    for (let i = 0; i < SX * SZ; i++) { if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; } if (windowColumns[i] || rampCollision[i] || basementCollision[i]) sightColumnWork[i] = 1; }
     const sightCacheStats = { queries: 0, hits: 0 };
     const sightClearAt = (x, y, z, toX, toY, toZ, witness = null, slot = 0) => {
       const dx = toX - x, dy = toY - y, dz = toZ - z;

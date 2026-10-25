@@ -22,7 +22,7 @@
   const fabricSteps = function* (pattern, width, depth, top, bottom, centerZ, kind, slice = null) {
     const geo = { verts: [], faces: [], lines: [] }, size = pattern.width, colors = pattern.colors;
     const cells = new Uint32Array(size * size), used = new Uint8Array(cells.length);
-    for (let i = 0; i < cells.length; i++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } cells[i] = colors[i * 3] << 16 | colors[i * 3 + 1] << 8 | colors[i * 3 + 2]; }
+    for (let i = 0; i < cells.length; i++) { if (slice && BL.buildTasks.due(slice, 15)) { yield; slice.until = performance.now() + slice.budget; } cells[i] = colors[i * 3] << 16 | colors[i * 3 + 1] << 8 | colors[i * 3 + 2]; }
     const quad = (a, b, c, d, color) => {
       const i = geo.verts.length / 3;
       geo.verts.push(...a, ...b, ...c, ...d);
@@ -30,25 +30,25 @@
     };
     const xAt = (x) => (x / size - 0.5) * width, zAt = (z) => (z / size - 0.5) * depth + centerZ;
     // Merge equal-colour rectangles: every LifeHash pixel is kept, face count stays small in both renderers.
-    for (let z = 0; z < size; z++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } for (let x = 0; x < size; x++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let z = 0; z < size; z++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } for (let x = 0; x < size; x++) {
       const start = z * size + x, color = cells[start];
       if (used[start]) continue;
       let w = 1, h = 1;
-      while (x + w < size && !used[start + w] && cells[start + w] === color) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } w++; }
-      rows: while (z + h < size) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
-        for (let dx = 0; dx < w; dx++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } if (used[start + h * size + dx] || cells[start + h * size + dx] !== color) break rows; }
+      while (x + w < size && !used[start + w] && cells[start + w] === color) { w++; }
+      rows: while (z + h < size) {
+        for (let dx = 0; dx < w; dx++) { if (used[start + h * size + dx] || cells[start + h * size + dx] !== color) break rows; }
         h++;
       }
-      for (let dz = 0; dz < h; dz++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } used.fill(1, start + dz * size, start + dz * size + w); }
+      for (let dz = 0; dz < h; dz++) { used.fill(1, start + dz * size, start + dz * size + w); }
       const x0 = xAt(x), x1 = xAt(x + w), z0 = zAt(z), z1 = zAt(z + h);
       quad([x0, top, z0], [x0, top, z1], [x1, top, z1], [x1, top, z0], color);
     } }
     // Edge pixels continue down the case and sheet so the sides carry the same fabric, not an unprinted block.
-    for (let edge = 0; edge < 4; edge++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } for (let i = 0; i < size;) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let edge = 0; edge < 4; edge++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } for (let i = 0; i < size;) {
       const pixel = (n) => edge < 2 ? (edge ? size - 1 : 0) * size + n : n * size + (edge === 3 ? size - 1 : 0);
       const color = cells[pixel(i)];
       let end = i + 1;
-      while (end < size && cells[pixel(end)] === color) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } end++; }
+      while (end < size && cells[pixel(end)] === color) { end++; }
       if (edge < 2) {
         const x0 = xAt(i), x1 = xAt(end), z = zAt(edge ? size : 0);
         if (edge) quad([x0, bottom, z], [x1, bottom, z], [x1, top, z], [x0, top, z], color);
@@ -70,7 +70,7 @@
     sheet.pattern = BL.lifehash.make(sheet.seed);
     // The pillow carries the same LifeHash rotated a quarter turn, following the bedding's long axis.
     const pattern = sheet.pattern, colors = new Uint8Array(pattern.colors.length), size = pattern.width;
-    for (let y = 0; y < size; y++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } for (let x = 0; x < size; x++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let y = 0; y < size; y++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } for (let x = 0; x < size; x++) {
       const from = ((size - 1 - x) * size + y) * 3, to = (y * size + x) * 3;
       colors[to] = pattern.colors[from]; colors[to + 1] = pattern.colors[from + 1]; colors[to + 2] = pattern.colors[from + 2];
     } }

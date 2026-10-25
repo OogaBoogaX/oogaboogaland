@@ -6,6 +6,9 @@
   // A construction slice's budget. It runs while the screen holds black, so throughput matters more than frame
   // pacing; staying under the 50 ms long-task line keeps input and the fade responsive.
   const SLICE_MS = 40;
+  // Call only for sliced work. Rows and model pieces check directly; tight mesh loops can retain their clock stride.
+  // The caller resets the deadline after yielding, so waiting for the next task never spends construction budget.
+  const due = (slice, mask = 0) => (!mask || (++slice.work & mask) === 0) && performance.now() >= slice.until;
   const later = () => {
     if (globalThis.scheduler && typeof scheduler.postTask === "function") return scheduler.postTask(() => {}, { priority: "user-visible" });
     return new Promise(resolve => {
@@ -34,5 +37,5 @@
       measure(() => BL.models.withScope(scope, () => steps.return()));
     }
   };
-  BL.buildTasks = { SLICE_MS, run, measure, get cpu() { return cpu; } };
+  BL.buildTasks = { SLICE_MS, due, run, measure, get cpu() { return cpu; } };
 })();

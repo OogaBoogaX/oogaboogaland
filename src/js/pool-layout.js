@@ -336,7 +336,7 @@
     if (built) return built;
     const data = new Uint8Array(SX * SY * SZ), heights = new Float32Array(SX * SZ).fill(-Infinity);
     const columnWork = { ...COLUMN, gaps: new Float64Array(COLUMN.gaps.length) };
-    for (let i = 0; i < SX; i++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } for (let k = 0; k < SZ; k++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let i = 0; i < SX; i++) { for (let k = 0; k < SZ; k++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
       const x = ORIGIN.x + (i + 0.5) * UNIT, z = ORIGIN.z + (k + 0.5) * UNIT, c = column(x, z, columnWork);
       if (c.top === -Infinity) continue;
       let highest = -Infinity;
@@ -345,15 +345,15 @@
       // The wall a painting lies on is cut into metre squares: the Canvas 2D renderer sorts whole faces by depth,
       // and one long face would draw over half the paint.
       let wall = NaN;
-      for (const stop of STOPS) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+      for (const stop of STOPS) {
         const along = x * Math.sin(stop) + z * Math.cos(stop), across = x * Math.cos(stop) - z * Math.sin(stop);
         if (Math.abs(across) < STOP.half && along > CHAMBER_R && along < CHAMBER_R + UNIT) wall = Math.floor(across);
       }
-      for (let j = 0; j < SY; j++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+      for (let j = 0; j < SY; j++) {
         const y = ORIGIN.y + (j + 0.5) * UNIT;
         if (y > c.top || y < c.bottom) continue;
         let open = false;
-        for (let g = 0; g < c.count && !open; g++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } open = y > c.gaps[g * 2] && y < c.gaps[g * 2 + 1]; }
+        for (let g = 0; g < c.count && !open; g++) { open = y > c.gaps[g * 2] && y < c.gaps[g * 2 + 1]; }
         if (open) continue;
         let material;
         if (y > c.top - UNIT) material = c.material;

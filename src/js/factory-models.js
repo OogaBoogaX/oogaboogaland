@@ -25,17 +25,31 @@
   const { mulberry32, hexToRgb } = math;
   const TAU = Math.PI * 2;
 
-  const STONE = ["#5b4a3e", "#524238", "#66544a", "#4a3d34"];const STONE_DK = "#3a2f28";
-  const TIMBER = "#8a5a32";const TIMBER_LT = "#a8703e";const TIMBER_DK = "#5c3a1e";const IRON_DK = "#2c2e33";const IRON_LT = "#6f737a";const BRASS = "#c9962e";
-  const GOLD = "#ffc83a";const CRYSTAL = "#4f9dff";const CYAN = "#5fe3ff";
+  const STONE = ["#5b4a3e", "#524238", "#66544a", "#4a3d34"];
+  const STONE_DK = "#3a2f28";
+  const TIMBER = "#8a5a32";
+  const TIMBER_LT = "#a8703e";
+  const TIMBER_DK = "#5c3a1e";
+  const IRON_DK = "#2c2e33";
+  const IRON_LT = "#6f737a";
+  const BRASS = "#c9962e";
+  const GOLD = "#ffc83a";
+  const CRYSTAL = "#4f9dff";
+  const CYAN = "#5fe3ff";
   // Each line's two capacitors: blue lights on a settled forward, orange sputters on a failed one.
-  const CAP_BLUE = { dim: ["#1a5fb8", "#2f96e8"], lit: ["#3fb4ff", "#9fe4ff"], halo: "#6fcaff" };const CAP_ORANGE = { dim: ["#b8440c", "#f2701a"], lit: ["#ff8420", "#ffc868"], halo: "#ffa040" };
-  const BRONZE = "#a86a34";const BRONZE_DK = "#6e4222";const COPPER = "#c0703a";const COPPER_DK = "#7e4220";
+  const CAP_BLUE = { dim: ["#1a5fb8", "#2f96e8"], lit: ["#3fb4ff", "#9fe4ff"], halo: "#6fcaff" };
+  const CAP_ORANGE = { dim: ["#b8440c", "#f2701a"], lit: ["#ff8420", "#ffc868"], halo: "#ffa040" };
+  const BRONZE = "#a86a34";
+  const BRONZE_DK = "#6e4222";
+  const COPPER = "#c0703a";
+  const COPPER_DK = "#7e4220";
 
   const LEVEL = { pit: 0, low: 2.5, main: 5, high: 10, top: 15.5 };
   // Rock outcrops on the left of the front of the pit: [x, z, size].
   const OUTCROPS = [[-11, 21, 1.3], [-16, 25, 1.6]];
-  const HALL = { halfW: 23, back: -22, front: 30, h: 26 };const WALL_LEAN = 3.5;const STATION_BACK = 0.8;
+  const HALL = { halfW: 23, back: -22, front: 30, h: 26 };
+  const WALL_LEAN = 3.5;
+  const STATION_BACK = 0.8;
   // Kortik's Switchboard on its deck (LAYOUT.kortik): the patch wall stands along the deck's west edge, its face `face`
   // in from the edge and looking into the hall (+x), `wall` either side of the deck's middle. What stands in front of
   // it blocks the walkers, as [along the wall, out from it, radius]; along runs toward -z. Its lanterns hang from
@@ -426,7 +440,8 @@
   // them. A bronze clamp at the top of its arch hangs it on a chain from the vault. The path the sats ride is sampled
   // once so the scene only reads it.
   // Where the conduit sits on the capacitor's cap, above the glass's top, and the flare it grows out of.
-  const CONDUIT_SAMPLES = 48;const CONDUIT_SEAT = 0.54;
+  const CONDUIT_SAMPLES = 48;
+  const CONDUIT_SEAT = 0.54;
   const conduitPath = (bay) => {
     const c = LAYOUT.core, side = Math.sign(bay.x), [lo, hi] = c.chamber;
     const ax = stationX(bay) - side * 1.2, ay = bay.y + CAP.top + CONDUIT_SEAT, az = stationZ(bay);
@@ -459,7 +474,8 @@
   // opened or closed on chain.
   // The height of the arch's and the fire's middle: low enough that the keystone ends inside the core walkway's planks.
   const FORGE_CY = 1.55;
-  const FORGE_TRACKS = [-0.95, 0.95];const FORGE_CONSOLE = [-2.45, 1.4];
+  const FORGE_TRACKS = [-0.95, 0.95];
+  const FORGE_CONSOLE = [-2.45, 1.4];
   // The stores by the forge, [x, z]: between its tracks and the stairs up to the core's walkway, clear of both.
   const FORGE_STORES = [[-2.5, 3.4], [2.5, 2.8], [-2.5, 5], [2.5, 4.6]];
   // A flame: a teardrop of orange with a smaller one of yellow in front of it.
@@ -484,7 +500,8 @@
   // of each mouth, which faces the forge (-z). The left, from the chain, sends carts of sats up to be consumed; the
   // right, to the chain, takes the coins the forge mints back down. Inside each the line runs SHAFT_DEEP metres into
   // the dark, the last SHAFT_RAMP of it dropping away down the shaft.
-  const SHAFTS = [[-6, 14.2], [6, 14.2]];const LINE_STEP = 0.05;
+  const SHAFTS = [[-6, 14.2], [6, 14.2]];
+  const LINE_STEP = 0.05;
   const gem = (size, color, emissive = 0.8) => lathe({ profile: [[0, -0.1], [0.12, 0.01], [0.085, 0.05], [0, 0.055]].map(([r, h]) => [r * size, h * size]), segments: 8, color, emissive });
   // The coin the forge mints when sats leave: a thick disc of gold with a raised rim, a milled edge and the ₿ struck
   // on both faces, `COIN_R` in radius and standing on its edge, its axle along x, so it rolls along z.
@@ -537,7 +554,8 @@
   // the entrance. `COOK` places what the scene hangs and moves: the lid's hinge and how far it opens, the mouth the
   // sats drop into, the porthole, the gears, the stack, the hatch and the chute's lip and heading, the sign, the board,
   // the lanterns and the cook's spot.
-  const ORANGE = "#f39a1e";const IRON_BK = "#211c19";
+  const ORANGE = "#f39a1e";
+  const IRON_BK = "#211c19";
   const COOK = (() => {
     const c = LAYOUT.cooker, hatch = [0.25, 1.02, 1.46], gx = -c.x - hatch[0], gz = HALL.front - 0.6 - c.z - hatch[2], gl = Math.hypot(gx, gz);
     const lip = [hatch[0] + gx / gl * 0.9, 0.86, hatch[2] + gz / gl * 0.9], dx = -c.x - lip[0], dz = HALL.front - 0.6 - c.z - lip[2], l = Math.hypot(dx, dz);
@@ -581,7 +599,8 @@
   // real tips); its figures (`boardValues`) are a picture of their
   // own laid over its right-hand column, repainted when they change. `BOARD` places the face and the figures in the
   // board's frame and, in the cave's, the lanterns' hooks.
-  const BOARD_FACE = { w: 3, h: 1.875, px: 400 };const BOARD_VALUES = { x: 640, y: 150, w: 530, h: 540 };
+  const BOARD_FACE = { w: 3, h: 1.875, px: 400 };
+  const BOARD_VALUES = { x: 640, y: 150, w: 530, h: 540 };
   const BOARD = (() => {
     const b = LAYOUT.board, c = Math.cos(b.turn), s = Math.sin(b.turn), at = (x, z) => [b.x + x * c + z * s, b.z - x * s + z * c];
     const lamps = [[-2.1, 3.5, 0.75], [2.1, 3.5, 0.75]], face = [0, 2.6875, 0.752], P = BOARD_FACE.px, V = BOARD_VALUES;
@@ -618,7 +637,9 @@
     { ring: "#6fb8ff", sky: "#1f3a6a", ground: "#4a6a8a", accent: "#e8e0d0" }
   ];
   // Crossing reverses the lateral offset, so keep both sides of the aperture clear of consoles.
-  const TUNNEL_SIGN = { y: 6.15, z: 0.7 };const TUNNEL_POST = 3.95;const TUNNEL_BOX = [-3.5, 0.95];
+  const TUNNEL_SIGN = { y: 6.15, z: 0.7 };
+  const TUNNEL_POST = 3.95;
+  const TUNNEL_BOX = [-3.5, 0.95];
   // Where the lanterns hang, and what holds them: [kind, x, y, z, turn] with y the floor they stand on, and
   // strings [ax, ay, az, bx, by, bz, sag, at] with lanterns hung at the fractions `at` along them.
   //   hang:  a lantern on a short chain from a hook at (x, y, z)
@@ -673,7 +694,8 @@
   // its balcony, so looking back from inside shows the same tunnel running on to daylight. Both work in the
   // mouth's frame: x across, y up from the floor, +z out of the cave, the rim at z 0 and the shield at SHIELD_Z.
   // In the hall that frame stands at EXIT_Z with the balcony's floor, so the shield is the balcony's back edge.
-  const SHIELD_Z = -3.8;const EXIT_Z = HALL.front - 0.6 - SHIELD_Z;
+  const SHIELD_Z = -3.8;
+  const EXIT_Z = HALL.front - 0.6 - SHIELD_Z;
 
   // The part both ends share: three timber sets, the track running in (out to `reach`, since the factory's end
   // stops at the rim), and the shield's emitters, iron posts with cyan coils just outside the phase plane, which
@@ -729,7 +751,8 @@
   // metre before the shield at true size, where an Ooga walks through; `hall` is everything else that stands still,
   // cut off where `front` begins; `chamber`, the `tank` variants standing at `tanks`, `fire`, `sat` and `satRed` are
   // what the window lights and moves; and `paths` are the conduits the sats ride, sampled as `conduits` samples them.
-  const WINDOW_CUT = HALL.front - 1.1;const WINDOW_SHIELD = EXIT_Z + SHIELD_Z;
+  const WINDOW_CUT = HALL.front - 1.1;
+  const WINDOW_SHIELD = EXIT_Z + SHIELD_Z;
   // The factory's light at rest, as `scene-factory.js` sets it: ambient by a face's slope over its floor, the sun and
   // the violet fill in its shade, and fog judged from an eye ten metres out from the shield. Stone and timber are
   // dimmed by `dim` for the bloom they feed, then eased from `knee` to under `cap`.

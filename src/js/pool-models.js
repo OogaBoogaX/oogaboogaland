@@ -93,17 +93,17 @@
     // Split affected greedy quads at cell boundaries first: otherwise a long edge can bridge across
     // its neighbour's bevelled corner and leave a crack at the old T-junction.
     const shoreFaces = [];
-    for (const f of geometry.faces) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const f of geometry.faces) { if (slice && BL.buildTasks.due(slice, 15)) { yield; slice.until = performance.now() + slice.budget; }
       const v = geometry.verts, ids = f.i;
       let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity, maxY = -Infinity;
-      for (const id of ids) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+      for (const id of ids) { if (slice && BL.buildTasks.due(slice, 15)) { yield; slice.until = performance.now() + slice.budget; }
         minX = Math.min(minX, v[id * 3]); maxX = Math.max(maxX, v[id * 3]);
         minZ = Math.min(minZ, v[id * 3 + 2]); maxZ = Math.max(maxZ, v[id * 3 + 2]);
         maxY = Math.max(maxY, v[id * 3 + 1]);
       }
       const nearX = Math.max(0, minX, -maxX), nearZ = Math.max(0, minZ, -maxZ);
       let mouth = false;
-      for (const channel of L.CHANNELS) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+      for (const channel of L.CHANNELS) { if (slice && BL.buildTasks.due(slice, 15)) { yield; slice.until = performance.now() + slice.budget; }
         const ux = Math.sin(channel.bearing), uz = Math.cos(channel.bearing), half = L.CHANNEL.low + 2 * L.UNIT;
         const x = (minX + maxX) / 2, z = (minZ + maxZ) / 2, rx = (maxX - minX) / 2, rz = (maxZ - minZ) / 2;
         if (x * ux + z * uz + Math.abs(ux) * rx + Math.abs(uz) * rz >= L.channelOutlet(channel) - (channel.inner ? 2 * L.UNIT : 0) &&
@@ -116,12 +116,12 @@
       const at = (u, w) => pushVert(geometry, v[a] + (v[b] - v[a]) * u + (v[d] - v[a]) * w,
         v[a + 1] + (v[b + 1] - v[a + 1]) * u + (v[d + 1] - v[a + 1]) * w,
         v[a + 2] + (v[b + 2] - v[a + 2]) * u + (v[d + 2] - v[a + 2]) * w);
-      for (let x = 0; x < nx; x++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } for (let z = 0; z < nz; z++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+      for (let x = 0; x < nx; x++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } for (let z = 0; z < nz; z++) {
         shoreFaces.push({ ...f, i: [at(x / nx, z / nz), at((x + 1) / nx, z / nz), at((x + 1) / nx, (z + 1) / nz), at(x / nx, (z + 1) / nz)] });
       } }
     }
     geometry.faces = shoreFaces;
-    for (let i = 0; i < geometry.verts.length; i += 3) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let i = 0; i < geometry.verts.length; i += 3) { if (slice && BL.buildTasks.due(slice, 15)) { yield; slice.until = performance.now() + slice.budget; }
       if (geometry.verts[i + 1] < underside) continue;
       const x = geometry.verts[i], z = geometry.verts[i + 2], r = Math.hypot(x, z);
       if (r > 0 && r < L.LAKE_R) {
@@ -131,9 +131,9 @@
     }
     // Flatten the narrow mouth into the cliff so the stream and vertical sheet meet on the rock face.
     // The outer half-metre blends back into the voxel cliff; cell-sized faces keep the cut watertight.
-    for (const channel of L.CHANNELS) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const channel of L.CHANNELS) { if (slice && BL.buildTasks.due(slice, 15)) { yield; slice.until = performance.now() + slice.budget; }
       const ux = Math.sin(channel.bearing), uz = Math.cos(channel.bearing), end = L.channelOutlet(channel);
-      for (let i = 0; i < geometry.verts.length; i += 3) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+      for (let i = 0; i < geometry.verts.length; i += 3) { if (slice && BL.buildTasks.due(slice, 15)) { yield; slice.until = performance.now() + slice.budget; }
         const x = geometry.verts[i], z = geometry.verts[i + 2], along = x * ux + z * uz;
         const across = Math.abs(x * uz - z * ux), blend = Math.min(1, (L.CHANNEL.low + 2 * L.UNIT - across) / L.UNIT);
         if (blend <= 0) continue;
@@ -175,11 +175,11 @@
       return edge;
     };
     const fallCuts = [];
-    for (const channel of L.CHANNELS) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } if (channel.falls) {
+    for (const channel of L.CHANNELS) { if (slice && BL.buildTasks.due(slice, 15)) { yield; slice.until = performance.now() + slice.budget; } if (channel.falls) {
       const width = fallMouthHalf;
       let left = channel.bearing - width / L.edgeAt(channel.bearing);
       let right = channel.bearing + width / L.edgeAt(channel.bearing);
-      for (let i = 0; i < 4; i++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+      for (let i = 0; i < 4; i++) { if (slice && BL.buildTasks.due(slice, 15)) { yield; slice.until = performance.now() + slice.budget; }
         left = channel.bearing - width / L.edgeAt(left);
         right = channel.bearing + width / L.edgeAt(right);
       }
@@ -227,7 +227,7 @@
     };
     let galleryEnd = null, ledgeEnd = null;
     const reach = RAMP.bay + 0.3;
-    for (let n = 0; n < L.RILL_STATIONS.length - 1; n++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let n = 0; n < L.RILL_STATIONS.length - 1; n++) { if (slice && BL.buildTasks.due(slice, 15)) { yield; slice.until = performance.now() + slice.budget; }
       const a = L.RILL_STATIONS[n], to = L.RILL_STATIONS[n + 1];
       if (a >= L.RILL.end) {
         // The turn's floor patch replaces the inner landing; keep the outer walking lane at its grade.
@@ -255,13 +255,13 @@
           at(RAMP.start + from, r0 + G.half, y0)], SKIRT, SHEET);
       }
       // Through a door: from the descent's edge out to the ledge.
-      for (const door of L.DOORS) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } if (Math.abs((a + to) / 2 - door.at * RAMP.sweep) * 18 < L.DOOR.half + 0.4) {
+      for (const door of L.DOORS) { if (slice && BL.buildTasks.due(slice, 15)) { yield; slice.until = performance.now() + slice.budget; } if (Math.abs((a + to) / 2 - door.at * RAMP.sweep) * 18 < L.DOOR.half + 0.4) {
         quad(RAMP.start + a, RAMP.start + to, RAMP.r + reach, L.edgeAt(RAMP.start + (a + to) / 2) - 0.25, L.rampY(a), L.rampY(to), EARTH[n & 1]);
       } }
       // Through a link: carry the descent's surface out through the mouths and along the gallery. Between
       // galleries only the exterior lip continues, with its inner edge buried in the intact cliff wall.
       const link = L.linkAt((a + to) / 2);
-      for (let h = 0; h < 2; h++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+      for (let h = 0; h < 2; h++) { if (slice && BL.buildTasks.due(slice, 15)) { yield; slice.until = performance.now() + slice.budget; }
         const a0 = a + (to - a) * h / 2, a1 = a + (to - a) * (h + 1) / 2, b0 = RAMP.start + a0, b1 = RAMP.start + a1;
         const draw = (start, end) => {
           const lip0 = L.lipAt(start), lip1 = L.lipAt(end);
@@ -286,7 +286,7 @@
     if (galleryEnd) capEnd(galleryEnd.b, galleryEnd.inner, galleryEnd.outer, galleryEnd.y, true);
     // Rebuild the narrow floor strip over the voxel recess around the bend and chamber.
     // Sample the union of both grooves at their join so neither bank dams the other stream.
-    for (const arc of L.RILL_TAIL) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const arc of L.RILL_TAIL) { if (slice && BL.buildTasks.due(slice, 15)) { yield; slice.until = performance.now() + slice.budget; }
       if (arc.squeeze) {
         // A flat patch avoids folded offset banks on the tight hairpin's small inner radius.
         const half = arc.r + 0.95, reach = arc.r * arc.squeeze + 0.95;
@@ -299,7 +299,7 @@
           const cut = math.clamp((L.RILL.half - L.rillTailDistance(x, z)) / (L.RILL.half - L.RILL.bedHalf), 0, 1);
           return pushVert(geo, x, L.rillJunctionY(x, z) + 0.008 - L.RILL.depth * cut, z);
         };
-        for (let i = 0; i < cols; i++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } for (let j = 0; j < rows; j++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+        for (let i = 0; i < cols; i++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } for (let j = 0; j < rows; j++) {
           face(geo, [point(i, j), point(i + 1, j), point(i + 1, j + 1), point(i, j + 1)], EARTH[0], SHEET);
         } }
         continue;
@@ -313,14 +313,14 @@
         const cut = math.clamp((L.RILL.half - L.rillTailDistance(x, z)) / (L.RILL.half - L.RILL.bedHalf), 0, 1);
         return pushVert(geo, x, L.FLOOR + 0.008 - L.RILL.depth * cut, z);
       };
-      for (let i = 0; i < count; i++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } for (let j = 0; j < bands; j++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+      for (let i = 0; i < count; i++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } for (let j = 0; j < bands; j++) {
         const ids = [point(i, j), point(i, j + 1), point(i + 1, j + 1), point(i + 1, j)];
         if (arc.sweep < 0) ids.reverse();
         face(geo, ids, Math.abs(j + 0.5 - bands / 2) < 2 ? SKIRT : EARTH[0], SHEET);
       } }
     }
     const end = L.LEDGE.to * RAMP.sweep + L.LEDGE.tail, leadSteps = Math.ceil(L.LEDGE.lead / STEP) * 2;
-    for (let n = -leadSteps; n * STEP < end - 1e-6; n++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let n = -leadSteps; n * STEP < end - 1e-6; n++) { if (slice && BL.buildTasks.due(slice, 15)) { yield; slice.until = performance.now() + slice.budget; }
       const a = n < 0 ? n * L.LEDGE.lead / leadSteps : n * STEP;
       const to = n < 0 ? (n + 1) * L.LEDGE.lead / leadSteps : Math.min(end, a + STEP);
       drySpans(RAMP.start + a, RAMP.start + to, (b0, b1) => {
@@ -340,7 +340,7 @@
     }
     if (ledgeEnd) capEnd(ledgeEnd.b, ledgeEnd.inner, ledgeEnd.outer, ledgeEnd.y, true);
     // Support only: a sheet is a floor to stand on, never a wall, a ceiling or the skin of a solid.
-    for (const f of geo.faces) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } f.supportOnly = true; }
+    for (const f of geo.faces) { if (slice && BL.buildTasks.due(slice, 15)) { yield; slice.until = performance.now() + slice.budget; } f.supportOnly = true; }
     return geo;
   });
   // Behind the chamber's floor, wall and roof, inside the rock: where the mesher's faces meet at a T a pixel can
@@ -356,14 +356,14 @@
       for (let k = 0; k <= 4; k++) if (!L.solidAt(Math.sin(b0 + STEP * k / 4) * wallR, y, Math.cos(b0 + STEP * k / 4) * wallR)) return false;
       return true;
     };
-    for (let n = 0; n < N; n++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let n = 0; n < N; n++) { if (slice && BL.buildTasks.due(slice, 15)) { yield; slice.until = performance.now() + slice.budget; }
       const b0 = n * STEP, b1 = b0 + STEP;
       if (n % 3 === 0) {
         const c0 = b0, c1 = b0 + STEP * 3;
         face(geo, [at(c0, L.SHAFT_R + 0.6, low), at(c0, wallR, low), at(c1, wallR, low), at(c1, L.SHAFT_R + 0.6, low)], tone);
         face(geo, [at(c0, L.LAKE_R + 0.5, high), at(c1, L.LAKE_R + 0.5, high), at(c1, wallR, high), at(c0, wallR, high)], tone);
       }
-      for (let j = 0, from = -1; j <= rows; j++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+      for (let j = 0, from = -1; j <= rows; j++) { if (slice && BL.buildTasks.due(slice, 15)) { yield; slice.until = performance.now() + slice.budget; }
         const solid = j < rows && rock(b0, base + (j + 0.5) * L.UNIT);
         if (solid && from < 0) from = j;
         if (!solid && from >= 0) {
@@ -387,11 +387,11 @@
         if (L.solidAt(Math.sin(a) * r, y, Math.cos(a) * r)) return r - 0.1;
       return L.CHAMBER_R - 0.12;
     };
-    for (let quarter = 0; quarter < 4; quarter++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } for (let k = 0; k < 5; k++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let quarter = 0; quarter < 4; quarter++) { for (let k = 0; k < 5; k++) { if (slice && BL.buildTasks.due(slice, 15)) { yield; slice.until = performance.now() + slice.budget; }
       const a = quarter * Math.PI / 2 + (21 + k * 12 + (rand() - 0.5) * 5) * Math.PI / 180;
       const top = -4.8 - rand() * 0.5, end = floorY + (k % 3 === 0 ? 0 : 0.8 + rand() * 1.5);
       const points = [];
-      for (let j = 0; j <= 8; j++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+      for (let j = 0; j <= 8; j++) { if (slice && BL.buildTasks.due(slice, 15)) { yield; slice.until = performance.now() + slice.budget; }
         const t = j / 8, b = a + Math.sin(t * 4.5 + k) * 0.012;
         points.push(point(b, wallR(b, top + (end - top) * t) - 0.045, top + (end - top) * t));
       }
@@ -399,9 +399,9 @@
         out: [-Math.sin(a), 0, -Math.cos(a)], rand, tones });
       if (end > floorY + 0.1) continue;
       const root = points[points.length - 1], runners = 1 + (k % 2);
-      for (let branch = 0; branch < runners; branch++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+      for (let branch = 0; branch < runners; branch++) { if (slice && BL.buildTasks.due(slice, 15)) { yield; slice.until = performance.now() + slice.budget; }
         const floor = [root], reach = 1.8 + rand() * 1.2, bend = (branch ? 1 : -1) * (0.04 + rand() * 0.06);
-        for (let j = 1; j <= 6; j++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+        for (let j = 1; j <= 6; j++) { if (slice && BL.buildTasks.due(slice, 15)) { yield; slice.until = performance.now() + slice.budget; }
           const t = j / 6;
           floor.push(point(a + bend * t, Math.hypot(root[0], root[2]) - reach * t, floorY));
         }
@@ -516,27 +516,27 @@
   // The crossing as it was first built, kept as the bridge's collision shell so walking on it never changes.
   const bridgeShell = models.cachedSteps(function* (slice = null) {
     const geos = [], w = SITE.width, length = DECK_END - DECK_START, count = Math.ceil(length / 0.46), pitch = length / count;
-    for (let i = 0; i < count; i++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let i = 0; i < count; i++) { if (slice && BL.buildTasks.due(slice, 15)) { yield; slice.until = performance.now() + slice.budget; }
       const z = DECK_START + (i + 0.5) * pitch;
       geos.push(bevelBox({ w, h: 0.18, d: pitch + 0.02, color: i % 3 === 0 ? BARK : BARK_LT, bevel: 0.04, offset: { y: deckY(z / SITE.span) - 0.05, z } }));
     }
     const steps = 24;
-    for (const side of [-1, 1]) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const side of [-1, 1]) { if (slice && BL.buildTasks.due(slice, 15)) { yield; slice.until = performance.now() + slice.budget; }
       const rail = [], deck = [];
-      for (let i = 0; i <= steps; i++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+      for (let i = 0; i <= steps; i++) { if (slice && BL.buildTasks.due(slice, 15)) { yield; slice.until = performance.now() + slice.budget; }
         const t = i / steps;
         rail.push({ x: side * w / 2, y: deckY(t) + 0.95, z: t * SITE.span });
         deck.push({ x: side * w / 2, y: deckY(t) - 0.04, z: t * SITE.span });
       }
       geos.push(polyline({ points: rail, color: MOSS, emissive: 0 }), polyline({ points: deck, color: BARK, emissive: 0 }));
-      for (let i = 2; i < steps - 1; i += 3) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+      for (let i = 2; i < steps - 1; i += 3) { if (slice && BL.buildTasks.due(slice, 15)) { yield; slice.until = performance.now() + slice.budget; }
         const t = i / steps;
         geos.push(polyline({ points: [{ x: side * w / 2, y: deckY(t) - 0.04, z: t * SITE.span }, { x: side * w / 2, y: deckY(t) + 0.95, z: t * SITE.span }], color: MOSS, emissive: 0 }));
       }
     }
     // A gateway at each end: two posts, a lashed crossbeam and a lantern, so the crossing reads as a way in.
-    for (const z of [0, SITE.span]) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
-      for (const side of [-1, 1]) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const z of [0, SITE.span]) { if (slice && BL.buildTasks.due(slice, 15)) { yield; slice.until = performance.now() + slice.budget; }
+      for (const side of [-1, 1]) { if (slice && BL.buildTasks.due(slice, 15)) { yield; slice.until = performance.now() + slice.budget; }
         geos.push(bevelBox({ w: 0.36, h: 3.95 + (z === 0 ? L.UNIT : 0), d: 0.36, color: BARK, offset: { x: side * (w / 2 + 0.16), y: 1.7 - (z === 0 ? L.UNIT / 2 : 0), z } }));
         geos.push(bevelBox({ w: 0.46, h: 0.2, d: 0.46, color: MOSS, offset: { x: side * (w / 2 + 0.16), y: 3.68, z } }));
       }
@@ -544,9 +544,9 @@
       geos.push(box({ w: 0.26, h: 0.34, d: 0.26, color: "#ffb347", emissive: 1, offset: { y: 3.46, z } }));
     }
     // Vines slung under the deck, following its own sag.
-    for (const side of [-1, 1]) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const side of [-1, 1]) { if (slice && BL.buildTasks.due(slice, 15)) { yield; slice.until = performance.now() + slice.budget; }
       const vine = [];
-      for (let i = 0; i <= 16; i++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+      for (let i = 0; i <= 16; i++) { if (slice && BL.buildTasks.due(slice, 15)) { yield; slice.until = performance.now() + slice.budget; }
         const t = i / 16;
         vine.push({ x: side * w * 0.32, y: deckY(t) - 0.5 - Math.sin(t * Math.PI) * 0.55, z: t * SITE.span });
       }
@@ -571,9 +571,9 @@
       padNormals(geo);
     };
     const steps = 16;
-    for (const side of [-1, 1]) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const side of [-1, 1]) { if (slice && BL.buildTasks.due(slice, 15)) { yield; slice.until = performance.now() + slice.budget; }
       const x = side * w / 2, rail = [], deck = [], under = [];
-      for (let i = 0; i <= steps; i++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+      for (let i = 0; i <= steps; i++) { if (slice && BL.buildTasks.due(slice, 15)) { yield; slice.until = performance.now() + slice.budget; }
         const t = i / steps;
         rail.push({ x, y: deckY(t) + 0.95, z: t * SITE.span });
         deck.push({ x, y: deckY(t) - 0.04, z: t * SITE.span });
@@ -583,14 +583,14 @@
       vine(rail, 0.075, 0.075, VINE);
       vine(deck, 0.06, 0.06, VINE_DK);
       vine(under, 0.055, 0.055, VINE_DK);
-      for (let i = 2; i < steps - 1; i += 2) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+      for (let i = 2; i < steps - 1; i += 2) { if (slice && BL.buildTasks.due(slice, 15)) { yield; slice.until = performance.now() + slice.budget; }
         const t = i / steps;
         vine([{ x, y: deckY(t) - 0.04, z: t * SITE.span }, { x, y: deckY(t) + 0.95, z: t * SITE.span }], 0.035, 0.03, VINE_DK);
       }
       // Leaves in twos and threes along the rail, hanging out and down from it, lit as if the rail were a hedge.
-      for (let i = 1; i < 24; i++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+      for (let i = 1; i < 24; i++) { if (slice && BL.buildTasks.due(slice, 15)) { yield; slice.until = performance.now() + slice.budget; }
         const t = (i + rand() * 0.6) / 24, y = deckY(t) + 0.95, z = t * SITE.span;
-        for (let n = rand() < 0.5 ? 2 : 3; n > 0; n--) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+        for (let n = rand() < 0.5 ? 2 : 3; n > 0; n--) { if (slice && BL.buildTasks.due(slice, 15)) { yield; slice.until = performance.now() + slice.budget; }
           const out = side * (0.3 + rand() * 0.6), down = -0.3 - rand() * 0.7, along = (rand() - 0.5) * 0.8, l = Math.hypot(out, down, along);
           const ax = out / l, ay = down / l, az = along / l, wx = -az, wz = ax, wl = Math.hypot(wx, wz) || 1;
           const band = 1 + ((rand() * 3) | 0);
@@ -598,7 +598,7 @@
         }
       }
     }
-    for (let i = 0; i < count; i++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let i = 0; i < count; i++) { if (slice && BL.buildTasks.due(slice, 15)) { yield; slice.until = performance.now() + slice.budget; }
       const z = DECK_START + (i + 0.5) * pitch;
       flatInto(geo, bevelBox({ w, h: 0.18, d: pitch + 0.02, color: i % 3 === 0 ? BARK : BARK_LT, bevel: 0.04, offset: { y: deckY(z / SITE.span) - 0.05, z } }));
       if (i % 6 === 1 || i % 9 === 5) {
@@ -607,8 +607,8 @@
           offset: { x: side * (w / 2 - 0.27 - rand() * 0.12), y: deckY(z / SITE.span) + 0.045, z: z + (rand() - 0.5) * pitch * 0.25 } }));
       }
     }
-    for (const z of [0, SITE.span]) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
-      for (const side of [-1, 1]) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const z of [0, SITE.span]) { if (slice && BL.buildTasks.due(slice, 15)) { yield; slice.until = performance.now() + slice.budget; }
+      for (const side of [-1, 1]) { if (slice && BL.buildTasks.due(slice, 15)) { yield; slice.until = performance.now() + slice.budget; }
         flatInto(geo, bevelBox({ w: 0.36, h: 3.95 + (z === 0 ? L.UNIT : 0), d: 0.36, color: BARK, offset: { x: side * (w / 2 + 0.16), y: 1.7 - (z === 0 ? L.UNIT / 2 : 0), z } }));
         puff(geo, side * (w / 2 + 0.16), 3.7, z, 0.3, 0.16, 0.3, MOSS_TONES, rand, 4, 8);
       }
@@ -1221,10 +1221,10 @@
   // Roots hanging through a tunnel's roof by an opening, in a frame whose origin is on the roof: smooth cords.
   const roots = models.cachedSteps(function* (slice = null) {
     const rand = mulberry32(5521), geo = { verts: [], faces: [], lines: [], smooth: true, normals: [] };
-    for (let k = 0; k < 5; k++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let k = 0; k < 5; k++) { if (slice && BL.buildTasks.due(slice, 15)) { yield; slice.until = performance.now() + slice.budget; }
       let x = (k - 2) * 0.55 + (rand() - 0.5) * 0.3, y = 0.1, z = (rand() - 0.5) * 0.6;
       const length = 0.7 + rand() * 0.9;
-      for (let j = 1; j <= 4; j++) { if (slice && (++slice.work & 15) === 0 && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+      for (let j = 1; j <= 4; j++) { if (slice && BL.buildTasks.due(slice, 15)) { yield; slice.until = performance.now() + slice.budget; }
         const nx = x + (rand() - 0.5) * 0.16, ny = 0.1 - j / 4 * length, nz = z + (rand() - 0.5) * 0.16;
         limb(geo, x, y, z, nx, ny, nz, 0.05 - j * 0.008, 0.042 - j * 0.008, 5, BARK_RGB);
         x = nx; y = ny; z = nz;

@@ -19193,8 +19193,8 @@ const terrainParityChecks = (BL, island) => {
     return h.digest("hex").slice(0, 16);
   };
   const direct = islandDigest(island);
-  const steps = BL.terrain.islandSnapshotSteps({ seed: 1 }, null);
-  let step; do { step = steps.next(); } while (!step.done);
+  const steps = BL.terrain.islandSnapshotSteps({ seed: 1 }, { until: 0, budget: 0, work: 0 });
+  let step, slices = 0; do { step = steps.next(); if (!step.done) slices++; } while (!step.done);
   const clone = structuredClone(step.value);
   BL.terrainSnapshot.validate(clone);
   const restored = BL.terrainSnapshot.create(clone), snapshotDigest = islandDigest(restored);
@@ -19229,8 +19229,8 @@ const terrainParityChecks = (BL, island) => {
     if (left !== right && mismatches.length < 5) mismatches.push({ name, args: a, left, right });
   }
   record("terrain parity: the flag-off island keeps its golden digest, its Worker snapshot survives a structured clone and validation with the same mesh, and every snapshot query answers a seeded sample exactly as terrain.js does",
-    direct === TERRAIN_GOLDEN && snapshotDigest === direct && !mismatches.length && !missing.length && total > 100000,
-    JSON.stringify({ direct, golden: TERRAIN_GOLDEN, snapshotDigest, total, missing, mismatches }));
+    direct === TERRAIN_GOLDEN && snapshotDigest === direct && slices > 0 && !mismatches.length && !missing.length && total > 100000,
+    JSON.stringify({ direct, golden: TERRAIN_GOLDEN, snapshotDigest, slices, total, missing, mismatches }));
 };
 const unitChecks = async () => {
   await canvasSurfaceCacheChecks();
