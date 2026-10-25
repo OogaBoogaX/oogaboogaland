@@ -355,7 +355,7 @@
     }
     return lo < hi - 1e-9;
   };
-  // Exact moving vertical cylinder vs box: footprint is the box's two expanded strips plus four round corners,
+  // Exact moving vertical cylinder vs box: footprint is the box's two expanded strips plus four round corners.
   // The typed entry reads caller-owned storage; the numeric adapter below retains the original API.
   const segmentBoxQueryClear = (q) => {
     let x = q[0], y = q[1], z = q[2], dx = q[3], dy = q[4], dz = q[5], radius = q[6], height = q[7];

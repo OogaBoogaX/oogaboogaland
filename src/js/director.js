@@ -34,10 +34,10 @@
   const MEMORY_LIMITED = Number.isFinite(DEVICE_MEMORY) && DEVICE_MEMORY > 0 && DEVICE_MEMORY <= 8;
   const INITIAL_QUALITY = COARSE || MEMORY_LIMITED ? "medium" : "high";
   const $ = (id) => document.getElementById(id);
-  // One opt-in override makes both policies measurable. Chrome reports at most 8, so a report of 8 means 8 GiB or
-  // more: it starts the renderer at medium (`MEMORY_LIMITED`, which guards frame cost) but keeps the built island, and
-  // only a report below 8 releases it. Safari and Firefox report nothing: there a coarse pointer (phones and tablets,
-  // iOS among them, with the tightest per-tab memory) releases the island and a fine one keeps it.
+  // One opt-in override makes both policies measurable. Memory reports are approximate and browser/version-dependent:
+  // at least 8 GiB keeps the built island; exactly 8 still starts the renderer at medium (`MEMORY_LIMITED`, which
+  // guards frame cost). A usable report below 8 releases it. Without one, a coarse pointer releases the island and
+  // a fine pointer keeps it.
   const HUB_CACHE = params.get("hubcache") || "auto";
   const MEMORY_REPORTED = Number.isFinite(DEVICE_MEMORY) && DEVICE_MEMORY > 0;
   const KEEP_HUB = HUB_CACHE === "keep" || HUB_CACHE !== "release" && (MEMORY_REPORTED ? DEVICE_MEMORY >= 8 : !COARSE);

@@ -167,7 +167,7 @@ The existing character check now releases each template and rebuilds all 46 char
 
 ## 1.7 — Keep/reuse or release the built hub
 
-`hubcache=auto` keeps the built hub on devices reporting at least 8 GiB, or no usable memory signal; below 8 GiB it releases it. `hubcache=keep` and `hubcache=release` override either choice for measurement. The existing opening-quality policy remains separate.
+`hubcache=auto` keeps the built hub on devices reporting at least 8 GiB and releases it below 8 GiB. Without a usable memory report, it keeps the hub for a fine pointer and releases it for a coarse pointer. `hubcache=keep` and `hubcache=release` override either choice for measurement. The existing opening-quality policy remains separate.
 
 Keep mode retains the same root, camera, solids, cutaway sections, guide registries and actors. Its published active root becomes empty while away; input is unbound, visit listeners abort, subscriptions and timers stop, audio closes, and the guide/dialog controls pause. Transient particles, speech, sleep marks, damage numbers and tickers clear while the visibility cache and resize observer remain live. A fresh visit signal and reconciled HUD resume those objects on return. The hub's local elapsed time resumes too, and feeds/weather reconcile with the current snapshot. The director explicitly adds retained-hub geometry to the GPU ownership set, so the existing no-orphaned-record assertion still applies. Page destruction disposes the retained graph as well.
 

@@ -4040,6 +4040,42 @@ const canvasSurfaceCacheChecks = async () => {
   steady.paints = paints - steady.paints;
   record("Canvas surface shading: a curved board drawn as ten faces under a moving sun shades at most once a frame and reallocates nothing, and the surfaces beside it keep their slots",
     curved.paints <= 60 && curved.allocations <= 2 && steady.paints <= 8 && board.size === 8, JSON.stringify({ curved, steady, size: board.size }));
+  const paintStart = source.indexOf("    const paintStyles ="), paintEnd = source.indexOf("    const canvasShades =", paintStart);
+  if (paintStart < 0 || paintEnd < 0) throw new Error("Canvas surface painting not found");
+  const paintSurface = new Function(`${source.slice(paintStart, paintEnd)} return paintCanvasSurface;`)();
+  const input = { width: 64, height: 32 }, mask = { width: 64, height: 32 }, rows = [];
+  const image = { get width() { return 64; }, set width(value) { throw new Error(`Unexpected canvas resize: ${value}`); },
+    get height() { return 32; }, set height(value) { throw new Error(`Unexpected canvas resize: ${value}`); } };
+  const shades = [{ r: 64, g: 128, b: 255, ar: 0, ag: 0, ab: 0 }, { r: 638, g: 383, b: 128, ar: 7, ag: 11, ab: 3 }];
+  // Exercise the production painter without a filter API, then reuse the same backing and context after an
+  // overbright draw. This checks supported API use and state ownership, without emulating rendered pixels.
+  const draws = [], fills = [], clears = [];
+  const context = { globalAlpha: 1, globalCompositeOperation: "source-over", fillStyle: "#000",
+    get filter() { throw new Error("Canvas filter is unavailable"); },
+    set filter(value) { throw new Error(`Canvas filter is unavailable: ${value}`); },
+    clearRect(...rect) { clears.push(rect); },
+    fillRect(...rect) { fills.push({ rect, mode: this.globalCompositeOperation, alpha: this.globalAlpha }); },
+    drawImage(value) {
+      if (value !== input && value !== image && value !== mask) throw new Error("Unexpected canvas source");
+      if (!Number.isFinite(this.globalAlpha) || this.globalAlpha < 0 || this.globalAlpha > 1) throw new Error("Invalid Canvas alpha");
+      draws.push({ source: value, mode: this.globalCompositeOperation, alpha: this.globalAlpha });
+    },
+    getImageData() { throw new Error("Unexpected Canvas readback"); },
+    putImageData() { throw new Error("Unexpected Canvas pixel upload"); }
+  };
+  for (const shade of [shades[0], shades[1], shades[0]]) {
+    draws.length = fills.length = clears.length = 0;
+    paintSurface(image, context, { canvas: input, background: [12, 32, 48] }, shade, mask);
+    const sourceDraws = draws.filter(draw => draw.source === input), selfDraws = draws.filter(draw => draw.source === image), last = draws.at(-1);
+    rows.push({ source: sourceDraws.length === 1 && sourceDraws[0].mode === "source-over" && sourceDraws[0].alpha === 1,
+      coverage: last.source === mask && last.mode === "destination-in" && last.alpha === 1,
+      backing: clears.length === 1 && clears.concat(fills.map(fill => fill.rect)).every(rect => rect.join() === "0,0,64,32"),
+      light: fills.some(fill => fill.mode === "multiply") && selfDraws.every(draw => draw.mode === "lighter")
+        && (shade === shades[1] ? selfDraws.length > 0 : selfDraws.length === 0),
+      state: context.globalAlpha === 1 && context.globalCompositeOperation === "source-over" });
+  }
+  record("Canvas surface compatibility: the production painter needs no filter, readback or resize, keeps source and coverage draws, uses valid additive alpha for overbright light, and restores context state before reuse",
+    rows.every(row => Object.values(row).every(Boolean)), JSON.stringify(rows));
 };
 const deferredLoadingChecks = async () => {
   const source = await readFile(join(root, "src/js/deferred.js"), "utf8"), rows = [];

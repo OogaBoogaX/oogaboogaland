@@ -1738,11 +1738,11 @@
       return canvas;
     };
     // The last style strings built, rebuilt only when their 8-bit values change.
-    const paintStyles = { br: -1, bg: -1, bb: -1, background: "#000", tint: -1, tintStyle: "", gain: -1, gainFilter: "", add: -1, addStyle: "" };
+    const paintStyles = { br: -1, bg: -1, bb: -1, background: "#000", tint: -1, tintStyle: "", add: -1, addStyle: "" };
     const paintCanvasSurface = (canvas, paint, surface, shade, coverage) => {
       const source = surface.canvas, sw = surface.width || source.width, sh = surface.height || source.height, styles = paintStyles;
-      const gain = Math.max(shade.r, shade.g, shade.b, 1);
-      paint.globalCompositeOperation = "source-over"; paint.filter = "none";
+      const gain = Math.max(shade.r, shade.g, shade.b, 255);
+      paint.globalCompositeOperation = "source-over";
       paint.clearRect(0, 0, sw, sh);
       const background = surface.background;
       if (!background) paint.fillStyle = "#000";
@@ -1759,10 +1759,14 @@
       if (tint !== styles.tint) { styles.tint = tint; styles.tintStyle = `rgb(${tr},${tg},${tb})`; }
       paint.fillStyle = styles.tintStyle;
       paint.fillRect(0, 0, sw, sh);
-      if (gain !== styles.gain) { styles.gain = gain; styles.gainFilter = `brightness(${gain / 255})`; }
-      paint.globalCompositeOperation = "copy"; paint.filter = styles.gainFilter;
-      paint.drawImage(canvas, 0, 0); paint.filter = "none";
+      // Multiply supplies all dimming without Canvas filters (absent in older Safari). Restore overbright gain
+      // by adding the image to itself: full doublings, then the remaining fraction, before the additive light.
       paint.globalCompositeOperation = "lighter";
+      for (let boost = gain / 255; boost > 1; boost /= 2) {
+        paint.globalAlpha = Math.min(1, boost - 1);
+        paint.drawImage(canvas, 0, 0);
+      }
+      paint.globalAlpha = 1;
       const add = (shade.ar * 256 + shade.ag) * 256 + shade.ab;
       if (add !== styles.add) { styles.add = add; styles.addStyle = `rgb(${shade.ar},${shade.ag},${shade.ab})`; }
       paint.fillStyle = styles.addStyle;
