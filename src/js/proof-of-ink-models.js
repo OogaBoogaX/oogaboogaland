@@ -1,7 +1,7 @@
 // Shared, cached workshop assemblies. Repeated stock uses the renderer's existing instancing.
 (() => {
   "use strict";
-  const BL=window.BL,M=BL.models,cache=new Map(),C={ink:"#202326",bone:"#d8cbb1",orange:"#e68a35",wood:"#876647",steel:"#42494b",sage:"#65735a"};
+  const BL=window.BL,M=BL.models,cache=BL.models.scopedMap(),C={ink:"#202326",bone:"#d8cbb1",orange:"#e68a35",wood:"#876647",steel:"#42494b",sage:"#65735a"};
   BL.dressing.proofOfInk=(kind,tone="ink")=>{
     const key=kind+":"+tone;if(cache.has(key))return cache.get(key);
     const parts=[],color=C[tone]||C.ink;

@@ -1,7 +1,7 @@
 // Boutique display studies, not replicas or claims about particular products. Immutable shared meshes.
 (() => {
   "use strict";
-  const BL=window.BL,M=BL.models,S=BL.scene,cache=new Map();
+  const BL=window.BL,M=BL.models,S=BL.scene,cache=BL.models.scopedMap();
   const geometry=(kind,tone="cream",motif="bitcoin")=>{
     const key=[kind,tone,motif].join(":");if(cache.has(key))return cache.get(key);
     const parts=[],b=(c,x,y,z,w,h,d,e=0)=>parts.push(M.box({color:c,w,h,d,emissive:e,offset:{x,y,z}}));

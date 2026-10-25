@@ -194,7 +194,7 @@
   };
   // A line of runes `height` tall, centred on the origin and standing a tenth of their height proud of z 0, facing +z.
   // Cached by text, height and colour; merge before moving.
-  const words = new Map();
+  const words = BL.models.scopedMap();
   const runeWord = (text, height, color = ICE, emissive = 1) => {
     const key = `${text}|${height}|${color}|${emissive}`;
     if (!words.has(key)) {
@@ -270,7 +270,7 @@
       ]
     }
   };
-  const bannerCache = new Map();
+  const bannerCache = BL.models.scopedMap();
   // Painted runes keep their own batch so the depth offset never pulls the cloth forward too.
   const bannerMarks = (parts) => {
     const geo = noShadow(merge(...parts));

@@ -396,6 +396,16 @@
   // faces), whom she watches when she is not flying or beaming (`watching`
   // and `watch`), and her moods: `calm` while she talks, `steady` while she keeps by someone, so she does not turn to
   // her flight. Outline registries walk past her, as she moves every frame.
+  // Hub scope survives scene changes, but Tess's meshes need survive only while a Tess owns them. The director leaves
+  // one scene and enters the next in one task, so the caches go only once that task ends with no Tess: the Factory's
+  // greeter entered as the hub's guide leaves reuses every tier rather than rebuilding them in the swap frame.
+  let instances = 0, releasing = false;
+  const releaseIdle = () => {
+    releasing = false;
+    if (instances) return;
+    MESHES.clear(); FINE_MESHES.clear(); LIGHT_MESHES.clear();
+    BEAM.clear(); GLINT.clear(); SPARKS.clear(); MOTE.clear();
+  };
   const create = ({ parent, input, fx, camera, kind, coarse, quality = () => "high" }) => {
     // Prepare detail behind the scene transition, never in update. Touch and Low retain the lighter rig.
     const lightMeshes = LIGHT_MESHES(), eligible = !coarse && quality() !== "low",
@@ -641,8 +651,10 @@
         removeChild(parent, body);
         for (let i = 0; i < BEAMS; i++) { removeChild(parent, beams[i]); removeChild(parent, glints[i]); }
         for (let i = 0; i < FLECKS; i++) removeChild(parent, flecks[i].node);
+        if (--instances === 0 && !releasing) { releasing = true; queueMicrotask(releaseIdle); }
       }
     };
+    instances++;
     return rig;
   };
   BL.tess = { create, HEIGHT, SCALE, RADIUS };

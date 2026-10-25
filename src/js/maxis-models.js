@@ -1,7 +1,7 @@
 // Maxis additions to the shared dressing kit. Every repeated prop shares one immutable mesh.
 (() => {
   "use strict";
-  const BL=window.BL,cache=new Map();
+  const BL=window.BL,cache=BL.models.scopedMap();
   BL.dressing.maxis=kind=>{
     if(cache.has(kind))return cache.get(kind);
     const bits=[],b=(c,x,y,z,w,h,d,e=0)=>bits.push(BL.models.box({w,h,d,color:c,emissive:e,offset:{x,y,z}}));

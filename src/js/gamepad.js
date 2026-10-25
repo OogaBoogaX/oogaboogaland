@@ -11,7 +11,7 @@
   const BUTTON = { a: 1, b: 2, x: 4, y: 8, lb: 16, rb: 32, lt: 64, rt: 128, view: 256, menu: 512, ls: 1024, rs: 2048 };
   const COUNT = 12, LT = 6, RT = 7, DEAD = 0.18, TRIGGER_ON = 0.5, TRIGGER_OFF = 0.3;
   const state = { connected: false, frame: 0, lx: 0, ly: 0, rx: 0, ry: 0, held: 0, pressed: 0, released: 0 };
-  let plugged = 0;
+  let plugged = 0, physicalHeld = 0, blocked = 0, holding = false;
   window.addEventListener("gamepadconnected", (e) => { if (e.gamepad.mapping === "standard") plugged++; });
   window.addEventListener("gamepaddisconnected", (e) => { if (e.gamepad.mapping === "standard") plugged = Math.max(0, plugged - 1); });
   const first = () => {
@@ -29,10 +29,17 @@
     const s = Math.min(1, (m - DEAD) / (1 - DEAD));
     return (curve ? s * s : s) / m;
   };
+  const neutral = () => {
+    const changed = state.lx || state.ly || state.rx || state.ry || state.held || state.pressed || state.released;
+    state.lx = state.ly = state.rx = state.ry = state.held = state.pressed = state.released = 0;
+    if (changed) state.frame++;
+  };
   const poll = () => {
     const pad = plugged ? first() : null;
     state.connected = !!pad;
     if (!pad) {
+      physicalHeld = blocked = 0;
+      if (holding) { neutral(); return; }
       if (!state.held && !state.lx && !state.ly && !state.rx && !state.ry) return;
       state.lx = state.ly = state.rx = state.ry = 0;
       state.released = state.held;
@@ -40,21 +47,35 @@
       state.frame++;
       return;
     }
+    // The triggers are analogue: held past one depth, let go below a shallower one, so a half press never chatters.
+    let held = 0;
+    for (let i = 0; i < COUNT; i++) {
+      const b = pad.buttons[i], bit = 1 << i;
+      if (i === LT || i === RT ? b.value > (physicalHeld & bit ? TRIGGER_OFF : TRIGGER_ON) : b.pressed) held |= bit;
+    }
+    physicalHeld = held;
+    blocked &= held;
+    if (holding) { blocked = held; neutral(); return; }
+    held &= ~blocked;
     const a = pad.axes;
     let k = scale(a[0], a[1], false);
     state.lx = a[0] * k; state.ly = -a[1] * k;
     k = scale(a[2], a[3], true);
     state.rx = a[2] * k; state.ry = -a[3] * k;
-    // The triggers are analogue: held past one depth, let go below a shallower one, so a half press never chatters.
-    let held = 0;
-    for (let i = 0; i < COUNT; i++) {
-      const b = pad.buttons[i], bit = 1 << i;
-      if (i === LT || i === RT ? b.value > (state.held & bit ? TRIGGER_OFF : TRIGGER_ON) : b.pressed) held |= bit;
-    }
     const pressed = held & ~state.held, released = state.held & ~held;
     if (!pressed && !released && !state.pressed && !state.released) return;
     state.pressed = pressed; state.released = released; state.held = held;
     state.frame++;
   };
-  BL.gamepad = { BUTTON, state, poll };
+  // Keep reading physical buttons behind an entry hold, but never publish an action from it. A held button must be
+  // released and pressed again afterwards; trigger hysteresis follows the physical state, not the muted one.
+  const hold = (on) => {
+    on = !!on;
+    if (holding === on) return;
+    if (!on) poll(); // Consume the current hardware state even when the hold ended between display frames.
+    holding = on;
+    blocked |= physicalHeld;
+    neutral();
+  };
+  BL.gamepad = { BUTTON, state, poll, hold };
 })();

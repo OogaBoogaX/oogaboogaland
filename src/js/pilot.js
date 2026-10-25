@@ -226,7 +226,7 @@
       ownOoga = character && crew && crew.cavemen ? crew.cavemen.get(character.handle) || null : null;
       if (hud.setOwnOoga) hud.setOwnOoga(ownOoga);
     };
-    const unsubscribeOwnOoga = BL.net.subscribe(syncOwnOoga);
+    let unsubscribeOwnOoga = BL.net.subscribe(syncOwnOoga);
     let restoredPose = null;
     const freeTarget = { x: 0, y: 0, z: 0 };
     const followTarget = { x: 0, y: 0, z: 0 };
@@ -2573,6 +2573,7 @@
     // Each press is acted on once; a trigger held when the pilot lets go of input is let go of with it, and LT also
     // when combat ends. Letting go of LT leaves a right-click aim held with the mouse.
     let padFrame = -1, padFire = false, padAds = false;
+    const resetPad = () => { padFrame = pad.frame; padFire = padAds = mouseAds = ads = false; };
     const readPad = () => {
       const live = active && !externalControl && !menuOpen;
       if (padFire && (!live || !(pad.held & PAD.rt))) {
@@ -3590,6 +3591,7 @@
       handoff.cancel();
       active = value;
       controls.reset();
+      resetPad();
       unlockAim();
       carryCursor.endAim();
       if (crew && player()) {
@@ -3599,14 +3601,16 @@
       }
       reticle.hidden = menuOpen || !value || !armed();
     };
-    const dispose = () => {
+    const dispose = (keep = false) => {
       handoff.cancel();
       if (saveActiveLoginView === saveLoginView) saveActiveLoginView = null;
-      unsubscribeOwnOoga();
+      if (unsubscribeOwnOoga) unsubscribeOwnOoga();
+      unsubscribeOwnOoga = null;
       ownAccount = ownCrew = ownOoga = null;
       if (hud.setOwnOoga) hud.setOwnOoga(null);
       restoredPose = null;
       disposed = true;
+      resetPad();
       unlockAim();
       carryCursor.dispose();
       clearFeedback();
@@ -3637,7 +3641,32 @@
       hud.setMagazine(0, 0, 0, false);
       if (hud.setMode) hud.setMode(null, false, "detached", false);
       controls.dispose();
-      crew = fx = input = null;
+      if (!keep) crew = fx = input = null;
+    };
+    const suspend = () => { release(true); setActive(false); dispose(true); };
+    const resume = () => {
+      disposed = false;
+      active = true;
+      resetPad();
+      controls.resume(); carryCursor.resume();
+      window.addEventListener("mousemove", aimMouseMove);
+      window.addEventListener("pointerup", aimMouseUp);
+      window.addEventListener("pointerdown", interruptRightGesture, true);
+      window.addEventListener("pointermove", interruptRightGesture, true);
+      window.addEventListener("pointerup", interruptRightGesture, true);
+      window.addEventListener("pointercancel", interruptRightGesture, true);
+      window.addEventListener("blur", unlockAim);
+      document.addEventListener("pointerlockchange", aimLockChanged);
+      document.addEventListener("pointerlockerror", aimLockFailed);
+      document.addEventListener("visibilitychange", aimVisibility);
+      canvas.addEventListener("pointerdown", aimPointer, true);
+      canvas.addEventListener("pointermove", aimPointer, true);
+      canvas.addEventListener("pointerup", aimPointer, true);
+      canvas.addEventListener("pointercancel", aimPointer, true);
+      window.addEventListener("keydown", aimKey, true);
+      ownAccount = ownCrew = null;
+      unsubscribeOwnOoga = BL.net.subscribe(syncOwnOoga);
+      saveActiveLoginView = saveLoginView;
     };
     // The first claim can precede the first frame. Give it the landing eye,
     // or the detached eye saved before OAuth navigated away from this route.
@@ -3699,7 +3728,7 @@
       get birdsEye() { return birdsEye(); }, get birdsEyeMix() { return camera.orthoMix || 0; }, get birdsEyeHeight() { return overheadHeight; }, get birdsEyeNorthUp() { return overheadNorthUp; },
       get birdsEyeCeiling() { return overheadCeiling; },
       get shoulderEntryMix() { return aimMix; },
-      bind, setActive, refreshCombat, readInput, update, goPreset, resetCamera, freeCursor, navigate, travelRefusal, travel, transformView, pickCarryTarget, enterClose, exitClose, possess, release, escape, action, modeAction, weaponAction, weaponMode, showAct, dispose, get player() {
+      bind, setActive, refreshCombat, readInput, update, goPreset, resetCamera, freeCursor, navigate, travelRefusal, travel, transformView, pickCarryTarget, enterClose, exitClose, possess, release, escape, action, modeAction, weaponAction, weaponMode, showAct, suspend, resume, dispose, get player() {
       return player();
     }, get assistedTarget() {
       if (birdsEye() && assistedTargetActive) return assistedTargetHit;

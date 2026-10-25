@@ -128,7 +128,7 @@
   // The carved headline has room for both diagonals; a three-cell M reads too much like H at bridge distance.
   const CARVED_M = ["10001", "11011", "10101", "10001", "10001"];
   const SIGN_CELL = 0.075, SIGN_PAD = 0.855, SIGN_FRONT = 0.23;
-  const SIGN_CACHE = new Map();
+  const SIGN_CACHE = BL.models.scopedMap();
   // The emblem each cave flies, 5 by 7: on its sign either side of the name and on its banners.
   const SIGN_ICONS = {
     bolt: ["...##", "..##.", ".##..", "#####", "..##.", ".##..", "##..."],
@@ -271,7 +271,7 @@
   };
   // A small name board on two chunky pegs, for the Drop and Orbit launch sites and the Mempool island: the cave
   // sign scaled down, its bottom `peg` above the ground. `signWidth` and `signHeight` are its scaled size.
-  const POST_SIGNS = new Map();
+  const POST_SIGNS = BL.models.scopedMap();
   const postSign = (text, scale, peg) => {
     const key = `${text}|${scale}|${peg}`;
     let geo = POST_SIGNS.get(key);

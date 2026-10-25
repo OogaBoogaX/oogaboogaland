@@ -4068,6 +4068,8 @@ void main() {
       releaseGeometry,
       createRig: createRendererRig,
       releaseUnused,
+      // Read-only, on demand: inspecting resident identities never materializes a GPU record.
+      geometryRecords: () => records.keys(),
       dispose,
       get quality() {
         return qualityName;

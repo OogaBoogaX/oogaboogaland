@@ -222,7 +222,7 @@
   const SCORE_INK = "#ffb02e", BOARD_RIM = [0.12, 0.1], BOARD_STONE = ["#a08868", "#8f7a62"];
   const digit = variants((d) => unshadowed(brushWord(geometry(), String(d), 0, 0, 0.14, 0.026, SCORE_INK, 0.8, 0.004)));
   const DIGIT_W = (GLYPH_W + TRACKING) * 0.022 * 1.25;
-  const boardCache = new Map();
+  const boardCache = BL.models.scopedMap();
   const board = (title, digits, trim) => {
     const key = `${title}|${digits}|${trim}`;
     let out = boardCache.get(key);
@@ -1860,7 +1860,7 @@
   // (x, y, z): three turns wrapped up the planks' face just outside the post, over the top and under the foot, the
   // middle one a shade darker, covering both plates and their rivets. Flat parts, built once per sign in its own
   // units (`bindings`).
-  const bindings = new Map();
+  const bindings = BL.models.scopedMap();
   const signBinding = (text, icon, width, x, y, z) => {
     const sign = BL.hubModels.caveSign(text, icon), b = BL.scene.boundsOf(sign), k = width / (b.max[0] - b.min[0]), key = `${text}|${icon}`;
     let turns = bindings.get(key);
@@ -3067,7 +3067,7 @@
     if (spot) round.push(moved(turnedX(lathe({ profile: [[r * 0.42, 0], [r * 0.3, r * 0.07], [0, r * 0.11]], segments: 10, color: "#f6ecd2" }), Math.PI / 2), 0, 0, r * 0.9));
     return shaded(round);
   };
-  const nutCache = new Map();
+  const nutCache = BL.models.scopedMap();
   const coconutBall = (style = "husk", r = 0.075, spot = false) => {
     const key = `${style}|${r}|${spot}`;
     let geo = nutCache.get(key);
@@ -3469,7 +3469,7 @@
   // front of it: a dry bamboo pole laid along the board's top, lashed near each end, a small bone tied on its middle,
   // and from each lashing a vine drooping over the rim to its corner (`tie`), where two feathers hang down the side of
   // the rim, splayed a little, each corner its own pair. Nothing crosses the board's face, and nothing glows.
-  const bulbCache = new Map();
+  const bulbCache = BL.models.scopedMap();
   const bulbFrame = (w, h) => {
     const key = `${w}|${h}`;
     let geo = bulbCache.get(key);
@@ -3489,7 +3489,7 @@
   // A zone's name brushed in chalk on a board of two carved planks between bark ends, a bone brushed either side of it
   // and a handprint in the zone's colour at each end, a log laid across its top and a leafy liana slung from the log's
   // ends, facing +z. A name too long for the bay between two trunks is brushed smaller, so no board runs past `ZONE_W`.
-  const zoneCache = new Map(), ZONE_W = 3.2;
+  const zoneCache = BL.models.scopedMap(), ZONE_W = 3.2;
   const zoneSign = (text, color) => {
     const key = `${text}|${color}`;
     let out = zoneCache.get(key);
@@ -4826,7 +4826,7 @@
   // lamps hung from it on three cords each: half a shell, husk outside, cupped open to the room so its pale meat
   // shows round the flame burning in it at `POOL_LAMP_Y`, three holes carved in its underside glowing down on the
   // table. One per `up`, so tables under the same spot share it.
-  const POOL_LAMP_Y = 2.25, poolLamps = new Map();
+  const POOL_LAMP_Y = 2.25, poolLamps = BL.models.scopedMap();
   const poolLamp = (up) => {
     let geo = poolLamps.get(up);
     if (geo) return geo;

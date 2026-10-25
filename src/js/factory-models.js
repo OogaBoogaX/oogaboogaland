@@ -240,7 +240,7 @@
   // A banner of the concept's blue (or `cloth`) with the bolt on both faces, hung from a rod: `h` tall, the rod at
   // the origin, facing +z. Cached by height and cloth and shared, so a builder that places one moves a copy
   // (`merge`), never the banner.
-  const bannerCache = new Map();
+  const bannerCache = BL.models.scopedMap();
   const banner = (h = 2, cloth = "#2b4fb0") => {
     const key = `${h}|${cloth}`;
     let geo = bannerCache.get(key);
@@ -271,7 +271,7 @@
     plain: { board: "#0d0b0a", edge: "rgba(236,226,206,0.6)", title: "#f8f4ec", sub: "#d6cfc1", back: IRON_DK },
     gold: { board: "#1e140d", edge: "rgba(0,0,0,0)", title: "#fbe3a4", sub: "#e8c887", back: TIMBER_DK }
   };
-  const labelCache = new Map();
+  const labelCache = BL.models.scopedMap();
   const label = (title, sub = "", { height = 1.25, style = "plain", keep = true } = {}) => {
     const key = `${title}|${sub}|${height}|${style}`;
     let out = keep ? labelCache.get(key) : null;
@@ -1955,7 +1955,7 @@
   });
   // A gear for the cooker's side: an iron disc with an orange hub, cut into `teeth` round its edge, with spokes on its
   // face; its axle along x, so the scene turns it by rotation.x. Cached by size.
-  const gearCache = new Map();
+  const gearCache = BL.models.scopedMap();
   const cookerGear = (r, teeth) => {
     const key = `${r}|${teeth}`;
     let geo = gearCache.get(key);
@@ -2141,7 +2141,7 @@
     }
   };
   const BOARD_ROWS = [["coins", "TOTAL DONATED", 200], ["banana", "BANANAS DONATED", 285], ["calendar", "TODAY", 400], ["calendar", "THIS WEEK", 482], ["bolt", "CURRENT RATE", 564], ["figure", "LATEST DONATION", 646]], BOARD_RULE = 336;
-  const boardFaces = new Map();
+  const boardFaces = BL.models.scopedMap();
   const boardFace = (note) => boardFaces.get(note) || boardFaces.set(note, paintBoardFace(note)).get(note);
   const paintBoardFace = (note) => {
     const { w: W, h: H, px: P } = BOARD_FACE, canvas = document.createElement("canvas");
