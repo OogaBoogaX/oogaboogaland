@@ -21,6 +21,8 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
+  // Construction checkpoints (see build-tasks.js). They reach it only when sliced, so an unsliced build runs without it.
+  const pause = function* (slice) { if (slice) yield* BL.buildTasks.pause(slice); };
   const { clamp } = BL.math;
   const TAU = Math.PI * 2, DEG = Math.PI / 180;
   const UNIT = 0.5;
@@ -336,7 +338,7 @@
     if (built) return built;
     const data = new Uint8Array(SX * SY * SZ), heights = new Float32Array(SX * SZ).fill(-Infinity);
     const columnWork = { ...COLUMN, gaps: new Float64Array(COLUMN.gaps.length) };
-    for (let i = 0; i < SX; i++) { for (let k = 0; k < SZ; k++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (let i = 0; i < SX; i++) { for (let k = 0; k < SZ; k++) { yield* pause(slice);
       const x = ORIGIN.x + (i + 0.5) * UNIT, z = ORIGIN.z + (k + 0.5) * UNIT, c = column(x, z, columnWork);
       if (c.top === -Infinity) continue;
       let highest = -Infinity;

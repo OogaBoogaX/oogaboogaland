@@ -5,6 +5,8 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
+  // Construction checkpoints (see build-tasks.js). They reach it only when sliced, so an unsliced build runs without it.
+  const pause = function* (slice) { if (slice) yield* BL.buildTasks.pause(slice); };
   const { box, merge, cached } = BL.models;
   const variants = (build) => {
     const read = BL.models.variants(build);
@@ -22,7 +24,7 @@
   const fabricSteps = function* (pattern, width, depth, top, bottom, centerZ, kind, slice = null) {
     const geo = { verts: [], faces: [], lines: [] }, size = pattern.width, colors = pattern.colors;
     const cells = new Uint32Array(size * size), used = new Uint8Array(cells.length);
-    for (let i = 0; i < cells.length; i++) { if (slice && BL.buildTasks.due(slice, 15)) { yield; slice.until = performance.now() + slice.budget; } cells[i] = colors[i * 3] << 16 | colors[i * 3 + 1] << 8 | colors[i * 3 + 2]; }
+    for (let i = 0; i < cells.length; i++) { cells[i] = colors[i * 3] << 16 | colors[i * 3 + 1] << 8 | colors[i * 3 + 2]; }
     const quad = (a, b, c, d, color) => {
       const i = geo.verts.length / 3;
       geo.verts.push(...a, ...b, ...c, ...d);
@@ -30,7 +32,7 @@
     };
     const xAt = (x) => (x / size - 0.5) * width, zAt = (z) => (z / size - 0.5) * depth + centerZ;
     // Merge equal-colour rectangles: every LifeHash pixel is kept, face count stays small in both renderers.
-    for (let z = 0; z < size; z++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } for (let x = 0; x < size; x++) {
+    for (let z = 0; z < size; z++) { yield* pause(slice); for (let x = 0; x < size; x++) {
       const start = z * size + x, color = cells[start];
       if (used[start]) continue;
       let w = 1, h = 1;
@@ -44,7 +46,7 @@
       quad([x0, top, z0], [x0, top, z1], [x1, top, z1], [x1, top, z0], color);
     } }
     // Edge pixels continue down the case and sheet so the sides carry the same fabric, not an unprinted block.
-    for (let edge = 0; edge < 4; edge++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } for (let i = 0; i < size;) {
+    for (let edge = 0; edge < 4; edge++) { for (let i = 0; i < size;) {
       const pixel = (n) => edge < 2 ? (edge ? size - 1 : 0) * size + n : n * size + (edge === 3 ? size - 1 : 0);
       const color = cells[pixel(i)];
       let end = i + 1;
@@ -70,7 +72,7 @@
     sheet.pattern = BL.lifehash.make(sheet.seed);
     // The pillow carries the same LifeHash rotated a quarter turn, following the bedding's long axis.
     const pattern = sheet.pattern, colors = new Uint8Array(pattern.colors.length), size = pattern.width;
-    for (let y = 0; y < size; y++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } for (let x = 0; x < size; x++) {
+    for (let y = 0; y < size; y++) { for (let x = 0; x < size; x++) {
       const from = ((size - 1 - x) * size + y) * 3, to = (y * size + x) * 3;
       colors[to] = pattern.colors[from]; colors[to + 1] = pattern.colors[from + 1]; colors[to + 2] = pattern.colors[from + 2];
     } }

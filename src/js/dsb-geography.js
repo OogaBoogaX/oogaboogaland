@@ -2,6 +2,8 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {}, S = BL.scene, M = BL.models;
+  // Construction checkpoints (see build-tasks.js). They reach it only when sliced, so an unsliced build runs without it.
+  const pause = function* (slice) { if (slice) yield* BL.buildTasks.pause(slice); };
   const STEP = 1.5, MIN = -99, N = 133, C = BL.dsbCoast;
   // Authored marine decks share their exact footprints/top with rendering and walking support.
   // heightAt remains the terrain/seabed query, including beneath these structures.
@@ -53,7 +55,7 @@
     scoped.use();
     if(!cached) {
       const heights=new Float32Array(N*N), geo={verts:[],faces:[],lines:[]}, shore={};
-      for(let j=0;j<N;j++){ if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } for(let i=0;i<N;i++) {
+      for(let j=0;j<N;j++){ yield* pause(slice); for(let i=0;i<N;i++) {
         const x=MIN+i*STEP,z=MIN+j*STEP, distance=closest(edge,x,z).d;
         let h=-5;
         if(inside(x,z)) {
@@ -85,7 +87,7 @@
       const scratch=new Float32Array(heights.length);
       for(let pass=0;pass<3;pass++) {
         scratch.set(heights);
-        for(let j=1;j<N-1;j++){ if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } for(let i=1;i<N-1;i++) {
+        for(let j=1;j<N-1;j++){ yield* pause(slice); for(let i=1;i<N-1;i++) {
           const x=MIN+i*STEP,z=MIN+j*STEP;
           if(closest(trail,x,z).d>4.5||z<trail[0][1])continue;
           const at=j*N+i;let sum=0;
@@ -100,13 +102,13 @@
       const fbm=(x,z)=>vn(x,z)*.58+vn(x*2.1+7.3,z*2.1+3.1)*.3+vn(x*4.3+1.7,z*4.3+9.2)*.12;
       const mix=(p,q,t)=>{t=Math.max(0,Math.min(1,t));return [p[0]+(q[0]-p[0])*t,p[1]+(q[1]-p[1])*t,p[2]+(q[2]-p[2])*t];};
       const F=2*N-1,fine=new Float32Array(F*F);
-      for(let j=0;j<F;j++){ if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } for(let i=0;i<F;i++){
+      for(let j=0;j<F;j++){ yield* pause(slice); for(let i=0;i<F;i++){
         const i0=i>>1,j0=j>>1,at=j0*N+i0;
         // Odd/odd points sit on the shared diagonal of the approved quad, so the fine mesh is the same surface.
         fine[j*F+i]=i&1&&j&1?(heights[at+1]+heights[at+N])/2:i&1?(heights[at]+heights[at+1])/2:j&1?(heights[at]+heights[at+N])/2:heights[at];
       } }
       geo.verts.length=0;geo.smooth=true;
-      for(let j=0;j<F;j++){ if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } for(let i=0;i<F;i++){ geo.verts.push(MIN+i*STEP/2,fine[j*F+i],MIN+j*STEP/2); } }
+      for(let j=0;j<F;j++){ yield* pause(slice); for(let i=0;i<F;i++){ geo.verts.push(MIN+i*STEP/2,fine[j*F+i],MIN+j*STEP/2); } }
       const SAND=[232,208,160],WET=[196,172,126],BED=[160,152,122],STRAW=[188,174,120],MEADOW=[148,152,100],GREEN=[112,132,84],GARRIGUE=[160,150,110];
       const ROCK=[[176,158,134],[154,138,118],[192,176,150],[164,144,122]],OCHRE=[184,146,112],EARTH=[204,178,134],FLAG=[212,196,166],PROM=[220,204,172],MARBLE=[214,204,182];
       const paint=(p,q,r,o)=>{
@@ -154,7 +156,7 @@
         const k=1+speck*.055;
         geo.faces.push({i:[p,q,r],color:[Math.round(Math.min(255,c[0]*k)),Math.round(Math.min(255,c[1]*k)),Math.round(Math.min(255,c[2]*k))]});
       };
-      for(let j=0;j<N-1;j++){ if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } for(let i=0;i<N-1;i++){
+      for(let j=0;j<N-1;j++){ yield* pause(slice); for(let i=0;i<N-1;i++){
         const o=(2*j)*F+2*i,A=o,AB=o+1,B=o+2,AC=o+F,CE=o+F+1,BD=o+F+2,C=o+2*F,CD=o+2*F+1,D=o+2*F+2;
         // The fourth index is the square's opposite corner: both halves sample the same centre.
         paint(A,AC,AB,CE);paint(AB,AC,CE,AC);paint(AB,CE,B,BD);paint(B,CE,BD,CE);paint(AC,C,CE,CD);paint(CE,C,CD,C);paint(CE,CD,BD,D);paint(BD,CD,D,CD);
@@ -171,7 +173,6 @@
     const {geo,heightAt}=cached, root=S.createNode(), buildings=[];
     S.addChild(root,S.createNode({geometry:geo}));
     const put=(color,x,y,z,w,h,d,ry=0)=>{const n=S.createNode({geometry:M.box({color}),position:{x,y,z},scale:{x:w,y:h,z:d},rotation:{x:0,y:ry,z:0}});S.addChild(root,n);return n;};
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     const sea=put("#347f99",0,-.45,0,650,.3,650);
     // PROTOTYPE shells: same footprint, height, door and registry as the approved block masses; only the look
     // changes. Chamfered plaster, a dressed-stone base on the voxel grid, and a roof form per lot.
@@ -221,18 +222,14 @@
       put("#2f6aa0",x+s*(d/2+.035),floor+1.1,z+c*(d/2+.035),1.1,2.2,.08,yaw);
       buildings.push({name,x,z,w,d,yaw,floor,front:{x:front.x,z:front.z},h});
     };
-    for(const row of properties){ if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } place(row,row[6]?[waterfront]:lanes); }
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for(const row of properties){ yield* pause(slice); place(row,row[6]?[waterfront]:lanes); }
     place(["Noderunner waterfront",-61,27,11,8,5],[waterfront]);
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     place(["Harbor store",-48,25,7,6,4],[waterfront]);
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     place(["Harbor workshop",-35,26,8,6,4.5],[waterfront]);
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     place(["Harbor office",-68,38,6,6,4],[waterfront]);
-    for(const row of hillside){ if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } place(row,[HILL_LANES[row[6]]]); }
+    for(const row of hillside){ yield* pause(slice); place(row,[HILL_LANES[row[6]]]); }
     // The existing quay and two piers: geometry is unchanged; support is separate from the seabed.
-    for(const d of HARBOR_DECKS){ if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } put("#b7a98d",d.x,d.top-.35,d.z,d.w,.7,d.d); }
+    for(const d of HARBOR_DECKS){ put("#b7a98d",d.x,d.top-.35,d.z,d.w,.7,d.d); }
     const groundAt=(x,z)=>{
       let h=heightAt(x,z);
       for(const d of HARBOR_DECKS)if(Math.abs(x-d.x)<=d.w/2&&Math.abs(z-d.z)<=d.d/2)h=Math.max(h,d.top);

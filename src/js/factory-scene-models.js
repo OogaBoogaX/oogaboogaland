@@ -2,6 +2,8 @@
 (() => {
   "use strict";
   const { BL, BOARD, BOARD_FACE, BOARD_VALUES, BRASS, BRONZE, BRONZE_DK, CAP, CAP_BLUE, CAP_ORANGE, COILS, COIN_R, CONDUIT_SAMPLES, CONSOLE, COOK, COPPER, COPPER_DK, CRYSTAL, CYAN, FALLS, FLOOR, FORGE_CONSOLE, FORGE_CY, FORGE_TRACKS, GOLD, HALL, IRON_BK, IRON_DK, IRON_LT, KIOSK, LABEL_FONT, LAYOUT, LEVEL, LINE_STEP, LOOKOUT_BEAM, MONITORS, ORANGE, OUTCROPS, PORCH_HALF, REB, RING_BRIDGES, SHAFTS, STEP, STONE, STONE_DK, STUDY, TAU, TIMBER, TIMBER_DK, TIMBER_LT, TRE, TUNNEL_BOX, TUNNEL_POST, TUNNEL_THEMES, WALL_LEAN, along, banner, beam, bevelBox, box, cached, chain, columnParts, conduitPath, deckParts, donationCorner, face, flame, forwardLathe, gem, geometry, groundUnder, hexToRgb, label, labelCache, lanternParts, lathe, makeVox, merge, models, moved, mulberry32, networkGlyph, noShadow, porchOf, prism, pushVert, railParts, ringLanding, shaded, smoothBitcoin, smoothBolt, span, stairParts, stationX, stationZ, torus, tube, tunnelFrame, turn, turnedX, turnedY, turnedZ, voxelGeometry } = window.BL.factoryModelsSceneKit;
+  // Construction checkpoints (see build-tasks.js). They reach it only when sliced, so an unsliced build runs without it.
+  const pause = function* (slice) { if (slice) yield* BL.buildTasks.pause(slice); };
   const ROCK_LT = "#75614f";
   const IRON = "#4a4d52";
   const BOLT = "#ffd84a";
@@ -119,7 +121,7 @@
   const hall = BL.models.cachedSteps(function* (slice = null) {
     const rand = mulberry32(2112), rock = [], ceiling = [], glow = [];
     const { halfW: W, back: B, front: F, h: H } = HALL;
-    for (let x = -W; x < W; x += 4) { for (let z = B; z < F; z += 4) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (let x = -W; x < W; x += 4) { for (let z = B; z < F; z += 4) { yield* pause(slice);
       rock.push(box({ w: 4, h: 0.4, d: 4, color: STONE[Math.floor(rand() * 4)], offset: { x: x + 2, y: -0.2 - rand() * 0.06, z: z + 2 } }));
     } }
     // Walls: voxel stone in cells of WALL_CELL metres, leaning in as they rise and heaved in and out at two scales,
@@ -162,19 +164,18 @@
         for (let d = 0; d < 3; d++) put(iu, iy, depth, d, color);
       }
     };
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     shell("back", -W - 1, W + 1, 1, (iu, iy, depth, d, c) => v.set(iu, iy, cell(B + depth) - d, c));
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    yield* pause(slice);
     shell("front", -W - 1, W + 1, 2, (iu, iy, depth, d, c) => v.set(iu, iy, cell(F - depth) + d, c));
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    yield* pause(slice);
     shell("left", B, F, 3, (iu, iy, depth, d, c) => v.set(cell(-W + depth) - d, iy, iu, c));
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    yield* pause(slice);
     shell("right", B, F, 4, (iu, iy, depth, d, c) => v.set(cell(W - depth) + d, iy, iu, c));
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    yield* pause(slice);
     const walls = voxelGeometry(v, { unit: C, palette: [null, ...STONE, ROCK_LT] });
     // The vault: slabs across the top and stalactites hanging from them in three tapering courses.
-    for (let x = -W; x < W; x += 5) { for (let z = B; z < F; z += 5) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } ceiling.push(box({ w: 5.4, h: 2, d: 5.4, color: STONE[Math.floor(rand() * 4)], offset: { x: x + 2.5, y: H + rand() * 1.2, z: z + 2.5 } })); } }
-    for (let i = 0; i < 70; i++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (let x = -W; x < W; x += 5) { for (let z = B; z < F; z += 5) { yield* pause(slice); ceiling.push(box({ w: 5.4, h: 2, d: 5.4, color: STONE[Math.floor(rand() * 4)], offset: { x: x + 2.5, y: H + rand() * 1.2, z: z + 2.5 } })); } }
+    for (let i = 0; i < 70; i++) { yield* pause(slice);
       const x = (rand() * 2 - 1) * (W - 3), z = B + 2 + rand() * (F - B - 5), len = 1.4 + rand() * 3.6, s = 0.8 + rand() * 0.8;
       const top = H - 0.8, color = STONE[Math.floor(rand() * 4)];
       ceiling.push(
@@ -188,7 +189,7 @@
       for (let k = 0; k < 3; k++) rock.push(box({ w: w - k * 0.8, h: y / 3 + 0.2, d: d - k * 0.6, color: STONE[(k + 1) % 4], offset: { x, y: y * (k + 0.5) / 3, z } }));
     };
     // Their tops stand just under the porches' planks.
-    for (const t of LAYOUT.tunnels) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (const t of LAYOUT.tunnels) {
       if (t.turn === 0) ledge(t.x, t.y - 0.4, t.z + 2.2, 8, 5);
       else ledge(t.x - Math.sign(t.x) * 2.4, t.y - 0.4, t.z, 7, 8);
     }
@@ -204,27 +205,27 @@
         glow.push(moved(g, x + Math.cos(a) * s * 0.3, y, z + Math.sin(a) * s * 0.3));
       }
     };
-    for (let i = 0; i < 26; i++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (let i = 0; i < 26; i++) { yield* pause(slice);
       const side = i % 3, t = rand();
       if (side === 0) crystal(-W + 1.5 + rand(), 0, B + 3 + t * (F - B - 8), 0.8 + rand() * 0.9);
       else if (side === 1) crystal(W - 1.5 - rand(), 0, B + 3 + t * (F - B - 8), 0.8 + rand() * 0.9);
       else crystal(-W + 4 + t * (2 * W - 8), 0, B + 1.8, 0.9 + rand());
     }
-    for (const t of LAYOUT.tunnels) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } crystal(t.x + (t.turn ? 0 : 3.6), t.y, t.z + (t.turn ? 3.4 : 1.4), 0.7); }
+    for (const t of LAYOUT.tunnels) { crystal(t.x + (t.turn ? 0 : 3.6), t.y, t.z + (t.turn ? 3.4 : 1.4), 0.7); }
     // Outcrops on the left of the front of the pit, framing the view from the balcony.
-    for (const [x, z, s] of OUTCROPS) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
-      for (let k = 0; k < 4; k++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (const [x, z, s] of OUTCROPS) {
+      for (let k = 0; k < 4; k++) {
         const w = (3.6 - k * 0.7) * s, h = 1.4 * s;
         rock.push(box({ w, h, d: w * 0.9, color: STONE[(k + 2) % 4], offset: { x: x + (rand() - 0.5) * 0.6, y: h * (k + 0.5), z: z + (rand() - 0.5) * 0.6 } }));
       }
       crystal(x + 1.4 * s, 0, z - 1.2 * s, 0.9 * s);
     }
-    for (const fx of FALLS) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
-      for (let y = 0; y < 15; y += 1.5) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } glow.push(box({ w: 1.1 + rand() * 0.5, h: 1.6, d: 0.3, color: y % 3 < 1.5 ? "#3f8fe0" : "#6ab8ff", emissive: 0.55 + rand() * 0.2, offset: { x: fx + (rand() - 0.5) * 0.3, y: y + 0.8, z: B + 1.4 + (y + 0.8) / H * WALL_LEAN } })); }
+    for (const fx of FALLS) {
+      for (let y = 0; y < 15; y += 1.5) { glow.push(box({ w: 1.1 + rand() * 0.5, h: 1.6, d: 0.3, color: y % 3 < 1.5 ? "#3f8fe0" : "#6ab8ff", emissive: 0.55 + rand() * 0.2, offset: { x: fx + (rand() - 0.5) * 0.3, y: y + 0.8, z: B + 1.4 + (y + 0.8) / H * WALL_LEAN } })); }
       // The pool each fall lands in.
       glow.push(moved(lathe({ profile: [[1.6, 0.05], [0, 0.05]], segments: 10, color: "#4a9bff", emissive: 0.5 }), fx, 0, B + 2.6));
     }
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    yield* pause(slice);
     const roof = models.cutCylinder(merge(...ceiling), LAYOUT.cooker.x + COOK.lip[0], LAYOUT.cooker.z + COOK.lip[2], 0.29);
     return { rock: merge(...rock), ceiling: roof, walls, glow: noShadow(merge(...glow)) };
   });
@@ -271,21 +272,21 @@
     // Where a stair, a bridge, a porch, the stairway or the walkway lands on a deck, as cuts on that deck's rail:
     // exactly as wide as the rails that arrive, which end on the cut's end posts.
     const landings = [];
-    for (const [ax, ay, az, bx, by, bz, w] of L.stairs) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (const [ax, ay, az, bx, by, bz, w] of L.stairs) {
       const l = Math.hypot(bx - ax, bz - az), dx = (bx - ax) / l, dz = (bz - az) / l;
       landings.push([ax, ay, az, w / 2 + 0.05, dx, dz], [bx, by, bz, w / 2 + 0.05, -dx, -dz]);
     }
-    for (const l of L.ladders) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (const l of L.ladders) {
       landings.push([l.x, l.top, l.z, l.width / 2 + 0.15, l.nx, l.nz]);
       landings.push([l.x, l.bottom, l.z, l.width / 2 + 0.15, l.nx, l.nz]);
     }
     const cutAcross = ([p, q], y) => landings.push([(p[0] + q[0]) / 2, y, (p[1] + q[1]) / 2, Math.hypot(p[0] - q[0], p[1] - q[1]) / 2]);
-    for (const bd of ringBridges) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } cutAcross(bd.sides.map((sd) => sd.b), LEVEL.main); }
-    for (const bd of topBridges) { for (const end of ["a", "b"]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } cutAcross(bd.sides.map((sd) => sd[end]), LEVEL.top); } }
+    for (const bd of ringBridges) { cutAcross(bd.sides.map((sd) => sd.b), LEVEL.main); }
+    for (const bd of topBridges) { for (const end of ["a", "b"]) { cutAcross(bd.sides.map((sd) => sd[end]), LEVEL.top); } }
     // The first gallery's front opens onto the landing, exactly between the flights' rails.
     const ld = L.landing;
     landings.push([ld.x, ld.y, ld.z - ld.d / 2 - 0.1, ld.w / 2 - 0.1]);
-    for (const t of L.tunnels) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (const t of L.tunnels) {
       const b = L.bays[t.bay];
       landings.push(t.turn === 0 ? [t.x, t.y, b.z - b.d / 2 + 0.1, PORCH_HALF - 0.1] : [b.x + Math.sign(t.x) * (b.w / 2 - 0.1), t.y, t.z, PORCH_HALF - 0.1]);
     }
@@ -296,65 +297,58 @@
     const deckAt = (d, rails, drop = (x, z) => d.y - groundUnder(d.x + x, d.z + z, d.y)) => place(deckParts(d.w, d.d, drop, rails, Math.round(d.x * 7 + d.z), cutsFor(d)), d.x, d.y, d.z);
     // Every deck is railed all round, open only where something lands on it; the galleries' backs are the wall, and
     // they hang from it on brackets rather than stand on posts, which would land in the porches below them.
-    for (const b of L.bays) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } deckAt(b, "nsew"); }
-    for (const d of [L.switchboard, L.platform]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } deckAt(d, "nsew"); }
+    for (const b of L.bays) { yield* pause(slice); deckAt(b, "nsew"); }
+    for (const d of [L.switchboard, L.platform]) { yield* pause(slice); deckAt(d, "nsew"); }
     // Kortik's switchboard stands along its west edge, where a rail would be.
     deckAt(L.kortik, "nse");
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    yield* pause(slice);
     deckAt(L.lookout, "nsew");
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     deckAt(L.lookoutDeck, "nsew", 0);
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     deckAt(L.lookoutApproach, "ew", 0);
     // Brackets carry the lantern deck out from the tower's four legs.
-    for (const sx of [-1, 1]) { for (const sz of [-1, 1]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } geos.push(beam(L.lookout.x + sx * 0.9, L.lookoutDeck.y - 1.4, L.lookout.z + sz * 0.9,
+    for (const sx of [-1, 1]) { for (const sz of [-1, 1]) { geos.push(beam(L.lookout.x + sx * 0.9, L.lookoutDeck.y - 1.4, L.lookout.z + sz * 0.9,
       L.lookout.x + sx * 2.2, L.lookoutDeck.y - 0.4, L.lookout.z + sz * 2.2, 0.16, TIMBER_DK)); } }
     // Rails extend above the landing as handholds; the rungs stop below the deck lip.
-    for (const l of L.ladders) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (const l of L.ladders) { yield* pause(slice);
       const tx = l.nz, tz = -l.nx;
-      for (const side of [-1, 1]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } geos.push(beam(l.x + tx * side * l.width / 2, l.bottom, l.z + tz * side * l.width / 2,
+      for (const side of [-1, 1]) { geos.push(beam(l.x + tx * side * l.width / 2, l.bottom, l.z + tz * side * l.width / 2,
         l.x + tx * side * l.width / 2, l.top + 1, l.z + tz * side * l.width / 2, 0.12, TIMBER_DK)); }
       const count = Math.ceil((l.top - l.bottom) / 0.3);
-      for (let i = 1; i <= count; i++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+      for (let i = 1; i <= count; i++) {
         const y = l.bottom + (l.top - l.bottom - 0.15) * i / count;
         geos.push(beam(l.x - tx * l.width / 2, y, l.z - tz * l.width / 2, l.x + tx * l.width / 2, y, l.z + tz * l.width / 2, 0.09, TIMBER_LT));
       }
     }
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     deckAt(L.landing, "s");
-    for (const g of L.galleries) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (const g of L.galleries) { yield* pause(slice);
       deckAt(g, "swe", 0);
       const back = HALL.back + 2, front = g.z + g.d / 2;
-      for (const x of galleryBrackets(g)) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+      for (const x of galleryBrackets(g)) {
         geos.push(beam(x, g.y - 0.55, back, x, g.y - 0.55, front - 0.2, 0.26, TIMBER_DK), beam(x, g.y - 2.9, back, x, g.y - 0.68, front - 0.7, 0.2, TIMBER));
         geos.push(bevelBox({ w: 0.4, h: 0.12, d: 0.4, color: IRON_DK, bevel: 0.02, offset: { x, y: g.y - 0.65, z: front - 0.7 } }));
       }
       // An end near a side wall is bracketed into it too.
-      for (const s of [-1, 1]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+      for (const s of [-1, 1]) {
         const end = g.x + s * g.w / 2, wall = s * (HALL.halfW - 2);
         if (Math.abs(wall - end) > 2.5) continue;
-        for (const z of [g.z - g.d / 4, g.z + g.d / 4]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } geos.push(beam(wall, g.y - 0.55, z, end - s * 0.2, g.y - 0.55, z, 0.26, TIMBER_DK), beam(wall, g.y - 2.6, z, end - s * 0.6, g.y - 0.68, z, 0.2, TIMBER)); }
+        for (const z of [g.z - g.d / 4, g.z + g.d / 4]) { geos.push(beam(wall, g.y - 0.55, z, end - s * 0.2, g.y - 0.55, z, 0.26, TIMBER_DK), beam(wall, g.y - 2.6, z, end - s * 0.6, g.y - 0.68, z, 0.2, TIMBER)); }
       }
     }
     // The balcony the visitor enters on, running out from the tunnel, open at its front to the stairway and on its
     // right to the walkway.
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     deckAt(e, "nwe");
     // Level 2's walkway round the right wall, posted down to the pit floor and railed along the hall side from the
     // balcony's rail to the Harbor porch's, every corner one shared post; and each line's porch out to its peer
     // tunnel, railed along both sides from its deck's rail.
-    for (const [x0, x1, z0, z1] of L.walk) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } place(deckParts(x1 - x0, z1 - z0, e.y, "", 17), (x0 + x1) / 2, e.y, (z0 + z1) / 2); }
+    for (const [x0, x1, z0, z1] of L.walk) { yield* pause(slice); place(deckParts(x1 - x0, z1 - z0, e.y, "", 17), (x0 + x1) / 2, e.y, (z0 + z1) / 2); }
     const ex = e.x + e.w / 2 - 0.1, wx = s1x0 + 0.1;
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     place(railParts(ex, a0 + 0.1, wx, a0 + 0.1, [false, true]), 0, e.y, 0);
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     place(railParts(ex, a1 - 0.1, s1x1 - 0.1, a1 - 0.1, [false, true]), 0, e.y, 0);
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     place(railParts(wx, a0 + 0.1, wx, s1z0 - 0.1, [false, true]), 0, e.y, 0);
-    for (const t of L.tunnels) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (const t of L.tunnels) { yield* pause(slice);
       const [x0, x1, z0, z1] = porchOf(t), b = L.bays[t.bay], s = Math.sign(t.x);
       place(deckParts(x1 - x0, z1 - z0, t.turn ? t.y : 0.3, "", 23), (x0 + x1) / 2, t.y, (z0 + z1) / 2);
-      if (t.turn === 0) for (const x of [x0 + 0.1, x1 - 0.1]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } place(railParts(x, z0, x, z1 + 0.1, [true, false]), 0, t.y, 0); }
+      if (t.turn === 0) for (const x of [x0 + 0.1, x1 - 0.1]) { place(railParts(x, z0, x, z1 + 0.1, [true, false]), 0, t.y, 0); }
       else {
         const inner = b.x + s * (b.w / 2 - 0.1), face = t.x - s * 0.5;
         place(railParts(inner, z0 + 0.1, face, z0 + 0.1, [false, true]), 0, t.y, 0);
@@ -365,7 +359,7 @@
     // The core's walkway: a ring of planks round the chamber's foot, each cut to its wedge so the ring closes
     // without gaps at its rim, posted down to the pit.
     const planks = 28;
-    for (let i = 0; i < planks; i++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (let i = 0; i < planks; i++) { yield* pause(slice);
       const a = i / planks * TAU, a2 = (i + 1) / planks * TAU, edge = (rad, t) => [r.x + Math.cos(t) * rad, r.z + Math.sin(t) * rad];
       const seam = (rad) => 0.015 / rad;
       geos.push(slab([edge(r.inner, a + seam(r.inner)), edge(r.outer, a + seam(r.outer)), edge(r.outer, a2 - seam(r.outer)), edge(r.inner, a2 - seam(r.inner))], r.y - 0.2, r.y, i % 3 ? TIMBER : TIMBER_LT));
@@ -384,18 +378,18 @@
       while (d < -Math.PI) d += TAU;
       gaps.push([c + Math.min(0, d), c + Math.max(0, d)]);
     };
-    for (const bd of ringBridges) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } arcOf(bd.sides[0].a, bd.sides[1].a); }
+    for (const bd of ringBridges) { arcOf(bd.sides[0].a, bd.sides[1].a); }
     // A stair up from the pit arrives beside the walkway: a landing cut to the walkway's curve carries it on, its
     // top flush with the planks, railed each side from the stair's rails to the walkway's.
-    for (const [, , , bx, by, bz, w] of L.stairs) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } if (ringLanding(bx, by, bz)) {
+    for (const [, , , bx, by, bz, w] of L.stairs) { yield* pause(slice); if (ringLanding(bx, by, bz)) {
       const o = w / 2 + 0.05, rim = (x) => r.z + Math.sqrt(R * R - (x - r.x) ** 2), plank = (x) => r.z + Math.sqrt((r.outer - 0.02) ** 2 - (x - r.x) ** 2);
       const x0 = bx - w / 2, x1 = bx + w / 2;
       geos.push(slab([[x0, bz], [x1, bz], [x1, Math.min(bz, plank(x1))], [x0, Math.min(bz, plank(x0))]], by - 0.2, by - 0.005, TIMBER_LT));
       const ends = [-1, 1].map((s) => [bx + s * o, rim(bx + s * o)]);
-      for (const [x, z] of ends) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } if (z < bz - 0.05) geos.push(...railParts(x, bz, x, z, [false, false]).map((g) => moved(g, 0, by, 0))); }
+      for (const [x, z] of ends) { if (z < bz - 0.05) geos.push(...railParts(x, bz, x, z, [false, false]).map((g) => moved(g, 0, by, 0))); }
       arcOf(ends[0], ends[1]);
     } }
-    for (const g of gaps) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } const span = g[1] - g[0]; g[0] = (g[0] % TAU + TAU) % TAU; g[1] = g[0] + span; }
+    for (const g of gaps) { const span = g[1] - g[0]; g[0] = (g[0] % TAU + TAU) % TAU; g[1] = g[0] + span; }
     gaps.sort((p, q) => p[0] - q[0]);
     gaps.forEach((g, i) => {
       const b0 = g[1], b1 = i + 1 < gaps.length ? gaps[i + 1][0] : gaps[0][0] + TAU, n = Math.max(1, Math.ceil((b1 - b0) * R / 1.5));
@@ -420,27 +414,27 @@
         geos.push(beam(p[0], y - 0.3, p[1], q[0], y - 0.3, q[1], 0.24, TIMBER_DK));
       }
     };
-    for (const bd of ringBridges) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } bridge(bd, LEVEL.main); }
-    for (const bd of topBridges) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } bridge(bd, LEVEL.top); }
+    for (const bd of ringBridges) { bridge(bd, LEVEL.main); }
+    for (const bd of topBridges) { bridge(bd, LEVEL.top); }
     // The grand stairway from the balcony down to the forge: plank treads and risers between heavy stringers,
     // propped on posts, with a rail each side that ends on the balcony rail's posts.
     {
       const [x, y0, z0, , y1, z1, w] = L.stairway, steps = Math.round((y1 - y0) / 0.32), run = (z1 - z0) / steps, rise = (y1 - y0) / steps;
       const heightAt = (z) => y0 + (y1 - y0) * (z - z0) / (z1 - z0), top = z1 + 0.1;
-      for (let i = 0; i < steps; i++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+      for (let i = 0; i < steps; i++) { yield* pause(slice);
         const ty = y0 + rise * (i + 1), z = z0 + run * (i + 0.5);
         geos.push(bevelBox({ w: w - 0.1, h: 0.12, d: run + 0.03, color: i % 2 ? TIMBER : TIMBER_LT, bevel: 0.03, offset: { x, y: ty - 0.06, z } }));
         geos.push(box({ w: w - 0.2, h: rise, d: 0.06, color: TIMBER_DK, offset: { x, y: ty - rise / 2, z: z - run / 2 + 0.03 } }));
       }
-      for (const s of [-1, 1]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+      for (const s of [-1, 1]) {
         const sx = x + s * (w / 2 + 0.1);
         geos.push(beam(sx, y0 - 0.1, z0, sx, y1 - 0.1, z1, 0.3, TIMBER_DK));
         geos.push(beam(sx, y0 + 1.05, z0 - 0.2, sx, heightAt(top) + 1.02, top, 0.14, TIMBER_LT), beam(sx, y0 + 0.6, z0 - 0.2, sx, heightAt(top) + 0.6, top, 0.09, TIMBER));
-        for (let z = z0 + 0.1; z < z1 - 0.5; z += 1.5) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } geos.push(bevelBox({ w: 0.17, h: 1.1, d: 0.17, color: TIMBER_DK, bevel: 0.03, offset: { x: sx, y: heightAt(z) + 0.5, z } }), bevelBox({ w: 0.25, h: 0.08, d: 0.25, color: TIMBER_LT, bevel: 0.02, offset: { x: sx, y: heightAt(z) + 1.08, z } })); }
-        for (const z of [z0 + (z1 - z0) * 0.45, z0 + (z1 - z0) * 0.8]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } geos.push(...columnParts(sx, z, 0, heightAt(z) - 0.25, 0.34)); }
+        for (let z = z0 + 0.1; z < z1 - 0.5; z += 1.5) { geos.push(bevelBox({ w: 0.17, h: 1.1, d: 0.17, color: TIMBER_DK, bevel: 0.03, offset: { x: sx, y: heightAt(z) + 0.5, z } }), bevelBox({ w: 0.25, h: 0.08, d: 0.25, color: TIMBER_LT, bevel: 0.02, offset: { x: sx, y: heightAt(z) + 1.08, z } })); }
+        for (const z of [z0 + (z1 - z0) * 0.45, z0 + (z1 - z0) * 0.8]) { geos.push(...columnParts(sx, z, 0, heightAt(z) - 0.25, 0.34)); }
       }
     }
-    for (const [ax, ay, az, bx, by, bz, w] of L.stairs) { for (const g of stairParts(ax, ay, az, bx, by, bz, w, [!atRail(ax, ay, az), !atRail(bx, by, bz)])) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } geos.push(g); } }
+    for (const [ax, ay, az, bx, by, bz, w] of L.stairs) { yield* pause(slice); for (const g of stairParts(ax, ay, az, bx, by, bz, w, [!atRail(ax, ay, az), !atRail(bx, by, bz)])) { geos.push(g); } }
     return merge(...geos);
   });
   const supportAt = (x, z, feet) => {
@@ -549,72 +543,65 @@
   // the scene can light and dim them.
   const coreBody = BL.models.cachedSteps(function* (slice = null) {
     const c = LAYOUT.core, [lo, hi] = c.chamber, M = LEVEL.main, round = [], flat = [];
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     round.push(turn([[4.2, 0], [4.2, 0.5], [3.9, 0.7], [3.4, 0.9], [3.3, M - 0.6], [3.65, M - 0.35], [3.65, M - 0.2], [0, M - 0.2]], 20, (t) => t < 0.3 ? STONE[3] : STONE[2]));
-    for (let k = 0; k < 8; k++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (let k = 0; k < 8; k++) { yield* pause(slice);
       const a = (k + 0.5) / 8 * TAU;
       if (Math.abs(Math.sin(a) - 1) < 0.1) continue;
       flat.push(moved(turnedY(bevelBox({ w: 0.9, h: M - 1.2, d: 0.6, color: STONE_DK, bevel: 0.1 }), -a + Math.PI / 2), Math.cos(a) * 3.5, (M - 1.2) / 2 + 0.6, Math.sin(a) * 3.5));
     }
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     round.push(turn([[3.25, M - 0.2], [3.3, M + 0.1], [3.08, M + 0.22], [3.08, lo - 0.34], [3.24, lo - 0.22], [3.24, lo], [0, lo]], 28, BRONZE_DK));
     // A seam of lava zigzagging round the drum, with short cracks running off it, and a ring of blue lamps over it.
     const rand = mulberry32(77), seam = 56, at = (a, y) => [Math.cos(a) * 3.1, y, Math.sin(a) * 3.1];
-    for (let k = 0; k < seam; k++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (let k = 0; k < seam; k++) { yield* pause(slice);
       const a0 = k / seam * TAU, a1 = (k + 1) / seam * TAU, y0 = M + 0.42 + (k % 2 ? 0.12 : -0.1) + rand() * 0.05, y1 = M + 0.42 + ((k + 1) % 2 ? 0.12 : -0.1);
       flat.push(beam(...at(a0, y0), ...at(a1, y1), 0.075, "#ff8a2a", 1));
       if (k % 4 === 1) flat.push(beam(...at(a0, y0), ...at(a0 + (rand() - 0.5) * 0.12, y0 + (rand() < 0.5 ? -0.3 : 0.3)), 0.05, "#ffb040", 1));
     }
-    for (let k = 0; k < 16; k++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (let k = 0; k < 16; k++) { yield* pause(slice);
       const a = (k + 0.5) / 16 * TAU;
       round.push(moved(ball(0.1, "#5fc0ff", 1, 8), Math.cos(a) * 3.1, lo - 0.55, Math.sin(a) * 3.1));
     }
-    for (const y of [lo, hi]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } round.push(moved(torus(2.7, 0.2, BRASS, 0, 32, 8), 0, y, 0)); }
+    for (const y of [lo, hi]) { round.push(moved(torus(2.7, 0.2, BRASS, 0, 32, 8), 0, y, 0)); }
     // Eight heavy riveted ribs up the glass, set so the four bolts look out between them.
-    for (let k = 0; k < 8; k++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (let k = 0; k < 8; k++) { yield* pause(slice);
       const a = (k + 0.5) / 8 * TAU, r = 2.72;
       flat.push(moved(turnedY(bevelBox({ w: 0.42, h: hi - lo + 0.2, d: 0.36, color: BRONZE, bevel: 0.07 }), -a + Math.PI / 2), Math.cos(a) * r, (lo + hi) / 2, Math.sin(a) * r));
-      for (let y = lo + 0.35; y < hi - 0.2; y += 0.5) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } round.push(moved(ball(0.065, BRASS, 0, 6), Math.cos(a) * (r + 0.19), y, Math.sin(a) * (r + 0.19))); }
+      for (let y = lo + 0.35; y < hi - 0.2; y += 0.5) { round.push(moved(ball(0.065, BRASS, 0, 6), Math.cos(a) * (r + 0.19), y, Math.sin(a) * (r + 0.19))); }
     }
     // A ring of blue lamps round the edge of the walkway the core stands in.
     const ring = LAYOUT.ring;
-    for (let k = 0; k < 40; k++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (let k = 0; k < 40; k++) { yield* pause(slice);
       const a = (k + 0.5) / 40 * TAU;
       round.push(moved(ball(0.075, "#5fc0ff", 1, 6), Math.cos(a) * (ring.outer + 0.03), ring.y - 0.12, Math.sin(a) * (ring.outer + 0.03)));
     }
     // The crown: three stepped tiers of copper, each with a band of lit windows, up to the lantern's base.
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     round.push(turn([[2.95, hi], [3.12, hi + 0.25], [3.12, hi + 0.6], [2.72, hi + 0.8], [2.72, hi + 1.35], [2.24, hi + 1.55], [2.24, hi + 2.05],
       [1.64, hi + 2.25], [1.64, hi + 2.75], [1.0, hi + 2.95], [0.75, hi + 3.1], [0, hi + 3.1]], 28, (t) => t < 0.3 ? COPPER : t < 0.6 ? COPPER_DK : COPPER));
-    for (const [r, y, n, h] of [[2.73, hi + 1.07, 14, 0.42], [2.25, hi + 1.8, 12, 0.38], [1.65, hi + 2.5, 9, 0.36]]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
-      for (let k = 0; k < n; k++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (const [r, y, n, h] of [[2.73, hi + 1.07, 14, 0.42], [2.25, hi + 1.8, 12, 0.38], [1.65, hi + 2.5, 9, 0.36]]) { yield* pause(slice);
+      for (let k = 0; k < n; k++) {
         const a = (k + 0.5) / n * TAU;
         flat.push(moved(turnedY(box({ w: 0.2, h, d: 0.06, color: "#ffb347", emissive: 1 }), -a + Math.PI / 2), Math.cos(a) * r, y, Math.sin(a) * r));
       }
     }
     // A band of blue lights round the crown's lip, as on the concept's core.
-    for (let k = 0; k < 24; k++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (let k = 0; k < 24; k++) { yield* pause(slice);
       const a = (k + 0.5) / 24 * TAU;
       flat.push(moved(turnedY(box({ w: 0.3, h: 0.13, d: 0.05, color: "#5fc0ff", emissive: 1 }), -a + Math.PI / 2), Math.cos(a) * 3.14, hi + 0.42, Math.sin(a) * 3.14));
     }
     // The badge on the drum's front: a blue panel with four lit studs, facing the balcony.
     const by = lo - 0.75;
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     flat.push(bevelBox({ w: 0.66, h: 0.66, d: 0.1, color: IRON_DK, bevel: 0.02, offset: { y: by, z: 3.2 } }), box({ w: 0.52, h: 0.52, d: 0.04, color: "#1f5fb8", emissive: 0.9, offset: { y: by, z: 3.26 } }));
-    for (const [dx, dy] of [[-0.12, 0.12], [0.12, 0.12], [-0.12, -0.12], [0.12, -0.12]]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } flat.push(box({ w: 0.1, h: 0.1, d: 0.03, color: "#dff6ff", emissive: 1, offset: { x: dx, y: by + dy, z: 3.29 } })); }
+    for (const [dx, dy] of [[-0.12, 0.12], [0.12, 0.12], [-0.12, -0.12], [0.12, -0.12]]) { flat.push(box({ w: 0.1, h: 0.1, d: 0.03, color: "#dff6ff", emissive: 1, offset: { x: dx, y: by + dy, z: 3.29 } })); }
     // The lantern: a brass base, six bars of cage round the flame and a copper dome with a finial.
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     round.push(turn([[0.82, hi + 3.1], [0.82, hi + 3.28], [0.66, hi + 3.36], [0, hi + 3.36]], 16, BRASS));
-    for (let k = 0; k < 6; k++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (let k = 0; k < 6; k++) {
       const a = k / 6 * TAU;
       flat.push(bevelBox({ w: 0.1, h: 1.2, d: 0.1, color: BRASS, bevel: 0.02, offset: { x: Math.cos(a) * 0.62, y: hi + 3.96, z: Math.sin(a) * 0.62 } }));
     }
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     round.push(turn([[0.86, hi + 4.52], [0.86, hi + 4.64], [0.34, hi + 5.1], [0.14, hi + 5.5], [0, hi + 5.56]], 16, COPPER_DK));
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     round.push(moved(ball(0.16, BRASS, 0, 10), 0, hi + 5.66, 0));
     // Chains up to the vault from the crown.
-    for (let k = 0; k < 4; k++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (let k = 0; k < 4; k++) { yield* pause(slice);
       const a = (k + 0.5) / 4 * TAU, x = Math.cos(a) * 1.9, z = Math.sin(a) * 1.9;
       round.push(...chain(x, hi + 2.1, z, x * 1.4, HALL.h, z * 1.4, 0.2));
     }
@@ -672,10 +659,10 @@
   const CONDUIT_FLARE = [[0.6, 0], [0.57, 0.05], [0.49, 0.14], [0.42, 0.25], [0.38, 0.37], [0.36, 0.48]];
   const conduits = BL.models.cachedSteps(function* (slice = null) {
     const round = [], glass = [], lamps = [], paths = [];
-    for (const bay of LAYOUT.bays) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (const bay of LAYOUT.bays) { yield* pause(slice);
       const path = conduitPath(bay), samples = new Float32Array((CONDUIT_SAMPLES + 1) * 3);
       let length = 0;
-      for (let i = 0; i <= CONDUIT_SAMPLES; i++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+      for (let i = 0; i <= CONDUIT_SAMPLES; i++) {
         const p = path(i / CONDUIT_SAMPLES);
         samples[i * 3] = p.x; samples[i * 3 + 1] = p.y; samples[i * 3 + 2] = p.z;
         if (i) length += Math.hypot(p.x - samples[i * 3 - 3], p.y - samples[i * 3 - 2], p.z - samples[i * 3 - 1]);
@@ -687,28 +674,28 @@
         return along(build(), p.x, p.y, p.z, b.x - a.x, b.y - a.y, b.z - a.z);
       };
       const flanges = Math.max(2, Math.round(length / 1.5));
-      for (let i = 1; i < flanges; i++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } round.push(at(i / flanges, () => turn([[0.36, -0.1], [0.46, -0.1], [0.5, -0.06], [0.5, 0.06], [0.46, 0.1], [0.36, 0.1]], 16, BRASS))); }
-      for (const [t, toward] of [[0, 0.02], [1, 0.98]]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+      for (let i = 1; i < flanges; i++) { round.push(at(i / flanges, () => turn([[0.36, -0.1], [0.46, -0.1], [0.5, -0.06], [0.5, 0.06], [0.46, 0.1], [0.36, 0.1]], 16, BRASS))); }
+      for (const [t, toward] of [[0, 0.02], [1, 0.98]]) {
         const p = path(t), q = path(toward);
         round.push(along(turn(CONDUIT_FLARE, 18, BRONZE), p.x, p.y, p.z, q.x - p.x, q.y - p.y, q.z - p.z));
       }
       let top = 0;
-      for (let i = 1; i < CONDUIT_SAMPLES; i++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } if (samples[i * 3 + 1] > samples[top * 3 + 1]) top = i; }
+      for (let i = 1; i < CONDUIT_SAMPLES; i++) { if (samples[i * 3 + 1] > samples[top * 3 + 1]) top = i; }
       const peak = path(top / CONDUIT_SAMPLES);
       round.push(at(top / CONDUIT_SAMPLES, () => turn([[0.36, -0.16], [0.48, -0.16], [0.52, -0.12], [0.52, 0.12], [0.48, 0.16], [0.36, 0.16]], 16, BRONZE)));
       round.push(moved(turn([[0.1, 0], [0.1, 0.22], [0, 0.24]], 10, BRONZE), peak.x, peak.y + 0.46, peak.z), ...chain(peak.x, HALL.h + 0.5, peak.z, peak.x, peak.y + 0.7, peak.z, 0.12, IRON_DK));
       // Glowing bands along the pipe, orange for the node's own side of the line, as the concept lights them.
       const bands = Math.round(length / 0.9);
-      for (let i = 1; i < bands; i++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } lamps.push(at((i - 0.5) / bands, () => turn([[0.36, -0.05], [0.39, -0.03], [0.39, 0.03], [0.36, 0.05]], 18, i % 2 ? "#ff9a30" : "#ffc060", 1))); }
+      for (let i = 1; i < bands; i++) { lamps.push(at((i - 0.5) / bands, () => turn([[0.36, -0.05], [0.39, -0.03], [0.39, 0.03], [0.36, 0.05]], 18, i % 2 ? "#ff9a30" : "#ffc060", 1))); }
     }
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    yield* pause(slice);
     const tubes = noShadow(shaded(glass));
     tubes.glass = 0.2;
     return { pipe: shaded(round), glass: tubes, glow: noShadow(shaded(lamps)), paths };
   });
   const stationFrame = BL.models.cachedSteps(function* (slice = null) {
     const round = [], flat = [];
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    yield* pause(slice);
     [-1.2, 1.2].forEach((x, side) => {
       round.push(moved(turn([[0.86, 0], [0.86, 0.3], [0.8, 0.36], [0.8, 0.55], [0.72, CAP.foot], [0, CAP.foot]], 22, BRONZE), x, 0, 0));
       round.push(moved(turn([[CAP.r + 0.02, CAP.top], [0.86, CAP.top + 0.05], [0.86, CAP.top + 0.4], [0.78, CAP.top + 0.45], [0.78, CAP.top + 0.52], [0.5, CAP.top + 0.56], [0, CAP.top + 0.58]], 22, BRONZE), x, 0, 0));
@@ -727,29 +714,23 @@
       [-0.3, 0.3].forEach((dx) => round.push(moved(ball(0.05, side ? "#ffc84a" : "#8fe0ff", 1, 8), x + dx, 0.34, 0.8)));
     });
     // Iron corner plates squaring off each cap and foot, as the concept's tanks have them.
-    for (const x of [-1.2, 1.2]) { for (let k = 0; k < 4; k++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (const x of [-1.2, 1.2]) { for (let k = 0; k < 4; k++) { yield* pause(slice);
       const a = (k + 0.5) / 4 * TAU;
-      for (const [y, h] of [[CAP.top + 0.22, 0.44], [0.3, 0.52]]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } flat.push(moved(turnedY(bevelBox({ w: 0.26, h, d: 0.1, color: IRON_DK, bevel: 0.02 }), -a + Math.PI / 2), x + Math.cos(a) * 0.88, y, Math.sin(a) * 0.88)); }
+      for (const [y, h] of [[CAP.top + 0.22, 0.44], [0.3, 0.52]]) { flat.push(moved(turnedY(bevelBox({ w: 0.26, h, d: 0.1, color: IRON_DK, bevel: 0.02 }), -a + Math.PI / 2), x + Math.cos(a) * 0.88, y, Math.sin(a) * 0.88)); }
     } }
     // Arms out from the posts' tops for the station's two lanterns.
-    for (const s of [-1, 1]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } flat.push(beam(s * 2.25, 3.95, -0.6, s * 3.1, 3.95, -0.6, 0.14, TIMBER_DK), beam(s * 2.4, 3.4, -0.6, s * 2.85, 3.92, -0.6, 0.08, TIMBER)); }
+    for (const s of [-1, 1]) { flat.push(beam(s * 2.25, 3.95, -0.6, s * 3.1, 3.95, -0.6, 0.14, TIMBER_DK), beam(s * 2.4, 3.4, -0.6, s * 2.85, 3.92, -0.6, 0.08, TIMBER)); }
     // The control panel between the tanks: a pedestal, an upright screen with green bars, and keys.
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     flat.push(bevelBox({ w: 0.62, h: 0.85, d: 0.42, color: IRON_DK, bevel: 0.04, offset: { y: 0.425, z: 0.62 } }));
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     const panel = [bevelBox({ w: 0.6, h: 0.42, d: 0.08, color: IRON, bevel: 0.03 }), box({ w: 0.5, h: 0.32, d: 0.02, color: "#123a2a", emissive: 0.8, offset: { z: 0.05 } })];
-    for (let k = 0; k < 4; k++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } panel.push(box({ w: 0.07, h: 0.06 + k * 0.05, d: 0.02, color: "#5fff7a", emissive: 1, offset: { x: -0.15 + k * 0.1, y: -0.12 + (0.06 + k * 0.05) / 2, z: 0.07 } })); }
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (let k = 0; k < 4; k++) { panel.push(box({ w: 0.07, h: 0.06 + k * 0.05, d: 0.02, color: "#5fff7a", emissive: 1, offset: { x: -0.15 + k * 0.1, y: -0.12 + (0.06 + k * 0.05) / 2, z: 0.07 } })); }
     flat.push(moved(merge(...panel), 0, 1.05, 0.72));
-    for (let k = 0; k < 5; k++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } flat.push(box({ w: 0.08, h: 0.03, d: 0.07, color: ["#ff5a3a", "#ffc83a", "#5fb8ff", "#5fe36a", "#ff5a3a"][k], emissive: 0.95, offset: { x: -0.2 + k * 0.1, y: 0.86, z: 0.8 } })); }
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (let k = 0; k < 5; k++) { flat.push(box({ w: 0.08, h: 0.03, d: 0.07, color: ["#ff5a3a", "#ffc83a", "#5fb8ff", "#5fe36a", "#ff5a3a"][k], emissive: 0.95, offset: { x: -0.2 + k * 0.1, y: 0.86, z: 0.8 } })); }
     flat.push(bevelBox({ w: 4.4, h: 3.7, d: 0.16, color: "#7c4424", bevel: 0.05, offset: { y: 2, z: -0.95 } }));
-    for (let i = 0; i < 13; i++) { for (const y of [0.3, 3.7]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } round.push(moved(ball(0.05, BRASS, 0, 6), -2 + i * 0.333, y, -0.86)); } }
-    for (const x of [-2.4, 2.4]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } flat.push(bevelBox({ w: 0.36, h: 4.3, d: 0.36, color: BRONZE, bevel: 0.06, offset: { x, y: 2.15, z: -0.6 } })); }
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (let i = 0; i < 13; i++) { for (const y of [0.3, 3.7]) { yield* pause(slice); round.push(moved(ball(0.05, BRASS, 0, 6), -2 + i * 0.333, y, -0.86)); } }
+    for (const x of [-2.4, 2.4]) { flat.push(bevelBox({ w: 0.36, h: 4.3, d: 0.36, color: BRONZE, bevel: 0.06, offset: { x, y: 2.15, z: -0.6 } })); }
     flat.push(bevelBox({ w: 5.2, h: 0.34, d: 0.44, color: BRONZE_DK, bevel: 0.06, offset: { y: 4.15, z: -0.6 } }));
-    for (let i = 0; i < 9; i++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } round.push(moved(ball(0.07, "#ffb040", 1, 8), -2 + i * 0.5, 4.36, -0.45)); }
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (let i = 0; i < 9; i++) { yield* pause(slice); round.push(moved(ball(0.07, "#ffb040", 1, 8), -2 + i * 0.5, 4.36, -0.45)); }
     round.push(tube({ path: (t) => ({ x: -1.2 + 2.4 * t, y: CAP.top + 0.9 + Math.sin(Math.PI * t) * 0.3, z: 0 }), radius: () => 0.1, rings: 16, segments: 8, colorFn: () => COPPER }));
     return shaded(round, flat);
   });
@@ -785,17 +766,17 @@
   const peerPipes = BL.models.cachedSteps(function* (slice = null) {
     const flat = [], glow = [];
     const disc = (r, x, y, z) => moved(turn([[r, 0], [r, 0.03], [r - 0.03, 0.04], [0, 0.04]], 20, BRONZE), x, y, z);
-    for (const t of LAYOUT.tunnels) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (const t of LAYOUT.tunnels) { yield* pause(slice);
       const b = LAYOUT.bays[t.bay], s = Math.sign(b.x), x0 = stationX(b) + s * 1.2, z0 = stationZ(b), y = b.y;
       const pts = t.turn === 0
         ? [[x0, z0 - 0.8], [x0, z0 - 1.6], [t.x + s * 0.7, z0 - 2.3], [t.x + s * 0.7, t.z + 0.6]]
         : [[x0 + s * 0.8, z0 + 0.3], [t.x - s * 0.5, z0 + 0.3]];
-      for (let i = 0; i + 1 < pts.length; i++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+      for (let i = 0; i + 1 < pts.length; i++) {
         const [ax, az] = pts[i], [bx, bz] = pts[i + 1], len = Math.hypot(bx - ax, bz - az), ux = (bx - ax) / len, uz = (bz - az) / len;
         const piece = (geo, u, off) => moved(turnedY(geo, Math.atan2(ux, uz)), ax + ux * u - uz * off, y, az + uz * u + ux * off);
-        for (const off of [-0.14, 0.14]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } flat.push(piece(box({ w: 0.06, h: 0.03, d: len, color: BRONZE, offset: { y: 0.015 } }), len / 2, off)); }
+        for (const off of [-0.14, 0.14]) { flat.push(piece(box({ w: 0.06, h: 0.03, d: len, color: BRONZE, offset: { y: 0.015 } }), len / 2, off)); }
         const n = Math.max(1, Math.round(len / 0.45));
-        for (let k = 0; k < n; k++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } glow.push(piece(box({ w: 0.22, h: 0.02, d: len / n - 0.04, color: k % 2 ? "#3fa7ff" : "#8fd8ff", emissive: 1, offset: { y: 0.01 } }), (k + 0.5) * len / n, 0)); }
+        for (let k = 0; k < n; k++) { glow.push(piece(box({ w: 0.22, h: 0.02, d: len / n - 0.04, color: k % 2 ? "#3fa7ff" : "#8fd8ff", emissive: 1, offset: { y: 0.01 } }), (k + 0.5) * len / n, 0)); }
         if (i > 0) flat.push(disc(0.2, ax, y, az));
       }
       // The shoe under the tank's foot, and the bar across the channel's end at the tunnel.
@@ -807,34 +788,28 @@
   });
   const forge = BL.models.cachedSteps(function* (slice = null) {
     const f = LAYOUT.forge, geos = [], cy = FORGE_CY;
-    for (const [r, n, depth, z] of [[2.25, 12, 1.3, 0], [2.95, 16, 1, -0.15]]) { for (let k = 0; k <= n; k++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (const [r, n, depth, z] of [[2.25, 12, 1.3, 0], [2.95, 16, 1, -0.15]]) { for (let k = 0; k <= n; k++) { yield* pause(slice);
       const a = Math.PI * k / n, key = k === n / 2, w = r * Math.PI / n * 0.9;
       geos.push(moved(turnedZ(bevelBox({ w: key ? w * 1.35 : w, h: key ? 0.9 : 0.64, d: key ? depth + 0.2 : depth, color: key ? ROCK_LT : k % 2 ? STONE[0] : STONE[2], bevel: 0.08 }), a - Math.PI / 2), Math.cos(a) * r, cy + Math.sin(a) * r, z));
     } }
-    for (const s of [-1, 1]) { for (let row = 0; row < 3; row++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } for (const [x, d, z] of [[2.25, 1.3, 0], [2.95, 1, -0.15]]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (const s of [-1, 1]) { for (let row = 0; row < 3; row++) { for (const [x, d, z] of [[2.25, 1.3, 0], [2.95, 1, -0.15]]) {
       geos.push(bevelBox({ w: 0.64, h: 0.5, d, color: (row + (x < 2.5 ? 0 : 1)) % 2 ? STONE[1] : STONE[3], bevel: 0.08, offset: { x: s * x, y: 0.26 + row * 0.52, z } }));
     } } }
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     geos.push(bevelBox({ w: 3.8, h: 3.4, d: 0.4, color: "#1e120c", bevel: 0.06, offset: { y: 1.7, z: -0.6 } }));
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     const rim = tube({ path: (t) => ({ x: Math.cos(Math.PI * t) * 1.9, y: cy + Math.sin(Math.PI * t) * 1.9, z: 0.45 }), radius: () => 0.13, rings: 28, segments: 8, colorFn: () => BRASS });
     // The timber frame round the arch, as the concept builds it: posts with glowing vents, a header beam on iron
     // brackets, all under the core's walkway.
-    for (const s of [-1, 1]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (const s of [-1, 1]) {
       geos.push(bevelBox({ w: 0.46, h: 4.3, d: 0.46, color: TIMBER_DK, bevel: 0.06, offset: { x: s * 3.7, y: 2.15, z: 0.75 } }));
-      for (const y of [0.85, 1.5]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } geos.push(box({ w: 0.26, h: 0.4, d: 0.05, color: "#ff8a2a", emissive: 1, offset: { x: s * 3.7, y, z: 1 } }), box({ w: 0.04, h: 0.4, d: 0.06, color: IRON_DK, offset: { x: s * 3.7, y, z: 1.01 } })); }
-      for (const y of [3.95, 4.62]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } geos.push(bevelBox({ w: 0.62, h: 0.12, d: 0.6, color: IRON_DK, bevel: 0.02, offset: { x: s * 3.7, y, z: 0.75 } })); }
+      for (const y of [0.85, 1.5]) { geos.push(box({ w: 0.26, h: 0.4, d: 0.05, color: "#ff8a2a", emissive: 1, offset: { x: s * 3.7, y, z: 1 } }), box({ w: 0.04, h: 0.4, d: 0.06, color: IRON_DK, offset: { x: s * 3.7, y, z: 1.01 } })); }
+      for (const y of [3.95, 4.62]) { geos.push(bevelBox({ w: 0.62, h: 0.12, d: 0.6, color: IRON_DK, bevel: 0.02, offset: { x: s * 3.7, y, z: 0.75 } })); }
     }
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     geos.push(bevelBox({ w: 8.3, h: 0.5, d: 0.56, color: TIMBER, bevel: 0.07, offset: { y: 4.3, z: 0.75 } }));
     // The forge's control: a console with an upright screen of green bars and a lever with a red knob.
     const cx = FORGE_CONSOLE[0], cz = FORGE_CONSOLE[1];
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     geos.push(bevelBox({ w: 0.7, h: 0.95, d: 0.5, color: IRON_DK, bevel: 0.05, offset: { x: cx, y: 0.475, z: cz } }));
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     const screen = [bevelBox({ w: 0.62, h: 0.44, d: 0.08, color: IRON, bevel: 0.03 }), box({ w: 0.52, h: 0.34, d: 0.02, color: "#123a2a", emissive: 0.8, offset: { z: 0.05 } })];
-    for (let k = 0; k < 4; k++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } screen.push(box({ w: 0.08, h: 0.07 + k * 0.05, d: 0.02, color: "#5fff7a", emissive: 1, offset: { x: -0.16 + k * 0.1, y: -0.12 + (0.07 + k * 0.05) / 2, z: 0.07 } })); }
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (let k = 0; k < 4; k++) { screen.push(box({ w: 0.08, h: 0.07 + k * 0.05, d: 0.02, color: "#5fff7a", emissive: 1, offset: { x: -0.16 + k * 0.1, y: -0.12 + (0.07 + k * 0.05) / 2, z: 0.07 } })); }
     geos.push(moved(merge(...screen), cx - 0.08, 1.15, cz + 0.08), beam(cx + 0.22, 0.95, cz, cx + 0.34, 1.42, cz + 0.1, 0.05, IRON_LT), moved(ball(0.08, "#e8342a", 0.4, 8), cx + 0.35, 1.46, cz + 0.11));
     return moved(shaded([rim], geos), f.x, 0, f.z);
   });
@@ -1350,16 +1325,14 @@
   const cookerBody = BL.models.cachedSteps(function* (slice = null) {
     const { w, h, d, plinth: P, rim: R } = COOK, round = [], flat = [], glow = [];
     // The plinth, striped yellow on black along the hall side and the right.
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     flat.push(bevelBox({ w: w + 0.2, h: P, d: d + 0.2, color: IRON_BK, bevel: 0.03, offset: { y: P / 2 } }));
     const stripe = (x0) => prism([[x0, 0.025], [x0 + 0.1, 0.025], [x0 + 0.2, P - 0.025], [x0 + 0.1, P - 0.025]], 0.02, HAZARD);
-    for (let x = -d / 2 - 0.08; x < d / 2 - 0.1; x += 0.24) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } flat.push(moved(turnedY(stripe(x), -Math.PI / 2), -w / 2 - 0.105, 0, 0)); }
-    for (let x = -w / 2 - 0.08; x < w / 2 - 0.1; x += 0.24) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } flat.push(moved(stripe(x), 0, 0, d / 2 + 0.105)); }
+    for (let x = -d / 2 - 0.08; x < d / 2 - 0.1; x += 0.24) { yield* pause(slice); flat.push(moved(turnedY(stripe(x), -Math.PI / 2), -w / 2 - 0.105, 0, 0)); }
+    for (let x = -w / 2 - 0.08; x < w / 2 - 0.1; x += 0.24) { flat.push(moved(stripe(x), 0, 0, d / 2 + 0.105)); }
     // Black iron up to the mouth, the orange frame round it: corner posts, a band at the foot and the rim's walls.
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     flat.push(bevelBox({ w: w - 0.04, h: R - P, d: d - 0.04, color: IRON_BK, bevel: 0.04, offset: { y: (P + R) / 2 } }));
-    for (const sx of [-1, 1]) { for (const sz of [-1, 1]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } flat.push(bevelBox({ w: 0.22, h: h - P, d: 0.22, color: ORANGE, bevel: 0.05, offset: { x: sx * (w / 2 - 0.08), y: (P + h) / 2, z: sz * (d / 2 - 0.08) } })); } }
-    for (const s of [-1, 1]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (const sx of [-1, 1]) { for (const sz of [-1, 1]) { flat.push(bevelBox({ w: 0.22, h: h - P, d: 0.22, color: ORANGE, bevel: 0.05, offset: { x: sx * (w / 2 - 0.08), y: (P + h) / 2, z: sz * (d / 2 - 0.08) } })); } }
+    for (const s of [-1, 1]) {
       flat.push(bevelBox({ w: 0.2, h: 0.12, d: d + 0.02, color: ORANGE_DK, bevel: 0.03, offset: { x: s * (w / 2 - 0.08), y: P + 0.07 } }));
       flat.push(bevelBox({ w: w + 0.02, h: 0.12, d: 0.2, color: ORANGE_DK, bevel: 0.03, offset: { y: P + 0.07, z: s * (d / 2 - 0.08) } }));
       // The rim's walls, open toward the hall where the jaw closes on the teeth.
@@ -1370,39 +1343,30 @@
       flat.push(box({ w: w - 0.44, h: h - R - 0.04, d: 0.02, color: MOUTH_DK, offset: { y: (R + h) / 2 - 0.02, z: s * (d / 2 - 0.205) } }));
     }
     // Gold rivets along the frame on the hall side and the right.
-    for (const y of [P + 0.07, R - 0.07]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
-      for (let z = -d / 2 + 0.3; z <= d / 2 - 0.29; z += 0.3) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } round.push(moved(ball(0.035, GOLD, 0.2, 6), -w / 2 - 0.02, y, z)); }
-      for (let x = -w / 2 + 0.3; x <= w / 2 - 0.29; x += 0.3) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } round.push(moved(ball(0.035, GOLD, 0.2, 6), x, y, d / 2 + 0.02)); }
+    for (const y of [P + 0.07, R - 0.07]) { yield* pause(slice);
+      for (let z = -d / 2 + 0.3; z <= d / 2 - 0.29; z += 0.3) { round.push(moved(ball(0.035, GOLD, 0.2, 6), -w / 2 - 0.02, y, z)); }
+      for (let x = -w / 2 + 0.3; x <= w / 2 - 0.29; x += 0.3) { round.push(moved(ball(0.035, GOLD, 0.2, 6), x, y, d / 2 + 0.02)); }
     }
     // Inside: a red floor, a fat tongue and the firebox's glow at the throat.
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     flat.push(box({ w: w - 0.42, h: 0.04, d: d - 0.42, color: MOUTH, offset: { y: R + 0.02 } }));
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     const tongue = ball(0.5, "#e2485a", 0, 14);
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     round.push(moved({ ...tongue, verts: tongue.verts.map((v, i) => v * [0.8, 0.22, 1.6][i % 3]) }, -0.12, R + 0.05, 0));
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     glow.push(box({ w: 0.26, h: 0.02, d: d - 0.9, color: "#ff7a2a", emissive: 0.95, offset: { x: w / 2 - 0.4, y: R + 0.05 } }));
     // An orange lip along the front under the lower teeth, whose tips stand just under the shut jaw.
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     flat.push(bevelBox({ w: 0.24, h: 0.1, d: d - 0.4, color: ORANGE, bevel: 0.03, offset: { x: -w / 2 + 0.06, y: R - 0.05 } }));
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     teethRow(flat, round, -w / 2 + 0.13, R, d - 0.5, 8, 1);
     // The porthole's orange bezel on the hall side, riveted; its glass is `cookerPort`. Amber lamps on the front posts.
     const [px, py, pz] = COOK.port;
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     round.push(moved(turnedY(forwardLathe(torus(0.41, 0.075, ORANGE, 0, 28, 8)), -Math.PI / 2), px + 0.02, py, pz));
-    for (let k = 0; k < 10; k++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } const a = k / 10 * TAU; round.push(moved(ball(0.03, GOLD, 0.2, 6), px - 0.06, py + Math.sin(a) * 0.41, pz + Math.cos(a) * 0.41)); }
-    for (const sz of [-1, 1]) { for (const y of [0.55, 1.0]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } glow.push(bevelBox({ w: 0.06, h: 0.1, d: 0.1, color: "#ffd35a", emissive: 1, bevel: 0.02, offset: { x: -w / 2 - 0.04, y, z: sz * (d / 2 - 0.08) } })); } }
+    for (let k = 0; k < 10; k++) { yield* pause(slice); const a = k / 10 * TAU; round.push(moved(ball(0.03, GOLD, 0.2, 6), px - 0.06, py + Math.sin(a) * 0.41, pz + Math.cos(a) * 0.41)); }
+    for (const sz of [-1, 1]) { for (const y of [0.55, 1.0]) { glow.push(bevelBox({ w: 0.06, h: 0.1, d: 0.1, color: "#ffd35a", emissive: 1, bevel: 0.02, offset: { x: -w / 2 - 0.04, y, z: sz * (d / 2 - 0.08) } })); } }
     // The hatch the bananas leave by, on the right: an orange frame round a dark mouth with the chute's glow in it.
     const [hx, hy, hz] = COOK.hatch;
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     flat.push(box({ w: 0.46, h: 0.34, d: 0.04, color: "#120d0a", offset: { x: hx, y: hy + 0.02, z: d / 2 - 0.01 } }));
-    for (const s of [-1, 1]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (const s of [-1, 1]) {
       flat.push(bevelBox({ w: 0.62, h: 0.09, d: 0.08, color: ORANGE, bevel: 0.025, offset: { x: hx, y: hy + 0.02 + s * 0.215, z: d / 2 + 0.02 } }));
       flat.push(bevelBox({ w: 0.09, h: 0.52, d: 0.08, color: ORANGE, bevel: 0.025, offset: { x: hx + s * 0.27, y: hy + 0.02, z: d / 2 + 0.02 } }));
     }
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     glow.push(box({ w: 0.38, h: 0.06, d: 0.02, color: "#ff9a2a", emissive: 0.8, offset: { x: hx, y: hy - 0.1, z: d / 2 + 0.005 } }));
     return { body: shaded(round, flat), glow: noShadow(shaded(glow)) };
   });
@@ -1840,136 +1804,110 @@
     const disc = (r, color, x, y, z) => moved(forwardLathe(turn([[r, 0], [r, 0.04], [r * 0.75, 0.08], [0, 0.09]], 18, color)), x, y, z);
     // The rock the wall is cut back to round the portal: piers either side of the room, courses over the arch that
     // lean out as the wall does, stones in the arch's spandrels and a slab behind it all.
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     flat.push(box({ w: 7, h: 10, d: 0.5, color: STONE_DK, offset: { y: 4.5, z: -3.1 } }));
-    for (const s of [-1, 1]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (const s of [-1, 1]) {
       flat.push(bevelBox({ w: 1.5, h: 5.2, d: 3.4, color: STONE[2], bevel: 0.14, offset: { x: s * 2.75, y: 2.4, z: -1.3 } }));
       flat.push(bevelBox({ w: 1, h: 1, d: 1, color: STONE[1], bevel: 0.14, offset: { x: s * 2.05, y: 4.45, z: 0.05 } }));
     }
-    for (let y = 4.9; y < 9.6; y += 1.2) { for (let x = -2.7; x <= 2.8; x += 1.8) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (let y = 4.9; y < 9.6; y += 1.2) { for (let x = -2.7; x <= 2.8; x += 1.8) { yield* pause(slice);
       const d = 3.2 + (y - 4.9) * 0.12;
       flat.push(bevelBox({ w: 1.9, h: 1.3, d, color: STONE[Math.floor(rand() * 4)], bevel: 0.16, offset: { x: x + (rand() - 0.5) * 0.3, y: y + 0.6, z: 0.4 + (y - 4.9) * 0.1 - d / 2 - rand() * 0.3 } }));
     } }
     // The threshold: planks from the walkway's edge in under the arch.
-    for (let i = 0; i < 12; i++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } flat.push(bevelBox({ w: 0.78, h: 0.1, d: 1.58, color: i % 3 ? TIMBER : TIMBER_LT, bevel: 0.02, offset: { x: -4.5 + i * 0.8, y: -0.05, z: 0.39 } })); }
+    for (let i = 0; i < 12; i++) { yield* pause(slice); flat.push(bevelBox({ w: 0.78, h: 0.1, d: 1.58, color: i % 3 ? TIMBER : TIMBER_LT, bevel: 0.02, offset: { x: -4.5 + i * 0.8, y: -0.05, z: 0.39 } })); }
     // The arch: cut stone, pillowed, a ring of voussoirs with a keystone on jambs of alternating quoins.
     const R0 = 1.75, R1 = 2.45, CY = 2.5, CUT = ["#8a7a6a", "#7a6a5c"], mid = (R0 + R1) / 2;
-    for (let k = 0; k <= 10; k++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (let k = 0; k <= 10; k++) { yield* pause(slice);
       const a = Math.PI * k / 10, key = k === 5, w = mid * Math.PI / 10 * 0.92;
       round.push(moved(turnedZ(bevelBox({ w: key ? w * 1.3 : w, h: key ? 0.95 : R1 - R0, d: key ? 1.2 : 1, color: key ? "#9c8b78" : CUT[k % 2], bevel: 0.12 }), a - Math.PI / 2), Math.cos(a) * mid, CY + Math.sin(a) * mid, key ? 0.25 : 0.15));
     }
-    for (const s of [-1, 1]) { for (let row = 0; row < 3; row++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (const s of [-1, 1]) { for (let row = 0; row < 3; row++) {
       const wide = row % 2 === 0;
       round.push(bevelBox({ w: wide ? 0.9 : 0.7, h: 0.72, d: 1, color: CUT[(row + (s > 0 ? 1 : 0)) % 2], bevel: 0.1, offset: { x: s * (wide ? 2.2 : 2.1), y: 0.37 + row * 0.73, z: 0.15 } }));
     } }
     // The door frame inside the arch, and the room behind it: floor, panelled walls, ceiling and a rug.
-    for (const s of [-1, 1]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } flat.push(bevelBox({ w: 0.26, h: 3.3, d: 0.3, color: TIMBER_DK, bevel: 0.04, offset: { x: s * 1.58, y: 1.65, z: -0.45 } })); }
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (const s of [-1, 1]) { flat.push(bevelBox({ w: 0.26, h: 3.3, d: 0.3, color: TIMBER_DK, bevel: 0.04, offset: { x: s * 1.58, y: 1.65, z: -0.45 } })); }
     flat.push(bevelBox({ w: 3.5, h: 0.3, d: 0.34, color: TIMBER, bevel: 0.05, offset: { y: 3.4, z: -0.45 } }));
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     flat.push(box({ w: 3.9, h: 0.1, d: 2.6, color: TIMBER_LT, offset: { y: 0.02, z: -1.6 } }));
-    for (const s of [-1, 1]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } flat.push(box({ w: 0.2, h: 4.6, d: 2.6, color: "#4a2e1a", emissive: 0.08, offset: { x: s * 1.95, y: 2.3, z: -1.6 } })); }
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (const s of [-1, 1]) { flat.push(box({ w: 0.2, h: 4.6, d: 2.6, color: "#4a2e1a", emissive: 0.08, offset: { x: s * 1.95, y: 2.3, z: -1.6 } })); }
     flat.push(box({ w: 4.1, h: 4.6, d: 0.2, color: "#5a3820", emissive: 0.12, offset: { y: 2.3, z: -2.85 } }));
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     flat.push(box({ w: 4.1, h: 0.2, d: 2.6, color: "#4a2e1a", offset: { y: 4.5, z: -1.6 } }));
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     flat.push(box({ w: 1.8, h: 0.02, d: 1.2, color: BRASS, offset: { y: 0.08, z: -1.3 } }), box({ w: 1.6, h: 0.03, d: 1, color: "#8a2a24", offset: { y: 0.09, z: -1.3 } }));
     // Shelves of books either side of the back wall, and the bolt on a dark board between them.
-    for (const sx of [-1, 1]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (const sx of [-1, 1]) {
       const cx = sx * 1.2, w = 1.25;
-      for (const e of [-1, 1]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } flat.push(bevelBox({ w: 0.1, h: 3.5, d: 0.45, color: TIMBER, bevel: 0.02, offset: { x: cx + e * w / 2, y: 1.75, z: -2.45 } })); }
-      for (let sh = 0; sh < 5; sh++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+      for (const e of [-1, 1]) { flat.push(bevelBox({ w: 0.1, h: 3.5, d: 0.45, color: TIMBER, bevel: 0.02, offset: { x: cx + e * w / 2, y: 1.75, z: -2.45 } })); }
+      for (let sh = 0; sh < 5; sh++) { yield* pause(slice);
         const y = 0.12 + sh * 0.8;
         flat.push(bevelBox({ w, h: 0.07, d: 0.45, color: TIMBER_LT, bevel: 0.015, offset: { x: cx, y, z: -2.45 } }));
         if (sh === 4) break;
-        for (let x = cx - w / 2 + 0.07; x < cx + w / 2 - 0.2;) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+        for (let x = cx - w / 2 + 0.07; x < cx + w / 2 - 0.2;) {
           const bw = 0.1 + rand() * 0.07, bh = 0.44 + rand() * 0.22;
           flat.push(box({ w: bw, h: bh, d: 0.32, color: BOOKS[Math.floor(rand() * BOOKS.length)], offset: { x: x + bw / 2, y: y + 0.035 + bh / 2, z: -2.42 } }));
           x += bw + 0.012;
         }
       }
     }
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     flat.push(bevelBox({ w: 0.95, h: 1.2, d: 0.08, color: "#17110d", bevel: 0.02, offset: { y: 2.75, z: -2.7 } }));
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     glow.push(moved(smoothBolt(0.9, 0.06, "#ffd23a", 1), 0, 2.75, -2.63));
     // The desk, a globe on its stand and an open book, and the lantern hung over them.
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     flat.push(bevelBox({ w: 1.1, h: 0.08, d: 0.55, color: TIMBER_LT, bevel: 0.02, offset: { y: 0.8, z: -1.95 } }));
-    for (const lx of [-0.48, 0.48]) { for (const lz of [-0.2, 0.2]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } flat.push(box({ w: 0.07, h: 0.76, d: 0.07, color: TIMBER_DK, offset: { x: lx, y: 0.38, z: -1.95 + lz } })); } }
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (const lx of [-0.48, 0.48]) { for (const lz of [-0.2, 0.2]) { flat.push(box({ w: 0.07, h: 0.76, d: 0.07, color: TIMBER_DK, offset: { x: lx, y: 0.38, z: -1.95 + lz } })); } }
     round.push(moved(turn([[0.1, 0], [0.1, 0.03], [0.03, 0.05], [0.03, 0.14], [0, 0.14]], 10, BRASS), -0.3, 0.84, -1.95));
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     round.push(moved(ball(0.16, "#3a7ac0", 0, 14), -0.3, 1.14, -1.95), moved(forwardLathe(torus(0.19, 0.012, BRASS, 0, 16, 4)), -0.3, 1.14, -1.95));
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     flat.push(box({ w: 0.48, h: 0.025, d: 0.32, color: "#6b2a1a", offset: { x: 0.2, y: 0.85, z: -1.9 } }));
-    for (const s of [-1, 1]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } flat.push(moved(turnedZ(box({ w: 0.22, h: 0.02, d: 0.3, color: "#efe2c4", offset: { x: s * 0.11 } }), s * 0.12), 0.2, 0.875, -1.9)); }
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (const s of [-1, 1]) { flat.push(moved(turnedZ(box({ w: 0.22, h: 0.02, d: 0.3, color: "#efe2c4", offset: { x: s * 0.11 } }), s * 0.12), 0.2, 0.875, -1.9)); }
     round.push(...chain(0, 4.4, -1.5, 0, 3.95, -1.5, 0.05, IRON_DK));
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     lanternParts(0.9, 0, 3.95 - 0.84 * 0.9, -1.5, flat, glow);
     // The portal: posts bound in iron on stone footings, a header on a lower beam with iron plates at the joints
     // and knee braces under it, and brackets at its ends for the lanterns.
-    for (const s of [-1, 1]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (const s of [-1, 1]) { yield* pause(slice);
       const x = s * P;
       flat.push(bevelBox({ w: 0.7, h: 0.36, d: 0.7, color: STONE_DK, bevel: 0.07, offset: { x, y: 0.18, z: Z } }));
       flat.push(bevelBox({ w: 0.44, h: 7.6, d: 0.44, color: TIMBER_DK, bevel: 0.06, offset: { x, y: 4.1, z: Z } }));
       flat.push(bevelBox({ w: 0.56, h: 0.14, d: 0.56, color: TIMBER_LT, bevel: 0.03, offset: { x, y: 7.97, z: Z } }));
-      for (const y of [1.2, 3.3]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+      for (const y of [1.2, 3.3]) {
         flat.push(bevelBox({ w: 0.5, h: 0.12, d: 0.5, color: IRON_DK, bevel: 0.02, offset: { x, y, z: Z } }));
-        for (const bx of [-0.12, 0.12]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } rivet(x + bx, y, Z + 0.26); }
+        for (const bx of [-0.12, 0.12]) { rivet(x + bx, y, Z + 0.26); }
       }
       flat.push(bevelBox({ w: 0.62, h: 0.62, d: 0.05, color: IRON_DK, bevel: 0.015, offset: { x, y: HY, z: Z + 0.27 } }));
-      for (const [bx, by] of [[-0.2, -0.2], [0.2, -0.2], [0.2, 0.2], [-0.2, 0.2]]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } rivet(x + bx, HY + by, Z + 0.3); }
+      for (const [bx, by] of [[-0.2, -0.2], [0.2, -0.2], [0.2, 0.2], [-0.2, 0.2]]) { rivet(x + bx, HY + by, Z + 0.3); }
       flat.push(beam(x - s * 0.2, 4.3, Z, x - s * 0.95, 5.02, Z, 0.16, TIMBER));
       flat.push(box({ w: 0.06, h: 0.06, d: 0.3, color: IRON_DK, offset: { x: s * 3.55, y: HY - 0.22, z: Z + 0.3 } }));
     }
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     flat.push(bevelBox({ w: 7.6, h: 0.5, d: 0.52, color: TIMBER, bevel: 0.07, offset: { y: HY, z: Z } }));
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     flat.push(bevelBox({ w: 5.9, h: 0.24, d: 0.4, color: TIMBER_DK, bevel: 0.05, offset: { y: HY - 0.45, z: Z } }));
     // The sign's frame on the header: timber round a dark board, iron at the corners and a lit bolt at each end.
     const [sx, sy, sz] = STUDY.sign;
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     signFrame(round, flat, sx, sy, sz, 6.3, 1.5);
-    for (const s of [-1, 1]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } glow.push(moved(smoothBolt(0.95, 0.1, "#ffd23a", 1), sx + s * 2.62, sy, sz + 0.02)); }
+    for (const s of [-1, 1]) { glow.push(moved(smoothBolt(0.95, 0.1, "#ffd23a", 1), sx + s * 2.62, sy, sz + 0.02)); }
     // The striped rope slung between the posts' tops, over the sign.
     const rope = (t) => ({ x: -P + 2 * P * t, y: 7.82 - Math.sin(Math.PI * t) * 0.3, z: Z + 0.28 });
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     round.push(tube({ path: rope, radius: () => 0.05, rings: 40, segments: 6, colorFn: (t) => Math.floor(t * 20) % 2 ? "#1c1a18" : "#f2c230" }));
     // The banner's arm off the right post, braced, and the banner in the cave's black.
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     flat.push(bevelBox({ w: 1.8, h: 0.16, d: 0.16, color: TIMBER_DK, bevel: 0.03, offset: { x: P + 0.9, y: 4.95, z: Z + 0.3 } }));
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     flat.push(beam(P + 0.22, 4.25, Z + 0.25, P + 0.85, 4.9, Z + 0.3, 0.1, TIMBER));
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     flat.push(moved(merge(banner(2.1, "#1a1716")), P + 1.25, 4.8, Z + 0.38));
     // The easel the lesson stands on, and a crate by the right post with books and a plant on it.
     const [ex] = STUDY.easel;
-    for (const s of [-1, 1]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } flat.push(beam(ex + s * 0.62, 0, 1.42, ex + s * 0.48, 2.75, 1.02, 0.09, TIMBER)); }
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (const s of [-1, 1]) { flat.push(beam(ex + s * 0.62, 0, 1.42, ex + s * 0.48, 2.75, 1.02, 0.09, TIMBER)); }
     flat.push(beam(ex, 0, 0.75, ex, 2.6, 1.05, 0.08, TIMBER_DK));
     const [cx, cz] = STUDY.crate;
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     flat.push(bevelBox({ w: 0.8, h: 0.75, d: 0.75, color: TIMBER_LT, bevel: 0.05, offset: { x: cx, y: 0.375, z: cz } }));
-    for (const y of [0.2, 0.55]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } flat.push(box({ w: 0.82, h: 0.05, d: 0.77, color: TIMBER_DK, offset: { x: cx, y, z: cz } })); }
-    for (let i = 0; i < 3; i++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } flat.push(moved(turnedY(bevelBox({ w: 0.46 - i * 0.05, h: 0.1, d: 0.34, color: BOOKS[i * 2], bevel: 0.015 }), (rand() - 0.5) * 0.6), cx - 0.12, 0.8 + i * 0.1, cz)); }
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (const y of [0.2, 0.55]) { flat.push(box({ w: 0.82, h: 0.05, d: 0.77, color: TIMBER_DK, offset: { x: cx, y, z: cz } })); }
+    for (let i = 0; i < 3; i++) { flat.push(moved(turnedY(bevelBox({ w: 0.46 - i * 0.05, h: 0.1, d: 0.34, color: BOOKS[i * 2], bevel: 0.015 }), (rand() - 0.5) * 0.6), cx - 0.12, 0.8 + i * 0.1, cz)); }
     round.push(moved(turn([[0.09, 0], [0.12, 0.2], [0.13, 0.22], [0.11, 0.22], [0, 0.2]], 12, "#b0643a"), cx + 0.24, 0.75, cz + 0.14));
-    for (let k = 0; k < 7; k++) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } flat.push(moved(turnedY(turnedX(leaf(1.4, k % 2 ? "#4f9a36" : "#3c8229"), 0.5 + (k % 3) * 0.2), k * TAU / 7), cx + 0.24, 0.93, cz + 0.14)); }
+    for (let k = 0; k < 7; k++) { flat.push(moved(turnedY(turnedX(leaf(1.4, k % 2 ? "#4f9a36" : "#3c8229"), 0.5 + (k % 3) * 0.2), k * TAU / 7), cx + 0.24, 0.93, cz + 0.14)); }
     // Two chains from iron eyes on the posts, crossed over the doorway to the padlock.
     const CH = "#80858c";
-    for (const s of [-1, 1]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (const s of [-1, 1]) { yield* pause(slice);
       round.push(...chain(s * (P - 0.24), 3.8, Z, s * 0.3, 2.56, Z + 0.16, 0.13, CH));
       round.push(...chain(s * 0.34, 1.6, Z + 0.16, s * (P - 0.24), 0.7, Z, 0.13, CH));
-      for (const y of [3.8, 0.7]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; } round.push(moved(turnedZ(torus(0.1, 0.035, IRON_DK, 0, 12, 6), Math.PI / 2), s * (P - 0.25), y, Z)); }
+      for (const y of [3.8, 0.7]) { round.push(moved(turnedZ(torus(0.1, 0.035, IRON_DK, 0, 12, 6), Math.PI / 2), s * (P - 0.25), y, Z)); }
     }
     // The padlock: a pillowed yellow body with a monkey's face on it and a steel shackle.
     const LY = 2, LZ = Z + 0.2, legs = 0.2, r = 0.3, reach = legs * 2 + Math.PI * r;
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     round.push(bevelBox({ w: 1.05, h: 0.95, d: 0.34, color: "#d69a1e", bevel: 0.14, offset: { y: LY, z: LZ } }));
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     round.push(tube({
       path: (t) => {
         const d = t * reach, base = LY + 0.42;
@@ -1981,15 +1919,12 @@
       radius: () => 0.075, rings: 24, segments: 8, colorFn: () => "#a9aeb5"
     }));
     const FZ = LZ + 0.16, FUR = "#5b3517", MASK = "#e6b77e";
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     round.push(disc(0.3, FUR, 0, LY - 0.02, FZ));
-    for (const s of [-1, 1]) { if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+    for (const s of [-1, 1]) {
       round.push(disc(0.12, FUR, s * 0.3, LY + 0.08, FZ - 0.01), disc(0.065, MASK, s * 0.3, LY + 0.08, FZ + 0.01), disc(0.12, MASK, s * 0.1, LY + 0.04, FZ + 0.04));
       round.push(moved(ball(0.042, "#111111", 0, 8), s * 0.1, LY + 0.05, FZ + 0.13), moved(ball(0.018, "#3a1f10", 0, 6), s * 0.035, LY - 0.08, FZ + 0.13));
     }
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     round.push(disc(0.16, MASK, 0, LY - 0.13, FZ + 0.04));
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     flat.push(box({ w: 0.14, h: 0.025, d: 0.02, color: "#3a1f10", offset: { y: LY - 0.18, z: FZ + 0.135 } }));
     // Vines down the rock and the posts.
     const vine = (x, y, z, len) => {
@@ -2000,15 +1935,10 @@
         flat.push(moved(turnedZ(leaf(0.9 + rand() * 0.5, rand() < 0.5 ? "#4f9a36" : "#3c8229"), (i % 2 ? 1 : -1) * (2 + rand() * 0.5)), p.x, p.y, p.z + 0.02));
       }
     };
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     vine(-2.2, HY - 0.25, Z + 0.3, 1.2);
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     vine(-3.3, 7.9, Z + 0.45, 2.2);
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     vine(3.35, 7.9, Z + 0.45, 1.5);
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     vine(-1.6, 9.4, 0.95, 1.5);
-    if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
     vine(2.3, 9.2, 1, 1.1);
     return { stone: shaded(round, flat), glow: noShadow(shaded(glow)) };
   });

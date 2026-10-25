@@ -6,9 +6,17 @@
   // A construction slice's budget. It runs while the screen holds black, so throughput matters more than frame
   // pacing; staying under the 50 ms long-task line keeps input and the fade responsive.
   const SLICE_MS = 40;
-  // Call only for sliced work. Rows and model pieces check directly; tight mesh loops can retain their clock stride.
-  // The caller resets the deadline after yielding, so waiting for the next task never spends construction budget.
-  const due = (slice, mask = 0) => (!mask || (++slice.work & mask) === 0) && performance.now() >= slice.until;
+  // A builder's checkpoints: `yield* pause(slice)` once per row or model piece; in a tight per-face or per-vertex
+  // loop, where a call each time costs more than the work, `if (due(slice, 63))` in front of it reads the clock every
+  // 64th time. Each builder file binds the two to these only when sliced, so an unsliced build (the terrain worker's,
+  // a Node check's) runs without this file. Without a slice neither pauses.
+  const due = (slice, mask = 0) => !!slice && (!mask || (++slice.work & mask) === 0) && performance.now() >= slice.until;
+  // The deadline restarts on resuming, so waiting for the next task never spends construction budget.
+  const pause = function* (slice) {
+    if (!due(slice)) return;
+    yield;
+    slice.until = performance.now() + slice.budget;
+  };
   const later = () => {
     if (globalThis.scheduler && typeof scheduler.postTask === "function") return scheduler.postTask(() => {}, { priority: "user-visible" });
     return new Promise(resolve => {
@@ -37,5 +45,5 @@
       measure(() => BL.models.withScope(scope, () => steps.return()));
     }
   };
-  BL.buildTasks = { SLICE_MS, due, run, measure, get cpu() { return cpu; } };
+  BL.buildTasks = { SLICE_MS, due, pause, run, measure, get cpu() { return cpu; } };
 })();

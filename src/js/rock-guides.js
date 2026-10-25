@@ -8,6 +8,9 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
+  // Construction checkpoints (see build-tasks.js). They reach it only when sliced, so an unsliced build runs without it.
+  const due = (slice, mask) => !!slice && BL.buildTasks.due(slice, mask);
+  const pause = function* (slice) { if (slice) yield* BL.buildTasks.pause(slice); };
   const LIMIT = 96, EPS = 1e-5, RADIUS = 12, FADE_START = 10.5, FADE_SECONDS = 0.25, SURFACE_PATCH = 0.6;
   const OUTDOOR_CHUNK = 6, OUTDOOR_PATCH = 1.5;
   // The wall classifications are world-anchored, so motion-only re-derivation shares the sibling
@@ -155,7 +158,7 @@
     const floorVertices = new Map();
     const floorKey = (context, x, z) => `${context.basement ? 1 : 0}:${context.index}:${round(x)},${round(z)}`;
     for (const face of island.geometry.faces) if (face.headquartersRamp || face.headquartersBasementRamp) {
-      if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
+      if (due(slice, 63)) yield* pause(slice);
       const v = island.geometry.verts;
       let x = 0, z = 0, owner = null, nearest = Infinity;
       for (const i of face.i) { x += v[i * 3]; z += v[i * 3 + 2]; } x /= face.i.length; z /= face.i.length;
@@ -474,7 +477,7 @@
     const v = island.geometry.verts, candidates = new Uint8Array(contexts.length), faceContexts = new Uint8Array(contexts.length);
     let tested = 0, creases = 0, windowReveals = 0;
     for (const face of island.geometry.faces) {
-      if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
+      if (due(slice, 63)) yield* pause(slice);
       if (face.i.length < 3) continue;
       // Window reveals are authored after the voxel shell is carved: exclude them by identity, before classification.
       // Plane matching alone can miss clipped fragments at frustum joins.
@@ -576,7 +579,7 @@
     // Keep each connected hillside aspect together, including its short stair treads.
     // Opposing aspects stop at the crest and qualify separately.
     for (const face of island.geometry.faces) {
-      if (slice && BL.buildTasks.due(slice, 63)) { yield; slice.until = performance.now() + slice.budget; }
+      if (due(slice, 63)) yield* pause(slice);
       if (face.i.length < 3 || face.headquartersWindowReveal || face.windowIndex !== undefined) continue;
       const ia = face.i[0] * 3, ib = face.i[1] * 3, ic = face.i[2] * 3;
       const ux = v[ib] - v[ia], uy = v[ib + 1] - v[ia + 1], uz = v[ib + 2] - v[ia + 2], vx = v[ic] - v[ia], vy = v[ic + 1] - v[ia + 1], vz = v[ic + 2] - v[ia + 2];
@@ -721,7 +724,7 @@
     };
     let total = 0;
     for (const context of contexts) {
-      if (slice && BL.buildTasks.due(slice)) { yield; slice.until = performance.now() + slice.budget; }
+      yield* pause(slice);
       total += finish(context);
     }
     outdoorMap.clear(); windowOwners.clear();
