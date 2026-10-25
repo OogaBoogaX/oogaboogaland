@@ -333,14 +333,26 @@
   let inputHeld = false;
   const heldEvent = (e) => {
     if (!inputHeld || e.target.closest && e.target.closest("#reload-notice")) return;
-    e.preventDefault();
+    if (e.type !== "touchstart" && e.type !== "touchmove") e.preventDefault();
     e.stopImmediatePropagation();
   };
-  for (const type of HELD_EVENTS) window.addEventListener(type, heldEvent, { capture: true, passive: false });
+  for (const type of HELD_EVENTS) window.addEventListener(type, heldEvent, { capture: true, passive: type === "touchstart" || type === "touchmove" });
   const holdInput = (on) => {
     if (inputHeld === on) return;
     inputHeld = on;
     for (const el of heldHud) el.inert = on;
+  };
+  const entryFailed = (t, error) => {
+    if (destroyed) return;
+    // The previous visit has gone and leave cannot tear down a half-built one. Keep its controls held and offer
+    // a way out, with honest wording: an entry error says nothing about whether the deployment changed.
+    active = null;
+    t.entering = t.building = t.entryFailed = true;
+    visitController.abort();
+    holdInput(true);
+    window.BL.hud.offerReload("Ooga Booga Land could not be opened");
+    $("reload-notice").querySelector("button").focus({ preventScroll: true });
+    reportError(error);
   };
   // True once the next scene has entered. A scene with `enterSteps` (a released hub, rebuilding its island's whole
   // visit) enters in slices instead: the departed scene is gone, nothing updates, draws or takes a key, and the screen
@@ -364,14 +376,14 @@
     }
     holdInput(true);
     const retainedTime = arriving(next, place);
+    const t = transition;
+    const finish = () => { arrived(next, place, retainedTime); releaseLeft(leaving, next); };
     let steps, step;
     try {
       steps = models.withScope(next.id, () => next.enterSteps(ctx));
       step = window.BL.buildTasks.measure(() => models.withScope(next.id, () => steps.next()));
-    } catch (error) { visitController.abort(); throw error; }
-    const finish = () => { arrived(next, place, retainedTime); releaseLeft(leaving, next); };
-    if (step.done) { finish(); return true; }
-    const t = transition;
+      if (step.done) { finish(); return true; }
+    } catch (error) { entryFailed(t, error); return false; }
     active = null;
     t.entering = t.building = true;
     // The rest of the enter, then the meshes its first frame draws, so that frame does not build them all at once.
@@ -384,17 +396,7 @@
       finish();
       t.entering = t.building = false;
       done();
-    }).catch((error) => {
-      if (destroyed) return;
-      // The previous visit has gone and leave cannot tear down a half-built one. Keep its controls held and offer
-      // a way out, with honest wording: an entry error says nothing about whether the deployment changed.
-      t.entering = t.building = t.entryFailed = true;
-      visitController.abort();
-      holdInput(true);
-      window.BL.hud.offerReload("Ooga Booga Land could not be opened");
-      $("reload-notice").querySelector("button").focus({ preventScroll: true });
-      reportError(error);
-    });
+    }).catch(error => entryFailed(t, error));
     return false;
   };
   // Where a settled transition lands: its own scene, or where its preparation redirected it.
@@ -477,9 +479,13 @@
     overlayCtx.fillStyle = "#000000";
     overlayCtx.fillRect(0, 0, overlayCssW, overlayCssH);
     overlayCtx.globalAlpha = 1;
-    if (!transition || transition.entryFailed || transition.held < SPINNER_AFTER
+    if (!transition || transition.held < SPINNER_AFTER
       || !(fade === 1 || transition.instant && (!transition.ready || transition.entering))) return;
     const x = overlayCssW / 2, y = overlayCssH / 2, turn = elapsed / 0.9 % 1 * Math.PI * 2;
+    // A transparent hold never redraws the scene's overlay. Erase only the old spinner, including stroke fringes.
+    const pad = SPINNER_R + 3;
+    if (fade < 1) overlayCtx.clearRect(x - pad, y - pad, pad * 2, pad * 2);
+    if (transition.entryFailed) return;
     overlayCtx.lineWidth = 3;
     overlayCtx.strokeStyle = "rgba(243, 239, 228, 0.18)";
     overlayCtx.beginPath(); overlayCtx.arc(x, y, SPINNER_R, 0, Math.PI * 2); overlayCtx.stroke();

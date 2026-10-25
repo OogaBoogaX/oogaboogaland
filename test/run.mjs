@@ -12082,7 +12082,7 @@ const hubEntryHold = { name: "hub entry hold", why: "regression: a released hub 
   await tourGo(b, "lab");
   await b.evaluate(`(() => {
     const H = BL.scenes.hub, createHud = BL.hud.create, createPilot = BL.pilot.create, subscribe = BL.totemFeed.subscribe, steps = H.enterSteps;
-    const S = window.__entryHold = { released: false, paused: false, callbacks: new Set(), captures: 0, actions: 0, registered: false };
+    const S = window.__entryHold = { released: false, paused: false, callbacks: new Set(), captures: 0, touchLeaks: 0, actions: 0, registered: false };
     BL.hud.create = (...args) => {
       const hud = createHud(...args), onAction = hud.onAction;
       hud.onAction = fn => {
@@ -12103,6 +12103,7 @@ const hubEntryHold = { name: "hub entry hold", why: "regression: a released hub 
       S.signal = ctx.signal;
       // This capture listener is registered with the scene's first slice, as the real carry cursor is.
       window.addEventListener("pointerdown", () => S.captures++, { capture: true, signal: ctx.signal });
+      for (const type of ["touchstart", "touchmove"]) window.addEventListener(type, () => S.touchLeaks++, { capture: true, passive: true, signal: ctx.signal });
       const it = steps(ctx);
       try {
         for (let step = it.next(); !step.done; step = it.next()) {
@@ -12118,6 +12119,10 @@ const hubEntryHold = { name: "hub entry hold", why: "regression: a released hub 
   try {
     const paused = await b.evaluate(`(async () => { const end = performance.now() + 20000; while (!__entryHold.paused && performance.now() < end) { __ooga.advance(1 / 30, 1 / 30); await new Promise(r => setTimeout(r, 0)); } return __entryHold.paused; })()`);
     if (!paused) throw new Error("released entry did not reach its HUD-handler pause");
+    const target = await b.send("Runtime.evaluate", { expression: "window", objectGroup: "entry-hold-listeners" });
+    const listeners = await b.send("DOMDebugger.getEventListeners", { objectId: target.result.result.objectId });
+    const touch = listeners.result.listeners.filter(listener => ["touchstart", "touchmove"].includes(listener.type) && listener.useCapture);
+    await b.send("Runtime.releaseObjectGroup", { objectGroup: "entry-hold-listeners" });
     held = await b.evaluate(`(() => {
       const S = __entryHold, map = document.getElementById("destination-hud"), mode = document.getElementById("mode-hud"), canvas = document.getElementById("scene");
       S.before = JSON.stringify({ mode: S.pilot.mode, aiming: S.pilot.aiming, preset: document.getElementById("detached-destination-name").textContent });
@@ -12126,10 +12131,15 @@ const hubEntryHold = { name: "hub entry hold", why: "regression: a released hub 
       mode.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 91, pointerType: "mouse", button: 0, buttons: 0 }));
       canvas.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 92, pointerType: "mouse", button: 0, buttons: 1 }));
       canvas.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 92, pointerType: "mouse", button: 0, buttons: 0 }));
+      const touchCancelled = ["touchstart", "touchmove"].map(type => {
+        const event = new Event(type, { bubbles: true, cancelable: true }); canvas.dispatchEvent(event); return event.defaultPrevented;
+      });
       for (const fn of S.callbacks) fn({ type: "change", index: 0, fresh: true, changedAt: Date.now() });
       return { scene: __ooga.scene, transitioning: __ooga.transitioning, captures: S.captures, actions: S.actions, subscriptions: S.callbacks.size,
+        touchLeaks: S.touchLeaks, touchCancelled,
         inert: [...document.querySelectorAll('[data-scene="hub"], #sheet, #equipment-hud, .joysticks, #act')].every(el => el.inert) };
     })()`);
+    held.passiveTouch = touch.length === 4 && touch.every(listener => listener.passive);
     await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "w", code: "KeyW" });
     await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: " ", code: "Space", text: " " });
     pressed = await b.evaluate(`(() => {
@@ -12150,30 +12160,39 @@ const hubEntryHold = { name: "hub entry hold", why: "regression: a released hub 
     })()`);
   } finally { await b.evaluate(`__entryHold.restore()`); }
   record("hub entry hold: the real released visit refuses map/mode, canvas capture, Space/W and early totem callbacks, then restores its HUD and merge celebration when ready",
-    held.scene === null && held.transitioning && held.inert && held.captures === 0 && held.actions === 0 && held.subscriptions === 0 && pressed.quiet && pressed.unchanged
+    held.scene === null && held.transitioning && held.inert && held.captures === 0 && held.actions === 0 && held.subscriptions === 0
+      && held.passiveTouch && held.touchLeaks === 0 && held.touchCancelled.every(cancelled => !cancelled) && pressed.quiet && pressed.unchanged
       && resumed.scene === "hub" && resumed.live && resumed.actions === 1 && resumed.subscriptions === 1 && resumed.flare === 1 && resumed.toast.includes("Bitcoin Core just merged"), JSON.stringify({ held, pressed, resumed }));
 } };
 scene("hub", { label: "release policy", query: "hubcache=release", steps: [hudVisit, hubEntryHold, hubSlicedReturn, trip("hub")] });
-scene("hub", { label: "entry failure", query: "hubcache=release", steps: [{ name: "hub entry failure", why: "regression: an entry throwing after its first yield left a permanent black hold with no way to recover", run: async (b) => {
+const hubEntryFailure = async (b, stage) => {
+  if (stage === "resume") await b.evaluate(`window.__resumeHud = __ooga.hud`);
   await tourGo(b, "lab");
-  await b.evaluate(`(() => {
-    const S = window.__entryFailure = { errors: [], report: window.reportError };
+  await b.evaluate(`((stage) => {
+    const H = BL.scenes.hub, steps = H.enterSteps, S = window.__entryFailure = { errors: [], calls: 0, report: window.reportError, kept: H.retained };
     window.reportError = error => S.errors.push(error.message);
-    BL.scenes.hub.enterSteps = function* (ctx) { S.signal = ctx.signal; yield; throw new Error("entry failure fixture"); };
+    if (stage === "resume") __resumeHud.restoreBoards = () => { throw new Error("entry failure fixture"); };
+    H.enterSteps = function* (ctx) {
+      S.calls++; S.signal = ctx.signal;
+      if (stage === "resume") return yield* steps(ctx);
+      if (stage === "later") yield;
+      throw new Error("entry failure fixture");
+    };
     __ooga.go("hub");
-  })()`);
+  })(${JSON.stringify(stage)})`);
   const failed = await b.evaluate(`(async () => {
     const S = __entryFailure, end = performance.now() + 6000;
     while (!S.errors.length && performance.now() < end) { __ooga.advance(1 / 30, 1 / 30); await new Promise(r => setTimeout(r, 0)); }
     __ooga.advance(2, 1 / 30);
     const notice = document.getElementById("reload-notice"), button = notice.querySelector("button"), rect = button.getBoundingClientRect();
     window.reportError = S.report;
-    return { scene: __ooga.scene, transitioning: __ooga.transitioning, aborted: S.signal.aborted, errors: S.errors, message: notice.textContent,
+    return { scene: __ooga.scene, transitioning: __ooga.transitioning, aborted: S.signal.aborted, calls: S.calls, kept: S.kept, errors: S.errors, message: notice.textContent,
       visible: !notice.hidden && rect.width > 0 && rect.height > 0, usable: !button.closest("[inert]"), focused: document.activeElement === button,
       x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
   })()`);
-  record("hub entry failure: a post-yield error aborts the partial visit, reports once and offers a usable, focused Reload with accurate could-not-open wording",
-    failed.scene === null && failed.transitioning && failed.aborted && failed.errors.length === 1 && failed.errors[0] === "entry failure fixture"
+  const phase = stage === "later" ? "post-yield" : stage === "first" ? "first-slice" : "kept-resume";
+  record(`hub entry failure: a ${phase} error aborts the partial visit, reports once and offers a usable, focused Reload with accurate could-not-open wording`,
+    failed.scene === null && failed.transitioning && failed.aborted && failed.calls === 1 && failed.kept === (stage === "resume") && failed.errors.length === 1 && failed.errors[0] === "entry failure fixture"
       && failed.message.includes("could not be opened") && !failed.message.includes("was updated") && failed.visible && failed.usable && failed.focused, JSON.stringify(failed));
   await b.click(failed.x, failed.y);
   let reloaded = false;
@@ -12181,7 +12200,79 @@ scene("hub", { label: "entry failure", query: "hubcache=release", steps: [{ name
     await b.sleep(100);
     reloaded = await b.evaluate(`!!window.__ooga && !window.__entryFailure && __ooga.scene === "hub" && __ooga.renderedFrames > 0`);
   }
-  record("hub entry failure: the offered Reload works through the retained input hold and opens a fresh playable island", reloaded);
+  record(`hub entry failure: ${phase} Reload works through the retained input hold and opens a fresh playable island`, reloaded);
+};
+scene("hub", { label: "entry failure", query: "hubcache=release", steps: [{ name: "hub entry failure", why: "regression: entry errors before or after the first yield left input held with no way to recover", run: async (b) => {
+  await hubEntryFailure(b, "later");
+  await hubEntryFailure(b, "first");
+} }] });
+scene("hub", { label: "kept entry failure", query: "hubcache=keep", steps: [{ name: "hub kept entry failure", why: "regression: a kept hub resumes inside the first entry slice, where an error repeated the swap instead of offering Reload", run: b => hubEntryFailure(b, "resume") }] });
+scene("hub", { label: "entry spinner", query: "hubcache=keep", steps: [{ name: "hub entry spinner", why: "regression: transparent build and entry holds repainted spinner arcs without clearing them, accumulating a solid ring", run: async (b) => {
+  const rows = await b.evaluate(`(async () => {
+    const B = __ooga, L = BL.scenes.lab, canvas = document.getElementById("overlay"), ctx = canvas.getContext("2d");
+    const saved = { build: L.buildSteps, enter: L.enterSteps, clear: ctx.clearRect, fill: ctx.fillRect, arc: ctx.arc };
+    const S = { buildReady: false, enterReady: false, phase: null, audit: null }, rows = [];
+    L.buildSteps = function* () { S.phase = "build"; while (!S.buildReady) yield; };
+    L.enterSteps = function* (visit) { S.phase = "enter"; while (!S.enterReady) yield; L.enter(visit); };
+    ctx.fillRect = function(x, y, w, h) {
+      const a = S.audit;
+      if (a && x === 0 && y === 0 && w === canvas.clientWidth && h === canvas.clientHeight) {
+        a.frames++; a.opaque = this.globalAlpha === 1; a.clear = null;
+        if (a.opaque) a.black++;
+      }
+      return saved.fill.call(this, x, y, w, h);
+    };
+    ctx.clearRect = function(x, y, w, h) {
+      const a = S.audit;
+      if (a) { a.clears++; a.clear = { x, y, w, h }; }
+      return saved.clear.call(this, x, y, w, h);
+    };
+    ctx.arc = function(x, y, radius, ...rest) {
+      const a = S.audit;
+      if (a) {
+        a.arcs++;
+        const c = a.clear, edge = radius + this.lineWidth / 2;
+        if (!a.opaque) a.covered &&= !!c && c.x <= x - edge && c.y <= y - edge && c.x + c.w >= x + edge && c.y + c.h >= y + edge;
+        a.bounded &&= !c || c.w === c.h && c.w < canvas.clientWidth / 2 && c.h < canvas.clientHeight / 2;
+        if (a.opaque) a.blackIntact &&= !c;
+      }
+      return saved.arc.call(this, x, y, radius, ...rest);
+    };
+    const wait = async condition => {
+      const end = performance.now() + 20000;
+      while (!condition() && performance.now() < end) { B.advance(1 / 30, 1 / 30); await new Promise(r => setTimeout(r, 0)); }
+      if (!condition()) throw new Error("spinner hold did not settle");
+    };
+    const sample = label => {
+      S.audit = { frames: 0, black: 0, clears: 0, arcs: 0, covered: true, bounded: true, blackIntact: true };
+      B.advance(2.8, 1 / 60);
+      rows.push({ label, ...S.audit, clear: undefined, scene: B.scene, fade: B.fade });
+      S.audit = null;
+    };
+    try {
+      for (const instant of [true, false]) {
+        S.buildReady = S.enterReady = false; S.phase = null;
+        B.go("lab", null, instant);
+        await wait(() => S.phase === "build");
+        sample(instant ? "instant build" : "black build");
+        S.buildReady = true;
+        await wait(() => S.phase === "enter");
+        sample(instant ? "instant enter" : "black enter");
+        S.enterReady = true;
+        await wait(() => B.scene === "lab" && !B.transitioning);
+        B.go("hub");
+        await wait(() => B.scene === "hub" && !B.transitioning);
+      }
+      return rows;
+    } finally {
+      S.audit = null; S.buildReady = S.enterReady = true;
+      L.buildSteps = saved.build; L.enterSteps = saved.enter;
+      ctx.clearRect = saved.clear; ctx.fillRect = saved.fill; ctx.arc = saved.arc;
+    }
+  })()`);
+  record("hub entry spinner: repeated transparent build and entry frames erase a bounded square covering each spinner before repainting, while black holds keep their opaque fill",
+    rows.length === 4 && rows.every(row => row.frames > 100 && row.arcs > 100 && row.covered && row.bounded && row.blackIntact
+      && (row.label.startsWith("instant") ? row.fade === 0 && row.black === 0 && row.clears > 0 : row.fade === 1 && row.black === row.frames && row.clears === 0)), JSON.stringify(rows));
 } }] });
 scene("hub", { query: "ooga=portlandhodl:clank:lab,obl,lf&ooga=w-s-bitcoin:clank:lab,obl,lf&ooga=bc1gui:clank:lab,obl,lf&ooga=DrNeski:clank:lab,obl,lf&ooga=2140data:clank:lab,obl,lf", steps: [{ name: "work movement cave trips", why: "regression: off-lane cave traffic aimed through obstacles and started backwards detours", run: workCaveTrips }] });
 scene("hub", { label: "room sign", query: "pos=0", steps: [{ name: "room sign copies hash", why: "rule: tapping a room sign swings it and copies its displayed eight-character code with visible confirmation", run: async (b) => {
