@@ -14,7 +14,7 @@
 //
 // The screens are native charts (timechain-charts.js) of mempool.space's public block and mining data
 // (timechain-blocks.js), repainted only when what they print changes, one picture a frame at most, plus the six
-// Timechain Index holdings readings at the desk's terminal. Sani sits in his recliner in every room with his beer.
+// Timechain Index holdings readings at the desk's terminal. Sleeping or away, Sani sits in his recliner with his beer.
 (() => {
   "use strict";
   const BL = window.BL;
@@ -304,12 +304,13 @@
       go: (i) => { holdingsIndex = i; holdingsVersion++; sweep = true; }
     };
 
-    // Sani in his recliner with his beer, in every room, unless the visitor drives him in.
+    // Sleeping or away, Sani is in his recliner; active, he is with the mainland crew.
     const lounge = built.lounge, beer = BL.timechainBeer.create(lounge);
     const seat = { x: lounge.spots.chair.x, z: lounge.spots.chair.z, angle: Math.PI, speed: 0, phase: 0, active: true };
     target(lounge.chair, { kind: "recliner" }, 1.2);
     target(beer.mug, { kind: "beer" }, 0.3);
-    let sani = null;
+    let sani = null, saniRemote = false;
+    const saniContributor = contributors.roster.find(entry => entry.name === "SaniExp");
     const saniActor = { x: 0, y: 0, z: 0, radius: 0.35, height: 1.8 };
     const NO_ACTORS = [], actors = [];
 
@@ -418,7 +419,7 @@
       BL.net.setZone(room.zone);
       if (guide.stage) BL.net.passDoor(room.zone, "in");
     } else { BL.net.setBody(null); BL.net.setZone("none"); }
-    remotes = shared ? BL.remotePlayers.create({ root, crew: people, hide: (name, on) => { if (sani && name === "SaniExp") sani.root.visible = !on; } }) : null;
+    remotes = shared ? BL.remotePlayers.create({ root, crew: people, hide: (name, on) => { if (name === "SaniExp") saniRemote = on; } }) : null;
     const footsteps = BL.footsteps.create();
     const sound = ambience(room, ctx.signal);
     // Another player crossing this room's own doorway opens its doors here too (net.js `subscribeDoor`).
@@ -575,6 +576,14 @@
     // Sani at his laptop, in the pose the island used to give him there, his beer gear doing the rest.
     const poseSani = (dt) => {
       if (!sani) return;
+      const state = contributors.stateFor(saniContributor);
+      const visible = !saniRemote && (state === "sleeping" || state === "away");
+      if (!visible) {
+        if (sani.root.visible) beer.pause();
+        sani.root.visible = false;
+        return;
+      }
+      sani.root.visible = true;
       seat.phase = (seat.phase + dt * 7) % (Math.PI * 2);
       const decay = Math.exp(-1.15 * dt);
       seat.angle = (seat.angle + seat.speed * (1 - decay) / 1.15) % (Math.PI * 2);
