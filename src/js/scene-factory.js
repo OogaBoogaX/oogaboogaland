@@ -2287,15 +2287,17 @@
   };
   const overlay = (dt) => fx.drawOverlay(dt, drawExtra);
 
-  const leave = () => {
-    // The hall's meshes stay on the GPU while the island runs (`world.factoryKeep`, read by the island's liveGeometry),
-    // so walking back in uploads nothing; taken first, while every piece is still on the graph.
-    // Only the hall's own, so the island's kept meshes never ride along from one visit to the next.
-    const kept = new Set(), collect = (node) => { if (node.geometry) kept.add(node.geometry); for (const child of node.children) collect(child); };
+  // One current visit's owners, including hidden pools and declared alternatives. Never read the previous keep Set.
+  const allGeometry = (kept) => {
+    const collect = (node) => { if (node.geometry) kept.add(node.geometry); for (const child of node.children) collect(child); };
     collect(root);
-    hallGeometry(kept);
+    factoryScene.hallGeometry(kept);
     if (world.islandKeep) for (const geometry of world.islandKeep) kept.delete(geometry);
-    world.factoryKeep = kept;
+    return kept;
+  };
+  const leave = () => {
+    // Capture once, before disposal: the island retains only this visit, never a union of earlier halls.
+    world.factoryKeep = factoryScene.allGeometry(new Set());
     // A visitor at the kiosk steps away first, and a tip of theirs still on its screen goes into the cooker.
     endBooth(scene);
     // Whoever walked in walks back out as themselves: the island takes the same Ooga back at this mouth.
@@ -2371,7 +2373,7 @@
     // Voice zone: the Factory group, which its tunnel on the island shares (`factory`).
     voiceZone: "factory.hall",
     micKey: true,
-    id: "factory", buildSteps: () => FM.buildSteps(), enter, update, overlay, onDonation, previewDonation, onSeen, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry,
+    id: "factory", buildSteps: () => FM.buildSteps(), enter, update, overlay, onDonation, previewDonation, onSeen, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry, allGeometry, hallGeometry,
     root: null, camera: null, input: null, debug: null, agent: null, agentView: null, agentControls: null, agentHandoff: null,
     // Diagnostics observe the existing detached owner without reading model caches.
     get retainedGeometry() { return world ? world.factoryKeep : null; },

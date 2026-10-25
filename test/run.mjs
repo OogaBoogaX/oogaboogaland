@@ -6312,7 +6312,7 @@ const hubRetentionProof = async () => {
   const own = {}, borrowed = {}, alternate = {}, graph = { geometry: own, children: [{ geometry: borrowed, children: [] }] };
   for (const keep of [false, true]) {
     let calls = 0;
-    const kept = new Function("reuseHub", "root", "world", "islandGeometry", `${hub.slice(islandStart, islandEnd)} return islandMeshes();`)(keep, graph, { factoryKeep: new Set([borrowed]) }, set => { calls++; set.add(alternate); });
+    const kept = new Function("reuseHub", "root", "world", "hubScene", `${hub.slice(islandStart, islandEnd)} return islandMeshes();`)(keep, graph, { factoryKeep: new Set([borrowed]) }, { islandGeometry: set => { calls++; set.add(alternate); } });
     if (keep ? !kept.has(own) || !kept.has(alternate) || kept.has(borrowed) || calls !== 1 : kept !== null || calls !== 0) failures++;
     cases++;
   }
@@ -17339,6 +17339,114 @@ const gpuGeometryDelta = (before, after) => {
     added: metadata(added), removed: metadata(removed)
   } };
 };
+// Observe the collectors already used by production; an extra liveGeometry call would warm model caches.
+// Only numeric weak identities survive a call, never another strong geometry inventory.
+const factoryGeometryAudit = (scenes, renderer, state) => {
+  const factory = scenes.factory, hub = scenes.hub;
+  const id = geometry => {
+    if (!state.ids.has(geometry)) state.ids.set(geometry, state.nextId++);
+    return state.ids.get(geometry);
+  };
+  const ids = geometries => [...geometries].map(id);
+  const audit = { generation: 0, current: null, hub: [], hubSeen: false };
+  const collect = factory.allGeometry, hall = factory.hallGeometry, island = hub.islandGeometry;
+  if ([collect, hall, island].some(fn => typeof fn !== "function")) throw new Error("Missing Factory ownership collectors");
+  let alternatives = null;
+  factory.hallGeometry = set => {
+    const add = set.add, descriptor = Object.getOwnPropertyDescriptor(set, "add");
+    set.add = function (geometry) { if (alternatives) alternatives.push(id(geometry)); return add.call(this, geometry); };
+    try { return hall(set); }
+    finally {
+      if (descriptor) Object.defineProperty(set, "add", descriptor);
+      else delete set.add;
+    }
+  };
+  factory.allGeometry = set => {
+    const graph = new Set(), walk = node => {
+      if (node.geometry) graph.add(id(node.geometry));
+      for (const child of node.children) walk(child);
+    };
+    walk(factory.root);
+    const empty = set.size === 0, borrowed = [], slots = [], remove = set.delete, descriptor = Object.getOwnPropertyDescriptor(set, "delete");
+    set.delete = function (geometry) { borrowed.push(id(geometry)); return remove.call(this, geometry); };
+    let result;
+    alternatives = slots;
+    try { result = collect(set); }
+    finally {
+      alternatives = null;
+      if (descriptor) Object.defineProperty(set, "delete", descriptor);
+      else delete set.delete;
+    }
+    const stats = factory.stats();
+    audit.current = { generation: ++audit.generation, expected: ids(result), empty: empty && result === set,
+      graph: [...graph], alternatives: slots, borrowed, avatars: factory.debug.crew ? 1 : 0,
+      structural: stats.allNodes - stats.particles - stats.pool, particles: stats.particles + stats.pool,
+      workers: factory.debug.factory.scene.crew.length, remotes: stats.reservedPlayers, quality: renderer.quality };
+    return result;
+  };
+  hub.islandGeometry = set => {
+    const owned = new Set(), add = set.add, descriptor = Object.getOwnPropertyDescriptor(set, "add");
+    // Record every declared owner, including an add of a shared identity already present in the destination Set.
+    set.add = function (geometry) { owned.add(id(geometry)); return add.call(this, geometry); };
+    try { return island(set); }
+    finally {
+      if (descriptor) Object.defineProperty(set, "add", descriptor);
+      else delete set.add;
+      audit.hub = [...owned]; audit.hubSeen = true;
+    }
+  };
+  audit.snapshot = () => {
+    const owned = new Set(audit.hub), walk = node => {
+      if (!node) return;
+      if (node.geometry) owned.add(id(node.geometry));
+      for (const child of node.children) walk(child);
+    };
+    walk(hub.root || hub.retainedRoot);
+    return { ...audit.current, kind: renderer.kind, keep: ids(factory.retainedGeometry || []), hub: [...owned], hubSeen: audit.hubSeen };
+  };
+  return audit;
+};
+const factoryGeometryBound = (baseline, previous, current, { sameVisit = false } = {}) => {
+  const ids = values => Array.isArray(values) && values.every(id => Number.isSafeInteger(id) && id > 0);
+  const list = values => ids(values) && new Set(values).size === values.length;
+  const complete = snapshot => {
+    const f = snapshot?.factory, rows = snapshot?.geometry;
+    if (!(f && f.kind === "webgl2" && f.empty && f.hubSeen && f.quality === "low"
+      && Array.isArray(rows) && rows.length > 0 && rows.length === snapshot.stats?.gl?.records && list(rows.map(row => row?.id))
+      && list(f.keep) && list(f.expected) && f.expected.length > 0 && list(f.hub) && f.hub.length > 0
+      && list(f.graph) && list(f.borrowed) && ids(f.alternatives) && (f.avatars === 0 || f.avatars === 1)
+      && f.alternatives.length === 125 + f.avatars * 2
+      && Number.isSafeInteger(f.generation) && f.generation > 0
+      && Number.isSafeInteger(f.structural) && f.structural >= 0
+      && Number.isSafeInteger(f.particles) && f.particles >= 0 && f.particles <= 240 && f.workers === 11 && f.remotes === 0
+      && f.graph.length <= f.structural + f.particles
+      && f.keep.length === f.expected.length && f.keep.every(id => f.expected.includes(id)))) return false;
+    // This inventory is anchored independently of the outer collector's result: current graph plus
+    // the fixed declared alternate slots, minus the existing borrowed-island deletions.
+    const owned = new Set([...f.graph, ...f.alternatives]);
+    for (const id of f.borrowed) owned.delete(id);
+    return owned.size === f.expected.length && f.expected.every(id => owned.has(id));
+  };
+  if (![baseline, previous, current].every(complete)) return { ok: false, complete: false, captures: [baseline, previous, current].map(s => ({
+    records: s?.stats?.gl?.records, rows: s?.geometry?.length, keep: s?.factory?.keep?.length, collected: s?.factory?.expected?.length,
+    graph: s?.factory?.graph?.length, slots: s?.factory?.alternatives?.length, structural: s?.factory?.structural,
+    particles: s?.factory?.particles, workers: s?.factory?.workers, avatars: s?.factory?.avatars, remotes: s?.factory?.remotes,
+    kind: s?.factory?.kind, quality: s?.factory?.quality, empty: s?.factory?.empty, hubSeen: s?.factory?.hubSeen
+  })) };
+  const a = baseline.factory, p = previous.factory, z = current.factory;
+  const keep = new Set(z.keep), hub = new Set(z.hub), resident = new Set(current.geometry.map(row => row.id));
+  const outside = snapshot => snapshot.geometry.reduce((n, row) => n + (!snapshot.factory.keep.includes(row.id) || snapshot.factory.hub.includes(row.id)), 0);
+  const from = outside(baseline), to = outside(current);
+  const retired = p.keep.filter(id => !keep.has(id) && !hub.has(id) && resident.has(id));
+  // One node per FX slot (fx.js, 240 max). Off graph: 37 fixed variants, 11x6 worker parts,
+  // gate 1, low Tess 13, Kortik 8 and up to two avatar heads. Remotes are absent in this fixture.
+  // This is independent of observed keep sizes; exact membership above rejects extra owners below this ceiling too.
+  const capacity = a.structural + 240 + 127;
+  const structure = p.structural === a.structural && z.structural === a.structural && z.avatars === a.avatars && z.keep.length <= capacity;
+  const generation = z.generation === p.generation + (sameVisit ? 0 : 1);
+  return { ok: structure && generation && retired.length === 0 && Math.abs(to - from) <= 3,
+    complete: true, structure, generation, capacity, keep: z.keep.length, outside: [from, to], retired };
+};
 const gpuGeometryDiagnosticChecks = async () => {
   const a = {}, b = {}, c = {}, d = {}, detached = {}, added = {}, privateText = "must-not-be-serialized";
   const node = (geometry, visible = true, children = []) => ({ geometry, visible, children, name: privateText, text: privateText });
@@ -17394,8 +17502,116 @@ const gpuGeometryDiagnosticChecks = async () => {
     && change.observations.added.every(row => row.length === 8) && !change.added.some(row => "observation" in row);
   record("GPU record provenance: hidden and detached CPU owners precede residency, eviction preserves weak identity, safe shape metadata skips accessors and compact deltas preserve resident counts", cold.length === 0 && warm.length === 3 && priorCpu && freshCpu && detachedKnown && shape && reappeared && compact,
     JSON.stringify({ priorCpu, freshCpu, detachedKnown, shape, reappeared, compact }));
+
+  let collector = false, observation = false, collectorError = "";
+  try {
+    // Exercise the actual departure collector: an old keep cannot authorize its own continued ownership.
+    const source = await readFile(join(root, "src/js/scene-factory.js"), "utf8");
+    const start = source.indexOf("  const allGeometry ="), end = source.indexOf("  const leave =", start);
+    if (start < 0 || end < 0) throw new Error("Factory owner collector missing");
+    const oldOnly = {}, borrowed = {}, sharedPart = {}, currentPart = {}, declared = [];
+    const pieces = n => Array.from({ length: n }, () => { const g = {}; declared.push(g); return g; });
+    const variants = n => Object.fromEntries(pieces(n).map((g, i) => [i, g]));
+    const FM = {};
+    for (const [name, n] of [["coreChamber", 4], ["forgeFire", 2], ["forgeSign", 3], ["forgeWave", 2], ["switchScreens", 2],
+      ["rebalancerRing", 2], ["rebalancerFlow", 2], ["lookoutLamp", 2], ["galleryCaps", 2], ["cookerPort", 2]]) {
+      const value = variants(n); FM[name] = () => value;
+    }
+    const capacitors = { blue: variants(2), orange: variants(2) };
+    const shafts = Array.from({ length: 2 }, () => { const [dim, bright] = pieces(2); return { glow: { dim, bright } }; });
+    const arcs = Array.from({ length: 2 }, () => pieces(3));
+    Object.assign(FM, { capacitor: () => capacitors, forgeShafts: () => shafts, teslaArcs: () => arcs });
+    const role = n => { const meshes = pieces(n); return { liveGeometry(set) { for (const g of meshes) set.add(g); } }; };
+    const scene = { crew: Array.from({ length: 11 }, () => ({ agent: role(6) })), gate: { phase: role(1) } };
+    const greeter = role(13), kortik = role(8), remotes = { liveGeometry() {} };
+    const graph = node(sharedPart, true, [node(currentPart, false), node(borrowed)]);
+    const world = { islandKeep: new Set([borrowed]), get factoryKeep() { throw new Error("Read historical Factory keep"); } };
+    const hallStart = source.indexOf("  const hallGeometry ="), hallEnd = source.indexOf("  const stats =", hallStart);
+    if (hallStart < 0 || hallEnd < 0) throw new Error("Factory alternate collector missing");
+    const hall = new Function("FM", "scene", "avatar", "greeter", "kortik", "remotes", "world",
+      `${source.slice(hallStart, hallEnd)} return hallGeometry;`)(FM, scene, null, greeter, kortik, remotes, world);
+    let calls = 0, islandCalls = 0;
+    const fakeFactory = { root: graph, hallGeometry: hall, retainedGeometry: null,
+      stats: () => ({ allNodes: 10, particles: 2, pool: 1, reservedPlayers: 0 }), debug: { crew: null, factory: { scene } } };
+    const collect = new Function("root", "factoryScene", "world", `${source.slice(start, end)} return allGeometry;`)(graph, fakeFactory, world);
+    fakeFactory.allGeometry = set => { calls++; return collect(set); };
+    const own = collect(new Set());
+    collector = declared.length === 125 && own.size === 127 && [...declared, sharedPart, currentPart].every(g => own.has(g)) && !own.has(borrowed) && !own.has(oldOnly);
+    const alternate = declared[0];
+    const fakeHub = { root: node(sharedPart), islandGeometry: set => { islandCalls++; set.add(alternate).add(borrowed); } };
+    const identities = { ids: new WeakMap(), nextId: 1 };
+    const audit = factoryGeometryAudit({ factory: fakeFactory, hub: fakeHub }, { kind: "webgl2", quality: "low" }, identities);
+    fakeFactory.retainedGeometry = fakeFactory.allGeometry(new Set());
+    // The destination already contains a Factory-only part; it must not become a Hub exemption.
+    const destination = new Set([currentPart, alternate]);
+    fakeHub.islandGeometry(destination);
+    fakeFactory.retainedGeometry.add(oldOnly);
+    const sample = audit.snapshot(), idOf = g => identities.ids.get(g);
+    observation = calls === 1 && islandCalls === 1 && !Object.hasOwn(destination, "add") && !Object.hasOwn(fakeFactory.retainedGeometry, "delete")
+      && sample.empty && sample.generation === 1 && sample.structural === 7 && sample.particles === 3
+      && sample.alternatives.length === 125 && sample.graph.length === 3 && sample.borrowed.includes(idOf(borrowed))
+      && sample.keep.includes(idOf(oldOnly)) && !sample.expected.includes(idOf(oldOnly))
+      && sample.hub.includes(idOf(sharedPart)) && sample.hub.includes(idOf(alternate)) && sample.hub.includes(idOf(borrowed))
+      && !sample.hub.includes(idOf(currentPart));
+    // Restore the intercepted Set method even if a real collector throws.
+    const throwingHub = { root: graph, islandGeometry() { throw new Error("collector failure"); } };
+    factoryGeometryAudit({ factory: { ...fakeFactory, allGeometry: collect }, hub: throwingHub }, { kind: "webgl2", quality: "low" }, identities);
+    try { throwingHub.islandGeometry(destination); } catch (error) { observation &&= error.message === "collector failure"; }
+    observation &&= !Object.hasOwn(destination, "add");
+  } catch (error) { collectorError = String(error); }
+
+  const range = start => Array.from({ length: 10 }, (_, i) => start + i);
+  const firstKeep = [10, ...range(20)], nextKeep = [10, ...range(30)];
+  const makeFactorySnapshot = (keep, residents, generation, extra = {}) => ({
+    stats: { gl: { records: residents.length } }, geometry: residents.map(id => ({ id, owners: [], references: 24, omittedOwners: 16 })),
+    factory: { kind: "webgl2", empty: true, hubSeen: true, quality: "low", structural: 100, particles: 20, workers: 11, remotes: 0,
+      expected: [...keep], keep: [...keep], graph: [...keep], alternatives: Array(125).fill(10), borrowed: [], avatars: 0,
+      hub: [1, 2, 3], generation, ...extra }
+  });
+  const initial = makeFactorySnapshot(firstKeep, [1, 2, 3, 10, ...range(20).slice(0, 5)], 1);
+  const current = makeFactorySnapshot(nextKeep, [1, 2, 3, ...nextKeep], 2);
+  const accepts = (sample, baseline = initial) => factoryGeometryBound(baseline, baseline, sample).ok;
+  const altered = (extra, residents = current.geometry.map(row => row.id)) => makeFactorySnapshot(nextKeep, residents, 2, extra);
+  const factoryCases = {
+    collector, observation,
+    forwardPhase: accepts(current),
+    reversePhase: accepts(makeFactorySnapshot(nextKeep, [1, 2, 3, 10, ...range(30).slice(0, 5)], 2), makeFactorySnapshot(firstKeep, [1, 2, 3, ...firstKeep], 1)),
+    sharedHub: accepts(altered({ hub: [1, 2, 3, 20] }, [...current.geometry.map(row => row.id), 20])),
+    sharedFour: accepts(altered({ hub: [1, 2, 3, 20, 21, 22, 23] }, [...current.geometry.map(row => row.id), 20, 21, 22, 23]),
+      makeFactorySnapshot(firstKeep, initial.geometry.map(row => row.id), 1, { hub: [1, 2, 3, 20, 21, 22, 23] })),
+    retiredOutside: !accepts(altered({}, [...current.geometry.map(row => row.id), 20])),
+    retiredInside: !accepts(altered({ keep: [...nextKeep, 20] })),
+    nonresidentInside: !accepts(altered({ keep: [...nextKeep, 999] })),
+    sameSizeSubstitution: !accepts(altered({ keep: [...nextKeep.slice(0, -1), 20] })),
+    collectorUnion: !accepts(altered({ keep: [...nextKeep, 20], expected: [...nextKeep, 20] })),
+    historicalAlternate: !accepts(altered({ keep: [...nextKeep, 20], expected: [...nextKeep, 20], alternatives: [...Array(125).fill(10), 20] })),
+    // Reusing a geometry in an existing declared slot is current bounded ownership, not appended history.
+    declaredSlotReuse: accepts(altered({ keep: [...nextKeep, 20], expected: [...nextKeep, 20], alternatives: [...Array(124).fill(10), 20] })),
+    growingGraph: !accepts(altered({ keep: [...nextKeep, 20], expected: [...nextKeep, 20], graph: [...nextKeep, 20], structural: 101 })),
+    fxCeiling: !accepts(altered({ particles: 241 })),
+    duplicateKeep: !accepts(altered({ keep: [...nextKeep, 10], expected: [...nextKeep, 10] })),
+    canvas: !accepts(altered({ kind: "canvas2d" })),
+    repeatedCapture: !accepts(altered({ generation: 1 })),
+    sameDeparture: factoryGeometryBound(initial, current, current, { sameVisit: true }).ok
+  };
+  const incomplete = altered({}); incomplete.stats.gl.records++; factoryCases.incomplete = !accepts(incomplete);
+  const oversized = [10, ...Array.from({ length: 467 }, (_, i) => i + 1000)];
+  factoryCases.overBudgetInventory = !accepts(altered({ keep: oversized, expected: oversized, graph: oversized }, [1, 2, 3, ...oversized]));
+  const duplicate = altered({}); duplicate.geometry[0].id = duplicate.geometry[1].id; factoryCases.duplicateResident = !accepts(duplicate);
+  factoryCases.empty = !accepts(makeFactorySnapshot(nextKeep, [], 2));
+  let previous = initial, insideRejected = true;
+  const outside = [];
+  for (let i = 1; i <= 6; i++) {
+    const extra = Array.from({ length: i }, (_, j) => 100 + j);
+    const next = makeFactorySnapshot(nextKeep, [1, 2, 3, ...nextKeep, ...extra], i + 1);
+    outside.push(factoryGeometryBound(initial, previous, next).ok); previous = next;
+    insideRejected &&= !accepts(altered({ keep: [...nextKeep, ...extra] }));
+  }
+  factoryCases.accumulatingOutside = outside.slice(0, 3).every(Boolean) && outside.slice(3).every(ok => !ok);
+  factoryCases.accumulatingInside = insideRejected;
+  record("Factory residency guard: real current-visit collection excludes history; shared owners and hall upload phases pass while stale, accumulating, malformed and over-budget retention fails", Object.values(factoryCases).every(Boolean), JSON.stringify({ ...factoryCases, collectorError }));
 };
-const dsbSoak = async (b, { geometry = false } = {}) => {
+const dsbSoak = async (b, { geometry = false, factory = false } = {}) => {
   await b.send("HeapProfiler.enable");
   const until = (cond, ms) => b.evaluate(`new Promise((resolve) => { const B = window.__ooga; const t0 = performance.now(); const tick = () => { const ok = !!(${cond}); if (ok || performance.now() - t0 > ${ms}) resolve(ok); else requestAnimationFrame(tick); }; tick(); })`);
   const rendered = (frames, ms = 6000) => b.evaluate(`new Promise((resolve) => { const B = window.__ooga; const start = B.renderedFrames; const t0 = performance.now(); const tick = () => { if (B.renderedFrames >= start + ${frames} || performance.now() - t0 > ${ms}) resolve(B.renderedFrames - start); else requestAnimationFrame(tick); }; requestAnimationFrame(tick); })`);
@@ -17441,16 +17657,16 @@ const dsbSoak = async (b, { geometry = false } = {}) => {
       throw new Error("Incomplete heap node accounting");
     return { used: (await b.send("Runtime.getHeapUsage")).result.usedSize, objects: total - compiled, code: compiled, nodes: dom.nodes, listeners: dom.jsEventListeners };
   };
-  const snapshot = async (stats = null) => {
+  const snapshot = async (stats = null, { heap: measureHeap = true } = {}) => {
     // Freeze the page so stats, DOM counters and heap describe one state despite other lanes' delays.
     await b.focus(false);
     try {
       await b.send("Page.setWebLifecycleState", { state: "frozen" });
       if (geometry) {
-        const state = await b.evaluate(`({ stats: window.__ooga.stats(), geometry: ${gpuGeometryPageSnapshot} })`);
-        return { ...state, stats: stats || state.stats, ...await heap() };
+        const state = await b.evaluate(`({ stats: window.__ooga.stats(), geometry: ${gpuGeometryPageSnapshot}${factory ? ", factory: window.__factoryGeometryAudit.snapshot()" : ""} })`);
+        return { ...state, stats: stats || state.stats, ...(measureHeap ? await heap() : {}) };
       }
-      return { stats: stats || await b.evaluate("window.__ooga.stats()"), ...await heap() };
+      return { stats: stats || await b.evaluate("window.__ooga.stats()"), ...(measureHeap ? await heap() : {}) };
     } finally {
       await b.send("Page.setWebLifecycleState", { state: "active" });
       await b.focus(true);
@@ -17483,7 +17699,7 @@ scene("dsb", { label: "lifecycle", exclusive: true, url: hubPage(src), steps: [{
 } }] });
 
 scene("factory", { label: "lifecycle", exclusive: true, url: hubPage(src), steps: [{ name: "factory lifecycle", why: "contract: repeated factory visits, each left with a tip's show in the air, release the hall's listeners, nodes and GPU resources while retaining one bounded shared node", run: async (b) => {
-  const { rendered, settled, snapshot, travel, heapDetail, within } = await dsbSoak(b, { geometry: true });
+  const { rendered, settled, snapshot, travel, heapDetail, within } = await dsbSoak(b, { geometry: true, factory: true });
   // Compare the same roster and work sites even when an activity expires during the soak.
   // Only classification uses this instant; scene animation and the Factory feed keep their clocks.
   await b.evaluate(`(() => {
@@ -17505,6 +17721,8 @@ scene("factory", { label: "lifecycle", exclusive: true, url: hubPage(src), steps
   await b.evaluate(`(() => {
     const node = __ooga.factory.node, feed = node.feed, subscribe = feed.subscribe;
     window.__factoryLife = { node, subscriptions: 0 };
+    window.__factoryGeometryAudit = (${factoryGeometryAudit})(BL.scenes, __ooga.renderer,
+      window.__testGeometryIds ||= { ids: new WeakMap(), nextId: 1 });
     feed.subscribe = (fn) => {
       const off = subscribe(fn); let live = true;
       __factoryLife.subscriptions++;
@@ -17535,6 +17753,7 @@ scene("factory", { label: "lifecycle", exclusive: true, url: hubPage(src), steps
   // Warm both scenes and the cooker's show, so the counts below start from a visit made after the instrumenting.
   await travel("factory"); await tip("soak-warm"); await travel("lab"); await travel("hub"); await settled(); await rendered(2);
   const beforeWindows = await warmWindowBatches(), before = await snapshot(), visits = [];
+  let previous = before;
   for (let i = 0; i < 6; i++) {
     await travel("factory");
     // One listener belongs to the hall and one to Tess; both leave with the scene.
@@ -17548,16 +17767,21 @@ scene("factory", { label: "lifecycle", exclusive: true, url: hubPage(src), steps
       const n = __ooga.factory.node;
       return { same: n === __factoryLife.node, subscriptions: __factoryLife.subscriptions, lines: n.placeOf.size, places: n.bays.length + n.stands.length };
     })()`);
-    visits.push({ ...visit, hall, away, lighter, inFlight });
+    const current = await snapshot(null, { heap: false }), geometry = factoryGeometryBound(before, previous, current);
+    previous = current;
+    visits.push({ ...visit, hall, away, lighter, inFlight, geometry });
   }
   const afterWindows = await warmWindowBatches(), after = await snapshot(), same = (key) => before.stats[key] === after.stats[key];
   record("soak: factory cycles: both snapshots warm all bounded window batches and restore their visibility", [beforeWindows, afterWindows].every(w => w.windows === 2 && w.batches === 18 && w.warmed && w.restored), JSON.stringify({ before: beforeWindows, after: afterWindows }));
   // The hub's entrance and roof windows each own one subscription.
   record("soak: factory cycles: one bounded node survives six round trips, each left mid-show, the hall's subscription released, without retaining scene nodes, targets or DOM", visits.every((v) => v.same && v.hall === 2 && v.away === 0 && v.lighter && v.subscriptions === 2 && v.lines <= v.places && v.inFlight > 0)
     && same("allNodes") && same("targets") && same("dom") && after.stats.tweens === 0, JSON.stringify({ visits, before: before.stats, after: after.stats }));
-  const bounded = Math.abs(after.stats.gl.records - before.stats.gl.records) <= 3 && before.nodes === after.nodes && before.listeners === after.listeners && within(before, after, 0.1);
+  // Hall pool uploads vary with the show. Check the exact bounded owner generation separately,
+  // keep the same ±3 limit outside it, and reject retired records on every measured departure.
+  const residency = factoryGeometryBound(before, previous, after, { sameVisit: true });
+  const bounded = residency.ok && visits.every(v => v.geometry.ok) && before.nodes === after.nodes && before.listeners === after.listeners && within(before, after, 0.1);
   record("soak: factory cycles: GPU records, listeners and retained heap remain bounded", bounded, heapDetail(before, after) + `, GPU ${before.stats.gl.records} -> ${after.stats.gl.records}, DOM ${before.nodes} -> ${after.nodes}, listeners ${before.listeners} -> ${after.listeners}`
-    + (bounded ? "" : `, geometry ${JSON.stringify(gpuGeometryDelta(before.geometry, after.geometry))}`));
+    + (bounded ? "" : `, ownership ${JSON.stringify(residency)}, geometry ${JSON.stringify(gpuGeometryDelta(before.geometry, after.geometry))}`));
 } }] });
 
 // Node tier: pure computation over window.BL under a minimal DOM shim, calling the same probe functions.

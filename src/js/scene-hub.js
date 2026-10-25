@@ -12496,14 +12496,14 @@
     if (!reuseHub) return null;
     const kept = new Set(), walk = (node) => { if (node.geometry) kept.add(node.geometry); for (const child of node.children) walk(child); };
     walk(root);
-    islandGeometry(kept);
+    hubScene.islandGeometry(kept);
     if (world.factoryKeep) for (const geometry of world.factoryKeep) kept.delete(geometry);
     return kept;
   };
   const liveGeometry = (set) => {
     // The Lightning Factory's meshes stay on the GPU while the island runs, so walking back in uploads nothing.
     if (world && world.factoryKeep) for (const geometry of world.factoryKeep) set.add(geometry);
-    islandGeometry(set);
+    hubScene.islandGeometry(set);
   };
   const islandGeometry = (set) => {
     if (islandGuide) islandGuide.liveGeometry(set);
@@ -12537,7 +12537,7 @@
     // The island reports its own zone as soon as an Ooga is driven (see `zoneOf`); until then it is nowhere.
     voiceZone: "none",
     micKey: true,
-    id: "hub", enter, enterSteps, update, overlay, onDonation, previewDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry, cachedGeometry,
+    id: "hub", enter, enterSteps, update, overlay, onDonation, previewDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry, cachedGeometry, islandGeometry,
     get retained() { return heldHub; }, get elapsed() { return now; },
     get retainedRoot() { return heldHub ? root : null; },
     // The Lightning Factory's builders stay warm while the island runs, since its shield walks straight in.
