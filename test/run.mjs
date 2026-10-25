@@ -845,9 +845,9 @@ const cutawayBoundsProof = async () => {
 
 const visibilityStorageProof = async ({ compact = false, deferred = false } = {}) => {
   const context = { window: {}, performance };
-  for (const name of ["math", "scene", "models", "object-guides"]) {
+  for (const name of ["math", "scene", "models", "object-guides", "sight-guides"]) {
     let source = await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8");
-    if (name === "object-guides") source = source.replace("return { collect, clear,", "return { ownerRecords: () => ownerGroups, geometryRecords: () => geometries, entryRecords: () => registered, collect, clear,");
+    if (name === "object-guides") source = source.replace("return { collect, clear,", "return { contourScratchClear: () => !contoursPending && contourActor === null && contourRetained === null && contourRetainedCount === 0, ownerRecords: () => ownerGroups, geometryRecords: () => geometries, entryRecords: () => registered, collect, clear,");
     runInNewContext(source, context);
   }
   return runInNewContext(`(() => {
@@ -862,7 +862,20 @@ const visibilityStorageProof = async ({ compact = false, deferred = false } = {}
     const guides = B.objectGuides.create({ roots: [owner], crew: { cavemen: new Map() } });
     const initiallyUnbaked = guides.stats.triangles === 0 && guides.stats.samples === 0;
     const camera = S.createCamera({ near: 0.1, far: 100 }); Object.assign(camera.position, { x: 0, y: 0, z: 0 }); Object.assign(camera.target, { x: 0, y: 0, z: 8 });
-    S.updateWorld(root); guides.collect(actor, 0, 0, 8, camera, 1.6);
+    S.updateWorld(root);
+    const collected = guides.collect(actor, 0, 0, 8, camera, 1.6, [owner], 1, ${deferred});
+    let lazyContours = !${deferred} || collected.count === 0 && guides.stats.triangles === 0;
+    if (${deferred}) {
+      collected.ensureContours();
+      const version = collected.version;
+      collected.ensureContours();
+      lazyContours &&= version === collected.version && guides.contourScratchClear();
+      guides.collect(actor, 0, 0, 8, camera, 1.6, [owner], 1, true); guides.refresh();
+      lazyContours &&= guides.contourScratchClear();
+      guides.collect(actor, 0, 0, 8, camera, 1.6, [owner], 1, true);
+      guides.collect(actor, 0, 0, 8, camera, 1.6);
+      lazyContours &&= guides.contourScratchClear();
+    }
     guides.ownerBoundaryAt(owner, 0, 0.2, 8, 1, 0, 0);
     let values = 0, exact = true, tightBacking = true, bytes = 0, count = 0;
     for (const [source, geometry] of guides.geometryRecords()) {
@@ -900,7 +913,7 @@ const visibilityStorageProof = async ({ compact = false, deferred = false } = {}
     S.addChild(root, firstRoot, secondRoot);
     S.addChild(firstRoot, firstNode, removed); S.addChild(secondRoot, secondNode);
     const first = B.objectGuides.create({ roots: [firstRoot], crew: { cavemen: new Map() } }), second = B.objectGuides.create({ roots: [secondRoot], crew: { cavemen: new Map() } });
-    const query = (q, sceneRoot) => { S.updateWorld(sceneRoot); q.collect(actor, 0, 0, 8, camera, 1.6); q.ownerBoundaryAt(sceneRoot, 0, 0.2, 8, 1, 0, 0); };
+    const query = (q, sceneRoot) => { S.updateWorld(sceneRoot); q.collect(actor, 0, 0, 8, camera, 1.6, null, 0, ${deferred}); if (${deferred}) q.result.ensureContours(); q.ownerBoundaryAt(sceneRoot, 0, 0.2, 8, 1, 0, 0); };
     query(first, firstRoot); query(second, secondRoot);
     const sharedBake = first.geometryRecords().get(shared) === second.geometryRecords().get(shared);
     const sharedIndices = second.geometryRecords().get(shared).triangleIndices.slice();
@@ -964,7 +977,7 @@ const visibilityStorageProof = async ({ compact = false, deferred = false } = {}
     S.addChild(root, hiddenRoot); S.addChild(hiddenRoot, hiddenNode);
     const hidden = B.objectGuides.create({ roots: [hiddenRoot], crew: { cavemen: new Map() } }), hiddenCases = [];
     const hiddenSnapshot = q => {
-      S.updateWorld(hiddenRoot); q.collect(actor, 0, 0, 8, camera, 1.6);
+      S.updateWorld(hiddenRoot); q.collect(actor, 0, 0, 8, camera, 1.6, null, 0, ${deferred}); if (${deferred}) q.result.ensureContours();
       const rays = [], contours = [], v = hiddenNode.geometry.verts, w = hiddenNode.world;
       for (const x of [-2, -0.5, 0, 0.5, 2]) for (const y of [-0.75, -0.1, 0.3, 0.8, 1.5])
         rays.push(q.ownerClear(hiddenRoot, x, y, 0, x, y, 12), q.cameraClear(x, y, 0, x, y, 12, actor));
@@ -1000,7 +1013,37 @@ const visibilityStorageProof = async ({ compact = false, deferred = false } = {}
     hidden.register(hiddenNode, hiddenRoot); compareHidden("geometry replaced while parent hidden", false);
     hiddenRoot.visible = true; compareHidden("shown with replacement geometry", true);
     const hiddenTransitions = hiddenCases.every(row => row.pass); hidden.dispose();
-    return { exact, unchanged, bounded, tightBacking, storage, demand, nearBounds, nearCases, boundaryHits, gridQueries, values, count, bytes, lifecycle: sharedBake && removal && replacement && survivor && released && second.geometryRecords().size === 0 && hiddenTransitions, sharedBake, removal, replacement, survivor, released, hiddenTransitions, hiddenCases, disposed: guides.stats.registered === 0 };
+    // The production sight cadence must consume the latest deferred contours only when it recomputes.
+    // Compare its exact lines and owner phases against the eager registry throughout the existing motion/clip fixture.
+    if (${deferred}) {
+      const eager = B.objectGuides.create({ roots: [hiddenRoot], crew: { cavemen: new Map() } });
+      const delayed = B.objectGuides.create({ roots: [hiddenRoot], crew: { cavemen: new Map() } });
+      const sight = () => B.sightGuides.create({ segmentClear: () => true, objectClear: () => false,
+        ownerPerceived: () => true, ownerConcealed: () => true, ownerBoundary: () => true });
+      const a = sight(), b = sight();
+      let materializations = 0;
+      const ensure = delayed.result.ensureContours;
+      delayed.result.ensureContours = () => { materializations++; ensure(); };
+      const snapshot = q => JSON.stringify({ lines: Array.from(q.lines.subarray(0, q.count * 6)),
+        kinds: Array.from(q.kinds.subarray(0, q.count)), states: Array.from(q.ownerStates.subarray(0, q.ownerCount)),
+        alpha: Array.from(q.ownerAlphas.subarray(0, q.ownerCount)), retained: q.retainedCount, updates: q.updates });
+      for (let frame = 0; frame < 60; frame++) {
+        camera.position.x = Math.sin(frame * 0.1) * 0.5;
+        hiddenNode.geometry.clipMinY = frame < 30 ? 0 : 0.15;
+        S.updateWorld(hiddenRoot);
+        const x = eager.collect(actor, 0, 0, 8, camera, 1.6);
+        const y = delayed.collect(actor, 0, 0, 8, camera, 1.6, null, 0, true);
+        const enabled = frame >= 8;
+        const first = a.update(actor, null, x, camera, 1.6, 1 / 60, enabled, false, 15);
+        const second = b.update(actor, null, y, camera, 1.6, 1 / 60, enabled, false, 15);
+        lazyContours &&= snapshot(first) === snapshot(second);
+        if (!enabled) lazyContours &&= delayed.stats.triangles === 0;
+      }
+      lazyContours &&= materializations > 0 && materializations < 20;
+      delayed.refresh(); lazyContours &&= delayed.contourScratchClear();
+      eager.dispose(); delayed.dispose(); a.dispose(); b.dispose();
+    }
+    return { lazyContours, exact, unchanged, bounded, tightBacking, storage, demand, nearBounds, nearCases, boundaryHits, gridQueries, values, count, bytes, lifecycle: sharedBake && removal && replacement && survivor && released && second.geometryRecords().size === 0 && hiddenTransitions, sharedBake, removal, replacement, survivor, released, hiddenTransitions, hiddenCases, disposed: guides.stats.registered === 0 };
   })()`, context);
 };
 // Count descriptor users rather than timings, so the first-demand cost scales with actual users.
@@ -3900,12 +3943,130 @@ const contributorActivityChecks = async () => {
   record("characters: every join key (github || handle) matches a login in the baked Oogatron snapshot, so no Ooga sleeps forever on a mismatch", unjoined.length === 0,
     unjoined.length ? `fix the handle, add github: "<login>" to the character file, or regenerate src/js/jumbotron-data.js: ${JSON.stringify(unjoined)}` : "");
 };
+const canvasSurfaceCacheChecks = async () => {
+  const source = await readFile(join(root, "src/js/canvas-renderer.js"), "utf8"), start = source.indexOf("  const createSurfaceShadeCache ="), end = source.indexOf("  const createRenderer =", start);
+  if (start < 0 || end < 0) throw new Error("Canvas surface shade cache not found");
+  // A backing store is allocated whenever a canvas dimension is assigned, even to the same value.
+  let allocations = 0;
+  const canvases = [], document = { createElement() {
+    let w = 0, h = 0;
+    const canvas = { get width() { return w; }, set width(v) { w = v; allocations++; }, get height() { return h; }, set height(v) { h = v; allocations++; }, getContext: () => ({}) };
+    canvases.push(canvas); return canvas;
+  } };
+  const create = new Function("document", `${source.slice(start, end)} return createSurfaceShadeCache;`)(document);
+  let paints = 0, failures = 0;
+  const cache = create(canvas => { canvas.serial = ++paints; });
+  const geometry = () => ({ imageSurface: { canvas: { width: 64, height: 32 }, version: 0, background: [10, 12, 10] } });
+  const a = geometry(), b = geometry(), rec = { canvasR: 0.8, canvasG: 0.6, canvasB: 1, canvasAddR: 0, canvasAddG: 0, canvasAddB: 0 };
+  cache.frame();
+  const first = cache.get(a, rec), serial = first.serial; cache.get(b, rec);
+  cache.frame();
+  if (cache.get(a, rec) !== first || first.serial !== serial || paints !== 2) failures++;
+  // Light moves the 8-bit output: a step of one output level repaints in a later frame, a change under half a level
+  // does not, and within one frame the first face's light stands for the surface.
+  for (const key of Object.keys(rec)) {
+    const step = key.startsWith("canvasAdd") ? 1 : 1 / 255;
+    cache.frame();
+    let before = paints; rec[key] += step;
+    const fresh = cache.get(a, rec), painted = fresh.serial;
+    if (paints !== before + 1 || cache.get(a, rec) !== fresh || fresh.serial !== painted) failures++;
+    cache.frame(); before = paints; rec[key] += step * 0.2;
+    if (cache.get(a, rec) !== fresh || paints !== before) failures++;
+    before = paints; rec[key] += step * 3;
+    if (cache.get(a, rec) !== fresh || paints !== before) failures++;
+  }
+  const changed = mutate => { cache.frame(); const before = paints; mutate(); cache.get(a, rec); if (paints !== before + 1) failures++; };
+  changed(() => a.imageSurface.version++);
+  changed(() => a.imageSurface.background[0]++);
+  changed(() => { a.imageSurface.background = null; });
+  changed(() => { a.imageSurface.canvas = { width: 64, height: 32 }; });
+  changed(() => { a.imageSurface.width = 60; });
+  changed(() => { a.imageSurface.height = 30; });
+  // A fixed crop does not hide changes in the source's native dimensions.
+  changed(() => { a.imageSurface.canvas.width++; });
+  changed(() => { a.imageSurface.canvas.height++; });
+  for (let i = 0; i < 40; i++) {
+    const g = geometry(); g.imageSurface.canvas.width = g.imageSurface.canvas.height = 512;
+    cache.frame(); cache.get(g, rec);
+    if (cache.size > 8 || cache.pixels > 2048 * 1024) failures++;
+  }
+  const huge = geometry(); huge.imageSurface.canvas.width = 2048; huge.imageSurface.canvas.height = 2048;
+  const before = paints, size = cache.size, pixels = cache.pixels;
+  cache.frame(); cache.get(huge, rec); cache.frame(); cache.get(huge, rec);
+  if (paints !== before + 2 || cache.size !== size || cache.pixels !== pixels) failures++;
+  cache.release(new Set());
+  if (cache.size || cache.pixels) failures++;
+  cache.get(a, rec); cache.dispose();
+  if (cache.size || cache.pixels || canvases.some(c => c.width || c.height) || canvases.length > 9) failures++;
+  record("Canvas surface reuse: unchanged faces reuse exact shaded images, every content/lighting/dimension input invalidates, and eviction, scene release and disposal bound owned canvases", failures === 0, JSON.stringify({ failures, paints, canvases: canvases.length }));
+  // The curved jumbotron: a 1200x540 board drawn as ten faces a frame, each lit a little differently, under a sun
+  // that moves every frame. It shades at most once a frame, and a slot keeps its backing store across repaints.
+  const board = create(canvas => { canvas.serial = ++paints; }), slide = geometry();
+  slide.imageSurface.canvas.width = 1200; slide.imageSurface.canvas.height = 540; slide.imageSurface.tessellated = true;
+  const lit = { canvasR: 0, canvasG: 0, canvasB: 0, canvasAddR: 0, canvasAddG: 0, canvasAddB: 0 };
+  const curved = { paints: paints, allocations };
+  for (let frame = 0; frame < 60; frame++) {
+    board.frame();
+    for (let face = 0; face < 10; face++) {
+      lit.canvasR = 0.6 + face * 0.031 + frame * 0.0007; lit.canvasG = lit.canvasR * 0.97; lit.canvasB = lit.canvasR * 0.93;
+      board.get(slide, lit);
+    }
+  }
+  curved.paints = paints - curved.paints; curved.allocations = allocations - curved.allocations;
+  // Beside it, the four Mempool paintings and six Timechain boards each keep their own slot within the budget.
+  const small = Array.from({ length: 7 }, () => geometry()), still = { ...lit }, steady = { paints };
+  for (let frame = 0; frame < 10; frame++) { board.frame(); board.get(slide, still); for (const g of small) board.get(g, still); }
+  steady.paints = paints - steady.paints;
+  record("Canvas surface shading: a curved board drawn as ten faces under a moving sun shades at most once a frame and reallocates nothing, and the surfaces beside it keep their slots",
+    curved.paints <= 60 && curved.allocations <= 2 && steady.paints <= 8 && board.size === 8, JSON.stringify({ curved, steady, size: board.size }));
+  const paintStart = source.indexOf("    const paintStyles ="), paintEnd = source.indexOf("    const canvasShades =", paintStart);
+  if (paintStart < 0 || paintEnd < 0) throw new Error("Canvas surface painting not found");
+  const paintSurface = new Function(`${source.slice(paintStart, paintEnd)} return paintCanvasSurface;`)();
+  const input = { width: 64, height: 32 }, mask = { width: 64, height: 32 }, rows = [];
+  const image = { get width() { return 64; }, set width(value) { throw new Error(`Unexpected canvas resize: ${value}`); },
+    get height() { return 32; }, set height(value) { throw new Error(`Unexpected canvas resize: ${value}`); } };
+  const shades = [{ r: 64, g: 128, b: 255, ar: 0, ag: 0, ab: 0 }, { r: 638, g: 383, b: 128, ar: 7, ag: 11, ab: 3 }];
+  // Exercise the production painter without a filter API, then reuse the same backing and context after an
+  // overbright draw. This checks supported API use and state ownership, without emulating rendered pixels.
+  const draws = [], fills = [], clears = [];
+  const context = { globalAlpha: 1, globalCompositeOperation: "source-over", fillStyle: "#000",
+    get filter() { throw new Error("Canvas filter is unavailable"); },
+    set filter(value) { throw new Error(`Canvas filter is unavailable: ${value}`); },
+    clearRect(...rect) { clears.push(rect); },
+    fillRect(...rect) { fills.push({ rect, mode: this.globalCompositeOperation, alpha: this.globalAlpha }); },
+    drawImage(value) {
+      if (value !== input && value !== image && value !== mask) throw new Error("Unexpected canvas source");
+      if (!Number.isFinite(this.globalAlpha) || this.globalAlpha < 0 || this.globalAlpha > 1) throw new Error("Invalid Canvas alpha");
+      draws.push({ source: value, mode: this.globalCompositeOperation, alpha: this.globalAlpha });
+    },
+    getImageData() { throw new Error("Unexpected Canvas readback"); },
+    putImageData() { throw new Error("Unexpected Canvas pixel upload"); }
+  };
+  for (const shade of [shades[0], shades[1], shades[0]]) {
+    draws.length = fills.length = clears.length = 0;
+    paintSurface(image, context, { canvas: input, background: [12, 32, 48] }, shade, mask);
+    const sourceDraws = draws.filter(draw => draw.source === input), selfDraws = draws.filter(draw => draw.source === image), last = draws.at(-1);
+    rows.push({ source: sourceDraws.length === 1 && sourceDraws[0].mode === "source-over" && sourceDraws[0].alpha === 1,
+      coverage: last.source === mask && last.mode === "destination-in" && last.alpha === 1,
+      backing: clears.length === 1 && clears.concat(fills.map(fill => fill.rect)).every(rect => rect.join() === "0,0,64,32"),
+      light: fills.some(fill => fill.mode === "multiply") && selfDraws.every(draw => draw.mode === "lighter")
+        && (shade === shades[1] ? selfDraws.length > 0 : selfDraws.length === 0),
+      state: context.globalAlpha === 1 && context.globalCompositeOperation === "source-over" });
+  }
+  record("Canvas surface compatibility: the production painter needs no filter, readback or resize, keeps source and coverage draws, uses valid additive alpha for overbright light, and restores context state before reuse",
+    rows.every(row => Object.values(row).every(Boolean)), JSON.stringify(rows));
+};
 // Every file in src/characters/ must register once and build a whole Ooga, so a
 // new contributor is covered without editing this suite.
 const characterChecks = async () => {
   const context = { window: {}, URLSearchParams, location: { search: "" } };
   for (const name of CONTRIBUTOR_SOURCES) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
-  const BL = context.window.BL, all = BL.characters.all(), hooks = ["torso", "club", "gear", "skull", "crown", "eyes", "mark", "hatY", "headgear", "extras", "tint"];
+  const BL = context.window.BL, all = BL.characters.all(), hooks = ["torso", "club", "gear", "skull", "crown", "eyes", "mark", "hatY", "headgear", "extras", "tint"], mirrorGeometries = new Set();
+  const collect = node => {
+    if (node.geometry) mirrorGeometries.add(node.geometry);
+    if (node.skins) for (const skin of Object.values(node.skins)) mirrorGeometries.add(skin);
+    for (const child of node.children) collect(child);
+  };
   const rows = all.map((c) => {
     BL.models.setScope("character-rebuild");
     const traits = BL.contributors.traitsFor(c.handle), m = BL.models.caveman(traits);
@@ -3920,6 +4081,9 @@ const characterChecks = async () => {
     const visit = node => { if (node.geometry) geometries.add(node.geometry); for (const child of node.children) visit(child); };
     visit(rebuilt.root);
     if (rebuilt.tint) for (const [original, twin] of rebuilt.tint) geometries.add(original).add(twin);
+    collect(rebuilt.root);
+    for (const geo of geometries) mirrorGeometries.add(geo);
+    for (const weapon of Object.values(rebuilt.skins)) for (const skin of Object.values(weapon)) mirrorGeometries.add(skin);
     const palette = [...geometries].every(geo => geo.faces.every(face => face.color && face.color.length === 3 && face.color.every(Number.isFinite)));
     BL.models.release("character-rebuild", []); BL.models.setScope(null);
     return { palette, handle: c.handle, joined: c.joined > 1.7e9 && c.joined < 4e9, built: m.headOpen.faces.length > 0 && m.headClosed.faces.length > 0 && m.headOpen !== m.headClosed,
@@ -3930,6 +4094,53 @@ const characterChecks = async () => {
   const unique = new Set(all.map((c) => c.handle.toLowerCase())).size === all.length;
   const ordered = all.every((c, i) => !i || all[i - 1].joined <= c.joined);
   record("characters: every src/characters file registers one handle, builds a whole Ooga and uses only known hooks", rows.length === CAST && CAST === BL.contributors.roster.length && unique && ordered && rows.every((r) => r.joined && r.built && r.parts && r.hooks && r.tint && r.voice && r.display && r.palette), JSON.stringify(rows.filter((r) => !(r.joined && r.built && r.parts && r.hooks && r.tint && r.voice && r.display && r.palette))));
+  for (const item of BL.models.SWAG) collect(item.buildNode());
+  Object.assign(BL, { pilot: { WALK: { speed: 2.8, gravity: 9.8 } }, crew: { JUMP_SPEED: 4 } });
+  for (const name of ["convex", "agent"]) runInNewContext(await readFile(join(root, `src/js/${name}.js`), "utf8"), context);
+  const mouth = { x: 0, z: 0, ry: 0, floorY: 0 }, coatClip = BL.agent.labCoatClip(mouth), suitClip = BL.agent.suitClip(mouth);
+  for (const clip of [coatClip, suitClip]) for (const part of Object.values(clip)) {
+    if (part?.ape) mirrorGeometries.add(part.ape).add(part.code);
+  }
+  for (const suit of suitClip.suits) for (const geo of Object.values(suit)) mirrorGeometries.add(geo);
+  for (const suitColor of [null, ...Array.from({ length: BL.agent.SUIT_COLORS }, (_, i) => i)]) {
+    const rig = BL.agent.create({ groundAt: () => 0, managed: true, coatClip, ...(suitColor === null ? {} : { suitClip, suitColor }) });
+    for (const form of ["ape", "code"]) { rig.setForm(form); collect(rig.root); }
+    rig.dispose();
+  }
+  for (const variant of [undefined, 0, 1]) {
+    const flask = BL.agent.labFlaskGeometry(variant);
+    mirrorGeometries.add(flask).add(flask.glassShell);
+  }
+  // The worn jetpack and its flame come from the hub's kit, not the caveman builder (#290 review).
+  Object.assign(context, { document: { createElement: () => ({ getContext: () => null }) }, performance, console });
+  for (const name of ["terrain", "hub-models"]) runInNewContext(await readFile(join(root, `src/js/${name}.js`), "utf8"), context);
+  const worn = [BL.hubModels.jetpack(), BL.hubModels.jetFlame()];
+  for (const geo of worn) mirrorGeometries.add(geo);
+  const spare = BL.models.spareMagazine();
+  collect(spare.node);
+  // Exercise the renderer's real reduced-capture decision on actual builder output, in both storage paths.
+  const source = await readFile(join(root, "src/js/gl-renderer.js"), "utf8"), start = source.indexOf("    const captureInstanceVisible ="), end = source.indexOf("    const drawCaptureRuns =", start);
+  if (start < 0 || end < 0) throw new Error("Reduced mirror capture predicate not found");
+  let inView = true;
+  const capture = new Function("boundsOf", "slotInFrustum", "sphereInFrustum", `${source.match(/const CULL_MARGIN = [^;]+;/)[0]}
+    ${source.match(/const INSTANCE_FLOATS = [^;]+;/)[0]} const MIRROR_FRUSTUM = [];
+    ${source.slice(start, end)} return { visible: captureInstanceVisible, margin: CULL_MARGIN, stride: INSTANCE_FLOATS };`)(BL.scene.boundsOf, () => inView, () => inView);
+  let small = 0, failures = 0;
+  const check = (geometry, expected) => {
+    const bounds = BL.scene.boundsOf(geometry), data = new Float32Array(capture.stride);
+    data[0] = data[5] = data[10] = data[15] = 1;
+    const node = { geometry, spheres: new Float32Array([0, 0, 0, bounds.radius + capture.margin]) }, batch = { geometry, batch: { instanceData: data } };
+    inView = true;
+    if (capture.visible(node, 0) !== expected || capture.visible(batch, 0) !== expected) failures++;
+    inView = false;
+    if (capture.visible(node, 0) || capture.visible(batch, 0)) failures++;
+    if (expected && bounds.radius < 1.25) small++;
+  };
+  for (const geo of mirrorGeometries) check(geo, true);
+  check(BL.models.box({ w: 0.1, h: 0.1, d: 0.1, color: "#ffffff" }), false);
+  const jetpack = worn.every(geo => geo.characterPart === true && BL.scene.boundsOf(geo).radius < 1.25);
+  const magazine = spare.node.geometry.characterPart === true;
+  record("mirror character ownership: reduced captures keep both weapon skins, tint and head swaps, swag, gorilla forms/clothing and the worn jetpack and flame, while still culling small scenery and out-of-frustum parts", failures === 0 && small > 0 && jetpack && magazine, JSON.stringify({ geometries: mirrorGeometries.size, small, failures, jetpack, magazine }));
 };
 // The mempool.space feed parser in Node: message shapes as the socket sends them, no socket.
 const mempoolFeedChecks = async () => {
@@ -7480,6 +7691,23 @@ const hubMirror = { name: "hub mirror", why: "rule: 500 damage shatters the mirr
   const r = await b.evaluate(`(() => { const B = window.__ooga, M = B.mirrorCave, g = M.gate, w = M.node.world, G = B.matrixGate, m = M.mouth; const A = { x: m.x + Math.sin(m.ry) * 1.5, y: m.floorY, z: m.z + Math.cos(m.ry) * 1.5 }, E = { x: m.x - Math.sin(m.ry), y: m.floorY + 1.6, z: m.z - Math.cos(m.ry) }, dh = Math.hypot(E.x - A.x, E.z - A.z); B.pilot.navigate({ position: A, yaw: Math.atan2(E.x - A.x, E.z - A.z), pitch: Math.atan2(E.y - (A.y + 1.53), dh), dist: dh }); B.advance(1, 1 / 60); const before = { broken: M.damage.broken, locked: g.locked, hint: M.guides.state.doorway }; M.damage.hit(499 - M.damage.damage, w[12], w[13], w[14]); B.advance(1 / 60, 1 / 60); const whole = { broken: M.damage.broken, locked: g.locked }; M.damage.hit(1, w[12], w[13], w[14]); B.advance(1 / 60, 1 / 60); const u0 = M.guides.state.doorwayUpdates; B.advance(1, 1 / 60); const after = { broken: M.damage.broken, shattered: M.shattered, locked: g.locked, reveal: M.node.mirrorReveal, hint: M.guides.state.doorway, frozen: M.guides.state.doorwayUpdates === u0 }; B.go("lab"); let n = 0; while ((B.transitioning || B.scene !== "pool") && n++ < 600) B.advance(1 / 30, 1 / 30); B.go("hub"); n = 0; while ((B.transitioning || B.scene !== "hub") && n++ < 600) B.advance(1 / 30, 1 / 30); B.advance(0.5, 1 / 60); const N = B.mirrorCave; return { before, whole, after, back: { broken: N.damage.broken, shattered: N.shattered, locked: N.gate.locked, reveal: N.node.mirrorReveal, hint: N.guides.state.doorway } }; })()`);
   record("hub mirror: 499 damage leaves it whole and locked, 500 shatters it open with its gate unlocked and the glyph hint stopped, and it is still broken after a trip away", !r.before.broken && r.before.locked && r.before.hint && !r.whole.broken && r.whole.locked && r.after.broken && r.after.shattered && !r.after.locked && r.after.reveal === 1 && !r.after.hint && r.after.frozen && r.back.broken && r.back.shattered && !r.back.locked && r.back.reveal === 1 && !r.back.hint, JSON.stringify(r));
 } };
+// Medium captures the mirror only while its pane reads; one that shrinks below that must drop its capture.
+const hubMirrorMedium = { name: "hub mirror medium size", why: "regression: on medium a mirror whose pane shrank under the capture size kept drawing its last capture, frozen, instead of its authored face", run: async (b) => {
+  const r = await b.evaluate(`(() => {
+    const B = window.__ooga, R = B.renderer, M = B.mirrorCave, root = BL.scenes.hub.root;
+    if (R.kind !== "webgl2") return { kind: R.kind };
+    const tier = R.quality, w = M.node.world, n = Math.hypot(w[8], w[9], w[10]) || 1, cam = BL.scene.createCamera({ far: 120 });
+    cam.position.x = w[12] + w[8] / n * 3.5; cam.position.y = w[13] + w[9] / n * 3.5; cam.position.z = w[14] + w[10] / n * 3.5;
+    cam.target.x = w[12]; cam.target.y = w[13]; cam.target.z = w[14];
+    R.setQuality("medium");
+    // A wide lens at the same spot shrinks the pane on screen without moving the camera behind any rock.
+    const look = fov => { cam.fov = fov * Math.PI / 180; for (let i = 0; i < 4; i++) R.render(root, cam, B.renderOpts); const m = R.mirror; return { reason: m.skipReason, valid: m.captureValid, drawn: m.surfaceDrawn }; };
+    const near = look(50), small = look(170), back = look(50);
+    R.setQuality(tier);
+    return { kind: R.kind, near, small, back };
+  })()`);
+  record("hub mirror medium size: a readable pane captures and draws its reflection, shrunk below the capture size it drops the capture for its authored face, and it captures again when it reads", r.kind === "webgl2" && r.near.valid && r.near.drawn && r.small.reason === "quality-size" && !r.small.valid && !r.small.drawn && r.back.valid && r.back.drawn, JSON.stringify(r));
+} };
 // The Canvas 2D fallback, for a device without WebGL2: every scene, entered in one page, paints real
 // colour (sampled small, after the arrival fade) and keeps the leave contract; the console stays clean.
 const canvasTour = { name: "canvas2d tour", why: "contract: the Canvas 2D fallback boots and draws every scene with the leave contract kept", run: async (b) => {
@@ -7500,12 +7728,66 @@ const hubJumbotron = { name: "hub jumbotron", why: "rule: the island rotation st
   const r = await b.evaluate(`(() => {
     const B = window.__ooga, j = B.jumbotron, data = window.BL.jumbotronData;
     j.goToView(0);
+    j.update(0, B.renderer);
+    B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts);
+    const surfaceNode = j.node.children.find(node => node.geometry?.imageSurface?.canvas);
+    const surfaceGeometry = surfaceNode?.geometry, surfaceCanvas = surfaceGeometry?.imageSurface.canvas;
+    const initialRevision = surfaceGeometry?.imageSurface.version;
+    const chrome = j.node.children.find(node => node !== surfaceNode), variants = chrome.children.map(node => node.geometry);
+    const owned = variants.length === j.count && new Set(variants).size === j.count
+      && chrome.children.every(node => node.visible === false && node.geometry);
+    const gl = B.renderer.kind === "webgl2" ? document.getElementById("scene").getContext("webgl2") : null;
+    const create = gl?.createBuffer, remove = gl?.deleteBuffer;
+    let cycleCreates = 0, cycleDeletes = 0, rewarm = false;
+    if (gl) {
+      gl.createBuffer = function(...args) { cycleCreates++; return create.apply(this, args); };
+      gl.deleteBuffer = function(...args) { cycleDeletes++; return remove.apply(this, args); };
+    }
+    let cycleStable;
+    try {
+      for (let round = 0; round < 3; round++) for (let i = 0; i < j.count; i++) {
+        j.goToView(i); j.update(0, B.renderer);
+        B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts);
+      }
+      cycleStable = owned && cycleCreates === 0 && cycleDeletes === 0
+        && chrome.children.every((node, i) => node.geometry === variants[i]);
+      // Deliberate GPU pruning models a released visit or lost record. The unchanged selected index must rewarm
+      // every exact alternative, and preparing or selecting those alternatives again must remain idempotent.
+      const records = B.renderer.stats.records;
+      for (const geometry of variants) B.renderer.releaseGeometry(geometry);
+      const pruned = B.renderer.stats.records;
+      j.update(0, B.renderer);
+      const warmedCreates = cycleCreates, warmedDeletes = cycleDeletes;
+      rewarm = !gl || (pruned === records - variants.length && B.renderer.stats.records === records && warmedCreates > 0);
+      for (const geometry of variants) B.renderer.prepareGeometry(geometry);
+      for (let i = 0; i < j.count; i++) { j.goToView(i); j.update(0, B.renderer); }
+      rewarm &&= cycleCreates === warmedCreates && cycleDeletes === warmedDeletes;
+      j.goToView(0); j.update(0, B.renderer);
+      B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts);
+    } finally {
+      if (gl) { gl.createBuffer = create; gl.deleteBuffer = remove; }
+    }
+    let bufferCreates = 0, bufferDeletes = 0;
     const captions = [];
     for (let i = 0; i < j.count; i++) { captions.push(j.caption); j.nextView(); }
     const wrapped = j.caption;
     // Same single-row feed twice, the pr flagged draft and not: the ticker's type column must differ.
     const feed = (draft) => ({ ...data, recent: [{ login: data.contributors[0].login, repo: data.repos[0].name, type: "pr", occurred_at: data.meta.generated_at, draft }] });
-    const column = () => { j.setView("recent"); B.advance(0.2, 1 / 30); return j.canvas.getContext("2d").getImageData(126, 12, 60, 92).data.join(); };
+    const column = () => {
+      const gl = B.renderer.kind === "webgl2" ? document.getElementById("scene").getContext("webgl2") : null;
+      const create = gl?.createBuffer, remove = gl?.deleteBuffer;
+      if (gl) {
+        gl.createBuffer = function(...args) { bufferCreates++; return create.apply(this, args); };
+        gl.deleteBuffer = function(...args) { bufferDeletes++; return remove.apply(this, args); };
+      }
+      try {
+        j.setView("recent"); j.update(0, B.renderer);
+        B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts);
+      } finally {
+        if (gl) { gl.createBuffer = create; gl.deleteBuffer = remove; }
+      }
+      return j.canvas.getContext("2d").getImageData(126, 12, 60, 92).data.join();
+    };
     j.refreshData(feed(false));
     const plain = column();
     j.refreshData(feed(true));
@@ -7525,11 +7807,13 @@ const hubJumbotron = { name: "hub jumbotron", why: "rule: the island rotation st
       && reader.filters.users.length === 1 && reader.filters.users[0] === owner;
     reader.dispose(); restored.dispose(); j.refreshData(data);
     return { count: j.count, captions, wrapped, differs: plain !== drafted,
-      filtered, ownerOnly, restoredOwner };
+      filtered, ownerOnly, restoredOwner, bufferCreates, bufferDeletes, cycleStable, rewarm,
+      stable: !!surfaceGeometry && surfaceNode.geometry === surfaceGeometry && surfaceGeometry.imageSurface.canvas === surfaceCanvas
+        && surfaceGeometry.imageSurface.version > initialRevision };
   })()`);
   const orgBoards = ["commits", "prs", "reviews", "comments", "issues"].map((t) => "org · " + t);
   record("hub jumbotron: the island rotates org activity, readers filter repositories, and attributed users appear once with saved alias selections restored", r.count === 7 && r.captions[0] === "Recent activity" && r.captions[1] === "Org totals" && orgBoards.every((c, i) => r.captions[2 + i] === c) && r.wrapped === "Recent activity" && r.filtered && r.ownerOnly && r.restoredOwner, JSON.stringify(r));
-  record("hub jumbotron: a draft PR draws a different ticker row than the same PR undrafted", r.differs, JSON.stringify({ differs: r.differs }));
+  record("hub jumbotron: a draft PR changes the stable canvas ticker and exact chrome cycles without GPU buffer churn, including after records are pruned", r.differs && r.stable && r.bufferCreates === 0 && r.bufferDeletes === 0 && r.cycleStable && r.rewarm, JSON.stringify({ differs: r.differs, stable: r.stable, bufferCreates: r.bufferCreates, bufferDeletes: r.bufferDeletes, cycleStable: r.cycleStable, rewarm: r.rewarm }));
 } };
 const oogatronPopups = { name: "oogatron popups", why: "rule: Oogatron windows keep their displays apart during mouse or touch drags and remember their independent controls and layout after reload", run: async (b) => {
   const mobile = await b.evaluate("matchMedia('(pointer: coarse)').matches"), mode = mobile ? "phone" : "desktop";
@@ -9740,6 +10024,39 @@ const hubBirdsEyeProjection = { name: "birds-eye projection", why: "rule: overhe
     && state.filter(r => r.fallback).every(r => r.error < 0.002) && settled.every(r => r.aligned < 0.001 && r.parallel < 1e-6), JSON.stringify(state));
   record("birds-eye projection: rendered near and far objects follow projected positions, including a batch outside the old perspective frustum", samples.every(r => r.pixels[0]?.[0] > r.pixels[0]?.[1] + 40 && r.pixels[1]?.[2] > r.pixels[1]?.[1] + 40
     && (!r.pixels[2] || r.pixels[2][0] > r.pixels[2][1] + 40 && r.pixels[2][2] > r.pixels[2][1] + 40)) && settled.every(r => r.pixels[2]), JSON.stringify(samples.map(({ kind, mix, pixels }) => ({ kind, mix, pixels }))));
+  const culling = await b.evaluate(`(() => {
+    const B = __ooga, S = BL.scene, R = B.renderer, root = S.createNode(), rows = [];
+    const camera = S.createCamera({ near: 0.1, far: 80, orthoHeight: 10, orthoMix: 1 });
+    Object.assign(camera.position,{x:0,y:0,z:10}); Object.assign(camera.target,{x:0,y:0,z:0});
+    const geometry = BL.models.box({w:1,h:1,d:1,color:"#ff0000"});
+    const protectedGeometry = {...BL.models.box({w:1,h:1,d:1,color:"#00ff00"}),matrixGlyph:true};
+    const batchGeometry = BL.models.box({w:1,h:1,d:1,color:"#0000ff"});
+    const small = S.createNode({geometry,screenCull:true}), assembled = S.createNode({geometry});
+    const glyphs = new Float32Array(8*20), particles = new Float32Array(4*20), batch = S.createNode({geometry:batchGeometry,screenCull:true,instanceData:particles,instanceCount:4,instanceVersion:1});
+    const size = px => px*10/(Math.sqrt(3)*R.size.height);
+    const write = (data,i,px,x=0) => {const o=i*20,s=size(px);data[o]=data[o+5]=data[o+10]=s;data[o+15]=data[o+16]=1;data[o+12]=x;};
+    for(let i=0;i<8;i++)write(glyphs,i,.2,(i-4)*.2);
+    for(let i=0;i<4;i++)write(particles,i,.5,(i-2)*.3);
+    const mosaic = S.createNode({geometry:protectedGeometry,screenCull:true,instanceData:glyphs,instanceCount:8,instanceVersion:1});
+    Object.assign(assembled.scale,{x:size(.2),y:size(.2),z:size(.2)});
+    S.addChild(root,small,assembled,mosaic,batch);
+    const originalGlyphs = Array.from(glyphs), originalParticles = Array.from(particles), opts = {bloomStrength:0,shadowStrength:0,ambientFloor:1,directStrength:0};
+    try {
+      for(const pixels of [1,2,2.3,2,1.7,2,2.3]) {
+        const s=size(pixels);Object.assign(small.scale,{x:s,y:s,z:s});R.render(root,camera,opts);
+        rows.push({pixels,drawn:R.stats.drawn,smallCulled:R.stats.smallCulled});
+      }
+      // One visible individual preserves an explicit mixed batch's single draw and upload contract.
+      write(particles,2,3);batch.instanceVersion++;R.render(root,camera,opts);
+      const mixed={drawn:R.stats.drawn,smallCulled:R.stats.smallCulled,count:batch.instanceCount};
+      const preserved = root.children.every(n=>n.visible) && small.geometry===geometry && batch.instanceData===particles
+        && mosaic.instanceData===glyphs && glyphs.every((v,i)=>v===originalGlyphs[i]) && particles.every((v,i)=>i>=40&&i<60||v===originalParticles[i]);
+      return {rows,mixed,preserved,kind:R.kind};
+    } finally {for(const g of [geometry,protectedGeometry,batchGeometry])R.releaseGeometry(g);R.render(BL.scenes.hub.root,B.camera,B.renderOpts);}
+  })()`);
+  record("birds-eye projection: physical screen bounds cull only marked tiny props with hysteresis, preserve coherent glyph mosaics and assembled details, and retain an entire mixed batch", culling.kind === "webgl2"
+    && culling.rows.map(r=>r.drawn).join() === "9,9,10,10,9,9,10" && culling.rows.map(r=>r.smallCulled).join() === "5,5,4,4,5,5,4"
+    && culling.mixed.drawn === 14 && culling.mixed.smallCulled === 0 && culling.mixed.count === 4 && culling.preserved, JSON.stringify(culling));
   const anchors = await b.evaluate(`(() => {
     const B = __ooga, S = BL.scene, root = S.createNode(), actor = S.createNode({ position: { x: 4, y: 0, z: 0 } });
     const bodyGeometry = BL.models.box({ w: 1, h: 2, d: 1, color: "#999999" }), headGeometry = BL.models.box({ w: 1, h: 1, d: 1, color: "#ffffff" });
@@ -11571,6 +11888,31 @@ const variantCacheChecks = BL => {
   M.release("arcade", []); M.release("hub", []); M.setScope(null);
   record("variant caches: release drops scene-only indices while preserving the hub and next scene, including named indices", shared === hub && kept && rebuilt && keptNext && releasedNext,
     JSON.stringify({ kept, rebuilt, keptNext, releasedNext }));
+  const foliage = M.variants(() => {
+    const high = M.box({ color: "#50a044" });
+    high.collisionGeometry = M.box({ color: "#000000" });
+    return M.foliageLods(high, M.box({ color: "#50a044" }));
+  });
+  M.setScope("foliage-cache"); const source = foliage(), bytes = JSON.stringify([source.verts, source.faces]);
+  const owned = M.addLods(new Set([source])), lods = source.foliageLods;
+  const borrowed = { ...source, verts: source.verts.slice(), faces: source.faces.slice() };
+  const coherent = lods.owner === source && M.addLods(new Set([borrowed])).size === 1
+    && owned.size === 3 && owned.has(lods.medium) && owned.has(lods.far)
+    && lods.medium.collisionGeometry === source.collisionGeometry && JSON.stringify([source.verts, source.faces]) === bytes
+    && lods.far.faces.reduce((sum, f) => sum + f.i.length - 2, 0) === 12 && lods.far.imageSurface.canvas === null;
+  M.release("foliage-cache", []); M.assertReleased("foliage-cache");
+  const nextFoliage = foliage();
+  record("foliage ownership: hidden render alternatives follow their source cache, preserve collision and geometry bytes, and rebuild after release", coherent && nextFoliage !== source && nextFoliage.foliageLods !== lods);
+  const rendererSource = readFileSync(join(root, "src/js/gl-renderer.js"), "utf8"), start = rendererSource.indexOf("    const prepareScene ="), end = rendererSource.indexOf("    // One owned texture per canvas surface", start);
+  if (start < 0 || end < 0) throw new Error("Scene resource preparation not found");
+  let paints = 0;
+  const prepareScene = new Function("BL", `${rendererSource.slice(start, end)} return prepareScene;`)({ models: { paintFoliageAtlas: surface => { paints++; return M.paintFoliageAtlas(surface); } } });
+  const alternatives = M.addLods(new Set([nextFoliage])), cold = !nextFoliage.foliageLods.far.imageSurface.canvas;
+  prepareScene(alternatives);
+  const warm = nextFoliage.foliageLods.far.imageSurface.canvas, once = paints === 1;
+  prepareScene(alternatives);
+  record("foliage preparation: all live far alternatives rasterize before first use, repeat preparation reuses the atlas and geometry-only construction stays DOM-free", cold && !!warm && once && paints === 1 && nextFoliage.foliageLods.far.imageSurface.canvas === warm);
+  M.release("foliage-cache", []); M.assertReleased("foliage-cache"); M.setScope(null);
 };
 
 // Regression: private model Maps and historical hub reads survived scene release.
@@ -15352,7 +15694,7 @@ scene("hub", { label: "guide", query: "character=portlandhodl&jetpack=1", steps:
 scene("hub", { label: "birds-eye combat", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", exclusive: true, steps: [hubBirdsEye] });
 scene("hub", { label: "birds-eye combat projection and targets", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", steps: [hubBirdsEyeProjection, gameCombat(hubBirdsEyeTargets), hubCombatReplay] });
 scene("hub", { label: "birds-eye lower floors", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", steps: [hubBirdsEyeFloors] });
-scene("hub", { label: "mirror", steps: [hubJumbotron, hubMatrix, hubMirror] });
+scene("hub", { label: "mirror", steps: [hubJumbotron, hubMirrorMedium, hubMatrix, hubMirror] });
 scene("hub", { label: "oogatron popups", url: hubPage(dist, "pos=0"), steps: [oogatronPopups] });
 scene("hub", { label: "oogatron popups phone", url: hubPage(dist, "pos=0"), opts: PHONE_SIZE, steps: [oogatronPopups] });
 scene("hub", { label: "reset storage race", steps: [{ name: "reset storage race", why: "regression: a page timer or pagehide storage write once survived the pooled browser reset and leaked state into the next task", run: async () => {
@@ -16602,23 +16944,55 @@ const waterGolden = W => {
 // alias a renderer record. Exercise the real collector/uploader against a byte-bounded GL sink;
 // shader compilation and pixels remain the separate, mandatory WebGL browser checkpoint.
 const waterUploadProbe = (BL, W) => {
-  const buffers=new Map(),bindings=new Map(),errors=[],uploads=new Map(),listeners=new Set();let serial=0,tier="",draws=0;
+  const buffers=new Map(),bindings=new Map(),attributes=new Map(),errors=[],uploads=new Map(),listeners=new Set();
+  const fields=new Map(),fieldBuffers=new Map(),vaoFields=new Map(),fieldVaos=new Map(),bits=new Map();let serial=0,tier="",draws=0,vao=null;
+  const associate=(v,data)=>{vaoFields.set(v,data);let list=fieldVaos.get(data);if(!list)fieldVaos.set(data,list=new Set());list.add(v);};
+  const exactSpan=(v,data,count,start=0)=>{
+    const expected=bits.get(data),attrs=attributes.get(v);if(!expected||!attrs||start+count>data.length/20)return false;
+    for(let loc=3;loc<=7;loc++){
+      const a=attrs.get(loc),storage=a&&buffers.get(a.buffer);if(!storage?.words)return false;
+      for(let i=0;i<count;i++)for(let j=0;j<4;j++)if(storage.words[(a.offset+i*a.stride)/4+j]!==expected[(start+i)*20+(loc-3)*4+j])return false;
+    }
+    return true;
+  };
+  const draw=count=>{
+    draws++;if(!count)return;
+    for(const a of attributes.get(vao)?.values()||[])if(a.offset+(count-1)*a.stride+a.size*4>buffers.get(a.buffer)?.size)errors.push({tier,drawCount:count,offset:a.offset,stride:a.stride,capacity:buffers.get(a.buffer)?.size});
+    const data=vaoFields.get(vao),field=data&&fields.get(data);
+    if(field){let found=false;for(let first=0;!found&&first+count<=field.instanceCount;first++)found=exactSpan(vao,data,count,first);if(!found)errors.push({tier,drawData:true,count,live:field.instanceCount});}
+  };
   const api={
     getExtension:()=>null,getProgramParameter:()=>true,getParameter:()=>4,
-    createBuffer:()=>{const b={id:++serial};buffers.set(b,0);return b;},
+    createBuffer:()=>{const b={id:++serial};buffers.set(b,{size:0,bytes:null,words:null});return b;},
     bindBuffer:(target,b)=>bindings.set(target,b),
-    bufferData:(target,data)=>buffers.set(bindings.get(target),typeof data==="number"?data:data.byteLength),
-    bufferSubData:(target,offset,data,start=0,length=0)=>{
-      const count=length||data.length-start,capacity=buffers.get(bindings.get(target)),end=offset+count*data.BYTES_PER_ELEMENT;
-      if(start<0||count<0||start+count>data.length||end>capacity)errors.push({tier,source:data.length,start,length:count,capacity,offset});
-      uploads.set(data,{count,capacity});
+    bufferData:(target,data,usage)=>{
+      const size=typeof data==="number"?data:data.byteLength,storage={size,bytes:null,words:null};
+      // Instance storage needs real contents; static vertex buffers need only their byte-bound here.
+      if(usage===gl.DYNAMIC_DRAW||usage===gl.STREAM_DRAW){storage.bytes=new Uint8Array(size);storage.words=new Uint32Array(storage.bytes.buffer);if(typeof data!=="number")storage.bytes.set(new Uint8Array(data.buffer,data.byteOffset,data.byteLength));}
+      buffers.set(bindings.get(target),storage);
     },
-    deleteBuffer:b=>buffers.delete(b),drawArraysInstanced:()=>draws++
+    bufferSubData:(target,offset,data,start=0,length=0)=>{
+      const count=length||data.length-start,handle=bindings.get(target),storage=buffers.get(handle),capacity=storage.size,end=offset+count*data.BYTES_PER_ELEMENT;
+      if(start<0||count<0||start+count>data.length||end>capacity)errors.push({tier,source:data.length,start,length:count,capacity,offset});
+      else{if(!storage.bytes){storage.bytes=new Uint8Array(capacity);storage.words=new Uint32Array(storage.bytes.buffer);}storage.bytes.set(new Uint8Array(data.buffer,data.byteOffset+start*data.BYTES_PER_ELEMENT,count*data.BYTES_PER_ELEMENT),offset);}
+      uploads.set(data,{count,capacity});
+      // First private uploads identify a field's VAOs. Later shared uploads must still fetch that exact field.
+      if(fields.has(data)){fieldBuffers.set(data,handle);for(const [v,attrs]of attributes)if(attrs.get(3)?.buffer===handle)associate(v,data);}
+    },
+    copyBufferSubData:(read,write,from,to,size)=>{
+      const source=buffers.get(bindings.get(read)),target=buffers.get(bindings.get(write)),capacity=target.size;
+      if(from<0||to<0||size<0||from+size>source.size||to+size>capacity||size&&!source.bytes)errors.push({tier,copySize:size,from,to,source:source.size,capacity});
+      else if(size){if(!target.bytes){target.bytes=new Uint8Array(capacity);target.words=new Uint32Array(target.bytes.buffer);}target.bytes.set(source.bytes.subarray(from,from+size),to);}
+    },
+    bindVertexArray:v=>{vao=v;if(v&&!attributes.has(v))attributes.set(v,new Map());},
+    vertexAttribPointer:(loc,size,type,normalized,stride,offset)=>{if(loc>=3&&loc<=7)attributes.get(vao).set(loc,{buffer:bindings.get(gl.ARRAY_BUFFER),size,stride,offset});},
+    deleteVertexArray:v=>{const data=vaoFields.get(v);if(data)fieldVaos.get(data).delete(v);vaoFields.delete(v);attributes.delete(v);},deleteBuffer:b=>buffers.delete(b),
+    drawArraysInstanced:(mode,first,count,instances)=>draw(instances),drawElementsInstanced:(mode,count,type,offset,instances)=>draw(instances)
   };
   const gl=new Proxy(api,{get:(o,k)=>k in o?o[k]:o[k]=/^[A-Z0-9_]+$/.test(k)?++serial:k.startsWith("create")||k==="getUniformLocation"?()=>({id:++serial}):()=>{}});
   const canvas={clientWidth:64,clientHeight:64,getContext:()=>gl,addEventListener:k=>listeners.add(k),removeEventListener:k=>listeners.delete(k)};
   const R=BL.glRenderer.createRenderer(canvas),opts={...BL.scenes.dsb.renderOpts,dsbWater:W.water},rows=[];
-  const arrays=new Map();BL.scene.traverseVisible(W.root,n=>{if(n.instanceData)arrays.set(n,n.instanceData);});
+  const arrays=new Map();BL.scene.traverseVisible(W.root,n=>{if(n.instanceData){arrays.set(n,n.instanceData);fields.set(n.instanceData,n);bits.set(n.instanceData,new Uint32Array(n.instanceData.buffer,n.instanceData.byteOffset,n.instanceData.length));}});
   for(tier of ["high","medium","low","high"]){
     W.renderer.quality=tier;R.setQuality(tier);
     for(const [x,y,z] of [[20,8,83],[-40,25,-8],[0,110,1]]){
@@ -16627,7 +17001,15 @@ const waterUploadProbe = (BL, W) => {
       let exclusive=true,bounded=true;
       for(const nodes of owners.values())for(const n of nodes)if(n.instanceData){exclusive&&=nodes.length===1;bounded&&=Number.isInteger(n.instanceCount)&&n.instanceCount>=0&&n.instanceCount*20<=n.instanceData.length&&n.instanceData===arrays.get(n)&&n.instanceData.every(Number.isFinite);}
       uploads.clear();const drawn=R.render(W.root,W.camera,opts);
-      let exact=true;for(const [n,data] of arrays)if(uploads.has(data)){const upload=uploads.get(data);exact&&=upload.count===n.instanceCount*20&&upload.capacity===data.byteLength;}
+      let exact=true;
+      for(const [n,data]of arrays){
+        if(uploads.has(data)){const upload=uploads.get(data);exact&&=upload.count===n.instanceCount*20&&upload.capacity===data.byteLength;}
+        if(n.instanceCount&&owners.get(n.geometry)?.includes(n)){
+          const privateBuffer=fieldBuffers.get(data),vaos=fieldVaos.get(data);
+          exact&&=!!privateBuffer&&buffers.get(privateBuffer)?.size===data.byteLength&&!!vaos?.size;
+          for(const v of vaos||[])exact&&=exactSpan(v,data,n.instanceCount);
+        }
+      }
       rows.push({tier,x,y,z,exclusive,bounded,drawn,exact});
     }
   }
@@ -16725,7 +17107,7 @@ const waterChecks = BL => {
   for(let i=0;i<3;i++){const next=BL.dsbWaterInteraction.create(W);next.update(.02,i,A);lifecycle&&=next.group.children.length===nodes&&next.stats.active<=24;next.dispose();lifecycle&&=next.group.children.length===0&&W.root.children.length===children-1;}
   record("DSB water lifecycle: indoor gating and repeat disposal/re-entry clear impulses without growing nodes",lifecycle);
   const upload=waterUploadProbe(BL,W);
-  record("DSB WebGL uploads: independent dressing fields own their records across tiers, views and disposal",upload.rows.every(r=>r.exclusive&&r.bounded&&r.drawn&&r.exact)&&!upload.errors.length&&upload.draws>0&&upload.released&&!upload.buffers&&!upload.listeners,JSON.stringify(upload));
+  record("DSB WebGL uploads: dressing records and instance offsets remain bounded across tiers, views and disposal",upload.rows.every(r=>r.exclusive&&r.bounded&&r.drawn&&r.exact)&&!upload.errors.length&&upload.draws>0&&upload.released&&!upload.buffers&&!upload.listeners,JSON.stringify(upload));
   W.dispose();
 };
 // Recorded from f578f9cda6e77468049b5e000e3002ce9711809b before applying the water extension.
@@ -17589,8 +17971,15 @@ const tileGpuChecks = async () => {
     ["WebKit WebGL", unmasked("Apple GPU"), false],
     ["WebKit WebGL", unmasked(null), false]
   ].map(([renderer, info, expected]) => ({ renderer, expected, got: tileBasedGpu(renderer, info) }));
-  record("tile-based GPU: only a named Apple silicon GPU skips the depth prepass; Intel, AMD, Safari's generic \"Apple GPU\" and a missing debug extension keep it",
-    rows.every(row => row.got === row.expected) && asked === 7, JSON.stringify(rows.filter(row => row.got !== row.expected)));
+  const enabled = new Function(`${helper}; return depthPrepassEnabled;`)();
+  const policy = [
+    [false, false, null, false, false], [false, true, null, false, false],
+    [true, false, null, false, true], [true, true, null, false, false],
+    [true, false, "0", false, false], [false, true, "1", false, true],
+    [true, false, "1", true, false]
+  ].map(([prepass, tile, override, rig, expected]) => ({ prepass, tile, override, rig, expected, got: enabled({ prepass }, tile, override, rig) }));
+  record("tile-based GPU: named Apple silicon skips the prepass on every tier, other GPUs keep it, explicit overrides apply and rigs retain their own path",
+    rows.every(row => row.got === row.expected) && asked === 7 && policy.every(row => row.got === row.expected), JSON.stringify({ classification: rows.filter(row => row.got !== row.expected), policy }));
 };
 const raceRigChecks = async () => {
   const context = { window: {}, location: { search: "?debug=1&rain=0" }, URLSearchParams, crypto: webcrypto };
@@ -17629,16 +18018,17 @@ const raceRigChecks = async () => {
     // Depth pre-pass "no image change" rendering core: the shared vertex and fragment
     // bytes the depth-only and plain variants derive from, plus the untouched shadow path.
     "6bed3532a26c98c3e5a9218674dbe75c789324168104f6b0eb7fb5c88872a012",
-    // 487d99ac909f added uObjectSlab2 for the Factory roof bore; removing its
-    // declaration and clipping predicate restores the previous b82d02f4 hash.
-    "f5f71f7931156d9329b39a13997433e2146fa367cee44e5ceb44ace6038a2be3",
+    // The fragment shader, re-baselined on purpose: 487d99ac909f added uObjectSlab2 for the Factory roof bore
+    // (b82d02f4 to f5f71f79), ab4ebcd sampled retained canvas surfaces (to c98cc70d) and e32e91e sampled the
+    // foliage LOD atlas (to fb12fd53). Removing those additions would not restore b82d02f4 alone.
+    "fb12fd53216aa902750f5bf315e44a6334c9b24fb58afb12f28a4f5e85233677",
     "37030f053de422aa157f017ceedef0812ed57a17c9e1b2af4aab017c0b645364"
   ];
   record("race rig strategy: ordinary mesh, fragment and shadow shader bytes retain the pre-rig fast path", ordinaryHashes.every((hash, i) => hash === expectedOrdinaryHashes[i]), JSON.stringify(ordinaryHashes));
   const extract = (name, next) => rendererSource.slice(rendererSource.indexOf(`    const ${name} =`), rendererSource.indexOf(next, rendererSource.indexOf(`    const ${name} =`))).trim();
   const cachedRig = {}, cachedGeometry = { meshRig: cachedRig }, cacheRecords = new Map([[cachedGeometry, {}]]), uniformCalls = [];
   const cacheMesh = { rig: cachedRig, u: { uRigCount: "mesh-count" } }, cacheShadow = { rig: cachedRig, u: { uRigCount: "shadow-count" } };
-  const cacheContext = { rigPrograms: { mesh: cacheMesh, shadow: cacheShadow }, programs: { mesh: cacheMesh, shadow: cacheShadow }, records: cacheRecords, res: { programs: { mesh: cacheMesh, shadow: cacheShadow } }, destroyReflector() {}, deleteRecord() {}, gl: { uniform1i: (...args) => uniformCalls.push(args) }, geometry: cachedGeometry };
+  const cacheContext = { rigPrograms: { mesh: cacheMesh, shadow: cacheShadow }, programs: { mesh: cacheMesh, shadow: cacheShadow }, records: cacheRecords, res: { programs: { mesh: cacheMesh, shadow: cacheShadow } }, destroyReflector() {}, deleteRecord() {}, destroyInstanceStream() {}, gl: { uniform1i: (...args) => uniformCalls.push(args) }, geometry: cachedGeometry };
   runInNewContext(`${extract("releaseGeometry", "    init();")}
 ${extract("applyRig", "    const uploadInstances =")}
 releaseGeometry(geometry); applyRig(res.programs.mesh, { geometry: {} }, 1); applyRig(res.programs.shadow, { geometry: {} }, 2);`, cacheContext);
@@ -18160,8 +18550,8 @@ const rigFailureIsolationProof = async () => {
     const context = {
       failure: null, rigFailure: null, rigProgramsReady: false, rigMode: false, parallel: null,
       finishProgram() { linkAttempts++; if (linkFails) throw new Error("Program link failed: uniform pressure"); },
-      gl: { getProgramParameter: () => true },
-      rigPrograms: { mesh: {}, shadow: {} }, res: { programs: "ordinary" }, programs: null,
+      gl: { getProgramParameter: () => true, activeTexture() {}, bindTexture() {} },
+      rigPrograms: { mesh: {}, shadow: {} }, res: { programs: "ordinary", matrixTexture: {} }, programs: null,
       collect: "cpu", collectRig: "rig", writeCullSphere: "cpu-cull", writeRigCullSphere: "rig-cull",
       uploadInstances: "cpu-upload", uploadRigInstances: "rig-upload",
       meshRigs: true, collectForRender: null, cullForRender: null, uploadForRender: null,
@@ -18287,7 +18677,7 @@ const reviewCrowdAndFallbackProof = async () => {
   const blocked=c.occupied(body,0,0,0);near.root.visible=false;const hidden=!c.occupied(body,0,0,0);near.root.visible=true;near.root.position.y=3;const above=!c.occupied(body,0,0,0);
   const renderer=await readFile(join(root,"src/js/gl-renderer.js"),"utf8");
   const collect=renderer.slice(renderer.indexOf("    const collect ="),renderer.indexOf("    const updateRig ="));
-  const seen=[],r={rigMode:false,hiddenFromCutaway:()=>false,cutawayFade:0,recordFor:g=>{seen.push(g);return {active:true};},suppressed:0,CULL_MARGIN:0,sphereInFrustum:()=>true};
+  const seen=[],r={rigMode:false,hiddenFromCutaway:()=>false,cutawayFade:0,foliageGeometry:n=>n.geometry,screenVisible:()=>true,recordFor:g=>{seen.push(g);return {active:true};},suppressed:0,CULL_MARGIN:0,sphereInFrustum:()=>true};
   runInNewContext(collect+"this.collect=collect;this.collectRig=collectRig;",r);
   const geo={meshRig:{}},original={faces:[{}]},aggregate={geometry:geo,instanceData:[],instanceCount:1},part={geometry:original,meshRigSource:geo.meshRig,instanceData:[],instanceCount:1};
   r.collect(aggregate);r.collect(part);const cpu=seen.length===1&&seen[0]===original;
@@ -18296,6 +18686,7 @@ const reviewCrowdAndFallbackProof = async () => {
 };
 
 const unitChecks = async () => {
+  await canvasSurfaceCacheChecks();
   const heldPad = await gamepadHoldProof();
   record("gamepad entry hold: real pad polling stays neutral, preserves trigger hysteresis and requires a fresh button after release or reconnect", Object.values(heldPad).every(Boolean), JSON.stringify(heldPad));
   const retention = await hubRetentionProof();
@@ -18345,7 +18736,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   const cutaway = await cutawayBoundsProof();
   record("cutaway visibility: active apertures reject remote meshes without vertex scans and retain cells, blends, children, global and rotated local cuts", Object.entries(cutaway).every(([key, value]) => key === "bytes" ? value === 160 : value), JSON.stringify(cutaway));
   const storage = await visibilityStorageProof({ compact: true, deferred: true });
-  record("visibility storage: exact source doubles and signed zero survive queries, demand and bounded screen BVHs", storage.exact && storage.unchanged && storage.bounded && storage.tightBacking && storage.storage && storage.demand && storage.nearBounds && storage.nearCases > 100 && storage.boundaryHits > 0 && storage.disposed && storage.values > 600, JSON.stringify(storage));
+  record("visibility storage: exact source doubles and signed zero survive queries, demand and bounded screen BVHs", storage.lazyContours && storage.exact && storage.unchanged && storage.bounded && storage.tightBacking && storage.storage && storage.demand && storage.nearBounds && storage.nearCases > 100 && storage.boundaryHits > 0 && storage.disposed && storage.values > 600, JSON.stringify(storage));
   record("visibility lifecycle: shared bakes survive removal and replacement; hidden transforms, clips and geometry restore exact queries", storage.lifecycle, JSON.stringify(storage));
   const demandUsers = await visibilityDemandUsersProof();
   record("visibility demand: first demand visits only descriptor users and releases replaced, removed and disposed entries", demandUsers.rows.every(row => row.visits === row.count && row.released && row.resolved) && demandUsers.boundsTracked && demandUsers.replacementReleased && demandUsers.bothResolved && demandUsers.disposed, JSON.stringify(demandUsers));

@@ -322,6 +322,49 @@ bool cutaway(vec3 p, float opacity) {
 bool cutaway(vec3 p) {
   return cutaway(p, 1.0);
 }`;
+  const FOLIAGE_UV_GLSL = `
+vec2 foliageUV(vec3 local, vec3 normal, vec3 lower, vec3 upper) {
+  vec3 p = (local - lower) / max(upper - lower, vec3(0.000001));
+  vec3 n = abs(normal);
+  vec2 uv; float tile;
+  if (n.y > n.x && n.y > n.z) { uv = p.xz; tile = 2.0; }
+  else if (n.x > n.z) { uv = p.zy; tile = 1.0; }
+  else { uv = p.xy; tile = 0.0; }
+  uv = (uv * 126.0 + 1.0) / 128.0;
+  return vec2((uv.x + tile) / 3.0, 1.0 - uv.y);
+}`;
+  const FOLIAGE_SHADOW_VS = `#version 300 es
+precision highp float;
+layout(location=0) in vec3 aPos;
+layout(location=1) in vec3 aNormal;
+layout(location=3) in vec4 aM0;
+layout(location=4) in vec4 aM1;
+layout(location=5) in vec4 aM2;
+layout(location=6) in vec4 aM3;
+uniform mat4 uLightViewProj;
+out vec3 vWorld;
+out vec3 vLocal;
+out vec3 vLocalNormal;
+void main() {
+  vec4 world = mat4(aM0, aM1, aM2, aM3) * vec4(aPos, 1.0);
+  vWorld = world.xyz; vLocal = aPos; vLocalNormal = aNormal;
+  gl_Position = uLightViewProj * world;
+}`;
+  const FOLIAGE_SHADOW_FS = `#version 300 es
+precision highp float;
+in vec3 vWorld;
+in vec3 vLocal;
+in vec3 vLocalNormal;
+uniform float uClipMinY;
+uniform vec4 uObjectClip;
+uniform sampler2D uCanvasImage;
+uniform vec3 uCanvasAtlasMin;
+uniform vec3 uCanvasAtlasMax;
+${FOLIAGE_UV_GLSL}
+void main() {
+  if (vWorld.y < uClipMinY || dot(uObjectClip, vec4(vWorld, 1.0)) > 0.0) discard;
+  if (texture(uCanvasImage, foliageUV(vLocal, vLocalNormal, uCanvasAtlasMin, uCanvasAtlasMax)).a <= 0.5) discard;
+}`;
   const MESH_FS = `#version 300 es
 precision highp float;
 precision highp int;
@@ -340,7 +383,27 @@ in vec2 vPortalUV;
 in vec4 vPortalView;
 ${PORTAL_LIQUID_GLSL}
 in vec3 vLocal;
+// Revisioned canvases retain ordinary surface lighting, emission, fog and Matrix behavior.
+uniform float uCanvasSurface;
+uniform sampler2D uCanvasImage;
+uniform vec4 uCanvasRect;
+uniform vec3 uCanvasCurve;
+uniform vec3 uCanvasBackground;
+uniform vec2 uCanvasScale;
+uniform float uCanvasAtlas;
+uniform vec3 uCanvasAtlasMin;
+uniform vec3 uCanvasAtlasMax;
 in vec3 vLocalNormal;
+${FOLIAGE_UV_GLSL}
+vec4 canvasColor() {
+  if (uCanvasAtlas > 0.5) return texture(uCanvasImage, foliageUV(vLocal, vLocalNormal, uCanvasAtlasMin, uCanvasAtlasMax));
+  vec2 local = vLocal.xy;
+  if (uCanvasCurve.x > 0.0) local = vec2(atan(vLocal.x, uCanvasCurve.x - vLocal.z) * uCanvasCurve.x - uCanvasCurve.y, vLocal.y - uCanvasCurve.z);
+  vec2 uv = (local - uCanvasRect.xy) / uCanvasRect.zw;
+  vec4 color = texture(uCanvasImage, vec2(uv.x, 1.0 - uv.y) * uCanvasScale);
+  color.rgb = mix(uCanvasBackground, color.rgb, color.a);
+  return color;
+}
 in float vMatrixSurface;
 flat in float vMatrixCave;
 flat in float vMatrixPermanentFallback;
@@ -769,6 +832,7 @@ float matrixPermanentAt(vec3 point, float caveIndex) {
 }
 // Every cut a fragment takes, also the whole of the depth pre-pass's shader, so both passes keep the same pixels.
 bool clipped() {
+  if (uCanvasSurface > 0.5 && canvasColor().a <= (uCanvasAtlas > 0.5 ? 0.5 : 0.0)) return true;
   vWorld = uProjective > 0.5 ? vWorldH.xyz / vWorldH.w : vWorldH.xyz;
   if (vWorld.y < uClipMinY || dot(uObjectClip, vec4(vWorld, 1.0)) > 0.0 || abs(dot(uObjectSlab.xyz, vWorld) + uObjectSlab.w) > 1.0 || abs(dot(uObjectSlab2.xyz, vWorld) + uObjectSlab2.w) > 1.0 || cutaway(vWorld, vSmokeOpacity)) return true;
   if (uLakeOcclude.w > 0.0 && uEye.y > uLakeOcclude.y && vWorld.y < uLakeOcclude.y) {
@@ -818,6 +882,7 @@ void main() {
 #endif
   vec3 n = normalize(vNormal);
   vec3 base = vColor.rgb;
+  if (uCanvasSurface > 0.5) base *= canvasColor().rgb;
   // Mode 5 keeps its own palette in the Matrix; clouds are mode 4.
   float nativeMode = step(4.5, vParams.z);
   float cloud = step(3.5, vParams.z) * (1.0 - nativeMode);
@@ -1022,7 +1087,7 @@ void main() {
   const ORDINARY_MESH_FS = derive(MESH_FS, ["flat in vec4 vVoxel;", "uniform vec4 uVoxel;"], [/\bvVoxel\b/g, "uVoxel"]);
   // The camera's depth pre-pass: the mesh shader's cuts and nothing else, the rest compiled away.
   const DEPTH_MESH_FS = ORDINARY_MESH_FS.slice(0, ORDINARY_MESH_FS.indexOf("void main() {")) + "void main() {\n  if (clipped()) discard;\n}";
-  const MESH_UNIFORMS = ["uRigCount", "uRigPass", "uRigMatrices", "uRigParams", "uRigVoxels", "uRigVisibility", "uViewProj", "uLightViewProj", "uEye", "uViewDirection", "uLightDir", "uSky", "uGround", "uSun", "uDirectStrength", "uAmbientFloor", "uDiffuseFloor", "uShadowStrength", "uShadowFloor", "uShadowBias", "uShadow", "uShadowTexel", "uLights", "uLightCount", "uSpotLight", "uFog", "uFogRange", "uMatrixParams", "uMatrixOrigin", "uMatrixGlyph", "uMatrixCave", "uMatrixCaves", "uMatrixCaveBounds", "uMatrixCaveNear", "uMatrixPermanentCave", "uMatrixPermanentPlane", "uMatrixPermanentAperture", "uMatrixLivingGlobal", "uMatrixGlyphTex", "uMatrixSamples", "uClipMinY", "uClipMaxY", "uObjectClip", "uObjectSlab", "uObjectSlab2", "uProjective", "uMatrixGlyphOpacity", "uGlassOpacity", "uVoxel", "uWindTime", "uSway", "uSwing", "uGlass", "uLightBeam", "uLakeWaveCount", "uLakeWaves", "uLakeSurface", "uLakeSuction", "uLakeFlowEnabled", "uLakeFlowU", "uLakeFlowV", "uLakeCharge", "uLakeChargeRise", "uLakeChargeCenter", "uLakeOcclude", "uLakeWaveEnd", "uLakeBodyShape", "uLakeBodyBend", "uDSBSurface", "uDSBDepth", "uDSBEnvironment"];
+  const MESH_UNIFORMS = ["uRigCount", "uRigPass", "uRigMatrices", "uRigParams", "uRigVoxels", "uRigVisibility", "uViewProj", "uLightViewProj", "uEye", "uViewDirection", "uLightDir", "uSky", "uGround", "uSun", "uDirectStrength", "uAmbientFloor", "uDiffuseFloor", "uShadowStrength", "uShadowFloor", "uShadowBias", "uShadow", "uShadowTexel", "uLights", "uLightCount", "uSpotLight", "uFog", "uFogRange", "uMatrixParams", "uMatrixOrigin", "uMatrixGlyph", "uMatrixCave", "uMatrixCaves", "uMatrixCaveBounds", "uMatrixCaveNear", "uMatrixPermanentCave", "uMatrixPermanentPlane", "uMatrixPermanentAperture", "uMatrixLivingGlobal", "uMatrixGlyphTex", "uMatrixSamples", "uClipMinY", "uClipMaxY", "uObjectClip", "uObjectSlab", "uObjectSlab2", "uProjective", "uMatrixGlyphOpacity", "uGlassOpacity", "uVoxel", "uWindTime", "uSway", "uSwing", "uGlass", "uLightBeam", "uLakeWaveCount", "uLakeWaves", "uLakeSurface", "uLakeSuction", "uLakeFlowEnabled", "uLakeFlowU", "uLakeFlowV", "uLakeCharge", "uLakeChargeRise", "uLakeChargeCenter", "uLakeOcclude", "uLakeWaveEnd", "uLakeBodyShape", "uLakeBodyBend", "uDSBSurface", "uDSBDepth", "uDSBEnvironment", "uCanvasSurface", "uCanvasImage", "uCanvasRect", "uCanvasCurve", "uCanvasBackground", "uCanvasScale", "uCanvasAtlas", "uCanvasAtlasMin", "uCanvasAtlasMax"];
   const ORDINARY_SHADOW_VS = derive(SHADOW_VS, [RIG_GLSL, ""], ["rigMatrix(mat4(aM0, aM1, aM2, aM3))", "mat4(aM0, aM1, aM2, aM3)"],
     ["layout(location=6) in vec4 aM3;\n\n", "layout(location=6) in vec4 aM3;\n"]);
   const LINE_VS = `#version 300 es
@@ -1574,6 +1639,8 @@ void main() {
     const real = unmasked();
     return real != null && APPLE_SILICON.test(String(real));
   };
+  const depthPrepassEnabled = (settings, tileBased, override, rigMode) => !rigMode
+    && (override === "1" || override !== "0" && settings.prepass && !tileBased);
   const isSupported = () => {
     try {
       const probe = document.createElement("canvas");
@@ -1591,6 +1658,9 @@ void main() {
     const DRAW_BOTH = [gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1];
     let settings = QUALITY[quality] || QUALITY.high;
     let qualityName = QUALITY[quality] ? quality : "high";
+    // The explicit A/B override, under debug only, applies on every GPU and tier; rigs retain their own programs.
+    const pageParams = new URLSearchParams(location.search), prepassOverride = pageParams.has("debug") ? pageParams.get("prepass") : null;
+    let collectNear = 0.2;
     // Firefox names the GPU in RENDERER (and warns about the debug extension); Chrome and Safari mask it there and
     // answer through the extension.
     const tileBased = tileBasedGpu(gl.getParameter(gl.RENDERER), () => {
@@ -1619,7 +1689,7 @@ void main() {
     const mirrorInvViewProj = mat4.create();
     const FRUSTUM = new Float32Array(24), LIGHT_FRUSTUM = new Float32Array(24), MIRROR_FRUSTUM = new Float32Array(24);
     const CENTER = new Float32Array(3), CULL = new Float64Array(4);
-    let culled = 0, drawn = 0, suppressed = 0, shadowPassCount = 0, rippleSurfaces = 0, rippleWaves = 0;
+    let culled = 0, drawn = 0, suppressed = 0, smallCulled = 0, shadowPassCount = 0, rippleSurfaces = 0, rippleWaves = 0;
     // Static casters live in a cached depth map (res.shadow.staticFb) baked under shadowBaked; the working map
     // starts each frame as a copy of it and takes only the moving casters.
     let shadowFrame = 0, shadowBake = 0, shadowBakedCount = 0, shadowStaticValid = false, shadowSubset = 0, shadowDraws = 0, shadowStaticRebuilds = 0;
@@ -1666,8 +1736,10 @@ void main() {
     let dsbGPU=null;
     // PROTOTYPE: a scene at sea level can switch off the hub's dropped haze horizon (`hazeDrop: 0`).
     let skyHaze=1;
+    const canvasSurfaces = new WeakMap();
+    let canvasSurfaceSerial = 0;
     const res = { programs: {}, fbo: null, shadow: null, bloom: null, quadVao: null, matrixTexture: null };
-    const mirror = { node: null, record: null, geometry: null, program: null, programReady: false, fb: null, tex: null, depth: null, width: 0, height: 0, renderWidth: 0, renderHeight: 0, capturedWidth: 0, capturedHeight: 0, portal: false, reveal: 0, frontFacing: false, walkThrough: false, captureValid: false, bodyTex: null, bodyState: null, bodyVersion: -1, shards: 0, query: null, queryPending: false, occluded: false, frame: 0 };
+    const mirror = { node: null, record: null, geometry: null, program: null, programReady: false, fb: null, tex: null, depth: null, width: 0, height: 0, renderWidth: 0, renderHeight: 0, capturedWidth: 0, capturedHeight: 0, portal: false, reveal: 0, frontFacing: false, walkThrough: false, captureValid: false, readable: false, bodyTex: null, bodyState: null, bodyVersion: -1, shards: 0, query: null, queryPending: false, occluded: false, frame: 0 };
     const environment = { program: null, ready: false, fb: null, tex: null, depth: null, size: 0, next: 0, valid: 0, frame: 0, origin: new Float32Array(3) };
     // Reflectors: plain planar mirrors a scene may hold several of (the factory's peer shields), each with a capture
     // of its own, drawn with the mirror's program and their ripples. The mirror above stays the one mirror with
@@ -1675,8 +1747,12 @@ void main() {
     // turns, one a frame, so a scene pays two reflection passes at most; one waiting its turn shows its last capture.
     // A reflector needs a geometry of its own, which keys its capture. `reflectorPass` is the record a capture leaves
     // out (null in the eye's pass, which draws every reflector itself).
+    // Changing ordinary records share six upload regions: world and beforeView poses can each consume one.
+    // Stable records keep their own buffer, so a stationary prop never joins the per-frame copy.
+    const instanceStream = { buffer: null, data: null, capacity: 0, slot: 0, trimFrame: -1, trimSince: -1 };
     const reflectorNodes = [], reflectorTargets = new Map();
-    let reflectorTurn = 0, reflectorPass = null;
+    let reflectorTurn = 0, reflectorPass = null, reflectorFrame = 0;
+    let reducedCapture = false;
     // Glass (`geometry.glass`, its see-through alpha) draws after everything opaque and the sky, blended and leaving
     // the depth alone, back faces first so a tube shows its far wall through its near one. `glassPass` is set while it
     // draws; every other pass leaves glass out.
@@ -1723,6 +1799,10 @@ void main() {
         gl.uniform1f(p.u.uGlass, 1);
         p.glass = 1;
       }
+      if (p.u.uCanvasImage) {
+        gl.useProgram(p.prog);
+        gl.uniform1i(p.u.uCanvasImage, 6);
+      }
       // Active water samplers must never alias the shadow sampler's unit 0, even outside DSB.
       // Linking also runs after context restoration and for the optional rig programs.
       if (p.u.uDSBSurface || p.u.uDSBDepth) {
@@ -1761,6 +1841,7 @@ void main() {
         mesh: compile(ORDINARY_MESH_VS, meshFragment, MESH_UNIFORMS),
         depth: compile(ORDINARY_MESH_VS, DEPTH_MESH_FS, MESH_UNIFORMS),
         plain: compile(ORDINARY_MESH_VS, meshFragment.replace("#version 300 es", "#version 300 es\n#define PLAIN"), MESH_UNIFORMS),
+        foliageShadow: compile(FOLIAGE_SHADOW_VS, FOLIAGE_SHADOW_FS, MESH_UNIFORMS),
         shadow: compile(ORDINARY_SHADOW_VS, SHADOW_FS, ["uRigCount", "uRigPass", "uRigMatrices", "uRigVisibility", "uLightViewProj", "uClipMinY", "uClipMaxY", "uObjectClip"]),
         line: compile(LINE_VS, LINE_FS, ["uViewProj", "uViewport", "uWidth", "uClipMaxY", "uObjectClip"]),
         sky: compile(QUAD_VS, SKY_FS, ["uInvViewProj", "uHorizon", "uZenith", "uSun", "uSunDir", "uMoonDir", "uMoonSunDir", "uStarMatrix", "uStars", "uTime", "uHazeDrop", "uClouds", "uSea", "uSeaEye"]),
@@ -1880,7 +1961,7 @@ void main() {
     };
     const reflectorTarget = (geometry) => {
       let t = reflectorTargets.get(geometry);
-      if (!t) reflectorTargets.set(geometry, t = { fb: null, tex: null, depth: null, size: 0, renderWidth: 0, renderHeight: 0, viewProj: new Float32Array(16), valid: false, area: 0, record: null });
+      if (!t) reflectorTargets.set(geometry, t = { fb: null, tex: null, depth: null, size: 0, renderWidth: 0, renderHeight: 0, viewProj: new Float32Array(16), valid: false, readable: false, area: 0, screenWidth: 0, screenHeight: 0, record: null });
       return t;
     };
     // One square allocation per reflector at the tier's mirror size, as the mirror keeps.
@@ -2138,6 +2219,12 @@ void main() {
       res.shadow = { tex: work.tex, fb: work.fb, staticTex: baked.tex, staticFb: baked.fb, size };
       shadowStaticValid = false;
     };
+    const destroyInstanceStream = () => {
+      if (instanceStream.buffer) gl.deleteBuffer(instanceStream.buffer);
+      instanceStream.buffer = instanceStream.data = null;
+      instanceStream.capacity = instanceStream.slot = 0;
+      instanceStream.trimFrame = instanceStream.trimSince = -1;
+    };
     const deleteRecord = (rec) => {
       if (rec.active) {
         const index = activeRecords.indexOf(rec);
@@ -2158,21 +2245,99 @@ void main() {
       rec.rippleBodyState = null;
       rec.nodes.length = 0;
       rec.batch = null;
-      rec.data = null;
+      rec.data = rec.instanceBuffer = null;
     };
     const destroyRecords = () => {
       for (const rec of records.values()) deleteRecord(rec);
       records.clear();
       activeRecords.length = 0;
+      destroyInstanceStream();
     };
-    const bindInstanceAttribs = (ibo) => {
+    const bindInstanceAttribs = (ibo, first = 0, setup = true) => {
       gl.bindBuffer(gl.ARRAY_BUFFER, ibo);
       for (let i = 0; i < 5; i++) {
         const loc = 3 + i;
-        gl.enableVertexAttribArray(loc);
-        gl.vertexAttribPointer(loc, 4, gl.FLOAT, false, INSTANCE_FLOATS * 4, i * 16);
-        gl.vertexAttribDivisor(loc, 1);
+        if (setup) gl.enableVertexAttribArray(loc);
+        gl.vertexAttribPointer(loc, 4, gl.FLOAT, false, INSTANCE_FLOATS * 4, first * INSTANCE_FLOATS * 4 + i * 16);
+        if (setup) gl.vertexAttribDivisor(loc, 1);
       }
+    };
+    const bindRecordInstances = (rec, buffer, first = 0) => {
+      if (rec.instanceBuffer === buffer && rec.instanceFirst === first) return;
+      if (rec.mesh) { gl.bindVertexArray(rec.mesh.vao); bindInstanceAttribs(buffer, first, false); }
+      if (rec.line) { gl.bindVertexArray(rec.line.vao); bindInstanceAttribs(buffer, first, false); }
+      gl.bindVertexArray(null);
+      rec.instanceBuffer = buffer;
+      rec.instanceFirst = first;
+    };
+    const flushInstanceStream = () => {
+      let need = 0, total = 0;
+      for (let i = 0; i < activeRecords.length; i++) {
+        const rec = activeRecords[i];
+        if (!rec.streaming) continue;
+        total += rec.count * INSTANCE_FLOATS;
+        if (rec.streamFrame !== shadowFrame) need += rec.count * INSTANCE_FLOATS;
+      }
+      const stream = instanceStream, minimum = INSTANCE_FLOATS * 256;
+      let trim = false;
+      if (stream.trimFrame !== shadowFrame) {
+        stream.trimFrame = shadowFrame;
+        // Count the whole live stream, including world-pose batches already flushed before beforeView.
+        // A sustained fourfold gap releases startup peaks; empty scene transitions do not churn storage.
+        if (total > 0 && stream.capacity > minimum && total < stream.capacity / 4) {
+          const now = performance.now();
+          if (stream.trimSince < 0) stream.trimSince = now;
+          else trim = now - stream.trimSince >= 4000;
+        } else stream.trimSince = -1;
+      }
+      if (!need && !trim) return;
+      if (stream.capacity < need || trim) {
+        // Replacing storage also invalidates unchanged records already flushed for the world pose this frame.
+        need = total;
+        for (let i = 0; i < activeRecords.length; i++) if (activeRecords[i].streaming) activeRecords[i].streamFrame = -1;
+        stream.capacity = trim ? Math.max(minimum, Math.ceil(total * 1.25 / INSTANCE_FLOATS) * INSTANCE_FLOATS) : Math.max(need, stream.capacity * 2, minimum);
+        stream.trimSince = -1;
+        stream.data = new Float32Array(stream.capacity);
+        if (!stream.buffer) stream.buffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, stream.buffer);
+        gl.bufferData(gl.ARRAY_BUFFER, stream.capacity * 4 * 6, gl.STREAM_DRAW);
+        stream.slot = 0;
+      }
+      const offset = stream.slot * stream.capacity;
+      let written = 0;
+      for (let i = 0; i < activeRecords.length; i++) {
+        const rec = activeRecords[i];
+        if (!rec.streaming || rec.streamFrame === shadowFrame) continue;
+        const count = rec.count * INSTANCE_FLOATS, source = rec.batch ? rec.batch.instanceData : rec.data;
+        // Borrow batch storage only during this copy; no alias survives a frame or overwrites the caller's array.
+        // Copy only live floats without allocating a subarray view for every record.
+        for (let k = 0; k < count; k++) stream.data[written + k] = source[k];
+        rec.streamFirst = (offset + written) / INSTANCE_FLOATS;
+        written += count;
+      }
+      gl.bindBuffer(gl.ARRAY_BUFFER, stream.buffer);
+      gl.bufferSubData(gl.ARRAY_BUFFER, offset * 4, stream.data, 0, need);
+      for (let i = 0; i < activeRecords.length; i++) {
+        const rec = activeRecords[i];
+        if (!rec.streaming || rec.streamFrame === shadowFrame) continue;
+        const first = rec.streamFirst;
+        rec.streamFrame = shadowFrame;
+        if (shadowFrame - rec.instanceChanged >= SHADOW_SETTLE) {
+          // Settled records leave the stream. Copy its fresh span on the GPU, including after an inactive visit;
+          // no CPU upload per record and no dependency on an older ring region still holding its contents.
+          if (!rec.batch && rec.capacity < rec.data.length) {
+            gl.bindBuffer(gl.ARRAY_BUFFER, rec.ibo);
+            gl.bufferData(gl.ARRAY_BUFFER, rec.data.length * 4, gl.DYNAMIC_DRAW);
+            rec.capacity = rec.data.length;
+          }
+          gl.bindBuffer(gl.COPY_READ_BUFFER, stream.buffer);
+          gl.bindBuffer(gl.COPY_WRITE_BUFFER, rec.ibo);
+          gl.copyBufferSubData(gl.COPY_READ_BUFFER, gl.COPY_WRITE_BUFFER, first * INSTANCE_FLOATS * 4, 0, rec.count * INSTANCE_FLOATS * 4);
+          rec.streaming = false;
+          bindRecordInstances(rec, rec.ibo);
+        } else bindRecordInstances(rec, stream.buffer, first);
+      }
+      stream.slot = (stream.slot + 1) % 6;
     };
     const makePart = (data, floatsPerVertex, layout, ibo) => {
       const vao = gl.createVertexArray();
@@ -2343,7 +2508,7 @@ void main() {
       let rec = records.get(geometry);
       if (!rec) {
         const ibo = gl.createBuffer();
-        rec = { geometry, ibo, capacity: 0, mesh: geometry.meshRig ? buildRigPart(geometry.meshRig, ibo) : buildMeshPart(geometry, ibo), line: buildLinePart(geometry, ibo), nodes: [], spheres: new Float64Array(4), count: 0, drawCount: 0, cameraHiddenCount: 0, active: false, data: null, batch: null, batchVersion: -1, lightVisible: true, mirrorVisible: true, living: false, imageTexture: null, rippleBodyTexture: null, rippleBodyState: null, rippleBodyVersion: -1, shadowChanged: 0, shadowSettle: SHADOW_SETTLE, shadowCount: -1, shadowClip: NaN, shadowStatic: false, shadowBake: -1 };
+        rec = { geometry, ibo, instanceBuffer: ibo, instanceFirst: 0, instanceChanged: 0, instanceCount: 0, streaming: false, streamFirst: 0, streamFrame: -1, capacity: 0, mesh: geometry.meshRig ? buildRigPart(geometry.meshRig, ibo) : buildMeshPart(geometry, ibo), line: buildLinePart(geometry, ibo), nodes: [], spheres: new Float64Array(4), count: 0, drawCount: 0, cameraHiddenCount: 0, active: false, data: null, batch: null, batchVersion: -1, lightVisible: true, mirrorVisible: true, living: false, imageTexture: null, rippleBodyTexture: null, rippleBodyState: null, rippleBodyVersion: -1, shadowChanged: 0, shadowSettle: SHADOW_SETTLE, shadowCount: -1, shadowClip: NaN, shadowStatic: false, shadowBake: -1 };
         records.set(geometry, rec);
       }
       return rec;
@@ -2421,7 +2586,14 @@ void main() {
         if (rec.geometry.castShadow === false) continue;
         const sphere = rec.batch && rec.batch.cullSphere;
         let visible = rec.batch ? !sphere || sphereInFrustum(sphere[0], sphere[1], sphere[2], sphere[3] + CULL_MARGIN, LIGHT_FRUSTUM) : false;
-        for (let k = 0; !rec.batch && !visible && k < rec.count; k++) visible = slotInFrustum(rec.spheres, k * 4, LIGHT_FRUSTUM);
+        for (let k = 0; !rec.batch && !visible && k < rec.count; k++) {
+          const node = rec.nodes[k], o = k * 4;
+          // A marked prop's true physical bound may fall wholly outside the shadow volume even while the
+          // camera's extra one-metre cull margin overlaps it. Keep unmarked/rig/cloud bounds unchanged.
+          visible = screenCullable(node) && !node.matrixCloud
+            ? sphereInFrustum(rec.spheres[o],rec.spheres[o+1],rec.spheres[o+2],Math.min(rec.spheres[o+3],physicalRadius(node.geometry,node.world,0,false)),LIGHT_FRUSTUM)
+            : slotInFrustum(rec.spheres,o,LIGHT_FRUSTUM);
+        }
         rec.lightVisible = visible;
       }
     };
@@ -2453,6 +2625,93 @@ void main() {
         rec.mirrorVisible = visible;
       }
     };
+    // Only explicitly marked props participate: a character's small parts and the tiny glyphs of a visible
+    // Matrix mosaic remain one authored picture. Main-camera rejection never removes shadow/mirror instances.
+    const screenStates = new WeakMap();
+    const screenCullable = (node) => {
+      const g = node.geometry;
+      return node.screenCull === true && !g.meshRig && !g.projective && !g.portalSurface && !g.imageSurface
+        && !g.reflector && !g.mirrorSource && !g.matrixGlyph && !g.matrixRevealBacking && !g.matrixLocalGlyphSurface
+        && !g.matrixSourceGeometry && !node.mirror && !node.mirrorPortal;
+    };
+    const physicalRadius = (g, w, o = 0, deform = true) => {
+      const b = boundsOf(g), a = Math.abs(w[o]), c = Math.abs(w[o + 1]), d = Math.abs(w[o + 2]);
+      const e = Math.abs(w[o + 4]), f = Math.abs(w[o + 5]), h = Math.abs(w[o + 6]);
+      const i = Math.abs(w[o + 8]), j = Math.abs(w[o + 9]), k = Math.abs(w[o + 10]);
+      // These bound the largest stretch even with shear. The Gram row sum stays tight for rotated scales:
+      // orthogonal columns have zero cross terms, while absolute dot products retain a safe shear bound.
+      const xx = a*a+c*c+d*d, yy = e*e+f*f+h*h, zz = i*i+j*j+k*k;
+      const xy = Math.abs(w[o]*w[o+4]+w[o+1]*w[o+5]+w[o+2]*w[o+6]);
+      const xz = Math.abs(w[o]*w[o+8]+w[o+1]*w[o+9]+w[o+2]*w[o+10]);
+      const yz = Math.abs(w[o+4]*w[o+8]+w[o+5]*w[o+9]+w[o+6]*w[o+10]);
+      const frobenius = xx+yy+zz, gram = Math.max(xx+xy+xz, yy+xy+yz, zz+xz+yz);
+      const norm = Math.max(a+c+d, e+f+h, i+j+k) * Math.max(a+e+i, c+f+j, d+h+k);
+      const wind = deform ? 1.35 * Math.max(0,g.sway || 0) * Math.max(0, b.max[1]) ** 2 + 0.066 * Math.max(0,g.swing || 0) : 0;
+      return b.radius * Math.sqrt(Math.min(frobenius, norm, gram)) + wind;
+    };
+    const screenDiameter = (x, y, z, radius) => {
+      const vx = view[0]*x+view[4]*y+view[8]*z+view[12];
+      const vy = view[1]*x+view[5]*y+view[9]*z+view[13];
+      const vz = view[2]*x+view[6]*y+view[10]*z+view[14];
+      // Keep spheres intersecting the near plane, crossing the eye, or carrying invalid bounds.
+      if (!(radius >= 0) || !Number.isFinite(radius) || -vz - radius <= collectNear) return Infinity;
+      const w = proj[11]*vz+proj[15], dw = Math.abs(proj[11])*radius;
+      const near = w-dw, far = w+dw;
+      if (!(near > 0)) return Infinity;
+      const nx = proj[0]*vx+proj[8]*vz+proj[12], ny = proj[5]*vy+proj[9]*vz+proj[13];
+      const dx = (Math.abs(proj[0])+Math.abs(proj[8]))*radius, dy = (Math.abs(proj[5])+Math.abs(proj[9]))*radius;
+      // Project the sphere's enclosing camera-space box. All four numerator/denominator combinations bound
+      // both perspective and orthographic/blended projections, including an off-axis object's depth extent.
+      const minX = Math.min((nx-dx)/near,(nx-dx)/far,(nx+dx)/near,(nx+dx)/far);
+      const maxX = Math.max((nx-dx)/near,(nx-dx)/far,(nx+dx)/near,(nx+dx)/far);
+      const minY = Math.min((ny-dy)/near,(ny-dy)/far,(ny+dy)/near,(ny+dy)/far);
+      const maxY = Math.max((ny-dy)/near,(ny-dy)/far,(ny+dy)/near,(ny+dy)/far);
+      return Math.max((maxX-minX)*width,(maxY-minY)*height)*0.5;
+    };
+    const screenVisible = (node, s = null, o = 0, count = 0) => {
+      if (!screenCullable(node)) return true;
+      const threshold = screenStates.get(node) === false ? 2.2 : 1.8, g = node.geometry;
+      let visible = false;
+      if (node.instanceData) {
+        // Preserve each explicit batch as one draw and one upload. Reject it only if every instance in its
+        // camera prefix is tiny; mixed batches retain their original data/order and all passes' counts.
+        const data = node.instanceData, b = boundsOf(g), cx = b.center[0], cy = b.center[1], cz = b.center[2];
+        for (let i = 0; !visible && i < count; i++) {
+          const p = i*INSTANCE_FLOATS;
+          const x = data[p]*cx+data[p+4]*cy+data[p+8]*cz+data[p+12];
+          const y = data[p+1]*cx+data[p+5]*cy+data[p+9]*cz+data[p+13];
+          const z = data[p+2]*cx+data[p+6]*cy+data[p+10]*cz+data[p+14];
+          visible = screenDiameter(x,y,z,physicalRadius(g,data,p)) >= threshold;
+        }
+      } else visible = screenDiameter(s[o],s[o+1],s[o+2],physicalRadius(g,node.world)) >= threshold;
+      if (visible !== screenStates.get(node)) screenStates.set(node,visible);
+      return visible;
+    };
+    const foliageStates = new WeakMap();
+    const foliageGeometry = (node) => {
+      const g = node.geometry, lods = g.foliageLods;
+      // Explicit batches and aperture-specific wrappers retain their current source. Enrolled hub foliage is
+      // ordinary instancing; collision, picking, cutaways and cull spheres always read the untouched high mesh.
+      if (!lods || lods.owner !== g || node.instanceData || g.matrixSourceGeometry || g.clipPlane || g.clipSlab || g.clipSlab2) return g;
+      const b = boundsOf(g), w = node.world;
+      mat4.transformPoint(CENTER, w, b.center[0], b.center[1], b.center[2]);
+      const pixels = screenDiameter(CENTER[0], CENTER[1], CENTER[2], physicalRadius(g, w));
+      const lower = qualityName === "low" ? 180 : qualityName === "medium" ? 150 : 120;
+      const upper = qualityName === "low" ? 220 : qualityName === "medium" ? 185 : 150;
+      const farLower = qualityName === "low" ? 36 : qualityName === "medium" ? 30 : 24;
+      const farUpper = qualityName === "low" ? 46 : qualityName === "medium" ? 40 : 32;
+      let states = foliageStates.get(g);
+      if (!states) { states = new WeakMap(); foliageStates.set(g, states); }
+      const previous = states.get(node);
+      let level = previous;
+      if (level === undefined) level = pixels < farLower ? 2 : pixels < lower ? 1 : 0;
+      else if (level === 0) { if (pixels < lower) level = pixels < farLower ? 2 : 1; }
+      else if (pixels > upper) level = 0;
+      else if (level === 1 && pixels < farLower) level = 2;
+      else if (level === 2 && pixels > farUpper) level = 1;
+      if (level !== previous) states.set(node, level);
+      return level === 0 ? g : level === 1 ? lods.medium : lods.far;
+    };
     const collect = (node) => {
       if (!node.geometry || !rigMode && node.geometry.meshRig || hiddenFromCutaway(node) || cutawayFade === 1 && node.geometry.cutawayHide) return;
       if (node.mirror || node.mirrorPortal) {
@@ -2466,7 +2725,7 @@ void main() {
         mirrorDebug.portal = mirror.portal;
         mirrorDebug.reveal = mirror.reveal;
       }
-      const rec = recordFor(node.geometry);
+      const rec = recordFor(foliageGeometry(node));
       if (node.mirror || node.mirrorPortal) mirror.record = rec;
       if (node.geometry.reflector) {
         reflectorNodes.push(node);
@@ -2485,6 +2744,10 @@ void main() {
         rec.drawCount = node.drawInstanceCount === undefined ? rec.count : Math.max(0, Math.min(rec.count, node.drawInstanceCount));
         suppressed += rec.count - rec.drawCount;
         rec.offscreen = !!node.cullSphere && !sphereInFrustum(node.cullSphere[0], node.cullSphere[1], node.cullSphere[2], node.cullSphere[3] + CULL_MARGIN);
+        if (!rec.offscreen && !screenVisible(node,null,0,rec.drawCount)) {
+          rec.offscreen = true;
+          smallCulled += rec.drawCount;
+        }
         return;
       }
       // In-frustum nodes stay in front of the culled ones by swapping into the draw region.
@@ -2500,8 +2763,9 @@ void main() {
       if (node.smokeOpacity === 0 || hiddenFromCamera(node)) {
         rec.cameraHiddenCount++;
         suppressed++;
-      } else if (slotInFrustum(rec.spheres, idx * 4, FRUSTUM)) drawSlot(rec, idx);
-      else culled++;
+      } else if (!slotInFrustum(rec.spheres, idx * 4, FRUSTUM)) culled++;
+      else if (screenVisible(node,rec.spheres,idx*4)) drawSlot(rec,idx);
+      else { culled++; smallCulled++; }
     };
     const collectRig = (node) => { if (!node.meshRigSource) collect(node); };
     const updateRig = (rec) => {
@@ -2570,10 +2834,12 @@ void main() {
     const uploadInstances = (rec) => {
       const need = rec.count * INSTANCE_FLOATS;
       if (rec.batch) {
-        // A reserved pool that has never held an instance owns no GPU memory until it does;
-        // empty cave batches cost nothing until the wave arrives.
-        if (!need && !rec.capacity) return;
-        // Fixed-capacity systems reserve their bounded upload once; variable batches grow geometrically.
+        const initial = !rec.capacity;
+        // A geometry reused as a batch must not leave an ordinary instance cache to masquerade as its GPU data.
+        rec.data = null;
+        // A reserved pool that has never held an instance owns no GPU memory until it does.
+        if (!need && initial) { rec.streaming = false; return; }
+        // Preserve fixed reservations and the existing geometric variable-capacity policy independently of streaming.
         const cap = rec.batch.fixedInstanceCapacity ? rec.batch.instanceData.length : Math.min(rec.batch.instanceData.length, Math.max(need, rec.capacity * 2));
         if (rec.capacity < cap) {
           gl.bindBuffer(gl.ARRAY_BUFFER, rec.ibo);
@@ -2581,26 +2847,33 @@ void main() {
           rec.capacity = cap;
           rec.batchVersion = -1;
         }
-        if (rec.batchVersion !== rec.batch.instanceVersion) {
-          // WebGL treats a zero source length as "the rest of the array": empty cave batches must not upload their
-          // whole reserved pool on restore.
-          if (need > 0) {
+        if (rec.batchVersion !== rec.batch.instanceVersion || rec.instanceCount !== rec.count) {
+          rec.instanceChanged = rec.shadowChanged = shadowFrame;
+          rec.streamFrame = -1;
+          rec.streaming = need > 0 && !initial;
+          // First use is a private static upload. Subsequent changing versions/counts share one live stream span.
+          // Never pass zero length: WebGL interprets it as the remainder of the reserved source array.
+          if (need > 0 && initial) {
             gl.bindBuffer(gl.ARRAY_BUFFER, rec.ibo);
             gl.bufferSubData(gl.ARRAY_BUFFER, 0, rec.batch.instanceData, 0, need);
           }
           rec.batchVersion = rec.batch.instanceVersion;
+          rec.instanceCount = rec.count;
           rec.living = false;
           for (let o = 18; o < need && !rec.living; o += INSTANCE_FLOATS) rec.living = isLiving(rec.batch.instanceData[o]);
-          rec.shadowChanged = shadowFrame;
         }
+        if (!need) rec.streaming = false;
+        if (!rec.streaming) bindRecordInstances(rec, rec.ibo);
         return;
       }
+      rec.batchVersion = -1;
       if (!rec.data || rec.data.length < need) {
         rec.data = new Float32Array(Math.max(need, (rec.data ? rec.data.length : 0) * 2, INSTANCE_FLOATS));
       }
-      // The buffer mirrors rec.data exactly, so an unchanged block (static props, resting crew) needs no upload.
+      // Keep the existing changed-span comparison: transforms also feed shadowStatic, while glow/mode changes
+      // require an instance upload without invalidating a static shadow.
       const d = rec.data;
-      // One moving node in a shared record uploads only its own span.
+      // Detect changed blocks before the shared stream copies the complete record for all passes.
       let lo = need, hi = 0, moved = false, living = false;
       for (let i = 0; i < rec.count; i++) {
         const n = rec.nodes[i], w = n.world;
@@ -2630,13 +2903,17 @@ void main() {
       rec.living = living;
       // Shadow depth reads only the transform, so glow and mode changes leave a caster static.
       if (moved) rec.shadowChanged = shadowFrame;
-      if (rec.capacity < d.length) {
+      const changed = hi > lo || rec.instanceCount !== rec.count;
+      rec.instanceCount = rec.count;
+      if (changed) { rec.instanceChanged = shadowFrame; rec.streamFrame = -1; }
+      if (!rec.capacity && !rec.streaming) {
         gl.bindBuffer(gl.ARRAY_BUFFER, rec.ibo);
         gl.bufferData(gl.ARRAY_BUFFER, d, gl.DYNAMIC_DRAW);
         rec.capacity = d.length;
-      } else if (hi > lo) {
-        gl.bindBuffer(gl.ARRAY_BUFFER, rec.ibo);
-        gl.bufferSubData(gl.ARRAY_BUFFER, lo * 4, d, lo, hi - lo);
+      } else if (changed || rec.streaming) {
+        // A dirty record joins one shared upload instead of issuing its own bufferSubData. Keep it there until
+        // its full instance data (including glow and camera ordering) has settled for the shadow settle window.
+        rec.streaming = true;
       }
     };
     const uploadRigInstances = (rec) => { updateRig(rec); uploadInstances(rec); };
@@ -2694,6 +2971,10 @@ void main() {
       mirrorDebug.portal = mirror.portal;
       mirrorDebug.reveal = mirror.reveal;
     };
+    // Medium captures a pane only while it reads: in at 150 CSS pixels on both axes, out under 130, so a pane near
+    // the line does not flicker between its reflection and its authored face.
+    const paneReadable = (target, paneWidth, paneHeight) => target.readable = target.readable
+      ? paneWidth >= 130 && paneHeight >= 130 : paneWidth >= 150 && paneHeight >= 150;
     // Readies the reflected camera for the mirror, or for a reflector when `target` is one; only the mirror's own
     // capture writes the debug readout.
     const prepareMirrorCamera = (camera, node = mirror.node, target = mirror) => {
@@ -2712,6 +2993,17 @@ void main() {
       }
       const area = (Math.min(1, MIRROR_RECT[2]) - Math.max(-1, MIRROR_RECT[0])) * width * 0.5 * (Math.min(1, MIRROR_RECT[3]) - Math.max(-1, MIRROR_RECT[1])) * height * 0.5;
       if (area < 16) return own && skipMirrorPass("negligible");
+      if (qualityName === "medium" && !paneReadable(target, (Math.min(1, MIRROR_RECT[2]) - Math.max(-1, MIRROR_RECT[0])) * width * 0.5,
+          (Math.min(1, MIRROR_RECT[3]) - Math.max(-1, MIRROR_RECT[1])) * height * 0.5)) {
+        // A pane too small to read drops its capture, so it shows its authored face rather than a reflection frozen
+        // when it was last captured.
+        if (!own) {
+          target.valid = false;
+          return false;
+        }
+        mirror.captureValid = mirrorDebug.captureValid = false;
+        return skipMirrorPass("quality-size");
+      }
       reflectMirrorPoint(mirrorEye, camera.position, center, normal);
       reflectMirrorPoint(mirrorTarget, camera.target, center, normal);
       const up = camera.up || UP, upDot = up.x * normal[0] + up.y * normal[1] + up.z * normal[2];
@@ -2776,11 +3068,52 @@ void main() {
       return true;
     };
     // How many pixels of the eye's view a reflector's glass covers, facing it; 0 when it faces away or is off screen.
-    const reflectorArea = (node, camera) => {
+    const reflectorArea = (node, camera, target = null) => {
+      if (target) target.screenWidth = target.screenHeight = 0;
       const w = node.world, nlen = Math.hypot(w[8], w[9], w[10]) || 1;
       if (((camera.position.x - w[12]) * w[8] + (camera.position.y - w[13]) * w[9] + (camera.position.z - w[14]) * w[10]) / nlen <= MIRROR_EPSILON) return 0;
       if (!mirrorRect(node, viewProj) || MIRROR_RECT[2] < -1 || MIRROR_RECT[0] > 1 || MIRROR_RECT[3] < -1 || MIRROR_RECT[1] > 1) return 0;
+      if (target) {
+        target.screenWidth = (Math.min(1, MIRROR_RECT[2]) - Math.max(-1, MIRROR_RECT[0])) * width * 0.5;
+        target.screenHeight = (Math.min(1, MIRROR_RECT[3]) - Math.max(-1, MIRROR_RECT[1])) * height * 0.5;
+      }
       return (Math.min(1, MIRROR_RECT[2]) - Math.max(-1, MIRROR_RECT[0])) * width * 0.5 * (Math.min(1, MIRROR_RECT[3]) - Math.max(-1, MIRROR_RECT[1])) * height * 0.5;
+    };
+    // Shard records retain a camera-visible prefix. Test their actual transformed vertices rather than the
+    // collection sphere's extra metre; a sliver outside the viewport must not spend a whole scene capture.
+    const shardCaptureVisible = (rec, index) => {
+      const batch = rec.batch, world = batch ? batch.instanceData : rec.nodes[index].world;
+      const o = batch ? index * INSTANCE_FLOATS : 0, verts = rec.geometry.verts;
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity, behind = false, outside = 63;
+      for (let i = 0; i < verts.length; i += 3) {
+        const x = world[o]*verts[i]+world[o+4]*verts[i+1]+world[o+8]*verts[i+2]+world[o+12];
+        const y = world[o+1]*verts[i]+world[o+5]*verts[i+1]+world[o+9]*verts[i+2]+world[o+13];
+        const z = world[o+2]*verts[i]+world[o+6]*verts[i+1]+world[o+10]*verts[i+2]+world[o+14];
+        const cx = viewProj[0]*x+viewProj[4]*y+viewProj[8]*z+viewProj[12];
+        const cy = viewProj[1]*x+viewProj[5]*y+viewProj[9]*z+viewProj[13];
+        const cz = viewProj[2]*x+viewProj[6]*y+viewProj[10]*z+viewProj[14];
+        const cw = viewProj[3]*x+viewProj[7]*y+viewProj[11]*z+viewProj[15];
+        outside &= (cx < -cw ? 1 : 0) | (cx > cw ? 2 : 0) | (cy < -cw ? 4 : 0)
+          | (cy > cw ? 8 : 0) | (cz < -cw ? 16 : 0) | (cz > cw ? 32 : 0);
+        if (cw <= MIRROR_EPSILON) { behind = true; continue; }
+        const px = cx/cw, py = cy/cw;
+        minX = Math.min(minX,px); maxX = Math.max(maxX,px);
+        minY = Math.min(minY,py); maxY = Math.max(maxY,py);
+      }
+      if (outside || minX === Infinity) return false;
+      // Crossing the eye can cover the viewport even while surviving corners lie outside it.
+      if (behind) return true;
+      const w = (Math.min(1,maxX)-Math.max(-1,minX))*width*0.5;
+      const h = (Math.min(1,maxY)-Math.max(-1,minY))*height*0.5;
+      return w > 0 && h > 0 && Math.max(w,h) >= 8;
+    };
+    const environmentCaptureVisible = () => {
+      for (let i = 0; i < activeRecords.length; i++) {
+        const rec = activeRecords[i];
+        if (!rec.geometry.mirrorSource || !rec.mesh || !rec.drawCount || rec.offscreen) continue;
+        for (let k = 0; k < rec.drawCount; k++) if (shardCaptureVisible(rec,k)) return true;
+      }
+      return false;
     };
     const prepareEnvironmentCamera = (camera, face) => {
       const world = mirror.node.world, at = face * 6;
@@ -2843,12 +3176,14 @@ void main() {
     const onLost = (e) => {
       e.preventDefault();
       lost = true;
+      destroyInstanceStream();
       imageTextures = rippleBodyTextures = 0;
       for (const rec of records.values()) { rec.imageTexture = rec.rippleBodyTexture = rec.rippleBodyState = null; }
       forgetMirror();
     };
     const onRestored = () => {
       dsbGPU=null;
+      destroyInstanceStream();
       records.clear();
       activeRecords.length = 0;
       res.fbo = null;
@@ -2893,6 +3228,60 @@ void main() {
         gl.uniform1i(program.u.uCutCount, count);
         program.cutCount = count;
       }
+    };
+    // The director calls this behind the entry fade, including far LODs not visible in the starting view.
+    const prepareScene = (geometries) => {
+      for (const geometry of geometries) {
+        const surface = geometry.imageSurface;
+        if (surface?.atlas && !surface.canvas) BL.models.paintFoliageAtlas(surface);
+      }
+    };
+    // One owned texture per canvas surface. Painting changes its revision; geometry and GPU buffers stay put.
+    const bindCanvasSurface = (rec, program) => {
+      const surface = rec.geometry.imageSurface;
+      if (surface?.atlas && !surface.canvas) BL.models.paintFoliageAtlas(surface);
+      const canvas = surface?.canvas;
+      let identity = canvas ? canvasSurfaces.get(surface) : 0;
+      if (canvas && !identity) { identity = ++canvasSurfaceSerial; canvasSurfaces.set(surface, identity); }
+      if (program.canvasSurfaceId !== identity || canvas && program.canvasSurfaceVersion !== surface.version) {
+        gl.uniform1f(program.u.uCanvasSurface, canvas ? 1 : 0);
+        // Keep only a number: an idle depth program must never retain a departed scene's canvas.
+        program.canvasSurfaceId = identity;
+        program.canvasSurfaceVersion = canvas ? surface.version : -1;
+        if (canvas) {
+          gl.uniform1f(program.u.uCanvasAtlas, surface.atlas ? 1 : 0);
+          if (surface.atlas) { gl.uniform3fv(program.u.uCanvasAtlasMin, surface.atlasMin); gl.uniform3fv(program.u.uCanvasAtlasMax, surface.atlasMax); }
+          gl.uniform4fv(program.u.uCanvasRect, surface.rect);
+          gl.uniform2f(program.u.uCanvasScale, (surface.width || canvas.width) / canvas.width, (surface.height || canvas.height) / canvas.height);
+          const bg = surface.background;
+          gl.uniform3f(program.u.uCanvasBackground, bg ? bg[0] / 255 : 0, bg ? bg[1] / 255 : 0, bg ? bg[2] / 255 : 0);
+          if (surface.curve) gl.uniform3fv(program.u.uCanvasCurve, surface.curve);
+          else gl.uniform3f(program.u.uCanvasCurve, 0, 0, 0);
+        }
+      }
+      if (!canvas) return;
+      gl.activeTexture(gl.TEXTURE6);
+      if (!rec.imageTexture) {
+        rec.imageTexture = gl.createTexture();
+        imageTextures++;
+        gl.bindTexture(gl.TEXTURE_2D, rec.imageTexture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, canvas);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, surface.atlas ? gl.LINEAR : gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, surface.atlas ? gl.LINEAR : gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        rec.canvasWidth = canvas.width; rec.canvasHeight = canvas.height; rec.canvasVersion = surface.version;
+      } else {
+        gl.bindTexture(gl.TEXTURE_2D, rec.imageTexture);
+        if (rec.canvasWidth !== canvas.width || rec.canvasHeight !== canvas.height) {
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, canvas);
+          rec.canvasWidth = canvas.width; rec.canvasHeight = canvas.height; rec.canvasVersion = surface.version;
+        } else if (rec.canvasVersion !== surface.version) {
+          gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, canvas);
+          rec.canvasVersion = surface.version;
+        }
+      }
+      gl.activeTexture(gl.TEXTURE0);
     };
     const drawImageSurface = (rec, count, cameraPass, resume) => {
       const surface = rec.geometry.imageSurface, image = surface.asset.load(), p = programs.image;
@@ -2967,12 +3356,49 @@ void main() {
     // The camera pass draws only the in-frustum front of each record; shadow and mirror draw all.
     // 1 draws only the records the plain variant can shade, -1 only the others, 0 all.
     let plainFilter = 0;
+    // A medium reflection keeps the large physical world and every character. Camera and shadow order stay untouched: selected
+    // instance runs read the existing buffer through a temporary base offset, restored before another pass.
+    const captureInstanceVisible = (rec, index) => {
+      if (!rec.batch) {
+        const s = rec.spheres, o = index * 4;
+        const radius = s[o + 3] - CULL_MARGIN - (rec.geometry.lakeWaves ? 0.18 : 0);
+        return (radius >= 1.25 || rec.geometry.characterPart === true) && slotInFrustum(s, o, MIRROR_FRUSTUM);
+      }
+      const b = boundsOf(rec.geometry), d = rec.batch.instanceData, o = index * INSTANCE_FLOATS;
+      const x = d[o] * b.center[0] + d[o + 4] * b.center[1] + d[o + 8] * b.center[2] + d[o + 12];
+      const y = d[o + 1] * b.center[0] + d[o + 5] * b.center[1] + d[o + 9] * b.center[2] + d[o + 13];
+      const z = d[o + 2] * b.center[0] + d[o + 6] * b.center[1] + d[o + 10] * b.center[2] + d[o + 14];
+      const scale = Math.max(d[o] * d[o] + d[o + 1] * d[o + 1] + d[o + 2] * d[o + 2],
+        d[o + 4] * d[o + 4] + d[o + 5] * d[o + 5] + d[o + 6] * d[o + 6],
+        d[o + 8] * d[o + 8] + d[o + 9] * d[o + 9] + d[o + 10] * d[o + 10]);
+      const radius = b.radius * Math.sqrt(scale);
+      return (radius >= 1.25 || rec.geometry.characterPart === true) && sphereInFrustum(x, y, z, radius + CULL_MARGIN, MIRROR_FRUSTUM);
+    };
+    const drawCaptureRuns = (part, rec, first, count, instances) => {
+      try {
+        let start = -1;
+        for (let i = 0; i <= instances; i++) {
+          const visible = i < instances && captureInstanceVisible(rec, i);
+          if (visible && start < 0) start = i;
+          if (!visible && start >= 0) {
+            bindInstanceAttribs(rec.instanceBuffer, rec.instanceFirst + start, false);
+            // Indexed parts arrive with the open GPU-packing PR; CPU geometry and uploads remain unchanged here.
+            if (part.index) gl.drawElementsInstanced(gl.TRIANGLES, count, part.index, first * part.indexSize, i - start);
+            else gl.drawArraysInstanced(gl.TRIANGLES, first, count, i - start);
+            start = -1;
+          }
+        }
+      } finally {
+        bindInstanceAttribs(rec.instanceBuffer, rec.instanceFirst, false);
+      }
+    };
     const drawParts = (kind, useProgram, excludeMirror = false, cull = false, matrixStage = 0) => {
       // The depth pre-pass's and the plain variant's programs take every per-draw setting the mesh program does.
       const meshPass = useProgram === "mesh" || useProgram === "depth" || useProgram === "plain";
       for (let i = 0; i < activeRecords.length; i++) {
         const rec = activeRecords[i], g = rec.geometry, program = programs[useProgram];
         if (g.mirrorRippleOnly) continue;
+        if (reducedCapture && (g.sway || g.foliageVisibility === false || g.imageSurface || g.projective)) continue;
         const part = rec[kind], n = rec.batch && rec.batch.drawInstanceCount !== undefined ? rec.drawCount : cull ? rec.drawCount : rec.count;
         if (!part || !n) continue;
         let first = 0, count = part.count;
@@ -2988,8 +3414,15 @@ void main() {
         if (cull && rec.offscreen) continue;
         if (kind === "mesh" && useProgram === "shadow" && g.castShadow === false) continue;
         if (useProgram === "shadow" ? !rec.lightVisible || shadowSubset && rec.shadowStatic !== (shadowSubset === 1) : !cull && !rec.mirrorVisible) continue;
-        if (excludeMirror && (rec === mirror.record || g.mirrorSource)) continue;
-        if (g.reflector && (reflectorPass === null || rec === reflectorPass)) continue;
+        // Only the camera pass (the culled one) shows the authored face; a capture never sees the mirror itself.
+        if (excludeMirror && (rec === mirror.record && (!cull || mirror.portal || mirrorPaneReady()) || g.mirrorSource && (!cull || environment.ready && environment.tex))) continue;
+        // Tiny first-use shards keep their authored material until a readable shard initializes the shared cube.
+        if (g.reflector && (reflectorPass === null || rec === reflectorPass)) {
+          // Uncaptured lower-tier panes retain their authored grey-blue face instead of disappearing.
+          const fallback = reflectorPass === null && qualityName !== "high"
+            && (qualityName === "low" || !reflectorTargets.get(g)?.valid);
+          if (!fallback) continue;
+        }
         if (meshPass && !g.glass !== !glassPass) continue;
         if (meshPass && !(g.imageSurface && g.imageSurface.blend) !== !blendPass) continue;
         // A record drawn by another stage's pass drops out before any per-record uniform moves.
@@ -3015,8 +3448,23 @@ void main() {
         }
         if (rigMode && kind === "mesh") applyRig(program, rec, useProgram === "shadow" ? 2 : cull ? 1 : 3);
         if (useProgram === "shadow") shadowDraws++;
+        if (useProgram === "shadow" && g.imageSurface?.atlas) {
+          // Ordinary shadow bytes stay unchanged. Only silhouette cards need their alpha-tested shadow shader.
+          const p = programs.foliageShadow;
+          gl.useProgram(p.prog);
+          gl.uniformMatrix4fv(p.u.uLightViewProj, false, lightViewProj);
+          gl.uniform1f(p.u.uClipMinY, g.clipMinY ?? -1e6);
+          gl.uniform4fv(p.u.uObjectClip, objectClip);
+          bindCanvasSurface(rec, p);
+          gl.bindVertexArray(part.vao);
+          if (part.index) gl.drawElementsInstanced(gl.TRIANGLES, count, part.index, first * part.indexSize, n);
+          else gl.drawArraysInstanced(gl.TRIANGLES, first, count, n);
+          gl.useProgram(program.prog);
+          continue;
+        }
         if (kind === "mesh" && meshPass) {
-          if (g.imageSurface) { drawImageSurface(rec, n, cull, program); continue; }
+          if (g.imageSurface && !g.imageSurface.canvas && !g.imageSurface.atlas) { drawImageSurface(rec, n, cull, program); continue; }
+          bindCanvasSurface(rec, program);
           const mesh = program, glyph = stage === 1 ? 3 : stage === 2 ? 1 : g.matrixLocalGlyphSurface ? 2 : 0, cave = g.matrixCave || 0;
           if (glyph !== mesh.matrixGlyph) {
             gl.uniform1f(mesh.u.uMatrixGlyph, glyph);
@@ -3101,7 +3549,9 @@ void main() {
               program.lakeSurface = null;
             }
           }
-          const minimumY = g.clipMinY ?? -1e6, maximumY = Math.min(g.cutawayPreserve ? 1e6 : cutawayMaxY, g.clipMaxY ?? 1e6);
+          // The mirror's authored face, drawn while its pane cannot be, drains with the Matrix reveal as the pane does.
+          const minimumY = rec === mirror.record && mirror.reveal > 0 && useProgram !== "shadow" ? Math.max(g.clipMinY ?? -1e6, mirrorRevealFloor())
+            : g.clipMinY ?? -1e6, maximumY = Math.min(g.cutawayPreserve ? 1e6 : cutawayMaxY, g.clipMaxY ?? 1e6);
           if (minimumY !== program.clipMinY) {
             gl.uniform1f(program.u.uClipMinY, minimumY);
             program.clipMinY = minimumY;
@@ -3157,6 +3607,12 @@ void main() {
         if (offset) {
           gl.enable(gl.POLYGON_OFFSET_FILL);
           gl.polygonOffset(0, -4);
+        }
+        if (reducedCapture) {
+          gl.bindVertexArray(part.vao);
+          drawCaptureRuns(part, rec, first, count, n);
+          if (offset) gl.disable(gl.POLYGON_OFFSET_FILL);
+          continue;
         }
         gl.bindVertexArray(part.vao);
         gl.drawArraysInstanced(gl.TRIANGLES, first, count, n);
@@ -3241,6 +3697,9 @@ void main() {
       gl.uniform4fv(pg.mesh.u.uMatrixPermanentAperture, matrix && matrix.permanentAperture || DEFAULT_MATRIX_APERTURE);
       gl.uniform1f(pg.mesh.u.uMatrixLivingGlobal, matrix ? matrix.livingGlobal ?? 1 : 1);
       pg.mesh.matrixNone = !matrix;
+      const previousReducedCapture = reducedCapture;
+      reducedCapture = cube || qualityName === "medium";
+      try {
       drawParts("mesh", "mesh", true);
       if (skyOn) drawSky(mirrorInvViewProj, mirrorEye.y);
       drawGlass(false);
@@ -3260,7 +3719,10 @@ void main() {
       gl.disable(gl.CULL_FACE);
       drawParts("line", "line", true);
       gl.enable(gl.CULL_FACE);
-      reflectorPass = null;
+      } finally {
+        reducedCapture = previousReducedCapture;
+        reflectorPass = null;
+      }
       if (target !== mirror) {
         target.viewProj.set(mirrorViewProj);
         target.valid = true;
@@ -3282,11 +3744,22 @@ void main() {
       mirrorDebug.reflectionPassCount++;
       mirrorDebug.captureExcluded = true;
     };
+    // The world height under which the Matrix reveal has drained the pane, from its foot up, as Canvas 2D clips it.
+    const mirrorRevealFloor = () => {
+      const w = mirror.node.world, bounds = boundsOf(mirror.geometry), min = bounds.min, max = bounds.max;
+      const low = w[13] + Math.min(w[1] * min[0], w[1] * max[0]) + Math.min(w[5] * min[1], w[5] * max[1]) + Math.min(w[9] * min[2], w[9] * max[2]);
+      const high = w[13] + Math.max(w[1] * min[0], w[1] * max[0]) + Math.max(w[5] * min[1], w[5] * max[1]) + Math.max(w[9] * min[2], w[9] * max[2]);
+      return low + (high - low) * mirror.reveal;
+    };
+    // Whether the reflective pane draws this frame; when it cannot (low tier, or no capture yet), the camera pass
+    // draws the mirror's authored face instead, as uncaptured reflectors keep theirs.
+    const mirrorPaneReady = () => qualityName !== "low" && !mirror.portal && mirror.frontFacing && !!(mirror.record && mirror.record.mesh)
+      && !!mirror.tex && mirror.programReady && mirror.captureValid;
     const drawMirrorSurface = (camera) => {
       const rec = mirror.record, part = rec && rec.mesh, pg = mirror.program;
       mirrorDebug.ripples = 0;
       mirrorDebug.bodyContacts = mirrorDebug.bodyWaves = 0;
-      const pane = !mirror.portal && mirror.frontFacing && part && mirror.tex && mirror.programReady && mirror.captureValid;
+      const pane = mirrorPaneReady();
       if (!mirror.node) return;
       if (pane) {
         gl.useProgram(pg.prog);
@@ -3378,7 +3851,7 @@ void main() {
     // Each reflector facing the eye draws its own last capture, through the matrix it was captured with, and its
     // ripples in its crest tint.
     const drawReflectors = (camera) => {
-      if (!reflectorNodes.length || !mirror.programReady) return;
+      if (qualityName === "low" || !reflectorNodes.length || !mirror.programReady) return;
       const pg = mirror.program;
       gl.useProgram(pg.prog);
       gl.uniform1f(pg.u.uClipMaxY, cutawayMaxY);
@@ -3528,11 +4001,16 @@ void main() {
     // explicitly every frame, so snapshot callers never inherit a live rig.
     const render = (root, camera, opts = {}, meshRigs = opts.meshRigs === true) => {
       if (lost || !pollPrograms()) return false;
+      collectNear = camera.near;
       // The scene's ancestor flags (matrix modes, camera/cutaway hides) were settled by the scene's update.
       memoFrame++;
       rigMode = !!meshRigs && !!rigPrograms && !rigFailure;
       if (rigMode && !pollRigPrograms()) { if (rigFailure) rigMode = false; else return false; }
       programs = rigMode ? rigPrograms : res.programs;
+      // A previous surface may have been released since the last frame. Keep the active canvas sampler complete.
+      gl.activeTexture(gl.TEXTURE6);
+      gl.bindTexture(gl.TEXTURE_2D, res.matrixTexture);
+      gl.activeTexture(gl.TEXTURE0);
       collectForRender = rigMode ? collectRig : collect;
       cullForRender = rigMode ? writeRigCullSphere : writeCullSphere;
       uploadForRender = rigMode ? uploadRigInstances : uploadInstances;
@@ -3664,7 +4142,7 @@ void main() {
       mirrorDebug.ripples = 0;
       mirrorDebug.bodyContacts = mirrorDebug.bodyWaves = 0;
       mirror.shards = mirrorDebug.shardsDrawn = 0;
-      culled = drawn = suppressed = rippleSurfaces = rippleWaves = 0;
+      culled = drawn = suppressed = smallCulled = rippleSurfaces = rippleWaves = 0;
       shadowFrame++;
       updateWorld(root, null);
       traverseVisible(root, collectForRender);
@@ -3676,6 +4154,7 @@ void main() {
         uploadForRender(rec);
         rec.livingClear = rec.living && livingClear(rec, matrix);
       }
+      flushInstanceStream();
       // A matrix that moved since last frame (a following shadow centre) draws everything as before; a steady one
       // bakes the static casters once, then each frame copies them in and draws only the moving ones.
       let steady = true, baked = shadowStaticValid;
@@ -3730,6 +4209,9 @@ void main() {
         updateMirrorSide(camera);
         if (mirror.portal) {
           skipMirrorPass("portal-open");
+        } else if (qualityName === "low") {
+          // The ordinary material remains visible; low spends no scene pass on the pane.
+          skipMirrorPass("quality-low");
         } else if (prepareMirrorCamera(camera)) {
           // The last pane the camera drew lost every pixel to depth (rock, a cave wall): its capture is unseen, and the
           // pane keeps the one it has until a query finds it showing again.
@@ -3744,7 +4226,7 @@ void main() {
           else if (mirror.captureValid && mirror.frame++ % settings.mirrorCadence && mirror.renderWidth * mirror.renderHeight * 25 < pw * ph) skipMirrorPass("cadence");
           else renderMirrorCapture(clear, sky, ground, direct, directStrength, ambientFloor, diffuseFloor, shadowStrength, shadowFloor, shadowBias, lx, ly, lz, sh, lights, nLights, skyOn, fogColor, fogA, fogB, matrix, spotLight);
         }
-        if (mirror.shards && ensureShardProgram()) {
+        if (mirror.shards && environmentCaptureVisible() && ensureShardProgram()) {
           ensureEnvironment(clear);
           if (environment.valid !== 63 || environment.frame++ % settings.environmentCadence === 0) {
             const face = environment.next;
@@ -3754,22 +4236,28 @@ void main() {
           }
         }
       }
-      if (reflectorNodes.length && ensureMirrorProgram()) {
-        // The reflector covering most of the view captures every frame, and one other in turn.
+      if (qualityName !== "low" && reflectorNodes.length && ensureMirrorProgram()) {
+        // High preserves best plus one every frame. Medium captures only readable panes, on its cadence unless the
+        // best fills a twenty-fifth of the view or more, as the mirror does.
         const n = reflectorNodes.length;
         let best = -1, bestArea = 16;
         for (let i = 0; i < n; i++) {
           const t = reflectorTarget(reflectorNodes[i].geometry);
-          t.area = reflectorArea(reflectorNodes[i], camera);
+          t.area = reflectorArea(reflectorNodes[i], camera, qualityName === "medium" ? t : null);
+          // On-screen CSS dimensions, not the capped texture dimensions or area alone; an unreadable pane drops its
+          // capture and shows its authored face.
+          if (qualityName === "medium" && t.area >= 16 && !paneReadable(t, t.screenWidth, t.screenHeight)) t.area = 0, t.valid = false;
           if (t.area > bestArea) { bestArea = t.area; best = i; }
         }
+        const due = qualityName === "high" || reflectorFrame++ % settings.mirrorCadence === 0;
+        if (!due && best >= 0 && reflectorTargets.get(reflectorNodes[best].geometry).valid && bestArea * 25 < width * height) best = -1;
         // One just come into view with nothing captured yet goes first.
         let turn = -1;
-        for (let i = 0; i < n && turn < 0; i++) {
+        for (let i = 0; due && i < n && turn < 0; i++) {
           const t = reflectorTargets.get(reflectorNodes[i].geometry);
           if (i !== best && t.area >= 16 && !t.valid) turn = i;
         }
-        for (let k = 0; k < n && turn < 0; k++) {
+        for (let k = 0; due && k < n && turn < 0; k++) {
           const i = (reflectorTurn + k) % n;
           if (i !== best && reflectorTargets.get(reflectorNodes[i].geometry).area >= 16) turn = i;
         }
@@ -3801,6 +4289,7 @@ void main() {
             }
           }
           for (const rec of activeRecords) uploadForRender(rec);
+          flushInstanceStream();
         } finally {
           opts.afterView?.();
           updateWorld(viewActor.root, viewActor.root.parent?.world || null);
@@ -3862,7 +4351,7 @@ void main() {
       // Depth first, then the opaque pass shades under EQUAL with depth writes off: the same vertex shader, invariant,
       // so the depths match, and with no write a shader that may discard keeps the early depth test (written, the
       // driver tests late and shades every hidden fragment). Each pixel is shaded once. Rigs keep their own programs.
-      const prepass = settings.prepass && !rigMode && !tileBased;
+      const prepass = depthPrepassEnabled(settings, tileBased, prepassOverride, rigMode);
       if (prepass) {
         const dp = pg.depth;
         gl.useProgram(dp.prog);
@@ -4030,6 +4519,7 @@ void main() {
     };
     // Drop unreferenced buffers; they are rebuilt on demand.
     const releaseUnused = (live) => {
+      BL.models.addLods(live);
       let released = 0;
       if(dsbGPU && !live.has(dsbGPU.state.geometry)){dsbGPU.dispose();dsbGPU=null;}
       if (mirror.geometry && !live.has(mirror.geometry)) destroyMirror();
@@ -4040,12 +4530,14 @@ void main() {
       }
       for (const geometry of records.keys()) {
         if (live.has(geometry)) continue;
+        const before = records.size;
         releaseGeometry(geometry);
-        released++;
+        released += before - records.size;
       }
       return released;
     };
     const releaseGeometry = (geometry) => {
+      if (geometry.foliageLods?.owner === geometry) { releaseGeometry(geometry.foliageLods.medium); releaseGeometry(geometry.foliageLods.far); }
       destroyReflector(geometry);
       if (geometry.meshRig) for (const program of [rigPrograms?.mesh, rigPrograms?.shadow]) {
         // Null forces the next ordinary draw to reset the joint-count uniform.
@@ -4055,6 +4547,7 @@ void main() {
       if (!rec) return;
       deleteRecord(rec);
       records.delete(geometry);
+      if (!records.size) destroyInstanceStream();
     };
     init();
     return {
@@ -4066,6 +4559,9 @@ void main() {
       ray,
       setQuality,
       releaseGeometry,
+      prepareScene,
+      // Owners of bounded, alternating meshes may prepare every variant before their first visible swap.
+      prepareGeometry: (geometry) => { if (lost || !pollPrograms()) return false; recordFor(geometry); return true; },
       createRig: createRendererRig,
       releaseUnused,
       // Read-only, on demand: inspecting resident identities never materializes a GPU record.
@@ -4077,7 +4573,7 @@ void main() {
       get stats() {
         let shadowFinite = true;
         for (let i = 0; i < 16; i++) if (!Number.isFinite(lightViewProj[i])) shadowFinite = false;
-        return { waterTextures: dsbGPU?2:0, records: records.size, active: activeRecords.length, mirrorResources: mirrorDebug.resources, imageTextures, rippleBodyTextures, shadowResources: res.shadow ? 4 : 0, shadowSize: res.shadow ? res.shadow.size : 0, shadowPassCount, shadowFinite, shadowDraws, shadowStatic: shadowStaticValid ? shadowBakedCount : 0, shadowStaticRebuilds, culled, drawn, suppressed, rippleSurfaces, rippleWaves };
+        return { instanceStreamCPUBytes: instanceStream.data ? instanceStream.data.byteLength : 0, instanceStreamGPUBytes: instanceStream.buffer ? instanceStream.capacity * 4 * 6 : 0, waterTextures: dsbGPU?2:0, records: records.size, active: activeRecords.length, mirrorResources: mirrorDebug.resources, imageTextures, rippleBodyTextures, shadowResources: res.shadow ? 4 : 0, shadowSize: res.shadow ? res.shadow.size : 0, shadowPassCount, shadowFinite, shadowDraws, shadowStatic: shadowStaticValid ? shadowBakedCount : 0, shadowStaticRebuilds, culled, drawn, suppressed, smallCulled, rippleSurfaces, rippleWaves };
       },
       get mirror() {
         return mirrorDebug;

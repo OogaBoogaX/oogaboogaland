@@ -546,18 +546,15 @@
   };
   const hashScale = { top: 1 };
 
-  // The type on both boards, set in the jumbotron's 5x7 font on one offscreen canvas for the visit and
-  // merged into quads. Each figure is compared as a rounded number first, so an unchanged board builds
-  // nothing; a rebuilt panel releases the geometry it replaces.
+  // Both boards share a small transparent painter; each stable panel snapshots it to its own canvas.
+  // Figures compare rounded values first, so unchanged boards repaint and upload nothing.
   const { drawText, measureText } = BL.jumbotron.text;
-  const LABEL_PX = 0.011, LABEL_BG = [3, 4, 5], LABEL_BG_CSS = "rgb(3,4,5)";
+  const LABEL_PX = 0.011, LABEL_BG = [3, 4, 5];
   const labelState = { price: -1, change: 0, hi: -1, lo: -1, hash: -1, top: -1, diff: -1, real: -1 };
   const drawLabels = (panelNode, w, h, draw) => {
-    labelCtx.fillStyle = LABEL_BG_CSS;
-    labelCtx.fillRect(0, 0, w, h);
+    labelCtx.clearRect(0, 0, w, h);
     draw();
-    if (panelNode.geometry) renderer.releaseGeometry(panelNode.geometry);
-    panelNode.geometry = BL.poolModels.panelFrom(labelCtx, w, h, LABEL_PX, LABEL_PX, LABEL_BG);
+    panelNode.geometry = BL.poolModels.panelFrom(labelCtx, w, h, LABEL_PX, LABEL_PX, LABEL_BG, panelNode.geometry);
   };
   // Where a height on a chart falls in its panel's canvas rows.
   const rowOf = (C, y) => Math.round((C.labelY + C.labelH * LABEL_PX - y) / LABEL_PX) - 3;
@@ -2097,7 +2094,7 @@
     labelCanvas = document.createElement("canvas");
     labelCanvas.width = 200;
     labelCanvas.height = 100;
-    labelCtx = labelCanvas.getContext("2d", { alpha: false, willReadFrequently: true });
+    labelCtx = labelCanvas.getContext("2d");
     for (const key of Object.keys(labelState)) labelState[key] = -1;
     shownCandles = shownHist = -1;
     labelTimer = 0;

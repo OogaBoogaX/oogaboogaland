@@ -362,7 +362,7 @@
           continue;
         }
         const y = p.y + p.t * 0.45;
-        if (zzzVisible && !zzzVisible(p.cave, p.x, y, p.z)) continue;
+        if (zzzVisible && !zzzVisible(p.cave, p.x, y, p.z, p)) continue;
         const pos = project(p.x, y, p.z);
         if (!pos) continue;
         ctx.globalAlpha = (1 - p.t / 2.4) * 0.8;
