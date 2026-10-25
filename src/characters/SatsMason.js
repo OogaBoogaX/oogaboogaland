@@ -1,7 +1,7 @@
 (() => {
   "use strict";
   const BL = window.BL;
-  const { box, lathe, tube, prism, merge, moved } = BL.models;
+  const { box, lathe, tube, prism, merge, moved, variants } = BL.models;
   const { createNode, addChild } = BL.scene;
   const hurley = (h, gold) => {
     const u = h / 16, wood = gold ? "#c29a42" : "#c19a60", edge = gold ? "#e0bd69" : "#dfbd83";
@@ -12,9 +12,10 @@
     const grip = lathe({ profile: [[0.4 * u, -2.1 * u], [0.42 * u, -1.8 * u], [0.42 * u, 1.4 * u], [0.38 * u, 1.6 * u]], segments: 8, color: "#504b3e" });
     return merge(shaft, bas, grip);
   };
+  const height = 1.3, hurleyGeometry = variants((gold) => hurley(height, gold));
   BL.characters.add({
-    handle: "SatsMason", joined: 1791072000, lastCommit: 1791072000,
-    look: { height: 1.3, bald: true, cleanShaven: true, noBrow: true, noPupils: true,
+    handle: "SatsMason", joined: 1792784900, lastCommit: 1792863005,
+    look: { height, bald: true, cleanShaven: true, noBrow: true, noPupils: true,
       face: "none", skin: "#777667", hair: "#4c5040", fur: "#675039", eyeColor: "#d1b576" },
     voice: { poke: "Mind the hurley.", idle: ["Fair play… for effort.", "Off you go."] },
     dress: {
@@ -29,7 +30,7 @@
         // A few dark joints make the exposed chest read as worked stone.
         for (const [x, y] of [[2, 7], [2, 6], [3, 5], [6, 6], [6, 5]]) v.set(x, y, 4, k.P.skinDk);
       },
-      club: (k) => ({ default: hurley(k.h, false), gold: hurley(k.h, true),
+      club: () => ({ default: hurleyGeometry(0), gold: hurleyGeometry(1),
         rest: { x: 0.95, z: 0 }, carry: { x: 0.95, z: 0 } }),
       extras(k) {
         const u = k.u, leather = "#493827";
