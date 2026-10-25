@@ -2159,6 +2159,8 @@
       prepareScene: () => { },
       prepareGeometry: () => true,
       prepareSteps: function* () { },
+      // Canvas has no resident GPU geometry records.
+      geometryRecords: function* () { },
       createRig: () => null,
       releaseUnused: (live) => { BL.models.addLods(live); canvasShades.release(live); if (environment.source && !live.has(environment.source.geometry)) destroyEnvironment(); return 0; },
       dispose: () => {

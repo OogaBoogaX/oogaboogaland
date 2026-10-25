@@ -16992,6 +16992,9 @@ const gpuGeometryDiagnosticChecks = async () => {
   const room = node(b, false, [node(c)]), held = node(a), sceneRoot = node(a, true, [room, ...Array.from({ length: 10 }, () => node(d))]);
   const glSource = await readFile(join(root, "src/js/gl-renderer.js"), "utf8");
   const hubSource = await readFile(join(root, "src/js/scene-hub.js"), "utf8");
+  const canvasSource = await readFile(join(root, "src/js/canvas-renderer.js"), "utf8");
+  const canvas = new Function(`return { kind: "canvas2d", ${canvasSource.match(/geometryRecords: function\* \(\) \{ \},/)[0]} };`)();
+  const canvasEmpty = [...canvas.geometryRecords()].length === 0 && [...canvas.geometryRecords()].length === 0;
   const records = new Map([a, b, c, d, detached].map(geometry => [geometry, {}]));
   const renderer = new Function("records", `return { kind: "webgl2", ${glSource.match(/geometryRecords: \(\) => records\.keys\(\),/)[0]} };`)(records);
   const retained = new Function("root", "heldHub", `return { ${hubSource.match(/get retainedRoot\(\) \{[^\n]+\}/)[0]} };`)(held, true);
@@ -17011,7 +17014,7 @@ const gpuGeometryDiagnosticChecks = async () => {
   const stable = gpuGeometrySnapshot(renderer, scenes, "dsb", state).find(r => r.id === row(b).id)?.id === row(b).id;
   const empty = gpuGeometryDelta(before, before);
   const safe = !JSON.stringify({ before, after, delta }).includes(privateText) && !JSON.stringify(before).includes("private-room-name");
-  record("GPU record diagnostics: stable weak identities, exact additions/removals, shared/hidden/retained owners and bounded private-free paths without cache reads", shared && hidden && bounded && unknown && exact && stable && safe && released.retainedRoot === null && empty.added.length === 0 && empty.removed.length === 0 && gpuGeometrySnapshot({ kind: "canvas2d" }, {}, null, state).length === 0, JSON.stringify({ shared, hidden, bounded, unknown, exact, stable, safe }));
+  record("GPU record diagnostics: stable weak identities, exact additions/removals, shared/hidden/retained owners and bounded private-free paths without cache reads", shared && hidden && bounded && unknown && exact && stable && safe && canvasEmpty && released.retainedRoot === null && empty.added.length === 0 && empty.removed.length === 0 && gpuGeometrySnapshot({ kind: "canvas2d" }, {}, null, state).length === 0, JSON.stringify({ shared, hidden, bounded, unknown, exact, stable, safe, canvasEmpty }));
 };
 const dsbSoak = async (b, { geometry = false } = {}) => {
   await b.send("HeapProfiler.enable");
@@ -17101,7 +17104,7 @@ scene("dsb", { label: "lifecycle", exclusive: true, url: hubPage(src), steps: [{
 } }] });
 
 scene("factory", { label: "lifecycle", exclusive: true, url: hubPage(src), steps: [{ name: "factory lifecycle", why: "contract: repeated factory visits, each left with a tip's show in the air, release the hall's listeners, nodes and GPU resources while retaining one bounded shared node", run: async (b) => {
-  const { rendered, settled, snapshot, travel, heapDetail, within } = await dsbSoak(b);
+  const { rendered, settled, snapshot, travel, heapDetail, within } = await dsbSoak(b, { geometry: true });
   // Compare the same roster and work sites even when an activity expires during the soak.
   // Only classification uses this instant; scene animation and the Factory feed keep their clocks.
   await b.evaluate(`(() => {
@@ -17173,7 +17176,9 @@ scene("factory", { label: "lifecycle", exclusive: true, url: hubPage(src), steps
   // The hub's entrance and roof windows each own one subscription.
   record("soak: factory cycles: one bounded node survives six round trips, each left mid-show, the hall's subscription released, without retaining scene nodes, targets or DOM", visits.every((v) => v.same && v.hall === 2 && v.away === 0 && v.lighter && v.subscriptions === 2 && v.lines <= v.places && v.inFlight > 0)
     && same("allNodes") && same("targets") && same("dom") && after.stats.tweens === 0, JSON.stringify({ visits, before: before.stats, after: after.stats }));
-  record("soak: factory cycles: GPU records, listeners and retained heap remain bounded", Math.abs(after.stats.gl.records - before.stats.gl.records) <= 3 && before.nodes === after.nodes && before.listeners === after.listeners && within(before, after, 0.1), heapDetail(before, after) + `, GPU ${before.stats.gl.records} -> ${after.stats.gl.records}, DOM ${before.nodes} -> ${after.nodes}, listeners ${before.listeners} -> ${after.listeners}`);
+  const bounded = Math.abs(after.stats.gl.records - before.stats.gl.records) <= 3 && before.nodes === after.nodes && before.listeners === after.listeners && within(before, after, 0.1);
+  record("soak: factory cycles: GPU records, listeners and retained heap remain bounded", bounded, heapDetail(before, after) + `, GPU ${before.stats.gl.records} -> ${after.stats.gl.records}, DOM ${before.nodes} -> ${after.nodes}, listeners ${before.listeners} -> ${after.listeners}`
+    + (bounded ? "" : `, geometry ${JSON.stringify(gpuGeometryDelta(before.geometry, after.geometry))}`));
 } }] });
 
 // Node tier: pure computation over window.BL under a minimal DOM shim, calling the same probe functions.

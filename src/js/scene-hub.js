@@ -419,7 +419,7 @@
   const CLANKER_HIT = { node: null, owner: null, type: "none", distance: Infinity, x: 0, y: 0, z: 0 };
   const CLANKER_CAVITY = { floor: 0, ceiling: 0, caveIndex: 0 };
   const JETPACK_HUD_STATE = { owned: false, equipped: false, fuel: 1, blocked: false };
-  let enteringTween = null, factoryDeparting = false, bifrostDeparting = false, bifrostHeld = false, factoryHeld = false;
+  let enteringTween = null, factoryDeparting = false, bifrostDeparting = false, factoryHeld = false;
   // The walk through the Lightning Factory's shield (factoryGlide): which way, the Ooga it walks, how long it has
   // walked, where the Ooga stood the frame before, whether it is through, and the shield's light over the view.
   // Coming back out, the Ooga walks on until it is OUT_WALK metres out of the mouth.
@@ -10989,7 +10989,7 @@
     ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
     glCanvas = ctx.canvas; overlayCanvas = ctx.overlay;
     heldHub = false;
-    factoryDeparting = bifrostDeparting = bifrostHeld = factoryHeld = entering = false;
+    factoryDeparting = bifrostDeparting = factoryHeld = entering = false;
     Object.assign(factoryWalk, { phase: 0, cave: null, seen: false, through: false, beat: 0, grab: false, still: 0, hold: 0, settle: false });
     world.islandKeep = null;
     if (factoryMouth) factoryMouth.snap = false;
@@ -11132,7 +11132,7 @@
     ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
     poolEffectsActive = false; poolEffectsTime = 0;
     glCanvas = ctx.canvas;
-    factoryDeparting = bifrostDeparting = bifrostHeld = factoryHeld = false;
+    factoryDeparting = bifrostDeparting = factoryHeld = false;
     Object.assign(factoryWalk, { phase: 0, cave: null, seen: false, through: false, beat: 0, grab: false, still: 0, hold: 0, settle: false });
     world.islandKeep = null;
     overlayCanvas = ctx.overlay;
@@ -12287,7 +12287,6 @@
   // the island, driving again, and nothing is photographed for a crossing that did not happen.
   const stay = () => {
     factoryHeld = factoryDeparting;
-    bifrostHeld = bifrostDeparting;
     entering = factoryDeparting = bifrostDeparting = false;
     factoryWalk.phase = 0; factoryWalk.seen = factoryWalk.through = factoryWalk.grab = false; factoryWalk.still = factoryWalk.hold = 0;
     world.factoryCrossing = world.islandKeep = null;
