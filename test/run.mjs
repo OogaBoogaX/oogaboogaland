@@ -6076,6 +6076,100 @@ const wallPerformance = async (b) => {
     record(`wall movement performance: ${covered ? "moving behind cave walls during a donation" : "ordinary movement"} stays responsive at a high-density desktop size`, r.quality === "high" && r.fps >= 55 && r.p95 < 25 && r.max < 50 && r.worst.gap < 50 && r.travel > 1 && (covered ? r.outlined > r.samples * 0.9 && r.donated && r.particles >= 26 : r.outlined === 0), JSON.stringify(r));
   }
 };
+// Suggested extension to test/run.mjs's permitted global tier. This snippet was NOT executed by the helper.
+// Use the real gamepad module; the fixture observes published state/actions, not a duplicate input formula.
+const gamepadHoldProof = async () => {
+  const events = new Map();
+  const buttons = Array.from({ length: 12 }, () => ({ pressed: false, value: 0 }));
+  const hardware = { mapping: "standard", connected: true, axes: [0.6, -0.7, 0.5, -0.4], buttons };
+  let reads = 0, connected = true;
+  const context = { window: { addEventListener: (name, fn) => events.set(name, fn) }, navigator: { getGamepads: () => { reads++; return connected ? [hardware] : []; } } };
+  runInNewContext(await readFile(join(root, "src/js/gamepad.js"), "utf8"), context);
+  const G = context.window.BL.gamepad, S = G.state, B = G.BUTTON;
+  events.get("gamepadconnected")({ gamepad: hardware });
+  const neutral = () => !S.lx && !S.ly && !S.rx && !S.ry && !S.held && !S.pressed && !S.released;
+  buttons[0].pressed = true; buttons[6].value = buttons[7].value = 0.8;
+  G.poll();
+  const initiallyLive = S.connected && S.lx && S.ly && (S.pressed & B.a) && (S.pressed & B.lt) && (S.pressed & B.rt);
+  G.hold(true);
+  const synchronous = neutral();
+  const startReads = reads;
+  // Trigger values between their on/off depths remain physically held while published state is muted.
+  buttons[6].value = buttons[7].value = 0.4;
+  buttons[3].pressed = true;
+  G.poll(); G.poll();
+  const heldNeutral = neutral() && S.connected && reads === startReads + 2;
+  G.hold(false); G.poll();
+  buttons[6].value = buttons[7].value = 0.8; G.poll();
+  const noReplay = !(S.held | S.pressed | S.released) && !!S.lx;
+  // Only physical release followed by a fresh press may rearm A, Y and either trigger.
+  buttons[0].pressed = buttons[3].pressed = false; buttons[6].value = buttons[7].value = 0.2; G.poll();
+  buttons[0].pressed = buttons[3].pressed = true; buttons[6].value = buttons[7].value = 0.8; G.poll();
+  const fresh = (S.pressed & (B.a | B.y | B.lt | B.rt)) === (B.a | B.y | B.lt | B.rt);
+  G.hold(false); // Idempotent: must not block a new live press.
+  const idempotent = (S.pressed & B.a) !== 0;
+  // A button pressed after the last held poll, but before unhold, must also be consumed.
+  buttons[0].pressed = buttons[3].pressed = false; buttons[6].value = buttons[7].value = 0; G.poll();
+  G.hold(true); buttons[1].pressed = true; G.hold(false); G.poll();
+  const betweenFrames = !(S.held & B.b) && !(S.pressed & B.b);
+  buttons[1].pressed = false; G.poll(); buttons[1].pressed = true; G.poll();
+  const afterRelease = (S.pressed & B.b) !== 0;
+  // Disconnect/reconnect during a hold stays neutral, including when the new device has a button held.
+  G.hold(true); connected = false; G.poll();
+  const disconnected = !S.connected && neutral();
+  connected = true; G.poll(); G.hold(false); G.poll();
+  const reconnected = S.connected && !(S.held | S.pressed | S.released);
+  context.window.removeEventListener = () => {};
+  for (const name of ["math", "controls"]) runInNewContext(await readFile(join(root, `src/js/${name}.js`), "utf8"), context);
+  buttons[1].pressed = false; G.poll();
+  let actions = 0;
+  const controls = context.window.BL.controls.create({ onAction: () => { actions++; return true; } });
+  buttons[0].pressed = true; G.poll(); controls.read();
+  controls.dispose();
+  buttons[0].pressed = false; G.poll(); buttons[0].pressed = true; G.poll();
+  controls.resume(); controls.read();
+  const dropped = actions === 1;
+  buttons[0].pressed = false; G.poll(); controls.read(); buttons[0].pressed = true; G.poll(); controls.read();
+  const controlsResume = dropped && actions === 2;
+  controls.dispose();
+  const pilot = await readFile(join(root, "src/js/pilot.js"), "utf8");
+  const reset = new Function("pad", `let padFrame = -1, padFire = true, padAds = true, mouseAds = true, ads = true; ${pilot.match(/const resetPad = [^\n]+/)[0]} resetPad(); return { padFrame, padFire, padAds, mouseAds, ads };`)(S);
+  const pilotReset = reset.padFrame === S.frame && !reset.padFire && !reset.padAds && !reset.mouseAds && !reset.ads;
+  return { initiallyLive: !!initiallyLive, synchronous, heldNeutral, noReplay, fresh, idempotent, betweenFrames, afterRelease, disconnected, reconnected, controlsResume, pilotReset };
+};
+
+
+const hubRetentionProof = async () => {
+  const director = await readFile(join(root, "src/js/director.js"), "utf8"), hub = await readFile(join(root, "src/js/scene-hub.js"), "utf8");
+  const start = director.indexOf("    // Preserve only"), end = director.indexOf("renderer.releaseUnused(retained);", start);
+  if (start < 0 || end < 0) throw Error("Destination ownership release block missing");
+  const release = new Function("KEEP_HUB", "leaving", "next", "models", "liveGeometry", "DEBUG", "renderer", director.slice(start, end + "renderer.releaseUnused(retained);".length));
+  let cases = 0, failures = 0;
+  for (const keep of [false, true]) for (const destination of ["factory", "hub", "lab"]) {
+    const context = { window: {} };
+    for (const name of ["math", "scene", "models"]) runInNewContext(await readFile(join(root, `src/js/${name}.js`), "utf8"), context);
+    const M = context.window.BL.models, make = () => ({ verts: [0, 0, 0], faces: [] });
+    const hubBuilder = M.cached(make), factoryBuilder = M.cached(make);
+    M.setScope("hub"); const island = hubBuilder();
+    M.setScope("factory"); const hall = factoryBuilder();
+    const leaving = { id: destination === "factory" ? "hub" : "factory" }, next = { id: destination, ...(destination === "hub" ? { keeps: ["factory"] } : {}) };
+    M.setScope(next.id);
+    const live = new Set(destination === "hub" || keep ? [island] : []);
+    release(keep, leaving, next, M, () => live, true, { releaseUnused: retained => { if (retained !== live) failures++; } });
+    if ((hubBuilder() === island) !== (leaving.id !== "hub" || keep)) failures++;
+    if ((factoryBuilder() === hall) !== (destination !== "lab")) failures++;
+    cases++;
+  }
+  const islandStart = hub.indexOf("  const islandMeshes ="), islandEnd = hub.indexOf("  const liveGeometry =", islandStart);
+  const own = {}, borrowed = {}, alternate = {}, graph = { geometry: own, children: [{ geometry: borrowed, children: [] }] };
+  for (const keep of [false, true]) {
+    let calls = 0;
+    const kept = new Function("reuseHub", "root", "world", "islandGeometry", `${hub.slice(islandStart, islandEnd)} return islandMeshes();`)(keep, graph, { factoryKeep: new Set([borrowed]) }, set => { calls++; set.add(alternate); });
+    if (keep ? !kept.has(own) || !kept.has(alternate) || kept.has(borrowed) || calls !== 1 : kept !== null || calls !== 0) failures++;
+    cases++;
+  }
+  return { cases, failures };
+};
 const adaptiveQualityChecks = async () => {
   const r = autoQualityProbe();
   record("memory policy: devices below 8 GiB release the hub, 8 GiB retains it, unknown memory retains it with a fine pointer and releases it with a coarse one, and the explicit policy overrides either", r.hubMemory, JSON.stringify(r));
@@ -11479,15 +11573,49 @@ const factoryEntrance = { name: "factory entrance", why: "regression: flying abo
   const above = await b.evaluate(`(() => { const B = window.__ooga, a = B.cavemen.get("portlandhodl"), m = B.mouths.find((m) => m.id === "c2"), along = window.BL.factoryModels.SHIELD_Z - 0.1; if (B.crew.player !== a) B.pilot.possess(a); B.pilot.navigate({ position: { x: m.x + Math.sin(m.ry) * along, y: m.floorY + 20, z: m.z + Math.cos(m.ry) * along }, yaw: m.ry, pitch: 0.2, dist: 5 }); B.advance(1 / 60, 1 / 60); return { scene: B.scene, transitioning: B.transitioning, height: a.root.position.y - a.baseY - m.floorY }; })()`);
   record("factory entrance: flying above the shield stays on the island", above.scene === "hub" && !above.transitioning && above.height > 3, JSON.stringify(above));
   await b.evaluate(`(() => { const B = window.__ooga, a = B.cavemen.get("portlandhodl"), slot = window.BL.caves.slots.find((s) => s.scene === "factory"), m = B.mouths.find((m) => m.id === slot.id), along = window.BL.factoryModels.SHIELD_Z + 0.6; if (B.crew.player !== a) B.pilot.possess(a); B.pilot.navigate({ position: { x: m.x + Math.sin(m.ry) * along, y: m.floorY, z: m.z + Math.cos(m.ry) * along }, yaw: m.ry, pitch: 0.2, dist: 5 }); B.advance(0.5, 1 / 60); B.crew.configureWeapon(a, 2, 23); B.crew.removeMagazines(a); B.crew.collectGroundMagazine(7, a); B.crew.collectGroundMagazine(11, a); window.__mouth = { x: m.x, z: m.z, ry: m.ry }; })()`);
-  const inKey = await b.evaluate(`(() => { const m = window.__mouth; return [-Math.sin(m.ry), -Math.cos(m.ry)]; })()`);
-  await walkToward(b, inKey[0], inKey[1], 0.8);
-  // The hall's construction slices run as real tasks while the fade holds black, as tourGo allows for.
-  const arrived = await b.evaluate(`(async () => { const B = window.__ooga, t0 = performance.now(); while ((B.transitioning || B.scene !== "factory") && performance.now() - t0 < 20000) { B.advance(1 / 30, 1 / 30); await new Promise(r => setTimeout(r, 0)); } B.advance(0.3, 1 / 30); const a = B.crew.player; return { scene: B.scene, ooga: a ? a.traits.name : null, rifle: !!a && a.weapon.equipped && a.weapon.selectedSlot === 2, ammo: a && a.weapon.ammo, spares: a && a.weapon.spareAmmo.join(",") }; })()`);
+  // In through the shield on a held key, a frame at a time. Yield only while a transition's deferred code or sliced
+  // construction needs real tasks, as tourGo does; once arrived the walk is stepped without yielding. The hall comes on under the island's last frame with
+  // it a step past its own shield and the view in the exit tunnel, walking on. A key pressed during that walk, once the
+  // walk is done, carries the Ooga no further until it is let go; a step back from where an arrival stands then stays
+  // in the hall.
+  const keys = `const toward = (dx, dz) => { const c = B.camera, fx = c.target.x - c.position.x, fz = c.target.z - c.position.z, l = Math.hypot(fx, fz), f = [fx / l, fz / l], r = [-f[1], f[0]]; const score = { w: f[0] * dx + f[1] * dz, s: -(f[0] * dx + f[1] * dz), d: -(r[0] * dx + r[1] * dz), a: r[0] * dx + r[1] * dz }; return Object.entries(score).sort((p, q) => q[1] - p[1])[0][0]; }; const key = (k, down) => window.dispatchEvent(new KeyboardEvent(down ? "keydown" : "keyup", { key: k, code: "Key" + k.toUpperCase(), bubbles: true })); const shot = () => { const W = B.factory.walk, p = B.crew.player.root.position; return { phase: W.phase, still: +W.still.toFixed(2), z: +p.z.toFixed(2), camZ: +B.camera.position.z.toFixed(2) }; }; const crossing = async (id, sample) => { const end = performance.now() + 20000; let frames = 0; while (frames < 300 && performance.now() < end) { B.advance(1 / 60, 1 / 60); if (B.scene === id && !B.transitioning) return sample(); if (B.transitioning) await new Promise(r => setTimeout(r, 0)); else frames++; } return null; };`;
+  const glideIn = await b.evaluate(`(async () => { const B = window.__ooga, m = window.__mouth; ${keys}
+    const k = toward(-Math.sin(m.ry), -Math.cos(m.ry)); key(k, true);
+    const first = await crossing("factory", shot);
+    key(k, false); if (!first) return { first };
+    const on2 = toward(0, -1); key(on2, true); let on = null;
+    for (let i = 0; i < 240 && !on; i++) { B.advance(1 / 60, 1 / 60); if (!B.factory.walk.phase) on = shot(); }
+    if (on) { B.advance(0.3, 1 / 60); on.held = +B.crew.player.root.position.z.toFixed(2); }
+    key(on2, false); B.advance(0.8, 1 / 60);
+    return { first, on };
+  })()`);
+  const first = glideIn.first, on = glideIn.on;
+  const arrived = await b.evaluate(`(async () => { const B = window.__ooga, end = performance.now() + 20000; while ((B.transitioning || B.scene !== "factory") && performance.now() < end) { B.advance(1 / 30, 1 / 30); await new Promise(r => setTimeout(r, 0)); } B.advance(0.3, 1 / 30); const a = B.crew.player, out = { scene: B.scene, ooga: a ? a.traits.name : null, rifle: !!a && a.weapon.equipped && a.weapon.selectedSlot === 2, ammo: a && a.weapon.ammo, spares: a && a.weapon.spareAmmo.join(","), z0: +a.root.position.z.toFixed(2) }; const key = (down) => window.dispatchEvent(new KeyboardEvent(down ? "keydown" : "keyup", { key: "s", code: "KeyS", bubbles: true })); key(true); B.advance(0.08, 1 / 60); key(false); B.advance(0.5, 1 / 60); out.back = { scene: B.scene, transitioning: B.transitioning, phase: B.factory.walk.phase, z: +a.root.position.z.toFixed(2) }; return out; })()`);
+  const F = await b.evaluate(`(() => { const F = window.BL.factoryModels; return { gate: F.HALL.front - 0.6, front: F.HALL.front, arrival: F.LAYOUT.entrance.z + 1, shield: F.SHIELD_Z }; })()`);
+  record("factory entrance: walking in, the Ooga walks itself through the shield, with no fade, the island's last frame dissolving off the hall's first: it comes on a step past the hall's own shield with the view behind it in the exit tunnel and walks on to where an arrival stands, a key pressed on the way carries it no further until let go, and a step back from there stays in the hall",
+    !!first && first.phase === 1 && first.still >= 0.9 && first.z <= F.gate && first.z >= F.gate - 0.8 && first.camZ > F.front - 1.2
+      && !!on && Math.abs(on.z - F.arrival) < 0.4 && Math.abs(on.held - on.z) < 0.05
+      && arrived.back.scene === "factory" && !arrived.back.transitioning && arrived.back.phase === 0 && arrived.back.z > arrived.z0 + 0.2, JSON.stringify({ first, on, back: arrived.back, z0: arrived.z0, F }));
   const outside = await b.evaluate(`(() => { const B = window.__ooga, e = window.BL.factoryModels.LAYOUT.entrance, rows = []; for (const [name, x, y] of [["beside", 10, e.y], ["below", 0, 0], ["above", 0, e.y + 12]]) { if (B.scene !== "factory" || B.transitioning) break; B.pilot.navigate({ position: { x, y, z: 29 }, yaw: Math.PI, pitch: 0.2, dist: 5 }); B.advance(1 / 60, 1 / 60); rows.push({ name, scene: B.scene, transitioning: B.transitioning }); } return rows; })()`);
   record("factory entrance: positions beside, below and above the exit doorway stay in the factory", outside.length === 3 && outside.every((r) => r.scene === "factory" && !r.transitioning), JSON.stringify(outside));
   await b.evaluate(`(() => { const B = window.__ooga, a = B.crew.player, e = window.BL.factoryModels.LAYOUT.entrance; B.pilot.navigate({ position: { x: 0, y: e.y, z: e.z + 2.2 }, yaw: 0, pitch: 0.2, dist: 5 }); B.crew.configureWeapon(a, 1, 17); if (B.pilot.aiming) B.pilot.modeAction("mode-toggle"); B.advance(0.5, 1 / 60); })()`);
-  await walkToward(b, 0, 1, 0.8);
-  const back = await b.evaluate(`(() => { const B = window.__ooga, m = window.__mouth; for (let i = 0; i < 240 && (B.transitioning || B.scene !== "hub"); i++) B.advance(1 / 30, 1 / 30); B.advance(0.3, 1 / 30); const p = B.crew.player && B.crew.player.root.position; return { scene: B.scene, ooga: B.crew.player ? B.crew.player.traits.name : null, fromMouth: p ? +Math.hypot(p.x - m.x, p.z - m.z).toFixed(1) : null, melee: !!p && B.crew.player.weapon.primaryEquipped && !B.crew.player.weapon.equipped && B.crew.player.weapon.selectedSlot === 1, ammo: p && B.crew.player.weapon.ammo, spares: p && B.crew.player.weapon.spareAmmo.join(","), carry: !B.pilot.aiming && document.getElementById("weapon-reticle").hidden }; })()`);
+  // Out through the gate's shield the same way, yielding for transition tasks only: the island has the Ooga at the
+  // mouth's rim under the hall's last frame, the view behind it in the tunnel, and walks it on out of the mouth; a key
+  // pressed on the way that now means back in carries it no further until it is let go.
+  const glideOut = await b.evaluate(`(async () => { const B = window.__ooga, m = window.__mouth, sr = Math.sin(m.ry), cr = Math.cos(m.ry), along = (q) => +((q.x - m.x) * sr + (q.z - m.z) * cr).toFixed(2); ${keys}
+    const k = toward(0, 1); key(k, true);
+    const rim = await crossing("hub", () => ({ ooga: along(B.crew.player.root.position), view: along(B.camera.position) }));
+    key(k, false); if (!rim) return { rim };
+    const back = toward(-sr, -cr); key(back, true); let last = along(B.crew.player.root.position);
+    for (let i = 0; i < 240; i++) { B.advance(1 / 60, 1 / 60); const now = along(B.crew.player.root.position); if (i > 10 && Math.abs(now - last) < 1e-4) break; last = now; }
+    const after = along(B.crew.player.root.position); B.advance(0.3, 1 / 60); const held = along(B.crew.player.root.position);
+    key(back, false); B.advance(0.5, 1 / 60);
+    return { rim, walkedOut: { after, held } };
+  })()`);
+  const rim = glideOut.rim, walkedOut = glideOut.walkedOut || {};
+  const back = await b.evaluate(`(async () => { const B = window.__ooga, m = window.__mouth, end = performance.now() + 20000; while ((B.transitioning || B.scene !== "hub") && performance.now() < end) { B.advance(1 / 30, 1 / 30); await new Promise(r => setTimeout(r, 0)); } B.advance(0.3, 1 / 30); const p = B.crew.player && B.crew.player.root.position; return { scene: B.scene, ooga: B.crew.player ? B.crew.player.traits.name : null, fromMouth: p ? +Math.hypot(p.x - m.x, p.z - m.z).toFixed(1) : null, melee: !!p && B.crew.player.weapon.primaryEquipped && !B.crew.player.weapon.equipped && B.crew.player.weapon.selectedSlot === 1, ammo: p && B.crew.player.weapon.ammo, spares: p && B.crew.player.weapon.spareAmmo.join(","), carry: !B.pilot.aiming && document.getElementById("weapon-reticle").hidden }; })()`);
+  record("factory entrance: walking out, the walk takes the Ooga into the hall's shield and the island has it at the mouth's rim under the hall's last frame, the view behind it in the tunnel, walking on out of the mouth, and a key pressed on the way back toward the tunnel carries it no further until let go",
+    !!rim && rim.ooga > -0.6 && rim.ooga < 1.2 && rim.view < rim.ooga - 2 && rim.view > F.shield && walkedOut.after > rim.ooga + 0.8 && Math.abs(walkedOut.held - walkedOut.after) < 0.05, JSON.stringify({ rim, walkedOut }));
   record("factory doorway: the selected rifle, rounds and spare magazines survive entry; a switch to melee and carry inside survives the return", arrived.rifle && arrived.ammo === 23 && arrived.spares === "7,11" && back.melee && back.ammo === 17 && back.spares === "7,11" && back.carry, JSON.stringify({ arrived, back }));
   await tourGo(b, "factory");
   await b.key("Escape");
@@ -12112,7 +12240,7 @@ const hubEntryHold = { name: "hub entry hold", why: "regression: a released hub 
         }
       } finally { it.return(); }
     };
-    S.restore = () => { S.released = true; H.enterSteps = steps; BL.hud.create = createHud; BL.pilot.create = createPilot; BL.totemFeed.subscribe = subscribe; };
+    S.restore = () => { S.released = true; S.restorePad?.(); H.enterSteps = steps; BL.hud.create = createHud; BL.pilot.create = createPilot; BL.totemFeed.subscribe = subscribe; };
     __ooga.go("hub");
   })()`);
   let held, pressed, resumed;
@@ -12125,7 +12253,17 @@ const hubEntryHold = { name: "hub entry hold", why: "regression: a released hub 
     await b.send("Runtime.releaseObjectGroup", { objectGroup: "entry-hold-listeners" });
     held = await b.evaluate(`(() => {
       const S = __entryHold, map = document.getElementById("destination-hud"), mode = document.getElementById("mode-hud"), canvas = document.getElementById("scene");
+      const originalPads = Object.getOwnPropertyDescriptor(navigator, "getGamepads");
+      S.pad = { mapping: "standard", connected: true, axes: [0.7, -0.6, 0.4, -0.5], buttons: Array.from({ length: 12 }, () => ({ pressed: false, value: 0 })) };
+      for (const i of [0, 3, 8]) S.pad.buttons[i].pressed = true;
+      S.pad.buttons[7].value = 0.8; S.padReads = 0;
+      Object.defineProperty(navigator, "getGamepads", { configurable: true, value: () => { S.padReads++; return [S.pad]; } });
+      const padEvent = type => { const event = new Event(type); Object.defineProperty(event, "gamepad", { value: S.pad }); window.dispatchEvent(event); };
+      S.restorePad = () => { padEvent("gamepaddisconnected"); if (originalPads) Object.defineProperty(navigator, "getGamepads", originalPads); else delete navigator.getGamepads; BL.gamepad.poll(); };
+      padEvent("gamepadconnected");
       S.before = JSON.stringify({ mode: S.pilot.mode, aiming: S.pilot.aiming, preset: document.getElementById("detached-destination-name").textContent });
+      __ooga.advance(3 / 60, 1 / 60);
+      const pad = BL.gamepad.state;
       map.click();
       mode.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 91, pointerType: "mouse", button: 0, buttons: 1 }));
       mode.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 91, pointerType: "mouse", button: 0, buttons: 0 }));
@@ -12136,7 +12274,8 @@ const hubEntryHold = { name: "hub entry hold", why: "regression: a released hub 
       });
       for (const fn of S.callbacks) fn({ type: "change", index: 0, fresh: true, changedAt: Date.now() });
       return { scene: __ooga.scene, transitioning: __ooga.transitioning, captures: S.captures, actions: S.actions, subscriptions: S.callbacks.size,
-        touchLeaks: S.touchLeaks, touchCancelled,
+        touchLeaks: S.touchLeaks, touchCancelled, padConnected: pad.connected, padReads: S.padReads,
+        padNeutral: !(pad.lx || pad.ly || pad.rx || pad.ry || pad.held || pad.pressed || pad.released),
         inert: [...document.querySelectorAll('[data-scene="hub"], #sheet, #equipment-hud, .joysticks, #act')].every(el => el.inert) };
     })()`);
     held.passiveTouch = touch.length === 4 && touch.every(listener => listener.passive);
@@ -12149,20 +12288,23 @@ const hubEntryHold = { name: "hub entry hold", why: "regression: a released hub 
     })()`);
     await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: " ", code: "Space" });
     await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "w", code: "KeyW" });
-    await b.evaluate(`__entryHold.released = true`);
+    await b.evaluate(`__entryHold.pad.axes.fill(0); __entryHold.released = true`);
     await untilPage(b, 'B.scene === "hub" && !B.transitioning', 20000);
     resumed = await b.evaluate(`(() => {
-      const S = __entryHold, map = document.getElementById("destination-hud");
+      const S = __entryHold, map = document.getElementById("destination-hud"), pad = BL.gamepad.state, axes = S.pilot.controls.read();
       map.click();
       for (const fn of S.callbacks) fn({ type: "change", index: 0, fresh: true, changedAt: Date.now() });
       return { scene: __ooga.scene, live: !document.getElementById("equipment-hud").inert, actions: S.actions,
-        subscriptions: S.callbacks.size, flare: __ooga.totems.list[0].flare, toast: document.getElementById("toast").textContent };
+        subscriptions: S.callbacks.size, flare: __ooga.totems.list[0].flare, toast: document.getElementById("toast").textContent,
+        padNoReplay: S.pad.buttons[0].pressed && pad.connected && !(pad.held || pad.pressed || pad.released),
+        padQuiet: axes.x === 0 && axes.y === 0 && axes.up === 0 && axes.yaw === 0 && axes.pitch === 0 };
     })()`);
   } finally { await b.evaluate(`__entryHold.restore()`); }
   record("hub entry hold: the real released visit refuses map/mode, canvas capture, Space/W and early totem callbacks, then restores its HUD and merge celebration when ready",
     held.scene === null && held.transitioning && held.inert && held.captures === 0 && held.actions === 0 && held.subscriptions === 0
       && held.passiveTouch && held.touchLeaks === 0 && held.touchCancelled.every(cancelled => !cancelled) && pressed.quiet && pressed.unchanged
-      && resumed.scene === "hub" && resumed.live && resumed.actions === 1 && resumed.subscriptions === 1 && resumed.flare === 1 && resumed.toast.includes("Bitcoin Core just merged"), JSON.stringify({ held, pressed, resumed }));
+      && resumed.scene === "hub" && resumed.live && resumed.actions === 1 && resumed.subscriptions === 1 && resumed.flare === 1 && resumed.toast.includes("Bitcoin Core just merged")
+      && held.padConnected && held.padReads >= 3 && held.padNeutral && resumed.padNoReplay && resumed.padQuiet, JSON.stringify({ held, pressed, resumed }));
 } };
 scene("hub", { label: "release policy", query: "hubcache=release", steps: [hudVisit, hubEntryHold, hubSlicedReturn, trip("hub")] });
 const hubEntryFailure = async (b, stage) => {
@@ -19302,6 +19444,10 @@ const terrainParityChecks = (BL, island) => {
 };
 const unitChecks = async () => {
   await canvasSurfaceCacheChecks();
+  const heldPad = await gamepadHoldProof();
+  record("gamepad entry hold: real pad polling stays neutral, preserves trigger hysteresis and requires a fresh button after release or reconnect", Object.values(heldPad).every(Boolean), JSON.stringify(heldPad));
+  const retention = await hubRetentionProof();
+  record("scene keeps: Factory builders survive a hub return, ordinary departures release them and only kept hubs hand off island meshes", retention.cases === 8 && retention.failures === 0, JSON.stringify(retention));
   await gpuGeometryDiagnosticChecks();
   const rage = await gorillaRageProof();
   record("gorilla rage: distinct rolling hits, only agitating Oogas targeted, held capture through planning and swing, bounded throws, exact expiry, zero health and account/lifecycle cancellation", Object.values(rage).every(Boolean), JSON.stringify(rage));

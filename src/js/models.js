@@ -452,7 +452,8 @@
     for (const entry of scopedCaches) {
       if (!entry.scenes.has(id) && !(returned && entry.scenes.has("hub"))) continue;
       if (keep.some(k => entry.scenes.has(k))) {
-        if (!returned || !entry.peek || liveCache(entry.peek(), live, arrays) !== 2) continue;
+        // An explicitly kept scene's off-graph variants stay warm too; only hub-only caches use live-mesh pruning.
+        if (!returned || keep.some(k => k !== "hub" && entry.scenes.has(k)) || !entry.peek || liveCache(entry.peek(), live, arrays) !== 2) continue;
       }
       entry.clear();
     }
