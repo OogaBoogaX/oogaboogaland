@@ -1654,7 +1654,7 @@
     ({ renderer, game, world, go, agentPlay } = ctx);
     camera = createCamera({ fov: 55, near: 0.3, far: 150 });
     root = createNode();
-    hud = hudMod.create({ roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
+    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
     hud.setAreaLabel("LF");
     if (window.matchMedia("(max-width: 720px), (max-height: 500px)").matches) hud.el.sheet.dataset.open = "false";
     hooks = {};

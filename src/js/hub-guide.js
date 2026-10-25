@@ -710,14 +710,26 @@
       else { rig.watch.x = camera.position.x; rig.watch.y = camera.position.y; rig.watch.z = camera.position.z; }
       rig.update(dt, elapsed);
     };
-    const dispose = () => {
+    let suspended = false;
+    const suspend = () => {
+      if (suspended) return;
+      suspended = true;
       if (state.ask) { state.ask.abort(); pending(null); }
       window.removeEventListener("keydown", captureKey, true);
       if (state.holding) release();
-      rig.dispose();
+      state.still = false;
+      rig.hush();
+      show("work");
       panel.remove();
     };
-    return { root: rig.root, state, update, escape, tap, dispose, liveGeometry: rig.liveGeometry, lend /* HALLOWEEN */, get holding() { return state.holding; }, get speech() { return rig.speech; } };
+    const resume = () => {
+      if (!suspended) return;
+      suspended = false;
+      document.body.append(panel);
+      window.addEventListener("keydown", captureKey, true);
+    };
+    const dispose = () => { suspend(); rig.dispose(); };
+    return { root: rig.root, state, update, escape, tap, suspend, resume, dispose, liveGeometry: rig.liveGeometry, lend /* HALLOWEEN */, get holding() { return state.holding; }, get speech() { return rig.speech; } };
   };
   BL.hubGuide = { create, NAME, LINES, STOPS, NEWS, freshAfter, legsOf, answer, SUGGESTIONS };
 })();

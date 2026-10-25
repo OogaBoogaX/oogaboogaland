@@ -576,9 +576,49 @@
         appendClipLines(entry, entry.worldMinY); appendClipLines(entry, entry.worldMaxY);
       }
     };
-    const collect = (actor, ex, ey, ez, camera = null, aspect = 1, retainedOwners = null, retainedCount = 0) => {
+    // Blockers and actor visibility stay current every frame. The hub may defer the expensive world-space
+    // contour emission until sight-guides actually needs it at its existing recompute cadence.
+    const contourAnchor = new Float64Array(3);
+    let contoursPending = false, contourActor = null, contourRetained = null, contourRetainedCount = 0;
+    const materializeContours = (actorRoot, ex, ey, ez, retainedOwners, retainedCount) => {
+      let emit = emissionDirty || hasCamera !== emissionHasCamera || actorRoot !== emissionActor
+        || ex !== emissionX || ey !== emissionY || ez !== emissionZ
+        || tanX !== emissionTanX || tanY !== emissionTanY || near !== emissionNear || far !== emissionFar;
+      for (let i = 0; !emit && i < 16; i++) if (emissionView[i] !== cameraView[i]) emit = true;
+      if (!emit) {
+        const kept = retainedOwners ? retainedCount : 0;
+        if (kept !== emissionRetainedCount || candidateCount !== emissionMembers) emit = true;
+        else {
+          for (let n = 0; n < kept && !emit; n++) if (retainedOwners[n] !== emissionRetained[n]) emit = true;
+          for (let n = 0; n < candidateCount && !emit; n++) if (candidates[n] !== emissionMembership[n]) emit = true;
+        }
+      }
+      if (emit) {
+        emitContours();
+        const used = lineUsed; let changed = linesChanged;
+        if (result.count !== used) changed = true;
+        for (let i = used; i < result.count; i++) owners[i] = null;
+        result.count = result.contours = used; if (changed) result.version++;
+        emissionDirty = false;
+        emissionHasCamera = hasCamera; emissionActor = actorRoot;
+        emissionX = ex; emissionY = ey; emissionZ = ez;
+        emissionTanX = tanX; emissionTanY = tanY; emissionNear = near; emissionFar = far;
+        emissionView.set(cameraView);
+        emissionRetainedCount = retainedOwners ? retainedCount : 0; emissionMembers = candidateCount;
+        for (let n = 0; n < emissionRetainedCount; n++) emissionRetained[n] = retainedOwners[n];
+        for (let n = 0; n < candidateCount; n++) emissionMembership[n] = candidates[n];
+      }
+    };
+    const ensureContours = () => {
+      if (!contoursPending) return;
+      const actor = contourActor, retained = contourRetained, count = contourRetainedCount;
+      contoursPending = false; contourActor = contourRetained = null; contourRetainedCount = 0;
+      materializeContours(actor, contourAnchor[0], contourAnchor[1], contourAnchor[2], retained, count);
+    };
+    result.ensureContours = ensureContours;
+    const collect = (actor, ex, ey, ez, camera = null, aspect = 1, retainedOwners = null, retainedCount = 0, deferContours = false) => {
       const actorRoot = actor && actor.root;
-      let changed = false, occlusionChanged = false, structuralChanged = false, perceptionChanged = false, providerChanged = false;
+      let occlusionChanged = false, structuralChanged = false, perceptionChanged = false, providerChanged = false;
       // A character immersed in fruit can perceive beyond that shell; camera rays still hit it and the separate
       // stone platform stays opaque.
       const through = perceptionThrough && actor ? perceptionThrough(actor) : null;
@@ -696,33 +736,11 @@
         if (entry.group.provider || !entry.group.near || !cameraIncludes(entry.x, entry.y, entry.z, entry.radius)) continue;
         candidates[candidateCount++] = entry;
       }
-      let emit = emissionDirty || hasCamera !== emissionHasCamera || actorRoot !== emissionActor
-        || ex !== emissionX || ey !== emissionY || ez !== emissionZ
-        || tanX !== emissionTanX || tanY !== emissionTanY || near !== emissionNear || far !== emissionFar;
-      for (let i = 0; !emit && i < 16; i++) if (emissionView[i] !== cameraView[i]) emit = true;
-      if (!emit) {
-        const kept = retainedOwners ? retainedCount : 0;
-        if (kept !== emissionRetainedCount || candidateCount !== emissionMembers) emit = true;
-        else {
-          for (let n = 0; n < kept && !emit; n++) if (retainedOwners[n] !== emissionRetained[n]) emit = true;
-          for (let n = 0; n < candidateCount && !emit; n++) if (candidates[n] !== emissionMembership[n]) emit = true;
-        }
-      }
-      if (emit) {
-        emitContours();
-        const used = lineUsed; changed = changed || linesChanged;
-        if (result.count !== used) changed = true;
-        for (let i = used; i < result.count; i++) owners[i] = null;
-        result.count = result.contours = used; if (changed) result.version++;
-        emissionDirty = false;
-        emissionHasCamera = hasCamera; emissionActor = actorRoot;
-        emissionX = ex; emissionY = ey; emissionZ = ez;
-        emissionTanX = tanX; emissionTanY = tanY; emissionNear = near; emissionFar = far;
-        emissionView.set(cameraView);
-        emissionRetainedCount = retainedOwners ? retainedCount : 0; emissionMembers = candidateCount;
-        for (let n = 0; n < emissionRetainedCount; n++) emissionRetained[n] = retainedOwners[n];
-        for (let n = 0; n < candidateCount; n++) emissionMembership[n] = candidates[n];
-      }
+      contoursPending = false; contourActor = contourRetained = null; contourRetainedCount = 0;
+      if (deferContours) {
+        contourActor = actorRoot; contourAnchor[0] = ex; contourAnchor[1] = ey; contourAnchor[2] = ez;
+        contourRetained = retainedOwners; contourRetainedCount = retainedCount; contoursPending = true;
+      } else materializeContours(actorRoot, ex, ey, ez, retainedOwners, retainedCount);
       if (occlusionChanged) result.occlusionVersion++;
       if (structuralChanged) result.structuralVersion++;
       if (perceptionChanged) {
@@ -1703,6 +1721,7 @@
       return left !== ownerHit(group, sx, sy, 1);
     };
     const refresh = () => {
+      contoursPending = false; contourActor = contourRetained = null; contourRetainedCount = 0;
       // Registration boundaries size every reused buffer from actual scene contents; the frame path never grows
       // them or discards visible items.
       const live = new Set(), wanted = new Set();
@@ -1740,6 +1759,7 @@
       stats.candidates = stats.occluders = stats.cameraOccluders = stats.nearOwners = 0;
     };
     const dispose = () => {
+      contoursPending = false; contourActor = contourRetained = null; contourRetainedCount = 0;
       for (const users of descriptorUsers.values()) users.clear();
       descriptorUsers.clear();
       registered.length = ownerGroups.length = 0; seen.clear(); entries.clear(); ownerEntries.clear(); aliases.clear(); providerOwners.clear(); geometries.clear(); characterRoots.clear();

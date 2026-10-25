@@ -11,7 +11,9 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const { makeVox, voxelGeometry, cached } = BL.models;
+  const { makeVox, voxelGeometry: buildVoxel, cached, characterGeometry } = BL.models;
+  // Mark both palettes and clipped clothing before any visit chooses a form.
+  const voxelGeometry = (voxels, options) => characterGeometry(buildVoxel(voxels, options));
   const { createNode, addChild, removeChild, updateLocal, boundsOf } = BL.scene;
   const { damp, clamp, mulberry32, fnv1a, mat4, quat } = BL.math;
   const U = 0.086;
@@ -384,7 +386,7 @@
   const labFlaskGeometry = (level = 0.14) => {
     // Smooth circular glass keeps the same physical bounds and neck grip as
     // the original vessel. The rolled rim turns inward into its open neck.
-    return BL.models.glassVessel({
+    return characterGeometry(BL.models.glassVessel({
       liquidProfile: shorterFlask([[0, 0], [0.15, 0], [0.17, 0.042], [0.17, 0.061],
         [0.17 - (level - 0.061) * 0.34, level], [0, level]]),
       glassProfile: shorterFlask([[0.177, 0], [0.19, 0.005], [0.19565, 0.016], [0.19565, 0.042],
@@ -394,7 +396,7 @@
         [0.035, 0.501], [0.037, 0.477], [0.045, 0.451], [0.143, 0.14], [0.17, 0.061],
         [0.175, 0.016], [0.16, 0]]),
       liquid: "#57c6a0", segments: 32
-    });
+    }));
   };
   const labFlaskVariants = BL.models.variants((i) => {
     const geometry = labFlaskGeometry(i ? 0.19 : 0.10);

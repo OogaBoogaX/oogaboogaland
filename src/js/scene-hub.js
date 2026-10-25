@@ -199,6 +199,7 @@
   const RETICLE_PROPS = new Set(["tree", "bush", "flower", "torch", "firepit", "totem", "ladder", "poolsign", "poolpainting", "chainsign", "weathersign", "poolfern", "poollog", "jaguar", "monkey", "toucan", "canopy", "jumbotron", "palm", "timechainentrance", "timechainkeypad", "bifrostgate", "heimdall"]);
   const workCave = (slot) => slot.repo && (slot.status === "open" || slot.status === "mirror");
   const MATRIX_LIVING_PROPS = new Set(["tree"]);
+  const SCREEN_CULL_PROPS = new Set(["tree", "bush", "rock", "crate", "barrel", "flower", "grass", "palm", "poolrock", "poolfern", "poollog", "canopy", "magazine"]);
   const SOLID_PROPS = new Set(["tree", "firepit", "dock", "jumbotron", "totem", "poolbridge", "poolrock", "canopy"]);
   const CLANKER_STEP_PROPS = new Set(["poolrock"]);
   const BUSH_WORDS = ["Something rustles.", "A beetle. Ooga leaves it.", "Just a bush."];
@@ -431,6 +432,7 @@
   const factoryWalk = { phase: 0, cave: null, t: 0, x: 0, z: 0, seen: false, through: false, beat: 0, grab: false, still: 0, hold: 0, settle: false };
   // Tess, the island's guide, for the visit (`hub-guide.js`).
   let islandGuide = null;
+  let reuseHub = false, heldHub = false, heldDebug = null;
   let stateTimer = 0, hintTimer = 0, now = 0, hour = 12, unsubscribeActivity = null, unsubscribeAccount = null, ownOogaClaimed = false;
   // The daylight inputs as last sampled; sampledDay starts at a never-true 0 so the first frame always samples.
   let sampledHour = 0, sampledDay = 0, sampledLatitude = NaN, sampledContinuousDay = 0, sampledUtcMs = 0;
@@ -1502,7 +1504,23 @@
     return ix >= PORTAL_MIN_X && ix <= PORTAL_MAX_X && iy >= PORTAL_MIN_Y && iy <= PORTAL_MAX_Y;
   };
   const SLEEP_SCREEN = { x: 0, y: 0, depth: 0 };
-  let sleepSightFrame = 0;
+  let sleepSightFrame = 0, sleepSightSince = Infinity;
+  const SLEEP_SIGHT_VIEW = new Float64Array(12);
+  let sleepSightMode = null, sleepSightGorilla = false;
+  const advanceSleepSight = (dt) => {
+    sleepSightSince += Math.max(0, dt);
+    const p = camera.position, t = camera.target, view = SLEEP_SIGHT_VIEW;
+    const changed = pilot.mode !== sleepSightMode || !!clankerPlay.active !== sleepSightGorilla
+      || camera.near !== view[6] || camera.fov !== view[7] || renderer.size.width !== view[8] || renderer.size.height !== view[9]
+      || +RENDER_OPTS.birdsEyeCutaway !== view[10] || +matrixCave.portal.inside !== view[11]
+      || Math.hypot(p.x - view[0], p.y - view[1], p.z - view[2]) > 1
+      || Math.hypot(t.x - view[3], t.y - view[4], t.z - view[5]) > 1;
+    if (dt !== 0 && !changed && sleepSightSince < 1 / SIGHT_RECOMPUTE_HZ) return;
+    sleepSightFrame++; sleepSightSince = 0; sleepSightMode = pilot.mode; sleepSightGorilla = !!clankerPlay.active;
+    view[0] = p.x; view[1] = p.y; view[2] = p.z; view[3] = t.x; view[4] = t.y; view[5] = t.z;
+    view[6] = camera.near; view[7] = camera.fov; view[8] = renderer.size.width; view[9] = renderer.size.height;
+    view[10] = +RENDER_OPTS.birdsEyeCutaway; view[11] = +matrixCave.portal.inside;
+  };
   const sleepSightAt = (x, y, z) => {
     if (!matrixOverlayVisible(x, y, z)) return false;
     const screen = renderer.project(x, y, z, SLEEP_SCREEN);
@@ -1534,16 +1552,21 @@
     }
     return false;
   };
-  const sleepMarksVisible = (cave, x, y, z) => {
+  const sleepMarksVisible = (cave, x, y, z, mark = null) => {
     // Nobody's sleep is seen through the Mempool island's rock: not from the tunnels and the chamber inside it,
     // and not a gorilla's in its nest from under the island or beyond its cliffs.
     if (poolShade > 0.5) return false;
     if (mempoolIsland?.billboardOccludes(camera.position.x, camera.position.y, camera.position.z, x, y, z)) return false;
-    if (!cave) return sleepSightAt(x, y, z) && mempoolIsland.sightClear(camera.position.x, camera.position.y, camera.position.z, x, y, z);
+    if (!cave) {
+      if (mark && mark.sightFrame === sleepSightFrame) return mark.sightVisible;
+      const visible = sleepSightAt(x, y, z) && mempoolIsland.sightClear(camera.position.x, camera.position.y, camera.position.z, x, y, z);
+      if (mark) { mark.sightFrame = sleepSightFrame; mark.sightVisible = visible; }
+      return visible;
+    }
     const bed = cave.bedroll;
     if (cave.state !== "sleeping" || cave.bedTravel.mode !== "rest" || !bed || bed.sleeper !== cave) return false;
-    if (bed.sightFrame === sleepSightFrame) return bed.sightVisible;
-    bed.sightFrame = sleepSightFrame;
+    if (bed.sightFrame === sleepSightFrame && bed.sightActor === cave.index) return bed.sightVisible;
+    bed.sightFrame = sleepSightFrame; bed.sightActor = cave.index;
     const head = cave.sleepHead, body = cave.root.position, room = bed.room, window = bed.window;
     bed.sightVisible = sleepSightAt(head.x, head.y, head.z) || sleepSightAt(body.x, body.y, body.z)
       || !bed.outdoor && sleepOpeningVisible(room.entrance.x, room.floor + 1.8, room.entrance.z, bed.cr, -bed.sr, (room.corridorWidth ?? room.width - 1.3) * 0.35, 1.1)
@@ -1584,6 +1607,7 @@
 
   const addProp = (kind, node, x, z, radius) => {
     const owner = { kind: "prop", prop: kind, node, x, z, ripe: 0, pickRadius: radius, active: true };
+    if (SCREEN_CULL_PROPS.has(kind)) node.screenCull = true;
     if (kind === "tree" || kind === "bush" || kind === "flower" || kind === "grass" || kind === "palm") owner.weaponType = "none";
     if (kind === "tree" || kind === "palm") node.npcTreeSupport = true;
     if (kind === "tree" || kind === "palm" || kind === "canopy") node.ragePass = true;
@@ -2393,7 +2417,7 @@
   };
   const buildLawn = () => {
     if (renderer.kind === "canvas2d") return;
-    const node = createNode({ geometry: hubModels.lawnTuft(), instanceData: new Float32Array(LAWN_CAP * 20), instanceCount: 0, instanceVersion: 0, fixedInstanceCapacity: true });
+    const node = createNode({ geometry: hubModels.lawnTuft(), screenCull: true, instanceData: new Float32Array(LAWN_CAP * 20), instanceCount: 0, instanceVersion: 0, fixedInstanceCapacity: true });
     addChild(root, node);
     placed.push(node);
     lawn = { node, version: -1 };
@@ -2907,8 +2931,8 @@
       const canvas = document.createElement("canvas");
       canvas.width = CHAIN_PANEL_W;
       canvas.height = CHAIN_PANEL_H;
-      // willReadFrequently: every refresh reads the panel back, and without it Chrome warns.
-      chainSign = { node: panelNode, ctx2d: canvas.getContext("2d", { alpha: false, willReadFrequently: true }), printed: "", index: 0, switchAt: NaN, nextRefresh: 0 };
+      // Transparent pixels leave the curved slate visible between the retained surface's letters.
+      chainSign = { node: panelNode, ctx2d: canvas.getContext("2d"), printed: "", index: 0, switchAt: NaN, nextRefresh: 0 };
     }
     // Fire: the two torches of the court either side of the mouth, then one down each stretch of the descent on the
     // wall clear of its waterfalls, and four round the chamber between the paintings. The ones under the ground burn
@@ -3514,6 +3538,7 @@
       const quiet = kind === "grass";
       const pickRadius = kind === "tree" ? BL.scene.boundsOf(geometry).radius : footprint + 0.3;
       const node = place(geometry, x, z, ry, y, quiet ? null : kind, pickRadius);
+      if (quiet) node.screenCull = true;
       if (quiet || kind === "flower" || kind === "bush") node.sightHidden = true;
       if (MATRIX_LIVING_PROPS.has(kind)) node.matrixLiving = true;
       const owner = quiet ? { kind: "prop", prop: kind, node, x, z, ripe: 0, pickRadius: 0, active: true } : props[props.length - 1];
@@ -5894,8 +5919,7 @@
     if (printed === chainSign.printed) return;
     chainSign.printed = printed;
     const c2 = chainSign.ctx2d, text = BL.jumbotron.text;
-    c2.fillStyle = `rgb(${CHAIN_PANEL_BG[0]},${CHAIN_PANEL_BG[1]},${CHAIN_PANEL_BG[2]})`;
-    c2.fillRect(0, 0, CHAIN_PANEL_W, CHAIN_PANEL_H);
+    c2.clearRect(0, 0, CHAIN_PANEL_W, CHAIN_PANEL_H);
     if (!index) {
       let y = 4;
       for (const [label, value, color] of rows) {
@@ -5912,8 +5936,7 @@
       if (under) drawMetric(c2, under, CHAIN_PANEL_W / 2, 54, "#9b8f7a", 2);
     }
     const node = chainSign.node;
-    if (node.geometry) renderer.releaseGeometry(node.geometry);
-    node.geometry = poolModels.chainPanel(c2, CHAIN_PANEL_W, CHAIN_PANEL_H, CHAIN_PANEL_BG);
+    node.geometry = poolModels.chainPanel(c2, CHAIN_PANEL_W, CHAIN_PANEL_H, CHAIN_PANEL_BG, node.geometry);
   };
   const updateChainSign = (elapsed) => {
     if (!chainSign) return;
@@ -8185,9 +8208,7 @@
       const lamp = addLamp({ glow: 0, flare: 0, visible: true }, light, spot.x, L.apex * 0.35, spot.z, true, Infinity, `totem:${i}`);
       totems.push({ owner, runes, rings, features, flames, light, lamp, flare: 0, live: 0, pattern: BL.totemGlow.pattern(feed.REPOS[i].word), eyeTop: Math.max(...L.eyes.map((e) => e[1])) });
     });
-    totemUnsub = feed.subscribe((event) => {
-      if (event.fresh) flareTotem(event.index);
-    });
+    totemUnsub = feed.subscribe(onTotem);
   };
   const updateTotems = (dt, elapsed) => {
     const at = Date.now(), repos = BL.totemFeed.state.repos;
@@ -9892,7 +9913,8 @@
     if (!clankerFireClear(entry, x, y, z, x, y, z, heading, heading)) return false;
     const slope = CLANKER_REST_SLOPE, angled = slope.groundRects.angled;
     slope.supportEntry = entry;
-    clankerGroundPlaneAt(x, y, z, heading, slope, slope);
+    try { clankerGroundPlaneAt(x, y, z, heading, slope, slope); }
+    finally { slope.supportEntry = null; }
     if (!angled.walkable || Math.hypot(angled.groundX, angled.groundZ) > 0.2 || angled.uneven > 0.3) return false;
     // Walking uses centre clearance; a settled body must also leave its rear,
     // middle and front clear of props, interactive items and other actors.
@@ -10608,7 +10630,7 @@
   let uiGuideObjects = null, uiGuidesReady = false, preparingGuideActor = null;
   const collectViewObjects = () => {
     const player = controlledGuideActor(), p = player ? player.root.position : camera.target;
-    return objectGuides.collect(player, p.x, p.y, p.z, camera, renderer.size.width / Math.max(1, renderer.size.height), sightGuides.state.retainedOwners, sightGuides.state.retainedCount);
+    return objectGuides.collect(player, p.x, p.y, p.z, camera, renderer.size.width / Math.max(1, renderer.size.height), sightGuides.state.retainedOwners, sightGuides.state.retainedCount, true);
   };
   const characterUiOccluded = (cave) => {
     if (cave.root.cameraHidden) return true;
@@ -10697,7 +10719,8 @@
   const overlay = (dt) => {
     if (poolBlockHovered) showPoolBlockTooltip();
     else if (pileHovered) showPileTooltip();
-    sleepSightFrame++;
+    // World-anchored sleeping marks share the guide visibility cadence; their particles still move every frame.
+    advanceSleepSight(dt);
     if (CAMERA_GLYPHS.radius !== MATRIX_WORLD.radius || CAMERA_GLYPHS.active !== MATRIX_WORLD.active || CAMERA_GLYPHS.permanentCave !== MATRIX_WORLD.permanentCave) {
       CAMERA_GLYPHS.radius = MATRIX_WORLD.radius; CAMERA_GLYPHS.active = MATRIX_WORLD.active; CAMERA_GLYPHS.permanentCave = MATRIX_WORLD.permanentCave;
       CAMERA_GLYPHS.version++;
@@ -10878,7 +10901,172 @@
     }
   };
 
+  const onOogatron = (event) => {
+    if (event.type === "stats") {
+      if (jumbotron) jumbotron.refreshData(event.stats);
+      contributors.applySnapshot(event.stats);
+    }
+  };
+  const onTotem = (event) => { if (event.fresh) flareTotem(event.index); };
+  const suspendHub = () => {
+    // A kept island ends its hunt and its game as a full leave does, and lowers the ring at once.
+    ghostVisit++;
+    if (ghosts) { ghosts.dispose(); ghosts = null; }
+    ghostLoading = false; ghostSeal = null;
+    setGameMode(false);
+    gameRingK = gameRingWait = ringPulseWait = 0; gameRing.visible = false;
+    // The veils' waves and glyph outlines end with the visit as leave ends them; an outline is made again where a body
+    // next touches its veil (`ringBodies`).
+    for (const node of ringPanels) {
+      const ripples = node.mirrorRipples;
+      ripples.waves.fill(0); ripples.active = 0; ripples.time = 0;
+      if (node.mirrorBody) node.mirrorBody.dispose();
+    }
+    for (const node of ringLanterns) node.visible = false;
+    ringLanternsShown = false;
+    actorTransition.sourceRoot = actorTransition.sourceHead = null;
+    if (factoryMouth && factoryMouth.snap) snapFactoryView();
+    if (bifrostIsle && bifrostIsle.snap) snapBifrostView();
+    if (factoryMouth) factoryMouth.snap = false;
+    if (bifrostIsle) bifrostIsle.snap = false;
+    // Heimdall's horn closes its sound as a full leave does; his next blast opens it again.
+    if (bifrostIsle) bifrostIsle.heimdall.dispose();
+    if (enteringTween) enteringTween.alive = false;
+    enteringTween = null;
+    // The director clears every tween after leave without running its `done`. The pile's fruit in the air goes back
+    // to its queue; the island's other tweens (a prop's wobble, a crate opening, a build coming down) finish now, so
+    // nothing is left tilted, busy or half-shrunk for the next visit.
+    pile.suspend();
+    for (let pass = 0; pass < 8 && tweenCount(); pass++) stepTweens(1e3);
+    clearCutawayHidden();
+    selectDebugGorilla(null);
+    window.clearInterval(stateTimer); stateTimer = 0;
+    window.clearTimeout(hintTimer); hintTimer = 0;
+    unsubscribeActivity(); unsubscribeActivity = null;
+    unsubscribeAccount(); unsubscribeAccount = null;
+    unsubscribeMempool(); unsubscribeMempool = null;
+    unsubscribeChain(); unsubscribeChain = null;
+    if (oogatronUnsub) oogatronUnsub(); oogatronUnsub = null;
+    if (totemUnsub) totemUnsub(); totemUnsub = null;
+    if (positionDebug) {
+      positionDebug.removeEventListener("click", copyPositionDebug);
+      positionDebug.hidden = true;
+    }
+    for (let i = 0; i < clankerCaptures.length; i++) finishClankerRider(clankerCaptures[i].entry, false);
+    clankerCaptures.length = 0;
+    timechainIsland.gate.dispose();
+    islandGuide.suspend();
+    chalkboard.suspend();
+    clankerPlay.dispose();
+    remotes.dispose();
+    npcSync.dispose();
+    // The fireworks stop as a full leave stops them (what is in the sky goes, and the sound closes), before the pilot
+    // suspends, so a view held to watch is given back first; the stand stays in the kept graph with the rest.
+    stopFireworks();
+    pilot.suspend();
+    input.suspend();
+    crew.pause();
+    weather.dispose();
+    footsteps.dispose();
+    fx.reset();
+    if (factoryMouth?.hall) factoryMouth.hall.suspend();
+    if (factoryMouth?.roofWindow) factoryMouth.roofWindow.suspend();
+    hud.dispose();
+    BL.net.setBody(null); BL.net.setHub(false); zoneHeld = null;
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
+    CLANKER_REST_SLOPE.supportEntry = RAGE_WARP_MOTION.supportEntry = null;
+    sleepSightSince = Infinity; sleepSightMode = null; sleepSightGorilla = false; sleepSightFrame++;
+    CLANKER_HIT.node = CLANKER_HIT.owner = POOL_BLOCK_HIT.node = POOL_BLOCK_HIT.owner = null;
+    DEBUG_MOVE_HIT.node = DEBUG_MOVE_HIT.owner = DEBUG_GORILLA_HIT.node = DEBUG_GORILLA_HIT.owner = null;
+    viewPoseActor = grabSupportEntry = clankerSupportActor = clankerPassingEntry = preparingGuideActor = null;
+    poolBlockHovered = poolBlockHoverIgnore = null;
+    glCanvas = overlayCanvas = null;
+    heldDebug = hubScene.debug;
+    heldHub = true;
+    // The active graph is empty; the retained graph has a separate, explicit geometry owner.
+    hubScene.root = createNode(); hubScene.input = hubScene.debug = null;
+    return { targets: input.targetCount };
+  };
+  const resumeHub = (ctx) => {
+    ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
+    glCanvas = ctx.canvas; overlayCanvas = ctx.overlay;
+    heldHub = false;
+    factoryDeparting = bifrostDeparting = bifrostHeld = entering = false;
+    Object.assign(factoryWalk, { phase: 0, cave: null, seen: false, through: false, beat: 0, grab: false, still: 0, hold: 0, settle: false });
+    world.islandKeep = null;
+    if (factoryMouth) factoryMouth.snap = false;
+    if (bifrostIsle) bifrostIsle.snap = false;
+    hubScene.root = root; hubScene.camera = camera; hubScene.input = input; hubScene.debug = heldDebug;
+    heldDebug = null;
+    hud.renew(ctx.signal);
+    hud.restoreBoards(jumbotronBoard);
+    hud.setDestinations(["pile", "lab", "mirror", "underground", "basement", "mempool", "factory", "arcade", "bca", "gate", "bifrost", "timechain"]);
+    input.resume(); pilot.resume(); clankerPlay.resume(); chalkboard.resume();
+    islandGuide.resume();
+    if (timechainIsland.gate.resume()) hud.toast(`Room ${timechainIsland.gate.preselected} is chosen at the keypad · walk up to it and press Enter to go in`);
+    if (factoryMouth?.hall) factoryMouth.hall.resume();
+    if (factoryMouth?.roofWindow) factoryMouth.roofWindow.resume();
+    weather = weatherMod.create({ root, renderer, camera, heightAt: mempoolIsland.rainAt, fx, onRain: mempoolIsland.rainHit, centre: mempoolIsland.centre });
+    footsteps = BL.footsteps.create();
+    startFireworks();
+    hubScene.debug.weather = weather;
+    weather.apply(chain.snapshot); mempoolIsland.water.apply(chain.snapshot);
+    mempoolIsland.paintings.refresh(chain.snapshot); refreshChainSign();
+    // As enter does: the distant island rests until the first proximity check below wakes it.
+    poolEffectsActive = false; poolEffectsTime = 0;
+    if (factoryMouth) factoryMouth.roofEffectsActive = false;
+    weather.update(0, null);
+    weather.pause(true);
+    unsubscribeChain = chain.subscribe(onChain);
+    unsubscribeMempool = mempool.subscribe(onMempool);
+    oogatronUnsub = oogatronLive.subscribe(onOogatron);
+    totemUnsub = BL.totemFeed.subscribe(onTotem);
+    BL.net.setHub(true);
+    crew.refreshStates(true);
+    const handsBack = ctx.from === "dsb" || ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" || ctx.from === "lab" || ctx.from === "timechain";
+    const returningCharacter = handsBack ? world.pilot : null;
+    if (handsBack) world.pilot = null;
+    if (returningCharacter) {
+      const cave = crew.cavemen.get(returningCharacter);
+      if (!contributors.debugState && !contributors.debugRoster && crew.stateOf(cave) !== "working") {
+        cave.override = "working"; crew.refreshStates(true);
+      }
+      pilot.possess(cave);
+      if (ctx.from === "factory") crew.selectWeapon(cave.weapon.selectedSlot, cave);
+    }
+    ownOogaClaimed = !!world.pilotDetached || !!(returningCharacter && BL.net.state.me); world.pilotDetached = false;
+    claimOwnOoga();
+    unsubscribeActivity = contributors.subscribe(() => crew.refreshStates());
+    unsubscribeAccount = BL.net.subscribe(onAccountChange);
+    const donate = ctx.place === "donate", routedPlace = donate ? null : ctx.place;
+    const sphereExit = ctx.from === "timechain" ? world.sphereExit : null;
+    world.sphereExit = null;
+    const factoryCrossing = ctx.from === "factory" ? world.factoryCrossing : null;
+    world.factoryCrossing = null;
+    if (returningCharacter && sphereExit && pilot.player) timechainIsland.gate.arrive(sphereExit);
+    else if (returningCharacter && factoryCrossing && pilot.player && factoryMouth) arriveFromFactory(factoryCrossing);
+    else if (returningCharacter) navigate(ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" ? ctx.from : ctx.from === "timechain" ? "timechain" : "pile", false, false);
+    else navigate(routedPlace || (ctx.from === "bifrost" ? "bifrost" : "pile"), false, false);
+    if (donate) hud.openFeed();
+    clankers.sync(); clankerMeshes.sync();
+    for (let i = 0; i < crew.list.length; i++) crew.refreshRosterRow(crew.list[i]);
+    if (lootEnabled) { crew.applyAllSwag(); crew.renderLocker(); }
+    hud.setStats(game.state); pile.syncPile(true);
+    stateTimer = window.setInterval(() => { crew.refreshStates(); fx.trimPool(); }, 6e4);
+    lampSelValid = false; sampledDay = 0;
+    cameraPreviousValid = false; cameraTrailPlayer = caveEntryPlayer = null;
+    cameraTrailCount = cameraTrailNext = 0;
+    pilot.update(0);
+    if (POSITION_DEBUG) {
+      positionDebug.hidden = false;
+      positionDebug.addEventListener("click", copyPositionDebug, { signal: ctx.signal });
+      updatePositionDebug(true);
+    }
+    updatePoolEffectsActivity();
+  };
   const enter = (ctx) => {
+    reuseHub = ctx.hubPolicy === "keep";
+    if (heldHub) { resumeHub(ctx); return; }
     ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
     poolEffectsActive = false; poolEffectsTime = 0;
     glCanvas = ctx.canvas;
@@ -10903,7 +11091,7 @@
     positionDebugNext = 0;
     positionDebugJSON = "";
     positionDebugState = "";
-    if (POSITION_DEBUG) positionDebug.addEventListener("click", copyPositionDebug);
+    if (POSITION_DEBUG) positionDebug.addEventListener("click", copyPositionDebug, { signal: ctx.signal });
     solids = BL.solidProps.create();
     clock = daylight.createClock({ hour: hourParam, daylen: daylenParam, day: dayParam, time: timeParam, now: new Date() });
     phase = null;
@@ -10944,7 +11132,7 @@
       MATRIX_WORLD.caveNear = Math.min(MATRIX_WORLD.caveNear, MATRIX_WORLD.caves[offset + 3] - 4);
     }
     mark("island");
-    hud = hudMod.create({ roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
+    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks, preciseHover: true });
     presets = { pile: PILE_VIEW, gate: GATE_VIEW };
@@ -11067,12 +11255,7 @@
       // times flow through contributors -> crew.refreshStates, which wakes a
       // sleeper into a walk out of the HQ (and the 60s state interval later
       // walks idled Oogas down to bed).
-      oogatronUnsub = oogatronLive.subscribe((event) => {
-        if (event.type === "stats") {
-          if (jumbotron) jumbotron.refreshData(event.stats);
-          contributors.applySnapshot(event.stats);
-        }
-      });
+      oogatronUnsub = oogatronLive.subscribe(onOogatron);
     }
     buildTotems();
     addDressingLights();
@@ -11127,16 +11310,7 @@
     weather = weatherMod.create({ root, renderer, camera, heightAt: mempoolIsland.rainAt, fx, onRain: mempoolIsland.rainHit, centre: mempoolIsland.centre });
     footsteps = BL.footsteps.create();
     FIREWORK_LAUNCH.y = island.surfaceAt(FIREWORK_LAUNCH.x, FIREWORK_LAUNCH.z) + 0.5;
-    fireworksAudio = BL.fireworksAudio.create();
-    fireworks = BL.fireworks.create({
-      quality: () => renderer.kind === "webgl2" ? renderer.quality : "low",
-      launchPoint: FIREWORK_LAUNCH,
-      slots: FIREWORK_SLOTS,
-      // A sound already past (a firework heard late) is dropped, not played at once with the rest.
-      onCue: (kind, at, x, y, z, size, rise, whistle) => { if (at - now > -0.25) fireworksAudio.cue(kind, at - now, x, y, z, size, rise, whistle); }
-    });
-    RENDER_OPTS.sprites = fireworks.batch;
-    RENDER_OPTS.glints = fireworks.glints;
+    startFireworks();
     // The snapshot outlives the visit, so a re-entered hub opens in the weather it left.
     weather.apply(chain.snapshot);
     mempoolIsland.water.apply(chain.snapshot);
@@ -11473,7 +11647,7 @@
     pilot.bind(shared);
     // The doorway draws the island once from inside the passage for the way back out (`renderView`), sets the
     // sphere's heartbeat going while a room readies slowly (`show`), and hands a crossing the island's own meshes to
-    // keep on the GPU while the visit lasts (`keep`).
+    // keep on the GPU while the visit lasts (`keep`). A released island must not stay pinned by a departing visit.
     const keepGeometry = islandMeshes;
     timechainIsland.gate = BL.timechainGate.create({ site: timechainIsland.site, place: timechainIsland.place, pilot, crew, hud, camera, renderer, canvas: glCanvas, world, go, equipJetpack,
       show: timechainIsland.show, renderView: (view) => {
@@ -12035,7 +12209,9 @@
     if (bifrostIsle) bifrostIsle.snap = false;
     pilot.controls.reset(); input.reset(); pilot.setActive(true);
   };
-  const leave = () => {
+  const leave = (destroy = false) => {
+    if (reuseHub && !destroy) return suspendHub();
+    heldHub = false; heldDebug = null;
     actorTransition.sourceRoot = actorTransition.sourceHead = null;
     factoryWalk.cave = null;
     resetRageThrowMap(false);
@@ -12069,13 +12245,13 @@
     if (enteringTween) enteringTween.alive = false;
     enteringTween = null;
     window.clearInterval(stateTimer);
-    unsubscribeActivity();
+    if (unsubscribeActivity) unsubscribeActivity();
     unsubscribeActivity = null;
-    unsubscribeAccount();
+    if (unsubscribeAccount) unsubscribeAccount();
     unsubscribeAccount = null;
-    unsubscribeMempool();
+    if (unsubscribeMempool) unsubscribeMempool();
     unsubscribeMempool = null;
-    unsubscribeChain();
+    if (unsubscribeChain) unsubscribeChain();
     unsubscribeChain = null;
     timechainIsland.gate.dispose();
     hud.closeBoard(true);
@@ -12083,20 +12259,12 @@
     chainSign = null;
     weather.dispose();
     footsteps.dispose();
-    fireworks.dispose();
-    fireworksAudio.dispose();
-    fireworkCountdown.until = fireworkCountdown.shown = 0;
-    fireworkCountdown.texts = null;
-    fireworkWatch.mode = 0;
-    document.body.classList.remove("fireworks-watching");
+    stopFireworks();
     fireworkStand.built = false;
     fireworkStand.stars.length = fireworkStand.tips.length = fireworkStand.bulbs.length = 0;
     fireworkStand.vendor = fireworkStand.menuNode = fireworkStand.launchesNode = null;
     fireworkStand.menuCanvas = fireworkStand.launchesCanvas = fireworkStand.board.canvas = null;
     fireworkStand.menuShown = fireworkStand.launchesShown = fireworkStand.board.shown = null;
-    RENDER_OPTS.sprites = RENDER_OPTS.glints = null;
-    RENDER_OPTS.glintCount = 0;
-    RENDER_OPTS.flash.fill(0);
     mempoolIsland.water.dispose();
     mempoolIsland.paintings.dispose();
     mempoolIsland.wildlife.dispose();
@@ -12227,16 +12395,24 @@
     const count = input.targetCount;
     input.dispose();
     hud.dispose();
+    // Shared query scratch must not keep an actor (and its groundAt closure) alive past this visit.
+    CLANKER_REST_SLOPE.supportEntry = RAGE_WARP_MOTION.supportEntry = null;
+    sleepSightSince = Infinity; sleepSightMode = null; sleepSightGorilla = false; sleepSightFrame++;
+    CLANKER_HIT.node = CLANKER_HIT.owner = null;
+    viewPoseActor = grabSupportEntry = clankerSupportActor = clankerPassingEntry = preparingGuideActor = null;
     // Drop every per-visit ref but the cached island.
     terrainRampRoof = pathNode = altar = lawn = life = hud = hooks = input = pilot = fx = cameraCover = bananaCover = solids = rockGuides = objectGuides = sightGuides = bananaGuides = pileGuides = platformGuides = mirrorGuides = pile = crew = crates = critters = clock = presets = mirrorCave = matrixCave = matrixControl = gateRain = fire = headquarters = positionDebug = dockStairs = overlayCanvas = null;
     beasts.clear();
     magazine = magazineState = weather = footsteps = fireworks = fireworksAudio = mempoolIsland = timechainIsland = clankers = clankerPlay = null;
     hubScene.input = hubScene.debug = null;
+    island = chalkboardDressing = null;
+    guideSegmentClear.boxGrid = POOL_SEAMS[0].boxGrid = POOL_SEAMS[1].boxGrid = null;
     return { targets: count };
   };
   // Every mesh the island draws, for a scene it walks into to keep on the GPU while the visit lasts: only the island's
   // own, so the Factory's kept meshes never ride along from one visit to the next.
   const islandMeshes = () => {
+    if (!reuseHub) return null;
     const kept = new Set(), walk = (node) => { if (node.geometry) kept.add(node.geometry); for (const child of node.children) walk(child); };
     walk(root);
     islandGeometry(kept);
@@ -12263,6 +12439,36 @@
     for (const cave of crew.cavemen.values()) set.add(cave.headOpen).add(cave.headClosed);
     remotes.liveGeometry(set);
     if (timechainIsland && timechainIsland.gate) timechainIsland.gate.liveGeometry(set);
+  };
+  // The fireworks for a visit: the engine (fireworks.js) and its sound, made on enter and on a kept hub's resume, and
+  // stopped on leave and on its suspend, so a show never outlives the visit and the clock never jumps under one.
+  const startFireworks = () => {
+    fireworksAudio = BL.fireworksAudio.create();
+    fireworks = BL.fireworks.create({
+      quality: () => renderer.kind === "webgl2" ? renderer.quality : "low",
+      launchPoint: FIREWORK_LAUNCH,
+      slots: FIREWORK_SLOTS,
+      // A sound already past (a firework heard late) is dropped, not played at once with the rest.
+      onCue: (kind, at, x, y, z, size, rise, whistle) => { if (at - now > -0.25) fireworksAudio.cue(kind, at - now, x, y, z, size, rise, whistle); }
+    });
+    RENDER_OPTS.sprites = fireworks.batch;
+    RENDER_OPTS.glints = fireworks.glints;
+  };
+  const stopFireworks = () => {
+    if (fireworkWatch.mode) {
+      fireworkWatch.mode = 0;
+      pilot.setExternalControl(false);
+      pilot.setActive(true);
+    }
+    document.body.classList.remove("fireworks-watching");
+    if (fireworks) fireworks.dispose();
+    if (fireworksAudio) fireworksAudio.dispose();
+    fireworks = fireworksAudio = null;
+    fireworkCountdown.until = fireworkCountdown.shown = 0;
+    fireworkCountdown.texts = null;
+    RENDER_OPTS.sprites = RENDER_OPTS.glints = null;
+    RENDER_OPTS.glintCount = 0;
+    RENDER_OPTS.flash.fill(0);
   };
   // The stand, built before the scenery is laid so its claims keep trees and scatter off it: the attraction's models
   // (stand-models.js) in its own frame, its two boards' faces, the terminal's glass and the counter's cloth as pictures,
@@ -12545,18 +12751,25 @@
     if (lead < 0.5) hud.toast(`${who} over the Timechain Sphere`);
     return true;
   };
+  const cachedGeometry = (set) => {
+    if (!heldHub) return;
+    const visit = (node) => { if (node.geometry) set.add(node.geometry); for (const child of node.children) visit(child); };
+    visit(root); liveGeometry(set);
+  };
   const stats = () => {
     let nodes = 0;
     traverseVisible(root, () => nodes++);
     const all = (n) => 1 + n.children.reduce((sum, c) => sum + all(c), 0);
-    return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...crates.stats(), ...crew.stats(), ...pile.stats(), ...critters.stats(), ...mempoolIsland.water.stats(), ...weather.stats(), ...remotes.stats(), ...fireworks.stats(), ...fireworksAudio.stats(), ghosts: ghosts ? ghosts.stats().ghosts : 0 /* HALLOWEEN */ };
+    return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...crates.stats(), ...crew.stats(), ...pile.stats(), ...critters.stats(), ...mempoolIsland.water.stats(), ...weather.stats(), ...remotes.stats(), ...(fireworks ? fireworks.stats() : {}), ...(fireworksAudio ? fireworksAudio.stats() : {}), ghosts: ghosts ? ghosts.stats().ghosts : 0 /* HALLOWEEN */ };
   };
   const hubScene = {
     // The island reports its own zone as soon as an Ooga is driven (see `zoneOf`); until then it is nowhere.
     voiceZone: "none",
     micKey: true,
-    id: "hub", enter, update, overlay, onDonation, onFirework, previewDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry,
-    // The Lightning Factory's builders stay warm while the island runs (director.js), since its shield walks straight in.
+    id: "hub", enter, update, overlay, onDonation, onFirework, previewDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry, cachedGeometry,
+    get retained() { return heldHub; }, get elapsed() { return now; },
+    get retainedRoot() { return heldHub ? root : null; },
+    // The Lightning Factory's builders stay warm while the island runs, since its shield walks straight in.
     keeps: ["factory"],
     root: null, camera: null, input: null, debug: null,
     // A show's frames are not evidence that the tier is too expensive: its caps bound it, and a step down lasts.

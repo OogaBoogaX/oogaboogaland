@@ -1091,6 +1091,7 @@ body[data-active-scene="arcade"] .magazine-hud {
 .banana-board-labels span:last-child { text-align: right; }
 
 .banana-leaders { margin: 0; padding: 0; list-style: none; }
+.banana-leaders li[hidden] { display: none; }
 
 .banana-leaders li {
   padding: 6px 2px;

@@ -223,7 +223,7 @@
       g.stage = "load";
       Promise.resolve(BL.deferred.load("timechain")).then(() => {
         if (stamp !== g.prep) return null;
-        g.prepared = BL.timechainInterior.prepare(g.room.id, renderer);
+        g.prepared = BL.models.withScope("timechain", () => BL.timechainInterior.prepare(g.room.id, renderer));
         return g.prepared.ready;
       }).then(() => {
         if (stamp === g.prep) g.stage = "capture";
@@ -234,7 +234,10 @@
     const dropPrepared = () => {
       g.prep++;
       g.stage = null;
-      if (g.prepared) { g.prepared.dispose(); g.prepared = null; }
+      if (g.prepared) {
+        g.prepared.dispose(); g.prepared = null;
+        BL.models.release("timechain", ["hub"]);
+      }
       if (g.picture) { site.picture.geometry = null; renderer.releaseGeometry(g.picture); g.picture = null; }
     };
     // A canvas's frame copied out at no more than 1280 pixels across, ready to hang as a picture: both renderers take
@@ -318,7 +321,7 @@
         else { g.ask = 0; g.cycle = null; g.starting = false; }
       }
     };
-    const unsubscribeDoor = BL.net.subscribeDoor(onDoor);
+    let unsubscribeDoor = BL.net.subscribeDoor(onDoor);
     // Whether this crossing should wait its turn: shared, with a room that knows the doorway.
     const reserving = () => g.mode === "shared" && BL.net.state.doorway;
     const askDoor = (dir) => {
@@ -575,7 +578,8 @@
     const dispose = () => {
       window.removeEventListener("keydown", onKey, true);
       document.removeEventListener("visibilitychange", onVisibility);
-      unsubscribeDoor();
+      if (unsubscribeDoor) unsubscribeDoor();
+      unsubscribeDoor = null;
       // Through the passage the crossing is done; anything short of that gives the doorway back.
       if (g.state === "gone" && g.cycle !== null) BL.net.doneDoor(g.cycle);
       else if (g.cycle !== null || g.ask) BL.net.cancelDoor();
@@ -583,10 +587,23 @@
       dropPrepared();
       if (crew.player) hideHead(crew.player, false);
       g.state = "idle";
+      g.ask = 0; g.cycle = null;
+    };
+    // A kept island's gate takes a room chosen in advance on resuming, as `create` does; true when one was.
+    const resume = () => {
+      const asked = ROOMS.parse(world.sphereKeypad) || 0;
+      world.sphereKeypad = null;
+      if (asked) preselect = asked;
+      if (unsubscribeDoor) return !!asked;
+      unsubscribeDoor = BL.net.subscribeDoor(onDoor);
+      window.addEventListener("keydown", onKey, true);
+      document.addEventListener("visibilitychange", onVisibility);
+      show();
+      return !!asked;
     };
     show();
     return {
-      action, nearKeypad, engage, update, view, arrive, dispose, onKey, liveGeometry, get preselected() { return preselect; },
+      action, nearKeypad, engage, update, view, arrive, resume, dispose, onKey, liveGeometry, get preselected() { return preselect; },
       get busy() { return g.state !== "idle"; },
       get crossing() { return g.state === "opening" || g.state === "crossing" || g.state === "gone" || g.state === "leaving" || g.state === "arriving"; },
       debug: g, choose, commit, disengage, press

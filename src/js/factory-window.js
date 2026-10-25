@@ -96,6 +96,7 @@
   // its roof and across its width with MARGIN into the rock. Made once for the page, so every visit draws the same
   // geometries and one clip slab.
   let clipped = null;
+  const clippedScope = BL.models.track(() => { clipped = null; }, () => clipped);
   const clippedFor = (mouth, roof = null) => {
     if (roof) {
       const w = FM.hubWindow(), half = roof.radius + 0.02;
@@ -105,6 +106,7 @@
       return { hall: clip(w.hall), chamber: clip(w.chamber), fire: clip(w.fire), sat: clip(w.sat), satRed: clip(w.satRed),
         blueDim: clip(w.tank.blueDim), blueLit: clip(w.tank.blueLit), orangeDim: clip(w.tank.orangeDim), orangeLit: clip(w.tank.orangeLit) };
     }
+    clippedScope.use();
     if (clipped && clipped.mouth === mouth) return clipped;
     const w = FM.hubWindow(), sr = Math.sin(mouth.ry), cr = Math.cos(mouth.ry), half = mouth.room.w / 2 + MARGIN;
     const clipSlab = new Float32Array([cr / half, 0, -sr / half, -(cr * mouth.x - sr * mouth.z) / half]);
@@ -221,7 +223,7 @@
           break;
       }
     };
-    const unsubscribe = node.feed.subscribe(onEvent);
+    let unsubscribe = node.feed.subscribe(onEvent);
 
     // The show advances only while nearby and shown, keeping its existing motion when it resumes.
     const step = (dt) => {
@@ -327,8 +329,10 @@
       }
     };
 
+    const suspend = () => { if (unsubscribe) unsubscribe(); unsubscribe = null; };
+    const resume = () => { if (!unsubscribe) unsubscribe = node.feed.subscribe(onEvent); };
     const dispose = () => {
-      unsubscribe();
+      suspend();
       root.visible = false;
       removeChild(group, root);
     };
@@ -342,7 +346,7 @@
       },
       batches: { hall, chamber, fire, blueLit, blueDim, orangeLit, orangeDim, sat: gold, satRed: red }
     };
-    return { root, update, dispose, debug };
+    return { root, update, suspend, resume, dispose, debug };
   };
 
   BL.factoryWindow = { create, relief, grab, still, AXIS, DEPTH, TINT, GLIDE };

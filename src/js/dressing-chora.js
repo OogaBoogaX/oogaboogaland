@@ -1,7 +1,7 @@
 // Static Cycladic extension of the shared dressing kit. Geometry is cached across visits.
 (() => {
   "use strict";
-  const BL=window.BL,M=BL.models,cache=new Map();
+  const BL=window.BL,M=BL.models,cache=BL.models.scopedMap();
   const chora=kind=>{
     if(cache.has(kind))return cache.get(kind);
     if(kind==="crate"||kind==="barrel"){

@@ -4,7 +4,7 @@
 // thousand.
 (() => {
   "use strict";
-  const BL = window.BL, M = BL.models, H = BL.hubModels, cache = new Map();
+  const BL = window.BL, M = BL.models, H = BL.hubModels, cache = BL.models.scopedMap();
   const tones = list => list.map(BL.math.hexToRgb);
   const OLIVE = tones(["#55684b", "#6e8262", "#8b9e7c", "#acbb9b"]);
   const CYPRESS = tones(["#1d3829", "#284a33", "#35603e", "#467649"]);

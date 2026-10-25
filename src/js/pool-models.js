@@ -12,8 +12,8 @@
 // walked on as a thin closed shell so nothing falls through it into the chamber), `crossing` is the plank bridge
 // that carries the ring path over a channel, and `nestBed` is a clearing's banana-leaf beds.
 //
-// `carve` cuts headline type from `hubModels.SIGN_GLYPHS` and `panelFrom` merges a canvas of the jumbotron's 5x7
-// font into bounded quads, which is how the chamber's wall paintings are set. `chainBoard`/`CHAIN_BOARD`
+// `carve` cuts headline type from `hubModels.SIGN_GLYPHS`; `panelFrom` retains a transparent canvas on one
+// stable surface for the jumbotron's 5x7 font, which is how the chamber's wall paintings are set. `chainBoard`/`CHAIN_BOARD`
 // is the curved stats board on the lake's far shore, whose panel follows the same arc, and `infoSign` the
 // weather key beside it. The plants, rocks, animals and bridge are cartoon geometry from the hub's kit (`leafy`,
 // `puff`, `limb`, `flatInto`), one cached build each shared by every copy; the solid ones keep their first block
@@ -664,7 +664,7 @@
   // Drawn as a cartoon rainforest tree: a tall tapered trunk on flared buttress roots, limbs reaching out to a wide
   // umbrella of leafy clumps (one broad crown and four lower satellites, so the layers of the old slabs survive),
   // and lianas hanging from the clumps' undersides as smooth cords.
-  const canopy = (seed, height, spread) => cached(() => {
+  const canopyGeometry = (seed, height, spread, lod = 0, collision = null) => {
     const lean = (mulberry32(seed)() - 0.5) * 0.25, top = height + 0.1, cx = lean * height;
     const rand = mulberry32(seed + 500), geo = { verts: [], faces: [], lines: [], smooth: true, normals: [], foliageVisibility: false };
     limb(geo, 0, -0.1, 0, cx * 0.8, height * 0.8, 0, 0.34, 0.2, 8, TRUNK);
@@ -685,7 +685,7 @@
     const canopyStart = geo.faces.length;
     for (let k = 0; k < crowns.length; k++) {
       const [x, y, z, rx, ry] = crowns[k];
-      leafy(geo, x, y, z, rx, ry, rx, JUNGLE, rand, Math.round(9 + rx * rx * 5), 0.4 + (k % 3) * 0.04);
+      leafy(geo, x, y, z, rx, ry, rx, JUNGLE, rand, Math.round(9 + rx * rx * 5), 0.4 + (k % 3) * 0.04, lod);
     }
     const canopyEnd = geo.faces.length;
     // Uneven leafy curtains soften the umbrella's bare underside, while pockets of epiphytes climb the trunk.
@@ -707,20 +707,24 @@
     // five limbs (from the trunk out to each lower crown), and a perch on top of every crown. `crowns` are the
     // clumps themselves (centre, then radius across and up), which the rain lands on.
     geo.climb = { lean: cx, height, branches, perches: crowns.map(([x, y, z, , ry]) => [x, y + ry * 0.9, z]), crowns };
-    geo.collisionGeometry = merge(canopyShell(seed, height, spread), canopySupport(geo, canopyStart, canopyEnd));
+    geo.collisionGeometry = collision || merge(canopyShell(seed, height, spread), canopySupport(geo, canopyStart, canopyEnd));
     return geo;
+  };
+  const canopy = (seed, height, spread) => cached(() => {
+    const high = canopyGeometry(seed, height, spread);
+    return models.foliageLods(high, canopyGeometry(seed, height, spread, 1, high.collisionGeometry));
   });
   const CANOPY = [canopy(71, 7.5, 3.2), canopy(72, 5.4, 2.6), canopy(73, 9.2, 3.8)];
 
   // Eight fronds arching out and down, each a row of paired leaflets shrinking to a tip.
   const FERN = ["#1e5237", "#347d42", "#66a84a", "#99c856"].map(hexToRgb);
-  const fern = cached(() => {
+  const fernGeometry = (lod = 0) => {
     const rand = mulberry32(88), geo = { verts: [], faces: [], lines: [], normals: [] };
     for (let i = 0; i < 8; i++) {
       const a = i / 8 * Math.PI * 2 + rand() * 0.3, len = 0.6 + rand() * 0.35, ca = Math.cos(a), sa = Math.sin(a), rise = 0.45 + rand() * 0.2;
       const at = (t, out) => { out[0] = ca * len * t; out[1] = 0.05 + Math.sin(t * Math.PI * 0.8) * len * rise; out[2] = sa * len * t; return out; };
       const p = [0, 0, 0], q = [0, 0, 0], light = FERN[2 + (i & 1)], dark = FERN[1 + (i & 1)];
-      for (let j = 0; j <= 6; j++) {
+      for (let j = 0; j <= 6; j += lod ? 2 : 1) {
         const t = (j + 0.6) / 6.6;
         at(Math.min(1, t), p); at(Math.min(1, t + 0.05), q);
         let fx = q[0] - p[0], fy = q[1] - p[1], fz = q[2] - p[2];
@@ -738,13 +742,14 @@
     }
     geo.normals = Float32Array.from(geo.normals);
     return Object.assign(noShadow(geo), { sway: 0.06 });
-  });
+  };
+  const fern = cached(() => models.foliageLods(fernGeometry(), fernGeometry(1)));
   // A jungle shrub: two leafy clumps over a skirt of broad elephant-ear leaves.
   const SHRUB = ["#16442e", "#286a3d", "#49904a", "#81b84d"].map(hexToRgb);
-  const shrub = cached(() => {
+  const shrubGeometry = (lod = 0) => {
     const rand = mulberry32(95), geo = { verts: [], faces: [], lines: [], normals: [] };
-    leafy(geo, 0, 0.4, 0, 0.56, 0.38, 0.56, SHRUB, rand, 18, 0.2);
-    leafy(geo, 0.12, 0.72, -0.08, 0.36, 0.26, 0.36, SHRUB, rand, 10, 0.17);
+    leafy(geo, 0, 0.4, 0, 0.56, 0.38, 0.56, SHRUB, rand, 18, 0.2, lod);
+    leafy(geo, 0.12, 0.72, -0.08, 0.36, 0.26, 0.36, SHRUB, rand, 10, 0.17, lod);
     for (let k = 0; k < 5; k++) {
       const a = k / 5 * Math.PI * 2 + rand() * 0.5, l = Math.hypot(0.8, 0.45);
       const ax = Math.cos(a) * 0.8 / l, ay = 0.45 / l, az = Math.sin(a) * 0.8 / l, n = faceUp(ax, ay, az);
@@ -752,16 +757,18 @@
     }
     geo.normals = Float32Array.from(geo.normals);
     return Object.assign(geo, { sway: 0.03 });
-  });
+  };
+  const shrub = cached(() => models.foliageLods(shrubGeometry(), shrubGeometry(1)));
   // Substantial understory, built at its natural proportions rather than stretching a small round shrub.
   // The broad blades arch in 3D with a folded midrib, notched edges and two painted halves. All three plants
   // share the same bounded footprint, but their leaf heights, fans and accents give the scatter different silhouettes.
   const UNDERLEAF = ["#123d2d", "#1d6040", "#368449", "#67a84d", "#a0c959"].map(hexToRgb);
   const PETIOLE = hexToRgb("#46713c"), VEIN = hexToRgb("#91af58"), CORAL = hexToRgb("#df6448"), CORAL_DK = hexToRgb("#a53639");
-  const broadBlade = (geo, ox, oy, oz, angle, reach, rise, width, arch, light, dark, split = false) => {
-    const ca = Math.cos(angle), sa = Math.sin(angle), rows = [], count = 6;
-    for (let j = 0; j <= count; j++) {
-      const t = j / count, wave = j === count ? 0 : Math.sin(t * Math.PI), edge = width * Math.pow(Math.max(0, wave), 0.68) * (split && (j === 2 || j === 4) ? 0.64 : 1);
+  const broadBlade = (geo, ox, oy, oz, angle, reach, rise, width, arch, light, dark, split = false, lod = 0) => {
+    // Coarse blades retain the root, tip, folded middle and both authored split notches.
+    const ca = Math.cos(angle), sa = Math.sin(angle), rows = [], count = 6, samples = lod ? [0, 2, 3, 4, 6] : [0, 1, 2, 3, 4, 5, 6];
+    for (let rowIndex = 0; rowIndex < samples.length; rowIndex++) {
+      const j = samples[rowIndex], t = j / count, wave = j === count ? 0 : Math.sin(t * Math.PI), edge = width * Math.pow(Math.max(0, wave), 0.68) * (split && (j === 2 || j === 4) ? 0.64 : 1);
       const x = ox + ca * reach * t, y = oy + rise * t + arch * wave, z = oz + sa * reach * t;
       const slope = rise + arch * Math.PI * Math.cos(t * Math.PI), nl = Math.hypot(reach, slope), nx = -ca * slope / nl, ny = reach / nl, nz = -sa * slope / nl;
       const row = [];
@@ -771,32 +778,32 @@
       }
       rows.push(row);
     }
-    for (let j = 0; j < count; j++) for (let side = 0; side < 2; side++) {
-      const ids = j === 0 ? [rows[j][side], rows[j + 1][side + 1], rows[j + 1][side]] : j === count - 1 ?
+    for (let j = 0; j < samples.length - 1; j++) for (let side = 0; side < 2; side++) {
+      const ids = j === 0 ? [rows[j][side], rows[j + 1][side + 1], rows[j + 1][side]] : j === samples.length - 2 ?
         [rows[j][side], rows[j][side + 1], rows[j + 1][side]] : [rows[j][side], rows[j][side + 1], rows[j + 1][side + 1], rows[j + 1][side]];
       const color = side ? light : dark;
       geo.faces.push({ i: ids, color, emissive: 0 }, { i: [ids[0], ...ids.slice(1).reverse()], color, emissive: 0 });
     }
     // A slender pale rib keeps the broad planes readable when the light is low.
-    for (let j = 0; j < count; j++) {
-      const ids = [];
-      for (const [t, side] of [[j / count, -1], [(j + 1) / count, -1], [(j + 1) / count, 1], [j / count, 1]]) {
+    for (let j = 0; j < samples.length - 1; j++) {
+      const ids = [], from = samples[j] / count, to = samples[j + 1] / count;
+      for (const [t, side] of [[from, -1], [to, -1], [to, 1], [from, 1]]) {
         const half = 0.012 * (1 - t), x = ox + ca * reach * t - sa * half * side, z = oz + sa * reach * t + ca * half * side;
         ids.push(pushVert(geo, x, oy + rise * t + arch * Math.sin(t * Math.PI) + 0.006, z));
         geo.normals.push(0, 1, 0);
       }
-      face(geo, j === count - 1 ? [ids[0], ids[3], ids[1]] : [ids[0], ids[3], ids[2], ids[1]], VEIN, { emissive: 0 });
+      face(geo, j === samples.length - 2 ? [ids[0], ids[3], ids[1]] : [ids[0], ids[3], ids[2], ids[1]], VEIN, { emissive: 0 });
     }
   };
-  const undergrowth = (kind) => cached(() => {
+  const undergrowthGeometry = (kind, lod = 0) => {
     const rand = mulberry32(741 + kind * 37), geo = { verts: [], faces: [], lines: [], smooth: true, normals: [] };
     // Offset stems and overlapping lower masses make one clump read as several plants growing together.
     for (const [x, z, h] of [[-0.23, 0.14, 1.95], [0.08, 0, 2.72], [0.28, -0.17, 2.5], [0.08, 0.31, 1.5]]) {
       limb(geo, x * 0.55, -0.08, z * 0.55, x, h, z, 0.055, 0.026, 5, PETIOLE);
     }
     padNormals(geo);
-    leafy(geo, -0.2, 0.75, 0.05, 0.62, 0.55, 0.65, UNDERLEAF, rand, 10, 0.32);
-    leafy(geo, 0.23, 1.65, -0.09, 0.66, 0.63, 0.6, UNDERLEAF, rand, 12, 0.38);
+    leafy(geo, -0.2, 0.75, 0.05, 0.62, 0.55, 0.65, UNDERLEAF, rand, 10, 0.32, lod);
+    leafy(geo, 0.23, 1.65, -0.09, 0.66, 0.63, 0.6, UNDERLEAF, rand, 12, 0.38, lod);
     if (kind !== 1) {
       // Giant elephant ears and tall heliconia both retain generous leaves well above the waterline.
       const count = kind ? 17 : 21;
@@ -806,7 +813,7 @@
         const width = kind ? 0.3 + rand() * 0.12 : 0.42 + rand() * 0.15, band = tier === 2 ? 3 : 2;
         limb(geo, 0.08 * y / 2.72, y - 0.18, 0, ox, y, oz, 0.025, 0.017, 5, PETIOLE);
         padNormals(geo);
-        broadBlade(geo, ox, y, oz, a, reach, rise, width, 0.21 + rand() * 0.15, UNDERLEAF[band], UNDERLEAF[band - 1], !kind);
+        broadBlade(geo, ox, y, oz, a, reach, rise, width, 0.21 + rand() * 0.15, UNDERLEAF[band], UNDERLEAF[band - 1], !kind, lod);
       }
       if (kind === 2) {
         // Two coral flower spires are accents in the greenery, not a carpet of flowers.
@@ -815,7 +822,7 @@
           padNormals(geo);
           for (let j = 0; j < 4; j++) {
             const a = j % 2 ? 0.3 : Math.PI + 0.3;
-            broadBlade(geo, x, y + j * 0.13, z, a, 0.28 - j * 0.035, 0.13, 0.06, 0.045, CORAL, CORAL_DK);
+            broadBlade(geo, x, y + j * 0.13, z, a, 0.28 - j * 0.035, 0.13, 0.06, 0.045, CORAL, CORAL_DK, false, lod);
           }
         }
       }
@@ -826,7 +833,8 @@
         const reach = 0.88 + rand() * 0.18, rise = 0.28 + rand() * 0.35, arch = 0.45 + rand() * 0.2, ox = ca * 0.14, oz = sa * 0.14;
         limb(geo, 0.08 * y / 2.72, y - 0.12, 0, ox, y, oz, 0.025, 0.014, 5, PETIOLE);
         let px = ox, py = y, pz = oz;
-        for (let j = 1; j <= 8; j++) {
+        // Keep every feathered fan and its terminal point; coarse stems join alternate authored stations.
+        for (let j = lod ? 2 : 1; j <= 8; j += lod ? 2 : 1) {
           const t = j / 8, x = ox + ca * reach * t, yy = y + rise * t + arch * Math.sin(t * Math.PI), z = oz + sa * reach * t;
           limb(geo, px, py, pz, x, yy, z, 0.014 * (1 - t * 0.65), 0.012 * (1 - t * 0.7), 4, PETIOLE);
           padNormals(geo);
@@ -840,7 +848,7 @@
       }
       for (let k = 0; k < 7; k++) {
         const a = k * 2.39996;
-        broadBlade(geo, 0, 0.75 + (k % 2) * 0.65, 0, a, 0.96, 0.4, 0.36, 0.2, UNDERLEAF[2], UNDERLEAF[1], true);
+        broadBlade(geo, 0, 0.75 + (k % 2) * 0.65, 0, a, 0.96, 0.4, 0.36, 0.2, UNDERLEAF[2], UNDERLEAF[1], true, lod);
       }
     }
     geo.normals = Float32Array.from(geo.normals);
@@ -850,6 +858,12 @@
       height = Math.max(height, geo.verts[i + 1]);
     }
     return Object.assign(geo, { sway: 0.0045, plantRadius: radius, plantHeight: height });
+  };
+  const undergrowth = (kind) => cached(() => {
+    const high = undergrowthGeometry(kind), coarse = undergrowthGeometry(kind, 1);
+    // Placement and thicket collision retain the original authored plant envelope at every render level.
+    coarse.plantRadius = high.plantRadius; coarse.plantHeight = high.plantHeight;
+    return models.foliageLods(high, coarse);
   });
   const UNDERGROWTH = [undergrowth(0), undergrowth(1), undergrowth(2)];
   // The hub's rounded boulder in its jungle variant, walked against as the old block rock.
@@ -1248,42 +1262,31 @@
     return cursor;
   };
 
-  // A dense wall panel: the jumbotron's 5x7 font rendered into a canvas, then run-length merged into
-  // quads exactly as the big board does, so a wall of numbers is a few hundred faces and no texture.
-  const panelFrom = (ctx, w, h, px, py, background) => {
-    const geo = { verts: [], faces: [], lines: [] };
-    const data = ctx.getImageData(0, 0, w, h).data;
-    const bg = background;
-    const push = (x0, x1, y0, y1, color) => {
-      const base = geo.verts.length / 3;
-      geo.verts.push(x0, y0, 0, x1, y0, 0, x1, y1, 0, x0, y1, 0);
-      geo.faces.push({ i: [base, base + 1, base + 2, base + 3], color, emissive: 0.85 });
-    };
-    for (let y = 0; y < h; y++) {
-      const wy0 = (h - y - 1) * py, wy1 = (h - y) * py, row = y * w;
-      let x = 0;
-      while (x < w) {
-        const i = (row + x) * 4, r = data[i], g = data[i + 1], b = data[i + 2];
-        if (r === bg[0] && g === bg[1] && b === bg[2]) { x++; continue; }
-        let run = x + 1;
-        while (run < w) {
-          const j = (row + run) * 4;
-          if (data[j] !== r || data[j + 1] !== g || data[j + 2] !== b) break;
-          run++;
-        }
-        push(x * px, run * px, wy0, wy1, [r, g, b]);
-        x = run;
-      }
+  // One canvas-backed panel. Callers repaint transparent pixels and pass the existing geometry on a refresh.
+  // Each panel owns its canvas even when two boards use the same scratch painter.
+  const panelFrom = (ctx, w, h, px, py, background, previous = null) => {
+    const geo = previous || { verts: [0, 0, 0, w * px, 0, 0, w * px, h * py, 0, 0, h * py, 0],
+      faces: [{ i: [0, 1, 2, 3], color: [255, 255, 255], emissive: 0.85 }], lines: [], castShadow: false };
+    if (!geo.imageSurface) {
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      geo.imageSurface = { canvas, context: canvas.getContext("2d"), version: 0, rect: [0, 0, w * px, h * py], background, tessellated: false };
     }
-    geo.castShadow = false;
+    const surface = geo.imageSurface;
+    surface.context.clearRect(0, 0, w, h);
+    surface.context.drawImage(ctx.canvas, 0, 0, w, h, 0, 0, w, h);
+    surface.version++;
     return geo;
   };
 
-  // Live numbers sit just proud of the slate and bend with it, including the run-merged glyph faces.
-  const chainPanel = (ctx, w, h, background) => {
-    const B = CHAIN_BOARD;
-    return curveChainBoard(panelFrom(ctx, w, h, B.px, B.px, background),
-      -w * B.px / 2, B.y + (B.h - h * B.px) / 2, B.d / 2 + 0.02);
+  // Live numbers keep the same circular arc and a stable UV mapping back to their unbent canvas.
+  const chainPanel = (ctx, w, h, background, previous = null) => {
+    const B = CHAIN_BOARD, ox = -w * B.px / 2, oy = B.y + (B.h - h * B.px) / 2;
+    if (previous) return panelFrom(ctx, w, h, B.px, B.px, background, previous);
+    const geo = curveChainBoard(panelFrom(ctx, w, h, B.px, B.px, background), ox, oy, B.d / 2 + 0.02);
+    geo.imageSurface.curve = [B.r, ox, oy];
+    geo.imageSurface.tessellated = true;
+    return geo;
   };
 
   // The island as one group: its body, the smooth floors, the bridge, the lake's membrane, the plank crossings,

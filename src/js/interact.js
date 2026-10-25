@@ -336,6 +336,7 @@
       call("onZoom", Math.exp(Math.max(-1200, Math.min(1200, delta)) * 2.5e-3), zoomGesture, p.x, p.y);
     };
     const onContextMenu = (e) => e.preventDefault();
+    let suspended = false;
     canvas.addEventListener("pointerdown", onPointerDown);
     canvas.addEventListener("pointermove", onPointerMove);
     canvas.addEventListener("pointerup", onPointerUp);
@@ -380,7 +381,9 @@
       hovered = null;
       canvas.style.cursor = "grab";
     };
-    const dispose = () => {
+    const suspend = () => {
+      if (suspended) return;
+      suspended = true;
       reset();
       canvas.removeEventListener("pointerdown", onPointerDown);
       canvas.removeEventListener("pointermove", onPointerMove);
@@ -389,11 +392,22 @@
       canvas.removeEventListener("pointerleave", onPointerLeave);
       canvas.removeEventListener("wheel", onWheel);
       canvas.removeEventListener("contextmenu", onContextMenu);
-      targets.length = 0;
     };
+    const resume = () => {
+      if (!suspended) return;
+      suspended = false;
+      canvas.addEventListener("pointerdown", onPointerDown);
+      canvas.addEventListener("pointermove", onPointerMove);
+      canvas.addEventListener("pointerup", onPointerUp);
+      canvas.addEventListener("pointercancel", onPointerCancel);
+      canvas.addEventListener("pointerleave", onPointerLeave);
+      canvas.addEventListener("wheel", onWheel, { passive: false });
+      canvas.addEventListener("contextmenu", onContextMenu);
+    };
+    const dispose = () => { suspend(); targets.length = 0; };
     return {
-      add, remove, pick, aimPoint, weaponTargets, groundPoint, update, reset, dispose, get targetCount() {
-        return targets.length;
+      add, remove, pick, aimPoint, weaponTargets, groundPoint, update, reset, suspend, resume, dispose, get targetCount() {
+        return suspended ? 0 : targets.length;
       },
       // A drag is still held, even if it has paused.
       get orbiting() {

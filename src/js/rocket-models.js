@@ -14,7 +14,7 @@
   const { postSign, limb, padNormals, flatInto, puff: hubPuff } = BL.hubModels;
   const { rocketParts, rocket } = BL;
   const keyed = (build) => {
-    const cache = new Map();
+    const cache = BL.models.scopedMap();
     return (key) => {
       let value = cache.get(key);
       if (!value) cache.set(key, value = build(key));

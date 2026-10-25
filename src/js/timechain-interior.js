@@ -38,7 +38,7 @@
   // The room's hum: a low drone and a soft fan hiss, pitched a little apart in each room, honouring the page-wide
   // mute and the tab's visibility; a context only after a gesture, closed on leaving.
   const STORAGE_KEY = "oogaboogaland.audio";
-  const ambience = (room) => {
+  const ambience = (room, signal) => {
     let context = null, bus = null, sources = [], nodes = [], connected = false, disposed = false, muted = false;
     try { muted = localStorage.getItem(STORAGE_KEY) === "off"; } catch { muted = false; }
     const gate = () => {
@@ -71,9 +71,9 @@
       gate();
     };
     const gesture = () => { wake(); if (context && context.state === "suspended") context.resume().catch(() => {}); };
-    document.addEventListener("pointerdown", gesture);
-    document.addEventListener("keydown", gesture);
-    document.addEventListener("visibilitychange", gate);
+    document.addEventListener("pointerdown", gesture, { signal });
+    document.addEventListener("keydown", gesture, { signal });
+    document.addEventListener("visibilitychange", gate, { signal });
     wake();
     return {
       get stats() { return { contexts: context ? 1 : 0, sources: sources.length, connected }; },
@@ -154,7 +154,7 @@
     const room = ROOMS.get(visit.room), L = ROOMS.layout(room.scale), shared = visit.mode === "shared";
     const camera = createCamera({ fov: 58, near: 0.12, far: L.radius * 3 + 20 });
     const root = createNode();
-    const hud = hudMod.create({ roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
+    const hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
     const hooks = {};
     const input = interactMod.create({ canvas, renderer, camera, hooks });
     // A room the island's doorway prepared for this visit (`prepare`) is taken as it stands: built, painted and already
@@ -420,7 +420,7 @@
     } else { BL.net.setBody(null); BL.net.setZone("none"); }
     remotes = shared ? BL.remotePlayers.create({ root, crew: people, hide: (name, on) => { if (sani && name === "SaniExp") sani.root.visible = !on; } }) : null;
     const footsteps = BL.footsteps.create();
-    const sound = ambience(room);
+    const sound = ambience(room, ctx.signal);
     // Another player crossing this room's own doorway opens its doors here too (net.js `subscribeDoor`).
     const unsubscribeDoor = shared ? BL.net.subscribeDoor((event) => {
       if (event.t !== "transit" || event.door !== room.zone) return;
@@ -431,7 +431,8 @@
     const exitNote = (signedOut) => ({ room: room.id, mode: signedOut ? "solo" : visit.mode, character: avatar ? avatar.traits.name : null, jetpack: visit.jetpack || null });
     // A walked-out exit hands over mid-stride without the fade, with where its eye stood from the handover point
     // (`pose`), so the island starts from the same view; any other way out (signed out, Leave far from the doors)
-    // fades as before.
+    // fades as before. Under the `release` hub policy the island is built again on the way out, so that build happens
+    // behind the fade too rather than freezing the room's last frame.
     const handOff = (signedOut = false, pose = null) => {
       if (leaving) return;
       world.sphereExit = { ...exitNote(signedOut), pose };
@@ -439,7 +440,7 @@
       world.pilotDetached = !avatar;
       BL.net.setBody(null);
       BL.net.setZone("none");
-      leaving = go("hub", "timechain", !!pose);
+      leaving = go("hub", "timechain", !!pose && ctx.hubPolicy === "keep");
       if (!leaving) world.sphereExit = null;
     };
     const exitPose = () => {
@@ -475,8 +476,8 @@
       e.preventDefault();
       e.stopImmediatePropagation();
     };
-    window.addEventListener("keydown", armsKeys, true);
-    canvas.addEventListener("pointerdown", rightClick, true);
+    window.addEventListener("keydown", armsKeys, { capture: true, signal: ctx.signal });
+    canvas.addEventListener("pointerdown", rightClick, { capture: true, signal: ctx.signal });
 
     const tipFor = (hit) => {
       const o = hit.owner;
