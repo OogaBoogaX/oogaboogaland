@@ -4139,6 +4139,18 @@ const characterChecks = async () => {
   for (const geo of worn) mirrorGeometries.add(geo);
   const spare = BL.models.spareMagazine();
   collect(spare.node);
+  for (const name of ["jumbotron", "factory-kiosk", "factory-models", "kortik-models", "tess"])
+    runInNewContext(await readFile(join(root, `src/js/${name}.js`), "utf8"), context);
+  const kortik = BL.kortikModels.rig(), kortikHeads = ["headOpen", "headClosed", "headTalk", "redOpen", "redClosed", "redTalk"];
+  collect(kortik.root);
+  for (const key of kortikHeads) mirrorGeometries.add(kortik[key]);
+  const tess = BL.tess.create({ parent: BL.scene.createNode(), input: { add() {} }, fx: {}, coarse: false }), tessGeometries = new Set();
+  tess.liveGeometry(tessGeometries);
+  for (const geo of tessGeometries) mirrorGeometries.add(geo);
+  const characters = kortikHeads.every(key => kortik[key].characterPart === true)
+    && kortik.parts.katana.geometry.characterPart === true && kortik.parts.sword.geometry.characterPart === true
+    && tessGeometries.size === 37 && [...tessGeometries].every(geo => geo.characterPart === true)
+    && BL.factoryModels.forgeWave().gold.characterPart !== true;
   // Exercise the renderer's real reduced-capture decision on actual builder output, in both storage paths.
   const source = await readFile(join(root, "src/js/gl-renderer.js"), "utf8"), start = source.indexOf("    const captureInstanceVisible ="), end = source.indexOf("    const drawCaptureRuns =", start);
   if (start < 0 || end < 0) throw new Error("Reduced mirror capture predicate not found");
@@ -4161,7 +4173,7 @@ const characterChecks = async () => {
   check(BL.models.box({ w: 0.1, h: 0.1, d: 0.1, color: "#ffffff" }), false);
   const jetpack = worn.every(geo => geo.characterPart === true && BL.scene.boundsOf(geo).radius < 1.25);
   const magazine = spare.node.geometry.characterPart === true;
-  record("mirror character ownership: reduced captures keep both weapon skins, tint and head swaps, swag, gorilla forms/clothing and the worn jetpack and flame, while still culling small scenery and out-of-frustum parts", failures === 0 && small > 0 && jetpack && magazine, JSON.stringify({ geometries: mirrorGeometries.size, small, failures, jetpack, magazine }));
+  record("mirror character ownership: reduced captures keep Ooga, gorilla, Tess and Kortik bodies, detail and head swaps, worn gear and effects, while still culling small scenery and out-of-frustum parts", failures === 0 && small > 0 && jetpack && magazine && characters, JSON.stringify({ geometries: mirrorGeometries.size, small, failures, jetpack, magazine, characters }));
 };
 // The mempool.space feed parser in Node: message shapes as the socket sends them, no socket.
 const mempoolFeedChecks = async () => {
@@ -5032,8 +5044,119 @@ const gameRulesChecks = async () => {
     record("jackpot wheel: a spin pays back 75 to 90% of its cost on average, the jackpot is ten spins' worth, and every wedge stops under the clapper wherever the spin aims in it", V.length === 20 && ev >= cost * 0.75 && ev <= cost * 0.9 && jackpot >= cost * 10 && missed.length === 0, JSON.stringify({ ev, cost, jackpot, missed: missed.slice(0, 4) }));
   }
 };
+// Regression: an idle hub loaded the whole hunt; a lazy entry must also hear a follower before its host has loaded it.
+const ghostEntryChecks = async () => {
+  const paint = { drawImage() {}, translate() {}, scale() {}, fillRect() {}, createRadialGradient: () => ({ addColorStop() {} }) };
+  const context = { window: {}, Image: class {
+    naturalWidth = 142; naturalHeight = 240;
+    decode() { return Promise.resolve(); }
+  }, document: { createElement: () => ({ width: 1, height: 1, getContext: () => paint, toDataURL: () => "data:image/png;base64," }) } };
+  for (const name of ["math", "scene", "models", "ghost-sync", "ghost-entry"])
+    runInNewContext(await readFile(join(root, `src/js/${name}.js`), "utf8"), context);
+  const BL = context.window.BL;
+  BL.ghostHeraldData = { front: "", back: "", side: "" };
+  const fixture = (role = "solo", portable = false) => {
+    const state = { loads: 0, made: 0, starts: 0, heard: [], snapshots: [], notices: [] }, pending = [], targets = new Map();
+    const rootNode = BL.scene.createNode(), npcSync = { role, extra: null };
+    let listener = null, sync = null;
+    const net = { state: { hostId: role === "follow" ? 2 : 1 }, serverNow: () => 1.7e12,
+      subscribeGhost(fn) { listener = fn; return () => { if (listener === fn) listener = null; }; }, sendGhost() {} };
+    BL.net = net;
+    BL.deferred = { load: () => {
+      state.loads++;
+      return portable ? null : new Promise((resolve, reject) => pending.push({ resolve, reject }));
+    } };
+    const entry = BL.ghostEntry.create({ root: rootNode, camera: { position: { x: 0, y: 10, z: 20 }, target: { x: 0, y: 0, z: 0 } },
+      island: { surfaceAt: () => 0 }, npcSync, addTarget: (node, owner) => targets.set(node, owner), removeTarget: node => targets.delete(node),
+      hud: { toast: text => state.notices.push(text) }, fx: { spawnParticle() {} }, attach: () => {
+        state.made++;
+        sync = BL.ghostSync.create({ npcSync, write: () => null, onSnapshot: snap => state.snapshots.push(snap), onMessage: msg => state.heard.push(msg) });
+        return { start: () => state.starts++, receive: sync.receive, restore: snap => state.snapshots.push(snap), debug: { state: "IDLE" } };
+      } });
+    return { entry, state, pending, targets, rootNode, npcSync, net, message: msg => listener && listener(msg),
+      dispose: () => { entry.dispose(); if (sync) sync.dispose(); }, listening: () => !!listener };
+  };
+  const rows = [], active = { k: "gh", v: 1, s: [10] }, latest = { k: "gh", v: 1, s: [1] };
+  {
+    const f = fixture();
+    await Promise.resolve();
+    for (let i = 0; i < 120; i++) f.entry.update(1 / 30);
+    f.entry.hit(true, false); f.entry.hit(false, true);
+    rows.push({ idle: f.state.loads === 0 && f.state.made === 0 && f.targets.size === 1 && !!f.entry.herald.geometry });
+    f.entry.hit(true, true); f.entry.hit(true, true); f.entry.debug.start();
+    const once = f.state.loads === 1 && f.state.made === 0;
+    f.pending[0].resolve(); await Promise.resolve();
+    const handedOff = f.npcSync.extra;
+    f.entry.dispose();
+    rows.push({ once: once && f.state.made === 1 && f.state.starts === 1, handoff: f.targets.size === 0 && f.rootNode.children.length === 0 && f.npcSync.extra === handedOff && f.listening() });
+    f.dispose();
+  }
+  {
+    const f = fixture();
+    f.entry.hit(true, true); f.pending[0].reject(new Error("offline")); await Promise.resolve();
+    const failed = !f.entry.debug.loading && f.state.made === 0 && f.state.notices.some(text => text.includes("retry"));
+    f.targets.get(f.entry.herald).tap();
+    f.pending[1].resolve(); await Promise.resolve();
+    rows.push({ retry: failed && f.state.loads === 2 && f.state.made === 1 && f.state.starts === 1 });
+    f.dispose();
+  }
+  {
+    const f = fixture();
+    f.entry.hit(true, true); f.dispose(); f.pending[0].resolve(); await Promise.resolve();
+    rows.push({ late: f.state.made === 0 && f.targets.size === 0 && f.rootNode.children.length === 0 && !f.listening() && f.npcSync.extra === null });
+  }
+  {
+    const f = fixture("follow");
+    f.npcSync.extra.read({ k: "gh", v: 1, s: [0] });
+    const idle = f.state.loads === 0;
+    f.npcSync.extra.read(active); f.npcSync.extra.read(latest);
+    f.pending[0].resolve(); await Promise.resolve();
+    rows.push({ join: idle && f.state.loads === 1 && f.state.made === 1 && f.state.starts === 0 && f.state.snapshots.length === 1 && f.state.snapshots[0] === latest });
+    f.dispose();
+  }
+  {
+    const f = fixture("host");
+    f.message({ k: "start", from: -1 }); f.message({ k: "ready", from: 3 });
+    const ignored = f.state.loads === 0;
+    f.message({ k: "start", from: 3 }); f.message({ k: "start", from: 3 });
+    f.pending[0].resolve(); await Promise.resolve();
+    rows.push({ host: ignored && f.state.loads === 1 && f.state.made === 1 && f.state.heard.length === 1 && f.state.heard[0].from === 3 && f.state.heard[0].k === "start" });
+    f.dispose();
+  }
+  for (const role of ["host", "follow"]) {
+    const f = fixture(role);
+    if (role === "host") f.message({ k: "start", from: 3 }); else f.npcSync.extra.read(active);
+    f.net.state.hostId = 4; f.npcSync.role = "follow";
+    f.pending[0].resolve(); await Promise.resolve();
+    rows.push({ changedHost: f.state.heard.length === 0 && f.state.snapshots.length === 0 });
+    f.dispose();
+  }
+  {
+    const f = fixture("follow");
+    f.npcSync.extra.read(active); f.net.state.hostId = 1; f.npcSync.role = "host";
+    f.pending[0].resolve(); await Promise.resolve();
+    rows.push({ takeover: f.state.snapshots.length === 1 && f.state.snapshots[0] === active && f.state.starts === 0 });
+    f.dispose();
+  }
+  {
+    const f = fixture("host");
+    f.message({ k: "start", from: 3 }); f.pending[0].reject(new Error("offline")); await Promise.resolve();
+    f.message({ k: "start", from: 4 }); f.pending[1].resolve(); await Promise.resolve();
+    rows.push({ remoteRetry: f.state.loads === 2 && f.state.made === 1 && f.state.heard.length === 1 && f.state.heard[0].from === 4 });
+    f.dispose();
+  }
+  {
+    const f = fixture("solo", true);
+    f.entry.hit(true, true); f.entry.hit(true, true);
+    rows.push({ portable: f.state.loads === 1 && f.state.made === 1 && f.state.starts === 1 && !f.entry.debug.loading });
+    f.dispose();
+  }
+  record("ghost entry lifecycle: idle visits and melee load no hunt, concurrent starts attach once, failures retry, departures cancel, and current-host starts and latest snapshots survive the deferred handoff in hosted and portable builds",
+    rows.every(row => Object.values(row).every(Boolean)), JSON.stringify(rows));
+};
 // HALLOWEEN: the hub's ghost hunt (ghost-sim.js), its rules run in Node with scripted players on a ring of crest spots.
 const ghostHuntChecks = async () => {
+  await ghostEntryChecks();
   const context = { window: {} };
   runInNewContext(await readFile(new URL("../src/js/ghost-sim.js", import.meta.url), "utf8"), context);
   const G = context.window.BL.ghostSim, ST = G.STATE, T0 = 1.7e12, FRAME = 16;
@@ -8190,7 +8313,8 @@ const hubCombatGate = { name: "hub game-only combat", why: "rule: ordinary visit
 } };
 const hubGhostEntry = (melee) => ({ name: `ghost entry ${melee ? "melee" : "shooting"}`, why: "regression: only a HUB rifle shot wakes the herald, and its lobby must release mouse-look until it closes", run: async b => {
   const loaded = await untilPage(b, "BL.scenes.hub.debug.halloween?.herald.geometry", 15000);
-  record("ghost entry: the deferred herald loads", loaded);
+  const lazy = await b.evaluate("BL.scenes.hub.debug.halloween?.loaded === false");
+  record("ghost entry: the deferred herald loads", loaded && lazy, JSON.stringify({ loaded, lazy }));
   if (!loaded) return;
   if (!melee) await b.key("x");
   const entry = await b.evaluate(`(() => {
@@ -10816,8 +10940,8 @@ const factoryGreeter = { name: "factory greeter", why: "rule: the guide notices 
     return { nearFaces: near.faces.length, farFaces: far.faces.length, switched: near !== far, expectedDetail,
       lowCoarse: lowNear === lowFar && (expectedDetail ? lowNear.faces.length < far.faces.length : lowNear === far),
       lightFaces: lowNear.faces.length, retainedFaces: [...set].reduce((sum, mesh) => sum + mesh.faces.length, 0),
-      entry, prepared: set.size === (expectedDetail ? 36 : 12),
-      stable: heldNear === near && farAgain === far && heldFar === far, retained: geometry.every(mesh => set.has(mesh) || mesh === BL.factoryModels.forgeWave().gold), count: set.size };
+      entry, prepared: set.size === (expectedDetail ? 37 : 13),
+      stable: heldNear === near && farAgain === far && heldFar === far, retained: geometry.every(mesh => set.has(mesh)), count: set.size };
   })()`);
   record("factory greeter: close-up detail switches with hysteresis and every animated tier remains in the visit's live geometry set",
     detail.switched === detail.expectedDetail && detail.stable && detail.retained && detail.lowCoarse && detail.prepared
@@ -11995,7 +12119,7 @@ const tessCacheChecks = async BL => {
   const rebuilt = [...after].every(mesh => !before.has(mesh)); d.dispose();
   await Promise.resolve();
   BL.models.setScope(null);
-  record("Tess caches: live rigs share all tiers, a Tess entered as the last one leaves reuses them, and once a change of scene ends with none they are released and the next visit rebuilds every tier", shared && held && reused && rebuilt && before.size === 36 && swapped.size === 36 && after.size === 36 && parent.children.length === 0,
+  record("Tess caches: live rigs share all tiers, a Tess entered as the last one leaves reuses them, and once a change of scene ends with none they are released and the next visit rebuilds every tier", shared && held && reused && rebuilt && before.size === 37 && swapped.size === 37 && after.size === 37 && parent.children.length === 0,
     JSON.stringify({ shared, held, reused, rebuilt, tiers: before.size, children: parent.children.length }));
 };
 
@@ -16612,7 +16736,7 @@ scene("factory", { label: "lifecycle", exclusive: true, url: hubPage(src), steps
     await travel("factory");
     // One listener belongs to the hall and one to Tess; both leave with the scene.
     const hall = await b.evaluate('__factoryLife.subscriptions');
-    const lighter = await b.evaluate(`(() => { const set = new Set(); __ooga.factory.greeter.liveGeometry(set); return __ooga.renderer.quality === "low" && set.size === 12; })()`);
+    const lighter = await b.evaluate(`(() => { const set = new Set(); __ooga.factory.greeter.liveGeometry(set); return __ooga.renderer.quality === "low" && set.size === 13; })()`);
     const inFlight = await tip(`soak-${i}`);
     await travel("lab");
     const away = await b.evaluate('__factoryLife.subscriptions');

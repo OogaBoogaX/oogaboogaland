@@ -6,7 +6,7 @@
   const BL = window.BL = window.BL || {};
   const { models } = BL;
   const { quat, damp, hexToRgb } = BL.math;
-  const { cached, lathe, turn, shaded, torus, forwardLathe, moved, turnedZ, bevelBox, prism } = models;
+  const { cached, characterGeometry, lathe, turn, shaded, torus, forwardLathe, moved, turnedZ, bevelBox, prism } = models;
   const { createNode, addChild, removeChild } = BL.scene;
   // Flink's head was seven voxels wide at 16 voxels per metre of height; Tess is half again as big, so she reads
   // across a hall 46 m wide, and across the island.
@@ -359,12 +359,18 @@
       }
       return shaded(round, marks);
     });
-    return {
+    const meshes = {
       core, lens, iris, pupil, housing, glints, blades: shaded([], blades),
       armor: shaded(caps, capDetails), irisMarks: shaded([], irisMarks), rings
     };
+    for (const part of Object.values(meshes)) {
+      if (Array.isArray(part)) for (const ring of part) characterGeometry(ring);
+      else characterGeometry(part);
+    }
+    return meshes;
   };
   const MESHES = cached(() => buildMeshes(false)), FINE_MESHES = cached(() => buildMeshes(true)), LIGHT_MESHES = cached(() => buildMeshes(false, true));
+  const ACCENT = cached(() => characterGeometry({ ...BL.factoryModels.forgeWave().gold }));
   // Her beam, a glowing ribbon a metre long down +z and a metre across, that a visit stretches from her eye to where
   // it lands and rolls about its length to face the camera: a white-hot middle in gold, amber at its edges, every band
   // emissive so the bloom haloes it in its own colour. Both faces, so it shows on Canvas 2D too. The glint where it
@@ -403,7 +409,7 @@
   const releaseIdle = () => {
     releasing = false;
     if (instances) return;
-    MESHES.clear(); FINE_MESHES.clear(); LIGHT_MESHES.clear();
+    MESHES.clear(); FINE_MESHES.clear(); LIGHT_MESHES.clear(); ACCENT.clear();
     BEAM.clear(); GLINT.clear(); SPARKS.clear(); MOTE.clear();
   };
   const create = ({ parent, input, fx, camera, kind, coarse, quality = () => "high" }) => {
@@ -422,7 +428,7 @@
     addChild(body, hover); addChild(hover, head);
     addChild(head, createNode({ geometry: meshes.lens }), createNode({ geometry: meshes.housing }), optics,
       createNode({ geometry: meshes.armor }), createNode({ geometry: meshes.irisMarks }),
-      createNode({ geometry: BL.factoryModels.forgeWave().gold, scale: { x: 0.045, y: 0.045, z: 0.045 }, position: { x: 0, y: 0, z: 0.108 } }));
+      createNode({ geometry: ACCENT(), scale: { x: 0.045, y: 0.045, z: 0.045 }, position: { x: 0, y: 0, z: 0.108 } }));
     addChild(optics, iris, pupil, blades, createNode({ geometry: meshes.glints }));
     for (let i = 0; i < RINGS.length; i++) {
       const spec = RINGS[i], pivot = createNode({ quaternion: quat.fromEuler(quat.create(), spec.x, spec.y, 0) });
@@ -625,6 +631,7 @@
         }
       },
       liveGeometry(set) {
+        set.add(ACCENT());
         for (const tier of detailTiers) {
           for (const key of detailKeys) set.add(tier[key]);
           for (const ring of tier.rings) set.add(ring);

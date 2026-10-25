@@ -4,7 +4,7 @@
 (() => {
   "use strict";
   const BL = window.BL, M = BL.models, FM = BL.factoryModels, Q = BL.math.quat;
-  const { box, bevelBox, merge, cached, makeVox, voxelGeometry, lathe, turn, shaded, tube, torus, forwardLathe, moved, turnedX, turnedY, turnedZ } = M;
+  const { box, bevelBox, merge, cached, makeVox, voxelGeometry, characterGeometry, lathe, turn, shaded, tube, torus, forwardLathe, moved, turnedX, turnedY, turnedZ } = M;
   const { prism, along, lanternParts, chain, noShadow, particleGeometry, geometry, pushVert, face } = M;
   const { createNode, addChild } = BL.scene;
 
@@ -31,7 +31,7 @@
   // Kimono cloth: folds running down it and a little wear.
   const cloth = (x, y, z) => (x % 4 === 1 ? C.robeDk : hv(x, y, z) === 0 ? C.robeLt : C.robe);
   const pleat = (x, y, z) => (x % 2 ? C.robeDk : hv(x, y, z) === 0 ? C.robe : C.shadow);
-  const vg = (v, ox, oy, oz, palette = PALETTE) => voxelGeometry(v, { unit: U, palette, origin: { x: ox * U, y: oy * U, z: oz * U } });
+  const vg = (v, ox, oy, oz, palette = PALETTE) => characterGeometry(voxelGeometry(v, { unit: U, palette, origin: { x: ox * U, y: oy * U, z: oz * U } }));
 
   // The head, fourteen cells across, its base on the neck and its face toward +z: a messy black crop with a topknot,
   // heavy brows slanting to a scowl over narrowed eyes, a broad nose, a drooping moustache over a down-turned mouth, a
@@ -172,11 +172,11 @@
   const BLADE_SCALE = 1.35;
   const grown = (g) => { for (let i = 0; i < g.verts.length; i++) g.verts[i] *= BLADE_SCALE; return g; };
   const bowAt = (y) => BOW * Math.sin(Math.PI * (y - SHEATH[0]) / (SHEATH[1] - SHEATH[0]));
-  const scabbard = cached(() => grown(shaded([
+  const scabbard = cached(() => characterGeometry(grown(shaded([
     tube({ path: (t) => { const y = SHEATH[0] + (SHEATH[1] - SHEATH[0]) * t; return { x: bowAt(y), y, z: 0 }; }, radius: () => 0.034, rings: 10, segments: 10, colorFn: () => SCABBARD }),
     turn([[0, -0.685], [0.036, -0.675], [0.038, -0.62], [0, -0.62]], 12, GOLD),
     turn([[0.038, -0.045], [0.041, -0.022], [0.038, 0]], 12, GOLD_DK)
-  ])));
+  ]))));
   // The blade: a lens of steel along the bow from the collar to the point, its spine to -x and its edge to +x, the
   // ridge line between them, the temper line pale toward the edge, and the point curving in to the spine. Flat
   // faces, lit a little, so a glint can catch it.
@@ -210,7 +210,7 @@
     ];
     const flat = [blade()];
     for (const y of [0.06, 0.11, 0.16, 0.21, 0.255]) for (const z of [-1, 1]) flat.push(moved(turnedZ(box({ w: 0.028, h: 0.028, d: 0.008, color: HILT_DK }), Math.PI / 4), 0, y, z * 0.025));
-    return grown(shaded(round, flat));
+    return characterGeometry(grown(shaded(round, flat)));
   });
   // Where the katana hangs from his hip, its turn at rest and turned ready to draw (its grip across his belly, where
   // his right hand reaches it), where each hand holds the grip from the guard, the point's reach from the right, and
