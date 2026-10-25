@@ -997,7 +997,6 @@
     const centerTarget = (hit) => {
       const owner = hit.owner, node = hit.node;
       if (!owner || !node) return;
-      if (node.mirrorDamage?.aimCenter && node.mirrorDamage.aimCenter(hit, hit.x, hit.y, hit.z)) return;
       if (owner.kind === "caveman") {
         const target = owner.cave, p = target.root.position;
         hit.x = p.x; hit.y = p.y - target.baseY + target.bodyHeight * 0.5; hit.z = p.z;

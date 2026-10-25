@@ -149,8 +149,7 @@
       out.type = target.owner.weaponType || (target.owner.cave ? target.owner.cave.hostile ? "enemy" : "friendly" : "object");
     };
     const onMirror = (node, bounds, x, y) => x >= bounds.min[0] - EPS && x <= bounds.max[0] + EPS
-      && y >= bounds.min[1] + (bounds.max[1] - bounds.min[1]) * (node.mirrorReveal || 0) - EPS && y <= bounds.max[1] + EPS
-      && (!node.mirrorDamage || node.mirrorDamage.contains(x, y));
+      && y >= bounds.min[1] + (bounds.max[1] - bounds.min[1]) * (node.mirrorReveal || 0) - EPS && y <= bounds.max[1] + EPS;
     const ray = (out, ox, oy, oz, dx, dy, dz, maxDistance, ignore = null, accept = null, includeNonWeapon = false) => {
       begin(out);
       const length = Math.hypot(dx, dy, dz);
@@ -249,29 +248,6 @@
         if (!eligible(target, ignore) || accept && !accept(target.owner, target.node)) continue;
         const entry = sync(target.node);
         if (!entry) continue;
-        // A damaged mirror remains one aimable surface even when the forward
-        // slice crosses a hole. Resolve that slice against the original pane,
-        // then let mirror damage choose the closest surviving panel.
-        if (target.node.mirror && target.node.mirrorDamage?.aimCenter) {
-          const m = entry.inverse, source = geometryOf(target.node.mirrorCaptureGeometry || target.node.geometry).bounds;
-          mat4.transformPoint(point, m, ox, oy, oz);
-          const ux = m[0] * dx + m[8] * dz, uz = m[2] * dx + m[10] * dz;
-          const t = Math.abs(uz) > 1e-12 ? (source.min[2] - point[2]) / uz : -1;
-          const lx = point[0] + ux * t, ly = point[1];
-          if (t > EPS && lx >= source.min[0] - EPS && lx <= source.max[0] + EPS
-            && ly >= source.min[1] - EPS && ly <= source.max[1] + EPS) {
-            const x = ox + dx * t, z = oz + dz * t;
-            if (target.node.mirrorDamage.aimCenter(verticalHit, x, oy, z)) {
-              const rx = verticalHit.x - ox, ry = verticalHit.y - oy, rz = verticalHit.z - oz;
-              const distance = Math.hypot(rx, ry, rz), forward = rx * dx + rz * dz;
-              if (forward > EPS && distance <= maxDistance && distance < out.distance
-                && (!clear || clear(ox, oy, oz, verticalHit.x, verticalHit.y, verticalHit.z, target.node, true))) {
-                hit(out, target, distance, verticalHit.x, verticalHit.y, verticalHit.z);
-              }
-            }
-          }
-          continue;
-        }
         const box = entry.box, cx = (box[0] + box[3]) / 2 - ox, cz = (box[2] + box[5]) / 2 - oz;
         const hx = (box[3] - box[0]) / 2, hz = (box[5] - box[2]) / 2;
         if (Math.abs(cx * dz - cz * dx) > Math.abs(dz) * hx + Math.abs(dx) * hz + EPS
@@ -424,7 +400,7 @@
         stats.candidates++;
         const m = entry.world;
         contactDistance = contactTriangle = Infinity;
-        if (target.node.mirror && !target.node.mirrorDamage?.stage) {
+        if (target.node.mirror) {
           const bounds = entry.bounds, bottom = bounds.min[1] + (bounds.max[1] - bounds.min[1]) * (target.node.mirrorReveal || 0);
           for (let face = 0; face < 2; face++) {
             for (let vertex = 0; vertex < 3; vertex++) {
