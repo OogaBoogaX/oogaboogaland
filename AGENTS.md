@@ -296,7 +296,7 @@ New event geometry and pickup nodes must stay capped and take part in `liveGeome
 | `tess.js` | `factory` and `hub`, where she flies |
 | `scene-timechain.js`, `timechain-interior.js`, `timechain-room-models.js`, `timechain-charts.js`, `timechain-blocks.js`, `timechain-beer.js`, `timechain-data.js`, `timechain-rooms.js` | `timechain` (and `hub`, whose doorway enters it) |
 | `scene-bifrost.js`, `bifrost-*`, and the arch's or the islet's wiring in `scene-hub.js` | `bifrost` (and `hub`, since every hub page builds the arch and the islet) |
-| `scene-arcade.js`, `arcade-*` | `arcade` (and `hub` for its mouth); `arcade-games.js` and `arcade-models.js` also `skee`, `hoops`, `shy`, `claw`, `hockey`, `billiards`, `darts`, `pinball`, `ride`, and `arcade-models.js` the retro scenes too |
+| `scene-arcade.js`, `arcade-*` | `arcade` (and `hub` for its mouth); `arcade-games.js`, `arcade-models.js` and `arcade-scene-models.js` also `skee`, `hoops`, `shy`, `claw`, `hockey`, `billiards`, `darts`, `pinball`, `ride`; both model modules also the retro scenes |
 | `scene-carnival.js`, `carnival-audio.js` | `skee`, `hoops`, `shy`, `claw`, `hockey`, `billiards`, `darts`, `pinball`, `ride`, `invaders`, `snake`, `pong`, `stampede`, `flap`, `breaker`, `dash`, `stacker` |
 | `retro-games.js` | `invaders`, `snake`, `pong`, `stampede`, `flap`, `breaker`, `dash`, `stacker` |
 | anything shared (`director.js`, `scene.js`, the renderers, `icon-renderer.js`, `crew.js`, `pile.js`, `fx.js`, `game.js`, `hud.js`, `models.js`, `terrain.js`, `deferred.js`, `scene-deferred.js`, `build-tasks.js`) | `full` |
