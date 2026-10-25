@@ -19,7 +19,7 @@
   const POLL_MS = 60000;
   const subscribers = new Set();
   const state = { enabled: false, polls: 0, failures: 0, activity: -1, contributions: 0, lastAt: 0, lastError: "" };
-  let timer = 0, inFlight = false, dueAt = 0;
+  let timer = 0, inFlight = false, dueAt = 0, latestStats = null;
 
   const emit = (event) => {
     for (const fn of subscribers) fn(event);
@@ -46,7 +46,8 @@
         emit({ type: "contribution", delta: activity - state.activity, activity });
       }
       state.activity = activity;
-      emit({ type: "stats", stats });
+      latestStats = { type: "stats", stats };
+      emit(latestStats);
     } catch (e) {
       state.failures++;
       state.lastError = e && e.message || String(e);
@@ -75,6 +76,9 @@
 
   const subscribe = (fn) => {
     subscribers.add(fn);
+    // The first poll can finish while the hub is still building. Give a late
+    // subscriber that reading before it places the crew from the baked roster.
+    if (latestStats) fn(latestStats);
     return () => subscribers.delete(fn);
   };
 
@@ -84,6 +88,7 @@
     document.removeEventListener("visibilitychange", onVisibility);
     state.enabled = false;
     subscribers.clear();
+    latestStats = null;
   };
 
   BL.oogatronLive = { start, subscribe, dispose, state, ENDPOINT };
