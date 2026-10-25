@@ -10714,13 +10714,49 @@ const factoryEntrance = { name: "factory entrance", why: "regression: flying abo
   record("factory entrance: flying above the shield stays on the island", above.scene === "hub" && !above.transitioning && above.height > 3, JSON.stringify(above));
   await b.evaluate(`(() => { const B = window.__ooga, a = B.cavemen.get("portlandhodl"), slot = window.BL.caves.slots.find((s) => s.scene === "factory"), m = B.mouths.find((m) => m.id === slot.id), along = window.BL.factoryModels.SHIELD_Z + 0.6; if (B.crew.player !== a) B.pilot.possess(a); B.pilot.navigate({ position: { x: m.x + Math.sin(m.ry) * along, y: m.floorY, z: m.z + Math.cos(m.ry) * along }, yaw: m.ry, pitch: 0.2, dist: 5 }); B.advance(0.5, 1 / 60); B.crew.configureWeapon(a, 2, 23); B.crew.removeMagazines(a); B.crew.collectGroundMagazine(7, a); B.crew.collectGroundMagazine(11, a); window.__mouth = { x: m.x, z: m.z, ry: m.ry }; })()`);
   const inKey = await b.evaluate(`(() => { const m = window.__mouth; return [-Math.sin(m.ry), -Math.cos(m.ry)]; })()`);
-  await walkToward(b, inKey[0], inKey[1], 0.8);
-  const arrived = await b.evaluate(`(() => { const B = window.__ooga; for (let i = 0; i < 240 && (B.transitioning || B.scene !== "factory"); i++) B.advance(1 / 30, 1 / 30); B.advance(0.3, 1 / 30); const a = B.crew.player; return { scene: B.scene, ooga: a ? a.traits.name : null, rifle: !!a && a.weapon.equipped && a.weapon.selectedSlot === 2, ammo: a && a.weapon.ammo, spares: a && a.weapon.spareAmmo.join(",") }; })()`);
+  // In through the shield on a held key, a frame at a time and all in one page call, so the page's own frames between
+  // calls never walk it on: the walk takes the Ooga through, and the hall comes on under the island's last frame with
+  // it a step past its own shield and the view in the exit tunnel, walking on. A key pressed during that walk, once the
+  // walk is done, carries the Ooga no further until it is let go; a step back from where an arrival stands then stays
+  // in the hall.
+  const keys = `const toward = (dx, dz) => { const c = B.camera, fx = c.target.x - c.position.x, fz = c.target.z - c.position.z, l = Math.hypot(fx, fz), f = [fx / l, fz / l], r = [-f[1], f[0]]; const score = { w: f[0] * dx + f[1] * dz, s: -(f[0] * dx + f[1] * dz), d: -(r[0] * dx + r[1] * dz), a: r[0] * dx + r[1] * dz }; return Object.entries(score).sort((p, q) => q[1] - p[1])[0][0]; }; const key = (k, down) => window.dispatchEvent(new KeyboardEvent(down ? "keydown" : "keyup", { key: k, code: "Key" + k.toUpperCase(), bubbles: true })); const shot = () => { const W = B.factory.walk, p = B.crew.player.root.position; return { phase: W.phase, still: +W.still.toFixed(2), z: +p.z.toFixed(2), camZ: +B.camera.position.z.toFixed(2) }; };`;
+  const glideIn = await b.evaluate(`(() => { const B = window.__ooga, m = window.__mouth; ${keys}
+    const k = toward(-Math.sin(m.ry), -Math.cos(m.ry)); key(k, true); let first = null;
+    for (let i = 0; i < 300 && !first; i++) { B.advance(1 / 60, 1 / 60); if (B.scene === "factory" && !B.transitioning) first = shot(); }
+    key(k, false); if (!first) return { first };
+    const on2 = toward(0, -1); key(on2, true); let on = null;
+    for (let i = 0; i < 240 && !on; i++) { B.advance(1 / 60, 1 / 60); if (!B.factory.walk.phase) on = shot(); }
+    if (on) { B.advance(0.3, 1 / 60); on.held = +B.crew.player.root.position.z.toFixed(2); }
+    key(on2, false); B.advance(0.8, 1 / 60);
+    return { first, on };
+  })()`);
+  const first = glideIn.first, on = glideIn.on;
+  const arrived = await b.evaluate(`(() => { const B = window.__ooga; for (let i = 0; i < 240 && (B.transitioning || B.scene !== "factory"); i++) B.advance(1 / 30, 1 / 30); B.advance(0.3, 1 / 30); const a = B.crew.player, out = { scene: B.scene, ooga: a ? a.traits.name : null, rifle: !!a && a.weapon.equipped && a.weapon.selectedSlot === 2, ammo: a && a.weapon.ammo, spares: a && a.weapon.spareAmmo.join(","), z0: +a.root.position.z.toFixed(2) }; const key = (down) => window.dispatchEvent(new KeyboardEvent(down ? "keydown" : "keyup", { key: "s", code: "KeyS", bubbles: true })); key(true); B.advance(0.08, 1 / 60); key(false); B.advance(0.5, 1 / 60); out.back = { scene: B.scene, transitioning: B.transitioning, phase: B.factory.walk.phase, z: +a.root.position.z.toFixed(2) }; return out; })()`);
+  const F = await b.evaluate(`(() => { const F = window.BL.factoryModels; return { gate: F.HALL.front - 0.6, front: F.HALL.front, arrival: F.LAYOUT.entrance.z + 1, shield: F.SHIELD_Z }; })()`);
+  record("factory entrance: walking in, the Ooga walks itself through the shield, with no fade, the island's last frame dissolving off the hall's first: it comes on a step past the hall's own shield with the view behind it in the exit tunnel and walks on to where an arrival stands, a key pressed on the way carries it no further until let go, and a step back from there stays in the hall",
+    !!first && first.phase === 1 && first.still >= 0.9 && first.z <= F.gate && first.z >= F.gate - 0.8 && first.camZ > F.front - 1.2
+      && !!on && Math.abs(on.z - F.arrival) < 0.4 && Math.abs(on.held - on.z) < 0.05
+      && arrived.back.scene === "factory" && !arrived.back.transitioning && arrived.back.phase === 0 && arrived.back.z > arrived.z0 + 0.2, JSON.stringify({ first, on, back: arrived.back, z0: arrived.z0, F }));
   const outside = await b.evaluate(`(() => { const B = window.__ooga, e = window.BL.factoryModels.LAYOUT.entrance, rows = []; for (const [name, x, y] of [["beside", 10, e.y], ["below", 0, 0], ["above", 0, e.y + 12]]) { if (B.scene !== "factory" || B.transitioning) break; B.pilot.navigate({ position: { x, y, z: 29 }, yaw: Math.PI, pitch: 0.2, dist: 5 }); B.advance(1 / 60, 1 / 60); rows.push({ name, scene: B.scene, transitioning: B.transitioning }); } return rows; })()`);
   record("factory entrance: positions beside, below and above the exit doorway stay in the factory", outside.length === 3 && outside.every((r) => r.scene === "factory" && !r.transitioning), JSON.stringify(outside));
   await b.evaluate(`(() => { const B = window.__ooga, a = B.crew.player, e = window.BL.factoryModels.LAYOUT.entrance; B.pilot.navigate({ position: { x: 0, y: e.y, z: e.z + 2.2 }, yaw: 0, pitch: 0.2, dist: 5 }); B.crew.configureWeapon(a, 1, 17); if (B.pilot.aiming) B.pilot.modeAction("mode-toggle"); B.advance(0.5, 1 / 60); })()`);
-  await walkToward(b, 0, 1, 0.8);
+  // Out through the gate's shield the same way, a frame at a time in one page call: the island has the Ooga at the
+  // mouth's rim under the hall's last frame, the view behind it in the tunnel, and walks it on out of the mouth; a key
+  // pressed on the way that now means back in carries it no further until it is let go.
+  const glideOut = await b.evaluate(`(() => { const B = window.__ooga, m = window.__mouth, sr = Math.sin(m.ry), cr = Math.cos(m.ry), along = (q) => +((q.x - m.x) * sr + (q.z - m.z) * cr).toFixed(2); ${keys}
+    const k = toward(0, 1); key(k, true); let rim = null;
+    for (let i = 0; i < 300 && !rim; i++) { B.advance(1 / 60, 1 / 60); if (B.scene === "hub" && !B.transitioning) rim = { ooga: along(B.crew.player.root.position), view: along(B.camera.position) }; }
+    key(k, false); if (!rim) return { rim };
+    const back = toward(-sr, -cr); key(back, true); let last = along(B.crew.player.root.position);
+    for (let i = 0; i < 240; i++) { B.advance(1 / 60, 1 / 60); const now = along(B.crew.player.root.position); if (i > 10 && Math.abs(now - last) < 1e-4) break; last = now; }
+    const after = along(B.crew.player.root.position); B.advance(0.3, 1 / 60); const held = along(B.crew.player.root.position);
+    key(back, false); B.advance(0.5, 1 / 60);
+    return { rim, walkedOut: { after, held } };
+  })()`);
+  const rim = glideOut.rim, walkedOut = glideOut.walkedOut || {};
   const back = await b.evaluate(`(() => { const B = window.__ooga, m = window.__mouth; for (let i = 0; i < 240 && (B.transitioning || B.scene !== "hub"); i++) B.advance(1 / 30, 1 / 30); B.advance(0.3, 1 / 30); const p = B.crew.player && B.crew.player.root.position; return { scene: B.scene, ooga: B.crew.player ? B.crew.player.traits.name : null, fromMouth: p ? +Math.hypot(p.x - m.x, p.z - m.z).toFixed(1) : null, melee: !!p && B.crew.player.weapon.primaryEquipped && !B.crew.player.weapon.equipped && B.crew.player.weapon.selectedSlot === 1, ammo: p && B.crew.player.weapon.ammo, spares: p && B.crew.player.weapon.spareAmmo.join(","), carry: !B.pilot.aiming && document.getElementById("weapon-reticle").hidden }; })()`);
+  record("factory entrance: walking out, the walk takes the Ooga into the hall's shield and the island has it at the mouth's rim under the hall's last frame, the view behind it in the tunnel, walking on out of the mouth, and a key pressed on the way back toward the tunnel carries it no further until let go",
+    !!rim && rim.ooga > -0.6 && rim.ooga < 1.2 && rim.view < rim.ooga - 2 && rim.view > F.shield && walkedOut.after > rim.ooga + 0.8 && Math.abs(walkedOut.held - walkedOut.after) < 0.05, JSON.stringify({ rim, walkedOut }));
   record("factory doorway: the selected rifle, rounds and spare magazines survive entry; a switch to melee and carry inside survives the return", arrived.rifle && arrived.ammo === 23 && arrived.spares === "7,11" && back.melee && back.ammo === 17 && back.spares === "7,11" && back.carry, JSON.stringify({ arrived, back }));
   await tourGo(b, "factory");
   await b.key("Escape");

@@ -281,7 +281,9 @@
     if (DEBUG && tweenCount()) throw new Error(`${tweenCount()} tweens survived clearTweens`);
     enter(next, place);
     // The builder caches only the scene just left used go too; the island's stay, since every route passes through it.
-    if (leaving.id !== "hub") window.BL.models.release(leaving.id, ["hub", next.id]);
+    // A scene may keep others' builders warm while it runs (`keeps`): the island keeps the Lightning Factory's, which it
+    // walks straight into.
+    if (leaving.id !== "hub") window.BL.models.release(leaving.id, ["hub", next.id, ...(next.keeps || [])]);
     renderer.releaseUnused(liveGeometry());
     if (DEBUG && renderer.stats.records > live.size) throw new Error(`${next.id}: ${renderer.stats.records} GPU records for ${live.size} live geometries`);
   };
