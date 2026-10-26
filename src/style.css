@@ -375,9 +375,9 @@ body[data-active-scene="hub"] .home-link {
 .sheet {
   --sheet-chat-top: 207px;
   --sheet-chat-left: 216px;
-  position: absolute;
+  position: fixed;
   top: calc(52px + var(--safe-top));
-  right: calc(16px + var(--safe-right));
+  right: 0;
   height: var(--sheet-height, 520px);
   max-height: calc(100% - 90px - var(--safe-top) - var(--safe-bottom));
   width: 380px;
@@ -403,18 +403,24 @@ body[data-active-scene="hub"] .home-link {
   border-radius: inherit;
   box-shadow: 0 6px 0 rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.35);
   padding-bottom: 14px;
+  transition: visibility 0s;
+  overflow: auto;
 }
 
 .sheet-content {
   flex: 1;
-  min-height: 0;
+  min-height: 96px;
   display: flex;
   flex-direction: column;
 }
 
 .sheet[data-open="false"] {
-  transform: translateX(calc(100% + 16px + var(--safe-right)));
+  transform: translateX(100%);
+  pointer-events: none;
 }
+.sheet[data-dock="left"][data-open="false"] { transform: translateX(-100%); }
+.sheet[data-open="false"] .sheet-body { visibility: hidden; transition-delay: 0.28s; }
+.sheet[data-open="false"] .sheet-toggle { pointer-events: auto; }
 
 /* Scrolling game panels keep a thin wooden scrollbar instead of the platform's grey one. */
 .garage,
@@ -656,13 +662,14 @@ body[data-active-scene="arcade"] .magazine-hud {
   z-index: 0;
   top: 71px;
   left: -41px;
-  width: 44px;
+  width: 41px;
   height: 64px;
   margin-top: 0;
   padding: 0;
   border: 0;
   background: none;
   outline: none;
+  touch-action: none;
 }
 
 /* Keep the whole tab clickable while its face slides behind the panel body. */
@@ -705,34 +712,33 @@ body[data-active-scene="arcade"] .magazine-hud {
 .sheet-toggle:focus-visible .sheet-tab-face { outline: 2px solid var(--accent); outline-offset: -3px; }
 .sheet-toggle .tab-count { position: absolute; bottom: 3px; right: 3px; margin: 0; }
 
-.sheet-resize {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -3px;
-  height: 16px;
-  cursor: ns-resize;
-  touch-action: none;
-  user-select: none;
+.sheet-drag, .sheet-corner, .sheet-edge {
+  margin: 0; padding: 0; border: 0; border-radius: 0;
+  background: transparent; color: var(--paper); touch-action: none; user-select: none;
 }
+.sheet-drag { position: absolute; z-index: 3; top: 6px; left: 16px; right: 16px; height: 12px; cursor: grab; }
+.sheet-drag:active { cursor: grabbing; }
+.sheet-edge { position: absolute; z-index: 3; }
+.sheet-edge-n, .sheet-edge-s { left: 16px; right: 16px; height: 6px; cursor: ns-resize; }
+.sheet-edge-n { top: 0; }
+.sheet-edge-s { bottom: 0; }
+.sheet-edge-w, .sheet-edge-e { top: 16px; bottom: 16px; width: 6px; cursor: ew-resize; }
+.sheet-edge-w { left: 0; }
+.sheet-edge-e { right: 0; }
+.sheet-corner { position: absolute; z-index: 3; width: 16px; height: 16px; }
+.sheet-corner-nw { left: 0; top: 0; cursor: nwse-resize; }
+.sheet-corner-ne { right: 0; top: 0; cursor: nesw-resize; }
+.sheet-corner-sw { left: 0; bottom: 0; cursor: nesw-resize; }
+.sheet-corner-se { right: 0; bottom: 0; cursor: nwse-resize; }
+.sheet-corner::after { content: ""; position: absolute; inset: 4px; border-color: var(--muted); border-style: solid; border-width: 0; }
+.sheet-corner-nw::after { border-left-width: 2px; border-top-width: 2px; }
+.sheet-corner-ne::after { border-right-width: 2px; border-top-width: 2px; }
+.sheet-corner-sw::after { border-left-width: 2px; border-bottom-width: 2px; }
+.sheet-corner-se::after { border-right-width: 2px; border-bottom-width: 2px; }
+.sheet-drag:focus-visible, .sheet-corner:focus-visible, .sheet-edge:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+.sheet[data-open="false"] :is(.sheet-drag, .sheet-corner, .sheet-edge) { display: none; }
 
-/* Two carved grooves for a grip, warming to amber under the pointer or the keyboard. */
-.sheet-resize::after {
-  content: "";
-  display: block;
-  width: 44px;
-  height: 6px;
-  margin: 5px auto;
-  background: linear-gradient(var(--wood-edge) 0 2px, transparent 2px 4px, var(--wood-edge) 4px 6px);
-  filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.15));
-}
-
-.sheet-resize:hover::after,
-.sheet-resize:focus-visible::after { background: linear-gradient(var(--accent-text) 0 2px, transparent 2px 4px, var(--accent-text) 4px 6px); }
-.sheet-resize:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
-.sheet[data-open="false"] .sheet-resize { display: none; }
-
-/* Docking follows three 380px panel widths; two widths fit Bananas and Oogas together. */
+/* Untouched panels dock at the bottom on smaller screens. */
 .sheet[data-dock="bottom"] {
   top: auto;
   left: 0;
@@ -753,7 +759,6 @@ body[data-active-scene="arcade"] .magazine-hud {
 }
 
 .sheet[data-dock="bottom"][data-open="false"] { transform: translateY(100%); }
-.sheet[data-dock="bottom"] .sheet-resize { top: 3px; bottom: auto; }
 .sheet[data-dock="bottom"][data-open="true"]:not([hidden])~.joysticks,
 .sheet[data-dock="bottom"][data-open="true"]:not([hidden])~.bottom-hud>.act { display: none; }
 
@@ -761,7 +766,7 @@ body[data-active-scene="arcade"] .magazine-hud {
   top: -39px;
   left: 72px;
   width: 64px;
-  height: 42px;
+  height: 39px;
 }
 
 .sheet[data-dock="bottom"] .sheet-tab-face {
@@ -777,18 +782,31 @@ body[data-active-scene="arcade"] .magazine-hud {
 .sheet[data-dock="bottom"] .sheet-toggle-bananas .sheet-tab-face { padding: 4px 18px 0; }
 .sheet[data-dock="bottom"] .sheet-toggle-loot { left: 144px; }
 .sheet[data-dock="bottom"] .sheet-toggle-chat { left: var(--sheet-chat-left); }
-.sheet[data-dock="bottom"][data-open="false"] .sheet-toggle { top: calc(-45px - var(--safe-bottom)); }
 
-.sheet[data-paired="true"] .sheet-content {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  grid-template-rows: minmax(0, 1fr);
+/* Every panel touches an edge; its tabs face inward and fit with its body. */
+.sheet:is([data-dock="left"], [data-dock="right"]) .sheet-toggle { top: calc(7px + var(--sheet-tab-index, 0) * 64px); height: 56px; }
+.sheet[data-dock="bottom"] .sheet-toggle { left: calc(var(--sheet-tab-index, 0) * 72px); }
+.sheet[data-dock="left"] .sheet-toggle { left: auto; right: -41px; }
+.sheet[data-dock="left"] .sheet-tab-face {
+  border-left: 0; border-right: 3px solid var(--wood-edge); border-radius: 0 8px 8px 0;
+  transform: translateX(calc(-1 * var(--sheet-tab-slide, 0px)));
 }
-
-.sheet[data-paired="true"] #bananas-panel { grid-column: 1; grid-row: 1; }
-.sheet[data-paired="true"] #roster-panel { grid-column: 2; grid-row: 1; border-left: 2px solid var(--wood-edge); }
-.sheet[data-paired="true"] #roster-panel > .feed-open { display: none; }
-.sheet[data-paired="true"] .panel { min-width: 0; }
+.sheet[data-sized="true"] {
+  position: fixed; right: auto; bottom: auto; max-width: none; max-height: none;
+}
+.sheet[data-sized="true"]:not([data-dock="bottom"]) .sheet-toggle {
+  top: calc(7px + var(--sheet-tab-index, 0) * var(--sheet-tab-step, 64px));
+  height: calc(var(--sheet-tab-step, 64px) - 8px);
+}
+.sheet[data-sized="true"][data-dock="bottom"] .sheet-toggle {
+  left: calc(var(--sheet-tab-index, 0) * var(--sheet-tab-step, 72px));
+  width: min(64px, var(--sheet-tab-step, 72px));
+}
+.sheet[data-sized="true"] .sheet-toggle svg { max-height: 100%; }
+.sheet.sheet-moving { transition: none; }
+.sheet.sheet-tab-drag { opacity: 0.7; }
+.sheet-merge-target .sheet-body,
+.sheet-merge-target .sheet-tab-face { outline: 2px solid var(--accent-text); outline-offset: -2px; }
 
 /* Open: hidden at rest, fully out on panel or fixed tab-area hover.
    Closed panels and touch devices keep the whole tab. */
@@ -801,6 +819,7 @@ body[data-active-scene="arcade"] .magazine-hud {
 
 @media (prefers-reduced-motion: reduce) {
   .sheet,
+  .sheet-body,
   .sheet-tab-face { transition: none !important; }
 }
 
@@ -917,7 +936,7 @@ body[data-active-scene="arcade"] .magazine-hud {
   filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.6));
 }
 
-.panel > .feed-open { flex: none; margin-top: 0; }
+.sheet-foot > .feed-open { flex: none; margin: 0 0 4px; }
 
 .roster-hint:not(:has(> :not([hidden]))) { display: none; }
 
@@ -3783,7 +3802,8 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
   .equipment-hud { left: calc(8px + var(--safe-left)); }
   .weapon-equipment-row { gap: 4px; }
 }
-.joysticks {
+.joysticks,
+.bottom-hud>.act {
   display: none;
 }
 
@@ -6215,7 +6235,8 @@ body.orbit-dragging #tooltip {
     display: none;
   }
 
-  .joysticks {
+  .joysticks,
+  .bottom-hud>.act {
     display: block;
   }
 
@@ -6312,7 +6333,7 @@ body[data-active-scene="hub"] .equipment-hud:is([data-banner="compact"], [data-b
   transition-delay: 0s;
 }
 
-body[data-active-scene="hub"] .sheet[data-dock="side"] { top: calc(72px + var(--safe-top)); }
+body[data-active-scene="hub"] .sheet[data-dock="right"][data-sized="false"] { top: calc(72px + var(--safe-top)); }
 body[data-active-scene="hub"] .mic-note { top: var(--hub-equipment-bottom, calc(72px + var(--safe-top))); }
 
 @media (max-width: 720px) {
@@ -6559,19 +6580,19 @@ body[data-active-scene="hub"] .mic-note { top: var(--hub-equipment-bottom, calc(
 }
 
 @media (min-width: 620px) and (max-width: 720px) {
-  .panel[data-panel="roster"] > .roster,
-  .panel[data-panel="loot"] > .loot {
+  .sheet[data-dock="bottom"] .panel[data-panel="roster"] > .roster,
+  .sheet[data-dock="bottom"] .panel[data-panel="loot"] > .loot {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     column-gap: 16px;
   }
 
-  .panel[data-panel="roster"] > .roster li {
+  .sheet[data-dock="bottom"] .panel[data-panel="roster"] > .roster li {
     grid-column: auto;
     grid-template-columns: 8px minmax(0, 1fr) 26px max-content 6.5ch;
   }
 
-  .panel[data-panel="roster"] > .roster li.roster-away {
+  .sheet[data-dock="bottom"] .panel[data-panel="roster"] > .roster li.roster-away {
     grid-column: 1 / -1;
   }
 
@@ -8993,7 +9014,7 @@ body[data-active-scene="stacker"] .joysticks {
 }
 
 /* Ember Den: a walkable room, a readable lobby, and a focused table. */
-body[data-active-scene="poker"] #sheet,
+body[data-active-scene="poker"] .sheet,
 body[data-active-scene="poker"] .world-block,
 body[data-active-scene="poker"] .world-clock { display: none; }
 #poker {

@@ -330,8 +330,20 @@
   // Registered once, before boot creates any scene's capture listeners. During enter even the HUD and bubbling
   // controls belong to a half-built visit; only its recovery notice may take input.
   const HELD_EVENTS = ["keydown", "keyup", "pointerdown", "pointermove", "pointerup", "pointercancel", "pointerleave", "mousedown", "mousemove", "mouseup", "click", "dblclick", "wheel", "contextmenu", "touchstart", "touchmove", "touchend", "touchcancel"];
-  const heldHud = [...sceneSections, ...intros, ...document.querySelectorAll("#sheet, #equipment-hud, .joysticks, #act")];
+  const heldHud = [...sceneSections, ...intros, ...document.querySelectorAll("#equipment-hud, .joysticks, #act")];
   let inputHeld = false;
+  const holdSheets = () => {
+    // A layout change must not release a venue modal's background isolation.
+    if (inputHeld) for (const el of document.querySelectorAll(".sheet")) el.inert = true;
+  };
+  document.addEventListener("sheetchange", holdSheets);
+  // Aiming can cancel pointerdown before its default focus transfer. Every
+  // scene shares this canvas; routed virtual-cursor panel clicks keep UI focus.
+  sceneCanvas.tabIndex = -1;
+  const focusWorld = (e) => {
+    if (e.target === sceneCanvas) sceneCanvas.focus({ preventScroll: true });
+  };
+  document.addEventListener("pointerdown", focusWorld, true);
   const heldEvent = (e) => {
     if (!inputHeld || e.target.closest && e.target.closest("#reload-notice")) return;
     if (e.type !== "touchstart" && e.type !== "touchmove") e.preventDefault();
@@ -343,6 +355,7 @@
     inputHeld = on;
     gamepad.hold(on);
     for (const el of heldHud) el.inert = on;
+    for (const el of document.querySelectorAll(".sheet")) el.inert = on;
   };
   const entryFailed = (t, error) => {
     if (destroyed) return;
@@ -967,6 +980,8 @@
     window.removeEventListener("keyup", clearRightShift);
     window.removeEventListener("blur", clearRightShift);
     for (const type of HELD_EVENTS) window.removeEventListener(type, heldEvent, true);
+    document.removeEventListener("sheetchange", holdSheets);
+    document.removeEventListener("pointerdown", focusWorld, true);
     document.removeEventListener("visibilitychange", onVisibility);
     positionDebug.removeEventListener("click", copyPositionDebug);
     try {

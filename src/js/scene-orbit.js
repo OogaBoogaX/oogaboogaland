@@ -2007,7 +2007,7 @@
     for (const c of contributors.roster) hud.setRosterRow(c.name, contributors.stateFor(c), contributors.ageLabel(c));
     if (lootEnabled) renderLocker();
     hud.setStats(game.state);
-    hud.el.sheet.dataset.open = "false";
+    hud.foldPanels();
     rhud.el.help.textContent = COARSE
       ? "The button does each step · left stick steers"
       : "Space does each step · G autopilot · V spacewalk\nW S push · A D steer";
