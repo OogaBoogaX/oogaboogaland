@@ -933,5 +933,9 @@
     }
   };
 
-  BL.bifrostIsle = { AXIS, HEAD, ROCK, COURT, TERRACE, BRIDGE, Z_GATE, GATE_Y, spot, site, update };
+  // The islet's shared meshes, a piece a task, ahead of `site` (a released hub's return builds them behind the fade).
+  const prepareSteps = function* () {
+    for (const build of [plan, dress, rock, curtains, vines, BG.build]) { build(); yield; }
+  };
+  BL.bifrostIsle = { AXIS, HEAD, ROCK, COURT, TERRACE, BRIDGE, Z_GATE, GATE_Y, spot, site, update, prepareSteps };
 })();

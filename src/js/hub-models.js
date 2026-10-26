@@ -1116,6 +1116,24 @@
     }
     return merge(...parts);
   };
+  // Closed, faceted foliage masses. Both detail levels keep every lobe; only its tessellation changes.
+  // Mesh wobble has its own seed so reducing facets cannot move later lobes or their flowers.
+  const clumped = (geo, cx, cy, cz, rx, ry, rz, tones, rand, lod, tips = null) => {
+    // Eight buried triangles provide conservative visibility coverage inside the central lobe on both levels.
+    // The decorative outer lobes draw and support landings, but never multiply sight-guide ray work.
+    puff(geo, cx, cy, cz, rx * 0.5, ry * 0.5, rz * 0.5, tones, () => 0.5, 2, 4);
+    const detailStart = geo.faces.length, turn = rand() * Math.PI * 2;
+    for (let n = 0; n < 5; n++) {
+      const a = turn + n * Math.PI / 2, reach = n ? 0.48 + rand() * 0.08 : 0;
+      const x = cx + Math.cos(a) * rx * reach, y = cy + (n ? 0.12 + rand() * 0.1 : 0) * ry, z = cz + Math.sin(a) * rz * reach;
+      const w = n ? 0.5 + rand() * 0.08 : 0.86, h = n ? 0.64 + rand() * 0.08 : 0.82;
+      const part = { verts: [], faces: [], lines: [] }, wobble = mulberry32(Math.floor(rand() * 4294967296));
+      puff(part, x, y, z, rx * w, ry * h, rz * w, tones, wobble, lod ? 3 : 4, lod ? 6 : 8);
+      flatInto(geo, part);
+      if (tips) tips.push([x, y + ry * h, z]);
+    }
+    for (let i = detailStart; i < geo.faces.length; i++) geo.faces[i].visibility = false;
+  };
   const cartoonTree = (i, rand, shell, lod = 0, collision = null) => {
     const geo = { verts: [], faces: [], lines: [], smooth: true, normals: [], foliageVisibility: false }, tones = CANOPIES[i].map(hexToRgb);
     limb(geo, 0, -0.1, 0, 0.05, 2.1, 0.02, 0.24, 0.14, 8, BARK[0]);
@@ -1124,7 +1142,7 @@
     // The bark keeps its smooth normals: zeros mean "not given" to the renderer.
     while (geo.normals.length < geo.verts.length) geo.normals.push(0);
     const canopyStart = geo.faces.length;
-    for (const [cx, cy, cz, rx, ry, rz] of CROWNS[i]) leafy(geo, cx * QUARTER, cy * QUARTER, cz * QUARTER, rx * QUARTER, ry * QUARTER, rz * QUARTER, tones, rand, Math.round(14 + rx * rz * 2.6), 0.3, lod);
+    for (const [cx, cy, cz, rx, ry, rz] of CROWNS[i]) clumped(geo, cx * QUARTER, cy * QUARTER, cz * QUARTER, rx * QUARTER, ry * QUARTER, rz * QUARTER, tones, rand, lod);
     geo.normals = Float32Array.from(geo.normals);
     geo.collisionGeometry = collision || merge(shell, canopySupport(geo, canopyStart));
     return geo;
@@ -1167,7 +1185,7 @@
     const palette = ["#6b4a2b", "#4e361f", ...CANOPIES[i]];
     // Drawn as a cartoon tree: a tapered eight-sided trunk with its branch stubs under crowns of low-poly
     // puffs on the voxel crown's own ellipsoids. Keep its solid shell and
-    // extend landing support across every visible leaf and lower crown.
+    // extend landing support across the visible clumps and lower crown.
     const shell = voxGeo(solid, { unit: QUARTER, palette });
     const canopySamples = [];
     const geometry = cartoonTree(i, () => { const value = rand(); canopySamples.push(value); return value; }, shell);
@@ -1190,20 +1208,19 @@
     [[0, 1.4, 0, 2.5, 2.2, 2.3], [-1.2, 2.0, 0.8, 1.7, 1.6, 1.6], [1.3, 1.8, -0.9, 1.6, 1.5, 1.5]],
     [[0, 1.4, 0, 3.4, 2.0, 2.9], [-1.5, 2.1, 0.6, 2.0, 1.9, 1.9], [1.7, 2.3, -0.5, 2.0, 2.0, 2.0], [0.3, 2.8, 1.0, 1.6, 1.5, 1.5]]
   ];
-  // Bushes: leafy clumps on the voxel bushes' own ellipsoids. The first two flower (peach and pink, then yellow and
+  // Bushes: solid clumps with flowers perched on their upper tips. The first two flower (peach and pink, then yellow and
   // purple), the third carries round red berries.
   const cartoonBush = (i, lod = 0) => {
     const rand = mulberry32(7 + i), geo = { verts: [], faces: [], lines: [], normals: [], foliageVisibility: false }, tones = ["#3a6e24", "#56902f", "#6fae3a", "#8ccb4b"].map(hexToRgb);
-    for (const [cx, cy, cz, rx, ry, rz] of CLUMPS[i]) leafy(geo, cx * QUARTER, cy * 0.8 * QUARTER, cz * QUARTER, rx * 1.12 * QUARTER, ry * 0.82 * QUARTER, rz * 1.12 * QUARTER, tones, rand, Math.round(10 + rx * rz * 3.2), 0.17, lod);
-    const [cx, cy, cz, rx, ry, rz] = CLUMPS[i][0];
-    for (let n = 0; n < (i === 2 ? 9 : 6); n++) {
-      const a = rand() * Math.PI * 2, up = 0.25 + rand() * 0.6, side = Math.sqrt(1 - up * up);
-      const nx = Math.cos(a) * side, ny = up, nz = Math.sin(a) * side;
-      const px = (cx + nx * rx * 1.02) * QUARTER, py = (cy + ny * ry * 1.02) * QUARTER, pz = (cz + nz * rz * 1.02) * QUARTER;
+    const tips = [];
+    for (const [cx, cy, cz, rx, ry, rz] of CLUMPS[i]) clumped(geo, cx * QUARTER, cy * 0.8 * QUARTER, cz * QUARTER, rx * 1.12 * QUARTER, ry * 0.82 * QUARTER, rz * 1.12 * QUARTER, tones, rand, lod, tips);
+    const count = i === 2 ? 9 : 6;
+    for (let n = 0; n < count; n++) {
+      const [px, top, pz] = tips[Math.floor(n * tips.length / count)], py = top + (i === 2 ? 0.035 : 0.006);
       if (i === 2) puff(geo, px, py, pz, 0.05, 0.05, 0.05, [hexToRgb("#a8221f"), hexToRgb("#c8322e"), hexToRgb("#e0473c"), hexToRgb("#ff6a55")], rand, 3, 6);
       else {
         const ink = FLOWER_INKS[(i * 2 + n) % FLOWER_INKS.length];
-        flower(geo, px, py, pz, nx, ny, nz, ink[0], ink[1], 0.075, rand);
+        flower(geo, px, py, pz, 0, 1, 0, ink[0], ink[1], 0.075, rand);
       }
     }
     geo.normals = Float32Array.from(geo.normals);
@@ -1478,13 +1495,15 @@
         geo.faces.push({ i: [rings[2][e], tip, rings[2][f]], color: GRASS_TONES[n % 2 ? 2 : 3], emissive: 0 });
       }
     }
-    return Object.assign(noShadow(geo), { sway: 0.3 });
+    Object.assign(noShadow(geo), { sway: 0.3 });
+    // This final tuft is decoration only; it has no collision shell or cutaway readers.
+    return BL.compactGeometry?.enabled ? BL.compactGeometry.pack(geo, { immutable: true, renderOnly: true }) : geo;
   });
   const grass = grassTuft;
   // The lawn's instanced batch takes the same tuft as its own geometry object, so it never shares a GPU record
   // with the scattered tufts.
   const lawnTuft = cached(() => ({ ...grassTuft() }));
-  // Firepit geometry only; the flame is fireFlame.
+  // Firepit geometry only; the fires themselves live in the blaze module.
   const firepit = cached(() => {
     const rand = mulberry32(131);
     return merge(
@@ -1495,19 +1514,6 @@
       }),
       ...Array.from({ length: 3 }, (_, n) => turn(box({ w: 0.9, h: 0.14, d: 0.14, color: WOOD_DK, offset: { y: 0.12 + n * 0.05 } }), n * Math.PI / 3, 0.18))
     );
-  });
-  const FLAME = [[0.34, 0.3, 0.22, 0, 0, "#ff9a2e"], [0.26, 0.22, 0.44, 0.02, -0.02, "#ffc148"], [0.2, 0.18, 0.6, 0.06, 0.03, "#ffc148"], [0.16, 0.14, 0.72, 0.03, 0.05, "#fff0b0"], [0.12, 0.12, 0.84, -0.01, 0.02, "#fff0b0"], [0.14, 0.16, 0.36, -0.16, 0.04, "#ffc148"], [0.12, 0.14, 0.5, 0.17, 0.1, "#ff9a2e"]];
-  const fireFlame = cached(() => {
-    const geometry = noShadow(merge(...FLAME.map(([w, h, y, x, z, color]) => box({ w, h, d: w, color, emissive: 1, offset: { x, y, z } }))));
-    // Keep ignition aligned with the rendered flames, not the firepit's wide
-    // NPC avoidance circle. Each row is a box centre and half extents.
-    geometry.fireBoxes = new Float32Array(FLAME.length * 6);
-    for (let i = 0; i < FLAME.length; i++) {
-      const [w, h, y, x, z] = FLAME[i], at = i * 6;
-      geometry.fireBoxes[at] = x; geometry.fireBoxes[at + 1] = y; geometry.fireBoxes[at + 2] = z;
-      geometry.fireBoxes[at + 3] = w * 0.5; geometry.fireBoxes[at + 4] = h * 0.5; geometry.fireBoxes[at + 5] = w * 0.5;
-    }
-    return geometry;
   });
   const WINGS = [["#f2c94c", "#e04a3a"], ["#f3efe4", "#6f9fca"]];
   const butterfly = variants((i) => {
@@ -1521,7 +1527,8 @@
     ));
   });
   const firefly = cached(() => noShadow(box({ w: 0.06, h: 0.06, d: 0.06, color: "#d9ff6a", emissive: 1 })));
-  const ember = cached(() => noShadow(box({ w: 0.05, h: 0.05, d: 0.05, color: "#ff8a2a", emissive: 1 })));
+  // The ember model lives in the blaze module now.
+  const ember = cached(() => BL.blaze.emberModel());
   const vine = cached(() => {
     const rand = mulberry32(53);
     const leaves = [];
@@ -1595,5 +1602,5 @@
       ...[-0.8, 0.8].map(brace)
     );
   });
-  BL.hubModels = { SIGN_GLYPHS, SIGN_ICONS, AMMO_BANANA, jetpack, jetFlame, caveMouthRim, mirrorPanel, matrixPrisonBars, sealedCaveFace, matrixLeverPlate, matrixLeverLights, matrixLeverHub, matrixLeverArm, matrixLeverGrip, matrixLeverLabels, matrixGlyph, caveSign, postSign, CAVE_SIGN_WIDTH, CAVE_SIGN_HEIGHT, gate, caveShelves, entropyLab, bedroll, tree, bush, rock, breakableRock, voxelRock, puff, leafy, pointedLeaf, flower, FLOWER_INKS, limb, padNormals, flatInto, canopySupport, withJungle, liana, sagPoints, sprig, garland, bamboo, lashing, log, thatch, altarSlab, altarBlock, woodCrate, barrel, flowerTuft, torch, grass, lawnTuft, firepit, fireFlame, butterfly, firefly, ember, vine, cloud, ladder, dock, TREE_HEIGHT };
+  BL.hubModels = { SIGN_GLYPHS, SIGN_ICONS, AMMO_BANANA, jetpack, jetFlame, caveMouthRim, mirrorPanel, matrixPrisonBars, sealedCaveFace, matrixLeverPlate, matrixLeverLights, matrixLeverHub, matrixLeverArm, matrixLeverGrip, matrixLeverLabels, matrixGlyph, caveSign, postSign, CAVE_SIGN_WIDTH, CAVE_SIGN_HEIGHT, gate, caveShelves, entropyLab, bedroll, tree, bush, rock, breakableRock, voxelRock, puff, clumped, leafy, pointedLeaf, flower, FLOWER_INKS, limb, padNormals, flatInto, canopySupport, withJungle, liana, sagPoints, sprig, garland, bamboo, lashing, log, thatch, altarSlab, altarBlock, woodCrate, barrel, flowerTuft, torch, grass, lawnTuft, firepit, butterfly, firefly, ember, vine, cloud, ladder, dock, TREE_HEIGHT };
 })();

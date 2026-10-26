@@ -14,6 +14,7 @@
     const pointers = new Map();
     const ray = { ox: 0, oy: 0, oz: 0, dx: 0, dy: 0, dz: 0 };
     const hoverHit = { node: null, owner: null, distance: Infinity };
+    const visibleHit = { node: null, owner: null, distance: Infinity };
     // Scratch for the per-frame hover path only: every consumer reads the
     // answer synchronously (tooltip hooks take primitives out of it). The
     // gesture path keeps its own pick result, which `gesture` retains.
@@ -21,6 +22,7 @@
     const hoverPoint = { x: -1, y: -1 };
     const C = new Float32Array(3);
     const aimView = BL.math.mat4.create(), aimInverse = BL.math.mat4.create(), aimUp = { x: 0, y: 1, z: 0 };
+    const aimCursors = new WeakMap();
     let hoverX = -1, hoverY = -1, hoverDirty = false, hovered = null;
     let hoverIgnored = null;
     let gesture = null;
@@ -88,6 +90,18 @@
         }
       }
       if (!best) return null;
+      const prop = best.owner.prop;
+      if (preciseHover && best.owner.kind === "prop"
+        && (prop === "bush" || prop === "tree" || prop === "palm" || prop === "canopy")) {
+        // Broad foliage pick spheres can cover a board outside the visible leaves. Use the
+        // same mesh hit as hover, so the tap goes to what the cursor actually points at.
+        if (!weaponTargets.ray(visibleHit, ray.ox, ray.oy, ray.oz, ray.dx, ray.dy, ray.dz,
+            camera.far, ignoreCave, null, true)) return null;
+        out.node = visibleHit.node;
+        out.owner = visibleHit.owner;
+        out.t = visibleHit.distance;
+        return out;
+      }
       out.node = best.node;
       out.owner = best.owner;
       out.t = bestT;
@@ -115,8 +129,13 @@
       const dx = m[0] * ray.dx + m[4] * ray.dy + m[8] * ray.dz;
       const dy = m[1] * ray.dx + m[5] * ray.dy + m[9] * ray.dz;
       const dz = m[2] * ray.dx + m[6] * ray.dy + m[10] * ray.dz;
-      let nearest = Infinity;
-      for (const face of geometry.faces) {
+      let nearest = Infinity, cursor = null;
+      if (geometry.compactGeometry) {
+        cursor = aimCursors.get(geometry);
+        if (!cursor) { cursor = BL.compactGeometry.createCursor(geometry); aimCursors.set(geometry, cursor); }
+      }
+      for (let index = 0; index < geometry.faces.length; index++) {
+        const face = cursor ? BL.compactGeometry.readFace(geometry, index, cursor) : geometry.faces[index];
         const indices = face.i, a = indices[0] * 3;
         for (let i = 1; i + 1 < indices.length; i++) {
           const b = indices[i] * 3, c = indices[i + 1] * 3;

@@ -47,6 +47,8 @@ Screenshots at high, medium and low are saved as `untracked/performance/phase-1-
 
 Validation: build and syntax checks clean; unit tier 261/261; hosted DEBUG hub → Factory → Lab passes teardown with a clean console. Renderer interfaces and the open GPU/deferral PRs are untouched.
 
+Review note: commit 4d6582d does two separate things. The refcounted cache release is what frees Tess's meshes after she leaves; the 576 removed tick nodes and their 14,976 faces come from deleting her 192 subpixel ticks per ring, a visual simplification that is independent of the cache change and should be judged on its own (it accounts for the 3.54 MiB in the Factory, where Tess stays live).
+
 ## 1.3 — Per-index model variants
 
 `models.variants` now lazily tracks each index and clears only that index's payload. The hub's indices 0 and 3 no longer pin the other ten Arcade cabinets or attract-frame sets 1 and 2. The same change covers every `variants` user, including shared hub/scene kits in hub-models, agent, bifrost-models and race-models; callers keep their existing API and stable identities for retained indices.
@@ -130,6 +132,8 @@ The matching tours are Lab, Arcade, Rally, Drop, Orbit, Mine, Factory, Bifrost, 
 The ten-scene reduction is 66.22 MiB. The ≤ boot + 15 MB target is still not met; the next investigation covers remaining model caches and historical hub ownership. This is one demonstrated retention fix, not a claim that task 1.6 is finished.
 
 Validation: syntax/build clean, unit tier 265/265, both full hosted DEBUG tours complete with clean consoles. The new unit check proves per-key sharing and release while retaining the roof-open hub and preserving the rebuilt game's mesh counts and sampled support heights. #265 and #267 still apply cleanly; the terrain change does not touch the other open PRs.
+
+Consequence worth stating: Drop and Orbit share an unperforated island that is no longer kept after the visit, so each entry to either rebuilds it (about 1.6 to 1.9 s; since task 4.5 in slices behind the fade, longest task about 125 ms). `?terrainworker=1` turns later entries into an IndexedDB restore (about 0.48 s to ready).
 
 ## 1.6b — Keyed and historical model ownership
 

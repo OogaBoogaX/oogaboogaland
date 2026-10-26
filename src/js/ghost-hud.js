@@ -40,7 +40,13 @@
       lobby: document.getElementById("ghost-lobby"), lobbyGoal: document.getElementById("ghost-lobby-goal"), lobbyPlayers: document.getElementById("ghost-lobby-players"),
       lobbyNote: document.getElementById("ghost-lobby-note"), lobbyHow: document.getElementById("ghost-lobby-how"), lobbyReady: document.getElementById("ghost-lobby-ready"), lobbyDecline: document.getElementById("ghost-lobby-decline"),
       spec: document.getElementById("ghost-spectate"), specModes: document.querySelectorAll("#ghost-spectate [data-spec]"),
-      specWatch: document.getElementById("ghost-spectate-watch"), specName: document.getElementById("ghost-spectate-name"), specNext: document.getElementById("ghost-spectate-next")
+      specWatch: document.getElementById("ghost-spectate-watch"), specName: document.getElementById("ghost-spectate-name"), specNext: document.getElementById("ghost-spectate-next"),
+      scores: document.getElementById("ghost-scores"), results: document.getElementById("ghost-results"), halving: document.getElementById("ghost-halving"),
+      resultsGoal: document.getElementById("ghost-results-goal"), resultsPlayers: document.getElementById("ghost-results-players"),
+      steps: [1, 2, 3].map((place) => document.querySelector(`#ghost-podium [data-place="${place}"]`)),
+      intro: document.getElementById("ghost-intro"), introKicker: document.getElementById("ghost-intro-kicker"), introName: document.getElementById("ghost-intro-name"),
+      introText: document.getElementById("ghost-intro-text"), introArt: document.querySelectorAll("#ghost-intro .ghost-intro-art canvas:not(.ghost-intro-solo)"),
+      introSolo: document.querySelectorAll("#ghost-intro .ghost-intro-solo")
     };
     // The spectator menu's buttons, let go of after a press so the turn keys keep working.
     const pickSpec = (e) => { if (onSpectate) onSpectate(e.currentTarget.dataset.spec); e.currentTarget.blur(); };
@@ -80,7 +86,7 @@
     el.playerToggle.addEventListener("click", flip);
     const skip = () => { if (onSkip) onSkip(); el.playerSkip.blur(); };
     el.playerSkip.addEventListener("click", skip);
-    const last = { shown: false, title: null, sub: null, boss: -1, player: null, playing: null, on: null, skips: null, spec: null, specName: null };
+    const last = { shown: false, title: null, sub: null, win: false, high: false, intro: null, introPicture: null, boss: -1, player: null, playing: null, on: null, skips: null, spec: null, specName: null };
     const text = (node, key, value) => {
       if (last[key] === value) return;
       last[key] = value;
@@ -114,7 +120,101 @@
       window.cancelAnimationFrame(mapFrame);
       mapFrame = 0;
       if (on) layoutMap();
-      if (!on) { banner(null); boss(-1); player(null); spectate(null); el.flash.hidden = true; }
+      if (!on) { banner(null); boss(-1); player(null); spectate(null); scores(null); results(null); halving(false); intro(null); el.flash.hidden = true; }
+    };
+    // A round's new-enemy card: `card` (`kicker`, `name`, `text`, `layout`) with `picture` (an image or canvas, null until
+    // it is ready) on it, or null to hide it: "trio" three of it hovering, "float" one large hovering, "clip" one large
+    // and still (the caller hands a new picture for each frame of its motion). Its words and pictures are written only
+    // when they change.
+    const intro = (card, picture = null) => {
+      if (!card) {
+        if (last.intro) { last.intro = last.introPicture = null; el.intro.hidden = true; }
+        return;
+      }
+      if (card !== last.intro) {
+        el.introKicker.textContent = card.kicker;
+        el.introName.setAttribute("aria-label", card.name);
+        el.introName.replaceChildren(BL.hud.signLettering(card.name));
+        el.introText.textContent = card.text;
+        el.intro.dataset.art = card.layout;
+        el.intro.dataset.enemy = card.art;
+      }
+      if (picture !== last.introPicture || card !== last.intro) {
+        for (const canvas of card.layout === "trio" ? el.introArt : el.introSolo) {
+          const g = canvas.getContext("2d");
+          g.clearRect(0, 0, canvas.width, canvas.height);
+          if (!picture) continue;
+          // A lone hovering ghost keeps room over it to rise into, standing on the card's foot.
+          const fill = card.layout === "float" ? 0.8 : 1, w = picture.naturalWidth || picture.width, h = picture.naturalHeight || picture.height;
+          const k = Math.min(canvas.width / w, canvas.height / h) * fill;
+          g.drawImage(picture, (canvas.width - w * k) / 2, fill < 1 ? canvas.height - h * k : (canvas.height - h * k) / 2, w * k, h * k);
+        }
+      }
+      if (!last.intro) el.intro.hidden = false;
+      last.intro = card; last.introPicture = picture;
+    };
+    // The halving notice, shown while an hourglass stands (`on`).
+    const halving = (on) => { if (el.halving.hidden === on) el.halving.hidden = !on; };
+    // The hunters' scoreboard: `rows` (`cave` the Ooga whose face shows, `name`, `points`, `lead` for the point leader)
+    // of which `count` show; null hides it. The caller passes rows only when something on it changed. Each place's face
+    // is painted again only when the Ooga in it changes.
+    const scoreRows = [];
+    const scores = (rows, count = 0) => {
+      if (rows === null) { el.scores.hidden = true; return; }
+      el.scores.hidden = false;
+      while (scoreRows.length < count) {
+        const li = document.createElement("li"), canvas = document.createElement("canvas"), points = document.createElement("b");
+        li.className = "ghost-score";
+        canvas.setAttribute("aria-hidden", "true");
+        li.append(canvas, points);
+        scoreRows.push({ li, canvas, points, cave: null });
+      }
+      for (let i = 0; i < scoreRows.length; i++) {
+        const r = scoreRows[i];
+        if (i >= count) { if (r.li.parentNode) r.li.remove(); continue; }
+        const row = rows[i];
+        if (!r.li.parentNode) el.scores.append(r.li);
+        if (r.cave !== row.cave) {
+          r.cave = row.cave;
+          if (row.cave) BL.hud.renderFaceIcon(r.canvas, row.cave, null, 68);
+          else r.canvas.getContext("2d").clearRect(0, 0, r.canvas.width, r.canvas.height);
+        }
+        r.points.textContent = String(row.points);
+        r.li.title = row.name;
+        r.li.toggleAttribute("data-lead", !!row.lead);
+      }
+    };
+    // A won hunt's results card: `goal` its line, the podium's three steps from `top` (`cave`, `name`, `points`, first
+    // to third; a step past `rows`' count stands empty), and every hunter's tally from `rows` (`name`, `foes` the
+    // enemies they killed, `points`), best first, of which `count` show; null takes it down. Each on the podium stands
+    // whole, square to the view (BL.hud.renderBodyIcon).
+    const resultRows = [];
+    const results = (goal, top = null, rows = null, count = 0) => {
+      if (goal === null) { el.results.hidden = true; return; }
+      el.resultsGoal.textContent = goal;
+      for (let i = 0; i < el.steps.length; i++) {
+        const step = el.steps[i], here = i < count, canvas = step.querySelector("canvas");
+        step.toggleAttribute("data-empty", !here);
+        if (here && top[i].cave) BL.hud.renderBodyIcon(canvas, top[i].cave, 240, 320);
+        else canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+        step.querySelector("b").textContent = here ? top[i].name : "";
+        step.querySelector("small").textContent = here ? `${top[i].points} points` : "";
+      }
+      while (resultRows.length < count) {
+        const li = document.createElement("li"), place = document.createElement("span"), name = document.createElement("b"), tally = document.createElement("small");
+        place.className = "ghost-results-place"; place.setAttribute("aria-hidden", "true");
+        li.append(place, name, tally);
+        resultRows.push({ li, place, name, tally });
+      }
+      for (let i = 0; i < resultRows.length; i++) {
+        const r = resultRows[i];
+        if (i >= count) { if (r.li.parentNode) r.li.remove(); continue; }
+        if (!r.li.parentNode) el.resultsPlayers.append(r.li);
+        r.place.textContent = String(i + 1);
+        r.name.textContent = rows[i].name;
+        r.tally.textContent = `${rows[i].foes} enemies · ${rows[i].points} points`;
+      }
+      el.results.hidden = false;
     };
     // The spectator menu, bottom centre while the visitor is down: `mode` the view they watch from ("grave", "free" or
     // "players"; null hides it) and, watching players, `name` the one watched.
@@ -128,12 +228,16 @@
       }
       if (name !== last.specName) { last.specName = name; el.specName.textContent = name; }
     };
-    const banner = (title, sub = "") => {
+    // The banner: `title` (null hides it) over `sub`, green instead of red for a `win`, smaller and higher when `high`
+    // (over a card).
+    const banner = (title, sub = "", win = false, high = false) => {
       if (title === null) {
         if (last.title !== null) { last.title = null; el.banner.hidden = true; }
         return;
       }
       if (last.title === null) el.banner.hidden = false;
+      if (win !== last.win) { last.win = win; el.banner.toggleAttribute("data-win", win); }
+      if (high !== last.high) { last.high = high; el.banner.toggleAttribute("data-high", high); }
       text(el.title, "title", title);
       text(el.sub, "sub", sub);
     };
@@ -233,12 +337,18 @@
       // The rows go with the visit: the next one's card makes its own, and these would stand beside them.
       for (const r of lobbyRows) r.li.remove();
       lobbyRows.length = 0;
+      for (const r of scoreRows) r.li.remove();
+      scoreRows.length = 0;
+      for (const r of resultRows) r.li.remove();
+      resultRows.length = 0;
+      el.banner.removeAttribute("data-win");
+      el.banner.removeAttribute("data-high");
       el.playerToggle.removeEventListener("click", flip);
       el.playerSkip.removeEventListener("click", skip);
       show(false);
       el.flash.classList.remove("on");
     };
-    return { show, map, lobby, player, banner, boss, flash, soul, spectate, dispose };
+    return { show, map, lobby, player, banner, boss, flash, soul, spectate, scores, results, halving, intro, dispose };
   };
 
   BL.ghostHud = { create };

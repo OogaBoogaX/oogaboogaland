@@ -58,8 +58,8 @@ export class Room extends DurableObject {
     this.loopEpoch = 0;
     ctx.blockConcurrencyWhile(async () => {
       const stored = await ctx.storage.get(["loopEpoch", "sweepAt"]);
-      this.loopEpoch = stored && stored.loopEpoch || Date.now();
-      this.sweepAt = stored && stored.sweepAt || Date.now() + SWEEP_MS;
+      this.loopEpoch = stored.get("loopEpoch") || Date.now();
+      this.sweepAt = stored.get("sweepAt") || Date.now() + SWEEP_MS;
       await ctx.storage.put("loopEpoch", this.loopEpoch);
       await ctx.storage.put("sweepAt", this.sweepAt);
     });

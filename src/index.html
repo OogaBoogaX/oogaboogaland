@@ -158,6 +158,7 @@
         <p data-scene="hub" id="subtitle">an island of caves</p>
         <p data-scene="lab" hidden>EntropyLab cave</p>
         <p data-scene="factory" hidden>Lightning Factory</p>
+        <p data-scene="hangar" hidden>Lightning Jet Hangar</p>
         <p data-scene="bifrost" hidden>₿IFRÖST</p>
         <p data-scene="timechain" id="sphere-subtitle" hidden>Timechain Sphere</p>
         <p data-scene="arcade" hidden>Ooga Arcade</p>
@@ -204,6 +205,14 @@
         <button type="button" data-preset="treasury">Treasury</button>
         <button type="button" data-action="factory-mute">Sound</button>
         <button type="button" class="leave" data-action="leave">Leave<span> cave</span></button>
+      </nav>
+      <nav class="presets" aria-label="Lightning Jet Hangar" data-scene="hangar" hidden>
+        <button type="button" data-preset="entrance">Hangar</button>
+        <button type="button" data-preset="jet">Jet</button>
+        <button type="button" data-preset="boards">Boards</button>
+        <button type="button" data-preset="runway">Runway</button>
+        <button type="button" data-action="hangar-mute">Sound</button>
+        <button type="button" class="leave" data-action="leave">Factory</button>
       </nav>
       <nav class="presets" aria-label="Thro-ball" data-scene="skee" hidden>
         <button type="button" data-action="carnival-mute">Sound</button>
@@ -1603,6 +1612,7 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
       </div>
       <div class="board-dots" id="board-dots" aria-label="Pages"></div>
       <p class="board-note" id="board-note" hidden></p>
+      <div class="board-links" id="board-links" hidden></div>
       <p class="help" id="board-help"></p>
       <button type="button" class="board-resize" id="board-resize" aria-label="Resize Oogatron window; arrow keys adjust size" hidden></button>
     </dialog>
@@ -1617,16 +1627,34 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
     <div class="bottom-hud">
       <button type="button" class="act" id="act" data-action="act" hidden>JUMP!</button>
       <div class="message-stack" id="message-stack">
+        <output class="toast" id="reload-notice" data-reload="true" hidden></output>
         <output class="toast" id="toast" hidden></output>
         <div class="hint" id="hint" hidden></div>
       </div>
     </div>
     <output class="mic-note" id="mic-note" data-muted="false" hidden></output>
     <!-- HALLOWEEN: the ghost hunt's HUD (ghost-hud.js shows and hides it; no data-scene, or every arrival would show it). -->
+    <ol class="ghost-scores" id="ghost-scores" aria-label="Hunters' points" hidden></ol>
+    <p class="ghost-halving" id="ghost-halving" role="status" hidden>Halving · rifles at half power</p>
     <div class="ghost-hud" id="ghost-hud" hidden>
       <div class="ghost-boss" id="ghost-boss" hidden><span class="ghost-boss-label">The boss</span><meter id="ghost-boss-bar" min="0" max="1" value="1"></meter></div>
     </div>
     <div class="ghost-banner" id="ghost-banner" hidden><strong id="ghost-banner-title"></strong><span id="ghost-banner-sub"></span></div>
+    <section class="race-results game-intro ghost-results" id="ghost-results" aria-label="The hunt's results" hidden>
+      <p class="game-intro-goal" id="ghost-results-goal"></p>
+      <div class="ghost-podium" id="ghost-podium" aria-label="Top hunters">
+        <figure class="ghost-podium-step" data-place="2"><canvas aria-hidden="true"></canvas><figcaption><b></b><small></small></figcaption><span class="ghost-podium-block">2</span></figure>
+        <figure class="ghost-podium-step" data-place="1"><canvas aria-hidden="true"></canvas><figcaption><b></b><small></small></figcaption><span class="ghost-podium-block">1</span></figure>
+        <figure class="ghost-podium-step" data-place="3"><canvas aria-hidden="true"></canvas><figcaption><b></b><small></small></figcaption><span class="ghost-podium-block">3</span></figure>
+      </div>
+      <ul class="game-rules ghost-results-players" id="ghost-results-players" aria-label="Every hunter's enemies and points"></ul>
+    </section>
+    <section class="race-results game-intro ghost-intro" id="ghost-intro" aria-labelledby="ghost-intro-name" aria-describedby="ghost-intro-text" hidden>
+      <p class="game-intro-kicker" id="ghost-intro-kicker"></p>
+      <h2 class="game-intro-title"><span data-sign id="ghost-intro-name">Ghosts</span></h2>
+      <div class="ghost-intro-art" aria-hidden="true"><canvas width="96" height="120"></canvas><canvas width="128" height="160"></canvas><canvas width="96" height="120"></canvas><canvas class="ghost-intro-solo" width="320" height="220"></canvas></div>
+      <p class="game-intro-goal" id="ghost-intro-text"></p>
+    </section>
     <div class="ghost-flash" id="ghost-flash" hidden></div>
     <section class="race-results game-intro ghost-lobby" id="ghost-lobby" role="dialog" aria-labelledby="ghost-lobby-title" hidden>
       <div class="game-intro-glow" aria-hidden="true"><div class="game-intro-rays"></div></div>
@@ -1654,6 +1682,15 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
         <button type="button" class="ghost-spectate-next" id="ghost-spectate-next" aria-label="Next player">Next ▶</button>
       </div>
     </div>
+    <section class="hangar-sound" id="hangar-sound" aria-label="Hangar sound" hidden>
+      <div class="hangar-sound-head">
+        <h3>Sound</h3>
+        <button type="button" class="hangar-sound-toggle" id="hangar-sound-toggle" aria-pressed="true">Sound on</button>
+      </div>
+      <label class="hangar-sound-row" for="hangar-volume"><span>Volume</span><input type="range" id="hangar-volume" min="0" max="100" step="5" value="100"></label>
+      <label class="hangar-sound-row" for="hangar-vibration"><span>Vibration</span><input type="range" id="hangar-vibration" min="0" max="100" step="5" value="100"></label>
+      <p class="hangar-sound-note">Pad vibration: Chrome and Edge</p>
+    </section>
     <div class="ghost-player" id="ghost-player" hidden>
       <span class="ghost-player-note" aria-hidden="true">♪</span>
       <span class="ghost-player-title" id="ghost-player-title"></span>
@@ -1704,18 +1741,22 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/math.js"></script>
   <script src="js/daylight.js"></script>
   <script src="js/scene.js"></script>
+  <script src="js/compact-geometry.js"></script>
   <script src="js/mirror-ripples.js"></script>
   <script src="js/mirror-body.js"></script>
   <script src="js/character-visibility.js"></script>
   <script src="js/dsb-water.js"></script>
   <script src="js/gl-renderer.js"></script>
-  <script src="js/canvas-renderer.js"></script>
+  <script src="js/icon-renderer.js"></script>
+  <script src="js/canvas-renderer.js" data-defer="canvas"></script>
   <script src="js/models.js"></script>
+  <script src="js/blaze.js"></script>
   <script src="js/banana-icon.js"></script>
   <script src="js/convex.js"></script>
   <script src="js/terrain.js"></script>
   <script src="js/terrain-cutaway.js"></script>
   <script src="js/lab-wallpaper.js"></script>
+  <script src="js/lab-wallpaper-data.js" data-defer="lab-wallpaper"></script>
   <script src="js/hub-models.js"></script>
   <script src="js/dressing.js"></script>
   <script src="js/dressing-mediterranean.js"></script>
@@ -1771,7 +1812,7 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/race-models.js"></script>
   <script src="js/drop-models.js"></script>
   <script src="js/rocket.js"></script>
-  <script src="js/rocket-models.js"></script>
+  <script src="js/rocket-models.js" data-defer="orbit"></script>
   <script src="js/pool-layout.js"></script>
   <script src="js/pool-models.js"></script>
   <script src="js/pool-water.js"></script>
@@ -1779,6 +1820,9 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/pool-wildlife.js"></script>
   <script src="js/timechain-rooms.js"></script>
   <script src="js/deferred.js"></script>
+  <script src="js/terrain-snapshot.js" data-defer="terrain-cache"></script>
+  <script src="js/terrain-cache.js" data-defer="terrain-cache"></script>
+  <script src="js/build-tasks.js"></script>
   <script src="js/timechain-models.js"></script>
   <script src="js/timechain-gate.js"></script>
   <script src="js/solid-props.js"></script>
@@ -1801,44 +1845,61 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/scene-lab.js"></script>
   <script src="js/factory-feed.js"></script>
   <script src="js/factory-mock.js"></script>
+  <script src="js/factory-kiosk-core.js"></script>
   <script src="js/factory-kiosk.js"></script>
   <script src="js/stand-kiosk.js"></script>
   <script src="js/stand-models.js"></script>
   <script src="js/donation-popup.js"></script>
   <script src="js/factory-models.js"></script>
+  <script src="js/factory-scene-models.js" data-defer="factory-scene"></script>
   <script src="js/factory-window.js"></script>
   <script src="js/tess.js"></script>
   <script src="js/hub-guide.js"></script>
-  <script src="js/factory-greeter.js"></script>
-  <script src="js/kortik-models.js"></script>
-  <script src="js/kortik.js"></script>
-  <script src="js/factory-audio.js"></script>
-  <script src="js/scene-factory.js"></script>
+  <script src="js/scene-deferred.js"></script>
+  <script src="js/factory-greeter.js" data-defer="factory-scene"></script>
+  <script src="js/kortik-models.js" data-defer="factory-scene"></script>
+  <script src="js/kortik.js" data-defer="factory-scene"></script>
+  <script src="js/factory-audio.js" data-defer="factory-scene"></script>
+  <script src="js/scene-factory.js" data-defer="factory-scene"></script>
+  <script src="js/jet-models.js" data-defer="hangar-scene"></script>
+  <script src="js/jet-data.js" data-defer="hangar-scene"></script>
+  <script src="js/jet-feed.js" data-defer="hangar-scene"></script>
+  <script src="js/forklift-models.js" data-defer="hangar-scene"></script>
+  <script src="js/hangar-models.js" data-defer="hangar-scene"></script>
+  <script src="js/hangar-fire.js" data-defer="hangar-scene"></script>
+  <script src="js/hangar-terminals.js" data-defer="hangar-scene"></script>
+  <script src="js/sis-models.js" data-defer="hangar-scene"></script>
+  <script src="js/sis.js" data-defer="hangar-scene"></script>
+  <script src="js/hangar-window.js" data-defer="hangar-scene"></script>
+  <script src="js/hangar-guide.js" data-defer="hangar-scene"></script>
+  <script src="js/hangar-audio.js" data-defer="hangar-scene"></script>
+  <script src="js/scene-hangar.js" data-defer="hangar-scene"></script>
   <script src="js/arcade-models.js"></script>
+  <script src="js/arcade-scene-models.js" data-defer="arcade"></script>
   <script src="js/arcade-games.js" data-defer="arcade"></script>
   <script src="js/retro-games.js" data-defer="arcade"></script>
-  <script src="js/scene-arcade.js"></script>
+  <script src="js/scene-arcade.js" data-defer="arcade-scene"></script>
   <script src="js/carnival-audio.js" data-defer="arcade"></script>
   <script src="js/scene-carnival.js"></script>
-  <script src="js/race-track.js"></script>
-  <script src="js/racers.js"></script>
-  <script src="js/race-items.js"></script>
-  <script src="js/race-hud.js"></script>
-  <script src="js/race-audio.js"></script>
-  <script src="js/scene-race.js"></script>
+  <script src="js/race-track.js" data-defer="race"></script>
+  <script src="js/racers.js" data-defer="race"></script>
+  <script src="js/race-items.js" data-defer="race"></script>
+  <script src="js/race-hud.js" data-defer="race"></script>
+  <script src="js/race-audio.js" data-defer="race"></script>
+  <script src="js/scene-race.js" data-defer="race-scene"></script>
   <script src="js/skydiver.js" data-defer="drop"></script>
   <script src="js/drop-hud.js"></script>
   <script src="js/drop-audio.js" data-defer="drop"></script>
-  <script src="js/scene-drop.js"></script>
+  <script src="js/scene-drop.js" data-defer="drop-scene"></script>
   <script src="js/mine-models.js"></script>
   <script src="js/mine-sim.js"></script>
-  <script src="js/mine-hud.js"></script>
-  <script src="js/mine-audio.js"></script>
-  <script src="js/mine-crew.js"></script>
-  <script src="js/scene-mine.js"></script>
-  <script src="js/rocket-hud.js"></script>
-  <script src="js/rocket-audio.js"></script>
-  <script src="js/scene-orbit.js"></script>
+  <script src="js/mine-hud.js" data-defer="mine"></script>
+  <script src="js/mine-audio.js" data-defer="mine"></script>
+  <script src="js/mine-crew.js" data-defer="mine"></script>
+  <script src="js/scene-mine.js" data-defer="mine-scene"></script>
+  <script src="js/rocket-hud.js" data-defer="orbit"></script>
+  <script src="js/rocket-audio.js" data-defer="orbit"></script>
+  <script src="js/scene-orbit.js" data-defer="orbit-scene"></script>
   <script src="js/dsb-coast.js" data-defer="dsb"></script>
   <script src="js/dsb-geography.js" data-defer="dsb"></script>
   <script src="js/dsb-models.js" data-defer="dsb"></script>

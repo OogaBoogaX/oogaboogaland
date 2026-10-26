@@ -61,9 +61,11 @@ const snapshot = {
     contributors: (r.contributors || []).map(({ login, last_seen_at }) => ({ login, last_seen_at }))
   })),
   // draft rides along on pr rows so the ticker can tag them DRAFT PR.
-  recent: stats.recent.map(({ login, repo, type, occurred_at, draft }) => (
-    draft === true ? { login, repo, type, occurred_at, draft: true } : { login, repo, type, occurred_at }
-  )),
+  recent: stats.recent.map(({ login, repo, type, occurred_at, draft, event_key }) => ({
+    login, repo, type, occurred_at,
+    ...(draft === true ? { draft: true } : {}),
+    ...(typeof event_key === "string" ? { event_key } : {})
+  })),
   // The jumbotron needs logins for leaderboard labels; the caveman roster
   // needs last_seen_at for sleep states. Nothing else ships.
   contributors: stats.contributors.map((c) => ({

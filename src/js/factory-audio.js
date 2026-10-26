@@ -294,10 +294,12 @@
       tone(at, "sine", f, f, dur, level);
       tone(at, "sine", f * 2.76, f * 2.76, dur * 0.45, level * 0.4);
     };
-    // Kortik's babble: `count` syllables, each its own pitch and vowel, gruff or, shouting, high and hard.
-    const speak = (count, shout) => {
+    // Kortik's babble: `count` syllables, each its own pitch and vowel, gruff or, shouting, high and hard; or, `sis`, his
+    // sister yelling back through the hangar's door, higher and muffled.
+    const speak = (count, shout, sis = false) => {
       const th = bed.throat, now = ctx.currentTime, g = th.gain.gain, f = th.osc.frequency;
-      const base = shout ? 165 : 98, len = shout ? 0.13 : 0.11, level = Math.max(0.0002, (shout ? 0.34 : 0.22) * AT.level);
+      const base = sis ? 300 : shout ? 165 : 98, len = shout ? 0.13 : 0.11, level = Math.max(0.0002, (sis ? 0.26 : shout ? 0.34 : 0.22) * AT.level);
+      const f1 = sis ? 1.15 : 1, f2 = sis ? 0.8 : 1;
       g.cancelScheduledValues(now);
       g.setTargetAtTime(0.0001, now, 0.01);
       f.cancelScheduledValues(now);
@@ -309,8 +311,8 @@
         const p = base * (0.88 + Math.random() * 0.3), v = Math.floor(Math.random() * 5) * 2;
         f.setValueAtTime(p, t);
         f.exponentialRampToValueAtTime(p * (shout ? 1.12 : 0.88), t + len);
-        th.f1.frequency.setValueAtTime(VOWELS[v], t);
-        th.f2.frequency.setValueAtTime(VOWELS[v + 1], t);
+        th.f1.frequency.setValueAtTime(VOWELS[v] * f1, t);
+        th.f2.frequency.setValueAtTime(VOWELS[v + 1] * f2, t);
         g.setValueAtTime(0.0001, t);
         g.exponentialRampToValueAtTime(level, t + 0.025);
         g.exponentialRampToValueAtTime(0.0001, t + len);
@@ -509,7 +511,9 @@
       }],
       // His voice, `n` syllables: muttering, or yelling.
       mutter: [NEAR_REF, 0, (n) => speak(n, false)],
-      yell: [NEAR_REF, 0.05, (n) => speak(n, true)]
+      yell: [NEAR_REF, 0.05, (n) => speak(n, true)],
+      // His sister answering him through the Lightning Jet Hangar's door, heard across the hall.
+      sis: [REF, 0.08, (n) => speak(n, true, true)]
     };
     const heard = {};
     for (const name in CUES) heard[name] = 0;

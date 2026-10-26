@@ -17,7 +17,7 @@
     const dx = (bounds.max[0] - minX) / SIZE, dy = (bounds.max[1] - minY) / SIZE, diagonal = Math.hypot(dx, dy);
     const mask = new Uint8Array(count), union = new Uint8Array(count), lastUnion = new Uint8Array(count);
     const parity = new Uint8Array(count), rowParity = new Uint8Array(SIZE), distance = new Float32Array(count);
-    const actors = [], records = new WeakMap();
+    const actors = [], records = new WeakMap(), faceCursors = new WeakMap();
     let vertices = new Float64Array(0), alive = true, paused = false;
     // Registration follows the scene's bounded actor and object pools. Only
     // model changes walk a subtree or resize scratch; sampling never scans the scene.
@@ -112,8 +112,13 @@
         vertices[i] = point[0]; vertices[i + 1] = point[1]; vertices[i + 2] = point[2] - cut;
       }
       parity.fill(0); rowParity.fill(0);
-      for (const face of geometry.faces) {
-        const indices = face.i;
+      let cursor = null;
+      if (geometry.compactGeometry) {
+        cursor = faceCursors.get(geometry);
+        if (!cursor) { cursor = BL.compactGeometry.createCursor(geometry); faceCursors.set(geometry, cursor); }
+      }
+      for (let index = 0; index < geometry.faces.length; index++) {
+        const indices = (cursor ? BL.compactGeometry.readFace(geometry, index, cursor) : geometry.faces[index]).i;
         let found = false, ax = 0, ay = 0, bx = 0, by = 0, farthest = 0;
         for (let i = 0; i < indices.length; i++) {
           const ai = indices[i] * 3, bi = indices[(i + 1) % indices.length] * 3;

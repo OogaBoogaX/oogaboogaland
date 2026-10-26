@@ -275,12 +275,19 @@
   const LOOK_ROTATION = math.quat.create();
   const PILLOW_CLIP_A = new Float64Array(48), PILLOW_CLIP_B = new Float64Array(48);
   const PILLOW_FRAME = { x: 0, y: 0, z: 0, sr: 0, cr: 1, minX: 0, maxX: 0, minZ: 0, maxZ: 0, minimum: Infinity };
+  const pillowCursors = new WeakMap();
   const clipHeadToPillow = (node) => {
     if (!node.visible) return;
     const frame = PILLOW_FRAME;
     if (node.geometry) {
-      const verts = node.geometry.verts, m = node.world;
-      for (const face of node.geometry.faces) {
+      const geometry = node.geometry, verts = geometry.verts, m = node.world;
+      let cursor = null;
+      if (geometry.compactGeometry) {
+        cursor = pillowCursors.get(geometry);
+        if (!cursor) { cursor = BL.compactGeometry.createCursor(geometry); pillowCursors.set(geometry, cursor); }
+      }
+      for (let index = 0; index < geometry.faces.length; index++) {
+        const face = cursor ? BL.compactGeometry.readFace(geometry, index, cursor) : geometry.faces[index];
         let src = PILLOW_CLIP_A, dst = PILLOW_CLIP_B, count = face.i.length;
         for (let i = 0; i < count; i++) {
           const v = face.i[i] * 3, x = m[0] * verts[v] + m[4] * verts[v + 1] + m[8] * verts[v + 2] + m[12] - frame.x;
@@ -465,7 +472,7 @@
     };
     contributors.roster.forEach((contributor, i) => {
       if (ctx.playerName ? contributor.name !== ctx.playerName : !contributors.activeRoster.includes(contributor)) return;
-      const cave = models.caveman(contributors.traitsFor(contributor.name));
+      const cave = ctx.characterModel ? ctx.characterModel(contributor.name) : models.caveman(contributors.traitsFor(contributor.name));
       const h = cave.traits.height;
       let health = world.health.get(contributor.name);
       if (!health) { health = { value: HEALTH_MAX, delay: 0, stunned: false, recovering: false }; world.health.set(contributor.name, health); }
@@ -3711,7 +3718,13 @@
         && groundAt(x, z, feet, feet, cave) >= feet - STEP - 1e-7;
     };
     const resetWalkerRoute = (cave, retainPath = false) => {
-      const tx = retainPath && cave.pathing ? cave.pathing.tx : NaN, tz = retainPath && cave.pathing ? cave.pathing.tz : NaN;
+      const path = cave.pathing, traffic = cave.traffic;
+      // A direct pile approach has no cached path target. Recovery can step
+      // back outside that approach, so retain its actual destination too.
+      const direct = retainPath && path && !Number.isFinite(path.tx) && traffic.moving
+        && cave.state === "working" && !cave.bedTravel.mode;
+      const tx = direct ? traffic.tx : retainPath && path ? path.tx : NaN;
+      const tz = direct ? traffic.tz : retainPath && path ? path.tz : NaN;
       const a = cave.avoidance;
       a.active = false; a.tx = NaN; a.stalled = 0; a.best = Infinity;
       a.navigation.mode = 0; a.detour.site = -1;
@@ -3767,7 +3780,11 @@
       // Failed recovery jumps count as stalled travel, but neither replanning
       // nor relocation may interrupt the collision-checked airborne motion.
       if (airborne) return;
-      if (!progress.escaped && progress.motionless >= 0.8) {
+      // Small back-and-forth steps are not progress. Give a jittering walker
+      // the same swept escape and route repair as a stationary one, before
+      // the last-resort relocation can become eligible.
+      const stuck = progress.motionless >= 0.8 || progress.stalled >= 2;
+      if (!progress.escaped && stuck) {
         progress.escaped = true;
         const heading = Math.atan2(cave.traffic.tx - p.x, cave.traffic.tz - p.z);
         for (let side = 0; side < 5; side++) {
@@ -3779,7 +3796,7 @@
           break;
         }
       }
-      if (!progress.replanned && progress.stalled >= 1 && progress.motionless >= 0.8 && !progress.backoff) {
+      if (!progress.replanned && progress.stalled >= 1 && stuck && !progress.backoff) {
         resetWalkerRoute(cave, true); progress.replanned = true; progress.replans++;
         ctx.fx.say(cave, "COMING THROUGH!", 1.8);
         if (travel.mode === "walk" && ctx.bedRoute) startBedRoute(cave, travel.toBed ? cave.bedroll : travel.bed, travel.toBed);
@@ -5759,7 +5776,8 @@
     const playerAction = () => {
       if (!player || player.grabbedBy || player.health.stunned) return false;
       if (player.camp.burning) return dropRoll();
-      if (player.camp.seat) return standPlayer();
+      // A seat may take the act itself (`seat.act`, true when it did), as the forklift's starts it; else it stands up.
+      if (player.camp.seat) return player.camp.seat.act && player.camp.seat.act() || standPlayer();
       if (player.bedTravel.manual) return wakePlayer();
       if (weaponsEnabled && !player.weapon.reloading && !player.weapon.swapTime && !player.weapon.reloadHandoff && player.weapon.equipped && reloadMissing(player) > 0 && nearReload(player)) {
         if (!startReload(player)) hud.hint("No bananas in the pile");
