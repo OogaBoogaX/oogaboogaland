@@ -334,6 +334,13 @@
   let inputHeld = false;
   const holdSheets = () => { for (const el of document.querySelectorAll(".sheet")) el.inert = inputHeld; };
   document.addEventListener("sheetchange", holdSheets);
+  // Aiming can cancel pointerdown before its default focus transfer. Every
+  // scene shares this canvas; routed virtual-cursor panel clicks keep UI focus.
+  sceneCanvas.tabIndex = -1;
+  const focusWorld = (e) => {
+    if (e.target === sceneCanvas) sceneCanvas.focus({ preventScroll: true });
+  };
+  document.addEventListener("pointerdown", focusWorld, true);
   const heldEvent = (e) => {
     if (!inputHeld || e.target.closest && e.target.closest("#reload-notice")) return;
     if (e.type !== "touchstart" && e.type !== "touchmove") e.preventDefault();
@@ -971,6 +978,7 @@
     window.removeEventListener("blur", clearRightShift);
     for (const type of HELD_EVENTS) window.removeEventListener(type, heldEvent, true);
     document.removeEventListener("sheetchange", holdSheets);
+    document.removeEventListener("pointerdown", focusWorld, true);
     document.removeEventListener("visibilitychange", onVisibility);
     positionDebug.removeEventListener("click", copyPositionDebug);
     try {

@@ -7364,7 +7364,18 @@ const openWithSheetState = async (b, url, state) => {
   try { await b.open(url); await untilReady(b); }
   finally { await b.send("Page.removeScriptToEvaluateOnNewDocument", { identifier: script.result.identifier }); }
 };
-const hubSheetPersistence = { name: "side panel persistence", why: "rule: panels dock to left, right or bottom, slide their panels and rails together when closed, restore each open or closed layout, and merge without duplicate ownership or losing account controls", run: async (b) => {
+const sheetMovementKeys = async b => {
+  const rows = [];
+  // The browser delivers these to the focused element; targeting the canvas
+  // directly would hide the panel-focus regression.
+  for (const key of ["w", "a", "s", "d"]) {
+    await b.send("Input.dispatchKeyEvent", { type: "keyDown", key, code: "Key" + key.toUpperCase() });
+    try { rows.push(await b.evaluate('(() => { const a = __ooga.pilot.controls.read(); return [a.x, a.y]; })()')); }
+    finally { await b.send("Input.dispatchKeyEvent", { type: "keyUp", key, code: "Key" + key.toUpperCase() }); }
+  }
+  return JSON.stringify(rows);
+};
+const hubSheetPersistence = { name: "side panel persistence", why: "rule: panels dock to left, right or bottom, slide their panels and rails together when closed, restore each open or closed layout, merge without duplicate ownership or losing account controls, and return keyboard control on a canvas press", run: async (b) => {
   const url = hubPage(src, "pos=0");
   const settled = () => untilPage(b, `[...document.querySelectorAll(".sheet")].every(node => !node.getAnimations({ subtree: true }).some(animation => animation.transitionProperty && (animation.playState === "running" || animation.playState === "pending")))`);
   const motions = [];
@@ -7455,6 +7466,43 @@ const hubSheetPersistence = { name: "side panel persistence", why: "rule: panels
   record("side panel: reloading closed rails and reopening their tabs restores both windows at their previous positions",
     closedReload.shown.length === 0 && closedReload.all.every((panel, i) => !panel.hidden && near(panel.rect, last.all[i].rect))
     && reopened.shown.length === 2 && reopened.all.every((panel, i) => near(panel.rect, multiple.all[i].rect)), JSON.stringify({ closedReload, reopened }));
+  const clickHandle = async selector => {
+    const point = await b.evaluate(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+    await b.click(point.x, point.y);
+    return b.evaluate(`document.activeElement === document.querySelector(${JSON.stringify(selector)})`);
+  };
+  const mainFocus = await clickHandle("#sheet .sheet-drag"), mainKeys = await sheetMovementKeys(b);
+  const detachedFocus = await clickHandle(".sheet:not(#sheet) .sheet-drag"), detachedKeys = await sheetMovementKeys(b);
+  await b.evaluate(`(() => {
+    __ooga.pilot.freeCursor();
+    const canvas = document.getElementById("scene");
+    window.__sheetCanvasPress = false;
+    canvas.addEventListener("pointerdown", event => { event.preventDefault(); event.stopImmediatePropagation(); window.__sheetCanvasPress = event.defaultPrevented; }, { capture: true, once: true });
+  })()`);
+  await b.click(reopened.width / 2, reopened.height / 2);
+  const canvasFocus = await b.evaluate('document.activeElement === document.getElementById("scene") && window.__sheetCanvasPress');
+  const canvasKeys = await sheetMovementKeys(b);
+  const backToPanel = await clickHandle("#sheet .sheet-drag"), panelKeys = await sheetMovementKeys(b);
+  let retriedFocus = false, retryKeys;
+  try {
+    await b.evaluate(`(() => {
+      __ooga.pilot.freeCursor();
+      window.__sheetLockRequests = 0;
+      window.__sheetRetryCursor = BL.cursor.create({ canvas: document.getElementById("scene"), requestLock: () => { window.__sheetLockRequests++; }, unlock: () => {} });
+      window.__sheetRetryCursor.start();
+    })()`);
+    await b.click(reopened.width / 2, reopened.height / 2);
+    retriedFocus = await b.evaluate('window.__sheetLockRequests === 2 && !document.pointerLockElement && document.activeElement === document.getElementById("scene")');
+    retryKeys = await sheetMovementKeys(b);
+  } finally {
+    await b.evaluate('window.__sheetRetryCursor?.dispose(); delete window.__sheetRetryCursor; delete window.__sheetLockRequests; delete window.__sheetCanvasPress;');
+  }
+  const afterFocus = await b.evaluate(read), idleKeys = '[[0,0],[0,0],[0,0],[0,0]]', walkingKeys = '[[0,1],[-1,0],[0,-1],[1,0]]';
+  record("side panel: either panel owns keyboard focus until a canceled canvas press or denied-lock retry restores WASD, without closing or moving panels",
+    mainFocus && detachedFocus && backToPanel && mainKeys === idleKeys && detachedKeys === idleKeys && panelKeys === idleKeys
+    && canvasFocus && retriedFocus && canvasKeys === walkingKeys && retryKeys === walkingKeys
+    && afterFocus.shown.length === 2 && afterFocus.all.every((panel, i) => panel.open && near(panel.rect, reopened.all[i].rect))
+    && JSON.stringify(afterFocus.saved) === JSON.stringify(reopened.saved), JSON.stringify({ mainFocus, detachedFocus, backToPanel, mainKeys, detachedKeys, panelKeys, canvasFocus, retriedFocus, canvasKeys, retryKeys, afterFocus }));
   const held = await b.evaluate(`(() => {
     const H = __ooga.hud, before = localStorage.getItem("oogaboogaland.sheet.v1");
     H.setPanelsHidden(true); window.dispatchEvent(new Event("resize"));
@@ -22232,6 +22280,12 @@ scene("dsb",{label:"studio checkpoint phone",query:"&view=studio-door&weather=st
 const dsbIntegrationCheckpoint={name:"dsb integration checkpoint",why:"contract: global account UI, venue zones and direct return survive desktop and mobile scene transitions",run:async b=>{
   const step=()=>b.evaluate('for(let i=0;i<36;i++)BL.scenes.dsb.update(1/60,i/60)');
   const read=()=>b.evaluate('({zone:BL.net.state.zone,body:__ooga.dsb?.presence.body,backend:BL.net.state.backend,room:BL.net.state.room,hidden:document.getElementById("sheet").hidden,open:document.getElementById("sheet").dataset.open})');
+  const resumeCanvas=async()=>{
+    const point=await b.evaluate('(()=>{__ooga.pilot.freeCursor();const canvas=document.getElementById("scene");for(const y of [innerHeight/2,innerHeight/4,8])for(const x of [innerWidth/2,8,innerWidth-8])if(document.elementFromPoint(x,y)===canvas)return {x,y};throw new Error("No canvas point outside the open sheet");})()');
+    await b.click(point.x,point.y);
+    // Successful native lock deliberately blurs the canvas to the body.
+    return {focused:await b.evaluate('(()=>{const active=document.activeElement,canvas=document.getElementById("scene");return !active.isContentEditable&&!active.closest(".sheet,dialog,[role=dialog],input,textarea,select")&&(active===canvas||active===document.body&&document.pointerLockElement===canvas);})()'),keys:await sheetMovementKeys(b)};
+  };
   let state=await read();
   record("DSB integration: static scene exposes global sheet without backend room",state.zone==="dsb-outside"&&!state.hidden&&!state.backend&&state.room==="off",JSON.stringify(state));
   await walkingModeControls(b, "DSB");
@@ -22241,7 +22295,10 @@ const dsbIntegrationCheckpoint={name:"dsb integration checkpoint",why:"contract:
   await b.send("Input.dispatchKeyEvent",{type:"keyDown",key:"w",code:"KeyW"});await step();await b.send("Input.dispatchKeyEvent",{type:"keyUp",key:"w",code:"KeyW"});
   const moved=await b.evaluate('({x:__ooga.dsb.avatar.root.position.x,z:__ooga.dsb.avatar.root.position.z})');
   record("DSB integration: focused global sheet isolates movement",Math.hypot(focus.x-moved.x,focus.z-moved.z)<.001,JSON.stringify({focus,moved}));
-  await b.evaluate('document.activeElement.blur()');
+  const resumed=await resumeCanvas();
+  await holdKey(b,"w",.2);
+  const walking=await b.evaluate('({x:__ooga.dsb.avatar.root.position.x,z:__ooga.dsb.avatar.root.position.z,open:document.getElementById("sheet").dataset.open})');
+  record("DSB integration: pressing outside the global sheet restores WASD and character movement with the sheet still open",resumed.focused&&resumed.keys==='[[0,1],[-1,0],[0,-1],[1,0]]'&&Math.hypot(walking.x-moved.x,walking.z-moved.z)>.01&&walking.open==="true",JSON.stringify({resumed,moved,walking}));
   const zones={"dsb-studio":"dsb-studio","maxis-club":"dsb-maxis","without-rulers":"dsb-without-rulers","proof-of-ink":"dsb-proof-of-ink","big-bitcoin":"dsb-big-bitcoin","meme-factory":"dsb-meme-factory","stackchain-magazine":"dsb-stackchain","svrn-society":"dsb-svrn"};
   for(const [id,zone] of Object.entries(zones)){
     await b.evaluate(`__ooga.dsb.interiors.review(${JSON.stringify(id)},true)`);await step();state=await read();
@@ -22258,6 +22315,9 @@ const dsbIntegrationCheckpoint={name:"dsb integration checkpoint",why:"contract:
   }
   await b.evaluate('__ooga.go("bifrost");__ooga.advance(.6,.3)');
   record("DSB integration: short direct return clears DSB presence and keeps global sheet",await b.evaluate('__ooga.scene==="bifrost"&&BL.net.state.zone==="bifrost.chamber"&&!document.querySelector(".dsb-entry")&&document.getElementById("sheet").dataset.open==="true"'));
+  await b.evaluate('document.getElementById("sheet-toggle").focus()');
+  const returned=await resumeCanvas();
+  record("DSB integration: the same canvas focus handoff restores WASD after returning to Bifrost",returned.focused&&returned.keys==='[[0,1],[-1,0],[0,-1],[1,0]]',JSON.stringify(returned));
   await b.evaluate('__ooga.go("dsb");__ooga.advance(.6,.3)');
   record("DSB integration: outbound Bifrost journey uses special tunnel without island voice",await b.evaluate('__ooga.dsb.entrance.phase==="tunnel"&&BL.net.state.zone==="dsb-transit"&&document.getElementById("sheet").dataset.open==="true"'));
   await b.evaluate('__ooga.dsb.entrance.skip();__ooga.advance(.1,.1)');

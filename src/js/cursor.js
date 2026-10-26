@@ -233,6 +233,9 @@
           if (e.type === "pointerdown") { stop(); unlock(); suppressClick = false; }
           return;
         }
+        // This capture retry consumes the native event before the page's
+        // canvas focus handler, including when pointer lock is denied.
+        if (e.type === "pointerdown") canvas.focus({ preventScroll: true });
         // Right-click changes the pilot's view even before pointer lock has
         // settled. Let its press and release reach the canvas in that case.
         if (e.button === 2) {
