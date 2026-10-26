@@ -1363,6 +1363,9 @@
       setBoard(labelNode(node, D.sign[0], D.sign[1], D.sign[2]), "LIGHTNING JET\nHANGAR", "", true, { height: 1.3 });
       for (const side of [-1, 1]) addChild(node, createNode({ position: { x: side * (D.post + 0.75), y: 5.9, z: 0.6 }, geometry: FM.banner(2.2) }));
       addChild(root, node);
+      // The landing before it: its stripes, crates and cable drum (its deck and rails are the scaffold's).
+      const dress = FM.hangarLanding();
+      addChild(root, createNode({ geometry: dress.body }), createNode({ geometry: dress.glow, sightHidden: true }));
       const mouth = { x: h.x, z: h.z, ry: h.turn, floorY: h.y, room: { w: 4.4, h: 5, from: 0, to: 3.3 } };
       s.hangar = { node, stone, glow, near: 0, hum: 0, phase: BL.labPhase.create(node, mouth, HANGAR_OPENING, D.plane, HANGAR_TINT) };
       // Through the shield, the hangar as it stands, from its own stand-in (`hangar-window.js`; WebGL only, the glimpse
