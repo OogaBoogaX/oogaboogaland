@@ -4891,6 +4891,11 @@ const fireworksChecks = async () => {
   record("fireworks engine: each tier holds its sprite cap with three shows and every kind bought at once, queuing the rest until all of it bursts", Object.values(tiers).every((r) => r.peak > 0 && r.peak <= r.cap && r.queued > 0 && r.bursts === 24), JSON.stringify(tiers));
   record("fireworks engine: a show bursts over three neighbouring slots, never split across the ends of the arc", Object.values(tiers).every((r) => r.shows), JSON.stringify(tiers));
   record("fireworks engine: after the shows the sky is empty, nothing is queued and the sprite buffer is released", Object.values(tiers).every((r) => !r.live && !r.sprites && !r.buffer && !r.ranges), JSON.stringify(tiers));
+  // The stand stands against one sealed cave mouth: giving that slot a cave would put the stand in its doorway.
+  const caves = { window: {} };
+  runInNewContext(await readFile(new URL("../src/js/caves.js", import.meta.url), "utf8"), caves);
+  const standSlots = caves.window.BL.caves.slots.filter((slot) => slot.stand === "fireworks");
+  record("fireworks stand: exactly one cave slot holds the stand, and it is sealed", standSlots.length === 1 && standSlots[0].status === "dark" && !standSlots[0].scene && !standSlots[0].place, JSON.stringify(standSlots));
 };
 // The six rain steps in Node: soak alone picks them, a step holds against a hover on its boundary, and
 // the amount that falls is continuous through them.
