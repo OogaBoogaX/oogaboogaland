@@ -661,7 +661,7 @@
     UP[0] = nx / l; UP[1] = ny / l; UP[2] = nz / l;
     return UP;
   };
-  const JUNGLE = ["#173d2a", "#28643a", "#438a3e", "#83b94d"].map(hexToRgb);
+  const JUNGLE = ["#123825", "#1e5334", "#347746", "#5b994d"].map(hexToRgb);
   const BARK_RGB = hexToRgb(BARK), LIANA = hexToRgb("#3f6a33");
   const TRUNK = hexToRgb("#6b4d33"), TRUNK_LT = hexToRgb("#7a5a3c");
   // Drawn as a cartoon rainforest tree: a tall tapered trunk on flared buttress roots, limbs reaching out to a wide
