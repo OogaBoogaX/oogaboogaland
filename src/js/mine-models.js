@@ -19,7 +19,7 @@
 // as one instanced batch), rack, Cold Pool, pad, the three generators and the Crystal Bank, sky hole,
 // workbench, shelves, breaker and lever, the Fan Wall and Box Fan with their blades mounted by
 // `FAN_MOUNT`, the busbar riser, the crystal cell, pool board, trader's stall and price board, banana
-// rock, trophy shelf and the eight trophies, drop marker, lamp, flame and crystal, and `hubCart`, the cart of
+// rock, trophy shelf and the eight trophies, drop marker, lamp and crystal, and `hubCart`, the cart of
 // glowing ore that stands by the Lightning Factory's switchboard.
 (() => {
   "use strict";
@@ -712,7 +712,6 @@
     ...[[-0.25, -0.3, "#7fe0ff", 0.7], [0.2, -0.2, STONE_LIGHT, 0], [-0.1, 0.2, "#b58cff", 0.7], [0.3, 0.3, STONE, 0], [0, 0, "#f5c542", 0.7]].map(([x, z, color, emissive]) =>
       bx({ w: 0.36, h: 0.28, d: 0.36, color, emissive, offset: { x, y: 0.98, z } }))
   ));
-  const flame = cached(() => BL.hubModels.fireFlame());
   // A charge crystal, the panic power the trader sells by the bag.
   const crystal = cached(() => merge(
     lathe({ profile: [[0, 0], [0.14, 0.12], [0.1, 0.44], [0, 0.56]], segments: 6, color: "#7fe0ff", emissive: 0.8 }),
@@ -763,6 +762,6 @@
     dressingLights,
     LAYOUT, CHART, POOL_CHART, pickaxe, extinguisher, spareBreaker, smokeAlarm, chamberTimber, tunnelFrame, hubCart, chartScreen, candle, chartMark, bayLocal, cave, pebbleBox, shinyRocks, thunderBox, asic, ASIC_LOOKS, rackFrame, coldPool, pad, waterWheel, sunLeaves, steamVent,
     POWER_BUILDERS, skyHole, workbench, shelves, breakerPanel, breakerLever, fanWall, boxFan, FAN_MOUNT, busbarRiser, crystalCell, fanBlade, fanBlur, poolBoard, traderStall,
-    priceBoard, crackRock, trophyShelf, trophy, marker, lamp, flame, crystal, seal, chamberDecor
+    priceBoard, crackRock, trophyShelf, trophy, marker, lamp, crystal, seal, chamberDecor
   };
 })();

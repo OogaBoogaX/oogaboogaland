@@ -408,21 +408,7 @@
   // and orange to red at the tips, glowing. Smooth and unshadowed, its tips sway; the scene stands one on each fire
   // (`lanterns().flames`) and flickers each on its own clock. The big sign's torches burn the flat, still `flame`
   // (below) instead, baked into its mesh.
-  const BLAZE_INKS = ["#fff2b8", "#ffd24a", "#ffa030", "#ff6420"];
-  const blaze = cached(() => {
-    const ink = (t) => BLAZE_INKS[Math.min(3, Math.floor(t * 4))];
-    const lick = (h, r) => turn([[0, 0], [r * 0.72, h * 0.05], [r, h * 0.2], [r * 0.9, h * 0.38], [r * 0.62, h * 0.58], [r * 0.3, h * 0.8], [0, h]], 8, ink, 0.9);
-    const parts = [lick(0.5, 0.13)];
-    for (let k = 0; k < 3; k++) parts.push(turnedY(moved(turnedZ(lick(0.3, 0.075), -0.45), 0.05, 0.02, 0), k * 2.09 + 0.5));
-    const geo = shaded(parts), v = geo.verts;
-    for (let i = 0; i < v.length; i += 3) {
-      const a = v[i + 1] * 1.6, c = Math.cos(a), s = Math.sin(a), x = v[i], z = v[i + 2];
-      v[i] = x * c + z * s;
-      v[i + 2] = -x * s + z * c;
-    }
-    geo.sway = 0.15;
-    return unshadowed(geo);
-  });
+  const blaze = BL.blaze.smooth;
   // Overhead, the cave the Oogas moved into (`ceiling`): big clusters of stalactites dripping off the bare rock in
   // loose rows, some grown through by roots that wind down round them with moss where they come out, and a few
   // clusters of glowing teal crystal up by the side walls, all clear of the spots, the gourds' vines, the bunting and

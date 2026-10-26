@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; script-src 'sha256-AlrmyIviGRXNTzOfyKqnfpkEgPOENhe5qFb0NqRxjwU=' 'sha256-sanX5MbaJsCDbCwTY/of/YGafQiCdZL/L7L3rJ+Xr9w='; style-src 'sha256-dlCxR1BaC+TY9aPin2rGJNM7ujmhYSdYgh3Ka0d80X4='; img-src 'self' data:; media-src https://stream.noderunnersradio.com; connect-src 'self' https: wss:; worker-src 'self'; base-uri 'none'; form-action 'none'">
+    content="default-src 'none'; script-src 'sha256-fSLhgLu7rfruxlX0oFpWEYmimtI/pGop6qHQRoBQxH4=' 'sha256-sanX5MbaJsCDbCwTY/of/YGafQiCdZL/L7L3rJ+Xr9w='; style-src 'sha256-dlCxR1BaC+TY9aPin2rGJNM7ujmhYSdYgh3Ka0d80X4='; img-src 'self' data:; media-src https://stream.noderunnersradio.com; connect-src 'self' https: wss:; worker-src 'self'; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#0a0a0b">
@@ -22847,6 +22847,320 @@ void main() {
   BL.models = { characterGeometry, foliageLods, paintFoliageAtlas, addLods, beam, forwardLathe, turn, shaded, torus, along, chain, railParts, columnParts, deckGrid, deckPosts, deckParts, deckRailSpans, stairParts, stairTreads, lanternParts, LANTERN_GLASS, geometry, pushVert, face, cutCylinder, voxCoords, box, bevelBox, panel, lathe, glassVessel, attachGlassShell, tube, ring, polyline, merge, forward, moved, turnedX, turnedY, turnedZ, prism, cached, cachedSteps, variants, scopedMap, track, setScope, withScope, release, assertReleased, noShadow, makeVox, voxelGeometry, voxelFaces, banana, bananaGeometry, bananaTileGeometry, bananaPileCoreGeometry, bananaPileRadiusScale, bananaPileHeightOffset, BANANA_AMMO_SCALE, BANANA_PILE_PROFILE, particleGeometry, spareMagazine, caveman, CLUB_PALETTE, GOLD_CLUB_PALETTE, labRoom, buildableGeos, crate, die, dieRotationFor, SWAG, TIER_COLORS };
 })();
 
+// ---- js/blaze.js ----
+// The page's fires in one place: the arcade hall's smooth `blaze` (the geometry every merged fire in the hall is
+// built from) and the island's flame, a rig of glowing blocks that pour up off a pit's coals.
+// A rig also breathes its embers up out of the pit and reports a `light` level so the scene can pulse the pit's
+// light with the flame. Nothing here allocates per frame; a rig's blocks and ember pool are built once.
+(() => {
+  "use strict";
+  const BL = window.BL = window.BL || {};
+  const { box, turn, shaded, moved, turnedY, turnedZ, noShadow, cached, variants } = BL.models;
+  const { createNode, addChild } = BL.scene;
+  const { mulberry32 } = BL.math;
+
+  // ---- the arcade hall's smooth blaze -------------------------------------------------------------------------
+  // A fat teardrop licking up to a point with three smaller tongues leaning out round its foot, the whole twisted a
+  // little as it rises, white-gold at the root through yellow and orange to red at the tips. Smooth and unshadowed,
+  // its tips sway. The arcade stands it at hall size.
+  const BLAZE_INKS = ["#fff2b8", "#ffd24a", "#ffa030", "#ff6420"];
+  const buildSmooth = (scale) => {
+    const ink = (t) => BLAZE_INKS[Math.min(3, Math.floor(t * 4))];
+    const lick = (h, r) => turn([[0, 0], [r * 0.72, h * 0.05], [r, h * 0.2], [r * 0.9, h * 0.38], [r * 0.62, h * 0.58], [r * 0.3, h * 0.8], [0, h]], 8, ink, 0.9);
+    const parts = [lick(0.5, 0.13)];
+    for (let k = 0; k < 3; k++) parts.push(turnedY(moved(turnedZ(lick(0.3, 0.075), -0.45), 0.05, 0.02, 0), k * 2.09 + 0.5));
+    const geo = shaded(parts), v = geo.verts;
+    for (let i = 0; i < v.length; i += 3) {
+      const a = v[i + 1] * 1.6, c = Math.cos(a), s = Math.sin(a), x = v[i] * scale, z = v[i + 2] * scale;
+      v[i + 1] *= scale;
+      v[i] = x * c + z * s;
+      v[i + 2] = -x * s + z * c;
+    }
+    geo.sway = 0.15;
+    return noShadow(geo);
+  };
+  const smooth = cached(() => buildSmooth(1));
+  // The one flicker clock every fire in the page reads: the arcade's flames, the pits' fires and lights.
+  const flare = (t, phase = 0) => Math.sin(t * 11 + phase) * 0.07 + Math.sin(t * 17.3 + phase * 0.48 + 1.1) * 0.05;
+
+  // The ember lives here. `emberModel` is the hub's `ember` (the critters draw it as an instanced batch);
+  // `buildEmberModel` makes a fresh object of the same look for a second batch, because the WebGL renderer keys
+  // an instanced batch by geometry: two batches sharing one object leave one of them never drawn. `emberGeometry`
+  // is a distinct object too, for a rig's plain ember nodes.
+  const buildEmberModel = () => noShadow(box({ w: 0.05, h: 0.05, d: 0.05, color: "#ff8a2a", emissive: 1 }));
+  const emberModel = cached(buildEmberModel);
+  // The blaze's own ember, clear of the critters' batch (a plain node sharing their geometry is never drawn) and
+  // big enough to read against the fire.
+  const emberGeometry = cached(() => noShadow(box({ w: 0.1, h: 0.1, d: 0.1, color: "#ffb347", emissive: 1 })));
+  // A spark the fire throws off: the frequent little bits, its own geometry so a rig need not pass one.
+  const sparkGeometry = cached(() => noShadow(box({ w: 0.12, h: 0.12, d: 0.12, color: "#ffd27a", emissive: 1 })));
+  // ---- the island's flame ---------------------------------------------------------------------------------------
+  // A fire reads as fire by how it moves: it pours upward, narrows and breaks into licks. So a pit's flame is a
+  // stream of small glowing blocks rather than fixed shapes: each rises off the coals, drifts in toward the flame's
+  // axis, tumbles, shrinks and dies, and is reborn at the foot. A block's colour is set by where it lives, not by
+  // its age: white-gold blocks stay low and short-lived, yellow and orange ones climb further, and small red licks
+  // start higher and break off at the top, so the stream shades white to red from root to tip. Each band shares
+  // one geometry (four instanced draws) and the bloom softens the edges. A slow gust and a quicker flutter lean the
+  // upper stream; nothing allocates per frame.
+  const FLAME_BANDS = [
+    // Flame band object properties:
+    //   color:    hex color string, block color in band
+    //   count:    number of blocks to spawn in band
+    //   y0:       minimum vertical start height (fraction of flame)
+    //   y1:       maximum vertical start height (fraction of flame)
+    //   r:        horizontal radius at this band (max distance from axis)
+    //   size0:    minimum block size
+    //   size1:    maximum block size
+    //   life0:    minimum lifespan of a block (seconds)
+    //   life1:    maximum lifespan of a block (seconds)
+    //   vy0:      minimum upward speed (units/s)
+    //   vy1:      maximum upward speed (units/s)
+    //   stretch:  block stretch (y axis scale vs x/z)
+    //   glow:     how much bloom/glow to add
+
+    // Band 0: White-hot core
+    {
+      color: "#fff0a8",
+      count: 10,
+      y0: 0.16,
+      y1: 0.20,
+      r: 0.3,
+      size0: 0.17,
+      size1: 0.23,
+      life0: 1.45,
+      life1: 2.0,
+      vy0: 0.1,
+      vy1: 0.3,
+      stretch: 0.2,
+      glow: 2.8
+    },
+    // Band 1: Yellow body
+    {
+      color: "#ffd03a",
+      count: 8,
+      y0: 0.20,
+      y1: 0.34,
+      r: 0.25,
+      size0: 0.16,
+      size1: 0.21,
+      life0: 0.8,
+      life1: 1.3,
+      vy0: 0.4,
+      vy1: 0.6,
+      stretch: 0.5,
+      glow: 2.2
+    },
+    // Band 2: Orange mid-licks
+    {
+      color: "#ff8a1e",
+      count: 6,
+      y0: 0.24,
+      y1: 0.4,
+      r: 0.3,
+      size0: 0.12,
+      size1: 0.16,
+      life0: 1.0,
+      life1: 1.5,
+      vy0: 0.4,
+      vy1: 0.6,
+      stretch: 0.9,
+      glow: 1.4
+    },
+    // Band 3: Red tips
+    {
+      color: "#e0381a",
+      count: 7,
+      y0: 0.5,
+      y1: 0.65,
+      r: 0.16,
+      size0: 0.12,
+      size1: 0.17,
+      life0: 0.53,
+      life1: 1.1,
+      vy0: 0.55,
+      vy1: 0.8,
+      stretch: 1.2,
+      glow: 1.0
+    }
+  ];
+  // A block a little taller than wide, so a rising one reads as a lick, not a cube.
+  // How fast a rising block is drawn in toward the flame's axis, per second: what narrows the stream to a point.
+  const FLAME_PULL = 1.2;
+  // The rise is slowed a little; a block holds its width through the lower half of its climb, then fades quickly
+  // to nothing as it rises into the air, so the stream dissolves instead of carrying solid boxes up with it.
+  // FLAME_RATE is the flame's own clock: below 1 the whole stream slows \u2014 rise, life, sway, spin and light \u2014 while
+  // its shape and height stay put (a block travels the same distance over a longer wall-clock life). Embers and
+  // sparks keep the page's clock, so the fire throws them as often as before.
+  const FLAME_RATE = 0.8, FLAME_RISE = 0.72, FLAME_FADE_FROM = 0.5, FLAME_FADE_TO = 0.85;
+  const flameBlock = variants((i) => noShadow(box({ w: 1, h: 1.8, d: 1, color: FLAME_BANDS[i].color, emissive: 1 })));
+  // The glowing bed the flame stands on: coals wedged in the gaps between the pit's three crossed logs (which lie
+  // at 0, 60 and 120 degrees, 0.12 to 0.29 up), and one bright coal where they cross.
+  const COALS = [0, 1, 2, 3, 4, 5].map((k) => {
+    const a = (30 + 60 * k) * Math.PI / 180, r = k % 2 ? 0.2 : 0.27;
+    return [Math.cos(a) * r, 0.09, Math.sin(a) * r, k % 2 ? 0.11 : 0.14, "#d8481a"];
+  }).concat([[0, 0.24, 0, 0.17, "#ff8a2a"]]);
+  const coalBed = cached(() => noShadow(BL.models.merge(...COALS.map(([x, y, z, s, color]) => moved(box({ w: s, h: s * 0.5, d: s, color, emissive: 1 }), x, y, z)))));
+  // The ignition volumes the block flame occupies, in the pit's frame (centre, then half extents): sized from the
+  // blocks' outer edges sampled over many seconds, widest just above the logs and narrowing to the licks.
+  const FLAME_BOXES = new Float32Array([
+    0, 0.29, 0, 0.38, 0.11, 0.38,
+    0, 0.5, 0, 0.26, 0.1, 0.26,
+    0, 0.7, 0, 0.2, 0.1, 0.2,
+    0, 0.9, 0, 0.17, 0.1, 0.17,
+    0, 1.12, 0, 0.15, 0.12, 0.15
+  ]);
+  const EMBER_POOL = 6;
+  // `opts`: x, y, z is the rig's own place in its parent; emitX/emitY/emitZ the pit's world place for the fx; scale;
+  // sightHidden for the hub's outline registry; embers `{ fx, bits }` to breathe embers (the hub's ember model).
+  const createVoxelRig = (opts) => {
+    const o = opts || {}, scale = o.scale || 1, rand = mulberry32(o.seed || 7);
+    const root = createNode({ position: { x: o.x || 0, y: o.y || 0, z: o.z || 0 }, scale: { x: scale, y: scale, z: scale } });
+    if (o.sightHidden) root.sightHidden = true;
+    const coals = createNode({ geometry: coalBed(), glow: 1 });
+    if (o.sightHidden) coals.sightHidden = true;
+    addChild(root, coals);
+    // A block is reborn at its band's foot with a fresh place, speed, size, life and spin.
+    const spawn = (p) => {
+      const B = p.band, a = rand() * Math.PI * 2, r = Math.sqrt(rand()) * B.r;
+      p.x = Math.cos(a) * r;
+      p.z = Math.sin(a) * r;
+      p.y = B.y0 + rand() * (B.y1 - B.y0);
+      p.vy = (B.vy0 + rand() * (B.vy1 - B.vy0)) * FLAME_RISE;
+      p.size = B.size0 + rand() * (B.size1 - B.size0);
+      p.life = B.life0 + rand() * (B.life1 - B.life0);
+      p.age = 0;
+      p.spin = (rand() - 0.5) * 4.5;
+      p.tilt = (rand() - 0.5) * 0.3;
+      p.wob = rand() * Math.PI * 2;
+      p.node.rotation.y = rand() * Math.PI * 2;
+    };
+    const blocks = [];
+    for (let b = 0; b < FLAME_BANDS.length; b++) {
+      const B = FLAME_BANDS[b], geo = flameBlock(b);
+      for (let i = 0; i < B.count; i++) {
+        const node = createNode({ geometry: geo, glow: B.glow });
+        if (o.sightHidden) node.sightHidden = true;
+        addChild(root, node);
+        const p = { node, band: B, age: 0, life: 1, x: 0, y: 0, z: 0, vy: 1, size: 0.1, spin: 0, tilt: 0, wob: 0 };
+        // Start part-way through a life, so the flame is whole from its first frame.
+        spawn(p);
+        p.age = rand() * p.life;
+        p.y += p.vy * p.age;
+        const k = Math.exp(-FLAME_PULL * p.age);
+        p.x *= k;
+        p.z *= k;
+        blocks.push(p);
+      }
+    }
+    const embers = [];
+    if (o.embers) {
+      const geo = emberGeometry();
+      for (let i = 0; i < EMBER_POOL; i++) {
+        const node = createNode({ geometry: geo, visible: false, glow: 1 });
+        if (o.sightHidden) node.sightHidden = true;
+        addChild(root, node);
+        embers.push({ node, life: 0, max: 1, vx: 0, vy: 0, vz: 0, spin: 0 });
+      }
+    }
+    const emberBits = o.embers ? (o.embers.bits || [sparkGeometry()]) : null;
+    let timer = 0.3 + Math.random() * 0.6, sparkTimer = 0.1;
+    const rig = {
+      root, blocks, boxes: FLAME_BOXES, light: 1,
+      update(dt, elapsed) {
+        // The flame runs on its own clock (FLAME_RATE): every motion below is scaled by it, the embers' and sparks'
+        // above it are not.
+        const sdt = dt * FLAME_RATE, st = elapsed * FLAME_RATE;
+        // The whole flame leans with a slow gust and a quicker flutter, more the higher a block has climbed.
+        const gx = Math.sin(st * 0.7) * 0.1 + Math.sin(st * 2 + 1.3) * 0.04;
+        const gz = Math.cos(st * 0.55 + 0.4) * 0.07 + Math.sin(st * 2.3) * 0.03;
+        const pull = Math.exp(-FLAME_PULL * sdt);
+        // A click on the pit flares it: the hub's lamp loop raises the root's `flare` and lets it fall back.
+        // The lamp loop hands the fire's lit glow and click flare to the rig; the blocks follow both,
+        // since the rig root has no geometry of its own.
+        const lampK = root.lampK === undefined ? 1 : root.lampK;
+        const lampBase = root.lampBase || 1;
+        const lampRatio = (root.lampGlow === undefined ? lampBase : root.lampGlow) / lampBase;
+        const flared = root.flare > 0 ? root.flare : 0, grow = 1 + flared * 0.35, bright = lampK * (1 + flared) * lampRatio;
+        for (let i = 0; i < blocks.length; i++) {
+          const p = blocks[i], node = p.node;
+          p.age += sdt;
+          if (p.age >= p.life) spawn(p);
+          const t = p.age / p.life, lift = p.y * p.y;
+          p.y += p.vy * sdt;
+          p.x *= pull;
+          p.z *= pull;
+          node.position.x = p.x + gx * lift + Math.sin(st * 6.8 + p.wob) * 0.025 * p.y;
+          node.position.y = p.y;
+          node.position.z = p.z + gz * lift + Math.cos(st * 5.5 + p.wob) * 0.02 * p.y;
+          // Grows in over its first eighth, holds its width through the lower half, then fades quickly to nothing
+          // as it climbs into the air, drawn thinner and taller so the upper blocks pull into licks.
+          const fade = Math.min(1, Math.max(0, (FLAME_FADE_TO - t) / (FLAME_FADE_TO - FLAME_FADE_FROM)));
+          const s = p.size * grow * Math.min(1, t * 8) * fade, stretch = 1 + t * p.band.stretch;
+          node.scale.y = s * stretch;
+          node.scale.x = node.scale.z = s / Math.sqrt(stretch);
+          node.rotation.y += p.spin * sdt;
+          node.rotation.x = Math.sin(st * 3.8 + p.wob) * 0.1;
+          node.rotation.z = p.tilt + gx * 1.2;
+          node.glow = p.band.glow * bright * (0.75 + 0.5 * fade);
+        }
+        rig.light = 1 + flare(st) + gx * 0.5 + flared * 0.5;
+        coals.glow = 1.1 + Math.sin(st * 1.7) * 0.15 + flare(st, 2) * 1.5;
+        if (!embers.length) return;
+        const ex = o.emitX !== undefined ? o.emitX : root.position.x;
+        const ey = o.emitY !== undefined ? o.emitY : root.position.y;
+        const ez = o.emitZ !== undefined ? o.emitZ : root.position.z;
+        // Small sparks: the frequent little bits the fire throws off, a few a second, short-lived.
+        if (o.embers.fx) {
+          sparkTimer -= dt;
+          if (sparkTimer <= 0) {
+            sparkTimer = 0.12 + Math.random() * 0.22;
+            const sa = Math.random() * Math.PI * 2, sr = 0.12 + Math.random() * 0.3;
+            o.embers.fx.burst(ex + Math.cos(sa) * sr * scale, ey + (0.95 + Math.random() * 0.45) * scale, ez + Math.sin(sa) * sr * scale, 2, emberBits, 0.8);
+          }
+        }
+        // Embers: mostly small bits, now and then a larger one that rides up out of the fire.
+        timer -= dt;
+        if (timer <= 0) {
+          timer = 0.3 + Math.random() * 0.6;
+          let e = embers[0];
+          for (let i = 0; i < embers.length; i++) if (!embers[i].life) { e = embers[i]; break; }
+          // Embers leave from the top of the fire, clear of the flame's body and the pit stones, and drift outward as
+          // they rise, so a viewer sees them come out of the fire instead of through its body.
+          const a = Math.random() * Math.PI * 2, r = 0.22 + Math.random() * 0.28, outward = 0.2 + Math.random() * 0.3;
+          e.node.visible = true;
+          e.node.glow = 1.5;
+          e.node.position.x = Math.cos(a) * r;
+          e.node.position.y = 1.1 + Math.random() * 0.4;
+          e.node.position.z = Math.sin(a) * r;
+          const sc = Math.random() < 0.15 ? 1.6 + Math.random() * 0.6 : 0.6 + Math.random() * 0.35;
+          e.node.scale.x = e.node.scale.y = e.node.scale.z = sc;
+          e.vx = Math.cos(a) * outward + (Math.random() - 0.5) * 0.1;
+          e.vy = 0.45 + Math.random() * 0.4;
+          e.vz = Math.sin(a) * outward + (Math.random() - 0.5) * 0.1;
+          e.spin = (Math.random() - 0.5) * 2.2;
+          e.life = e.max = 1.2 + Math.random() * 1;
+        }
+        for (let i = 0; i < embers.length; i++) {
+          const e = embers[i];
+          if (!e.life) continue;
+          e.life -= dt;
+          if (e.life <= 0) { e.node.visible = false; e.life = 0; continue; }
+          e.node.position.x += e.vx * dt;
+          e.node.position.y += e.vy * dt;
+          e.node.position.z += e.vz * dt;
+          e.vy -= 0.2 * dt;
+          e.node.rotation.y += e.spin * dt;
+          const k = Math.min(1, e.life / 0.5) * (0.6 + e.life * 0.35);
+          e.node.scale.x = e.node.scale.y = e.node.scale.z = k;
+        }
+      }
+    };
+    return rig;
+  };
+
+  BL.blaze = { smooth, flare, createVoxelRig, emberModel, buildEmberModel };
+})();
+
 // ---- js/banana-icon.js ----
 // The Bananas panel's nine-pixel icon, shared by painted screens and solid signs.
 (() => {
@@ -27674,7 +27988,7 @@ void main() {
   // The lawn's instanced batch takes the same tuft as its own geometry object, so it never shares a GPU record
   // with the scattered tufts.
   const lawnTuft = cached(() => ({ ...grassTuft() }));
-  // Firepit geometry only; the flame is fireFlame.
+  // Firepit geometry only; the fires themselves live in the blaze module.
   const firepit = cached(() => {
     const rand = mulberry32(131);
     return merge(
@@ -27685,19 +27999,6 @@ void main() {
       }),
       ...Array.from({ length: 3 }, (_, n) => turn(box({ w: 0.9, h: 0.14, d: 0.14, color: WOOD_DK, offset: { y: 0.12 + n * 0.05 } }), n * Math.PI / 3, 0.18))
     );
-  });
-  const FLAME = [[0.34, 0.3, 0.22, 0, 0, "#ff9a2e"], [0.26, 0.22, 0.44, 0.02, -0.02, "#ffc148"], [0.2, 0.18, 0.6, 0.06, 0.03, "#ffc148"], [0.16, 0.14, 0.72, 0.03, 0.05, "#fff0b0"], [0.12, 0.12, 0.84, -0.01, 0.02, "#fff0b0"], [0.14, 0.16, 0.36, -0.16, 0.04, "#ffc148"], [0.12, 0.14, 0.5, 0.17, 0.1, "#ff9a2e"]];
-  const fireFlame = cached(() => {
-    const geometry = noShadow(merge(...FLAME.map(([w, h, y, x, z, color]) => box({ w, h, d: w, color, emissive: 1, offset: { x, y, z } }))));
-    // Keep ignition aligned with the rendered flames, not the firepit's wide
-    // NPC avoidance circle. Each row is a box centre and half extents.
-    geometry.fireBoxes = new Float32Array(FLAME.length * 6);
-    for (let i = 0; i < FLAME.length; i++) {
-      const [w, h, y, x, z] = FLAME[i], at = i * 6;
-      geometry.fireBoxes[at] = x; geometry.fireBoxes[at + 1] = y; geometry.fireBoxes[at + 2] = z;
-      geometry.fireBoxes[at + 3] = w * 0.5; geometry.fireBoxes[at + 4] = h * 0.5; geometry.fireBoxes[at + 5] = w * 0.5;
-    }
-    return geometry;
   });
   const WINGS = [["#f2c94c", "#e04a3a"], ["#f3efe4", "#6f9fca"]];
   const butterfly = variants((i) => {
@@ -27711,7 +28012,8 @@ void main() {
     ));
   });
   const firefly = cached(() => noShadow(box({ w: 0.06, h: 0.06, d: 0.06, color: "#d9ff6a", emissive: 1 })));
-  const ember = cached(() => noShadow(box({ w: 0.05, h: 0.05, d: 0.05, color: "#ff8a2a", emissive: 1 })));
+  // The ember model lives in the blaze module now.
+  const ember = cached(() => BL.blaze.emberModel());
   const vine = cached(() => {
     const rand = mulberry32(53);
     const leaves = [];
@@ -27785,7 +28087,7 @@ void main() {
       ...[-0.8, 0.8].map(brace)
     );
   });
-  BL.hubModels = { SIGN_GLYPHS, SIGN_ICONS, AMMO_BANANA, jetpack, jetFlame, caveMouthRim, mirrorPanel, matrixPrisonBars, sealedCaveFace, matrixLeverPlate, matrixLeverLights, matrixLeverHub, matrixLeverArm, matrixLeverGrip, matrixLeverLabels, matrixGlyph, caveSign, postSign, CAVE_SIGN_WIDTH, CAVE_SIGN_HEIGHT, gate, caveShelves, entropyLab, bedroll, tree, bush, rock, breakableRock, voxelRock, puff, clumped, leafy, pointedLeaf, flower, FLOWER_INKS, limb, padNormals, flatInto, canopySupport, withJungle, liana, sagPoints, sprig, garland, bamboo, lashing, log, thatch, altarSlab, altarBlock, woodCrate, barrel, flowerTuft, torch, grass, lawnTuft, firepit, fireFlame, butterfly, firefly, ember, vine, cloud, ladder, dock, TREE_HEIGHT };
+  BL.hubModels = { SIGN_GLYPHS, SIGN_ICONS, AMMO_BANANA, jetpack, jetFlame, caveMouthRim, mirrorPanel, matrixPrisonBars, sealedCaveFace, matrixLeverPlate, matrixLeverLights, matrixLeverHub, matrixLeverArm, matrixLeverGrip, matrixLeverLabels, matrixGlyph, caveSign, postSign, CAVE_SIGN_WIDTH, CAVE_SIGN_HEIGHT, gate, caveShelves, entropyLab, bedroll, tree, bush, rock, breakableRock, voxelRock, puff, clumped, leafy, pointedLeaf, flower, FLOWER_INKS, limb, padNormals, flatInto, canopySupport, withJungle, liana, sagPoints, sprig, garland, bamboo, lashing, log, thatch, altarSlab, altarBlock, woodCrate, barrel, flowerTuft, torch, grass, lawnTuft, firepit, butterfly, firefly, ember, vine, cloud, ladder, dock, TREE_HEIGHT };
 })();
 
 // ---- js/dressing.js ----
@@ -60200,6 +60502,15 @@ void main() {
   const { createNode, addChild, removeChild } = BL.scene;
   const SEED = 9137;
   const BUTTERFLY_CAP = 24, FIREFLY_CAP = 48, EMBER_CAP = 16;
+  // The fires breathe a few embers at a time; a tenth of each cycle is a burst of faster-rising ones.
+  const EMBER_CALM = 4, EMBER_BURST_COUNT = 10, EMBER_PERIOD = 8, EMBER_BURST = 0.8, EMBER_BURST_STEP = 0.04, EMBER_BURST_SPEED = 1.8;
+  // An ember fades as it climbs and is reborn at the foot. Capping how high it climbs keeps that rebirth a
+  // small step at the top rather than a leap, so the proximity gate's resumed frame never catches a jump.
+  const EMBER_RISE = 1.8;
+  // The hearth's ember batch needs its own geometry object: the WebGL renderer keys an instanced batch by
+  // geometry, so sharing the plaza batch's would leave one of the two never drawn.
+  let hearthEmberGeometry = null;
+  const hearthEmber = () => hearthEmberGeometry || (hearthEmberGeometry = BL.blaze.buildEmberModel());
   const FRACTION = { high: 1, medium: 0.5, low: 0.25 };
   // FADE_STEP: seconds between one individual appearing or leaving.
   const FADE_STEP = 0.12;
@@ -60233,13 +60544,13 @@ void main() {
     data[o + 18] = matrixLiving ? 2 : 0;
     data[o + 19] = 0;
   };
-  const settle = (batch, target, dt) => {
+  const settle = (batch, target, dt, step = FADE_STEP) => {
     if (batch.shown === target) {
       batch.fade = 0;
       return;
     }
     batch.fade += dt;
-    if (batch.fade < FADE_STEP) return;
+    if (batch.fade < step) return;
     batch.fade = 0;
     batch.shown += batch.shown < target ? 1 : -1;
   };
@@ -60248,7 +60559,7 @@ void main() {
     const butterflies = [makeBatch(hubModels.butterfly(0), BUTTERFLY_CAP, true, !!activeAt), makeBatch(hubModels.butterfly(1), BUTTERFLY_CAP, true, !!activeAt)];
     const fireflies = makeBatch(hubModels.firefly(), FIREFLY_CAP, true, !!activeAt);
     const embers = makeBatch(hubModels.ember(), EMBER_CAP, true, !!activeAt);
-    const secondaryEmbers = secondaryFire ? makeBatch(hubModels.ember(), EMBER_CAP, true, !!activeAt) : null;
+    const secondaryEmbers = secondaryFire ? makeBatch(hearthEmber(), EMBER_CAP, true, !!activeAt) : null;
     const burstVx = new Float32Array(FIREFLY_CAP), burstVz = new Float32Array(FIREFLY_CAP);
     const emberT = new Float32Array(EMBER_CAP), emberPeriod = new Float32Array(EMBER_CAP);
     const secondaryEmberT = secondaryFire ? new Float32Array(EMBER_CAP) : null, secondaryEmberPeriod = secondaryFire ? new Float32Array(EMBER_CAP) : null;
@@ -60277,6 +60588,7 @@ void main() {
     }
     const seedEmbers = (batch, source, times, periods) => {
       if (!source) return;
+      batch.prevShown = 0;
       const y = Number.isFinite(source.y) ? source.y : heightAt(source.x, source.z);
       for (let i = 0; i < EMBER_CAP; i++) {
         batch.hx[i] = source.x;
@@ -60290,6 +60602,13 @@ void main() {
     };
     seedEmbers(embers, fire, emberT, emberPeriod);
     seedEmbers(secondaryEmbers, secondaryFire, secondaryEmberT, secondaryEmberPeriod);
+    // Each fire's burst cycle runs on its own proximity-paused clock: it advances only while that fire is
+    // near, so a distant view neither advances the burst nor leaves it to catch up when the view returns.
+    const fireX = fire ? fire.x : 0, fireZ = fire ? fire.z : 0;
+    const fireY = fire ? (Number.isFinite(fire.y) ? fire.y : heightAt(fire.x, fire.z)) : 0;
+    const hearthX = secondaryFire ? secondaryFire.x : 0, hearthZ = secondaryFire ? secondaryFire.z : 0;
+    const hearthY = secondaryFire ? (Number.isFinite(secondaryFire.y) ? secondaryFire.y : heightAt(secondaryFire.x, secondaryFire.z)) : 0;
+    let emberClock = 0, hearthClock = 0, emberNear = true, hearthNear = true;
     addChild(root, butterflies[0].node, butterflies[1].node, fireflies.node, embers.node);
     if (secondaryEmbers) addChild(root, secondaryEmbers.node);
     // 0 needs placement (also after a burst), 1 rests and 2 moves. Resting instances keep their pose;
@@ -60340,17 +60659,22 @@ void main() {
       }
       return changed;
     };
-    const updateEmbers = (e, times, periods, dt, elapsed) => {
+    // An ember's speed is dealt when its rise begins, and kept for the whole rise: a burst's embers are fast
+    // from the moment they leave the fire, and nothing changes speed mid-flight.
+    const updateEmbers = (e, times, periods, dt, clock, burstNow) => {
       const data = e.node.instanceData;
       let changed = false;
       for (let i = 0; i < e.shown; i++) {
-        if (activeAt && !step(e, i, dt, elapsed)) continue;
+        if (activeAt && !step(e, i, dt, clock)) continue;
         if (!activeAt || e.active[i] === 2) times[i] += dt;
-        if (times[i] >= periods[i]) times[i] -= periods[i];
-        const time = activeAt ? e.time[i] : elapsed, k = times[i] / periods[i];
+        if (times[i] >= periods[i]) {
+          times[i] -= periods[i];
+          e.speed[i] = (0.8 + rand() * 0.6) * (burstNow ? EMBER_BURST_SPEED : 1);
+        }
+        const time = activeAt ? e.time[i] : clock, k = times[i] / periods[i];
         const x = e.hx[i] + Math.sin(time * 2.6 + e.phase[i]) * 0.12 * k;
         const z = e.hz[i] + Math.cos(time * 2.1 + e.phase[i]) * 0.12 * k;
-        writeInstance(data, i * 20, time * 3 + e.phase[i], 1, x, e.hy[i] + times[i] * e.speed[i], z, 1 - k, e.matrixLiving);
+        writeInstance(data, i * 20, time * 3 + e.phase[i], 1, x, e.hy[i] + Math.min(times[i] * e.speed[i], EMBER_RISE), z, 1 - k, e.matrixLiving);
         changed = true;
       }
       return changed;
@@ -60366,13 +60690,41 @@ void main() {
       settle(butterflies[0], butterflyTarget, dt);
       settle(butterflies[1], butterflyTarget, dt);
       settle(fireflies, Math.round(FIREFLY_CAP * fraction * night), dt);
-      settle(embers, fire ? Math.round(EMBER_CAP * fraction * night * fireLit) : 0, dt);
-      if (secondaryEmbers) settle(secondaryEmbers, Math.round(EMBER_CAP * fraction * secondaryFireLit), dt);
+      // The pits breathe two to four embers by day and night; a tenth of the cycle is a burst of more, rising
+      // faster, the two fires half a cycle apart. Each cycle runs on its own proximity-paused clock, advanced
+      // only while its fire is near, so a distant view neither advances the burst nor catches up on return.
+      if (activeAt) {
+        if (fire) emberNear = activeAt(fireX, fireY + 1, fireZ, emberNear, 24, 32);
+        if (secondaryFire) hearthNear = activeAt(hearthX, hearthY + 1, hearthZ, hearthNear, 24, 32);
+      }
+      if (!activeAt || fire && emberNear) emberClock += dt;
+      if (secondaryFire && (!activeAt || hearthNear)) hearthClock += dt;
+      const burst = (emberClock % EMBER_PERIOD) < EMBER_BURST;
+      const calm = Math.max(2, Math.round(EMBER_CALM * fraction));
+      const emberTarget = fire ? Math.round((burst ? EMBER_BURST_COUNT * fraction : calm) * fireLit) : 0;
+      settle(embers, emberTarget, dt, burst || embers.shown > emberTarget ? EMBER_BURST_STEP : FADE_STEP);
+      for (let i = embers.prevShown; i < embers.shown; i++) {
+        emberT[i] = 0;
+        embers.speed[i] = (0.8 + rand() * 0.6) * (burst ? EMBER_BURST_SPEED : 1);
+        if (activeAt) { embers.active[i] = 0; embers.node.instanceData[i * 20 + 15] = 0; }
+      }
+      embers.prevShown = embers.shown;
+      const hearthBurst = ((hearthClock + EMBER_PERIOD / 2) % EMBER_PERIOD) < EMBER_BURST;
+      if (secondaryEmbers) {
+        const hearthTarget = Math.round((hearthBurst ? EMBER_BURST_COUNT * fraction : calm) * secondaryFireLit);
+        settle(secondaryEmbers, hearthTarget, dt, hearthBurst || secondaryEmbers.shown > hearthTarget ? EMBER_BURST_STEP : FADE_STEP);
+        for (let i = secondaryEmbers.prevShown; i < secondaryEmbers.shown; i++) {
+          secondaryEmberT[i] = 0;
+          secondaryEmbers.speed[i] = (0.8 + rand() * 0.6) * (hearthBurst ? EMBER_BURST_SPEED : 1);
+          if (activeAt) { secondaryEmbers.active[i] = 0; secondaryEmbers.node.instanceData[i * 20 + 15] = 0; }
+        }
+        secondaryEmbers.prevShown = secondaryEmbers.shown;
+      }
       finish(butterflies[0], updateButterflies(butterflies[0], dt, elapsed));
       finish(butterflies[1], updateButterflies(butterflies[1], dt, elapsed));
       finish(fireflies, updateFireflies(dt, elapsed));
-      finish(embers, updateEmbers(embers, emberT, emberPeriod, dt, elapsed));
-      if (secondaryEmbers) finish(secondaryEmbers, updateEmbers(secondaryEmbers, secondaryEmberT, secondaryEmberPeriod, dt, elapsed));
+      finish(embers, updateEmbers(embers, emberT, emberPeriod, dt, emberClock, burst));
+      if (secondaryEmbers) finish(secondaryEmbers, updateEmbers(secondaryEmbers, secondaryEmberT, secondaryEmberPeriod, dt, hearthClock, hearthBurst));
     };
     // Re-homes a few existing fireflies to the shaken tree and scatters them outward; spawns none.
     const burst = (x, z) => {
@@ -82655,7 +83007,7 @@ void main() {
   };
 
   // One visit's state: created in enter, dropped in leave.
-  let oogatronUnsub, renderer, game, world, go, lootEnabled, testBananas, root, camera, overlayCanvas, island, terrainRampRoof, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, mirrorCave, matrixCave, matrixControl, fire, headquarters, dockStairs, jumbotron, positionDebug, remotes, npcSync;
+  let oogatronUnsub, renderer, game, world, go, lootEnabled, testBananas, root, camera, overlayCanvas, island, terrainRampRoof, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, mirrorCave, matrixCave, matrixControl, gateRain, fireRigs, firePitRig, fire, headquarters, dockStairs, jumbotron, positionDebug, remotes, npcSync;
   // GAME MODE (`setGameMode`): an island event holds the island still for play while it runs.
   let gameMode = false, gameCombatOnly = false;
   // GAME MODE's ring (`updateGameRing`): the group holding its veils, how far it has risen (0 to 1) and the seconds left
@@ -83431,6 +83783,11 @@ void main() {
     const phaseNow = daylight.phaseAt(hour);
     const lanternsOn = phaseNow === "dusk" || phaseNow === "night" || phaseNow === "midnight";
     const coilLamp = coilCharge && coilCharge.lamp, coilActive = !!coilLamp && coilCharge.level > 0.02;
+    // The pits' lights follow their flames: the plaza lamp's gain and the HQ hearth's colour pulse with the flicker.
+    const plazaRig = firePitRig, hearthRig = headquarters && headquarters.hearth && headquarters.hearth.rig;
+    const plazaLamp = plazaRig ? plazaRig.lamp : null;
+    const plazaPulse = plazaRig ? 1 + (plazaRig.light - 1) * 1.5 : 1;
+    const hearthK = hearthRig ? 1 + (hearthRig.light - 1) * 1.2 : 1;
     let count = 0, approximated = 0, registered = 0;
     for (let i = 0; i < lamps.length; i++) {
       const l = lamps[i], node = l.node;
@@ -83442,13 +83799,24 @@ void main() {
       if (lit && !l.lit && spark) fx.burst(l.x, l.y, l.z, 5, [SPARK], 1.3);
       l.lit = lit;
       l.k = k;
+      const steady = l.nightOnly ? 0 : LAMP_OFF;
+      const kindGlow = l.kind.glow * (1 + (l.pileProfile ? RENDER_OPTS.lampFactor * PILE_POST_NIGHT_BOOST * 0.25 : 0));
+      let baseGlow;
       if (k === 0 && node.flare <= 0) {
         // k times a finite factor is exactly 0, so the glow is this constant; skip the flicker sample.
-        const steady = l.nightOnly ? 0 : LAMP_OFF;
-        if (node.glow !== steady) node.glow = steady;
+        baseGlow = steady;
+        if (node.glow !== baseGlow) node.glow = baseGlow;
       } else {
         const flicker = Math.sin(elapsed * 11 + i * 2.3) * 0.15;
-        node.glow = (l.nightOnly ? 0 : LAMP_OFF) + k * (l.kind.glow * (1 + (l.pileProfile ? RENDER_OPTS.lampFactor * PILE_POST_NIGHT_BOOST * 0.25 : 0)) + flicker) + node.flare * 1.5;
+        baseGlow = steady + k * (kindGlow + flicker);
+        node.glow = baseGlow + node.flare * 1.5;
+      }
+      // A fire rig's root carries no geometry, so a glow written on it goes nowhere. Hand the lamp's
+      // lit glow and its click flare to the rig, which writes them onto the flame's blocks.
+      if (node.lampRig) {
+        node.lampK = k;
+        node.lampGlow = baseGlow;
+        node.lampBase = steady + kindGlow;
       }
       if (node.flare > 0) node.flare = Math.max(0, node.flare - dt * 2);
       // kind.hide: the node is hidden while unlit, so a cold fire shows no flame at all.
@@ -83460,7 +83828,7 @@ void main() {
       if (l.reach > 0) {
         const away = Math.hypot(l.fromX - camera.target.x, l.fromY - camera.target.y, l.fromZ - camera.target.z);
         l.gain = Math.max(poolShade, poolUnder) * Math.min(1, Math.max(0, (l.reach - away) / l.fade));
-      } else l.gain = 1 - poolShade;
+      } else l.gain = (1 - poolShade) * (l === plazaLamp ? plazaPulse : 1);
       l.far = l.gain < 0.02;
       if (l.debug) {
         l.debug.factor = k;
@@ -83535,12 +83903,6 @@ void main() {
       const o = coilLamp.slot * 8, s = coilLamp.k * coilLamp.gain * coilCharge.level;
       lights[o + 4] = coilLamp.kind.r * s; lights[o + 5] = coilLamp.kind.g * s; lights[o + 6] = coilLamp.kind.b * s;
     }
-    if (headquarters) {
-      // The underground hearth stays lit for the windowless common room.
-      // Its emissive flame still breathes with the same flicker as the campfire.
-      const hearth = headquarters.hearth;
-      hearth.node.glow = LAMP_OFF + LAMP.fire.glow + Math.sin(elapsed * 11 + hearth.phase) * 0.15;
-    }
     if (!keyHit && headquarters && camera.position.y < -1 && cameraCaveIndex && CAMERA_OPENINGS[cameraCaveIndex - 1].headquarters) {
       const underground = headquarters.sources;
       // The upper hearth cannot cast through the rock into the basement.
@@ -83555,14 +83917,15 @@ void main() {
           if (!l.selected && d < distance) { nearest = l; distance = d; }
         }
         const l = nearest, o = i * 8, sky = l.daylight ? 0.12 + RENDER_OPTS.day * 0.88 : 1;
+        const kk = l.rig ? hearthK : 1;
         l.selected = true;
         lights[o] = l.x;
         lights[o + 1] = l.y;
         lights[o + 2] = l.z;
         lights[o + 3] = l.daylight ? 11 : 9;
-        lights[o + 4] = (l.daylight ? 0.8 : 1) * sky;
-        lights[o + 5] = (l.daylight ? 0.88 : 0.65) * sky;
-        lights[o + 6] = (l.daylight ? 1 : 0.3) * sky;
+        lights[o + 4] = (l.daylight ? 0.8 : 1) * sky * kk;
+        lights[o + 5] = (l.daylight ? 0.88 : 0.65) * sky * kk;
+        lights[o + 6] = (l.daylight ? 1 : 0.3) * sky * kk;
         lights[o + 7] = 0;
         LIGHTING_DEBUG.selectedIds[i] = l.id;
       }
@@ -83590,10 +83953,17 @@ void main() {
     }
     if (!p) throw new Error("No clear spot for the fire pit");
     const pit = place(hubModels.firepit(), p.x, p.z, 0, 0, "firepit", 1.2);
-    const flame = createNode({ geometry: hubModels.fireFlame(), matrixEmissiveLiving: true });
-    addChild(pit, flame);
-    fireHazards.push({ node: flame, pit, x: p.x, y: pit.position.y, z: p.z, avoidRadius: FIRE_AVOID_RADIUS });
-    addLamp(flame, LAMP.fire, p.x, 0.6, p.z, true, 3, "firepit").always = true;
+    // The island's voxel flame: a stream of glowing blocks pouring up off the pit's coals. The pit's embers are
+    // the hub's own critter ember batch drawn for the fire at `firePos`, the same style as the HQ hearth's.
+    const rig = BL.blaze.createVoxelRig({ scale: 1, sightHidden: true });
+    addChild(pit, rig.root);
+    rig.lamp = addLamp(rig.root, LAMP.fire, p.x, 0.6, p.z, true, 3, "firepit");
+    rig.lamp.always = true;
+    // The lamp's glow and flare land on this geometry-less root; the rig reads them for its blocks.
+    rig.root.lampRig = rig;
+    fireRigs.push(rig);
+    firePitRig = rig;
+    fireHazards.push({ node: rig.root, boxes: rig.boxes, pit, x: p.x, y: pit.position.y, z: p.z, avoidRadius: FIRE_AVOID_RADIUS });
     claim(p.x, p.z, 1.4);
     // Spare concentric rings let the whole chilling roster arrive together.
     // Keep the original six seats first; ordinary strolls still use that ring.
@@ -84411,12 +84781,14 @@ void main() {
     }
     const firepit = createNode({ position: { x: 0, y: floor, z: 0 }, geometry: hubModels.firepit() });
     solids.add(firepit);
-    const flame = createNode({ geometry: hubModels.fireFlame(), glow: 0.9, matrixEmissiveLiving: true });
-    addChild(firepit, flame);
-    fireHazards.push({ node: flame, pit: firepit, x: 0, y: floor, z: 0, avoidRadius: FIRE_AVOID_RADIUS });
+    // The island's voxel flame burns in the HQ hearth too; its embers are the hub's critter batch at the hearth.
+    const rig = BL.blaze.createVoxelRig({ scale: 1, sightHidden: true });
+    addChild(firepit, rig.root);
+    fireRigs.push(rig);
+    fireHazards.push({ node: rig.root, boxes: rig.boxes, pit: firepit, x: 0, y: floor, z: 0, avoidRadius: FIRE_AVOID_RADIUS });
     addChild(root, firepit);
     placed.push(firepit);
-    const hearth = { id: "headquarters:hearth", node: flame, x: 0, y: floor + 0.6, z: 0, phase: 23 };
+    const hearth = { id: "headquarters:hearth", node: rig.root, rig, x: 0, y: floor + 0.6, z: 0, phase: 23 };
     lights.push(hearth);
     // The hearth is the only shared HQ point light.
     // Windows and ramp torches stay physical/emissive; no camera-proximity light spills into an unclaimed room.
@@ -87962,7 +88334,8 @@ void main() {
         fx.burst(x, w[13] + 1.4, z, 8, [SPARK], 1.3);
         break;
       case "firepit":
-        if (RENDER_OPTS.torch < 0.5) {
+        // The voxel flame burns by day and night, so the click flares it whenever the lamp is lit.
+        if (!fire || !fire.lit) {
           hud.toast("Cold ashes. Ooga waits for night.");
           break;
         }
@@ -89908,6 +90281,16 @@ void main() {
     }
     updateTotems(dt, elapsed);
     if (coilCharge) updateCoilCharge(elapsed);
+    // A fire rig pauses with the view: its own clock advances only while its pit is near, so a distant pit
+    // freezes its flame and resumes without a catch-up jump.
+    for (let i = 0; i < fireRigs.length; i++) {
+      const rig = fireRigs[i], w = rig.root.world;
+      const near = effectsActiveAt(w[12], w[13] + 1, w[14], rig.near, 24, 32);
+      rig.near = near;
+      if (!near) continue;
+      rig.time = (rig.time || 0) + dt;
+      rig.update(dt, rig.time);
+    }
     updateLamps(dt, elapsed, phase !== null);
     if (jumbotron) {
       jumbotron.update(elapsed, renderer);
@@ -91182,7 +91565,8 @@ void main() {
     for (let i = 0; i < fireHazards.length; i++) {
       const hazard = fireHazards[i];
       if (!hazard.node.visible) continue;
-      const boxes = hazard.node.geometry.fireBoxes, reach = entry.gorilla.bodyRadius + 0.5;
+      const boxes = hazard.boxes;
+      const reach = entry.gorilla.bodyRadius + 0.5;
       for (let s = 0; s <= samples; s++) {
         const k = s / samples, x = lerp(fromX, p.x, k), y = lerp(fromY, p.y, k), z = lerp(fromZ, p.z, k);
         if (Math.hypot(x - hazard.x, z - hazard.z) > reach) continue;
@@ -92820,6 +93204,8 @@ void main() {
     TICKER_AT.y = gate.position.y + (arch ? arch.top + 1 : 6);
     GATE_VIEW.target.y = gate.position.y + (arch ? arch.middle : 2.5);
     const archLamp = arch ? dressArch(gate, arch) : null;
+    fireRigs = [];
+    firePitRig = null;
     yield* pause(slice);
     headquarters = buildHeadquarters();
     yield* pause(slice);
@@ -93830,6 +94216,8 @@ void main() {
     for (const node of placed) removeChild(root, node);
     targets.length = placed.length = claimed.length = scenery.length = sceneryClaims.length = matrixGates.length = sealedCaves.length = clouds.length = lamps.length = pilePosts.length = fireSeats.length = sleepers.length = labels.length = signDetails.length = spots.length = chillSpots.length = headquartersRimLintels.length = climbMasonry.length = props.length = meadowPalms.length = 0;
     fireHazards.length = 0;
+    fireRigs = null;
+    firePitRig = null;
     clankerFireReachable = null;
     workZones.length = entranceZones.length = 0;
     closedCaveZones.length = 0;
@@ -116569,21 +116957,7 @@ void main() {
   // and orange to red at the tips, glowing. Smooth and unshadowed, its tips sway; the scene stands one on each fire
   // (`lanterns().flames`) and flickers each on its own clock. The big sign's torches burn the flat, still `flame`
   // (below) instead, baked into its mesh.
-  const BLAZE_INKS = ["#fff2b8", "#ffd24a", "#ffa030", "#ff6420"];
-  const blaze = cached(() => {
-    const ink = (t) => BLAZE_INKS[Math.min(3, Math.floor(t * 4))];
-    const lick = (h, r) => turn([[0, 0], [r * 0.72, h * 0.05], [r, h * 0.2], [r * 0.9, h * 0.38], [r * 0.62, h * 0.58], [r * 0.3, h * 0.8], [0, h]], 8, ink, 0.9);
-    const parts = [lick(0.5, 0.13)];
-    for (let k = 0; k < 3; k++) parts.push(turnedY(moved(turnedZ(lick(0.3, 0.075), -0.45), 0.05, 0.02, 0), k * 2.09 + 0.5));
-    const geo = shaded(parts), v = geo.verts;
-    for (let i = 0; i < v.length; i += 3) {
-      const a = v[i + 1] * 1.6, c = Math.cos(a), s = Math.sin(a), x = v[i], z = v[i + 2];
-      v[i] = x * c + z * s;
-      v[i + 2] = -x * s + z * c;
-    }
-    geo.sway = 0.15;
-    return unshadowed(geo);
-  });
+  const blaze = BL.blaze.smooth;
   // Overhead, the cave the Oogas moved into (`ceiling`): big clusters of stalactites dripping off the bare rock in
   // loose rows, some grown through by roots that wind down round them with moss where they come out, and a few
   // clusters of glowing teal crystal up by the side walls, all clear of the spots, the gourds' vines, the bunting and
@@ -130359,7 +130733,7 @@ void main() {
     lit.lanterns.glow = (party ? 1.25 : 0.94) + Math.sin(elapsed * 7.3) * 0.05 + Math.sin(elapsed * 13.1) * 0.03;
     // Each flame licks up and settles on its own clock, brighter and taller while the room celebrates.
     for (let i = 0; i < lit.flames.length; i++) {
-      const f = lit.flames[i], k = Math.sin(elapsed * 11 + i * 2.3) * 0.07 + Math.sin(elapsed * 17.3 + i * 1.1) * 0.05 + (party ? 0.15 : 0);
+      const f = lit.flames[i], k = BL.blaze.flare(elapsed, i * 2.3) + (party ? 0.15 : 0);
       f.node.scale.y = f.size * (1 + k);
       f.node.scale.x = f.node.scale.z = f.size * (1 - k * 0.4);
       f.node.glow = 1 + k * 1.5;
@@ -139501,7 +139875,7 @@ void main() {
 // as one instanced batch), rack, Cold Pool, pad, the three generators and the Crystal Bank, sky hole,
 // workbench, shelves, breaker and lever, the Fan Wall and Box Fan with their blades mounted by
 // `FAN_MOUNT`, the busbar riser, the crystal cell, pool board, trader's stall and price board, banana
-// rock, trophy shelf and the eight trophies, drop marker, lamp, flame and crystal, and `hubCart`, the cart of
+// rock, trophy shelf and the eight trophies, drop marker, lamp and crystal, and `hubCart`, the cart of
 // glowing ore that stands by the Lightning Factory's switchboard.
 (() => {
   "use strict";
@@ -140194,7 +140568,6 @@ void main() {
     ...[[-0.25, -0.3, "#7fe0ff", 0.7], [0.2, -0.2, STONE_LIGHT, 0], [-0.1, 0.2, "#b58cff", 0.7], [0.3, 0.3, STONE, 0], [0, 0, "#f5c542", 0.7]].map(([x, z, color, emissive]) =>
       bx({ w: 0.36, h: 0.28, d: 0.36, color, emissive, offset: { x, y: 0.98, z } }))
   ));
-  const flame = cached(() => BL.hubModels.fireFlame());
   // A charge crystal, the panic power the trader sells by the bag.
   const crystal = cached(() => merge(
     lathe({ profile: [[0, 0], [0.14, 0.12], [0.1, 0.44], [0, 0.56]], segments: 6, color: "#7fe0ff", emissive: 0.8 }),
@@ -140245,7 +140618,7 @@ void main() {
     dressingLights,
     LAYOUT, CHART, POOL_CHART, pickaxe, extinguisher, spareBreaker, smokeAlarm, chamberTimber, tunnelFrame, hubCart, chartScreen, candle, chartMark, bayLocal, cave, pebbleBox, shinyRocks, thunderBox, asic, ASIC_LOOKS, rackFrame, coldPool, pad, waterWheel, sunLeaves, steamVent,
     POWER_BUILDERS, skyHole, workbench, shelves, breakerPanel, breakerLever, fanWall, boxFan, FAN_MOUNT, busbarRiser, crystalCell, fanBlade, fanBlur, poolBoard, traderStall,
-    priceBoard, crackRock, trophyShelf, trophy, marker, lamp, flame, crystal, seal, chamberDecor
+    priceBoard, crackRock, trophyShelf, trophy, marker, lamp, crystal, seal, chamberDecor
   };
 })();
 
@@ -143327,7 +143700,7 @@ void main() {
   // The last hundredth of a coin the payout tick sounded for, the halving's lamp dip, and its countdown.
   let paidShown = -1, halvingDim = 0, halvingShown = -1;
   let shownLayout = -1, shownFaults = -1, shownMilestone = 0, shownLog = 0, shownEvent = -1, shownCard = "", shownArrivals = 0, shownStrikes = 0;
-  let cpuNodes, gpuNodes, padNodes, holderNodes, powerNodes, trophyNodes, gearNodes, markerNodes, flameNodes, lampNodes, busbars;
+  let cpuNodes, gpuNodes, padNodes, holderNodes, powerNodes, trophyNodes, gearNodes, markerNodes, flameRigs, fireRigOf, lampNodes, busbars;
   // The fan spot a chamber's cooling fault is worked from: its first fan standing, else its first spot.
   const coolSpotOf = (c) => {
     for (let k = c * R.COOL_SPOTS; k < (c + 1) * R.COOL_SPOTS; k++) if (s.cooler[k]) return k;
@@ -143636,18 +144009,21 @@ void main() {
       asicBatches[k].instanceCount = asicCount[k];
       asicBatches[k].instanceVersion++;
     }
-    // A flame over every fire.
+    // A flame over every fire. The rig each fault shows is the scene's, kept off the sim's fault so a save
+    // stays plain data.
     let f = 0;
+    fireRigOf.clear();
     for (const fault of s.faults) {
       if (!fault.active || fault.kind !== "fire" || f >= FLAMES) continue;
       unitSpot(fault.unit, SPOT);
-      const node = flameNodes[f++];
-      node.visible = true;
-      node.position.x = SPOT.x;
-      node.position.y = SPOT.y + 0.1;
-      node.position.z = SPOT.z;
+      const rig = flameRigs[f++];
+      fireRigOf.set(fault, rig);
+      rig.root.visible = true;
+      rig.root.position.x = SPOT.x;
+      rig.root.position.y = SPOT.y + 0.1;
+      rig.root.position.z = SPOT.z;
     }
-    for (; f < FLAMES; f++) flameNodes[f].visible = false;
+    for (; f < FLAMES; f++) flameRigs[f].root.visible = false;
     props.price.geometry = MM.priceBoard(s.shortage ? 1 : 0);
     props.board.glow = s.rug ? 0.1 : s.poolBonus ? 1.6 : 1;
     const dim = dark() ? 0.15 : 1;
@@ -143821,7 +144197,8 @@ void main() {
     for (const fault of s.faults) {
       if (!fault.active) continue;
       spotOf(fault.kind, fault.unit, SPOT);
-      n = fault.kind === "fire" ? pushLight(n, SPOT.x, SPOT.y + 0.8, SPOT.z, 7, 1, 0.42, 0.12) : fault.kind === "melt" ? pushLight(n, SPOT.x, SPOT.y + 0.6, SPOT.z, 6, 1, 0.15, 0.1) : pushLight(n, SPOT.x, 2, SPOT.z, 5, 0.9, 0.25, 0.1);
+      const rig = fireRigOf.get(fault), fk = rig ? rig.light : 1;
+      n = fault.kind === "fire" ? pushLight(n, SPOT.x, SPOT.y + 0.8, SPOT.z, 7, 1 * fk, 0.42 * fk, 0.12 * fk) : fault.kind === "melt" ? pushLight(n, SPOT.x, SPOT.y + 0.6, SPOT.z, 6, 1, 0.15, 0.1) : pushLight(n, SPOT.x, 2, SPOT.z, 5, 0.9, 0.25, 0.1);
     }
     const out = dark();
     if (s.sun > 0.05) n = pushLight(n, L.PROP_AT.shaft.x, 3.4, L.PROP_AT.shaft.z, 7, 0.55 * s.sun, 0.52 * s.sun, 0.4 * s.sun);
@@ -145117,14 +145494,10 @@ void main() {
     // A sounding smoke alarm blinks its light; a quiet one glows faintly.
     const blink = Math.floor(sceneTime * 4) % 2 ? 1.6 : 0.15;
     for (let c = 0; c <= s.dug; c++) gearNodes[2][c].glow = s.alarmOn[c] ? blink : 0.4;
-    // Flames flicker; the fire itself is the sim's.
+    // Each fire's flame flickers on its own clock; the fire itself is the sim's.
     for (let f = 0; f < FLAMES; f++) {
-      const node = flameNodes[f];
-      if (!node.visible) continue;
-      const k = 0.85 + Math.sin(performance.now() * 0.02 + f * 1.7) * 0.2;
-      node.scale.x = node.scale.z = 0.7 * k;
-      node.scale.y = k;
-      if (Math.random() < dt * 6) fx.burst(node.position.x, node.position.y + 0.4, node.position.z, 1, FIRE_BITS, 1);
+      const rig = flameRigs[f];
+      if (rig.root.visible) rig.update(dt, sceneTime);
     }
     // A block, a milestone or the halving rolls a wave of light down every rack.
     if (ripple > 0) {
@@ -145348,8 +145721,14 @@ void main() {
     }));
     markerNodes = [];
     for (let m = 0; m < MARKERS; m++) markerNodes.push(place(createNode({ geometry: MM.marker(), visible: false })));
-    flameNodes = [];
-    for (let f = 0; f < FLAMES; f++) flameNodes.push(place(createNode({ geometry: MM.flame(), visible: false })));
+    flameRigs = [];
+    fireRigOf = new Map();
+    for (let f = 0; f < FLAMES; f++) {
+      const rig = BL.blaze.createVoxelRig({ scale: 0.7, embers: { get fx() { return fx; }, bits: FIRE_BITS } });
+      place(rig.root);
+      rig.root.visible = false;
+      flameRigs.push(rig);
+    }
     asicBatches = [];
     for (let k = 0; k < ASIC_MODELS; k++) {
       asicBatches.push(place(createNode({ geometry: MM.asic(k), instanceData: new Float32Array(R.PADS * R.BAYS * 20), instanceCount: 0, instanceVersion: 0, fixedInstanceCapacity: true })));
@@ -145512,7 +145891,7 @@ void main() {
     drag.count = 0;
     selection.type = "";
     hud = mhud = hooks = input = pilot = fx = audio = crew = clock = cave = props = asicBatches = motes = candles = hashMarks = chartLabels = labelCanvas = labelCtx = null;
-    cpuNodes = gpuNodes = padNodes = holderNodes = powerNodes = trophyNodes = gearNodes = markerNodes = flameNodes = lampNodes = busbars = null;
+    cpuNodes = gpuNodes = padNodes = holderNodes = powerNodes = trophyNodes = gearNodes = markerNodes = flameRigs = fireRigOf = lampNodes = busbars = null;
     breakers = levers = fanNodes = bladeNodes = batteryNode = null;
     sim = s = null;
     mineScene.input = mineScene.debug = mineScene.agentControls = null;
@@ -145523,7 +145902,7 @@ void main() {
   // or housekeeping frees a buffer the next purchase is about to want back.
   const liveGeometry = (set) => {
     set.add(MM.pebbleBox()).add(MM.shinyRocks()).add(MM.rackFrame()).add(MM.coldPool()).add(MM.pad())
-      .add(MM.marker()).add(MM.flame()).add(MM.seal()).add(MM.fanBlade()).add(MM.fanBlur()).add(MM.candle(0)).add(MM.candle(1)).add(MM.candle(2)).add(MM.chartMark(0)).add(MM.chartMark(1)).add(MM.priceBoard(0)).add(MM.priceBoard(1)).add(MM.fanWall()).add(MM.boxFan());
+      .add(MM.marker()).add(MM.seal()).add(MM.fanBlade()).add(MM.fanBlur()).add(MM.candle(0)).add(MM.candle(1)).add(MM.candle(2)).add(MM.chartMark(0)).add(MM.chartMark(1)).add(MM.priceBoard(0)).add(MM.priceBoard(1)).add(MM.fanWall()).add(MM.boxFan());
     for (let c = 0; c < NC; c++) set.add(MM.chamberDecor(c));
     for (let k = 0; k < ASIC_MODELS; k++) set.add(MM.asic(k));
     for (const build of MM.POWER_BUILDERS) set.add(build());
