@@ -20092,7 +20092,7 @@ const raceRigDisposalProof = async () => {
       // dispose drops the page-life resize listeners it registered at creation.
       window: { removeEventListener() {}, visualViewport: { removeEventListener() {} } }, onResize() {},
       destroyRecords() {}, reflectorTargets: new Map(), destroyReflector() {},
-      destroyMirror() {}, destroyFbo() {}, destroyShadow() {},
+      destroyMirror() {}, destroyFbo() {}, destroyShadow() {}, destroySprites() {},
       res: { programs: base, matrixTexture: null, quadVao: null },
       rigPrograms: rig, rigProgramsReady: !pending, programs: rig, rigMode: true,
       gl: {
