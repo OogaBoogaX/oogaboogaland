@@ -747,12 +747,12 @@
     return Object.assign(noShadow(geo), { sway: 0.06 });
   };
   const fern = cached(() => models.foliageLods(fernGeometry(), fernGeometry(1)));
-  // A jungle shrub: two leafy clumps over a skirt of broad elephant-ear leaves.
-  const SHRUB = ["#16442e", "#286a3d", "#49904a", "#81b84d"].map(hexToRgb);
+  // A jungle shrub: two faceted clumps over a skirt of broad elephant-ear leaves.
+  const SHRUB = ["#143b29", "#22583a", "#3a7949", "#619a52"].map(hexToRgb);
   const shrubGeometry = (lod = 0) => {
     const rand = mulberry32(95), geo = { verts: [], faces: [], lines: [], normals: [] };
-    leafy(geo, 0, 0.4, 0, 0.56, 0.38, 0.56, SHRUB, rand, 18, 0.2, lod);
-    leafy(geo, 0.12, 0.72, -0.08, 0.36, 0.26, 0.36, SHRUB, rand, 10, 0.17, lod);
+    clumped(geo, 0, 0.4, 0, 0.56, 0.38, 0.56, SHRUB, rand, lod);
+    clumped(geo, 0.12, 0.72, -0.08, 0.36, 0.26, 0.36, SHRUB, rand, lod);
     for (let k = 0; k < 5; k++) {
       const a = k / 5 * Math.PI * 2 + rand() * 0.5, l = Math.hypot(0.8, 0.45);
       const ax = Math.cos(a) * 0.8 / l, ay = 0.45 / l, az = Math.sin(a) * 0.8 / l, n = faceUp(ax, ay, az);
