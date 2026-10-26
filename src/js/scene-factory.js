@@ -62,6 +62,15 @@
   // Where whoever walked in stands: a step inside the gate, facing the core (yaw 0 turns the Ooga to PI), seen over
   // its shoulder looking horizontally across the hall.
   const ARRIVAL = { yaw: 0, pitch: 0, dist: FOLLOW.max, position: { x: 0, y: LAYOUT.entrance.y, z: LAYOUT.entrance.z + 1 } };
+  // The Lightning Jet Hangar's door, while the hangar is open (`FM.hangarEntry`): its shield's opening in the door's
+  // frame, as wide as the arch, in the hall's cyan; and where whoever comes back out of the hangar stands, a step out of
+  // the door on the walkway facing back along it, the view just inside the doorway behind it.
+  const HANGAR_OPENING = { minX: -FM.HANGAR_DOOR.half, maxX: FM.HANGAR_DOOR.half, floorY: 0, ceilingY: FM.HANGAR_DOOR.top }, HANGAR_TINT = BL.factoryWindow.TINT;
+  // How the hangar door answers whoever comes near, as ₿IFRÖST's windows do: from DOOR_FAR metres of its opening,
+  // growing faster the nearer they come, and fully only at the doorway itself (DOOR_NEAR), easing at DOOR_EASE a second,
+  // its arch's glow brightening by up to DOOR_BRIGHTEN.
+  const DOOR_NEAR = 0, DOOR_FAR = 12, DOOR_EASE = 5, DOOR_BRIGHTEN = 3.2;
+  const HANGAR_ARRIVAL = { yaw: -Math.PI / 2, pitch: 0.12, dist: FOLLOW.min, position: { x: LAYOUT.hangar.x + 1.4, y: LAYOUT.hangar.y, z: LAYOUT.hangar.z } };
   // `entrance` is the balcony's view across the core; the rest frame one station each.
   const PRESETS = {
     entrance: view(0, 9, -6, 0, 0, 33),
@@ -80,6 +89,8 @@
     show: view(11.2, 5.7, 18.2, 0.848, 0.38, 12),
     lookout: view(-16, 19, -14, 0.7, 0.15, 14),
     study: view(19, 8.6, 12, -Math.PI / 2 + 0.2, 0.2, 11),
+    // The hangar's door at the end of the left walkway, seen down the walkway from the balcony.
+    hangar: view(-20.2, 8.2, LAYOUT.hangar.z, Math.PI / 2, 0.1, 16),
     galleries: view(4, 17, -16, 0, 0.14, 17)
   };
   const RENDER_OPTS = {
@@ -159,6 +170,7 @@
     lookout: ["Watchtower · the node's signal", "The beam sweeps while the node's events are arriving. Dark means no signal: the node may be fine, but nothing is getting through."],
     study: ["Study Hall · locked", "Bananas first! The study hall opens in a later update."],
     tunnel: ["Peer tunnel", "Through here lives the peer at the other end of a line."],
+    hangar: ["Lightning Jet Hangar · walk through", "Lightning Jet v2 is being built in here. Walk an Ooga through the door to have a look."],
     galleries: ["More channels", "Every line past the featured four stands up in the galleries."],
     exit: ["The way out", "Back to the island."]
   };
@@ -168,7 +180,7 @@
 
   let renderer, game, world, go, root, camera, hud, hooks, input, pilot, fx, agentPlay = null;
   // The page's one factory node (`world.factoryNode`), and its feed and demo node.
-  let shared = null, feed = null, mock = null, unsubscribe = null, leaving = false, exitHeld = false, dust = null;
+  let shared = null, feed = null, mock = null, unsubscribe = null, leaving = false, exitHeld = false, toHangar = false, hangarHeld = false, dust = null;
   // The Ooga the visitor walked in as: one playable actor from the shared crew, and the world it carries.
   let people = null, avatar = null, playerWorld = null, unsubscribeAccount = null, remotes = null, footsteps = null;
   // The hall's sound (factory-audio.js): what its bed follows, written in place each frame, and where its machines,
@@ -184,6 +196,13 @@
     shaftIn: [FM.SHAFTS[0][0], 0.5, FM.SHAFTS[0][1]], shaftOut: [FM.SHAFTS[1][0], 0.5, FM.SHAFTS[1][1]], gallery: [0, LEVEL.top + 4.5, HALL.back + 4.9]
   };
   const hearAt = (name, p, loud = 1, n = 0) => audio.cue(name, p[0], p[1], p[2], loud, n);
+  // Kortik's Sis answering her brother from behind the Lightning Jet Hangar's door, her line over it and her voice
+  // through it, a syllable for every few letters; and where that is.
+  const SIS_AT = [FM.LAYOUT.hangar.x + 0.6, FM.LAYOUT.hangar.y + 2, FM.LAYOUT.hangar.z], SIS_LINES = BL.kortik.RIVALRY.map(([, hers]) => "KORTIK'S SIS: " + hers);
+  const sisAnswers = (i) => {
+    fx.sayAt(SIS_AT[0], SIS_AT[1] + 3.2, SIS_AT[2], SIS_LINES[i], 3.4);
+    hearAt("sis", SIS_AT, 1, Math.min(12, Math.max(2, Math.round(BL.kortik.RIVALRY[i][1].length / 4))));
+  };
   const hearNode = (name, node, up, loud = 1, n = 0) => audio.cue(name, node.position.x, node.position.y + up, node.position.z, loud, n);
   // An event's sound at its line's bay or gallery stand, or at the forge for a line the hall does not show.
   const hearPlace = (name, place) => { if (place) hearNode(name, place.node, 2, place.bay ? 1 : 0.6); else hearAt(name, SPOTS.forge, 0.6); };
@@ -286,7 +305,9 @@
     const [[w0, w1, a0], [s0, , s1]] = L.walk;
     onRail(w0, a0 + 0.1, w1, a0 + 0.1, e.y, [0.2, 0.5, 0.8]);
     onRail(s0 + 0.1, a0, s0 + 0.1, s1, e.y, [0.1, 0.3, 0.5, 0.7, 0.9]);
-    onRail(-e.w / 2 + 0.1, e.z - e.d / 2 + 0.1, -e.w / 2 + 0.1, e.z + e.d / 2 - 0.1, e.y, [0.5]);
+    // While the hangar is open its walkway opens the balcony's left rail, and its own lamps take that rail's.
+    if (FM.hangarEntry()) lamps.push(...FM.hangarLamps());
+    else onRail(-e.w / 2 + 0.1, e.z - e.d / 2 + 0.1, -e.w / 2 + 0.1, e.z + e.d / 2 - 0.1, e.y, [0.5]);
     const r = L.ring;
     for (const i of [5, 9, 16, 19, 23, 26]) { const a = i / 28 * Math.PI * 2; lamps.push(["rail", r.x + Math.cos(a) * (r.outer - 0.15), r.y - 0.05, r.z + Math.sin(a) * (r.outer - 0.15)]); }
     for (const t of L.tunnels) {
@@ -1090,6 +1111,29 @@
     if (leaving) return;
     leaving = go("hub", null, instant);
   };
+  // Into the Lightning Jet Hangar as the same Ooga: `leave` hands it on, as it does on the way out. As the island hands
+  // one over at its mouth, nothing held or hovered here carries into the hangar.
+  const enterHangar = () => {
+    if (leaving || !go("hangar")) return;
+    leaving = toHangar = true;
+    pilot.controls.reset(); input.reset(); pilot.setActive(false); hud.tooltip.hide();
+  };
+  // Whether (p) has come through the hangar door's shield, inside its opening: an Ooga whose feet stand `baseY` under
+  // p, walked past the plane, or the free view flown to within `margin` of it.
+  const throughHangar = (s, p, baseY, margin = 0) => {
+    if (!s.hangar) return false;
+    const h = LAYOUT.hangar, dx = p.x - h.x, dz = p.z - h.z, c = Math.cos(h.turn), sn = Math.sin(h.turn);
+    const along = dx * sn + dz * c, across = dx * c - dz * sn, feet = p.y - baseY - h.y;
+    return along <= FM.HANGAR_DOOR.plane + margin && along > -2 && across >= HANGAR_OPENING.minX && across <= HANGAR_OPENING.maxX
+      && feet >= HANGAR_OPENING.floorY - 0.12 && feet < HANGAR_OPENING.ceilingY;
+  };
+  // While the hangar is open its door shows the hangar through the shield from the hangar's own stand-in, so a hosted
+  // page fetches the hangar's code with the hall's. Should that fail, the hall opens all the same, its door keeping the
+  // glimpse, and walking through tries the hangar's code again.
+  const prepare = () => {
+    const loading = FM.hangarEntry() ? BL.deferred.load("hangar-scene") : null;
+    return loading && loading.catch(() => null);
+  };
   // On in through the gate's shield from the island: as far across and as far past it as the Ooga went through the
   // island's, facing in, the view square behind it, and the walk on.
   const walkIn = (c) => {
@@ -1150,8 +1194,12 @@
     if (!leaving) { world.factoryCrossing = null; w.through = w.grab = false; }
   };
   // The island could not be built for the way out (the director's `stay`): the Ooga walks again, and the gate waits for
-  // it to step back out of the opening before it tries again.
-  const stay = () => { leaving = false; exitHeld = true; walk.phase = 0; walk.through = walk.grab = false; walk.still = walk.hold = 0; world.factoryCrossing = null; };
+  // it to step back out of the opening before it tries again. Kept from the hangar (its code could not be fetched), the
+  // Ooga is the visitor's again, and the hangar's door waits the same way.
+  const stay = () => {
+    if (toHangar) { toHangar = false; hangarHeld = true; pilot.setActive(true); }
+    leaving = false; exitHeld = true; walk.phase = 0; walk.through = walk.grab = false; walk.still = walk.hold = 0; world.factoryCrossing = null;
+  };
   const onKey = (e) => {
     if (scene.booth.mode) return boothKey(scene, e);
     if (e.key === "0" && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) return pilot.resetCamera();
@@ -1305,6 +1353,25 @@
       transform[14] = other.z + Math.cos(other.turn) * PEER_PLANE + sx * sn - sz * c;
       s.tunnels.push({ at: t, node, stone, label: lbl, face, ripples, body, transform, yaw, crossings: 0, hum: Math.random() * 0.3 });
     });
+    // The Lightning Jet Hangar's door at the end of the left walkway, while the hangar is open: its arch, its sign, a
+    // banner either side, and across it the lab's phase plane in the hall's cyan, which takes whoever walks through into
+    // the hangar.
+    if (FM.hangarEntry()) {
+      const h = L.hangar, D = FM.HANGAR_DOOR, door = FM.hangarDoor();
+      const node = createNode({ position: { x: h.x, y: h.y, z: h.z }, rotation: { x: 0, y: h.turn, z: 0 } }), stone = createNode({ geometry: door.stone }), glow = createNode({ geometry: door.glow, sightHidden: true });
+      addChild(node, stone, glow, createNode({ geometry: door.glimpse, sightHidden: true }));
+      setBoard(labelNode(node, D.sign[0], D.sign[1], D.sign[2]), "LIGHTNING JET\nHANGAR", "", true, { height: 1.3 });
+      for (const side of [-1, 1]) addChild(node, createNode({ position: { x: side * (D.post + 0.75), y: 5.9, z: 0.6 }, geometry: FM.banner(2.2) }));
+      addChild(root, node);
+      const mouth = { x: h.x, z: h.z, ry: h.turn, floorY: h.y, room: { w: 4.4, h: 5, from: 0, to: 3.3 } };
+      s.hangar = { node, stone, glow, near: 0, hum: 0, phase: BL.labPhase.create(node, mouth, HANGAR_OPENING, D.plane, HANGAR_TINT) };
+      // Through the shield, the hangar as it stands, from its own stand-in (`hangar-window.js`; WebGL only, the glimpse
+      // staying behind it and in its place on Canvas 2D).
+      if (renderer.kind !== "canvas2d" && BL.hangarWindow) {
+        const HD = BL.hangarModels.LAYOUT.door;
+        s.hangar.window = BL.hangarWindow.create({ group: node, pieces: BL.hangarModels.doorWindow(), beyond: BL.hangarWindow.across(HD.x, HD.y, HD.z, HD.turn, D.plane), plane: D.plane });
+      }
+    }
     // Gallery stands along the top decks.
     const gcaps = FM.galleryCaps();
     for (const g of L.galleries) {
@@ -1478,6 +1545,7 @@
     target(lkBody, "lookout", "lookout", 3.5);
     target(stBody, "study", "study", 3.2);
     s.tunnels.forEach((t, i) => target(t.stone, "tunnel", ["lineA", "lineB", "lineC", "lineD"][i], 3, { place: s.bays[i] }));
+    if (s.hangar) target(s.hangar.stone, "hangar", "hangar", 3.2);
     for (const g of s.gallery) target(g.stand, "galleries", "galleries", 1.2);
     // The way out: behind the balcony the tunnel runs on to the rim, the same tunnel the hub dresses its mouth
     // with, and the shield hangs across it at the balcony's back edge, the lab's phase plane humming as the one
@@ -1558,6 +1626,10 @@
       const rgb = math.hexToRgb(FM.TUNNEL_THEMES[i].ring);
       out.push(t.x + Math.sin(t.turn) * 2, t.y + 2.4, t.z + Math.cos(t.turn) * 2, 8, rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, 0);
     });
+    if (FM.hangarEntry()) {
+      const h = L.hangar;
+      out.push(h.x + Math.sin(h.turn) * 2, h.y + 2.4, h.z + Math.cos(h.turn) * 2, 8, HANGAR_TINT[0], HANGAR_TINT[1], HANGAR_TINT[2], 0);
+    }
     out.push(0, e.y + 2.2, e.z - 4, 12, 1, 0.66, 0.3, 0);
     for (const g of L.galleries) out.push(g.x, g.y + 2, g.z + 1, 10, 1, 0.66, 0.3, 0);
     // Daylight falling in at the rim, so the tunnel's far end is lit the way the island lights it.
@@ -1617,6 +1689,7 @@
   const clipProjectileTarget = (from, to) => {
     let clipped = scene.gate.phase.ripples.absorb(from.x, from.y, from.z, to);
     for (const t of scene.tunnels) if (t.ripples.absorb(from.x, from.y, from.z, to)) clipped = true;
+    if (scene.hangar && scene.hangar.phase.ripples.absorb(from.x, from.y, from.z, to)) clipped = true;
     return clipped;
   };
   const absorbProjectile = (ax, ay, az, point, dt) => {
@@ -1625,6 +1698,7 @@
     for (const t of scene.tunnels) {
       if (t.ripples.absorb(ax, ay, az, point)) hit = t.ripples;
     }
+    if (scene.hangar && scene.hangar.phase.ripples.absorb(ax, ay, az, point)) hit = scene.hangar.phase.ripples;
     return !!hit && hit.cross(ax, ay, az, bx, by, bz, dt);
   };
   const feetOf = () => avatar ? avatar.root.position.y - avatar.baseY : 0;
@@ -1649,6 +1723,12 @@
       const across = dx * c - dz * sn, along = dx * sn + dz * c;
       if (Math.abs(across) < PEER_OPENING.maxX && along >= -0.5 && along <= 2.5
         && p.y >= t.y && p.y <= t.y + PEER_OPENING.ceilingY) return true;
+    }
+    // And the hangar's doorway, deeper in, so the view can stand in it behind whoever comes back out.
+    if (scene && scene.hangar) {
+      const h = LAYOUT.hangar, dx = p.x - h.x, dz = p.z - h.z, c = Math.cos(h.turn), sn = Math.sin(h.turn);
+      const across = dx * c - dz * sn, along = dx * sn + dz * c;
+      if (Math.abs(across) < HANGAR_OPENING.maxX && along >= -3 && along <= 2.5 && p.y >= h.y && p.y <= h.y + HANGAR_OPENING.ceilingY) return true;
     }
     return false;
   };
@@ -1787,15 +1867,18 @@
         if (!avatar) return;
         scene.gate.phase.body.refresh(avatar.root);
         for (const t of scene.tunnels) t.body.refresh(avatar.root);
+        if (scene.hangar) scene.hangar.phase.body.refresh(avatar.root);
       };
       people = shared.crew = BL.crew.create(shared);
       world.weapons = playerWorld.weapons;
       world.magazine = playerWorld.magazine;
       pilot.bind(shared);
       avatar = people.cavemen.get(playerName);
+      // Back out of the hangar it stands on the walkway at the door; in from the island, a step inside the gate.
+      const arrival = ctx.from === "hangar" && scene.hangar ? HANGAR_ARRIVAL : ARRIVAL;
       if (pilot.loginViewRestored) {
-        Object.assign(avatar.root.position, { x: ARRIVAL.position.x, y: ARRIVAL.position.y + avatar.baseY, z: ARRIVAL.position.z });
-        avatar.root.rotation.y = ARRIVAL.yaw + Math.PI;
+        Object.assign(avatar.root.position, { x: arrival.position.x, y: arrival.position.y + avatar.baseY, z: arrival.position.z });
+        avatar.root.rotation.y = arrival.yaw + Math.PI;
       }
       pilot.possess(avatar);
       people.selectWeapon(avatar.weapon.selectedSlot, avatar);
@@ -1804,10 +1887,11 @@
       // shield, it comes on through the gate's in its light instead, and walks on to that step.
       if (!pilot.loginViewRestored) {
         if (crossing) walkIn(crossing);
-        else pilot.navigate(ARRIVAL);
+        else pilot.navigate(arrival);
       }
       scene.gate.phase.body.track(avatar.root, avatar.traits.height * 2, Math.max(avatar.headOpen.verts.length, avatar.headClosed.verts.length));
       for (const t of scene.tunnels) t.body.track(avatar.root, avatar.traits.height * 2, Math.max(avatar.headOpen.verts.length, avatar.headClosed.verts.length));
+      if (scene.hangar) scene.hangar.phase.body.track(avatar.root, avatar.traits.height * 2, Math.max(avatar.headOpen.verts.length, avatar.headClosed.verts.length));
     }
     unsubscribeAccount = BL.net.subscribe(accountChanged);
     // Other signed-in players in the hall, as the Oogas they drive.
@@ -1832,15 +1916,16 @@
     shared.stands.forEach((p) => placeIn(scene, p));
     unsubscribe = feed.subscribe(onEvent);
     refreshBoards(scene);
-    leaving = exitHeld = false;
+    leaving = exitHeld = toHangar = hangarHeld = false;
     actPrompt = false;
     greeter = BL.factoryGreeter.create({ parent: root, input, fx, feed,
       visitor: () => people && people.player === avatar ? avatar : null,
       demoRunning: () => feed.reading.contract === "obl.factory.demo.v1" || feed.reading.contract === null && !!shared.mock, coarse: COARSE, camera, quality: () => renderer.quality,
       onKortik: () => kortik && kortik.tourHere() });
-    // When Kortik shouts for Tess, she answers back if she is at work.
+    // When Kortik shouts for Tess, she answers back if she is at work; where the hall has the Lightning Jet Hangar's
+    // door, he shouts at his sister through it now and then, and she answers from behind it.
     // His board's sounds come from where he sits.
-    kortik = BL.kortik.create({ fx, onShout: () => greeter && greeter.retort(), onSound: (name, n) => hearAt(name, SPOTS.board, 1, n) });
+    kortik = BL.kortik.create({ fx, onShout: () => greeter && greeter.retort(), onSound: (name, n) => hearAt(name, SPOTS.board, 1, n), onSis: FM.hangarEntry() ? sisAnswers : null });
     addChild(root, kortik.node);
     // Kortik himself takes pokes; his board frames itself and says what it is, as the stations do.
     // He outranks the board he sits in, but not an Ooga or the guide nearer the view.
@@ -2081,6 +2166,23 @@
       g.hum = 0.1 + Math.random() * 0.22;
       g.phase.ripples.pulse(GATE_OPENING.minX + Math.random() * (GATE_OPENING.maxX - GATE_OPENING.minX), Math.random() * GATE_OPENING.ceilingY, 0);
     }
+    // So does the hangar door's, in the same cyan; and, as ₿IFRÖST's windows do, the door answers whoever comes near
+    // (the Ooga driven here, or with none the view), its arch's studs and neon brightening and its field humming faster.
+    const hg = s.hangar;
+    if (hg) {
+      if (hg.window) hg.window.update(camera);
+      const p = hg.node.position, want = clamp((DOOR_FAR - Math.max(0, Math.hypot(at.x - p.x, at.y - p.y - 1, at.z - p.z) - 2)) / (DOOR_FAR - DOOR_NEAR), 0, 1);
+      hg.near += (want * want - hg.near) * Math.min(1, dt * DOOR_EASE);
+      hg.glow.glow = 1 + DOOR_BRIGHTEN * hg.near;
+      hg.phase.update(dt, elapsed);
+      hg.phase.body.update(dt);
+      hg.phase.body.time = hg.phase.ripples.time;
+      hg.hum -= dt;
+      if (hg.hum <= 0) {
+        hg.hum = (0.12 + Math.random() * 0.25) * (1 - 0.65 * hg.near);
+        hg.phase.ripples.pulse(HANGAR_OPENING.minX + Math.random() * (HANGAR_OPENING.maxX - HANGAR_OPENING.minX), Math.random() * HANGAR_OPENING.ceilingY, 0);
+      }
+    }
     // The peer tunnels' shields hum in their blue.
     for (let i = 0; i < s.tunnels.length; i++) {
       const t = s.tunnels[i];
@@ -2096,11 +2198,12 @@
     shared.tick(dt);
     dust.update(elapsed, pilot.orbit.target.x, pilot.orbit.target.z);
     for (let i = 0; i < s.crew.length; i++) s.crew[i].agent.update(dt);
-    // Out through the gate: walked into it, or flown into it with the free view.
+    // Out through the gate, or into the hangar through its door: walked into, or flown into with the free view.
     if (!leaving) {
       const driven = pilot.player, p = driven ? driven.root.position : camera.position, y = p.y - (driven ? driven.baseY : 0) - LAYOUT.entrance.y;
       const inOpening = p.x >= GATE_OPENING.minX && p.x <= GATE_OPENING.maxX && y >= GATE_OPENING.floorY - 0.12 && y < GATE_OPENING.ceilingY;
       if (exitHeld && !(inOpening && p.z > HALL.front - 2.2)) exitHeld = false;
+      if (hangarHeld && !throughHangar(s, p, driven ? driven.baseY : 0, driven ? 0 : 0.9)) hangarHeld = false;
       if (driven) {
         // The walk has the Ooga; on foot heading out over the balcony's last stretch, it takes it through the gate's
         // shield. Anything else in the doorway (an Ooga in the air, say) goes out as it always has.
@@ -2109,10 +2212,12 @@
           Object.assign(walk, { phase: WALK_OFF, t: 0, x: p.x, z: p.z, through: false });
           pilot.controls.reset(); input.reset(); hud.tooltip.hide();
         } else if (!exitHeld && inOpening && p.z > HALL.front - 1.3) leaveCave();
+        else if (!hangarHeld && throughHangar(s, p, driven.baseY)) enterHangar();
         else peerPortal(s, previousX, previousY, previousZ);
       } else if (!avatar) {
-        const a = pilot.controls.read();
-        if (!exitHeld && inOpening && Math.hypot(a.x, a.y) > 0.05 && p.z > HALL.front - 2.2) leaveCave();
+        const a = pilot.controls.read(), moving = Math.hypot(a.x, a.y) > 0.05;
+        if (!exitHeld && inOpening && moving && p.z > HALL.front - 2.2) leaveCave();
+        else if (!hangarHeld && moving && throughHangar(s, p, 0, 0.9)) enterHangar();
       }
     }
     const node = feed.reading.node, signal = feed.signal, running = node === "ready" || node === "starting";
@@ -2319,6 +2424,10 @@
     }
     for (const g of scene.crew) g.agent.dispose();
     scene.gate.phase.dispose();
+    if (scene.hangar) {
+      scene.hangar.phase.dispose();
+      if (scene.hangar.window) scene.hangar.window.dispose();
+    }
     for (const t of scene.tunnels) { t.ripples.dispose(); t.body.dispose(); }
     // Save the carry/combat choice while the controlled actor still exists.
     pilot.dispose();
@@ -2356,6 +2465,7 @@
     if (scene) {
       for (const g of scene.crew) g.agent.liveGeometry(set);
       scene.gate.phase.liveGeometry(set);
+      if (scene.hangar) scene.hangar.phase.liveGeometry(set);
     }
     if (avatar) set.add(avatar.headOpen).add(avatar.headClosed);
     if (greeter) greeter.liveGeometry(set);
@@ -2373,7 +2483,7 @@
     // Voice zone: the Factory group, which its tunnel on the island shares (`factory`).
     voiceZone: "factory.hall",
     micKey: true,
-    id: "factory", buildSteps: () => FM.buildSteps(), enter, update, overlay, onDonation, previewDonation, onSeen, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry, allGeometry, hallGeometry,
+    id: "factory", prepare, buildSteps: () => FM.buildSteps(), enter, update, overlay, onDonation, previewDonation, onSeen, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry, allGeometry, hallGeometry,
     root: null, camera: null, input: null, debug: null, agent: null, agentView: null, agentControls: null, agentHandoff: null,
     // Diagnostics observe the existing detached owner without reading model caches.
     get retainedGeometry() { return world ? world.factoryKeep : null; },

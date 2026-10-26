@@ -10,6 +10,10 @@
 // becomes a trip there and back, and a few common questions have their own lines. One it can't answer goes to the
 // page's Worker, which asks Claude (`/api/tess`), where the Worker says it can (`net.state.tess`); elsewhere, and when
 // that fails, she says her offline line.
+//
+// Another place she guides hands `create` its own tables as `guide` (the Lightning Jet Hangar's `hangar-guide.js`): its
+// stops, lines, work spots, answers and suggestions, what she calls it, the keys she remembers it by, and what the
+// Worker hears it is about; it has no news, and offers its tour to everyone until this browser has answered it.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -148,26 +152,24 @@
     out.yaw = Math.atan2(dx, dz); out.pitch = Math.atan2(dy, Math.hypot(dx, dz));
     return out;
   };
-  const VIEWS = STOPS.map((stop) => viewOf(stop, pose()));
+
   // How far to the view's side she can hover `ahead` metres out and still be in it: 65% of the way to the screen's edge,
   // so a narrow (portrait) screen keeps her in view. The camera's field of view is vertical.
   const sideRoom = (camera, ahead) => 0.65 * ahead * Math.tan(camera.fov / 2) * innerWidth / innerHeight;
-  // Where she hovers at a stop: half way from the view to the landmark, up to 2.2 m to the view's right (less on a
-  // narrow screen), a little up. Laid for the screen's shape as a tour starts.
-  const SPOTS = STOPS.map(() => [0, 0, 0]);
-  const laySpots = (camera) => {
-    STOPS.forEach((stop, i) => {
+  // Where she hovers at each of `stops`, into `spots`: half way from the view to the landmark, up to 2.2 m to the view's
+  // right (less on a narrow screen), a little up. Laid for the screen's shape as a tour starts.
+  const laySpots = (camera, stops, spots) => {
+    stops.forEach((stop, i) => {
       const dx = stop.look[0] - stop.eye[0], dz = stop.look[2] - stop.eye[2], d = Math.hypot(dx, dz), side = Math.min(2.2, sideRoom(camera, d * 0.5));
-      SPOTS[i][0] = stop.eye[0] + dx * 0.5 - dz / d * side;
-      SPOTS[i][1] = stop.eye[1] + (stop.look[1] - stop.eye[1]) * 0.5 + 0.4;
-      SPOTS[i][2] = stop.eye[2] + dz * 0.5 + dx / d * side;
+      spots[i][0] = stop.eye[0] + dx * 0.5 - dz / d * side;
+      spots[i][1] = stop.eye[1] + (stop.look[1] - stop.eye[1]) * 0.5 + 0.4;
+      spots[i][2] = stop.eye[2] + dz * 0.5 + dx / d * side;
     });
   };
   // A tour is a list of legs, each a stop (-1: where the visitor is) with its title and what she says there: its
   // lines, each starting a new bubble, and the line each bubble belongs to (`lineAt`), for her beam.
-  const legOf = (stop, title, ids) => ({ stop, title, text: ids.map((id) => LINES[id]).join("\n"),
-    lineAt: ids.flatMap((id) => BL.fx.beatsOf(LINES[id]).map(() => id)) });
-  const ISLAND = STOPS.map((stop, i) => legOf(i, stop.title, stop.lines));
+  const legOf = (stop, title, ids, lines = LINES) => ({ stop, title, text: ids.map((id) => lines[id]).join("\n"),
+    lineAt: ids.flatMap((id) => BL.fx.beatsOf(lines[id]).map(() => id)) });
   // Lines about something beside a stop's landmark: while she says one she faces the middle of what the place hands
   // her under that name (`targets`) and points a beam at each of them at once, then goes back to the landmark.
   const POINT_AT = { totems: "totems", newsTotems: "totems" };
@@ -276,11 +278,11 @@
   };
   // Whether this browser has answered her island tour, Show me or Not now: a visitor who is not signed in is then not
   // offered it again unasked. Kept in localStorage only; anything unreadable there counts as not yet.
-  const toured = () => {
-    try { return localStorage.getItem(TOURED) === "1"; } catch { return false; }
+  const toured = (key) => {
+    try { return localStorage.getItem(key) === "1"; } catch { return false; }
   };
-  const markToured = () => {
-    try { localStorage.setItem(TOURED, "1"); } catch { /* Storage unavailable: she offers it again next visit. */ }
+  const markToured = (key) => {
+    try { localStorage.setItem(key, "1"); } catch { /* Storage unavailable: she offers it again next visit. */ }
   };
   // Under debug, `tessnews=YYYY-MM-DD` plays the signed-in greeting as if the visitor's last visit were that day: the
   // news from that day on.
@@ -289,15 +291,25 @@
     return params.get("debug") === "1" && day && DAY.test(day) ? day : null;
   })();
 
-  const create = ({ parent, input, fx, camera, pilot, visitor, world, hud, busy, coarse, quality, landing, targets = {} }) => {
+  // The island's own tables, as another place hands its own (see the header): the place's name in her offer's heading
+  // and the tour's, the box's prompt, the `world` flag that says she has greeted this page and the localStorage key that
+  // says this browser has answered her tour, and what the Worker hears a question is about.
+  const ISLAND_GUIDE = {
+    stops: STOPS, lines: LINES, work: WORK, answer, suggestions: SUGGESTIONS, pointAt: POINT_AT, news: true,
+    title: "island guide", tour: "Island tour", ask: "Ask me about the island", greeted: "tessGreeted", toured: TOURED, about: (stop) => stop.id
+  };
+
+  const create = ({ parent, input, fx, camera, pilot, visitor, world, hud, busy, coarse, quality, landing, targets = {}, guide = ISLAND_GUIDE }) => {
+    const G = guide, LN = G.lines, PLACE = G.stops, VIEWS = PLACE.map((stop) => viewOf(stop, pose())), SPOTS = PLACE.map(() => [0, 0, 0]);
+    const TOUR = PLACE.map((stop, i) => legOf(i, stop.title, stop.lines, LN)), WORKS = G.work;
     const rig = BL.tess.create({ parent, input, fx, camera, kind: "tess", coarse, quality }), position = rig.position;
     const state = {
-      phase: "work", stage: "beam", timer: 3, site: 0, seen: 0, again: false, kind: "island", legs: ISLAND, welcome: null,
+      phase: "work", stage: "beam", timer: 3, site: 0, seen: 0, again: false, kind: "island", legs: TOUR, welcome: null,
       stop: -1, arrived: false, closing: null, holding: false, tourGuest: false, glide: 0, glideTime: GLIDE,
       login: null, newest: null, still: landing, settle: SETTLE, driven: null, asked: false, place: null, ask: null
     };
     const spot = { x: 0, y: 0, z: 0 }, home = pose(), from = pose(), to = pose();
-    position.x = WORK[0].at[0]; position.y = WORK[0].at[1]; position.z = WORK[0].at[2];
+    position.x = WORKS[0].at[0]; position.y = WORKS[0].at[1]; position.z = WORKS[0].at[2];
     // The offer and the tour's controls live on screen, in the HUD's wood, built for the visit and removed on leave.
     const panel = document.createElement("div");
     panel.className = "greeter-menu";
@@ -315,13 +327,13 @@
     const form = document.createElement("form"), field = document.createElement("input"), send = document.createElement("button");
     form.className = "greeter-ask";
     field.type = "text"; field.maxLength = 200; field.autocomplete = "off"; field.enterKeyHint = "send";
-    field.placeholder = coarse ? "Ask me anything" : "Ask me about the island";
+    field.placeholder = coarse ? "Ask me anything" : G.ask;
     field.setAttribute("aria-label", `Ask ${NAME} a question`);
     send.type = "submit"; send.className = "greeter-choice"; send.textContent = "Ask";
     form.append(field, send);
     const chips = document.createElement("div");
     chips.className = "greeter-chips";
-    for (const text of SUGGESTIONS) {
+    for (const text of G.suggestions) {
       const chip = document.createElement("button");
       chip.type = "button"; chip.className = "greeter-chip"; chip.textContent = text;
       chip.addEventListener("click", () => { chip.blur(); question(text); });
@@ -353,7 +365,7 @@
       form.hidden = chips.hidden = phase !== "offer";
       const news = state.kind === "news";
       if (phase === "offer") {
-        heading.textContent = news ? `${NAME} · what's new` : `${NAME} · island guide`;
+        heading.textContent = news ? `${NAME} · what's new` : `${NAME} · ${G.title}`;
         go.textContent = "Show me"; skip.textContent = "Not now";
         help.textContent = `${coarse ? "Tap to choose, or ask" : "Enter starts · Esc closes"}${BL.net.state.tess ? "\nWhat I can't answer goes to Claude" : ""}`;
       } else if (phase === "tour" && state.kind === "trip") {
@@ -361,7 +373,7 @@
         label(); skip.textContent = "Back";
         help.textContent = coarse ? "Tap to go on" : "Enter or → goes on · Esc goes back";
       } else if (phase === "tour") {
-        heading.textContent = `${news ? "What's new" : "Island tour"} · ${state.stop + 1} / ${state.legs.length}\n${state.legs[state.stop].title}`;
+        heading.textContent = `${news ? "What's new" : G.tour} · ${state.stop + 1} / ${state.legs.length}\n${state.legs[state.stop].title}`;
         label(); skip.textContent = "End tour";
         help.textContent = coarse ? "Tap to go on" : "Enter or → goes on · Esc ends";
       }
@@ -370,7 +382,7 @@
     const label = () => {
       go.textContent = state.stop === state.legs.length - 1 && !(state.arrived && rig.more) ? "Finish" : "Next";
     };
-    const say = (id) => rig.say(LINES[id]);
+    const say = (id) => rig.say(LN[id]);
     // What she says at a stop, a bubble at a time: each goes on by itself, Next skips ahead, and the last stays up
     // until the tour moves on.
     const tell = () => { rig.say(state.legs[state.stop].text, true); label(); };
@@ -388,9 +400,9 @@
     };
     const toWork = () => {
       let site = state.site;
-      while (site === state.site) site = Math.floor(Math.random() * WORK.length);
+      while (site === state.site) site = Math.floor(Math.random() * WORKS.length);
       state.site = site;
-      const w = WORK[site].at;
+      const w = WORKS[site].at;
       flyTo(w[0], w[1], w[2], 4);
       state.stage = "fly";
       show("work");
@@ -413,9 +425,9 @@
     // The visit's one greeting: the island tour for a visitor who is not signed in, until this browser has answered it;
     // for a signed-in one, what is new since their last visit here, or no greeting at all when nothing is.
     const greet = () => {
-      world.tessGreeted = true;
-      const me = account();
-      if (!me) { if (toured()) return; state.kind = "island"; state.legs = ISLAND; state.welcome = null; notice(); return; }
+      world[G.greeted] = true;
+      const me = G.news ? account() : null;
+      if (!me) { if (toured(G.toured)) return; state.kind = "island"; state.legs = TOUR; state.welcome = null; notice(); return; }
       const fresh = DEBUG_NEWS ? NEWS.filter((n) => n.date >= DEBUG_NEWS) : freshAfter(lastSeen(me.login));
       if (!fresh.length) return;
       const count = fresh.length;
@@ -427,7 +439,7 @@
     const approach = () => { placeBy(); flyTo(spot.x, spot.y, spot.z, pace(6, spot.x, spot.y, spot.z), true); show("approach"); };
     const offer = (text) => {
       state.timer = OFFER_TIME; state.asked = false;
-      state.tourGuest = state.kind === "island" && !account();
+      state.tourGuest = state.kind === "island" && !(G.news && account());
       rig.clearPath(3, 1); rig.push(spot.x, spot.y, spot.z); rig.track();
       rig.nod(); show("offer"); rig.say(text);
     };
@@ -493,7 +505,7 @@
     };
     // The tour keeps where the view was, to give it back.
     const startTour = () => {
-      laySpots(camera);
+      laySpots(camera, PLACE, SPOTS);
       readPose(home);
       hold();
       if (document.pointerLockElement) document.exitPointerLock();
@@ -511,7 +523,7 @@
     // got no answer to waits for the next visit.
     const answered = () => {
       if (state.kind === "news" && state.login) { markSeen(state.login, state.newest); state.login = null; }
-      else if (state.tourGuest) markToured();
+      else if (state.tourGuest) markToured(G.toured);
     };
     // The panel's two buttons and their keys: on, and back out.
     const forward = () => {
@@ -544,44 +556,44 @@
       if (state.phase !== "offer" || state.ask || !text.trim()) return;
       // Another actor or panel may have taken the controls since she offered.
       if (busy()) { toWork(); return; }
-      const a = answer(text, state.place);
+      const a = G.answer(text, state.place);
       state.asked = true; state.timer = OFFER_TIME;
       if (!a) { if (BL.net.state.tess) consult(text); else say("unknown"); return; }
       if (a.place !== null) state.place = a.place;
       if (a.tour) {
         if (state.kind === "island") answered();
-        state.kind = "island"; state.legs = ISLAND; startTour();
+        state.kind = "island"; state.legs = TOUR; startTour();
       } else if (a.go !== null) {
-        state.kind = "trip"; state.legs = [legOf(a.go, STOPS[a.go].title, a.lines)]; startTour();
-      } else rig.say(a.lines.map((id) => LINES[id]).join("\n"));
+        state.kind = "trip"; state.legs = [legOf(a.go, PLACE[a.go].title, a.lines, LN)]; startTour();
+      } else rig.say(a.say || a.lines.map((id) => LN[id]).join("\n"));
     };
     // The Worker's answer: what she says, a line a bubble, and a place to fly the visitor to, or none. She thinks aloud
     // while it comes; one that comes after she has moved on is dropped, and a failure gets one of her own lines.
     const consult = async (text) => {
       const ask = new AbortController(), timer = setTimeout(() => ask.abort(), ASK_TIME);
       pending(ask);
-      rig.flare(); rig.say(LINES.thinking, true);
+      rig.flare(); rig.say(LN.thinking, true);
       let reply = null;
       try {
         const res = await fetch("/api/tess", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" },
-          body: JSON.stringify({ question: text, about: state.place === null ? null : STOPS[state.place].id }), signal: ask.signal });
+          body: JSON.stringify({ question: text, about: G.about(state.place === null ? null : PLACE[state.place]) }), signal: ask.signal });
         reply = await res.json();
       } catch { /* Offline, too slow, dropped or no JSON: her offline line. */ }
       clearTimeout(timer);
       if (state.ask !== ask) return;
       pending(null); state.timer = OFFER_TIME;
       if (!reply || typeof reply.say !== "string") { say(FAILED[reply && reply.error] || "unknown"); return; }
-      const go = STOPS.findIndex((stop) => stop.id === reply.go);
+      const go = PLACE.findIndex((stop) => stop.id === reply.go);
       if (go < 0) { rig.say(reply.say); return; }
       if (busy()) { rig.hush(); toWork(); return; }
       state.place = go; state.kind = "trip";
-      state.legs = [{ stop: go, title: STOPS[go].title, text: reply.say, lineAt: BL.fx.beatsOf(reply.say).map(() => null) }];
+      state.legs = [{ stop: go, title: PLACE[go].title, text: reply.say, lineAt: BL.fx.beatsOf(reply.say).map(() => null) }];
       startTour();
     };
     // Back from a trip she offers again, ready for the next question, the island tour behind Show me.
     const offerAgain = () => {
-      state.kind = "island"; state.legs = ISLAND; state.asked = true; state.timer = OFFER_TIME;
-      state.tourGuest = !account();
+      state.kind = "island"; state.legs = TOUR; state.asked = true; state.timer = OFFER_TIME;
+      state.tourGuest = !(G.news && account());
       rig.clearPath(3, 1); rig.push(spot.x, spot.y, spot.z); rig.track();
       show("offer");
     };
@@ -589,8 +601,8 @@
     // shows before she arrives.
     const tap = () => {
       if (state.phase !== "work" || busy()) return;
-      world.tessGreeted = true;
-      state.kind = "island"; state.legs = ISLAND; state.again = true;
+      world[G.greeted] = true;
+      state.kind = "island"; state.legs = TOUR; state.again = true;
       rig.flare(); rig.nod();
       placeBy(); flyTo(spot.x, spot.y, spot.z, pace(6, spot.x, spot.y, spot.z), true);
       show("approach");
@@ -606,8 +618,8 @@
       if (!e.repeat) forward();
     };
     window.addEventListener("keydown", captureKey, true);
-    // HALLOWEEN: the ghost hunt borrows her (ghost-game.js): while lent she drops whatever she was doing and `driver(rig,
-    // dt)` flies her; given back, she goes back to work.
+    // A place may borrow her (the ghost hunt, ghost-game.js, HALLOWEEN; the hangar, while Kortik's Sis smashes the Jet):
+    // while lent she drops whatever she was doing and `driver(rig, dt)` flies her; given back, she goes back to work.
     let lender = null;
     const lend = (driver) => {
       if (driver && !lender) {
@@ -623,12 +635,12 @@
       lender = driver;
     };
     const update = (dt, elapsed) => {
-      if (lender) { lender(rig, dt); rig.update(dt, elapsed); return; } // HALLOWEEN
+      if (lender) { lender(rig, dt); rig.update(dt, elapsed); return; }
       const actor = visitor();
       if (state.still && (state.phase === "work" || state.phase === "notice" || state.phase === "approach")) watchStill(dt);
       // A greeting she started is dropped, without a word, when the visitor gets going first; one they asked for by a
       // tap is not.
-      if (!state.still && !state.again && (state.phase === "notice" || state.phase === "approach")) { world.tessGreeted = false; toWork(); }
+      if (!state.still && !state.again && (state.phase === "notice" || state.phase === "approach")) { world[G.greeted] = false; toWork(); }
       switch (state.phase) {
         case "work":
           if (state.stage === "fly") {
@@ -637,7 +649,7 @@
           }
           // A newcomer gets a moment to look round, and to see her at work, before she notices them; she waits until
           // the page knows whether they are signed in.
-          state.seen = world.tessGreeted || !state.still || busy() || !BL.net.state.resolved && !DEBUG_NEWS ? 0 : state.seen + dt;
+          state.seen = world[G.greeted] || !state.still || busy() || !BL.net.state.resolved && !DEBUG_NEWS ? 0 : state.seen + dt;
           if (state.seen > NOTICE_AFTER) { greet(); if (state.phase !== "work") break; }
           if ((state.timer -= dt) <= 0) {
             if (state.stage === "beam") { state.stage = "rest"; state.timer = 0.6; }
@@ -650,7 +662,7 @@
         case "approach":
           placeBy(); rig.setLast(spot.x, spot.y, spot.z); rig.steer(dt);
           if (rig.lastPoint && Math.hypot(spot.x - position.x, spot.y - position.y, spot.z - position.z) < 0.5) {
-            offer(state.welcome || LINES[state.again ? "again" : "greeting"]);
+            offer(state.welcome || LN[state.again ? "again" : "greeting"]);
             state.again = false; state.welcome = null;
           }
           break;
@@ -691,17 +703,17 @@
       // there, otherwise she watches the visitor: their Ooga, or the view.
       const working = state.phase === "work" && state.stage === "beam", at = state.phase === "tour" ? state.legs[state.stop].stop : -1;
       rig.mode = working ? 1 : at >= 0 && rig.onLastLeg ? 2 : 0;
-      if (working) { const a = WORK[state.site].aim; rig.aim.x = a[0]; rig.aim.y = a[1]; rig.aim.z = a[2]; }
+      if (working) { const a = WORKS[state.site].aim; rig.aim.x = a[0]; rig.aim.y = a[1]; rig.aim.z = a[2]; }
       else if (rig.mode === 2) {
         // At a stop, the landmark; through a line about something beside it, a beam to each of those at once.
         const speech = rig.speech, line = state.arrived && speech ? state.legs[state.stop].lineAt[speech.beat] : null;
-        const list = line && POINT_AT[line] ? targets[POINT_AT[line]] : null;
+        const list = line && G.pointAt[line] ? targets[G.pointAt[line]] : null;
         rig.aims = list && list.length ? list : null;
         if (rig.aims) {
           let x = 0, y = 0, z = 0;
           for (let i = 0; i < list.length; i++) { x += list[i].x; y += list[i].y; z += list[i].z; }
           rig.aim.x = x / list.length; rig.aim.y = y / list.length; rig.aim.z = z / list.length;
-        } else { const a = STOPS[at].look; rig.aim.x = a[0]; rig.aim.y = a[1]; rig.aim.z = a[2]; }
+        } else { const a = PLACE[at].look; rig.aim.x = a[0]; rig.aim.y = a[1]; rig.aim.z = a[2]; }
       }
       rig.steady = state.phase === "offer" || state.phase === "tour" && at < 0;
       rig.calm = rig.steady || state.phase === "tour";
@@ -729,7 +741,7 @@
       window.addEventListener("keydown", captureKey, true);
     };
     const dispose = () => { suspend(); rig.dispose(); };
-    return { root: rig.root, state, update, escape, tap, suspend, resume, dispose, liveGeometry: rig.liveGeometry, lend /* HALLOWEEN */, get holding() { return state.holding; }, get speech() { return rig.speech; } };
+    return { root: rig.root, state, update, escape, tap, suspend, resume, dispose, liveGeometry: rig.liveGeometry, light: rig.light, lend, get holding() { return state.holding; }, get lent() { return !!lender; }, get speech() { return rig.speech; } };
   };
-  BL.hubGuide = { create, NAME, LINES, STOPS, NEWS, freshAfter, legsOf, answer, SUGGESTIONS };
+  BL.hubGuide = { create, NAME, LINES, STOPS, NEWS, freshAfter, legsOf, answer, SUGGESTIONS, fold, has };
 })();
