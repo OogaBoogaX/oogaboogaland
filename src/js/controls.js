@@ -77,7 +77,8 @@
   // Joystick bases, a hold-to-climb button, a canvas whose mouse chord walks, and a Space handler
   const create = ({ move = null, look = null, boost = null, chord = null, onAction = null, pressActions = false, tabNavigation = false, shooter = () => false, canDescend = () => true } = {}) => {
     const held = { forward: 0, back: 0, left: 0, right: 0, yawLeft: 0, yawRight: 0, pitchDown: 0, pitchUp: 0, up: 0, space: 0, down: 0, boost: 0, chord: 0, sprint: 0, peek: 0 };
-    const axes = { x: 0, y: 0, up: 0, yaw: 0, pitch: 0, orbitYaw: 0, sprint: 0, peek: 0, shiftTap: 0 };
+    const axes = { x: 0, y: 0, up: 0, yaw: 0, pitch: 0, keyPitch: 0, orbitYaw: 0, sprint: 0, peek: 0, shiftTap: 0 };
+    let pitchBorrowed = false;
     let spaceDown = false, boostPointer = null, boostClick = false, shiftAt = 0, shiftUsed = false, shiftTap = 0;
     let padFrame = -1, padUp = 0, padSprint = 0;
     const downKeys = new Set(), blockedKeys = new Set();
@@ -232,7 +233,9 @@
       // Bird's-eye combat rotates with Q/E while its look stick aims the pointer.
       axes.orbitYaw = held.yawLeft - held.yawRight;
       axes.yaw = clamp((shooter() ? 0 : held.yawLeft - held.yawRight) - (lookStick ? lookStick.x : 0) - pad.rx, -1, 1);
-      axes.pitch = clamp((shooter() ? 0 : held.pitchDown - held.pitchUp) - (lookStick ? lookStick.y : 0) - pad.ry, -1, 1);
+      // R and F pitch the view unless a scene borrows them (`borrowPitch`), which reads them as `keyPitch` instead.
+      axes.keyPitch = held.pitchDown - held.pitchUp;
+      axes.pitch = clamp((shooter() || pitchBorrowed ? 0 : axes.keyPitch) - (lookStick ? lookStick.y : 0) - pad.ry, -1, 1);
       axes.sprint = Math.max(held.sprint, padSprint);
       axes.peek = shooter() ? held.peek : 0;
       axes.shiftTap = shiftTap;
@@ -275,6 +278,7 @@
       boostClick = false;
     };
     const reset = () => { onBlur(); if (moveStick) moveStick.reset(); if (lookStick) lookStick.reset(); };
+    const borrowPitch = (on) => { pitchBorrowed = !!on; };
     const resume = () => {
       if (listening) return;
       reset();
@@ -303,7 +307,7 @@
       if (moveStick) moveStick.resume();
       if (lookStick) lookStick.resume();
     };
-    return { read, axes, clearPointer, reset, consumeTab, resume, dispose, get rightShift() { return !!held.peek; } };
+    return { read, axes, clearPointer, reset, consumeTab, resume, borrowPitch, dispose, get rightShift() { return !!held.peek; } };
   };
   BL.controls = { create, uiKey };
 })();
