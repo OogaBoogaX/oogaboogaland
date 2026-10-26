@@ -10,10 +10,13 @@
     const handle = document.getElementById("donation-handle"), message = document.getElementById("donation-message"), closeButton = document.getElementById("donation-close");
     const status = document.getElementById("donation-details-status");
     const context = canvas.getContext("2d"), donations = BL.donations, help = dialog.querySelector(".help");
-    // The dialog's lettered title and the screen's spoken label, the donation's or the stand's.
-    const title = document.querySelector("#donation-title [data-sign]");
-    const donateTitle = title.getAttribute("aria-label") || title.textContent, donateLabel = canvas.getAttribute("aria-label");
+    // The dialog's lettered title and the screen's spoken label are the donation's until the stand's screen takes the
+    // dialog, which keeps them (`donateHeading`) to put back when a donation opens it again; the donation's own path
+    // never touches them.
+    let donateHeading = null;
     const heading = (text, label) => {
+      const title = document.getElementById("donation-title").querySelector("[data-sign]");
+      if (!donateHeading) donateHeading = [title.getAttribute("aria-label") || title.textContent, canvas.getAttribute("aria-label")];
       if (title.getAttribute("aria-label") !== text) { title.setAttribute("aria-label", text); title.replaceChildren(BL.hud.signLettering(text)); }
       canvas.setAttribute("aria-label", label);
     };
@@ -257,7 +260,7 @@
     const open = (demo = false) => {
       if (dialog.open) return;
       simulated = demo;
-      heading(donateTitle, donateLabel);
+      if (donateHeading) { heading(donateHeading[0], donateHeading[1]); donateHeading = null; }
       // The page's own /donate address: a path where the router serves paths, a hash from disk or a named file.
       const link = BL.router && !BL.router.served ? `${location.href.split("#")[0]}#/donate` : `${location.origin}/donate`;
       help.textContent = simulated ? "This is a local simulation. No Bitcoin is sent." : "Pay with Lightning or on-chain. Your bananas arrive from the Factory when the payment confirms.";
