@@ -472,6 +472,13 @@
     // Reject a complete static bounding box before walking its faces. The
     // mixed perspective/orthographic side planes are linear in view space.
     // Dynamic surfaces and Matrix receiver planes keep their existing path.
+    const compactCursors = new WeakMap();
+    const readFace = (geometry, index) => {
+      if (!geometry.compactGeometry) return geometry.faces[index];
+      let cursor = compactCursors.get(geometry);
+      if (!cursor) { cursor = BL.compactGeometry.createCursor(geometry); compactCursors.set(geometry, cursor); }
+      return BL.compactGeometry.readFace(geometry, index, cursor);
+    };
     const matrixReceiverCache = new WeakMap();
     const hasMatrixReceiver = (node) => {
       const g = node.geometry;
@@ -481,7 +488,8 @@
       let entry = matrixReceiverCache.get(g);
       if (entry && entry.faces === g.faces) return entry.receiver;
       let receiver = false;
-      if (g.faces) for (const face of g.faces) {
+      if (g.faces) for (let index = 0; index < g.faces.length; index++) {
+        const face = readFace(g, index);
         if (face.matrixCave || face.matrixPermanentFallback || face.matrixLocalGlyphSurface || face.matrixWorldGlyphSurface || face.color?.[3] < 0) { receiver = true; break; }
       }
       matrixReceiverCache.set(g, { faces: g.faces, receiver });
@@ -553,8 +561,8 @@
       const clipMaximumY = Math.min(preserved ? Infinity : cutawayMaxY, node.geometry.clipMaxY ?? Infinity);
       let shardDrawn = false;
       if (faces) {
-        for (const face of faces) {
-          const idx = face.i;
+        for (let index = 0; index < faces.length; index++) {
+          const face = readFace(node.geometry, index), idx = face.i;
           const count = idx.length;
           if (liquid) {
             // Portal faces are radial strips. Skip those beyond the reveal,
@@ -2150,6 +2158,9 @@
       releaseGeometry: () => { },
       prepareScene: () => { },
       prepareGeometry: () => true,
+      prepareSteps: function* () { },
+      // Canvas has no resident GPU geometry records.
+      geometryRecords: function* () { },
       createRig: () => null,
       releaseUnused: (live) => { BL.models.addLods(live); canvasShades.release(live); if (environment.source && !live.has(environment.source.geometry)) destroyEnvironment(); return 0; },
       dispose: () => {

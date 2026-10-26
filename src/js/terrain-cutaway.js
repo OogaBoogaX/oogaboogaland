@@ -68,6 +68,14 @@
       return entry;
     };
     const emptyGeometry = () => ({ verts: [], faces: [], lines: [], castShadow: false, cutawayCap: true });
+    const finishGeometry = (base, paths) => {
+      // Horizontal caps are immutable, render-only results. Canonical island and collision meshes stay writable.
+      if (BL.compactGeometry?.enabled) {
+        BL.compactGeometry.pack(base, { immutable: true, renderOnly: true });
+        for (const geometry of paths) BL.compactGeometry.pack(geometry, { immutable: true, renderOnly: true });
+      }
+      return { base, paths };
+    };
     // All scratch belongs to this visit. Polygon generation only runs when a
     // slice or its authored cut region changes, never during a steady camera.
     const emit = (geometry, points, count, color, region) => {
@@ -100,7 +108,7 @@
     const buildSolid = (layer, region, pathState) => {
       const geometry = emptyGeometry(), paths = pathNodes.map(emptyGeometry);
       stats.solidBuilds++;
-      if (layer < 0 || layer >= sy) return { base: geometry, paths };
+      if (layer < 0 || layer >= sy) return finishGeometry(geometry, paths);
       let x0 = 0, x1 = sx, z0 = 0, z1 = sz;
       if (region) {
         const rx = Math.abs(region.cos) * region.halfWidth + Math.abs(region.sin) * region.halfDepth, rz = Math.abs(region.sin) * region.halfWidth + Math.abs(region.cos) * region.halfDepth;
@@ -128,7 +136,7 @@
         for (let k = 0; k < depth; k++) mask.fill(0, at + k * sz, at + k * sz + width);
         z += width;
       }
-      return { base: geometry, paths };
+      return finishGeometry(geometry, paths);
     };
     const buildDetail = (slice, region, pathState) => {
       const geometry = emptyGeometry(), paths = detailPathNodes.map(emptyGeometry), y = slice * DETAIL_STEP - EPS;
@@ -194,7 +202,7 @@
           }
         }
       }
-      return { base: geometry, paths };
+      return finishGeometry(geometry, paths);
     };
     const update = (cutY, region = null, pathState = null) => {
       node.visible = Number.isFinite(cutY) && cutY > origin.y && cutY < origin.y + sy * unit;

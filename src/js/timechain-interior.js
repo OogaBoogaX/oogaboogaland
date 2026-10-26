@@ -444,6 +444,19 @@
       leaving = go("hub", "timechain", !!pose && ctx.hubPolicy === "keep");
       if (!leaving) world.sphereExit = null;
     };
+    // A way out the island could not be built for (the director's `stay`): back in the room with the walk-out undone, so
+    // Space at the button can try again.
+    const stay = () => {
+      leaving = false;
+      world.sphereExit = null;
+      if (shared) BL.net.setZone(room.zone);
+      if (guide.stage) {
+        // The vestibule is walkable only while guided: return inside before closing the doors and giving control back.
+        arrive(L.doorStep);
+        doors.want = 0;
+        finishGuide();
+      }
+    };
     const exitPose = () => {
       const p = camera.position, t = camera.target, dx = t.x - p.x, dy = t.y - p.y, dz = t.z - p.z;
       return { x: p.x, dz: p.z - exitEye, heading: Math.atan2(dx, dz), pitch: Math.atan2(dy, Math.hypot(dx, dz)) };
@@ -724,7 +737,7 @@
       const count = (node) => 1 + node.children.reduce((sum, c) => sum + count(c), 0);
       return { visibleNodes: visible, allNodes: count(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...(remotes ? remotes.stats() : {}), requests: reader.pending, timers: reader.timers };
     };
-    return { update, overlay, onKey, onDonation, leave, liveGeometry, stats, renderOpts: RENDER_OPTS, get inMotion() { return true; } };
+    return { update, overlay, onKey, onDonation, stay, leave, liveGeometry, stats, renderOpts: RENDER_OPTS, get inMotion() { return true; } };
   };
 
   // A room readied at the island's doorway once Enter commits to it, so that arriving costs no build, paint or upload:

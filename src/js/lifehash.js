@@ -174,5 +174,6 @@
     const hash = Array.from(digest, (v) => v.toString(16).padStart(2, "0")).join("");
     return { width: 32, height: 32, colors, hash };
   };
-  BL.lifehash = { make };
+  const hash = (seed) => Array.from(sha256(UTF8.encode(seed)), v => v.toString(16).padStart(2, "0")).join("");
+  BL.lifehash = { make, hash };
 })();

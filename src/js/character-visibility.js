@@ -4,6 +4,15 @@
   const BL = window.BL = window.BL || {}, { mat4 } = BL.math, { boundsOf } = BL.scene;
   const UP = { x: 0, y: 1, z: 0 }, VERTICES = 64, FRAGMENTS = 1024, EPS = 1e-10;
   const meshes = new WeakMap(), sourceVertices = new WeakMap();
+  // A witness can lazily bake another actor sharing its source mesh. Keep that bake's cursor separate from
+  // the visible-face cursor held across exposed(), so nested blocker queries cannot overwrite its polygon.
+  const bakeCursors = new WeakMap(), visibleCursors = new WeakMap();
+  const readFace = (geometry, index, cursors = bakeCursors) => {
+    if (!geometry.compactGeometry) return geometry.faces[index];
+    let cursor = cursors.get(geometry);
+    if (!cursor) { cursor = BL.compactGeometry.createCursor(geometry); cursors.set(geometry, cursor); }
+    return BL.compactGeometry.readFace(geometry, index, cursor);
+  };
   const meshOf = (geometry, trackSource = false) => {
     let mesh = meshes.get(geometry);
     // A direct bake can precede the first wrapper alias attempt. Record the
@@ -17,7 +26,11 @@
     const source = geometry.matrixSourceGeometry;
     if (source && !source.matrixSourceGeometry && source !== geometry && source.verts === geometry.verts && source.faces.length === geometry.faces.length) {
       let same = true;
-      for (let i = 0; i < source.faces.length; i++) if (source.faces[i].i !== geometry.faces[i].i || source.faces[i].visibility !== geometry.faces[i].visibility) { same = false; break; }
+      const compact = BL.compactGeometry?.storageOf(source);
+      if (!compact || BL.compactGeometry.storageOf(geometry) !== compact) for (let i = 0; i < source.faces.length; i++) {
+        const original = readFace(source, i), wrapped = readFace(geometry, i);
+        if (original.i !== wrapped.i || original.visibility !== wrapped.visibility) { same = false; break; }
+      }
       if (same) {
         mesh = meshOf(source, true);
         const snapshot = sourceVertices.get(source);
@@ -27,8 +40,9 @@
         // bake merely because the new wrapper agrees with the new source.
         let at = 0;
         for (let f = 0; same && f < source.faces.length; f++) {
-          if (source.faces[f].visibility === false) continue;
-          const indices = source.faces[f].i;
+          const face = readFace(source, f);
+          if (face.visibility === false) continue;
+          const indices = face.i;
           for (let i = 1; same && i + 1 < indices.length; i++) {
             same = mesh.indices[at++] === indices[0] * 3
               && mesh.indices[at++] === indices[i] * 3 && mesh.indices[at++] === indices[i + 1] * 3;
@@ -39,15 +53,22 @@
     }
     const vertices = geometry.verts, nodes = [];
     let count = 0;
-    for (const face of geometry.faces) if (face.visibility !== false && face.i.length > 2) count += face.i.length - 2;
+    for (let index = 0; index < geometry.faces.length; index++) {
+      const face = readFace(geometry, index);
+      if (face.visibility !== false && face.i.length > 2) count += face.i.length - 2;
+    }
     const indices = new Uint32Array(count * 3), boxes = new Float64Array(count * 6), order = new Uint32Array(count);
     let n = 0;
-    for (const face of geometry.faces) if (face.visibility !== false) for (let i = 1; i + 1 < face.i.length; i++) {
-      const a = face.i[0] * 3, b = face.i[i] * 3, c = face.i[i + 1] * 3;
-      indices[n * 3] = a; indices[n * 3 + 1] = b; indices[n * 3 + 2] = c; order[n] = n;
-      for (let axis = 0; axis < 3; axis++) boxes[n * 6 + axis] = Math.min(vertices[a + axis], vertices[b + axis], vertices[c + axis]);
-      for (let axis = 0; axis < 3; axis++) boxes[n * 6 + axis + 3] = Math.max(vertices[a + axis], vertices[b + axis], vertices[c + axis]);
-      n++;
+    for (let index = 0; index < geometry.faces.length; index++) {
+      const face = readFace(geometry, index);
+      if (face.visibility === false) continue;
+      for (let i = 1; i + 1 < face.i.length; i++) {
+        const a = face.i[0] * 3, b = face.i[i] * 3, c = face.i[i + 1] * 3;
+        indices[n * 3] = a; indices[n * 3 + 1] = b; indices[n * 3 + 2] = c; order[n] = n;
+        for (let axis = 0; axis < 3; axis++) boxes[n * 6 + axis] = Math.min(vertices[a + axis], vertices[b + axis], vertices[c + axis]);
+        for (let axis = 0; axis < 3; axis++) boxes[n * 6 + axis + 3] = Math.max(vertices[a + axis], vertices[b + axis], vertices[c + axis]);
+        n++;
+      }
     }
     const keys = new Float64Array(count * 3), scratch = BL.math.sortScratch(count);
     let ordered = true;
@@ -399,9 +420,12 @@
     const visiblePart = (node, owner) => {
       if (!node.visible || node.cameraHidden) return false;
       const entry = records.get(node)?.[0], geometry = node.geometry;
-      if (entry && entry.frame === frame && geometry) for (const face of geometry.faces) for (let i = 1; i + 1 < face.i.length; i++) {
-        const count = projectTriangle(entry, face.i[0] * 3, face.i[i] * 3, face.i[i + 1] * 3);
-        if (count >= 3 && area(projected, count) >= 1e-14 && exposed(count, owner)) return true;
+      if (entry && entry.frame === frame && geometry) for (let index = 0; index < geometry.faces.length; index++) {
+        const face = readFace(geometry, index, visibleCursors);
+        for (let i = 1; i + 1 < face.i.length; i++) {
+          const count = projectTriangle(entry, face.i[0] * 3, face.i[i] * 3, face.i[i + 1] * 3);
+          if (count >= 3 && area(projected, count) >= 1e-14 && exposed(count, owner)) return true;
+        }
       }
       for (const child of node.children) if (visiblePart(child, owner)) return true;
       return false;
@@ -489,7 +513,10 @@
           const geometry = pending[pending.length - 1];
           if (meshes.has(geometry)) { pending.pop(); continue; }
           let triangles = 0;
-          for (const face of geometry.faces) if (face.visibility !== false && face.i.length > 2) triangles += face.i.length - 2;
+          for (let index = 0; index < geometry.faces.length; index++) {
+            const face = readFace(geometry, index);
+            if (face.visibility !== false && face.i.length > 2) triangles += face.i.length - 2;
+          }
           const estimated = triangles * msPerTriangle + 1;
           if (estimated > 8) { pending.pop(); continue; }
           if (estimated > deadline.timeRemaining()) break;
