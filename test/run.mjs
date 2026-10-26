@@ -8341,8 +8341,8 @@ const hubMirror = { name: "hub mirror", why: "rule: rifle shots and melee ripple
   const back = await b.evaluate(`(() => { const M = __ooga.mirrorCave; return M.node.visible && M.node.geometry.faces.length > 0 && !M.node.mirrorReveal && M.gate.locked && !("damage" in M) && !("mirrorDamage" in M.node); })()`);
   record("hub mirror: the unbreakable pane and locked gate remain intact after leaving and returning", back);
 } };
-// Medium captures the mirror only while its pane reads; one that shrinks below that must drop its capture.
-const hubMirrorMedium = { name: "hub mirror medium size", why: "regression: on medium a mirror whose pane shrank under the capture size kept drawing its last capture, frozen, instead of its authored face", run: async (b) => {
+// Distant mirrors keep refreshing at reduced resolution; low also bounds refreshes and retained GPU targets.
+const hubMirrorMedium = { name: "hub mirror medium size", why: "regression: lower tiers replaced distant mirror reflections with a grey face instead of keeping a cheaper live reflection", run: async (b) => {
   const r = await b.evaluate(`(() => {
     const B = window.__ooga, R = B.renderer, M = B.mirrorCave, root = BL.scenes.hub.root;
     if (R.kind !== "webgl2") return { kind: R.kind };
@@ -8351,12 +8351,29 @@ const hubMirrorMedium = { name: "hub mirror medium size", why: "regression: on m
     cam.target.x = w[12]; cam.target.y = w[13]; cam.target.z = w[14];
     R.setQuality("medium");
     // A wide lens at the same spot shrinks the pane on screen without moving the camera behind any rock.
-    const look = fov => { cam.fov = fov * Math.PI / 180; for (let i = 0; i < 4; i++) R.render(root, cam, B.renderOpts); const m = R.mirror; return { reason: m.skipReason, valid: m.captureValid, drawn: m.surfaceDrawn }; };
+    const look = fov => { cam.fov = fov * Math.PI / 180; const before = R.mirror.reflectionPassCount; for (let i = 0; i < 8; i++) R.render(root, cam, B.renderOpts); const m = R.mirror; return { valid: m.captureValid, drawn: m.surfaceDrawn, width: m.width, height: m.height, refreshes: m.reflectionPassCount - before }; };
     const near = look(50), small = look(170), back = look(50);
+    R.setQuality("low");
+    const released = R.mirror.textureWidth === 0, lowFirstSmall = look(170), lowNear = look(50), m = R.mirror;
+    const width = m.textureWidth, height = m.textureHeight, allocations = m.allocationCount, passes = m.reflectionPassCount;
+    let held = true;
+    for (let i = 0; i < 8; i++) { R.render(root, cam, B.renderOpts); held &&= m.captureValid && m.surfaceDrawn; }
+    const refreshes = m.reflectionPassCount - passes, steady = m.allocationCount === allocations;
+    cam.target.x = cam.position.x * 2 - w[12]; cam.target.y = cam.position.y * 2 - w[13]; cam.target.z = cam.position.z * 2 - w[14];
+    const beforeAway = m.reflectionPassCount;
+    look(50);
+    const offscreen = m.reflectionPassCount === beforeAway;
+    cam.target.x = w[12]; cam.target.y = w[13]; cam.target.z = w[14];
+    const lowSmall = look(170), lowBack = look(50), reused = m.allocationCount === allocations;
     R.setQuality(tier);
-    return { kind: R.kind, near, small, back };
+    return { kind: R.kind, near, small, back, low: { released, firstSmall: lowFirstSmall, near: lowNear, width, height, refreshes, held, steady, offscreen, small: lowSmall, back: lowBack, reused } };
   })()`);
-  record("hub mirror medium size: a readable pane captures and draws its reflection, shrunk below the capture size it drops the capture for its authored face, and it captures again when it reads", r.kind === "webgl2" && r.near.valid && r.near.drawn && r.small.reason === "quality-size" && !r.small.valid && !r.small.drawn && r.back.valid && r.back.drawn, JSON.stringify(r));
+  record("hub mirror medium size: the reflection stays live as its pane shrinks, uses fewer pixels, and restores detail up close", r.kind === "webgl2" && r.near.valid && r.near.drawn && r.small.valid && r.small.drawn && r.small.refreshes > 0
+    && r.small.width < r.near.width && r.small.height < r.near.height && r.back.valid && r.back.drawn && r.back.width === r.near.width && r.back.height === r.near.height, JSON.stringify(r));
+  const low = r.low;
+  record("hub mirror low: a downgrade releases the larger target, even a distant first view reflects, close captures stay within 256 pixels and two refreshes in eight frames, offscreen captures stop, and distant views stay live on the same target", r.kind === "webgl2" && low.released && low.firstSmall.valid && low.firstSmall.drawn && low.firstSmall.refreshes > 0 && low.near.valid && low.near.drawn
+    && low.width > 0 && low.width <= 256 && low.height > 0 && low.height <= 256 && low.refreshes === 2 && low.held && low.steady && low.offscreen
+    && low.small.valid && low.small.drawn && low.small.refreshes > 0 && low.small.width < low.near.width && low.small.height < low.near.height && low.back.valid && low.back.drawn && low.reused, JSON.stringify(low));
 } };
 // The Canvas 2D fallback, for a device without WebGL2: every scene, entered in one page, paints real
 // colour (sampled small, after the arrival fade) and keeps the leave contract; the console stays clean.
@@ -12307,6 +12324,13 @@ const hubDistantEffects = { name: "hub distant effects", why: "rule: distant por
     const far = () => view(500, 300, 500);
     const same = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
     const phases = nodes.filter(n => n.geometry?.mirrorRippleOnly && n.mirrorRipples && n.mirrorBody);
+    const caveFields = B.island.mouths.map(mouth => {
+      const field = [...phases, B.mirrorCave.node].find(node => node.parent.position.x === mouth.x && node.parent.position.z === mouth.z);
+      const slot = BL.caves.slots.find(slot => slot.id === mouth.id), tint = field?.rippleTint;
+      return { id: mouth.id, contact: !!field?.mirrorBody && field.mirrorBody.tracked > 0,
+        transparent: slot.status === "mirror" || field?.geometry.mirrorRippleOnly === true,
+        color: slot.scene !== "arcade" || !!tint && tint[0] > 0.8 && tint[1] < 0.25 && tint[2] < 0.25 };
+    });
     const portals = [];
     for (const node of phases) {
       const w = node.world, x = w[12], y = w[13] + 1.5, z = w[14];
@@ -12373,9 +12397,10 @@ const hubDistantEffects = { name: "hub distant effects", why: "rule: distant por
         moving: n.position.x !== sails[i][0] || n.position.z !== sails[i][2], rocking: !same(sails[i].slice(3), boatPose(n).slice(3)) })),
       clouds: clouds.map((c, i) => ({ visible: c.node.visible, moving: c.node.position.x !== sky[i][0] || c.node.position.z !== sky[i][2] })) });
     }
-    return { portals, bridgeRested, bridgeResumed, projected, windowResumed, daylight, night, batches, horizon };
+    return { caveFields, portals, bridgeRested, bridgeResumed, projected, windowResumed, daylight, night, batches, horizon };
   })()`);
-  record("hub distant effects: all four portals and the bridge rest and resume locally while the paused window retains parallax", state.portals.length === 4 && state.portals.every(row => Object.values(row).every(Boolean)) && state.bridgeRested && state.bridgeResumed && state.projected && state.windowResumed, JSON.stringify({ portals: state.portals, bridgeRested: state.bridgeRested, bridgeResumed: state.bridgeResumed, projected: state.projected, windowResumed: state.windowResumed }));
+  record("hub cave fields: every cave mouth has a tracked contact field, non-mirror fields are transparent, and the Arcade glyphs are red", state.caveFields.length === 8 && state.caveFields.every(row => row.contact && row.transparent && row.color), JSON.stringify(state.caveFields));
+  record("hub distant effects: all eight portal fields and the bridge rest and resume locally while the paused window retains parallax", state.portals.length === 8 && state.portals.every(row => Object.values(row).every(Boolean)) && state.bridgeRested && state.bridgeResumed && state.projected && state.windowResumed, JSON.stringify({ portals: state.portals, bridgeRested: state.bridgeRested, bridgeResumed: state.bridgeResumed, projected: state.projected, windowResumed: state.windowResumed }));
   record("hub distant effects: daytime and newly populated nighttime insects and embers keep valid visible poses, rest at distance and resume without a jump", state.daylight && state.night && state.batches.length >= 5 && state.batches.every(row => Object.values(row).every(Boolean)), JSON.stringify({ daylight: state.daylight, night: state.night, batches: state.batches }));
   record("hub distant effects: every horizon bird and all five boats keep moving from the pile and far away", state.horizon.length === 2 && state.horizon.every(row => row.birds.length === 2 && row.birds.reduce((n, batch) => n + batch.count, 0) === 32 && row.birds.every(batch => batch.initialized && batch.visible && batch.count === batch.moving) && row.sails.length === 5 && row.sails.every(boat => Object.values(boat).every(Boolean))), JSON.stringify(state.horizon));
   const water = await b.evaluate(`(() => {
