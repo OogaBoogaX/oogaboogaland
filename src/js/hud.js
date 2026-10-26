@@ -76,7 +76,6 @@
     $("message-stack").append(box);
     box.classList.add("show");
   };
-  const SHEET_STATE_KEY = "oogaboogaland.sheet.v1";
   const BOARD_STATE_KEY = "oogaboogaland.oogatron.windows.v1";
   const MAX_FLOATING_BOARDS = 12;
   const readBoardState = () => {
@@ -112,15 +111,6 @@
       return { windows, lastUsed: Number.isInteger(state.lastUsed) ? state.lastUsed : -1,
         lastWidth: Number.isFinite(state.lastWidth) && state.lastWidth > 0 ? state.lastWidth : 440 };
     } catch { return null; }
-  };
-  const readSheetState = () => {
-    try {
-      const state = JSON.parse(localStorage.getItem(SHEET_STATE_KEY));
-      return state && typeof state.open === "boolean" && ["bananas", "roster", "loot", "chat"].includes(state.tab) ? state : null;
-    } catch { return null; }
-  };
-  const writeSheetState = (open, tab, height) => {
-    try { localStorage.setItem(SHEET_STATE_KEY, JSON.stringify({ open, tab, height })); } catch { /* Storage may be unavailable. */ }
   };
   // Sign headings: one pixel path per element, scaled by that element's CSS height.
   const SIGN_NS = "http://www.w3.org/2000/svg";
@@ -287,7 +277,6 @@
       bananaBtcPrice: $("banana-btc-price"), bananaExchange: $("banana-exchange"),
       donorUnits: [...document.querySelectorAll("[data-donor-unit]")],
       lootTab: $("loot-tab"),
-      lootCount: $("loot-count"),
       worldLootHint: $("world-loot-hint"),
       subtitle: $("subtitle"),
       topbar: document.querySelector(".topbar"), brand: document.querySelector(".brand"),
@@ -343,12 +332,6 @@
       tooltipHealthFill: $("tooltip-health-fill"),
       hint: $("hint"),
       sheet: $("sheet"),
-      sheetToggle: $("sheet-toggle"),
-      sheetBananas: $("sheet-bananas"),
-      sheetResize: $("sheet-resize"),
-      sheetPanels: document.querySelector(".sheet-panels"),
-      tabs: [...document.querySelectorAll("[data-tab]")],
-      panels: [...document.querySelectorAll("[data-panel]")],
       presets: [...document.querySelectorAll("[data-preset]")],
       inventory: $("inventory"),
       inventoryEmpty: $("inventory-empty"),
@@ -375,34 +358,7 @@
     favicon.src = document.querySelector('link[rel="icon"][sizes="64x64"]').href;
     el.lootTab.hidden = !lootEnabled;
     el.worldLootHint.hidden = !lootEnabled;
-    const savedSheet = readSheetState();
-    let sheetHeight = Number.isFinite(savedSheet?.height) && savedSheet.height >= 1 && savedSheet.height <= 10000 ? savedSheet.height : null;
-    if (sheetHeight === null) el.sheet.style.removeProperty("--sheet-height");
-    else el.sheet.style.setProperty("--sheet-height", `${sheetHeight}px`);
-    // Ooga Chat has a tab only where a backend answered (chat.js), which the director learns before any scene.
-    const sheetTab = savedSheet && (savedSheet.tab !== "loot" || lootEnabled) && (savedSheet.tab !== "chat" || BL.net.state.backend) ? savedSheet.tab : "roster";
-    // Dock below three times the 380px panel width; show two panels when two widths fit.
-    const bottomSheet = window.matchMedia("(width < 1140px)"), pairedSheet = window.matchMedia("(min-width: 760px)");
-    const showSheetPanels = (name) => {
-      const paired = bottomSheet.matches && pairedSheet.matches && (name === "bananas" || name === "roster");
-      el.sheet.dataset.dock = bottomSheet.matches ? "bottom" : "side";
-      el.sheet.dataset.paired = String(paired);
-      let moveFocus = false;
-      for (const panel of el.panels) {
-        const hidden = panel.dataset.panel !== name && !(paired && (panel.dataset.panel === "bananas" || panel.dataset.panel === "roster"));
-        if (hidden && panel.contains(document.activeElement)) moveFocus = true;
-        panel.hidden = hidden;
-      }
-      for (const tab of el.tabs) tab.setAttribute("aria-controls", paired && (tab.dataset.tab === "bananas" || tab.dataset.tab === "roster")
-        ? "bananas-panel roster-panel" : `${tab.dataset.tab}-panel`);
-      if (moveFocus) el.tabs.find((tab) => tab.dataset.tab === name)?.focus({ preventScroll: true });
-    };
-    for (const tab of el.tabs) {
-      tab.setAttribute("aria-selected", String(tab.dataset.tab === sheetTab));
-      tab.tabIndex = tab.dataset.tab === sheetTab ? 0 : -1;
-    }
-    showSheetPanels(sheetTab);
-    el.sheet.dataset.open = String(!!savedSheet?.open);
+    const sheet = BL.sheet.create({ lootEnabled, signal });
     el.primary.hidden = true;
     el.gorillaSmash.hidden = true;
     el.mode.hidden = true;
@@ -626,7 +582,7 @@
     showVoices();
     // Value the donated sats at the current price; donor rankings retain their receipt prices.
     const showBananaRate = () => {
-      if (document.hidden || el.sheet.hidden || el.bananaPanel.hidden || el.sheet.dataset.open !== "true") return;
+      if (document.hidden || !BL.sheet.visible(el.bananaPanel)) return;
       const rate = currentDonationRate(), total = donationValueText();
       const tone = !rate ? "wait" : rate.stale ? "stale" : rate.live ? "live" : "idle";
       const label = tone === "live" ? "LIVE BTCUSD" : tone === "stale" ? "STALE BTCUSD" : "BTCUSD";
@@ -640,7 +596,7 @@
     };
     let stopBananaRate = null, pileValueVisible = false;
     const watchBananaRate = () => {
-      const visible = !document.hidden && (pileValueVisible || !el.sheet.hidden && !el.bananaPanel.hidden && el.sheet.dataset.open === "true");
+      const visible = !document.hidden && (pileValueVisible || BL.sheet.visible(el.bananaPanel));
       if (visible && !stopBananaRate) stopBananaRate = BL.donationRate.watch(showBananaRate);
       else if (!visible && stopBananaRate) { stopBananaRate(); stopBananaRate = null; }
       if (visible) showBananaRate();
@@ -654,6 +610,7 @@
     bananaRateObserver.observe(el.bananaPanel, { attributes: true, attributeFilter: ["hidden"] });
     bananaRateObserver.observe(el.sheet, { attributes: true, attributeFilter: ["data-open", "hidden"] });
     on(document, "visibilitychange", watchBananaRate);
+    on(document, "sheetchange", watchBananaRate);
     listeners.push(() => {
       bananaRateObserver.disconnect();
       if (stopBananaRate) stopBananaRate();
@@ -1786,14 +1743,12 @@
       mainBoard.update(elapsed);
       if (!panelsHidden) for (let i = 0; i < floatingBoards.length; i++) floatingBoards[i].update(elapsed);
     };
-    // A hunt borrows the play area without changing the visitor's saved panel choices.
+    // A hunt or kiosk borrows the play area without changing the visitor's saved panel choices.
     const setPanelsHidden = (on) => {
       on = !!on;
       if (on === panelsHidden) return;
-      finishSheetResize();
-      if (on && el.sheet.contains(document.activeElement)) document.activeElement.blur();
       panelsHidden = on;
-      el.sheet.hidden = on;
+      sheet.setHidden(on);
       for (const popup of floatingBoards) popup.setHidden(on);
     };
     const openRecipe = () => {
@@ -2091,11 +2046,8 @@
         if (!el.hint.classList.contains("show")) el.hint.hidden = true;
       }, MESSAGE_FADE_MS);
     };
-    const selectedSheetTab = () => el.tabs.find((tab) => tab.getAttribute("aria-selected") === "true")?.dataset.tab || "roster";
-    const setSheetOpen = (open) => {
-      el.sheet.dataset.open = String(open);
-      writeSheetState(open, selectedSheetTab(), sheetHeight);
-    };
+    const selectTab = (name) => sheet.selectTab(name);
+    const foldPanels = () => sheet.fold();
     // Registered before actor controls: a popup or the sheet takes one Escape
     // before cursor capture or possession can change. Dialogs keep their own
     // nested Escape actions (for example a board's filter menu).
@@ -2104,7 +2056,7 @@
       if (e.repeat) { e.preventDefault(); e.stopImmediatePropagation(); return; }
       // Chat owns IME state and first returns focus from its editor to its tab.
       if (e.target.id === "chat-input" || e.target.id === "chat-display") return;
-      if (document.querySelector("dialog:modal") || e.target.closest && e.target.closest("dialog[open]")) return;
+      if (document.querySelector("dialog:modal") || e.target.closest && e.target.closest('dialog[open], [role="dialog"][aria-modal="true"]')) return;
       let closed = false;
       if (!panelsHidden && floatingBoards.length) {
         floatingBoards[floatingBoards.length - 1].escape();
@@ -2118,117 +2070,9 @@
           break;
         }
       }
-      if (!closed && el.sheet.dataset.open === "true" && el.sheet.getClientRects().length) {
-        if (el.sheet.contains(document.activeElement)) document.activeElement.blur();
-        setSheetOpen(false);
-        closed = true;
-      }
+      if (!closed) closed = sheet.escape();
       if (closed) { e.preventDefault(); e.stopImmediatePropagation(); }
     }, true);
-    const selectTab = (name) => {
-      for (const t of el.tabs) {
-        t.setAttribute("aria-selected", String(t.dataset.tab === name));
-        t.tabIndex = t.dataset.tab === name ? 0 : -1;
-      }
-      showSheetPanels(name);
-      setSheetOpen(true);
-    };
-    // A pull tab opens its own panel, and folds the sheet when that panel is already showing.
-    const pull = (name) => {
-      const showing = el.sheet.dataset.open === "true" && el.tabs.some((t) => t.dataset.tab === name && t.getAttribute("aria-selected") === "true");
-      if (showing) setSheetOpen(false);
-      else selectTab(name);
-    };
-    for (const tab of el.tabs) on(tab, "click", () => pull(tab.dataset.tab));
-    on(el.sheetPanels, "keydown", (e) => {
-      let step = 0;
-      if (e.key === "ArrowDown" || e.key === "ArrowRight") step = 1;
-      else if (e.key === "ArrowUp" || e.key === "ArrowLeft") step = -1;
-      else if (e.key !== "Home" && e.key !== "End") return;
-      e.preventDefault(); e.stopPropagation();
-      const tabs = el.tabs.filter((tab) => !tab.hidden), index = tabs.indexOf(document.activeElement);
-      const next = e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : (index + step + tabs.length) % tabs.length;
-      selectTab(tabs[next].dataset.tab);
-      tabs[next].focus({ preventScroll: true });
-    });
-    let sheetPointer = -1, sheetStartY = 0, sheetStartHeight = 0, sheetDirection = 1;
-    const sheetLimits = () => {
-      const safe = getComputedStyle(document.documentElement);
-      const safeTop = parseFloat(safe.getPropertyValue("--safe-top")) || 0;
-      const safeBottom = parseFloat(safe.getPropertyValue("--safe-bottom")) || 0;
-      const viewport = parseFloat(el.sheet.style.getPropertyValue("--chat-viewport")) || window.innerHeight;
-      const max = Math.max(1, bottomSheet.matches ? viewport - 74 - safeTop : window.innerHeight - 90 - safeTop - safeBottom);
-      return { min: Math.min(240, max), max };
-    };
-    const showSheetHeight = () => {
-      const limits = sheetLimits();
-      const height = el.sheet.getBoundingClientRect().height;
-      el.sheetPanels.setAttribute("aria-orientation", bottomSheet.matches ? "horizontal" : "vertical");
-      el.sheetResize.setAttribute("aria-valuemin", String(Math.round(limits.min)));
-      el.sheetResize.setAttribute("aria-valuemax", String(Math.round(limits.max)));
-      if (height > 0) el.sheetResize.setAttribute("aria-valuenow", String(Math.round(height)));
-    };
-    const resizeSheet = (height) => {
-      const limits = sheetLimits();
-      sheetHeight = Math.round(Math.min(limits.max, Math.max(limits.min, height)));
-      el.sheet.style.setProperty("--sheet-height", `${sheetHeight}px`);
-      showSheetHeight();
-    };
-    const finishSheetResize = () => {
-      const pointer = sheetPointer;
-      sheetPointer = -1;
-      if (pointer >= 0 && el.sheetResize.hasPointerCapture(pointer)) el.sheetResize.releasePointerCapture(pointer);
-      if (pointer >= 0) writeSheetState(el.sheet.dataset.open === "true", selectedSheetTab(), sheetHeight);
-    };
-    on(el.sheetResize, "pointerdown", (e) => {
-      if (sheetPointer >= 0 || e.button !== 0 || !e.isPrimary) return;
-      e.preventDefault(); e.stopPropagation();
-      sheetPointer = e.pointerId; sheetStartY = e.clientY;
-      sheetStartHeight = el.sheet.getBoundingClientRect().height;
-      sheetDirection = bottomSheet.matches ? -1 : 1;
-      el.sheetResize.focus({ preventScroll: true });
-      if (e.isTrusted) el.sheetResize.setPointerCapture(e.pointerId);
-    });
-    on(el.sheetResize, "pointermove", (e) => {
-      if (e.pointerId !== sheetPointer) return;
-      e.preventDefault(); e.stopPropagation();
-      resizeSheet(sheetStartHeight + (e.clientY - sheetStartY) * sheetDirection);
-    });
-    const endSheetResize = (e) => {
-      if (e.pointerId !== sheetPointer) return;
-      e.preventDefault(); e.stopPropagation();
-      finishSheetResize();
-    };
-    on(el.sheetResize, "pointerup", endSheetResize);
-    on(el.sheetResize, "pointercancel", endSheetResize);
-    on(el.sheetResize, "lostpointercapture", endSheetResize);
-    on(window, "blur", finishSheetResize);
-    const layoutSheet = () => {
-      finishSheetResize();
-      showSheetPanels(selectedSheetTab());
-      showSheetHeight();
-    };
-    on(bottomSheet, "change", layoutSheet);
-    on(pairedSheet, "change", layoutSheet);
-    on(window, "resize", () => { finishSheetResize(); showSheetHeight(); });
-    on(el.sheetResize, "keydown", (e) => {
-      if (!["ArrowUp", "ArrowDown", "Home", "End"].includes(e.key)) return;
-      e.preventDefault(); e.stopPropagation();
-      const limits = sheetLimits();
-      resizeSheet(e.key === "Home" ? limits.min : e.key === "End" ? limits.max
-        : el.sheet.getBoundingClientRect().height + (e.key === "ArrowUp" ? 32 : -32));
-      writeSheetState(el.sheet.dataset.open === "true", selectedSheetTab(), sheetHeight);
-    });
-    on(el.sheetResize, "dblclick", () => {
-      sheetHeight = null;
-      el.sheet.style.removeProperty("--sheet-height");
-      writeSheetState(el.sheet.dataset.open === "true", selectedSheetTab(), sheetHeight);
-      showSheetHeight();
-    });
-    const sheetObserver = new ResizeObserver(showSheetHeight);
-    sheetObserver.observe(el.sheet);
-    listeners.push(() => sheetObserver.disconnect());
-    showSheetHeight();
     let presetHandler = null;
     for (const b of el.presets) if (!b.closest(".hub-presets")) b.title = "Camera viewpoint · releases character control";
     for (const b of el.presets) on(b, "click", () => {
@@ -2271,8 +2115,7 @@
     const renderInventory = (entries, assignedTo, wornBy = () => null) => {
       el.inventory.replaceChildren();
       el.inventoryEmpty.hidden = entries.length > 0;
-      el.lootCount.hidden = entries.length === 0;
-      el.lootCount.textContent = String(entries.length);
+      sheet.setLootCount(entries.length);
       for (const group of groupEntries(entries)) {
         const { item } = group;
         const worn = group.entries.map((e) => ({ entry: e, name: assignedTo(e.id) })).filter((w) => w.name);
@@ -2349,8 +2192,7 @@
     };
     // End this visit; the attached sheet rows belong to the page.
     const dispose = () => {
-      finishSheetResize();
-      el.sheet.hidden = false;
+      sheet.dispose();
       finishPrimary(true);
       window.clearTimeout(toastTimer);
       window.clearTimeout(toastHideTimer);
@@ -2400,7 +2242,7 @@
         Object.defineProperties(this, Object.getOwnPropertyDescriptors(next));
         return this;
       },
-      el, openFeed, openRecipe, closeRecipe, dismissOutside, openBoard, closeBoard, updateBoard, restoreBoards, setPanelsHidden, setRosterRow, setStats, setAct, setMode, setDestinations, setOwnOoga, get retakeActor() { return retake.actor ? retake : null; }, setGorilla, setGorillaSmashPower, setDetachedView, fadeDetachedName, setAreaLabel, setPrimary, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, hideHint, letterSign, selectTab, onPreset, setPileValueVisible, onAssign, onUnassign, renderInventory, dispose };
+      el, openFeed, openRecipe, closeRecipe, dismissOutside, openBoard, closeBoard, updateBoard, restoreBoards, setPanelsHidden, foldPanels, setRosterRow, setStats, setAct, setMode, setDestinations, setOwnOoga, get retakeActor() { return retake.actor ? retake : null; }, setGorilla, setGorillaSmashPower, setDetachedView, fadeDetachedName, setAreaLabel, setPrimary, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, hideHint, letterSign, selectTab, onPreset, setPileValueVisible, onAssign, onUnassign, renderInventory, dispose };
   };
   // The account line in the sheet's foot is page-level: shown only when a backend answered, and
   // the director hands every change of `BL.net.state` here, whichever scene is active.
