@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { createHash, webcrypto } from "node:crypto";
 import { externalizeAudio } from "../scripts/distribution-audio.mjs";
-import { externalizeModules } from "../scripts/distribution-modules.mjs";
+import { PICTURE_MODULES, externalizeModules, externalizePictures } from "../scripts/distribution-modules.mjs";
 import { launch, acquire, dispose, driverError } from "./browser.mjs";
 import { writeCharacters } from "../scripts/characters.mjs";
 const emptyPeerPreviewProof = async () => {
@@ -19382,6 +19382,20 @@ const distributionAudioChecks = async () => {
     record("distribution audio: exact MP3 assets replace embedded text and the final script retains its literal bytes and strict CSP hash",
       descriptor.external && urls.length === 5 && urls.every((url, i) => /^\/audio\/dsb-[a-f0-9]{64}\.mp3$/.test(url) && readFileSync(join(out, url)).equals(Buffer.from(encoded[i], "base64")))
       && staged.includes(`script-src 'sha256-${hash(updated)}'`) && updated.endsWith(script.slice(script.indexOf("const literal"))) && !updated.includes(encoded[0]), "staged recording/CSP mismatch");
+    // The DSB rooms' pictures leave the deferred dsb bundle as same-origin files of the same bytes; the bundle still evaluates.
+    const blocks = new Map(PICTURE_MODULES.map(src => [src, `// ---- ${src} ----\n${readFileSync(join(root, "src", src), "utf8").trim()}`]));
+    const pictures = [...blocks.values()].flatMap(text => [...text.matchAll(/data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)/g)]);
+    const body = `\nwindow.BL = {};\n${[...blocks.values()].join("\n\n")}\n`;
+    const page = `<meta content="default-src 'none'; script-src 'sha256-${hash(body)}'; img-src 'self' data:"><script>${body}</script>`;
+    const terrainWorker = { build: "0".repeat(64), url: "/js/terrain-worker-0000000000000000.js" };
+    const hosted = externalizeModules(page, out, new Map([["dsb", PICTURE_MODULES]]), src => blocks.get(src), terrainWorker, (src, text) => externalizePictures(src, text, out));
+    const bundle = readFileSync(join(out, JSON.parse(hosted.match(/deferredScripts = (\{[^}]*\})/)[1]).dsb), "utf8"), art = { window: { BL: {} } };
+    runInNewContext(bundle, art);
+    const files = [...bundle.matchAll(/\/art\/[a-z-]+-[a-f0-9]{64}\.(jpg|png|webp)/g)].map(m => m[0]);
+    record("distribution pictures: the DSB rooms' data URIs leave the deferred dsb bundle as exact same-origin files, and the bundle still evaluates",
+      pictures.length > 0 && files.length === pictures.length && files.every((url, i) => readFileSync(join(out, url)).equals(Buffer.from(pictures[i][2], "base64")))
+      && !/data:image\//.test(bundle) && art.window.BL.stackchainArt["article-0"].image.startsWith("/art/")
+      && hosted.includes(`window.BL.terrainWorker = ${JSON.stringify(terrainWorker)};`), "staged pictures/terrain descriptor mismatch");
   } finally { rmSync(out, { recursive: true, force: true }); }
 };
 const qualityFramebufferChecks = async () => {
