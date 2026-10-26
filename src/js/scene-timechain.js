@@ -74,6 +74,7 @@
     onDonation: (donation, bananas) => impl.onDonation(donation, bananas),
     onKey: (e) => impl.onKey(e),
     onLootCleared: () => {},
+    stay: () => { if (impl) impl.stay(); },
     leave() {
       const out = impl.leave();
       impl = null;

@@ -621,5 +621,8 @@
       dispose() { entries.length = 0; registered.clear(); gridDirty = true; stats.nodes = stats.active = stats.transforms = stats.triangles = 0; }
     };
   };
-  BL.solidProps = { create };
+  // A mesh's shared collision tree, built ahead of its first `add` (a released hub's return builds its large ones behind
+  // the fade, a mesh a task).
+  const prepare = (geometry) => { geometryOf(geometry); };
+  BL.solidProps = { create, prepare };
 })();

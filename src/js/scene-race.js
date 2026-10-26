@@ -9,9 +9,7 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const { math, models, contributors, donations, pile: pileMod, game: gameMod, hud: hudMod, interact: interactMod, controls: controlsMod, fx: fxMod, raceModels } = BL;
-  // Deferred on a hosted page (the race group): read once `prepare` has loaded them.
-  let raceTrack, racersMod, raceItems, raceHud, raceAudio;
+  const { math, models, contributors, donations, pile: pileMod, game: gameMod, hud: hudMod, interact: interactMod, controls: controlsMod, fx: fxMod, raceModels, raceTrack, racers: racersMod, raceItems, raceHud, raceAudio } = BL;
   const { clamp, lerp, damp } = math;
   const { createNode, addChild, removeChild, createCamera, stepTweens, tweenCount, traverseVisible } = BL.scene;
   const { CONFETTI } = fxMod;
@@ -77,12 +75,6 @@
   // roster after this file loads.
   const cup = { active: false, round: 0, done: false, points: null };
   const nearestTorches = new Float32Array(LIGHT_CAPACITY * 2);
-  const raceScene = {
-    id: "race", renderOpts: null, root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
-    get inMotion() {
-      return phase === "countdown" || phase === "racing" || fx.inMotion;
-    }
-  };
 
   const buildTrack = (id) => {
     if (track) {
@@ -760,7 +752,6 @@
   };
 
   const enter = (ctx) => {
-    ({ raceTrack, racers: racersMod, raceItems, raceHud, raceAudio } = BL);
     ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
     home = ctx.from === "arcade" ? "arcade" : "hub";
     hudMod.leaveTo("race", home);
@@ -967,8 +958,13 @@
     const all = (n) => 1 + n.children.reduce((sum, c) => sum + all(c), 0);
     return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...racers.stats(), ...items.stats(), sectors: track.sectors.length, phase };
   };
-  Object.assign(raceScene, { enter, update, overlay, onDonation, onKey, onLootCleared, leave, stats, liveGeometry });
+  const raceScene = BL.deferred.scene("race", {
+    id: "race", renderOpts: null, root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
+    enter, update, overlay, onDonation, onKey, onLootCleared, leave, stats, liveGeometry,
+    get inMotion() {
+      return phase === "countdown" || phase === "racing" || fx.inMotion;
+    }
+  });
   BL.scenes = BL.scenes || {};
-  raceScene.prepare = () => { const loading = BL.deferred.load("race"); return loading ? loading.then(() => null) : null; };
   BL.scenes.race = raceScene;
 })();

@@ -23,11 +23,9 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const { math, models, contributors, donations, terrain, hubModels, dropModels, rocketParts, rocket: rocketMod, daylight, pile: pileMod, game: gameMod, hud: hudMod, interact: interactMod, controls: controlsMod, fx: fxMod } = BL;
+  const { math, models, contributors, donations, terrain, hubModels, dropModels, rocketModels, rocketParts, rocket: rocketMod, rocketHud, rocketAudio, daylight, pile: pileMod, game: gameMod, hud: hudMod, interact: interactMod, controls: controlsMod, fx: fxMod } = BL;
   const { clamp, lerp, damp, quat, mulberry32, fnv1a } = math;
   const { createNode, addChild, removeChild, createCamera, addTween, stepTweens, tweenCount, traverseVisible } = BL.scene;
-  // Deferred on a hosted page (the orbit group): read once `prepare` has loaded them.
-  let rocketModels, rocketHud, rocketAudio;
   const { CONFETTI } = fxMod;
   const { R, CY, GM, SEA, SPACE_ALT, ORBIT_ALT } = rocketMod;
   // TOP is the Sky Top (ORBIT_ALT) - the goal of a flight, not true orbit.
@@ -141,12 +139,6 @@
   const cam = { x: 0, y: 0, z: 0, tx: 0, ty: 0, tz: 0, ox: 0, oy: 0, oz: 0, ax: 0, ay: 0, az: 0, warm: false, offset: 0, tilt: 0, dragAt: -9, buildYaw: -0.64, buildPitch: 0.18, buildZoom: 1, shake: 0 };
   const ctrl = { throttle: 0, lean: 0, pitch: 0, roll: 0, yaw: 0 };
   let inputLocked = false;
-  const orbitScene = {
-    id: "orbit", renderOpts: RENDER_OPTS, root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
-    get inMotion() {
-      return (phase !== "build" && phase !== "results") || fx.inMotion || smoke.count > 0;
-    }
-  };
 
   // Islands, then the site's pad and deck, else the sea (the flight reads the sea from its own height).
   const groundAt = (x, z) => {
@@ -1884,7 +1876,6 @@
   };
 
   const enter = (ctx) => {
-    ({ rocketModels, rocketHud, rocketAudio } = BL);
     ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
     home = ctx.from === "arcade" ? "arcade" : "hub";
     hudMod.leaveTo("orbit", home);
@@ -2141,8 +2132,13 @@
     const all = (n) => 1 + n.children.reduce((sum, c) => sum + all(c), 0);
     return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), phase, smoke: smoke.count, debris: debris.length };
   };
-  Object.assign(orbitScene, { enter, update, overlay, onDonation, onKey, onLootCleared, leave, stats, liveGeometry });
+  const orbitScene = BL.deferred.scene("orbit", {
+    id: "orbit", renderOpts: RENDER_OPTS, root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
+    enter, update, overlay, onDonation, onKey, onLootCleared, leave, stats, liveGeometry,
+    get inMotion() {
+      return (phase !== "build" && phase !== "results") || fx.inMotion || smoke.count > 0;
+    }
+  });
   BL.scenes = BL.scenes || {};
-  orbitScene.prepare = () => { const loading = BL.deferred.load("orbit"); return loading ? loading.then(() => null) : null; };
   BL.scenes.orbit = orbitScene;
 })();

@@ -7,11 +7,15 @@
     let result = geometries.get(geometry);
     if (result) return result;
     const verts = geometry.verts, triangles = [], boxes = [], order = [], nodes = [];
-    for (const face of geometry.faces) for (let i = 1; i + 1 < face.i.length; i++) {
-      const a = face.i[0] * 3, b = face.i[i] * 3, c = face.i[i + 1] * 3;
-      triangles.push(a, b, c); order.push(order.length);
-      boxes.push(Math.min(verts[a], verts[b], verts[c]), Math.min(verts[a + 1], verts[b + 1], verts[c + 1]), Math.min(verts[a + 2], verts[b + 2], verts[c + 2]),
-        Math.max(verts[a], verts[b], verts[c]), Math.max(verts[a + 1], verts[b + 1], verts[c + 1]), Math.max(verts[a + 2], verts[b + 2], verts[c + 2]));
+    const cursor = BL.compactGeometry?.storageOf(geometry) ? BL.compactGeometry.createCursor(geometry) : null;
+    for (let index = 0; index < geometry.faces.length; index++) {
+      const face = cursor ? BL.compactGeometry.readFace(geometry, index, cursor) : geometry.faces[index];
+      for (let i = 1; i + 1 < face.i.length; i++) {
+        const a = face.i[0] * 3, b = face.i[i] * 3, c = face.i[i + 1] * 3;
+        triangles.push(a, b, c); order.push(order.length);
+        boxes.push(Math.min(verts[a], verts[b], verts[c]), Math.min(verts[a + 1], verts[b + 1], verts[c + 1]), Math.min(verts[a + 2], verts[b + 2], verts[c + 2]),
+          Math.max(verts[a], verts[b], verts[c]), Math.max(verts[a + 1], verts[b + 1], verts[c + 1]), Math.max(verts[a + 2], verts[b + 2], verts[c + 2]));
+      }
     }
     const keys = new Float64Array(order.length * 3), scratch = BL.math.sortScratch(order.length);
     for (let i = 0; i < order.length; i++) for (let axis = 0; axis < 3; axis++) keys[i * 3 + axis] = boxes[i * 6 + axis] + boxes[i * 6 + axis + 3];
