@@ -86,9 +86,10 @@ The baked and live board readers group historical Factory/Foundry names under
 `lightningfoundry`, including repository filters and recent-event labels. Grouping
 preserves upstream event counts and recent rows, combines weekly and contributor
 leaderboards, and unions contributor identities using their newest timestamps.
-It does not deduplicate Oogatron's stored events: the public snapshot omits event
-IDs, and distinct commits can share a login and timestamp. Any duplicate history
-caused by repository renames must be repaired in Oogatron using those IDs.
+It does not deduplicate Oogatron's stored events: distinct commits can share a
+login and timestamp. New snapshots carry a stable `event_key` for ordering; older
+snapshots remain readable. Duplicate history caused by repository renames must
+still be repaired in Oogatron using its source event identities.
 
 Confirmed contribution identities normalize through `contributor-identities.js`
 before repository grouping. Counts, weekly history, recent-event logins and
@@ -140,3 +141,23 @@ has no valid timestamp.
 Sources: [Oogatron stats contract](https://github.com/rules-without-rulers/oogatron/blob/rock/worker/src/api/stats.ts),
 [event timestamp tracking](https://github.com/rules-without-rulers/oogatron/blob/rock/worker/src/sync/identity.ts),
 [integration PR](https://github.com/rules-without-rulers/oogaboogaland/pull/1).
+
+## Recent-event selection
+
+Archive pruning is deferred under #113; Oogatron's database events and payloads
+remain intact. The following selection changes correct filtered displays and
+are not a claimed storage or billing optimization.
+
+Snapshots include the union of rows needed for ten individual events per type
+and ten complete rolling windows for each of the 63 nonempty type selections,
+per repository/contributor pair. Filtering repositories, contributors and types
+happens before rolling up and before the ten-item display limit. Windows start
+at their newest event and include events strictly less than 60 seconds older;
+they may cross a minute boundary and never chain beyond that interval. Complete
+windows preserve their highest-ranked label and `+`, including large bursts.
+
+Newest events come first. Equal timestamps rank merge, PR, commit, review, issue,
+comment, then stable `event_key`. The bake preserves that key and live snapshots
+use the same ordering. Older snapshots without keys use a deterministic visible
+field fallback; identical legacy rows cannot be distinguished. There is no age
+cutoff. Totals, leaderboards, weekly figures and activity timestamps are unchanged.

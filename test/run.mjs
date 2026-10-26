@@ -1289,7 +1289,7 @@ const { npcPathWalkingProbe, npcCenterlineProbe, npcLowerTurnsProbe, npcStairPas
       c.walk = null; c.act.kind = "idle"; c.act.until = c.nextBuildAt = 1e12;
       c.hop = c.hopV = c.cheer = c.catchT = c.yawn = 0;
     }
-    let time = B.renderOpts.matrix.time;
+    let time = BL.scenes.hub.elapsed;
     try {
       for (const name of ["ring", "passing", "changed path", "fireplace", "jump recovery"]) {
         path.setRadius(B.altar.platformRadius);
@@ -1356,7 +1356,7 @@ const { npcPathWalkingProbe, npcCenterlineProbe, npcLowerTurnsProbe, npcStairPas
     for (const c of actors) { c.root.visible = false; c.override = c.state = "away"; c.work.phase = ""; B.crew.stopBurst(c); B.crew.stopReload(c, true); c.bedTravel.mode = ""; c.walk = null; c.act.kind = "idle"; c.act.until = c.nextBuildAt = 1e12; }
     cave.override = cave.state = "working";
     cave.root.visible = true;
-    let time = B.renderOpts.matrix.time;
+    let time = BL.scenes.hub.elapsed;
     try {
       for (let line = 0; line < path.centerlines.length; line++) {
         const points = [];
@@ -1428,7 +1428,7 @@ const { npcPathWalkingProbe, npcCenterlineProbe, npcLowerTurnsProbe, npcStairPas
       c.work.phase = ""; B.crew.stopBurst(c); B.crew.stopReload(c, true);
     }
     cave.root.visible = true;
-    let time = B.renderOpts.matrix.time;
+    let time = BL.scenes.hub.elapsed;
     try {
       for (const ramp of B.island.headquarters.ramps) for (const bed of B.headquarters.mattresses) for (const toBed of [true, false]) {
         const apron = B.island.mouths.find((m) => m.id === ramp.id).apron;
@@ -1472,7 +1472,7 @@ const { npcPathWalkingProbe, npcCenterlineProbe, npcLowerTurnsProbe, npcStairPas
       c.act.kind = "idle"; c.act.until = c.nextBuildAt = c.yawnAt = 1e12; c.hop = c.hopV = 0;
       c.work.phase = ""; B.crew.stopBurst(c); B.crew.stopReload(c, true);
     }
-    let time = B.renderOpts.matrix.time;
+    let time = BL.scenes.hub.elapsed;
     try {
       for (const [level, ramps] of [["HQ", B.island.headquarters.ramps], ["basement", B.island.headquarters.basement.ramps]]) {
         for (const ramp of ramps) for (const uphill of [true, false]) for (const offset of [0, 0.4, -0.4]) {
@@ -3037,15 +3037,32 @@ const { contributorActivityProbe } = (() => {
 const { npcLaneSpacingProbe, npcLaneCornerProbe, npcLaneCurveProbe, npcLabLaneProbe, npcRingJunctionProbe } = (() => {
   // Real crew walkers share a simple trail, isolating lane choice and following
   // distance from scenery, spawn timing, and the cave's firing formation.
-  const npcLaneSpacingProbe = ({ dt = 1 / 60, oscillating = false } = {}) => {
+  const npcLaneSpacingProbe = ({ dt = 1 / 60, oscillating = false, jittering = false } = {}) => {
     const BL = window.BL, S = BL.scene, root = S.createNode(), targets = new Set(), noop = () => {};
     const island = { path: { version: 0, debug: { active: false, ringCenterRadius: 0 }, centerlines: [[{ x: 0, z: -10 }, { x: 0, z: 10 }]] },
       surfaceAt: () => 0, isPath: (x, z) => Math.abs(x) < 1 && Math.abs(z) <= 10 };
-    const npcPaths = BL.npcPaths.create({ island, walkable: () => true });
+    const walkable = (_x, _z, x) => !jittering || x <= 0.05;
+    const npcPaths = BL.npcPaths.create({ island, walkable });
+    if (jittering) {
+      const target = npcPaths.target;
+      // Changing local hints can keep a walker moving inside one small patch
+      // while never advancing toward its destination. The crew must escape
+      // through ordinary swept steps, including when one side is blocked.
+      npcPaths.target = (cave, tx, tz) => {
+        const p = cave.root.position, path = cave.pathing;
+        if (Math.abs(p.x) < 0.3 && Math.abs(p.z + 6.75) < 0.3) {
+          path.tx = tx; path.tz = tz; path.count = path.index = 0;
+          path.targetX = 0; path.targetZ = -6.75 + (p.z >= -6.75 ? -0.12 : 0.12);
+        } else {
+          if (!path.count) path.tx = NaN;
+          target(cave, tx, tz);
+        }
+      };
+    }
     const crew = BL.crew.create({ root, world: { level: 0 }, npcPaths,
       input: { add: (node) => targets.add(node), remove: (node) => targets.delete(node) }, hud: { setRosterRow: noop },
       game: { state: { assignments: {}, inventory: [] } }, pile: { footprintEdge: 1, pileEdge: () => 1 },
-      viewYaw: 0, buildSpots: [], walkIn: { x: 0, z: 3 }, groundAt: () => 0, walkable: () => true,
+      viewYaw: 0, buildSpots: [], walkIn: { x: 0, z: 3 }, groundAt: () => 0, walkable,
       bedrolls: BL.contributors.roster.map((entry, i) => ({ x: 30 + i * 2, y: 0, z: 30, hidden: true })),
       fx: { say: noop, zzzAt: noop, burst: noop, puff: noop, spawnParticle: noop, damageNumber: noop }
     });
@@ -3064,20 +3081,21 @@ const { npcLaneSpacingProbe, npcLaneCornerProbe, npcLaneCurveProbe, npcLabLanePr
     };
     try {
       for (const cave of actors) { cave.root.visible = false; cave.state = "away"; cave.bedTravel.mode = ""; }
-      for (const name of oscillating ? ["oscillating"] : ["opposing", "following", "tied", "branching"]) {
+      for (const name of jittering ? ["jittering"] : oscillating ? ["oscillating"] : ["opposing", "following", "tied", "branching"]) {
         place(a, name === "tied" ? 0.35 : 0, -6, 0, 6);
         place(b, name === "tied" ? -0.35 : 0, name === "opposing" ? 6 : name === "tied" ? -6 : -6.75, 0, name === "opposing" ? -6 : 6);
         let frames = 0, gap = Infinity, waitFrames = 0, resumedGap = 0, laneError = 0, laneSamples = 0, laneRight = true;
         let waiting = false, branched = false, branchReleased = false, deadlocked = false, maxHop = 0, maxStep = 0, jumps = 0;
         const oldJumps = a.avoidance.navigation.jumps + b.avoidance.navigation.jumps;
-        const duration = name === "opposing" || oscillating ? 12 : 3;
+        const duration = name === "opposing" || oscillating || jittering ? 12 : 3;
+        if (jittering) { a.root.visible = false; a.state = "away"; a.walk = null; }
         if (oscillating) {
           // A real queue leader whose local avoidance jitters without opening
           // a gap must not reset the follower's progress timer every frame.
           a.puppet = true;
           b.root.position.z = -7.1;
         }
-        let stall = 0, maximumStall = 0;
+        let stall = 0, maximumStall = 0, blockedSteps = 0;
         const resets = b.progress.resets;
         while (frames++ < Math.ceil(duration / dt) && (a.walk || b.walk)) {
           const ax = a.root.position.x, az = a.root.position.z, bx = b.root.position.x, bz = b.root.position.z;
@@ -3091,6 +3109,7 @@ const { npcLaneSpacingProbe, npcLaneCornerProbe, npcLaneCurveProbe, npcLabLanePr
           }
           crew.update(dt, time += dt); S.updateWorld(root);
           const step = Math.hypot(b.root.position.x - bx, b.root.position.z - bz);
+          if (!walkable(bx, bz, b.root.position.x, b.root.position.z)) blockedSteps++;
           stall = b.walk && step < 0.001 ? stall + dt : 0;
           maximumStall = Math.max(maximumStall, stall);
           const separation = Math.hypot(a.root.position.x - b.root.position.x, a.root.position.z - b.root.position.z);
@@ -3110,7 +3129,7 @@ const { npcLaneSpacingProbe, npcLaneCornerProbe, npcLaneCurveProbe, npcLabLanePr
         }
         jumps = a.avoidance.navigation.jumps + b.avoidance.navigation.jumps - oldJumps;
         rows.push({ name, frames, gap, waiting, waitSeconds: waitFrames * dt, resumedGap, branched, branchReleased, deadlocked,
-          maxHop, maxStep, jumps, laneRight, laneError, laneSamples, maximumStall, resets: b.progress.resets - resets, passed: b.root.position.z > a.root.position.z + 1, arrived: !a.walk && !b.walk });
+          maxHop, maxStep, jumps, laneRight, laneError, laneSamples, maximumStall, blockedSteps, resets: b.progress.resets - resets, passed: b.root.position.z > a.root.position.z + 1, arrived: !a.walk && !b.walk });
       }
       result = { dt, rows };
     } finally { crew.dispose(); if (result) result.disposed = targets.size === 0 && root.children.length === 0; }
@@ -3208,7 +3227,7 @@ const { npcLaneSpacingProbe, npcLaneCornerProbe, npcLaneCurveProbe, npcLabLanePr
       c.act.kind = "idle"; c.act.until = c.nextBuildAt = 1e12; c.hop = c.hopV = 0;
     }
     cave.root.visible = true;
-    let time = B.renderOpts.matrix.time;
+    let time = BL.scenes.hub.elapsed;
     try {
       for (const direction of [1, -1]) {
         const start = direction > 0 ? points[0] : points.at(-1), end = direction > 0 ? points.at(-1) : points[0];
@@ -4835,7 +4854,7 @@ const workCaveTrips = async (b) => {
     const rows = actors.map(c => ({ name: c.contributor.name, outbound: [0, 0, 0], returned: [0, 0, 0],
       phase: "", stall: 0, maximumStall: 0, maximumStep: 0, missingRoutes: 0,
       resets: c.progress.resets, jumps: c.avoidance.navigation.jumps }));
-    let time = B.renderOpts.matrix.time, frames = 0;
+    let time = BL.scenes.hub.elapsed, frames = 0;
     try {
       for (; frames < 6000; frames++) {
         for (let i = 0; i < actors.length; i++) {
@@ -4874,7 +4893,12 @@ const workCaveTrips = async (b) => {
             || c.work.phase === "return" && c.work.index < 0 && !c.pileApproach
               && Math.hypot(p.x, p.z) > B.island.path.debug.ringLoadingRadius + 2;
           if (followsPath && !c.work.direct && !c.hop && !c.bedTravel.mode
-            && Math.abs(p.y - c.baseY) < 0.1 && c.pathing.count < 2) row.missingRoutes++;
+            && Math.abs(p.y - c.baseY) < 0.1 && c.pathing.count < 2) {
+            row.missingRoutes++;
+            if (!row.missingRoute) row.missingRoute = { frame: frames, position: { ...p }, phase: c.work.phase,
+              site: c.work.site, index: c.work.index, pileApproach: c.pileApproach,
+              path: { tx: c.pathing.tx, tz: c.pathing.tz, count: c.pathing.count }, recovery: { ...c.progress } };
+          }
         }
         if (rows.every(row => row.returned.every(count => count >= 2))) break;
       }
@@ -4889,6 +4913,12 @@ const workCaveTrips = async (b) => {
     r.sites.length === 3 && r.sites.every(Boolean) && r.rows.length === 5 && r.rows.every(row => row.outbound.every(n => n >= 2)
       && row.returned.every(n => n >= 2) && row.maximumStall < 5 && row.maximumStep <= 2.8 / 20 + 1e-6
       && row.missingRoutes === 0 && row.resets === 0 && row.jumps === 0), JSON.stringify({ failures: r.rows.filter(row => row.failure), ...r }));
+  for (const dt of [1 / 20, 1 / 60]) {
+    const jitter = await b.evaluate(`(${npcLaneSpacingProbe.toString()})(${JSON.stringify({ dt, jittering: true })})`);
+    record(`work movement cave trips: ${1 / dt}Hz moving-without-progress recovery walks around the blocked side without relocation`,
+      jitter.disposed && jitter.rows.length === 1 && jitter.rows.every(row => row.arrived && row.blockedSteps === 0
+        && row.maxStep <= 1.7 * dt + 1e-6 && row.maxHop === 0 && row.jumps === 0 && row.resets === 0), JSON.stringify(jitter));
+  }
   const rejoin = await b.evaluate(`(() => {
     const island = { path: { version: 0, debug: { active: false, ringCenterRadius: 0 }, centerlines: [[{ x: 0, z: 0 }, { x: 0, z: 10 }]] }, surfaceAt: () => 0, isPath: () => true };
     const clear = (x, z, tx, tz) => {
@@ -5626,10 +5656,11 @@ const donationClientChecks = async () => {
   let priceClock = 1000, nextPriceTimer = 0;
   const rateContext = { window: { BL: {}, setTimeout: fn => { const id = ++nextPriceTimer; priceTimers.set(id, fn); return id; }, clearTimeout: id => priceTimers.delete(id) },
     document: { hidden: false, addEventListener: (name, fn) => priceListeners.set(name, fn), removeEventListener: name => priceListeners.delete(name) },
-    Date: { now: () => priceClock }, WebSocket: class { constructor(url) { this.url = url; priceSockets.push(this); } close() { this.closed = true; } } };
+    Date: { now: () => priceClock }, WebSocket: class { constructor(url) { this.url = url; this.readyState = 0; priceSockets.push(this); } close() { this.closed = true; this.readyState = 3; } } };
   runInNewContext(await readFile(new URL("../src/js/donation-rate.js", import.meta.url), "utf8"), rateContext);
   const rateNotices = [];
   const rates = rateContext.window.BL.donationRate, offOne = rates.watch(value => rateNotices.push(value && { ...value })), offTwo = rates.watch();
+  priceSockets[0].readyState = 1; priceSockets[0].onopen();
   priceSockets[0].onmessage({ data: JSON.stringify({ weightedPrice: "90000.12" }) });
   const sharedRate = priceSockets.length === 1 && rates.current.usdPerBtc === 90000.12 && !rates.current.stale
     && rates.current.live && rates.current.satsPerBanana > 1111 && rates.current.satsPerBanana < 1112
@@ -5639,14 +5670,24 @@ const donationClientChecks = async () => {
   rateContext.document.hidden = true; priceListeners.get("visibilitychange")();
   const hiddenRate = priceSockets[0].closed && rates.current.stale && priceTimers.size === 0 && rateNotices.at(-1)?.stale;
   rateContext.document.hidden = false; priceListeners.get("visibilitychange")();
+  priceSockets[1].readyState = 1; priceSockets[1].onopen();
   priceClock++; priceSockets[1].onmessage({ data: JSON.stringify({ weightedPrice: "91000" }) });
   const noticeCount = rateNotices.length;
   offOne(); priceClock++; priceSockets[1].onmessage({ data: JSON.stringify({ weightedPrice: "92000" }) });
   const retainedRate = !priceSockets[1].closed && rateNotices.length === noticeCount;
   offTwo(); offTwo();
+  // A quick panel close must not abort CONNECTING; reopening reuses that one
+  // handshake, and its eventual open closes it if the panel has gone away again.
+  const offPending = rates.watch(), pending = priceSockets.at(-1);
+  offPending();
+  const waiting = !pending.closed && priceTimers.size === 0;
+  const count = priceSockets.length, offAgain = rates.watch();
+  const reused = priceSockets.length === count && priceTimers.size === 1;
+  offAgain(); pending.readyState = 1; pending.onopen();
+  const pendingClosed = pending.closed && pending.onopen === null && pending.onmessage === null;
   record("donation rate: watchers share one socket, receive live and stale updates until released, reject invalid prices, pause while hidden, reconnect when visible, and close the last socket and its timers exactly once",
-    sharedRate && validRate && hiddenRate && retainedRate && priceSockets[1].closed && priceListeners.size === 0 && priceTimers.size === 0,
-    JSON.stringify({ sharedRate, validRate, hiddenRate, retainedRate, listeners: priceListeners.size, timers: priceTimers.size }));
+    sharedRate && validRate && hiddenRate && retainedRate && waiting && reused && pendingClosed && priceSockets[1].closed && priceListeners.size === 0 && priceTimers.size === 0,
+    JSON.stringify({ sharedRate, validRate, hiddenRate, retainedRate, waiting, reused, pendingClosed, listeners: priceListeners.size, timers: priceTimers.size }));
 
   // Regression: the pile showed whole gameplay stock (79) beside a panel valued at 77.97.
   const valueBL = { game: {}, scene: {}, donationRate: { current: null }, donations: { real: true,
@@ -6206,7 +6247,7 @@ const hubLiveWake = { name: "hub live wake", why: "regression: live activity mus
       }
     };
     watch();
-    let time = B.renderOpts.matrix.time, frames = 0;
+    let time = BL.scenes.hub.elapsed, frames = 0;
     while (actors[0].bedTravel.mode === "waiting" && frames++ < 600) {
       B.crew.update(1 / 30, time += 1 / 30);
       BL.scene.updateWorld(scene.root);
@@ -7707,7 +7748,7 @@ const hubFall = { name: "hub fall", why: "rule: abyss falls return players and N
         puppets = B.crew.list.map(c => c.puppet), position = { ...npc.root.position }, yaw = npc.root.rotation.y, pending = [];
       const peer = B.crew.list.find(c => c !== a && c !== npc);
       const poolCount = BL.scenes.hub.stats().remotePlayers;
-      let time = B.renderOpts.matrix.time;
+      let time = BL.scenes.hub.elapsed;
       try {
         net.remotes.clear(); Math.random = () => 0.125;
         for (const c of B.crew.list) c.puppet = c !== npc;
@@ -7919,35 +7960,40 @@ const labKeys = { name: "lab keys", why: "rule: B streams the test bananas onto 
   const second = await b.evaluate(`({ scene: __ooga.scene, driving: !!__ooga.pilot.player })`);
   record("lab keys: B lands 100 test bananas; Escape closes the sheet, frees soft mouse-look, detaches the Ooga and then returns to the island still detached", landed === 100 && focused && ui.scene === "lab" && ui.driving && ui.focused && ui.open === "false" && cursor.scene === "lab" && cursor.driving && !cursor.focused && !cursor.locked && first.scene === "lab" && !first.driving && second.scene === "hub" && !second.driving, JSON.stringify({ landed, focused, ui, cursor, first, second }));
 } };
-// The Matrix room and the mirror, each inside one evaluate so no real frame falls between the steps.
-const hubMatrix = { name: "hub matrix", why: "rule: pulling the room lever down raises the mirror's bars and starts the glyph wave; switching it off recedes the wave even inside the room", run: async (b) => {
-  const r = await b.evaluate(`(() => { const B = window.__ooga, G = B.matrixGate, M = B.mirrorCave, W = B.renderOpts.matrix, D = BL.scenes.hub.debug.matrixCave, m = M.mouth, g = M.gate, a = B.cavemen.get("portlandhodl"); if (B.crew.player !== a) B.pilot.possess(a); B.pilot.navigate({ position: { x: G.x + Math.sin(m.ry) * 0.8, y: m.floorY, z: G.z + Math.cos(m.ry) * 0.8 }, yaw: m.ry, pitch: 0.3, dist: 3 }); B.advance(0.5, 1 / 60); const snap = () => ({ inside: D.portal.inside, pressed: G.pressed, lever: +G.lever.rotation.x.toFixed(2), bars: +g.node.position.y.toFixed(2), wave: W.active, direction: W.direction, radius: +W.radius.toFixed(1), glyphs: W.livingGlobal, lights: G.lights.matrixLiving, grip: G.grip.matrixLiving, frame: !!G.button.matrixLiving, arm: !!G.lever.matrixLiving }); const before = { near: G.near, ...snap() }; const pressedIn = G.press(); B.advance(3, 1 / 60); const on = snap(), originalQuality = B.renderer.quality, tiers = []; for (const quality of ["high", "medium", "low"]) { B.renderer.setQuality(quality); B.advance(1 / 60, 1 / 60); tiers.push({ quality: D.quality, density: D.qualityDensity, coverage: D.drawnGlyphCount / D.surfaceGlyphCount }); } B.renderer.setQuality(originalQuality); B.advance(1 / 60, 1 / 60); const pressedOut = G.press(); B.advance(0.25, 1 / 60); const receding = snap(); B.advance(5.75, 1 / 60); const off = snap();
-    // Occupancy never starts or reverses the lever's outward/returning wave.
-    const apron = () => B.pilot.navigate({ position: { x: m.x + Math.sin(m.ry) * 2, y: m.floorY, z: m.z + Math.cos(m.ry) * 2 }, yaw: m.ry, pitch: 0.3, dist: 3 }), lever = () => B.pilot.navigate({ position: { x: G.x + Math.sin(m.ry) * 0.8, y: m.floorY, z: G.z + Math.cos(m.ry) * 0.8 }, yaw: m.ry, pitch: 0.3, dist: 3 }), state = () => ({ inside: D.portal.inside, wave: W.active, direction: W.direction, radius: +W.radius.toFixed(1), glyphs: W.livingGlobal });
-    apron(); B.advance(6, 1 / 60); const away = state();
-    lever(); B.advance(0.5, 1 / 60); const reenteredOff = state(), pressedIn2 = G.press(); B.advance(3, 1 / 60); apron(); B.advance(3, 1 / 60); const held = state();
-    lever(); B.advance(0.5, 1 / 60); const pressedOut2 = G.press(); apron(); B.advance(0.25, 1 / 60); const exitRecede = state(); lever(); B.advance(0.25, 1 / 60); const reenterRecede = state(); B.advance(6, 1 / 60); return { before, pressedIn, on, tiers, pressedOut, receding, off, away, reenteredOff, pressedIn2, held, pressedOut2, exitRecede, reenterRecede, off2: state() }; })()`);
-  record("hub matrix: entering leaves the world unchanged; pulling the lever down lights its accents, raises the bars and spreads glyphs, while switching it up recedes the wave even inside and crossing the doorway never changes its direction", r.before.near && r.before.inside && r.before.lever < 0.5 && !r.before.wave && !r.before.glyphs && r.before.radius === 0 && !r.before.lights && !r.before.grip && !r.before.frame && !r.before.arm && r.before.bars === 0 && r.pressedIn && r.on.pressed && r.on.lever > 2.5 && r.on.lights && r.on.grip && !r.on.frame && !r.on.arm && r.on.bars > 3 && r.on.wave && r.on.radius > 30 && r.on.glyphs
-    && r.pressedOut && r.receding.inside && r.receding.direction === -1 && r.receding.wave && r.receding.glyphs && r.receding.radius > 0 && r.receding.radius < r.on.radius
-    && r.off.inside && !r.off.pressed && r.off.lever < 0.5 && !r.off.lights && !r.off.grip && r.off.bars === 0 && !r.off.wave && !r.off.glyphs && r.off.radius === 0
-    && !r.away.inside && !r.away.wave && !r.away.glyphs && r.away.radius === 0 && r.reenteredOff.inside && !r.reenteredOff.wave && !r.reenteredOff.glyphs && r.reenteredOff.radius === 0
-    && r.pressedIn2 && !r.held.inside && r.held.wave === 1 && r.held.radius > 30 && r.held.glyphs === 1 && r.pressedOut2
-    && !r.exitRecede.inside && r.exitRecede.direction === -1 && r.reenterRecede.inside && r.reenterRecede.direction === -1 && r.reenterRecede.radius < r.exitRecede.radius
-    && r.off2.inside && !r.off2.wave && !r.off2.glyphs && r.off2.radius === 0, JSON.stringify(r));
-  record("hub matrix: high, medium and low WebGL quality retain all glyph lanes instead of exposing black backing panels", r.tiers.every((tier, i) => tier.quality === ["high", "medium", "low"][i] && tier.density === 1 && tier.coverage > 0.55), JSON.stringify(r.tiers));
-  const carved = await b.evaluate(`(() => { const B = __ooga, D = BL.scenes.hub.debug, skip = new Set(["c730", "c5"]), rooms = new Map(B.mouths.map(mouth => [mouth.id, mouth.room])); return {
-    caves: D.matrixCave.caves.filter(cave => !skip.has(cave.id)).map(cave => ({ id: cave.id, terrain: cave.terrainFaces, counts: { ...cave.surfaceCounts } })),
+// The retired glyph room stays dark for the actual eye, independent of its actor.
+const hubMatrix = { name: "hub matrix", why: "rule: the retired glyph room is pitch black behind the mirror for free and driven cameras without allocating glyph batches", run: async b => {
+  const r = await b.evaluate(`(() => {
+    const B = __ooga, H = BL.scenes.hub, M = B.mirrorCave, m = M.mouth, D = H.debug.matrixCave;
+    const overlay = document.getElementById("overlay"), sample = document.createElement("canvas");
+    sample.width = sample.height = 8;
+    const ctx = sample.getContext("2d", { willReadFrequently: true }), eye = { ...B.camera.position }, target = { ...B.camera.target };
+    const paint = z => {
+      Object.assign(B.camera.position, { x: m.x + Math.sin(m.ry) * z, y: m.floorY + 1.5, z: m.z + Math.cos(m.ry) * z });
+      Object.assign(B.camera.target, { x: m.x, y: m.floorY + 1.5, z: m.z });
+      H.overlay(0); ctx.clearRect(0, 0, 8, 8); ctx.drawImage(overlay, 0, 0, 8, 8);
+      const pixels = ctx.getImageData(0, 0, 8, 8).data;
+      let black = 0; for (let i = 0; i < pixels.length; i += 4) if (!pixels[i] && !pixels[i + 1] && !pixels[i + 2] && pixels[i + 3] === 255) black++;
+      return { inside: D.cameraInside(), black };
+    };
+    B.pilot.release(true); const free = paint(-2), outside = paint(2);
+    B.pilot.possess(B.cavemen.get("portlandhodl")); const driven = paint(-2), returned = paint(2);
+    let batches = 0, levers = 0;
+    const visit = node => { if (node.instanceData && node.geometry?.matrixGlyph) batches++; for (const child of node.children) visit(child); };
+    visit(H.root);
+    const noDamage = !BL.mirrorDamage && !("damage" in M) && !("mirrorDamage" in M.node);
+    Object.assign(B.camera.position, eye); Object.assign(B.camera.target, target); H.overlay(0);
+    return { free, outside, driven, returned, batches, noDamage, gateLocked: M.gate.locked, wave: !!B.renderOpts.matrix };
+  })()`);
+  record("hub matrix: free and driven eyes inside see opaque black, moving outside restores the view, and no glyph batches or mirror HP exist", r.free.inside && r.free.black === 64 && r.driven.inside && r.driven.black === 64 && !r.outside.inside && r.outside.black < 64 && !r.returned.inside && r.returned.black < 64 && !r.batches && !r.wave && r.noDamage && r.gateLocked, JSON.stringify(r));
+  const carved = await b.evaluate(`(() => { const B = __ooga, D = BL.scenes.hub.debug, rooms = new Map(B.mouths.map(mouth => [mouth.id, mouth.room])); return {
     regions: D.caveSections.map(entry => { const room = rooms.get(entry.region.id); return { id: entry.region.id, width: entry.region.halfWidth, depth: entry.region.halfDepth, expectedWidth: room.w / 2 + 0.45, expectedDepth: (room.to + 1.6) / 2 }; }),
     sealed: B.matrixGate.sealed.map(entry => ({ id: entry.mouth.id, visible: entry.node.visible, stop: entry.stopZ }))
   }; })()`);
-  // Open and mirror caves carry a bird's-eye roof region; the sealed c9 carries a seal.
-  record("hub caves: every ordinary carved chamber feeds complete Matrix surfaces, fitted bird's-eye roof regions and the sealed cave's seal", carved.caves.length === 6 && [...new Set(carved.caves.map(cave => cave.id))].sort().join() === "c1,c10,c11,c2,c3,c9"
-    && carved.caves.every(cave => cave.terrain > 0 && cave.counts.floor > 0 && cave.counts.ceiling > 0 && cave.counts.wall > 0)
-    && carved.regions.length === 5 && carved.regions.map(region => region.id).sort().join() === "c1,c10,c11,c2,c3"
+  record("hub caves: carved chambers retain fitted bird's-eye roof regions and the sealed cave's seal", carved.regions.length === 5 && carved.regions.map(region => region.id).sort().join() === "c1,c10,c11,c2,c3"
     && carved.regions.every(region => Math.abs(region.width - region.expectedWidth) < 1e-7 && Math.abs(region.depth - region.expectedDepth) < 1e-7)
-    && carved.sealed.length === 1 && carved.sealed.map(entry => entry.id).sort().join() === "c9" && carved.sealed.every(entry => entry.visible && Number.isFinite(entry.stop)), JSON.stringify(carved));
+    && carved.sealed.length === 1 && carved.sealed[0].id === "c9" && carved.sealed.every(entry => entry.visible && Number.isFinite(entry.stop)), JSON.stringify(carved));
 } };
-const hubMirror = { name: "hub mirror", why: "rule: 500 damage shatters the mirror, unlocks its gate and ends the glyph hint; a short scene trip preserves the broken mirror before its repair delay", run: async (b) => {
+const hubMirror = { name: "hub mirror", why: "rule: rifle shots and melee ripple the unbreakable mirror without damage or panel HP, including after a scene round trip", run: async (b) => {
   const physical = await b.evaluate(`(() => {
     const B = __ooga, M = B.mirrorCave, m = M.mouth, a = B.cavemen.get("portlandhodl");
     B.pilot.possess(a); B.crew.configureWeapon(a, 2, 30);
@@ -7956,15 +8002,30 @@ const hubMirror = { name: "hub mirror", why: "rule: 500 damage shatters the mirr
     const dh = Math.hypot(E.x - A.x, E.z - A.z);
     B.pilot.navigate({ position: A, yaw: Math.atan2(E.x - A.x, E.z - A.z), pitch: Math.atan2(E.y - (A.y + 1.53), dh), dist: dh });
     B.advance(0.3, 1 / 60); BL.scene.updateWorld(BL.scenes.hub.root);
-    const w = M.node.world, before = M.damage.damage, health = a.health.value, shots = a.weapon.shotsFired;
+    const w = M.node.world, geometry = M.node.geometry, before = M.ripples.hits, health = a.health.value, shots = a.weapon.shotsFired;
     const fired = B.crew.fireWeapon(a, { x: w[12], y: w[13], z: w[14] }, 1);
     B.advance(0.5, 1 / 60);
-    return { fired, damage: M.damage.damage - before, shots: a.weapon.shotsFired - shots,
+    const ripples = M.ripples.hits - before, playerShots = a.weapon.shotsFired - shots;
+    B.pilot.release(true); B.crew.configureWeapon(a, 2, 30);
+    const npcShots = a.weapon.shotsFired;
+    const npcFired = B.crew.fireWeapon(a, { x: w[12], y: w[13], z: w[14] }, 1);
+    B.advance(0.5, 1 / 60);
+    const decorative = npcFired && a.weapon.shotsFired > npcShots && M.node.geometry === geometry;
+    B.pilot.possess(a);
+    B.crew.configureWeapon(a, 1);
+    B.pilot.navigate({ position: { x: m.x + Math.sin(m.ry) * 1.0, y: m.floorY, z: m.z + Math.cos(m.ry) * 1.0 }, yaw: m.ry, pitch: 0.1, dist: 3 });
+    B.advance(0.3, 1 / 60);
+    Object.assign(B.camera.target, { x: w[12], y: w[13], z: w[14] });
+    const meleeBefore = M.ripples.hits, swung = B.crew.swingWeapon(a);
+    B.advance(0.7, 1 / 60);
+    return { fired, ripples, swung, meleeRipples: M.ripples.hits - meleeBefore, shots: playerShots, decorative,
+      intact: M.node.geometry === geometry && M.node.visible && !M.node.mirrorReveal && M.gate.locked && !("damage" in M) && !("mirrorDamage" in M.node),
       harmless: !B.crew.combatEnabled && !BL.scenes.hub.debug.gameMode && health === a.health.value };
   })()`);
-  record("hub mirror: an ordinary visitor can damage the glass with a real rifle shot without enabling character damage", physical.fired && physical.damage > 0 && physical.shots === 1 && physical.harmless, JSON.stringify(physical));
-  const r = await b.evaluate(`(() => { const B = window.__ooga, M = B.mirrorCave, g = M.gate, w = M.node.world, G = B.matrixGate, m = M.mouth; const A = { x: m.x + Math.sin(m.ry) * 1.5, y: m.floorY, z: m.z + Math.cos(m.ry) * 1.5 }, E = { x: m.x - Math.sin(m.ry), y: m.floorY + 1.6, z: m.z - Math.cos(m.ry) }, dh = Math.hypot(E.x - A.x, E.z - A.z); B.pilot.navigate({ position: A, yaw: Math.atan2(E.x - A.x, E.z - A.z), pitch: Math.atan2(E.y - (A.y + 1.53), dh), dist: dh }); B.advance(1, 1 / 60); const before = { broken: M.damage.broken, locked: g.locked, hint: M.guides.state.doorway }; M.damage.hit(499 - M.damage.damage, w[12], w[13], w[14]); B.advance(1 / 60, 1 / 60); const whole = { broken: M.damage.broken, locked: g.locked }; M.damage.hit(1, w[12], w[13], w[14]); B.advance(1 / 60, 1 / 60); const u0 = M.guides.state.doorwayUpdates; B.advance(1, 1 / 60); const after = { broken: M.damage.broken, shattered: M.shattered, locked: g.locked, reveal: M.node.mirrorReveal, hint: M.guides.state.doorway, frozen: M.guides.state.doorwayUpdates === u0 }; B.go("lab"); let n = 0; while ((B.transitioning || B.scene !== "pool") && n++ < 600) B.advance(1 / 30, 1 / 30); B.go("hub"); n = 0; while ((B.transitioning || B.scene !== "hub") && n++ < 600) B.advance(1 / 30, 1 / 30); B.advance(0.5, 1 / 60); const N = B.mirrorCave; return { before, whole, after, back: { broken: N.damage.broken, shattered: N.shattered, locked: N.gate.locked, reveal: N.node.mirrorReveal, hint: N.guides.state.doorway } }; })()`);
-  record("hub mirror: 499 damage leaves it whole and locked, 500 shatters it open with its gate unlocked and the glyph hint stopped, and it is still broken after a trip away", !r.before.broken && r.before.locked && r.before.hint && !r.whole.broken && r.whole.locked && r.after.broken && r.after.shattered && !r.after.locked && r.after.reveal === 1 && !r.after.hint && r.after.frozen && r.back.broken && r.back.shattered && !r.back.locked && r.back.reveal === 1 && !r.back.hint, JSON.stringify(r));
+  record("hub mirror: real player and NPC shots and a melee swing ripple intact glass without HP or character damage", physical.fired && physical.ripples > 0 && physical.shots === 1 && physical.harmless && physical.decorative && physical.swung && physical.meleeRipples > 0 && physical.intact, JSON.stringify(physical));
+  await trip("hub").run(b);
+  const back = await b.evaluate(`(() => { const M = __ooga.mirrorCave; return M.node.visible && M.node.geometry.faces.length > 0 && !M.node.mirrorReveal && M.gate.locked && !("damage" in M) && !("mirrorDamage" in M.node); })()`);
+  record("hub mirror: the unbreakable pane and locked gate remain intact after leaving and returning", back);
 } };
 // Medium captures the mirror only while its pane reads; one that shrinks below that must drop its capture.
 const hubMirrorMedium = { name: "hub mirror medium size", why: "regression: on medium a mirror whose pane shrank under the capture size kept drawing its last capture, frozen, instead of its authored face", run: async (b) => {
@@ -8081,13 +8142,20 @@ const hubJumbotron = { name: "hub jumbotron", why: "rule: the island rotation st
     const ownerOnly = reader.users.length === 1 && reader.users[0].login === owner
       && reader.filters.users.length === 1 && reader.filters.users[0] === owner;
     reader.dispose(); restored.dispose(); j.refreshData(data);
-    return { count: j.count, captions, wrapped, differs: plain !== drafted,
+    const types = ["merge", "pr", "commit", "review", "issue", "comment"];
+    const tied = types.flatMap(type => ["b", "a"].map(key => ({ login: data.contributors[0].login,
+      repo: data.repos[0].name, type, occurred_at: "2026-01-01T00:00:00Z", event_key: type + "/" + key })));
+    const order = rows => BL.jumbotron.parseStats({ ...data, recent: rows }).recent.map(row => row.eventKey).join(",");
+    const expected = types.flatMap(type => [type + "/a", type + "/b"]).join(",");
+    const stableOrder = order(tied) === expected && order(tied.reverse()) === expected;
+    return { count: j.count, captions, wrapped, differs: plain !== drafted, stableOrder,
       filtered, ownerOnly, restoredOwner, bufferCreates, bufferDeletes, cycleStable, rewarm,
       stable: !!surfaceGeometry && surfaceNode.geometry === surfaceGeometry && surfaceGeometry.imageSurface.canvas === surfaceCanvas
         && surfaceGeometry.imageSurface.version > initialRevision };
   })()`);
   const orgBoards = ["commits", "prs", "reviews", "comments", "issues"].map((t) => "org · " + t);
   record("hub jumbotron: the island rotates org activity, readers filter repositories, and attributed users appear once with saved alias selections restored", r.count === 7 && r.captions[0] === "Recent activity" && r.captions[1] === "Org totals" && orgBoards.every((c, i) => r.captions[2 + i] === c) && r.wrapped === "Recent activity" && r.filtered && r.ownerOnly && r.restoredOwner, JSON.stringify(r));
+  record("hub jumbotron: equal-time recent events use merge, PR, commit, review, issue, comment priority and stable event keys", r.stableOrder, JSON.stringify({ stableOrder: r.stableOrder }));
   record("hub jumbotron: a draft PR changes the stable canvas ticker and exact chrome cycles without GPU buffer churn, including after records are pruned", r.differs && r.stable && r.bufferCreates === 0 && r.bufferDeletes === 0 && r.cycleStable && r.rewarm, JSON.stringify({ differs: r.differs, stable: r.stable, bufferCreates: r.bufferCreates, bufferDeletes: r.bufferDeletes, cycleStable: r.cycleStable, rewarm: r.rewarm }));
 } };
 const oogatronPopups = { name: "oogatron popups", why: "rule: Oogatron windows keep their displays apart during mouse or touch drags and remember their independent controls and layout after reload", run: async (b) => {
@@ -8352,6 +8420,13 @@ const hubGhostEntry = (melee) => ({ name: `ghost entry ${melee ? "melee" : "shoo
   record("ghost entry: the deferred herald loads", loaded && lazy, JSON.stringify({ loaded, lazy }));
   if (!loaded) return;
   if (!melee) await b.key("x");
+  const panels = await b.evaluate(`(() => {
+    const H = BL.scenes.hub.debug, touch = matchMedia('(pointer: coarse)').matches;
+    H.hud.selectTab("roster");
+    H.useProp(H.props.find(p => p.prop === "jumbotron"));
+    if (touch) { H.hud.closeBoard(); H.hud.el.tabs.find(t => t.dataset.tab === "roster").click(); }
+    return { touch, open: H.hud.el.sheet.dataset.open, boards: document.querySelectorAll('.board-floating[open]').length };
+  })()`);
   const entry = await b.evaluate(`(() => {
     // The herald drifts on the room clock, which \`advance\` does not step, and is a picture turned to the camera: hold the
     // clock, and shoot from between it and the camera, along the view, once the camera has followed, or the aim point
@@ -8374,19 +8449,23 @@ const hubGhostEntry = (melee) => ({ name: `ghost entry ${melee ? "melee" : "shoo
     return { accepted, state: G.state, combat: B.crew.combatEnabled, game: H.gameMode, health: a.health.value === health,
       shots: a.weapon.shotsFired - before, shown: !document.getElementById("ghost-lobby").hidden,
       aiming: B.pilot.aiming, reticle: document.getElementById("weapon-reticle").hidden,
-      labelsHidden: getComputedStyle(document.getElementById("tooltip")).visibility === "hidden" };
+      labelsHidden: getComputedStyle(document.getElementById("tooltip")).visibility === "hidden",
+      panelsHidden: H.hud.el.sheet.hidden && Array.from(document.querySelectorAll('.board-floating[open]')).every(e => e.hidden) };
     } finally { net.serverNow = serverNow; }
   })()`);
   record(`ghost entry: ${melee ? "a club leaves the herald idle" : "an AK burst opens the lobby without readying automatically"} and HUB damage stays off`, entry.accepted && entry.state === (melee ? "IDLE" : "GATHER") && entry.shown === !melee && entry.health && !entry.game && !entry.combat && (melee ? entry.shots === 0 : entry.shots > 0 && entry.shots <= 3), JSON.stringify(entry));
   if (melee || !entry.shown) return;
   const released = await untilPage(b, '!document.pointerLockElement && !document.body.classList.contains("aim-cursor-focused") && document.getElementById("weapon-reticle").hidden');
-  record("ghost lobby: the menu releases mouse-look and hides world names without changing carry/combat mode", released && entry.labelsHidden && entry.aiming === !melee, JSON.stringify(entry));
+  record("ghost lobby: the menu releases mouse-look and hides world names, the sheet and Oogatron windows without changing carry/combat mode", released && entry.labelsHidden && entry.panelsHidden && entry.aiming === !melee, JSON.stringify(entry));
   const button = await b.evaluate(`(() => { const r = document.getElementById("ghost-lobby-${melee ? "decline" : "ready"}").getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
-  await b.click(button.x, button.y);
+  if (panels.touch) {
+    await b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [button] });
+    await b.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  } else await b.click(button.x, button.y);
   const closed = await untilPage(b, 'document.getElementById("ghost-lobby").hidden');
   record("ghost lobby: world-name visibility is restored after closing", await b.evaluate('getComputedStyle(document.getElementById("tooltip")).visibility !== "hidden"'));
   const resumed = await b.evaluate(`({ aiming: __ooga.pilot.aiming, focus: document.body.classList.contains("aim-cursor-focused") || document.pointerLockElement === document.getElementById("scene"), reticle: !document.getElementById("weapon-reticle").hidden, combat: __ooga.crew.combatEnabled, game: BL.scenes.hub.debug.gameMode })`);
-  record(`ghost lobby: ${melee ? "declining keeps carry mode and a free cursor" : "Ready starts the hunt and restores crosshair control"}`, closed && (melee ? !resumed.aiming && !resumed.focus && !resumed.reticle && !resumed.game : resumed.aiming && resumed.focus && resumed.reticle && resumed.combat && resumed.game), JSON.stringify(resumed));
+  record("ghost lobby: Ready starts the hunt and restores crosshair control", closed && resumed.aiming && (panels.touch ? !resumed.focus : resumed.focus) && resumed.reticle && resumed.combat && resumed.game, JSON.stringify(resumed));
   if (melee || !resumed.game) return;
   await b.key("x");
   const locked = await b.evaluate(`(() => {
@@ -8404,16 +8483,51 @@ const hubGhostEntry = (melee) => ({ name: `ghost entry ${melee ? "melee" : "shoo
   const hunt = await b.evaluate(`(() => {
     const B = __ooga, H = BL.scenes.hub.debug, G = H.halloween, C = BL.ghostSim.CONFIG, a = B.crew.player;
     G.simulate((G.lapMs + C.NIGHT_MS + C.COUNTDOWN_MS) / 1000 + 0.5);
+    // The hunt clock and the hub's ring animation have separate debug steppers.
+    B.advance((G.lapMs + C.NIGHT_MS + C.COUNTDOWN_MS) / 1000 + 2, 1 / 60);
+    const position = { ...a.root.position, y: a.root.position.y - a.baseY }, heading = a.root.rotation.y;
+    const crossRing = () => {
+      B.crew.relocatePlayer({ x: 20, y: H.island.surfaceAt(20, 0), z: 0 }, Math.PI / 2);
+      for (let i = 0; i < 60; i++) { B.crew.steer(1, 0); B.crew.update(1 / 60); }
+      const x = a.root.position.x;
+      B.crew.steer(0, 0); B.crew.relocatePlayer(position, heading);
+      return x;
+    };
+    const ringHeld = crossRing();
     const active = G.state, ghosts = G.sim.ghosts.filter(g => g.on && !g.dying).length, unlimited = a.weapon.unlimited;
     const shots = a.weapon.shotsFired, ammo = a.weapon.ammo;
     const fired = B.crew.fireWeapon(a, { x: a.root.position.x, y: 30, z: a.root.position.z }, 1);
     B.advance(0.3, 1 / 60);
     const shooting = fired && a.weapon.shotsFired > shots && a.weapon.ammo === ammo;
-    G.end(); B.advance(1 / 60, 1 / 60);
+    const sealed = G.walls.length > 0 && G.walls.every(w => {
+      const s = w.stop;
+      return w.node.visible && w.sealed && G.seal(s.cx + s.nx, s.cz + s.nz, s.cx - s.nx, s.cz - s.nz, s.base + 1);
+    });
+    const map = document.getElementById("ghost-minimap"), rect = map.getBoundingClientRect();
+    const minimap = !map.hidden && rect.width > 0 && rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight
+      && map.getContext("2d").getImageData(0, 0, map.width, map.height).data.some((v, i) => i % 4 === 3 && v > 0);
+    const key = code => document.getElementById("scene").dispatchEvent(new KeyboardEvent("keydown", { key: code.slice(3).toUpperCase(), code, shiftKey: true, bubbles: true }));
+    key("KeyH"); G.simulate((C.BONES.beamMs + C.BONES.fallMs) / 1000 + 0.2);
+    const bones = G.sim.brutes.find(b => b.on && b.kind === 1), hit = {};
+    BL.scene.updateWorld(BL.scenes.hub.root);
+    const skeleton = !!bones && BL.scenes.hub.input.weaponTargets.ray(hit, bones.x, 30, bones.z, 0, -1, 0, 50, null,
+      owner => owner.kind === "halloween" && owner.role === "brute" && G.sim.brutes[owner.slot] === bones);
+    if (bones) G.sim.hit(bones.id, 100, 1);
+    key("KeyE");
+    const me = G.sim.playerById(1), bot = G.sim.playerById(BL.ghostSim.REVIVE_BOT), down = !!bot && bot.seg === 0 && me.elixir === 1;
+    G.simulate(C.ELIXIR.reviveMs / 1000 + 0.2);
+    const revived = down && bot.seg > 0 && me.elixir === 0 && G.sim.state.reviveOf === bot.id;
+    G.end(); G.simulate(C.DAWN_MS / 1000 + 0.1); B.advance(1 / 60, 1 / 60);
+    const ringReleased = crossRing();
     B.pilot.modeAction("mode-toggle");
-    return { active, ghosts, unlimited, shooting, restored: !H.gameMode && !B.crew.combatEnabled && !a.weapon.unlimited && !B.crew.damage(a, 100) && B.crew.weaponsEnabled && !a.weapon.aiming };
+    return { active, ghosts, unlimited, shooting, sealed, minimap, skeleton, revived, ringHeld, ringReleased,
+      panels: { hidden: H.hud.el.sheet.hidden, open: H.hud.el.sheet.dataset.open, boards: document.querySelectorAll('.board-floating[open]:not([hidden])').length },
+      cleared: map.hidden && document.getElementById("ghost-hud").hidden && G.walls.every(w => !w.sealed),
+      restored: !H.gameMode && !B.crew.combatEnabled && !a.weapon.unlimited && !B.crew.damage(a, 100) && B.crew.weaponsEnabled && !a.weapon.aiming };
   })()`);
   record("ghost hunt: Ready progresses to an active round with ghosts and unlimited shooting; dawn restores harmless HUB weapons and carry switching", hunt.active === "ACTIVE" && hunt.ghosts > 0 && hunt.unlimited && hunt.shooting && hunt.restored, JSON.stringify(hunt));
+  record("ghost hunt: the ring holds and releases the player, walls seal the exits, the minimap fits and paints, a skeleton is shootable, and an elixir revives a fallen hunter", hunt.ringHeld > 20 && hunt.ringHeld <= 21.5 && hunt.ringReleased > 22 && hunt.sealed && hunt.minimap && hunt.skeleton && hunt.revived, JSON.stringify(hunt));
+  record("ghost hunt: teardown clears hunt UI and restores open or closed panel choices", hunt.cleared && !hunt.panels.hidden && hunt.panels.open === panels.open && hunt.panels.boards === panels.boards, JSON.stringify({ before: panels, after: hunt.panels, cleared: hunt.cleared }));
 } });
 const hubMelee = { name: "hub melee", why: "rule: focused quick taps recover their strike power over time, changing weapons cannot bypass recovery, and a charged strike doubles damage", run: async (b) => {
   await tapKey(b, "1");
@@ -12018,7 +12132,8 @@ const hubDistantEffects = { name: "hub distant effects", why: "rule: distant por
       B.poolIsland.preview.sleep(a.traits.name, true);
       e.active = e.root.visible = false; e.sleep.stage = "";
       far();
-      for (let elapsed = 0; elapsed < 10 && !(a.bedTravel.mode === "rest" && e.sleep.stage === "asleep"); elapsed += 0.5) {
+      // A newly settled gorilla finishes its pose at full rate before sleeping ticks are throttled.
+      for (let elapsed = 0; elapsed < 10 && !(a.bedTravel.mode === "rest" && e.sleep.stage === "asleep" && !e.animation.settle); elapsed += 0.5) {
         B.advance(0.5, 1 / 60);
       }
       out.sleeping = a.state === "sleeping" && a.bedTravel.mode === "rest" && e.sleep.stage === "asleep";
@@ -13862,12 +13977,16 @@ scene("hub", { label: "gorilla lab carry jump", exclusive: true, query: "charact
       && rage.identity && rage.cleanPose && rage.released,
     JSON.stringify({ ...state, rage }));
 } }].map(gameCombat) });
-scene("hub", { label: "gorilla rage throw", query: "status=chillin&gorillarage=1", steps: [{ name: "gorilla rage throw", why: "playthrough: an autonomous gorilla carries past nearby Oogas and rocks, visibly grabs raised outer targets before returning them to flat ground, pursues ordinary ground targets on foot, then throws with real terrain clearance before hunting again", run: async (b) => {
+scene("hub", { label: "gorilla rage throw", query: "status=chillin&gorillarage=1", steps: [{ name: "gorilla rage throw", outsideRing: true, why: "playthrough: an autonomous gorilla carries past nearby Oogas and rocks, visibly grabs raised outer targets before returning them to flat ground, pursues ordinary ground targets on foot, then throws with real terrain clearance before hunting again", run: async (b) => {
   const states = [], sceneryVisibility = await b.evaluate(`__ooga.props.map(prop => prop.node.visible)`);
   // Complete the production map with all scenery present before isolating
   // actors or adding contact props. Each spot uses at most 201 static checks.
   const mapBake = await b.evaluate(`(() => {
     const B = __ooga, map = BL.scenes.hub.debug.rageThrowMap;
+    // Combat normally hides the Mempool site. These perimeter cases need its
+    // real bridge and forest support present while the shared map is baked.
+    B.poolIsland.site.node.visible = true;
+    BL.scene.updateWorld(BL.scenes.hub.root); B.headquarters.solids.props.sync();
     const limit = Math.ceil(map.spots.length * 201 / 24) + 1;
     let frames = 0;
     while (!map.ready && frames < limit) { B.advance(1 / 60, 1 / 60); frames++; }
@@ -13982,7 +14101,7 @@ scene("hub", { label: "gorilla rage throw", query: "status=chillin&gorillarage=1
       cave.override = cave.state = "chilling"; cave.root.visible = true;
       cave.camp.seat = null; cave.camp.burning = cave.camp.rolling = cave.camp.panic.active = cave.roofEscape.active = false;
       cave.health.stunned = false; cave.hop = cave.hopV = cave.jumps = 0;
-      cave.act.kind = "idle"; cave.act.until = Infinity;
+      cave.act.kind = "idle"; cave.act.until = Infinity; cave.act.spot.sit = false;
       Object.assign(cave.root.position, { x: at.x, y: (cave === c ? initialFloor : B.island.surfaceAt(at.x, at.z)) + cave.baseY, z: at.z });
     }
     if (fixture === "crate" || raised) {
@@ -15002,12 +15121,12 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1"
     B.crew.showShot(c, origin.x, origin.y, origin.z, target.x, target.y, target.z);
     B.advance(0.35, 1 / 60); C.damage(e, 1);
     const excluded = e.rage.count === count;
-    const wave = B.renderOpts.matrix, waveBefore = [wave.active, wave.livingGlobal, wave.permanentCave];
+    const waveBefore = B.renderOpts.matrix;
     for (let serial = 1000; serial < 1041; serial++) C.bananaHit(e, c, serial);
     const active = e.rage.active && e.rage.target === c;
     const body = ["armL", "armR", "legL", "legR", "torso", "head"].map(name => e.gorilla.parts[name]);
     const codeForm = e.gorilla.form === "code" && e.root.matrixNative && body.every(part => S.matrixModeOf(part) === 5)
-      && waveBefore.every((value, i) => value === [wave.active, wave.livingGlobal, wave.permanentCave][i]);
+      && B.renderOpts.matrix === waveBefore;
     const hand = new Float64Array(3);
     const placeForGrab = () => {
       e.recover = 0; e.biped = false; e.speed = 0;
@@ -15157,6 +15276,9 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1"
       tap("x"); sample("combat birds-eye again");
       const gestures = [], accountBefore = BL.net.state.me, backendBefore = BL.net.state.backend;
       BL.scenes.hub.debug.setGameMode(true); C.setAway(false);
+      // These camera targets include open sky; an arena wall rising between the two account cases
+      // turns the second sky ray into a surface pick. Exercise combat controls outside the ring.
+      BL.scenes.hub.debug.delayGameRing(Infinity);
       const pointer = (type, button = 2, buttons = type === "pointerdown" ? 2 : 0) => {
         const rect = canvas.getBoundingClientRect();
         canvas.dispatchEvent(new PointerEvent(type, { pointerId: 91, pointerType: "mouse", isPrimary: true, button, buttons,
@@ -15884,8 +16006,8 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1"
         : row.gait === "knuckle" && row.after - row.before > 0.65)), JSON.stringify(labTransition));
 } }].map(step => ["gorilla prop traversal", "gorilla rage contacts"].includes(step.name) ? gameCombat(step) : step) });
 scene("hub", { label: "mirror clanker", query: "solo=1&character=portlandhodl&status=clankin", steps: [{ name: "mirror clanker stays inside", why: "regression: a clanker turned around after crossing the mirror, poked its head back out, and worked beside a glowing generic box", run: async (b) => {
-  const state = await b.evaluate(`(() => { const B = __ooga, C = B.clankers, siteIndex = C.sites.findIndex(s => s.mirrorRoom), site = C.sites[siteIndex], m = site.mouth, e = C.list[0], localX = p => (p.x - m.x) * site.cr - (p.z - m.z) * site.sr, localZ = p => (p.x - m.x) * site.sr + (p.z - m.z) * site.cr, place = (x, z) => ({ x: m.x + site.cr * x + site.sr * z, y: m.floorY, z: m.z - site.sr * x + site.cr * z }); e.owner.state = "working"; e.owner.work.site = e.owner.work.plannedSite = e.site = siteIndex; e.pendingSite = -1; e.hasSlot = true; e.slotIndex = 0; Object.assign(e, { slotX: place(0, -4.92).x, slotY: m.floorY, slotZ: place(0, -4.92).z, phase: "travel", route: "enter", fromSite: -1, entryTurn: false, blocked: 0, retry: 0 }); Object.assign(e.root.position, place(0, 0)); e.heading = m.ry + Math.PI; B.advance(0.25, 1 / 60); const entry = { turn: e.entryTurn, goal: localZ({ x: e.goalX, z: e.goalZ }) }; Object.assign(e.root.position, place(0, -4.92)); e.phase = "work"; e.route = ""; e.goalX = e.slotX; e.goalY = e.slotY; e.goalZ = e.slotZ; let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity, distance = 0, lastX = e.root.position.x, lastZ = e.root.position.z; for (let t = 0; t < 18; t += 1 / 30) { B.advance(1 / 30, 1 / 30); const x = localX(e.root.position), z = localZ(e.root.position); minX = Math.min(minX, x); maxX = Math.max(maxX, x); minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z); distance += Math.hypot(e.root.position.x - lastX, e.root.position.z - lastZ); lastX = e.root.position.x; lastZ = e.root.position.z; } const control = B.matrixGate.button, lever = B.matrixGate.lever; return { room: m.room, entry, minX, maxX, minZ, maxZ, distance, recoveries: e.stuck.recoveries, equipment: C.equipment.filter(item => item.site === siteIndex).length, leverY: control.position.y, leverScale: control.scale.y, leverZ: control.position.z, leverTagged: control.geometry.matrixCave !== undefined && control.children.every(node => node.geometry.matrixCave !== undefined) && lever.children.every(node => node.geometry.matrixCave !== undefined), leverNative: !!control.matrixNative, leverParts: control.children.filter(node => !node.matrixLiving).length, leverLabels: control.children.filter(node => node.matrixLiving && node.geometry.verts === BL.hubModels.matrixLeverLabels().verts).length, gripParts: lever.children.length }; })()`);
-  record("mirror clanker: the safe chamber expands, entry continues straight inward, runs cross from side to side at varied depths behind the glass, and a compact glyphed lever is mounted within reach on the back wall", state.room.w > 6 && state.room.to > 6.5 && Math.abs(state.entry.goal + 3.5) < 0.01 && state.maxZ <= -1.85 + 1e-6 && state.minX < -0.8 && state.maxX > 0.8 && state.maxZ - state.minZ > 1 && state.distance > 8 && state.equipment === 0 && state.leverY >= 1 && state.leverY < 1.5 && state.leverScale < 1 && state.leverZ < -state.room.to + 0.3 && state.leverTagged && !state.leverNative && state.leverParts === 3 && state.leverLabels === 1 && state.gripParts === 1, JSON.stringify(state));
+  const state = await b.evaluate(`(() => { const B = __ooga, C = B.clankers, siteIndex = C.sites.findIndex(s => s.mirrorRoom), site = C.sites[siteIndex], m = site.mouth, e = C.list[0], localX = p => (p.x - m.x) * site.cr - (p.z - m.z) * site.sr, localZ = p => (p.x - m.x) * site.sr + (p.z - m.z) * site.cr, place = (x, z) => ({ x: m.x + site.cr * x + site.sr * z, y: m.floorY, z: m.z - site.sr * x + site.cr * z }); e.owner.state = "working"; e.owner.work.site = e.owner.work.plannedSite = e.site = siteIndex; e.pendingSite = -1; e.hasSlot = true; e.slotIndex = 0; Object.assign(e, { slotX: place(0, -4.92).x, slotY: m.floorY, slotZ: place(0, -4.92).z, phase: "travel", route: "enter", fromSite: -1, entryTurn: false, blocked: 0, retry: 0 }); Object.assign(e.root.position, place(0, 0)); e.heading = m.ry + Math.PI; B.advance(0.25, 1 / 60); const entry = { turn: e.entryTurn, goal: localZ({ x: e.goalX, z: e.goalZ }) }; Object.assign(e.root.position, place(0, -4.92)); e.phase = "work"; e.route = ""; e.goalX = e.slotX; e.goalY = e.slotY; e.goalZ = e.slotZ; let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity, distance = 0, lastX = e.root.position.x, lastZ = e.root.position.z; for (let t = 0; t < 18; t += 1 / 30) { B.advance(1 / 30, 1 / 30); const x = localX(e.root.position), z = localZ(e.root.position); minX = Math.min(minX, x); maxX = Math.max(maxX, x); minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z); distance += Math.hypot(e.root.position.x - lastX, e.root.position.z - lastZ); lastX = e.root.position.x; lastZ = e.root.position.z; } return { room: m.room, entry, minX, maxX, minZ, maxZ, distance, recoveries: e.stuck.recoveries, equipment: C.equipment.filter(item => item.site === siteIndex).length }; })()`);
+  record("mirror clanker: the safe chamber expands, entry continues straight inward, runs cross from side to side at varied depths behind the glass, and the room has no work equipment", state.room.w > 6 && state.room.to > 6.5 && Math.abs(state.entry.goal + 3.5) < 0.01 && state.maxZ <= -1.85 + 1e-6 && state.minX < -0.8 && state.maxX > 0.8 && state.maxZ - state.minZ > 1 && state.distance > 8 && state.equipment === 0, JSON.stringify(state));
 } }] });
 scene("hub", { perf: true, query: "bananas=1000", opts: { w: 1920, h: 1080, perf: true, motion: true }, steps: [{ name: "wall movement performance", why: "regression: frame rate fell moving behind cave walls during a donation", run: wallPerformance }] });
 scene("lab", { steps: [donation("lab"), labWalking, labKeys, trip("lab")] });
@@ -16027,6 +16149,7 @@ scene("poker", { opts: PHONE_SIZE, steps: [phone("poker", { card: '[data-intro="
 } }] });
 scene("hub", { label: "weapons", query: "character=portlandhodl&weapon=2&mag=1&ammo=6&jetpack=1&gorillarage=1", steps: [hubCombatGate, ...[hubAk, hubMelee, hubJetpack].map(gameCombat)] });
 for (const melee of [false, true]) scene("hub", { label: `ghost entry ${melee ? "melee" : "shooting"}`, query: "halloween=1&character=portlandhodl&weapon=2&ammo=30", exclusive: true, steps: [hubGhostEntry(melee)] });
+scene("hub", { label: "ghost entry touch", opts: PHONE_SIZE, query: "halloween=1&character=portlandhodl&weapon=2&ammo=30", exclusive: true, steps: [hubGhostEntry(false)] });
 // Her greeting comes once a page, to a fresh landing nothing has moved, so the guide has its own page.
 scene("hub", { label: "guide", query: "character=portlandhodl&jetpack=1", steps: [hubGuide, hubAsk] });
 // Native pointer-lock assertions need sole focus; another browser lane can
@@ -16034,7 +16157,8 @@ scene("hub", { label: "guide", query: "character=portlandhodl&jetpack=1", steps:
 scene("hub", { label: "birds-eye combat", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", exclusive: true, steps: [hubBirdsEye] });
 scene("hub", { label: "birds-eye combat projection and targets", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", steps: [hubBirdsEyeProjection, gameCombat(hubBirdsEyeTargets), hubCombatReplay] });
 scene("hub", { label: "birds-eye lower floors", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", steps: [hubBirdsEyeFloors] });
-scene("hub", { label: "mirror", steps: [hubJumbotron, hubMirrorMedium, hubMatrix, hubMirror] });
+scene("hub", { label: "mirror", query: "status=chillin", steps: [hubJumbotron, hubMirrorMedium, hubMirror] });
+scene("hub", { label: "matrix", steps: [hubMatrix] });
 scene("hub", { label: "oogatron popups", url: hubPage(dist, "pos=0"), steps: [oogatronPopups] });
 scene("hub", { label: "oogatron popups phone", url: hubPage(dist, "pos=0"), opts: PHONE_SIZE, steps: [oogatronPopups] });
 scene("hub", { label: "reset storage race", steps: [{ name: "reset storage race", why: "regression: a page timer or pagehide storage write once survived the pooled browser reset and leaked state into the next task", run: async () => {
@@ -16061,7 +16185,7 @@ scene("hub", { label: "reset storage race", steps: [{ name: "reset storage race"
 } }] });
 scene("hub", { label: "side panel", query: "pos=0", steps: [hubSheetPersistence, hubChat] });
 scene("hub", { label: "clock and block height", query: "pos=0&time=0900", steps: [hubBlockHeight, hubDestinationNames] });
-scene("hub", { label: "canvas2d", query: "canvas2d=1", steps: [canvasTour] });
+scene("hub", { label: "canvas2d", query: "canvas2d=1", steps: [hubMatrix, canvasTour] });
 scene("hub", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("hub", { required: ["#joy-move", "#joy-look", "#sheet-toggle", "#sheet-bananas"], sheet: true })] });
 scene("lab", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("lab", { required: ["#joy-move", "#joy-look", ".leave"] })] });
 scene("race", { query: "pos=0&rain=0&draw=0", opts: PHONE_SIZE, steps: [phone("race", { card: '[data-intro="race"]', play: "window.__ooga.race.startRace()", required: ["#joy-move", "#act", "#item-btn", "#race-garage-btn", ".leave"] })] });
@@ -18715,114 +18839,6 @@ const raceRigDisposalProof = async () => {
   return outcomes;
 };
 
-const terrainGlyphLayoutProof = () => {
-  const context = { window: {} };
-  for (const name of ["math", "scene", "models", "convex", "terrain", "hub-models", "caves"]) {
-    runInNewContext(readFileSync(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
-  }
-  const source = readFileSync(new URL("../src/js/scene-hub.js", import.meta.url), "utf8");
-  const constants = source.slice(source.indexOf("  const MATRIX_TYPES ="), source.indexOf("  const RIM_SEAM_DROP ="));
-  const functions = source.slice(source.indexOf("  const matrixModulo ="), source.indexOf("  const matrixWorldStreamSample ="));
-  runInNewContext(`
-    const BL = window.BL, { fnv1a, mulberry32 } = BL.math, { createNode, addChild } = BL.scene, hubModels = BL.hubModels;
-    const RADIUS = 38; ${constants}
-    let island = BL.terrain.island({ seed: 1 }), root = createNode(), renderer;
-    const placed = [], matrixInteriors = [], CAVE_TERRAIN_LAYOUTS = new WeakMap(), DEBUG = true;
-    ${functions}
-    window.glyphProof = {
-      buildCaveGlyphs, updateCaveGlyphs, terrainGlyphLayoutMatches, captureTerrainGlyphSource, island,
-      begin(kind) { root = createNode(); placed.length = matrixInteriors.length = 0; renderer = { kind, quality: "high" }; },
-      activate(caves) { matrixInteriors.length = 0; for (const cave of caves) matrixInteriors.push(cave); },
-      permanent(index) { MATRIX_WORLD.permanentCave = index; MATRIX_WORLD.radius = 100; },
-      layouts() { return CAVE_TERRAIN_LAYOUTS.get(island.geometry); }
-    };
-  `, context);
-  const proof = context.window.glyphProof, BL = context.window.BL;
-  let cases = 0, failures = 0; const timings = [];
-  const check = ok => { cases++; if (!ok) failures++; };
-  const visit = kind => {
-    proof.begin(kind);
-    return BL.caves.slots.map(slot => {
-      const m = proof.island.mouths.find(mouth => mouth.id === slot.id);
-      const group = BL.scene.createNode({ position: { x: m.x, y: m.floorY, z: m.z }, rotation: { x: 0, y: m.ry, z: 0 } });
-      BL.scene.addChild(group, BL.scene.createNode({ geometry: BL.hubModels.caveShelves(), position: { x: 0, y: 0, z: -2 } }));
-      return proof.buildCaveGlyphs(slot, m, group);
-    });
-  };
-  // Original uncached builder's exact registry hashes for the real island and this prop fixture.
-  const hashes = ["d4c73397", "838b0d54", "2a66543d", "26c1d671", "1b1079a0", "84f53811", "4c0e8983", "0c0f13b7"];
-  const metadata = caves => JSON.stringify(caves.map(cave => ({ hash: cave.registryHash, count: cave.glyphCount, capacity: cave.capacity,
-    sections: cave.sections, streams: cave.streams,
-    entries: Array.from({ length: cave.entries.length / 3 }, (_, index) => ({
-      stream: cave.entries[index * 3], character: cave.entries[index * 3 + 1], rank: cave.entries[index * 3 + 2]
-    })), bytes: cave.bufferBytes, surfaces: cave.surfaceCounts })));
-  for (const kind of ["webgl2", "canvas2d"]) {
-    const start = Date.now(), cold = visit(kind), built = Date.now(), warm = visit(kind);
-    timings.push({ kind, coldMs: built - start, warmMs: Date.now() - built });
-    check(cold.every((cave, i) => cave.registryHash === hashes[i]));
-    check(metadata(cold) === metadata(warm));
-    for (let i = 0; i < warm.length; i++) {
-      check(warm[i].streams !== cold[i].streams && (!warm[i].streams.length || warm[i].streams[0] !== cold[i].streams[0]));
-      check(Object.prototype.toString.call(warm[i].entries) === "[object Uint32Array]" && warm[i].entries !== cold[i].entries);
-      check(warm[i].entries.buffer !== cold[i].entries.buffer);
-      check(warm[i].entries.length % 3 === 0);
-      for (let streamIndex = 0; streamIndex < warm[i].streams.length; streamIndex++) {
-        const stream = warm[i].streams[streamIndex];
-        for (let character = 0; character < stream.entryCount; character++) {
-          const at = (stream.entryStart + character) * 3;
-          check(warm[i].entries[at] === streamIndex);
-          check(warm[i].entries[at + 1] === character && warm[i].entries[at + 2] === stream.rank);
-        }
-      }
-      check(warm[i].nodes.every((node, n) => node.instanceData !== cold[i].nodes[n].instanceData));
-      check(warm[i].bufferBytes === cold[i].bufferBytes);
-    }
-    for (const time of [0, 0.33, 1.9]) for (let i = 0; i < warm.length; i++) {
-      proof.permanent(i + 1);
-      proof.activate(cold); proof.updateCaveGlyphs(time, true, kind === "canvas2d" ? 1 : 8);
-      proof.activate(warm); proof.updateCaveGlyphs(time, true, kind === "canvas2d" ? 1 : 8);
-      check(warm[i].nodes.every((node, n) => {
-        const expected = cold[i].nodes[n];
-        if (node.instanceCount !== expected.instanceCount) return false;
-        for (let at = 0; at < node.instanceCount * 20; at++) if (node.instanceData[at] !== expected.instanceData[at]) return false;
-        return true;
-      }));
-    }
-  }
-  check(proof.layouts().size === 16);
-  const geometry = { verts: [0, 0, 0, 1, 0, 0, 0, 1, 0], faces: [{ i: [0, 1, 2] }] };
-  const signature = ["c1", "mirror", 0, 0, 0, 0, "webgl2"];
-  const saved = proof.captureTerrainGlyphSource(geometry, geometry.faces, signature);
-  check(proof.terrainGlyphLayoutMatches(saved, geometry, geometry.faces, signature));
-  for (let i = 0; i < signature.length; i++) {
-    const changed = signature.slice(); changed[i] = typeof signature[i] === "string" ? "changed" : 1;
-    check(!proof.terrainGlyphLayoutMatches(saved, geometry, geometry.faces, changed));
-  }
-  geometry.verts[0] = 0.1; check(!proof.terrainGlyphLayoutMatches(saved, geometry, geometry.faces, signature)); geometry.verts[0] = 0;
-  geometry.faces[0].i[1] = 2; check(!proof.terrainGlyphLayoutMatches(saved, geometry, geometry.faces, signature)); geometry.faces[0].i[1] = 1;
-  const face = geometry.faces[0]; geometry.faces[0] = { i: face.i };
-  check(!proof.terrainGlyphLayoutMatches(saved, geometry, geometry.faces, signature)); geometry.faces[0] = face;
-  const verts = geometry.verts; geometry.verts = verts.slice();
-  check(!proof.terrainGlyphLayoutMatches(saved, geometry, geometry.faces, signature)); geometry.verts = verts;
-  check(proof.terrainGlyphLayoutMatches(saved, geometry, geometry.faces, signature));
-  const slot = BL.caves.slots[0], oldStatus = slot.status;
-  slot.status = "headquarters"; visit("webgl2"); check(proof.layouts().size === 16); slot.status = oldStatus;
-  const mouth = proof.island.mouths.find(mouth => mouth.id === slot.id), oldX = mouth.x;
-  mouth.x += 0.01; visit("webgl2"); check(proof.layouts().size === 16); mouth.x = oldX;
-  let snapshotBytes = 0, entryBytes = 0, streamObjects = 0, entryCount = 0, surfaceMetadataEstimate = 0;
-  for (const layout of proof.layouts().values()) {
-    snapshotBytes += layout.coordinates.byteLength + layout.lengths.byteLength;
-    entryBytes += layout.entryData.byteLength; entryCount += layout.entryData.length / 3;
-    streamObjects += layout.streams.length;
-    for (const section of layout.sections) {
-      surfaceMetadataEstimate += 128 + section.constraints.length * 24;
-      if (section.supports) for (const support of section.supports) surfaceMetadataEstimate += 32 + support.polygon.length * 16;
-      else surfaceMetadataEstimate += section.polygon.length * 16;
-    }
-  }
-  return { cases, failures, timings, cacheSlots: proof.layouts().size, snapshotBytes, entryBytes, entryCount, streamObjects, surfaceMetadataEstimate };
-
-};
 const selectedWaterProgramProof = () => {
   const source = readFileSync(new URL("../src/js/gl-renderer.js", import.meta.url), "utf8");
   const start = source.indexOf("      skyHaze=opts.hazeDrop");
@@ -19049,9 +19065,6 @@ const unitChecks = async () => {
   record("rig program link failure: an optional rig failure disables only rig mode, leaves the renderer-wide failure state clean and draws the frame through the ordinary path", rigIsolation.cases === 12 && rigIsolation.failures === 0, JSON.stringify(rigIsolation));
   const shaderDerivation = await shaderDerivationProof();
   record("shader derivation: ordinary shader rewrites assert every pattern matched, throw naming the failed pattern on drift, and keep the derived markers exact", shaderDerivation.cases === 3 && !!(shaderDerivation.markers && shaderDerivation.threw && shaderDerivation.helper), JSON.stringify(shaderDerivation));
-
-const glyphLayout = terrainGlyphLayoutProof();
-record("terrain glyph layouts: warm visits preserve exact registries and rendered instances with fresh mutable buffers and bounded invalidation", glyphLayout.failures === 0 && glyphLayout.cases >= 100, JSON.stringify(glyphLayout));
 
   const rigDisposal = await raceRigDisposalProof();
   record("race rig disposal: pending and linked variants release owned shaders and programs exactly once without context-loss support", rigDisposal.every(r => !r.programs && !r.shaders && !r.duplicateDeletes && r.arraysCleared && r.aliasesReleased), JSON.stringify(rigDisposal));
@@ -19880,231 +19893,6 @@ record("character visibility source bakes: ownership wrappers share exact immuta
       && keys.every((key, i) => Array.from(model.parts[key].quaternion).every((value, j) => value === quaternions[i][j]))
       && model.parts.gunBananas[0].visible === banana.visible && Object.keys(banana.scale).every(key => model.parts.gunBananas[0].scale[key] === banana.scale[key]));
     record("caveman cache: clones share immutable geometry while owning fresh gun arrays, quaternions and transforms", independent && fresh && c.gunHeadBounds === BL.scene.boundsOf(c.headOpen), JSON.stringify({ independent, fresh, gunBananas: c.parts.gunBananas.length }));
-  }
-  {
-    const S = BL.scene, root = S.createNode(), panel = S.createNode({ geometry: BL.hubModels.mirrorPanel(), mirror: true });
-    S.addChild(root, panel); const original = panel.geometry, damage = BL.mirrorDamage.create(panel), nodes = [...root.children];
-    const limit = BL.mirrorDamage.DEBRIS_LIMIT;
-    const ignored = !damage.hit(0, 0, 0, 0) && !damage.hit(-1, 0, 0, 0) && damage.damage === 0 && panel.geometry === original;
-    damage.hit(2, 0.2, 0.1, 0); const firstSeams = damage.seams, firstHoles = damage.holes;
-    const edges = nodes[1].geometry;
-    let firstCrackArea = 0;
-    for (const face of edges.faces) {
-      let area = 0;
-      for (let i = 0, j = face.i.length - 1; i < face.i.length; j = i++) {
-        const a = face.i[j] * 3, b = face.i[i] * 3;
-        area += edges.verts[a] * edges.verts[b + 1] - edges.verts[b] * edges.verts[a + 1];
-      }
-      firstCrackArea += Math.abs(area) * 0.5;
-    }
-    const rows = [];
-    for (const power of [BL.mirrorDamage.PANEL_DAMAGE - 2, 2, 6, (BL.mirrorDamage.PANEL_LIMIT - 1) * BL.mirrorDamage.PANEL_HEALTH, BL.mirrorDamage.MAX_DAMAGE]) {
-      damage.hit(power, 0.2, 0.1, 0);
-      const live = new Set(); damage.liveGeometry(live);
-      rows.push({ stage: damage.stage, seams: damage.seams, active: damage.active, holes: damage.holes, minimumHealth: Math.min(...damage.panelHealth), live: live.size, nodes: root.children.length });
-    }
-    const shards = nodes.filter(node => node.mirrorShard === panel), floor = S.boundsOf(original).min[1];
-    const reflective = shards.every(node => node.geometry && node.geometry.mirrorSource.length === node.geometry.verts.length);
-    let falling = false, landed = false, faded = false, belowGround = false;
-    const point = new Float64Array(3);
-    for (let tick = 0; tick < 360; tick++) {
-      damage.update(1 / 120); S.updateWorld(root);
-      for (const shard of shards) {
-        if (!shard.visible) continue;
-        if (shard.rotation.x !== -Math.PI / 2 || shard.rotation.z !== 0) falling = true;
-        else {
-          landed = true;
-          for (let i = 0; i < shard.geometry.verts.length; i += 3) {
-            const v = shard.geometry.verts; BL.math.mat4.transformPoint(point, shard.world, v[i], v[i + 1], v[i + 2]);
-            if (point[1] < floor - 1e-7) belowGround = true;
-          }
-        }
-        if (shard.smokeOpacity > 0 && shard.smokeOpacity < 1 && shard.scale.x === 1) faded = true;
-      }
-    }
-    const settled = damage.active === 0 && shards.every(node => !node.visible);
-    damage.dispose();
-    record("mirror damage: one hundred crack damage precedes eight-health panels, with bounded reflective debris, flat landings above support, fade and complete disposal", ignored && firstSeams >= 40 && firstHoles === 0 && firstCrackArea > 0.03 && rows[0].active === 0 && rows[0].live === 3 && rows[0].seams > firstSeams && rows[1].active === 0 && rows[1].minimumHealth === 6 && rows[2].holes === 1 && rows[2].active === 1 && rows.every(row => row.active <= limit && row.live <= limit + 3 && row.nodes === limit + 2) && shards.length === limit && rows[3].active === limit && reflective && falling && landed && faded && !belowGround && settled && damage.damage === BL.mirrorDamage.MAX_DAMAGE && root.children.length === 1 && root.children[0] === panel && panel.geometry === original && panel.mirrorDamage === null && panel.mirrorCaptureGeometry === null && nodes.slice(1).every(node => node.parent === null), JSON.stringify({ ignored, limit, firstSeams, firstHoles, firstCrackArea, rows, reflective, falling, landed, faded, belowGround, settled, children: root.children.length }));
-  }
-  {
-    const S = BL.scene, make = () => {
-      const root = S.createNode(), panel = S.createNode({ geometry: BL.hubModels.mirrorPanel(), mirror: true });
-      S.addChild(root, panel); return { root, panel, damage: BL.mirrorDamage.create(panel) };
-    };
-    const present = (geo, x, y, source = false) => {
-      const v = source ? geo.mirrorSource : geo.verts;
-      return geo.faces.some(face => {
-        if (source && geo.verts[face.i[0] * 3 + 2] !== 0) return false;
-        for (let i = 0, j = face.i.length - 1; i < face.i.length; j = i++) {
-          const a = face.i[j] * 3, b = face.i[i] * 3;
-          if ((v[b] - v[a]) * (y - v[a + 1]) - (v[b + 1] - v[a + 1]) * (x - v[a]) < -1e-8) return false;
-        }
-        return true;
-      });
-    };
-    const health = make(), healthArray = health.damage.panelHealth;
-    const scattered = [], aim = {}, repeated = {};
-    for (let sample = 0; sample < 8; sample++) {
-      health.damage.aimCenter(aim, 0, 0, 0, sample);
-      health.damage.aimCenter(repeated, 1, 1, 0, sample);
-      scattered.push({ x: aim.x, y: aim.y, present: health.damage.contains(aim.x, aim.y), stable: aim.x === repeated.x && aim.y === repeated.y && aim.z === repeated.z });
-    }
-    health.damage.hit(BL.mirrorDamage.PANEL_DAMAGE, 0.2, 0.1, 0);
-    const crackedVertices = Array.from(health.panel.geometry.verts), allCracked = health.damage.crackDamage === BL.mirrorDamage.PANEL_DAMAGE && !health.damage.holes && healthArray.every(value => value === 8);
-    health.damage.hit(2, 0.2, 0.1, 0);
-    const halfHealth = Array.from(healthArray), halfIntact = !health.damage.holes && !health.damage.active && crackedVertices.every((value, i) => value === health.panel.geometry.verts[i]);
-    health.damage.hit(6, 0.2, 0.1, 0);
-    const roundBreak = health.damage.holes === 1 && health.damage.active === 1 && healthArray.filter(value => value === 0).length === 1;
-    health.damage.dispose();
-    const charged = make(); charged.damage.hit(BL.mirrorDamage.PANEL_DAMAGE, 0.2, 0.1, 0); charged.damage.hit(10, 0.2, 0.1, 0);
-    const chargedHealth = Array.from(charged.damage.panelHealth), brokenIndex = chargedHealth.indexOf(0), woundedIndex = chargedHealth.indexOf(6);
-    const chip = charged.root.children.find(node => node.visible && node.mirrorShard === charged.panel), chipGeometry = chip.geometry, cx = chip.position.x, cy = chip.position.y;
-    const panelAim = {}, aimedAtSurvivor = charged.damage.aimCenter(panelAim, cx, cy, 0, 7)
-      && charged.damage.contains(panelAim.x, panelAim.y) && Math.hypot(panelAim.x - cx, panelAim.y - cy) > 1e-5;
-    const paneArea = (geo, source = false) => {
-      const v = source ? geo.mirrorSource : geo.verts; let total = 0;
-      for (const face of geo.faces) {
-        if (source && geo.verts[face.i[0] * 3 + 2] !== 0) continue;
-        let px = 0, py = 0, area = 0;
-        for (let i = 0, j = face.i.length - 1; i < face.i.length; j = i++) {
-          const a = face.i[j] * 3, b = face.i[i] * 3;
-          px += v[b]; py += v[b + 1]; area += v[a] * v[b + 1] - v[b] * v[a + 1];
-        }
-        if (source || present(chipGeometry, px / face.i.length, py / face.i.length, true)) total += Math.abs(area) * 0.5;
-      }
-      return total;
-    };
-    const fullArea = paneArea(chipGeometry, true);
-    charged.damage.update(BL.mirrorDamage.HEAL_DELAY + 1 / BL.mirrorDamage.PANEL_HEAL_RATE);
-    const recovered = charged.damage.panelHealth[brokenIndex], woundedRecovered = charged.damage.panelHealth[woundedIndex], areaFraction = paneArea(charged.panel.geometry) / fullArea;
-    const regrownVertices = Array.from(charged.panel.geometry.verts);
-    charged.damage.hit(0.4, cx, cy, 0);
-    const partialHealth = charged.damage.panelHealth[brokenIndex], extentRetained = regrownVertices.length === charged.panel.geometry.verts.length && regrownVertices.every((value, i) => value === charged.panel.geometry.verts[i]);
-    charged.damage.hit(partialHealth, cx, cy, 0);
-    const fallen = charged.root.children.filter(node => node.visible && node.mirrorShard === charged.panel), fallenArea = fallen.reduce((sum, node) => sum + paneArea(node.geometry, true), 0) / fullArea;
-    const proportionalBreak = charged.damage.panelHealth[brokenIndex] === 0 && charged.damage.panelHealth[woundedIndex] === woundedRecovered && !charged.damage.contains(cx, cy);
-    charged.damage.dispose();
-    record("mirror damage: intact glass gets varied stable shot targets and auto aim through a hole resolves to surviving glass", scattered.every(hit => hit.present && hit.stable) && new Set(scattered.map(hit => `${hit.x},${hit.y}`)).size === scattered.length && Math.max(...scattered.map(hit => hit.x)) - Math.min(...scattered.map(hit => hit.x)) > 1 && Math.max(...scattered.map(hit => hit.y)) - Math.min(...scattered.map(hit => hit.y)) > 1 && aimedAtSurvivor, JSON.stringify({ scattered, aimedAtSurvivor, panelAim, hole: [cx, cy] }));
-    record("mirror damage: each panel has eight health, charged overflow reaches the next panel, and regrown area restores matching fractional health", BL.mirrorDamage.PANEL_DAMAGE === 100 && BL.mirrorDamage.PANEL_HEALTH === 8 && BL.mirrorDamage.PANEL_LIMIT === 50 && BL.mirrorDamage.MAX_DAMAGE === 500 && healthArray === health.damage.panelHealth && allCracked && halfIntact && halfHealth.filter(value => value === 6).length === 1 && halfHealth.every(value => value === 8 || value === 6) && roundBreak && chargedHealth.filter(value => value === 0).length === 1 && chargedHealth.filter(value => value === 6).length === 1 && Math.abs(recovered - 1) < 1e-9 && Math.abs(woundedRecovered - 7) < 1e-9 && Math.abs(areaFraction - recovered / BL.mirrorDamage.PANEL_HEALTH) < 1e-6 && Math.abs(partialHealth - 0.6) < 1e-9 && extentRetained && proportionalBreak && fallen.length === 1 && Math.abs(fallenArea - areaFraction) < 1e-6, JSON.stringify({ allCracked, halfHealth, halfIntact, roundBreak, chargedHealth, recovered, woundedRecovered, areaFraction, partialHealth, extentRetained, proportionalBreak, fallen: fallen.length, fallenArea }));
-    const crackedReference = make(); crackedReference.damage.hit(BL.mirrorDamage.PANEL_DAMAGE, 0.2, 0.1, 0);
-    const crackedTemplate = crackedReference.panel.geometry; crackedReference.damage.dispose();
-    const otherImpact = make(); otherImpact.damage.hit(BL.mirrorDamage.PANEL_DAMAGE, -1.4, 0.8, 0);
-    const fixedLayout = JSON.stringify(otherImpact.panel.geometry.verts) === JSON.stringify(crackedTemplate.verts)
-      && JSON.stringify(otherImpact.panel.geometry.faces) === JSON.stringify(crackedTemplate.faces);
-    otherImpact.damage.dispose();
-    const repaired = make(), repairDamage = BL.mirrorDamage.PANEL_DAMAGE + 64, panelTime = BL.mirrorDamage.PANEL_HEALTH / BL.mirrorDamage.PANEL_HEAL_RATE;
-    repaired.damage.hit(repairDamage, 0.2, 0.1, 0);
-    const centers = repaired.root.children.filter(node => node.visible && node.mirrorShard === repaired.panel).map(node => {
-      const x = node.position.x, y = node.position.y, v = crackedTemplate.verts;
-      let far = -1, ex = x, ey = y;
-      // A bulk hit drops the formerly intact pane; its original tips extend
-      // into future cracks. Measure growth toward the actual cracked border.
-      for (const face of crackedTemplate.faces) {
-        let cx = 0, cy = 0;
-        for (const index of face.i) { cx += v[index * 3]; cy += v[index * 3 + 1]; }
-        if (!present(node.geometry, cx / face.i.length, cy / face.i.length, true)) continue;
-        for (const index of face.i) {
-          const i = index * 3, d = (v[i] - x) ** 2 + (v[i + 1] - y) ** 2;
-          if (d > far) { far = d; ex = x + (v[i] - x) * 0.7; ey = y + (v[i + 1] - y) * 0.7; }
-        }
-      }
-      return { x, y, ex, ey };
-    });
-    const repairState = () => ({ damage: repaired.damage.damage, holes: repaired.damage.holes, cracks: repaired.damage.cracks, version: repaired.damage.version,
-      centers: centers.filter(p => repaired.damage.contains(p.x, p.y)).length, edges: centers.filter(p => repaired.damage.contains(p.ex, p.ey)).length });
-    const empty = repairState(); repaired.damage.update(BL.mirrorDamage.HEAL_DELAY - 0.01);
-    const quiet = repairState(); repaired.damage.update(0.01 + panelTime * 0.25);
-    const quarter = repairState(); repaired.damage.update(panelTime * 0.5);
-    const threeQuarter = repairState(); repaired.damage.update(panelTime * 0.25 + 0.001);
-    const panes = repairState(); repaired.damage.update(BL.mirrorDamage.CRACK_HEAL_TIME * 0.5);
-    const cracks = repairState(); repaired.damage.update(BL.mirrorDamage.CRACK_HEAL_TIME * 0.5 + 0.01);
-    const restored = repairState(); repaired.damage.dispose();
-    record("mirror damage: pane borders are independent of the first impact and every missing pane grows from its fixed center before cracks seal", fixedLayout && centers.length > 0 && empty.holes === centers.length && !empty.centers && !empty.edges && quiet.version === empty.version && quiet.damage === empty.damage
-      && quarter.centers === centers.length && !quarter.edges && quarter.holes === empty.holes && quarter.cracks === empty.cracks && quarter.damage < empty.damage
-      && threeQuarter.centers === centers.length && threeQuarter.edges === centers.length && threeQuarter.damage < quarter.damage && threeQuarter.cracks === empty.cracks
-      && !panes.holes && panes.edges === centers.length && panes.cracks === empty.cracks && !cracks.holes && cracks.cracks > 0 && cracks.cracks < panes.cracks
-      && !restored.damage && !restored.holes && !restored.cracks, JSON.stringify({ fixedLayout, count: centers.length, empty, quiet, quarter, threeQuarter, panes, cracks, restored }));
-    const brokenRepairs = [];
-    for (const mode of ["closed", "open", "restored"]) {
-      const m = make(), original = m.panel.geometry;
-      if (mode === "restored") m.damage.restore();
-      else m.damage.hit(BL.mirrorDamage.MAX_DAMAGE, -1.4, 0.8, 0);
-      const version = m.damage.version;
-      m.damage.update(119, mode !== "open");
-      const waiting = m.damage.broken && m.damage.damage === BL.mirrorDamage.MAX_DAMAGE && m.damage.version === version && !m.panel.geometry.faces.length;
-      m.damage.update(mode === "open" ? 240 : 1, mode !== "open");
-      const delay = m.damage.broken && m.damage.version === version;
-      m.damage.update(panelTime * 0.25, true);
-      const growing = !m.damage.broken && m.damage.panelHealth.every(hp => hp === 2) && m.panel.geometry.faces.length > 0;
-      const growthVersion = m.damage.version, growthDamage = m.damage.damage;
-      m.damage.update(240, false);
-      const paused = m.damage.version === growthVersion && m.damage.damage === growthDamage;
-      m.damage.update(panelTime * 0.75 + BL.mirrorDamage.CRACK_HEAL_TIME + 0.01, true);
-      const complete = !m.damage.broken && m.damage.damage === 0 && m.panel.geometry === original;
-      brokenRepairs.push({ mode, waiting, delay, growing, paused, complete }); m.damage.dispose();
-    }
-    record("mirror damage: fully shattered and restored mirrors wait 120 seconds, regrow only with a closed gate and pause without jumping while open", brokenRepairs.every(row => row.waiting && row.delay && row.growing && row.paused && row.complete), JSON.stringify(brokenRepairs));
-    const crackOnly = make(); crackOnly.damage.hit(30, 0.2, 0.1, 0);
-    const firstCrack = crackOnly.damage.cracks, crackVersion = crackOnly.damage.version;
-    crackOnly.damage.update(BL.mirrorDamage.HEAL_DELAY - 0.01);
-    const waited = crackOnly.damage.version === crackVersion && crackOnly.damage.cracks === firstCrack;
-    crackOnly.damage.update(0.01 + BL.mirrorDamage.CRACK_HEAL_TIME / 2);
-    const halfCrack = crackOnly.damage.cracks, noPanePhase = crackOnly.damage.holes === 0;
-    crackOnly.damage.update(BL.mirrorDamage.CRACK_HEAL_TIME / 2 + 0.01);
-    const crackRestored = crackOnly.damage.damage === 0 && crackOnly.damage.cracks === 0 && crackOnly.damage.holes === 0;
-    crackOnly.damage.dispose();
-    record("mirror damage: crack-only damage waits quietly then seals directly without a missing-pane phase", waited && noPanePhase && halfCrack > 0 && halfCrack < firstCrack && crackRestored, JSON.stringify({ waited, firstCrack, halfCrack, noPanePhase, crackRestored }));
-    const sealingHits = [], faceKey = (geo, face) => face.i.map(index => Array.from(geo.verts.subarray(index * 3, index * 3 + 3)).join(",")).sort().join("|");
-    for (const progress of [0.25, 0.5, 0.75]) {
-      const m = make(); m.damage.hit(BL.mirrorDamage.PANEL_DAMAGE + 96, 0.2, 0.1, 0);
-      const shard = m.root.children.find(node => node.visible && node.mirrorShard === m.panel), struck = shard.geometry;
-      const x = shard.position.x, y = shard.position.y;
-      m.damage.update(BL.mirrorDamage.HEAL_DELAY + panelTime + BL.mirrorDamage.CRACK_HEAL_TIME * progress);
-      const before = m.panel.geometry, beforeCracks = m.damage.cracks, complete = !m.damage.holes && m.damage.contains(x, y);
-      const hit = m.damage.hit(8, x, y, 0), after = m.panel.geometry, keys = new Set(after.faces.map(face => faceKey(after, face)));
-      let remote = 0, changed = 0;
-      for (const face of before.faces) {
-        let cx = 0, cy = 0;
-        for (const index of face.i) { cx += before.verts[index * 3]; cy += before.verts[index * 3 + 1]; }
-        if (present(struck, cx / face.i.length, cy / face.i.length, true)) continue;
-        remote++; if (!keys.has(faceKey(before, face))) changed++;
-      }
-      const version = m.damage.version; m.damage.update(BL.mirrorDamage.HEAL_DELAY - 0.01);
-      sealingHits.push({ progress, beforeCracks, complete, hit, remote, changed, quiet: m.damage.version === version }); m.damage.dispose();
-    }
-    record("mirror damage: hits during final crack sealing preserve every untouched pane contour and restart the quiet delay", sealingHits.every(row => row.complete && row.hit && row.beforeCracks > 0 && row.beforeCracks < 1 && row.remote > 20 && !row.changed && row.quiet), JSON.stringify(sealingHits));
-    const locality = [];
-    for (const x of [-1.8, 1.8]) {
-      const m = make(); m.damage.hit(BL.mirrorDamage.PANEL_DAMAGE, 0, 0, 0); m.damage.hit(4 * BL.mirrorDamage.PANEL_HEALTH, x, 0.1, 0);
-      const shards = m.root.children.filter(node => node.visible && node.mirrorShard === m.panel);
-      const mean = shards.reduce((sum, node) => sum + node.position.x, 0) / shards.length;
-      locality.push({ x, count: shards.length, mean }); m.damage.dispose();
-    }
-    const m = make(); m.damage.hit(BL.mirrorDamage.PANEL_DAMAGE + 144, 0.2, 0.1, 0);
-    const fragment = m.root.children.find(node => node.visible && node.mirrorShard === m.panel);
-    const x = fragment.position.x, y = fragment.position.y, wasMissing = !m.damage.contains(x, y);
-    m.damage.update(12);
-    const before = m.panel.geometry, regrownCenter = m.damage.contains(x, y), beforeDamage = m.damage.damage;
-    const maxFragments = Math.ceil(8 / Math.min(...m.damage.panelHealth.filter(health => health > 0)));
-    m.damage.hit(8, x, y, 0);
-    const shards = m.root.children.filter(node => node.visible && node.mirrorShard === m.panel).map(node => node.geometry);
-    let overHole = 0, remoteRemoved = 0, holeFilled = 0, removed = 0, samples = 0;
-    for (const geo of shards) for (const face of geo.faces) {
-      if (geo.verts[face.i[0] * 3 + 2] !== 0) continue;
-      const s = geo.mirrorSource, a = face.i[0] * 3, b = face.i[1] * 3, c = face.i[2] * 3;
-      for (let i = 0; i < 5; i++) for (let j = 0; j < 5 - i; j++) {
-        const u = (i + 0.2) / 5, t = (j + 0.2) / 5;
-        const px = s[a] * (1 - u - t) + s[b] * u + s[c] * t, py = s[a + 1] * (1 - u - t) + s[b + 1] * u + s[c + 1] * t;
-        samples++; if (!present(before, px, py)) overHole++;
-      }
-    }
-    for (let ix = 0; ix < 61; ix++) for (let iy = 0; iy < 41; iy++) {
-      const px = -2.47 + ix * 4.94 / 60, py = -1.72 + iy * 3.19 / 40, was = present(before, px, py), now = m.damage.contains(px, py);
-      if (!was && now) holeFilled++;
-      if (was && !now) { removed++; if (!shards.some(geo => present(geo, px, py, true))) remoteRemoved++; }
-    }
-    const spent = m.damage.damage - beforeDamage; m.damage.dispose();
-    record("mirror damage: subsequent impacts choose nearby panes and interrupted repair spends proportional health while dropping only present glass", locality[0].mean < -0.8 && locality[1].mean > 0.8 && locality.every(row => row.count === 4) && wasMissing && regrownCenter && Math.abs(spent - 8) < 1e-9 && shards.length > 0 && shards.length <= maxFragments && samples > 0 && removed > 0 && !overHole && !remoteRemoved && !holeFilled, JSON.stringify({ locality, wasMissing, regrownCenter, spent, maxFragments, shards: shards.length, samples, removed, overHole, remoteRemoved, holeFilled }));
   }
   {
     const S = BL.scene, root = S.createNode(), owners = [], damage = [], player = { root: S.createNode(), baseY: 0, bodyRadius: 0.3, bodyHeight: 1.7 }, system = BL.breakables.create({ root, renderer: {}, fx: { burst() {}, damageNumber(x, y, z, amount) { damage.push({ x, y, z, amount }); } }, crew: { player, collectGroundMagazine: amount => amount },
