@@ -7488,7 +7488,16 @@
     }
     updateTotems(dt, elapsed);
     if (coilCharge) updateCoilCharge(elapsed);
-    for (let i = 0; i < fireRigs.length; i++) fireRigs[i].update(dt, elapsed);
+    // A fire rig pauses with the view: its own clock advances only while its pit is near, so a distant pit
+    // freezes its flame and resumes without a catch-up jump.
+    for (let i = 0; i < fireRigs.length; i++) {
+      const rig = fireRigs[i], w = rig.root.world;
+      const near = effectsActiveAt(w[12], w[13] + 1, w[14], rig.near, 24, 32);
+      rig.near = near;
+      if (!near) continue;
+      rig.time = (rig.time || 0) + dt;
+      rig.update(dt, rig.time);
+    }
     updateLamps(dt, elapsed, phase !== null);
     if (jumbotron) {
       jumbotron.update(elapsed, renderer);
