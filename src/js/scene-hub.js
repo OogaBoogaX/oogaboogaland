@@ -979,6 +979,8 @@
     }
     return null;
   };
+  // How many point-light slots the lamps took when last chosen (the selection is cached; the hunt's lanterns follow).
+  let lampLights = 0;
   const addLamp = (node, kind, x, y, z, light = true, order = lamps.length, id = `lamp:${lamps.length}`) => {
     node.glow = LAMP_OFF;
     node.flare = 0;
@@ -989,7 +991,10 @@
   const updateLamps = (dt, elapsed, spark) => {
     const lights = RENDER_OPTS.lights;
     const webgl = renderer.kind === "webgl2";
-    const limit = webgl ? BL.glRenderer.QUALITY[renderer.quality].lights : 6;
+    // HALLOWEEN: through the hunt's night a few slots are kept back for the hunters' lanterns (a quarter of the tier's
+    // at most), filled after the lamps; a change in how many is a new key, so the lamps are chosen again.
+    const tierLimit = webgl ? BL.glRenderer.QUALITY[renderer.quality].lights : 6;
+    const reserved = ghosts ? Math.min(ghosts.lanternsWanted(), Math.floor(tierLimit / 4)) : 0, limit = tierLimit - reserved;
     const phaseNow = daylight.phaseAt(hour);
     const lanternsOn = phaseNow === "dusk" || phaseNow === "night" || phaseNow === "midnight";
     const coilLamp = coilCharge && coilCharge.lamp, coilActive = !!coilLamp && coilCharge.level > 0.02;
@@ -1083,7 +1088,7 @@
       }
       for (let i = count; i < LIGHT_CAPACITY; i++) LIGHTING_DEBUG.selectedIds[i] = null;
       for (let i = approximated; i < LIGHT_CAPACITY; i++) LIGHTING_DEBUG.approximatedIds[i] = null;
-      RENDER_OPTS.lightCount = count;
+      RENDER_OPTS.lightCount = lampLights = count;
       LIGHTING_DEBUG.registeredLampCount = registered;
       LIGHTING_DEBUG.activeFullLightCount = count;
       LIGHTING_DEBUG.approximatedLightCount = approximated;
@@ -1129,7 +1134,7 @@
         LIGHTING_DEBUG.selectedIds[i] = l.id;
       }
       for (let i = total; i < LIGHT_CAPACITY; i++) LIGHTING_DEBUG.selectedIds[i] = null;
-      RENDER_OPTS.lightCount = LIGHTING_DEBUG.activeFullLightCount = LIGHTING_DEBUG.selectedCount = total;
+      RENDER_OPTS.lightCount = lampLights = LIGHTING_DEBUG.activeFullLightCount = LIGHTING_DEBUG.selectedCount = total;
     }
     if (!keyHit) {
       key.tx = camera.target.x; key.ty = camera.target.y; key.tz = camera.target.z;
@@ -1139,6 +1144,7 @@
       key.lanternsOn = lanternsOn; key.coilActive = coilActive; key.cave = cameraCaveIndex; key.limit = limit;
       lampSelValid = true;
     }
+    RENDER_OPTS.lightCount = lampLights + (reserved ? ghosts.lanterns(lights, lampLights, reserved) : 0); // HALLOWEEN
   };
   const buildFire = () => {
     let p = null;
@@ -11386,7 +11392,7 @@
     clankerFireReachable = null;
     workZones.length = entranceZones.length = 0;
     closedCaveZones.length = 0;
-    RENDER_OPTS.lightCount = 0;
+    RENDER_OPTS.lightCount = lampLights = 0;
     // The next visit's first frame rebuilds the lamp selection and resamples the clock.
     lampSelValid = false;
     sampledDay = 0;

@@ -5439,17 +5439,19 @@ const ghostHuntChecks = async () => {
   for (let i = 0; i < 120; i++) { const a = i / 120 * Math.PI * 2; spots.push(Math.sin(a) * 25.5, 4, -Math.cos(a) * 25.5, a); }
   // Two players stand still; with `shoot` every ghost within 14 m of the middle and every gorilla is hit every sixth frame,
   // the boss every fifth.
-  const play = (sim, from, until, { shoot = true, here = 2, watch = null } = {}) => {
+  // `armored` keeps the two standing hunters from harm, for a check about the hunt's course rather than its danger.
+  const play = (sim, from, until, { shoot = true, here = 2, watch = null, armored = false } = {}) => {
     let now = T0 + from;
     while (now < T0 + until) {
       now += FRAME;
       sim.beginPresence();
-      if (here > 0) sim.present(1, 3, 0, 4);
-      if (here > 1) sim.present(2, -5, 0, -2);
+      const a = here > 0 ? sim.present(1, 3, 0, 4) : null, b = here > 1 ? sim.present(2, -5, 0, -2) : null;
+      if (armored) for (const p of [a, b]) if (p) p.invulnUntil = sim.state.now + 60000;
       sim.advance(now);
       const frame = now / FRAME | 0;
       if (shoot) for (const g of sim.ghosts) if (g.on && !g.dying && Math.hypot(g.x, g.z) < 14 && frame % 6 === 0) sim.hit(g.id, 2, g.id % 2 ? 1 : 2);
       if (shoot && frame % 6 === 0) for (const b of sim.brutes) if (b.on && !b.dying) sim.hit(b.id, 2, 1);
+      if (shoot && frame % 6 === 0) for (const l of sim.lings) if (l.on && !l.dying) sim.hit(l.id, 2, 1);
       if (shoot && sim.state.bossOn && frame % 5 === 0) sim.hit(0, 5, 1);
       if (watch) watch(sim);
       if (sim.state.state === ST.IDLE) break;
@@ -5478,11 +5480,12 @@ const ghostHuntChecks = async () => {
     record("ghost hunt: a seeded hunt repeats exactly, one picked up from its snapshot mid-way (a new host) goes on the same, and its rows stay readable across a deploy", repeated && loaded && same && hunting && a.state.kills > 0 && rows && older, JSON.stringify({ repeated, loaded, same, hunting, kills: a.state.kills, rows, older }));
   }
   {
-    const sim = begin(11), rounds = [], drops = { 3: false, 4: false }, gorillas = [], skeletons = [], seenBrutes = new Set();
+    const sim = begin(11), rounds = [], drops = { 3: false, 4: false }, gorillas = [], skeletons = [], spiders = [], brood = [], glasses = [], seenBrutes = new Set();
+    let bossGlasses = 0, dropped = 0, crowded = 0;
     let maxAlive = 0, round = 0, lapToNight = false;
     const settings = { ghosts: 0, cap: 0, interval: 0, group: 0, speed: 0 };
     const states = new Set();
-    const end = play(sim, 0, 3600000, { watch: (s) => {
+    const end = play(sim, 0, 3600000, { armored: true, watch: (s) => {
       const st = s.state;
       states.add(st.state);
       if (st.state === ST.NIGHT) lapToNight = true;
@@ -5491,16 +5494,25 @@ const ghostHuntChecks = async () => {
         rounds[round].max = Math.max(rounds[round].max, s.alive());
         rounds[round].spawned = st.spawned;
         if (round === 3 && s.drops.some((d) => d.on && d.kind === 1)) drops[3] = true;
-        for (const b of s.brutes) if (b.on && !seenBrutes.has(b.id)) { seenBrutes.add(b.id); const into = b.kind ? skeletons : gorillas; into[round] = (into[round] || 0) + 1; }
+        for (const b of s.brutes) if (b.on && !seenBrutes.has(b.id)) { seenBrutes.add(b.id); const into = [gorillas, skeletons, spiders, glasses][b.kind]; into[round] = (into[round] || 0) + 1; }
+        for (const l of s.lings) if (l.on && !seenBrutes.has(l.id)) {
+          seenBrutes.add(l.id); brood[round] = (brood[round] || 0) + 1;
+          // A Fiat Rush spiderling drops only while fewer than `swarmLive` others are alive.
+          if (l.phase === G.LING_PHASE.DROP) { dropped++; if (s.lings.filter((o) => o !== l && o.on && !o.dying).length >= G.CONFIG.LING.swarmLive) crowded++; }
+        }
         if (round === 4 && s.drops.some((d) => d.on && d.kind === 2)) drops[4] = true;
       }
+      // The boss's fight, with its hourglass.
+      if (st.state === ST.BOSS) for (const b of s.brutes) if (b.on && b.kind === 3 && !seenBrutes.has(b.id)) { seenBrutes.add(b.id); bossGlasses++; }
       maxAlive = Math.max(maxAlive, s.alive());
     } });
     const tables = rounds.slice(1).every((r) => r.spawned === r.total && r.max <= r.cap);
     const path = [ST.LAP, ST.NIGHT, ST.COUNTDOWN, ST.ACTIVE, ST.BREAK, ST.BOSS, ST.VICTORY, ST.DAWN].every((st) => states.has(st)) && !states.has(ST.DEFEAT);
-    record("ghost hunt: shooting every ghost clears each round's whole table within its cap, round 3 drops the shield and round 4 the ice, each ordinary round sends its gorillas and skeletons, the sixth clears into the boss, his fall is victory and dawn hands the island back",
-      lapToNight && rounds.length === 7 && tables && drops[3] && drops[4] && gorillas.slice(1, 7).every((n, i) => n === G.CONFIG.BRUTE.perRound[i]) && [1, 2, 3, 4, 5, 6].every((r) => (skeletons[r] || 0) === G.bonesFor(r, rounds[r].players)) && path && sim.state.state === ST.IDLE && maxAlive <= G.CONFIG.MAX_GHOSTS,
-      JSON.stringify({ rounds: rounds.slice(1), drops, gorillas, skeletons, states: [...states], end, maxAlive }));
+    const ordinary = G.ROUNDS.map((_, i) => i + 1);
+    record("ghost hunt: shooting every ghost clears each round's whole table within its cap, round 3 drops the shield and round 4 the ice, each ordinary round sends its gorillas, spiders (each bursting into its brood as it dies, and the swarm round's spiderlings dropping in one at a time, never into ten alive), hourglasses and skeletons, the last clears into the boss (with his hourglass), whose fall is victory, and dawn hands the island back",
+      lapToNight && rounds.length === G.ROUNDS.length + 1 && tables && drops[3] && drops[4] && ordinary.every((r) => (gorillas[r] || 0) === G.brutesFor(r, rounds[r].players)) && ordinary.every((r) => (spiders[r] || 0) === G.spidersFor(r) && (brood[r] || 0) === G.spidersFor(r) * G.CONFIG.LING.count + (r === G.CONFIG.LING.swarmRound ? G.swarmFor(rounds[r].players) : 0)) && ordinary.every((r) => (skeletons[r] || 0) === G.bonesFor(r, rounds[r].players))
+        && ordinary.every((r) => (glasses[r] || 0) === G.glassesFor(r)) && bossGlasses === G.CONFIG.HOURGLASS.boss && dropped === G.swarmFor(rounds[G.CONFIG.LING.swarmRound].players) && !crowded && path && sim.state.state === ST.IDLE && maxAlive <= G.CONFIG.MAX_GHOSTS,
+      JSON.stringify({ rounds: rounds.slice(1), drops, gorillas, spiders, brood, dropped, crowded, glasses, bossGlasses, skeletons, states: [...states], end, maxAlive }));
   }
   {
     // Two players away from the pile, shooting what comes within 8 m, until the lightning comes over it; then one walks
@@ -5587,11 +5599,27 @@ const ghostHuntChecks = async () => {
     const partialWave = z.state.brutesSent === 1 && z.state.bonesSent === 0;
     for (const b of z.brutes) if (b.dying) b.on = false;
     for (let i = 0; i < 40; i++) tick();
-    const enemiesCame = z.state.state === ST.ACTIVE && z.brutes.filter((b) => b.on && !b.kind).length === G.CONFIG.BRUTE.perRound[5]
-      && z.brutes.filter((b) => b.on && b.kind).length === G.bonesFor(6, z.state.players);
+    const enemiesCame = z.state.state === ST.ACTIVE && z.brutes.filter((b) => b.on && !b.kind).length === G.brutesFor(6, z.state.players)
+      && z.brutes.filter((b) => b.on && b.kind === 1).length === G.bonesFor(6, z.state.players);
     record("ghost hunt: full pools defer ghosts, lightning, skeletons and gorillas until slots free, including a partly sent gorilla wave, without ending the round early",
       pooled && waited && came && enemiesWaited && partialWave && enemiesCame, JSON.stringify({ pooled, waited, came, enemiesWaited, partialWave, enemiesCame }));
   }
+  {
+    // A standing hourglass halves the rifles (the hunt reads `halving`) until it dies.
+    const z = begin(23);
+    let now = T0;
+    const tick = () => { now += FRAME; z.beginPresence(); const p = z.present(1, 0, 0, 6); if (p) p.invulnUntil = z.state.now + 60000; z.advance(now); };
+    while (now < T0 + 60000 && z.state.state !== ST.ACTIVE) tick();
+    const before = z.halving();
+    z.debug.hourglass();
+    const glass = z.brutes.find((b) => b.on && b.kind === 3);
+    while (now < T0 + 120000 && glass.phase < G.BRUTE_PHASE.SHAKE) tick();
+    const halved = z.halving();
+    for (let i = 0; i < 400 && !glass.dying; i++) z.hit(glass.id, 5, 1);
+    const lifted = !z.halving();
+    record("ghost hunt: a standing hourglass halves every rifle round until it dies", !before && halved && lifted, JSON.stringify({ before, halved, lifted }));
+  }
+
   {
     // A rescuer knocked down during an elixir revive must start a fresh hold after being brought back. A third
     // hunter keeps the round alive while both are down. The one being revived is found where they went down even once
@@ -5677,15 +5705,18 @@ const ghostHuntChecks = async () => {
     if (z.state.state === ST.ACTIVE) z.debug.next();
     for (let i = 0; i < 20 && z.state.state === ST.ACTIVE; i++) tick();
     const back = me().seg === G.CONFIG.PLAYER_SEGMENTS && !(z.state.now < me().frozenUntil) && !!mate();
-    // The sixth round gives way straight to the boss: one gone down in it is back for the boss's fight.
-    z.jump(ST.ACTIVE, 6);
+    // The last round gives way straight to the boss: one gone down in it is back for the boss's fight.
+    const last = G.ROUNDS.length;
+    z.jump(ST.ACTIVE, last);
     for (let i = 0; i < 24000 && !(me().seg === 0) && z.state.state === ST.ACTIVE; i++) tick();
-    const downIn6 = me().seg === 0 && z.state.round === 6;
+    const downInLast = me().seg === 0 && z.state.round === last;
     z.debug.next();
-    for (let i = 0; i < 20 && z.state.state === ST.ACTIVE; i++) tick();
+    // The boss comes after the last round's break and its own countdown, as a round would.
+    let counted = false;
+    for (let i = 0; i < 1200 && z.state.state !== ST.BOSS; i++) { tick(); if (z.state.state === ST.COUNTDOWN && z.state.round === last) counted = true; }
     const boss = z.state.state === ST.BOSS && me().seg === G.CONFIG.PLAYER_SEGMENTS && !(z.state.now < me().frozenUntil);
-    record("ghost hunt: a player gone down stays down for the rest of the round and is back whole when it ends, the sixth's into the boss's fight",
-      round >= 1 && stayed && back && downIn6 && boss, JSON.stringify({ round, stayed, back, downIn6, boss, seg: me().seg, state: z.state.state }));
+    record("ghost hunt: a player gone down stays down for the rest of the round and is back whole when it ends, the last's through a countdown into the boss's fight",
+      round >= 1 && stayed && back && downInLast && counted && boss, JSON.stringify({ round, stayed, back, downInLast, counted, boss, seg: me().seg, state: z.state.state }));
   }
   {
     const lost = begin(3), states = new Set();
@@ -5704,9 +5735,21 @@ const ghostHuntChecks = async () => {
     const still = held.state.paused && held.state.now === heldAt && held.state.state === heldState && JSON.stringify(held.ghosts.map((g) => [g.on, g.x, g.z])) === stood;
     let heldOutcome = 0;
     play(held, 40000 + G.CONFIG.PAUSE_MAX_MS - 1000, 3600000, { here: 0, watch: (s) => { if (s.state.state === ST.DAWN) heldOutcome = s.state.outcome; } });
-    record("ghost hunt: every player frozen is defeat, an arena left empty ends the hunt, and a pause holds it still only until its limit",
-      defeat && outcome === G.OUTCOME.ABANDON && empty.state.state === ST.IDLE && paused && still && heldOutcome === G.OUTCOME.ABANDON && held.state.state === ST.IDLE,
-      JSON.stringify({ states: [...states], outcome, paused, still, heldOutcome }));
+    // Regression: a spider's brood still out when the hunt is lost goes with the ghosts, not left standing through the
+    // defeat and the dawn.
+    const brood = begin(7);
+    let called = false;
+    let at = play(brood, 0, 45000, { shoot: false, armored: true, watch: (s) => { if (!called && s.state.state === ST.ACTIVE) called = s.debug.spider(1); } });
+    const spider = brood.brutes.find((b) => b.on && b.kind === 2);
+    at = play(brood, at, at + 4000, { shoot: false, armored: true });
+    for (let i = 0; i < 99 && spider && !spider.dying; i++) brood.hit(spider.id, 99, 1);
+    const hatched = brood.lings.filter((l) => l.on && !l.dying).length;
+    let leftAtDefeat = -1;
+    play(brood, at, 3600000, { shoot: false, watch: (s) => { if (s.state.state === ST.DEFEAT && leftAtDefeat < 0) leftAtDefeat = s.lings.filter((l) => l.on && !l.dying).length; } });
+    record("ghost hunt: every player frozen is defeat (taking any spiderlings out with the ghosts), an arena left empty ends the hunt, and a pause holds it still only until its limit",
+      defeat && outcome === G.OUTCOME.ABANDON && empty.state.state === ST.IDLE && paused && still && heldOutcome === G.OUTCOME.ABANDON && held.state.state === ST.IDLE
+        && hatched === G.CONFIG.LING.count && leftAtDefeat === 0,
+      JSON.stringify({ states: [...states], outcome, paused, still, heldOutcome, hatched, leftAtDefeat }));
   }
 };
 const donationClientChecks = async () => {
@@ -8814,8 +8857,10 @@ const hubGhostEntry = (melee) => ({ name: `ghost entry ${melee ? "melee" : "shoo
   record("ghost hunt: X and portrait keep combat mode, retaking an Ooga restores combat, and menus can still free the cursor", Object.values(locked).every(Boolean), JSON.stringify(locked));
   const hunt = await b.evaluate(`(() => {
     const B = __ooga, H = BL.scenes.hub.debug, G = H.halloween, C = BL.ghostSim.CONFIG, a = B.crew.player;
-    G.simulate((G.lapMs + C.NIGHT_MS + C.COUNTDOWN_MS) / 1000 + 0.5);
-    // The hunt clock and the hub's ring animation have separate debug steppers.
+    const cards = BL.ghostSim.introPages(1, false);
+    G.simulate((G.lapMs + C.NIGHT_MS + C.COUNTDOWN_MS + cards * BL.ghostSim.introMs(cards)) / 1000 + 0.5);
+    // The hunt clock and the hub's ring animation have separate debug steppers. The ring rises with the walls, so it
+    // needs no time for round 1's cards; the hunt keeps running on the real clock meanwhile, so keep this short.
     B.advance((G.lapMs + C.NIGHT_MS + C.COUNTDOWN_MS) / 1000 + 2, 1 / 60);
     const position = { ...a.root.position, y: a.root.position.y - a.baseY }, heading = a.root.rotation.y;
     const crossRing = () => {

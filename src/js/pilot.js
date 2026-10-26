@@ -1811,11 +1811,12 @@
         headOrbit = freeEntry = true;
       }
     };
-    const exitClose = () => {
+    // Out of first person, to the shoulder, or with `shoulder` false to the orbit (or, armed, the overhead view).
+    const exitClose = (shoulder = true) => {
       if (!closeWanted || firstOnly) return;
       clearRightGesture();
       const cave = player();
-      shoulderView = !!cave;
+      shoulderView = !!cave && shoulder;
       if (aimView()) {
         if (cave && !cave.camp.rolling) lockCurrentAimPoint();
         closeWanted = false;
@@ -3727,6 +3728,8 @@
       get birdsEye() { return birdsEye(); }, get birdsEyeMix() { return camera.orthoMix || 0; }, get birdsEyeHeight() { return overheadHeight; }, get birdsEyeNorthUp() { return overheadNorthUp; },
       get birdsEyeCeiling() { return overheadCeiling; },
       get shoulderEntryMix() { return aimMix; },
+      // The view being kept: "first-person", "shoulder", "birds-eye", "orbit", or "detached" with nobody driven.
+      get view() { return viewMode(); },
       bind, setActive, refreshCombat, readInput, update, goPreset, resetCamera, freeCursor, navigate, travelRefusal, travel, transformView, pickCarryTarget, enterClose, exitClose, possess, release, escape, action, modeAction, weaponAction, weaponMode, showAct, suspend, resume, dispose, get player() {
       return player();
     }, get assistedTarget() {

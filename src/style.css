@@ -2373,6 +2373,401 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
   }
 }
 
+/* The hunters' scoreboard, fixed to the top centre through the hunt (under the title on a narrow screen): each one's
+   face in a circle with their points under it, the leader's circle glowing green. */
+.ghost-scores {
+  position: fixed;
+  left: 50%;
+  top: calc(6px + var(--safe-top, 0px));
+  transform: translateX(-50%);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  max-width: calc(100vw - 32px);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  pointer-events: none;
+  z-index: 4;
+}
+
+@media (max-width: 720px) {
+  .ghost-scores {
+    top: calc(62px + var(--safe-top, 0px));
+  }
+}
+
+.ghost-scores[hidden] {
+  display: none;
+}
+
+.ghost-score {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+
+.ghost-score canvas {
+  width: 38px;
+  height: 38px;
+  padding: 2px;
+  background: var(--tablet);
+  border: 2px solid var(--wood-edge);
+  border-radius: 50%;
+  box-shadow: var(--tablet-shadow);
+}
+
+.ghost-score b {
+  color: var(--paper);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.9), 0 0 4px rgba(0, 0, 0, 0.8);
+}
+
+.ghost-score[data-lead] canvas {
+  border-color: #3dff66;
+  box-shadow: 0 0 10px 2px rgba(61, 255, 102, 0.75), 0 0 22px rgba(61, 255, 102, 0.45);
+}
+
+.ghost-score[data-lead] b {
+  color: #8dffa6;
+}
+
+/* While a Halving Hourglass stands: a notice under the scoreboard that every rifle does half damage. */
+.ghost-halving {
+  position: fixed;
+  left: 50%;
+  top: calc(66px + var(--safe-top, 0px));
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 3px 10px;
+  background: rgba(20, 10, 2, 0.75);
+  border: 2px solid #f7931a;
+  border-radius: 999px;
+  box-shadow: 0 0 10px rgba(247, 147, 26, 0.55);
+  color: #ffc163;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 4;
+  animation: ghost-halving 1.2s ease-in-out infinite;
+}
+
+.ghost-halving[hidden] {
+  display: none;
+}
+
+@keyframes ghost-halving {
+  50% { box-shadow: 0 0 18px rgba(247, 147, 26, 0.9); }
+}
+
+@media (max-width: 720px) {
+  .ghost-halving {
+    top: calc(122px + var(--safe-top, 0px));
+  }
+}
+
+/* A won hunt's banner: green, smaller and higher, over its results card (the podium and every hunter's tally). */
+.ghost-banner[data-win] {
+  top: 13%;
+}
+
+.ghost-banner[data-win] strong {
+  font-size: clamp(34px, 7vw, 84px);
+  color: #2fe05a;
+  text-shadow: 0 0 28px rgba(40, 255, 90, 0.55), 0 0 6px rgba(0, 90, 20, 0.9), 0 5px 0 rgba(0, 0, 0, 0.75);
+}
+
+.ghost-banner span:empty {
+  display: none;
+}
+
+.ghost-banner[data-win] span {
+  color: #6dff8e;
+  text-shadow: 0 0 16px rgba(40, 255, 90, 0.45), 0 3px 0 rgba(0, 0, 0, 0.75);
+}
+
+.ghost-results {
+  top: 60%;
+  z-index: 6;
+  box-shadow: 0 6px 0 rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.35), 0 0 0 100vmax rgba(8, 6, 4, 0.3);
+}
+
+.ghost-results[hidden] {
+  display: none;
+}
+
+.ghost-results .game-intro-goal {
+  margin: 0 0 6px;
+}
+
+.ghost-podium {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 4px;
+  margin: 0 0 12px;
+}
+
+/* A place nobody took keeps its block, with no one and nothing on it. */
+.ghost-podium-step[data-empty] canvas,
+.ghost-podium-step[data-empty] figcaption {
+  visibility: hidden;
+}
+
+/* The winner floats a little over the top step. */
+.ghost-podium-step[data-place="1"]:not([data-empty]) canvas {
+  animation: ghost-levitate 2.4s ease-in-out infinite;
+  filter: drop-shadow(0 10px 6px rgba(0, 0, 0, 0.45));
+}
+
+@keyframes ghost-results-in {
+  from { opacity: 0; transform: translate(-50%, 4%) scale(0.94); }
+  to { opacity: 1; transform: translate(-50%, 0) scale(1); }
+}
+
+@keyframes ghost-levitate {
+  0%, 100% { transform: translateY(-6px); }
+  50% { transform: translateY(-16px); }
+}
+
+.ghost-results .ghost-results-players {
+  grid-template-columns: 1fr 1fr;
+}
+
+.ghost-results-players li {
+  grid-template-columns: 22px 1fr;
+}
+
+/* On a narrow screen the card stands on the foot of the screen, under the banner, its tallies still two to a row. */
+@media (max-width: 720px) {
+  .ghost-results {
+    top: auto;
+    bottom: calc(12px + var(--safe-bottom, 0px));
+    transform: translateX(-50%);
+    padding: 12px 12px 10px;
+    animation-name: ghost-results-in;
+  }
+
+  .ghost-banner[data-win] {
+    top: 19%;
+  }
+
+  .ghost-podium-step {
+    width: min(110px, 23vw);
+  }
+}
+
+.ghost-results-place {
+  grid-row: span 2;
+  color: var(--accent-text);
+  font-size: 15px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.ghost-results-players b {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+/* A round's new-enemy card (ghost-hud.js `intro`), through the countdown of a round that brings one in: the enemy
+   hovering on it over what it does, the round's banner raised over it (`data-high`). It takes no clicks, so the
+   hunters can still look round and move. */
+.game-intro.ghost-intro {
+  top: 58%;
+  z-index: 6;
+  width: min(460px, calc(100vw - 32px));
+  pointer-events: none;
+  box-shadow: 0 6px 0 rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.35), 0 0 0 100vmax rgba(8, 6, 4, 0.3);
+}
+
+.ghost-intro[hidden] {
+  display: none;
+}
+
+.game-intro.ghost-intro .game-intro-title {
+  font-size: 34px;
+}
+
+.ghost-intro-art {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 10px;
+  height: 165px;
+  margin: 4px 0 10px;
+}
+
+.ghost-intro-art canvas {
+  width: 72px;
+  height: 90px;
+  filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.6));
+  animation: ghost-hover 2.6s ease-in-out infinite;
+}
+
+.ghost-intro-art canvas:nth-child(2) {
+  width: 96px;
+  height: 120px;
+  margin-bottom: 14px;
+  animation-delay: -0.9s;
+}
+
+.ghost-intro-art canvas:nth-child(3) {
+  animation-delay: -1.7s;
+}
+
+/* One enemy alone, large: a ghost hovering ("float"), or a model playing its own loop ("clip"). */
+.ghost-intro-art .ghost-intro-solo {
+  display: none;
+  width: 240px;
+  height: 165px;
+  animation: none;
+  filter: drop-shadow(0 6px 6px rgba(0, 0, 0, 0.45));
+}
+
+.ghost-intro:not([data-art="trio"]) .ghost-intro-art canvas {
+  display: none;
+}
+
+.ghost-intro:not([data-art="trio"]) .ghost-intro-art .ghost-intro-solo {
+  display: block;
+}
+
+.ghost-intro[data-art="float"] .ghost-intro-art .ghost-intro-solo {
+  animation: ghost-hover 2.6s ease-in-out infinite;
+  filter: drop-shadow(0 0 12px rgba(255, 255, 255, 0.6));
+}
+
+.ghost-intro[data-enemy="boss"] .ghost-intro-art .ghost-intro-solo {
+  filter: drop-shadow(0 0 16px rgba(255, 40, 30, 0.85));
+}
+
+@keyframes ghost-hover {
+  0%, 100% { transform: translateY(0) rotate(-3deg); }
+  50% { transform: translateY(-14px) rotate(3deg); }
+}
+
+.ghost-banner[data-high] {
+  top: 13%;
+}
+
+.ghost-banner[data-high] strong {
+  font-size: clamp(34px, 7vw, 84px);
+}
+
+.ghost-banner[data-high] span {
+  font-size: clamp(20px, 3.5vw, 40px);
+}
+
+/* On a narrow screen the card stands on the foot of the screen, as the results card does. */
+@media (max-width: 720px) {
+  .game-intro.ghost-intro {
+    top: auto;
+    bottom: calc(12px + var(--safe-bottom, 0px));
+    transform: translateX(-50%);
+    padding: 12px 12px 10px;
+    animation-name: ghost-results-in;
+  }
+
+  .ghost-intro-art {
+    height: 110px;
+  }
+
+  .ghost-intro-art .ghost-intro-solo {
+    width: 160px;
+    height: 110px;
+  }
+
+  .ghost-intro-art canvas {
+    width: 56px;
+    height: 70px;
+  }
+
+  .ghost-intro-art canvas:nth-child(2) {
+    width: 76px;
+    height: 95px;
+    margin-bottom: 10px;
+  }
+
+  .ghost-banner[data-high] {
+    top: 19%;
+  }
+}
+
+.ghost-podium-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: min(120px, 26vw);
+  margin: 0;
+}
+
+.ghost-podium-step canvas {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+}
+
+.ghost-podium-step figcaption {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  margin: 2px 0 4px;
+  color: var(--paper);
+  text-align: center;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.8);
+}
+
+.ghost-podium-step b {
+  font-size: 12px;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.ghost-podium-step small {
+  color: #8dffa6;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ghost-podium-block {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  width: 100%;
+  padding-top: 6px;
+  background: var(--planks);
+  border: 3px solid var(--wood-edge);
+  border-radius: 6px 6px 0 0;
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.35);
+  color: var(--accent-text);
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.ghost-podium-step[data-place="1"] .ghost-podium-block {
+  height: 92px;
+  border-color: #c9a227;
+}
+
+.ghost-podium-step[data-place="2"] .ghost-podium-block {
+  height: 62px;
+  border-color: #b8bcc4;
+}
+
+.ghost-podium-step[data-place="3"] .ghost-podium-block {
+  height: 44px;
+  border-color: #b07a45;
+}
+
 /* The hunt's spectator menu, bottom centre while the visitor is down (above the thumb sticks on a touch screen): the
    three views to watch from, and the hunter watched with a step on to the next. */
 .ghost-spectate {
@@ -2451,6 +2846,85 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
   .ghost-spectate-next {
     min-height: 32px;
   }
+}
+
+/* The hangar's sound panel under its Sound button: on or off, the level and the pad's vibration, on the planks. */
+.hangar-sound {
+  position: absolute;
+  top: calc(58px + var(--safe-top));
+  right: calc(16px + var(--safe-right, 0px));
+  width: min(240px, calc(100vw - 32px));
+  padding: 9px 11px 10px;
+  background: var(--planks);
+  border: 3px solid var(--wood-edge);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.35), 0 8px 20px rgba(0, 0, 0, 0.35);
+  color: var(--paper);
+  pointer-events: auto;
+  z-index: 6;
+}
+
+.hangar-sound[hidden] {
+  display: none;
+}
+
+.hangar-sound-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.hangar-sound-head h3 {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: var(--accent-text);
+  white-space: nowrap;
+}
+
+.hangar-sound-toggle {
+  flex: none;
+  padding: 4px 9px;
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  background: linear-gradient(#f0b05a, var(--accent));
+  color: var(--ink);
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.hangar-sound-toggle[aria-pressed="false"] {
+  background: var(--wood-edge);
+  color: var(--paper);
+}
+
+.hangar-sound-row {
+  display: grid;
+  grid-template-columns: 62px 1fr;
+  align-items: center;
+  gap: 8px;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.hangar-sound-row input[type="range"] {
+  width: 100%;
+  margin: 0;
+  height: 26px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.hangar-sound-note {
+  margin: 4px 0 0;
+  font-size: 9.5px;
+  line-height: 1.3;
+  color: var(--accent-text);
+  white-space: nowrap;
 }
 
 /* The hunt's mini player, bottom right: what is playing and the music switch, on the lobby card's planks. */
@@ -4263,6 +4737,28 @@ body.tess-touring #joy-look {
 }
 
 .board-note[hidden] {
+  display: none;
+}
+
+.board-links {
+  margin: 10px 0 0;
+}
+
+.board-links[hidden] {
+  display: none;
+}
+
+.board-link {
+  display: block;
+  margin: 4px 0 0;
+  color: var(--accent-text);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.board-link[hidden] {
   display: none;
 }
 
