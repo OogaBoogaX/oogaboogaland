@@ -21,6 +21,7 @@
     const hoverPoint = { x: -1, y: -1 };
     const C = new Float32Array(3);
     const aimView = BL.math.mat4.create(), aimInverse = BL.math.mat4.create(), aimUp = { x: 0, y: 1, z: 0 };
+    const aimCursors = new WeakMap();
     let hoverX = -1, hoverY = -1, hoverDirty = false, hovered = null;
     let hoverIgnored = null;
     let gesture = null;
@@ -115,8 +116,13 @@
       const dx = m[0] * ray.dx + m[4] * ray.dy + m[8] * ray.dz;
       const dy = m[1] * ray.dx + m[5] * ray.dy + m[9] * ray.dz;
       const dz = m[2] * ray.dx + m[6] * ray.dy + m[10] * ray.dz;
-      let nearest = Infinity;
-      for (const face of geometry.faces) {
+      let nearest = Infinity, cursor = null;
+      if (geometry.compactGeometry) {
+        cursor = aimCursors.get(geometry);
+        if (!cursor) { cursor = BL.compactGeometry.createCursor(geometry); aimCursors.set(geometry, cursor); }
+      }
+      for (let index = 0; index < geometry.faces.length; index++) {
+        const face = cursor ? BL.compactGeometry.readFace(geometry, index, cursor) : geometry.faces[index];
         const indices = face.i, a = indices[0] * 3;
         for (let i = 1; i + 1 < indices.length; i++) {
           const b = indices[i] * 3, c = indices[i + 1] * 3;

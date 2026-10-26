@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 import { externalizeAudio } from "./distribution-audio.mjs";
 import { PICTURE_MODULES, externalizeModules, externalizePictures } from "./distribution-modules.mjs";
+import { writeTerrainWorker } from "./distribution-terrain.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const out = resolve(root, process.argv[2] || "untracked/site");
@@ -36,7 +37,7 @@ if (process.argv.includes("--worker-page")) {
 if (process.argv.includes("--audio-assets")) shell = externalizeAudio(shell, root, out);
 const pictures = process.argv.includes("--image-assets");
 if (pictures) for (const src of PICTURE_MODULES) if (![...deferred.values()].some((sources) => sources.includes(src))) throw new Error(`${src}: --image-assets needs it in a data-defer group`);
-shell = externalizeModules(shell, out, deferred, block, pictures ? (src, text) => PICTURE_MODULES.includes(src) ? externalizePictures(src, text, out) : text : undefined);
+shell = externalizeModules(shell, out, deferred, block, writeTerrainWorker(root, out), pictures ? (src, text) => PICTURE_MODULES.includes(src) ? externalizePictures(src, text, out) : text : undefined);
 if (shell.split("</title>").length !== 2 || shell.split("</head>").length !== 2) throw new Error("oogaboogaland.html: expected one <title> and one </head>");
 
 const esc = (text) => text.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");

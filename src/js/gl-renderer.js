@@ -2357,8 +2357,10 @@ void main() {
     };
     const buildMeshPart = (geometry, ibo, dataOnly = false) => {
       const { verts, faces } = geometry;
+      const cursor = geometry.compactGeometry ? BL.compactGeometry.createCursor(geometry) : null;
+      const readFace = index => cursor ? BL.compactGeometry.readFace(geometry, index, cursor) : faces[index];
       let triCount = 0;
-      for (const f of faces) triCount += f.i.length - 2;
+      for (let index = 0; index < faces.length; index++) triCount += readFace(index).i.length - 2;
       if (!triCount) return null;
       const source = geometry.mirrorSource, stride = source ? MESH_STRIDE + 3 : MESH_STRIDE;
       // A voxel geometry names its grid; a face whose corners all sit on it gets block detail, flagged by a doubled
@@ -2379,7 +2381,8 @@ void main() {
       // `normals` (one per vertex, all zeros for "not set") wins over both: foliage cards light as one soft mass by
       // taking the direction out of their canopy instead of their own facing.
       const given = geometry.normals || null;
-      if (smooth) for (const f of faces) {
+      if (smooth) for (let index = 0; index < faces.length; index++) {
+        const f = readFace(index);
         let nx = 0, ny = 0, nz = 0;
         for (let k = 0, m = f.i.length; k < m; k++) {
           const a = f.i[k] * 3, b = f.i[(k + 1) % m] * 3;
@@ -2387,7 +2390,7 @@ void main() {
           ny += (verts[a + 2] - verts[b + 2]) * (verts[a] + verts[b]);
           nz += (verts[a] - verts[b]) * (verts[a + 1] + verts[b + 1]);
         }
-        for (const idx of f.i) { smooth[idx * 3] += nx; smooth[idx * 3 + 1] += ny; smooth[idx * 3 + 2] += nz; }
+        for (let k = 0; k < f.i.length; k++) { const idx = f.i[k]; smooth[idx * 3] += nx; smooth[idx * 3 + 1] += ny; smooth[idx * 3 + 2] += nz; }
       }
       let o = 0;
       const put = (idx, nx, ny, nz, c, e) => {
@@ -2448,11 +2451,11 @@ void main() {
       const special = (f) => f.water || f.lake || f.matrixCave || f.matrixLocalGlyphSurface || f.matrixWorldGlyphSurface || f.matrixPermanentFallback;
       let plainCount = 0;
       if (dataOnly || geometry.glass || geometry.glassOpacity || geometry.matrixGlyph || geometry.matrixRevealBacking) {
-        for (const f of faces) writeFace(f);
+        for (let index = 0; index < faces.length; index++) writeFace(readFace(index));
       } else {
-        for (const f of faces) if (!special(f)) writeFace(f);
+        for (let index = 0; index < faces.length; index++) { const f = readFace(index); if (!special(f)) writeFace(f); }
         plainCount = o / stride;
-        for (const f of faces) if (special(f)) writeFace(f);
+        for (let index = 0; index < faces.length; index++) { const f = readFace(index); if (special(f)) writeFace(f); }
       }
       if (dataOnly) return { data: out, voxel: gridded ? voxel : null };
       const part = makePart(out, stride, source ? [[0, 3], [1, 3], [2, 4], [9, 3]] : [[0, 3], [1, 3], [2, 4]], ibo);
@@ -4562,6 +4565,26 @@ void main() {
       prepareScene,
       // Owners of bounded, alternating meshes may prepare every variant before their first visible swap.
       prepareGeometry: (geometry) => { if (lost || !pollPrograms()) return false; recordFor(geometry); return true; },
+      // A scene entering in slices (a released hub's return) builds here, a slice at a time, the meshes its first frame
+      // would otherwise build all at once: every shown node's own mesh (with each of a foliage mesh's levels of detail,
+      // since its frame picks one by distance) and, as the frame does, a rig's parts when rigs are drawn and its rig when not.
+      prepareSteps: function* (root, rigs, slice) {
+        const stack = [root];
+        while (stack.length) {
+          const node = stack.pop();
+          if (!node.visible) continue;
+          for (let i = node.children.length - 1; i >= 0; i--) stack.push(node.children[i]);
+          const g = node.geometry;
+          if (!g || (rigs ? node.meshRigSource : g.meshRig)) continue;
+          const lods = g.foliageLods && g.foliageLods.owner === g ? g.foliageLods : null;
+          if (records.has(g) && (!lods || records.has(lods.medium) && records.has(lods.far))) continue;
+          if (lost || !pollPrograms()) return;
+          recordFor(g);
+          if (lods) { recordFor(lods.medium); recordFor(lods.far); }
+          // Half a construction slice: one large mesh can take as long again.
+          if (performance.now() >= slice.until) { yield; slice.until = performance.now() + BL.buildTasks.SLICE_MS / 2; }
+        }
+      },
       createRig: createRendererRig,
       releaseUnused,
       // Read-only, on demand: inspecting resident identities never materializes a GPU record.

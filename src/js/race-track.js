@@ -108,7 +108,12 @@
       const nv = normalsOf(geo);
       for (let i = 0; i < nv.length; i += 3) out.normals.push(nv[i] * c + nv[i + 2] * sn, nv[i + 1], nv[i + 2] * c - nv[i] * sn);
     } else if (out.normals) while (out.normals.length < out.verts.length) out.normals.push(0);
-    for (const f of geo.faces) out.faces.push({ i: f.i.map((k) => k + base), color: f.color, emissive: f.emissive });
+    // A packed piece gives fresh face records, so baking it never fills its legacy face cache.
+    const packed = BL.compactGeometry?.storageOf(geo);
+    for (let n = 0, count = packed ? packed.count : geo.faces.length; n < count; n++) {
+      const f = packed ? BL.compactGeometry.copyFace(geo, n) : geo.faces[n];
+      out.faces.push({ i: f.i.map((k) => k + base), color: f.color, emissive: f.emissive });
+    }
   };
   // cos/sin may come precomputed (a fixed yaw cached by the caller, or 1/0 for an upright one), which is
   // bit-identical: 1 is cos(0) and 0 is sin(0) exactly, and the products were the same multiply.

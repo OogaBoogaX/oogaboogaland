@@ -1,7 +1,7 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const { canvasRenderer } = BL;
+  const { iconRenderer: iconRendererMod } = BL;
   const { formatLarge } = BL.game;
   const { createNode, addChild, createCamera, boundsOf } = BL.scene;
   const STATE_LABELS = { working: "clank", chilling: "chill", sleeping: "sleep", away: "away", online: "online" };
@@ -62,6 +62,19 @@
         if (!box.classList.contains("show")) box.hidden = true;
       }, MESSAGE_FADE_MS);
     }, 2800);
+  };
+  // Page-owned recovery stays through scene visits, beside ordinary toasts such as payment notices.
+  let reloadOffered = false;
+  const offerReload = (message = "Ooga Booga Land was updated") => {
+    if (reloadOffered) return;
+    reloadOffered = true;
+    const box = $("reload-notice"), reload = document.createElement("button");
+    reload.type = "button"; reload.className = "link"; reload.textContent = "Reload";
+    reload.addEventListener("click", () => location.reload(), { once: true });
+    box.replaceChildren(`${message} · `, reload);
+    box.hidden = false;
+    $("message-stack").append(box);
+    box.classList.add("show");
   };
   const SHEET_STATE_KEY = "oogaboogaland.sheet.v1";
   const BOARD_STATE_KEY = "oogaboogaland.oogatron.windows.v1";
@@ -172,7 +185,7 @@
   const ICON_PX = 48;
   const renderIcon = (item) => {
     const canvas = document.createElement("canvas");
-    const iconRenderer = canvasRenderer.createRenderer(canvas, { width: ICON_PX, height: ICON_PX, transparent: true });
+    const iconRenderer = iconRendererMod.createRenderer(canvas, { width: ICON_PX, height: ICON_PX, transparent: true });
     const iconRoot = createNode();
     const node = item.buildNode();
     const bounds = boundsOf(node.geometry);
@@ -191,7 +204,7 @@
   // Draw the carried item's actual geometry, including likenesses and skins.
   // This owns only temporary icon nodes; the character's item is never reparented.
   const renderPrimaryIcon = (canvas, geometry, tall = false) => {
-    const renderer = canvasRenderer.createRenderer(canvas, { width: ICON_PX, height: ICON_PX, transparent: true });
+    const renderer = iconRendererMod.createRenderer(canvas, { width: ICON_PX, height: ICON_PX, transparent: true });
     const root = createNode(), pivot = createNode(), item = createNode({ geometry });
     const bounds = boundsOf(geometry), fit = (tall ? 0.52 : 0.67) / Math.max(bounds.radius, 0.05);
     item.scale.x = item.scale.y = item.scale.z = fit;
@@ -217,7 +230,7 @@
     return copy;
   };
   const renderFaceIcon = (canvas, cave, gorilla = null) => {
-    const renderer = canvasRenderer.createRenderer(canvas, { width: ICON_PX, height: ICON_PX, transparent: true });
+    const renderer = iconRendererMod.createRenderer(canvas, { width: ICON_PX, height: ICON_PX, transparent: true });
     const source = gorilla ? gorilla.parts.head : cave.parts.head, geometry = gorilla ? source.geometry : cave.portraitHead;
     const root = createNode(), head = copyPortraitNode(source, source, geometry);
     const bounds = boundsOf(geometry), fit = (!gorilla && cave.traits.gasMask ? 0.68 : 0.78) / Math.max(bounds.radius, 0.05);
@@ -2510,5 +2523,5 @@
       else b.textContent = `Back to ${place}`;
     }
   };
-  BL.hud = { create, renderIcon, signLettering, showAccount, showMic, showVoices, setDonationStats, donationValueText, toast, holdRow, leaveTo, STATE_LABELS, statusFor };
+  BL.hud = { create, renderIcon, signLettering, showAccount, showMic, showVoices, setDonationStats, donationValueText, toast, offerReload, holdRow, leaveTo, STATE_LABELS, statusFor };
 })();
