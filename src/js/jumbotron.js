@@ -166,8 +166,9 @@
     });
     const recent = (Array.isArray(json.recent) ? json.recent : []).map((e) => ({
       login: String(e.login), repo: String(e.repo), type: String(e.type), occurredAt: String(e.occurred_at),
-      draft: e.draft === true
-    })).sort((a, b) => Date.parse(b.occurredAt) - Date.parse(a.occurredAt));
+      draft: e.draft === true,
+      eventKey: typeof e.event_key === "string" ? e.event_key : JSON.stringify([e.repo, e.login, e.type, e.occurred_at, e.draft === true])
+    })).sort(compareRecent);
     // Org-wide weekly series: the repos' weeks summed.
     const weeklyMap = new Map();
     for (const r of repos) {
@@ -293,6 +294,9 @@
   const TYPE_COLOR = { commit: "commits", pr: "prs", review: "reviews", merge: "accent", issue: "issues", comment: "comments" };
   const RECENT_TYPES = ["commit", "pr", "review", "merge", "issue", "comment"];
   const ROLLUP_RANK = { merge: 0, pr: 1, commit: 2, review: 3, issue: 4, comment: 5 };
+  const compareRecent = (a, b) => Date.parse(b.occurredAt) - Date.parse(a.occurredAt)
+    || (ROLLUP_RANK[a.type] ?? 6) - (ROLLUP_RANK[b.type] ?? 6)
+    || (a.eventKey < b.eventKey ? -1 : a.eventKey > b.eventKey ? 1 : 0);
   const rollupRecent = (rows) => {
     const groups = new Map(), rolled = [];
     for (const row of rows) {
@@ -314,9 +318,7 @@
         group.draft = row.draft;
       }
     }
-    rolled.sort((a, b) => Date.parse(b.occurredAt) - Date.parse(a.occurredAt)
-      || (ROLLUP_RANK[a.type] ?? 6) - (ROLLUP_RANK[b.type] ?? 6)
-      || a.repo.localeCompare(b.repo) || a.login.localeCompare(b.login));
+    rolled.sort(compareRecent);
     return rolled;
   };
   // Short relative age for the recent feed, against wall-clock now.
