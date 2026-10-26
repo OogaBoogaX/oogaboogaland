@@ -537,8 +537,8 @@
       g.fillStyle = BLACK;
       for (let x = -H; x < W + H; x += H * 0.5) { g.beginPath(); g.moveTo(x, H); g.lineTo(x + H * 0.25, H); g.lineTo(x + H * 0.25 + H, 0); g.lineTo(x + H, 0); g.closePath(); g.fill(); }
     },
-    // The speed dial: its face dark with a steel rim, ticks every unit and a long one every five with its figure, the
-    // last quarter red (SPEED's arc), and an orange needle on its cap.
+    // The speed dial: its face dark with a steel rim, ticks every unit and a long one every five with its figure, and
+    // the last quarter red (SPEED's arc); its needle is a part of its own (`speedNeedle`).
     gauge: (g, W, H) => {
       const r = W / 2, at = (q) => SPEED.from + q / SPEED.top * SPEED.sweep;
       g.fillStyle = "#0c0e12"; g.beginPath(); g.arc(r, r, r * 0.96, 0, TAU); g.fill();
@@ -551,8 +551,6 @@
         g.beginPath(); g.moveTo(r + Math.cos(a) * r * (long ? 0.6 : 0.68), r + Math.sin(a) * r * (long ? 0.6 : 0.68)); g.lineTo(r + Math.cos(a) * r * 0.8, r + Math.sin(a) * r * 0.8); g.stroke();
         if (long) write(g, String(q), r + Math.cos(a) * r * 0.42, r + Math.sin(a) * r * 0.42, W * 0.12, "#ffffff", W * 0.2);
       }
-      g.strokeStyle = AMBER; g.lineWidth = W * 0.045; g.beginPath(); g.moveTo(r, r); g.lineTo(r + Math.cos(at(3)) * r * 0.7, r + Math.sin(at(3)) * r * 0.7); g.stroke();
-      g.fillStyle = "#3a3f47"; g.beginPath(); g.arc(r, r, r * 0.12, 0, TAU); g.fill();
     },
     // The charge dial: E to F over a red, amber and green arc (CHARGE's sweep), and the bolt under it; its needle is a
     // part of its own (`needle`).

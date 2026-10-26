@@ -124,7 +124,8 @@
   const BUTTON_PRESS = { open: -1.1, swing: 0.12, hold: 0.9, dip: 0.012, again: 0.6 };
   // The forklift's power: how its lit parts glow off and on (`lit`); its beacon's dome off and running, and how bright
   // and how narrow its beam's flash is as it passes the view (`flash`, `sharp`); how fast the beacon turns (rad/s), the
-  // key (`turn`, rad/s) and the charge needle (`needle`, rad/s, so it sweeps up as the drive spins up); how long the key
+  // key (`turn`, rad/s) and the charge needle (`needle`, rad/s, so it sweeps up as the drive spins up), and how fast the
+  // speed needle follows the speed (`speedo`, a second); how long the key
   // holds at START while the drive spins up (`crank`, s) and when the dash lights at the chime (`ready`, s); and the
   // beacon's light: how far out its beam's spot falls (`reach`, m), how far it carries and its colour.
   // How high the forks lift over their rest (the forklift's units) and how fast (units a second), and how far the fork
@@ -138,7 +139,7 @@
   const DRIVE = { forward: 3.2, reverse: 1.6, accel: 2.2, brake: 5, coast: 1.8, tip: 0.25 };
   // What the driver is told once it is ready.
   const DRIVE_HINT = COARSE ? "Stick drives · tap the fork stick for the forks · tap the wheel to honk" : "W S drive · A D steer · R F forks · H horn · Space gets out";
-  const POWER = { lit: [0.12, 1], dome: [0.2, 0.7], flash: 2.6, sharp: 8, rate: 9, turn: 9, needle: 2.4, crank: 0.75, ready: 0.9, reach: 1.1, radius: 7, color: [1.6, 0.95, 0.22] };
+  const POWER = { lit: [0.12, 1], dome: [0.2, 0.7], flash: 2.6, sharp: 8, rate: 9, turn: 9, needle: 2.4, speedo: 8, crank: 0.75, ready: 0.9, reach: 1.1, radius: 7, color: [1.6, 0.95, 0.22] };
   // How near the hold-short bar the launch shield answers whoever walks up to it, and how far back they must step before
   // it answers again.
   const SHIELD_NEAR = 0.6, SHIELD_REARM = 3;
@@ -240,6 +241,8 @@
     // The charge needle on its dial, at E while it is off (the dial's angle as painted, turned onto the face), drawn
     // after the dial's picture on Canvas 2D.
     const needle = at(FL.needle(), FL.CHARGE.at, { rotation: { x: FL.CHARGE.tilt, y: 0, z: -FL.CHARGE.from }, sightHidden: true, depthBias: -0.2 });
+    // And the speed needle on its dial, at 0 while it stands.
+    const speedo = at(FL.speedNeedle(), FL.SPEED.at, { rotation: { x: FL.SPEED.tilt, y: 0, z: -FL.SPEED.from }, sightHidden: true, depthBias: -0.2 });
     lit.glow = POWER.lit[0];
     beacon.glow = POWER.dome[0];
     screen.visible = false;
@@ -249,10 +252,10 @@
     const C = FL.CHAIN, ring = FL.chainLink(), count = Math.floor((C.sheave - C.anchor + Math.PI * C.r + C.sheave - C.carriage) / C.pitch), links = [];
     for (const side of [-1, 1]) for (let i = 0; i < count; i++) links.push(createNode({ geometry: i % 2 ? ring.b : ring.a, position: { x: side * C.x, y: 0, z: 0 }, sightHidden: true }));
     addChild(root, body, createNode({ geometry: FL.mast() }), inner, createNode({ geometry: FL.fittings() }), lit,
-      ...wheels, carriage, ...links, steering, stick, needle, beacon, button, cover, key, screen, ...doors, ...decals.body.map(picture));
+      ...wheels, carriage, ...links, steering, stick, needle, speedo, beacon, button, cover, key, screen, ...doors, ...decals.body.map(picture));
     const sn = Math.sin(turn), cs = Math.cos(turn), [, sy, sz] = P.seat.map((v) => v * FL.SCALE);
     const seat = { x: x + sz * sn, y: sy + FL.CUSHION * FL.SCALE, z: z + sz * cs, ry: turn + Math.PI, floor: 0, sitter: null, walkAt: { x: 0, z: 0 } };
-    const f = { root, body, wheels, inner, carriage, links, lift: 0, liftTo: -1, lifting: false, stick, needle, steering, helm, steer: 0, speed: 0, side: 1, getInZ: 0, beacon, button, cover, doors, key, screen, lit, seat, x, z, sn, cs, buttonY: P.button[1], pressT: -1, on: false, startT: -1, keyTo: 0, sweep: 0 };
+    const f = { root, body, wheels, inner, carriage, links, lift: 0, liftTo: -1, lifting: false, stick, needle, speedo, steering, helm, steer: 0, speed: 0, side: 1, getInZ: 0, beacon, button, cover, doors, key, screen, lit, seat, x, z, sn, cs, buttonY: P.button[1], pressT: -1, on: false, startT: -1, keyTo: 0, sweep: 0 };
     // Space in the seat starts it; running, Space gets out (and switches it off) beside the cab wherever it stands.
     seat.act = () => {
       if (!f.on) { powerOn(f); return true; }
@@ -379,6 +382,9 @@
     // The charge needle: up to its charge as it starts, back to E as it stops.
     const C = BL.forkliftModels.CHARGE, n = f.needle.rotation.z, read = -(C.from + (f.on ? C.level * C.sweep : 0)), swing = POWER.needle * dt;
     f.needle.rotation.z = n + clamp(read - n, -swing, swing);
+    // The speed needle follows how fast it goes, forward or back, in km/h on its dial.
+    const S = BL.forkliftModels.SPEED, kmh = Math.abs(f.speed) * 3.6, aim = -(S.from + Math.min(1, kmh / S.top) * S.sweep);
+    f.speedo.rotation.z += (aim - f.speedo.rotation.z) * Math.min(1, dt * POWER.speedo);
     if (!f.on || f.startT >= 0) return;
     f.sweep += POWER.rate * dt;
     f.beacon.rotation.y = f.sweep;
