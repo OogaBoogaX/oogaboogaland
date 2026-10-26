@@ -7349,39 +7349,168 @@ const walkKeys = async (b, who, x, z, yaws, seconds) => {
   return rows;
 };
 const allWalk = (rows) => Object.values(rows).every((r) => r.ok);
-const hubSheetPersistence = { name: "side panel persistence", why: "rule: a first visit starts folded, while later visits restore both the folded state and selected tab", run: async (b) => {
+const dragSheet = async (b, selector, x, y) => {
+  const from = await b.evaluate(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+  await b.send("Input.dispatchMouseEvent", { type: "mouseMoved", ...from });
+  await b.send("Input.dispatchMouseEvent", { type: "mousePressed", ...from, button: "left", buttons: 1, clickCount: 1 });
+  await b.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y, button: "left", buttons: 1 });
+  await b.send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", buttons: 0, clickCount: 1 });
+};
+const openWithSheetState = async (b, url, state) => {
+  // Seed after the old document's pagehide flush, before the new sheet reads.
+  const script = await b.send("Page.addScriptToEvaluateOnNewDocument", { source: state === null
+    ? 'localStorage.removeItem("oogaboogaland.sheet.v1");'
+    : `localStorage.setItem("oogaboogaland.sheet.v1", ${JSON.stringify(JSON.stringify(state))});` });
+  try { await b.open(url); await untilReady(b); }
+  finally { await b.send("Page.removeScriptToEvaluateOnNewDocument", { identifier: script.result.identifier }); }
+};
+const hubSheetPersistence = { name: "side panel persistence", why: "rule: panels dock to left, right or bottom, retain their rails when closed, restore each open or closed layout, and merge without duplicate ownership or losing account controls", run: async (b) => {
   const url = hubPage(src, "pos=0");
-  await b.evaluate(`localStorage.removeItem("oogaboogaland.sheet.v1")`);
-  await b.open(url);
-  await untilReady(b);
-  const read = `(() => { const sheet = document.getElementById("sheet"), tab = document.querySelector("[data-tab][aria-selected='true']").dataset.tab, saved = localStorage.getItem("oogaboogaland.sheet.v1"); return { open: sheet.dataset.open, tab, panel: !document.querySelector('[data-panel="' + tab + '"]').hidden, saved: saved && JSON.parse(saved) }; })()`;
+  const settled = () => untilPage(b, `(() => { const node = document.getElementById("sheet"), r = node.getBoundingClientRect(); return node.dataset.open === "true" && r.left >= -0.01 && r.top >= -0.01 && r.right <= innerWidth + 0.01 && r.bottom <= innerHeight + 0.01; })()`);
+  await openWithSheetState(b, url, null);
+  const read = `(() => {
+    const sheet = document.getElementById("sheet"), tab = sheet.querySelector("[data-tab][aria-selected='true']")?.dataset.tab || null;
+    const saved = localStorage.getItem("oogaboogaland.sheet.v1"), shown = [...document.querySelectorAll(".sheet")].filter(node => !node.hidden && node.dataset.open === "true");
+    const rect = node => { const r = node.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; };
+    return { open: sheet.dataset.open, hidden: sheet.hidden, dock: sheet.dataset.dock, tab, width: innerWidth, height: innerHeight,
+      panel: !!tab && !document.querySelector('[data-panel="' + tab + '"]').hidden,
+      panels: [...document.querySelectorAll(".sheet [data-panel]")].filter(panel => !panel.hidden).map(panel => panel.dataset.panel),
+      tabs: [...sheet.querySelectorAll("[data-tab]")].filter(tab => !tab.hidden).map(tab => tab.dataset.tab),
+      all: [...document.querySelectorAll(".sheet")].map(node => ({ id: node.id, open: node.dataset.open === "true", hidden: node.hidden,
+        dock: node.dataset.dock, rect: rect(node), body: getComputedStyle(node.querySelector(".sheet-body")).visibility,
+        tabs: [...node.querySelectorAll("[data-tab]")].filter(tab => !tab.hidden).map(tab => ({ name: tab.dataset.tab, rect: rect(tab) })) })),
+      shown: shown.map(node => { return { tab: node.querySelector("[aria-selected='true']").dataset.tab, dock: node.dataset.dock,
+        rect: rect(node),
+        tabs: [...node.querySelectorAll("[data-tab]")].filter(tab => !tab.hidden).map(tab => tab.dataset.tab) }; }),
+      saved: saved && JSON.parse(saved) };
+  })()`;
   const first = await b.evaluate(read);
   await b.evaluate(`document.getElementById("sheet-bananas").click()`);
+  if (!await settled()) throw Error("The opened panel did not finish docking");
   const opened = await b.evaluate(read);
   await b.open(url);
   await untilReady(b);
+  if (!await settled()) throw Error("The restored panel did not finish docking");
   const restored = await b.evaluate(read);
   await b.evaluate(`document.getElementById("sheet-bananas").click()`);
   await b.open(url);
   await untilReady(b);
   const closed = await b.evaluate(read);
-  await b.evaluate(`localStorage.removeItem("oogaboogaland.sheet.v1")`);
-  record("side panel: first load is closed and reloads restore its open state and selected tab", first.open === "false" && first.tab === "roster" && first.panel && first.saved === null
+  record("side panel: first load has no selection, reloads restore its open tab, and closing retains its rail without showing content", first.open === "false" && first.tab === null && !first.panel && first.panels.length === 0 && first.shown.length === 0
+    && (first.saved === null || first.saved.open === false && first.saved.tab === "roster" && first.saved.rect === null && first.saved.windows.length === 0)
     && opened.open === "true" && opened.tab === "bananas" && opened.saved?.open && opened.saved.tab === "bananas"
     && restored.open === "true" && restored.tab === "bananas" && restored.panel
-    && closed.open === "false" && closed.tab === "bananas" && !closed.saved.open && closed.saved.tab === "bananas", JSON.stringify({ first, opened, restored, closed }));
+    && closed.open === "false" && closed.tab === null && closed.panels.length === 0 && closed.shown.length === 0 && !closed.hidden
+    && !closed.saved.open && closed.saved.tab === "bananas" && closed.saved.rect
+    && Math.abs(opened.all[0].rect.x + opened.all[0].rect.width - opened.width) < 0.01
+    && JSON.stringify(closed.all[0].tabs) === JSON.stringify(opened.all[0].tabs), JSON.stringify({ first, opened, restored, closed }));
+  const layout = { open: true, tab: "bananas", rect: { x: 900, y: 90, width: 420, height: 480 },
+    windows: [{ tab: "roster", rect: { x: 140, y: 130, width: 360, height: 430 } }] };
+  await openWithSheetState(b, url, layout);
+  const multiple = await b.evaluate(read);
+  await b.evaluate(`document.querySelector(".sheet:not(#sheet) [aria-selected='true']").click()`);
+  const one = await b.evaluate(read);
+  await b.evaluate(`document.getElementById("sheet-bananas").click()`);
+  const last = await b.evaluate(read);
+  const near = (a, b) => a && b && Object.keys(a).every(key => Math.abs(a[key] - b[key]) < 0.01);
+  const matches = (tab, rect) => near(multiple.shown.find(panel => panel.tab === tab)?.rect, rect);
+  record("side panel: old free rectangles migrate to the nearest allowed edge, and closing either or both panels preserves their rail geometry and tab ownership",
+    multiple.shown.length === 2 && matches("bananas", { ...layout.rect, x: multiple.width - layout.rect.width }) && matches("roster", { ...layout.windows[0].rect, x: 0 })
+    && multiple.shown.every(panel => panel.tabs.includes(panel.tab) && !panel.tabs.includes(panel.tab === "bananas" ? "roster" : "bananas"))
+    && one.shown.length === 1 && one.tab === "bananas" && !one.tabs.includes("roster") && one.saved.windows.length === 1 && !one.saved.windows[0].open
+    && last.shown.length === 0 && last.panels.length === 0 && last.tab === null && !last.hidden && last.dock === first.dock
+    && last.all.every((panel, i) => !panel.hidden && panel.body === "hidden" && near(panel.rect, multiple.all[i].rect) && JSON.stringify(panel.tabs) === JSON.stringify(multiple.all[i].tabs))
+    && !last.saved.open && last.saved.tab === "bananas" && last.saved.dock === "right" && last.saved.windows[0].dock === "left", JSON.stringify({ multiple, one, last }));
+  await b.open(url); await untilReady(b);
+  const closedReload = await b.evaluate(read);
+  await b.evaluate(`__ooga.hud.selectTab("roster"); __ooga.hud.selectTab("bananas")`);
+  const reopened = await b.evaluate(read);
+  record("side panel: reloading closed rails and reopening their tabs restores both windows at their previous positions",
+    closedReload.shown.length === 0 && closedReload.all.every((panel, i) => !panel.hidden && near(panel.rect, last.all[i].rect))
+    && reopened.shown.length === 2 && reopened.all.every((panel, i) => near(panel.rect, last.all[i].rect)), JSON.stringify({ closedReload, reopened }));
+  const held = await b.evaluate(`(() => {
+    const H = __ooga.hud, before = localStorage.getItem("oogaboogaland.sheet.v1");
+    H.setPanelsHidden(true); window.dispatchEvent(new Event("resize"));
+    const hidden = [...document.querySelectorAll(".sheet")].every(node => node.hidden);
+    H.setPanelsHidden(false); H.foldPanels(); window.dispatchEvent(new Event("resize"));
+    const folded = [...document.querySelectorAll(".sheet")].every(node => node.dataset.open === "false") && !document.getElementById("sheet").hidden;
+    H.selectTab("roster");
+    const same = before === localStorage.getItem("oogaboogaland.sheet.v1");
+    document.getElementById("sheet-bananas").click();
+    BL.hud.showAccount({ backend: true, me: null, room: "off", online: 0 });
+    const footer = document.querySelector(".sheet-foot"), owner = footer.closest(".sheet"), login = document.getElementById("account-login");
+    const account = owner.id !== "sheet" && !owner.hidden && owner.dataset.open === "true" && !!login.getClientRects().length && getComputedStyle(login).visibility === "visible" && document.querySelectorAll("#account-login").length === 1;
+    H.selectTab("bananas");
+    const returned = footer.closest(".sheet").id === "sheet";
+    BL.hud.showAccount(BL.net.state);
+    return { hidden, folded, same, account, returned, count: document.querySelectorAll(".sheet").length };
+  })()`);
+  record("side panel: temporary suppression and folding survive resize without changing saved choices, and detached-only panels retain the shared account controls", Object.values(held).every(Boolean) && held.count === 2, JSON.stringify(held));
+  // A closed source rail can be merged into another panel, focusing its tab and removing only its own rail.
+  await b.evaluate(`document.querySelector(".sheet:not(#sheet) [data-tab='roster']").click()`);
+  await dragSheet(b, ".sheet:not(#sheet) [data-tab='roster']", multiple.width - 180, 260);
+  const merged = await b.evaluate(read);
+  record("side panel: dragging a closed detached tab onto the other panel removes its old rail and focuses that tab",
+    merged.all.length === 1 && merged.shown.length === 1 && merged.tab === "roster" && merged.saved.windows.length === 0
+    && await b.evaluate(`document.activeElement === document.getElementById("sheet-toggle")`), JSON.stringify(merged));
+  await dragSheet(b, "#sheet [data-tab='bananas']", 60, 180);
+  const torn = await b.evaluate(read);
+  record("side panel: dragging an unselected tab creates one panel on the nearest edge with unique tab ownership",
+    torn.all.length === 2 && torn.shown.length === 2 && torn.shown.find(panel => panel.tab === "bananas")?.dock === "left"
+    && torn.shown.every(panel => !panel.tabs.includes(panel.tab === "bananas" ? "roster" : "bananas")), JSON.stringify(torn));
+  const fits = state => state.all.every(panel => panel.rect.x >= -0.01 && panel.rect.y >= -0.01 && panel.rect.x + panel.rect.width <= state.width + 0.01 && panel.rect.y + panel.rect.height <= state.height + 0.01
+    && (panel.dock === "left" ? Math.abs(panel.rect.x) < 0.01 : panel.dock === "right" ? Math.abs(panel.rect.x + panel.rect.width - state.width) < 0.01 : panel.dock === "bottom" && Math.abs(panel.rect.y + panel.rect.height - state.height) < 0.01)
+    && panel.tabs.every(tab => tab.rect.x >= -0.01 && tab.rect.y >= -0.01 && tab.rect.x + tab.rect.width <= state.width + 0.01 && tab.rect.y + tab.rect.height <= state.height + 0.01));
+  await dragSheet(b, ".sheet:not(#sheet) .sheet-corner-se", 700, 500);
+  const resized = await b.evaluate(read);
+  await dragSheet(b, ".sheet:not(#sheet) .sheet-drag", 650, resized.height - 260);
+  const bottomDocked = await b.evaluate(read);
+  const bottomPanel = bottomDocked.all.find(panel => panel.id !== "sheet");
+  await b.evaluate(`document.querySelector(".sheet:not(#sheet) [data-tab='bananas']").click()`);
+  const bottomClosed = await b.evaluate(read);
+  const bottomRail = bottomClosed.all.find(panel => panel.id !== "sheet");
+  record("side panel: corner resizing preserves its edge, dragging chooses bottom, and closing leaves the horizontal rail at its prior level",
+    resized.all.find(panel => panel.id !== "sheet").dock === "left" && fits(resized) && fits(bottomDocked)
+    && bottomPanel.dock === "bottom" && near(bottomPanel.rect, bottomRail.rect) && JSON.stringify(bottomPanel.tabs) === JSON.stringify(bottomRail.tabs)
+    && await b.evaluate(`getComputedStyle(document.querySelector(".sheet:not(#sheet)")).pointerEvents === "none"`), JSON.stringify({ resized, bottomDocked, bottomClosed }));
+  await b.open(url); await untilReady(b);
+  const bottomReload = await b.evaluate(read);
+  await b.evaluate(`__ooga.hud.selectTab("bananas")`);
+  const bottomReopened = await b.evaluate(read);
+  record("side panel: a closed bottom panel reloads and reopens at the same rail level with its rectangle and edge intact",
+    near(bottomReload.all.find(panel => panel.id !== "sheet").rect, bottomPanel.rect) && !bottomReload.all.find(panel => panel.id !== "sheet").open
+    && near(bottomReopened.all.find(panel => panel.id !== "sheet").rect, bottomPanel.rect) && bottomReopened.shown.length === 2 && fits(bottomReopened), JSON.stringify({ bottomReload, bottomReopened }));
+  await b.evaluate(`__ooga.hud.foldPanels()`);
+  await dragSheet(b, "#sheet [data-tab='bananas']", 80, 180);
+  const unfoldedDrag = await b.evaluate(read);
+  record("side panel: dragging an existing tab from a temporary fold reuses its owner without duplicating the tab or panel",
+    unfoldedDrag.all.length === 2 && unfoldedDrag.shown.length === 2 && unfoldedDrag.shown.filter(panel => panel.tab === "bananas").length === 1 && fits(unfoldedDrag), JSON.stringify(unfoldedDrag));
+  try {
+    await b.send("Emulation.setDeviceMetricsOverride", { width: 844, height: 390, deviceScaleFactor: 1, mobile: false });
+    await openWithSheetState(b, url, null);
+    await b.evaluate(`document.getElementById("sheet-bananas").click()`);
+    if (!await settled()) throw Error("The landscape panel did not finish docking");
+    const shortOpen = await b.evaluate(read);
+    await b.evaluate(`document.getElementById("sheet-bananas").click()`);
+    const shortClosed = await b.evaluate(read);
+    await b.evaluate(`document.getElementById("sheet-bananas").click()`);
+    const shortReopened = await b.evaluate(read);
+    record("side panel: first close and reopen in landscape preserve a short default bottom drawer's rail and size",
+      shortOpen.dock === "bottom" && shortOpen.all[0].rect.height < 263 && near(shortOpen.all[0].rect, shortClosed.all[0].rect)
+      && near(shortOpen.all[0].rect, shortReopened.all[0].rect) && JSON.stringify(shortOpen.all[0].tabs) === JSON.stringify(shortClosed.all[0].tabs), JSON.stringify({ shortOpen, shortClosed, shortReopened }));
+  } finally { await b.send("Emulation.clearDeviceMetricsOverride"); }
 } };
 const hubChat = { name: "ooga chat", why: "regression: Chat releases pre-focus movement and fits keyboard-reduced viewports; Ooga Chat shows only with a backend, asks a signed-out visitor to sign in, keeps the last 100 lines as plain text, never pulls a reader back down, and Enter sends while Escape only leaves the input", run: async (b) => {
-  // No backend in the suite: a saved chat tab falls back to the roster and the tab stays hidden.
-  await b.evaluate(`localStorage.setItem("oogaboogaland.sheet.v1", JSON.stringify({ open: true, tab: "chat" }))`);
-  await b.open(hubPage(src, "pos=0"));
-  await untilReady(b);
-  const none = await b.evaluate(`({ hidden: document.getElementById("chat-tab").hidden, tab: document.querySelector("[data-tab][aria-selected='true']").dataset.tab, offline: BL.net.sendChat("hi") })`);
+  // No backend in the suite: retain the saved selection while its tab is unavailable.
+  await openWithSheetState(b, hubPage(src, "pos=0"), { open: true, tab: "chat" });
+  const none = await b.evaluate(`({ hidden: document.getElementById("chat-tab").hidden, tab: document.querySelector("[data-tab][aria-selected='true']")?.dataset.tab || null,
+    panel: document.getElementById("chat-panel").hidden, saved: JSON.parse(localStorage.getItem("oogaboogaland.sheet.v1")), offline: BL.net.sendChat("hi") })`);
   const r = await b.evaluate(`(() => {
     const C = BL.chat, $ = (id) => document.getElementById(id), tab = $("chat-tab"), input = $("chat-input"), send = $("chat-send"), log = $("chat-log");
     const out = {};
+    BL.net.state.backend = true;
     C.account({ backend: true, me: null, room: "off" });
-    tab.click();
+    window.dispatchEvent(new Event("resize"));
     out.signedOut = !tab.hidden && !$("chat-panel").hidden && input.disabled && send.disabled && !$("chat-status").hidden && $("chat-status-text").textContent.includes("Sign in to chat") && document.activeElement !== input;
     C.account({ backend: true, me: { id: 9, login: "Tester", display: "Tester" }, room: "live" });
     tab.click();
@@ -7521,6 +7650,8 @@ const hubChat = { name: "ooga chat", why: "regression: Chat releases pre-focus m
     inputTransitions.push({ id, held, released, isolated, composing, ...escapedInput });
   }
   record("ooga chat: both editors release movement held before focus, isolate typed movement and retain IME-safe Escape", inputTransitions.every(r => r.held === 1 && r.released === 0 && r.isolated === 0 && r.composing && r.y === 0 && r.focus === "chat-tab" && r.open === "true"), JSON.stringify(inputTransitions));
+  // Exercise the responsive default drawer before the separately resized-panel keyboard check.
+  await b.evaluate(`document.querySelector("#sheet .sheet-drag").dispatchEvent(new MouseEvent("dblclick", { bubbles: true }))`);
   const keyboardLayouts = [];
   const originalViewport = await b.evaluate(`({ width: innerWidth, height: innerHeight, dock: document.getElementById("sheet").dataset.dock })`);
   try {
@@ -7559,9 +7690,33 @@ const hubChat = { name: "ooga chat", why: "regression: Chat releases pre-focus m
     await untilPage(b, `innerWidth === ${originalViewport.width} && innerHeight === ${originalViewport.height} && document.getElementById("sheet").dataset.dock === ${JSON.stringify(originalViewport.dock)}`);
   }
   record("ooga chat: portrait and both landscape editors lift above the keyboard, stay within the visual viewport and clear positioning/listeners on blur", keyboardLayouts.every(r => r.laidOut && r.focused && r.cleared && r.detached && [r.resized, r.scrolled].every(m => m.bottom === 200 && m.top >= r.visibleTop && m.toggleTop >= r.visibleTop && m.edge <= r.visibleBottom + 1 && m.fieldTop >= m.panelTop - 1 && m.fieldBottom <= m.panelBottom + 1)), JSON.stringify(keyboardLayouts));
-  const escaped = await b.evaluate(`(() => { BL.net.sendChat = window.__chatSend; const out = { blurred: document.activeElement !== document.getElementById("chat-input"), open: document.getElementById("sheet").dataset.open === "true", tab: document.querySelector("[data-tab][aria-selected='true']").dataset.tab }; BL.chat.account({ backend: false, me: null, room: "off" }); localStorage.removeItem("oogaboogaland.sheet.v1"); return out; })()`);
+  await dragSheet(b, "#sheet .sheet-drag", originalViewport.width / 2, originalViewport.height - 400);
+  const retainedSize = await b.evaluate(`(async () => {
+    const sheet = document.getElementById("sheet"), input = document.getElementById("chat-input"), viewport = visualViewport;
+    const descriptors = Object.fromEntries(["height", "offsetTop"].map(key => [key, Object.getOwnPropertyDescriptor(viewport, key)]));
+    const before = sheet.getBoundingClientRect(), saved = localStorage.getItem("oogaboogaland.sheet.v1");
+    let reduced, kept;
+    try {
+      input.focus();
+      Object.defineProperty(viewport, "height", { configurable: true, value: 344 });
+      Object.defineProperty(viewport, "offsetTop", { configurable: true, value: 12 });
+      viewport.dispatchEvent(new Event("resize")); viewport.dispatchEvent(new Event("scroll"));
+      const r = sheet.getBoundingClientRect(), tab = sheet.querySelector("[data-tab]:not([hidden])").getBoundingClientRect();
+      reduced = sheet.dataset.dock === "bottom" && r.height < before.height && r.bottom <= 356 && tab.top >= 12;
+      await new Promise(resolve => setTimeout(resolve, 150));
+      kept = saved === localStorage.getItem("oogaboogaland.sheet.v1");
+    } finally {
+      input.blur();
+      for (const key of ["height", "offsetTop"]) { if (descriptors[key]) Object.defineProperty(viewport, key, descriptors[key]); else delete viewport[key]; }
+      viewport.dispatchEvent(new Event("resize"));
+    }
+    const after = sheet.getBoundingClientRect();
+    return { reduced, kept, before: before.height, after: after.height, restored: before.x === after.x && before.y === after.y && before.width === after.width && before.height === after.height };
+  })()`);
+  record("ooga chat: a docked panel fits the software keyboard without saving a smaller size, then restores its previous rectangle", retainedSize.reduced && retainedSize.kept && retainedSize.restored, JSON.stringify(retainedSize));
+  const escaped = await b.evaluate(`(() => { BL.net.sendChat = window.__chatSend; const out = { blurred: document.activeElement !== document.getElementById("chat-input"), open: document.getElementById("sheet").dataset.open === "true", tab: document.querySelector("[data-tab][aria-selected='true']").dataset.tab }; BL.net.state.backend = false; BL.chat.account({ backend: false, me: null, room: "off" }); window.dispatchEvent(new Event("resize")); return out; })()`);
   record("ooga chat: hidden without a backend, signed out asks to sign in, the last 100 lines kept as text, a reader not pulled down, a rejoin to a room that forgot keeps the page's lines, Enter sends and Escape leaves the input",
-    none.hidden && none.tab === "roster" && none.offline === false && r.signedOut && r.folded && r.saved === "chat" && r.focused
+    none.hidden && none.tab === null && none.panel && none.saved.open === true && none.saved.tab === "chat" && none.offline === false && r.signedOut && r.folded && r.saved === "chat" && r.focused
     && r.history[0] === 100 && r.history[1] === "line 20" && r.capped[0] === 100 && r.capped[1] === "line 50" && r.capped[2] === 100 && r.text && r.followed
     && r.reading[0] === 0 && r.reading[1] === 100 && r.reading[2] === "line 51" && r.refollowed
     && r.rejoined[0] === 100 && r.rejoined[1] === "line 54" && r.rejoined[2] === "line 153" && r.emptyRejoin && r.readerRejoin && r.followRejoin
@@ -8826,7 +8981,7 @@ const hubGhostEntry = (melee) => ({ name: `ghost entry ${melee ? "melee" : "shoo
     const H = BL.scenes.hub.debug, touch = matchMedia('(pointer: coarse)').matches;
     H.hud.selectTab("roster");
     H.useProp(H.props.find(p => p.prop === "jumbotron"));
-    if (touch) { H.hud.closeBoard(); H.hud.el.tabs.find(t => t.dataset.tab === "roster").click(); }
+    if (touch) { H.hud.closeBoard(); BL.sheet.tabFor(document.getElementById("roster-panel")).click(); }
     return { touch, open: H.hud.el.sheet.dataset.open, boards: document.querySelectorAll('.board-floating[open]').length };
   })()`);
   const entry = await b.evaluate(`(() => {
@@ -11815,6 +11970,9 @@ const donationDetails = { name: "donation details", why: "regression: clicking K
 // the exit shield's hum is stopped, so its ripple count is crossings alone. The kiosk is tapped with the view free, as
 // the room sign is, and its screen is worked with the keys the way a visitor works it.
 const factoryCooker = { name: "factory cooker", why: "rule: a tip in the factory, paid at the kiosk or arriving from anywhere, is counted once and cooked in plain sight: the kiosk runs the whole simulated donation and holds the visitor's bananas until they watch, no sat of it rides a line or lights a bay, the core never surges for it, each banana leaves through the ceiling tube, the board names no tipper and no time, a stopped node's cubes come in from outside, and a burst stays inside the cooker's pools", run: async (b) => {
+  await b.evaluate(`__ooga.hud.selectTab("bananas")`);
+  await dragSheet(b, "#sheet [data-tab='roster']", 60, 180);
+  const panelLayout = await b.evaluate(`localStorage.getItem("oogaboogaland.sheet.v1")`);
   const at = await b.evaluate(`(() => { const B = window.__ooga; ${FACTORY_EVENT} const s = X.scene, q = s.sats;
     for (let t = 0; t < 10 && q.bay.some((v) => v >= 0); t += 0.25) B.advance(0.25, 1 / 20);
     s.gate.hum = Infinity;
@@ -11828,6 +11986,8 @@ const factoryCooker = { name: "factory cooker", why: "rule: a tip in the factory
     return { mode: s.booth.mode, state: f.state, sats: f.sats, bananas: f.bananas, invoice: f.invoice ? f.invoice.id : null, qr: f.invoice ? f.invoice.code.size : 0, left: f.left, held: s.booth.held }; })()`);
   await b.evaluate(`window.__ooga.advance(1, 1 / 30)`);
   const opened = await screen();
+  const panelsDuring = await b.evaluate(`(() => { window.dispatchEvent(new Event("resize")); return { count: document.querySelectorAll(".sheet").length,
+    hidden: [...document.querySelectorAll(".sheet")].every(node => node.hidden), saved: localStorage.getItem("oogaboogaland.sheet.v1") }; })()`);
   await b.key("Enter"); await b.key("A");
   await b.evaluate(`(() => {
     document.getElementById("donation-handle").value = "tester";
@@ -11883,6 +12043,10 @@ const factoryCooker = { name: "factory cooker", why: "rule: a tip in the factory
     && invoiced.state === "invoice" && !!invoiced.invoice && invoiced.qr > 0 && invoiced.left > 290 && paid.waiting === "waiting" && paid.state === "paid"
     && paid.level === paid.n && paid.donations === 1 && paid.handle === "tester" && paid.held === paid.n && paid.idle && r.watching === 3 && r.back === 0,
     JSON.stringify({ opened, typed, quoted, invoiced, paid, watching: r.watching, back: r.back }));
+  const panelsAfter = await b.evaluate(`({ shown: [...document.querySelectorAll(".sheet")].filter(node => !node.hidden && node.dataset.open === "true").length,
+    saved: localStorage.getItem("oogaboogaland.sheet.v1") })`);
+  record("factory kiosk: every island panel stays hidden through resize while the kiosk owns the view, then returns with its saved layout intact",
+    panelsDuring.count === 2 && panelsDuring.hidden && panelsDuring.saved === panelLayout && panelsAfter.shown === 2 && panelsAfter.saved === panelLayout, JSON.stringify({ panelsDuring, panelsAfter }));
   record("factory cooker: a tip's bananas count once, the moment it arrives, and each leaves through the ceiling tube; no sat of it rides a line or lights a bay, and the core never surges for it", r.counted.level === r.n && !r.recounted && r.rippled === 0 && r.out === r.n && r.routed === 0 && r.lit === 0 && !r.surged, JSON.stringify(r));
   record("factory cooker: bananas rise vertically from the chute into the overhead intake", r.vertical > 0 && r.drift < 0.001 && r.high > r.intake, JSON.stringify({ samples: r.vertical, drift: r.drift, high: r.high, intake: r.intake }));
   record("factory cooker: the cooker's board and the donations board on the wall show the last tip rounded and never the tipper's handle, message or a time", r.board.rounded && !r.board.named && !r.board.timed, JSON.stringify(r.board));
@@ -19242,9 +19406,14 @@ const chatClientChecks = async () => {
   const nodes = new Map(), timers = new Map(); let timerId = 0, uuid = 0;
   const element = () => ({ value: "", textContent: "", dataset: {}, hidden: false, disabled: false, children: [], style: { setProperty() {}, removeProperty() {} }, handlers: {},
     addEventListener(type, fn) { this.handlers[type] = fn; }, append(...items) { this.children.push(...items); }, replaceChildren(...items) { this.children = items; },
+    closest(selector) { return selector === ".sheet" ? this.owner || null : selector === ".sheet [data-tab='chat']" && this.dataset.tab === "chat" && this.owner ? this : null; },
     focus() { document.activeElement = this; }, get childElementCount() { return this.children.length; } });
-  const document = { activeElement: null, getElementById(id) { if (!nodes.has(id)) nodes.set(id, element()); return nodes.get(id); }, createElement: element };
-  const sent = [], window = { BL: { net: { CHAT_MAX: 160, CHAT_KEEP: 100, subscribe() {}, subscribeChat() {}, sendChat(text, clientId) { sent.push({ text, clientId }); return true; } }, donations: { sanitize: (text, max) => String(text || "").replace(/[^\w .,!?'@#:-]/g, "").trim().slice(0, max) } }, crypto: { randomUUID: () => "id-" + ++uuid }, matchMedia: () => ({ matches: true }), setTimeout(fn) { timers.set(++timerId, fn); return timerId; }, clearTimeout(id) { timers.delete(id); } };
+  const document = { activeElement: null, handlers: {}, addEventListener(type, fn) { this.handlers[type] = fn; },
+    getElementById(id) { if (!nodes.has(id)) nodes.set(id, element()); return nodes.get(id); }, createElement: element };
+  const sheet = document.getElementById("sheet"), panel = document.getElementById("chat-panel"), tab = document.getElementById("chat-tab");
+  sheet.dataset.open = "false"; panel.hidden = true; panel.dataset.panel = tab.dataset.tab = "chat"; panel.owner = tab.owner = sheet;
+  const sheetApi = { visible(panel) { const owner = panel.closest(".sheet"); return !!owner && !panel.hidden && !owner.hidden && owner.dataset.open === "true"; }, tabFor: () => tab };
+  const sent = [], window = { BL: { sheet: sheetApi, net: { CHAT_MAX: 160, CHAT_KEEP: 100, subscribe() {}, subscribeChat() {}, sendChat(text, clientId) { sent.push({ text, clientId }); return true; } }, donations: { sanitize: (text, max) => String(text || "").replace(/[^\w .,!?'@#:-]/g, "").trim().slice(0, max) } }, crypto: { randomUUID: () => "id-" + ++uuid }, matchMedia: () => ({ matches: true }), setTimeout(fn) { timers.set(++timerId, fn); return timerId; }, clearTimeout(id) { timers.delete(id); } };
   runInNewContext(await readFile(join(root, "src/js/chat.js"), "utf8"), { window, document, MutationObserver: class { observe() {} }, Intl });
   const C = window.BL.chat, input = nodes.get("chat-input"), send = nodes.get("chat-send"), status = nodes.get("chat-status-text"), edit = text => { input.value = text; input.handlers.input(); }, submit = () => nodes.get("chat-form").handlers.submit({ preventDefault() {} }), receipt = id => C.heard([], false, { clientId: id, accepted: true });
   C.account({ backend: true, me: { id: 1, login: "Tester" }, room: "live" });
@@ -21952,13 +22121,16 @@ scene("dsb",{label:"nature checkpoint phone",query:"&overview=1&weather=clear&ti
 
 const dsbStudioCheckpoint = {name:"dsb studio checkpoint",why:"playthrough: Studio seating preserves locomotion lock, aim/fire and throws; archive and environment dispose through repeated visits",run:async b=>{
   const step=()=>b.evaluate('for(let i=0;i<48;i++)BL.scenes.dsb.update(1/60,i/60)');
+  const coarse=await b.evaluate('matchMedia("(pointer: coarse)").matches');
   const tap=async selector=>{
+    if(selector==="#act"&&!coarse){await b.evaluate('document.activeElement.blur()');await b.key(" ");await step();return;}
     const p=await b.evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});e.scrollIntoView({block:"center"});const r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()`);
     await b.send("Input.dispatchTouchEvent",{type:"touchStart",touchPoints:[p]});await b.send("Input.dispatchTouchEvent",{type:"touchEnd",touchPoints:[]});await step();
   };
   await b.key(" ");await step();
   const layout=await b.evaluate(`(()=>{const B=__ooga,D=B.dsb,R=D.interiors.active?.room;return {id:R?.id,seats:R?.seats.length,entry:R?.groundAt(0,17),lower:R?.groundAt(0,-6),stage:R?.groundAt(0,-12),exterior:D.exterior.visible,rain:D.weather.shared.state.drops,master:D.weather.shared.state.masterLevel,lights:R?.lighting.lightCount};})()`);
   record("Studio: correct door reveals upper entrance, descending room and isolated stage",layout.id==="dsb-studio"&&layout.seats===39&&layout.entry===3&&layout.lower===0&&layout.stage===.6&&!layout.exterior&&layout.rain===0&&layout.master===0&&layout.lights===3&&!await b.evaluate("__ooga.crew.combatEnabled"),JSON.stringify(layout));
+  record("Studio: the bottom action is visible for touch controls and absent on keyboard desktops",await b.evaluate('!!document.getElementById("act").getClientRects().length')===coarse);
   const routes=await b.evaluate(`(()=>{const B=__ooga,D=B.dsb,R=D.interiors.active.room,A=D.avatar,clear=(a,b)=>D.interiors.walkable(a[0],a[1],b[0],b[1],3,2,A);return {left:R.jukeboxAt.x<0,booth:clear([0,12],[5,12])&&clear([5,12],[5,15.5]),corridor:clear([0,17],[0,8.5]),balcony:clear([0,8.5],[13.5,8.5])&&clear([13.5,8.5],[12.5,6.8]),seats:R.seats.every(s=>clear([s.walkAt.x,s.walkAt.z],[s.walkAt.x,s.walkAt.z]))};})()`);
   record("Studio: left archive, enterable right booth, corridor and balcony approaches stay clear",Object.values(routes).every(Boolean),JSON.stringify(routes));
   const seatRoundTrip=await b.evaluate(`(()=>{const B=__ooga,R=B.dsb.interiors.active.room;return R.seats.every(s=>{B.pilot.navigate({position:{x:s.walkAt.x,y:s.floor,z:s.walkAt.z},yaw:s.viewYaw??0,pitch:.12,dist:3});return B.crew.sitPlayer(s)&&B.crew.standPlayer()&&!s.sitter;});})()`);
@@ -21987,10 +22159,10 @@ const dsbStudioCheckpoint = {name:"dsb studio checkpoint",why:"playthrough: Stud
     const fired=await b.evaluate('({seat:!!__ooga.dsb.avatar.camp.seat,p:{...__ooga.dsb.avatar.root.position},yaw:__ooga.dsb.avatar.root.rotation.y,shots:__ooga.dsb.avatar.weapon.shotsFired,throws:__ooga.crew.stats().tomatoesThrown,aim:__ooga.dsb.avatar.weapon.aiming,audio:__ooga.dsb.interiors.audio.stats})');
     record("Studio: seat "+cycle+" locks walking with seated pose and allows gun/throw controls",seated.seat&&seated.close&&seated.leg<-1.5&&Math.cos(seated.yaw)>.9&&fired.seat&&Math.hypot(fired.p.x-seated.p.x,fired.p.z-seated.p.z)<.001&&fired.shots>cycle&&fired.throws===throws0+cycle+1&&fired.aim&&fired.audio.sources===3&&!fired.audio.cues,JSON.stringify({seated,fired}));
     const standControls=await b.evaluate('Array.from(document.querySelectorAll("button")).filter(e=>/stand up/i.test(e.textContent)&&e.getClientRects().length&&getComputedStyle(e).visibility!=="hidden").length');
-    record("Studio: seated control "+cycle+" has one stand action and no lighting button",standControls===1&&!await b.evaluate('Array.from(document.querySelectorAll("button")).some(e=>/stage lights|studio lights/i.test(e.textContent))'));
+    record("Studio: seated control "+cycle+" shows one touch stand action and no desktop action or lighting button",standControls===(coarse?1:0)&&!await b.evaluate('Array.from(document.querySelectorAll("button")).some(e=>/stage lights|studio lights/i.test(e.textContent))'));
     await tap("#act");
     const stood=await b.evaluate('({seat:!!__ooga.dsb.avatar.camp.seat,close:__ooga.pilot.closeWanted,clear:__ooga.dsb.interiors.walkable(__ooga.dsb.avatar.root.position.x,__ooga.dsb.avatar.root.position.z,__ooga.dsb.avatar.root.position.x,__ooga.dsb.avatar.root.position.z,0,2,__ooga.dsb.avatar)})');
-    record("Studio: touch stand "+cycle+" restores clear ground and follow camera",!stood.seat&&!stood.close&&stood.clear,JSON.stringify(stood));
+    record("Studio: "+(coarse?"touch":"keyboard")+" stand "+cycle+" restores clear ground and follow camera",!stood.seat&&!stood.close&&stood.clear,JSON.stringify(stood));
     await b.evaluate('__ooga.pilot.navigate({position:__ooga.dsb.interiors.active.room.spawn,yaw:0,pitch:.22,dist:3})');await step();await tap("#dsb-context");
     const end=await b.evaluate(`(()=>{const B=__ooga,D=B.dsb;return {indoor:!!D.interiors.active,seat:!!D.avatar.camp.seat,weather:D.weather.state.exterior,trigger:D.avatar.weapon.triggerHeld,projectiles:B.crew.stats().projectiles,rooms:D.interiors.rooms.size,records:B.renderer.stats.records};})()`);
     record("Studio: exit "+cycle+" disposes seat and projectiles and restores exterior",!end.indoor&&!end.seat&&end.weather&&!end.trigger&&end.projectiles===0,JSON.stringify(end));

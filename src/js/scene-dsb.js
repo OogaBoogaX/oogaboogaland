@@ -93,7 +93,7 @@
     if(denied){if(crew.player){pilot.release(true);hud.toast(denied);}avatar.root.visible=false;}
     crew.refreshRosterRow(avatar);sharePresence();
   };
-  const sheetFocus=()=>{pilot.controls.reset();input.reset();crew.setWeaponTrigger(false);};
+  const sheetFocus=e=>{if(!e.target.closest(".sheet"))return;pilot.controls.reset();input.reset();crew.setWeaponTrigger(false);};
   const drawExtra=(ctx2d,project)=>{
     remotes?.drawNames(ctx2d,project);
     const overlay=overlayCanvas.getContext("2d");entrance?.overlay(overlay,overlayCanvas.clientWidth,overlayCanvas.clientHeight);
@@ -242,7 +242,7 @@
     crew.wearJetpack(avatar,BL.hubModels.jetpack(),BL.hubModels.jetFlame());
     remotes=BL.remotePlayers.create({root,crew,visible:rec=>rec.zone===voiceZone()&&(!entrance||entrance.phase==="done")});
     footsteps=BL.footsteps.create(); // The driven Ooga's own footsteps, heard by this page alone (footsteps.js).
-    hud.el.sheet.addEventListener("focusin",sheetFocus,{signal:ctx.signal});
+    document.addEventListener("focusin",sheetFocus,{signal:ctx.signal});
     Object.assign(avatar.root.position,{x:-45,y:land.heightAt(-45,-43)+avatar.baseY,z:-43});avatar.root.rotation.y=0;
     Object.assign(hooks,pilot.hooks);hud.onAction(action);hud.onPreset(()=>overviewView());
     // Shared timing/input/transport; DSB alone uses the marble's rectangular clear aperture.
@@ -472,7 +472,7 @@
   const leave=()=>{
     world.pilotDetached=!pilot.player;world.pilot=pilot.player?pilot.player.traits.name:null;
     unsubscribeAccount();unsubscribeAccount=null;BL.net.setBody(null);BL.net.setZone("scene-transition");
-    hud.el.sheet.removeEventListener("focusin",sheetFocus);remotes.dispose();remotes=null;footsteps.dispose();footsteps=null;
+    document.removeEventListener("focusin",sheetFocus);remotes.dispose();remotes=null;footsteps.dispose();footsteps=null;
     inkLayoutObserver.disconnect();inkLayoutObserver=null;window.removeEventListener("resize",requestInkLayout);
     context.classList.remove("ink-context-browse");
     memeMenu.dispose();memeMenu=null;

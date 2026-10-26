@@ -2207,7 +2207,7 @@
     hud.onPreset(pilot.goPreset);
     hud.onAction(onAction);
     hud.setStats(game.state);
-    hud.el.sheet.dataset.open = "false";
+    hud.foldPanels();
 
     mhud.setSection(phase);
     if (phase === "results") mhud.results(s, false, game.state.mine.best, !s.won && s.reason !== "time" && s.reason !== "left");
