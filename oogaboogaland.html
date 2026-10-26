@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; script-src 'sha256-XJbJIGtrQ51OZWbbMDpc41gOvpP0KPK+fFq4qI0vZp4=' 'sha256-sanX5MbaJsCDbCwTY/of/YGafQiCdZL/L7L3rJ+Xr9w='; style-src 'sha256-dlCxR1BaC+TY9aPin2rGJNM7ujmhYSdYgh3Ka0d80X4='; img-src 'self' data:; media-src https://stream.noderunnersradio.com; connect-src 'self' https: wss:; worker-src 'self'; base-uri 'none'; form-action 'none'">
+    content="default-src 'none'; script-src 'sha256-eBq1PefZ2E1rEQ4VeuNyzqSzRKBOoDXQ7/ZlO2Ve5QI=' 'sha256-sanX5MbaJsCDbCwTY/of/YGafQiCdZL/L7L3rJ+Xr9w='; style-src 'sha256-dlCxR1BaC+TY9aPin2rGJNM7ujmhYSdYgh3Ka0d80X4='; img-src 'self' data:; media-src https://stream.noderunnersradio.com; connect-src 'self' https: wss:; worker-src 'self'; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#0a0a0b">
@@ -23094,7 +23094,12 @@ void main() {
         const gz = Math.cos(st * 0.55 + 0.4) * 0.07 + Math.sin(st * 2.3) * 0.03;
         const pull = Math.exp(-FLAME_PULL * sdt);
         // A click on the pit flares it: the hub's lamp loop raises the root's `flare` and lets it fall back.
-        const flared = root.flare > 0 ? root.flare : 0, grow = 1 + flared * 0.35, bright = 1 + flared;
+        // The lamp loop hands the fire's lit glow and click flare to the rig; the blocks follow both,
+        // since the rig root has no geometry of its own.
+        const lampK = root.lampK === undefined ? 1 : root.lampK;
+        const lampBase = root.lampBase || 1;
+        const lampRatio = (root.lampGlow === undefined ? lampBase : root.lampGlow) / lampBase;
+        const flared = root.flare > 0 ? root.flare : 0, grow = 1 + flared * 0.35, bright = lampK * (1 + flared) * lampRatio;
         for (let i = 0; i < blocks.length; i++) {
           const p = blocks[i], node = p.node;
           p.age += sdt;
@@ -23117,7 +23122,7 @@ void main() {
           node.rotation.z = p.tilt + gx * 1.2;
           node.glow = p.band.glow * bright * (0.75 + 0.5 * fade);
         }
-        rig.light = 1 + flare(st) + gx * 0.5;
+        rig.light = 1 + flare(st) + gx * 0.5 + flared * 0.5;
         coals.glow = 1.1 + Math.sin(st * 1.7) * 0.15 + flare(st, 2) * 1.5;
         if (!embers.length) return;
         const ex = o.emitX !== undefined ? o.emitX : root.position.x;
@@ -26511,7 +26516,7 @@ void main() {
   "use strict";
   const BL = window.BL = window.BL || {};
   const { hexToRgb, mulberry32 } = BL.math;
-  const { geometry, pushVert, face, box, bevelBox, lathe, glassVessel, ring, merge, turn: turnPart, shaded, cached, variants, characterGeometry, makeVox: vox, voxelGeometry: voxGeo, voxCoords, moved, turnedX, turnedY, turnedZ, along, prism } = BL.models;
+  const { geometry, pushVert, face, box, bevelBox, lathe, glassVessel, ring, merge, cached, variants, characterGeometry, makeVox: vox, voxelGeometry: voxGeo, voxCoords, moved, turnedX, turnedY, turnedZ, along, prism } = BL.models;
   const blob = (v, { cx, cy, cz, rx, ry, rz, chip = 0, floor = -Infinity, rand, color }) => {
     for (let x = Math.floor(cx - rx); x <= Math.ceil(cx + rx); x++) {
       for (let y = Math.max(floor, Math.floor(cy - ry)); y <= Math.ceil(cy + ry); y++) {
@@ -83784,13 +83789,24 @@ void main() {
       if (lit && !l.lit && spark) fx.burst(l.x, l.y, l.z, 5, [SPARK], 1.3);
       l.lit = lit;
       l.k = k;
+      const steady = l.nightOnly ? 0 : LAMP_OFF;
+      const kindGlow = l.kind.glow * (1 + (l.pileProfile ? RENDER_OPTS.lampFactor * PILE_POST_NIGHT_BOOST * 0.25 : 0));
+      let baseGlow;
       if (k === 0 && node.flare <= 0) {
         // k times a finite factor is exactly 0, so the glow is this constant; skip the flicker sample.
-        const steady = l.nightOnly ? 0 : LAMP_OFF;
-        if (node.glow !== steady) node.glow = steady;
+        baseGlow = steady;
+        if (node.glow !== baseGlow) node.glow = baseGlow;
       } else {
         const flicker = Math.sin(elapsed * 11 + i * 2.3) * 0.15;
-        node.glow = (l.nightOnly ? 0 : LAMP_OFF) + k * (l.kind.glow * (1 + (l.pileProfile ? RENDER_OPTS.lampFactor * PILE_POST_NIGHT_BOOST * 0.25 : 0)) + flicker) + node.flare * 1.5;
+        baseGlow = steady + k * (kindGlow + flicker);
+        node.glow = baseGlow + node.flare * 1.5;
+      }
+      // A fire rig's root carries no geometry, so a glow written on it goes nowhere. Hand the lamp's
+      // lit glow and its click flare to the rig, which writes them onto the flame's blocks.
+      if (node.lampRig) {
+        node.lampK = k;
+        node.lampGlow = baseGlow;
+        node.lampBase = steady + kindGlow;
       }
       if (node.flare > 0) node.flare = Math.max(0, node.flare - dt * 2);
       // kind.hide: the node is hidden while unlit, so a cold fire shows no flame at all.
@@ -83933,6 +83949,8 @@ void main() {
     addChild(pit, rig.root);
     rig.lamp = addLamp(rig.root, LAMP.fire, p.x, 0.6, p.z, true, 3, "firepit");
     rig.lamp.always = true;
+    // The lamp's glow and flare land on this geometry-less root; the rig reads them for its blocks.
+    rig.root.lampRig = rig;
     fireRigs.push(rig);
     firePitRig = rig;
     fireHazards.push({ node: rig.root, boxes: rig.boxes, pit, x: p.x, y: pit.position.y, z: p.z, avoidRadius: FIRE_AVOID_RADIUS });
@@ -88298,7 +88316,8 @@ void main() {
         fx.burst(x, w[13] + 1.4, z, 8, [SPARK], 1.3);
         break;
       case "firepit":
-        if (RENDER_OPTS.torch < 0.5) {
+        // The voxel flame burns by day and night, so the click flares it whenever the lamp is lit.
+        if (!fire || !fire.lit) {
           hud.toast("Cold ashes. Ooga waits for night.");
           break;
         }

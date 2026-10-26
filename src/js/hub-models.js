@@ -12,7 +12,7 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const { hexToRgb, mulberry32 } = BL.math;
-  const { geometry, pushVert, face, box, bevelBox, lathe, glassVessel, ring, merge, turn: turnPart, shaded, cached, variants, characterGeometry, makeVox: vox, voxelGeometry: voxGeo, voxCoords, moved, turnedX, turnedY, turnedZ, along, prism } = BL.models;
+  const { geometry, pushVert, face, box, bevelBox, lathe, glassVessel, ring, merge, cached, variants, characterGeometry, makeVox: vox, voxelGeometry: voxGeo, voxCoords, moved, turnedX, turnedY, turnedZ, along, prism } = BL.models;
   const blob = (v, { cx, cy, cz, rx, ry, rz, chip = 0, floor = -Infinity, rand, color }) => {
     for (let x = Math.floor(cx - rx); x <= Math.ceil(cx + rx); x++) {
       for (let y = Math.max(floor, Math.floor(cy - ry)); y <= Math.ceil(cy + ry); y++) {

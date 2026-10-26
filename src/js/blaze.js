@@ -225,7 +225,12 @@
         const gz = Math.cos(st * 0.55 + 0.4) * 0.07 + Math.sin(st * 2.3) * 0.03;
         const pull = Math.exp(-FLAME_PULL * sdt);
         // A click on the pit flares it: the hub's lamp loop raises the root's `flare` and lets it fall back.
-        const flared = root.flare > 0 ? root.flare : 0, grow = 1 + flared * 0.35, bright = 1 + flared;
+        // The lamp loop hands the fire's lit glow and click flare to the rig; the blocks follow both,
+        // since the rig root has no geometry of its own.
+        const lampK = root.lampK === undefined ? 1 : root.lampK;
+        const lampBase = root.lampBase || 1;
+        const lampRatio = (root.lampGlow === undefined ? lampBase : root.lampGlow) / lampBase;
+        const flared = root.flare > 0 ? root.flare : 0, grow = 1 + flared * 0.35, bright = lampK * (1 + flared) * lampRatio;
         for (let i = 0; i < blocks.length; i++) {
           const p = blocks[i], node = p.node;
           p.age += sdt;
@@ -248,7 +253,7 @@
           node.rotation.z = p.tilt + gx * 1.2;
           node.glow = p.band.glow * bright * (0.75 + 0.5 * fade);
         }
-        rig.light = 1 + flare(st) + gx * 0.5;
+        rig.light = 1 + flare(st) + gx * 0.5 + flared * 0.5;
         coals.glow = 1.1 + Math.sin(st * 1.7) * 0.15 + flare(st, 2) * 1.5;
         if (!embers.length) return;
         const ex = o.emitX !== undefined ? o.emitX : root.position.x;

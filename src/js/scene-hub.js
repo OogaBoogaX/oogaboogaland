@@ -1014,13 +1014,24 @@
       if (lit && !l.lit && spark) fx.burst(l.x, l.y, l.z, 5, [SPARK], 1.3);
       l.lit = lit;
       l.k = k;
+      const steady = l.nightOnly ? 0 : LAMP_OFF;
+      const kindGlow = l.kind.glow * (1 + (l.pileProfile ? RENDER_OPTS.lampFactor * PILE_POST_NIGHT_BOOST * 0.25 : 0));
+      let baseGlow;
       if (k === 0 && node.flare <= 0) {
         // k times a finite factor is exactly 0, so the glow is this constant; skip the flicker sample.
-        const steady = l.nightOnly ? 0 : LAMP_OFF;
-        if (node.glow !== steady) node.glow = steady;
+        baseGlow = steady;
+        if (node.glow !== baseGlow) node.glow = baseGlow;
       } else {
         const flicker = Math.sin(elapsed * 11 + i * 2.3) * 0.15;
-        node.glow = (l.nightOnly ? 0 : LAMP_OFF) + k * (l.kind.glow * (1 + (l.pileProfile ? RENDER_OPTS.lampFactor * PILE_POST_NIGHT_BOOST * 0.25 : 0)) + flicker) + node.flare * 1.5;
+        baseGlow = steady + k * (kindGlow + flicker);
+        node.glow = baseGlow + node.flare * 1.5;
+      }
+      // A fire rig's root carries no geometry, so a glow written on it goes nowhere. Hand the lamp's
+      // lit glow and its click flare to the rig, which writes them onto the flame's blocks.
+      if (node.lampRig) {
+        node.lampK = k;
+        node.lampGlow = baseGlow;
+        node.lampBase = steady + kindGlow;
       }
       if (node.flare > 0) node.flare = Math.max(0, node.flare - dt * 2);
       // kind.hide: the node is hidden while unlit, so a cold fire shows no flame at all.
@@ -1163,6 +1174,8 @@
     addChild(pit, rig.root);
     rig.lamp = addLamp(rig.root, LAMP.fire, p.x, 0.6, p.z, true, 3, "firepit");
     rig.lamp.always = true;
+    // The lamp's glow and flare land on this geometry-less root; the rig reads them for its blocks.
+    rig.root.lampRig = rig;
     fireRigs.push(rig);
     firePitRig = rig;
     fireHazards.push({ node: rig.root, boxes: rig.boxes, pit, x: p.x, y: pit.position.y, z: p.z, avoidRadius: FIRE_AVOID_RADIUS });
@@ -5528,7 +5541,8 @@
         fx.burst(x, w[13] + 1.4, z, 8, [SPARK], 1.3);
         break;
       case "firepit":
-        if (RENDER_OPTS.torch < 0.5) {
+        // The voxel flame burns by day and night, so the click flares it whenever the lamp is lit.
+        if (!fire || !fire.lit) {
           hud.toast("Cold ashes. Ooga waits for night.");
           break;
         }
