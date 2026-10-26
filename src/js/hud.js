@@ -2056,7 +2056,7 @@
       if (e.repeat) { e.preventDefault(); e.stopImmediatePropagation(); return; }
       // Chat owns IME state and first returns focus from its editor to its tab.
       if (e.target.id === "chat-input" || e.target.id === "chat-display") return;
-      if (document.querySelector("dialog:modal") || e.target.closest && e.target.closest("dialog[open]")) return;
+      if (document.querySelector("dialog:modal") || e.target.closest && e.target.closest('dialog[open], [role="dialog"][aria-modal="true"]')) return;
       let closed = false;
       if (!panelsHidden && floatingBoards.length) {
         floatingBoards[floatingBoards.length - 1].escape();

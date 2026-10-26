@@ -22229,7 +22229,8 @@ const dsbStudioCheckpoint = {name:"dsb studio checkpoint",why:"playthrough: Stud
   await b.key(" ");await step();
   const layout=await b.evaluate(`(()=>{const B=__ooga,D=B.dsb,R=D.interiors.active?.room;return {id:R?.id,seats:R?.seats.length,entry:R?.groundAt(0,17),lower:R?.groundAt(0,-6),stage:R?.groundAt(0,-12),exterior:D.exterior.visible,rain:D.weather.shared.state.drops,master:D.weather.shared.state.masterLevel,lights:R?.lighting.lightCount};})()`);
   record("Studio: correct door reveals upper entrance, descending room and isolated stage",layout.id==="dsb-studio"&&layout.seats===39&&layout.entry===3&&layout.lower===0&&layout.stage===.6&&!layout.exterior&&layout.rain===0&&layout.master===0&&layout.lights===3&&!await b.evaluate("__ooga.crew.combatEnabled"),JSON.stringify(layout));
-  record("Studio: the bottom action is visible for touch controls and absent on keyboard desktops",await b.evaluate('!!document.getElementById("act").getClientRects().length')===coarse);
+  const viewport=await b.evaluate('({action:!!document.getElementById("act").getClientRects().length,height:innerHeight,bodyHeight:document.body.scrollHeight,stageTop:document.querySelector(".stage").getBoundingClientRect().top})');
+  record("Studio: the bottom action is touch-only and closed panels cannot scroll the scene",viewport.action===coarse&&viewport.bodyHeight<=viewport.height&&viewport.stageTop===0,JSON.stringify(viewport));
   const routes=await b.evaluate(`(()=>{const B=__ooga,D=B.dsb,R=D.interiors.active.room,A=D.avatar,clear=(a,b)=>D.interiors.walkable(a[0],a[1],b[0],b[1],3,2,A);return {left:R.jukeboxAt.x<0,booth:clear([0,12],[5,12])&&clear([5,12],[5,15.5]),corridor:clear([0,17],[0,8.5]),balcony:clear([0,8.5],[13.5,8.5])&&clear([13.5,8.5],[12.5,6.8]),seats:R.seats.every(s=>clear([s.walkAt.x,s.walkAt.z],[s.walkAt.x,s.walkAt.z]))};})()`);
   record("Studio: left archive, enterable right booth, corridor and balcony approaches stay clear",Object.values(routes).every(Boolean),JSON.stringify(routes));
   const seatRoundTrip=await b.evaluate(`(()=>{const B=__ooga,R=B.dsb.interiors.active.room;return R.seats.every(s=>{B.pilot.navigate({position:{x:s.walkAt.x,y:s.floor,z:s.walkAt.z},yaw:s.viewYaw??0,pitch:.12,dist:3});return B.crew.sitPlayer(s)&&B.crew.standPlayer()&&!s.sitter;});})()`);
@@ -22303,12 +22304,14 @@ const dsbIntegrationCheckpoint={name:"dsb integration checkpoint",why:"contract:
   for(const [id,zone] of Object.entries(zones)){
     await b.evaluate(`__ooga.dsb.interiors.review(${JSON.stringify(id)},true)`);await step();state=await read();
     record("DSB integration: "+id+" immediately selects its voice zone",state.zone===zone&&!!state.body,JSON.stringify(state));
-    if(id==="svrn-society"){
-      await b.evaluate('__ooga.dsb.svrnMenu.open("home")');
-      record("DSB integration: venue modal isolates the global sheet and owns focus",await b.evaluate('(()=>{const s=document.getElementById("sheet");return !!s.closest("[inert]")&&document.activeElement.closest(".svrn-menu")!==null&&BL.dsbMenuShell.count===1;})()'));
-      record("DSB modes: venue menus retain the Ooga and its mode when X or the portrait is pressed",await b.evaluate('(()=>{const P=__ooga.pilot,cave=P.player,aiming=cave.weapon.aiming;BL.scenes.dsb.onKey(new KeyboardEvent("keydown",{key:"x",code:"KeyX",cancelable:true}));document.getElementById("mode-hud").click();return P.player===cave&&cave.weapon.aiming===aiming&&__ooga.dsb.svrnMenu.isOpen;})()'));
+    if(id==="proof-of-ink"||id==="svrn-society"){
+      const menu=id==="proof-of-ink"?"inkMenu":"svrnMenu",selector=id==="proof-of-ink"?"#ink-catalog":".svrn-menu";
+      await b.evaluate(`__ooga.dsb[${JSON.stringify(menu)}].open()`);
+      const isolated=await b.evaluate(`(()=>{const s=document.getElementById("sheet"),modal=document.querySelector(${JSON.stringify(selector)}),focused=document.activeElement;window.dispatchEvent(new Event("resize"));document.getElementById("sheet-toggle").focus();return !!s.closest("[inert]")&&modal.contains(focused)&&document.activeElement===focused&&BL.dsbMenuShell.count===1;})()`);
+      record("DSB integration: "+id+" modal keeps the global sheet inert and retains focus after a panel layout change",isolated);
+      record("DSB modes: "+id+" menu retains the Ooga and its mode when X or the portrait is pressed",await b.evaluate(`(()=>{const P=__ooga.pilot,cave=P.player,aiming=cave.weapon.aiming;BL.scenes.dsb.onKey(new KeyboardEvent("keydown",{key:"x",code:"KeyX",cancelable:true}));document.getElementById("mode-hud").click();return P.player===cave&&cave.weapon.aiming===aiming&&__ooga.dsb[${JSON.stringify(menu)}].isOpen;})()`));
       await b.key("Escape");
-      record("DSB integration: closing venue restores global menu without changing saved state",await b.evaluate('!document.getElementById("sheet").closest("[inert]")&&document.getElementById("sheet").dataset.open==="true"&&BL.dsbMenuShell.count===0'));
+      record("DSB integration: closing "+id+" restores global menu without changing saved state",await b.evaluate('!document.getElementById("sheet").closest("[inert]")&&document.getElementById("sheet").dataset.open==="true"&&BL.dsbMenuShell.count===0'));
     }
     await b.evaluate('__ooga.dsb.interiors.request(__ooga.dsb.interiors.active.room.exit)');await step();
     record("DSB integration: exit "+id+" restores exterior voice",await b.evaluate('BL.net.state.zone==="dsb-outside"&&!__ooga.dsb.interiors.active'));

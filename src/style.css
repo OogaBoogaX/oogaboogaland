@@ -375,7 +375,7 @@ body[data-active-scene="hub"] .home-link {
 .sheet {
   --sheet-chat-top: 207px;
   --sheet-chat-left: 216px;
-  position: absolute;
+  position: fixed;
   top: calc(52px + var(--safe-top));
   right: 0;
   height: var(--sheet-height, 520px);
