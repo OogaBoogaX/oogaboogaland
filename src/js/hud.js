@@ -229,8 +229,8 @@
     for (const child of source.children) if (child.visible && !child.portraitHidden) addChild(copy, copyPortraitNode(child, portraitRoot, portraitGeometry));
     return copy;
   };
-  const renderFaceIcon = (canvas, cave, gorilla = null) => {
-    const renderer = iconRendererMod.createRenderer(canvas, { width: ICON_PX, height: ICON_PX, transparent: true });
+  const renderFaceIcon = (canvas, cave, gorilla = null, px = ICON_PX) => {
+    const renderer = iconRendererMod.createRenderer(canvas, { width: px, height: px, transparent: true });
     const source = gorilla ? gorilla.parts.head : cave.parts.head, geometry = gorilla ? source.geometry : cave.portraitHead;
     const root = createNode(), head = copyPortraitNode(source, source, geometry);
     const bounds = boundsOf(geometry), fit = (!gorilla && cave.traits.gasMask ? 0.68 : 0.78) / Math.max(bounds.radius, 0.05);
@@ -247,6 +247,23 @@
     camera.position.x = camera.position.y = 0;
     camera.position.z = 2.7;
     camera.target.x = camera.target.y = camera.target.z = 0;
+    renderer.render(root, camera);
+    renderer.dispose();
+  };
+  // An Ooga standing square to the view, whole, as it stands posed now: its built parts copied (hidden ones left out)
+  // and turned to face the camera, `w` by `h` pixels. A podium's portraits (HALLOWEEN: the ghost hunt's winners).
+  const renderBodyIcon = (canvas, cave, w, h) => {
+    const renderer = iconRendererMod.createRenderer(canvas, { width: w, height: h, transparent: true });
+    const root = createNode(), body = copyPortraitNode(cave.root, null, null), tall = cave.bodyHeight;
+    body.visible = true;
+    body.position.x = body.position.z = 0;
+    body.position.y = cave.baseY;
+    body.rotation.x = body.rotation.y = body.rotation.z = 0;
+    addChild(root, body);
+    // Back far enough that the view's 28 degrees take in 1.2 of its height, for room over its head and under its feet.
+    const camera = createCamera({ fov: 28, near: 0.1, far: 40 }), fit = tall * 0.6 / Math.tan(14 * Math.PI / 180);
+    camera.position.x = 0; camera.position.y = tall * 0.55; camera.position.z = fit;
+    camera.target.x = 0; camera.target.y = tall * 0.5; camera.target.z = 0;
     renderer.render(root, camera);
     renderer.dispose();
   };
@@ -1189,7 +1206,7 @@
     const createBoardWindow = (node, floatingId = 0, saved = null) => {
       const el = { board: node };
       const ids = {
-        boardTitle: "board-title", boardScreen: "board-screen", boardCaption: "board-caption", boardNote: "board-note",
+        boardTitle: "board-title", boardScreen: "board-screen", boardCaption: "board-caption", boardNote: "board-note", boardLinks: "board-links",
         boardDots: "board-dots", boardPrev: "board-prev", boardNext: "board-next", boardHelp: "board-help",
         boardHead: "board-head", boardPause: "board-pause", boardResize: "board-resize",
         boardFilter: "board-filter", boardFilterMenu: "board-filter-menu", boardFilterList: "board-filter-list", boardRollup: "board-rollup",
@@ -1216,7 +1233,7 @@
       };
       // Each window copies a readable board's canvas and owns its controls.
       // A board is any object with `title`, `help`, `canvas`, `count`, `index`, `caption`, `note`, `version` and
-      // `go(index)`, plus optional `wide` and `captionAbove` layouts. The dialog copies the canvas, captions the page, lays one dot per page and pages with the
+      // `go(index)`, plus optional `wide` and `captionAbove` layouts and a `link` out ({ href, label }, opened in a new tab). The dialog copies the canvas, captions the page, lays one dot per page and pages with the
       // chevrons, the dots and the arrow keys; it never learns what a board shows, so a board can change freely.
       // `updateBoard` repaints whenever the open board's version moves.
       // A `floating` board also supplies `paused` and `setPaused`, and keeps island input available.
@@ -1496,6 +1513,22 @@
         el.boardCaption.textContent = board.caption;
         el.boardNote.textContent = board.note || "";
         el.boardNote.hidden = !!board.floating || !board.note;
+        // A board's links out, one anchor each under its note, made the first time a board needs that many.
+        const links = board.links || [];
+        el.boardLinks.hidden = !links.length;
+        for (let i = el.boardLinks.children.length; i < links.length; i++) {
+          const a = document.createElement("a");
+          a.className = "board-link";
+          a.target = "_blank";
+          a.rel = "noopener noreferrer";
+          a.referrerPolicy = "no-referrer";
+          el.boardLinks.append(a);
+        }
+        for (let i = 0; i < el.boardLinks.children.length; i++) {
+          const a = el.boardLinks.children[i];
+          a.hidden = i >= links.length;
+          if (i < links.length) { a.href = links[i].href; a.textContent = links[i].label; }
+        }
         if (board.floating || board.carousel) paintBoardPause();
         if (board.floating) {
           el.boardRollup.checked = board.rollup;
@@ -2523,5 +2556,5 @@
       else b.textContent = `Back to ${place}`;
     }
   };
-  BL.hud = { create, renderIcon, signLettering, showAccount, showMic, showVoices, setDonationStats, donationValueText, toast, offerReload, holdRow, leaveTo, STATE_LABELS, statusFor };
+  BL.hud = { create, renderIcon, renderFaceIcon, renderBodyIcon, signLettering, showAccount, showMic, showVoices, setDonationStats, donationValueText, toast, offerReload, holdRow, leaveTo, STATE_LABELS, statusFor };
 })();

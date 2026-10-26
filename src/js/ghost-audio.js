@@ -26,7 +26,7 @@
     if (loading) loading.catch(() => {});
     return loading;
   };
-  const CLIPS = ["wave", "kaboom", "screech", "freeze", "apples", "double", "banana", "ooga", "landing", "network", "tessZap", "tessScream", "monkeyGet", "choir", "gameOver"];
+  const CLIPS = ["wave", "kaboom", "screech", "freeze", "apples", "double", "banana", "ooga", "landing", "network", "fiatRush", "tessZap", "tessScream", "monkeyGet", "choir", "gameOver"];
 
   const decode = (ctx, base64) => {
     const raw = atob(base64), bytes = new Uint8Array(raw.length);
@@ -185,6 +185,49 @@
         tone(b, t + 0.2, "square", 1800, 700, 0.03, 0.35, 0.002, 0.05, "bandpass", 2400, 2);
         burst(c, t + 0.27, 0.06, 3600, 2000, 3, 2.4);
         tone(c, t + 0.27, "triangle", 160, 60, 0.08, 1.2, 0.003, 0.12);
+      },
+      // A spider spits: a wet hiss rising through a band, a click of its fangs at the front of it.
+      spit: () => {
+        const t = ctx.currentTime, a = voice(), b = voice();
+        burst(a, t, 0.3, 700, 4200, 2, 1.1);
+        tone(b, t, "square", 320, 900, 0.07, 0.22, 0.004, 0.09, "bandpass", 1300, 3);
+      },
+      // A giant spider bursts into its brood: a piercing, wavering shriek in two voices a third apart, rising and
+      // breaking, with a tearing hiss under it and a wet burst as its body splits.
+      brood: () => {
+        const t = ctx.currentTime;
+        for (let k = 0; k < 2; k++) {
+          const v = voice(), at = t + k * 0.05, f = k ? 1.26 : 1;
+          v.osc.type = "sawtooth";
+          v.osc.frequency.setValueAtTime(1100 * f, at);
+          v.osc.frequency.exponentialRampToValueAtTime(3200 * f, at + 0.18);
+          v.osc.frequency.setValueAtTime(3000 * f, at + 0.5);
+          v.osc.frequency.exponentialRampToValueAtTime(1500 * f, at + 1.0);
+          v.lfo.frequency.setValueAtTime(34 + k * 7, at);
+          v.wobble.gain.setValueAtTime(260 * f, at);
+          v.filter.type = "bandpass";
+          v.filter.frequency.setValueAtTime(2600 * f, at);
+          v.filter.Q.setValueAtTime(1.6, at);
+          const g = v.gain.gain;
+          g.setValueAtTime(0.0001, at);
+          g.exponentialRampToValueAtTime(0.4 * LEVEL, at + 0.04);
+          g.setValueAtTime(0.4 * LEVEL, at + 0.7);
+          g.exponentialRampToValueAtTime(0.0001, at + 1.05);
+          g.setValueAtTime(0, at + 1.06);
+          burst(v, at + 0.02, 0.9, 2200, 6400, 1.4, 0.45);
+        }
+        const w = voice();
+        burst(w, t, 0.2, 1600, 300, 1, 1.4);
+        tone(w, t, "triangle", 130, 45, 0.18, 1, 0.004, 0.25);
+      },
+      // A giant spider lands: "Fiat Rush!" in a woman's voice (`fiatRush`, see ghost-audio-data.js).
+      fiatRush: () => clip("fiatRush", 2),
+      // Its venom lands: a wet splat with a low thud under it, and a fizz as it eats at the ground.
+      splat: () => {
+        const t = ctx.currentTime, a = voice(), b = voice();
+        burst(a, t, 0.14, 1900, 380, 1.2, 1.5);
+        tone(a, t, "triangle", 150, 55, 0.1, 0.9, 0.003, 0.15);
+        burst(b, t + 0.06, 0.7, 5200, 7600, 4, 0.45);
       },
       // The monkeys join you: a children's Spanish lesson saying "monkey" (`monkeyGet`, see ghost-audio-data.js).
       monkeys: () => clip("monkeyGet", 1.6),

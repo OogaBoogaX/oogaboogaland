@@ -21,8 +21,9 @@
     race: () => !!BL.raceAudio, mine: () => !!BL.mineCrew, orbit: () => !!BL.rocketAudio,
     // HALLOWEEN: the hub's ghost hunt, and each track of its playlist.
     halloween: () => !!BL.halloween, ...Object.fromEntries(["boss", "colt", "martial", "nightmare", "synthed"].map((k) => [`halloween-track-${k}`, () => !!(BL.ghostMusic && BL.ghostMusic[k])])) };
-  // Only scene implementation groups depend on a base group; no base group depends on a scene shell.
-  const SCENE_BASE = { "arcade-scene": "arcade", "drop-scene": "drop", "race-scene": "race", "mine-scene": "mine", "orbit-scene": "orbit" };
+  // Only scene implementation groups depend on a base group; no base group depends on a scene shell. The Lightning Jet
+  // Hangar, walked into from the Factory and left back into it, builds on the Factory's scene group.
+  const SCENE_BASE = { "arcade-scene": "arcade", "drop-scene": "drop", "race-scene": "race", "mine-scene": "mine", "orbit-scene": "orbit", "hangar-scene": "factory-scene" };
   const loading = new Map(), attempts = new Map();
   let stale = false, staleHandler = null;
   // A file that answers 404 is gone for good: the site was deployed since this page loaded.
