@@ -11,7 +11,7 @@
   const SHIFT_KEYS = ["ShiftLeft", "ShiftRight", "Shift"];
   const keyName = (e) => e.key === "Shift" && (e.code === "ShiftRight" || e.location === 2) ? "peek" : KEYS[e.key.toLowerCase()];
   const uiKey = (e) => e.target && (e.target.isContentEditable || e.target.closest
-    && (e.target.closest("input, textarea, select, [role='dialog'], dialog, #sheet")
+    && (e.target.closest("input, textarea, select, [role='dialog'], dialog, .sheet")
       || (e.key === "Tab" || e.key === "Enter" || e.key === " ") && e.target.closest("button, a[href], summary, [role='button']")));
   // Joystick state x/y track the pointer normalized to -1..1.
   const joystick = (el) => {
@@ -85,7 +85,7 @@
     let tabConsumed = false;
     let pointerButtons = 0, blockedPointerButtons = 0;
     const typing = (e) => tabNavigation ? uiKey(e) : e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA"
-      || e.target.closest && e.target.closest("dialog, #sheet"));
+      || e.target.closest && e.target.closest("dialog, .sheet"));
     const consumeKey = (e) => { e.preventDefault(); e.stopImmediatePropagation(); };
     const consumeTab = (e) => { tabConsumed = true; consumeKey(e); };
     // Runs before actor shortcuts. Tab cancels held input even when the

@@ -501,7 +501,7 @@
     }
     hud.setStats(game.state);
     pile.syncPile(true);
-    if (window.matchMedia("(max-width: 720px), (max-height: 500px)").matches) hud.el.sheet.dataset.open = "false";
+    if (window.matchMedia("(max-width: 720px), (max-height: 500px)").matches) hud.foldPanels();
     hintTimer = window.setTimeout(() => hud.hint(COARSE ? "Drag to look · pinch to zoom · sticks to fly" : "Drag to orbit · scroll to zoom · WASD to fly"), 1200);
     // The lab has no Agent until Shift+A calls one in, so a lab visit holds no
     // Agent geometry of its own.

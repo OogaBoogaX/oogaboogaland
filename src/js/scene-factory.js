@@ -759,10 +759,7 @@
     if (b.hidden === aside) return;
     b.hidden = aside;
     if (avatar) avatar.root.visible = !aside;
-    if (aside) {
-      b.sheet = hud.el.sheet.dataset.open;
-      hud.el.sheet.dataset.open = "false";
-    } else hud.el.sheet.dataset.open = b.sheet;
+    hud.setPanelsHidden(aside);
   };
   // The Ooga's controls (the act button, the aim's reticle and the equipment by the title) stay hidden while the kiosk
   // has the view, and come back as they were.
@@ -1275,7 +1272,7 @@
       // The kiosk while a visitor works it: the glide, its poses (from, to, and the walking view to come back to), the
       // visitor's paid tip held for the show, the states of the sheet and the Ooga's controls while put away, and the
       // flow, which enter makes.
-      booth: { mode: 0, t: 0, ease: EASE, after: 0, clock: 0, near: false, hidden: false, sheet: "", act: true, reticle: true, equipment: false, held: 0, heldSats: 0, from: pose(), to: pose(), home: pose(), flow: null }
+      booth: { mode: 0, t: 0, ease: EASE, after: 0, clock: 0, near: false, hidden: false, act: true, reticle: true, equipment: false, held: 0, heldSats: 0, from: pose(), to: pose(), home: pose(), flow: null }
     };
     const hall = FM.hall(), cond = FM.conduits();
     s.ceiling = createNode({ geometry: hall.ceiling });
@@ -1742,7 +1739,7 @@
     root = createNode();
     hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
     hud.setAreaLabel("LF");
-    if (window.matchMedia("(max-width: 720px), (max-height: 500px)").matches) hud.el.sheet.dataset.open = "false";
+    if (window.matchMedia("(max-width: 720px), (max-height: 500px)").matches) hud.foldPanels();
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
     const clampTarget = (p) => {

@@ -2953,6 +2953,20 @@
     }
     return 0;
   };
+  // Remove the bush beside the fire after scattering, keeping every other seeded prop in place.
+  const clearFireBush = (firePos) => {
+    let nearest = null, distance = Infinity;
+    for (const o of scenery) {
+      if (o.prop !== "bush" || o.node.position.y !== 0 || sceneryReason(o)) continue;
+      const d = (o.x - firePos.x) ** 2 + (o.z - firePos.z) ** 2;
+      if (d < distance) { nearest = o; distance = d; }
+    }
+    if (!nearest) return;
+    removeTarget(nearest.node);
+    removeChild(root, nearest.node);
+    drop(placed, nearest.node); drop(props, nearest); drop(scenery, nearest);
+    drop(claimed, nearest.reservation); drop(sceneryClaims, nearest.reservation);
+  };
   const setSceneryActive = (o, active) => {
     if (o.active === active) return;
     o.active = active;
@@ -10507,6 +10521,7 @@
     mempoolIsland.claimGround();
     timechainIsland.claimGround();
     if (bifrostIsle) bifrostIsle.claimGround();
+    clearFireBush(firePos);
     buildLawn();
     reflowScenery();
     buildSpots();
