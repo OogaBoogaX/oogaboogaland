@@ -112,7 +112,7 @@ const host = (clock = Date, env = {}) => {
   const ctx = {
     setWebSocketAutoResponse() {}, blockConcurrencyWhile: (fn) => fn(), acceptWebSocket: (ws) => accepted.push(ws),
     getWebSockets: () => accepted.filter((ws) => !ws.closed),
-    storage: { get: async () => undefined, put: async () => {}, getAlarm: async () => 0, setAlarm: async () => {} },
+    storage: { get: async (key) => Array.isArray(key) ? new Map() : undefined, put: async () => {}, getAlarm: async () => 0, setAlarm: async () => {} },
   };
   const room = () => new context.Room(ctx, env);
   const upgrade = (r, id, login, display, contributor = true) => r.fetch({ url: "https://island.invalid/room", headers: new Headers({ upgrade: "websocket", "x-player-id": String(id), "x-player-login": login, "x-player-display": display, "x-player-contributor": contributor ? "1" : "0" }) });
