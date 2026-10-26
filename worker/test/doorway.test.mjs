@@ -41,7 +41,8 @@ const host = () => {
     setWebSocketAutoResponse() {}, blockConcurrencyWhile: (fn) => fn(), acceptWebSocket: (ws) => accepted.push(ws),
     getWebSockets: () => accepted.filter((ws) => !ws.closed), getWebSocketAutoResponseTimestamp: () => null,
     storage: {
-      get: async (key) => Array.isArray(key) ? Object.fromEntries(key.filter((k) => stored.has(k)).map((k) => [k, stored.get(k)])) : stored.get(key),
+      // As Cloudflare's storage: an array of keys answers a Map of those found.
+      get: async (key) => Array.isArray(key) ? new Map(key.filter((k) => stored.has(k)).map((k) => [k, stored.get(k)])) : stored.get(key),
       put: async (key, value) => stored.set(key, value), getAlarm: async () => alarms.length ? alarms.at(-1) : null,
       setAlarm: async (at) => alarms.push(at),
     },
@@ -110,6 +111,20 @@ test("a cancelled door alarm does not pull the ordinary account sweep forward", 
   h.advance(protocol.DOOR_GRANT_MS + 1);
   await r.alarm();
   assert.equal(r.sweepAt, sweepAt);
+});
+
+test("a woken room keeps the pile loop's phase and the account sweep it stored", async () => {
+  const settle = () => new Promise(setImmediate);
+  const h = host(), r = h.room();
+  await settle();
+  const born = r.loopEpoch;
+  assert.ok(born > 0);
+  assert.equal(r.sweepAt, born + protocol.SWEEP_MS);
+  h.advance(30000);
+  const woken = h.room();
+  await settle();
+  assert.equal(woken.loopEpoch, born, "every page keeps hearing the same crackle");
+  assert.equal(woken.sweepAt, born + protocol.SWEEP_MS, "a wake does not push the sweep out");
 });
 
 test("a hibernated room reconstructs its active lease and in-flight room transit", async () => {
