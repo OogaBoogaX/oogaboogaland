@@ -1750,7 +1750,7 @@
     }
     if (!p) throw new Error("No clear spot for the fire pit");
     const pit = place(hubModels.firepit(), p.x, p.z, 0, 0, "firepit", 1.2);
-    // The island's voxel flame: separate tongues stretching and leaning on their own clocks. The pit's embers are
+    // The island's voxel flame: a stream of glowing blocks pouring up off the pit's coals. The pit's embers are
     // the hub's own critter ember batch drawn for the fire at `firePos`, the same style as the HQ hearth's.
     const rig = BL.blaze.createVoxelRig({ scale: 1, sightHidden: true });
     addChild(pit, rig.root);
@@ -9447,8 +9447,7 @@
     for (let i = 0; i < fireHazards.length; i++) {
       const hazard = fireHazards[i];
       if (!hazard.node.visible) continue;
-      const boxes = hazard.boxes || (hazard.node.geometry && hazard.node.geometry.fireBoxes);
-      if (!boxes) continue;
+      const boxes = hazard.boxes;
       const reach = entry.gorilla.bodyRadius + 0.5;
       for (let s = 0; s <= samples; s++) {
         const k = s / samples, x = lerp(fromX, p.x, k), y = lerp(fromY, p.y, k), z = lerp(fromZ, p.z, k);

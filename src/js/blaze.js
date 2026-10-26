@@ -5,25 +5,16 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const { box, makeVox, voxelGeometry, turn, shaded, moved, turnedY, turnedZ, noShadow, cached, variants } = BL.models;
+  const { box, turn, shaded, moved, turnedY, turnedZ, noShadow, cached, variants } = BL.models;
   const { createNode, addChild } = BL.scene;
   const { mulberry32 } = BL.math;
 
   // ---- the arcade hall's smooth blaze -------------------------------------------------------------------------
   // A fat teardrop licking up to a point with three smaller tongues leaning out round its foot, the whole twisted a
   // little as it rises, white-gold at the root through yellow and orange to red at the tips. Smooth and unshadowed,
-  // its tips sway. The arcade stands it at hall size; a pit stands `smoothPit`, the same flame at the pit's size
-  // with the ignition boxes the boxed flame carried.
+  // its tips sway. The arcade stands it at hall size.
   const BLAZE_INKS = ["#fff2b8", "#ffd24a", "#ffa030", "#ff6420"];
-  // The ignition volumes a pit's flame occupies, in the flame's own frame: the gorillas' fire contact reads these.
-  const FIRE_BOXES = new Float32Array([
-    0, 0.09, 0, 0.19, 0.09, 0.19,
-    0, 0.27, 0, 0.23, 0.09, 0.23,
-    0, 0.45, 0, 0.21, 0.09, 0.21,
-    0, 0.63, 0, 0.15, 0.09, 0.15,
-    0, 0.81, 0, 0.07, 0.09, 0.07
-  ]);
-  const buildSmooth = (scale, boxes) => {
+  const buildSmooth = (scale) => {
     const ink = (t) => BLAZE_INKS[Math.min(3, Math.floor(t * 4))];
     const lick = (h, r) => turn([[0, 0], [r * 0.72, h * 0.05], [r, h * 0.2], [r * 0.9, h * 0.38], [r * 0.62, h * 0.58], [r * 0.3, h * 0.8], [0, h]], 8, ink, 0.9);
     const parts = [lick(0.5, 0.13)];
@@ -36,51 +27,12 @@
       v[i + 2] = -x * s + z * c;
     }
     geo.sway = 0.15;
-    if (boxes) geo.fireBoxes = FIRE_BOXES;
     return noShadow(geo);
   };
-  const smooth = cached(() => buildSmooth(1, false));
-  const smoothPit = cached(() => buildSmooth(1.8, true));
-  // The one flicker clock every fire in the page reads: the arcade's flames, the pits' tongues and lights.
+  const smooth = cached(() => buildSmooth(1));
+  // The one flicker clock every fire in the page reads: the arcade's flames, the pits' fires and lights.
   const flare = (t, phase = 0) => Math.sin(t * 11 + phase) * 0.07 + Math.sin(t * 17.3 + phase * 0.48 + 1.1) * 0.05;
 
-  // ---- the voxel tongues -------------------------------------------------------------------------------------
-  // The mine's `flame` model stands tongue 0; the pits burn the block flame further down. Six thin tongues of stacked blocks, different heights, leans and offsets, so the flame is not two mirrored
-  // halves. Each tongue is its own node: it stretches and leans on its own clock. The central tongue keeps a 2x2
-  // foot; the rest are one block wide. The drift within a tongue is a half block at most per level, so the stack
-  // curves instead of standing straight.
-  const VOXEL_UNIT = 0.12;
-  const TONGUE_INKS = ["#fff6c8", "#ffd24a", "#ff8f24", "#e84012"];
-  const TONGUES = [
-    // The tall central tongue is a touch shorter and steadier than the rest: it holds the flame's height, so it
-    // stretches and leans less and sways least of all.
-    { h: 9, x: 0.0, z: 0.0, leanZ: 0.03, leanX: -0.02, phase: 0.0, speed: 2.1, amp: 0.06, leanSpeed: 1.1, leanAmp: 0.03, sway: 0.04 },
-    { h: 7, x: 0.2, z: 0.06, leanZ: 0.12, leanX: 0.03, phase: 1.7, speed: 2.6, amp: 0.13, leanSpeed: 1.7, leanAmp: 0.06 },
-    { h: 8, x: -0.18, z: 0.1, leanZ: -0.14, leanX: -0.04, phase: 3.1, speed: 2.3, amp: 0.14, leanSpeed: 1.5, leanAmp: 0.07 },
-    { h: 6, x: 0.1, z: -0.16, leanZ: 0.1, leanX: -0.12, phase: 4.4, speed: 2.9, amp: 0.15, leanSpeed: 1.9, leanAmp: 0.06 },
-    { h: 7, x: -0.1, z: -0.1, leanZ: -0.1, leanX: 0.1, phase: 5.6, speed: 2.5, amp: 0.13, leanSpeed: 1.6, leanAmp: 0.06 }
-  ];
-  const buildTongue = (i) => {
-    const T = TONGUES[i], rand = mulberry32(97 + i * 13), vox = makeVox();
-    let ox = 0, oz = 0;
-    for (let y = 0; y < T.h; y++) {
-      const t = T.h <= 1 ? 0 : y / (T.h - 1);
-      const c = Math.min(3, Math.floor(t * 4));
-      ox += (rand() - 0.5) * 0.12;
-      oz += (rand() - 0.5) * 0.12;
-      const cx = Math.round(ox * 2) / 2, cz = Math.round(oz * 2) / 2;
-      // A fat 3x3 foot, then one block narrower at a time (2x2, then 1x1), so the top is a point and the base
-      // is full. The grid coord is the block's corner, so a centred cluster sits at (centre - 0.5).
-      const w = t < 0.2 ? 3 : t < 0.55 ? 2 : 1, half = (w - 1) / 2;
-      for (let gx = 0; gx < w; gx++) {
-        for (let gz = 0; gz < w; gz++) {
-          vox.set(cx - half + gx - 0.5, y, cz - half + gz - 0.5, c);
-        }
-      }
-    }
-    return noShadow(voxelGeometry(vox, { unit: VOXEL_UNIT, palette: TONGUE_INKS, emissive: { 0: 1, 1: 1, 2: 1, 3: 1 } }));
-  };
-  const tongueGeo = variants((i) => buildTongue(i));
   // The ember lives here. `emberModel` is the hub's `ember` (the critters draw it as an instanced batch);
   // `buildEmberModel` makes a fresh object of the same look for a second batch, because the WebGL renderer keys
   // an instanced batch by geometry: two batches sharing one object leave one of them never drawn. `emberGeometry`
@@ -101,12 +53,85 @@
   // one geometry (four instanced draws) and the bloom softens the edges. A slow gust and a quicker flutter lean the
   // upper stream; nothing allocates per frame.
   const FLAME_BANDS = [
-    // The white-hot core is the widest and busiest at the foot of the fire, so it reads through the yellow body
-    // above it instead of being covered: more blocks, spread across the coals, and the yellow band starts higher.
-    { color: "#fff0a8", count: 14, y0: 0.16, y1: 0.24, r: 0.26, size0: 0.17, size1: 0.23, life0: 1.45, life1: 2.65, vy0: 0.41, vy1: 0.6, stretch: 0.2, glow: 2.8 },
-    { color: "#ffd03a", count: 12, y0: 0.32, y1: 0.44, r: 0.3, size0: 0.16, size1: 0.21, life0: 0.67, life1: 0.93, vy0: 0.56, vy1: 0.75, stretch: 0.5, glow: 2.2 },
-    { color: "#ff8a1e", count: 12, y0: 0.24, y1: 0.4, r: 0.3, size0: 0.19, size1: 0.25, life0: 0.8, life1: 1.13, vy0: 0.68, vy1: 0.86, stretch: 0.9, glow: 1.8 },
-    { color: "#e0381a", count: 9, y0: 0.55, y1: 0.72, r: 0.16, size0: 0.12, size1: 0.17, life0: 0.53, life1: 0.8, vy0: 0.75, vy1: 0.98, stretch: 1.4, glow: 1.4 }
+    // Flame band object properties:
+    //   color:    hex color string, block color in band
+    //   count:    number of blocks to spawn in band
+    //   y0:       minimum vertical start height (fraction of flame)
+    //   y1:       maximum vertical start height (fraction of flame)
+    //   r:        horizontal radius at this band (max distance from axis)
+    //   size0:    minimum block size
+    //   size1:    maximum block size
+    //   life0:    minimum lifespan of a block (seconds)
+    //   life1:    maximum lifespan of a block (seconds)
+    //   vy0:      minimum upward speed (units/s)
+    //   vy1:      maximum upward speed (units/s)
+    //   stretch:  block stretch (y axis scale vs x/z)
+    //   glow:     how much bloom/glow to add
+
+    // Band 0: White-hot core
+    {
+      color: "#fff0a8",
+      count: 10,
+      y0: 0.16,
+      y1: 0.20,
+      r: 0.3,
+      size0: 0.17,
+      size1: 0.23,
+      life0: 1.45,
+      life1: 2.0,
+      vy0: 0.1,
+      vy1: 0.3,
+      stretch: 0.2,
+      glow: 2.8
+    },
+    // Band 1: Yellow body
+    {
+      color: "#ffd03a",
+      count: 8,
+      y0: 0.20,
+      y1: 0.34,
+      r: 0.25,
+      size0: 0.16,
+      size1: 0.21,
+      life0: 0.8,
+      life1: 1.3,
+      vy0: 0.4,
+      vy1: 0.6,
+      stretch: 0.5,
+      glow: 2.2
+    },
+    // Band 2: Orange mid-licks
+    {
+      color: "#ff8a1e",
+      count: 6,
+      y0: 0.24,
+      y1: 0.4,
+      r: 0.3,
+      size0: 0.12,
+      size1: 0.16,
+      life0: 1.0,
+      life1: 1.5,
+      vy0: 0.4,
+      vy1: 0.6,
+      stretch: 0.9,
+      glow: 1.4
+    },
+    // Band 3: Red tips
+    {
+      color: "#e0381a",
+      count: 7,
+      y0: 0.5,
+      y1: 0.65,
+      r: 0.16,
+      size0: 0.12,
+      size1: 0.17,
+      life0: 0.53,
+      life1: 1.1,
+      vy0: 0.55,
+      vy1: 0.8,
+      stretch: 1.2,
+      glow: 1.0
+    }
   ];
   // A block a little taller than wide, so a rising one reads as a lick, not a cube.
   // How fast a rising block is drawn in toward the flame's axis, per second: what narrows the stream to a point.
@@ -116,7 +141,7 @@
   // FLAME_RATE is the flame's own clock: below 1 the whole stream slows — rise, life, sway, spin and light — while
   // its shape and height stay put (a block travels the same distance over a longer wall-clock life). Embers and
   // sparks keep the page's clock, so the fire throws them as often as before.
-  const FLAME_RATE = 0.7, FLAME_RISE = 0.72, FLAME_FADE_FROM = 0.5, FLAME_FADE_TO = 0.85;
+  const FLAME_RATE = 0.8, FLAME_RISE = 0.72, FLAME_FADE_FROM = 0.5, FLAME_FADE_TO = 0.85;
   const flameBlock = variants((i) => noShadow(box({ w: 1, h: 1.8, d: 1, color: FLAME_BANDS[i].color, emissive: 1 })));
   // The glowing bed the flame stands on: coals wedged in the gaps between the pit's three crossed logs (which lie
   // at 0, 60 and 120 degrees, 0.12 to 0.29 up), and one bright coal where they cross.
@@ -244,7 +269,7 @@
           timer = 0.3 + Math.random() * 0.6;
           let e = embers[0];
           for (let i = 0; i < embers.length; i++) if (!embers[i].life) { e = embers[i]; break; }
-          // Embers leave from the top of the fire, clear of the tongues and the pit stones, and drift outward as
+          // Embers leave from the top of the fire, clear of the flame's body and the pit stones, and drift outward as
           // they rise, so a viewer sees them come out of the fire instead of through its body.
           const a = Math.random() * Math.PI * 2, r = 0.22 + Math.random() * 0.28, outward = 0.2 + Math.random() * 0.3;
           e.node.visible = true;
@@ -278,5 +303,5 @@
     return rig;
   };
 
-  BL.blaze = { smooth, smoothPit, flare, createVoxelRig, tongueGeo, emberModel, buildEmberModel, TONGUE_COUNT: TONGUES.length };
+  BL.blaze = { smooth, flare, createVoxelRig, emberModel, buildEmberModel };
 })();

@@ -127,7 +127,7 @@
   // The last hundredth of a coin the payout tick sounded for, the halving's lamp dip, and its countdown.
   let paidShown = -1, halvingDim = 0, halvingShown = -1;
   let shownLayout = -1, shownFaults = -1, shownMilestone = 0, shownLog = 0, shownEvent = -1, shownCard = "", shownArrivals = 0, shownStrikes = 0;
-  let cpuNodes, gpuNodes, padNodes, holderNodes, powerNodes, trophyNodes, gearNodes, markerNodes, flameRigs, lampNodes, busbars;
+  let cpuNodes, gpuNodes, padNodes, holderNodes, powerNodes, trophyNodes, gearNodes, markerNodes, flameRigs, fireRigOf, lampNodes, busbars;
   // The fan spot a chamber's cooling fault is worked from: its first fan standing, else its first spot.
   const coolSpotOf = (c) => {
     for (let k = c * R.COOL_SPOTS; k < (c + 1) * R.COOL_SPOTS; k++) if (s.cooler[k]) return k;
@@ -436,13 +436,15 @@
       asicBatches[k].instanceCount = asicCount[k];
       asicBatches[k].instanceVersion++;
     }
-    // A flame over every fire.
+    // A flame over every fire. The rig each fault shows is the scene's, kept off the sim's fault so a save
+    // stays plain data.
     let f = 0;
+    fireRigOf.clear();
     for (const fault of s.faults) {
       if (!fault.active || fault.kind !== "fire" || f >= FLAMES) continue;
       unitSpot(fault.unit, SPOT);
       const rig = flameRigs[f++];
-      fault.rig = rig;
+      fireRigOf.set(fault, rig);
       rig.root.visible = true;
       rig.root.position.x = SPOT.x;
       rig.root.position.y = SPOT.y + 0.1;
@@ -625,7 +627,7 @@
     for (const fault of s.faults) {
       if (!fault.active) continue;
       spotOf(fault.kind, fault.unit, SPOT);
-      const fk = fault.rig ? fault.rig.light : 1;
+      const rig = fireRigOf.get(fault), fk = rig ? rig.light : 1;
       n = fault.kind === "fire" ? pushLight(n, SPOT.x, SPOT.y + 0.8, SPOT.z, 7, 1 * fk, 0.42 * fk, 0.12 * fk) : fault.kind === "melt" ? pushLight(n, SPOT.x, SPOT.y + 0.6, SPOT.z, 6, 1, 0.15, 0.1) : pushLight(n, SPOT.x, 2, SPOT.z, 5, 0.9, 0.25, 0.1);
     }
     const out = dark();
@@ -1922,7 +1924,7 @@
     // A sounding smoke alarm blinks its light; a quiet one glows faintly.
     const blink = Math.floor(sceneTime * 4) % 2 ? 1.6 : 0.15;
     for (let c = 0; c <= s.dug; c++) gearNodes[2][c].glow = s.alarmOn[c] ? blink : 0.4;
-    // Each fire's tongues flicker on their own clocks; the fire itself is the sim's.
+    // Each fire's flame flickers on its own clock; the fire itself is the sim's.
     for (let f = 0; f < FLAMES; f++) {
       const rig = flameRigs[f];
       if (rig.root.visible) rig.update(dt, sceneTime);
@@ -2149,6 +2151,7 @@
     markerNodes = [];
     for (let m = 0; m < MARKERS; m++) markerNodes.push(place(createNode({ geometry: MM.marker(), visible: false })));
     flameRigs = [];
+    fireRigOf = new Map();
     for (let f = 0; f < FLAMES; f++) {
       const rig = BL.blaze.createVoxelRig({ scale: 0.7, embers: { get fx() { return fx; }, bits: FIRE_BITS } });
       place(rig.root);
@@ -2315,7 +2318,7 @@
     drag.count = 0;
     selection.type = "";
     hud = mhud = hooks = input = pilot = fx = audio = crew = clock = cave = props = asicBatches = motes = candles = hashMarks = chartLabels = labelCanvas = labelCtx = null;
-    cpuNodes = gpuNodes = padNodes = holderNodes = powerNodes = trophyNodes = gearNodes = markerNodes = flameRigs = lampNodes = busbars = null;
+    cpuNodes = gpuNodes = padNodes = holderNodes = powerNodes = trophyNodes = gearNodes = markerNodes = flameRigs = fireRigOf = lampNodes = busbars = null;
     breakers = levers = fanNodes = bladeNodes = batteryNode = null;
     sim = s = null;
     mineScene.input = mineScene.debug = mineScene.agentControls = null;
@@ -2326,7 +2329,7 @@
   // or housekeeping frees a buffer the next purchase is about to want back.
   const liveGeometry = (set) => {
     set.add(MM.pebbleBox()).add(MM.shinyRocks()).add(MM.rackFrame()).add(MM.coldPool()).add(MM.pad())
-      .add(MM.marker()).add(MM.flame()).add(MM.seal()).add(MM.fanBlade()).add(MM.fanBlur()).add(MM.candle(0)).add(MM.candle(1)).add(MM.candle(2)).add(MM.chartMark(0)).add(MM.chartMark(1)).add(MM.priceBoard(0)).add(MM.priceBoard(1)).add(MM.fanWall()).add(MM.boxFan());
+      .add(MM.marker()).add(MM.seal()).add(MM.fanBlade()).add(MM.fanBlur()).add(MM.candle(0)).add(MM.candle(1)).add(MM.candle(2)).add(MM.chartMark(0)).add(MM.chartMark(1)).add(MM.priceBoard(0)).add(MM.priceBoard(1)).add(MM.fanWall()).add(MM.boxFan());
     for (let c = 0; c < NC; c++) set.add(MM.chamberDecor(c));
     for (let k = 0; k < ASIC_MODELS; k++) set.add(MM.asic(k));
     for (const build of MM.POWER_BUILDERS) set.add(build());
