@@ -445,6 +445,10 @@
     phase.update(dt, phase.ripples.time + dt);
     return true;
   };
+  const absorbCaveVeil = (ax, ay, az, point, dt) => {
+    for (const veil of caveVeils) if (veil.phase.absorb(ax, ay, az, point, dt)) return true;
+    return false;
+  };
   // The two boards across the hole from the vine bridge, one reading the chain and one reading the
   // weather. Each holds its canvas, its panel node and the reading it last drew, so a snapshot saying
   // nothing new replaces no geometry.
@@ -667,6 +671,8 @@
   const sceneryClaims = [];
   const matrixGates = [];
   const sealedCaves = [];
+  // Mouths without a specialized portal share the lab's transparent contact veil.
+  const caveVeils = [], ARCADE_VEIL_TINT = [1, 0.16, 0.12];
   let sceneryVisible = 0, sceneryRadiusCulled = 0, sceneryPathCulled = 0, sceneryFixedCulled = 0, sceneryReflows = 0;
   const addTarget = (node, owner, opts) => {
     input.add(node, owner, opts);
@@ -1840,6 +1846,11 @@
         ]
       });
       if (mirrorCave && mirrorCave.slot === slot) mirrorCave.sign = sign;
+    }
+    if (slot.status !== "mirror" && slot.scene !== "lab" && slot.scene !== "factory" && slot.place !== "bca") {
+      const seal = slot.status === "dark" ? sealedCaves[sealedCaves.length - 1] : null;
+      caveVeils.push({ mouth: m, group, opening: rim.geometry.openingBounds,
+        plane: seal ? seal.stopZ + 0.02 : PORTAL_Z, tint: slot.scene === "arcade" ? ARCADE_VEIL_TINT : null, phase: null });
     }
     dressMouth(slot, m, group);
     addChild(root, group);
@@ -7471,6 +7482,7 @@
     }
     mirrorCave.ripples.update(dt, elapsed);
     updatePortalEffects(entropyLab.phase, dt);
+    for (const veil of caveVeils) updatePortalEffects(veil.phase, dt);
     if (factoryMouth) factoryShield(dt, elapsed);
     if (bifrostIsle) bifrostGate(dt, elapsed);
     if (bcaMouth) bcaVeil(dt, elapsed);
@@ -7642,6 +7654,10 @@
     mirrorCave.body.update(dt);
     entropyLab.phase.body.update(dt);
     entropyLab.phase.body.time = entropyLab.phase.ripples.time;
+    for (const veil of caveVeils) {
+      veil.phase.body.update(dt);
+      veil.phase.body.time = veil.phase.ripples.time;
+    }
     if (bcaMouth) {
       bcaMouth.phase.body.update(dt);
       bcaMouth.phase.body.time = bcaMouth.phase.ripples.time;
@@ -8169,15 +8185,18 @@
     || (rockGuides = BL.rockGuides.create({ island, sealed: sealedCaves }));
   const trackMirrorObject = (node, radius, vertexCapacity) => {
     entropyLab?.phase?.body?.track(node, radius, vertexCapacity);
+    for (const veil of caveVeils) veil.phase?.body.track(node, radius, vertexCapacity);
     return mirrorCave?.body?.track(node, radius, vertexCapacity);
   };
   const untrackMirrorObject = (node) => {
     entropyLab?.phase?.body?.untrack(node);
+    for (const veil of caveVeils) veil.phase?.body.untrack(node);
     return mirrorCave?.body?.untrack(node);
   };
   const refreshMirrorObject = (node) => {
     mirrorCave?.body?.refresh(node);
     entropyLab?.phase?.body?.refresh(node);
+    for (const veil of caveVeils) veil.phase?.body.refresh(node);
     if (crew) for (let i = 0; i < crew.list.length; i++) {
       const actor = crew.list[i];
       if (actor.root !== node) continue;
@@ -10530,6 +10549,11 @@
     mirrorCave.ripples = BL.mirrorRipples.create(mirrorCave.node);
     entropyLab.phase = BL.labPhase.create(entropyLab.group, entropyLab.mouth, entropyLab.opening);
     yield* pause(slice);
+    for (const veil of caveVeils) {
+      veil.phase = BL.labPhase.create(veil.group, veil.mouth, veil.opening, veil.plane, veil.tint);
+      veil.phase.pause(true);
+      yield* pause(slice);
+    }
     // The factory's shield crests in its emitters' cyan, and on WebGL its window into the hall, which shows the page's
     // one factory node: the island ticks it while it is here, as the hall does.
     if (factoryMouth) {
@@ -10563,6 +10587,7 @@
       || !!(factoryMouth && factoryMouth.phase.absorb(ax, ay, az, point, dt))
       || !!(bcaMouth && bcaMouth.phase.absorb(ax, ay, az, point, dt))
       || !!(bifrostIsle && bifrostIsle.phase.absorb(ax, ay, az, point, dt))
+      || absorbCaveVeil(ax, ay, az, point, dt)
       || !!(workShot && source && shared.workSites[source.work.site]?.mirrorRoom
         && mirrorCave.ripples.absorb(ax, ay, az, point));
     shared.onProjectileMove = (ax, ay, az, bx, by, bz, dt) => mirrorCave.ripples.cross(ax, ay, az, bx, by, bz, dt);
@@ -10773,6 +10798,8 @@
     if (bcaMouth) for (const cave of crew.list) bcaMouth.phase.body.track(cave.root, cave.traits.height * 2,
       Math.max(cave.headOpen.verts.length, cave.headClosed.verts.length));
     if (bifrostIsle) for (const cave of crew.list) bifrostIsle.phase.body.track(cave.root, cave.traits.height * 2,
+      Math.max(cave.headOpen.verts.length, cave.headClosed.verts.length));
+    for (const veil of caveVeils) for (const cave of crew.list) veil.phase.body.track(cave.root, cave.traits.height * 2,
       Math.max(cave.headOpen.verts.length, cave.headClosed.verts.length));
     if (magazine) trackMirrorObject(magazine.node, 1);
     for (let caveIndex = 0; caveIndex < crew.list.length; caveIndex++) {
@@ -11321,6 +11348,8 @@
     mirrorCave.ripples.dispose();
     entropyLab.phase.dispose();
     entropyLab = null;
+    for (const veil of caveVeils) veil.phase.dispose();
+    caveVeils.length = 0;
     if (factoryMouth) {
       if (factoryMouth.hall) factoryMouth.hall.dispose();
       if (factoryMouth.roofWindow) factoryMouth.roofWindow.dispose();
@@ -11420,6 +11449,7 @@
     pile.liveGeometry(set);
     clankers.liveGeometry(set);
     entropyLab.phase.liveGeometry(set);
+    for (const veil of caveVeils) veil.phase.liveGeometry(set);
     if (factoryMouth) factoryMouth.phase.liveGeometry(set);
     if (bcaMouth) bcaMouth.phase.liveGeometry(set);
     if (bifrostIsle) bifrostIsle.phase.liveGeometry(set);
@@ -11457,6 +11487,10 @@
       if (ghosts && ghosts.inMotion) return true; // HALLOWEEN
       if (pile.inMotion || fx.inMotion || poolEffectsActive && (weather.active || mempoolIsland.water.active) || magazine && magazine.revealed || mirrorCave.ripples.active || mirrorCave.body.active) return true;
       if (!entropyLab.phase.paused && (entropyLab.phase.ripples.active || entropyLab.phase.body.contacts || entropyLab.phase.body.active)) return true;
+      for (const veil of caveVeils) {
+        const phase = veil.phase;
+        if (!phase.paused && (phase.ripples.active || phase.body.contacts || phase.body.active)) return true;
+      }
       if (bcaMouth && !bcaMouth.phase.paused && (bcaMouth.phase.ripples.active || bcaMouth.phase.body.contacts || bcaMouth.phase.body.active)) return true;
       for (const sign of headquarters.roomSigns) if (sign.velocity || sign.node.rotation.x) return true;
       return false;

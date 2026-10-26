@@ -26,7 +26,7 @@
   const QUALITY = {
     high: { dpr: 1.5, msaa: 2, shadow: 2048, bloom: true, shafts: true, mirror: 1024, mirrorCadence: 1, prepass: true, environment: 128, environmentCadence: 1, lights: 32 },
     medium: { dpr: 1.25, msaa: 2, shadow: 1024, bloom: true, shafts: true, mirror: 768, mirrorCadence: 2, prepass: true, environment: 96, environmentCadence: 2, lights: 20 },
-    low: { dpr: 1, msaa: 0, shadow: 512, bloom: false, shafts: false, mirror: 512, mirrorCadence: 3, prepass: true, environment: 64, environmentCadence: 4, lights: 10 }
+    low: { dpr: 1, msaa: 0, shadow: 512, bloom: false, shafts: false, mirror: 256, mirrorCadence: 4, prepass: true, environment: 64, environmentCadence: 4, lights: 10 }
   };
   const INSTANCE_FLOATS = 20;
   const NO_OBJECT_CLIP = new Float32Array([0, 0, 0, -1]);
@@ -59,7 +59,10 @@
   const NO_MIRROR_BODY_WAVES = new Float32Array(BL.mirrorBody.CAPACITY * 4);
   const FOG_OFF = 1e8;
   const LIGHT_EYE = { x: 0, y: 0, z: 0 };
-  const MESH_STRIDE = 10;
+  // A mesh vertex in 32-bit words: its position (3 floats), its unit normal (10:10:10:2), its colour with the normal's
+  // length in 32nds (4 bytes; the length marks water, lava, roads, the lake and voxel detail) and its emissive code
+  // (1 float). 24 bytes against the 40 of ten floats; a mirror source adds 3 floats and a rig's joint 1.
+  const MESH_WORDS = 6;
   const LINE_STRIDE = 12;
   const MATRIX_MASKS = new Int32Array([630678, 497559, 988959, 495513, 1009263, 288049, 456438, 616809]);
   // Projection-weighted rays stay parallel in orthographic views and retain
@@ -117,8 +120,11 @@ precision highp float;
 // The depth pre-pass draws these vertices through its own program; invariance keeps both programs' depths equal.
 invariant gl_Position;
 layout(location=0) in vec3 aPos;
-layout(location=1) in vec3 aNormal;
-layout(location=2) in vec4 aColor;
+// Packed (MESH_WORDS): the unit normal; the colour, its alpha the normal's length in 32nds, which marks the material;
+// the emissive code.
+layout(location=1) in vec3 aNormalUnit;
+layout(location=2) in vec4 aColorPacked;
+layout(location=10) in float aEmissive;
 layout(location=3) in vec4 aM0;
 layout(location=4) in vec4 aM1;
 layout(location=5) in vec4 aM2;
@@ -177,6 +183,8 @@ vec3 lakeBodyWarp(vec3 p) {
   return q;
 }
 void main() {
+  vec3 aNormal = aNormalUnit * (aColorPacked.a * (255.0 / 32.0));
+  vec4 aColor = vec4(aColorPacked.rgb, aEmissive);
   mat4 m = rigMatrix(mat4(aM0, aM1, aM2, aM3));
   vec4 params = uRigCount > 0 ? uRigParams[int(aJoint)] : aParams;
   vVoxel = uRigCount > 0 ? uRigVoxels[int(aJoint)] : uVoxel;
@@ -1739,7 +1747,7 @@ void main() {
     const canvasSurfaces = new WeakMap();
     let canvasSurfaceSerial = 0;
     const res = { programs: {}, fbo: null, shadow: null, bloom: null, quadVao: null, matrixTexture: null };
-    const mirror = { node: null, record: null, geometry: null, program: null, programReady: false, fb: null, tex: null, depth: null, width: 0, height: 0, renderWidth: 0, renderHeight: 0, capturedWidth: 0, capturedHeight: 0, portal: false, reveal: 0, frontFacing: false, walkThrough: false, captureValid: false, readable: false, bodyTex: null, bodyState: null, bodyVersion: -1, shards: 0, query: null, queryPending: false, occluded: false, frame: 0 };
+    const mirror = { node: null, record: null, geometry: null, program: null, programReady: false, fb: null, tex: null, depth: null, width: 0, height: 0, renderWidth: 0, renderHeight: 0, capturedWidth: 0, capturedHeight: 0, portal: false, reveal: 0, frontFacing: false, walkThrough: false, captureValid: false, readable: false, bodyTex: null, bodyState: null, bodyVersion: -1, shards: 0, query: null, queryPending: false, occluded: false, frame: 0, cadence: 1 };
     const environment = { program: null, ready: false, fb: null, tex: null, depth: null, size: 0, next: 0, valid: 0, frame: 0, origin: new Float32Array(3) };
     // Reflectors: plain planar mirrors a scene may hold several of (the factory's peer shields), each with a capture
     // of its own, drawn with the mirror's program and their ripples. The mirror above stays the one mirror with
@@ -2234,6 +2242,7 @@ void main() {
       if (rec.mesh) {
         gl.deleteVertexArray(rec.mesh.vao);
         gl.deleteBuffer(rec.mesh.vbo);
+        if (rec.mesh.ebo) gl.deleteBuffer(rec.mesh.ebo);
       }
       if (rec.line) {
         gl.deleteVertexArray(rec.line.vao);
@@ -2339,30 +2348,53 @@ void main() {
       }
       stream.slot = (stream.slot + 1) % 6;
     };
-    const makePart = (data, floatsPerVertex, layout, ibo) => {
+    // `layout` holds [location, size, type, normalized, byte offset] for each attribute of a `stride`-byte vertex. With
+    // `indices` the part is drawn through them, and its `count` and every range drawn from it count indices.
+    const makePart = (data, stride, layout, ibo, indices = null) => {
       const vao = gl.createVertexArray();
       gl.bindVertexArray(vao);
       const vbo = gl.createBuffer();
       gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
       gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
-      let offset = 0;
-      for (const [loc, size] of layout) {
+      for (const [loc, size, type, normalized, offset] of layout) {
         gl.enableVertexAttribArray(loc);
-        gl.vertexAttribPointer(loc, size, gl.FLOAT, false, floatsPerVertex * 4, offset * 4);
-        offset += size;
+        gl.vertexAttribPointer(loc, size, type, normalized, stride, offset);
       }
       bindInstanceAttribs(ibo);
+      let ebo = null;
+      if (indices) {
+        ebo = gl.createBuffer();
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ebo);
+        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
+      }
       gl.bindVertexArray(null);
-      return { vao, vbo, count: data.length / floatsPerVertex };
+      return { vao, vbo, ebo, index: indices ? (indices.BYTES_PER_ELEMENT === 2 ? gl.UNSIGNED_SHORT : gl.UNSIGNED_INT) : 0,
+        indexSize: indices ? indices.BYTES_PER_ELEMENT : 0, count: indices ? indices.length : data.byteLength / stride };
+    };
+    // Triangles `first` to `first + count` (in corners) of a part, `instances` times.
+    const drawPart = (part, first, count, instances) => {
+      if (part.index) gl.drawElementsInstanced(gl.TRIANGLES, count, part.index, first * part.indexSize, instances);
+      else gl.drawArraysInstanced(gl.TRIANGLES, first, count, instances);
+    };
+    // Indices for `vertices` corners, reserving the type's maximum index for WebGL 2 primitive restart.
+    const indexArray = (vertices, length) => vertices <= 65535 ? new Uint16Array(length) : new Uint32Array(length);
+    // A packed mesh vertex (MESH_WORDS), and an extra float attribute after it: [location, size].
+    const meshLayout = (extra) => {
+      const layout = [[0, 3, gl.FLOAT, false, 0], [1, 4, gl.INT_2_10_10_10_REV, true, 12], [2, 4, gl.UNSIGNED_BYTE, true, 16], [10, 1, gl.FLOAT, false, 20]];
+      if (extra) layout.push([extra[0], extra[1], gl.FLOAT, false, MESH_WORDS * 4]);
+      return layout;
     };
     const buildMeshPart = (geometry, ibo, dataOnly = false) => {
       const { verts, faces } = geometry;
       const cursor = geometry.compactGeometry ? BL.compactGeometry.createCursor(geometry) : null;
       const readFace = index => cursor ? BL.compactGeometry.readFace(geometry, index, cursor) : faces[index];
-      let triCount = 0;
-      for (let index = 0; index < faces.length; index++) triCount += readFace(index).i.length - 2;
+      let triCount = 0, corners = 0;
+      for (let index = 0; index < faces.length; index++) {
+        const f = readFace(index);
+        if (f.i.length > 2) { triCount += f.i.length - 2; corners += f.i.length; }
+      }
       if (!triCount) return null;
-      const source = geometry.mirrorSource, stride = source ? MESH_STRIDE + 3 : MESH_STRIDE;
+      const source = geometry.mirrorSource, stride = source ? MESH_WORDS + 3 : MESH_WORDS;
       // A voxel geometry names its grid; a face whose corners all sit on it gets block detail, flagged by a doubled
       // normal. Faces moved off the grid after the build (a shift, a scale, a merged prop) simply go without.
       const voxel = geometry.voxel || null;
@@ -2374,7 +2406,10 @@ void main() {
         return true;
       };
       let gridded = 0;
-      const out = new Float32Array(triCount * 3 * stride);
+      // A face's corners are written once and its triangles fan out of them through the indices.
+      const out = new ArrayBuffer(corners * stride * 4), words = new Uint32Array(out), floats = new Float32Array(out), bytes = new Uint8ClampedArray(out);
+      const indices = indexArray(corners, triCount * 3);
+      let n = 0;
       // A `smooth` geometry shades with vertex normals: each face's area-weighted Newell normal summed into the
       // vertices it uses, once at upload (cartoon foliage reads as soft round clumps, not facets).
       const smooth = geometry.smooth ? new Float32Array(verts.length) : null;
@@ -2395,23 +2430,25 @@ void main() {
       let o = 0;
       const put = (idx, nx, ny, nz, c, e) => {
         const b = idx * 3;
-        out[o++] = verts[b];
-        out[o++] = verts[b + 1];
-        out[o++] = verts[b + 2];
+        floats[o] = verts[b];
+        floats[o + 1] = verts[b + 1];
+        floats[o + 2] = verts[b + 2];
         if (given && (given[b] || given[b + 1] || given[b + 2])) {
           nx = given[b]; ny = given[b + 1]; nz = given[b + 2];
         } else if (smooth) {
           const l = Math.hypot(smooth[b], smooth[b + 1], smooth[b + 2]) || 1;
           nx = smooth[b] / l; ny = smooth[b + 1] / l; nz = smooth[b + 2] / l;
         }
-        out[o++] = nx;
-        out[o++] = ny;
-        out[o++] = nz;
-        out[o++] = c[0] / 255;
-        out[o++] = c[1] / 255;
-        out[o++] = c[2] / 255;
-        out[o++] = e;
-        if (source) { out[o++] = source[b]; out[o++] = source[b + 1]; out[o++] = source[b + 2]; }
+        const length = Math.hypot(nx, ny, nz), unit = length ? 511 / length : 0;
+        words[o + 3] = (Math.round(nx * unit) & 1023) | (Math.round(ny * unit) & 1023) << 10 | (Math.round(nz * unit) & 1023) << 20;
+        const at = (o + 4) * 4;
+        bytes[at] = c[0];
+        bytes[at + 1] = c[1];
+        bytes[at + 2] = c[2];
+        bytes[at + 3] = length * 32;
+        floats[o + 5] = e;
+        if (source) { floats[o + 6] = source[b]; floats[o + 7] = source[b + 1]; floats[o + 8] = source[b + 2]; }
+        o += stride;
       };
       const writeFace = (f) => {
         // Newell's method, stable when leading vertices coincide.
@@ -2440,10 +2477,13 @@ void main() {
         }
         const emissive = f.emissive || 0;
         const e = f.matrixCave || f.matrixLocalGlyphSurface || f.matrixWorldGlyphSurface || f.matrixPermanentFallback ? -1 - (f.matrixCave || 0) * 2 - (f.matrixWorldGlyphSurface ? 32 : 0) - (f.matrixPermanentFallback ? 64 : 0) - emissive : emissive;
+        if (f.i.length < 3) return;
+        const first = o / stride;
+        for (const idx of f.i) put(idx, nx, ny, nz, f.color, e);
         for (let k = 1; k < f.i.length - 1; k++) {
-          put(f.i[0], nx, ny, nz, f.color, e);
-          put(f.i[k], nx, ny, nz, f.color, e);
-          put(f.i[k + 1], nx, ny, nz, f.color, e);
+          indices[n++] = first;
+          indices[n++] = first + k;
+          indices[n++] = first + k + 1;
         }
       };
       // Faces the plain shader variant can draw (no special water, no Matrix cave or glyph tags) lead, so a camera
@@ -2454,31 +2494,34 @@ void main() {
         for (let index = 0; index < faces.length; index++) writeFace(readFace(index));
       } else {
         for (let index = 0; index < faces.length; index++) { const f = readFace(index); if (!special(f)) writeFace(f); }
-        plainCount = o / stride;
+        plainCount = n;
         for (let index = 0; index < faces.length; index++) { const f = readFace(index); if (special(f)) writeFace(f); }
       }
-      if (dataOnly) return { data: out, voxel: gridded ? voxel : null };
-      const part = makePart(out, stride, source ? [[0, 3], [1, 3], [2, 4], [9, 3]] : [[0, 3], [1, 3], [2, 4]], ibo);
+      if (dataOnly) return { data: words, indices, voxel: gridded ? voxel : null };
+      const part = makePart(out, stride * 4, meshLayout(source ? [9, 3] : null), ibo, indices);
       part.voxel = gridded ? voxel : null;
       part.plainCount = plainCount;
       return part;
     };
     const buildRigPart = (rig, ibo) => {
       const parts = rig.sources.map(geometry => buildMeshPart(geometry, ibo, true));
-      let length = 0;
-      for (const part of parts) length += part ? part.data.length / MESH_STRIDE * (MESH_STRIDE + 1) : 0;
-      const data = new Float32Array(length);
-      let offset = 0;
+      let vertices = 0, count = 0;
+      for (const part of parts) if (part) { vertices += part.data.length / MESH_WORDS; count += part.indices.length; }
+      const data = new ArrayBuffer(vertices * (MESH_WORDS + 1) * 4), words = new Uint32Array(data), floats = new Float32Array(data);
+      const indices = indexArray(vertices, count);
+      let offset = 0, n = 0;
       for (let joint = 0; joint < parts.length; joint++) {
         const part = parts[joint];
         if (!part) continue;
         if (part.voxel) rig.voxels.set(part.voxel, joint * 4);
-        for (let i = 0; i < part.data.length; i += MESH_STRIDE) {
-          for (let k = 0; k < MESH_STRIDE; k++) data[offset++] = part.data[i + k];
-          data[offset++] = joint;
+        const base = offset / (MESH_WORDS + 1);
+        for (const index of part.indices) indices[n++] = base + index;
+        for (let i = 0; i < part.data.length; i += MESH_WORDS) {
+          for (let k = 0; k < MESH_WORDS; k++) words[offset++] = part.data[i + k];
+          floats[offset++] = joint;
         }
       }
-      return makePart(data, MESH_STRIDE + 1, [[0, 3], [1, 3], [2, 4], [8, 1]], ibo);
+      return makePart(data, (MESH_WORDS + 1) * 4, meshLayout([8, 1]), ibo, indices);
     };
     const LINE_CORNERS = [[0, -1], [1, -1], [1, 1], [0, -1], [1, 1], [0, 1]];
     const buildLinePart = (geometry, ibo) => {
@@ -2503,7 +2546,7 @@ void main() {
           out[o++] = l.emissive || 0;
         }
       }
-      const part = makePart(out, LINE_STRIDE, [[0, 3], [1, 3], [2, 2], [8, 4]], ibo);
+      const part = makePart(out, LINE_STRIDE * 4, [[0, 3, gl.FLOAT, false, 0], [1, 3, gl.FLOAT, false, 12], [2, 2, gl.FLOAT, false, 24], [8, 4, gl.FLOAT, false, 32]], ibo);
       part.width = geometry.lineWidth || 1.5;
       return part;
     };
@@ -2974,7 +3017,7 @@ void main() {
       mirrorDebug.portal = mirror.portal;
       mirrorDebug.reveal = mirror.reveal;
     };
-    // Medium captures a pane only while it reads: in at 150 CSS pixels on both axes, out under 130, so a pane near
+    // Other planar reflectors on lower tiers capture only while readable: in at 150 CSS pixels, out under 130, so a pane near
     // the line does not flicker between its reflection and its authored face.
     const paneReadable = (target, paneWidth, paneHeight) => target.readable = target.readable
       ? paneWidth >= 130 && paneHeight >= 130 : paneWidth >= 150 && paneHeight >= 150;
@@ -2995,17 +3038,20 @@ void main() {
         return own && skipMirrorPass("offscreen");
       }
       const area = (Math.min(1, MIRROR_RECT[2]) - Math.max(-1, MIRROR_RECT[0])) * width * 0.5 * (Math.min(1, MIRROR_RECT[3]) - Math.max(-1, MIRROR_RECT[1])) * height * 0.5;
-      if (area < 16) return own && skipMirrorPass("negligible");
-      if (qualityName === "medium" && !paneReadable(target, (Math.min(1, MIRROR_RECT[2]) - Math.max(-1, MIRROR_RECT[0])) * width * 0.5,
+      if (area <= 0 || !own && area < 16) return own && skipMirrorPass("negligible");
+      if (own) {
+        // Keep even a tiny mirror live. Its viewport shrinks below; only its refresh rate steps down, to at most
+        // eight displayed frames between captures. Close low-tier mirrors keep their four-frame budget.
+        mirror.cadence = area * 25 < width * height
+          ? Math.max(settings.mirrorCadence, Math.min(8, Math.ceil(128 / Math.sqrt(area))))
+          : qualityName === "low" ? settings.mirrorCadence : 1;
+      }
+      if (!own && qualityName !== "high" && !paneReadable(target, (Math.min(1, MIRROR_RECT[2]) - Math.max(-1, MIRROR_RECT[0])) * width * 0.5,
           (Math.min(1, MIRROR_RECT[3]) - Math.max(-1, MIRROR_RECT[1])) * height * 0.5)) {
         // A pane too small to read drops its capture, so it shows its authored face rather than a reflection frozen
         // when it was last captured.
-        if (!own) {
-          target.valid = false;
-          return false;
-        }
-        mirror.captureValid = mirrorDebug.captureValid = false;
-        return skipMirrorPass("quality-size");
+        target.valid = false;
+        return false;
       }
       reflectMirrorPoint(mirrorEye, camera.position, center, normal);
       reflectMirrorPoint(mirrorTarget, camera.target, center, normal);
@@ -3314,7 +3360,7 @@ void main() {
       applyCutaway(p, rec.geometry);
       gl.uniform1f(p.u.uClipMaxY, Math.min(rec.geometry.cutawayPreserve ? 1e6 : cutawayMaxY, rec.geometry.clipMaxY ?? 1e6));
       gl.bindVertexArray(rec.mesh.vao);
-      gl.drawArraysInstanced(gl.TRIANGLES, 0, rec.mesh.count, count);
+      drawPart(rec.mesh, 0, rec.mesh.count, count);
       gl.activeTexture(gl.TEXTURE0);
       gl.useProgram(resume.prog);
     };
@@ -3359,7 +3405,7 @@ void main() {
     // The camera pass draws only the in-frustum front of each record; shadow and mirror draw all.
     // 1 draws only the records the plain variant can shade, -1 only the others, 0 all.
     let plainFilter = 0;
-    // A medium reflection keeps the large physical world and every character. Camera and shadow order stay untouched: selected
+    // A lower-tier reflection keeps the large physical world and every character. Camera and shadow order stay untouched: selected
     // instance runs read the existing buffer through a temporary base offset, restored before another pass.
     const captureInstanceVisible = (rec, index) => {
       if (!rec.batch) {
@@ -3618,7 +3664,7 @@ void main() {
           continue;
         }
         gl.bindVertexArray(part.vao);
-        gl.drawArraysInstanced(gl.TRIANGLES, first, count, n);
+        drawPart(part, first, count, n);
         if (offset) gl.disable(gl.POLYGON_OFFSET_FILL);
       }
     };
@@ -3701,7 +3747,7 @@ void main() {
       gl.uniform1f(pg.mesh.u.uMatrixLivingGlobal, matrix ? matrix.livingGlobal ?? 1 : 1);
       pg.mesh.matrixNone = !matrix;
       const previousReducedCapture = reducedCapture;
-      reducedCapture = cube || qualityName === "medium";
+      reducedCapture = cube || qualityName !== "high";
       try {
       drawParts("mesh", "mesh", true);
       if (skyOn) drawSky(mirrorInvViewProj, mirrorEye.y);
@@ -3754,9 +3800,9 @@ void main() {
       const high = w[13] + Math.max(w[1] * min[0], w[1] * max[0]) + Math.max(w[5] * min[1], w[5] * max[1]) + Math.max(w[9] * min[2], w[9] * max[2]);
       return low + (high - low) * mirror.reveal;
     };
-    // Whether the reflective pane draws this frame; when it cannot (low tier, or no capture yet), the camera pass
+    // Whether the reflective pane draws this frame; until its first capture is ready, the camera pass
     // draws the mirror's authored face instead, as uncaptured reflectors keep theirs.
-    const mirrorPaneReady = () => qualityName !== "low" && !mirror.portal && mirror.frontFacing && !!(mirror.record && mirror.record.mesh)
+    const mirrorPaneReady = () => !mirror.portal && mirror.frontFacing && !!(mirror.record && mirror.record.mesh)
       && !!mirror.tex && mirror.programReady && mirror.captureValid;
     const drawMirrorSurface = (camera) => {
       const rec = mirror.record, part = rec && rec.mesh, pg = mirror.program;
@@ -3819,7 +3865,7 @@ void main() {
           if (!mirror.query) mirror.query = gl.createQuery();
           gl.beginQuery(gl.ANY_SAMPLES_PASSED_CONSERVATIVE, mirror.query);
         }
-        gl.drawArraysInstanced(gl.TRIANGLES, 0, part.count, rec.count);
+        drawPart(part, 0, part.count, rec.count);
         if (query) {
           gl.endQuery(gl.ANY_SAMPLES_PASSED_CONSERVATIVE);
           mirror.queryPending = true;
@@ -3845,7 +3891,7 @@ void main() {
           if (!shard.geometry.mirrorSource || !shard.mesh || !shard.drawCount || shard.offscreen) continue;
           applyCutaway(shardProgram, shard.geometry);
           gl.bindVertexArray(shard.mesh.vao);
-          gl.drawArraysInstanced(gl.TRIANGLES, 0, shard.mesh.count, shard.drawCount);
+          drawPart(shard.mesh, 0, shard.mesh.count, shard.drawCount);
           mirrorDebug.shardsDrawn += shard.drawCount;
         }
       }
@@ -3908,7 +3954,7 @@ void main() {
         gl.uniform4fv(pg.u.uRipples, ripples ? ripples.waves : NO_MIRROR_RIPPLES);
         gl.bindTexture(gl.TEXTURE_2D, t.tex);
         gl.bindVertexArray(rec.mesh.vao);
-        gl.drawArraysInstanced(gl.TRIANGLES, 0, rec.mesh.count, rec.count);
+        drawPart(rec.mesh, 0, rec.mesh.count, rec.count);
       }
       // The passes after this one bind their inputs to unit 0.
       gl.activeTexture(gl.TEXTURE0);
@@ -3972,7 +4018,7 @@ void main() {
         const tint = node.rippleTint;
         gl.uniform3f(pg.u.uCrestTint, tint ? tint[0] : -1, tint ? tint[1] : 0, tint ? tint[2] : 0);
         gl.bindVertexArray(rec.mesh.vao);
-        gl.drawArraysInstanced(gl.TRIANGLES, 0, rec.mesh.count, rec.drawCount);
+        drawPart(rec.mesh, 0, rec.mesh.count, rec.drawCount);
         rippleSurfaces += rec.drawCount; rippleWaves += ripples ? ripples.active : 0;
       }
       if (started) {
@@ -4212,9 +4258,6 @@ void main() {
         updateMirrorSide(camera);
         if (mirror.portal) {
           skipMirrorPass("portal-open");
-        } else if (qualityName === "low") {
-          // The ordinary material remains visible; low spends no scene pass on the pane.
-          skipMirrorPass("quality-low");
         } else if (prepareMirrorCamera(camera)) {
           // The last pane the camera drew lost every pixel to depth (rock, a cave wall): its capture is unseen, and the
           // pane keeps the one it has until a query finds it showing again.
@@ -4224,9 +4267,8 @@ void main() {
           }
           if (!ensureMirrorProgram()) skipMirrorPass("shader-pending");
           else if (mirror.occluded && mirror.captureValid) skipMirrorPass("occluded");
-          // A mirror under a twenty-fifth of the view re-captures on the tier's cadence: the whole scene's draws for a
-          // few hundred pixels, where a frame-old reflection does not show. Nearer, it captures every frame.
-          else if (mirror.captureValid && mirror.frame++ % settings.mirrorCadence && mirror.renderWidth * mirror.renderHeight * 25 < pw * ph) skipMirrorPass("cadence");
+          // Skipped frames reuse the last reflection, including when the pane is only a few pixels across.
+          else if (mirror.captureValid && mirror.frame++ % mirror.cadence) skipMirrorPass("cadence");
           else renderMirrorCapture(clear, sky, ground, direct, directStrength, ambientFloor, diffuseFloor, shadowStrength, shadowFloor, shadowBias, lx, ly, lz, sh, lights, nLights, skyOn, fogColor, fogA, fogB, matrix, spotLight);
         }
         if (mirror.shards && environmentCaptureVisible() && ensureShardProgram()) {
@@ -4489,6 +4531,8 @@ void main() {
       if (!QUALITY[name] || QUALITY[name] === settings) return;
       settings = QUALITY[name];
       qualityName = name;
+      // A downgrade releases the larger capture now, even when the mirror is offscreen until a later visit.
+      if (mirror.width > settings.mirror) destroyMirrorTarget();
       buildShadow();
       resize();
     };
