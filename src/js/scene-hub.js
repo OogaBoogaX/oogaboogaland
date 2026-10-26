@@ -1380,7 +1380,7 @@
     c.level = level;
   };
   const CHALKBOARD_X = 6.75, CHALKBOARD_Z = 2.15, CHALKBOARD_YAW = -0.57;
-  let chalkboardDressing = null;
+  let chalkboardDressing = null, chalkboardClearance = null;
   const placeChalkboard = (m, group) => {
     const sr = Math.sin(m.ry), cr = Math.cos(m.ry);
     const wx = m.x + cr * CHALKBOARD_X + sr * CHALKBOARD_Z;
@@ -1394,6 +1394,8 @@
     }
     const boardGroup = createNode({ position: { x: CHALKBOARD_X, y, z: CHALKBOARD_Z }, rotation: { x: 0, y: CHALKBOARD_YAW, z: 0 } });
     addChild(group, boardGroup);
+    const facing = m.ry + CHALKBOARD_YAW;
+    chalkboardClearance = { x: wx, z: wz, rightX: Math.cos(facing), rightZ: -Math.sin(facing), frontX: Math.sin(facing), frontZ: Math.cos(facing) };
     addDressing(chalkboardDressing, boardGroup, wx, m.floorY + y, wz, `${m.id}:chalkboard`, false);
     const sa = Math.sin(CHALKBOARD_YAW), ca = Math.cos(CHALKBOARD_YAW);
     addPieceTargets(chalkboardDressing.picks, (px, py, pz) => {
@@ -2907,6 +2909,12 @@
   const sceneryReason = (o) => {
     const clearance = island.path.debug.ringOuterRadius + SCENERY_CLEARANCE;
     if (o.node.position.y < 2 && !workSceneryClear(o.x, o.z, o.footprint)) return 3;
+    if (o.prop === "bush" && chalkboardClearance) {
+      const board = chalkboardClearance, dx = o.x - board.x, dz = o.z - board.z;
+      const across = dx * board.rightX + dz * board.rightZ, front = dx * board.frontX + dz * board.frontZ;
+      // Keep the board's face and both edges clear without moving the seeded meadow scatter.
+      if (Math.abs(across) < 1.8 + o.footprint && front > 0 && front < 2.4 + o.footprint) return 3;
+    }
     if (Math.hypot(o.x, o.z) - o.footprint < clearance - 1e-9) return 1;
     if (island.path.overlaps(o.x, o.z, o.footprint) || island.overlapsStairs(o.x, o.z, o.footprint)) return 2;
     for (let i = 0; i < claimed.length; i++) {
@@ -11428,7 +11436,7 @@
     beasts.clear();
     magazine = magazineState = weather = footsteps = mempoolIsland = timechainIsland = clankers = clankerPlay = null;
     hubScene.input = hubScene.debug = null;
-    island = chalkboardDressing = null;
+    island = chalkboardDressing = chalkboardClearance = null;
     guideSegmentClear.boxGrid = POOL_SEAMS[0].boxGrid = POOL_SEAMS[1].boxGrid = null;
     return { targets: count };
   };
