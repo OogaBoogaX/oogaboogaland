@@ -2,8 +2,8 @@
 // orange just off the ground round the pile; clicked, it cackles and shoots straight up out of sight, the land quakes
 // as a black wall with a lit jack-o'-lantern rises across every open cave and bridge at once, and the island falls to
 // a deep night. The Oogas nobody drives and the boxes and barrels are gone
-// for the hunt, and every hunter's rifle never runs dry. Then six rounds of ghosts come over the outer bluff and float
-// down after the players, the boss circles outside it spitting more, and when he burns (or every player is down)
+// for the hunt, and every hunter's rifle never runs dry. Then seven rounds of ghosts come over the outer bluff and float
+// down after the players, the boss blinks about inside the walls spitting more, and when he burns (or every player is down)
 // the dawn comes back, the walls sink away and everything returns.
 //
 // The herald loads this group when a player starts or joins (data-defer="halloween") and hands `create` one adapter (`ghostHub` in
@@ -21,7 +21,7 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const { clamp, ease, fnv1a } = BL.math;
-  const { createNode, addChild, removeChild } = BL.scene;
+  const { createNode, addChild, removeChild, createCamera } = BL.scene;
   const SIM = BL.ghostSim, ST = SIM.STATE, C = SIM.CONFIG, MODELS = BL.ghostModels, TIERS = MODELS.TIERS;
   const { BUTTON: PAD, state: pad } = BL.gamepad;
   const TAU = Math.PI * 2, DEG = Math.PI / 180;
@@ -48,7 +48,7 @@
   const MAX_BEAMS = 8, MAX_SOULS = 6, MAX_GRAVES = C.MAX_PLAYERS;
   const BOSS_Y = C.BOSS.y;
   // How tall each stands (m): a plain ghost, a general, a wraith; the boss and the herald.
-  const HEIGHT = [1.3, 1.3 * C.BIG, 1.3 * C.BIG], BOSS_H = 5.2, HERALD_H = 1.7;
+  const HEIGHT = [1.3, 1.3 * C.BIG * C.GENERAL, 1.3 * C.BIG], BOSS_H = 5.2, HERALD_H = 1.7;
   const MAX_ORBS = 8 * 5, ORB_TURN_MS = 650, ORB_R = 0.42, ORB_Y = 0.55;
   // The herald's orange wisps, how many and their light.
   const HERALD_WISPS = 4, WISP = [255, 140, 30];
@@ -62,6 +62,10 @@
   const POWER_COLOURS = MODELS.DROPS.map((d, kind) => kind === 4 ? GREEN : { core: d.mist[0], mid: d.mist[1], edge: d.mist[2], ring: d.mist[1], spark: d.mist[1] });
   const hex = (c) => "#" + c.map((v) => v.toString(16).padStart(2, "0")).join("");
   const TIPS = ["Ghost · shoot it!", "Ghost general · beware its eye beam", "Wraith · it pulls at your soul"];
+  const BRUTE_TIPS = ["Gorilla · it leaps at you and slams the ground", "Skeleton · it crawls after you", "Giant spider · it spits venom",
+    "Halving Hourglass · halves your rifle while it stands"];
+  // The hourglass's gold beam, as the gorillas' green; how tall it stands, and how long its sand takes to run through.
+  const GOLD = { core: [255, 245, 215], mid: [255, 170, 40], edge: [247, 147, 26] }, GLASS_H = 3, SAND_MS = 12000;
   const DROP_WORDS = ["Bomb! Every ghost burns", "Shield up for everyone", "Ice! The ghosts slow down", "Health banana! Everyone's bar is full", "Double points",
     "Tess joins you! She zaps any ghost that comes near", "Lightning Network! Bolts strike every enemy", "Monkeys! One at each side, shooting with you"];
   const DROP_CUES = ["boom", "shield", "ice", "health", "double", "tess", "thunder", "monkeys"];
@@ -98,10 +102,25 @@
   // The lab's debug keys, here with Shift held (the island's own keys take the bare ones): the drops, the next round,
   // a ghost, a general, a wraith, the boss, burn them all, thaw, ten kills.
   const DEBUG_KEYS = { Digit1: "drop", Digit2: "drop", Digit3: "drop", Digit4: "drop", Digit5: "drop", Digit6: "drop", Digit7: "drop", Digit8: "drop", KeyN: "next", KeyG: "ghost",
-    KeyJ: "general", KeyX: "wraith", KeyY: "gorilla", KeyH: "skeleton", KeyE: "revive", KeyO: "boss", KeyB: "nuke", KeyU: "unfreeze", KeyK: "kills" };
+    Digit9: "results", KeyZ: "hourglass", KeyJ: "general", KeyX: "wraith", KeyY: "gorilla", KeyH: "skeleton", KeyV: "spider", KeyE: "revive", KeyO: "boss", KeyB: "nuke", KeyU: "unfreeze", KeyK: "kills" };
   // The gorillas' arrival: a green beam from the sky (the double points' colours), the landing's flash and rings twice a
   // power-up's size, the land shaking under it for `LAND_SHAKE_S` at `LAND_SHAKE` of the quake; how much larger than the
   // island's gorillas it is, how tall it stands, and how far off its slam still shakes the view.
+  // The spider: drawn `SPIDER_SCALE` times its model's size, so `SPIDER_H` tall (its abdomen's top). Its feet stand
+  // planted and each leg reaches its own by two-bone IK; a foot `STEP_AT` (in the model's units) from where it rests
+  // beside the body steps there, its whole four with it (`STEP_WITH`), taking `STEP_MS` and rising `STEP_LIFT`, landing
+  // `STEP_LEAD` of the way past it, the two fours in turn. Then the arc its venom flies and how long the green splash
+  // lies where it lands.
+  const SPIDER_SCALE = 2, SPIDER_H = 1.25 * SPIDER_SCALE, STEP_AT = 0.32, STEP_WITH = 0.1, STEP_MS = 80, STEP_LIFT = 0.17, STEP_LEAD = 0.8;
+  const VENOM_ARC = 1.6, PUDDLE_MS = 1600, VENOM_GLOW = [125, 255, 58];
+  // Where venom lands, a green ring the splash's width (sim.js SPIDER.venomR) pulses `RING_PULSES` times over `PUDDLE_MS`.
+  const RING_PULSES = 3;
+  // Spiderlings dying together share one shriek: at most one each `LING_CRY_MS`.
+  const LING_CRY_MS = 120;
+  // A spiderling: drawn `LING_SCALE` of its mother's model, its legs changing stride every `LING_STRIDE` m it runs, and
+  // the height its scatter out of her flings it. The Fiat Rush's drop in their green beams, at most `LING_BEAMS` shown
+  // at once, from `LING_DROP_FROM` up.
+  const LING_SCALE = 0.38, LING_STRIDE = 0.18, LING_HOP = 0.9, LING_BEAMS = 8, LING_DROP_FROM = 10;
   const BRUTE_SCALE = 1.25, BRUTE_H = 1.5 * BRUTE_SCALE, BONES_H = 0.7, ARRIVAL = 2, ARRIVE_LAND_MS = 1100, SLAM_FELT = 14, LAND_SHAKE_S = 1, LAND_SHAKE = 0.6;
   // The skeleton's crawl (m, radians): its chest's pivot height and how far it leans up, the shoulders in the chest's
   // frame and how wide its arms splay, the upper arm and forearm-to-claw lengths; each hand's path in the body's frame
@@ -132,6 +151,10 @@
     zapped: [pg("#ffffff", 0.09), pg("#bfe0ff", 0.08), pg("#5aa8ff", 0.08), pg("#2a6cff", 0.07)],
     gorilla: [pg("#0f5a22", 0.12, 0.2), pg("#3dff66", 0.11), pg("#6dff8c", 0.1), pg("#093a15", 0.1, 0.1)],
     skeleton: [pg("#ece4cf", 0.09), pg("#b9ad90", 0.08), pg("#fff8e6", 0.07), pg("#ff3b2f", 0.06)],
+    // A giant spider: green and purple chitin, its red eyes, a spray of its venom.
+    spider: [pg("#4fb83a", 0.11), pg("#8a3fd0", 0.1), pg("#c8ff2e", 0.08), pg("#ff2a1a", 0.06)],
+    // The hourglass: wood, glass and its orange sats.
+    hourglass: [pg("#f7931a", 0.1), pg("#cfe8ff", 0.09), pg("#4a3020", 0.09), pg("#ffd23f", 0.06)],
     boss: [pg("#f4f7fb", 0.22), pg("#dfe5ef", 0.18), pg("#c3ccdb", 0.15), pg("#ff3b2f", 0.15)],
     herald: [pg("#ff9a2e", 0.1), pg("#ffcf6b", 0.09), pg("#ff6a10", 0.08)]
   };
@@ -141,8 +164,8 @@
     const { root, renderer, fx, crew, island, npcSync } = hub;
     const net = BL.net, coarse = hub.coarse;
     const camera = hub.camera, guide = hub.guide;
-    // `?skip=N` starts a hunt at round N, as the lab's did.
-    const SKIP = Math.max(1, Math.min(SIM.ROUNDS.length, parseInt(hub.params.get("skip"), 10) || 1));
+    // `?skip=N` starts a hunt at round N, as the lab's did (the boss's round, 8, at his countdown).
+    const SKIP = Math.max(1, Math.min(SIM.ROUNDS.length + 1, parseInt(hub.params.get("skip"), 10) || 1));
     MODELS.prepare();
     const group = createNode({ sightHidden: true });
     addChild(root, group);
@@ -272,7 +295,8 @@
     const S = sim.state;
     // The rifles' tier as the hunt stands (it grows with the rounds, red for the boss), and a round's damage at it.
     const rifleTier = () => SIM.weaponTier(S.round, S.state === ST.BOSS);
-    const rifleDamage = () => C.WEAPON.damage[rifleTier()];
+    // While an hourglass stands every rifle round does half (at least 1).
+    const rifleDamage = () => sim.halving() ? Math.max(1, Math.round(C.WEAPON.damage[rifleTier()] / 2)) : C.WEAPON.damage[rifleTier()];
 
     // ---------- nodes ----------
     const pool = (n, geometry, extra) => Array.from({ length: n }, () => {
@@ -285,7 +309,7 @@
     const owner = (role, slot) => ({
       kind: "halloween", role, slot, priority: role === "herald" ? 3 : 2, weaponType: role === "herald" ? "object" : "enemy", active: role === "herald",
       tooltip: () => role === "herald" ? S.state === ST.GATHER ? coarse ? "The restless ghost · tap it to ready up" : "The restless ghost · click it to ready up" : "A restless ghost · shoot it to start the ghost hunt"
-        : role === "boss" ? "THE BOSS · shoot him down" : role === "brute" ? sim.brutes[slot].kind ? "Skeleton · it crawls after you" : "Gorilla · it leaps at you and slams the ground" : TIPS[sim.ghosts[slot].tier],
+        : role === "boss" ? "THE BOSS · shoot him down" : role === "ling" ? "Spiderling · it scuttles after you and bites" : role === "brute" ? BRUTE_TIPS[sim.brutes[slot].kind] : TIPS[sim.ghosts[slot].tier],
       // Clicking the herald only readies a player in its lobby; only a shot wakes it (`hit`).
       tap: () => { if (role === "herald" && S.state === ST.GATHER) tapHerald(); }
     });
@@ -360,9 +384,9 @@
     // The skeletons: a crawling upper body in each slot too (ghost-models.js `skeletonParts`), shown in place of the
     // gorilla when the slot's `kind` is 1, every bone shootable. The chest leans up from the hips, its tail dragging and
     // its arms pulling it along; `cycle` is the crawl's phase (0..1), the left arm half a cycle from the right.
-    const skels = [];
-    for (let i = 0; i < B.max; i++) {
-      const P = MODELS.skeletonParts(), o = bruteOwners[i];
+    // One skeleton's bones, each shootable for `o` (a new-enemy card's has none).
+    const buildSkeleton = (o) => {
+      const P = MODELS.skeletonParts();
       const node = (geometry, x, y, z) => createNode({ geometry, position: { x, y, z } });
       const root = createNode({ visible: false, sightHidden: true });
       const torso = node(P.chest, 0, CRAWL.y, 0), tail = node(P.tail, 0, 0, -0.1), skull = node(P.skull, 0, 0.06, 0.5), jaw = node(P.jaw, 0, 0.03, 0);
@@ -373,10 +397,100 @@
       addChild(shR, foR);
       addChild(torso, tail, skull, shL, shR);
       addChild(root, torso);
-      addChild(group, root);
-      for (const n of [torso, tail, skull, jaw, shL, shR, foL, foR]) target(n, o);
-      skels.push({ root, torso, tail, skull, jaw, shL, shR, foL, foR, cycle: 0 });
+      if (o) for (const n of [torso, tail, skull, jaw, shL, shR, foL, foR]) target(n, o);
+      return { root, torso, tail, skull, jaw, shL, shR, foL, foR, cycle: 0 };
+    };
+    const skels = [];
+    for (let i = 0; i < B.max; i++) {
+      const k = buildSkeleton(bruteOwners[i]);
+      addChild(group, k.root);
+      skels.push(k);
     }
+    // The spiders, a rig a slot: its body, and each leg turned toward its foot from its hip on the head (`turn`), raised
+    // there by its femur (`hip`), the tibia from the knee and the tarsus from the ankle, bent down by its fixed bend.
+    // Right legs from the front, at [x, z, rest yaw, rest reach]; the left mirror them. Each leg keeps where its foot
+    // stands on the island and, stepping, where it lifted from and where it will land (`feet`, `from`, `to`, three a leg)
+    // and how far through the step it is (`stepT`, below 0 while planted).
+    const SPIDER_LEGS = [[0.2, 0.36, -1.0, 1.15], [0.24, 0.2, -0.4, 1.0], [0.24, 0.04, 0.35, 1.0], [0.2, -0.12, 1.0, 1.1]];
+    const LEG = MODELS.SPIDER_LEG;
+    // One spider, its body and legs shootable for `o` (a new-enemy card's has none), at `scale` its model's size.
+    const buildSpider = (o, scale) => {
+      const P = MODELS.spiderParts();
+      const root = createNode({ visible: false, sightHidden: true, scale: { x: scale, y: scale, z: scale } });
+      const body = createNode({ geometry: P.body });
+      addChild(root, body);
+      if (o) target(body, o);
+      const legs = [];
+      for (let k = 0; k < 8; k++) {
+        const [x, z, yaw, reach] = SPIDER_LEGS[k % 4], side = k < 4 ? 1 : -1, hx = side * x;
+        const turnNode = createNode({ position: { x: hx, y: MODELS.SPIDER_HIP, z } });
+        const hip = createNode({ geometry: P.femur }), knee = createNode({ geometry: P.tibia, position: { x: LEG.femur, y: 0, z: 0 } });
+        const ankle = createNode({ geometry: P.tarsus, position: { x: LEG.tibia, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: -LEG.bend } });
+        addChild(knee, ankle);
+        addChild(hip, knee);
+        addChild(turnNode, hip);
+        addChild(body, turnNode);
+        if (o) target(hip, o);
+        // Alternating fours: right 1 and 3 with left 2 and 4, then the others.
+        legs.push({ turn: turnNode, hip, knee, ankle, hx, hz: z, restX: hx + side * Math.cos(yaw) * reach, restZ: z - Math.sin(yaw) * reach,
+          group: (k % 4 + (side > 0 ? 0 : 1)) % 2 });
+      }
+      return { root, body, legs, spat: 0, planted: false, feet: new Float64Array(24), from: new Float64Array(24), to: new Float64Array(24), stepT: new Float64Array(8).fill(-1) };
+    };
+    const spiders = [];
+    for (let i = 0; i < B.max; i++) {
+      const k = buildSpider(bruteOwners[i], SPIDER_SCALE);
+      addChild(group, k.root);
+      spiders.push(k);
+    }
+    // The tarsus's reach from the knee, folded into one straight part for the IK (its length, and the angle it stands
+    // below the tibia's line).
+    const LOWER = Math.hypot(LEG.tibia + LEG.tarsus * Math.cos(LEG.bend), LEG.tarsus * Math.sin(LEG.bend));
+    const LOWER_TILT = Math.atan2(-LEG.tarsus * Math.sin(LEG.bend), LEG.tibia + LEG.tarsus * Math.cos(LEG.bend));
+    // The spiderlings, one node a slot over their two strides, each a target of its own.
+    const lingNodes = pool(C.LING.max, MODELS.spiderling(0), { sightHidden: true, scale: { x: LING_SCALE, y: LING_SCALE, z: LING_SCALE } });
+    const lingOwners = lingNodes.map((node, i) => { const o = owner("ling", i); target(node, o); return o; });
+    const lingShown = new Float64Array(C.LING.max), lingBit = new Float64Array(C.LING.max), lingRun = new Float64Array(C.LING.max), lingPhase = new Int8Array(C.LING.max);
+    const lingBeams = pool(LING_BEAMS, null), lingGlows = pool(LING_BEAMS, null);
+    const lingX = new Float64Array(C.LING.max), lingZ = new Float64Array(C.LING.max);
+    // The hourglasses: frame, glass, and the sand above and below the neck; an orange ring pulsing round each.
+    const buildGlass = (o) => {
+      const P = MODELS.hourglassParts();
+      const root = createNode({ visible: false, sightHidden: true }), frame = createNode({ geometry: P.frame }), glass = createNode({ geometry: P.glass });
+      const top = createNode({ geometry: P.sandTop, position: { x: 0, y: MODELS.HOURGLASS_NECK + 0.04, z: 0 } }), bottom = createNode({ geometry: P.sandBottom, position: { x: 0, y: 0.26, z: 0 } });
+      addChild(root, frame, top, bottom, glass);
+      if (o) { target(frame, o); target(glass, o); }
+      return { root, top, bottom };
+    };
+    const glasses = [], glassRings = pool(B.max, null);
+    for (let i = 0; i < B.max; i++) {
+      const k = buildGlass(bruteOwners[i]);
+      addChild(group, k.root);
+      glasses.push(k);
+    }
+    // The glowing "$" over each big spider and each spiderling.
+    const spiderDollars = pool(B.max, MODELS.dollar()), lingDollars = pool(C.LING.max, MODELS.dollar());
+    let fiatVoiceAt = -1e9;
+    // Each spider's venom glob in flight and the green splash where the last one landed.
+    const venoms = pool(B.max, MODELS.spiderParts().venom), puddles = pool(B.max, null), venomRings = pool(B.max, null);
+    let lingCried = -1e9;
+    const puddleAt = new Float64Array(B.max).fill(-1e9), puddleX = new Float64Array(B.max), puddleZ = new Float64Array(B.max);
+    // By kind (gorilla, skeleton, spider, hourglass), built once so drawing a brute builds nothing: each slot's bodies,
+    // and each kind's height, base health, death pixels and hit radius.
+    const bodies = rigs.map((rig, i) => [rig.root, skels[i].root, spiders[i].root, glasses[i].root]);
+    const KIND_H = [BRUTE_H, BONES_H, SPIDER_H, GLASS_H], KIND_HP = [B.hp, C.BONES.hp, C.SPIDER.hp, C.HOURGLASS.hp];
+    const KIND_PIXELS = [PIXELS.gorilla, PIXELS.skeleton, PIXELS.spider, PIXELS.hourglass], KIND_HIT = [BRUTE_H * 0.55, 0.6, 0.85 * SPIDER_SCALE, 0.9];
+    // A brute's body as this page draws it, how tall it stands and its full health this round.
+    const bodyOf = (i, b) => bodies[i][b.kind];
+    const heightOf = (b) => KIND_H[b.kind];
+    const fullHp = (b) => SIM.hpOf(KIND_HP[b.kind], S.round);
+    // Every body of slot `i` but the one its brute of kind `kind` wears put away, and its kind's extras with them.
+    const hideOthers = (i, kind) => {
+      const roots = bodies[i];
+      for (let k = 0; k < roots.length; k++) if (k !== kind) roots[k].visible = false;
+      if (kind !== 2) venoms[i].visible = spiderDollars[i].visible = false;
+      if (kind !== 3) glassRings[i].visible = false;
+    };
     // The elixirs on the totems: each a sprite with its glow, and which were taken as last drawn.
     const elixirNodes = pool(C.ELIXIR.max, null), elixirGlows = pool(C.ELIXIR.max, null);
     let elixirsShown = 0, reviveShown = 0;
@@ -391,7 +505,7 @@
     const beams = pool(MAX_BEAMS, MODELS.beam()), souls = pool(MAX_SOULS, MODELS.soul(), { smokeOpacity: 0.85 });
     const ring = pool(1, MODELS.shockwave())[0], zapBeam = pool(1, MODELS.zap())[0];
     keep(MODELS.beam()); keep(MODELS.zap()); keep(MODELS.soul()); keep(MODELS.shockwave()); keep(MODELS.gravestone());
-    keep(MODELS.orb(false)); keep(MODELS.orb(true)); keep(MODELS.rock()); keep(MODELS.laserBurst()); keep(MODELS.lightningBolt());
+    keep(MODELS.orb(false)); keep(MODELS.orb(true)); keep(MODELS.rock()); keep(MODELS.laserBurst()); keep(MODELS.lightningBolt()); keep(MODELS.spiderParts().venom); keep(MODELS.spiderling(0)); keep(MODELS.spiderling(1)); keep(MODELS.dollar());
     for (let i = 0; i < C.WEAPON.damage.length - 1; i++) keep(MODELS.laserBolt(i));
 
     // ---------- the hunt's place on this page ----------
@@ -494,7 +608,10 @@
     // The lobby's rows (one a player there, pooled) and the key its card was last drawn for.
     const LOBBY_ROWS = Array.from({ length: C.MAX_PLAYERS }, () => ({ id: 0, name: "", ready: false, host: false }));
     let lobbyShown = -1, padFrame = -1;
+    // Debug only (Shift+9): the stand-in hunters of a mock hunt's end, by id: their names and Oogas from the roster.
+    const MOCK = new Map();
     const nameOf = (id) => {
+      if (MOCK.has(id)) return MOCK.get(id).name;
       if (id === myId()) {
         const me = net.state.me;
         return me ? `${me.display || me.login} (you)` : "You";
@@ -556,8 +673,8 @@
     const tapHerald = () => {
       if (S.state === ST.GATHER) { readyUp(); return; }
       if (S.state !== ST.IDLE || !hunter()) return;
+      // Its "oogaa" plays as the lobby opens (`onState`), on every page.
       audio.open();
-      audio.play("ooga");
       if (npcSync.role === "follow") {
         sync.start();
         startAskedAt = clock();
@@ -660,6 +777,157 @@
     };
 
     // ---------- HUD lines (rebuilt only when what they say changes) ----------
+    // ---------- the new-enemy cards ----------
+    // A round that brings in new enemies opens with a card for each in turn through its countdown (ghost-sim.js
+    // `INTRO_PAGES`, `introMs` a card), the last list the boss's: its name, what it does, and the enemy itself on the card.
+    // A ghost is its own picture (`tier`), three hovering ("trio") or one ("float"); the rest are the hunt's own models
+    // playing a loop ("clip").
+    const INTROS = [
+      [{ art: "ghost", layout: "trio", tier: TIERS.plain, name: "Ghosts",
+        text: "They float in over the bluff and drift after the nearest Ooga. Each touch takes one of your five health cells, so shoot them down before they reach you." },
+      { art: "gorilla", layout: "clip", name: "Gorillas",
+        text: "When a round is down to its last two ghosts, a green beam calls a gorilla down. It lands shaking the ground, then leaps at you and slams its fists into everyone near." }],
+      [{ art: "general", layout: "trio", tier: TIERS.general, name: "Ghost Generals",
+        text: "Big blue ghosts that come with the pack and take more hits. Get within a few metres and an eye beam locks on and burns a health cell. Back away to break it." },
+      { art: "skeleton", layout: "clip", name: "Skeletons",
+        text: "Called down in a white beam, they crawl after you on their arms with their jaws hanging open. Get too close and one lunges up and bites." },
+      { art: "spider", layout: "clip", name: "Giant Spiders",
+        text: "Fast and huge. Within 7 m one rears up and spits green venom that splashes everyone where it lands. Kill it and it bursts into fifteen spiderlings." }],
+      [{ art: "wraith", layout: "float", tier: TIERS.wraith, name: "Wraiths",
+        text: "Black ghosts edged in white. Within 5 m a wraith grabs at your soul and takes a health cell, and it holds on until you get well away." },
+      { art: "swarm", layout: "clip", name: "Fiat Rush",
+        text: "When the round is down to its last two ghosts, spiderlings drop in one after another, each in a green beam, up to ten at a time. One bite each, and a bomb clears them fast." }],
+      [{ art: "hourglass", layout: "clip", name: "Halving Hourglass",
+        text: "It drops in a gold beam somewhere inside the walls and stands there. While any hourglass stands, every rifle shot does half damage. Smash it first." }],
+      null, null, null,
+      [{ art: "boss", layout: "float", tier: TIERS.boss, name: "The Boss",
+        text: "He shows himself inside the walls three seconds at a time, spitting out every kind of enemy, then vanishes and comes back somewhere else. An hourglass comes with him." }]
+    ];
+    // Each card's line over its name, and the first moving model of each list, baked while the round before it ends.
+    const INTRO_CLIP = INTROS.map((list, i) => {
+      if (!list) return null;
+      list.forEach((page, n) => { page.kicker = (i === SIM.ROUNDS.length ? `Round ${i + 1} · the boss` : `Round ${i + 1} · new enemy`) + (list.length > 1 ? ` ${n + 1} of ${list.length}` : ""); });
+      const clip = list.find((page) => page.layout === "clip");
+      return clip ? clip.art : null;
+    });
+    // The moving models: each built once a visit, its own nodes off the island, posed for each of its `frames` (played
+    // at `fps`) and drawn by the HUD's portrait renderer into one of `CARD_MAX` pictures, a picture a frame while its
+    // card is coming or up, so none of it costs a frame more than one small drawing. The view takes in `h` round height
+    // `y`, the model turned `CARD_TURN` toward it. That renderer draws no pictures, so a pose lists where each "$" floats
+    // (`marks`: x, y, z and height, `count` of them) and the "$" is painted over the model there.
+    const CARD_W = 320, CARD_H = 220, CARD_MAX = 24, CARD_TURN = -0.55;
+    const SWARM = [[-1.15, -0.2], [-0.45, 0.45], [0.3, -0.35], [1.05, 0.25], [-0.6, -0.95], [0.6, -1.05]];
+    const FIGURES = {
+      // Rearing up to beat its chest, then down on all fours.
+      gorilla: { frames: 16, fps: 12, h: 3.2, y: 1.25,
+        build: () => { const rig = BL.agent.create({ managed: true, form: "code", groundAt: () => 0, scale: BRUTE_SCALE }); return { root: rig.root, rig }; },
+        pose: (k, f) => {
+          if (f === 0) { for (let n = 0; n < 20; n++) k.rig.poseManaged(0.05, 0, 0, 0, CARD_TURN, 0, false); k.rig.beat(); }
+          k.rig.poseManaged(1 / 12, 0, 0, 0, CARD_TURN, 0, false);
+        } },
+      // Crawling on its arms, its jaw chattering.
+      skeleton: { frames: 16, fps: 12, h: 1.0, y: 0.38,
+        build: () => { const k = buildSkeleton(null); k.root.visible = true; k.root.rotation.y = CARD_TURN; return k; },
+        pose: (k, f) => {
+          const u = f / 16, wave = Math.sin(u * TAU), pitch = CRAWL.pitch, chestY = CRAWL.y + 0.025 * Math.abs(wave);
+          k.torso.position.y = chestY; k.torso.rotation.x = -pitch; k.torso.rotation.z = 0.07 * wave;
+          k.tail.rotation.x = -0.35; k.tail.rotation.y = -0.3 * Math.sin(u * TAU + 0.7);
+          k.skull.rotation.x = pitch - 0.15; k.skull.rotation.y = 0.12 * wave;
+          k.jaw.rotation.x = LUNGE.open + 0.2 * Math.max(0, Math.sin(u * TAU * 4));
+          const hl = handAt(u);
+          reachArm(k.shL, k.foL, 1, hl.y, hl.z, pitch, chestY);
+          const hr = handAt((u + 0.5) % 1);
+          reachArm(k.shR, k.foR, -1, hr.y, hr.z, pitch, chestY);
+        } },
+      // Walking on the spot, its fours stepping in turn, its "$" over it.
+      spider: { frames: 16, fps: 12, h: 2.5, y: 0.95,
+        build: () => {
+          const k = buildSpider(null, 1);
+          k.root.visible = true; k.root.rotation.y = CARD_TURN;
+          return { root: k.root, k, marks: new Float64Array(4), count: 1 };
+        },
+        pose: (q, f) => {
+          const u = f / 16, k = q.k;
+          k.body.position.y = 0.02 * Math.sin(u * TAU * 2);
+          for (const L of k.legs) {
+            const a = (u * 2 + L.group * 0.5) * TAU;
+            reachLeg(L, L.restX, Math.max(0, Math.sin(a)) * 0.12 - k.body.position.y, L.restZ - 0.14 * Math.cos(a), 0);
+          }
+          q.marks[1] = 1.45 + 0.05 * Math.sin(u * TAU); q.marks[3] = 0.5;
+        } },
+      // Spiderlings scuttling on the spot, each with its "$".
+      swarm: { frames: 16, fps: 12, h: 1.7, y: 0.4,
+        build: () => {
+          const root = createNode(), lings = SWARM.map(([x, z], n) => {
+            const node = createNode({ geometry: MODELS.spiderling(0), position: { x, y: 0, z }, rotation: { x: 0, y: CARD_TURN * 0.5 + (n % 3 - 1) * 0.35, z: 0 },
+              scale: { x: LING_SCALE, y: LING_SCALE, z: LING_SCALE } });
+            addChild(root, node);
+            return node;
+          });
+          return { root, lings, marks: new Float64Array(SWARM.length * 4), count: SWARM.length };
+        },
+        pose: (q, f) => {
+          for (let n = 0; n < q.lings.length; n++) {
+            const node = q.lings[n], hop = 0.07 * Math.abs(Math.sin((f / 16 * 4 + n * 0.37) * Math.PI)), m = n * 4;
+            node.geometry = MODELS.spiderling(((f >> 1) + n) % 2);
+            node.position.y = hop;
+            q.marks[m] = node.position.x; q.marks[m + 1] = hop + 0.62; q.marks[m + 2] = node.position.z; q.marks[m + 3] = 0.28;
+          }
+        } },
+      // Its sand running through, swaying a little.
+      hourglass: { frames: 24, fps: 8, h: 3.5, y: 1.5,
+        build: () => { const k = buildGlass(null); k.root.visible = true; return k; },
+        pose: (k, f) => {
+          const u = f / 24, top = Math.max(0.05, 1 - u), heap = 0.1 + 0.9 * u;
+          k.top.scale.x = k.top.scale.z = Math.sqrt(top); k.top.scale.y = top;
+          k.bottom.scale.x = k.bottom.scale.z = Math.sqrt(heap); k.bottom.scale.y = heap;
+          k.root.rotation.y = CARD_TURN + 0.25 * Math.sin(u * TAU);
+        } }
+    };
+    const cardFrames = Array.from({ length: CARD_MAX }, () => { const c = document.createElement("canvas"); c.width = CARD_W; c.height = CARD_H; return c; });
+    const cardFigures = {}, cardCamera = createCamera({ fov: 28, near: 0.1, far: 60 });
+    let cardCanvas = null, cardRenderer = null, cardArt = "", cardBaked = 0;
+    // Draws the next frame of `art`'s loop, if any is left (a new model starts over).
+    const bakeCard = (art) => {
+      const F = FIGURES[art];
+      if (art !== cardArt) { cardArt = art; cardBaked = 0; }
+      if (cardBaked >= F.frames) return;
+      if (!cardRenderer) {
+        cardCanvas = document.createElement("canvas");
+        cardRenderer = BL.iconRenderer.createRenderer(cardCanvas, { width: CARD_W, height: CARD_H });
+      }
+      const k = cardFigures[art] || (cardFigures[art] = F.build());
+      F.pose(k, cardBaked);
+      const fit = F.h * 0.5 / Math.tan(14 * Math.PI / 180);
+      cardCamera.position.x = 0; cardCamera.position.y = F.y + fit * 0.3; cardCamera.position.z = fit;
+      cardCamera.target.x = 0; cardCamera.target.y = F.y; cardCamera.target.z = 0;
+      cardRenderer.render(k.root, cardCamera);
+      const g = cardFrames[cardBaked].getContext("2d");
+      g.clearRect(0, 0, CARD_W, CARD_H);
+      g.drawImage(cardCanvas, 0, 0, CARD_W, CARD_H);
+      if (k.marks) for (let n = 0; n < k.count; n++) cardMark(g, k.marks, n * 4);
+      cardBaked++;
+    };
+    // The "$" at `marks[o..o + 3]` (its foot and height) painted where the card's camera sees it.
+    const cardMark = (g, marks, o) => {
+      const image = MODELS.dollar().imageSurface.asset.load(), e = cardCamera.position, at = cardCamera.target;
+      if (!image.complete || !image.naturalWidth) return;
+      let fx = at.x - e.x, fy = at.y - e.y, fz = at.z - e.z;
+      const fl = Math.hypot(fx, fy, fz);
+      fx /= fl; fy /= fl; fz /= fl;
+      const rl = Math.hypot(fz, fx), rx = -fz / rl, rz = fx / rl, ux = -rz * fy, uy = rz * fx - rx * fz, uz = rx * fy;
+      const vx = marks[o] - e.x, vy = marks[o + 1] - e.y, vz = marks[o + 2] - e.z;
+      const cz = vx * fx + vy * fy + vz * fz, F = CARD_H / 2 / Math.tan(cardCamera.fov / 2) / cz;
+      const sx = CARD_W / 2 + (vx * rx + vz * rz) * F, sy = CARD_H / 2 - (vx * ux + vy * uy + vz * uz) * F;
+      const h = marks[o + 3] * F, w = h * image.naturalWidth / image.naturalHeight;
+      g.drawImage(image, sx - w / 2, sy - h, w, h);
+    };
+    // The picture card `page` shows at `t`: its ghost's, or its model's loop frame among those drawn so far.
+    const cardPicture = (page, t) => {
+      if (page.layout !== "clip") return MODELS.portrait(page.tier);
+      bakeCard(page.art);
+      return cardBaked && cardArt === page.art ? cardFrames[Math.floor(t / 1000 * FIGURES[page.art].fps) % cardBaked] : null;
+    };
     let bannerKey = -1, bannerUp = false, hush = 0;
     const drawHud = (t) => {
       const st = S.state;
@@ -671,33 +939,158 @@
       const secs = st === ST.COUNTDOWN || st === ST.BREAK ? Math.max(0, Math.ceil((S.endsAt - t) / 1000)) : 0;
       const bossIntro = st === ST.BOSS && t - stateAt < 3500;
       const dawnWords = st === ST.DAWN && S.outcome === SIM.OUTCOME.ABANDON && t - stateAt < 4000;
-      bannerUp = S.paused || st === ST.COUNTDOWN || st === ST.BREAK || bossIntro || st === ST.VICTORY || st === ST.DEFEAT || dawnWords;
-      const bk = st * 1000 + secs * 10 + (bossIntro ? 1 : 0) + (dawnWords ? 2 : 0) + S.round * 1e5 + (S.paused ? 1e8 : 0);
+      // The Fiat Rush's warning: its spiderlings are on their way.
+      const rush = st === ST.ACTIVE && S.swarmAt > 0 && !S.swarmSent;
+      // A countdown's cards in turn; while a round before one ends, its first model is drawn ahead.
+      const toBoss = sim.bossNext(), pages = st === ST.COUNTDOWN && !S.paused ? SIM.introPages(S.round, toBoss) : 0;
+      let card = null;
+      if (pages) {
+        const list = INTROS[toBoss ? SIM.ROUNDS.length : S.round - 1], ms = SIM.introMs(pages), start = S.endsAt - C.COUNTDOWN_MS - pages * ms;
+        card = list[clamp(Math.floor((t - start) / ms), 0, list.length - 1)];
+      } else if (st === ST.LAP || st === ST.NIGHT || st === ST.BREAK) {
+        const next = INTRO_CLIP[st === ST.BREAK ? toBoss ? SIM.ROUNDS.length : S.round : 0];
+        if (next) bakeCard(next);
+      }
+      hud.intro(card, card ? cardPicture(card, t) : null);
+      bannerUp = S.paused || st === ST.COUNTDOWN || st === ST.BREAK || bossIntro || rush || st === ST.VICTORY || st === ST.DEFEAT || dawnWords;
+      const bk = st * 1000 + secs * 10 + (bossIntro ? 1 : 0) + (dawnWords ? 2 : 0) + (rush ? 4 : 0) + (card ? 8 : 0) + S.round * 1e5 + (S.paused ? 1e8 : 0);
       if (bk !== bannerKey) {
         bannerKey = bk;
         if (S.paused) hud.banner("Paused", "P to go on");
+        else if (st === ST.COUNTDOWN && toBoss) hud.banner(`Round ${SIM.ROUNDS.length + 1}`, secs >= 3 ? "THE BOSS is coming" : `${secs}`, false, !!card);
         else if (st === ST.COUNTDOWN) {
           // A round that hands out stronger rifles says so for the countdown's first two seconds.
           const tier = rifleTier(), upgrade = S.round > 1 && tier !== SIM.weaponTier(S.round - 1, false);
-          hud.banner(`Round ${S.round}`, upgrade && secs >= 3 ? `rifles upgraded · ${RIFLE_WORDS[tier]}` : secs >= 4 ? "get ready" : `${secs}`);
+          hud.banner(`Round ${S.round}`, upgrade && secs >= 3 ? `rifles upgraded · ${RIFLE_WORDS[tier]}` : secs >= 4 ? "get ready" : `${secs}`, false, !!card);
         }
-        else if (st === ST.BREAK) hud.banner(`Round ${S.round} cleared!`, `next round in ${secs}`);
-        else if (bossIntro) hud.banner("THE BOSS is here", `rifles upgraded · ${RIFLE_WORDS[rifleTier()]}`);
-        else if (st === ST.VICTORY) hud.banner("The island is safe!", `${S.kills} ghosts busted`);
+        else if (st === ST.BREAK) hud.banner(`Round ${S.round} cleared!`, sim.bossNext() ? `the boss comes in ${secs}` : `next round in ${secs}`);
+        else if (bossIntro) hud.banner("THE BOSS is here", `Round ${SIM.ROUNDS.length + 1} · rifles upgraded · ${RIFLE_WORDS[rifleTier()]}`);
+        else if (rush) hud.banner("FIAT RUSH", "", true);
+        else if (st === ST.VICTORY) hud.banner("The island is safe!", "", true);
         else if (st === ST.DEFEAT) hud.banner("The ghosts took the island", "every Ooga down");
         else if (dawnWords) hud.banner("The ghosts drift away", "nobody was left to haunt");
         else hud.banner(null);
       }
+      drawScores(st);
+      hud.halving(st >= ST.COUNTDOWN && st <= ST.BOSS && sim.halving());
+    };
+
+    // ---------- the scoreboard and the podium ----------
+    // Each hunter's face and points along the top through the hunt (the leader's glowing green), and as a won hunt ends
+    // the top three on a podium; drawn again only when what they show changes. One pooled row a hunter.
+    const SCORE_ROWS = Array.from({ length: C.MAX_PLAYERS }, () => ({ cave: null, name: "", points: 0, lead: false }));
+    const PODIUM_ROWS = [0, 1, 2].map(() => ({ cave: null, name: "", points: 0 }));
+    const lastCave = new Map();
+    let scoresKey = -1, podiumUp = false;
+    const scored = (q) => q.on && q.inGame && q.id !== SIM.REVIVE_BOT;
+    // The Ooga a hunter plays: this page's own, another's as the room names it, the last one seen if they let go.
+    const caveOf = (id) => {
+      if (MOCK.has(id)) return MOCK.get(id).cave;
+      const own = id === myId() ? crew.player || null : null;
+      const name = own ? own.traits.name : id === myId() ? net.ownCharacter()?.handle : net.remotes.get(id)?.body;
+      const cave = own || (name ? crew.cavemen.get(name) : null);
+      if (cave) { if (lastCave.get(id) !== cave) lastCave.set(id, cave); return cave; }
+      return lastCave.get(id) || null;
+    };
+    const drawScores = (st) => {
+      if (st < ST.COUNTDOWN || st > ST.DEFEAT) {
+        if (scoresKey !== -1) { scoresKey = -1; hud.scores(null); }
+        drawPodium(false);
+        return;
+      }
+      let key = 7, best = 0;
+      for (let i = 0; i < C.MAX_PLAYERS; i++) {
+        const q = sim.players[i];
+        if (!scored(q)) continue;
+        key = (key * 31 + (i + 1) * 7919 + q.kills * 13 + (caveOf(q.id) ? 1 : 0)) % 2147483647;
+        best = Math.max(best, q.kills);
+      }
+      if (key !== scoresKey) {
+        scoresKey = key;
+        let n = 0;
+        for (let i = 0; i < C.MAX_PLAYERS; i++) {
+          const q = sim.players[i];
+          if (!scored(q)) continue;
+          const row = SCORE_ROWS[n++];
+          row.cave = caveOf(q.id); row.name = nameOf(q.id); row.points = q.kills; row.lead = best > 0 && q.kills === best;
+        }
+        hud.scores(SCORE_ROWS, n);
+      }
+      drawPodium(st === ST.VICTORY);
+    };
+    // The results card goes up once as the hunt is won: every hunter by points, best first (ties by who joined first),
+    // with the enemies each killed, and the first three on the podium, standing whole.
+    const RESULT_ROWS = Array.from({ length: C.MAX_PLAYERS }, () => ({ name: "", foes: 0, points: 0 })), resultSlots = new Int32Array(C.MAX_PLAYERS);
+    const drawPodium = (on) => {
+      if (!on) { if (podiumUp) { podiumUp = false; hud.results(null); } return; }
+      if (podiumUp) return;
+      podiumUp = true;
+      let n = 0;
+      for (; n < C.MAX_PLAYERS; n++) {
+        let pick = -1;
+        for (let i = 0; i < C.MAX_PLAYERS; i++) {
+          const q = sim.players[i];
+          let taken = false;
+          for (let j = 0; j < n; j++) if (resultSlots[j] === i) taken = true;
+          if (taken || !scored(q)) continue;
+          if (pick < 0 || q.kills > sim.players[pick].kills) pick = i;
+        }
+        if (pick < 0) break;
+        resultSlots[n] = pick;
+        const q = sim.players[pick], row = RESULT_ROWS[n];
+        row.name = nameOf(q.id); row.foes = q.foes; row.points = q.kills;
+        if (n < 3) { const top = PODIUM_ROWS[n]; top.cave = caveOf(q.id); top.name = row.name; top.points = q.kills; }
+      }
+      hud.results(`${S.kills} ghosts busted`, PODIUM_ROWS, RESULT_ROWS, n);
+    };
+
+    // ---------- the hunters' lanterns ----------
+    // Through the hunt's night each hunter still standing carries a soft lantern over their head, so the others can
+    // pick them out across the dark meadow without the night itself lifting. The hub keeps `lanternsWanted()` of its
+    // point-light slots back from its own lamps (fewer on a lower tier) and `lanterns` fills them with the hunters
+    // nearest the view, brightening as the night falls and fading with the dawn.
+    const LANTERNS = 4, LANTERN = { up: 2.3, radius: 7, r: 1.0, g: 0.9, b: 0.75, gain: 1.2 };
+    const lanternSlots = new Int32Array(LANTERNS);
+    const lit = (q) => scored(q) && !down(q.id);
+    const lanternsWanted = () => {
+      if (nightK <= 0 || off(S.state)) return 0;
+      let n = 0;
+      for (const q of sim.players) if (lit(q) && playerAt(q.id)) n++;
+      return Math.min(LANTERNS, n);
+    };
+    const lanterns = (lights, at, wanted) => {
+      const tg = camera.target, k = nightK * LANTERN.gain;
+      let n = 0;
+      for (; n < wanted; n++) {
+        let pick = -1, near = Infinity;
+        for (let i = 0; i < C.MAX_PLAYERS; i++) {
+          const q = sim.players[i];
+          let taken = false;
+          for (let j = 0; j < n; j++) if (lanternSlots[j] === i) taken = true;
+          if (taken || !lit(q)) continue;
+          const p = playerAt(q.id);
+          if (!p) continue;
+          const d = (p.x - tg.x) ** 2 + (p.z - tg.z) ** 2;
+          if (d < near) { near = d; pick = i; }
+        }
+        if (pick < 0) break;
+        lanternSlots[n] = pick;
+        const p = playerAt(sim.players[pick].id), o = (at + n) * 8;
+        lights[o] = p.x; lights[o + 1] = p.y + LANTERN.up; lights[o + 2] = p.z; lights[o + 3] = LANTERN.radius;
+        lights[o + 4] = LANTERN.r * k; lights[o + 5] = LANTERN.g * k; lights[o + 6] = LANTERN.b * k; lights[o + 7] = 0;
+      }
+      return n;
     };
 
     // ---------- cues from what changed ----------
-    let stateAt = 0, pickShown = 0, bombShown = 0, spitShown = 0, ringT = -1, ringX = 0, ringZ = 0, cackled = false, bossShownHit = 0;
+    let swarmShown = false, stateAt = 0, pickShown = 0, bombShown = 0, spitShown = 0, ringT = -1, ringX = 0, ringZ = 0, cackled = false, bossShownHit = 0;
     const beamShown = new Float64Array(C.MAX_GHOSTS), soulShown = new Float64Array(C.MAX_GHOSTS);
     const onState = (st, prev, t) => {
       stateAt = t;
       // The hunt proper begins as the walls rise (straight from IDLE on a page that joins mid-hunt), not in its lobby.
       const wasOff = prev === ST.IDLE || prev === ST.GATHER;
-      if (st === ST.GATHER) declined = false;
+      // Woken by a shot, the herald calls the gorillas' "oogaa" as its lobby opens.
+      if (st === ST.GATHER) { declined = false; if (prev === ST.IDLE) audio.play("oogaa"); }
       if (wasOff && st !== ST.IDLE && st !== ST.GATHER) {
         guide.lend(driveTess);
         tessHolder = 0; tessGone = 0;
@@ -767,9 +1160,11 @@
       }
       if (S.spitAt && S.spitAt !== spitShown) {
         spitShown = S.spitAt;
-        audio.play("launch");
-        fx.burst(S.bossX, BOSS_Y + 4, S.bossZ, 6, VAPOR, 2.2);
+        audio.play("launch"); fx.burst(S.bossX, BOSS_Y + BOSS_H * 0.6, S.bossZ, 6, VAPOR, 2.2);
       }
+      // The Fiat Rush's first spiderling drops with a shriek.
+      if (S.swarmSent && !swarmShown) { swarmShown = true; audio.play("brood"); }
+      else if (!S.swarmSent) swarmShown = false;
     };
 
     // ---------- drawing ----------
@@ -876,19 +1271,36 @@
       }
       for (; n < MAX_ORBS; n++) orbNodes[n].visible = false;
     };
-    let bossX = 0, bossZ = 0, bossView = 0, bossMirror = false;
+    let bossX = 0, bossZ = 0, bossView = 0, bossMirror = false, bossCame = 0;
+    // How far the boss has come out (0 to 1) while he shows himself (sim.js BOSS.shownMs), swelling in and shrinking
+    // away over `BOSS_POP_MS`; 0 while he is gone.
+    const BOSS_POP_MS = 250;
+    let bossSize = BOSS_H;
+    const bossOut = (t) => {
+      const since = t - S.bossShownAt, left = S.bossShownAt + C.BOSS.shownMs - t;
+      return S.bossShownAt > 0 && since >= 0 && left > 0 ? Math.min(1, since / BOSS_POP_MS, left / BOSS_POP_MS) : 0;
+    };
     const drawBoss = (dt, t, now) => {
       const on = S.bossOn && (S.state === ST.BOSS || S.state === ST.VICTORY);
       // Beaten, he bursts into a storm of pixels at once.
       if (on && S.bossDyingAt && bossNode.visible) {
-        explode(bossNode.position.x, bossNode.position.y, bossNode.position.z, BOSS_H, PIXELS.boss, 120);
+        explode(bossNode.position.x, bossNode.position.y, bossNode.position.z, bossSize, PIXELS.boss, 120);
         audio.play("scream", 1);
       }
-      bossNode.visible = !!on && !S.bossDyingAt;
+      const out = on && !S.bossDyingAt ? bossOut(t) : 0, was = bossNode.visible;
+      // He comes in a puff of vapour and leaves in another.
+      if (on && !S.bossDyingAt && out > 0 && S.bossShownAt !== bossCame) {
+        bossCame = S.bossShownAt;
+        fx.burst(S.bossX, BOSS_Y + BOSS_H * 0.5, S.bossZ, 18, VAPOR, 3);
+        audio.play("arrive");
+      } else if (was && out <= 0 && !S.bossDyingAt) fx.burst(bossNode.position.x, BOSS_Y + BOSS_H * 0.5, bossNode.position.z, 14, VAPOR, 2.6);
+      bossNode.visible = out > 0;
       bossOwner.active = bossNode.visible;
       if (!bossNode.visible) return;
       const k = 0;
-      const bob = Math.sin(now / 1000 * TAU * 0.6) * 0.065 * BOSS_H * 3 / 4, size = BOSS_H;
+      const full = BOSS_H;
+      const bob = Math.sin(now / 1000 * TAU * 0.6) * 0.065 * full * 3 / 4, size = full * ease.outBack(out);
+      bossSize = size;
       if (dt > 0 && Math.hypot(S.bossX - bossX, S.bossZ - bossZ) > 0.01) {
         const sv = onScreen(S.bossX, S.bossZ, (S.bossX - bossX) / dt, (S.bossZ - bossZ) / dt);
         MODELS.viewOf(false, sv.sx, sv.sy, -1, VIEW);
@@ -900,7 +1312,8 @@
       bossNode.scale.x = bossNode.scale.y = bossNode.scale.z = Math.max(0.01, size);
       face(bossNode, Math.max(0.01, size));
       if (S.bossHitAt !== bossShownHit) { bossShownHit = S.bossHitAt; audio.play("hit"); }
-      show(bossNode, MODELS.ghost(TIERS.boss, bossView, bossMirror, t - S.bossHitAt < 140 && !k ? MODELS.MODE.flash : MODELS.MODE.normal));
+      const flashed = t - S.bossHitAt < 140 && !k;
+      show(bossNode, MODELS.ghost(TIERS.boss, bossView, bossMirror, flashed ? MODELS.MODE.flash : MODELS.MODE.normal));
     };
     const sprite = (node, geometry, x, y, z, w, h, opacity, flat) => {
       show(node, geometry);
@@ -1252,8 +1665,16 @@
       const cave = crew.player;
       for (let i = 0; i < B.max; i++) {
         const b = sim.brutes[i], rig = rigs[i], o = bruteOwners[i], beam = arriveBeams[i], glow = arriveGlows[i], burst = landFlashes[i];
+        if (t - puddleAt[i] >= PUDDLE_MS) puddles[i].visible = venomRings[i].visible = false;
+        else {
+          // The splash: a glow where it fell, and round it a ring as wide as it reached, pulsing as it fades.
+          const u = (t - puddleAt[i]) / PUDDLE_MS, gy = island.surfaceAt(puddleX[i], puddleZ[i]), beat = 0.5 + 0.5 * Math.cos(u * RING_PULSES * TAU);
+          const ring = C.SPIDER.venomR * 2 / 0.9 * (0.94 + 0.06 * beat);
+          sprite(puddles[i], MODELS.glowDisc(VENOM_GLOW), puddleX[i], gy + 0.04, puddleZ[i], C.SPIDER.venomR * 1.6, C.SPIDER.venomR * 1.6, 0.55 * (1 - u), true);
+          sprite(venomRings[i], MODELS.ringOf(VENOM_GLOW), puddleX[i], gy + 0.05, puddleZ[i], ring, ring, (1 - u) * (0.45 + 0.55 * beat), true);
+        }
         if (!b.on) {
-          rig.root.visible = skels[i].root.visible = o.active = false;
+          hideOthers(i, -1); o.active = false;
           beam.visible = glow.visible = burst.visible = landRings[i * 2].visible = landRings[i * 2 + 1].visible = false;
           bruteShown[i] = 0;
           continue;
@@ -1264,16 +1685,23 @@
           if (b.phase === BP.BEAM) audio.play("arrive");
         }
         const ground = island.surfaceAt(b.x, b.z);
-        // Dead, it bursts into green pixels (a skeleton into bone).
+        // Dead, it bursts into green pixels (a skeleton into bone, a spider into chitin and venom).
         if (b.dying) {
-          const body = b.kind ? skels[i].root : rig.root;
-          if (body.visible) { explode(body.position.x, body.position.y, body.position.z, b.kind ? BONES_H : BRUTE_H, b.kind ? PIXELS.skeleton : PIXELS.gorilla, 40); audio.play("hit"); }
-          rig.root.visible = skels[i].root.visible = o.active = false;
+          const body = bodyOf(i, b);
+          if (body.visible) {
+            explode(body.position.x, body.position.y, body.position.z, heightOf(b), KIND_PIXELS[b.kind], b.kind >= 2 ? 90 : 40);
+            audio.play("hit");
+            // A spider bursts with a shriek, its brood spilling out of it (the sim's `brood`).
+            if (b.kind === 2) { audio.play("brood"); fx.burst(b.x, ground + 1, b.z, 30, VAPOR, 5); landShake = 0.5; }
+          }
+          hideOthers(i, -1); o.active = false;
           beam.visible = glow.visible = burst.visible = landRings[i * 2].visible = landRings[i * 2 + 1].visible = false;
           continue;
         }
-        if (b.kind) { rig.root.visible = false; drawSkeleton(i, b, ground, dt, t, now); continue; }
-        skels[i].root.visible = false;
+        hideOthers(i, b.kind);
+        if (b.kind === 1) { drawSkeleton(i, b, ground, dt, t, now); continue; }
+        if (b.kind === 2) { drawSpider(i, b, ground, dt, t, now); continue; }
+        if (b.kind === 3) { drawHourglass(i, b, ground, dt, t, now); continue; }
         const since = t - b.phaseAt, pulse = 0.75 + 0.25 * Math.sin(now / 200);
         // The beam: down out of the sky to where it will land, held while it falls, gone soon after it lands.
         let column = 0, reach = 1;
@@ -1415,6 +1843,237 @@
         (Math.random() - 0.5) * 3, Math.random() * 2, (Math.random() - 0.5) * 3, 0.25, 4, 0, -50);
     };
 
+    // A brute's arrival: a beam of `colour` down out of the sky to where it will land, held while it falls, gone soon
+    // after it lands; the glow under it while it comes.
+    const arrive = (i, b, ground, colour, width, t, now) => {
+      const since = t - b.phaseAt, pulse = 0.75 + 0.25 * Math.sin(now / 200);
+      let column = 0, reach = 1;
+      if (b.phase === BP.BEAM) { reach = Math.min(1, since / 300); column = 1; }
+      else if (b.phase === BP.FALL) column = 1;
+      else column = Math.max(0, 1 - (t - bruteLand[i]) / 600);
+      sprite(arriveBeams[i], MODELS.beamOf(colour.core, colour.mid, colour.edge, false), b.x, ground + BEAM_TOP * (1 - reach), b.z, 1.4 * width, BEAM_TOP * reach, column, false);
+      sprite(arriveGlows[i], MODELS.glowDisc(colour.mid), b.x, ground + 0.03, b.z, width, width, b.phase <= BP.FALL ? 0.6 * pulse : 0, true);
+      landFlashes[i].visible = landRings[i * 2].visible = landRings[i * 2 + 1].visible = false;
+    };
+    // The Halving Hourglass: called down in a gold beam, standing where it landed, its orange sand running through the
+    // neck and over again, sats trickling down it, an orange ring pulsing round its foot.
+    const drawHourglass = (i, b, ground, dt, t, now) => {
+      const k = glasses[i], o = bruteOwners[i];
+      arrive(i, b, ground, GOLD, 3.2, t, now);
+      if (brutePhase[i] <= BP.FALL && b.phase > BP.FALL) { bruteLand[i] = t; audio.play("thump"); fx.burst(b.x, ground + 0.1, b.z, 14, DIRT, 3); }
+      brutePhase[i] = b.phase;
+      const shown = b.phase >= BP.FALL;
+      k.root.visible = o.active = shown;
+      if (!shown) { glassRings[i].visible = false; return; }
+      const zapped = b.struckAt > 0 && t >= b.struckAt, jit = zapped ? STRIKE_SHAKE * 2 : 0, r = k.root;
+      r.position.x = b.x + (Math.random() - 0.5) * jit; r.position.z = b.z + (Math.random() - 0.5) * jit;
+      r.position.y = ground + (b.phase === BP.FALL ? Math.max(0, b.y) : 0);
+      r.rotation.y = now / 4000;
+      const u = (t % SAND_MS) / SAND_MS, top = Math.max(0.05, 1 - u), heap = 0.1 + 0.9 * u;
+      k.top.scale.x = k.top.scale.z = Math.sqrt(top); k.top.scale.y = top;
+      k.bottom.scale.x = k.bottom.scale.z = Math.sqrt(heap); k.bottom.scale.y = heap;
+      if (b.phase > BP.FALL && Math.random() < dt * 14) fx.spawnParticle(PIXELS.hourglass[0], r.position.x, r.position.y + MODELS.HOURGLASS_NECK, r.position.z, 0, -1.5, 0, 0.5, 2, 0, -50);
+      const beat = 0.5 + 0.5 * Math.sin(now / 260), ring = 2.6 * (0.95 + 0.05 * beat);
+      sprite(glassRings[i], MODELS.ringOf(GOLD.mid), b.x, ground + 0.05, b.z, ring * 2 / 0.9, ring * 2 / 0.9, b.phase > BP.FALL ? 0.4 + 0.4 * beat : 0, true);
+      if (zapped && Math.random() < 0.4) fx.spawnParticle(ZAPS[Math.random() * 3 | 0], b.x + (Math.random() - 0.5) * 1.6, ground + Math.random() * GLASS_H, b.z + (Math.random() - 0.5) * 1.6,
+        (Math.random() - 0.5) * 3, Math.random() * 2, (Math.random() - 0.5) * 3, 0.25, 4, 0, -50);
+    };
+    // The spiderlings: flung out of their mother in a hop, then scuttling after their player, their legs changing
+    // stride as they run; a bite, and a pop of green when one dies.
+    const drawLings = (dt, t) => {
+      let beamN = 0;
+      for (let i = 0; i < C.LING.max; i++) {
+        const l = sim.lings[i], node = lingNodes[i], o = lingOwners[i];
+        if (!l.on) { node.visible = o.active = lingDollars[i].visible = false; lingShown[i] = 0; continue; }
+        if (l.id !== lingShown[i]) { lingShown[i] = l.id; lingBit[i] = l.bitAt; lingRun[i] = 0; lingX[i] = l.x; lingZ[i] = l.z; lingPhase[i] = 0; }
+        const ground = island.surfaceAt(l.x, l.z);
+        if (l.dying) {
+          if (node.visible) {
+            explode(l.x, ground + 0.2, l.z, 0.5, PIXELS.spider, 10);
+            if (t - lingCried >= LING_CRY_MS) { lingCried = t; audio.play("brood"); }
+          }
+          node.visible = o.active = lingDollars[i].visible = false;
+          continue;
+        }
+        // A Fiat Rush spiderling: a green beam down to where it will land, then it drops out of it (not yet a target).
+        if (l.phase === SIM.LING_PHASE.DROP) {
+          const since = t - l.phaseAt, fall = clamp((since - C.LING.dropBeamMs) / C.LING.dropFallMs, 0, 1);
+          if (beamN < LING_BEAMS) {
+            const reach = Math.min(1, since / 300), pulse = 0.75 + 0.25 * Math.sin(t / 200);
+            sprite(lingBeams[beamN], MODELS.beamOf(GREEN.core, GREEN.mid, GREEN.edge, false), l.x, ground + BEAM_TOP * (1 - reach), l.z, 1.4 * 1.2, BEAM_TOP * reach, 1 - fall, false);
+            sprite(lingGlows[beamN], MODELS.glowDisc(GREEN.mid), l.x, ground + 0.03, l.z, 1.6, 1.6, 0.6 * pulse, true);
+            beamN++;
+          }
+          o.active = lingDollars[i].visible = false;
+          node.visible = since > C.LING.dropBeamMs;
+          node.position.x = l.x; node.position.z = l.z;
+          node.position.y = ground + LING_DROP_FROM * (1 - fall * fall);
+          node.rotation.y = l.heading;
+          show(node, MODELS.spiderling(0));
+          lingPhase[i] = l.phase;
+          continue;
+        }
+        // Landed: a puff of dirt and a soft thump.
+        if (lingPhase[i] === SIM.LING_PHASE.DROP) { fx.burst(l.x, ground + 0.1, l.z, 6, DIRT, 2); audio.play("thump"); }
+        lingPhase[i] = l.phase;
+        if (l.bitAt && l.bitAt !== lingBit[i]) { lingBit[i] = l.bitAt; audio.play("bite"); }
+        lingRun[i] += Math.hypot(l.x - lingX[i], l.z - lingZ[i]);
+        lingX[i] = l.x; lingZ[i] = l.z;
+        const u = l.phase === SIM.LING_PHASE.SCATTER ? clamp((t - l.phaseAt) / C.LING.scatterMs, 0, 1) : 1;
+        node.visible = o.active = true;
+        node.position.x = l.x; node.position.z = l.z;
+        node.position.y = ground + LING_HOP * 4 * u * (1 - u);
+        node.rotation.y = l.heading;
+        show(node, MODELS.spiderling(Math.floor(lingRun[i] / LING_STRIDE) % 2));
+        sprite(lingDollars[i], MODELS.dollar(), l.x, node.position.y + 0.8 + 0.06 * Math.sin(t / 250 + i), l.z, 0.45, 0.45, 0.8, false);
+      }
+      for (; beamN < LING_BEAMS; beamN++) lingBeams[beamN].visible = lingGlows[beamN].visible = false;
+    };
+    // Where leg `L` of spider `k` rests on the island, beside its body as it stands now, into `out` at `o`.
+    const restFoot = (k, L, out, o) => {
+      const r = k.root, h = r.rotation.y, c = Math.cos(h), sn = Math.sin(h);
+      const x = r.position.x + (L.restX * c + L.restZ * sn) * SPIDER_SCALE, z = r.position.z + (-L.restX * sn + L.restZ * c) * SPIDER_SCALE;
+      out[o] = x; out[o + 1] = island.surfaceAt(x, z); out[o + 2] = z;
+    };
+    // How far (in the model's units) leg `n`'s foot stands from its rest.
+    const RESTING = new Float64Array(3);
+    const strayed = (k, n) => {
+      restFoot(k, k.legs[n], RESTING, 0);
+      return Math.hypot(k.feet[n * 3] - RESTING[0], k.feet[n * 3 + 2] - RESTING[2]) / SPIDER_SCALE;
+    };
+    // Its legs: falling, curled under it; otherwise each foot planted and its leg reaching it (two-bone IK in the leg's
+    // own upright plane, its knee up), the fours stepping in turn as the feet stray from their rests.
+    const walkSpider = (k, falling, zapped, dt) => {
+      const legs = k.legs, feet = k.feet;
+      if (falling) {
+        for (const L of legs) {
+          L.turn.rotation.y = Math.atan2(-(L.restZ - L.hz), L.restX - L.hx);
+          L.hip.rotation.z = 0.9; L.knee.rotation.z = -1.7;
+        }
+        k.planted = false;
+        return;
+      }
+      if (!k.planted) {
+        for (let n = 0; n < 8; n++) { restFoot(k, legs[n], feet, n * 3); k.stepT[n] = -1; }
+        k.planted = true;
+      }
+      // Steps under way go on; then the four whose feet strayed furthest step, while the other four stand.
+      const busy0 = stepFeet(k, dt, 0), busy1 = stepFeet(k, dt, 1);
+      if (!busy0 && !busy1) {
+        let worst0 = 0, worst1 = 0;
+        for (let n = 0; n < 8; n++) { const d = strayed(k, n); if (legs[n].group) worst1 = Math.max(worst1, d); else worst0 = Math.max(worst0, d); }
+        const g = worst0 >= worst1 ? 0 : 1;
+        if (Math.max(worst0, worst1) > STEP_AT) {
+          for (let n = 0; n < 8; n++) {
+            if (legs[n].group !== g || strayed(k, n) <= STEP_WITH) continue;
+            const o = n * 3;
+            restFoot(k, legs[n], RESTING, 0);
+            k.from[o] = feet[o]; k.from[o + 1] = feet[o + 1]; k.from[o + 2] = feet[o + 2];
+            const tx = RESTING[0] + (RESTING[0] - feet[o]) * STEP_LEAD, tz = RESTING[2] + (RESTING[2] - feet[o + 2]) * STEP_LEAD;
+            k.to[o] = tx; k.to[o + 1] = island.surfaceAt(tx, tz); k.to[o + 2] = tz;
+            k.stepT[n] = 0;
+          }
+        }
+      }
+      // Each leg reaches its foot from its hip, in the body's frame.
+      const r = k.root, h = r.rotation.y, c = Math.cos(h), sn = Math.sin(h), rx = k.body.rotation.x, cr = Math.cos(rx), sr = Math.sin(rx);
+      for (let n = 0; n < 8; n++) {
+        const L = legs[n], o = n * 3, dx = feet[o] - r.position.x, dz = feet[o + 2] - r.position.z;
+        const lift = k.stepT[n] >= 0 ? Math.sin(Math.PI * k.stepT[n]) * STEP_LIFT : 0;
+        const lx = (dx * c - dz * sn) / SPIDER_SCALE, lz = (dx * sn + dz * c) / SPIDER_SCALE, ly = (feet[o + 1] - r.position.y) / SPIDER_SCALE + lift - k.body.position.y;
+        reachLeg(L, lx, ly * cr + lz * sr, -ly * sr + lz * cr, zapped ? (Math.random() - 0.5) * 0.25 : 0);
+      }
+    };
+    // Leg `L` reaching its foot at (lx, by, bz) in its body's frame: two-bone IK in the leg's own upright plane, its knee
+    // up, turned and lifted by `shake` more.
+    const reachLeg = (L, lx, by, bz, shake) => {
+      const vx = lx - L.hx, vy = by - MODELS.SPIDER_HIP, vz = bz - L.hz, d = Math.hypot(vx, vz);
+      const reach = clamp(Math.hypot(d, vy), Math.abs(LEG.femur - LOWER) + 1e-3, LEG.femur + LOWER - 1e-3);
+      const up = Math.acos(clamp((LEG.femur * LEG.femur + reach * reach - LOWER * LOWER) / (2 * LEG.femur * reach), -1, 1));
+      const knee = Math.acos(clamp((LEG.femur * LEG.femur + LOWER * LOWER - reach * reach) / (2 * LEG.femur * LOWER), -1, 1));
+      L.turn.rotation.y = Math.atan2(-vz, vx) + shake;
+      L.hip.rotation.z = Math.atan2(vy, d) + up + shake;
+      L.knee.rotation.z = -(Math.PI - knee) - LOWER_TILT;
+    };
+    // Steps the feet of four `g` along their arcs; true while any of them is still in the air.
+    const stepFeet = (k, dt, g) => {
+      let busy = false;
+      for (let n = 0; n < 8; n++) {
+        if (k.legs[n].group !== g || k.stepT[n] < 0) continue;
+        const u = Math.min(1, k.stepT[n] + dt * 1000 / STEP_MS), o = n * 3, e = u * u * (3 - 2 * u);
+        k.feet[o] = k.from[o] + (k.to[o] - k.from[o]) * e;
+        k.feet[o + 1] = k.from[o + 1] + (k.to[o + 1] - k.from[o + 1]) * e;
+        k.feet[o + 2] = k.from[o + 2] + (k.to[o + 2] - k.from[o + 2]) * e;
+        k.stepT[n] = u >= 1 ? -1 : u;
+        if (u < 1) busy = true;
+      }
+      return busy;
+    };
+    // A giant spider: called down in a white beam, dropping legs curled, landing in a puff of dust and walking on, its
+    // legs in alternating fours; in range it rears up and spits its glob of venom, which arcs to where its player stood
+    // and splashes green there.
+    const drawSpider = (i, b, ground, dt, t, now) => {
+      const k = spiders[i], o = bruteOwners[i], since = t - b.phaseAt, pulse = 0.75 + 0.25 * Math.sin(now / 200);
+      let column = 0, reach = 1;
+      if (b.phase === BP.BEAM) { reach = Math.min(1, since / 300); column = 1; }
+      else if (b.phase === BP.FALL) column = 1;
+      else column = Math.max(0, 1 - (t - bruteLand[i]) / 600);
+      sprite(arriveBeams[i], MODELS.beamOf(WHITE.core, WHITE.mid, WHITE.edge, false), b.x, ground + BEAM_TOP * (1 - reach), b.z, 1.4 * 4, BEAM_TOP * reach, column, false);
+      sprite(arriveGlows[i], MODELS.glowDisc(WHITE.mid), b.x, ground + 0.03, b.z, 3.2, 3.2, b.phase <= BP.FALL ? 0.6 * pulse : 0, true);
+      landFlashes[i].visible = landRings[i * 2].visible = landRings[i * 2 + 1].visible = false;
+      // Landing it shakes the ground a second, and a voice calls the Fiat Rush (once for spiders landing together).
+      if (brutePhase[i] <= BP.FALL && b.phase > BP.FALL) {
+        bruteLand[i] = t; audio.play("thump"); fx.burst(b.x, ground + 0.1, b.z, 14, DIRT, 3);
+        landShake = Math.max(landShake, LAND_SHAKE_S);
+        if (t - fiatVoiceAt > 2500) { fiatVoiceAt = t; audio.play("fiatRush"); }
+      }
+      brutePhase[i] = b.phase;
+      const shown = b.phase >= BP.FALL;
+      k.root.visible = o.active = shown;
+      // Its glowing "$", bobbing over it.
+      if (shown) sprite(spiderDollars[i], MODELS.dollar(), b.x, ground + SPIDER_H + 0.9 + 0.12 * Math.sin(now / 300 + i), b.z, 1.2, 1.2, 0.75 + 0.25 * Math.sin(now / 160 + i), false);
+      else spiderDollars[i].visible = false;
+      if (!shown) { venoms[i].visible = false; k.planted = false; return; }
+      bruteX[i] = b.x; bruteZ[i] = b.z;
+      const zapped = b.struckAt > 0 && t >= b.struckAt, falling = b.phase === BP.FALL, spitting = b.phase === BP.SPIT;
+      // Rearing up through the wind-up, then down again as the glob leaves; its feet stay where they stand.
+      const rear = spitting ? (t < b.fromY ? clamp(since / C.SPIDER.windMs, 0, 1) : Math.max(0, 1 - (t - b.fromY) / 200)) : 0;
+      k.body.rotation.x = -0.42 * rear;
+      k.body.position.y = 0;
+      // It faces its player while it gathers itself; it turns at most so fast, its legs stepping round with it.
+      const target = b.target ? playerAt(b.target) : null;
+      const want = target && b.phase === BP.RECOVER ? Math.atan2(target.x - b.x, target.z - b.z) : b.heading, r = k.root;
+      const turnBy = Math.atan2(Math.sin(want - r.rotation.y), Math.cos(want - r.rotation.y));
+      r.rotation.y = k.planted ? r.rotation.y + clamp(turnBy, -4 * dt, 4 * dt) : want;
+      const jit = zapped ? STRIKE_SHAKE * 2 : 0;
+      r.position.x = b.x + (Math.random() - 0.5) * jit; r.position.z = b.z + (Math.random() - 0.5) * jit;
+      r.position.y = ground + (falling ? Math.max(0, b.y) : 0);
+      walkSpider(k, falling, zapped, dt);
+      // The glob in flight: from its fangs up an arc to where its player stood.
+      const v = venoms[i], flying = spitting && t >= b.fromY && t < b.toY;
+      v.visible = flying;
+      if (flying) {
+        if (k.spat !== b.fromY) { k.spat = b.fromY; audio.play("spit"); }
+        const u = (t - b.fromY) / Math.max(1, b.toY - b.fromY), h = b.heading;
+        const sx = b.fromX + Math.sin(h) * 0.75 * SPIDER_SCALE, sz = b.fromZ + Math.cos(h) * 0.75 * SPIDER_SCALE, sy = ground + MODELS.SPIDER_HIP * SPIDER_SCALE;
+        const ey = island.surfaceAt(b.toX, b.toZ) + 0.15;
+        v.position.x = sx + (b.toX - sx) * u; v.position.z = sz + (b.toZ - sz) * u;
+        v.position.y = sy + (ey - sy) * u + VENOM_ARC * 4 * u * (1 - u);
+        v.scale.x = v.scale.y = v.scale.z = 1.6 * (1 + 0.2 * Math.sin(now / 40));
+        if (Math.random() < 0.5) fx.spawnParticle(VAPOR[Math.random() * 3 | 0], v.position.x, v.position.y, v.position.z, 0, -0.5, 0, 0.3, 3, 0, -50);
+      }
+      // Where it lands, a green splash, the venom lying there a moment.
+      if (b.slamAt && b.slamAt !== bruteSlam[i]) {
+        bruteSlam[i] = b.slamAt;
+        audio.play("splat");
+        const gy = island.surfaceAt(b.toX, b.toZ);
+        fx.burst(b.toX, gy + 0.15, b.toZ, 24, VAPOR, 4);
+        puddleAt[i] = t; puddleX[i] = b.toX; puddleZ[i] = b.toZ;
+      }
+      if (zapped && Math.random() < 0.4) fx.spawnParticle(ZAPS[Math.random() * 3 | 0], b.x + (Math.random() - 0.5) * 1.6, ground + Math.random() * SPIDER_H, b.z + (Math.random() - 0.5) * 1.6,
+        (Math.random() - 0.5) * 3, Math.random() * 2, (Math.random() - 0.5) * 3, 0.25, 4, 0, -50);
+    };
+
     // ---------- the monkeys ----------
     // Where a player stands and faces, and how tall their Ooga is: this page's own as it stands, another's as the room
     // last had it (false when nowhere).
@@ -1491,12 +2150,17 @@
         test("ghost", i, view[i * 4], view[i * 4 + 3] + h * 0.5, view[i * 4 + 2], h * 0.45);
       }
       for (let i = 0; i < B.max; i++) {
-        const b = sim.brutes[i], r = b.kind ? skels[i].root : rigs[i].root, h = b.kind ? BONES_H : BRUTE_H;
-        // A skeleton is long and low: its sphere sits a little ahead of its hips, round its chest and arms.
-        const ahead = b.kind ? 0.25 : 0, x = r.position.x + Math.sin(b.heading) * ahead, z = r.position.z + Math.cos(b.heading) * ahead;
-        if (b.on && !b.dying && r.visible) test("brute", i, x, r.position.y + h * 0.5, z, b.kind ? 0.6 : h * 0.55);
+        const b = sim.brutes[i], r = bodyOf(i, b), h = heightOf(b);
+        // A skeleton is long and low: its sphere sits a little ahead of its hips, round its chest and arms. A spider's
+        // sits over its body, a little behind its head, wide enough for its great abdomen.
+        const ahead = b.kind === 1 ? 0.25 : b.kind === 2 ? -0.15 * SPIDER_SCALE : 0, x = r.position.x + Math.sin(b.heading) * ahead, z = r.position.z + Math.cos(b.heading) * ahead;
+        if (b.on && !b.dying && r.visible) test("brute", i, x, r.position.y + h * 0.5, z, KIND_HIT[b.kind]);
       }
-      if (bossNode.visible) test("boss", -1, S.bossX, BOSS_Y + BOSS_H * 0.5, S.bossZ, BOSS_H * 0.4);
+      for (let i = 0; i < C.LING.max; i++) {
+        const l = sim.lings[i], n = lingNodes[i];
+        if (l.on && !l.dying && lingOwners[i].active) test("ling", i, n.position.x, n.position.y + 0.25, n.position.z, 0.4);
+      }
+      if (bossNode.visible) test("boss", -1, S.bossX, BOSS_Y + bossSize * 0.5, S.bossZ, bossSize * 0.4);
       return ROCK_HIT.slot >= 0 || ROCK_HIT.role === "boss" && best < ROCK_RANGE;
     };
     // This page's player fired from `from` toward `to`: each monkey fires a rock too, the left one toward a point to the
@@ -1738,8 +2402,9 @@
     // grey while down), the ghosts (red, bigger for a general or wraith), the gorillas (green), the skeletons (bone) and
     // the boss, with N E S W round the rim. Nothing it draws a frame allocates.
     const MAP = { range: 26, half: 30, size: 192 };
-    const MAP_INK = { ring: "rgba(255,138,31,0.55)", pile: "#ffd23f", elixir: "#ff8a1f", player: "#4fa3ff", down: "#8a8f99", ghost: "#ff453a",
+    const MAP_INK = { spider: "#c8ff2e", hourglass: "#f7931a", ring: "rgba(255,138,31,0.55)", pile: "#ffd23f", elixir: "#ff8a1f", player: "#4fa3ff", down: "#8a8f99", ghost: "#ff453a",
       gorilla: "#3dff66", bones: "#ece4cf", boss: "#ff2a1f", me: "#ffffff", edge: "rgba(0,0,0,0.75)", letter: "#f3e9d2", north: "#ff8a1f" };
+    const MAP_KIND = [MAP_INK.gorilla, MAP_INK.bones, MAP_INK.spider, MAP_INK.hourglass];
     // The compass points: a letter and its way on the island (north is -z, the bearing's zero; east +x).
     const COMPASS = [["N", 0, -1], ["E", 1, 0], ["S", 0, 1], ["W", -1, 0]];
     let mapTerrain = null, mapCone = null, mapConeFor = 0;
@@ -1829,9 +2494,12 @@
       }
       for (let i = 0; i < B.max; i++) {
         const q = sim.brutes[i];
-        if (q.on && !q.dying && q.phase >= BP.FALL) dot(g, q.x, q.z, (q.kind ? 3 : 4.2) * k, q.kind ? MAP_INK.bones : MAP_INK.gorilla);
+        if (q.on && !q.dying && q.phase >= BP.FALL) dot(g, q.x, q.z, (q.kind === 1 ? 3 : 4.2) * k, MAP_KIND[q.kind]);
       }
-      if (S.bossOn && !S.bossDyingAt) dot(g, S.bossX, S.bossZ, 6 * k, MAP_INK.boss);
+      for (const l of sim.lings) {
+        if (l.on && !l.dying) dot(g, l.x, l.z, 2 * k, MAP_INK.spider);
+      }
+      if (S.bossOn && !S.bossDyingAt && bossOut(t) > 0) dot(g, S.bossX, S.bossZ, 6 * k, MAP_INK.boss);
       const me = myId();
       for (const q of sim.players) {
         if (!q.on || q.id === me) continue;
@@ -1912,7 +2580,7 @@
         strikeOne(i, g.on ? g.struckAt : 0, view[i * 4], view[i * 4 + 3], view[i * 4 + 2], t, now);
       }
       for (let i = 0; i < C.BRUTE.max; i++) {
-        const b = sim.brutes[i], p = (b.kind ? skels[i] : rigs[i]).root.position;
+        const b = sim.brutes[i], p = bodyOf(i, b).position;
         strikeOne(C.MAX_GHOSTS + i, b.on ? b.struckAt : 0, p.x, p.y, p.z, t, now);
       }
       strikeOne(STRIKES - 1, S.bossOn ? S.bossStruckAt : 0, S.bossX, BOSS_Y, S.bossZ, t, now);
@@ -1989,6 +2657,7 @@
         drawElixirs(now);
         drawBubbles(t, now);
         drawBrutes(dt, t, now);
+        drawLings(dt, t);
         drawMonkeys(now);
         drawGlows(t);
         drawRocks();
@@ -2004,6 +2673,12 @@
         boltDrop.visible = false; strikeFlash = 0;
         for (const rig of rigs) rig.root.visible = false;
         for (const k of skels) k.root.visible = false;
+        for (const k of spiders) { k.root.visible = false; k.planted = false; }
+        for (const list of [venoms, puddles, venomRings, lingNodes, glassRings, spiderDollars, lingDollars, lingBeams, lingGlows]) for (const n of list) n.visible = false;
+        for (const k of glasses) k.root.visible = false;
+        hud.halving(false);
+        for (const o of lingOwners) o.active = false;
+        lingShown.fill(0); puddleAt.fill(-1e9);
         boltNode.visible = boltGlow.visible = false;
         flash = 0;
         for (const n of beams) n.visible = false;
@@ -2142,11 +2817,11 @@
         ctx2d.globalAlpha = 1;
       }
       for (let i = 0; i < B.max; i++) {
-        const b = sim.brutes[i], root = b.kind ? skels[i].root : rigs[i].root, max = SIM.hpOf(b.kind ? C.BONES.hp : B.hp, S.round);
+        const b = sim.brutes[i], root = bodyOf(i, b), max = fullHp(b);
         if (!b.on || b.dying || b.hp >= max || !root.visible) continue;
-        const r = root.position, p = project(r.x, r.y + (b.kind ? BONES_H : BRUTE_H) + 0.3, r.z);
+        const r = root.position, p = project(r.x, r.y + heightOf(b) + 0.3, r.z);
         if (!p) continue;
-        const w = b.kind ? 30 : 48, frac = b.hp / max;
+        const w = b.kind === 1 ? 30 : 48, frac = b.hp / max;
         ctx2d.globalAlpha = 0.85;
         ctx2d.fillStyle = "rgba(0,0,0,0.55)";
         ctx2d.fillRect(p.x - w / 2 - 1, p.y - 4, w + 2, 6);
@@ -2186,7 +2861,11 @@
     const hitAs = (role, slot, x, y, z, damage) => {
       let id;
       if (role === "boss") id = 0;
-      else if (role === "brute") {
+      else if (role === "ling") {
+        const l = sim.lings[slot];
+        if (!l.on || l.dying) return;
+        id = l.id;
+      } else if (role === "brute") {
         const b = sim.brutes[slot];
         if (!b.on || b.dying) return;
         id = b.id;
@@ -2201,6 +2880,22 @@
       if (npcSync.role === "follow") queueHit(id, damage);
       else sim.hit(id, damage, myId());
     };
+    // Debug (Shift+9): straight to a won hunt's end with this page's player and three stand-ins from the roster (Oogas
+    // other than the visitor's own), with mock points and enemies, a hunt opened first if none is under way.
+    const MOCK_SCORES = [{ id: -101, kills: 212, foes: 168 }, { id: -102, kills: 147, foes: 121 }, { id: -103, kills: 96, foes: 80 }];
+    const mockResults = (me) => {
+      if (S.state === ST.IDLE) sim.start(clock(), me, 1);
+      MOCK.clear();
+      let k = 0;
+      const own = crew.player ? crew.player.traits.name : net.ownCharacter()?.handle;
+      for (const cave of crew.list) {
+        if (k >= MOCK_SCORES.length) break;
+        if (cave.traits.name === own) continue;
+        MOCK.set(MOCK_SCORES[k++].id, { name: BL.characters.displayOf(cave.traits.name), cave });
+      }
+      const rows = MOCK_SCORES.slice(0, k);
+      if (!sim.debug.results(me, { kills: 180, foes: 140 }, rows)) hub.hud.toast("Debug · no results to show");
+    };
     /** The lab's debug keys, with Shift, on a `debug=1` page during a hunt; true when one was used. */
     const key = (e) => {
       if (S.state === ST.GATHER && !declined && (e.key === "r" || e.key === "R") && !e.shiftKey && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) { readyUp(); return true; }
@@ -2212,9 +2907,10 @@
       }
       if (!hub.debug || !e.shiftKey || e.repeat || e.metaKey || e.ctrlKey || e.altKey) return false;
       const what = DEBUG_KEYS[e.code];
-      if (!what || S.state === ST.IDLE) return false;
+      if (!what || S.state === ST.IDLE && what !== "results") return false;
       if (npcSync.role === "follow") { hub.hud.toast("Ghost debug keys work on the host's page"); return true; }
       const me = myId();
+      if (what === "results") { mockResults(me); return true; }
       if (what === "drop") {
         // 1–6 the lab's six, 7 the monkeys, 8 the lightning.
         const kind = e.code === "Digit7" ? SIM.MONKEY_DROP : e.code === "Digit8" ? SIM.LIGHTNING_DROP : Number(e.code.slice(5)) - 1;
@@ -2229,6 +2925,8 @@
       else if (what === "kills") { sim.debug.kills(me, 10); hub.hud.toast("Debug · +10 kills"); }
       else if (what === "gorilla") hub.hud.toast(sim.debug.gorilla(me) ? "Debug · a gorilla" : "Debug · gorillas come only while a round runs");
       else if (what === "skeleton") hub.hud.toast(sim.debug.skeleton(me) ? "Debug · a skeleton" : "Debug · skeletons come only while a round runs");
+      else if (what === "spider") hub.hud.toast(sim.debug.spider(me) ? "Debug · a spider" : "Debug · spiders come only while a round runs");
+      else if (what === "hourglass") hub.hud.toast(sim.debug.hourglass() ? "Debug · an hourglass" : "Debug · hourglasses come only while a round runs");
       else if (what === "revive") {
         // An elixir, and a stand-in hunter down a step in front of the visitor's Ooga: stand still to watch the revive.
         const cave = crew.player;
@@ -2262,6 +2960,8 @@
       for (const node of targetNodes) hub.removeTarget(node);
       targetNodes.length = 0;
       for (const rig of rigs) rig.dispose();
+      if (cardFigures.gorilla) cardFigures.gorilla.rig.dispose();
+      if (cardRenderer) cardRenderer.dispose();
       hub.setSeal(null);
       hub.gameMode(false);
       letGo();
@@ -2300,7 +3000,7 @@
 
     return {
       start: () => { if (S.state === ST.IDLE) tapHerald(); }, receive: sync.receive, restore,
-      update, drawOverlay, hit, shot, key, down, get waiting() { return spectating; }, shotGeometry: () => { const tier = rifleTier(); return tier ? MODELS.laserBolt(tier - 1) : MODELS.rock(); }, hour, shade, shake, unshake, release, dispose, liveGeometry, refuseTravel, debug,
+      update, drawOverlay, hit, shot, key, down, get waiting() { return spectating; }, shotGeometry: () => { const tier = rifleTier(); return tier ? MODELS.laserBolt(tier - 1) : MODELS.rock(); }, lanternsWanted, lanterns, hour, shade, shake, unshake, release, dispose, liveGeometry, refuseTravel, debug,
       get sealed() { return sealedCount > 0; },
       get hunting() { return !off(S.state); },
       get busy() { return busy(); },

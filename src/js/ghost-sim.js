@@ -20,27 +20,28 @@
   // GATHER, the lobby before the walls rise, comes last in number so every LAP..DAWN range keeps its meaning.
   const STATE = { IDLE: 0, LAP: 1, NIGHT: 2, COUNTDOWN: 3, ACTIVE: 4, BREAK: 5, BOSS: 6, VICTORY: 7, DEFEAT: 8, DAWN: 9, GATHER: 10 };
   const OUTCOME = { NONE: 0, VICTORY: 1, DEFEAT: 2, ABANDON: 3 };
-  // Per round: total ghosts, most at once, seconds between spawn events, ghosts per event, speed (m/s). Past the third
-  // round each round still climbs, by a quarter less than the lab's: 15 more ghosts and 0.3 m/s faster a round where it
-  // added 20 and 0.4 (80, 100, 120 ghosts at 3.2, 3.6, 4.0 m/s). The fifth and sixth rounds are eased further, for
-  // one player as much as many: three ghosts at a time where the lab sent four, every 0.75 and 0.65 s where it was 0.65
-  // and 0.55 (3.75, 4 and 4.6 a second through rounds 4 to 6, where round 5 leapt to 6.15), and at most 18 and 22 on
-  // the field at once where it allowed 24 and 28.
+  // Per round: total ghosts, most at once, seconds between spawn events, ghosts per event, speed (m/s). Seven rounds,
+  // then the boss as the eighth. Matched to the rifles (`WEAPON`) and the enemies' toughness (`HP_SCALE`) so the rounds
+  // a player must land each second (the ghosts coming times the rounds each takes) climbs with no easy stretch: about
+  // 1.5, 7.7, 7.2, 12.7, 13.5, then 8.8 as the green laser comes and 10.3 in the seventh, for one player.
   const ROUNDS = [
     { ghosts: 20, cap: 6, interval: 2.0, group: 1, speed: 1.8 },
     { ghosts: 40, cap: 12, interval: 1.2, group: 2, speed: 2.3 },
-    { ghosts: 60, cap: 16, interval: 0.9, group: 3, speed: 2.8 },
-    { ghosts: 75, cap: 20, interval: 0.8, group: 3, speed: 3.1 },
-    { ghosts: 90, cap: 18, interval: 0.75, group: 3, speed: 3.4 },
-    { ghosts: 105, cap: 22, interval: 0.65, group: 3, speed: 3.7 }
+    { ghosts: 55, cap: 14, interval: 0.95, group: 2, speed: 2.7 },
+    { ghosts: 70, cap: 16, interval: 0.85, group: 3, speed: 3.0 },
+    { ghosts: 85, cap: 18, interval: 0.8, group: 3, speed: 3.2 },
+    { ghosts: 100, cap: 20, interval: 0.75, group: 3, speed: 3.4 },
+    { ghosts: 115, cap: 22, interval: 0.7, group: 3, speed: 3.6 }
   ];
-  // Rounds scale with the players counted as each starts (6+ play like 5).
+  // Rounds scale with the players counted as each starts (6+ play like 5). Each hunter's share stays near one
+  // player's: two face 1.6 times the ghosts coming 1.28 times as fast, five 3.4 times as many twice as fast (`cap`
+  // still held to MAX_GHOSTS), since a group also has revives and more drops to share.
   const PLAYER_SCALING = [null,
     { ghosts: 1.0, cap: 1.0, interval: 1.0, speed: 1.0 },
-    { ghosts: 1.4, cap: 1.3, interval: 0.85, speed: 1.05 },
-    { ghosts: 1.8, cap: 1.6, interval: 0.75, speed: 1.1 },
-    { ghosts: 2.2, cap: 1.9, interval: 0.68, speed: 1.15 },
-    { ghosts: 2.6, cap: 2.2, interval: 0.62, speed: 1.2 }];
+    { ghosts: 1.6, cap: 1.4, interval: 0.78, speed: 1.05 },
+    { ghosts: 2.2, cap: 1.8, interval: 0.65, speed: 1.1 },
+    { ghosts: 2.8, cap: 2.2, interval: 0.56, speed: 1.15 },
+    { ghosts: 3.4, cap: 2.6, interval: 0.5, speed: 1.2 }];
   const TIER = { PLAIN: 0, GENERAL: 1, WRAITH: 2 };
   // The drops; "tess" stands in the lab's monkey sidearm: Tess comes down, and whoever takes her has her at their side.
   // "lightning" is never a random drop: one comes over the banana pile in each round (LIGHTNING). "monkeys" is a random
@@ -55,35 +56,56 @@
     TICK_MS: 50, MAX_GHOSTS: 32, MAX_DROPS: 12, MAX_PLAYERS: 16, MAX_PENDING: 24,
     // The lobby: how long players have to gather and ready up once the herald is woken.
     GATHER_MS: 30000,
-    NIGHT_MS: 3500, COUNTDOWN_MS: 4000, BREAK_MS: 6000, BANNER_MS: 10000, DAWN_MS: 6000, ABANDON_MS: 15000,
+    // A won hunt holds its banner and podium `VICTORY_MS` (five seconds past the ten it once held) before the dawn.
+    NIGHT_MS: 3500, COUNTDOWN_MS: 4000, BREAK_MS: 6000, VICTORY_MS: 15000, DAWN_MS: 6000, ABANDON_MS: 15000,
+    // A round that brings in new enemies opens with a card for each in turn, its countdown `INTRO_MS` longer for every
+    // card (`INTRO_LONG_MS` when there are more than two to read): `INTRO_PAGES[round - 1]` of them, the last the boss's
+    // (round 8). Round 1 ghosts and gorillas; round 2
+    // generals, skeletons and the spider; round 3 wraiths and the Fiat Rush; round 4 the hourglass; then the boss.
+    INTRO_MS: 4000, INTRO_LONG_MS: 6000, INTRO_PAGES: [2, 3, 2, 1, 0, 0, 0, 1],
     // A lost hunt gives the island back sooner: a short banner and a quick dawn.
     DEFEAT_MS: 3000, DAWN_FAST_MS: 2500,
     // A player whose bar empties is down for the rest of the round (`DOWN_UNTIL`, past any round's end) and comes back
-    // whole as it ends (a round cleared, the next one called, the sixth giving way to the boss); in the boss's fight,
+    // whole as it ends (a round cleared, the next one called, the last giving way to the boss); in the boss's fight,
     // until the hunt ends.
     DOWN_UNTIL: 1e12, PLAYER_SEGMENTS: 5, IFRAMES_MS: 1000,
     // Tess and the monkeys stay through the first hits and leave a player once their bar falls below `POWER_KEEP_SEG`.
     POWER_KEEP_SEG: 4,
-    GHOST_RADIUS: 0.42, BIG: 1.5, PLAYER_RADIUS: 0.3, SHIELD_PAD: 0.4, BOUNCE_MS: 450, BOUNCE_SPEED: 2.5,
+    // A ghost's body: a plain one `GHOST_RADIUS` round, a general or wraith `BIG` times that, a general `GENERAL` times
+    // that again.
+    GHOST_RADIUS: 0.42, BIG: 1.5, GENERAL: 1.5, PLAYER_RADIUS: 0.3, SHIELD_PAD: 0.4, BOUNCE_MS: 450, BOUNCE_SPEED: 2.5,
     KNOCK_MS: 140, KNOCK_SPEED: 8, HOVER: 0.3, CLIMB_RATE: 2,
     WEAVE_AMP: 0.85, WEAVE_HZ: 0.4, SEPARATION_PUSH: 1.7, RETARGET_MS: 500, DYING_MS: 1100,
     ARENA_R: 23, LAND_R: 20.5, DESCEND_MS: 1600, SPAWN_SAFE: 6.5, GOLDEN: 137.508 * Math.PI / 180, JITTER: 10 * Math.PI / 180, SPAWN_TRIES: 5,
+    // By tier: a plain ghost, a general, a wraith.
     HP: [6, 12, 12], KILLS: [1, 2, 2],
     // Every enemy but the boss grows tougher as the rounds go: `HP_SCALE[round - 1]` times its health (`hpOf`), on the
     // rifles' sawtooth (`WEAPON`). A round that hands out a stronger rifle keeps the round before's toughness, so the
-    // upgrade is felt, and the next catches up: a plain ghost takes 3, 4, 3, 3, 2, 2 rifle rounds through rounds 1 to 6
-    // (3, 3, 2, 2, 1, 1 at the base health), a general or wraith 6, 7, 5, 6, 3, 4, a gorilla 40, 46, 31, 36, 20, 22.
-    HP_SCALE: [1, 1.15, 1.15, 1.35, 1.5, 1.65],
+    // upgrade is felt, and the next catches up: a plain ghost takes 3, 4, 3, 3, 3, 2, 2 rifle rounds through rounds 1 to
+    // 7, a general or wraith 6, 7, 5, 6, 6, 3, 4, a gorilla 40, 46, 31, 36, 40, 20, 24.
+    HP_SCALE: [1, 1.15, 1.15, 1.35, 1.5, 1.5, 1.75],
     GENERAL_EVERY: 5, GENERAL_FROM: 2, WRAITH_EVERY: 10, WRAITH_FROM: 3, WRAITH_SPEED: 1,
     // A general's eye beam and a wraith's soul pull: how near they must be to start one, and how far a player must get
     // to break it (both 40% shorter than the lab's 6.4 and 9.4, 8.5 and 17).
     BEAM: { range: 3.84, breakRange: 5.64, ms: 3000, windMs: 350, cooldownMs: 4000 },
     SOUL: { range: 5.1, breakRange: 10.2, ms: 1500, windMs: 300, cooldownMs: 4000 },
-    BOSS: { ring: 34, y: 8.5, speed: 8.5, spitEvery: 5000, spit: 3, launchMs: 700, launchSpeed: 4, burnMs: 600, kills: 5, hp: 200, hpPerPlayer: 100, hpMax: 600, radius: 2.4, height: 7.6, generals: 20, generalGroup: 4, generalEvery: 6000, generalFirst: 4000 },
+    // The boss: inside the walls, he shows himself for `shownMs` somewhere at least `minR` and at most `maxR` from the
+    // middle (clear of every hunter by `clearR`, and `moveR` from where he was), spits `spit` enemies of any kind at
+    // `spitAtMs` into it (one more for every `spitPlayers` players past the first; `SPIT` weighs the kinds), vanishes
+    // and comes again elsewhere `goneMs` later. Only while he shows can he be shot. His generals still come over the
+    // bluff in waves.
+    BOSS: { y: 1.5, minR: 6, maxR: 16, clearR: 6, moveR: 8, shownMs: 3000, goneMs: 1500, spitAtMs: 1200, spit: 3, spitPlayers: 2,
+      launchMs: 700, launchSpeed: 4, burnMs: 600, kills: 5, hp: 200, hpPerPlayer: 100, hpMax: 600, radius: 2.4, height: 7.6, generals: 20, generalGroup: 4, generalEvery: 6000, generalFirst: 4000 },
+    // What the boss spits, weighed: a plain ghost, a general, a wraith, a skeleton, a gorilla (a full pool of the last
+    // two gives a plain ghost instead).
+    SPIT: [0.45, 0.2, 0.15, 0.12, 0.08],
     // Every `MONKEY_EVERY_KILLS` enemies a player kills themselves (one each, whatever its points: `foes`, never shared
     // and never doubled) the monkeys come down on them, as though they had taken the drop; a gift earned while they
     // still have a pair waits until a hit has taken those away (`giftMonkeys`).
-    FIRST_DROPS: 2, MONKEY_EVERY_KILLS: 20, ROUND_DROP_DELAY_MS: 6000, ROUND_DROP_GAP_MS: 150, FALL_MS: 850, PICKUP_R: 1.0,
+    // Drops: `FIRST_DROPS` as the first round starts, then `ROUND_DROPS[round - 1]` as each round is cleared (the
+    // last's as the boss comes), a steady few rather than a flood that grows with the rounds.
+    ROUND_DROPS: [2, 3, 3, 4, 4, 4, 6],
+    FIRST_DROPS: 2, MONKEY_EVERY_KILLS: 30, ROUND_DROP_DELAY_MS: 6000, ROUND_DROP_GAP_MS: 150, FALL_MS: 850, PICKUP_R: 1.0,
     SHIELD_MS: 10000, ICE_MS: 5000, ICE_SLOW: 0.5, DOUBLE_MS: 10000, BOMB_BOSS: 0.1,
     PUMPKIN_KILLS: 40, SPLASH_R: 1.6,
     // A pause holds the hunt still (P) for `PAUSE_MAX_MS` at most, so one left paused cannot keep the island sealed.
@@ -97,13 +119,13 @@
     // its health (two zaps), then rests `cooldownMs`;
     // the first zap waits `firstMs`. Her player's bar falling below `POWER_KEEP_SEG` sends her away, as it does the monkeys.
     TESS: { range: 8.5, reach: 4, cooldownMs: 2000, firstMs: 600, brute: 12 },
-    // The gorillas: green, 80 health, sent when a round is down to its last two ghosts (never in the boss's
-    // fight), `perRound[round - 1]` of them. Each is called down by a beam (`beamMs`), drops (`fallMs`) and lands
-    // shaking (`shakeMs`), then comes at the nearest player; within `reach` it leaps at them (`leapMs`, `leapH` high),
-    // lands `beside` them and slams the ground, every player within `splashR` of the slam losing `damage` segments, then
-    // gathers itself (`recoverMs`).
+    // The gorillas: green, 80 health, sent when a round is down to its last two ghosts (never in the boss's fight),
+    // `perRound[round - 1]` of them and one more for every `perPlayers` players past the first (`brutesFor`). Each is
+    // called down by a beam (`beamMs`), drops (`fallMs`) and lands shaking (`shakeMs`), then comes at the nearest
+    // player; within `reach` it leaps at them (`leapMs`, `leapH` high), lands `beside` them and slams the ground, every
+    // player within `splashR` of the slam losing `damage` segments, then gathers itself (`recoverMs`).
     BRUTE: { max: 10, hp: 80, kills: 3, speed: 6.2, beamMs: 1300, fallMs: 450, fallFrom: 25, shakeMs: 1000, reach: 5, leapMs: 650, leapH: 2.4, beside: 1,
-      splashR: 2.6, recoverMs: 1400, damage: 1, perRound: [1, 1, 1, 2, 2, 2], landMin: 4, landMax: 7, landR: 18, radius: 0.7 },
+      splashR: 2.6, recoverMs: 1400, damage: 1, perRound: [1, 1, 1, 2, 2, 2, 3], perPlayers: 2, landMin: 4, landMax: 7, landR: 18, radius: 0.7 },
     // The elixirs: one glowing on each totem pole's front (`elixirs` where they hang), set out afresh as each round
     // starts. An active player who comes within `pickR` of one (carrying none) takes it; carrying one, standing within
     // `reviveR` of where a player went down (their grave, `downX`, `downZ`) for `reviveMs` brings them back whole
@@ -115,14 +137,38 @@
     // evenly through its ghosts' coming. One drops (`fallMs`) and crawls at the nearest player at once (only its upper
     // body, pulling itself along by its arms); within `reach` it lunges up at them and bites for `damage` segments (a
     // shield throws it back), then gathers itself (`recoverMs`).
-    BONES: { hp: 6, kills: 1, speed: 3.2, beamMs: 1300, fallMs: 450, fallFrom: 25, reach: 1.6, recoverMs: 1000, damage: 1, perRound: [0, 2, 3, 4, 5, 6], perPlayers: 2 },
-    // The hunters' rifles grow stronger every `every` rounds: the white rock, then yellow, green and, for the boss, red
-    // laser, each round's `damage` in OBL points (a plain ghost has 6, a general or wraith 12). Matched to the rounds'
-    // pressure: the ghosts coming each second (group over interval) times the rounds each takes rises tenfold from the
-    // first round to the sixth with the rock alone; the upgrades hold it near round two's from the third round on, while
-    // the ghosts' speed and numbers still climb. The boss's health (`BOSS`) was doubled with the red laser, so his
-    // fight takes half the rounds it did with the rock rather than a quarter.
-    WEAPON: { every: 2, damage: [2, 3, 6, 8] }
+    BONES: { hp: 6, kills: 1, speed: 3.2, beamMs: 1300, fallMs: 450, fallFrom: 25, reach: 1.6, recoverMs: 1000, damage: 1, perRound: [0, 2, 3, 4, 5, 6, 7], perPlayers: 2 },
+    // The giant striped spiders: each in a gorilla's slot (`kind` 2, so the beam, hits, bolts, bomb and Tess take it),
+    // sent once a round's gorillas are down, `perRound[round - 1]` of them. One is called down in a white beam
+    // (`beamMs`), drops (`fallMs`) and walks at the nearest player; within `spitRange` it stops, rears (`windMs`) and
+    // spits a glob of green venom at where they stand, flying `venomSpeed` m/s, which splashes every player within
+    // `venomR` of where it lands (the spider's own width, a pulsing ring shows it) for `damage` segments (the shield and
+    // a fresh hurt keep them up); then it gathers itself (`recoverMs`). Its glob rides in the gorilla's leap fields:
+    // from (`fromX`, `fromZ`) to (`toX`, `toZ`), thrown at `fromY` and landing at `toY` (hunt times).
+    SPIDER: { hp: 60, kills: 2, speed: 7.2, beamMs: 1100, fallMs: 700, fallFrom: 20, spitRange: 7, windMs: 300, venomSpeed: 11, venomR: 2.4,
+      recoverMs: 700, damage: 1, perRound: [0, 1, 2, 2, 2, 2, 2] },
+    // A giant spider killed in a fight bursts into `count` spiderlings (their own pool of `max`): each flung out from
+    // where it died at `scatterSpeed` for `scatterMs`, then crawling at the nearest player; within `reach` it bites for
+    // `damage` segments (the shield and a fresh hurt keep them up), hops back and gathers itself (`recoverMs`). The
+    // round waits for them all. `hp` as every enemy's, grown with the rounds. In round `swarmRound`, once its ghosts
+    // are down to their last two, the Fiat Rush is called (`swarmWarnMs` of warning) and then `swarmCount` more (and
+    // `swarmPlayers` for every player past the first, at most `swarmMax`) drop in one at a time, `swarmGapMs` apart and
+    // only while fewer than `swarmLive` spiderlings are alive: each `dropMin` to `dropMax` from a hunter (inside
+    // `dropR` of the middle), called down in a green beam (`dropBeamMs`) and falling (`dropFallMs`) before it comes on,
+    // neither shot nor bombed until it lands.
+    LING: { count: 15, max: 96, hp: 4, kills: 1, speed: 4.6, scatterSpeed: 6, scatterMs: 450, reach: 0.9, damage: 1, recoverMs: 900, radius: 0.35,
+      swarmRound: 3, swarmCount: 20, swarmPlayers: 10, swarmMax: 60, swarmWarnMs: 2000, swarmGapMs: 700, swarmLive: 10,
+      dropMin: 3, dropMax: 7, dropR: 19, dropBeamMs: 700, dropFallMs: 450 },
+    // The Halving Hourglass (`kind` 3): called down in a gold beam somewhere inside the walls (`minR` to `maxR` from the
+    // middle, `clearR` from every hunter) once `at` of a round's ghosts have come, `perRound[round - 1]` of them, and
+    // `boss` more as the boss's fight begins (every four rounds, like the halving). It stands still; while any
+    // stands, every rifle round does half damage (`halving`).
+    HOURGLASS: { hp: 50, kills: 4, beamMs: 1500, fallMs: 600, fallFrom: 25, at: 0.1, minR: 6, maxR: 15, clearR: 6, perRound: [0, 0, 0, 1, 0, 0, 0], boss: 1 },
+    // The hunters' rifles grow stronger with the rounds: the white rock (rounds 1 and 2), then yellow laser (3 to 5),
+    // green (6 and 7) and, for the boss, red, `tiers[round - 1]` naming each round's and `damage` each tier's in OBL
+    // points (a plain ghost has 6, a general or wraith 12, before `HP_SCALE`). The boss's health (`BOSS`) was doubled
+    // with the red laser, so his fight takes half the rounds it did with the rock rather than a quarter.
+    WEAPON: { tiers: [0, 0, 1, 1, 1, 2, 2], damage: [2, 3, 6, 8] }
   };
   const C = CONFIG, TAU = Math.PI * 2;
 
@@ -141,10 +187,25 @@
   const hpOf = (base, round) => Math.round(base * C.HP_SCALE[Math.min(C.HP_SCALE.length, Math.max(1, round)) - 1]);
   /** The rifles' tier (0 the rock, 1 yellow, 2 green, 3 red) in `round`, or in the boss's fight. */
   const weaponTier = (round, boss) => boss ? C.WEAPON.damage.length - 1
-    : Math.min(C.WEAPON.damage.length - 2, Math.floor((Math.max(1, round) - 1) / C.WEAPON.every));
+    : C.WEAPON.tiers[Math.min(C.WEAPON.tiers.length, Math.max(1, round)) - 1];
   const isWraith = (n, round) => round >= C.WRAITH_FROM && n % C.WRAITH_EVERY === C.WRAITH_EVERY - 1;
   const ghostTier = (n, round) => isWraith(n, round) ? TIER.WRAITH : round >= C.GENERAL_FROM && n % C.GENERAL_EVERY === C.GENERAL_EVERY - 1 ? TIER.GENERAL : TIER.PLAIN;
-  const radiusOf = (tier) => C.GHOST_RADIUS * (tier === TIER.PLAIN ? 1 : C.BIG);
+  const radiusOf = (tier) => C.GHOST_RADIUS * (tier === TIER.PLAIN ? 1 : tier === TIER.GENERAL ? C.BIG * C.GENERAL : C.BIG);
+  /** How many new-enemy cards open `round`'s countdown (the boss's when `boss`), `INTRO_MS` each. */
+  const introPages = (round, boss) => C.INTRO_PAGES[boss ? ROUNDS.length : round - 1] || 0;
+  /** How long each of `pages` cards stands: longer when there are more than two to read. */
+  const introMs = (pages) => pages > 2 ? C.INTRO_LONG_MS : C.INTRO_MS;
+  /** How many gorillas a round sends with `players` counted in it. */
+  const brutesFor = (round, players) => {
+    const base = C.BRUTE.perRound[round - 1] || 0;
+    return base ? base + Math.floor((Math.max(1, players) - 1) / C.BRUTE.perPlayers) : 0;
+  };
+  /** How many hourglasses a round sends. */
+  const glassesFor = (round) => C.HOURGLASS.perRound[round - 1] || 0;
+  /** How many spiderlings the Fiat Rush sends with `players` counted in its round. */
+  const swarmFor = (players) => Math.min(C.LING.swarmMax, C.LING.swarmCount + C.LING.swarmPlayers * (Math.max(1, players) - 1));
+  /** How many spiders a round sends. */
+  const spidersFor = (round) => C.SPIDER.perRound[round - 1] || 0;
   /** How many skeletons a round sends with `players` counted in it. */
   const bonesFor = (round, players) => {
     const base = C.BONES.perRound[round - 1] || 0;
@@ -163,12 +224,19 @@
   const DROP_FIELDS = ["id", "kind", "x", "z", "at"];
   // A gorilla's phase: 1 called down (the beam), 2 falling, 3 landed and shaking, 4 coming, 5 holding someone, 6 gathering.
   // A skeleton (`kind` 1) skips the shaking and the leap: it strikes from CHASE and gathers itself in RECOVER.
-  const BRUTE_PHASE = { BEAM: 1, FALL: 2, SHAKE: 3, CHASE: 4, LEAP: 5, RECOVER: 6 };
+  const BRUTE_PHASE = { BEAM: 1, FALL: 2, SHAKE: 3, CHASE: 4, LEAP: 5, RECOVER: 6, SPIT: 7 };
   const BRUTE_FIELDS = ["id", "x", "y", "z", "hp", "phase", "phaseAt", "target", "heading", "dying", "dyingAt", "hitAt", "slamAt", "fromX", "fromY", "fromZ", "toX", "toY", "toZ", "struckAt", "kind"];
+  // A spiderling's fields, in the order a snapshot's `l` rows carry them after its slot (older pages skip `l`).
+  const LING_PHASE = { SCATTER: 1, CHASE: 2, RECOVER: 3, DROP: 4 };
+  const LING_FIELDS = ["id", "x", "z", "hp", "phase", "phaseAt", "heading", "vx", "vz", "dying", "dyingAt", "hitAt", "bitAt"];
   const STATE_FIELDS = ["state", "outcome", "round", "endsAt", "spawned", "players", "lapAt", "lapMs", "now", "rng", "seqN", "theta0",
     "lastSpawnAt", "nextId", "emptySince", "shieldUntil", "slowUntil", "kills", "bombAt", "pickAt", "pickKind", "pickBy", "pendingCount", "brutesSent",
-    "bossOn", "bossA", "bossTa", "bossX", "bossZ", "bossHp", "bossMax", "bossNextSpit", "bossGenerals", "bossNextGeneral", "bossDyingAt", "bossHitAt", "spitAt", "startedBy", "paused", "pausedFor", "healAt",
+    "bossOn", "bossShownAt", "bossNextAt", "bossX", "bossZ", "bossHp", "bossMax", "bossNextSpit", "bossGenerals", "bossNextGeneral", "bossDyingAt", "bossHitAt", "spitAt", "startedBy", "paused", "pausedFor", "healAt",
     "lightningSent", "boltAt", "boltBy", "bossStruckAt", "bonesSent", "elixirsTaken", "reviveAt", "reviveBy", "reviveOf"];
+  // State added since that row was fixed, carried in a snapshot's own `y` (older pages skip it, newer ones read what
+  // is missing as zeros): the hourglasses sent this round, how many of this round's Fiat Rush spiderlings have dropped,
+  // when it was called (its warning) and when the next may drop.
+  const STATE_EXTRA = ["glassesSent", "swarmSent", "swarmAt", "swarmNext"], STATE_ALL = STATE_FIELDS.concat(STATE_EXTRA);
 
   const newGhost = () => {
     const g = { on: false };
@@ -185,6 +253,11 @@
     for (const f of BRUTE_FIELDS) b[f] = 0;
     return b;
   };
+  const newLing = () => {
+    const l = { on: false };
+    for (const f of LING_FIELDS) l[f] = 0;
+    return l;
+  };
   const newDrop = () => {
     const d = { on: false };
     for (const f of DROP_FIELDS) d[f] = 0;
@@ -199,11 +272,12 @@
    */
   const create = ({ seed = 1, spots, lapMs = 20000, pile = { x: 0, z: 0, r: 3 }, elixirs = [] } = {}) => {
     const s = { epoch: 0, pending: new Float64Array(C.MAX_PENDING) };
-    for (const f of STATE_FIELDS) s[f] = 0;
+    for (const f of STATE_ALL) s[f] = 0;
     const ghosts = Array.from({ length: C.MAX_GHOSTS }, newGhost);
     const players = Array.from({ length: C.MAX_PLAYERS }, newPlayer);
     const drops = Array.from({ length: C.MAX_DROPS }, newDrop);
     const brutes = Array.from({ length: C.BRUTE.max }, newBrute);
+    const lings = Array.from({ length: C.LING.max }, newLing);
     const spotCount = Math.floor(spots.length / 4);
     const round = { ghosts: 0, cap: 0, interval: 0, group: 0, speed: 0 };
     let baseSeed = seed >>> 0, ticks = 0;
@@ -218,11 +292,12 @@
     const settings = () => roundSettings(Math.max(1, s.round), s.players, round);
 
     const reset = () => {
-      for (const f of STATE_FIELDS) if (f !== "lapMs" && f !== "now") s[f] = 0;
+      for (const f of STATE_ALL) if (f !== "lapMs" && f !== "now") s[f] = 0;
       for (const g of ghosts) g.on = false;
       for (const p of players) p.on = p.here = false;
       for (const d of drops) d.on = false;
       for (const b of brutes) b.on = false;
+      for (const l of lings) l.on = false;
     };
 
     // ---------- players ----------
@@ -316,7 +391,7 @@
       return n;
     };
     const queueRoundDrops = () => {
-      const n = Math.max(0, 4 * s.round - 2);
+      const n = C.ROUND_DROPS[s.round - 1] || 0;
       for (let i = 0; i < n && s.pendingCount < C.MAX_PENDING; i++) s.pending[s.pendingCount++] = s.now + C.ROUND_DROP_DELAY_MS + i * C.ROUND_DROP_GAP_MS;
     };
     // `n` kill points for player `p` (or nobody), from `foes` enemies killed.
@@ -354,6 +429,7 @@
         let points = 0, foes = 0;
         for (const g of ghosts) if (g.on && !g.dying) { kill(g, DYING.BURNED); points += killValue(g); foes++; }
         for (const b of brutes) if (b.on && !b.dying) { killBrute(b, DYING.BURNED); points += bruteKills(b); foes++; }
+        for (const l of lings) if (l.on && !l.dying && l.phase !== LING_PHASE.SCATTER && l.phase !== LING_PHASE.DROP) { killLing(l, DYING.BURNED); points += C.LING.kills; foes++; }
         if (s.bossOn && !s.bossDyingAt) {
           s.bossHp = Math.max(1, s.bossHp - Math.ceil(s.bossMax * C.BOMB_BOSS));
           s.bossHitAt = s.now;
@@ -386,12 +462,52 @@
       return null;
     };
     // ---------- gorillas ----------
-    const killBrute = (b, kind) => { b.dying = kind; b.dyingAt = s.now; };
+    // A giant spider killed in a fight (not cleared away as the hunt ends) bursts into its brood.
+    const killBrute = (b, kind) => { b.dying = kind; b.dyingAt = s.now; if (b.kind === 2 && fighting()) brood(b.x, b.z); };
+    // ---------- spiderlings ----------
+    // A spiderling at (x, z), flung along bearing `a` before it comes on; null with the pool full.
+    const spawnLing = (x, z, a) => {
+      const K = C.LING, l = lings.find((q) => !q.on);
+      if (!l) return null;
+      for (const f of LING_FIELDS) l[f] = 0;
+      const v = K.scatterSpeed * (0.7 + 0.6 * rand());
+      l.on = true; l.id = s.nextId++; l.x = x; l.z = z; l.hp = hpOf(K.hp, s.round);
+      l.vx = Math.sin(a) * v; l.vz = Math.cos(a) * v; l.heading = a;
+      l.phase = LING_PHASE.SCATTER; l.phaseAt = s.now;
+      return l;
+    };
+    // A spider's brood, flung out all round where it died.
+    const brood = (x, z) => {
+      const K = C.LING, a0 = rand() * TAU;
+      for (let n = 0; n < K.count; n++) if (!spawnLing(x, z, a0 + n * TAU / K.count + (rand() - 0.5) * 0.4)) return;
+    };
+    // One of the Fiat Rush's spiderlings called down in its beam near one of the hunters; false with the pool full.
+    const dropLing = () => {
+      const K = C.LING, a = rand() * TAU, d = K.dropMin + rand() * (K.dropMax - K.dropMin);
+      let p = null;
+      for (const q of players) if (active(q) && (!p || rand() < 0.5)) p = q;
+      let x = (p ? p.x : 0) + Math.sin(a) * d, z = (p ? p.z : 0) + Math.cos(a) * d;
+      const out = Math.hypot(x, z);
+      if (out > K.dropR) { x *= K.dropR / out; z *= K.dropR / out; }
+      const l = spawnLing(x, z, a + Math.PI);
+      if (!l) return false;
+      l.vx = l.vz = 0;
+      l.phase = LING_PHASE.DROP;
+      return true;
+    };
+    const lingsAlive = () => {
+      let n = 0;
+      for (const l of lings) if (l.on && !l.dying) n++;
+      return n;
+    };
+    const killLing = (l, kind) => { l.dying = kind; l.dyingAt = s.now; };
     // A gorilla's settings, or a skeleton's, and what killing it is worth.
-    const kindOf = (b) => b.kind ? C.BONES : C.BRUTE;
+    const KINDS = [C.BRUTE, C.BONES, C.SPIDER, C.HOURGLASS];
+    const kindOf = (b) => KINDS[b.kind];
     const bruteKills = (b) => kindOf(b).kills;
     // ---------- the lightning drop ----------
-    // Every ghost and landed gorilla gets its bolt in turn, the boss his.
+    // Every ghost and landed gorilla gets its bolt in turn, the boss his. Spiderlings have no crackle of their own: every
+    // landed one burns at once, credited to whoever called the bolt.
     const strikeAll = (p) => {
       const L = C.LIGHTNING;
       s.boltAt = s.now; s.boltBy = p.id;
@@ -404,6 +520,7 @@
       for (const g of ghosts) if (g.on && !g.dying && !g.struckAt) g.struckAt = s.now + L.firstMs + gap * k++;
       for (const b of brutes) if (b.on && !b.dying && !b.struckAt && b.phase >= BRUTE_PHASE.FALL) b.struckAt = s.now + L.firstMs + gap * k++;
       if (s.bossOn && !s.bossDyingAt) s.bossStruckAt = s.now + L.firstMs + gap * k;
+      for (const l of lings) if (l.on && !l.dying && l.phase !== LING_PHASE.DROP) { killLing(l, DYING.ZAPPED); addKills(p, C.LING.kills); }
     };
     // Struck and crackling: held where it is, harmless, and dead once its zap is done (true while held).
     const struck = (e, now) => e.struckAt > 0 && now >= e.struckAt;
@@ -412,18 +529,28 @@
       for (const b of brutes) if (b.on && !b.dying) n++;
       return n;
     };
-    /** A gorilla (or with `kind` 1 a skeleton) called down beside player `p` (or anywhere when there is none). */
-    const addBrute = (p, kind = 0) => {
+    const gorillasAlive = () => {
+      for (const b of brutes) if (b.on && !b.dying && !b.kind) return true;
+      return false;
+    };
+    // A brute of `kind` (0 a gorilla, 1 a skeleton, 2 a spider, 3 an hourglass) called down near player `p` (or anywhere
+    // when there is none), or, given `at`, dropped from the boss's mouth there ({ x, z, y }) partway through its fall.
+    const addBrute = (p, kind = 0, at = null) => {
       for (const b of brutes) {
         if (b.on) continue;
         for (const f of BRUTE_FIELDS) b[f] = 0;
         const a = rand() * TAU, r = C.BRUTE.landMin + rand() * (C.BRUTE.landMax - C.BRUTE.landMin);
-        let x = (p ? p.x : 0) + Math.sin(a) * r, z = (p ? p.z : 0) - Math.cos(a) * r;
+        let x = at ? at.x : (p ? p.x : 0) + Math.sin(a) * r, z = at ? at.z : (p ? p.z : 0) - Math.cos(a) * r;
         const out = Math.hypot(x, z);
         if (out > C.BRUTE.landR) { x *= C.BRUTE.landR / out; z *= C.BRUTE.landR / out; }
         b.on = true; b.id = s.nextId++; b.x = x; b.z = z; b.kind = kind; b.y = kindOf(b).fallFrom; b.hp = hpOf(kindOf(b).hp, s.round);
         b.phase = BRUTE_PHASE.BEAM; b.phaseAt = s.now;
         b.heading = p ? Math.atan2(p.x - x, p.z - z) : 0;
+        if (at) {
+          // Its fall starts where `at.y` lies on it: y = fallFrom * (1 - k * k).
+          const K = kindOf(b), k = Math.sqrt(Math.max(0, 1 - Math.min(at.y, K.fallFrom) / K.fallFrom));
+          b.phase = BRUTE_PHASE.FALL; b.phaseAt = s.now - k * K.fallMs;
+        }
         return b;
       }
       return null;
@@ -518,7 +645,60 @@
       g.bounceUntil = s.now + C.BOUNCE_MS;
       g.bounceSpeed = C.BOUNCE_SPEED;
     };
-    const bossTarget = (from) => from + (Math.PI / 2 + rand() * Math.PI) * (rand() < 0.5 ? 1 : -1);
+    // A spot inside the walls `minR` to `maxR` from the middle, a few tries for one `clearR` from every hunter and
+    // `awayR` from (awayX, awayZ), into `OPEN`.
+    const OPEN = { x: 0, z: 0 };
+    const openSpot = (minR, maxR, clearR, awayX = 0, awayZ = 0, awayR = 0) => {
+      for (let tries = 0; tries < 12; tries++) {
+        const a = rand() * TAU, r = minR + rand() * (maxR - minR);
+        OPEN.x = Math.sin(a) * r; OPEN.z = -Math.cos(a) * r;
+        if (Math.hypot(OPEN.x - awayX, OPEN.z - awayZ) < awayR) continue;
+        let clear = true;
+        for (const p of players) if (active(p) && Math.hypot(p.x - OPEN.x, p.z - OPEN.z) < clearR) { clear = false; break; }
+        if (clear) break;
+      }
+      return OPEN;
+    };
+    const placeBoss = () => {
+      const B = C.BOSS, at = openSpot(B.minR, B.maxR, B.clearR, s.bossX, s.bossZ, B.moveR);
+      s.bossX = at.x; s.bossZ = at.z;
+    };
+    // An hourglass called down somewhere open inside the walls.
+    const sendGlass = () => {
+      const b = addBrute(null, 3);
+      if (!b) return false;
+      const H = C.HOURGLASS, at = openSpot(H.minR, H.maxR, H.clearR);
+      b.x = at.x; b.z = at.z; b.heading = 0;
+      return true;
+    };
+    /** While any hourglass stands (landed, not dying), every rifle round does half damage. */
+    const halving = () => {
+      for (const b of brutes) if (b.on && !b.dying && b.kind === 3 && b.phase >= BRUTE_PHASE.SHAKE) return true;
+      return false;
+    };
+    // The countdown under way, or the break before it, leads to the boss: the last round is over, its ghosts all spent.
+    const bossNext = () => s.round >= ROUNDS.length && (s.state === STATE.COUNTDOWN || s.state === STATE.BREAK) && s.spawned >= settings().ghosts;
+    // The boss shows himself a while at a time.
+    const bossShown = () => s.bossShownAt > 0 && s.now >= s.bossShownAt && s.now < s.bossShownAt + C.BOSS.shownMs;
+    const SPIT_AT = { x: 0, y: 0, z: 0 };
+    // One enemy out of the boss's mouth, of a kind drawn by `SPIT`, flung out along `a`.
+    const spitOne = (a) => {
+      const vx = Math.sin(a), vz = Math.cos(a), mouth = C.BOSS.y + C.BOSS.height * 0.6, now = s.now;
+      let roll = rand(), kind = 0;
+      while (kind < C.SPIT.length - 1 && roll >= C.SPIT[kind]) { roll -= C.SPIT[kind]; kind++; }
+      if (kind >= 3) {
+        SPIT_AT.x = s.bossX + vx * 2.2; SPIT_AT.z = s.bossZ + vz * 2.2; SPIT_AT.y = mouth;
+        let target = null;
+        for (const p of players) if (active(p) && (!target || rand() < 0.5)) target = p;
+        if (addBrute(target, kind === 3 ? 1 : 0, SPIT_AT)) return true;
+        kind = 0;
+      }
+      const g = addGhost(kind, s.bossX + vx * 1.7, mouth, s.bossZ + vz * 1.7, 0, 0);
+      if (!g) return false;
+      g.spawnAt = now - C.DESCEND_MS;
+      g.bvx = vx; g.bvz = vz; g.bounceUntil = now + C.BOSS.launchMs; g.bounceSpeed = C.BOSS.launchSpeed;
+      return true;
+    };
 
     // ---------- the machine ----------
     const enter = (state) => {
@@ -526,7 +706,7 @@
       s.state = state;
       const roundOver = state === STATE.COUNTDOWN || state === STATE.BREAK || state === STATE.BOSS && prev === STATE.ACTIVE;
       if (roundOver) {
-        // A round over (the sixth goes straight to the boss), or a new one called: everyone down is back, and everyone
+        // A round over (the last goes straight to the boss), or a new one called: everyone down is back, and everyone
         // is whole again.
         for (const p of players) {
           if (!p.on) continue;
@@ -538,12 +718,18 @@
       if (state === STATE.COUNTDOWN || state === STATE.BOSS && prev === STATE.ACTIVE) { s.healAt = s.now; s.elixirsTaken = 0; }
       // A new hunt's first round: nobody carries one over from the last hunt.
       if (state === STATE.COUNTDOWN && prev === STATE.NIGHT) for (const p of players) p.elixir = p.reviveTarget = 0;
-      if (state === STATE.COUNTDOWN) { s.endsAt = s.now + C.COUNTDOWN_MS; s.spawned = 0; }
+      if (state === STATE.COUNTDOWN) {
+        const boss = bossNext();
+        const pages = introPages(s.round, boss);
+        s.endsAt = s.now + C.COUNTDOWN_MS + pages * introMs(pages);
+        if (!boss) s.spawned = 0;
+      }
       else if (state === STATE.ACTIVE) {
         let n = 0;
         for (const p of players) if (p.on && p.here) n++;
         s.players = Math.max(1, n);
         s.seqN = 0; s.theta0 = rand() * TAU; s.lastSpawnAt = -1e9; s.endsAt = 0; s.brutesSent = 0; s.bonesSent = 0; s.lightningSent = 0;
+        s.glassesSent = 0; s.swarmSent = 0; s.swarmAt = 0; s.swarmNext = 0;
         if (s.round === 1) for (let i = 0; i < C.FIRST_DROPS; i++) dropRandom();
         if (s.round === 3 && !dropsOf(1)) placeDrop(1);
         if (s.round === 4 && !dropsOf(2)) placeDrop(2);
@@ -552,21 +738,23 @@
         let n = 0;
         for (const p of players) if (p.on && p.here) n++;
         s.bossOn = 1;
-        s.bossA = 0; s.bossTa = bossTarget(0);
-        s.bossX = 0; s.bossZ = -C.BOSS.ring;
+        s.lightningSent = 0; s.bossStruckAt = 0; s.bossDyingAt = 0; s.bossNextAt = 0; s.glassesSent = 0;
+        s.bossX = s.bossZ = 0; placeBoss();
+        s.bossShownAt = s.now + 1000;
         s.bossMax = s.bossHp = Math.min(C.BOSS.hpMax, C.BOSS.hp + C.BOSS.hpPerPlayer * Math.max(0, n - 1));
-        s.bossNextSpit = s.now + 2000; s.bossGenerals = 0; s.bossNextGeneral = s.now + C.BOSS.generalFirst; s.bossDyingAt = 0;
-        s.lightningSent = 0; s.bossStruckAt = 0;
+        s.bossNextSpit = s.bossShownAt + C.BOSS.spitAtMs; s.bossGenerals = 0; s.bossNextGeneral = s.now + C.BOSS.generalFirst;
       } else if (state === STATE.VICTORY || state === STATE.DEFEAT) {
         s.outcome = state === STATE.VICTORY ? OUTCOME.VICTORY : OUTCOME.DEFEAT;
-        s.endsAt = s.now + (state === STATE.DEFEAT ? C.DEFEAT_MS : C.BANNER_MS);
+        s.endsAt = s.now + (state === STATE.DEFEAT ? C.DEFEAT_MS : C.VICTORY_MS);
         for (const g of ghosts) if (g.on && !g.dying) kill(g, DYING.SHOT);
         for (const b of brutes) if (b.on && !b.dying) killBrute(b, DYING.SHOT);
+        for (const l of lings) if (l.on && !l.dying) killLing(l, DYING.SHOT);
         if (state === STATE.DEFEAT) s.bossOn = 0;
       } else if (state === STATE.DAWN) {
         s.endsAt = s.now + dawnMs();
         for (const g of ghosts) if (g.on && !g.dying) kill(g, DYING.SHOT);
         for (const b of brutes) if (b.on && !b.dying) killBrute(b, DYING.SHOT);
+        for (const l of lings) if (l.on && !l.dying) killLing(l, DYING.SHOT);
         s.bossOn = 0;
         for (const d of drops) d.on = false;
         s.pendingCount = 0;
@@ -650,23 +838,23 @@
         clampArena(g);
       }
 
-      // The boss: dashes between stops round the ring outside the bluff and spits ghosts over it.
+      // The boss: shows himself inside the walls, spits his enemies, vanishes and comes again somewhere else.
       if (s.bossOn && s.state === STATE.BOSS && !s.bossDyingAt) {
-        const stepA = C.BOSS.speed * (slowed ? C.ICE_SLOW : 1) * dt / C.BOSS.ring, left = s.bossTa - s.bossA;
-        if (Math.abs(left) <= stepA) { s.bossA = s.bossTa; s.bossTa = bossTarget(s.bossA); }
-        else s.bossA += Math.sign(left) * stepA;
-        s.bossX = Math.sin(s.bossA) * C.BOSS.ring; s.bossZ = -Math.cos(s.bossA) * C.BOSS.ring;
-        if (now >= s.bossNextSpit) {
-          s.bossNextSpit = now + C.BOSS.spitEvery;
+        const B = C.BOSS;
+        if (!s.bossNextAt && now >= s.bossShownAt + B.shownMs) s.bossNextAt = now + B.goneMs;
+        if (s.bossNextAt && now >= s.bossNextAt) {
+          placeBoss();
+          s.bossShownAt = now; s.bossNextAt = 0; s.bossNextSpit = now + B.spitAtMs;
+        }
+        if (s.bossNextSpit && now >= s.bossNextSpit && bossShown()) {
+          s.bossNextSpit = 0;
           s.spitAt = now;
-          const toward = Math.atan2(-s.bossX, -s.bossZ);
-          for (let i = 0; i < C.BOSS.spit; i++) {
-            const a = toward + (i - 1) * 0.35, vx = Math.sin(a), vz = Math.cos(a);
-            const g = addGhost(TIER.PLAIN, s.bossX + vx * 1.7, C.BOSS.y + 4, s.bossZ + vz * 1.7, 0, 0);
-            if (!g) break;
-            g.spawnAt = now - C.DESCEND_MS;
-            g.bvx = vx; g.bvz = vz; g.bounceUntil = now + C.BOSS.launchMs; g.bounceSpeed = C.BOSS.launchSpeed;
-          }
+          // Fanned out toward the middle of the hunters, else the middle of the island.
+          let cx = 0, cz = 0, n = 0;
+          for (const p of players) if (active(p)) { cx += p.x; cz += p.z; n++; }
+          const toward = Math.atan2((n ? cx / n : 0) - s.bossX, (n ? cz / n : 0) - s.bossZ);
+          const count = B.spit + Math.floor((Math.max(1, s.players) - 1) / B.spitPlayers);
+          for (let i = 0; i < count; i++) if (!spitOne(toward + (i - (count - 1) / 2) * 0.35)) break;
         }
         if (s.bossGenerals < C.BOSS.generals && now >= s.bossNextGeneral) {
           const n = Math.min(C.BOSS.generalGroup, C.BOSS.generals - s.bossGenerals);
@@ -758,7 +946,13 @@
       // The gorillas: when a round is down to its last two ghosts they are called down, one beside each of the nearest
       // players; then each falls, lands shaking, comes on, leaps and slams the ground beside them. Only arrivals with
       // a free slot count: skeletons share the pool, and dying bodies still hold their slots for a moment.
-      const gorillas = C.BRUTE.perRound[s.round - 1] || 0;
+      // The spiders follow them, counted on after them in `brutesSent`, once every gorilla is down.
+      const gorillas = brutesFor(s.round, s.players), spiders = spidersFor(s.round);
+      if (s.state === STATE.ACTIVE && s.brutesSent >= gorillas && s.brutesSent < gorillas + spiders && !gorillasAlive()) {
+        let best = null;
+        for (const p of players) if (active(p) && (!best || rand() < 0.5)) best = p;
+        if (addBrute(best, 2)) s.brutesSent++;
+      }
       if (s.state === STATE.ACTIVE && s.brutesSent < gorillas && s.spawned >= r.ghosts && alive() <= 2) {
         for (let i = s.brutesSent; i < gorillas; i++) {
           let best = null;
@@ -775,6 +969,15 @@
         for (const p of players) if (active(p) && (!best || rand() < 0.5)) best = p;
         if (addBrute(best, 1)) s.bonesSent++;
       }
+      // The hourglasses, early in their round and as the boss's fight begins (after the gorillas and skeletons, so a
+      // freed slot goes to them first).
+      if (s.state === STATE.ACTIVE && s.glassesSent < glassesFor(s.round) && s.spawned >= r.ghosts * C.HOURGLASS.at && sendGlass()) s.glassesSent++;
+      // The swarm round's spiderlings: the Fiat Rush is called as its ghosts are down to their last two, and once its
+      // warning is up they drop one at a time while there is room for them.
+      if (s.state === STATE.ACTIVE && s.round === C.LING.swarmRound && !s.swarmAt && s.spawned >= r.ghosts && alive() <= 2) s.swarmAt = now;
+      if (s.state === STATE.ACTIVE && s.swarmAt && s.swarmSent < swarmFor(s.players) && now >= s.swarmAt + C.LING.swarmWarnMs && now >= s.swarmNext
+        && lingsAlive() < C.LING.swarmLive && dropLing()) { s.swarmSent++; s.swarmNext = now + C.LING.swarmGapMs; }
+      if (s.state === STATE.BOSS && s.glassesSent < C.HOURGLASS.boss && sendGlass()) s.glassesSent++;
       for (const b of brutes) {
         if (!b.on) continue;
         if (b.dying) { if (now - b.dyingAt >= C.DYING_MS) b.on = false; continue; }
@@ -787,7 +990,8 @@
         if (b.phase === BRUTE_PHASE.FALL) {
           const k = Math.min(1, since / K.fallMs);
           b.y = K.fallFrom * (1 - k * k);
-          if (k >= 1) { b.y = 0; b.phase = b.kind ? BRUTE_PHASE.CHASE : BRUTE_PHASE.SHAKE; b.phaseAt = now; }
+          // Gorillas land heavy and shake; the rest go straight on.
+          if (k >= 1) { b.y = 0; b.phase = b.kind === 0 ? BRUTE_PHASE.SHAKE : BRUTE_PHASE.CHASE; b.phaseAt = now; }
           continue;
         }
         if (b.phase === BRUTE_PHASE.SHAKE) { if (since >= C.BRUTE.shakeMs) { b.phase = BRUTE_PHASE.CHASE; b.phaseAt = now; } continue; }
@@ -805,6 +1009,20 @@
           continue;
         }
         if (b.phase === BRUTE_PHASE.RECOVER) { if (since >= K.recoverMs) { b.phase = BRUTE_PHASE.CHASE; b.phaseAt = now; } continue; }
+        if (b.phase === BRUTE_PHASE.SPIT) {
+          // The glob lands: everyone under it is hurt.
+          if (now >= b.toY) {
+            b.slamAt = now;
+            for (const p of players) {
+              if (!active(p) || now < p.invulnUntil || now < s.shieldUntil || Math.hypot(p.x - b.toX, p.z - b.toZ) > C.SPIDER.venomR) continue;
+              slamPlayer(p, C.SPIDER.damage, b.toX, b.toZ);
+            }
+            b.phase = BRUTE_PHASE.RECOVER; b.phaseAt = now;
+          }
+          continue;
+        }
+        // An hourglass, once down, only stands.
+        if (b.kind === 3) continue;
         // Coming on: at the nearest player, slowed by the ice, kept apart from the others.
         const t = nearestPlayer(b.x, b.z);
         b.target = t ? t.id : 0;
@@ -812,7 +1030,16 @@
         let dx = t.x - b.x, dz = t.z - b.z;
         const d = Math.hypot(dx, dz);
         // A skeleton within reach strikes them where they stand (a shield throws it back, a fresh hurt keeps them up).
-        if (b.kind && d <= C.BONES.reach && Math.abs(t.y - b.y) < 1.5) {
+        if (b.kind === 2 && d <= C.SPIDER.spitRange && Math.abs(t.y - b.y) < 2) {
+          // A spider in range spits at where they stand.
+          const S = C.SPIDER;
+          b.fromX = b.x; b.fromZ = b.z; b.toX = t.x; b.toZ = t.z;
+          b.fromY = now + S.windMs; b.toY = b.fromY + d / S.venomSpeed * 1000;
+          b.heading = Math.atan2(dx, dz);
+          b.phase = BRUTE_PHASE.SPIT; b.phaseAt = now;
+          continue;
+        }
+        if (b.kind === 1 && d <= C.BONES.reach && Math.abs(t.y - b.y) < 1.5) {
           if (now < s.shieldUntil) { b.x -= dx / (d || 1) * 2; b.z -= dz / (d || 1) * 2; }
           else {
             b.slamAt = now;
@@ -849,6 +1076,45 @@
         b.heading = Math.atan2(dx, dz);
         const out = Math.hypot(b.x, b.z);
         if (out > C.ARENA_R) { b.x *= C.ARENA_R / out; b.z *= C.ARENA_R / out; }
+      }
+
+      // The spiderlings: flung out of the spider that bore them, then after the nearest player, biting within reach.
+      for (const l of lings) {
+        if (!l.on) continue;
+        if (l.dying) { if (now - l.dyingAt >= C.DYING_MS) l.on = false; continue; }
+        const K = C.LING, since = now - l.phaseAt;
+        if (l.phase === LING_PHASE.DROP) {
+          if (since >= K.dropBeamMs + K.dropFallMs) { l.phase = LING_PHASE.CHASE; l.phaseAt = now; }
+        } else if (l.phase === LING_PHASE.SCATTER) {
+          l.x += l.vx * dt; l.z += l.vz * dt;
+          if (since >= K.scatterMs) { l.phase = LING_PHASE.CHASE; l.phaseAt = now; }
+        } else if (l.phase === LING_PHASE.RECOVER) {
+          if (since >= K.recoverMs) { l.phase = LING_PHASE.CHASE; l.phaseAt = now; }
+        } else if (fighting()) {
+          const t = nearestPlayer(l.x, l.z);
+          if (t) {
+            let dx = t.x - l.x, dz = t.z - l.z;
+            const d = Math.hypot(dx, dz) || 1;
+            dx /= d; dz /= d;
+            l.heading = Math.atan2(dx, dz);
+            if (d <= K.reach && Math.abs(t.y) < 1.5) {
+              // It bites, and hops back to gather itself (the shield throws it back without the bite).
+              if (now >= s.shieldUntil && active(t) && now >= t.invulnUntil) { slamPlayer(t, K.damage, l.x, l.z); l.bitAt = now; }
+              l.x -= dx * 0.8; l.z -= dz * 0.8;
+              l.phase = LING_PHASE.RECOVER; l.phaseAt = now;
+            } else {
+              let vx = dx * K.speed * (slowed ? C.ICE_SLOW : 1), vz = dz * K.speed * (slowed ? C.ICE_SLOW : 1);
+              for (const o of lings) {
+                if (o === l || !o.on || o.dying) continue;
+                const ox = l.x - o.x, oz = l.z - o.z, od = Math.hypot(ox, oz);
+                if (od < K.radius * 2 && od > 1e-6) { vx += ox / od * 1.2; vz += oz / od * 1.2; }
+              }
+              l.x += vx * dt; l.z += vz * dt;
+            }
+          }
+        }
+        const out = Math.hypot(l.x, l.z);
+        if (out > C.ARENA_R) { l.x *= C.ARENA_R / out; l.z *= C.ARENA_R / out; }
       }
 
       // The elixirs: taken from the totems by whoever reaches one empty-handed; carried, held beside someone down for
@@ -928,14 +1194,19 @@
         }
       } else if (st === STATE.LAP) { if (now >= s.lapAt + s.lapMs) { s.endsAt = now + C.NIGHT_MS; enter(STATE.NIGHT); } }
       else if (st === STATE.NIGHT) { if (now >= s.endsAt) { s.round = Math.max(1, s.round); enter(STATE.COUNTDOWN); } }
-      else if (st === STATE.COUNTDOWN) { if (now >= s.endsAt) enter(STATE.ACTIVE); }
+      else if (st === STATE.COUNTDOWN) { if (now >= s.endsAt) enter(bossNext() ? STATE.BOSS : STATE.ACTIVE); }
       else if (st === STATE.ACTIVE) {
         if (anyHere && !anyActive) enter(STATE.DEFEAT);
-        else if (s.spawned >= r.ghosts && alive() === 0 && brutesAlive() === 0 && s.brutesSent >= gorillas && s.bonesSent >= bones) enter(s.round >= ROUNDS.length ? STATE.BOSS : STATE.BREAK);
+        else if (s.spawned >= r.ghosts && alive() === 0 && brutesAlive() === 0 && s.brutesSent >= gorillas + spidersFor(s.round) && s.bonesSent >= bones && lingsAlive() === 0
+          && s.glassesSent >= glassesFor(s.round) && (s.round !== C.LING.swarmRound || s.swarmSent >= swarmFor(s.players))) enter(STATE.BREAK);
       } else if (st === STATE.BOSS) {
         if (anyHere && !anyActive) enter(STATE.DEFEAT);
+        // The boss's fall is the victory.
         else if (s.bossDyingAt && now - s.bossDyingAt >= C.BOSS.burnMs) { s.bossOn = 0; enter(STATE.VICTORY); }
-      } else if (st === STATE.BREAK) { if (now >= s.endsAt) { s.round++; enter(STATE.COUNTDOWN); } }
+      } else if (st === STATE.BREAK) {
+        // After the last round's break the countdown is the boss's: the round stays, its ghosts all spent (`bossNext`).
+        if (now >= s.endsAt) { if (s.round < ROUNDS.length) s.round++; enter(STATE.COUNTDOWN); }
+      }
       else if (st === STATE.VICTORY || st === STATE.DEFEAT) { if (now >= s.endsAt) enter(STATE.DAWN); }
       else if (st === STATE.DAWN) { if (now >= s.endsAt) { const lap = s.lapMs; reset(); s.lapMs = lap; } }
       ticks++;
@@ -975,7 +1246,8 @@
     };
     /**
      * The herald was clicked by player `by` (the hunt's host): its lobby opens at `now`, and the hunt, from `round`
-     * (debug only skips ahead), follows only once the host has readied up. `by` 0 (debug) opens it with no host.
+     * (debug only skips ahead; past the last round, to the boss's countdown), follows only once the host has readied
+     * up. `by` 0 (debug) opens it with no host.
      */
     const start = (now, by = 0, fromRound = 1) => {
       if (s.state !== STATE.IDLE) return false;
@@ -990,6 +1262,8 @@
       s.lapAt = 0;
       s.startedBy = by;
       s.round = Math.min(ROUNDS.length, Math.max(1, fromRound | 0));
+      // The boss: the last round with every ghost spent, so its countdown is his (`bossNext`).
+      if ((fromRound | 0) > ROUNDS.length) s.spawned = Number.MAX_SAFE_INTEGER;
       s.state = STATE.GATHER;
       s.endsAt = C.GATHER_MS;
       if (by) slotFor(by);
@@ -1001,7 +1275,7 @@
       if (s.paused || !fighting() || !(damage > 0)) return "";
       const p = playerById(by);
       if (id === 0) {
-        if (!s.bossOn || s.bossDyingAt) return "";
+        if (!s.bossOn || s.bossDyingAt || !bossShown()) return "";
         s.bossHp = Math.max(0, s.bossHp - damage);
         s.bossHitAt = s.now;
         if (s.bossHp > 0) return "hurt";
@@ -1009,6 +1283,15 @@
         for (const g of ghosts) if (g.on && !g.dying) kill(g, DYING.BURNED);
         for (const b of brutes) if (b.on && !b.dying) killBrute(b, DYING.BURNED);
         addKills(p, C.BOSS.kills);
+        return "kill";
+      }
+      for (const l of lings) {
+        if (!l.on || l.id !== id) continue;
+        if (l.dying || l.phase === LING_PHASE.DROP) return "";
+        l.hitAt = s.now;
+        if (l.hp > damage) { l.hp -= damage; return "hurt"; }
+        killLing(l, DYING.SHOT);
+        addKills(p, C.LING.kills);
         return "kill";
       }
       for (const b of brutes) {
@@ -1042,11 +1325,12 @@
 
     // ---------- snapshots ----------
     // A hunt as plain numbers: everything `load` needs to go on from here, timers relative to `epoch`.
-    const SNAP = { k: "gh", v: 1, e: 0, s: [], g: [], p: [], d: [], q: [], u: [], x: [] };
+    const SNAP = { k: "gh", v: 1, e: 0, s: [], g: [], p: [], d: [], q: [], u: [], x: [], l: [], y: [] };
     const snapshot = () => {
       SNAP.e = s.epoch;
-      SNAP.s.length = SNAP.g.length = SNAP.p.length = SNAP.d.length = SNAP.q.length = SNAP.u.length = SNAP.x.length = 0;
+      SNAP.s.length = SNAP.g.length = SNAP.p.length = SNAP.d.length = SNAP.q.length = SNAP.u.length = SNAP.x.length = SNAP.l.length = SNAP.y.length = 0;
       for (const f of STATE_FIELDS) SNAP.s.push(s[f]);
+      for (const f of STATE_EXTRA) SNAP.y.push(s[f]);
       for (let i = 0; i < ghosts.length; i++) {
         const g = ghosts[i];
         if (!g.on) continue;
@@ -1074,6 +1358,12 @@
         SNAP.u.push(i);
         for (const f of BRUTE_FIELDS) SNAP.u.push(b[f]);
       }
+      for (let i = 0; i < lings.length; i++) {
+        const l = lings[i];
+        if (!l.on) continue;
+        SNAP.l.push(i);
+        for (const f of LING_FIELDS) SNAP.l.push(l[f]);
+      }
       return SNAP;
     };
     const num = (v) => typeof v === "number" && Number.isFinite(v) ? v : 0;
@@ -1084,6 +1374,8 @@
       if (snap.g.length % gw || snap.p.length % pw || snap.d.length % dw) return false;
       s.epoch = num(snap.e);
       for (let i = 0; i < STATE_FIELDS.length; i++) s[STATE_FIELDS[i]] = num(snap.s[i]);
+      const y = Array.isArray(snap.y) ? snap.y : [];
+      for (let i = 0; i < STATE_EXTRA.length; i++) s[STATE_EXTRA[i]] = i < y.length ? num(y[i]) : 0;
       s.state = Math.max(0, Math.min(STATE.GATHER, s.state | 0));
       s.round = Math.max(0, Math.min(ROUNDS.length, s.round | 0));
       s.rng >>>= 0;
@@ -1125,7 +1417,15 @@
         if (!b) continue;
         b.on = true;
         for (let i = 0; i < BRUTE_FIELDS.length; i++) b[BRUTE_FIELDS[i]] = num(u[o + 1 + i]);
-        b.kind = b.kind ? 1 : 0;
+        b.kind = Math.max(0, Math.min(3, b.kind | 0));
+      }
+      for (const l of lings) l.on = false;
+      const ls = Array.isArray(snap.l) ? snap.l : [], lw = LING_FIELDS.length + 1;
+      for (let o = 0; o + lw <= ls.length; o += lw) {
+        const l = lings[ls[o]];
+        if (!l) continue;
+        l.on = true;
+        for (let i = 0; i < LING_FIELDS.length; i++) l[LING_FIELDS[i]] = num(ls[o + 1 + i]);
       }
       const q = Array.isArray(snap.q) ? snap.q : [];
       s.pendingCount = Math.min(C.MAX_PENDING, q.length);
@@ -1148,6 +1448,28 @@
       gorilla: (id) => fighting() && !!addBrute(playerById(id) || null),
       /** A skeleton is called down beside player `id`. */
       skeleton: (id) => fighting() && !!addBrute(playerById(id) || null, 1),
+      /**
+       * A hunt's end to look at (Shift+9): player `id` and each of `rows` ({ id, kills, foes }) seated in the hunt with
+       * those points and enemies, the boss gone, and straight to the victory.
+       */
+      results: (id, mine, rows) => {
+        if (s.state === STATE.IDLE) return false;
+        const me = slotFor(id);
+        if (!me) return false;
+        me.inGame = 1; me.kills = mine.kills; me.foes = mine.foes;
+        for (const row of rows) {
+          const p = slotFor(row.id);
+          if (!p) break;
+          p.inGame = 1; p.kills = row.kills; p.foes = row.foes;
+        }
+        s.bossOn = 0; s.kills = 0;
+        for (const p of players) if (p.on && p.inGame) s.kills += p.kills;
+        return jump(STATE.VICTORY, ROUNDS.length);
+      },
+      /** An hourglass is called down somewhere open. */
+      hourglass: () => fighting() && sendGlass(),
+      /** A spider is called down beside player `id`. */
+      spider: (id) => fighting() && !!addBrute(playerById(id) || null, 2),
       /**
        * An elixir's revive to watch alone: an elixir for player `id`, and a stand-in hunter (`REVIVE_BOT`, no page behind
        * it, so its caller presents it) down at (x, z). Only while a round runs.
@@ -1172,14 +1494,20 @@
       /** The round ends: everything spawned and gone (or the wait cut short). */
       next: () => {
         if (s.state === STATE.ACTIVE) {
-          s.spawned = settings().ghosts; s.brutesSent = C.BRUTE.perRound[s.round - 1] || 0; s.bonesSent = bonesFor(s.round, s.players);
+          s.spawned = settings().ghosts; s.brutesSent = brutesFor(s.round, s.players) + spidersFor(s.round); s.bonesSent = bonesFor(s.round, s.players);
+          s.glassesSent = glassesFor(s.round); s.swarmSent = swarmFor(s.players);
           for (const g of ghosts) g.on = false;
           for (const b of brutes) b.on = false;
+          for (const l of lings) l.on = false;
         }
         else if (s.state !== STATE.IDLE) s.endsAt = s.now;
       },
       /** Every ghost on the field burns, no kills credited. */
-      nuke: () => { for (const g of ghosts) if (g.on && !g.dying) kill(g, DYING.BURNED); for (const b of brutes) if (b.on && !b.dying) killBrute(b, DYING.BURNED); },
+      nuke: () => {
+        for (const g of ghosts) if (g.on && !g.dying) kill(g, DYING.BURNED);
+        for (const b of brutes) if (b.on && !b.dying) killBrute(b, DYING.BURNED);
+        for (const l of lings) if (l.on && !l.dying) killLing(l, DYING.BURNED);
+      },
       /** Player `id` thaws, back to a full bar. */
       unfreeze: (id) => { const p = playerById(id); if (p) { p.frozenUntil = 0; p.seg = C.PLAYER_SEGMENTS; } },
       /** Player `id` is credited `n` kills (drops and pumpkins follow). */
@@ -1191,16 +1519,17 @@
       s.round = Math.max(1, Math.min(ROUNDS.length, toRound | 0));
       for (const g of ghosts) g.on = false;
       for (const b of brutes) b.on = false;
+      for (const l of lings) l.on = false;
       enter(state);
       return true;
     };
 
     return {
-      state: s, ghosts, players, drops, brutes, round, settings, debug, brutesAlive, beginPresence, present, playerById, advance, start, ready, pause, hit, snapshot, load, clear, jump,
+      state: s, ghosts, players, drops, brutes, lings, round, settings, debug, brutesAlive, bossShown, bossNext, halving, beginPresence, present, playerById, advance, start, ready, pause, hit, snapshot, load, clear, jump,
       get ticks() { return ticks; }, get presence() { return presence; },
       frozen: (p) => frozen(p), alive, radiusOf, dawnMs
     };
   };
 
-  BL.ghostSim = { create, STATE, OUTCOME, TIER, DROP, TESS_DROP, LIGHTNING_DROP, MONKEY_DROP, DYING, BRUTE_PHASE, ROUNDS, CONFIG, roundSettings, weaponTier, hpOf, ghostTier, radiusOf, bonesFor, REVIVE_BOT };
+  BL.ghostSim = { create, STATE, OUTCOME, TIER, LING_PHASE, DROP, TESS_DROP, LIGHTNING_DROP, MONKEY_DROP, DYING, BRUTE_PHASE, ROUNDS, CONFIG, roundSettings, introPages, introMs, weaponTier, hpOf, ghostTier, radiusOf, brutesFor, spidersFor, swarmFor, glassesFor, bonesFor, REVIVE_BOT };
 })();

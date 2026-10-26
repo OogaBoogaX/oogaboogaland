@@ -5776,7 +5776,8 @@
     const playerAction = () => {
       if (!player || player.grabbedBy || player.health.stunned) return false;
       if (player.camp.burning) return dropRoll();
-      if (player.camp.seat) return standPlayer();
+      // A seat may take the act itself (`seat.act`, true when it did), as the forklift's starts it; else it stands up.
+      if (player.camp.seat) return player.camp.seat.act && player.camp.seat.act() || standPlayer();
       if (player.bedTravel.manual) return wakePlayer();
       if (weaponsEnabled && !player.weapon.reloading && !player.weapon.swapTime && !player.weapon.reloadHandoff && player.weapon.equipped && reloadMissing(player) > 0 && nearReload(player)) {
         if (!startReload(player)) hud.hint("No bananas in the pile");

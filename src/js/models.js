@@ -1664,6 +1664,40 @@
   // below, and a rail along the named edges ("n" is -z, "s" +z, "w" -x, "e" +x). Posts stand under the frame at the
   // corners and every few metres round it; `drop` is how far down each one reaches, a number or a function of its
   // (x, z) in the deck's frame, and 0 leaves the posts out.
+  // The spans a deck's rails run along, in the deck's frame, as `deckParts` stands them: [x0, z0, x1, z1, from, to],
+  // `from` and `to` whether a post stands at that end. A rail stands 0.1 in from each of the deck's `rails` edges ("n",
+  // "s", "w", "e"), leaving a gap wherever a stair or a bridge lands on its edge, exactly as wide as what arrives, and
+  // ending either side of it on a post that the arriving rails share: `cuts` are [x, z, half-width] in the deck's frame,
+  // on the rail's line, and a stair's also the way its flight runs off the deck, so it opens only the rail it crosses
+  // and as wide as it crosses it. A scene's floor stands its walkers off the same spans.
+  const deckRailSpans = (w, d, rails = "", cuts = []) => {
+    const spans = [];
+    const rail = (x0, z0, x1, z1, ends = [true, true]) => {
+      const len = Math.hypot(x1 - x0, z1 - z0), ux = (x1 - x0) / len, uz = (z1 - z0) / len, keep = [[0, len]];
+      const out = (x0 + x1) * uz - (z0 + z1) * ux > 0 ? 1 : -1, nx = uz * out, nz = -ux * out;
+      for (const [cx, cz, width, dx, dz] of cuts) {
+        if (Math.abs((cx - x0) * uz - (cz - z0) * ux) > 0.6) continue;
+        // A stair's centre line where it crosses this rail's line, and its width along the rail at that slant.
+        const along = dx === undefined ? 1 : dx * nx + dz * nz;
+        if (along < 0.3) continue;
+        const k = dx === undefined ? 0 : -((cx - x0) * nx + (cz - z0) * nz) / along, t = (cx + (dx || 0) * k - x0) * ux + (cz + (dz || 0) * k - z0) * uz, half = width / along;
+        if (t < -half || t > len + half) continue;
+        for (let i = keep.length - 1; i >= 0; i--) {
+          const [a, b] = keep[i];
+          if (t + half <= a || t - half >= b) continue;
+          keep.splice(i, 1, ...[[a, t - half], [t + half, b]].filter(([p, q]) => q - p > 0.12));
+        }
+      }
+      for (const [a, b] of keep) spans.push([x0 + ux * a, z0 + uz * a, x0 + ux * b, z0 + uz * b, a > 0 || ends[0], b < len || ends[1]]);
+    };
+    // Corners are shared: the side rails leave out the post the front or back rail already stands there.
+    const hw = w / 2 - 0.1, hd = d / 2 - 0.1, north = rails.includes("n"), south = rails.includes("s");
+    if (north) rail(-hw, -hd, hw, -hd);
+    if (south) rail(-hw, hd, hw, hd);
+    if (rails.includes("w")) rail(-hw, -hd, -hw, hd, [!north, !south]);
+    if (rails.includes("e")) rail(hw, -hd, hw, hd, [!north, !south]);
+    return spans;
+  };
   const deckParts = (w, d, drop, rails = "", seed = 1, cuts = []) => {
     const rand = mulberry32(seed), geos = [], across = w >= d;
     const n = Math.max(2, Math.round((across ? d : w) / 0.9));
@@ -1695,43 +1729,30 @@
       const depth = Math.min(reach(ax, az), reach(bx, bz), 4.5);
       if (depth > 1.5) geos.push(beam(ax, -depth + 0.3, az, bx, -0.6, bz, 0.16, TIMBER), beam(ax, -0.6, az, bx, -depth + 0.3, bz, 0.16, TIMBER));
     }
-    // A rail leaves a gap wherever a stair or a bridge lands on its edge, exactly as wide as what arrives, and ends
-    // either side of it on a post that the arriving rails share: `cuts` are [x, z, half-width] in the deck's frame, on
-    // the rail's line, and a stair's also the way its flight runs off the deck, so it opens only the rail it crosses
-    // and as wide as it crosses it.
-    const rail = (x0, z0, x1, z1, ends = [true, true]) => {
-      const len = Math.hypot(x1 - x0, z1 - z0), ux = (x1 - x0) / len, uz = (z1 - z0) / len, keep = [[0, len]];
-      const out = (x0 + x1) * uz - (z0 + z1) * ux > 0 ? 1 : -1, nx = uz * out, nz = -ux * out;
-      for (const [cx, cz, width, dx, dz] of cuts) {
-        if (Math.abs((cx - x0) * uz - (cz - z0) * ux) > 0.6) continue;
-        // A stair's centre line where it crosses this rail's line, and its width along the rail at that slant.
-        const along = dx === undefined ? 1 : dx * nx + dz * nz;
-        if (along < 0.3) continue;
-        const k = dx === undefined ? 0 : -((cx - x0) * nx + (cz - z0) * nz) / along, t = (cx + (dx || 0) * k - x0) * ux + (cz + (dz || 0) * k - z0) * uz, half = width / along;
-        if (t < -half || t > len + half) continue;
-        for (let i = keep.length - 1; i >= 0; i--) {
-          const [a, b] = keep[i];
-          if (t + half <= a || t - half >= b) continue;
-          keep.splice(i, 1, ...[[a, t - half], [t + half, b]].filter(([p, q]) => q - p > 0.12));
-        }
-      }
-      for (const [a, b] of keep) geos.push(...railParts(x0 + ux * a, z0 + uz * a, x0 + ux * b, z0 + uz * b, [a > 0 || ends[0], b < len || ends[1]]));
-    };
-    // Corners are shared: the side rails leave out the post the front or back rail already stands there.
-    const hw = w / 2 - 0.1, hd = d / 2 - 0.1, north = rails.includes("n"), south = rails.includes("s");
-    if (north) rail(-hw, -hd, hw, -hd);
-    if (south) rail(-hw, hd, hw, hd);
-    if (rails.includes("w")) rail(-hw, -hd, -hw, hd, [!north, !south]);
-    if (rails.includes("e")) rail(hw, -hd, hw, hd, [!north, !south]);
+    for (const [x0, z0, x1, z1, a, b] of deckRailSpans(w, d, rails, cuts)) geos.push(...railParts(x0, z0, x1, z1, [a, b]));
     return geos;
   };
+  // A stepped flight's treads (`stairParts`' `stepped`): one fewer than its risers, each riser near STEP_RISER high.
+  // Tread i (0 to n - 1) runs from i / n to (i + 1) / n of the way along, its top (i + 1) / (n + 1) of the way up, so a
+  // scene's floor can stand walkers on the very treads drawn.
+  const STEP_RISER = 0.3;
+  const stairTreads = (rise) => Math.max(2, Math.round(rise / STEP_RISER) - 1);
   // A flight of steps from (ax, ay, az) up to (bx, by, bz), `w` wide. An end on a deck's rail leaves out its posts,
-  // since the rail's own end posts stand there (`posts` [foot, head]).
-  const stairParts = (ax, ay, az, bx, by, bz, w = 1.6, posts = [true, true]) => {
+  // since the rail's own end posts stand there (`posts` [foot, head]). Its treads are rungs across it, or, `stepped`,
+  // deep plank treads at `stairTreads`' heights with a riser board under each one's front.
+  const stairParts = (ax, ay, az, bx, by, bz, w = 1.6, posts = [true, true], stepped = false) => {
     const geos = [], rise = by - ay, steps = Math.max(3, Math.round(rise / 0.32)), len = Math.hypot(bx - ax, bz - az);
     const ux = (bx - ax) / len, uz = (bz - az) / len, px = -uz, pz = ux;
     for (const s of [-1, 1]) geos.push(beam(ax + px * s * w / 2, ay, az + pz * s * w / 2, bx + px * s * w / 2, by, bz + pz * s * w / 2, 0.22, TIMBER_DK));
-    for (let i = 0; i < steps; i++) {
+    if (stepped) {
+      const n = stairTreads(rise), run = len / n, yaw = Math.atan2(ux, uz);
+      for (let i = 0; i < n; i++) {
+        const t = (i + 0.5) / n, x = ax + (bx - ax) * t, z = az + (bz - az) * t, top = ay + rise * (i + 1) / (n + 1), up = rise / (n + 1);
+        geos.push(moved(turnedY(bevelBox({ w: w - 0.06, h: 0.08, d: run - 0.03, color: i % 2 ? TIMBER : TIMBER_LT, bevel: 0.02 }), yaw), x, top - 0.04, z));
+        const fx = ax + (bx - ax) * i / n + ux * 0.03, fz = az + (bz - az) * i / n + uz * 0.03;
+        geos.push(moved(turnedY(box({ w: w - 0.1, h: up - 0.08, d: 0.04, color: TIMBER_DK }), yaw), fx, top - 0.08 - (up - 0.08) / 2, fz));
+      }
+    } else for (let i = 0; i < steps; i++) {
       const t = (i + 0.5) / steps, x = ax + (bx - ax) * t, z = az + (bz - az) * t, y = ay + rise * t;
       geos.push(beam(x - px * w / 2, y + 0.06, z - pz * w / 2, x + px * w / 2, y + 0.06, z + pz * w / 2, 0.14, i % 2 ? TIMBER : TIMBER_LT));
     }
@@ -1831,5 +1852,5 @@
     for (const geo of set) if (geo.foliageLods?.owner === geo) { set.add(geo.foliageLods.medium); set.add(geo.foliageLods.far); }
     return set;
   };
-  BL.models = { characterGeometry, foliageLods, paintFoliageAtlas, addLods, beam, forwardLathe, turn, shaded, torus, along, chain, railParts, columnParts, deckGrid, deckPosts, deckParts, stairParts, lanternParts, LANTERN_GLASS, geometry, pushVert, face, cutCylinder, voxCoords, box, bevelBox, panel, lathe, glassVessel, attachGlassShell, tube, ring, polyline, merge, forward, moved, turnedX, turnedY, turnedZ, prism, cached, cachedSteps, variants, scopedMap, track, setScope, withScope, release, assertReleased, noShadow, makeVox, voxelGeometry, voxelFaces, banana, bananaGeometry, bananaTileGeometry, bananaPileCoreGeometry, bananaPileRadiusScale, bananaPileHeightOffset, BANANA_AMMO_SCALE, BANANA_PILE_PROFILE, particleGeometry, spareMagazine, caveman, CLUB_PALETTE, GOLD_CLUB_PALETTE, labRoom, buildableGeos, crate, die, dieRotationFor, SWAG, TIER_COLORS };
+  BL.models = { characterGeometry, foliageLods, paintFoliageAtlas, addLods, beam, forwardLathe, turn, shaded, torus, along, chain, railParts, columnParts, deckGrid, deckPosts, deckParts, deckRailSpans, stairParts, stairTreads, lanternParts, LANTERN_GLASS, geometry, pushVert, face, cutCylinder, voxCoords, box, bevelBox, panel, lathe, glassVessel, attachGlassShell, tube, ring, polyline, merge, forward, moved, turnedX, turnedY, turnedZ, prism, cached, cachedSteps, variants, scopedMap, track, setScope, withScope, release, assertReleased, noShadow, makeVox, voxelGeometry, voxelFaces, banana, bananaGeometry, bananaTileGeometry, bananaPileCoreGeometry, bananaPileRadiusScale, bananaPileHeightOffset, BANANA_AMMO_SCALE, BANANA_PILE_PROFILE, particleGeometry, spareMagazine, caveman, CLUB_PALETTE, GOLD_CLUB_PALETTE, labRoom, buildableGeos, crate, die, dieRotationFor, SWAG, TIER_COLORS };
 })();

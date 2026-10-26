@@ -1,7 +1,7 @@
 // Scene-only factory geometry. Shared island props and their model-cache owners stay in factory-models.js.
 (() => {
   "use strict";
-  const { BL, BOARD, BOARD_FACE, BOARD_VALUES, BRASS, BRONZE, BRONZE_DK, CAP, CAP_BLUE, CAP_ORANGE, COILS, COIN_R, CONDUIT_SAMPLES, CONSOLE, COOK, COPPER, COPPER_DK, CRYSTAL, CYAN, FALLS, FLOOR, FORGE_CONSOLE, FORGE_CY, FORGE_TRACKS, GOLD, HALL, IRON_BK, IRON_DK, IRON_LT, KIOSK, LABEL_FONT, LAYOUT, LEVEL, LINE_STEP, LOOKOUT_BEAM, MONITORS, ORANGE, OUTCROPS, PORCH_HALF, REB, RING_BRIDGES, SHAFTS, STEP, STONE, STONE_DK, STUDY, TAU, TIMBER, TIMBER_DK, TIMBER_LT, TRE, TUNNEL_BOX, TUNNEL_POST, TUNNEL_THEMES, WALL_LEAN, along, banner, beam, bevelBox, box, cached, chain, columnParts, conduitPath, deckParts, donationCorner, face, flame, forwardLathe, gem, geometry, groundUnder, hexToRgb, label, labelCache, lanternParts, lathe, makeVox, merge, models, moved, mulberry32, networkGlyph, noShadow, porchOf, prism, pushVert, railParts, ringLanding, shaded, smoothBitcoin, smoothBolt, span, stairParts, stationX, stationZ, torus, tube, tunnelFrame, turn, turnedX, turnedY, turnedZ, voxelGeometry } = window.BL.factoryModelsSceneKit;
+  const { BL, BOARD, BOARD_FACE, BOARD_VALUES, BRASS, BRONZE, BRONZE_DK, CAP, CAP_BLUE, CAP_ORANGE, COILS, COIN_R, CONDUIT_SAMPLES, CONSOLE, COOK, COPPER, COPPER_DK, CRYSTAL, CYAN, FALLS, FLOOR, FORGE_CONSOLE, FORGE_CY, FORGE_TRACKS, GOLD, HALL, HANGAR_DOOR, HANGAR_SET_BACK, IRON_BK, IRON_DK, IRON_LT, KIOSK, LABEL_FONT, LAYOUT, LEVEL, LINE_STEP, LOOKOUT_BEAM, MONITORS, ORANGE, PORCH_HALF, REB, RING_BRIDGES, SHAFTS, STEP, STONE, STONE_DK, STUDY, TAU, TIMBER, TIMBER_DK, TIMBER_LT, TRE, TUNNEL_BOX, TUNNEL_POST, TUNNEL_THEMES, WALL_LEAN, along, banner, beam, bevelBox, box, cached, chain, columnParts, conduitPath, deckParts, donationCorner, face, flame, forwardLathe, gem, geometry, groundUnder, hangarEntry, hexToRgb, label, labelCache, lanternParts, lathe, makeVox, merge, models, moved, mulberry32, networkGlyph, noShadow, outcropTop, outcrops, plate, porchOf, prism, pushVert, railParts, railPlan, deckRailing, walkRails, ringLanding, shaded, smoothBitcoin, smoothBolt, span, stairParts, stationX, stationZ, torus, tube, tunnelFrame, turn, turnedX, turnedY, turnedZ, voxelGeometry } = window.BL.factoryModelsSceneKit;
   // Construction checkpoints (see build-tasks.js). They reach it only when sliced, so an unsliced build runs without it.
   const pause = function* (slice) { if (slice) yield* BL.buildTasks.pause(slice); };
   const ROCK_LT = "#75614f";
@@ -131,8 +131,14 @@
     // donations board's, set the face back flat at a depth of their own instead: [..., half-width, depth].
     const openings = LAYOUT.tunnels.map((t) => [t.turn === 0 ? "back" : t.x < 0 ? "left" : "right", t.turn === 0 ? t.x : t.z, t.y - 0.5, t.y + 7.8, 4.3]);
     openings.push(["right", LAYOUT.study.z, LAYOUT.study.y - 0.5, LAYOUT.study.y + 9.5, 3.4], ["front", 0, 3, 10.5, 6.5]);
+    if (hangarEntry()) openings.push(["left", LAYOUT.hangar.z, LAYOUT.hangar.y - 0.5, LAYOUT.hangar.y + 7.8, 4.3]);
     const open = (wall, u, y) => openings.some(([w, c, y0, y1, half]) => w === wall && Math.abs(u - c) < half && y > y0 && y < y1);
     const recesses = donationCorner() ? [["right", LAYOUT.kiosk.z, LAYOUT.kiosk.y - 0.5, LAYOUT.kiosk.y + 5.6, 2, 1.6], ["right", LAYOUT.board.z, LAYOUT.board.y + 0.9, LAYOUT.board.y + 4.6, 2.3, 1.6]] : [];
+    // While the hangar is open the front wall stands further off over the left walkway, its rock as craggy as ever:
+    // `HANGAR_SET_BACK` metres back from past the outcrop to the hangar door's arch, easing to the wall's own line toward
+    // the balcony and above the door, so the walkway runs along an open side and the whole arch shows down it.
+    const ease = (t) => t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t);
+    const setBack = (wall, u, y) => wall !== "front" || !hangarEntry() ? 0 : HANGAR_SET_BACK * ease((-5 - u) / 5) * ease((y - 2) / 2) * ease((16.5 - y) / 3);
     const recess = (wall, u, y) => {
       for (const [w, c, y0, y1, half, depth] of recesses) if (w === wall && Math.abs(u - c) < half && y > y0 && y < y1) return depth;
       return 0;
@@ -159,7 +165,7 @@
         if (open(name, u, y)) continue;
         // The back wall is smooth where the water runs down it.
         const groove = name === "back" && falls.some((f) => Math.abs(u - f) < 1.1);
-        const depth = recess(name, u, y) || 0.5 + y / H * WALL_LEAN + (groove ? 0 : heave(u, y, 3.2, k) * 0.95 + hash(iu, iy, k + 9) * 0.3);
+        const depth = recess(name, u, y) || 0.5 + y / H * WALL_LEAN + (groove ? 0 : heave(u, y, 3.2, k) * 0.95 + hash(iu, iy, k + 9) * 0.3) - setBack(name, u, y);
         const tone = hash(iu >> 1, iy >> 1, k + 3), color = tone < 0.1 ? 5 : 1 + Math.floor(hash(iu >> 1, iy >> 1, k + 5) * 3.99);
         for (let d = 0; d < 3; d++) put(iu, iy, depth, d, color);
       }
@@ -212,11 +218,12 @@
       else crystal(-W + 4 + t * (2 * W - 8), 0, B + 1.8, 0.9 + rand());
     }
     for (const t of LAYOUT.tunnels) { crystal(t.x + (t.turn ? 0 : 3.6), t.y, t.z + (t.turn ? 3.4 : 1.4), 0.7); }
-    // Outcrops on the left of the front of the pit, framing the view from the balcony.
-    for (const [x, z, s] of OUTCROPS) {
+    // Outcrops on the left of the front of the pit, framing the view from the balcony. A lowered one still draws its
+    // missing tiers' jitter, so everything after it falls where it always has.
+    for (const [x, z, s, tiers, th] of outcrops()) {
       for (let k = 0; k < 4; k++) {
-        const w = (3.6 - k * 0.7) * s, h = 1.4 * s;
-        rock.push(box({ w, h, d: w * 0.9, color: STONE[(k + 2) % 4], offset: { x: x + (rand() - 0.5) * 0.6, y: h * (k + 0.5), z: z + (rand() - 0.5) * 0.6 } }));
+        const w = (3.6 - k * 0.7) * s, h = 1.4 * s * th, jx = (rand() - 0.5) * 0.6, jz = (rand() - 0.5) * 0.6;
+        if (k < tiers) rock.push(box({ w, h, d: w * 0.9, color: STONE[(k + 2) % 4], offset: { x: x + jx, y: h * (k + 0.5), z: z + jz } }));
       }
       crystal(x + 1.4 * s, 0, z - 1.2 * s, 0.9 * s);
     }
@@ -241,70 +248,16 @@
 
   // Decks, bridges, stairs and the core's walkway ring: all the timber, as one mesh.
   const scaffold = BL.models.cachedSteps(function* (slice = null) {
-    const L = LAYOUT, geos = [], r = L.ring, R = r.outer - 0.15, e = L.entrance, [[, , a0, a1], [s1x0, s1x1, s1z0]] = L.walk;
+    const L = LAYOUT, geos = [], r = L.ring, R = r.outer - 0.15, e = L.entrance;
     const place = (parts, x, y, z) => { for (const g of parts) geos.push(moved(g, x, y, z)); };
     // Whether (x, y, z) stands on a deck's rail line, where that rail's cut ends carry the posts.
     const DECKS = [...L.bays, L.switchboard, L.platform, L.lookout, ...L.galleries, e];
     const atRail = (x, y, z) => DECKS.some((d) => Math.abs(y - d.y) < 0.3 && Math.abs(x - d.x) < d.w / 2 + 0.2 && Math.abs(z - d.z) < d.d / 2 + 0.2 &&
       (Math.abs(Math.abs(x - d.x) - (d.w / 2 - 0.1)) < 0.15 || Math.abs(Math.abs(z - d.z) - (d.d / 2 - 0.1)) < 0.15));
-    // A bridge's two sides, each from where it leaves the rail line `from` of what it starts on to where it meets the
-    // rail line `to` of what it lands on: `t0` and `t1` the fractions along it, `a` and `b` the points. A line is a
-    // function of a side's ends giving that fraction: the circle round the core's walkway going out, or a line x = x.
-    const crossCircle = (rad) => (ax, az, bx, bz) => {
-      const dx = bx - ax, dz = bz - az, cx = ax - r.x, cz = az - r.z, qa = dx * dx + dz * dz, qb = 2 * (cx * dx + cz * dz), qc = cx * cx + cz * cz - rad * rad;
-      return (-qb + Math.sqrt(qb * qb - 4 * qa * qc)) / (2 * qa);
-    };
-    const crossX = (x) => (ax, az, bx) => (x - ax) / (bx - ax);
-    const bridgeOf = (x0, z0, x1, z1, w, from, to) => {
-      const len = Math.hypot(x1 - x0, z1 - z0), px = -(z1 - z0) / len * w / 2, pz = (x1 - x0) / len * w / 2;
-      const sides = [-1, 1].map((s) => {
-        const ax = x0 + px * s, az = z0 + pz * s, bx = x1 + px * s, bz = z1 + pz * s, t0 = from(ax, az, bx, bz), t1 = to(ax, az, bx, bz);
-        const at = (t) => [ax + (bx - ax) * t, az + (bz - az) * t];
-        return { t0, t1, at, a: at(t0), b: at(t1) };
-      });
-      return { x0, z0, x1, z1, w, len, sides };
-    };
-    const ringBridges = RING_BRIDGES.map(([x0, z0, x1, z1]) => {
-      const line = Math.sign(x1) * (Math.abs(L.bays[3].x) - L.bays[3].w / 2 + 0.1);
-      return { ...bridgeOf(x0, z0, x1, z1, 2, crossCircle(R), crossX(line)), line };
-    });
-    const topBridges = L.bridges.map(([x0, z0, x1, z1, w]) => bridgeOf(x0, z0, x1, z1, w, crossX(x0 - 0.1), crossX(x1 + 0.1)));
-    // Where a stair, a bridge, a porch, the stairway or the walkway lands on a deck, as cuts on that deck's rail:
-    // exactly as wide as the rails that arrive, which end on the cut's end posts.
-    const landings = [];
-    for (const [ax, ay, az, bx, by, bz, w] of L.stairs) {
-      const l = Math.hypot(bx - ax, bz - az), dx = (bx - ax) / l, dz = (bz - az) / l;
-      landings.push([ax, ay, az, w / 2 + 0.05, dx, dz], [bx, by, bz, w / 2 + 0.05, -dx, -dz]);
-    }
-    for (const l of L.ladders) {
-      landings.push([l.x, l.top, l.z, l.width / 2 + 0.15, l.nx, l.nz]);
-      landings.push([l.x, l.bottom, l.z, l.width / 2 + 0.15, l.nx, l.nz]);
-    }
-    const cutAcross = ([p, q], y) => landings.push([(p[0] + q[0]) / 2, y, (p[1] + q[1]) / 2, Math.hypot(p[0] - q[0], p[1] - q[1]) / 2]);
-    for (const bd of ringBridges) { cutAcross(bd.sides.map((sd) => sd.b), LEVEL.main); }
-    for (const bd of topBridges) { for (const end of ["a", "b"]) { cutAcross(bd.sides.map((sd) => sd[end]), LEVEL.top); } }
-    // The first gallery's front opens onto the landing, exactly between the flights' rails.
-    const ld = L.landing;
-    landings.push([ld.x, ld.y, ld.z - ld.d / 2 - 0.1, ld.w / 2 - 0.1]);
-    for (const t of L.tunnels) {
-      const b = L.bays[t.bay];
-      landings.push(t.turn === 0 ? [t.x, t.y, b.z - b.d / 2 + 0.1, PORCH_HALF - 0.1] : [b.x + Math.sign(t.x) * (b.w / 2 - 0.1), t.y, t.z, PORCH_HALF - 0.1]);
-    }
-    const [gx, , , , gy1, , gw] = L.stairway;
-    landings.push([gx, gy1, e.z - e.d / 2 + 0.1, gw / 2 + 0.1], [e.x + e.w / 2 - 0.1, e.y, (a0 + a1) / 2, (a1 - a0) / 2 - 0.1]);
-    const cutsFor = (d) => landings.filter(([x, y, z]) => Math.abs(y - d.y) < 0.3 && Math.abs(x - d.x) < d.w / 2 + 1 && Math.abs(z - d.z) < d.d / 2 + 1).map(([x, , z, ...rest]) => [x - d.x, z - d.z, ...rest]);
+    const { ringBridges, topBridges, cutsFor } = railPlan();
     // A deck's posts reach down to whatever stands under each: a lower floor, a tunnel's rock ledge, or the pit.
     const deckAt = (d, rails, drop = (x, z) => d.y - groundUnder(d.x + x, d.z + z, d.y)) => place(deckParts(d.w, d.d, drop, rails, Math.round(d.x * 7 + d.z), cutsFor(d)), d.x, d.y, d.z);
-    // Every deck is railed all round, open only where something lands on it; the galleries' backs are the wall, and
-    // they hang from it on brackets rather than stand on posts, which would land in the porches below them.
-    for (const b of L.bays) { yield* pause(slice); deckAt(b, "nsew"); }
-    for (const d of [L.switchboard, L.platform]) { yield* pause(slice); deckAt(d, "nsew"); }
-    // Kortik's switchboard stands along its west edge, where a rail would be.
-    deckAt(L.kortik, "nse");
-    yield* pause(slice);
-    deckAt(L.lookout, "nsew");
-    deckAt(L.lookoutDeck, "nsew", 0);
-    deckAt(L.lookoutApproach, "ew", 0);
+    for (const [d, rails, drop] of deckRailing()) { yield* pause(slice); deckAt(d, rails, drop); }
     // Brackets carry the lantern deck out from the tower's four legs.
     for (const sx of [-1, 1]) { for (const sz of [-1, 1]) { geos.push(beam(L.lookout.x + sx * 0.9, L.lookoutDeck.y - 1.4, L.lookout.z + sz * 0.9,
       L.lookout.x + sx * 2.2, L.lookoutDeck.y - 0.4, L.lookout.z + sz * 2.2, 0.16, TIMBER_DK)); } }
@@ -319,9 +272,7 @@
         geos.push(beam(l.x - tx * l.width / 2, y, l.z - tz * l.width / 2, l.x + tx * l.width / 2, y, l.z + tz * l.width / 2, 0.09, TIMBER_LT));
       }
     }
-    deckAt(L.landing, "s");
     for (const g of L.galleries) { yield* pause(slice);
-      deckAt(g, "swe", 0);
       const back = HALL.back + 2, front = g.z + g.d / 2;
       for (const x of galleryBrackets(g)) {
         geos.push(beam(x, g.y - 0.55, back, x, g.y - 0.55, front - 0.2, 0.26, TIMBER_DK), beam(x, g.y - 2.9, back, x, g.y - 0.68, front - 0.7, 0.2, TIMBER));
@@ -334,28 +285,19 @@
         for (const z of [g.z - g.d / 4, g.z + g.d / 4]) { geos.push(beam(wall, g.y - 0.55, z, end - s * 0.2, g.y - 0.55, z, 0.26, TIMBER_DK), beam(wall, g.y - 2.6, z, end - s * 0.6, g.y - 0.68, z, 0.2, TIMBER)); }
       }
     }
-    // The balcony the visitor enters on, running out from the tunnel, open at its front to the stairway and on its
-    // right to the walkway.
-    deckAt(e, "nwe");
-    // Level 2's walkway round the right wall, posted down to the pit floor and railed along the hall side from the
-    // balcony's rail to the Harbor porch's, every corner one shared post; and each line's porch out to its peer
-    // tunnel, railed along both sides from its deck's rail.
+    // Level 2's walkway round the right wall, posted down to the pit floor; while the hangar is open, its walkway on the
+    // left, straight from the balcony's rail to the hangar's door in the left wall, its posts standing on the lowered
+    // outcrop where they come down on it; each line's porch out to its peer tunnel; and their rails (`walkRails`).
     for (const [x0, x1, z0, z1] of L.walk) { yield* pause(slice); place(deckParts(x1 - x0, z1 - z0, e.y, "", 17), (x0 + x1) / 2, e.y, (z0 + z1) / 2); }
-    const ex = e.x + e.w / 2 - 0.1, wx = s1x0 + 0.1;
-    place(railParts(ex, a0 + 0.1, wx, a0 + 0.1, [false, true]), 0, e.y, 0);
-    place(railParts(ex, a1 - 0.1, s1x1 - 0.1, a1 - 0.1, [false, true]), 0, e.y, 0);
-    place(railParts(wx, a0 + 0.1, wx, s1z0 - 0.1, [false, true]), 0, e.y, 0);
-    for (const t of L.tunnels) { yield* pause(slice);
-      const [x0, x1, z0, z1] = porchOf(t), b = L.bays[t.bay], s = Math.sign(t.x);
-      place(deckParts(x1 - x0, z1 - z0, t.turn ? t.y : 0.3, "", 23), (x0 + x1) / 2, t.y, (z0 + z1) / 2);
-      if (t.turn === 0) for (const x of [x0 + 0.1, x1 - 0.1]) { place(railParts(x, z0, x, z1 + 0.1, [true, false]), 0, t.y, 0); }
-      else {
-        const inner = b.x + s * (b.w / 2 - 0.1), face = t.x - s * 0.5;
-        place(railParts(inner, z0 + 0.1, face, z0 + 0.1, [false, true]), 0, t.y, 0);
-        // The Harbor line's porch meets the walkway along its hall-side edge.
-        place(t.x > 0 ? railParts(inner, z1 - 0.1, wx, z1 - 0.1, [false, false]) : railParts(inner, z1 - 0.1, face, z1 - 0.1, [false, true]), 0, t.y, 0);
-      }
+    if (hangarEntry()) {
+      const [[x0, x1, z0, z1]] = L.walkLeft, cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
+      place(deckParts(x1 - x0, z1 - z0, (x, z) => e.y - outcropTop(cx + x, cz + z), "", 19), cx, e.y, cz);
     }
+    for (const t of L.tunnels) { yield* pause(slice);
+      const [x0, x1, z0, z1] = porchOf(t);
+      place(deckParts(x1 - x0, z1 - z0, t.turn ? t.y : 0.3, "", 23), (x0 + x1) / 2, t.y, (z0 + z1) / 2);
+    }
+    for (const [ax, az, bx, bz, y, ends] of walkRails()) place(railParts(ax, az, bx, bz, ends), 0, y, 0);
     // The core's walkway: a ring of planks round the chamber's foot, each cut to its wedge so the ring closes
     // without gaps at its rim, posted down to the pit.
     const planks = 28;
@@ -473,7 +415,7 @@
       const x = ax + (bx - ax) * i / steps, z = az + (bz - az) * i / steps;
       const floor = supportAt(x, z, feet);
       const px = ax + (bx - ax) * (i - 1) / steps, pz = az + (bz - az) * (i - 1) / steps;
-      if (!clearAt(x, z, Math.max(feet, floor), radius, height, px, pz) || floor < feet - STEP) return false;
+      if (!clearAt(x, z, Math.max(feet, floor), radius, height, px, pz) || !railClear(x, z, Math.max(feet, floor), radius, px, pz) || floor < feet - STEP) return false;
     }
     return true;
   };
@@ -509,6 +451,24 @@
       if (old2 >= r * r || distance2 <= old2 + 1e-12 || ox * (x - fromX) + oz * (z - fromZ) < -1e-12) return false;
     }
     return true;
+  };
+  // Whether a step on foot from (fromX, fromZ) to (x, z) keeps a body of `radius` off the decks' and walkways' rails
+  // (`FLOOR`'s walls): no nearer than `radius` to one, or, already nearer, no deeper into it. A body in the air goes
+  // over them.
+  const railClear = (x, z, feet, radius, fromX, fromZ) => {
+    const W = FLOOR().walls;
+    for (let i = 0; i < W.length; i += 6) {
+      if (feet < W[i + 4] || feet > W[i + 5]) continue;
+      const near = wallDistance(W, i, x, z);
+      if (near >= radius) continue;
+      if (near < wallDistance(W, i, fromX, fromZ) - 1e-9 || wallDistance(W, i, fromX, fromZ) >= radius) return false;
+    }
+    return true;
+  };
+  // How far (x, z) stands outside the wall at `i` in `W`, less than nothing inside it.
+  const wallDistance = (W, i, x, z) => {
+    const dx = Math.max(W[i] - x, x - W[i + 1]), dz = Math.max(W[i + 2] - z, z - W[i + 3]);
+    return dx > 0 || dz > 0 ? Math.hypot(Math.max(dx, 0), Math.max(dz, 0)) : Math.max(dx, dz);
   };
   // Horizontal clearance alone cannot stop a fall entering a lower layer's obstacle. Resolve the new
   // contact at its rim as the feet cross its top, before the walker can land trapped inside it.
@@ -1042,7 +1002,7 @@
       const foot = y > 2 ? 0 : C.top, stem = y - h / 2 - foot + 0.05, back = y > 2 ? reach + 0.12 : reach;
       geos.push(consoleAt(box({ w: 0.12, h: stem, d: 0.12, color: IRON, offset: { y: -stem / 2 - h / 2, z: -0.06 } }), bearing, back, y, 0));
     }
-    geos.push(moved(merge(BL.mineModels.hubCart()), -3, 0, 1.4));
+    geos.push(moved(merge(BL.mineModels.hubCart()), -3, 0, -1.4));
     return merge(...geos);
   });
   // The monitors' faces, dim and busy: a forward routed through the board lights them. The board draws the routes,
@@ -2012,6 +1972,69 @@
     lines: [], castShadow: false, reflector: true
   })));
 
+  // The Lightning Jet Hangar's door, as its concept builds it: a peer tunnel's arch of voussoirs in two rings with a
+  // keystone, its neon strip and studs in the hall's cyan, inside a timber frame whose header carries the hangar's sign
+  // on a timber board between two lit bolts. Behind it a walled and roofed passage floored in planks from the walkway's
+  // edge, and through it, until the hangar itself shows there, a glimpse of it: its runway's blue lamps running away to
+  // the launch tunnel's glow, lanterns either side (`glimpse`). In the door's frame, +z out into the hall and the sill
+  // at y 0.
+  const hangarDoor = cached(() => {
+    const geos = [], lit = [], far = [], cy = 2.6, D = HANGAR_DOOR;
+    for (const [r, n, depth, z] of [[2.5, 12, 1.4, 0], [3.2, 16, 1.1, -0.15]]) for (let k = 0; k <= n; k++) {
+      const a = Math.PI * k / n, key = k === n / 2, w = r * Math.PI / n * 0.9;
+      geos.push(moved(turnedZ(bevelBox({ w: key ? w * 1.35 : w, h: key ? 0.9 : 0.66, d: key ? depth + 0.2 : depth, color: key ? ROCK_LT : k % 2 ? STONE[3] : STONE[1], bevel: 0.09 }), a - Math.PI / 2), Math.cos(a) * r, cy + Math.sin(a) * r, z));
+    }
+    for (const s of [-1, 1]) for (let row = 0; row < 4; row++) for (const [x, d, z] of [[2.5, 1.4, 0], [3.2, 1.1, -0.15]]) {
+      geos.push(bevelBox({ w: 0.66, h: 0.62, d, color: (row + (x < 3 ? 0 : 1)) % 2 ? STONE[0] : STONE[2], bevel: 0.08, offset: { x: s * x, y: 0.32 + row * 0.65, z } }));
+    }
+    const stud = (x, y, a) => {
+      geos.push(moved(turnedZ(bevelBox({ w: 0.32, h: 0.32, d: 0.1, color: IRON_DK, bevel: 0.03 }), a), x, y, 0.45));
+      lit.push(moved(turnedZ(box({ w: 0.18, h: 0.18, d: 0.06, color: CYAN, emissive: 1 }), a), x, y, 0.52));
+    };
+    for (let k = 1; k < 6; k++) { const a = Math.PI * k / 6; stud(Math.cos(a) * 3.2, cy + Math.sin(a) * 3.2, a - Math.PI / 2); }
+    for (const s of [-1, 1]) for (const y of [0.95, 1.9]) stud(s * 3.2, y, 0);
+    const R = 2.08, legs = cy - 0.15, total = 2 * legs + Math.PI * R;
+    const neon = (t) => {
+      const d = t * total;
+      if (d < legs) return { x: -R, y: 0.15 + d, z: 0.52 };
+      if (d > legs + Math.PI * R) return { x: R, y: cy - (d - legs - Math.PI * R), z: 0.52 };
+      const a = Math.PI - (d - legs) / R;
+      return { x: Math.cos(a) * R, y: cy + Math.sin(a) * R, z: 0.52 };
+    };
+    lit.push(tube({ path: neon, radius: () => 0.075, rings: 60, segments: 8, colorFn: () => CYAN, emissive: 1 }));
+    // The timber frame, its header, and the sign's board over it with a lit bolt either side.
+    for (const s of [-1, 1]) {
+      geos.push(bevelBox({ w: 0.44, h: 6.2, d: 0.46, color: TIMBER_DK, bevel: 0.06, offset: { x: s * D.post, y: 3.1, z: 0.35 } }));
+      for (const y of [1.2, 3.4, 5.6]) geos.push(bevelBox({ w: 0.52, h: 0.1, d: 0.54, color: IRON_DK, bevel: 0.02, offset: { x: s * D.post, y, z: 0.35 } }));
+      lit.push(moved(smoothBolt(0.95, 0.1, "#ffd23a", 1), s * D.bolts, D.sign[1], D.sign[2] - 0.08));
+    }
+    geos.push(bevelBox({ w: 8.6, h: 0.52, d: 0.52, color: TIMBER, bevel: 0.07, offset: { y: 6.15, z: 0.35 } }));
+    geos.push(bevelBox({ w: 5.6, h: 1.9, d: 0.14, color: TIMBER_DK, bevel: 0.05, offset: { y: D.sign[1], z: D.sign[2] - 0.14 } }));
+    for (const s of [-1, 1]) for (const t of [-1, 1]) geos.push(bevelBox({ w: 0.24, h: 0.24, d: 0.05, color: IRON_DK, bevel: 0.015, offset: { x: s * 2.62, y: D.sign[1] + t * 0.77, z: D.sign[2] - 0.05 } }));
+    // The passage behind the arch, walled and roofed, floored in planks on a stone sill from the walkway's edge, and the
+    // rock the wall is cut back to round it.
+    for (const x of [-2.75, 2.75]) geos.push(bevelBox({ w: 0.5, h: 5.3, d: 2.8, color: STONE[2], bevel: 0.1, offset: { x, y: 2.65, z: -1.9 } }));
+    geos.push(bevelBox({ w: 6, h: 0.6, d: 2.8, color: STONE[1], bevel: 0.1, offset: { y: 5.3, z: -1.9 } }));
+    geos.push(box({ w: 9, h: 8.6, d: 0.5, color: STONE_DK, offset: { y: 3.8, z: -3.6 } }));
+    for (const x of [-3.9, 3.9]) geos.push(bevelBox({ w: 1.3, h: 8.2, d: 1.6, color: STONE[0], bevel: 0.14, offset: { x, y: 4.1, z: -1.2 } }));
+    geos.push(bevelBox({ w: 9, h: 1.8, d: 1.6, color: STONE[1], bevel: 0.14, offset: { y: 7.3, z: -0.6 } }));
+    geos.push(box({ w: 5.2, h: 0.5, d: 4.2, color: STONE[3], offset: { y: -0.35, z: -1.35 } }));
+    for (let z = 0.6 - 0.225, i = 0; z > -3.3; z -= 0.45, i++) geos.push(bevelBox({ w: 4.9, h: 0.1, d: 0.43, color: i % 3 ? TIMBER : TIMBER_LT, bevel: 0.02, offset: { y: -0.05, z } }));
+    // The hangar, far off: its dark, its runway rising to the launch tunnel's glow between two rows of blue lamps and a
+    // yellow centre line, and its lanterns high either side.
+    far.push(box({ w: 4.4, h: 4.6, d: 0.1, color: "#0b1530", emissive: 0.7, offset: { y: 2.3, z: -3.25 } }));
+    far.push(box({ w: 1.7, h: 1.4, d: 0.06, color: "#2f6fd0", emissive: 0.9, offset: { y: 1.75, z: -3.18 } }), box({ w: 1.1, h: 0.85, d: 0.06, color: "#9fe4ff", emissive: 1, offset: { y: 1.7, z: -3.14 } }));
+    far.push(plate([[-1.9, 0.02, -0.4], [1.9, 0.02, -0.4], [0.45, 1.1, -3.1], [-0.45, 1.1, -3.1]], [0, 1, 0.36], "#1a2236", 0.35));
+    for (let k = 0; k < 7; k++) {
+      const t = k / 7, y = 0.06 + t * 1.04, z = -0.5 - t * 2.55, half = 1.8 - t * 1.32, size = 0.11 - t * 0.06;
+      for (const s of [-1, 1]) far.push(box({ w: size, h: size, d: size, color: "#6fc8ff", emissive: 1, offset: { x: s * half, y, z } }));
+      far.push(box({ w: size * 0.6, h: 0.02, d: size * 2.2, color: "#ffd23a", emissive: 0.85, offset: { y: y + 0.01, z } }));
+    }
+    for (const s of [-1, 1]) for (let k = 0; k < 3; k++) far.push(box({ w: 0.12, h: 0.15, d: 0.05, color: "#ffc86a", emissive: 1, offset: { x: s * (1.55 - k * 0.38), y: 3.4 - k * 0.32, z: -3.18 } }));
+    // The glimpse is its own mesh, so the hangar can stand the same door in its own wall without it.
+    return { stone: merge(...geos), glow: noShadow(shaded(lit)), glimpse: noShadow(merge(...far)) };
+  });
+
   // A gallery station: a smaller pair of capacitors on a stand, for the lines past the featured four.
   const galleryStation = cached(() => shaded([-0.4, 0.4].flatMap((x) => [
     moved(turn([[0.36, 0], [0.36, 0.3], [0.3, 0.36], [0, 0.36]], 14, BRONZE), x, 0, 0),
@@ -2248,6 +2271,6 @@
   };
   Object.assign(BL.factoryModels, {
     buildSteps,
-    forgeSign, forgeLines, forgeTrack, forgeShafts, mintCoin, teslaCoil, statusLantern, peerPipes, peerMirrors, supportAt, stairCeilingAt, clearAt, walkable, resolveFall, hall, scaffold, coreBody, coreChamber, conduits, stationFrame, capacitor, forge, forgeFire, cart, switchboard, switchScreens, rebalancerBase, rebalancerRing, rebalancerFlow, treasuryBody, goldPile, hopperFill, beltNugget, goldCrate, dataBoard, moveBoard, cookerBody, cookerFixtures, cookerLid, cookerPort, cookerGear, cookerSats, donationKiosk, kioskScreen, kioskIdle, kioskThanks, donationBoard, boardFace, boardValues, paintBoard, satCube, flyingBanana, coreRingLime, coreRing, teslaArcs, lookoutTower, lookoutLamp, lookoutOptics, lookoutBeam, studyHall, studyNote, studyBoard, tunnels, galleryStation, galleryCaps, hardHat, exitTunnel
+    forgeSign, forgeLines, forgeTrack, forgeShafts, mintCoin, teslaCoil, statusLantern, peerPipes, peerMirrors, supportAt, stairCeilingAt, clearAt, walkable, resolveFall, hall, scaffold, coreBody, coreChamber, conduits, stationFrame, capacitor, forge, forgeFire, cart, switchboard, switchScreens, rebalancerBase, rebalancerRing, rebalancerFlow, treasuryBody, goldPile, hopperFill, beltNugget, goldCrate, dataBoard, moveBoard, cookerBody, cookerFixtures, cookerLid, cookerPort, cookerGear, cookerSats, donationKiosk, kioskScreen, kioskIdle, kioskThanks, donationBoard, boardFace, boardValues, paintBoard, satCube, flyingBanana, coreRingLime, coreRing, teslaArcs, lookoutTower, lookoutLamp, lookoutOptics, lookoutBeam, studyHall, studyNote, studyBoard, tunnels, galleryStation, galleryCaps, hardHat, exitTunnel, hangarDoor
   });
 })();

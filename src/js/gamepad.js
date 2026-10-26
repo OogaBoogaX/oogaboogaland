@@ -77,5 +77,45 @@
     blocked |= physicalHeld;
     neutral();
   };
-  BL.gamepad = { BUTTON, state, poll, hold };
+  // Vibration, for a pad that has it (Chrome and Edge's `vibrationActuator`, Firefox's `hapticActuators`; anywhere else
+  // nothing happens): `rumble(strong, weak, ms)` runs both motors for `ms`, each 0..1 times `strength`, the visitor's
+  // setting (localStorage `ooga-vibration`, 0..1, full when unset), a new effect taking over from the one playing, and
+  // `stop` ends it. Each call costs a `getGamepads` read and the browser's own effect, so a reader calls it a few times
+  // a second, not every frame.
+  const VIBRATION_KEY = "ooga-vibration", RUMBLE = { startDelay: 0, duration: 0, strongMagnitude: 0, weakMagnitude: 0 }, quiet = () => {};
+  let strength = 1;
+  try {
+    const saved = localStorage.getItem(VIBRATION_KEY), v = Number(saved);
+    if (saved !== null && v >= 0 && v <= 1) strength = v;
+  } catch {
+    strength = 1;
+  }
+  const settle = (done) => { if (done && done.catch) done.catch(quiet); };
+  const rumble = (strong, weak, ms) => {
+    const pad = plugged ? first() : null;
+    if (!pad || strength <= 0) return false;
+    const s = Math.min(1, Math.max(0, strong)) * strength, w = Math.min(1, Math.max(0, weak)) * strength;
+    const act = pad.vibrationActuator, haptic = pad.hapticActuators && pad.hapticActuators[0];
+    if (act && act.playEffect) {
+      RUMBLE.duration = ms; RUMBLE.strongMagnitude = s; RUMBLE.weakMagnitude = w;
+      settle(act.playEffect("dual-rumble", RUMBLE));
+    } else if (haptic && haptic.pulse) settle(haptic.pulse(Math.max(s, w), ms));
+    else return false;
+    return true;
+  };
+  const stop = () => {
+    const pad = plugged ? first() : null, act = pad && pad.vibrationActuator, haptic = pad && pad.hapticActuators && pad.hapticActuators[0];
+    if (act && act.reset) settle(act.reset());
+    else if (haptic && haptic.pulse) settle(haptic.pulse(0, 1));
+  };
+  const setStrength = (value) => {
+    strength = Math.min(1, Math.max(0, value));
+    try {
+      localStorage.setItem(VIBRATION_KEY, String(strength));
+    } catch {
+    }
+    if (!strength) stop();
+    return strength;
+  };
+  BL.gamepad = { BUTTON, state, poll, hold, rumble, stop, setStrength, get strength() { return strength; } };
 })();

@@ -24,7 +24,23 @@
     "Stuck HTLC. Classic.", "ENOUGH!", "Force-closed.", "Now I have to rewire all of it.",
     "Oh good. A tour.", "Tess. I'm WORKING.", "No flash photography."];
   const KATANA = 12, FORCED = 13, REWIRE = 14, TESS = 8, TOUR = 15, TOUR_LINES = 3;
-  const EMOTES = ["hate", "unbelievable", "rebalance", "slam", "openclose", "liquidity", "clap", "future", "tess", "suspicious", "showoff", "htlc", "katana", "tour"];
+  // His quarrel with his sister through the Lightning Jet Hangar's door, his line and her answer a pair each: where the
+  // hall has that door (`onSis`) he turns and shouts toward it now and then, and she answers through it; the hangar
+  // plays the same quarrel the other way round (`sis.js`). His lines follow the rest from RIVAL.
+  const RIVALRY = [
+    ["SIS! STOP HAMMERING! I CAN'T HEAR MY RELAYS!", "STOP REBALANCING BY HAND, CAVEMAN!"],
+    ["IS THAT THING FLYING YET?!", "IS YOUR NODE ONLINE YET?!"],
+    ["WHO TOOK MY GOOD PATCH CORD?!", "FINDERS KEEPERS!"],
+    ["YOUR JET IS BLOCKING MY CHANNELS!", "YOUR CHANNELS ARE BLOCKING MY JET!"],
+    ["KEEP IT DOWN IN THERE!", "YOU KEEP IT DOWN, SWITCHBOARD BOY!"],
+    ["MOM SAYS CALL HER!", "TELL MOM I'M BUSY!"]
+  ];
+  const RIVAL = LINES.length;
+  for (const [his] of RIVALRY) LINES.push(his);
+  // How long after the first visit's start he first shouts at her, and between shouts after, s; how long after his
+  // line she answers.
+  const QUARREL = { first: [40, 70], every: [90, 160], answer: 2.6 };
+  const EMOTES = ["hate", "unbelievable", "rebalance", "slam", "openclose", "liquidity", "clap", "future", "tess", "suspicious", "showoff", "htlc", "katana", "tour", "sis"];
   // Poked, he gets more irritated a poke, one level to five, and cools a level every CALM seconds he is left alone. What
   // he says at each level, and once he has drawn his sword on you, as he ignores you; the PATIENCE-th poke he ignores is
   // one too many. A poke from the visitor's Ooga reaches him from POKE_REACH away.
@@ -81,7 +97,7 @@
     return out;
   };
 
-  const create = ({ fx, onShout = null, onSound = null }) => {
+  const create = ({ fx, onShout = null, onSound = null, onSis = null }) => {
     const B = KM.BOARD, S = KM.station(), L = FM.LAYOUT.kortik, K = KM.KATANA, rand = BL.math.mulberry32(0x6b6f7274);
     const ox = L.x - L.w / 2 + FM.KORTIK.face, oy = L.y, oz = L.z;
     const node = createNode({ position: { x: ox, y: oy, z: oz }, rotation: { x: 0, y: Math.PI / 2, z: 0 } });
@@ -194,8 +210,9 @@
     // is on is one, and whether the visitor's Ooga stands within a poke of him.
     let anger = 0, calmIn = 0, peak = 0, threatened = false, ignored = 0, flinch = 0, glare = 0, retort = 0, steam = 0, steamIn = 0;
     let wantReact = 0, reacting = false, visitorNear = false, emoteDue = false;
-    // Shouting for Tess, the moment she would hear it and answer (through `onShout`).
-    let hailIn = 0;
+    // Shouting for Tess, the moment she would hear it and answer (through `onShout`); and his sister: when he next
+    // shouts toward the hangar, which line of the quarrel, and the moment she answers (through `onSis`).
+    let hailIn = 0, quarrelIn = QUARREL.first[0] + rand() * (QUARREL.first[1] - QUARREL.first[0]), quarrel = 0, sisIn = 0;
     // The sword: drawn or not and how far into his hand, the scabbard's turn ready to draw, the blade's angle and tilt
     // (now, and from and to for the right hand's move), which way it last swung round, whether that move is a cut, and
     // where its point and the left hand's hold are.
@@ -367,6 +384,7 @@
         case SAY:
           say(s.v);
           if (s.v === TESS) hailIn = 1.6;
+          else if (s.v >= RIVAL) sisIn = QUARREL.answer;
           break;
         case SHAKE: shake = 0; shakeDur = s.dur; break;
         case WAG: wagT[s.arm] = s.v || s.dur; break;
@@ -618,6 +636,18 @@
       push(WAIT, 0.4);
       turnBack();
     };
+    // Turned toward the hall, a hand to his mouth, shouting at his sister through the hangar's door.
+    const sis = () => {
+      quarrel = Math.floor(rand() * RIVALRY.length);
+      turnTo(3);
+      push(LEAN, 0, 0, 0, -1, -1, -0.12);
+      go(2, T_MOUTH, 0.3);
+      push(SAY, 0, 0, 0, -1, -1, RIVAL + quarrel);
+      push(WAIT, 2.2);
+      go(2, T_REST, 0.4);
+      push(WAIT, 0.4);
+      turnBack();
+    };
     const suspicious = () => {
       let j = oldest(CONNECTED);
       if (j < 0) j = litJack();
@@ -806,7 +836,7 @@
       go(2, T_REST, 0.4);
       turnBack();
     };
-    const ACTS = [hate, unbelievable, rebalance, slam, openClose, liquidity, clap, future, tess, suspicious, showOff, htlc, katana, tour];
+    const ACTS = [hate, unbelievable, rebalance, slam, openClose, liquidity, clap, future, tess, suspicious, showOff, htlc, katana, tour, sis];
     // The next emote: the katana now and then once he has worked up to it, otherwise the next from a shuffled bag.
     const bag = new Int8Array(KATANA);
     let bagAt = KATANA, sinceKatana = 0;
@@ -1043,6 +1073,12 @@
       // His temper cools a level at a time while he is left alone; calm again after a proper fit, he says so.
       if (retort > 0) retort -= dt;
       if (hailIn > 0 && (hailIn -= dt) <= 0 && onShout) onShout();
+      if (sisIn > 0 && (sisIn -= dt) <= 0 && onSis) onSis(quarrel);
+      // Now and then, while someone is near to hear it and he isn't fuming, a shout at his sister next door.
+      if (onSis && near && (quarrelIn -= dt) <= 0) {
+        quarrelIn = QUARREL.every[0] + rand() * (QUARREL.every[1] - QUARREL.every[0]);
+        if (anger < 3 && !threatened && forced < 0) emote("sis");
+      }
       if (glare > 0) glare -= dt;
       if (anger > 0 || threatened) {
         calmIn -= dt;
@@ -1294,5 +1330,5 @@
       get jacks() { return jack; }, get cords() { return cordJack; }, get held() { return cordHeld; }, get near() { return near; }, get anger() { return anger; }, get threatened() { return threatened; }
     };
   };
-  BL.kortik = { create, LINES, EMOTES };
+  BL.kortik = { create, LINES, EMOTES, RIVALRY };
 })();
