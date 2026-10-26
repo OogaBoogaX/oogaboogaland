@@ -9,6 +9,17 @@ historical fallback and does not pretend that its old commits just happened.
 `ooga=` fixtures override them when requested; `seedDebugActivity()` remains a
 test helper for repeatable activity windows.
 
+On hub arrival, working Oogas start beside the banana pile and chilling Oogas
+gather around the campfire, filling clear places in the inner ring before using
+outer rings. Sleeping Oogas get separate HQ and basement beds, newest activity
+first; the longest-inactive sleepers overflow into separate rainforest sleeping
+spots, taken in one fixed order (the Nth overflow sleeper takes the Nth spot) and
+searched once a page only as far as sleepers need them. The search uses the
+rainforest's original scenery transforms, so passing players and shaking trees
+cannot change the cached order. Each visit keeps its own bed reservations. A signed-in visitor
+arrives awake beside the pile regardless of activity, without changing their
+contribution timestamps.
+
 Roster activity labels use yellow **clankin**, orange **chillin**, and gray **sleepin**.
 A separate dot before the name is green when `cave.humanControlled` is true and gray
 when offline. The tooltip dot keeps its existing behavior: green for human presence,
@@ -75,9 +86,10 @@ The baked and live board readers group historical Factory/Foundry names under
 `lightningfoundry`, including repository filters and recent-event labels. Grouping
 preserves upstream event counts and recent rows, combines weekly and contributor
 leaderboards, and unions contributor identities using their newest timestamps.
-It does not deduplicate Oogatron's stored events: the public snapshot omits event
-IDs, and distinct commits can share a login and timestamp. Any duplicate history
-caused by repository renames must be repaired in Oogatron using those IDs.
+It does not deduplicate Oogatron's stored events: distinct commits can share a
+login and timestamp. New snapshots carry a stable `event_key` for ordering; older
+snapshots remain readable. Duplicate history caused by repository renames must
+still be repaired in Oogatron using its source event identities.
 
 Confirmed contribution identities normalize through `contributor-identities.js`
 before repository grouping. Counts, weekly history, recent-event logins and
@@ -129,3 +141,23 @@ has no valid timestamp.
 Sources: [Oogatron stats contract](https://github.com/rules-without-rulers/oogatron/blob/rock/worker/src/api/stats.ts),
 [event timestamp tracking](https://github.com/rules-without-rulers/oogatron/blob/rock/worker/src/sync/identity.ts),
 [integration PR](https://github.com/rules-without-rulers/oogaboogaland/pull/1).
+
+## Recent-event selection
+
+Archive pruning is deferred under #113; Oogatron's database events and payloads
+remain intact. The following selection changes correct filtered displays and
+are not a claimed storage or billing optimization.
+
+Snapshots include the union of rows needed for ten individual events per type
+and ten complete rolling windows for each of the 63 nonempty type selections,
+per repository/contributor pair. Filtering repositories, contributors and types
+happens before rolling up and before the ten-item display limit. Windows start
+at their newest event and include events strictly less than 60 seconds older;
+they may cross a minute boundary and never chain beyond that interval. Complete
+windows preserve their highest-ranked label and `+`, including large bursts.
+
+Newest events come first. Equal timestamps rank merge, PR, commit, review, issue,
+comment, then stable `event_key`. The bake preserves that key and live snapshots
+use the same ordering. Older snapshots without keys use a deterministic visible
+field fallback; identical legacy rows cannot be distinguished. There is no age
+cutoff. Totals, leaderboards, weekly figures and activity timestamps are unchanged.

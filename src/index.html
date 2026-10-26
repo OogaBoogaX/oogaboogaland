@@ -158,6 +158,7 @@
         <p data-scene="hub" id="subtitle">an island of caves</p>
         <p data-scene="lab" hidden>EntropyLab cave</p>
         <p data-scene="factory" hidden>Lightning Factory</p>
+        <p data-scene="hangar" hidden>Lightning Jet Hangar</p>
         <p data-scene="bifrost" hidden>₿IFRÖST</p>
         <p data-scene="timechain" id="sphere-subtitle" hidden>Timechain Sphere</p>
         <p data-scene="arcade" hidden>Ooga Arcade</p>
@@ -202,7 +203,16 @@
         <button type="button" data-preset="lines">Lines</button>
         <button type="button" data-preset="forge">Forge</button>
         <button type="button" data-preset="treasury">Treasury</button>
+        <button type="button" data-action="factory-mute">Sound</button>
         <button type="button" class="leave" data-action="leave">Leave<span> cave</span></button>
+      </nav>
+      <nav class="presets" aria-label="Lightning Jet Hangar" data-scene="hangar" hidden>
+        <button type="button" data-preset="entrance">Hangar</button>
+        <button type="button" data-preset="jet">Jet</button>
+        <button type="button" data-preset="boards">Boards</button>
+        <button type="button" data-preset="runway">Runway</button>
+        <button type="button" data-action="hangar-mute">Sound</button>
+        <button type="button" class="leave" data-action="leave">Factory</button>
       </nav>
       <nav class="presets" aria-label="Thro-ball" data-scene="skee" hidden>
         <button type="button" data-action="carnival-mute">Sound</button>
@@ -283,7 +293,7 @@
       <nav class="presets" aria-label="Race" data-scene="race" hidden>
         <button type="button" data-action="garage" id="race-garage-btn">Garage</button>
         <button type="button" data-action="mute" id="race-mute" aria-label="Mute sound" aria-pressed="false">Sound</button>
-        <button type="button" class="leave" data-action="leave">Leave<span> cave</span></button>
+        <button type="button" class="leave" data-action="leave">Back<span> to the island</span></button>
       </nav>
       <nav class="presets" aria-label="DSB Land" data-scene="dsb" hidden>
         <button type="button" data-action="dsb-lookout" title="Camera viewpoint · releases character control">Island overview</button>
@@ -309,7 +319,7 @@
         <button type="button" data-action="mine-view" id="mine-view-btn" aria-pressed="false">View</button>
         <button type="button" data-action="mine-pause" id="mine-pause-btn" aria-pressed="false">Pause</button>
         <button type="button" data-action="mute" id="mine-mute" aria-label="Mute sound" aria-pressed="false">Sound</button>
-        <button type="button" class="leave" data-action="leave">Leave<span> cave</span></button>
+        <button type="button" class="leave" data-action="leave">Back<span> to the island</span></button>
       </nav>
       <nav class="presets" aria-label="Orbit" data-scene="orbit" hidden>
         <button type="button" data-action="orbit-build" id="orbit-build-btn">Build</button>
@@ -318,18 +328,21 @@
       </nav>
     </header>
 
-    <aside class="sheet" id="sheet" data-open="false">
+    <aside class="sheet" id="sheet" data-open="false" data-dock="side" data-paired="false">
       <nav class="sheet-panels" role="tablist" aria-label="Island panels">
         <button type="button" class="sheet-toggle sheet-toggle-bananas" id="sheet-bananas" role="tab"
           data-tab="bananas" aria-selected="false" aria-controls="bananas-panel" aria-label="Bananas and top donors">
+          <span class="sheet-tab-face">
           <svg class="banana-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true">
             <path fill="#211b14" d="M0 0h1v5H0zM2 0h1v2H2zM3 2h1v2H3zM4 4h1v1H4zM1 5h1v2H1zM5 5h1v1H5zM6 6h1v1H6zM2 7h2v1H2zM7 7h1v1H7zM4 8h4v1H4z" />
             <path fill="#ffd84a" d="M1 2h2v2H1zM1 4h3v1H1zM2 5h3v1H2zM2 6h4v1H2zM4 7h3v1H4z" />
             <path fill="#789a3b" d="M1 0h1v2H1z" />
           </svg>
+          </span>
         </button>
         <button type="button" class="sheet-toggle" id="sheet-toggle" role="tab" data-tab="roster"
           aria-selected="true" aria-controls="roster-panel" aria-label="Ooga Boogas">
+          <span class="sheet-tab-face">
           <svg class="caveman-icon" viewBox="0 0 7 9" shape-rendering="crispEdges" aria-hidden="true">
             <path fill="#2b1b10" d="M1 0h5v1H1zM0 1h7v2H0zM0 3h1v2H0zM6 3h1v2H6z" />
             <path fill="#c98a5b" d="M1 3h5v3H1zM2 6h3v1H2z" />
@@ -337,25 +350,32 @@
             <path fill="#4a2c14" d="M1 6h1v1H1zM5 6h1v1H5zM1 7h5v1H1zM2 8h3v1H2z" />
             <path fill="#f2efe4" d="M1 8h1v1H1zM5 8h1v1H5z" />
           </svg>
+          </span>
         </button>
         <button type="button" class="sheet-toggle sheet-toggle-loot" role="tab" data-tab="loot"
           aria-selected="false" id="loot-tab" aria-controls="loot-panel" aria-label="Swag locker" hidden>
+          <span class="sheet-tab-face">
           <svg viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true">
             <path fill="#2b1b10" d="M0 2h9v7H0zM1 0h7v2H1z" />
             <path fill="#d6a45f" d="M1 3h7v5H1zM2 1h5v1H2z" />
             <path fill="#5c4425" d="M1 4h7v1H1zM4 3h1v5H4z" />
             <path fill="#f3efe4" d="M4 4h1v2H4z" />
           </svg><span class="tab-count" id="loot-count" hidden></span>
+          </span>
         </button>
         <button type="button" class="sheet-toggle sheet-toggle-chat" role="tab" data-tab="chat"
           aria-selected="false" id="chat-tab" aria-controls="chat-panel" aria-label="Ooga Chat" hidden>
+          <span class="sheet-tab-face">
           <svg viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true">
             <path fill="#2b1b10" d="M0 0h9v7H5v1H4v1H1V7H0z" />
             <path fill="#f3efe4" d="M1 1h7v5H4v1H3v1H2V6H1z" />
             <path fill="#5c4425" d="M2 3h1v1H2zM4 3h1v1H4zM6 3h1v1H6z" />
           </svg>
+          </span>
         </button>
       </nav>
+      <div class="sheet-body">
+      <div class="sheet-content">
       <section class="panel" data-panel="roster" id="roster-panel" role="tabpanel" aria-labelledby="sheet-toggle">
         <header class="panel-title">
           <h2><span data-sign>Ooga Boogas</span></h2>
@@ -456,6 +476,7 @@
           <button type="submit" class="chat-send" id="chat-send" disabled>Send</button>
         </form>
       </section>
+      </div>
       <footer class="sheet-foot">
         <span class="account" id="account" hidden>
           <span class="account-who">
@@ -478,6 +499,7 @@
       <div class="sheet-resize" id="sheet-resize" role="separator" tabindex="0" aria-label="Resize panel height"
         aria-orientation="horizontal" aria-valuemin="240" aria-valuemax="1000" aria-valuenow="520"
         title="Drag to resize · Up grows · Down shrinks · double-click to reset"></div>
+      </div>
     </aside>
 
     <div id="weapon-reticle" class="weapon-reticle" aria-hidden="true" hidden>
@@ -498,7 +520,7 @@
       <button type="button" class="mode-hud" id="own-ooga-hud" data-action="mode-retake" data-selected="true"
         aria-label="Return to your last character" title="Return to your last character" hidden>
         <canvas class="mode-face-icon" id="own-ooga-face-icon" width="48" height="48" aria-hidden="true"></canvas>
-        <span class="mode-health" id="own-ooga-health" role="progressbar" aria-label="Last character's health" aria-valuemin="0" aria-valuemax="25" aria-valuenow="25"><span id="own-ooga-health-fill"></span></span>
+        <span class="mode-health" id="own-ooga-health" role="progressbar" aria-label="Last character's health" aria-valuemin="0" aria-valuemax="25" aria-valuenow="25" hidden><span id="own-ooga-health-fill"></span></span>
       </button>
       <button type="button" class="mode-hud" id="mode-hud" data-action="mode-toggle" data-selected="false" data-shooter="false"
         aria-label="Character controls" title="Character controls" hidden>
@@ -521,13 +543,6 @@
             <span class="jetpack-compact-fuel-fill" id="jetpack-fuel-compact-fill"></span>
           </span>
         </span>
-        <div class="jetpack-readout">
-          <div class="jetpack-label"><span>Fuel</span><span id="jetpack-fuel-value" aria-hidden="true">100%</span></div>
-          <div class="jetpack-fuel" id="jetpack-fuel" role="progressbar" aria-label="Jetpack fuel"
-            aria-valuemin="0" aria-valuemax="100" aria-valuenow="100">
-            <span class="jetpack-fuel-fill" id="jetpack-fuel-fill"></span>
-          </div>
-        </div>
       </button>
       <button type="button" class="gorilla-hud" id="gorilla-smash-hud" data-action="gorilla-smash"
         aria-label="Ground smash; hold for double damage" title="Ground smash · hold for double damage (1)" hidden>
@@ -744,7 +759,7 @@
         </ul>
         <div class="actions">
           <button type="button" class="game-intro-go" data-action="intro-go">Race!</button>
-          <button type="button" data-action="leave">Exit Game</button>
+          <button type="button" data-action="leave">Back to the island</button>
         </div>
       </section>
       <section class="race-results" id="race-results" hidden aria-label="Results">
@@ -758,7 +773,7 @@
           <button type="button" data-action="race-next" id="race-next" hidden>Next track</button>
           <button type="button" data-action="race-again">Race again</button>
           <button type="button" data-action="garage">Garage</button>
-          <button type="button" data-action="leave">Exit Game</button>
+          <button type="button" data-action="leave">Back to the island</button>
         </div>
       </section>
       <section class="race-pause" id="race-pause" hidden aria-label="Paused">
@@ -767,7 +782,7 @@
           <button type="button" data-action="race-resume">Resume</button>
           <button type="button" data-action="race-again">Restart</button>
           <button type="button" data-action="garage">Garage</button>
-          <button type="button" data-action="leave">Exit Game</button>
+          <button type="button" data-action="leave">Back to the island</button>
         </div>
       </section>
     </div>
@@ -775,8 +790,8 @@
       <section class="garage" id="drop-board" aria-label="Drop board">
         <div class="garage-head">
           <h2><span data-sign>Ooga Drop</span> <span class="garage-medal garage-cup" id="drop-medal" hidden></span></h2>
-          <p class="help">Pick an Ooga. The plane climbs, you jump, steer through the rings, pull the chute and land on the
-            target.</p>
+          <p class="help"><span id="drop-pick-ooga">Pick an Ooga. </span>The plane climbs, you jump, steer through the rings,
+            pull the chute and land on the target.</p>
         </div>
         <div class="garage-columns drop-columns">
           <div class="garage-col">
@@ -822,7 +837,7 @@
         </ul>
         <div class="actions">
           <button type="button" class="game-intro-go" data-action="intro-go">Fly!</button>
-          <button type="button" data-action="leave">Exit Game</button>
+          <button type="button" data-action="leave">Back to the island</button>
         </div>
       </section>
       <section class="race-results" id="drop-results" hidden aria-label="Drop results">
@@ -832,7 +847,7 @@
         <div class="actions">
           <button type="button" data-action="drop-again">Again</button>
           <button type="button" data-action="drop-board">Board</button>
-          <button type="button" data-action="leave">Exit Game</button>
+          <button type="button" data-action="leave">Back to the island</button>
         </div>
       </section>
     </div>
@@ -1226,7 +1241,7 @@
         </ul>
         <div class="actions">
           <button type="button" class="game-intro-go" data-action="intro-go">Build!</button>
-          <button type="button" data-action="leave">Exit Game</button>
+          <button type="button" data-action="leave">Back to the island</button>
         </div>
       </section>
       <section class="race-results" id="orbit-results" hidden aria-label="Flight log">
@@ -1241,7 +1256,7 @@
         <div class="actions">
           <button type="button" data-action="orbit-again">Fly again</button>
           <button type="button" data-action="orbit-build">Build</button>
-          <button type="button" data-action="leave">Exit Game</button>
+          <button type="button" data-action="leave">Back to the island</button>
         </div>
       </section>
     </div>
@@ -1345,7 +1360,7 @@
         </ul>
         <div class="actions">
           <button type="button" class="game-intro-go" data-action="mine-start">Start digging</button>
-          <button type="button" data-action="leave">Exit Game</button>
+          <button type="button" data-action="leave">Back to the island</button>
         </div>
       </section>
 
@@ -1361,7 +1376,7 @@
         <div class="actions">
           <button type="button" data-action="mine-again">Dig again</button>
           <button type="button" data-action="mine-keep" id="mine-keep" hidden>Keep digging</button>
-          <button type="button" data-action="leave">Exit Game</button>
+          <button type="button" data-action="leave">Back to the island</button>
         </div>
       </section>
     </div>
@@ -1597,6 +1612,7 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
       </div>
       <div class="board-dots" id="board-dots" aria-label="Pages"></div>
       <p class="board-note" id="board-note" hidden></p>
+      <div class="board-links" id="board-links" hidden></div>
       <p class="help" id="board-help"></p>
       <button type="button" class="board-resize" id="board-resize" aria-label="Resize Oogatron window; arrow keys adjust size" hidden></button>
     </dialog>
@@ -1611,11 +1627,76 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
     <div class="bottom-hud">
       <button type="button" class="act" id="act" data-action="act" hidden>JUMP!</button>
       <div class="message-stack" id="message-stack">
+        <output class="toast" id="reload-notice" data-reload="true" hidden></output>
         <output class="toast" id="toast" hidden></output>
         <div class="hint" id="hint" hidden></div>
       </div>
     </div>
     <output class="mic-note" id="mic-note" data-muted="false" hidden></output>
+    <!-- HALLOWEEN: the ghost hunt's HUD (ghost-hud.js shows and hides it; no data-scene, or every arrival would show it). -->
+    <ol class="ghost-scores" id="ghost-scores" aria-label="Hunters' points" hidden></ol>
+    <p class="ghost-halving" id="ghost-halving" role="status" hidden>Halving · rifles at half power</p>
+    <div class="ghost-hud" id="ghost-hud" hidden>
+      <div class="ghost-boss" id="ghost-boss" hidden><span class="ghost-boss-label">The boss</span><meter id="ghost-boss-bar" min="0" max="1" value="1"></meter></div>
+    </div>
+    <div class="ghost-banner" id="ghost-banner" hidden><strong id="ghost-banner-title"></strong><span id="ghost-banner-sub"></span></div>
+    <section class="race-results game-intro ghost-results" id="ghost-results" aria-label="The hunt's results" hidden>
+      <p class="game-intro-goal" id="ghost-results-goal"></p>
+      <div class="ghost-podium" id="ghost-podium" aria-label="Top hunters">
+        <figure class="ghost-podium-step" data-place="2"><canvas aria-hidden="true"></canvas><figcaption><b></b><small></small></figcaption><span class="ghost-podium-block">2</span></figure>
+        <figure class="ghost-podium-step" data-place="1"><canvas aria-hidden="true"></canvas><figcaption><b></b><small></small></figcaption><span class="ghost-podium-block">1</span></figure>
+        <figure class="ghost-podium-step" data-place="3"><canvas aria-hidden="true"></canvas><figcaption><b></b><small></small></figcaption><span class="ghost-podium-block">3</span></figure>
+      </div>
+      <ul class="game-rules ghost-results-players" id="ghost-results-players" aria-label="Every hunter's enemies and points"></ul>
+    </section>
+    <section class="race-results game-intro ghost-intro" id="ghost-intro" aria-labelledby="ghost-intro-name" aria-describedby="ghost-intro-text" hidden>
+      <p class="game-intro-kicker" id="ghost-intro-kicker"></p>
+      <h2 class="game-intro-title"><span data-sign id="ghost-intro-name">Ghosts</span></h2>
+      <div class="ghost-intro-art" aria-hidden="true"><canvas width="96" height="120"></canvas><canvas width="128" height="160"></canvas><canvas width="96" height="120"></canvas><canvas class="ghost-intro-solo" width="320" height="220"></canvas></div>
+      <p class="game-intro-goal" id="ghost-intro-text"></p>
+    </section>
+    <div class="ghost-flash" id="ghost-flash" hidden></div>
+    <section class="race-results game-intro ghost-lobby" id="ghost-lobby" role="dialog" aria-labelledby="ghost-lobby-title" hidden>
+      <div class="game-intro-glow" aria-hidden="true"><div class="game-intro-rays"></div></div>
+      <p class="game-intro-kicker">Halloween on the island</p>
+      <h2 class="game-intro-title" id="ghost-lobby-title"><span data-sign>Ghost Hunt</span></h2>
+      <p class="game-intro-goal" id="ghost-lobby-goal"></p>
+      <ul class="game-rules ghost-lobby-players" id="ghost-lobby-players"></ul>
+      <ul class="ghost-lobby-how" id="ghost-lobby-how" aria-label="How to play"></ul>
+      <p class="help ghost-lobby-note" id="ghost-lobby-note" hidden>Sign in to hunt with others</p>
+      <div class="actions">
+        <button type="button" class="game-intro-go" id="ghost-lobby-ready">Ready</button>
+        <button type="button" id="ghost-lobby-decline">Not this time</button>
+      </div>
+    </section>
+    <canvas class="ghost-minimap" id="ghost-minimap" aria-hidden="true" hidden></canvas>
+    <div class="ghost-spectate" id="ghost-spectate" role="group" aria-label="Watch while you're down" hidden>
+      <span class="ghost-spectate-head">You're down · watch from</span>
+      <div class="ghost-spectate-modes">
+        <button type="button" data-spec="grave" aria-pressed="true">My view</button>
+        <button type="button" data-spec="free" aria-pressed="false">Free camera</button>
+        <button type="button" data-spec="players" aria-pressed="false">Players</button>
+      </div>
+      <div class="ghost-spectate-watch" id="ghost-spectate-watch" hidden>
+        <span class="ghost-spectate-name" id="ghost-spectate-name"></span>
+        <button type="button" class="ghost-spectate-next" id="ghost-spectate-next" aria-label="Next player">Next ▶</button>
+      </div>
+    </div>
+    <section class="hangar-sound" id="hangar-sound" aria-label="Hangar sound" hidden>
+      <div class="hangar-sound-head">
+        <h3>Sound</h3>
+        <button type="button" class="hangar-sound-toggle" id="hangar-sound-toggle" aria-pressed="true">Sound on</button>
+      </div>
+      <label class="hangar-sound-row" for="hangar-volume"><span>Volume</span><input type="range" id="hangar-volume" min="0" max="100" step="5" value="100"></label>
+      <label class="hangar-sound-row" for="hangar-vibration"><span>Vibration</span><input type="range" id="hangar-vibration" min="0" max="100" step="5" value="100"></label>
+      <p class="hangar-sound-note">Pad vibration: Chrome and Edge</p>
+    </section>
+    <div class="ghost-player" id="ghost-player" hidden>
+      <span class="ghost-player-note" aria-hidden="true">♪</span>
+      <span class="ghost-player-title" id="ghost-player-title"></span>
+      <button type="button" class="ghost-player-skip" id="ghost-player-skip" aria-label="Next track" hidden>⏭</button>
+      <button type="button" class="ghost-player-toggle" id="ghost-player-toggle" aria-pressed="true">Music on</button>
+    </div>
     <button type="button" class="position-debug" id="position-debug"
       aria-label="Debug character and camera state. Click to copy an exact replay URL." hidden></button>
     <section class="feed-debug" id="feed-debug" aria-label="mempool.space feed" hidden>
@@ -1660,13 +1741,14 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/math.js"></script>
   <script src="js/daylight.js"></script>
   <script src="js/scene.js"></script>
+  <script src="js/compact-geometry.js"></script>
   <script src="js/mirror-ripples.js"></script>
   <script src="js/mirror-body.js"></script>
-  <script src="js/mirror-damage.js"></script>
   <script src="js/character-visibility.js"></script>
   <script src="js/dsb-water.js"></script>
   <script src="js/gl-renderer.js"></script>
-  <script src="js/canvas-renderer.js"></script>
+  <script src="js/icon-renderer.js"></script>
+  <script src="js/canvas-renderer.js" data-defer="canvas"></script>
   <script src="js/models.js"></script>
   <script src="js/blaze.js"></script>
   <script src="js/banana-icon.js"></script>
@@ -1674,6 +1756,7 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/terrain.js"></script>
   <script src="js/terrain-cutaway.js"></script>
   <script src="js/lab-wallpaper.js"></script>
+  <script src="js/lab-wallpaper-data.js" data-defer="lab-wallpaper"></script>
   <script src="js/hub-models.js"></script>
   <script src="js/dressing.js"></script>
   <script src="js/dressing-mediterranean.js"></script>
@@ -1704,6 +1787,7 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
     <script src="js/chain.js"></script>
   <script src="js/weapon-targets.js"></script>
   <script src="js/interact.js"></script>
+  <script src="js/gamepad.js"></script>
   <script src="js/controls.js"></script>
   <script src="js/cursor.js"></script>
   <script src="js/pilot.js"></script>
@@ -1736,6 +1820,9 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/pool-wildlife.js"></script>
   <script src="js/timechain-rooms.js"></script>
   <script src="js/deferred.js"></script>
+  <script src="js/terrain-snapshot.js" data-defer="terrain-cache"></script>
+  <script src="js/terrain-cache.js" data-defer="terrain-cache"></script>
+  <script src="js/build-tasks.js"></script>
   <script src="js/timechain-models.js"></script>
   <script src="js/timechain-gate.js"></script>
   <script src="js/solid-props.js"></script>
@@ -1756,18 +1843,38 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/scene-lab.js"></script>
   <script src="js/factory-feed.js"></script>
   <script src="js/factory-mock.js"></script>
+  <script src="js/factory-kiosk-core.js"></script>
   <script src="js/factory-kiosk.js"></script>
   <script src="js/donation-popup.js"></script>
   <script src="js/factory-models.js"></script>
+  <script src="js/factory-scene-models.js" data-defer="factory-scene"></script>
   <script src="js/factory-window.js"></script>
   <script src="js/tess.js"></script>
   <script src="js/hub-guide.js"></script>
-  <script src="js/factory-greeter.js"></script>
-  <script src="js/scene-factory.js"></script>
+  <script src="js/scene-deferred.js"></script>
+  <script src="js/factory-greeter.js" data-defer="factory-scene"></script>
+  <script src="js/kortik-models.js" data-defer="factory-scene"></script>
+  <script src="js/kortik.js" data-defer="factory-scene"></script>
+  <script src="js/factory-audio.js" data-defer="factory-scene"></script>
+  <script src="js/scene-factory.js" data-defer="factory-scene"></script>
+  <script src="js/jet-models.js" data-defer="hangar-scene"></script>
+  <script src="js/jet-data.js" data-defer="hangar-scene"></script>
+  <script src="js/jet-feed.js" data-defer="hangar-scene"></script>
+  <script src="js/forklift-models.js" data-defer="hangar-scene"></script>
+  <script src="js/hangar-models.js" data-defer="hangar-scene"></script>
+  <script src="js/hangar-fire.js" data-defer="hangar-scene"></script>
+  <script src="js/hangar-terminals.js" data-defer="hangar-scene"></script>
+  <script src="js/sis-models.js" data-defer="hangar-scene"></script>
+  <script src="js/sis.js" data-defer="hangar-scene"></script>
+  <script src="js/hangar-window.js" data-defer="hangar-scene"></script>
+  <script src="js/hangar-guide.js" data-defer="hangar-scene"></script>
+  <script src="js/hangar-audio.js" data-defer="hangar-scene"></script>
+  <script src="js/scene-hangar.js" data-defer="hangar-scene"></script>
   <script src="js/arcade-models.js"></script>
+  <script src="js/arcade-scene-models.js" data-defer="arcade"></script>
   <script src="js/arcade-games.js" data-defer="arcade"></script>
   <script src="js/retro-games.js" data-defer="arcade"></script>
-  <script src="js/scene-arcade.js"></script>
+  <script src="js/scene-arcade.js" data-defer="arcade-scene"></script>
   <script src="js/carnival-audio.js" data-defer="arcade"></script>
   <script src="js/scene-carnival.js"></script>
   <script src="js/race-track.js"></script>
@@ -1775,20 +1882,20 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/race-items.js"></script>
   <script src="js/race-hud.js"></script>
   <script src="js/race-audio.js"></script>
-  <script src="js/scene-race.js"></script>
+  <script src="js/scene-race.js" data-defer="race-scene"></script>
   <script src="js/skydiver.js" data-defer="drop"></script>
   <script src="js/drop-hud.js"></script>
   <script src="js/drop-audio.js" data-defer="drop"></script>
-  <script src="js/scene-drop.js"></script>
+  <script src="js/scene-drop.js" data-defer="drop-scene"></script>
   <script src="js/mine-models.js"></script>
   <script src="js/mine-sim.js"></script>
   <script src="js/mine-hud.js"></script>
   <script src="js/mine-audio.js"></script>
   <script src="js/mine-crew.js"></script>
-  <script src="js/scene-mine.js"></script>
+  <script src="js/scene-mine.js" data-defer="mine-scene"></script>
   <script src="js/rocket-hud.js"></script>
   <script src="js/rocket-audio.js"></script>
-  <script src="js/scene-orbit.js"></script>
+  <script src="js/scene-orbit.js" data-defer="orbit-scene"></script>
   <script src="js/dsb-coast.js" data-defer="dsb"></script>
   <script src="js/dsb-geography.js" data-defer="dsb"></script>
   <script src="js/dsb-models.js" data-defer="dsb"></script>
@@ -1874,6 +1981,23 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/poker-models.js" data-defer="poker"></script>
   <script src="js/poker-hud.js" data-defer="poker"></script>
   <script src="js/scene-poker.js"></script>
+  <!-- HALLOWEEN: only the herald is present at entry; the hunt loads when a player starts or joins. -->
+  <script src="js/ghost-herald-data.js"></script>
+  <script src="js/ghost-entry.js"></script>
+  <script src="js/ghost-sim.js" data-defer="halloween"></script>
+  <script src="js/ghost-art-data.js" data-defer="halloween"></script>
+  <script src="js/ghost-models.js" data-defer="halloween"></script>
+  <script src="js/ghost-audio-data.js" data-defer="halloween"></script>
+  <script src="js/ghost-audio.js" data-defer="halloween"></script>
+  <script src="js/ghost-font-data.js" data-defer="halloween"></script>
+  <script src="js/ghost-hud.js" data-defer="halloween"></script>
+  <script src="js/ghost-sync.js" data-defer="halloween"></script>
+  <script src="js/ghost-game.js" data-defer="halloween"></script>
+  <script src="js/ghost-boss-audio-data.js" data-defer="halloween-track-boss"></script>
+  <script src="js/ghost-track-colt.js" data-defer="halloween-track-colt"></script>
+  <script src="js/ghost-track-martial.js" data-defer="halloween-track-martial"></script>
+  <script src="js/ghost-track-nightmare.js" data-defer="halloween-track-nightmare"></script>
+  <script src="js/ghost-track-synthed.js" data-defer="halloween-track-synthed"></script>
   <script src="js/director.js"></script>
 </body>
 

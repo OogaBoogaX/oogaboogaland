@@ -549,18 +549,15 @@
   };
   const hashScale = { top: 1 };
 
-  // The type on both boards, set in the jumbotron's 5x7 font on one offscreen canvas for the visit and
-  // merged into quads. Each figure is compared as a rounded number first, so an unchanged board builds
-  // nothing; a rebuilt panel releases the geometry it replaces.
+  // Both boards share a small transparent painter; each stable panel snapshots it to its own canvas.
+  // Figures compare rounded values first, so unchanged boards repaint and upload nothing.
   const { drawText, measureText } = BL.jumbotron.text;
-  const LABEL_PX = 0.011, LABEL_BG = [3, 4, 5], LABEL_BG_CSS = "rgb(3,4,5)";
+  const LABEL_PX = 0.011, LABEL_BG = [3, 4, 5];
   const labelState = { price: -1, change: 0, hi: -1, lo: -1, hash: -1, top: -1, diff: -1, real: -1 };
   const drawLabels = (panelNode, w, h, draw) => {
-    labelCtx.fillStyle = LABEL_BG_CSS;
-    labelCtx.fillRect(0, 0, w, h);
+    labelCtx.clearRect(0, 0, w, h);
     draw();
-    if (panelNode.geometry) renderer.releaseGeometry(panelNode.geometry);
-    panelNode.geometry = BL.poolModels.panelFrom(labelCtx, w, h, LABEL_PX, LABEL_PX, LABEL_BG);
+    panelNode.geometry = BL.poolModels.panelFrom(labelCtx, w, h, LABEL_PX, LABEL_PX, LABEL_BG, panelNode.geometry);
   };
   // Where a height on a chart falls in its panel's canvas rows.
   const rowOf = (C, y) => Math.round((C.labelY + C.labelH * LABEL_PX - y) / LABEL_PX) - 3;
@@ -2026,6 +2023,7 @@
   const enter = (ctx) => {
     ({ renderer, game, world, go } = ctx);
     home = ctx.from === "arcade" ? "arcade" : "hub";
+    hudMod.leaveTo("mine", home);
     camera = createCamera({ fov: 58, near: 0.2, far: 120 });
     root = createNode();
     // The run lives on `world` for the page life, so walking out to the island does not end an hour's
@@ -2046,7 +2044,7 @@
     phase = s.over ? "results" : s.time > 0 ? "run" : "intro";
     clock = daylight.createClock({ hour: hourParam, daylen: daylenParam, day: dayParam, time: timeParam, now: new Date() });
 
-    hud = hudMod.create({ roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
+    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
     // Space and the WORK button both come through the pilot's action: whatever is beside the Ooga.
@@ -2096,7 +2094,7 @@
     labelCanvas = document.createElement("canvas");
     labelCanvas.width = 200;
     labelCanvas.height = 100;
-    labelCtx = labelCanvas.getContext("2d", { alpha: false, willReadFrequently: true });
+    labelCtx = labelCanvas.getContext("2d");
     for (const key of Object.keys(labelState)) labelState[key] = -1;
     shownCandles = shownHist = -1;
     labelTimer = 0;
@@ -2167,10 +2165,12 @@
     for (let i = 0; i < MOTES; i++) moteData[i * 20] = moteData[i * 20 + 5] = moteData[i * 20 + 10] = moteData[i * 20 + 15] = 1;
     motes = place(createNode({ geometry: models.particleGeometry("#e8d9b0", 0.035, 0.8), instanceData: moteData, instanceCount: MOTES, instanceVersion: 0, fixedInstanceCapacity: true }));
     sceneTime = 0;
-    // The player is whoever walked in; with nobody chosen, the Ooga this run already had, or one at random.
+    // The player is whoever walked in; with nobody chosen, the Ooga this run already had, or one at random. A
+    // signed-in visitor with an Ooga leads it, as they drive only it on the island.
     const names = contributors.activeRoster.length ? contributors.activeRoster : contributors.roster;
-    const known = (name) => names.some((c) => c.name === name);
-    if (known(world.pilot)) world.mineLead = world.pilot;
+    const known = (name) => names.some((c) => c.name === name), own = BL.net.ownAmong(names);
+    if (own) world.mineLead = own;
+    else if (known(world.pilot)) world.mineLead = world.pilot;
     else if (!known(world.mineLead)) world.mineLead = names[Math.floor(Math.random() * names.length)].name;
     world.pilot = null;
     crew = mineCrew.create({ root, fx, world: { inside, obstacles, station, spotOf, chamberAt, doorZ }, lead: world.mineLead });
@@ -2348,14 +2348,14 @@
     };
   };
 
-  const mineScene = {
+  const mineScene = BL.deferred.scene("mine", {
     id: "mine", enter, update, overlay, onDonation, onKey, onLootCleared: () => {}, renderOpts: RENDER_OPTS,
     leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
     get inMotion() {
       return fx ? fx.inMotion : false;
     }
-  };
+  });
   BL.scenes = BL.scenes || {};
   BL.scenes.mine = mineScene;
 })();

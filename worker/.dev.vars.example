@@ -12,3 +12,8 @@ GITHUB_CLIENT_SECRET=
 # Voice: a Realtime SFU app's App ID and App token. Without them voice says unavailable.
 REALTIME_APP_ID=
 REALTIME_SECRET=
+
+# Tess's answers (/api/tess): an Anthropic API key, from a workspace with a monthly spend limit. Without it she answers
+# only what the page knows. TESS_DAILY_CENTS caps a day's spend (UTC), counted from each answer's token usage.
+ANTHROPIC_API_KEY=
+TESS_DAILY_CENTS=50

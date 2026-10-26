@@ -66,13 +66,22 @@
       if (previous !== other) descriptorUsers.get(previous)?.delete(entry);
       descriptorUsers.get(geometry)?.add(entry);
     };
+    const compactCursors = new WeakMap();
+    const readFace = (geometry, index) => {
+      if (!geometry.compactGeometry) return geometry.faces[index];
+      let cursor = compactCursors.get(geometry);
+      if (!cursor) { cursor = BL.compactGeometry.createCursor(geometry); compactCursors.set(geometry, cursor); }
+      return BL.compactGeometry.readFace(geometry, index, cursor);
+    };
     const geometryOf = (geometry) => {
       if (!geometry || excluded.has(geometry) || geometry.matrixGlyph || !geometry.faces || !geometry.faces.length) return null;
       let cached = geometries.get(geometry);
       if (cached) return cached;
       let triangles = 0, edges = 0, resolved = null;
       const v = geometry.verts;
-      for (const face of geometry.faces) if (face.visibility !== false && face.i.length > 2) {
+      for (let index = 0; index < geometry.faces.length; index++) {
+        const face = readFace(geometry, index);
+        if (face.visibility === false || face.i.length < 3) continue;
         const a = face.i[0] * 3, b = face.i[1] * 3, c = face.i[2] * 3;
         const ux = v[b] - v[a], uy = v[b + 1] - v[a + 1], uz = v[b + 2] - v[a + 2], vx = v[c] - v[a], vy = v[c + 1] - v[a + 1], vz = v[c + 2] - v[a + 2];
         // Match the bake's degenerate-face rejection so grid sizing stays identical.
@@ -108,8 +117,9 @@
       let cached;
       const baked = bakes.get(geometry.verts);
       if (baked) for (const bake of baked) {
-        let same = bake.faces.length === geometry.faces.length;
-        for (let n = 0; same && n < bake.faces.length; n++) same = bake.faces[n] === (geometry.faces[n].visibility === false ? null : geometry.faces[n].i);
+        const compact = BL.compactGeometry?.storageOf(geometry);
+        let same = compact ? bake.compact === compact : !bake.compact && bake.faces.length === geometry.faces.length;
+        if (!compact) for (let n = 0; same && n < bake.faces.length; n++) same = bake.faces[n] === (geometry.faces[n].visibility === false ? null : geometry.faces[n].i);
         if (!same) continue;
         cached = bake.record;
         stats.triangles += cached.triangleIndices.length / 3; stats.triangleBytes += cached.triangleIndices.byteLength; stats.samples += cached.samples.length / 3;
@@ -118,7 +128,10 @@
       // Triangle buffers take every face's fan up front (skipped faces leave their slots unused) and the witnesses
       // grow a typed buffer, so the bake does not grow JS arrays through the island's hundreds of thousands of faces.
       let slots = 0;
-      for (const face of geometry.faces) if (face.visibility !== false && face.i.length > 2) slots += face.i.length - 2;
+      for (let index = 0; index < geometry.faces.length; index++) {
+        const face = readFace(geometry, index);
+        if (face.visibility !== false && face.i.length > 2) slots += face.i.length - 2;
+      }
       const v = geometry.verts, triangleIndices = new Uint32Array(slots * 3), triangleBounds = new Float64Array(slots * 6), triangleCoverFaces = new Int32Array(slots), coverFaces = [], edgeMap = new Map(), planes = new Map();
       let count = 0;
       // Witnesses dedupe by rounded coordinates, first point kept, in insertion order: an open-addressing table of
@@ -167,7 +180,7 @@
         }
       };
       for (let faceIndex = 0; faceIndex < geometry.faces.length; faceIndex++) {
-        face = geometry.faces[faceIndex];
+        face = readFace(geometry, faceIndex);
         if (face.visibility === false || face.i.length < 3) continue;
         a = face.i[0] * 3;
         const b = face.i[1] * 3, c = face.i[2] * 3;
@@ -337,7 +350,7 @@
       };
       if (count) build(0, count);
       cached = { lines: edgeLines, samples, sampleBounds, coverFaces: new Uint32Array(coverFaces), triangleCoverFaces: count === slots ? triangleCoverFaces : triangleCoverFaces.slice(0, count), edgeStarts, edgeNormals: new Float64Array(edgeNormals), vertices: v, triangleIndices: count === slots ? triangleIndices : triangleIndices.slice(0, count * 3), indices, bounds: new Float64Array(bounds), left: new Int32Array(left), right: new Int32Array(right), starts: new Uint32Array(starts), counts: new Uint32Array(counts), sphere: BL.scene.boundsOf(geometry) };
-      const bake = { faces: geometry.faces.map((face) => face.visibility === false ? null : face.i), record: cached };
+      const bake = { faces: BL.compactGeometry?.storageOf(geometry) ? null : geometry.faces.map((face) => face.visibility === false ? null : face.i), compact: BL.compactGeometry?.storageOf(geometry) || null, record: cached };
       if (baked) baked.push(bake); else bakes.set(geometry.verts, [bake]);
       stats.triangles += count; stats.triangleBytes += cached.triangleIndices.byteLength; stats.samples += samples.length / 3;
       return cached;
@@ -576,9 +589,59 @@
         appendClipLines(entry, entry.worldMinY); appendClipLines(entry, entry.worldMaxY);
       }
     };
-    const collect = (actor, ex, ey, ez, camera = null, aspect = 1, retainedOwners = null, retainedCount = 0) => {
+    // Blockers and actor visibility stay current every frame. The hub may defer the expensive world-space
+    // contour emission until sight-guides actually needs it at its existing recompute cadence.
+    const contourAnchor = new Float64Array(3);
+    let contoursPending = false, contourActor = null, contourRetained = null, contourRetainedCount = 0;
+    const materializeContours = (actorRoot, ex, ey, ez, retainedOwners, retainedCount) => {
+      let emit = emissionDirty || hasCamera !== emissionHasCamera || actorRoot !== emissionActor
+        || ex !== emissionX || ey !== emissionY || ez !== emissionZ
+        || tanX !== emissionTanX || tanY !== emissionTanY || near !== emissionNear || far !== emissionFar;
+      for (let i = 0; !emit && i < 16; i++) if (emissionView[i] !== cameraView[i]) emit = true;
+      if (!emit) {
+        const kept = retainedOwners ? retainedCount : 0;
+        if (kept !== emissionRetainedCount || candidateCount !== emissionMembers) emit = true;
+        else {
+          for (let n = 0; n < kept && !emit; n++) if (retainedOwners[n] !== emissionRetained[n]) emit = true;
+          for (let n = 0; n < candidateCount && !emit; n++) if (candidates[n] !== emissionMembership[n]) emit = true;
+        }
+      }
+      if (emit) {
+        emitContours();
+        const used = lineUsed; let changed = linesChanged;
+        if (result.count !== used) changed = true;
+        for (let i = used; i < result.count; i++) owners[i] = null;
+        result.count = result.contours = used; if (changed) result.version++;
+        emissionDirty = false;
+        emissionHasCamera = hasCamera; emissionActor = actorRoot;
+        emissionX = ex; emissionY = ey; emissionZ = ez;
+        emissionTanX = tanX; emissionTanY = tanY; emissionNear = near; emissionFar = far;
+        emissionView.set(cameraView);
+        emissionRetainedCount = retainedOwners ? retainedCount : 0; emissionMembers = candidateCount;
+        for (let n = 0; n < emissionRetainedCount; n++) emissionRetained[n] = retainedOwners[n];
+        for (let n = 0; n < candidateCount; n++) emissionMembership[n] = candidates[n];
+      }
+    };
+    const ensureContours = () => {
+      if (!contoursPending) return;
+      const actor = contourActor, retained = contourRetained, count = contourRetainedCount;
+      contoursPending = false; contourActor = contourRetained = null; contourRetainedCount = 0;
+      materializeContours(actor, contourAnchor[0], contourAnchor[1], contourAnchor[2], retained, count);
+    };
+    result.ensureContours = ensureContours;
+    // A deferred emission's lazy bakes, one a call (true while any is left), so a caller can spread a first emission
+    // over several tasks before `ensureContours`; the bakes are the ones the emission would make.
+    result.bakeNext = () => {
+      if (!contoursPending) return false;
+      for (let n = 0; n < candidateCount; n++) {
+        const geometry = candidates[n].geometry;
+        if (geometry.ready === false) { void geometry.lines; return true; }
+      }
+      return false;
+    };
+    const collect = (actor, ex, ey, ez, camera = null, aspect = 1, retainedOwners = null, retainedCount = 0, deferContours = false) => {
       const actorRoot = actor && actor.root;
-      let changed = false, occlusionChanged = false, structuralChanged = false, perceptionChanged = false, providerChanged = false;
+      let occlusionChanged = false, structuralChanged = false, perceptionChanged = false, providerChanged = false;
       // A character immersed in fruit can perceive beyond that shell; camera rays still hit it and the separate
       // stone platform stays opaque.
       const through = perceptionThrough && actor ? perceptionThrough(actor) : null;
@@ -696,33 +759,11 @@
         if (entry.group.provider || !entry.group.near || !cameraIncludes(entry.x, entry.y, entry.z, entry.radius)) continue;
         candidates[candidateCount++] = entry;
       }
-      let emit = emissionDirty || hasCamera !== emissionHasCamera || actorRoot !== emissionActor
-        || ex !== emissionX || ey !== emissionY || ez !== emissionZ
-        || tanX !== emissionTanX || tanY !== emissionTanY || near !== emissionNear || far !== emissionFar;
-      for (let i = 0; !emit && i < 16; i++) if (emissionView[i] !== cameraView[i]) emit = true;
-      if (!emit) {
-        const kept = retainedOwners ? retainedCount : 0;
-        if (kept !== emissionRetainedCount || candidateCount !== emissionMembers) emit = true;
-        else {
-          for (let n = 0; n < kept && !emit; n++) if (retainedOwners[n] !== emissionRetained[n]) emit = true;
-          for (let n = 0; n < candidateCount && !emit; n++) if (candidates[n] !== emissionMembership[n]) emit = true;
-        }
-      }
-      if (emit) {
-        emitContours();
-        const used = lineUsed; changed = changed || linesChanged;
-        if (result.count !== used) changed = true;
-        for (let i = used; i < result.count; i++) owners[i] = null;
-        result.count = result.contours = used; if (changed) result.version++;
-        emissionDirty = false;
-        emissionHasCamera = hasCamera; emissionActor = actorRoot;
-        emissionX = ex; emissionY = ey; emissionZ = ez;
-        emissionTanX = tanX; emissionTanY = tanY; emissionNear = near; emissionFar = far;
-        emissionView.set(cameraView);
-        emissionRetainedCount = retainedOwners ? retainedCount : 0; emissionMembers = candidateCount;
-        for (let n = 0; n < emissionRetainedCount; n++) emissionRetained[n] = retainedOwners[n];
-        for (let n = 0; n < candidateCount; n++) emissionMembership[n] = candidates[n];
-      }
+      contoursPending = false; contourActor = contourRetained = null; contourRetainedCount = 0;
+      if (deferContours) {
+        contourActor = actorRoot; contourAnchor[0] = ex; contourAnchor[1] = ey; contourAnchor[2] = ez;
+        contourRetained = retainedOwners; contourRetainedCount = retainedCount; contoursPending = true;
+      } else materializeContours(actorRoot, ex, ey, ez, retainedOwners, retainedCount);
       if (occlusionChanged) result.occlusionVersion++;
       if (structuralChanged) result.structuralVersion++;
       if (perceptionChanged) {
@@ -1264,7 +1305,7 @@
       if (cached) {
         wx = cameraPropPlanes[0]; wy = cameraPropPlanes[1]; wz = cameraPropPlanes[2]; front = cameraPropPlanes[3]; retreat = cameraPropPlanes[4];
       } else {
-        v = g.verts; m = e.inverse; face = g.faces[e.geometry.coverFaces[faceIndex]];
+        v = g.verts; m = e.inverse; face = readFace(g, e.geometry.coverFaces[faceIndex]);
         const a = face.i[0] * 3, b = face.i[1] * 3, c = face.i[2] * 3;
         const ux = v[b] - v[a], uy = v[b + 1] - v[a + 1], uz = v[b + 2] - v[a + 2], vx = v[c] - v[a], vy = v[c + 1] - v[a + 1], vz = v[c + 2] - v[a + 2];
         nx = uy * vz - uz * vy; ny = uz * vx - ux * vz; nz = ux * vy - uy * vx;
@@ -1703,6 +1744,7 @@
       return left !== ownerHit(group, sx, sy, 1);
     };
     const refresh = () => {
+      contoursPending = false; contourActor = contourRetained = null; contourRetainedCount = 0;
       // Registration boundaries size every reused buffer from actual scene contents; the frame path never grows
       // them or discards visible items.
       const live = new Set(), wanted = new Set();
@@ -1740,6 +1782,7 @@
       stats.candidates = stats.occluders = stats.cameraOccluders = stats.nearOwners = 0;
     };
     const dispose = () => {
+      contoursPending = false; contourActor = contourRetained = null; contourRetainedCount = 0;
       for (const users of descriptorUsers.values()) users.clear();
       descriptorUsers.clear();
       registered.length = ownerGroups.length = 0; seen.clear(); entries.clear(); ownerEntries.clear(); aliases.clear(); providerOwners.clear(); geometries.clear(); characterRoots.clear();

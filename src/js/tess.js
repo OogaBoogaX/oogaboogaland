@@ -6,7 +6,7 @@
   const BL = window.BL = window.BL || {};
   const { models } = BL;
   const { quat, damp, hexToRgb } = BL.math;
-  const { cached, lathe, turn, shaded, torus, forwardLathe, moved, turnedZ, bevelBox, prism } = models;
+  const { cached, characterGeometry, lathe, turn, shaded, torus, forwardLathe, moved, turnedZ, bevelBox, prism } = models;
   const { createNode, addChild, removeChild } = BL.scene;
   // Flink's head was seven voxels wide at 16 voxels per metre of height; Tess is half again as big, so she reads
   // across a hall 46 m wide, and across the island.
@@ -359,12 +359,18 @@
       }
       return shaded(round, marks);
     });
-    return {
+    const meshes = {
       core, lens, iris, pupil, housing, glints, blades: shaded([], blades),
       armor: shaded(caps, capDetails), irisMarks: shaded([], irisMarks), rings
     };
+    for (const part of Object.values(meshes)) {
+      if (Array.isArray(part)) for (const ring of part) characterGeometry(ring);
+      else characterGeometry(part);
+    }
+    return meshes;
   };
   const MESHES = cached(() => buildMeshes(false)), FINE_MESHES = cached(() => buildMeshes(true)), LIGHT_MESHES = cached(() => buildMeshes(false, true));
+  const ACCENT = cached(() => characterGeometry({ ...BL.factoryModels.forgeWave().gold }));
   // Her beam, a glowing ribbon a metre long down +z and a metre across, that a visit stretches from her eye to where
   // it lands and rolls about its length to face the camera: a white-hot middle in gold, amber at its edges, every band
   // emissive so the bloom haloes it in its own colour. Both faces, so it shows on Canvas 2D too. The glint where it
@@ -396,6 +402,16 @@
   // faces), whom she watches when she is not flying or beaming (`watching`
   // and `watch`), and her moods: `calm` while she talks, `steady` while she keeps by someone, so she does not turn to
   // her flight. Outline registries walk past her, as she moves every frame.
+  // Hub scope survives scene changes, but Tess's meshes need survive only while a Tess owns them. The director leaves
+  // one scene and enters the next in one task, so the caches go only once that task ends with no Tess: the Factory's
+  // greeter entered as the hub's guide leaves reuses every tier rather than rebuilding them in the swap frame.
+  let instances = 0, releasing = false;
+  const releaseIdle = () => {
+    releasing = false;
+    if (instances) return;
+    MESHES.clear(); FINE_MESHES.clear(); LIGHT_MESHES.clear(); ACCENT.clear();
+    BEAM.clear(); GLINT.clear(); SPARKS.clear(); MOTE.clear();
+  };
   const create = ({ parent, input, fx, camera, kind, coarse, quality = () => "high" }) => {
     // Prepare detail behind the scene transition, never in update. Touch and Low retain the lighter rig.
     const lightMeshes = LIGHT_MESHES(), eligible = !coarse && quality() !== "low",
@@ -412,7 +428,7 @@
     addChild(body, hover); addChild(hover, head);
     addChild(head, createNode({ geometry: meshes.lens }), createNode({ geometry: meshes.housing }), optics,
       createNode({ geometry: meshes.armor }), createNode({ geometry: meshes.irisMarks }),
-      createNode({ geometry: BL.factoryModels.forgeWave().gold, scale: { x: 0.045, y: 0.045, z: 0.045 }, position: { x: 0, y: 0, z: 0.108 } }));
+      createNode({ geometry: ACCENT(), scale: { x: 0.045, y: 0.045, z: 0.045 }, position: { x: 0, y: 0, z: 0.108 } }));
     addChild(optics, iris, pupil, blades, createNode({ geometry: meshes.glints }));
     for (let i = 0; i < RINGS.length; i++) {
       const spec = RINGS[i], pivot = createNode({ quaternion: quat.fromEuler(quat.create(), spec.x, spec.y, 0) });
@@ -615,6 +631,7 @@
         }
       },
       liveGeometry(set) {
+        set.add(ACCENT());
         for (const tier of detailTiers) {
           for (const key of detailKeys) set.add(tier[key]);
           for (const ring of tier.rings) set.add(ring);
@@ -641,8 +658,10 @@
         removeChild(parent, body);
         for (let i = 0; i < BEAMS; i++) { removeChild(parent, beams[i]); removeChild(parent, glints[i]); }
         for (let i = 0; i < FLECKS; i++) removeChild(parent, flecks[i].node);
+        if (--instances === 0 && !releasing) { releasing = true; queueMicrotask(releaseIdle); }
       }
     };
+    instances++;
     return rig;
   };
   BL.tess = { create, HEIGHT, SCALE, RADIUS };

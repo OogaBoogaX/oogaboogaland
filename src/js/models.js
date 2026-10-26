@@ -12,6 +12,11 @@
   const { hexToRgb, damp } = BL.math;
   const { createNode, addChild } = BL.scene;
   const geometry = () => ({ verts: [], faces: [], lines: [] });
+  const characterGeometry = (geo) => {
+    geo.characterPart = true;
+    if (geo.glassShell) geo.glassShell.characterPart = true;
+    return geo;
+  };
   const pushVert = (geo, x, y, z) => {
     geo.verts.push(x, y, z);
     return geo.verts.length / 3 - 1;
@@ -234,7 +239,12 @@
       // Index walk, not a spread: a large geometry would overflow the stack.
       const v = geo.verts;
       for (let i = 0; i < v.length; i++) out.verts.push(v[i]);
-      for (const f of geo.faces) out.faces.push({ ...f, i: f.i.map((i) => i + shift) });
+      // A packed part gives fresh face records, so merging it never fills its legacy face cache.
+      const packed = BL.compactGeometry?.storageOf(geo);
+      for (let n = 0, count = packed ? packed.count : geo.faces.length; n < count; n++) {
+        const f = packed ? BL.compactGeometry.copyFace(geo, n) : geo.faces[n];
+        out.faces.push({ ...f, i: f.i.map((i) => i + shift) });
+      }
       for (const l of geo.lines) out.lines.push({ ...l, i: l.i.map((i) => i + shift) });
     }
     return out;
@@ -345,34 +355,152 @@
   // frees their GPU side. A hand-rolled cache joins with `track(drop)` and calls `use()` on every read.
   const scopedCaches = new Set();
   let cacheScope = null;
-  const track = (drop) => {
-    const entry = { scenes: new Set(), last: undefined, drop, use: () => {
+  const track = (drop, peek = null) => {
+    const entry = { scenes: new Set(), last: undefined, drop, peek, use: () => {
       if (entry.last === cacheScope) return;
       entry.last = cacheScope;
       if (cacheScope !== null) entry.scenes.add(cacheScope);
       scopedCaches.add(entry);
-    } };
-    return entry;
-  };
-  const setScope = (id) => { cacheScope = id; };
-  const release = (id, keep) => {
-    for (const entry of scopedCaches) {
-      if (!entry.scenes.has(id) || keep.some((k) => entry.scenes.has(k))) continue;
+    }, clear: () => {
       entry.drop();
       entry.scenes.clear();
       entry.last = undefined;
       scopedCaches.delete(entry);
+    } };
+    return entry;
+  };
+  const setScope = (id) => { cacheScope = id; };
+  // Scope one synchronous build batch. Async builders call this again after each await, without borrowing the
+  // active scene's scope while their code, images or next frame are pending.
+  const withScope = (id, build, arg) => {
+    const previous = cacheScope;
+    cacheScope = id;
+    try { return build(arg); }
+    finally { cacheScope = previous; }
+  };
+  // Each keyed payload has its own owners, as variants do. Iteration counts as a read too; clearing a key removes
+  // its tracking entry, so the registry does not grow with one-off sign labels, room themes or colours.
+  class ScopedMap extends Map {
+    #owners = new Map();
+    constructor(values) {
+      super();
+      if (values) for (const [key, value] of values) this.set(key, value);
     }
+    get(key) { this.#owners.get(key)?.use(); return super.get(key); }
+    has(key) { this.#owners.get(key)?.use(); return super.has(key); }
+    set(key, value) {
+      let owner = this.#owners.get(key);
+      if (!owner) {
+        owner = track(() => { Map.prototype.delete.call(this, key); this.#owners.delete(key); }, () => Map.prototype.get.call(this, key));
+        this.#owners.set(key, owner);
+      }
+      owner.use();
+      return super.set(key, value);
+    }
+    delete(key) {
+      const owner = this.#owners.get(key);
+      if (!owner) return false;
+      owner.clear();
+      return true;
+    }
+    clear() { for (const owner of this.#owners.values()) owner.clear(); }
+    *entries() { for (const entry of super.entries()) { this.#owners.get(entry[0]).use(); yield entry; } }
+    *values() { for (const key of super.keys()) { this.#owners.get(key).use(); yield super.get(key); } }
+    [Symbol.iterator]() { return this.entries(); }
+    forEach(fn, receiver) { super.forEach((value, key) => { this.#owners.get(key).use(); fn.call(receiver, value, key, this); }); }
+  }
+  const scopedMap = (values) => new ScopedMap(values);
+  // A past hub read must not pin meshes absent from the newly built hub. Inspect payload containers, never their
+  // vertex/face arrays or lazy accessors; the scratch releases every reference even when a payload is cyclic.
+  const cacheProbe = [], cacheSeen = new Set();
+  const liveCache = (value, live, arrays) => {
+    let meshes = false;
+    cacheProbe.push(value);
+    try {
+      while (cacheProbe.length) {
+        const part = cacheProbe.pop();
+        if (!part || typeof part !== "object" || cacheSeen.has(part)) continue;
+        cacheSeen.add(part);
+        const verts = Object.getOwnPropertyDescriptor(part, "verts"), faces = Object.getOwnPropertyDescriptor(part, "faces");
+        if ((Array.isArray(verts?.value) || ArrayBuffer.isView(verts?.value)) && Array.isArray(faces?.value)) {
+          meshes = true;
+          if (live.has(part) || arrays.has(verts.value) || arrays.has(faces.value)) return 1;
+        } else if (part instanceof Map) {
+          for (const child of Map.prototype.values.call(part)) cacheProbe.push(child);
+        } else if (Array.isArray(part)) {
+          for (let i = 0; i < part.length; i++) if (part[i] && typeof part[i] === "object") cacheProbe.push(part[i]);
+        } else if (!ArrayBuffer.isView(part)) {
+          for (const key of Object.keys(part)) {
+            const child = Object.getOwnPropertyDescriptor(part, key).value;
+            if (child && typeof child === "object") cacheProbe.push(child);
+          }
+        }
+      }
+      return meshes ? 2 : 0;
+    } finally { cacheProbe.length = 0; cacheSeen.clear(); }
+  };
+  const release = (id, keep, live = null) => {
+    const returned = live && cacheScope === "hub", arrays = returned ? new Set() : null;
+    // Projective windows wrap a mesh without copying its arrays. Their source is live too, even when only the wrapper
+    // is a node's geometry; retain that cache rather than rebuilding a second copy beside the live window.
+    if (returned) for (const mesh of live) {
+      if (!mesh || typeof mesh !== "object") continue;
+      const verts = Object.getOwnPropertyDescriptor(mesh, "verts"), faces = Object.getOwnPropertyDescriptor(mesh, "faces");
+      if (verts?.value) arrays.add(verts.value);
+      if (faces?.value) arrays.add(faces.value);
+    }
+    for (const entry of scopedCaches) {
+      if (!entry.scenes.has(id) && !(returned && entry.scenes.has("hub"))) continue;
+      if (keep.some(k => entry.scenes.has(k))) {
+        // An explicitly kept scene's off-graph variants stay warm too; only hub-only caches use live-mesh pruning.
+        if (!returned || keep.some(k => k !== "hub" && entry.scenes.has(k)) || !entry.peek || liveCache(entry.peek(), live, arrays) !== 2) continue;
+      }
+      entry.clear();
+    }
+  };
+  const assertReleased = (id) => {
+    for (const entry of scopedCaches) if (entry.scenes.size === 1 && entry.scenes.has(id)) throw new Error(`${id}: scene-only model cache survived release`);
   };
   const cached = (build) => {
     let value = null;
-    const entry = track(() => { value = null; });
-    return () => { entry.use(); return value || (value = build()); };
+    const entry = track(() => { value = null; }, () => value);
+    const read = () => { entry.use(); return value || (value = build()); };
+    // Owners with a shorter lifetime than their scene scope can release the same tracked entry explicitly.
+    read.clear = entry.clear;
+    return read;
+  };
+  // A pure cached builder can publish only its completed value, while yielding inside its construction loops.
+  // Ordinary calls retain the synchronous API; a scene's build phase drains steps with its own scope and signal.
+  const cachedSteps = (build) => {
+    let value = null;
+    const entry = track(() => { value = null; }, () => value);
+    const steps = function* (slice = null) {
+      entry.use();
+      if (value) return value;
+      const built = yield* build(slice);
+      value = built;
+      return value;
+    };
+    const read = () => {
+      entry.use();
+      if (value) return value;
+      const iterator = steps();
+      let next;
+      do { next = iterator.next(); } while (!next.done);
+      return next.value;
+    };
+    read.steps = steps;
+    read.clear = entry.clear;
+    return read;
   };
   const variants = (build) => {
-    const cache = [];
-    const entry = track(() => { cache.length = 0; });
-    return (i = 0) => { entry.use(); return cache[i] || (cache[i] = build(i)); };
+    const cache = [], entries = [];
+    return (i = 0) => {
+      // One hub cabinet must not make every cabinet built by the Arcade a hub resident.
+      const entry = entries[i] || (entries[i] = track(() => { cache[i] = null; }, () => cache[i]));
+      entry.use();
+      return cache[i] || (cache[i] = build(i));
+    };
   };
   const noShadow = (geo) => {
     geo.castShadow = false;
@@ -410,7 +538,7 @@
     const source = bananaGeometry();
     // Crop the hidden ends of each oversized indicator so a lower row cannot
     // stick past the magazine's narrower curve above it.
-    return { ...source, verts: source.verts.map((v, i) => i % 3 === 0 ? Math.max(-0.3, Math.min(0.3, v)) : i % 3 === 1 ? Math.min(0.25, v) : v) };
+    return characterGeometry({ ...source, verts: source.verts.map((v, i) => i % 3 === 0 ? Math.max(-0.3, Math.min(0.3, v)) : i % 3 === 1 ? Math.min(0.25, v) : v) });
   });
   // Deliberate near-duplicate of bananaGeometry: full depth and dimensions of a carried banana.
   // Its origin is recentred so pile tiles sit evenly across the mound surface.
@@ -481,7 +609,7 @@
     geo.pileFaceSize = faceSize;
     return geo;
   };
-  const particleCache = new Map();
+  const particleCache = scopedMap();
   const particleGeometry = (color, size = 0.07, emissive = 1) => {
     const key = `${color}/${size}/${emissive}`;
     let geo = particleCache.get(key);
@@ -522,7 +650,7 @@
     appendMagazineShell(pieces, 1, GUN_PALETTE);
     const geo = merge(...pieces);
     for (let i = 0; i < geo.verts.length; i += 3) { geo.verts[i + 1] += 0.1825; geo.verts[i + 2] -= 0.0675; }
-    return geo;
+    return characterGeometry(geo);
   });
   const spareMagazine = () => {
     const node = createNode({ geometry: spareMagazineShell() }), bananas = [];
@@ -661,6 +789,10 @@
   //                     voxel part is baked again under it, paired in `tint`
   // `look` flags read here: slim, bald, cleanShaven, wideEyes, hairless, noBrow, noPupils,
   // face ("nose" | "smirk" | "beard" | "none"), eyeColor, eyeGlow, hatY.
+  // A character file may keep the slot numbers its first build was given; every later build registers that
+  // character's colours in the same order first, so after a released cache rebuilds the model those numbers
+  // still name the same colours. The base palette ahead of them comes from the same traits every time.
+  const colorOrders = new WeakMap();
   const buildCaveman = (traits) => {
     const { skin, hair, height: h, belly, rand } = traits;
     const dress = traits.dress || {};
@@ -683,14 +815,18 @@
     ];
     // A character's own colours join the palette on first use.
     const colors = new Map();
+    let order = traits.dress ? colorOrders.get(traits.dress) : null;
+    if (traits.dress && !order) colorOrders.set(traits.dress, order = []);
     const color = (hex) => {
       let c = colors.get(hex);
       if (c === undefined) {
         colors.set(hex, c = palette.length);
         palette.push(hexToRgb(hex));
+        if (order) order.push(hex);
       }
       return c;
     };
+    if (order) for (let i = 0, n = order.length; i < n; i++) color(order[i]);
     const jit = (base, dark, p) => () => rand() < p ? dark : base;
     const skinJ = jit(P.skin, P.skinDk, 0.08);
     const hairJ = jit(P.hair, P.hairDk, 0.12);
@@ -946,11 +1082,36 @@
         tint.set(bake.geo, twin).set(twin, bake.geo);
       }
     }
+    // A reflection keeps characters whatever their size: the renderer's reduced capture otherwise drops small parts.
+    const markCharacter = (node) => {
+      if (node.geometry) characterGeometry(node.geometry);
+      if (node.skins) for (const skin of Object.values(node.skins)) characterGeometry(skin);
+      for (const child of node.children) markCharacter(child);
+    };
+    markCharacter(root);
+    for (const weapon of Object.values(skins)) for (const skin of Object.values(weapon)) characterGeometry(skin);
+    headOpen.characterPart = headClosed.characterPart = portraitHead.characterPart = true;
+    if (tint) for (const twin of tint.keys()) twin.characterPart = true;
+    // Only this builder's completed voxel bakes are immutable here. Dress hooks and both colourways finish
+    // first; separately authored weapons, equipment and other geometry stay in their original representation.
+    if (BL.compactGeometry?.enabled) {
+      const live = new Set([headOpen, headClosed, portraitHead]);
+      const visit = (node) => {
+        if (node.geometry) live.add(node.geometry);
+        for (const child of node.children) visit(child);
+      };
+      visit(root);
+      for (const bake of bakes) if (live.has(bake.geo)) {
+        BL.compactGeometry.pack(bake.geo, { immutable: true, renderOnly: true, precision: 64 });
+        const twin = tint?.get(bake.geo);
+        if (twin) BL.compactGeometry.pack(twin, { immutable: true, renderOnly: true, precision: 64 });
+      }
+    }
     return { root, parts, traits, headOffset: 1.1 * h, headOpen, headClosed, portraitHead, skins, clubRest, clubCarry, tint, gunHeadBounds: BL.scene.boundsOf(headOpen) };
   };
   // Traits hash from the handle, so one handle always builds the same voxels.
   // Callers get fresh nodes over shared geometry: one build per contributor, GPU records survive a scene swap.
-  const cavemen = new Map();
+  const cavemen = scopedMap();
   const cloneNode = (node, copies) => {
     const copy = createNode({ ...node, position: { ...node.position }, rotation: { ...node.rotation }, scale: { ...node.scale }, parent: null, children: [], world: new Float32Array(node.world), local: new Float32Array(node.local) });
     if (node.quaternion) copy.quaternion = new Float32Array(node.quaternion);
@@ -1305,7 +1466,7 @@
     })
   ];
   const TIER_COLORS = { common: "#9aa0a6", rare: "#6f9fca", epic: "#b16fd6", legendary: "#d8892b" };
-  const crateCache = new Map();
+  const crateCache = scopedMap();
   const crate = (tier) => {
     let geos = crateCache.get(tier);
     if (!geos) {
@@ -1326,11 +1487,11 @@
     addChild(node, createNode({ geometry: geos.body }), lid);
     return { node, lid };
   };
-  const swagCache = new Map();
+  const swagCache = scopedMap();
   const swagGeo = (id, build) => {
     let geo = swagCache.get(id);
     if (!geo) {
-      geo = build();
+      geo = characterGeometry(build());
       swagCache.set(id, geo);
     }
     return geo;
@@ -1503,6 +1664,40 @@
   // below, and a rail along the named edges ("n" is -z, "s" +z, "w" -x, "e" +x). Posts stand under the frame at the
   // corners and every few metres round it; `drop` is how far down each one reaches, a number or a function of its
   // (x, z) in the deck's frame, and 0 leaves the posts out.
+  // The spans a deck's rails run along, in the deck's frame, as `deckParts` stands them: [x0, z0, x1, z1, from, to],
+  // `from` and `to` whether a post stands at that end. A rail stands 0.1 in from each of the deck's `rails` edges ("n",
+  // "s", "w", "e"), leaving a gap wherever a stair or a bridge lands on its edge, exactly as wide as what arrives, and
+  // ending either side of it on a post that the arriving rails share: `cuts` are [x, z, half-width] in the deck's frame,
+  // on the rail's line, and a stair's also the way its flight runs off the deck, so it opens only the rail it crosses
+  // and as wide as it crosses it. A scene's floor stands its walkers off the same spans.
+  const deckRailSpans = (w, d, rails = "", cuts = []) => {
+    const spans = [];
+    const rail = (x0, z0, x1, z1, ends = [true, true]) => {
+      const len = Math.hypot(x1 - x0, z1 - z0), ux = (x1 - x0) / len, uz = (z1 - z0) / len, keep = [[0, len]];
+      const out = (x0 + x1) * uz - (z0 + z1) * ux > 0 ? 1 : -1, nx = uz * out, nz = -ux * out;
+      for (const [cx, cz, width, dx, dz] of cuts) {
+        if (Math.abs((cx - x0) * uz - (cz - z0) * ux) > 0.6) continue;
+        // A stair's centre line where it crosses this rail's line, and its width along the rail at that slant.
+        const along = dx === undefined ? 1 : dx * nx + dz * nz;
+        if (along < 0.3) continue;
+        const k = dx === undefined ? 0 : -((cx - x0) * nx + (cz - z0) * nz) / along, t = (cx + (dx || 0) * k - x0) * ux + (cz + (dz || 0) * k - z0) * uz, half = width / along;
+        if (t < -half || t > len + half) continue;
+        for (let i = keep.length - 1; i >= 0; i--) {
+          const [a, b] = keep[i];
+          if (t + half <= a || t - half >= b) continue;
+          keep.splice(i, 1, ...[[a, t - half], [t + half, b]].filter(([p, q]) => q - p > 0.12));
+        }
+      }
+      for (const [a, b] of keep) spans.push([x0 + ux * a, z0 + uz * a, x0 + ux * b, z0 + uz * b, a > 0 || ends[0], b < len || ends[1]]);
+    };
+    // Corners are shared: the side rails leave out the post the front or back rail already stands there.
+    const hw = w / 2 - 0.1, hd = d / 2 - 0.1, north = rails.includes("n"), south = rails.includes("s");
+    if (north) rail(-hw, -hd, hw, -hd);
+    if (south) rail(-hw, hd, hw, hd);
+    if (rails.includes("w")) rail(-hw, -hd, -hw, hd, [!north, !south]);
+    if (rails.includes("e")) rail(hw, -hd, hw, hd, [!north, !south]);
+    return spans;
+  };
   const deckParts = (w, d, drop, rails = "", seed = 1, cuts = []) => {
     const rand = mulberry32(seed), geos = [], across = w >= d;
     const n = Math.max(2, Math.round((across ? d : w) / 0.9));
@@ -1534,43 +1729,30 @@
       const depth = Math.min(reach(ax, az), reach(bx, bz), 4.5);
       if (depth > 1.5) geos.push(beam(ax, -depth + 0.3, az, bx, -0.6, bz, 0.16, TIMBER), beam(ax, -0.6, az, bx, -depth + 0.3, bz, 0.16, TIMBER));
     }
-    // A rail leaves a gap wherever a stair or a bridge lands on its edge, exactly as wide as what arrives, and ends
-    // either side of it on a post that the arriving rails share: `cuts` are [x, z, half-width] in the deck's frame, on
-    // the rail's line, and a stair's also the way its flight runs off the deck, so it opens only the rail it crosses
-    // and as wide as it crosses it.
-    const rail = (x0, z0, x1, z1, ends = [true, true]) => {
-      const len = Math.hypot(x1 - x0, z1 - z0), ux = (x1 - x0) / len, uz = (z1 - z0) / len, keep = [[0, len]];
-      const out = (x0 + x1) * uz - (z0 + z1) * ux > 0 ? 1 : -1, nx = uz * out, nz = -ux * out;
-      for (const [cx, cz, width, dx, dz] of cuts) {
-        if (Math.abs((cx - x0) * uz - (cz - z0) * ux) > 0.6) continue;
-        // A stair's centre line where it crosses this rail's line, and its width along the rail at that slant.
-        const along = dx === undefined ? 1 : dx * nx + dz * nz;
-        if (along < 0.3) continue;
-        const k = dx === undefined ? 0 : -((cx - x0) * nx + (cz - z0) * nz) / along, t = (cx + (dx || 0) * k - x0) * ux + (cz + (dz || 0) * k - z0) * uz, half = width / along;
-        if (t < -half || t > len + half) continue;
-        for (let i = keep.length - 1; i >= 0; i--) {
-          const [a, b] = keep[i];
-          if (t + half <= a || t - half >= b) continue;
-          keep.splice(i, 1, ...[[a, t - half], [t + half, b]].filter(([p, q]) => q - p > 0.12));
-        }
-      }
-      for (const [a, b] of keep) geos.push(...railParts(x0 + ux * a, z0 + uz * a, x0 + ux * b, z0 + uz * b, [a > 0 || ends[0], b < len || ends[1]]));
-    };
-    // Corners are shared: the side rails leave out the post the front or back rail already stands there.
-    const hw = w / 2 - 0.1, hd = d / 2 - 0.1, north = rails.includes("n"), south = rails.includes("s");
-    if (north) rail(-hw, -hd, hw, -hd);
-    if (south) rail(-hw, hd, hw, hd);
-    if (rails.includes("w")) rail(-hw, -hd, -hw, hd, [!north, !south]);
-    if (rails.includes("e")) rail(hw, -hd, hw, hd, [!north, !south]);
+    for (const [x0, z0, x1, z1, a, b] of deckRailSpans(w, d, rails, cuts)) geos.push(...railParts(x0, z0, x1, z1, [a, b]));
     return geos;
   };
+  // A stepped flight's treads (`stairParts`' `stepped`): one fewer than its risers, each riser near STEP_RISER high.
+  // Tread i (0 to n - 1) runs from i / n to (i + 1) / n of the way along, its top (i + 1) / (n + 1) of the way up, so a
+  // scene's floor can stand walkers on the very treads drawn.
+  const STEP_RISER = 0.3;
+  const stairTreads = (rise) => Math.max(2, Math.round(rise / STEP_RISER) - 1);
   // A flight of steps from (ax, ay, az) up to (bx, by, bz), `w` wide. An end on a deck's rail leaves out its posts,
-  // since the rail's own end posts stand there (`posts` [foot, head]).
-  const stairParts = (ax, ay, az, bx, by, bz, w = 1.6, posts = [true, true]) => {
+  // since the rail's own end posts stand there (`posts` [foot, head]). Its treads are rungs across it, or, `stepped`,
+  // deep plank treads at `stairTreads`' heights with a riser board under each one's front.
+  const stairParts = (ax, ay, az, bx, by, bz, w = 1.6, posts = [true, true], stepped = false) => {
     const geos = [], rise = by - ay, steps = Math.max(3, Math.round(rise / 0.32)), len = Math.hypot(bx - ax, bz - az);
     const ux = (bx - ax) / len, uz = (bz - az) / len, px = -uz, pz = ux;
     for (const s of [-1, 1]) geos.push(beam(ax + px * s * w / 2, ay, az + pz * s * w / 2, bx + px * s * w / 2, by, bz + pz * s * w / 2, 0.22, TIMBER_DK));
-    for (let i = 0; i < steps; i++) {
+    if (stepped) {
+      const n = stairTreads(rise), run = len / n, yaw = Math.atan2(ux, uz);
+      for (let i = 0; i < n; i++) {
+        const t = (i + 0.5) / n, x = ax + (bx - ax) * t, z = az + (bz - az) * t, top = ay + rise * (i + 1) / (n + 1), up = rise / (n + 1);
+        geos.push(moved(turnedY(bevelBox({ w: w - 0.06, h: 0.08, d: run - 0.03, color: i % 2 ? TIMBER : TIMBER_LT, bevel: 0.02 }), yaw), x, top - 0.04, z));
+        const fx = ax + (bx - ax) * i / n + ux * 0.03, fz = az + (bz - az) * i / n + uz * 0.03;
+        geos.push(moved(turnedY(box({ w: w - 0.1, h: up - 0.08, d: 0.04, color: TIMBER_DK }), yaw), fx, top - 0.08 - (up - 0.08) / 2, fz));
+      }
+    } else for (let i = 0; i < steps; i++) {
       const t = (i + 0.5) / steps, x = ax + (bx - ax) * t, z = az + (bz - az) * t, y = ay + rise * t;
       geos.push(beam(x - px * w / 2, y + 0.06, z - pz * w / 2, x + px * w / 2, y + 0.06, z + pz * w / 2, 0.14, i % 2 ? TIMBER : TIMBER_LT));
     }
@@ -1605,5 +1787,70 @@
     }
     glass.push(box({ w: W, h: tall, d: W, color: tint, emissive: 1, offset: { x, y: mid, z } }));
   };
-  BL.models = { beam, forwardLathe, turn, shaded, torus, along, chain, railParts, columnParts, deckGrid, deckPosts, deckParts, stairParts, lanternParts, LANTERN_GLASS, geometry, pushVert, face, cutCylinder, voxCoords, box, bevelBox, panel, lathe, glassVessel, attachGlassShell, tube, ring, polyline, merge, forward, moved, turnedX, turnedY, turnedZ, prism, cached, variants, track, setScope, release, noShadow, makeVox, voxelGeometry, voxelFaces, banana, bananaGeometry, bananaTileGeometry, bananaPileCoreGeometry, bananaPileRadiusScale, bananaPileHeightOffset, BANANA_AMMO_SCALE, BANANA_PILE_PROFILE, particleGeometry, spareMagazine, caveman, CLUB_PALETTE, GOLD_CLUB_PALETTE, labRoom, buildableGeos, crate, die, dieRotationFor, SWAG, TIER_COLORS };
+  // A base mesh owns its foliage alternatives. Collision and scene nodes keep the original mesh; only the
+  // WebGL collector selects one of these render meshes. Canvas continues drawing that original source.
+  const foliageLods = (high, coarse) => {
+    const medium = { ...high, ...coarse, collisionGeometry: high.collisionGeometry };
+    const b = BL.scene.boundsOf(high), lo = Array.from(b.min), hi = Array.from(b.max), c = b.center;
+    const far = { verts: [], faces: [], lines: [], sway: high.sway, foliageVisibility: false, castShadow: high.castShadow };
+    const planes = [
+      [lo[0], lo[1], c[2], hi[0], lo[1], c[2], hi[0], hi[1], c[2], lo[0], hi[1], c[2]],
+      [c[0], lo[1], lo[2], c[0], lo[1], hi[2], c[0], hi[1], hi[2], c[0], hi[1], lo[2]],
+      [lo[0], c[1], lo[2], hi[0], c[1], lo[2], hi[0], c[1], hi[2], lo[0], c[1], hi[2]]
+    ];
+    for (const plane of planes) {
+      const first = far.verts.length / 3;
+      far.verts.push(...plane);
+      far.faces.push({ i: [first, first + 1, first + 2, first + 3], color: [255, 255, 255], emissive: 0 },
+        { i: [first, first + 3, first + 2, first + 1], color: [255, 255, 255], emissive: 0 });
+    }
+    // Three orthographic silhouettes share one small atlas; normal axes select their own UV rectangle.
+    // Rasterization is deferred until a far record is first prepared, keeping geometry-only builders DOM-free.
+    far.imageSurface = { canvas: null, version: 1, atlas: true, atlasMin: lo, atlasMax: hi, source: medium,
+      rect: [lo[0], lo[1], hi[0] - lo[0], hi[1] - lo[1]], background: [0, 0, 0] };
+    high.foliageLods = { owner: high, medium, far };
+    if (BL.compactGeometry?.enabled) {
+      // These final render meshes are immutable; the separate walking shell stays in its original form.
+      // Keep authored double coordinates exactly so averaged normals and outline planes stay identical.
+      for (const geometry of [high, medium, far]) BL.compactGeometry.pack(geometry, { immutable: true, renderOnly: true, precision: 64 });
+    }
+    return high;
+  };
+  const paintFoliageAtlas = (surface) => {
+    if (surface.canvas) return surface.canvas;
+    const tile = 128, canvas = document.createElement("canvas"), geo = surface.source;
+    canvas.width = tile * 3; canvas.height = tile;
+    const ctx = canvas.getContext("2d"), order = new Uint32Array(geo.faces.length), depths = new Float32Array(geo.faces.length);
+    const cursor = BL.compactGeometry?.storageOf(geo) ? BL.compactGeometry.createCursor(geo) : null;
+    const faceAt = index => cursor ? BL.compactGeometry.readFace(geo, index, cursor) : geo.faces[index];
+    const lo = surface.atlasMin, hi = surface.atlasMax, axes = [[0, 1, 2], [2, 1, 0], [0, 2, 1]];
+    for (let view = 0; view < 3; view++) {
+      const [u, v, depth] = axes[view], sx = (tile - 2) / Math.max(1e-6, hi[u] - lo[u]), sy = (tile - 2) / Math.max(1e-6, hi[v] - lo[v]);
+      for (let i = 0; i < geo.faces.length; i++) {
+        const ids = faceAt(i).i;
+        let sum = 0; for (let k = 0; k < ids.length; k++) sum += geo.verts[ids[k] * 3 + depth];
+        order[i] = i; depths[i] = sum / ids.length;
+      }
+      order.sort((a, b) => depths[a] - depths[b]);
+      ctx.save(); ctx.beginPath(); ctx.rect(view * tile + 1, 1, tile - 2, tile - 2); ctx.clip();
+      for (let n = 0; n < order.length; n++) {
+        const face = faceAt(order[n]), color = face.color;
+        ctx.beginPath();
+        for (let i = 0; i < face.i.length; i++) {
+          const at = face.i[i] * 3, x = view * tile + 1 + (geo.verts[at + u] - lo[u]) * sx, y = 1 + (hi[v] - geo.verts[at + v]) * sy;
+          if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+        }
+        ctx.closePath(); ctx.fillStyle = `rgb(${color[0]},${color[1]},${color[2]})`; ctx.fill();
+      }
+      ctx.restore();
+    }
+    surface.canvas = canvas; surface.source = null;
+    return canvas;
+  };
+  // Expand liveness once per ownership walk, including hidden alternatives and a retained hub's meshes.
+  const addLods = (set) => {
+    for (const geo of set) if (geo.foliageLods?.owner === geo) { set.add(geo.foliageLods.medium); set.add(geo.foliageLods.far); }
+    return set;
+  };
+  BL.models = { characterGeometry, foliageLods, paintFoliageAtlas, addLods, beam, forwardLathe, turn, shaded, torus, along, chain, railParts, columnParts, deckGrid, deckPosts, deckParts, deckRailSpans, stairParts, stairTreads, lanternParts, LANTERN_GLASS, geometry, pushVert, face, cutCylinder, voxCoords, box, bevelBox, panel, lathe, glassVessel, attachGlassShell, tube, ring, polyline, merge, forward, moved, turnedX, turnedY, turnedZ, prism, cached, cachedSteps, variants, scopedMap, track, setScope, withScope, release, assertReleased, noShadow, makeVox, voxelGeometry, voxelFaces, banana, bananaGeometry, bananaTileGeometry, bananaPileCoreGeometry, bananaPileRadiusScale, bananaPileHeightOffset, BANANA_AMMO_SCALE, BANANA_PILE_PROFILE, particleGeometry, spareMagazine, caveman, CLUB_PALETTE, GOLD_CLUB_PALETTE, labRoom, buildableGeos, crate, die, dieRotationFor, SWAG, TIER_COLORS };
 })();

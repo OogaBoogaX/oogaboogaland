@@ -553,7 +553,7 @@
   // white-hot, which the scene climbs as someone comes near. Cached by tint and step.
   const RIM_STEPS = 8;
   const blend = (a, b, t) => "#" + hexToRgb(a).map((v, k) => Math.round(v + (hexToRgb(b)[k] - v) * t).toString(16).padStart(2, "0")).join("");
-  const rims = new Map();
+  const rims = BL.models.scopedMap();
   const portalRim = (tint, k) => {
     const key = `${tint}|${k}`;
     if (rims.has(key)) return rims.get(key);
@@ -566,7 +566,7 @@
   };
   // A label's board hangs from the wall on two brass rods, `w` wide, its middle at y 0, the rods climbing `up` and back
   // `back` to the wall.
-  const hangers = new Map();
+  const hangers = BL.models.scopedMap();
   const hanger = (w, up, back) => {
     const key = `${w.toFixed(2)}|${up}|${back}`;
     if (!hangers.has(key)) hangers.set(key, merge(...[-w / 2 + 0.12, w / 2 - 0.12].map((x) => FM.beam(x, 0.3, -0.02, x, up, -back, 0.04, BRASS))));
@@ -593,7 +593,7 @@
     return geo;
   };
   // A window's stand-in picture, as its `stand` describes it (see `DSB_STAND`), cached by the stand's key.
-  const stands = new Map();
+  const stands = BL.models.scopedMap();
   const standIn = (stand) => {
     if (stands.has(stand.key)) return stands.get(stand.key);
     const { w, h, z } = passage().picture, parts = [];
@@ -680,7 +680,7 @@
   // The mechanism charging toward an open world takes on that world's colour: the beam's drum and the shockwave blended
   // from their gold toward its `tint` in `CHARGE_STEPS` steps, the first their own gold. Cached by tint.
   const CHARGE_STEPS = 6;
-  const chargedSets = new Map();
+  const chargedSets = BL.models.scopedMap();
   const charged = (tint) => {
     if (chargedSets.has(tint)) return chargedSets.get(tint);
     const beam = [coreBeam().geometry], shock = [shockwave()];

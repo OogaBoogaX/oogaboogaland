@@ -7,11 +7,15 @@
     let result = geometries.get(geometry);
     if (result) return result;
     const verts = geometry.verts, triangles = [], boxes = [], order = [], nodes = [];
-    for (const face of geometry.faces) for (let i = 1; i + 1 < face.i.length; i++) {
-      const a = face.i[0] * 3, b = face.i[i] * 3, c = face.i[i + 1] * 3;
-      triangles.push(a, b, c); order.push(order.length);
-      boxes.push(Math.min(verts[a], verts[b], verts[c]), Math.min(verts[a + 1], verts[b + 1], verts[c + 1]), Math.min(verts[a + 2], verts[b + 2], verts[c + 2]),
-        Math.max(verts[a], verts[b], verts[c]), Math.max(verts[a + 1], verts[b + 1], verts[c + 1]), Math.max(verts[a + 2], verts[b + 2], verts[c + 2]));
+    const cursor = BL.compactGeometry?.storageOf(geometry) ? BL.compactGeometry.createCursor(geometry) : null;
+    for (let index = 0; index < geometry.faces.length; index++) {
+      const face = cursor ? BL.compactGeometry.readFace(geometry, index, cursor) : geometry.faces[index];
+      for (let i = 1; i + 1 < face.i.length; i++) {
+        const a = face.i[0] * 3, b = face.i[i] * 3, c = face.i[i + 1] * 3;
+        triangles.push(a, b, c); order.push(order.length);
+        boxes.push(Math.min(verts[a], verts[b], verts[c]), Math.min(verts[a + 1], verts[b + 1], verts[c + 1]), Math.min(verts[a + 2], verts[b + 2], verts[c + 2]),
+          Math.max(verts[a], verts[b], verts[c]), Math.max(verts[a + 1], verts[b + 1], verts[c + 1]), Math.max(verts[a + 2], verts[b + 2], verts[c + 2]));
+      }
     }
     const keys = new Float64Array(order.length * 3), scratch = BL.math.sortScratch(order.length);
     for (let i = 0; i < order.length; i++) for (let axis = 0; axis < 3; axis++) keys[i * 3 + axis] = boxes[i * 6 + axis] + boxes[i * 6 + axis + 3];
@@ -149,8 +153,7 @@
       out.type = target.owner.weaponType || (target.owner.cave ? target.owner.cave.hostile ? "enemy" : "friendly" : "object");
     };
     const onMirror = (node, bounds, x, y) => x >= bounds.min[0] - EPS && x <= bounds.max[0] + EPS
-      && y >= bounds.min[1] + (bounds.max[1] - bounds.min[1]) * (node.mirrorReveal || 0) - EPS && y <= bounds.max[1] + EPS
-      && (!node.mirrorDamage || node.mirrorDamage.contains(x, y));
+      && y >= bounds.min[1] + (bounds.max[1] - bounds.min[1]) * (node.mirrorReveal || 0) - EPS && y <= bounds.max[1] + EPS;
     const ray = (out, ox, oy, oz, dx, dy, dz, maxDistance, ignore = null, accept = null, includeNonWeapon = false) => {
       begin(out);
       const length = Math.hypot(dx, dy, dz);
@@ -249,29 +252,6 @@
         if (!eligible(target, ignore) || accept && !accept(target.owner, target.node)) continue;
         const entry = sync(target.node);
         if (!entry) continue;
-        // A damaged mirror remains one aimable surface even when the forward
-        // slice crosses a hole. Resolve that slice against the original pane,
-        // then let mirror damage choose the closest surviving panel.
-        if (target.node.mirror && target.node.mirrorDamage?.aimCenter) {
-          const m = entry.inverse, source = geometryOf(target.node.mirrorCaptureGeometry || target.node.geometry).bounds;
-          mat4.transformPoint(point, m, ox, oy, oz);
-          const ux = m[0] * dx + m[8] * dz, uz = m[2] * dx + m[10] * dz;
-          const t = Math.abs(uz) > 1e-12 ? (source.min[2] - point[2]) / uz : -1;
-          const lx = point[0] + ux * t, ly = point[1];
-          if (t > EPS && lx >= source.min[0] - EPS && lx <= source.max[0] + EPS
-            && ly >= source.min[1] - EPS && ly <= source.max[1] + EPS) {
-            const x = ox + dx * t, z = oz + dz * t;
-            if (target.node.mirrorDamage.aimCenter(verticalHit, x, oy, z)) {
-              const rx = verticalHit.x - ox, ry = verticalHit.y - oy, rz = verticalHit.z - oz;
-              const distance = Math.hypot(rx, ry, rz), forward = rx * dx + rz * dz;
-              if (forward > EPS && distance <= maxDistance && distance < out.distance
-                && (!clear || clear(ox, oy, oz, verticalHit.x, verticalHit.y, verticalHit.z, target.node, true))) {
-                hit(out, target, distance, verticalHit.x, verticalHit.y, verticalHit.z);
-              }
-            }
-          }
-          continue;
-        }
         const box = entry.box, cx = (box[0] + box[3]) / 2 - ox, cz = (box[2] + box[5]) / 2 - oz;
         const hx = (box[3] - box[0]) / 2, hz = (box[5] - box[2]) / 2;
         if (Math.abs(cx * dz - cz * dx) > Math.abs(dz) * hx + Math.abs(dx) * hz + EPS
@@ -399,7 +379,7 @@
         sweepContacts(data, before, after, index);
       }
     };
-    const strike = (out, previousWorld, currentWorld, geometry, ignore = null) => {
+    const strike = (out, previousWorld, currentWorld, geometry, ignore = null, accept = null) => {
       begin(out);
       originX = currentWorld[12]; originY = currentWorld[13]; originZ = currentWorld[14];
       let nearest = Infinity;
@@ -418,13 +398,13 @@
         }
       }
       for (const target of targets) {
-        if (!eligible(target, ignore)) continue;
+        if (!eligible(target, ignore) || accept && !accept(target.owner, target.node)) continue;
         const entry = sync(target.node);
         if (!entry || !overlaps(entry.box, sweepBox)) continue;
         stats.candidates++;
         const m = entry.world;
         contactDistance = contactTriangle = Infinity;
-        if (target.node.mirror && !target.node.mirrorDamage?.stage) {
+        if (target.node.mirror) {
           const bounds = entry.bounds, bottom = bounds.min[1] + (bounds.max[1] - bounds.min[1]) * (target.node.mirrorReveal || 0);
           for (let face = 0; face < 2; face++) {
             for (let vertex = 0; vertex < 3; vertex++) {

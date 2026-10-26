@@ -57,10 +57,7 @@
   const selection = { racer: contributors.activeRoster[0]?.name || null, mount: "kart", track: "bay", mirror: false };
   // A signed-in visitor with an Ooga races it, as they drive only it on the island; the picker is for the rest.
   // Their Ooga must be in the cast this visit built, which the garage rows and the field are made from.
-  const ownRacer = () => {
-    const own = BL.net.ownCharacter();
-    return own && racers.all.some((r) => r.name === own.handle) ? own.handle : null;
-  };
+  const ownRacer = () => BL.net.ownAmong(racers.all);
   // Bests are kept per track, the mirrored ones under their own key.
   const bestKey = () => selection.mirror ? `${selection.track}-m` : selection.track;
 
@@ -78,12 +75,6 @@
   // roster after this file loads.
   const cup = { active: false, round: 0, done: false, points: null };
   const nearestTorches = new Float32Array(LIGHT_CAPACITY * 2);
-  const raceScene = {
-    id: "race", renderOpts: null, root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
-    get inMotion() {
-      return phase === "countdown" || phase === "racing" || fx.inMotion;
-    }
-  };
 
   const buildTrack = (id) => {
     if (track) {
@@ -763,9 +754,10 @@
   const enter = (ctx) => {
     ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
     home = ctx.from === "arcade" ? "arcade" : "hub";
+    hudMod.leaveTo("race", home);
     camera = createCamera({ fov: 50, near: 0.3, far: 280 });
     root = createNode();
-    hud = hudMod.create({ roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
+    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
     fx = fxMod.create({ root, renderer, camera, hud, overlay: ctx.overlay, tickerAt: TICKER_AT });
@@ -779,6 +771,11 @@
         } else placeRacers();
       }
     });
+    // The Ooga an arcade cabinet sent in races, as in the other games; a signed-in visitor's own still wins.
+    if (world.pilot) {
+      if (contributors.activeRoster.some((c) => c.name === world.pilot)) selection.racer = world.pilot;
+      world.pilot = null;
+    }
     Object.assign(rhud.selection, selection);
     hud.dismissOutside(rhud.el.pause, () => pause(false));
     driftTaught = 0;
@@ -802,8 +799,8 @@
     screechAt = crewScreechAt = -9;
     quieted = false;
     rhud.el.mute.setAttribute("aria-pressed", String(audio.muted));
-    window.addEventListener("pointerdown", onGesture);
-    window.addEventListener("keydown", onGesture);
+    window.addEventListener("pointerdown", onGesture, { signal: ctx.signal });
+    window.addEventListener("keydown", onGesture, { signal: ctx.signal });
     hud.onAssign((entryId, name) => {
       if (game.assign(entryId, name)) renderLocker();
     });
@@ -873,7 +870,7 @@
       const pick = ownRacer() ? "a ride and a track" : "an Ooga, a ride and a track";
       hud.hint(COARSE ? `Tap ${pick}, then Race!` : `Pick ${pick}, then Race! (Enter)`);
     }, 1200);
-    window.addEventListener("blur", onBlur);
+    window.addEventListener("blur", onBlur, { signal: ctx.signal });
     unsubscribeAccount = BL.net.subscribe(accountChanged);
     Object.assign(raceScene, {
       root, camera, input,
@@ -961,7 +958,13 @@
     const all = (n) => 1 + n.children.reduce((sum, c) => sum + all(c), 0);
     return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...racers.stats(), ...items.stats(), sectors: track.sectors.length, phase };
   };
-  Object.assign(raceScene, { enter, update, overlay, onDonation, onKey, onLootCleared, leave, stats, liveGeometry });
+  const raceScene = BL.deferred.scene("race", {
+    id: "race", renderOpts: null, root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
+    enter, update, overlay, onDonation, onKey, onLootCleared, leave, stats, liveGeometry,
+    get inMotion() {
+      return phase === "countdown" || phase === "racing" || fx.inMotion;
+    }
+  });
   BL.scenes = BL.scenes || {};
   BL.scenes.race = raceScene;
 })();

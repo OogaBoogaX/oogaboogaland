@@ -61,6 +61,12 @@
     const setPilot = (name) => {
       el.pilotName.firstChild.data = BL.characters.displayOf(name);
     };
+    // A signed-in visitor with an Ooga flies it, as they drive only it on the island: the pilot stops cycling and
+    // says why.
+    const lockPilot = (locked) => {
+      el.pilot.disabled = locked;
+      el.pilot.title = locked ? "Signed in, you fly your own Ooga" : "";
+    };
     const button = (text, className, fn) => {
       const b = document.createElement("button");
       b.type = "button";
@@ -588,7 +594,7 @@
       show(null);
       el.buildBtn.hidden = true;
     };
-    return { el, MISSION, buildPalette, buildMission, setStep, renderStack, refreshBest, setPilot, setEva, setMeters, setAltimeter, show, setAlt, setSpeed, setStage, setBar, setGauge, center, notice, results, medalFor, dispose };
+    return { el, MISSION, buildPalette, buildMission, setStep, renderStack, refreshBest, setPilot, lockPilot, setEva, setMeters, setAltimeter, show, setAlt, setSpeed, setStage, setBar, setGauge, center, notice, results, medalFor, dispose };
   };
   BL.rocketHud = { create, medalFor, MEDALS };
 })();

@@ -11,9 +11,13 @@
     "deploy:staging": "npm --prefix .. run build:site && wrangler d1 migrations apply DB --remote --config ../wrangler.staging.jsonc && wrangler deploy --config ../wrangler.staging.jsonc",
     "deploy:production": "npm --prefix .. run build:site && wrangler d1 migrations apply DB --remote --config ../wrangler.production.jsonc && wrangler deploy --config ../wrangler.production.jsonc",
     "migrate:local": "wrangler d1 migrations apply DB --local --config ../wrangler.staging.jsonc",
-    "test": "node --test \"test/**/*.test.mjs\""
+    "test": "node --test \"test/**/*.test.mjs\"",
+    "eval": "npm --prefix .. run build:site --silent && node eval/run.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.141.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.1.0"
   }
 }

@@ -1,7 +1,7 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const { canvasRenderer } = BL;
+  const { iconRenderer: iconRendererMod } = BL;
   const { formatLarge } = BL.game;
   const { createNode, addChild, createCamera, boundsOf } = BL.scene;
   const STATE_LABELS = { working: "clank", chilling: "chill", sleeping: "sleep", away: "away", online: "online" };
@@ -62,6 +62,19 @@
         if (!box.classList.contains("show")) box.hidden = true;
       }, MESSAGE_FADE_MS);
     }, 2800);
+  };
+  // Page-owned recovery stays through scene visits, beside ordinary toasts such as payment notices.
+  let reloadOffered = false;
+  const offerReload = (message = "Ooga Booga Land was updated") => {
+    if (reloadOffered) return;
+    reloadOffered = true;
+    const box = $("reload-notice"), reload = document.createElement("button");
+    reload.type = "button"; reload.className = "link"; reload.textContent = "Reload";
+    reload.addEventListener("click", () => location.reload(), { once: true });
+    box.replaceChildren(`${message} · `, reload);
+    box.hidden = false;
+    $("message-stack").append(box);
+    box.classList.add("show");
   };
   const SHEET_STATE_KEY = "oogaboogaland.sheet.v1";
   const BOARD_STATE_KEY = "oogaboogaland.oogatron.windows.v1";
@@ -172,7 +185,7 @@
   const ICON_PX = 48;
   const renderIcon = (item) => {
     const canvas = document.createElement("canvas");
-    const iconRenderer = canvasRenderer.createRenderer(canvas, { width: ICON_PX, height: ICON_PX, transparent: true });
+    const iconRenderer = iconRendererMod.createRenderer(canvas, { width: ICON_PX, height: ICON_PX, transparent: true });
     const iconRoot = createNode();
     const node = item.buildNode();
     const bounds = boundsOf(node.geometry);
@@ -191,7 +204,7 @@
   // Draw the carried item's actual geometry, including likenesses and skins.
   // This owns only temporary icon nodes; the character's item is never reparented.
   const renderPrimaryIcon = (canvas, geometry, tall = false) => {
-    const renderer = canvasRenderer.createRenderer(canvas, { width: ICON_PX, height: ICON_PX, transparent: true });
+    const renderer = iconRendererMod.createRenderer(canvas, { width: ICON_PX, height: ICON_PX, transparent: true });
     const root = createNode(), pivot = createNode(), item = createNode({ geometry });
     const bounds = boundsOf(geometry), fit = (tall ? 0.52 : 0.67) / Math.max(bounds.radius, 0.05);
     item.scale.x = item.scale.y = item.scale.z = fit;
@@ -216,8 +229,8 @@
     for (const child of source.children) if (child.visible && !child.portraitHidden) addChild(copy, copyPortraitNode(child, portraitRoot, portraitGeometry));
     return copy;
   };
-  const renderFaceIcon = (canvas, cave, gorilla = null) => {
-    const renderer = canvasRenderer.createRenderer(canvas, { width: ICON_PX, height: ICON_PX, transparent: true });
+  const renderFaceIcon = (canvas, cave, gorilla = null, px = ICON_PX) => {
+    const renderer = iconRendererMod.createRenderer(canvas, { width: px, height: px, transparent: true });
     const source = gorilla ? gorilla.parts.head : cave.parts.head, geometry = gorilla ? source.geometry : cave.portraitHead;
     const root = createNode(), head = copyPortraitNode(source, source, geometry);
     const bounds = boundsOf(geometry), fit = (!gorilla && cave.traits.gasMask ? 0.68 : 0.78) / Math.max(bounds.radius, 0.05);
@@ -237,7 +250,29 @@
     renderer.render(root, camera);
     renderer.dispose();
   };
-  const create = ({ roster, catalog, tierColors, renderIcon, lootEnabled = false }) => {
+  // An Ooga standing square to the view, whole, as it stands posed now: its built parts copied (hidden ones left out)
+  // and turned to face the camera, `w` by `h` pixels. A podium's portraits (HALLOWEEN: the ghost hunt's winners).
+  const renderBodyIcon = (canvas, cave, w, h) => {
+    const renderer = iconRendererMod.createRenderer(canvas, { width: w, height: h, transparent: true });
+    const root = createNode(), body = copyPortraitNode(cave.root, null, null), tall = cave.bodyHeight;
+    body.visible = true;
+    body.position.x = body.position.z = 0;
+    body.position.y = cave.baseY;
+    body.rotation.x = body.rotation.y = body.rotation.z = 0;
+    addChild(root, body);
+    // Back far enough that the view's 28 degrees take in 1.2 of its height, for room over its head and under its feet.
+    const camera = createCamera({ fov: 28, near: 0.1, far: 40 }), fit = tall * 0.6 / Math.tan(14 * Math.PI / 180);
+    camera.position.x = 0; camera.position.y = tall * 0.55; camera.position.z = fit;
+    camera.target.x = 0; camera.target.y = tall * 0.5; camera.target.z = 0;
+    renderer.render(root, camera);
+    renderer.dispose();
+  };
+  // The sheet belongs to the page. Reuse attached rows across visits; only current roster names stay in this map.
+  const rosterNodes = new Map();
+  let rosterAway = null, donorRows = null, donationRows = null;
+  const create = ({ roster, catalog, tierColors, renderIcon, lootEnabled = false, healthEnabled = false, signal = null }) => {
+    const lifetime = signal ? null : new AbortController();
+    signal = signal || lifetime.signal;
     const el = {
       roster: $("roster"), rosterCount: $("roster-count"),
       statDonations: $("stat-donations"),
@@ -255,6 +290,10 @@
       lootCount: $("loot-count"),
       worldLootHint: $("world-loot-hint"),
       subtitle: $("subtitle"),
+      topbar: document.querySelector(".topbar"), brand: document.querySelector(".brand"),
+      clock: $("world-clock"), block: $("world-block"),
+      equipment: $("equipment-hud"), equipmentRow: document.querySelector(".weapon-equipment-row"),
+      micNote: $("mic-note"),
       actions: [...document.querySelectorAll("[data-action]")],
       board: $("board-modal"), boardTitle: $("board-title"), boardScreen: $("board-screen"), boardCaption: $("board-caption"), boardNote: $("board-note"),
       boardDots: $("board-dots"), boardPrev: $("board-prev"), boardNext: $("board-next"), boardHelp: $("board-help"),
@@ -294,10 +333,6 @@
       magazineLowAmmo: $("magazine-ammo-low"),
       magazineRearBananas: [...$("magazine-back").querySelectorAll(".magazine-banana")],
       jetpack: $("jetpack-hud"),
-      jetpackFuel: $("jetpack-fuel"),
-      jetpackFuelFill: $("jetpack-fuel-fill"),
-      jetpackFuelValue: $("jetpack-fuel-value"),
-      jetpackCompact: document.querySelector(".jetpack-compact"),
       jetpackCompactFuel: $("jetpack-fuel-compact"),
       jetpackCompactFill: $("jetpack-fuel-compact-fill"),
       messageStack: $("message-stack"),
@@ -346,32 +381,113 @@
     else el.sheet.style.setProperty("--sheet-height", `${sheetHeight}px`);
     // Ooga Chat has a tab only where a backend answered (chat.js), which the director learns before any scene.
     const sheetTab = savedSheet && (savedSheet.tab !== "loot" || lootEnabled) && (savedSheet.tab !== "chat" || BL.net.state.backend) ? savedSheet.tab : "roster";
+    // Dock below three times the 380px panel width; show two panels when two widths fit.
+    const bottomSheet = window.matchMedia("(width < 1140px)"), pairedSheet = window.matchMedia("(min-width: 760px)");
+    const showSheetPanels = (name) => {
+      const paired = bottomSheet.matches && pairedSheet.matches && (name === "bananas" || name === "roster");
+      el.sheet.dataset.dock = bottomSheet.matches ? "bottom" : "side";
+      el.sheet.dataset.paired = String(paired);
+      let moveFocus = false;
+      for (const panel of el.panels) {
+        const hidden = panel.dataset.panel !== name && !(paired && (panel.dataset.panel === "bananas" || panel.dataset.panel === "roster"));
+        if (hidden && panel.contains(document.activeElement)) moveFocus = true;
+        panel.hidden = hidden;
+      }
+      for (const tab of el.tabs) tab.setAttribute("aria-controls", paired && (tab.dataset.tab === "bananas" || tab.dataset.tab === "roster")
+        ? "bananas-panel roster-panel" : `${tab.dataset.tab}-panel`);
+      if (moveFocus) el.tabs.find((tab) => tab.dataset.tab === name)?.focus({ preventScroll: true });
+    };
     for (const tab of el.tabs) {
       tab.setAttribute("aria-selected", String(tab.dataset.tab === sheetTab));
       tab.tabIndex = tab.dataset.tab === sheetTab ? 0 : -1;
     }
-    for (const panel of el.panels) panel.hidden = panel.dataset.panel !== sheetTab;
+    showSheetPanels(sheetTab);
     el.sheet.dataset.open = String(!!savedSheet?.open);
     el.primary.hidden = true;
     el.gorillaSmash.hidden = true;
     el.mode.hidden = true;
     el.ownOoga.hidden = true;
+    el.mode.dataset.health = el.ownOoga.dataset.health = String(healthEnabled);
+    el.modeHealth.hidden = true;
+    el.ownOogaHealth.hidden = !healthEnabled;
     el.weapon.hidden = true;
     el.magazine.hidden = true;
     el.jetpack.hidden = true;
     const listeners = [];
     const on = (target, type, fn, opts) => {
-      target.addEventListener(type, fn, opts);
+      target.addEventListener(type, fn, typeof opts === "boolean" ? { capture: opts, signal } : { ...opts, signal });
       listeners.push(() => target.removeEventListener(type, fn, opts));
     };
+    // Fit the HUB controls between the title and clock when their actual visible widths allow it.
+    // Observers only schedule a pass after layout or equipment changes; ammo and animation never poll it.
+    if (document.body.dataset.activeScene === "hub") {
+      let bannerFrame = 0;
+      const bannerStyle = (node, property, value) => {
+        if (node.style.getPropertyValue(property) !== value) node.style.setProperty(property, value);
+      };
+      const fitBanner = () => {
+        bannerFrame = 0;
+        if (document.body.dataset.activeScene !== "hub") return;
+        const brand = el.brand.getBoundingClientRect(), clock = el.clock.getBoundingClientRect(), block = el.block.getBoundingClientRect();
+        const topbar = getComputedStyle(el.topbar), row = getComputedStyle(el.equipmentRow);
+        const fontSize = parseFloat(getComputedStyle(el.clock).fontSize) || 22;
+        const scale = Math.max(0.7, Math.min(0.85, 0.7 + (fontSize - 13) / 60));
+        const leftEdge = brand.right + 12, available = Math.min(clock.left, block.left) - 12 - leftEdge;
+        let compactWidth = 0, count = 0, expanded = false;
+        for (const button of el.equipmentRow.children) {
+          if (button.hidden || getComputedStyle(button).display === "none") continue;
+          compactWidth += button === el.weapon ? 78 : button.offsetWidth;
+          if (button === el.weapon) expanded = button.dataset.equipped === "true";
+          count++;
+        }
+        compactWidth += Math.max(0, count - 1) * (parseFloat(row.columnGap) || 0);
+        const banner = (compactWidth + (expanded ? 140 : 0)) * scale <= available ? "full"
+          : compactWidth * scale <= available ? "compact" : "below";
+        const paddingLeft = parseFloat(topbar.paddingLeft) || 0, paddingRight = parseFloat(topbar.paddingRight) || 0;
+        const topEdge = Math.min(brand.top, clock.top, block.top), bottomEdge = Math.max(brand.bottom, clock.bottom, block.bottom);
+        const top = banner === "below" ? bottomEdge + 12 : (topEdge + bottomEdge - 52 * scale) / 2;
+        if (el.equipment.dataset.banner !== banner) el.equipment.dataset.banner = banner;
+        bannerStyle(el.equipment, "--hub-equipment-scale", String(scale));
+        bannerStyle(el.equipment, "--hub-equipment-left", `${banner === "below" ? paddingLeft : leftEdge}px`);
+        bannerStyle(el.equipment, "--hub-equipment-top", `${top}px`);
+        bannerStyle(el.equipment, "--hub-equipment-width", `${Math.max(0, window.innerWidth - paddingLeft - paddingRight) / scale}px`);
+        const bottom = `${top + el.equipmentRow.offsetHeight * scale + 8}px`;
+        bannerStyle(el.messageStack, "--hub-equipment-bottom", bottom);
+        bannerStyle(el.micNote, "--hub-equipment-bottom", bottom);
+      };
+      const scheduleBanner = () => {
+        if (!bannerFrame) bannerFrame = window.requestAnimationFrame(fitBanner);
+      };
+      const bannerResize = new ResizeObserver(scheduleBanner), bannerEquipment = new MutationObserver(scheduleBanner);
+      for (const node of [el.brand, el.clock, el.block, el.equipmentRow]) bannerResize.observe(node);
+      for (const button of el.equipmentRow.children) bannerEquipment.observe(button, {
+        attributes: true, attributeFilter: button === el.weapon ? ["hidden", "data-equipped"] : ["hidden"]
+      });
+      on(window, "resize", scheduleBanner);
+      listeners.push(() => {
+        bannerResize.disconnect();
+        bannerEquipment.disconnect();
+        window.cancelAnimationFrame(bannerFrame);
+        delete el.equipment.dataset.banner;
+        for (const property of ["--hub-equipment-scale", "--hub-equipment-left", "--hub-equipment-top", "--hub-equipment-width"]) el.equipment.style.removeProperty(property);
+        el.messageStack.style.removeProperty("--hub-equipment-bottom");
+        el.micNote.style.removeProperty("--hub-equipment-bottom");
+      });
+      scheduleBanner();
+    }
     let hintTimer = 0, hintHideTimer = 0, copyTimer = 0;
     const rosterRows = new Map();
     let showAway = false, awayCount = 0, awayShownCount = -1, awayShownShow = null, onlineCount = 0, onlineShown = -1;
-    const awayRow = document.createElement("li"), awayButton = document.createElement("button");
-    awayRow.className = "roster-away";
-    awayButton.type = "button";
+    if (!rosterAway) {
+      const li = document.createElement("li"), button = document.createElement("button");
+      li.className = "roster-away"; button.type = "button"; li.append(button);
+      rosterAway = { li, button };
+    }
+    const awayRow = rosterAway.li, awayButton = rosterAway.button;
     awayButton.setAttribute("aria-expanded", "false");
-    awayRow.append(awayButton);
+    awayRow.remove();
+    const names = new Set(roster.map(contributor => contributor.name));
+    for (const [name, row] of rosterNodes) if (!names.has(name)) { row.li.remove(); rosterNodes.delete(name); }
     // countAway rescans on every roster state flip and online toggle; skip the writes until they change.
     // The title's chip counts the players online, or the cast while nobody is.
     const updateAwayButton = () => {
@@ -391,43 +507,35 @@
       (b.lastContributionAt || b.lastCommitAt) - (a.lastContributionAt || a.lastCommitAt));
     for (let rosterIndex = 0; rosterIndex < orderedRoster.length; rosterIndex++) {
       const contributor = orderedRoster[rosterIndex];
-      const li = document.createElement("li");
-      li.dataset.name = contributor.name;
-      const presence = document.createElement("span");
-      presence.className = "roster-presence";
-      presence.dataset.online = "false";
-      presence.setAttribute("role", "img");
-      presence.setAttribute("aria-label", "Offline");
-      presence.title = "Offline";
-      const name = document.createElement("span");
-      name.className = "roster-name";
-      name.textContent = contributor.display;
-      // The signed-in player on this Ooga, when there is one: the room's host and their voice.
-      const marks = document.createElement("span"), host = document.createElement("span"), voice = document.createElement("button");
-      marks.className = "roster-marks";
-      host.className = "roster-host";
-      host.hidden = true;
-      host.setAttribute("role", "img");
-      host.setAttribute("aria-label", "Host: runs the Oogas for everyone");
-      host.title = "Host: runs the Oogas for everyone";
-      voice.className = "roster-voice";
-      voice.type = "button";
-      voice.hidden = true;
-      voice.append(voiceIcon.cloneNode(true));
-      marks.append(host, voice);
-      const age = document.createElement("span");
-      age.className = "roster-age";
-      age.append(BL.contributors.contributionAgeLabel(contributor));
-      const state = document.createElement("span");
-      state.className = "roster-state";
-      const activity = BL.contributors.contributionStateFor(contributor);
-      state.dataset.state = activity;
-      state.append(STATE_LABELS[activity]);
-      if (activity === "away") {
-        if (!awayRow.parentElement) el.roster.append(awayRow);
-        li.hidden = true; awayCount++;
+      let nodes = rosterNodes.get(contributor.name);
+      if (!nodes) {
+        const li = document.createElement("li"), presence = document.createElement("span"), name = document.createElement("span");
+        li.dataset.name = contributor.name;
+        presence.className = "roster-presence"; presence.setAttribute("role", "img");
+        name.className = "roster-name";
+        const marks = document.createElement("span"), host = document.createElement("span"), voice = document.createElement("button");
+        marks.className = "roster-marks"; host.className = "roster-host";
+        host.setAttribute("role", "img"); host.setAttribute("aria-label", "Host: runs the Oogas for everyone");
+        host.title = "Host: runs the Oogas for everyone";
+        voice.className = "roster-voice"; voice.type = "button"; voice.append(voiceIcon.cloneNode(true));
+        marks.append(host, voice);
+        const age = document.createElement("span"), state = document.createElement("span");
+        age.className = "roster-age"; age.append(""); state.className = "roster-state"; state.append("");
+        li.append(presence, name, marks, age, state);
+        nodes = { li, presence, name, host, voice, age, state };
+        rosterNodes.set(contributor.name, nodes);
       }
-      li.append(presence, name, marks, age, state);
+      const { li, presence, name, host, voice, age, state } = nodes;
+      if (name.textContent !== contributor.display) name.textContent = contributor.display;
+      presence.dataset.online = "false"; presence.setAttribute("aria-label", "Offline"); presence.title = "Offline";
+      host.hidden = voice.hidden = true; voice.disabled = false;
+      voice.dataset.voice = voice.dataset.login = ""; voice.dataset.self = "false";
+      const activity = BL.contributors.contributionStateFor(contributor), ageText = BL.contributors.contributionAgeLabel(contributor);
+      if (age.firstChild.data !== ageText) age.firstChild.data = ageText;
+      state.dataset.state = activity;
+      if (state.firstChild.data !== STATE_LABELS[activity]) state.firstChild.data = STATE_LABELS[activity];
+      li.hidden = activity === "away";
+      if (activity === "away") { if (!awayRow.parentElement) el.roster.append(awayRow); awayCount++; }
       el.roster.append(li);
       rosterRows.set(contributor.name, { li, presence, state, age, contributor, rosterIndex, online: false, sceneOnline: false, remoteOnline: false, netOnline: false, nextOnline: false, placedStamp: stampOf(contributor), host, voice, look: "", login: "", hostOn: false, blocked: false, self: false, nextLook: "", nextLogin: "", nextHost: false, nextSelf: false });
     }
@@ -518,7 +626,7 @@
     showVoices();
     // Value the donated sats at the current price; donor rankings retain their receipt prices.
     const showBananaRate = () => {
-      if (document.hidden || el.bananaPanel.hidden || el.sheet.dataset.open !== "true") return;
+      if (document.hidden || el.sheet.hidden || el.bananaPanel.hidden || el.sheet.dataset.open !== "true") return;
       const rate = currentDonationRate(), total = donationValueText();
       const tone = !rate ? "wait" : rate.stale ? "stale" : rate.live ? "live" : "idle";
       const label = tone === "live" ? "LIVE BTCUSD" : tone === "stale" ? "STALE BTCUSD" : "BTCUSD";
@@ -532,7 +640,7 @@
     };
     let stopBananaRate = null, pileValueVisible = false;
     const watchBananaRate = () => {
-      const visible = !document.hidden && (pileValueVisible || !el.bananaPanel.hidden && el.sheet.dataset.open === "true");
+      const visible = !document.hidden && (pileValueVisible || !el.sheet.hidden && !el.bananaPanel.hidden && el.sheet.dataset.open === "true");
       if (visible && !stopBananaRate) stopBananaRate = BL.donationRate.watch(showBananaRate);
       else if (!visible && stopBananaRate) { stopBananaRate(); stopBananaRate = null; }
       if (visible) showBananaRate();
@@ -544,7 +652,7 @@
     };
     const bananaRateObserver = new MutationObserver(watchBananaRate);
     bananaRateObserver.observe(el.bananaPanel, { attributes: true, attributeFilter: ["hidden"] });
-    bananaRateObserver.observe(el.sheet, { attributes: true, attributeFilter: ["data-open"] });
+    bananaRateObserver.observe(el.sheet, { attributes: true, attributeFilter: ["data-open", "hidden"] });
     on(document, "visibilitychange", watchBananaRate);
     listeners.push(() => {
       bananaRateObserver.disconnect();
@@ -552,7 +660,7 @@
     });
     watchBananaRate();
     // A fixed pool, so the DOM never grows with donations.
-    const recentRows = Array.from({ length: BL.donations.RECENT_MAX }, () => {
+    const recentRows = donationRows || (donationRows = Array.from({ length: BL.donations.RECENT_MAX }, () => {
       const li = document.createElement("li"), name = document.createElement("span"), label = document.createTextNode("");
       const badge = document.createElement("span"), amount = document.createElement("strong"), message = document.createElement("p");
       // Every text node exists from the start, so filling a row later adds nothing to the DOM.
@@ -574,7 +682,16 @@
       li.hidden = true;
       el.bananaRecent.append(li);
       return { li, name, label, badge, amountText, message, messageText };
-    });
+    }));
+    const leaderRows = donorRows || (donorRows = Array.from({ length: 10 }, (_, i) => {
+      const li = document.createElement("li"), rank = document.createElement("span"), name = document.createElement("span"), amount = document.createElement("strong");
+      const nameText = document.createTextNode(""), amountText = document.createTextNode("");
+      rank.className = "banana-rank"; rank.textContent = String(i + 1).padStart(2, "0");
+      name.className = "banana-donor"; name.append(nameText);
+      amount.className = "banana-amount"; amount.append(amountText);
+      li.append(rank, name, amount); li.hidden = true; el.bananaLeaders.append(li);
+      return { li, name, nameText, amountText };
+    }));
     // The recent list's checkbox keeps it to tips at or above the message bar, remembered in this browser.
     const RECENT_BAR_KEY = "ooga-recent-bar";
     let recentBarOnly = false;
@@ -608,15 +725,15 @@
       const ranked = missingSats ? [] : real ? entries || [] : (entries || []).slice().sort((a, b) =>
         b[donorUnit] - a[donorUnit] || b[donorUnit === "bananas" ? "sats" : "bananas"] - a[donorUnit === "bananas" ? "sats" : "bananas"]
         || a.handle.localeCompare(b.handle));
-      el.bananaLeaders.replaceChildren();
-      for (let i = 0; i < Math.min(10, ranked.length); i++) {
-        const entry = ranked[i], row = document.createElement("li");
-        const rank = document.createElement("span"), name = document.createElement("span"), amount = document.createElement("strong");
-        rank.className = "banana-rank"; rank.textContent = String(i + 1).padStart(2, "0");
-        name.className = "banana-donor"; name.textContent = entry.handle ? `@${entry.handle}` : "Anonymous";
-        if (!entry.handle) name.dataset.anon = "true";
-        amount.className = "banana-amount"; amount.textContent = (donorUnit === "sats" ? BANANA_COUNT : DONOR_BANANAS).format(entry[donorUnit]);
-        row.append(rank, name, amount); el.bananaLeaders.append(row);
+      for (let i = 0; i < leaderRows.length; i++) {
+        const entry = ranked[i], row = leaderRows[i];
+        row.li.hidden = !entry;
+        if (!entry) continue;
+        const name = entry.handle ? `@${entry.handle}` : "Anonymous";
+        const amount = (donorUnit === "sats" ? BANANA_COUNT : DONOR_BANANAS).format(entry[donorUnit]);
+        if (row.nameText.data !== name) row.nameText.data = name;
+        if (row.amountText.data !== amount) row.amountText.data = amount;
+        row.name.dataset.anon = String(!entry.handle);
       }
       el.bananaEmpty.hidden = ranked.length > 0;
       el.bananaEmpty.textContent = missingSats ? "Sat totals are not available from the donation feed yet."
@@ -716,7 +833,7 @@
       detachedNameShown = true;
       el.modeDestinationName.classList.add("show");
     };
-    let gorillaEntry = null, gorillaView = "orbit", gorillaCombat = false;
+    let gorillaEntry = null, gorillaView = "orbit", gorillaCombat = false, gorillaCombatEnabled = true;
     let modeName = "", modeGeometry = null, modeSelected = false, modeCombat = false, modeView = "detached", modeHealth = -1, modeHealthMax = 0, modeGorilla = false;
     let modeCave = null, modeVisible = true, retakePortraitActor = null, retakeGeometry = null, retakePortraitGeometry = null, retakeHealth = -1, retakeHealthMax = 0;
     const retake = { actor: null, gorilla: false };
@@ -737,12 +854,13 @@
           el.ownOoga.setAttribute("aria-label", label);
           el.ownOoga.title = label;
           el.ownOoga.dataset.gorilla = String(!!gorilla);
-          el.ownOogaHealth.setAttribute("aria-label", `${gorilla ? "Gorilla" : "Ooga"} health: ${name}`);
+          if (healthEnabled) el.ownOogaHealth.setAttribute("aria-label", `${gorilla ? "Gorilla" : "Ooga"} health: ${name}`);
         }
         retakePortraitActor = actor;
         retakeGeometry = geometry;
         retakePortraitGeometry = portraitGeometry;
       }
+      if (!healthEnabled) return;
       const source = actor.health, max = source ? source.max : BL.crew.HEALTH_MAX;
       const health = source ? Math.max(0, Math.min(max, source.value)) : max;
       if (health !== retakeHealth || max !== retakeHealthMax) {
@@ -754,17 +872,18 @@
     };
     // Legacy account updates never replace the last actor successfully controlled.
     const setOwnOoga = () => syncRetakeActor();
-    const setMode = (cave, combat = false, view = cave ? "orbit" : "detached", visible = true) => {
+    let modeCombatEnabled = true;
+    const setMode = (cave, combat = false, view = cave ? "orbit" : "detached", visible = true, combatEnabled = true) => {
       const gorilla = gorillaEntry ? gorillaEntry.gorilla : null;
       modeCave = gorilla ? null : cave;
       modeVisible = visible;
       if (gorillaEntry || cave) { retake.actor = gorillaEntry || cave; retake.gorilla = !!gorillaEntry; }
       syncRetakeActor();
-      if (gorilla) { cave = gorillaEntry.owner; combat = gorillaCombat; view = gorillaView; visible = true; }
+      if (gorilla) { cave = gorillaEntry.owner; combat = gorillaCombat; view = gorillaView; visible = true; combatEnabled = gorillaCombatEnabled; }
       const selected = !!cave, name = selected ? cave.traits.name : "", shown = selected ? cave.traits.display : "";
       if (!visible) fadeDetachedName(true);
       const identityChanged = selected !== modeSelected || selected && name !== modeName || !!gorilla !== modeGorilla;
-      const stateChanged = combat !== modeCombat || view !== modeView;
+      const stateChanged = combat !== modeCombat || view !== modeView || combatEnabled !== modeCombatEnabled;
       const showMode = visible && selected;
       if (el.mode.hidden === showMode) el.mode.hidden = !showMode;
       const showDestinations = visible && destinationNames.length > 0;
@@ -782,30 +901,34 @@
         el.mode.dataset.selected = String(selected);
       }
       if (el.modeFace.hidden === selected) el.modeFace.hidden = !selected;
-      const showHealth = selected;
+      const showHealth = healthEnabled && selected;
       if (el.modeHealth.hidden === showHealth) el.modeHealth.hidden = !showHealth;
-      const sourceHealth = gorilla ? gorillaEntry.health : cave && cave.health;
-      const healthMax = sourceHealth ? sourceHealth.max : BL.crew.HEALTH_MAX;
-      const health = sourceHealth ? Math.max(0, Math.min(healthMax, sourceHealth.value)) : healthMax;
-      if (health !== modeHealth || healthMax !== modeHealthMax) {
-        modeHealth = health;
-        modeHealthMax = healthMax;
-        el.modeHealthFill.style.transform = `scaleY(${health / healthMax})`;
-        el.modeHealth.setAttribute("aria-valuemax", String(healthMax));
-        el.modeHealth.setAttribute("aria-valuenow", String(Math.ceil(health)));
+      if (showHealth) {
+        const sourceHealth = gorilla ? gorillaEntry.health : cave && cave.health;
+        const healthMax = sourceHealth ? sourceHealth.max : BL.crew.HEALTH_MAX;
+        const health = sourceHealth ? Math.max(0, Math.min(healthMax, sourceHealth.value)) : healthMax;
+        if (health !== modeHealth || healthMax !== modeHealthMax) {
+          modeHealth = health;
+          modeHealthMax = healthMax;
+          el.modeHealthFill.style.transform = `scaleY(${health / healthMax})`;
+          el.modeHealth.setAttribute("aria-valuemax", String(healthMax));
+          el.modeHealth.setAttribute("aria-valuenow", String(Math.ceil(health)));
+        }
       }
-      if (stateChanged) { modeCombat = combat; modeView = view; }
+      if (stateChanged) { modeCombat = combat; modeView = view; modeCombatEnabled = combatEnabled; }
       if (identityChanged || stateChanged) {
-        el.mode.dataset.shooter = String(selected && combat);
+        el.mode.dataset.shooter = String(selected && combat && combatEnabled);
         el.mode.dataset.combat = String(selected && combat);
         el.mode.dataset.view = selected ? view : "detached";
         el.mode.setAttribute("aria-pressed", String(selected && combat));
+        const look = combatEnabled || gorilla ? combat ? "combat" : "carry" : combat ? "cursor look" : "drag to look";
+        const change = combatEnabled || gorilla ? "combat or carry mode" : "cursor look or click-and-drag look";
         el.mode.setAttribute("aria-label", gorilla
-          ? `${shown}'s gorilla; ${view} view; ${combat ? "combat" : "carry"} mode. Press to switch combat or carry mode; hold to detach`
+          ? `${shown}'s gorilla; ${view} view; ${look}. Press to switch ${change}; hold to detach`
           : selected
-          ? `${shown}; ${view} view; ${combat ? "combat" : "carry"} mode. Press to switch combat or carry mode; hold to detach`
+          ? `${shown}; ${view} view; ${look}. Press to switch ${change}; hold to detach`
           : `${DETACHED_NAMES[detachedPreset]} detached view. Press to cycle destinations`);
-        el.mode.title = gorilla ? `${shown}'s gorilla · ${view} · ${combat ? "combat" : "carry"} · hold to detach` : selected ? `${shown} · ${view} · ${combat ? "combat" : "carry"} · hold to detach` : `${DETACHED_NAMES[detachedPreset]} · detached`;
+        el.mode.title = gorilla ? `${shown}'s gorilla · ${view} · ${look} · hold to detach` : selected ? `${shown} · ${view} · ${look} · hold to detach` : `${DETACHED_NAMES[detachedPreset]} · detached`;
       }
     };
     setDetachedView(detachedPreset);
@@ -1012,24 +1135,21 @@
       const level = fuel < 0.2 ? "low" : "ok";
       if (level !== jetpackLevel) {
         jetpackLevel = level;
-        el.jetpackFuel.dataset.level = level;
         el.jetpackCompactFuel.dataset.level = level;
       }
       if (percent === jetpackPercent) return;
       jetpackPercent = percent;
-      el.jetpackFuelFill.style.transform = `scaleX(${percent / 100})`;
       el.jetpackCompactFill.style.transform = `scaleY(${percent / 100})`;
-      el.jetpackFuel.setAttribute("aria-valuenow", String(percent));
       el.jetpackCompactFuel.setAttribute("aria-valuenow", String(percent));
-      el.jetpackFuelValue.firstChild.data = `${percent}%`;
     };
-    const setGorilla = (entry, view = "orbit", combat = false) => {
-      if (entry === gorillaEntry && view === gorillaView && combat === gorillaCombat) { syncRetakeActor(); return; }
+    const setGorilla = (entry, view = "orbit", combat = false, combatEnabled = true) => {
+      if (entry === gorillaEntry && view === gorillaView && combat === gorillaCombat && combatEnabled === gorillaCombatEnabled) { syncRetakeActor(); return; }
       if (entry !== gorillaEntry) finishPrimary(true);
       gorillaEntry = entry;
       gorillaView = view;
       gorillaCombat = combat;
-      el.gorillaSmash.hidden = !entry;
+      gorillaCombatEnabled = combatEnabled;
+      el.gorillaSmash.hidden = !entry || !combatEnabled;
       el.primary.hidden = !primaryShown || !!entry;
       el.weapon.hidden = !weaponShown || !!entry;
       el.jetpack.hidden = !jetpackShown || !!entry;
@@ -1063,6 +1183,7 @@
       BL.donationPopup.open(!BL.donations.real);
     };
     const floatingBoards = [];
+    let panelsHidden = false;
     const stackBoards = () => {
       for (let i = 0; i < floatingBoards.length; i++) floatingBoards[i].setLayer(20 + i);
     };
@@ -1085,7 +1206,7 @@
     const createBoardWindow = (node, floatingId = 0, saved = null) => {
       const el = { board: node };
       const ids = {
-        boardTitle: "board-title", boardScreen: "board-screen", boardCaption: "board-caption", boardNote: "board-note",
+        boardTitle: "board-title", boardScreen: "board-screen", boardCaption: "board-caption", boardNote: "board-note", boardLinks: "board-links",
         boardDots: "board-dots", boardPrev: "board-prev", boardNext: "board-next", boardHelp: "board-help",
         boardHead: "board-head", boardPause: "board-pause", boardResize: "board-resize",
         boardFilter: "board-filter", boardFilterMenu: "board-filter-menu", boardFilterList: "board-filter-list", boardRollup: "board-rollup",
@@ -1107,12 +1228,12 @@
       el.boardFilterTypes.setAttribute("aria-controls", el.boardFilterList.id);
       const boardListeners = [];
       const on = (target, type, fn, options) => {
-        target.addEventListener(type, fn, options);
+        target.addEventListener(type, fn, typeof options === "boolean" ? { capture: options, signal } : { ...options, signal });
         boardListeners.push(() => target.removeEventListener(type, fn, options));
       };
       // Each window copies a readable board's canvas and owns its controls.
       // A board is any object with `title`, `help`, `canvas`, `count`, `index`, `caption`, `note`, `version` and
-      // `go(index)`, plus optional `wide` and `captionAbove` layouts. The dialog copies the canvas, captions the page, lays one dot per page and pages with the
+      // `go(index)`, plus optional `wide` and `captionAbove` layouts and a `link` out ({ href, label }, opened in a new tab). The dialog copies the canvas, captions the page, lays one dot per page and pages with the
       // chevrons, the dots and the arrow keys; it never learns what a board shows, so a board can change freely.
       // `updateBoard` repaints whenever the open board's version moves.
       // A `floating` board also supplies `paused` and `setPaused`, and keeps island input available.
@@ -1364,7 +1485,7 @@
       on(el.board, "lostpointercapture", endBoardPointer);
       on(window, "blur", finishBoardPointer);
       on(window, "resize", () => {
-        if (board?.floating) { layoutBoard(); placeBoard(); scheduleBoardSave(); }
+        if (board?.floating && !panelsHidden) { layoutBoard(); placeBoard(); scheduleBoardSave(); }
       });
       on(el.boardResize, "keydown", (e) => {
         let step;
@@ -1392,6 +1513,22 @@
         el.boardCaption.textContent = board.caption;
         el.boardNote.textContent = board.note || "";
         el.boardNote.hidden = !!board.floating || !board.note;
+        // A board's links out, one anchor each under its note, made the first time a board needs that many.
+        const links = board.links || [];
+        el.boardLinks.hidden = !links.length;
+        for (let i = el.boardLinks.children.length; i < links.length; i++) {
+          const a = document.createElement("a");
+          a.className = "board-link";
+          a.target = "_blank";
+          a.rel = "noopener noreferrer";
+          a.referrerPolicy = "no-referrer";
+          el.boardLinks.append(a);
+        }
+        for (let i = 0; i < el.boardLinks.children.length; i++) {
+          const a = el.boardLinks.children[i];
+          a.hidden = i >= links.length;
+          if (i < links.length) { a.href = links[i].href; a.textContent = links[i].label; }
+        }
         if (board.floating || board.carousel) paintBoardPause();
         if (board.floating) {
           el.boardRollup.checked = board.rollup;
@@ -1578,6 +1715,19 @@
       });
       const controller = {
         open: openBoard, close: closeBoard, update: updateBoard,
+        setHidden(on) {
+          if (el.board.hidden === on) return;
+          finishBoardPointer();
+          if (on && el.board.contains(document.activeElement)) document.activeElement.blur();
+          el.board.hidden = on;
+          if (!on && board) {
+            // Resume this screen's rotation from now, without changing its pause setting.
+            board.go(board.index);
+            updateBoard();
+            layoutBoard();
+            placeBoard();
+          }
+        },
         escape() { if (!el.boardFilterMenu.hidden) showFilters(false); else closeBoard(); },
         bounds: boardBounds,
         setLayer(layer) { el.board.style.zIndex = String(layer); },
@@ -1601,6 +1751,7 @@
       el.board.parentElement.append(node);
       floatingBoards.push(popup);
       popup.open(next.createReader(saved));
+      if (panelsHidden) popup.setHidden(true);
       stackBoards();
       return popup;
     };
@@ -1618,6 +1769,7 @@
     };
     const openBoard = (next) => {
       if (!next.floating) { mainBoard.open(next); return; }
+      if (panelsHidden) return;
       restoreBoards(next);
       lastBoard = openFloatingBoard(next);
       scheduleBoardSave();
@@ -1632,7 +1784,17 @@
     };
     const updateBoard = (elapsed) => {
       mainBoard.update(elapsed);
-      for (let i = 0; i < floatingBoards.length; i++) floatingBoards[i].update(elapsed);
+      if (!panelsHidden) for (let i = 0; i < floatingBoards.length; i++) floatingBoards[i].update(elapsed);
+    };
+    // A hunt borrows the play area without changing the visitor's saved panel choices.
+    const setPanelsHidden = (on) => {
+      on = !!on;
+      if (on === panelsHidden) return;
+      finishSheetResize();
+      if (on && el.sheet.contains(document.activeElement)) document.activeElement.blur();
+      panelsHidden = on;
+      el.sheet.hidden = on;
+      for (const popup of floatingBoards) popup.setHidden(on);
     };
     const openRecipe = () => {
       if (!el.recipe.open) el.recipe.showModal();
@@ -1782,116 +1944,130 @@
       const panel = document.getElementById(b.dataset.fold);
       panel.dataset.folded = String(panel.dataset.folded !== "true");
     });
-    let tipText = "", tipState = "", tipHealth = -1, tipHealthMax = -1, tipW = 0, tipH = 0, tipCave = null, tipName = false, tipLeft = NaN, tipTop = NaN;
-    let tipVisibility = null, tipSpeechTop = Infinity, tipSpeechAlpha = 0;
-    const tipScreen = { x: 0, y: 0, depth: 0 };
-    // A tooltip's box depends only on its text, its name/no-status-dot classes (the health bar rides
-    // on the name class) and the viewport width (the name class's max-width), so a tooltip measured
-    // before never needs the offset reads' forced layout again. A 0x0 read is a drag-hid tooltip
-    // (body.orbit-dragging / mine-dragging): never cached, so the first real hover measures again.
-    const tipSizeCache = new Map();
-    const placeTooltip = (left, top) => {
-      left = Math.round(left); top = Math.round(top);
-      if (left === tipLeft && top === tipTop) return;
-      tipLeft = left; tipTop = top;
-      el.tooltip.style.transform = `translate(${left}px, ${top}px)`;
-    };
-    const tooltip = {
-      show: (text, x, y, cave = null, noStatusDot = false, above = false) => {
-        if (cave !== tipCave) { tipSpeechTop = Infinity; tipSpeechAlpha = 0; }
-        tipCave = cave;
-        const name = !!cave;
-        const changed = text !== tipText || name !== tipName || el.tooltip.classList.contains("tooltip--no-status-dot") !== noStatusDot;
-        el.tooltip.classList.toggle("tooltip--no-status-dot", noStatusDot);
-        if (name !== tipName) {
-          tipName = name;
-          el.tooltip.classList.toggle("tooltip--name", name);
-          el.tooltipHealth.hidden = !name;
-          if (!name) {
-            tipState = "";
-            tipHealth = tipHealthMax = -1;
-            delete el.tooltip.dataset.state;
-            el.tooltip.removeAttribute("aria-label");
+    // Hover owns one bounded nameplate.
+    const createTooltip = (element, textElement, healthElement, healthFillElement, showHealth = healthEnabled) => {
+      let tipText = "", tipState = "", tipHealth = -1, tipHealthMax = -1, tipW = 0, tipH = 0, tipCave = null, tipName = false, tipLeft = NaN, tipTop = NaN;
+      let tipVisibility = null, tipSpeechBottom = -Infinity, tipNoStatusDot = false, tipViewport = 0;
+      const tipScreen = { x: 0, y: 0, depth: 0 };
+      // A tooltip's box depends only on its text, its name/no-status-dot classes (the health bar rides
+      // on the name class) and the viewport width (the name class's max-width), so a tooltip measured
+      // before never needs the offset reads' forced layout again. A 0x0 read is a drag-hid tooltip
+      // (body.orbit-dragging / mine-dragging): never cached, so the first real hover measures again.
+      const tipSizeCache = new Map();
+      const measureTooltip = () => {
+        tipViewport = window.innerWidth;
+        const key = `${tipName}\0${tipNoStatusDot}\0${tipViewport}\0${tipText}`, size = tipSizeCache.get(key);
+        if (size) {
+          tipW = size.w; tipH = size.h;
+        } else {
+          tipW = element.offsetWidth; tipH = element.offsetHeight;
+          if (tipW || tipH) {
+            if (tipSizeCache.size >= 64) tipSizeCache.clear();
+            tipSizeCache.set(key, { w: tipW, h: tipH });
           }
         }
-        el.tooltip.hidden = false;
-        if (changed) {
-          tipText = text;
-          tipState = "";
-          el.tooltipText.textContent = text;
-          const size = tipSizeCache.get(`${tipName}\0${noStatusDot}\0${window.innerWidth}\0${text}`);
-          if (size) {
-            tipW = size.w;
-            tipH = size.h;
-          } else {
-            tipW = el.tooltip.offsetWidth;
-            tipH = el.tooltip.offsetHeight;
-            if (tipW || tipH) {
-              if (tipSizeCache.size >= 64) tipSizeCache.clear();
-              tipSizeCache.set(`${tipName}\0${noStatusDot}\0${window.innerWidth}\0${text}`, { w: tipW, h: tipH });
+      };
+      const placeTooltip = (left, top) => {
+        left = Math.round(left); top = Math.round(top);
+        if (left === tipLeft && top === tipTop) return;
+        tipLeft = left; tipTop = top;
+        element.style.transform = `translate(${left}px, ${top}px)`;
+      };
+      const tooltip = {
+        show: (text, x, y, cave = null, noStatusDot = false, above = false) => {
+          if (cave !== tipCave) tipSpeechBottom = -Infinity;
+          tipCave = cave;
+          const name = !!cave;
+          const changed = text !== tipText || name !== tipName || element.classList.contains("tooltip--no-status-dot") !== noStatusDot;
+          element.classList.toggle("tooltip--no-status-dot", noStatusDot);
+          if (name !== tipName) {
+            tipName = name;
+            element.classList.toggle("tooltip--name", name);
+            healthElement.hidden = !showHealth || !name;
+            if (!name) {
+              tipState = "";
+              tipHealth = tipHealthMax = -1;
+              delete element.dataset.state;
+              element.removeAttribute("aria-label");
             }
           }
+          element.hidden = false;
+          if (changed) {
+            tipText = text;
+            tipState = "";
+            textElement.textContent = text;
+            tipNoStatusDot = noStatusDot;
+            measureTooltip();
+          }
+          if (cave) {
+            tooltip.update();
+            return;
+          }
+          const w = tipW, h = tipH;
+          const left = above ? Math.max(8, Math.min(window.innerWidth - w - 8, x - w / 2)) : Math.min(window.innerWidth - w - 8, x + 14);
+          const top = above ? Math.max(8, y - h - 10) : y + 18 + h > window.innerHeight ? y - h - 10 : y + 18;
+          placeTooltip(left, top);
+        },
+        setVisibility: (visibility) => {
+          tipVisibility = visibility;
+          if (!visibility) tooltip.hide();
+        },
+        get visibility() { return tipVisibility; },
+        beginFrame: () => {
+          tipSpeechBottom = -Infinity;
+          tooltip.update(false);
+        },
+        update: (place = true) => {
+          if (!tipCave) return;
+          const state = statusFor(tipCave);
+          let healthChanged = false;
+          if (showHealth) {
+            const healthMax = tipCave.health && tipCave.health.max || BL.crew.HEALTH_MAX;
+            const health = tipCave.health ? Math.max(0, Math.min(healthMax, tipCave.health.value)) : healthMax;
+            healthChanged = health !== tipHealth || healthMax !== tipHealthMax;
+            if (healthChanged) {
+              tipHealth = health; tipHealthMax = healthMax;
+              healthFillElement.style.transform = `scaleX(${health / healthMax})`;
+              healthElement.setAttribute("aria-valuemax", String(healthMax));
+              healthElement.setAttribute("aria-valuenow", String(Math.ceil(health)));
+            }
+          }
+          if (state !== tipState || healthChanged) {
+            tipState = state;
+            element.dataset.state = state;
+            element.setAttribute("aria-label", showHealth
+              ? `${tipText}, ${STATE_LABELS[state]}, ${Math.ceil(tipHealth)} of ${tipHealthMax} health`
+              : `${tipText}, ${STATE_LABELS[state]}`);
+          }
+          element.hidden = !tipVisibility || !tipVisibility.anchor(tipCave, tipScreen);
+          if (element.hidden) return;
+          if (tipViewport !== window.innerWidth) measureTooltip();
+          if (!place) return;
+          // Speech can push the name down at the top edge, where the bubble has no room to rise.
+          const top = Math.max(8, tipScreen.y - 2 - tipH, tipSpeechBottom + 6);
+          placeTooltip(Math.max(8, Math.min(window.innerWidth - tipW - 8, tipScreen.x - tipW / 2)), top);
+        },
+        // Speech sits above the name, which stays anchored to the head.
+        speechSpace: (cave) => cave && cave === tipCave && !element.hidden ? tipH + 6 : 0,
+        belowSpeech: (cave, bottom) => {
+          if (cave && cave === tipCave && bottom > tipSpeechBottom) tipSpeechBottom = bottom;
+        },
+        hide: () => {
+          tipCave = null;
+          tipSpeechBottom = -Infinity;
+          element.hidden = true;
+          element.classList.remove("tooltip--name");
+          healthElement.hidden = true;
+          delete element.dataset.state;
+          element.removeAttribute("aria-label");
+          tipName = false;
+          tipText = tipState = "";
+          tipHealth = tipHealthMax = -1;
         }
-        if (cave) {
-          tooltip.update();
-          return;
-        }
-        const w = tipW, h = tipH;
-        const left = above ? Math.max(8, Math.min(window.innerWidth - w - 8, x - w / 2)) : Math.min(window.innerWidth - w - 8, x + 14);
-        const top = above ? Math.max(8, y - h - 10) : y + 18 + h > window.innerHeight ? y - h - 10 : y + 18;
-        placeTooltip(left, top);
-      },
-      setVisibility: (visibility) => {
-        tipVisibility = visibility;
-        if (!visibility) tooltip.hide();
-      },
-      beginFrame: () => {
-        tipSpeechTop = Infinity; tipSpeechAlpha = 0;
-        tooltip.update(false);
-      },
-      update: (place = true) => {
-        if (!tipCave) return;
-        const state = statusFor(tipCave);
-        const healthMax = tipCave.health && tipCave.health.max || BL.crew.HEALTH_MAX;
-        const health = tipCave.health ? Math.max(0, Math.min(healthMax, tipCave.health.value)) : healthMax;
-        const shownHealth = Math.ceil(health);
-        const healthChanged = health !== tipHealth || healthMax !== tipHealthMax;
-        if (healthChanged) {
-          tipHealth = health; tipHealthMax = healthMax;
-          el.tooltipHealthFill.style.transform = `scaleX(${health / healthMax})`;
-          el.tooltipHealth.setAttribute("aria-valuemax", String(healthMax));
-          el.tooltipHealth.setAttribute("aria-valuenow", String(shownHealth));
-        }
-        if (state !== tipState || healthChanged) {
-          tipState = state;
-          el.tooltip.dataset.state = state;
-          el.tooltip.setAttribute("aria-label", `${tipText}, ${STATE_LABELS[state]}, ${shownHealth} of ${healthMax} health`);
-        }
-        el.tooltip.hidden = !tipVisibility.anchor(tipCave, tipScreen);
-        if (el.tooltip.hidden || !place) return;
-        // The name rests on the head and rises over a bubble only as far as the bubble shows, so a bubble fading
-        // in or out never leaves it hanging over empty space.
-        const rest = tipScreen.y - 2, top = rest + (Math.min(rest, tipSpeechTop - 6) - rest) * tipSpeechAlpha - tipH;
-        placeTooltip(Math.max(8, Math.min(window.innerWidth - tipW - 8, tipScreen.x - tipW / 2)), Math.max(8, top));
-      },
-      // The name sits above speech; reserve room for both near the top edge.
-      speechSpace: (cave) => cave && cave === tipCave && !el.tooltip.hidden ? tipH + 6 : 0,
-      aboveSpeech: (cave, top, alpha = 1) => {
-        if (cave && cave === tipCave && top < tipSpeechTop) { tipSpeechTop = top; tipSpeechAlpha = Math.max(0, Math.min(1, alpha)); }
-      },
-      hide: () => {
-        tipCave = null;
-        tipSpeechTop = Infinity;
-        el.tooltip.hidden = true;
-        el.tooltip.classList.remove("tooltip--name");
-        el.tooltipHealth.hidden = true;
-        delete el.tooltip.dataset.state;
-        el.tooltip.removeAttribute("aria-label");
-        tipName = false;
-        tipText = tipState = "";
-        tipHealth = tipHealthMax = -1;
-      }
+      };
+      return tooltip;
     };
+    const tooltip = createTooltip(el.tooltip, el.tooltipText, el.tooltipHealth, el.tooltipHealthFill);
     const hint = (text, ms = 4200) => {
       window.clearTimeout(hintTimer);
       window.clearTimeout(hintHideTimer);
@@ -1930,7 +2106,7 @@
       if (e.target.id === "chat-input" || e.target.id === "chat-display") return;
       if (document.querySelector("dialog:modal") || e.target.closest && e.target.closest("dialog[open]")) return;
       let closed = false;
-      if (floatingBoards.length) {
+      if (!panelsHidden && floatingBoards.length) {
         floatingBoards[floatingBoards.length - 1].escape();
         closed = true;
       } else {
@@ -1954,7 +2130,7 @@
         t.setAttribute("aria-selected", String(t.dataset.tab === name));
         t.tabIndex = t.dataset.tab === name ? 0 : -1;
       }
-      for (const p of el.panels) p.hidden = p.dataset.panel !== name;
+      showSheetPanels(name);
       setSheetOpen(true);
     };
     // A pull tab opens its own panel, and folds the sheet when that panel is already showing.
@@ -1975,7 +2151,6 @@
       selectTab(tabs[next].dataset.tab);
       tabs[next].focus({ preventScroll: true });
     });
-    const bottomSheet = window.matchMedia("(max-width: 720px), (max-height: 500px) and (orientation: landscape)");
     let sheetPointer = -1, sheetStartY = 0, sheetStartHeight = 0, sheetDirection = 1;
     const sheetLimits = () => {
       const safe = getComputedStyle(document.documentElement);
@@ -2028,6 +2203,13 @@
     on(el.sheetResize, "pointercancel", endSheetResize);
     on(el.sheetResize, "lostpointercapture", endSheetResize);
     on(window, "blur", finishSheetResize);
+    const layoutSheet = () => {
+      finishSheetResize();
+      showSheetPanels(selectedSheetTab());
+      showSheetHeight();
+    };
+    on(bottomSheet, "change", layoutSheet);
+    on(pairedSheet, "change", layoutSheet);
     on(window, "resize", () => { finishSheetResize(); showSheetHeight(); });
     on(el.sheetResize, "keydown", (e) => {
       if (!["ArrowUp", "ArrowDown", "Home", "End"].includes(e.key)) return;
@@ -2134,7 +2316,7 @@
             chip.className = "chip";
             chip.title = `Take ${item.name} off ${BL.characters.displayOf(w.name)}`;
             chip.textContent = BL.characters.displayOf(w.name);
-            chip.addEventListener("click", () => unassignHandler && unassignHandler(w.name));
+            chip.addEventListener("click", () => unassignHandler && unassignHandler(w.name), { signal });
             chips.append(chip);
           }
           main.append(chips);
@@ -2160,14 +2342,15 @@
           select.value = "";
           select.blur();
           if (target && free.length) assignHandler && assignHandler(free[0].id, target);
-        });
+        }, { signal });
         li.append(select);
         el.inventory.append(li);
       }
     };
-    // dispose removes only the rows and timers this instance added.
+    // End this visit; the attached sheet rows belong to the page.
     const dispose = () => {
       finishSheetResize();
+      el.sheet.hidden = false;
       finishPrimary(true);
       window.clearTimeout(toastTimer);
       window.clearTimeout(toastHideTimer);
@@ -2175,11 +2358,11 @@
       window.clearTimeout(hintHideTimer);
       window.clearTimeout(copyTimer);
       for (const off of listeners) off();
+      listeners.length = 0;
+      if (lifetime) lifetime.abort();
       if (liveRows === rosterRows) liveRows = liveOnline = null;
       if (liveDonors === refreshDonors) liveDonors = null;
-      el.roster.replaceChildren();
-      el.bananaLeaders.replaceChildren();
-      el.bananaRecent.replaceChildren();
+      // Page-owned roster and donation rows remain attached; the next visit reconciles their contents.
       el.inventory.replaceChildren();
       el.toast.classList.remove("show");
       el.toast.hidden = true;
@@ -2208,7 +2391,16 @@
       el.board.classList.remove("board-floating");
       el.board.removeAttribute("style");
     };
-    return { el, openFeed, openRecipe, closeRecipe, dismissOutside, openBoard, closeBoard, updateBoard, restoreBoards, setRosterRow, setStats, setAct, setMode, setDestinations, setOwnOoga, get retakeActor() { return retake.actor ? retake : null; }, setGorilla, setGorillaSmashPower, setDetachedView, fadeDetachedName, setAreaLabel, setPrimary, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, hideHint, letterSign, selectTab, onPreset, setPileValueVisible, onAssign, onUnassign, renderInventory, dispose };
+    return {
+      // Engines keep this facade while a retained scene takes a fresh visit signal and sheet state.
+      renew(signal) {
+        const next = create({ roster, catalog, tierColors, renderIcon, lootEnabled, healthEnabled, signal });
+        next.tooltip.setVisibility(this.tooltip.visibility);
+        next.onAction(actionHandler); next.onPreset(presetHandler); next.onAssign(assignHandler); next.onUnassign(unassignHandler);
+        Object.defineProperties(this, Object.getOwnPropertyDescriptors(next));
+        return this;
+      },
+      el, openFeed, openRecipe, closeRecipe, dismissOutside, openBoard, closeBoard, updateBoard, restoreBoards, setPanelsHidden, setRosterRow, setStats, setAct, setMode, setDestinations, setOwnOoga, get retakeActor() { return retake.actor ? retake : null; }, setGorilla, setGorillaSmashPower, setDetachedView, fadeDetachedName, setAreaLabel, setPrimary, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, hideHint, letterSign, selectTab, onPreset, setPileValueVisible, onAssign, onUnassign, renderInventory, dispose };
   };
   // The account line in the sheet's foot is page-level: shown only when a backend answered, and
   // the director hands every change of `BL.net.state` here, whichever scene is active.
@@ -2345,5 +2537,24 @@
       liveOnline(row);
     }
   };
-  BL.hud = { create, renderIcon, signLettering, showAccount, showMic, showVoices, setDonationStats, donationValueText, toast, STATE_LABELS, statusFor };
+  // A game's Ooga list (`rows`, name to button, each button in its own <li>) held to one Ooga, a signed-in
+  // visitor's own: its row stands alone, moved last so it keeps no divider. `null` brings every row back in order.
+  const holdRow = (list, rows, name) => {
+    for (const [key, b] of rows) {
+      b.parentElement.hidden = !!name && key !== name;
+      list.append(b.parentElement);
+    }
+    if (name) list.append(rows.get(name).parentElement);
+  };
+  // A game's exits say where they go: back to the arcade when one of its cabinets started it, else the island. A
+  // header button names the place in its span (a phone shows only "Back"); a card's button says it all.
+  const leaveTo = (scene, home) => {
+    const place = home === "arcade" ? "arcade" : "the island";
+    for (const b of document.querySelectorAll(`[data-scene="${scene}"] [data-action="leave"]`)) {
+      const span = b.querySelector("span");
+      if (span) span.textContent = ` to ${place}`;
+      else b.textContent = `Back to ${place}`;
+    }
+  };
+  BL.hud = { create, renderIcon, renderFaceIcon, renderBodyIcon, signLettering, showAccount, showMic, showVoices, setDonationStats, donationValueText, toast, offerReload, holdRow, leaveTo, STATE_LABELS, statusFor };
 })();

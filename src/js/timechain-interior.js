@@ -14,7 +14,7 @@
 //
 // The screens are native charts (timechain-charts.js) of mempool.space's public block and mining data
 // (timechain-blocks.js), repainted only when what they print changes, one picture a frame at most, plus the six
-// Timechain Index holdings readings at the desk's terminal. Sani sits in his recliner in every room with his beer.
+// Timechain Index holdings readings at the desk's terminal. Sleeping or away, Sani sits in his recliner with his beer.
 (() => {
   "use strict";
   const BL = window.BL;
@@ -38,7 +38,7 @@
   // The room's hum: a low drone and a soft fan hiss, pitched a little apart in each room, honouring the page-wide
   // mute and the tab's visibility; a context only after a gesture, closed on leaving.
   const STORAGE_KEY = "oogaboogaland.audio";
-  const ambience = (room) => {
+  const ambience = (room, signal) => {
     let context = null, bus = null, sources = [], nodes = [], connected = false, disposed = false, muted = false;
     try { muted = localStorage.getItem(STORAGE_KEY) === "off"; } catch { muted = false; }
     const gate = () => {
@@ -71,9 +71,9 @@
       gate();
     };
     const gesture = () => { wake(); if (context && context.state === "suspended") context.resume().catch(() => {}); };
-    document.addEventListener("pointerdown", gesture);
-    document.addEventListener("keydown", gesture);
-    document.addEventListener("visibilitychange", gate);
+    document.addEventListener("pointerdown", gesture, { signal });
+    document.addEventListener("keydown", gesture, { signal });
+    document.addEventListener("visibilitychange", gate, { signal });
     wake();
     return {
       get stats() { return { contexts: context ? 1 : 0, sources: sources.length, connected }; },
@@ -154,7 +154,7 @@
     const room = ROOMS.get(visit.room), L = ROOMS.layout(room.scale), shared = visit.mode === "shared";
     const camera = createCamera({ fov: 58, near: 0.12, far: L.radius * 3 + 20 });
     const root = createNode();
-    const hud = hudMod.create({ roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
+    const hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
     const hooks = {};
     const input = interactMod.create({ canvas, renderer, camera, hooks });
     // A room the island's doorway prepared for this visit (`prepare`) is taken as it stands: built, painted and already
@@ -304,12 +304,13 @@
       go: (i) => { holdingsIndex = i; holdingsVersion++; sweep = true; }
     };
 
-    // Sani in his recliner with his beer, in every room, unless the visitor drives him in.
+    // Sleeping or away, Sani is in his recliner; active, he is with the mainland crew.
     const lounge = built.lounge, beer = BL.timechainBeer.create(lounge);
     const seat = { x: lounge.spots.chair.x, z: lounge.spots.chair.z, angle: Math.PI, speed: 0, phase: 0, active: true };
     target(lounge.chair, { kind: "recliner" }, 1.2);
     target(beer.mug, { kind: "beer" }, 0.3);
-    let sani = null;
+    let sani = null, saniRemote = false;
+    const saniContributor = contributors.roster.find(entry => entry.name === "SaniExp");
     const saniActor = { x: 0, y: 0, z: 0, radius: 0.35, height: 1.8 };
     const NO_ACTORS = [], actors = [];
 
@@ -418,9 +419,9 @@
       BL.net.setZone(room.zone);
       if (guide.stage) BL.net.passDoor(room.zone, "in");
     } else { BL.net.setBody(null); BL.net.setZone("none"); }
-    remotes = shared ? BL.remotePlayers.create({ root, crew: people, hide: (name, on) => { if (sani && name === "SaniExp") sani.root.visible = !on; } }) : null;
+    remotes = shared ? BL.remotePlayers.create({ root, crew: people, hide: (name, on) => { if (name === "SaniExp") saniRemote = on; } }) : null;
     const footsteps = BL.footsteps.create();
-    const sound = ambience(room);
+    const sound = ambience(room, ctx.signal);
     // Another player crossing this room's own doorway opens its doors here too (net.js `subscribeDoor`).
     const unsubscribeDoor = shared ? BL.net.subscribeDoor((event) => {
       if (event.t !== "transit" || event.door !== room.zone) return;
@@ -431,7 +432,8 @@
     const exitNote = (signedOut) => ({ room: room.id, mode: signedOut ? "solo" : visit.mode, character: avatar ? avatar.traits.name : null, jetpack: visit.jetpack || null });
     // A walked-out exit hands over mid-stride without the fade, with where its eye stood from the handover point
     // (`pose`), so the island starts from the same view; any other way out (signed out, Leave far from the doors)
-    // fades as before.
+    // fades as before. Under the `release` hub policy the island is built again on the way out, so that build happens
+    // behind the fade too rather than freezing the room's last frame.
     const handOff = (signedOut = false, pose = null) => {
       if (leaving) return;
       world.sphereExit = { ...exitNote(signedOut), pose };
@@ -439,8 +441,21 @@
       world.pilotDetached = !avatar;
       BL.net.setBody(null);
       BL.net.setZone("none");
-      leaving = go("hub", "timechain", !!pose);
+      leaving = go("hub", "timechain", !!pose && ctx.hubPolicy === "keep");
       if (!leaving) world.sphereExit = null;
+    };
+    // A way out the island could not be built for (the director's `stay`): back in the room with the walk-out undone, so
+    // Space at the button can try again.
+    const stay = () => {
+      leaving = false;
+      world.sphereExit = null;
+      if (shared) BL.net.setZone(room.zone);
+      if (guide.stage) {
+        // The vestibule is walkable only while guided: return inside before closing the doors and giving control back.
+        arrive(L.doorStep);
+        doors.want = 0;
+        finishGuide();
+      }
     };
     const exitPose = () => {
       const p = camera.position, t = camera.target, dx = t.x - p.x, dy = t.y - p.y, dz = t.z - p.z;
@@ -475,8 +490,8 @@
       e.preventDefault();
       e.stopImmediatePropagation();
     };
-    window.addEventListener("keydown", armsKeys, true);
-    canvas.addEventListener("pointerdown", rightClick, true);
+    window.addEventListener("keydown", armsKeys, { capture: true, signal: ctx.signal });
+    canvas.addEventListener("pointerdown", rightClick, { capture: true, signal: ctx.signal });
 
     const tipFor = (hit) => {
       const o = hit.owner;
@@ -574,6 +589,14 @@
     // Sani at his laptop, in the pose the island used to give him there, his beer gear doing the rest.
     const poseSani = (dt) => {
       if (!sani) return;
+      const state = contributors.stateFor(saniContributor);
+      const visible = !saniRemote && (state === "sleeping" || state === "away");
+      if (!visible) {
+        if (sani.root.visible) beer.pause();
+        sani.root.visible = false;
+        return;
+      }
+      sani.root.visible = true;
       seat.phase = (seat.phase + dt * 7) % (Math.PI * 2);
       const decay = Math.exp(-1.15 * dt);
       seat.angle = (seat.angle + seat.speed * (1 - decay) / 1.15) % (Math.PI * 2);
@@ -714,7 +737,7 @@
       const count = (node) => 1 + node.children.reduce((sum, c) => sum + count(c), 0);
       return { visibleNodes: visible, allNodes: count(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...(remotes ? remotes.stats() : {}), requests: reader.pending, timers: reader.timers };
     };
-    return { update, overlay, onKey, onDonation, leave, liveGeometry, stats, renderOpts: RENDER_OPTS, get inMotion() { return true; } };
+    return { update, overlay, onKey, onDonation, stay, leave, liveGeometry, stats, renderOpts: RENDER_OPTS, get inMotion() { return true; } };
   };
 
   // A room readied at the island's doorway once Enter commits to it, so that arriving costs no build, paint or upload:

@@ -21,7 +21,7 @@
     // crossing in either direction. The scene registers its existing actors
     // and samples after their final poses, without another scene traversal.
     const body = BL.mirrorBody.create(node, new Map());
-    let contactX = 0, contactY = 0;
+    let contactX = 0, contactY = 0, paused = false;
     const intersection = (ax, ay, az, bx, by, bz) => {
       const dx = ax - mouth.x, dz = az - mouth.z, ex = bx - mouth.x, ez = bz - mouth.z;
       const from = dx * sr + dz * cr - plane, to = ex * sr + ez * cr - plane;
@@ -47,17 +47,19 @@
       point.x = ax + (point.x - ax) * t;
       point.y = ay + (point.y - ay) * t;
       point.z = az + (point.z - az) * t;
-      ripples.pulse(contactX, contactY, (1 - t) * dt);
+      if (!paused) ripples.pulse(contactX, contactY, (1 - t) * dt);
       return true;
     };
-    const update = (dt, time) => ripples.update(dt, time);
+    const pause = (on) => { paused = !!on; body.pause(paused); };
+    const update = (dt, time) => { if (!paused) ripples.update(dt, time); };
     const inside = (x, y, z) => {
       const dx = x - mouth.x, dz = z - mouth.z, across = dx * cr - dz * sr, along = dx * sr + dz * cr;
       const room = mouth.room, half = along < -room.from ? room.w / 2 : 2.5;
       return y >= mouth.floorY - 0.12 && y < mouth.floorY + room.h - 0.1
         && along <= plane && along >= -room.to && Math.abs(across) <= half;
     };
-    return { node, ripples, body, clipTarget, absorb, update, inside,
+    return { node, ripples, body, clipTarget, absorb, update, inside, pause,
+      get paused() { return paused; },
       liveGeometry(set) { set.add(geometry); },
       dispose() { ripples.dispose(); body.dispose(); node.visible = false; removeChild(group, node); }
     };

@@ -16,7 +16,7 @@
   const lump = (geo, x, y, z, rx, ry, rz, hex, rand, rings = 5, segs = 9) => puff(geo, x, y, z, rx, ry, rz, tones(hex), rand, rings, segs);
   const ROPE = "#b89760";
   const keyed = (build) => {
-    const cache = new Map();
+    const cache = BL.models.scopedMap();
     return (key) => {
       let value = cache.get(key);
       if (!value) cache.set(key, value = build(key));

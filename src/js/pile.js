@@ -646,6 +646,9 @@
       if (!outstandingValue() && hatchTarget === 1) hatchTarget = 0;
       hatchOpen = damp(hatchOpen, hatchTarget, 7, dt);
     };
+    // A kept island leaving: the fruit in the air goes back to the queue, so it falls again on the next visit rather
+    // than hanging where the director's tween clear stopped it.
+    const suspend = () => cancelAirborne(true);
     const dispose = () => {
       cancelAirborne(true);
       for (const slot of pileSlots) {
@@ -717,7 +720,7 @@
     // crew exists or starts walking.
     reflow(Math.max(0, Math.min(MAX_BANANAS, Math.floor(world.level))));
     return {
-      slots: pileSlots, drops: dropSlots, core, shell, syncPile, deliverBananas, pileEdge, eatFromPile, update, dispose, stats, setLevel, liveGeometry, delivery: deliveryDebug, spill, spillEffect,
+      slots: pileSlots, drops: dropSlots, core, shell, syncPile, deliverBananas, pileEdge, eatFromPile, update, suspend, dispose, stats, setLevel, liveGeometry, delivery: deliveryDebug, spill, spillEffect,
       get shown() {
         return counted;
       },

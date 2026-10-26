@@ -13,7 +13,7 @@
     const el = {
       drop: $("drop"), board: $("drop-board"), oogas: $("drop-oogas"), bestList: $("drop-best"), medal: $("drop-medal"), help: $("drop-help"),
       strip: $("drop-strip"), alt: $("drop-alt"), rings: $("drop-rings"), ringTotal: $("drop-ring-total"), time: $("drop-time"), speed: $("drop-speed"), chute: $("drop-chute"), chuteName: $("drop-chute-name"),
-      center: $("drop-center"), notice: $("drop-notice"), results: $("drop-results"), score: $("drop-score"), summary: $("drop-summary"), boardBtn: $("drop-board-btn"), mute: $("drop-mute"), joyLook: $("joy-look")
+      center: $("drop-center"), notice: $("drop-notice"), results: $("drop-results"), score: $("drop-score"), summary: $("drop-summary"), boardBtn: $("drop-board-btn"), mute: $("drop-mute"), joyLook: $("joy-look"), pickOoga: $("drop-pick-ooga")
     };
     const listeners = [];
     const on = (target, type, fn) => {
@@ -53,6 +53,18 @@
       }));
       mark();
       refreshBest();
+    };
+    // A signed-in visitor with an Ooga flies it, as they drive only it on the island: their row stands alone on
+    // the board and the help stops offering a pick; `null` brings every row back. Only a change of name touches it.
+    let lockedTo;
+    const lockDiver = (name) => {
+      if (name === lockedTo) return;
+      lockedTo = name;
+      BL.hud.holdRow(el.oogas, buttons, name);
+      el.pickOoga.hidden = !!name;
+      if (!name) return;
+      selection.racer = name;
+      mark();
     };
     const row = (label, value) => {
       const li = document.createElement("li");
@@ -150,7 +162,7 @@
       el.boardBtn.hidden = true;
       buttons.clear();
     };
-    return { el, selection, buildBoard, refreshBest, show, setAlt, setRings, setTime, setSpeed, setChute, center, notice, results, formatTime, medalFor, dispose };
+    return { el, selection, buildBoard, lockDiver, refreshBest, show, setAlt, setRings, setTime, setSpeed, setChute, center, notice, results, formatTime, medalFor, dispose };
   };
   BL.dropHud = { create, formatTime, medalFor, MEDALS };
 })();

@@ -7,8 +7,8 @@ import { contributorRows, createContributorLookup, createOwnedCharacterLookup } 
 import { missingCharacters, characterSource, retiredCharacters, queuedDefaults } from "../../scripts/sync-characters.mjs";
 import { checkCharacterIdentities, identityAdvice } from "../../scripts/contributor-pr.mjs";
 import { declaredIdentity, mayAuthorIdentity } from "../../scripts/character-identity.mjs";
-import { CharacterRejection, parseSafeCharacter, scanCharacter, safeCharacterSource, checkOwner } from "../../scripts/character-safety.mjs";
-import { digest, due, inspectSubmission, manifestPath, readManifest, queuedCharacters, reviewDecision } from "../../scripts/character-submissions.mjs";
+import { CharacterRejection, parseSafeCharacter, scanCharacter, safeCharacterSource, checkOwner, isGitHubDisplayRename } from "../../scripts/character-safety.mjs";
+import { LANES, digest, due, inspectSubmission, manifestPath, readManifest, queuedCharacters, reviewDecision } from "../../scripts/character-submissions.mjs";
 import { createCoordinator } from "../../scripts/character-bundles.mjs";
 import { BOT, OPERATORS, isOperator } from "../../scripts/character-operators.mjs";
 
@@ -50,6 +50,7 @@ test("midnight gates are UTC, never merge empty or manual bundles, and reused bu
   assert.equal(due(state, new Date("2026-10-05T00:00:00Z")), true);
   assert.equal(due({ ...state, entries: [] }, new Date("2026-10-05T00:30:00Z")), false);
   assert.equal(due({ ...state, lane: "manual" }, new Date("2026-10-05T00:30:00Z")), false);
+  assert.equal(due({ ...state, lane: "rename" }, new Date("2026-10-05T00:30:00Z")), false);
   assert.equal(due({ ...state, openedOn: "2026-10-05" }, new Date("2026-10-05T00:30:00Z")), false);
   assert.throws(() => readManifest(JSON.stringify({ version: 1, lane: "daily", openedOn: "2026-10-04", entries: [{ path: "../auth.js" }] }), "daily"));
 });
@@ -74,7 +75,7 @@ test("empty bundle identity checks pass only for validated placeholders and stil
     else throw new Error(`Unexpected request: ${path}`);
     return new Response(JSON.stringify(data));
   });
-  for (lane of ["daily", "manual"]) {
+  for (lane of LANES) {
     const pr = { user: { login: bot }, head: { sha: head, ref: `automation/characters-${lane}-abc`, repo: { full_name: repo } },
       base: { ref: "rock", repo: { full_name: repo } }, merge_commit_sha: "merged" };
     assert.deepEqual(await checkCharacterIdentities(pr), []);
@@ -187,6 +188,130 @@ test("the scanner checks earlier character revisions and extracts only character
   current = null;
   author = "attacker";
   await assert.rejects(inspectSubmission(gh, { pr: 7, head }, rock), CharacterRejection);
+});
+
+const renameBase = `(() => {
+  "use strict";
+  const BL = window.BL;
+  BL.characters.add({
+    handle: "cave-name",
+    github: "owner",
+    joined: 1,
+    lastCommit: 2,
+    dress: { crown(k, v) { v.set(0, 0, 0, k.P.black); } }
+  });
+})();
+`;
+const renameSource = renameBase.replace('    handle: "cave-name",\n', '    handle: "cave-name",\n    display: "owner",\n');
+
+test("independent GitHub display renames preserve every non-display byte and literal identity", () => {
+  assert.equal(isGitHubDisplayRename(renameBase, renameSource), true);
+  assert.equal(isGitHubDisplayRename(renameSource.replace('display: "owner"', 'display: "Old Name"'), renameSource), true);
+  for (const source of [renameBase, renameSource + "\n", renameSource.replace('github: "owner"', 'github: "other"'),
+    renameSource.replace('handle: "cave-name"', 'handle: "other"'), renameSource.replace('lastCommit: 2', 'lastCommit: 3'),
+    renameSource.replace('k.P.black', 'k.P.white'), renameSource.replace('display: "owner"', 'display: "someone-else"'),
+    renameSource.replace('display: "owner"', 'display: ("owner")'), renameSource.replace('display: "owner"', 'display: "owner", display: "owner"'),
+    renameSource.replace('    display:', '  display:'), renameSource.replace('display: "owner"', 'display: `owner`'),
+    renameSource.replace('display: "owner"', 'display: "ow\\ner"'), renameSource.replace('display: "owner"', 'display: call()'),
+    renameSource.replace('dress:', '/* BL.characters.add({ */ dress:')]) assert.equal(isGitHubDisplayRename(renameBase, source), false);
+  assert.equal(isGitHubDisplayRename(renameSource, renameBase), false);
+  assert.equal(isGitHubDisplayRename(null, renameSource), false);
+  assert.equal(isGitHubDisplayRename(renameBase.replace('    github: "owner",\n', ''), renameSource.replace('    github: "owner",\n', '').replace('display: "owner"', 'display: "cave-name"')), true);
+});
+
+test("rename intake requires immutable operator authority and cosmetic-only history", async () => {
+  const rock = "a".repeat(40), head = "b".repeat(40), old = "c".repeat(40), path = "src/characters/cave-name.js";
+  let user = { ...OPERATORS[0], type: "User" }, permission = "admin", earlier = false;
+  const gh = {
+    list: async () => [...(earlier ? [{ sha: old }] : []), { sha: head }],
+    api: async (url) => {
+      if (url === "pulls/7") return { number: 7, user, base: { ref: "rock" }, head: { sha: head } };
+      if (url.startsWith("collaborators/")) return { permission };
+      if (url.startsWith("compare/")) return { merge_base_commit: { sha: rock }, total_commits: earlier ? 2 : 1, files: [{ filename: path, status: "modified" }] };
+      if (url.startsWith("commits/")) return { author: user, parents: [{ sha: earlier && url.includes(head) ? old : rock }], files: [{ filename: path, status: "modified" }] };
+      throw new Error(`Unexpected request ${url}`);
+    },
+    file: async (ref) => ({ sha: ref, source: ref === rock ? renameBase : ref === old ? renameBase.replace('lastCommit: 2', 'lastCommit: 3') : renameSource })
+  };
+  const lane = async () => (await inspectSubmission(gh, { pr: 7, head }, rock)).entries[0].lane;
+  assert.equal(await lane(), "rename");
+  user.id = 1; assert.equal(await lane(), "manual");
+  user = { ...OPERATORS[0], type: "Bot" }; assert.equal(await lane(), "manual");
+  user = { ...OPERATORS[0], type: "User" }; earlier = true; assert.equal(await lane(), "manual");
+  earlier = false; user = { login: "owner", id: 42, type: "User" }; permission = "read";
+  assert.equal(await lane(), "manual");
+  user = { ...OPERATORS[0], type: "User" };
+  await assert.rejects(lane, /Only the GitHub owner/);
+});
+
+test("rename migration preserves held custom submissions, revalidates provenance and requires fresh approval", async () => {
+  const repo = "example/land", bot = "private-app[bot]", rock = "a".repeat(40), sourceHead = "b".repeat(40);
+  const user = { ...OPERATORS[0], type: "User" }, path = "src/characters/cave-name.js", heldPath = "src/characters/held.js";
+  const heldSource = safeCharacterSource({ handle: "held", joined: 1, lastCommit: 2 });
+  const held = { pr: 9, head: "c".repeat(40), author: "held", path: heldPath, base: null, hash: digest(heldSource), lane: "manual" };
+  const old = { pr: 6, head: "d".repeat(40), author: user.login, path, base: rock, hash: digest(renameSource), lane: "manual" };
+  const files = new Map([[rock, new Map([[path, { source: renameBase, sha: rock }]])], [sourceHead, new Map([[path, { source: renameSource, sha: sourceHead }]])]]);
+  const prs = LANES.map((lane, i) => {
+    const head = String(i + 1).repeat(40), state = { version: 1, lane, openedOn: "2026-10-04", entries: lane === "manual" ? [held, old] : [] };
+    files.set(head, new Map([[manifestPath(lane), { source: JSON.stringify(state) }],
+      ...(lane === "manual" ? [[path, { source: renameSource }], [heldPath, { source: heldSource }]] : [])]));
+    return { number: i + 1, state: "open", user: { login: bot }, head: { sha: head, ref: `automation/characters-${lane}-round`, repo: { full_name: repo } }, base: { ref: "rock", repo: { full_name: repo } } };
+  });
+  const sourcePr = { number: 7, state: "open", user, head: { sha: sourceHead, ref: "rename", repo: { full_name: repo } }, base: { ref: "rock", repo: { full_name: repo } } };
+  const writes = [], statuses = new Map(); let sequence = 10, reviews = [];
+  const gh = { repo,
+    tree: async () => files.get(rock),
+    file: async (sha, name) => files.get(sha)?.get(name) || null,
+    list: async (url) => url.endsWith("/commits") ? [{ sha: sourceHead }] : url.endsWith("/reviews") ? reviews : url.endsWith("/comments") ? [] : prs,
+    commit: async (branch, expected, additions, deletions) => {
+      const pr = prs.find(row => row.head.ref === branch); assert.equal(pr.head.sha, expected);
+      assert.deepEqual(deletions, []); const next = new Map(files.get(expected));
+      for (const file of additions) next.set(file.path, { source: file.source });
+      const sha = String(sequence++).padStart(40, "0"); files.set(sha, next); pr.head.sha = sha;
+      writes.push({ branch, additions }); return sha;
+    },
+    api: async (url, method, data) => {
+      if (url === "git/ref/heads/rock") return { object: { sha: rock } };
+      if (url.startsWith("collaborators/")) return { permission: "admin" };
+      if (url.startsWith("statuses/")) { statuses.set(url + ":" + data.context, data.state); return {}; }
+      if (url.endsWith("/comments")) return {};
+      if (/^pulls\/\d+$/.test(url)) { const pr = Number(url.split("/")[1]) === 7 ? sourcePr : prs.find(row => row.number === Number(url.split("/")[1])); if (method === "PATCH") Object.assign(pr, data); return pr; }
+      if (url === `commits/${sourceHead}?per_page=100`) return { author: user, parents: [{ sha: rock }], files: [{ filename: path, status: "modified" }] };
+      if (url.startsWith("commits/")) return { author: { login: bot }, commit: { verification: { verified: true } } };
+      if (url.startsWith("compare/")) {
+        const sha = url.split("...")[1];
+        return { behind_by: 0, merge_base_commit: { sha: rock }, total_commits: 1, commits: [{ sha: sourceHead }],
+          files: [...files.get(sha)].filter(([name, file]) => file.source !== files.get(rock).get(name)?.source)
+            .map(([filename]) => ({ filename, status: filename === path ? "modified" : "added" })) };
+      }
+      throw new Error(`Unexpected request ${url}`);
+    }
+  };
+  const coordinator = createCoordinator(gh, bot, () => new Date(NOW));
+  const manual = prs[1], rename = prs[2], queued = files.get(manual.head.sha).get(path);
+  queued.source += "\n";
+  await assert.rejects(coordinator.intake({ pr: 7, head: sourceHead }), /differs from its verified source/);
+  assert.equal(writes.length, 0);
+  queued.source = renameSource;
+  await coordinator.intake({ pr: 7, head: sourceHead });
+  const manualFiles = files.get(manual.head.sha), renameFiles = files.get(rename.head.sha);
+  assert.deepEqual(JSON.parse(manualFiles.get(manifestPath("manual")).source).entries, [held]);
+  assert.equal(manualFiles.get(heldPath).source, heldSource);
+  assert.equal(manualFiles.get(path).source, renameBase);
+  assert.equal(renameFiles.get(path).source, renameSource);
+  assert.equal(JSON.parse(renameFiles.get(manifestPath("rename")).source).entries[0].head, sourceHead);
+  assert.equal(sourcePr.state, "closed");
+  const gate = () => statuses.get(`statuses/${rename.head.sha}:Character bundle safety`);
+  assert.equal(gate(), "pending");
+  reviews = [{ user, state: "APPROVED", commit_id: "old" }];
+  await coordinator.intake({ pr: rename.number }); assert.equal(gate(), "pending");
+  reviews[0].commit_id = rename.head.sha;
+  await coordinator.intake({ pr: rename.number }); assert.equal(gate(), "success");
+  reviews[0].state = "CHANGES_REQUESTED";
+  // The held submission's source is deliberately unavailable in this fixture.
+  // Report its failed validation while still refreshing the rename gate.
+  await assert.rejects(coordinator.refreshReviews()); assert.equal(gate(), "pending");
+  assert.equal(writes.length, 2);
 });
 
 test("queued custom identities reserve defaults without executing source and require trusted provenance", async () => {

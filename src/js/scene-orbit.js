@@ -139,12 +139,6 @@
   const cam = { x: 0, y: 0, z: 0, tx: 0, ty: 0, tz: 0, ox: 0, oy: 0, oz: 0, ax: 0, ay: 0, az: 0, warm: false, offset: 0, tilt: 0, dragAt: -9, buildYaw: -0.64, buildPitch: 0.18, buildZoom: 1, shake: 0 };
   const ctrl = { throttle: 0, lean: 0, pitch: 0, roll: 0, yaw: 0 };
   let inputLocked = false;
-  const orbitScene = {
-    id: "orbit", renderOpts: RENDER_OPTS, root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
-    get inMotion() {
-      return (phase !== "build" && phase !== "results") || fx.inMotion || smoke.count > 0;
-    }
-  };
 
   // Islands, then the site's pad and deck, else the sea (the flight reads the sea from its own height).
   const groundAt = (x, z) => {
@@ -384,6 +378,8 @@
     refreshBuilder();
     if (preset) hud.toast(`${preset.name} on the pad`);
   };
+  // A signed-in visitor with an Ooga flies it, as they drive only it on the island; the pilot button is for the rest.
+  const ownPilot = () => BL.net.ownAmong(contributors.roster);
   const cyclePilot = () => {
     const roster = contributors.roster, i = roster.findIndex((c) => c.name === selection.pilot);
     selection.pilot = roster[(i + 1) % roster.length].name;
@@ -523,6 +519,7 @@
 
   const toBuild = () => {
     phase = "build";
+    rhud.lockPilot(!!ownPilot());
     flight = null;
     release = null;
     igniteIn = 0;
@@ -1881,12 +1878,13 @@
   const enter = (ctx) => {
     ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
     home = ctx.from === "arcade" ? "arcade" : "hub";
+    hudMod.leaveTo("orbit", home);
     camera = createCamera({ fov: 50, near: 0.3, far: 1600 });
     root = createNode();
     clock = daylight.createClock({ hour: hourParam, daylen: daylenParam, day: dayParam, time: timeParam, now: new Date() });
     island = terrain.island({ seed: SEED });
     spot = rocketModels.siteSpot(island, {});
-    hud = hudMod.create({ roster: contributors.roster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
+    hud = hudMod.create({ signal: ctx.signal, roster: contributors.roster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
     fx = fxMod.create({ root, renderer, overlay: ctx.overlay, tickerAt: TICKER_AT });
@@ -1931,6 +1929,8 @@
       selection.pilot = world.pilot;
       world.pilot = null;
     }
+    const own = ownPilot();
+    if (own) selection.pilot = own;
     rockNode = place(createNode({ geometry: rocketModels.spaceRock(), visible: false }));
     tetherNode = place(createNode({ geometry: rocketModels.tether(), quaternion: quat.create(), visible: false }));
     buildPassenger();
@@ -1950,8 +1950,8 @@
     audio = rocketAudio.create();
     quieted = false;
     rhud.el.mute.setAttribute("aria-pressed", String(audio.muted));
-    window.addEventListener("pointerdown", onGesture);
-    window.addEventListener("keydown", onGesture);
+    window.addEventListener("pointerdown", onGesture, { signal: ctx.signal });
+    window.addEventListener("keydown", onGesture, { signal: ctx.signal });
     hud.onAssign((entryId, name) => {
       if (game.assign(entryId, name)) renderLocker();
     });
@@ -2132,7 +2132,13 @@
     const all = (n) => 1 + n.children.reduce((sum, c) => sum + all(c), 0);
     return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), phase, smoke: smoke.count, debris: debris.length };
   };
-  Object.assign(orbitScene, { enter, update, overlay, onDonation, onKey, onLootCleared, leave, stats, liveGeometry });
+  const orbitScene = BL.deferred.scene("orbit", {
+    id: "orbit", renderOpts: RENDER_OPTS, root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
+    enter, update, overlay, onDonation, onKey, onLootCleared, leave, stats, liveGeometry,
+    get inMotion() {
+      return (phase !== "build" && phase !== "results") || fx.inMotion || smoke.count > 0;
+    }
+  });
   BL.scenes = BL.scenes || {};
   BL.scenes.orbit = orbitScene;
 })();

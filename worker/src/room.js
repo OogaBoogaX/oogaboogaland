@@ -22,7 +22,7 @@ import { DurableObject } from "cloudflare:workers";
 import {
   CLOSE_KICK, CLOSE_PROTOCOL, MAX_PLAYERS, MOVE_HZ, STALE_MS, SWEEP_MS, TICK_HZ,
   NPC_FRAME_MAX, NPC_HZ, OUTSIDE, HP_HZ, VOICE_TRACK, CHAT_HZ, CHAT_BURST, CHAT_BUCKET_KEEP, CHAT_RETRY_KEEP,
-  DOOR_ZONE, DOOR_ROOM, DOOR_GRANT_MS, DOOR_TRANSIT_MS, DOOR_PASS_MS, DOOR_HZ, DOOR_BURST,
+  DOOR_ZONE, DOOR_ROOM, DOOR_GRANT_MS, DOOR_TRANSIT_MS, DOOR_PASS_MS, DOOR_HZ, DOOR_BURST, GHOST_HZ, GHOST_BURST,
   chatLog, castIndex, bodyName, ownedBody, electHost, npcFollowers, claimRefusal, parseClientMessage, playerFromHeaders, spawnPoint, takeToken, voicePeers,
 } from "./protocol.js";
 import { sha256Hex } from "./crypto.js";
@@ -77,7 +77,7 @@ export class Room extends DurableObject {
   }
 
   record(ws, a) {
-    return { ws, voice: { pub: null, sub: null, track: null, gen: 0 }, muted: false, hp: 100, ko: false, g: null, sent: null, zone: OUTSIDE, pokerVoice: null, inHub: false, joinedAt: Date.now(), door: null, passes: [], ...a, bucket: { tokens: MOVE_HZ, at: Date.now() }, npcBucket: { tokens: NPC_HZ, at: Date.now() }, hpBucket: { tokens: HP_HZ, at: Date.now() }, doorBucket: { tokens: DOOR_BURST, at: Date.now() }, chatBucket: this.chatBucketFor(a.id, Date.now()), seenAt: Date.now() };
+    return { ws, voice: { pub: null, sub: null, track: null, gen: 0 }, muted: false, hp: 100, ko: false, g: null, sent: null, zone: OUTSIDE, pokerVoice: null, inHub: false, joinedAt: Date.now(), door: null, passes: [], ...a, bucket: { tokens: MOVE_HZ, at: Date.now() }, npcBucket: { tokens: NPC_HZ, at: Date.now() }, hpBucket: { tokens: HP_HZ, at: Date.now() }, doorBucket: { tokens: DOOR_BURST, at: Date.now() }, ghostBucket: { tokens: GHOST_BURST, at: Date.now() } /* HALLOWEEN */, chatBucket: this.chatBucketFor(a.id, Date.now()), seenAt: Date.now() };
   }
 
   // Retain account debt across socket records, only while awake. Reclaim fully replenished
@@ -355,6 +355,13 @@ export class Room extends DurableObject {
       return this.say(p, msg.text, msg.clientId);
     } else if (msg.t === "door") {
       return this.doorMessage(p, msg);
+    } else if (msg.t === "ghost") {
+      // HALLOWEEN: a follower on the island tells the host of the ghost hunt; nobody else hears it, nothing is kept.
+      if (!p.inHub || !p.body || p.id === this.hostId) return;
+      if (!p.ghostBucket) p.ghostBucket = { tokens: GHOST_BURST, at: p.seenAt };
+      if (!takeToken(p.ghostBucket, GHOST_HZ, p.seenAt, GHOST_BURST)) return;
+      const host = this.players.get(this.hostId);
+      if (host && host.inHub) this.send(host.ws, { ...msg, from: p.id });
     } else if (msg.t === "body") {
       if (msg.name === p.body) return;
       const refusal = claimRefusal(CAST, p.login, msg.name, this.players.values(), p.contributor);
@@ -477,7 +484,7 @@ export class Room extends DurableObject {
 
   // Also after any page's `hub` flag changes: the host sends frames only while someone follows.
   electHost() {
-    const id = electHost(this.players.values());
+    const id = electHost(this.players.values(), this.hostId);
     const followers = npcFollowers(this.players.values(), id);
     if (id === this.hostId && followers === this.followers) return;
     this.hostId = id;
