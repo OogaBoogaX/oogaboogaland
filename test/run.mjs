@@ -3037,11 +3037,11 @@ const { contributorActivityProbe } = (() => {
 const { npcLaneSpacingProbe, npcLaneCornerProbe, npcLaneCurveProbe, npcLabLaneProbe, npcRingJunctionProbe } = (() => {
   // Real crew walkers share a simple trail, isolating lane choice and following
   // distance from scenery, spawn timing, and the cave's firing formation.
-  const npcLaneSpacingProbe = ({ dt = 1 / 60, oscillating = false, jittering = false } = {}) => {
+  const npcLaneSpacingProbe = ({ dt = 1 / 60, oscillating = false, jittering = false, stationary = false, remote = false, wall = 0 } = {}) => {
     const BL = window.BL, S = BL.scene, root = S.createNode(), targets = new Set(), noop = () => {};
     const island = { path: { version: 0, debug: { active: false, ringCenterRadius: 0 }, centerlines: [[{ x: 0, z: -10 }, { x: 0, z: 10 }]] },
       surfaceAt: () => 0, isPath: (x, z) => Math.abs(x) < 1 && Math.abs(z) <= 10 };
-    const walkable = (_x, _z, x) => !jittering || x <= 0.05;
+    const walkable = (_x, _z, x) => (!jittering || x <= 0.05) && (wall < 0 ? x >= -0.8 : wall > 0 ? x <= 0.1 : true);
     const npcPaths = BL.npcPaths.create({ island, walkable });
     if (jittering) {
       const target = npcPaths.target;
@@ -3059,7 +3059,9 @@ const { npcLaneSpacingProbe, npcLaneCornerProbe, npcLaneCurveProbe, npcLabLanePr
         }
       };
     }
-    const crew = BL.crew.create({ root, world: { level: 0 }, npcPaths,
+    const outside = remote ? [{ id: "blocker", x: -0.35, y: 0, z: -3, radius: 0.3, height: 2.2 },
+      { id: "spectator", x: 20, y: 0, z: 20, radius: 0.3, height: 2.2 }] : [];
+    const crew = BL.crew.create({ root, world: { level: 0 }, npcPaths, outsideActors: remote ? () => outside : null,
       input: { add: (node) => targets.add(node), remove: (node) => targets.delete(node) }, hud: { setRosterRow: noop },
       game: { state: { assignments: {}, inventory: [] } }, pile: { footprintEdge: 1, pileEdge: () => 1 },
       viewYaw: 0, buildSpots: [], walkIn: { x: 0, z: 3 }, groundAt: () => 0, walkable,
@@ -3081,13 +3083,20 @@ const { npcLaneSpacingProbe, npcLaneCornerProbe, npcLaneCurveProbe, npcLabLanePr
     };
     try {
       for (const cave of actors) { cave.root.visible = false; cave.state = "away"; cave.bedTravel.mode = ""; }
-      for (const name of jittering ? ["jittering"] : oscillating ? ["oscillating"] : ["opposing", "following", "tied", "branching"]) {
+      for (const name of stationary ? ["stationary player"] : jittering ? ["jittering"] : oscillating ? ["oscillating"] : ["opposing", "following", "tied", "branching"]) {
         place(a, name === "tied" ? 0.35 : 0, -6, 0, 6);
         place(b, name === "tied" ? -0.35 : 0, name === "opposing" ? 6 : name === "tied" ? -6 : -6.75, 0, name === "opposing" ? -6 : 6);
         let frames = 0, gap = Infinity, waitFrames = 0, resumedGap = 0, laneError = 0, laneSamples = 0, laneRight = true;
         let waiting = false, branched = false, branchReleased = false, deadlocked = false, maxHop = 0, maxStep = 0, jumps = 0;
         const oldJumps = a.avoidance.navigation.jumps + b.avoidance.navigation.jumps;
-        const duration = name === "opposing" || oscillating || jittering ? 12 : 3;
+        const duration = name === "opposing" || oscillating || jittering || stationary ? 12 : 3;
+        if (stationary) {
+          // The player blocks the worker's short lane hints. Local control
+          // idles; a remote pose hides its roster copy. Either side can close.
+          a.root.position.x = b.root.position.x = -0.35; a.root.position.z = -3;
+          if (remote) { a.root.visible = false; a.state = "away"; a.walk = null; }
+          else crew.control(a);
+        }
         if (jittering) { a.root.visible = false; a.state = "away"; a.walk = null; }
         if (oscillating) {
           // A real queue leader whose local avoidance jitters without opening
@@ -3095,8 +3104,8 @@ const { npcLaneSpacingProbe, npcLaneCornerProbe, npcLaneCurveProbe, npcLabLanePr
           a.puppet = true;
           b.root.position.z = -7.1;
         }
-        let stall = 0, maximumStall = 0, blockedSteps = 0;
-        const resets = b.progress.resets;
+        let stall = 0, maximumStall = 0, blockedSteps = 0, reordered = false;
+        const resets = b.progress.resets, searches = b.avoidance.navigation.searches;
         while (frames++ < Math.ceil(duration / dt) && (a.walk || b.walk)) {
           const ax = a.root.position.x, az = a.root.position.z, bx = b.root.position.x, bz = b.root.position.z;
           if (oscillating) {
@@ -3106,6 +3115,13 @@ const { npcLaneSpacingProbe, npcLaneCornerProbe, npcLaneCurveProbe, npcLabLanePr
             const z = crew.actorClear(p.x, p.z, p.x, target, 0, a.bodyHeight) ? target : p.z;
             a.shoulder.motionZ = (z - p.z) / dt;
             p.z = z;
+          }
+          if (remote && !reordered && b.shoulder.phase === 1) {
+            // Remote poses reuse list slots when the room roster changes.
+            // The passing target must follow the body, not the pooled slot.
+            Object.assign(outside[0], { id: "spectator", x: 20, z: 20 });
+            Object.assign(outside[1], { id: "blocker", x: -0.35, z: -3 });
+            reordered = true;
           }
           crew.update(dt, time += dt); S.updateWorld(root);
           const step = Math.hypot(b.root.position.x - bx, b.root.position.z - bz);
@@ -3129,9 +3145,12 @@ const { npcLaneSpacingProbe, npcLaneCornerProbe, npcLaneCurveProbe, npcLabLanePr
         }
         jumps = a.avoidance.navigation.jumps + b.avoidance.navigation.jumps - oldJumps;
         rows.push({ name, frames, gap, waiting, waitSeconds: waitFrames * dt, resumedGap, branched, branchReleased, deadlocked,
-          maxHop, maxStep, jumps, laneRight, laneError, laneSamples, maximumStall, blockedSteps, resets: b.progress.resets - resets, passed: b.root.position.z > a.root.position.z + 1, arrived: !a.walk && !b.walk });
+          maxHop, maxStep, jumps, laneRight, laneError, laneSamples, maximumStall, blockedSteps, reordered, resets: b.progress.resets - resets,
+          searches: b.avoidance.navigation.searches - searches, requiredGap: remote ? Math.max(0.86, outside[0].radius + b.bodyRadius) : Math.max(0.68, a.bodyRadius + b.bodyRadius),
+          playerHeld: (remote ? a.state === "away" && !a.root.visible : crew.player === a) && a.root.position.x === -0.35 && a.root.position.z === -3,
+          passed: b.root.position.z > a.root.position.z + 1, arrived: !a.walk && !b.walk });
       }
-      result = { dt, rows };
+      result = { dt, wall, remote, rows };
     } finally { crew.dispose(); if (result) result.disposed = targets.size === 0 && root.children.length === 0; }
     return result;
   };
@@ -5112,6 +5131,13 @@ const labLanes = async (b) => {
 };
 const workCaveTrips = async (b) => {
   for (const dt of [1 / 20, 1 / 60]) {
+    for (const remote of [false, true]) for (const wall of [0, -1, 1]) {
+      const player = await b.evaluate(`(${npcLaneSpacingProbe.toString()})(${JSON.stringify({ dt, stationary: true, remote, wall })})`);
+      record(`work movement cave trips: ${1 / dt}Hz workers pass a stationary ${remote ? "remote" : "local"} player with wall ${wall} without overlap or recovery searches`,
+        player.disposed && player.rows.length === 1 && player.rows.every(row => row.playerHeld && row.arrived && row.passed && (!remote || row.reordered)
+          && row.gap >= row.requiredGap - 1e-6 && row.blockedSteps === 0 && row.maxStep <= 1.7 * dt + 1e-6
+          && row.maxHop === 0 && row.jumps === 0 && row.resets === 0 && row.searches === 0), JSON.stringify(player));
+    }
     const queue = await b.evaluate(`(${npcLaneSpacingProbe.toString()})(${JSON.stringify({ dt, oscillating: true })})`);
     record(`work movement cave trips: ${1 / dt}Hz followers pass an oscillating leader without overlap, jumps or relocation`,
       queue.disposed && queue.rows.length === 1 && queue.rows.every(row => row.waiting && row.passed && row.maximumStall < 5
@@ -6542,10 +6568,14 @@ const hubLiveWake = { name: "hub live wake", why: "regression: live activity mus
     // ball whatever his activity says, so he is no rainforest walker. Activity is set directly and settled at once:
     // applyActivity would hand it to the hub's listener, which walks new sleepers in from the pile.
     const cast = B.crew.list.filter(c => c !== B.pilot.player && !c.override && c.traits.name !== "SaniExp");
-    const away = cast.filter(c => c.state === "away"), asleep = cast.filter(c => c.state === "sleeping").length;
     const sleepAt = (c, at) => { c.contributor.lastCommitAt = c.contributor.lastContributionAt = at; };
+    // Earlier steps may leave sleepers walking to reserved beds. A same-state refresh deliberately leaves
+    // that travel alone, so expire those naps first and let fresh away-to-sleeping transitions settle them.
+    for (const cave of cast) if (cave.state === "sleeping") sleepAt(cave, now - 31 * day);
+    B.crew.refreshStates(true);
+    const away = cast.filter(c => c.state === "away");
     // Every bed taken and two rainforest sleepers beyond them, then one more Ooga, kept away for now, to take a bed.
-    const seeded = away.slice(0, Math.max(0, mattresses.length + 2 - asleep)), nextSleeper = away[seeded.length];
+    const seeded = away.slice(0, mattresses.length + 2), nextSleeper = away[seeded.length];
     if (!nextSleeper) return { missingNextSleeper: true };
     seeded.forEach((c, i) => sleepAt(c, now - 3 * day - i * 60000));
     B.crew.refreshStates(true);
@@ -12893,7 +12923,7 @@ scene("hub", { label: "entry spinner", query: "hubcache=keep", steps: [{ name: "
     rows.length === 4 && rows.every(row => row.frames > 100 && row.arcs > 100 && row.covered && row.bounded && row.blackIntact
       && (row.label.startsWith("instant") ? row.fade === 0 && row.black === 0 && row.clears > 0 : row.fade === 1 && row.black === row.frames && row.clears === 0)), JSON.stringify(rows));
 } }] });
-scene("hub", { query: "ooga=portlandhodl:clank:lab,obl,lf&ooga=w-s-bitcoin:clank:lab,obl,lf&ooga=bc1gui:clank:lab,obl,lf&ooga=DrNeski:clank:lab,obl,lf&ooga=2140data:clank:lab,obl,lf", steps: [{ name: "work movement cave trips", why: "regression: off-lane cave traffic aimed through obstacles and started backwards detours", run: workCaveTrips }] });
+scene("hub", { query: "ooga=portlandhodl:clank:lab,obl,lf&ooga=w-s-bitcoin:clank:lab,obl,lf&ooga=bc1gui:clank:lab,obl,lf&ooga=DrNeski:clank:lab,obl,lf&ooga=2140data:clank:lab,obl,lf", steps: [{ name: "work movement cave trips", why: "regression: cave traffic aimed through obstacles, started backwards detours and got trapped behind players by short lane hints", run: workCaveTrips }] });
 scene("hub", { label: "room sign", query: "pos=0", steps: [{ name: "room sign copies hash", why: "rule: tapping a room sign swings it and copies its displayed eight-character code with visible confirmation", run: async (b) => {
   const point = await b.evaluate(`(() => { const B = __ooga, sign = B.headquarters.roomSigns[0], n = sign.node; Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: (value) => { window.__roomHash = value; return Promise.resolve(); } } }); window.__roomSignBefore = sign.hits; B.pilot.release(true); B.pilot.navigate({ position: { x: n.position.x, y: n.position.y, z: n.position.z }, target: { x: n.position.x, y: n.position.y - 0.2, z: n.position.z }, yaw: n.rotation.y, pitch: 0, dist: 4 }); B.advance(0.6, 1 / 60); return B.project(n.position.x, n.position.y - 0.2, n.position.z, {}); })()`);
   await b.click(point.x, point.y);
