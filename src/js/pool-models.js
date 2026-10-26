@@ -22,6 +22,9 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
+  // Construction checkpoints (see build-tasks.js). They reach it only when sliced, so an unsliced build runs without it.
+  const due = (slice, mask) => !!slice && BL.buildTasks.due(slice, mask);
+  const pause = function* (slice) { if (slice) yield* BL.buildTasks.pause(slice); };
   const { models, math } = BL;
   const { createNode, addChild } = BL.scene;
   const { cached, box, bevelBox, lathe, merge, polyline, makeVox, voxelGeometry, noShadow, pushVert, face, turnedY } = models;
@@ -83,9 +86,9 @@
 
   // The island's body: the layout's grid through the home island's greedy mesher, welded as the home island is.
   // The same grid is the cutaway's material source, so a cut through the rock is capped in its own stone.
-  const islet = cached(() => {
-    const grid = L.body(), palette = L.PALETTE.map((hex) => hex && hexToRgb(hex));
-    const geometry = BL.terrain.gridGeometry(grid, { unit: L.UNIT, palette, origin: L.ORIGIN });
+  const islet = models.cachedSteps(function* (slice = null) {
+    const grid = yield* L.bodySteps(slice), palette = L.PALETTE.map((hex) => hex && hexToRgb(hex));
+    const geometry = yield* BL.terrain.gridGeometrySteps(grid, { unit: L.UNIT, palette, origin: L.ORIGIN }, slice);
     // Centre-sampled shore voxels leave inward corners across the circular lake. Bevel just those
     // corners out of the water; the same mesh is used for collision. A small chord allowance keeps
     // the straight edges between bevelled vertices outside the circle too.
@@ -93,7 +96,7 @@
     // Split affected greedy quads at cell boundaries first: otherwise a long edge can bridge across
     // its neighbour's bevelled corner and leave a crack at the old T-junction.
     const shoreFaces = [];
-    for (const f of geometry.faces) {
+    for (const f of geometry.faces) { if (due(slice, 15)) yield* pause(slice);
       const v = geometry.verts, ids = f.i;
       let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity, maxY = -Infinity;
       for (const id of ids) {
@@ -116,12 +119,12 @@
       const at = (u, w) => pushVert(geometry, v[a] + (v[b] - v[a]) * u + (v[d] - v[a]) * w,
         v[a + 1] + (v[b + 1] - v[a + 1]) * u + (v[d + 1] - v[a + 1]) * w,
         v[a + 2] + (v[b + 2] - v[a + 2]) * u + (v[d + 2] - v[a + 2]) * w);
-      for (let x = 0; x < nx; x++) for (let z = 0; z < nz; z++) {
+      for (let x = 0; x < nx; x++) { yield* pause(slice); for (let z = 0; z < nz; z++) {
         shoreFaces.push({ ...f, i: [at(x / nx, z / nz), at((x + 1) / nx, z / nz), at((x + 1) / nx, (z + 1) / nz), at(x / nx, (z + 1) / nz)] });
-      }
+      } }
     }
     geometry.faces = shoreFaces;
-    for (let i = 0; i < geometry.verts.length; i += 3) {
+    for (let i = 0; i < geometry.verts.length; i += 3) { if (due(slice, 15)) yield* pause(slice);
       if (geometry.verts[i + 1] < underside) continue;
       const x = geometry.verts[i], z = geometry.verts[i + 2], r = Math.hypot(x, z);
       if (r > 0 && r < L.LAKE_R) {
@@ -133,7 +136,7 @@
     // The outer half-metre blends back into the voxel cliff; cell-sized faces keep the cut watertight.
     for (const channel of L.CHANNELS) {
       const ux = Math.sin(channel.bearing), uz = Math.cos(channel.bearing), end = L.channelOutlet(channel);
-      for (let i = 0; i < geometry.verts.length; i += 3) {
+      for (let i = 0; i < geometry.verts.length; i += 3) { if (due(slice, 15)) yield* pause(slice);
         const x = geometry.verts[i], z = geometry.verts[i + 2], along = x * ux + z * uz;
         const across = Math.abs(x * uz - z * ux), blend = Math.min(1, (L.CHANNEL.low + 2 * L.UNIT - across) / L.UNIT);
         if (blend <= 0) continue;
@@ -150,7 +153,7 @@
         }
       }
     }
-    BL.terrain.compactVertices(geometry);
+    yield* BL.terrain.compactVerticesSteps(geometry, slice);
     geometry.cutawaySource = { data: grid.data, sx: grid.sx, sy: grid.sy, sz: grid.sz, unit: L.UNIT, origin: L.ORIGIN, palette };
     return geometry;
   });
@@ -159,7 +162,7 @@
   // voxel steps, which are cut at or under it. Their edges are buried in the walls; the ledge's outer edge and
   // its end wear a skirt down to the step below, so the sheet never shows from the side as a floating plane.
   const EARTH = ["#6a5238", "#624b33"].map(hexToRgb), LEDGE_TONES = ["#7a6a52", "#6f6048"].map(hexToRgb), SKIRT = hexToRgb("#54544f");
-  const rampFloor = cached(() => {
+  const rampFloor = models.cachedSteps(function* (slice = null) {
     const geo = { verts: [], faces: [], lines: [] }, RAMP = L.RAMP, STEP = 1 / RAMP.r;
     const at = (bearing, r, y) => pushVert(geo, Math.sin(bearing) * r, y, Math.cos(bearing) * r);
     const SHEET = { emissive: 0 };
@@ -175,7 +178,7 @@
       return edge;
     };
     const fallCuts = [];
-    for (const channel of L.CHANNELS) if (channel.falls) {
+    for (const channel of L.CHANNELS) { if (channel.falls) {
       const width = fallMouthHalf;
       let left = channel.bearing - width / L.edgeAt(channel.bearing);
       let right = channel.bearing + width / L.edgeAt(channel.bearing);
@@ -184,7 +187,7 @@
         right = channel.bearing + width / L.edgeAt(right);
       }
       fallCuts.push({ left, right, channel });
-    }
+    } }
     const cutInnerEdge = (bearing, inner) => {
       for (const cut of fallCuts) {
         if (Math.abs(bearing - cut.left) < 1e-6 || Math.abs(bearing - cut.right) < 1e-6)
@@ -227,7 +230,7 @@
     };
     let galleryEnd = null, ledgeEnd = null;
     const reach = RAMP.bay + 0.3;
-    for (let n = 0; n < L.RILL_STATIONS.length - 1; n++) {
+    for (let n = 0; n < L.RILL_STATIONS.length - 1; n++) { if (due(slice, 15)) yield* pause(slice);
       const a = L.RILL_STATIONS[n], to = L.RILL_STATIONS[n + 1];
       if (a >= L.RILL.end) {
         // The turn's floor patch replaces the inner landing; keep the outer walking lane at its grade.
@@ -255,9 +258,9 @@
           at(RAMP.start + from, r0 + G.half, y0)], SKIRT, SHEET);
       }
       // Through a door: from the descent's edge out to the ledge.
-      for (const door of L.DOORS) if (Math.abs((a + to) / 2 - door.at * RAMP.sweep) * 18 < L.DOOR.half + 0.4) {
+      for (const door of L.DOORS) { if (Math.abs((a + to) / 2 - door.at * RAMP.sweep) * 18 < L.DOOR.half + 0.4) {
         quad(RAMP.start + a, RAMP.start + to, RAMP.r + reach, L.edgeAt(RAMP.start + (a + to) / 2) - 0.25, L.rampY(a), L.rampY(to), EARTH[n & 1]);
-      }
+      } }
       // Through a link: carry the descent's surface out through the mouths and along the gallery. Between
       // galleries only the exterior lip continues, with its inner edge buried in the intact cliff wall.
       const link = L.linkAt((a + to) / 2);
@@ -299,9 +302,9 @@
           const cut = math.clamp((L.RILL.half - L.rillTailDistance(x, z)) / (L.RILL.half - L.RILL.bedHalf), 0, 1);
           return pushVert(geo, x, L.rillJunctionY(x, z) + 0.008 - L.RILL.depth * cut, z);
         };
-        for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) {
+        for (let i = 0; i < cols; i++) { yield* pause(slice); for (let j = 0; j < rows; j++) {
           face(geo, [point(i, j), point(i + 1, j), point(i + 1, j + 1), point(i, j + 1)], EARTH[0], SHEET);
-        }
+        } }
         continue;
       }
       const count = Math.ceil(Math.abs(arc.sweep) * arc.r / 0.2);
@@ -313,14 +316,14 @@
         const cut = math.clamp((L.RILL.half - L.rillTailDistance(x, z)) / (L.RILL.half - L.RILL.bedHalf), 0, 1);
         return pushVert(geo, x, L.FLOOR + 0.008 - L.RILL.depth * cut, z);
       };
-      for (let i = 0; i < count; i++) for (let j = 0; j < bands; j++) {
+      for (let i = 0; i < count; i++) { yield* pause(slice); for (let j = 0; j < bands; j++) {
         const ids = [point(i, j), point(i, j + 1), point(i + 1, j + 1), point(i + 1, j)];
         if (arc.sweep < 0) ids.reverse();
         face(geo, ids, Math.abs(j + 0.5 - bands / 2) < 2 ? SKIRT : EARTH[0], SHEET);
-      }
+      } }
     }
     const end = L.LEDGE.to * RAMP.sweep + L.LEDGE.tail, leadSteps = Math.ceil(L.LEDGE.lead / STEP) * 2;
-    for (let n = -leadSteps; n * STEP < end - 1e-6; n++) {
+    for (let n = -leadSteps; n * STEP < end - 1e-6; n++) { if (due(slice, 15)) yield* pause(slice);
       const a = n < 0 ? n * L.LEDGE.lead / leadSteps : n * STEP;
       const to = n < 0 ? (n + 1) * L.LEDGE.lead / leadSteps : Math.min(end, a + STEP);
       drySpans(RAMP.start + a, RAMP.start + to, (b0, b1) => {
@@ -340,13 +343,13 @@
     }
     if (ledgeEnd) capEnd(ledgeEnd.b, ledgeEnd.inner, ledgeEnd.outer, ledgeEnd.y, true);
     // Support only: a sheet is a floor to stand on, never a wall, a ceiling or the skin of a solid.
-    for (const f of geo.faces) f.supportOnly = true;
+    for (const f of geo.faces) { f.supportOnly = true; }
     return geo;
   });
   // Behind the chamber's floor, wall and roof, inside the rock: where the mesher's faces meet at a T a pixel can
   // fall between them, and in a dark room it would show the sky beyond the island. The wall's pieces are laid
   // only where the layout is solid, so none stands in the window or where the descent comes in.
-  const chamberBacking = cached(() => {
+  const chamberBacking = models.cachedSteps(function* (slice = null) {
     const geo = { verts: [], faces: [], lines: [] }, N = 96, STEP = Math.PI * 2 / N, tone = hexToRgb(L.PALETTE[L.M.earthDark]);
     const wallR = L.CHAMBER_R + 0.6, low = L.FLOOR - 0.25, high = L.LEVEL.shore - 1.25;
     // The wall is tried a row of cells at a time, from the row under the floor.
@@ -356,7 +359,7 @@
       for (let k = 0; k <= 4; k++) if (!L.solidAt(Math.sin(b0 + STEP * k / 4) * wallR, y, Math.cos(b0 + STEP * k / 4) * wallR)) return false;
       return true;
     };
-    for (let n = 0; n < N; n++) {
+    for (let n = 0; n < N; n++) { if (due(slice, 15)) yield* pause(slice);
       const b0 = n * STEP, b1 = b0 + STEP;
       if (n % 3 === 0) {
         const c0 = b0, c1 = b0 + STEP * 3;
@@ -377,7 +380,7 @@
   });
   // Wall creepers root in the chamber's seams between its four reading panels, then trail over the outer floor.
   // Build the whole dressing once; it has no collision and never enters the shaft or covers the lettering.
-  const chamberVines = cached(() => {
+  const chamberVines = models.cachedSteps(function* (slice = null) {
     const geo = { verts: [], faces: [], lines: [], smooth: true, normals: [] }, rand = mulberry32(0x514a93);
     const tones = ["#173b25", "#295e32", "#397d3b", "#68a34a"].map(hexToRgb);
     const vine = hexToRgb("#35552b"), floorY = L.FLOOR + 0.055;
@@ -387,7 +390,7 @@
         if (L.solidAt(Math.sin(a) * r, y, Math.cos(a) * r)) return r - 0.1;
       return L.CHAMBER_R - 0.12;
     };
-    for (let quarter = 0; quarter < 4; quarter++) for (let k = 0; k < 5; k++) {
+    for (let quarter = 0; quarter < 4; quarter++) { for (let k = 0; k < 5; k++) { yield* pause(slice);
       const a = quarter * Math.PI / 2 + (21 + k * 12 + (rand() - 0.5) * 5) * Math.PI / 180;
       const top = -4.8 - rand() * 0.5, end = floorY + (k % 3 === 0 ? 0 : 0.8 + rand() * 1.5);
       const points = [];
@@ -408,7 +411,7 @@
         garland(geo, floor, { r: 0.027, color: vine, every: 0.39, size: 0.2 + rand() * 0.08, droop: 0.12,
           out: [0, 1, 0], rand, tones });
       }
-    }
+    } }
     geo.normals = Float32Array.from(padNormals(geo).normals);
     return noShadow(geo);
   });
@@ -514,9 +517,9 @@
   const DECK_START = SITE.deckStart, DECK_END = SITE.span + 0.25;
   const deckY = (t) => { t = Math.max(0, Math.min(1, t)); return -SITE.sag * 4 * t * (1 - t); };
   // The crossing as it was first built, kept as the bridge's collision shell so walking on it never changes.
-  const bridgeShell = cached(() => {
+  const bridgeShell = models.cachedSteps(function* (slice = null) {
     const geos = [], w = SITE.width, length = DECK_END - DECK_START, count = Math.ceil(length / 0.46), pitch = length / count;
-    for (let i = 0; i < count; i++) {
+    for (let i = 0; i < count; i++) { if (due(slice, 15)) yield* pause(slice);
       const z = DECK_START + (i + 0.5) * pitch;
       geos.push(bevelBox({ w, h: 0.18, d: pitch + 0.02, color: i % 3 === 0 ? BARK : BARK_LT, bevel: 0.04, offset: { y: deckY(z / SITE.span) - 0.05, z } }));
     }
@@ -560,7 +563,7 @@
   // Drawn as a cartoon crossing: the same bevelled planks and gateways, with its rails, hangers and underslung
   // ropes as thick smooth vines, leaves sprouting along the rails and moss cushions on the post tops.
   const VINE = hexToRgb("#3f6b2a"), VINE_DK = hexToRgb("#2f5424"), LEAF_TONES = ["#2f6b2c", "#3f8a34", "#56a43f", "#74bd52"].map(hexToRgb);
-  const bridge = cached(() => {
+  const bridge = models.cachedSteps(function* (slice = null) {
     const rand = mulberry32(5561), w = SITE.width, length = DECK_END - DECK_START, count = Math.ceil(length / 0.46), pitch = length / count;
     const geo = { verts: [], faces: [], lines: [], smooth: true, normals: [] };
     const vine = (pts, r0, r1, color) => {
@@ -571,7 +574,7 @@
       padNormals(geo);
     };
     const steps = 16;
-    for (const side of [-1, 1]) {
+    for (const side of [-1, 1]) { yield* pause(slice);
       const x = side * w / 2, rail = [], deck = [], under = [];
       for (let i = 0; i <= steps; i++) {
         const t = i / steps;
@@ -598,7 +601,7 @@
         }
       }
     }
-    for (let i = 0; i < count; i++) {
+    for (let i = 0; i < count; i++) { if (due(slice, 15)) yield* pause(slice);
       const z = DECK_START + (i + 0.5) * pitch;
       flatInto(geo, bevelBox({ w, h: 0.18, d: pitch + 0.02, color: i % 3 === 0 ? BARK : BARK_LT, bevel: 0.04, offset: { y: deckY(z / SITE.span) - 0.05, z } }));
       if (i % 6 === 1 || i % 9 === 5) {
@@ -620,7 +623,7 @@
       );
     }
     geo.normals = Float32Array.from(geo.normals);
-    geo.collisionGeometry = bridgeShell();
+    geo.collisionGeometry = yield* bridgeShell.steps(slice);
     return geo;
   });
 
@@ -1219,7 +1222,7 @@
   });
   const VEINS = [vein(0), vein(1)];
   // Roots hanging through a tunnel's roof by an opening, in a frame whose origin is on the roof: smooth cords.
-  const roots = cached(() => {
+  const roots = models.cachedSteps(function* (slice = null) {
     const rand = mulberry32(5521), geo = { verts: [], faces: [], lines: [], smooth: true, normals: [] };
     for (let k = 0; k < 5; k++) {
       let x = (k - 2) * 0.55 + (rand() - 0.5) * 0.3, y = 0.1, z = (rand() - 0.5) * 0.6;
@@ -1321,7 +1324,13 @@
     return { node, ground: groundNode, floor: floorNode, bridge: bridgeNode, membrane: membraneNode, membraneRock: membraneRockNode, vines: vinesNode, sign: signNode, crossings, beds, torches };
   };
 
+  const prepareSteps = function* () {
+    const slice = { until: 0, budget: BL.buildTasks.SLICE_MS, work: 0 };
+    for (const build of [islet, rampFloor, bridgeShell, bridge, chamberBacking, chamberVines, roots]) yield* build.steps(slice);
+    return null;
+  };
   BL.poolModels = {
+    prepareSteps,
     SITE, UNIT, BEARING, DIR, WATER, FOAM, spot, build, latheBy, islet, rampFloor, membrane, membraneRock, chamberBacking, chamberVines, crossing, CROSSING, NEST_BEDS, bridge, caveSign, torchPost, wallTorch, VEINS, roots,
     TORCH_STEM_H, carve, carveCells, panelFrom, chainPanel, chainBoard, chainBoardLegs, CHAIN_BOARD, infoSign, infoSignLeg, INFO_SIGN, CANOPY, UNDERGROWTH, fern, shrub, mossRock, deckY,
     beastRig, flowers, log,

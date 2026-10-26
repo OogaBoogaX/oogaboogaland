@@ -275,12 +275,19 @@
   const LOOK_ROTATION = math.quat.create();
   const PILLOW_CLIP_A = new Float64Array(48), PILLOW_CLIP_B = new Float64Array(48);
   const PILLOW_FRAME = { x: 0, y: 0, z: 0, sr: 0, cr: 1, minX: 0, maxX: 0, minZ: 0, maxZ: 0, minimum: Infinity };
+  const pillowCursors = new WeakMap();
   const clipHeadToPillow = (node) => {
     if (!node.visible) return;
     const frame = PILLOW_FRAME;
     if (node.geometry) {
-      const verts = node.geometry.verts, m = node.world;
-      for (const face of node.geometry.faces) {
+      const geometry = node.geometry, verts = geometry.verts, m = node.world;
+      let cursor = null;
+      if (geometry.compactGeometry) {
+        cursor = pillowCursors.get(geometry);
+        if (!cursor) { cursor = BL.compactGeometry.createCursor(geometry); pillowCursors.set(geometry, cursor); }
+      }
+      for (let index = 0; index < geometry.faces.length; index++) {
+        const face = cursor ? BL.compactGeometry.readFace(geometry, index, cursor) : geometry.faces[index];
         let src = PILLOW_CLIP_A, dst = PILLOW_CLIP_B, count = face.i.length;
         for (let i = 0; i < count; i++) {
           const v = face.i[i] * 3, x = m[0] * verts[v] + m[4] * verts[v + 1] + m[8] * verts[v + 2] + m[12] - frame.x;
@@ -465,7 +472,7 @@
     };
     contributors.roster.forEach((contributor, i) => {
       if (ctx.playerName ? contributor.name !== ctx.playerName : !contributors.activeRoster.includes(contributor)) return;
-      const cave = models.caveman(contributors.traitsFor(contributor.name));
+      const cave = ctx.characterModel ? ctx.characterModel(contributor.name) : models.caveman(contributors.traitsFor(contributor.name));
       const h = cave.traits.height;
       let health = world.health.get(contributor.name);
       if (!health) { health = { value: HEALTH_MAX, delay: 0, stunned: false, recovering: false }; world.health.set(contributor.name, health); }

@@ -168,7 +168,7 @@
 
   let renderer, game, world, go, root, camera, hud, hooks, input, pilot, fx, agentPlay = null;
   // The page's one factory node (`world.factoryNode`), and its feed and demo node.
-  let shared = null, feed = null, mock = null, unsubscribe = null, leaving = false, dust = null;
+  let shared = null, feed = null, mock = null, unsubscribe = null, leaving = false, exitHeld = false, dust = null;
   // The Ooga the visitor walked in as: one playable actor from the shared crew, and the world it carries.
   let people = null, avatar = null, playerWorld = null, unsubscribeAccount = null, remotes = null, footsteps = null;
   // The hall's sound (factory-audio.js): what its bed follows, written in place each frame, and where its machines,
@@ -1149,6 +1149,9 @@
     // A switch the director refuses (another under way) leaves the Ooga in the hall.
     if (!leaving) { world.factoryCrossing = null; w.through = w.grab = false; }
   };
+  // The island could not be built for the way out (the director's `stay`): the Ooga walks again, and the gate waits for
+  // it to step back out of the opening before it tries again.
+  const stay = () => { leaving = false; exitHeld = true; walk.phase = 0; walk.through = walk.grab = false; walk.still = walk.hold = 0; world.factoryCrossing = null; };
   const onKey = (e) => {
     if (scene.booth.mode) return boothKey(scene, e);
     if (e.key === "0" && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) return pilot.resetCamera();
@@ -1829,7 +1832,7 @@
     shared.stands.forEach((p) => placeIn(scene, p));
     unsubscribe = feed.subscribe(onEvent);
     refreshBoards(scene);
-    leaving = false;
+    leaving = exitHeld = false;
     actPrompt = false;
     greeter = BL.factoryGreeter.create({ parent: root, input, fx, feed,
       visitor: () => people && people.player === avatar ? avatar : null,
@@ -2097,18 +2100,19 @@
     if (!leaving) {
       const driven = pilot.player, p = driven ? driven.root.position : camera.position, y = p.y - (driven ? driven.baseY : 0) - LAYOUT.entrance.y;
       const inOpening = p.x >= GATE_OPENING.minX && p.x <= GATE_OPENING.maxX && y >= GATE_OPENING.floorY - 0.12 && y < GATE_OPENING.ceilingY;
+      if (exitHeld && !(inOpening && p.z > HALL.front - 2.2)) exitHeld = false;
       if (driven) {
         // The walk has the Ooga; on foot heading out over the balcony's last stretch, it takes it through the gate's
         // shield. Anything else in the doorway (an Ooga in the air, say) goes out as it always has.
         if (walk.phase) { /* walking itself */ }
-        else if (driven === avatar && walkingOut(p, previousZ, dt)) {
+        else if (!exitHeld && driven === avatar && walkingOut(p, previousZ, dt)) {
           Object.assign(walk, { phase: WALK_OFF, t: 0, x: p.x, z: p.z, through: false });
           pilot.controls.reset(); input.reset(); hud.tooltip.hide();
-        } else if (inOpening && p.z > HALL.front - 1.3) leaveCave();
+        } else if (!exitHeld && inOpening && p.z > HALL.front - 1.3) leaveCave();
         else peerPortal(s, previousX, previousY, previousZ);
       } else if (!avatar) {
         const a = pilot.controls.read();
-        if (inOpening && Math.hypot(a.x, a.y) > 0.05 && p.z > HALL.front - 2.2) leaveCave();
+        if (!exitHeld && inOpening && Math.hypot(a.x, a.y) > 0.05 && p.z > HALL.front - 2.2) leaveCave();
       }
     }
     const node = feed.reading.node, signal = feed.signal, running = node === "ready" || node === "starting";
@@ -2283,15 +2287,17 @@
   };
   const overlay = (dt) => fx.drawOverlay(dt, drawExtra);
 
-  const leave = () => {
-    // The hall's meshes stay on the GPU while the island runs (`world.factoryKeep`, read by the island's liveGeometry),
-    // so walking back in uploads nothing; taken first, while every piece is still on the graph.
-    // Only the hall's own, so the island's kept meshes never ride along from one visit to the next.
-    const kept = new Set(), collect = (node) => { if (node.geometry) kept.add(node.geometry); for (const child of node.children) collect(child); };
+  // One current visit's owners, including hidden pools and declared alternatives. Never read the previous keep Set.
+  const allGeometry = (kept) => {
+    const collect = (node) => { if (node.geometry) kept.add(node.geometry); for (const child of node.children) collect(child); };
     collect(root);
-    hallGeometry(kept);
+    factoryScene.hallGeometry(kept);
     if (world.islandKeep) for (const geometry of world.islandKeep) kept.delete(geometry);
-    world.factoryKeep = kept;
+    return kept;
+  };
+  const leave = () => {
+    // Capture once, before disposal: the island retains only this visit, never a union of earlier halls.
+    world.factoryKeep = factoryScene.allGeometry(new Set());
     // A visitor at the kiosk steps away first, and a tip of theirs still on its screen goes into the cooker.
     endBooth(scene);
     // Whoever walked in walks back out as themselves: the island takes the same Ooga back at this mouth.
@@ -2363,16 +2369,18 @@
     return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...(remotes ? remotes.stats() : {}), feed: feed ? { ...feed.counts } : null, cooker: scene ? cookerStats(scene) : null };
   };
 
-  const factoryScene = {
+  const factoryScene = BL.deferred.scene("factory", {
     // Voice zone: the Factory group, which its tunnel on the island shares (`factory`).
     voiceZone: "factory.hall",
     micKey: true,
-    id: "factory", enter, update, overlay, onDonation, previewDonation, onSeen, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
+    id: "factory", buildSteps: () => FM.buildSteps(), enter, update, overlay, onDonation, previewDonation, onSeen, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry, allGeometry, hallGeometry,
     root: null, camera: null, input: null, debug: null, agent: null, agentView: null, agentControls: null, agentHandoff: null,
+    // Diagnostics observe the existing detached owner without reading model caches.
+    get retainedGeometry() { return world ? world.factoryKeep : null; },
     get inMotion() {
       return !!scene;
     }
-  };
+  });
   BL.scenes = BL.scenes || {};
   BL.scenes.factory = factoryScene;
 })();

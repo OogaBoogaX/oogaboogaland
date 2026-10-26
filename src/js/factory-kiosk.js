@@ -39,7 +39,7 @@
   "use strict";
   const BL = window.BL;
   const T = BL.jumbotron.text, GW = T.GLYPH_W, GH = T.GLYPH_H, TR = T.TRACKING;
-  const W = 400, H = 400;
+  const { W, H } = BL.factoryKiosk;
   const BANANAS = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const RATE = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   // An amount's bounds, an invoice's life, a simulated payment's settling, and how long the paid screen holds the
@@ -1030,5 +1030,5 @@
     return flow;
   };
 
-  BL.factoryKiosk = { W, H, MIN, MAX, EXPIRY, SETTLE, HOLD, create, still };
+  Object.assign(BL.factoryKiosk, { W, H, MIN, MAX, EXPIRY, SETTLE, HOLD, create, still });
 })();

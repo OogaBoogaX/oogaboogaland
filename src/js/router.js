@@ -36,7 +36,7 @@
       const query = params.toString();
       return `/${entry.path}${query ? `?${query}` : ""}`;
     };
-    let at = HOME, popped = false;
+    let at = HOME, popped = false, queued = null;
     // Called by the director on every arrival. Boot tidies the address in place, leaving a bare landing
     // (`/?scene=dsb`) as it came; a Back or Forward arrival finds its entry already there; any other
     // arrival pushes a new one.
@@ -58,10 +58,25 @@
     // Back and Forward travel through `go`, so they fade and keep the leave contract like any other trip.
     // Our entries always change scene; a hash edited by hand to another place in the same scene (only from
     // disk, where a changed path would load a new page anyway) boots again there.
+    // A Back or Forward pressed while another trip is still building is queued, not dropped: it runs once that trip
+    // has settled (`settled`, from the director), as an ordinary trip that pushes its own entry, so the address never
+    // falls out of step with the scene.
+    const travel = (want) => {
+      if (want.scene !== at.scene) return go(want.scene, want.place);
+      if (want.place !== at.place) location.reload();
+      return false;
+    };
     const onPop = (e) => {
       const want = e.state || current() || HOME;
-      if (want.scene !== at.scene) popped = go(want.scene, want.place);
-      else if (want.place !== at.place) location.reload();
+      queued = null;
+      popped = travel(want);
+      if (!popped && want.scene !== at.scene) queued = want;
+    };
+    const settled = () => {
+      if (!queued) return;
+      const want = queued;
+      queued = null;
+      if (!travel(want) && want.scene !== at.scene) queued = want;
     };
     window.addEventListener("popstate", onPop);
     const dispose = () => window.removeEventListener("popstate", onPop);
@@ -71,7 +86,7 @@
       popped = false;
       history.replaceState({ scene: at.scene, place: at.place }, "", urlOf(at));
     };
-    return { current, arrive, dismissPlace, abandon, dispose };
+    return { current, arrive, dismissPlace, abandon, settled, dispose };
   };
   BL.router = { create, served: SERVED };
 })();

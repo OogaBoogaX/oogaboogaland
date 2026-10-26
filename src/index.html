@@ -1617,6 +1617,7 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
     <div class="bottom-hud">
       <button type="button" class="act" id="act" data-action="act" hidden>JUMP!</button>
       <div class="message-stack" id="message-stack">
+        <output class="toast" id="reload-notice" data-reload="true" hidden></output>
         <output class="toast" id="toast" hidden></output>
         <div class="hint" id="hint" hidden></div>
       </div>
@@ -1704,18 +1705,21 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/math.js"></script>
   <script src="js/daylight.js"></script>
   <script src="js/scene.js"></script>
+  <script src="js/compact-geometry.js"></script>
   <script src="js/mirror-ripples.js"></script>
   <script src="js/mirror-body.js"></script>
   <script src="js/character-visibility.js"></script>
   <script src="js/dsb-water.js"></script>
   <script src="js/gl-renderer.js"></script>
-  <script src="js/canvas-renderer.js"></script>
+  <script src="js/icon-renderer.js"></script>
+  <script src="js/canvas-renderer.js" data-defer="canvas"></script>
   <script src="js/models.js"></script>
   <script src="js/banana-icon.js"></script>
   <script src="js/convex.js"></script>
   <script src="js/terrain.js"></script>
   <script src="js/terrain-cutaway.js"></script>
   <script src="js/lab-wallpaper.js"></script>
+  <script src="js/lab-wallpaper-data.js" data-defer="lab-wallpaper"></script>
   <script src="js/hub-models.js"></script>
   <script src="js/dressing.js"></script>
   <script src="js/dressing-mediterranean.js"></script>
@@ -1779,6 +1783,9 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/pool-wildlife.js"></script>
   <script src="js/timechain-rooms.js"></script>
   <script src="js/deferred.js"></script>
+  <script src="js/terrain-snapshot.js" data-defer="terrain-cache"></script>
+  <script src="js/terrain-cache.js" data-defer="terrain-cache"></script>
+  <script src="js/build-tasks.js"></script>
   <script src="js/timechain-models.js"></script>
   <script src="js/timechain-gate.js"></script>
   <script src="js/solid-props.js"></script>
@@ -1799,21 +1806,25 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/scene-lab.js"></script>
   <script src="js/factory-feed.js"></script>
   <script src="js/factory-mock.js"></script>
+  <script src="js/factory-kiosk-core.js"></script>
   <script src="js/factory-kiosk.js"></script>
   <script src="js/donation-popup.js"></script>
   <script src="js/factory-models.js"></script>
+  <script src="js/factory-scene-models.js" data-defer="factory-scene"></script>
   <script src="js/factory-window.js"></script>
   <script src="js/tess.js"></script>
   <script src="js/hub-guide.js"></script>
-  <script src="js/factory-greeter.js"></script>
-  <script src="js/kortik-models.js"></script>
-  <script src="js/kortik.js"></script>
-  <script src="js/factory-audio.js"></script>
-  <script src="js/scene-factory.js"></script>
+  <script src="js/scene-deferred.js"></script>
+  <script src="js/factory-greeter.js" data-defer="factory-scene"></script>
+  <script src="js/kortik-models.js" data-defer="factory-scene"></script>
+  <script src="js/kortik.js" data-defer="factory-scene"></script>
+  <script src="js/factory-audio.js" data-defer="factory-scene"></script>
+  <script src="js/scene-factory.js" data-defer="factory-scene"></script>
   <script src="js/arcade-models.js"></script>
+  <script src="js/arcade-scene-models.js" data-defer="arcade"></script>
   <script src="js/arcade-games.js" data-defer="arcade"></script>
   <script src="js/retro-games.js" data-defer="arcade"></script>
-  <script src="js/scene-arcade.js"></script>
+  <script src="js/scene-arcade.js" data-defer="arcade-scene"></script>
   <script src="js/carnival-audio.js" data-defer="arcade"></script>
   <script src="js/scene-carnival.js"></script>
   <script src="js/race-track.js"></script>
@@ -1821,20 +1832,20 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/race-items.js"></script>
   <script src="js/race-hud.js"></script>
   <script src="js/race-audio.js"></script>
-  <script src="js/scene-race.js"></script>
+  <script src="js/scene-race.js" data-defer="race-scene"></script>
   <script src="js/skydiver.js" data-defer="drop"></script>
   <script src="js/drop-hud.js"></script>
   <script src="js/drop-audio.js" data-defer="drop"></script>
-  <script src="js/scene-drop.js"></script>
+  <script src="js/scene-drop.js" data-defer="drop-scene"></script>
   <script src="js/mine-models.js"></script>
   <script src="js/mine-sim.js"></script>
   <script src="js/mine-hud.js"></script>
   <script src="js/mine-audio.js"></script>
   <script src="js/mine-crew.js"></script>
-  <script src="js/scene-mine.js"></script>
+  <script src="js/scene-mine.js" data-defer="mine-scene"></script>
   <script src="js/rocket-hud.js"></script>
   <script src="js/rocket-audio.js"></script>
-  <script src="js/scene-orbit.js"></script>
+  <script src="js/scene-orbit.js" data-defer="orbit-scene"></script>
   <script src="js/dsb-coast.js" data-defer="dsb"></script>
   <script src="js/dsb-geography.js" data-defer="dsb"></script>
   <script src="js/dsb-models.js" data-defer="dsb"></script>
