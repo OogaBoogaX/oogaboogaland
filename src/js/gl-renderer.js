@@ -26,7 +26,7 @@
   const QUALITY = {
     high: { dpr: 1.5, msaa: 2, shadow: 2048, bloom: true, shafts: true, mirror: 1024, mirrorCadence: 1, prepass: true, environment: 128, environmentCadence: 1, lights: 32 },
     medium: { dpr: 1.25, msaa: 2, shadow: 1024, bloom: true, shafts: true, mirror: 768, mirrorCadence: 2, prepass: true, environment: 96, environmentCadence: 2, lights: 20 },
-    low: { dpr: 1, msaa: 0, shadow: 512, bloom: false, shafts: false, mirror: 512, mirrorCadence: 3, prepass: true, environment: 64, environmentCadence: 4, lights: 10 }
+    low: { dpr: 1, msaa: 0, shadow: 512, bloom: false, shafts: false, mirror: 256, mirrorCadence: 4, prepass: true, environment: 64, environmentCadence: 4, lights: 10 }
   };
   const INSTANCE_FLOATS = 20;
   const NO_OBJECT_CLIP = new Float32Array([0, 0, 0, -1]);
@@ -1747,7 +1747,7 @@ void main() {
     const canvasSurfaces = new WeakMap();
     let canvasSurfaceSerial = 0;
     const res = { programs: {}, fbo: null, shadow: null, bloom: null, quadVao: null, matrixTexture: null };
-    const mirror = { node: null, record: null, geometry: null, program: null, programReady: false, fb: null, tex: null, depth: null, width: 0, height: 0, renderWidth: 0, renderHeight: 0, capturedWidth: 0, capturedHeight: 0, portal: false, reveal: 0, frontFacing: false, walkThrough: false, captureValid: false, readable: false, bodyTex: null, bodyState: null, bodyVersion: -1, shards: 0, query: null, queryPending: false, occluded: false, frame: 0 };
+    const mirror = { node: null, record: null, geometry: null, program: null, programReady: false, fb: null, tex: null, depth: null, width: 0, height: 0, renderWidth: 0, renderHeight: 0, capturedWidth: 0, capturedHeight: 0, portal: false, reveal: 0, frontFacing: false, walkThrough: false, captureValid: false, readable: false, bodyTex: null, bodyState: null, bodyVersion: -1, shards: 0, query: null, queryPending: false, occluded: false, frame: 0, cadence: 1 };
     const environment = { program: null, ready: false, fb: null, tex: null, depth: null, size: 0, next: 0, valid: 0, frame: 0, origin: new Float32Array(3) };
     // Reflectors: plain planar mirrors a scene may hold several of (the factory's peer shields), each with a capture
     // of its own, drawn with the mirror's program and their ripples. The mirror above stays the one mirror with
@@ -3017,7 +3017,7 @@ void main() {
       mirrorDebug.portal = mirror.portal;
       mirrorDebug.reveal = mirror.reveal;
     };
-    // Medium captures a pane only while it reads: in at 150 CSS pixels on both axes, out under 130, so a pane near
+    // Other planar reflectors on lower tiers capture only while readable: in at 150 CSS pixels, out under 130, so a pane near
     // the line does not flicker between its reflection and its authored face.
     const paneReadable = (target, paneWidth, paneHeight) => target.readable = target.readable
       ? paneWidth >= 130 && paneHeight >= 130 : paneWidth >= 150 && paneHeight >= 150;
@@ -3038,17 +3038,20 @@ void main() {
         return own && skipMirrorPass("offscreen");
       }
       const area = (Math.min(1, MIRROR_RECT[2]) - Math.max(-1, MIRROR_RECT[0])) * width * 0.5 * (Math.min(1, MIRROR_RECT[3]) - Math.max(-1, MIRROR_RECT[1])) * height * 0.5;
-      if (area < 16) return own && skipMirrorPass("negligible");
-      if (qualityName === "medium" && !paneReadable(target, (Math.min(1, MIRROR_RECT[2]) - Math.max(-1, MIRROR_RECT[0])) * width * 0.5,
+      if (area <= 0 || !own && area < 16) return own && skipMirrorPass("negligible");
+      if (own) {
+        // Keep even a tiny mirror live. Its viewport shrinks below; only its refresh rate steps down, to at most
+        // eight displayed frames between captures. Close low-tier mirrors keep their four-frame budget.
+        mirror.cadence = area * 25 < width * height
+          ? Math.max(settings.mirrorCadence, Math.min(8, Math.ceil(128 / Math.sqrt(area))))
+          : qualityName === "low" ? settings.mirrorCadence : 1;
+      }
+      if (!own && qualityName !== "high" && !paneReadable(target, (Math.min(1, MIRROR_RECT[2]) - Math.max(-1, MIRROR_RECT[0])) * width * 0.5,
           (Math.min(1, MIRROR_RECT[3]) - Math.max(-1, MIRROR_RECT[1])) * height * 0.5)) {
         // A pane too small to read drops its capture, so it shows its authored face rather than a reflection frozen
         // when it was last captured.
-        if (!own) {
-          target.valid = false;
-          return false;
-        }
-        mirror.captureValid = mirrorDebug.captureValid = false;
-        return skipMirrorPass("quality-size");
+        target.valid = false;
+        return false;
       }
       reflectMirrorPoint(mirrorEye, camera.position, center, normal);
       reflectMirrorPoint(mirrorTarget, camera.target, center, normal);
@@ -3402,7 +3405,7 @@ void main() {
     // The camera pass draws only the in-frustum front of each record; shadow and mirror draw all.
     // 1 draws only the records the plain variant can shade, -1 only the others, 0 all.
     let plainFilter = 0;
-    // A medium reflection keeps the large physical world and every character. Camera and shadow order stay untouched: selected
+    // A lower-tier reflection keeps the large physical world and every character. Camera and shadow order stay untouched: selected
     // instance runs read the existing buffer through a temporary base offset, restored before another pass.
     const captureInstanceVisible = (rec, index) => {
       if (!rec.batch) {
@@ -3744,7 +3747,7 @@ void main() {
       gl.uniform1f(pg.mesh.u.uMatrixLivingGlobal, matrix ? matrix.livingGlobal ?? 1 : 1);
       pg.mesh.matrixNone = !matrix;
       const previousReducedCapture = reducedCapture;
-      reducedCapture = cube || qualityName === "medium";
+      reducedCapture = cube || qualityName !== "high";
       try {
       drawParts("mesh", "mesh", true);
       if (skyOn) drawSky(mirrorInvViewProj, mirrorEye.y);
@@ -3797,9 +3800,9 @@ void main() {
       const high = w[13] + Math.max(w[1] * min[0], w[1] * max[0]) + Math.max(w[5] * min[1], w[5] * max[1]) + Math.max(w[9] * min[2], w[9] * max[2]);
       return low + (high - low) * mirror.reveal;
     };
-    // Whether the reflective pane draws this frame; when it cannot (low tier, or no capture yet), the camera pass
+    // Whether the reflective pane draws this frame; until its first capture is ready, the camera pass
     // draws the mirror's authored face instead, as uncaptured reflectors keep theirs.
-    const mirrorPaneReady = () => qualityName !== "low" && !mirror.portal && mirror.frontFacing && !!(mirror.record && mirror.record.mesh)
+    const mirrorPaneReady = () => !mirror.portal && mirror.frontFacing && !!(mirror.record && mirror.record.mesh)
       && !!mirror.tex && mirror.programReady && mirror.captureValid;
     const drawMirrorSurface = (camera) => {
       const rec = mirror.record, part = rec && rec.mesh, pg = mirror.program;
@@ -4255,9 +4258,6 @@ void main() {
         updateMirrorSide(camera);
         if (mirror.portal) {
           skipMirrorPass("portal-open");
-        } else if (qualityName === "low") {
-          // The ordinary material remains visible; low spends no scene pass on the pane.
-          skipMirrorPass("quality-low");
         } else if (prepareMirrorCamera(camera)) {
           // The last pane the camera drew lost every pixel to depth (rock, a cave wall): its capture is unseen, and the
           // pane keeps the one it has until a query finds it showing again.
@@ -4267,9 +4267,8 @@ void main() {
           }
           if (!ensureMirrorProgram()) skipMirrorPass("shader-pending");
           else if (mirror.occluded && mirror.captureValid) skipMirrorPass("occluded");
-          // A mirror under a twenty-fifth of the view re-captures on the tier's cadence: the whole scene's draws for a
-          // few hundred pixels, where a frame-old reflection does not show. Nearer, it captures every frame.
-          else if (mirror.captureValid && mirror.frame++ % settings.mirrorCadence && mirror.renderWidth * mirror.renderHeight * 25 < pw * ph) skipMirrorPass("cadence");
+          // Skipped frames reuse the last reflection, including when the pane is only a few pixels across.
+          else if (mirror.captureValid && mirror.frame++ % mirror.cadence) skipMirrorPass("cadence");
           else renderMirrorCapture(clear, sky, ground, direct, directStrength, ambientFloor, diffuseFloor, shadowStrength, shadowFloor, shadowBias, lx, ly, lz, sh, lights, nLights, skyOn, fogColor, fogA, fogB, matrix, spotLight);
         }
         if (mirror.shards && environmentCaptureVisible() && ensureShardProgram()) {
@@ -4532,6 +4531,8 @@ void main() {
       if (!QUALITY[name] || QUALITY[name] === settings) return;
       settings = QUALITY[name];
       qualityName = name;
+      // A downgrade releases the larger capture now, even when the mirror is offscreen until a later visit.
+      if (mirror.width > settings.mirror) destroyMirrorTarget();
       buildShadow();
       resize();
     };
