@@ -1152,7 +1152,7 @@
         const part = envelopeParts[i], b = envelopeBounds[i];
         if (!part.visible) continue;
         const m = partMatrix(part);
-        if (exactRest) supportY = Math.min(supportY, supportMinimum(i, m));
+        if (fitSupport && exactRest) supportY = Math.min(supportY, supportMinimum(i, m));
         for (let corner = 0; corner < 8; corner++) {
           const x = b[corner & 1 ? "max" : "min"][0], y = b[corner & 2 ? "max" : "min"][1], z = b[corner & 4 ? "max" : "min"][2];
           const px = (m[0] * x + m[4] * y + m[8] * z + m[12]) * scale;
@@ -1160,7 +1160,7 @@
           const pz = (m[2] * x + m[6] * y + m[10] * z + m[14]) * scale;
           // A tilted walking rig is supported by the slope beneath its complete
           // oriented boxes, the same conservative hulls used by its sweep.
-          if (state.groundPlane) {
+          if (fitSupport && state.groundPlane) {
             let floor = state.groundX * px + state.groundZ * pz + state.groundY;
             // Curved ramps depart slightly from the tangent under the root.
             // Fit low corners to that floor while leaving walls and steps to
