@@ -1969,7 +1969,7 @@ void main() {
     };
     const reflectorTarget = (geometry) => {
       let t = reflectorTargets.get(geometry);
-      if (!t) reflectorTargets.set(geometry, t = { fb: null, tex: null, depth: null, size: 0, renderWidth: 0, renderHeight: 0, viewProj: new Float32Array(16), valid: false, readable: false, area: 0, screenWidth: 0, screenHeight: 0, record: null });
+      if (!t) reflectorTargets.set(geometry, t = { fb: null, tex: null, depth: null, size: 0, renderWidth: 0, renderHeight: 0, viewProj: new Float32Array(16), valid: false, area: 0, record: null });
       return t;
     };
     // One square allocation per reflector at the tier's mirror size, as the mirror keeps.
@@ -3017,10 +3017,6 @@ void main() {
       mirrorDebug.portal = mirror.portal;
       mirrorDebug.reveal = mirror.reveal;
     };
-    // Other planar reflectors on lower tiers capture only while readable: in at 150 CSS pixels, out under 130, so a pane near
-    // the line does not flicker between its reflection and its authored face.
-    const paneReadable = (target, paneWidth, paneHeight) => target.readable = target.readable
-      ? paneWidth >= 130 && paneHeight >= 130 : paneWidth >= 150 && paneHeight >= 150;
     // Readies the reflected camera for the mirror, or for a reflector when `target` is one; only the mirror's own
     // capture writes the debug readout.
     const prepareMirrorCamera = (camera, node = mirror.node, target = mirror) => {
@@ -3038,20 +3034,13 @@ void main() {
         return own && skipMirrorPass("offscreen");
       }
       const area = (Math.min(1, MIRROR_RECT[2]) - Math.max(-1, MIRROR_RECT[0])) * width * 0.5 * (Math.min(1, MIRROR_RECT[3]) - Math.max(-1, MIRROR_RECT[1])) * height * 0.5;
-      if (area <= 0 || !own && area < 16) return own && skipMirrorPass("negligible");
+      if (area <= 0) return own && skipMirrorPass("negligible");
       if (own) {
         // Keep even a tiny mirror live. Its viewport shrinks below; only its refresh rate steps down, to at most
         // eight displayed frames between captures. Close low-tier mirrors keep their four-frame budget.
         mirror.cadence = area * 25 < width * height
           ? Math.max(settings.mirrorCadence, Math.min(8, Math.ceil(128 / Math.sqrt(area))))
           : qualityName === "low" ? settings.mirrorCadence : 1;
-      }
-      if (!own && qualityName !== "high" && !paneReadable(target, (Math.min(1, MIRROR_RECT[2]) - Math.max(-1, MIRROR_RECT[0])) * width * 0.5,
-          (Math.min(1, MIRROR_RECT[3]) - Math.max(-1, MIRROR_RECT[1])) * height * 0.5)) {
-        // A pane too small to read drops its capture, so it shows its authored face rather than a reflection frozen
-        // when it was last captured.
-        target.valid = false;
-        return false;
       }
       reflectMirrorPoint(mirrorEye, camera.position, center, normal);
       reflectMirrorPoint(mirrorTarget, camera.target, center, normal);
@@ -3117,15 +3106,10 @@ void main() {
       return true;
     };
     // How many pixels of the eye's view a reflector's glass covers, facing it; 0 when it faces away or is off screen.
-    const reflectorArea = (node, camera, target = null) => {
-      if (target) target.screenWidth = target.screenHeight = 0;
+    const reflectorArea = (node, camera) => {
       const w = node.world, nlen = Math.hypot(w[8], w[9], w[10]) || 1;
       if (((camera.position.x - w[12]) * w[8] + (camera.position.y - w[13]) * w[9] + (camera.position.z - w[14]) * w[10]) / nlen <= MIRROR_EPSILON) return 0;
       if (!mirrorRect(node, viewProj) || MIRROR_RECT[2] < -1 || MIRROR_RECT[0] > 1 || MIRROR_RECT[3] < -1 || MIRROR_RECT[1] > 1) return 0;
-      if (target) {
-        target.screenWidth = (Math.min(1, MIRROR_RECT[2]) - Math.max(-1, MIRROR_RECT[0])) * width * 0.5;
-        target.screenHeight = (Math.min(1, MIRROR_RECT[3]) - Math.max(-1, MIRROR_RECT[1])) * height * 0.5;
-      }
       return (Math.min(1, MIRROR_RECT[2]) - Math.max(-1, MIRROR_RECT[0])) * width * 0.5 * (Math.min(1, MIRROR_RECT[3]) - Math.max(-1, MIRROR_RECT[1])) * height * 0.5;
     };
     // Shard records retain a camera-visible prefix. Test their actual transformed vertices rather than the
@@ -3467,9 +3451,8 @@ void main() {
         if (excludeMirror && (rec === mirror.record && (!cull || mirror.portal || mirrorPaneReady()) || g.mirrorSource && (!cull || environment.ready && environment.tex))) continue;
         // Tiny first-use shards keep their authored material until a readable shard initializes the shared cube.
         if (g.reflector && (reflectorPass === null || rec === reflectorPass)) {
-          // Uncaptured lower-tier panes retain their authored grey-blue face instead of disappearing.
-          const fallback = reflectorPass === null && qualityName !== "high"
-            && (qualityName === "low" || !reflectorTargets.get(g)?.valid);
+          // An uncaptured pane keeps its authored face until its first reflection arrives.
+          const fallback = reflectorPass === null && qualityName !== "high" && !reflectorTargets.get(g)?.valid;
           if (!fallback) continue;
         }
         if (meshPass && !g.glass !== !glassPass) continue;
@@ -3900,7 +3883,7 @@ void main() {
     // Each reflector facing the eye draws its own last capture, through the matrix it was captured with, and its
     // ripples in its crest tint.
     const drawReflectors = (camera) => {
-      if (qualityName === "low" || !reflectorNodes.length || !mirror.programReady) return;
+      if (!reflectorNodes.length || !mirror.programReady) return;
       const pg = mirror.program;
       gl.useProgram(pg.prog);
       gl.uniform1f(pg.u.uClipMaxY, cutawayMaxY);
@@ -4281,30 +4264,28 @@ void main() {
           }
         }
       }
-      if (qualityName !== "low" && reflectorNodes.length && ensureMirrorProgram()) {
-        // High preserves best plus one every frame. Medium captures only readable panes, on its cadence unless the
-        // best fills a twenty-fifth of the view or more, as the mirror does.
+      if (reflectorNodes.length && ensureMirrorProgram()) {
+        // High preserves best plus one every frame. Medium follows its cadence for small panes; Low follows its
+        // four-frame cadence even nearby. All tiers keep a visible pane's reflection at its capped texture size.
         const n = reflectorNodes.length;
-        let best = -1, bestArea = 16;
+        let best = -1, bestArea = 0;
         for (let i = 0; i < n; i++) {
           const t = reflectorTarget(reflectorNodes[i].geometry);
-          t.area = reflectorArea(reflectorNodes[i], camera, qualityName === "medium" ? t : null);
-          // On-screen CSS dimensions, not the capped texture dimensions or area alone; an unreadable pane drops its
-          // capture and shows its authored face.
-          if (qualityName === "medium" && t.area >= 16 && !paneReadable(t, t.screenWidth, t.screenHeight)) t.area = 0, t.valid = false;
+          t.area = reflectorArea(reflectorNodes[i], camera);
           if (t.area > bestArea) { bestArea = t.area; best = i; }
         }
         const due = qualityName === "high" || reflectorFrame++ % settings.mirrorCadence === 0;
-        if (!due && best >= 0 && reflectorTargets.get(reflectorNodes[best].geometry).valid && bestArea * 25 < width * height) best = -1;
+        if (!due && best >= 0 && reflectorTargets.get(reflectorNodes[best].geometry).valid
+          && (qualityName === "low" || bestArea * 25 < width * height)) best = -1;
         // One just come into view with nothing captured yet goes first.
         let turn = -1;
         for (let i = 0; due && i < n && turn < 0; i++) {
           const t = reflectorTargets.get(reflectorNodes[i].geometry);
-          if (i !== best && t.area >= 16 && !t.valid) turn = i;
+          if (i !== best && t.area > 0 && !t.valid) turn = i;
         }
         for (let k = 0; due && k < n && turn < 0; k++) {
           const i = (reflectorTurn + k) % n;
-          if (i !== best && reflectorTargets.get(reflectorNodes[i].geometry).area >= 16) turn = i;
+          if (i !== best && reflectorTargets.get(reflectorNodes[i].geometry).area > 0) turn = i;
         }
         if (turn >= 0) reflectorTurn = turn + 1;
         for (let pass = 0; pass < 2; pass++) {
