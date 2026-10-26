@@ -11,6 +11,7 @@
   );
   BL.characters.add({
     handle: "bc1gui",
+    display: "ottoz0r",
     // GitHub login behind the handle, for activity and the jumbotron
     github: "ottoz0r",
     joined: 1788800918,
