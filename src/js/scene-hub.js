@@ -1118,6 +1118,10 @@
       const o = coilLamp.slot * 8, s = coilLamp.k * coilLamp.gain * coilCharge.level;
       lights[o + 4] = coilLamp.kind.r * s; lights[o + 5] = coilLamp.kind.g * s; lights[o + 6] = coilLamp.kind.b * s;
     }
+    if (plazaLamp && plazaLamp.selected) {
+      const o = plazaLamp.slot * 8, s = plazaLamp.k * plazaLamp.gain;
+      lights[o + 4] = plazaLamp.kind.r * s; lights[o + 5] = plazaLamp.kind.g * s; lights[o + 6] = plazaLamp.kind.b * s;
+    }
     if (!keyHit && headquarters && camera.position.y < -1 && cameraCaveIndex && CAMERA_OPENINGS[cameraCaveIndex - 1].headquarters) {
       const underground = headquarters.sources;
       // The upper hearth cannot cast through the rock into the basement.
@@ -1134,6 +1138,7 @@
         const l = nearest, o = i * 8, sky = l.daylight ? 0.12 + RENDER_OPTS.day * 0.88 : 1;
         const kk = l.rig ? hearthK : 1;
         l.selected = true;
+        l.slot = i;
         lights[o] = l.x;
         lights[o + 1] = l.y;
         lights[o + 2] = l.z;
@@ -1146,6 +1151,11 @@
       }
       for (let i = total; i < LIGHT_CAPACITY; i++) LIGHTING_DEBUG.selectedIds[i] = null;
       RENDER_OPTS.lightCount = lampLights = LIGHTING_DEBUG.activeFullLightCount = LIGHTING_DEBUG.selectedCount = total;
+    }
+    const hearth = headquarters && headquarters.hearth;
+    if (hearth?.selected && camera.position.y < -1 && cameraCaveIndex && CAMERA_OPENINGS[cameraCaveIndex - 1].headquarters) {
+      const o = hearth.slot * 8;
+      lights[o + 4] = hearthK; lights[o + 5] = 0.65 * hearthK; lights[o + 6] = 0.3 * hearthK;
     }
     if (!keyHit) {
       key.tx = camera.target.x; key.ty = camera.target.y; key.tz = camera.target.z;
