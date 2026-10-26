@@ -19727,8 +19727,10 @@ const raceRigChecks = async () => {
     "4184e76c3501711766e5229bc42eb5d249eb88212b5a9cf3b9086ebe5767286d",
     // The fragment shader, re-baselined on purpose: 487d99ac909f added uObjectSlab2 for the Factory roof bore
     // (b82d02f4 to f5f71f79), ab4ebcd sampled retained canvas surfaces (to c98cc70d) and e32e91e sampled the
-    // foliage LOD atlas (to fb12fd53). Removing those additions would not restore b82d02f4 alone.
-    "fb12fd53216aa902750f5bf315e44a6334c9b24fb58afb12f28a4f5e85233677",
+    // foliage LOD atlas (to fb12fd53). Removing those additions would not restore b82d02f4 alone. The fireworks'
+    // flash (`uFlash`, `uFlashPos`: a burst's light on what faces it, off at rest) moved it to 57da1811; without those
+    // lines the mesh fragment shader is byte for byte fb12fd53's.
+    "57da1811749ec1d80177285394c368b8867e8b53f640e6b29c86ad103ec1b10a",
     "37030f053de422aa157f017ceedef0812ed57a17c9e1b2af4aab017c0b645364"
   ];
   record("race rig strategy: ordinary mesh, fragment and shadow shader bytes retain the pre-rig fast path", ordinaryHashes.every((hash, i) => hash === expectedOrdinaryHashes[i]), JSON.stringify(ordinaryHashes));
