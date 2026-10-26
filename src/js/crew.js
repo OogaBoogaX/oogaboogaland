@@ -3711,7 +3711,13 @@
         && groundAt(x, z, feet, feet, cave) >= feet - STEP - 1e-7;
     };
     const resetWalkerRoute = (cave, retainPath = false) => {
-      const tx = retainPath && cave.pathing ? cave.pathing.tx : NaN, tz = retainPath && cave.pathing ? cave.pathing.tz : NaN;
+      const path = cave.pathing, traffic = cave.traffic;
+      // A direct pile approach has no cached path target. Recovery can step
+      // back outside that approach, so retain its actual destination too.
+      const direct = retainPath && path && !Number.isFinite(path.tx) && traffic.moving
+        && cave.state === "working" && !cave.bedTravel.mode;
+      const tx = direct ? traffic.tx : retainPath && path ? path.tx : NaN;
+      const tz = direct ? traffic.tz : retainPath && path ? path.tz : NaN;
       const a = cave.avoidance;
       a.active = false; a.tx = NaN; a.stalled = 0; a.best = Infinity;
       a.navigation.mode = 0; a.detour.site = -1;
@@ -3767,7 +3773,11 @@
       // Failed recovery jumps count as stalled travel, but neither replanning
       // nor relocation may interrupt the collision-checked airborne motion.
       if (airborne) return;
-      if (!progress.escaped && progress.motionless >= 0.8) {
+      // Small back-and-forth steps are not progress. Give a jittering walker
+      // the same swept escape and route repair as a stationary one, before
+      // the last-resort relocation can become eligible.
+      const stuck = progress.motionless >= 0.8 || progress.stalled >= 2;
+      if (!progress.escaped && stuck) {
         progress.escaped = true;
         const heading = Math.atan2(cave.traffic.tx - p.x, cave.traffic.tz - p.z);
         for (let side = 0; side < 5; side++) {
@@ -3779,7 +3789,7 @@
           break;
         }
       }
-      if (!progress.replanned && progress.stalled >= 1 && progress.motionless >= 0.8 && !progress.backoff) {
+      if (!progress.replanned && progress.stalled >= 1 && stuck && !progress.backoff) {
         resetWalkerRoute(cave, true); progress.replanned = true; progress.replans++;
         ctx.fx.say(cave, "COMING THROUGH!", 1.8);
         if (travel.mode === "walk" && ctx.bedRoute) startBedRoute(cave, travel.toBed ? cave.bedroll : travel.bed, travel.toBed);
