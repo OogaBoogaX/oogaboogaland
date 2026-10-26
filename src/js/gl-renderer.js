@@ -3034,7 +3034,7 @@ void main() {
         return own && skipMirrorPass("offscreen");
       }
       const area = (Math.min(1, MIRROR_RECT[2]) - Math.max(-1, MIRROR_RECT[0])) * width * 0.5 * (Math.min(1, MIRROR_RECT[3]) - Math.max(-1, MIRROR_RECT[1])) * height * 0.5;
-      if (area <= 0 || !own && area < 16) return own && skipMirrorPass("negligible");
+      if (area <= 0) return own && skipMirrorPass("negligible");
       if (own) {
         // Keep even a tiny mirror live. Its viewport shrinks below; only its refresh rate steps down, to at most
         // eight displayed frames between captures. Close low-tier mirrors keep their four-frame budget.
