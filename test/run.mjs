@@ -8142,13 +8142,20 @@ const hubJumbotron = { name: "hub jumbotron", why: "rule: the island rotation st
     const ownerOnly = reader.users.length === 1 && reader.users[0].login === owner
       && reader.filters.users.length === 1 && reader.filters.users[0] === owner;
     reader.dispose(); restored.dispose(); j.refreshData(data);
-    return { count: j.count, captions, wrapped, differs: plain !== drafted,
+    const types = ["merge", "pr", "commit", "review", "issue", "comment"];
+    const tied = types.flatMap(type => ["b", "a"].map(key => ({ login: data.contributors[0].login,
+      repo: data.repos[0].name, type, occurred_at: "2026-01-01T00:00:00Z", event_key: type + "/" + key })));
+    const order = rows => BL.jumbotron.parseStats({ ...data, recent: rows }).recent.map(row => row.eventKey).join(",");
+    const expected = types.flatMap(type => [type + "/a", type + "/b"]).join(",");
+    const stableOrder = order(tied) === expected && order(tied.reverse()) === expected;
+    return { count: j.count, captions, wrapped, differs: plain !== drafted, stableOrder,
       filtered, ownerOnly, restoredOwner, bufferCreates, bufferDeletes, cycleStable, rewarm,
       stable: !!surfaceGeometry && surfaceNode.geometry === surfaceGeometry && surfaceGeometry.imageSurface.canvas === surfaceCanvas
         && surfaceGeometry.imageSurface.version > initialRevision };
   })()`);
   const orgBoards = ["commits", "prs", "reviews", "comments", "issues"].map((t) => "org · " + t);
   record("hub jumbotron: the island rotates org activity, readers filter repositories, and attributed users appear once with saved alias selections restored", r.count === 7 && r.captions[0] === "Recent activity" && r.captions[1] === "Org totals" && orgBoards.every((c, i) => r.captions[2 + i] === c) && r.wrapped === "Recent activity" && r.filtered && r.ownerOnly && r.restoredOwner, JSON.stringify(r));
+  record("hub jumbotron: equal-time recent events use merge, PR, commit, review, issue, comment priority and stable event keys", r.stableOrder, JSON.stringify({ stableOrder: r.stableOrder }));
   record("hub jumbotron: a draft PR changes the stable canvas ticker and exact chrome cycles without GPU buffer churn, including after records are pruned", r.differs && r.stable && r.bufferCreates === 0 && r.bufferDeletes === 0 && r.cycleStable && r.rewarm, JSON.stringify({ differs: r.differs, stable: r.stable, bufferCreates: r.bufferCreates, bufferDeletes: r.bufferDeletes, cycleStable: r.cycleStable, rewarm: r.rewarm }));
 } };
 const oogatronPopups = { name: "oogatron popups", why: "rule: Oogatron windows keep their displays apart during mouse or touch drags and remember their independent controls and layout after reload", run: async (b) => {
