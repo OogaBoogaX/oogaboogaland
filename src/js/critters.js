@@ -6,6 +6,15 @@
   const { createNode, addChild, removeChild } = BL.scene;
   const SEED = 9137;
   const BUTTERFLY_CAP = 24, FIREFLY_CAP = 48, EMBER_CAP = 16;
+  // The fires breathe a few embers at a time; a tenth of each cycle is a burst of faster-rising ones.
+  const EMBER_CALM = 4, EMBER_BURST_COUNT = 10, EMBER_PERIOD = 8, EMBER_BURST = 0.8, EMBER_BURST_STEP = 0.04, EMBER_BURST_SPEED = 1.8;
+  // An ember fades as it climbs and is reborn at the foot. Capping how high it climbs keeps that rebirth a
+  // small step at the top rather than a leap, so the proximity gate's resumed frame never catches a jump.
+  const EMBER_RISE = 1.8;
+  // The hearth's ember batch needs its own geometry object: the WebGL renderer keys an instanced batch by
+  // geometry, so sharing the plaza batch's would leave one of the two never drawn.
+  let hearthEmberGeometry = null;
+  const hearthEmber = () => hearthEmberGeometry || (hearthEmberGeometry = BL.blaze.buildEmberModel());
   const FRACTION = { high: 1, medium: 0.5, low: 0.25 };
   // FADE_STEP: seconds between one individual appearing or leaving.
   const FADE_STEP = 0.12;
@@ -39,13 +48,13 @@
     data[o + 18] = matrixLiving ? 2 : 0;
     data[o + 19] = 0;
   };
-  const settle = (batch, target, dt) => {
+  const settle = (batch, target, dt, step = FADE_STEP) => {
     if (batch.shown === target) {
       batch.fade = 0;
       return;
     }
     batch.fade += dt;
-    if (batch.fade < FADE_STEP) return;
+    if (batch.fade < step) return;
     batch.fade = 0;
     batch.shown += batch.shown < target ? 1 : -1;
   };
@@ -54,7 +63,7 @@
     const butterflies = [makeBatch(hubModels.butterfly(0), BUTTERFLY_CAP, true, !!activeAt), makeBatch(hubModels.butterfly(1), BUTTERFLY_CAP, true, !!activeAt)];
     const fireflies = makeBatch(hubModels.firefly(), FIREFLY_CAP, true, !!activeAt);
     const embers = makeBatch(hubModels.ember(), EMBER_CAP, true, !!activeAt);
-    const secondaryEmbers = secondaryFire ? makeBatch(hubModels.ember(), EMBER_CAP, true, !!activeAt) : null;
+    const secondaryEmbers = secondaryFire ? makeBatch(hearthEmber(), EMBER_CAP, true, !!activeAt) : null;
     const burstVx = new Float32Array(FIREFLY_CAP), burstVz = new Float32Array(FIREFLY_CAP);
     const emberT = new Float32Array(EMBER_CAP), emberPeriod = new Float32Array(EMBER_CAP);
     const secondaryEmberT = secondaryFire ? new Float32Array(EMBER_CAP) : null, secondaryEmberPeriod = secondaryFire ? new Float32Array(EMBER_CAP) : null;
@@ -83,6 +92,7 @@
     }
     const seedEmbers = (batch, source, times, periods) => {
       if (!source) return;
+      batch.prevShown = 0;
       const y = Number.isFinite(source.y) ? source.y : heightAt(source.x, source.z);
       for (let i = 0; i < EMBER_CAP; i++) {
         batch.hx[i] = source.x;
@@ -96,6 +106,13 @@
     };
     seedEmbers(embers, fire, emberT, emberPeriod);
     seedEmbers(secondaryEmbers, secondaryFire, secondaryEmberT, secondaryEmberPeriod);
+    // Each fire's burst cycle runs on its own proximity-paused clock: it advances only while that fire is
+    // near, so a distant view neither advances the burst nor leaves it to catch up when the view returns.
+    const fireX = fire ? fire.x : 0, fireZ = fire ? fire.z : 0;
+    const fireY = fire ? (Number.isFinite(fire.y) ? fire.y : heightAt(fire.x, fire.z)) : 0;
+    const hearthX = secondaryFire ? secondaryFire.x : 0, hearthZ = secondaryFire ? secondaryFire.z : 0;
+    const hearthY = secondaryFire ? (Number.isFinite(secondaryFire.y) ? secondaryFire.y : heightAt(secondaryFire.x, secondaryFire.z)) : 0;
+    let emberClock = 0, hearthClock = 0, emberNear = true, hearthNear = true;
     addChild(root, butterflies[0].node, butterflies[1].node, fireflies.node, embers.node);
     if (secondaryEmbers) addChild(root, secondaryEmbers.node);
     // 0 needs placement (also after a burst), 1 rests and 2 moves. Resting instances keep their pose;
@@ -146,17 +163,22 @@
       }
       return changed;
     };
-    const updateEmbers = (e, times, periods, dt, elapsed) => {
+    // An ember's speed is dealt when its rise begins, and kept for the whole rise: a burst's embers are fast
+    // from the moment they leave the fire, and nothing changes speed mid-flight.
+    const updateEmbers = (e, times, periods, dt, clock, burstNow) => {
       const data = e.node.instanceData;
       let changed = false;
       for (let i = 0; i < e.shown; i++) {
-        if (activeAt && !step(e, i, dt, elapsed)) continue;
+        if (activeAt && !step(e, i, dt, clock)) continue;
         if (!activeAt || e.active[i] === 2) times[i] += dt;
-        if (times[i] >= periods[i]) times[i] -= periods[i];
-        const time = activeAt ? e.time[i] : elapsed, k = times[i] / periods[i];
+        if (times[i] >= periods[i]) {
+          times[i] -= periods[i];
+          e.speed[i] = (0.8 + rand() * 0.6) * (burstNow ? EMBER_BURST_SPEED : 1);
+        }
+        const time = activeAt ? e.time[i] : clock, k = times[i] / periods[i];
         const x = e.hx[i] + Math.sin(time * 2.6 + e.phase[i]) * 0.12 * k;
         const z = e.hz[i] + Math.cos(time * 2.1 + e.phase[i]) * 0.12 * k;
-        writeInstance(data, i * 20, time * 3 + e.phase[i], 1, x, e.hy[i] + times[i] * e.speed[i], z, 1 - k, e.matrixLiving);
+        writeInstance(data, i * 20, time * 3 + e.phase[i], 1, x, e.hy[i] + Math.min(times[i] * e.speed[i], EMBER_RISE), z, 1 - k, e.matrixLiving);
         changed = true;
       }
       return changed;
@@ -172,13 +194,41 @@
       settle(butterflies[0], butterflyTarget, dt);
       settle(butterflies[1], butterflyTarget, dt);
       settle(fireflies, Math.round(FIREFLY_CAP * fraction * night), dt);
-      settle(embers, fire ? Math.round(EMBER_CAP * fraction * night * fireLit) : 0, dt);
-      if (secondaryEmbers) settle(secondaryEmbers, Math.round(EMBER_CAP * fraction * secondaryFireLit), dt);
+      // The pits breathe two to four embers by day and night; a tenth of the cycle is a burst of more, rising
+      // faster, the two fires half a cycle apart. Each cycle runs on its own proximity-paused clock, advanced
+      // only while its fire is near, so a distant view neither advances the burst nor catches up on return.
+      if (activeAt) {
+        if (fire) emberNear = activeAt(fireX, fireY + 1, fireZ, emberNear, 24, 32);
+        if (secondaryFire) hearthNear = activeAt(hearthX, hearthY + 1, hearthZ, hearthNear, 24, 32);
+      }
+      if (!activeAt || fire && emberNear) emberClock += dt;
+      if (secondaryFire && (!activeAt || hearthNear)) hearthClock += dt;
+      const burst = (emberClock % EMBER_PERIOD) < EMBER_BURST;
+      const calm = Math.max(2, Math.round(EMBER_CALM * fraction));
+      const emberTarget = fire ? Math.round((burst ? EMBER_BURST_COUNT * fraction : calm) * fireLit) : 0;
+      settle(embers, emberTarget, dt, burst || embers.shown > emberTarget ? EMBER_BURST_STEP : FADE_STEP);
+      for (let i = embers.prevShown; i < embers.shown; i++) {
+        emberT[i] = 0;
+        embers.speed[i] = (0.8 + rand() * 0.6) * (burst ? EMBER_BURST_SPEED : 1);
+        if (activeAt) { embers.active[i] = 0; embers.node.instanceData[i * 20 + 15] = 0; }
+      }
+      embers.prevShown = embers.shown;
+      const hearthBurst = ((hearthClock + EMBER_PERIOD / 2) % EMBER_PERIOD) < EMBER_BURST;
+      if (secondaryEmbers) {
+        const hearthTarget = Math.round((hearthBurst ? EMBER_BURST_COUNT * fraction : calm) * secondaryFireLit);
+        settle(secondaryEmbers, hearthTarget, dt, hearthBurst || secondaryEmbers.shown > hearthTarget ? EMBER_BURST_STEP : FADE_STEP);
+        for (let i = secondaryEmbers.prevShown; i < secondaryEmbers.shown; i++) {
+          secondaryEmberT[i] = 0;
+          secondaryEmbers.speed[i] = (0.8 + rand() * 0.6) * (hearthBurst ? EMBER_BURST_SPEED : 1);
+          if (activeAt) { secondaryEmbers.active[i] = 0; secondaryEmbers.node.instanceData[i * 20 + 15] = 0; }
+        }
+        secondaryEmbers.prevShown = secondaryEmbers.shown;
+      }
       finish(butterflies[0], updateButterflies(butterflies[0], dt, elapsed));
       finish(butterflies[1], updateButterflies(butterflies[1], dt, elapsed));
       finish(fireflies, updateFireflies(dt, elapsed));
-      finish(embers, updateEmbers(embers, emberT, emberPeriod, dt, elapsed));
-      if (secondaryEmbers) finish(secondaryEmbers, updateEmbers(secondaryEmbers, secondaryEmberT, secondaryEmberPeriod, dt, elapsed));
+      finish(embers, updateEmbers(embers, emberT, emberPeriod, dt, emberClock, burst));
+      if (secondaryEmbers) finish(secondaryEmbers, updateEmbers(secondaryEmbers, secondaryEmberT, secondaryEmberPeriod, dt, hearthClock, hearthBurst));
     };
     // Re-homes a few existing fireflies to the shaken tree and scatters them outward; spawns none.
     const burst = (x, z) => {

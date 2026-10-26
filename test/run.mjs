@@ -4099,19 +4099,25 @@ const canvasSurfaceCacheChecks = async () => {
 const deferredLoadingChecks = async () => {
   const source = await readFile(join(root, "src/js/deferred.js"), "utf8"), rows = [];
   // `gone` names the files a deploy has removed: their HEAD probe answers 404, any other 200.
-  const fixture = (gone = [], stalled = false) => {
+  const fixture = (gone = [], stalled = false, id = "drop") => {
     const nodes = [], timers = new Map(), probes = []; let serial = 0;
     const document = { hidden: false, head: { appendChild(node) { nodes.push(node); return node; } },
       createElement: tag => ({ tag, remove() { const i = nodes.indexOf(this); if (i >= 0) nodes.splice(i, 1); } }) };
     const fetch = (url, options) => { probes.push({ url, method: options.method, signal: options.signal }); return stalled ? new Promise(() => {}) : Promise.resolve({ status: gone.includes(url) ? 404 : 200 }); };
-    const context = { window: { BL: { deferredScripts: { drop: "/drop.js", "drop-scene": "/scene.js" } } }, document, fetch, AbortController,
+    const baseGroup = id === "hangar" ? "factory-scene" : id, baseFile = id === "hangar" ? "/factory.js" : `/${id}.js`;
+    const context = { window: { BL: { deferredScripts: { [baseGroup]: baseFile, [`${id}-scene`]: "/scene.js" } } }, document, fetch, AbortController,
       setTimeout: fn => { timers.set(++serial, fn); return serial; }, clearTimeout: id => timers.delete(id) };
     runInNewContext(source, context);
-    const BL = context.window.BL, shell = BL.deferred.scene("drop");
+    const BL = context.window.BL, shell = BL.deferred.scene(id);
+    if (id === "hangar") BL.deferred.scene("factory");
     const scripts = () => nodes.filter(n => n.tag === "script"), links = () => nodes.filter(n => n.tag === "link");
-    const base = () => { BL.dropAudio = {}; scripts().find(n => n.src.startsWith("/drop.js")).onload(); };
+    const base = () => {
+      if (id === "hangar") BL.deferred.scene("factory", { enter() {} });
+      else BL[{ drop: "dropAudio", race: "raceAudio", mine: "mineCrew", orbit: "rocketAudio" }[id]] = {};
+      scripts().find(n => n.src.startsWith(baseFile)).onload();
+    };
     const timeout = () => { const [id, fn] = timers.entries().next().value; timers.delete(id); fn(); };
-    return { BL, shell, scripts, links, base, timeout, timers, probes, context };
+    return { BL, shell, scripts, links, base, baseGroup, baseFile, timeout, timers, probes, context };
   };
   const rejected = promise => promise.then(() => false, () => true);
   // A failed prerequisite never starts its scene; repeated retries must not grow the DOM. Only an error moves the
@@ -4175,6 +4181,27 @@ const deferredLoadingChecks = async () => {
       f.BL.deferred.scene("drop", { enter() {} }); next.onload(); await retry;
       rows.push({ path: `${outcome} recovery`, ok: address && f.BL.deferred.load("drop-scene") === null && !f.links().length && !f.timers.size });
     }
+  }
+  // The three game helper groups and the hangar's Factory prerequisite must finish before their scenes execute.
+  // Loading a scene starts its prerequisite and scene preload together; the definition alone cannot settle it.
+  for (const id of ["race", "mine", "orbit", "hangar"]) {
+    const f = fixture([], false, id), group = `${id}-scene`, pending = f.BL.deferred.load(group);
+    let settled = false; pending.then(() => { settled = true; });
+    const beside = f.scripts().length === 1 && f.scripts()[0].src === f.baseFile
+      && f.links().length === 1 && f.links()[0].href === "/scene.js";
+    await Promise.resolve();
+    const held = !settled && !f.BL.deferred.present(group) && f.BL.deferred.load(group) === pending;
+    if (!beside || !held) { rows.push({ path: `${id} helpers precede their scene`, ok: false, beside, held }); continue; }
+    f.base(); await Promise.resolve();
+    const script = f.scripts().find(n => n.src === "/scene.js");
+    if (!script) { rows.push({ path: `${id} helpers precede their scene`, ok: false, script: false }); continue; }
+    const ordered = f.BL.deferred.present(f.baseGroup) && !f.BL.deferred.present(group) && !settled;
+    const enter = () => id;
+    const scene = f.BL.deferred.scene(id, { id, enter });
+    const waitsForLoad = !settled;
+    script.onload(); await pending;
+    rows.push({ path: `${id} helpers precede their scene`, ok: beside && held && ordered && waitsForLoad && settled
+      && scene === f.shell && f.shell.enter === enter && f.BL.deferred.load(group) === null && !f.links().length && !f.timers.size });
   }
   // After a deploy the hashed file is gone: the error is probed, found 404, marked stale and reported once.
   {
@@ -5309,7 +5336,7 @@ const gameRulesChecks = async () => {
     // The jackpot wheel, from arcade-models.js and its scene half on the builders they load with: the house wins slowly, and every
     // wedge, from a turn at rest and one far round after many spins, stops under the clapper wherever in it the spin
     // aims, after its whole turns and less than one more.
-    for (const name of ["scene", "models", "contributor-identities", "activity-repos", "jumbotron", "hub-models", "arcade-models", "arcade-scene-models"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
+    for (const name of ["scene", "models", "blaze", "contributor-identities", "activity-repos", "jumbotron", "hub-models", "arcade-models", "arcade-scene-models"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
     const { WHEEL_VALUES: V, WHEEL_COST: cost, wheelAt, wheelStop } = BL.arcadeModels;
     const ev = V.reduce((s, v) => s + v, 0) / V.length, jackpot = Math.max(...V), missed = [];
     for (const from of [0, -0.3, -1234.567]) for (let k = 0; k < V.length; k++) for (const at of [0.2, 0.5, 0.8]) {
@@ -13122,7 +13149,10 @@ const timechainRoomChecks = async () => {
   for (const name of ["math", "scene", "models", "jumbotron", "timechain-room-models"])
     runInNewContext(await readFile(join(root, "src/js/" + name + ".js"), "utf8"), context);
   const M = context.window.BL.models, RM = context.window.BL.timechainRoomModels;
-  const expected = ["41ff2b0ba1c25d90d10c7d01fe03ebdd33702a46d62966389eaa1dcee6cda89a", "16a2ba26b673e221f8f844b2c95c82ee955eb40fb73483d2a2c700ed33a6cc7d", "c9519700334ea5f7e118a2c34be7146f1fd317686993a9e8b9b270135b7588a2"];
+  // V8's trigonometric results have different last bits on Linux and macOS; keep exact geometry oracles for both.
+  const expected = process.platform === "linux"
+    ? ["46fddc3f3afede6a71492af33e7972d9b316a5e19a3604140d204014467e0752", "1db29f77ae158599889e8538f0de24a9d808f6a5c7eb901ce97b0a8d3a098e66", "9d1fc6a2541c405835a3ede1997a372fe0cc0aac2a66cee5e96f6b3d8beedc51"]
+    : ["41ff2b0ba1c25d90d10c7d01fe03ebdd33702a46d62966389eaa1dcee6cda89a", "16a2ba26b673e221f8f844b2c95c82ee955eb40fb73483d2a2c700ed33a6cc7d", "c9519700334ea5f7e118a2c34be7146f1fd317686993a9e8b9b270135b7588a2"];
   const hash = geos => createHash("sha256").update(JSON.stringify(geos.map(({ verts, faces, lines, normals }) => ({ verts, faces, lines, normals })))).digest("hex");
   M.setScope("hub");
   const meshes = R.SCALES.map(scale => RM.geometries(scale)), hashes = meshes.map(hash);
