@@ -448,11 +448,11 @@ Both actors retained carry/native cursor, used left-drag for camera look and ign
 
 Existing actor/auth camera scenarios are extended for target selection, empty sky, release classification and cancelled/chord gestures. Execution remains pending under **wait**.
 
-## Occlusion outlines and Matrix lever
+## Occlusion outlines and mirror room
 
 Source inspection after `189b8d0` found that the hub's occlusion overlay selected only the controlled Ooga and used its camera state, treating a controlled gorilla as detached. Both actors should use the same silhouette and nearby object/rock guides when scenery blocks them, with their own body dimensions and close-view state. First-person, combat bird's-eye, cutaway and Mempool-specific visibility rules still apply; sign-in does not change them.
 
-The Matrix wave previously started on room entry or lever activation. Turning the lever off while inside kept the wave expanding. The approved flow makes the lever the only wave control: down turns it on, up makes it recede even while occupied, and crossing the doorway never changes its direction. Living objects follow the receding front instead of losing glyphs immediately. The mirror room retains its permanent local glyphs and the existing gate and mirror-damage rules. Lever orientation, ON/OFF labels, tooltip and action prompt agree.
+The mirror is now unbreakable, with no damage or per-panel HP. Its glyph room, island-wide wave and lever are retired to save resources. The actual camera position owns the opaque black view behind the mirror, whether detached or following an actor; moving back outside restores the ordinary view. Reflection, contact ripples and the locked gate remain.
 
 ## Combat entry from the orbit angle
 
@@ -486,7 +486,7 @@ For the maintainer's play-test, exercise each agreed flow with:
 10. Tab/Shift+Tab with successful, pending and denied capture; first release, held repeats, keyup and a fresh navigation press. Include held W, sprint/jump, a charged action and Right Shift peek/tap, plus carry, detached, sleeping actors and focused UI controls. Actor/mode/view stay unchanged; gameplay input does not resume from the cancelled hold. Check both actors and sign-in states, and leave Ctrl/Meta/Alt browser shortcuts alone.
 11. Carry/orbit right-click with each actor signed in/out: click visible ground/props at different elevations and sides, empty sky, near-body points and foreground cover. Check smooth shoulder entry, actor facing, native cursor and retained carry. Include both mouse-button press/release orders, right-drag, long holds, blur/cancel/Tab, and release outside the canvas. Detached right-click stays inactive; combat Ooga aim and gorilla 10m ground targeting retain their prior behavior.
 12. Ooga/gorilla occlusion behind rock, nearby objects and the pile in carry/orbit and shoulder views, signed in/out. Compare actor silhouettes and surrounding outlines; clear views, first person and combat bird's-eye must not retain stale outlines. Include underground ramps and Mempool's actor-only rim.
-13. Enter the mirror room with the lever off: only its local glyphs remain. Pull down to turn on, leave and return while on, then push up and remain inside until the world wave recedes completely. Cross the doorway during retreat and reverse the lever mid-wave. Check the lever labels, hints, gate movement and living-object glyph retreat.
+13. Move free and following cameras behind the mirror: the view is pitch black without glyphs or a lever. Move back outside and verify the ordinary view returns. Rifle shots and melee ripple the intact glass without damage or HP; repeat after leaving and returning.
 14. X and mode-portrait combat entry from low, exactly 45°, high and below-character carry/orbit views for both actors signed in/out. Include off-target camera looks, detached retakes, pressing X during a selection/T handoff, rolled views and underground cameras. Check smooth start/progress/settling, shoulder for low angles, bird's-eye for steep angles, unchanged close-view toggles and no combat entry while asleep.
 
 15. Grab and throw in every carry view and combat bird's-eye: launch forward at 45° regardless of camera pitch, charge, running or jumping. Combat first-person/shoulder throws follow the crosshair. Check signed in/out, both shoulders, canvas/HUD releases, mode/view changes while charging and camera movement during the arm swing.

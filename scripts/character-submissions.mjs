@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import { declaredIdentity } from "./character-identity.mjs";
 import { BOT, isOperator } from "./character-operators.mjs";
-import { CharacterRejection, characterPath, touchesCharacters, scanCharacter, checkOwner, safeCharacterSource } from "./character-safety.mjs";
+import { CharacterRejection, characterPath, touchesCharacters, scanCharacter, checkOwner, safeCharacterSource, isGitHubDisplayRename } from "./character-safety.mjs";
 
-export const LANES = ["daily", "manual"];
+export const LANES = ["daily", "manual", "rename"];
 export const manifestPath = (lane) => `.github/character-bundles/${lane}.json`;
 export const branchPrefix = (lane) => `automation/characters-${lane}-`;
 export const digest = (source) => createHash("sha256").update(source).digest("hex");
@@ -33,6 +33,7 @@ export const inspectSubmission = async (gh, submission, rock) => {
   if (!changed.length) return { entries: [], hasCharacters: false, mixed: comparison.files.length > 0, author };
   if (!author || (!pr && (!commit.commit.verification?.verified || commit.committer?.login !== author))) reject("Standalone commits need a verified signature with the same linked GitHub author and committer; otherwise submit an authenticated PR.");
   const maintainer = await isMaintainer(gh, author);
+  const operator = maintainer && isOperator(pr ? pr.user : commit.author);
   if (changed.length > 16) reject("At most 16 character files may be submitted together.");
   for (const file of changed) regular(file);
   if (pr && submission.archived && pr.head.sha !== submission.head) {
@@ -41,7 +42,7 @@ export const inspectSubmission = async (gh, submission, rock) => {
   }
   const commits = pr && !submission.archived ? await gh.list(`pulls/${pr.number}/commits`, 1) : comparison.commits;
   if (!Array.isArray(commits) || commits.length > 100 || comparison.total_commits > 100) throw new Error("Submission history too large for safe extraction");
-  const lanes = new Map(), touched = new Set();
+  const lanes = new Map(), touched = new Set(), notRename = new Set();
   for (const item of commits) {
     // Only commits actually in the pinned source head. On archived source PRs,
     // later edits must never replace the reviewed immutable source revision.
@@ -62,6 +63,7 @@ export const inspectSubmission = async (gh, submission, rock) => {
       const scanned = scanCharacter(blob.source);
       const previous = revision.parents?.[0] ? await gh.file(revision.parents[0].sha, file.filename) : null;
       checkOwner(scanned.row, previous ? declaredIdentity(previous.source) : null, author, maintainer);
+      if (!operator || !previous || !isGitHubDisplayRename(previous.source, blob.source)) notRename.add(file.filename);
       if (scanned.lane === "manual") lanes.set(file.filename, "manual");
       touched.add(file.filename);
     }
@@ -73,10 +75,11 @@ export const inspectSubmission = async (gh, submission, rock) => {
     const base = await gh.file(comparison.merge_base_commit.sha, file.filename);
     checkOwner(scanned.row, base ? declaredIdentity(base.source) : null, author, maintainer);
     const current = await gh.file(rock, file.filename);
-    const lane = lanes.get(file.filename) || scanned.lane;
+    const lane = operator && !notRename.has(file.filename) && base && isGitHubDisplayRename(base.source, original.source)
+      ? "rename" : lanes.get(file.filename) || scanned.lane;
     // Manual code must already declare its alias; never rewrite unparsed code.
     const literal = declaredIdentity(original.source);
-    if (lane === "manual" && (scanned.row.github || scanned.row.handle).toLowerCase() !== (literal.github || literal.handle).toLowerCase()) reject("Custom character code must explicitly declare its owning github login.");
+    if (lane !== "daily" && (scanned.row.github || scanned.row.handle).toLowerCase() !== (literal.github || literal.handle).toLowerCase()) reject("Custom character code must explicitly declare its owning github login.");
     const source = lane === "daily" ? safeCharacterSource(scanned.row) : original.source;
     // A previously merged identical contribution is a no-op, not a new bundle item.
     if (current?.source === source) continue;

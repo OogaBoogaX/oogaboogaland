@@ -120,6 +120,27 @@ export const safeCharacterSource = (row) => {
   return `(() => {\n  "use strict";\n  const BL = window.BL;\n  BL.characters.add(${data});\n})();\n`;
 };
 
+// A narrow cosmetic operation on an existing trusted file, never an evaluator.
+// Keep every byte outside one canonical display line, including custom hooks.
+export const isGitHubDisplayRename = (previous, source) => {
+  const read = (text) => {
+    const identity = declaredIdentity(text);
+    if (text.split("BL.characters.add({").length !== 2) return null;
+    const header = /BL\.characters\.add\(\{\n([ \t]+)handle: (["'])([A-Za-z0-9-]+)\2,\n/.exec(text);
+    if (!header || header[3] !== identity.handle) return null;
+    const at = header.index + header[0].length, tail = text.slice(at);
+    const line = /^([ \t]+)display: (["'])([A-Za-z0-9 -]{1,39})\2,\n/.exec(tail);
+    if (line && line[1] !== header[1]) return null;
+    return { identity, display: line?.[3], rest: text.slice(0, at) + tail.slice(line?.[0].length || 0) };
+  };
+  try {
+    const before = read(previous), after = read(source);
+    return !!before && !!after && previous !== source && before.rest === after.rest
+      && before.identity.handle === after.identity.handle && before.identity.github === after.identity.github
+      && after.display === (after.identity.github || after.identity.handle);
+  } catch { return false; }
+};
+
 export const scanCharacter = (source) => {
   if (typeof source !== "string" || Buffer.byteLength(source) > 32768) reject("Character source exceeds 32 KiB.");
   // This screen is deliberately conservative. Passing it does NOT make custom

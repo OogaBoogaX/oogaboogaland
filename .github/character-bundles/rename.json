@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "lane": "rename",
+  "openedOn": "2026-10-26",
+  "round": "c2b2d1fcc8b2957445778dc0dfc20466da3296fb",
+  "entries": [
+    {
+      "pr": 317,
+      "head": "a805faef4e4247907ef92381f51e3701c903188a",
+      "author": "w-s-bitcoin",
+      "path": "src/characters/bc1gui.js",
+      "base": "8ee25bb3738d0192b2218da16feda0866cee4d47",
+      "hash": "9caecee5d00538967dde7203d02000732e592bf380409700c2d427060471744b",
+      "lane": "rename"
+    }
+  ]
+}
