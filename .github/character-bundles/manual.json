@@ -2,33 +2,24 @@
   "version": 1,
   "lane": "manual",
   "openedOn": "2026-10-24",
-  "round": "7245ec34d9912921396b227e46a0401db82cc06c",
+  "round": "034dafa4380f6b8220fdfe7131c9d4a080604618",
   "entries": [
     {
-      "pr": 215,
-      "head": "7cff982927c9d8e5a51bacadb41c43e099c3fa19",
-      "author": "johnstackton21m",
-      "path": "src/characters/johnstackton21m.js",
+      "pr": 306,
+      "head": "90b34e1a5750ac7ec64232193d0a0e11f76fc9ff",
+      "author": "Bitcoin-Bill",
+      "path": "src/characters/Bitcoin-Bill.js",
       "base": null,
-      "hash": "d49aa270603513fd46e6754baf559d37965295158b3b362b694a3972ead1e937",
+      "hash": "df0fd02e035fa5f87b4f054acd40f6a37320dcef05b850cd8a0e5289b61fda1b",
       "lane": "manual"
     },
     {
-      "pr": 266,
-      "head": "6bb69c5a881ed0a80f8a4e5c56be4a737da3da89",
-      "author": "stacktoshi",
-      "path": "src/characters/stacktoshi.js",
+      "pr": 294,
+      "head": "cd7af864cc22c00fea5168ebfc46337a2a23ac93",
+      "author": "SatsMason",
+      "path": "src/characters/SatsMason.js",
       "base": null,
-      "hash": "35ca6e3aa66625bf3556889f32d162e7b3ef0091606bc78589b847312d33e4ab",
-      "lane": "manual"
-    },
-    {
-      "pr": 271,
-      "head": "4c9a0701e53bc8f179dacef076293cdad11d9b9d",
-      "author": "LiranCohen",
-      "path": "src/characters/itsLiran.js",
-      "base": null,
-      "hash": "5fa0f3725a7d21ac7f8ea029252485bc1772ebec8c503bc90c2d5d0ef74c6a26",
+      "hash": "1a16d6d72b08045aca2ed5737a9d10a84f037c09734bd85cbb981523043d5dc5",
       "lane": "manual"
     }
   ]
