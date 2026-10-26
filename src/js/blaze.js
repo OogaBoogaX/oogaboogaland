@@ -101,14 +101,22 @@
   // one geometry (four instanced draws) and the bloom softens the edges. A slow gust and a quicker flutter lean the
   // upper stream; nothing allocates per frame.
   const FLAME_BANDS = [
-    { color: "#fff0a8", count: 6, y0: 0.18, y1: 0.26, r: 0.16, size0: 0.18, size1: 0.24, life0: 0.4, life1: 0.6, vy0: 0.41, vy1: 0.6, stretch: 0.2, glow: 2.6 },
-    { color: "#ffd03a", count: 12, y0: 0.19, y1: 0.3, r: 0.3, size0: 0.23, size1: 0.3, life0: 0.67, life1: 0.93, vy0: 0.56, vy1: 0.75, stretch: 0.5, glow: 2.2 },
+    // The white-hot core is the widest and busiest at the foot of the fire, so it reads through the yellow body
+    // above it instead of being covered: more blocks, spread across the coals, and the yellow band starts higher.
+    { color: "#fff0a8", count: 14, y0: 0.16, y1: 0.24, r: 0.26, size0: 0.17, size1: 0.23, life0: 1.45, life1: 2.65, vy0: 0.41, vy1: 0.6, stretch: 0.2, glow: 2.8 },
+    { color: "#ffd03a", count: 12, y0: 0.32, y1: 0.44, r: 0.3, size0: 0.16, size1: 0.21, life0: 0.67, life1: 0.93, vy0: 0.56, vy1: 0.75, stretch: 0.5, glow: 2.2 },
     { color: "#ff8a1e", count: 12, y0: 0.24, y1: 0.4, r: 0.3, size0: 0.19, size1: 0.25, life0: 0.8, life1: 1.13, vy0: 0.68, vy1: 0.86, stretch: 0.9, glow: 1.8 },
     { color: "#e0381a", count: 9, y0: 0.55, y1: 0.72, r: 0.16, size0: 0.12, size1: 0.17, life0: 0.53, life1: 0.8, vy0: 0.75, vy1: 0.98, stretch: 1.4, glow: 1.4 }
   ];
   // A block a little taller than wide, so a rising one reads as a lick, not a cube.
   // How fast a rising block is drawn in toward the flame's axis, per second: what narrows the stream to a point.
   const FLAME_PULL = 1.2;
+  // The rise is slowed a little; a block holds its width through the lower half of its climb, then fades quickly
+  // to nothing as it rises into the air, so the stream dissolves instead of carrying solid boxes up with it.
+  // FLAME_RATE is the flame's own clock: below 1 the whole stream slows — rise, life, sway, spin and light — while
+  // its shape and height stay put (a block travels the same distance over a longer wall-clock life). Embers and
+  // sparks keep the page's clock, so the fire throws them as often as before.
+  const FLAME_RATE = 0.7, FLAME_RISE = 0.72, FLAME_FADE_FROM = 0.5, FLAME_FADE_TO = 0.85;
   const flameBlock = variants((i) => noShadow(box({ w: 1, h: 1.8, d: 1, color: FLAME_BANDS[i].color, emissive: 1 })));
   // The glowing bed the flame stands on: coals wedged in the gaps between the pit's three crossed logs (which lie
   // at 0, 60 and 120 degrees, 0.12 to 0.29 up), and one bright coal where they cross.
@@ -120,7 +128,7 @@
   // The ignition volumes the block flame occupies, in the pit's frame (centre, then half extents): sized from the
   // blocks' outer edges sampled over many seconds, widest just above the logs and narrowing to the licks.
   const FLAME_BOXES = new Float32Array([
-    0, 0.29, 0, 0.28, 0.11, 0.28,
+    0, 0.29, 0, 0.38, 0.11, 0.38,
     0, 0.5, 0, 0.26, 0.1, 0.26,
     0, 0.7, 0, 0.2, 0.1, 0.2,
     0, 0.9, 0, 0.17, 0.1, 0.17,
@@ -142,7 +150,7 @@
       p.x = Math.cos(a) * r;
       p.z = Math.sin(a) * r;
       p.y = B.y0 + rand() * (B.y1 - B.y0);
-      p.vy = B.vy0 + rand() * (B.vy1 - B.vy0);
+      p.vy = (B.vy0 + rand() * (B.vy1 - B.vy0)) * FLAME_RISE;
       p.size = B.size0 + rand() * (B.size1 - B.size0);
       p.life = B.life0 + rand() * (B.life1 - B.life0);
       p.age = 0;
@@ -184,35 +192,39 @@
     const rig = {
       root, blocks, boxes: FLAME_BOXES, light: 1,
       update(dt, elapsed) {
+        // The flame runs on its own clock (FLAME_RATE): every motion below is scaled by it, the embers' and sparks'
+        // above it are not.
+        const sdt = dt * FLAME_RATE, st = elapsed * FLAME_RATE;
         // The whole flame leans with a slow gust and a quicker flutter, more the higher a block has climbed.
-        const gx = Math.sin(elapsed * 0.7) * 0.1 + Math.sin(elapsed * 2 + 1.3) * 0.04;
-        const gz = Math.cos(elapsed * 0.55 + 0.4) * 0.07 + Math.sin(elapsed * 2.3) * 0.03;
-        const pull = Math.exp(-FLAME_PULL * dt);
+        const gx = Math.sin(st * 0.7) * 0.1 + Math.sin(st * 2 + 1.3) * 0.04;
+        const gz = Math.cos(st * 0.55 + 0.4) * 0.07 + Math.sin(st * 2.3) * 0.03;
+        const pull = Math.exp(-FLAME_PULL * sdt);
         // A click on the pit flares it: the hub's lamp loop raises the root's `flare` and lets it fall back.
         const flared = root.flare > 0 ? root.flare : 0, grow = 1 + flared * 0.35, bright = 1 + flared;
         for (let i = 0; i < blocks.length; i++) {
           const p = blocks[i], node = p.node;
-          p.age += dt;
+          p.age += sdt;
           if (p.age >= p.life) spawn(p);
           const t = p.age / p.life, lift = p.y * p.y;
-          p.y += p.vy * dt;
+          p.y += p.vy * sdt;
           p.x *= pull;
           p.z *= pull;
-          node.position.x = p.x + gx * lift + Math.sin(elapsed * 6.8 + p.wob) * 0.025 * p.y;
+          node.position.x = p.x + gx * lift + Math.sin(st * 6.8 + p.wob) * 0.025 * p.y;
           node.position.y = p.y;
-          node.position.z = p.z + gz * lift + Math.cos(elapsed * 5.5 + p.wob) * 0.02 * p.y;
-          // Grows in over its first eighth, then shrinks away to nothing at the end of its life, drawn thinner and
-          // taller as it climbs so the upper blocks pull into licks.
-          const s = p.size * grow * Math.min(1, t * 8) * Math.pow(1 - t, 0.75), stretch = 1 + t * p.band.stretch;
+          node.position.z = p.z + gz * lift + Math.cos(st * 5.5 + p.wob) * 0.02 * p.y;
+          // Grows in over its first eighth, holds its width through the lower half, then fades quickly to nothing
+          // as it climbs into the air, drawn thinner and taller so the upper blocks pull into licks.
+          const fade = Math.min(1, Math.max(0, (FLAME_FADE_TO - t) / (FLAME_FADE_TO - FLAME_FADE_FROM)));
+          const s = p.size * grow * Math.min(1, t * 8) * fade, stretch = 1 + t * p.band.stretch;
           node.scale.y = s * stretch;
           node.scale.x = node.scale.z = s / Math.sqrt(stretch);
-          node.rotation.y += p.spin * dt;
-          node.rotation.x = Math.sin(elapsed * 3.8 + p.wob) * 0.1;
+          node.rotation.y += p.spin * sdt;
+          node.rotation.x = Math.sin(st * 3.8 + p.wob) * 0.1;
           node.rotation.z = p.tilt + gx * 1.2;
-          node.glow = p.band.glow * bright * (0.75 + 0.5 * (1 - t));
+          node.glow = p.band.glow * bright * (0.75 + 0.5 * fade);
         }
-        rig.light = 1 + flare(elapsed) + gx * 0.5;
-        coals.glow = 1.1 + Math.sin(elapsed * 1.7) * 0.15 + flare(elapsed, 2) * 1.5;
+        rig.light = 1 + flare(st) + gx * 0.5;
+        coals.glow = 1.1 + Math.sin(st * 1.7) * 0.15 + flare(st, 2) * 1.5;
         if (!embers.length) return;
         const ex = o.emitX !== undefined ? o.emitX : root.position.x;
         const ey = o.emitY !== undefined ? o.emitY : root.position.y;
