@@ -15,7 +15,7 @@
 // `carve` cuts headline type from `hubModels.SIGN_GLYPHS`; `panelFrom` retains a transparent canvas on one
 // stable surface for the jumbotron's 5x7 font, which is how the chamber's wall paintings are set. `chainBoard`/`CHAIN_BOARD`
 // is the curved stats board on the lake's far shore, whose panel follows the same arc, and `infoSign` the
-// weather key beside it. The plants, rocks, animals and bridge are cartoon geometry from the hub's kit (`leafy`,
+// weather key beside it. The plants, rocks, animals and bridge are cartoon geometry from the hub's kit (`clumped`, `leafy`,
 // `puff`, `limb`, `flatInto`), one cached build each shared by every copy; the solid ones keep their first block
 // build as `collisionGeometry`. `spot` finds the rim and `build` returns the placed group.
 // Set `lineWidth` on a merged geometry, not on the polylines going into it: `merge` does not carry it.
@@ -29,7 +29,7 @@
   const { createNode, addChild } = BL.scene;
   const { cached, box, bevelBox, lathe, merge, polyline, makeVox, voxelGeometry, noShadow, pushVert, face, turnedY } = models;
   const { mulberry32, lerp, hexToRgb } = math;
-  const { puff, leafy, canopySupport, pointedLeaf, flower, FLOWER_INKS, limb, padNormals, flatInto, rock, garland, sprig } = BL.hubModels;
+  const { puff, clumped, leafy, canopySupport, pointedLeaf, flower, FLOWER_INKS, limb, padNormals, flatInto, rock, garland, sprig } = BL.hubModels;
   const L = BL.poolLayout;
 
   // A lathe whose colour varies by ring and segment, as `rocket-models.js` defines for the launch pad.
@@ -661,11 +661,11 @@
     UP[0] = nx / l; UP[1] = ny / l; UP[2] = nz / l;
     return UP;
   };
-  const JUNGLE = ["#173d2a", "#28643a", "#438a3e", "#83b94d"].map(hexToRgb);
+  const JUNGLE = ["#123825", "#1e5334", "#347746", "#5b994d"].map(hexToRgb);
   const BARK_RGB = hexToRgb(BARK), LIANA = hexToRgb("#3f6a33");
   const TRUNK = hexToRgb("#6b4d33"), TRUNK_LT = hexToRgb("#7a5a3c");
   // Drawn as a cartoon rainforest tree: a tall tapered trunk on flared buttress roots, limbs reaching out to a wide
-  // umbrella of leafy clumps (one broad crown and four lower satellites, so the layers of the old slabs survive),
+  // umbrella of closed faceted clumps (one broad crown and five lower satellites),
   // and lianas hanging from the clumps' undersides as smooth cords.
   const canopyGeometry = (seed, height, spread, lod = 0, collision = null) => {
     const lean = (mulberry32(seed)() - 0.5) * 0.25, top = height + 0.1, cx = lean * height;
@@ -688,10 +688,10 @@
     const canopyStart = geo.faces.length;
     for (let k = 0; k < crowns.length; k++) {
       const [x, y, z, rx, ry] = crowns[k];
-      leafy(geo, x, y, z, rx, ry, rx, JUNGLE, rand, Math.round(9 + rx * rx * 5), 0.4 + (k % 3) * 0.04, lod);
+      clumped(geo, x, y, z, rx, ry, rx, JUNGLE, rand, lod);
     }
     const canopyEnd = geo.faces.length;
-    // Uneven leafy curtains soften the umbrella's bare underside, while pockets of epiphytes climb the trunk.
+    // Hanging lianas soften the umbrella's underside, while pockets of epiphytes climb the trunk.
     const dressRand = mulberry32(seed + 1100);
     for (let k = 1; k < crowns.length; k++) {
       const [x, y, z, rx, ry] = crowns[k], a = dressRand() * Math.PI * 2;
@@ -747,12 +747,12 @@
     return Object.assign(noShadow(geo), { sway: 0.06 });
   };
   const fern = cached(() => models.foliageLods(fernGeometry(), fernGeometry(1)));
-  // A jungle shrub: two leafy clumps over a skirt of broad elephant-ear leaves.
-  const SHRUB = ["#16442e", "#286a3d", "#49904a", "#81b84d"].map(hexToRgb);
+  // A jungle shrub: two faceted clumps over a skirt of broad elephant-ear leaves.
+  const SHRUB = ["#143b29", "#22583a", "#3a7949", "#619a52"].map(hexToRgb);
   const shrubGeometry = (lod = 0) => {
     const rand = mulberry32(95), geo = { verts: [], faces: [], lines: [], normals: [] };
-    leafy(geo, 0, 0.4, 0, 0.56, 0.38, 0.56, SHRUB, rand, 18, 0.2, lod);
-    leafy(geo, 0.12, 0.72, -0.08, 0.36, 0.26, 0.36, SHRUB, rand, 10, 0.17, lod);
+    clumped(geo, 0, 0.4, 0, 0.56, 0.38, 0.56, SHRUB, rand, lod);
+    clumped(geo, 0.12, 0.72, -0.08, 0.36, 0.26, 0.36, SHRUB, rand, lod);
     for (let k = 0; k < 5; k++) {
       const a = k / 5 * Math.PI * 2 + rand() * 0.5, l = Math.hypot(0.8, 0.45);
       const ax = Math.cos(a) * 0.8 / l, ay = 0.45 / l, az = Math.sin(a) * 0.8 / l, n = faceUp(ax, ay, az);

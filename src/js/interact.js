@@ -14,6 +14,7 @@
     const pointers = new Map();
     const ray = { ox: 0, oy: 0, oz: 0, dx: 0, dy: 0, dz: 0 };
     const hoverHit = { node: null, owner: null, distance: Infinity };
+    const visibleHit = { node: null, owner: null, distance: Infinity };
     // Scratch for the per-frame hover path only: every consumer reads the
     // answer synchronously (tooltip hooks take primitives out of it). The
     // gesture path keeps its own pick result, which `gesture` retains.
@@ -89,6 +90,18 @@
         }
       }
       if (!best) return null;
+      const prop = best.owner.prop;
+      if (preciseHover && best.owner.kind === "prop"
+        && (prop === "bush" || prop === "tree" || prop === "palm" || prop === "canopy")) {
+        // Broad foliage pick spheres can cover a board outside the visible leaves. Use the
+        // same mesh hit as hover, so the tap goes to what the cursor actually points at.
+        if (!weaponTargets.ray(visibleHit, ray.ox, ray.oy, ray.oz, ray.dx, ray.dy, ray.dz,
+            camera.far, ignoreCave, null, true)) return null;
+        out.node = visibleHit.node;
+        out.owner = visibleHit.owner;
+        out.t = visibleHit.distance;
+        return out;
+      }
       out.node = best.node;
       out.owner = best.owner;
       out.t = bestT;
