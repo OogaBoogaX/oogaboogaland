@@ -6,8 +6,6 @@
 // wall. The crew are the Factory's own, gorillas in hard hats, each pacing its post. The boards read the repository
 // once a page life, on the first visit (`jet-feed.js`), and show the best reading there is meanwhile; a tap opens one
 // in the board dialog.
-// Until the hangar opens the scene stays `wip`, and the Factory builds no door to it (`FM.hangarEntry`) unless a page
-// opens it with ?wip=hangar.
 //
 // Whoever walked in stays themselves: the Ooga the hall handed over (`world.pilot`), or on a page that opens here,
 // `character=`. It stands on the landing a step in from the door, looking down the runway. Walking back out through the
@@ -1454,9 +1452,6 @@
   };
 
   const hangarScene = BL.deferred.scene("hangar", {
-    // Still being built, as its shell in scene-deferred.js says too: unregistered unless a page opts in with ?wip=hangar,
-    // and the Factory builds no door to it.
-    wip: true,
     // Voice zone: the Factory's group, which the hall shares (`factory.hall`).
     voiceZone: "factory.hangar",
     micKey: true,
