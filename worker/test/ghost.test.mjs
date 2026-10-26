@@ -55,7 +55,7 @@ const harness = () => {
   const ctx = {
     setWebSocketAutoResponse() {}, blockConcurrencyWhile: (fn) => fn(), acceptWebSocket: (ws) => accepted.push(ws),
     getWebSockets: () => accepted.filter((ws) => !ws.closed), getWebSocketAutoResponseTimestamp: () => null,
-    storage: { get: async (key) => stored.get(key), put: async (key, value) => stored.set(key, value), getAlarm: async () => null, setAlarm: async () => {} },
+    storage: { get: async (key) => Array.isArray(key) ? new Map(key.filter((k) => stored.has(k)).map((k) => [k, stored.get(k)])) : stored.get(key), put: async (key, value) => stored.set(key, value), getAlarm: async () => null, setAlarm: async () => {} },
   };
   const room = new context.Room(ctx, {});
   const join = async (id, login) => {
