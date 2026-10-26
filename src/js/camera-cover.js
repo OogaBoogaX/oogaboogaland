@@ -72,6 +72,13 @@
   // Keeps the driven Ooga's silhouette; shared overlay uses the same world transforms in both renderers.
   const create = (overlay, interiorTextureAt = null) => {
     const ctx = overlay.getContext("2d");
+    // The overlay's CSS size, read on resize rather than every frame: a per-frame read forces layout after the HUD writes.
+    let cssW = overlay.clientWidth, cssH = overlay.clientHeight;
+    const sizeObserver = new ResizeObserver(() => {
+      cssW = overlay.clientWidth;
+      cssH = overlay.clientHeight;
+    });
+    sizeObserver.observe(overlay);
     const mask = document.createElement("canvas"), rim = document.createElement("canvas"), stone = document.createElement("canvas");
     const maskCtx = mask.getContext("2d"), rimCtx = rim.getContext("2d"), stoneCtx = stone.getContext("2d");
     const concealed = document.createElement("canvas"), concealedRim = document.createElement("canvas");
@@ -83,6 +90,7 @@
     let wallContexts = new Array(32), wallVersions = new Float64Array(32), wallCount = 0, wallFaces = 0, wallCached = false, wallContrast = 0, wallRockOnly = false;
     let surfacePoints = new Float32Array(0), surfaceCorners = new Uint8Array(0), surfaceNext = new Int32Array(0);
     const view = mat4.create(), triangle = new Float64Array(9), clipped = new Float64Array(12);
+    const faceCursors = new WeakMap();
     let actorDepth = new Float32Array(0), clipActor = false, actorMinX = 0, actorMinY = 0, actorMaxX = -1, actorMaxY = -1;
     let actorColumns = new Int32Array(0);
     // Search the small silhouette band nearest-first. Stable distance order
@@ -191,7 +199,7 @@
     };
     const drawRock = (camera, solidAt, materialAt) => {
       rockAt = solidAt;
-      screenW = overlay.clientWidth; screenH = overlay.clientHeight;
+      screenW = cssW; screenH = cssH;
       planeX = camera.position.x - view[2] * camera.near;
       planeY = camera.position.y - view[6] * camera.near;
       planeZ = camera.position.z - view[10] * camera.near;
@@ -671,7 +679,13 @@
     const drawNode = (node) => {
       if (!node.visible || node.cameraHidden) return;
       const geometry = node.geometry, world = node.world;
-      if (geometry) for (const face of geometry.faces) {
+      let cursor = null;
+      if (geometry?.compactGeometry) {
+        cursor = faceCursors.get(geometry);
+        if (!cursor) { cursor = BL.compactGeometry.createCursor(geometry); faceCursors.set(geometry, cursor); }
+      }
+      if (geometry) for (let index = 0; index < geometry.faces.length; index++) {
+        const face = cursor ? BL.compactGeometry.readFace(geometry, index, cursor) : geometry.faces[index];
         // Triangles clip to at most four corners, so the scratch space stays fixed.
         for (let fan = 1; fan + 1 < face.i.length; fan++) {
           for (let n = 0; n < 3; n++) {
@@ -730,7 +744,7 @@
       if (guides?.objectsEnabled === false) structurePhases.fill(0);
       const hasStructures = guides?.objectsEnabled !== false && (guides?.structures ? guides.structures.length : guides?.structure?.surfaceActive);
       if (!touchesRock && !occluded && !guides?.count && !guides?.providerCount && !hasStructures) return;
-      const w = overlay.clientWidth, h = overlay.clientHeight;
+      const w = cssW, h = cssH;
       screenW = w; screenH = h;
       ctx.save();
       ctx.globalAlpha = 1;
@@ -779,6 +793,7 @@
       ctx.restore();
     };
     const dispose = () => {
+      sizeObserver.disconnect();
       mask.width = mask.height = rim.width = rim.height = stone.width = stone.height = concealed.width = concealed.height = concealedRim.width = concealedRim.height = visible.width = visible.height = apertureMask.width = apertureMask.height = wallLayer.width = wallLayer.height = 1;
       wallContexts.fill(null); wallCached = false; state.glyphInterior = false;
       glyphMaterial = textureMaterial = null;

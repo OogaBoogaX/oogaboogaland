@@ -1,15 +1,16 @@
-// Builds the page and serves it locally; --watch rebuilds on every change under src/.
-// `/` is the built single-file page as GitHub Pages serves it; `/src/` is the unbundled
-// source tree, which gives DevTools real file names while the same flags apply to both.
+// Builds and stages the site (scripts/site.mjs into untracked/site) and serves it locally; --watch rebuilds
+// on every change under src/. Everything outside `/src/` uses Worker-style audio and picture assets, so
+// /rally answers from rally.html and an unknown path from 404.html; `/src/` is the unbundled source tree,
+// which gives DevTools real file names while the same flags apply to both.
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, statSync, watch } from "node:fs";
+import { readFileSync, statSync, watch } from "node:fs";
 import { createServer } from "node:http";
 import { dirname, extname, join, normalize, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const build = join(root, "scripts", "build.mjs");
-const page = join(root, "oogaboogaland.html");
+const build = join(root, "scripts", "site.mjs");
+const site = join(root, "untracked", "site");
 const src = join(root, "src");
 const watching = process.argv.includes("--watch");
 const port = Number(process.env.PORT) || 8080;
@@ -24,6 +25,11 @@ const TYPES = {
   ".json": "application/json; charset=utf-8",
   ".svg": "image/svg+xml",
   ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".webp": "image/webp",
+  ".mp3": "audio/mpeg",
+  ".xml": "application/xml; charset=utf-8",
+  ".txt": "text/plain; charset=utf-8",
   ".ico": "image/x-icon",
 };
 
@@ -37,7 +43,7 @@ function rebuild() {
   }
   building = new Promise((resolve) => {
     const started = Date.now();
-    const child = spawn(process.execPath, [build], { cwd: root, stdio: "inherit" });
+    const child = spawn(process.execPath, [build, site, "--audio-assets", "--image-assets"], { cwd: root, stdio: "inherit" });
     child.on("exit", (code) => {
       if (code !== 0) console.log(`build failed (exit ${code}); serving the previous page`);
       else console.log(`rebuilt in ${Date.now() - started} ms`);
@@ -61,9 +67,19 @@ function send(res, status, body, type) {
   res.end(body);
 }
 
+// A rebuild restages the site, so a file can be gone between the check and the read: that is a 404, never a crash.
+function readOrNull(path) {
+  try {
+    return statSync(path).isFile() ? readFileSync(path) : null;
+  } catch {
+    return null;
+  }
+}
+
 function serveFile(res, path) {
-  if (!existsSync(path) || !statSync(path).isFile()) return send(res, 404, "not found");
-  send(res, 200, readFileSync(path), TYPES[extname(path)] || "application/octet-stream");
+  const body = readOrNull(path);
+  if (!body) return send(res, 404, "not found");
+  send(res, 200, body, TYPES[extname(path)] || "application/octet-stream");
 }
 
 const server = createServer((req, res) => {
@@ -74,9 +90,7 @@ const server = createServer((req, res) => {
   } catch {
     return send(res, 400, "bad request");
   }
-  if (pathname === "/" || pathname === "/index.html" || pathname === "/oogaboogaland.html") {
-    return serveFile(res, page);
-  }
+  if (pathname === "/") return serveFile(res, join(site, "index.html"));
   if (pathname === "/src" || pathname === "/src/") return serveFile(res, join(src, "index.html"));
   if (pathname.startsWith("/src/")) {
     // Resolve inside src/ only; a normalized path that escapes it is refused.
@@ -84,7 +98,15 @@ const server = createServer((req, res) => {
     if (!file.startsWith(src + sep)) return send(res, 403, "forbidden");
     return serveFile(res, file);
   }
-  send(res, 404, "not found");
+  const file = normalize(join(site, pathname));
+  if (!file.startsWith(site + sep)) return send(res, 403, "forbidden");
+  for (const candidate of [file, `${file}.html`]) {
+    const body = readOrNull(candidate);
+    if (body) return send(res, 200, body, TYPES[extname(candidate)] || "application/octet-stream");
+  }
+  const missing = readOrNull(join(site, "404.html"));
+  if (missing) send(res, 404, missing, TYPES[".html"]);
+  else send(res, 404, "not found");
 });
 
 await rebuild();
@@ -94,10 +116,14 @@ server.on("error", (err) => {
   process.exit(1);
 });
 server.listen(port, host, () => {
-  console.log(`serving http://${host}:${port}/ (built page) and http://${host}:${port}/src/ (sources)`);
+  console.log(`serving http://${host}:${port}/ (the staged site; try /rally) and http://${host}:${port}/src/ (sources)`);
   if (!watching) return;
   let timer = null;
+  // The build writes the cast's generated file itself (scripts/characters.mjs); watching it would rebuild forever.
+  // A change to the cast is a change under src/characters/, which is watched.
+  const generated = join("js", "characters.gen.js");
   watch(src, { recursive: true }, (_, file) => {
+    if (file === generated) return;
     if (file) console.log(`changed ${file}`);
     clearTimeout(timer);
     timer = setTimeout(rebuild, 100);

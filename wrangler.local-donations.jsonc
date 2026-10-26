@@ -1,0 +1,36 @@
+{
+  // Local preview with the deployed production donation feed. Use with wrangler dev, never deploy.
+  "name": "oogaboogaland-local-donations",
+  "main": "worker/src/index.js",
+  "compatibility_date": "2026-10-02",
+  "account_id": "1e5c1e8f7c343bf6cabced151b1ae2c6",
+  "assets": {
+    "directory": "./_site",
+    "binding": "ASSETS",
+    "html_handling": "drop-trailing-slash",
+    "not_found_handling": "404-page",
+    "run_worker_first": ["/auth/*", "/api/*", "/room", "/donations/*"]
+  },
+  "vars": {
+    "SITE_ORIGIN": "http://localhost:8787",
+    // Optional local OAuth and voice credentials come from .dev.vars, as in the normal local preview.
+    "GITHUB_CLIENT_ID": "",
+    "REALTIME_APP_ID": ""
+  },
+  "services": [
+    { "binding": "DONATIONS", "service": "bananapayserver-production", "entrypoint": "PageApi", "remote": true }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "oogaboogaland-local",
+      "database_id": "00000000-0000-0000-0000-000000000001",
+      "migrations_dir": "worker/migrations",
+      "remote": false
+    }
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "ROOM", "class_name": "Room" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }]
+}

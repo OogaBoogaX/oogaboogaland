@@ -1,4 +1,10 @@
 // Ooga Orbit parts: catalog, stacking rules, the stages a stack splits into, and the builder's numbers.
+//
+// `PARTS`: pods, shields, tanks, engines, the Vine Knot and fins, each with height, radius, dry mass, fuel,
+// thrust, exhaust speed, shield and hull ratings and a banana price. `PRESETS`; `stagesOf` (the stack cut
+// at its knots); `check` (problems stop a launch, warnings only say); `stats` (mass, speed per stage,
+// lift-off push, bill); `sanitize`. Loads before `game.js`, which validates the saved build with it.
+// `stats.stability` is the worst attached case: fins on a dropped stage leave with it.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -97,11 +103,17 @@
       above = m0;
     }
     const parts = stack.map(partOf);
+    // Steadiness is the worst the flight will see: fins on a dropped stage leave with it.
+    let stability = Infinity, fromTop = 0;
+    for (let i = stages.length - 1; i >= 0; i--) {
+      fromTop += stages[i].stability;
+      if (stages[i].engine || i === stages.length - 1) stability = Math.min(stability, fromTop - FLIP);
+    }
     return {
       mass: above, dv, stages: rows, liftoff: rows.length ? rows[0].twr : 0,
       height: parts.reduce((sum, p) => sum + p.h, 0),
       cost: parts.reduce((sum, p) => sum + p.price, 0),
-      stability: parts.reduce((sum, p) => sum + (p.stability || 0), 0) - FLIP
+      stability: Number.isFinite(stability) ? stability : -FLIP
     };
   };
   BL.rocketParts = { G0, PARTS, KINDS, KIND_NAMES, MAX_PARTS, FLIP, TOP_DV, PRESETS, partOf, sanitize, stagesOf, check, stats };

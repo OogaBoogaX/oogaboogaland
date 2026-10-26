@@ -68,6 +68,10 @@
   };
   const create = (ctx) => {
     const { root, world, pileScale: SCALE = 0.45, pileY: BASE_Y = 0.02 } = ctx;
+    const source = ctx.deliverySource || null;
+    const durationMin = source ? 4.2 : DROP_DURATION_MIN;
+    const durationMax = durationMin + DROP_DURATION_RANGE;
+    const throughput = Math.min(DROP_RATE, DROP_POOL_SIZE / durationMax);
     const matrixLiving = !!ctx.matrixLivingPile;
     const pileSlots = [];
     const coreFaceSize = ctx.renderer.kind === "canvas2d" ? CORE_FACE_SIZE * 1.75 : CORE_FACE_SIZE;
@@ -454,8 +458,8 @@
     const outstandingValue = () => delivery.pendingValue + delivery.airborneValue;
     const visualCapacityForDeadline = () => {
       const remaining = Math.max(0, delivery.drainDeadline - delivery.activeTime);
-      const occupiedDelay = delivery.airborneCount ? DROP_DURATION_MAX : 0;
-      const launchCapacity = Math.max(0, remaining - DROP_DURATION_MAX - FRAME_TIME_MAX - occupiedDelay) * DROP_THROUGHPUT;
+      const occupiedDelay = delivery.airborneCount ? durationMax : 0;
+      const launchCapacity = Math.max(0, remaining - durationMax - FRAME_TIME_MAX - occupiedDelay) * throughput;
       return Math.max(1, Math.min(BACKLOG_VISUAL_CAPACITY, Math.floor(launchCapacity + 1e-9)));
     };
     const replanPending = () => {
@@ -466,9 +470,10 @@
       const token = ++slot.token;
       const landing = chooseLanding(slot);
       const { pos, rot } = landing;
-      const fromX = pos.x + (Math.random() - 0.5) * 0.7;
-      const fromY = BANANA_DROP_HEIGHT + Math.random() * 1.2;
-      const fromZ = pos.z + (Math.random() - 0.5) * 0.7;
+      const fromX = source ? source.x : pos.x + (Math.random() - 0.5) * 0.7;
+      const fromY = source ? source.y : BANANA_DROP_HEIGHT + Math.random() * 1.2;
+      const fromZ = source ? source.z : pos.z + (Math.random() - 0.5) * 0.7;
+      const crest = Math.max(fromY, pos.y, BANANA_DROP_HEIGHT) + 24;
       const spinX = (Math.random() - 0.5) * 12;
       const spinY = (Math.random() - 0.5) * 10;
       const spinZ = (Math.random() - 0.5) * 12;
@@ -481,14 +486,21 @@
       delivery.visualDropsStarted++;
       delivery.maxConcurrentDrops = Math.max(delivery.maxConcurrentDrops, delivery.airborneCount);
       slot.tween = addTween({
-        dur: DROP_DURATION_MIN + Math.random() * DROP_DURATION_RANGE,
-        ease: ease.outBounce,
+        dur: durationMin + Math.random() * DROP_DURATION_RANGE,
+        ease: source ? ease.linear : ease.outBounce,
         update: (k) => {
           if (slot.token !== token) return;
           slot.node.visible = true;
           const scale = lerp(BANANA_SCALE, slot.restScale, k);
           setVec(slot.node.scale, scale, scale, scale);
-          setVec(slot.node.position, lerp(fromX, pos.x, k), lerp(fromY, pos.y, k), lerp(fromZ, pos.z, k));
+          if (source) {
+            // Vertical tangents at the roof and pile, with the horizontal travel high above the island.
+            const v = 1 - k, launch = v * v * v;
+            const across = k * k * (3 - 2 * k);
+            setVec(slot.node.position, lerp(fromX, pos.x, across),
+              fromY * launch + 3 * v * k * crest + pos.y * k * k * k,
+              lerp(fromZ, pos.z, across));
+          } else setVec(slot.node.position, lerp(fromX, pos.x, k), lerp(fromY, pos.y, k), lerp(fromZ, pos.z, k));
           setVec(slot.node.rotation, rot.x + (1 - k) * spinX, rot.y + (1 - k) * spinY, rot.z + (1 - k) * spinZ);
         },
         done: () => {
@@ -501,7 +513,8 @@
           slot.node.visible = false;
           if (ctx.untrackMirrorObject) ctx.untrackMirrorObject(slot.node);
           slot.tween = null;
-          world.level += slot.bananaValue;
+          // Real deliveries are a show: the server's pile message already owns the balance.
+          if (!BL.donations.real) world.level += slot.bananaValue;
           slot.bananaValue = 0;
           syncPile(true);
           if (!outstandingValue()) {
@@ -590,7 +603,8 @@
       if (additions >= 2) ctx.crew.rush();
     };
     const deliverBananas = (amount) => {
-      const room = MAX_BANANAS - Math.floor(world.level) - outstandingValue();
+      // A full server-owned pile still shows incoming fruit without reserving balance for it.
+      const room = MAX_BANANAS - (BL.donations.real ? 0 : Math.floor(world.level)) - outstandingValue();
       const additions = Math.max(0, Math.min(room, Math.floor(Number(amount) || 0)));
       if (!additions) return 0;
       delivery.pendingValue += additions;
@@ -632,6 +646,9 @@
       if (!outstandingValue() && hatchTarget === 1) hatchTarget = 0;
       hatchOpen = damp(hatchOpen, hatchTarget, 7, dt);
     };
+    // A kept island leaving: the fruit in the air goes back to the queue, so it falls again on the next visit rather
+    // than hanging where the director's tween clear stopped it.
+    const suspend = () => cancelAirborne(true);
     const dispose = () => {
       cancelAirborne(true);
       for (const slot of pileSlots) {
@@ -703,7 +720,7 @@
     // crew exists or starts walking.
     reflow(Math.max(0, Math.min(MAX_BANANAS, Math.floor(world.level))));
     return {
-      slots: pileSlots, drops: dropSlots, core, shell, syncPile, deliverBananas, pileEdge, eatFromPile, update, dispose, stats, setLevel, liveGeometry, delivery: deliveryDebug, spill, spillEffect,
+      slots: pileSlots, drops: dropSlots, core, shell, syncPile, deliverBananas, pileEdge, eatFromPile, update, suspend, dispose, stats, setLevel, liveGeometry, delivery: deliveryDebug, spill, spillEffect,
       get shown() {
         return counted;
       },

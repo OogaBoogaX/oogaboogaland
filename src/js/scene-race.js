@@ -1,13 +1,19 @@
-// Ooga Rally: the racing scene behind the 9 o'clock cave.
+// Ooga Rally: the racing scene, opened from its Ooga Arcade cabinet or its route.
+//
+// Phases: garage, countdown, racing, paused, finished. A chase camera; lighting from the ten nearest
+// torches; donations; `leave`. The rocket start reads the throttle through the count. Every lap
+// and the results show the delta against the record lap. The first release of each drift tier is
+// taught once a visit. The crowd swells on laps and finishes, and second and third place get podium
+// confetti. Prompts switch to touch wording on a coarse pointer. The Mirror toggle (`race-mirror`,
+// shown once the Cup is gold) rebuilds the track flipped.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const { math, models, contributors, donations, qr, pile: pileMod, game: gameMod, hud: hudMod, interact: interactMod, controls: controlsMod, fx: fxMod, raceModels, raceTrack, racers: racersMod, raceItems, raceHud, raceAudio } = BL;
+  const { math, models, contributors, donations, pile: pileMod, game: gameMod, hud: hudMod, interact: interactMod, controls: controlsMod, fx: fxMod, raceModels, raceTrack, racers: racersMod, raceItems, raceHud, raceAudio } = BL;
   const { clamp, lerp, damp } = math;
   const { createNode, addChild, removeChild, createCamera, stepTweens, tweenCount, traverseVisible } = BL.scene;
   const { CONFETTI } = fxMod;
   const COARSE = window.matchMedia("(pointer: coarse)").matches;
-  const METER_CAPACITY = 60;
   const FIXED = 1 / 120, MAX_SUBSTEPS = 4;
   const COUNTDOWN = 3.4, RESULTS_AFTER = 1.4;
   const CHASE = { dist: 6.4, up: 2.1, ahead: 2.2, lookUp: 1.1, distMin: 3.5, distMax: 11, yawRate: 7, eyeRate: 14, targetRate: 18 };
@@ -19,6 +25,11 @@
   const RAIN_CHANCE = 18, RAIN_CAP = 420, SNOW_CAP = 320, WEATHER_RANGE = 17, WEATHER_HEIGHT = 15;
   const DEBUG = new URLSearchParams(location.search).has("debug");
   const rainParam = DEBUG ? new URLSearchParams(location.search).get("rain") : null;
+  const hourParam = DEBUG ? parseFloat(new URLSearchParams(location.search).get("hour")) : NaN;
+  // draw=0 lines the field up in roster order instead of drawing it, so checks race the same rivals every run.
+  const drawParam = DEBUG ? new URLSearchParams(location.search).get("draw") : null;
+  // Crowd swells for CROWD_SWELL seconds on a lap or a finish; the drift tiers are first taught with a notice.
+  const CROWD_SWELL = 3;
   const SPARK = models.particleGeometry("#ffb13b", 0.08, 1);
   const SPARK_BLUE = models.particleGeometry("#79d8ff", 0.09, 1);
   const SPARK_PURPLE = models.particleGeometry("#c99bff", 0.1, 1);
@@ -43,35 +54,46 @@
     performance.mark(`ooga:${name}`);
   };
   // selection persists for the page's life: the garage remembers the last pick across visits.
-  const selection = { racer: contributors.activeRoster[0]?.name || null, mount: "kart", track: "bay" };
+  const selection = { racer: contributors.activeRoster[0]?.name || null, mount: "kart", track: "bay", mirror: false };
+  // A signed-in visitor with an Ooga races it, as they drive only it on the island; the picker is for the rest.
+  // Their Ooga must be in the cast this visit built, which the garage rows and the field are made from.
+  const ownRacer = () => BL.net.ownAmong(racers.all);
+  // Bests are kept per track, the mirrored ones under their own key.
+  const bestKey = () => selection.mirror ? `${selection.track}-m` : selection.track;
 
   // These are one visit's state: created in enter, dropped in leave.
+  // Where the game exits to: back to Ooga Arcade when a cabinet started it, otherwise the island.
+  let home = "hub";
   let renderer, game, world, go, lootEnabled, testBananas, root, camera, hud, rhud, hooks, input, fx, controls, track, racers, items, audio, weather, agent;
   let phase = "garage", countdown = 0, accumulator = 0, sceneTime = 0, finishedAt = 0;
-  let meterTimer = 0, stateTimer = 0, hintTimer = 0;
+  let stateTimer = 0, hintTimer = 0, unsubscribeAccount = null;
+  // revAt is the countdown time the throttle was first held through; -1 while it is off.
+  let revAt = -1, crowdSwell = 0, driftTaught = 0;
   const cam = { yaw: 0, offset: 0, dist: CHASE.dist, shake: 0, lookBack: false, x: 0, y: 0, z: 0, tx: 0, ty: 0, tz: 0, warm: false, garageYaw: 0, garageLift: 0 };
   const targets = [];
-  const cup = { active: false, round: 0, done: false, points: new Float32Array(contributors.activeRoster.length) };
+  // points is indexed by racer and sized to each visit's cast: a signed-in visitor's temporary Ooga joins the
+  // roster after this file loads.
+  const cup = { active: false, round: 0, done: false, points: null };
   const nearestTorches = new Float32Array(LIGHT_CAPACITY * 2);
-  const raceScene = {
-    id: "race", renderOpts: null, root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
-    get inMotion() {
-      return phase === "countdown" || phase === "racing" || fx.inMotion;
-    }
-  };
 
   const buildTrack = (id) => {
     if (track) {
+      fx.clearParticles();
       removeChild(root, track.root);
       track.dispose();
     }
     const detail = renderer.kind === "canvas2d" ? 0.35 : renderer.quality === "low" ? 0.6 : renderer.quality === "medium" ? 0.8 : 1;
     const rain = rainParam !== null ? rainParam === "1" : math.randomInt(100) < RAIN_CHANCE;
-    track = raceTrack.build(raceTrack.trackById(id), { renderer, detail, rain, spectators: !contributors.solo });
+    const def = raceTrack.trackById(id), hours = raceTrack.THEMES[def.theme].hours;
+    const hour = Number.isFinite(hourParam) ? hourParam : hours ? hours[math.randomInt(hours.length)] : null;
+    track = raceTrack.build(def, { renderer, detail, rain, spectators: !contributors.solo, slots: Math.min(racersMod.FIELD, contributors.activeRoster.length), hour, mirror: selection.mirror });
     addChild(root, track.root);
     buildWeather();
+    track.renderOpts.meshRigs = true;
     raceScene.renderOpts = track.renderOpts;
-    camera.far = 280;
+    // Fog that ends in the clear colour with no sky pass hides everything past fogFar, so the far plane stops there.
+    const o = track.renderOpts, fogIsClear = !o.horizon && !o.zenith && o.fog && o.clear && o.fog[0] === o.clear[0] && o.fog[1] === o.clear[1] && o.fog[2] === o.clear[2];
+    camera.far = fogIsClear ? Math.min(280, o.fogFar + 10) : 280;
     const g = track.grid[0];
     setVec(TICKER_AT, g.x, g.y + 8.5, g.z);
     if (items) items.setTrack(track);
@@ -123,7 +145,9 @@
         w.z[i] = (Math.random() - 0.5) * WEATHER_RANGE * 2;
       }
       const sway = w.snow ? Math.sin(sceneTime * 1.3 + w.phase[i]) * 0.6 : 0;
-      raceTrack.writeInstance(data, i * 20, w.snow ? sceneTime + w.phase[i] : 0, 1, cx + w.x[i] + sway, cy + w.y[i], cz + w.z[i], 1);
+      // Rain stands bolt upright, so its fixed yaw comes precomputed as the exact cos(0)/sin(0) pair.
+      if (w.snow) raceTrack.writeInstance(data, i * 20, sceneTime + w.phase[i], 1, cx + w.x[i] + sway, cy + w.y[i], cz + w.z[i], 1);
+      else raceTrack.writeInstance(data, i * 20, 0, 1, cx + w.x[i] + sway, cy + w.y[i], cz + w.z[i], 1, 1, 0);
     }
     w.node.instanceVersion++;
   };
@@ -157,8 +181,21 @@
     racers.setup({ track, playerName: selection.racer, playerMount: selection.mount, lapCount: track.laps });
     items.setTrack(track);
   };
+  // The garage holds the visitor to their own Ooga when they have one; true when that changed the pick.
+  const applyOwn = () => {
+    const own = ownRacer();
+    rhud.lockRacer(own);
+    if (!own || own === selection.racer) return false;
+    selection.racer = own;
+    return true;
+  };
+  // Back from a race the garage lines up freshly drawn rivals; a track picked in the garage keeps them, and
+  // Race again, the next track and every race of a cup run the same field.
   const toGarage = () => {
+    if (phase !== "garage") racers.draw();
+    applyOwn();
     phase = "garage";
+    fx.clearParticles();
     cup.active = false;
     cup.done = false;
     rhud.setCup(game.state.race.cup);
@@ -171,6 +208,8 @@
   };
   const startRace = () => {
     if (!racers.racers.length) return;
+    window.clearTimeout(hintTimer);
+    hud.hideHint();
     placeRacers();
     phase = "countdown";
     countdown = COUNTDOWN;
@@ -181,16 +220,20 @@
     rhud.setLap(1, track.laps);
     rhud.setRank(racers.player.rank, racers.racers.length);
     rhud.setItem(null, false);
-    rhud.setBoost(0, false);
+    rhud.setBoost(0, false, 0);
+    rhud.setPips(0, false);
     rhud.setTime(0);
+    revAt = -1;
+    crowdSwell = 0;
     hud.el.act.hidden = !COARSE;
     hud.setAct("Drift");
     cam.offset = 0;
     cam.lookBack = false;
     cam.warm = false;
     for (const lamp of track.lamps) lamp.glow = 0.1;
-    hud.setSubtitle(`Ooga Rally · ${track.name}${track.precipitation ? ` · ${track.precipitation}` : ""}`);
+    hud.setSubtitle(`Ooga Rally · ${track.name}${track.mirror ? " · mirror" : ""}${track.precipitation ? ` · ${track.precipitation}` : ""}`);
     if (track.precipitation) rhud.notice(track.precipitation === "snow" ? "snow · slippery" : "rain · slippery", 3000);
+    else rhud.notice(COARSE ? "hold the throttle on the last count for a rocket start" : "hold W on the last count for a rocket start", 2600);
     if (racers.player.mount.id === "kart") fx.say(racers.player.cave, track.wet ? "Ooga wet." : "Ooga vroom.", 1.4);
   };
   const nextTrackId = () => {
@@ -236,10 +279,21 @@
     }
     return { name: r.name, you: r === racers.player, finished: true, estimated, time };
   });
+  // A medal is a place and a pace: gold is a win under the gold time, silver a podium under the silver
+  // time, bronze a top-six finish under the bronze time. The pace medal is named when the place held it back.
+  const MEDAL_ORDER = ["bronze", "silver", "gold"], PLACE_CAP = ["gold", "silver", "silver", "bronze", "bronze", "bronze"];
+  const medalNow = (p) => {
+    if (!p.finished) return { medal: null, pace: null };
+    const pace = rhud.medalFor(track.targets, Math.round(p.finishTime * 1000)), cap = PLACE_CAP[p.rank - 1] || null;
+    const medal = pace && cap ? MEDAL_ORDER[Math.min(MEDAL_ORDER.indexOf(pace), MEDAL_ORDER.indexOf(cap))] : null;
+    return { medal, pace };
+  };
+  const placeFor = (medal) => medal === "gold" ? "1st" : medal === "silver" ? "top 3" : "top 6";
   const renderResults = () => {
     const p = racers.player;
-    const medal = p.finished ? rhud.medalFor(track.targets, Math.round(p.finishTime * 1000)) : null;
-    let summary = p.finished ? `${racers.rankLabel(p.rank)} · best lap ${rhud.formatTime(p.bestLap * 1000)}${medal ? ` · ${medal.toUpperCase()}` : ""}${recordImproved ? " · new record" : ""}` : "Did not finish";
+    const { medal, pace } = medalNow(p);
+    const lapGap = p.finished && lapBefore ? Math.round(p.bestLap * 1000) - lapBefore : 0;
+    let summary = p.finished ? `${racers.rankLabel(p.rank)} · best lap ${rhud.formatTime(p.bestLap * 1000)}${lapGap ? ` (${lapGap > 0 ? "+" : "-"}${(Math.abs(lapGap) / 1000).toFixed(2)})` : ""}${medal ? ` · ${medal.toUpperCase()}` : ""}${pace && pace !== medal ? ` · ${pace} pace, ${placeFor(pace)} for it` : ""}${recordImproved ? " · new record" : ""}` : "Did not finish";
     const extra = {};
     if (cup.active || cup.done) {
       const table = standings(), place = table.findIndex((r) => r.you) + 1;
@@ -260,7 +314,9 @@
     if (!racers.player) return;
     phase = "finished";
     const p = racers.player;
-    recordImproved = p.finished && game.recordRace(track.id, Math.round(p.bestLap * 1000), Math.round(p.finishTime * 1000));
+    // The lap delta reads the record before it is written.
+    lapBefore = game.state.race.best[bestKey()] ? game.state.race.best[bestKey()].lap : 0;
+    recordImproved = p.finished && game.recordRace(bestKey(), Math.round(p.bestLap * 1000), Math.round(p.finishTime * 1000), medalNow(p).medal);
     if (cup.active) {
       for (const r of racers.racers) cup.points[r.index] += CUP_POINTS[Math.min(CUP_POINTS.length, r.rank) - 1];
       if (cup.round === raceTrack.TRACKS.length - 1) {
@@ -272,10 +328,25 @@
     }
     renderResults();
     hud.el.act.hidden = true;
+    rhud.el.mirror.hidden = !mirrorOpen();
     if (p.rank === 1 || (cup.done && standings()[0].you)) {
       fx.burst(p.x, p.y + 1.5, p.z, 30, CONFETTI, 2.6);
       fx.say(p.cave, cup.done ? "OOGA CUP!" : "OOGA CHAMPION!", 3);
-    } else fx.say(p.cave, p.rank <= 3 ? "Good race." : "Next time.", 2.5);
+    } else if (p.rank <= 3) {
+      fx.burst(p.x, p.y + 1.5, p.z, 12, CONFETTI, 2);
+      fx.say(p.cave, "Good race.", 2.5);
+    } else fx.say(p.cave, "Next time.", 2.5);
+  };
+  let lapBefore = 0;
+  // The mirror is the Cup's gold prize.
+  const mirrorOpen = () => !!(game.state.race.cup && game.state.race.cup.medal === "gold");
+  const toggleMirror = () => {
+    if (!mirrorOpen()) return;
+    selection.mirror = !selection.mirror;
+    rhud.el.mirror.setAttribute("aria-pressed", String(selection.mirror));
+    buildTrack(selection.track);
+    toGarage();
+    rhud.refreshTracks();
   };
   const pause = (on) => {
     if (on && phase === "racing") {
@@ -326,7 +397,7 @@
     const fast = clamp((Math.abs(p.speed) - m.top * 0.55) / (m.top * 0.6), 0, 1) + (p.boost > 0 ? 0.35 : 0);
     camera.fov = damp(camera.fov, lerp(FOV_BASE, FOV_FAST, Math.min(1, fast)), 6, dt);
   };
-  // Shadows follow the player; the seven nearest torches become point lights.
+  // Shadows follow the player; the ten nearest torches (LIGHT_CAPACITY) become point lights.
   const updateLighting = () => {
     const opts = track.renderOpts, p = racers.player;
     const cx = p ? p.x : camera.target.x, cz = p ? p.z : camera.target.z, cy = p ? p.y : camera.target.y;
@@ -384,6 +455,11 @@
         if (r === racers.player) {
           cam.shake = Math.max(cam.shake, 0.3 + tier * 0.15);
           audio.cues.boost();
+          // The tiers are taught the first time each is released, once a visit.
+          if (tier > driftTaught) {
+            driftTaught = tier;
+            rhud.notice(tier === 3 ? "purple drift · the big boost" : tier === 2 ? "blue drift · hold it longer for purple" : "drift boost · hold the drift longer for more", 2000);
+          }
         }
       }
     };
@@ -419,15 +495,19 @@
         else audio.cues.respawn();
       }
     };
+    // Each lap reads against the record lap, so a chase has a number.
     racers.events.onLap = (r) => {
       if (r !== racers.player) return;
       rhud.center(r.lap === track.laps ? "FINAL LAP" : `LAP ${r.lap}`, 1200);
-      rhud.notice(`lap ${rhud.formatTime(r.lapTime * 1000)}`, 2200);
+      const best = game.state.race.best[bestKey()], gap = best && best.lap ? Math.round(r.lapTime * 1000) - best.lap : 0;
+      rhud.notice(`lap ${rhud.formatTime(r.lapTime * 1000)}${gap ? ` · ${gap > 0 ? "+" : "-"}${(Math.abs(gap) / 1000).toFixed(2)}` : ""}`, 2200);
       audio.cues.lap();
+      crowdSwell = CROWD_SWELL;
     };
     racers.events.onFinish = (r) => {
       if (r === racers.player) {
         finishedAt = sceneTime;
+        crowdSwell = CROWD_SWELL;
         rhud.center("FINISH", 1600);
         audio.cues.finish();
       } else if (phase === "racing") fx.say(r.cave, "Ooga done!", 1.5);
@@ -440,7 +520,7 @@
       fx.burst(r.x, r.y + 0.6, r.z, 3, [BANANA_BIT], 1.2);
       if (r === racers.player) {
         if (r.meterFull) {
-          rhud.notice("turbo ready · press E", 1800);
+          rhud.notice(COARSE ? "turbo ready · tap Boost" : "turbo ready · press E", 1800);
           audio.cues.meter();
         } else audio.cues.banana();
       }
@@ -448,7 +528,7 @@
     items.events.onCrate = (r, item) => {
       fx.burst(r.x, r.y + 0.8, r.z, 6, CONFETTI, 1.6);
       if (r === racers.player) {
-        rhud.notice(`${items.ITEMS[item]} · press E`, 1800);
+        rhud.notice(COARSE ? `${items.ITEMS[item]} · tap the button` : `${items.ITEMS[item]} · press E${item === "rock" ? " · brake to throw it back" : item === "peel" ? " · brake to lay it ahead" : ""}`, 2200);
         audio.cues.crate();
       }
     };
@@ -466,7 +546,7 @@
       fx.burst(r.x, r.y + 0.8, r.z, 8, [SPARK, DUST], 2);
       fx.say(r.cave, kind === "peel" ? "Slippy!" : kind === "boulder" ? "OOF." : "Ow! Rock!", 1.4);
       if (r === racers.player) cam.shake = Math.max(cam.shake, 0.7);
-      if (by === racers.player && by) hud.toast(`${r.name} spun out`);
+      if (by === racers.player && by) hud.toast(`${BL.characters.displayOf(r.name)} spun out`);
       if (r === racers.player || by === racers.player) audio.cues.hit();
       peelOut(r, 0.12, 0.4, 5);
     };
@@ -496,7 +576,7 @@
     a.boosting = p.boost > 0 ? 1 : 0;
     a.offroad = p.offroad && !p.airborne ? 1 : 0;
     const g = track.grid[0];
-    a.crowd = contributors.solo ? 0 : 1 - clamp(Math.hypot(p.x - g.x, p.z - g.z) / 70, 0, 1);
+    a.crowd = contributors.solo ? 0 : Math.max(1 - clamp(Math.hypot(p.x - g.x, p.z - g.z) / 70, 0, 1), crowdSwell > 0 ? 1 : 0);
     a.rain = track.precipitation === "rain" ? 1 : 0;
     if (phase === "racing") {
       if (Math.abs(p.steer) > 0.6 && Math.abs(p.speed) > p.mount.top * 0.65 && !p.drift.active && !p.airborne && sceneTime - screechAt > 1.6) peelOut(p, 0.04 + Math.abs(p.steer) * 0.03, 0.3, 2);
@@ -528,14 +608,16 @@
   };
   const onGesture = () => audio.unlock();
 
-  const onDonation = (donation) => {
-    game.recordDonation(donation);
-    const bananas = gameMod.bananasFor(donation.sats);
-    world.level = Math.min(pileMod.MAX_BANANAS, world.level + bananas);
+  // In real mode `counted` is the API's `{ exact, rounded }`: the tally counts the exact bananas and the toasts the
+  // rounded ones (the pile itself follows the API's).
+  const onDonation = (donation, counted = null) => {
+    game.recordDonation(donation, counted && counted.exact);
+    const bananas = gameMod.bananasFor(donation.sats), shown = counted ? counted.rounded : bananas;
+    world.level = Math.min(pileMod.MAX_BANANAS, world.level + (counted ? counted.exact : bananas));
     const who = donation.handle ? `@${donation.handle}` : "anon";
     const loot = lootEnabled ? game.lootFor(donation) : null;
-    hud.toast(`+${gameMod.formatLarge(donation.sats)} sats · ${bananas} banana${bananas > 1 ? "s" : ""} · ${who}${loot ? ` · ${loot.tier} ${loot.item.name}` : ""}`);
-    fx.showTicker(`THANKS ${donation.handle ? "@" + donation.handle.toUpperCase() : "ANON"} · ${bananas} BANANAS`, 4.5);
+    hud.toast(`+${gameMod.formatLarge(donation.sats)} sats · ${gameMod.formatLarge(shown)} banana${shown === 1 ? "" : "s"} · ${who}${loot ? ` · ${loot.tier} ${loot.item.name}` : ""}`);
+    fx.showTicker(`THANKS ${donation.handle ? "@" + donation.handle.toUpperCase() : "ANON"} · ${gameMod.formatLarge(shown)} BANANAS`, 4.5);
     const p = racers.player;
     if (p) fx.burst(p.x, p.y + 1.6, p.z, 20, CONFETTI, 2.2);
     // Set taken to 0.01, not 0: race-items' countdown branch must run once to make the banana visible again.
@@ -545,25 +627,26 @@
       renderLocker();
     }
     hud.setStats(game.state);
-    meterTimer = 0;
   };
   const renderLocker = () => hud.renderInventory(game.state.inventory, game.assignedTo, () => null);
 
-  const updateMeter = () => {
-    hud.setMeter(world.level, METER_CAPACITY, phase === "racing" ? `${racers.rankLabel(racers.player.rank)} of ${racers.racers.length}` : "stable");
-  };
   const tooltipFor = (hit) => {
     const o = hit.owner;
-    if (o.kind === "racer") return o.racer.name;
+    if (o.kind === "racer") return BL.characters.displayOf(o.racer.name);
     return "";
   };
   const simulate = (dt) => {
     accumulator = Math.min(accumulator + dt, FIXED * MAX_SUBSTEPS);
+    let first = true, stepped = false;
     while (accumulator >= FIXED) {
       accumulator -= FIXED;
       racers.substep(FIXED);
-      items.update(FIXED, sceneTime);
+      items.update(FIXED, sceneTime, first);
+      first = false;
+      stepped = true;
     }
+    // The pickups' spin, bob and pad glow are posed once a frame, from the last substep's spinT.
+    if (stepped) items.pose();
   };
   const update = (dt, elapsed) => {
     sceneTime = elapsed;
@@ -575,16 +658,27 @@
         rhud.center(String(step(countdown)), 700);
         audio.cues.count();
       }
+      // The throttle held through the count: from the last count it is a rocket start, from earlier wheelspin.
+      const revving = controls.read().y > 0.5;
+      if (revving && revAt < 0) revAt = countdown;
+      else if (!revving) revAt = -1;
       for (let i = 0; i < track.lamps.length; i++) track.lamps[i].glow = countdown < COUNTDOWN - (i + 1) * 0.9 ? 1 : 0.1;
       if (countdown <= 0.4 && before > 0.4) {
-        rhud.center("GO!", 800);
+        const start = revAt < 0 ? "" : revAt <= 1.4 ? "boost" : "spin";
+        rhud.center(start === "boost" ? "ROCKET START!" : "GO!", 800);
+        if (start === "spin") rhud.notice("too early · wheelspin", 1400);
         audio.cues.go();
-        racers.start();
-        peelOut(racers.player, 0.12, 0.6, 6);
+        racers.start(start);
+        peelOut(racers.player, start === "spin" ? 0.2 : 0.12, 0.6, start === "spin" ? 10 : 6);
+        if (start === "boost") {
+          fx.burst(racers.player.x, racers.player.y + 0.3, racers.player.z, 12, DRIFT_SPARKS[2], 3);
+          audio.cues.boost();
+        }
         phase = "racing";
         for (const lamp of track.lamps) lamp.glow = 1;
       }
     }
+    if (crowdSwell > 0) crowdSwell -= dt;
     if (phase === "racing" || phase === "finished") {
       readPlayerInput();
       simulate(dt);
@@ -609,13 +703,10 @@
       rhud.setLap(p.lap, track.laps);
       rhud.setTime(racers.raceTime * 1000);
       rhud.setItem(p.item, p.meterFull);
-      rhud.setBoost(p.drift.active ? Math.min(1, p.drift.charge / 2.2) : p.bananas / items.METER_MAX, p.drift.active ? p.drift.tier >= 3 : p.meterFull);
+      // The bar is the drift's charge, coloured by its tier; the bananas are the pips beside it.
+      rhud.setBoost(p.drift.active ? Math.min(1, p.drift.charge / 2.2) : 0, p.drift.active && p.drift.tier >= 3, p.drift.active ? p.drift.tier : 0);
+      rhud.setPips(p.bananas, p.meterFull);
       rhud.setSpeed(Math.abs(p.speed) * 2.6);
-    }
-    meterTimer -= dt;
-    if (meterTimer <= 0) {
-      meterTimer = 0.25;
-      updateMeter();
     }
   };
   const drawExtra = (ctx2d) => {
@@ -632,13 +723,16 @@
     renderLocker();
     hud.toast("Loot locker cleared");
   };
-  const demoTip = (sats) => onDonation({ id: `demo-${Date.now()}`, sats, handle: game.state.handle, message: game.state.message, at: Date.now() });
+  // A demo tip is the simulation's alone: in real mode it would count a tip nobody paid.
+  const demoTip = (sats) => {
+    if (!donations.real) onDonation({ id: `demo-${Date.now()}`, sats, handle: game.state.handle, message: game.state.message, at: Date.now() });
+  };
   const onKey = (e) => {
     if (e.key === "Escape") {
       if (phase === "racing") pause(true);
       else if (phase === "paused") pause(false);
       else if (phase === "finished") toGarage();
-      else go("hub");
+      else go(home);
     }
     if (e.key === "e" || e.key === "E" || e.key === "Shift") useItem();
     if (e.key === "0") cam.offset = 0;
@@ -652,17 +746,23 @@
     if (e.key === "l" || e.key === "L") demoTip(120000);
   };
   const onBlur = () => pause(true);
+  // The sign-in can answer once the garage is up; anywhere else the next garage applies it.
+  const accountChanged = () => {
+    if (phase === "garage" && applyOwn()) placeRacers();
+  };
 
   const enter = (ctx) => {
     ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
+    home = ctx.from === "arcade" ? "arcade" : "hub";
+    hudMod.leaveTo("race", home);
     camera = createCamera({ fov: 50, near: 0.3, far: 280 });
     root = createNode();
-    hud = hudMod.create({ roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
+    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
     fx = fxMod.create({ root, renderer, camera, hud, overlay: ctx.overlay, tickerAt: TICKER_AT });
     rhud = raceHud.create({
-      tracks: raceTrack.TRACKS, mounts: racersMod.MOUNTS, roster: contributors.activeRoster, best: () => game.state.race.best,
+      tracks: raceTrack.TRACKS, mounts: racersMod.MOUNTS, roster: contributors.activeRoster, best: () => game.state.race.best, mirror: () => selection.mirror,
       onPick: (kind, key) => {
         selection[kind] = key;
         if (kind === "track") {
@@ -671,13 +771,23 @@
         } else placeRacers();
       }
     });
+    // The Ooga an arcade cabinet sent in races, as in the other games; a signed-in visitor's own still wins.
+    if (world.pilot) {
+      if (contributors.activeRoster.some((c) => c.name === world.pilot)) selection.racer = world.pilot;
+      world.pilot = null;
+    }
     Object.assign(rhud.selection, selection);
+    hud.dismissOutside(rhud.el.pause, () => pause(false));
+    driftTaught = 0;
+    rhud.el.mirror.hidden = !mirrorOpen();
+    rhud.el.mirror.setAttribute("aria-pressed", String(selection.mirror));
     rhud.buildGarage((name) => contributors.stateFor(contributors.activeRoster.find((c) => c.name === name)));
     buildTrack(selection.track);
     agent = raceScene.agent = BL.agent.create({ groundAt: agentGround, form: "code" });
     addChild(root, agent.root);
     placeAgent();
-    racers = racersMod.create({ root, input, fx, game, track });
+    racers = racersMod.create({ root, input, fx, game, track, renderer, shuffle: drawParam !== "0" });
+    cup.points = new Float32Array(racers.all.length);
     mark("racers");
     items = raceItems.create({ root, racers, fx, track });
     items.setTrack(track);
@@ -689,16 +799,8 @@
     screechAt = crewScreechAt = -9;
     quieted = false;
     rhud.el.mute.setAttribute("aria-pressed", String(audio.muted));
-    window.addEventListener("pointerdown", onGesture);
-    window.addEventListener("keydown", onGesture);
-    const donationRequest = donations.createRequest(game.state);
-    qr.drawTo(hud.el.qr, donationRequest.url, { quiet: 3, dark: "#000000", light: "#f3efe4" });
-    hud.setDonationUrl(donationRequest.url);
-    hud.setIdentity(game.state);
-    hud.onIdentityChange(({ handle, message }) => {
-      game.setIdentity({ handle: donations.sanitize(handle, donations.HANDLE_MAX), message: donations.sanitize(message, donations.MESSAGE_MAX) });
-      hud.setIdentity(game.state);
-    });
+    window.addEventListener("pointerdown", onGesture, { signal: ctx.signal });
+    window.addEventListener("keydown", onGesture, { signal: ctx.signal });
     hud.onAssign((entryId, name) => {
       if (game.assign(entryId, name)) renderLocker();
     });
@@ -714,8 +816,10 @@
       onHoverMove: (hit, p) => hud.tooltip.show(tooltipFor(hit), p.x, p.y, hit.owner.kind === "racer" ? hit.owner.racer.cave : null),
       onTap: (hit) => {
         if (hit && hit.owner.kind === "racer") {
-          if (phase === "garage") rhud.el.racers.querySelector(`[data-racer="${hit.owner.racer.name}"]`).click();
-          else fx.say(hit.owner.racer.cave, "Ooga busy!", 1.2);
+          const refused = phase === "garage" && ownRacer() ? BL.net.mayDrive(hit.owner.racer.name) : null;
+          if (phase !== "garage") fx.say(hit.owner.racer.cave, "Ooga busy!", 1.2);
+          else if (refused) fx.say(hit.owner.racer.cave, refused, 1.6);
+          else rhud.el.racers.querySelector(`[data-racer="${hit.owner.racer.name}"]`).click();
         }
       },
       onOrbit: (dx, dy) => {
@@ -736,12 +840,11 @@
       else if (action === "race-next") nextRace();
       else if (action === "race-again") startRace();
       else if (action === "garage") toGarage();
+      else if (action === "race-mirror") toggleMirror();
       else if (action === "race-resume") pause(false);
-      else if (action === "leave") go("hub");
+      else if (action === "leave") go(home);
       else if (action === "item") useItem();
       else if (action === "mute") toggleMute();
-      else if (action === "tip") demoTip(1200);
-      else if (action === "tip-legendary") demoTip(120000);
       else if (action === "clear-loot") {
         game.clearLoot();
         onLootCleared();
@@ -756,7 +859,6 @@
     hud.el.sheet.dataset.open = "false";
     rhud.el.joyLook.hidden = true;
     rhud.el.help.textContent = COARSE ? "Drag to look round the garage · left stick steers · hold Drift · tap Throw" : "Drag to look round the garage · W A S D or arrows drive · hold Space to drift, tap to hop · E throws · Q looks back · Escape pauses";
-    meterTimer = 0;
     phase = "garage";
     cam.garageYaw = cam.garageLift = 0;
     toGarage();
@@ -764,8 +866,12 @@
       for (const cave of contributors.activeRoster) hud.setRosterRow(cave.name, contributors.stateFor(cave), contributors.ageLabel(cave));
       fx.trimPool();
     }, 6e4);
-    hintTimer = window.setTimeout(() => hud.hint(COARSE ? "Tap an Ooga, a ride and a track, then Race!" : "Pick an Ooga, a ride and a track, then Race! (Enter)"), 1200);
-    window.addEventListener("blur", onBlur);
+    hintTimer = window.setTimeout(() => {
+      const pick = ownRacer() ? "a ride and a track" : "an Ooga, a ride and a track";
+      hud.hint(COARSE ? `Tap ${pick}, then Race!` : `Pick ${pick}, then Race! (Enter)`);
+    }, 1200);
+    window.addEventListener("blur", onBlur, { signal: ctx.signal });
+    unsubscribeAccount = BL.net.subscribe(accountChanged);
     Object.assign(raceScene, {
       root, camera, input,
       debug: {
@@ -792,12 +898,13 @@
           get phase() {
             return phase;
           },
-          selection, startRace, startCup, nextRace, toGarage, pause, finishRace, cup, simulate: (seconds) => {
+          selection, startRace, startCup, nextRace, toGarage, pause, finishRace, cup,           simulate: (seconds) => {
             for (let t = 0; t < seconds; t += FIXED) {
               sceneTime += FIXED;
               racers.substep(FIXED);
               items.update(FIXED, sceneTime);
             }
+            items.pose();
           },
           get cam() {
             return cam;
@@ -813,6 +920,8 @@
     window.clearInterval(stateTimer);
     window.clearTimeout(hintTimer);
     window.removeEventListener("blur", onBlur);
+    unsubscribeAccount();
+    unsubscribeAccount = null;
     window.removeEventListener("pointerdown", onGesture);
     window.removeEventListener("keydown", onGesture);
     audio.dispose();
@@ -841,7 +950,7 @@
   };
   const liveGeometry = (set) => {
     agent.liveGeometry(set);
-    for (const r of racers.racers) set.add(r.cave.headOpen).add(r.cave.headClosed);
+    for (const r of racers.all) set.add(r.cave.headOpen).add(r.cave.headClosed);
   };
   const stats = () => {
     let nodes = 0;
@@ -849,7 +958,13 @@
     const all = (n) => 1 + n.children.reduce((sum, c) => sum + all(c), 0);
     return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...racers.stats(), ...items.stats(), sectors: track.sectors.length, phase };
   };
-  Object.assign(raceScene, { enter, update, overlay, onDonation, onKey, onLootCleared, leave, stats, liveGeometry });
+  const raceScene = BL.deferred.scene("race", {
+    id: "race", renderOpts: null, root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
+    enter, update, overlay, onDonation, onKey, onLootCleared, leave, stats, liveGeometry,
+    get inMotion() {
+      return phase === "countdown" || phase === "racing" || fx.inMotion;
+    }
+  });
   BL.scenes = BL.scenes || {};
   BL.scenes.race = raceScene;
 })();

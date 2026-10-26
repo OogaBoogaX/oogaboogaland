@@ -1,7 +1,48 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
+  // Construction checkpoints (see build-tasks.js). They reach it only when sliced, so an unsliced build runs without it.
+  const due = (slice, mask) => !!slice && BL.buildTasks.due(slice, mask);
+  const pause = function* (slice) { if (slice) yield* BL.buildTasks.pause(slice); };
   const { mulberry32, hexToRgb, clamp } = BL.math;
+  // Compact completed terrain positions without rounding collision or sight boundaries.
+  // Faces and lines retain their order and metadata; the first exact position owns each index.
+  // Positions are matched on their exact 64-bit patterns (so -0 stays apart from 0) in an open-addressed table,
+  // instead of a string key per vertex.
+  // Builders can be exhausted synchronously or advanced between tasks; only the async path reads the slice clock.
+  const finishBuild = (steps) => { let step; do { step = steps.next(); } while (!step.done); return step.value; };
+  const compactVerticesSteps = function* (geometry, slice = null) {
+    if (slice && !slice.until) { slice.work = 0; slice.until = performance.now() + slice.budget; }
+    const count = geometry.verts.length / 3, source = Float64Array.from(geometry.verts), bits = new Uint32Array(source.buffer);
+    const vertices = [], indices = new Uint32Array(count);
+    let size = 1;
+    while (size < count * 2) { size *= 2; }
+    const table = new Int32Array(size).fill(-1), mask = size - 1;
+    for (let v = 0; v < count; v++) { if (due(slice, 63)) yield* pause(slice);
+      const at = v * 6;
+      let hash = 0;
+      for (let k = 0; k < 6; k++) { hash = Math.imul(hash ^ bits[at + k], 0x9e3779b1) >>> 0; }
+      let slot = (hash ^ hash >>> 15) & mask, index = -1;
+      for (;;) {
+        const first = table[slot];
+        if (first < 0) break;
+        const other = first * 6;
+        if (bits[other] === bits[at] && bits[other + 1] === bits[at + 1] && bits[other + 2] === bits[at + 2]
+          && bits[other + 3] === bits[at + 3] && bits[other + 4] === bits[at + 4] && bits[other + 5] === bits[at + 5]) { index = indices[first]; break; }
+        slot = slot + 1 & mask;
+      }
+      if (index < 0) {
+        index = vertices.length / 3;
+        table[slot] = v;
+        vertices.push(source[v * 3], source[v * 3 + 1], source[v * 3 + 2]);
+      }
+      indices[v] = index;
+    }
+    for (const face of geometry.faces) { yield* pause(slice); for (let i = 0; i < face.i.length; i++) { face.i[i] = indices[face.i[i]]; } }
+    for (const line of geometry.lines) { yield* pause(slice); for (let i = 0; i < line.i.length; i++) { line.i[i] = indices[line.i[i]]; } }
+    geometry.verts = new Float64Array(vertices);
+  };
+  const compactVertices = (...args) => finishBuild(compactVerticesSteps(...args));
   // Dense voxel grid; value 0 and out-of-bounds are both empty.
   const makeGrid = (sx, sy, sz) => {
     const data = new Uint8Array(sx * sy * sz);
@@ -20,13 +61,35 @@
       has: (x, y, z) => inside(x, y, z) && data[index(x, y, z)] !== 0
     };
   };
+  // A compact read-only rendering source for cached sparse islets. Material 0
+  // remains air; sparse voxel palettes start at 0, so their indices shift by one.
+  const cutawaySourceFromVox = (vox, { unit, palette, origin = { x: 0, y: 0, z: 0 } }) => {
+    const cell = [0, 0, 0], min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+    for (const key of vox.map.keys()) {
+      BL.models.voxCoords(key, cell);
+      for (let axis = 0; axis < 3; axis++) { min[axis] = Math.min(min[axis], cell[axis]); max[axis] = Math.max(max[axis], cell[axis]); }
+    }
+    if (!vox.map.size) return null;
+    const sx = max[0] - min[0] + 1, sy = max[1] - min[1] + 1, sz = max[2] - min[2] + 1;
+    const data = new Uint8Array(sx * sy * sz);
+    for (const [key, material] of vox.map) {
+      BL.models.voxCoords(key, cell);
+      data[((cell[0] - min[0]) * sy + cell[1] - min[1]) * sz + cell[2] - min[2]] = material + 1;
+    }
+    return { data, sx, sy, sz, unit, origin: { x: origin.x + min[0] * unit, y: origin.y + min[1] * unit, z: origin.z + min[2] * unit }, palette: [null, ...palette.map((c) => typeof c === "string" ? hexToRgb(c) : c)] };
+  };
   // Exposed grid faces, greedy-meshed one slice at a time.
   const DIR_BIT = 0x100, FLOOR_DETAIL_BIT = 0x4000;
-  const gridGeometry = (grid, { unit, palette, origin = { x: 0, y: 0, z: 0 }, matrixCaves = null, floorRooms = [] }) => {
+  const gridGeometrySteps = function* (grid, { unit, palette, origin = { x: 0, y: 0, z: 0 }, matrixCaves = null, floorRooms = [], cutawayPathKeys = null, cutawayPathBottoms = null, cutawayWindowMask = null, cutawayWindowTops = null, cutawayWindowCeilings = null }, slice = null) {
+    if (slice && !slice.until) { slice.work = 0; slice.until = performance.now() + slice.budget; }
     const { data, sx, sy, sz } = grid;
     const dims = [sx, sy, sz], strides = [sy * sz, sz, 1];
-    const geo = { verts: [], faces: [], lines: [] };
+    const geo = { verts: [], faces: [], lines: [], voxel: new Float32Array([unit, origin.x, origin.y, origin.z]) };
     const mask = new Int16Array(Math.max(sx * sy, sy * sz, sz * sx));
+    const pathMask = cutawayPathKeys ? new Uint32Array(mask.length) : null;
+    const pathBottomMask = cutawayPathBottoms ? new Float32Array(mask.length) : null;
+    const windowMask = cutawayWindowMask ? new Uint8Array(mask.length) : null;
+    const windowColumnMask = cutawayWindowMask ? new Uint32Array(mask.length) : null;
     const floorDetails = floorRooms.map((room) => ({ ...room, cr: Math.cos(room.angle), sr: Math.sin(room.angle) }));
     // Rooms bucketed by the slice their floor lands on, so the y sweep never refilters the whole list.
     const floorsByRow = new Map();
@@ -50,12 +113,12 @@
     // rowLo/rowHi hold the first and last solid cell per z-row so a slice reads only rows that can show a face.
     const rowLo = new Int16Array(sx * sy).fill(sz), rowHi = new Int16Array(sx * sy).fill(-1);
     const slabLo = new Int16Array(sx).fill(sz), slabHi = new Int16Array(sx).fill(-1);
-    for (let r = 0; r < sx * sy; r++) {
+    for (let r = 0; r < sx * sy; r++) { if (due(slice, 63)) yield* pause(slice);
       const base = r * sz, x = Math.floor(r / sy);
       let lo = 0, hi = sz - 1;
-      while (lo < sz && !data[base + lo]) lo++;
+      while (lo < sz && !data[base + lo]) { lo++; }
       if (lo === sz) continue;
-      while (!data[base + hi]) hi--;
+      while (!data[base + hi]) { hi--; }
       rowLo[r] = lo; rowHi[r] = hi;
       if (lo < slabLo[x]) slabLo[x] = lo;
       if (hi > slabHi[x]) slabHi[x] = hi;
@@ -73,6 +136,24 @@
           const a = k > 0 ? data[base - sd] : 0, b = k < nd ? data[base] : 0;
           if (!a === !b) return;
           const n = j * nu + i;
+          if (pathMask || windowMask) {
+            const solid = a && !b ? base - sd : base;
+            const x = Math.floor(solid / (sy * sz)), z = solid % sz, column = x * sz + z;
+            if (pathMask) pathMask[n] = cutawayPathKeys[column];
+            if (pathBottomMask) pathBottomMask[n] = cutawayPathBottoms[column];
+            if (windowMask) {
+              let key = cutawayWindowMask[column];
+              if (key && cutawayWindowTops && cutawayWindowCeilings) {
+                const gy = Math.floor(solid / sz) % sy, bottom = origin.y + gy * unit, top = bottom + unit;
+                for (let level = 0; level < cutawayWindowCeilings.length; level++) if (key & 1 << level) {
+                  const openingTop = cutawayWindowTops[level * sx * sz + column];
+                  if (!(top > openingTop + 1e-7 && bottom < cutawayWindowCeilings[level] - 1e-7)) key &= ~(1 << level);
+                }
+              }
+              windowMask[n] = key;
+              windowColumnMask[n] = key ? column + 1 : 0;
+            }
+          }
           const cave = matrixCaves && (a && !b && k < nd ? matrixCaves[base] : !a && b && k > 0 ? matrixCaves[base - sd] : 0);
           mask[n] = a && !b ? a | DIR_BIT | (cave << 9) : b | (cave << 9);
           if (i < i0) i0 = i;
@@ -86,20 +167,20 @@
         };
         if (d === 2) {
           // Rows run along z: one cell per row, in memory order.
-          for (let x = 0; x < sx; x++) if (slabLo[x] <= k && slabHi[x] >= k - 1) for (let y = 0; y < sy; y++) {
+          for (let x = 0; x < sx; x++) { yield* pause(slice); if (slabLo[x] <= k && slabHi[x] >= k - 1) for (let y = 0; y < sy; y++) {
             const r = x * sy + y;
             if (rowLo[r] <= k && rowHi[r] >= k - 1) cell(x, y);
-          }
+          } }
         } else {
           // The two rows either side of the slice, over their joint solid span.
           const count = d === 0 ? sy : sx;
-          for (let m = 0; m < count; m++) {
+          for (let m = 0; m < count; m++) { yield* pause(slice);
             const near = d === 0 ? k * sy + m : m * sy + k, far = d === 0 ? near - sy : near - 1;
             const lo = Math.min(k < nd ? rowLo[near] : sz, k > 0 ? rowLo[far] : sz), hi = Math.max(k < nd ? rowHi[near] : -1, k > 0 ? rowHi[far] : -1);
-            for (let z = lo; z <= hi; z++) if (d === 0) cell(m, z); else cell(z, m);
+            for (let z = lo; z <= hi; z++) { if (d === 0) cell(m, z); else cell(z, m); }
           }
         }
-        for (let j = j0; j <= j1; j++) {
+        for (let j = j0; j <= j1; j++) { yield* pause(slice);
           let n = j * nu + i0;
           for (let i = i0; i <= i1;) {
             const c = mask[n];
@@ -109,19 +190,30 @@
               continue;
             }
             // Detail only furnished room floors; common areas keep the greedy mesh or Canvas floors paint over low beds.
-            const span = c & FLOOR_DETAIL_BIT ? Math.max(1, Math.round(1 / unit)) : Infinity;
+            const pathKey = pathMask ? pathMask[n] : 0;
+            const pathBottom = pathBottomMask ? pathBottomMask[n] : 0;
+            const windowKey = windowMask ? windowMask[n] : 0;
+            const windowColumn = windowKey ? windowColumnMask[n] - 1 : -1;
+            // Ramp-roof faces stay on their authored voxel cells. The render
+            // cutaway can then remove the true curved ceiling footprint in
+            // either renderer instead of approximating it with a rectangle.
+            const span = pathKey || windowKey ? 1 : c & FLOOR_DETAIL_BIT ? Math.max(1, Math.round(1 / unit)) : Infinity;
             let w = 1;
-            while (w < span && i + w < nu && mask[n + w] === c) w++;
+            while (w < span && i + w < nu && mask[n + w] === c && (!pathMask || pathMask[n + w] === pathKey)) { w++; }
             let h = 1;
             for (; h < span && j + h < nv; h++) {
               let same = true;
-              for (let x = 0; x < w && same; x++) same = mask[n + x + h * nu] === c;
+              for (let x = 0; x < w && same; x++) { same = mask[n + x + h * nu] === c && (!pathMask || pathMask[n + x + h * nu] === pathKey); }
               if (!same) break;
             }
             // (d, u, v) is cyclic, so this vertex order faces +d.
             const c0 = at(d, k, u, i, v, j), c1 = at(d, k, u, i + w, v, j), c2 = at(d, k, u, i + w, v, j + h), c3 = at(d, k, u, i, v, j + h);
-            geo.faces.push({ i: c & DIR_BIT ? [c0, c1, c2, c3] : [c0, c3, c2, c1], color: palette[c & 0xff], emissive: 0, matrixCave: (c & ~FLOOR_DETAIL_BIT) >> 9, matrixLocalGlyphSurface: ((c & ~FLOOR_DETAIL_BIT) >> 9) !== 0 });
-            for (let y = 0; y < h; y++) mask.fill(0, n + y * nu, n + y * nu + w);
+            geo.faces.push({ i: c & DIR_BIT ? [c0, c1, c2, c3] : [c0, c3, c2, c1], color: palette[c & 0xff], emissive: 0, matrixCave: (c & ~FLOOR_DETAIL_BIT) >> 9, matrixLocalGlyphSurface: ((c & ~FLOOR_DETAIL_BIT) >> 9) !== 0, cutawayPathKey: pathKey, cutawayPathBottom: pathBottom, cutawayWindowMask: windowKey, cutawayWindowColumn: windowColumn });
+            for (let y = 0; y < h; y++) {
+              mask.fill(0, n + y * nu, n + y * nu + w);
+              if (pathMask) pathMask.fill(0, n + y * nu, n + y * nu + w);
+              if (windowMask) { windowMask.fill(0, n + y * nu, n + y * nu + w); windowColumnMask.fill(0, n + y * nu, n + y * nu + w); }
+            }
             i += w;
             n += w;
           }
@@ -130,9 +222,11 @@
     }
     return geo;
   };
+  const gridGeometry = (...args) => finishBuild(gridGeometrySteps(...args));
   // Keep only carved labels near cave-owned surfaces: the full construction grid must not survive in the
   // material-sampling closure.
-  const compactCaveLabels = (labels, geometry, grid, unit, origin) => {
+  const compactCaveLabelsSteps = function* (labels, geometry, grid, unit, origin, slice = null) {
+    if (slice && !slice.until) { slice.work = 0; slice.until = performance.now() + slice.budget; }
     const extents = new Int32Array(8 * 6), regions = [];
     for (let cave = 0; cave < 8; cave++) {
       const at = cave * 6;
@@ -140,7 +234,7 @@
       extents[at + 3] = extents[at + 4] = extents[at + 5] = -1;
     }
     const v = geometry.verts;
-    for (const face of geometry.faces) {
+    for (const face of geometry.faces) { if (due(slice, 63)) yield* pause(slice);
       const cave = face.matrixCave || 0;
       if (cave < 1 || cave > 8) continue;
       const at = (cave - 1) * 6;
@@ -157,17 +251,18 @@
       const x = Math.max(0, extents[at] - 1), y = Math.max(0, extents[at + 1] - 1), z = Math.max(0, extents[at + 2] - 1);
       const sx = Math.min(grid.sx, extents[at + 3] + 2) - x, sy = Math.min(grid.sy, extents[at + 4] + 2) - y, sz = Math.min(grid.sz, extents[at + 5] + 2) - z;
       const data = new Uint8Array(sx * sy * sz);
-      for (let dx = 0; dx < sx; dx++) for (let dy = 0; dy < sy; dy++) {
+      for (let dx = 0; dx < sx; dx++) { yield* pause(slice); for (let dy = 0; dy < sy; dy++) {
         const source = ((x + dx) * grid.sy + y + dy) * grid.sz + z, target = (dx * sy + dy) * sz;
         for (let dz = 0; dz < sz; dz++) {
           const label = labels[source + dz];
           if (label > 0 && label <= 8) data[target + dz] = label;
         }
-      }
+      } }
       regions.push({ x, y, z, sx, sy, sz, data }); bytes += data.byteLength;
     }
     return { regions, bytes };
   };
+  const compactCaveLabels = (...args) => finishBuild(compactCaveLabelsSteps(...args));
   // Smooth value noise, three octaves, roughly 0..1.
   const LATTICE = 64;
   const valueNoise = (rand) => {
@@ -202,14 +297,23 @@
   const UNDER_SPHERE_CENTER = DEPTH - UNDER_SPHERE_RADIUS;
   const MAX_HEIGHT = 8;
   const BLUFF = 6;
-  const MOUTH = { w: 5, h: 3, depth: 5 };
+  const MOUTH = { w: 5, h: 3, depth: 5, front: 0.5 };
   const ROOM = { w: 6, h: 4, from: 2.5, to: 6.5 };
   const PATH_HALF = 0.75;
+  const RING_HALF = PATH_HALF * 1.5;
   const PATH_UNIT = UNIT / 2;
   const PATH_CAPACITY = 32768;
   const PATH_LIFT = 0.006;
   const MASTER_PATH_CENTER = 2;
   const GATE_Z = -(RADIUS - 2), PASS_HALF = 2.5, PASS_TOP = 5, TRAIL_HALF = 1;
+  const STAIR_TERRACE = { from: MEADOW, top: 2.5, halfWidth: 1.8, blend: 1.5 };
+  // The final terrace is as wide as the Sphere's six-metre portal and bridge deck.
+  const TIMECHAIN = { bearing: 8.25 / 12 * Math.PI * 2, ...STAIR_TERRACE, halfWidth: 3 };
+  const TIMECHAIN_X = Math.sin(TIMECHAIN.bearing), TIMECHAIN_Z = -Math.cos(TIMECHAIN.bearing);
+  // Deeper treads keep the diagonal voxel risers within an Ooga's step clearance. Reach the full height
+  // half a metre before the bridge so its underside cannot block the final rise onto the deck.
+  const POOL_APPROACH = { bearing: 3.625 / 12 * Math.PI * 2, from: 19, to: RADIUS - 0.5, top: 6.25, tread: 0.4, halfWidth: 2.6, blend: 1.5 };
+  const POOL_X = Math.sin(POOL_APPROACH.bearing), POOL_Z = -Math.cos(POOL_APPROACH.bearing);
   const BLUFF_LEN = 8, SIDE_OUT = 2.5, APRON = 3, TRAIL_LEAN = 1.2;
   const P = { grass: 1, grassLight: 2, grassDark: 3, path: 4, stone: 5, stoneDark: 6, inner: 7, dirt: 8, floor: 9 };
   const PALETTE = [null, "#6f7d3e", "#7b8945", "#65733a", "#a3874f", "#877869", "#5e5449", "#2f2824", "#6a4e39", "#3a302a"].map((hex) => hex && hexToRgb(hex));
@@ -217,12 +321,17 @@
     verts: [-PATH_UNIT / 2, 0, -PATH_UNIT / 2, PATH_UNIT / 2, 0, -PATH_UNIT / 2, PATH_UNIT / 2, 0, PATH_UNIT / 2, -PATH_UNIT / 2, 0, PATH_UNIT / 2],
     faces: [{ i: [0, 3, 2, 1], color: PALETTE[P.path], emissive: 0 }],
     lines: [],
-    depthOffset: true
+    depthOffset: true,
+    surfaceOverlay: true
   };
   const UNDER_BANDS = [P.dirt, P.stoneDark, P.dirt, P.stone];
   const undersideDepthAt = (radius) => Math.max(0, UNDER_SPHERE_CENTER + Math.sqrt(Math.max(0, UNDER_SPHERE_RADIUS * UNDER_SPHERE_RADIUS - radius * radius)));
+  const undersideRadiusAt = (floor) => {
+    const reach = -floor - UNDER_SPHERE_CENTER;
+    return Math.sqrt(Math.max(0, UNDER_SPHERE_RADIUS * UNDER_SPHERE_RADIUS - reach * reach));
+  };
   // CLOCKS entries are [slot, ring clock, tunnel clock].
-  const CLOCKS = [["c11", 11], ["c10", 10], ["c9", 9], ["c730", 7.5, 10.5], ["c1", 1], ["c2", 2], ["c3", 3], ["c5", 5, 2]];
+  const CLOCKS = [["c11", 11], ["c10", 10], ["c9", 9], ["c730", 7.25, 10.25], ["c1", 1], ["c2", 2], ["c3", 3], ["c5", 4.75, 1.75]];
   const HEADQUARTERS_CAVE = 9;
   const HEADQUARTERS_FLOOR = -7;
   const HEADQUARTERS_CEILING = -2.75;
@@ -231,6 +340,7 @@
   const HEADQUARTERS_ROOM = { x: 0, z: 0, radius: 14 };
   const HEADQUARTERS_RAMP_ARC = 1.4;
   const HEADQUARTERS_RAMP_SAMPLES = 96;
+  const HEADQUARTERS_RAMP_ENTRANCE = 1.75;
   const facing = (angle) => {
     const ry = (Math.PI * 2 - angle) % (Math.PI * 2);
     return ry > Math.PI ? ry - Math.PI * 2 : ry;
@@ -248,9 +358,11 @@
     }
     return lo < hi - 1e-9;
   };
-  // Exact moving vertical cylinder vs box: footprint is the box's two expanded strips plus four round corners,
-  // with no scratch arrays.
-  const segmentBoxClear = (x, y, z, dx, dy, dz, radius, height, minX, minY, minZ, maxX, maxY, maxZ) => {
+  // Exact moving vertical cylinder vs box: footprint is the box's two expanded strips plus four round corners.
+  // The typed entry reads caller-owned storage; the numeric adapter below retains the original API.
+  const segmentBoxQueryClear = (q) => {
+    let x = q[0], y = q[1], z = q[2], dx = q[3], dy = q[4], dz = q[5], radius = q[6], height = q[7];
+    let minX = q[8], minY = q[9], minZ = q[10], maxX = q[11], maxY = q[12], maxZ = q[13];
     radius = Math.max(0, radius - 1e-7);
     minY += 1e-7 - height; maxY -= 1e-7;
     let lo = 0, hi = 1;
@@ -271,6 +383,14 @@
       if (Math.max(lo, (-b - root) / span2) < Math.min(hi, (-b + root) / span2) - 1e-9) return false;
     }
     return true;
+  };
+  const BOX_SCALAR_QUERY = new Float64Array(14);
+  // Scalar callers keep the original API; repeated query owners can pass one typed record to the same arithmetic.
+  const segmentBoxClear = (x, y, z, dx, dy, dz, radius, height, minX, minY, minZ, maxX, maxY, maxZ) => {
+    const q = BOX_SCALAR_QUERY;
+    q[0] = x; q[1] = y; q[2] = z; q[3] = dx; q[4] = dy; q[5] = dz; q[6] = radius; q[7] = height;
+    q[8] = minX; q[9] = minY; q[10] = minZ; q[11] = maxX; q[12] = maxY; q[13] = maxZ;
+    return segmentBoxQueryClear(q);
   };
   // Build-time clipping keeps window stone inside the island shell; every remaining piece is convex and shares
   // one terrain mesh.
@@ -338,9 +458,11 @@
     return result.length >= 3 ? result : null;
   };
   const ISLANDS = new Map();
-  const island = ({ seed = 1 } = {}) => {
-    const hit = ISLANDS.get(seed);
-    if (hit) return hit;
+  const islandSteps = function* ({ seed = 1, roofHole = null } = {}, slice = { until: 0, budget: BL.buildTasks.SLICE_MS, work: 0 }, capture = null) {
+    if (slice && !slice.until) { slice.work = 0; slice.until = performance.now() + slice.budget; }
+    const cacheKey = roofHole ? `${seed}:${roofHole.id}:${roofHole.x}:${roofHole.z}:${roofHole.radius}` : seed;
+    const hit = ISLANDS.get(cacheKey);
+    if (hit && !capture) { hit.scope.use(); return hit.value; }
     const rand = mulberry32(seed);
     const noise = valueNoise(rand);
     const spoke = (angle, axis = angle) => {
@@ -353,6 +475,16 @@
     const frames = CLOCKS.map(([id, clock, axis = clock]) => ({ id, clock, ...spoke(clock / 12 * Math.PI * 2, axis / 12 * Math.PI * 2) }));
     const pass = spoke(0);
     const spokes = [...frames.filter((frame) => frame.id !== "c730" && frame.id !== "c5"), pass, spoke(Math.PI)];
+    const south = spokes[spokes.length - 1], stairStraight = RADIUS - 2;
+    // Join the incoming trail at its existing angle, wind across the treads, then face the bridge head squarely.
+    const stairCenter = (along, entrySlope, wind) => {
+      const t = clamp((along - MEADOW) / (stairStraight - MEADOW), 0, 1), u = 1 - t;
+      const wave = Math.sin(Math.PI * t);
+      return entrySlope * (stairStraight - MEADOW) * t * u * u + wind * Math.sin(2 * Math.PI * t) * wave * wave;
+    };
+    const southEntrySlope = -south.wobble * 2 * Math.PI / (MEADOW - MASTER_PATH_CENTER);
+    const southStairCenter = (along) => stairCenter(along, southEntrySlope, 1);
+    const timechainStairCenter = (along) => stairCenter(along, 0, -1.1);
     const headquartersFrames = [frames.find((f) => f.id === "c730"), frames.find((f) => f.id === "c5")];
     const headquartersFronts = headquartersFrames.map((f) => ({
       id: f.id,
@@ -371,9 +503,11 @@
     // Basement intervals use their own six-bit range, -16..-0.25.
     const basementCavities = new Uint16Array(SX * SZ);
     const basementCells = new Uint8Array(SX * SZ);
+    const basementStations = new Float32Array(SX * SZ);
     const basementCollision = new Uint32Array(SX * SZ);
     const basementHeights = new Float32Array((SX + 1) * (SZ + 1));
     const rampCells = new Uint8Array(SX * SZ);
+    const rampStations = new Float32Array(SX * SZ);
     const frontageCells = new Uint8Array(SX * SZ);
     const rampCollision = new Uint32Array(SX * SZ);
     const rampHeights = new Float32Array((SX + 1) * (SZ + 1));
@@ -393,8 +527,9 @@
       const g = noise(q(wx) / 3 + 120, q(wz) / 3 + 60);
       return g < 0.38 ? P.grassDark : g < 0.68 ? P.grass : P.grassLight;
     };
+    // Rock strata in metre blocks and metre courses, so a cliff face shows big coloured stones, not speckle.
     const strata = (wx, wz, gy) => {
-      const s = noise(q(wx) / 2 + q(gy * UNIT) * 1.8 + 400, q(wz) / 2 + 400);
+      const s = noise(Math.floor(wx) / 2 + Math.floor(gy * UNIT) * 1.8 + 400, Math.floor(wz) / 2 + 400);
       return s < 0.35 ? P.stoneDark : s < 0.7 ? P.stone : P.dirt;
     };
     const shapeColumn = (gx, gz, wx) => {
@@ -406,6 +541,7 @@
       for (const f of frames) {
         const dx = wx - f.x, dz = wz - f.z;
         const along = dx * f.ox + dz * f.oz, across = Math.abs(dz * f.ox - dx * f.oz);
+        // Use the recessed edge of diagonal cliff cells for the wall plane; the half-metre entrance rim projects from it.
         if (along > -f.e && across < 5) bluff = Math.max(bluff, (1 - smooth((across - 3) / 2)) * (1 - smooth((along - BLUFF_LEN) / 2)));
         else if (f.lean && along > -APRON && across < 3.5) {
           apron = true;
@@ -426,18 +562,53 @@
       if (r < edge && bluff <= 0) {
         meadow[i] = 1;
       } else {
-        let h = 0.4 + (plateau + noise(wx / 12 + 80, wz / 12 + 80) * 2.5) * smooth((r - edge) / ramp) - 1.2 * smooth((r - (RADIUS - 2)) / 2) + (noise(wx / 5 + 20, wz / 5 + 20) - 0.5) * 1.2;
-        h *= 1 - 0.6 * smooth(1 - (Math.PI - Math.abs(theta)) / 0.5);
+        // Big blocks: away from the mouths and the aprons the bluff takes its height from a block lattice, a metre
+        // where the rock is massive and half a metre where it breaks up, and steps in half metres (still under a
+        // walker's step), so cliffs read as big and small blocks instead of a quarter-metre grain.
+        const coarse = bluff <= 0 && !apron, B = noise(wx / 9 + 900, wz / 9 + 900) > 0.45 ? 1 : 0.5;
+        const sx = coarse ? (Math.floor(wx / B) + 0.5) * B : wx, sz = coarse ? (Math.floor(wz / B) + 0.5) * B : wz;
+        const sr = coarse ? Math.hypot(sx, sz) : r, st = coarse ? Math.atan2(sx, -sz) : theta;
+        let h = 0.4 + (plateau + noise(sx / 12 + 80, sz / 12 + 80) * 2.5) * smooth((sr - edge) / ramp) - 1.2 * smooth((sr - (RADIUS - 2)) / 2) + (noise(sx / 5 + 20, sz / 5 + 20) - 0.5) * 1.2;
+        h *= 1 - 0.6 * smooth(1 - (Math.PI - Math.abs(st)) / 0.5);
         const crest = BLUFF + noise(wx / 4 + 500, wz / 4 + 500) * 1.5;
         if (h < crest) h += (crest - h) * bluff;
-        const patch = noise(q(wx) / 4 + 700, q(wz) / 4 + 700);
+        const patch = noise(q(sx) / 4 + 700, q(sz) / 4 + 700);
         if (apron) h = 0;
         else if (patch <= 0.58) surface = patch < 0.3 ? P.stoneDark : P.stone;
         if (Math.abs(wx) < PASS_HALF && wz < 0) {
           h = Math.min(PASS_TOP, Math.floor((r - MEADOW) / UNIT) * UNIT);
           surface = grassAt(wx, wz);
         }
-        top = clamp(Math.round(h / UNIT) * UNIT, 0, MAX_HEIGHT);
+        const step = coarse && !(Math.abs(wx) < PASS_HALF && wz < 0) ? 0.5 : UNIT;
+        top = clamp(Math.round(h / step) * step, 0, MAX_HEIGHT);
+      }
+      // A grass terrace cut into the ridge; the same voxels render and support it.
+      const timechainAlong = wx * TIMECHAIN_X + wz * TIMECHAIN_Z;
+      const timechainAcross = Math.abs(wx * TIMECHAIN_Z - wz * TIMECHAIN_X);
+      if (timechainAlong >= TIMECHAIN.from - 1 && timechainAcross < TIMECHAIN.halfWidth + TIMECHAIN.blend) {
+        const tread = Math.min(TIMECHAIN.top, Math.max(0, Math.floor((timechainAlong - TIMECHAIN.from) / 0.5) * UNIT));
+        const mix = smooth((timechainAcross - TIMECHAIN.halfWidth) / TIMECHAIN.blend);
+        top = Math.round((tread + (top - tread) * mix) / UNIT) * UNIT;
+        surface = grassAt(wx, wz);
+        meadow[i] = top === 0 ? 1 : 0;
+      }
+      // Match those treads on the south route where the Ooga Orbit bridge meets the rim.
+      if (wz >= STAIR_TERRACE.from - 1 && Math.abs(wx) < STAIR_TERRACE.halfWidth + STAIR_TERRACE.blend) {
+        const tread = Math.min(STAIR_TERRACE.top, Math.max(0, Math.floor((wz - STAIR_TERRACE.from) / 0.5) * UNIT));
+        const mix = smooth((Math.abs(wx) - STAIR_TERRACE.halfWidth) / STAIR_TERRACE.blend);
+        top = Math.round((tread + (top - tread) * mix) / UNIT) * UNIT;
+        surface = grassAt(wx, wz);
+        meadow[i] = top === 0 ? 1 : 0;
+      }
+      // The rainforest crossing gets the same grass-topped, terrain-solid stair terrace, without a trail.
+      const poolAlong = wx * POOL_X + wz * POOL_Z;
+      const poolAcross = Math.abs(wx * POOL_Z - wz * POOL_X);
+      if (poolAlong >= POOL_APPROACH.from - 1 && poolAlong <= POOL_APPROACH.to + 0.5 && poolAcross < POOL_APPROACH.halfWidth + POOL_APPROACH.blend) {
+        const tread = Math.min(POOL_APPROACH.top, Math.max(0, Math.floor((poolAlong - POOL_APPROACH.from) / POOL_APPROACH.tread) * UNIT));
+        const mix = smooth((poolAcross - POOL_APPROACH.halfWidth) / POOL_APPROACH.blend);
+        top = Math.round((tread + (top - tread) * mix) / UNIT) * UNIT;
+        surface = grassAt(wx, wz);
+        meadow[i] = top === 0 ? 1 : 0;
       }
       // Carry the ground-level frontage across the outer ridge without lowering a column behind the HQ doorway plane.
       for (let fi = 0; fi < headquartersFronts.length; fi++) {
@@ -461,13 +632,13 @@
     };
     for (let gx = 0; gx < SX; gx++) {
       const wx = (gx + 0.5) * UNIT + ORIGIN.x;
-      for (let gz = 0; gz < SZ; gz++) shapeColumn(gx, gz, wx);
+      for (let gz = 0; gz < SZ; gz++) { if (due(slice, 63)) yield* pause(slice); shapeColumn(gx, gz, wx); }
     }
     const row = (j) => tops[j] === NONE ? -1 : SURFACE - 1 + Math.round(tops[j] / UNIT);
     const { data } = grid;
     for (let gx = 0; gx < SX; gx++) {
       const wx = (gx + 0.5) * UNIT + ORIGIN.x;
-      for (let gz = 0; gz < SZ; gz++) {
+      for (let gz = 0; gz < SZ; gz++) { if (due(slice, 63)) yield* pause(slice);
         const i = gx * SZ + gz;
         const top = tops[i];
         if (top === NONE) continue;
@@ -487,8 +658,33 @@
       const ceilingCell = Number.isFinite(ceiling) ? Math.round(ceiling / UNIT) + offset : 63;
       return caveIndex | (floorCell << 4) | (ceilingCell << 10);
     };
+    // Fit every surface chamber inside its existing mountain. Check
+    // the same quarter-unit columns the carve removes, including their outer
+    // corners; never raise a roof or break the island skin to gain floor space.
+    const fitWorkRoom = (frame) => {
+      const columns = [];
+      for (let gx = 2; gx < SX - 2; gx++) for (let gz = 2; gz < SZ - 2; gz++) {
+        const x = (gx + 0.5) * UNIT + ORIGIN.x, z = (gz + 0.5) * UNIT + ORIGIN.z;
+        const dx = x - frame.x, dz = z - frame.z;
+        const along = dx * frame.ox + dz * frame.oz, across = Math.abs(dz * frame.ox - dx * frame.oz);
+        if (along < 0.5 - frame.e || along > 6.75 + frame.e || across > 3.625 + frame.e) continue;
+        let wallTop = Infinity;
+        for (let ix = -2; ix <= 2; ix++) for (let iz = -2; iz <= 2; iz++) wallTop = Math.min(wallTop, tops[(gx + ix) * SZ + gz + iz]);
+        columns.push({ along, across, top: tops[gx * SZ + gz], wallTop, skin: RADIUS - Math.hypot(Math.abs(x) + UNIT / 2, Math.abs(z) + UNIT / 2) });
+      }
+      let area = 0;
+      for (let w = 6; w <= 7.25; w += UNIT) for (let from = 0.5; from <= 2.5; from += UNIT) for (let to = 6.5; to <= 6.75; to += UNIT) {
+        const candidateArea = w * (to - from);
+        if (candidateArea <= area) continue;
+        let safe = true;
+        for (const column of columns) if (column.along > from - frame.e && column.along < to + frame.e && column.across < w / 2 + frame.e
+          && (column.top < ROOM.h + 0.5 || column.wallTop < ROOM.h || column.skin < 0.5)) { safe = false; break; }
+        if (safe) { frame.room = { w, h: ROOM.h, from, to }; area = candidateArea; }
+      }
+    };
+    for (const frame of frames) { yield* pause(slice); if (frame.id !== "c730" && frame.id !== "c5") fitWorkRoom(frame); }
     const carve = (f, caveIndex) => {
-      const e = f.e;
+      const e = f.e, chamber = f.room || ROOM;
       const cx = f.x + f.ox * 4, cz = f.z + f.oz * 4;
       const gx0 = Math.max(0, Math.floor((cx - 7 - ORIGIN.x) / UNIT)), gx1 = Math.min(SX - 1, Math.ceil((cx + 7 - ORIGIN.x) / UNIT));
       const gz0 = Math.max(0, Math.floor((cz - 7 - ORIGIN.z) / UNIT)), gz1 = Math.min(SZ - 1, Math.ceil((cz + 7 - ORIGIN.z) / UNIT));
@@ -499,9 +695,9 @@
           const wz = (gz + 0.5) * UNIT + ORIGIN.z;
           const dx = wx - f.x, dz = wz - f.z;
           const along = dx * f.ox + dz * f.oz, across = Math.abs(dz * f.ox - dx * f.oz);
-          const room = along > ROOM.from - e && along < ROOM.to + e && across < ROOM.w / 2 + e;
-          if (!room && !(along > -0.5 && along < MOUTH.depth + e && across < MOUTH.w / 2 + e)) continue;
-          const gyTop = SURFACE - 1 + Math.round((room ? ROOM.h : MOUTH.h) / UNIT);
+          const room = along > chamber.from - e && along < chamber.to + e && across < chamber.w / 2 + e;
+          if (!room && !(along > -MOUTH.front && along < MOUTH.depth + e && across < MOUTH.w / 2 + e)) continue;
+          const gyTop = SURFACE - 1 + Math.round((room ? chamber.h : MOUTH.h) / UNIT);
           for (let gy = SURFACE; gy <= gyTop; gy++) {
             grid.set(gx, gy, gz, 0);
             // The opening lies at local z=.5; the exterior rim stays in global coordinates.
@@ -526,7 +722,7 @@
         }
       }
     };
-    for (let i = 0; i < frames.length; i++) {
+    for (let i = 0; i < frames.length; i++) { yield* pause(slice);
       if (frames[i].id !== "c730" && frames[i].id !== "c5") carve(frames[i], i + 1);
     }
     const headquartersRamps = headquartersFrames.map((f, i) => {
@@ -534,23 +730,39 @@
       const startAngle = Math.atan2(from.x, -from.z), direction = i ? -1 : 1;
       const startRadius = Math.hypot(from.x, from.z), endRadius = HEADQUARTERS_ROOM.radius - 0.8;
       const samples = [];
+      let station = 0, previous = null;
       for (let n = 0; n <= HEADQUARTERS_RAMP_SAMPLES; n++) {
         const t = n / HEADQUARTERS_RAMP_SAMPLES;
         const angle = startAngle + direction * HEADQUARTERS_RAMP_ARC * t;
         const radius = startRadius + (endRadius - startRadius) * smooth((t - 0.38) / 0.62);
-        samples.push({ x: Math.sin(angle) * radius, z: -Math.cos(angle) * radius, y: HEADQUARTERS_FLOOR * Math.min(t / 0.54, 1), t });
+        const point = { x: Math.sin(angle) * radius, z: -Math.cos(angle) * radius, y: HEADQUARTERS_FLOOR * Math.min(t / 0.54, 1), t, s: station };
+        if (previous) point.s = station += Math.hypot(point.x - previous.x, point.z - previous.z);
+        samples.push(point); previous = point;
       }
       const to = samples[samples.length - 1];
-      return { id: f.id, from, to: { x: to.x, z: to.z }, width: 4, startAngle, endAngle: startAngle + direction * HEADQUARTERS_RAMP_ARC, direction, slope: -samples[1].y / Math.hypot(samples[1].x - from.x, samples[1].z - from.z), axis: { x: f.ox, z: f.oz }, samples };
+      return { id: f.id, from, to: { x: to.x, z: to.z }, width: 4, entranceLength: HEADQUARTERS_RAMP_ENTRANCE, cutawayEntranceLength: ROOM.from, length: station, startAngle, endAngle: startAngle + direction * HEADQUARTERS_RAMP_ARC, direction, slope: -samples[1].y / Math.hypot(samples[1].x - from.x, samples[1].z - from.z), axis: { x: f.ox, z: f.oz }, samples };
     });
-    const headquartersRooms = [120, 138, 160, 174, 188, 202, 216, 238, 255].map((degrees, index) => {
+    const headquartersRooms = [120, 138, 152, 166, 180, 194, 208, 238, 255].map((degrees, index) => {
       const angle = degrees / 180 * Math.PI, sx = Math.sin(angle), sz = -Math.cos(angle);
       const radius = 23.25, width = 5, depth = 5;
       return { index, angle, radius, window: true, floor: HEADQUARTERS_FLOOR, ceiling: HEADQUARTERS_CEILING, height: HEADQUARTERS_HEIGHT, x: sx * radius, z: sz * radius, width, depth, approach: { x: sx * 13.25, z: sz * 13.25 }, entrance: { x: sx * 18.5, z: sz * 18.5 }, back: { x: sx * (radius + depth / 2 - 0.2), z: sz * (radius + depth / 2 - 0.2) } };
     }).filter((room) => room.index >= 2 && room.index <= 6);
-    const headquartersGallery = { startAngle: -32 * Math.PI / 180, endAngle: 47 * Math.PI / 180, radius: 24.5 };
-    // Spare nooks open sideways off the window gallery, away from ramp landings; entrances face the gallery,
-    // not the island centre.
+    const headquartersGallery = { startAngle: -39.5 * Math.PI / 180, endAngle: 39.5 * Math.PI / 180, radius: 24.5 };
+    // Broad, level offshoots grow from the flat ends of both entrance ramps.
+    // The outer edge follows the ramp only after it has reached this floor;
+    // the last ramp window remains above the cut while the side rooms stay
+    // behind the opposite edge.
+    const headquartersBalconies = [-1, 1].map((side) => ({
+      side,
+      startAngle: side < 0 ? -100 * Math.PI / 180 : 63 * Math.PI / 180,
+      endAngle: side < 0 ? -63 * Math.PI / 180 : 100 * Math.PI / 180,
+      radius: undersideRadiusAt(HEADQUARTERS_FLOOR),
+      openingRadius: undersideRadiusAt(HEADQUARTERS_CEILING),
+      floor: HEADQUARTERS_FLOOR,
+      ceiling: HEADQUARTERS_CEILING
+    }));
+    // The two spare nooks open sideways off the window gallery, away from the
+    // clear ramp landings. Their entrances face the gallery, not the island centre.
     for (const side of [-1, 1]) {
       const edge = side < 0 ? headquartersGallery.startAngle : headquartersGallery.endAngle, angle = edge + side * Math.PI / 2;
       const edgeRadius = 21.25, width = 7, depth = 6;
@@ -560,12 +772,12 @@
       // Keep the frame's front outside the gallery so its corners leave turning room.
       headquartersRooms.push({ index: side < 0 ? 9 : 10, angle, radius: Math.hypot(x, z), window: true, floor: HEADQUARTERS_FLOOR, ceiling: HEADQUARTERS_CEILING, height: HEADQUARTERS_HEIGHT, windowAngle: Math.atan2(x, -z), windowAt: { x: x * windowScale, z: z * windowScale }, nook: true, x, z, width, depth, approach: { x: edgeX - sx * 1.1, z: edgeZ - sz * 1.1 }, entrance: { x: edgeX + sx * 0.35, z: edgeZ + sz * 0.35 }, back: { x: x + sx * (depth / 2 - 0.2), z: z + sz * (depth / 2 - 0.2) } });
     }
-    const carveHeadquartersColumn = (gx, gz, floor, ceiling, deep = false) => {
+    const carveHeadquartersColumn = (gx, gz, floor, ceiling, deep = false, ceilingMaterial = P.inner) => {
       const floorGy = SURFACE - 1 + Math.round(floor / UNIT);
       const ceilingGy = SURFACE + Math.round(ceiling / UNIT);
       grid.set(gx, floorGy, gz, P.floor);
       for (let gy = floorGy + 1; gy < ceilingGy; gy++) grid.set(gx, gy, gz, 0);
-      if (grid.has(gx, ceilingGy, gz)) grid.set(gx, ceilingGy, gz, P.inner);
+      if (grid.has(gx, ceilingGy, gz)) grid.set(gx, ceilingGy, gz, ceilingMaterial);
       if (!deep) lowerCavities[gx * SZ + gz] = encodeCavity(HEADQUARTERS_CAVE, floor, ceiling);
       for (let gy = floorGy + 1; gy < ceilingGy; gy++) {
         if (grid.has(gx + 1, gy, gz)) grid.set(gx + 1, gy, gz, strata((gx + 1) * UNIT + ORIGIN.x, gz * UNIT + ORIGIN.z, gy));
@@ -574,6 +786,32 @@
         if (grid.has(gx, gy, gz - 1)) grid.set(gx, gy, gz - 1, strata(gx * UNIT + ORIGIN.x, (gz - 1) * UNIT + ORIGIN.z, gy));
       }
     };
+    const carveBalconyOpening = (balcony) => {
+      const reach = balcony.openingRadius + UNIT, gx0 = Math.max(0, Math.floor((-reach - ORIGIN.x) / UNIT)), gx1 = Math.min(SX - 1, Math.ceil((reach - ORIGIN.x) / UNIT));
+      const gz0 = Math.max(0, Math.floor((-reach - ORIGIN.z) / UNIT)), gz1 = Math.min(SZ - 1, Math.ceil((reach - ORIGIN.z) / UNIT));
+      const floorGy = SURFACE - 1 + Math.round(balcony.floor / UNIT), ceilingGy = SURFACE + Math.round(balcony.ceiling / UNIT);
+      for (let gx = gx0; gx <= gx1; gx++) {
+        const x = (gx + 0.5) * UNIT + ORIGIN.x;
+        for (let gz = gz0; gz <= gz1; gz++) {
+          const z = (gz + 0.5) * UNIT + ORIGIN.z, radius = Math.hypot(x, z);
+          if (radius < balcony.radius || radius >= balcony.openingRadius) continue;
+          const angle = Math.atan2(x, -z);
+          if (!insideBalcony(balcony, radius, angle)) continue;
+          for (let gy = floorGy + 1; gy < ceilingGy; gy++) grid.set(gx, gy, gz, 0);
+        }
+      }
+    };
+    const insideBalcony = (balcony, radius, angle) => {
+      let start = balcony.startAngle, end = balcony.endAngle;
+      const join = balcony.roomJoin;
+      if (join && radius < join.toRadius) {
+        const t = clamp((radius - join.fromRadius) / (join.toRadius - join.fromRadius), 0, 1);
+        const boundary = join.angle + ((balcony.side < 0 ? end : start) - join.angle) * t;
+        if (balcony.side < 0) end = boundary;
+        else start = boundary;
+      }
+      return angle > start && angle < end;
+    };
     const rampProbe = { distance: 0, floor: 0 };
     const sampleRamp = (ramp, x, z, out) => {
       let distance = Infinity, floor = 0, station = 0;
@@ -581,13 +819,14 @@
         const a = ramp.samples[i - 1], b = ramp.samples[i], dx = b.x - a.x, dz = b.z - a.z;
         const t = clamp(((x - a.x) * dx + (z - a.z) * dz) / (dx * dx + dz * dz), 0, 1);
         const ex = x - a.x - dx * t, ez = z - a.z - dz * t, d = ex * ex + ez * ez;
-        if (d < distance) { distance = d; floor = a.y + (b.y - a.y) * t; if (ramp.basement) station = a.s + (b.s - a.s) * t; }
+        if (d < distance) { distance = d; floor = a.y + (b.y - a.y) * t; station = a.s + (b.s - a.s) * t; }
       }
       out.distance = Math.sqrt(distance);
-      if (ramp.basement) { out.floor = floor; out.station = station; return; }
+      out.station = station;
+      if (ramp.basement) { out.floor = floor; return; }
       const along = (x - ramp.from.x) * ramp.axis.x + (z - ramp.from.z) * ramp.axis.z;
       // A short planar throat meets the doorway exactly, then bends into the curve.
-      const join = clamp((along - 1) / 0.75, 0, 1);
+      const join = clamp((along - (ramp.entranceLength - 0.75)) / 0.75, 0, 1);
       out.floor = -Math.max(0, along) * ramp.slope * (1 - join) + floor * join;
     };
     const roomAxes = new Map();
@@ -619,15 +858,21 @@
       const gz0 = Math.max(0, Math.floor((minZ - ORIGIN.z) / UNIT)), gz1 = Math.min(SZ - 1, Math.ceil((maxZ - ORIGIN.z) / UNIT));
       for (let gx = gx0; gx <= gx1; gx++) {
         const wx = (gx + 0.5) * UNIT + ORIGIN.x;
-        for (let gz = gz0; gz <= gz1; gz++) {
+        for (let gz = gz0; gz <= gz1; gz++) { if (due(slice, 63)) yield* pause(slice);
           const wz = (gz + 0.5) * UNIT + ORIGIN.z;
           sampleRamp(ramp, wx, wz, rampProbe);
           if (rampProbe.distance > ramp.width / 2 || (wx - ramp.from.x) * ramp.axis.x + (wz - ramp.from.z) * ramp.axis.z < -UNIT / 2) continue;
           const floor = rampProbe.floor;
           rampCells[gx * SZ + gz] = ri + 1;
-          carveHeadquartersColumn(gx, gz, Math.max(HEADQUARTERS_FLOOR - UNIT, Math.floor(floor / UNIT) * UNIT - UNIT), Math.ceil((floor + 3.5) / UNIT) * UNIT);
+          rampStations[gx * SZ + gz] = rampProbe.station;
           const frame = headquartersFrames[ri], dx = wx - frame.x, dz = wz - frame.z;
           const along = dx * frame.ox + dz * frame.oz, across = Math.abs(dz * frame.ox - dx * frame.oz);
+          const ceiling = Math.ceil((floor + 3.5) / UNIT) * UNIT;
+          // The ramp ceiling begins as an exposed lintel and remains visible
+          // down the open stairwell. Keep it in the cliff palette throughout
+          // instead of introducing a black interior-material strip.
+          const ceilingMaterial = strata(wx, wz, SURFACE + Math.round(ceiling / UNIT));
+          carveHeadquartersColumn(gx, gz, Math.max(HEADQUARTERS_FLOOR - UNIT, Math.floor(floor / UNIT) * UNIT - UNIT), ceiling, false, ceilingMaterial);
           if (along > frame.e - 0.48 && along < ROOM.to && across < ROOM.w / 2) {
             const index = frames.indexOf(frame) + 1;
             for (let gy = SURFACE + Math.floor(floor / UNIT) - 1; gy < SURFACE + Math.ceil((floor + 3.5) / UNIT); gy++) {
@@ -637,14 +882,15 @@
         }
       }
     }
-    const roomGX0 = Math.floor((-27 - ORIGIN.x) / UNIT), roomGX1 = Math.ceil((27 - ORIGIN.x) / UNIT);
-    const roomGZ0 = Math.floor((-27 - ORIGIN.z) / UNIT), roomGZ1 = Math.ceil((27 - ORIGIN.z) / UNIT);
+    const roomGX0 = Math.floor((-RADIUS - ORIGIN.x) / UNIT), roomGX1 = Math.ceil((RADIUS - ORIGIN.x) / UNIT);
+    const roomGZ0 = Math.floor((-RADIUS - ORIGIN.z) / UNIT), roomGZ1 = Math.ceil((RADIUS - ORIGIN.z) / UNIT);
     for (let gx = roomGX0; gx <= roomGX1; gx++) {
       const wx = (gx + 0.5) * UNIT + ORIGIN.x;
-      for (let gz = roomGZ0; gz <= roomGZ1; gz++) {
+      for (let gz = roomGZ0; gz <= roomGZ1; gz++) { if (due(slice, 63)) yield* pause(slice);
         const wz = (gz + 0.5) * UNIT + ORIGIN.z;
         const radius = Math.hypot(wx, wz), angle = Math.atan2(wx, -wz);
         let inside = radius < HEADQUARTERS_ROOM.radius || radius < headquartersGallery.radius && angle > headquartersGallery.startAngle && angle < headquartersGallery.endAngle;
+        for (const balcony of headquartersBalconies) { if (tops[gx * SZ + gz] !== NONE && radius < balcony.radius && insideBalcony(balcony, radius, angle)) inside = true; }
         for (const room of headquartersRooms) {
           if (insideRoom(room, wx, wz)) inside = true;
         }
@@ -655,12 +901,14 @@
           if (rampProbe.floor > HEADQUARTERS_FLOOR) continue;
         }
         rampCells[gx * SZ + gz] = 0;
+        rampStations[gx * SZ + gz] = 0;
         carveHeadquartersColumn(gx, gz, HEADQUARTERS_FLOOR, HEADQUARTERS_CEILING);
       }
     }
+    for (const balcony of headquartersBalconies) { carveBalconyOpening(balcony); }
     let rampGeometry = { verts: [], faces: [], lines: [] };
     for (let gx = 0; gx <= SX; gx++) {
-      for (let gz = 0; gz <= SZ; gz++) {
+      for (let gz = 0; gz <= SZ; gz++) { if (due(slice, 63)) yield* pause(slice);
         const ri = (gx < SX && gz < SZ && rampCells[gx * SZ + gz]) || (gx > 0 && gz < SZ && rampCells[(gx - 1) * SZ + gz]) || (gx < SX && gz > 0 && rampCells[gx * SZ + gz - 1]) || (gx > 0 && gz > 0 && rampCells[(gx - 1) * SZ + gz - 1]);
         if (!ri) continue;
         sampleRamp(headquartersRamps[ri - 1], gx * UNIT + ORIGIN.x, gz * UNIT + ORIGIN.z, rampProbe);
@@ -668,7 +916,7 @@
       }
     }
     for (let gx = 0; gx < SX; gx++) {
-      for (let gz = 0; gz < SZ; gz++) {
+      for (let gz = 0; gz < SZ; gz++) { if (due(slice, 63)) yield* pause(slice);
         if (!rampCells[gx * SZ + gz]) continue;
         const wx = gx * UNIT + ORIGIN.x, wz = gz * UNIT + ORIGIN.z, v = rampGeometry.verts.length / 3, i = gx * (SZ + 1) + gz;
         const ramp = headquartersRamps[rampCells[gx * SZ + gz] - 1];
@@ -680,16 +928,34 @@
           if ((da < 0) !== (db < 0)) { const t = da / (da - db); clipped.push([a[0] + (b[0] - a[0]) * t, 0, a[2] + (b[2] - a[2]) * t]); }
         }
         if (clipped.length < 3) continue;
-        for (const p of clipped) rampGeometry.verts.push(...p);
+        for (const p of clipped) { rampGeometry.verts.push(...p); }
         const frame = headquartersFrames[rampCells[gx * SZ + gz] - 1], dx = wx + UNIT / 2 - frame.x, dz = wz + UNIT / 2 - frame.z;
         const along = dx * frame.ox + dz * frame.oz, across = Math.abs(dz * frame.ox - dx * frame.oz);
         const cave = along > frame.e - 0.48 && along < ROOM.to && across < ROOM.w / 2 ? frames.indexOf(frame) + 1 : 0;
         // Curving slopes are not coplanar quads: glyphs and collision use the renderer's exact triangles, including
         // the clipped doorway boundary.
         rampCollision[gx * SZ + gz] = (rampGeometry.faces.length << 2) | (clipped.length - 2);
-        for (let n = 1; n < clipped.length - 1; n++) rampGeometry.faces.push({ i: [v, v + n, v + n + 1], color: PALETTE[(Math.floor(gx / 4) + Math.floor(gz / 4)) % 5 === 0 ? P.stoneDark : P.floor], emissive: 0, headquartersRamp: true, matrixCave: cave, matrixWorldGlyphSurface: cave !== 0 });
+        for (let n = 1; n < clipped.length - 1; n++) { rampGeometry.faces.push({ i: [v, v + n, v + n + 1], color: PALETTE[(Math.floor(gx / 4) + Math.floor(gz / 4)) % 5 === 0 ? P.stoneDark : P.floor], emissive: 0, headquartersRamp: true, matrixCave: cave, matrixWorldGlyphSurface: cave !== 0 }); }
       }
     }
+    // The curved ramp tops are separate from their stepped voxel supports.
+    // Close exposed boundary edges so balcony cuts cannot reveal that seam.
+    for (let gx = 0; gx < SX; gx++) { yield* pause(slice); for (let gz = 0; gz < SZ; gz++) {
+      const cell = gx * SZ + gz, ri = rampCells[cell];
+      if (!ri) continue;
+      const x = gx * UNIT + ORIGIN.x, z = gz * UNIT + ORIGIN.z, i = gx * (SZ + 1) + gz;
+      const corners = [[x, rampHeights[i], z], [x, rampHeights[i + 1], z + UNIT], [x + UNIT, rampHeights[i + SZ + 2], z + UNIT], [x + UNIT, rampHeights[i + SZ + 1], z]];
+      const base = (((lowerCavities[cell] >> 4) & 63) - 32) * UNIT;
+      const neighbors = [gx ? rampCells[cell - SZ] : 0, gz + 1 < SZ ? rampCells[cell + 1] : 0, gx + 1 < SX ? rampCells[cell + SZ] : 0, gz ? rampCells[cell - 1] : 0];
+      for (let edge = 0; edge < 4; edge++) {
+        if (neighbors[edge] === ri) continue;
+        const a = corners[edge], b = corners[(edge + 1) % 4];
+        if (a[1] <= base + 1e-7 && b[1] <= base + 1e-7) continue;
+        const v = rampGeometry.verts.length / 3;
+        rampGeometry.verts.push(a[0], a[1], a[2], a[0], base, a[2], b[0], base, b[2], b[0], b[1], b[2]);
+        rampGeometry.faces.push({ i: [v, v + 1, v + 2, v + 3], color: PALETTE[P.stoneDark], emissive: 0, headquartersRampSkirt: ri });
+      }
+    } }
     // Build-time route geometry; heights are solved separately from the upper tunnels.
     const buildBasementRoute = (main, angle) => {
       const samples = [], first = 27;
@@ -730,15 +996,15 @@
       const dz = (Math.floor((z - ORIGIN.z) / UNIT) + 0.5) * UNIT + ORIGIN.z - basementHole.z;
       return dx * dx + dz * dz < basementHole.radius * basementHole.radius;
     };
-    for (const [index, degrees] of [-30, -10, 10, 30, 155, 178, 201, 222].entries()) {
-      const angle = degrees * Math.PI / 180, sx = Math.sin(angle), sz = -Math.cos(angle), radius = 18, width = 5, depth = 5;
+    for (const [index, degrees] of [-50, -30, -10, 10, 30, 50, 146, 169, 191, 214].entries()) {
+      const angle = degrees * Math.PI / 180, sx = Math.sin(angle), sz = -Math.cos(angle), radius = 18, width = Math.abs(degrees) <= 50 ? 5.5 : 5, depth = 5;
       basement.rooms.push({ index, basement: true, angle, radius, width, depth, corridorWidth: 2.6, height: HEADQUARTERS_HEIGHT, window: true, x: sx * radius, z: sz * radius, approach: { x: sx * 8.25, z: sz * 8.25 }, entrance: { x: sx * 9.25, z: sz * 9.25 }, back: { x: sx * (radius + depth / 2 - 0.2), z: sz * (radius + depth / 2 - 0.2) } });
     }
-    for (const [index, degrees, mainId] of [[1, 138, "c5"], [7, 238, "c730"]]) {
+    for (const [index, degrees, mainId] of [[1, 130, "c5"], [7, 230, "c730"]]) {
       const angle = degrees * Math.PI / 180, ramp = buildBasementRoute(headquartersRamps.find((entry) => entry.id === mainId), angle);
       ramp.basement = true; ramp.index = index; ramp.angle = angle;
       ramp.entrance = { x: Math.sin(angle) * 14.5, y: HEADQUARTERS_FLOOR, z: -Math.cos(angle) * 14.5 };
-      for (const sample of ramp.samples) sample.y = HEADQUARTERS_FLOOR;
+      for (const sample of ramp.samples) { sample.y = HEADQUARTERS_FLOOR; }
       basement.ramps.push(ramp);
     }
     // Shallowest shared level comes from the full lower footprint, measured from the bottom of the actual upper
@@ -751,21 +1017,21 @@
       }
       return bounds;
     });
-    for (let gx = 0; gx < SX; gx++) for (let gz = 0; gz < SZ; gz++) {
+    for (let gx = 0; gx < SX; gx++) { yield* pause(slice); for (let gz = 0; gz < SZ; gz++) {
       const x = (gx + 0.5) * UNIT + ORIGIN.x, z = (gz + 0.5) * UNIT + ORIGIN.z, i = gx * SZ + gz;
       let inside = Math.hypot(x, z) < basement.room.radius;
-      for (const room of basement.rooms) if (insideRoom(room, x, z)) inside = true;
+      for (const room of basement.rooms) { if (insideRoom(room, x, z)) inside = true; }
       if (inside) basementCells[i] = 3;
       else for (let ri = 0; ri < basement.ramps.length; ri++) {
         const ramp = basement.ramps[ri], bounds = basementRampBounds[ri];
         if (x < bounds.minX || x > bounds.maxX || z < bounds.minZ || z > bounds.maxZ) continue;
         sampleRamp(ramp, x, z, rampProbe);
-        if (rampProbe.distance <= ramp.width / 2) { basementCells[i] = ri + 1; break; }
+        if (rampProbe.distance <= ramp.width / 2) { basementCells[i] = ri + 1; basementStations[i] = rampProbe.station; break; }
       }
       if (!basementCells[i] || !lowerCavities[i]) continue;
       const floor = (((lowerCavities[i] >> 4) & 63) - 32) * UNIT;
       basement.floor = Math.min(basement.floor, floor - UNIT - HEADQUARTERS_ROCK - HEADQUARTERS_HEIGHT);
-    }
+    } }
     basement.clearanceDrop = HEADQUARTERS_FLOOR - basement.floor;
     basement.floor = Math.floor(basement.floor / UNIT) * UNIT;
     basement.ceiling = basement.floor + HEADQUARTERS_HEIGHT;
@@ -781,7 +1047,7 @@
     };
     for (let ri = 0; ri < basement.ramps.length; ri++) {
       const ramp = basement.ramps[ri], constraints = [];
-      for (let gx = 0; gx < SX; gx++) for (let gz = 0; gz < SZ; gz++) {
+      for (let gx = 0; gx < SX; gx++) { yield* pause(slice); for (let gz = 0; gz < SZ; gz++) {
         const i = gx * SZ + gz;
         if (basementCells[i] !== ri + 1 || !lowerCavities[i]) continue;
         const x = gx * UNIT + ORIGIN.x, z = gz * UNIT + ORIGIN.z;
@@ -793,10 +1059,10 @@
         if (station < 1) continue;
         const floor = (((lowerCavities[i] >> 4) & 63) - 32) * UNIT;
         let sample = 1;
-        while (sample < ramp.samples.length - 1 && ramp.samples[sample].s < station) sample++;
+        while (sample < ramp.samples.length - 1 && ramp.samples[sample].s < station) { sample++; }
         const a = ramp.samples[sample - 1].s, b = ramp.samples[sample].s;
         constraints.push({ a, b, t: (station - a) / (b - a), ceiling: floor - UNIT - HEADQUARTERS_ROCK });
-      }
+      } }
       let lo = 1, hi = ramp.length;
       for (let n = 0; n < 24; n++) {
         const length = (lo + hi) / 2;
@@ -804,67 +1070,125 @@
         if (clear) lo = length; else hi = length;
       }
       ramp.descentLength = lo;
-      for (const sample of ramp.samples) sample.y = HEADQUARTERS_FLOOR + (basement.floor - HEADQUARTERS_FLOOR) * descentAt(sample.s, lo);
+      for (const sample of ramp.samples) { sample.y = HEADQUARTERS_FLOOR + (basement.floor - HEADQUARTERS_FLOOR) * descentAt(sample.s, lo); }
       sampleRamp(ramp, ramp.entrance.x, ramp.entrance.z, rampProbe);
       ramp.entrance.y = rampProbe.floor;
     }
-    // Slopes use the same two triangles per voxel as their support queries.
-    for (let gx = 0; gx <= SX; gx++) for (let gz = 0; gz <= SZ; gz++) {
-      let ri = 0;
-      for (let dx = -1; dx <= 0; dx++) for (let dz = -1; dz <= 0; dz++) {
-        const x = gx + dx, z = gz + dz, cell = x >= 0 && z >= 0 && x < SX && z < SZ ? basementCells[x * SZ + z] : 0;
-        if (cell && cell < 3) ri = cell;
+    // The lower balconies match the arcs above, beginning beyond the six-room
+    // bank and ending where both basement ramps have finished descending. They
+    // stop at this floor's own tapered cliff edge.
+    basement.balconies = [-1, 1].map((side) => {
+      const room = basement.rooms[side < 0 ? 0 : 5], fromRadius = Math.hypot(room.entrance.x, room.entrance.z);
+      const archHalfAngle = Math.asin((room.corridorWidth / 2 + UNIT * 2) / fromRadius);
+      return {
+        side,
+        startAngle: side < 0 ? -100 * Math.PI / 180 : 63 * Math.PI / 180,
+        endAngle: side < 0 ? -63 * Math.PI / 180 : 100 * Math.PI / 180,
+        roomJoin: { angle: room.angle + side * archHalfAngle, fromRadius, toRadius: 14.25 },
+        radius: undersideRadiusAt(basement.floor),
+        openingRadius: undersideRadiusAt(basement.ceiling),
+        floor: basement.floor,
+        ceiling: basement.ceiling
+      };
+    });
+    basement.connectors = [];
+    const basementRoutes = basement.ramps, basementCommon = 3;
+    for (let gx = 0; gx < SX; gx++) {
+      const x = (gx + 0.5) * UNIT + ORIGIN.x;
+      for (let gz = 0; gz < SZ; gz++) { if (due(slice, 63)) yield* pause(slice);
+        const z = (gz + 0.5) * UNIT + ORIGIN.z, cell = gx * SZ + gz, radius = Math.hypot(x, z), angle = Math.atan2(x, -z);
+        for (const balcony of basement.balconies) { if (tops[cell] !== NONE && radius < balcony.radius && insideBalcony(balcony, radius, angle)) basementCells[cell] = basementCommon; }
       }
-      if (!ri) continue;
-      sampleRamp(basement.ramps[ri - 1], gx * UNIT + ORIGIN.x, gz * UNIT + ORIGIN.z, rampProbe);
-      basementHeights[gx * (SZ + 1) + gz] = rampProbe.floor;
     }
-    for (let gx = 0; gx < SX; gx++) for (let gz = 0; gz < SZ; gz++) {
+    // Slopes use the same two triangles per voxel as their support queries.
+    for (let gx = 0; gx <= SX; gx++) { yield* pause(slice); for (let gz = 0; gz <= SZ; gz++) {
+      let ri = 0;
+      for (let dx = -1; dx <= 0; dx++) { for (let dz = -1; dz <= 0; dz++) {
+        const x = gx + dx, z = gz + dz, cell = x >= 0 && z >= 0 && x < SX && z < SZ ? basementCells[x * SZ + z] : 0;
+        if (cell && cell < basementCommon) ri = cell;
+      } }
+      if (!ri) continue;
+      sampleRamp(basementRoutes[ri - 1], gx * UNIT + ORIGIN.x, gz * UNIT + ORIGIN.z, rampProbe);
+      basementHeights[gx * (SZ + 1) + gz] = rampProbe.floor;
+    } }
+    for (let gx = 0; gx < SX; gx++) { yield* pause(slice); for (let gz = 0; gz < SZ; gz++) {
       const cell = gx * SZ + gz, ri = basementCells[cell];
       if (!ri) continue;
       const x = gx * UNIT + ORIGIN.x, z = gz * UNIT + ORIGIN.z, i = gx * (SZ + 1) + gz;
-      const a = ri < 3 ? basementHeights[i] : basement.floor, b = ri < 3 ? basementHeights[i + 1] : basement.floor, c = ri < 3 ? basementHeights[i + SZ + 2] : basement.floor, d = ri < 3 ? basementHeights[i + SZ + 1] : basement.floor;
+      const a = ri < basementCommon ? basementHeights[i] : basement.floor, b = ri < basementCommon ? basementHeights[i + 1] : basement.floor, c = ri < basementCommon ? basementHeights[i + SZ + 2] : basement.floor, d = ri < basementCommon ? basementHeights[i + SZ + 1] : basement.floor;
       const low = Math.min(a, b, c, d), high = Math.max(a, b, c, d), sloped = high - low > 1e-9;
       const floor = sloped ? Math.floor(low / UNIT) * UNIT - UNIT : low, ceiling = Math.ceil((high + HEADQUARTERS_HEIGHT) / UNIT) * UNIT;
       carveHeadquartersColumn(gx, gz, floor, ceiling, true);
       basementCavities[cell] = encodeCavity(HEADQUARTERS_CAVE, floor, ceiling, 64);
-      if (ri === 3) basementCells[cell] = 0;
+      if (ri === basementCommon) basementCells[cell] = 0;
       if (!sloped) continue;
       const v = rampGeometry.verts.length / 3;
+      const cutawayFloorChannel = ri + 1;
+      const cutawayFloorStation = 1 + Math.round(clamp(basementStations[cell] / basementRoutes[ri - 1].length, 0, 1) * 254);
       rampGeometry.verts.push(x, a, z, x, b, z + UNIT, x + UNIT, c, z + UNIT, x + UNIT, d, z);
       basementCollision[cell] = (rampGeometry.faces.length << 2) | 2;
-      rampGeometry.faces.push({ i: [v, v + 1, v + 2], color: PALETTE[P.floor], emissive: 0, headquartersBasementRamp: ri }, { i: [v, v + 2, v + 3], color: PALETTE[P.floor], emissive: 0, headquartersBasementRamp: ri });
-    }
+      rampGeometry.faces.push({ i: [v, v + 1, v + 2], color: PALETTE[P.floor], emissive: 0, headquartersBasementRamp: ri, cutawayFloorChannel, cutawayFloorStation },
+        { i: [v, v + 2, v + 3], color: PALETTE[P.floor], emissive: 0, headquartersBasementRamp: ri, cutawayFloorChannel, cutawayFloorStation });
+    } }
+    // The wider openings expose the outer edge of each lower ramp. Continue
+    // its visible sides down to the carved support instead of leaving slivers
+    // of sky between the smooth ramp and its stepped voxel base.
+    for (let gx = 0; gx < SX; gx++) { yield* pause(slice); for (let gz = 0; gz < SZ; gz++) {
+      const cell = gx * SZ + gz, ri = basementCells[cell];
+      if (!ri || ri >= basementCommon) continue;
+      const x = gx * UNIT + ORIGIN.x, z = gz * UNIT + ORIGIN.z, i = gx * (SZ + 1) + gz;
+      const corners = [[x, basementHeights[i], z], [x, basementHeights[i + 1], z + UNIT], [x + UNIT, basementHeights[i + SZ + 2], z + UNIT], [x + UNIT, basementHeights[i + SZ + 1], z]];
+      const base = (((basementCavities[cell] >> 4) & 63) - 64) * UNIT;
+      const cutawayFloorChannel = ri + 1;
+      const cutawayFloorStation = 1 + Math.round(clamp(basementStations[cell] / basementRoutes[ri - 1].length, 0, 1) * 254);
+      const neighbors = [gx ? basementCells[cell - SZ] : 0, gz + 1 < SZ ? basementCells[cell + 1] : 0, gx + 1 < SX ? basementCells[cell + SZ] : 0, gz ? basementCells[cell - 1] : 0];
+      for (let edge = 0; edge < 4; edge++) {
+        if (neighbors[edge] === ri) continue;
+        const a = corners[edge], b = corners[(edge + 1) % 4];
+        if (a[1] <= base + 1e-7 && b[1] <= base + 1e-7) continue;
+        const v = rampGeometry.verts.length / 3;
+        rampGeometry.verts.push(a[0], a[1], a[2], a[0], base, a[2], b[0], base, b[2], b[0], b[1], b[2]);
+        rampGeometry.faces.push({ i: [v, v + 1, v + 2, v + 3], color: PALETTE[P.stoneDark], emissive: 0, headquartersBasementRampSkirt: ri, cutawayFloorChannel, cutawayFloorStation });
+      }
+    } }
+    for (const balcony of basement.balconies) { carveBalconyOpening(balcony); }
     // Central shaft opens through the underside leaving a broad walking ring; two shallow voxel steps bevel its
     // mouth, and render faces and footing use those same cells, with no decorative collision lip.
     const holeGX0 = Math.floor((basementHole.x - basementHole.mouthRadius - UNIT - ORIGIN.x) / UNIT), holeGX1 = Math.ceil((basementHole.x + basementHole.mouthRadius + UNIT - ORIGIN.x) / UNIT);
     const holeGZ0 = Math.floor((basementHole.z - basementHole.mouthRadius - UNIT - ORIGIN.z) / UNIT), holeGZ1 = Math.ceil((basementHole.z + basementHole.mouthRadius + UNIT - ORIGIN.z) / UNIT);
     const basementFloorGy = SURFACE + Math.round(basement.floor / UNIT) - 1;
-    for (let gx = holeGX0; gx <= holeGX1; gx++) for (let gz = holeGZ0; gz <= holeGZ1; gz++) {
+    for (let gx = holeGX0; gx <= holeGX1; gx++) { yield* pause(slice); for (let gz = holeGZ0; gz <= holeGZ1; gz++) {
       const x = (gx + 0.5) * UNIT + ORIGIN.x, z = (gz + 0.5) * UNIT + ORIGIN.z, radius = Math.hypot(x - basementHole.x, z - basementHole.z);
       if (radius >= basementHole.mouthRadius + UNIT) continue;
       if (radius >= basementHole.mouthRadius) { grid.set(gx, basementFloorGy, gz, P.stoneDark); continue; }
       const shaft = radius < basementHole.radius;
       const floor = basement.floor - Math.min(basementHole.rimDepth, Math.ceil((basementHole.mouthRadius - radius) / UNIT) * UNIT);
       const bottomGy = shaft ? 0 : SURFACE + Math.round(floor / UNIT);
-      for (let gy = bottomGy; gy <= basementFloorGy; gy++) grid.set(gx, gy, gz, 0);
+      for (let gy = bottomGy; gy <= basementFloorGy; gy++) { grid.set(gx, gy, gz, 0); }
       if (!shaft) {
         grid.set(gx, bottomGy - 1, gz, P.stoneDark);
         basementCavities[gx * SZ + gz] = encodeCavity(HEADQUARTERS_CAVE, floor, basement.ceiling, 64);
       }
-    }
+    } }
     // Window openings cut through the cliff, with solid stone below each sill.
     const headquartersWindows = [];
-    for (const ramp of headquartersRamps) {
-      for (const index of [18, 30, 43]) {
-        const sample = ramp.samples[index], angle = Math.atan2(sample.x, -sample.z);
-        headquartersWindows.push({ kind: "ramp", x: sample.x, z: sample.z, floor: sample.y, y: sample.y + 2, sill: Math.ceil((sample.y + 1.05) / UNIT) * UNIT, angle, width: 3, height: 1.75 });
+    for (let rampIndex = 0; rampIndex < headquartersRamps.length; rampIndex++) {
+      const ramp = headquartersRamps[rampIndex];
+      for (const sampleIndex of [18, 30, 43]) {
+        const sample = ramp.samples[sampleIndex], angle = Math.atan2(sample.x, -sample.z);
+        headquartersWindows.push({ kind: "ramp", cutawayChannel: rampIndex, cutawayStation: sample.s,
+          cutawayCeiling: Math.ceil((sample.y + 3.5) / UNIT) * UNIT,
+          x: sample.x, z: sample.z, floor: sample.y, y: sample.y + 2, sill: Math.ceil((sample.y + 1.05) / UNIT) * UNIT, angle, width: 3, height: 1.75 });
       }
     }
-    for (const ramp of basement.ramps) {
+    for (let routeIndex = 0; routeIndex < basement.ramps.length; routeIndex++) {
+      const ramp = basement.ramps[routeIndex];
       for (const sampleIndex of [42, 56, 72]) {
         const sample = ramp.samples[sampleIndex], angle = Math.atan2(sample.x, -sample.z), sill = Math.ceil((sample.y + 1.15) / UNIT) * UNIT, height = 1.75;
-        headquartersWindows.push({ kind: "ramp", basement: true, rampIndex: ramp.index, sampleIndex, station: sample.s, x: sample.x, z: sample.z, floor: sample.y, y: sill + height / 2, sill, angle, width: 3, height });
+        headquartersWindows.push({ kind: "ramp", basement: true, rampIndex: ramp.index, sampleIndex, station: sample.s,
+          cutawayChannel: routeIndex + 2, cutawayStation: sample.s,
+          cutawayCeiling: Math.ceil((sample.y + HEADQUARTERS_HEIGHT + UNIT) / UNIT) * UNIT,
+          x: sample.x, z: sample.z, floor: sample.y, y: sill + height / 2, sill, angle, width: 3, height });
       }
     }
     for (const room of [...headquartersRooms, ...basement.rooms]) {
@@ -876,6 +1200,8 @@
     const panoramaAngle = (panoramaStart + panoramaEnd) / 2, panoramaRadius = headquartersGallery.radius - UNIT;
     headquartersWindows.push({ kind: "panorama", x: Math.sin(panoramaAngle) * panoramaRadius, z: -Math.cos(panoramaAngle) * panoramaRadius, floor: HEADQUARTERS_FLOOR, y: HEADQUARTERS_FLOOR + 2.125, sill: HEADQUARTERS_FLOOR + 1, angle: panoramaAngle, startAngle: panoramaStart, endAngle: panoramaEnd, radius: panoramaRadius, width: panoramaRadius * (panoramaEnd - panoramaStart), height: 2.25 });
     const windowCuts = new Map(), windowColumns = new Array(SX * SZ), windowGeometry = { verts: [], faces: [], lines: [] };
+    let windowCutawayChannels = new Uint8Array(SX * SZ), windowCutawayStations = new Float32Array(SX * SZ), windowCutawayBottoms = new Float32Array(SX * SZ);
+    const birdseyeWindowMask = new Uint8Array(SX * SZ), birdseyeWindowTops = new Float32Array(SX * SZ * 2).fill(-Infinity);
     const windowSightIds = new Map(), windowSightExact = new Map(), windowSightValues = [], windowSightIndices = [];
     const windowFlareWidth = 2, windowFlareHeight = 1.3;
     for (const [index, window] of headquartersWindows.entries()) {
@@ -885,27 +1211,27 @@
       let edge = start + UNIT;
       // Size the flare against this window's actual shell including top and bottom edges, not the island's nominal
       // maximum radius.
-      for (let radius = start; radius <= 31; radius += UNIT / 2) for (let y = window.sill - windowFlareHeight; y <= window.sill + window.height + windowFlareHeight; y += UNIT) {
+      for (let radius = start; radius <= 31; radius += UNIT / 2) { yield* pause(slice); for (let y = window.sill - windowFlareHeight; y <= window.sill + window.height + windowFlareHeight; y += UNIT) {
         if (grid.has(Math.floor((sx * radius - ORIGIN.x) / UNIT), Math.floor((y - ORIGIN.y) / UNIT), Math.floor((sz * radius - ORIGIN.z) / UNIT))) edge = radius + UNIT;
-      }
+      } }
       let innerRadius = start;
       if (window.kind === "ramp") {
         // Window marker sits on the ramp centerline; keep its rectangular opening unchanged through the corridor,
         // then flare past the real voxel wall at every corner of that opening.
-        for (let across = -window.width / 2; across <= window.width / 2 + 1e-7; across += UNIT / 2) for (const y of [window.sill + 0.025, window.y, window.sill + window.height - 0.025]) {
+        for (let across = -window.width / 2; across <= window.width / 2 + 1e-7; across += UNIT / 2) { yield* pause(slice); for (const y of [window.sill + 0.025, window.y, window.sill + window.height - 0.025]) {
           for (let radius = start; radius <= edge; radius += UNIT / 4) {
             const x = sx * radius - sz * across, z = sz * radius + sx * across;
             if (!grid.has(Math.floor((x - ORIGIN.x) / UNIT), Math.floor((y - ORIGIN.y) / UNIT), Math.floor((z - ORIGIN.z) / UNIT))) continue;
             innerRadius = Math.max(innerRadius, radius + UNIT * Math.SQRT2 / 2);
             break;
           }
-        }
+        } }
       }
       window.flare = { edge, innerRadius, horizontal: windowFlareWidth, vertical: windowFlareHeight, frusta: [] };
     }
     // Keep rock between neighbouring mouths and stacked levels: the inner frame is fixed, only the exterior
     // reveal widens.
-    for (let i = 0; i < headquartersWindows.length; i++) for (let j = i + 1; j < headquartersWindows.length; j++) {
+    for (let i = 0; i < headquartersWindows.length; i++) { for (let j = i + 1; j < headquartersWindows.length; j++) {
       const a = headquartersWindows[i], b = headquartersWindows[j], radius = Math.min(a.flare.edge, b.flare.edge);
       const angle = Math.abs(Math.atan2(Math.sin(a.angle - b.angle), Math.cos(a.angle - b.angle)));
       const aw = a.kind === "panorama" ? radius * (a.endAngle - a.startAngle) : a.width;
@@ -919,8 +1245,29 @@
         const room = Math.max(0, (vertical - 0.75) / 2);
         a.flare.vertical = Math.min(a.flare.vertical, room); b.flare.vertical = Math.min(b.flare.vertical, room);
       }
-    }
+    } }
+    // Keep the exact columns each authored frustum touches. Ramp apertures join
+    // their route reveal; room apertures remove only the fitted lintel band for
+    // their own underground level instead of using a rectangular proxy cut.
+    const recordWindowCutaway = (window, column) => {
+      if (window.kind === "room" || window.kind === "panorama") {
+        const level = window.basement ? 1 : 0;
+        window.birdseyeCutawayLevel = level;
+        window.birdseyeCutawayColumns = (window.birdseyeCutawayColumns || 0) + 1;
+        birdseyeWindowMask[column] |= 1 << level;
+        birdseyeWindowTops[level * SX * SZ + column] = Math.max(birdseyeWindowTops[level * SX * SZ + column], window.sill + window.height);
+      }
+      if (window.cutawayChannel === undefined) return;
+      const channel = window.cutawayChannel, owner = windowCutawayChannels[column] - 1;
+      const stronger = owner < 0 || channel < 2 && owner >= 2;
+      if (!stronger && (owner !== channel || window.cutawayStation >= windowCutawayStations[column])) return;
+      windowCutawayChannels[column] = channel + 1;
+      windowCutawayStations[column] = window.cutawayStation;
+      windowCutawayBottoms[column] = window.cutawayCeiling;
+    };
     const cutColumn = (window, planes, lower, upper, gx, gz, x, z, cx, cz) => {
+      const column = gx * SZ + gz;
+      let recorded = false;
       for (let gy = Math.max(0, Math.floor((lower - ORIGIN.y) / UNIT)); gy < Math.min(SY, Math.ceil((upper - ORIGIN.y) / UNIT)); gy++) {
         const id = grid.index(gx, gy, gz), prior = windowCuts.get(id), color = prior ? prior.color : data[id];
         if (!color) continue;
@@ -932,6 +1279,7 @@
           if (mid + reach > 1e-8) whollyInside = false;
         }
         if (outside) continue;
+        if (!recorded) { recordWindowCutaway(window, column); recorded = true; }
         if (whollyInside) { data[id] = 0; windowCuts.delete(id); continue; }
         const remaining = [];
         for (const fragment of prior ? prior.fragments : [cutCube(x, y, z, UNIT)]) {
@@ -968,7 +1316,10 @@
         // quantized wall edge.
         const planes = [[-sx, 0, -sz, -start], [sx, 0, sz, end], [tx - horizontal * sx, 0, tz - horizontal * sz, half - horizontal * start], [-tx - horizontal * sx, 0, -tz - horizontal * sz, half - horizontal * start], [-vertical * sx, -1, -vertical * sz, -window.sill - vertical * start], [-vertical * sx, 1, -vertical * sz, window.sill + window.height - vertical * start]];
         window.flare.frusta.push({ angle, start, end, half, horizontal, vertical, planes, inner });
-        const lower = window.sill - vertical * (end - start), upper = window.sill + window.height + vertical * (end - start);
+        const lower = window.sill - vertical * (end - start);
+        // Keep basement flares below the upper slab without shortening a ramp's
+        // original aperture, whose sill can sit above the basement room floor.
+        const upper = Math.min(window.sill + window.height + vertical * (end - start), window.basement ? Math.max(basement.ceiling, window.sill + window.height) : Infinity);
         // The footprint test below passes only inside this rectangle; one spare column absorbs rounding.
         const reach = half + horizontal * (end - start) + UNIT;
         const spanX = Math.abs(tx) * reach, spanZ = Math.abs(tz) * reach;
@@ -976,11 +1327,11 @@
         const minZ = Math.min((start - UNIT) * sz, (end + UNIT) * sz) - spanZ, maxZ = Math.max((start - UNIT) * sz, (end + UNIT) * sz) + spanZ;
         const gx0 = Math.max(0, Math.floor((minX - ORIGIN.x) / UNIT) - 2), gx1 = Math.min(SX - 1, Math.ceil((maxX - ORIGIN.x) / UNIT) + 1);
         const gz0 = Math.max(0, Math.floor((minZ - ORIGIN.z) / UNIT) - 2), gz1 = Math.min(SZ - 1, Math.ceil((maxZ - ORIGIN.z) / UNIT) + 1);
-        for (let gx = gx0; gx <= gx1; gx++) for (let gz = gz0; gz <= gz1; gz++) {
+        for (let gx = gx0; gx <= gx1; gx++) { yield* pause(slice); for (let gz = gz0; gz <= gz1; gz++) {
           const x = gx * UNIT + ORIGIN.x, z = gz * UNIT + ORIGIN.z, cx = x + UNIT / 2, cz = z + UNIT / 2;
           if (cx * sx + cz * sz < start - UNIT || cx * sx + cz * sz > end + UNIT || Math.abs(cx * tx + cz * tz) > half + horizontal * (end - start) + UNIT) continue;
           cutColumn(window, planes, lower, upper, gx, gz, x, z, cx, cz);
-        }
+        } }
       }
     }
     const flatAt = (points, axis, value, offset) => {
@@ -1067,7 +1418,8 @@
         for (let i = 1; i < polygon.points.length - 1; i += 5) {
           const indices = [offset];
           for (let k = i; k < Math.min(i + 6, polygon.points.length); k++) indices.push(offset + k);
-          windowGeometry.faces.push({ i: indices, color: PALETTE[cut.color], emissive: 0, headquartersWindowReveal: polygon.reveal, windowIndex: polygon.windowIndex, matrixCave: cut.matrixCave, matrixLocalGlyphSurface: cut.matrixCave !== 0 });
+          windowGeometry.faces.push({ i: indices, color: PALETTE[cut.color], emissive: 0, headquartersWindowReveal: polygon.reveal,
+            windowIndex: polygon.windowIndex, cutawayColumn: column, matrixCave: cut.matrixCave, matrixLocalGlyphSurface: cut.matrixCave !== 0 });
         }
       }
       const sightOffset = windowSightIndices.length;
@@ -1081,11 +1433,11 @@
     for (const cut of windowCuts.values()) {
       const column = cut.gx * SZ + cut.gz;
       if (!windowColumns[column]) windowColumns[column] = [];
-      for (const polygons of cut.fragments) addFragment(cut, polygons, column, windowGeometry, fragmentPool);
+      for (const polygons of cut.fragments) { yield* pause(slice); addFragment(cut, polygons, column, windowGeometry, fragmentPool); }
     }
     // Pieces view one shared vertex and index buffer instead of each owning two small allocations.
     const vertexPool = new Float64Array(fragmentPool.vertices), trianglePool = new Uint16Array(fragmentPool.triangles), pieces = fragmentPool.pieces;
-    for (let n = 0; n < pieces.length; n += 5) {
+    for (let n = 0; n < pieces.length; n += 5) { if (due(slice, 63)) yield* pause(slice);
       pieces[n].vertices = vertexPool.subarray(pieces[n + 1], pieces[n + 2]);
       pieces[n].triangles.i = trianglePool.subarray(pieces[n + 3], pieces[n + 4]);
     }
@@ -1098,17 +1450,17 @@
     const surface = new Float32Array(SX * SZ);
     const land = new Uint8Array(SX * SZ);
     for (let gx = 0; gx < SX; gx++) {
-      for (let gz = 0; gz < SZ; gz++) {
+      for (let gz = 0; gz < SZ; gz++) { if (due(slice, 63)) yield* pause(slice);
         const column = (gx * SY) * SZ + gz;
         let gy = 0;
-        while (gy < SY && !data[column + gy * SZ]) gy++;
+        while (gy < SY && !data[column + gy * SZ]) { gy++; }
         if (gy === SY) continue;
-        while (gy < SY && data[column + gy * SZ]) gy++;
+        while (gy < SY && data[column + gy * SZ]) { gy++; }
         const i = gx * SZ + gz;
         height[i] = (gy - SURFACE) * UNIT;
         land[i] = 1;
         let top = SY;
-        while (top > gy && !data[column + (top - 1) * SZ]) top--;
+        while (top > gy && !data[column + (top - 1) * SZ]) { top--; }
         surface[i] = (top - SURFACE) * UNIT;
       }
     }
@@ -1286,6 +1638,50 @@
       }
       return true;
     };
+    const hullBox = new Float64Array(24), hullRamp = new Float64Array(18);
+    const hullClearAt = (vertices) => {
+      let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+      for (let i = 0; i < vertices.length; i += 3) {
+        minX = Math.min(minX, vertices[i]); maxX = Math.max(maxX, vertices[i]);
+        minY = Math.min(minY, vertices[i + 1]); maxY = Math.max(maxY, vertices[i + 1]);
+        minZ = Math.min(minZ, vertices[i + 2]); maxZ = Math.max(maxZ, vertices[i + 2]);
+      }
+      const gx0 = Math.max(0, Math.floor((minX - ORIGIN.x) / UNIT)), gx1 = Math.min(SX - 1, Math.floor((maxX - ORIGIN.x) / UNIT));
+      const gz0 = Math.max(0, Math.floor((minZ - ORIGIN.z) / UNIT)), gz1 = Math.min(SZ - 1, Math.floor((maxZ - ORIGIN.z) / UNIT));
+      const gy0 = Math.max(0, Math.floor((minY - ORIGIN.y) / UNIT)), gy1 = Math.min(SY - 1, Math.floor((maxY - ORIGIN.y) / UNIT));
+      for (let gx = gx0; gx <= gx1; gx++) for (let gz = gz0; gz <= gz1; gz++) {
+        const cell = gx * SZ + gz, base = gx * SY * SZ + gz;
+        for (let gy = gy0; gy <= gy1; gy++) if (data[base + gy * SZ]) {
+          for (let corner = 0; corner < 8; corner++) {
+            const at = corner * 3;
+            hullBox[at] = (gx + (corner & 1)) * UNIT + ORIGIN.x;
+            hullBox[at + 1] = (gy + ((corner >> 1) & 1)) * UNIT + ORIGIN.y;
+            hullBox[at + 2] = (gz + ((corner >> 2) & 1)) * UNIT + ORIGIN.z;
+          }
+          if (BL.convex.hullsOverlap(hullBox, vertices)) return false;
+        }
+        const pieces = windowColumns[cell];
+        if (pieces) for (const piece of pieces) if (minY < piece.maxY && maxY > piece.minY
+          && BL.convex.hullsOverlap(piece.vertices, vertices)) return false;
+        for (let layer = 0; layer < 2; layer++) {
+          const range = layer ? basementCollision[cell] : rampCollision[cell];
+          const floor = layer ? (((basementCavities[cell] >> 4) & 63) - 64) * UNIT : (((lowerCavities[cell] >> 4) & 63) - 32) * UNIT;
+          if (!range || maxY <= floor) continue;
+          for (let n = 0; n < (range & 3); n++) {
+            const face = geometry.faces[rampFaceOffset + (range >>> 2) + n], verts = geometry.verts;
+            if (Math.max(verts[face.i[0] * 3 + 1], verts[face.i[1] * 3 + 1], verts[face.i[2] * 3 + 1]) <= minY) continue;
+            for (let k = 0; k < 3; k++) {
+              const at = k * 3, v = face.i[k] * 3;
+              hullRamp[at] = hullRamp[at + 9] = verts[v];
+              hullRamp[at + 1] = verts[v + 1]; hullRamp[at + 10] = floor;
+              hullRamp[at + 2] = hullRamp[at + 11] = verts[v + 2];
+            }
+            if (BL.convex.hullsOverlap(hullRamp, vertices)) return false;
+          }
+        }
+      }
+      return true;
+    };
     const ceilingAt = (x, y, z, radius = 0) => {
       const gx0 = Math.max(0, Math.floor((x - radius - ORIGIN.x) / UNIT)), gx1 = Math.min(SX - 1, Math.floor((x + radius - ORIGIN.x) / UNIT));
       const gz0 = Math.max(0, Math.floor((z - radius - ORIGIN.z) / UNIT)), gz1 = Math.min(SZ - 1, Math.floor((z + radius - ORIGIN.z) / UNIT));
@@ -1384,6 +1780,13 @@
       const i = pathColumn(x, z);
       return i >= 0 && paths[i] === 1;
     };
+    const isGrassAt = (x, z, y = surfaceAt(x, z)) => {
+      const i = column(x, z);
+      if (i < 0 || !land[i] || isPath(x, z) || Math.abs(y - surfaceAt(x, z)) > UNIT + 1e-7) return false;
+      const gy = Math.round((surface[i] - ORIGIN.y) / UNIT) - 1;
+      const material = data[(Math.floor(i / SZ) * SY + gy) * SZ + i % SZ];
+      return material === P.grass || material === P.grassLight || material === P.grassDark;
+    };
     const onLand = (x, z) => {
       const i = column(x, z);
       return i >= 0 && land[i] === 1;
@@ -1408,11 +1811,11 @@
         const a = samples[n - 1], b = samples[n], dx = b.x - a.x, dz = b.z - a.z, length2 = dx * dx + dz * dz;
         const gx0 = Math.max(0, Math.floor((Math.min(a.x, b.x) - PATH_HALF - ORIGIN.x) / PATH_UNIT)), gx1 = Math.min(PX - 1, Math.floor((Math.max(a.x, b.x) + PATH_HALF - ORIGIN.x) / PATH_UNIT));
         const gz0 = Math.max(0, Math.floor((Math.min(a.z, b.z) - PATH_HALF - ORIGIN.z) / PATH_UNIT)), gz1 = Math.min(PZ - 1, Math.floor((Math.max(a.z, b.z) + PATH_HALF - ORIGIN.z) / PATH_UNIT));
-        for (let gx = gx0; gx <= gx1; gx++) for (let gz = gz0; gz <= gz1; gz++) {
+        for (let gx = gx0; gx <= gx1; gx++) { yield* pause(slice); for (let gz = gz0; gz <= gz1; gz++) {
           const x = (gx + 0.5) * PATH_UNIT + ORIGIN.x, z = (gz + 0.5) * PATH_UNIT + ORIGIN.z;
           const t = clamp(((x - a.x) * dx + (z - a.z) * dz) / length2, 0, 1);
           if ((x - a.x - dx * t) ** 2 + (z - a.z - dz * t) ** 2 < PATH_HALF * PATH_HALF && Math.hypot(x, z) >= MASTER_PATH_CENTER) masterPaths[gx * PZ + gz] = 1;
-        }
+        } }
       }
     }
     let masterPathCount = 0, masterHashValue = 2166136261;
@@ -1424,6 +1827,7 @@
       if (!path && meadow[c] && r >= MASTER_PATH_CENTER) {
         const theta = Math.atan2(wx, -wz);
         for (const s of spokes) {
+          if (s === south && r >= MEADOW) continue;
           const d = theta - s.angle;
           const lateral = r * Math.atan2(Math.sin(d), Math.cos(d));
           const t = (r - MASTER_PATH_CENTER) / (MEADOW - MASTER_PATH_CENTER);
@@ -1438,14 +1842,17 @@
       if (!path && !meadow[c]) {
         if (Math.abs(wx) < PASS_HALF && wz < 0) {
           path = Math.abs(wx - pass.wobble * Math.sin((r - MEADOW) / (-GATE_Z - MEADOW) * Math.PI * 2)) < TRAIL_HALF;
-        } else if (Math.abs(wx) < PATH_HALF && wz > 0) path = true;
+        }
       }
+      if (wz >= MEADOW && Math.abs(wx - southStairCenter(wz)) < PATH_HALF) path = true;
       for (let n = 0; n < headquartersFronts.length && !headquartersPath; n++) {
         const front = headquartersFronts[n], dx = wx - front.center.x, dz = wz - front.center.z;
         const across = dx * front.tangent.x + dz * front.tangent.z;
         const depth = dx * -front.tangent.z + dz * front.tangent.x;
         headquartersPath = Math.abs(across) < front.halfLength && Math.abs(depth) < front.halfWidth && tops[c] === 0;
       }
+      const timechainAlong = wx * TIMECHAIN_X + wz * TIMECHAIN_Z;
+      if (timechainAlong >= MASTER_PATH_CENTER && Math.abs(wx * TIMECHAIN_Z - wz * TIMECHAIN_X - timechainStairCenter(timechainAlong)) < PATH_HALF) path = true;
       if (headquartersPath) {
         path = true;
       }
@@ -1457,7 +1864,7 @@
     };
     for (let gx = 0; gx < PX; gx++) {
       const wx = (gx + 0.5) * PATH_UNIT + ORIGIN.x;
-      for (let gz = 0; gz < PZ; gz++) masterCell(gx, gz, wx);
+      for (let gz = 0; gz < PZ; gz++) { if (due(slice, 63)) yield* pause(slice); masterCell(gx, gz, wx); }
     }
     // Column scaffolding is done: null it out so the closures the island hands out do not retain it.
     masterPaths = tops = surfaces = bottoms = null;
@@ -1497,8 +1904,9 @@
       const quantized = Math.ceil((requestedInner - 1e-9) / PATH_UNIT) * PATH_UNIT;
       if (quantized === ringInner) return false;
       ringInner = quantized;
-      ringCenter = ringInner + PATH_HALF;
-      ringOuter = ringCenter + PATH_HALF;
+      // Keep loading beside the pile, with a separate passing lane outside it.
+      ringCenter = ringInner + RING_HALF;
+      ringOuter = ringCenter + RING_HALF;
       pathVisible = ringOuter <= MEADOW;
       pathCount = 0;
       ringPathCount = 0;
@@ -1526,6 +1934,16 @@
         writePathTile(i, wx, wz);
         visibleSpokeCount++;
       }
+      // Each tile carries which of its eight neighbours are road (1 +x, 2 -x, 4 +z, 8 -z, then 16 +x+z, 32 -x+z,
+      // 64 +x-z, 128 -x-z) in its first parameter, stored as 1 + mask (road tiles are never emissive, so the slot is
+      // free); the road shader cuts each tile along the marching-squares half line of those neighbours, which turns
+      // the tile staircase into straight diagonals and curves.
+      for (let t = 0; t < pathCount; t++) {
+        const o = t * 20, gx = Math.floor((pathData[o + 12] - ORIGIN.x) / PATH_UNIT), gz = Math.floor((pathData[o + 14] - ORIGIN.z) / PATH_UNIT);
+        const at = (x, z) => x >= 0 && z >= 0 && x < PX && z < PZ && paths[x * PZ + z] === 1;
+        pathData[o + 16] = 1 + (at(gx + 1, gz) ? 1 : 0) + (at(gx - 1, gz) ? 2 : 0) + (at(gx, gz + 1) ? 4 : 0) + (at(gx, gz - 1) ? 8 : 0)
+          + (at(gx + 1, gz + 1) ? 16 : 0) + (at(gx - 1, gz + 1) ? 32 : 0) + (at(gx + 1, gz - 1) ? 64 : 0) + (at(gx - 1, gz - 1) ? 128 : 0);
+      }
       pathVersion++;
       pathReflows++;
       return true;
@@ -1549,6 +1967,31 @@
       }
       return false;
     };
+    // The rainforest approach has no painted path, but all three terrace cuts must stay clear of scenery.
+    const overlapsStairs = (x, z, radius) => {
+      if (z + radius >= STAIR_TERRACE.from - 1 && Math.abs(x) <= STAIR_TERRACE.halfWidth + STAIR_TERRACE.blend + radius) return true;
+      const timechainAlong = x * TIMECHAIN_X + z * TIMECHAIN_Z;
+      if (timechainAlong + radius >= TIMECHAIN.from - 1
+        && Math.abs(x * TIMECHAIN_Z - z * TIMECHAIN_X) <= TIMECHAIN.halfWidth + TIMECHAIN.blend + radius) return true;
+      const poolAlong = x * POOL_X + z * POOL_Z;
+      return poolAlong + radius >= POOL_APPROACH.from - 1 && poolAlong - radius <= POOL_APPROACH.to + 0.5
+        && Math.abs(x * POOL_Z - z * POOL_X) <= POOL_APPROACH.halfWidth + POOL_APPROACH.blend + radius;
+    };
+    const stairAt = (x, y, z) => {
+      const i = column(x, z);
+      if (i < 0) return false;
+      if (rampCells[i] && Math.abs(rampFloorAt(x, z) - y) <= UNIT + 0.05) return true;
+      if (Math.abs(surfaceAt(x, z) - y) > UNIT + 0.05) return false;
+      if (Math.abs(x) < PASS_HALF && z < -MEADOW && z > -RADIUS) return true;
+      if (z >= STAIR_TERRACE.from - 1 && z <= STAIR_TERRACE.from + STAIR_TERRACE.top * 2 + 1
+        && Math.abs(x) < STAIR_TERRACE.halfWidth + STAIR_TERRACE.blend) return true;
+      const timechainAlong = x * TIMECHAIN_X + z * TIMECHAIN_Z;
+      if (timechainAlong >= TIMECHAIN.from - 1 && timechainAlong <= TIMECHAIN.from + TIMECHAIN.top * 2 + 1
+        && Math.abs(x * TIMECHAIN_Z - z * TIMECHAIN_X) < TIMECHAIN.halfWidth + TIMECHAIN.blend) return true;
+      const poolAlong = x * POOL_X + z * POOL_Z;
+      return poolAlong >= POOL_APPROACH.from - 1 && poolAlong <= POOL_APPROACH.to + 0.5
+        && Math.abs(x * POOL_Z - z * POOL_X) < POOL_APPROACH.halfWidth + POOL_APPROACH.blend;
+    };
     // Walking centerlines reuse the rendered path mask's bends; master curves stay fixed and navigation clips
     // them to the growing ring.
     const centerlines = spokes.map((s) => {
@@ -1565,15 +2008,21 @@
     for (const north of [true, false]) {
       const points = [];
       for (let r = MEADOW; r <= RADIUS; r += PATH_UNIT) {
-        const x = north ? pass.wobble * Math.sin((r - MEADOW) / (-GATE_Z - MEADOW) * Math.PI * 2) : 0;
+        const x = north ? pass.wobble * Math.sin((r - MEADOW) / (-GATE_Z - MEADOW) * Math.PI * 2) : southStairCenter(r);
         points.push({ x, z: (north ? -1 : 1) * Math.sqrt(r * r - x * x) });
       }
       centerlines.push(points);
     }
+    const timechainPath = [];
+    for (let r = MASTER_PATH_CENTER; r <= RADIUS; r += PATH_UNIT) {
+      const across = timechainStairCenter(r);
+      timechainPath.push({ x: TIMECHAIN_X * r + TIMECHAIN_Z * across, z: TIMECHAIN_Z * r - TIMECHAIN_X * across });
+    }
+    centerlines.push(timechainPath);
     for (const front of headquartersFronts) {
       centerlines.push(front.connector);
       const points = [];
-      for (let n = -front.halfLength + PATH_HALF; n <= front.halfLength - PATH_HALF; n += PATH_UNIT) points.push({ x: front.center.x + front.tangent.x * n, z: front.center.z + front.tangent.z * n });
+      for (let n = -front.halfLength + PATH_HALF; n <= front.halfLength - PATH_HALF; n += PATH_UNIT) { points.push({ x: front.center.x + front.tangent.x * n, z: front.center.z + front.tangent.z * n }); }
       centerlines.push(points);
     }
     const path = {
@@ -1594,6 +2043,8 @@
         get ringInnerRadius() { return ringInner; },
         get ringCenterRadius() { return ringCenter; },
         get ringOuterRadius() { return ringOuter; },
+        get ringLoadingRadius() { return ringInner + RING_HALF / 2; },
+        get ringTrafficRadius() { return ringOuter - RING_HALF / 2; },
         get quantizedRadius() { return ringInner; },
         get visibleInstanceCount() { return pathCount; },
         masterSpokeCellCount: masterPathCount,
@@ -1606,23 +2057,123 @@
         get reflowCount() { return pathReflows; }
       }
     };
-    const inside = (ROOM.from + ROOM.to) / 2;
-    const mouths = frames.map((f) => ({ id: f.id, clock: f.clock, angle: f.angle, x: f.x, z: f.z, ry: facing(f.axis), floorY: 0, inside: { x: f.x + f.ox * inside, z: f.z + f.oz * inside }, apron: { x: f.x - f.ox * 1.6, z: f.z - f.oz * 1.6 } }));
-    const geometry = gridGeometry(grid, { unit: UNIT, palette: PALETTE, origin: ORIGIN, matrixCaves, floorRooms: [...headquartersRooms, ...basement.rooms] });
+    const mouths = frames.map((f) => {
+      const room = f.room || ROOM, inside = (room.from + room.to) / 2;
+      return { id: f.id, clock: f.clock, angle: f.angle, x: f.x, z: f.z, ry: facing(f.axis), floorY: 0, room,
+        inside: { x: f.x + f.ox * inside, z: f.z + f.oz * inside }, apron: { x: f.x - f.ox * 1.6, z: f.z - f.oz * 1.6 } };
+    });
+    // One byte per authored route records progress along the exact carved
+    // ceiling footprint. Main-ramp cells win at physical overlaps so cutting
+    // the lower route can never erase the upper ramp drawn above it.
+    const cutawayPathKeys = new Uint32Array(SX * SZ);
+    const cutawayPathBottoms = new Float32Array(SX * SZ);
+    const cutawayPathLengths = new Float32Array(4);
+    const cutawayPathInitial = new Uint8Array(4);
+    const cutawayPathBottomByStation = new Float32Array(4 * 256).fill(Infinity);
+    for (let channel = 0; channel < 2; channel++) {
+      const ramp = headquartersRamps[channel];
+      cutawayPathLengths[channel] = ramp.length;
+      // At rest expose the authored mouth depth, independently of the shorter
+      // planar floor throat used by movement. The first side window
+      // joins the opening as the player enters instead of already being
+      // visible from the lawn. Travel can extend this endpoint but never
+      // contract it below the same world-space length.
+      const initial = Math.min(ramp.length, ramp.cutawayEntranceLength);
+      cutawayPathInitial[channel] = 1 + Math.round(initial / ramp.length * 254);
+    }
+    for (let channel = 2; channel < 4; channel++) {
+      const ramp = basement.ramps[channel - 2];
+      cutawayPathLengths[channel] = ramp.length;
+      // One ramp-width of opening exposes the label and complete downhill
+      // arrow, with a short margin before the retained ceiling begins.
+      cutawayPathInitial[channel] = 1 + Math.round(Math.min(ramp.length, ramp.width) / ramp.length * 254);
+    }
+    for (let cell = 0; cell < cutawayPathKeys.length; cell++) { if (due(slice, 63)) yield* pause(slice);
+      let channel = -1, station = 0, cavity = 0, offset = 32;
+      const upper = rampCells[cell];
+      if (upper && upper <= 2) {
+        channel = upper - 1; station = rampStations[cell]; cavity = lowerCavities[cell];
+      } else {
+        const lower = basementCells[cell];
+        if (lower && lower < 3) { channel = lower + 1; station = basementStations[cell]; cavity = basementCavities[cell]; offset = 64; }
+      }
+      if (channel < 0 || !cavity) continue;
+      const length = cutawayPathLengths[channel] || 1;
+      const encoded = 1 + Math.round(clamp(station / length, 0, 1) * 254);
+      const bottom = ((cavity >> 10) - offset) * UNIT;
+      cutawayPathKeys[cell] = (encoded << (channel * 8)) >>> 0;
+      cutawayPathBottoms[cell] = bottom;
+      cutawayPathBottomByStation[channel * 256 + encoded] = Math.min(cutawayPathBottomByStation[channel * 256 + encoded], bottom);
+    }
+    // A ramp window's throat and flare continue beyond the centre corridor.
+    // Extend the same route through only those authored cut columns so removing
+    // the roof reveals the real aperture. Existing upper-ramp ownership wins;
+    // a main-level window likewise wins over a lower route at a stacked cell.
+    for (let cell = 0; cell < windowCutawayChannels.length; cell++) { if (due(slice, 63)) yield* pause(slice);
+      const owner = windowCutawayChannels[cell];
+      if (!owner) continue;
+      const channel = owner - 1, current = cutawayPathKeys[cell];
+      let currentChannel = -1;
+      for (let index = 0; index < 4; index++) { if (current >>> (index * 8) & 255) { currentChannel = index; break; } }
+      if (currentChannel >= 0 && (currentChannel < 2 || channel >= 2)) continue;
+      const length = cutawayPathLengths[channel] || 1;
+      const encoded = 1 + Math.round(clamp(windowCutawayStations[cell] / length, 0, 1) * 254);
+      const bottom = windowCutawayBottoms[cell];
+      cutawayPathKeys[cell] = (encoded << (channel * 8)) >>> 0;
+      cutawayPathBottoms[cell] = bottom;
+      cutawayPathBottomByStation[channel * 256 + encoded] = Math.min(cutawayPathBottomByStation[channel * 256 + encoded], bottom);
+    }
+    windowCutawayChannels = windowCutawayStations = windowCutawayBottoms = null;
+    // A ramp only descends, but several voxel columns can quantize into one
+    // station while other station bytes have no cell centre. Carry the lowest
+    // known ceiling forward so the global floor scan advances one continuous
+    // prefix instead of reopening a small skipped band.
+    for (let channel = 0; channel < 4; channel++) {
+      let bottom = Infinity;
+      for (let station = 1; station <= 255; station++) {
+        const at = channel * 256 + station;
+        if (Number.isFinite(cutawayPathBottomByStation[at])) bottom = Math.min(bottom, cutawayPathBottomByStation[at]);
+        cutawayPathBottomByStation[at] = bottom;
+      }
+    }
+    const cutawayPaths = { keys: cutawayPathKeys, bottoms: cutawayPathBottoms, lengths: cutawayPathLengths,
+      initial: cutawayPathInitial, bottomByStation: cutawayPathBottomByStation, width: SX, height: SZ, unit: UNIT, origin: ORIGIN,
+      ramps: [headquartersRamps[0], headquartersRamps[1], basement.ramps[0], basement.ramps[1]] };
+    const birdseyeWindowCeilings = new Float32Array([HEADQUARTERS_CEILING, basement.ceiling]);
+    const geometry = yield* gridGeometrySteps(grid, { unit: UNIT, palette: PALETTE, origin: ORIGIN, matrixCaves,
+      floorRooms: [...headquartersRooms, ...basement.rooms], cutawayPathKeys, cutawayPathBottoms, cutawayWindowMask: birdseyeWindowMask,
+      cutawayWindowTops: birdseyeWindowTops, cutawayWindowCeilings: birdseyeWindowCeilings }, slice);
+    let roofOpening = null;
+    const roofMouth = roofHole && mouths.find(m => m.id === roofHole.id);
+    if (roofMouth) {
+      const sr = Math.sin(roofMouth.ry), cr = Math.cos(roofMouth.ry);
+      const x = roofMouth.x + cr * roofHole.x + sr * roofHole.z, z = roofMouth.z - sr * roofHole.x + cr * roofHole.z;
+      const top = surfaceAt(x, z);
+      roofOpening = { x, z, radius: roofHole.radius, y: top - 0.4, bottom: top - 1.3 };
+      // A centimetre of clearance hides the voxel edge behind the rotated iron liner.
+      BL.models.cutCylinder(geometry, x, z, roofHole.radius + 0.01, roofOpening.bottom);
+    }
     const rampOffset = geometry.verts.length / 3;
     const rampFaceOffset = geometry.faces.length;
-    for (const v of rampGeometry.verts) geometry.verts.push(v);
-    for (const face of rampGeometry.faces) geometry.faces.push({ ...face, i: face.i.map((i) => i + rampOffset) });
+    for (const v of rampGeometry.verts) { if (due(slice, 63)) yield* pause(slice); geometry.verts.push(v); }
+    for (const face of rampGeometry.faces) { if (due(slice, 63)) yield* pause(slice); geometry.faces.push({ ...face, i: face.i.map((i) => i + rampOffset) }); }
     const windowOffset = geometry.verts.length / 3;
-    for (const value of windowGeometry.verts) geometry.verts.push(value);
-    for (const face of windowGeometry.faces) geometry.faces.push({ ...face, i: face.i.map((i) => i + windowOffset) });
-    const rockCaves = compactCaveLabels(matrixCaves, geometry, grid, UNIT, ORIGIN);
+    for (const value of windowGeometry.verts) { if (due(slice, 63)) yield* pause(slice); geometry.verts.push(value); }
+    for (const face of windowGeometry.faces) { if (due(slice, 63)) yield* pause(slice);
+      const { cutawayColumn, ...renderFace } = face, pathKey = cutawayPathKeys[cutawayColumn];
+      geometry.faces.push({ ...renderFace, i: face.i.map((i) => i + windowOffset),
+        cutawayPathKey: pathKey, cutawayPathBottom: pathKey ? cutawayPathBottoms[cutawayColumn] : undefined,
+        cutawayWindowMask: birdseyeWindowMask[cutawayColumn], cutawayWindowColumn: birdseyeWindowMask[cutawayColumn] ? cutawayColumn : -1 });
+    }
+    // Every ramp and window is appended before indices are compacted for the consumers below.
+    yield* compactVerticesSteps(geometry, slice);
+    const rockCaves = yield* compactCaveLabelsSteps(matrixCaves, geometry, grid, UNIT, ORIGIN, slice);
     matrixCaves = null;
     // Four half-spaces give each continuous ramp's triangular footprint and sloping top; its column supplies the
     // fifth, horizontal bottom plane.
     const rampFaceCount = rampGeometry.faces.length;
     const rampSight = new Float64Array(rampFaceCount * 17);
-    for (let i = 0; i < rampFaceCount; i++) {
+    for (let i = 0; i < rampFaceCount; i++) { if (due(slice, 63)) yield* pause(slice);
       const face = geometry.faces[rampFaceOffset + i], v = geometry.verts, a = face.i[0] * 3, b = face.i[1] * 3, c = face.i[2] * 3, at = i * 17;
       const ax = v[a], ay = v[a + 1], az = v[a + 2], bx = v[b] - ax, by = v[b + 1] - ay, bz = v[b + 2] - az, cx = v[c] - ax, cy = v[c + 1] - ay, cz = v[c + 2] - az;
       const determinant = bx * cz - bz * cx;
@@ -1754,10 +2305,33 @@
     // A point ray visits only the voxels it crosses, clipping window fragments and ramp prisms once per column;
     // most columns hold neither, so rays cross them on voxels alone.
     const sightColumnWork = new Uint8Array(SX * SZ);
-    for (let i = 0; i < SX * SZ; i++) if (windowColumns[i] || rampCollision[i] || basementCollision[i]) sightColumnWork[i] = 1;
-    const sightClearAt = (x, y, z, toX, toY, toZ) => {
+    for (let i = 0; i < SX * SZ; i++) { if (due(slice, 63)) yield* pause(slice); if (windowColumns[i] || rampCollision[i] || basementCollision[i]) sightColumnWork[i] = 1; }
+    const sightCacheStats = { queries: 0, hits: 0 };
+    const sightClearAt = (x, y, z, toX, toY, toZ, witness = null, slot = 0) => {
       const dx = toX - x, dy = toY - y, dz = toZ - z;
       if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) < 1e-12) return rockMaterialAt(x, y, z) === null;
+      if (witness) {
+        sightCacheStats.queries++;
+        const at = witness[slot];
+        // Only actual, still-occupied voxels certify a hit. Shrink the cell and require a positive
+        // interval well above the DDA tolerance: tangencies, tiny spans and partial rock fall through.
+        // Rechecking occupancy and the current segment makes this independent of camera/terrain epochs.
+        if (at >= 0 && at < data.length && data[at]) {
+          const gz = at % SZ, gy = Math.floor(at / SZ) % SY, gx = Math.floor(at / (SY * SZ));
+          let enter = 0, exit = 1;
+          for (let axis = 0; axis < 3 && enter < exit; axis++) {
+            const start = axis === 0 ? x : axis === 1 ? y : z, speed = axis === 0 ? dx : axis === 1 ? dy : dz;
+            const min = (axis === 0 ? ORIGIN.x + gx * UNIT : axis === 1 ? ORIGIN.y + gy * UNIT : ORIGIN.z + gz * UNIT) + UNIT * 1e-7, max = min + UNIT * (1 - 2e-7);
+            if (!speed) { if (start <= min || start >= max) exit = enter; }
+            else {
+              const a = (min - start) / speed, b = (max - start) / speed;
+              enter = Math.max(enter, Math.min(a, b)); exit = Math.min(exit, Math.max(a, b));
+            }
+          }
+          if (exit - enter > 1e-7) { sightCacheStats.hits++; return false; }
+        }
+        witness[slot] = -1;
+      }
       let lo = 0, hi = 1;
       for (let axis = 0; axis < 3; axis++) {
         const start = axis === 0 ? x : axis === 1 ? y : z, speed = axis === 0 ? dx : axis === 1 ? dy : dz, min = axis === 0 ? ORIGIN.x : axis === 1 ? ORIGIN.y : ORIGIN.z, max = min + (axis === 0 ? SX : axis === 1 ? SY : SZ) * UNIT;
@@ -1775,7 +2349,10 @@
       for (let step = 0; step < SX + SY + SZ + 3; step++) {
         const end = Math.min(tx, ty, tz, hi), column = gx * SZ + gz;
         if (end > t + 1e-12) {
-          if (data[(gx * SY + gy) * SZ + gz]) return false;
+          if (data[(gx * SY + gy) * SZ + gz]) {
+            if (witness) witness[slot] = (gx * SY + gy) * SZ + gz;
+            return false;
+          }
           if (column !== previousColumn && sightColumnWork[column]) {
             const columnEnd = Math.min(tx, tz, hi), a = y + dy * t, b = y + dy * columnEnd, minY = Math.min(a, b), maxY = Math.max(a, b), pieces = windowColumns[column];
             if (pieces) for (const piece of pieces) {
@@ -1783,8 +2360,10 @@
               if (sightConvexHit(windowSightPlanes, piece.sightOffset, piece.sightCount, x, y, z, dx, dy, dz, t, columnEnd, windowSightRefs)) return false;
             }
             for (let layer = 0; layer < 2; layer++) {
-              const range = layer ? basementCollision[column] : rampCollision[column], base = layer ? (((basementCavities[column] >> 4) & 63) - 64) * UNIT : (((lowerCavities[column] >> 4) & 63) - 32) * UNIT;
-              if (!range || maxY <= base + 1e-9) continue;
+              const range = layer ? basementCollision[column] : rampCollision[column];
+              if (!range) continue;
+              const base = layer ? (((basementCavities[column] >> 4) & 63) - 64) * UNIT : (((lowerCavities[column] >> 4) & 63) - 32) * UNIT;
+              if (maxY <= base + 1e-9) continue;
               const bottom = dy ? (base - y) / dy : 0, start = dy > 0 ? Math.max(t, bottom) : t, finish = dy < 0 ? Math.min(columnEnd, bottom) : columnEnd;
               if (start >= finish - 1e-12) continue;
               for (let n = 0; n < (range & 3); n++) {
@@ -1797,10 +2376,9 @@
           }
         }
         if (end >= hi - 1e-12) break;
-        if (tx <= end + 1e-12) { gx += sx; tx += stepX; }
-        if (ty <= end + 1e-12) { gy += sy; ty += stepY; }
-        if (tz <= end + 1e-12) { gz += sz; tz += stepZ; }
-        if (gx < 0 || gx >= SX || gy < 0 || gy >= SY || gz < 0 || gz >= SZ) break;
+        if (tx <= end + 1e-12) { gx += sx; tx += stepX; if (gx < 0 || gx >= SX) break; }
+        if (ty <= end + 1e-12) { gy += sy; ty += stepY; if (gy < 0 || gy >= SY) break; }
+        if (tz <= end + 1e-12) { gz += sz; tz += stepZ; if (gz < 0 || gz >= SZ) break; }
         t = end;
       }
       return true;
@@ -1875,12 +2453,20 @@
     };
     const built = {
       geometry,
+      roofOpening,
+      // Shared construction data is read-only to rendering. The cap builder
+      // fills only actual solid cells and the continuous window/ramp remnants.
+      cutawaySource: { data, sx: SX, sy: SY, sz: SZ, unit: UNIT, origin: ORIGIN, palette: PALETTE, windows: windowColumns, cutawayPaths,
+        birdseyeWindows: { mask: birdseyeWindowMask, tops: birdseyeWindowTops, ceilings: birdseyeWindowCeilings, levels: 2 },
+        rampGeometry: geometry, rampFaceOffset, rampLayers: [{ ranges: rampCollision, cavities: lowerCavities, offset: 32 }, { ranges: basementCollision, cavities: basementCavities, offset: 64 }] },
       path,
+      cutawayPaths,
       heightAt,
       surfaceAt,
       supportAt,
       clearAt,
       voxelSegmentClearAt,
+      hullClearAt,
       ceilingAt,
       smoothSupportAt,
       cavityAt,
@@ -1892,15 +2478,19 @@
       rockCaveAt,
       rockCaveBytes: rockCaves.bytes,
       sightClearAt,
+      sightCacheStats,
       sightBoxClearAt,
       sightBoxSolidAt,
       sightGrid: new Float64Array([UNIT, ORIGIN.x, ORIGIN.y, ORIGIN.z]),
       sightBytes: rampSight.byteLength + windowSightPlanes.byteLength + windowSightRefs.byteLength,
       windowPiecesAt: (x, z) => windowColumns[column(x, z)],
       isPath,
+      overlapsStairs,
+      stairAt,
+      isGrassAt,
       onLand,
       mouths,
-      headquarters: { caveIndex: HEADQUARTERS_CAVE, floor: HEADQUARTERS_FLOOR, ceiling: HEADQUARTERS_CEILING, rockCover: HEADQUARTERS_ROCK, room: HEADQUARTERS_ROOM, rooms: headquartersRooms, windows: headquartersWindows, windowFragments: windowFragmentCount, windowFaces: windowGeometry.faces.length, gallery: headquartersGallery, ramps: headquartersRamps, fronts: headquartersFronts, basement },
+      headquarters: { caveIndex: HEADQUARTERS_CAVE, floor: HEADQUARTERS_FLOOR, ceiling: HEADQUARTERS_CEILING, rockCover: HEADQUARTERS_ROCK, room: HEADQUARTERS_ROOM, rooms: headquartersRooms, windows: headquartersWindows, windowFragments: windowFragmentCount, windowFaces: windowGeometry.faces.length, gallery: headquartersGallery, balconies: headquartersBalconies, ramps: headquartersRamps, fronts: headquartersFronts, basement },
       gate: { x: 0, z: GATE_Z, ry: 0 },
       radius: RADIUS,
       undersideDepth: DEPTH,
@@ -1910,8 +2500,39 @@
       unit: UNIT,
       pathUnit: PATH_UNIT
     };
-    ISLANDS.set(seed, built);
+    // Drop and Orbit use an unperforated island; the hub has the Factory roof opening. Track each key separately
+    // so the games' second full voxel/mesh graph does not stay resident after a return to the hub.
+    // Only the opt-in worker asks for this data record. Every query dependency is explicit; functions never cross
+    // the worker/IndexedDB boundary. Preserve shared array-buffer views and palette/layout object aliases.
+    if (capture) {
+      const hole = { ...basementHole }; delete hole.contains;
+      capture({ version: 1, options: { seed, roofHole }, gridData: data,
+        constants: { UNIT, SX, SY, SZ, PX, PZ, SURFACE, ORIGIN, RADIUS, MEADOW, DEPTH, RING_HALF, PATH_UNIT, PATH_CAPACITY, PATH_LIFT, GATE_Z, PASS_HALF, STAIR_TERRACE, TIMECHAIN, TIMECHAIN_X, TIMECHAIN_Z, POOL_APPROACH, POOL_X, POOL_Z, P, PALETTE, PATH_TILE, UNDER_SPHERE_CENTER, UNDER_SPHERE_RADIUS, HEADQUARTERS_CAVE, HEADQUARTERS_FLOOR, HEADQUARTERS_CEILING, HEADQUARTERS_HEIGHT, HEADQUARTERS_ROCK, HEADQUARTERS_ROOM },
+        cavities, lowerCavities, basementCavities, basementCells, basementHeights, basementCollision, rampCells, rampHeights, rampCollision, frontageCells, height, surface, land, meadow, windowColumns, windowSightPlanes, windowSightRefs, headquartersRamps, headquartersRooms, headquartersWindows, headquartersGallery, headquartersBalconies, headquartersFronts, cutawayPaths, birdseyeWindowMask, birdseyeWindowTops, birdseyeWindowCeilings, geometry, roofOpening, rampFaceOffset, rockCaves, rampSight, sightColumnWork, masterList, masterPathCount, masterPathHash, centerlines, mouths, windowFragmentCount,
+        basement: { ...basement, hole }, windowFaceCount: windowGeometry.faces.length });
+      return built;
+    }
+    const scope = BL.models.track(() => ISLANDS.delete(cacheKey));
+    scope.use();
+    ISLANDS.set(cacheKey, { value: built, scope });
     return built;
   };
-  BL.terrain = { makeGrid, gridGeometry, island, segmentBoxClear, PALETTE, MAX_HEIGHT };
+  const islandSnapshotSteps = function* (options, slice = null) {
+    let snapshot;
+    yield* islandSteps(options, slice, value => { snapshot = value; });
+    return snapshot;
+  };
+  const islandKey = ({ seed = 1, roofHole = null } = {}) => roofHole ? `${seed}:${roofHole.id}:${roofHole.x}:${roofHole.z}:${roofHole.radius}` : seed;
+  const hasIsland = options => ISLANDS.has(islandKey(options));
+  const restoreIslandSnapshot = (snapshot, options) => {
+    const cacheKey = islandKey(options), hit = ISLANDS.get(cacheKey);
+    if (hit) { hit.scope.use(); return hit.value; }
+    if (!snapshot.options || islandKey(snapshot.options) !== cacheKey) throw new Error("Terrain snapshot options differ");
+    const built = BL.terrainSnapshot.create(snapshot);
+    const scope = BL.models.track(() => ISLANDS.delete(cacheKey));
+    scope.use(); ISLANDS.set(cacheKey, { value: built, scope });
+    return built;
+  };
+  const island = (options) => finishBuild(islandSteps(options, null));
+  BL.terrain = { makeGrid, gridGeometry, gridGeometrySteps, compactVertices, compactVerticesSteps, island, islandSteps, islandSnapshotSteps, hasIsland, restoreIslandSnapshot, segmentBoxClear, segmentBoxQueryClear, cutawaySourceFromVox, PALETTE, MAX_HEIGHT, TIMECHAIN, POOL_APPROACH };
 })();

@@ -1,0 +1,185 @@
+{
+  "sourceRevision": "9b7db4d7488f9909fc3d8f1b9e4d988dbb9090a4",
+  "label": "baseline",
+  "deadlineSeconds": 120,
+  "retries": 0,
+  "workloadSha256": "99d226d40710f2ccb06ebb367ca1c91467285045671f5343d877b058b36d09f0",
+  "backgroundBefore": [
+    {
+      "pid": 492,
+      "executable": "trustd",
+      "reportedCpu": 10.7,
+      "observedCpu": 16.1
+    },
+    {
+      "pid": 630,
+      "executable": "coreaudiod",
+      "reportedCpu": 10.7,
+      "observedCpu": 7.5
+    },
+    {
+      "pid": 688,
+      "executable": "trustd",
+      "reportedCpu": 15.8,
+      "observedCpu": 4.9
+    },
+    {
+      "pid": 17627,
+      "executable": "AddressBookSourceSync",
+      "reportedCpu": 36.8,
+      "observedCpu": 13.8
+    },
+    {
+      "pid": 67991,
+      "executable": "com.docker.backend",
+      "reportedCpu": 19.2,
+      "observedCpu": 22.6
+    },
+    {
+      "pid": 91440,
+      "executable": "ecosystemd",
+      "reportedCpu": 33.1,
+      "observedCpu": 48.9
+    }
+  ],
+  "backgroundAfter": [
+    {
+      "pid": 630,
+      "executable": "coreaudiod",
+      "reportedCpu": 35.6,
+      "observedCpu": 18.1
+    },
+    {
+      "pid": 15977,
+      "executable": "contactsd",
+      "reportedCpu": 26.7,
+      "observedCpu": 43.7
+    },
+    {
+      "pid": 17721,
+      "executable": "Google Chrome Helper (GPU)",
+      "reportedCpu": 27.3,
+      "observedCpu": 26.3
+    },
+    {
+      "pid": 17731,
+      "executable": "Google Chrome Helper (Renderer)",
+      "reportedCpu": 60.2,
+      "observedCpu": 58.4
+    },
+    {
+      "pid": 17770,
+      "executable": "node",
+      "reportedCpu": 142.9,
+      "observedCpu": 138.9
+    },
+    {
+      "pid": 19634,
+      "executable": "Spark Desktop Helper (Renderer)",
+      "reportedCpu": 20.6,
+      "observedCpu": 17.4
+    },
+    {
+      "pid": 67991,
+      "executable": "com.docker.backend",
+      "reportedCpu": 26.9,
+      "observedCpu": 23
+    },
+    {
+      "pid": 71369,
+      "executable": "contactsdonationagent",
+      "reportedCpu": 83.2,
+      "observedCpu": 65.3
+    },
+    {
+      "pid": 82806,
+      "executable": "studentd",
+      "reportedCpu": 9.1,
+      "observedCpu": 28.2
+    }
+  ],
+  "terrainCache": null,
+  "witnessBytes": 0,
+  "capturedAt": "2026-10-10T02:31:50.133Z",
+  "suiteSha256": "1a1b1b515c2b058e2eb69bf466d2e1c129cf9eeaafef8804d13457b2e178b557",
+  "pageSha256": "90932cb3e2fd457ea534458bfaccdcde92fd589c261e11475111f0131fde8889",
+  "browser": "Chrome/154.0.8037.99",
+  "cpuProfilerEnabled": false,
+  "rows": [
+    {
+      "name": "wall movement performance: ordinary movement stays responsive at a high-density desktop size",
+      "pass": false,
+      "details": {
+        "fps": 54.02172829662115,
+        "p95": 33.30000000000109,
+        "max": 33.400000000000546,
+        "worst": {
+          "gap": 21.799999952316284,
+          "at": 3949.7999999999993,
+          "updateMs": 2.399999976158142,
+          "renderMs": 3.100000023841858,
+          "overlayMs": 1.7999999523162842,
+          "donated": false
+        },
+        "outlined": 0,
+        "samples": 271,
+        "travel": 3.6146000000000083,
+        "donated": false,
+        "particles": 0,
+        "quality": "high"
+      }
+    },
+    {
+      "name": "wall movement performance: moving behind cave walls during a donation stays responsive at a high-density desktop size",
+      "pass": false,
+      "details": {
+        "fps": 34.28685338383335,
+        "p95": 49.900000000001455,
+        "max": 50.100000000000364,
+        "worst": {
+          "gap": 41.80000001192093,
+          "at": 400,
+          "updateMs": 3.399999976158142,
+          "renderMs": 3.400000035762787,
+          "overlayMs": 34.69999998807907,
+          "donated": false
+        },
+        "outlined": 172,
+        "samples": 172,
+        "travel": 3.3619499999999913,
+        "donated": true,
+        "particles": 26,
+        "quality": "low"
+      }
+    }
+  ],
+  "hot": [],
+  "stats": {
+    "geometries": 637,
+    "registered": 2373,
+    "candidates": 25,
+    "occluders": 787,
+    "cameraOccluders": 210,
+    "limit": 2427198,
+    "nodes": 2373,
+    "owners": 559,
+    "nearOwners": 15,
+    "triangles": 54253,
+    "triangleBytes": 651036,
+    "samples": 182052,
+    "perceptionQueries": 1487,
+    "perceptionCacheHits": 13,
+    "perceptionWitnessHits": 757,
+    "cameraWitnessHits": 0,
+    "cameraCertificates": 3,
+    "boundaryTriangles": 13804784,
+    "boundaryBuilds": 1729,
+    "boundaryEntries": 9931820,
+    "boundaryNodes": 14294115,
+    "boundaryGridBuilds": 694,
+    "boundaryGridQueries": 2272760,
+    "boundaryGridBytes": 511456,
+    "boundaryGridReferences": 121024
+  },
+  "logs": []
+}

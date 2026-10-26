@@ -1,4 +1,18 @@
-// Race tracks: a closed spline becomes a road ribbon, terrain skirt, walls and baked decor in culled sectors.
+// Race tracks: a closed spline becomes a road ribbon, terrain skirt, walls, baked decor and shared foliage in culled sectors.
+//
+// `TRACKS` and `THEMES` hold the definitions. `build` turns a closed Catmull-Rom spline into the road
+// ribbon with curbs, walls and lips before gaps, the terrain skirt in chunks, decor baked per sector,
+// spectators, torches, checkpoints, the grid, item spawns and the minimap; the built track answers
+// `nearest`, `project`, `heightAt`, `surfaceAt` and `roadY`. `build` takes `slots` (a grid slot per
+// racer), `hour` (the bay rolls its `hours`) and `mirror` (`mirrored` flips x, the banks and the wall
+// bits, every gap still downhill; bests live under `<id>-m`).
+//
+// Solid decor kinds carry `solid`, a radius at scale 1, and every placed one goes into the fixed
+// `props` table (`PROP_CAP`), indexed by sector through `sectorProps` and `sectorOf`, for the racers
+// to bounce off; nothing solid stands on the road, its curbs or its shoulder. The skirt keeps an
+// `APRON` flat past the shoulder and climbs into the hills over `APRON_RISE`. The peak rolls
+// snowballs across its ice (`spawns.boulders`, drawn as `raceModels.snowball`). The gorge's lava sits
+// under half bloom with a `seamGlow`.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -19,6 +33,10 @@
   const LIP = 1.7, LIP_SAMPLES = 5, RUNWAY = 45;
   const LOD_FAR = 95;
   const GRID_GAP = 4.6;
+  // The road's flat apron past the shoulder before the skirt climbs into hills, and how far the climb runs.
+  const APRON = 4, APRON_RISE = 12;
+  // Trackside props a racer can hit: one flat table per track, indexed by sector.
+  const PROP_CAP = 1024;
   // SPECTATOR_CAP: the whole crowd is one instanced batch, a single draw however large.
   const SPECTATOR_CAP = 320;
   const LATTICE = 64;
@@ -50,16 +68,57 @@
     geo.verts.push(x, y, z);
     return geo.verts.length / 3 - 1;
   };
+  // A source's shading normals, once per geometry: its explicit `normals` where given, the averaged face normals of
+  // a `smooth` one, zeros (the face's own) otherwise. Baking carries them, so cartoon foliage and rounded rocks keep
+  // their soft shading inside a sector's merged mesh.
+  const NORMALS = new WeakMap();
+  const normalsOf = (geo) => {
+    let out = NORMALS.get(geo);
+    if (out) return out;
+    const v = geo.verts, given = geo.normals;
+    out = new Float32Array(v.length);
+    if (geo.smooth) for (const f of geo.faces) {
+      let nx = 0, ny = 0, nz = 0;
+      for (let k = 0, m = f.i.length; k < m; k++) {
+        const a = f.i[k] * 3, b = f.i[(k + 1) % m] * 3;
+        nx += (v[a + 1] - v[b + 1]) * (v[a + 2] + v[b + 2]);
+        ny += (v[a + 2] - v[b + 2]) * (v[a] + v[b]);
+        nz += (v[a] - v[b]) * (v[a + 1] + v[b + 1]);
+      }
+      for (const idx of f.i) { out[idx * 3] += nx; out[idx * 3 + 1] += ny; out[idx * 3 + 2] += nz; }
+    }
+    for (let i = 0; i < out.length; i += 3) {
+      if (given && (given[i] || given[i + 1] || given[i + 2])) { out[i] = given[i]; out[i + 1] = given[i + 1]; out[i + 2] = given[i + 2]; }
+      const l = Math.hypot(out[i], out[i + 1], out[i + 2]);
+      if (l) { out[i] /= l; out[i + 1] /= l; out[i + 2] /= l; }
+    }
+    NORMALS.set(geo, out);
+    return out;
+  };
   const bake = (out, geo, x, y, z, yaw, s = 1) => {
     const base = out.verts.length / 3, v = geo.verts, c = Math.cos(yaw), sn = Math.sin(yaw);
     for (let i = 0; i < v.length; i += 3) {
       const px = v[i] * s, py = v[i + 1] * s, pz = v[i + 2] * s;
       out.verts.push(x + px * c + pz * sn, y + py, z + pz * c - px * sn);
     }
-    for (const f of geo.faces) out.faces.push({ i: f.i.map((k) => k + base), color: f.color, emissive: f.emissive });
+    if (geo.smooth || geo.normals) {
+      // The sector mesh takes normals from the first shaded piece on; everything before it is padded unset.
+      if (!out.normals) out.normals = [];
+      while (out.normals.length < base * 3) out.normals.push(0);
+      const nv = normalsOf(geo);
+      for (let i = 0; i < nv.length; i += 3) out.normals.push(nv[i] * c + nv[i + 2] * sn, nv[i + 1], nv[i + 2] * c - nv[i] * sn);
+    } else if (out.normals) while (out.normals.length < out.verts.length) out.normals.push(0);
+    // A packed piece gives fresh face records, so baking it never fills its legacy face cache.
+    const packed = BL.compactGeometry?.storageOf(geo);
+    for (let n = 0, count = packed ? packed.count : geo.faces.length; n < count; n++) {
+      const f = packed ? BL.compactGeometry.copyFace(geo, n) : geo.faces[n];
+      out.faces.push({ i: f.i.map((k) => k + base), color: f.color, emissive: f.emissive });
+    }
   };
-  const writeInstance = (data, o, yaw, s, x, y, z, glow = 1) => {
-    const c = Math.cos(yaw) * s, sn = Math.sin(yaw) * s;
+  // cos/sin may come precomputed (a fixed yaw cached by the caller, or 1/0 for an upright one), which is
+  // bit-identical: 1 is cos(0) and 0 is sin(0) exactly, and the products were the same multiply.
+  const writeInstance = (data, o, yaw, s, x, y, z, glow = 1, cos, sin) => {
+    const c = (cos === undefined ? Math.cos(yaw) : cos) * s, sn = (sin === undefined ? Math.sin(yaw) : sin) * s;
     data[o] = c; data[o + 1] = 0; data[o + 2] = -sn; data[o + 3] = 0;
     data[o + 4] = 0; data[o + 5] = s; data[o + 6] = 0; data[o + 7] = 0;
     data[o + 8] = sn; data[o + 9] = 0; data[o + 10] = c; data[o + 11] = 0;
@@ -71,7 +130,7 @@
     const opts = {
       clear: new Float32Array(3), horizon: new Float32Array(3), zenith: new Float32Array(3), sky: new Float32Array(3), ground: new Float32Array(3), sun: new Float32Array(3), direct: new Float32Array(3),
       light: { x: 0.5, y: 0.8, z: 0.2 }, sunDirection: { x: 0, y: 1, z: 0 }, moon: { x: 0, y: 1, z: 0 }, starMatrix: new Float32Array(9), stars: 0, time: 0,
-      lights: new Float32Array(80), lightCount: 0, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 38, bloomStrength: 0.55
+      lights: new Float32Array(80), lightCount: 0, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 38, bloomStrength: 0.55, clouds: 0.42
     };
     daylight.sample(hour, opts, 172, 20);
     // Fog colour is the horizon colour the sky pass paints, so fog fades into the sky.
@@ -80,15 +139,19 @@
     opts.fogFar = hour > 18 ? 230 : 320;
     return opts;
   };
-  const caveOpts = (clear, sky, ground, sun, light) => ({
+  const caveOpts = (clear, sky, ground, sun, light, bloom = 0.85) => ({
     clear: new Float32Array(clear), sky: new Float32Array(sky), ground: new Float32Array(ground), sun: new Float32Array(sun), direct: new Float32Array(sun),
     light, directStrength: 0.9, ambientFloor: 0.26, diffuseFloor: 0.1, shadowStrength: 0.75, shadowFloor: 0.45, shadowBias: 0.003,
-    lights: new Float32Array(80), lightCount: 0, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 38, bloomStrength: 0.85,
+    lights: new Float32Array(80), lightCount: 0, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 38, bloomStrength: bloom,
     fog: new Float32Array(clear), fogNear: 28, fogFar: 125
   });
+  // Solid decor: the radius at scale 1 a racer bounces off. Bushes, grass and bones are soft.
+  const SOLID = { palm: 0.55, lagoonRock: 1.4, lavaRock: 1.3, obsidian: 0.7, pine: 0.55, snowRock: 1.3 };
   const THEMES = {
     bay: {
-      renderOpts: () => skyOpts(9.5),
+      // The bay rolls its hour per load: dawn, morning, noon or late afternoon.
+      renderOpts: (hour = 9.5) => skyOpts(hour),
+      hours: [7.5, 9.5, 12.5, 17.5],
       road: [rgb("#b9a27a"), rgb("#ad9670"), rgb("#c2ab82")], line: rgb("#e9dcb8"), board: [rgb("#9c7040"), rgb("#8f6538")],
       curb: [rgb("#e04a3a"), rgb("#f3efe4")], wall: rgb("#8d857b"), wallTop: rgb("#a39a8f"), slab: rgb("#8c7a5a"), shoulder: rgb("#d8c48e"), seams: null,
       offroad: SURF.sand,
@@ -96,9 +159,9 @@
       height: (n, d) => n * 5 - 1.6,
       ground: (h, n) => h < 0.4 ? mix(rgb("#e0cf9c"), rgb("#d2bf8a"), n) : h < 1.6 ? mix(rgb("#8fb04a"), rgb("#7a9a3c"), n) : mix(rgb("#6f8f3a"), rgb("#5f7a30"), n),
       decor: [
-        { build: (i) => raceModels.palm(i % 3), p: 0.22, near: [3, 16], scale: [0.85, 1.3], big: true },
-        { build: (i) => raceModels.lagoonRock(i % 2), p: 0.05, near: [6, 22], scale: [0.7, 1.1], big: true },
-        { build: (i) => hubModels.bush(i % 3), p: 0.3, near: [2.5, 14], scale: [0.9, 1.4], big: true },
+        { build: (i) => raceModels.palm(i % 3), p: 0.22, near: [3, 16], scale: [0.85, 1.3], big: true, shared: true, solid: SOLID.palm },
+        { build: (i) => raceModels.lagoonRock(i % 2), p: 0.05, near: [6, 22], scale: [0.7, 1.1], big: true, solid: SOLID.lagoonRock },
+        { build: (i) => hubModels.bush(i % 3), p: 0.3, near: [2.5, 14], scale: [0.9, 1.4], big: true, shared: true },
         { build: () => hubModels.grass(), p: 0.9, near: [1.5, 18], scale: [1.2, 2], big: false },
         { build: () => hubModels.flowerTuft(), p: 0.35, near: [2, 12], scale: [1, 1.5], big: false }
       ],
@@ -108,16 +171,17 @@
       banners: [rgb("#f5c542"), rgb("#22c55e")]
     },
     gorge: {
-      renderOpts: () => caveOpts([0.09, 0.03, 0.02], [0.55, 0.32, 0.24], [0.62, 0.24, 0.1], [0.95, 0.6, 0.4], { x: 0.3, y: 0.9, z: -0.2 }),
+      // Fiery, not searing: the lava glows under half bloom and the bounce light is a deep amber.
+      renderOpts: () => caveOpts([0.07, 0.025, 0.02], [0.42, 0.26, 0.2], [0.42, 0.18, 0.09], [0.9, 0.58, 0.4], { x: 0.3, y: 0.9, z: -0.2 }, 0.5),
       road: [rgb("#5a524d"), rgb("#4e4743"), rgb("#635a55")], line: rgb("#8d7d70"), board: [rgb("#5c5048"), rgb("#4f453e")],
-      curb: [rgb("#ff6a1e"), rgb("#3a3330")], wall: rgb("#4a413a"), wallTop: rgb("#6a5f57"), slab: rgb("#2b2724"), shoulder: rgb("#3a3330"), seams: rgb("#ff6a1e"),
+      curb: [rgb("#d9551c"), rgb("#3a3330")], wall: rgb("#4a413a"), wallTop: rgb("#6a5f57"), slab: rgb("#2b2724"), shoulder: rgb("#3a3330"), seams: rgb("#d9551c"), seamGlow: 0.45,
       offroad: SURF.ash,
-      floor: { level: 0.3, color: rgb("#ff5a12"), emissive: 1, deep: rgb("#ffa02a") },
+      floor: { level: 0.3, color: rgb("#d9480f"), emissive: 0.5, deep: rgb("#e0842a") },
       height: (n, d) => n * 12 - 5.4,
       ground: (h, n) => h < 1 ? mix(rgb("#3a3330"), rgb("#2b2724"), n) : h < 3.5 ? mix(rgb("#4a413a"), rgb("#3a3330"), n) : mix(rgb("#5e5449"), rgb("#4a413a"), n),
       decor: [
-        { build: (i) => raceModels.lavaRock(i % 3), p: 0.16, near: [3, 16], scale: [0.8, 1.3], big: true },
-        { build: (i) => raceModels.obsidianSpike(i % 3), p: 0.14, near: [3, 14], scale: [0.8, 1.4], big: true },
+        { build: (i) => raceModels.lavaRock(i % 3), p: 0.16, near: [3, 16], scale: [0.8, 1.3], big: true, solid: SOLID.lavaRock },
+        { build: (i) => raceModels.obsidianSpike(i % 3), p: 0.14, near: [3, 14], scale: [0.8, 1.4], big: true, solid: SOLID.obsidian },
         { build: () => raceModels.bones(), p: 0.12, near: [2, 10], scale: [0.9, 1.3], big: false },
         { build: (i) => hubModels.rock(i % 2), p: 0.2, near: [2, 12], scale: [0.7, 1.2], big: false }
       ],
@@ -136,8 +200,8 @@
       height: (n, d) => n * 14 - 3,
       ground: (h, n) => h < 1 ? mix(rgb("#dfe9f0"), rgb("#cfdde8"), n) : h < 6 ? mix(rgb("#eef3f7"), rgb("#dfe9f0"), n) : mix(rgb("#f6f9fb"), rgb("#eef3f7"), n),
       decor: [
-        { build: (i) => raceModels.pine(i % 3), p: 0.24, near: [3, 18], scale: [0.9, 1.4], big: true },
-        { build: (i) => raceModels.snowRock(i % 2), p: 0.08, near: [4, 20], scale: [0.7, 1.2], big: true },
+        { build: (i) => raceModels.pine(i % 3), p: 0.24, near: [3, 18], scale: [0.9, 1.4], big: true, solid: SOLID.pine },
+        { build: (i) => raceModels.snowRock(i % 2), p: 0.08, near: [4, 20], scale: [0.7, 1.2], big: true, solid: SOLID.snowRock },
         { build: (i) => raceModels.iceSpike(i % 3), p: 0.14, near: [2.5, 12], scale: [0.8, 1.3], big: false },
         { build: (i) => raceModels.crystal(i % 3), p: 0.1, near: [2.5, 10], scale: [0.8, 1.4], big: false, surface: SURF.crystal }
       ],
@@ -188,6 +252,8 @@
     }
   ];
   const trackById = (id) => TRACKS.find((t) => t.id === id) || TRACKS[0];
+  // The same track in the mirror: x and the banks flip, the wall bits swap sides, every gap still runs downhill.
+  const mirrored = (points) => points.map((p) => ({ ...p, x: -p.x, bank: -p.bank, wall: ((p.wall & 1) << 1) | ((p.wall & 2) >> 1) }));
 
   const catmull = (p0, p1, p2, p3, t) => {
     const t2 = t * t, t3 = t2 * t;
@@ -267,18 +333,38 @@
     return out;
   };
 
-  const build = (def, { renderer, detail = 1, rain = false, spectators: showSpectators = true }) => {
+  const build = (def, { renderer, detail = 1, rain = false, spectators: showSpectators = true, slots = 8, hour = null, mirror = false }) => {
     const theme = THEMES[def.theme];
     // Rain on outdoor tracks, snow on the peak, never under a ceiling (the gorge).
     const wet = rain && !theme.ceiling;
     const precipitation = wet ? (def.theme === "peak" ? "snow" : "rain") : null;
     const rand = mulberry32(def.seed);
     const noise = valueNoise(mulberry32(def.seed + 1));
-    const S = sampleSpline(def.points);
+    const S = sampleSpline(mirror ? mirrored(def.points) : def.points);
+    // Every trackside prop a racer can hit, in bake order, so each sector owns one run of the table.
+    const props = { x: new Float32Array(PROP_CAP), z: new Float32Array(PROP_CAP), r: new Float32Array(PROP_CAP), count: 0 };
+    const sectorProps = [];
     const n = S.count;
     const root = createNode();
     const geometries = [];
+    // The renderer batches ordinary nodes sharing a geometry and culls each placement. Keeping the
+    // detailed foliage shared avoids copying hundreds of thousands of faces into the sector meshes.
+    const sharedDecor = new Map();
+    const decorGeometry = (geo) => {
+      let shared = sharedDecor.get(geo);
+      if (!shared) {
+        // Baking kept these props still, so retain that appearance when sharing their original mesh.
+        shared = { ...geo, sway: 0 };
+        sharedDecor.set(geo, shared);
+        geometries.push(shared);
+      }
+      return shared;
+    };
     const keep = (geo) => {
+      if (geo.normals) {
+        while (geo.normals.length < geo.verts.length) geo.normals.push(0);
+        geo.normals = Float32Array.from(geo.normals);
+      }
       geometries.push(geo);
       return geo;
     };
@@ -381,7 +467,8 @@
         // Over a gap or bridge the skirt drops below whatever crosses it; elsewhere it lerps up to meet the road.
         if (gap) h = Math.min(h, floor.level - 1.2);
         else if (bridge) h = Math.min(h, road - 1.6, floor.level + 0.6 * smooth((d - half - 3) / 8) + (h - floor.level) * smooth((d - half - 3) / 8));
-        else h = lerp(road, h + (noise(wx / 4 + 900, wz / 4 + 900) - 0.5) * 0.5, smooth((d - half - SHOULDER - 1) / 7));
+        // A flat apron past the shoulder, then the skirt climbs into the hills over APRON_RISE: no ledge at the road's edge.
+        else h = lerp(road, h + (noise(wx / 4 + 900, wz / 4 + 900) - 0.5) * 0.5, smooth((d - half - SHOULDER - APRON) / APRON_RISE));
         const k = gx * nz + gz;
         if (h < floor.level) {
           heights[k] = floor.level;
@@ -444,7 +531,7 @@
     for (let s = 0; s < sectorCount; s++) {
       const from = s * perSector, to = Math.min(n, from + perSector);
       if (from >= n) break;
-      const road = geometry(), big = geometry(), small = geometry(), walls = big;
+      const road = geometry(), big = geometry(), small = geometry(), walls = big, decor = [];
       road.castShadow = false;
       const rows = [];
       for (let i = from; i <= to; i++) {
@@ -499,7 +586,7 @@
           const y = roadY(k, 0, lat) + ROAD_LIFT + CROWN + 0.006;
           const v0 = vert(road, o.x - rightX(k) * 0.04, y, o.z - rightZ(k) * 0.04), v1 = vert(road, o.x + rightX(k) * 0.04, y, o.z + rightZ(k) * 0.04);
           const v2 = vert(road, o.x + dx + rightX(k) * 0.04, y, o.z + dz + rightZ(k) * 0.04), v3 = vert(road, o.x + dx - rightX(k) * 0.04, y, o.z + dz - rightZ(k) * 0.04);
-          quad(road, v0, v3, v2, v1, theme.seams, 0.9);
+          quad(road, v0, v3, v2, v1, theme.seams, theme.seamGlow || 0.9);
         }
         for (const side of [-1, 1]) {
           const e0 = edgeAt(k, side), e1 = edgeAt(q, side);
@@ -565,6 +652,7 @@
           }
         }
       }
+      const propFrom = props.count;
       for (let i = from; i < to; i += 2) {
         const k = i % n;
         if (S.surface[k] === SURF.gap) continue;
@@ -574,14 +662,24 @@
           for (const side of [-1, 1]) {
             if (rand() > kind.p * detail) continue;
             if (S.wall[k] & (side < 0 ? 1 : 2) && kind.near[0] < 2.5) continue;
+            const scale = lerp(kind.scale[0], kind.scale[1], rand()), solid = (kind.solid || 0) * scale;
             const off = side * (halfAt(k) + CURB_W + SHOULDER * 0.5 + lerp(kind.near[0], kind.near[1], rand()));
             const x = S.x[k] + rightX(k) * off + (rand() - 0.5) * STEP, z = S.z[k] + rightZ(k) * off + (rand() - 0.5) * STEP;
             const j = nearest(x, z, k);
             const dx = x - S.x[j], dz = z - S.z[j];
-            if (Math.abs(dx * rightX(j) + dz * rightZ(j)) < halfAt(j) + CURB_W + SHOULDER * 0.5 + kind.near[0] * 0.5 && Math.hypot(dx, dz) < halfAt(j) + CURB_W + kind.near[0] * 0.5) continue;
+            // Nothing solid stands on the road, its curbs or its shoulder, whichever sample it is nearest.
+            if (Math.abs(dx * rightX(j) + dz * rightZ(j)) < halfAt(j) + CURB_W + SHOULDER * 0.5 + kind.near[0] * 0.5 + solid && Math.hypot(dx, dz) < halfAt(j) + CURB_W + kind.near[0] * 0.5 + solid) continue;
             if (waterAt(x, z)) continue;
             const y = groundAt(x, z) - 0.08;
-            bake(kind.big ? big : small, kind.build(Math.floor(rand() * 3)), x, y, z, rand() * Math.PI * 2, lerp(kind.scale[0], kind.scale[1], rand()));
+            const geo = kind.build(Math.floor(rand() * 3)), yaw = rand() * Math.PI * 2;
+            if (kind.shared) decor.push(createNode({ geometry: decorGeometry(geo), position: { x, y, z }, rotation: { x: 0, y: yaw, z: 0 }, scale: { x: scale, y: scale, z: scale } }));
+            else bake(kind.big ? big : small, geo, x, y, z, yaw, scale);
+            if (solid > 0 && props.count < PROP_CAP) {
+              props.x[props.count] = x;
+              props.z[props.count] = z;
+              props.r[props.count] = solid;
+              props.count++;
+            }
           }
         }
         if (theme.water && (i & 3) === 0) {
@@ -614,10 +712,13 @@
       cy /= to - from;
       const node = createNode();
       const nodes = { road: createNode({ geometry: keep(road) }), big: createNode({ geometry: keep(big) }), small: createNode({ geometry: keep(small) }) };
-      addChild(node, nodes.road, nodes.big, nodes.small);
+      addChild(node, nodes.road, nodes.big, nodes.small, ...decor);
       addChild(root, node);
-      sectors.push({ node, nodes, from, to, cx, cy, cz });
+      sectors.push({ node, nodes, from, to, cx, cy, cz, propFrom, propTo: props.count });
+      sectorProps.push(propFrom);
     }
+    sectorProps.push(props.count);
+    const sectorOf = (i) => Math.min(sectors.length - 1, Math.floor(((i % n) + n) % n / perSector));
     const terrainNodes = [];
     for (let cx = 0; cx < nx - 1; cx += CHUNK) {
       for (let cz = 0; cz < nz - 1; cz += CHUNK) {
@@ -638,6 +739,8 @@
             const color = wet ? mix(floor.color, floor.deep, tone) : theme.ground((h00 + h11) * 0.5 - floor.level, tone);
             const a = vert(geo, wx, h00, wz), b = vert(geo, wx + CELL, h10, wz), c = vert(geo, wx + CELL, h11, wz + CELL), d = vert(geo, wx, h01, wz + CELL);
             quad(geo, a, d, c, b, color, wet ? floor.emissive : 0);
+            // Standing water ripples and a lava floor flows: the renderer's surface materials.
+            if (wet) geo.faces[geo.faces.length - 1].water = floor.emissive >= 0.4 ? "lava" : true;
           }
         }
         if (!geo.faces.length) continue;
@@ -700,7 +803,7 @@
       }
       geometries.push(raceModels.torchStand(), raceModels.torchFlame());
     }
-    const spectators = { node: null, x: new Float32Array(SPECTATOR_CAP), y: new Float32Array(SPECTATOR_CAP), z: new Float32Array(SPECTATOR_CAP), yaw: new Float32Array(SPECTATOR_CAP), phase: new Float32Array(SPECTATOR_CAP), count: 0 };
+    const spectators = { node: null, x: new Float32Array(SPECTATOR_CAP), y: new Float32Array(SPECTATOR_CAP), z: new Float32Array(SPECTATOR_CAP), yaw: new Float32Array(SPECTATOR_CAP), cos: new Float32Array(SPECTATOR_CAP), sin: new Float32Array(SPECTATOR_CAP), phase: new Float32Array(SPECTATOR_CAP), count: 0 };
     const standsGeo = geometry();
     if (theme.spectators) {
       const spots = [];
@@ -736,12 +839,27 @@
         spectators.x[i] = spots[i].x;
         spectators.y[i] = spots[i].y;
         spectators.z[i] = spots[i].z;
+        // The yaw is fixed at spawn, so its cos and sin are too - computed from the stored float32 yaw,
+        // the very value the per-frame write used to re-derive them from.
         spectators.yaw[i] = spots[i].yaw;
+        spectators.cos[i] = Math.cos(spectators.yaw[i]);
+        spectators.sin[i] = Math.sin(spectators.yaw[i]);
         spectators.phase[i] = rand() * Math.PI * 2;
       }
       spectators.count = count;
       if (count) {
+        // One world sphere around every stand: the figure is under 1 unit tall and hops 0.18, so 1.5 covers it.
+        let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
+        for (let i = 0; i < count; i++) {
+          x0 = Math.min(x0, spectators.x[i]); x1 = Math.max(x1, spectators.x[i]);
+          y0 = Math.min(y0, spectators.y[i]); y1 = Math.max(y1, spectators.y[i]);
+          z0 = Math.min(z0, spectators.z[i]); z1 = Math.max(z1, spectators.z[i]);
+        }
+        const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, cz = (z0 + z1) / 2;
+        let r2 = 0;
+        for (let i = 0; i < count; i++) r2 = Math.max(r2, (spectators.x[i] - cx) ** 2 + (spectators.y[i] - cy) ** 2 + (spectators.z[i] - cz) ** 2);
         spectators.node = createNode({ geometry: raceModels.spectator(def.seed % 3), instanceData: new Float32Array(SPECTATOR_CAP * 20), instanceCount: count, instanceVersion: 0, fixedInstanceCapacity: true });
+        spectators.node.cullSphere = new Float32Array([cx, cy, cz, Math.sqrt(r2) + 1.5]);
         addChild(root, spectators.node);
         geometries.push(spectators.node.geometry);
       }
@@ -758,16 +876,17 @@
       if (c > 0) for (let tries = 0; tries < n && (gapAhead(i) || S.surface[i] === SURF.gap); tries++) i = (i - 1 + n) % n;
       checkpoints[c] = i;
     }
+    // A grid slot for every racer, two abreast down the start straight.
     const grid = [];
-    for (let slot = 0; slot < 8; slot++) {
+    for (let slot = 0; slot < Math.max(8, slots); slot++) {
       const row = Math.floor(slot / 2), col = slot % 2 ? 1 : -1;
       const i = (n - 3 - Math.round(row * GRID_GAP / STEP) + n) % n;
       const lat = col * halfAt(i) * 0.42;
       grid.push({ x: S.x[i] + rightX(i) * lat, y: slabY(i, 0, lat), z: S.z[i] + rightZ(i) * lat, heading: Math.atan2(S.tx[i], S.tz[i]), index: i });
     }
     const spawns = { bananas: [], crates: [], pads: [], boulders: [] };
-    const every = Math.floor(n / 30);
-    for (let i = every, k = 0; i < n - 4; i += every, k++) {
+    const every = Math.floor(n / 30), gridBack = grid[grid.length - 1].index - 3;
+    for (let i = every, k = 0; i < gridBack; i += every, k++) {
       if (S.surface[i] === SURF.gap || S.surface[(i + 2) % n] === SURF.gap) continue;
       const lane = ((k % 3) - 1) * halfAt(i) * 0.45;
       const at = (lat) => ({ x: S.x[i] + rightX(i) * lat, y: slabY(i, 0, lat), z: S.z[i] + rightZ(i) * lat, heading: Math.atan2(S.tx[i], S.tz[i]), index: i });
@@ -792,6 +911,17 @@
     }
     if (def.hazard === "lava") {
       for (const i of [Math.floor(n * 0.32), Math.floor(n * 0.71)]) spawns.boulders.push({ index: i, x: S.x[i], z: S.z[i], y: slabY(i, 0, 0), heading: Math.atan2(S.tx[i], S.tz[i]), half: halfAt(i) });
+    } else if (def.hazard === "void") {
+      // Snowballs roll across the peak's ice, a third and two thirds of the way along it.
+      let first = -1, last = -1;
+      for (let i = 0; i < n; i++) if (S.surface[i] === SURF.ice) {
+        if (first < 0) first = i;
+        last = i;
+      }
+      if (first >= 0) for (const f of [0.33, 0.66]) {
+        const i = first + Math.floor((last - first) * f);
+        spawns.boulders.push({ index: i, x: S.x[i], z: S.z[i], y: slabY(i, 0, 0), heading: Math.atan2(S.tx[i], S.tz[i]), half: halfAt(i) });
+      }
     }
     // Minimap polyline, normalised to a unit square.
     const mapPts = [];
@@ -802,7 +932,7 @@
       out.y = (z - minZ - (spanZ - span) / 2) / span;
       return out;
     };
-    const renderOpts = theme.renderOpts();
+    const renderOpts = theme.renderOpts(hour === null ? undefined : hour);
     if (wet) {
       const grey = precipitation === "snow" ? [0.42, 0.46, 0.54] : [0.5, 0.53, 0.58];
       for (const key of ["horizon", "zenith", "clear", "sky"]) if (renderOpts[key]) for (let i = 0; i < 3; i++) renderOpts[key][i] = renderOpts[key][i] * 0.35 + grey[i] * 0.65;
@@ -814,17 +944,18 @@
       renderOpts.shadowStrength = 0.35;
       renderOpts.stars = 0;
       renderOpts.bloomStrength = 0.35;
+      renderOpts.clouds = 0.85;
       renderOpts.fogNear = 40;
       renderOpts.fogFar = 170;
     }
     const slipAt = (surface) => Math.min(1, SURFACE_SLIP[surface] + (wet && (surface === SURF.road || surface === SURF.board) ? 0.42 : 0));
-    // Per frame: spectators bob, torches flicker, far sectors drop their small decor.
+    // Per frame: spectators bob (only while the grid is in range), torches flicker, far sectors drop their small decor.
     const update = (elapsed, camX, camZ) => {
-      if (spectators.node) {
+      if (spectators.node && (S.x[0] - camX) ** 2 + (S.z[0] - camZ) ** 2 < LOD_FAR * LOD_FAR * 2.5) {
         const data = spectators.node.instanceData;
         for (let i = 0; i < spectators.count; i++) {
           const hop = Math.max(0, Math.sin(elapsed * 6 + spectators.phase[i])) * 0.18;
-          writeInstance(data, i * 20, spectators.yaw[i], 1, spectators.x[i], spectators.y[i] + hop, spectators.z[i], 1);
+          writeInstance(data, i * 20, spectators.yaw[i], 1, spectators.x[i], spectators.y[i] + hop, spectators.z[i], 1, spectators.cos[i], spectators.sin[i]);
         }
         spectators.node.instanceVersion++;
       }
@@ -838,19 +969,20 @@
       for (const child of root.children.slice()) removeChild(root, child);
       for (const geo of geometries) renderer.releaseGeometry(geo);
       geometries.length = 0;
+      sharedDecor.clear();
       sectors.length = 0;
       terrainNodes.length = 0;
       torches.length = 0;
     };
     return {
       floorLevel: floor.level,
-      id: def.id, name: def.name, laps: def.laps, targets: def.targets, hazard: def.hazard, theme: def.theme,
-      root, samples: S, count: n, length: S.length, sectors, terrainNodes, checkpoints, grid, spawns, torches, lamps, spectators, renderOpts,
+      id: def.id, name: def.name, laps: def.laps, targets: def.targets, hazard: def.hazard, theme: def.theme, mirror,
+      root, samples: S, count: n, length: S.length, sectors, terrainNodes, checkpoints, grid, spawns, torches, lamps, spectators, renderOpts, props, sectorProps, sectorOf,
       nearest, project, heightAt, surfaceAt, groundAt, waterAt, roadY, slabY, halfAt, slipAt, wet, precipitation, rightX, rightZ, mapPts, mapPoint, bounds, update, dispose,
       get geometryCount() {
         return geometries.length;
       }
     };
   };
-  BL.raceTrack = { TRACKS, THEMES, SURF, SURFACE_GRIP, SURFACE_SLIP, STEP, SHOULDER, CURB_W, FALL, LOD_FAR, build, trackById, writeInstance };
+  BL.raceTrack = { TRACKS, THEMES, SURF, SURFACE_GRIP, SURFACE_SLIP, STEP, SHOULDER, CURB_W, FALL, LOD_FAR, PROP_CAP, build, trackById, mirrored, writeInstance };
 })();

@@ -1,9 +1,22 @@
+// Procedural geometry: the lab room (`labRoom`), cavemen (`caveman`), props, crates, the `SWAG` catalog, and
+// the shared builders (`box`, `bevelBox`, `lathe`, `tube`, `ring`, `polyline`, `merge`, `makeVox`, `voxCoords`,
+// `voxelGeometry`, `cached`).
+//
+// Every caveman wears a hide belt, a fur shoulder strap and a loincloth whose flaps hang over the thighs
+// (`k.loinFlaps(v)`, colours from `k.loin`, which a torso hook may set; a character that replaces its torso
+// in `gear` calls it itself, as 2140data does). Shaven faces get a mouth and bare heads ears. None of these
+// draws from `k.rand`, so no character's existing draws move.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
   const { hexToRgb, damp } = BL.math;
   const { createNode, addChild } = BL.scene;
   const geometry = () => ({ verts: [], faces: [], lines: [] });
+  const characterGeometry = (geo) => {
+    geo.characterPart = true;
+    if (geo.glassShell) geo.glassShell.characterPart = true;
+    return geo;
+  };
   const pushVert = (geo, x, y, z) => {
     geo.verts.push(x, y, z);
     return geo.verts.length / 3 - 1;
@@ -34,6 +47,58 @@
     face(geo, [c[0], c[4], c[7], c[3]], rgb, opts);
     face(geo, [c[3], c[7], c[6], c[2]], rgb, opts);
     face(geo, [c[0], c[1], c[5], c[4]], rgb, opts);
+    return geo;
+  };
+  // A box with every edge chamfered: the chunky, rounded-looking timber of the island's signs, bridges and boards.
+  // Each corner splits into three vertices, one on each face it touches; the chamfers take a lighter tone so
+  // edges catch the light like a painted plank. Winding is fixed per face against the outward direction.
+  const bevelBox = ({ w = 1, h = 1, d = 1, color, emissive = 0, offset = {}, bevel = Math.min(w, h, d) * 0.2 } = {}) => {
+    const geo = geometry();
+    const half = [w / 2, h / 2, d / 2], off = [offset.x || 0, offset.y || 0, offset.z || 0];
+    const rgb = hexToRgb(color), edge = rgb.map((v) => Math.min(255, Math.round(v * 1.1))), opts = { emissive };
+    // vert(s, a): the corner with signs s = [sx, sy, sz], on the face of axis a.
+    const index = new Map();
+    const vert = (s, a) => {
+      const key = s[0] * 9 + s[1] * 3 + s[2] + a * 27;
+      let i = index.get(key);
+      if (i === undefined) {
+        const p = [0, 1, 2].map((k) => s[k] * (k === a ? half[k] : half[k] - bevel) + off[k]);
+        index.set(key, i = pushVert(geo, p[0], p[1], p[2]));
+      }
+      return i;
+    };
+    const add = (ids, c, out) => {
+      const v = geo.verts;
+      let nx = 0, ny = 0, nz = 0;
+      for (let k = 0; k < ids.length; k++) {
+        const p = ids[k] * 3, q = ids[(k + 1) % ids.length] * 3;
+        nx += (v[p + 1] - v[q + 1]) * (v[p + 2] + v[q + 2]);
+        ny += (v[p + 2] - v[q + 2]) * (v[p] + v[q]);
+        nz += (v[p] - v[q]) * (v[p + 1] + v[q + 1]);
+      }
+      face(geo, nx * out[0] + ny * out[1] + nz * out[2] < 0 ? ids.reverse() : ids, c, opts);
+    };
+    const S = [-1, 1];
+    for (let a = 0; a < 3; a++) {
+      const b = (a + 1) % 3, c = (a + 2) % 3;
+      for (const sa of S) {
+        const s = (u, t) => { const r = [0, 0, 0]; r[a] = sa; r[b] = u; r[c] = t; return r; };
+        const out = [0, 0, 0];
+        out[a] = sa;
+        add([vert(s(-1, -1), a), vert(s(1, -1), a), vert(s(1, 1), a), vert(s(-1, 1), a)], rgb, out);
+      }
+      // The four chamfers running along axis a.
+      for (const sb of S) for (const sc of S) {
+        const s = (t) => { const r = [0, 0, 0]; r[a] = t; r[b] = sb; r[c] = sc; return r; };
+        const out = [0, 0, 0];
+        out[b] = sb; out[c] = sc;
+        add([vert(s(-1), b), vert(s(1), b), vert(s(1), c), vert(s(-1), c)], edge, out);
+      }
+    }
+    for (const sx of S) for (const sy of S) for (const sz of S) {
+      const s = [sx, sy, sz];
+      add([vert(s, 0), vert(s, 1), vert(s, 2)], edge, s);
+    }
     return geo;
   };
   const panel = ({ w = 1, h = 1, tilesX = 4, tilesY = 4, color, altColor, emissive = 0 } = {}) => {
@@ -74,6 +139,43 @@
         face(geo, [rings[p][s], rings[p + 1][s], rings[p + 1][s2], rings[p][s2]], c, { emissive });
       }
     }
+    return geo;
+  };
+  // Subtract a polygonal vertical bore from a flat mesh at build time. Retained fragments keep their face tags.
+  // The caller supplies a liner; this cuts the opening without adding a cap across it.
+  const cutCylinder = (geo, x, z, radius, minY = -Infinity, segments = 16) => {
+    const planes = [], kept = [], verts = geo.verts;
+    if (Number.isFinite(minY)) planes.push([0, -1, 0, minY]);
+    for (let k = 0; k < segments; k++) {
+      const a = (k + 0.5) / segments * Math.PI * 2, nx = Math.cos(a), nz = Math.sin(a);
+      planes.push([nx, 0, nz, -nx * x - nz * z - radius * Math.cos(Math.PI / segments)]);
+    }
+    for (const f of geo.faces) {
+      let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity, top = -Infinity;
+      for (const i of f.i) {
+        minX = Math.min(minX, verts[i * 3]); maxX = Math.max(maxX, verts[i * 3]);
+        minZ = Math.min(minZ, verts[i * 3 + 2]); maxZ = Math.max(maxZ, verts[i * 3 + 2]); top = Math.max(top, verts[i * 3 + 1]);
+      }
+      if (maxX <= x - radius || minX >= x + radius || maxZ <= z - radius || minZ >= z + radius || top < minY) { kept.push(f); continue; }
+      let inside = f.i.map(i => [verts[i * 3], verts[i * 3 + 1], verts[i * 3 + 2]]);
+      for (const p of planes) {
+        const inner = [], outer = [];
+        for (let k = 0; k < inside.length; k++) {
+          const a = inside[k], b = inside[(k + 1) % inside.length];
+          const da = p[0] * a[0] + p[1] * a[1] + p[2] * a[2] + p[3], db = p[0] * b[0] + p[1] * b[1] + p[2] * b[2] + p[3];
+          if (da <= 0) inner.push(a);
+          if (da >= 0) outer.push(a);
+          if (da * db < 0) {
+            const t = da / (da - db), v = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+            inner.push(v); outer.push(v);
+          }
+        }
+        if (outer.length >= 3) kept.push({ ...f, i: outer.map(v => pushVert(geo, v[0], v[1], v[2])) });
+        inside = inner;
+        if (inside.length < 3) break;
+      }
+    }
+    geo.faces = kept;
     return geo;
   };
   const tube = ({ path, radius, rings = 8, segments = 6, colorFn, emissive = 0 } = {}) => {
@@ -129,15 +231,48 @@
   };
   const merge = (...geos) => {
     const out = geometry();
+    // One grid survives a merge when every voxel part shares its unit; the renderer checks each face against it.
+    const voxel = geos.find((geo) => geo.voxel)?.voxel;
+    if (voxel && geos.every((geo) => !geo.voxel || geo.voxel[0] === voxel[0])) out.voxel = voxel;
     for (const geo of geos) {
       const shift = out.verts.length / 3;
       // Index walk, not a spread: a large geometry would overflow the stack.
       const v = geo.verts;
       for (let i = 0; i < v.length; i++) out.verts.push(v[i]);
-      for (const f of geo.faces) out.faces.push({ ...f, i: f.i.map((i) => i + shift) });
+      // A packed part gives fresh face records, so merging it never fills its legacy face cache.
+      const packed = BL.compactGeometry?.storageOf(geo);
+      for (let n = 0, count = packed ? packed.count : geo.faces.length; n < count; n++) {
+        const f = packed ? BL.compactGeometry.copyFace(geo, n) : geo.faces[n];
+        out.faces.push({ ...f, i: f.i.map((i) => i + shift) });
+      }
       for (const l of geo.lines) out.lines.push({ ...l, i: l.i.map((i) => i + shift) });
     }
     return out;
+  };
+  // Draw the liquid and rolled lip as solids, with the vessel wall in its own
+  // translucent pass. Keep the wall vertices on the solid for grip bounds.
+  const glassVessel = ({ liquidProfile, glassProfile, liquid, segments = 24 }) => {
+    const fluid = lathe({ profile: liquidProfile, segments, color: liquid, emissive: 0.75 });
+    const glass = lathe({ profile: glassProfile, segments, color: "#d5ece8" });
+    const rim = geometry(), wall = geometry();
+    rim.verts = wall.verts = glass.verts;
+    let top = -Infinity;
+    for (const point of glassProfile) top = Math.max(top, point[1]);
+    for (let i = 0; i < glass.faces.length; i++) {
+      const band = Math.floor(i / segments);
+      const atLip = Math.min(glassProfile[band][1], glassProfile[band + 1][1]) >= top - 0.026;
+      (atLip ? rim.faces : wall.faces).push(glass.faces[i]);
+    }
+    wall.glassOpacity = 0.14;
+    wall.castShadow = false;
+    wall.smooth = true;
+    const vessel = merge(fluid, rim);
+    vessel.glassShell = wall;
+    return vessel;
+  };
+  const attachGlassShell = (node) => {
+    if (node.geometry.glassShell) addChild(node, createNode({ geometry: node.geometry.glassShell }));
+    return node;
   };
   // Key stays a string: cells are not all integral (half-steps) and the span exceeds a bit-packed key's range.
   const voxKey = (x, y, z) => x + "," + y + "," + z;
@@ -199,6 +334,7 @@
   };
   const voxelGeometry = (vox, { unit, palette, origin = { x: 0, y: 0, z: 0 }, emissive = {} }) => {
     const geo = geometry();
+    geo.voxel = new Float32Array([unit, origin.x, origin.y, origin.z]);
     const rgb = palette.map((c) => typeof c === "string" ? hexToRgb(c) : c);
     const emit = (pts, c) => {
       face(geo, pts.map(([x, y, z]) => pushVert(geo, origin.x + x * unit, origin.y + y * unit, origin.z + z * unit)), rgb[c], { emissive: emissive[c] || 0 });
@@ -214,13 +350,157 @@
   const clamp255 = (v) => Math.max(0, Math.min(255, Math.round(v)));
   const shade = (hex, k) => hexToRgb(hex).map((v) => clamp255(v * k));
   const mixRgb = (a, b, t) => a.map((v, i) => clamp255(v + (b[i] - v) * t));
+  // Builder caches remember which scenes used them. Leaving a scene drops the ones that only it used (`release`), so a
+  // visit's meshes are rebuilt on the next visit instead of staying resident for the page; renderer.releaseUnused
+  // frees their GPU side. A hand-rolled cache joins with `track(drop)` and calls `use()` on every read.
+  const scopedCaches = new Set();
+  let cacheScope = null;
+  const track = (drop, peek = null) => {
+    const entry = { scenes: new Set(), last: undefined, drop, peek, use: () => {
+      if (entry.last === cacheScope) return;
+      entry.last = cacheScope;
+      if (cacheScope !== null) entry.scenes.add(cacheScope);
+      scopedCaches.add(entry);
+    }, clear: () => {
+      entry.drop();
+      entry.scenes.clear();
+      entry.last = undefined;
+      scopedCaches.delete(entry);
+    } };
+    return entry;
+  };
+  const setScope = (id) => { cacheScope = id; };
+  // Scope one synchronous build batch. Async builders call this again after each await, without borrowing the
+  // active scene's scope while their code, images or next frame are pending.
+  const withScope = (id, build, arg) => {
+    const previous = cacheScope;
+    cacheScope = id;
+    try { return build(arg); }
+    finally { cacheScope = previous; }
+  };
+  // Each keyed payload has its own owners, as variants do. Iteration counts as a read too; clearing a key removes
+  // its tracking entry, so the registry does not grow with one-off sign labels, room themes or colours.
+  class ScopedMap extends Map {
+    #owners = new Map();
+    constructor(values) {
+      super();
+      if (values) for (const [key, value] of values) this.set(key, value);
+    }
+    get(key) { this.#owners.get(key)?.use(); return super.get(key); }
+    has(key) { this.#owners.get(key)?.use(); return super.has(key); }
+    set(key, value) {
+      let owner = this.#owners.get(key);
+      if (!owner) {
+        owner = track(() => { Map.prototype.delete.call(this, key); this.#owners.delete(key); }, () => Map.prototype.get.call(this, key));
+        this.#owners.set(key, owner);
+      }
+      owner.use();
+      return super.set(key, value);
+    }
+    delete(key) {
+      const owner = this.#owners.get(key);
+      if (!owner) return false;
+      owner.clear();
+      return true;
+    }
+    clear() { for (const owner of this.#owners.values()) owner.clear(); }
+    *entries() { for (const entry of super.entries()) { this.#owners.get(entry[0]).use(); yield entry; } }
+    *values() { for (const key of super.keys()) { this.#owners.get(key).use(); yield super.get(key); } }
+    [Symbol.iterator]() { return this.entries(); }
+    forEach(fn, receiver) { super.forEach((value, key) => { this.#owners.get(key).use(); fn.call(receiver, value, key, this); }); }
+  }
+  const scopedMap = (values) => new ScopedMap(values);
+  // A past hub read must not pin meshes absent from the newly built hub. Inspect payload containers, never their
+  // vertex/face arrays or lazy accessors; the scratch releases every reference even when a payload is cyclic.
+  const cacheProbe = [], cacheSeen = new Set();
+  const liveCache = (value, live, arrays) => {
+    let meshes = false;
+    cacheProbe.push(value);
+    try {
+      while (cacheProbe.length) {
+        const part = cacheProbe.pop();
+        if (!part || typeof part !== "object" || cacheSeen.has(part)) continue;
+        cacheSeen.add(part);
+        const verts = Object.getOwnPropertyDescriptor(part, "verts"), faces = Object.getOwnPropertyDescriptor(part, "faces");
+        if ((Array.isArray(verts?.value) || ArrayBuffer.isView(verts?.value)) && Array.isArray(faces?.value)) {
+          meshes = true;
+          if (live.has(part) || arrays.has(verts.value) || arrays.has(faces.value)) return 1;
+        } else if (part instanceof Map) {
+          for (const child of Map.prototype.values.call(part)) cacheProbe.push(child);
+        } else if (Array.isArray(part)) {
+          for (let i = 0; i < part.length; i++) if (part[i] && typeof part[i] === "object") cacheProbe.push(part[i]);
+        } else if (!ArrayBuffer.isView(part)) {
+          for (const key of Object.keys(part)) {
+            const child = Object.getOwnPropertyDescriptor(part, key).value;
+            if (child && typeof child === "object") cacheProbe.push(child);
+          }
+        }
+      }
+      return meshes ? 2 : 0;
+    } finally { cacheProbe.length = 0; cacheSeen.clear(); }
+  };
+  const release = (id, keep, live = null) => {
+    const returned = live && cacheScope === "hub", arrays = returned ? new Set() : null;
+    // Projective windows wrap a mesh without copying its arrays. Their source is live too, even when only the wrapper
+    // is a node's geometry; retain that cache rather than rebuilding a second copy beside the live window.
+    if (returned) for (const mesh of live) {
+      if (!mesh || typeof mesh !== "object") continue;
+      const verts = Object.getOwnPropertyDescriptor(mesh, "verts"), faces = Object.getOwnPropertyDescriptor(mesh, "faces");
+      if (verts?.value) arrays.add(verts.value);
+      if (faces?.value) arrays.add(faces.value);
+    }
+    for (const entry of scopedCaches) {
+      if (!entry.scenes.has(id) && !(returned && entry.scenes.has("hub"))) continue;
+      if (keep.some(k => entry.scenes.has(k))) {
+        // An explicitly kept scene's off-graph variants stay warm too; only hub-only caches use live-mesh pruning.
+        if (!returned || keep.some(k => k !== "hub" && entry.scenes.has(k)) || !entry.peek || liveCache(entry.peek(), live, arrays) !== 2) continue;
+      }
+      entry.clear();
+    }
+  };
+  const assertReleased = (id) => {
+    for (const entry of scopedCaches) if (entry.scenes.size === 1 && entry.scenes.has(id)) throw new Error(`${id}: scene-only model cache survived release`);
+  };
   const cached = (build) => {
     let value = null;
-    return () => value || (value = build());
+    const entry = track(() => { value = null; }, () => value);
+    const read = () => { entry.use(); return value || (value = build()); };
+    // Owners with a shorter lifetime than their scene scope can release the same tracked entry explicitly.
+    read.clear = entry.clear;
+    return read;
+  };
+  // A pure cached builder can publish only its completed value, while yielding inside its construction loops.
+  // Ordinary calls retain the synchronous API; a scene's build phase drains steps with its own scope and signal.
+  const cachedSteps = (build) => {
+    let value = null;
+    const entry = track(() => { value = null; }, () => value);
+    const steps = function* (slice = null) {
+      entry.use();
+      if (value) return value;
+      const built = yield* build(slice);
+      value = built;
+      return value;
+    };
+    const read = () => {
+      entry.use();
+      if (value) return value;
+      const iterator = steps();
+      let next;
+      do { next = iterator.next(); } while (!next.done);
+      return next.value;
+    };
+    read.steps = steps;
+    read.clear = entry.clear;
+    return read;
   };
   const variants = (build) => {
-    const cache = [];
-    return (i = 0) => cache[i] || (cache[i] = build(i));
+    const cache = [], entries = [];
+    return (i = 0) => {
+      // One hub cabinet must not make every cabinet built by the Arcade a hub resident.
+      const entry = entries[i] || (entries[i] = track(() => { cache[i] = null; }, () => cache[i]));
+      entry.use();
+      return cache[i] || (cache[i] = build(i));
+    };
   };
   const noShadow = (geo) => {
     geo.castShadow = false;
@@ -258,7 +538,7 @@
     const source = bananaGeometry();
     // Crop the hidden ends of each oversized indicator so a lower row cannot
     // stick past the magazine's narrower curve above it.
-    return { ...source, verts: source.verts.map((v, i) => i % 3 === 0 ? Math.max(-0.3, Math.min(0.3, v)) : i % 3 === 1 ? Math.min(0.25, v) : v) };
+    return characterGeometry({ ...source, verts: source.verts.map((v, i) => i % 3 === 0 ? Math.max(-0.3, Math.min(0.3, v)) : i % 3 === 1 ? Math.min(0.25, v) : v) });
   });
   // Deliberate near-duplicate of bananaGeometry: full depth and dimensions of a carried banana.
   // Its origin is recentred so pile tiles sit evenly across the mound surface.
@@ -329,7 +609,7 @@
     geo.pileFaceSize = faceSize;
     return geo;
   };
-  const particleCache = new Map();
+  const particleCache = scopedMap();
   const particleGeometry = (color, size = 0.07, emissive = 1) => {
     const key = `${color}/${size}/${emissive}`;
     let geo = particleCache.get(key);
@@ -370,7 +650,7 @@
     appendMagazineShell(pieces, 1, GUN_PALETTE);
     const geo = merge(...pieces);
     for (let i = 0; i < geo.verts.length; i += 3) { geo.verts[i + 1] += 0.1825; geo.verts[i + 2] -= 0.0675; }
-    return geo;
+    return characterGeometry(geo);
   });
   const spareMagazine = () => {
     const node = createNode({ geometry: spareMagazineShell() }), bananas = [];
@@ -384,11 +664,8 @@
     const setAmmo = (ammo) => {
       if (ammo === shown) return;
       shown = ammo;
-      for (let i = 0; i < bananas.length; i++) {
-        const fill = Math.max(0, Math.min(1, (ammo - i * 3) / 3));
-        bananas[i].visible = fill > 0;
-        bananas[i].scale.y = 0.175 * fill;
-      }
+      const filled = Math.round(ammo / 3);
+      for (let i = 0; i < bananas.length; i++) bananas[i].visible = i < filled;
     };
     return { node, bananas, setAmmo };
   };
@@ -399,24 +676,43 @@
       stock.verts[i] *= 1 - front * 0.12;
       stock.verts[i + 1] = stock.verts[i + 1] * (1 - front * 0.35) + (-0.04 + front * 0.025) * h;
     }
+    // Keep the handguard just inside the receiver where they overlap, then
+    // slope only its underside upward toward the barrel.
+    const handguard = box({ w: 0.09 * h, h: 0.122 * h, d: 0.22 * h, color: pal.stock, offset: { z: 0.24 * h } });
+    for (let i = 0; i < handguard.verts.length; i += 3) {
+      if (handguard.verts[i + 1] < 0) handguard.verts[i + 1] += (handguard.verts[i + 2] / h - 0.13) / 0.22 * 0.02 * h;
+    }
     // The upper gas tube meets the front of the wood and slopes into the barrel.
     const gasBlock = box({ w: 0.029 * h, h: 0.029 * h, d: Math.hypot(0.06, 0.05) * h, color: pal.barrel, emissive: pal.emissive });
     const angle = Math.atan2(0.05, 0.06), cos = Math.cos(angle), sin = Math.sin(angle);
     for (let i = 0; i < gasBlock.verts.length; i += 3) {
       const y = gasBlock.verts[i + 1], z = gasBlock.verts[i + 2];
-      gasBlock.verts[i + 1] = y * cos - z * sin - 0.005 * h;
+      gasBlock.verts[i + 1] = y * cos - z * sin + 0.01 * h;
       gasBlock.verts[i + 2] = y * sin + z * cos + 0.46 * h;
     }
+    // A compact rear blade with an open, half-round notch. Its top and the
+    // front post define the first-person sight line.
+    const rearSight = [box({ w: 0.042 * h, h: 0.004 * h, d: 0.014 * h, color: pal.barrel, offset: { y: 0.067 * h, z: -0.18 * h } })];
+    for (let i = 0; i < 8; i++) {
+      const low = 0.069 + i * 0.011 / 8, high = low + 0.011 / 8;
+      const mid = (low + high) * 0.5;
+      const inner = Math.sqrt(Math.max(0, 0.011 ** 2 - (mid - 0.08) ** 2));
+      const width = 0.021 - inner;
+      for (const side of [-1, 1]) rearSight.push(box({ w: width * h, h: (high - low) * h, d: 0.014 * h,
+        color: pal.barrel, offset: { x: side * (0.021 + inner) * 0.5 * h, y: mid * h, z: -0.18 * h } }));
+    }
     const pieces = [
-      // Long receiver, tapered wooden stock, low barrel and raised gas tube.
+      // Long receiver, tapered wooden stock, barrel and raised gas tube.
       box({ w: 0.11 * h, h: 0.13 * h, d: 0.4 * h, color: pal.body, emissive: pal.emissive, offset: { z: -0.035 * h } }),
       stock,
       box({ w: 0.09 * h, h: 0.14 * h, d: 0.02 * h, color: pal.barrel, offset: { z: -0.516 * h, y: -0.04 * h } }),
-      box({ w: 0.09 * h, h: 0.095 * h, d: 0.22 * h, color: pal.stock, offset: { z: 0.24 * h } }),
-      box({ w: 0.035 * h, h: 0.035 * h, d: 0.38 * h, color: pal.barrel, emissive: pal.emissive, offset: { z: 0.47 * h, y: -0.03 * h } }),
-      box({ w: 0.026 * h, h: 0.026 * h, d: 0.095 * h, color: pal.barrel, emissive: pal.emissive, offset: { z: 0.3925 * h, y: 0.02 * h } }),
+      handguard,
+      box({ w: 0.035 * h, h: 0.035 * h, d: 0.38 * h, color: pal.barrel, emissive: pal.emissive, offset: { z: 0.47 * h, y: -0.01 * h } }),
+      box({ w: 0.026 * h, h: 0.026 * h, d: 0.095 * h, color: pal.barrel, emissive: pal.emissive, offset: { z: 0.3925 * h, y: 0.035 * h } }),
       gasBlock,
       box({ w: 0.03 * h, h: 0.085 * h, d: 0.03 * h, color: pal.barrel, offset: { z: 0.59 * h, y: 0.0075 * h } }),
+      ...rearSight,
+      box({ w: 0.01 * h, h: 0.04 * h, d: 0.016 * h, color: pal.barrel, offset: { y: 0.07 * h, z: 0.59 * h } }),
       box({ w: 0.065 * h, h: 0.18 * h, d: 0.066 * h, color: pal.stock, offset: { y: -0.14 * h, z: -0.184 * h } }),
       // A hollow guard ends behind the magazine, leaving a visible gap.
       box({ w: 0.045 * h, h: 0.012 * h, d: 0.106 * h, color: pal.body, offset: { y: -0.13 * h, z: -0.098 * h } }),
@@ -434,6 +730,51 @@
     out.faces = geo.faces.map((f) => ({ ...f, i: [...f.i].reverse() }));
     return out;
   };
+  // Moves a freshly built geometry by (x, y, z), in place.
+  const moved = (geo, x, y, z) => {
+    const v = geo.verts;
+    for (let i = 0; i < v.length; i += 3) { v[i] += x; v[i + 1] += y; v[i + 2] += z; }
+    return geo;
+  };
+  // Turns a freshly built geometry about y, the way a node's rotation.y would.
+  const turnedY = (geo, a) => {
+    const v = geo.verts, c = Math.cos(a), s = Math.sin(a);
+    for (let i = 0; i < v.length; i += 3) {
+      const x = v[i], z = v[i + 2];
+      v[i] = x * c + z * s;
+      v[i + 2] = -x * s + z * c;
+    }
+    return geo;
+  };
+  // Turns a freshly built geometry about z: a positive angle rolls +x toward +y.
+  const turnedZ = (geo, a) => {
+    const v = geo.verts, c = Math.cos(a), s = Math.sin(a);
+    for (let i = 0; i < v.length; i += 3) {
+      const x = v[i], y = v[i + 1];
+      v[i] = x * c - y * s;
+      v[i + 1] = x * s + y * c;
+    }
+    return geo;
+  };
+  // A convex outline, counter-clockwise from the front, extruded `depth` thick about z 0.
+  const prism = (points, depth, color, emissive = 0) => {
+    const geo = geometry(), rgb = hexToRgb(color), opts = { emissive }, n = points.length;
+    const back = points.map(([x, y]) => pushVert(geo, x, y, -depth / 2)), front = points.map(([x, y]) => pushVert(geo, x, y, depth / 2));
+    for (let i = 0; i < n; i++) face(geo, [back[i], back[(i + 1) % n], front[(i + 1) % n], front[i]], rgb, opts);
+    face(geo, front, rgb, opts);
+    face(geo, back.slice().reverse(), rgb, opts);
+    return geo;
+  };
+  // Tips a freshly built geometry about x: a positive angle leans its top toward +z.
+  const turnedX = (geo, a) => {
+    const v = geo.verts, c = Math.cos(a), s = Math.sin(a);
+    for (let i = 0; i < v.length; i += 3) {
+      const y = v[i + 1], z = v[i + 2];
+      v[i + 1] = y * c - z * s;
+      v[i + 2] = y * s + z * c;
+    }
+    return geo;
+  };
   // Resting club angles: x tilts the head forward, z rolls it; carry is the working hang.
   const CLUB_REST = { x: 0.95, z: 0 };
   // The shared body every contributor gets. A character file (src/characters/<handle>.js)
@@ -444,8 +785,14 @@
   //   crown(k, v)  hats and hair over the head    eyes(k, v)   replaces the eyes
   //   mark(k, v)   face paint after the pupils    hatY(k)      where swag hats sit
   //   headgear(k)  nodes on the head              extras(k)    nodes on the root, last
+  //   tint(k, palette)  a second colourway: return an alternate palette and every
+  //                     voxel part is baked again under it, paired in `tint`
   // `look` flags read here: slim, bald, cleanShaven, wideEyes, hairless, noBrow, noPupils,
   // face ("nose" | "smirk" | "beard" | "none"), eyeColor, eyeGlow, hatY.
+  // A character file may keep the slot numbers its first build was given; every later build registers that
+  // character's colours in the same order first, so after a released cache rebuilds the model those numbers
+  // still name the same colours. The base palette ahead of them comes from the same traits every time.
+  const colorOrders = new WeakMap();
   const buildCaveman = (traits) => {
     const { skin, hair, height: h, belly, rand } = traits;
     const dress = traits.dress || {};
@@ -468,14 +815,18 @@
     ];
     // A character's own colours join the palette on first use.
     const colors = new Map();
+    let order = traits.dress ? colorOrders.get(traits.dress) : null;
+    if (traits.dress && !order) colorOrders.set(traits.dress, order = []);
     const color = (hex) => {
       let c = colors.get(hex);
       if (c === undefined) {
         colors.set(hex, c = palette.length);
         palette.push(hexToRgb(hex));
+        if (order) order.push(hex);
       }
       return c;
     };
+    if (order) for (let i = 0, n = order.length; i < n; i++) color(order[i]);
     const jit = (base, dark, p) => () => rand() < p ? dark : base;
     const skinJ = jit(P.skin, P.skinDk, 0.08);
     const hairJ = jit(P.hair, P.hairDk, 0.12);
@@ -490,13 +841,32 @@
         if (v.get(nx, y, z) === P.fur) v.set(nx, y, z, P.spot);
       }
     };
-    const vg = (v, origin, emissive) => voxelGeometry(v, { unit: u, palette, origin, emissive });
+    // Each voxel map is kept with what it was baked from, so a second colourway
+    // can bake the same maps again under another palette.
+    const bakes = [];
+    const vg = (v, origin, emissive) => {
+      const geo = voxelGeometry(v, { unit: u, palette, origin, emissive });
+      bakes.push({ v, origin, emissive, geo });
+      return geo;
+    };
     const parts = {};
     const legH = 5 * u;
     const root = createNode({ position: { x: 0, y: legH, z: 0 } });
     const eyeCells = [];
     // nose: the beard's nose jitter pair; lid: closed-eye colour; headEmissive: lit head indices
-    const k = { traits, h, u, rand, P, color, jit, skinJ, hairJ, leopard, vg, root, parts, armX: 0, eyeCells, nose: [P.nose, P.skin], lid: null, headEmissive: undefined };
+    // loin: the loincloth's two colours, fur and spot unless a torso hook names its own.
+    const k = { traits, h, u, rand, P, color, jit, skinJ, hairJ, leopard, vg, root, parts, armX: 0, eyeCells, nose: [P.nose, P.skin], lid: null, headEmissive: undefined, loin: null };
+    // Hashed from the cell, never drawn from rand, so no character's existing draws move.
+    const cellMix = (x, y, z) => ((Math.imul(x + 11, 73856093) ^ Math.imul(y + 7, 19349663) ^ Math.imul(z + 5, 83492791)) >>> 0) % 7;
+    // The loincloth every Ooga wears: a flap front and back that hangs over the thighs, cut ragged at the hem.
+    const loinFlaps = (v) => {
+      const [a, b] = k.loin || [P.fur, P.spot];
+      for (const z of [0, 5]) for (let x = 2; x <= 6; x++) {
+        const hem = x === 2 || x === 6 ? -1 : cellMix(x, 0, z) < 2 ? -3 : -2;
+        for (let y = -1; y >= hem; y--) v.set(x, y, z, cellMix(x, y, z) === 0 ? b : a);
+      }
+    };
+    k.loinFlaps = loinFlaps;
     const legVox = (side) => {
       const v = makeVox();
       v.fill(0, 3, 2, 4, 0, 3, skinJ);
@@ -507,8 +877,9 @@
       return v;
     };
     const leg = (side) => createNode({ position: { x: side * 2.5 * u, y: 0, z: 0 }, geometry: vg(legVox(side), { x: -2 * u, y: -5 * u, z: -2.5 * u }) });
-    parts.legL = leg(-1);
-    parts.legR = leg(1);
+    // Facing +Z, local -X is anatomical right and +X is anatomical left.
+    parts.legR = leg(-1);
+    parts.legL = leg(1);
     const torsoVox = () => {
       const v = makeVox();
       if (traits.slim) {
@@ -519,9 +890,17 @@
         v.fill(0, 8, 0, 2, 0, 5, leopard);
         rosettes(v, 0, 8, 0, 2, 0, 5, 8);
         v.fill(1, 7, 3, 7, 1, 4, skinJ);
+        // A hide belt with a stone buckle, and a fur strap over one shoulder to the other hip.
+        v.fill(1, 7, 3, 3, 1, 4, P.wood);
+        v.set(4, 3, 4, P.stone);
+        for (let y = 4; y <= 7; y++) {
+          const x = 7 - Math.round((y - 4) * 1.6);
+          for (const z of [1, 4]) for (const dx of [0, 1]) if (x + dx >= 1 && x + dx <= 7) v.set(x + dx, y, z, cellMix(x + dx, y, z) === 0 ? P.spot : P.fur);
+        }
       }
       if (dress.torso) dress.torso(k, v);
       for (let x = 0; x <= 8; x++) for (let z = 0; z <= 5; z++) if (rand() < 0.18) v.del(x, 0, z);
+      loinFlaps(v);
       return v;
     };
     parts.torso = createNode({ scale: { x: belly, y: 1, z: belly }, geometry: vg(torsoVox(), { x: -4.5 * u, y: 0, z: -3 * u }) });
@@ -551,12 +930,12 @@
       });
       const fingers = createNode({ position: { x: 0, y: -10 * u, z: 0 }, geometry: fingerGeometry, quaternion: BL.math.quat.create() });
       BL.math.quat.fromEuler(fingers.quaternion, 0, -side * Math.PI / 2, 0);
-      parts[side < 0 ? "fingersL" : "fingersR"] = fingers;
+      parts[side < 0 ? "fingersR" : "fingersL"] = fingers;
       addChild(node, fingers);
       return node;
     };
-    parts.armL = arm(-1);
-    parts.armR = arm(1);
+    parts.armR = arm(-1);
+    parts.armL = arm(1);
     // club(k) returns { voxels, palette, goldPalette } for a voxel item, or { default, gold }
     // geometry, plus optional rest and carry angles.
     const club = dress.club ? dress.club(k) : {};
@@ -573,7 +952,7 @@
       rotation: { x: clubRest.x, y: 0, z: clubRest.z },
       geometry: skins.club.default
     });
-    addChild(parts.armL, parts.club);
+    addChild(parts.armR, parts.club);
     parts.snack = createNode({
       position: { x: 0, y: -0.62 * h, z: 0.18 * h },
       scale: { x: BANANA_AMMO_SCALE, y: BANANA_AMMO_SCALE, z: BANANA_AMMO_SCALE },
@@ -581,7 +960,7 @@
       geometry: bananaGeometry(),
       visible: false
     });
-    addChild(parts.armR, parts.snack);
+    addChild(parts.armL, parts.snack);
     parts.gun = createNode({ quaternion: BL.math.quat.create(), visible: false });
     parts.gun.ammoReloading = false;
     parts.gunBody = createNode({ geometry: skins.gun.default });
@@ -606,6 +985,8 @@
       const face = traits.face || (traits.slim || traits.cleanShaven ? "nose" : "beard");
       if (face === "nose") {
         v.fill(3, 3, 2, 3, 6, 6, P.nose);
+        // A mouth under it, so a shaven face has an expression.
+        v.fill(2, 4, 0, 0, 5, 5, P.spot);
       } else if (face === "smirk") {
         v.set(3, 1, 6, P.nose);
         v.fill(2, 4, 0, 0, 6, 6, P.spot);
@@ -624,6 +1005,8 @@
         v.fill(-1, -1, traits.slim ? -3 : 2, 5, -1, 4, hairJ);
         v.fill(7, 7, traits.slim ? -3 : 2, 5, -1, 4, hairJ);
       }
+      // Ears on a bare head; hair covers them otherwise.
+      if (!hairy && !dress.skull) for (const x of [-1, 7]) v.fill(x, x, 2, 3, 2, 3, P.skinDk);
       if (dress.crown) dress.crown(k, v);
       for (const [key, c] of [...v.map]) {
         if (c !== P.hair && c !== P.hairDk) continue;
@@ -654,8 +1037,20 @@
       if (dress.mark) dress.mark(k, v);
     }
     const headOrigin = { x: -3.5 * u, y: 0, z: -3 * u };
-    // Lit eyes glow open or closed; the closed variant only recolours the eye cells.
-    const headOpen = vg(headVox, headOrigin, k.headEmissive);
+    // Dress hooks define any glowing face cells for both the head and portrait.
+    const headEmissive = k.headEmissive;
+    const headOpen = vg(headVox, headOrigin, headEmissive);
+    // Each character may widen the central-face crop to retain a hat or hair.
+    // Bounds are in the same voxel coordinates as the character's head hooks.
+    const portraitVox = makeVox();
+    const portraitMin = traits.portrait?.min || [0, -2, 0];
+    const portraitMax = traits.portrait?.max || [6, 5, 8];
+    for (const [k, c] of headVox.map) {
+      voxCoords(k, CELL);
+      const x = CELL[0], y = CELL[1], z = CELL[2];
+      if (x >= portraitMin[0] && x <= portraitMax[0] && y >= portraitMin[1] && y <= portraitMax[1] && z >= portraitMin[2] && z <= portraitMax[2]) portraitVox.map.set(k, c);
+    }
+    const portraitHead = vg(portraitVox, headOrigin, headEmissive);
     const closedVox = makeVox();
     for (const [key, c] of headVox.map) closedVox.map.set(key, c);
     for (const [x, y] of eyeCells) closedVox.set(x, y, 5, k.lid !== null ? k.lid : y === 2 ? P.skinDk : P.skin);
@@ -663,16 +1058,60 @@
     parts.head = createNode({ position: { x: 0, y: 0.5 * h, z: 0.02 * h }, geometry: headOpen });
     const hatY = dress.hatY ? dress.hatY(k) : (traits.hatY || (traits.bald ? 6 : 9)) * u;
     parts.hat = createNode({ position: { x: 0, y: hatY, z: 0 }, scale: { x: h, y: h, z: h }, visible: false });
+    parts.hat.portraitHidden = true;
     parts.face = createNode({ position: { x: 0, y: 0, z: 0 }, scale: { x: h, y: h, z: h }, visible: false });
     addChild(parts.head, parts.hat, parts.face);
     if (dress.headgear) dress.headgear(k);
-    addChild(root, parts.legL, parts.legR, parts.torso, parts.armL, parts.armR, parts.head);
+    addChild(root, parts.legR, parts.legL, parts.torso, parts.armR, parts.armL, parts.head);
     if (dress.extras) dress.extras(k);
-    return { root, parts, traits, headOffset: 1.1 * h, headOpen, headClosed, skins, clubRest, clubCarry, gunHeadBounds: BL.scene.boundsOf(headOpen) };
+    // A second colourway bakes every voxel part still in use under the alternate
+    // palette and pairs each geometry with its twin both ways, so swapping a
+    // clone's geometry twice returns it to the colour it was built in.
+    let tint = null;
+    if (dress.tint) {
+      const alt = dress.tint(k, palette), live = new Set([headClosed, portraitHead]);
+      const visit = (node) => {
+        if (node.geometry) live.add(node.geometry);
+        for (const child of node.children) visit(child);
+      };
+      visit(root);
+      tint = new Map();
+      for (const bake of bakes) {
+        if (!live.has(bake.geo) || tint.has(bake.geo)) continue;
+        const twin = voxelGeometry(bake.v, { unit: u, palette: alt, origin: bake.origin, emissive: bake.emissive });
+        tint.set(bake.geo, twin).set(twin, bake.geo);
+      }
+    }
+    // A reflection keeps characters whatever their size: the renderer's reduced capture otherwise drops small parts.
+    const markCharacter = (node) => {
+      if (node.geometry) characterGeometry(node.geometry);
+      if (node.skins) for (const skin of Object.values(node.skins)) characterGeometry(skin);
+      for (const child of node.children) markCharacter(child);
+    };
+    markCharacter(root);
+    for (const weapon of Object.values(skins)) for (const skin of Object.values(weapon)) characterGeometry(skin);
+    headOpen.characterPart = headClosed.characterPart = portraitHead.characterPart = true;
+    if (tint) for (const twin of tint.keys()) twin.characterPart = true;
+    // Only this builder's completed voxel bakes are immutable here. Dress hooks and both colourways finish
+    // first; separately authored weapons, equipment and other geometry stay in their original representation.
+    if (BL.compactGeometry?.enabled) {
+      const live = new Set([headOpen, headClosed, portraitHead]);
+      const visit = (node) => {
+        if (node.geometry) live.add(node.geometry);
+        for (const child of node.children) visit(child);
+      };
+      visit(root);
+      for (const bake of bakes) if (live.has(bake.geo)) {
+        BL.compactGeometry.pack(bake.geo, { immutable: true, renderOnly: true, precision: 64 });
+        const twin = tint?.get(bake.geo);
+        if (twin) BL.compactGeometry.pack(twin, { immutable: true, renderOnly: true, precision: 64 });
+      }
+    }
+    return { root, parts, traits, headOffset: 1.1 * h, headOpen, headClosed, portraitHead, skins, clubRest, clubCarry, tint, gunHeadBounds: BL.scene.boundsOf(headOpen) };
   };
   // Traits hash from the handle, so one handle always builds the same voxels.
   // Callers get fresh nodes over shared geometry: one build per contributor, GPU records survive a scene swap.
-  const cavemen = new Map();
+  const cavemen = scopedMap();
   const cloneNode = (node, copies) => {
     const copy = createNode({ ...node, position: { ...node.position }, rotation: { ...node.rotation }, scale: { ...node.scale }, parent: null, children: [], world: new Float32Array(node.world), local: new Float32Array(node.local) });
     if (node.quaternion) copy.quaternion = new Float32Array(node.quaternion);
@@ -689,22 +1128,36 @@
       parts[key] = Array.isArray(part) ? part.map((node) => copies.get(node)) : copies.get(part);
     }
     const skins = { club: { ...template.skins.club }, gun: { ...template.skins.gun } };
-    return { root, parts, traits, headOffset: template.headOffset, headOpen: template.headOpen, headClosed: template.headClosed, skins, clubRest: template.clubRest, clubCarry: template.clubCarry, gunHeadBounds: template.gunHeadBounds };
+    return { root, parts, traits, headOffset: template.headOffset, headOpen: template.headOpen, headClosed: template.headClosed, portraitHead: template.portraitHead, skins, clubRest: template.clubRest, clubCarry: template.clubCarry, tint: template.tint, gunHeadBounds: template.gunHeadBounds };
   };
-  // A real die: opposite faces sum to seven.
-  const die = ({ size = 0.3 } = {}) => {
+  // A real die: opposite faces sum to seven. Round pip faces sit just above the
+  // voxel shell so even the smallest die does not render them as square cells.
+  const DIE_PIPS = [[], [[2, 2]], [[1, 1], [3, 3]], [[1, 1], [2, 2], [3, 3]],
+    [[1, 1], [1, 3], [3, 1], [3, 3]], [[1, 1], [1, 3], [2, 2], [3, 1], [3, 3]],
+    [[1, 1], [1, 2], [1, 3], [3, 1], [3, 2], [3, 3]]];
+  const die = ({ size = 0.3, variant = null } = {}) => {
     const n = 5, u = size / n;
     const v = makeVox();
     v.fill(0, n - 1, 0, n - 1, 0, n - 1, 0);
     for (const cx of [0, n - 1]) for (const cy of [0, n - 1]) for (const cz of [0, n - 1]) v.del(cx, cy, cz);
-    const corners = [[1, 1], [1, 3], [3, 1], [3, 3]];
-    for (const [a, b] of [...corners, [2, 2]]) v.set(a, n - 1, b, 1);
-    for (const [a, b] of [[1, 1], [3, 3]]) v.set(a, 0, b, 1);
-    for (const [a, b] of [...corners, [1, 2], [3, 2]]) v.set(n - 1, a, b, 1);
-    v.set(0, 2, 2, 1);
-    for (const [a, b] of [[1, 1], [2, 2], [3, 3]]) v.set(a, b, n - 1, 1);
-    for (const [a, b] of corners) v.set(a, b, 0, 1);
-    return voxelGeometry(v, { unit: u, palette: [hexToRgb("#f3efe4"), hexToRgb("#141414")], origin: { x: -size / 2, y: -size / 2, z: -size / 2 } });
+    const dots = geometry(), ink = hexToRgb("#141414"), radius = u * 0.43;
+    const values = variant === null ? [1, 6, 2, 5, 4, 3] :
+      [6 - (variant + 1) % 6, (variant + 1) % 6 + 1, 6 - (variant + 2) % 6,
+        (variant + 2) % 6 + 1, 6 - variant % 6, variant % 6 + 1];
+    const pip = (axis, side, a, b) => {
+      const ids = [], fixed = side * size * 0.506;
+      const ca = (a + 0.5) * u - size / 2, cb = (b + 0.5) * u - size / 2;
+      for (let i = 0; i < 12; i++) {
+        const angle = i * Math.PI / 6, p = ca + Math.cos(angle) * radius, q = cb + Math.sin(angle) * radius;
+        ids.push(axis === 0 ? pushVert(dots, fixed, p, q) : axis === 1 ? pushVert(dots, p, fixed, q) : pushVert(dots, p, q, fixed));
+      }
+      face(dots, (axis === 1 ? -side : side) < 0 ? ids.reverse() : ids, ink);
+    };
+    for (let axis = 0; axis < 3; axis++) for (let side = -1; side <= 1; side += 2) {
+      const value = values[axis * 2 + (side > 0 ? 1 : 0)];
+      for (const [a, b] of DIE_PIPS[value]) pip(axis, side, a, b);
+    }
+    return merge(voxelGeometry(v, { unit: u, palette: [hexToRgb("#f3efe4")], origin: { x: -size / 2, y: -size / 2, z: -size / 2 } }), dots);
   };
   const dieRotationFor = (pips, spin) => ({
     5: { x: 0, y: spin, z: 0 },
@@ -868,11 +1321,18 @@
     addChild(bench, createNode({ position: { y: 1.02, x: 0, z: 0 }, geometry: slab({ w: 1.3, d: 3.4, color: "#2a2a2d", sz: 6 }) }));
     for (const dz of [-1.5, 1.5]) addChild(bench, createNode({ position: { x: 0, y: 0.5, z: dz }, geometry: box({ w: 1.1, h: 1, d: 0.14, color: "#202022" }) }));
     ["#22c55e", "#6f9fca", "#d8892b"].forEach((liquid, i) => {
+      const level = [0.10, 0.17, 0.13][i];
       const flask = createNode({
         position: { x: 0, y: 1.13, z: -0.8 + i * 0.8 },
-        geometry: lathe({ profile: [[0.02, 0], [0.22, 0.02], [0.24, 0.14], [0.1, 0.34], [0.06, 0.52], [0.08, 0.56]], segments: 8, color: liquid, emissive: 0.75 })
+        geometry: glassVessel({
+          liquidProfile: [[0, 0], [0.19, 0.02], [0.20, level], [0, level]],
+          glassProfile: [[0.21, 0.02], [0.24, 0.14], [0.23, 0.17], [0.1, 0.34], [0.06, 0.52],
+            [0.08, 0.56], [0.055, 0.56], [0.045, 0.52], [0.085, 0.34], [0.205, 0.17], [0.19, 0.02]],
+          liquid
+        })
       });
       flask.color = liquid;
+      attachGlassShell(flask);
       leds.push(flask);
       equipment.flasks.push(flask);
       addChild(bench, flask);
@@ -1006,7 +1466,7 @@
     })
   ];
   const TIER_COLORS = { common: "#9aa0a6", rare: "#6f9fca", epic: "#b16fd6", legendary: "#d8892b" };
-  const crateCache = new Map();
+  const crateCache = scopedMap();
   const crate = (tier) => {
     let geos = crateCache.get(tier);
     if (!geos) {
@@ -1027,11 +1487,11 @@
     addChild(node, createNode({ geometry: geos.body }), lid);
     return { node, lid };
   };
-  const swagCache = new Map();
+  const swagCache = scopedMap();
   const swagGeo = (id, build) => {
     let geo = swagCache.get(id);
     if (!geo) {
-      geo = build();
+      geo = characterGeometry(build());
       swagCache.set(id, geo);
     }
     return geo;
@@ -1078,5 +1538,319 @@
       item.buildNode = () => createNode({ geometry: swagGeo(item.id, item.build) });
     }
   }
-  BL.models = { geometry, pushVert, face, voxCoords, box, panel, lathe, tube, ring, polyline, merge, forward, cached, variants, noShadow, makeVox, voxelGeometry, voxelFaces, banana, bananaGeometry, bananaTileGeometry, bananaPileCoreGeometry, bananaPileRadiusScale, bananaPileHeightOffset, BANANA_AMMO_SCALE, BANANA_PILE_PROFILE, particleGeometry, spareMagazine, caveman, CLUB_PALETTE, GOLD_CLUB_PALETTE, labRoom, buildableGeos, crate, dieRotationFor, SWAG, TIER_COLORS };
+  // ---- the interior kit ---------------------------------------------------------------------------------
+  // Timber structure, turned parts, chains and lanterns shared by the cave interiors (the Lightning Factory, Ooga
+  // Arcade), in the warm timber and black iron those caves are built of.
+  const TAU = Math.PI * 2, mulberry32 = BL.math.mulberry32;
+  const TIMBER = "#8a5a32", TIMBER_LT = "#a8703e", TIMBER_DK = "#5c3a1e", IRON_DK = "#2c2e33", STONE_DK = "#3a2f28";
+  // A squared beam between two points: braces, rails, chains and cables.
+  const beam = (ax, ay, az, bx, by, bz, w, color, emissive = 0) => {
+    const dx = bx - ax, dy = by - ay, dz = bz - az, len = Math.hypot(dx, dy, dz) || 1;
+    const ux = dx / len, uy = dy / len, uz = dz / len;
+    let hx = 0, hy = 1, hz = 0;
+    if (Math.abs(uy) > 0.9) { hx = 1; hy = 0; }
+    let px = uy * hz - uz * hy, py = uz * hx - ux * hz, pz = ux * hy - uy * hx;
+    const pl = Math.hypot(px, py, pz);
+    px /= pl; py /= pl; pz /= pl;
+    const qx = uy * pz - uz * py, qy = uz * px - ux * pz, qz = ux * py - uy * px;
+    const geo = geometry(), rgb = hexToRgb(color), r = w / 2, opts = { emissive };
+    const ring = (x, y, z) => [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([s, t]) => pushVert(geo, x + (px * s + qx * t) * r, y + (py * s + qy * t) * r, z + (pz * s + qz * t) * r));
+    const a = ring(ax, ay, az), b = ring(bx, by, bz);
+    for (let i = 0; i < 4; i++) face(geo, [a[i], a[(i + 1) % 4], b[(i + 1) % 4], b[i]], rgb, opts);
+    face(geo, b, rgb, opts);
+    face(geo, a.slice().reverse(), rgb, opts);
+    return geo;
+  };
+  // A lathe laid on its side along +z, for pipes, lenses and wheels.
+  const forwardLathe = (geo) => {
+    const v = geo.verts;
+    for (let i = 0; i < v.length; i += 3) { const y = v[i + 1]; v[i + 1] = v[i + 2]; v[i + 2] = y; }
+    geo.faces.forEach((f) => f.i.reverse());
+    return geo;
+  };
+  // ---- turned parts -------------------------------------------------------------------------------
+  // The machines are turned, like the stethoscope: lathes and tubes shaded smooth, so a glass drum or a pipe
+  // reads round instead of faceted. `turn` doubles the profile's sharp corners so rims and caps keep their crease;
+  // `shaded` gathers turned parts into one smooth geometry and folds flat ones (boxes, signs) in unsmoothed.
+  const turn = (profile, segments, color, emissive = 0) => {
+    const points = [];
+    profile.forEach((p, i) => {
+      points.push(p);
+      if (i === 0 || i === profile.length - 1) return;
+      const a = profile[i - 1], b = profile[i + 1], ux = p[0] - a[0], uy = p[1] - a[1], vx = b[0] - p[0], vy = b[1] - p[1];
+      if ((ux * vx + uy * vy) / (Math.hypot(ux, uy) * Math.hypot(vx, vy) || 1) < 0.75) points.push(p);
+    });
+    return lathe({ profile: points, segments, color, emissive });
+  };
+  const shaded = (round, flat = []) => {
+    const g = merge(...round);
+    g.smooth = true;
+    if (flat.length) BL.hubModels.flatInto(g, ...flat);
+    return g;
+  };
+  // A ring of round section: `R` to the middle of the tube, `r` its thickness, lying flat about +y.
+  const torus = (R, r, color, emissive = 0, segments = 20, sides = 8) => lathe({
+    profile: Array.from({ length: sides + 1 }, (_, k) => [R + Math.cos(k / sides * TAU) * r, Math.sin(k / sides * TAU) * r]),
+    segments, color, emissive
+  });
+  // Stands a geometry built round +y at (x, y, z) with that axis turned onto the direction (dx, dy, dz).
+  const along = (geo, x, y, z, dx, dy, dz) => {
+    const l = Math.hypot(dx, dy, dz) || 1, tx = dx / l, ty = dy / l, tz = dz / l;
+    const hx = Math.abs(ty) < 0.9 ? 0 : 1, hy = Math.abs(ty) < 0.9 ? 1 : 0;
+    let nx = hy * tz, ny = -hx * tz, nz = hx * ty - hy * tx;
+    const nl = Math.hypot(nx, ny, nz) || 1;
+    nx /= nl; ny /= nl; nz /= nl;
+    const bx = ny * tz - nz * ty, by = nz * tx - nx * tz, bz = nx * ty - ny * tx, v = geo.verts;
+    for (let i = 0; i < v.length; i += 3) {
+      const a = v[i], b = v[i + 1], c = v[i + 2];
+      v[i] = x + nx * a + tx * b + bx * c; v[i + 1] = y + ny * a + ty * b + by * c; v[i + 2] = z + nz * a + tz * b + bz * c;
+    }
+    return geo;
+  };
+  // A chain from one point to another: oval links of round iron, each a quarter turn from the last.
+  const chain = (ax, ay, az, bx, by, bz, size = 0.16, color = IRON_DK) => {
+    const len = Math.hypot(bx - ax, by - ay, bz - az), pitch = size * 2.2, n = Math.max(1, Math.round(len / pitch)), out = [];
+    for (let i = 0; i < n; i++) {
+      const t = (i + 0.5) / n, link = forwardLathe(torus(size, size * 0.3, color, 0, 10, 6));
+      for (let k = 1; k < link.verts.length; k += 3) link.verts[k] *= 1.55;
+      if (i % 2) turnedY(link, Math.PI / 2);
+      out.push(along(link, ax + (bx - ax) * t, ay + (by - ay) * t, az + (bz - az) * t, bx - ax, by - ay, bz - az));
+    }
+    return out;
+  };
+
+  // A rail from one point to another on a deck whose top is at y 0, as the concept builds them: square posts with
+  // caps every metre and a half, a broad handrail laid flat along the top, a bottom rail and a cross of braces in
+  // each bay. `ends` leaves out a post at an end another rail already stands on.
+  const railParts = (x0, z0, x1, z1, ends = [true, true]) => {
+    const geos = [], len = Math.hypot(x1 - x0, z1 - z0), n = Math.max(1, Math.round(len / 1.5)), a = Math.atan2(-(z1 - z0), x1 - x0);
+    const at = (t) => [x0 + (x1 - x0) * t, z0 + (z1 - z0) * t];
+    for (let i = 0; i <= n; i++) {
+      if (i === 0 && !ends[0] || i === n && !ends[1]) continue;
+      const [x, z] = at(i / n);
+      geos.push(bevelBox({ w: 0.17, h: 1.06, d: 0.17, color: TIMBER_DK, bevel: 0.03, offset: { x, y: 0.53, z } }));
+      geos.push(bevelBox({ w: 0.25, h: 0.08, d: 0.25, color: TIMBER_LT, bevel: 0.02, offset: { x, y: 1.1, z } }));
+    }
+    geos.push(moved(turnedY(bevelBox({ w: len + 0.12, h: 0.09, d: 0.2, color: TIMBER_LT, bevel: 0.025 }), a), (x0 + x1) / 2, 1.02, (z0 + z1) / 2));
+    geos.push(beam(x0, 0.2, z0, x1, 0.2, z1, 0.1, TIMBER));
+    for (let i = 0; i < n; i++) {
+      const [ax, az] = at(i / n), [bx, bz] = at((i + 1) / n);
+      geos.push(beam(ax, 0.25, az, bx, 0.97, bz, 0.055, TIMBER), beam(ax, 0.97, az, bx, 0.25, bz, 0.055, TIMBER));
+    }
+    return geos;
+  };
+  // A support column, as the concept props its decks: a stone footing, a square timber post bound with iron straps,
+  // and a cap block under the deck, from y0 up to y1 at (x, z).
+  const columnParts = (x, z, y0, y1, w = 0.38) => {
+    const geos = [
+      bevelBox({ w: w + 0.3, h: 0.36, d: w + 0.3, color: STONE_DK, bevel: 0.07, offset: { x, y: y0 + 0.14, z } }),
+      bevelBox({ w, h: y1 - y0 - 0.32, d: w, color: TIMBER_DK, bevel: 0.06, offset: { x, y: (y0 + 0.3 + y1 - 0.02) / 2, z } }),
+      bevelBox({ w: w + 0.16, h: 0.16, d: w + 0.16, color: TIMBER_LT, bevel: 0.03, offset: { x, y: y1 - 0.08, z } })
+    ];
+    for (let y = y0 + 1.1; y < y1 - 0.5; y += 1.4) geos.push(bevelBox({ w: w + 0.06, h: 0.08, d: w + 0.06, color: IRON_DK, bevel: 0.015, offset: { x, y, z } }));
+    return geos;
+  };
+  // Where a w by d deck's posts stand, in its frame: under its frame at the corners and every few metres round it.
+  const deckGrid = (w, d) => {
+    const cols = Math.max(2, Math.round(w / 3.2) + 1), rows = Math.max(2, Math.round(d / 3.2) + 1);
+    return { cols, rows, at: (i, j) => [(i / (cols - 1) - 0.5) * (w - 0.4), (j / (rows - 1) - 0.5) * (d - 0.4)] };
+  };
+  const deckPosts = (w, d) => {
+    const { cols, rows, at } = deckGrid(w, d), out = [];
+    for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) if (i === 0 || i === cols - 1 || j === 0 || j === rows - 1) out.push(at(i, j));
+    return out;
+  };
+  // A plank deck with its top at y 0, a frame of joists round its edge under the planks, posts down to what stands
+  // below, and a rail along the named edges ("n" is -z, "s" +z, "w" -x, "e" +x). Posts stand under the frame at the
+  // corners and every few metres round it; `drop` is how far down each one reaches, a number or a function of its
+  // (x, z) in the deck's frame, and 0 leaves the posts out.
+  // The spans a deck's rails run along, in the deck's frame, as `deckParts` stands them: [x0, z0, x1, z1, from, to],
+  // `from` and `to` whether a post stands at that end. A rail stands 0.1 in from each of the deck's `rails` edges ("n",
+  // "s", "w", "e"), leaving a gap wherever a stair or a bridge lands on its edge, exactly as wide as what arrives, and
+  // ending either side of it on a post that the arriving rails share: `cuts` are [x, z, half-width] in the deck's frame,
+  // on the rail's line, and a stair's also the way its flight runs off the deck, so it opens only the rail it crosses
+  // and as wide as it crosses it. A scene's floor stands its walkers off the same spans.
+  const deckRailSpans = (w, d, rails = "", cuts = []) => {
+    const spans = [];
+    const rail = (x0, z0, x1, z1, ends = [true, true]) => {
+      const len = Math.hypot(x1 - x0, z1 - z0), ux = (x1 - x0) / len, uz = (z1 - z0) / len, keep = [[0, len]];
+      const out = (x0 + x1) * uz - (z0 + z1) * ux > 0 ? 1 : -1, nx = uz * out, nz = -ux * out;
+      for (const [cx, cz, width, dx, dz] of cuts) {
+        if (Math.abs((cx - x0) * uz - (cz - z0) * ux) > 0.6) continue;
+        // A stair's centre line where it crosses this rail's line, and its width along the rail at that slant.
+        const along = dx === undefined ? 1 : dx * nx + dz * nz;
+        if (along < 0.3) continue;
+        const k = dx === undefined ? 0 : -((cx - x0) * nx + (cz - z0) * nz) / along, t = (cx + (dx || 0) * k - x0) * ux + (cz + (dz || 0) * k - z0) * uz, half = width / along;
+        if (t < -half || t > len + half) continue;
+        for (let i = keep.length - 1; i >= 0; i--) {
+          const [a, b] = keep[i];
+          if (t + half <= a || t - half >= b) continue;
+          keep.splice(i, 1, ...[[a, t - half], [t + half, b]].filter(([p, q]) => q - p > 0.12));
+        }
+      }
+      for (const [a, b] of keep) spans.push([x0 + ux * a, z0 + uz * a, x0 + ux * b, z0 + uz * b, a > 0 || ends[0], b < len || ends[1]]);
+    };
+    // Corners are shared: the side rails leave out the post the front or back rail already stands there.
+    const hw = w / 2 - 0.1, hd = d / 2 - 0.1, north = rails.includes("n"), south = rails.includes("s");
+    if (north) rail(-hw, -hd, hw, -hd);
+    if (south) rail(-hw, hd, hw, hd);
+    if (rails.includes("w")) rail(-hw, -hd, -hw, hd, [!north, !south]);
+    if (rails.includes("e")) rail(hw, -hd, hw, hd, [!north, !south]);
+    return spans;
+  };
+  const deckParts = (w, d, drop, rails = "", seed = 1, cuts = []) => {
+    const rand = mulberry32(seed), geos = [], across = w >= d;
+    const n = Math.max(2, Math.round((across ? d : w) / 0.9));
+    for (let i = 0; i < n; i++) {
+      const t = (i + 0.5) / n - 0.5, tone = [TIMBER, TIMBER_LT, "#946236"][Math.floor(rand() * 3)];
+      geos.push(across
+        ? bevelBox({ w: w - 0.04, h: 0.2, d: d / n - 0.05, color: tone, bevel: 0.04, offset: { y: -0.1, z: t * d } })
+        : bevelBox({ w: w / n - 0.05, h: 0.2, d: d - 0.04, color: tone, bevel: 0.04, offset: { x: t * w, y: -0.1 } }));
+    }
+    for (const s of [-1, 1]) {
+      geos.push(bevelBox({ w, h: 0.34, d: 0.28, color: TIMBER_DK, bevel: 0.05, offset: { y: -0.37, z: s * (d / 2 - 0.2) } }));
+      geos.push(bevelBox({ w: 0.28, h: 0.34, d: d - 0.68, color: TIMBER_DK, bevel: 0.05, offset: { x: s * (w / 2 - 0.2), y: -0.37 } }));
+    }
+    const reach = typeof drop === "function" ? drop : () => drop;
+    const { cols, rows, at } = deckGrid(w, d);
+    for (const [x, z] of deckPosts(w, d)) {
+      const down = reach(x, z);
+      if (down < 0.4) continue;
+      geos.push(...columnParts(x, z, -down, -0.54));
+      // Knee braces from each column up into the frame, toward the deck's middle.
+      if (down > 1.6) {
+        if (x) geos.push(beam(x, -1.35, z, x - Math.sign(x) * 0.8, -0.56, z, 0.12, TIMBER));
+        if (z) geos.push(beam(x, -1.35, z, x, -0.56, z - Math.sign(z) * 0.8, 0.12, TIMBER));
+      }
+    }
+    // Cross braces on the long faces, for the scaffold look, between the corner posts and no deeper than the shorter.
+    for (const s of [-1, 1]) {
+      const [ax, az] = across ? at(0, s < 0 ? 0 : rows - 1) : at(s < 0 ? 0 : cols - 1, 0), [bx, bz] = across ? at(cols - 1, s < 0 ? 0 : rows - 1) : at(s < 0 ? 0 : cols - 1, rows - 1);
+      const depth = Math.min(reach(ax, az), reach(bx, bz), 4.5);
+      if (depth > 1.5) geos.push(beam(ax, -depth + 0.3, az, bx, -0.6, bz, 0.16, TIMBER), beam(ax, -0.6, az, bx, -depth + 0.3, bz, 0.16, TIMBER));
+    }
+    for (const [x0, z0, x1, z1, a, b] of deckRailSpans(w, d, rails, cuts)) geos.push(...railParts(x0, z0, x1, z1, [a, b]));
+    return geos;
+  };
+  // A stepped flight's treads (`stairParts`' `stepped`): one fewer than its risers, each riser near STEP_RISER high.
+  // Tread i (0 to n - 1) runs from i / n to (i + 1) / n of the way along, its top (i + 1) / (n + 1) of the way up, so a
+  // scene's floor can stand walkers on the very treads drawn.
+  const STEP_RISER = 0.3;
+  const stairTreads = (rise) => Math.max(2, Math.round(rise / STEP_RISER) - 1);
+  // A flight of steps from (ax, ay, az) up to (bx, by, bz), `w` wide. An end on a deck's rail leaves out its posts,
+  // since the rail's own end posts stand there (`posts` [foot, head]). Its treads are rungs across it, or, `stepped`,
+  // deep plank treads at `stairTreads`' heights with a riser board under each one's front.
+  const stairParts = (ax, ay, az, bx, by, bz, w = 1.6, posts = [true, true], stepped = false) => {
+    const geos = [], rise = by - ay, steps = Math.max(3, Math.round(rise / 0.32)), len = Math.hypot(bx - ax, bz - az);
+    const ux = (bx - ax) / len, uz = (bz - az) / len, px = -uz, pz = ux;
+    for (const s of [-1, 1]) geos.push(beam(ax + px * s * w / 2, ay, az + pz * s * w / 2, bx + px * s * w / 2, by, bz + pz * s * w / 2, 0.22, TIMBER_DK));
+    if (stepped) {
+      const n = stairTreads(rise), run = len / n, yaw = Math.atan2(ux, uz);
+      for (let i = 0; i < n; i++) {
+        const t = (i + 0.5) / n, x = ax + (bx - ax) * t, z = az + (bz - az) * t, top = ay + rise * (i + 1) / (n + 1), up = rise / (n + 1);
+        geos.push(moved(turnedY(bevelBox({ w: w - 0.06, h: 0.08, d: run - 0.03, color: i % 2 ? TIMBER : TIMBER_LT, bevel: 0.02 }), yaw), x, top - 0.04, z));
+        const fx = ax + (bx - ax) * i / n + ux * 0.03, fz = az + (bz - az) * i / n + uz * 0.03;
+        geos.push(moved(turnedY(box({ w: w - 0.1, h: up - 0.08, d: 0.04, color: TIMBER_DK }), yaw), fx, top - 0.08 - (up - 0.08) / 2, fz));
+      }
+    } else for (let i = 0; i < steps; i++) {
+      const t = (i + 0.5) / steps, x = ax + (bx - ax) * t, z = az + (bz - az) * t, y = ay + rise * t;
+      geos.push(beam(x - px * w / 2, y + 0.06, z - pz * w / 2, x + px * w / 2, y + 0.06, z + pz * w / 2, 0.14, i % 2 ? TIMBER : TIMBER_LT));
+    }
+    // A handrail up each side on capped posts, and a middle rail.
+    for (const s of [-1, 1]) {
+      const sx = px * s * (w / 2 + 0.05), sz = pz * s * (w / 2 + 0.05), n = Math.max(2, Math.round(len / 1.6) + 1);
+      for (let i = 0; i < n; i++) {
+        if (i === 0 && !posts[0] || i === n - 1 && !posts[1]) continue;
+        const t = i / (n - 1), x = ax + (bx - ax) * t + sx, z = az + (bz - az) * t + sz, y = ay + rise * t;
+        geos.push(bevelBox({ w: 0.15, h: 1.02, d: 0.15, color: TIMBER_DK, bevel: 0.03, offset: { x, y: y + 0.5, z } }), bevelBox({ w: 0.22, h: 0.07, d: 0.22, color: TIMBER_LT, bevel: 0.02, offset: { x, y: y + 1.05, z } }));
+      }
+      geos.push(beam(ax + sx, ay + 1, az + sz, bx + sx, by + 1, bz + sz, 0.13, TIMBER_LT), beam(ax + sx, ay + 0.55, az + sz, bx + sx, by + 0.55, bz + sz, 0.08, TIMBER));
+    }
+    return geos;
+  };
+
+  // The concept's lanterns: a square lantern of warm glass in a black iron frame, iron posts at its corners and a
+  // cross of glazing bars on each face, a flat foot, a peaked cap and a ring to hang it by, `s` times the size of one
+  // 0.84 m tall with its foot at the origin. The glass is its own list, lit; `tint` colours it, and `grid` false
+  // leaves the faces clear for a sign.
+  const LANTERN_GLASS = "#ffc860";
+  const lanternParts = (s, x, y, z, frame, glass, tint = LANTERN_GLASS, grid = true) => {
+    const W = 0.34 * s, lo = 0.08 * s, hi = 0.52 * s, mid = y + (lo + hi) / 2, tall = hi - lo;
+    frame.push(box({ w: W + 0.08 * s, h: 0.07 * s, d: W + 0.08 * s, color: IRON_DK, offset: { x, y: y + 0.035 * s, z } }));
+    frame.push(moved(turnedY(lathe({ profile: [[0.3, 0.5], [0.3, 0.56], [0.14, 0.72], [0.05, 0.76], [0, 0.77]].map(([r, h]) => [r * s, h * s]), segments: 4, color: IRON_DK }), Math.PI / 4), x, y, z));
+    frame.push(moved(forwardLathe(torus(0.06 * s, 0.014 * s, IRON_DK, 0, 10, 5)), x, y + 0.84 * s, z));
+    for (const [cx, cz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) frame.push(box({ w: 0.05 * s, h: tall + 0.03 * s, d: 0.05 * s, color: IRON_DK, offset: { x: x + cx * W / 2, y: mid, z: z + cz * W / 2 } }));
+    if (grid) for (const [nx, nz] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
+      const fx = x + nx * (W / 2 + 0.006), fz = z + nz * (W / 2 + 0.006), thin = 0.012;
+      frame.push(box({ w: nz ? 0.03 * s : thin, h: tall, d: nx ? 0.03 * s : thin, color: IRON_DK, offset: { x: fx, y: mid, z: fz } }));
+      frame.push(box({ w: nz ? W : thin, h: 0.03 * s, d: nx ? W : thin, color: IRON_DK, offset: { x: fx, y: mid, z: fz } }));
+    }
+    glass.push(box({ w: W, h: tall, d: W, color: tint, emissive: 1, offset: { x, y: mid, z } }));
+  };
+  // A base mesh owns its foliage alternatives. Collision and scene nodes keep the original mesh; only the
+  // WebGL collector selects one of these render meshes. Canvas continues drawing that original source.
+  const foliageLods = (high, coarse) => {
+    const medium = { ...high, ...coarse, collisionGeometry: high.collisionGeometry };
+    const b = BL.scene.boundsOf(high), lo = Array.from(b.min), hi = Array.from(b.max), c = b.center;
+    const far = { verts: [], faces: [], lines: [], sway: high.sway, foliageVisibility: false, castShadow: high.castShadow };
+    const planes = [
+      [lo[0], lo[1], c[2], hi[0], lo[1], c[2], hi[0], hi[1], c[2], lo[0], hi[1], c[2]],
+      [c[0], lo[1], lo[2], c[0], lo[1], hi[2], c[0], hi[1], hi[2], c[0], hi[1], lo[2]],
+      [lo[0], c[1], lo[2], hi[0], c[1], lo[2], hi[0], c[1], hi[2], lo[0], c[1], hi[2]]
+    ];
+    for (const plane of planes) {
+      const first = far.verts.length / 3;
+      far.verts.push(...plane);
+      far.faces.push({ i: [first, first + 1, first + 2, first + 3], color: [255, 255, 255], emissive: 0 },
+        { i: [first, first + 3, first + 2, first + 1], color: [255, 255, 255], emissive: 0 });
+    }
+    // Three orthographic silhouettes share one small atlas; normal axes select their own UV rectangle.
+    // Rasterization is deferred until a far record is first prepared, keeping geometry-only builders DOM-free.
+    far.imageSurface = { canvas: null, version: 1, atlas: true, atlasMin: lo, atlasMax: hi, source: medium,
+      rect: [lo[0], lo[1], hi[0] - lo[0], hi[1] - lo[1]], background: [0, 0, 0] };
+    high.foliageLods = { owner: high, medium, far };
+    if (BL.compactGeometry?.enabled) {
+      // These final render meshes are immutable; the separate walking shell stays in its original form.
+      // Keep authored double coordinates exactly so averaged normals and outline planes stay identical.
+      for (const geometry of [high, medium, far]) BL.compactGeometry.pack(geometry, { immutable: true, renderOnly: true, precision: 64 });
+    }
+    return high;
+  };
+  const paintFoliageAtlas = (surface) => {
+    if (surface.canvas) return surface.canvas;
+    const tile = 128, canvas = document.createElement("canvas"), geo = surface.source;
+    canvas.width = tile * 3; canvas.height = tile;
+    const ctx = canvas.getContext("2d"), order = new Uint32Array(geo.faces.length), depths = new Float32Array(geo.faces.length);
+    const cursor = BL.compactGeometry?.storageOf(geo) ? BL.compactGeometry.createCursor(geo) : null;
+    const faceAt = index => cursor ? BL.compactGeometry.readFace(geo, index, cursor) : geo.faces[index];
+    const lo = surface.atlasMin, hi = surface.atlasMax, axes = [[0, 1, 2], [2, 1, 0], [0, 2, 1]];
+    for (let view = 0; view < 3; view++) {
+      const [u, v, depth] = axes[view], sx = (tile - 2) / Math.max(1e-6, hi[u] - lo[u]), sy = (tile - 2) / Math.max(1e-6, hi[v] - lo[v]);
+      for (let i = 0; i < geo.faces.length; i++) {
+        const ids = faceAt(i).i;
+        let sum = 0; for (let k = 0; k < ids.length; k++) sum += geo.verts[ids[k] * 3 + depth];
+        order[i] = i; depths[i] = sum / ids.length;
+      }
+      order.sort((a, b) => depths[a] - depths[b]);
+      ctx.save(); ctx.beginPath(); ctx.rect(view * tile + 1, 1, tile - 2, tile - 2); ctx.clip();
+      for (let n = 0; n < order.length; n++) {
+        const face = faceAt(order[n]), color = face.color;
+        ctx.beginPath();
+        for (let i = 0; i < face.i.length; i++) {
+          const at = face.i[i] * 3, x = view * tile + 1 + (geo.verts[at + u] - lo[u]) * sx, y = 1 + (hi[v] - geo.verts[at + v]) * sy;
+          if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+        }
+        ctx.closePath(); ctx.fillStyle = `rgb(${color[0]},${color[1]},${color[2]})`; ctx.fill();
+      }
+      ctx.restore();
+    }
+    surface.canvas = canvas; surface.source = null;
+    return canvas;
+  };
+  // Expand liveness once per ownership walk, including hidden alternatives and a retained hub's meshes.
+  const addLods = (set) => {
+    for (const geo of set) if (geo.foliageLods?.owner === geo) { set.add(geo.foliageLods.medium); set.add(geo.foliageLods.far); }
+    return set;
+  };
+  BL.models = { characterGeometry, foliageLods, paintFoliageAtlas, addLods, beam, forwardLathe, turn, shaded, torus, along, chain, railParts, columnParts, deckGrid, deckPosts, deckParts, deckRailSpans, stairParts, stairTreads, lanternParts, LANTERN_GLASS, geometry, pushVert, face, cutCylinder, voxCoords, box, bevelBox, panel, lathe, glassVessel, attachGlassShell, tube, ring, polyline, merge, forward, moved, turnedX, turnedY, turnedZ, prism, cached, cachedSteps, variants, scopedMap, track, setScope, withScope, release, assertReleased, noShadow, makeVox, voxelGeometry, voxelFaces, banana, bananaGeometry, bananaTileGeometry, bananaPileCoreGeometry, bananaPileRadiusScale, bananaPileHeightOffset, BANANA_AMMO_SCALE, BANANA_PILE_PROFILE, particleGeometry, spareMagazine, caveman, CLUB_PALETTE, GOLD_CLUB_PALETTE, labRoom, buildableGeos, crate, die, dieRotationFor, SWAG, TIER_COLORS };
 })();

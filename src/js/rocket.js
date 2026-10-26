@@ -1,5 +1,15 @@
 // Ooga Orbit flight: the attached stack as one body over a round world; gravity pulls to the world's centre,
 // air thins with height, stages drop, ascent lean stays in the launch plane. Fixed step, no allocation.
+//
+// Runs on the scene's 1/120 s step over a round world (`R`, `SEA`, `CY`, `GM`), air thinning by `SCALE_H`
+// and ending at 150. Thrust and fuel go by stage; the lean (`psi`) is planar in the launch plane on the way
+// up, with fins against flipping. Stress comes from dynamic pressure and lean, heat from density times
+// speed cubed on the pod's hull and shield. `homeward`: everything that can come off comes off and the pod
+// turns freely on three axes with lift and a weathervane. Also the sky hook (`hold`, `stand`), ground only
+// near the top of the world (`NEAR_GROUND`), the steerable leaf chute, touchdowns on land and water (`LAND`,
+// `SPLASH`), and `onDrop` for every stage that comes off. `Q_LIMIT` 16 puts max-Q where a full-throttle Jug
+// in thick air strains and a Firecracker is a real one, so the throttle is an ascent decision; the
+// autopilot eases the throttle past `Q_GUARD`; the early kick waits for lift-off (no lean while clamped).
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -16,7 +26,9 @@
   const LEAN = { gimbal: 1.3, coast: 0.35, damp: 2.2, air: 0.06 };
   const THROTTLE_RATE = 0.9;
   // Stress: Q_LIMIT is the head-on dynamic pressure the stack takes; BEND multiplies it for a lean into the wind.
-  const Q_LIMIT = 150, BEND = 5, OVER_T = 0.22;
+  // Set where a full-throttle Volcano Jug through thick air is a strain and a Firecracker a real one, so the
+  // throttle is an ascent decision; the autopilot eases off at Q_GUARD of it.
+  const Q_LIMIT = 16, BEND = 5, OVER_T = 0.35, Q_GUARD = 0.85;
   // Heat: HEAT_K flux per density and speed cubed, COOL cooling, ASCENT_EXPOSE what the cone's point takes on
   // the way up.
   const HEAT_K = 3.4e-4, COOL = 0.35, ASCENT_EXPOSE = 0.15, SHIELD_BURN = 1e-4;
@@ -331,7 +343,8 @@
         const authority = s.burning ? LEAN.gimbal : LEAN.coast;
         const air = LEAN.air * s.dynQ * Math.sin(alpha) * s.stability / Math.max(1, Math.sqrt(m));
         if (s.mode === "ascent") s.psiRate += (input.lean * authority - air - s.psiRate * LEAN.damp) * dt;
-        s.psi += s.psiRate * dt;
+        // Clamped, the stack cannot lean: an early kick waits for lift-off.
+        if (s.mode === "ascent") s.psi += s.psiRate * dt;
         setLean();
       } else if (s.mode === "free") {
         if (s.chute === "open") {
@@ -394,5 +407,5 @@
     reset(0, 0, 0);
     return { state: s, parts, stages, fuel, partY, pod, shieldPart, reset, ignite, separate, homeward, deploy, chuteReady, substep, hold, stand, isPod, massNow, engine };
   };
-  BL.rocket = { create, NEAR_GROUND, R, SEA, CY, GM, G0, RHO0, SCALE_H, SPACE_ALT, ORBIT_ALT, CHUTE, LAND, SPLASH, densityAt };
+  BL.rocket = { create, NEAR_GROUND, R, SEA, CY, GM, G0, RHO0, SCALE_H, SPACE_ALT, ORBIT_ALT, CHUTE, LAND, SPLASH, Q_LIMIT, Q_GUARD, densityAt };
 })();

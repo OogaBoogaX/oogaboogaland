@@ -1,0 +1,188 @@
+{
+  "sourceRevision": "d3743fc26afc4eea28cdb43b11158354671fa53b",
+  "label": "candidate",
+  "deadlineSeconds": 120,
+  "retries": 0,
+  "workloadSha256": "99d226d40710f2ccb06ebb367ca1c91467285045671f5343d877b058b36d09f0",
+  "backgroundBefore": [
+    {
+      "pid": 492,
+      "executable": "trustd",
+      "reportedCpu": 17.3,
+      "observedCpu": 17.4
+    },
+    {
+      "pid": 18094,
+      "executable": "node",
+      "reportedCpu": 129.3,
+      "observedCpu": 130
+    },
+    {
+      "pid": 67991,
+      "executable": "com.docker.backend",
+      "reportedCpu": 24.5,
+      "observedCpu": 23.6
+    },
+    {
+      "pid": 91440,
+      "executable": "ecosystemd",
+      "reportedCpu": 64.7,
+      "observedCpu": 61.9
+    }
+  ],
+  "backgroundAfter": [
+    {
+      "pid": 492,
+      "executable": "trustd",
+      "reportedCpu": 17.4,
+      "observedCpu": 5.2
+    },
+    {
+      "pid": 630,
+      "executable": "coreaudiod",
+      "reportedCpu": 13.2,
+      "observedCpu": 11.1
+    },
+    {
+      "pid": 777,
+      "executable": "ctkd",
+      "reportedCpu": 2.7,
+      "observedCpu": 23.6
+    },
+    {
+      "pid": 10699,
+      "executable": "com.apple.WebKit.WebContent",
+      "reportedCpu": 43,
+      "observedCpu": 13.4
+    },
+    {
+      "pid": 18119,
+      "executable": "Google Chrome",
+      "reportedCpu": 3.7,
+      "observedCpu": 29.8
+    },
+    {
+      "pid": 18127,
+      "executable": "Google Chrome Helper (GPU)",
+      "reportedCpu": 27.1,
+      "observedCpu": 27.9
+    },
+    {
+      "pid": 18135,
+      "executable": "Google Chrome Helper (Renderer)",
+      "reportedCpu": 60.1,
+      "observedCpu": 62.3
+    },
+    {
+      "pid": 18175,
+      "executable": "node",
+      "reportedCpu": 115.2,
+      "observedCpu": 135
+    },
+    {
+      "pid": 66936,
+      "executable": "Codex (Renderer)",
+      "reportedCpu": 11.1,
+      "observedCpu": 2
+    },
+    {
+      "pid": 67991,
+      "executable": "com.docker.backend",
+      "reportedCpu": 22.8,
+      "observedCpu": 23.9
+    },
+    {
+      "pid": 91440,
+      "executable": "ecosystemd",
+      "reportedCpu": 8,
+      "observedCpu": 12.1
+    }
+  ],
+  "terrainCache": {
+    "queries": 796153,
+    "hits": 276909
+  },
+  "witnessBytes": 224516,
+  "capturedAt": "2026-10-10T02:32:49.742Z",
+  "suiteSha256": "f4619697ae477affc19eb372718420a44daf29ad44fd9aa1e0db74c438026b18",
+  "pageSha256": "cf7f502ac659eea2f7be7e05b7505956c48f769b827c28058b25098fd0a96979",
+  "browser": "Chrome/154.0.8037.99",
+  "cpuProfilerEnabled": false,
+  "rows": [
+    {
+      "name": "wall movement performance: ordinary movement stays responsive at a high-density desktop size",
+      "pass": false,
+      "details": {
+        "fps": 54.02172829662115,
+        "p95": 33.399999999999636,
+        "max": 33.400000000001455,
+        "worst": {
+          "gap": 22.099999964237213,
+          "at": 1083.1999999999998,
+          "updateMs": 4.900000035762787,
+          "renderMs": 2.899999976158142,
+          "overlayMs": 7,
+          "donated": false
+        },
+        "outlined": 0,
+        "samples": 271,
+        "travel": 3.7463500000000085,
+        "donated": false,
+        "particles": 0,
+        "quality": "high"
+      }
+    },
+    {
+      "name": "wall movement performance: moving behind cave walls during a donation stays responsive at a high-density desktop size",
+      "pass": false,
+      "details": {
+        "fps": 36.878301604704475,
+        "p95": 33.399999999999636,
+        "max": 50,
+        "worst": {
+          "gap": 39.89999997615814,
+          "at": 1649.8999999999996,
+          "updateMs": 9.300000011920929,
+          "renderMs": 5.800000011920929,
+          "overlayMs": 24.599999964237213,
+          "donated": true
+        },
+        "outlined": 185,
+        "samples": 185,
+        "travel": 3.8749999999999734,
+        "donated": true,
+        "particles": 26,
+        "quality": "low"
+      }
+    }
+  ],
+  "hot": [],
+  "stats": {
+    "geometries": 637,
+    "registered": 2373,
+    "candidates": 25,
+    "occluders": 787,
+    "cameraOccluders": 204,
+    "limit": 2427198,
+    "nodes": 2373,
+    "owners": 559,
+    "nearOwners": 15,
+    "triangles": 54253,
+    "triangleBytes": 651036,
+    "samples": 182052,
+    "perceptionQueries": 1498,
+    "perceptionCacheHits": 13,
+    "perceptionWitnessHits": 793,
+    "cameraWitnessHits": 0,
+    "cameraCertificates": 3,
+    "boundaryTriangles": 14731497,
+    "boundaryBuilds": 1866,
+    "boundaryEntries": 10744302,
+    "boundaryNodes": 15221504,
+    "boundaryGridBuilds": 754,
+    "boundaryGridQueries": 2452503,
+    "boundaryGridBytes": 511456,
+    "boundaryGridReferences": 121024
+  },
+  "logs": []
+}

@@ -1,5 +1,10 @@
 // Procedural drop sound: one AudioContext made on the first gesture, fixed voice pool gated by gain.
 // One noise loop behind the engine drone, the wind and the canopy flutter.
+//
+// The rally's pattern: the context comes from an activated gesture and there are eight pooled voices. The
+// plane's drone is pitched by its speed and fades with its distance; the wind's band and level follow the
+// diver's speed. Cues for the mark, jump, rings, misses, pull, flare, the landings and crashes, lost and a
+// medal. Shares the rally's mute key.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -138,6 +143,7 @@
       g.linearRampToValueAtTime(0, now + dur);
     };
     const cues = {
+      count: () => blip("square", NOTE(3), NOTE(3), 0.01, 0.07, 0.06, 0.16),
       mark: () => {
         blip("square", NOTE(7), NOTE(7), 0.01, 0.08, 0.06, 0.2);
         blip("square", NOTE(12), NOTE(12), 0.01, 0.14, 0.1, 0.22, 0.14);

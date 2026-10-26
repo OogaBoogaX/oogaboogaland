@@ -26,6 +26,9 @@
     return { tier, item: pool[fnv1a(`${donation.id}/loot`) % pool.length] };
   };
   const bananasFor = (sats) => Math.max(1, Math.min(12, Math.round(sats / SATS_PER_BANANA)));
+  // The donations board's tally keeps the sats and bananas of each of the last TIP_DAYS local days, by day number.
+  const TIP_DAYS = 7, DAY_MS = 864e5, DONOR_MAX = 256, RECENT_HANDLES = 12;
+  const dayOf = (at) => Math.floor((at - new Date(at).getTimezoneOffset() * 6e4) / DAY_MS);
   const LARGE_UNITS = [[1e12, "T"], [1e9, "B"], [1e6, "M"], [1e3, "K"]];
   const formatLarge = (n) => {
     const unit = LARGE_UNITS.find(([size]) => n >= size);
@@ -33,12 +36,41 @@
     const v = n / unit[0];
     return `${v < 10 ? (Math.floor(v * 10) / 10).toFixed(1).replace(/\.0$/, "") : Math.floor(v)}${unit[1]}`;
   };
+  const formatThree = (n, compact = false) => {
+    if (!Number.isFinite(n)) return "-";
+    const rounded = Number(n.toPrecision(3));
+    const unit = compact ? LARGE_UNITS.find(([size]) => Math.abs(rounded) >= size) : null;
+    const value = unit ? rounded / unit[0] : rounded;
+    const places = value === 0 ? 2 : Math.max(0, 2 - Math.floor(Math.log10(Math.abs(value))));
+    return `${value.toFixed(places)}${unit ? unit[1] : ""}`;
+  };
+  const formatFeeRate = (n) => {
+    if (!(n > 0 && n < 1)) return formatThree(n);
+    const rounded = Number(n.toPrecision(2));
+    return rounded.toFixed(Math.max(0, 1 - Math.floor(Math.log10(rounded))));
+  };
   const isString = (v, max) => typeof v === "string" && v.length <= max;
+  const addRecentHandle = (list, raw) => {
+    const handle = BL.donations.sanitize(raw, HANDLE_MAX).replace(/^@+/, "").trim();
+    if (!handle || handle.toLowerCase() === "anon") return;
+    const at = list.findIndex((entry) => entry.toLowerCase() === handle.toLowerCase());
+    if (at >= 0) list.splice(at, 1);
+    list.unshift(handle);
+    if (list.length > RECENT_HANDLES) list.length = RECENT_HANDLES;
+  };
   const isEntry = (e, catalog) => e && typeof e === "object" && isString(e.id, 40) && catalog.some((c) => c.id === e.itemId) && LOOT_TIERS.some((t) => t.tier === e.tier) && isString(e.donationId, 64) && Number.isFinite(e.at);
-  const defaults = () => ({ inventory: [], assignments: {}, handle: "", message: "", handFed: 0, totalSats: 0, donations: 0, race: { best: {}, cup: null }, drop: { best: null }, orbit: { best: null, build: null } });
-  const LANDINGS = ["stand", "stumble", "tumble", "hole", "pancake", "lost"];
+  const defaults = () => ({ inventory: [], assignments: {}, handle: "", message: "", recentHandles: [], recentDonations: [], handFed: 0, totalSats: 0, donations: 0, bananas: 0, lastTip: 0, tipDays: [], donors: [], race: { best: {}, cup: null }, drop: { best: null, jumps: 0 }, orbit: { best: null, build: null }, mine: { best: null }, arcade: { skee: 0, hoops: 0, shy: 0, claw: 0, hockey: 0, billiards: 0, darts: 0, pinball: 0, ride: 0, invaders: 0, snake: 0, pong: 0, stampede: 0, flap: 0, breaker: 0, dash: 0, stacker: 0, tickets: 0, prizes: [] } });
+  // Ooga Arcade's carnival bests, each capped past the most its game can score (nine doubled 100s; the round games
+  // run on), the retro cabinets' bests (`retro-games.js`, capped past any run), the ticket balance, and the prizes
+  // (`ARCADE_PRIZES` ids) redeemed at the counter.
+  const ARCADE_MAX = { skee: 1800, hoops: 9999, shy: 999, claw: 400, hockey: 200, billiards: 200, darts: 540, pinball: 9999999, ride: 9999,
+    invaders: 50000, snake: 120000, pong: 99999, stampede: 75000, flap: 20000, breaker: 50000, dash: 99999, stacker: 999999 }, TICKETS_MAX = 1e7;
+  const ARCADE_PRIZES = ["banana-plush", "coconut-cup", "bone-kazoo", "gold-sticker", "gorilla-plush", "crown"];
+  // A drop best is a landing on your feet: a crash keeps its ring points on the card but is never a best.
+  const LANDINGS = ["stand", "stumble"];
   const ORBIT_LANDINGS = ["pad", "islet", "island", "land", "sea", "overpressure", "stuck", "heat", "breakup", "burnup", "splat", "crash", "wreck", "debris"];
   const CUP_MEDALS = ["gold", "silver", "bronze"];
+  const MINE_ENDINGS = ["goal", "time", "broke", "wrecked", "seized", "left"];
   const isTime = (v) => Number.isFinite(v) && v > 0 && v < 36e5;
   const load = (catalog) => {
     const state = defaults();
@@ -54,17 +86,44 @@
       }
       if (isString(parsed.handle, HANDLE_MAX)) state.handle = parsed.handle;
       if (isString(parsed.message, MESSAGE_MAX)) state.message = parsed.message;
-      for (const key of ["handFed", "totalSats", "donations"]) {
+      for (const key of ["handFed", "totalSats", "donations", "lastTip"]) {
         if (Number.isFinite(parsed[key]) && parsed[key] >= 0) state[key] = Math.floor(parsed[key]);
+      }
+      if (Number.isFinite(parsed.bananas) && parsed.bananas >= 0) state.bananas = parsed.bananas;
+      if (Array.isArray(parsed.donors)) {
+        for (const d of parsed.donors.slice(0, DONOR_MAX)) {
+          if (!d || !isString(d.handle, HANDLE_MAX) || !Number.isSafeInteger(d.sats) || d.sats < 0
+            || !Number.isFinite(d.bananas) || d.bananas < 0) continue;
+          const handle = BL.donations.sanitize(d.handle, HANDLE_MAX);
+          if (!state.donors.some((entry) => entry.handle.toLowerCase() === handle.toLowerCase())) state.donors.push({ handle, sats: d.sats, bananas: d.bananas });
+        }
+      }
+      if (Array.isArray(parsed.recentHandles)) {
+        for (const handle of parsed.recentHandles.slice(0, RECENT_HANDLES).reverse()) if (isString(handle, HANDLE_MAX)) addRecentHandle(state.recentHandles, handle);
+      } else for (const donor of state.donors.slice(-RECENT_HANDLES)) addRecentHandle(state.recentHandles, donor.handle);
+      if (Array.isArray(parsed.recentDonations)) for (const d of parsed.recentDonations.slice(0, BL.donations.RECENT_MAX)) {
+        if (!d || !isString(d.id, 64) || !d.id || !Number.isSafeInteger(d.sats) || !isString(d.handle, HANDLE_MAX)
+          || !isString(d.message, MESSAGE_MAX) || !Number.isFinite(d.at) || d.at < 0 || !Number.isFinite(d.bananas) || d.bananas < 0) continue;
+        state.recentDonations.push({ id: d.id, sats: d.sats, handle: BL.donations.sanitize(d.handle, HANDLE_MAX),
+          message: BL.donations.carried(d.sats, d.message), at: d.at, bananas: d.bananas });
+      }
+      // Each day's tally is [day, sats, bananas], the days rising; a malformed one is dropped alone.
+      if (Array.isArray(parsed.tipDays)) {
+        for (const d of parsed.tipDays.slice(-TIP_DAYS)) {
+          const last = state.tipDays[state.tipDays.length - 1];
+          if (Array.isArray(d) && d.length === 3 && Number.isInteger(d[0]) && d[0] >= 0 && Number.isInteger(d[1]) && d[1] >= 0 && Number.isFinite(d[2]) && d[2] >= 0 && (!last || d[0] > last[0])) state.tipDays.push(d.slice());
+        }
       }
       if (parsed.race && parsed.race.best && typeof parsed.race.best === "object") {
         for (const [track, b] of Object.entries(parsed.race.best)) {
-          if (isString(track, 16) && b && isTime(b.lap) && isTime(b.race)) state.race.best[track] = { lap: Math.floor(b.lap), race: Math.floor(b.race) };
+          if (isString(track, 16) && b && isTime(b.lap) && isTime(b.race)) state.race.best[track] = { lap: Math.floor(b.lap), race: Math.floor(b.race), medal: CUP_MEDALS.includes(b.medal) ? b.medal : null };
         }
       }
       if (parsed.race && parsed.race.cup && CUP_MEDALS.includes(parsed.race.cup.medal) && Number.isFinite(parsed.race.cup.points) && parsed.race.cup.points >= 0) {
         state.race.cup = { medal: parsed.race.cup.medal, points: Math.floor(parsed.race.cup.points) };
       }
+      const jumps = parsed.drop && parsed.drop.jumps;
+      if (Number.isFinite(jumps) && jumps >= 0 && jumps < 1e7) state.drop.jumps = Math.floor(jumps);
       const d = parsed.drop && parsed.drop.best;
       if (d && Number.isFinite(d.score) && d.score >= 0 && d.score < 1e6 && Number.isFinite(d.rings) && d.rings >= 0 && Number.isFinite(d.ringTotal) && d.ringTotal >= d.rings && d.ringTotal <= 99 && LANDINGS.includes(d.landing)) {
         state.drop.best = { score: Math.floor(d.score), rings: Math.floor(d.rings), ringTotal: Math.floor(d.ringTotal), landing: d.landing };
@@ -75,6 +134,17 @@
       }
       const build = o && BL.rocketParts.sanitize(o.build);
       if (build && build.length) state.orbit.build = build;
+      const m = parsed.mine && parsed.mine.best;
+      if (m && Number.isFinite(m.sats) && m.sats >= 0 && m.sats < 1e15 && Number.isFinite(m.seconds) && m.seconds > 0 && m.seconds <= BL.mineRigs.RUN_SECONDS
+        && MINE_ENDINGS.includes(m.ending) && typeof m.won === "boolean" && Number.isFinite(m.score) && m.score >= 0 && m.score < 1e7) {
+        state.mine.best = { sats: Math.floor(m.sats), seconds: Math.floor(m.seconds), ending: m.ending, won: m.won, score: Math.floor(m.score), continued: m.continued === true };
+      }
+      const a = parsed.arcade;
+      if (a && typeof a === "object") for (const kind in ARCADE_MAX) {
+        if (Number.isFinite(a[kind]) && a[kind] >= 0 && a[kind] <= ARCADE_MAX[kind]) state.arcade[kind] = Math.floor(a[kind]);
+      }
+      if (a && Number.isFinite(a.tickets) && a.tickets >= 0 && a.tickets <= TICKETS_MAX) state.arcade.tickets = Math.floor(a.tickets);
+      if (a && Array.isArray(a.prizes)) state.arcade.prizes = ARCADE_PRIZES.filter((id) => a.prizes.includes(id));
     } catch {
       return defaults();
     }
@@ -121,16 +191,55 @@
       return entry ? catalog.find((c) => c.id === entry.itemId) : null;
     };
     const assignedTo = (entryId) => Object.keys(state.assignments).find((name) => state.assignments[name] === entryId) || null;
-    const recordDonation = (donation) => {
+    // A donation, wherever it lands: the totals, and the donations board's tally of bananas made, the last tip and
+    // its day's sats and bananas. `counted` is the API's exact count in real mode; without it the game's own.
+    // A day already rolled out of the tally (a late replay) counts in the totals only.
+    const recordDonation = (donation, counted = null) => {
+      const bananas = counted === null ? bananasFor(donation.sats) : counted, day = dayOf(donation.at), days = state.tipDays;
       state.totalSats += donation.sats;
       state.donations += 1;
+      state.bananas += bananas;
+      state.lastTip = donation.sats;
+      // Local demo donors stay separate from the API's authoritative board. Older saves have no donor history.
+      if (counted === null) {
+        addRecentHandle(state.recentHandles, donation.handle);
+        // A message rides only a tip at or above the bar, whichever path handed the tip in.
+        state.recentDonations.unshift({ id: donation.id, sats: donation.sats, handle: BL.donations.sanitize(donation.handle, HANDLE_MAX),
+          message: BL.donations.carried(donation.sats, donation.message), at: donation.at, bananas });
+        if (state.recentDonations.length > BL.donations.RECENT_MAX) state.recentDonations.length = BL.donations.RECENT_MAX;
+        const handle = BL.donations.sanitize(donation.handle, HANDLE_MAX);
+        let donor = state.donors.find((entry) => entry.handle.toLowerCase() === handle.toLowerCase());
+        if (!donor && state.donors.length < DONOR_MAX) {
+          donor = { handle, sats: 0, bananas: 0 };
+          state.donors.push(donor);
+        }
+        if (donor) { donor.handle = handle; donor.sats += donation.sats; donor.bananas += bananas; }
+      }
+      let i = days.length - 1;
+      while (i >= 0 && days[i][0] > day) i--;
+      if (i >= 0 && days[i][0] === day) {
+        days[i][1] += donation.sats;
+        days[i][2] += bananas;
+      } else if (i >= 0 || days.length < TIP_DAYS) {
+        days.splice(i + 1, 0, [day, donation.sats, bananas]);
+        if (days.length > TIP_DAYS) days.shift();
+      }
       save(state);
+    };
+    const rememberHandle = (handle) => { addRecentHandle(state.recentHandles, handle); save(state); };
+    // This browser's tips over the last `days` local days, today included, as [sats, bananas].
+    const tipsWithin = (days, now = Date.now()) => {
+      const from = dayOf(now) - days + 1;
+      let sats = 0, bananas = 0;
+      for (const [day, s, b] of state.tipDays) if (day >= from) { sats += s; bananas += b; }
+      return [sats, bananas];
     };
     const recordHandFed = () => {
       state.handFed += 1;
       save(state);
     };
     const resetAll = () => {
+      if (BL.mineSim) BL.mineSim.clear();
       try {
         localStorage.removeItem(STORAGE_KEY);
       } catch {
@@ -142,10 +251,13 @@
       for (const name of Object.keys(state.assignments)) delete state.assignments[name];
       save(state);
     };
-    const recordRace = (track, lap, race) => {
-      const b = state.race.best[track];
-      const entry = { lap: Math.floor(b && b.lap < lap ? b.lap : lap), race: Math.floor(b && b.race < race ? b.race : race) };
-      const improved = !b || entry.race < b.race || entry.lap < b.lap;
+    // A track's best keeps its best medal too: the medal is earned by place as well as time, so it is
+    // not something the times alone can say.
+    const recordRace = (track, lap, race, medal = null) => {
+      const b = state.race.best[track], rank = (m) => CUP_MEDALS.indexOf(m);
+      const bestMedal = b && b.medal && (!medal || rank(b.medal) < rank(medal)) ? b.medal : medal || (b && b.medal) || null;
+      const entry = { lap: Math.floor(b && b.lap < lap ? b.lap : lap), race: Math.floor(b && b.race < race ? b.race : race), medal: bestMedal };
+      const improved = !b || entry.race < b.race || entry.lap < b.lap || (!!medal && (!b.medal || rank(medal) < rank(b.medal)));
       state.race.best[track] = entry;
       save(state);
       return improved;
@@ -162,9 +274,16 @@
       }
       return better;
     };
+    // Every flight counts as a jump; the count seeds the course's shape and numbers the results.
+    const recordJump = () => {
+      state.drop.jumps = (state.drop.jumps | 0) + 1;
+      save(state);
+      return state.drop.jumps;
+    };
     const recordDrop = ({ score, rings, ringTotal, landing }) => {
       const b = state.drop.best;
-      if (b && b.score >= score) return false;
+      // A lost first jump is not a best.
+      if (score <= 0 || !LANDINGS.includes(landing) || (b && b.score >= score)) return false;
       state.drop.best = { score: Math.floor(score), rings, ringTotal, landing };
       save(state);
       return true;
@@ -173,6 +292,43 @@
       const b = state.orbit.best;
       if (b && b.score >= score) return false;
       state.orbit.best = { score: Math.floor(score), orbit, landing };
+      save(state);
+      return true;
+    };
+    // A mine run is best by its score: coin mined plus the speed bonus a finished run earns, so a
+    // faster win beats a slower one and any win beats a run that ran out of hour. `continued` marks a
+    // run that came back from a loss: it can be the best, but it wears no medal.
+    const recordMine = ({ sats, seconds, ending, won, score, continued }) => {
+      const b = state.mine.best;
+      if (b && score <= b.score) return false;
+      state.mine.best = { sats: Math.floor(sats), seconds: Math.floor(seconds), ending, won: !!won, score: Math.floor(score), continued: !!continued };
+      save(state);
+      return true;
+    };
+    const recordArcade = (kind, score) => {
+      if (!(kind in ARCADE_MAX) || !(score > state.arcade[kind])) return false;
+      state.arcade[kind] = Math.min(ARCADE_MAX[kind], Math.floor(score));
+      save(state);
+      return true;
+    };
+    const addTickets = (n) => {
+      state.arcade.tickets = Math.min(TICKETS_MAX, state.arcade.tickets + Math.max(0, Math.floor(n)));
+      save(state);
+      return state.arcade.tickets;
+    };
+    // Tickets spent at a machine (the jackpot wheel's spin): false, and nothing spent, when the tickets fall short or
+    // the cost is not a whole number above nothing.
+    const spendTickets = (n) => {
+      if (!Number.isInteger(n) || n <= 0 || state.arcade.tickets < n) return false;
+      state.arcade.tickets -= n;
+      save(state);
+      return true;
+    };
+    // A prize at the counter: false when it is already won or the tickets fall short.
+    const redeem = (id, cost) => {
+      if (!ARCADE_PRIZES.includes(id) || state.arcade.prizes.includes(id) || state.arcade.tickets < cost) return false;
+      state.arcade.tickets -= cost;
+      state.arcade.prizes.push(id);
       save(state);
       return true;
     };
@@ -196,7 +352,7 @@
       if (seconds < 5400) return `${Math.round(seconds / 60)}m`;
       return `${(seconds / 3600).toFixed(1)}h`;
     };
-    return { state, countOf, lootFor: lootForVisitor, addItem, assign, unassign, itemOf, assignedTo, clearLoot, resetAll, recordDonation, recordHandFed, recordRace, recordCup, recordDrop, recordOrbit, setOrbitBuild, setIdentity, forecast, formatDuration };
+    return { state, countOf, lootFor: lootForVisitor, addItem, assign, unassign, itemOf, assignedTo, clearLoot, resetAll, recordDonation, rememberHandle, tipsWithin, recordHandFed, recordRace, recordCup, recordJump, recordDrop, recordOrbit, recordMine, recordArcade, addTickets, spendTickets, redeem, setOrbitBuild, setIdentity, forecast, formatDuration };
   };
-  BL.game = { create, LOOT_TIERS, STACK_MAX, SATS_PER_BANANA, tierFor, lootFor, bananasFor, formatLarge };
+  BL.game = { create, LOOT_TIERS, STACK_MAX, SATS_PER_BANANA, tierFor, lootFor, bananasFor, formatLarge, formatThree, formatFeeRate };
 })();

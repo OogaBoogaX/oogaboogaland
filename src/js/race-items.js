@@ -1,4 +1,9 @@
 // Pickups, crates, boost pads, thrown rocks, peels, boulders, skid marks - every one a fixed pool.
+//
+// Banana pickups feed the turbo meter; skid marks sit in a ring buffer. `use` fires the held item.
+// `ODDS` has four rows by place, the last row for last place. A rock thrown on the brake goes
+// backward and a peel dropped on the brake lies ahead. A pad tops a boost up to its own strength.
+// Skid marks are laid on the first substep of a frame (`update(dt, elapsed, first)`).
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -11,8 +16,9 @@
   const ROCK_SPEED = 26, ROCK_LIFE = 2.6, PEEL_LIFE = 25, BOOST_PAD = 0.9, TURBO = 1.3, SHOUT_RADIUS = 7;
   const ITEMS = { rock: "Rock", peel: "Peel", turbo: "Turbo", shout: "Shout" };
   const ITEM_NAMES = ["rock", "peel", "turbo", "shout"];
-  // ODDS rows by place: leaders draw defensive items, the tail draws catch-up ones.
-  const ODDS = [[0.55, 0.45, 0, 0], [0.35, 0.3, 0.35, 0], [0.25, 0.15, 0.4, 0.2]];
+  // ODDS rows by place: the leaders draw defensive items, the back third catch-up ones, last place the best.
+  const ODDS = [[0.55, 0.45, 0, 0], [0.35, 0.3, 0.35, 0], [0.25, 0.15, 0.4, 0.2], [0.1, 0.1, 0.45, 0.35]];
+  const ROCK_BITS = [models.particleGeometry("#6b625a", 0.09, 0)];
   const SKID_GEO = (() => {
     const geo = models.box({ w: 0.22, h: 0.01, d: 0.7, color: "#2b2521" });
     geo.castShadow = false;
@@ -24,7 +30,6 @@
     v.z = z;
     return v;
   };
-  const ROCK_BITS = [models.particleGeometry("#6b625a", 0.09, 0)];
   const create = (ctx) => {
     const { root, racers, fx } = ctx;
     let track = ctx.track;
@@ -57,12 +62,12 @@
       for (const s of track.spawns.bananas) {
         const node = createNode({ position: { x: s.x, y: s.y + 0.55, z: s.z }, rotation: { x: 0.4, y: 0, z: 0.9 }, scale: { x: 0.5, y: 0.5, z: 0.5 }, geometry: bananaGeo, glow: 1.2 });
         addChild(root, node);
-        bananas.push({ node, x: s.x, y: s.y, z: s.z, taken: 0, phase: fnv1a(`${s.x}/${s.z}`) % 7 });
+        bananas.push({ node, x: s.x, y: s.y, z: s.z, taken: 0, phase: fnv1a(`${s.x}/${s.z}`) % 7, backAt: -1, tookAt: 0 });
       }
       for (const s of track.spawns.crates) {
         const node = createNode({ position: { x: s.x, y: s.y + 0.2, z: s.z }, geometry: raceModels.itemCrate() });
         addChild(root, node);
-        crates.push({ node, x: s.x, y: s.y, z: s.z, taken: 0, phase: fnv1a(`${s.z}/${s.x}`) % 5 });
+        crates.push({ node, x: s.x, y: s.y, z: s.z, taken: 0, phase: fnv1a(`${s.z}/${s.x}`) % 5, backAt: -1, tookAt: 0 });
       }
       for (const s of track.spawns.pads) {
         const node = createNode({ position: { x: s.x, y: s.y + 0.01, z: s.z }, rotation: { x: 0, y: s.heading, z: 0 }, geometry: raceModels.boostPad() });
@@ -74,6 +79,7 @@
         b.live = !!s;
         b.node.visible = b.live;
         if (!s) continue;
+        b.node.geometry = track.hazard === "void" ? raceModels.snowball() : raceModels.boulder();
         b.index = s.index;
         b.x = s.x;
         b.z = s.z;
@@ -107,7 +113,7 @@
     };
     const rollItem = (racer, seed) => {
       const field = racers.racers.length;
-      const tier = racer.rank <= 2 ? 0 : racer.rank >= field - 1 ? 2 : 1;
+      const tier = racer.rank <= 2 ? 0 : racer.rank >= field ? 3 : racer.rank > field * 0.7 ? 2 : 1;
       const odds = ODDS[tier];
       let r = (fnv1a(`${seed}/item`) % 1000) / 1000;
       for (let i = 0; i < odds.length; i++) {
@@ -123,14 +129,15 @@
         break;
       }
       if (!rock) rock = rocks[0];
-      const dir = racer.heading;
+      // Braking throws it backward at whoever is on the tail.
+      const back = racer.throttle < -0.4, dir = racer.heading + (back ? Math.PI : 0);
       rock.live = true;
       rock.owner = racer;
       rock.x = racer.x + Math.sin(dir) * 1.4;
       rock.z = racer.z + Math.cos(dir) * 1.4;
       rock.y = racer.y + 0.9;
-      rock.vx = Math.sin(dir) * (ROCK_SPEED + Math.max(0, racer.speed));
-      rock.vz = Math.cos(dir) * (ROCK_SPEED + Math.max(0, racer.speed));
+      rock.vx = Math.sin(dir) * (ROCK_SPEED + (back ? 0 : Math.max(0, racer.speed)));
+      rock.vz = Math.cos(dir) * (ROCK_SPEED + (back ? 0 : Math.max(0, racer.speed)));
       rock.vy = 2.5;
       rock.life = ROCK_LIFE;
       rock.idx = racer.idx;
@@ -151,8 +158,10 @@
       }
       peel.live = true;
       peel.owner = racer;
-      peel.x = racer.x - Math.sin(racer.heading) * 1.6;
-      peel.z = racer.z - Math.cos(racer.heading) * 1.6;
+      // Braking lays it ahead instead, in the path of whoever is about to pass.
+      const ahead = racer.throttle < -0.4 ? 3 : -1.6;
+      peel.x = racer.x + Math.sin(racer.heading) * ahead;
+      peel.z = racer.z + Math.cos(racer.heading) * ahead;
       peel.y = track.heightAt(peel.x, peel.z, racer.idx);
       peel.life = PEEL_LIFE;
       setVec(peel.node.position, peel.x, peel.y + 0.02, peel.z);
@@ -198,23 +207,26 @@
       skids.node.visible = true;
       skids.node.instanceVersion++;
     };
-    const update = (dt, elapsed) => {
+    // `first` marks the first substep of a frame: skid marks are laid once a frame, not once a substep.
+    const update = (dt, elapsed, first = true) => {
       spinT += dt;
       const list = racers.racers;
       for (let i = 0; i < bananas.length; i++) {
         const b = bananas[i];
         if (b.taken > 0) {
           b.taken -= dt;
-          if (b.taken <= 0) b.node.visible = true;
+          if (b.taken <= 0) {
+            b.node.visible = true;
+            b.backAt = spinT;
+          }
           continue;
         }
-        b.node.rotation.y = spinT * 2.4 + b.phase;
-        b.node.position.y = b.y + 0.55 + Math.sin(spinT * 3 + b.phase) * 0.08;
         for (let k = 0; k < list.length; k++) {
           const r = list[k];
           if (r.respawn > 0 || Math.abs(r.y - b.y) > 1.5) continue;
           if ((r.x - b.x) ** 2 + (r.z - b.z) ** 2 < 1.3) {
             b.taken = BANANA_RESPAWN;
+            b.tookAt = spinT;
             b.node.visible = false;
             if (r.bananas < METER_MAX) r.bananas++;
             if (r.bananas >= METER_MAX) r.meterFull = true;
@@ -227,16 +239,18 @@
         const c = crates[i];
         if (c.taken > 0) {
           c.taken -= dt;
-          if (c.taken <= 0) c.node.visible = true;
+          if (c.taken <= 0) {
+            c.node.visible = true;
+            c.backAt = spinT;
+          }
           continue;
         }
-        c.node.rotation.y = spinT * 1.6 + c.phase;
-        c.node.position.y = c.y + 0.25 + Math.sin(spinT * 2 + c.phase) * 0.1;
         for (let k = 0; k < list.length; k++) {
           const r = list[k];
           if (r.respawn > 0 || r.item || Math.abs(r.y - c.y) > 1.5) continue;
           if ((r.x - c.x) ** 2 + (r.z - c.z) ** 2 < 1.6) {
             c.taken = CRATE_RESPAWN;
+            c.tookAt = spinT;
             c.node.visible = false;
             r.item = rollItem(r, `${elapsed.toFixed(2)}/${r.index}`);
             if (events.onCrate) events.onCrate(r, r.item);
@@ -246,13 +260,13 @@
       }
       for (let i = 0; i < pads.length; i++) {
         const p = pads[i];
-        p.node.glow = 0.8 + Math.sin(spinT * 5 + p.phase) * 0.3;
         for (let k = 0; k < list.length; k++) {
           const r = list[k];
           if (r.respawn > 0 || r.airborne || Math.abs(r.y - p.y) > 1) continue;
           const dx = r.x - p.x, dz = r.z - p.z;
           const along = dx * Math.sin(p.heading) + dz * Math.cos(p.heading), across = dx * Math.cos(p.heading) - dz * Math.sin(p.heading);
-          if (Math.abs(along) < 1.3 && Math.abs(across) < 1.1 && r.boost < BOOST_PAD * 0.5) {
+          // A pad tops a boost up rather than replacing it, so a drift boost is never lost on one.
+          if (Math.abs(along) < 1.3 && Math.abs(across) < 1.1 && r.boost < BOOST_PAD) {
             r.boost = BOOST_PAD;
             if (events.onPad) events.onPad(r);
           }
@@ -333,15 +347,49 @@
           }
         }
       }
-      for (let k = 0; k < list.length; k++) {
+      if (first && ((elapsed * 30) | 0) % 2 === 0) for (let k = 0; k < list.length; k++) {
         const r = list[k];
-        if (!r.drift.active || r.airborne || r.respawn > 0 || r.mount.id === "run") continue;
+        // Rubber marks tarmac, not grass or ice: nothing is laid off the road or on a slippery surface.
+        if (!r.drift.active || r.airborne || r.respawn > 0 || r.offroad || r.mount.id === "run") continue;
         const sx = Math.cos(r.heading) * 0.45, sz = -Math.sin(r.heading) * 0.45;
         const yaw = r.motionHeading;
-        if (((elapsed * 30) | 0) % 2 === 0) {
-          writeSkid(r.x + sx, r.y, r.z + sz, yaw);
-          writeSkid(r.x - sx, r.y, r.z - sz, yaw);
+        writeSkid(r.x + sx, r.y, r.z + sz, yaw);
+        writeSkid(r.x - sx, r.y, r.z - sz, yaw);
+      }
+    };
+    // The pickups' spin and bob and the pads' glow are pure presentation: as skid marks are laid on the
+    // first substep only, these are posed once a frame after the substeps with the same expressions the
+    // substeps used, so the rendered values are identical either way. `tookAt` and `backAt` keep the two
+    // edges exact: a taken pickup holds the take substep's pose (written before the take was seen), and a
+    // respawn that landed on the frame's last substep was never substep-written at all.
+    const pose = () => {
+      for (let i = 0; i < bananas.length; i++) {
+        const b = bananas[i];
+        if (b.taken > 0 || b.backAt === spinT) {
+          if (b.taken > 0) {
+            b.node.rotation.y = b.tookAt * 2.4 + b.phase;
+            b.node.position.y = b.y + 0.55 + Math.sin(b.tookAt * 3 + b.phase) * 0.08;
+          }
+          continue;
         }
+        b.node.rotation.y = spinT * 2.4 + b.phase;
+        b.node.position.y = b.y + 0.55 + Math.sin(spinT * 3 + b.phase) * 0.08;
+      }
+      for (let i = 0; i < crates.length; i++) {
+        const c = crates[i];
+        if (c.taken > 0 || c.backAt === spinT) {
+          if (c.taken > 0) {
+            c.node.rotation.y = c.tookAt * 1.6 + c.phase;
+            c.node.position.y = c.y + 0.25 + Math.sin(c.tookAt * 2 + c.phase) * 0.1;
+          }
+          continue;
+        }
+        c.node.rotation.y = spinT * 1.6 + c.phase;
+        c.node.position.y = c.y + 0.25 + Math.sin(spinT * 2 + c.phase) * 0.1;
+      }
+      for (let i = 0; i < pads.length; i++) {
+        const p = pads[i];
+        p.node.glow = 0.8 + Math.sin(spinT * 5 + p.phase) * 0.3;
       }
     };
     const dispose = () => {
@@ -355,7 +403,7 @@
       bananas.length = crates.length = pads.length = rocks.length = peels.length = boulders.length = 0;
     };
     const stats = () => ({ pickups: bananas.length + crates.length, rocksLive: rocks.filter((r) => r.live).length, peelsLive: peels.filter((p) => p.live).length, skids: skids.filled });
-    return { setTrack, clear, use, update, dispose, stats, events, bananas, crates, pads, rocks, peels, boulders, skids, METER_MAX, ITEMS };
+    return { setTrack, clear, use, update, pose, dispose, stats, events, bananas, crates, pads, rocks, peels, boulders, skids, METER_MAX, ITEMS };
   };
   BL.raceItems = { create, ITEMS, METER_MAX, SKID_CAP, ROCK_CAP, PEEL_CAP };
 })();

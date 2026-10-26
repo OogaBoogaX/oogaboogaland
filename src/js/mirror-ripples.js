@@ -1,4 +1,5 @@
-// Weapon contacts disturb the reflective surface without blocking the shot.
+// Weapon contacts disturb the reflective surface. The hub may also consume an
+// NPC work round at the exact pane contact while player shots continue through.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {}, { mat4 } = BL.math;
@@ -14,17 +15,19 @@
     BL.scene.updateWorld(root);
     mat4.invert(inverse, node.world);
     let next = 0;
-    const state = { waves, active: 0, hits: 0, time: 0, cross, strike, aimAt, continueShot, update, dispose };
+    const state = { waves, active: 0, hits: 0, time: 0, cross, absorb, strike, aimAt, continueShot, pulse, update, dispose };
     const onGlass = (x, y) => x >= bounds.min[0] && x <= bounds.max[0]
-      && y >= bounds.min[1] + (bounds.max[1] - bounds.min[1]) * (node.mirrorReveal || 0) && y <= bounds.max[1]
-      && (!node.mirrorDamage || node.mirrorDamage.contains(x, y));
+      && y >= bounds.min[1] + (bounds.max[1] - bounds.min[1]) * (node.mirrorReveal || 0) && y <= bounds.max[1];
     function intersection(ax, ay, az, bx, by, bz) {
       if (!node.visible || node.mirrorPortal) return -1;
       mat4.transformPoint(a, inverse, ax, ay, az);
       mat4.transformPoint(b, inverse, bx, by, bz);
       const fromZ = a[2] - bounds.min[2], toZ = b[2] - bounds.min[2];
       // Count the arrival at the plane once, including a long frame's sweep.
-      if (fromZ === 0 || fromZ * toZ > 0 || fromZ === toZ) return -1;
+      // A consumed projectile is clamped onto this plane in world space. Its
+      // inverse transform may land a few ulps to either side, so accept an
+      // endpoint at the pane instead of losing the ripple event.
+      if (Math.abs(fromZ) < 1e-7 || fromZ * toZ > 0 && Math.abs(toZ) >= 1e-7 || fromZ === toZ) return -1;
       const t = fromZ / (fromZ - toZ), x = a[0] + (b[0] - a[0]) * t, y = a[1] + (b[1] - a[1]) * t;
       return onGlass(x, y) ? t : -1;
     }
@@ -54,6 +57,14 @@
       const x = a[0] + (b[0] - a[0]) * t, y = a[1] + (b[1] - a[1]) * t;
       return emit(x, y, (1 - t) * dt);
     }
+    function absorb(ax, ay, az, point) {
+      const t = intersection(ax, ay, az, point.x, point.y, point.z);
+      if (t < 0) return false;
+      point.x = ax + (point.x - ax) * t;
+      point.y = ay + (point.y - ay) * t;
+      point.z = az + (point.z - az) * t;
+      return true;
+    }
     function emit(x, y, age) {
       const at = next * 4;
       next = (next + 1) % CAPACITY;
@@ -62,7 +73,10 @@
       state.hits++;
       return true;
     }
-    // Clip a face's section through the mirror plane to the remaining glass.
+    function pulse(x, y, age = 0) {
+      return onGlass(x, y) && emit(x, y, age);
+    }
+    // Clip a face's section through the mirror plane to the glass.
     // Scratch output avoids allocating contacts during a swing.
     function section(ax, ay, bx, by) {
       let enter = 0, leave = 1;
@@ -77,30 +91,6 @@
           enter = Math.max(enter, Math.min(t0, t1)); leave = Math.min(leave, Math.max(t0, t1));
           if (enter > leave) return false;
         }
-      }
-      if (node.mirrorDamage?.stage) {
-        const verts = node.geometry.verts, dx = bx - ax, dy = by - ay;
-        let earliest = Infinity;
-        for (const face of node.geometry.faces) {
-          const a = face.i[0] * 3, b = face.i[1] * 3, c = face.i[2] * 3;
-          const winding = (verts[b] - verts[a]) * (verts[c + 1] - verts[a + 1]) - (verts[b + 1] - verts[a + 1]) * (verts[c] - verts[a]);
-          const sign = winding > 0 ? 1 : -1;
-          let first = enter, last = leave;
-          for (let edge = 0; edge < 3; edge++) {
-            const from = face.i[edge] * 3, to = face.i[(edge + 1) % 3] * 3;
-            const ex = verts[to] - verts[from], ey = verts[to + 1] - verts[from + 1];
-            const start = sign * (ex * (ay - verts[from + 1]) - ey * (ax - verts[from])), delta = sign * (ex * dy - ey * dx);
-            if (Math.abs(delta) < 1e-12) { if (start < 0) { first = Infinity; break; } }
-            else {
-              const t = -start / delta;
-              if (delta > 0) first = Math.max(first, t); else last = Math.min(last, t);
-              if (first > last) break;
-            }
-          }
-          if (first <= last) earliest = Math.min(earliest, first);
-        }
-        if (earliest === Infinity) return false;
-        enter = earliest;
       }
       contact[0] = ax + (bx - ax) * enter; contact[1] = ay + (by - ay) * enter;
       return true;

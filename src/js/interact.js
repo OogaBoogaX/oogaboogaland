@@ -8,14 +8,23 @@
   const DOUBLE_MS = 380;
   const DOUBLE_PX = 24;
   const WHEEL_GAP_MS = 220;
-  const create = ({ canvas, renderer, camera, hooks = {} }) => {
+  const create = ({ canvas, renderer, camera, hooks = {}, preciseHover = false }) => {
     const targets = [];
     const weaponTargets = BL.weaponTargets.create(targets);
     const pointers = new Map();
     const ray = { ox: 0, oy: 0, oz: 0, dx: 0, dy: 0, dz: 0 };
+    const hoverHit = { node: null, owner: null, distance: Infinity };
+    const visibleHit = { node: null, owner: null, distance: Infinity };
+    // Scratch for the per-frame hover path only: every consumer reads the
+    // answer synchronously (tooltip hooks take primitives out of it). The
+    // gesture path keeps its own pick result, which `gesture` retains.
+    const hoverPick = { node: null, owner: null, t: 0 };
+    const hoverPoint = { x: -1, y: -1 };
     const C = new Float32Array(3);
     const aimView = BL.math.mat4.create(), aimInverse = BL.math.mat4.create(), aimUp = { x: 0, y: 1, z: 0 };
+    const aimCursors = new WeakMap();
     let hoverX = -1, hoverY = -1, hoverDirty = false, hovered = null;
+    let hoverIgnored = null;
     let gesture = null;
     let pinchDist = 0;
     let zoomGesture = 0, wheelAt = -Infinity, wheelDirection = 0;
@@ -46,10 +55,10 @@
       m[0] * m[0] + m[1] * m[1] + m[2] * m[2],
       m[4] * m[4] + m[5] * m[5] + m[6] * m[6],
       m[8] * m[8] + m[9] * m[9] + m[10] * m[10]));
-    const pick = (px, py, ignoreCave = null, currentView = false) => {
+    const pickInto = (out, px, py, ignoreCave = null, currentView = false) => {
       if (currentView) {
         BL.math.mat4.lookAt(aimView, camera.position, camera.target, camera.up || aimUp);
-        BL.math.mat4.rayFromView(ray, aimView, renderer.size.width, renderer.size.height, camera.fov, camera.position, px, py);
+        BL.math.mat4.rayFromView(ray, aimView, renderer.size.width, renderer.size.height, camera.fov, camera.position, px, py, camera.orthoMix, camera.orthoHeight);
       } else renderer.ray(px, py, camera, ray);
       let best = null, bestT = Infinity, bestPriority = -Infinity;
       for (const t of targets) {
@@ -70,7 +79,9 @@
         const d2 = lx * lx + ly * ly + lz * lz - tca * tca;
         if (d2 > r * r) continue;
         const thc = Math.sqrt(r * r - d2);
-        const hitT = tca - thc;
+        // Authored controls may refine their broad sphere to the visible surface.
+        const hitT = t.owner.pickRay ? t.owner.pickRay(ray) : tca - thc;
+        if (!Number.isFinite(hitT) || t.owner.pickRay && hitT < 0) continue;
         const priority = t.owner.priority || 0;
         if (priority > bestPriority || (priority === bestPriority && hitT < bestT)) {
           bestT = hitT;
@@ -78,7 +89,31 @@
           best = t;
         }
       }
-      return best ? { node: best.node, owner: best.owner, t: bestT } : null;
+      if (!best) return null;
+      const prop = best.owner.prop;
+      if (preciseHover && best.owner.kind === "prop"
+        && (prop === "bush" || prop === "tree" || prop === "palm" || prop === "canopy")) {
+        // Broad foliage pick spheres can cover a board outside the visible leaves. Use the
+        // same mesh hit as hover, so the tap goes to what the cursor actually points at.
+        if (!weaponTargets.ray(visibleHit, ray.ox, ray.oy, ray.oz, ray.dx, ray.dy, ray.dz,
+            camera.far, ignoreCave, null, true)) return null;
+        out.node = visibleHit.node;
+        out.owner = visibleHit.owner;
+        out.t = visibleHit.distance;
+        return out;
+      }
+      out.node = best.node;
+      out.owner = best.owner;
+      out.t = bestT;
+      return out;
+    };
+    const pick = (px, py, ignoreCave = null, currentView = false) => pickInto({}, px, py, ignoreCave, currentView);
+    const acceptHover = owner => !hoverIgnored || owner.cave !== hoverIgnored;
+    const pickHover = (px, py) => {
+      if (!preciseHover) return pickInto(hoverPick, px, py, hoverIgnored);
+      renderer.ray(px, py, camera, ray);
+      return weaponTargets.ray(hoverHit, ray.ox, ray.oy, ray.oz, ray.dx, ray.dy, ray.dz,
+        camera.far, null, acceptHover, true) ? hoverHit : null;
     };
     const aimPoint = (px, py, out, ignoreCave = null) => {
       // A one-off aim entry must use the current eye, not the renderer's
@@ -94,8 +129,13 @@
       const dx = m[0] * ray.dx + m[4] * ray.dy + m[8] * ray.dz;
       const dy = m[1] * ray.dx + m[5] * ray.dy + m[9] * ray.dz;
       const dz = m[2] * ray.dx + m[6] * ray.dy + m[10] * ray.dz;
-      let nearest = Infinity;
-      for (const face of geometry.faces) {
+      let nearest = Infinity, cursor = null;
+      if (geometry.compactGeometry) {
+        cursor = aimCursors.get(geometry);
+        if (!cursor) { cursor = BL.compactGeometry.createCursor(geometry); aimCursors.set(geometry, cursor); }
+      }
+      for (let index = 0; index < geometry.faces.length; index++) {
+        const face = cursor ? BL.compactGeometry.readFace(geometry, index, cursor) : geometry.faces[index];
         const indices = face.i, a = indices[0] * 3;
         for (let i = 1; i + 1 < indices.length; i++) {
           const b = indices[i] * 3, c = indices[i + 1] * 3;
@@ -155,7 +195,7 @@
     };
     const local = (e) => {
       const r = canvas.getBoundingClientRect();
-      return { x: e.clientX - r.left, y: e.clientY - r.top };
+      return { x: e.clientX - r.left, y: e.clientY - r.top, pointerType: e.pointerType };
     };
     const clearLongPress = () => {
       if (longPressTimer) {
@@ -171,9 +211,14 @@
       return true;
     };
     const onPointerDown = (e) => {
+      const tracked = pointers.get(e.pointerId);
+      if (tracked && tracked.pointerType !== e.pointerType) return;
       const p = local(e);
       pointers.set(e.pointerId, p);
-      if (document.pointerLockElement !== canvas) canvas.setPointerCapture(e.pointerId);
+      if (document.pointerLockElement !== canvas) {
+        // A cancelled or synthetic pointer may no longer exist in the browser.
+        try { canvas.setPointerCapture(e.pointerId); } catch (err) { if (err.name !== "NotFoundError") throw err; }
+      }
       if (pointers.size === 2) {
         clearLongPress();
         if (gesture && gesture.mode === "grab") {
@@ -188,7 +233,7 @@
       }
       if (e.button !== 0 && e.pointerType === "mouse") return;
       const hit = pick(p.x, p.y);
-      gesture = { mode: "pending", start: p, last: p, at: performance.now(), hit, pointerId: e.pointerId, moved: false };
+      gesture = { mode: "pending", start: p, last: p, at: e.timeStamp, hit, pointerId: e.pointerId, moved: false };
       if (hit && hit.owner.grab) {
         if (e.pointerType === "mouse") startGrab(hit, p);
         else {
@@ -200,6 +245,8 @@
       }
     };
     const onPointerMove = (e) => {
+      const tracked = pointers.get(e.pointerId);
+      if (tracked && tracked.pointerType !== e.pointerType) return;
       const p = local(e);
       if (e.pointerType === "mouse") {
         hoverX = p.x;
@@ -246,6 +293,10 @@
       }
     };
     const endGesture = (e, cancelled) => {
+      const tracked = pointers.get(e.pointerId);
+      // The virtual mouse can share an id with a real touch. Its handoff
+      // cancellation must not release a finger or interrupt that pinch.
+      if (tracked && tracked.pointerType !== e.pointerType) return;
       const p = local(e);
       pointers.delete(e.pointerId);
       clearLongPress();
@@ -262,9 +313,10 @@
       if (g.mode === "grab") {
         const dropHit = cancelled ? null : pick(p.x, p.y);
         call("onGrabEnd", g.hit, p, dropHit && dropHit.node !== g.hit.node ? dropHit : null, cancelled);
-      } else if (g.mode === "pending" && !cancelled && performance.now() - g.at < TAP_MS) {
+      } else if (g.mode === "pending" && !cancelled && e.timeStamp - g.at < TAP_MS) {
         const node = g.hit ? g.hit.node : null;
-        const now = performance.now();
+        // Input timestamps keep a quick tap quick even when a frame delays its handlers.
+        const now = e.timeStamp;
         if (now - lastTap.at < DOUBLE_MS && sameTarget(g.hit) && Math.hypot(p.x - lastTap.x, p.y - lastTap.y) < DOUBLE_PX) {
           lastTap.at = -Infinity;
           lastTap.node = null;
@@ -303,6 +355,7 @@
       call("onZoom", Math.exp(Math.max(-1200, Math.min(1200, delta)) * 2.5e-3), zoomGesture, p.x, p.y);
     };
     const onContextMenu = (e) => e.preventDefault();
+    let suspended = false;
     canvas.addEventListener("pointerdown", onPointerDown);
     canvas.addEventListener("pointermove", onPointerMove);
     canvas.addEventListener("pointerup", onPointerUp);
@@ -311,35 +364,45 @@
     canvas.addEventListener("wheel", onWheel, { passive: false });
     canvas.addEventListener("contextmenu", onContextMenu);
     const update = () => {
+      // A view change can hide our own name without any pointer movement.
+      const ignored = call("hoverIgnore") || null;
+      if (ignored !== hoverIgnored) { hoverIgnored = ignored; hoverDirty = true; }
       if (!hoverDirty) return;
       hoverDirty = false;
       const busy = gesture && gesture.mode !== "pending";
-      const hit = !busy && hoverX >= 0 ? pick(hoverX, hoverY) : null;
+      const hit = !busy && hoverX >= 0 ? pickHover(hoverX, hoverY) : null;
       const node = hit ? hit.node : null;
       if (node !== hovered) {
         hovered = node;
-        call("onHover", hit, { x: hoverX, y: hoverY });
+        hoverPoint.x = hoverX; hoverPoint.y = hoverY;
+        call("onHover", hit, hoverPoint);
         if (!busy) canvas.style.cursor = hit ? "pointer" : "grab";
       } else if (hit) {
-        call("onHoverMove", hit, { x: hoverX, y: hoverY });
+        hoverPoint.x = hoverX; hoverPoint.y = hoverY;
+        call("onHoverMove", hit, hoverPoint);
       }
     };
-    const reset = () => {
+    const reset = (preserveZoom = false) => {
       clearLongPress();
       if (gesture && gesture.mode === "grab") call("onGrabEnd", gesture.hit, gesture.last, null, true);
-      gesture = null;
-      for (const pointerId of pointers.keys()) if (canvas.hasPointerCapture(pointerId)) canvas.releasePointerCapture(pointerId);
-      pointers.clear();
-      pinchDist = 0;
+      if (preserveZoom !== true || !gesture || gesture.mode !== "pinch") {
+        gesture = null;
+        for (const pointerId of pointers.keys()) if (canvas.hasPointerCapture(pointerId)) canvas.releasePointerCapture(pointerId);
+        pointers.clear();
+        pinchDist = 0;
+      }
       lastTap.at = -Infinity;
       lastTap.node = lastTap.owner = null;
       hoverX = hoverY = -1;
       hoverDirty = false;
+      hoverIgnored = null;
       if (hovered) call("onHover", null, { x: -1, y: -1 });
       hovered = null;
       canvas.style.cursor = "grab";
     };
-    const dispose = () => {
+    const suspend = () => {
+      if (suspended) return;
+      suspended = true;
       reset();
       canvas.removeEventListener("pointerdown", onPointerDown);
       canvas.removeEventListener("pointermove", onPointerMove);
@@ -348,11 +411,22 @@
       canvas.removeEventListener("pointerleave", onPointerLeave);
       canvas.removeEventListener("wheel", onWheel);
       canvas.removeEventListener("contextmenu", onContextMenu);
-      targets.length = 0;
     };
+    const resume = () => {
+      if (!suspended) return;
+      suspended = false;
+      canvas.addEventListener("pointerdown", onPointerDown);
+      canvas.addEventListener("pointermove", onPointerMove);
+      canvas.addEventListener("pointerup", onPointerUp);
+      canvas.addEventListener("pointercancel", onPointerCancel);
+      canvas.addEventListener("pointerleave", onPointerLeave);
+      canvas.addEventListener("wheel", onWheel, { passive: false });
+      canvas.addEventListener("contextmenu", onContextMenu);
+    };
+    const dispose = () => { suspend(); targets.length = 0; };
     return {
-      add, remove, pick, aimPoint, weaponTargets, groundPoint, update, reset, dispose, get targetCount() {
-        return targets.length;
+      add, remove, pick, aimPoint, weaponTargets, groundPoint, update, reset, suspend, resume, dispose, get targetCount() {
+        return suspended ? 0 : targets.length;
       },
       // A drag is still held, even if it has paused.
       get orbiting() {
@@ -360,5 +434,5 @@
       }
     };
   };
-  BL.interact = { create };
+  BL.interact = { create, DOUBLE_MS };
 })();

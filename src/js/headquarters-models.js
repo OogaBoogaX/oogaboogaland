@@ -1,14 +1,16 @@
+// Cached geometry for the underground HQ and its basement: `room`, `entranceRamp`, `roomEntrance`,
+// `rampEntrance`, `mattress` (blanket plus a pillow carrying the same LifeHash a quarter turn round),
+// `roomSign` (the first eight hex of that hash), `MATTRESS` and `ROOM_RADIUS`. Eleven HQ and eight basement
+// slots reuse their geometry across visits.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const { box, merge } = BL.models;
-  const cached = (build) => {
-    let value = null;
-    return () => value || (value = build());
-  };
+  // Construction checkpoints (see build-tasks.js). They reach it only when sliced, so an unsliced build runs without it.
+  const pause = function* (slice) { if (slice) yield* BL.buildTasks.pause(slice); };
+  const { box, merge, cached } = BL.models;
   const variants = (build) => {
-    const cache = new Array(11);
-    return (i = 0) => cache[i % 11] || (cache[i % 11] = build(i % 11));
+    const read = BL.models.variants(build);
+    return (i = 0) => read(i % 11);
   };
   const STONE = ["#7d6f61", "#5e5449", "#877869"];
   const MOSS = ["#6f7d3e", "#7b8945", "#65733a"];
@@ -16,12 +18,13 @@
   const MATTRESS = { width: 1.45, depth: 2.45, height: 0.345, wallInset: 0.65, surface: 0.245, pillowTop: 0.345, pillowZ: -0.82 };
   // 19 room slots: eleven HQ plus eight basement.
   // Static geometry is reused across visits without retaining a departed room or scene.
-  const mattressCache = new Array(19);
-  const roomSignCache = new Array(19);
-  const fabric = (pattern, width, depth, top, bottom, centerZ, kind) => {
+  const mattressCache = BL.models.scopedMap();
+  const roomSignCache = BL.models.scopedMap();
+  const rampMarkerCache = BL.models.scopedMap();
+  const fabricSteps = function* (pattern, width, depth, top, bottom, centerZ, kind, slice = null) {
     const geo = { verts: [], faces: [], lines: [] }, size = pattern.width, colors = pattern.colors;
     const cells = new Uint32Array(size * size), used = new Uint8Array(cells.length);
-    for (let i = 0; i < cells.length; i++) cells[i] = colors[i * 3] << 16 | colors[i * 3 + 1] << 8 | colors[i * 3 + 2];
+    for (let i = 0; i < cells.length; i++) { cells[i] = colors[i * 3] << 16 | colors[i * 3 + 1] << 8 | colors[i * 3 + 2]; }
     const quad = (a, b, c, d, color) => {
       const i = geo.verts.length / 3;
       geo.verts.push(...a, ...b, ...c, ...d);
@@ -29,25 +32,25 @@
     };
     const xAt = (x) => (x / size - 0.5) * width, zAt = (z) => (z / size - 0.5) * depth + centerZ;
     // Merge equal-colour rectangles: every LifeHash pixel is kept, face count stays small in both renderers.
-    for (let z = 0; z < size; z++) for (let x = 0; x < size; x++) {
+    for (let z = 0; z < size; z++) { yield* pause(slice); for (let x = 0; x < size; x++) {
       const start = z * size + x, color = cells[start];
       if (used[start]) continue;
       let w = 1, h = 1;
-      while (x + w < size && !used[start + w] && cells[start + w] === color) w++;
+      while (x + w < size && !used[start + w] && cells[start + w] === color) { w++; }
       rows: while (z + h < size) {
-        for (let dx = 0; dx < w; dx++) if (used[start + h * size + dx] || cells[start + h * size + dx] !== color) break rows;
+        for (let dx = 0; dx < w; dx++) { if (used[start + h * size + dx] || cells[start + h * size + dx] !== color) break rows; }
         h++;
       }
-      for (let dz = 0; dz < h; dz++) used.fill(1, start + dz * size, start + dz * size + w);
+      for (let dz = 0; dz < h; dz++) { used.fill(1, start + dz * size, start + dz * size + w); }
       const x0 = xAt(x), x1 = xAt(x + w), z0 = zAt(z), z1 = zAt(z + h);
       quad([x0, top, z0], [x0, top, z1], [x1, top, z1], [x1, top, z0], color);
-    }
+    } }
     // Edge pixels continue down the case and sheet so the sides carry the same fabric, not an unprinted block.
-    for (let edge = 0; edge < 4; edge++) for (let i = 0; i < size;) {
+    for (let edge = 0; edge < 4; edge++) { for (let i = 0; i < size;) {
       const pixel = (n) => edge < 2 ? (edge ? size - 1 : 0) * size + n : n * size + (edge === 3 ? size - 1 : 0);
       const color = cells[pixel(i)];
       let end = i + 1;
-      while (end < size && cells[pixel(end)] === color) end++;
+      while (end < size && cells[pixel(end)] === color) { end++; }
       if (edge < 2) {
         const x0 = xAt(i), x1 = xAt(end), z = zAt(edge ? size : 0);
         if (edge) quad([x0, bottom, z], [x1, bottom, z], [x1, top, z], [x0, top, z], color);
@@ -58,36 +61,52 @@
         else quad([x, bottom, z0], [x, bottom, z1], [x, top, z1], [x, top, z0], color);
       }
       i = end;
-    }
+    } }
     return geo;
   };
-  const mattress = (room) => {
+  const mattressSteps = function* (room, slice = null) {
     const roomKey = [room.x, room.floor, room.z].map((n) => Number(n.toFixed(6))).join(",");
-    const slot = room.index + (room.basement ? 11 : 0), cached = mattressCache[slot];
+    const slot = room.index + (room.basement ? 11 : 0), cached = mattressCache.get(slot);
     if (cached && cached.mattress.roomKey === roomKey) return cached;
     const sheet = { seed: `room:${roomKey}:sheet` };
     sheet.pattern = BL.lifehash.make(sheet.seed);
     // The pillow carries the same LifeHash rotated a quarter turn, following the bedding's long axis.
     const pattern = sheet.pattern, colors = new Uint8Array(pattern.colors.length), size = pattern.width;
-    for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    for (let y = 0; y < size; y++) { for (let x = 0; x < size; x++) {
       const from = ((size - 1 - x) * size + y) * 3, to = (y * size + x) * 3;
       colors[to] = pattern.colors[from]; colors[to + 1] = pattern.colors[from + 1]; colors[to + 2] = pattern.colors[from + 2];
-    }
+    } }
     const pillow = { seed: sheet.seed, pattern: { width: size, height: size, colors, hash: pattern.hash } };
     const base = box({ w: MATTRESS.width - 0.02, h: 0.035, d: MATTRESS.depth - 0.02, color: "#c6b997", offset: { y: 0.0175 } });
     // The blanket is the top surface; a second buried top can sort in front of it in the Canvas painter.
     base.faces.splice(4, 1);
     const geo = merge(
       base,
-      fabric(sheet.pattern, MATTRESS.width, MATTRESS.depth, MATTRESS.surface, 0.035, 0, "sheet"),
-      fabric(pillow.pattern, 0.9, 0.5, MATTRESS.pillowTop, MATTRESS.surface, MATTRESS.pillowZ, "pillow")
+      (yield* fabricSteps(sheet.pattern, MATTRESS.width, MATTRESS.depth, MATTRESS.surface, 0.035, 0, "sheet", slice)),
+      (yield* fabricSteps(pillow.pattern, 0.9, 0.5, MATTRESS.pillowTop, MATTRESS.surface, MATTRESS.pillowZ, "pillow", slice))
     );
     geo.mattress = { roomKey, width: MATTRESS.width, depth: MATTRESS.depth, height: MATTRESS.height, sheet, pillow };
-    mattressCache[slot] = geo;
+    mattressCache.set(slot, geo);
     return geo;
   };
-  const roomSign = (room) => {
-    const bedding = mattress(room).mattress, slot = room.index + (room.basement ? 11 : 0), cached = roomSignCache[slot];
+  const finishSteps = (steps) => { let next; do { next = steps.next(); } while (!next.done); return next.value; };
+  const fabric = (...args) => finishSteps(fabricSteps(...args));
+  const mattress = (room) => finishSteps(mattressSteps(room));
+  // A plain sheet and pillow have exactly the finished bed's support and silhouette. Only the LifeHash ink waits.
+  const mattressPlaceholder = (room) => {
+    const roomKey = [room.x, room.floor, room.z].map(n => Number(n.toFixed(6))).join(",");
+    const seed = `room:${roomKey}:sheet`, pattern = { width: 1, height: 1, colors: new Uint8Array([198, 185, 151]), hash: BL.lifehash.hash(seed) };
+    const sheet = { seed, pattern }, pillow = { seed, pattern };
+    const base = box({ w: MATTRESS.width - 0.02, h: 0.035, d: MATTRESS.depth - 0.02, color: "#c6b997", offset: { y: 0.0175 } });
+    base.faces.splice(4, 1);
+    const geo = merge(base, fabric(pattern, MATTRESS.width, MATTRESS.depth, MATTRESS.surface, 0.035, 0, "sheet"),
+      fabric(pattern, 0.9, 0.5, MATTRESS.pillowTop, MATTRESS.surface, MATTRESS.pillowZ, "pillow"));
+    geo.mattress = { roomKey, width: MATTRESS.width, depth: MATTRESS.depth, height: MATTRESS.height, sheet, pillow };
+    return geo;
+  };
+  const roomSign = (room, lightweight = false) => {
+    const roomKey = [room.x, room.floor, room.z].map(n => Number(n.toFixed(6))).join(",");
+    const bedding = lightweight ? { roomKey, sheet: { pattern: { hash: BL.lifehash.hash(`room:${roomKey}:sheet`) } } } : mattress(room).mattress, slot = room.index + (room.basement ? 11 : 0), cached = roomSignCache.get(slot);
     if (cached && cached.roomLifehashSign.roomKey === bedding.roomKey) return cached;
     const hash = bedding.sheet.pattern.hash, text = hash.slice(0, 8).toUpperCase(), width = 2.12, height = 0.72, cell = 0.055, pixel = 0.047;
     const geo = merge(
@@ -120,9 +139,63 @@
     }
     geo.roomLifehashSign = { roomKey: bedding.roomKey, hash, lines: [text], width: width * size, height: height * size,
       board: new Float64Array([-width * size / 2, (-height / 2 - 0.63) * size, 0.04 * size, width * size / 2, (height / 2 - 0.63) * size, 0.1455 * size]) };
-    roomSignCache[slot] = geo;
+    roomSignCache.set(slot, geo);
     return geo;
   };
+  const RAMP_MARKER_GLYPHS = {
+    H: ["10001", "10001", "10001", "11111", "10001", "10001", "10001"],
+    Q: ["01110", "10001", "10001", "10001", "10101", "01001", "10110"],
+    B: ["11110", "10001", "10001", "11110", "10001", "10001", "11110"],
+    1: ["00100", "01100", "00100", "00100", "00100", "00100", "01110"]
+  };
+  // Raised floor paint for the overhead combat map. The denser 5x7 alphabet
+  // remains legible at bird's-eye distance without adding a backing plate.
+  // Keep the word's slots in order; HQ retains its mirrored glyphs while B1
+  // uses each glyph's original horizontal orientation.
+  const rampMarkerLabel = (label) => {
+    label = String(label).toUpperCase();
+    const cached = rampMarkerCache.get(label);
+    if (cached) return cached;
+    const visual = label;
+    const parts = [], cell = 0.11, pixel = 0.086, height = 0.025;
+    let cells = -1;
+    for (const ch of visual) cells += ch === " " ? 3 : 6;
+    let cursor = -cells * cell / 2;
+    for (const ch of visual) {
+      if (ch === " ") { cursor += cell * 3; continue; }
+      const glyph = RAMP_MARKER_GLYPHS[ch];
+      if (!glyph) throw new Error(`No ramp-marker glyph for "${ch}"`);
+      for (let row = 0; row < glyph.length; row++) for (let col = 0; col < glyph[row].length; col++) {
+        if (glyph[row][col] !== "1") continue;
+        parts.push(box({ w: pixel, h: height, d: pixel, color: "#f5c542", emissive: 0.45,
+          offset: { x: cursor + (label === "B1" ? col + 0.5 : glyph[row].length - col - 0.5) * cell, y: height / 2, z: (row - 3) * cell } }));
+      }
+      cursor += cell * 6;
+    }
+    const geometry = merge(...parts);
+    geometry.castShadow = false;
+    geometry.rampMarker = { kind: "label", label, visual, columns: 5, rows: 7 };
+    rampMarkerCache.set(label, geometry);
+    return geometry;
+  };
+  const rampMarkerArrow = cached(() => {
+    const parts = [], height = 0.025;
+    const bar = (length, x, z, yaw = 0) => {
+      const geo = box({ w: 0.11, h: height, d: length, color: "#f5c542", emissive: 0.45, offset: { y: height / 2 } });
+      const c = Math.cos(yaw), s = Math.sin(yaw);
+      for (let i = 0; i < geo.verts.length; i += 3) {
+        const px = geo.verts[i], pz = geo.verts[i + 2];
+        geo.verts[i] = px * c + pz * s + x;
+        geo.verts[i + 2] = pz * c - px * s + z;
+      }
+      return geo;
+    };
+    parts.push(bar(0.72, 0, -0.2), bar(0.42, -0.145, 0.3, -Math.PI * 0.75), bar(0.42, 0.145, 0.3, Math.PI * 0.75));
+    const geometry = merge(...parts);
+    geometry.castShadow = false;
+    geometry.rampMarker = { kind: "arrow", direction: "+z" };
+    return geometry;
+  });
   const room = cached(() => {
     const parts = [box({ w: 1.3, h: 0.04, d: 1.3, color: "#39352d", offset: { y: 0.025 } })];
     for (let i = 0; i < 10; i++) {
@@ -146,7 +219,7 @@
     geo.headquartersRamp = true;
     return geo;
   });
-  const buildRoomEntrance = (i, lightLintel) => {
+  const buildRoomEntrance = (i, lightLintel, openTop = false) => {
     const rand = BL.math.mulberry32(827 + i * 311), parts = [];
     for (const side of [-1, 1]) for (let row = 0; row < 8; row++) {
       const x = side * (2.25 + (row + i) % 3 * 0.07), y = 0.25 + row * 0.5, depth = 0.52 + rand() * 0.18;
@@ -155,7 +228,7 @@
         parts.push(box({ w: 0.245, h: 0.245, d: 0.025, color: MOSS[(row + i) % MOSS.length], offset: { x: x + side * 0.08, y: y + 0.12, z: depth * 0.5 - 0.045 } }));
       }
     }
-    for (let col = 0; col < 8; col++) {
+    for (let col = 0; !openTop && col < 8; col++) {
       const x = -2.1 + col * 0.6, y = 3.96 + (col + i) % 3 * 0.04, depth = 0.58 + rand() * 0.15;
       const lintel = box({ w: 0.62, h: 0.52, d: depth, color: lightLintel ? STONE[2] : STONE[(col + i) % STONE.length], offset: { x, y, z: -0.06 } });
       for (const face of lintel.faces) face.headquartersEntranceLintel = true;
@@ -175,6 +248,9 @@
     return geometry;
   };
   const roomEntrance = variants((i) => buildRoomEntrance(i, false));
-  const rampEntrance = variants((i) => buildRoomEntrance(i, true));
-  BL.headquartersModels = { room, entranceRamp, roomEntrance, rampEntrance, mattress, roomSign, MATTRESS, ROOM_RADIUS };
+  // The basement ramps are read from above. Side jambs frame their entrances,
+  // but a lintel would cover the B1 floor mark and recreate a roof across the
+  // opening that the terrain cutaway has already exposed.
+  const rampEntrance = variants((i) => buildRoomEntrance(i, true, true));
+  BL.headquartersModels = { room, entranceRamp, roomEntrance, rampEntrance, mattress, mattressSteps, mattressPlaceholder, roomSign, rampMarkerLabel, rampMarkerArrow, MATTRESS, ROOM_RADIUS };
 })();

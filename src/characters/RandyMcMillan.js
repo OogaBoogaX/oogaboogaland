@@ -5,7 +5,7 @@
     handle: "RandyMcMillan",
     joined: 1788800919,
     lastCommit: 1788210011,
-    look: { hairless: true, noBrow: true, face: "smirk", hatY: 11, skin: "#f3b52a", hair: "#151515" },
+    look: { portrait: { min: [-1, -2, -1], max: [7, 10, 8] }, hairless: true, noBrow: true, face: "smirk", hatY: 11, skin: "#f3b52a", hair: "#151515" },
     dress: {
       // The Bee: black bands round the fuzz and two pale wings folded off the back
       torso(k, v) {

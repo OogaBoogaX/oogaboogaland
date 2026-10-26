@@ -2,11 +2,17 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const { clamp } = BL.math;
+  const { BUTTON: PAD, state: pad } = BL.gamepad;
   const KEYS = {
     w: "forward", s: "back", a: "left", d: "right", q: "yawLeft", e: "yawRight", r: "pitchDown", f: "pitchUp",
     z: "up", " ": "up", x: "down", arrowup: "forward", arrowdown: "back", arrowleft: "left", arrowright: "right", shift: "sprint"
   };
   const KNOB = 18;
+  const SHIFT_KEYS = ["ShiftLeft", "ShiftRight", "Shift"];
+  const keyName = (e) => e.key === "Shift" && (e.code === "ShiftRight" || e.location === 2) ? "peek" : KEYS[e.key.toLowerCase()];
+  const uiKey = (e) => e.target && (e.target.isContentEditable || e.target.closest
+    && (e.target.closest("input, textarea, select, [role='dialog'], dialog, #sheet")
+      || (e.key === "Tab" || e.key === "Enter" || e.key === " ") && e.target.closest("button, a[href], summary, [role='button']")));
   // Joystick state x/y track the pointer normalized to -1..1.
   const joystick = (el) => {
     const knob = el.firstElementChild;
@@ -40,29 +46,98 @@
       knob.style.transform = "";
       el.classList.remove("live");
     };
+    let listening = true;
     el.addEventListener("pointerdown", onDown);
     el.addEventListener("pointermove", onMove);
     el.addEventListener("pointerup", onUp);
     el.addEventListener("pointercancel", onUp);
+    el.addEventListener("lostpointercapture", onUp);
+    s.reset = () => onUp({ pointerId: s.id });
+    s.resume = () => {
+      if (listening) return;
+      listening = true;
+      el.addEventListener("pointerdown", onDown);
+      el.addEventListener("pointermove", onMove);
+      el.addEventListener("pointerup", onUp);
+      el.addEventListener("pointercancel", onUp);
+      el.addEventListener("lostpointercapture", onUp);
+    };
     s.dispose = () => {
+      if (!listening) return;
+      listening = false;
       el.removeEventListener("pointerdown", onDown);
       el.removeEventListener("pointermove", onMove);
       el.removeEventListener("pointerup", onUp);
       el.removeEventListener("pointercancel", onUp);
+      el.removeEventListener("lostpointercapture", onUp);
       onUp({ pointerId: s.id });
     };
     return s;
   };
-  const create = ({ move = null, look = null, boost = null, chord = null, onAction = null, pressActions = false, shooter = () => false } = {}) => {
-    const held = { forward: 0, back: 0, left: 0, right: 0, yawLeft: 0, yawRight: 0, pitchDown: 0, pitchUp: 0, up: 0, space: 0, down: 0, boost: 0, chord: 0, sprint: 0 };
-    const axes = { x: 0, y: 0, up: 0, yaw: 0, pitch: 0, sprint: 0 };
-    let spaceDown = false, boostPointer = null, boostClick = false;
-    const typing = (e) => e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || (e.target.closest && e.target.closest("dialog")));
+  // Joystick bases, a hold-to-climb button, a canvas whose mouse chord walks, and a Space handler
+  const create = ({ move = null, look = null, boost = null, chord = null, onAction = null, pressActions = false, tabNavigation = false, shooter = () => false, canDescend = () => true } = {}) => {
+    const held = { forward: 0, back: 0, left: 0, right: 0, yawLeft: 0, yawRight: 0, pitchDown: 0, pitchUp: 0, up: 0, space: 0, down: 0, boost: 0, chord: 0, sprint: 0, peek: 0 };
+    const axes = { x: 0, y: 0, up: 0, yaw: 0, pitch: 0, keyPitch: 0, orbitYaw: 0, sprint: 0, peek: 0, shiftTap: 0 };
+    let pitchBorrowed = false;
+    let spaceDown = false, boostPointer = null, boostClick = false, shiftAt = 0, shiftUsed = false, shiftTap = 0;
+    let padFrame = -1, padUp = 0, padSprint = 0;
+    const downKeys = new Set(), blockedKeys = new Set();
+    let tabConsumed = false;
+    let pointerButtons = 0, blockedPointerButtons = 0;
+    const typing = (e) => tabNavigation ? uiKey(e) : e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA"
+      || e.target.closest && e.target.closest("dialog, #sheet"));
+    const consumeKey = (e) => { e.preventDefault(); e.stopImmediatePropagation(); };
+    const consumeTab = (e) => { tabConsumed = true; consumeKey(e); };
+    // Runs before actor shortcuts. Tab cancels held input even when the
+    // browser owns navigation; those keys need a release before playing again.
+    const captureKeyDown = (e) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === "Tab") {
+        if (e.repeat) { if (tabConsumed) consumeKey(e); return; }
+        tabConsumed = false;
+        for (const key of downKeys) blockedKeys.add(key);
+        blockedPointerButtons |= pointerButtons;
+        reset();
+        return;
+      }
+      if (uiKey(e)) return;
+      const key = e.code || e.key;
+      // A fresh press proves release, including a keyup missed while unfocused.
+      // Repeats from an interrupted hold remain blocked.
+      if (!e.repeat) {
+        // Blur forgets physical holds; Tab retains them. Either fresh Shift
+        // recovers stale blur blocks, but cannot release a Shift held through Tab.
+        if (e.key === "Shift") for (const shift of SHIFT_KEYS) if (!downKeys.has(shift)) blockedKeys.delete(shift);
+        blockedKeys.delete(key);
+      }
+      if (blockedKeys.has(key)
+        || e.shiftKey && (blockedKeys.has("ShiftLeft") || blockedKeys.has("ShiftRight") || blockedKeys.has("Shift"))) { consumeKey(e); return; }
+      // A physical keyboard has a bounded set of simultaneous presses.
+      if (downKeys.size < 64) downKeys.add(key);
+    };
+    const captureKeyUp = (e) => {
+      const key = e.code || e.key;
+      downKeys.delete(key); blockedKeys.delete(key);
+      if (e.key === "Tab") tabConsumed = false;
+    };
+    const releaseKeys = () => {
+      downKeys.clear(); blockedKeys.clear(); tabConsumed = false;
+      pointerButtons = blockedPointerButtons = 0;
+    };
+    const blurKeys = () => {
+      for (const key of downKeys) blockedKeys.add(key);
+      downKeys.clear(); tabConsumed = false;
+      pointerButtons = blockedPointerButtons = 0;
+    };
     const onKeyDown = (e) => {
       if (e.metaKey || e.ctrlKey || e.altKey || typing(e)) return;
-      const name = pressActions && e.key === " " ? "space" : KEYS[e.key.toLowerCase()];
+      const name = pressActions && e.key === " " ? "space" : keyName(e);
       if (!name) return;
       if (e.key === " " || e.key.startsWith("Arrow")) e.preventDefault();
+      if (name === "peek" && !held.peek) {
+        shiftAt = e.timeStamp;
+        shiftUsed = !!(held.left || held.right);
+      } else if ((name === "left" || name === "right") && held.peek) shiftUsed = true;
       if (pressActions && e.key === " ") {
         if (spaceDown || e.repeat) return;
         spaceDown = true;
@@ -71,7 +146,8 @@
       held[name] = 1;
     };
     const onKeyUp = (e) => {
-      const name = pressActions && e.key === " " ? "space" : KEYS[e.key.toLowerCase()];
+      const name = pressActions && e.key === " " ? "space" : keyName(e);
+      if (name === "peek" && held.peek && !shiftUsed && e.timeStamp - shiftAt <= 300) shiftTap = 1;
       if (name) held[name] = 0;
       if (e.key === " ") spaceDown = false;
     };
@@ -80,10 +156,20 @@
       spaceDown = false;
       boostPointer = null;
       boostClick = false;
+      shiftAt = shiftTap = 0;
+      shiftUsed = false;
+      // A pad press not yet read is dropped too, so closing a menu never acts on the press made inside it.
+      padUp = padSprint = 0;
+      padFrame = pad.frame;
     };
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
     window.addEventListener("blur", onBlur);
+    if (tabNavigation) {
+      window.addEventListener("keydown", captureKeyDown, true);
+      window.addEventListener("keyup", captureKeyUp, true);
+      window.addEventListener("blur", blurKeys);
+    }
     const moveStick = move ? joystick(move) : null;
     const lookStick = look ? joystick(look) : null;
     // A pointer press has the same action/thrust priority as Space.
@@ -102,7 +188,7 @@
       held.boost = 0;
     };
     const onBoostClick = (e) => {
-      if (boostClick && e.detail > 0) { e.preventDefault(); e.stopImmediatePropagation(); }
+      if (boostClick && e.detail > 0) { e.preventDefault(); e.stopImmediatePropagation(); boost.blur(); }
       boostClick = false;
     };
     if (boost) {
@@ -114,7 +200,12 @@
     }
     // Both mouse buttons down means forward (as W); a chorded press arrives as a move event.
     const onChord = (e) => {
-      if (e.pointerType === "mouse") held.chord = (e.buttons & 3) === 3 ? 1 : 0;
+      if (e.pointerType !== "mouse") return;
+      pointerButtons = e.buttons;
+      // A new pointerdown means every previous mouse button was released,
+      // even if that release happened outside the canvas after Tab.
+      blockedPointerButtons = e.type === "pointerdown" ? 0 : blockedPointerButtons & e.buttons;
+      held.chord = (e.buttons & ~blockedPointerButtons & 3) === 3 ? 1 : 0;
     };
     if (chord) {
       chord.addEventListener("pointerdown", onChord);
@@ -122,20 +213,48 @@
       chord.addEventListener("pointerup", onChord);
       chord.addEventListener("pointercancel", onChord);
     }
+    // A pad's sticks are the touch sticks, its A is Space (each press acted on once, however often `read` runs) and a
+    // click of its left stick runs until the stick lets go.
+    const readPad = () => {
+      if (pad.frame !== padFrame) {
+        padFrame = pad.frame;
+        if (pad.pressed & PAD.a) padUp = onAction && onAction() ? 0 : 1;
+        if (pad.released & PAD.a) padUp = 0;
+        if (pad.pressed & PAD.ls) padSprint = 1;
+      }
+      if (!pad.lx && !pad.ly) padSprint = 0;
+    };
     // Sign convention: yaw positive is left, pitch positive is down.
     const read = () => {
-      axes.x = clamp(held.right - held.left + (moveStick ? moveStick.x : 0), -1, 1);
-      axes.y = clamp(held.forward - held.back + (shooter() ? 0 : held.chord) + (moveStick ? moveStick.y : 0), -1, 1);
-      axes.up = clamp(held.up + held.space + held.boost - held.down, -1, 1);
-      axes.yaw = clamp((shooter() ? 0 : held.yawLeft - held.yawRight) - (lookStick ? lookStick.x : 0), -1, 1);
-      axes.pitch = clamp((shooter() ? 0 : held.pitchDown - held.pitchUp) - (lookStick ? lookStick.y : 0), -1, 1);
-      axes.sprint = shooter() ? held.sprint : 0;
+      readPad();
+      axes.x = clamp(held.right - held.left + (moveStick ? moveStick.x : 0) + pad.lx, -1, 1);
+      axes.y = clamp(held.forward - held.back + (shooter() ? 0 : held.chord) + (moveStick ? moveStick.y : 0) + pad.ly, -1, 1);
+      axes.up = clamp(held.up + held.space + held.boost + padUp - (canDescend() ? held.down : 0), -1, 1);
+      // Bird's-eye combat rotates with Q/E while its look stick aims the pointer.
+      axes.orbitYaw = held.yawLeft - held.yawRight;
+      axes.yaw = clamp((shooter() ? 0 : held.yawLeft - held.yawRight) - (lookStick ? lookStick.x : 0) - pad.rx, -1, 1);
+      // R and F pitch the view unless a scene borrows them (`borrowPitch`), which reads them as `keyPitch` instead.
+      axes.keyPitch = held.pitchDown - held.pitchUp;
+      axes.pitch = clamp((shooter() || pitchBorrowed ? 0 : axes.keyPitch) - (lookStick ? lookStick.y : 0) - pad.ry, -1, 1);
+      axes.sprint = Math.max(held.sprint, padSprint);
+      axes.peek = shooter() ? held.peek : 0;
+      axes.shiftTap = shiftTap;
+      shiftTap = 0;
       return axes;
     };
+    let listening = true;
     const dispose = () => {
+      if (!listening) return;
+      listening = false;
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);
+      if (tabNavigation) {
+        window.removeEventListener("keydown", captureKeyDown, true);
+        window.removeEventListener("keyup", captureKeyUp, true);
+        window.removeEventListener("blur", blurKeys);
+      }
+      releaseKeys();
       if (boost) {
         boost.removeEventListener("pointerdown", onBoostDown);
         boost.removeEventListener("pointerup", onBoostUp);
@@ -158,7 +277,37 @@
       boostPointer = null;
       boostClick = false;
     };
-    return { read, axes, clearPointer, dispose };
+    const reset = () => { onBlur(); if (moveStick) moveStick.reset(); if (lookStick) lookStick.reset(); };
+    const borrowPitch = (on) => { pitchBorrowed = !!on; };
+    const resume = () => {
+      if (listening) return;
+      reset();
+      listening = true;
+      window.addEventListener("keydown", onKeyDown);
+      window.addEventListener("keyup", onKeyUp);
+      window.addEventListener("blur", onBlur);
+      if (tabNavigation) {
+        window.addEventListener("keydown", captureKeyDown, true);
+        window.addEventListener("keyup", captureKeyUp, true);
+        window.addEventListener("blur", blurKeys);
+      }
+      if (boost) {
+        boost.addEventListener("pointerdown", onBoostDown);
+        boost.addEventListener("pointerup", onBoostUp);
+        boost.addEventListener("pointercancel", onBoostUp);
+        boost.addEventListener("pointerleave", onBoostUp);
+        if (pressActions) boost.addEventListener("click", onBoostClick, true);
+      }
+      if (chord) {
+        chord.addEventListener("pointerdown", onChord);
+        chord.addEventListener("pointermove", onChord);
+        chord.addEventListener("pointerup", onChord);
+        chord.addEventListener("pointercancel", onChord);
+      }
+      if (moveStick) moveStick.resume();
+      if (lookStick) lookStick.resume();
+    };
+    return { read, axes, clearPointer, reset, consumeTab, resume, borrowPitch, dispose, get rightShift() { return !!held.peek; } };
   };
-  BL.controls = { create };
+  BL.controls = { create, uiKey };
 })();

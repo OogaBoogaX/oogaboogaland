@@ -1,4 +1,10 @@
 // One contributor body turning freely on a quaternion, air pushing on it like a flat plate, then a canopy.
+//
+// `place`, `jump`, `deploy`, `land`: under the canopy every touchdown stands; without one the impact picks
+// `hole`, `tumble` or `pancake` from the spine angle and the ground speed. The fixed-step flat-plate model
+// has gravity, plate pressure along the belly normal, skin drag, player rates and a weathervane the stick
+// cannot outmuscle. The canopy flight has bloom, sink, forward, toggles and a flare reserve; it trims at
+// `FORWARD` 8 and `SINK` 6, `DIVE_SINK` 10.5. `pose` goes by phase.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -14,7 +20,7 @@
   // The weathervane outmuscles the stick: a held input settles near 65 degrees, a released one comes back flat.
   const RATE = { pitch: 3, roll: 3, yaw: 2.2 }, RESPONSE = 6, WEATHERVANE = 3.3;
   // Canopy constants in order: bloom, trimmed/dived/flared speeds, flare reserve, turn and crab.
-  const OPEN_T = 0.7, FORWARD = 6.5, DIVE_FORWARD = 10.5, FLARE_FORWARD = 3, SINK = 5, DIVE_SINK = 8.5, FLARE_SINK = 2.2, FLARE_MAX = 2, TURN = 1.3, CRAB = 3;
+  const OPEN_T = 0.7, FORWARD = 8, DIVE_FORWARD = 12.5, FLARE_FORWARD = 3, SINK = 6, DIVE_SINK = 10.5, FLARE_SINK = 2.2, FLARE_MAX = 2, TURN = 1.3, CRAB = 3;
   // How far the body's centre sits above the feet, in body heights.
   const FOOT = 0.55;
   const LANDING = { tumbleSpeed: 6, spine: 0.6 };
@@ -186,10 +192,10 @@
     };
     const resetLimbs = () => {
       const parts = cave.parts;
-      Object.assign(parts.armL.rotation, { x: -0.2, y: 0, z: -0.12 });
-      Object.assign(parts.armR.rotation, { x: -0.2, y: 0, z: 0.12 });
-      Object.assign(parts.legL.rotation, { x: 0, y: 0, z: 0 });
+      Object.assign(parts.armR.rotation, { x: -0.2, y: 0, z: -0.12 });
+      Object.assign(parts.armL.rotation, { x: -0.2, y: 0, z: 0.12 });
       Object.assign(parts.legR.rotation, { x: 0, y: 0, z: 0 });
+      Object.assign(parts.legL.rotation, { x: 0, y: 0, z: 0 });
       Object.assign(parts.head.rotation, { x: 0, y: 0, z: 0 });
       Object.assign(cave.root.rotation, { x: 0, y: 0, z: 0 });
       cave.root.position.y = legY - FOOT * h;
@@ -202,37 +208,37 @@
     const pose = (dt, elapsed, input) => {
       const parts = cave.parts;
       if (s.phase === "idle") {
-        parts.legL.rotation.x = parts.legR.rotation.x = -1.45;
-        parts.armL.rotation.x = parts.armR.rotation.x = -1.05;
-        parts.armL.rotation.z = -0.25;
-        parts.armR.rotation.z = 0.25;
+        parts.legR.rotation.x = parts.legL.rotation.x = -1.45;
+        parts.armR.rotation.x = parts.armL.rotation.x = -1.05;
+        parts.armR.rotation.z = -0.25;
+        parts.armL.rotation.z = 0.25;
         parts.head.rotation.x = 0;
         return;
       }
       if (s.phase === "free") {
         const flap = Math.sin(elapsed * 9) * 0.05;
-        parts.armL.rotation.x = damp(parts.armL.rotation.x, -1.15 - input.pitch * 0.4 + input.roll * 0.3, 8, dt);
-        parts.armR.rotation.x = damp(parts.armR.rotation.x, -1.15 - input.pitch * 0.4 - input.roll * 0.3, 8, dt);
-        parts.armL.rotation.z = damp(parts.armL.rotation.z, -0.95 + flap, 8, dt);
-        parts.armR.rotation.z = damp(parts.armR.rotation.z, 0.95 - flap, 8, dt);
-        parts.legL.rotation.x = damp(parts.legL.rotation.x, -0.5 + input.pitch * 0.3, 8, dt);
+        parts.armR.rotation.x = damp(parts.armR.rotation.x, -1.15 - input.pitch * 0.4 + input.roll * 0.3, 8, dt);
+        parts.armL.rotation.x = damp(parts.armL.rotation.x, -1.15 - input.pitch * 0.4 - input.roll * 0.3, 8, dt);
+        parts.armR.rotation.z = damp(parts.armR.rotation.z, -0.95 + flap, 8, dt);
+        parts.armL.rotation.z = damp(parts.armL.rotation.z, 0.95 - flap, 8, dt);
         parts.legR.rotation.x = damp(parts.legR.rotation.x, -0.5 + input.pitch * 0.3, 8, dt);
-        parts.legL.rotation.z = damp(parts.legL.rotation.z, -0.35, 8, dt);
-        parts.legR.rotation.z = damp(parts.legR.rotation.z, 0.35, 8, dt);
+        parts.legL.rotation.x = damp(parts.legL.rotation.x, -0.5 + input.pitch * 0.3, 8, dt);
+        parts.legR.rotation.z = damp(parts.legR.rotation.z, -0.35, 8, dt);
+        parts.legL.rotation.z = damp(parts.legL.rotation.z, 0.35, 8, dt);
         parts.head.rotation.x = damp(parts.head.rotation.x, -0.45, 8, dt);
         parts.head.rotation.y = damp(parts.head.rotation.y, -input.yaw * 0.3, 8, dt);
         return;
       }
       if (s.phase === "open" || s.phase === "canopy") {
-        parts.armL.rotation.x = damp(parts.armL.rotation.x, -2.7 + (s.steer < 0 ? 0.5 : 0), 6, dt);
-        parts.armR.rotation.x = damp(parts.armR.rotation.x, -2.7 + (s.steer > 0 ? 0.5 : 0), 6, dt);
-        parts.armL.rotation.z = damp(parts.armL.rotation.z, -0.25, 6, dt);
-        parts.armR.rotation.z = damp(parts.armR.rotation.z, 0.25, 6, dt);
+        parts.armR.rotation.x = damp(parts.armR.rotation.x, -2.7 + (s.steer < 0 ? 0.5 : 0), 6, dt);
+        parts.armL.rotation.x = damp(parts.armL.rotation.x, -2.7 + (s.steer > 0 ? 0.5 : 0), 6, dt);
+        parts.armR.rotation.z = damp(parts.armR.rotation.z, -0.25, 6, dt);
+        parts.armL.rotation.z = damp(parts.armL.rotation.z, 0.25, 6, dt);
         const swing = Math.sin(elapsed * 2.2) * 0.08;
-        parts.legL.rotation.x = damp(parts.legL.rotation.x, 0.25 + swing, 6, dt);
-        parts.legR.rotation.x = damp(parts.legR.rotation.x, 0.25 - swing, 6, dt);
-        parts.legL.rotation.z = damp(parts.legL.rotation.z, -0.08, 6, dt);
-        parts.legR.rotation.z = damp(parts.legR.rotation.z, 0.08, 6, dt);
+        parts.legR.rotation.x = damp(parts.legR.rotation.x, 0.25 + swing, 6, dt);
+        parts.legL.rotation.x = damp(parts.legL.rotation.x, 0.25 - swing, 6, dt);
+        parts.legR.rotation.z = damp(parts.legR.rotation.z, -0.08, 6, dt);
+        parts.legL.rotation.z = damp(parts.legL.rotation.z, 0.08, 6, dt);
         parts.head.rotation.x = damp(parts.head.rotation.x, s.flaring ? 0.3 : 0.15, 6, dt);
         parts.head.rotation.y = damp(parts.head.rotation.y, 0, 6, dt);
         return;
@@ -243,20 +249,20 @@
         if (s.landing === "hole") {
           const k = Math.min(1, t / 0.5);
           const kick = Math.sin(t * 9) * 0.5 * (1 - k);
-          parts.legL.rotation.x = 0.3 + kick;
-          parts.legR.rotation.x = 0.3 - kick;
-          parts.armL.rotation.x = parts.armR.rotation.x = -2.4 + kick;
+          parts.legR.rotation.x = 0.3 + kick;
+          parts.legL.rotation.x = 0.3 - kick;
+          parts.armR.rotation.x = parts.armL.rotation.x = -2.4 + kick;
           return;
         }
         if (s.landing === "pancake") {
           const k = Math.min(1, t / 0.25);
           parts.torso.scale.y = 1 - 0.75 * k;
           parts.torso.scale.x = parts.torso.scale.z = 1 + 0.5 * k;
-          parts.armL.rotation.z = -1.4;
-          parts.armR.rotation.z = 1.4;
-          parts.armL.rotation.x = parts.armR.rotation.x = -1.2;
-          parts.legL.rotation.z = -0.5;
-          parts.legR.rotation.z = 0.5;
+          parts.armR.rotation.z = -1.4;
+          parts.armL.rotation.z = 1.4;
+          parts.armR.rotation.x = parts.armL.rotation.x = -1.2;
+          parts.legR.rotation.z = -0.5;
+          parts.legL.rotation.z = 0.5;
           parts.head.rotation.x = -0.6;
           return;
         }
@@ -270,21 +276,21 @@
           cave.root.rotation.x = -Math.PI * 0.5 * Math.min(1, t / 0.6) * (1 + 0.6 * Math.sin(Math.min(1, t / 0.6) * Math.PI));
           cave.root.rotation.z = Math.sin(Math.min(1, t / 0.9) * Math.PI) * 0.6;
           cave.root.position.y = legY - FOOT * h - 0.2 * h * Math.min(1, t / 0.6);
-          parts.armL.rotation.x = parts.armR.rotation.x = -2.4;
-          parts.legL.rotation.x = parts.legR.rotation.x = 0.4;
+          parts.armR.rotation.x = parts.armL.rotation.x = -2.4;
+          parts.legR.rotation.x = parts.legL.rotation.x = 0.4;
           canopy.visible = false;
           return;
         }
         const deep = s.landing === "stumble" ? 0.32 : 0.14;
         const squat = Math.sin(Math.min(1, t / 0.7) * Math.PI) * deep;
         parts.torso.scale.y = 1 - squat;
-        parts.legL.rotation.x = squat * 1.6;
         parts.legR.rotation.x = squat * 1.6;
+        parts.legL.rotation.x = squat * 1.6;
         cave.root.rotation.x = s.landing === "stumble" ? Math.sin(Math.min(1, t / 0.9) * Math.PI) * 0.5 : 0;
-        parts.armL.rotation.x = damp(parts.armL.rotation.x, -0.2 - squat * 2, 6, dt);
         parts.armR.rotation.x = damp(parts.armR.rotation.x, -0.2 - squat * 2, 6, dt);
-        parts.armL.rotation.z = damp(parts.armL.rotation.z, -0.12, 6, dt);
-        parts.armR.rotation.z = damp(parts.armR.rotation.z, 0.12, 6, dt);
+        parts.armL.rotation.x = damp(parts.armL.rotation.x, -0.2 - squat * 2, 6, dt);
+        parts.armR.rotation.z = damp(parts.armR.rotation.z, -0.12, 6, dt);
+        parts.armL.rotation.z = damp(parts.armL.rotation.z, 0.12, 6, dt);
         parts.head.rotation.x = damp(parts.head.rotation.x, 0, 6, dt);
         if (canopy.visible) {
           canopy.scale.y = Math.max(0.05, canopy.scale.y - dt * 1.4);

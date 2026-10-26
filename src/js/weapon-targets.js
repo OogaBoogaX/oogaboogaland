@@ -7,11 +7,15 @@
     let result = geometries.get(geometry);
     if (result) return result;
     const verts = geometry.verts, triangles = [], boxes = [], order = [], nodes = [];
-    for (const face of geometry.faces) for (let i = 1; i + 1 < face.i.length; i++) {
-      const a = face.i[0] * 3, b = face.i[i] * 3, c = face.i[i + 1] * 3;
-      triangles.push(a, b, c); order.push(order.length);
-      boxes.push(Math.min(verts[a], verts[b], verts[c]), Math.min(verts[a + 1], verts[b + 1], verts[c + 1]), Math.min(verts[a + 2], verts[b + 2], verts[c + 2]),
-        Math.max(verts[a], verts[b], verts[c]), Math.max(verts[a + 1], verts[b + 1], verts[c + 1]), Math.max(verts[a + 2], verts[b + 2], verts[c + 2]));
+    const cursor = BL.compactGeometry?.storageOf(geometry) ? BL.compactGeometry.createCursor(geometry) : null;
+    for (let index = 0; index < geometry.faces.length; index++) {
+      const face = cursor ? BL.compactGeometry.readFace(geometry, index, cursor) : geometry.faces[index];
+      for (let i = 1; i + 1 < face.i.length; i++) {
+        const a = face.i[0] * 3, b = face.i[i] * 3, c = face.i[i + 1] * 3;
+        triangles.push(a, b, c); order.push(order.length);
+        boxes.push(Math.min(verts[a], verts[b], verts[c]), Math.min(verts[a + 1], verts[b + 1], verts[c + 1]), Math.min(verts[a + 2], verts[b + 2], verts[c + 2]),
+          Math.max(verts[a], verts[b], verts[c]), Math.max(verts[a + 1], verts[b + 1], verts[c + 1]), Math.max(verts[a + 2], verts[b + 2], verts[c + 2]));
+      }
     }
     const keys = new Float64Array(order.length * 3), scratch = BL.math.sortScratch(order.length);
     for (let i = 0; i < order.length; i++) for (let axis = 0; axis < 3; axis++) keys[i * 3 + axis] = boxes[i * 6 + axis] + boxes[i * 6 + axis + 3];
@@ -80,10 +84,12 @@
     const entries = new WeakMap(), transforms = new WeakMap(), clubs = new WeakMap();
     const stack = new Int32Array(64), point = new Float64Array(3), triangle = new Float64Array(9), swept = new Float64Array(9), clipped = new Float64Array(12);
     const sweepBox = new Float64Array(6), queryBox = new Float64Array(6), low = new Float64Array(3), high = new Float64Array(3);
+    const verticalTriangle = new Float64Array(9), verticalSegment = new Float64Array(6);
+    const verticalHit = { node: null, owner: null, type: "none", distance: Infinity, x: 0, y: 0, z: 0 };
     const stats = { queries: 0, candidates: 0, triangleTests: 0, transforms: 0 };
     let generation = 0, originX = 0, originY = 0, originZ = 0;
     let contactDistance = Infinity, contactTriangle = Infinity, contactX = 0, contactY = 0, contactZ = 0;
-    const transformState = () => ({ stamp: 0, active: false, version: 0, parent: null, parentVersion: -1, values: new Float64Array(14) });
+    const transformState = () => ({ stamp: 0, active: false, version: 0, parent: null, parentVersion: -1, values: new Float64Array(16) });
     const register = node => {
       if (!entries.has(node)) entries.set(node, { geometry: node.geometry, data: null, bounds: node.geometry ? BL.scene.boundsOf(node.geometry) : null, world: mat4.create(), inverse: mat4.create(), box: new Float64Array(6), version: -1, valid: false });
       for (let at = node; at; at = at.parent) if (!transforms.has(at)) transforms.set(at, transformState());
@@ -100,26 +106,25 @@
       const changed = !state.version || state.parent !== node.parent || state.parentVersion !== parentVersion
         || values[0] !== p.x || values[1] !== p.y || values[2] !== p.z || values[3] !== s.x || values[4] !== s.y || values[5] !== s.z
         || values[6] !== r.x || values[7] !== r.y || values[8] !== r.z || values[9] !== (q ? q[0] : 0) || values[10] !== (q ? q[1] : 0)
-        || values[11] !== (q ? q[2] : 0) || values[12] !== (q ? q[3] : 0) || values[13] !== node.poseYaw;
+        || values[11] !== (q ? q[2] : 0) || values[12] !== (q ? q[3] : 0) || values[13] !== node.poseYaw
+        || values[14] !== node.poseLean || values[15] !== node.poseLeanY;
       if (!changed) return true;
       values[0] = p.x; values[1] = p.y; values[2] = p.z; values[3] = s.x; values[4] = s.y; values[5] = s.z;
       values[6] = r.x; values[7] = r.y; values[8] = r.z; values[9] = q ? q[0] : 0; values[10] = q ? q[1] : 0;
       values[11] = q ? q[2] : 0; values[12] = q ? q[3] : 0; values[13] = node.poseYaw;
+      values[14] = node.poseLean; values[15] = node.poseLeanY;
       state.parent = node.parent; state.parentVersion = parentVersion; state.version++;
-      if (node.quaternion) mat4.fromTQS(node.local, node.position, node.quaternion, node.scale);
-      else mat4.fromTRS(node.local, node.position, node.rotation, node.scale);
-      if (node.poseYaw) {
-        const m = node.local, c = Math.cos(node.poseYaw), s = Math.sin(node.poseYaw);
-        for (let i = 0; i < 16; i += 4) { const x = m[i], z = m[i + 2]; m[i] = c * x + s * z; m[i + 2] = c * z - s * x; }
-      }
+      BL.scene.updateLocal(node);
       if (node.parent) mat4.multiply(node.world, node.parent.world, node.local);
       else node.world.set(node.local);
       stats.transforms++;
       return true;
     };
-    const eligible = (target, ignore) => {
+    const eligible = (target, ignore, includeNonWeapon = false) => {
       const { node, owner } = target;
-      return !!node.geometry && owner.active !== false && owner.weaponType !== "none" && (!ignore || owner.cave !== ignore)
+      return !!node.geometry && owner.active !== false && (includeNonWeapon || owner.weaponType !== "none")
+        && (!ignore || owner.cave !== ignore && owner.entry?.owner !== ignore
+          && (!ignore.owner || owner.cave !== ignore.owner) && !(ignore.gorilla && owner.kind === "clanker"))
         && !(node.mirror && (node.mirrorPortal || node.mirrorReveal >= 1)) && refreshWorld(node);
     };
     const sync = node => {
@@ -144,19 +149,32 @@
     const hit = (out, target, distance, x, y, z) => {
       out.node = target.node; out.owner = target.owner; out.distance = distance;
       out.x = x; out.y = y; out.z = z;
+      if (out.normal) out.normal.x = out.normal.y = out.normal.z = 0;
       out.type = target.owner.weaponType || (target.owner.cave ? target.owner.cave.hostile ? "enemy" : "friendly" : "object");
     };
     const onMirror = (node, bounds, x, y) => x >= bounds.min[0] - EPS && x <= bounds.max[0] + EPS
-      && y >= bounds.min[1] + (bounds.max[1] - bounds.min[1]) * (node.mirrorReveal || 0) - EPS && y <= bounds.max[1] + EPS
-      && (!node.mirrorDamage || node.mirrorDamage.contains(x, y));
-    const ray = (out, ox, oy, oz, dx, dy, dz, maxDistance, ignore = null) => {
+      && y >= bounds.min[1] + (bounds.max[1] - bounds.min[1]) * (node.mirrorReveal || 0) - EPS && y <= bounds.max[1] + EPS;
+    const ray = (out, ox, oy, oz, dx, dy, dz, maxDistance, ignore = null, accept = null, includeNonWeapon = false) => {
       begin(out);
       const length = Math.hypot(dx, dy, dz);
       if (!length || maxDistance < 0) return false;
       dx /= length; dy /= length; dz /= length;
       let nearest = maxDistance;
       for (const target of targets) {
-        if (!eligible(target, ignore)) continue;
+        if (!eligible(target, ignore, includeNonWeapon) || accept && !accept(target.owner, target.node)) continue;
+        if (includeNonWeapon && target.radius && !target.node.geometry.faces.length) {
+          const m = target.node.world, px = m[12] - ox, py = m[13] - oy, pz = m[14] - oz;
+          const radius = target.radius * Math.sqrt(Math.max(
+            m[0] * m[0] + m[1] * m[1] + m[2] * m[2],
+            m[4] * m[4] + m[5] * m[5] + m[6] * m[6],
+            m[8] * m[8] + m[9] * m[9] + m[10] * m[10]));
+          const along = px * dx + py * dy + pz * dz, side = px * px + py * py + pz * pz - along * along;
+          if (along >= 0 && side <= radius * radius) {
+            const found = Math.max(0, along - Math.sqrt(Math.max(0, radius * radius - side)));
+            if (found < nearest) { nearest = found; hit(out, target, found, ox + dx * found, oy + dy * found, oz + dz * found); }
+          }
+          continue;
+        }
         const entry = sync(target.node);
         if (!entry || !rayBox(entry.box, ox, oy, oz, dx, dy, dz, nearest)) continue;
         stats.candidates++;
@@ -164,7 +182,7 @@
         mat4.transformPoint(point, m, ox, oy, oz);
         const lx = point[0], ly = point[1], lz = point[2];
         const ux = m[0] * dx + m[4] * dy + m[8] * dz, uy = m[1] * dx + m[5] * dy + m[9] * dz, uz = m[2] * dx + m[6] * dy + m[10] * dz;
-        let found = Infinity;
+        let found = Infinity, foundTriangle = -1;
         if (target.node.mirror) {
           const t = Math.abs(uz) > 1e-12 ? (entry.bounds.min[2] - lz) / uz : -1;
           if (t >= 0 && t <= nearest && onMirror(target.node, entry.bounds, lx + ux * t, ly + uy * t)) found = t;
@@ -180,13 +198,99 @@
               const at = data.order[i] * 3;
               const t = triangleRay(data.verts, data.triangles[at], data.triangles[at + 1], data.triangles[at + 2], lx, ly, lz, ux, uy, uz);
               stats.triangleTests++;
-              if (t < found && t <= nearest) found = t;
+              if (t < found && t <= nearest) { found = t; foundTriangle = at; }
             }
           }
         }
-        if (found < Infinity) { nearest = found; hit(out, target, found, ox + dx * found, oy + dy * found, oz + dz * found); }
+        if (found < Infinity) {
+          nearest = found; hit(out, target, found, ox + dx * found, oy + dy * found, oz + dz * found);
+          // Navigation callers opt into the contacted face's world normal.
+          // The inverse transpose also handles nonuniformly scaled props.
+          if (out.normal) {
+            let nx = 0, ny = 0, nz = 1;
+            if (foundTriangle >= 0) {
+              const data = entry.data, v = data.verts, a = data.triangles[foundTriangle], b = data.triangles[foundTriangle + 1], c = data.triangles[foundTriangle + 2];
+              const ax = v[b] - v[a], ay = v[b + 1] - v[a + 1], az = v[b + 2] - v[a + 2];
+              const bx = v[c] - v[a], by = v[c + 1] - v[a + 1], bz = v[c + 2] - v[a + 2];
+              nx = ay * bz - az * by; ny = az * bx - ax * bz; nz = ax * by - ay * bx;
+            }
+            const x = m[0] * nx + m[1] * ny + m[2] * nz;
+            const y = m[4] * nx + m[5] * ny + m[6] * nz;
+            const z = m[8] * nx + m[9] * ny + m[10] * nz;
+            const scale = (x * dx + y * dy + z * dz > 0 ? -1 : 1) / Math.max(1e-12, Math.hypot(x, y, z));
+            out.normal.x = x * scale; out.normal.y = y * scale; out.normal.z = z * scale;
+          }
+        }
       }
       return !!out.node;
+    };
+    // A carry-view shot may adjust height, but never turn toward the orbit
+    // camera. Slice eligible meshes with the body's forward vertical plane;
+    // precise rays and the scene's solid sweep still decide visibility.
+    const verticalRay = (out, ox, oy, oz, dx, dz, maxDistance, ignore = null, clear = null, accept = null) => {
+      begin(out);
+      const length = Math.hypot(dx, dz);
+      if (!length || maxDistance <= 0) return false;
+      dx /= length; dz /= length;
+      const consider = (ax, ay, az, bx, by, bz) => {
+        const vx = bx - ax, vy = by - ay, vz = bz - az, norm = vx * vx + vy * vy + vz * vz;
+        const nearest = norm ? Math.max(0, Math.min(1, ((ox - ax) * vx + (oy - ay) * vy + (oz - az) * vz) / norm)) : 0;
+        // Endpoints let a partly exposed surface remain a candidate when its
+        // nearest point is hidden behind scenery.
+        for (let sample = 0; sample < 3; sample++) {
+          const t = sample === 0 ? nearest : sample - 1, x = ax + vx * t, y = ay + vy * t, z = az + vz * t;
+          const rx = x - ox, ry = y - oy, rz = z - oz, distance = Math.hypot(rx, ry, rz);
+          if (rx * dx + rz * dz <= EPS || distance > maxDistance || distance >= out.distance || distance < EPS) continue;
+          if (!ray(verticalHit, ox, oy, oz, rx, ry, rz, distance + 1e-5, ignore, accept)) continue;
+          const margin = Math.max(0, 1 - 1e-5 / verticalHit.distance);
+          if (clear && !clear(ox, oy, oz, ox + (verticalHit.x - ox) * margin, oy + (verticalHit.y - oy) * margin,
+            oz + (verticalHit.z - oz) * margin, verticalHit.node, true)) continue;
+          if (verticalHit.distance < out.distance) Object.assign(out, verticalHit);
+        }
+      };
+      for (const target of targets) {
+        if (!eligible(target, ignore) || accept && !accept(target.owner, target.node)) continue;
+        const entry = sync(target.node);
+        if (!entry) continue;
+        const box = entry.box, cx = (box[0] + box[3]) / 2 - ox, cz = (box[2] + box[5]) / 2 - oz;
+        const hx = (box[3] - box[0]) / 2, hz = (box[5] - box[2]) / 2;
+        if (Math.abs(cx * dz - cz * dx) > Math.abs(dz) * hx + Math.abs(dx) * hz + EPS
+          || cx * dx + cz * dz + Math.abs(dx) * hx + Math.abs(dz) * hz <= 0) continue;
+        const bx = Math.max(box[0] - ox, 0, ox - box[3]), by = Math.max(box[1] - oy, 0, oy - box[4]), bz = Math.max(box[2] - oz, 0, oz - box[5]);
+        const limit = Math.min(maxDistance, out.distance);
+        if (bx * bx + by * by + bz * bz > limit * limit) continue;
+        const data = entry.data || (entry.data = geometryOf(target.node.geometry)), m = entry.world;
+        for (let at = 0; at < data.triangles.length; at += 3) {
+          for (let vertex = 0; vertex < 3; vertex++) {
+            const index = data.triangles[at + vertex], x = data.verts[index], y = data.verts[index + 1], z = data.verts[index + 2];
+            for (let axis = 0; axis < 3; axis++) verticalTriangle[vertex * 3 + axis] = m[axis] * x + m[axis + 4] * y + m[axis + 8] * z + m[axis + 12];
+          }
+          let count = 0;
+          for (let edge = 0; edge < 3; edge++) {
+            const a = edge * 3, b = (edge + 1) % 3 * 3;
+            const sa = (verticalTriangle[a] - ox) * dz - (verticalTriangle[a + 2] - oz) * dx;
+            const sb = (verticalTriangle[b] - ox) * dz - (verticalTriangle[b + 2] - oz) * dx;
+            if (Math.abs(sa) <= EPS && Math.abs(sb) <= EPS) {
+              consider(verticalTriangle[a], verticalTriangle[a + 1], verticalTriangle[a + 2], verticalTriangle[b], verticalTriangle[b + 1], verticalTriangle[b + 2]);
+              continue;
+            }
+            if (sa * sb > 0 || Math.abs(sa - sb) < EPS) continue;
+            const t = sa / (sa - sb);
+            for (let axis = 0; axis < 3; axis++) verticalSegment[count * 3 + axis] = verticalTriangle[a + axis] + (verticalTriangle[b + axis] - verticalTriangle[a + axis]) * t;
+            if (count && Math.hypot(verticalSegment[3] - verticalSegment[0], verticalSegment[4] - verticalSegment[1], verticalSegment[5] - verticalSegment[2]) < EPS) continue;
+            if (++count === 2) {
+              consider(verticalSegment[0], verticalSegment[1], verticalSegment[2], verticalSegment[3], verticalSegment[4], verticalSegment[5]);
+              break;
+            }
+          }
+        }
+      }
+      return !!out.node;
+    };
+    const valid = (contact, ignore = null) => {
+      generation++;
+      for (const target of targets) if (target.node === contact.node && target.owner === contact.owner) return eligible(target, ignore);
+      return false;
     };
     // Segment against a triangle, including the coplanar contact at the start
     // of a swing. Every accepted point belongs to both actual mesh surfaces.
@@ -275,7 +379,7 @@
         sweepContacts(data, before, after, index);
       }
     };
-    const strike = (out, previousWorld, currentWorld, geometry, ignore = null) => {
+    const strike = (out, previousWorld, currentWorld, geometry, ignore = null, accept = null) => {
       begin(out);
       originX = currentWorld[12]; originY = currentWorld[13]; originZ = currentWorld[14];
       let nearest = Infinity;
@@ -294,13 +398,13 @@
         }
       }
       for (const target of targets) {
-        if (!eligible(target, ignore)) continue;
+        if (!eligible(target, ignore) || accept && !accept(target.owner, target.node)) continue;
         const entry = sync(target.node);
         if (!entry || !overlaps(entry.box, sweepBox)) continue;
         stats.candidates++;
         const m = entry.world;
         contactDistance = contactTriangle = Infinity;
-        if (target.node.mirror && !target.node.mirrorDamage?.stage) {
+        if (target.node.mirror) {
           const bounds = entry.bounds, bottom = bounds.min[1] + (bounds.max[1] - bounds.min[1]) * (target.node.mirrorReveal || 0);
           for (let face = 0; face < 2; face++) {
             for (let vertex = 0; vertex < 3; vertex++) {
@@ -343,7 +447,7 @@
       }
       return !!out.node;
     };
-    return { ray, strike, register, stats };
+    return { ray, verticalRay, strike, valid, register, stats };
   };
   BL.weaponTargets = { create };
 })();

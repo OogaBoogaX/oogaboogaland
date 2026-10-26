@@ -4,6 +4,7 @@ Thumbs.db
 *.swp
 .idea/
 .vscode/
+.claude/
 
 # Node
 node_modules/
@@ -15,6 +16,13 @@ untracked/
 # Build output: CI commits it back after merges to rock (the artifact job)
 /oogaboogaland.html
 /src/js/characters.gen.js
+
+# Cloudflare Workers: the staged site, local state and local secrets
+/_site/
+.wrangler/
+.dev.vars
+worker/src/characters.gen.json
+worker/src/tess-facts.gen.json
 
 # Test artifacts (screenshots written by test/ scripts)
 test/*.png

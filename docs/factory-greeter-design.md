@@ -1,0 +1,117 @@
+# Lightning Factory greeter
+
+Implementation of four optional world tours, following drneski's design direction and play-test feedback. The guide, routes and lines: Payments, Channels, Rebalancing and Node health.
+
+## Visitor experience
+
+Tess is a flying companion, in the spirit of Destiny's Ghost. Her rig is Flink's former head width (seven voxels) at 1.5 times scale, about 0.7 m across, so she reads across a hall 46 m wide. She has no torso, foot, stand or ground collision body.
+
+With nobody to guide she works the hall. She flies from station to station (the core, lines A to D, the forge, the switchboard, the rebalancer, the treasury and the watchtower) and hovers at each for six to ten seconds, working it with a bright beam from her eye. Sparks fly where it lands, and her light moves onto the station. Her work is her own show: it never changes a station's lights, which keep showing the node's reported state. She is found at work at a station near the front of the hall.
+
+When a visitor with an Ooga comes onto the balcony, she keeps working for a moment, then notices them: she stops, turns her eye to them and her rings flare. She flies over and hovers ahead of them and off to the side with room, at head height, where the view over their shoulder shows her, and greets them; while the demo node runs, her greeting says so. She takes a place only when it, and the leg she flies to it, pass the hall's clearance from the visitor's feet up; with no room either side she comes over their head, and with no place at all she stays where she is. The act button reads TALK TO TESS and the hover tooltip names her. If the visitor ignores her for nine seconds, walks off or presses Escape, she says she will be at work and goes back to it; Escape while she is still on her way waves her off the same way, before it would leave the cave. Noticing the visitor uses the visit's greeting, whatever happens next, so she does not come back on her own that visit: the visitor walks up to her, within four metres of her at a station, and TALK TO TESS appears. A tap on her from further away gets a bubble asking them to come closer.
+
+The selected Meridian design has a smooth Earth-globe core with graphite oceans, Bitcoin-orange land and darker orange country boundaries, an amber mechanical iris, three ivory armor caps and three open gyroscopic wooden rings bound in copper, each with an emissive Bitcoin-orange (#f7931a) outer rail. Radial ticks, linked block marks and rectangular slots evoke the concentric full-node sculpture without a Bitcoin logo. The rings share the eye's centre and tumble independently, each about a diameter of its own, a turn every 3.4, 4.7 and 6.1 seconds at her resting pace, the middle in the opposite direction; they also turn slowly in their own planes, so their ticks travel. Her mood sets the pace: brisk in flight, busy at work, slow while she talks, and a flare when she notices someone, when their orange rails glow brighter too. Nested radii keep the rings clear of one another in any orientation, and bounded angles and quaternion gimbals prevent accumulated rotation drift. A gentle 1.8 cm hover, greeting tilt, optical blink and speech glow give Tess expression.
+
+The globe uses a baked, simplified Natural Earth 110m country map (public domain; https://www.naturalearthdata.com/about/terms-of-use/), sampled at 2.5 degrees onto shared smooth lathe geometry. Small islands and countries below that scale may merge or disappear. No map data is fetched during play.
+
+The polished rig adds domed ceramic plates over graphite gaskets and copper lips, vent details and fasteners, a layered lens housing with eighteen iris vanes and small optical highlights, and chamfered ring rails with baked wood grain and inset copper blocks. Her optics shift subtly with her gaze and her core banks into turns. A small amber light follows her eye on Medium and High; Low retains the emissive eye and the existing hall lights.
+
+Geometry is built once with the existing smooth lathe, turned-part, prism and bevelled-box helpers. The amber eye accent reuses the forge-wave ring. All animation changes existing nodes; no mesh is rebuilt per frame.
+
+Talk (the act button; Space when she has come to the visitor, or within arm's reach of her at a station, never on a ladder; or a click or tap on her) turns the visitor's Ooga to face her and opens a small on-screen menu with the four tours. Tap or click picks one; Arrow keys choose and Enter starts it, and menu arrows do not move the visitor. Walking away closes the menu, and Escape closes it too: while she comes over, offers or has the menu up, Escape is hers, so the cave's own Escape leaves only when none of those is happening. Closing the menu at the visitor's side declines; at a station she goes back to her work. The visitor follows each tour with their own Ooga and camera.
+
+Every tour starts at the balcony. From the visitor's side there she goes straight to the start; from a station she says tours start at the balcony and flies there, and waits up to 45 seconds for the visitor, calling after 20. She flies the tour's route 2.2 m over the floor, ahead of the visitor, moving only while they are within six metres. At each stop she flies out to its station, rising off the route first where the route is hemmed in, and hovers beside it pointing a thin, soft beam at what she explains; then she flies back down to the route and leads on. During a tour the act button reads NEXT and an on-screen End tour button shows. Each line advances on its own after a readable beat — a whole tour plays with no presses at all — and NEXT, or a tap on Tess, skips ahead: to the line's next bubble, then the next line. While she leads, Space remains the visitor's usual action. When a tour ends, she goes back to work. Full lines remain voice-ready data; the shared world speech splits a long one into bubbles, with a down arrow while another follows.
+
+Arriving without an Ooga (a direct /lightning entry) shows a hint to pick one on the island; tapping Tess without one gets a bubble to the same effect. The greeter never assigns an Ooga.
+
+## Payments itinerary
+
+1. The tours' start at x -2, y 5, z 23.6 on the balcony; descend the broad central staircase, bending out from its foot past its lanterns.
+2. Pit viewing spot at x -6.5, y 0, z 8.5: explain channels connecting peers and payments passing through several nodes.
+3. Existing left pit-to-core stairs, then the landing near x -4.8, y 5, z 0.1: explain the core and forwarding, then the public feed's privacy boundary.
+4. Retrace the stairs to a floor viewing spot near x -7, y 0, z 8.5 facing the switchboard: explain settled and failed outcomes, describe a report received during this tour if one exists, then finish.
+5. Back to work: up from the last stop's route point to its dock in the air, then on to a station.
+
+The tour doesn't require station, out or fee. No incoming event is required to continue; a quiet tour uses conceptual dialogue. Observations distinguish public versus demo and live versus replay, each labelled once when relevant rather than in every line. A failed outcome never implies a cause, and a missing fee never means zero. The tours do not reconstruct routes or animate additional node events.
+
+## Other itineraries
+
+- Channels: descend the arrival stairs to the forge viewing spot (-4.8, 0, 5.8), explaining opening and closing on-chain. Take the left core stairs and the existing bridge to the inner channel porch (-8.5, 5, -2.5). Explain reported states, daily public slots and capacity versus private directional balances. A channel report is not attributed to the particular station being viewed.
+- Rebalancing: descend the arrival stairs, pause on the right pit floor (4.8, 0, 10) to explain liquidity, then face the ring machine from (8.5, 0, 9.5). Explain hourly reports, success and failure, without naming private channels or inventing failure causes.
+- Node health: take the core landing, explaining the last reported node state. Continue across the channel porch and up the existing high stairs to an observation landing (-9.2, 10, -10.1), looking up at the watchtower. Distinguish an explicit stopped report from a waiting or silent feed; incoming replay is not a fresh health check, and activity summaries are not diagnoses.
+
+Each tour ends by sending her back to work from its last stop. Reports are optional, retained only as bounded scalar observation state and labelled as demo or replay when appropriate. No tour waits for an event before continuing.
+
+## Ending and giving way
+
+One tour runs at a time. Beyond six metres from the visitor Tess waits. After four seconds she calls back; after twelve seconds she gives up with “Lost my visitor!” and goes back to work. There is no pause/resume tour state. End tour sends her back to work too: she finishes the leg she is flying first, so she always leaves from a place she knows the way from. Leaving the cave disposes the tour, the menu and the greeting.
+
+## Flight
+
+She flies only along legs fixed in the code and checked against the hall. Twenty-one air waypoints and forty legs between them keep at least 0.8 m from every surface the hall draws; a work site is one of those waypoints, with the point on its station her beam lands on. A path between two waypoints follows the next hop of a shortest-path table built once a page. The tours fly their routes at 2.2 m over the waypoints' supports, which clears the stair treads, rails and the grand stairway's foot lanterns (with one bend added at its foot). Every stop has its rise and its hover point, and every route waypoint has a dock, the air waypoint she rises to when a tour ends there. She never flies a leg that is not one of these: going to a visitor, she flies to the balcony's waypoint and then to the visitor's side, and leaving them, back to it; a visitor who leaves the balcony before she gets there sends her back to work from the balcony. She follows a path by easing her velocity toward its next point at the path's speed, rounding each point without stopping, banking into turns and trailing a few motes from the shared particle pool.
+
+The factory suite builds a quarter-metre grid from every surface of every visible mesh in the hall, less the actors who walk about and the particles, and checks every air leg, tour leg, rise and dock against her radius, and that every working beam lands on its station.
+
+## Implementation boundary
+
+factory-greeter.js owns a visit's rig, its beam and glint, fixed waypoints, the on-screen menu (DOM built per visit, styled in style.css, removed on leave), bounded state and one feed subscription. Lines are separately named data for future speech. It never fetches, emits node events, changes accounting, assigns player control or takes over the camera. The visit removes its pick, its keydown capture and unsubscribes on exit. Both renderers use the same procedural geometry. Prepared detail tiers are retained through the visit’s liveGeometry contract. Their GPU records are released when the scene leaves; bounded CPU mesh caches remain for the page lifetime.
+
+## Validation and next review
+
+Build, the factory browser suite and the unit checks are the repository's validation. The factory suite checks that she notices a visitor on the balcony and flies over to offer tours, over their head where neither side has room and through only places the hall's clearance passes; Space, the menu's arrows, and Escape declining while she stays at her work afterwards; Escape while she flies over, and walking off the balcony and back, bringing no second greeting; a visitor walking up to her at a station and starting a tour that End tour ends; all four tours completing every stop and sending her back to work; her flight's clearance against the hall; menu bounds on phone, Canvas operation, detail hysteresis and immediate Low-quality downgrade. The guide-route fixture moves the visitor beside Tess; the existing widest-Ooga floor and control checks separately prove visitor traversal. Please play-test:
+
+- Arrival with an Ooga: Tess at work, noticing, flying over and offering; ignoring her, walking off and Escape; walking up to her afterwards. A direct /lightning arrival without one (the hint).
+- Her flight round the hall: her beam, sparks and light at each station, her trail and banking, and the rings' tumble at each pace.
+- TALK TO TESS within reach, Space beyond it staying a jump; each of the four tours running start to finish hands-free, her flights out to each station and the soft beam, NEXT skipping, End tour, cancellation and repeat visits.
+- The menu: tap, click, arrows plus Enter, walking away, Escape closing the menu first and leaving the cave only with no menu up.
+- Stop following, wait for the warning and frustrated return; leave during a tour.
+- Public reports without routes, fees or private balances; demo, replay and no events; node stopped versus feed silence.
+- Tess's scale, ring motion and eye visibility; phone readability of the menu and Canvas 2D; route clearance, stair support, returning past the visitor and the scene leave contract.
+
+All four routes and their speech are implemented as proposals. Automated stair, bridge and menu checks complement maintainer play-test of observation sightlines and the overall experience. drneski’s requested play-test remains pending; review readiness does not imply approval to land.
+
+[PR #112](https://github.com/OogaBoogaX/oogaboogaland/pull/112) preserves the earlier explanations as reference material only. None of its rejected walkthrough implementation is carried over. The hotpixelgroup character landed independently in [PR #117](https://github.com/OogaBoogaX/oogaboogaland/pull/117).
+
+## Close-up detail
+
+Within 6 m of the camera Tess switches to a cached close-up rig: the globe has 51,200 faces versus 10,368 (4.94×), using finer Natural Earth 50m outlines at 1.125 degrees. Ring rails use 192 segments versus 96, the optics and armor use denser curves, and each ring gains 192 fine etched ticks. Beyond 7 m the original tier returns; hysteresis prevents switching at the boundary. Scene pixel resolution remains unchanged. Fine detail is prepared only when entering with a fine pointer and High or Medium quality. Touch, Canvas (whose quality is Low) and Low-entry visits prepare only a dedicated light rig. Its globe samples the same map at 36×18 cells; its bands and tiny decorative marks use fewer subdivisions. Desktop visits preserve the original far globe and prepare normal, fine and light tiers (36 geometry entries); light-only visits retain 12. A drop to Low immediately selects the prebuilt light rig at every camera distance. Geometry preparation happens during scene entry, never in the frame update. A debug-only promotion after a Low-entry visit prepares fine detail on the next visit. Prepared CPU meshes are cached once for the page lifetime; GPU retention is limited to the visit.
+
+## Device-cost assessment
+
+The original rig, including rings and optics, had 69,616 faces at the far tier and 449,680 at the fine tier (6.46×); globe-only counts understated device cost. Before the device gate, both tiers retained 518,528 faces through 24 geometry entries. Tiny fasteners and glints now use 12×6 subdivisions in all tiers instead of globe-scale tessellation; the fine globe still has 51,200 faces. The reduced cached meshes total 5,892 faces for light, 47,632 for normal and 158,776 for fine, excluding the separately shared 384-face emblem. Desktop preparation retains three bounded tiers, with fewer total faces than the original two; Low-entry preparation retains only light.
+
+Serial local Chrome samples at verified camera distances of 10 m and 3 m measured:
+
+| Before the gate | Far FPS | Near FPS | Near render p95 |
+|---|---:|---:|---:|
+| Desktop High | 59.54 | 60.14 | 0.50 ms |
+| Phone emulation, Low | 60.39 | 50.49 | 0.50 ms |
+| Canvas, Low | 8.29 | 2.20 | 506.40 ms |
+
+Phone emulation uses desktop hardware; these are not low-end hardware results. Camera exposure changes between views, so the comparison is observational. Actual cold guide construction took 91–92 ms behind scene entry. The first explicit far WebGL upload took about 31–32 ms; fine geometry had already warmed during the initial Factory draw (about 310 ms for the full scene), so its later near draw is a cached measurement. No frame-rate or resource threshold was lowered. The gate protects Canvas and touch devices from the additional fine-rig geometry and avoids constructing it during play.
+
+[Measurement data](tess-device-cost-evidence.json) retains the source revision, geometry counts, startup marks, first measured render and steady samples.
+
+A subsequent matched comparison with the current-engine Flink baseline showed that merely disabling fine detail still left a Canvas regression: at identical 10 m/3 m camera positions, Flink measured 13.75/15.28 FPS while the original far Tess rig measured 8.10/8.99 FPS (render p95 73.5/66.5 ms versus 127.0/117.1 ms). This prompted the separate light rig and decorative tessellation reductions; the matched final browser measurement below verifies their effect. The matched baseline is PR165 revision47867d4 and the before-reduction Tess revision is a2bcf4b.
+
+The final serial matched samples on code revision `e433ab9`, against current-engine baseline `47867d4`, measured:
+
+| View | Baseline far / near FPS | Reduced Tess far / near FPS | Tess near render p95 |
+|---|---:|---:|---:|
+| Desktop High | 60.06 / 60.14 | 60.12 / 60.17 | 1.60 ms |
+| Phone emulation, Low | 60.23 / 60.13 | 60.23 / 59.92 | 1.70 ms |
+| Canvas, Low | 13.87 / 15.52 | 13.24 / 14.66 | 69.50 ms |
+
+All WebGL samples settled at 60 FPS after the first second. The final desktop near sample's maximum frame gap was 16.8 ms; no fine-near hitch was observed after scene-entry warm-up. Canvas retains about a 5% measured frame-rate cost compared with Flink, substantially less than the original far Tess rig's roughly 40% loss. Canvas performance is already low on the baseline; this change does not claim to fix that underlying cost or to meet WebGL targets on Canvas.
+
+The browser's actual visible rig totals are 6,276 faces for light, 48,016 for normal and 159,160 for fine, including the shared 384-face emblem. Cold guide construction measured 3.7 ms for light-only entry and 48.1 ms for desktop preparation. The first explicit far WebGL render measured 21.1 ms; the initial full-scene draw took about 182 ms and warmed the prepared fine geometry. Three-frame startup marks still include that entry/upload cost; these measurements do not disguise it as steady rendering. These are local observations, not a guarantee for physical mobile or low-end hardware.
+
+## Final code verification
+
+Code and test revision `e433ab9` was validated again through documentation revision `dd386181`. Build, three syntax checks, 131 unit checks, site staging and 36 Worker tests passed; the repository has no lint runner. The final default full suite (`LANES=4`) completed with 712/730 checks passing in 11.4 minutes, exit 1. All selected desktop, phone and Canvas Factory gameplay, tours, traversal, menu and detail-policy checks passed. The 18 failed names are all shared with the current-engine baseline; none is unique to this variant. Original performance targets and travel deadlines remain unchanged.
+
+The summary count differs from the earlier 712/731 run: both test revisions retain 476 `record()` call sites, with no assertion, step or scene removed. The denominator counts runtime results, and preexisting watchdog failures can interrupt a step before later assertions or its conditional clean-console result. The earlier run used two lanes, the final run four. Quiet initial output did not save passing names, so the exact earlier partial passing check that differs is unknown. Interrupted checks remain incomplete coverage, and the full acceptance result remains failed.
+
+Factory and DSB's original full-run return-to-hub deadlines failed before resource counters. A separate isolated Factory diagnostic then ran all six visits and both original resource assertions successfully: attached DOM 3,111→3,111; DOM counters 9,248→9,248; listeners 367→367; GPU records 978→977; retained object heap 438.09→432.91 MB. Every visit retained only twelve light geometries, released the two hall/guide subscriptions on exit, and preserved the bounded shared node. The historical extra DOM node was not reproduced. All 21 isolated travels met the original eight-second deadline, but the diagnostic's `acceptanceEligible` remains false; it supplements rather than replaces the failed full-run timing verdict.
+
+[Curated validation evidence](tess-validation-evidence.json) preserves tested hashes, results, all failure names, exact timing failures, resource metrics and the limitations above. The complete suite remains blocked by shared baseline performance/gameplay/timeouts; maintainer play-test and physical-device checks remain pending. No merge or deployment is implied by review readiness.

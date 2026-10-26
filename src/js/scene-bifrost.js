@@ -1,0 +1,1092 @@
+// ₿IFRÖST: the chamber of windows onto other worlds. A short tunnel from the island opens into a round hall of stone
+// and bronze; the ₿ mechanism turns at its middle, and round the wall stand the windows, an open world's labelled
+// over its arch. Travel is walking: an Ooga that walks through a window's field goes to that world (into the poker room
+// at once, as its mirror back does), and one that walks into a window whose world is not open yet crosses its
+// reflection and emerges from the next mirror. A window's frame glows brighter as someone comes near, in its world's
+// colour, and the mechanism charges toward that colour too. Nobody but an Ooga crosses, so a visit without one only looks.
+//
+// Whoever walked in stays themselves: the Ooga the island handed over (`world.pilot`), or on a page that opens here,
+// `character=`. From the island it comes in through the tunnel's field, from a world out of that world's window; on a
+// page that opens here it stands at the tunnel's inner end. Walking back out through the field, Escape and the Leave
+// button all take it back out to the island's gate.
+//
+// An open world's window shows that world itself: its models are built off the graph and photographed once a page (the
+// poker room once for each cave theme it shows), in its own light, after the chamber opens, and the picture hangs at
+// the end of the window's passage. Until then the window shows its row's stand-in.
+(() => {
+  "use strict";
+  const BL = window.BL = window.BL || {};
+  const { math, models, contributors, hud: hudMod, interact: interactMod, pilot: pilotMod, fx: fxMod } = BL;
+  const BM = BL.bifrostModels, FM = BL.factoryModels;
+  const { clamp } = math;
+  const { createNode, addChild, removeChild, createCamera, stepTweens, tweenCount, traverseVisible } = BL.scene;
+  const { HALL, ENTRY, WINDOW, WINDOW_TOP, CORE, WINDOWS, SLOTS, NAME, MIRROR_Z } = BM;
+
+  const COARSE = window.matchMedia("(pointer: coarse)").matches;
+  const PITCH = [-0.2, 1.3], DIST = [3.5, 24];
+  const FOLLOW = { y: 0.9, min: 3, max: 7, pitch: [0.25, 0.8] };
+  const FLY = { speed: 5, perDist: 0.4, climb: 3, yMax: HALL.wall - 1 };
+  // The field's blue, for the ripples on every field and the mirror.
+  const TINT = [0.3, 0.62, 1];
+  const view = (x, y, z, yaw, pitch, dist) => ({ yaw, pitch, dist, target: { x, y, z } });
+  // A window's view stands between it and the mechanism, looking out at it.
+  const toward = (i, dist = 10.5) => { const b = SLOTS[i], r = HALL.r - 0.6; return view(Math.sin(b) * r, 3.3, Math.cos(b) * r, b + Math.PI, 0.1, dist); };
+  // `entrance` stands just inside the way in and looks across the mechanism at the far windows.
+  const PRESETS = {
+    entrance: view(0, 3.2, -2, 0, 0.12, 13),
+    core: view(0, 3.4, 0, 0.5, 0.16, 9.5),
+    dsb: toward(WINDOWS.findIndex((w) => w.id === "dsb")),
+    poker: toward(WINDOWS.findIndex((w) => w.id === "poker")),
+    // Low by the dais, looking up the beam through the open dome, the ringed giant beside it.
+    sky: view(0, 7, 0, -0.3, -0.7, 7)
+  };
+  // Warm lamps inside, and over the open dome a clear night: the sky pass paints its gradient, its moon and its twinkling
+  // stars (turned with the scene's own sky by `starMatrix`), and the moon lights the hall a little, cool. `sun` is the
+  // sun's colour, which the stars' night hides.
+  const MOON = [-0.45, 0.72, 0.53].map((v, i, a) => v / Math.hypot(...a));
+  const RENDER_OPTS = {
+    clear: [0.01, 0.012, 0.035], sky: [0.3, 0.3, 0.38], ground: [0.13, 0.11, 0.1],
+    horizon: [0.07, 0.06, 0.18], zenith: [0.006, 0.008, 0.03], stars: 1, moon: { x: MOON[0], y: MOON[1], z: MOON[2] },
+    starMatrix: new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1]),
+    light: { x: MOON[0], y: MOON[1], z: MOON[2] }, sun: [0.05, 0.05, 0.08], direct: [0.42, 0.5, 0.68], directStrength: 0.32, ambientFloor: 0.3,
+    shadowCenter: { x: 0, y: 3, z: 0 }, shadowExtent: 18,
+    lights: new Float32Array(BL.glRenderer.POINT_LIGHT_CAPACITY * 8), lightCount: 0, bloomStrength: 0.8
+  };
+  // The mechanism charges as someone nears an open world's window: how fast it follows, the seconds between bursts, and
+  // the sparkles a burst throws. Bands of light run up the beam: how many of its drums one band spans, how many bands
+  // leave its foot a second at rest and fully charged, and the seconds a burst's surge takes to reach the sky and how
+  // many drums it lights at once.
+  const CHARGE_EASE = 2, BURST_GAP = [4.5, 1.6], BURST_FROM = 0.3;
+  const BAND = 9, BAND_RATE = [0.3, 2.4], SURGE_TIME = 1.3, SURGE_WIDTH = 2.5;
+  const SPARKLES = ["#ffc83a", "#fff2b8", "#7fe0ff", "#ffffff"].map((c) => models.particleGeometry(c, 0.1, 1));
+  // A burst charged toward an open world's window throws that world's sparkles instead: its colour, paler, warmed toward
+  // gold, and white. Cached by colour.
+  const sparkleSets = BL.models.scopedMap();
+  const sparklesOf = (tint) => {
+    if (!sparkleSets.has(tint)) sparkleSets.set(tint, [tint, BM.blend(tint, "#ffffff", 0.45), BM.blend(tint, "#ffc83a", 0.3), "#ffffff"].map((c) => models.particleGeometry(c, 0.1, 1)));
+    return sparkleSets.get(tint);
+  };
+  // How fast the heavens turn (radians a second: a turn in a little over an hour), how long a shooting star lasts, and
+  // how long between them.
+  const SKY_TURN = 0.0015, METEOR_LIFE = 0.8, METEOR_GAP = [3, 9];
+  // Twinkling stars rest as bright as the rest and dip by `TWINKLE_DIP` of their glow; a glint stretches to `GLINT`
+  // times its star's size.
+  const TWINKLE_FULL = 1 / BM.TWINKLE_EMISSIVE, TWINKLE_DIP = 1.08, GLINT = 4;
+  // The ₿ ship: how long it is, how fast it goes (metres a second), how far from the hall the middle of its way bends,
+  // how long it rests between trips, the share of a trip it takes to flash out of a star or into one, and its exhaust:
+  // how many puffs, how often, how long each lasts and how big it starts.
+  // It calls at the stars within `reach` (radians) of its home port, the ringed giant, which the SKY view frames.
+  const SHIP = { size: 11, speed: 24, bend: 90, rest: [4, 10], warp: 0.06, puffs: 16, every: 0.07, life: 1.1, puff: 1.6, reach: 0.85 };
+  // Tooltip and tap words; a window's tooltip is its world's name and the first.
+  const TIPS = {
+    core: ["₿IFRÖST · the mechanism", "The heart of ₿IFRÖST. It turns for now; one day it may do more."],
+    exit: ["The way out", "Back to the island."],
+    travel: ["walk through to travel", "Walk an Ooga through the field to go there."],
+    mirror: ["Linked mirror · walk through", "Walk through the glass to come out of the next mirror in the chamber."]
+  };
+  // How the ₿'s rings turn, radians a second, and how each is tipped.
+  const TAU = Math.PI * 2;
+  const RING_SPIN = [0.5, -0.35, 0.25], RING_TILT = [[Math.PI / 2, 0], [1.1, 0.5], [0.4, -0.9]];
+  const MIRROR_ROTATION = math.quat.create();
+  // Each open world gets this many attempts, half a second apart, after the chamber's arrival has finished.
+  const PICTURE_TRIES = 10, PICTURE_DELAY = 0.6;
+  // How far past the way in's field the island's picture of the islet hangs, square to the tunnel, as the Lightning
+  // Factory hangs its own: far enough that it lines up with the islet seen through the field from anywhere in the hall.
+  const OUTSIDE_DISTANCE = 34;
+  // The open world's window brightens as someone comes near, so visitors know where to go: fully by `NEAR` metres from
+  // its face, from nothing at `FAR`, how fast it follows, and how much brighter its frame gets (its glow's emissive is
+  // 0.35, so 1.9 brings it to full) while it climbs its rim's steps.
+  const NEAR = 1.4, FAR = 7.5, EASE = 5, BRIGHTEN = 1.9;
+  const BACK = { position: { x: 0, y: 0, z: 0 }, target: { x: 0, y: 0, z: 0 }, yaw: 0, pitch: 0.3, dist: 3.4 };
+  // In from the island's gate: a few steps inside the field, walking on down the tunnel toward the mechanism, the camera
+  // just inside the field behind it.
+  const GATE = { position: { x: 0, y: 0, z: ENTRY.field - 3 }, target: { x: 0, y: 1, z: ENTRY.field - 3 }, yaw: 0, pitch: 0.16, dist: 2.7 };
+  // Each open world's picture, by scene: its models built off the graph (`build`, given the world's looks) and seen from
+  // `eye` toward `look`, `up` the tangent of half the view's height, in that world's own light (`opts`), then given back
+  // the saturation the page's grade adds again (`colour`) and misted a little toward the field's blue. DSB Land is seen
+  // from above its falls, down over the turtle to the far stars, in DSB's light (scene-dsb.js: `RENDER`, and the two
+  // lamps `buildLand` hangs); the poker room from over the aisle by its mirror, as its own view arrives, down between its
+  // tables in the cave theme the looks name, under its tables' lamps and its room lights (scene-poker.js lights it so).
+  const DSB_LIGHT = {
+    clear: [0.025, 0.014, 0.06], horizon: [0.11, 0.04, 0.19], zenith: [0.008, 0.006, 0.025], sky: [0.52, 0.43, 0.7], ground: [0.26, 0.17, 0.32],
+    sun: [0.8, 0.7, 0.9], light: { x: -0.4, y: 0.8, z: 0.4 }, stars: 1, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 48, bloomStrength: 0.5,
+    lights: new Float32Array(80), lightCount: 2
+  };
+  DSB_LIGHT.lights.set([-24, 5, -15, 14, 0.8, 0.25, 1, 0, -12, 5, -15, 14, 1, 0.8, 0.2, 0]);
+  const POKER_LIGHT = {
+    clear: [0.1, 0.12, 0.09], sky: null, ground: null, direct: null, directStrength: 0.38, ambientFloor: 0.48, sun: { x: 0.2, y: 1, z: 0.3 },
+    shadowCenter: { x: 0, y: 1.5, z: 0 }, shadowExtent: 35, bloomStrength: 0.24, lights: new Float32Array(13 * 8), lightCount: 13
+  };
+  const pokerLight = (theme) => {
+    POKER_LIGHT.sky = theme.sky; POKER_LIGHT.ground = theme.ground; POKER_LIGHT.direct = theme.direct; POKER_LIGHT.ambientFloor = theme.ambient;
+    BL.pokerModels.TABLES.forEach((p, i) => POKER_LIGHT.lights.set([p.x, 5.1, p.z, 14, ...theme.tableLight, 0], i * 8));
+    for (let i = 0; i < 3; i++) POKER_LIGHT.lights.set([0, 6.15, (i - 1) * 24, 13, ...theme.roomLight, 0], (10 + i) * 8);
+    return POKER_LIGHT;
+  };
+  const SHOTS = {
+    dsb: {
+      width: 360, up: 0.36, eye: { x: 0, y: 40, z: 84 }, look: { x: 0, y: -3, z: 0 }, colour: 0.83, mist: 0.08, haze: [70, 120, 235],
+      build: () => { const root = preparedDsb || BL.dsbGeography.build().root; preparedDsb = null; return root; }, opts: () => DSB_LIGHT
+    },
+    poker: {
+      width: 360, up: 0.42, eye: { x: 0, y: 8.2, z: 33 }, look: { x: 0, y: 1.2, z: 6 }, colour: 0.83, mist: 0.05, haze: [70, 120, 235],
+      build: (look) => BL.pokerModels.build(look.theme.id).root, opts: (look) => pokerLight(look.theme)
+    }
+  };
+
+  let renderer, canvas, game, world, go, root, camera, hud, hooks, input, pilot, fx, agentPlay = null;
+  let people = null, avatar = null, playerWorld = null, scene = null, leaving = false, dust = null, pictureTries = 0, pictureWait = 0, unsubscribeAccount = null, remotes = null, footsteps = null;
+  let pictureEpoch = 0, pictureJob = 0, pictureIdle = false, pictureLoading = false, pictureIndex = 0;
+  // DSB Land's geography (about 350 ms whole) is built for its picture in small slices during play, not in one task.
+  const PLAY_SLICE_MS = 8;
+  let preparedDsb = null, pictureAbort = null, pictureShot = null;
+  const NO_ACTORS = [];
+  // On the Worker's page the island's driving rules hold in here too, and the Ooga driven is reported to the
+  // room every frame, so signed-in players in the chamber hear each other (voice needs a driven Ooga).
+  const mayPossess = (cave) => BL.net.mayDrive(cave.traits.name);
+  const accountChanged = () => {
+    if (!avatar) return;
+    const released = BL.net.state.released;
+    const denied = mayPossess(avatar) || (released && released.name === avatar.traits.name ? "That Ooga is no longer yours to drive" : null);
+    BL.net.state.released = null;
+    if (denied && people.player === avatar) {
+      pilot.release(true);
+      hud.toast(denied);
+    }
+  };
+  const targets = [];
+
+  // One picture of each open world for the page, kept on `world.windowViews` by its looks' key (DSB Land's as `dsb`).
+  // Built from the world's own models off the graph, drawn once into the scene canvas and read straight back, as the
+  // island photographs itself for the Lightning Factory: the frame is never shown, since the scene draws over it before
+  // the browser presents. The models' GPU records are released at once, so nothing of them stays behind.
+  // The renderer can take a picture once its programs are ready and the canvas has a size: a hidden page's has none.
+  const canPicture = () => renderer.ready && canvas.clientWidth > 0 && canvas.clientHeight > 0;
+  // A photograph is four idle tasks, so none holds the main thread long: the world's models (`P.build`); the draw, read
+  // straight back and halved down, with the chamber drawn again before the browser presents; the grade; and a JPEG
+  // encode off the main thread (`toBlob`), read back as a data address, the only image source the page's policy allows.
+  const drawPicture = (shot) => {
+    const { P, look } = shot;
+    const pic = BM.passage().picture, W = canvas.width, H = canvas.height, aspect = W / H;
+    const across = P.up * pic.w / pic.h, t = Math.max(P.up, across / aspect);
+    const lens = createCamera({ fov: 2 * Math.atan(t) * 180 / Math.PI, near: 0.5, far: 260 });
+    Object.assign(lens.position, P.eye);
+    Object.assign(lens.target, P.look);
+    // A source model can share meshes with the chamber or its retained hub. Only the temporary source's
+    // exclusive GPU records may go; removing a shared record would make the next frame upload it again.
+    const kept = new Set();
+    const keep = (node) => {
+      if (node.geometry) kept.add(node.geometry);
+      for (const child of node.children) keep(child);
+    };
+    keep(root); liveGeometry(kept);
+    BL.scenes.hub.cachedGeometry(kept);
+    const land = shot.land, drawn = renderer.render(land, lens, P.opts(look));
+    const release = (node) => {
+      if (node.geometry && !kept.has(node.geometry)) renderer.releaseGeometry(node.geometry);
+      for (const child of node.children) release(child);
+    };
+    if (!drawn) {
+      release(land);
+      return false;
+    }
+    let src = canvas, sx = W / 2 * (1 - across / (t * aspect)), sy = H / 2 * (1 - P.up / t), sw = W - 2 * sx, sh = H * P.up / t;
+    const w = P.width, h = Math.round(w * pic.h / pic.w);
+    while (sw > w * 2) {
+      const half = document.createElement("canvas");
+      half.width = Math.ceil(sw / 2); half.height = Math.ceil(sh / 2);
+      half.getContext("2d").drawImage(src, sx, sy, sw, sh, 0, 0, half.width, half.height);
+      src = half; sx = sy = 0; sw = half.width; sh = half.height;
+    }
+    const out = document.createElement("canvas"), g = out.getContext("2d", { willReadFrequently: true });
+    out.width = w; out.height = h;
+    g.imageSmoothingQuality = "high";
+    g.drawImage(src, sx, sy, sw, sh, 0, 0, w, h);
+    release(land);
+    Object.assign(shot, { land: null, out, g, width: w, height: h });
+    return true;
+  };
+  // The page grades what it draws, so a picture of a graded frame is graded twice: take back the saturation the
+  // grade adds (WebGL only; Canvas 2D has no grade), and mist it toward the field's blue.
+  const gradePicture = (shot) => {
+    const { P, g, width: w, height: h } = shot;
+    const colour = renderer.kind === "webgl2" ? P.colour : 1, pixels = g.getImageData(0, 0, w, h), d = pixels.data;
+    for (let i = 0; i < d.length; i += 4) {
+      const l = 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+      for (let k = 0; k < 3; k++) d[i + k] = (l + (d[i + k] - l) * colour) * (1 - P.mist) + P.haze[k] * P.mist;
+    }
+    g.putImageData(pixels, 0, 0);
+    shot.graded = true;
+  };
+  const encodePicture = (out, done) => {
+    out.toBlob((blob) => {
+      if (!blob) { done(null); return; }
+      const reader = new FileReader();
+      reader.onload = () => {
+        const image = new Image();
+        image.onload = () => done(image);
+        image.onerror = () => done(null);
+        image.src = reader.result;
+      };
+      reader.onerror = () => done(null);
+      reader.readAsDataURL(blob);
+    }, "image/jpeg", 0.9);
+  };
+  // The open worlds of a visit, each row with its looks now, read once so the windows and their pictures agree.
+  const openLooks = () => WINDOWS.filter((row) => row.kind === "travel" && BL.scenes[row.scene]).map((row) => ({ row, look: BM.lookOf(row) }));
+  // A travel window's picture: its world's photograph once there is one, the stand-in until then.
+  const hangPicture = (w) => {
+    if (w.picture.owned) return true;
+    const asset = world.windowViews && world.windowViews[w.look.key], image = asset && asset.load();
+    if (image && image.complete && image.naturalWidth > 0) {
+      w.picture.geometry = BM.pictureQuad(asset, BM.passage().picture);
+      w.picture.owned = true;
+      return true;
+    }
+    w.picture.geometry = BM.standIn(w.look.stand);
+    return false;
+  };
+  // Loads and photographs are separate idle tasks. Neither belongs to prepare/enter or a displayed frame's update.
+  // Only the visit number crosses a promise, so a load completed after leaving cannot photograph another visit.
+  const stopPictures = () => {
+    pictureEpoch++;
+    if (pictureJob) {
+      if (pictureIdle) cancelIdleCallback(pictureJob);
+      else clearTimeout(pictureJob);
+    }
+    pictureJob = 0; pictureLoading = false; pictureIndex = 0; pictureTries = 0; pictureWait = 0;
+    if (pictureAbort) pictureAbort.abort();
+    pictureAbort = null; preparedDsb = null; pictureShot = null;
+  };
+  const nextPicture = () => {
+    pictureShot = null;
+    pictureIndex++;
+    pictureTries = pictureIndex < scene.looks.length ? PICTURE_TRIES : 0;
+    pictureWait = 0;
+  };
+  const queuePicture = (loaded = false) => {
+    const epoch = pictureEpoch;
+    const run = () => {
+      if (epoch !== pictureEpoch) return;
+      pictureJob = 0;
+      if (!scene || leaving) return;
+      if (document.hidden) { pictureWait = 0.5; return; }
+      const entry = scene.looks[pictureIndex];
+      if (!entry) { pictureTries = 0; return; }
+      const { row, look } = entry;
+      if (!loaded && !(world.windowViews && world.windowViews[look.key])) {
+        const loading = BL.deferred.load(row.scene);
+        if (loading) {
+          pictureLoading = true;
+          loading.then(() => {
+            if (epoch !== pictureEpoch || !scene || leaving) return;
+            pictureLoading = false;
+            queuePicture(true);
+          }, () => {
+            if (epoch !== pictureEpoch || !scene || leaving) return;
+            pictureLoading = false;
+            nextPicture();
+          });
+        } else queuePicture(true);
+        return;
+      }
+      if (row.scene === "dsb" && !preparedDsb && !pictureShot && !(world.windowViews && world.windowViews[look.key])) {
+        pictureLoading = true;
+        pictureAbort = new AbortController();
+        BL.buildTasks.run(BL.dsbGeography.buildSteps({ until: 0, budget: PLAY_SLICE_MS, work: 0 }), "bifrost", pictureAbort.signal).then((geography) => {
+          if (epoch !== pictureEpoch || !scene || leaving) return;
+          pictureLoading = false; pictureAbort = null; preparedDsb = geography.root;
+          queuePicture(true);
+        }, () => {
+          if (epoch !== pictureEpoch || !scene || leaving) return;
+          pictureLoading = false; pictureAbort = null;
+          nextPicture();
+        });
+        return;
+      }
+      const views = world.windowViews || (world.windowViews = {});
+      const hang = () => {
+        const hung = models.withScope("bifrost", () => {
+          let all = true;
+          for (const w of scene.windows) if (w.kind === "travel" && w.look.key === look.key && !hangPicture(w)) all = false;
+          return all;
+        });
+        if (hung || --pictureTries === 0) nextPicture();
+        else pictureWait = 0.5;
+      };
+      if (views[look.key]) { hang(); return; }
+      if (!canPicture()) { pictureWait = 0.5; return; }
+      let shot = pictureShot;
+      if (!shot || shot.look !== look) {
+        shot = pictureShot = { look, P: SHOTS[row.scene], land: null, out: null, g: null, graded: false, width: 0, height: 0 };
+        shot.land = models.withScope("bifrost", () => shot.P.build(look));
+        queuePicture(true);
+        return;
+      }
+      if (!shot.out) {
+        const drawn = models.withScope("bifrost", () => {
+          // Idle work has no director render following it. Replace the source's frame before the browser presents.
+          try { return drawPicture(shot); } finally { renderer.render(root, camera, RENDER_OPTS); }
+        });
+        if (drawn) queuePicture(true);
+        else if (--pictureTries === 0) nextPicture();
+        else pictureWait = 0.5;
+        return;
+      }
+      if (!shot.graded) { gradePicture(shot); queuePicture(true); return; }
+      pictureLoading = true;
+      // The picture belongs to the page, so one finished after this visit ended is still kept.
+      encodePicture(shot.out, (image) => {
+        if (image && !views[look.key]) views[look.key] = { width: shot.width, height: shot.height, load: () => image };
+        if (epoch !== pictureEpoch || !scene || leaving) return;
+        pictureLoading = false; pictureShot = null;
+        if (image) hang();
+        else if (--pictureTries === 0) nextPicture();
+        else pictureWait = 0.5;
+      });
+    };
+    pictureIdle = typeof requestIdleCallback === "function";
+    pictureJob = pictureIdle ? requestIdleCallback(run, { timeout: 1000 }) : setTimeout(run, 0);
+  };
+
+  // Back out to the island's gate, as the same Ooga.
+  const leaveChamber = () => {
+    if (leaving) return;
+    world.pilotDetached = !pilot.player;
+    world.pilot = pilot.player ? pilot.player.traits.name : null;
+    leaving = go("hub");
+  };
+  // Through a window to its world, as the same Ooga, once a transition is free to start.
+  const travel = (w) => {
+    if (leaving) return;
+    world.pilotDetached = false;
+    world.pilot = avatar.traits.name;
+    if (!go(w.row.scene, null, !!w.row.instant)) return;
+    leaving = true;
+    w.held = true;
+    pilot.setActive(false);
+  };
+  // A first visit to a world can fail to fetch. Give control back without immediately crossing the same field again.
+  const stay = () => {
+    stopPictures();
+    pictureTries = PICTURE_TRIES; pictureWait = PICTURE_DELAY;
+    leaving = false;
+    pilot.setActive(true);
+  };
+  const onKey = (e) => {
+    if (e.key === "0" && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && !leaving) return pilot.resetCamera();
+    if ((e.key === "x" || e.key === "X") && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && !leaving) {
+      if (pilot.modeAction("mode-toggle")) { e.preventDefault(); return true; }
+    }
+    if (e.key === "Escape") {
+      if (!pilot.escape()) leaveChamber();
+      return true;
+    }
+    return false;
+  };
+  // In real mode `counted` is the API's `{ exact, rounded }`, which the tally counts (the pile itself follows the API's).
+  const onDonation = (donation, counted = null) => {
+    game.recordDonation(donation, counted && counted.exact);
+    world.level = Math.min(BL.pile.MAX_BANANAS, world.level + (counted ? counted.exact : BL.game.bananasFor(donation.sats)));
+  };
+  const onLootCleared = () => {};
+
+  // The chamber for a visit: the hall, the mechanism and the tunnel from the cached builds, then each window by the
+  // kind its row resolves to now: a travel window whose world is not open is a mirror instead.
+  const build = (looks) => {
+    const s = { windows: [], kinds: [], rings: [], looks, lead: null, step: 0 };
+    const hall = BM.hall(), pillars = BM.pillars(), tunnel = BM.tunnel(), field = BM.entryField(), name = BM.name(), base = BM.coreBase(), lit = BM.lighting();
+    const outside = world.bifrostView;
+    s.core = createNode({ geometry: base.stone });
+    addChild(root,
+      createNode({ geometry: hall.walls }), createNode({ geometry: hall.dome }), createNode({ geometry: hall.floor, depthBias: 1.2 }), createNode({ geometry: hall.inlay, depthBias: 0.4, sightHidden: true }),
+      createNode({ geometry: pillars.stone }), createNode({ geometry: pillars.banners }),
+      createNode({ geometry: tunnel.stone }), createNode({ geometry: tunnel.banners }), createNode({ geometry: tunnel.glow, sightHidden: true }),
+      // Past the field: the picture of the islet the island took on the way in, or with no visit from the island, the
+      // rock that closes the tunnel.
+      outside ? createNode({ geometry: BL.factoryModels.outsideView(outside, OUTSIDE_DISTANCE), position: { x: 0, y: 0, z: ENTRY.field + OUTSIDE_DISTANCE }, rotation: { x: 0, y: Math.PI, z: 0 }, sightHidden: true })
+        : createNode({ geometry: tunnel.closer }),
+      s.core, createNode({ geometry: base.glow, sightHidden: true }),
+      createNode({ geometry: lit.frame }), createNode({ geometry: lit.glass, sightHidden: true }),
+      ...BL.dressing.nodes(BM.dressing(), { glow: 1 })
+    );
+    // The way in: its arch on the hall's side, and the name over it, held out from the wall.
+    s.mouth = createNode({ position: { x: 0, y: 0, z: HALL.r }, geometry: tunnel.mouth });
+    const nameNode = createNode({ position: { x: 0, y: NAME.y, z: HALL.r - NAME.out }, rotation: { x: 0, y: Math.PI, z: 0 } });
+    addChild(nameNode, createNode({ geometry: name.plaque, depthBias: 1.5 }), createNode({ geometry: name.letters }));
+    addChild(root, s.mouth, nameNode);
+    // The court's lamp posts, the benches, and the bushes: in planters flanking the windows and on the pilasters.
+    addChild(root, createNode({ geometry: BM.courtPosts() }));
+    for (const a of BM.BENCHES) addChild(root, createNode({ position: { x: Math.sin(a) * BM.BENCH_R, y: 0, z: Math.cos(a) * BM.BENCH_R }, rotation: { x: 0, y: a, z: 0 }, geometry: BM.bench() }));
+    BM.PLANTERS.forEach((a, k) => {
+      const x = Math.sin(a) * BM.PLANTER_R, z = Math.cos(a) * BM.PLANTER_R;
+      addChild(root, createNode({ position: { x, y: 0, z }, rotation: { x: 0, y: a, z: 0 }, geometry: BM.planter() }), createNode({ position: { x, y: BM.PLANTER_TOP, z }, rotation: { x: 0, y: k * 1.3, z: 0 }, geometry: BL.hubModels.bush(k % 3), sightHidden: true }));
+    });
+    BM.PILLARS.forEach((b, k) => addChild(root, createNode({ position: { x: Math.sin(b) * BM.PILLAR_R, y: HALL.wall, z: Math.cos(b) * BM.PILLAR_R }, rotation: { x: 0, y: k * 2.1, z: 0 }, scale: { x: 0.85, y: 0.85, z: 0.85 }, geometry: BL.hubModels.bush((k + 1) % 3), sightHidden: true })));
+    // The mechanism: the ₿ turning over the plinth inside its three rings, and the beam up into the sky.
+    s.glyph = createNode({ position: { x: 0, y: CORE.glyphY, z: 0 }, geometry: BM.coreGlyph() });
+    const beam = BM.coreBeam();
+    s.beam = beam.rows.map((row) => ({ node: createNode({ position: { x: 0, y: row.y, z: 0 }, scale: { x: row.r, y: row.h, z: row.r }, geometry: beam.geometry, sightHidden: true }), r: row.r }));
+    BM.coreRings().forEach((geometry, i) => {
+      const spin = createNode({ position: { x: 0, y: CORE.glyphY, z: 0 } });
+      addChild(spin, createNode({ rotation: { x: RING_TILT[i][0], y: 0, z: RING_TILT[i][1] }, geometry }));
+      s.rings.push(spin);
+    });
+    addChild(root, s.glyph, ...s.beam.map((b) => b.node), ...s.rings);
+    // The mechanism's charge, the bands running up its beam and a burst's surge (1 when none is climbing), and its two
+    // shockwaves: one round the ₿, one across the floor.
+    s.charge = 0; s.flare = 0; s.burstWait = BURST_GAP[0]; s.bob = 0; s.flow = 0; s.surge = 1; s.stepLead = null;
+    s.shocks = [[CORE.glyphY, 5], [0.03, 9]].map(([y, reach]) => {
+      const node = createNode({ position: { x: 0, y, z: 0 }, geometry: BM.shockwave(), visible: false, sightHidden: true });
+      addChild(root, node);
+      return { node, t: 1, reach };
+    });
+    // The sky over the open dome, lighter on Canvas 2D: stars, the twinkling ones and their halos a group to a node, the
+    // galaxy's band, the planets, the glints on the brightest stars and the shooting stars waiting their turn, all on
+    // one node that turns the heavens. A turning planet leans on a node of its own, its body and each band of its rings
+    // spinning on it at their own pace (`spins`), with its day and night over it, fixed toward the sun; its moons go
+    // round it (`moons`).
+    const night = BM.sky(renderer.kind === "canvas2d" ? 1 : 0);
+    s.sky = createNode();
+    s.twinkle = night.twinkle.map((geometry) => createNode({ geometry, sightHidden: true }));
+    s.halos = night.halos.map((geometry) => createNode({ geometry, sightHidden: true }));
+    addChild(s.sky, createNode({ geometry: night.stars, sightHidden: true }), ...s.twinkle, ...s.halos, createNode({ geometry: night.band, sightHidden: true }));
+    s.spins = []; s.moons = [];
+    for (const p of night.planets) {
+      const planet = createNode({ position: { x: p.at.x, y: p.at.y, z: p.at.z } });
+      if (p.body) {
+        const lean = createNode({ rotation: { x: 0, y: 0, z: p.tilt } });
+        for (const [geometry, rate] of [[p.body, p.turn], ...p.rings.map((ring) => [ring.geometry, ring.rate])]) {
+          const node = createNode({ geometry, sightHidden: true });
+          addChild(lean, node);
+          s.spins.push({ node, rate });
+        }
+        addChild(planet, lean);
+        for (const geometry of p.shade) addChild(planet, createNode({ geometry, scale: { x: p.r, y: p.r, z: p.r }, sightHidden: true }));
+      } else addChild(planet, createNode({ geometry: p.geometry, sightHidden: true }));
+      for (const m of p.moons) {
+        const node = createNode({ geometry: m.geometry, sightHidden: true });
+        addChild(planet, node);
+        s.moons.push({ node, a: m.a, rate: m.rate, phase: m.phase, u: m.u, v: m.v });
+      }
+      addChild(s.sky, planet);
+    }
+    s.glints = night.glints.map((g, i) => {
+      const node = createNode({ geometry: night.glint, rotation: { x: -g.elevation, y: g.bearing, z: 0 }, sightHidden: true });
+      addChild(s.sky, node);
+      return { node, size: g.size * GLINT, rate: 0.3 + 0.07 * (i % 5), phase: i * 2.4, flare: 0 };
+    });
+    // The ₿ ship cruises from its home port, the ringed giant, out to the glinting stars round it and back: out from
+    // behind the giant or out of a star's flash, across the sky under its trail of exhaust, and into a star, which
+    // flashes, or home behind the giant; then it rests and sets off again. With no star near, it goes round the planets.
+    const craft = BM.starship(), R = BM.SKY.r * 0.95;
+    s.ship = createNode({ geometry: craft.body, visible: false, sightHidden: true });
+    s.flame = createNode({ geometry: craft.flame, position: { x: 0, y: 0, z: -0.53 }, sightHidden: true });
+    addChild(s.ship, s.flame);
+    s.puffs = Array.from({ length: SHIP.puffs }, () => {
+      const node = createNode({ geometry: craft.puff, visible: false, sightHidden: true });
+      addChild(s.sky, node);
+      return { node, t: 1 };
+    });
+    addChild(s.sky, s.ship);
+    s.ports = night.planets.map((p) => ({ x: p.at.x, y: p.at.y, z: p.at.z, glint: null }));
+    const home = s.ports[0], homeAt = Math.hypot(home.x, home.y, home.z), near = Math.cos(SHIP.reach);
+    s.stars = night.glints.map((g, i) => ({ x: Math.sin(g.bearing) * Math.cos(g.elevation) * R, y: Math.sin(g.elevation) * R, z: Math.cos(g.bearing) * Math.cos(g.elevation) * R, glint: s.glints[i] }))
+      .filter((p) => (p.x * home.x + p.y * home.y + p.z * home.z) / (R * homeAt) > near);
+    s.voyage = { from: null, to: s.ports[0], bend: { x: 0, y: 0, z: 0 }, t: 1, time: 1, rest: SHIP.rest[0], puff: 0, port: 1, star: 0 };
+    s.meteors = night.meteors.map((m) => {
+      const node = createNode({ geometry: m.geometry, visible: false, sightHidden: true });
+      addChild(s.sky, node);
+      return { node, dir: m.dir, len: m.len, t: 1 };
+    });
+    s.meteorWait = METEOR_GAP[0];
+    addChild(root, s.sky);
+    // The field at the tunnel's far end, facing back in: the sheet (a veil the islet shows through, with its picture
+    // past it), its sparkles, and the ripples.
+    const fieldGroup = createNode({ position: { x: 0, y: 0, z: ENTRY.field }, rotation: { x: 0, y: Math.PI, z: 0 } });
+    const sparkles = createNode({ geometry: field.sparkles, sightHidden: true });
+    if (outside) addChild(fieldGroup, createNode({ geometry: field.veil, sightHidden: true }), createNode({ geometry: field.rim, sightHidden: true }), sparkles);
+    else addChild(fieldGroup, createNode({ geometry: field.sheet, sightHidden: true }), sparkles);
+    addChild(root, fieldGroup);
+    const opening = { minX: -ENTRY.halfW, maxX: ENTRY.halfW, floorY: 0, ceilingY: ENTRY.spring + ENTRY.halfW };
+    s.gate = { hum: 0, opening, phase: BL.labPhase.create(fieldGroup, { x: 0, z: ENTRY.field, ry: Math.PI, floorY: 0, room: { w: 2 * ENTRY.halfW, h: opening.ceilingY, from: 0, to: 2 } }, opening, 0.08, TINT) };
+    // The windows: each its frame and its glow, then what fills it by kind. A travel window whose
+    // world is not open is a mirror instead.
+    const winOpening = { minX: -WINDOW.halfW, maxX: WINDOW.halfW, floorY: 0, ceilingY: WINDOW_TOP };
+    WINDOWS.forEach((row, i) => {
+      const f = BM.frameOf(i), open = looks.find((o) => o.row === row), kind = open ? "travel" : "mirror";
+      const node = createNode({ position: { x: f.x, y: 0, z: f.z }, rotation: { x: 0, y: f.ry, z: 0 } }), stone = createNode({ geometry: BM.archStone() });
+      const neon = createNode({ geometry: BM.archGlow(), sightHidden: true });
+      addChild(node, stone, neon);
+      if (kind === "travel") {
+        const label = FM.label(row.label, "", { height: 1.1 }), board = createNode({ position: { x: 0, y: WINDOW_TOP + BM.FRAME.band + 1.15, z: BM.FRAME.front + 0.2 } });
+        addChild(board, createNode({ geometry: BM.hanger(label.width, 1.35, BM.FRAME.front + 0.2) }), createNode({ geometry: label.back }), createNode({ geometry: label.face }));
+        addChild(node, board);
+      }
+      addChild(root, node);
+      const w = { row, kind, look: open ? open.look : null, node, neon, ribs: null, rim: null, rims: null, tint: null, charge: null, sparkles: null, sn: Math.sin(f.bearing), c: Math.cos(f.bearing), phase: null, body: null, face: null, picture: null, held: false, light: -1, near: 0, hum: Math.random() * 0.3, transform: null, yaw: 0, crossings: 0 };
+      if (kind === "travel") {
+        const passage = BM.passage(), tint = w.look.tint;
+        w.rims = Array.from({ length: BM.RIM_STEPS }, (_, k) => BM.portalRim(tint, k));
+        w.rim = createNode({ geometry: w.rims[0], sightHidden: true });
+        w.tint = math.hexToRgb(tint).map((v) => v / 255);
+        w.charge = BM.charged(tint);
+        w.sparkles = sparklesOf(tint);
+        addChild(node, w.rim);
+        w.picture = createNode({ sightHidden: true });
+        w.ribs = createNode({ geometry: passage.glow, sightHidden: true });
+        addChild(node, createNode({ geometry: passage.walls }), w.ribs, w.picture);
+        w.phase = BL.labPhase.create(node, { x: f.x, z: f.z, ry: f.ry, floorY: 0, room: { w: 2 * WINDOW.halfW, h: WINDOW_TOP, from: 0, to: WINDOW.depth } }, winOpening, -WINDOW.plane, TINT);
+        hangPicture(w);
+      } else {
+        const m = BM.mirror(i);
+        addChild(node, createNode({ geometry: m.backing }));
+        w.phase = BL.labPhase.create(node, { x: f.x, z: f.z, ry: f.ry, floorY: 0, room: { w: 2 * WINDOW.halfW, h: WINDOW_TOP, from: 0, to: 1 } }, winOpening, -MIRROR_Z, TINT);
+        // The glass takes the field's ripples, so the blue waves run over the reflection; the field's own plane only
+        // keeps them.
+        w.face = createNode({ geometry: m.glass, position: { x: 0, y: 0, z: -MIRROR_Z }, rippleTint: TINT, sightHidden: true });
+        w.face.mirrorRipples = w.phase.ripples;
+        w.phase.node.visible = false;
+        addChild(node, w.face);
+      }
+      // A reflective face owns its contact atlas; the hidden ripple field
+      // cannot sample contacts. Travel fields use their existing atlas.
+      w.body = w.face ? BL.mirrorBody.create(w.face, new Map()) : w.phase.body;
+      w.tip = kind === "travel" ? `${row.name} · ${TIPS.travel[0]}` : TIPS.mirror[0];
+      s.windows.push(w);
+      s.kinds.push(kind);
+      input.add(stone, { kind: "window", window: w }, { radius: 3 });
+      targets.push(stone);
+    });
+    // Closed-world mirrors form a loop. One rigid transform per doorway
+    // preserves its local crossing point and turns inward travel into an exit.
+    const mirrors = s.windows.filter((w) => w.kind === "mirror");
+    for (let i = 0; i < mirrors.length; i++) {
+      const w = mirrors[i], other = mirrors[(i + 1) % mirrors.length];
+      const yaw = other.node.rotation.y - w.node.rotation.y + Math.PI, c = Math.cos(yaw), sn = Math.sin(yaw);
+      const r = HALL.r + MIRROR_Z, x = w.sn * r, z = w.c * r, m = math.mat4.create();
+      m[0] = m[10] = c; m[2] = -sn; m[8] = sn;
+      m[12] = other.sn * r - x * c - z * sn;
+      m[14] = other.c * r + x * sn - z * c;
+      w.transform = m; w.yaw = yaw;
+    }
+    input.add(s.core, { kind: "core" }, { radius: 3.2 });
+    targets.push(s.core);
+    input.add(s.mouth, { kind: "exit" }, { radius: 3 });
+    targets.push(s.mouth);
+    return s;
+  };
+
+  // Point lights, most important first so the lowest tier keeps them: the mechanism and the crown over it, the field
+  // at the way out, then each window, mirrors too; the lanterns share what is left, each flickering like a flame.
+  const LANTERN_GLOW = [1.3, 0.8, 0.36], LANTERN_REACH = 7.5, WINDOW_GLOW = [0.4, 0.65, 1], CORE_GLOW = [0.85, 0.55, 0.22];
+  let fixedLights = 0;
+  const lamp = (i, x, y, z, radius, r, g, b) => {
+    const o = i * 8, l = RENDER_OPTS.lights;
+    l[o] = x; l[o + 1] = y; l[o + 2] = z; l[o + 3] = radius; l[o + 4] = r; l[o + 5] = g; l[o + 6] = b; l[o + 7] = 0;
+  };
+  const lightUp = (s) => {
+    let n = 0;
+    lamp(n++, 0, CORE.glyphY, 0, 13, ...CORE_GLOW);
+    lamp(n++, 0, HALL.apex - 2.5, 0, 12, 1, 0.85, 0.55);
+    lamp(n++, 0, 2.2, ENTRY.field - 1.2, 8, 0.35, 0.6, 1);
+    // Each window's light starts at rest in the field's blue; an open world's takes its own tint each frame.
+    for (const w of s.windows) {
+      w.light = n;
+      lamp(n++, w.node.position.x - w.sn * 1.6, 2.4, w.node.position.z - w.c * 1.6, 7, WINDOW_GLOW[0] * 0.5, WINDOW_GLOW[1] * 0.5, WINDOW_GLOW[2] * 0.5);
+    }
+    fixedLights = n;
+    const hung = BM.lighting().lights;
+    for (let i = 0; i < hung.length && n < BL.glRenderer.POINT_LIGHT_CAPACITY; i += 4) lamp(n++, hung[i], hung[i + 1], hung[i + 2], LANTERN_REACH, ...LANTERN_GLOW);
+    RENDER_OPTS.lightCount = n;
+  };
+
+  const groundFor = (x, z) => BM.supportAt(x, z);
+  const walkableFor = (ax, az, bx, bz, y, height, actor) => BM.walkable(ax, az, bx, bz, actor.bodyRadius || 0.35, scene.kinds);
+
+  const enter = (ctx) => {
+    stopPictures();
+    ({ renderer, game, world, go, agentPlay } = ctx);
+    canvas = ctx.canvas;
+    const looks = openLooks();
+    // Each window's world starts downloading on arrival, so a step through one (an instant crossing) seldom waits on it.
+    for (let i = 0; i < looks.length; i++) BL.deferred.prefetchScene(looks[i].row.scene);
+    pictureTries = PICTURE_TRIES;
+    pictureWait = PICTURE_DELAY;
+    camera = createCamera({ fov: 55, near: 0.3, far: 700 });
+    root = createNode();
+    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
+    hooks = {};
+    input = interactMod.create({ canvas, renderer, camera, hooks });
+    const inTunnel = (p) => p.z > HALL.r - 1.5 && Math.abs(p.x) < ENTRY.halfW;
+    const clampTarget = (p) => {
+      p.y = clamp(p.y, 0.5, HALL.wall - 1);
+      if (inTunnel(p)) {
+        p.x = clamp(p.x, -ENTRY.halfW + 0.6, ENTRY.halfW - 0.6);
+        p.y = Math.min(p.y, ENTRY.spring + 1);
+        p.z = Math.min(p.z, ENTRY.field - 0.8);
+        return;
+      }
+      const r = Math.hypot(p.x, p.z), max = HALL.r - 2;
+      if (r > max) { p.x *= max / r; p.z *= max / r; }
+    };
+    // In the hall the eye keeps inside the windows' frames and under the dome; only the tunnel lets it out along +z.
+    const clampCamera = (p) => {
+      p.y = clamp(p.y, 0.5, HALL.wall + 2);
+      if (inTunnel(p)) {
+        p.x = clamp(p.x, -ENTRY.halfW + 0.4, ENTRY.halfW - 0.4);
+        p.y = Math.min(p.y, ENTRY.spring + ENTRY.halfW - 0.4);
+        p.z = Math.min(p.z, ENTRY.field - 0.3);
+        return;
+      }
+      const r = Math.hypot(p.x, p.z), max = HALL.r - BM.FRAME.front - 0.2 - Math.max(0, p.y - HALL.wall) * 1.4;
+      if (r > max) { p.x *= max / r; p.z *= max / r; }
+    };
+    pilot = pilotMod.create({
+      renderer, canvas, camera, hud, presets: PRESETS, landing: "entrance", pitch: PITCH, dist: DIST,
+      follow: FOLLOW, fly: FLY, clampTarget, clampCamera, ceilingAt: () => HALL.wall + 2, coarse: COARSE, mayPossess,
+      close: { eyeHeight: 1.1, eyeRatio: 0.95, eyeForward: 0.16, pitch: [-1.35, 1.35], trailingDist: 4, orbitDist: 5, maxStep: 0.6, groundAt: groundFor }
+    });
+    const tipFor = (hit) => {
+      const o = hit.owner;
+      if (o.kind === "window") return o.window.tip;
+      return TIPS[o.kind] ? TIPS[o.kind][0] : "";
+    };
+    Object.assign(hooks, {
+      onHover: (hit, p) => {
+        if (hit) hud.tooltip.show(tipFor(hit), p.x, p.y);
+        else hud.tooltip.hide();
+      },
+      onHoverMove: (hit, p) => hud.tooltip.show(tipFor(hit), p.x, p.y),
+      onTap: (hit) => {
+        if (!hit) return;
+        const o = hit.owner;
+        if (o.kind === "exit") return leaveChamber();
+        if (o.kind === "window") {
+          const w = o.window;
+          if (PRESETS[w.row.id]) pilot.goPreset(w.row.id);
+          return hud.toast(w.kind === "travel" && !avatar ? "Only an Ooga can cross. Walk one in from the island." : TIPS[w.kind][1]);
+        }
+        if (o.kind === "core") {
+          pilot.goPreset("core");
+          hud.toast(TIPS.core[1]);
+        }
+      },
+      ...pilot.hooks
+    });
+    hud.onPreset(pilot.goPreset);
+    hud.onAction((action) => {
+      if (action === "leave") leaveChamber();
+      else if (action === "reset-view") pilot.resetCamera();
+      else if (!leaving && action.startsWith("mode-")) pilot.modeAction(action);
+    });
+    fx = fxMod.create({ root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, tickerAt: { x: 0, y: 7, z: 0 } });
+    dust = BL.dressing.motes({ count: 160, span: 14, low: 0.5, high: 9 });
+    addChild(root, dust.node);
+    scene = build(looks);
+    // The visitor's Ooga: `character=` on a page that opens here, else the one handed over, else a free view.
+    const asked = ctx.from === null ? new URLSearchParams(location.search).get("character")?.trim().toLowerCase() : null;
+    const named = asked ? contributors.roster.find((c) => c.name.toLowerCase() === asked) : null;
+    const returningOwn = pilot.loginViewRestored && BL.net.ownCharacter();
+    const picked = returningOwn ? contributors.roster.find(c => c.name === returningOwn.handle)
+      : named || world.pilot && contributors.roster.find((c) => c.name === world.pilot) || null;
+    const playerName = picked && !BL.net.mayDrive(picked.name) ? picked.name : null;
+    world.pilot = null;
+    if (playerName) {
+      playerWorld = { level: 0, weapons: new Map(), magazine: { owned: false, count: 0, ammo: 0, carrier: null } };
+      const shared = { root, input, hud, game, world: playerWorld, playerName, weaponsEnabled: true, fx, viewYaw: 0, outsideActors: () => remotes ? remotes.actors() : NO_ACTORS, outsideActorHeight: BL.remotePlayers.BODY_HEIGHT, groundAt: groundFor, walkable: walkableFor };
+      people = shared.crew = BL.crew.create(shared);
+      pilot.bind(shared);
+      avatar = people.cavemen.get(playerName);
+      Object.assign(avatar.root.position, { x: 0, y: avatar.baseY, z: HALL.r - 1.6 });
+      avatar.root.rotation.y = Math.PI;
+      pilot.possess(avatar);
+      scene.gate.phase.body.track(avatar.root, avatar.traits.height * 2, Math.max(avatar.headOpen.verts.length, avatar.headClosed.verts.length));
+      for (const w of scene.windows) w.body.track(avatar.root, avatar.traits.height * 2, Math.max(avatar.headOpen.verts.length, avatar.headClosed.verts.length));
+      // Back from a world, out of its window: standing in front of it, facing the mechanism. In from the island: through
+      // the field at the tunnel's end.
+      const from = scene.windows.find((w) => w.kind === "travel" && w.row.scene === ctx.from);
+      if (!pilot.loginViewRestored) {
+        if (from) standBefore(from, 2.8);
+        else if (ctx.from === "hub") pilot.navigate(GATE);
+      }
+    }
+    unsubscribeAccount = BL.net.subscribe(accountChanged);
+    // Other signed-in players in the chamber, as the Oogas they drive.
+    remotes = BL.remotePlayers.create({ root, crew: people });
+    // The driven Ooga's own footsteps, heard by this page alone (footsteps.js).
+    footsteps = BL.footsteps.create();
+    lightUp(scene);
+    leaving = false;
+
+    bifrostScene.root = root;
+    bifrostScene.camera = camera;
+    bifrostScene.input = input;
+    bifrostScene.debug = {
+      hud, camera, controls: pilot.controls, pilot, crew: people, cavemen: people ? people.cavemen : null,
+      bifrost: { get scene() { return scene; }, get avatar() { return avatar; }, get pictured() { return !!(world.windowViews && world.windowViews.dsb); }, get outside() { return !!world.bifrostView; } }
+    };
+  };
+
+  // Stands the Ooga `out` metres in from a window's face, facing the mechanism, with the camera behind it.
+  const standBefore = (w, out) => {
+    const d = HALL.r - out, x = w.sn * d, z = w.c * d;
+    BACK.position.x = x; BACK.position.y = 0; BACK.position.z = z;
+    BACK.target.x = x; BACK.target.y = 1; BACK.target.z = z;
+    BACK.yaw = Math.atan2(w.sn, w.c);
+    pilot.navigate(BACK);
+  };
+  // Where the Ooga stands against a window: how far past the wall's face (`along`) and how far across its opening.
+  const AT = { along: 0, across: 0 };
+  const against = (w, p) => {
+    const radial = p.x * w.sn + p.z * w.c;
+    AT.along = radial - HALL.r;
+    AT.across = p.x * w.c - p.z * w.sn;
+    return AT;
+  };
+  // Cross the glass itself, retaining the step's overshoot. The emerging
+  // character is inside the destination plane, so holding forward cannot
+  // immediately send them through it again.
+  const windowsFrame = (previousX, previousY, previousZ) => {
+    if (people.player !== avatar) return;
+    const p = avatar.root.position, feet = p.y - avatar.baseY;
+    for (let i = 0; i < scene.windows.length; i++) {
+      const w = scene.windows[i], at = against(w, p);
+      if (Math.abs(at.across) > WINDOW.halfW) continue;
+      if (w.kind === "travel") {
+        if (at.along <= WINDOW.plane) w.held = false;
+        else if (!w.held && feet <= 0.6) { travel(w); return; }
+      } else {
+        const from = previousX * w.sn + previousZ * w.c - HALL.r - MIRROR_Z, to = at.along - MIRROR_Z;
+        if (from > 1e-7 || to < 0 || to - from < 1e-8) continue;
+        const t = -from / (to - from), across = (previousX + (p.x - previousX) * t) * w.c - (previousZ + (p.z - previousZ) * t) * w.sn;
+        const bottom = previousY + (p.y - previousY) * t - avatar.baseY;
+        if (bottom < -0.12 || !BM.inArch(across, bottom + avatar.bodyHeight, WINDOW.halfW, WINDOW.spring)) continue;
+        const m = w.transform, x = p.x, z = p.z, vx = avatar.leap.vx, vz = avatar.leap.vz;
+        p.x = m[0] * x + m[8] * z + m[12]; p.z = m[2] * x + m[10] * z + m[14];
+        avatar.root.rotation.y += w.yaw;
+        if (avatar.root.quaternion) {
+          math.quat.fromEuler(MIRROR_ROTATION, 0, w.yaw, 0);
+          math.quat.multiply(avatar.root.quaternion, MIRROR_ROTATION, avatar.root.quaternion);
+        }
+        avatar.leap.vx = m[0] * vx + m[8] * vz; avatar.leap.vz = m[2] * vx + m[10] * vz;
+        pilot.transformView(m, w.yaw);
+        w.crossings++;
+        return;
+      }
+    }
+  };
+
+  // The mechanism, charged by how near anyone stands to an open world's window: the ₿ spins faster and bobs, its rings
+  // whirl, and the light in the beam flows upward, a slow shimmer at rest and a rush fully charged; and once it is
+  // charged it bursts now and then, throwing sparkles, two shockwaves and a flare, and sending a surge up the beam.
+  // Its light takes on the colour of the world it answers, the nearest open window's, kept while the charge ebbs: the
+  // beam, the shockwaves, the sparkles and the core's light, from gold at rest to that colour fully charged. The ₿ and
+  // its rings keep their gold and bronze.
+  const mechanism = (s, dt, elapsed) => {
+    let want = 0, lead = null;
+    for (let i = 0; i < s.windows.length; i++) {
+      const w = s.windows[i];
+      if (w.kind === "travel" && w.near > want) { want = w.near; lead = w; }
+    }
+    const k = (s.charge += (want - s.charge) * Math.min(1, dt * CHARGE_EASE));
+    if (lead) s.lead = lead;
+    const step = s.lead ? Math.round(k * (BM.CHARGE_STEPS - 1)) : 0;
+    if (step !== s.step || s.lead !== s.stepLead) {
+      s.step = step;
+      s.stepLead = s.lead;
+      for (let i = 0; i < s.beam.length; i++) s.beam[i].node.geometry = s.lead.charge.beam[step];
+    }
+    s.glyph.rotation.y += dt * (0.6 + 5 * k);
+    s.bob += dt * (1.5 + 4 * k);
+    s.glyph.position.y = CORE.glyphY + Math.sin(s.bob) * 0.06 * (0.4 + k);
+    s.glyph.scale.x = s.glyph.scale.y = s.glyph.scale.z = 1 + (0.04 * k + 0.12 * s.flare) * (1 + Math.sin(elapsed * 9));
+    for (let i = 0; i < s.rings.length; i++) s.rings[i].rotation.y += dt * RING_SPIN[i] * (1 + 7 * k);
+    // The beam: bands of light leave its foot and climb, lengthening and speeding up with its drums; they come faster,
+    // deeper and brighter as the charge builds and swell the beam a little as they pass, and a surge outshines them all.
+    s.flow += dt * (BAND_RATE[0] + (BAND_RATE[1] - BAND_RATE[0]) * k);
+    s.surge = Math.min(1, s.surge + dt / SURGE_TIME);
+    const depth = 0.25 + 0.35 * k, at = s.surge * (s.beam.length + 2 * SURGE_WIDTH) - SURGE_WIDTH;
+    for (let i = 0; i < s.beam.length; i++) {
+      const b = s.beam[i], u = 0.5 + 0.5 * Math.sin(TAU * (i / BAND - s.flow)), band = u * u * u, d = (i - at) / SURGE_WIDTH;
+      const surge = s.surge < 1 ? Math.exp(-d * d) : 0;
+      b.node.glow = (0.8 + 0.4 * k) * (1 - depth * (1 - band)) + surge;
+      b.node.highlight = band * (0.1 + 0.7 * k) + 1.2 * surge;
+      b.node.scale.x = b.node.scale.z = b.r * (1 + 0.35 * k + band * (0.04 + 0.16 * k) + 0.9 * surge);
+    }
+    // Bursts, once charged: sparkles, the shockwaves, a flare and a surge up the beam.
+    s.flare = Math.max(0, s.flare - dt * 1.8);
+    if (k > BURST_FROM) {
+      s.burstWait -= dt;
+      if (s.burstWait <= 0) {
+        s.burstWait = BURST_GAP[0] + (BURST_GAP[1] - BURST_GAP[0]) * k + Math.random() * 1.2;
+        fx.burst(0, CORE.glyphY, 0, Math.round(18 + 30 * k), s.lead ? s.lead.sparkles : SPARKLES, 4 + 4 * k);
+        for (let i = 0; i < s.shocks.length; i++) {
+          s.shocks[i].t = 0; s.shocks[i].node.visible = true;
+          if (s.lead) s.shocks[i].node.geometry = s.lead.charge.shock[step];
+        }
+        s.flare = 1;
+        s.surge = 0;
+      }
+    } else s.burstWait = Math.max(s.burstWait, BURST_GAP[1]);
+    for (let i = 0; i < s.shocks.length; i++) {
+      const w = s.shocks[i];
+      if (w.t >= 1) continue;
+      w.t = Math.min(1, w.t + dt / 0.9);
+      const r = 0.6 + w.reach * (1 - (1 - w.t) * (1 - w.t));
+      w.node.scale.x = w.node.scale.z = r;
+      w.node.glow = 1.5 * (1 - w.t);
+      w.node.smokeOpacity = Math.min(1, 3 * (1 - w.t));
+      w.node.visible = w.t < 1;
+    }
+    // The core's light swells with the charge and flares with a burst, warming from gold toward the lead's colour.
+    const L = RENDER_OPTS.lights, lift = 1 + 1.2 * k + 3 * s.flare, c = s.lead ? s.lead.tint : CORE_GLOW, m = s.lead ? k : 0;
+    L[4] = (CORE_GLOW[0] + (c[0] - CORE_GLOW[0]) * m) * lift;
+    L[5] = (CORE_GLOW[1] + (c[1] - CORE_GLOW[1]) * m) * lift;
+    L[6] = (CORE_GLOW[2] + (c[2] - CORE_GLOW[2]) * m) * lift;
+  };
+
+  // The ₿ ship's trip: a quadratic from where it sets off, bent toward the hall through `bend`, to where it is going,
+  // eased in and out, its nose along the way it flies and rocking a little, its flame flickering; it flashes out of a
+  // star and into one, the star flaring each time. Its exhaust puffs shrink away where they were left.
+  const sail = (s, dt, elapsed) => {
+    for (let i = 0; i < s.puffs.length; i++) {
+      const p = s.puffs[i];
+      if (p.t >= 1) continue;
+      p.t = Math.min(1, p.t + dt / SHIP.life);
+      p.node.scale.x = p.node.scale.y = p.node.scale.z = SHIP.puff * (1 - p.t);
+      p.node.glow = 1 - 0.6 * p.t;
+      p.node.visible = p.t < 1;
+    }
+    const v = s.voyage, ship = s.ship;
+    if (v.t >= 1) {
+      v.rest -= dt;
+      if (v.rest > 0) return;
+      v.from = v.to;
+      v.to = v.from.glint ? s.ports[0] : s.stars.length ? s.stars[v.star++ % s.stars.length] : s.ports[v.port++ % s.ports.length];
+      const mx = v.from.x + v.to.x, my = v.from.y + v.to.y, mz = v.from.z + v.to.z, ml = SHIP.bend / Math.hypot(mx, my, mz);
+      v.bend.x = mx * ml; v.bend.y = my * ml; v.bend.z = mz * ml;
+      v.time = (Math.hypot(v.bend.x - v.from.x, v.bend.y - v.from.y, v.bend.z - v.from.z) + Math.hypot(v.to.x - v.bend.x, v.to.y - v.bend.y, v.to.z - v.bend.z)) / SHIP.speed;
+      v.t = 0;
+      if (v.from.glint) v.from.glint.flare = 1;
+      ship.visible = true;
+    }
+    v.t = Math.min(1, v.t + dt / v.time);
+    const t = v.t, u = t * t * (3 - 2 * t), a = (1 - u) * (1 - u), b = 2 * u * (1 - u), c = u * u, f = v.from, e = v.to, m = v.bend, p = ship.position;
+    p.x = a * f.x + b * m.x + c * e.x; p.y = a * f.y + b * m.y + c * e.y; p.z = a * f.z + b * m.z + c * e.z;
+    const dx = (1 - u) * (m.x - f.x) + u * (e.x - m.x), dy = (1 - u) * (m.y - f.y) + u * (e.y - m.y), dz = (1 - u) * (m.z - f.z) + u * (e.z - m.z), dl = Math.hypot(dx, dy, dz);
+    ship.rotation.y = Math.atan2(dx, dz);
+    ship.rotation.x = -Math.asin(dy / dl);
+    ship.rotation.z = 0.3 * Math.sin(elapsed * 1.3);
+    const k = Math.min(1, f.glint ? t / SHIP.warp : 1, e.glint ? (1 - t) / SHIP.warp : 1);
+    ship.scale.x = ship.scale.y = ship.scale.z = SHIP.size * k;
+    s.flame.scale.x = s.flame.scale.y = 0.85 + 0.3 * Math.random();
+    s.flame.scale.z = 0.7 + 0.6 * Math.random();
+    v.puff -= dt;
+    if (v.puff <= 0 && k > 0.5) {
+      v.puff = SHIP.every;
+      for (let i = 0; i < s.puffs.length; i++) {
+        const q = s.puffs[i];
+        if (q.t < 1) continue;
+        const back = 0.6 * SHIP.size / dl;
+        q.node.position.x = p.x - dx * back; q.node.position.y = p.y - dy * back; q.node.position.z = p.z - dz * back;
+        q.t = 0; q.node.visible = true;
+        break;
+      }
+    }
+    if (t >= 1) {
+      ship.visible = false;
+      if (e.glint) e.glint.flare = 1;
+      v.rest = SHIP.rest[0] + Math.random() * (SHIP.rest[1] - SHIP.rest[0]);
+    }
+  };
+
+  // The heavens turn slowly overhead, and the sky pass's stars with them, while the moon stays where the hall's light
+  // comes from; stars twinkle a group at a time with their halos, the brightest glint, the ₿ ship sails, the turning
+  // planets and their rings spin, moons go round their planets, and now and then a shooting star streaks down its way
+  // and fades.
+  const heavens = (s, dt, elapsed) => {
+    const a = (s.sky.rotation.y += dt * SKY_TURN), c = Math.cos(a), sn = Math.sin(a), M = RENDER_OPTS.starMatrix;
+    M[0] = c; M[2] = sn; M[6] = -sn; M[8] = c;
+    for (let i = 0; i < s.twinkle.length; i++) {
+      const u = Math.sin(elapsed * (1.1 + 0.29 * i) + i * 2.1) * Math.sin(elapsed * (0.37 + 0.07 * i) + i), d = u * u;
+      s.twinkle[i].glow = s.halos[i].glow = TWINKLE_FULL - TWINKLE_DIP * d * d;
+    }
+    for (let i = 0; i < s.glints.length; i++) {
+      const g = s.glints[i], u = 0.5 + 0.5 * Math.sin(elapsed * g.rate + g.phase), k = u * u * u * u, f = g.flare = Math.max(0, g.flare - dt * 1.2);
+      g.node.scale.x = g.node.scale.y = g.size * (0.3 + 0.9 * k + 2.2 * f);
+      g.node.rotation.z = 0.25 * Math.sin(elapsed * 0.1 + g.phase);
+      g.node.glow = 1 + (TWINKLE_FULL - 1) * Math.max(k, f);
+    }
+    sail(s, dt, elapsed);
+    for (let i = 0; i < s.spins.length; i++) s.spins[i].node.rotation.y += dt * s.spins[i].rate;
+    for (let i = 0; i < s.moons.length; i++) {
+      const m = s.moons[i], t = elapsed * m.rate + m.phase, x = Math.cos(t) * m.a, y = Math.sin(t) * m.a, p = m.node.position;
+      p.x = m.u[0] * x + m.v[0] * y; p.y = m.u[1] * x + m.v[1] * y; p.z = m.u[2] * x + m.v[2] * y;
+    }
+    s.meteorWait -= dt;
+    if (s.meteorWait <= 0) {
+      s.meteorWait = METEOR_GAP[0] + Math.random() * (METEOR_GAP[1] - METEOR_GAP[0]);
+      const m = s.meteors[Math.floor(Math.random() * s.meteors.length)];
+      if (m.t >= 1) { m.t = 0; m.node.visible = true; }
+    }
+    for (let i = 0; i < s.meteors.length; i++) {
+      const m = s.meteors[i];
+      if (m.t >= 1) continue;
+      m.t = Math.min(1, m.t + dt / METEOR_LIFE);
+      const k = m.t * m.len;
+      m.node.position.x = m.dir[0] * k; m.node.position.y = m.dir[1] * k; m.node.position.z = m.dir[2] * k;
+      m.node.glow = 1.4 * (1 - m.t);
+      m.node.smokeOpacity = Math.min(1, 3 * (1 - m.t));
+      m.node.visible = m.t < 1;
+    }
+  };
+
+  const update = (dt, elapsed) => {
+    const s = scene;
+    const previousX = avatar ? avatar.root.position.x : 0, previousY = avatar ? avatar.root.position.y : 0, previousZ = avatar ? avatar.root.position.z : 0;
+    pilot.readInput(dt);
+    if (people) people.update(dt, elapsed);
+    pilot.update(dt);
+    // The Ooga driven here goes to the room with where it stands and its health; other players here are shown.
+    const drivenHere = people && people.player;
+    BL.net.setBody(drivenHere ? drivenHere.traits.name : null);
+    if (drivenHere) {
+      const p = drivenHere.root.position;
+      BL.net.sendPose(p.x, p.y - drivenHere.baseY, p.z, drivenHere.root.rotation.y);
+      BL.net.setHealth(drivenHere.health.value, drivenHere.health.stunned);
+    }
+    remotes.update(dt);
+    footsteps.update(drivenHere);
+    mechanism(s, dt, elapsed);
+    heavens(s, dt, elapsed);
+    // The way out's field hums and shows the outline of whoever walks through it.
+    const g = s.gate;
+    g.phase.update(dt, elapsed);
+    g.phase.body.update(dt);
+    g.phase.body.time = g.phase.ripples.time;
+    g.hum -= dt;
+    if (g.hum <= 0) {
+      g.hum = 0.12 + Math.random() * 0.25;
+      g.phase.ripples.pulse(g.opening.minX + Math.random() * (g.opening.maxX - g.opening.minX), Math.random() * g.opening.ceilingY, 0);
+    }
+    // The open world's window alone answers whoever comes near (the Ooga, or with none, the view): its glow, its rim,
+    // which breathes at rest and climbs to white-hot, its light and the light's reach, its passage's ribs and how often
+    // its field ripples. The mirrors keep their look. Every field hums in the same blue.
+    const who = avatar ? avatar.root.position : pilot.orbit.target, L = RENDER_OPTS.lights;
+    for (let i = 0; i < s.windows.length; i++) {
+      const w = s.windows[i];
+      if (w.kind === "travel") {
+        const at = against(w, who), d = Math.hypot(Math.max(0, -at.along), Math.max(0, Math.abs(at.across) - WINDOW.halfW));
+        const want = clamp((FAR - d) / (FAR - NEAR), 0, 1), k = want * want * (3 - 2 * want), o = w.light * 8, power = 0.7 + 2.6 * w.near;
+        w.near += (k - w.near) * Math.min(1, dt * EASE);
+        w.neon.glow = 1 + BRIGHTEN * w.near;
+        const rim = w.rims[Math.min(BM.RIM_STEPS - 1, Math.floor(w.near * BM.RIM_STEPS))];
+        if (w.rim.geometry !== rim) w.rim.geometry = rim;
+        w.rim.glow = 0.85 + 0.15 * Math.sin(elapsed * 2.4) + w.near;
+        w.ribs.glow = 1 + w.near;
+        L[o + 3] = 7 + 5 * w.near;
+        L[o + 4] = w.tint[0] * power; L[o + 5] = w.tint[1] * power; L[o + 6] = w.tint[2] * power;
+      }
+      w.phase.update(dt, elapsed);
+      w.body.update(dt);
+      w.body.time = w.phase.ripples.time;
+      w.hum -= dt;
+      if (w.hum <= 0) {
+        w.hum = (0.16 + Math.random() * 0.3) * (1 - 0.65 * w.near);
+        w.phase.ripples.pulse((Math.random() * 2 - 1) * WINDOW.halfW, Math.random() * WINDOW_TOP, 0);
+      }
+    }
+    // The lanterns flicker like flames.
+    for (let slot = fixedLights, j = 0; slot < RENDER_OPTS.lightCount; slot++, j++) {
+      const k = 0.9 + Math.sin(elapsed * 9.3 + j * 1.7) * 0.06 + Math.sin(elapsed * 23.7 + j * 5.3) * 0.04, o = slot * 8;
+      L[o + 4] = LANTERN_GLOW[0] * k; L[o + 5] = LANTERN_GLOW[1] * k; L[o + 6] = LANTERN_GLOW[2] * k;
+    }
+    dust.update(elapsed, pilot.orbit.target.x, pilot.orbit.target.z);
+    // Out through the field: walked into, or flown into with the free view.
+    if (!leaving) {
+      if (pilot.player) {
+        const p = pilot.player.root.position;
+        if (p.z > ENTRY.field && Math.abs(p.x) < ENTRY.halfW) leaveChamber();
+        else windowsFrame(previousX, previousY, previousZ);
+      } else if (!avatar) {
+        const a = pilot.controls.read(), p = camera.position;
+        if (Math.hypot(a.x, a.y) > 0.05 && p.z > ENTRY.field - 1.2 && Math.abs(p.x) < ENTRY.halfW) leaveChamber();
+      }
+    }
+    stepTweens(dt);
+    fx.update(dt, elapsed);
+    pictureWait -= dt;
+    if (!leaving && pictureTries > 0 && pictureWait <= 0 && !pictureJob && !pictureLoading) queuePicture();
+  };
+  const drawExtra = (ctx2d, project) => remotes.drawNames(ctx2d, project);
+  const overlay = (dt) => fx.drawOverlay(dt, drawExtra);
+
+  const leave = () => {
+    stopPictures();
+    // Left by Back or Forward rather than by a way out of its own, the chamber hands the Ooga on, so the next scene
+    // plays the same one; the way out to the island and a window have handed theirs over already.
+    if (!leaving) {
+      world.pilotDetached = !pilot.player;
+      world.pilot = pilot.player ? pilot.player.traits.name : null;
+    }
+    unsubscribeAccount();
+    unsubscribeAccount = null;
+    BL.net.setBody(null);
+    for (const w of scene.windows) {
+      w.phase.dispose();
+      if (w.face) { w.body.dispose(); w.face.mirrorRipples = null; }
+      if (w.picture && w.picture.owned) renderer.releaseGeometry(w.picture.geometry);
+    }
+    scene.gate.phase.dispose();
+    remotes.dispose();
+    remotes = null;
+    footsteps.dispose();
+    footsteps = null;
+    if (people) people.dispose();
+    fx.dispose();
+    pilot.dispose();
+    for (const node of targets) input.remove(node);
+    targets.length = 0;
+    while (root.children.length) removeChild(root, root.children[root.children.length - 1]);
+    const count = input.targetCount;
+    input.dispose();
+    hud.dispose();
+    scene = hud = hooks = input = pilot = fx = agentPlay = dust = people = avatar = playerWorld = canvas = null;
+    bifrostScene.input = bifrostScene.debug = null;
+    return { targets: count };
+  };
+  const liveGeometry = (set) => {
+    if (scene) {
+      scene.gate.phase.liveGeometry(set);
+      for (const w of scene.windows) {
+        w.phase.liveGeometry(set);
+        // An open world's rim swaps through its steps, and the mechanism through its colour's, so every step stays on
+        // the GPU.
+        if (w.rims) for (const rim of w.rims) set.add(rim);
+        if (w.charge) for (let k = 0; k < BM.CHARGE_STEPS; k++) set.add(w.charge.beam[k]).add(w.charge.shock[k]);
+      }
+    }
+    if (avatar) set.add(avatar.headOpen).add(avatar.headClosed);
+    if (remotes) remotes.liveGeometry(set);
+  };
+  const stats = () => {
+    let nodes = 0;
+    traverseVisible(root, () => nodes++);
+    const all = (n) => 1 + n.children.reduce((sum, c) => sum + all(c), 0);
+    return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...(remotes ? remotes.stats() : {}) };
+  };
+
+  const bifrostScene = {
+    // Voice zone: the Bifrost group, which the isle and its bridge share (`bifrost`).
+    voiceZone: "bifrost.chamber",
+    micKey: true,
+    id: "bifrost", enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry,
+    root: null, camera: null, input: null, debug: null, agent: null, agentView: null, agentControls: null, agentHandoff: null,
+    get inMotion() {
+      return !!scene;
+    }
+  };
+  BL.scenes = BL.scenes || {};
+  BL.scenes.bifrost = bifrostScene;
+})();

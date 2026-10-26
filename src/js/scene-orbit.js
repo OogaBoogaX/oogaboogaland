@@ -1,8 +1,29 @@
 // Build on the pad, release clamps, stage to the Sky Top, sky-hook hold, spacewalk, fall home shield first.
+//
+// Ooga Orbit. Phases `build`, `count`, `ignite`, `ascent`, `orbit`, `eva`, `descent`, `down`, `boom`,
+// `results`. The pad builder; the side camera on the way up (downrange to the right); the camera-relative
+// pod turn with rim air puffs and the attitude ball. The Sky Top goal is `TOP` = `rocket.ORBIT_ALT` (500):
+// reaching it with anything still rising hands the flight to the sky hook, which reels it over the pad and
+// holds it still with `flight.hold`, then after the spacewalk lets go with `flight.stand` and a downward
+// throw. The climb autopilot follows `leanTarget` by height (an arc capped at 40 degrees), flies whenever A
+// and D are left alone, G toggles it, and draws a yellow aim line. The log gives the reason a flight missed
+// orbit; the mission checklist has seven steps, the one in hand lit with a live detail, skipped and failed
+// ones struck. The spacewalk (phase `eva`) is a suited copy of the pilot on a tether in the pod's own frame,
+// flying to the space rock, measuring it and climbing back in. Falling stages, smoke puffs and plasma
+// streaks live in fixed rings of instanced batches; the sky darkens with height; donations and `leave`.
+//
+// A tapped tank or fin joins the stage under the last Vine Knot; a pod goes on top and a shield under it.
+// Scoring: thrift (`SCORE.thrift` a banana under `REF_BILL`) and a fast climb (`SCORE.fast`, from the clamps
+// to the top against `FAST_BEST`) on a completed mission, `SCORE.hand` for a climb flown without the
+// autopilot, the pad on a gradient from its middle, and a failed flight capped under bronze. A stage
+// dropped with fuel is counted (`fuelWasted`) and named in the post-mortem; descent Space always reaches
+// `pullChute` so an early press explains itself. The spacewalk has `EVA_AIR` seconds of air (the tether
+// reels in at zero, leftover air pays) and the rock's place in the pod's frame (`eva.rockE/U/F`) is drawn per
+// launch. A pad landing gets confetti, the ticker and a word from the Agent.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const { math, models, contributors, donations, qr, terrain, hubModels, dropModels, rocketModels, rocketParts, rocket: rocketMod, rocketHud, rocketAudio, daylight, pile: pileMod, game: gameMod, hud: hudMod, interact: interactMod, controls: controlsMod, fx: fxMod } = BL;
+  const { math, models, contributors, donations, terrain, hubModels, dropModels, rocketModels, rocketParts, rocket: rocketMod, rocketHud, rocketAudio, daylight, pile: pileMod, game: gameMod, hud: hudMod, interact: interactMod, controls: controlsMod, fx: fxMod } = BL;
   const { clamp, lerp, damp, quat, mulberry32, fnv1a } = math;
   const { createNode, addChild, removeChild, createCamera, addTween, stepTweens, tweenCount, traverseVisible } = BL.scene;
   const { CONFETTI } = fxMod;
@@ -17,9 +38,8 @@
   const daylenParam = DEBUG ? parseFloat(params.get("daylen")) : NaN;
   const dayParam = DEBUG ? parseFloat(params.get("day")) : NaN;
   const latitudeParam = DEBUG ? parseFloat(params.get("latitude")) : NaN;
-  const islandLatitude = Number.isFinite(latitudeParam) ? Math.max(-66, Math.min(66, latitudeParam)) : daylight.ISLAND_LATITUDE_DEG;
+  const islandLatitude = Number.isFinite(latitudeParam) ? Math.max(-90, Math.min(90, latitudeParam)) : daylight.ISLAND_LATITUDE_DEG;
   const SEED = 1;
-  const METER_CAPACITY = 60;
   const FIXED = 1 / 120, MAX_SUBSTEPS = 4;
   // Space in GREEN [.55,.86] frees the clamps, GOLD [.66,.78] is perfect; early staggers, late strains, full pops.
   const COUNT_T = 3, SPOOL_T = 2.6, GREEN = [0.55, 0.86], GOLD = [0.66, 0.78], EARLY = { boost: 0.55, t: 2.2, kick: -0.3 }, LATE_HEAT = 0.3;
@@ -30,7 +50,13 @@
   // EVA rock offsets (e, u, f) are in the pod's own frame: side, up, ahead.
   // Bumps push the Ooga back at the restitution and keep some speed (no air); steadying pauses for EVA.drift.
   const EVA = { size: 0.85, rockE: 9, rockU: 4.5, rockF: 6.5, tether: 18, reach: 2.8, hatch: 3, accel: 4, max: 3.2, settle: 2.4, measure: 3.6, eye: 5.5, body: 0.45, rockR: 1.05, podR: 1, bounce: 0.12, drift: 0.35 };
-  const SCORE = { perfect: 200, good: 100, space: 300, orbit: 1000, stage: 100, home: 500, cool: 300, pad: 1500, islet: 1000, island: 700, land: 400, sea: 300, near: 500, nearRange: 600, eva: 700 };
+  // Thrift pays for every banana under REF_BILL on a completed mission; `fast` for a quick climb to the top
+  // measured from the clamps' release; `hand` for a climb flown without the autopilot; a pad landing pays on a
+  // gradient from its middle.
+  const SCORE = { perfect: 200, good: 100, space: 300, orbit: 1000, stage: 100, home: 500, cool: 300, pad: 1500, padBase: 900, islet: 1000, island: 700, land: 400, sea: 300, near: 500, nearRange: 600, eva: 700, thrift: 2, hand: 400, fast: 400 };
+  const REF_BILL = 600, FAST_BEST = 28, FAST_SPAN = 40;
+  // Air for the spacewalk, in seconds; the tether reels the walker in when it runs out.
+  const EVA_AIR = 40;
   const LANDED_T = 2.6, BOOM_T = 3;
   // DEBRIS.life = seconds a dropped stage falls before it is gone; DEBRIS.pod = the pod's radius for stage hits.
   const DEBRIS = { life: 30, pod: 1.1 };
@@ -50,12 +76,13 @@
   const SPLASH_BITS = [SPRAY, SPRAY_DK];
   const RENDER_OPTS = {
     clear: new Float32Array(3), horizon: new Float32Array(3), zenith: new Float32Array(3), sky: new Float32Array(3), ground: new Float32Array(3), sun: new Float32Array(3), direct: new Float32Array(3),
-    light: { x: 0.55, y: 0.78, z: -0.25 }, sunDirection: { x: 0, y: 1, z: 0 }, moon: { x: 0, y: 1, z: 0 }, starMatrix: new Float32Array(9),
+    light: { x: 0.55, y: 0.78, z: -0.25 }, sunDirection: { x: 0, y: 1, z: 0 }, moon: { x: 0, y: 1, z: 0 }, moonSun: { x: 0, y: -1, z: 0 }, starMatrix: new Float32Array(9),
     stars: 0, torch: 0, day: 1, twilight: 0, lampFactor: 0, directStrength: 1, sunStrength: 1, moonStrength: 0, ambientFloor: 0.18, diffuseFloor: 0, shadowStrength: 1, shadowFloor: 0, shadowBias: 0.002,
     time: 0, bloomStrength: 0.55, lights: new Float32Array(80), lightCount: 0, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 34, fog: null, fogNear: 260, fogFar: 900
   };
   RENDER_OPTS.starMatrix[0] = RENDER_OPTS.starMatrix[4] = RENDER_OPTS.starMatrix[8] = 1;
   RENDER_OPTS.fog = RENDER_OPTS.horizon;
+  RENDER_OPTS.clouds = 0.4;
   const SPACE_ZENITH = [0.004, 0.006, 0.02], SPACE_HORIZON = [0.16, 0.34, 0.62], SPACE_CLEAR = [0.004, 0.006, 0.02];
   const setVec = (v, x, y, z) => {
     v.x = x;
@@ -78,15 +105,20 @@
   const leanTarget = (alt) => Math.pow(clamp((alt - LEAN_FROM) / LEAN_OVER, 0, 1), LEAN_CURVE) * LEAN_MAX;
 
   // One visit's state: made in enter, dropped in leave.
-  let renderer, game, world, go, lootEnabled, testBananas, root, camera, island, hud, rhud, hooks, input, fx, controls, audio, clock, spot, site, planet, flight, view, passenger, canopy, heatShell, smoke, plasma, splashNode;
+  // Where the game exits to: back to Ooga Arcade when a cabinet started it, otherwise the island.
+  let home = "hub";
+  let renderer, game, world, go, lootEnabled, testBananas, root, camera, island, hud, rhud, hooks, input, fx, controls, audio, clock, spot, planet, flight, view, passenger, canopy, heatShell, smoke, plasma, splashNode;
   let astro, astroStick, astroLight, rockNode, tetherNode, agent;
-  const eva = { measured: false, back: false, reeling: false, measuring: 0, reading: 0, drift: 0, tumble: 0, spin: 0, e: 0, u: 0, f: 0, ve: 0, vu: 0, vf: 0, yaw: 0, pitch: 0, near: "", puff: 0 };
+  // The rock's place in the pod's frame is drawn per launch (rockE, rockU, rockF), so the walk is a small hunt.
+  const eva = { measured: false, back: false, reeling: false, measuring: 0, reading: 0, drift: 0, tumble: 0, spin: 0, e: 0, u: 0, f: 0, ve: 0, vu: 0, vf: 0, yaw: 0, pitch: 0, near: "", puff: 0, air: EVA_AIR, bonus: 0, out: false, rockE: EVA.rockE, rockU: EVA.rockU, rockF: EVA.rockF };
   let phase = "build", stack = [], selected = -1, sceneTime = 0, flightTime = 0, accumulator = 0, phaseT = 0, countShown = 0, gauge = 0, release = null, igniteIn = 0;
+  // The clock from the clamps to the top, whether the climb was flown by hand throughout, and fuel dropped unburnt.
+  let releasedAt = 0, topAt = 0, handFlown = true, fuelWasted = 0, launches = 0;
   let puffClock = 0, reelT = 0;
   // REEL holds where the sky hook reels the flight from (x0,y0,z0) and to (x1,y1,z1).
   const REEL = { x0: 0, y0: 0, z0: 0, x1: 0, y1: 0, z1: 0 };
   let orbited = false, spaceCalled = false, stagesDropped = 0, chuteCalled = false, warnAt = 0, flipAt = 0, leanHinted = false, result = null, failure = null, score = 0;
-  let meterTimer = 0, stateTimer = 0, hintTimer = 0;
+  let stateTimer = 0, hintTimer = 0;
   const placed = [];
   const debris = [];
   const fireballs = [];
@@ -107,12 +139,6 @@
   const cam = { x: 0, y: 0, z: 0, tx: 0, ty: 0, tz: 0, ox: 0, oy: 0, oz: 0, ax: 0, ay: 0, az: 0, warm: false, offset: 0, tilt: 0, dragAt: -9, buildYaw: -0.64, buildPitch: 0.18, buildZoom: 1, shake: 0 };
   const ctrl = { throttle: 0, lean: 0, pitch: 0, roll: 0, yaw: 0 };
   let inputLocked = false;
-  const orbitScene = {
-    id: "orbit", renderOpts: RENDER_OPTS, root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
-    get inMotion() {
-      return (phase !== "build" && phase !== "results") || fx.inMotion || smoke.count > 0;
-    }
-  };
 
   // Islands, then the site's pad and deck, else the sea (the flight reads the sea from its own height).
   const groundAt = (x, z) => {
@@ -246,7 +272,7 @@
     astroStick = createNode({ position: { x: 0, y: -0.62 * h, z: 0.06 * h }, rotation: { x: Math.PI, y: 0, z: 0 }, scale: { x: 1, y: 0.01, z: 1 }, geometry: rocketModels.measureStick(), visible: false });
     astroLight = createNode({ position: { x: 0, y: 0.95, z: 0 }, geometry: rocketModels.readingLight() });
     addChild(astroStick, astroLight);
-    addChild(astro.parts.armR, astroStick);
+    addChild(astro.parts.armL, astroStick);
     astro.root.visible = false;
     addChild(root, astro.root);
   };
@@ -276,7 +302,10 @@
       else stack.splice(podAt >= 0 ? podAt : stack.length, 0, id);
       selected = stack.indexOf(id);
     } else {
-      const at = shieldAt >= 0 ? shieldAt : podAt >= 0 ? podAt : stack.length;
+      // Under the last Vine Knot when there is one, so the part joins the stage below it rather than the
+      // pod's section (where a tank or fin would break the knot rule); else under the shield or the pod.
+      const knotAt = stack.map((p) => rocketParts.partOf(p).kind).lastIndexOf("sep");
+      const at = knotAt >= 0 ? knotAt : shieldAt >= 0 ? shieldAt : podAt >= 0 ? podAt : stack.length;
       stack.splice(at, 0, id);
       selected = at;
     }
@@ -349,6 +378,8 @@
     refreshBuilder();
     if (preset) hud.toast(`${preset.name} on the pad`);
   };
+  // A signed-in visitor with an Ooga flies it, as they drive only it on the island; the pilot button is for the rest.
+  const ownPilot = () => BL.net.ownAmong(contributors.roster);
   const cyclePilot = () => {
     const roster = contributors.roster, i = roster.findIndex((c) => c.name === selection.pilot);
     selection.pilot = roster[(i + 1) % roster.length].name;
@@ -376,6 +407,12 @@
     debris.push({ node, len: d.height, wide, clear: false, v: { x: s.v.x - s.up[0] * 1.6, y: s.v.y - s.up[1] * 1.6, z: s.v.z - s.up[2] * 1.6 }, w: { x: s.right[0] * 0.5 + s.front[0] * 0.2, y: s.right[1] * 0.5 + s.front[1] * 0.2, z: s.right[2] * 0.5 + s.front[2] * 0.2 }, t: 0 });
     stagesDropped++;
     score += SCORE.stage;
+    // Fuel still in the stage goes down with it.
+    const left = flight.fuel[d.stage], full = flight.stages[d.stage].fuel;
+    if (left > 0.01 && full > 0) {
+      fuelWasted += left;
+      rhud.notice(`Stage dropped with ${Math.round(left / full * 100)}% fuel still in it`, 2200);
+    }
     audio.cues.stage();
     const jx = bx + s.up[0] * d.height, jy = by + s.up[1] * d.height, jz = bz + s.up[2] * d.height;
     for (let i = 0; i < 10; i++) {
@@ -482,6 +519,7 @@
 
   const toBuild = () => {
     phase = "build";
+    rhud.lockPilot(!!ownPilot());
     flight = null;
     release = null;
     igniteIn = 0;
@@ -495,6 +533,7 @@
     rebuildView();
     view.node.visible = true;
     rhud.show("build");
+    rhud.setMeters("");
     rhud.renderStack(stack, selected, rocketParts.check(stack), rocketParts.stats(stack));
     hud.el.act.hidden = true;
     hud.setSubtitle("Ooga Orbit · the pad");
@@ -525,8 +564,19 @@
     stagesDropped = 0;
     orbited = spaceCalled = chuteCalled = leanHinted = false;
     reelT = 0;
-    eva.measured = eva.back = eva.reeling = false;
+    releasedAt = topAt = 0;
+    handFlown = true;
+    fuelWasted = 0;
+    launches++;
+    eva.measured = eva.back = eva.reeling = eva.out = false;
     eva.measuring = 0;
+    eva.air = EVA_AIR;
+    eva.bonus = 0;
+    // The rock somewhere new each launch: its side, height and reach drawn from the pilot and the launch count.
+    const seed = fnv1a(`${selection.pilot}/${launches}`);
+    eva.rockE = (seed % 2 ? 1 : -1) * (6 + (seed >>> 3) % 5);
+    eva.rockU = 2 + (seed >>> 7) % 5;
+    eva.rockF = 4 + (seed >>> 11) % 6;
     astro.root.visible = tetherNode.visible = rockNode.visible = false;
     rockNode.glow = 1;
     missionKey = leanKey = NaN;
@@ -535,6 +585,7 @@
     selected = -1;
     markSelected();
     rhud.show("flight");
+    rhud.setMeters("ascent");
     rhud.setStage(1, flight.stages.length);
     hud.el.act.hidden = !COARSE;
     hud.setAct("Release!");
@@ -569,7 +620,7 @@
       score += release === "perfect" ? SCORE.perfect : SCORE.good;
       flight.ignite();
       rhud.center(release === "perfect" ? "PERFECT!" : "GOOD", 1100);
-      rhud.notice("W S push · A D lean · Space stages", 3200);
+      rhud.notice(COARSE ? "left stick pushes · right stick leans · STAGE drops a stage" : "W S push · A D lean · Space stages", 3200);
       if (release === "perfect") audio.cues.perfect();
     } else {
       release = "late";
@@ -582,6 +633,7 @@
     audio.cues.clamp();
     phase = "ascent";
     phaseT = 0;
+    releasedAt = flightTime;
     hud.setAct("Stage");
     hud.setSubtitle("Ooga Orbit · climbing");
     for (let i = 0; i < 16; i++) {
@@ -624,6 +676,7 @@
     phase = "orbit";
     phaseT = 0;
     orbited = true;
+    topAt = flightTime;
     score += SCORE.orbit;
     s.burning = false;
     igniteIn = 0;
@@ -683,6 +736,7 @@
     phaseT = 0;
     accumulator = 0;
     igniteIn = 0;
+    rhud.setMeters("descent");
     hud.setAct("Chute");
     hud.setSubtitle(fromOrbit ? "Ooga Orbit · coming home" : "Ooga Orbit · falling");
     const s = flight.state;
@@ -737,6 +791,13 @@
       fx.burst(bx, by + 0.1, bz, 10, SPLASH_BITS, 1.4);
       audio.cues.thud();
       rhud.center(place === "pad" ? "ON THE PAD!" : place === "land" ? "FAR LAND" : "LANDED", 1800);
+      if (place === "pad") {
+        // The 1500-point moment gets a party: confetti, the ticker, and the Agent's word.
+        fx.burst(bx, by + 1.5, bz, 30, CONFETTI, 2.8);
+        fx.showTicker("OOGA BULLSEYE", 4);
+        if (agent.root.visible) fx.sayAt(agent.root.position.x, agent.root.position.y + 2.2, agent.root.position.z, "Textbook.", 2.4);
+        audio.cues.perfect();
+      }
     }
     canopy.visible = false;
     hud.el.act.hidden = true;
@@ -778,7 +839,8 @@
     const place = failure ? null : where();
     const dist = Math.hypot(s.p.x - spot.x, s.p.z - spot.z);
     let landScore = 0;
-    if (place === "pad") landScore = SCORE.pad;
+    // The pad pays on a gradient from its middle, so a landing has a number to chase after the first one.
+    if (place === "pad") landScore = SCORE.padBase + Math.round((SCORE.pad - SCORE.padBase) * clamp(1 - dist / rocketModels.SITE.padR, 0, 1));
     else if (place === "islet") landScore = SCORE.islet;
     else if (place === "island") landScore = SCORE.island;
     else if (place === "land") landScore = SCORE.land;
@@ -787,7 +849,16 @@
     const home = !failure && orbited ? SCORE.home : 0;
     const cool = !failure && orbited ? Math.round(SCORE.cool * clamp(1 - s.peakHeat, 0, 1)) : 0;
     const spaceScore = s.spaced ? SCORE.space : 0;
-    score += landScore + home + cool + spaceScore;
+    // A finished mission is scored on its bill, its pace to the top and whether the climb was flown by hand.
+    const done = !failure && orbited && eva.back;
+    const bill = rocketParts.stats(stack).cost;
+    const thrift = done ? Math.round(SCORE.thrift * Math.max(0, REF_BILL - bill)) : 0;
+    const climb = topAt > releasedAt ? topAt - releasedAt : 0;
+    const fast = done && climb > 0 ? Math.round(SCORE.fast * clamp(1 - (climb - FAST_BEST) / FAST_SPAN, 0, 1)) : 0;
+    const hand = orbited && handFlown ? SCORE.hand : 0;
+    score += landScore + home + cool + spaceScore + thrift + fast + hand;
+    // A fireball cannot medal: the checkpoints it passed are worth less than bronze.
+    if (failure) score = Math.min(score, rocketHud.MEDALS.bronze - 1);
     const medal = rhud.medalFor(score);
     const landing = failure || place;
     const improved = game.recordOrbit({ score, orbit: orbited, landing, parts: stack.length });
@@ -795,14 +866,16 @@
     const rows = [
       ["Clamps", release ? `${release.toUpperCase()}${release === "perfect" ? ` · ${SCORE.perfect}` : release === "good" ? ` · ${SCORE.good}` : ""}` : "held"],
       ["Highest", `${Math.round(s.maxAlt)}${s.spaced ? ` · space ${SCORE.space}` : ""}`],
-      ["Stages dropped", `${stagesDropped} × ${SCORE.stage}`],
-      ["Low orbit", orbited ? `reached · ${SCORE.orbit}` : `no · ${Math.round(s.maxAlt)} of ${TOP}`]
+      ["Stages dropped", `${stagesDropped} × ${SCORE.stage}${fuelWasted > 0.01 ? ` · ${fuelWasted.toFixed(1)} fuel dropped unburnt` : ""}`],
+      ["Low orbit", orbited ? `reached · ${SCORE.orbit}${climb > 0 ? ` · ${climb.toFixed(1)}s from the clamps${fast ? ` · fast ${fast}` : ""}` : ""}${hand ? ` · hand-flown ${hand}` : ""}` : `no · ${Math.round(s.maxAlt)} of ${TOP}`]
     ];
-    rows.push(["Spacewalk", eva.back ? `rock ${eva.reading} bananas long · ${SCORE.eva}` : eva.measured ? "measured, never got back in" : "skipped"]);
+    if (done) rows.push(["Thrift", `${bill} bananas${thrift ? ` · ${thrift}` : " · nothing under the mark"}`]);
+    rows.push(["Spacewalk", eva.back ? `rock ${eva.reading} bananas long · ${SCORE.eva}${eva.bonus ? ` · air ${eva.bonus}` : ""}` : eva.measured ? "measured, never got back in" : "skipped"]);
     if (orbited && !failure) rows.push(["Coming home", `peak heat ${Math.round(s.peakHeat * 100)}% · ${home + cool}`]);
     rows.push(["Landing", failure ? FAILS[failure][0].toLowerCase() : `${place === "land" ? "far land" : place}${place === "sea" ? ` · ${Math.round(dist)} out` : ""}${s.landing === "hard" ? " · hard" : ""} · ${landScore}`]);
     rows.push(["Time", BL.dropHud.formatTime(flightTime * 1000)]);
-    const summary = failure ? FAILS[failure][1] : place === "pad" ? "Back on the pad. The tribe salutes you." : orbited ? "Up to low orbit and home." : missedOrbit();
+    const summary = failure ? FAILS[failure][1] : !orbited ? `${missedOrbit()}${place === "pad" ? " It came down on the pad, at least." : ""}` : place === "pad" ? "Back on the pad. The tribe salutes you." : "Up to low orbit and home.";
+    rhud.setMeters("");
     rhud.results(rows, summary, result);
     hud.el.act.hidden = true;
     hud.setSubtitle("Ooga Orbit · flight log");
@@ -811,6 +884,7 @@
   };
   const missedOrbit = () => {
     const dv = Math.round(rocketParts.stats(stack).dv), high = Math.round(flight.state.maxAlt);
+    if (fuelWasted > 0.3) return `Short of low orbit (${high} of ${TOP}): ${fuelWasted.toFixed(1)} fuel went down with a stage still burning. Wait for STAGE! before dropping one.`;
     if (dv < rocketParts.TOP_DV) return `Short of low orbit (${high} of ${TOP}): not enough push. This rocket has ${dv} speed to spend and low orbit needs about ${rocketParts.TOP_DV}: add fuel or a stage.`;
     if (maxLean > LEAN_MAX + 0.35) return `Short of low orbit (${high} of ${TOP}): it leaned over too far. Keep near the yellow line; up is the goal.`;
     return `Short of low orbit (${high} of ${TOP}): it ran out of push. Drop each empty stage the moment STAGE! shows and keep W held.`;
@@ -826,7 +900,7 @@
     // At the top Space steps the mission: drop the rest, go outside, and once back in let go.
     if (phase === "orbit") return dropRest() || (!eva.back && startEva()) || letGo();
     if (phase === "eva") return evaAct();
-    if (phase === "descent") return flight.chuteReady() || flight.state.chute !== "packed" ? pullChute() : false;
+    if (phase === "descent") return pullChute();
     if (phase === "results") return launch();
     return false;
   };
@@ -857,10 +931,13 @@
     const a = controls.read();
     if (inputLocked) return a;
     ctrl.throttle = a.y;
-    // Hands off A and D (|a.x| < 0.05) the autopilot leans along the climb; touching them flies by hand.
+    // Hands off A and D (|a.x| < 0.05) the autopilot leans along the climb and eases the throttle back
+    // when the air's push nears the limit; touching them flies by hand.
     if (phase === "ascent" && selection.assist && Math.abs(a.x) < 0.05) {
       const s = flight.state;
       ctrl.lean = clamp((leanTarget(s.alt) - s.psi) * 3 - s.psiRate * 1.5, -1, 1);
+      if (s.stress > rocketMod.Q_GUARD && a.y <= 0) ctrl.throttle = -1;
+      handFlown = false;
     } else ctrl.lean = a.x;
     if (phase === "ascent") maxLean = Math.max(maxLean, flight.state.psi);
     if (phase === "eva") ctrl.pitch = ctrl.roll = ctrl.yaw = ctrl.throttle = ctrl.lean = 0;
@@ -957,7 +1034,7 @@
       case 30: return "Settling into low orbit over the island";
       case 31: return "Space: drop the rest of the rocket";
       case 32: return "Space: go outside";
-      case 33: return "Fly to the glowing rock · W A S D, Q E down up";
+      case 33: return COARSE ? `Fly to the glowing rock · left stick, tilt the right for down and up · air ${Math.ceil(eva.air)}` : `Fly to the glowing rock · W A S D, Q E down up · air ${Math.ceil(eva.air)}`;
       case 34: return "Measuring…";
       case 35: return "Space: measure the rock";
       case 36: return eva.reeling ? "The tether reels you back in" : eva.near === "hatch" ? "Space: climb back in" : "Back to the hatch";
@@ -971,7 +1048,7 @@
   };
   const updateMission = () => {
     missionStep();
-    const key = (NOW.step * 10 + NOW.word) * 1e6 + NOW.n + 5e5 + (eva.near === "hatch" ? 0.5 : 0) + (eva.reeling ? 0.25 : 0);
+    const key = (NOW.step * 10 + NOW.word) * 1e6 + NOW.n + 5e5 + (eva.near === "hatch" ? 0.5 : 0) + (eva.reeling ? 0.25 : 0) + (phase === "eva" ? Math.ceil(eva.air) * 1e-3 : 0);
     const lean = phase === "ascent" ? Math.round(flight.state.psi * 180 / Math.PI) * 1000 + Math.round(leanTarget(flight.state.alt) * 180 / Math.PI) + (selection.assist ? 5e5 : 0) : 0;
     if (key === missionKey && lean === leanKey) return;
     missionKey = key;
@@ -1058,17 +1135,18 @@
     phaseT = 0;
     eva.e = eva.f = eva.ve = eva.vu = eva.vf = 0;
     eva.u = 1.1;
-    eva.yaw = Math.atan2(EVA.rockE, EVA.rockF);
+    eva.yaw = Math.atan2(eva.rockE, eva.rockF);
     eva.pitch = 0.2;
     eva.measuring = 0;
     eva.reeling = false;
+    eva.out = true;
     eva.drift = eva.tumble = eva.spin = 0;
     passenger.root.visible = false;
     astro.root.visible = tetherNode.visible = true;
     cam.warm = false;
     hud.setAct("Act");
     rhud.center("SPACEWALK", 1200);
-    rhud.notice("W A S D fly where you look · Q E down up · drag to look · Space at the rock", 4200);
+    rhud.notice(COARSE ? "Left stick flies where you look · tilt the right stick down and up · drag to look · the button at the rock" : "W A S D fly where you look · Q E down up · drag to look · Space at the rock", 4200);
     fx.say(speaker, "Ooga go outside!", 1.8);
     audio.cues.chute();
     return true;
@@ -1076,14 +1154,17 @@
   const climbIn = () => {
     phase = "orbit";
     phaseT = 0;
+    eva.out = false;
     astro.root.visible = tetherNode.visible = astroStick.visible = false;
     passenger.root.visible = true;
     cam.warm = false;
-    hud.setAct("Boost");
+    hud.setAct("Home");
     audio.cues.clamp();
     if (eva.measured) {
       eva.back = true;
-      score += SCORE.eva;
+      // The air left over is worth something: a quick walk pays more, and the flight log shows it.
+      eva.bonus = Math.round(SCORE.eva * 0.5 * eva.air / EVA_AIR);
+      score += SCORE.eva + eva.bonus;
       rhud.center("MISSION DONE", 1800);
       rhud.notice("Space: leave orbit and drop home", 4200);
       fx.say(speaker, "Ooga measure good!", 2);
@@ -1092,7 +1173,7 @@
   const evaAct = () => {
     if (eva.measuring > 0) return true;
     if (eva.near === "rock") {
-      eva.measuring = EVA.measure;
+      eva.measuring = Math.min(EVA.measure, Math.max(0.5, eva.air));
       astroStick.visible = true;
       astroStick.scale.y = 0.05;
       rhud.notice("Measuring…", 0);
@@ -1108,6 +1189,18 @@
   };
   const evaStep = (dt, a) => {
     podFrame();
+    // Air runs while the walker is out; empty, the tether reels in whatever was or was not done.
+    if (!eva.reeling) {
+      eva.air = Math.max(0, eva.air - dt);
+      if (eva.air <= 0) {
+        eva.reeling = true;
+        eva.measuring = 0;
+        astroStick.visible = false;
+        rhud.center("OUT OF AIR", 1400);
+        rhud.notice("The tether reels you back in", 3000);
+        audio.cues.warn();
+      }
+    }
     const cp = Math.cos(eva.pitch), le = Math.sin(eva.yaw) * cp, lu = Math.sin(eva.pitch), lf = Math.cos(eva.yaw) * cp;
     const lx = FRAME.ex * le + FRAME.ux * lu + FRAME.fx * lf, ly = FRAME.ey * le + FRAME.uy * lu + FRAME.fy * lf, lz = FRAME.ez * le + FRAME.uz * lu + FRAME.fz * lf;
     setVec(LOOK, lx, ly, lz);
@@ -1116,7 +1209,8 @@
     const rl = Math.hypot(rx, ry, rz) || 1;
     rx /= rl; ry /= rl; rz /= rl;
     setVec(SIDE, rx, ry, rz);
-    const up = -a.yaw;
+    // Q E (or the look stick's tilt on touch, where the drag owns the look) fly down and up.
+    const up = COARSE ? -a.pitch : -a.yaw;
     const mx = lx * a.y + rx * a.x + FRAME.ux * up, my = ly * a.y + ry * a.x + FRAME.uy * up, mz = lz * a.y + rz * a.x + FRAME.uz * up;
     const me = mx * FRAME.ex + my * FRAME.ey + mz * FRAME.ez, mu = mx * FRAME.ux + my * FRAME.uy + mz * FRAME.uz, mf = mx * FRAME.fx + my * FRAME.fy + mz * FRAME.fz;
     const pushing = Math.abs(a.x) + Math.abs(a.y) + Math.abs(up) > 0.05 && eva.measuring <= 0 && !eva.reeling;
@@ -1147,7 +1241,7 @@
     eva.f += eva.vf * dt;
     if (!eva.reeling) {
       const s0 = flight.state, down = s0.height / 2 + 0.2;
-      bump(EVA.rockE, EVA.rockU, EVA.rockF, EVA.rockR, dt);
+      bump(eva.rockE, eva.rockU, eva.rockF, EVA.rockR, dt);
       bump(-(s0.up[0] * FRAME.ex + s0.up[1] * FRAME.ey + s0.up[2] * FRAME.ez) * down, -(s0.up[0] * FRAME.ux + s0.up[1] * FRAME.uy + s0.up[2] * FRAME.uz) * down, -(s0.up[0] * FRAME.fx + s0.up[1] * FRAME.fy + s0.up[2] * FRAME.fz) * down, EVA.podR, dt);
     }
     if (eva.drift > 0) eva.drift -= dt;
@@ -1162,7 +1256,7 @@
       }
     }
     framePoint(eva.e, eva.u, eva.f, WALKER);
-    framePoint(EVA.rockE, EVA.rockU, EVA.rockF, ROCK);
+    framePoint(eva.rockE, eva.rockU, eva.rockF, ROCK);
     // The Ooga faces the look flattened across the world's up.
     let zx = lx - FRAME.ux * lu, zy = ly - FRAME.uy * lu, zz = lz - FRAME.uz * lu;
     const zl = Math.hypot(zx, zy, zz) || 1;
@@ -1194,12 +1288,12 @@
         spawnSmoke(bx - zx * 0.15, by - zy * 0.15, bz - zz * 0.15, flight.state.v.x - mx * 3, flight.state.v.y - my * 3, flight.state.v.z - mz * 3, 0.12, 0.5);
       }
     }
-    const arm = astro.parts.armR;
+    const arm = astro.parts.armL;
     if (eva.measuring > 0) {
       const k = 1 - eva.measuring / EVA.measure;
-      eva.yaw = wrap(eva.yaw + wrap(Math.atan2(EVA.rockE - eva.e, EVA.rockF - eva.f) - eva.yaw) * (1 - Math.exp(-4 * dt)));
-      const flat = Math.hypot(EVA.rockE - eva.e, EVA.rockF - eva.f);
-      const aim = clamp(-Math.PI / 2 - Math.atan2(EVA.rockU - eva.u, flat), -2.5, -0.5);
+      eva.yaw = wrap(eva.yaw + wrap(Math.atan2(eva.rockE - eva.e, eva.rockF - eva.f) - eva.yaw) * (1 - Math.exp(-4 * dt)));
+      const flat = Math.hypot(eva.rockE - eva.e, eva.rockF - eva.f);
+      const aim = clamp(-Math.PI / 2 - Math.atan2(eva.rockU - eva.u, flat), -2.5, -0.5);
       arm.rotation.x = lerp(-0.2, aim, Math.min(1, k * 4)) + Math.sin(sceneTime * 16) * 0.07 * Math.min(1, k * 4);
       astroStick.scale.y = Math.min(1, 0.05 + k * 3);
       astroLight.glow = Math.sin(sceneTime * 22) > 0 ? 1 : 0.15;
@@ -1227,7 +1321,7 @@
     rockNode.visible = show;
     if (!show) return;
     podFrame();
-    framePoint(EVA.rockE, EVA.rockU, EVA.rockF, rockNode.position);
+    framePoint(eva.rockE, eva.rockU, eva.rockF, rockNode.position);
     rockNode.rotation.y += dt * 0.25;
     rockNode.rotation.x += dt * 0.11;
   };
@@ -1405,11 +1499,17 @@
       o.lightCount = 1;
     } else o.lightCount = 0;
   };
+  // quieted: the idle fade is scheduled once per idle stretch, and again after unlock builds the voices.
+  let quieted = false;
   const updateAudio = (lit) => {
     if (phase === "build" || phase === "results") {
-      audio.quiet();
+      if (!quieted) {
+        audio.quiet();
+        quieted = true;
+      }
       return;
     }
+    quieted = false;
     const a = audio.state, s = flight.state;
     a.engine = lit;
     a.near = clamp(1.4 - Math.hypot(camera.position.x - s.p.x, camera.position.y - s.p.y, camera.position.z - s.p.z) / 160, 0.2, 1);
@@ -1475,7 +1575,7 @@
     phaseT += dt;
     agent.update(dt);
     const hour = clock.read();
-    daylight.sample(hour, RENDER_OPTS, clock.dayOfYear, islandLatitude, clock.continuousDay);
+    daylight.sample(hour, RENDER_OPTS, clock.dayOfYear, islandLatitude, clock.continuousDay, clock.utcMs);
     const a = readInput();
     if (phase === "count") {
       const left = Math.ceil(COUNT_T - phaseT);
@@ -1534,11 +1634,6 @@
     updateAudio(lit);
     fx.update(dt);
     stepTweens(dt);
-    meterTimer -= dt;
-    if (meterTimer <= 0) {
-      meterTimer = 0.25;
-      hud.setMeter(world.level, METER_CAPACITY, phase === "build" ? "stable" : flight && orbited ? "in low orbit" : "flying");
-    }
   };
   // World markers: green where the flight goes, orange where the shield faces, plus home.
   const MARKER = { x: 0, y: 0 };
@@ -1711,14 +1806,16 @@
   };
   const overlay = (dt) => fx.drawOverlay(dt, drawExtra);
 
-  const onDonation = (donation) => {
-    game.recordDonation(donation);
-    const bananas = gameMod.bananasFor(donation.sats);
-    world.level = Math.min(pileMod.MAX_BANANAS, world.level + bananas);
+  // In real mode `counted` is the API's `{ exact, rounded }`: the tally counts the exact bananas and the toasts the
+  // rounded ones (the pile itself follows the API's).
+  const onDonation = (donation, counted = null) => {
+    game.recordDonation(donation, counted && counted.exact);
+    const bananas = gameMod.bananasFor(donation.sats), shown = counted ? counted.rounded : bananas;
+    world.level = Math.min(pileMod.MAX_BANANAS, world.level + (counted ? counted.exact : bananas));
     const who = donation.handle ? `@${donation.handle}` : "anon";
     const loot = lootEnabled ? game.lootFor(donation) : null;
-    hud.toast(`+${gameMod.formatLarge(donation.sats)} sats · ${bananas} banana${bananas > 1 ? "s" : ""} · ${who}${loot ? ` · ${loot.tier} ${loot.item.name}` : ""}`);
-    fx.showTicker(`THANKS ${donation.handle ? "@" + donation.handle.toUpperCase() : "ANON"} · ${bananas} BANANAS`, 4.5);
+    hud.toast(`+${gameMod.formatLarge(donation.sats)} sats · ${gameMod.formatLarge(shown)} banana${shown === 1 ? "" : "s"} · ${who}${loot ? ` · ${loot.tier} ${loot.item.name}` : ""}`);
+    fx.showTicker(`THANKS ${donation.handle ? "@" + donation.handle.toUpperCase() : "ANON"} · ${gameMod.formatLarge(shown)} BANANAS`, 4.5);
     const p = flight ? flight.state.p : EYE;
     if (!flight) padBase();
     fx.burst(p.x, p.y + 2, p.z, 20, CONFETTI, 2.2);
@@ -1727,7 +1824,6 @@
       renderLocker();
     }
     hud.setStats(game.state);
-    meterTimer = 0;
   };
   const renderLocker = () => hud.renderInventory(game.state.inventory, game.assignedTo, () => null);
 
@@ -1736,16 +1832,22 @@
     renderLocker();
     hud.toast("Loot locker cleared");
   };
-  const demoTip = (sats) => onDonation({ id: `demo-${Date.now()}`, sats, handle: game.state.handle, message: game.state.message, at: Date.now() });
+  // A demo tip is the simulation's alone: in real mode it would count a tip nobody paid.
+  const demoTip = (sats) => {
+    if (!donations.real) onDonation({ id: `demo-${Date.now()}`, sats, handle: game.state.handle, message: game.state.message, at: Date.now() });
+  };
   const toggleMute = () => {
     audio.setMuted(!audio.muted);
     rhud.el.mute.setAttribute("aria-pressed", String(audio.muted));
     hud.toast(audio.muted ? "Sound off" : "Sound on");
   };
-  const onGesture = () => audio.unlock();
+  const onGesture = () => {
+    audio.unlock();
+    quieted = false;
+  };
   const onKey = (e) => {
     if (e.key === "Escape") {
-      if (phase === "build") go("hub");
+      if (phase === "build") go(home);
       else toBuild();
     }
     if (e.key === "Enter" && (phase === "build" || phase === "results")) launch();
@@ -1775,12 +1877,14 @@
 
   const enter = (ctx) => {
     ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
+    home = ctx.from === "arcade" ? "arcade" : "hub";
+    hudMod.leaveTo("orbit", home);
     camera = createCamera({ fov: 50, near: 0.3, far: 1600 });
     root = createNode();
     clock = daylight.createClock({ hour: hourParam, daylen: daylenParam, day: dayParam, time: timeParam, now: new Date() });
     island = terrain.island({ seed: SEED });
     spot = rocketModels.siteSpot(island, {});
-    hud = hudMod.create({ roster: contributors.roster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
+    hud = hudMod.create({ signal: ctx.signal, roster: contributors.roster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
     fx = fxMod.create({ root, renderer, overlay: ctx.overlay, tickerAt: TICKER_AT });
@@ -1796,8 +1900,7 @@
     place(createNode({ position: { x: 0, y: 0.36, z: 0 }, scale: { x: footprint, y: 0.48 * growth, z: footprint }, geometry: models.bananaPileCoreGeometry(0.45 * 6, 0.48 * 6, 0.45), visible: level > 0 }));
     const slab = place(createNode({ geometry: hubModels.altarSlab(), depthBias: 0.15 }));
     setVec(slab.scale, footprint + 0.3, 0.34, footprint + 0.3);
-    site = rocketModels.site(spot);
-    place(site.node);
+    place(rocketModels.site(spot));
     // The Agent paces the islet beside the pad, across from the tower.
     const agentX = spot.x - 5.2, agentZ = spot.z + 1;
     agent = orbitScene.agent = BL.agent.create({ groundAt, form: "code", x: agentX, z: agentZ, heading: Math.PI / 2 });
@@ -1812,7 +1915,7 @@
       const q = quat.create(), axis = Math.hypot(dz, dx) || 1;
       quat.fromAxisAngle(q, dz / axis, 0, -dx / axis, Math.acos(clamp(dy, -1, 1)));
       const s = 3.5 + rand() * 5;
-      place(createNode({ position: { x: dx * h, y: CY + dy * h, z: dz * h }, quaternion: q, scale: { x: s, y: s * 0.7, z: s }, geometry: hubModels.cloud(i % 3) }));
+      place(createNode({ position: { x: dx * h, y: CY + dy * h, z: dz * h }, quaternion: q, scale: { x: s, y: s * 0.7, z: s }, geometry: hubModels.cloud(i % 3), matrixCloud: true }));
     }
     smoke = { node: place(createNode({ geometry: rocketModels.puff(), instanceData: new Float32Array(SMOKE * 20), instanceCount: 0, instanceVersion: 0, fixedInstanceCapacity: true, visible: false })), x: new Float32Array(SMOKE), y: new Float32Array(SMOKE), z: new Float32Array(SMOKE), vx: new Float32Array(SMOKE), vy: new Float32Array(SMOKE), vz: new Float32Array(SMOKE), age: new Float32Array(SMOKE), life: new Float32Array(SMOKE), size: new Float32Array(SMOKE), next: 0, count: 0 };
     plasma = { node: place(createNode({ geometry: rocketModels.plasma(), instanceData: new Float32Array(PLASMA * 20), instanceCount: 0, instanceVersion: 0, fixedInstanceCapacity: true, visible: false })), x: new Float32Array(PLASMA), y: new Float32Array(PLASMA), z: new Float32Array(PLASMA) };
@@ -1821,11 +1924,13 @@
     canopy = createNode({ geometry: dropModels.canopy(), visible: false });
     heatShell = createNode({ geometry: rocketModels.heatShell(), visible: false, smokeOpacity: 0 });
     mark("orbit world");
-    // An Ooga walked or tapped onto the pad arrives as world.pilot and flies.
+    // The Ooga an arcade cabinet sent in arrives as world.pilot and flies.
     if (world.pilot) {
       selection.pilot = world.pilot;
       world.pilot = null;
     }
+    const own = ownPilot();
+    if (own) selection.pilot = own;
     rockNode = place(createNode({ geometry: rocketModels.spaceRock(), visible: false }));
     tetherNode = place(createNode({ geometry: rocketModels.tether(), quaternion: quat.create(), visible: false }));
     buildPassenger();
@@ -1843,17 +1948,10 @@
     controls = controlsMod.create({ move: document.getElementById("joy-move"), look: document.getElementById("joy-look"), boost: hud.el.act, chord: ctx.canvas, onAction: act });
     orbitScene.agentControls = controls;
     audio = rocketAudio.create();
+    quieted = false;
     rhud.el.mute.setAttribute("aria-pressed", String(audio.muted));
-    window.addEventListener("pointerdown", onGesture);
-    window.addEventListener("keydown", onGesture);
-    const donationRequest = donations.createRequest(game.state);
-    qr.drawTo(hud.el.qr, donationRequest.url, { quiet: 3, dark: "#000000", light: "#f3efe4" });
-    hud.setDonationUrl(donationRequest.url);
-    hud.setIdentity(game.state);
-    hud.onIdentityChange(({ handle, message }) => {
-      game.setIdentity({ handle: donations.sanitize(handle, donations.HANDLE_MAX), message: donations.sanitize(message, donations.MESSAGE_MAX) });
-      hud.setIdentity(game.state);
-    });
+    window.addEventListener("pointerdown", onGesture, { signal: ctx.signal });
+    window.addEventListener("keydown", onGesture, { signal: ctx.signal });
     hud.onAssign((entryId, name) => {
       if (game.assign(entryId, name)) renderLocker();
     });
@@ -1895,11 +1993,9 @@
       if (action === "orbit-launch" || action === "orbit-again") launch();
       else if (action === "orbit-eva") startEva();
       else if (action === "orbit-build") toBuild();
-      else if (action === "leave") go("hub");
+      else if (action === "leave") go(home);
       else if (action === "act") act();
       else if (action === "mute") toggleMute();
-      else if (action === "tip") demoTip(1200);
-      else if (action === "tip-legendary") demoTip(120000);
       else if (action === "clear-loot") {
         game.clearLoot();
         onLootCleared();
@@ -1914,8 +2010,9 @@
     hud.el.sheet.dataset.open = "false";
     rhud.el.help.textContent = COARSE
       ? "The button does each step · left stick steers"
-      : "Space does each step · W S push · A D steer · G autopilot · V spacewalk";
-    meterTimer = 0;
+      : "Space does each step · G autopilot · V spacewalk\nW S push · A D steer";
+    document.getElementById("orbit-help").textContent = COARSE ? "Tap a part to add it · hold and drag it onto the rocket" : "Tap or drag a part onto the rocket · drag a row off to remove it";
+    if (COARSE) rhud.el.evaBtn.querySelector("small").textContent = "the button";
     cam.buildYaw = -0.64;
     cam.buildPitch = 0.18;
     cam.buildZoom = 1;
@@ -1971,7 +2068,9 @@
           },
           launch, toBuild, act, releaseClamps, dropRest, letGo, pullChute, startEva, evaAct,
           // Where the space rock sits in the pod's frame and how near counts as at it, so a check can place the walker.
-          rock: { e: EVA.rockE, u: EVA.rockU, f: EVA.rockF, reach: EVA.reach },
+          get rock() {
+            return { e: eva.rockE, u: eva.rockU, f: eva.rockF, reach: EVA.reach };
+          },
           slots: rocketSlots,
           // Run the scene forward without frames, at the fixed step.
           simulate: (seconds) => {
@@ -2019,7 +2118,7 @@
     phase = "build";
     inputLocked = false;
     astro = astroStick = astroLight = rockNode = tetherNode = agent = null;
-    flight = view = passenger = canopy = heatShell = smoke = plasma = splashNode = site = planet = spot = hud = rhud = hooks = input = fx = controls = audio = clock = island = null;
+    flight = view = passenger = canopy = heatShell = smoke = plasma = splashNode = planet = spot = hud = rhud = hooks = input = fx = controls = audio = clock = island = null;
     orbitScene.input = orbitScene.debug = orbitScene.agent = orbitScene.agentControls = null;
     return { targets: count };
   };
@@ -2033,7 +2132,13 @@
     const all = (n) => 1 + n.children.reduce((sum, c) => sum + all(c), 0);
     return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), phase, smoke: smoke.count, debris: debris.length };
   };
-  Object.assign(orbitScene, { enter, update, overlay, onDonation, onKey, onLootCleared, leave, stats, liveGeometry });
+  const orbitScene = BL.deferred.scene("orbit", {
+    id: "orbit", renderOpts: RENDER_OPTS, root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
+    enter, update, overlay, onDonation, onKey, onLootCleared, leave, stats, liveGeometry,
+    get inMotion() {
+      return (phase !== "build" && phase !== "results") || fx.inMotion || smoke.count > 0;
+    }
+  });
   BL.scenes = BL.scenes || {};
   BL.scenes.orbit = orbitScene;
 })();

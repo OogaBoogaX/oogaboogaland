@@ -1,18 +1,38 @@
 // Racers: contributors on foot, in a Rock Kart or on a Dino; one arcade controller and an AI driver.
+//
+// The active contributors race on a mount (`MOUNTS`) under a fixed-step arcade controller: throttle,
+// steer, drift charge and tiered boost, hop, launches and landings, walls, falls, hazards and respawn,
+// plus racer pushes, checkpoints, laps, ranks, the rubber band, the AI driver and mount animation.
+// Each mount has one lever of its own (`charge` for the dino's drift, `boostMul` for the runner's
+// boost, `recover` for its spin); the AI field is `AI_MOUNTS`, two karts and two dinos to a runner.
+// `start(playerStart)` gives a throttle held from inside the last count `START_BOOST`, from earlier
+// `START_SPIN` of wheelspin, and the sharper AI `AI_START_BOOST`. A racer inside a prop's circle (the
+// track's `props`, its sector and the two beside it) is pushed out and knocked as by a wall.
+// Every contributor is built once (`all`), but a race runs `FIELD` of them (`racers`): the visitor and
+// the first rivals of a deck `draw` shuffles; the rest sit out hidden.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
   const { models, contributors, raceModels, raceTrack } = BL;
-  const { clamp, lerp, damp, fnv1a, mulberry32 } = BL.math;
+  const { clamp, lerp, damp, fnv1a, mulberry32, randomInt } = BL.math;
   const { createNode, addChild, removeChild } = BL.scene;
   const { SURF, SURFACE_GRIP, STEP, SHOULDER, CURB_W, FALL } = raceTrack;
+  // Each mount has one lever of its own: the kart's top speed, the dino's quick drift charge, the runner's
+  // big boost and quick recovery from a spin.
   const MOUNTS = [
-    { id: "run", name: "On foot", top: 21, accel: 12.5, brake: 15, turn: 2.9, driftTurn: 1.55, mass: 0.8, hop: 5.6, offroad: 0.85, radius: 0.55, bars: [3, 4, 5] },
-    { id: "kart", name: "Rock Kart", top: 24.5, accel: 8, brake: 16, turn: 1.95, driftTurn: 1.8, mass: 1.35, hop: 4.6, offroad: 0.55, radius: 0.8, bars: [5, 2, 3] },
-    { id: "dino", name: "Dino", top: 22.5, accel: 11, brake: 15, turn: 2.3, driftTurn: 1.65, mass: 1.1, hop: 6.6, offroad: 0.72, radius: 0.7, bars: [4, 4, 4] }
+    { id: "run", name: "On foot", top: 21, accel: 12.5, brake: 15, turn: 2.9, driftTurn: 1.55, mass: 0.8, hop: 5.6, offroad: 0.85, radius: 0.55, charge: 1, boostMul: 1.45, recover: 0.7, bars: [3, 4, 5] },
+    { id: "kart", name: "Rock Kart", top: 24.5, accel: 8, brake: 16, turn: 1.95, driftTurn: 1.8, mass: 1.35, hop: 4.6, offroad: 0.55, radius: 0.8, charge: 1, boostMul: 1.32, recover: 1, bars: [5, 2, 3] },
+    { id: "dino", name: "Dino", top: 22.5, accel: 11, brake: 15, turn: 2.3, driftTurn: 1.65, mass: 1.1, hop: 6.6, offroad: 0.72, radius: 0.7, charge: 1.3, boostMul: 1.32, recover: 0.85, bars: [4, 4, 4] }
   ];
   const mountById = (id) => MOUNTS.find((m) => m.id === id) || MOUNTS[1];
+  // The AI field: two karts and two dinos to every runner, so the back of the pack is not all on foot.
+  const AI_MOUNTS = [MOUNTS[1], MOUNTS[2], MOUNTS[1], MOUNTS[2], MOUNTS[0]];
+  // The whole roster on one grid buries the visitor; a race is them and fourteen drawn rivals. Places are
+  // named from short tables (`NAMES`, the HUD's suffixes), right while the field stays under 21.
+  const FIELD = 15;
   const BOOST_MUL = 1.32, BOOST_TIERS = [0, 0.55, 0.95, 1.5], DRIFT_ANGLE = 0.5;
+  // The start: a throttle held from inside the last count boosts off the line, held from earlier it spins the wheels.
+  const START_BOOST = 0.7, START_SPIN = 0.6, START_SPIN_TOP = 0.4, AI_START_BOOST = 0.55, AI_START_SKILL = 0.75;
   const GRAVITY = 24, HOP_V = 3.2, LAUNCH_MIN = 2.6, DROP = 0.12;
   const SPIN_TIME = 1.1, RESPAWN_TIME = 1.2, INVULN = 1.6, WRONG_WAY_AFTER = 0.9;
   const CHECK_WINDOW = 4;
@@ -33,25 +53,34 @@
     return v;
   };
   const create = (ctx) => {
-    const { root, input, fx } = ctx;
+    const { root, input, fx, shuffle = true } = ctx;
     let track = ctx.track;
+    // `all` is every built Ooga; `racers` (in grid order) and `order` (by rank) are this race's field.
+    const all = [];
     const racers = [];
     const order = [];
+    const deck = [];
     let player = null, laps = 3, rankTimer = 0, elapsed = 0, raceTime = 0, running = false, autopilot = false;
     const events = { onLap: null, onFinish: null, onRespawn: null, onDrift: null, onLand: null, onWrongWay: null, onWall: null, onBump: null, onHop: null };
     contributors.activeRoster.forEach((contributor, i) => {
       const traits = contributors.traitsFor(contributor.name);
       const cave = models.caveman(traits);
       const node = createNode({ visible: false });
-      const body = createNode();
+      if (ctx.renderer && ctx.renderer.createRig) {
+        const parts = cave.parts;
+        node.geometry = ctx.renderer.createRig([parts.legR, parts.legL, parts.torso, parts.armR, parts.armL, parts.club, parts.head, parts.fingersR, parts.fingersL]);
+      }
+      const body = node;
       const flame = createNode({ geometry: raceModels.boostFlame(), visible: false });
-      addChild(node, body);
       addChild(root, node);
+      // The body sits under its hidden wrapper from the start: picking judges a part by its ancestors, so an
+      // Ooga that never makes the field stays hidden and unpickable. `seat` dresses it when it races.
+      addChild(node, cave.root);
       const seed = mulberry32(fnv1a(contributor.name + "/driver"));
       const racer = {
         index: i, name: contributor.name, traits, cave, node, body, flame, mount: null, ride: null, baseY: cave.root.position.y,
         x: 0, y: 0, z: 0, heading: 0, motionHeading: 0, speed: 0, vy: 0, airborne: false, ground: 0, centre: 0, groundV: 0, groundVPrev: 0,
-        steer: 0, throttle: 0, driftIn: false, itemIn: false, driftHeld: false,
+        steer: 0, throttle: 0, driftIn: false, itemIn: false, driftHeld: false, wheelspin: 0,
         drift: { active: false, dir: 0, charge: 0, tier: 0 }, boost: 0, spin: 0, spinRot: 0, respawn: 0, invuln: 0, wrongWay: 0, wrong: false,
         idx: -1, lateral: 0, along: 0, progress: 0, lap: 1, checkpoint: 0, started: false, rank: i + 1, lapStart: 0, lapTime: 0, bestLap: 0, finishTime: 0, finished: false,
         surface: 0, offroad: false, wallHit: 0, item: null, bananas: 0, meterFull: false,
@@ -59,10 +88,22 @@
         anim: { phase: 0, lean: 0, pitch: 0, roll: 0, squash: 0, wheel: 0 },
         hide: i % raceModels.DINO_HIDES.length
       };
-      racers.push(racer);
-      order.push(racer);
+      all.push(racer);
       for (const key of ["torso", "head"]) input.add(cave.parts[key], { kind: "racer", racer, priority: 1 });
     });
+    // Shuffles the rivals with the crypto dice; the field holds until the next draw. Without `shuffle` (the
+    // scene's draw=0) the deck keeps roster order.
+    const draw = () => {
+      deck.length = 0;
+      for (const r of all) deck.push(r);
+      if (!shuffle) return;
+      for (let i = deck.length - 1; i > 0; i--) {
+        const j = randomInt(i + 1), r = deck[i];
+        deck[i] = deck[j];
+        deck[j] = r;
+      }
+    };
+    draw();
     const seat = (racer) => {
       const cave = racer.cave, parts = cave.parts;
       for (const child of racer.body.children.slice()) removeChild(racer.body, child);
@@ -73,22 +114,28 @@
         racer.ride = null;
         setVec(cave.root.position, 0, racer.baseY, 0);
         setVec(racer.flame.position, 0, 0.35, -0.3);
-        parts.legL.rotation.x = parts.legR.rotation.x = 0;
-        parts.armL.rotation.x = parts.armR.rotation.x = -0.2;
+        parts.legR.rotation.x = parts.legL.rotation.x = 0;
+        parts.armR.rotation.x = parts.armL.rotation.x = -0.2;
         addChild(racer.body, cave.root);
         return;
       }
       const ride = m.id === "kart" ? raceModels.kart(racer.traits.fur) : raceModels.dino(racer.hide);
       racer.ride = ride;
-      addChild(racer.body, ride.node);
+      // The mount wrapper has an identity transform; keep its animated parts
+      // directly under the racer rather than traversing another empty node.
+      while (ride.node.children.length) {
+        const child = ride.node.children[0];
+        removeChild(ride.node, child);
+        addChild(racer.body, child);
+      }
       setVec(racer.flame.position, 0, m.id === "kart" ? 0.5 : 0.9, m.id === "kart" ? -1.05 : -0.95);
       setVec(cave.root.position, 0, ride.seatY + racer.baseY * (m.id === "kart" ? 0.45 : 0.7), ride.seatZ);
-      parts.legL.rotation.x = parts.legR.rotation.x = m.id === "kart" ? -1.45 : -0.55;
-      parts.legL.rotation.z = m.id === "dino" ? -0.95 : 0;
-      parts.legR.rotation.z = m.id === "dino" ? 0.95 : 0;
-      parts.armL.rotation.x = parts.armR.rotation.x = m.id === "kart" ? -1.05 : -1.25;
-      parts.armL.rotation.z = -0.25;
-      parts.armR.rotation.z = 0.25;
+      parts.legR.rotation.x = parts.legL.rotation.x = m.id === "kart" ? -1.45 : -0.55;
+      parts.legR.rotation.z = m.id === "dino" ? -0.95 : 0;
+      parts.legL.rotation.z = m.id === "dino" ? 0.95 : 0;
+      parts.armR.rotation.x = parts.armL.rotation.x = m.id === "kart" ? -1.05 : -1.25;
+      parts.armR.rotation.z = -0.25;
+      parts.armL.rotation.z = 0.25;
       addChild(racer.body, cave.root);
     };
     const setup = ({ track: nextTrack, playerName, playerMount, lapCount }) => {
@@ -98,15 +145,19 @@
       raceTime = 0;
       player = null;
       const grid = track.grid;
-      // The visitor starts last on the grid, the AI ahead by roster order.
-      const lineup = racers.filter((r) => r.name !== playerName);
-      const chosen = racers.find((r) => r.name === playerName) || racers[0];
+      const chosen = all.find((r) => r.name === playerName) || all[0];
       if (!chosen) return;
-      lineup.push(chosen);
-      lineup.forEach((racer, slot) => {
+      // The visitor starts last on the grid, the deck's first rivals ahead of them in its order (taking a
+      // rival's Ooga brings in the next), and everyone else sits out hidden.
+      racers.length = order.length = 0;
+      for (const r of deck) if (r !== chosen && racers.length < FIELD - 1) racers.push(r);
+      racers.push(chosen);
+      for (const r of all) r.node.visible = false;
+      racers.forEach((racer, slot) => {
+        order.push(racer);
         const g = grid[Math.min(grid.length - 1, slot)];
         const isPlayer = racer === chosen;
-        racer.mount = isPlayer ? mountById(playerMount) : MOUNTS[(slot + 1) % MOUNTS.length];
+        racer.mount = isPlayer ? mountById(playerMount) : AI_MOUNTS[slot % AI_MOUNTS.length];
         seat(racer);
         racer.x = g.x;
         racer.z = g.z;
@@ -121,7 +172,7 @@
         racer.groundV = racer.groundVPrev = 0;
         racer.drift.active = false;
         racer.drift.charge = 0;
-        racer.boost = racer.spin = racer.spinRot = racer.respawn = racer.invuln = racer.wrongWay = 0;
+        racer.boost = racer.spin = racer.spinRot = racer.respawn = racer.invuln = racer.wrongWay = racer.wheelspin = 0;
         racer.wrong = false;
         racer.lap = 1;
         racer.checkpoint = 0;
@@ -143,10 +194,18 @@
       });
       pose(0);
     };
-    const start = () => {
+    // `playerStart` is "boost" for a throttle held from inside the last count, "spin" for one held from
+    // earlier, else nothing; the sharper AI get their own jump off the line.
+    const start = (playerStart = "") => {
       running = true;
       raceTime = 0;
-      for (const r of racers) r.lapStart = 0;
+      for (const r of racers) {
+        r.lapStart = 0;
+        if (r === player) {
+          if (playerStart === "boost") r.boost = START_BOOST;
+          else if (playerStart === "spin") r.wheelspin = START_SPIN;
+        } else if (r.ai.skill > AI_START_SKILL) r.boost = AI_START_BOOST;
+      }
     };
     const setInput = (racer, steer, throttle, drift, item) => {
       racer.steer = clamp(steer, -1, 1);
@@ -233,7 +292,7 @@
     };
     const spinOut = (r, strength = 1) => {
       if (r.invuln > 0 || r.spin > 0) return false;
-      r.spin = SPIN_TIME * strength;
+      r.spin = SPIN_TIME * strength * r.mount.recover;
       r.speed *= 0.35;
       r.drift.active = false;
       r.drift.charge = 0;
@@ -267,8 +326,12 @@
       r.offroad = !gap && Math.abs(r.lateral) > half + CURB_W;
       const boosting = r.boost > 0;
       if (boosting) r.boost -= dt;
-      let top = m.top * (boosting ? BOOST_MUL : 1) * (r.offroad ? m.offroad : grip < 1 && !slippery ? grip : 1);
+      let top = m.top * (boosting ? m.boostMul : 1) * (r.offroad ? m.offroad : grip < 1 && !slippery ? grip : 1);
       if (r.ai && r !== player) top *= r.aiTopMul || 1;
+      if (r.wheelspin > 0) {
+        r.wheelspin -= dt;
+        top = Math.min(top, m.top * START_SPIN_TOP);
+      }
       if (r.throttle > 0) {
         if (r.speed < top) r.speed = Math.min(top, r.speed + m.accel * r.throttle * dt * (boosting ? 1.6 : 1));
         else r.speed = damp(r.speed, top, boosting ? 2 : 5, dt);
@@ -295,7 +358,7 @@
         if (events.onHop) events.onHop(r);
       }
       if (d.active) {
-        d.charge += dt * (r.steer * d.dir > 0.2 ? 1.3 : 0.8);
+        d.charge += dt * (r.steer * d.dir > 0.2 ? 1.3 : 0.8) * m.charge;
         d.tier = d.charge > 2.2 ? 3 : d.charge > 1.25 ? 2 : d.charge > 0.55 ? 1 : 0;
         if (!r.driftIn || r.speed < m.top * 0.28 || r.spin > 0) {
           d.active = false;
@@ -379,6 +442,28 @@
           r.wallHit = 0.25;
         }
       }
+      // Trackside props in this sector and its neighbours: a solid one pushes the racer out of its circle and knocks it as a wall does.
+      const secs = track.sectorProps, sec = track.sectorOf(r.idx), last = secs.length - 1, px = track.props.x, pz = track.props.z, pr = track.props.r;
+      for (let k = -1; k <= 1; k++) {
+        const si = (sec + k + last) % last;
+        for (let q = secs[si]; q < secs[si + 1]; q++) {
+          const dx = r.x - px[q], dz = r.z - pz[q], min = pr[q] + m.radius * 0.7, d2 = dx * dx + dz * dz;
+          if (d2 >= min * min || d2 < 1e-6) continue;
+          const dist = Math.sqrt(d2), nx = dx / dist, nz = dz / dist;
+          r.x = px[q] + nx * min;
+          r.z = pz[q] + nz * min;
+          const into = -(Math.sin(r.motionHeading) * nx + Math.cos(r.motionHeading) * nz);
+          if (into > 0.05) {
+            if (r.wallHit <= 0) {
+              r.speed *= Math.max(0.3, 1 - into * 0.8);
+              d.active = false;
+              d.charge = 0;
+              if (events.onWall) events.onWall(r, into);
+            } else r.speed -= r.speed * into * 1.5 * dt;
+            r.wallHit = 0.25;
+          }
+        }
+      }
       if (r.wallHit > 0) r.wallHit -= dt;
       r.progress = S.dist[r.idx] + r.along * STEP;
       const checks = track.checkpoints, count = checks.length;
@@ -443,7 +528,7 @@
           const rel = va - vb;
           if (rel > 0) {
             a.speed = Math.max(-a.mount.top * 0.3, a.speed - rel * 0.35 * (b.mount.mass / total));
-            b.speed = Math.min(b.mount.top * BOOST_MUL, b.speed + rel * 0.35 * (a.mount.mass / total));
+            b.speed = Math.min(b.mount.top * b.mount.boostMul, b.speed + rel * 0.35 * (a.mount.mass / total));
             if (rel > 3 && events.onBump) events.onBump(a, b, rel);
             if (rel > 9 && a.boost > 0) spinOut(b, 0.6);
           }
@@ -531,10 +616,10 @@
         a.phase += Math.abs(r.speed) * dt * (m.id === "run" ? 1.4 : 1.1);
         if (m.id === "run") {
           const swing = r.airborne ? 0.6 : Math.sin(a.phase) * clamp(r.speed / 4, 0, 1);
-          parts.legL.rotation.x = swing * 0.9;
-          parts.legR.rotation.x = -swing * 0.9;
-          parts.armL.rotation.x = -0.4 - swing * 0.7;
-          parts.armR.rotation.x = -0.4 + swing * 0.7;
+          parts.legR.rotation.x = swing * 0.9;
+          parts.legL.rotation.x = -swing * 0.9;
+          parts.armR.rotation.x = -0.4 - swing * 0.7;
+          parts.armL.rotation.x = -0.4 + swing * 0.7;
           r.cave.root.position.y = r.baseY + (r.airborne ? 0.1 : Math.abs(Math.sin(a.phase)) * 0.06 * clamp(r.speed / 6, 0, 1));
           parts.torso.rotation.x = clamp(r.speed / m.top, 0, 1) * 0.28;
         } else if (m.id === "kart") {
@@ -544,8 +629,8 @@
             ride.wheels[w].rotation.x = a.wheel;
             if (w < 2) ride.wheels[w].rotation.y = -r.steer * 0.4;
           }
-          parts.armL.rotation.z = -0.25 + r.steer * 0.25;
-          parts.armR.rotation.z = 0.25 + r.steer * 0.25;
+          parts.armR.rotation.z = -0.25 + r.steer * 0.25;
+          parts.armL.rotation.z = 0.25 + r.steer * 0.25;
         } else {
           const ride = r.ride;
           const k = clamp(r.speed / 5, 0, 1);
@@ -569,16 +654,23 @@
     const rankLabel = (rank) => NAMES[rank - 1] || `${rank}th`;
     const dispose = () => {
       player = null;
-      for (const r of racers) {
+      for (const r of all) {
         for (const key of ["torso", "head"]) input.remove(r.cave.parts[key]);
+        if (r.node.geometry && r.node.geometry.meshRig) {
+          const rig = r.node.geometry.meshRig;
+          for (const node of rig.nodes) node.meshRigSource = null;
+          ctx.renderer.releaseGeometry(r.node.geometry);
+          rig.nodes.length = rig.sources.length = 0;
+          rig.matrices = rig.params = rig.voxels = rig.visibility = null;
+          r.node.geometry = null;
+        }
         removeChild(root, r.node);
       }
-      racers.length = 0;
-      order.length = 0;
+      all.length = racers.length = order.length = deck.length = 0;
     };
     const stats = () => ({ racers: racers.length, running });
     return {
-      racers, order, MOUNTS, setup, start, substep, pose, setInput, control, spinOut, respawnAt, rankLabel, dispose, stats, events,
+      racers, order, all, MOUNTS, setup, draw, start, substep, pose, setInput, control, spinOut, respawnAt, rankLabel, dispose, stats, events,
       get player() {
         return player;
       },
@@ -599,5 +691,5 @@
       }
     };
   };
-  BL.racers = { create, MOUNTS, mountById, BOOST_MUL, BOOST_TIERS };
+  BL.racers = { create, MOUNTS, mountById, FIELD, BOOST_MUL, BOOST_TIERS, START_BOOST, START_SPIN };
 })();

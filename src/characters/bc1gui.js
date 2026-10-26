@@ -11,12 +11,13 @@
   );
   BL.characters.add({
     handle: "bc1gui",
+    display: "ottoz0r",
     // GitHub login behind the handle, for activity and the jumbotron
     github: "ottoz0r",
     joined: 1788800918,
     lastCommit: 1788190400,
     // skater also moves the drawn gun to the side in crew.js (the board takes the back)
-    look: { skater: true, hairless: true, noBrow: true, face: "smirk", hatY: 13, skin: "#f2a33c", hair: "#e4561f", fur: "#8f4f17" },
+    look: { portrait: { min: [-3, -2, -1], max: [7, 13, 8] }, skater: true, hairless: true, noBrow: true, face: "smirk", hatY: 13, skin: "#f2a33c", hair: "#e4561f", fur: "#8f4f17" },
     dress: {
       // A slouched green beanie over dreads, shades in front of the eyes
       crown(k, v) {
@@ -39,9 +40,11 @@
         v.fill(-1, -1, 3, 3, 4, 6, P.black);
         v.fill(7, 7, 3, 3, 4, 6, P.black);
       },
+      // The board on its back, a named part so a scene can take it off (the arcade's rides do)
       extras(k) {
         const h = k.h;
-        addChild(k.root, createNode({ position: { x: 0, y: 0.28 * h, z: -0.35 * h }, rotation: { x: 0, y: 0, z: 0.4 }, geometry: skateboardGeometry(h) }));
+        k.parts.board = createNode({ position: { x: 0, y: 0.28 * h, z: -0.35 * h }, rotation: { x: 0, y: 0, z: 0.4 }, geometry: skateboardGeometry(h) });
+        addChild(k.root, k.parts.board);
       }
     }
   });

@@ -1,4 +1,4 @@
-// A visible carry cursor shares the shooter's pointer lock and real picking.
+// The virtual cursor shares pointer lock and real picking across carry and overhead views.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -6,10 +6,13 @@
   const INTERACTIVE = "button, a, input, select, textarea, [role='button']";
   const create = ({ canvas, requestLock, unlock }) => {
     const element = document.getElementById("carry-cursor"), reticle = document.getElementById("weapon-reticle");
+    const sheet = document.getElementById("sheet");
     const pressed = [null, null, null];
-    let active = false, dispatching = false, x = 0, y = 0;
+    let active = false, visible = true, dispatching = false, x = window.innerWidth / 2, y = window.innerHeight / 2;
+    let canvasLeft = 0, canvasTop = 0, canvasWidth = 1, canvasHeight = 1;
     let pointerId = 1, buttons = 0, blockedButtons = 0, suppressClick = false;
     let captured = null, hovered = null, hoverButton = null, pendingMove = null;
+    let hoverSheet = false;
     let aimAnimation = null, reticleAnimation = null, aimProgress = 0, aimBase = 0, visualBase = 0;
     let aimFromX = 0, aimFromY = 0, aimToX = 0, aimToY = 0;
     const locked = () => document.pointerLockElement === canvas;
@@ -17,6 +20,24 @@
     const targetAtCursor = () => {
       const hit = hitAtCursor();
       return hit.closest(INTERACTIVE) || hit;
+    };
+    const measureCanvas = () => {
+      const rect = canvas.getBoundingClientRect();
+      canvasLeft = rect.left; canvasTop = rect.top;
+      canvasWidth = rect.width || 1; canvasHeight = rect.height || 1;
+      return rect;
+    };
+    const setHoverButton = (button, target = button) => {
+      // Blank panel surfaces reveal the tabs too, including a pilot-placed cursor.
+      const overSheet = sheet.contains(target);
+      if (overSheet !== hoverSheet) {
+        hoverSheet = overSheet;
+        sheet.classList.toggle("virtual-hover", overSheet);
+      }
+      if (button === hoverButton) return;
+      if (hoverButton) hoverButton.classList.remove("virtual-hover");
+      hoverButton = button;
+      if (hoverButton && !hoverButton.matches(":disabled")) hoverButton.classList.add("virtual-hover");
     };
     const dispatch = (target, event) => {
       const previous = dispatching;
@@ -63,7 +84,7 @@
     };
     const beginAim = (clientX, clientY) => {
       endAim();
-      const rect = canvas.getBoundingClientRect();
+      const rect = measureCanvas();
       x = aimFromX = clientX; y = aimFromY = clientY;
       aimToX = rect.left + rect.width / 2; aimToY = rect.top + rect.height / 2;
       aimProgress = aimBase = visualBase = 0;
@@ -94,11 +115,7 @@
     const rebaseAim = () => { if (aimAnimation) aimBase = aimProgress; };
     const hover = (e) => {
       const target = targetAtCursor(), button = target.closest(INTERACTIVE);
-      if (button !== hoverButton) {
-        if (hoverButton) hoverButton.classList.remove("virtual-hover");
-        hoverButton = button;
-        if (hoverButton && !hoverButton.matches(":disabled")) hoverButton.classList.add("virtual-hover");
-      }
+      setHoverButton(button, target);
       if (target !== hovered) {
         if (hovered) pointer(hovered, "pointerleave", e, -1);
         hovered = target;
@@ -122,29 +139,38 @@
       clearPresses();
       if (hovered) pointer(hovered, "pointerleave", { button: -1, buttons: 0 }, -1, 0);
       hovered = null;
-      if (hoverButton) hoverButton.classList.remove("virtual-hover");
-      hoverButton = null;
+      setHoverButton(null);
       element.hidden = true;
       document.body.classList.remove("carry-cursor-active");
     };
-    const start = () => {
+    const start = (clientX = null, clientY = null, show = true, capture = true) => {
       endAim();
       if (active) clearPresses();
-      const rect = canvas.getBoundingClientRect();
-      x = rect.left + rect.width / 2; y = rect.top + rect.height / 2;
+      const rect = measureCanvas();
+      x = clientX ?? rect.left + rect.width / 2; y = clientY ?? rect.top + rect.height / 2;
       active = true;
+      visible = show;
       blockedButtons = buttons;
       suppressClick = true;
-      element.hidden = false;
+      element.hidden = !visible;
       document.body.classList.add("carry-cursor-active");
       paint();
       clearPresses();
       if (locked()) {
         const e = { button: -1, buttons: 0 };
         pointer(hover(e), "pointermove", e, -1, 0);
-      } else requestLock();
+      } else if (capture) requestLock();
     };
-    const nativeControl = (target) => target.matches("input, select, textarea") || !!target.closest("dialog");
+    const placeCanvas = (localX, localY, width, height) => {
+      x = canvasLeft + localX * canvasWidth / Math.max(1, width);
+      y = canvasTop + localY * canvasHeight / Math.max(1, height);
+      paint();
+      if (active) {
+        const target = targetAtCursor();
+        setHoverButton(target.closest(INTERACTIVE), target);
+      }
+    };
+    const nativeControl = (target) => target.matches("input, select, textarea") || !!target.closest("dialog:modal");
     const focusNative = (target) => {
       stop(); unlock();
       target.focus({ preventScroll: true });
@@ -183,7 +209,7 @@
         if (button === 0 && original && (original === under || original.contains(under))) {
           mouse(original, "click", e, 0, held);
           // Modal fields need the native cursor and ordinary text input.
-          if (active && document.querySelector("dialog[open]")) { stop(); unlock(); }
+          if (active && document.querySelector("dialog:modal")) { stop(); unlock(); }
         }
       }
     };
@@ -192,15 +218,25 @@
       pointerId = e.pointerId;
       buttons = e.type === "pointercancel" ? 0 : e.buttons;
       if (!active) {
+        if (!locked()) { x = e.clientX; y = e.clientY; }
         if (e.type === "pointerdown") suppressClick = false;
         return;
       }
+      // Pointer lock may swallow the release of the right press that changed
+      // views. A new right down proves that hold ended; route this new click.
+      if (e.type === "pointerdown" && e.button === 2) blockedButtons &= ~BUTTON_MASK[2];
       blockedButtons &= buttons;
       if (!locked()) {
         if (e.target !== canvas) {
           // A denied lock never creates an offset native cursor. HUD controls
           // remain usable; a canvas press only retries capture.
           if (e.type === "pointerdown") { stop(); unlock(); suppressClick = false; }
+          return;
+        }
+        // Right-click changes the pilot's view even before pointer lock has
+        // settled. Let its press and release reach the canvas in that case.
+        if (e.button === 2) {
+          if (e.type === "pointerdown") requestLock();
           return;
         }
         e.stopImmediatePropagation();
@@ -220,7 +256,9 @@
     const onMouseMove = (e) => {
       if (dispatching || !active || !locked() || e.sourceCapabilities?.firesTouchEvents) return;
       e.stopImmediatePropagation();
-      x += e.movementX; y += e.movementY;
+      // The hidden overhead cursor is positioned by the pilot's constrained
+      // reticle. Raw deltas must not send hover or the next click off that line.
+      if (visible) { x += e.movementX; y += e.movementY; }
       paint();
       const source = pendingMove || e;
       pendingMove = null;
@@ -270,6 +308,7 @@
       if (active && allowed && target !== canvas) { scrollPanel(target, e); hover(e); }
     };
     const onResize = () => {
+      measureCanvas();
       if (active) paint();
       else if (aimAnimation) {
         // Keep the displayed pixel when the viewport changes, then finish the
@@ -282,6 +321,7 @@
         animateAimArrow();
       }
     };
+    let listening = true;
     window.addEventListener("pointerdown", onPointer, true);
     window.addEventListener("pointermove", onPointer, true);
     window.addEventListener("pointerup", onPointer, true);
@@ -293,7 +333,24 @@
     window.addEventListener("contextmenu", onMouseButton, true);
     window.addEventListener("wheel", onWheel, { capture: true, passive: false });
     window.addEventListener("resize", onResize);
+    const resume = () => {
+      if (listening) return;
+      listening = true;
+      window.addEventListener("pointerdown", onPointer, true);
+      window.addEventListener("pointermove", onPointer, true);
+      window.addEventListener("pointerup", onPointer, true);
+      window.addEventListener("pointercancel", onPointer, true);
+      window.addEventListener("mousemove", onMouseMove, true);
+      window.addEventListener("mousedown", onMouseButton, true);
+      window.addEventListener("mouseup", onMouseButton, true);
+      window.addEventListener("click", onMouseButton, true);
+      window.addEventListener("contextmenu", onMouseButton, true);
+      window.addEventListener("wheel", onWheel, { capture: true, passive: false });
+      window.addEventListener("resize", onResize);
+    };
     const dispose = () => {
+      if (!listening) return;
+      listening = false;
       stop();
       window.removeEventListener("pointerdown", onPointer, true);
       window.removeEventListener("pointermove", onPointer, true);
@@ -307,7 +364,8 @@
       window.removeEventListener("wheel", onWheel, true);
       window.removeEventListener("resize", onResize);
     };
-    return { start, stop, beginAim, updateAim, rebaseAim, endAim, dispose, element, get active() { return active; }, get x() { return x; }, get y() { return y; } };
+    return { start, stop, placeCanvas, beginAim, updateAim, rebaseAim, endAim, resume, dispose, element,
+      get active() { return active; }, get visible() { return visible; }, get x() { return x; }, get y() { return y; } };
   };
   BL.cursor = { create };
 })();

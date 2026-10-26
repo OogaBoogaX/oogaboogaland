@@ -33,8 +33,9 @@
     const reserve = (source, structure) => {
       const edges = source ? source.capacity || source.count : 0;
       output.structureSourceCount = structure ? structure.count : 0;
-      // Reserve from scene geometry, not from visible objects; keep high-water buffers across camera/actor motion.
-      reserveLines(edges * 4 + (structure ? structure.count * 8 : 0));
+      // Owner slots come from scene geometry; lines only ever hold what lies within RADIUS, so they start small and
+      // keep their high-water size across camera/actor motion.
+      reserveLines(1);
       reserveOwners(source ? source.ownerCapacity || source.nearCount || source.count : 0);
       if (edges > ownerSlots.length) { ownerSlots = grow(ownerSlots, edges); output.bufferGrowths++; }
     };
@@ -232,7 +233,10 @@
         if (run >= 0) append(ax, ay, az, dx, dy, dz, run, t0, kind, n / 6);
       }
     };
-    const update = (cave, structure, objects, camera, aspect, dt = 0, objectsEnabled = true, rockOnly = false) => {
+    let sinceCompute = Infinity;
+    // `recomputeHz` throttles motion-driven recomputes to that many a second of game time; 0 (the default,
+    // and what every direct caller gets) recomputes on every change, as the checks expect.
+    const update = (cave, structure, objects, camera, aspect, dt = 0, objectsEnabled = true, rockOnly = false, recomputeHz = 0) => {
       actor = cave;
       output.objectsEnabled = objectsEnabled;
       output.rockOnly = rockOnly;
@@ -251,9 +255,21 @@
       observer[12] = tanX = Math.tan(camera.fov / 2) * aspect; observer[13] = tanY = Math.tan(camera.fov / 2);
       observer[14] = ox; observer[15] = oy; observer[16] = oz; observer[17] = camera.near; observer[18] = camera.far;
       observer[19] = eye.x; observer[20] = eye.y; observer[21] = eye.z;
-      let changed = cave !== lastActor || structure !== lastStructure || objects.version !== lastObjects || objects.occlusionVersion !== lastOcclusion || objects.nearVersion !== lastNear || objectsEnabled !== lastEnabled || rockOnly !== lastRockOnly;
+      // An actor, structure or mode change recomputes at once; registry versions tick as the player walks and
+      // are throttled with motion.
+      const versionChanged = cave !== lastActor || structure !== lastStructure || objectsEnabled !== lastEnabled || rockOnly !== lastRockOnly;
+      const registryChanged = objects.version !== lastObjects || objects.occlusionVersion !== lastOcclusion || objects.nearVersion !== lastNear;
+      let changed = versionChanged || registryChanged;
       for (let i = 0; i < observer.length && !changed; i++) if (Math.abs(observer[i] - previous[i]) > 1e-5 || !Number.isFinite(previous[i])) changed = true;
+      // Perception and edge clipping are the frame's dearest work, and the lines are world-anchored, so a
+      // move alone recomputes them at most RECOMPUTE_HZ times a second of game time; anything else at once.
+      sinceCompute += Math.max(0, dt);
+      if (changed && !versionChanged && recomputeHz > 0 && sinceCompute < 1 / recomputeHz) changed = false;
       if (!changed) { if (objectsEnabled && output.fading) advanceFades(dt); return output; }
+      sinceCompute = 0;
+      // A clear view and a throttled frame need no new object contours. Materialize only for this recompute,
+      // then size the source-index scratch in case emission reached a new high-water capacity.
+      if (objectsEnabled && objects.ensureContours) { objects.ensureContours(); reserve(objects, structure); }
       previous.set(observer); lastActor = cave; lastStructure = structure; lastObjects = objects.version; lastOcclusion = objects.occlusionVersion; lastNear = objects.nearVersion; lastEnabled = objectsEnabled; lastRockOnly = rockOnly;
       output.count = output.structureCount = output.objectCount = output.rays = output.actorRays = 0;
       output.index = structure ? structure.index : -1; output.basement = !!(structure && structure.basement);

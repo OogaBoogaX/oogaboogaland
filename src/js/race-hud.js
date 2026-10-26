@@ -1,3 +1,7 @@
+// The rally's HUD: the garage board, the in-race strip, countdown and notices, results, pause, and
+// the minimap and speed lines drawn on the overlay. `setBoost(k, full, tier)` colours the drift bar
+// by tier, `setPips` lights the ten banana pips, the item box shows the item's pixel icon, and
+// `mirror()` picks the mirrored bests for the garage rows.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -18,14 +22,15 @@
     if (ms <= targets.bronze) return "bronze";
     return null;
   };
-  const create = ({ tracks, mounts, roster, best, onPick }) => {
+  // `mirror()` says whether the garage is showing the mirrored tracks, whose bests live under "<id>-m".
+  const create = ({ tracks, mounts, roster, best, onPick, mirror = () => false }) => {
     const el = {
       race: $("race"), garage: $("garage"), racers: $("garage-racers"), mounts: $("garage-mounts"), tracks: $("garage-tracks"), help: $("garage-help"),
       strip: $("race-strip"), rank: $("race-rank"), rankSuffix: $("race-rank-suffix"), field: $("race-field"), lap: $("race-lap"), laps: $("race-laps"), time: $("race-time"),
-      item: $("race-item"), itemName: $("race-item-name"), boost: $("race-boost-fill"), speed: $("race-speed"),
+      item: $("race-item"), itemName: $("race-item-name"), boost: $("race-boost-fill"), pips: $("race-pips"), speed: $("race-speed"), mirror: $("garage-mirror"),
       center: $("race-center"), notice: $("race-notice"), itemBtn: $("item-btn"), results: $("race-results"), podium: $("race-podium"), summary: $("race-summary"), pause: $("race-pause"), garageBtn: $("race-garage-btn"), mute: $("race-mute"),
       cupNote: $("race-cup-note"), standingsHead: $("race-standings-head"), standings: $("race-standings"), next: $("race-next"), garageCup: $("garage-cup"),
-      hudLeft: document.querySelector(".race-hud-left"), joyLook: $("joy-look")
+      hudLeft: document.querySelector(".race-hud-left"), pickOoga: $("garage-pick-ooga"), joyLook: $("joy-look")
     };
     const listeners = [];
     const on = (target, type, fn) => {
@@ -43,6 +48,19 @@
       selection[kind] = key;
       mark(kind);
       if (onPick) onPick(kind, key);
+    };
+    // A signed-in visitor with an Ooga races it, as they drive only it on the island: their row stands alone
+    // in the Ooga column and the help stops offering a pick; `null` brings every row back. Only a change of
+    // name touches the list.
+    let lockedTo;
+    const lockRacer = (name) => {
+      if (name === lockedTo) return;
+      lockedTo = name;
+      BL.hud.holdRow(el.racers, buttons.racer, name);
+      el.pickOoga.hidden = !!name;
+      if (!name) return;
+      selection.racer = name;
+      mark("racer");
     };
     const row = (kind, key, build) => {
       const li = document.createElement("li");
@@ -80,7 +98,7 @@
       el.racers.replaceChildren(...roster.map((c) => row("racer", c.name, (b) => {
         const name = document.createElement("span");
         name.className = "garage-name";
-        name.textContent = c.name;
+        name.textContent = c.display;
         const state = document.createElement("span");
         state.className = "roster-state";
         state.dataset.state = stateOf(c.name);
@@ -111,8 +129,8 @@
     };
     const refreshTracks = () => {
       for (const t of tracks) {
-        const r = trackRows.get(t.id), b = best()[t.id];
-        const medal = b ? medalFor(t.targets, b.race) : null;
+        const r = trackRows.get(t.id), b = best()[mirror() ? `${t.id}-m` : t.id];
+        const medal = b ? (b.medal || medalFor(t.targets, b.race)) : null;
         r.medal.dataset.medal = medal || "";
         r.medal.textContent = medal ? medal.toUpperCase() : "NEW";
         r.note.textContent = b ? `best ${formatTime(b.race)} · lap ${formatTime(b.lap)} · ${t.laps} laps` : `${t.laps} laps · gold under ${formatTime(t.targets.gold)}`;
@@ -138,7 +156,8 @@
         el.notice.hidden = true;
       }
     };
-    let lastRank = -1, lastLap = -1, lastItem = "", lastSpeed = -1, lastBoost = -1, lastTime = -1;
+    let lastRank = -1, lastLap = -1, lastItem = "", lastSpeed = -1, lastBoost = -1, lastTime = -1, lastTier = -1, lastPips = -1;
+    const pipNodes = [...el.pips.children];
     const setRank = (rank, field) => {
       if (rank === lastRank) return;
       lastRank = rank;
@@ -166,12 +185,24 @@
       el.itemName.firstChild.data = item ? { rock: "Rock", peel: "Peel", turbo: "Turbo", shout: "Shout" }[item] : meterFull ? "Turbo" : " ";
       el.itemBtn.textContent = item === "peel" ? "Drop" : item === "shout" ? "Shout" : item === "turbo" || meterFull ? "Boost" : "Throw";
     };
-    const setBoost = (k, full) => {
+    // The drift bar takes the tier's colour as the sparks do; the banana pips fill one at a time.
+    const setBoost = (k, full, tier = 0) => {
       const pct = Math.round(k * 100);
-      if (pct === lastBoost) return;
-      lastBoost = pct;
-      el.boost.style.width = `${pct}%`;
-      el.boost.classList.toggle("full", !!full);
+      if (pct !== lastBoost) {
+        lastBoost = pct;
+        el.boost.style.width = `${pct}%`;
+        el.boost.classList.toggle("full", !!full);
+      }
+      if (tier !== lastTier) {
+        lastTier = tier;
+        el.boost.dataset.tier = String(tier);
+      }
+    };
+    const setPips = (n, full) => {
+      const key = n + (full ? 100 : 0);
+      if (key === lastPips) return;
+      lastPips = key;
+      for (let i = 0; i < pipNodes.length; i++) pipNodes[i].dataset.on = i < n ? (full ? "full" : "yes") : "no";
     };
     const setSpeed = (v) => {
       const n = Math.round(v);
@@ -200,11 +231,16 @@
       const li = document.createElement("li");
       if (r.you) li.className = "you";
       const name = document.createElement("span");
-      name.textContent = r.name + (r.you ? " (you)" : "");
+      name.textContent = BL.characters.displayOf(r.name) + (r.you ? " (you)" : "");
       const value = document.createElement("span");
       value.textContent = right;
       li.append(name, value);
       return li;
+    };
+    // Centres a row in a box that scrolls; a box that does not scroll keeps its place.
+    const reveal = (box, row) => {
+      const top = row.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop;
+      box.scrollTop = top - (box.clientHeight - row.offsetHeight) / 2;
     };
     // rows: this race; standings: cup points so far; next: label for the next-race button, or null.
     const results = (rows, summary, { note = "", standings = null, next = null } = {}) => {
@@ -218,6 +254,11 @@
       el.summary.textContent = summary;
       refreshTracks();
       show("results");
+      // The tables can be longer than the card, so each opens at the visitor's row, and so does the card.
+      const you = el.podium.querySelector(".you");
+      reveal(el.podium, you);
+      if (standings) reveal(el.standings, el.standings.querySelector(".you"));
+      reveal(el.results, you);
     };
     const setCup = (cup) => {
       el.garageCup.hidden = !cup;
@@ -226,6 +267,9 @@
         el.garageCup.textContent = `${cup.medal.toUpperCase()} CUP · ${cup.points} pts`;
       }
     };
+    // The track's outline is fixed between track builds, so the Path2D is kept and only remade when its
+    // key changes (the map's points, size or origin); stroking the same vertices rasterizes identically.
+    let mapPath = null, mapKeyPts = null, mapKeySize = 0, mapKeyX0 = 0, mapKeyY0 = 0;
     const minimap = (ctx, track, list, player, w, h) => {
       const size = Math.min(coarse ? 100 : MAP_SIZE, w * 0.28), x0 = MAP_PAD + 8, y0 = coarse ? mapTop : h - size - 30, pts = track.mapPts;
       ctx.save();
@@ -235,14 +279,20 @@
       ctx.strokeStyle = "rgba(243,239,228,0.85)";
       ctx.lineWidth = 3;
       ctx.lineJoin = "round";
-      ctx.beginPath();
-      for (let i = 0; i < pts.length; i += 2) {
-        const px = x0 + pts[i] * size, py = y0 + pts[i + 1] * size;
-        if (i === 0) ctx.moveTo(px, py);
-        else ctx.lineTo(px, py);
+      if (pts !== mapKeyPts || size !== mapKeySize || x0 !== mapKeyX0 || y0 !== mapKeyY0) {
+        mapKeyPts = pts;
+        mapKeySize = size;
+        mapKeyX0 = x0;
+        mapKeyY0 = y0;
+        mapPath = new Path2D();
+        for (let i = 0; i < pts.length; i += 2) {
+          const px = x0 + pts[i] * size, py = y0 + pts[i + 1] * size;
+          if (i === 0) mapPath.moveTo(px, py);
+          else mapPath.lineTo(px, py);
+        }
+        mapPath.closePath();
       }
-      ctx.closePath();
-      ctx.stroke();
+      ctx.stroke(mapPath);
       for (let i = 0; i < list.length; i++) {
         const r = list[i];
         track.mapPoint(r.x, r.z, MAP_POINT);
@@ -297,7 +347,7 @@
       buttons.track.clear();
       trackRows.clear();
     };
-    return { el, selection, buildGarage, refreshTracks, show, setRank, setLap, setTime, setItem, setBoost, setSpeed, center, notice, results, setCup, minimap, speedLines, formatTime, medalFor, dispose };
+    return { el, selection, buildGarage, lockRacer, refreshTracks, show, setRank, setLap, setTime, setItem, setBoost, setPips, setSpeed, center, notice, results, setCup, minimap, speedLines, formatTime, medalFor, dispose };
   };
   BL.raceHud = { create, formatTime, medalFor };
 })();
