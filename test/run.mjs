@@ -4099,19 +4099,25 @@ const canvasSurfaceCacheChecks = async () => {
 const deferredLoadingChecks = async () => {
   const source = await readFile(join(root, "src/js/deferred.js"), "utf8"), rows = [];
   // `gone` names the files a deploy has removed: their HEAD probe answers 404, any other 200.
-  const fixture = (gone = [], stalled = false) => {
+  const fixture = (gone = [], stalled = false, id = "drop") => {
     const nodes = [], timers = new Map(), probes = []; let serial = 0;
     const document = { hidden: false, head: { appendChild(node) { nodes.push(node); return node; } },
       createElement: tag => ({ tag, remove() { const i = nodes.indexOf(this); if (i >= 0) nodes.splice(i, 1); } }) };
     const fetch = (url, options) => { probes.push({ url, method: options.method, signal: options.signal }); return stalled ? new Promise(() => {}) : Promise.resolve({ status: gone.includes(url) ? 404 : 200 }); };
-    const context = { window: { BL: { deferredScripts: { drop: "/drop.js", "drop-scene": "/scene.js" } } }, document, fetch, AbortController,
+    const baseGroup = id === "hangar" ? "factory-scene" : id, baseFile = id === "hangar" ? "/factory.js" : `/${id}.js`;
+    const context = { window: { BL: { deferredScripts: { [baseGroup]: baseFile, [`${id}-scene`]: "/scene.js" } } }, document, fetch, AbortController,
       setTimeout: fn => { timers.set(++serial, fn); return serial; }, clearTimeout: id => timers.delete(id) };
     runInNewContext(source, context);
-    const BL = context.window.BL, shell = BL.deferred.scene("drop");
+    const BL = context.window.BL, shell = BL.deferred.scene(id);
+    if (id === "hangar") BL.deferred.scene("factory");
     const scripts = () => nodes.filter(n => n.tag === "script"), links = () => nodes.filter(n => n.tag === "link");
-    const base = () => { BL.dropAudio = {}; scripts().find(n => n.src.startsWith("/drop.js")).onload(); };
+    const base = () => {
+      if (id === "hangar") BL.deferred.scene("factory", { enter() {} });
+      else BL[{ drop: "dropAudio", race: "raceAudio", mine: "mineCrew", orbit: "rocketAudio" }[id]] = {};
+      scripts().find(n => n.src.startsWith(baseFile)).onload();
+    };
     const timeout = () => { const [id, fn] = timers.entries().next().value; timers.delete(id); fn(); };
-    return { BL, shell, scripts, links, base, timeout, timers, probes, context };
+    return { BL, shell, scripts, links, base, baseGroup, baseFile, timeout, timers, probes, context };
   };
   const rejected = promise => promise.then(() => false, () => true);
   // A failed prerequisite never starts its scene; repeated retries must not grow the DOM. Only an error moves the
@@ -4175,6 +4181,27 @@ const deferredLoadingChecks = async () => {
       f.BL.deferred.scene("drop", { enter() {} }); next.onload(); await retry;
       rows.push({ path: `${outcome} recovery`, ok: address && f.BL.deferred.load("drop-scene") === null && !f.links().length && !f.timers.size });
     }
+  }
+  // The three game helper groups and the hangar's Factory prerequisite must finish before their scenes execute.
+  // Loading a scene starts its prerequisite and scene preload together; the definition alone cannot settle it.
+  for (const id of ["race", "mine", "orbit", "hangar"]) {
+    const f = fixture([], false, id), group = `${id}-scene`, pending = f.BL.deferred.load(group);
+    let settled = false; pending.then(() => { settled = true; });
+    const beside = f.scripts().length === 1 && f.scripts()[0].src === f.baseFile
+      && f.links().length === 1 && f.links()[0].href === "/scene.js";
+    await Promise.resolve();
+    const held = !settled && !f.BL.deferred.present(group) && f.BL.deferred.load(group) === pending;
+    if (!beside || !held) { rows.push({ path: `${id} helpers precede their scene`, ok: false, beside, held }); continue; }
+    f.base(); await Promise.resolve();
+    const script = f.scripts().find(n => n.src === "/scene.js");
+    if (!script) { rows.push({ path: `${id} helpers precede their scene`, ok: false, script: false }); continue; }
+    const ordered = f.BL.deferred.present(f.baseGroup) && !f.BL.deferred.present(group) && !settled;
+    const enter = () => id;
+    const scene = f.BL.deferred.scene(id, { id, enter });
+    const waitsForLoad = !settled;
+    script.onload(); await pending;
+    rows.push({ path: `${id} helpers precede their scene`, ok: beside && held && ordered && waitsForLoad && settled
+      && scene === f.shell && f.shell.enter === enter && f.BL.deferred.load(group) === null && !f.links().length && !f.timers.size });
   }
   // After a deploy the hashed file is gone: the error is probed, found 404, marked stale and reported once.
   {
