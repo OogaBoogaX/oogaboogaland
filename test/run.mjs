@@ -7364,20 +7364,47 @@ const openWithSheetState = async (b, url, state) => {
   try { await b.open(url); await untilReady(b); }
   finally { await b.send("Page.removeScriptToEvaluateOnNewDocument", { identifier: script.result.identifier }); }
 };
-const hubSheetPersistence = { name: "side panel persistence", why: "rule: panels dock to left, right or bottom, retain their rails when closed, restore each open or closed layout, and merge without duplicate ownership or losing account controls", run: async (b) => {
+const hubSheetPersistence = { name: "side panel persistence", why: "rule: panels dock to left, right or bottom, slide their panels and rails together when closed, restore each open or closed layout, and merge without duplicate ownership or losing account controls", run: async (b) => {
   const url = hubPage(src, "pos=0");
-  const settled = () => untilPage(b, `(() => { const node = document.getElementById("sheet"), r = node.getBoundingClientRect(); return node.dataset.open === "true" && r.left >= -0.01 && r.top >= -0.01 && r.right <= innerWidth + 0.01 && r.bottom <= innerHeight + 0.01; })()`);
+  const settled = () => untilPage(b, `[...document.querySelectorAll(".sheet")].every(node => !node.getAnimations({ subtree: true }).some(animation => animation.transitionProperty && (animation.playState === "running" || animation.playState === "pending")))`);
+  const motions = [];
+  const toggle = async selector => {
+    motions.push(await b.evaluate(`(async () => {
+      const tab = document.querySelector(${JSON.stringify(selector)}), node = tab.closest(".sheet"), body = node.querySelector(".sheet-body");
+      const rect = el => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; };
+      const sample = () => ({ panel: rect(node), tab: rect(tab) });
+      const before = sample(); tab.click();
+      const animation = node.getAnimations().find(a => a.transitionProperty === "transform");
+      if (!animation) return { dock: node.dataset.dock, animated: false };
+      animation.pause(); animation.currentTime = Number(animation.effect.getTiming().duration) / 2;
+      const middle = sample(), open = node.dataset.open === "true";
+      const content = [...node.querySelectorAll("[data-panel]")].some(panel => !panel.hidden);
+      const accessible = body.inert === !open && body.getAttribute("aria-hidden") === String(!open);
+      const painted = getComputedStyle(body).visibility === "visible";
+      animation.finish(); await animation.finished;
+      return { dock: node.dataset.dock, animated: true, open, before, middle, after: sample(), content, accessible, painted };
+    })()`));
+    if (!await settled()) throw Error("The panel transition did not finish");
+  };
+  const near = (a, b) => a && b && Object.keys(a).every(key => Math.abs(a[key] - b[key]) < 0.01);
+  const railAtEdge = (closed, opened, state) => closed.tabs.length === opened.tabs.length && closed.tabs.every((tab, i) => {
+    const before = opened.tabs[i], r = tab.rect, side = closed.dock !== "bottom";
+    return tab.name === before.name && Math.abs((side ? r.y : r.x) - (side ? before.rect.y : before.rect.x)) < 0.01
+      && r.x >= -0.01 && r.y >= -0.01 && r.x + r.width <= state.width + 0.01 && r.y + r.height <= state.height + 0.01;
+  }) && (closed.dock === "left" ? closed.rect.x + closed.rect.width <= 0.01 : closed.dock === "right" ? closed.rect.x >= state.width - 0.01 : closed.rect.y >= state.height - 0.01);
+  await b.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "no-preference" }] });
+  try {
   await openWithSheetState(b, url, null);
   const read = `(() => {
     const sheet = document.getElementById("sheet"), tab = sheet.querySelector("[data-tab][aria-selected='true']")?.dataset.tab || null;
     const saved = localStorage.getItem("oogaboogaland.sheet.v1"), shown = [...document.querySelectorAll(".sheet")].filter(node => !node.hidden && node.dataset.open === "true");
     const rect = node => { const r = node.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; };
     return { open: sheet.dataset.open, hidden: sheet.hidden, dock: sheet.dataset.dock, tab, width: innerWidth, height: innerHeight,
-      panel: !!tab && !document.querySelector('[data-panel="' + tab + '"]').hidden,
-      panels: [...document.querySelectorAll(".sheet [data-panel]")].filter(panel => !panel.hidden).map(panel => panel.dataset.panel),
+      panel: !!tab && BL.sheet.visible(document.querySelector('[data-panel="' + tab + '"]')),
+      panels: [...document.querySelectorAll(".sheet [data-panel]")].filter(panel => BL.sheet.visible(panel)).map(panel => panel.dataset.panel),
       tabs: [...sheet.querySelectorAll("[data-tab]")].filter(tab => !tab.hidden).map(tab => tab.dataset.tab),
       all: [...document.querySelectorAll(".sheet")].map(node => ({ id: node.id, open: node.dataset.open === "true", hidden: node.hidden,
-        dock: node.dataset.dock, rect: rect(node), body: getComputedStyle(node.querySelector(".sheet-body")).visibility,
+        dock: node.dataset.dock, rect: rect(node), body: getComputedStyle(node.querySelector(".sheet-body")).visibility, inert: node.querySelector(".sheet-body").inert,
         tabs: [...node.querySelectorAll("[data-tab]")].filter(tab => !tab.hidden).map(tab => ({ name: tab.dataset.tab, rect: rect(tab) })) })),
       shown: shown.map(node => { return { tab: node.querySelector("[aria-selected='true']").dataset.tab, dock: node.dataset.dock,
         rect: rect(node),
@@ -7392,42 +7419,42 @@ const hubSheetPersistence = { name: "side panel persistence", why: "rule: panels
   await untilReady(b);
   if (!await settled()) throw Error("The restored panel did not finish docking");
   const restored = await b.evaluate(read);
-  await b.evaluate(`document.getElementById("sheet-bananas").click()`);
+  await toggle("#sheet-bananas");
   await b.open(url);
   await untilReady(b);
   const closed = await b.evaluate(read);
-  record("side panel: first load has no selection, reloads restore its open tab, and closing retains its rail without showing content", first.open === "false" && first.tab === null && !first.panel && first.panels.length === 0 && first.shown.length === 0
+  record("side panel: first load has no selection, reloads restore its open tab, and closing slides the panel offscreen with its rail still reachable", first.open === "false" && first.tab === null && !first.panel && first.panels.length === 0 && first.shown.length === 0
     && (first.saved === null || first.saved.open === false && first.saved.tab === "roster" && first.saved.rect === null && first.saved.windows.length === 0)
     && opened.open === "true" && opened.tab === "bananas" && opened.saved?.open && opened.saved.tab === "bananas"
     && restored.open === "true" && restored.tab === "bananas" && restored.panel
     && closed.open === "false" && closed.tab === null && closed.panels.length === 0 && closed.shown.length === 0 && !closed.hidden
     && !closed.saved.open && closed.saved.tab === "bananas" && closed.saved.rect
     && Math.abs(opened.all[0].rect.x + opened.all[0].rect.width - opened.width) < 0.01
-    && JSON.stringify(closed.all[0].tabs) === JSON.stringify(opened.all[0].tabs), JSON.stringify({ first, opened, restored, closed }));
+    && railAtEdge(closed.all[0], opened.all[0], closed) && closed.all[0].inert, JSON.stringify({ first, opened, restored, closed }));
   const layout = { open: true, tab: "bananas", rect: { x: 900, y: 90, width: 420, height: 480 },
     windows: [{ tab: "roster", rect: { x: 140, y: 130, width: 360, height: 430 } }] };
   await openWithSheetState(b, url, layout);
   const multiple = await b.evaluate(read);
-  await b.evaluate(`document.querySelector(".sheet:not(#sheet) [aria-selected='true']").click()`);
+  await toggle(".sheet:not(#sheet) [aria-selected='true']");
   const one = await b.evaluate(read);
-  await b.evaluate(`document.getElementById("sheet-bananas").click()`);
+  await toggle("#sheet-bananas");
   const last = await b.evaluate(read);
-  const near = (a, b) => a && b && Object.keys(a).every(key => Math.abs(a[key] - b[key]) < 0.01);
   const matches = (tab, rect) => near(multiple.shown.find(panel => panel.tab === tab)?.rect, rect);
-  record("side panel: old free rectangles migrate to the nearest allowed edge, and closing either or both panels preserves their rail geometry and tab ownership",
+  record("side panel: old free rectangles migrate to the nearest allowed edge, and closing either or both panels keeps the rail level and tab ownership at the corresponding edge",
     multiple.shown.length === 2 && matches("bananas", { ...layout.rect, x: multiple.width - layout.rect.width }) && matches("roster", { ...layout.windows[0].rect, x: 0 })
     && multiple.shown.every(panel => panel.tabs.includes(panel.tab) && !panel.tabs.includes(panel.tab === "bananas" ? "roster" : "bananas"))
     && one.shown.length === 1 && one.tab === "bananas" && !one.tabs.includes("roster") && one.saved.windows.length === 1 && !one.saved.windows[0].open
     && last.shown.length === 0 && last.panels.length === 0 && last.tab === null && !last.hidden && last.dock === first.dock
-    && last.all.every((panel, i) => !panel.hidden && panel.body === "hidden" && near(panel.rect, multiple.all[i].rect) && JSON.stringify(panel.tabs) === JSON.stringify(multiple.all[i].tabs))
+    && last.all.every((panel, i) => !panel.hidden && panel.body === "hidden" && panel.inert && railAtEdge(panel, multiple.all[i], last))
     && !last.saved.open && last.saved.tab === "bananas" && last.saved.dock === "right" && last.saved.windows[0].dock === "left", JSON.stringify({ multiple, one, last }));
   await b.open(url); await untilReady(b);
   const closedReload = await b.evaluate(read);
-  await b.evaluate(`__ooga.hud.selectTab("roster"); __ooga.hud.selectTab("bananas")`);
+  await toggle(".sheet:not(#sheet) [data-tab='roster']");
+  await toggle("#sheet-bananas");
   const reopened = await b.evaluate(read);
   record("side panel: reloading closed rails and reopening their tabs restores both windows at their previous positions",
     closedReload.shown.length === 0 && closedReload.all.every((panel, i) => !panel.hidden && near(panel.rect, last.all[i].rect))
-    && reopened.shown.length === 2 && reopened.all.every((panel, i) => near(panel.rect, last.all[i].rect)), JSON.stringify({ closedReload, reopened }));
+    && reopened.shown.length === 2 && reopened.all.every((panel, i) => near(panel.rect, multiple.all[i].rect)), JSON.stringify({ closedReload, reopened }));
   const held = await b.evaluate(`(() => {
     const H = __ooga.hud, before = localStorage.getItem("oogaboogaland.sheet.v1");
     H.setPanelsHidden(true); window.dispatchEvent(new Event("resize"));
@@ -7439,21 +7466,26 @@ const hubSheetPersistence = { name: "side panel persistence", why: "rule: panels
     document.getElementById("sheet-bananas").click();
     BL.hud.showAccount({ backend: true, me: null, room: "off", online: 0 });
     const footer = document.querySelector(".sheet-foot"), owner = footer.closest(".sheet"), login = document.getElementById("account-login");
-    const account = owner.id !== "sheet" && !owner.hidden && owner.dataset.open === "true" && !!login.getClientRects().length && getComputedStyle(login).visibility === "visible" && document.querySelectorAll("#account-login").length === 1;
+    const account = owner.id !== "sheet" && !owner.hidden && owner.dataset.open === "true" && !!login.getClientRects().length && getComputedStyle(login).visibility === "visible" && document.querySelectorAll("#account-login").length === 1
+      && document.querySelectorAll(".sheet .feed-open").length === 1 && document.querySelectorAll(".sheet #account").length === 1
+      && !!footer.querySelector(".feed-open") && !!footer.querySelector("#account") && !!footer.querySelector(".feed-open").getClientRects().length;
     H.selectTab("bananas");
     const returned = footer.closest(".sheet").id === "sheet";
     BL.hud.showAccount(BL.net.state);
     return { hidden, folded, same, account, returned, count: document.querySelectorAll(".sheet").length };
   })()`);
-  record("side panel: temporary suppression and folding survive resize without changing saved choices, and detached-only panels retain the shared account controls", Object.values(held).every(Boolean) && held.count === 2, JSON.stringify(held));
+  record("side panel: temporary suppression and folding survive resize without changing saved choices, and detached-only panels retain one shared Feed button and account controls", Object.values(held).every(Boolean) && held.count === 2, JSON.stringify(held));
+  if (!await settled()) throw Error("The restored panels did not finish opening");
   // A closed source rail can be merged into another panel, focusing its tab and removing only its own rail.
-  await b.evaluate(`document.querySelector(".sheet:not(#sheet) [data-tab='roster']").click()`);
+  await toggle(".sheet:not(#sheet) [data-tab='roster']");
   await dragSheet(b, ".sheet:not(#sheet) [data-tab='roster']", multiple.width - 180, 260);
+  if (!await settled()) throw Error("The merged panel did not finish opening");
   const merged = await b.evaluate(read);
   record("side panel: dragging a closed detached tab onto the other panel removes its old rail and focuses that tab",
     merged.all.length === 1 && merged.shown.length === 1 && merged.tab === "roster" && merged.saved.windows.length === 0
     && await b.evaluate(`document.activeElement === document.getElementById("sheet-toggle")`), JSON.stringify(merged));
   await dragSheet(b, "#sheet [data-tab='bananas']", 60, 180);
+  if (!await settled()) throw Error("The detached panel did not finish opening");
   const torn = await b.evaluate(read);
   record("side panel: dragging an unselected tab creates one panel on the nearest edge with unique tab ownership",
     torn.all.length === 2 && torn.shown.length === 2 && torn.shown.find(panel => panel.tab === "bananas")?.dock === "left"
@@ -7461,27 +7493,36 @@ const hubSheetPersistence = { name: "side panel persistence", why: "rule: panels
   const fits = state => state.all.every(panel => panel.rect.x >= -0.01 && panel.rect.y >= -0.01 && panel.rect.x + panel.rect.width <= state.width + 0.01 && panel.rect.y + panel.rect.height <= state.height + 0.01
     && (panel.dock === "left" ? Math.abs(panel.rect.x) < 0.01 : panel.dock === "right" ? Math.abs(panel.rect.x + panel.rect.width - state.width) < 0.01 : panel.dock === "bottom" && Math.abs(panel.rect.y + panel.rect.height - state.height) < 0.01)
     && panel.tabs.every(tab => tab.rect.x >= -0.01 && tab.rect.y >= -0.01 && tab.rect.x + tab.rect.width <= state.width + 0.01 && tab.rect.y + tab.rect.height <= state.height + 0.01));
+  const beforeEdges = torn.all.find(panel => panel.id !== "sheet");
+  await dragSheet(b, ".sheet:not(#sheet) [data-edge='e']", beforeEdges.rect.x + beforeEdges.rect.width + 80, beforeEdges.rect.y + beforeEdges.rect.height / 2);
+  const eastResized = await b.evaluate(read), east = eastResized.all.find(panel => panel.id !== "sheet");
+  await dragSheet(b, ".sheet:not(#sheet) [data-edge='n']", east.rect.x + east.rect.width / 2, east.rect.y - 30);
+  const northResized = await b.evaluate(read), north = northResized.all.find(panel => panel.id !== "sheet");
   await dragSheet(b, ".sheet:not(#sheet) .sheet-corner-se", 700, 500);
   const resized = await b.evaluate(read);
   await dragSheet(b, ".sheet:not(#sheet) .sheet-drag", 650, resized.height - 260);
   const bottomDocked = await b.evaluate(read);
   const bottomPanel = bottomDocked.all.find(panel => panel.id !== "sheet");
-  await b.evaluate(`document.querySelector(".sheet:not(#sheet) [data-tab='bananas']").click()`);
+  await toggle(".sheet:not(#sheet) [data-tab='bananas']");
   const bottomClosed = await b.evaluate(read);
   const bottomRail = bottomClosed.all.find(panel => panel.id !== "sheet");
-  record("side panel: corner resizing preserves its edge, dragging chooses bottom, and closing leaves the horizontal rail at its prior level",
-    resized.all.find(panel => panel.id !== "sheet").dock === "left" && fits(resized) && fits(bottomDocked)
-    && bottomPanel.dock === "bottom" && near(bottomPanel.rect, bottomRail.rect) && JSON.stringify(bottomPanel.tabs) === JSON.stringify(bottomRail.tabs)
-    && await b.evaluate(`getComputedStyle(document.querySelector(".sheet:not(#sheet)")).pointerEvents === "none"`), JSON.stringify({ resized, bottomDocked, bottomClosed }));
+  record("side panel: side and top edges resize one dimension, corners keep the dock, and bottom closing brings its horizontal rail to the edge",
+    east.rect.width > beforeEdges.rect.width && east.rect.height === beforeEdges.rect.height && east.dock === "left" && fits(eastResized)
+    && north.rect.height > east.rect.height && north.rect.width === east.rect.width && north.dock === "left" && fits(northResized)
+    && resized.all.find(panel => panel.id !== "sheet").dock === "left" && fits(resized) && fits(bottomDocked)
+    && bottomPanel.dock === "bottom" && railAtEdge(bottomRail, bottomPanel, bottomClosed) && bottomRail.inert
+    && await b.evaluate(`getComputedStyle(document.querySelector(".sheet:not(#sheet)")).pointerEvents === "none"`), JSON.stringify({ beforeEdges, eastResized, northResized, resized, bottomDocked, bottomClosed }));
   await b.open(url); await untilReady(b);
   const bottomReload = await b.evaluate(read);
-  await b.evaluate(`__ooga.hud.selectTab("bananas")`);
+  await toggle(".sheet:not(#sheet) [data-tab='bananas']");
   const bottomReopened = await b.evaluate(read);
-  record("side panel: a closed bottom panel reloads and reopens at the same rail level with its rectangle and edge intact",
-    near(bottomReload.all.find(panel => panel.id !== "sheet").rect, bottomPanel.rect) && !bottomReload.all.find(panel => panel.id !== "sheet").open
+  record("side panel: a closed bottom panel reloads at the edge and reopens at its saved rectangle",
+    near(bottomReload.all.find(panel => panel.id !== "sheet").rect, bottomRail.rect) && !bottomReload.all.find(panel => panel.id !== "sheet").open
     && near(bottomReopened.all.find(panel => panel.id !== "sheet").rect, bottomPanel.rect) && bottomReopened.shown.length === 2 && fits(bottomReopened), JSON.stringify({ bottomReload, bottomReopened }));
   await b.evaluate(`__ooga.hud.foldPanels()`);
+  if (!await settled()) throw Error("The temporary fold did not finish closing");
   await dragSheet(b, "#sheet [data-tab='bananas']", 80, 180);
+  if (!await settled()) throw Error("The dragged panel did not finish opening");
   const unfoldedDrag = await b.evaluate(read);
   record("side panel: dragging an existing tab from a temporary fold reuses its owner without duplicating the tab or panel",
     unfoldedDrag.all.length === 2 && unfoldedDrag.shown.length === 2 && unfoldedDrag.shown.filter(panel => panel.tab === "bananas").length === 1 && fits(unfoldedDrag), JSON.stringify(unfoldedDrag));
@@ -7491,14 +7532,24 @@ const hubSheetPersistence = { name: "side panel persistence", why: "rule: panels
     await b.evaluate(`document.getElementById("sheet-bananas").click()`);
     if (!await settled()) throw Error("The landscape panel did not finish docking");
     const shortOpen = await b.evaluate(read);
-    await b.evaluate(`document.getElementById("sheet-bananas").click()`);
+    await toggle("#sheet-bananas");
     const shortClosed = await b.evaluate(read);
-    await b.evaluate(`document.getElementById("sheet-bananas").click()`);
+    await toggle("#sheet-bananas");
     const shortReopened = await b.evaluate(read);
-    record("side panel: first close and reopen in landscape preserve a short default bottom drawer's rail and size",
-      shortOpen.dock === "bottom" && shortOpen.all[0].rect.height < 263 && near(shortOpen.all[0].rect, shortClosed.all[0].rect)
-      && near(shortOpen.all[0].rect, shortReopened.all[0].rect) && JSON.stringify(shortOpen.all[0].tabs) === JSON.stringify(shortClosed.all[0].tabs), JSON.stringify({ shortOpen, shortClosed, shortReopened }));
+    record("side panel: first close and reopen in landscape slide a short default drawer to the edge without changing its saved size",
+      shortOpen.dock === "bottom" && shortOpen.all[0].rect.height < 263 && railAtEdge(shortClosed.all[0], shortOpen.all[0], shortClosed)
+      && near(shortOpen.all[0].rect, shortReopened.all[0].rect) && shortClosed.saved.rect.height === shortOpen.all[0].rect.height, JSON.stringify({ shortOpen, shortClosed, shortReopened }));
   } finally { await b.send("Emulation.clearDeviceMetricsOverride"); }
+  record("side panel: opening and closing animate the painted panel and its tabs together on every edge while closed content is inert", motions.every(m => {
+    if (!m.animated || !m.content || !m.accessible || !m.painted) return false;
+    const axis = m.dock === "bottom" ? "y" : "x", other = axis === "x" ? "y" : "x";
+    const moved = m.after.panel[axis] - m.before.panel[axis], middle = m.middle.panel[axis] - m.before.panel[axis];
+    return Math.abs(moved) > 1 && middle / moved > 0 && middle / moved < 1
+      && Math.abs((m.middle.tab[axis] - m.before.tab[axis]) - middle) < 0.01
+      && Math.abs((m.after.tab[axis] - m.before.tab[axis]) - moved) < 0.01
+      && Math.abs(m.after.tab[other] - m.before.tab[other]) < 0.01;
+  }) && ["left", "right", "bottom"].every(dock => [false, true].every(open => motions.some(m => m.dock === dock && m.open === open))), JSON.stringify(motions));
+  } finally { await b.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] }); }
 } };
 const hubChat = { name: "ooga chat", why: "regression: Chat releases pre-focus movement and fits keyboard-reduced viewports; Ooga Chat shows only with a backend, asks a signed-out visitor to sign in, keeps the last 100 lines as plain text, never pulls a reader back down, and Enter sends while Escape only leaves the input", run: async (b) => {
   // No backend in the suite: retain the saved selection while its tab is unavailable.

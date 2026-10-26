@@ -51,7 +51,7 @@
     const fit = (w) => {
       w.node.dataset.open = String(isOpen(w));
       // Only the untouched launcher and temporary scene fold use the default edge.
-      // A closed used panel keeps its full rectangle so its rail never jumps.
+      // Keep the open rectangle; CSS slides the whole panel and rail to its edge.
       if (!w.rect || w.node === root && folded) {
         for (const name of ["left", "top", "width", "height"]) w.node.style.removeProperty(name);
         w.node.dataset.sized = "false";
@@ -130,7 +130,9 @@
     };
     const refresh = () => {
       for (const panel of panels) {
-        const owner = windows.find((w) => isOpen(w) && w.tab === panel.dataset.panel), target = owner || main;
+        // Retain the selected content during the closing slide. The closed body
+        // becomes inert immediately and CSS hides it when the slide finishes.
+        const owner = available(panel.dataset.panel) && ownerOf(panel.dataset.panel), target = owner || main;
         if (panel.parentElement !== target.content) target.content.append(panel);
         panel.hidden = !owner;
         if (owner) panel.setAttribute("aria-labelledby", owner.tabs.find((t) => t.dataset.tab === owner.tab).id);
@@ -152,6 +154,8 @@
         fit(w);
         w.nav.setAttribute("aria-orientation", w.node.dataset.dock === "bottom" ? "horizontal" : "vertical");
         w.node.hidden = hidden || folded && w !== main || !index || w !== main && !available(w.tab);
+        w.body.inert = !open || w.node.hidden;
+        w.body.setAttribute("aria-hidden", String(w.body.inert));
       }
       placeFooter(); showLootCount();
       notify();
@@ -178,7 +182,9 @@
     const measure = (w) => {
       if (w.rect) return;
       const r = w.node.getBoundingClientRect();
-      w.rect = { x: r.left, y: r.top, width: r.width, height: r.height };
+      const transform = getComputedStyle(w.node).transform;
+      const offset = transform === "none" ? null : new DOMMatrixReadOnly(transform);
+      w.rect = { x: r.left - (offset?.m41 || 0), y: r.top - (offset?.m42 || 0), width: r.width, height: r.height };
       w.dock = w.node.dataset.dock;
       fit(w);
     };
@@ -206,7 +212,7 @@
       suppressClick = g.moved;
       if (g.handle.hasPointerCapture(g.id)) g.handle.releasePointerCapture(g.id);
       showMergeTarget(null);
-      g.w.node.classList.remove("sheet-tab-drag");
+      g.w.node.classList.remove("sheet-tab-drag", "sheet-moving");
       if (target) {
         remove(g.w);
         select(target, g.tab);
@@ -221,12 +227,12 @@
       const w = findWindow(e.target);
       if (!w || hidden || e.button !== 0 || !e.isPrimary || gesture) return;
       front(w); suppressClick = false;
-      const handle = e.target.closest("[data-tab], .sheet-drag, .sheet-corner, .sheet-panels");
+      const handle = e.target.closest("[data-tab], .sheet-drag, .sheet-corner, .sheet-edge, .sheet-panels");
       if (!handle) return;
       e.preventDefault(); e.stopPropagation();
       handle.focus({ preventScroll: true });
       const r = w.node.getBoundingClientRect();
-      gesture = { id: e.pointerId, handle, w, tab: handle.dataset.tab, corner: handle.dataset.corner,
+      gesture = { id: e.pointerId, handle, w, tab: handle.dataset.tab, corner: handle.dataset.corner || handle.dataset.edge,
         x: e.clientX, y: e.clientY, rect: { x: r.left, y: r.top, width: r.width, height: r.height }, moved: false };
       // The locked virtual cursor captures its synthetic pointers itself.
       if (e.isTrusted) handle.setPointerCapture(e.pointerId);
@@ -236,9 +242,9 @@
       const minTop = b.y + (w.dock === "bottom" ? TAB_EDGE : 0), minWidth = Math.min(300, Math.max(1, maxRight - minLeft)), minHeight = Math.min(263, Math.max(1, b.y + b.height - minTop));
       let left = r.x, top = r.y, right = r.x + r.width, foot = r.y + r.height;
       if (corner.includes("w")) left = Math.max(minLeft, Math.min(right - minWidth, left + dx));
-      else right = Math.min(maxRight, Math.max(left + minWidth, right + dx));
+      else if (corner.includes("e")) right = Math.min(maxRight, Math.max(left + minWidth, right + dx));
       if (corner.includes("n")) top = Math.max(minTop, Math.min(foot - minHeight, top + dy));
-      else foot = Math.min(b.y + b.height, Math.max(top + minHeight, foot + dy));
+      else if (corner.includes("s")) foot = Math.min(b.y + b.height, Math.max(top + minHeight, foot + dy));
       Object.assign(w.rect, { x: left, y: top, width: right - left, height: foot - top });
       fit(w);
     };
@@ -260,6 +266,7 @@
           g.w = addWindow(g.tab, { ...g.rect });
           front(g.w); refresh();
         } else {
+          g.w.node.classList.add("sheet-moving");
           g.w.open = true; g.w.node.dataset.open = "true";
           measure(g.w); refresh(); g.rect = { ...g.w.bounds };
         }
@@ -295,7 +302,7 @@
     on(parent, "keydown", (e) => {
       const w = findWindow(e.target);
       if (!w) return;
-      const tab = e.target.closest("[data-tab]"), handle = e.target.closest(".sheet-drag, .sheet-corner");
+      const tab = e.target.closest("[data-tab]"), handle = e.target.closest(".sheet-drag, .sheet-corner, .sheet-edge");
       const arrows = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"];
       if (tab && (arrows.includes(e.key) || e.key === "Home" || e.key === "End")) {
         e.preventDefault(); e.stopPropagation();
@@ -306,7 +313,7 @@
         e.preventDefault(); e.stopPropagation(); measure(w);
         const step = e.shiftKey ? 32 : 10, dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
         const dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
-        if (handle.dataset.corner) resize(w, w.bounds, handle.dataset.corner, dx, dy);
+        if (handle.dataset.corner || handle.dataset.edge) resize(w, w.bounds, handle.dataset.corner || handle.dataset.edge, dx, dy);
         else { w.bounds.x += dx; w.bounds.y += dy; w.rect.x = w.bounds.x; w.rect.y = w.bounds.y; w.dock = nearestDock(w.bounds); fit(w); }
         refresh(); save();
       }
@@ -350,9 +357,10 @@
         listeners.length = 0;
         for (const panel of panels) { content.append(panel); panel.hidden = panel.dataset.panel !== main.tab; }
         main.body.append(footer);
+        main.body.inert = false; main.body.removeAttribute("aria-hidden");
         for (const w of windows) if (w !== main) w.node.remove();
         root.querySelector(".sheet-drag").remove();
-        for (const corner of root.querySelectorAll(".sheet-corner")) corner.remove();
+        for (const handle of root.querySelectorAll(".sheet-corner, .sheet-edge")) handle.remove();
         root.hidden = false;
         notify();
       }
