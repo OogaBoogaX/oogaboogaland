@@ -21,6 +21,8 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
+  // Construction checkpoints (see build-tasks.js). They reach it only when sliced, so an unsliced build runs without it.
+  const pause = function* (slice) { if (slice) yield* BL.buildTasks.pause(slice); };
   const { clamp } = BL.math;
   const TAU = Math.PI * 2, DEG = Math.PI / 180;
   const UNIT = 0.5;
@@ -240,13 +242,13 @@
   // One column of ground: its top (a cell top, or -Infinity where there is none), its underside, the material it
   // wears, and the gaps cut through it as [from, to) pairs in `gaps`.
   const COLUMN = { top: 0, bottom: 0, material: 0, gaps: new Float64Array(12), count: 0, r: 0, bearing: 0, a: 0, ledge: false };
-  const gap = (from, to) => {
-    COLUMN.gaps[COLUMN.count * 2] = from;
-    COLUMN.gaps[COLUMN.count * 2 + 1] = to;
-    COLUMN.count++;
+  const gap = (from, to, out = COLUMN) => {
+    out.gaps[out.count * 2] = from;
+    out.gaps[out.count * 2 + 1] = to;
+    out.count++;
   };
-  const column = (x, z) => {
-    const c = COLUMN, r = Math.hypot(x, z), bearing = wrap(Math.atan2(x, z)), a = rampAngle(bearing), edge = edgeAt(bearing);
+  const column = (x, z, out = COLUMN) => {
+    const c = out, r = Math.hypot(x, z), bearing = wrap(Math.atan2(x, z)), a = rampAngle(bearing), edge = edgeAt(bearing);
     c.count = 0; c.r = r; c.bearing = bearing; c.a = a; c.ledge = false; c.top = -Infinity; c.material = M.grass;
     if (r < SHAFT_R) return c;
     if (r >= edge) {
@@ -289,7 +291,7 @@
       if (across >= CHANNEL.low || r > channel.to + (channel.inner ? UNIT : 0)) continue;
       if (channel.inner && r >= RING.ridge) {
         // A culvert under the raised forest, opening over the inner ramp wall; keep its roof intact.
-        gap(LEVEL.bed, WATER.flood + UNIT);
+        gap(LEVEL.bed, WATER.flood + UNIT, c);
         continue;
       }
       const level = across < CHANNEL.bed ? (r > edge - CHANNEL.lip ? Math.max(LEVEL.bed, channel.lip) : LEVEL.bed) : across < CHANNEL.bank ? LEVEL.shore : LEVEL.lowland;
@@ -309,34 +311,35 @@
       const along = x * Math.sin(stop) + z * Math.cos(stop), across = x * Math.cos(stop) - z * Math.sin(stop);
       if (Math.abs(across) < STOP.half && along > 0) chamber = along < CHAMBER_R;
     }
-    if (chamber) gap(FLOOR, roofUnder(r));
+    if (chamber) gap(FLOOR, roofUnder(r), c);
     if (r < RAMP.r && r > CHAMBER_R - 2 && rillTailDistance(x, z) < RILL.half + UNIT * Math.SQRT1_2) {
-      gap(down(FLOOR - RILL.depth - 0.08), FLOOR + UNIT);
+      gap(down(FLOOR - RILL.depth - 0.08), FLOOR + UNIT, c);
     }
     if (a <= RAMP.sweep && Math.abs(r - RAMP.r) < rampHalf(a)) {
       const floor = rampY(a), gutter = a <= RILL.end + UNIT * Math.SQRT1_2 / (RAMP.r - RAMP.half) && a >= RILL.start - UNIT * Math.SQRT1_2 / (RAMP.r - RAMP.half) && r > rillInner(a) - (RILL.half - RILL.waterHalf) - UNIT * Math.SQRT1_2 && r < rillRadius(a) + RILL.half + UNIT * Math.SQRT1_2;
-      gap(gutter ? down(floor - RILL.depth - 0.08) : stepUnder(floor), up(floor + RAMP.head));
+      gap(gutter ? down(floor - RILL.depth - 0.08) : stepUnder(floor), up(floor + RAMP.head), c);
     }
     // The level bay where the descent meets the chamber, through the wall between them.
-    if (wrap(bearing - RAMP.start - RAMP.sweep + JUNCTION.before) <= JUNCTION.before + JUNCTION.after && r >= CHAMBER_R - 0.5 && r < RAMP.r + RAMP.bay) gap(FLOOR, FLOOR + JUNCTION.height);
-    for (const door of DOORS) if (Math.abs(a - door.at * RAMP.sweep) * 18 < DOOR.half && r >= RAMP.r) gap(stepUnder(rampY(a)), stepUnder(rampY(a)) + DOOR.height);
+    if (wrap(bearing - RAMP.start - RAMP.sweep + JUNCTION.before) <= JUNCTION.before + JUNCTION.after && r >= CHAMBER_R - 0.5 && r < RAMP.r + RAMP.bay) gap(FLOOR, FLOOR + JUNCTION.height, c);
+    for (const door of DOORS) if (Math.abs(a - door.at * RAMP.sweep) * 18 < DOOR.half && r >= RAMP.r) gap(stepUnder(rampY(a)), stepUnder(rampY(a)) + DOOR.height, c);
     // A link: open from the descent out through each mouth, and along the gallery outside the pier.
     const link = linkAt(a);
     if (link) {
       const mouth = a < link.from * RAMP.sweep + LINK.mouth / 18 || a > link.to * RAMP.sweep - LINK.mouth / 18;
-      if (r >= (mouth ? RAMP.r : RAMP.r + RAMP.half + LINK.rib)) gap(stepUnder(rampY(a)), up(rampY(a) + LINK.head));
+      if (r >= (mouth ? RAMP.r : RAMP.r + RAMP.half + LINK.rib)) gap(stepUnder(rampY(a)), up(rampY(a) + LINK.head), c);
     }
-    if (Math.abs(a - WINDOW.at * RAMP.sweep) * 12.5 < WINDOW.half && r >= CHAMBER_R - 0.5 && r <= RAMP.r) gap(stepUnder(rampY(a)) + WINDOW.sill, stepUnder(rampY(a)) + WINDOW.top);
+    if (Math.abs(a - WINDOW.at * RAMP.sweep) * 12.5 < WINDOW.half && r >= CHAMBER_R - 0.5 && r <= RAMP.r) gap(stepUnder(rampY(a)) + WINDOW.sill, stepUnder(rampY(a)) + WINDOW.top, c);
     return c;
   };
 
   // The grid, filled once for the page: materials for the mesher, and each column's top for everyone else.
   let built = null;
-  const body = () => {
+  const bodySteps = function* (slice = null) {
     if (built) return built;
     const data = new Uint8Array(SX * SY * SZ), heights = new Float32Array(SX * SZ).fill(-Infinity);
-    for (let i = 0; i < SX; i++) for (let k = 0; k < SZ; k++) {
-      const x = ORIGIN.x + (i + 0.5) * UNIT, z = ORIGIN.z + (k + 0.5) * UNIT, c = column(x, z);
+    const columnWork = { ...COLUMN, gaps: new Float64Array(COLUMN.gaps.length) };
+    for (let i = 0; i < SX; i++) { for (let k = 0; k < SZ; k++) { yield* pause(slice);
+      const x = ORIGIN.x + (i + 0.5) * UNIT, z = ORIGIN.z + (k + 0.5) * UNIT, c = column(x, z, columnWork);
       if (c.top === -Infinity) continue;
       let highest = -Infinity;
       // Tones come in patches a few metres across and courses a metre and a half deep, never a speckle of cells.
@@ -352,7 +355,7 @@
         const y = ORIGIN.y + (j + 0.5) * UNIT;
         if (y > c.top || y < c.bottom) continue;
         let open = false;
-        for (let g = 0; g < c.count && !open; g++) open = y > c.gaps[g * 2] && y < c.gaps[g * 2 + 1];
+        for (let g = 0; g < c.count && !open; g++) { open = y > c.gaps[g * 2] && y < c.gaps[g * 2 + 1]; }
         if (open) continue;
         let material;
         if (y > c.top - UNIT) material = c.material;
@@ -367,8 +370,15 @@
         highest = y + UNIT / 2;
       }
       heights[i * SZ + k] = highest;
-    }
-    return built = { data, sx: SX, sy: SY, sz: SZ, heights };
+    } }
+    return built || (built = { data, sx: SX, sy: SY, sz: SZ, heights });
+  };
+  const body = () => {
+    if (built) return built;
+    const steps = bodySteps();
+    let next;
+    do { next = steps.next(); } while (!next.done);
+    return next.value;
   };
   const cellX = (x) => Math.floor((x - ORIGIN.x) / UNIT), cellZ = (z) => Math.floor((z - ORIGIN.z) / UNIT);
   // The top of the ground at a point, or -Infinity off the island and over the lake.
@@ -490,7 +500,7 @@
   BL.poolLayout = {
     UNIT, R, LAKE_R, CHAMBER_R, SHAFT_R, FLOOR, MEMBRANE_DEPTH, LEVEL, WATER, RING, RAMP, DOORS, DOOR, BAYS, WINDOW, JUNCTION, LEDGE, LINK, LINKS, linkAt, lipAt, STOPS, STOP, COURT, BRIDGE, NEST, NESTS,
     CHANNEL, CHANNELS, channelOutlet, fallGap, FALL_OPENING_HALF, FALL_GAP_MARGIN, RILL, rillRadius, rillInner, RILL_STATIONS, RILL_TAIL, rillTailPoint, rillTailDistance, rillJunctionY, HILLS, SLOT_GRID: SLOT, SLOTS, ORIGIN, SX, SY, SZ, M, PALETTE,
-    wrap, turn, edgeAt, membraneY, waterRadius, rampAngle, rampY, rampHalf, stepUnder, roofUnder, onLedge, ledgeWidth, ledgeY, ridgeTop, column, body,
+    wrap, turn, edgeAt, membraneY, waterRadius, rampAngle, rampY, rampHalf, stepUnder, roofUnder, onLedge, ledgeWidth, ledgeY, ridgeTop, column, body, bodySteps,
     groundAt, solidAt, covered, sightClear, boxSolid, boxClear, onIsland, keptClear, rampPoint
   };
 })();

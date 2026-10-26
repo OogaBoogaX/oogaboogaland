@@ -5,6 +5,8 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
+  // Construction checkpoints (see build-tasks.js). They reach it only when sliced, so an unsliced build runs without it.
+  const pause = function* (slice) { if (slice) yield* BL.buildTasks.pause(slice); };
   const { box, merge, cached } = BL.models;
   const variants = (build) => {
     const read = BL.models.variants(build);
@@ -19,10 +21,10 @@
   const mattressCache = BL.models.scopedMap();
   const roomSignCache = BL.models.scopedMap();
   const rampMarkerCache = BL.models.scopedMap();
-  const fabric = (pattern, width, depth, top, bottom, centerZ, kind) => {
+  const fabricSteps = function* (pattern, width, depth, top, bottom, centerZ, kind, slice = null) {
     const geo = { verts: [], faces: [], lines: [] }, size = pattern.width, colors = pattern.colors;
     const cells = new Uint32Array(size * size), used = new Uint8Array(cells.length);
-    for (let i = 0; i < cells.length; i++) cells[i] = colors[i * 3] << 16 | colors[i * 3 + 1] << 8 | colors[i * 3 + 2];
+    for (let i = 0; i < cells.length; i++) { cells[i] = colors[i * 3] << 16 | colors[i * 3 + 1] << 8 | colors[i * 3 + 2]; }
     const quad = (a, b, c, d, color) => {
       const i = geo.verts.length / 3;
       geo.verts.push(...a, ...b, ...c, ...d);
@@ -30,25 +32,25 @@
     };
     const xAt = (x) => (x / size - 0.5) * width, zAt = (z) => (z / size - 0.5) * depth + centerZ;
     // Merge equal-colour rectangles: every LifeHash pixel is kept, face count stays small in both renderers.
-    for (let z = 0; z < size; z++) for (let x = 0; x < size; x++) {
+    for (let z = 0; z < size; z++) { yield* pause(slice); for (let x = 0; x < size; x++) {
       const start = z * size + x, color = cells[start];
       if (used[start]) continue;
       let w = 1, h = 1;
-      while (x + w < size && !used[start + w] && cells[start + w] === color) w++;
+      while (x + w < size && !used[start + w] && cells[start + w] === color) { w++; }
       rows: while (z + h < size) {
-        for (let dx = 0; dx < w; dx++) if (used[start + h * size + dx] || cells[start + h * size + dx] !== color) break rows;
+        for (let dx = 0; dx < w; dx++) { if (used[start + h * size + dx] || cells[start + h * size + dx] !== color) break rows; }
         h++;
       }
-      for (let dz = 0; dz < h; dz++) used.fill(1, start + dz * size, start + dz * size + w);
+      for (let dz = 0; dz < h; dz++) { used.fill(1, start + dz * size, start + dz * size + w); }
       const x0 = xAt(x), x1 = xAt(x + w), z0 = zAt(z), z1 = zAt(z + h);
       quad([x0, top, z0], [x0, top, z1], [x1, top, z1], [x1, top, z0], color);
-    }
+    } }
     // Edge pixels continue down the case and sheet so the sides carry the same fabric, not an unprinted block.
-    for (let edge = 0; edge < 4; edge++) for (let i = 0; i < size;) {
+    for (let edge = 0; edge < 4; edge++) { for (let i = 0; i < size;) {
       const pixel = (n) => edge < 2 ? (edge ? size - 1 : 0) * size + n : n * size + (edge === 3 ? size - 1 : 0);
       const color = cells[pixel(i)];
       let end = i + 1;
-      while (end < size && cells[pixel(end)] === color) end++;
+      while (end < size && cells[pixel(end)] === color) { end++; }
       if (edge < 2) {
         const x0 = xAt(i), x1 = xAt(end), z = zAt(edge ? size : 0);
         if (edge) quad([x0, bottom, z], [x1, bottom, z], [x1, top, z], [x0, top, z], color);
@@ -59,10 +61,10 @@
         else quad([x, bottom, z0], [x, bottom, z1], [x, top, z1], [x, top, z0], color);
       }
       i = end;
-    }
+    } }
     return geo;
   };
-  const mattress = (room) => {
+  const mattressSteps = function* (room, slice = null) {
     const roomKey = [room.x, room.floor, room.z].map((n) => Number(n.toFixed(6))).join(",");
     const slot = room.index + (room.basement ? 11 : 0), cached = mattressCache.get(slot);
     if (cached && cached.mattress.roomKey === roomKey) return cached;
@@ -70,25 +72,41 @@
     sheet.pattern = BL.lifehash.make(sheet.seed);
     // The pillow carries the same LifeHash rotated a quarter turn, following the bedding's long axis.
     const pattern = sheet.pattern, colors = new Uint8Array(pattern.colors.length), size = pattern.width;
-    for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    for (let y = 0; y < size; y++) { for (let x = 0; x < size; x++) {
       const from = ((size - 1 - x) * size + y) * 3, to = (y * size + x) * 3;
       colors[to] = pattern.colors[from]; colors[to + 1] = pattern.colors[from + 1]; colors[to + 2] = pattern.colors[from + 2];
-    }
+    } }
     const pillow = { seed: sheet.seed, pattern: { width: size, height: size, colors, hash: pattern.hash } };
     const base = box({ w: MATTRESS.width - 0.02, h: 0.035, d: MATTRESS.depth - 0.02, color: "#c6b997", offset: { y: 0.0175 } });
     // The blanket is the top surface; a second buried top can sort in front of it in the Canvas painter.
     base.faces.splice(4, 1);
     const geo = merge(
       base,
-      fabric(sheet.pattern, MATTRESS.width, MATTRESS.depth, MATTRESS.surface, 0.035, 0, "sheet"),
-      fabric(pillow.pattern, 0.9, 0.5, MATTRESS.pillowTop, MATTRESS.surface, MATTRESS.pillowZ, "pillow")
+      (yield* fabricSteps(sheet.pattern, MATTRESS.width, MATTRESS.depth, MATTRESS.surface, 0.035, 0, "sheet", slice)),
+      (yield* fabricSteps(pillow.pattern, 0.9, 0.5, MATTRESS.pillowTop, MATTRESS.surface, MATTRESS.pillowZ, "pillow", slice))
     );
     geo.mattress = { roomKey, width: MATTRESS.width, depth: MATTRESS.depth, height: MATTRESS.height, sheet, pillow };
     mattressCache.set(slot, geo);
     return geo;
   };
-  const roomSign = (room) => {
-    const bedding = mattress(room).mattress, slot = room.index + (room.basement ? 11 : 0), cached = roomSignCache.get(slot);
+  const finishSteps = (steps) => { let next; do { next = steps.next(); } while (!next.done); return next.value; };
+  const fabric = (...args) => finishSteps(fabricSteps(...args));
+  const mattress = (room) => finishSteps(mattressSteps(room));
+  // A plain sheet and pillow have exactly the finished bed's support and silhouette. Only the LifeHash ink waits.
+  const mattressPlaceholder = (room) => {
+    const roomKey = [room.x, room.floor, room.z].map(n => Number(n.toFixed(6))).join(",");
+    const seed = `room:${roomKey}:sheet`, pattern = { width: 1, height: 1, colors: new Uint8Array([198, 185, 151]), hash: BL.lifehash.hash(seed) };
+    const sheet = { seed, pattern }, pillow = { seed, pattern };
+    const base = box({ w: MATTRESS.width - 0.02, h: 0.035, d: MATTRESS.depth - 0.02, color: "#c6b997", offset: { y: 0.0175 } });
+    base.faces.splice(4, 1);
+    const geo = merge(base, fabric(pattern, MATTRESS.width, MATTRESS.depth, MATTRESS.surface, 0.035, 0, "sheet"),
+      fabric(pattern, 0.9, 0.5, MATTRESS.pillowTop, MATTRESS.surface, MATTRESS.pillowZ, "pillow"));
+    geo.mattress = { roomKey, width: MATTRESS.width, depth: MATTRESS.depth, height: MATTRESS.height, sheet, pillow };
+    return geo;
+  };
+  const roomSign = (room, lightweight = false) => {
+    const roomKey = [room.x, room.floor, room.z].map(n => Number(n.toFixed(6))).join(",");
+    const bedding = lightweight ? { roomKey, sheet: { pattern: { hash: BL.lifehash.hash(`room:${roomKey}:sheet`) } } } : mattress(room).mattress, slot = room.index + (room.basement ? 11 : 0), cached = roomSignCache.get(slot);
     if (cached && cached.roomLifehashSign.roomKey === bedding.roomKey) return cached;
     const hash = bedding.sheet.pattern.hash, text = hash.slice(0, 8).toUpperCase(), width = 2.12, height = 0.72, cell = 0.055, pixel = 0.047;
     const geo = merge(
@@ -234,5 +252,5 @@
   // but a lintel would cover the B1 floor mark and recreate a roof across the
   // opening that the terrain cutaway has already exposed.
   const rampEntrance = variants((i) => buildRoomEntrance(i, true, true));
-  BL.headquartersModels = { room, entranceRamp, roomEntrance, rampEntrance, mattress, roomSign, rampMarkerLabel, rampMarkerArrow, MATTRESS, ROOM_RADIUS };
+  BL.headquartersModels = { room, entranceRamp, roomEntrance, rampEntrance, mattress, mattressSteps, mattressPlaceholder, roomSign, rampMarkerLabel, rampMarkerArrow, MATTRESS, ROOM_RADIUS };
 })();

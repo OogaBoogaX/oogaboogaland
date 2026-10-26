@@ -2,7 +2,9 @@
 // page life. The four are asked one after another on start, then one every STEP_MS in turn while the tab is visible,
 // so each repository is asked every six minutes. Closed pull requests are read newest-updated first until their
 // updates predate the last day; only a PR merged into main or master in that day can light a totem. A refused poll
-// (403 or 429 with the limit spent) waits for GitHub's reset.
+// (403 or 429 with the limit spent) waits for GitHub's reset. Served by the site's Worker, each poll asks its
+// `/api/totems/<i>` for that scan's result instead (revalidated by ETag); a page that gets a 404, a 405 or a reply that
+// is not JSON there (a static host, a file page) reads GitHub itself for the rest of its life.
 //
 // Each repository's `word` is what its totem carries, in runes down its back and sides and on its name board, and its
 // `importance` to Bitcoin sizes it: its totem stands that share of Bitcoin Core's height (`totem-models.js`).
@@ -26,15 +28,48 @@
   const subscribers = new Set();
   const state = { enabled: false, polls: 0, failures: 0, lastError: "", limitedUntil: 0, repos: REPOS.map(() => ({ number: 0, url: "", changedAt: 0, seen: false })) };
   let timer = 0, turn = 0, inFlight = false, dueAt = 0;
+  let compactSupported = /^https?:$/.test(location.protocol);
+  const summaries = new Array(REPOS.length);
 
   const emit = (event) => {
     for (const fn of subscribers) fn(event);
   };
 
+  // Hosted Workers answer a bounded summary. Source/file and static hosting retain the public GitHub feed.
+  const compact = async (index, cutoff, now) => {
+    if (!compactSupported) return null;
+    const previous = summaries[index], headers = {};
+    if (previous?.etag) headers["if-none-match"] = previous.etag;
+    const res = await fetch(`/api/totems/${index}`, { headers });
+    if (res.status === 404 || res.status === 405 || res.status !== 304 && !res.headers.get("content-type")?.includes("application/json")) {
+      compactSupported = false;
+      return null;
+    }
+    // The Worker's limit is GitHub's budget for Cloudflare's shared addresses, not this visitor's: read GitHub
+    // directly this turn, as a page without the Worker always does.
+    if (res.status === 403 || res.status === 429 || res.status === 503) return null;
+    let summary;
+    if (res.status === 304 && previous) summary = previous.value;
+    else {
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      summary = await res.json();
+      if (summary?.repo !== REPOS[index].repo || !Number.isSafeInteger(summary.number) || summary.number < 0
+        || !Number.isSafeInteger(summary.mergedAt) || summary.mergedAt < 0
+        || !!summary.number !== !!summary.mergedAt) throw new Error("unexpected merge summary");
+      summaries[index] = { value: summary, etag: res.headers.get("etag") || "" };
+    }
+    return summary.mergedAt > cutoff && summary.mergedAt <= now ? summary : { number: 0, mergedAt: 0 };
+  };
+
   const poll = async (index) => {
     const now = Date.now(), cutoff = now - RECENT;
     let latest = null, mergedAt = 0;
-    for (let page = 1; ; page++) {
+    const summary = await compact(index, cutoff, now);
+    if (summary) {
+      mergedAt = summary.mergedAt;
+      latest = summary.number ? { number: summary.number, html_url: `https://github.com/${REPOS[index].repo}/pull/${summary.number}` } : null;
+    }
+    for (let page = 1; !summary; page++) {
       const res = await fetch(`${API}${REPOS[index].repo}/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=${page}`);
       if (res.status === 403 || res.status === 429) {
         const reset = Number(res.headers.get("x-ratelimit-reset"));

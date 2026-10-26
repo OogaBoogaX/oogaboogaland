@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 import { externalizeAudio } from "./distribution-audio.mjs";
 import { externalizeModules } from "./distribution-modules.mjs";
+import { writeTerrainWorker } from "./distribution-terrain.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const out = resolve(root, process.argv[2] || "untracked/site");
@@ -32,7 +33,7 @@ if (process.argv.includes("--worker-page")) {
   shell = shell.replace(tag, '<html lang="en" data-worker-page="1">');
 }
 if (process.argv.includes("--audio-assets")) shell = externalizeAudio(shell, root, out);
-shell = externalizeModules(shell, out, deferred, block);
+shell = externalizeModules(shell, out, deferred, block, writeTerrainWorker(root, out));
 if (shell.split("</title>").length !== 2 || shell.split("</head>").length !== 2) throw new Error("oogaboogaland.html: expected one <title> and one </head>");
 
 const esc = (text) => text.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");

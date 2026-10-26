@@ -1478,7 +1478,9 @@
         geo.faces.push({ i: [rings[2][e], tip, rings[2][f]], color: GRASS_TONES[n % 2 ? 2 : 3], emissive: 0 });
       }
     }
-    return Object.assign(noShadow(geo), { sway: 0.3 });
+    Object.assign(noShadow(geo), { sway: 0.3 });
+    // This final tuft is decoration only; it has no collision shell or cutaway readers.
+    return BL.compactGeometry?.enabled ? BL.compactGeometry.pack(geo, { immutable: true, renderOnly: true }) : geo;
   });
   const grass = grassTuft;
   // The lawn's instanced batch takes the same tuft as its own geometry object, so it never shares a GPU record

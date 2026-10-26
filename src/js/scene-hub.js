@@ -7,6 +7,7 @@
   const { JET_SPEED, JET_RISE, JET_FUEL_SECONDS, JET_MOVE_SECONDS } = crewMod;
   const { DROP_HEIGHT } = pileMod;
   const params = new URLSearchParams(location.search);
+  const LAZY_BEDDING = params.get("lazyhub") === "1";
   const SEED = 1;
   const DEG = Math.PI / 180;
   const COARSE = window.matchMedia("(pointer: coarse)").matches;
@@ -404,7 +405,7 @@
   const CLANKER_HIT = { node: null, owner: null, type: "none", distance: Infinity, x: 0, y: 0, z: 0 };
   const CLANKER_CAVITY = { floor: 0, ceiling: 0, caveIndex: 0 };
   const JETPACK_HUD_STATE = { owned: false, equipped: false, fuel: 1, blocked: false };
-  let enteringTween = null, factoryDeparting = false, bifrostDeparting = false, bifrostHeld = false;
+  let enteringTween = null, factoryDeparting = false, bifrostDeparting = false, factoryHeld = false;
   // The walk through the Lightning Factory's shield (factoryGlide): which way, the Ooga it walks, how long it has
   // walked, where the Ooga stood the frame before, whether it is through, and the shield's light over the view.
   // Coming back out, the Ooga walks on until it is OUT_WALK metres out of the mouth.
@@ -1868,7 +1869,7 @@
     solids.add(room);
     const benches = [];
     for (const x of [-2.6, 2.6]) for (const z of [-0.55, 0.55]) benches.push({ kind: "bench", x, y: floor + 0.58, z, floor, ry: Math.atan2(-x, -z), sitter: null, walkAt: { x: x - Math.sign(x) * 0.85, z } });
-    const entrances = [], lights = [], mattresses = [], roomSigns = [], rampMarkers = [];
+    const entrances = [], lights = [], mattresses = [], roomSigns = [], rampMarkers = [], lazyBeds = [];
     FLY.yMin = basement.floor - 1;
     const addEntrance = (node, roomIndex, lower, ramp = false) => {
       node.sightSolid = true;
@@ -1889,8 +1890,8 @@
       const entrance = createNode({ position: { x: cave.entrance.x, y: cave.floor, z: cave.entrance.z }, rotation: { x: 0, y: -angle, z: 0 }, scale: { x: (cave.corridorWidth ?? cave.width - 1.3) / 3.86, y: 1, z: 1 }, geometry: headquartersModels.roomEntrance(i) });
       addEntrance(entrance, i, level === basement);
       const dimensions = headquartersModels.MATTRESS, across = -(cave.width / 2 - dimensions.wallInset - dimensions.width / 2), along = cave.depth / 2 - dimensions.wallInset - dimensions.depth / 2;
-      const sx = Math.sin(angle), cx = Math.cos(angle), geometry = headquartersModels.mattress(cave);
-      const sign = createNode({ position: { x: cave.entrance.x - sx * 0.28, y: cave.floor + 3.78, z: cave.entrance.z + cx * 0.28 }, rotation: { x: 0, y: -angle, z: 0 }, geometry: headquartersModels.roomSign(cave), matrixSignLiving: true });
+      const sx = Math.sin(angle), cx = Math.cos(angle), geometry = LAZY_BEDDING ? headquartersModels.mattressPlaceholder(cave) : headquartersModels.mattress(cave);
+      const sign = createNode({ position: { x: cave.entrance.x - sx * 0.28, y: cave.floor + 3.78, z: cave.entrance.z + cx * 0.28 }, rotation: { x: 0, y: -angle, z: 0 }, geometry: headquartersModels.roomSign(cave, LAZY_BEDDING), matrixSignLiving: true });
       addChild(root, sign);
       placed.push(sign);
       const hanging = { roomIndex: i, basement: level === basement, room: cave, node: sign, sr: -sx, cr: cx, velocity: 0, hits: 0, contacts: 0 };
@@ -1908,6 +1909,7 @@
         -0.45, dimensions.surface, dimensions.pillowZ - 0.25, 0.45, dimensions.pillowTop, dimensions.pillowZ + 0.25]),
         walkAt: { x: node.position.x + cx * side, y: cave.floor, z: node.position.z + sx * side }
       });
+      if (LAZY_BEDDING) lazyBeds.push({ bed: mattresses[mattresses.length - 1], ready: false, failed: false });
     }
     for (const ramp of basement.ramps) {
       const p = ramp.entrance;
@@ -1967,7 +1969,7 @@
     // The hearth is the only shared HQ point light.
     // Windows and ramp torches stay physical/emissive; no camera-proximity light spills into an unclaimed room.
     const sources = [hearth];
-    return { node: room, entrances, mattresses, roomSigns, rampMarkers, benches, fireHazards, lights, sources, hearth, firepit, rooms: island.headquarters.rooms, windows: island.headquarters.windows, ramps: island.headquarters.ramps, openFloor: island.headquarters.room, basement, sleepMarksVisible };
+    return { node: room, entrances, mattresses, roomSigns, rampMarkers, lazyBeds, benches, fireHazards, lights, sources, hearth, firepit, rooms: island.headquarters.rooms, windows: island.headquarters.windows, ramps: island.headquarters.ramps, openFloor: island.headquarters.room, basement, sleepMarksVisible };
   };
   // An invisible one-way staircase continues from the dock into the sky. It
   // only arms from a grounded step off the outer deck: arriving from the air,
@@ -2085,7 +2087,7 @@
   // The Mempool island off the east rim: a rainforest round a lake, a vine bridge, and the tunnels and chamber
   // under the lake. Everything solid, so an Ooga walks across, in and all the way down without a scene change.
   // `pool-layout.js` says where everything is; the scatter is claimed off the crossing.
-  const buildMempoolIsland = () => {
+  const buildMempoolIsland = function* (slice) {
     const P = poolModels, S = P.SITE, DIR = P.DIR, L = BL.poolLayout;
     // How much ground an animal keeps to itself, measured against each plant's own footprint.
     const BEAST_CLEAR = 1.3;
@@ -2301,6 +2303,7 @@
       planted.push({ x, z, ground: L.membraneY(r), pool: true });
       trunks.push({ x, z, r: 0.6 });
     }
+    yield* pause(slice);
     for (let i = 0; i < 3600 + planted.length; i++) {
       const fixed = i < planted.length ? planted[i] : null;
       const a = rand() * Math.PI * 2, r = Math.sqrt(inner + rand() * (outer - inner)), roll = rand();
@@ -2340,6 +2343,7 @@
         for (const t of [-1.2, 0, 1.2]) obstacles.push({ x: x + ax * t * k, z: z + az * t * k, r: 0.4 * k });
       }
     }
+    yield* pause(slice);
     // Broad leaves, fern fans and flowering thickets form a middle storey beneath the trees. A separate
     // seed leaves the established trunks, animal perches and small forest scatter where they were.
     const foliageRand = mulberry32(6417), undergrowth = P.UNDERGROWTH.map((build) => build()), thickets = [];
@@ -2437,8 +2441,10 @@
       beast.owner = addProp(beast.kind, beast.node, beast.wx, beast.wz, 0.7);
       beasts.set(beast.node, beast);
     }
+    yield* pause(slice);
     // The water, and the paintings on the chamber's wall, each a pick target that opens the board behind it.
     const water = BL.poolWater.create({ site, renderer, seaY: SEA_Y - place.y });
+    yield* pause(slice);
     for (const owner of water.picks) { owner.weaponType = "none"; addTarget(owner.node, owner); }
     const fillParam = DEBUG ? params.get("poolfill") : null;
     if (fillParam !== null && fillParam.trim() !== "" && Number.isFinite(Number(fillParam))) water.previewFill(Number(fillParam));
@@ -2627,12 +2633,15 @@
   };
   // The Timechain Sphere off the southwest rim: the ball, its bridge and its doorway, whose keypad and crossing
   // (timechain-gate.js) open its nine rooms, a scene of their own. Only the outside is the island's.
-  const buildTimechainIsland = () => {
+  const buildTimechainIsland = function* (slice) {
     const T = BL.timechainModels, site = T.build(island), p = site.place;
+    yield* pause(slice);
     const cos = Math.cos(p.ry), sin = Math.sin(p.ry), worldX = (x, z) => p.x + x * cos + z * sin, worldZ = (x, z) => p.z - x * sin + z * cos;
     addChild(root, site.node);
     placed.push(site.node);
+    yield* pause(slice);
     for (const node of [site.shell, site.entrance, site.bridge, site.plug]) solids.add(node);
+    yield* pause(slice);
     // Match the visible grass tiles, not the bounding sphere around the cliff.
     for (const [kind, node, radius] of [["timechainentrance", site.entrance, 3], ["timechainbridge", site.bridge, T.SITE.width / 2 + 0.2], ["timechainkeypad", site.keypad, 0.6]]) {
       const x = node.position.x, z = node.position.z;
@@ -2664,11 +2673,12 @@
   // played Ooga into the chamber, and their lamps with the arch's. The bridge and its head, the rock and the gate are
   // solid; the field, the deck's light and the dressing are not. The field and its window hang in their own group straight
   // under the root, in the portal's frame, as the factory's do.
-  const buildBifrostIsle = (archLamp) => {
+  const buildBifrostIsle = function* (archLamp, slice) {
     const I = BL.bifrostIsle, site = I.site(I.spot(island)), p = site.portal;
     for (const node of site.roots) addChild(root, node);
     placed.push(...site.roots);
     addTerrainSection(site.islet.geometry.cutawaySource, site.node, site.node.position.y);
+    yield* pause(slice);
     // Architecture, as the cave rims are: a walker climbs its stairs rather than shouldering past them as a tall prop.
     for (const node of site.solids) {
       node.sightSolid = true;
@@ -2744,7 +2754,7 @@
   };
   // Rejection sampling: scatter props, keeping off paths and mouths.
   const SPREAD_CANDIDATES = 40, SPREAD_TRIES = 1500;
-  const scatter = () => {
+  const scatter = function* (slice) {
     const rand = mulberry32(SEED);
     const routeOverlaps = (x, z, radius) => island.path.overlaps(x, z, radius) || island.overlapsStairs(x, z, radius);
     const treeGroundClear = (geometry, x, z, y) => {
@@ -2867,7 +2877,9 @@
         }
       }
     };
+    yield* pause(slice);
     cliff(40, 1.4, 3, "tree", (n) => hubModels.tree(n % 4 === 3 ? 3 : n % 3), true);
+    yield* pause(slice);
     cliff(30, 1, 0.5, "bush", (n) => hubModels.bush(n % 3));
     spread([
       { kind: "bush", count: 30, radius: 0.7, geometryAt: (n) => hubModels.bush(n % 3) }
@@ -5409,6 +5421,7 @@
     hud.tooltip.show(owner.sequence.label, screen.x, screen.y, null, false, true);
   };
   const showHoverTooltip = (hit, p) => {
+    if (hit && (hit.owner.kind === "cave" || hit.owner.kind === "cave-sign")) BL.deferred.prefetchScene(hit.owner.slot.scene);
     pileHovered = hit?.owner.kind === "pile";
     if (!pileHovered) hud.setPileValueVisible(false);
     poolBlockHovered = hit?.owner.kind === "poolblock" ? hit.owner : null;
@@ -5695,6 +5708,10 @@
     const p = player.root.position, sr = Math.sin(m.ry), cr = Math.cos(m.ry), shield = BL.factoryModels.SHIELD_Z;
     const along = (p.x - m.x) * sr + (p.z - m.z) * cr, across = (p.x - m.x) * cr - (p.z - m.z) * sr;
     const feet = p.y - player.baseY - m.floorY;
+    if (factoryHeld) {
+      if (along > shield || along < shield - 2 || Math.abs(across) > 2.4 || feet < o.floorY - 0.12 || feet >= o.ceilingY) factoryHeld = false;
+      return;
+    }
     if (w.phase) return factoryGlide(dt, player, along, across, feet);
     // Heading in on its feet down the tunnel's last stretch, the walk takes the Ooga through; a jump (a view preset,
     // a respawn), further than a sprint goes in the frame, is no walk.
@@ -5818,9 +5835,7 @@
     const sr = Math.sin(p.ry), cr = Math.cos(p.ry);
     const along = (at.x - p.x) * sr + (at.z - p.z) * cr, across = (at.x - p.x) * cr - (at.z - p.z) * sr;
     const feet = at.y - player.baseY - p.floorY;
-    if (along > p.fieldZ || along < p.fieldZ - 2 || Math.abs(across) > p.halfW || feet < o.floorY - 0.12 || feet >= o.ceilingY) { bifrostHeld = false; return; }
-    // A crossing the chamber could not be opened for waits until the Ooga has stepped back out of the field.
-    if (bifrostHeld) return;
+    if (along > p.fieldZ || along < p.fieldZ - 2 || Math.abs(across) > p.halfW || feet < o.floorY - 0.12 || feet >= o.ceilingY) return;
     b.phase.ripples.pulse(across, feet + 1, 0);
     entering = bifrostDeparting = true;
     world.pilot = player.traits.name;
@@ -7264,7 +7279,6 @@
       const lamp = addLamp({ glow: 0, flare: 0, visible: true }, light, spot.x, L.apex * 0.35, spot.z, true, Infinity, `totem:${i}`);
       totems.push({ owner, runes, rings, features, flames, light, lamp, flare: 0, live: 0, pattern: BL.totemGlow.pattern(feed.REPOS[i].word), eyeTop: Math.max(...L.eyes.map((e) => e[1])) });
     });
-    totemUnsub = feed.subscribe(onTotem);
   };
   const updateTotems = (dt, elapsed) => {
     const at = Date.now(), repos = BL.totemFeed.state.repos;
@@ -7328,8 +7342,66 @@
     const repo = BL.totemFeed.REPOS[o.totem], url = BL.totemFeed.state.repos[o.totem].url;
     window.open(url || `https://github.com/${repo.repo}/pulls?q=is%3Apr+is%3Amerged`, "_blank", "noopener,noreferrer");
   };
+  let prefetchAt = 0;
+  let lazyBedJob = null;
+  const stopLazyBedding = () => {
+    const job = lazyBedJob;
+    lazyBedJob = null;
+    if (!job) return;
+    job.controller.abort();
+    if (job.handle) {
+      if (job.idle) cancelIdleCallback(job.handle);
+      else clearTimeout(job.handle);
+      job.handle = 0;
+    }
+  };
+  const updateLazyBedding = () => {
+    if (!LAZY_BEDDING || lazyBedJob || !headquarters) return;
+    const p = pilot.player ? pilot.player.root.position : camera.position;
+    let selected = null, distance = 18 * 18;
+    for (const item of headquarters.lazyBeds) {
+      if (item.ready || item.failed) continue;
+      const bed = item.bed, dx = p.x - bed.x, dy = p.y - bed.y, dz = p.z - bed.z, d = dx * dx + dy * dy + dz * dz;
+      if (d < distance) { selected = item; distance = d; }
+    }
+    if (!selected) return;
+    const job = lazyBedJob = { item: selected, controller: new AbortController(), owner: headquarters, handle: 0, idle: typeof requestIdleCallback === "function" };
+    const start = () => {
+      job.handle = 0;
+      if (lazyBedJob !== job || job.controller.signal.aborted) return;
+      const steps = headquartersModels.mattressSteps(selected.bed.room, { until: 0, budget: 8, work: 0 });
+      BL.buildTasks.run(steps, "hub", job.controller.signal).then(geometry => {
+        if (lazyBedJob !== job || job.controller.signal.aborted || headquarters !== job.owner) return;
+        const bed = selected.bed, old = bed.node.geometry;
+        bed.node.geometry = geometry;
+        Object.assign(bed, geometry.mattress);
+        selected.ready = true;
+        try { refreshObjectGuides(); }
+        finally { renderer.releaseGeometry(old); }
+      }).catch(() => { if (!job.controller.signal.aborted) selected.failed = true; }).finally(() => {
+        if (lazyBedJob === job) lazyBedJob = null;
+      });
+    };
+    job.handle = job.idle ? requestIdleCallback(start, { timeout: 250 }) : setTimeout(start, 0);
+  };
   const update = (dt, elapsed) => {
     if (ghosts) ghosts.unshake(camera); // HALLOWEEN: last frame's quake comes off before anything reads the camera
+    // Four cheap proximity reads a second, without building a visit or changing its actor/account state.
+    if (elapsed >= prefetchAt) {
+      prefetchAt = elapsed + 0.25;
+      const p = pilot.player ? pilot.player.root.position : camera.position;
+      for (let i = 0; i < caves.slots.length; i++) {
+        const slot = caves.slots[i];
+        if (!slot.scene || slot.status !== "open") continue;
+        for (let j = 0; j < island.mouths.length; j++) {
+          const mouth = island.mouths[j];
+          if (mouth.id !== slot.id) continue;
+          const dx = p.x - mouth.x, dy = p.y - mouth.floorY, dz = p.z - mouth.z;
+          if (dx * dx + dy * dy + dz * dz <= 225) BL.deferred.prefetchScene(slot.scene);
+          break;
+        }
+      }
+    }
     if (lawn && lawn.version !== island.path.version) layLawn();
     if (life) { life.gulls.update(elapsed); life.shore.update(elapsed); life.boats.update(elapsed); }
     now = elapsed;
@@ -7494,6 +7566,7 @@
     }
     dockStairs.update(dt, pilot.player);
     updateRoomSigns(dt);
+    updateLazyBedding();
     pile.update(dt);
     const player = pilot.player;
     if (player && !pilot.poseHeld && player.root.position.y - player.baseY < ABYSS_RESPAWN_Y && abyssAt(player.root.position.x, player.root.position.z, player.root.position.y - player.baseY)) {
@@ -9668,7 +9741,7 @@
     if (!uiGuideObjects) uiGuideObjects = collectViewObjects();
     return !objectGuides.actorVisible(cave, guideSegmentClear);
   };
-  const prepareCoveredView = (overlayCanvas) => {
+  const prepareCoveredView = function* (overlayCanvas, slice) {
     const actor = crew.list.find((cave) => cave.root.visible);
     if (!actor) return;
     // Exercise the first covered-view paths behind the loading curtain. The
@@ -9682,12 +9755,16 @@
     setVec(view.position, p.x, p.y + 8, p.z + 50);
     try {
       preparingGuideActor = actor;
-      const objects = objectGuides.collect(actor, p.x, p.y, p.z, view, aspect);
+      const objects = objectGuides.collect(actor, p.x, p.y, p.z, view, aspect, null, 0, true);
+      while (objects.bakeNext()) yield* pause(slice);
+      objects.ensureContours();
+      yield* pause(slice);
       const guides = sightGuides.update(actor, null, objects, view, aspect, 0.25, true);
       const observer = guides.observer;
       guides.structure = rockGuides.select(p.x, p.y - actor.baseY, p.z, view.position.x, view.position.y, view.position.z);
       guides.structures = rockGuides.updateSurfaces(observer[19], observer[20], observer[21], view, 0.25, actor, objectGuides.perceptionClear, objects.occlusionVersion, objects.perceptionVersion);
       cameraCover.draw(view, actor.root, false, true, cameraRockAt, cameraRockMaterialAt, guides, 0.25);
+      yield* pause(slice);
     } finally {
       preparingGuideActor = null;
       const guides = sightGuides.update(null, null, null, camera, aspect, 0, false);
@@ -9934,6 +10011,7 @@
   };
   const onTotem = (event) => { if (event.fresh) flareTotem(event.index); };
   const suspendHub = () => {
+    stopLazyBedding();
     // A kept island ends its hunt and its game as a full leave does, and lowers the ring at once.
     if (ghostEntry) { ghostEntry.dispose(); ghostEntry = null; }
     if (ghosts) { ghosts.dispose(); ghosts = null; }
@@ -10013,7 +10091,7 @@
     ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
     glCanvas = ctx.canvas; overlayCanvas = ctx.overlay;
     heldHub = false;
-    factoryDeparting = bifrostDeparting = bifrostHeld = entering = false;
+    factoryDeparting = bifrostDeparting = factoryHeld = entering = false;
     Object.assign(factoryWalk, { phase: 0, cave: null, seen: false, through: false, beat: 0, grab: false, still: 0, hold: 0, settle: false });
     world.islandKeep = null;
     if (factoryMouth) factoryMouth.snap = false;
@@ -10086,13 +10164,78 @@
     updatePoolEffectsActivity();
     createGhostEntry();
   };
-  const enter = (ctx) => {
+  // Prepare only raw character rigs: the published crew, its stable roster order, input, health and NPC/remote
+  // registration are still created together by enter. No partly populated actor registry reaches a live scene.
+  const preparedCharacters = models.scopedMap(), characterLocations = new Map();
+  const rememberCharacterLocations = () => {
+    if (!crew) return;
+    characterLocations.clear();
+    for (const cave of crew.list) {
+      const p = cave.root.position;
+      characterLocations.set(cave.traits.name, { x: p.x, y: p.y, z: p.z });
+    }
+  };
+  // A released hub comes back to an island its departure dropped, and to every hub-scoped model cache with it. The pure
+  // builds run here in slices behind the fade, not in the swap frame (seconds on a phone): the island, the Mempool
+  // island's meshes, the rock guides' walls (BL.rockGuides.prepareSteps) and every Ooga's rig. What is left for enter
+  // is placing the props, the crew and the outline registry. Boot (unless ?lazyhub=1) and a kept hub skip it.
+  const prepareHubSteps = function* (ctx) {
+    if (heldHub || ctx.from === "hub" || !ctx.from && !LAZY_BEDDING) return null;
+    preparedCharacters.clear();
+    const factory = caves.slots.find(slot => slot.status === "open" && slot.scene === "factory");
+    const options = { seed: SEED, roofHole: factory ? { id: factory.id, ...BL.factoryModels.ROOF_TUBE } : null };
+    const slice = { until: 0, budget: BL.buildTasks.SLICE_MS, work: 0 };
+    if (!terrain.hasIsland(options)) yield* terrain.islandSteps(options, slice);
+    yield* poolModels.prepareSteps();
+    yield* BL.rockGuides.prepareSteps(terrain.island(options), slice);
+    // The Mempool island's walked meshes' collision trees, and ₿IFRÖST's islet, each a task of its own.
+    for (const geometry of [poolModels.islet(), poolModels.rampFloor(), poolModels.membrane(), poolModels.crossing(), poolModels.bridge()]) {
+      yield;
+      BL.solidProps.prepare(geometry);
+    }
+    if (BL.scenes.bifrost) yield* BL.bifrostIsle.prepareSteps();
+    const roster = contributors.activeRoster, point = camera ? camera.position : PILE_VIEW.target;
+    const requested = ctx.world.pilot || params.get("character")?.trim().toLowerCase();
+    const distance = contributor => {
+      if (requested && contributor.name.toLowerCase() === requested.toLowerCase()) return -Infinity;
+      const p = characterLocations.get(contributor.name);
+      return p ? (p.x - point.x) ** 2 + (p.y - point.y) ** 2 + (p.z - point.z) ** 2 : Infinity;
+    };
+    // Last-visit positions give an exact nearest-first priority on a rebuild. Cold boot has no placed actors yet;
+    // its requested driver leads, then stable roster order. A cold spatial spawn planner remains a separate step.
+    const nearest = roster.map((contributor, index) => ({ contributor, index, distance: distance(contributor) }))
+      .sort((a, b) => a.distance - b.distance || a.index - b.index).slice(0, 10).map(row => row.contributor);
+    const first = new Set(nearest), ordered = nearest.concat(roster.filter(contributor => !first.has(contributor)));
+    for (const contributor of ordered) {
+      preparedCharacters.set(contributor.name, models.caveman(contributors.traitsFor(contributor.name)));
+      yield;
+    }
+    return null;
+  };
+  const takePreparedCharacter = (name) => {
+    const cave = preparedCharacters.get(name);
+    preparedCharacters.delete(name);
+    return cave || models.caveman(contributors.traitsFor(name));
+  };
+  // Half the construction slice: an enter's steps are coarser than a builder's, and a slice runs to its next pause.
+  const ENTER_SLICE_MS = 20;
+  const pause = function* (slice) {
+    if (performance.now() < slice.until) return;
+    yield;
+    slice.until = performance.now() + ENTER_SLICE_MS;
+  };
+  // The island's whole visit, built in slices when the director lets it (`enterSteps`, a released hub's return) and
+  // in one go otherwise (`enter`: boot, and a kept hub's resume, which never pauses). `pause` gives the frame back once
+  // a slice has run its budget; between slices nothing of the visit runs, and the director holds the canvas's input.
+  const enterSteps = function* (ctx) {
+    const slice = { until: performance.now() + ENTER_SLICE_MS };
+    prefetchAt = 0;
     reuseHub = ctx.hubPolicy === "keep";
     if (heldHub) { resumeHub(ctx); return; }
     ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
     poolEffectsActive = false; poolEffectsTime = 0;
     glCanvas = ctx.canvas;
-    factoryDeparting = bifrostDeparting = bifrostHeld = false;
+    factoryDeparting = bifrostDeparting = factoryHeld = false;
     Object.assign(factoryWalk, { phase: 0, cave: null, seen: false, through: false, beat: 0, grab: false, still: 0, hold: 0, settle: false });
     world.islandKeep = null;
     overlayCanvas = ctx.overlay;
@@ -10151,7 +10294,9 @@
       onOpen: () => { pilot.setActive(false); pilot.controls.reset(); input.reset(); hud.tooltip.hide(); },
       onClose: () => { pilot.setActive(true); pilot.controls.reset(); input.reset(); }
     });
+    yield* pause(slice);
     terrainRampRoof = BL.terrainCutaway.createRampRoof(island.cutawaySource, island.geometry, renderer.releaseGeometry);
+    yield* pause(slice);
     debugMovementTerrain = place(terrainRampRoof.baseGeometry, 0, 0, 0, 0);
     addChild(root, terrainRampRoof.node);
     placed.push(terrainRampRoof.node);
@@ -10186,6 +10331,7 @@
     // While ₿IFRÖST is open its arch stands over the pass in the old gate's place, at the head of Bifröst; its stone is
     // the gate, and its gold, banners, lanterns and lit name dress it off the outlines.
     const arch = BL.scenes.bifrost ? BL.bifrostGate.landmark() : null;
+    yield* pause(slice);
     const gate = place(arch ? arch.stone : hubModels.gate(), island.gate.x, island.gate.z, island.gate.ry);
     if (arch) gate.depthBias = -0.05; // Canvas also favours the dressed stone where it meets the ridge.
     solids.add(gate);
@@ -10208,12 +10354,16 @@
     TICKER_AT.y = gate.position.y + (arch ? arch.top + 1 : 6);
     GATE_VIEW.target.y = gate.position.y + (arch ? arch.middle : 2.5);
     const archLamp = arch ? dressArch(gate, arch) : null;
+    yield* pause(slice);
     headquarters = buildHeadquarters();
+    yield* pause(slice);
     const bedrolls = headquarters.mattresses;
     headquarters.sleepAnchors = bedrolls;
+    yield* pause(slice);
     for (const slot of caves.slots) {
       const m = island.mouths.find((mouth) => mouth.id === slot.id);
       addTarget(buildMouth(slot, m), { kind: "cave", slot, priority: 1 }, { radius: 2.6 });
+      yield* pause(slice);
       claim(m.x, m.z, 3.5);
       if (workCave(slot)) {
         workZones.push({ x: m.x, z: m.z, floor: m.floorY, sr: Math.sin(m.ry), cr: Math.cos(m.ry), active: false, half: 3.4, front: 5.8 });
@@ -10231,10 +10381,12 @@
       return { x, z, ry: Math.atan2(-x, -z) };
     }).filter(Boolean);
     buildRim();
-    mempoolIsland = buildMempoolIsland();
-    timechainIsland = buildTimechainIsland();
-    bifrostIsle = BL.scenes.bifrost ? buildBifrostIsle(archLamp) : null;
+    mempoolIsland = yield* buildMempoolIsland(slice);
+    yield* pause(slice);
+    timechainIsland = yield* buildTimechainIsland(slice);
+    bifrostIsle = BL.scenes.bifrost ? yield* buildBifrostIsle(archLamp, slice) : null;
     const firePos = buildFire();
+    yield* pause(slice);
     fire = lamps[lamps.length - 1];
     fire.centerLight = true;
     // The arch's lanterns pool warm light on its stone, ranked right after the fire so every tier keeps the fires first;
@@ -10264,13 +10416,17 @@
       // walks idled Oogas down to bed).
       oogatronUnsub = oogatronLive.subscribe(onOogatron);
     }
+    yield* pause(slice);
     buildTotems();
+    yield* pause(slice);
     addDressingLights();
     buildPilePosts();
     plantPalms();
     raiseIslets();
+    yield* pause(slice);
     buildLife();
-    scatter();
+    yield* pause(slice);
+    yield* scatter(slice);
     mempoolIsland.claimGround();
     timechainIsland.claimGround();
     if (bifrostIsle) bifrostIsle.claimGround();
@@ -10373,6 +10529,7 @@
     shared.onBodyMove = moveCampBody;
     mirrorCave.ripples = BL.mirrorRipples.create(mirrorCave.node);
     entropyLab.phase = BL.labPhase.create(entropyLab.group, entropyLab.mouth, entropyLab.opening);
+    yield* pause(slice);
     // The factory's shield crests in its emitters' cyan, and on WebGL its window into the hall, which shows the page's
     // one factory node: the island ticks it while it is here, as the hall does.
     if (factoryMouth) {
@@ -10387,6 +10544,7 @@
         factoryMouth.hall.debug.roof = factoryMouth.roofWindow.debug;
       }
     }
+    yield* pause(slice);
     // B.C.A.'s veil glows warm, a lamp's amber, over the office the gorillas suit up behind.
     if (bcaMouth) bcaMouth.phase = BL.labPhase.create(bcaMouth.group, bcaMouth.mouth, bcaMouth.opening, BCA_VEIL_Z, BCA_TINT);
     // ₿IFRÖST's field crests in the chamber's blue, and on WebGL shows the chamber through it; Heimdall keeps the bridge.
@@ -10437,7 +10595,9 @@
     shared.refreshMirrorObject = refreshMirrorObject;
     cameraCover = BL.cameraCover.create(ctx.overlay);
     headquarters.cameraCover = cameraCover.state;
+    yield* pause(slice);
     ensureRockGuides();
+    yield* pause(slice);
     // Reading the cue builds it, so any view or inspector needing one gets it without waiting on the timer.
     Object.defineProperty(headquarters, "rockGuides", { configurable: true, get: ensureRockGuides });
     mark("rockGuides");
@@ -10455,7 +10615,9 @@
       island, walkable: npcWalkable, pointAllowed: (x, z) => !npcClosedCaveAt(x, z) && !npcRampRoofAt(x, island.surfaceAt(x, z), z),
       surfaceAt: (x, z, y) => island.supportAt(x, z, y, 1e-6, null, PLAYER_RADIUS)
     });
+    yield* pause(slice);
     const sleepNavigation = headquarters.sleepNavigation = BL.headquartersSleep.create({ island, beds: bedrolls, walkable: sleepRouteClear, surfaceRoute: shared.npcPaths.route });
+    yield* pause(slice);
     // Overflow sleepers take the rainforest's fixed anchors in order, searched once a page and only as far as needed.
     // Only scenery belongs in this cached search: a passing Ooga must not permanently change the anchor order.
     const forest = BL.headquartersSleep.outdoor(mempoolIsland,
@@ -10558,6 +10720,8 @@
     // Signed-in visitors elsewhere, as the Oogas they drive; the crew walks round them.
     shared.outsideActors = () => remotes.actors();
     shared.outsideActorHeight = REMOTE_BODY_HEIGHT;
+    shared.characterModel = takePreparedCharacter;
+    yield* pause(slice);
     crew = shared.crew = crewMod.create(shared);
     remotes = BL.remotePlayers.create({
       root, crew, visible: remoteShown,
@@ -10601,6 +10765,7 @@
     BL.net.setHub(true);
     for (const cave of crew.list) crew.setJetpackOwnership(cave, true, hubModels.jetpack(), hubModels.jetFlame());
     mirrorCave.body = BL.mirrorBody.create(mirrorCave.node, crew.cavemen);
+    yield* pause(slice);
     for (const cave of crew.list) entropyLab.phase.body.track(cave.root, cave.traits.height * 2,
       Math.max(cave.headOpen.verts.length, cave.headClosed.verts.length));
     if (factoryMouth) for (const cave of crew.list) factoryMouth.phase.body.track(cave.root, cave.traits.height * 2,
@@ -10683,6 +10848,7 @@
       });
     }
     const labSiteIndex = shared.workSites.findIndex(site => site.mouth === entropyLab.mouth);
+    yield* pause(slice);
     clankers = BL.clankers.create({
       root, crew, animationInterval, sites: shared.workSites, loungeRoofs, loungeAreas, climbRoofs, chillZones, descentWalls,
       rageLandAt, rageEdgeAt, rageEdgeHeading, rageEdgeGoal, rageApproach, rageWarpRequired, rageWarpTarget, rageWarpPose, rageWarpHome, rageGrab, rageCaptive, rageRelease, rageThrow, rageDragClear, rageCarryClear, rageCaptureEligible, rageJumpPoseClear,
@@ -10710,6 +10876,7 @@
       canSmash: canClankerSmash, supportAt: clankerSupportAt, terrainSupportAt: clankerTerrainSupportAt,
       track: (entry) => trackMirrorObject(entry.root, 3.6, 4248), untrack: (entry) => untrackMirrorObject(entry.root)
     });
+    yield* pause(slice);
     shared.fireThreats = () => clankers.list;
     for (const entry of clankers.list) {
       entry.netBody = BL.net.gorillaBody(entry.owner.traits.name);
@@ -10813,7 +10980,9 @@
       else if (action.startsWith("weapon-") || action === "magazine-swap") pilot.weaponAction(action);
       else if (action === "reset-view") return (clankerPlay.active ? clankerPlay : pilot).resetCamera();
     });
+    yield* pause(slice);
     crew.refreshStates(true);
+    yield* pause(slice);
     unsubscribeActivity = contributors.subscribe(() => crew.refreshStates());
     // Sign-in returns to the bare page; a routed hub place (a shared link, the Sphere's keypad) is still honoured.
     const signedInArrival = ctx.from === null && (!ctx.place || ctx.place === "donate") && !!BL.net.ownCharacter();
@@ -10886,9 +11055,11 @@
     });
     platformGuides = headquarters.platformGuides = BL.pileGuides.create({ pile, altar, platform: true });
     mirrorGuides = mirrorCave.guides = BL.mirrorGuides.create({ mirror: mirrorCave });
+    yield* pause(slice);
     // Scenery may receive outlines, but only island rock activates the hidden character view.
     // Banana interiors keep their separate covered-view pass.
     objectGuides = headquarters.objectGuides = BL.objectGuides.create({ roots: root.children, crew, actorRoots: clankers.list.map((entry) => entry.root), exclude: [...terrainRampRoof.geometries, pathNode.geometry, mempoolIsland.site.ground.geometry], providers: [pileGuides, platformGuides, mirrorGuides], propsBlockActor: false, perceptionThrough: (actor) => inBananas(actor) ? pile.core : null });
+    yield* pause(slice);
     const guideOptions = { segmentClear: guideSegmentClear, objectClear: objectGuides.cameraClear, actorClear: objectGuides.perceptionClear, eyeAt: guideEyeAt, ownerBoundary: objectGuides.ownerBoundaryAt, ownerPerceived: objectGuides.perceived, ownerConcealed: objectGuides.concealed, ownerDistance: objectGuides.distance, ownerInView: objectGuides.inView, ownerClear: objectGuides.ownerClear, getProvider: objectGuides.getProvider };
     sightGuides = BL.sightGuides.create(guideOptions);
     bananaGuides = BL.sightGuides.create(guideOptions);
@@ -10897,9 +11068,6 @@
     headquarters.sightGuides = sightGuides.state;
     headquarters.bananaGuides = bananaGuides.state;
     mark("guides");
-    hintTimer = window.setTimeout(() => {
-      if (!pilot.player && !clankerPlay.active && !matrixControl.promptAction) hud.hint(COARSE ? "Drag to look · pinch to eye level · sticks to fly · tap a cave" : "Drag to look · scroll to eye level · WASD to fly · tap a cave to enter");
-    }, 1200);
     Object.assign(hubScene, {
       root, camera, input,
       debug: {
@@ -10991,6 +11159,7 @@
     if (POSITION_DEBUG) updatePositionDebug(true);
     updatePoolEffectsActivity();
     if (DEBUG_POOL_BLOCK) mempoolIsland.preview.block();
+    yield* pause(slice);
     // Tess greets a newcomer once a page and shows them round; nothing she does starts while the island is busy. She
     // greets only a visit that lands on the island's own view, not one sent to a place or walked back out of a cave.
     islandGuide = BL.hubGuide.create({
@@ -11000,29 +11169,44 @@
       // What her beam sweeps across on the totems' line: their eyes, west to east.
       targets: { totems: totems.map((t) => { const p = t.owner.node.position; return { x: p.x, y: p.y + t.eyeTop, z: p.z }; }).sort((a, b) => a.x - b.x) }
     });
+    yield* pause(slice);
     hubScene.debug.tess = islandGuide;
-    createGhostEntry();
+    // Tess wears every tier of her detail in her first frames, so each is on the GPU before she comes close: build
+    // them here, a mesh a slice, rather than in her first frame.
+    const tessTiers = new Set();
+    islandGuide.liveGeometry(tessTiers);
+    for (const geometry of tessTiers) { renderer.prepareGeometry(geometry); yield* pause(slice); }
     Object.defineProperty(hubScene.debug, "halloween", { get: () => ghosts ? ghosts.debug : ghostEntry && ghostEntry.debug, enumerable: true }); // HALLOWEEN
     mark("visibility-start");
     fx.warmVisibility(crew);
     fx.warmBlockers();
     mark("visibility");
     mark("covered-view-start");
-    prepareCoveredView(ctx.overlay);
+    yield* prepareCoveredView(ctx.overlay, slice);
     mark("covered-view");
+    // Remote hunt callbacks may attach the full game; subscribe only once every construction slice is complete.
+    createGhostEntry();
+    totemUnsub = BL.totemFeed.subscribe(onTotem);
+    hintTimer = window.setTimeout(() => {
+      if (!pilot.player && !clankerPlay.active && !matrixControl.promptAction) hud.hint(COARSE ? "Drag to look · pinch to eye level · sticks to fly · tap a cave" : "Drag to look · scroll to eye level · WASD to fly · tap a cave to enter");
+    }, 1200);
     if (DEBUG_GORILLA_MOVE) hud.toast("Gorilla movement debug · click a gorilla, then a destination");
   };
+  const enter = (ctx) => { const steps = enterSteps(ctx); while (!steps.next().done); };
   // The scene a departure was heading for could not be prepared (its deferred code did not arrive): the visitor stays on
   // the island, driving again, and nothing is photographed for a crossing that did not happen.
   const stay = () => {
-    bifrostHeld = bifrostDeparting;
+    factoryHeld = factoryDeparting;
     entering = factoryDeparting = bifrostDeparting = false;
-    factoryWalk.through = factoryWalk.grab = false; factoryWalk.still = 0;
+    factoryWalk.phase = 0; factoryWalk.seen = factoryWalk.through = factoryWalk.grab = false; factoryWalk.still = factoryWalk.hold = 0;
+    world.factoryCrossing = world.islandKeep = null;
     if (factoryMouth) factoryMouth.snap = false;
     if (bifrostIsle) bifrostIsle.snap = false;
     pilot.controls.reset(); input.reset(); pilot.setActive(true);
   };
   const leave = (destroy = false) => {
+    rememberCharacterLocations();
+    stopLazyBedding();
     if (reuseHub && !destroy) return suspendHub();
     heldHub = false; heldDebug = null;
     actorTransition.sourceRoot = actorTransition.sourceHead = null;
@@ -11219,14 +11403,14 @@
     if (!reuseHub) return null;
     const kept = new Set(), walk = (node) => { if (node.geometry) kept.add(node.geometry); for (const child of node.children) walk(child); };
     walk(root);
-    islandGeometry(kept);
+    hubScene.islandGeometry(kept);
     if (world.factoryKeep) for (const geometry of world.factoryKeep) kept.delete(geometry);
     return kept;
   };
   const liveGeometry = (set) => {
     // The Lightning Factory's meshes stay on the GPU while the island runs, so walking back in uploads nothing.
     if (world && world.factoryKeep) for (const geometry of world.factoryKeep) set.add(geometry);
-    islandGeometry(set);
+    hubScene.islandGeometry(set);
   };
   const islandGeometry = (set) => {
     if (islandGuide) islandGuide.liveGeometry(set);
@@ -11259,7 +11443,7 @@
     // The island reports its own zone as soon as an Ooga is driven (see `zoneOf`); until then it is nowhere.
     voiceZone: "none",
     micKey: true,
-    id: "hub", enter, update, overlay, onDonation, previewDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry, cachedGeometry,
+    id: "hub", enter, enterSteps, update, overlay, onDonation, previewDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry, cachedGeometry, islandGeometry,
     get retained() { return heldHub; }, get elapsed() { return now; },
     get retainedRoot() { return heldHub ? root : null; },
     // The Lightning Factory's builders stay warm while the island runs, since its shield walks straight in.
@@ -11279,5 +11463,6 @@
     }
   };
   BL.scenes = BL.scenes || {};
+  hubScene.buildSteps = prepareHubSteps;
   BL.scenes.hub = hubScene;
 })();
