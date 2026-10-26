@@ -1289,7 +1289,7 @@ const { npcPathWalkingProbe, npcCenterlineProbe, npcLowerTurnsProbe, npcStairPas
       c.walk = null; c.act.kind = "idle"; c.act.until = c.nextBuildAt = 1e12;
       c.hop = c.hopV = c.cheer = c.catchT = c.yawn = 0;
     }
-    let time = B.renderOpts.matrix.time;
+    let time = BL.scenes.hub.elapsed;
     try {
       for (const name of ["ring", "passing", "changed path", "fireplace", "jump recovery"]) {
         path.setRadius(B.altar.platformRadius);
@@ -1356,7 +1356,7 @@ const { npcPathWalkingProbe, npcCenterlineProbe, npcLowerTurnsProbe, npcStairPas
     for (const c of actors) { c.root.visible = false; c.override = c.state = "away"; c.work.phase = ""; B.crew.stopBurst(c); B.crew.stopReload(c, true); c.bedTravel.mode = ""; c.walk = null; c.act.kind = "idle"; c.act.until = c.nextBuildAt = 1e12; }
     cave.override = cave.state = "working";
     cave.root.visible = true;
-    let time = B.renderOpts.matrix.time;
+    let time = BL.scenes.hub.elapsed;
     try {
       for (let line = 0; line < path.centerlines.length; line++) {
         const points = [];
@@ -1428,7 +1428,7 @@ const { npcPathWalkingProbe, npcCenterlineProbe, npcLowerTurnsProbe, npcStairPas
       c.work.phase = ""; B.crew.stopBurst(c); B.crew.stopReload(c, true);
     }
     cave.root.visible = true;
-    let time = B.renderOpts.matrix.time;
+    let time = BL.scenes.hub.elapsed;
     try {
       for (const ramp of B.island.headquarters.ramps) for (const bed of B.headquarters.mattresses) for (const toBed of [true, false]) {
         const apron = B.island.mouths.find((m) => m.id === ramp.id).apron;
@@ -1472,7 +1472,7 @@ const { npcPathWalkingProbe, npcCenterlineProbe, npcLowerTurnsProbe, npcStairPas
       c.act.kind = "idle"; c.act.until = c.nextBuildAt = c.yawnAt = 1e12; c.hop = c.hopV = 0;
       c.work.phase = ""; B.crew.stopBurst(c); B.crew.stopReload(c, true);
     }
-    let time = B.renderOpts.matrix.time;
+    let time = BL.scenes.hub.elapsed;
     try {
       for (const [level, ramps] of [["HQ", B.island.headquarters.ramps], ["basement", B.island.headquarters.basement.ramps]]) {
         for (const ramp of ramps) for (const uphill of [true, false]) for (const offset of [0, 0.4, -0.4]) {
@@ -3037,15 +3037,32 @@ const { contributorActivityProbe } = (() => {
 const { npcLaneSpacingProbe, npcLaneCornerProbe, npcLaneCurveProbe, npcLabLaneProbe, npcRingJunctionProbe } = (() => {
   // Real crew walkers share a simple trail, isolating lane choice and following
   // distance from scenery, spawn timing, and the cave's firing formation.
-  const npcLaneSpacingProbe = ({ dt = 1 / 60, oscillating = false } = {}) => {
+  const npcLaneSpacingProbe = ({ dt = 1 / 60, oscillating = false, jittering = false } = {}) => {
     const BL = window.BL, S = BL.scene, root = S.createNode(), targets = new Set(), noop = () => {};
     const island = { path: { version: 0, debug: { active: false, ringCenterRadius: 0 }, centerlines: [[{ x: 0, z: -10 }, { x: 0, z: 10 }]] },
       surfaceAt: () => 0, isPath: (x, z) => Math.abs(x) < 1 && Math.abs(z) <= 10 };
-    const npcPaths = BL.npcPaths.create({ island, walkable: () => true });
+    const walkable = (_x, _z, x) => !jittering || x <= 0.05;
+    const npcPaths = BL.npcPaths.create({ island, walkable });
+    if (jittering) {
+      const target = npcPaths.target;
+      // Changing local hints can keep a walker moving inside one small patch
+      // while never advancing toward its destination. The crew must escape
+      // through ordinary swept steps, including when one side is blocked.
+      npcPaths.target = (cave, tx, tz) => {
+        const p = cave.root.position, path = cave.pathing;
+        if (Math.abs(p.x) < 0.3 && Math.abs(p.z + 6.75) < 0.3) {
+          path.tx = tx; path.tz = tz; path.count = path.index = 0;
+          path.targetX = 0; path.targetZ = -6.75 + (p.z >= -6.75 ? -0.12 : 0.12);
+        } else {
+          if (!path.count) path.tx = NaN;
+          target(cave, tx, tz);
+        }
+      };
+    }
     const crew = BL.crew.create({ root, world: { level: 0 }, npcPaths,
       input: { add: (node) => targets.add(node), remove: (node) => targets.delete(node) }, hud: { setRosterRow: noop },
       game: { state: { assignments: {}, inventory: [] } }, pile: { footprintEdge: 1, pileEdge: () => 1 },
-      viewYaw: 0, buildSpots: [], walkIn: { x: 0, z: 3 }, groundAt: () => 0, walkable: () => true,
+      viewYaw: 0, buildSpots: [], walkIn: { x: 0, z: 3 }, groundAt: () => 0, walkable,
       bedrolls: BL.contributors.roster.map((entry, i) => ({ x: 30 + i * 2, y: 0, z: 30, hidden: true })),
       fx: { say: noop, zzzAt: noop, burst: noop, puff: noop, spawnParticle: noop, damageNumber: noop }
     });
@@ -3064,20 +3081,21 @@ const { npcLaneSpacingProbe, npcLaneCornerProbe, npcLaneCurveProbe, npcLabLanePr
     };
     try {
       for (const cave of actors) { cave.root.visible = false; cave.state = "away"; cave.bedTravel.mode = ""; }
-      for (const name of oscillating ? ["oscillating"] : ["opposing", "following", "tied", "branching"]) {
+      for (const name of jittering ? ["jittering"] : oscillating ? ["oscillating"] : ["opposing", "following", "tied", "branching"]) {
         place(a, name === "tied" ? 0.35 : 0, -6, 0, 6);
         place(b, name === "tied" ? -0.35 : 0, name === "opposing" ? 6 : name === "tied" ? -6 : -6.75, 0, name === "opposing" ? -6 : 6);
         let frames = 0, gap = Infinity, waitFrames = 0, resumedGap = 0, laneError = 0, laneSamples = 0, laneRight = true;
         let waiting = false, branched = false, branchReleased = false, deadlocked = false, maxHop = 0, maxStep = 0, jumps = 0;
         const oldJumps = a.avoidance.navigation.jumps + b.avoidance.navigation.jumps;
-        const duration = name === "opposing" || oscillating ? 12 : 3;
+        const duration = name === "opposing" || oscillating || jittering ? 12 : 3;
+        if (jittering) { a.root.visible = false; a.state = "away"; a.walk = null; }
         if (oscillating) {
           // A real queue leader whose local avoidance jitters without opening
           // a gap must not reset the follower's progress timer every frame.
           a.puppet = true;
           b.root.position.z = -7.1;
         }
-        let stall = 0, maximumStall = 0;
+        let stall = 0, maximumStall = 0, blockedSteps = 0;
         const resets = b.progress.resets;
         while (frames++ < Math.ceil(duration / dt) && (a.walk || b.walk)) {
           const ax = a.root.position.x, az = a.root.position.z, bx = b.root.position.x, bz = b.root.position.z;
@@ -3091,6 +3109,7 @@ const { npcLaneSpacingProbe, npcLaneCornerProbe, npcLaneCurveProbe, npcLabLanePr
           }
           crew.update(dt, time += dt); S.updateWorld(root);
           const step = Math.hypot(b.root.position.x - bx, b.root.position.z - bz);
+          if (!walkable(bx, bz, b.root.position.x, b.root.position.z)) blockedSteps++;
           stall = b.walk && step < 0.001 ? stall + dt : 0;
           maximumStall = Math.max(maximumStall, stall);
           const separation = Math.hypot(a.root.position.x - b.root.position.x, a.root.position.z - b.root.position.z);
@@ -3110,7 +3129,7 @@ const { npcLaneSpacingProbe, npcLaneCornerProbe, npcLaneCurveProbe, npcLabLanePr
         }
         jumps = a.avoidance.navigation.jumps + b.avoidance.navigation.jumps - oldJumps;
         rows.push({ name, frames, gap, waiting, waitSeconds: waitFrames * dt, resumedGap, branched, branchReleased, deadlocked,
-          maxHop, maxStep, jumps, laneRight, laneError, laneSamples, maximumStall, resets: b.progress.resets - resets, passed: b.root.position.z > a.root.position.z + 1, arrived: !a.walk && !b.walk });
+          maxHop, maxStep, jumps, laneRight, laneError, laneSamples, maximumStall, blockedSteps, resets: b.progress.resets - resets, passed: b.root.position.z > a.root.position.z + 1, arrived: !a.walk && !b.walk });
       }
       result = { dt, rows };
     } finally { crew.dispose(); if (result) result.disposed = targets.size === 0 && root.children.length === 0; }
@@ -3208,7 +3227,7 @@ const { npcLaneSpacingProbe, npcLaneCornerProbe, npcLaneCurveProbe, npcLabLanePr
       c.act.kind = "idle"; c.act.until = c.nextBuildAt = 1e12; c.hop = c.hopV = 0;
     }
     cave.root.visible = true;
-    let time = B.renderOpts.matrix.time;
+    let time = BL.scenes.hub.elapsed;
     try {
       for (const direction of [1, -1]) {
         const start = direction > 0 ? points[0] : points.at(-1), end = direction > 0 ? points.at(-1) : points[0];
@@ -5080,7 +5099,7 @@ const workCaveTrips = async (b) => {
     const rows = actors.map(c => ({ name: c.contributor.name, outbound: [0, 0, 0], returned: [0, 0, 0],
       phase: "", stall: 0, maximumStall: 0, maximumStep: 0, missingRoutes: 0,
       resets: c.progress.resets, jumps: c.avoidance.navigation.jumps }));
-    let time = B.renderOpts.matrix.time, frames = 0;
+    let time = BL.scenes.hub.elapsed, frames = 0;
     try {
       for (; frames < 6000; frames++) {
         for (let i = 0; i < actors.length; i++) {
@@ -5119,7 +5138,12 @@ const workCaveTrips = async (b) => {
             || c.work.phase === "return" && c.work.index < 0 && !c.pileApproach
               && Math.hypot(p.x, p.z) > B.island.path.debug.ringLoadingRadius + 2;
           if (followsPath && !c.work.direct && !c.hop && !c.bedTravel.mode
-            && Math.abs(p.y - c.baseY) < 0.1 && c.pathing.count < 2) row.missingRoutes++;
+            && Math.abs(p.y - c.baseY) < 0.1 && c.pathing.count < 2) {
+            row.missingRoutes++;
+            if (!row.missingRoute) row.missingRoute = { frame: frames, position: { ...p }, phase: c.work.phase,
+              site: c.work.site, index: c.work.index, pileApproach: c.pileApproach,
+              path: { tx: c.pathing.tx, tz: c.pathing.tz, count: c.pathing.count }, recovery: { ...c.progress } };
+          }
         }
         if (rows.every(row => row.returned.every(count => count >= 2))) break;
       }
@@ -5134,6 +5158,12 @@ const workCaveTrips = async (b) => {
     r.sites.length === 3 && r.sites.every(Boolean) && r.rows.length === 5 && r.rows.every(row => row.outbound.every(n => n >= 2)
       && row.returned.every(n => n >= 2) && row.maximumStall < 5 && row.maximumStep <= 2.8 / 20 + 1e-6
       && row.missingRoutes === 0 && row.resets === 0 && row.jumps === 0), JSON.stringify({ failures: r.rows.filter(row => row.failure), ...r }));
+  for (const dt of [1 / 20, 1 / 60]) {
+    const jitter = await b.evaluate(`(${npcLaneSpacingProbe.toString()})(${JSON.stringify({ dt, jittering: true })})`);
+    record(`work movement cave trips: ${1 / dt}Hz moving-without-progress recovery walks around the blocked side without relocation`,
+      jitter.disposed && jitter.rows.length === 1 && jitter.rows.every(row => row.arrived && row.blockedSteps === 0
+        && row.maxStep <= 1.7 * dt + 1e-6 && row.maxHop === 0 && row.jumps === 0 && row.resets === 0), JSON.stringify(jitter));
+  }
   const rejoin = await b.evaluate(`(() => {
     const island = { path: { version: 0, debug: { active: false, ringCenterRadius: 0 }, centerlines: [[{ x: 0, z: 0 }, { x: 0, z: 10 }]] }, surfaceAt: () => 0, isPath: () => true };
     const clear = (x, z, tx, tz) => {
@@ -6482,7 +6512,7 @@ const hubLiveWake = { name: "hub live wake", why: "regression: live activity mus
       }
     };
     watch();
-    let time = B.renderOpts.matrix.time, frames = 0;
+    let time = BL.scenes.hub.elapsed, frames = 0;
     while (actors[0].bedTravel.mode === "waiting" && frames++ < 600) {
       B.crew.update(1 / 30, time += 1 / 30);
       BL.scene.updateWorld(scene.root);
@@ -8032,7 +8062,7 @@ const hubFall = { name: "hub fall", why: "rule: abyss falls return players and N
         puppets = B.crew.list.map(c => c.puppet), position = { ...npc.root.position }, yaw = npc.root.rotation.y, pending = [];
       const peer = B.crew.list.find(c => c !== a && c !== npc);
       const poolCount = BL.scenes.hub.stats().remotePlayers;
-      let time = B.renderOpts.matrix.time;
+      let time = BL.scenes.hub.elapsed;
       try {
         net.remotes.clear(); Math.random = () => 0.125;
         for (const c of B.crew.list) c.puppet = c !== npc;
@@ -8427,13 +8457,20 @@ const hubJumbotron = { name: "hub jumbotron", why: "rule: the island rotation st
     const ownerOnly = reader.users.length === 1 && reader.users[0].login === owner
       && reader.filters.users.length === 1 && reader.filters.users[0] === owner;
     reader.dispose(); restored.dispose(); j.refreshData(data);
-    return { count: j.count, captions, wrapped, differs: plain !== drafted,
+    const types = ["merge", "pr", "commit", "review", "issue", "comment"];
+    const tied = types.flatMap(type => ["b", "a"].map(key => ({ login: data.contributors[0].login,
+      repo: data.repos[0].name, type, occurred_at: "2026-01-01T00:00:00Z", event_key: type + "/" + key })));
+    const order = rows => BL.jumbotron.parseStats({ ...data, recent: rows }).recent.map(row => row.eventKey).join(",");
+    const expected = types.flatMap(type => [type + "/a", type + "/b"]).join(",");
+    const stableOrder = order(tied) === expected && order(tied.reverse()) === expected;
+    return { count: j.count, captions, wrapped, differs: plain !== drafted, stableOrder,
       filtered, ownerOnly, restoredOwner, bufferCreates, bufferDeletes, cycleStable, rewarm,
       stable: !!surfaceGeometry && surfaceNode.geometry === surfaceGeometry && surfaceGeometry.imageSurface.canvas === surfaceCanvas
         && surfaceGeometry.imageSurface.version > initialRevision };
   })()`);
   const orgBoards = ["commits", "prs", "reviews", "comments", "issues"].map((t) => "org · " + t);
   record("hub jumbotron: the island rotates org activity, readers filter repositories, and attributed users appear once with saved alias selections restored", r.count === 7 && r.captions[0] === "Recent activity" && r.captions[1] === "Org totals" && orgBoards.every((c, i) => r.captions[2 + i] === c) && r.wrapped === "Recent activity" && r.filtered && r.ownerOnly && r.restoredOwner, JSON.stringify(r));
+  record("hub jumbotron: equal-time recent events use merge, PR, commit, review, issue, comment priority and stable event keys", r.stableOrder, JSON.stringify({ stableOrder: r.stableOrder }));
   record("hub jumbotron: a draft PR changes the stable canvas ticker and exact chrome cycles without GPU buffer churn, including after records are pruned", r.differs && r.stable && r.bufferCreates === 0 && r.bufferDeletes === 0 && r.cycleStable && r.rewarm, JSON.stringify({ differs: r.differs, stable: r.stable, bufferCreates: r.bufferCreates, bufferDeletes: r.bufferDeletes, cycleStable: r.cycleStable, rewarm: r.rewarm }));
 } };
 const oogatronPopups = { name: "oogatron popups", why: "rule: Oogatron windows keep their displays apart during mouse or touch drags and remember their independent controls and layout after reload", run: async (b) => {
