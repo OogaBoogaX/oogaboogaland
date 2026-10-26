@@ -441,16 +441,17 @@
   let fireworks = null, fireworksAudio = null, fireworkDebugCount = 0;
   // The toast's count to the latest paid firework's launch, in scene seconds: its three lines are made when it is heard.
   const fireworkCountdown = { until: 0, shown: 0, texts: null };
-  // The stand that sells them (stand-models.js for the attraction, stand-kiosk.js for its screen), in the meadow before
-  // the Sphere's stairs: FIREWORK_STAND_ALONG out on the Sphere's bearing and FIREWORK_STAND_SIDE to its right, on open
-  // grass with its whole footprint clear of the paths, rock, trees and palms, its front (FIREWORK_STAND_FACING, a world
-  // heading) to the diagonal path from the stairs a couple of metres off, which the old spot stood on. Space at its
+  // The stand that sells them (stand-models.js for the attraction, stand-kiosk.js for its screen), with its back to the
+  // rock wall in front of the sealed cave at 9 o'clock (caves.js marks it, FIREWORK_STAND_SLOT), just right of the
+  // Sphere's stairs: FIREWORK_STAND_OUT out of the mouth, so its back wall stands clear of the rim and the seal, the
+  // booth over the sealed doorway, facing the island's middle down the path that leads to it. The rockets go up from
+  // the cliff top behind it (FIREWORK_LAUNCH). It is built only while that slot stays sealed. Space at its
   // counter (stand-models.js LAYOUT.use) or a tap on it or its menu opens its screen; TOP LAUNCHES ranks the fireworks
   // by launches over the API's last seven days (`purchaseCounts`), with the top buyers on its dialog's second page.
   // After a purchase, or a preview, the visitor's view glides up from the stand to the arc (FIREWORK_WATCH_UP over
   // it) and holds there while the sky is lit, then comes home. Within FIREWORK_STAND_NEAR its stars twinkle and sparks
   // now and then fly from the rockets' tips.
-  const FIREWORK_STAND_ALONG = 12, FIREWORK_STAND_SIDE = 9, FIREWORK_STAND_FACING = 0, FIREWORK_WATCH_UP = 9, FIREWORK_STAND_NEAR = 30;
+  const FIREWORK_STAND_SLOT = "fireworks", FIREWORK_STAND_OUT = 2.4, FIREWORK_WATCH_UP = 9, FIREWORK_STAND_NEAR = 30;
   const STAND_SPARKS = [models.particleGeometry("#ffc21a", 0.11, 1), models.particleGeometry("#57c7ff", 0.11, 1), models.particleGeometry("#d65cff", 0.11, 1)];
   const FIREWORK_ITEMS = [{ id: "pop", name: "OOGA POP", price: null }, { id: "bolt", name: "LIGHTNING BOLT", price: null }, { id: "mega", name: "MEGA BLAST", price: null }, { id: "show", name: "SHOW PACK", price: null }];
   // What the stand asks with no API behind it, where it only simulates: the prices the API is configured with.
@@ -11681,11 +11682,13 @@
     }
   };
   const buildFireworkStand = () => {
-    const S = fireworkStand, M = BL.standModels, L = M.LAYOUT, b = terrain.TIMECHAIN.bearing, ax = Math.sin(b), az = -Math.cos(b);
-    S.x = ax * FIREWORK_STAND_ALONG - az * FIREWORK_STAND_SIDE;
-    S.z = az * FIREWORK_STAND_ALONG + ax * FIREWORK_STAND_SIDE;
+    const S = fireworkStand, M = BL.standModels, L = M.LAYOUT;
+    const slot = caves.slots.find((entry) => entry.stand === FIREWORK_STAND_SLOT), mouth = slot && island.mouths.find((m) => m.id === slot.id);
+    if (!mouth || slot.status !== "dark") return;
+    S.ry = mouth.ry;
+    S.x = mouth.x + Math.sin(mouth.ry) * FIREWORK_STAND_OUT;
+    S.z = mouth.z + Math.cos(mouth.ry) * FIREWORK_STAND_OUT;
     S.y = island.surfaceAt(S.x, S.z);
-    S.ry = FIREWORK_STAND_FACING;
     const group = createNode({ position: { x: S.x, y: S.y, z: S.z }, rotation: { x: 0, y: S.ry, z: 0 } });
     addChild(root, group);
     placed.push(group);

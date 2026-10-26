@@ -80,10 +80,13 @@ Rockets leave the rock north of the Sphere's stairs (`FIREWORK_LAUNCH`, 23 m out
 its right). From the meadow below, every flight climbs too shallow to clear that 7 m wall; from its top, every flight
 to every slot clears the rock by more than 20 m and the Sphere's shell by more than 8.
 
-The stand stands in that meadow on open grass right of the stairs, its front to the path that runs down from them,
-on ground it claims so palms and scatter stay off it and off the strip before it (`FIREWORK_STAND_ALONG` and
-`FIREWORK_STAND_SIDE` in `scene-hub.js`). A visitor at its counter looks up the stairs to the show above the Sphere;
-the buyer's view glides up from the stand to watch, with the Sphere at the foot of the frame.
+The stand stands with its back to the rock wall in front of the sealed cave at 9 o'clock, just right of the
+Sphere's stairs, its booth over the sealed doorway and its front to the island's middle at the end of the path that
+leads to that mouth (`FIREWORK_STAND_OUT` out of it, in `scene-hub.js`). `caves.js` marks that slot as the stand's
+(`stand: "fireworks"`), and a check in the global tier keeps it sealed, since giving it a cave would put the stand
+in the doorway; the stand is built only while it stays sealed. Its ground and the strip before it are claimed, so
+palms and scatter stay off them. The rockets go up from the cliff top just behind it, and the buyer's view glides up
+from the stand to watch, with the Sphere at the foot of the frame.
 
 ## The stand
 
