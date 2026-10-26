@@ -3880,7 +3880,7 @@ const orbitFlow = async (b) => {
 // perf floor; `perf` runs the perf floor alone; `unit` (or nothing) runs only the global tier.
 // Two lanes limit concurrent WebGL boot pressure; four produced long startups
 // and a GPU context loss during the full suite.
-const SCENES = ["hub", "lab", "race", "drop", "orbit", "mine", "dsb", "factory", "bifrost", "timechain", "poker", "arcade", "skee", "hoops", "shy", "claw", "hockey", "billiards", "darts", "pinball", "ride", "invaders", "snake", "pong", "stampede", "flap", "breaker", "dash", "stacker"];
+const SCENES = ["hub", "lab", "race", "drop", "orbit", "mine", "dsb", "factory", "hangar", "bifrost", "timechain", "poker", "arcade", "skee", "hoops", "shy", "claw", "hockey", "billiards", "darts", "pinball", "ride", "invaders", "snake", "pong", "stampede", "flap", "breaker", "dash", "stacker"];
 const LANES = Number(process.env.LANES) || 2;
 const ARGS = process.argv.slice(2);
 for (const a of ARGS) if (!SCENES.includes(a) && !["unit", "chat-unit", "integration-unit", "svrn-unit", "svrn-review", "vacancy-unit", "portal-unit", "water-baseline", "water-review", "water-unit", "stackchain-review", "stackchain-unit", "dsb-menus-unit", "maxis-unit", "exterior-unit", "rulers-unit", "ink-unit", "big-unit", "perf", "full", "poker-protocol"].includes(a)) throw new Error(`Unknown argument "${a}" (unit | perf | full | poker-protocol | ${SCENES.join(" | ")})`);
@@ -16800,9 +16800,53 @@ scene("race", { query: "rain=0&draw=0", steps: [raceStart, raceOwn, raceBench, {
 scene("drop", { steps: [dropStart, dropSteering, play("drop", "a jump lands on the target, scores its own medal and is saved as the best", dropRun), dropCrash, trip("drop"), dropOwn] });
 scene("orbit", { steps: [{ name: "orbit flow", why: "regression: the spacewalk air bonus was missing from the flight log", run: orbitFlow }, orbitSteering, orbitMissed, orbitEscape, trip("orbit"), orbitOwn] });
 scene("mine", { steps: [mineResume, trip("mine"), mineControls, mineOwn] });
+// ---- The Lightning Jet Hangar ----
+const hangarWalking = { name: "hangar walking", why: "rule: W A S D walk the visitor's Ooga their way on screen in the Lightning Jet Hangar, as they do in the Factory", run: async (b) => {
+  const ooga = await walkKeys(b, "portlandhodl", -1.5, 2, [0, 2.2], 0.5);
+  record("hangar walking: W A S D walk the visitor's Ooga away, left, back and right on screen on the runway from two camera angles", allWalk(ooga), JSON.stringify(ooga));
+} };
+const hangarDoor = { name: "hangar door", why: "rule: the hangar's door takes the same Ooga out onto the Factory's landing and back in, on foot", run: async (b) => {
+  // From the hangar's landing, walked out through its door.
+  await b.evaluate(`(() => { const B = window.__ooga, a = B.cavemen.get("portlandhodl"), D = B.hangar.layout.door; if (B.crew.player !== a) B.pilot.possess(a); B.pilot.navigate({ position: { x: D.x, y: D.y, z: D.z - 2.5 }, yaw: Math.PI, pitch: 0.2, dist: 5 }); B.advance(0.5, 1 / 60); })()`);
+  await walkToward(b, 0, 1, 3);
+  const out = await untilPage(b, 'B.scene === "factory" && !B.transitioning', 15000);
+  const landed = await b.evaluate(`(() => { const a = window.__ooga.pilot.player, L = BL.factoryModels.LAYOUT.hangarLanding, p = a && a.root.position;
+    return a && { name: a.traits.name, x: +p.x.toFixed(2), z: +p.z.toFixed(2), feet: +(p.y - a.baseY).toFixed(2),
+      on: Math.abs(p.x - L.x) < L.w / 2 && Math.abs(p.z - L.z) < L.d / 2 && Math.abs(p.y - a.baseY - L.y) < 0.05 }; })()`);
+  // And back in from where it stands, the door behind it.
+  await walkToward(b, -1, 0, 4);
+  const back = await untilPage(b, 'B.scene === "hangar" && !B.transitioning', 15000);
+  const inside = await b.evaluate(`(() => { const a = window.__ooga.pilot.player; return a && a.traits.name; })()`);
+  record("hangar door: walking out through the door lands the same Ooga on the Factory's landing before it, and walking back in takes it into the hangar",
+    out && !!landed && landed.name === "portlandhodl" && landed.on && back && inside === "portlandhodl", JSON.stringify({ out, landed, back, inside }));
+} };
+const hangarFire = { name: "hangar static fire", why: "playthrough: the static fire test runs from the press through the blast to its result, holding the presser's controls meanwhile and handing them back, and the booth is ready again after its cooldown", run: async (b) => {
+  const r = await b.evaluate(`(() => {
+    const B = window.__ooga, a = B.cavemen.get("portlandhodl");
+    if (B.crew.player !== a) B.pilot.possess(a);
+    B.pilot.navigate({ position: { x: -1.5, y: 0, z: 2 }, yaw: 0, pitch: 0.3, dist: 6 });
+    B.advance(0.5, 1 / 60);
+    const F = B.hangar.fire, seen = [], key = (down) => window.dispatchEvent(new KeyboardEvent(down ? "keydown" : "keyup", { key: "w", code: "KeyW", bubbles: true }));
+    let last = "";
+    const run = (seconds) => { for (let i = 0; i < Math.round(seconds * 60); i++) { B.advance(1 / 60, 1 / 60); if (F.phase !== last) seen.push(last = F.phase); } };
+    // W held for half a second: how far the visitor's own Ooga goes.
+    const walked = () => { const p = B.pilot.player.root.position, x = p.x, z = p.z; key(true); run(0.5); key(false); run(0.2); return +Math.hypot(p.x - x, p.z - z).toFixed(2); };
+    const pressed = F.press();
+    run(4);
+    const held = walked();
+    run(7.5);
+    const free = B.pilot.player === a ? walked() : -1;
+    run(22);
+    return { pressed, seen, held, free, ready: F.phase };
+  })()`);
+  const order = ["armed", "spool", "fire", "warning", "boom", "out", "result", "ready"];
+  record("hangar static fire: a press runs armed, spool-up, fire, warning, blast, out cold and result, the presser's W does nothing until the result hands the controls back, and the booth is ready after its cooldown",
+    r.pressed && order.every((phase, i) => r.seen[i] === phase) && r.held < 0.05 && r.free > 1 && r.ready === "ready", JSON.stringify(r));
+} };
 scene("factory", { query: "character=portlandhodl", steps: [factoryWalking, factoryGreeter, factoryLadders, factoryRailingJump, factoryWeapons, factoryForward, factoryForge, factoryShields, factoryKortik, trip("factory")] });
 scene("factory", { label: "cooker", query: "character=portlandhodl", steps: [donation("factory", { stat: "cooker.out", seconds: 14, where: "the cooker sends its bananas up through the ceiling tube" }), donationDetails, factoryCooker, trip("factory")] });
 scene("factory", { label: "entrance", url: hubPage(src, "character=portlandhodl"), steps: [factoryFloor, factoryEntrance] });
+scene("hangar", { query: "character=portlandhodl", steps: [hangarWalking, hangarDoor, hangarFire, trip("hangar")] });
 scene("factory", { label: "canvas2d", query: "canvas2d=1&character=portlandhodl", steps: [factoryCanvas, factoryGreeter] });
 scene("bifrost", { url: hubPage(src, "solo=1&character=portlandhodl"), steps: [bifrostEntrance, bifrostWalking, bifrostExit, trip("bifrost")] });
 scene("bifrost", { label: "dsb round trip", query: "character=portlandhodl", steps: [bifrostDsb] });
@@ -16940,6 +16984,7 @@ scene("drop", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("drop", { card: 
 scene("orbit", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("orbit", { card: '[data-intro="orbit"]', play: "window.__ooga.orbit.launch()", required: ["#joy-move", "#act", ".leave"] })] });
 scene("mine", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("mine", { card: "#mine-intro", required: ["#joy-move", "#joy-look", "#act", "#mine-view-btn", "#mine-pause-btn", "#mine-mute", ".leave"] })] });
 scene("factory", { query: "pos=0&character=portlandhodl", opts: PHONE_SIZE, steps: [phone("factory", { required: ["#joy-move", "#joy-look", ".leave"] }), factoryGreeter] });
+scene("hangar", { query: "pos=0&character=portlandhodl", opts: PHONE_SIZE, steps: [phone("hangar", { required: ["#joy-move", "#joy-look", ".leave"] })] });
 scene("bifrost", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("bifrost", { required: ["#joy-move", "#joy-look", ".leave"] })] });
 scene("timechain", { url: roomPage(3), opts: PHONE_SIZE, steps: [phone("timechain", { required: ["#joy-move", "#joy-look", ".leave", "#sphere-mode"] })] });
 // The keypad's controls are its physical keys: from the first person a phone shows, each is on screen with nothing of
@@ -17600,7 +17645,7 @@ const factoryGeometryAudit = (scenes, renderer, state) => {
     }
     const stats = factory.stats();
     audit.current = { generation: ++audit.generation, expected: ids(result), empty: empty && result === set,
-      graph: [...graph], alternatives: slots, borrowed, avatars: factory.debug.crew ? 1 : 0,
+      graph: [...graph], alternatives: slots, borrowed, avatars: factory.debug.crew ? 1 : 0, hangar: factory.debug.factory.scene.hangar ? 1 : 0,
       structural: stats.allNodes - stats.particles - stats.pool, particles: stats.particles + stats.pool,
       workers: factory.debug.factory.scene.crew.length, remotes: stats.reservedPlayers, quality: renderer.quality };
     return result;
@@ -17635,8 +17680,8 @@ const factoryGeometryBound = (baseline, previous, current, { sameVisit = false }
     if (!(f && f.kind === "webgl2" && f.empty && f.hubSeen && f.quality === "low"
       && Array.isArray(rows) && rows.length > 0 && rows.length === snapshot.stats?.gl?.records && list(rows.map(row => row?.id))
       && list(f.keep) && list(f.expected) && f.expected.length > 0 && list(f.hub) && f.hub.length > 0
-      && list(f.graph) && list(f.borrowed) && ids(f.alternatives) && (f.avatars === 0 || f.avatars === 1)
-      && f.alternatives.length === 125 + f.avatars * 2
+      && list(f.graph) && list(f.borrowed) && ids(f.alternatives) && (f.avatars === 0 || f.avatars === 1) && (f.hangar === 0 || f.hangar === 1)
+      && f.alternatives.length === 125 + f.avatars * 2 + f.hangar
       && Number.isSafeInteger(f.generation) && f.generation > 0
       && Number.isSafeInteger(f.structural) && f.structural >= 0
       && Number.isSafeInteger(f.particles) && f.particles >= 0 && f.particles <= 240 && f.workers === 11 && f.remotes === 0
@@ -17651,7 +17696,7 @@ const factoryGeometryBound = (baseline, previous, current, { sameVisit = false }
   if (![baseline, previous, current].every(complete)) return { ok: false, complete: false, captures: [baseline, previous, current].map(s => ({
     records: s?.stats?.gl?.records, rows: s?.geometry?.length, keep: s?.factory?.keep?.length, collected: s?.factory?.expected?.length,
     graph: s?.factory?.graph?.length, slots: s?.factory?.alternatives?.length, structural: s?.factory?.structural,
-    particles: s?.factory?.particles, workers: s?.factory?.workers, avatars: s?.factory?.avatars, remotes: s?.factory?.remotes,
+    particles: s?.factory?.particles, workers: s?.factory?.workers, avatars: s?.factory?.avatars, hangar: s?.factory?.hangar, remotes: s?.factory?.remotes,
     kind: s?.factory?.kind, quality: s?.factory?.quality, empty: s?.factory?.empty, hubSeen: s?.factory?.hubSeen
   })) };
   const a = baseline.factory, p = previous.factory, z = current.factory;
@@ -17660,10 +17705,11 @@ const factoryGeometryBound = (baseline, previous, current, { sameVisit = false }
   const from = outside(baseline), to = outside(current);
   const retired = p.keep.filter(id => !keep.has(id) && !hub.has(id) && resident.has(id));
   // One node per FX slot (fx.js, 240 max). Off graph: 37 fixed variants, 11x6 worker parts,
-  // gate 1, low Tess 13, Kortik 8 and up to two avatar heads. Remotes are absent in this fixture.
+  // gate 1, the hangar's door 1 while the hangar is open, low Tess 13, Kortik 8 and up to two avatar heads. Remotes
+  // are absent in this fixture.
   // This is independent of observed keep sizes; exact membership above rejects extra owners below this ceiling too.
-  const capacity = a.structural + 240 + 127;
-  const structure = p.structural === a.structural && z.structural === a.structural && z.avatars === a.avatars && z.keep.length <= capacity;
+  const capacity = a.structural + 240 + 127 + a.hangar;
+  const structure = p.structural === a.structural && z.structural === a.structural && z.avatars === a.avatars && z.hangar === a.hangar && z.keep.length <= capacity;
   const generation = z.generation === p.generation + (sameVisit ? 0 : 1);
   return { ok: structure && generation && retired.length === 0 && Math.abs(to - from) <= 3,
     complete: true, structure, generation, capacity, keep: z.keep.length, outside: [from, to], retired };
@@ -17786,7 +17832,7 @@ const gpuGeometryDiagnosticChecks = async () => {
   const makeFactorySnapshot = (keep, residents, generation, extra = {}) => ({
     stats: { gl: { records: residents.length } }, geometry: residents.map(id => ({ id, owners: [], references: 24, omittedOwners: 16 })),
     factory: { kind: "webgl2", empty: true, hubSeen: true, quality: "low", structural: 100, particles: 20, workers: 11, remotes: 0,
-      expected: [...keep], keep: [...keep], graph: [...keep], alternatives: Array(125).fill(10), borrowed: [], avatars: 0,
+      expected: [...keep], keep: [...keep], graph: [...keep], alternatives: Array(125).fill(10), borrowed: [], avatars: 0, hangar: 0,
       hub: [1, 2, 3], generation, ...extra }
   });
   const initial = makeFactorySnapshot(firstKeep, [1, 2, 3, 10, ...range(20).slice(0, 5)], 1);
@@ -17808,6 +17854,8 @@ const gpuGeometryDiagnosticChecks = async () => {
     historicalAlternate: !accepts(altered({ keep: [...nextKeep, 20], expected: [...nextKeep, 20], alternatives: [...Array(125).fill(10), 20] })),
     // Reusing a geometry in an existing declared slot is current bounded ownership, not appended history.
     declaredSlotReuse: accepts(altered({ keep: [...nextKeep, 20], expected: [...nextKeep, 20], alternatives: [...Array(124).fill(10), 20] })),
+    // While the hangar is open its door's shield is one more declared slot, in every capture alike.
+    hangarDoor: accepts(altered({ hangar: 1, alternatives: Array(126).fill(10) }), makeFactorySnapshot(firstKeep, initial.geometry.map(row => row.id), 1, { hangar: 1, alternatives: Array(126).fill(10) })),
     growingGraph: !accepts(altered({ keep: [...nextKeep, 20], expected: [...nextKeep, 20], graph: [...nextKeep, 20], structural: 101 })),
     fxCeiling: !accepts(altered({ particles: 241 })),
     duplicateKeep: !accepts(altered({ keep: [...nextKeep, 10], expected: [...nextKeep, 10] })),
