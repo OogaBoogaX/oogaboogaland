@@ -65,8 +65,8 @@
     return geo;
   };
   // A picture washed in `tint`, edged with a crisp `outline` (its silhouette in that colour, stamped round it `px`
-  // pixels out), padded so the outline fits, mirrored when asked.
-  const outlined = (image, { tint = null, outline = null, px = 3, mirror = false, bright = 0.35 }) => {
+  // pixels out), padded so the outline fits, mirrored when asked: as a canvas, and as a sprite.
+  const outlinedCanvas = (image, { tint = null, outline = null, px = 3, mirror = false }) => {
     const w = image.naturalWidth, h = image.naturalHeight, pad = outline ? px + 1 : 1;
     const canvas = canvasOf(w + pad * 2, h + pad * 2), g = canvas.getContext("2d");
     if (mirror) { g.translate(canvas.width, 0); g.scale(-1, 1); }
@@ -78,8 +78,9 @@
       }
     }
     g.drawImage(washed(image, tint), pad, pad);
-    return spriteOf(canvas, h, pad, bright);
+    return canvas;
   };
+  const outlined = (image, opts) => spriteOf(outlinedCanvas(image, opts), image.naturalHeight, opts.outline ? (opts.px || 3) + 1 : 1, opts.bright ?? 0.35);
   // A picture with the lab's soft coloured glow round it (its shadow blur, `blur` px for a picture the lab drew `lab`
   // units tall), blended, so the glow fades smoothly as the lab's did.
   const glowing = (image, { glow, blur, lab = 64, bright = 0.3, mirror = false }) => {
@@ -111,6 +112,19 @@
     geo = outlined(sources[name], { tint, outline, mirror, bright: mode === MODE.flash ? 0.8 : look.bright });
     ghostCache.set(key, geo);
     return geo;
+  };
+  // A tier's front view as a picture for the page (the hunt's new-enemy cards), washed and edged as its sprite is; null
+  // until its picture has decoded.
+  const portraitCache = new Map(), portraitEntry = track(() => portraitCache.clear());
+  const portrait = (tier) => {
+    portraitEntry.use();
+    let canvas = portraitCache.get(tier);
+    if (canvas) return canvas;
+    const look = LOOKS[tier], name = ART[look.art][0];
+    if (!ready(name)) return null;
+    canvas = outlinedCanvas(sources[name], look);
+    portraitCache.set(tier, canvas);
+    return canvas;
   };
   /**
    * Which view a ghost shows, the lab's way: from its velocity on screen, `sx` to the right and `sy` toward the camera.
@@ -471,6 +485,137 @@
     }
     return { chest: shaded(chest), tail: shaded(tail), skull: shaded(skull, flat), jaw: shaded(jaw, jawFlat), upper: shaded(upper), fore: shaded(fore) };
   });
+  // The giant spider, striped green and purple, in its own frame (+z forward, the ground at y = 0, its hips
+  // `SPIDER_HIP` up; the hunt draws it at twice this size): `body` its cephalothorax with the groove down its back, the
+  // narrow waist, the great abdomen in purple bands with chevrons, bristles and spinnerets, eight red eyes with glints, the chelicerae with their curved
+  // fangs and the pedipalps beside them. Each leg is three parts built along +x, jointed as `SPIDER_LEG` gives:
+  // `femur` from the hip, `tibia` from the knee, and `tarsus` from the ankle (bent `SPIDER_LEG.bend` down from the
+  // tibia) to the claws at its foot, each ringed in purple along it and at its joint, and bristled. `venom` is a
+  // glowing green glob.
+  const SPIDER_HIP = 0.62, SPIDER_LEG = { femur: 0.62, tibia: 0.55, tarsus: 0.45, bend: 0.35 };
+  const CHITIN = "#4fb83a", BAND = "#8a3fd0", HAIR = "#9bdc6a", FANG = "#1c2a14", MARK = "#4e1f80", RED = "#ff2a1a", GLINT = "#ffe6dc", VENOM = "#c8ff2e";
+  const spiderParts = cached(() => {
+    const oval = (r, len, color, emissive) => turn(Array.from({ length: 13 }, (_, k) => [r * Math.sin(Math.PI * k / 12), len * (1 - Math.cos(Math.PI * k / 12)) / 2]), 14, color, emissive);
+    const cone = (r, len, color, emissive = 0.15) => turn([[r, 0], [r * 0.4, len * 0.6], [0, len]], 5, color, emissive);
+    // A tapering leg segment `len` long along +x, ringed in purple at a third and two thirds of it and banded at its far
+    // joint, with bristles along its top and sides.
+    const segment = (len, r0, r1, bristles) => {
+      const out = [along(turn([[r0, 0], [r0 * 1.08, len * 0.12], [(r0 + r1) / 2, len * 0.55], [r1, len * 0.94], [r1 * 0.8, len]], 8, CHITIN, 0.16), 0, 0, 0, 1, 0, 0),
+        moved(ball(r1 * 1.25, BAND, 0.16), len, 0, 0)];
+      for (const f of [0.33, 0.66]) out.push(along(disc((r0 + (r1 - r0) * f) * 1.12, len * 0.05, BAND), len * f, 0, 0, 1, 0, 0));
+      for (let i = 0; i < bristles; i++) {
+        const x = len * (0.2 + 0.6 * i / Math.max(1, bristles - 1)), r = r0 + (r1 - r0) * x / len, a = (i % 3 - 1) * 1.1;
+        out.push(along(cone(r * 0.22, r * 2.4, HAIR), x, Math.cos(a) * r * 0.9, Math.sin(a) * r * 0.9, 0.5, Math.cos(a), Math.sin(a)));
+      }
+      return out;
+    };
+    const L = SPIDER_LEG;
+    const femur = [ball(0.075, BAND, 0.16), ...segment(L.femur, 0.05, 0.042, 5)];
+    const tibia = segment(L.tibia, 0.04, 0.032, 4);
+    const tarsus = [...segment(L.tarsus * 0.82, 0.03, 0.022, 3), along(cone(0.022, L.tarsus * 0.18, FANG, 0.05), L.tarsus * 0.82, 0, 0, 1, -0.4, 0),
+      along(cone(0.012, 0.05, FANG, 0.05), L.tarsus * 0.96, 0, 0.015, 0.4, -1, 0.5), along(cone(0.012, 0.05, FANG, 0.05), L.tarsus * 0.96, 0, -0.015, 0.4, -1, -0.5)];
+    // The abdomen hangs back and up from the waist along `ax`, its top facing `up`; `at(t, a, r)` a point on its skin
+    // `t` along it, `a` round from the top, lifted `r` off it.
+    const A0 = [0, SPIDER_HIP + 0.24, -0.1], AL = 0.95, AR = 0.5, ax = [0, 0.33, -0.944], up = [0, 0.944, 0.33];
+    const at = (t, a, lift = 0) => {
+      const rad = AR * Math.sin(Math.PI * t / AL) + lift;
+      return [Math.sin(a) * rad, A0[1] + ax[1] * t + up[1] * Math.cos(a) * rad, A0[2] + ax[2] * t + up[2] * Math.cos(a) * rad];
+    };
+    const body = [
+      along(oval(0.3, 0.64, CHITIN, 0.18), 0, SPIDER_HIP + 0.06, -0.04, 0, 0, 1),
+      moved(turn([[0.025, -0.01], [0.04, 0], [0.025, 0.01]], 8, MARK, 0.1), 0, SPIDER_HIP + 0.355, 0.2),
+      span(0, SPIDER_HIP + 0.34, 0.02, 0, SPIDER_HIP + 0.31, 0.38, 0.012, MARK),
+      along(turn([[0.11, 0], [0.09, 0.08], [0.12, 0.16]], 10, BAND, 0.16), 0, SPIDER_HIP + 0.12, -0.02, 0, 0.3, -1),
+      along(oval(AR, AL, CHITIN, 0.18), A0[0], A0[1], A0[2], ax[0], ax[1], ax[2])];
+    // Purple bands round the abdomen and chevrons down its back.
+    for (const [t, w] of [[0.2, 0.03], [0.34, 0.035], [0.48, 0.035], [0.62, 0.035], [0.76, 0.03]]) {
+      const c = at(t, 0, -AR * Math.sin(Math.PI * t / AL));
+      body.push(along(disc(AR * Math.sin(Math.PI * t / AL) + 0.012, w, BAND), c[0], c[1], c[2], ax[0], ax[1], ax[2]));
+    }
+    for (let i = 0; i < 4; i++) {
+      const t = 0.22 + i * 0.15, tip = at(t, 0, 0.01);
+      for (const side of [1, -1]) {
+        const wing = at(t - 0.07, side * 0.75, 0.01);
+        body.push(span(tip[0], tip[1], tip[2], wing[0], wing[1], wing[2], 0.014, MARK));
+      }
+    }
+    // Bristles over the abdomen, the spinnerets at its end.
+    for (let i = 0; i < 18; i++) {
+      const t = 0.15 + 0.7 * ((i * 7) % 18) / 18, a = (i * 2.4) % (Math.PI * 1.6) - Math.PI * 0.8, base = at(t, a, -0.005), tipAt = at(t, a, 0.06);
+      body.push(along(cone(0.009, 0.07, HAIR), base[0], base[1], base[2], tipAt[0] - base[0], tipAt[1] - base[1] - 0.01, tipAt[2] - base[2] - 0.02));
+    }
+    const end = at(AL * 0.985, Math.PI, 0);
+    for (const side of [1, -1]) body.push(along(cone(0.035, 0.09, BAND), end[0] + side * 0.035, end[1], end[2], ax[0] + side * 0.2, ax[1] - 0.4, ax[2]));
+    // The eyes: four large across the front of the head and four smaller behind, each with a glint.
+    for (let i = 0; i < 8; i++) {
+      const row = i < 4 ? 0 : 1, k = (i % 4 - 1.5) / 1.5, r = row ? 0.03 : 0.042;
+      const x = k * (row ? 0.15 : 0.1), y = SPIDER_HIP + (row ? 0.29 : 0.22), z = (row ? 0.4 : 0.48) - Math.abs(k) * 0.03;
+      body.push(moved(ball(r, RED, 1), x, y, z), moved(ball(r * 0.3, GLINT, 1), x + r * 0.35, y + r * 0.45, z + r * 0.55));
+    }
+    // The chelicerae under the face, each with its fang curving in and down, and the pedipalps either side.
+    for (const side of [1, -1]) {
+      body.push(moved(ball(0.075, CHITIN, 0.16), side * 0.07, SPIDER_HIP - 0.04, 0.55),
+        span(side * 0.075, SPIDER_HIP - 0.08, 0.6, side * 0.06, SPIDER_HIP - 0.2, 0.66, 0.024, FANG),
+        span(side * 0.06, SPIDER_HIP - 0.2, 0.66, side * 0.02, SPIDER_HIP - 0.27, 0.64, 0.016, FANG),
+        span(side * 0.14, SPIDER_HIP - 0.02, 0.5, side * 0.22, SPIDER_HIP - 0.16, 0.72, 0.026, CHITIN),
+        span(side * 0.22, SPIDER_HIP - 0.16, 0.72, side * 0.19, SPIDER_HIP - 0.34, 0.84, 0.022, BAND));
+    }
+    return { body: shaded(body), femur: shaded(femur), tibia: shaded(tibia), tarsus: shaded(tarsus), venom: noShadow(ball(0.14, VENOM, 1)) };
+  });
+  // A spiderling, a giant spider's brood: the whole of it in one mesh, in its mother's model units and stripes, in two
+  // strides (`frame` 0 with one four reaching forward and lifted, 1 with the other), swapped as it scuttles.
+  const SPIDERLING_LEGS = [[0.2, 0.36, -1.0], [0.24, 0.2, -0.4], [0.24, 0.04, 0.35], [0.2, -0.12, 1.0]];
+  const spiderling = variants((frame) => {
+    const oval = (r, len, color) => turn(Array.from({ length: 9 }, (_, k) => [r * Math.sin(Math.PI * k / 8), len * (1 - Math.cos(Math.PI * k / 8)) / 2]), 10, color, 0.25);
+    const H = SPIDER_HIP, parts = [
+      along(oval(0.3, 0.6, CHITIN), 0, H + 0.06, -0.04, 0, 0, 1),
+      along(oval(0.46, 0.85, CHITIN), 0, H + 0.2, -0.08, 0, 0.33, -1),
+      along(disc(0.45, 0.04, BAND), 0, H + 0.33, -0.43, 0, 0.33, -1), along(disc(0.33, 0.035, BAND), 0, H + 0.43, -0.7, 0, 0.33, -1),
+      moved(ball(0.06, RED, 1), 0.07, H + 0.24, 0.48), moved(ball(0.06, RED, 1), -0.07, H + 0.24, 0.48),
+      span(0.06, H - 0.04, 0.55, 0.04, H - 0.2, 0.62, 0.03, FANG), span(-0.06, H - 0.04, 0.55, -0.04, H - 0.2, 0.62, 0.03, FANG)];
+    for (let k = 0; k < 8; k++) {
+      const [x, z, yaw] = SPIDERLING_LEGS[k % 4], side = k < 4 ? 1 : -1, group = (k % 4 + (side > 0 ? 0 : 1)) % 2;
+      const reach = group === frame ? 0.3 : -0.3, lift = group === frame ? 0.16 : 0, a = yaw - reach;
+      const dx = side * Math.cos(a), dz = -Math.sin(a), hx = side * x;
+      const kx = hx + dx * 0.55, kz = z + dz * 0.55, fx = hx + dx * 1.05, fz = z + dz * 1.05;
+      parts.push(span(hx, H, z, kx, H + 0.36 + lift, kz, 0.05, CHITIN), moved(ball(0.065, BAND, 0.25), kx, H + 0.36 + lift, kz),
+        span(kx, H + 0.36 + lift, kz, fx, lift, fz, 0.04, BAND));
+    }
+    return shaded(parts);
+  });
+  // The Halving Hourglass, 3 m tall in its own frame: `frame` its wooden ends and three posts, orange coins round its
+  // foot; `glass` its two bulbs, half see-through; `sandTop` the orange sand above the neck (scaled down from the neck as it
+  // runs out) and `sandBottom` the mound below (scaled up from the floor as it fills). `HOURGLASS_NECK` the neck's height.
+  const WOOD_DARK = "#4a3020", WOOD_LIGHT = "#6b4528", SAND = "#f7931a", GLASS = "#cfe8ff", HOURGLASS_NECK = 1.5;
+  const hourglassParts = cached(() => {
+    const frame = [turn([[0.9, 0], [0.95, 0.06], [0.9, 0.22], [0.75, 0.25], [0, 0.25]], 16, WOOD_DARK, 0.08),
+      moved(turn([[0, 0], [0.75, 0], [0.9, 0.03], [0.95, 0.19], [0.9, 0.25], [0, 0.25]], 16, WOOD_DARK, 0.08), 0, 2.75, 0)];
+    for (let i = 0; i < 3; i++) {
+      const a = i * Math.PI * 2 / 3;
+      frame.push(span(Math.sin(a) * 0.75, 0.25, Math.cos(a) * 0.75, Math.sin(a) * 0.75, 2.75, Math.cos(a) * 0.75, 0.06, WOOD_LIGHT));
+    }
+    for (let i = 0; i < 9; i++) {
+      const a = i * Math.PI * 2 / 9 + 0.3;
+      frame.push(moved(along(disc(0.11, 0.018, SAND), 0, 0, 0, Math.sin(a) * 0.4, 1, Math.cos(a) * 0.4), Math.sin(a) * 1.05, 0.04 + (i % 3) * 0.035, Math.cos(a) * 1.05));
+    }
+    const bulb = [[0.04, 0], [0.45, 0.25], [0.62, 0.6], [0.55, 0.95], [0.08, 1.2], [0.05, 1.25]];
+    const glass = merge(moved(turn(bulb.map(([r, y]) => [r, y]), 16, GLASS, 0.35), 0, 0.25, 0),
+      moved(turn(bulb.map(([r, y]) => [r, 1.25 - y]).reverse(), 16, GLASS, 0.35), 0, HOURGLASS_NECK, 0));
+    glass.glass = 0.35;
+    glass.castShadow = false;
+    const sandTop = noShadow(turn([[0.02, 0], [0.45, 0.55], [0.47, 0.62], [0, 0.62]], 14, SAND, 0.5));
+    const sandBottom = noShadow(turn([[0.58, 0], [0.5, 0.18], [0.15, 0.5], [0, 0.55]], 14, SAND, 0.5));
+    return { frame: shaded(frame), glass, sandTop, sandBottom };
+  });
+  // A glowing green "$", one unit tall, added in light over the spiders and their brood.
+  const dollar = cached(() => {
+    const W = 96, H = 128, canvas = canvasOf(W, H), g = canvas.getContext("2d");
+    g.font = "bold 104px serif"; g.textAlign = "center"; g.textBaseline = "middle";
+    g.shadowColor = "rgba(70,255,110,0.95)"; g.shadowBlur = 20;
+    g.fillStyle = "#5dff7a"; g.fillText("$", W / 2, H / 2 + 6); g.fillText("$", W / 2, H / 2 + 6);
+    g.shadowBlur = 0; g.fillStyle = "#d8ffd8"; g.font = "bold 92px serif"; g.fillText("$", W / 2, H / 2 + 6);
+    return spriteOf(canvas, H, 0, 1, true, "add");
+  });
   const GRAVE_TOP = 1.05;
   const gravestone = cached(() => {
     const arch = [];
@@ -488,5 +633,5 @@
   });
   const shockwave = cached(() => noShadow(ring({ r: 1, thickness: 0.05, segments: 40, color: "#7dff9a", emissive: 1 })));
 
-  BL.ghostModels = { TIERS, MODE, DROPS, prepare, ghost, viewOf, drop, glowDisc, ringOf, beamOf, scorch, bolt, bubble, wallGeometry, orb, beam, zap, soul, rock, laserBurst, laserBolt, lightningBolt, monkey, elixir, picture, skeletonParts, gravestone, GRAVE_TOP, shockwave };
+  BL.ghostModels = { TIERS, MODE, DROPS, prepare, ghost, portrait, viewOf, drop, glowDisc, ringOf, beamOf, scorch, bolt, bubble, wallGeometry, orb, beam, zap, soul, rock, laserBurst, laserBolt, lightningBolt, monkey, elixir, picture, skeletonParts, spiderParts, spiderling, SPIDER_HIP, SPIDER_LEG, hourglassParts, HOURGLASS_NECK, dollar, gravestone, GRAVE_TOP, shockwave };
 })();
