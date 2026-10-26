@@ -19384,6 +19384,49 @@ const tileGpuChecks = async () => {
   record("tile-based GPU: named Apple silicon skips the prepass on every tier, other GPUs keep it, explicit overrides apply and rigs retain their own path",
     rows.every(row => row.got === row.expected) && asked === 7 && policy.every(row => row.got === row.expected), JSON.stringify({ classification: rows.filter(row => row.got !== row.expected), policy }));
 };
+const meshIndexChecks = () => {
+  // Regression: WebGL 2 reserves 65535 for primitive restart, including when rig sources are joined.
+  const source = readFileSync(join(root, "src/js/gl-renderer.js"), "utf8");
+  const extract = (name, next) => source.slice(source.indexOf(`    const ${name} =`), source.indexOf(next, source.indexOf(`    const ${name} =`)));
+  const context = { window: { location: { search: "?compactGeometry=1" } }, URLSearchParams, Object };
+  runInNewContext(readFileSync(join(root, "src/js/compact-geometry.js"), "utf8"), context);
+  const compact = context.window.BL.compactGeometry;
+  const writers = runInNewContext(`${source.match(/const MESH_WORDS = \d+;/)[0]}
+${extract("indexArray", "    const meshLayout =")}
+${extract("buildMeshPart", "    const buildRigPart =")}
+${extract("buildRigPart", "    const LINE_CORNERS =")}
+({ buildMeshPart, buildRigPart });`, {
+    BL: context.window.BL, meshLayout: () => [],
+    makePart: (data, _stride, _layout, _ibo, indices) => ({ data: new Uint8Array(data), indices, count: indices.length })
+  });
+  const triangle = { i: [0, 1, 2], color: [255, 255, 255] };
+  const geometry = corners => {
+    const faces = Array(Math.floor(corners / 3) - 1).fill(triangle);
+    faces.push({ ...triangle, i: Array.from({ length: corners - faces.length * 3 }, (_, i) => i) });
+    return { verts: [0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, -1, 0.5, 0], faces };
+  };
+  const rows = [];
+  for (const [corners, bytes] of [[65535, 2], [65536, 4], [65537, 4]]) {
+    const inputs = [geometry(corners), geometry(32766), geometry(corners - 32766)];
+    const build = () => [writers.buildMeshPart(inputs[0], null), writers.buildRigPart({ sources: inputs.slice(1) }, null)];
+    const ordinary = build();
+    for (const input of inputs) compact.pack(input, { immutable: true, renderOnly: true });
+    const packed = build(), noLegacy = inputs.every(input => compact.storageOf(input).legacy.size === 0);
+    for (const [mode, parts] of [["ordinary", ordinary], ["compact", packed]]) {
+      for (let i = 0; i < parts.length; i++) {
+        const kind = i ? "rig" : "mesh", part = parts[i], expected = ordinary[i];
+        const indices = part.indices, restart = indices.BYTES_PER_ELEMENT === 2 ? 65535 : 4294967295;
+        const parity = part.data.length === expected.data.length && part.data.every((value, index) => value === expected.data[index])
+          && indices.length === expected.indices.length && indices.every((value, index) => value === expected.indices[index]);
+        rows.push({ kind, mode, corners, bytes: indices.BYTES_PER_ELEMENT, last: indices.at(-1), parity, noLegacy,
+          valid: indices.BYTES_PER_ELEMENT === bytes && indices.at(-1) === corners - 1
+            && indices.every(index => index !== restart) && (kind === "rig" || part.plainCount === indices.length)
+            && parity && noLegacy });
+      }
+    }
+  }
+  record("mesh indices: boundary faces and joined rigs retain their last corner without a primitive restart, and plainCount counts indices", rows.every(row => row.valid), JSON.stringify(rows));
+};
 const raceRigChecks = async () => {
   const context = { window: {}, location: { search: "?debug=1&rain=0" }, URLSearchParams, crypto: webcrypto };
   for (const name of ["math", "scene", "models", "caves", "contributor-identities", "activity-repos", "characters"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
@@ -19420,7 +19463,8 @@ const raceRigChecks = async () => {
   const expectedOrdinaryHashes = [
     // Depth pre-pass "no image change" rendering core: the shared vertex and fragment
     // bytes the depth-only and plain variants derive from, plus the untouched shadow path.
-    "6bed3532a26c98c3e5a9218674dbe75c789324168104f6b0eb7fb5c88872a012",
+    // Packed mesh vertices decode into aNormal and aColor at the top of main (was 6bed3532).
+    "4184e76c3501711766e5229bc42eb5d249eb88212b5a9cf3b9086ebe5767286d",
     // The fragment shader, re-baselined on purpose: 487d99ac909f added uObjectSlab2 for the Factory roof bore
     // (b82d02f4 to f5f71f79), ab4ebcd sampled retained canvas surfaces (to c98cc70d) and e32e91e sampled the
     // foliage LOD atlas (to fb12fd53). Removing those additions would not restore b82d02f4 alone.
@@ -20104,6 +20148,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   const emptyPeers = await emptyPeerPreviewProof();
   record("peer pose previews: certified empty terrain preserves exact poses and peer rejection while omitting vertex probes", emptyPeers.cases === 291 && emptyPeers.failures === 0 && emptyPeers.samples > 0 && emptyPeers.callbacks > 0 && emptyPeers.contact.length === 4 && emptyPeers.arms.length === 8 && emptyPeers.rollback.length === 6, JSON.stringify(emptyPeers));
   await raceRigChecks();
+  meshIndexChecks();
   await qualityFramebufferChecks();
   await tileGpuChecks();
   await hubScratchChecks();
