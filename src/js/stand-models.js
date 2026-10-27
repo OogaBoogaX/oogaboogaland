@@ -38,7 +38,7 @@
   const PALETTE = [null, "#9a5a28", "#8b5022", "#a6652e", "#7d461e", "#57301a", "#46260f",
     "#d8342c", "#f4eee2", "#2d5bd8", "#ffc21a", "#8a3bd1", "#2fa84a", "#a6ef74", "#b8231d", "#2c2e33", "#1d2f7a",
     "#ff8a1c", "#c83a2a", "#2a4fb8", "#ffd24a", "#16110d", "#ffcf3f", "#5b1f8a", "#1d6e2f",
-    "#8e7d84", "#7c6b72", "#9a898f", "#6e5f66", "#ad6a4b", "#9a5a40", "#bb7856", "#8c4f39",
+    "#a57b72", "#946a63", "#b08a84", "#86625d", "#ad6a4b", "#9a5a40", "#bb7856", "#8c4f39",
     "#3f8f2f", "#2f7426", "#5aae3c", "#f4f1e4", "#ffc93a"];
   const T = { trim: 6, red: 7, white: 8, blue: 9, gold: 10, purple: 11, green: 12, lime: 13, cone: 14, iron: 15, navy: 16,
     orange: 17, boxRed: 18, boxBlue: 19, star: 20, slate: 21, crown: 22, plum: 23, pine: 24,
@@ -322,7 +322,7 @@
   // one bed, so it draws the plinth in the stand's own voxels, in the same tones and without the joints (`plinthFlat`).
   const MASON = 1 / 32;
   const MASONRY = {
-    stones: ["#8e7d84", "#7c6b72", "#9a898f", "#6e5f66"], mortar: "#3b3236",
+    stones: ["#a57b72", "#946a63", "#b08a84", "#86625d"], mortar: "#3b3236",
     bricks: ["#ad6a4b", "#9a5a40", "#bb7856", "#8c4f39"], worn: "#c88b6a", grout: "#4f342a"
   };
   const masonry = () => {
