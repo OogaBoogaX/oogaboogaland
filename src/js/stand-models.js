@@ -764,8 +764,8 @@
       cursor += size * (g[0].length + 1);
     }
   };
-  const boardText = (kind, data) => {
-    const G = BL.hubModels.SIGN_GLYPHS, B = LAYOUT[kind], kx = B.w / MENU_W, ky = B.h / MENU_H, face = [];
+  const boardText = (kind, data, B = LAYOUT[kind]) => {
+    const G = BL.hubModels.SIGN_GLYPHS, kx = B.w / MENU_W, ky = B.h / MENU_H, face = [];
     const X = (px) => B.x - B.w / 2 + px * kx, Y = (py) => B.y + B.h / 2 - py * ky;
     const clean = (t) => [...String(t)].map((c) => c === " " || G[c] ? c : c === "," ? "." : c === "·" ? "-" : c === ":" ? " " : " ").join("").replace(/ +/g, " ").trim();
     const cells = (t) => { let n = -1; for (const c of t) n += c === " " ? 2 : G[c][0].length + 1; return n; };
@@ -805,10 +805,10 @@
   // corner, a raised dark panel for each row (TOP LAUNCHES' first a little warmer), a raised frame round each row's
   // icon, and on the menu a raised gold play button with its triangle. The lettering and icons are its picture, laid
   // just in front of the panels and plaque (`LAYOUT.menu.z`), so the frames, studs and buttons stand through it.
-  // `kind` is "menu" or "launches"; TOP LAUNCHES' fourth row, which shows only once the show pack has launches, is its
-  // own mesh (`fourth`) for the scene to show and hide.
-  const boardGeometry = (kind) => {
-    const B = LAYOUT[kind], R = BOARD_PX[kind], kx = B.w / MENU_W, ky = B.h / MENU_H, parts = [], fourth = [];
+  // `kind` is "menu" or "launches", laid where `B` is (a board's LAYOUT, its own by default); TOP LAUNCHES' fourth row,
+  // which shows only once the show pack has launches, is its own mesh (`fourth`) for the scene to show and hide.
+  const boardGeometry = (kind, B = LAYOUT[kind]) => {
+    const R = BOARD_PX[kind], kx = B.w / MENU_W, ky = B.h / MENU_H, parts = [], fourth = [];
     const X = (px) => B.x - B.w / 2 + px * kx, Y = (py) => B.y + B.h / 2 - py * ky;
     const rect = (x0, y0, x1, y1) => ({ x: (X(x0) + X(x1)) / 2, y: (Y(y0) + Y(y1)) / 2, w: (x1 - x0) * kx, h: (y1 - y0) * ky });
     const block = (out, r, z0, z1, color, bevel, emissive = 0) => out.push(bevelBox({ w: r.w, h: r.h, d: z1 - z0, color, emissive, bevel, offset: { x: r.x, y: r.y, z: (z0 + z1) / 2 } }));
