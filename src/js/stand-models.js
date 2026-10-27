@@ -830,6 +830,100 @@
     }
     return { main: merge(...parts), fourth: fourth.length ? merge(...fourth) : null };
   };
+  // ---- clips ------------------------------------------------------------------------------------------------------
+  // Each firework's clip: the burst itself, written once by a studio engine of its own (fireworks.js
+  // at the low tier, its rocket leaving a point under its one slot, its flat patterns facing the viewer) and kept as its
+  // sparks, with the box its rocket and sparks fly through (each kind bursts at its own height) and how long it lasts.
+  // `clipFrame` plays it back by the engine's own flight at `t` seconds into its loop (its length and a short pause),
+  // each spark splatted as light that adds up into a small picture over a night sky, its brightness as the sprite
+  // shader gives it, framed to fit its box.
+  const CLIP_H = 45, CLIP_PAUSE = 0.6, CLIP_KINDS = ["pop", "bolt", "mega"];
+  const clips = cached(() => {
+    const F = BL.fireworks, eye = { x: 0, y: CLIP_H, z: 600 }, out = {};
+    const studio = F.create({ quality: () => "low", launchPoint: { x: 0, y: 0, z: 0 }, slots: [{ x: 0, y: CLIP_H, z: 0 }] });
+    const p = [0, 0, 0];
+    for (const kind of CLIP_KINDS) {
+      studio.clear();
+      studio.launch(kind, `clip-${kind}`, { at: 0.2, slot: 0, eye });
+      for (let n = 0, was = -1; n < 4000; n++) {
+        studio.update(0, 0, eye);
+        const written = studio.stats().fireworkWritten;
+        if (written === was) break;
+        was = written;
+      }
+      const b = studio.batch, start = b.ranges[0], count = b.ranges[1], data = b.data.slice(start * F.FLOATS, (start + count) * F.FLOATS);
+      // The box its sparks fly through over their lives, from the launch point up; and when its last spark goes out.
+      let X = 8, lo = 0, hi = 10, end = 0;
+      for (let i = 0; i < count; i++) {
+        const o = i * F.FLOATS, life = data[o + 7];
+        end = Math.max(end, data[o + 3] + data[o + 14] + life);
+        if (data[o + 15] === 3 || data[o + 15] === 4) continue;
+        for (const f of [0.15, 0.45, 0.8]) {
+          F.flight(data, o, life * f, p);
+          X = Math.max(X, Math.abs(p[0])); lo = Math.min(lo, p[1]); hi = Math.max(hi, p[1]);
+        }
+      }
+      out[kind] = { data, count, X, lo, hi, loop: end + CLIP_PAUSE };
+    }
+    studio.dispose();
+    return out;
+  });
+  // A spark's brightness `age` seconds into its life, as the sprite shader gives it (fireworks.js `headAt`), without the
+  // shader's twinkle; glitter and electric sparks flicker instead.
+  const sparkGlow = (d, o, age, flick) => {
+    const life = d[o + 7];
+    if (!(age >= 0 && age <= life)) return 0;
+    const l = age / life, kind = d[o + 15], open = 0.12 + 0.88 * Math.min(1, age / 0.28);
+    if (kind === 0) return Math.pow(1 - l, 1.2) * open;
+    if (kind === 5) return (l < 0.5 ? 1 : 2 - 2 * l) * open;
+    if (kind === 1) return Math.pow(1 - l, 0.7) * Math.min(1, age / 0.35) * (flick > 0.45 ? 1 : 0.35);
+    if (kind === 2) return Math.pow(1 - l, 0.6) * 0.75 * (flick > 0.3 ? 1 : 0.2);
+    return kind === 3 ? 1 - l * 0.4 : (1 - l) * (1 - l);
+  };
+  // Light to pixel: 1 - e^-light, in a table.
+  const CLIP_LUT = new Uint8Array(1024);
+  for (let i = 0; i < 1024; i++) CLIP_LUT[i] = Math.round(255 * (1 - Math.exp(-i / 1023 * 4)));
+  let clipLight = new Float32Array(0);
+  // Paints `kind`'s clip at `t` into `px` (RGBA, `stride` pixels a row) over w by h pixels from (x0, y0).
+  const clipFrame = (px, stride, x0, y0, w, h, kind, t) => {
+    const C = clips()[kind], d = C.data, F = BL.fireworks, n = w * h;
+    if (clipLight.length < n * 3) clipLight = new Float32Array(n * 3);
+    const L = clipLight;
+    L.fill(0, 0, n * 3);
+    const scale = Math.min((w - 6) / (C.X * 2), (h - 6) / (C.hi - C.lo)), cx = w / 2, top = (h - (C.hi - C.lo) * scale) / 2;
+    const at = ((t % C.loop) + C.loop) % C.loop, p = clipPoint, halo = scale > 1.2 ? 0.75 : 0.3;
+    for (let i = 0; i < C.count; i++) {
+      const o = i * F.FLOATS, age = at - d[o + 3] - d[o + 14];
+      if (age < 0 || age > d[o + 7]) continue;
+      const flick = (Math.sin(i * 12.9898 + at * 47.3) * 43758.5453) % 1;
+      const g = sparkGlow(d, o, age, Math.abs(flick));
+      if (g < 0.02) continue;
+      F.flight(d, o, age, p);
+      const x = Math.round(cx + p[0] * scale), y = Math.round(top + (C.hi - p[1]) * scale);
+      if (x < 1 || y < 1 || x >= w - 1 || y >= h - 1) continue;
+      const k = g * 0.55, r = d[o + 8] * k, gg = d[o + 9] * k, b = d[o + 10] * k, c = (y * w + x) * 3;
+      L[c] += r; L[c + 1] += gg; L[c + 2] += b;
+      const sr = r * halo, sg = gg * halo, sb = b * halo, up = c - w * 3, down = c + w * 3;
+      L[c - 3] += sr; L[c - 2] += sg; L[c - 1] += sb; L[c + 3] += sr; L[c + 4] += sg; L[c + 5] += sb;
+      L[up] += sr; L[up + 1] += sg; L[up + 2] += sb; L[down] += sr; L[down + 1] += sg; L[down + 2] += sb;
+    }
+    for (let y = 0; y < h; y++) {
+      const sky = 1 - y / h, br = 3 + 4 * sky, bg = 4 + 5 * sky, bb = 9 + 11 * sky;
+      for (let x = 0; x < w; x++) {
+        const c = (y * w + x) * 3, q = ((y0 + y) * stride + x0 + x) * 4;
+        const lr = CLIP_LUT[Math.min(1023, (L[c] * 1023) | 0)], lg = CLIP_LUT[Math.min(1023, (L[c + 1] * 1023) | 0)], lb = CLIP_LUT[Math.min(1023, (L[c + 2] * 1023) | 0)];
+        px[q] = br + lr * (1 - br / 255); px[q + 1] = bg + lg * (1 - bg / 255); px[q + 2] = bb + lb * (1 - bb / 255); px[q + 3] = 255;
+      }
+    }
+  };
+  const clipPoint = [0, 0, 0];
+  // One firework's clip in a picture of its own, w by h pixels, for the stand's screen: `paint(t)` paints it at `t`.
+  const clipPainter = (kind, w, h) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = w; canvas.height = h;
+    const context = canvas.getContext("2d"), image = context.createImageData(w, h);
+    return { canvas, paint: (t) => { clipFrame(image.data, w, 0, 0, w, h, kind, t); context.putImageData(image, 0, 0); } };
+  };
   // The cloth in the counter's front: the island under a burst over the Sphere, on parchment, in big pixels.
   const clothCanvas = cached(() => {
     const c = document.createElement("canvas"), W = 96, H = 48, g = canvasOf(c, W, H);
@@ -857,5 +951,5 @@
     return c;
   });
 
-  BL.standModels = { PX, LAYOUT, ground, plinthFlat, build, star, rockets, strawHat, pictureFace, menuFace, launchesFace, boardText, menuRowAt, clothCanvas, screenCanvas, MENU_W, MENU_H };
+  BL.standModels = { PX, LAYOUT, ground, plinthFlat, build, star, rockets, strawHat, pictureFace, menuFace, launchesFace, boardText, menuRowAt, clips, clipPainter, CLIP_KINDS, clothCanvas, screenCanvas, MENU_W, MENU_H };
 })();
