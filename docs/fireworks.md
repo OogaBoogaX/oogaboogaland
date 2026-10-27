@@ -103,9 +103,10 @@ fireworks, is `images/fireworks-concept-sheet.webp`:
   with a sparkle at either end, and four oversized voxel rockets standing on it before a palisade of stakes, a
   sparkle over each tip in its own colour and gold bursts in the greenery at the sign's corners, all twinkling.
 - **In the middle:** a timber booth with a red and white striped canopy and a scalloped valance; a merchant counter
-  with the terminal (BUY HERE), a painted cloth of the island under a burst and rockets on its ends; shelves stocked
-  with boxes and bundles behind, a purple and a red starburst on them; and the vendor, an Ooga of no one's in a straw
-  hat, looking about.
+  with the stand's point-of-sale terminal (a keypad with a card slot on a graphite base, and on a neck the head
+  leaning back toward the buyer, BUY HERE on its screen in a bezel lined in glowing orange, a receipt curling from its
+  top), a painted cloth of the island under a burst and rockets on its ends; shelves stocked with boxes and bundles
+  behind, a purple and a red starburst on them; and the vendor, an Ooga of no one's in a straw hat, looking about.
 - **Either side:** a board in a heavy frame, its face from the counter's height up, greenery on its cap, and open
   framing behind it to the wall with a shelf of fireworks and a barrel. Tall corner posts fly blue sunburst banners
   that rock in the wind and string lantern ropes to the sign.

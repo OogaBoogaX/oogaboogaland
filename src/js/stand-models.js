@@ -1,21 +1,22 @@
 // The firework stand's models and pictures, for the hub's wall at the sealed cave beside the Timechain Sphere's stairs.
 // A small attraction, readable from across the island: a timber booth on a deck with a merchant counter and the stand's
-// terminal on it, shelves stocked with fireworks behind, a red and white striped canopy with a scalloped valance, the
-// big gold FIREWORKS sign with LIGHT UP OBL under it and four oversized rockets standing on it, and a board either
-// side: BUY A FIREWORK on the left with each firework's icon, name and price, and TOP LAUNCHES on the right under a
-// gold crown. It stands on a plinth of two courses of chunky stones with mortar joints and a paving of bricks in grout,
-// its floor half a metre up. Tall posts at its outer corners fly blue sunburst banners and string lantern ropes to the
-// sign. The boards stand in heavy frames, their faces from the counter's height up. A rope fence on posts, the two
-// either side of the way in lit, runs round the paving. Open timber framing with a shelf and a barrel stands behind
-// each board. A starburst stands at either end of the shelves, rockets on the counter's ends, and the big rockets stand
-// before a palisade of stakes. Painted crates of fireworks stand at the paving's corners. A sparkle hangs over each
-// rocket's tip, gold bursts at the sign's top corners and a sparkle at either end of the tagline. Greenery with white
-// flowers grows on the caps, by the sign and round the plinth. Its timber is voxels an eighth of a metre across (`PX`)
-// with the grain running along each beam, as the Factory's kiosk and board are built, so the renderer's block detail
-// gives it the same pixel texture; the plinth's stones and bricks are boxes on a grid a quarter of a voxel across
-// (`MASON`) that the renderer details as voxels, the greenery's half that size (`LEAF`); cloth, rope, letters, stars
-// and pictures stay smooth. The lettering and the marquee are meshes of their own, for Canvas 2D's `depthBias` (the
-// scene sets it) to sort them in front of the sign's planks.
+// point-of-sale terminal on it, its screen in a bezel lined in glowing orange, shelves stocked with fireworks behind, a
+// red and white striped canopy with a scalloped valance, the big gold FIREWORKS sign with LIGHT UP OBL under it and
+// four oversized rockets standing on it, and a board either side: BUY A FIREWORK on the left with each firework's icon,
+// name and price, and TOP LAUNCHES on the right under a gold crown. It stands on a plinth of two courses of chunky
+// stones with mortar joints and a paving of bricks in grout, its floor half a metre up. Tall posts at its outer corners
+// fly blue sunburst banners and string lantern ropes to the sign. The boards stand in heavy frames, their faces from
+// the counter's height up. A rope fence on posts, the two either side of the way in lit, runs round the paving. Open
+// timber framing with a shelf and a barrel stands behind each board. A starburst stands at either end of the shelves,
+// rockets on the counter's ends, and the big rockets stand before a palisade of stakes. Painted crates of fireworks
+// stand at the paving's corners. A sparkle hangs over each rocket's tip, gold bursts at the sign's top corners and a
+// sparkle at either end of the tagline. Greenery with white flowers grows on the caps, by the sign and round the
+// plinth. Its timber is voxels an eighth of a metre across (`PX`) with the grain running along each beam, as the
+// Factory's kiosk and board are built, so the renderer's block detail gives it the same pixel texture; the plinth's
+// stones and bricks are boxes on a grid a quarter of a voxel across (`MASON`) that the renderer details as voxels, the
+// greenery's half that size (`LEAF`); cloth, rope, letters, stars and pictures stay smooth. The lettering and the
+// marquee are meshes of their own, for Canvas 2D's `depthBias` (the scene sets it) to sort them in front of the sign's
+// planks.
 //
 // Everything is in the stand's own frame: x to the visitor's right as they face it, y up from its floor (the plinth's
 // top, `LAYOUT.floor` over the ground), +z out of its front. `LAYOUT` places what the scene hangs and uses (where a
@@ -79,7 +80,9 @@
     apron: [[-2.75, 4.6, 1.4], [0, 4.8, 1.5], [2.75, 4.6, 1.4]],
     // Where a visitor stands to buy: before the counter, by the terminal; how near counts.
     use: { x: 0.45, z: 1.6, reach: 1.7 },
-    screen: { x: 0.8, y: 1.25, z: 0.62, w: 0.46, h: 0.34, tilt: -0.55 },
+    // The terminal's head: its middle, its lean back toward the buyer, its glass (a picture `w` by `h`) and how far out
+    // of the middle the glass lies.
+    screen: { x: 0.8, y: 1.62, z: 0.5, w: 0.57, h: 0.38, tilt: -0.32, face: 0.051 },
     // The vendor stands on a step behind the counter, so his head and hat clear its top.
     vendor: { x: -0.55, y: 0.6, z: -0.35 },
     // The lanterns that light it, from the canopy's front corners.
@@ -549,10 +552,28 @@
       glow.push(moved(box({ w: 0.05, h: 0.05, d: 0.05, color: "#fff2b0", emissive: 0.6 }), crownAt.x + x, crownAt.y + 0.17 + tall, crownAt.z));
     }
     for (const [x, c] of [[-0.18, "#d8342c"], [0, "#2d5bd8"], [0.18, "#d8342c"]]) iron.push(moved(box({ w: 0.07, h: 0.07, d: 0.03, color: c, emissive: 0.4 }), crownAt.x + x, crownAt.y + 0.08, crownAt.z + 0.075));
-    // The terminal's housing on the counter (its glass is a picture).
-    const S = LAYOUT.screen;
-    iron.push(moved(bevelBox({ w: S.w + 0.12, h: 0.12, d: 0.34, color: "#2c2e33", bevel: 0.02 }), S.x, S.y + 0.06, S.z - 0.02));
-    iron.push(moved(turnedX(bevelBox({ w: S.w + 0.1, h: S.h + 0.1, d: 0.06, color: "#1c1e22", bevel: 0.015 }), S.tilt), S.x, S.y + 0.3, S.z - 0.08));
+    // The terminal on the counter, the stand's point of sale: a graphite base with an orange strip glowing along its
+    // front; on it a sloped keypad of grey keys, a red, a yellow and two green down its right, a card slot along its
+    // back; and on a neck behind, the head leaning back toward the buyer, its thick bezel lined in glowing orange round
+    // the glass (a picture the scene lays), a status light at its corner and a receipt curling from a slot in its top.
+    const S = LAYOUT.screen, top = 1.25, pad = { y: top + 0.075, z: 0.74, tilt: -0.22 };
+    const onHead = (geo, x, y, z) => moved(turnedX(moved(geo, x, y, z), S.tilt), S.x, S.y, S.z);
+    const onPad = (geo, x, y, z) => moved(turnedX(moved(geo, x, y, z), pad.tilt), S.x, pad.y, pad.z);
+    iron.push(moved(bevelBox({ w: 0.6, h: 0.05, d: 0.44, color: "#2a2d33", bevel: 0.012 }), S.x, top + 0.025, 0.62));
+    glow.push(box({ w: 0.6, h: 0.016, d: 0.008, color: "#f7931a", emissive: 0.6, offset: { x: S.x, y: top + 0.025, z: 0.844 } }));
+    iron.push(onPad(bevelBox({ w: 0.44, h: 0.04, d: 0.18, color: "#33363d", bevel: 0.01 }), 0, 0, 0));
+    for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) {
+      const color = c < 3 ? "#cfd3d8" : ["#d8342c", "#ffc21a", "#3fbf5f", "#3fbf5f"][r];
+      iron.push(onPad(box({ w: c < 3 ? 0.08 : 0.07, h: 0.016, d: 0.03, color }), -0.155 + c * 0.1, 0.028, -0.06 + r * 0.04));
+    }
+    iron.push(onPad(box({ w: 0.3, h: 0.01, d: 0.012, color: "#0a0b0d" }), 0, 0.022, -0.078));
+    iron.push(moved(bevelBox({ w: 0.14, h: 0.2, d: 0.08, color: "#24272c", bevel: 0.015 }), S.x, top + 0.14, 0.46));
+    iron.push(onHead(bevelBox({ w: 0.72, h: 0.52, d: 0.09, color: "#1b1d22", bevel: 0.025 }), 0, 0, 0));
+    iron.push(onHead(box({ w: S.w + 0.05, h: S.h + 0.05, d: 0.004, color: "#f7931a", emissive: 0.7 }), 0, 0, S.face - 0.004));
+    glow.push(onHead(box({ w: 0.03, h: 0.03, d: 0.01, color: "#3dff6e", emissive: 1 }), 0.3, 0.225, 0.047));
+    iron.push(onHead(box({ w: 0.2, h: 0.012, d: 0.024, color: "#0a0b0d" }), 0, 0.262, 0));
+    iron.push(onHead(box({ w: 0.14, h: 0.1, d: 0.004, color: "#f4f1e8" }), 0, 0.31, 0.004));
+    iron.push(onHead(moved(turnedX(box({ w: 0.14, h: 0.07, d: 0.004, color: "#f4f1e8" }), 0.8), 0, 0.025, 0.012), 0, 0.36, 0.004));
     // The cloth's frame in the counter's recess, dark, so the picture sits in it.
     dark.push(box({ w: LAYOUT.cloth.w + 0.06, h: LAYOUT.cloth.h + 0.06, d: 0.02, color: "#2a1307", offset: { x: 0, y: LAYOUT.cloth.y, z: LAYOUT.cloth.z - 0.012 } }));
 
@@ -717,11 +738,12 @@
   });
   // The terminal's glass: a bolt and BUY over the dark, the glow that says where to buy.
   const screenCanvas = cached(() => {
-    const c = document.createElement("canvas"), W = 120, H = 88, g = canvasOf(c, W, H), { INK, write } = K();
+    const c = document.createElement("canvas"), W = 144, H = 96, g = canvasOf(c, W, H), { INK, write } = K();
     g.fillStyle = "#0b1016"; g.fillRect(0, 0, W, H);
-    pix(g, ["...##", "..##.", ".##..", "#####", "..##.", ".##..", "##..."], { "#": INK.gold }, 14, 18, 46);
-    write(g, "BUY", 92, 30, 3, INK.gold, "center");
-    write(g, "HERE", 92, 56, 2, INK.white, "center");
+    g.strokeStyle = "#2a3440"; g.lineWidth = 2; g.strokeRect(4, 4, W - 8, H - 8);
+    pix(g, ["...##", "..##.", ".##..", "#####", "..##.", ".##..", "##..."], { "#": INK.gold }, 14, 18, 58);
+    write(g, "BUY", 104, 26, 4, INK.gold, "center");
+    write(g, "HERE", 104, 60, 3, INK.white, "center");
     return c;
   });
 

@@ -11737,9 +11737,10 @@
       n.scale.x = n.scale.y = n.scale.z = size;
       S.stars.push(n);
     }
-    // The pictures: the terminal's glass leaning back on its housing, the cloth in the counter's recess, the boards.
+    // The pictures: the terminal's glass in its head's bezel, the cloth in the counter's recess, the boards.
     const G = L.screen;
-    node(M.pictureFace(M.screenCanvas(), G.w, G.h, 1), { x: G.x, y: G.y + 0.3 + Math.sin(-G.tilt) * 0.035, z: G.z - 0.08 + Math.cos(G.tilt) * 0.035 }, { x: G.tilt });
+    // On Canvas 2D the glass sorts a little nearer than the bezel and lining it lies on.
+    node(M.pictureFace(M.screenCanvas(), G.w, G.h, 1), { x: G.x, y: G.y - Math.sin(G.tilt) * G.face, z: G.z + Math.cos(G.tilt) * G.face }, { x: G.tilt }).depthBias = canvas2d ? -0.3 : 0;
     node(M.pictureFace(M.clothCanvas(), L.cloth.w, L.cloth.h, 0.25), { x: L.cloth.x, y: L.cloth.y, z: L.cloth.z });
     S.menuCanvas = document.createElement("canvas");
     S.launchesCanvas = document.createElement("canvas");
