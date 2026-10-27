@@ -501,6 +501,7 @@
     const arriveBeams = pool(B.max, null), arriveGlows = pool(B.max, null), landFlashes = pool(B.max, null), landRings = pool(B.max * 2, null);
     const bruteShown = new Float64Array(B.max), brutePhase = new Int8Array(B.max), bruteLand = new Float64Array(B.max).fill(-1e9);
     const bruteSlam = new Float64Array(B.max), bruteX = new Float64Array(B.max), bruteZ = new Float64Array(B.max), bruteY = new Float64Array(B.max);
+    const bruteAt = new Float64Array(B.max), bruteSpeed = new Float64Array(B.max);
     const boltNode = pool(1, null)[0], boltGlow = pool(1, null)[0];
     const beams = pool(MAX_BEAMS, MODELS.beam()), souls = pool(MAX_SOULS, MODELS.soul(), { smokeOpacity: 0.85 });
     const ring = pool(1, MODELS.shockwave())[0], zapBeam = pool(1, MODELS.zap())[0];
@@ -1682,6 +1683,7 @@
         if (b.id !== bruteShown[i]) {
           bruteShown[i] = b.id; brutePhase[i] = 0; bruteLand[i] = -1e9; bruteSlam[i] = b.slamAt;
           bruteX[i] = b.x; bruteZ[i] = b.z; bruteY[i] = b.y;
+          bruteAt[i] = S.now; bruteSpeed[i] = 0;
           if (b.phase === BP.BEAM) audio.play("arrive");
         }
         const ground = island.surfaceAt(b.x, b.z);
@@ -1742,8 +1744,14 @@
         rig.root.visible = shown;
         o.active = shown;
         if (!shown) continue;
-        const speed = dt > 0 ? Math.hypot(b.x - bruteX[i], b.z - bruteZ[i]) / dt : 0;
-        bruteX[i] = b.x; bruteZ[i] = b.z;
+        // Movement arrives on 50 ms sim ticks (250 ms snapshots on followers).
+        // Measure that interval, then keep the shared gait running between
+        // updates instead of alternating idle frames with clipped speed spikes.
+        if (S.now !== bruteAt[i]) {
+          const elapsed = (S.now - bruteAt[i]) / 1000;
+          bruteSpeed[i] = elapsed > 0 ? Math.hypot(b.x - bruteX[i], b.z - bruteZ[i]) / elapsed : 0;
+          bruteX[i] = b.x; bruteZ[i] = b.z; bruteAt[i] = S.now;
+        }
         const zapped = b.struckAt > 0 && t >= b.struckAt, shake = zapped ? STRIKE_SHAKE * 2 : b.phase === BP.SHAKE ? 0.05 : 0;
         let heading = b.heading;
         const target = b.target ? playerAt(b.target) : null;
@@ -1752,7 +1760,7 @@
         const k = b.phase === BP.LEAP ? Math.min(1, since / B.leapMs) : 0;
         const lift = b.phase === BP.FALL ? Math.max(0, b.y) : B.leapH * 4 * k * (1 - k);
         rig.poseManaged(dt, b.x + (Math.random() - 0.5) * shake, ground + lift + (Math.random() - 0.5) * shake, b.z + (Math.random() - 0.5) * shake,
-          heading, b.phase === BP.CHASE && !zapped ? Math.min(speed, 6) : 0, b.phase === BP.FALL || b.phase === BP.LEAP);
+          heading, b.phase === BP.CHASE && !zapped && !S.paused ? bruteSpeed[i] : 0, b.phase === BP.FALL || b.phase === BP.LEAP);
         if (zapped && Math.random() < 0.4) fx.spawnParticle(ZAPS[Math.random() * 3 | 0], b.x + (Math.random() - 0.5) * 1.2, ground + Math.random() * BRUTE_H * 1.3, b.z + (Math.random() - 0.5) * 1.2,
           (Math.random() - 0.5) * 3, Math.random() * 2, (Math.random() - 0.5) * 3, 0.25, 4, 0, -50);
         // The slam: it lands with its fists into the ground beside them, the ground rings and shakes, and the dirt flies.
@@ -2982,7 +2990,7 @@
 
     // ---------- debug (`__ooga.halloween`) ----------
     const debug = {
-      sim, walls, stops, spots, lapMs, herald, seal,
+      sim, walls, stops, spots, lapMs, herald, seal, rigs,
       get state() { return Object.keys(ST).find((k) => ST[k] === S.state); },
       get round() { return S.round; },
       get role() { return npcSync.role; },

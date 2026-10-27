@@ -363,7 +363,7 @@ A new check must not repeat an existing one: extend that check or leave it. No p
 **Files.** `test/` is two files: `run.mjs` holds every check and probe, `browser.mjs` is the Chrome driver. Do not add a third. Every page opens with `?debug=1&nosim=1&hour=12&day=80`. A page build costs far more than a check, so make the suite faster with fewer page builds, not faster checks. Never return a scene node or a pick hit from an evaluate, only the fields a check reads.
 
 **The regressions.**
-- `wall movement performance` (hub, perf): movement plain and behind cave walls during a donation holds 55 FPS at 1920x1080. If it fails, profile the overlay and cave outlines; never loosen the floor.
+- `wall movement performance` (hub, perf): movement plain and behind cave walls during a donation holds 55 FPS at 1920x1080. If it fails, profile the overlay and cave outlines with `node scripts/profile-covered-movement.mjs` (the same workload, `--cpu` for a CPU profile; see `docs/covered-movement-128.md`); never loosen the floor.
 - `work movement lab lanes` (hub, open): walkers keep to their facing-right side; on some boots the lane targets sit on the centre or far side.
 - `race tracks` (race): every track builds into culled sectors with checkpoints clear of its gaps and releases the old track's GPU records.
 - `orbit flow` (orbit): launch, orbit, spacewalk, re-entry and the flight log, including the spacewalk air bonus.

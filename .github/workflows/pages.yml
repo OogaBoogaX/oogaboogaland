@@ -97,6 +97,10 @@ jobs:
         with:
           ref: ${{ github.sha }}
           token: ${{ steps.app.outputs.token || github.token }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
       - name: Download the page that was deployed
         uses: actions/download-artifact@v4
         with:
@@ -120,6 +124,19 @@ jobs:
           # A concurrent rock update fails instead of overwriting newer work.
           artifact_branch="automation/site-artifact-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           git push origin "HEAD:refs/heads/$artifact_branch"
+          # Branch protection pins this context to GitHub Actions, not the
+          # character App. Test this generated commit and report with our job token.
+          artifact_sha="$(git rev-parse HEAD)"
+          unit_context='Unit · the browser-free lane'
+          unit_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          GH_TOKEN="$UNIT_STATUS_TOKEN" gh api "repos/$GITHUB_REPOSITORY/statuses/$artifact_sha" -f state=pending -f context="$unit_context" -f description='Testing the generated site commit' -f target_url="$unit_url"
+          if npm run test:unit; then
+            unit_state=success
+          else
+            unit_state=failure
+          fi
+          GH_TOKEN="$UNIT_STATUS_TOKEN" gh api "repos/$GITHUB_REPOSITORY/statuses/$artifact_sha" -f state="$unit_state" -f context="$unit_context" -f description='Unit suite on the generated site commit' -f target_url="$unit_url"
+          if [ "$unit_state" != success ]; then exit 1; fi
           for context in 'Character identity ownership' 'Character intake' 'Character bundle safety'; do
             gh api "repos/$GITHUB_REPOSITORY/statuses/$(git rev-parse HEAD)" -f state=success -f context="$context" -f description='Trusted generated-character and site artifact commit'
           done
@@ -127,5 +144,6 @@ jobs:
           git push origin --delete "$artifact_branch"
         env:
           GH_TOKEN: ${{ steps.app.outputs.token || github.token }}
+          UNIT_STATUS_TOKEN: ${{ github.token }}
           GITHUB_TOKEN: ${{ steps.app.outputs.token || github.token }}
           CHARACTER_BOT_LOGIN: ${{ vars.CHARACTER_BOT_LOGIN || 'github-actions[bot]' }}

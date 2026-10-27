@@ -3447,6 +3447,26 @@
     return support && Math.abs(playerSupportAt(p.x, p.z, feet, feet, cave) - feet) <= 1e-6 ? support : null;
   };
   let clankerSupportActor = null;
+  const npcYieldAhead = (cave, fx, fz) => {
+    if (!clankers || cave.humanControlled || cave.remoteControlled) return false;
+    const p = cave.root.position, feet = p.y - cave.baseY, shape = BL.agent.torso;
+    for (const entry of clankers.list) {
+      if (!entry.active || !entry.root.visible || entry.controlled || entry.remoteControlled
+        || Math.abs(entry.speed) <= 0.1 && !entry.drive.airborne && !entry.jump.active) continue;
+      const q = entry.root.position;
+      // A passenger or an Ooga on a different floor keeps its ordinary support.
+      if (feet > q.y + STEP_MAX || feet + cave.bodyHeight <= q.y + 0.1
+        || (p.x - q.x) ** 2 + (p.z - q.z) ** 2 > 16) continue;
+      const sine = Math.sin(entry.heading), cosine = Math.cos(entry.heading);
+      const width = shape.radius(entry) + cave.bodyRadius, reach = width + (cave.traffic.yielding ? 0.85 : 0.6);
+      for (let i = 0; i < shape.count(entry); i++) {
+        const offset = shape.offset(entry, i), dx = q.x + sine * offset - p.x, dz = q.z + cosine * offset - p.z;
+        const along = dx * fx + dz * fz;
+        if (along > 0 && along < reach && Math.abs(dx * fz - dz * fx) < width) return true;
+      }
+    }
+    return false;
+  };
   const characterClankerSupportAllowed = (node, y) => {
     const entry = clankerPartOwners.get(node), rage = entry.rage;
     // A held grab wins over stepping onto its hunter. An Ooga moving into
@@ -3830,7 +3850,9 @@
       return false;
     }
     const heldHeight = rec.autonomous && !throwing ? rec.safeY : handY;
-    const ceiling = throwing ? ceilingAt(p.x, p.z, heldHeight, cave) : Infinity;
+    // A free arm can swing above a low roof. Find headroom from the
+    // carrier's floor side of that roof before standing the captive upright.
+    const ceiling = throwing ? ceilingAt(p.x, p.z, Math.min(heldHeight, entry.root.position.y + 0.025), cave) : Infinity;
     const height = throwing ? Math.min(heldHeight, ceiling - cave.bodyHeight - Math.max(0, cave.viewLift)) : heldHeight;
     // Keep the roof outside the support query's step allowance.
     const supportY = Math.min(heldHeight, ceiling - STEP_MAX - 1e-6);
@@ -4055,7 +4077,8 @@
     cave.root.rotation.x = -Math.acos(clamp((floor + 0.12 - hand[1]) / headReach, -0.7, 0.3));
     cave.root.rotation.y = entry.heading; cave.root.rotation.z = 0;
     p.x = hand[0]; p.y = hand[1]; p.z = hand[2];
-    parts.legL.rotation.x = 0.25; parts.legR.rotation.x = -0.1;
+    // Keep the free foot level with the held ankle at a low ground grip.
+    parts.legL.rotation.x = parts.legR.rotation.x = -0.1;
     if (cave.weapon.carry !== "hands") {
       parts.armR.quaternion = parts.armL.quaternion = null;
       parts.armR.rotation.x = -1.1; parts.armL.rotation.x = -1.35;
@@ -4082,7 +4105,7 @@
       // Beside a crate the head's floor alone cannot describe the whole body.
       // Keep the ankle attached and raise the body only through checked poses
       // until its limbs clear the prop; lower it again as the route opens up.
-      if (!clear && !rec.throwing) {
+      if (!clear) {
         const angle = cave.root.rotation.x;
         for (let i = 1; i <= 6 && !clear; i++) {
           cave.root.rotation.x = angle * (1 - i / 6); alignDraggedFoot(cave, hand);
@@ -7272,26 +7295,8 @@
     const minutes = Math.max(0, Math.round((Date.now() - changed) / 60000));
     return minutes < 60 ? `${minutes} min ago` : minutes < 2880 ? `${Math.round(minutes / 60)} h ago` : `${Math.round(minutes / 1440)} days ago`;
   };
-  // A caveman's "Ooga booga!" in the browser's own speech, deep and slow: only once the visitor has touched the page
-  // (browsers refuse speech before that), never with the island's sound muted, and only in a voice on this device, so
-  // no text leaves it. The deep male voices go first where the device has them.
-  const OOGA_VOICES = ["Ralph", "Fred", "Daniel", "Alex"];
-  const shoutOoga = () => {
-    const speech = window.speechSynthesis;
-    if (!speech || weather.muted || navigator.userActivation && !navigator.userActivation.hasBeenActive) return;
-    const voices = speech.getVoices().filter((v) => v.localService && /^en/i.test(v.lang));
-    const voice = OOGA_VOICES.map((name) => voices.find((v) => v.name.startsWith(name))).find(Boolean) || voices[0];
-    if (!voice) return;
-    const line = new SpeechSynthesisUtterance("Oooga! Boooga!");
-    line.voice = voice;
-    line.pitch = 0.1;
-    line.rate = 0.7;
-    speech.cancel();
-    speech.speak(line);
-  };
   // A merge landing during the visit: the eyes and runes flare, the Oogas awake within TOTEM_CHEER cheer
-  // and shout its word (never the one being driven), a deep
-  // voice shouts "Ooga booga!", and one notice names the repository.
+  // and show its word in speech bubbles (never the one being driven), and one notice names the repository.
   const flareTotem = (i) => {
     const o = totems[i], p = o.owner.node.position, repo = BL.totemFeed.REPOS[i];
     o.flare = 1;
@@ -7302,7 +7307,6 @@
       cave.cheer = 1.6;
       fx.say(cave, fnv1a(`${repo.word}/${cave.traits.name}`) % 2 ? `${repo.word}!` : "OOGA!", 1.8);
     }
-    shoutOoga();
     hud.toast(`${repo.name} just merged · the ${repo.word} totem blazes`);
   };
   const buildTotems = () => {
@@ -8392,11 +8396,12 @@
     fromHeading = entry.heading, toHeading = fromHeading) => {
     const radius = CLANKER_CORE_RADIUS, centerY = 0.65, height = 0.12;
     const from = y + centerY, to = toY + centerY;
+    // A center brushing a step behind it may move away; new or inward contact still blocks.
     if (!allowOffLand && !island.onLand(toX, toZ) && !clankerSatelliteLandAt(toX, toY, toZ, radius)
       || crossesSealedCave(x, z, toX, toZ, y)
       || !island.clearAt(toX, to, toZ, radius, height)
       || !island.voxelSegmentClearAt(x, from, z, toX, to, toZ, radius, height)
-      || !solids.segmentClear(x, from, z, toX, to, toZ, radius, height, null, radius, height, true, false, false, entry.rage.active)
+      || !solids.segmentClear(x, from, z, toX, to, toZ, radius, height, null, radius, height, true, false, !entry.drive.airborne && !entry.jump.active, entry.rage.active)
       || !matrixGateSegmentClear(x, from, z, toX, to, toZ, radius, height, true)) return false;
     return clankerFireClear(entry, x, y, z, toX, toY, toZ, fromHeading, toHeading);
   };
@@ -8441,7 +8446,7 @@
     // Check the animated hand and held limbs before committing jump progress.
     // The jump's own sweep already proves the gorilla's arc against scenery.
     const motion = entry.motion, supportOffset = motion.supportOffset;
-    motion.supportOffset = damp(supportOffset, 0, 12, dt);
+    motion.supportOffset = damp(supportOffset, 0, 10, dt);
     try {
       return entry.gorilla.climbPoseClear(dt, x, y, z, entry.heading,
         motion, clankerPeerEmptyStone, clankerCarryPoseTransition, entry, speed,
@@ -8883,28 +8888,9 @@
         if (mempoolIsland) floor = Math.max(floor, mempoolIsland.floatAt(x, z, y, step, GORILLA_DRAUGHT));
         if (ALTAR_HEIGHT <= y + step + 1e-7
           && x * x + z * z < altar.platformRadius * altar.platformRadius) floor = Math.max(floor, ALTAR_HEIGHT);
-        if (floor > ABYSS_FLOOR + BL.clankers.PROP_STEP) {
-          const rect = clankerRectangleAt(entry, CLANKER_RECTANGLE);
-          const reach = step >= STEP_MAX - 1e-6 ? Math.max(step, BL.clankers.PROP_STEP) : step;
-          floor = Math.max(floor, solids.gorillaBlendedStepAt(x, z, y, reach, heading, floor,
-            rect.halfForward, rect.halfSide, rect.centerForward));
-        } else floor = Math.max(floor, solids.gorillaStepAt(x, z, y, step));
-      }
-      // At a diagonal roof edge the center can be over lower ground while
-      // the walking pads still stand on the lip. One remaining corner alone
-      // cannot hold the whole body up.
-      if (!entry.drive.airborne && !entry.jump.active && !entry.climb.active && y - floor > STEP_MAX) {
-        const sine = Math.sin(heading), cosine = Math.cos(heading), scale = entry.root.scale.x;
-        let planted = 0;
-        for (let forward = 0; forward < 2; forward++) for (let side = -1; side <= 1; side += 2) {
-          const along = (forward ? 1.35 : 0.05) * scale, across = side * 0.6 * scale;
-          const px = x + sine * along + cosine * across, pz = z + cosine * along - sine * across;
-          if (Math.abs(padSupportAt(px, pz, y, step, props) - y) <= 0.1) planted++;
-        }
-        if (planted >= 2) {
-          const pads = entry.gorilla.walkSupportAt(x, z, y, heading, step, props, padSupportAt);
-          if (Number.isFinite(pads)) floor = Math.max(floor, pads);
-        }
+        // Only the body's support area holds it up; reaching limbs must not
+        // keep the root suspended past a short step or platform edge.
+        floor = Math.max(floor, solids.gorillaStepAt(x, z, y, step));
       }
       return floor;
     }
@@ -9112,6 +9098,29 @@
       if (!clankerCylinderClear(px, y, pz, px, y, pz, 0.85, 2.7, entry, null, false, false, false)) return false;
     }
     return true;
+  };
+  const clankerClimbTorsoClear = (vertices) => {
+    if (!island.hullClearAt(vertices)) return false;
+    let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    for (let i = 0; i < vertices.length; i += 3) {
+      minX = Math.min(minX, vertices[i]); maxX = Math.max(maxX, vertices[i]);
+      minY = Math.min(minY, vertices[i + 1]); maxY = Math.max(maxY, vertices[i + 1]);
+      minZ = Math.min(minZ, vertices[i + 2]); maxZ = Math.max(maxZ, vertices[i + 2]);
+    }
+    for (let i = 0; i < climbMasonry.length; i++) {
+      const row = climbMasonry[i];
+      if (maxX < row.minX || minX > row.maxX || maxY < row.minY || minY > row.maxY
+        || maxZ < row.minZ || minZ > row.maxZ || !solids.isActive(row.node)) continue;
+      for (let j = 0; j < row.boxes.length; j++) if (BL.convex.hullsOverlap(vertices, row.boxes[j])) return false;
+    }
+    return true;
+  };
+  const clankerClimbAreaAt = (x, y, z) => {
+    // Climb geometry belongs to the mainland's cliff belt and underground
+    // walls. The meadow, authored stairs and satellite mesh paths are walks.
+    // This broad phase only admits a search; contact still proves a real wall.
+    const radius2 = x * x + z * z, outer = island.radius + 4, inner = island.meadowRadius - 4;
+    return radius2 <= outer * outer && (y < -0.5 || radius2 >= inner * inner) && !island.stairAt(x, y, z);
   };
   const clankerClimbSolidAt = (x, y, z) => {
     if (island.solidAt(x, y, z)) return true;
@@ -10164,7 +10173,6 @@
     if (factoryMouth?.roofWindow) factoryMouth.roofWindow.suspend();
     hud.dispose();
     BL.net.setBody(null); BL.net.setHub(false); zoneHeld = null;
-    if (window.speechSynthesis) window.speechSynthesis.cancel();
     CLANKER_REST_SLOPE.supportEntry = RAGE_WARP_MOTION.supportEntry = null;
     sleepSightSince = Infinity; sleepSightMode = null; sleepSightGorilla = false; sleepSightFrame++;
     CLANKER_HIT.node = CLANKER_HIT.owner = POOL_BLOCK_HIT.node = POOL_BLOCK_HIT.owner = null;
@@ -10583,6 +10591,7 @@
     };
     shared.carryCharacter = carryCharacter;
     shared.npcWalkable = npcWalkable;
+    shared.npcYieldAhead = npcYieldAhead;
     shared.prepareNpcRoutes = refreshWorkZones;
     shared.npcDetour = npcWorkDetour;
     shared.npcRouteBlocked = (cave, x, y, z) => npcClosedCaveAt(x, z, y, cave.bodyHeight) || npcWorkZoneAt(cave, x, y, z)
@@ -10962,12 +10971,12 @@
       labInside: entropyLab.phase.inside, labStations: entropyLab.stations,
       offices: bcaMouth ? [bcaOffice()] : [],
       labEquipment: entropyLab.equipment, labPickup: pickUpLabEquipment, labReturn: returnLabEquipment, labRoll: rollLabEquipment,
-      solidAt: island.solidAt, climbSolidAt: clankerClimbSolidAt, climbSurfaceAt: clankerClimbSurfaceAt,
+      solidAt: island.solidAt, climbAreaAt: clankerClimbAreaAt, climbSolidAt: clankerClimbSolidAt, climbSurfaceAt: clankerClimbSurfaceAt, climbTorsoClear: clankerClimbTorsoClear,
       climbClear: clankerClimbClear, climbOpeningClear: clankerOpeningClear, platformEntryAt: clankerPlatformEntryAt,
       climbTransitionClear: clankerClimbTransitionClear, climbPeersClear: clankerPeersClear,
       restPoseClear: clankerRestPoseClear, restFootingClear: clankerRestFootingClear,
       groomClear: clankerGroomClear, restSiteClear: clankerRestSiteClear,
-      groundAt: (x, z, y) => island.supportAt(x, z, y, 0.52), groundPlaneAt: clankerGroundPlaneAt, rectangleAt: clankerRectangleAt, groundHullAt: island.hullClearAt, surfaceAt: island.surfaceAt, stairAt: island.stairAt,
+      groundAt: (x, z, y) => island.supportAt(x, z, y, 0.52), groundPlaneAt: clankerGroundPlaneAt, rectangleAt: clankerRectangleAt, surfaceAt: island.surfaceAt, stairAt: island.stairAt,
       pointSupportAt: (x, z, y, entry = null) => Math.max(island.supportAt(x, z, y, 0.02, -Infinity),
         solids.supportAt(x, z, y, 0.02, 0, null, null, false, null, !!entry?.rage?.active)),
       isGrass: island.isGrassAt, restSurfaceClear: clankerRestSurfaceClear, onLand: island.onLand,
@@ -11448,7 +11457,6 @@
       totemUnsub();
       totemUnsub = null;
     }
-    if (window.speechSynthesis) window.speechSynthesis.cancel();
     totems.length = 0;
     if (jumbotron) {
       jumbotron.dispose(renderer);
