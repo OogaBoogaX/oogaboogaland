@@ -468,6 +468,9 @@
     menuNode: null, menuText: null, clips: null, clipIn: 0, menuCanvas: null, menuShown: null, menuMay: "", launchesNode: null, launchesText: null, launchesBoard: null, launchesFourth: null, launchesMenu: null, launchClips: null, launchesMirror: null,
     // Each board's rim, lit while the pointer is over it (`focus`, that board's pick kind).
     focusRims: null, focus: null, launchesCanvas: null, launchesShown: null,
+    // A star at each of the sky's places, shown while a buyer chooses one there (`choosing`, `{ id, was, hover }`), and
+    // the item and place the stand opens at again once the view is home (`reopen`).
+    skyMarks: [], choosing: null, reopen: null,
     // The board dialog: TOP LAUNCHES, then the top buyers (stand-kiosk.js `plaque`), painted as it pages.
     board: { title: "Top launches", help: "", canvas: null, count: 2, index: 0, page: -1, caption: "", note: "", version: 0, shown: null, go(i) { this.index = (i + this.count) % this.count; this.shown = null; } } };
   // Each page's line under the board dialog's picture (its caption, which repaints with it).
@@ -5550,6 +5553,7 @@
     hud.tooltip.show(owner.sequence.label, screen.x, screen.y, null, false, true);
   };
   const showHoverTooltip = (hit, p) => {
+    if (fireworkStand.choosing) return;
     if (hit && (hit.owner.kind === "cave" || hit.owner.kind === "cave-sign")) BL.deferred.prefetchScene(hit.owner.slot.scene);
     // A stand board under the pointer, lit, and named in the tooltip.
     const board = hit && hit.owner.kind === "prop" && (hit.owner.prop === "fireworkmenu" || hit.owner.prop === "fireworklaunches") ? hit.owner : null;
@@ -6163,6 +6167,7 @@
       TAP_RAY.ox + TAP_RAY.dx * depth, TAP_RAY.oy + TAP_RAY.dy * depth, TAP_RAY.oz + TAP_RAY.dz * depth);
   };
   const onTap = (hit, p) => {
+    if (fireworkStand.choosing) return tapSky(p);
     if (factoryDeparting || bifrostDeparting || islandGuide.holding) return;
     if (gorillaBehindBillboard(hit, p)) return;
     if (debugMovementTap(hit, p)) return;
@@ -10155,6 +10160,7 @@
     if (ghosts && ghosts.key(e)) { e.preventDefault(); return; } // HALLOWEEN: the ghost hunt's debug keys
     if (e.key === "Escape" && islandGuide.escape()) { e.preventDefault(); return; }
     if (fireworkWatch.mode === WATCH_GOING || fireworkWatch.mode === WATCH_HOLDING) {
+      if (fireworkStand.choosing && skyKey(e)) return;
       if (e.key === "Escape") { e.preventDefault(); endFireworkWatch(); }
       return;
     }
@@ -11406,7 +11412,8 @@
       launchPoint: FIREWORK_LAUNCH,
       stand: fireworkStand,
       watch: fireworkWatch,
-      openStand: () => openFireworkStand()
+      skyPoints: SKY_POINTS,
+      openStand: (pick = null, place = null) => openFireworkStand(pick, place)
     };
     Object.defineProperty(hubScene.debug, "fireworksPending", { get: () => fireworks ? fireworks.pending : 0, enumerable: true });
     // Tess wears every tier of her detail in her first frames, so each is on the GPU before she comes close: build
@@ -11499,6 +11506,7 @@
     fireworkStand.vendor = fireworkStand.menuNode = fireworkStand.launchesNode = fireworkStand.launchesFourth = fireworkStand.menuText = fireworkStand.launchesText = fireworkStand.clips = null;
     fireworkStand.launchesBoard = fireworkStand.launchesMenu = fireworkStand.launchClips = fireworkStand.launchesMirror = null;
     fireworkStand.focusRims = fireworkStand.focus = null;
+    fireworkStand.skyMarks.length = 0;
     fireworkStand.menuCanvas = fireworkStand.launchesCanvas = fireworkStand.board.canvas = null;
     fireworkStand.menuShown = fireworkStand.launchesShown = fireworkStand.board.shown = null;
     mempoolIsland.water.dispose();
@@ -11694,6 +11702,8 @@
     RENDER_OPTS.glints = fireworks.glints;
   };
   const stopFireworks = () => {
+    if (fireworkStand.choosing) leaveChoosing();
+    fireworkStand.reopen = null;
     if (fireworkWatch.mode) {
       fireworkWatch.mode = 0;
       pilot.setExternalControl(false);
@@ -11887,6 +11897,16 @@
     const tx = (arcMid.x + arcEnd.x) / 2 - v.x, ty = FIREWORK_HEIGHT - 20 - v.y, tz = (arcMid.z + arcEnd.z) / 2 - v.z;
     v.yaw = Math.atan2(tx, tz);
     v.pitch = Math.atan2(ty, Math.hypot(tx, tz));
+    // The sky's places, a star at each slot turned full to that view, hidden until a buyer chooses one (`chooseFireworkPlace`).
+    S.skyMarks.length = 0;
+    for (const slot of FIREWORK_SLOTS) {
+      const dx = v.x - slot.x, dz = v.z - slot.z, rotation = { x: Math.atan2(slot.y - v.y, Math.hypot(dx, dz)), y: Math.atan2(dx, dz), z: 0 };
+      const n = createNode({ geometry: M.star("gold"), position: { x: slot.x, y: slot.y, z: slot.z }, rotation });
+      n.visible = false;
+      addChild(root, n);
+      placed.push(n);
+      S.skyMarks.push(n);
+    }
     S.built = true;
   };
   // The menu's prices, TOP LAUNCHES' counts and the board dialog's page repaint only when what they show changes; a
@@ -11987,7 +12007,7 @@
     if (!f || donations.state.open === false) return "closed";
     return f.buyers === "signed-in" && !BL.net.state.me ? "sign-in" : "yes";
   };
-  const openFireworkStand = (pick = null) => {
+  const openFireworkStand = (pick = null, place = null) => {
     const real = donations.real;
     fireworkStand.note = "";
     if (real && fireworkCatalogue() && BL.net.state.me) donations.purchaseTotals(donations.FIREWORK).then((t) => {
@@ -12000,7 +12020,7 @@
     BL.donationPopup.openStand({
       real, title: "FIREWORKS", heading: "Fireworks",
       label: "Firework stand. Up and Down choose, Enter buys, 1 to 4 buy that one, P previews it free, W pays with your wallet, C copies the invoice, Escape goes back.",
-      items: fireworkItems, pick, mayBuy: fireworkMayBuy, note: () => fireworkStand.note, testNetwork: () => donations.testNetwork,
+      items: fireworkItems, pick, place, mayBuy: fireworkMayBuy, note: () => fireworkStand.note, testNetwork: () => donations.testNetwork,
       // A firework chosen on the board plays large before it is paid for.
       showcase: (id, w, h) => BL.standModels.CLIP_KINDS.includes(id) ? BL.standModels.clipPainter(id, w, h) : null,
       buy: real ? (id, place) => donations.purchase(donations.FIREWORK, id, { slot: fireworkSlotOf(id, place) })
@@ -12019,6 +12039,7 @@
       // Who sees it, and where in the sky the buyer may set it off.
       showLine: fireworkShowLine,
       places: (id) => fireworkPlacesOpen() && FIREWORK_ITEMS.some((it) => it.id === id) ? fireworkPlaces(id) : null,
+      choosePlace: chooseFireworkPlace,
       signIn: () => { BL.donationPopup.close(); BL.net.login(); },
       watch: () => BL.donationPopup.close()
     }, real ? "Pay with Lightning. Your firework goes up for everyone on the island a few seconds after it's paid." : "This is a local simulation. No Bitcoin is sent.");
@@ -12068,6 +12089,84 @@
       }
     }
   });
+  // Where in the sky, chosen in the sky itself: the dialog steps aside, the view goes up over the stand to the arc, and
+  // a star stands at each place. The one nearest the pointer lights (a show pack's neighbours with it); a tap on it
+  // chooses it, on the one chosen already none (the stand chooses), and anywhere else, or Escape, keeps the choice there
+  // was. Left and Right move the light, Enter chooses. The view comes home, and the stand opens again at the item.
+  const SKY_MARK = 20, SKY_MARK_LIT = 30, SKY_POINTS = FIREWORK_SLOTS.map(() => ({ x: 0, y: 0, depth: 0, on: false }));
+  const chooseFireworkPlace = (id, place) => {
+    BL.donationPopup.close();
+    watchFireworks();
+    if (fireworkWatch.mode !== WATCH_GOING && fireworkWatch.mode !== WATCH_HOLDING) return openFireworkStand(id, place);
+    fireworkStand.choosing = { id, was: place, hover: place };
+    for (const n of fireworkStand.skyMarks) n.visible = true;
+    document.body.classList.add("fireworks-choosing");
+    glCanvas.addEventListener("pointermove", hoverSky);
+    hud.hint(COARSE ? "Tap a star to set it off there · tap anywhere else to go back" : "Click a star to set it off there · Esc to go back", 3600000);
+  };
+  const finishChoosing = (place) => {
+    const c = fireworkStand.choosing;
+    if (!c) return;
+    leaveChoosing();
+    fireworkStand.reopen = { id: c.id, place };
+    endFireworkWatch();
+  };
+  const leaveChoosing = () => {
+    fireworkStand.choosing = null;
+    for (const n of fireworkStand.skyMarks) n.visible = false;
+    document.body.classList.remove("fireworks-choosing");
+    if (glCanvas) glCanvas.removeEventListener("pointermove", hoverSky);
+    hud.hideHint();
+    hud.tooltip.hide();
+  };
+  // The star nearest a point on the screen, within most of the way to its neighbour; -1 for none.
+  const skySlotAt = (x, y) => {
+    let best = -1, near = Infinity, gap = Infinity;
+    for (let i = 0; i < SKY_POINTS.length; i++) {
+      const a = SKY_POINTS[i];
+      if (!a.on) continue;
+      if (i > 0 && SKY_POINTS[i - 1].on) gap = Math.min(gap, Math.hypot(a.x - SKY_POINTS[i - 1].x, a.y - SKY_POINTS[i - 1].y));
+      const d = Math.hypot(a.x - x, a.y - y);
+      if (d < near) { near = d; best = i; }
+    }
+    return near < Math.min(0.6 * gap, 120) ? best : -1;
+  };
+  const hoverSky = (e) => {
+    const c = fireworkStand.choosing;
+    if (!c) return;
+    const r = glCanvas.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top, i = skySlotAt(x, y);
+    c.hover = i < 0 ? c.was : i;
+    if (i < 0) hud.tooltip.hide();
+    else hud.tooltip.show(i === c.was ? "Chosen · click again for anywhere" : "Set it off here", x, y, null, false);
+  };
+  const tapSky = (p) => {
+    const c = fireworkStand.choosing, i = skySlotAt(p.x, p.y);
+    finishChoosing(i < 0 ? c.was : i === c.was ? null : i);
+  };
+  const skyKey = (e) => {
+    const c = fireworkStand.choosing, k = e.key;
+    if (k === "Escape") finishChoosing(c.was);
+    else if (k === "ArrowLeft" || k === "ArrowRight") {
+      const step = k === "ArrowLeft" ? -1 : 1, from = c.hover === null ? (step < 0 ? 3 : 2) : c.hover;
+      c.hover = Math.max(0, Math.min(FIREWORK_SLOTS.length - 1, from + step));
+    } else if (k === "Enter" || k === " ") finishChoosing(c.hover);
+    else return false;
+    e.preventDefault();
+    return true;
+  };
+  // While choosing: where each star is on the screen, and the lit ones (the place under the pointer, or the one chosen)
+  // larger and brighter, all of them twinkling.
+  const skyMarksFrame = () => {
+    const c = fireworkStand.choosing, marks = fireworkStand.skyMarks;
+    if (!c) return;
+    const slot = fireworkSlotOf(c.id, c.hover), span = fireworkSpan(c.id);
+    for (let i = 0; i < marks.length; i++) {
+      const s = FIREWORK_SLOTS[i], n = marks[i], lit = slot !== null && i >= slot && i < slot + span, pulse = Math.sin(now * 3 + i * 1.3);
+      n.scale.x = n.scale.y = n.scale.z = (lit ? SKY_MARK_LIT : SKY_MARK) * (1 + 0.06 * pulse);
+      n.glow = lit ? 1.3 + 0.2 * pulse : 0.5 + 0.12 * pulse;
+      SKY_POINTS[i].on = !!renderer.project(s.x, s.y, s.z, SKY_POINTS[i]);
+    }
+  };
   // The view, read and written as an eye and a heading, eased by smoothstep with the heading turning the short way.
   const readWatchPose = (out) => {
     const p = camera.position, t = camera.target, dx = t.x - p.x, dy = t.y - p.y, dz = t.z - p.z;
@@ -12111,15 +12210,20 @@
     document.body.classList.remove("fireworks-watching");
     pilot.setExternalControl(false);
     pilot.setActive(true); pilot.controls.reset(); input.reset();
+    const back = fireworkStand.reopen;
+    fireworkStand.reopen = null;
+    if (back) openFireworkStand(back.id, back.place);
   };
-  // After the pilot's own view every frame: gliding up, held while anything is in the sky, gliding home.
+  // After the pilot's own view every frame: gliding up, held while anything is in the sky or a place is being chosen,
+  // gliding home.
   const fireworkWatchFrame = (dt) => {
     const w = fireworkWatch;
     if (!w.mode) return;
     w.t = Math.min(1, w.t + dt / WATCH_EASE);
     putWatchPose(w.from, w.to, w.t);
+    skyMarksFrame();
     if (w.mode === WATCH_GOING && w.t >= 1) w.mode = WATCH_HOLDING;
-    else if (w.mode === WATCH_HOLDING && !fireworks.live && !fireworks.pending) endFireworkWatch();
+    else if (w.mode === WATCH_HOLDING && !fireworks.live && !fireworks.pending && !fireworkStand.choosing) endFireworkWatch();
     else if (w.mode === WATCH_RETURNING && w.t >= 1) releaseFireworkWatch();
   };
   // A paid firework, heard on every page (donations.js): it launches at the API's `launchAt` on this page's estimate of

@@ -145,7 +145,11 @@ item, its clip playing, its name and price, the cards scrolling once there are m
 details, the item playing large with BUY and its price, BACK and SEE IT IN THE SKY (the free preview), and BUY goes on
 to its payment. The details say plainly that everyone on the island sees it in their sky (with how many players are
 here, when there are others), and let the buyer choose where in the sky it bursts: one of the arc's six slots over the
-Sphere, the show pack's three around it, or anywhere, the server's choice. The chosen slot goes with the purchase
+Sphere, the show pack's three around it, or anywhere, the server's choice. It is chosen in the sky itself: a tap on
+the details' WHERE IN THE SKY strip steps the dialog aside and takes the view up over the stand to the arc, where a
+star stands at each slot; the one under the pointer lights (with a show pack's neighbours), a tap on it chooses it (on
+the chosen one again, anywhere), and a tap elsewhere or Escape keeps the choice there was. The view comes home and the
+details open again with the place on their strip. The chosen slot goes with the purchase
 (`slot` in `/purchases/buy`) only where the API's catalogue says it takes one (`slots`), and with the free preview and
 a simulated purchase.
 
