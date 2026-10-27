@@ -11252,8 +11252,27 @@ const hubCombatReplay = { name: "birds-eye combat replay", why: "contract: repla
     P.restorePose(JSON.parse(JSON.stringify(pose)), true); B.advance(0.2, 1 / 60);
     return { pose, side, headOffset: B.renderer.size.width / 2 - head.x, held, roundTrip: view === JSON.stringify([C.position, C.target, C.up, C.fov]) };
   })()`);
-  record("shoulder replay: the supplied zero-offset URL loads beside the head before any input and holds the repaired camera", repaired.pose.mode === "shoulder" && repaired.pose.combat && repaired.pose.shoulderSide === 0.6 && Math.abs(repaired.side - 0.6) < 1e-5 && repaired.headOffset > 0 && repaired.held
+  record("shoulder replay: the supplied zero-offset URL loads beside the head before any input and holds the repaired camera", repaired.pose.mode === "shoulder" && repaired.pose.combat && repaired.pose.shoulderSide === 0.9 && Math.abs(repaired.side - 0.9) < 1e-5 && repaired.headOffset > 0 && repaired.held
     && repaired.pose.actor.every((n, i) => Math.abs(n - collapsed.actor[i]) < 1e-6) && repaired.pose.selectedSlot === 2 && repaired.pose.ammo === 30 && repaired.roundTrip, JSON.stringify(repaired));
+  // The same replay as saved before the shoulder moved out: settled at the earlier ±0.6 side, which is valid, not collapsed.
+  const height = await b.evaluate("__ooga.pilot.player.traits.height"), yaw = collapsed.orbit[0], kept = [];
+  for (const sign of [1, -1]) {
+    const dx = Math.cos(yaw) * 0.6 * height * sign, dz = -Math.sin(yaw) * 0.6 * height * sign;
+    const saved = { ...collapsed, shoulderSide: 0.6 * sign,
+      position: [collapsed.position[0] + dx, collapsed.position[1], collapsed.position[2] + dz], target: [collapsed.target[0] + dx, collapsed.target[1], collapsed.target[2] + dz] };
+    await b.open(hubPage(src, `character=w-s-bitcoin&pose=${encodeURIComponent(JSON.stringify(saved))}`));
+    await untilReady(b);
+    kept.push(await b.evaluate(`(() => {
+      const B = __ooga, P = B.pilot, C = B.camera, saved = ${JSON.stringify(saved)};
+      const at = (v, a) => Math.abs(v.x - a[0]) < 1e-6 && Math.abs(v.y - a[1]) < 1e-6 && Math.abs(v.z - a[2]) < 1e-6;
+      const pose = JSON.parse(document.getElementById("position-debug").dataset.pose); P.capturePose(pose);
+      const exact = at(C.position, saved.position) && at(C.target, saved.target);
+      B.advance(0.5, 1 / 60);
+      return { side: pose.shoulderSide, exact, held: P.poseHeld && at(C.position, saved.position) && at(C.target, saved.target) };
+    })()`));
+  }
+  record("shoulder replay: a settled URL saved at the earlier ±0.6 side holds its recorded camera instead of being repaired", kept.length === 2
+    && kept.every((k, i) => k.exact && k.held && Math.abs(k.side - (i ? -0.6 : 0.6)) < 1e-9), JSON.stringify(kept));
 } };
 
 const hubBirdsEyeTargets = { name: "birds-eye lower-floor targets", why: "rule: hidden upstairs targets cannot steal downstairs aim, and the orange melee dot and secondary shots identify the object that actually receives damage", run: async (b) => {

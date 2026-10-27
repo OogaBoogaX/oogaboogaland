@@ -60,7 +60,9 @@
   const FLY = { speed: 6, perDist: 0.5, climb: 6, yMin: -8, yMax: JET_RISE * JET_FUEL_SECONDS + 16 }, FLY_BOUND = RADIUS + JET_SPEED * JET_MOVE_SECONDS + 8;
   // ABYSS_FLOOR is an unseen support that keeps hop integration finite until the visible abyss fall ends.
   const ABYSS_FLOOR = -120, ABYSS_RESPAWN_Y = -60;
-  const FOLLOW = { y: 0.9, min: 4, max: 10, pitch: [0.25, 0.8] };
+  // `view` is where a driven Ooga's camera arrives at the pile (signing in, a respawn) and where a reset puts it:
+  // high and far enough to read the ground all round the Ooga, the top of the view just reaching the horizon.
+  const FOLLOW = { y: 0.9, min: 4, max: 10, pitch: [0.25, 0.8], view: { pitch: 0.42, dist: 9 } };
   // Close view sits at an average Ooga eye; first person sits at the face surface.
   // Looking down then clears the hidden head. Portal ownership stays with the Ooga, not this offset.
   const CLOSE_VIEW = { eyeHeight: 1.1, eyeRatio: 0.95, eyeForward: 0.16, pitch: [-1.35, 1.35], trailingDist: 6, orbitDist: 6 };
@@ -6464,8 +6466,8 @@
     if (name === "pile") {
       z = Math.max(5, altar.platformRadius + 1.3);
       setVec(target, 0, ALTAR_HEIGHT + Math.max(0.4, pile.pileEdge() * 0.3), 0);
-      pitch = player ? 0.22 : 0.28;
-      if (!player) dist = Math.max(10, z + 4);
+      pitch = player ? FOLLOW.view.pitch : 0.28;
+      dist = player ? FOLLOW.view.dist : Math.max(10, z + 4);
     } else if (name === "gate") {
       // Eye-level arrivals view the arch from the foot of the steps; a trailing camera pulls back from the landing.
       // Neither arrival puts a standing body across the narrow stair treads.
