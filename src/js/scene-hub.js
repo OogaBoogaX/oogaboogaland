@@ -11715,7 +11715,9 @@
     plinth.depthBias = canvas2d ? -0.3 : 0;
     solids.add(plinth);
     solids.add(node(parts.timber));
+    // The banners' sunbursts sort nearer on Canvas 2D than the cloth they lie on.
     node(parts.iron); node(parts.cloth); node(parts.dark); node(parts.swing); node(parts.glow);
+    node(parts.marks).depthBias = canvas2d ? -0.25 : 0;
     // The sign's lettering: raised blocks in WebGL; on Canvas 2D one cut-out picture each, sorted well nearer than the
     // planks it stands on (a negative bias, as the island's other signs use). The plank faces split at every knot, so
     // a piece can sit a metre nearer than the picture's middle in an oblique view; seen from behind, a picture faces
@@ -11743,9 +11745,9 @@
     S.launchesNode = node(null, { x: L.launches.x, y: L.launches.y, z: L.launches.z });
     S.menuShown = S.launchesShown = S.board.shown = null;
     refreshFireworkBoards();
-    // Lanterns: the canopy's, which light the counter at night, and the boards', which only glow.
+    // Lanterns: the canopy's, which light the counter at night, and the lantern ropes', which only glow.
     L.lamps.forEach(([x, y, z], n) => hangStandLantern(group, x, y, z, `fireworkstand:lamp${n}`, true));
-    L.boardLamps.forEach(([x, y, z], n) => hangStandLantern(group, x, y, z, `fireworkstand:board${n}`, false));
+    L.ropeLamps.forEach(([x, y, z], n) => hangStandLantern(group, x, y, z, `fireworkstand:rope${n}`, false));
     // The vendor behind the counter in a straw hat: an Ooga of no one's, looking out over it.
     const vendor = models.caveman(contributors.traitsFor("fireworks-vendor")), figure = vendor.root;
     figure.position.x = L.vendor.x;

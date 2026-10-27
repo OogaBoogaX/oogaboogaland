@@ -3,12 +3,13 @@
 // terminal on it, shelves of firework boxes behind, a red and white striped canopy with a scalloped valance and
 // bunting, the big gold FIREWORKS sign with LIGHT UP OBL under it and four oversized rockets standing on it, gold
 // starbursts round it, and two boards either side on their own posts: BUY A FIREWORK on the left with each firework's
-// icon, name and price, and TOP LAUNCHES on the right under a gold crown and a banner. It stands on a plinth of two
-// stone courses with a paving of bricks, its floor half a metre up. Its timber is voxels an eighth of a metre across
-// (`PX`) with the grain running along each beam, as the Factory's kiosk and board are built, so the renderer's block
-// detail gives it the same pixel texture; the plinth's stones and bricks are voxels too; cloth, letters, stars and
-// pictures stay smooth. The lettering and the marquee are meshes of their own, for Canvas 2D's `depthBias` (the scene
-// sets it) to sort them in front of the sign's planks.
+// icon, name and price, and TOP LAUNCHES on the right under a gold crown. It stands on a plinth of two stone courses
+// with a paving of bricks, its floor half a metre up. Tall posts at its outer corners fly blue sunburst banners and
+// string lantern ropes to the sign. Its timber is voxels an eighth of a metre across (`PX`) with the grain running
+// along each beam, as the Factory's kiosk and board are built, so the renderer's block detail gives it the same pixel
+// texture; the plinth's stones and bricks are voxels too; cloth, rope, letters, stars and pictures stay smooth. The
+// lettering and the marquee are meshes of their own, for Canvas 2D's `depthBias` (the scene sets it) to sort them in
+// front of the sign's planks.
 //
 // Everything is in the stand's own frame: x to the visitor's right as they face it, y up from its floor (the plinth's
 // top, `LAYOUT.floor` over the ground), +z out of its front. `LAYOUT` places what the scene hangs and uses (where a
@@ -54,9 +55,11 @@
   };
   // A steady fraction for a cell, so a block or a brick keeps its tone.
   const hash = (a, b, c) => (Math.imul(a * 73856093 ^ b * 19349663 ^ c * 83492791, 2654435761) >>> 0) / 4294967296;
+  // A sagging rope's point t of the way from a to b, `sag` metres down at its middle.
+  const along = ([ax, ay, az], [bx, by, bz], sag, t) => [ax + (bx - ax) * t, ay + (by - ay) * t - sag * 4 * t * (1 - t), az + (bz - az) * t];
 
   // Where things are, in the stand's frame.
-  const FLOOR = 0.5, ROCKET_H = 1.5, BOARD_X = 2.875;
+  const FLOOR = 0.5, ROCKET_H = 1.5, BOARD_X = 2.875, CORNER_X = 4.0;
   // The plinth: its lower course's and upper course's half-width and front (both run back to the booth's back), and
   // the border of stone round the paving in the upper course's top.
   const PLINTH = { lower: { x: 4.5, z: 3.625 }, upper: { x: 4.25, z: 3.375 }, back: -1.75, border: 0.5 };
@@ -72,9 +75,11 @@
     screen: { x: 0.8, y: 1.25, z: 0.62, w: 0.46, h: 0.34, tilt: -0.55 },
     // The vendor stands on a step behind the counter, so his head and hat clear its top.
     vendor: { x: -0.55, y: 0.6, z: -0.35 },
-    // The lanterns that light it, from the canopy's front corners; the boards' own, which only glow.
+    // The lanterns that light it, from the canopy's front corners.
     lamps: [[-1.62, 2.5, 1.0], [1.62, 2.5, 1.0]],
-    boardLamps: [[-BOARD_X - 0.875, 3.0, 0.32], [BOARD_X - 0.875, 3.0, 0.32]],
+    // The lantern ropes, from the corner posts' tops to the sign's top corners: their ends, their sag, and where along
+    // each a lantern hangs; those lanterns only glow.
+    ropes: [-1, 1].map((s) => ({ from: [s * CORNER_X, 4.8, 0.25], to: [s * 2.3, 4.1, 1.2], sag: 0.32, lamps: [0.34, 0.68] })),
     // The pictures stand a few centimetres proud of the faces behind them, so Canvas 2D sorts them in front too.
     menu: { x: -BOARD_X, y: 1.69, z: 0.42, w: 1.42, h: 1.78 },
     launches: { x: BOARD_X, y: 1.69, z: 0.42, w: 1.42, h: 1.78 },
@@ -84,9 +89,11 @@
     // The four big rockets on the sign: their feet, their lean, their paint; their tips are where the sparks fly from.
     rockets: [[-1.69, 4.25, 1.25, 0.14, "stripes"], [-0.56, 4.25, 1.25, 0.05, "stars"], [0.56, 4.25, 1.25, -0.05, "plum"], [1.69, 4.25, 1.25, -0.14, "spiral"]],
     rocketH: ROCKET_H,
-    banner: { x: 3.55, y: 4.3, z: 0.18 }
+    // The corner posts' banners: where each hangs from its arm.
+    banners: [-1, 1].map((s) => ({ x: s * (CORNER_X + 0.47), y: 4.78, z: 0.25 }))
   };
   LAYOUT.tips = LAYOUT.rockets.map(([x, y, z, lean]) => [x - Math.sin(lean) * ROCKET_H, y + Math.cos(lean) * ROCKET_H, z]);
+  LAYOUT.ropeLamps = LAYOUT.ropes.flatMap((r) => r.lamps.map((t) => along(r.from, r.to, r.sag, t)));
 
   // ---- letters ---------------------------------------------------------------------------------------------------
   // `text` in the island's carved sign font (hub-models.js SIGN_GLYPHS), centred on (x, y) with its back at depth z,
@@ -151,6 +158,10 @@
     return merge(...out);
   };
   const STAR = ["...#...", ".#.#.#.", "..###..", "###@###", "..###..", ".#.#.#.", "...#..."];
+  // Inks for the sprites: a burst's colour and its bright middle.
+  const INKS = {
+    gold: { "#": "#ffc21a", "@": "#fff2b0" }
+  };
   // One starburst, about half a metre across, that the scene twinkles node by node.
   const star = cached(() => noShadow(sprite(STAR, { "#": "#ffc21a", "@": "#fff2b0" }, 0, 0, 0, 0.075, 0.06, 1)));
 
@@ -200,6 +211,18 @@
     v.set(i + 1, j + 1, k, T.star);
   };
 
+  // ---- rope ------------------------------------------------------------------------------------------------------
+  // A rope sagging `sag` metres from a to b, in twelve-centimetre lengths of alternating twist.
+  const rope = (out, a, b, sag, thick = 0.055) => {
+    const n = Math.max(4, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]) / 0.12));
+    for (let s = 0; s < n; s++) {
+      const p = along(a, b, sag, s / n), q = along(a, b, sag, (s + 1) / n), dx = q[0] - p[0], dy = q[1] - p[1], dz = q[2] - p[2];
+      const length = Math.hypot(dx, dy, dz) + thick * 0.5, flat = Math.hypot(dx, dz);
+      const piece = turnedY(turnedZ(box({ w: length, h: thick, d: thick, color: s % 2 ? "#a8803f" : "#c9a063" }), Math.atan2(dy, flat)), Math.atan2(-dz, dx));
+      out.push(moved(piece, (p[0] + q[0]) / 2, (p[1] + q[1]) / 2, (p[2] + q[2]) / 2));
+    }
+  };
+
   // ---- the stand -------------------------------------------------------------------------------------------------
   // What stands on the ground round the stand, cached on its own so the hub can build it in a slice of its own before
   // the booth: the plinth.
@@ -220,7 +243,7 @@
     return { plinth: voxGeo(p, ZERO) };
   });
   const build = cached(() => {
-    const v = makeVox(), rand = mulberry32(2140), iron = [], cloth = [], swing = [], glow = [], dark = [];
+    const v = makeVox(), rand = mulberry32(2140), iron = [], cloth = [], swing = [], marks = [], glow = [], dark = [];
 
     // The deck the booth stands on, and the merchant counter on it: vertical planks, a top that runs out over them, and
     // a recess in its front for the painted cloth.
@@ -258,9 +281,13 @@
       timber(v, rand, cx - 1.0, cx + 1.0, 2.875, 3.0, 0.125, 0.5, "x");
       fill(v, cx - 0.75, cx + 0.75, 0.75, 2.625, 0.25, 0.375, T.slate);
     }
-    // TOP LAUNCHES' banner pole, behind the board at its outer end, and the arm the banner hangs from.
-    timber(v, rand, 3.75, 3.875, 0, 4.5, 0.0, 0.125, "y");
-    timber(v, rand, 3.25, 3.875, 4.375, 4.5, 0.0, 0.125, "x");
+    // The corner posts, past the boards' outer posts, to five metres, each with a finial, a lantern rope's hook at its
+    // top and an arm the banner hangs from.
+    for (const s of [-1, 1]) {
+      timber(v, rand, s * CORNER_X - 0.125, s * CORNER_X + 0.125, 0, 5.0, 0.125, 0.375, "y");
+      fill(v, s * CORNER_X - 0.125, s * CORNER_X + 0.125, 5.0, 5.125, 0.125, 0.375, T.trim);
+      timber(v, rand, Math.min(s * CORNER_X, s * (CORNER_X + 0.875)), Math.max(s * CORNER_X, s * (CORNER_X + 0.875)), 4.75, 4.875, 0.125, 0.375, "x");
+    }
     // The shelves' goods: boxes of fireworks in their paints with gold stars, and bundles of little rockets.
     const sb = (x, y, z, c) => starBox(v, cell(x, "x"), cell(y, "y"), cell(z, "z"), c);
     sb(-1.375, 1.5, -1.625, T.boxBlue); sb(-1.0, 1.5, -1.625, T.boxRed); sb(0.75, 1.5, -1.625, T.boxBlue);
@@ -301,13 +328,16 @@
       const t0 = n / 12, t1 = (n + 1) / 12, x0 = -1.5 + 3 * t0, x1 = -1.5 + 3 * t1, y0 = 2.46 - Math.sin(t0 * Math.PI) * 0.1, y1 = 2.46 - Math.sin(t1 * Math.PI) * 0.1;
       swing.push(moved(turnedZ(box({ w: Math.hypot(x1 - x0, y1 - y0), h: 0.015, d: 0.015, color: "#3a2412" }), Math.atan2(y1 - y0, x1 - x0)), (x0 + x1) / 2, (y0 + y1) / 2, 1.22));
     }
-    // TOP LAUNCHES' banner: navy cloth hanging from the pole's arm, a gold firework on it, rocking with the bunting.
-    const B = LAYOUT.banner;
-    swing.push(box({ w: 0.62, h: 1.0, d: 0.03, color: "#1d3f9e", offset: { x: B.x, y: B.y - 0.55, z: B.z } }));
-    // Its foot cut in four points.
-    for (let k = 0; k < 4; k++) swing.push(moved(prism([[-0.31 + k * 0.155, 0], [-0.155 + k * 0.155, 0], [-0.2325 + k * 0.155, -0.12]], 0.03, "#1d3f9e"), B.x, B.y - 1.05, B.z));
-    swing.push(moved(sprite(STAR, { "#": "#ffc21a", "@": "#fff2b0" }, 0, 0, 0, 0.06, 0.02, 0.8), B.x, B.y - 0.5, B.z + 0.03));
-    swing.push(box({ w: 0.03, h: 0.12, d: 0.03, color: "#3a2412", offset: { x: B.x - 0.25, y: B.y + 0.02, z: B.z } }), box({ w: 0.03, h: 0.12, d: 0.03, color: "#3a2412", offset: { x: B.x + 0.25, y: B.y + 0.02, z: B.z } }));
+    // The ropes: the lantern ropes from the corner posts to the sign.
+    for (const r of LAYOUT.ropes) rope(cloth, r.from, r.to, r.sag, 0.045);
+    // The corner posts' banners: blue cloth hanging from each arm, its foot cut in four points, a gold sunburst on its
+    // front (`marks`, its own mesh so Canvas 2D can sort it before the cloth); they rock in the wind (`swing`).
+    for (const B of LAYOUT.banners) {
+      swing.push(box({ w: 0.66, h: 1.05, d: 0.03, color: "#2238a8", offset: { x: B.x, y: B.y - 0.6, z: B.z } }));
+      for (let k = 0; k < 4; k++) swing.push(moved(prism([[-0.33 + k * 0.165, 0], [-0.165 + k * 0.165, 0], [-0.2475 + k * 0.165, -0.13]], 0.03, "#2238a8"), B.x, B.y - 1.125, B.z));
+      marks.push(moved(sprite(STAR, INKS.gold, 0, 0, 0, 0.065, 0.02, 0.8), B.x, B.y - 0.55, B.z + 0.027));
+      swing.push(box({ w: 0.03, h: 0.14, d: 0.03, color: "#3a2412", offset: { x: B.x - 0.27, y: B.y + 0.02, z: B.z } }), box({ w: 0.03, h: 0.14, d: 0.03, color: "#3a2412", offset: { x: B.x + 0.27, y: B.y + 0.02, z: B.z } }));
+    }
 
     // The sign's letters, gold over a darker orange with a dark rim, and the tagline's in cream.
     // The lettering is its own pair of meshes, so Canvas 2D can sort it in front of the planks it stands on.
@@ -346,7 +376,7 @@
       // Canvas 2D's lettering: [picture, its middle], the scene lays each as a cut-out.
       letterPictures: [[letterPicture("FIREWORKS", 0.118, "#ffc61f", "#a8360a"), [0, 3.69 + 0, 1.42]], [letterPicture("LIGHT UP OBL", 0.056, "#f6ecd2", "#2a1307"), [0, 2.81, 1.53]]],
       ...ground(), timber: voxGeo(v), iron: merge(...iron), cloth: merge(...cloth), dark: merge(...dark),
-      swing: Object.assign(noShadow(merge(...swing)), { swing: 1 }), glow: noShadow(merge(...glow))
+      swing: Object.assign(noShadow(merge(...swing)), { swing: 1 }), marks: Object.assign(noShadow(merge(...marks)), { swing: 1 }), glow: noShadow(merge(...glow))
     };
   });
 
