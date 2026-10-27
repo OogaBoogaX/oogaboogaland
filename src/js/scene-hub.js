@@ -443,17 +443,19 @@
   let fireworks = null, fireworksAudio = null, fireworkDebugCount = 0;
   // The toast's count to the latest paid firework's launch, in scene seconds: its three lines are made when it is heard.
   const fireworkCountdown = { until: 0, shown: 0, texts: null };
-  // The stand that sells them (stand-models.js for the attraction, stand-kiosk.js for its screen), with its back to the
-  // rock wall in front of the sealed cave at 9 o'clock (caves.js marks it, FIREWORK_STAND_SLOT), just right of the
-  // Sphere's stairs: FIREWORK_STAND_OUT out of the mouth, so its back wall stands clear of the rim and the seal, the
-  // booth over the sealed doorway, facing the island's middle down the path that leads to it. The rockets go up from
-  // the cliff top behind it (FIREWORK_LAUNCH). It is built only while that slot stays sealed. Space at its
+  // The stand that sells them (stand-models.js for the attraction, stand-kiosk.js for its screen), set into the mouth
+  // of the sealed cave at 9 o'clock (caves.js marks it, FIREWORK_STAND_SLOT), just right of the Sphere's stairs:
+  // FIREWORK_STAND_OUT out of the mouth, so its counter, sign, boards and posts stand before the cave's rim and its
+  // shelves and vendor inside the opening, under the rock, its awning hung from the rim's lintel, facing the island's
+  // middle down the path that leads to it. The cave's seal stands just behind its back wall (`buildMouth`). The
+  // rockets go up from the cliff top above it (FIREWORK_LAUNCH). It is built only while that slot stays sealed. Space
+  // at its
   // counter (stand-models.js LAYOUT.use) or a tap on it or its menu opens its screen; TOP LAUNCHES ranks the fireworks
   // by launches over the API's last seven days (`purchaseCounts`), with the top buyers on its dialog's second page.
   // After a purchase, or a preview, the visitor's view glides up from the stand to the arc (FIREWORK_WATCH_UP over
   // it) and holds there while the sky is lit, then comes home. Within FIREWORK_STAND_NEAR its stars twinkle and sparks
   // now and then fly from the rockets' tips.
-  const FIREWORK_STAND_SLOT = "fireworks", FIREWORK_STAND_OUT = 2.4, FIREWORK_WATCH_UP = 9, FIREWORK_STAND_NEAR = 30;
+  const FIREWORK_STAND_SLOT = "fireworks", FIREWORK_STAND_OUT = 0.6, FIREWORK_WATCH_UP = 9, FIREWORK_STAND_NEAR = 30;
   const STAND_SPARKS = [models.particleGeometry("#ffc21a", 0.11, 1), models.particleGeometry("#57c7ff", 0.11, 1), models.particleGeometry("#d65cff", 0.11, 1)];
   const FIREWORK_ITEMS = [{ id: "pop", name: "OOGA POP", price: null }, { id: "bolt", name: "LIGHTNING BOLT", price: null }, { id: "mega", name: "MEGA BLAST", price: null }, { id: "show", name: "SHOW PACK", price: null }];
   // What the stand asks with no API behind it, where it only simulates: the prices the API is configured with.
@@ -1838,7 +1840,9 @@
     }
     if (slot.status === "dark") {
       const geometry = hubModels.sealedCaveFace(sealedCaveVariant(slot.id));
-      const seal = createNode({ position: { x: 0, y: 0, z: SEAL_Z }, geometry, matrixExterior: true, sightSolid: true });
+      // With the firework stand set into the mouth, the seal stands just behind the stand's back wall.
+      const sealZ = slot.stand === FIREWORK_STAND_SLOT ? FIREWORK_STAND_OUT + BL.standModels.LAYOUT.footprint.z0 - geometry.frontZ - 0.03 : SEAL_Z;
+      const seal = createNode({ position: { x: 0, y: 0, z: sealZ }, geometry, matrixExterior: true, sightSolid: true });
       addChild(group, seal);
       solids.add(seal);
       registerClimbMasonry(seal, m);

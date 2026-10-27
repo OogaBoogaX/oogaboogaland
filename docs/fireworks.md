@@ -80,13 +80,17 @@ Rockets leave the rock north of the Sphere's stairs (`FIREWORK_LAUNCH`, 23 m out
 its right). From the meadow below, every flight climbs too shallow to clear that 7 m wall; from its top, every flight
 to every slot clears the rock by more than 20 m and the Sphere's shell by more than 8.
 
-The stand stands with its back to the rock wall in front of the sealed cave at 9 o'clock, just right of the
-Sphere's stairs, its booth over the sealed doorway and its front to the island's middle at the end of the path that
-leads to that mouth (`FIREWORK_STAND_OUT` out of it, in `scene-hub.js`). `caves.js` marks that slot as the stand's
-(`stand: "fireworks"`), and a check in the global tier keeps it sealed, since giving it a cave would put the stand
-in the doorway; the stand is built only while it stays sealed. Its ground and the strip before it are claimed, so
-palms and scatter stay off them. The rockets go up from the cliff top just behind it, and the buyer's view glides up
-from the stand to watch, with the Sphere at the foot of the frame.
+The stand is set into the mouth of the sealed cave at 9 o'clock, just right of the Sphere's stairs, facing the
+island's middle at the end of the path that leads to that mouth (`FIREWORK_STAND_OUT` out of it, in `scene-hub.js`).
+Its counter, sign, rockets, boards and banner posts stand before the cave's stone rim; its shelves and vendor stand
+inside the opening, under the rock, and its awning hangs from the rim's lintel. The cave's seal and the veil on it
+stand just behind the stand's back wall, while the plane walkers stop at and the zone kept clear of NPCs stay at the
+rim, so the stand opens no way into the cave. `caves.js` marks that slot as the stand's (`stand: "fireworks"`), and a
+check in the global tier keeps it sealed, since giving it a cave would put the stand in the doorway; the stand is
+built only while it stays sealed. Its ground and the strip before it are claimed, so palms and scatter stay off
+them. The rockets go up from the cliff top above it, and the buyer's view glides up from the stand to watch, with the
+Sphere at the foot of the frame. The cave behind the counter is where the stand can grow, as it becomes the island's
+shop for other experiences.
 
 ## The stand
 
@@ -102,17 +106,17 @@ fireworks, is `images/fireworks-concept-sheet.webp`:
 - **Above:** the FIREWORKS sign in big gold letters with a marquee of bulbs chasing round it, LIGHT UP OBL under it
   with a sparkle at either end, and four oversized voxel rockets standing on it before a palisade of stakes, a
   sparkle over each tip in its own colour and gold bursts in the greenery at the sign's corners, all twinkling.
-- **In the middle:** a timber booth with a red and white striped canopy and a scalloped valance; a merchant counter
-  with the stand's point-of-sale terminal (a keypad with a card slot on a graphite base, and on a neck the head
-  leaning back toward the buyer, BUY HERE on its screen in a bezel lined in glowing orange, a receipt curling from its
-  top), a painted cloth of the island under a burst and rockets on its ends; shelves stocked with boxes and bundles
-  behind, a purple and a red starburst on them; and the vendor, an Ooga of no one's in a straw hat, looking about.
+- **In the middle:** a timber booth, its back half inside the cave's opening, with a red and white striped canopy hung
+  from the rim's lintel and a scalloped valance; a merchant counter with the stand's point-of-sale terminal (a keypad
+  with a card slot on a graphite base, and on a neck the head leaning back toward the buyer, BUY HERE on its screen in
+  a bezel lined in glowing orange, a receipt curling from its top), a painted cloth of the island under a burst and
+  rockets on its ends; shelves stocked with boxes and bundles behind, a purple and a red starburst on them; and the
+  vendor, an Ooga of no one's in a straw hat, looking about.
 - **Either side:** a board in a heavy frame, its face from the counter's height up, greenery on its cap: its header on
   a plaque with a gold rim and brass studs, each row a raised panel with its icon in a raised frame (and on the menu a
   raised gold play button), and over them its lettering, raised letters like the sign's in WebGL (a picture on Canvas
-  2D), rebuilt when prices or counts change, big enough to read from the path; and open framing behind it to the wall
-  with a shelf of fireworks and a barrel. Tall corner posts fly blue sunburst banners that rock in the wind and string
-  lantern ropes to the sign.
+  2D), rebuilt when prices or counts change, big enough to read from the path. Tall corner posts fly blue sunburst
+  banners that rock in the wind and string lantern ropes to the sign.
 - **Left:** BUY A FIREWORK, the three fireworks with their icons and the server's prices (the show pack is on the
   terminal's screen, not the board), and how to buy.
 - **Right:** TOP LAUNCHES under a gold crown: the fireworks ranked by launches over the last seven days
@@ -123,7 +127,7 @@ fireworks, is `images/fireworks-concept-sheet.webp`:
   ropes' four only glow.
 - Within 30 m its stars twinkle, the marquee chases and sparks now and then fly from a rocket's tip; beyond, nothing
   of it moves. Its models build in two slices of the hub's sliced build (the plinth and greenery, 15 to 21 ms; the
-  booth, 10 to 12 ms) and the stand in a third (about 25 ms). It is about 33,000 faces on 74 nodes, under 3% of the
+  booth, 10 to 12 ms) and the stand in a third (about 25 ms). It is about 31,000 faces on 74 nodes, under 3% of the
   hub's 1.2 million, four pictures (about half a million texels, uploaded once and repainted only when prices or
   counts change) and four lights.
 - On Canvas 2D the boards' lettering (most of all) and their plaques and panels, the banners' sunbursts and the pieces

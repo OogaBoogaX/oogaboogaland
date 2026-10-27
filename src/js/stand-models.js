@@ -1,23 +1,24 @@
-// The firework stand's models and pictures, for the hub's wall at the sealed cave beside the Timechain Sphere's stairs.
-// A small attraction, readable from across the island: a timber booth on a deck with a merchant counter and the stand's
-// point-of-sale terminal on it, its screen in a bezel lined in glowing orange, shelves stocked with fireworks behind, a
-// red and white striped canopy with a scalloped valance, the big gold FIREWORKS sign with LIGHT UP OBL under it and
-// four oversized rockets standing on it, and a board either side: BUY A FIREWORK on the left with each firework's icon,
-// name and price, and TOP LAUNCHES on the right under a gold crown. It stands on a plinth of two courses of chunky
-// stones with mortar joints and a paving of bricks in grout, its floor half a metre up. Tall posts at its outer corners
-// fly blue sunburst banners and string lantern ropes to the sign. The boards stand in heavy frames, their faces from
-// the counter's height up, each a header plaque on a gold rim with brass studs and a raised panel to a row, its icon in
-// a raised frame and, on the menu, a raised gold play button, under its lettering, which in WebGL is raised letters
-// like the sign's. A rope fence on posts, the two either side of the way in lit, runs round the paving. Open timber
-// framing with a shelf and a barrel stands behind each board. A starburst stands at either end of the shelves, rockets
-// on the counter's ends, and the big rockets stand before a palisade of stakes. Painted crates of fireworks stand at
-// the paving's corners. A sparkle hangs over each rocket's tip, gold bursts at the sign's top corners and a sparkle at
-// either end of the tagline. Greenery with white flowers grows on the caps, by the sign and round the plinth. Its
-// timber is voxels an eighth of a metre across (`PX`) with the grain running along each beam, as the Factory's kiosk
-// and board are built, so the renderer's block detail gives it the same pixel texture; the plinth's stones and bricks
-// are boxes on a grid a quarter of a voxel across (`MASON`) that the renderer details as voxels, the greenery's half
-// that size (`LEAF`); cloth, rope, letters, stars and pictures stay smooth. The lettering and the marquee are meshes of
-// their own, for Canvas 2D's `depthBias` (the scene sets it) to sort them in front of the sign's planks.
+// The firework stand's models and pictures, for the sealed cave at 9 o'clock beside the Timechain Sphere's stairs, set
+// into its mouth. A small attraction, readable from across the island: a timber booth on a deck, its back half inside
+// the cave's opening under the rock, with a merchant counter and the stand's point-of-sale terminal on it, its screen
+// in a bezel lined in glowing orange, shelves stocked with fireworks behind, a red and white striped canopy hung from
+// the rim's lintel with a scalloped valance, the big gold FIREWORKS sign with LIGHT UP OBL under it and four oversized
+// rockets standing on it, and a board either side: BUY A FIREWORK on the left with each firework's icon, name and
+// price, and TOP LAUNCHES on the right under a gold crown. It stands on a plinth of two courses of chunky stones with
+// mortar joints and a paving of bricks in grout, its floor half a metre up. Tall posts at its outer corners fly blue
+// sunburst banners and string lantern ropes to the sign. The boards stand in heavy frames, their faces from the
+// counter's height up, each a header plaque on a gold rim with brass studs and a raised panel to a row, its icon in a
+// raised frame and, on the menu, a raised gold play button, under its lettering, which in WebGL is raised letters like
+// the sign's. A rope fence on posts, the two either side of the way in lit, runs round the paving. A starburst stands
+// at either end of the shelves, rockets on the counter's ends, and the big rockets stand before a palisade of stakes.
+// Painted crates of fireworks stand at the paving's corners. A sparkle hangs over each rocket's tip, gold bursts at the
+// sign's top corners and a sparkle at either end of the tagline. Greenery with white flowers grows on the caps, by the
+// sign and round the plinth. Its timber is voxels an eighth of a metre across (`PX`) with the grain running along each
+// beam, as the Factory's kiosk and board are built, so the renderer's block detail gives it the same pixel texture; the
+// plinth's stones and bricks are boxes on a grid a quarter of a voxel across (`MASON`) that the renderer details as
+// voxels, the greenery's half that size (`LEAF`); cloth, rope, letters, stars and pictures stay smooth. The lettering
+// and the marquee are meshes of their own, for Canvas 2D's `depthBias` (the scene sets it) to sort them in front of the
+// sign's planks.
 //
 // Everything is in the stand's own frame: x to the visitor's right as they face it, y up from its floor (the plinth's
 // top, `LAYOUT.floor` over the ground), +z out of its front. `LAYOUT` places what the scene hangs and uses (where a
@@ -78,7 +79,7 @@
     // The ground the stand takes (its plinth), for its claim and for checks of where it may stand; and the open ground
     // before it, kept clear of palms and scatter so the stand shows from the path and visitors have room to come in.
     footprint: { x0: -PLINTH.lower.x, x1: PLINTH.lower.x, z0: PLINTH.back, z1: PLINTH.lower.z },
-    apron: [[-2.75, 4.6, 1.4], [0, 4.8, 1.5], [2.75, 4.6, 1.4]],
+    apron: [[-2.75, 4.6, 1.4], [0, 4.8, 1.5], [2.75, 4.6, 1.4], [-2.75, 6.4, 1.4], [0, 6.6, 1.5], [2.75, 6.4, 1.4]],
     // Where a visitor stands to buy: before the counter, by the terminal; how near counts.
     use: { x: 0.45, z: 1.6, reach: 1.7 },
     // The terminal's head: its middle, its lean back toward the buyer, its glass (a picture `w` by `h`) and how far out
@@ -420,12 +421,9 @@
     // The back wall, and two shelves on it.
     timber(v, rand, -1.75, 1.75, 0.25, 2.875, -1.75, -1.625, "y");
     for (const y of [1.375, 2.0]) timber(v, rand, -1.5, 1.5, y, y + 0.125, -1.625, -1.25, "x");
-    // The posts: the front pair runs up behind the sign and holds it, the back pair the canopy's back beam; the beams.
-    for (const s of [-1, 1]) {
-      timber(v, rand, s > 0 ? 1.5 : -1.75, s > 0 ? 1.75 : -1.5, 0.25, 4.375, 0.875, 1.125, "y");
-      timber(v, rand, s > 0 ? 1.5 : -1.75, s > 0 ? 1.75 : -1.5, 0.25, 3.25, -1.75, -1.5, "y");
-    }
-    timber(v, rand, -1.75, 1.75, 3.0, 3.25, -1.75, -1.5, "x");
+    // The front posts run up behind the sign and hold it, with a beam between them; the booth's back stands under the
+    // rock inside the cave's opening, so it needs no back posts.
+    for (const s of [-1, 1]) timber(v, rand, s > 0 ? 1.5 : -1.75, s > 0 ? 1.75 : -1.5, 0.25, 4.375, 0.875, 1.125, "y");
     timber(v, rand, -1.5, 1.5, 2.375, 2.5, 0.875, 1.125, "x");
     // The sign: a board of planks with a dark rim, in front of the posts; the tagline's plank under it.
     timber(v, rand, -2.375, 2.375, 3.125, 4.25, 1.125, 1.375, "x");
@@ -447,19 +445,6 @@
       timber(v, rand, cx - 0.75, cx + 0.75, 3.0, 3.25, 0.25, 0.5, "x");
       timber(v, rand, cx - 1.125, cx + 1.125, 3.25, 3.5, 0.0, 0.625, "x");
       fill(v, cx - 0.75, cx + 0.75, 1.125, 3.0, 0.25, 0.375, T.slate);
-      // Behind it, open framing to the wall: a post at the back, beams back from the cap, a brace, a shelf of boxes and
-      // bundles, and a barrel on the floor.
-      const outer = s > 0 ? 3.625 : -3.875, inner = s > 0 ? 1.75 : -2.0;
-      timber(v, rand, outer, outer + 0.25, 0, 3.375, -1.75, -1.5, "y");
-      timber(v, rand, outer, outer + 0.25, 3.125, 3.375, -1.5, 0.125, "z");
-      timber(v, rand, Math.min(inner, outer), Math.max(inner, outer) + 0.25, 3.125, 3.375, -1.75, -1.5, "x");
-      timber(v, rand, Math.min(inner, outer) + 0.25, Math.max(inner, outer), 1.125, 1.25, -1.625, -0.875, "x");
-      for (let n = 0; n < 12; n++) fill(v, outer, outer + 0.25, 0.375 + n * 0.229, 0.625 + n * 0.229, -1.5 + n * 0.125, -1.375 + n * 0.125, (i, j, k) => TONES[(j + k) % 4]);
-      const shelfX = s > 0 ? 2.0 : -3.375;
-      starBox(v, cell(shelfX, "x"), cell(1.25, "y"), cell(-1.5, "z"), T.boxRed);
-      starBox(v, cell(shelfX + 0.5, "x"), cell(1.25, "y"), cell(-1.5, "z"), T.purple);
-      bundleAt(bundles, shelfX + 1.0, 1.25, -1.375, [T.green, T.red, T.blue, T.orange]);
-      barrel(v, s * 2.9, 0, -0.95);
     }
     // The corner posts, past the boards' outer posts, to five metres, each with a finial, a lantern rope's hook at its
     // top and an arm the banner hangs from.
@@ -508,9 +493,9 @@
       lamps.push(box({ w: 0.22, h: 0.22, d: 0.22, color: "#ffd66b", emissive: 1, offset: { x, y: top + 0.285, z } }));
     }
 
-    // The canopy: red and white stripes from the back beam down to the front, out over the counter, and a scalloped
+    // The canopy: red and white stripes from the cave rim's lintel down and out over the counter, and a scalloped
     // valance along its front edge.
-    const back = { y: 3.25, z: -1.6 }, front = { y: 2.62, z: 1.32 }, run = Math.hypot(front.z - back.z, back.y - front.y), slope = Math.atan2(back.y - front.y, front.z - back.z);
+    const back = { y: 2.95, z: -0.08 }, front = { y: 2.62, z: 1.32 }, run = Math.hypot(front.z - back.z, back.y - front.y), slope = Math.atan2(back.y - front.y, front.z - back.z);
     const stripes = 10, wide = 3.9 / stripes;
     for (let n = 0; n < stripes; n++) {
       const x = -1.95 + wide * (n + 0.5), color = n % 2 ? "#f4eee2" : "#d8342c";
@@ -604,15 +589,6 @@
   const bundleAt = (out, x, y, z, colors) => {
     colors.forEach((c, n) => out.push(littleRocket(x + PX / 2 + (n % 2) * PX, y, z + PX / 2 + Math.floor(n / 2) * PX, c, n % 3, (n + colors.length) % 3)));
     if (colors.length === 4) out.push(littleRocket(x + PX, y, z + PX, colors[2], 3, 0));
-  };
-  // A barrel on the floor at (x, z), its middle; staves in the timber's tones, two iron hoops.
-  const barrel = (v, x, y, z) => {
-    const i0 = cell(x, "x"), j0 = cell(y, "y"), k0 = cell(z, "z");
-    for (let j = 0; j < 6; j++) for (let a = -3; a <= 2; a++) for (let b = -3; b <= 2; b++) {
-      const d = Math.hypot(a + 0.5, b + 0.5), r = j === 0 || j === 5 ? 2.4 : 2.9;
-      if (d > r) continue;
-      v.set(i0 + a, j0 + j, k0 + b, j === 1 || j === 4 ? T.iron : j === 5 ? GRAIN : TONES[(Math.floor(Math.atan2(b + 0.5, a + 0.5) * 2.5) & 3)]);
-    }
   };
 
   // The vendor's straw hat, for the hat anchor of an Ooga's head: a wide brim and a crown with a red band.
