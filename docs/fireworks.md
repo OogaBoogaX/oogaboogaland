@@ -139,8 +139,10 @@ fireworks, is `images/fireworks-concept-sheet.webp`:
   in voxels, without the joints. The island's large ground polygons can still paint over the plinth's lowest course
   from some angles.
 
-Space at the counter, or a tap on it (BUY HERE), opens the stand's screen at its whole list; a tap on a row of the
-menu board opens it on that firework's preview, and a tap elsewhere on the board at the list.
+Space at the counter, or a tap on it (BUY HERE), opens the stand's screen at its whole list, each item playing its
+clip in a tile, the show pack's the whole show over three bursts; choosing one there opens it on its preview, as from
+the board, and BUY goes on to its payment. A tap on a row of the menu board opens the screen on that firework's
+preview, and a tap elsewhere on the board at the list.
 
 ## Timing
 

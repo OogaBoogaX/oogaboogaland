@@ -14,8 +14,8 @@
 // SIGN IN TO BUY, `hooks.signIn()`; Preview still works) or "closed". `hooks.note()` is a line under the menu (the
 // visitor's own purchases, say), or "". Simulated (`hooks.real` false), the invoice is paid with a tap on PAY, through
 // `hooks.simulate(id)`, which then arrives like the API's word. `hooks.pick`, an item's id, opens the screen at that
-// item. Where the stand can show an item (`hooks.showcase(id, w, h)`, `{ canvas, paint(t) }` or null), the item opens
-// on its showcase first: the item playing large, with BUY and its price (or what stands in the way), BACK and SEE IT IN
+// item. Where the stand can show an item (`hooks.showcase(id, w, h)`, `{ canvas, paint(t) }` or null), its row in the
+// menu plays it in a small tile, and choosing it, there or with `hooks.pick`, opens it on its showcase first: the item playing large, with BUY and its price (or what stands in the way), BACK and SEE IT IN
 // THE SKY (the free preview); BUY goes on to its invoice, and Back from there comes back to the showcase. Without
 // one, the item opens at its invoice when it can be bought now (or what stands in the way), else the menu with it
 // highlighted.
@@ -44,13 +44,15 @@
     canvas.height = H;
     let dirty = true, shown = -1, buttons = [], ticket = 0, shownMay = "", shownNote = "", shownNet = "", walletNote = "";
     const flow = { canvas, W, H, open: false, state: "menu", pick: 0, item: null, invoice: null, error: "", left: 0, showcase: null, from: "menu" };
-    // The showcase's picture: where it sits on the screen, and the item's own painter, made once per item.
-    const SHOW = { x: 30, y: 46, w: 340, h: 200 }, showcases = new Map();
-    let shownAt = -1;
-    const showcaseOf = (item) => {
-      if (!hooks.showcase) return null;
-      if (!showcases.has(item.id)) showcases.set(item.id, hooks.showcase(item.id, SHOW.w, SHOW.h));
-      return showcases.get(item.id);
+    // The showcase's picture and the menu's tiles: where they sit on the screen, and the item's own painters, made once
+    // per item and size.
+    const SHOW = { x: 30, y: 46, w: 340, h: 200 }, TILE = { x: 30, w: 60 }, showcases = new Map();
+    let shownAt = -1, tilesAt = -1;
+    const showcaseOf = (item, w = SHOW.w, h = SHOW.h) => {
+      if (!hooks.showcase || !item) return null;
+      const key = `${item.id}:${w}x${h}`;
+      if (!showcases.has(key)) showcases.set(key, hooks.showcase(item.id, w, h));
+      return showcases.get(key);
     };
     const show = (item) => {
       flow.item = item;
@@ -119,7 +121,7 @@
         if (a.startsWith("item:")) {
           const i = Number(a.slice(5));
           flow.pick = i;
-          return buy(list[i]);
+          return showcaseOf(list[i]) ? show(list[i]) : buy(list[i]);
         }
         if (a === "preview" && list[flow.pick]) return hooks.preview(list[flow.pick].id);
         if (a === "sign-in") return hooks.signIn();
@@ -229,6 +231,17 @@
     };
     flow.animate = (g2, time) => {
       if (flow.state === "asking") spin(g2, W / 2, 226, 30, 8, time);
+      // The menu's tiles play at about 15 frames a second, a little out of step.
+      if (flow.state === "menu") {
+        const list = items(), fresh = tilesAt < 0 || time - tilesAt >= 1 / 15;
+        if (fresh) tilesAt = time;
+        for (let i = 0; i < ROWS && i < list.length; i++) {
+          const tile = showcaseOf(list[i], TILE.w, ROW_H);
+          if (!tile) continue;
+          if (fresh) tile.paint(time + i * 1.7);
+          g2.drawImage(tile.canvas, TILE.x, ROW_Y + i * (ROW_H + ROW_GAP), TILE.w, ROW_H);
+        }
+      }
       // The showcase plays at about 30 frames a second, its picture laid in its frame.
       if (flow.state === "show" && flow.showcase) {
         if (shownAt < 0 || time - shownAt >= 1 / 30) { flow.showcase.paint(time); shownAt = time; }
@@ -240,9 +253,25 @@
       face(g, hooks.title || "FIREWORKS");
       const list = items(), may = shownMay;
       for (let i = 0; i < ROWS && i < list.length; i++) {
-        const it = list[i], y = ROW_Y + i * (ROW_H + ROW_GAP), price = it.price;
+        const it = list[i], y = ROW_Y + i * (ROW_H + ROW_GAP), price = it.price, tile = showcaseOf(it, TILE.w, ROW_H);
         const label = may === "sign-in" ? `${it.name} · SIGN IN` : may === "closed" || price === null ? `${it.name} · CLOSED` : `${it.name} · ${sats(price)} SATS`;
-        button(30, y, 340, ROW_H, label, may === "closed" || price === null ? "off" : i === flow.pick ? "picked" : "secondary", `item:${i}`);
+        const x = tile ? TILE.x + TILE.w + 6 : 30, kind = may === "closed" || price === null ? "off" : i === flow.pick ? "picked" : "secondary";
+        // Beside a tile the row is narrower: its name at the left and its price at the right, each at full size.
+        button(x, y, 370 - x, ROW_H, tile ? "" : label, kind, `item:${i}`);
+        if (tile) {
+          const ty = y + Math.round((ROW_H - GH * 2) / 2), on = kind !== "off";
+          const right = may === "sign-in" ? "SIGN IN" : may === "closed" || price === null ? "CLOSED" : `${sats(price)} SATS`;
+          writeFit(g, it.name, x + 8, ty, 2, on ? INK.white : INK.dim, 362 - width(right, 2) - 8 - (x + 8));
+          write(g, right, 362, ty, 2, on ? (may === "sign-in" ? INK.amber : INK.gold) : INK.dim, "right");
+        }
+        // Its tile (`animate` plays it): a frame round it, and a tap on it chooses the row too, even while it can't be
+        // bought, so its showcase can still be seen.
+        if (tile) {
+          g.strokeStyle = kind === "picked" ? INK.gold : INK.line;
+          g.lineWidth = 2;
+          g.strokeRect(TILE.x - 1, y - 1, TILE.w + 2, ROW_H + 2);
+          buttons.push({ x: TILE.x, y, w: TILE.w, h: ROW_H, act: `item:${i}` });
+        }
       }
       const y = ROW_Y + ROWS * (ROW_H + ROW_GAP) + 2;
       button(30, y, may === "sign-in" ? 160 : 340, 40, "PREVIEW", "secondary", "preview");
