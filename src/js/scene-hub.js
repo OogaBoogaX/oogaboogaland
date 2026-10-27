@@ -11688,7 +11688,8 @@
     S.ry = mouth.ry;
     S.x = mouth.x + Math.sin(mouth.ry) * FIREWORK_STAND_OUT;
     S.z = mouth.z + Math.cos(mouth.ry) * FIREWORK_STAND_OUT;
-    S.y = island.surfaceAt(S.x, S.z);
+    // The stand's frame stands on its floor, the plinth's top.
+    S.y = island.surfaceAt(S.x, S.z) + L.floor;
     const group = createNode({ position: { x: S.x, y: S.y, z: S.z }, rotation: { x: 0, y: S.ry, z: 0 } });
     addChild(root, group);
     placed.push(group);
@@ -11697,6 +11698,12 @@
       addChild(group, n);
       return n;
     };
+    // The plinth and the timber collide; a visitor steps up onto the plinth and walks its paving to the counter. On
+    // Canvas 2D the plinth sorts a little nearer, so the island's ground under it doesn't paint over its foot.
+    const canvas2d = renderer.kind !== "webgl2";
+    const plinth = node(parts.plinth);
+    plinth.depthBias = canvas2d ? -0.3 : 0;
+    solids.add(plinth);
     solids.add(node(parts.timber));
     node(parts.iron); node(parts.cloth); node(parts.dark); node(parts.swing); node(parts.glow);
     // The sign's lettering: raised blocks in WebGL; on Canvas 2D one cut-out picture each, sorted well nearer than the
@@ -11751,9 +11758,9 @@
       BL.scene.updateWorld(pick);
       addProp(kind, pick, at.x, at.z, r);
     }
-    // Its ground, claimed in circles along its width, so nothing is laid under it.
-    const F = L.footprint, mid = (F.z0 + F.z1) / 2;
-    for (let x = F.x0 + 1; x <= F.x1 - 0.99; x += 1.45) { const at = standToWorld(x, 0, mid, { x: 0, y: 0, z: 0 }); claim(at.x, at.z, 2.1); }
+    // Its ground, the plinth's, claimed in two rows of circles along its width, so nothing is laid under it.
+    const F = L.footprint;
+    for (const z of [F.z0 + 1.3, F.z1 - 1.3]) for (let x = F.x0 + 1; x <= F.x1 - 0.99; x += 1.4) { const at = standToWorld(x, 0, z, { x: 0, y: 0, z: 0 }); claim(at.x, at.z, 1.8); }
     for (const [x, z, r] of L.apron) { const at = standToWorld(x, 0, z, { x: 0, y: 0, z: 0 }); claim(at.x, at.z, r); }
     // The buyer's view: up over the stand to the arc's middle.
     const arcMid = FIREWORK_SLOTS[2], arcEnd = FIREWORK_SLOTS[3], v = fireworkWatch.view;

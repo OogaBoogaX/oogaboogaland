@@ -1,32 +1,37 @@
-// The firework stand's models and pictures, for the hub's meadow before the Timechain Sphere's stairs. A small
-// attraction, readable from across the island: a timber booth on a deck with a merchant counter and the stand's
+// The firework stand's models and pictures, for the hub's wall at the sealed cave beside the Timechain Sphere's stairs.
+// A small attraction, readable from across the island: a timber booth on a deck with a merchant counter and the stand's
 // terminal on it, shelves of firework boxes behind, a red and white striped canopy with a scalloped valance and
 // bunting, the big gold FIREWORKS sign with LIGHT UP OBL under it and four oversized rockets standing on it, gold
 // starbursts round it, and two boards either side on their own posts: BUY A FIREWORK on the left with each firework's
-// icon, name and price, and TOP LAUNCHES on the right, under a gold crown and a banner. Its timber is voxels an eighth
-// of a metre across (`PX`) with the grain running along each beam, as the Factory's kiosk and board are built, so the
-// renderer's block detail gives it the same pixel texture; cloth, letters, stars and pictures stay smooth. The
-// lettering and the marquee are meshes of their own, for Canvas 2D's `depthBias` (the scene sets it) to sort them in
-// front of the sign's planks.
+// icon, name and price, and TOP LAUNCHES on the right under a gold crown and a banner. It stands on a plinth of two
+// stone courses with a paving of bricks, its floor half a metre up. Its timber is voxels an eighth of a metre across
+// (`PX`) with the grain running along each beam, as the Factory's kiosk and board are built, so the renderer's block
+// detail gives it the same pixel texture; the plinth's stones and bricks are voxels too; cloth, letters, stars and
+// pictures stay smooth. The lettering and the marquee are meshes of their own, for Canvas 2D's `depthBias` (the scene
+// sets it) to sort them in front of the sign's planks.
 //
-// Everything is in the stand's own frame: x to the visitor's right as they face it, y up from the ground, +z out of
-// its front. `LAYOUT` places what the scene hangs and uses (where a visitor stands to buy, the terminal, the vendor,
-// the lanterns, the stars, the rocket tips the sparks come from, the boards' faces). `build()` is cached per visit's
-// scope, as every builder is. The painters (`menuFace`, `launchesFace`) draw the two boards in the Factory kiosk's
-// letters (factory-kiosk.js `kit`), and `pictureFace` lays a canvas on a face the renderer uploads once.
+// Everything is in the stand's own frame: x to the visitor's right as they face it, y up from its floor (the plinth's
+// top, `LAYOUT.floor` over the ground), +z out of its front. `LAYOUT` places what the scene hangs and uses (where a
+// visitor stands to buy, the terminal, the vendor, the lanterns, the stars, the rocket tips the sparks come from, the
+// boards' faces). `build()` is cached per visit's scope, as every builder is. The painters (`menuFace`, `launchesFace`)
+// draw the two boards in the Factory kiosk's letters (factory-kiosk.js `kit`), and `pictureFace` lays a canvas on a
+// face the renderer uploads once.
 (() => {
   "use strict";
   const BL = window.BL;
   const { makeVox, voxelGeometry, box, bevelBox, merge, moved, turnedX, turnedY, turnedZ, prism, lathe, noShadow, cached } = BL.models;
   const { mulberry32 } = BL.math;
 
-  const PX = 0.125, FROM = { x: -4.5, y: -0.125, z: -2.5 };
-  // Timber tones, its grain, dark trim; the rockets' and boxes' paints; gold that glows a little in the day.
+  const PX = 0.125, FROM = { x: -4.5, y: -0.125, z: -2.5 }, ZERO = { x: 0, y: 0, z: 0 };
+  // Timber tones, its grain, dark trim; the rockets' and boxes' paints; gold that glows a little in the day; the
+  // plinth's stones and its paving's bricks.
   const PALETTE = [null, "#9a5a28", "#8b5022", "#a6652e", "#7d461e", "#57301a", "#46260f",
     "#d8342c", "#f4eee2", "#2d5bd8", "#ffc21a", "#8a3bd1", "#2fa84a", "#a6ef74", "#b8231d", "#2c2e33", "#1d2f7a",
-    "#ff8a1c", "#c83a2a", "#2a4fb8", "#ffd24a", "#16110d", "#ffcf3f", "#5b1f8a", "#1d6e2f"];
+    "#ff8a1c", "#c83a2a", "#2a4fb8", "#ffd24a", "#16110d", "#ffcf3f", "#5b1f8a", "#1d6e2f",
+    "#968b8c", "#857a7c", "#a1979a", "#776d70", "#c07a58", "#b06a4c", "#cc8a66", "#a35f44"];
   const T = { trim: 6, red: 7, white: 8, blue: 9, gold: 10, purple: 11, green: 12, lime: 13, cone: 14, iron: 15, navy: 16,
-    orange: 17, boxRed: 18, boxBlue: 19, star: 20, slate: 21, crown: 22, plum: 23, pine: 24 };
+    orange: 17, boxRed: 18, boxBlue: 19, star: 20, slate: 21, crown: 22, plum: 23, pine: 24,
+    stones: [25, 26, 27, 28], bricks: [29, 30, 31, 32] };
   const GLOWS = { [T.gold]: 0.35, [T.star]: 0.55, [T.crown]: 0.7 };
   const TONES = [1, 2, 3, 4], GRAIN = 5;
   const cell = (m, axis) => Math.round((m - FROM[axis]) / PX);
@@ -47,14 +52,21 @@
   const carve = (v, x0, x1, y0, y1, z0, z1) => {
     for (let i = cell(x0, "x"); i < cell(x1, "x"); i++) for (let j = cell(y0, "y"); j < cell(y1, "y"); j++) for (let k = cell(z0, "z"); k < cell(z1, "z"); k++) v.del(i, j, k);
   };
+  // A steady fraction for a cell, so a block or a brick keeps its tone.
+  const hash = (a, b, c) => (Math.imul(a * 73856093 ^ b * 19349663 ^ c * 83492791, 2654435761) >>> 0) / 4294967296;
 
   // Where things are, in the stand's frame.
-  const ROCKET_H = 1.5, BOARD_X = 2.875;
+  const FLOOR = 0.5, ROCKET_H = 1.5, BOARD_X = 2.875;
+  // The plinth: its lower course's and upper course's half-width and front (both run back to the booth's back), and
+  // the border of stone round the paving in the upper course's top.
+  const PLINTH = { lower: { x: 4.5, z: 3.625 }, upper: { x: 4.25, z: 3.375 }, back: -1.75, border: 0.5 };
   const LAYOUT = {
-    // The ground the stand takes, for its claim and for checks of where it may stand; and the open ground before it,
-    // kept clear of palms and scatter so the stand shows from the path and visitors have room at the counter.
-    footprint: { x0: -4.0, x1: 4.0, z0: -1.75, z1: 2.125 },
-    apron: [[-2.5, 3.6, 1.8], [0, 3.8, 1.8], [2.5, 3.6, 1.8]],
+    // Its floor, the plinth's top, over the ground the stand stands on.
+    floor: FLOOR,
+    // The ground the stand takes (its plinth), for its claim and for checks of where it may stand; and the open ground
+    // before it, kept clear of palms and scatter so the stand shows from the path and visitors have room to come in.
+    footprint: { x0: -PLINTH.lower.x, x1: PLINTH.lower.x, z0: PLINTH.back, z1: PLINTH.lower.z },
+    apron: [[-2.75, 4.6, 1.4], [0, 4.8, 1.5], [2.75, 4.6, 1.4]],
     // Where a visitor stands to buy: before the counter, by the terminal; how near counts.
     use: { x: 0.45, z: 1.6, reach: 1.7 },
     screen: { x: 0.8, y: 1.25, z: 0.62, w: 0.46, h: 0.34, tilt: -0.55 },
@@ -191,6 +203,21 @@
   // ---- the stand -------------------------------------------------------------------------------------------------
   const build = cached(() => {
     const v = makeVox(), rand = mulberry32(2140), iron = [], cloth = [], swing = [], glow = [], dark = [];
+
+    // The plinth under it all, in the ground's cells below the floor: two courses of stone blocks four cells long and
+    // deep and two tall, each block one stone's tone and each course's joints half a block on from the one below, the
+    // upper set back a quarter metre; and in its top, inside a border of the same stone, a paving of bricks two cells
+    // long, each row half a brick on from the last.
+    const p = makeVox(), rear = Math.round(PLINTH.back / PX);
+    const course = (half, front, j0, stagger) => {
+      for (let i = -Math.round(half / PX); i < Math.round(half / PX); i++) for (let k = rear; k < Math.round(front / PX); k++) for (let j = j0; j < j0 + 2; j++)
+        p.set(i, j, k, T.stones[Math.floor(hash(Math.floor((i + stagger) / 4), Math.floor((k + stagger) / 4), j0) * 4)]);
+    };
+    course(PLINTH.lower.x, PLINTH.lower.z, -4, 0);
+    course(PLINTH.upper.x, PLINTH.upper.z, -2, 2);
+    const px = Math.round((PLINTH.upper.x - PLINTH.border) / PX), pz = Math.round((PLINTH.upper.z - PLINTH.border) / PX);
+    for (let i = -px; i < px; i++) for (let k = rear; k < pz; k++) p.set(i, -1, k, T.bricks[Math.floor(hash(Math.floor((i + (k & 1)) / 2), k, 9) * 4)]);
+
     // The deck the booth stands on, and the merchant counter on it: vertical planks, a top that runs out over them, and
     // a recess in its front for the painted cloth.
     timber(v, rand, -1.875, 1.875, 0, 0.25, -1.75, 1.125, "x");
@@ -314,7 +341,7 @@
       bulbs: bulbs.map((list) => noShadow(merge(...list))), lettering,
       // Canvas 2D's lettering: [picture, its middle], the scene lays each as a cut-out.
       letterPictures: [[letterPicture("FIREWORKS", 0.118, "#ffc61f", "#a8360a"), [0, 3.69 + 0, 1.42]], [letterPicture("LIGHT UP OBL", 0.056, "#f6ecd2", "#2a1307"), [0, 2.81, 1.53]]],
-      timber: voxGeo(v), iron: merge(...iron), cloth: merge(...cloth), dark: merge(...dark),
+      plinth: voxGeo(p, ZERO), timber: voxGeo(v), iron: merge(...iron), cloth: merge(...cloth), dark: merge(...dark),
       swing: Object.assign(noShadow(merge(...swing)), { swing: 1 }), glow: noShadow(merge(...glow))
     };
   });
