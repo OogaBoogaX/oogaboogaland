@@ -143,7 +143,11 @@ The stand has one way to buy, wherever it starts: Space at the counter, a tap on
 (or on TOP LAUNCHES while it wears the menu) opens the stand's screen, a wider dialog, at its list: a card for each
 item, its clip playing, its name and price, the cards scrolling once there are more than fit. Choosing one opens its
 details, the item playing large with BUY and its price, BACK and SEE IT IN THE SKY (the free preview), and BUY goes on
-to its payment.
+to its payment. The details say plainly that everyone on the island sees it in their sky (with how many players are
+here, when there are others), and let the buyer choose where in the sky it bursts: one of the arc's six slots over the
+Sphere, the show pack's three around it, or anywhere, the server's choice. The chosen slot goes with the purchase
+(`slot` in `/purchases/buy`) only where the API's catalogue says it takes one (`slots`), and with the free preview and
+a simulated purchase.
 
 ## Timing
 

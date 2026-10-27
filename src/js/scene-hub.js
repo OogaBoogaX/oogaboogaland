@@ -12003,9 +12003,9 @@
       items: fireworkItems, pick, mayBuy: fireworkMayBuy, note: () => fireworkStand.note, testNetwork: () => donations.testNetwork,
       // A firework chosen on the board plays large before it is paid for.
       showcase: (id, w, h) => BL.standModels.CLIP_KINDS.includes(id) ? BL.standModels.clipPainter(id, w, h) : null,
-      buy: real ? (id) => donations.purchase(donations.FIREWORK, id)
+      buy: real ? (id, place) => donations.purchase(donations.FIREWORK, id, { slot: fireworkSlotOf(id, place) })
         : () => Promise.resolve({ invoice: { id: `sim-firework-${++fireworkDebugCount}`, bolt11: "lnbc1simulatedfireworkdonotpay", expires: Date.now() / 1000 + 300 } }),
-      simulate: (id, invoiceId) => donations.simulateFirework(id, invoiceId),
+      simulate: (id, invoiceId, place) => donations.simulateFirework(id, invoiceId, fireworkSlotOf(id, place)),
       // The browser's own wallet (WebLN), only ever inside the visitor's click: the page never pays by itself.
       wallet: () => real && !!window.webln,
       walletPay: async (bolt11) => {
@@ -12015,17 +12015,59 @@
       },
       openWallet: (bolt11) => { window.location.href = `lightning:${bolt11}`; },
       copy: (text) => { if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => hud.toast("Invoice copied"), () => {}); },
-      preview: previewFirework,
+      preview: (id, place) => previewFirework(id, fireworkSlotOf(id, place)),
+      // Who sees it, and where in the sky the buyer may set it off.
+      showLine: fireworkShowLine,
+      places: (id) => fireworkPlacesOpen() && FIREWORK_ITEMS.some((it) => it.id === id) ? fireworkPlaces(id) : null,
       signIn: () => { BL.donationPopup.close(); BL.net.login(); },
       watch: () => BL.donationPopup.close()
     }, real ? "Pay with Lightning. Your firework goes up for everyone on the island a few seconds after it's paid." : "This is a local simulation. No Bitcoin is sent.");
   };
   // A preview: the item for this visitor alone, free, seen from the stand's view.
-  const previewFirework = (kind) => {
+  const previewFirework = (kind, slot = null) => {
     BL.donationPopup.close();
     watchFireworks();
-    fireworks.launch(kind, `preview-${kind}-${++fireworkDebugCount}`, { at: now + 1.2, eye: fireworkWatch.view });
+    fireworks.launch(kind, `preview-${kind}-${++fireworkDebugCount}`, { at: now + 1.2, slot: slot === null ? -1 : slot, eye: fireworkWatch.view });
   };
+  // Every paid firework goes up in every open page's sky; the stand says so, with how many players are here now.
+  const fireworkShowLine = () => {
+    const online = BL.net?.state.online || 0;
+    return online > 1 ? `EVERYONE ON THE ISLAND SEES IT · ${online} PLAYERS HERE NOW` : "EVERYONE ON THE ISLAND SEES IT IN THEIR SKY";
+  };
+  // Where in the sky a buyer may set a firework off: the arc's slots over the Sphere, left to right as the island
+  // sees them. A show pack fills three neighbours, so its place is the middle one's. Offered with no API (the page
+  // simulates) or where the API says it takes a chosen slot (its catalogue's `slots`).
+  const fireworkPlacesOpen = () => !donations.real || Number.isSafeInteger(fireworkCatalogue()?.slots);
+  const fireworkSpan = (id) => id === "show" ? 3 : 1;
+  const fireworkSlotOf = (id, place) => place === null || place === undefined ? null : Math.max(0, Math.min(FIREWORK_SLOTS.length - fireworkSpan(id), place - (fireworkSpan(id) >> 1)));
+  // The strip's picture: night sky, the Sphere's dome at its foot, a star at each slot, the chosen one's (and a show's
+  // neighbours) lit gold.
+  const fireworkPlaces = (id) => ({
+    title: "WHERE IN THE SKY", count: FIREWORK_SLOTS.length,
+    paint: (g, x, y, w, h, picked) => {
+      const n = FIREWORK_SLOTS.length, slot = fireworkSlotOf(id, picked), span = fireworkSpan(id);
+      g.fillStyle = "#0a1020"; g.fillRect(x, y, w, h);
+      g.fillStyle = "#121c36"; g.fillRect(x, y, w, Math.round(h * 0.4));
+      // The Sphere: a dome rising from the strip's foot in bands, orange as its shell, its crown lit.
+      const R = Math.round(h * 0.55);
+      for (let k = 0; k < R; k += 2) {
+        const half = Math.sqrt(R * R - k * k) * 1.3;
+        g.fillStyle = k > R - 4 ? "#ffb347" : (k >> 1) % 2 ? "#c96a12" : "#a35510";
+        g.fillRect(Math.round(x + w / 2 - half), y + h - 2 - k, Math.round(half * 2), 2);
+      }
+      g.strokeStyle = "#2a3a5c"; g.lineWidth = 1;
+      g.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+      for (let i = 0; i < n; i++) {
+        const cx = Math.round(x + (i + 0.5) * w / n), cy = Math.round(y + h * 0.32 + Math.abs(i - (n - 1) / 2) * h * 0.06);
+        const lit = slot !== null && i >= slot && i < slot + span, chosen = picked === i;
+        const arm = lit ? 6 : 3;
+        g.fillStyle = lit ? "#ffd24a" : "#6e6a52";
+        g.fillRect(cx - arm, cy - 1, arm * 2 + 1, 3);
+        g.fillRect(cx - 1, cy - arm, 3, arm * 2 + 1);
+        if (chosen) { g.fillStyle = "#fff2b0"; g.fillRect(cx - 1, cy - 1, 3, 3); }
+      }
+    }
+  });
   // The view, read and written as an eye and a heading, eased by smoothstep with the heading turning the short way.
   const readWatchPose = (out) => {
     const p = camera.position, t = camera.target, dx = t.x - p.x, dy = t.y - p.y, dz = t.z - p.z;
