@@ -573,14 +573,16 @@
       bulbs[n % 3].push(box({ w: 0.075, h: 0.075, d: 0.05, color: "#fff1c2", emissive: 1, offset: { x, y, z: 1.4 } }));
       dark.push(box({ w: 0.1, h: 0.1, d: 0.02, color: "#3a2412", offset: { x, y, z: 1.38 } }));
     });
-    const menuBoard = boardGeometry("menu"), launchBoard = boardGeometry("launches");
+    const menuBoard = boardGeometry("menu"), launchBoard = boardGeometry("launches"), launchMenu = boardGeometry("menu", LAYOUT.launches);
     return {
       bulbs: bulbs.map((list) => noShadow(merge(...list))), lettering,
       // Canvas 2D's lettering: [picture, its middle], the scene lays each as a cut-out.
       letterPictures: [[letterPicture("FIREWORKS", 0.118, "#ffc61f", "#a8360a"), [0, 3.69 + 0, 1.42]], [letterPicture("LIGHT UP OBL", 0.056, "#f6ecd2", "#2a1307"), [0, 2.81, 1.53]]],
       ...ground(), timber: voxGeo(v), iron: merge(...iron), cloth: merge(...cloth), dark: merge(...dark),
       swing: Object.assign(noShadow(merge(...swing)), { swing: 1 }), marks: Object.assign(noShadow(merge(...marks)), { swing: 1 }), glow: noShadow(merge(...glow)), lamps: noShadow(merge(...lamps)), bundles: merge(...bundles),
-      boards: merge(menuBoard.main, launchBoard.main), boardsFourth: launchBoard.fourth
+      // The menu board; TOP LAUNCHES, with its fourth row apart; and the menu laid on TOP LAUNCHES' board, which it
+      // shows until there are launches to rank.
+      boards: menuBoard.main, launchBoard: launchBoard.main, boardsFourth: launchBoard.fourth, launchMenuBoard: launchMenu.main
     };
   });
   // A bundle of little rockets two cells square with its near left corner at (x, y, z) metres: standing two by two,

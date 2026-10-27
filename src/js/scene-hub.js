@@ -465,7 +465,7 @@
   const FIREWORK_DEMO_PRICES = { pop: 10, bolt: 69, mega: 100, show: 300 };
   const fireworkStand = { action: { kind: "firework-stand" }, x: 0, y: 0, z: 0, ry: 0, built: false, note: "",
     use: { x: 0, z: 0 }, tips: [], stars: [], bulbs: [], vendor: null, sparkIn: 0, simCounts: { pop: 0, bolt: 0, mega: 0, show: 0 }, simVersion: 0,
-    menuNode: null, menuText: null, clips: null, clipIn: 0, menuCanvas: null, menuShown: null, menuMay: "", launchesNode: null, launchesText: null, launchesFourth: null, launchesCanvas: null, launchesShown: null,
+    menuNode: null, menuText: null, clips: null, clipIn: 0, menuCanvas: null, menuShown: null, menuMay: "", launchesNode: null, launchesText: null, launchesBoard: null, launchesFourth: null, launchesMenu: null, launchClips: null, launchesMirror: null, launchesCanvas: null, launchesShown: null,
     // The board dialog: TOP LAUNCHES, then the top buyers (stand-kiosk.js `plaque`), painted as it pages.
     board: { title: "Top launches", help: "", canvas: null, count: 2, index: 0, page: -1, caption: "", note: "", version: 0, shown: null, go(i) { this.index = (i + this.count) % this.count; this.shown = null; } } };
   // Each page's line under the board dialog's picture (its caption, which repaints with it).
@@ -5694,7 +5694,13 @@
         openFireworkStand(item ? item.id : null);
         break;
       }
+      // TOP LAUNCHES opens its board in the dialog; while it wears the menu (no launches yet), it is the menu.
       case "fireworklaunches":
+        if (fireworkStand.launchesMirror) {
+          const row = o.boardHit ? BL.standModels.menuRowAt(o.boardHit.px, o.boardHit.py) : -1, item = row >= 0 ? fireworkItems()[row] : null;
+          openFireworkStand(item ? item.id : null);
+          break;
+        }
         fireworkStand.board.index = 0;
         fireworkStand.board.shown = null;
         refreshFireworkBoards();
@@ -11481,6 +11487,7 @@
     fireworkStand.built = false;
     fireworkStand.stars.length = fireworkStand.tips.length = fireworkStand.bulbs.length = 0;
     fireworkStand.vendor = fireworkStand.menuNode = fireworkStand.launchesNode = fireworkStand.launchesFourth = fireworkStand.menuText = fireworkStand.launchesText = fireworkStand.clips = null;
+    fireworkStand.launchesBoard = fireworkStand.launchesMenu = fireworkStand.launchClips = fireworkStand.launchesMirror = null;
     fireworkStand.menuCanvas = fireworkStand.launchesCanvas = fireworkStand.board.canvas = null;
     fireworkStand.menuShown = fireworkStand.launchesShown = fireworkStand.board.shown = null;
     mempoolIsland.water.dispose();
@@ -11712,10 +11719,10 @@
     const slot = caves.slots.find((entry) => entry.stand === FIREWORK_STAND_SLOT);
     return slot && slot.status === "dark" && island.mouths.find((m) => m.id === slot.id) || null;
   };
-  // The menu board's pick, refined to its face: a ray that meets the face from the front hits where it lands, and that
-  // point, in the picture's pixels, is kept for the tap (`boardHit`) to tell which row it chose.
-  const menuBoardRay = (at) => {
-    const S = fireworkStand, B = BL.standModels.LAYOUT.menu, nx = Math.sin(S.ry), nz = Math.cos(S.ry);
+  // A board's pick, refined to its face (`B`, its LAYOUT): a ray that meets the face from the front hits where it lands,
+  // and that point, in the picture's pixels, is kept for the tap (`boardHit`) to tell which row it chose.
+  const menuBoardRay = (at, B) => {
+    const S = fireworkStand, nx = Math.sin(S.ry), nz = Math.cos(S.ry);
     return function (ray) {
       const facing = ray.dx * nx + ray.dz * nz;
       if (facing >= -1e-6) return NaN;
@@ -11757,8 +11764,11 @@
     // The boards' plaques, panels, frames and buttons (TOP LAUNCHES' fourth row shown only while it has one), a little
     // nearer on Canvas 2D than the dark faces they stand on.
     node(parts.boards).depthBias = canvas2d ? -0.3 : 0;
+    // TOP LAUNCHES' board, its fourth row, and the menu laid on it, which it wears until there are launches to rank.
+    S.launchesBoard = node(parts.launchBoard);
     S.launchesFourth = node(parts.boardsFourth);
-    S.launchesFourth.depthBias = canvas2d ? -0.3 : 0;
+    S.launchesMenu = node(parts.launchMenuBoard);
+    S.launchesBoard.depthBias = S.launchesFourth.depthBias = S.launchesMenu.depthBias = canvas2d ? -0.3 : 0;
     node(parts.marks).depthBias = node(parts.glow).depthBias = canvas2d ? -0.25 : 0;
     // The sign's lettering: raised blocks in WebGL; on Canvas 2D one cut-out picture each, sorted well nearer than the
     // planks it stands on (a negative bias, as the island's other signs use). The plank faces split at every knot, so
@@ -11791,6 +11801,11 @@
     S.clips = M.clipBoard(L.menu);
     node(S.clips.geometry).depthBias = canvas2d ? -0.7 : 0;
     S.clips.paint(2.4, FIREWORK_CLIP_ROWS);
+    // And the same on TOP LAUNCHES' board while it wears the menu.
+    S.launchClips = M.clipBoard(L.launches);
+    S.launchClips.node = node(S.launchClips.geometry);
+    S.launchClips.node.depthBias = canvas2d ? -0.7 : 0;
+    S.launchClips.paint(4.1, FIREWORK_CLIP_ROWS);
     // In WebGL the boards' lettering is raised letters (`boardText`), rebuilt when it changes; their pictures carry only
     // the icons. Canvas 2D keeps the lettering in the pictures, as it does the sign's.
     if (!canvas2d) { S.menuText = node(null); S.launchesText = node(null); }
@@ -11825,11 +11840,11 @@
     for (const [x, y, z] of L.tips) S.tips.push(standToWorld(x, y, z, { x: 0, y: 0, z: 0 }));
     standToWorld(L.use.x, 0, L.use.z, S.use);
     // Picks off the scene graph, as the set pieces' are: the counter, the menu, and TOP LAUNCHES.
-    for (const [kind, x, y, z, r] of [["fireworkstand", 0, 1.3, 0.6, 1.8], ["fireworkmenu", L.menu.x, L.menu.y, L.menu.z, 1.2], ["fireworklaunches", L.launches.x, L.launches.y, L.launches.z, 0.9]]) {
+    for (const [kind, x, y, z, r] of [["fireworkstand", 0, 1.3, 0.6, 1.8], ["fireworkmenu", L.menu.x, L.menu.y, L.menu.z, 1.2], ["fireworklaunches", L.launches.x, L.launches.y, L.launches.z, 1.2]]) {
       const at = standToWorld(x, y, z, { x: 0, y: 0, z: 0 }), pick = createNode({ position: at, geometry: PICK_GEOMETRY });
       BL.scene.updateWorld(pick);
       addProp(kind, pick, at.x, at.z, r);
-      if (kind === "fireworkmenu") props[props.length - 1].pickRay = menuBoardRay(at);
+      if (kind !== "fireworkstand") props[props.length - 1].pickRay = menuBoardRay(at, kind === "fireworkmenu" ? L.menu : L.launches);
     }
     // Its ground, the plinth's, claimed in two rows of circles along its width, so nothing is laid under it.
     const F = L.footprint;
@@ -11864,22 +11879,27 @@
     const S = fireworkStand, L = BL.standModels.LAYOUT;
     if (!S.menuNode) return;
     const may = fireworkMayBuy(), menuKey = donations.real ? donations.state.catalogue : FIREWORK_DEMO_PRICES;
-    if (menuKey !== S.menuShown || may !== S.menuMay) {
+    const menuChanged = menuKey !== S.menuShown || may !== S.menuMay;
+    const items = fireworkItems().slice(0, 3), note = may === "sign-in" ? "SIGN IN TO BUY · PREVIEW IS FREE" : may === "closed" ? "THE STAND IS CLOSED FOR NOW" : "";
+    if (menuChanged) {
       S.menuShown = menuKey; S.menuMay = may;
-      const items = fireworkItems().slice(0, 3), note = may === "sign-in" ? "SIGN IN TO BUY · PREVIEW IS FREE" : may === "closed" ? "THE STAND IS CLOSED FOR NOW" : "";
       BL.standModels.menuFace(S.menuCanvas, items, note, true, !S.menuText);
       swapStandFace(S.menuNode, S.menuCanvas, L.menu.w, L.menu.h);
       if (S.menuText) swapStandText(S.menuText, BL.standModels.boardText("menu", { items, note }));
     }
+    // TOP LAUNCHES wears the menu, the same as the left board, until a launch is counted; then it ranks them.
     const launchesKey = donations.real ? donations.state.purchaseCounts[donations.FIREWORK] || null : S.simVersion;
-    if (launchesKey !== S.launchesShown || S.launchesNode.geometry === null) {
-      S.launchesShown = launchesKey;
-      const counts = donations.real ? donations.state.purchaseCounts[donations.FIREWORK] : null;
-      const rows = fireworkLaunchRows(), days = counts && counts.days || 7;
-      BL.standModels.launchesFace(S.launchesCanvas, rows, days, true, !S.launchesText);
+    const rows = fireworkLaunchRows(), mirror = !rows.some((r) => r.count > 0);
+    if (launchesKey !== S.launchesShown || mirror !== S.launchesMirror || mirror && menuChanged || S.launchesNode.geometry === null) {
+      S.launchesShown = launchesKey; S.launchesMirror = mirror;
+      const counts = donations.real ? donations.state.purchaseCounts[donations.FIREWORK] : null, days = counts && counts.days || 7;
+      if (mirror) BL.standModels.menuFace(S.launchesCanvas, items, note, true, !S.launchesText);
+      else BL.standModels.launchesFace(S.launchesCanvas, rows, days, true, !S.launchesText);
       swapStandFace(S.launchesNode, S.launchesCanvas, L.launches.w, L.launches.h);
-      if (S.launchesText) swapStandText(S.launchesText, BL.standModels.boardText("launches", { rows, days }));
-      if (S.launchesFourth) S.launchesFourth.visible = rows.length > 3;
+      if (S.launchesText) swapStandText(S.launchesText, mirror ? BL.standModels.boardText("menu", { items, note }, L.launches) : BL.standModels.boardText("launches", { rows, days }));
+      S.launchesBoard.visible = !mirror;
+      S.launchesFourth.visible = !mirror && rows.length > 3;
+      S.launchesMenu.visible = S.launchClips.node.visible = mirror;
       S.board.shown = null;
     }
     // The dialog's page, painted only while it is open on it and what it shows has changed.
@@ -11907,6 +11927,7 @@
     if (S.clips && (S.clipIn -= dt) <= 0) {
       S.clipIn = 1 / FIREWORK_CLIP_FPS;
       S.clips.paint(elapsed, FIREWORK_CLIP_ROWS);
+      if (S.launchesMirror) S.launchClips.paint(elapsed + 2.3, FIREWORK_CLIP_ROWS);
     }
     // The marquee chases: each group in turn, a step every fifth of a second.
     const step = Math.floor(elapsed * 5) % 3;

@@ -125,7 +125,8 @@ fireworks, is `images/fireworks-concept-sheet.webp`:
 - **Right:** TOP LAUNCHES under a gold crown: the fireworks ranked by launches over the last seven days
   (`purchaseCounts`), the show pack joining them, on a fourth panel, once it has launches. A tap opens it in the board
   dialog, whose second page is the top buyers (`purchaseBoard`). With no API behind the page it counts this page's own
-  launches.
+  launches. Until a launch is counted it wears the menu instead, the same as the left board, clips, prices and taps
+  included, so a new stand offers fireworks on both sides rather than an empty ranking.
 - Lanterns at the canopy's corners light the counter at night and the fence's two lit posts the paving; the lantern
   ropes' four only glow.
 - Within 30 m its stars twinkle, the marquee chases and sparks now and then fly from a rocket's tip; beyond, nothing
