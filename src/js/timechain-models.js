@@ -192,13 +192,13 @@
       const x = side * (SITE.width / 2 + 0.1);
       geos.push(box({ w: 0.12, h: 0.12, d: GATE - POSTS[0], color: WOOD, offset: { x, y: 0.95, z: (POSTS[0] + GATE) / 2 } }));
       for (const z of POSTS) geos.push(box({ w: 0.26, h: 1.3, d: 0.26, color: WOOD, offset: { x, y: 0.5, z } }));
-      geos.push(box({ w: 0.36, h: 2.7, d: 0.36, color: WOOD, offset: { x: side * (SITE.width / 2 + 0.18), y: 1.2, z: GATE } }));
+      geos.push(box({ w: 0.36, h: 3.95, d: 0.36, color: WOOD, offset: { x: side * (SITE.width / 2 + 0.18), y: 1.7, z: GATE } }));
     }
-    geos.push(box({ w: SITE.width + 0.9, h: 0.3, d: 0.3, color: WOOD, offset: { y: 2.55, z: GATE } }));
+    geos.push(box({ w: SITE.width + 0.9, h: 0.3, d: 0.3, color: WOOD, offset: { y: 3.8, z: GATE } }));
     return merge(...geos);
   });
   // Drawn as the island's cartoon crossings are: bevelled planks on two stringers, chunky posts with Bitcoin-orange
-  // caps, thick sagging rope rails and a lantern gateway on the shore.
+  // caps, thick sagging rope rails and a lantern gateway on the shore, as tall as the Mempool bridge's gateway.
   const bridge = cached(() => {
     const geo = { verts: [], faces: [], lines: [], smooth: true, normals: [] }, w = SITE.width, length = DECK_END - DECK;
     const count = Math.round(length / 0.46), pitch = length / count, rope = BL.math.hexToRgb("#d2ab62");
@@ -219,14 +219,14 @@
       }
       padNormals(geo);
       flatInto(geo,
-        bevelBox({ w: 0.36, h: 2.7, d: 0.36, color: POST, offset: { x: side * (w / 2 + 0.18), y: 1.2, z: GATE } }),
-        bevelBox({ w: 0.46, h: 0.2, d: 0.46, color: ORANGE, offset: { x: side * (w / 2 + 0.18), y: 2.62, z: GATE } }));
+        bevelBox({ w: 0.36, h: 3.95, d: 0.36, color: POST, offset: { x: side * (w / 2 + 0.18), y: 1.7, z: GATE } }),
+        bevelBox({ w: 0.46, h: 0.2, d: 0.46, color: ORANGE, offset: { x: side * (w / 2 + 0.18), y: 3.68, z: GATE } }));
     }
     flatInto(geo,
-      bevelBox({ w: w + 0.9, h: 0.3, d: 0.3, color: PLANK, offset: { y: 2.55, z: GATE } }),
-      bevelBox({ w: 0.3, h: 0.08, d: 0.3, color: "#3b2a1c", offset: { y: 2.36, z: GATE } }),
-      bevelBox({ w: 0.26, h: 0.3, d: 0.26, color: "#ffb347", emissive: 1, bevel: 0.05, offset: { y: 2.16, z: GATE } }),
-      bevelBox({ w: 0.3, h: 0.06, d: 0.3, color: "#3b2a1c", offset: { y: 1.99, z: GATE } }));
+      bevelBox({ w: w + 0.9, h: 0.3, d: 0.3, color: PLANK, offset: { y: 3.8, z: GATE } }),
+      bevelBox({ w: 0.3, h: 0.08, d: 0.3, color: "#3b2a1c", offset: { y: 3.61, z: GATE } }),
+      bevelBox({ w: 0.26, h: 0.3, d: 0.26, color: "#ffb347", emissive: 1, bevel: 0.05, offset: { y: 3.41, z: GATE } }),
+      bevelBox({ w: 0.3, h: 0.06, d: 0.3, color: "#3b2a1c", offset: { y: 3.24, z: GATE } }));
     geo.normals = Float32Array.from(geo.normals);
     geo.collisionGeometry = bridgeShell();
     return geo;
