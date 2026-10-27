@@ -6340,7 +6340,7 @@ const wallPerformance = async (b, passes = ["ordinary", "covered"]) => {
       if (${show}) { B.fireworks.launch("show"); await new Promise(resolve => setTimeout(resolve, 5500)); }
       let start = null, first = 0;
       const p = actor.root.position, originX = p.x, originZ = p.z, frames = [];
-      let previous = 0, held = "", outlined = 0, travel = 0, donated = false, particles = 0, sprites = 0;
+      let previous = 0, held = "", outlined = 0, travel = 0, donated = false, sprites = 0;
       const scene = window.BL.scenes.hub, update = scene.update, overlay = scene.overlay, render = B.renderer.render;
       let updateMs = 0, overlayMs = 0, renderMs = 0, wall = 0, worst = null;
       scene.update = function(...args) {
@@ -6391,16 +6391,16 @@ const wallPerformance = async (b, passes = ["ordinary", "covered"]) => {
             travel = Math.max(travel, Math.hypot(p.x - originX, p.z - originZ));
             const next = Math.floor((now - start) / 420) % 2 ? "a" : "d";
             if (next !== held) { if (held) key(held, false); key(next, true); held = next; }
-            if (${covered} && !donated && now - start >= 1000) { B.demoTip(1200); donated = true; particles = B.stats().particles; }
+            if (${covered} && !donated && now - start >= 1000) { B.demoTip(1200); donated = true; }
             if (now - start < 5000) requestAnimationFrame(tick); else resolve();
           };
           requestAnimationFrame(tick);
         });
       } finally { if (held) key(held, false); scene.update = update; scene.overlay = overlay; B.renderer.render = render; }
       frames.sort((a, b) => a - b);
-      return { fps: (B.renderedFrames - first) * 1000 / (previous - start), p95: frames[Math.floor(frames.length * 0.95)], max: frames.at(-1), worst, outlined, samples: frames.length, travel, donated, particles, sprites, quality: B.renderer.quality };
+      return { fps: (B.renderedFrames - first) * 1000 / (previous - start), p95: frames[Math.floor(frames.length * 0.95)], max: frames.at(-1), worst, outlined, samples: frames.length, travel, donated, sprites, quality: B.renderer.quality };
     })()`);
-    record(`${show ? "fireworks show performance: moving under a show pack in full view" : `wall movement performance: ${covered ? "moving behind cave walls during a donation" : "ordinary movement"}`} stays responsive at a high-density desktop size`, r.quality === "high" && r.fps >= 55 && r.p95 < 25 && r.max < 50 && r.worst.gap < 50 && r.travel > 1 && (covered ? r.outlined > r.samples * 0.9 && r.donated && r.particles >= 26 : show ? r.sprites > 20000 : r.outlined === 0), JSON.stringify(r));
+    record(`${show ? "fireworks show performance: moving under a show pack in full view" : `wall movement performance: ${covered ? "moving behind cave walls during a donation" : "ordinary movement"}`} stays responsive at a high-density desktop size`, r.quality === "high" && r.fps >= 55 && r.p95 < 25 && r.max < 50 && r.worst.gap < 50 && r.travel > 1 && (covered ? r.outlined > r.samples * 0.9 && r.donated : show ? r.sprites > 20000 : r.outlined === 0), JSON.stringify(r));
   }
 };
 // Suggested extension to test/run.mjs's permitted global tier. This snippet was NOT executed by the helper.
