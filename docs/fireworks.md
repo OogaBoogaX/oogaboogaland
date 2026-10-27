@@ -107,24 +107,28 @@ fireworks, is `images/fireworks-concept-sheet.webp`:
   leaning back toward the buyer, BUY HERE on its screen in a bezel lined in glowing orange, a receipt curling from its
   top), a painted cloth of the island under a burst and rockets on its ends; shelves stocked with boxes and bundles
   behind, a purple and a red starburst on them; and the vendor, an Ooga of no one's in a straw hat, looking about.
-- **Either side:** a board in a heavy frame, its face from the counter's height up, greenery on its cap, and open
-  framing behind it to the wall with a shelf of fireworks and a barrel. Tall corner posts fly blue sunburst banners
-  that rock in the wind and string lantern ropes to the sign.
+- **Either side:** a board in a heavy frame, its face from the counter's height up, greenery on its cap: its header on
+  a plaque with a gold rim and brass studs, each row a raised panel with its icon in a raised frame (and on the menu a
+  raised gold play button), and over them its lettering, big enough to read from the path, a picture that repaints
+  when prices or counts change; and open framing behind it to the wall with a shelf of fireworks and a barrel. Tall
+  corner posts fly blue sunburst banners that rock in the wind and string lantern ropes to the sign.
 - **Left:** BUY A FIREWORK, the three fireworks with their icons and the server's prices (the show pack is on the
   terminal's screen, not the board), and how to buy.
 - **Right:** TOP LAUNCHES under a gold crown: the fireworks ranked by launches over the last seven days
-  (`purchaseCounts`), the show pack joining them once it has launches. A tap opens it in the board dialog, whose
-  second page is the top buyers (`purchaseBoard`). With no API behind the page it counts this page's own launches.
+  (`purchaseCounts`), the show pack joining them, on a fourth panel, once it has launches. A tap opens it in the board
+  dialog, whose second page is the top buyers (`purchaseBoard`). With no API behind the page it counts this page's own
+  launches.
 - Lanterns at the canopy's corners light the counter at night and the fence's two lit posts the paving; the lantern
   ropes' four only glow.
 - Within 30 m its stars twinkle, the marquee chases and sparks now and then fly from a rocket's tip; beyond, nothing
   of it moves. Its models build in two slices of the hub's sliced build (the plinth and greenery, 15 to 21 ms; the
-  booth, 10 to 12 ms) and the stand in a third (about 25 ms). It is about 27,400 faces on 70 nodes, about 2% of the
+  booth, 10 to 12 ms) and the stand in a third (about 25 ms). It is about 28,900 faces on 72 nodes, under 2.5% of the
   hub's 1.2 million, four pictures (about half a million texels, uploaded once and repainted only when prices or
   counts change) and four lights.
-- On Canvas 2D the boards' faces, the banners' sunbursts and the pieces laid on faces sort nearer than what they lie
-  on, and the plinth a little nearer than the ground; it draws the plinth in voxels, without the joints. The island's
-  large ground polygons can still paint over the plinth's lowest course from some angles.
+- On Canvas 2D the boards' lettering (most of all) and their plaques and panels, the banners' sunbursts and the pieces
+  laid on faces sort nearer than what they lie on, and the plinth a little nearer than the ground; it draws the plinth
+  in voxels, without the joints. The island's large ground polygons can still paint over the plinth's lowest course
+  from some angles.
 
 Space at the counter, or a tap on it or on the menu board, opens the stand's screen.
 

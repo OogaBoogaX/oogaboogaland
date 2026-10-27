@@ -458,7 +458,7 @@
   const FIREWORK_DEMO_PRICES = { pop: 10, bolt: 69, mega: 100, show: 300 };
   const fireworkStand = { action: { kind: "firework-stand" }, x: 0, y: 0, z: 0, ry: 0, built: false, note: "",
     use: { x: 0, z: 0 }, tips: [], stars: [], bulbs: [], vendor: null, sparkIn: 0, simCounts: { pop: 0, bolt: 0, mega: 0, show: 0 }, simVersion: 0,
-    menuNode: null, menuCanvas: null, menuShown: null, menuMay: "", launchesNode: null, launchesCanvas: null, launchesShown: null,
+    menuNode: null, menuCanvas: null, menuShown: null, menuMay: "", launchesNode: null, launchesFourth: null, launchesCanvas: null, launchesShown: null,
     // The board dialog: TOP LAUNCHES, then the top buyers (stand-kiosk.js `plaque`), painted as it pages.
     board: { title: "Top launches", help: "", canvas: null, count: 2, index: 0, page: -1, caption: "", note: "", version: 0, shown: null, go(i) { this.index = (i + this.count) % this.count; this.shown = null; } } };
   // Each page's line under the board dialog's picture (its caption, which repaints with it).
@@ -11461,7 +11461,7 @@
     stopFireworks();
     fireworkStand.built = false;
     fireworkStand.stars.length = fireworkStand.tips.length = fireworkStand.bulbs.length = 0;
-    fireworkStand.vendor = fireworkStand.menuNode = fireworkStand.launchesNode = null;
+    fireworkStand.vendor = fireworkStand.menuNode = fireworkStand.launchesNode = fireworkStand.launchesFourth = null;
     fireworkStand.menuCanvas = fireworkStand.launchesCanvas = fireworkStand.board.canvas = null;
     fireworkStand.menuShown = fireworkStand.launchesShown = fireworkStand.board.shown = null;
     mempoolIsland.water.dispose();
@@ -11720,6 +11720,11 @@
     // The banners' sunbursts and the glowing pieces laid on faces (the crates' bursts, the shelves' stars) sort nearer
     // on Canvas 2D than the cloth and wood they lie on.
     node(parts.iron); node(parts.cloth); node(parts.dark); node(parts.swing); node(parts.bundles);
+    // The boards' plaques, panels, frames and buttons (TOP LAUNCHES' fourth row shown only while it has one), a little
+    // nearer on Canvas 2D than the dark faces they stand on.
+    node(parts.boards).depthBias = canvas2d ? -0.3 : 0;
+    S.launchesFourth = node(parts.boardsFourth);
+    S.launchesFourth.depthBias = canvas2d ? -0.3 : 0;
     node(parts.marks).depthBias = node(parts.glow).depthBias = canvas2d ? -0.25 : 0;
     // The sign's lettering: raised blocks in WebGL; on Canvas 2D one cut-out picture each, sorted well nearer than the
     // planks it stands on (a negative bias, as the island's other signs use). The plank faces split at every knot, so
@@ -11799,7 +11804,7 @@
   // repaint swaps the face's geometry, which the renderer uploads once.
   const swapStandFace = (n, canvas, w, h) => {
     if (n.geometry) renderer.releaseGeometry(n.geometry);
-    n.geometry = BL.standModels.pictureFace(canvas, w, h);
+    n.geometry = BL.standModels.pictureFace(canvas, w, h, 0.85, true);
   };
   const fireworkLaunchRows = () => {
     const counts = donations.real ? donations.state.purchaseCounts[donations.FIREWORK] : null;
@@ -11813,15 +11818,17 @@
     const may = fireworkMayBuy(), menuKey = donations.real ? donations.state.catalogue : FIREWORK_DEMO_PRICES;
     if (menuKey !== S.menuShown || may !== S.menuMay) {
       S.menuShown = menuKey; S.menuMay = may;
-      BL.standModels.menuFace(S.menuCanvas, fireworkItems().slice(0, 3), may === "sign-in" ? "SIGN IN TO BUY · PREVIEW IS FREE" : may === "closed" ? "THE STAND IS CLOSED FOR NOW" : "");
+      BL.standModels.menuFace(S.menuCanvas, fireworkItems().slice(0, 3), may === "sign-in" ? "SIGN IN TO BUY · PREVIEW IS FREE" : may === "closed" ? "THE STAND IS CLOSED FOR NOW" : "", true);
       swapStandFace(S.menuNode, S.menuCanvas, L.menu.w, L.menu.h);
     }
     const launchesKey = donations.real ? donations.state.purchaseCounts[donations.FIREWORK] || null : S.simVersion;
     if (launchesKey !== S.launchesShown || S.launchesNode.geometry === null) {
       S.launchesShown = launchesKey;
       const counts = donations.real ? donations.state.purchaseCounts[donations.FIREWORK] : null;
-      BL.standModels.launchesFace(S.launchesCanvas, fireworkLaunchRows(), counts && counts.days || 7);
+      const rows = fireworkLaunchRows();
+      BL.standModels.launchesFace(S.launchesCanvas, rows, counts && counts.days || 7, true);
       swapStandFace(S.launchesNode, S.launchesCanvas, L.launches.w, L.launches.h);
+      if (S.launchesFourth) S.launchesFourth.visible = rows.length > 3;
       S.board.shown = null;
     }
     // The dialog's page, painted only while it is open on it and what it shows has changed.
@@ -11829,10 +11836,10 @@
     if (S.board.shown !== key || S.board.page !== page) {
       S.board.shown = key; S.board.page = page;
       S.board.caption = FIREWORK_BOARD_CAPTIONS[page];
+      // Its first page is TOP LAUNCHES painted whole, as the board's own picture is only its lettering.
       if (page === 0) {
-        const g = S.board.canvas, c = S.launchesCanvas;
-        g.width = c.width; g.height = c.height;
-        g.getContext("2d").drawImage(c, 0, 0);
+        const counts = donations.real ? donations.state.purchaseCounts[donations.FIREWORK] : null;
+        BL.standModels.launchesFace(S.board.canvas, fireworkLaunchRows(), counts && counts.days || 7);
       } else BL.standKiosk.plaque(S.board.canvas, donations.state.purchaseBoards[donations.FIREWORK], "TOP LAUNCHERS");
       S.board.version++;
     }
