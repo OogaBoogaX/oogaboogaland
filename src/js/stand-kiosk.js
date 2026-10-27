@@ -5,26 +5,32 @@
 //
 // The menu lists `hooks.items()`, `[{ id, name, price }]` (the price the API's, in sats; null while that item can't be
 // bought), as cards two to a row, each with its showcase playing small, its name and its price; more than fit scroll
-// (`wheel(dy)`, `drag(dy)`, the arrow keys). Choosing one opens its showcase, and BUY there asks for its invoice
-// (`hooks.buy(id)`, which resolves to `{ invoice: { id, bolt11, expires } }` or `{ error }`); the invoice offers, in order, the browser's own wallet in one click where it has one
-// (`hooks.wallet()`, then `hooks.walletPay(bolt11)` inside the click, which resolves to true when the wallet paid; a
-// refusal leaves the QR), OPEN WALLET (`hooks.openWallet(bolt11)`, its `lightning:` link) and the QR, with COPY.
-// Nothing settles but the API's word, which the scene hands back through `receive(id)`; the screen then says so and asks
-// to go and look (`hooks.watch()`). PREVIEW shows the highlighted item to this visitor alone, free (`hooks.preview(id)`).
-// `hooks.mayBuy()` is "yes", "sign-in" while only signed-in visitors may buy and this one isn't (the prices give way to
-// SIGN IN TO BUY, `hooks.signIn()`; Preview still works) or "closed". `hooks.note()` is a line under the menu (the
-// visitor's own purchases, say), or "". Simulated (`hooks.real` false), the invoice is paid with a tap on PAY, through
-// `hooks.simulate(id)`, which then arrives like the API's word. `hooks.pick`, an item's id, opens the screen at that
-// item. Where the stand can show an item (`hooks.showcase(id, w, h)`, `{ canvas, paint(t) }` or null), its card plays
-// it, and choosing it, there or with `hooks.pick`, opens it on its showcase first: the item playing large, with BUY and its price (or what stands in the way), BACK and SEE IT IN
-// THE SKY (the free preview); BUY goes on to its invoice, and Back from there comes back to the showcase. Without
-// one, the item opens at its invoice when it can be bought now (or what stands in the way), else the menu with it
-// highlighted.
+// (`wheel(dy)`, `drag(dy)`, the arrow keys). Where the stand can show an item (`hooks.showcase(id, w, h)`, `{ canvas,
+// paint(t) }` or null), choosing it, on its card or with `hooks.pick` (an item's id, to open the screen at it), opens
+// its showcase: the item playing large, `hooks.showLine()` under it (who will see it), BUY and its price (or what
+// stands in the way), BACK and SEE IT IN THE SKY (the free preview, `hooks.preview(id, place)`, which only this visitor
+// sees). Without a showcase, the item opens at its invoice when it can be bought now (or what stands in the way), else
+// the menu with it highlighted.
+//
+// Where the stand lets a buyer choose where an item goes (`hooks.places(id)`, `{ title, count, paint(g, x, y, w, h,
+// picked) }` or null), the showcase has a strip of `count` places it paints: one tapped chooses it, tapped again none
+// (the stand chooses). The choice, `place`, goes with BUY, the free preview and a simulated payment.
+//
+// BUY asks for the item's invoice (`hooks.buy(id, place)`, which resolves to `{ invoice: { id, bolt11, expires } }` or
+// `{ error }`), and Back from it comes back to the showcase. The invoice offers, in order, the browser's own wallet in
+// one click where it has one (`hooks.wallet()`, then `hooks.walletPay(bolt11)` inside the click, which resolves to true
+// when the wallet paid; a refusal leaves the QR), OPEN WALLET (`hooks.openWallet(bolt11)`, its `lightning:` link) and
+// the QR, with COPY. Nothing settles but the API's word, which the scene hands back through `receive(id)`; the screen
+// then says so and asks to go and look (`hooks.watch()`). `hooks.mayBuy()` is "yes", "sign-in" while only signed-in
+// visitors may buy and this one isn't (the prices give way to SIGN IN TO BUY, `hooks.signIn()`; the free preview still
+// works) or "closed". `hooks.note()` is a line under the menu (the visitor's own purchases, say), or "". Simulated
+// (`hooks.real` false), the invoice is paid with a tap on PAY, through `hooks.simulate(id, invoiceId, place)`, which
+// then arrives like the API's word.
 //
 // `create(hooks)` returns the popup's flow: `start`, `stop`, `key(e)`, `tap(u, v)` and `hover(u, v)` in the canvas's
-// pixels, `wheel(dy)` and `drag(dy)` in them too, `receive(id)`
-// (true when it was this invoice), `update(dt)`, `paint()` (repaints only after a change), `animate(ctx, time)`, and
-// `state`, `item` and `invoice` for the scene and checks.
+// pixels, `wheel(dy)` and `drag(dy)` in them too, `receive(id)` (true when it was this invoice), `update(dt)`,
+// `paint()` (repaints only after a change), `animate(ctx, time)`, and `state`, `item` and `invoice` for the scene and
+// checks.
 (() => {
   "use strict";
   const BL = window.BL;
@@ -47,10 +53,10 @@
     canvas.width = W;
     canvas.height = H;
     let dirty = true, shown = -1, buttons = [], ticket = 0, shownMay = "", shownNote = "", shownNet = "", walletNote = "";
-    const flow = { canvas, W, H, open: false, state: "menu", pick: 0, item: null, invoice: null, error: "", left: 0, showcase: null, from: "menu" };
+    const flow = { canvas, W, H, open: false, state: "menu", pick: 0, item: null, invoice: null, error: "", left: 0, showcase: null, from: "menu", place: null };
     // The showcase's picture and the menu's tiles: where they sit on the screen, and the item's own painters, made once
     // per item and size.
-    const SHOW = { x: 30, y: 46, w: 340, h: 200 }, showcases = new Map();
+    const SHOW = { x: 30, y: 44, w: 340, h: 150 }, PLACES = { x: 30, y: 230, w: 340, h: 28 }, showcases = new Map();
     let shownAt = -1, tilesAt = -1, scroll = 0;
     // Where card `i` sits on the screen, scrolled; how far the cards can scroll; scrolling by `dy`, and to show card `i`.
     const cardAt = (i) => ({ x: VIEW.x + (i % COLS) * (CARD_W + GAP), y: VIEW.y + Math.floor(i / COLS) * (CARD_H + GAP) - scroll });
@@ -71,6 +77,7 @@
       return showcases.get(key);
     };
     const show = (item) => {
+      if (item !== flow.item) flow.place = null;
       flow.item = item;
       flow.showcase = showcaseOf(item);
       flow.invoice = null;
@@ -110,7 +117,7 @@
       flow.invoice = null;
       walletNote = "";
       set("asking");
-      const mine = ++ticket, r = await hooks.buy(item.id);
+      const mine = ++ticket, r = await hooks.buy(item.id, flow.place);
       if (mine !== ticket || flow.state !== "asking") return;
       if (r.error) {
         flow.error = PROBLEMS[r.error] ? r.error : "invalid";
@@ -139,20 +146,26 @@
           flow.pick = i;
           return showcaseOf(list[i]) ? show(list[i]) : buy(list[i]);
         }
-        if (a === "preview" && list[flow.pick]) return hooks.preview(list[flow.pick].id);
+        if (a === "preview" && list[flow.pick]) return hooks.preview(list[flow.pick].id, null);
         if (a === "sign-in") return hooks.signIn();
         if (a === "close") return hooks.close();
       }
       if (s === "show") {
         if (a === "buy") return buy(flow.item);
-        if (a === "preview") return hooks.preview(flow.item.id);
+        if (a === "preview") return hooks.preview(flow.item.id, flow.place);
+        if (a.startsWith("place:")) {
+          const n = Number(a.slice(6));
+          flow.place = flow.place === n ? null : n;
+          dirty = true;
+          return;
+        }
         if (a === "sign-in") return hooks.signIn();
       }
       if (s === "invoice") {
         if (a === "wallet") return walletPay();
         if (a === "open") return hooks.openWallet(flow.invoice.bolt);
         if (a === "copy") return hooks.copy(flow.invoice.bolt, "Invoice");
-        if (a === "pay" && !real) return hooks.simulate(flow.item.id, flow.invoice.id);
+        if (a === "pay" && !real) return hooks.simulate(flow.item.id, flow.invoice.id, flow.place);
       }
       if (s === "paid" && (a === "watch" || a === "back")) return hooks.watch();
       if (s === "problem" && a === "sign-in") return hooks.signIn();
@@ -319,6 +332,7 @@
       const hint = may === "sign-in" ? "CHOOSE ONE TO SEE IT · SIGN IN TO BUY" : most > 0 ? "CHOOSE ONE TO SEE IT · SCROLL FOR MORE" : "CHOOSE ONE TO SEE IT";
       writeFit(g, shownNote || hint, W / 2, VIEW.y + VIEW.h + 10, 1, shownNote ? INK.gold : INK.dim, 340, "center");
       if (shownNet) write(g, `${shownNet.toUpperCase()} TEST · NOT REAL BITCOIN`, W / 2, VIEW.y + VIEW.h + 24, 1, INK.amber, "center");
+      else if (hooks.showLine) writeFit(g, hooks.showLine(), W / 2, VIEW.y + VIEW.h + 24, 1, INK.gold, 340, "center");
     };
     const paintInvoice = () => {
       const v = flow.invoice, it = flow.item;
@@ -336,22 +350,31 @@
       write(g, real ? "LAUNCHES FOR EVERYONE A FEW SECONDS AFTER IT'S PAID" : "A LOCAL SIMULATION · NO BITCOIN IS SENT", W / 2, 366, 1, INK.dim, "center");
       if (shownNet) write(g, `${shownNet.toUpperCase()} TEST · NOT REAL BITCOIN`, W / 2, 382, 1, INK.amber, "center");
     };
-    // The item large, as it plays (`animate` lays it in the frame), its price under it, and how to go on.
+    // The item large, as it plays (`animate` lays it in the frame); who will see it; where it goes, where the buyer may
+    // choose; its price, and how to go on.
     const paintShow = () => {
-      const it = flow.item, may = shownMay, open = may === "yes" && it.price !== null;
+      const it = flow.item, may = shownMay, open = may === "yes" && it.price !== null, places = hooks.places ? hooks.places(it.id) : null;
       face(g, it.name);
       g.fillStyle = INK.panel;
       g.fillRect(SHOW.x - 4, SHOW.y - 4, SHOW.w + 8, SHOW.h + 8);
       g.strokeStyle = INK.gold;
       g.lineWidth = 2;
       g.strokeRect(SHOW.x - 3, SHOW.y - 3, SHOW.w + 6, SHOW.h + 6);
-      writeFit(g, hooks.showLine || "WHAT EVERYONE ON THE ISLAND WILL SEE", W / 2, SHOW.y + SHOW.h + 12, 1, INK.dim, 340, "center");
-      if (may === "sign-in") button(30, 280, 340, 46, "SIGN IN TO BUY", "primary", "sign-in", 3);
-      else if (open) button(30, 280, 340, 46, `BUY · ${sats(it.price)} SATS`, "primary", "buy", 3);
-      else button(30, 280, 340, 46, `${it.name} · CLOSED`, "off", "buy", 2);
-      button(30, 336, 160, 40, "BACK", "secondary", "back");
-      button(210, 336, 160, 40, "SEE IT IN THE SKY", "secondary", "preview");
-      writeFit(g, "SEEING IT IN THE SKY IS FREE AND ONLY YOU SEE IT", W / 2, 384, 1, INK.dim, 340, "center");
+      writeFit(g, hooks.showLine ? hooks.showLine() : "WHAT EVERYONE ON THE ISLAND WILL SEE", W / 2, SHOW.y + SHOW.h + 8, 1, INK.gold, 340, "center");
+      if (places) {
+        write(g, places.title, PLACES.x, PLACES.y - 13, 1, INK.dim);
+        write(g, flow.place === null ? "ANYWHERE · TAP ONE TO CHOOSE" : "TAP IT AGAIN FOR ANYWHERE", PLACES.x + PLACES.w, PLACES.y - 13, 1, flow.place === null ? INK.dim : INK.amber, "right");
+        places.paint(g, PLACES.x, PLACES.y, PLACES.w, PLACES.h, flow.place);
+        const zone = PLACES.w / places.count;
+        for (let n = 0; n < places.count; n++) buttons.push({ x: PLACES.x + n * zone, y: PLACES.y, w: zone, h: PLACES.h, act: `place:${n}` });
+      }
+      if (may === "sign-in") button(30, 264, 340, 42, "SIGN IN TO BUY", "primary", "sign-in", 3);
+      else if (open) button(30, 264, 340, 42, `BUY · ${sats(it.price)} SATS`, "primary", "buy", 3);
+      else button(30, 264, 340, 42, `${it.name} · CLOSED`, "off", "buy", 2);
+      button(30, 314, 160, 36, "BACK", "secondary", "back");
+      button(210, 314, 160, 36, "SEE IT IN THE SKY", "secondary", "preview");
+      writeFit(g, "SEEING IT IN THE SKY IS FREE AND ONLY YOU SEE IT", W / 2, 358, 1, INK.dim, 340, "center");
+      if (shownNet) write(g, `${shownNet.toUpperCase()} TEST · NOT REAL BITCOIN`, W / 2, 372, 1, INK.amber, "center");
     };
     const paintProblem = () => {
       const [title, line, note] = PROBLEMS[flow.error] || PROBLEMS.invalid;
