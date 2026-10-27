@@ -46,7 +46,7 @@
   const create = ({ root, crew = null, posed = null, visible = sameZone, hide = null, createGorilla = null, hideGorilla = null }) => {
     const net = BL.net;
     const bodies = new Map();
-    const actorPool = Array.from({ length: MAX }, () => ({ x: 0, y: 0, z: 0, radius: BODY_RADIUS, height: BODY_HEIGHT }));
+    const actorPool = Array.from({ length: MAX }, () => ({ id: null, x: 0, y: 0, z: 0, radius: BODY_RADIUS, height: BODY_HEIGHT }));
     const actorList = [];
 
     // The crew's Ooga of this name goes away while a remote drives it; its own override comes back after.
@@ -178,6 +178,7 @@
         entry.cave.root.visible = visible(rec) && !(!entry.gorilla && crew && crew.player && crew.player.traits.name === entry.name);
         if (!entry.cave.root.visible) continue;
         const actor = actorPool[n++];
+        actor.id = entry.id;
         actor.x = entry.x; actor.y = entry.y; actor.z = entry.z;
         actor.radius = entry.gorilla ? entry.cave.bodyRadius : BODY_RADIUS;
         actor.height = entry.gorilla ? entry.cave.bodyHeight : BODY_HEIGHT;

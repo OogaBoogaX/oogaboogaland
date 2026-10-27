@@ -1789,25 +1789,29 @@
   };
   // A base mesh owns its foliage alternatives. Collision and scene nodes keep the original mesh; only the
   // WebGL collector selects one of these render meshes. Canvas continues drawing that original source.
-  const foliageLods = (high, coarse) => {
+  // Flat distant silhouettes are optional for low, rounded plants that expose the crossed planes.
+  const foliageLods = (high, coarse, flatFar = true) => {
     const medium = { ...high, ...coarse, collisionGeometry: high.collisionGeometry };
-    const b = BL.scene.boundsOf(high), lo = Array.from(b.min), hi = Array.from(b.max), c = b.center;
-    const far = { verts: [], faces: [], lines: [], sway: high.sway, foliageVisibility: false, castShadow: high.castShadow };
-    const planes = [
-      [lo[0], lo[1], c[2], hi[0], lo[1], c[2], hi[0], hi[1], c[2], lo[0], hi[1], c[2]],
-      [c[0], lo[1], lo[2], c[0], lo[1], hi[2], c[0], hi[1], hi[2], c[0], hi[1], lo[2]],
-      [lo[0], c[1], lo[2], hi[0], c[1], lo[2], hi[0], c[1], hi[2], lo[0], c[1], hi[2]]
-    ];
-    for (const plane of planes) {
-      const first = far.verts.length / 3;
-      far.verts.push(...plane);
-      far.faces.push({ i: [first, first + 1, first + 2, first + 3], color: [255, 255, 255], emissive: 0 },
-        { i: [first, first + 3, first + 2, first + 1], color: [255, 255, 255], emissive: 0 });
+    let far = medium;
+    if (flatFar) {
+      const b = BL.scene.boundsOf(high), lo = Array.from(b.min), hi = Array.from(b.max), c = b.center;
+      far = { verts: [], faces: [], lines: [], sway: high.sway, foliageVisibility: false, castShadow: high.castShadow };
+      const planes = [
+        [lo[0], lo[1], c[2], hi[0], lo[1], c[2], hi[0], hi[1], c[2], lo[0], hi[1], c[2]],
+        [c[0], lo[1], lo[2], c[0], lo[1], hi[2], c[0], hi[1], hi[2], c[0], hi[1], lo[2]],
+        [lo[0], c[1], lo[2], hi[0], c[1], lo[2], hi[0], c[1], hi[2], lo[0], c[1], hi[2]]
+      ];
+      for (const plane of planes) {
+        const first = far.verts.length / 3;
+        far.verts.push(...plane);
+        far.faces.push({ i: [first, first + 1, first + 2, first + 3], color: [255, 255, 255], emissive: 0 },
+          { i: [first, first + 3, first + 2, first + 1], color: [255, 255, 255], emissive: 0 });
+      }
+      // Three orthographic silhouettes share one small atlas; normal axes select their own UV rectangle.
+      // Rasterization is deferred until a far record is first prepared, keeping geometry-only builders DOM-free.
+      far.imageSurface = { canvas: null, version: 1, atlas: true, atlasMin: lo, atlasMax: hi, source: medium,
+        rect: [lo[0], lo[1], hi[0] - lo[0], hi[1] - lo[1]], background: [0, 0, 0] };
     }
-    // Three orthographic silhouettes share one small atlas; normal axes select their own UV rectangle.
-    // Rasterization is deferred until a far record is first prepared, keeping geometry-only builders DOM-free.
-    far.imageSurface = { canvas: null, version: 1, atlas: true, atlasMin: lo, atlasMax: hi, source: medium,
-      rect: [lo[0], lo[1], hi[0] - lo[0], hi[1] - lo[1]], background: [0, 0, 0] };
     high.foliageLods = { owner: high, medium, far };
     if (BL.compactGeometry?.enabled) {
       // These final render meshes are immutable; the separate walking shell stays in its original form.

@@ -383,7 +383,6 @@
         </header>
         <ul id="roster" class="roster slab" aria-label="Ooga Boogas"></ul>
         <p class="help roster-hint" data-scene="hub"><span id="world-loot-hint" hidden>Something is hidden out there.</span></p>
-        <button type="button" class="feed-open" data-action="feed"><span data-sign>Feed the Ooga Boogas</span></button>
       </section>
       <section class="panel" data-panel="bananas" id="bananas-panel" role="tabpanel" aria-labelledby="sheet-bananas" hidden>
         <header class="panel-title">
@@ -437,7 +436,6 @@
           </section>
           <p class="banana-board-note" id="banana-board-note">Demo donations saved in this browser.</p>
         </div>
-        <button type="button" class="feed-open" data-action="feed"><span data-sign>Feed the Ooga Boogas</span></button>
       </section>
       <section class="panel" data-panel="loot" id="loot-panel" role="tabpanel" aria-labelledby="loot-tab" hidden>
         <header class="panel-title">
@@ -478,6 +476,7 @@
       </section>
       </div>
       <footer class="sheet-foot">
+        <button type="button" class="feed-open" data-action="feed"><span data-sign>Feed the Ooga Boogas</span></button>
         <span class="account" id="account" hidden>
           <span class="account-who">
             <span class="account-name" id="account-name" hidden></span>
@@ -496,11 +495,20 @@
           <button type="button" class="link" data-action="reset">Reset demo</button>
         </span>
       </footer>
-      <div class="sheet-resize" id="sheet-resize" role="separator" tabindex="0" aria-label="Resize panel height"
-        aria-orientation="horizontal" aria-valuemin="240" aria-valuemax="1000" aria-valuenow="520"
-        title="Drag to resize · Up grows · Down shrinks · double-click to reset"></div>
       </div>
     </aside>
+
+    <template id="sheet-chrome">
+      <button type="button" class="sheet-drag" aria-label="Move panel" title="Drag top edge to move · arrow keys move · double-click to reset"></button>
+      <button type="button" class="sheet-edge sheet-edge-n" data-edge="n" aria-label="Resize panel from top" title="Drag to change height · arrow keys resize"></button>
+      <button type="button" class="sheet-edge sheet-edge-s" data-edge="s" aria-label="Resize panel from bottom" title="Drag to change height · arrow keys resize"></button>
+      <button type="button" class="sheet-edge sheet-edge-w" data-edge="w" aria-label="Resize panel from left" title="Drag to change width · arrow keys resize"></button>
+      <button type="button" class="sheet-edge sheet-edge-e" data-edge="e" aria-label="Resize panel from right" title="Drag to change width · arrow keys resize"></button>
+      <button type="button" class="sheet-corner sheet-corner-nw" data-corner="nw" aria-label="Resize panel from top left" title="Drag to resize · arrow keys resize"></button>
+      <button type="button" class="sheet-corner sheet-corner-ne" data-corner="ne" aria-label="Resize panel from top right" title="Drag to resize · arrow keys resize"></button>
+      <button type="button" class="sheet-corner sheet-corner-sw" data-corner="sw" aria-label="Resize panel from bottom left" title="Drag to resize · arrow keys resize"></button>
+      <button type="button" class="sheet-corner sheet-corner-se" data-corner="se" aria-label="Resize panel from bottom right" title="Drag to resize · arrow keys resize"></button>
+    </template>
 
     <div id="weapon-reticle" class="weapon-reticle" aria-hidden="true" hidden>
       <svg viewBox="-1 -1 2 2" focusable="false">
@@ -1794,6 +1802,7 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/rocket-parts.js"></script>
   <script src="js/mine-rigs.js"></script>
   <script src="js/game.js"></script>
+  <script src="js/sheet.js"></script>
   <script src="js/hud.js"></script>
   <script src="js/net.js"></script>
   <script src="js/voice.js"></script>

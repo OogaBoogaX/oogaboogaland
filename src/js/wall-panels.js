@@ -47,6 +47,16 @@
       }
       return Infinity;
     };
+    // Measure the face at mass-center height, not a ledge above or below it.
+    // Starting behind the center also finds a safe outward correction at a lip.
+    const contactAt = (x, y, z, heading, clearance, out) => {
+      const sx = Math.sin(heading), sz = Math.cos(heading), back = clearance + 0.25;
+      const depth = rayDepth(x - sx * back, y, z - sz * back, sx, sz);
+      if (!Number.isFinite(depth) || depth === 0 || depth - back > clearance + 1.5) return false;
+      out.distance = depth - back;
+      out.shift = out.distance - clearance;
+      return true;
+    };
     const fit = (x, y, z, heading, out) => {
       const sx = Math.sin(heading), sz = Math.cos(heading);
       let covariance = 0, variance = 0, samples = 0, sumAcross = 0, sumDepth = 0;
@@ -90,7 +100,7 @@
       out.y = panel.y + v;
       out.z = panel.z - panel.nx * u + panel.nz * depth;
     };
-    return { fit, coordinates, point };
+    return { fit, coordinates, point, contactAt };
   };
   BL.wallPanels = { create, rampAt, RAMP_STEP, RAMP_SLOPE };
 })();
