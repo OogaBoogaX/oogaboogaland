@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
@@ -20714,7 +20715,57 @@ const terrainParityChecks = (BL, island) => {
     direct === TERRAIN_GOLDEN && snapshotDigest === direct && slices > 0 && !mismatches.length && !missing.length && total > 100000,
     JSON.stringify({ direct, golden: TERRAIN_GOLDEN, snapshotDigest, slices, total, missing, mismatches }));
 };
+const artifactUnitProof = () => {
+  const workflow = readFileSync(join(root, ".github/workflows/pages.yml"), "utf8");
+  const script = workflow.split("      - name: Commit the built page\n        run: |\n")[1]?.split("        env:\n")[0]?.replace(/^          /gm, "");
+  if (!script) return { parsed: false };
+  // Execute the workflow's actual shell with local command doubles. No Git
+  // state, credentials or network is touched, and npm never recurses into us.
+  const doubles = `
+    git() {
+      if [ "$1" = diff ]; then return "$CHANGED"; fi
+      if [ "$1" = rev-parse ]; then printf '%s\\n' generated-sha; return; fi
+      printf 'git|%s\\n' "$*"
+      if [ "$1" = push ] && [ "$3" = HEAD:rock ]; then return "$PUSH_EXIT"; fi
+    }
+    node() { return 0; }
+    npm() { printf 'npm|%s\\n' "$*"; return "$UNIT_EXIT"; }
+    gh() {
+      printf 'gh|%s|%s\\n' "$GH_TOKEN" "$*"
+      case "$*" in
+        *"context=Unit · the browser-free lane"*)
+          case "$*" in *"state=$STATUS_FAIL"*) return 1;; esac;;
+      esac
+      return 0
+    }
+  `;
+  const dir = mkdtempSync(join(tmpdir(), "ooga-artifact-unit-")), rows = [];
+  try {
+    for (const [name, changed, unit, status, push] of [["pass", 1, 0, "none", 0], ["fail", 1, 1, "none", 0],
+      ["status", 1, 0, "success", 0], ["pending", 1, 0, "pending", 0], ["unchanged", 0, 0, "none", 0], ["concurrent", 1, 0, "none", 1]]) {
+      const result = spawnSync("bash", ["-e", "-c", doubles + script], { cwd: dir, encoding: "utf8", timeout: 5000,
+        env: { ...process.env, GH_TOKEN: "character-app", UNIT_STATUS_TOKEN: "actions-job", GITHUB_REPOSITORY: "fixture/repo",
+          GITHUB_SERVER_URL: "https://github.com", GITHUB_RUN_ID: "123", GITHUB_RUN_ATTEMPT: "1",
+          CHANGED: String(changed), UNIT_EXIT: String(unit), STATUS_FAIL: status, PUSH_EXIT: String(push) } });
+      const lines = result.stdout.split("\n"), ran = lines.indexOf("npm|run test:unit"), pushed = lines.indexOf("git|push origin HEAD:rock");
+      const pending = lines.findIndex(l => l.includes("state=pending")), success = lines.findIndex(l => l.includes("state=success") && l.includes("context=Unit ·"));
+      const failure = lines.findIndex(l => l.includes("state=failure")), cleaned = lines.some(l => l.includes("git|push origin --delete"));
+      const statuses = lines.filter(l => l.startsWith("gh|") && l.includes("context=Unit ·"));
+      const identity = statuses.every(l => l.startsWith("gh|actions-job|api repos/fixture/repo/statuses/generated-sha ")
+        && l.includes("target_url=https://github.com/fixture/repo/actions/runs/123"));
+      const ok = !result.error && identity && (name === "pass" ? result.status === 0 && pending < ran && ran < success && success < pushed && cleaned
+        : name === "unchanged" ? result.status === 0 && ran < 0 && pushed < 0 && !statuses.length
+        : name === "concurrent" ? result.status !== 0 && success > ran && pushed > success && !cleaned
+        : result.status !== 0 && pushed < 0 && !cleaned && (name === "fail" ? failure > ran && ran > pending && success < 0
+          : name === "status" ? success > ran && ran > pending : ran < 0 && pending >= 0));
+      rows.push({ name, ok, status: result.status, output: ok ? "" : result.stdout + result.stderr });
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+  return { parsed: true, rows };
+};
 const unitChecks = async () => {
+  const artifact = artifactUnitProof();
+  record("artifact workflow: tests the generated commit with the Actions-owned status and blocks rock on failed tests, status writes or concurrent pushes", artifact.parsed && artifact.rows.every(row => row.ok), JSON.stringify(artifact));
   await canvasSurfaceCacheChecks();
   const heldPad = await gamepadHoldProof();
   record("gamepad entry hold: real pad polling stays neutral, preserves trigger hysteresis and requires a fresh button after release or reconnect", Object.values(heldPad).every(Boolean), JSON.stringify(heldPad));
