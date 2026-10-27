@@ -228,10 +228,26 @@
   };
   const rockets = cached(() => ({ stripes: rocket("stripes"), stars: rocket("stars"), plum: rocket("plum"), spiral: rocket("spiral") }));
 
-  // A little rocket for the bundles, one cell square: a body four or five cells tall in its colour and a tip.
-  const littleRocket = (v, i, j, k, h, c, tip) => {
-    for (let y = 0; y < h; y++) v.set(i, j + y, k, y === h - 2 ? T.star : c);
-    v.set(i, j + h, k, tip);
+  // A little rocket for the bundles, twelve centimetres across and a third of a metre or so tall, standing on (x, y, z):
+  // a round body of eight sides in its colour, striped in its second colour (`style` 0: candy stripes all the way up,
+  // 1: one broad band, 2: two thin ones), a gold collar that steps out and back in, and a nose cone to a point in its
+  // cone's colour. Its paint is one of `LITTLE`; its body is one of four heights. One lathe, coloured ring by ring.
+  const LITTLE = {
+    [T.red]: ["#d8342c", "#f4eee2", "#b8231d"], [T.blue]: ["#2d5bd8", "#ffc21a", "#d8342c"], [T.green]: ["#2fa84a", "#a6ef74", "#ffc21a"],
+    [T.purple]: ["#8a3bd1", "#ffc21a", "#d8342c"], [T.orange]: ["#ff8a1c", "#ffd24a", "#2d5bd8"]
+  };
+  const STRIPES = [[0, 1, 0, 1, 0, 1], [0, 0, 1, 1, 0, 0], [0, 1, 0, 0, 1, 0]];
+  const littleRocket = (x, y, z, paint, height, style) => {
+    const [body, band, cone] = LITTLE[paint], r = 0.06, h = [0.24, 0.3, 0.36, 0.46][height], bands = STRIPES[style];
+    // One ring where a stripe begins, so a run of one colour is one segment; the cone is one segment to its point.
+    const rings = [[r, 0]], colors = [];
+    bands.forEach((b, k) => {
+      if (k && b === bands[k - 1]) rings[rings.length - 1][1] = h * (k + 1) / bands.length;
+      else { rings.push([r, h * (k + 1) / bands.length]); colors.push(b ? band : body); }
+    });
+    rings.push([r * 1.2, h], [r * 1.2, h + 0.03], [r * 0.9, h + 0.03], [0, h + 0.13]);
+    colors.push("#e0a81a", "#ffcf3f", "#e0a81a", cone);
+    return moved(lathe({ profile: rings, segments: 8, color: (t) => colors[Math.round(t * (rings.length - 1))] }), x, y, z);
   };
   // A box of fireworks three cells a side, its paint and a gold star on its front.
   const starBox = (v, i, j, k, c) => {
@@ -385,7 +401,7 @@
     return { plinth: masonry(), leaves: voxGeo(g, ZERO, LEAF) };
   });
   const build = cached(() => {
-    const v = makeVox(), rand = mulberry32(2140), iron = [], cloth = [], swing = [], marks = [], glow = [], lamps = [], dark = [];
+    const v = makeVox(), rand = mulberry32(2140), iron = [], cloth = [], swing = [], marks = [], glow = [], lamps = [], dark = [], bundles = [];
 
     // The deck the booth stands on, and the merchant counter on it: vertical planks, a top that runs out over them, and
     // a recess in its front for the painted cloth.
@@ -437,7 +453,7 @@
       const shelfX = s > 0 ? 2.0 : -3.375;
       starBox(v, cell(shelfX, "x"), cell(1.25, "y"), cell(-1.5, "z"), T.boxRed);
       starBox(v, cell(shelfX + 0.5, "x"), cell(1.25, "y"), cell(-1.5, "z"), T.purple);
-      bundleAt(v, shelfX + 1.0, 1.25, -1.375, [T.green, T.red, T.blue, T.orange]);
+      bundleAt(bundles, shelfX + 1.0, 1.25, -1.375, [T.green, T.red, T.blue, T.orange]);
       barrel(v, s * 2.9, 0, -0.95);
     }
     // The corner posts, past the boards' outer posts, to five metres, each with a finial, a lantern rope's hook at its
@@ -457,24 +473,24 @@
     const sb = (x, y, z, c) => starBox(v, cell(x, "x"), cell(y, "y"), cell(z, "z"), c);
     sb(-1.375, 1.5, -1.625, T.boxBlue); sb(-1.0, 1.5, -1.625, T.boxRed); sb(0.75, 1.5, -1.625, T.boxBlue);
     sb(-0.375, 2.125, -1.625, T.boxRed);
-    bundleAt(v, 0.125, 1.5, -1.5, [T.red, T.blue, T.green, T.purple]);
-    bundleAt(v, 0.5, 1.5, -1.5, [T.orange, T.purple, T.red, T.blue]);
-    bundleAt(v, 1.25, 1.5, -1.5, [T.green, T.red, T.blue, T.orange]);
-    bundleAt(v, -0.875, 2.125, -1.5, [T.purple, T.red, T.orange, T.blue]);
-    bundleAt(v, 0.25, 2.125, -1.5, [T.green, T.red, T.purple, T.blue]);
-    bundleAt(v, 0.625, 2.125, -1.5, [T.red, T.blue, T.orange, T.green]);
+    bundleAt(bundles, 0.125, 1.5, -1.5, [T.red, T.blue, T.green, T.purple]);
+    bundleAt(bundles, 0.5, 1.5, -1.5, [T.orange, T.purple, T.red, T.blue]);
+    bundleAt(bundles, 1.25, 1.5, -1.5, [T.green, T.red, T.blue, T.orange]);
+    bundleAt(bundles, -0.875, 2.125, -1.5, [T.purple, T.red, T.orange, T.blue]);
+    bundleAt(bundles, 0.25, 2.125, -1.5, [T.green, T.red, T.purple, T.blue]);
+    bundleAt(bundles, 0.625, 2.125, -1.5, [T.red, T.blue, T.orange, T.green]);
     // And on the counter's ends, either side of the vendor and the terminal.
-    bundleAt(v, -1.5, 1.25, 0.375, [T.blue, T.red, T.purple, T.orange]);
-    bundleAt(v, -1.25, 1.25, 0.5, [T.green, T.purple]);
-    bundleAt(v, 1.25, 1.25, 0.375, [T.red, T.orange, T.blue, T.purple]);
+    bundleAt(bundles, -1.5, 1.25, 0.375, [T.blue, T.red, T.purple, T.orange]);
+    bundleAt(bundles, -1.25, 1.25, 0.5, [T.green, T.purple]);
+    bundleAt(bundles, 1.25, 1.25, 0.375, [T.red, T.orange, T.blue, T.purple]);
     // Down front, on the paving, below the boards' faces: at the left a crate at the corner with a bundle on its outer
     // edge and a smaller one before it; at the right a crate by the counter and another at the corner, bundles on
     // their edges by the boards' posts.
     crate(v, -3.75, 0, 0.625, 5); crate(v, -2.875, 0, 1.375, 4);
     crate(v, 1.875, 0, 1.125, 5); crate(v, 3.25, 0, 0.625, 4);
-    bundleAt(v, -3.75, 0.625, 0.875, [T.red, T.blue, T.purple, T.green]);
-    bundleAt(v, 1.875, 0.625, 1.375, [T.red, T.green, T.blue, T.orange]);
-    bundleAt(v, 3.5, 0.5, 0.75, [T.purple, T.red, T.orange, T.blue]);
+    bundleAt(bundles, -3.75, 0.625, 0.875, [T.red, T.blue, T.purple, T.green]);
+    bundleAt(bundles, 1.875, 0.625, 1.375, [T.red, T.green, T.blue, T.orange]);
+    bundleAt(bundles, 3.5, 0.5, 0.75, [T.purple, T.red, T.orange, T.blue]);
     // Iron at the joints: plates where the front posts meet the counter's top, the beam and the sign; collars round the
     // fence posts' feet.
     for (const s of [-1, 1]) for (const y of [1.19, 2.44, 3.4, 4.0]) iron.push(moved(bevelBox({ w: 0.3, h: 0.22, d: 0.05, color: "#2c2e33", bevel: 0.012 }), s * 1.625, y, 1.15));
@@ -554,11 +570,16 @@
       // Canvas 2D's lettering: [picture, its middle], the scene lays each as a cut-out.
       letterPictures: [[letterPicture("FIREWORKS", 0.118, "#ffc61f", "#a8360a"), [0, 3.69 + 0, 1.42]], [letterPicture("LIGHT UP OBL", 0.056, "#f6ecd2", "#2a1307"), [0, 2.81, 1.53]]],
       ...ground(), timber: voxGeo(v), iron: merge(...iron), cloth: merge(...cloth), dark: merge(...dark),
-      swing: Object.assign(noShadow(merge(...swing)), { swing: 1 }), marks: Object.assign(noShadow(merge(...marks)), { swing: 1 }), glow: noShadow(merge(...glow)), lamps: noShadow(merge(...lamps))
+      swing: Object.assign(noShadow(merge(...swing)), { swing: 1 }), marks: Object.assign(noShadow(merge(...marks)), { swing: 1 }), glow: noShadow(merge(...glow)), lamps: noShadow(merge(...lamps)), bundles: merge(...bundles)
     };
   });
-  // A bundle of little rockets two cells square with its near left corner at (x, y, z) metres, their colours in turn.
-  const bundleAt = (v, x, y, z, colors) => colors.forEach((c, n) => littleRocket(v, cell(x, "x") + (n % 2), cell(y, "y"), cell(z, "z") + Math.floor(n / 2), 4 + (n % 3), c, n % 2 ? T.cone : T.star));
+  // A bundle of little rockets two cells square with its near left corner at (x, y, z) metres: standing two by two,
+  // their colours in turn, their heights and stripes varied, and a fifth, the tallest, in the middle of four; into
+  // `out`, the bundles' one mesh.
+  const bundleAt = (out, x, y, z, colors) => {
+    colors.forEach((c, n) => out.push(littleRocket(x + PX / 2 + (n % 2) * PX, y, z + PX / 2 + Math.floor(n / 2) * PX, c, n % 3, (n + colors.length) % 3)));
+    if (colors.length === 4) out.push(littleRocket(x + PX, y, z + PX, colors[2], 3, 0));
+  };
   // A barrel on the floor at (x, z), its middle; staves in the timber's tones, two iron hoops.
   const barrel = (v, x, y, z) => {
     const i0 = cell(x, "x"), j0 = cell(y, "y"), k0 = cell(z, "z");

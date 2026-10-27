@@ -97,7 +97,7 @@ fireworks, is `images/fireworks-concept-sheet.webp`:
 - **Below:** a plinth of two courses of chunky mauve-grey stones with mortar joints, the upper set back, and a paving
   of warm bricks in grout inside a stone border. It is the stand's floor, half a metre up: a visitor steps onto it and
   walks the paving to the counter. A rope fence on posts runs round the paving, the two posts either side of the way
-  in lit; painted crates of fireworks with bundles of rockets stand at its corners, and flowering greenery grows round
+  in lit; painted crates of fireworks with bundles of round, striped little rockets stand at its corners, and flowering greenery grows round
   the plinth's front corners and sides.
 - **Above:** the FIREWORKS sign in big gold letters with a marquee of bulbs chasing round it, LIGHT UP OBL under it
   with a sparkle at either end, and four oversized voxel rockets standing on it before a palisade of stakes, a
@@ -118,7 +118,7 @@ fireworks, is `images/fireworks-concept-sheet.webp`:
   ropes' four only glow.
 - Within 30 m its stars twinkle, the marquee chases and sparks now and then fly from a rocket's tip; beyond, nothing
   of it moves. Its models build in two slices of the hub's sliced build (the plinth and greenery, 15 to 21 ms; the
-  booth, 10 to 12 ms) and the stand in a third (about 25 ms). It is about 23,500 faces on 69 nodes, under 2% of the
+  booth, 10 to 12 ms) and the stand in a third (about 25 ms). It is about 27,400 faces on 70 nodes, about 2% of the
   hub's 1.2 million, four pictures (about half a million texels, uploaded once and repainted only when prices or
   counts change) and four lights.
 - On Canvas 2D the boards' faces, the banners' sunbursts and the pieces laid on faces sort nearer than what they lie
