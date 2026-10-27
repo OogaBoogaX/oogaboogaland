@@ -72,6 +72,8 @@ Who drives which Ooga:
 
 Players driving an Ooga or gorilla can also talk: **Join voice** at the foot of the panel asks for your microphone, then becomes **Mute**. You hear everyone driving an actor in the same place as you, all at the same volume: out on the island, in HQ, or inside the same cave. Step into a cave and you hear only who is in there with you.
 
+DSB Studio has a shared session panel: **Enable Studio sound** listens without microphone permission, while **Join conversation** explicitly requests your microphone when the host's mode permits it. Approved hosts control the reviewed video and presentation/discussion modes. Receive-only listeners keep a speaker's microphone live; your own mute still takes priority. The panel can unmute a publication muted through the global voice control. See [Studio video and voice](docs/dsb-studio-session.md) for setup, controls and the remaining live/device acceptance requirements.
+
 While you are in voice, **M** mutes and unmutes your microphone on the island, in the lab, the Lightning Factory, ₿IFRÖST and the Ember Den (in Ooga Arcade and the games, M still mutes their sound), and a note stays on screen while you are muted. Your own speaker mark in the roster does the same. When nobody else in voice is in the same place as you, your microphone stays off (the note says "Alone · mic off") and turns back on by itself when someone joins; if you muted yourself, you stay muted. Walking your Ooga on the island, you hear your own footsteps; nobody else hears them.
 
 Ownership goes by GitHub login, not by name. These rules apply on the signed-in site; the plain GitHub Pages build has no accounts and every Ooga is free there. How it works: `docs/auth-and-presence.md`.

@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import * as protocol from "../src/protocol.js";
+import * as studioPolicy from "../src/studio-policy.js";
 import { sha256Hex } from "../src/crypto.js";
 import { getPlayer } from "../src/db.js";
 
@@ -30,10 +31,10 @@ const host = () => {
     .replace(/import\s+[\s\S]*?from\s+"[^"]+";/g, "")
     .replace("export class Room", "class Room") + "\nglobalThis.Room = Room;";
   const context = {
-    ...protocol, sha256Hex, getPlayer, sfuClient: () => null,
+    ...protocol, ...studioPolicy, sha256Hex, getPlayer, sfuClient: () => null,
     CAST_ROWS: [{ handle: "a", github_login: "a" }, { handle: "b", github_login: "b" }, { handle: "c", github_login: "c" }],
     DurableObject: class { constructor(ctx, env) { this.ctx = ctx; this.env = env; } },
-    WebSocketPair, Response, WebSocketRequestResponsePair: class {}, URL, Date: Clock, Map, Set, setTimeout, clearTimeout, console,
+    WebSocketPair, Response, WebSocketRequestResponsePair: class {}, URL, crypto, Date: Clock, Map, Set, setTimeout, clearTimeout, console,
   };
   runInNewContext(source, context);
   const stored = new Map();
@@ -154,9 +155,9 @@ test("a voice pull is closed if its room membership changes while the SFU answer
   const closed = [];
   r.sfu = {
     newTracks: async () => { began(); return ready; },
-    closeTracks: async (session, mids) => closed.push({ session, mids }),
+    closeTracks: async (session, mids) => { closed.push({ session, mids }); return { tracks: mids.map((mid) => ({ mid })) }; },
   };
-  const pending = r.voiceRequest("pull", { headers: new Headers({ "x-player-id": "1" }), json: async () => ({ ids: [2] }) });
+  const pending = r.voiceRequest("pull", { headers: new Headers({ "x-player-id": "1", "x-room-token": pa.connectionToken }), json: async () => ({ ids: [2] }) });
   await started;
   await h.send(r, a, { t: "zone", name: "sphere-2" });
   answer({ tracks: [{ sessionId: "pub-b", mid: "7" }], sessionDescription: { type: "answer", sdp: "x" } });
