@@ -5682,9 +5682,15 @@
         hud.toast("Bifröst hums underfoot. ₿IFRÖST is across.");
         break;
       case "fireworkstand":
-      case "fireworkmenu":
         openFireworkStand();
         break;
+      // The menu is where a firework is chosen: a tap on its row opens the stand at that firework's payment, a tap
+      // elsewhere on the board the whole list.
+      case "fireworkmenu": {
+        const row = o.boardHit ? BL.standModels.menuRowAt(o.boardHit.px, o.boardHit.py) : -1, item = row >= 0 ? fireworkItems()[row] : null;
+        openFireworkStand(item ? item.id : null);
+        break;
+      }
       case "fireworklaunches":
         fireworkStand.board.index = 0;
         fireworkStand.board.shown = null;
@@ -11701,6 +11707,21 @@
     const slot = caves.slots.find((entry) => entry.stand === FIREWORK_STAND_SLOT);
     return slot && slot.status === "dark" && island.mouths.find((m) => m.id === slot.id) || null;
   };
+  // The menu board's pick, refined to its face: a ray that meets the face from the front hits where it lands, and that
+  // point, in the picture's pixels, is kept for the tap (`boardHit`) to tell which row it chose.
+  const menuBoardRay = (at) => {
+    const S = fireworkStand, B = BL.standModels.LAYOUT.menu, nx = Math.sin(S.ry), nz = Math.cos(S.ry);
+    return function (ray) {
+      const facing = ray.dx * nx + ray.dz * nz;
+      if (facing >= -1e-6) return NaN;
+      const t = ((at.x - ray.ox) * nx + (at.z - ray.oz) * nz) / facing;
+      const hx = ray.ox + ray.dx * t - at.x, hy = ray.oy + ray.dy * t - at.y, hz = ray.oz + ray.dz * t - at.z;
+      const across = hx * nz - hz * nx;
+      if (t < 0 || Math.abs(across) > B.w / 2 || Math.abs(hy) > B.h / 2) return NaN;
+      this.boardHit = { px: (across / B.w + 0.5) * BL.standModels.MENU_W, py: (0.5 - hy / B.h) * BL.standModels.MENU_H };
+      return t;
+    };
+  };
   const buildFireworkStand = () => {
     const S = fireworkStand, M = BL.standModels, L = M.LAYOUT, mouth = fireworkStandMouth();
     if (!mouth) return;
@@ -11794,10 +11815,11 @@
     for (const [x, y, z] of L.tips) S.tips.push(standToWorld(x, y, z, { x: 0, y: 0, z: 0 }));
     standToWorld(L.use.x, 0, L.use.z, S.use);
     // Picks off the scene graph, as the set pieces' are: the counter, the menu, and TOP LAUNCHES.
-    for (const [kind, x, y, z, r] of [["fireworkstand", 0, 1.3, 0.6, 1.8], ["fireworkmenu", L.menu.x, L.menu.y, L.menu.z, 0.9], ["fireworklaunches", L.launches.x, L.launches.y, L.launches.z, 0.9]]) {
+    for (const [kind, x, y, z, r] of [["fireworkstand", 0, 1.3, 0.6, 1.8], ["fireworkmenu", L.menu.x, L.menu.y, L.menu.z, 1.2], ["fireworklaunches", L.launches.x, L.launches.y, L.launches.z, 0.9]]) {
       const at = standToWorld(x, y, z, { x: 0, y: 0, z: 0 }), pick = createNode({ position: at, geometry: PICK_GEOMETRY });
       BL.scene.updateWorld(pick);
       addProp(kind, pick, at.x, at.z, r);
+      if (kind === "fireworkmenu") props[props.length - 1].pickRay = menuBoardRay(at);
     }
     // Its ground, the plinth's, claimed in two rows of circles along its width, so nothing is laid under it.
     const F = L.footprint;
@@ -11899,7 +11921,7 @@
     if (!f || donations.state.open === false) return "closed";
     return f.buyers === "signed-in" && !BL.net.state.me ? "sign-in" : "yes";
   };
-  const openFireworkStand = () => {
+  const openFireworkStand = (pick = null) => {
     const real = donations.real;
     fireworkStand.note = "";
     if (real && fireworkCatalogue() && BL.net.state.me) donations.purchaseTotals(donations.FIREWORK).then((t) => {
@@ -11912,7 +11934,7 @@
     BL.donationPopup.openStand({
       real, title: "FIREWORKS", heading: "Fireworks",
       label: "Firework stand. Up and Down choose, Enter buys, 1 to 4 buy that one, P previews it free, W pays with your wallet, C copies the invoice, Escape goes back.",
-      items: fireworkItems, mayBuy: fireworkMayBuy, note: () => fireworkStand.note, testNetwork: () => donations.testNetwork,
+      items: fireworkItems, pick, mayBuy: fireworkMayBuy, note: () => fireworkStand.note, testNetwork: () => donations.testNetwork,
       buy: real ? (id) => donations.purchase(donations.FIREWORK, id)
         : () => Promise.resolve({ invoice: { id: `sim-firework-${++fireworkDebugCount}`, bolt11: "lnbc1simulatedfireworkdonotpay", expires: Date.now() / 1000 + 300 } }),
       simulate: (id, invoiceId) => donations.simulateFirework(id, invoiceId),

@@ -665,6 +665,11 @@
     launches: { y: 104, step: 100, h: 90, rows: 4, icon: [64, 15, 60] }
   };
   const PANEL = "#211913", PANEL_FIRST = "#2a2014";
+  // The BUY A FIREWORK row a point on the menu's picture (pixels) lies in, or -1 off the rows.
+  const menuRowAt = (px, py) => {
+    const R = BOARD_PX.menu, n = Math.floor((py - R.y) / R.step);
+    return px >= 22 && px <= MENU_W - 22 && n >= 0 && n < R.rows && py - R.y - n * R.step <= R.h ? n : -1;
+  };
   // A play button's triangle in a square `s` across at (x, y).
   const playMark = (g, x, y, s) => {
     g.beginPath();
@@ -852,5 +857,5 @@
     return c;
   });
 
-  BL.standModels = { PX, LAYOUT, ground, plinthFlat, build, star, rockets, strawHat, pictureFace, menuFace, launchesFace, boardText, clothCanvas, screenCanvas, MENU_W, MENU_H };
+  BL.standModels = { PX, LAYOUT, ground, plinthFlat, build, star, rockets, strawHat, pictureFace, menuFace, launchesFace, boardText, menuRowAt, clothCanvas, screenCanvas, MENU_W, MENU_H };
 })();

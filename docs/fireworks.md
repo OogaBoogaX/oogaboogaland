@@ -118,7 +118,8 @@ fireworks, is `images/fireworks-concept-sheet.webp`:
   2D), rebuilt when prices or counts change, big enough to read from the path. Tall corner posts fly blue sunburst
   banners that rock in the wind and string lantern ropes to the sign.
 - **Left:** BUY A FIREWORK, the three fireworks with their icons and the server's prices (the show pack is on the
-  terminal's screen, not the board), and how to buy.
+  terminal's screen, not the board), and how to buy. It is where a firework is chosen: a tap on its row opens the
+  stand's screen at that firework's payment.
 - **Right:** TOP LAUNCHES under a gold crown: the fireworks ranked by launches over the last seven days
   (`purchaseCounts`), the show pack joining them, on a fourth panel, once it has launches. A tap opens it in the board
   dialog, whose second page is the top buyers (`purchaseBoard`). With no API behind the page it counts this page's own
@@ -135,7 +136,8 @@ fireworks, is `images/fireworks-concept-sheet.webp`:
   in voxels, without the joints. The island's large ground polygons can still paint over the plinth's lowest course
   from some angles.
 
-Space at the counter, or a tap on it or on the menu board, opens the stand's screen.
+Space at the counter, or a tap on it (BUY HERE), opens the stand's screen at its whole list; a tap on a row of the
+menu board opens it at that firework's payment, and a tap elsewhere on the board at the list.
 
 ## Timing
 
