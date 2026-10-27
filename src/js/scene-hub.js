@@ -11731,8 +11731,8 @@
     const R = M.rockets();
     for (const [x, y, z, lean, paint] of L.rockets) node(R[paint], { x, y, z }, { z: lean });
     S.stars.length = 0;
-    for (const [x, y, z, size] of L.stars) {
-      const n = node(M.star(), { x, y, z });
+    for (const [x, y, z, size, paint] of L.stars) {
+      const n = node(M.star(paint), { x, y, z });
       n.scale.x = n.scale.y = n.scale.z = size;
       S.stars.push(n);
     }

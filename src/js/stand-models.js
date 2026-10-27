@@ -1,18 +1,19 @@
 // The firework stand's models and pictures, for the hub's wall at the sealed cave beside the Timechain Sphere's stairs.
 // A small attraction, readable from across the island: a timber booth on a deck with a merchant counter and the stand's
 // terminal on it, shelves stocked with fireworks behind, a red and white striped canopy with a scalloped valance, the
-// big gold FIREWORKS sign with LIGHT UP OBL under it and four oversized rockets standing on it, gold starbursts round
-// it, and a board either side: BUY A FIREWORK on the left with each firework's icon, name and price, and TOP LAUNCHES
-// on the right under a gold crown. It stands on a plinth of two stone courses with a paving of bricks, its floor half a
-// metre up. Tall posts at its outer corners fly blue sunburst banners and string lantern ropes to the sign. The boards
-// stand in heavy frames, their faces from the counter's height up. A rope fence on posts, the two either side of the
-// way in lit, runs round the paving. Open timber framing with a shelf and a barrel stands behind each board. A
-// starburst stands at either end of the shelves, rockets on the counter's ends, and the big rockets stand before a
-// palisade of stakes. Painted crates of fireworks stand at the paving's corners. Its timber is voxels an eighth of a
-// metre across (`PX`) with the grain running along each beam, as the Factory's kiosk and board are built, so the
-// renderer's block detail gives it the same pixel texture; the plinth's stones and bricks are voxels too; cloth, rope,
-// letters, stars and pictures stay smooth. The lettering and the marquee are meshes of their own, for Canvas 2D's
-// `depthBias` (the scene sets it) to sort them in front of the sign's planks.
+// big gold FIREWORKS sign with LIGHT UP OBL under it and four oversized rockets standing on it, and a board either
+// side: BUY A FIREWORK on the left with each firework's icon, name and price, and TOP LAUNCHES on the right under a
+// gold crown. It stands on a plinth of two stone courses with a paving of bricks, its floor half a metre up. Tall posts
+// at its outer corners fly blue sunburst banners and string lantern ropes to the sign. The boards stand in heavy
+// frames, their faces from the counter's height up. A rope fence on posts, the two either side of the way in lit, runs
+// round the paving. Open timber framing with a shelf and a barrel stands behind each board. A starburst stands at
+// either end of the shelves, rockets on the counter's ends, and the big rockets stand before a palisade of stakes.
+// Painted crates of fireworks stand at the paving's corners. A sparkle hangs over each rocket's tip, gold bursts at the
+// sign's top corners and a sparkle at either end of the tagline. Its timber is voxels an eighth of a metre across
+// (`PX`) with the grain running along each beam, as the Factory's kiosk and board are built, so the renderer's block
+// detail gives it the same pixel texture; the plinth's stones and bricks are voxels too; cloth, rope, letters, stars
+// and pictures stay smooth. The lettering and the marquee are meshes of their own, for Canvas 2D's `depthBias` (the
+// scene sets it) to sort them in front of the sign's planks.
 //
 // Everything is in the stand's own frame: x to the visitor's right as they face it, y up from its floor (the plinth's
 // top, `LAYOUT.floor` over the ground), +z out of its front. `LAYOUT` places what the scene hangs and uses (where a
@@ -93,8 +94,9 @@
     menu: { x: -BOARD_X, y: 2.0625, z: 0.42, w: 1.42, h: 1.78 },
     launches: { x: BOARD_X, y: 2.0625, z: 0.42, w: 1.42, h: 1.78 },
     cloth: { x: 0, y: 0.72, z: 0.8, w: 1.18, h: 0.58 },
-    // The starbursts that twinkle: either end of the sign, and either end of the tagline.
-    stars: [[-2.7, 3.98, 1.42, 1], [2.7, 3.98, 1.42, 1], [-2.6, 3.36, 1.42, 0.7], [2.6, 3.36, 1.42, 0.7], [-1.72, 2.82, 1.56, 0.5], [1.72, 2.82, 1.56, 0.5]],
+    // The stars that twinkle, [x, y, z, size, paint]: gold bursts at the sign's top corners, a sparkle either end of the
+    // tagline, and (below) one over each rocket's tip.
+    stars: [[-2.55, 4.42, 1.45, 0.75, "gold"], [2.55, 4.42, 1.45, 0.75, "gold"], [-1.72, 2.82, 1.56, 0.5, "sparkle"], [1.72, 2.82, 1.56, 0.5, "sparkle"]],
     // The four big rockets on the sign: their feet, their lean, their paint; their tips are where the sparks fly from.
     rockets: [[-1.69, 4.25, 1.25, 0.14, "stripes"], [-0.56, 4.25, 1.25, 0.05, "stars"], [0.56, 4.25, 1.25, -0.05, "plum"], [1.69, 4.25, 1.25, -0.14, "spiral"]],
     rocketH: ROCKET_H,
@@ -102,6 +104,8 @@
     banners: [-1, 1].map((s) => ({ x: s * (CORNER_X + 0.47), y: 4.78, z: 0.25 }))
   };
   LAYOUT.tips = LAYOUT.rockets.map(([x, y, z, lean]) => [x - Math.sin(lean) * ROCKET_H, y + Math.cos(lean) * ROCKET_H, z]);
+  const TIP_PAINT = { stripes: "orange", stars: "gold", plum: "pink", spiral: "lime" };
+  LAYOUT.rockets.forEach(([, , , , paint], n) => LAYOUT.stars.push([LAYOUT.tips[n][0], LAYOUT.tips[n][1] + 0.24, LAYOUT.tips[n][2], 0.45, TIP_PAINT[paint]]));
   LAYOUT.ropeLamps = LAYOUT.ropes.flatMap((r) => r.lamps.map((t) => along(r.from, r.to, r.sag, t)));
   for (const [x, z, top, lit] of LAYOUT.posts) if (lit) LAYOUT.postLamps.push([x, top + 0.285, z]);
 
@@ -168,14 +172,24 @@
     return merge(...out);
   };
   const STAR = ["...#...", ".#.#.#.", "..###..", "###@###", "..###..", ".#.#.#.", "...#..."];
+  const SPARKLE = ["...#...", "...#...", "..###..", "###@###", "..###..", "...#...", "...#..."];
   // Inks for the sprites: a burst's colour and its bright middle.
   const INKS = {
     gold: { "#": "#ffc21a", "@": "#fff2b0" },
     purple: { "#": "#b45cff", "@": "#f3e2ff" },
-    red: { "#": "#ff4030", "@": "#ffe0a0" }
+    red: { "#": "#ff4030", "@": "#ffe0a0" },
+    orange: { "#": "#ff8a1c", "@": "#ffe3b0" },
+    pink: { "#": "#ff5ad8", "@": "#ffe0f6" },
+    lime: { "#": "#8cf04a", "@": "#f0ffd0" }
   };
-  // One starburst, about half a metre across, that the scene twinkles node by node.
-  const star = cached(() => noShadow(sprite(STAR, { "#": "#ffc21a", "@": "#fff2b0" }, 0, 0, 0, 0.075, 0.06, 1)));
+  // The stars the scene twinkles node by node, each about half a metre across: gold, the tip sparkles' colours, and the
+  // tagline's four-pointed sparkle in gold.
+  const stars = cached(() => {
+    const out = { sparkle: noShadow(sprite(SPARKLE, INKS.gold, 0, 0, 0, 0.075, 0.06, 1)) };
+    for (const paint of ["gold", "orange", "pink", "lime"]) out[paint] = noShadow(sprite(STAR, INKS[paint], 0, 0, 0, 0.075, 0.06, 1));
+    return out;
+  });
+  const star = (paint = "gold") => stars()[paint];
 
   // ---- rockets ---------------------------------------------------------------------------------------------------
   // A big rocket in voxels: a body four cells square and seven tall in its paint, a stepped nose cone to a point of
