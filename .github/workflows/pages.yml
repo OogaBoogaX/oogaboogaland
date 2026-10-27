@@ -50,7 +50,7 @@ jobs:
         env:
           OOGATRON_STATS_URL: https://oogatron.wickedsmartbitcoin.workers.dev/v2/stats
       - name: Build and stage site
-        run: node scripts/site.mjs _site
+        run: node scripts/site.mjs _site --audio-assets
       - name: Upload the built page for the artifact job
         uses: actions/upload-artifact@v4
         with:
