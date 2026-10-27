@@ -117,8 +117,9 @@ fireworks, is `images/fireworks-concept-sheet.webp`:
   raised gold play button), and over them its lettering, raised letters like the sign's in WebGL (a picture on Canvas
   2D), rebuilt when prices or counts change, big enough to read from the path. Tall corner posts fly blue sunburst
   banners that rock in the wind and string lantern ropes to the sign.
-- **Left:** BUY A FIREWORK, the three fireworks with their icons and the server's prices (the show pack is on the
-  terminal's screen, not the board), and how to buy. It is where a firework is chosen: a tap on its row opens the
+- **Left:** BUY A FIREWORK, the three fireworks with the server's prices (the show pack is on the terminal's screen,
+  not the board), and how to buy. Each row plays its firework in a frame, a looping clip of the burst itself as the
+  sky shows it, so a buyer sees what they would get. It is where a firework is chosen: a tap on its row opens the
   stand's screen at that firework's payment.
 - **Right:** TOP LAUNCHES under a gold crown: the fireworks ranked by launches over the last seven days
   (`purchaseCounts`), the show pack joining them, on a fourth panel, once it has launches. A tap opens it in the board
@@ -127,10 +128,11 @@ fireworks, is `images/fireworks-concept-sheet.webp`:
 - Lanterns at the canopy's corners light the counter at night and the fence's two lit posts the paving; the lantern
   ropes' four only glow.
 - Within 30 m its stars twinkle, the marquee chases and sparks now and then fly from a rocket's tip; beyond, nothing
-  of it moves. Its models build in two slices of the hub's sliced build (the plinth and greenery, 15 to 21 ms; the
-  booth, 10 to 12 ms) and the stand in a third (about 25 ms). It is about 31,000 faces on 74 nodes, under 3% of the
-  hub's 1.2 million, four pictures (about half a million texels, uploaded once and repainted only when prices or
-  counts change) and four lights.
+  of it moves. Its models build in three slices of the hub's sliced build (the plinth and greenery, 15 to 21 ms; the
+  booth, 10 to 12 ms; the menu's clips, under 2 ms) and the stand in a fourth (about 25 ms). Within 30 m the clips
+  play at 15 frames a second, about 0.3 ms a frame for all three; beyond, they hold one frame. It is about 31,000
+  faces on 75 nodes, under 3% of the hub's 1.2 million, five pictures (about half a million texels; the clips' is
+  repainted as they play, the rest only when prices or counts change) and four lights.
 - On Canvas 2D the boards' lettering (most of all) and their plaques and panels, the banners' sunbursts and the pieces
   laid on faces sort nearer than what they lie on, and the plinth a little nearer than the ground; it draws the plinth
   in voxels, without the joints. The island's large ground polygons can still paint over the plinth's lowest course

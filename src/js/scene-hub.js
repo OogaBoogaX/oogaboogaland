@@ -457,12 +457,15 @@
   // now and then fly from the rockets' tips.
   const FIREWORK_STAND_SLOT = "fireworks", FIREWORK_STAND_OUT = 0.6, FIREWORK_WATCH_UP = 9, FIREWORK_STAND_NEAR = 30;
   const STAND_SPARKS = [models.particleGeometry("#ffc21a", 0.11, 1), models.particleGeometry("#57c7ff", 0.11, 1), models.particleGeometry("#d65cff", 0.11, 1)];
+  // The menu board's rows' fireworks, for their clips; and how often a clip shows a new frame.
+  const FIREWORK_CLIP_FPS = 15;
   const FIREWORK_ITEMS = [{ id: "pop", name: "OOGA POP", price: null }, { id: "bolt", name: "LIGHTNING BOLT", price: null }, { id: "mega", name: "MEGA BLAST", price: null }, { id: "show", name: "SHOW PACK", price: null }];
+  const FIREWORK_CLIP_ROWS = FIREWORK_ITEMS.slice(0, 3).map((it) => it.id);
   // What the stand asks with no API behind it, where it only simulates: the prices the API is configured with.
   const FIREWORK_DEMO_PRICES = { pop: 10, bolt: 69, mega: 100, show: 300 };
   const fireworkStand = { action: { kind: "firework-stand" }, x: 0, y: 0, z: 0, ry: 0, built: false, note: "",
     use: { x: 0, z: 0 }, tips: [], stars: [], bulbs: [], vendor: null, sparkIn: 0, simCounts: { pop: 0, bolt: 0, mega: 0, show: 0 }, simVersion: 0,
-    menuNode: null, menuText: null, menuCanvas: null, menuShown: null, menuMay: "", launchesNode: null, launchesText: null, launchesFourth: null, launchesCanvas: null, launchesShown: null,
+    menuNode: null, menuText: null, clips: null, clipIn: 0, menuCanvas: null, menuShown: null, menuMay: "", launchesNode: null, launchesText: null, launchesFourth: null, launchesCanvas: null, launchesShown: null,
     // The board dialog: TOP LAUNCHES, then the top buyers (stand-kiosk.js `plaque`), painted as it pages.
     board: { title: "Top launches", help: "", canvas: null, count: 2, index: 0, page: -1, caption: "", note: "", version: 0, shown: null, go(i) { this.index = (i + this.count) % this.count; this.shown = null; } } };
   // Each page's line under the board dialog's picture (its caption, which repaints with it).
@@ -10605,13 +10608,15 @@
     yield* pause(slice);
     addDressingLights();
     buildPilePosts();
-    // The firework stand takes three slices: its models' ground, then its booth, then the stand itself; it still comes
-    // before the palms and scatter, whose places its claims keep clear.
+    // The firework stand takes four slices: its models' ground, its booth, its fireworks' clips, then the stand itself;
+    // it still comes before the palms and scatter, whose places its claims keep clear.
     if (fireworkStandMouth()) {
       yield* pause(slice);
       BL.standModels.ground();
       yield* pause(slice);
       BL.standModels.build();
+      yield* pause(slice);
+      BL.standModels.clips();
     }
     yield* pause(slice);
     buildFireworkStand();
@@ -11475,7 +11480,7 @@
     stopFireworks();
     fireworkStand.built = false;
     fireworkStand.stars.length = fireworkStand.tips.length = fireworkStand.bulbs.length = 0;
-    fireworkStand.vendor = fireworkStand.menuNode = fireworkStand.launchesNode = fireworkStand.launchesFourth = fireworkStand.menuText = fireworkStand.launchesText = null;
+    fireworkStand.vendor = fireworkStand.menuNode = fireworkStand.launchesNode = fireworkStand.launchesFourth = fireworkStand.menuText = fireworkStand.launchesText = fireworkStand.clips = null;
     fireworkStand.menuCanvas = fireworkStand.launchesCanvas = fireworkStand.board.canvas = null;
     fireworkStand.menuShown = fireworkStand.launchesShown = fireworkStand.board.shown = null;
     mempoolIsland.water.dispose();
@@ -11781,6 +11786,11 @@
     S.board.canvas = document.createElement("canvas");
     S.menuNode = node(null, { x: L.menu.x, y: L.menu.y, z: L.menu.z });
     S.launchesNode = node(null, { x: L.launches.x, y: L.launches.y, z: L.launches.z });
+    // The menu's clips, each firework playing in its row's frame: a frame now, so they show from afar, and within
+    // FIREWORK_STAND_NEAR they play (`fireworkStandFrame`). On Canvas 2D they sort nearer than the panels round them.
+    S.clips = M.clipBoard(L.menu);
+    node(S.clips.geometry).depthBias = canvas2d ? -0.7 : 0;
+    S.clips.paint(2.4, FIREWORK_CLIP_ROWS);
     // In WebGL the boards' lettering is raised letters (`boardText`), rebuilt when it changes; their pictures carry only
     // the icons. Canvas 2D keeps the lettering in the pictures, as it does the sign's.
     if (!canvas2d) { S.menuText = node(null); S.launchesText = node(null); }
@@ -11894,6 +11904,10 @@
     const p = camera.position;
     if (Math.hypot(p.x - S.x, p.z - S.z) > FIREWORK_STAND_NEAR) return;
     for (let i = 0; i < S.stars.length; i++) S.stars[i].glow = 0.72 + 0.48 * Math.sin(elapsed * 2.6 + i * 1.7);
+    if (S.clips && (S.clipIn -= dt) <= 0) {
+      S.clipIn = 1 / FIREWORK_CLIP_FPS;
+      S.clips.paint(elapsed, FIREWORK_CLIP_ROWS);
+    }
     // The marquee chases: each group in turn, a step every fifth of a second.
     const step = Math.floor(elapsed * 5) % 3;
     for (let i = 0; i < S.bulbs.length; i++) S.bulbs[i].glow = i === step ? 1.25 : 0.4;

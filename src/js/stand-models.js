@@ -656,12 +656,13 @@
     g.strokeRect(12, 12, W - 24, H - 24);
   };
   // The boards' layout, in their pictures' pixels: the header plaque [x0, y0, x1, y1]; each board's rows (the first's
-  // top, the step to the next, a row's height) with its icon's frame [x, y in the row, side] and the menu's play
-  // button [x, y in the row, side]. The geometry is placed from it (`boardGeometry`), so the two stay together.
+  // top, the step to the next, a row's height) with its icon's frame [x, y in the row, width, height] (the menu's
+  // holds its firework's clip) and the menu's play button [x, y in the row, side]. The geometry is placed from it
+  // (`boardGeometry`), so the two stay together.
   const MENU_W = 440, MENU_H = 552;
   const BOARD_PX = {
     plaque: [18, 14, 422, 92],
-    menu: { y: 108, step: 132, h: 120, rows: 3, icon: [32, 14, 92], button: [340, 26, 68] },
+    menu: { y: 108, step: 132, h: 120, rows: 3, icon: [30, 10, 136, 100], button: [340, 26, 68] },
     launches: { y: 104, step: 100, h: 90, rows: 4, icon: [64, 15, 60] }
   };
   const PANEL = "#211913", PANEL_FIRST = "#2a2014";
@@ -682,7 +683,7 @@
   // are geometry; without, the whole face. `text: false` leaves the lettering out, for a board whose lettering is
   // raised letters (`boardText`).
   const menuFace = (canvas, items, note = "", cutout = false, text = true) => {
-    const g = canvasOf(canvas, MENU_W, MENU_H), { INK, writeFit, sats } = K(), R = BOARD_PX.menu, [ix, iy, is] = R.icon, [bx, by, bs] = R.button;
+    const g = canvasOf(canvas, MENU_W, MENU_H), { INK, writeFit, sats } = K(), R = BOARD_PX.menu, [ix, iy, iw, ih] = R.icon, [bx, by, bs] = R.button;
     if (cutout) g.clearRect(0, 0, MENU_W, MENU_H);
     else frame(g, MENU_W, MENU_H);
     if (text) writeFit(g, "BUY A FIREWORK", MENU_W / 2, 39, 4, INK.gold, MENU_W - 60, "center");
@@ -693,10 +694,11 @@
         g.fillStyle = INK.gold; g.fillRect(bx, top + by, bs, bs);
         g.fillStyle = INK.dark; playMark(g, bx, top + by, bs);
       }
-      icon(g, it.id, ix, top + iy, is);
+      // On the board each frame holds the firework's clip (`clipBoard`); the whole face draws its icon there.
+      if (!cutout) icon(g, it.id, ix + (iw - ih) / 2, top + iy, ih);
       if (!text) continue;
-      writeFit(g, it.name, 136, top + 22, 3, INK.white, 196);
-      writeFit(g, it.price === null ? "CLOSED" : `${sats(it.price)} SATS`, 136, top + 66, 4, it.price === null ? INK.dim : INK.gold, 196);
+      writeFit(g, it.name, 180, top + 22, 3, INK.white, 152);
+      writeFit(g, it.price === null ? "CLOSED" : `${sats(it.price)} SATS`, 180, top + 66, 4, it.price === null ? INK.dim : INK.gold, 152);
     }
     if (text) writeFit(g, note || "AT THE COUNTER: SPACE OR TAP", MENU_W / 2, MENU_H - 38, 2, note ? INK.amber : INK.dim, MENU_W - 60, "center");
   };
@@ -781,8 +783,8 @@
       line("BUY A FIREWORK", MENU_W / 2, 53, 0.024, 360, "gold", "center");
       data.items.slice(0, R.rows).forEach((it, n) => {
         const top = R.y + n * R.step;
-        line(it.name, 136, top + 32, 0.016, 196, "white");
-        line(it.price === null ? "CLOSED" : `${it.price.toLocaleString("en-US")} SATS`, 136, top + 82, 0.021, 196, it.price === null ? "dim" : "gold");
+        line(it.name, 180, top + 32, 0.016, 152, "white");
+        line(it.price === null ? "CLOSED" : `${it.price.toLocaleString("en-US")} SATS`, 180, top + 82, 0.021, 152, it.price === null ? "dim" : "gold");
       });
       line(data.note || "AT THE COUNTER: SPACE OR TAP", MENU_W / 2, MENU_H - 30, 0.01, 400, data.note ? "amber" : "dim", "center");
     } else {
@@ -814,11 +816,11 @@
     block(parts, { ...plaque, w: plaque.w + 0.04, h: plaque.h + 0.04 }, 0.375, 0.392, "#c9971c", 0.006, 0.3);
     block(parts, plaque, 0.38, 0.41, "#17110c", 0.01);
     for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) parts.push(bevelBox({ w: 0.035, h: 0.035, d: 0.02, color: "#e0a81a", emissive: 0.25, bevel: 0.008, offset: { x: plaque.x + sx * (plaque.w / 2 - 0.035), y: plaque.y + sy * (plaque.h / 2 - 0.035), z: 0.42 } }));
-    const [ix, iy, is] = R.icon, bar = 6;
+    const [ix, iy, iw, ih = iw] = R.icon, bar = 6;
     for (let n = 0; n < R.rows; n++) {
       const out = n === 3 ? fourth : parts, top = R.y + n * R.step;
       block(out, rect(22, top, MENU_W - 22, top + R.h), 0.378, 0.405, kind === "launches" && n === 0 ? PANEL_FIRST : PANEL, 0.008);
-      for (const [a, b, c, d] of [[ix - bar, top + iy - bar, ix + is + bar, top + iy], [ix - bar, top + iy + is, ix + is + bar, top + iy + is + bar], [ix - bar, top + iy, ix, top + iy + is], [ix + is, top + iy, ix + is + bar, top + iy + is]])
+      for (const [a, b, c, d] of [[ix - bar, top + iy - bar, ix + iw + bar, top + iy], [ix - bar, top + iy + ih, ix + iw + bar, top + iy + ih + bar], [ix - bar, top + iy, ix, top + iy + ih], [ix + iw, top + iy, ix + iw + bar, top + iy + ih]])
         block(out, rect(a, b, c, d), 0.4, 0.425, "#6e5532", 0.004);
       if (R.button) {
         const [bx, by, bs] = R.button, button = rect(bx, top + by, bx + bs, top + by + bs);
@@ -831,7 +833,7 @@
     return { main: merge(...parts), fourth: fourth.length ? merge(...fourth) : null };
   };
   // ---- clips ------------------------------------------------------------------------------------------------------
-  // Each firework's clip: the burst itself, written once by a studio engine of its own (fireworks.js
+  // Each firework's clip, for the menu board: the burst itself, written once by a studio engine of its own (fireworks.js
   // at the low tier, its rocket leaving a point under its one slot, its flat patterns facing the viewer) and kept as its
   // sparks, with the box its rocket and sparks fly through (each kind bursts at its own height) and how long it lasts.
   // `clipFrame` plays it back by the engine's own flight at `t` seconds into its loop (its length and a short pause),
@@ -917,13 +919,25 @@
     }
   };
   const clipPoint = [0, 0, 0];
-  // One firework's clip in a picture of its own, w by h pixels, for the stand's screen: `paint(t)` paints it at `t`.
-  const clipPainter = (kind, w, h) => {
+  // The menu board's clips: one live picture over its rows' frames (`B`, LAYOUT.menu), each row's firework playing in
+  // its frame, the rows a little out of step; clear between the frames. `paint(t, kinds)` paints them all at `t`, and
+  // the renderer uploads the picture again (its `version`).
+  const clipBoard = (B) => {
+    const R = BOARD_PX.menu, [ix, iy, iw, ih] = R.icon, y0 = R.y + iy, rows = (R.rows - 1) * R.step + ih;
     const canvas = document.createElement("canvas");
-    canvas.width = w; canvas.height = h;
-    const context = canvas.getContext("2d"), image = context.createImageData(w, h);
-    return { canvas, paint: (t) => { clipFrame(image.data, w, 0, 0, w, h, kind, t); context.putImageData(image, 0, 0); } };
+    canvas.width = iw; canvas.height = rows;
+    const context = canvas.getContext("2d"), image = context.createImageData(iw, rows);
+    const kx = B.w / MENU_W, ky = B.h / MENU_H, left = B.x - B.w / 2 + ix * kx, top = B.y + B.h / 2 - y0 * ky, width = iw * kx, height = rows * ky, z = B.z + 0.003;
+    const geometry = { verts: [left, top - height, z, left + width, top - height, z, left + width, top, z, left, top, z], faces: [{ i: [0, 1, 2, 3], color: [255, 255, 255], emissive: 1 }], lines: [], castShadow: false };
+    geometry.imageSurface = { canvas, context, version: 0, rect: [left, top - height, width, height], background: null, tessellated: false };
+    const paint = (t, kinds) => {
+      for (let n = 0; n < R.rows; n++) if (kinds[n]) clipFrame(image.data, iw, 0, n * R.step, iw, ih, kinds[n], t + n * 1.7);
+      context.putImageData(image, 0, 0);
+      geometry.imageSurface.version++;
+    };
+    return { geometry, paint };
   };
+
   // The cloth in the counter's front: the island under a burst over the Sphere, on parchment, in big pixels.
   const clothCanvas = cached(() => {
     const c = document.createElement("canvas"), W = 96, H = 48, g = canvasOf(c, W, H);
@@ -951,5 +965,5 @@
     return c;
   });
 
-  BL.standModels = { PX, LAYOUT, ground, plinthFlat, build, star, rockets, strawHat, pictureFace, menuFace, launchesFace, boardText, menuRowAt, clips, clipPainter, CLIP_KINDS, clothCanvas, screenCanvas, MENU_W, MENU_H };
+  BL.standModels = { PX, LAYOUT, ground, plinthFlat, build, star, rockets, strawHat, pictureFace, menuFace, launchesFace, boardText, menuRowAt, clips, clipBoard, CLIP_KINDS, clothCanvas, screenCanvas, MENU_W, MENU_H };
 })();
