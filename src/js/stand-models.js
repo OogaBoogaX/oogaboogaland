@@ -9,38 +9,40 @@
 // round the paving. Open timber framing with a shelf and a barrel stands behind each board. A starburst stands at
 // either end of the shelves, rockets on the counter's ends, and the big rockets stand before a palisade of stakes.
 // Painted crates of fireworks stand at the paving's corners. A sparkle hangs over each rocket's tip, gold bursts at the
-// sign's top corners and a sparkle at either end of the tagline. Its timber is voxels an eighth of a metre across
-// (`PX`) with the grain running along each beam, as the Factory's kiosk and board are built, so the renderer's block
-// detail gives it the same pixel texture; the plinth's stones and bricks are voxels too; cloth, rope, letters, stars
-// and pictures stay smooth. The lettering and the marquee are meshes of their own, for Canvas 2D's `depthBias` (the
-// scene sets it) to sort them in front of the sign's planks.
+// sign's top corners and a sparkle at either end of the tagline. Greenery with white flowers grows on the caps, by the
+// sign and round the plinth. Its timber is voxels an eighth of a metre across (`PX`) with the grain running along each
+// beam, as the Factory's kiosk and board are built, so the renderer's block detail gives it the same pixel texture; the
+// plinth's stones and bricks are voxels too, the greenery's half that size (`LEAF`); cloth, rope, letters, stars and
+// pictures stay smooth. The lettering and the marquee are meshes of their own, for Canvas 2D's `depthBias` (the scene
+// sets it) to sort them in front of the sign's planks.
 //
 // Everything is in the stand's own frame: x to the visitor's right as they face it, y up from its floor (the plinth's
 // top, `LAYOUT.floor` over the ground), +z out of its front. `LAYOUT` places what the scene hangs and uses (where a
 // visitor stands to buy, the terminal, the vendor, the lanterns, the stars, the rocket tips the sparks come from, the
-// boards' faces). `ground()` (the plinth) and `build()` (all of it, the ground's too) are cached per visit's scope, as
-// every builder is. The painters (`menuFace`, `launchesFace`) draw the two boards in the Factory kiosk's letters
-// (factory-kiosk.js `kit`), and `pictureFace` lays a canvas on a face the renderer uploads once.
+// boards' faces). `ground()` (the plinth and greenery) and `build()` (all of it, the ground's too) are cached per
+// visit's scope, as every builder is. The painters (`menuFace`, `launchesFace`) draw the two boards in the Factory
+// kiosk's letters (factory-kiosk.js `kit`), and `pictureFace` lays a canvas on a face the renderer uploads once.
 (() => {
   "use strict";
   const BL = window.BL;
   const { makeVox, voxelGeometry, box, bevelBox, merge, moved, turnedX, turnedY, turnedZ, prism, lathe, noShadow, cached } = BL.models;
   const { mulberry32 } = BL.math;
 
-  const PX = 0.125, FROM = { x: -4.5, y: -0.125, z: -2.5 }, ZERO = { x: 0, y: 0, z: 0 };
+  const PX = 0.125, LEAF = PX / 2, FROM = { x: -4.5, y: -0.125, z: -2.5 }, ZERO = { x: 0, y: 0, z: 0 };
   // Timber tones, its grain, dark trim; the rockets' and boxes' paints; gold that glows a little in the day; the
-  // plinth's stones and its paving's bricks.
+  // plinth's stones and its paving's bricks; leaves, petals and their middles.
   const PALETTE = [null, "#9a5a28", "#8b5022", "#a6652e", "#7d461e", "#57301a", "#46260f",
     "#d8342c", "#f4eee2", "#2d5bd8", "#ffc21a", "#8a3bd1", "#2fa84a", "#a6ef74", "#b8231d", "#2c2e33", "#1d2f7a",
     "#ff8a1c", "#c83a2a", "#2a4fb8", "#ffd24a", "#16110d", "#ffcf3f", "#5b1f8a", "#1d6e2f",
-    "#968b8c", "#857a7c", "#a1979a", "#776d70", "#c07a58", "#b06a4c", "#cc8a66", "#a35f44"];
+    "#968b8c", "#857a7c", "#a1979a", "#776d70", "#c07a58", "#b06a4c", "#cc8a66", "#a35f44",
+    "#3f8f2f", "#2f7426", "#5aae3c", "#f4f1e4", "#ffc93a"];
   const T = { trim: 6, red: 7, white: 8, blue: 9, gold: 10, purple: 11, green: 12, lime: 13, cone: 14, iron: 15, navy: 16,
     orange: 17, boxRed: 18, boxBlue: 19, star: 20, slate: 21, crown: 22, plum: 23, pine: 24,
-    stones: [25, 26, 27, 28], bricks: [29, 30, 31, 32] };
+    stones: [25, 26, 27, 28], bricks: [29, 30, 31, 32], leaves: [33, 34, 35], petal: 36, bloom: 37 };
   const GLOWS = { [T.gold]: 0.35, [T.star]: 0.55, [T.crown]: 0.7 };
   const TONES = [1, 2, 3, 4], GRAIN = 5;
   const cell = (m, axis) => Math.round((m - FROM[axis]) / PX);
-  const voxGeo = (v, from = FROM) => voxelGeometry(v, { unit: PX, palette: PALETTE, origin: from, emissive: GLOWS });
+  const voxGeo = (v, from = FROM, unit = PX) => voxelGeometry(v, { unit, palette: PALETTE, origin: from, emissive: GLOWS });
   const fill = (v, x0, x1, y0, y1, z0, z1, c) => {
     for (let i = cell(x0, "x"); i < cell(x1, "x"); i++) for (let j = cell(y0, "y"); j < cell(y1, "y"); j++) for (let k = cell(z0, "z"); k < cell(z1, "z"); k++) v.set(i, j, k, typeof c === "function" ? c(i, j, k) : c);
   };
@@ -94,8 +96,8 @@
     menu: { x: -BOARD_X, y: 2.0625, z: 0.42, w: 1.42, h: 1.78 },
     launches: { x: BOARD_X, y: 2.0625, z: 0.42, w: 1.42, h: 1.78 },
     cloth: { x: 0, y: 0.72, z: 0.8, w: 1.18, h: 0.58 },
-    // The stars that twinkle, [x, y, z, size, paint]: gold bursts at the sign's top corners, a sparkle either end of the
-    // tagline, and (below) one over each rocket's tip.
+    // The stars that twinkle, [x, y, z, size, paint]: gold bursts in the greenery at the sign's top corners, a sparkle
+    // either end of the tagline, and (below) one over each rocket's tip.
     stars: [[-2.55, 4.42, 1.45, 0.75, "gold"], [2.55, 4.42, 1.45, 0.75, "gold"], [-1.72, 2.82, 1.56, 0.5, "sparkle"], [1.72, 2.82, 1.56, 0.5, "sparkle"]],
     // The four big rockets on the sign: their feet, their lean, their paint; their tips are where the sparks fly from.
     rockets: [[-1.69, 4.25, 1.25, 0.14, "stripes"], [-0.56, 4.25, 1.25, 0.05, "stars"], [0.56, 4.25, 1.25, -0.05, "plum"], [1.69, 4.25, 1.25, -0.14, "spiral"]],
@@ -246,6 +248,35 @@
     }
   };
 
+  // ---- greenery --------------------------------------------------------------------------------------------------
+  // A clump of leaves in `LEAF` cells, a dome `rx` by `ry` by `rz` metres on (x, y, z), ragged at its rim and lighter to
+  // its top in patches a few cells across (so its faces run long), with white flowers with gold middles on its top
+  // and front, about one cell in `flowers` of its skin. Cells inside the plinth are left out, as nothing shows them.
+  const inPlinth = (x, y, z) => z > PLINTH.back && (y < -FLOOR / 2 ? Math.abs(x) < PLINTH.lower.x && z < PLINTH.lower.z : y < 0 && Math.abs(x) < PLINTH.upper.x && z < PLINTH.upper.z);
+  const clump = (g, rand, x, y, z, rx, ry, rz, flowers = 0) => {
+    const cx = Math.round(x / LEAF), cy = Math.round(y / LEAF), cz = Math.round(z / LEAF), seed = Math.floor(rand() * 1e6);
+    const nx = Math.ceil(rx / LEAF), ny = Math.ceil(ry / LEAF), nz = Math.ceil(rz / LEAF), mine = [];
+    for (let i = -nx; i <= nx; i++) for (let j = 0; j <= ny; j++) for (let k = -nz; k <= nz; k++) {
+      const d = (i / nx) ** 2 + (j / ny) ** 2 + (k / nz) ** 2;
+      if (d > 1 - hash(i >> 1, j >> 1, (k >> 1) + seed) * 0.34) continue;
+      if (inPlinth((cx + i + 0.5) * LEAF, (cy + j + 0.5) * LEAF, (cz + k + 0.5) * LEAF)) continue;
+      const shade = j / ny + (hash(i >> 2, j >> 1, (k >> 2) + seed) - 0.5) * 0.55;
+      g.set(cx + i, cy + j, cz + k, T.leaves[shade > 0.62 ? 2 : shade > 0.25 ? 0 : 1]);
+      mine.push([cx + i, cy + j, cz + k]);
+    }
+    if (!flowers) return;
+    for (const [i, j, k] of mine) {
+      if (rand() * flowers > 1) continue;
+      if (!g.has(i, j + 1, k)) {
+        g.set(i, j + 1, k, T.bloom);
+        for (const [a, b] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (!g.has(i + a, j + 1, k + b)) g.set(i + a, j + 1, k + b, T.petal);
+      } else if (!g.has(i, j, k + 1)) {
+        g.set(i, j, k + 1, T.bloom);
+        for (const [a, b] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (!g.has(i + a, j + b, k + 1)) g.set(i + a, j + b, k + 1, T.petal);
+      }
+    }
+  };
+
   // ---- rope ------------------------------------------------------------------------------------------------------
   // A rope sagging `sag` metres from a to b, in twelve-centimetre lengths of alternating twist.
   const rope = (out, a, b, sag, thick = 0.055) => {
@@ -259,8 +290,8 @@
   };
 
   // ---- the stand -------------------------------------------------------------------------------------------------
-  // What stands on the ground round the stand, cached on its own so the hub can build it in a slice of its own before
-  // the booth: the plinth.
+  // What stands on the ground and grows round the stand, cached on its own so the hub can build it in a slice of its
+  // own before the booth: the plinth, and the greenery.
   const ground = cached(() => {
     // The plinth under it all, in the ground's cells below the floor: two courses of stone blocks four cells long and
     // deep and two tall, each block one stone's tone and each course's joints half a block on from the one below, the
@@ -275,7 +306,25 @@
     course(PLINTH.upper.x, PLINTH.upper.z, -2, 2);
     const px = Math.round((PLINTH.upper.x - PLINTH.border) / PX), pz = Math.round((PLINTH.upper.z - PLINTH.border) / PX);
     for (let i = -px; i < px; i++) for (let k = rear; k < pz; k++) p.set(i, -1, k, T.bricks[Math.floor(hash(Math.floor((i + (k & 1)) / 2), k, 9) * 4)]);
-    return { plinth: voxGeo(p, ZERO) };
+
+    // The greenery: on the boards' caps (clear of the crown), at the sign's top corners among the rockets and its
+    // foot, at the corner posts' tops and up their fronts, on the paving by the crates, and at the plinth's front
+    // corners and sides, most of it in flower.
+    const g = makeVox(), leafy = mulberry32(77);
+    for (const s of [-1, 1]) {
+      clump(g, leafy, s * 3.65, 3.5, 0.3, 0.4, 0.32, 0.34, 16);
+      clump(g, leafy, s * 2.12, 3.5, 0.3, 0.36, 0.28, 0.3, s < 0 ? 16 : 0);
+      if (s < 0) clump(g, leafy, -2.85, 3.5, 0.3, 0.3, 0.2, 0.26, 0);
+      clump(g, leafy, s * 2.2, 4.25, 1.18, 0.38, 0.3, 0.22, 16);
+      clump(g, leafy, s * 2.42, 3.0, 1.26, 0.22, 0.26, 0.16, 0);
+      clump(g, leafy, s * CORNER_X, 5.125, 0.25, 0.24, 0.18, 0.2, 0);
+      // Up the corner posts' fronts, a few tufts.
+      for (const [y, r] of [[3.6, 0.16], [4.05, 0.13], [4.45, 0.15]]) clump(g, leafy, s * (CORNER_X + 0.03), y, 0.42, r, r * 0.9, 0.1, 0);
+      clump(g, leafy, s * 2.75, 0, 2.55, 0.36, 0.3, 0.3, 12);
+      clump(g, leafy, s * 4.55, -FLOOR, 3.68, 0.52, 0.48, 0.42, 12);
+      clump(g, leafy, s * 4.7, -FLOOR, 1.6, 0.36, 0.4, 0.45, 12);
+    }
+    return { plinth: voxGeo(p, ZERO), leaves: voxGeo(g, ZERO, LEAF) };
   });
   const build = cached(() => {
     const v = makeVox(), rand = mulberry32(2140), iron = [], cloth = [], swing = [], marks = [], glow = [], lamps = [], dark = [];
@@ -310,7 +359,8 @@
     // The palisade the rockets stand before: three stakes behind the sign, between them, the middle one the tallest.
     for (const x of [-1.125, 0, 1.125]) timber(v, rand, x - 0.125, x + 0.125, 3.125, x ? 4.75 : 5.0, 0.875, 1.125, "y");
     // The boards either side, each in a heavy frame with its face from the counter's height up: two posts a quarter
-    // metre square, rails above and below the dark face, and a deep cap that runs out over the posts.
+    // metre square, rails above and below the dark face, and a deep cap that runs out over the posts, which the
+    // greenery grows on.
     for (const s of [-1, 1]) {
       const cx = s * BOARD_X;
       for (const px0 of [cx - 1.0, cx + 0.75]) timber(v, rand, px0, px0 + 0.25, 0, 3.375, 0.125, 0.5, "y");

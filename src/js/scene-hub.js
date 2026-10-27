@@ -11710,10 +11710,11 @@
       return n;
     };
     // The plinth and the timber collide; a visitor steps up onto the plinth and walks its paving to the counter. On
-    // Canvas 2D the plinth sorts a little nearer, so the island's ground under it doesn't paint over its foot.
+    // Canvas 2D the plinth and the greenery round it sort a little nearer, so the island's ground under them doesn't
+    // paint over their feet.
     const canvas2d = renderer.kind !== "webgl2";
     const plinth = node(parts.plinth);
-    plinth.depthBias = canvas2d ? -0.3 : 0;
+    plinth.depthBias = node(parts.leaves).depthBias = canvas2d ? -0.3 : 0;
     solids.add(plinth);
     solids.add(node(parts.timber));
     // The banners' sunbursts and the glowing pieces laid on faces (the crates' bursts, the shelves' stars) sort nearer
