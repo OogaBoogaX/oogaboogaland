@@ -1,4 +1,4 @@
-// Cloudflare-only staging: keep the portable page embedded, serve exact MP3 bytes on demand.
+// Cloudflare and GitHub Pages staging: keep the portable page embedded, serve exact MP3 bytes on demand.
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

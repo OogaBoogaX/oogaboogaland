@@ -7,7 +7,8 @@
 // cards/ holds the card images from `npm run cards`; a route without an `image` uses home's. Modules tagged
 // `data-defer` move out of the pages into js/<group>-<hash>.js (scripts/distribution-modules.mjs), fetched when needed.
 // `--audio-assets` and `--image-assets` write the DSB entrance recordings and the DSB rooms' pictures as same-origin
-// files under audio/ and art/; `npm run build:site` and `npm run serve` pass both, and the portable page stays whole.
+// files under audio/ and art/; `npm run build:site` and `npm run serve` pass both, GitHub Pages (`pages.yml`) only
+// `--audio-assets`, and the portable page stays whole.
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
