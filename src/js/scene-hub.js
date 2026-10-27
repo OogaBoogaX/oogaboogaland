@@ -10563,8 +10563,9 @@
     headquarters.sleepAnchors = bedrolls;
     yield* pause(slice);
     for (const slot of caves.slots) {
-      const m = island.mouths.find((mouth) => mouth.id === slot.id);
-      addTarget(buildMouth(slot, m), { kind: "cave", slot, priority: 1 }, { radius: 2.6 });
+      const m = island.mouths.find((mouth) => mouth.id === slot.id), rim = buildMouth(slot, m);
+      // The firework stand fills its sealed mouth, so a tap or the pointer there is the stand's, not the cave's.
+      if (slot.stand !== FIREWORK_STAND_SLOT) addTarget(rim, { kind: "cave", slot, priority: 1 }, { radius: 2.6 });
       yield* pause(slice);
       claim(m.x, m.z, 3.5);
       if (workCave(slot)) {
