@@ -839,37 +839,46 @@
   // `clipFrame` plays it back by the engine's own flight at `t` seconds into its loop (its length and a short pause),
   // each spark splatted as light that adds up into a small picture over a night sky, its brightness as the sprite
   // shader gives it, framed to fit its box.
-  const CLIP_H = 45, CLIP_PAUSE = 0.6, CLIP_KINDS = ["pop", "bolt", "mega"];
-  const clips = cached(() => {
-    const F = BL.fireworks, eye = { x: 0, y: CLIP_H, z: 600 }, out = {};
-    const studio = F.create({ quality: () => "low", launchPoint: { x: 0, y: 0, z: 0 }, slots: [{ x: 0, y: CLIP_H, z: 0 }] });
-    const p = [0, 0, 0];
-    for (const kind of CLIP_KINDS) {
-      studio.clear();
-      studio.launch(kind, `clip-${kind}`, { at: 0.2, slot: 0, eye });
-      for (let n = 0, was = -1; n < 4000; n++) {
-        studio.update(0, 0, eye);
-        const written = studio.stats().fireworkWritten;
-        if (written === was) break;
-        was = written;
-      }
-      const b = studio.batch, start = b.ranges[0], count = b.ranges[1], data = b.data.slice(start * F.FLOATS, (start + count) * F.FLOATS);
-      // The box its sparks fly through over their lives, from the launch point up; and when its last spark goes out.
-      let X = 8, lo = 0, hi = 10, end = 0;
-      for (let i = 0; i < count; i++) {
-        const o = i * F.FLOATS, life = data[o + 7];
-        end = Math.max(end, data[o + 3] + data[o + 14] + life);
-        if (data[o + 15] === 3 || data[o + 15] === 4) continue;
-        for (const f of [0.15, 0.45, 0.8]) {
-          F.flight(data, o, life * f, p);
-          X = Math.max(X, Math.abs(p[0])); lo = Math.min(lo, p[1]); hi = Math.max(hi, p[1]);
-        }
-      }
-      out[kind] = { data, count, X, lo, hi, loop: end + CLIP_PAUSE };
+  // The show pack's clip is the whole show over three slots side by side; each kind is written the first time it is
+  // asked for (`clip(kind)`), so the board's three are written in the hub's build and the show only once it is shown.
+  const CLIP_H = 45, CLIP_PAUSE = 0.6, CLIP_KINDS = ["pop", "bolt", "mega", "show"];
+  const clipStore = cached(() => new Map());
+  const clip = (kind) => {
+    const store = clipStore();
+    if (store.has(kind)) return store.get(kind);
+    const F = BL.fireworks, eye = { x: 0, y: CLIP_H, z: 600 }, p = [0, 0, 0];
+    const slots = kind === "show" ? [-22, 0, 22].map((x) => ({ x, y: CLIP_H, z: 0 })) : [{ x: 0, y: CLIP_H, z: 0 }];
+    const studio = F.create({ quality: () => "low", launchPoint: { x: 0, y: 0, z: 0 }, slots });
+    studio.launch(kind, `clip-${kind}`, { at: 0.2, slot: 0, eye });
+    // Every shell is admitted at once (a show's are well inside the low tier's cap) and written in the engine's slices;
+    // then each burst's sparks are kept, one after another.
+    for (let n = 0, was = -1; n < 4000; n++) {
+      studio.update(0, 0, eye);
+      const written = studio.stats().fireworkWritten;
+      if (written === was) break;
+      was = written;
     }
+    const b = studio.batch, ranges = [];
+    for (let i = 0; i < b.rangeCount; i++) ranges.push([b.ranges[i * 2], b.ranges[i * 2 + 1]]);
+    const count = ranges.reduce((n, [, c]) => n + c, 0), data = new Float32Array(count * F.FLOATS);
+    let at = 0;
+    for (const [start, c] of ranges) { data.set(b.data.subarray(start * F.FLOATS, (start + c) * F.FLOATS), at); at += c * F.FLOATS; }
     studio.dispose();
-    return out;
-  });
+    // The box its sparks fly through over their lives, from the launch point up; and when its last spark goes out.
+    let X = 8, lo = 0, hi = 10, end = 0;
+    for (let i = 0; i < count; i++) {
+      const o = i * F.FLOATS, life = data[o + 7];
+      end = Math.max(end, data[o + 3] + data[o + 14] + life);
+      if (data[o + 15] === 3 || data[o + 15] === 4) continue;
+      for (const f of [0.15, 0.45, 0.8]) {
+        F.flight(data, o, life * f, p);
+        X = Math.max(X, Math.abs(p[0])); lo = Math.min(lo, p[1]); hi = Math.max(hi, p[1]);
+      }
+    }
+    const made = { data, count, X, lo, hi, loop: end + CLIP_PAUSE };
+    store.set(kind, made);
+    return made;
+  };
   // A spark's brightness `age` seconds into its life, as the sprite shader gives it (fireworks.js `headAt`), without the
   // shader's twinkle; glitter and electric sparks flicker instead.
   const sparkGlow = (d, o, age, flick) => {
@@ -888,7 +897,7 @@
   let clipLight = new Float32Array(0);
   // Paints `kind`'s clip at `t` into `px` (RGBA, `stride` pixels a row) over w by h pixels from (x0, y0).
   const clipFrame = (px, stride, x0, y0, w, h, kind, t) => {
-    const C = clips()[kind], d = C.data, F = BL.fireworks, n = w * h;
+    const C = clip(kind), d = C.data, F = BL.fireworks, n = w * h;
     if (clipLight.length < n * 3) clipLight = new Float32Array(n * 3);
     const L = clipLight;
     L.fill(0, 0, n * 3);
@@ -972,5 +981,5 @@
     return c;
   });
 
-  BL.standModels = { PX, LAYOUT, ground, plinthFlat, build, star, rockets, strawHat, pictureFace, menuFace, launchesFace, boardText, menuRowAt, clips, clipBoard, clipPainter, CLIP_KINDS, clothCanvas, screenCanvas, MENU_W, MENU_H };
+  BL.standModels = { PX, LAYOUT, ground, plinthFlat, build, star, rockets, strawHat, pictureFace, menuFace, launchesFace, boardText, menuRowAt, clip, clipBoard, clipPainter, CLIP_KINDS, clothCanvas, screenCanvas, MENU_W, MENU_H };
 })();

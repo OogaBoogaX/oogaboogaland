@@ -10616,7 +10616,7 @@
       yield* pause(slice);
       BL.standModels.build();
       yield* pause(slice);
-      BL.standModels.clips();
+      for (const id of FIREWORK_CLIP_ROWS) BL.standModels.clip(id);
     }
     yield* pause(slice);
     buildFireworkStand();
