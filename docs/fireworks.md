@@ -117,12 +117,10 @@ fireworks, is `images/fireworks-concept-sheet.webp`:
   raised gold play button), and over them its lettering, raised letters like the sign's in WebGL (a picture on Canvas
   2D), rebuilt when prices or counts change, big enough to read from the path. Tall corner posts fly blue sunburst
   banners that rock in the wind and string lantern ropes to the sign.
-- **Left:** BUY A FIREWORK, the three fireworks with the server's prices (the show pack is on the terminal's screen,
-  not the board), and how to buy. Each row plays its firework in a frame, a looping clip of the burst itself as the
-  sky shows it, so a buyer sees what they would get. It is where a firework is chosen: a tap on its row opens the
-  stand's screen on that firework playing large, with BUY and its price, BACK, and SEE IT IN THE SKY (the free
-  preview); BUY goes on to its payment. The row under the pointer lights a gold rim and the tooltip names it and its
-  price; a chosen row stays lit while its preview is open.
+- **Left:** BUY A FIREWORK, the three fireworks with the server's prices (the show pack is on the stand's list, not
+  the board), and how to buy. Each row plays its firework in a frame, a looping clip of the burst itself as the sky
+  shows it. A tap on the board opens the stand's list, as the counter does; the board lights a gold rim while the
+  pointer is over it.
 - **Right:** TOP LAUNCHES under a gold crown: the fireworks ranked by launches over the last seven days
   (`purchaseCounts`), the show pack joining them, on a fourth panel, once it has launches. A tap opens it in the board
   dialog, whose second page is the top buyers (`purchaseBoard`). With no API behind the page it counts this page's own
@@ -141,10 +139,11 @@ fireworks, is `images/fireworks-concept-sheet.webp`:
   in voxels, without the joints. The island's large ground polygons can still paint over the plinth's lowest course
   from some angles.
 
-Space at the counter, or a tap on it (BUY HERE), opens the stand's screen at its whole list, each item playing its
-clip in a tile, the show pack's the whole show over three bursts; choosing one there opens it on its preview, as from
-the board, and BUY goes on to its payment. A tap on a row of the menu board opens the screen on that firework's
-preview, and a tap elsewhere on the board at the list.
+The stand has one way to buy, wherever it starts: Space at the counter, a tap on it (BUY HERE) or on the menu board
+(or on TOP LAUNCHES while it wears the menu) opens the stand's screen, a wider dialog, at its list: a card for each
+item, its clip playing, its name and price, the cards scrolling once there are more than fit. Choosing one opens its
+details, the item playing large with BUY and its price, BACK and SEE IT IN THE SKY (the free preview), and BUY goes on
+to its payment.
 
 ## Timing
 

@@ -466,8 +466,8 @@
   const fireworkStand = { action: { kind: "firework-stand" }, x: 0, y: 0, z: 0, ry: 0, built: false, note: "",
     use: { x: 0, z: 0 }, tips: [], stars: [], bulbs: [], vendor: null, sparkIn: 0, simCounts: { pop: 0, bolt: 0, mega: 0, show: 0 }, simVersion: 0,
     menuNode: null, menuText: null, clips: null, clipIn: 0, menuCanvas: null, menuShown: null, menuMay: "", launchesNode: null, launchesText: null, launchesBoard: null, launchesFourth: null, launchesMenu: null, launchClips: null, launchesMirror: null,
-    // The rims of the menu rows in focus (`focus` the hovered one, `chosen` the one whose preview is open), per board.
-    focusRims: null, focus: null, chosen: null, launchesCanvas: null, launchesShown: null,
+    // Each board's rim, lit while the pointer is over it (`focus`, that board's pick kind).
+    focusRims: null, focus: null, launchesCanvas: null, launchesShown: null,
     // The board dialog: TOP LAUNCHES, then the top buyers (stand-kiosk.js `plaque`), painted as it pages.
     board: { title: "Top launches", help: "", canvas: null, count: 2, index: 0, page: -1, caption: "", note: "", version: 0, shown: null, go(i) { this.index = (i + this.count) % this.count; this.shown = null; } } };
   // Each page's line under the board dialog's picture (its caption, which repaints with it).
@@ -5551,14 +5551,14 @@
   };
   const showHoverTooltip = (hit, p) => {
     if (hit && (hit.owner.kind === "cave" || hit.owner.kind === "cave-sign")) BL.deferred.prefetchScene(hit.owner.slot.scene);
-    // A stand board's row in focus under the pointer, lit, and named in the tooltip.
+    // A stand board under the pointer, lit, and named in the tooltip.
     const board = hit && hit.owner.kind === "prop" && (hit.owner.prop === "fireworkmenu" || hit.owner.prop === "fireworklaunches") ? hit.owner : null;
     if (fireworkStand.focusRims && (board || fireworkStand.focus)) {
-      const row = focusStandRow(board, p), item = row >= 0 ? fireworkItems()[row] : null;
+      const focus = focusStandBoard(board, p);
       if (board) {
-        const tip = item ? `${item.name.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())}${item.price === null ? "" : ` · ${item.price.toLocaleString("en-US")} sats`} · ${COARSE ? "tap" : "click"} to see it`
-          : board.prop === "fireworkmenu" || fireworkStand.launchesMirror ? `Buy a firework · ${COARSE ? "tap" : "click"} one to see it` : `Top launches · ${COARSE ? "tap" : "click"} to open`;
-        hud.tooltip.show(tip, p.x, p.y, null, false);
+        const tip = board.prop === "fireworkmenu" || fireworkStand.launchesMirror ? `Buy a firework · ${COARSE ? "tap" : "click"} to choose one` : `Top launches · ${COARSE ? "tap" : "click"} to open`;
+        if (focus) hud.tooltip.show(tip, p.x, p.y, null, false);
+        else hud.tooltip.hide();
         return;
       }
     }
@@ -5700,22 +5700,14 @@
       case "fireworkstand":
         openFireworkStand();
         break;
-      // The menu is where a firework is chosen: a tap on its row opens the stand at that firework's payment, a tap
-      // elsewhere on the board the whole list.
-      case "fireworkmenu": {
-        const row = o.boardHit ? BL.standModels.menuRowAt(o.boardHit.px, o.boardHit.py) : -1, item = row >= 0 ? fireworkItems()[row] : null;
-        fireworkStand.chosen = item ? { board: o.prop, row } : null;
-        showStandFocus();
-        openFireworkStand(item ? item.id : null);
+      // The menu opens the stand's list, as the counter does: a firework is chosen there, seen, then paid for.
+      case "fireworkmenu":
+        openFireworkStand();
         break;
-      }
       // TOP LAUNCHES opens its board in the dialog; while it wears the menu (no launches yet), it is the menu.
       case "fireworklaunches":
         if (fireworkStand.launchesMirror) {
-          const row = o.boardHit ? BL.standModels.menuRowAt(o.boardHit.px, o.boardHit.py) : -1, item = row >= 0 ? fireworkItems()[row] : null;
-          fireworkStand.chosen = item ? { board: o.prop, row } : null;
-          showStandFocus();
-          openFireworkStand(item ? item.id : null);
+          openFireworkStand();
           break;
         }
         fireworkStand.board.index = 0;
@@ -11505,7 +11497,7 @@
     fireworkStand.stars.length = fireworkStand.tips.length = fireworkStand.bulbs.length = 0;
     fireworkStand.vendor = fireworkStand.menuNode = fireworkStand.launchesNode = fireworkStand.launchesFourth = fireworkStand.menuText = fireworkStand.launchesText = fireworkStand.clips = null;
     fireworkStand.launchesBoard = fireworkStand.launchesMenu = fireworkStand.launchClips = fireworkStand.launchesMirror = null;
-    fireworkStand.focusRims = fireworkStand.focus = fireworkStand.chosen = null;
+    fireworkStand.focusRims = fireworkStand.focus = null;
     fireworkStand.menuCanvas = fireworkStand.launchesCanvas = fireworkStand.board.canvas = null;
     fireworkStand.menuShown = fireworkStand.launchesShown = fireworkStand.board.shown = null;
     mempoolIsland.water.dispose();
@@ -11738,41 +11730,32 @@
     return slot && slot.status === "dark" && island.mouths.find((m) => m.id === slot.id) || null;
   };
   // A board's pick, refined to its face (`B`, its LAYOUT): a ray that meets the face from the front hits where it lands,
-  // and that point, in the picture's pixels, is kept for the tap (`boardHit`) to tell which row it chose.
+  // a ray off it misses, so a tap or the pointer near the board goes on to what is behind.
   const menuBoardRay = (at, B) => {
     const S = fireworkStand, nx = Math.sin(S.ry), nz = Math.cos(S.ry);
-    return function (ray) {
+    return (ray) => {
       const facing = ray.dx * nx + ray.dz * nz;
       if (facing >= -1e-6) return NaN;
       const t = ((at.x - ray.ox) * nx + (at.z - ray.oz) * nz) / facing;
       const hx = ray.ox + ray.dx * t - at.x, hy = ray.oy + ray.dy * t - at.y, hz = ray.oz + ray.dz * t - at.z;
       const across = hx * nz - hz * nx;
       if (t < 0 || Math.abs(across) > B.w / 2 || Math.abs(hy) > B.h / 2) return NaN;
-      this.boardHit = { px: (across / B.w + 0.5) * BL.standModels.MENU_W, py: (0.5 - hy / B.h) * BL.standModels.MENU_H };
       return t;
     };
   };
-  // Which menu row of a stand board (`owner`, its pick) the screen point `p` is over, or -1: none on TOP LAUNCHES while it
-  // ranks launches.
+  // Whether the screen point `p` is on a stand board's face (`owner`, its pick); and the rim lit on the board in focus.
   const STAND_FOCUS_RAY = { ox: 0, oy: 0, oz: 0, dx: 0, dy: 0, dz: 0 };
-  const standRowAt = (owner, p) => {
-    if (owner.prop === "fireworklaunches" && !fireworkStand.launchesMirror) return -1;
+  const onStandBoard = (owner, p) => {
     renderer.ray(p.x, p.y, camera, STAND_FOCUS_RAY);
-    if (!Number.isFinite(owner.pickRay(STAND_FOCUS_RAY))) return -1;
-    return BL.standModels.menuRowAt(owner.boardHit.px, owner.boardHit.py);
+    return Number.isFinite(owner.pickRay(STAND_FOCUS_RAY));
   };
-  // The rims lit: the hovered row's, and the chosen row's while its preview is open.
-  const showStandFocus = () => {
-    const S = fireworkStand;
-    if (!S.focusRims) return;
-    for (const [board, rims] of Object.entries(S.focusRims)) rims.forEach((n, row) => {
-      n.visible = !!(S.focus && S.focus.board === board && S.focus.row === row || S.chosen && S.chosen.board === board && S.chosen.row === row);
-    });
-  };
-  const focusStandRow = (owner, p) => {
-    const S = fireworkStand, row = owner ? standRowAt(owner, p) : -1, focus = row >= 0 ? { board: owner.prop, row } : null;
-    if ((focus && focus.board) !== (S.focus && S.focus.board) || (focus && focus.row) !== (S.focus && S.focus.row)) { S.focus = focus; showStandFocus(); }
-    return row;
+  const focusStandBoard = (owner, p) => {
+    const S = fireworkStand, focus = owner && onStandBoard(owner, p) ? owner.prop : null;
+    if (focus !== S.focus) {
+      S.focus = focus;
+      for (const [board, rim] of Object.entries(S.focusRims)) rim.visible = board === focus;
+    }
+    return focus;
   };
   const buildFireworkStand = () => {
     const S = fireworkStand, M = BL.standModels, L = M.LAYOUT, mouth = fireworkStandMouth();
@@ -11846,14 +11829,13 @@
     S.launchClips.node = node(S.launchClips.geometry);
     S.launchClips.node.depthBias = canvas2d ? -0.7 : 0;
     S.launchClips.paint(4.1, FIREWORK_CLIP_ROWS);
-    // The rims that show which menu row is in focus, hidden until the pointer is over one.
+    // The rims that show a board is in focus, hidden until the pointer is over one.
     S.focusRims = {};
-    for (const [board, at] of [["fireworkmenu", L.menu], ["fireworklaunches", L.launches]]) S.focusRims[board] = M.boardFocus(at).map((geometry) => {
-      const n = node(geometry);
+    for (const [board, at] of [["fireworkmenu", L.menu], ["fireworklaunches", L.launches]]) {
+      const n = S.focusRims[board] = node(M.boardFocus(at));
       n.visible = false;
       n.depthBias = canvas2d ? -0.8 : 0;
-      return n;
-    });
+    }
     // In WebGL the boards' lettering is raised letters (`boardText`), rebuilt when it changes; their pictures carry only
     // the icons. Canvas 2D keeps the lettering in the pictures, as it does the sign's.
     if (!canvas2d) { S.menuText = node(null); S.launchesText = node(null); }
@@ -11969,7 +11951,6 @@
     const S = fireworkStand;
     if (!S.built) return;
     refreshFireworkBoards();
-    if (S.chosen && !document.getElementById("donation-popup").open) { S.chosen = null; showStandFocus(); }
     const p = camera.position;
     if (Math.hypot(p.x - S.x, p.z - S.z) > FIREWORK_STAND_NEAR) return;
     for (let i = 0; i < S.stars.length; i++) S.stars[i].glow = 0.72 + 0.48 * Math.sin(elapsed * 2.6 + i * 1.7);

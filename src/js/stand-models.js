@@ -668,11 +668,6 @@
     launches: { y: 104, step: 100, h: 90, rows: 4, icon: [64, 15, 60] }
   };
   const PANEL = "#211913", PANEL_FIRST = "#2a2014";
-  // The BUY A FIREWORK row a point on the menu's picture (pixels) lies in, or -1 off the rows.
-  const menuRowAt = (px, py) => {
-    const R = BOARD_PX.menu, n = Math.floor((py - R.y) / R.step);
-    return px >= 22 && px <= MENU_W - 22 && n >= 0 && n < R.rows && py - R.y - n * R.step <= R.h ? n : -1;
-  };
   // A play button's triangle in a square `s` across at (x, y).
   const playMark = (g, x, y, s) => {
     g.beginPath();
@@ -834,17 +829,13 @@
     }
     return { main: merge(...parts), fourth: fourth.length ? merge(...fourth) : null };
   };
-  // The menu's focus, for the row the pointer is over or the one just chosen: a glowing gold rim round each row's panel,
-  // one mesh a row, laid where `B` is (a board's LAYOUT), for the scene to show and hide.
+  // A board's focus, while the pointer is over it: a glowing gold rim round its face, laid where `B` is (a board's
+  // LAYOUT), for the scene to show and hide.
   const boardFocus = (B) => {
-    const R = BOARD_PX.menu, kx = B.w / MENU_W, ky = B.h / MENU_H, X = (px) => B.x - B.w / 2 + px * kx, Y = (py) => B.y + B.h / 2 - py * ky;
+    const kx = B.w / MENU_W, ky = B.h / MENU_H, X = (px) => B.x - B.w / 2 + px * kx, Y = (py) => B.y + B.h / 2 - py * ky;
     const bar = (x0, y0, x1, y1) => box({ w: (x1 - x0) * kx, h: (y1 - y0) * ky, d: 0.012, color: "#ffd24a", emissive: 0.95, offset: { x: (X(x0) + X(x1)) / 2, y: (Y(y0) + Y(y1)) / 2, z: 0.413 } });
-    const rows = [];
-    for (let n = 0; n < R.rows; n++) {
-      const top = R.y + n * R.step - 6, bottom = R.y + n * R.step + R.h + 6, left = 16, right = MENU_W - 16, t = 7;
-      rows.push(noShadow(merge(bar(left, top, right, top + t), bar(left, bottom - t, right, bottom), bar(left, top + t, left + t, bottom - t), bar(right - t, top + t, right, bottom - t))));
-    }
-    return rows;
+    const t = 8, l = 4, r = MENU_W - 4, top = 4, bottom = MENU_H - 4;
+    return noShadow(merge(bar(l, top, r, top + t), bar(l, bottom - t, r, bottom), bar(l, top + t, l + t, bottom - t), bar(r - t, top + t, r, bottom - t)));
   };
   // ---- clips ------------------------------------------------------------------------------------------------------
   // Each firework's clip, for the menu board: the burst itself, written once by a studio engine of its own (fireworks.js
@@ -995,5 +986,5 @@
     return c;
   });
 
-  BL.standModels = { PX, LAYOUT, ground, plinthFlat, build, star, rockets, strawHat, pictureFace, menuFace, launchesFace, boardText, menuRowAt, boardFocus, clip, clipBoard, clipPainter, CLIP_KINDS, clothCanvas, screenCanvas, MENU_W, MENU_H };
+  BL.standModels = { PX, LAYOUT, ground, plinthFlat, build, star, rockets, strawHat, pictureFace, menuFace, launchesFace, boardText, boardFocus, clip, clipBoard, clipPainter, CLIP_KINDS, clothCanvas, screenCanvas, MENU_W, MENU_H };
 })();
