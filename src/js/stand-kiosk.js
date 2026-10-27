@@ -14,8 +14,11 @@
 // SIGN IN TO BUY, `hooks.signIn()`; Preview still works) or "closed". `hooks.note()` is a line under the menu (the
 // visitor's own purchases, say), or "". Simulated (`hooks.real` false), the invoice is paid with a tap on PAY, through
 // `hooks.simulate(id)`, which then arrives like the API's word. `hooks.pick`, an item's id, opens the screen at that
-// item: its invoice when it can be bought now (or what stands in the way), else the menu with it highlighted; Back
-// goes to the menu.
+// item. Where the stand can show an item (`hooks.showcase(id, w, h)`, `{ canvas, paint(t) }` or null), the item opens
+// on its showcase first: the item playing large, with BUY and its price (or what stands in the way), BACK and SEE IT IN
+// THE SKY (the free preview); BUY goes on to its invoice, and Back from there comes back to the showcase. Without
+// one, the item opens at its invoice when it can be bought now (or what stands in the way), else the menu with it
+// highlighted.
 //
 // `create(hooks)` returns the popup's flow: `start`, `stop`, `key(e)`, `tap(u, v)` in the canvas's pixels, `receive(id)`
 // (true when it was this invoice), `update(dt)`, `paint()` (repaints only after a change), `animate(ctx, time)`, and
@@ -40,7 +43,22 @@
     canvas.width = W;
     canvas.height = H;
     let dirty = true, shown = -1, buttons = [], ticket = 0, shownMay = "", shownNote = "", shownNet = "", walletNote = "";
-    const flow = { canvas, W, H, open: false, state: "menu", pick: 0, item: null, invoice: null, error: "", left: 0 };
+    const flow = { canvas, W, H, open: false, state: "menu", pick: 0, item: null, invoice: null, error: "", left: 0, showcase: null, from: "menu" };
+    // The showcase's picture: where it sits on the screen, and the item's own painter, made once per item.
+    const SHOW = { x: 30, y: 46, w: 340, h: 200 }, showcases = new Map();
+    let shownAt = -1;
+    const showcaseOf = (item) => {
+      if (!hooks.showcase) return null;
+      if (!showcases.has(item.id)) showcases.set(item.id, hooks.showcase(item.id, SHOW.w, SHOW.h));
+      return showcases.get(item.id);
+    };
+    const show = (item) => {
+      flow.item = item;
+      flow.showcase = showcaseOf(item);
+      flow.invoice = null;
+      shownAt = -1;
+      set("show");
+    };
     const set = (state) => {
       flow.state = state;
       dirty = true;
@@ -69,6 +87,7 @@
         flow.error = may;
         return set("problem");
       }
+      flow.from = flow.state === "show" ? "show" : "menu";
       flow.item = item;
       flow.invoice = null;
       walletNote = "";
@@ -106,6 +125,11 @@
         if (a === "sign-in") return hooks.signIn();
         if (a === "close") return hooks.close();
       }
+      if (s === "show") {
+        if (a === "buy") return buy(flow.item);
+        if (a === "preview") return hooks.preview(flow.item.id);
+        if (a === "sign-in") return hooks.signIn();
+      }
       if (s === "invoice") {
         if (a === "wallet") return walletPay();
         if (a === "open") return hooks.openWallet(flow.invoice.bolt);
@@ -117,6 +141,8 @@
       if (a === "back") {
         ticket++;
         flow.invoice = null;
+        // Back from the invoice, or from making it, goes back to the showcase it was bought from.
+        if (s !== "show" && s !== "menu" && flow.from === "show" && flow.showcase) return show(flow.item);
         return set("menu");
       }
     };
@@ -125,6 +151,11 @@
     flow.key = (e) => {
       const k = e.key, s = flow.state, list = items();
       if (k === "Escape" || k === "Backspace") return s === "menu" ? hooks.close() : act("back");
+      if (s === "show") {
+        if ((k === "Enter" || k === " ") && flow.item.price !== null && hooks.mayBuy() === "yes") return act("buy");
+        if (k === "p" || k === "P") return act("preview");
+        return;
+      }
       if (s === "menu") {
         if (k === "ArrowDown" || k === "ArrowUp") {
           flow.pick = (flow.pick + (k === "ArrowDown" ? 1 : list.length - 1)) % Math.max(1, list.length);
@@ -155,7 +186,8 @@
       const list = items(), at = hooks.pick ? list.findIndex((it) => it.id === hooks.pick) : -1;
       if (at < 0) return;
       flow.pick = at;
-      if (list[at].price !== null) buy(list[at]);
+      if (showcaseOf(list[at])) show(list[at]);
+      else if (list[at].price !== null) buy(list[at]);
     };
     flow.stop = () => {
       ticket++;
@@ -197,6 +229,11 @@
     };
     flow.animate = (g2, time) => {
       if (flow.state === "asking") spin(g2, W / 2, 226, 30, 8, time);
+      // The showcase plays at about 30 frames a second, its picture laid in its frame.
+      if (flow.state === "show" && flow.showcase) {
+        if (shownAt < 0 || time - shownAt >= 1 / 30) { flow.showcase.paint(time); shownAt = time; }
+        g2.drawImage(flow.showcase.canvas, SHOW.x, SHOW.y, SHOW.w, SHOW.h);
+      }
     };
 
     const paintMenu = () => {
@@ -230,6 +267,23 @@
       write(g, real ? "LAUNCHES FOR EVERYONE A FEW SECONDS AFTER IT'S PAID" : "A LOCAL SIMULATION · NO BITCOIN IS SENT", W / 2, 366, 1, INK.dim, "center");
       if (shownNet) write(g, `${shownNet.toUpperCase()} TEST · NOT REAL BITCOIN`, W / 2, 382, 1, INK.amber, "center");
     };
+    // The item large, as it plays (`animate` lays it in the frame), its price under it, and how to go on.
+    const paintShow = () => {
+      const it = flow.item, may = shownMay, open = may === "yes" && it.price !== null;
+      face(g, it.name);
+      g.fillStyle = INK.panel;
+      g.fillRect(SHOW.x - 4, SHOW.y - 4, SHOW.w + 8, SHOW.h + 8);
+      g.strokeStyle = INK.gold;
+      g.lineWidth = 2;
+      g.strokeRect(SHOW.x - 3, SHOW.y - 3, SHOW.w + 6, SHOW.h + 6);
+      writeFit(g, hooks.showLine || "WHAT EVERYONE ON THE ISLAND WILL SEE", W / 2, SHOW.y + SHOW.h + 12, 1, INK.dim, 340, "center");
+      if (may === "sign-in") button(30, 280, 340, 46, "SIGN IN TO BUY", "primary", "sign-in", 3);
+      else if (open) button(30, 280, 340, 46, `BUY · ${sats(it.price)} SATS`, "primary", "buy", 3);
+      else button(30, 280, 340, 46, `${it.name} · CLOSED`, "off", "buy", 2);
+      button(30, 336, 160, 40, "BACK", "secondary", "back");
+      button(210, 336, 160, 40, "SEE IT IN THE SKY", "secondary", "preview");
+      writeFit(g, "SEEING IT IN THE SKY IS FREE AND ONLY YOU SEE IT", W / 2, 384, 1, INK.dim, 340, "center");
+    };
     const paintProblem = () => {
       const [title, line, note] = PROBLEMS[flow.error] || PROBLEMS.invalid;
       face(g, "");
@@ -245,6 +299,7 @@
       buttons = [];
       const s = flow.state;
       if (s === "menu") paintMenu();
+      else if (s === "show") paintShow();
       else if (s === "asking") {
         face(g, flow.item.name);
         write(g, "MAKING YOUR INVOICE", W / 2, 150, 2, INK.white, "center");

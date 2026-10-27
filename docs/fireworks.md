@@ -120,7 +120,8 @@ fireworks, is `images/fireworks-concept-sheet.webp`:
 - **Left:** BUY A FIREWORK, the three fireworks with the server's prices (the show pack is on the terminal's screen,
   not the board), and how to buy. Each row plays its firework in a frame, a looping clip of the burst itself as the
   sky shows it, so a buyer sees what they would get. It is where a firework is chosen: a tap on its row opens the
-  stand's screen at that firework's payment.
+  stand's screen on that firework playing large, with BUY and its price, BACK, and SEE IT IN THE SKY (the free
+  preview); BUY goes on to its payment.
 - **Right:** TOP LAUNCHES under a gold crown: the fireworks ranked by launches over the last seven days
   (`purchaseCounts`), the show pack joining them, on a fourth panel, once it has launches. A tap opens it in the board
   dialog, whose second page is the top buyers (`purchaseBoard`). With no API behind the page it counts this page's own
@@ -139,7 +140,7 @@ fireworks, is `images/fireworks-concept-sheet.webp`:
   from some angles.
 
 Space at the counter, or a tap on it (BUY HERE), opens the stand's screen at its whole list; a tap on a row of the
-menu board opens it at that firework's payment, and a tap elsewhere on the board at the list.
+menu board opens it on that firework's preview, and a tap elsewhere on the board at the list.
 
 ## Timing
 

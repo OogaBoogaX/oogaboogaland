@@ -11949,6 +11949,8 @@
       real, title: "FIREWORKS", heading: "Fireworks",
       label: "Firework stand. Up and Down choose, Enter buys, 1 to 4 buy that one, P previews it free, W pays with your wallet, C copies the invoice, Escape goes back.",
       items: fireworkItems, pick, mayBuy: fireworkMayBuy, note: () => fireworkStand.note, testNetwork: () => donations.testNetwork,
+      // A firework chosen on the board plays large before it is paid for.
+      showcase: (id, w, h) => BL.standModels.CLIP_KINDS.includes(id) ? BL.standModels.clipPainter(id, w, h) : null,
       buy: real ? (id) => donations.purchase(donations.FIREWORK, id)
         : () => Promise.resolve({ invoice: { id: `sim-firework-${++fireworkDebugCount}`, bolt11: "lnbc1simulatedfireworkdonotpay", expires: Date.now() / 1000 + 300 } }),
       simulate: (id, invoiceId) => donations.simulateFirework(id, invoiceId),

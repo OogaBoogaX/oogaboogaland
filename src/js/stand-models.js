@@ -919,6 +919,13 @@
     }
   };
   const clipPoint = [0, 0, 0];
+  // One firework's clip in a picture of its own, w by h pixels, for the stand's screen: `paint(t)` paints it at `t`.
+  const clipPainter = (kind, w, h) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = w; canvas.height = h;
+    const context = canvas.getContext("2d"), image = context.createImageData(w, h);
+    return { canvas, paint: (t) => { clipFrame(image.data, w, 0, 0, w, h, kind, t); context.putImageData(image, 0, 0); } };
+  };
   // The menu board's clips: one live picture over its rows' frames (`B`, LAYOUT.menu), each row's firework playing in
   // its frame, the rows a little out of step; clear between the frames. `paint(t, kinds)` paints them all at `t`, and
   // the renderer uploads the picture again (its `version`).
@@ -965,5 +972,5 @@
     return c;
   });
 
-  BL.standModels = { PX, LAYOUT, ground, plinthFlat, build, star, rockets, strawHat, pictureFace, menuFace, launchesFace, boardText, menuRowAt, clips, clipBoard, CLIP_KINDS, clothCanvas, screenCanvas, MENU_W, MENU_H };
+  BL.standModels = { PX, LAYOUT, ground, plinthFlat, build, star, rockets, strawHat, pictureFace, menuFace, launchesFace, boardText, menuRowAt, clips, clipBoard, clipPainter, CLIP_KINDS, clothCanvas, screenCanvas, MENU_W, MENU_H };
 })();
