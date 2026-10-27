@@ -91,23 +91,38 @@ from the stand to watch, with the Sphere at the foot of the frame.
 ## The stand
 
 A small attraction, readable from across the island (`stand-models.js`), built to the concept in
-`images/fireworks-concept-stand.webp`; the first concept sheet, with the three fireworks, is
-`images/fireworks-concept-sheet.webp`:
+`images/fireworks-concept-stand.webp` and its four detail renders; the first concept sheet, with the three
+fireworks, is `images/fireworks-concept-sheet.webp`:
 
-- **Above:** the FIREWORKS sign in big gold letters with a marquee of bulbs chasing round it, LIGHT UP OBL under it,
-  four oversized voxel rockets standing on it, and gold starbursts either side that twinkle.
-- **In the middle:** a timber booth with a red and white striped canopy, a scalloped valance and bunting that rocks
-  in the wind; a merchant counter with the terminal (BUY HERE) and a painted cloth of the island under a burst;
-  shelves of firework boxes and bundles behind; and the vendor, an Ooga of no one's in a straw hat, looking about.
+- **Below:** a plinth of two stone courses, the upper set back, with a paving of warm bricks inside a stone border.
+  It is the stand's floor, half a metre up: a visitor steps onto it and walks the paving to the counter. A rope fence
+  on posts runs round the paving, the two posts either side of the way in lit; painted crates of fireworks with
+  bundles of rockets stand at its corners, and flowering greenery grows round the plinth's front corners and sides.
+- **Above:** the FIREWORKS sign in big gold letters with a marquee of bulbs chasing round it, LIGHT UP OBL under it
+  with a sparkle at either end, and four oversized voxel rockets standing on it before a palisade of stakes, a
+  sparkle over each tip in its own colour and gold bursts in the greenery at the sign's corners, all twinkling.
+- **In the middle:** a timber booth with a red and white striped canopy and a scalloped valance; a merchant counter
+  with the terminal (BUY HERE), a painted cloth of the island under a burst and rockets on its ends; shelves stocked
+  with boxes and bundles behind, a purple and a red starburst on them; and the vendor, an Ooga of no one's in a straw
+  hat, looking about.
+- **Either side:** a board in a heavy frame, its face from the counter's height up, greenery on its cap, and open
+  framing behind it to the wall with a shelf of fireworks and a barrel. Tall corner posts fly blue sunburst banners
+  that rock in the wind and string lantern ropes to the sign.
 - **Left:** BUY A FIREWORK, the three fireworks with their icons and the server's prices (the show pack is on the
   terminal's screen, not the board), and how to buy.
-- **Right:** TOP LAUNCHES under a gold crown and a banner: the fireworks ranked by launches over the last seven days
+- **Right:** TOP LAUNCHES under a gold crown: the fireworks ranked by launches over the last seven days
   (`purchaseCounts`), the show pack joining them once it has launches. A tap opens it in the board dialog, whose
   second page is the top buyers (`purchaseBoard`). With no API behind the page it counts this page's own launches.
-- Lanterns at the canopy's corners light the counter at night; the boards' lanterns only glow.
+- Lanterns at the canopy's corners light the counter at night and the fence's two lit posts the paving; the lantern
+  ropes' four only glow.
 - Within 30 m its stars twinkle, the marquee chases and sparks now and then fly from a rocket's tip; beyond, nothing
-  of it moves. It adds 25 to 30 ms to the hub's build (of about 3 s), about 9,400 faces on 54 nodes, four pictures
-  (about half a million texels, uploaded once and repainted only when prices or counts change) and two lights.
+  of it moves. Its models build in two slices of the hub's sliced build (the plinth and greenery, 15 to 21 ms; the
+  booth, 10 to 12 ms) and the stand in a third (about 25 ms). It is about 21,800 faces on 68 nodes, under 2% of the
+  hub's 1.2 million, four pictures (about half a million texels, uploaded once and repainted only when prices or
+  counts change) and four lights.
+- On Canvas 2D the boards' faces, the banners' sunbursts and the pieces laid on faces sort nearer than what they
+  lie on, and the plinth a little nearer than the ground. The island's large ground polygons can still paint over
+  the plinth's lowest course from some angles.
 
 Space at the counter, or a tap on it or on the menu board, opens the stand's screen.
 
