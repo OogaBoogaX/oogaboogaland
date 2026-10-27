@@ -253,9 +253,12 @@
   const bucket = (n) => n === 0 ? "none" : n === 1 ? "1" : n <= 5 ? "2-5" : "6+";
   // An item's invoice: `{ request, invoice: { id, bolt11, expires } }`, Lightning only, or `{ error }` (`sign-in` when
   // only signed-in visitors may buy, `closed`, `network`).
-  const purchase = async (category, item) => {
+  // `opts.slot`, where in the sky a firework is asked to burst, goes only to an API that says it takes one (its
+  // catalogue's `slots`, how many there are).
+  const purchase = async (category, item, opts = {}) => {
     if (!CATEGORY.test(category) || !ITEM.test(item)) return { error: "invalid" };
-    const body = { category, item };
+    const body = { category, item }, slots = state.catalogue?.[category]?.slots;
+    if (Number.isSafeInteger(slots) && Number.isSafeInteger(opts.slot) && opts.slot >= 0 && opts.slot < slots) body.slot = opts.slot;
     if (state.catalogue?.[category]?.buyers === "everyone") { body.nth = Math.min(999, boughtHere + 1); body.before = bucket(boughtBefore); }
     const r = await call("/purchases/buy", body);
     if (r.error) return r;
@@ -292,12 +295,13 @@
     }
     if (firework && handlers.firework) handlers.firework({ ...firework, mine });
   };
-  // Without an API, the stand's purchase plays as if paid, on this page alone: its own id, the API's lead, no slot
-  // (the page picks the next one round the arc).
-  const simulateFirework = (kind, id = `sim-firework-${randomId()}`) => {
+  // Without an API, the stand's purchase plays as if paid, on this page alone: its own id, the API's lead, and the slot
+  // the buyer chose, or none (the page picks the next one round the arc).
+  const simulateFirework = (kind, id = `sim-firework-${randomId()}`, slot = null) => {
     if (real || !FIREWORK_KINDS.includes(kind)) return null;
     ownPurchases.add(id);
-    heardPurchase(id, { id, kind, slot: null, launchAt: serverNow() + FIREWORK_LEAD_MS, login: BL.net?.state.me?.login || null });
+    const at = Number.isSafeInteger(slot) && slot >= 0 && slot < FIREWORK_SLOTS ? slot : null;
+    heardPurchase(id, { id, kind, slot: at, launchAt: serverNow() + FIREWORK_LEAD_MS, login: BL.net?.state.me?.login || null });
     return id;
   };
 
