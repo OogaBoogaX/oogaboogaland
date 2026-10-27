@@ -74,6 +74,8 @@
   const MIRROR_GATE_CLOSED = true;
   const PORTAL_Z = 0.5, PORTAL_MIN_X = -2.48, PORTAL_MAX_X = 2.48, PORTAL_MIN_Y = 0, PORTAL_MAX_Y = 2.98;
   const RIM_SEAM_DROP = 0.015;
+  // Where a sealed cave's face stands, just inside its rim: walkers stop there however far in the seal itself is set.
+  const SEAL_Z = 0.52;
   // The sign's back reaches 0.07 m behind its origin; the Arcade's flat wall sits behind the projecting rim.
   const CAVE_SIGN_Y = 3.5 - RIM_SEAM_DROP + hubModels.CAVE_SIGN_HEIGHT * 0.5 + 0.32;
   const CAVE_SIGN_Z = PORTAL_Z + 0.055;
@@ -1836,12 +1838,14 @@
     }
     if (slot.status === "dark") {
       const geometry = hubModels.sealedCaveFace(sealedCaveVariant(slot.id));
-      const seal = createNode({ position: { x: 0, y: 0, z: 0.52 }, geometry, matrixExterior: true, sightSolid: true });
+      const seal = createNode({ position: { x: 0, y: 0, z: SEAL_Z }, geometry, matrixExterior: true, sightSolid: true });
       addChild(group, seal);
       solids.add(seal);
       registerClimbMasonry(seal, m);
-      sealedCaves.push({ caveIndex, mouth: m, node: seal, sr: ax, cr: az, stopZ: seal.position.z + geometry.frontZ + 0.01 });
-      closedCaveZones.push({ active: true, x: m.x, z: m.z, floor: m.floorY, sr: ax, cr: az, half: PORTAL_MAX_X + 0.25, front: seal.position.z + geometry.frontZ + 0.26 });
+      // `stopZ`, the plane walkers stop at, and the zone kept clear of NPCs stay at the rim; `faceZ`, the seal's own
+      // face, is where the cave's veil lies.
+      sealedCaves.push({ caveIndex, mouth: m, node: seal, sr: ax, cr: az, stopZ: SEAL_Z + geometry.frontZ + 0.01, faceZ: seal.position.z + geometry.frontZ + 0.01 });
+      closedCaveZones.push({ active: true, x: m.x, z: m.z, floor: m.floorY, sr: ax, cr: az, half: PORTAL_MAX_X + 0.25, front: SEAL_Z + geometry.frontZ + 0.26 });
     } else if (slot.status === "mirror") {
       const opening = rim.geometry.openingBounds;
       const geometry = { ...hubModels.matrixPrisonBars(), matrixCave: caveIndex, clipMinY: m.floorY + opening.floorY, clipMaxY: m.floorY + opening.ceilingY };
@@ -1947,7 +1951,7 @@
     if (slot.status !== "mirror" && slot.scene !== "lab" && slot.scene !== "factory" && slot.place !== "bca") {
       const seal = slot.status === "dark" ? sealedCaves[sealedCaves.length - 1] : null;
       caveVeils.push({ mouth: m, group, opening: rim.geometry.openingBounds,
-        plane: seal ? seal.stopZ + 0.02 : PORTAL_Z, tint: slot.scene === "arcade" ? ARCADE_VEIL_TINT : null, phase: null });
+        plane: seal ? seal.faceZ + 0.02 : PORTAL_Z, tint: slot.scene === "arcade" ? ARCADE_VEIL_TINT : null, phase: null });
     }
     dressMouth(slot, m, group);
     addChild(root, group);
