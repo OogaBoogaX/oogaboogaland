@@ -834,6 +834,18 @@
     }
     return { main: merge(...parts), fourth: fourth.length ? merge(...fourth) : null };
   };
+  // The menu's focus, for the row the pointer is over or the one just chosen: a glowing gold rim round each row's panel,
+  // one mesh a row, laid where `B` is (a board's LAYOUT), for the scene to show and hide.
+  const boardFocus = (B) => {
+    const R = BOARD_PX.menu, kx = B.w / MENU_W, ky = B.h / MENU_H, X = (px) => B.x - B.w / 2 + px * kx, Y = (py) => B.y + B.h / 2 - py * ky;
+    const bar = (x0, y0, x1, y1) => box({ w: (x1 - x0) * kx, h: (y1 - y0) * ky, d: 0.012, color: "#ffd24a", emissive: 0.95, offset: { x: (X(x0) + X(x1)) / 2, y: (Y(y0) + Y(y1)) / 2, z: 0.413 } });
+    const rows = [];
+    for (let n = 0; n < R.rows; n++) {
+      const top = R.y + n * R.step - 6, bottom = R.y + n * R.step + R.h + 6, left = 16, right = MENU_W - 16, t = 7;
+      rows.push(noShadow(merge(bar(left, top, right, top + t), bar(left, bottom - t, right, bottom), bar(left, top + t, left + t, bottom - t), bar(right - t, top + t, right, bottom - t))));
+    }
+    return rows;
+  };
   // ---- clips ------------------------------------------------------------------------------------------------------
   // Each firework's clip, for the menu board: the burst itself, written once by a studio engine of its own (fireworks.js
   // at the low tier, its rocket leaving a point under its one slot, its flat patterns facing the viewer) and kept as its
@@ -983,5 +995,5 @@
     return c;
   });
 
-  BL.standModels = { PX, LAYOUT, ground, plinthFlat, build, star, rockets, strawHat, pictureFace, menuFace, launchesFace, boardText, menuRowAt, clip, clipBoard, clipPainter, CLIP_KINDS, clothCanvas, screenCanvas, MENU_W, MENU_H };
+  BL.standModels = { PX, LAYOUT, ground, plinthFlat, build, star, rockets, strawHat, pictureFace, menuFace, launchesFace, boardText, menuRowAt, boardFocus, clip, clipBoard, clipPainter, CLIP_KINDS, clothCanvas, screenCanvas, MENU_W, MENU_H };
 })();

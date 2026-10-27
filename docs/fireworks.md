@@ -121,7 +121,8 @@ fireworks, is `images/fireworks-concept-sheet.webp`:
   not the board), and how to buy. Each row plays its firework in a frame, a looping clip of the burst itself as the
   sky shows it, so a buyer sees what they would get. It is where a firework is chosen: a tap on its row opens the
   stand's screen on that firework playing large, with BUY and its price, BACK, and SEE IT IN THE SKY (the free
-  preview); BUY goes on to its payment.
+  preview); BUY goes on to its payment. The row under the pointer lights a gold rim and the tooltip names it and its
+  price; a chosen row stays lit while its preview is open.
 - **Right:** TOP LAUNCHES under a gold crown: the fireworks ranked by launches over the last seven days
   (`purchaseCounts`), the show pack joining them, on a fourth panel, once it has launches. A tap opens it in the board
   dialog, whose second page is the top buyers (`purchaseBoard`). With no API behind the page it counts this page's own
