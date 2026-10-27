@@ -6,11 +6,11 @@
 // and TOP LAUNCHES on the right under a gold crown. It stands on a plinth of two stone courses with a paving of bricks,
 // its floor half a metre up. Tall posts at its outer corners fly blue sunburst banners and string lantern ropes to the
 // sign. The boards stand in heavy frames, their faces from the counter's height up. A rope fence on posts, the two
-// either side of the way in lit, runs round the paving. Its timber is voxels an eighth of a metre across (`PX`) with
-// the grain running along each beam, as the Factory's kiosk and board are built, so the renderer's block detail gives
-// it the same pixel texture; the plinth's stones and bricks are voxels too; cloth, rope, letters, stars and pictures
-// stay smooth. The lettering and the marquee are meshes of their own, for Canvas 2D's `depthBias` (the scene sets it)
-// to sort them in front of the sign's planks.
+// either side of the way in lit, runs round the paving. Open timber framing with a shelf and a barrel stands behind
+// each board. Its timber is voxels an eighth of a metre across (`PX`) with the grain running along each beam, as the
+// Factory's kiosk and board are built, so the renderer's block detail gives it the same pixel texture; the plinth's
+// stones and bricks are voxels too; cloth, rope, letters, stars and pictures stay smooth. The lettering and the marquee
+// are meshes of their own, for Canvas 2D's `depthBias` (the scene sets it) to sort them in front of the sign's planks.
 //
 // Everything is in the stand's own frame: x to the visitor's right as they face it, y up from its floor (the plinth's
 // top, `LAYOUT.floor` over the ground), +z out of its front. `LAYOUT` places what the scene hangs and uses (where a
@@ -289,6 +289,19 @@
       timber(v, rand, cx - 0.75, cx + 0.75, 3.0, 3.25, 0.25, 0.5, "x");
       timber(v, rand, cx - 1.125, cx + 1.125, 3.25, 3.5, 0.0, 0.625, "x");
       fill(v, cx - 0.75, cx + 0.75, 1.125, 3.0, 0.25, 0.375, T.slate);
+      // Behind it, open framing to the wall: a post at the back, beams back from the cap, a brace, a shelf of boxes and
+      // bundles, and a barrel on the floor.
+      const outer = s > 0 ? 3.625 : -3.875, inner = s > 0 ? 1.75 : -2.0;
+      timber(v, rand, outer, outer + 0.25, 0, 3.375, -1.75, -1.5, "y");
+      timber(v, rand, outer, outer + 0.25, 3.125, 3.375, -1.5, 0.125, "z");
+      timber(v, rand, Math.min(inner, outer), Math.max(inner, outer) + 0.25, 3.125, 3.375, -1.75, -1.5, "x");
+      timber(v, rand, Math.min(inner, outer) + 0.25, Math.max(inner, outer), 1.125, 1.25, -1.625, -0.875, "x");
+      for (let n = 0; n < 12; n++) fill(v, outer, outer + 0.25, 0.375 + n * 0.229, 0.625 + n * 0.229, -1.5 + n * 0.125, -1.375 + n * 0.125, (i, j, k) => TONES[(j + k) % 4]);
+      const shelfX = s > 0 ? 2.0 : -3.375;
+      starBox(v, cell(shelfX, "x"), cell(1.25, "y"), cell(-1.5, "z"), T.boxRed);
+      starBox(v, cell(shelfX + 0.5, "x"), cell(1.25, "y"), cell(-1.5, "z"), T.purple);
+      bundleAt(v, shelfX + 1.0, 1.25, -1.375, [T.green, T.red, T.blue, T.orange]);
+      barrel(v, s * 2.9, 0, -0.95);
     }
     // The corner posts, past the boards' outer posts, to five metres, each with a finial, a lantern rope's hook at its
     // top and an arm the banner hangs from.
@@ -307,18 +320,17 @@
     const sb = (x, y, z, c) => starBox(v, cell(x, "x"), cell(y, "y"), cell(z, "z"), c);
     sb(-1.375, 1.5, -1.625, T.boxBlue); sb(-1.0, 1.5, -1.625, T.boxRed); sb(0.75, 1.5, -1.625, T.boxBlue);
     sb(-0.375, 2.125, -1.625, T.boxRed); sb(1.0, 2.125, -1.625, T.purple);
-    const bundle = (x, y, z, colors) => colors.forEach((c, n) => littleRocket(v, cell(x, "x") + (n % 2), cell(y, "y"), cell(z, "z") + Math.floor(n / 2), 4 + (n % 3), c, n % 2 ? T.cone : T.star));
-    bundle(0.125, 1.5, -1.5, [T.red, T.blue, T.green, T.purple]);
-    bundle(-1.375, 2.125, -1.5, [T.purple, T.red, T.orange, T.blue]);
-    bundle(0.25, 2.125, -1.5, [T.green, T.red]);
+    bundleAt(v, 0.125, 1.5, -1.5, [T.red, T.blue, T.green, T.purple]);
+    bundleAt(v, -1.375, 2.125, -1.5, [T.purple, T.red, T.orange, T.blue]);
+    bundleAt(v, 0.25, 2.125, -1.5, [T.green, T.red]);
     // Down front: a crate of rockets at the left corner, boxes at the right, rockets in a barrel beside them (the
     // barrel the scene's kit lays); and boxes stacked at the counter's left end.
     timber(v, rand, -2.25, -1.75, 0, 0.5, 1.375, 1.875, "x");
     carve(v, -2.125, -1.875, 0.375, 0.5, 1.5, 1.75);
-    bundle(-2.125, 0.375, 1.5, [T.red, T.blue, T.purple, T.green]);
+    bundleAt(v, -2.125, 0.375, 1.5, [T.red, T.blue, T.purple, T.green]);
     sb(1.875, 0, 1.5, T.boxBlue); sb(2.25, 0, 1.625, T.boxRed); sb(2.0, 0.375, 1.5, T.purple);
     sb(-1.875, 0.25, -0.125, T.boxRed); sb(-1.875, 0.625, -0.125, T.boxBlue);
-    bundle(2.5, 0.5, 1.0, [T.red, T.green, T.blue, T.orange]);
+    bundleAt(v, 2.5, 0.5, 1.0, [T.red, T.green, T.blue, T.orange]);
     // Iron at the joints: plates where the front posts meet the counter's top, the beam and the sign; collars round the
     // fence posts' feet.
     for (const s of [-1, 1]) for (const y of [1.19, 2.44, 3.4, 4.0]) iron.push(moved(bevelBox({ w: 0.3, h: 0.22, d: 0.05, color: "#2c2e33", bevel: 0.012 }), s * 1.625, y, 1.15));
@@ -407,6 +419,17 @@
       swing: Object.assign(noShadow(merge(...swing)), { swing: 1 }), marks: Object.assign(noShadow(merge(...marks)), { swing: 1 }), glow: noShadow(merge(...glow)), lamps: noShadow(merge(...lamps))
     };
   });
+  // A bundle of little rockets two cells square with its near left corner at (x, y, z) metres, their colours in turn.
+  const bundleAt = (v, x, y, z, colors) => colors.forEach((c, n) => littleRocket(v, cell(x, "x") + (n % 2), cell(y, "y"), cell(z, "z") + Math.floor(n / 2), 4 + (n % 3), c, n % 2 ? T.cone : T.star));
+  // A barrel on the floor at (x, z), its middle; staves in the timber's tones, two iron hoops.
+  const barrel = (v, x, y, z) => {
+    const i0 = cell(x, "x"), j0 = cell(y, "y"), k0 = cell(z, "z");
+    for (let j = 0; j < 6; j++) for (let a = -3; a <= 2; a++) for (let b = -3; b <= 2; b++) {
+      const d = Math.hypot(a + 0.5, b + 0.5), r = j === 0 || j === 5 ? 2.4 : 2.9;
+      if (d > r) continue;
+      v.set(i0 + a, j0 + j, k0 + b, j === 1 || j === 4 ? T.iron : j === 5 ? GRAIN : TONES[(Math.floor(Math.atan2(b + 0.5, a + 0.5) * 2.5) & 3)]);
+    }
+  };
 
   // The vendor's straw hat, for the hat anchor of an Ooga's head: a wide brim and a crown with a red band.
   const strawHat = cached(() => merge(
