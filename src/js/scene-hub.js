@@ -11716,8 +11716,8 @@
     plinth.depthBias = canvas2d ? -0.3 : 0;
     solids.add(plinth);
     solids.add(node(parts.timber));
-    // The banners' sunbursts and the glowing pieces laid on faces (the shelves' stars) sort nearer on Canvas 2D than
-    // the cloth and wood they lie on.
+    // The banners' sunbursts and the glowing pieces laid on faces (the crates' bursts, the shelves' stars) sort nearer
+    // on Canvas 2D than the cloth and wood they lie on.
     node(parts.iron); node(parts.cloth); node(parts.dark); node(parts.swing);
     node(parts.marks).depthBias = node(parts.glow).depthBias = canvas2d ? -0.25 : 0;
     // The sign's lettering: raised blocks in WebGL; on Canvas 2D one cut-out picture each, sorted well nearer than the

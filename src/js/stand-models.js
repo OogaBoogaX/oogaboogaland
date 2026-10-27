@@ -8,11 +8,11 @@
 // stand in heavy frames, their faces from the counter's height up. A rope fence on posts, the two either side of the
 // way in lit, runs round the paving. Open timber framing with a shelf and a barrel stands behind each board. A
 // starburst stands at either end of the shelves, rockets on the counter's ends, and the big rockets stand before a
-// palisade of stakes. Its timber is voxels an eighth of a metre across (`PX`) with the grain running along each beam,
-// as the Factory's kiosk and board are built, so the renderer's block detail gives it the same pixel texture; the
-// plinth's stones and bricks are voxels too; cloth, rope, letters, stars and pictures stay smooth. The lettering and
-// the marquee are meshes of their own, for Canvas 2D's `depthBias` (the scene sets it) to sort them in front of the
-// sign's planks.
+// palisade of stakes. Painted crates of fireworks stand at the paving's corners. Its timber is voxels an eighth of a
+// metre across (`PX`) with the grain running along each beam, as the Factory's kiosk and board are built, so the
+// renderer's block detail gives it the same pixel texture; the plinth's stones and bricks are voxels too; cloth, rope,
+// letters, stars and pictures stay smooth. The lettering and the marquee are meshes of their own, for Canvas 2D's
+// `depthBias` (the scene sets it) to sort them in front of the sign's planks.
 //
 // Everything is in the stand's own frame: x to the visitor's right as they face it, y up from its floor (the plinth's
 // top, `LAYOUT.floor` over the ground), +z out of its front. `LAYOUT` places what the scene hangs and uses (where a
@@ -222,6 +222,15 @@
     v.set(i + 1, j + 1, k + 2, T.star);
     v.set(i + 1, j + 1, k, T.star);
   };
+  // A crate `n` cells a side with its near bottom-left corner at (x, y, z) metres: planks running across in the timber's
+  // tones, dark edges, iron at its eight corners.
+  const crate = (v, x, y, z, n) => {
+    const i0 = cell(x, "x"), j0 = cell(y, "y"), k0 = cell(z, "z"), end = (a) => a === 0 || a === n - 1;
+    for (let a = 0; a < n; a++) for (let b = 0; b < n; b++) for (let d = 0; d < n; d++) {
+      const edges = end(a) + end(b) + end(d);
+      v.set(i0 + a, j0 + b, k0 + d, edges === 3 ? T.iron : edges === 2 ? T.trim : TONES[(b + i0) % 4]);
+    }
+  };
 
   // ---- rope ------------------------------------------------------------------------------------------------------
   // A rope sagging `sag` metres from a to b, in twelve-centimetre lengths of alternating twist.
@@ -336,14 +345,14 @@
     bundleAt(v, -1.5, 1.25, 0.375, [T.blue, T.red, T.purple, T.orange]);
     bundleAt(v, -1.25, 1.25, 0.5, [T.green, T.purple]);
     bundleAt(v, 1.25, 1.25, 0.375, [T.red, T.orange, T.blue, T.purple]);
-    // Down front: a crate of rockets at the left corner, boxes at the right, rockets in a barrel beside them (the
-    // barrel the scene's kit lays); and boxes stacked at the counter's left end.
-    timber(v, rand, -2.25, -1.75, 0, 0.5, 1.375, 1.875, "x");
-    carve(v, -2.125, -1.875, 0.375, 0.5, 1.5, 1.75);
-    bundleAt(v, -2.125, 0.375, 1.5, [T.red, T.blue, T.purple, T.green]);
-    sb(1.875, 0, 1.5, T.boxBlue); sb(2.25, 0, 1.625, T.boxRed); sb(2.0, 0.375, 1.5, T.purple);
-    sb(-1.875, 0.25, -0.125, T.boxRed); sb(-1.875, 0.625, -0.125, T.boxBlue);
-    bundleAt(v, 2.5, 0.5, 1.0, [T.red, T.green, T.blue, T.orange]);
+    // Down front, on the paving, below the boards' faces: at the left a crate at the corner with a bundle on its outer
+    // edge and a smaller one before it; at the right a crate by the counter and another at the corner, bundles on
+    // their edges by the boards' posts.
+    crate(v, -3.75, 0, 0.625, 5); crate(v, -2.875, 0, 1.375, 4);
+    crate(v, 1.875, 0, 1.125, 5); crate(v, 3.25, 0, 0.625, 4);
+    bundleAt(v, -3.75, 0.625, 0.875, [T.red, T.blue, T.purple, T.green]);
+    bundleAt(v, 1.875, 0.625, 1.375, [T.red, T.green, T.blue, T.orange]);
+    bundleAt(v, 3.5, 0.5, 0.75, [T.purple, T.red, T.orange, T.blue]);
     // Iron at the joints: plates where the front posts meet the counter's top, the beam and the sign; collars round the
     // fence posts' feet.
     for (const s of [-1, 1]) for (const y of [1.19, 2.44, 3.4, 4.0]) iron.push(moved(bevelBox({ w: 0.3, h: 0.22, d: 0.05, color: "#2c2e33", bevel: 0.012 }), s * 1.625, y, 1.15));
@@ -384,6 +393,9 @@
     }
     // The shelves' starbursts, purple at the left and red at the right, standing on the lower shelf's ends.
     glow.push(sprite(STAR, INKS.purple, -1.15, 1.8, -1.2, 0.06, 0.03, 0.75), sprite(STAR, INKS.red, 1.15, 1.8, -1.2, 0.06, 0.03, 0.75));
+    // The crates' painted bursts, on their fronts: red on the left's corner crate and the right's by the counter, gold
+    // on the small one at the left.
+    glow.push(sprite(STAR, INKS.red, -3.4375, 0.3125, 1.262, 0.05, 0.02, 0.35), sprite(STAR, INKS.gold, -2.625, 0.25, 1.887, 0.045, 0.02, 0.35), sprite(STAR, INKS.red, 2.1875, 0.3125, 1.762, 0.05, 0.02, 0.35));
 
     // The sign's letters, gold over a darker orange with a dark rim, and the tagline's in cream.
     // The lettering is its own pair of meshes, so Canvas 2D can sort it in front of the planks it stands on.
