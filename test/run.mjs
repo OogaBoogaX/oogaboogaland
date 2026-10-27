@@ -12482,7 +12482,9 @@ const hubFireworks = { name: "hub fireworks", why: "rule: a firework anyone buys
     const frame = () => new Promise((r) => requestAnimationFrame(() => r()));
     const before = S.launchesShown, settle = async () => { for (let n = 0; n < 4; n++) await frame(); await tick(); };
     await settle();
-    tap(200, 183); await settle();
+    // The list's Mega Blast card (the third, the second row's left), its showcase's BUY, then PAY.
+    tap(113, 264); await settle();
+    tap(200, 303); await settle();
     tap(200, 274); await settle();
     const closed = !dialog.open, watching = F.watch.mode > 0, launched = B.fireworksPending > 0;
     let n = 0;

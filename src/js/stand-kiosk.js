@@ -4,8 +4,9 @@
 // A purchase is not a donation: no amount is typed, no bananas are quoted, and there is no on-chain.
 //
 // The menu lists `hooks.items()`, `[{ id, name, price }]` (the price the API's, in sats; null while that item can't be
-// bought). Choosing one asks for its invoice at once (`hooks.buy(id)`, which resolves to `{ invoice: { id, bolt11,
-// expires } }` or `{ error }`), and the invoice offers, in order, the browser's own wallet in one click where it has one
+// bought), as cards two to a row, each with its showcase playing small, its name and its price; more than fit scroll
+// (`wheel(dy)`, `drag(dy)`, the arrow keys). Choosing one opens its showcase, and BUY there asks for its invoice
+// (`hooks.buy(id)`, which resolves to `{ invoice: { id, bolt11, expires } }` or `{ error }`); the invoice offers, in order, the browser's own wallet in one click where it has one
 // (`hooks.wallet()`, then `hooks.walletPay(bolt11)` inside the click, which resolves to true when the wallet paid; a
 // refusal leaves the QR), OPEN WALLET (`hooks.openWallet(bolt11)`, its `lightning:` link) and the QR, with COPY.
 // Nothing settles but the API's word, which the scene hands back through `receive(id)`; the screen then says so and asks
@@ -14,13 +15,14 @@
 // SIGN IN TO BUY, `hooks.signIn()`; Preview still works) or "closed". `hooks.note()` is a line under the menu (the
 // visitor's own purchases, say), or "". Simulated (`hooks.real` false), the invoice is paid with a tap on PAY, through
 // `hooks.simulate(id)`, which then arrives like the API's word. `hooks.pick`, an item's id, opens the screen at that
-// item. Where the stand can show an item (`hooks.showcase(id, w, h)`, `{ canvas, paint(t) }` or null), its row in the
-// menu plays it in a small tile, and choosing it, there or with `hooks.pick`, opens it on its showcase first: the item playing large, with BUY and its price (or what stands in the way), BACK and SEE IT IN
+// item. Where the stand can show an item (`hooks.showcase(id, w, h)`, `{ canvas, paint(t) }` or null), its card plays
+// it, and choosing it, there or with `hooks.pick`, opens it on its showcase first: the item playing large, with BUY and its price (or what stands in the way), BACK and SEE IT IN
 // THE SKY (the free preview); BUY goes on to its invoice, and Back from there comes back to the showcase. Without
 // one, the item opens at its invoice when it can be bought now (or what stands in the way), else the menu with it
 // highlighted.
 //
-// `create(hooks)` returns the popup's flow: `start`, `stop`, `key(e)`, `tap(u, v)` in the canvas's pixels, `receive(id)`
+// `create(hooks)` returns the popup's flow: `start`, `stop`, `key(e)`, `tap(u, v)` and `hover(u, v)` in the canvas's
+// pixels, `wheel(dy)` and `drag(dy)` in them too, `receive(id)`
 // (true when it was this invoice), `update(dt)`, `paint()` (repaints only after a change), `animate(ctx, time)`, and
 // `state`, `item` and `invoice` for the scene and checks.
 (() => {
@@ -28,7 +30,9 @@
   const BL = window.BL;
   const K = BL.factoryKiosk.kit, { W, H, INK, write, writeFit, width, face, panel, qrBox, clock, sats } = K;
   const GH = BL.jumbotron.text.GLYPH_H;
-  const ROW_Y = 52, ROW_H = 46, ROW_GAP = 8, ROWS = 4;
+  // The menu's cards: the view they scroll in, two to a row, each its showcase over its name and price.
+  const VIEW = { x: 26, y: 44, w: 344, h: 304 }, COLS = 2, GAP = 6, CARD_W = (VIEW.w - GAP) / COLS, CARD_H = 144;
+  const CLIP = { x: 4, y: 4, w: CARD_W - 8, h: 96 };
   // What the screen says when the API says no: [title, line, note] by its error.
   const PROBLEMS = {
     "sign-in": ["SIGN IN TO BUY", "ONLY SIGNED-IN PLAYERS", "CAN BUY HERE FOR NOW."],
@@ -46,8 +50,20 @@
     const flow = { canvas, W, H, open: false, state: "menu", pick: 0, item: null, invoice: null, error: "", left: 0, showcase: null, from: "menu" };
     // The showcase's picture and the menu's tiles: where they sit on the screen, and the item's own painters, made once
     // per item and size.
-    const SHOW = { x: 30, y: 46, w: 340, h: 200 }, TILE = { x: 30, w: 60 }, showcases = new Map();
-    let shownAt = -1, tilesAt = -1;
+    const SHOW = { x: 30, y: 46, w: 340, h: 200 }, showcases = new Map();
+    let shownAt = -1, tilesAt = -1, scroll = 0;
+    // Where card `i` sits on the screen, scrolled; how far the cards can scroll; scrolling by `dy`, and to show card `i`.
+    const cardAt = (i) => ({ x: VIEW.x + (i % COLS) * (CARD_W + GAP), y: VIEW.y + Math.floor(i / COLS) * (CARD_H + GAP) - scroll });
+    const maxScroll = () => Math.max(0, Math.ceil(items().length / COLS) * (CARD_H + GAP) - GAP - VIEW.h);
+    const scrollBy = (dy) => {
+      const to = Math.max(0, Math.min(maxScroll(), scroll + dy));
+      if (to !== scroll) { scroll = to; dirty = true; }
+    };
+    const scrollTo = (i) => {
+      const top = Math.floor(i / COLS) * (CARD_H + GAP);
+      if (top < scroll) scrollBy(top - scroll);
+      else if (top + CARD_H > scroll + VIEW.h) scrollBy(top + CARD_H - scroll - VIEW.h);
+    };
     const showcaseOf = (item, w = SHOW.w, h = SHOW.h) => {
       if (!hooks.showcase || !item) return null;
       const key = `${item.id}:${w}x${h}`;
@@ -159,8 +175,11 @@
         return;
       }
       if (s === "menu") {
-        if (k === "ArrowDown" || k === "ArrowUp") {
-          flow.pick = (flow.pick + (k === "ArrowDown" ? 1 : list.length - 1)) % Math.max(1, list.length);
+        // The arrows move through the cards, a row up or down, a card left or right, the view following.
+        const step = { ArrowDown: COLS, ArrowUp: -COLS, ArrowRight: 1, ArrowLeft: -1 }[k];
+        if (step && list.length) {
+          flow.pick = Math.max(0, Math.min(list.length - 1, flow.pick + step));
+          scrollTo(flow.pick);
           dirty = true;
           return;
         }
@@ -179,6 +198,17 @@
     flow.tap = (u, v) => {
       for (const b of buttons) if (u >= b.x && u <= b.x + b.w && v >= b.y && v <= b.y + b.h) return act(b.act);
     };
+    // The pointer over a card puts it in focus; the wheel and a drag scroll the cards.
+    flow.hover = (u, v) => {
+      if (flow.state !== "menu") return;
+      for (const b of buttons) if (b.act.startsWith("item:") && u >= b.x && u <= b.x + b.w && v >= b.y && v <= b.y + b.h) {
+        const i = Number(b.act.slice(5));
+        if (i !== flow.pick) { flow.pick = i; dirty = true; }
+        return;
+      }
+    };
+    flow.wheel = (dy) => { if (flow.state === "menu") scrollBy(dy); };
+    flow.drag = (dy) => { if (flow.state === "menu") scrollBy(-dy); };
     flow.start = () => {
       ticket++;
       flow.open = true;
@@ -231,16 +261,21 @@
     };
     flow.animate = (g2, time) => {
       if (flow.state === "asking") spin(g2, W / 2, 226, 30, 8, time);
-      // The menu's tiles play at about 15 frames a second, a little out of step.
+      // The cards' showcases play at about 15 frames a second, a little out of step, inside the view.
       if (flow.state === "menu") {
         const list = items(), fresh = tilesAt < 0 || time - tilesAt >= 1 / 15;
         if (fresh) tilesAt = time;
-        for (let i = 0; i < ROWS && i < list.length; i++) {
-          const tile = showcaseOf(list[i], TILE.w, ROW_H);
+        g2.save();
+        g2.beginPath(); g2.rect(VIEW.x, VIEW.y, VIEW.w, VIEW.h); g2.clip();
+        for (let i = 0; i < list.length; i++) {
+          const at = cardAt(i);
+          if (at.y + CARD_H < VIEW.y || at.y > VIEW.y + VIEW.h) continue;
+          const tile = showcaseOf(list[i], CLIP.w, CLIP.h);
           if (!tile) continue;
           if (fresh) tile.paint(time + i * 1.7);
-          g2.drawImage(tile.canvas, TILE.x, ROW_Y + i * (ROW_H + ROW_GAP), TILE.w, ROW_H);
+          g2.drawImage(tile.canvas, at.x + CLIP.x, at.y + CLIP.y, CLIP.w, CLIP.h);
         }
+        g2.restore();
       }
       // The showcase plays at about 30 frames a second, its picture laid in its frame.
       if (flow.state === "show" && flow.showcase) {
@@ -252,33 +287,38 @@
     const paintMenu = () => {
       face(g, hooks.title || "FIREWORKS");
       const list = items(), may = shownMay;
-      for (let i = 0; i < ROWS && i < list.length; i++) {
-        const it = list[i], y = ROW_Y + i * (ROW_H + ROW_GAP), price = it.price, tile = showcaseOf(it, TILE.w, ROW_H);
-        const label = may === "sign-in" ? `${it.name} · SIGN IN` : may === "closed" || price === null ? `${it.name} · CLOSED` : `${it.name} · ${sats(price)} SATS`;
-        const x = tile ? TILE.x + TILE.w + 6 : 30, kind = may === "closed" || price === null ? "off" : i === flow.pick ? "picked" : "secondary";
-        // Beside a tile the row is narrower: its name at the left and its price at the right, each at full size.
-        button(x, y, 370 - x, ROW_H, tile ? "" : label, kind, `item:${i}`);
-        if (tile) {
-          const ty = y + Math.round((ROW_H - GH * 2) / 2), on = kind !== "off";
-          const right = may === "sign-in" ? "SIGN IN" : may === "closed" || price === null ? "CLOSED" : `${sats(price)} SATS`;
-          writeFit(g, it.name, x + 8, ty, 2, on ? INK.white : INK.dim, 362 - width(right, 2) - 8 - (x + 8));
-          write(g, right, 362, ty, 2, on ? (may === "sign-in" ? INK.amber : INK.gold) : INK.dim, "right");
-        }
-        // Its tile (`animate` plays it): a frame round it, and a tap on it chooses the row too, even while it can't be
-        // bought, so its showcase can still be seen.
-        if (tile) {
-          g.strokeStyle = kind === "picked" ? INK.gold : INK.line;
-          g.lineWidth = 2;
-          g.strokeRect(TILE.x - 1, y - 1, TILE.w + 2, ROW_H + 2);
-          buttons.push({ x: TILE.x, y, w: TILE.w, h: ROW_H, act: `item:${i}` });
-        }
+      scrollBy(0);
+      g.save();
+      g.beginPath(); g.rect(VIEW.x, VIEW.y, VIEW.w, VIEW.h); g.clip();
+      for (let i = 0; i < list.length; i++) {
+        const it = list[i], at = cardAt(i), price = it.price, off = may === "closed" || price === null, picked = i === flow.pick;
+        if (at.y + CARD_H < VIEW.y || at.y > VIEW.y + VIEW.h) continue;
+        // The card: its panel, a gold rim while in focus, its showcase's frame (`animate` plays it), its name and price.
+        g.fillStyle = INK.panel;
+        g.fillRect(at.x, at.y, CARD_W, CARD_H);
+        g.strokeStyle = picked ? INK.gold : off ? INK.line : INK.amber;
+        g.lineWidth = picked ? 3 : 2;
+        g.strokeRect(at.x + 1, at.y + 1, CARD_W - 2, CARD_H - 2);
+        g.fillStyle = INK.bg;
+        g.fillRect(at.x + CLIP.x, at.y + CLIP.y, CLIP.w, CLIP.h);
+        writeFit(g, it.name, at.x + CARD_W / 2, at.y + CLIP.y + CLIP.h + 8, 2, off ? INK.dim : INK.white, CARD_W - 2, "center");
+        const right = may === "sign-in" ? "SIGN IN TO BUY" : off ? "CLOSED" : `${sats(price)} SATS`;
+        writeFit(g, right, at.x + CARD_W / 2, at.y + CLIP.y + CLIP.h + 26, 2, off ? INK.dim : may === "sign-in" ? INK.amber : INK.gold, CARD_W - 12, "center");
+        // A card can be chosen, even while it can't be bought, so its showcase can still be seen.
+        const top = Math.max(at.y, VIEW.y), bottom = Math.min(at.y + CARD_H, VIEW.y + VIEW.h);
+        if (bottom > top) buttons.push({ x: at.x, y: top, w: CARD_W, h: bottom - top, act: `item:${i}` });
       }
-      const y = ROW_Y + ROWS * (ROW_H + ROW_GAP) + 2;
-      button(30, y, may === "sign-in" ? 160 : 340, 40, "PREVIEW", "secondary", "preview");
-      if (may === "sign-in") button(210, y, 160, 40, "SIGN IN", "primary", "sign-in");
-      const hint = may === "sign-in" ? "SIGN IN TO BUY · PREVIEW IS FREE AND ONLY YOU SEE IT" : "PREVIEW IS FREE AND ONLY YOU SEE IT";
-      writeFit(g, shownNote || hint, W / 2, y + 50, 1, shownNote ? INK.gold : INK.dim, 340, "center");
-      if (shownNet) write(g, `${shownNet.toUpperCase()} TEST · NOT REAL BITCOIN`, W / 2, y + 64, 1, INK.amber, "center");
+      g.restore();
+      // While there are more cards than fit, a bar at the view's right says how far down it is.
+      const most = maxScroll();
+      if (most > 0) {
+        const bar = Math.max(24, VIEW.h * VIEW.h / (VIEW.h + most)), y = VIEW.y + (VIEW.h - bar) * scroll / most;
+        g.fillStyle = INK.line; g.fillRect(VIEW.x + VIEW.w + 6, VIEW.y, 4, VIEW.h);
+        g.fillStyle = INK.gold; g.fillRect(VIEW.x + VIEW.w + 6, y, 4, bar);
+      }
+      const hint = may === "sign-in" ? "CHOOSE ONE TO SEE IT · SIGN IN TO BUY" : most > 0 ? "CHOOSE ONE TO SEE IT · SCROLL FOR MORE" : "CHOOSE ONE TO SEE IT";
+      writeFit(g, shownNote || hint, W / 2, VIEW.y + VIEW.h + 10, 1, shownNote ? INK.gold : INK.dim, 340, "center");
+      if (shownNet) write(g, `${shownNet.toUpperCase()} TEST · NOT REAL BITCOIN`, W / 2, VIEW.y + VIEW.h + 24, 1, INK.amber, "center");
     };
     const paintInvoice = () => {
       const v = flow.invoice, it = flow.item;
@@ -388,5 +428,5 @@
     face.imageSurface = { asset: { width: canvas.width, height: canvas.height, load: () => image }, rect: [-w / 2, -h / 2, w, h] };
     return face;
   };
-  BL.standKiosk = { create, ROWS, plaque, plaqueFace, PLAQUE_W, PLAQUE_H };
+  BL.standKiosk = { create, plaque, plaqueFace, PLAQUE_W, PLAQUE_H };
 })();
