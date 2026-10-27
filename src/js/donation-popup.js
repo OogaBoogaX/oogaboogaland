@@ -242,6 +242,7 @@
       cancelAnimationFrame(frame); frame = 0;
       if (flow) flow.stop();
       flow = null;
+      dialog.classList.remove("stand");
       if (dialog.open) { dialog.close(); if (onClose) onClose(); }
     };
     const closeOutside = () => { if (simulated && dialog.open) close(); };
@@ -307,6 +308,8 @@
       heading(hooks.heading, hooks.label);
       flow = BL.standKiosk.create({ ...hooks, close });
       flow.start();
+      // The stand's screen opens wider than a donation's, so its cards and showcases read larger.
+      dialog.classList.add("stand");
       if (document.pointerLockElement) document.exitPointerLock();
       dialog.showModal();
       canvas.focus({ preventScroll: true });
@@ -322,22 +325,50 @@
     const key = (event) => {
       if (event.target === message || event.target === handle || event.metaKey || event.ctrlKey || event.altKey || event.isComposing || event.key === "Tab") return;
       if (!flow || event.target === closeButton) return;
-      if (event.key.length === 1 || ["Enter", "Escape", "Backspace", "Delete", "ArrowUp", "ArrowDown"].includes(event.key)) {
+      if (event.key.length === 1 || ["Enter", "Escape", "Backspace", "Delete", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) {
         event.preventDefault(); event.stopPropagation();
         flow.key(event);
       }
     };
+    // A point on the canvas in its own pixels; a drag of more than a few pixels scrolls (where the screen scrolls)
+    // and is no tap.
+    const at = (event) => {
+      const rect = canvas.getBoundingClientRect();
+      return [(event.clientX - rect.left) * canvas.width / rect.width, (event.clientY - rect.top) * canvas.height / rect.height];
+    };
+    let dragFrom = null, dragged = false;
     const tap = (event) => {
       if (!flow) return;
-      const rect = canvas.getBoundingClientRect();
       canvas.focus({ preventScroll: true });
-      flow.tap((event.clientX - rect.left) * canvas.width / rect.width, (event.clientY - rect.top) * canvas.height / rect.height);
+      if (dragged) { dragged = false; return; }
+      flow.tap(...at(event));
+    };
+    const hover = (event) => {
+      if (!flow) return;
+      const [u, v] = at(event);
+      if (dragFrom !== null && flow.drag) {
+        if (!dragged && Math.abs(v - dragFrom) > 6) dragged = true;
+        if (dragged) { flow.drag(v - dragFrom); dragFrom = v; }
+        return;
+      }
+      if (flow.hover && event.pointerType === "mouse") flow.hover(u, v);
+    };
+    const press = (event) => { dragFrom = flow && flow.drag ? at(event)[1] : null; dragged = false; };
+    const release = () => { dragFrom = null; };
+    const wheel = (event) => {
+      if (!flow || !flow.wheel) return;
+      event.preventDefault();
+      flow.wheel(event.deltaY * canvas.height / canvas.getBoundingClientRect().height);
     };
     const cancel = (event) => { event.preventDefault(); close(); };
     dialog.addEventListener("keydown", key);
     dialog.addEventListener("cancel", cancel);
     closeButton.addEventListener("click", close);
     canvas.addEventListener("click", tap);
+    canvas.addEventListener("pointermove", hover);
+    canvas.addEventListener("pointerdown", press);
+    for (const type of ["pointerup", "pointercancel", "pointerleave"]) canvas.addEventListener(type, release);
+    canvas.addEventListener("wheel", wheel, { passive: false });
     const receive = (donation, bananas) => {
       if (!flow || !flow.receive(donation.id, bananas, donation.handle, donation.sats)) return false;
       // Show the delivery in the visitor's current scene as soon as the payment settles.
@@ -354,6 +385,9 @@
       fields.removeEventListener("keydown", fieldsKey);
       for (const type of ["keyup", "select", "focusin", "focusout"]) fields.removeEventListener(type, track);
       closeButton.removeEventListener("click", close); canvas.removeEventListener("click", tap);
+      canvas.removeEventListener("pointermove", hover); canvas.removeEventListener("pointerdown", press);
+      for (const type of ["pointerup", "pointercancel", "pointerleave"]) canvas.removeEventListener(type, release);
+      canvas.removeEventListener("wheel", wheel);
     };
     return { open, openStand, receivePurchase, close, closeOutside, onClose: callback => { onClose = callback; }, receive, seen, dispose, defaults, details, typing: () => typed, restoreDetails, focusDetails, attachDetails, detachDetails, detailsState,
       history: () => historyOpen ? historyMatches : null, historyCount: () => game.state.recentHandles.length, toggleHistory, chooseHistory, closeHistory: hideHistory };
