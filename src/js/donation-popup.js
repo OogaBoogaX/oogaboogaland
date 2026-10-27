@@ -238,11 +238,12 @@
     fields.addEventListener("keydown", fieldsKey);
     // The caret and the focus move without input: the screen follows them.
     for (const type of ["keyup", "select", "focusin", "focusout"]) fields.addEventListener(type, track);
+    let wide = false;
     const close = () => {
       cancelAnimationFrame(frame); frame = 0;
       if (flow) flow.stop();
       flow = null;
-      dialog.classList.remove("stand");
+      if (wide) { dialog.classList.remove("stand"); wide = false; }
       if (dialog.open) { dialog.close(); if (onClose) onClose(); }
     };
     const closeOutside = () => { if (simulated && dialog.open) close(); };
@@ -308,8 +309,10 @@
       heading(hooks.heading, hooks.label);
       flow = BL.standKiosk.create({ ...hooks, close });
       flow.start();
-      // The stand's screen opens wider than a donation's, so its cards and showcases read larger.
+      // The stand's screen opens wider than a donation's, so its cards and showcases read larger; only the stand's
+      // close takes the class off again, so the donation path never touches it.
       dialog.classList.add("stand");
+      wide = true;
       if (document.pointerLockElement) document.exitPointerLock();
       dialog.showModal();
       canvas.focus({ preventScroll: true });
