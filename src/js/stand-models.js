@@ -7,17 +7,17 @@
 // stones with mortar joints and a paving of bricks in grout, its floor half a metre up. Tall posts at its outer corners
 // fly blue sunburst banners and string lantern ropes to the sign. The boards stand in heavy frames, their faces from
 // the counter's height up, each a header plaque on a gold rim with brass studs and a raised panel to a row, its icon in
-// a raised frame and, on the menu, a raised gold play button, under its lettering. A rope fence on posts, the two
-// either side of the way in lit, runs round the paving. Open timber framing with a shelf and a barrel stands behind
-// each board. A starburst stands at either end of the shelves, rockets on the counter's ends, and the big rockets stand
-// before a palisade of stakes. Painted crates of fireworks stand at the paving's corners. A sparkle hangs over each
-// rocket's tip, gold bursts at the sign's top corners and a sparkle at either end of the tagline. Greenery with white
-// flowers grows on the caps, by the sign and round the plinth. Its timber is voxels an eighth of a metre across (`PX`)
-// with the grain running along each beam, as the Factory's kiosk and board are built, so the renderer's block detail
-// gives it the same pixel texture; the plinth's stones and bricks are boxes on a grid a quarter of a voxel across
-// (`MASON`) that the renderer details as voxels, the greenery's half that size (`LEAF`); cloth, rope, letters, stars
-// and pictures stay smooth. The lettering and the marquee are meshes of their own, for Canvas 2D's `depthBias` (the
-// scene sets it) to sort them in front of the sign's planks.
+// a raised frame and, on the menu, a raised gold play button, under its lettering, which in WebGL is raised letters
+// like the sign's. A rope fence on posts, the two either side of the way in lit, runs round the paving. Open timber
+// framing with a shelf and a barrel stands behind each board. A starburst stands at either end of the shelves, rockets
+// on the counter's ends, and the big rockets stand before a palisade of stakes. Painted crates of fireworks stand at
+// the paving's corners. A sparkle hangs over each rocket's tip, gold bursts at the sign's top corners and a sparkle at
+// either end of the tagline. Greenery with white flowers grows on the caps, by the sign and round the plinth. Its
+// timber is voxels an eighth of a metre across (`PX`) with the grain running along each beam, as the Factory's kiosk
+// and board are built, so the renderer's block detail gives it the same pixel texture; the plinth's stones and bricks
+// are boxes on a grid a quarter of a voxel across (`MASON`) that the renderer details as voxels, the greenery's half
+// that size (`LEAF`); cloth, rope, letters, stars and pictures stay smooth. The lettering and the marquee are meshes of
+// their own, for Canvas 2D's `depthBias` (the scene sets it) to sort them in front of the sign's planks.
 //
 // Everything is in the stand's own frame: x to the visitor's right as they face it, y up from its floor (the plinth's
 // top, `LAYOUT.floor` over the ground), +z out of its front. `LAYOUT` places what the scene hangs and uses (where a
@@ -698,12 +698,13 @@
   // BUY A FIREWORK: each of `items`, `[{ id, name, price }]` (the price in sats, or null while it can't be bought),
   // with its icon and a gold play button, and how to buy under them. `note` replaces that line (SIGN IN TO BUY). With
   // `cutout` it paints only the lettering and icons on a clear ground, for the board, whose plaque, panels and buttons
-  // are geometry; without, the whole face.
-  const menuFace = (canvas, items, note = "", cutout = false) => {
+  // are geometry; without, the whole face. `text: false` leaves the lettering out, for a board whose lettering is
+  // raised letters (`boardText`).
+  const menuFace = (canvas, items, note = "", cutout = false, text = true) => {
     const g = canvasOf(canvas, MENU_W, MENU_H), { INK, writeFit, sats } = K(), R = BOARD_PX.menu, [ix, iy, is] = R.icon, [bx, by, bs] = R.button;
     if (cutout) g.clearRect(0, 0, MENU_W, MENU_H);
     else frame(g, MENU_W, MENU_H);
-    writeFit(g, "BUY A FIREWORK", MENU_W / 2, 39, 4, INK.gold, MENU_W - 60, "center");
+    if (text) writeFit(g, "BUY A FIREWORK", MENU_W / 2, 39, 4, INK.gold, MENU_W - 60, "center");
     for (let n = 0; n < items.length && n < R.rows; n++) {
       const it = items[n], top = R.y + n * R.step;
       if (!cutout) {
@@ -712,28 +713,110 @@
         g.fillStyle = INK.dark; playMark(g, bx, top + by, bs);
       }
       icon(g, it.id, ix, top + iy, is);
+      if (!text) continue;
       writeFit(g, it.name, 136, top + 22, 3, INK.white, 196);
       writeFit(g, it.price === null ? "CLOSED" : `${sats(it.price)} SATS`, 136, top + 66, 4, it.price === null ? INK.dim : INK.gold, 196);
     }
-    writeFit(g, note || "AT THE COUNTER: SPACE OR TAP", MENU_W / 2, MENU_H - 38, 2, note ? INK.amber : INK.dim, MENU_W - 60, "center");
+    if (text) writeFit(g, note || "AT THE COUNTER: SPACE OR TAP", MENU_W / 2, MENU_H - 38, 2, note ? INK.amber : INK.dim, MENU_W - 60, "center");
   };
   // TOP LAUNCHES over the last `days` days: each of `rows`, `[{ id, name, count }]`, ranked, with its icon and count.
-  // `cutout` as for the menu.
-  const launchesFace = (canvas, rows, days = 7, cutout = false) => {
+  // `cutout` and `text` as for the menu.
+  const launchesFace = (canvas, rows, days = 7, cutout = false, text = true) => {
     const g = canvasOf(canvas, MENU_W, MENU_H), { INK, write, writeFit, sats } = K(), R = BOARD_PX.launches, [ix, iy, is] = R.icon;
     if (cutout) g.clearRect(0, 0, MENU_W, MENU_H);
     else frame(g, MENU_W, MENU_H);
-    writeFit(g, "TOP LAUNCHES", MENU_W / 2, 26, 4, INK.gold, MENU_W - 60, "center");
-    write(g, `LAST ${days} DAYS`, MENU_W / 2, 64, 2, INK.dim, "center");
+    if (text) {
+      writeFit(g, "TOP LAUNCHES", MENU_W / 2, 26, 4, INK.gold, MENU_W - 60, "center");
+      write(g, `LAST ${days} DAYS`, MENU_W / 2, 64, 2, INK.dim, "center");
+    }
     for (let n = 0; n < rows.length && n < R.rows; n++) {
       const r = rows[n], top = R.y + n * R.step;
       if (!cutout) { g.fillStyle = n === 0 ? PANEL_FIRST : PANEL; g.fillRect(22, top, MENU_W - 44, R.h); }
-      write(g, String(n + 1), 38, top + 31, 4, n === 0 ? INK.gold : INK.white);
       icon(g, r.id, ix, top + iy, is);
+      if (!text) continue;
+      write(g, String(n + 1), 38, top + 31, 4, n === 0 ? INK.gold : INK.white);
       writeFit(g, r.name, 136, top + 38, 2, INK.white, 170);
       write(g, sats(r.count), MENU_W - 34, top + 35, 3, n === 0 ? INK.gold : INK.white, "right");
     }
-    if (!rows.some((r) => r.count > 0)) writeFit(g, "BE THE FIRST TO LIGHT ONE UP", MENU_W / 2, MENU_H - 38, 2, INK.amber, MENU_W - 60, "center");
+    if (text && !rows.some((r) => r.count > 0)) writeFit(g, "BE THE FIRST TO LIGHT ONE UP", MENU_W / 2, MENU_H - 38, 2, INK.amber, MENU_W - 60, "center");
+  };
+  // A board's lettering as raised letters, as the sign's are, for WebGL: they stay crisp from across the island where
+  // a picture's thin lettering blurs. `kind` and the rows as for the painters (`data`: the menu's `{ items, note }`,
+  // TOP LAUNCHES' `{ rows, days }`), laid in the same places on the panels and plaque. Each line is as big as its room
+  // allows up to its size; the sign's font has no comma or middle dot, so those become a stop and a dash.
+  const BOARD_INK = { gold: ["#ffc61f", "#a8360a", 0.75], white: ["#f6ecd2", "#2a1307", 0.55], dim: ["#a99c84", "#2a1307", 0.35], amber: ["#ffb347", "#5a2a08", 0.6] };
+  // The board's letters, lighter than the sign's for their number: each glyph's runs of cells, a run the same in rows
+  // after it merged into one taller block, each block a box without its hidden back and a shadow of its front alone,
+  // set down and right of it as the sign's are. Into `out`.
+  const boardLetters = (out, text, x, y, z, size, color, shadow, glow) => {
+    const G = BL.hubModels.SIGN_GLYPHS, deep = size * 0.42, gap = size * 0.18;
+    const only = (geo, keep) => { const v = geo.verts; geo.faces = geo.faces.filter((f) => keep(f.i.map((i) => v[i * 3 + 2]))); return geo; };
+    let cells = -1;
+    for (const ch of text) cells += ch === " " ? 2 : G[ch][0].length + 1;
+    let cursor = x - cells * size / 2;
+    for (const ch of text) {
+      if (ch === " ") { cursor += size * 2; continue; }
+      const g = G[ch], open = new Map();
+      const emit = ({ r0, r1, c, n }) => {
+        const cx = cursor + (c + n / 2) * size, cy = y + (2 - (r0 + r1) / 2) * size, h = (r1 - r0 + 1) * size;
+        const front = z + gap + deep, back = z + gap;
+        out.push(only(box({ w: size * n - size * 0.06, h: h - size * 0.06, d: deep, color, emissive: glow, offset: { x: cx, y: cy, z: (front + back) / 2 } }), (zs) => zs.some((q) => q > back + 1e-9)));
+        out.push(only(box({ w: size * n, h, d: gap * 0.6, color: shadow, offset: { x: cx + size * 0.22, y: cy - size * 0.22, z: z + gap * 0.3 } }), (zs) => zs.every((q) => q > z + gap * 0.3)));
+      };
+      for (let r = 0; r < g.length; r++) {
+        const seen = new Set();
+        for (let c = 0; c < g[r].length; c++) {
+          if (g[r][c] !== "1") continue;
+          let n = 1;
+          while (g[r][c + n] === "1") n++;
+          const key = c * 16 + n, run = open.get(key);
+          if (run && run.r1 === r - 1) run.r1 = r;
+          else { if (run) emit(run); open.set(key, { r0: r, r1: r, c, n }); }
+          seen.add(key);
+          c += n - 1;
+        }
+        for (const [key, run] of open) if (!seen.has(key) && run.r1 === r - 1) { emit(run); open.delete(key); }
+      }
+      for (const run of open.values()) emit(run);
+      cursor += size * (g[0].length + 1);
+    }
+  };
+  const boardText = (kind, data) => {
+    const G = BL.hubModels.SIGN_GLYPHS, B = LAYOUT[kind], kx = B.w / MENU_W, ky = B.h / MENU_H, face = [];
+    const X = (px) => B.x - B.w / 2 + px * kx, Y = (py) => B.y + B.h / 2 - py * ky;
+    const clean = (t) => [...String(t)].map((c) => c === " " || G[c] ? c : c === "," ? "." : c === "·" ? "-" : c === ":" ? " " : " ").join("").replace(/ +/g, " ").trim();
+    const cells = (t) => { let n = -1; for (const c of t) n += c === " " ? 2 : G[c][0].length + 1; return n; };
+    // `text` at (px, py) in the picture's pixels, its line's middle; `align` left, center or right; the cell size
+    // `size` metres at most, less if `room` pixels is too narrow.
+    const line = (t, px, py, size, room, ink, align = "left") => {
+      t = clean(t);
+      if (!t) return;
+      const n = cells(t), s = Math.min(size, room * kx / n), w = n * s, [color, shadow, glow] = BOARD_INK[ink];
+      const x = align === "left" ? X(px) + w / 2 : align === "right" ? X(px) - w / 2 : X(px);
+      boardLetters(face, t, x, Y(py), 0.41, s, color, shadow, glow);
+    };
+    if (kind === "menu") {
+      const R = BOARD_PX.menu;
+      line("BUY A FIREWORK", MENU_W / 2, 53, 0.024, 360, "gold", "center");
+      data.items.slice(0, R.rows).forEach((it, n) => {
+        const top = R.y + n * R.step;
+        line(it.name, 136, top + 32, 0.016, 196, "white");
+        line(it.price === null ? "CLOSED" : `${it.price.toLocaleString("en-US")} SATS`, 136, top + 82, 0.021, 196, it.price === null ? "dim" : "gold");
+      });
+      line(data.note || "AT THE COUNTER: SPACE OR TAP", MENU_W / 2, MENU_H - 30, 0.01, 400, data.note ? "amber" : "dim", "center");
+    } else {
+      const R = BOARD_PX.launches;
+      line("TOP LAUNCHES", MENU_W / 2, 44, 0.024, 360, "gold", "center");
+      line(`LAST ${data.days} DAYS`, MENU_W / 2, 80, 0.008, 200, "dim", "center");
+      data.rows.slice(0, R.rows).forEach((r, n) => {
+        const top = R.y + n * R.step;
+        line(String(n + 1), 40, top + R.h / 2, 0.022, 30, n === 0 ? "gold" : "white", "center");
+        line(r.name, 136, top + R.h / 2, 0.016, 172, "white");
+        line(r.count.toLocaleString("en-US"), MENU_W - 32, top + R.h / 2, 0.02, 90, n === 0 ? "gold" : "white", "right");
+      });
+      if (!data.rows.some((r) => r.count > 0)) line("BE THE FIRST TO LIGHT ONE UP", MENU_W / 2, MENU_H - 30, 0.01, 400, "amber", "center");
+    }
+    return noShadow(merge(...face));
   };
   // A board's geometry, after the concept: on its dark face a header plaque on a gold rim with a brass stud at each
   // corner, a raised dark panel for each row (TOP LAUNCHES' first a little warmer), a raised frame round each row's
@@ -793,5 +876,5 @@
     return c;
   });
 
-  BL.standModels = { PX, LAYOUT, ground, plinthFlat, build, star, rockets, strawHat, pictureFace, menuFace, launchesFace, clothCanvas, screenCanvas, MENU_W, MENU_H };
+  BL.standModels = { PX, LAYOUT, ground, plinthFlat, build, star, rockets, strawHat, pictureFace, menuFace, launchesFace, boardText, clothCanvas, screenCanvas, MENU_W, MENU_H };
 })();

@@ -109,9 +109,10 @@ fireworks, is `images/fireworks-concept-sheet.webp`:
   behind, a purple and a red starburst on them; and the vendor, an Ooga of no one's in a straw hat, looking about.
 - **Either side:** a board in a heavy frame, its face from the counter's height up, greenery on its cap: its header on
   a plaque with a gold rim and brass studs, each row a raised panel with its icon in a raised frame (and on the menu a
-  raised gold play button), and over them its lettering, big enough to read from the path, a picture that repaints
-  when prices or counts change; and open framing behind it to the wall with a shelf of fireworks and a barrel. Tall
-  corner posts fly blue sunburst banners that rock in the wind and string lantern ropes to the sign.
+  raised gold play button), and over them its lettering, raised letters like the sign's in WebGL (a picture on Canvas
+  2D), rebuilt when prices or counts change, big enough to read from the path; and open framing behind it to the wall
+  with a shelf of fireworks and a barrel. Tall corner posts fly blue sunburst banners that rock in the wind and string
+  lantern ropes to the sign.
 - **Left:** BUY A FIREWORK, the three fireworks with their icons and the server's prices (the show pack is on the
   terminal's screen, not the board), and how to buy.
 - **Right:** TOP LAUNCHES under a gold crown: the fireworks ranked by launches over the last seven days
@@ -122,7 +123,7 @@ fireworks, is `images/fireworks-concept-sheet.webp`:
   ropes' four only glow.
 - Within 30 m its stars twinkle, the marquee chases and sparks now and then fly from a rocket's tip; beyond, nothing
   of it moves. Its models build in two slices of the hub's sliced build (the plinth and greenery, 15 to 21 ms; the
-  booth, 10 to 12 ms) and the stand in a third (about 25 ms). It is about 28,900 faces on 72 nodes, under 2.5% of the
+  booth, 10 to 12 ms) and the stand in a third (about 25 ms). It is about 33,000 faces on 74 nodes, under 3% of the
   hub's 1.2 million, four pictures (about half a million texels, uploaded once and repainted only when prices or
   counts change) and four lights.
 - On Canvas 2D the boards' lettering (most of all) and their plaques and panels, the banners' sunbursts and the pieces
