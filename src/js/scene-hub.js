@@ -11674,7 +11674,8 @@
   };
   // The stand, built before the scenery is laid so its claims keep trees and scatter off it: the attraction's models
   // (stand-models.js) in its own frame, its two boards' faces, the terminal's glass and the counter's cloth as pictures,
-  // its lanterns from the kit (the canopy's two lit at night), the vendor, and picks for the counter and both boards.
+  // its lanterns from the kit (the canopy's two lit at night) and the fence's lit posts, the vendor, and picks for the
+  // counter and both boards.
   const standToWorld = (lx, ly, lz, out) => {
     const S = fireworkStand, c = Math.cos(S.ry), s = Math.sin(S.ry);
     out.x = S.x + lx * c + lz * s; out.y = S.y + ly; out.z = S.z - lx * s + lz * c;
@@ -11748,8 +11749,14 @@
     if (renderer.kind !== "webgl2") S.menuNode.depthBias = S.launchesNode.depthBias = -0.6;
     S.menuShown = S.launchesShown = S.board.shown = null;
     refreshFireworkBoards();
-    // Lanterns: the canopy's, which light the counter at night, and the lantern ropes', which only glow.
+    // Lanterns: the canopy's, which light the counter at night, the fence's lit posts', which light the paving, and the
+    // lantern ropes', which only glow.
     L.lamps.forEach(([x, y, z], n) => hangStandLantern(group, x, y, z, `fireworkstand:lamp${n}`, true));
+    const postLamps = node(parts.lamps);
+    L.postLamps.forEach(([x, y, z], n) => {
+      const at = standToWorld(x, y, z, { x: 0, y: 0, z: 0 });
+      addLamp(postLamps, LAMP.lantern, at.x, at.y, at.z, true, 0, `fireworkstand:post${n}:${lamps.length}`).nightOnly = true;
+    });
     L.ropeLamps.forEach(([x, y, z], n) => hangStandLantern(group, x, y, z, `fireworkstand:rope${n}`, false));
     // The vendor behind the counter in a straw hat: an Ooga of no one's, looking out over it.
     const vendor = models.caveman(contributors.traitsFor("fireworks-vendor")), figure = vendor.root;

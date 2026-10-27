@@ -5,11 +5,12 @@
 // starbursts round it, and a board either side: BUY A FIREWORK on the left with each firework's icon, name and price,
 // and TOP LAUNCHES on the right under a gold crown. It stands on a plinth of two stone courses with a paving of bricks,
 // its floor half a metre up. Tall posts at its outer corners fly blue sunburst banners and string lantern ropes to the
-// sign. The boards stand in heavy frames, their faces from the counter's height up. Its timber is voxels an eighth of a
-// metre across (`PX`) with the grain running along each beam, as the Factory's kiosk and board are built, so the
-// renderer's block detail gives it the same pixel texture; the plinth's stones and bricks are voxels too; cloth, rope,
-// letters, stars and pictures stay smooth. The lettering and the marquee are meshes of their own, for Canvas 2D's
-// `depthBias` (the scene sets it) to sort them in front of the sign's planks.
+// sign. The boards stand in heavy frames, their faces from the counter's height up. A rope fence on posts, the two
+// either side of the way in lit, runs round the paving. Its timber is voxels an eighth of a metre across (`PX`) with
+// the grain running along each beam, as the Factory's kiosk and board are built, so the renderer's block detail gives
+// it the same pixel texture; the plinth's stones and bricks are voxels too; cloth, rope, letters, stars and pictures
+// stay smooth. The lettering and the marquee are meshes of their own, for Canvas 2D's `depthBias` (the scene sets it)
+// to sort them in front of the sign's planks.
 //
 // Everything is in the stand's own frame: x to the visitor's right as they face it, y up from its floor (the plinth's
 // top, `LAYOUT.floor` over the ground), +z out of its front. `LAYOUT` places what the scene hangs and uses (where a
@@ -80,6 +81,12 @@
     // The lantern ropes, from the corner posts' tops to the sign's top corners: their ends, their sag, and where along
     // each a lantern hangs; those lanterns only glow.
     ropes: [-1, 1].map((s) => ({ from: [s * CORNER_X, 4.8, 0.25], to: [s * 2.3, 4.1, 1.2], sag: 0.32, lamps: [0.34, 0.68] })),
+    // The rope fence's posts on the paving, [x, z, top, lit]: one either side of the way in, lit, and plain ones at the
+    // front corners and back along the sides; `fence` pairs the posts its ropes run between.
+    posts: [[-1.5, 3.0, 1.25, true], [1.5, 3.0, 1.25, true], [-3.875, 3.0, 1.0, false], [3.875, 3.0, 1.0, false], [-3.875, 1.75, 1.0, false], [3.875, 1.75, 1.0, false]],
+    fence: [[0, 2], [1, 3], [2, 4], [3, 5]],
+    // The lit posts' lamps, which light the paving at night.
+    postLamps: [],
     // The pictures stand a few centimetres proud of the faces behind them, so Canvas 2D sorts them in front too.
     menu: { x: -BOARD_X, y: 2.0625, z: 0.42, w: 1.42, h: 1.78 },
     launches: { x: BOARD_X, y: 2.0625, z: 0.42, w: 1.42, h: 1.78 },
@@ -94,6 +101,7 @@
   };
   LAYOUT.tips = LAYOUT.rockets.map(([x, y, z, lean]) => [x - Math.sin(lean) * ROCKET_H, y + Math.cos(lean) * ROCKET_H, z]);
   LAYOUT.ropeLamps = LAYOUT.ropes.flatMap((r) => r.lamps.map((t) => along(r.from, r.to, r.sag, t)));
+  for (const [x, z, top, lit] of LAYOUT.posts) if (lit) LAYOUT.postLamps.push([x, top + 0.285, z]);
 
   // ---- letters ---------------------------------------------------------------------------------------------------
   // `text` in the island's carved sign font (hub-models.js SIGN_GLYPHS), centred on (x, y) with its back at depth z,
@@ -243,7 +251,7 @@
     return { plinth: voxGeo(p, ZERO) };
   });
   const build = cached(() => {
-    const v = makeVox(), rand = mulberry32(2140), iron = [], cloth = [], swing = [], marks = [], glow = [], dark = [];
+    const v = makeVox(), rand = mulberry32(2140), iron = [], cloth = [], swing = [], marks = [], glow = [], lamps = [], dark = [];
 
     // The deck the booth stands on, and the merchant counter on it: vertical planks, a top that runs out over them, and
     // a recess in its front for the painted cloth.
@@ -289,6 +297,12 @@
       fill(v, s * CORNER_X - 0.125, s * CORNER_X + 0.125, 5.0, 5.125, 0.125, 0.375, T.trim);
       timber(v, rand, Math.min(s * CORNER_X, s * (CORNER_X + 0.875)), Math.max(s * CORNER_X, s * (CORNER_X + 0.875)), 4.75, 4.875, 0.125, 0.375, "x");
     }
+    // The rope fence's posts, each on a stone footing, a dark cap on top.
+    for (const [x, z, top] of LAYOUT.posts) {
+      fill(v, x - 0.25, x + 0.25, 0, 0.25, z - 0.25, z + 0.25, (i, j, k) => T.stones[(i * 3 + k * 5 + j) & 3]);
+      timber(v, rand, x - 0.125, x + 0.125, 0.25, top, z - 0.125, z + 0.125, "y");
+      fill(v, x - 0.125, x + 0.125, top, top + 0.125, z - 0.125, z + 0.125, T.trim);
+    }
     // The shelves' goods: boxes of fireworks in their paints with gold stars, and bundles of little rockets.
     const sb = (x, y, z, c) => starBox(v, cell(x, "x"), cell(y, "y"), cell(z, "z"), c);
     sb(-1.375, 1.5, -1.625, T.boxBlue); sb(-1.0, 1.5, -1.625, T.boxRed); sb(0.75, 1.5, -1.625, T.boxBlue);
@@ -305,8 +319,17 @@
     sb(1.875, 0, 1.5, T.boxBlue); sb(2.25, 0, 1.625, T.boxRed); sb(2.0, 0.375, 1.5, T.purple);
     sb(-1.875, 0.25, -0.125, T.boxRed); sb(-1.875, 0.625, -0.125, T.boxBlue);
     bundle(2.5, 0.5, 1.0, [T.red, T.green, T.blue, T.orange]);
-    // Iron at the joints: plates where the front posts meet the counter's top, the beam and the sign.
+    // Iron at the joints: plates where the front posts meet the counter's top, the beam and the sign; collars round the
+    // fence posts' feet.
     for (const s of [-1, 1]) for (const y of [1.19, 2.44, 3.4, 4.0]) iron.push(moved(bevelBox({ w: 0.3, h: 0.22, d: 0.05, color: "#2c2e33", bevel: 0.012 }), s * 1.625, y, 1.15));
+    for (const [x, z] of LAYOUT.posts) iron.push(moved(bevelBox({ w: 0.3, h: 0.08, d: 0.3, color: "#2c2e33", bevel: 0.01 }), x, 0.36, z));
+    // The fence's lit posts: a lamp of glass between two iron plates on each, its own mesh (`lamps`) for the scene to
+    // light at night.
+    for (const [x, z, top, lit] of LAYOUT.posts) if (lit) {
+      iron.push(moved(bevelBox({ w: 0.3, h: 0.05, d: 0.3, color: "#2c2e33", bevel: 0.01 }), x, top + 0.15, z));
+      iron.push(moved(bevelBox({ w: 0.3, h: 0.05, d: 0.3, color: "#2c2e33", bevel: 0.01 }), x, top + 0.42, z));
+      lamps.push(box({ w: 0.22, h: 0.22, d: 0.22, color: "#ffd66b", emissive: 1, offset: { x, y: top + 0.285, z } }));
+    }
 
     // The canopy: red and white stripes from the back beam down to the front, out over the counter, a scalloped
     // valance along its front edge, and a sagging cord of bunting under it that rocks in the wind (`swing`).
@@ -329,7 +352,11 @@
       const t0 = n / 12, t1 = (n + 1) / 12, x0 = -1.5 + 3 * t0, x1 = -1.5 + 3 * t1, y0 = 2.46 - Math.sin(t0 * Math.PI) * 0.1, y1 = 2.46 - Math.sin(t1 * Math.PI) * 0.1;
       swing.push(moved(turnedZ(box({ w: Math.hypot(x1 - x0, y1 - y0), h: 0.015, d: 0.015, color: "#3a2412" }), Math.atan2(y1 - y0, x1 - x0)), (x0 + x1) / 2, (y0 + y1) / 2, 1.22));
     }
-    // The ropes: the lantern ropes from the corner posts to the sign.
+    // The ropes: the fence's between its posts, and the lantern ropes from the corner posts to the sign.
+    for (const [a, b] of LAYOUT.fence) {
+      const [ax, az, at] = LAYOUT.posts[a], [bx, bz, bt] = LAYOUT.posts[b];
+      rope(cloth, [ax, at - 0.2, az], [bx, bt - 0.2, bz], 0.16);
+    }
     for (const r of LAYOUT.ropes) rope(cloth, r.from, r.to, r.sag, 0.045);
     // The corner posts' banners: blue cloth hanging from each arm, its foot cut in four points, a gold sunburst on its
     // front (`marks`, its own mesh so Canvas 2D can sort it before the cloth); they rock in the wind (`swing`).
@@ -377,7 +404,7 @@
       // Canvas 2D's lettering: [picture, its middle], the scene lays each as a cut-out.
       letterPictures: [[letterPicture("FIREWORKS", 0.118, "#ffc61f", "#a8360a"), [0, 3.69 + 0, 1.42]], [letterPicture("LIGHT UP OBL", 0.056, "#f6ecd2", "#2a1307"), [0, 2.81, 1.53]]],
       ...ground(), timber: voxGeo(v), iron: merge(...iron), cloth: merge(...cloth), dark: merge(...dark),
-      swing: Object.assign(noShadow(merge(...swing)), { swing: 1 }), marks: Object.assign(noShadow(merge(...marks)), { swing: 1 }), glow: noShadow(merge(...glow))
+      swing: Object.assign(noShadow(merge(...swing)), { swing: 1 }), marks: Object.assign(noShadow(merge(...marks)), { swing: 1 }), glow: noShadow(merge(...glow)), lamps: noShadow(merge(...lamps))
     };
   });
 
