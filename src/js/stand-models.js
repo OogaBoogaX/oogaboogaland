@@ -3,18 +3,19 @@
 // terminal on it, shelves stocked with fireworks behind, a red and white striped canopy with a scalloped valance, the
 // big gold FIREWORKS sign with LIGHT UP OBL under it and four oversized rockets standing on it, and a board either
 // side: BUY A FIREWORK on the left with each firework's icon, name and price, and TOP LAUNCHES on the right under a
-// gold crown. It stands on a plinth of two stone courses with a paving of bricks, its floor half a metre up. Tall posts
-// at its outer corners fly blue sunburst banners and string lantern ropes to the sign. The boards stand in heavy
-// frames, their faces from the counter's height up. A rope fence on posts, the two either side of the way in lit, runs
-// round the paving. Open timber framing with a shelf and a barrel stands behind each board. A starburst stands at
-// either end of the shelves, rockets on the counter's ends, and the big rockets stand before a palisade of stakes.
-// Painted crates of fireworks stand at the paving's corners. A sparkle hangs over each rocket's tip, gold bursts at the
-// sign's top corners and a sparkle at either end of the tagline. Greenery with white flowers grows on the caps, by the
-// sign and round the plinth. Its timber is voxels an eighth of a metre across (`PX`) with the grain running along each
-// beam, as the Factory's kiosk and board are built, so the renderer's block detail gives it the same pixel texture; the
-// plinth's stones and bricks are voxels too, the greenery's half that size (`LEAF`); cloth, rope, letters, stars and
-// pictures stay smooth. The lettering and the marquee are meshes of their own, for Canvas 2D's `depthBias` (the scene
-// sets it) to sort them in front of the sign's planks.
+// gold crown. It stands on a plinth of two courses of chunky stones with mortar joints and a paving of bricks in grout,
+// its floor half a metre up. Tall posts at its outer corners fly blue sunburst banners and string lantern ropes to the
+// sign. The boards stand in heavy frames, their faces from the counter's height up. A rope fence on posts, the two
+// either side of the way in lit, runs round the paving. Open timber framing with a shelf and a barrel stands behind
+// each board. A starburst stands at either end of the shelves, rockets on the counter's ends, and the big rockets stand
+// before a palisade of stakes. Painted crates of fireworks stand at the paving's corners. A sparkle hangs over each
+// rocket's tip, gold bursts at the sign's top corners and a sparkle at either end of the tagline. Greenery with white
+// flowers grows on the caps, by the sign and round the plinth. Its timber is voxels an eighth of a metre across (`PX`)
+// with the grain running along each beam, as the Factory's kiosk and board are built, so the renderer's block detail
+// gives it the same pixel texture; the plinth's stones and bricks are boxes on a grid a quarter of a voxel across
+// (`MASON`) that the renderer details as voxels, the greenery's half that size (`LEAF`); cloth, rope, letters, stars
+// and pictures stay smooth. The lettering and the marquee are meshes of their own, for Canvas 2D's `depthBias` (the
+// scene sets it) to sort them in front of the sign's planks.
 //
 // Everything is in the stand's own frame: x to the visitor's right as they face it, y up from its floor (the plinth's
 // top, `LAYOUT.floor` over the ground), +z out of its front. `LAYOUT` places what the scene hangs and uses (where a
@@ -289,14 +290,65 @@
     }
   };
 
-  // ---- the stand -------------------------------------------------------------------------------------------------
-  // What stands on the ground and grows round the stand, cached on its own so the hub can build it in a slice of its
-  // own before the booth: the plinth, and the greenery.
-  const ground = cached(() => {
-    // The plinth under it all, in the ground's cells below the floor: two courses of stone blocks four cells long and
-    // deep and two tall, each block one stone's tone and each course's joints half a block on from the one below, the
-    // upper set back a quarter metre; and in its top, inside a border of the same stone, a paving of bricks two cells
-    // long, each row half a brick on from the last.
+  // ---- the plinth ------------------------------------------------------------------------------------------------
+  // The plinth as the concept builds it: its stones and bricks as boxes on a grid of `MASON` cells (a thirty-second of
+  // a metre), which the geometry names as its voxel grid so the renderer gives them block detail as it does voxels.
+  // Two courses of mauve-grey stones half a metre deep, a little under a quarter metre tall and half a metre or so
+  // long, with a cell of mortar between them and between their ends, which a dark core behind them shows; the upper
+  // course's stones border the paving, whose warm bricks stand a cell proud of a bed of grout. It collides as the two
+  // courses' plain boxes (`collisionGeometry`). Canvas 2D's painter's sort can't keep hundreds of small bricks above
+  // one bed, so it draws the plinth in the stand's own voxels, in the same tones and without the joints (`plinthFlat`).
+  const MASON = 1 / 32;
+  const MASONRY = {
+    stones: ["#8e7d84", "#7c6b72", "#9a898f", "#6e5f66"], mortar: "#3b3236",
+    bricks: ["#ad6a4b", "#9a5a40", "#bb7856", "#8c4f39"], worn: "#c88b6a", grout: "#4f342a"
+  };
+  const masonry = () => {
+    const parts = [], m = (n) => n * MASON, Lo = PLINTH.lower, Up = PLINTH.upper, back = PLINTH.back, deep = PLINTH.border;
+    const slab = (x0, x1, y0, y1, z0, z1, color) => parts.push(box({ w: x1 - x0, h: y1 - y0, d: z1 - z0, color, offset: { x: (x0 + x1) / 2, y: (y0 + y1) / 2, z: (z0 + z1) / 2 } }));
+    // A stone: its edges cut a cell back and lit a little brighter, so each reads as its own chunky block.
+    const stone = (x0, x1, y0, y1, z0, z1, color) => parts.push(bevelBox({ w: x1 - x0, h: y1 - y0, d: z1 - z0, color, bevel: MASON, offset: { x: (x0 + x1) / 2, y: (y0 + y1) / 2, z: (z0 + z1) / 2 } }));
+    // Stones laid along x or z from a to b, each 14 to 20 cells long with a cell of mortar after it, across c0 to c1
+    // and up y0 to y1; each stone one of the stones' tones.
+    const row = (along, a, b, c0, c1, y0, y1, seed) => {
+      for (let at = a, n = 0; at < b - MASON; n++) {
+        const length = Math.min(m(14 + Math.floor(hash(n, seed, 3) * 7)), b - at), color = MASONRY.stones[Math.floor(hash(n, seed, 5) * 4)];
+        if (along === "x") stone(at, at + length, y0, y1, c0, c1, color);
+        else stone(c0, c1, y0, y1, at, at + length, color);
+        at += length + MASON;
+      }
+    };
+    // The lower course, its top a cell under the upper's foot; the upper, its top the floor.
+    for (const [c, y0, y1, seed] of [[Lo, m(-16), m(-9), 1], [Up, m(-8), 0, 2]]) {
+      row("x", -c.x, c.x, c.z - deep, c.z, y0, y1, seed);
+      for (const s of [-1, 1]) row("z", back, c.z - deep - MASON, s > 0 ? c.x - deep : -c.x, s > 0 ? c.x : -c.x + deep, y0, y1, seed * 10 + s);
+    }
+    // The cores the mortar shows, a cell in from the stones' faces and tops; the grout bed, and its bricks: ten cells by
+    // six, a cell of grout round each, each row half a brick on from the last, cut at the border, none under the deck.
+    slab(-Lo.x + MASON, Lo.x - MASON, m(-16), m(-10), back, Lo.z - MASON, MASONRY.mortar);
+    slab(-Up.x + MASON, Up.x - MASON, m(-10), m(-2), back, Up.z - MASON, MASONRY.mortar);
+    const px = Up.x - deep, pz = Up.z - deep;
+    slab(-px, px, m(-2), m(-1), back, pz, MASONRY.grout);
+    for (let z1 = pz - MASON, r = 0; z1 - m(6) > back; z1 -= m(7), r++) {
+      for (let x0 = -px + MASON - (r & 1 ? m(5) : 0), n = 0; x0 < px - MASON; x0 += m(11), n++) {
+        const a = Math.max(x0, -px + MASON), b = Math.min(x0 + m(10), px - MASON), z0 = z1 - m(6);
+        if (b - a < m(2) || (z0 < 1.125 && b > -1.875 && a < 1.875)) continue;
+        const pick = hash(n, r, 41);
+        slab(a, b, m(-1), 0, z0, z1, pick < 0.08 ? MASONRY.worn : MASONRY.bricks[Math.floor(hash(n, r, 43) * 4)]);
+      }
+    }
+    const geo = merge(...parts);
+    geo.voxel = new Float32Array([MASON, 0, 0, 0]);
+    geo.collisionGeometry = merge(
+      box({ w: Lo.x * 2, h: 0.25, d: Lo.z - back, color: MASONRY.mortar, offset: { x: 0, y: -0.375, z: (Lo.z + back) / 2 } }),
+      box({ w: Up.x * 2, h: 0.25, d: Up.z - back, color: MASONRY.mortar, offset: { x: 0, y: -0.125, z: (Up.z + back) / 2 } }));
+    return geo;
+  };
+  // Canvas 2D's plinth, in the ground's cells below the floor: two courses of stone blocks four cells long and deep
+  // and two tall, each block one stone's tone and each course's joints half a block on from the one below, the upper
+  // set back a quarter metre; and in its top, inside a border of the same stone, a paving of bricks two cells long,
+  // each row half a brick on from the last.
+  const plinthFlat = cached(() => {
     const p = makeVox(), rear = Math.round(PLINTH.back / PX);
     const course = (half, front, j0, stagger) => {
       for (let i = -Math.round(half / PX); i < Math.round(half / PX); i++) for (let k = rear; k < Math.round(front / PX); k++) for (let j = j0; j < j0 + 2; j++)
@@ -306,7 +358,13 @@
     course(PLINTH.upper.x, PLINTH.upper.z, -2, 2);
     const px = Math.round((PLINTH.upper.x - PLINTH.border) / PX), pz = Math.round((PLINTH.upper.z - PLINTH.border) / PX);
     for (let i = -px; i < px; i++) for (let k = rear; k < pz; k++) p.set(i, -1, k, T.bricks[Math.floor(hash(Math.floor((i + (k & 1)) / 2), k, 9) * 4)]);
+    return voxGeo(p, ZERO);
+  });
 
+  // ---- the stand -------------------------------------------------------------------------------------------------
+  // What stands on the ground and grows round the stand, cached on its own so the hub can build it in a slice of its
+  // own before the booth: the plinth's masonry, and the greenery.
+  const ground = cached(() => {
     // The greenery: on the boards' caps (clear of the crown), at the sign's top corners among the rockets and its
     // foot, at the corner posts' tops and up their fronts, on the paving by the crates, and at the plinth's front
     // corners and sides, most of it in flower.
@@ -324,7 +382,7 @@
       clump(g, leafy, s * 4.55, -FLOOR, 3.68, 0.52, 0.48, 0.42, 12);
       clump(g, leafy, s * 4.7, -FLOOR, 1.6, 0.36, 0.4, 0.45, 12);
     }
-    return { plinth: voxGeo(p, ZERO), leaves: voxGeo(g, ZERO, LEAF) };
+    return { plinth: masonry(), leaves: voxGeo(g, ZERO, LEAF) };
   });
   const build = cached(() => {
     const v = makeVox(), rand = mulberry32(2140), iron = [], cloth = [], swing = [], marks = [], glow = [], lamps = [], dark = [];
@@ -646,5 +704,5 @@
     return c;
   });
 
-  BL.standModels = { PX, LAYOUT, ground, build, star, rockets, strawHat, pictureFace, menuFace, launchesFace, clothCanvas, screenCanvas, MENU_W, MENU_H };
+  BL.standModels = { PX, LAYOUT, ground, plinthFlat, build, star, rockets, strawHat, pictureFace, menuFace, launchesFace, clothCanvas, screenCanvas, MENU_W, MENU_H };
 })();

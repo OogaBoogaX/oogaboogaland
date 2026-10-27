@@ -11710,10 +11710,10 @@
       return n;
     };
     // The plinth and the timber collide; a visitor steps up onto the plinth and walks its paving to the counter. On
-    // Canvas 2D the plinth and the greenery round it sort a little nearer, so the island's ground under them doesn't
-    // paint over their feet.
+    // Canvas 2D the plinth is the stand's own voxels without the joints (`plinthFlat`), and it and the greenery round
+    // it sort a little nearer, so the island's ground under them doesn't paint over their feet.
     const canvas2d = renderer.kind !== "webgl2";
-    const plinth = node(parts.plinth);
+    const plinth = node(canvas2d ? M.plinthFlat() : parts.plinth);
     plinth.depthBias = node(parts.leaves).depthBias = canvas2d ? -0.3 : 0;
     solids.add(plinth);
     solids.add(node(parts.timber));
