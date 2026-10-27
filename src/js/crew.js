@@ -598,7 +598,7 @@
         build: null,
         walk: null,
         pathing: ctx.npcPaths ? ctx.npcPaths.createState() : null,
-        traffic: { moving: false, waiting: false, leader: null, crossing: null, tx: 0, tz: 0, fx: 0, fz: 1, distance: 0, speed: 0 },
+        traffic: { moving: false, waiting: false, yielding: false, leader: null, crossing: null, tx: 0, tz: 0, fx: 0, fz: 1, distance: 0, speed: 0 },
         progress: {
           x: NaN, z: NaN, stalled: 0, motionless: 0, retry: 0, replanned: false, navigationHop: false, escaped: false,
           backoff: 0, backX: 0, backZ: 0, detours: 0, replans: 0, resets: 0, roofTime: 0
@@ -3522,6 +3522,8 @@
     };
     const spaceWalker = (cave) => {
       const traffic = cave.traffic;
+      traffic.yielding = !!(traffic.moving && ctx.npcYieldAhead && ctx.npcYieldAhead(cave, traffic.fx, traffic.fz));
+      if (traffic.yielding) { traffic.waiting = true; traffic.leader = traffic.crossing = null; return; }
       if (!traffic.moving) { traffic.waiting = false; traffic.leader = traffic.crossing = null; return; }
       if (traffic.crossing && crossingSoon(cave, traffic.crossing, true)) { traffic.waiting = true; traffic.leader = null; return; }
       traffic.crossing = null;
@@ -3777,7 +3779,7 @@
       const a = cave.avoidance;
       a.active = false; a.tx = NaN; a.stalled = 0; a.best = Infinity;
       a.navigation.mode = 0; a.detour.site = -1;
-      cave.traffic.waiting = false; cave.traffic.leader = cave.traffic.crossing = null;
+      cave.traffic.waiting = cave.traffic.yielding = false; cave.traffic.leader = cave.traffic.crossing = null;
       cave.pileApproach = false;
       if (cave.pathing) { cave.pathing.tx = NaN; cave.pathing.index = cave.pathing.count = 0; }
       clearShoulder(cave);
@@ -3813,7 +3815,7 @@
       const attempting = cave.walk || travel.mode === "walk" || cave.state === "working" && workSites
         && (work.phase === "outbound" || work.phase === "return" || work.phase === "station");
       if (dt <= 0 || !attempting || !navigationHop && (!cave.traffic.moving || cave.traffic.distance < 0.15) || cave === player || !cave.root.visible
-        || cave.health.stunned || cave.camp.seat || cave.camp.burning || cave.camp.rolling || cave.cheer > 0
+        || cave.traffic.yielding || cave.health.stunned || cave.camp.seat || cave.camp.burning || cave.camp.rolling || cave.cheer > 0
         || airborne && !navigationHop || cave.root.quaternion || cave.roofEscape.active) {
         progress.x = p.x; progress.z = p.z; progress.stalled = progress.motionless = progress.retry = progress.backoff = 0;
         progress.replanned = progress.navigationHop = progress.escaped = false; return;
@@ -4063,6 +4065,7 @@
       }
     };
     const walkToward = (cave, tx, tz, distance) => {
+      if (cave.traffic.yielding) return 0;
       const progress = cave.progress;
       if (progress.backoff > 0) {
         const p = cave.root.position, step = Math.min(distance, progress.backoff, PLAYER_STEP);

@@ -1226,7 +1226,8 @@
     geo.normals = Float32Array.from(geo.normals);
     return Object.assign(geo, { sway: 0.03 });
   };
-  const bush = variants((i) => BL.models.foliageLods(cartoonBush(i), cartoonBush(i, 1)));
+  // Keep the closed coarse clumps at distance; crossed silhouette cards look like upright fins on low bushes.
+  const bush = variants((i) => BL.models.foliageLods(cartoonBush(i), cartoonBush(i, 1), false));
   // The voxel boulder the mine's crack rock is veined for; everywhere else takes the cartoon `rock`.
   const ROCK_SHAPES = [{ rx: 3.2, ry: 3.6, rz: 2.8 }, { rx: 5, ry: 3.8, rz: 4.2 }];
   const voxelRock = variants((i) => {
