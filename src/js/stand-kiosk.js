@@ -13,7 +13,9 @@
 // `hooks.mayBuy()` is "yes", "sign-in" while only signed-in visitors may buy and this one isn't (the prices give way to
 // SIGN IN TO BUY, `hooks.signIn()`; Preview still works) or "closed". `hooks.note()` is a line under the menu (the
 // visitor's own purchases, say), or "". Simulated (`hooks.real` false), the invoice is paid with a tap on PAY, through
-// `hooks.simulate(id)`, which then arrives like the API's word.
+// `hooks.simulate(id)`, which then arrives like the API's word. `hooks.pick`, an item's id, opens the screen at that
+// item: its invoice when it can be bought now (or what stands in the way), else the menu with it highlighted; Back
+// goes to the menu.
 //
 // `create(hooks)` returns the popup's flow: `start`, `stop`, `key(e)`, `tap(u, v)` in the canvas's pixels, `receive(id)`
 // (true when it was this invoice), `update(dt)`, `paint()` (repaints only after a change), `animate(ctx, time)`, and
@@ -150,6 +152,10 @@
       flow.item = flow.invoice = null;
       flow.error = walletNote = "";
       set("menu");
+      const list = items(), at = hooks.pick ? list.findIndex((it) => it.id === hooks.pick) : -1;
+      if (at < 0) return;
+      flow.pick = at;
+      if (list[at].price !== null) buy(list[at]);
     };
     flow.stop = () => {
       ticket++;
