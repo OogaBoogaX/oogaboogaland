@@ -1,3 +1,4 @@
+import { parseStudioCommand, studioCanSpeak, STUDIO_ZONE } from "./studio-policy.js";
 // The room's wire format and the limits it enforces, as pure functions the tests can reach.
 //
 // Client → room:  { t: "pose", x, y, z, yaw }   the driven body's feet and heading, at most MOVE_HZ
@@ -9,9 +10,12 @@
 //                 { t: "hp", v, ko }             the driven body's health (normalized 0-100) and knockout flag
 //                 pose.g                         optional gorilla locomotion: [flags, speed, stride, climb, side, swim]
 //                 { t: "chat", text, clientId? }            a line for Ooga Chat (see Chat below)
+//                 { t: "studio", action, playback?, commandId?, ... }  a DSB Studio seat or host command; transport
+//                                checks `playback` against the state's playbackRevision
+//                                (`parseStudioCommand` in studio-policy.js; see docs/dsb-studio-session.md)
 //                 { t: "ghost", k, g?, d?, h? }  HALLOWEEN: the ghost hunt's `start`, `ready` or `pause`, or `hits` h, for the host
 //                 binary                         the NPC host's frame of every Ooga's pose, relayed as is
-// Room → client:  welcome { you, players, tickHz, now, loopEpoch }, join { p }, leave { id, reason },
+// Room → client:  welcome { you, players, tickHz, now, loopEpoch, connectionToken }, join { p }, leave { id, reason },
 //                 body { id, name }, state { now, ps: [id, x, y, z, yaw, ...], gs? }, kick { reason },
 //                 state.gs                       gorilla locomotion in [id, ...g] runs; welcome/join carry g too
 //                 release { name, reason }   the Ooga this socket claimed is not, or no longer, its to drive
@@ -21,7 +25,11 @@
 //                                            and join carry the same two fields on every player, and hp and ko
 //                 hp { id, v, ko }           a player's driven Ooga's health changed
 //                 voice { peers, gens }      whom to hear, and each one's publication count (a new count is a
-//                                            microphone published again, to be pulled again)
+//                                            microphone published again, to be pulled again); in the Studio also
+//                                            `listeners`, the other receive sessions there
+//                 studio-state { state }     the Studio's host, mode, program anchor, seats and this page's own
+//                                            rights; studio-result { action, commandId, ok, error, revision }
+//                                            answers a command; studio-mic-revoked: drop the microphone now
 //                 chat { id, at, login, name, text }  a line someone said, to everyone, the sender too
 //                 chat-ack { clientId }     the sender's line was accepted, including a recognized retry
 //                 chat-rejected { clientId?, reason }  refused; rate retries keep the same id
@@ -46,6 +54,8 @@ export const MESSAGE_MAX = 256;
 // room, so it runs once a minute; three missed 10 s pings make a socket stale.
 export const STALE_MS = 90000;
 export const SWEEP_MS = 60000;
+// Voice cleanup the SFU keeps refusing is given up after an hour, so a room nobody is in stops waking for it.
+export const CLEANUP_MS = 3600000;
 // Generous bounds around the hub: jetpack flight reaches about 140 out and 72 up, falls end at -120.
 export const BOUND_XZ = 160;
 export const BOUND_Y_MIN = -130;
@@ -124,6 +134,7 @@ export const parseClientMessage = (text) => {
   if (!msg || typeof msg !== "object" || Array.isArray(msg)) return false;
   // Only chat earns the longer frame: a repeated key could make a chat-prefixed frame parse as anything.
   if (text.length > MESSAGE_MAX && msg.t !== "chat") return false;
+  if (msg.t === "studio") return parseStudioCommand(msg);
   if (msg.t === "pose") {
     const { x, y, z, yaw } = msg;
     if (!finite(x) || !finite(y) || !finite(z) || !finite(yaw)) return null;
@@ -262,13 +273,15 @@ export const zoneGroup = (zone) => {
 };
 
 /** Map of player id → sorted ids that player should hear. */
-export const voicePeers = (players) => {
+export const voicePeers = (players, studio = null) => {
   const out = new Map();
   for (const p of players) {
     const ids = [];
     const group = zoneGroup(p.zone);
-    if (p.body && p.voice && p.voice.sub && group !== NOWHERE) {
-      for (const q of players) if (q !== p && q.body && zoneGroup(q.zone) === group && (group !== "ember-den" || (p.pokerVoice ?? null) === (q.pokerVoice ?? null)) && q.voice && q.voice.track) ids.push(q.id);
+    // Both restrictions hold together: a bodiless listener counts only inside the Studio, a Studio
+    // speaker only while permitted, and Ember Den voice only between players at the same poker table.
+    if ((p.body || (studio && p.zone === STUDIO_ZONE)) && p.voice && p.voice.sub && group !== NOWHERE) {
+      for (const q of players) if (q !== p && (q.body || (studio && q.zone === STUDIO_ZONE)) && zoneGroup(q.zone) === group && (group !== "ember-den" || (p.pokerVoice ?? null) === (q.pokerVoice ?? null)) && q.voice && q.voice.track && (!studio || q.zone !== STUDIO_ZONE || studioCanSpeak(studio, q))) ids.push(q.id);
       ids.sort((a, b) => a - b);
     }
     out.set(p.id, ids);

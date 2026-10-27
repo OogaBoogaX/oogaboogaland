@@ -2,6 +2,7 @@
 // on every change under src/. Everything outside `/src/` uses Worker-style audio and picture assets, so
 // /rally answers from rally.html and an unknown path from 404.html; `/src/` is the unbundled source tree,
 // which gives DevTools real file names while the same flags apply to both.
+import { previewResponse } from "./preview-response.mjs";
 import { spawn } from "node:child_process";
 import { readFileSync, statSync, watch } from "node:fs";
 import { createServer } from "node:http";
@@ -30,6 +31,9 @@ const TYPES = {
   ".mp3": "audio/mpeg",
   ".xml": "application/xml; charset=utf-8",
   ".txt": "text/plain; charset=utf-8",
+  ".mp4": "video/mp4",
+  ".webm": "video/webm",
+  ".vtt": "text/vtt; charset=utf-8",
   ".ico": "image/x-icon",
 };
 
@@ -76,10 +80,16 @@ function readOrNull(path) {
   }
 }
 
-function serveFile(res, path) {
+function respond(req, res, path, body) {
+  const extension = extname(path), response = previewResponse(body, TYPES[extension] || "application/octet-stream", req, extension === ".mp4" || extension === ".webm");
+  res.writeHead(response.status, response.headers);
+  res.end(response.body);
+}
+
+function serveFile(req, res, path) {
   const body = readOrNull(path);
   if (!body) return send(res, 404, "not found");
-  send(res, 200, body, TYPES[extname(path)] || "application/octet-stream");
+  respond(req, res, path, body);
 }
 
 const server = createServer((req, res) => {
@@ -90,19 +100,19 @@ const server = createServer((req, res) => {
   } catch {
     return send(res, 400, "bad request");
   }
-  if (pathname === "/") return serveFile(res, join(site, "index.html"));
-  if (pathname === "/src" || pathname === "/src/") return serveFile(res, join(src, "index.html"));
+  if (pathname === "/") return serveFile(req, res, join(site, "index.html"));
+  if (pathname === "/src" || pathname === "/src/") return serveFile(req, res, join(src, "index.html"));
   if (pathname.startsWith("/src/")) {
     // Resolve inside src/ only; a normalized path that escapes it is refused.
     const file = normalize(join(src, pathname.slice("/src/".length)));
     if (!file.startsWith(src + sep)) return send(res, 403, "forbidden");
-    return serveFile(res, file);
+    return serveFile(req, res, file);
   }
   const file = normalize(join(site, pathname));
   if (!file.startsWith(site + sep)) return send(res, 403, "forbidden");
   for (const candidate of [file, `${file}.html`]) {
     const body = readOrNull(candidate);
-    if (body) return send(res, 200, body, TYPES[extname(candidate)] || "application/octet-stream");
+    if (body) return respond(req, res, candidate, body);
   }
   const missing = readOrNull(join(site, "404.html"));
   if (missing) send(res, 404, missing, TYPES[".html"]);
