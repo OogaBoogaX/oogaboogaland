@@ -2,14 +2,14 @@
 // A small attraction, readable from across the island: a timber booth on a deck with a merchant counter and the stand's
 // terminal on it, shelves of firework boxes behind, a red and white striped canopy with a scalloped valance and
 // bunting, the big gold FIREWORKS sign with LIGHT UP OBL under it and four oversized rockets standing on it, gold
-// starbursts round it, and two boards either side on their own posts: BUY A FIREWORK on the left with each firework's
-// icon, name and price, and TOP LAUNCHES on the right under a gold crown. It stands on a plinth of two stone courses
-// with a paving of bricks, its floor half a metre up. Tall posts at its outer corners fly blue sunburst banners and
-// string lantern ropes to the sign. Its timber is voxels an eighth of a metre across (`PX`) with the grain running
-// along each beam, as the Factory's kiosk and board are built, so the renderer's block detail gives it the same pixel
-// texture; the plinth's stones and bricks are voxels too; cloth, rope, letters, stars and pictures stay smooth. The
-// lettering and the marquee are meshes of their own, for Canvas 2D's `depthBias` (the scene sets it) to sort them in
-// front of the sign's planks.
+// starbursts round it, and a board either side: BUY A FIREWORK on the left with each firework's icon, name and price,
+// and TOP LAUNCHES on the right under a gold crown. It stands on a plinth of two stone courses with a paving of bricks,
+// its floor half a metre up. Tall posts at its outer corners fly blue sunburst banners and string lantern ropes to the
+// sign. The boards stand in heavy frames, their faces from the counter's height up. Its timber is voxels an eighth of a
+// metre across (`PX`) with the grain running along each beam, as the Factory's kiosk and board are built, so the
+// renderer's block detail gives it the same pixel texture; the plinth's stones and bricks are voxels too; cloth, rope,
+// letters, stars and pictures stay smooth. The lettering and the marquee are meshes of their own, for Canvas 2D's
+// `depthBias` (the scene sets it) to sort them in front of the sign's planks.
 //
 // Everything is in the stand's own frame: x to the visitor's right as they face it, y up from its floor (the plinth's
 // top, `LAYOUT.floor` over the ground), +z out of its front. `LAYOUT` places what the scene hangs and uses (where a
@@ -81,8 +81,8 @@
     // each a lantern hangs; those lanterns only glow.
     ropes: [-1, 1].map((s) => ({ from: [s * CORNER_X, 4.8, 0.25], to: [s * 2.3, 4.1, 1.2], sag: 0.32, lamps: [0.34, 0.68] })),
     // The pictures stand a few centimetres proud of the faces behind them, so Canvas 2D sorts them in front too.
-    menu: { x: -BOARD_X, y: 1.69, z: 0.42, w: 1.42, h: 1.78 },
-    launches: { x: BOARD_X, y: 1.69, z: 0.42, w: 1.42, h: 1.78 },
+    menu: { x: -BOARD_X, y: 2.0625, z: 0.42, w: 1.42, h: 1.78 },
+    launches: { x: BOARD_X, y: 2.0625, z: 0.42, w: 1.42, h: 1.78 },
     cloth: { x: 0, y: 0.72, z: 0.8, w: 1.18, h: 0.58 },
     // The starbursts that twinkle: either end of the sign, and either end of the tagline.
     stars: [[-2.7, 3.98, 1.42, 1], [2.7, 3.98, 1.42, 1], [-2.6, 3.36, 1.42, 0.7], [2.6, 3.36, 1.42, 0.7], [-1.72, 2.82, 1.56, 0.5], [1.72, 2.82, 1.56, 0.5]],
@@ -272,14 +272,15 @@
     fill(v, 2.25, 2.375, 3.125, 4.25, 1.125, 1.375, T.trim);
     timber(v, rand, -1.5, 1.5, 2.625, 3.0, 1.375, 1.5, "x");
     fill(v, -1.5, 1.5, 2.625, 3.0, 1.375, 1.5, (i, j, k) => (i + j) % 7 === 0 ? GRAIN : T.trim);
-    // The boards either side: two posts each, a frame round a dark face, and a cap that runs out past the posts.
+    // The boards either side, each in a heavy frame with its face from the counter's height up: two posts a quarter
+    // metre square, rails above and below the dark face, and a deep cap that runs out over the posts.
     for (const s of [-1, 1]) {
       const cx = s * BOARD_X;
-      for (const px of [cx - 0.875, cx + 0.75]) timber(v, rand, px, px + 0.125, 0, 3.0, 0.25, 0.375, "y");
-      timber(v, rand, cx - 0.75, cx + 0.75, 0.625, 0.75, 0.25, 0.375, "x");
-      timber(v, rand, cx - 0.75, cx + 0.75, 2.625, 2.75, 0.25, 0.375, "x");
-      timber(v, rand, cx - 1.0, cx + 1.0, 2.875, 3.0, 0.125, 0.5, "x");
-      fill(v, cx - 0.75, cx + 0.75, 0.75, 2.625, 0.25, 0.375, T.slate);
+      for (const px0 of [cx - 1.0, cx + 0.75]) timber(v, rand, px0, px0 + 0.25, 0, 3.375, 0.125, 0.5, "y");
+      timber(v, rand, cx - 0.75, cx + 0.75, 0.875, 1.125, 0.25, 0.5, "x");
+      timber(v, rand, cx - 0.75, cx + 0.75, 3.0, 3.25, 0.25, 0.5, "x");
+      timber(v, rand, cx - 1.125, cx + 1.125, 3.25, 3.5, 0.0, 0.625, "x");
+      fill(v, cx - 0.75, cx + 0.75, 1.125, 3.0, 0.25, 0.375, T.slate);
     }
     // The corner posts, past the boards' outer posts, to five metres, each with a finial, a lantern rope's hook at its
     // top and an arm the banner hangs from.
@@ -345,7 +346,7 @@
     const tag = letters("LIGHT UP OBL", 0, 2.81, 1.5, 0.056, "#f6ecd2", "#2a1307", 0.6);
     const lettering = { face: noShadow(merge(sign.face, tag.face)), back: noShadow(merge(sign.back, tag.back)) };
     // TOP LAUNCHES' crown on its cap: a gold band, five points, red and blue jewels.
-    const crownAt = { x: BOARD_X, y: 3.0, z: 0.31 };
+    const crownAt = { x: BOARD_X, y: 3.5, z: 0.31 };
     iron.push(moved(bevelBox({ w: 0.66, h: 0.16, d: 0.14, color: "#e0a81a", bevel: 0.02 }), crownAt.x, crownAt.y + 0.08, crownAt.z));
     for (let k = 0; k < 5; k++) {
       const x = -0.28 + k * 0.14, tall = k === 2 ? 0.3 : k % 2 ? 0.2 : 0.25;

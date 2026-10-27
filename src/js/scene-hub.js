@@ -11743,6 +11743,9 @@
     S.board.canvas = document.createElement("canvas");
     S.menuNode = node(null, { x: L.menu.x, y: L.menu.y, z: L.menu.z });
     S.launchesNode = node(null, { x: L.launches.x, y: L.launches.y, z: L.launches.z });
+    // On Canvas 2D the boards' faces sort well nearer than their frames: the dark backing's top rows, nearer a camera
+    // above them than the picture's middle, would otherwise paint over its top.
+    if (renderer.kind !== "webgl2") S.menuNode.depthBias = S.launchesNode.depthBias = -0.6;
     S.menuShown = S.launchesShown = S.board.shown = null;
     refreshFireworkBoards();
     // Lanterns: the canopy's, which light the counter at night, and the lantern ropes', which only glow.
