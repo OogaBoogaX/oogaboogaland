@@ -74,6 +74,8 @@
   const subscribers = new Set();
   const doorSubscribers = new Set();
   const rosterSubscribers = new Set();
+  const studioSubscribers = new Set();
+  const studioEmit = message => { for (const fn of studioSubscribers) fn(message); };
   const chatSubscribers = new Set();
   const remotes = new Map();
   // room: "off" (signed out or no backend), "connecting", "live", "paused" (hidden a while), or a kick that
@@ -115,6 +117,7 @@
 
   const setRoom = (room) => {
     state.room = room;
+    if (room !== "live") { state.studio = null; state.connectionToken = ""; studioEmit({t:"studio-state",state:null}); }
     state.online = room === "live" ? remotes.size + 1 : 0;
     emit();
   };
@@ -197,7 +200,16 @@
     } catch {
       return;
     }
-    if (msg.t === "state") {
+    if (msg.t === "studio-mic-revoked") {
+      BL.voice.dropMic();
+    } else if (msg.t === "studio-state") {
+      const previous = state.studio, incoming = msg.state;
+      if (previous && incoming && (incoming.epoch < previous.epoch || (incoming.epoch === previous.epoch && incoming.revision < previous.revision))) return;
+      state.studio = incoming;
+      studioEmit(msg);
+    } else if (msg.t === "studio-result") {
+      studioEmit(msg);
+    } else if (msg.t === "state") {
       clockSample(msg.now);
       const ps = msg.ps;
       for (let i = 0; i + 4 < ps.length; i += 5) {
@@ -218,6 +230,7 @@
       state.hostId = Number.isSafeInteger(msg.host) ? msg.host : 0;
       state.followers = Number.isSafeInteger(msg.followers) ? msg.followers : 0;
       state.selfId = msg.you.id;
+      state.connectionToken = typeof msg.connectionToken === "string" ? msg.connectionToken : "";
       state.doorway = Array.isArray(msg.features) && msg.features.includes("door");
       remotes.clear();
       for (const p of msg.players) upsert(p);
@@ -304,7 +317,7 @@
     } else if (msg.t === "transit-end") {
       if (chatIdValid(msg.cycle)) doorHeard({ t: "transit-end", cycle: msg.cycle });
     } else if (msg.t === "voice") {
-      if (Array.isArray(msg.peers)) BL.voice.setPeers(msg.peers, Array.isArray(msg.gens) ? msg.gens : null);
+      if (Array.isArray(msg.peers)) BL.voice.setPeers(msg.peers, Array.isArray(msg.gens) ? msg.gens : null, state.zone === "dsb-studio" ? msg.listeners : undefined);
     } else if (msg.t === "ghost") {
       if (ghostHeard) ghostHeard(msg); // HALLOWEEN
     } else if (msg.t === "release") {
@@ -668,6 +681,13 @@
     return () => doorSubscribers.delete(fn);
   };
 
+  const subscribeStudio = fn => { studioSubscribers.add(fn); return () => studioSubscribers.delete(fn); };
+  const studioCommand = (action, fields = {}) => {
+    if (state.room !== "live") return false;
+    send(JSON.stringify({...fields, t:"studio", action}));
+    return true;
+  };
+
   const dispose = () => {
     document.removeEventListener("visibilitychange", onVisibility);
     stopped = true;
@@ -675,11 +695,12 @@
     window.clearTimeout(hiddenTimer);
     subscribers.clear();
     rosterSubscribers.clear();
+    studioSubscribers.clear();
     chatSubscribers.clear();
     doorSubscribers.clear();
     ghostHeard = null; // HALLOWEEN
     close("off");
   };
 
-  BL.net = { start, recheck, subscribe, subscribeRoster, subscribeChat, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendGhost, subscribeGhost, sendPose, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
+  BL.net = { subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeChat, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendGhost, subscribeGhost, sendPose, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
 })();

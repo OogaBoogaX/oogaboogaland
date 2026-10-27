@@ -1,0 +1,5 @@
+Quiet color study — original synthetic demonstration
+Duration: 8 seconds.
+A different synthetic color animation accompanies a softer generated 220 Hz tone.
+There is no speech, music, third-party imagery or recording.
+Released under this repository's Unlicense.
