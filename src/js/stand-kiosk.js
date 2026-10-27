@@ -14,7 +14,9 @@
 //
 // Where the stand lets a buyer choose where an item goes (`hooks.places(id)`, `{ title, count, paint(g, x, y, w, h,
 // picked) }` or null), the showcase has a strip of `count` places it paints: one tapped chooses it, tapped again none
-// (the stand chooses). The choice, `place`, goes with BUY, the free preview and a simulated payment.
+// (the stand chooses). Where the stand chooses them itself (`hooks.choosePlace(id, place)`, the fireworks' in the sky),
+// a tap on the strip hands it the choosing, and the stand opens the screen again with `hooks.place` chosen. The choice,
+// `place`, goes with BUY, the free preview and a simulated payment.
 //
 // BUY asks for the item's invoice (`hooks.buy(id, place)`, which resolves to `{ invoice: { id, bolt11, expires } }` or
 // `{ error }`), and Back from it comes back to the showcase. The invoice offers, in order, the browser's own wallet in
@@ -153,6 +155,7 @@
       if (s === "show") {
         if (a === "buy") return buy(flow.item);
         if (a === "preview") return hooks.preview(flow.item.id, flow.place);
+        if (a === "choose-place") return hooks.choosePlace(flow.item.id, flow.place);
         if (a.startsWith("place:")) {
           const n = Number(a.slice(6));
           flow.place = flow.place === n ? null : n;
@@ -231,8 +234,10 @@
       const list = items(), at = hooks.pick ? list.findIndex((it) => it.id === hooks.pick) : -1;
       if (at < 0) return;
       flow.pick = at;
-      if (showcaseOf(list[at])) show(list[at]);
-      else if (list[at].price !== null) buy(list[at]);
+      if (showcaseOf(list[at])) {
+        show(list[at]);
+        flow.place = hooks.place ?? null;
+      } else if (list[at].price !== null) buy(list[at]);
     };
     flow.stop = () => {
       ticket++;
@@ -363,10 +368,13 @@
       writeFit(g, hooks.showLine ? hooks.showLine() : "WHAT EVERYONE ON THE ISLAND WILL SEE", W / 2, SHOW.y + SHOW.h + 8, 1, INK.gold, 340, "center");
       if (places) {
         write(g, places.title, PLACES.x, PLACES.y - 13, 1, INK.dim);
-        write(g, flow.place === null ? "ANYWHERE · TAP ONE TO CHOOSE" : "TAP IT AGAIN FOR ANYWHERE", PLACES.x + PLACES.w, PLACES.y - 13, 1, flow.place === null ? INK.dim : INK.amber, "right");
+        const choose = !!hooks.choosePlace, chosen = flow.place !== null;
+        const say = choose ? chosen ? "CHOSEN · TAP TO CHANGE" : "ANYWHERE · TAP TO CHOOSE" : chosen ? "TAP IT AGAIN FOR ANYWHERE" : "ANYWHERE · TAP ONE TO CHOOSE";
+        write(g, say, PLACES.x + PLACES.w, PLACES.y - 13, 1, chosen ? INK.amber : INK.dim, "right");
         places.paint(g, PLACES.x, PLACES.y, PLACES.w, PLACES.h, flow.place);
         const zone = PLACES.w / places.count;
-        for (let n = 0; n < places.count; n++) buttons.push({ x: PLACES.x + n * zone, y: PLACES.y, w: zone, h: PLACES.h, act: `place:${n}` });
+        if (choose) buttons.push({ x: PLACES.x, y: PLACES.y - 16, w: PLACES.w, h: PLACES.h + 16, act: "choose-place" });
+        else for (let n = 0; n < places.count; n++) buttons.push({ x: PLACES.x + n * zone, y: PLACES.y, w: zone, h: PLACES.h, act: `place:${n}` });
       }
       if (may === "sign-in") button(30, 264, 340, 42, "SIGN IN TO BUY", "primary", "sign-in", 3);
       else if (open) button(30, 264, 340, 42, `BUY · ${sats(it.price)} SATS`, "primary", "buy", 3);
