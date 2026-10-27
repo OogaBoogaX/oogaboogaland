@@ -12477,8 +12477,10 @@ const hubFireworks = { name: "hub fireworks", why: "rule: a firework anyone buys
     const dialog = document.getElementById("donation-popup"), opened = dialog.open;
     const screen = document.getElementById("donation-screen"), at = screen.getBoundingClientRect();
     const tap = (u, v) => screen.dispatchEvent(new MouseEvent("click", { clientX: at.left + u * at.width / 400, clientY: at.top + v * at.height / 400, bubbles: true }));
-    // The screen lays out its buttons as it paints, on the dialog's own frames: give each screen a few to draw.
-    const before = S.launchesShown, settle = async () => { for (let n = 0; n < 8; n++) await tick(); };
+    // The screen lays out its buttons as it paints, on the dialog's own frames: give each screen four frames to draw,
+    // however long a frame takes on a loaded machine.
+    const frame = () => new Promise((r) => requestAnimationFrame(() => r()));
+    const before = S.launchesShown, settle = async () => { for (let n = 0; n < 4; n++) await frame(); await tick(); };
     await settle();
     tap(200, 183); await settle();
     tap(200, 274); await settle();
