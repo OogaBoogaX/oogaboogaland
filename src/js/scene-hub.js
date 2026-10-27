@@ -10591,8 +10591,14 @@
     yield* pause(slice);
     addDressingLights();
     buildPilePosts();
-    // The firework stand takes 25 to 30 ms, more than a slice, so it has one of its own; it still comes before the palms
-    // and scatter, whose places its claims keep clear.
+    // The firework stand takes three slices: its models' ground, then its booth, then the stand itself; it still comes
+    // before the palms and scatter, whose places its claims keep clear.
+    if (fireworkStandMouth()) {
+      yield* pause(slice);
+      BL.standModels.ground();
+      yield* pause(slice);
+      BL.standModels.build();
+    }
     yield* pause(slice);
     buildFireworkStand();
     yield* pause(slice);
@@ -11681,10 +11687,14 @@
       if (node.geometry === baked.lampGlow || node.geometry === baked.swingLampGlow || node.geometry === baked.glow || node.geometry === baked.swingGlow) addLamp(node, LAMP.lantern, at.x, at.y, at.z, light, 0, `${id}:${lamps.length}`).nightOnly = true;
     }
   };
+  // The sealed mouth the stand stands against, or null when no sealed slot is marked for it.
+  const fireworkStandMouth = () => {
+    const slot = caves.slots.find((entry) => entry.stand === FIREWORK_STAND_SLOT);
+    return slot && slot.status === "dark" && island.mouths.find((m) => m.id === slot.id) || null;
+  };
   const buildFireworkStand = () => {
-    const S = fireworkStand, M = BL.standModels, L = M.LAYOUT;
-    const slot = caves.slots.find((entry) => entry.stand === FIREWORK_STAND_SLOT), mouth = slot && island.mouths.find((m) => m.id === slot.id);
-    if (!mouth || slot.status !== "dark") return;
+    const S = fireworkStand, M = BL.standModels, L = M.LAYOUT, mouth = fireworkStandMouth();
+    if (!mouth) return;
     S.ry = mouth.ry;
     S.x = mouth.x + Math.sin(mouth.ry) * FIREWORK_STAND_OUT;
     S.z = mouth.z + Math.cos(mouth.ry) * FIREWORK_STAND_OUT;

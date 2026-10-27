@@ -13,9 +13,9 @@
 // Everything is in the stand's own frame: x to the visitor's right as they face it, y up from its floor (the plinth's
 // top, `LAYOUT.floor` over the ground), +z out of its front. `LAYOUT` places what the scene hangs and uses (where a
 // visitor stands to buy, the terminal, the vendor, the lanterns, the stars, the rocket tips the sparks come from, the
-// boards' faces). `build()` is cached per visit's scope, as every builder is. The painters (`menuFace`, `launchesFace`)
-// draw the two boards in the Factory kiosk's letters (factory-kiosk.js `kit`), and `pictureFace` lays a canvas on a
-// face the renderer uploads once.
+// boards' faces). `ground()` (the plinth) and `build()` (all of it, the ground's too) are cached per visit's scope, as
+// every builder is. The painters (`menuFace`, `launchesFace`) draw the two boards in the Factory kiosk's letters
+// (factory-kiosk.js `kit`), and `pictureFace` lays a canvas on a face the renderer uploads once.
 (() => {
   "use strict";
   const BL = window.BL;
@@ -201,9 +201,9 @@
   };
 
   // ---- the stand -------------------------------------------------------------------------------------------------
-  const build = cached(() => {
-    const v = makeVox(), rand = mulberry32(2140), iron = [], cloth = [], swing = [], glow = [], dark = [];
-
+  // What stands on the ground round the stand, cached on its own so the hub can build it in a slice of its own before
+  // the booth: the plinth.
+  const ground = cached(() => {
     // The plinth under it all, in the ground's cells below the floor: two courses of stone blocks four cells long and
     // deep and two tall, each block one stone's tone and each course's joints half a block on from the one below, the
     // upper set back a quarter metre; and in its top, inside a border of the same stone, a paving of bricks two cells
@@ -217,6 +217,10 @@
     course(PLINTH.upper.x, PLINTH.upper.z, -2, 2);
     const px = Math.round((PLINTH.upper.x - PLINTH.border) / PX), pz = Math.round((PLINTH.upper.z - PLINTH.border) / PX);
     for (let i = -px; i < px; i++) for (let k = rear; k < pz; k++) p.set(i, -1, k, T.bricks[Math.floor(hash(Math.floor((i + (k & 1)) / 2), k, 9) * 4)]);
+    return { plinth: voxGeo(p, ZERO) };
+  });
+  const build = cached(() => {
+    const v = makeVox(), rand = mulberry32(2140), iron = [], cloth = [], swing = [], glow = [], dark = [];
 
     // The deck the booth stands on, and the merchant counter on it: vertical planks, a top that runs out over them, and
     // a recess in its front for the painted cloth.
@@ -341,7 +345,7 @@
       bulbs: bulbs.map((list) => noShadow(merge(...list))), lettering,
       // Canvas 2D's lettering: [picture, its middle], the scene lays each as a cut-out.
       letterPictures: [[letterPicture("FIREWORKS", 0.118, "#ffc61f", "#a8360a"), [0, 3.69 + 0, 1.42]], [letterPicture("LIGHT UP OBL", 0.056, "#f6ecd2", "#2a1307"), [0, 2.81, 1.53]]],
-      plinth: voxGeo(p, ZERO), timber: voxGeo(v), iron: merge(...iron), cloth: merge(...cloth), dark: merge(...dark),
+      ...ground(), timber: voxGeo(v), iron: merge(...iron), cloth: merge(...cloth), dark: merge(...dark),
       swing: Object.assign(noShadow(merge(...swing)), { swing: 1 }), glow: noShadow(merge(...glow))
     };
   });
@@ -481,5 +485,5 @@
     return c;
   });
 
-  BL.standModels = { PX, LAYOUT, build, star, rockets, strawHat, pictureFace, menuFace, launchesFace, clothCanvas, screenCanvas, MENU_W, MENU_H };
+  BL.standModels = { PX, LAYOUT, ground, build, star, rockets, strawHat, pictureFace, menuFace, launchesFace, clothCanvas, screenCanvas, MENU_W, MENU_H };
 })();
