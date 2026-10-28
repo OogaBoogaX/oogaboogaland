@@ -242,6 +242,7 @@
       if (BL.mineSim) BL.mineSim.clear();
       try {
         localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem("oogaboogaland.rescue.v1"); // Free Puppies Rescue's own save (rescue-dsb.js).
       } catch {
         // Storage unavailable, but the reload still resets.
       }

@@ -13,11 +13,13 @@
     addChild(parent, node);
     return node;
   };
+  // Shop signs' punctuation the island's carved alphabet lacks, cut on the same 3x5 grid.
+  const PUNCTUATION = { "%": ["101", "001", "010", "100", "101"], "'": ["010", "010", "000", "000", "000"], ",": ["000", "000", "000", "010", "100"] };
   const text = (value, color = C.yellow) => cached(`dsb-text-${value}-${color}`, () => {
     const bits = [], cell = 0.16, width = (value.length * 4 - 1) * cell;
     for (let i = 0; i < value.length; i++) {
       if (value[i] === " ") continue;
-      const glyph = BL.hubModels.SIGN_GLYPHS[value[i]] || BL.hubModels.SIGN_GLYPHS[value[i].toLowerCase()];
+      const glyph = BL.hubModels.SIGN_GLYPHS[value[i]] || BL.hubModels.SIGN_GLYPHS[value[i].toLowerCase()] || PUNCTUATION[value[i]];
       if (!glyph) throw new Error(`Missing DSB glyph ${value[i]}`);
       for (let r = 0; r < 5; r++) for (let c = 0; c < 3; c++) if (glyph[r][c] === "1") bits.push(box({ w: 0.135, h: 0.135, d: 0.12, color, emissive: 0.6, offset: { x: i * 4 * cell + c * cell - width / 2, y: (4 - r) * cell } }));
     }
