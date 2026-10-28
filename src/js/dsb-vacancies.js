@@ -2,6 +2,10 @@
 (() => {
   "use strict";
   const BL=window.BL,S=BL.scene;
+  // Occupied addresses keep their number and identity; the plaque names the establishment within its facade: name,
+  // interior, plaque width and height, its lift above the address's mounting height (a 4 m house's wide plaque rises
+  // clear of the facade's two lanterns), lettering size and the lettering's drop below the plaque centre.
+  const OCCUPANTS={1:["Free Puppies Rescue","puppy-rescue",3.7,.42,.77,.29,.09],7:["SVRN Society","svrn-society",4.4,.58,0,.48,.18]};
   // number, existing identity, x, z, type, plaque centre above floor, front offset, mount.
   // Houses use their authored local +z facade; balcony signs attach to the outward rail.
   const REGISTRY=Object.freeze([
@@ -40,7 +44,7 @@
     [33,"VACANT 29",2.5,-6,"house",2.78,0.16,"facade"],
     [34,"olympus-mill-east",-14,-58,"windmill",1.05,2.18,"beside tower door"],
     [35,"olympus-mill-west",-24,-66,"windmill",1.05,2.18,"beside tower door"]
-  ].map(([number,buildingId,x,z,type,signY,signZ,mount])=>Object.freeze({number,buildingId,x,z,type,signY,signZ,mount,status:number===7?"occupied":"vacant",occupant:number===7?"SVRN Society":null,interiorId:number===7?"svrn-society":null})));
+  ].map(([number,buildingId,x,z,type,signY,signZ,mount])=>Object.freeze({number,buildingId,x,z,type,signY,signZ,mount,status:OCCUPANTS[number]?"occupied":"vacant",occupant:OCCUPANTS[number]?.[0]||null,interiorId:OCCUPANTS[number]?.[1]||null})));
   const REVIEWS={
     "vac-overview":{yaw:.35,pitch:.75,dist:137,target:{x:17,y:12,z:17}},
     "vac-lower":{yaw:.1,pitch:.48,dist:64,target:{x:30,y:6,z:48}},
@@ -59,9 +63,9 @@
       const yaw=house?building.yaw:building.rotation.y,floor=house?building.floor:building.position.y,front=house?building.d/2:0;
       const c=Math.cos(yaw),s=Math.sin(yaw),point=(lx,y,lz)=>({x:x+c*lx+s*lz,y:floor+y,z:z-s*lx+c*lz});
       const node=S.createNode({position:{x,y:floor,z},rotation:{x:0,y:yaw+(house?0:.85),z:0},sightHidden:true});S.addChild(group,node);
-      const text=address.occupant||"VAC "+address.number,width=address.occupant?4.4:house?2.25:1.65,height=house?.58:.48,depth=.16,signZ=front+address.signZ;
-      const plaque=BL.dsbModels.block(node,"#346e9c",0,address.signY,signZ,width,height,depth);
-      const lettering=BL.dsbModels.sign(node,text,.04,address.signY-(house?.18:.14),signZ+.12,house?.48:.36,"#fff4df");
+      const occupant=OCCUPANTS[address.number],text=address.occupant||"VAC "+address.number,width=occupant?occupant[2]:house?2.25:1.65,height=occupant?occupant[3]:house?.58:.48,depth=.16,signZ=front+address.signZ,signY=address.signY+(occupant?occupant[4]:0);
+      const plaque=BL.dsbModels.block(node,"#346e9c",0,signY,signZ,width,height,depth);
+      const lettering=BL.dsbModels.sign(node,text,.04,signY-(occupant?occupant[6]:house?.18:.14),signZ+.12,occupant?occupant[5]:house?.48:.36,"#fff4df");
       properties.push({address,building,node,plaque,lettering,text,x,z,yaw,floor,front:"local +z",mount:address.mount,
         door:point(0,house?0:.2,house?front+.075:2.18),approach:point(0,0,house?front+1.5:3.8)});
     }

@@ -3249,6 +3249,7 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
 .gorilla-hud,
 .primary-hud,
 .weapon-hud,
+.rescue-hud,
 .magazine-hud,
 .jetpack-hud {
   grid-column: 1;
@@ -3282,6 +3283,9 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
 .weapon-hud:hover,
 .weapon-hud.virtual-hover,
 .weapon-hud:focus-visible,
+.rescue-hud:hover,
+.rescue-hud.virtual-hover,
+.rescue-hud:focus-visible,
 .magazine-hud:hover:not(:disabled),
 .magazine-hud.virtual-hover:not(:disabled),
 .magazine-hud:focus-visible,
@@ -3296,6 +3300,7 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
 .gorilla-hud:active,
 .primary-hud:active,
 .weapon-hud:active,
+.rescue-hud:active,
 .magazine-hud:active:not(:disabled),
 .jetpack-hud:active:not(:disabled) {
   transform: translateY(1px);
@@ -3305,6 +3310,7 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
 .gorilla-hud:focus-visible,
 .primary-hud:focus-visible,
 .weapon-hud:focus-visible,
+.rescue-hud:focus-visible,
 .magazine-hud:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
@@ -3325,11 +3331,13 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
   overflow: visible;
 }
 
-.mode-hud[data-holding="true"] {
+.mode-hud[data-holding="true"],
+.rescue-hud[data-holding="true"] {
   background: linear-gradient(160deg, #615645, #50483c 55%, #3e3932);
 }
 
-.mode-hud::after {
+.mode-hud::after,
+.rescue-hud::after {
   content: "";
   position: absolute;
   z-index: 2;
@@ -3344,7 +3352,8 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
   pointer-events: none;
 }
 
-.mode-hud[data-selected="true"][data-holding="true"]::after {
+.mode-hud[data-selected="true"][data-holding="true"]::after,
+.rescue-hud[data-holding="true"]::after {
   opacity: 1;
   animation: mode-release-progress 650ms linear forwards;
 }
@@ -3484,6 +3493,60 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
   width: 218px;
 }
 
+.rescue-hud {
+  flex: none;
+  padding: 0;
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+}
+
+.rescue-hud canvas {
+  width: 30px;
+  height: 30px;
+  flex: none;
+  image-rendering: pixelated;
+  transform: translateY(-2px);
+}
+
+.rescue-portrait {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  flex: none;
+}
+
+.rescue-equipment {
+  position: relative;
+  width: 78px;
+  height: 52px;
+  flex: none;
+}
+
+.rescue-equipment > span {
+  position: absolute;
+  top: calc(100% + 3px);
+  left: 0;
+  width: 100%;
+  font-size: 10px;
+  line-height: 12px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-shadow: 0 1px 3px #000;
+}
+
+.weapon-equipment-row:has(.rescue-hud:not([hidden])) {
+  flex-wrap: wrap;
+  row-gap: 23px;
+  max-width: calc(100vw - 32px - var(--safe-left) - var(--safe-right));
+}
+
+body.dsb-menu-open .rescue-equipment { visibility: hidden; pointer-events: none; }
+
 .primary-hud {
   flex: none;
   padding: 0;
@@ -3571,6 +3634,10 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
 
 .jetpack-compact-fuel[data-level="low"] .jetpack-compact-fuel-fill {
   background: var(--danger);
+}
+
+.rescue-hunger[data-level="full"] .jetpack-compact-fuel-fill {
+  background: var(--ok);
 }
 
 .primary-hud:not([data-equipped="true"]) .primary-strength-fill {
@@ -9506,10 +9573,10 @@ body[data-poker-table-view="true"] #joy-move, body[data-poker-table-view="true"]
   --menu-edge: max(12px,env(safe-area-inset-top),env(safe-area-inset-bottom),env(safe-area-inset-left),env(safe-area-inset-right));
   position: fixed; z-index: 1000; left: var(--menu-x,50vw); top: var(--menu-y,50dvh); right: auto; bottom: auto;
   transform: translate(-50%,-50%); margin: 0; box-sizing: border-box;
-  width: min(900px,calc(var(--menu-w,100vw) - 2 * var(--menu-edge)));
+  width: min(var(--menu-width,900px),calc(var(--menu-w,100vw) - 2 * var(--menu-edge)));
   height: auto; max-width: none; max-height: calc(var(--menu-h,100dvh) - 2 * var(--menu-edge));
   display: block; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable;
-  padding: 0; font: 14px/1.5 system-ui,sans-serif;
+  padding: 0; font: var(--menu-font,14px/1.5 system-ui,sans-serif);
 }
 .dsb-menu-engaged::backdrop { background: #060b1280; }
 .dsb-menu-engaged > header { position: sticky; top: 0; z-index: 2; margin: 0; padding: 14px 18px; }
@@ -9616,6 +9683,34 @@ body.dsb-menu-open :is(.bottom-hud,.top-hud,#joy-move,#joy-look,#act,.weapon-hud
   .svrn-menu nav button { flex: 1 0 42%; }
   .svrn-grid { grid-template-columns: 1fr; }
   .svrn-content { padding: 14px; }
+}
+
+/* Adoption uses the island sheet's materials and controls; the DSB shell keeps focus and viewport placement. */
+.rescue-menu {
+  --menu-width: 440px;
+  --menu-font: 13px/1.4 var(--mono);
+  border-radius: var(--radius);
+  color: var(--paper);
+}
+.rescue-menu:not([open]) { display: none; }
+.rescue-menu .panel-title h2 { min-width: 0; }
+.rescue-menu .panel-title .sign { max-width: 100%; }
+.rescue-menu .panel-title .foot-button { flex: none; }
+.rescue-adoption { padding: 12px; }
+.rescue-adoption > .help:first-child { margin-top: 0; }
+.rescue-breeds { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; margin-top: 14px; }
+.rescue-breed { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; min-width: 0; padding: 12px 4px; }
+.rescue-breed canvas { display: block; width: 40px; height: 40px; image-rendering: pixelated; }
+.rescue-breed[aria-pressed="true"] { border-color: var(--accent-text); background: linear-gradient(#e2a04a,var(--accent)); color: var(--ink); text-shadow: none; }
+.rescue-breed[aria-pressed="true"] span { text-decoration: underline; text-underline-offset: 3px; }
+.rescue-menu .field { margin-top: 16px; }
+.rescue-menu .field input { font-size: 13px; }
+.rescue-note:empty { display: none; }
+@media (max-width:380px) {
+  .rescue-breeds { grid-template-columns: repeat(2,minmax(0,1fr)); }
+}
+@media (pointer:coarse) {
+  .rescue-menu .field input { min-height: 44px; font-size: 16px; }
 }
 
 .studio-session { width:min(42rem,calc(100vw - 2rem)); max-height:85vh; overflow:auto; background:#211b25; color:var(--fg); border:1px solid #aa8054; border-radius:.75rem; padding:1.2rem; }
