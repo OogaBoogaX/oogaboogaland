@@ -1,7 +1,7 @@
 # DSB Chora vacancy addresses
 
 Frozen initial assignment: **35 properties — 33 houses and 2 windmills**.
-**Current occupancy:** VAC 7 — occupied by **SVRN Society**. The frozen 35-address map remains intact; 34 properties remain vacant (32 houses and both windmills).
+**Current occupancy:** VAC 1 — occupied by **Free Puppies Rescue**; VAC 7 — occupied by **SVRN Society**. The frozen 35-address map remains intact; 33 properties remain vacant (31 houses and both windmills).
 
 Source checkpoint: `abd624cc3c6e719cf6cac20d140b41a106609b56`.
 
@@ -15,7 +15,7 @@ All 33 `VACANT` lots in the current geography are included, including domed/cros
 
 | Address | Existing identity | Type | x (m) | z (m) | Yaw (radians) |
 |---|---|---|---:|---:|---:|
-| VAC 1 | VACANT 21 | house | 5 | 51 | -0.422853926 |
+| VAC 1 — Free Puppies Rescue (occupied) | VACANT 21 | house | 5 | 51 | -0.422853926 |
 | VAC 2 | VACANT 20 | house | 26 | 60 | 0.124354995 |
 | VAC 3 | VACANT 19 | house | 57 | 57 | -2.516107613 |
 | VAC 4 | VACANT 4 | house | 56 | 40 | -2.743070208 |
@@ -57,7 +57,7 @@ All 33 `VACANT` lots in the current geography are included, including domed/cros
 
 Every existing doorway faces building-local +z. House door metadata uses the existing facade centre at `depth / 2 + 0.075`; the approach is `depth / 2 + 1.5`. Mills use their existing blue door at local z 2.18 and their exterior approach at z 3.8. These are attachment/reference positions, not new traversable doors: existing steps, terrain and tower collision remain authoritative and must be considered when an interior is separately approved.
 
-The SVRN Society plaque at VAC 7 is 4.4 × 0.58 m at the original mounting height, using the same sign family. Other house plaques are 2.25 × 0.58 m, above the door lintel or mounted on the existing outward balcony rail where a balcony occupies that facade. Mill plaques are 1.65 × 0.48 m, beside the existing door on its +x side (plaque yaw is tower yaw + 0.85), below the blade sweep. The registry stores explicit mounting heights/offsets. All use the existing DSB sign glyph geometry, cream lettering and blue venue-style plaques. No walking collision, building, route, foliage or windmill geometry is changed.
+The SVRN Society plaque at VAC 7 is 4.4 × 0.58 m at the original mounting height, using the same sign family. The Free Puppies Rescue plaque at VAC 1 is 3.7 × 0.42 m, raised 0.77 m above the original mounting height so it clears the facade's two lanterns (`docs/dsb-puppy-rescue.md`). Other house plaques are 2.25 × 0.58 m, above the door lintel or mounted on the existing outward balcony rail where a balcony occupies that facade. Mill plaques are 1.65 × 0.48 m, beside the existing door on its +x side (plaque yaw is tower yaw + 0.85), below the blade sweep. The registry stores explicit mounting heights/offsets. All use the existing DSB sign glyph geometry, cream lettering and blue venue-style plaques. No walking collision, building, route, foliage or windmill geometry is changed.
 
 ## Review views
 
