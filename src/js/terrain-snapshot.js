@@ -1,5 +1,5 @@
 // Rehydrates an explicit terrain data snapshot; no serialized functions, evaluation or source strings.
-// Query source SHA256: 335193f3d7566939ff20d3b1cbbd5548c48fbabebf25bb039e29b06ef9034045
+// Query source SHA256: f7f958ea9b3ef1b8ee4e09369c5ce36b8072db1d86c94e806328c37b6e64f497
 (() => {
   "use strict";
   const BL = window.BL;
@@ -76,7 +76,7 @@
     const paths = new Uint8Array(PX * PZ), pathData = new Float32Array(PATH_CAPACITY * 20);
     let pathCount = 0, pathVersion = 0, pathReflows = 0, ringPathCount = 0, visibleSpokeCount = 0;
     let requestedInner = 0, ringInner = 0, ringCenter = 0, ringOuter = 0, pathVisible = false;
-    const { segmentBoxClear } = BL.terrain;
+    const { segmentBoxQueryClear } = BL.terrain;
 
   const undersideDepthAt = (radius) => Math.max(0, UNDER_SPHERE_CENTER + Math.sqrt(Math.max(0, UNDER_SPHERE_RADIUS * UNDER_SPHERE_RADIUS - radius * radius)));
   const smooth = (t) => {
@@ -238,17 +238,20 @@
     };
     // Camera substeps already test rendered ramp triangles with clearAt; this sweeps the volume between them
     // exactly against the solid voxel boxes.
+    const boxQuery = new Float64Array(14);
     const voxelSegmentClearAt = (x, y, z, toX, toY, toZ, radius, height) => {
       const gx0 = Math.max(0, Math.floor((Math.min(x, toX) - radius - ORIGIN.x) / UNIT)), gx1 = Math.min(SX - 1, Math.floor((Math.max(x, toX) + radius - ORIGIN.x) / UNIT));
       const gz0 = Math.max(0, Math.floor((Math.min(z, toZ) - radius - ORIGIN.z) / UNIT)), gz1 = Math.min(SZ - 1, Math.floor((Math.max(z, toZ) + radius - ORIGIN.z) / UNIT));
       const gy0 = Math.max(0, Math.floor((Math.min(y, toY) - ORIGIN.y) / UNIT)), gy1 = Math.min(SY - 1, Math.floor((Math.max(y, toY) + height - ORIGIN.y) / UNIT));
       const dx = toX - x, dy = toY - y, dz = toZ - z;
+      boxQuery[0] = x; boxQuery[1] = y; boxQuery[2] = z; boxQuery[3] = dx; boxQuery[4] = dy; boxQuery[5] = dz; boxQuery[6] = radius; boxQuery[7] = height;
       for (let gx = gx0; gx <= gx1; gx++) for (let gz = gz0; gz <= gz1; gz++) {
         const base = gx * SY * SZ + gz, minX = gx * UNIT + ORIGIN.x, minZ = gz * UNIT + ORIGIN.z;
         for (let gy = gy0; gy <= gy1; gy++) {
           if (!data[base + gy * SZ]) continue;
           const minY = gy * UNIT + ORIGIN.y;
-          if (!segmentBoxClear(x, y, z, dx, dy, dz, radius, height, minX, minY, minZ, minX + UNIT, minY + UNIT, minZ + UNIT)) return false;
+          boxQuery[8] = minX; boxQuery[9] = minY; boxQuery[10] = minZ; boxQuery[11] = minX + UNIT; boxQuery[12] = minY + UNIT; boxQuery[13] = minZ + UNIT;
+          if (!segmentBoxQueryClear(boxQuery)) return false;
         }
         const pieces = windowColumns[gx * SZ + gz];
         if (pieces) for (const piece of pieces) {
