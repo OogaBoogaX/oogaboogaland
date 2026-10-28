@@ -20941,6 +20941,12 @@ const terrainParityChecks = (BL, island) => {
   record("terrain parity: the flag-off island keeps its golden digest, its Worker snapshot survives a structured clone and validation with the same mesh, and every snapshot query answers a seeded sample exactly as terrain.js does",
     direct === TERRAIN_GOLDEN && snapshotDigest === direct && slices > 0 && !mismatches.length && !missing.length && total > 100000,
     JSON.stringify({ direct, golden: TERRAIN_GOLDEN, snapshotDigest, slices, total, missing, mismatches }));
+  const voxelPaths = ["terrain.js", "terrain-snapshot.js"].map(name => {
+    const source = readFileSync(join(root, "src/js", name), "utf8"), match = source.match(/const voxelSegmentClearAt =[\s\S]*?const hullBox/);
+    return { name, typed: !!match && match[0].includes("segmentBoxQueryClear(") && !match[0].includes("segmentBoxClear(") };
+  });
+  record("terrain collision: direct and Worker-restored voxel sweeps use caller-owned typed box queries instead of the allocating scalar adapter",
+    voxelPaths.every(path => path.typed), JSON.stringify(voxelPaths));
 };
 const artifactUnitProof = () => {
   const workflow = readFileSync(join(root, ".github/workflows/pages.yml"), "utf8");
