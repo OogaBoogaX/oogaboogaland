@@ -1,12 +1,15 @@
-// /donations/*: the page's donation calls, passed on over the DONATIONS service binding to bananapayserver's PageApi
+// /donations/* and /purchases/*: the page's donation and purchase calls, passed on over the DONATIONS service binding to bananapayserver's PageApi
 // entrypoint, as its docs/protocol.md ("How OBL's Worker passes them on") asks. Who is giving comes from this Worker's
 // GitHub sign-in, independently of the page's editable display handle; only the body and type go on, never its request, whose
 // cookies carry the session. The visitor's address goes beside each call for bananapayserver's rate limits. Without the
-// binding, or when bananapayserver throws, the page hears that donations are closed.
+// binding, or when bananapayserver throws, the page hears that donations are closed. Purchases (fireworks first) go the
+// same way, an invoice for one and the buyer's own totals each carrying the signed-in buyer.
 
 import { clientIp, fromSite, getSessionFromRequest, json } from "./http.js";
 
-const CALLS = { "/donations/invoice": "invoice", "/donations/note": "note", "/donations/onchain": "onchain" };
+const CALLS = { "/donations/invoice": "invoice", "/donations/note": "note", "/donations/onchain": "onchain", "/purchases/buy": "purchase", "/purchases/mine": "purchases" };
+// The calls that name who is giving or buying.
+const SIGNED = new Set(["invoice", "purchase", "purchases"]);
 const SOCKET_HEADERS = ["upgrade", "connection", "sec-websocket-key", "sec-websocket-version"];
 const BODY_MAX = 1024;
 
@@ -34,10 +37,10 @@ export const handleDonations = async (request, env, url) => {
     const body = await request.arrayBuffer();
     if (body.byteLength > BODY_MAX) return json({ error: "too large" }, 413);
     const call = new Request(url, { method: "POST", headers: { "content-type": request.headers.get("content-type") || "" }, body });
-    if (method !== "invoice") return await env.DONATIONS[method](call, visitor);
+    if (!SIGNED.has(method)) return await env.DONATIONS[method](call, visitor);
     // The donor: GitHub's numeric id, which survives a rename, and the login as GitHub gives it, or nobody.
     const found = await getSessionFromRequest(request, env);
-    return await env.DONATIONS.invoice(call, found ? { id: found.player.id, login: found.player.login } : null, visitor);
+    return await env.DONATIONS[method](call, found ? { id: found.player.id, login: found.player.login } : null, visitor);
   } catch {
     return closed();
   }

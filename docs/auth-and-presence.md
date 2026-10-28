@@ -11,7 +11,7 @@ PR ownership check are described in [Contributor onboarding](contributor-onboard
 | Piece | Where | Job |
 |---|---|---|
 | Static site | `_site/` (the page as `index.html` and each `<route>.html`), staged by `npm run build:site` | the whole game, served by the Worker's assets binding with the headers in `worker/_headers` |
-| Worker | `worker/src/index.js` | runs only for `/auth/*`, `/api/*` and `/room` (`run_worker_first`), and on staging `/donations/*`, which `worker/src/donations.js` passes on to bananapayserver with the signed-in donor; everything else is the static page |
+| Worker | `worker/src/index.js` | runs only for `/auth/*`, `/api/*` and `/room` (`run_worker_first`), and on staging `/donations/*` and `/purchases/*`, which `worker/src/donations.js` passes on to bananapayserver with the signed-in donor; everything else is the static page |
 | D1 `oogaboogaland` | `worker/migrations/` | `players` (GitHub id, login, display name) and `sessions` (token hash, expiry) |
 | Page modules | `src/js/net.js` (`BL.net`), `src/js/remote-players.js` | the account and the room socket; the other visitors on the island. The sheet footer shows the account and the online count through `hud.showAccount` |
 | Room | `worker/src/room.js` (Durable Object `Room`) | one socket per signed-in player, presence and poses, and Ooga Chat |

@@ -1521,6 +1521,11 @@ body[data-active-scene="arcade"] .magazine-hud {
   overflow: auto;
 }
 
+/* The firework stand's screen in the same dialog, wider: its cards and showcases read larger. */
+.donation-popup.stand {
+  width: 600px;
+}
+
 /* The kiosk draws the name and message on its own screen. These fields only take the typing, so they stay in the
    page, focusable, a phone's keyboard able to open on them, but out of sight; 16px keeps iOS from zooming in. */
 #donation-fields {
@@ -4119,6 +4124,19 @@ body.dsb-menu-open .rescue-equipment { visibility: hidden; pointer-events: none;
 body.tess-touring #joy-move,
 body.tess-touring #joy-look {
   visibility: hidden;
+}
+
+/* While the view watches a firework from the stand, its controls step aside for the show; the countdown stays. */
+body.fireworks-watching #act,
+body.fireworks-watching #hint,
+body.fireworks-watching #joy-move,
+body.fireworks-watching #joy-look {
+  visibility: hidden;
+}
+
+/* While a buyer chooses where in the sky, the hint says how. */
+body.fireworks-watching.fireworks-choosing #hint {
+  visibility: visible;
 }
 
 /* On tour the heading is two lines on purpose: where in the tour, then the stop's name. */

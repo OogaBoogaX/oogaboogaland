@@ -1,5 +1,6 @@
 // The kiosk flow on the mainland, real or simulated, and the name and message fields shared with the Factory's glass. The fields are
-// hidden: they only take the typing (and a phone's keyboard), which both kiosks draw on their own screens.
+// hidden: they only take the typing (and a phone's keyboard), which both kiosks draw on their own screens. The hub's stand
+// opens its own screen in the same dialog (`openStand`, stand-kiosk.js), which a paid purchase closes (`receivePurchase`).
 (() => {
   "use strict";
   const BL = window.BL;
@@ -9,6 +10,16 @@
     const handle = document.getElementById("donation-handle"), message = document.getElementById("donation-message"), closeButton = document.getElementById("donation-close");
     const status = document.getElementById("donation-details-status");
     const context = canvas.getContext("2d"), donations = BL.donations, help = dialog.querySelector(".help");
+    // The dialog's lettered title and the screen's spoken label are the donation's until the stand's screen takes the
+    // dialog, which keeps them (`donateHeading`) to put back when a donation opens it again; the donation's own path
+    // never touches them.
+    let donateHeading = null;
+    const heading = (text, label) => {
+      const title = document.getElementById("donation-title").querySelector("[data-sign]");
+      if (!donateHeading) donateHeading = [title.getAttribute("aria-label") || title.textContent, canvas.getAttribute("aria-label")];
+      if (title.getAttribute("aria-label") !== text) { title.setAttribute("aria-label", text); title.replaceChildren(BL.hud.signLettering(text)); }
+      canvas.setAttribute("aria-label", label);
+    };
     let flow = null, fieldFlow = null, frame = 0, previous = 0, clock = 0, saveTimer = 0, simulated = false, onClose = null;
     let historyOpen = false, historyAll = false, historyIndex = -1, historyPrefix = "";
     const historyMatches = [];
@@ -227,10 +238,12 @@
     fields.addEventListener("keydown", fieldsKey);
     // The caret and the focus move without input: the screen follows them.
     for (const type of ["keyup", "select", "focusin", "focusout"]) fields.addEventListener(type, track);
+    let wide = false;
     const close = () => {
       cancelAnimationFrame(frame); frame = 0;
       if (flow) flow.stop();
       flow = null;
+      if (wide) { dialog.classList.remove("stand"); wide = false; }
       if (dialog.open) { dialog.close(); if (onClose) onClose(); }
     };
     const closeOutside = () => { if (simulated && dialog.open) close(); };
@@ -249,6 +262,7 @@
     const open = (demo = false) => {
       if (dialog.open) return;
       simulated = demo;
+      if (donateHeading) { heading(donateHeading[0], donateHeading[1]); donateHeading = null; }
       // The page's own /donate address: a path where the router serves paths, a hash from disk or a named file.
       const link = BL.router && !BL.router.served ? `${location.href.split("#")[0]}#/donate` : `${location.origin}/donate`;
       help.textContent = simulated ? "This is a local simulation. No Bitcoin is sent." : "Pay with Lightning or on-chain. Your bananas arrive from the Factory when the payment confirms.";
@@ -286,25 +300,78 @@
       previous = performance.now(); clock = 0;
       frame = requestAnimationFrame(draw);
     };
+    // The stand's screen (stand-kiosk.js) in the same dialog, canvas, keys and close: `hooks` as that screen takes them,
+    // `help` the line under it.
+    const openStand = (hooks, helpText) => {
+      if (dialog.open) return;
+      simulated = !hooks.real;
+      help.textContent = helpText;
+      heading(hooks.heading, hooks.label);
+      flow = BL.standKiosk.create({ ...hooks, close });
+      flow.start();
+      // The stand's screen opens wider than a donation's, so its cards and showcases read larger; only the stand's
+      // close takes the class off again, so the donation path never touches it.
+      dialog.classList.add("stand");
+      wide = true;
+      if (document.pointerLockElement) document.exitPointerLock();
+      dialog.showModal();
+      canvas.focus({ preventScroll: true });
+      previous = performance.now(); clock = 0;
+      frame = requestAnimationFrame(draw);
+    };
+    // A paid purchase: true, closing the dialog, when it is the one the stand's screen is waiting for.
+    const receivePurchase = (id) => {
+      if (!flow || !flow.receive(id)) return false;
+      close();
+      return true;
+    };
     const key = (event) => {
       if (event.target === message || event.target === handle || event.metaKey || event.ctrlKey || event.altKey || event.isComposing || event.key === "Tab") return;
       if (!flow || event.target === closeButton) return;
-      if (event.key.length === 1 || ["Enter", "Escape", "Backspace", "Delete"].includes(event.key)) {
+      if (event.key.length === 1 || ["Enter", "Escape", "Backspace", "Delete", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) {
         event.preventDefault(); event.stopPropagation();
         flow.key(event);
       }
     };
+    // A point on the canvas in its own pixels; a drag of more than a few pixels scrolls (where the screen scrolls)
+    // and is no tap.
+    const at = (event) => {
+      const rect = canvas.getBoundingClientRect();
+      return [(event.clientX - rect.left) * canvas.width / rect.width, (event.clientY - rect.top) * canvas.height / rect.height];
+    };
+    let dragFrom = null, dragged = false;
     const tap = (event) => {
       if (!flow) return;
-      const rect = canvas.getBoundingClientRect();
       canvas.focus({ preventScroll: true });
-      flow.tap((event.clientX - rect.left) * canvas.width / rect.width, (event.clientY - rect.top) * canvas.height / rect.height);
+      if (dragged) { dragged = false; return; }
+      flow.tap(...at(event));
+    };
+    const hover = (event) => {
+      if (!flow) return;
+      const [u, v] = at(event);
+      if (dragFrom !== null && flow.drag) {
+        if (!dragged && Math.abs(v - dragFrom) > 6) dragged = true;
+        if (dragged) { flow.drag(v - dragFrom); dragFrom = v; }
+        return;
+      }
+      if (flow.hover && event.pointerType === "mouse") flow.hover(u, v);
+    };
+    const press = (event) => { dragFrom = flow && flow.drag ? at(event)[1] : null; dragged = false; };
+    const release = () => { dragFrom = null; };
+    const wheel = (event) => {
+      if (!flow || !flow.wheel) return;
+      event.preventDefault();
+      flow.wheel(event.deltaY * canvas.height / canvas.getBoundingClientRect().height);
     };
     const cancel = (event) => { event.preventDefault(); close(); };
     dialog.addEventListener("keydown", key);
     dialog.addEventListener("cancel", cancel);
     closeButton.addEventListener("click", close);
     canvas.addEventListener("click", tap);
+    canvas.addEventListener("pointermove", hover);
+    canvas.addEventListener("pointerdown", press);
+    for (const type of ["pointerup", "pointercancel", "pointerleave"]) canvas.addEventListener(type, release);
+    canvas.addEventListener("wheel", wheel, { passive: false });
     const receive = (donation, bananas) => {
       if (!flow || !flow.receive(donation.id, bananas, donation.handle, donation.sats)) return false;
       // Show the delivery in the visitor's current scene as soon as the payment settles.
@@ -321,8 +388,11 @@
       fields.removeEventListener("keydown", fieldsKey);
       for (const type of ["keyup", "select", "focusin", "focusout"]) fields.removeEventListener(type, track);
       closeButton.removeEventListener("click", close); canvas.removeEventListener("click", tap);
+      canvas.removeEventListener("pointermove", hover); canvas.removeEventListener("pointerdown", press);
+      for (const type of ["pointerup", "pointercancel", "pointerleave"]) canvas.removeEventListener(type, release);
+      canvas.removeEventListener("wheel", wheel);
     };
-    return { open, close, closeOutside, onClose: callback => { onClose = callback; }, receive, seen, dispose, defaults, details, typing: () => typed, restoreDetails, focusDetails, attachDetails, detachDetails, detailsState,
+    return { open, openStand, receivePurchase, close, closeOutside, onClose: callback => { onClose = callback; }, receive, seen, dispose, defaults, details, typing: () => typed, restoreDetails, focusDetails, attachDetails, detachDetails, detailsState,
       history: () => historyOpen ? historyMatches : null, historyCount: () => game.state.recentHandles.length, toggleHistory, chooseHistory, closeHistory: hideHistory };
   };
   BL.donationPopup = { create };

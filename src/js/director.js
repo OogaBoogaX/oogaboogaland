@@ -521,8 +521,9 @@
     const idx = QUALITY_ORDER.indexOf(renderer.quality);
     // Stepping is one-way and stops at the bottom tier, so quality cannot oscillate.
     if (idx < 0 || idx >= QUALITY_ORDER.length - 1) return;
-    // An unfocused tab and a transition building the next scene are not evidence that the tier is too expensive.
-    if (!document.hasFocus() || transition) { perf.frames = perf.total = 0; perf.since = 0; return; }
+    // An unfocused tab, a transition building the next scene and a scene's show (`holdTier`, a fireworks show in the
+    // hub, bounded by its own caps) are not evidence that the tier is too expensive.
+    if (!document.hasFocus() || transition || active && active.holdTier) { perf.frames = perf.total = 0; perf.since = 0; return; }
     if (!perf.since) perf.since = now;
     perf.frames++;
     perf.total += intervalMs;
@@ -781,7 +782,16 @@
         if (active && active.onSeen && active.onSeen(id, sats, due, left, pricing)) return;
         if (donations.waitingOn(id)) window.BL.hud.toast(left ? `Your on-chain tip arrived short · send ${gameMod.formatLarge(left)} more sats to the same address` : "Your on-chain tip is on its way · waiting for a block");
       },
-      onPile: ({ bananas, eatPerHour }) => Object.assign(pileFeed, { bananas, eatPerHour, at: performance.now() })
+      onPile: ({ bananas, eatPerHour }) => Object.assign(pileFeed, { bananas, eatPerHour, at: performance.now() }),
+      // A paid firework, on every page: the stand's dialog closes on its own purchase, the hub launches it and counts it
+      // down, and any other scene names it in a toast.
+      onFirework: (firework) => {
+        if (firework.mine) window.BL.donationPopup.receivePurchase(firework.id);
+        if (active && active.onFirework && active.onFirework(firework)) return;
+        const F = window.BL.fireworks;
+        window.BL.hud.toast(firework.mine ? `Your ${F.NAMES[firework.kind]} is going up over the Timechain Sphere`
+          : `${firework.login ? `@${firework.login}` : "Someone"} is launching ${F.aName(firework.kind)} over the Timechain Sphere`);
+      }
     });
   });
   // The feed panel: the Konami code toggles a page-wide readout of the socket, its counters and its last events.

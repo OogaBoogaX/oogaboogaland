@@ -3,9 +3,10 @@
 // pay that invoice on-chain, and `subscribe` opens its socket, which pushes each donation in OBL's event shape
 // `{ id, sats, handle, message, at }`, the pile, the leaderboard, the tally of every donation it holds with its current
 // rate, whether donations are open, and each on-chain payment seen before its block. Without an API the simulator plays
-// tips now and then, as it always has, for demos and for the suite.
+// tips now and then, as it always has, for demos and for the suite. Purchases (fireworks first) ride the same socket
+// and are never donations (see "purchases" below).
 //
-// The page only ever calls its own address: its Worker passes /donations/* on to bananapayserver over a service binding
+// The page only ever calls its own address: its Worker passes /donations/* and /purchases/* on to bananapayserver over a service binding
 // and names the donor from its own GitHub sign-in, while the page supplies the editable display handle. Real mode starts once that Worker says
 // it has the binding (`useOrigin`, which the director calls when the account's look at /api/me reports `donations`), so
 // staging and production each find their own with nothing stamped into the build. The socket's status says which
@@ -153,7 +154,7 @@
   // API's last word on whether donations are open, and `state.network` the network it takes payments on, each null
   // before it has said. `state.tally` is its latest tally, null before the first.
   const SOCKET_MIN = 1000, SOCKET_MAX = 60000, PLAYED = 64, RECENT_MAX = 10;
-  const state = { open: null, network: null, connected: false, attempts: 0, donations: 0, tally: null, board: null, boardSats: null, recent: null, limits: null };
+  const state = { open: null, network: null, connected: false, attempts: 0, donations: 0, tally: null, board: null, boardSats: null, recent: null, limits: null, catalogue: null, purchaseBoards: {}, purchaseCounts: {} };
   const limitsOf = (v) => v && Number.isSafeInteger(v.minSats) && v.minSats > 0
     && Number.isSafeInteger(v.maxSats) && v.maxSats >= v.minSats
     && Number.isSafeInteger(v.lightningMaxSats) && v.lightningMaxSats > 0 && v.lightningMaxSats <= v.maxSats
@@ -165,7 +166,7 @@
     readers.add(reader);
     return () => readers.delete(reader);
   };
-  const played = new Array(PLAYED).fill(""), handlers = { donation: null, status: null, pile: null, board: null, seen: null };
+  const played = new Array(PLAYED).fill(""), handlers = { donation: null, status: null, pile: null, board: null, seen: null, firework: null };
   let socket = null, timer = 0, backoff = SOCKET_MIN, after = "", playedAt = 0, live = false;
   const donationOf = (d) => {
     if (!d || typeof d.id !== "string" || !d.id || d.id.length > 64 || !Number.isInteger(d.sats) || d.sats <= 0 || !isNumber(d.at)) return null;
@@ -198,6 +199,112 @@
     for (const h of t.hours) if (hours.length < TALLY_HOURS && Array.isArray(h) && isNumber(h[0]) && isNumber(h[1]) && isNumber(h[2])) hours.push([h[0], Math.max(0, h[1]), Math.max(0, h[2])]);
     return { count: Math.max(0, t.count), sats: Math.max(0, t.sats), bananas: Math.max(0, t.bananas), last: Math.max(0, t.last), hours, rate: rateOf(t.rate) };
   };
+  // ---- purchases: things bought, never donations -----------------------------------------------------------
+  // Anything an OBL experience sells is bought with one Lightning payment: `purchase(category, item)` asks for its
+  // invoice, and the page never sends sats, since the API prices every item itself. `state.catalogue` is what it sells
+  // now, `{ firework: { buyers, prices } }` (`buyers`, who may buy: `signed-in` or `everyone`; null while purchases are
+  // closed), `state.purchaseBoards` each category's top ten signed-in buyers, `state.purchaseCounts` each category's
+  // purchases of each item over the API's last few days (`{ days, items: { mega: 3 } }`, the stand's TOP LAUNCHES), and
+  // `purchaseTotals(category)` what the signed-in visitor has bought. Fireworks are the first category: every page hears
+  // each paid one as `{ id, kind, slot, launchAt, login, mine }` (`onFirework`), `launchAt` on the API's clock, which
+  // `serverNow()` estimates from each purchase's `at`, keeping the fastest sample as the room's clock does. A purchase
+  // never makes bananas or reaches the pile, the board or the tally.
+  const FIREWORK = "firework", FIREWORK_KINDS = ["pop", "bolt", "mega", "show"], BUYERS = ["signed-in", "everyone"];
+  const PURCHASE_PLAYED = 32, BOARD_MAX = 10, FIREWORK_LEAD_MS = 3000, FIREWORK_SLOTS = 6;
+  // Names as bananapayserver's catalogue and D1 allow them, so no category or item it sells is dropped here.
+  const CATEGORY = /^[a-z0-9-]{1,32}$/, ITEM = /^[a-z0-9-]{1,64}$/;
+  const ownPurchases = new Set(), playedPurchases = new Array(PURCHASE_PLAYED).fill("");
+  let playedPurchaseAt = 0, clockOffset = 0, clockKnown = false, boughtHere = 0;
+  const clockSample = (serverMs) => {
+    const sample = serverMs - Date.now();
+    if (!clockKnown || sample > clockOffset) clockOffset = sample;
+    clockKnown = true;
+  };
+  const serverNow = () => Date.now() + clockOffset;
+  // Each category the API sells, kept with the items it prices; anything malformed is left out.
+  const catalogueOf = (c) => {
+    if (!c || typeof c !== "object" || Array.isArray(c)) return null;
+    const out = {};
+    for (const [category, v] of Object.entries(c)) {
+      if (!CATEGORY.test(category) || !v || !BUYERS.includes(v.buyers) || !v.prices || typeof v.prices !== "object") continue;
+      const prices = {};
+      for (const [item, sats] of Object.entries(v.prices)) if (ITEM.test(item) && Number.isSafeInteger(sats) && sats > 0) prices[item] = sats;
+      out[category] = { buyers: v.buyers, prices };
+    }
+    return out;
+  };
+  const purchaseBoardOf = (entries) => entries.slice(0, BOARD_MAX)
+    .filter((e) => e && typeof e.login === "string" && Number.isSafeInteger(e.quantity) && e.quantity > 0 && Number.isSafeInteger(e.sats) && e.sats >= 0)
+    .map((e) => ({ login: sanitize(e.login, HANDLE_MAX), quantity: e.quantity, sats: e.sats }));
+  // A paid firework as the scenes take it, or null: the purchase's own fields and the two fireworks add.
+  const fireworkOf = (d) => FIREWORK_KINDS.includes(d.item) && Number.isInteger(d.slot) && d.slot >= 0 && d.slot < FIREWORK_SLOTS && isNumber(d.launchAt)
+    ? { id: d.id, kind: d.item, slot: d.slot, launchAt: d.launchAt, login: d.login === null ? null : sanitize(d.login, HANDLE_MAX) || null } : null;
+  // How many things this browser bought before this page load, as the API's coarse buckets; the count lives in
+  // localStorage alone, and goes to the API (with `nth`, this page's count) only once everyone may buy in the category.
+  const BOUGHT_KEY = "oogaboogaland.bought";
+  const boughtBefore = (() => {
+    try {
+      const n = Number(localStorage.getItem(BOUGHT_KEY));
+      return Number.isSafeInteger(n) && n > 0 ? n : 0;
+    } catch {
+      return 0;
+    }
+  })();
+  const bucket = (n) => n === 0 ? "none" : n === 1 ? "1" : n <= 5 ? "2-5" : "6+";
+  // An item's invoice: `{ request, invoice: { id, bolt11, expires } }`, Lightning only, or `{ error }` (`sign-in` when
+  // only signed-in visitors may buy, `closed`, `network`).
+  // `opts.slot`, where in the sky a firework is asked to burst, goes only to an API that says it takes one (its
+  // catalogue's `slots`, how many there are).
+  const purchase = async (category, item, opts = {}) => {
+    if (!CATEGORY.test(category) || !ITEM.test(item)) return { error: "invalid" };
+    const body = { category, item }, slots = state.catalogue?.[category]?.slots;
+    if (Number.isSafeInteger(slots) && Number.isSafeInteger(opts.slot) && opts.slot >= 0 && opts.slot < slots) body.slot = opts.slot;
+    if (state.catalogue?.[category]?.buyers === "everyone") { body.nth = Math.min(999, boughtHere + 1); body.before = bucket(boughtBefore); }
+    const r = await call("/purchases/buy", body);
+    if (r.error) return r;
+    const inv = r.invoice;
+    if (typeof r.request !== "string" || !inv || typeof inv.id !== "string" || !inv.id || typeof inv.bolt11 !== "string" || !inv.bolt11 || !isNumber(inv.expires)) return { error: "invalid" };
+    ownPurchases.add(inv.id);
+    if (ownPurchases.size > OWN_MAX) ownPurchases.delete(ownPurchases.values().next().value);
+    return { request: r.request, invoice: { id: inv.id, bolt11: inv.bolt11, expires: inv.expires } };
+  };
+  // What the signed-in visitor has bought in `category` (or every category without one): `{ items: { firework: { mega:
+  // { quantity, sats } … } } }`, or `{ error }`.
+  const purchaseTotals = async (category) => {
+    const r = await call("/purchases/mine", category ? { category } : {});
+    if (r.error) return r;
+    if (!r.items || typeof r.items !== "object" || Array.isArray(r.items)) return { error: "invalid" };
+    const items = {};
+    for (const [cat, list] of Object.entries(r.items)) {
+      if (!CATEGORY.test(cat) || !list || typeof list !== "object") continue;
+      const kept = {};
+      for (const [item, e] of Object.entries(list)) if (ITEM.test(item) && e && Number.isSafeInteger(e.quantity) && e.quantity > 0 && Number.isSafeInteger(e.sats) && e.sats >= 0) kept[item] = { quantity: e.quantity, sats: e.sats };
+      items[cat] = kept;
+    }
+    return { items };
+  };
+  // A paid purchase, once: this browser's count goes up when it was this page's own, and a firework goes to the scenes.
+  const heardPurchase = (id, firework) => {
+    if (playedPurchases.includes(id)) return;
+    playedPurchases[playedPurchaseAt] = id;
+    playedPurchaseAt = (playedPurchaseAt + 1) % PURCHASE_PLAYED;
+    const mine = ownPurchases.delete(id);
+    if (mine) {
+      boughtHere++;
+      try { localStorage.setItem(BOUGHT_KEY, String(boughtBefore + boughtHere)); } catch { /* the count is a convenience */ }
+    }
+    if (firework && handlers.firework) handlers.firework({ ...firework, mine });
+  };
+  // Without an API, the stand's purchase plays as if paid, on this page alone: its own id, the API's lead, and the slot
+  // the buyer chose, or none (the page picks the next one round the arc).
+  const simulateFirework = (kind, id = `sim-firework-${randomId()}`, slot = null) => {
+    if (real || !FIREWORK_KINDS.includes(kind)) return null;
+    ownPurchases.add(id);
+    const at = Number.isSafeInteger(slot) && slot >= 0 && slot < FIREWORK_SLOTS ? slot : null;
+    heardPurchase(id, { id, kind, slot: at, launchAt: serverNow() + FIREWORK_LEAD_MS, login: BL.net?.state.me?.login || null });
+    return id;
+  };
+
   const onMessage = (text) => {
     let data;
     try {
@@ -213,6 +320,7 @@
       if (NETWORKS.includes(data.network)) state.network = data.network;
       const limits = limitsOf(data.limits);
       if (data.limits === null || limits) state.limits = limits;
+      state.catalogue = catalogueOf(data.catalogue);
       if (state.recent?.some((entry) => entry.message && entry.sats < messageMinSats())) {
         state.recent = state.recent.map((entry) => entry.message && entry.sats < messageMinSats() ? { ...entry, message: "" } : entry);
       }
@@ -255,6 +363,22 @@
       state.board = boardOf(data.entries);
       state.boardSats = Array.isArray(data.satsEntries) ? boardOf(data.satsEntries) : null;
       if (handlers.board) handlers.board(state.board);
+      notify();
+    } else if (data.type === "purchase") {
+      // Every category's purchases come to every page; only fireworks have an experience here yet.
+      if (typeof data.id !== "string" || !data.id || data.id.length > 64 || typeof data.category !== "string" || !CATEGORY.test(data.category)
+        || typeof data.item !== "string" || !ITEM.test(data.item) || !Number.isSafeInteger(data.quantity) || data.quantity < 1 || !isNumber(data.at) || data.login !== null && typeof data.login !== "string") return;
+      clockSample(data.at);
+      const firework = data.category === FIREWORK ? fireworkOf(data) : null;
+      if (data.category === FIREWORK && !firework) return;
+      heardPurchase(data.id, firework);
+    } else if (data.type === "purchaseCounts" && typeof data.category === "string" && CATEGORY.test(data.category) && Number.isSafeInteger(data.days) && data.days > 0 && data.items && typeof data.items === "object") {
+      const items = {};
+      for (const [item, n] of Object.entries(data.items)) if (ITEM.test(item) && Number.isSafeInteger(n) && n >= 0) items[item] = n;
+      state.purchaseCounts = { ...state.purchaseCounts, [data.category]: { days: data.days, items } };
+      notify();
+    } else if (data.type === "purchaseBoard" && typeof data.category === "string" && CATEGORY.test(data.category) && Array.isArray(data.entries)) {
+      state.purchaseBoards = { ...state.purchaseBoards, [data.category]: purchaseBoardOf(data.entries) };
       notify();
     } else if (data.type === "tally") {
       const tally = tallyOf(data);
@@ -334,9 +458,10 @@
   };
   // Each donation reaches `onDonation(donation, bananas)`, `bananas` the API's `{ exact, rounded }` in real mode and
   // null from the simulator. In real mode `onStatus(open)`, `onPile({ bananas, eatPerHour })`, `onBoard(entries)` and
-  // `onSeen(id, sats, due, left)` follow the socket too; a seen payment may come twice.
-  const subscribe = (onDonation, { identity: who = () => ({}), onStatus = null, onPile = null, onBoard = null, onSeen = null } = {}) => {
-    Object.assign(handlers, { donation: onDonation, status: onStatus, pile: onPile, board: onBoard, seen: onSeen });
+  // `onSeen(id, sats, due, left)` follow the socket too; a seen payment may come twice. Each paid firework reaches
+  // `onFirework(firework)`, once.
+  const subscribe = (onDonation, { identity: who = () => ({}), onStatus = null, onPile = null, onBoard = null, onSeen = null, onFirework = null } = {}) => {
+    Object.assign(handlers, { donation: onDonation, status: onStatus, pile: onPile, board: onBoard, seen: onSeen, firework: onFirework });
     identity = who;
     subscribed = true;
     begin();
@@ -368,5 +493,5 @@
   // The test network real donations are paid on (signet on staging), or "" for mainnet, before the API has said, and
   // when simulated.
   const testNetwork = () => real && state.network && state.network !== "mainnet" ? state.network : "";
-  BL.donations = { config, get real() { return real; }, get testNetwork() { return testNetwork(); }, get messageMinSats() { return messageMinSats(); }, state, useOrigin, createRequest, invoice, note, onchain, waitFor, waitingOn, waited, receivedOwnInvoice, subscribe, subscribeState, sanitize, carried, HANDLE_MAX, MESSAGE_MAX, MESSAGE_MIN_SATS, RECENT_MAX };
+  BL.donations = { config, get real() { return real; }, get testNetwork() { return testNetwork(); }, get messageMinSats() { return messageMinSats(); }, state, useOrigin, createRequest, invoice, note, onchain, waitFor, waitingOn, waited, receivedOwnInvoice, purchase, purchaseTotals, simulateFirework, serverNow, subscribe, subscribeState, sanitize, carried, HANDLE_MAX, MESSAGE_MAX, MESSAGE_MIN_SATS, RECENT_MAX, FIREWORK, FIREWORK_KINDS };
 })();

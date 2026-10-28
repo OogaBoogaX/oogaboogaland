@@ -32,6 +32,9 @@
   const NO_OBJECT_CLIP = new Float32Array([0, 0, 0, -1]);
   const NO_OBJECT_SLAB = new Float32Array(4);
   const NO_SPOT_LIGHT = new Float32Array(12);
+  const NO_FLASH = new Float32Array(8), NO_GLINTS = new Float32Array(32);
+  // Sprites (fireworks) let go of their GPU buffer after this long without one to draw.
+  const SPRITE_IDLE_MS = 30000;
   // MAX_PIXELS caps the pixel ratio to bound buffer memory.
   const MAX_PIXELS = 2.6e6;
   const DEFAULT_LIGHT = { x: 0.45, y: 0.85, z: 0.3 };
@@ -431,6 +434,8 @@ uniform float uShadowTexel;
 uniform vec4 uLights[64];
 uniform int uLightCount;
 uniform vec4 uSpotLight[3];
+uniform vec4 uFlash;
+uniform vec4 uFlashPos;
 ${VIEW_DIRECTION_GLSL}
 uniform vec3 uFog;
 uniform vec2 uFogRange;
@@ -647,6 +652,11 @@ vec3 lightFactorAt(vec3 n) {
       float energy = cone * fade * fade / (1.0 + 0.005 * dist * dist);
       factor += uSpotLight[2].rgb * energy * max(dot(n, -direction), 0.0);
     }
+  }
+  // Fireworks over the sea light whatever faces them while a burst burns; off (w 0) at rest.
+  if (uFlash.w > 0.0) {
+    vec3 fd = normalize(uFlashPos.xyz - vWorld);
+    factor += uFlash.rgb * (max(dot(n, fd), 0.0) * 0.85 + 0.15);
   }
   return factor;
 }
@@ -1095,7 +1105,7 @@ void main() {
   const ORDINARY_MESH_FS = derive(MESH_FS, ["flat in vec4 vVoxel;", "uniform vec4 uVoxel;"], [/\bvVoxel\b/g, "uVoxel"]);
   // The camera's depth pre-pass: the mesh shader's cuts and nothing else, the rest compiled away.
   const DEPTH_MESH_FS = ORDINARY_MESH_FS.slice(0, ORDINARY_MESH_FS.indexOf("void main() {")) + "void main() {\n  if (clipped()) discard;\n}";
-  const MESH_UNIFORMS = ["uRigCount", "uRigPass", "uRigMatrices", "uRigParams", "uRigVoxels", "uRigVisibility", "uViewProj", "uLightViewProj", "uEye", "uViewDirection", "uLightDir", "uSky", "uGround", "uSun", "uDirectStrength", "uAmbientFloor", "uDiffuseFloor", "uShadowStrength", "uShadowFloor", "uShadowBias", "uShadow", "uShadowTexel", "uLights", "uLightCount", "uSpotLight", "uFog", "uFogRange", "uMatrixParams", "uMatrixOrigin", "uMatrixGlyph", "uMatrixCave", "uMatrixCaves", "uMatrixCaveBounds", "uMatrixCaveNear", "uMatrixPermanentCave", "uMatrixPermanentPlane", "uMatrixPermanentAperture", "uMatrixLivingGlobal", "uMatrixGlyphTex", "uMatrixSamples", "uClipMinY", "uClipMaxY", "uObjectClip", "uObjectSlab", "uObjectSlab2", "uProjective", "uMatrixGlyphOpacity", "uGlassOpacity", "uVoxel", "uWindTime", "uSway", "uSwing", "uGlass", "uLightBeam", "uLakeWaveCount", "uLakeWaves", "uLakeSurface", "uLakeSuction", "uLakeFlowEnabled", "uLakeFlowU", "uLakeFlowV", "uLakeCharge", "uLakeChargeRise", "uLakeChargeCenter", "uLakeOcclude", "uLakeWaveEnd", "uLakeBodyShape", "uLakeBodyBend", "uDSBSurface", "uDSBDepth", "uDSBEnvironment", "uCanvasSurface", "uCanvasImage", "uCanvasRect", "uCanvasCurve", "uCanvasBackground", "uCanvasScale", "uCanvasAtlas", "uCanvasAtlasMin", "uCanvasAtlasMax"];
+  const MESH_UNIFORMS = ["uRigCount", "uRigPass", "uRigMatrices", "uRigParams", "uRigVoxels", "uRigVisibility", "uViewProj", "uLightViewProj", "uEye", "uViewDirection", "uLightDir", "uSky", "uGround", "uSun", "uDirectStrength", "uAmbientFloor", "uDiffuseFloor", "uShadowStrength", "uShadowFloor", "uShadowBias", "uShadow", "uShadowTexel", "uLights", "uLightCount", "uSpotLight", "uFlash", "uFlashPos", "uFog", "uFogRange", "uMatrixParams", "uMatrixOrigin", "uMatrixGlyph", "uMatrixCave", "uMatrixCaves", "uMatrixCaveBounds", "uMatrixCaveNear", "uMatrixPermanentCave", "uMatrixPermanentPlane", "uMatrixPermanentAperture", "uMatrixLivingGlobal", "uMatrixGlyphTex", "uMatrixSamples", "uClipMinY", "uClipMaxY", "uObjectClip", "uObjectSlab", "uObjectSlab2", "uProjective", "uMatrixGlyphOpacity", "uGlassOpacity", "uVoxel", "uWindTime", "uSway", "uSwing", "uGlass", "uLightBeam", "uLakeWaveCount", "uLakeWaves", "uLakeSurface", "uLakeSuction", "uLakeFlowEnabled", "uLakeFlowU", "uLakeFlowV", "uLakeCharge", "uLakeChargeRise", "uLakeChargeCenter", "uLakeOcclude", "uLakeWaveEnd", "uLakeBodyShape", "uLakeBodyBend", "uDSBSurface", "uDSBDepth", "uDSBEnvironment", "uCanvasSurface", "uCanvasImage", "uCanvasRect", "uCanvasCurve", "uCanvasBackground", "uCanvasScale", "uCanvasAtlas", "uCanvasAtlasMin", "uCanvasAtlasMax"];
   const ORDINARY_SHADOW_VS = derive(SHADOW_VS, [RIG_GLSL, ""], ["rigMatrix(mat4(aM0, aM1, aM2, aM3))", "mat4(aM0, aM1, aM2, aM3)"],
     ["layout(location=6) in vec4 aM3;\n\n", "layout(location=6) in vec4 aM3;\n"]);
   const LINE_VS = `#version 300 es
@@ -1472,6 +1482,9 @@ uniform float uHazeDrop;
 uniform float uClouds;
 uniform vec4 uSea;
 uniform vec2 uSeaEye;
+// Fireworks: the four brightest bursts (xyz, strength), then their colours; none at rest.
+uniform vec4 uGlints[8];
+uniform int uGlintCount;
 layout(location=0) out vec4 oColor;
 layout(location=1) out vec4 oBright;
 float hash(vec2 p) {
@@ -1530,6 +1543,7 @@ void main() {
       stars = mix(vec3(1.0), vec3(0.75, 0.85, 1.0), h3) * s;
     }
   }
+  vec3 glint = vec3(0.0), glow = vec3(0.0);
   // The sea far below the island: the view ray meets a level plane, waves from two drifting noise fields bend
   // its normal, the sky reflects by Fresnel, the sun glints, crests foam, and it hazes into the horizon.
   if (uSea.x > 0.0 && d.y < -0.0005) {
@@ -1553,7 +1567,25 @@ void main() {
     // Haze by distance, pushed out by however far the eye climbs past island heights, so a dive from altitude
     // still sees blue sea below instead of a sheet of horizon colour; at island heights nothing changes.
     float lift = max(0.0, uSea.z - uSea.y - 120.0);
+    // A bright firework lays a glittering path across the waves, from under its reflection toward the horizon, as the
+    // moon does on a rough sea: seen from the island even where the reflection itself lies too steeply below.
+    if (uGlintCount > 0) {
+      vec2 cell = floor(p * 0.7);
+      float sparkle = pow(hash(cell + floor(uTime * 9.0 + hash(cell) * 4.0)), 7.0) * 3.0 + 0.2;
+      vec2 dh = normalize(d.xz);
+      for (int i = 0; i < 4; i++) {
+        if (i >= uGlintCount) break;
+        vec4 gp = uGlints[i];
+        vec3 m = normalize(vec3(gp.x - uSeaEye.x, 2.0 * uSea.y - gp.y - uSea.z, gp.z - uSeaEye.y));
+        float az = acos(clamp(dot(dh, normalize(m.xz)), -1.0, 1.0));
+        float span = smoothstep(m.y * 1.15, m.y * 0.85, d.y) * (1.0 - smoothstep(-0.015, 0.0, d.y));
+        glint += uGlints[i + 4].rgb * gp.w * exp(-az * az / 0.0012) * span * mix(0.3, 1.0, clamp(d.y / m.y, 0.0, 1.0));
+      }
+      glint *= sparkle * 0.16;
+      water += glint;
+    }
     col = mix(water, uHorizon, smoothstep(160.0 + lift * 1.2, 900.0 + lift * 2.5, t));
+    glint *= 1.0 - smoothstep(160.0 + lift * 1.2, 900.0 + lift * 2.5, t);
   }
   // Painted cumulus on a plane over the world, drifting with time: lit toward the sun, grey underneath,
   // taking the horizon's colour at dusk and dimming to the night sky. They thin out toward the horizon.
@@ -1572,8 +1604,111 @@ void main() {
     moon *= 1.0 - cover;
     stars *= 1.0 - cover;
   }
-  oColor = vec4(col + sun + moon + stars, 1.0);
-  oBright = vec4(uSun * sunDisc * 0.6 + moon * 0.5 + stars * 0.35, 1.0);
+  // The sky lit round each bright firework, the smoke and haze it hangs in.
+  for (int i = 0; i < 4; i++) {
+    if (i >= uGlintCount) break;
+    vec4 gp = uGlints[i];
+    float f = max(dot(d, normalize(gp.xyz - vec3(uSeaEye.x, uSea.z, uSeaEye.y))), 0.0);
+    glow += uGlints[i + 4].rgb * gp.w * (pow(f, 5.0) * 0.5 + pow(f, 30.0) * 0.9) * 0.02;
+  }
+  oColor = vec4(col + sun + moon + stars + glow, 1.0);
+  oBright = vec4(uSun * sunDisc * 0.6 + moon * 0.5 + stars * 0.35 + glint * 0.5 + glow * 0.3, 1.0);
+}`;
+  // Fireworks (`opts.sprites`, see fireworks.js): each sprite an indexed quad facing the camera and stretched along
+  // the motion it shows across the view ray, so a spark draws its own streak. Its whole flight comes from its launch
+  // state: aA origin and launch time, aB velocity and life, aC colour and half size, aD drag, gravity, trail delay
+  // and kind (0 star, 1 glitter, 2 electric, 3 rocket head, 4 spark, 5 a pattern's star). Additive, depth-tested,
+  // never writing depth.
+  // A sprite's size on screen is clamped between uMinPx and uMaxPx, dimmed to keep its light when grown.
+  const SPRITE_VS = `#version 300 es
+precision highp float;
+layout(location=0) in vec2 aCorner;
+layout(location=1) in vec4 aA;
+layout(location=2) in vec4 aB;
+layout(location=3) in vec4 aC;
+layout(location=4) in vec4 aD;
+uniform mat4 uViewProj;
+uniform vec3 uUp, uFwd, uEye;
+uniform float uTime, uPpm, uMaxPx, uMinPx, uStreak;
+uniform vec2 uFogRange;
+out vec2 vLocal;
+out float vHalf, vS;
+out vec3 vCol;
+float hash(float x) { return fract(sin(x) * 43758.5453); }
+void main() {
+  float age = uTime - aA.w - aD.z, life = aB.w, k = aD.x, g = aD.y, kind = aD.w;
+  if (age < 0.0 || age > life) { gl_Position = vec4(0.0, 0.0, 2.0, 1.0); vLocal = vec2(0.0); vHalf = 0.0; vS = 1.0; vCol = vec3(0.0); return; }
+  float e = k > 1e-3 ? (1.0 - exp(-k * age)) / k : age;
+  vec3 p = aA.xyz + aB.xyz * e;
+  p.y -= g * (k > 1e-3 ? (age - e) / k : 0.5 * age * age);
+  float l = age / life;
+  float seed = aB.x * 0.137 + aB.z * 0.731 + aA.x * 0.0173 + aA.y * 0.0291 + aA.w * 1.31;
+  vec3 col = aC.rgb;
+  float b;
+  if (kind < 0.5 || kind > 4.5) {
+    // A star: white-hot as it opens, cooling to its colour and warmer as it fades. A pattern's star (5, the ₿ and
+    // its ring) holds full brightness for half its life so the shape reads, then fades.
+    b = (kind > 4.5 ? 1.0 - smoothstep(0.5, 1.0, l) : pow(1.0 - l, 1.2)) * mix(0.12, 1.0, smoothstep(0.0, 0.28, age));
+    col = mix(col, vec3(max(col.r, max(col.g, col.b))), exp(-age * 10.0) * 0.6);
+    col *= mix(vec3(1.0), vec3(1.0, 0.5, 0.28), l * 0.6);
+  } else if (kind < 1.5) {
+    // Glitter: steady, then twinkling as it falls.
+    float tw = step(0.55, hash(seed + floor(uTime * 20.0)));
+    b = pow(1.0 - l, 0.7) * mix(1.0, tw * 2.0, smoothstep(0.12, 0.4, l)) * smoothstep(0.0, 0.35, age);
+    col *= mix(vec3(1.0), vec3(1.0, 0.6, 0.35), l * 0.5);
+  } else if (kind < 2.5) {
+    // Electric: a hard flicker.
+    b = (0.25 + 0.75 * step(0.35, hash(seed + floor(uTime * 30.0)))) * pow(1.0 - l, 0.6);
+  } else if (kind < 3.5) {
+    b = 1.0 - l * 0.4;
+  } else {
+    b = (1.0 - l) * (1.0 - l);
+    col *= mix(vec3(1.0), vec3(1.0, 0.45, 0.2), l);
+  }
+  float ek = exp(-k * age);
+  vec3 vel = k > 1e-3 ? aB.xyz * ek - vec3(0.0, g * (1.0 - ek) / k, 0.0) : aB.xyz - vec3(0.0, g * age, 0.0);
+  vec3 toP = p - uEye;
+  float dist = length(toP);
+  vec3 vd = toP / max(dist, 1e-3);
+  vec3 across = vel - dot(vel, vd) * vd;
+  float speed = length(across);
+  vec3 axis = speed > 1e-3 ? across / speed : uUp;
+  vec3 side = normalize(cross(vd, axis));
+  float depth = max(dot(toP, uFwd), 0.5);
+  float px = aC.w * uPpm / depth;
+  float shown = clamp(px, uMinPx, uMaxPx);
+  b *= min(1.0, px * px / (shown * shown));
+  float s = shown * depth / uPpm;
+  float tail = min(speed * uStreak, s * 5.0) * 0.5;
+  b *= sqrt(s / (s + tail));
+  b *= 1.0 - smoothstep(uFogRange.x, uFogRange.y, dist);
+  vec2 local = vec2(aCorner.x * s, aCorner.y * (s + tail));
+  gl_Position = uViewProj * vec4(p - axis * tail + side * local.x + axis * local.y, 1.0);
+  vLocal = local;
+  vHalf = tail;
+  vS = s;
+  vCol = col * b;
+}`;
+  const SPRITE_FS = `#version 300 es
+precision highp float;
+in vec2 vLocal;
+in float vHalf, vS;
+in vec3 vCol;
+uniform float uColorGain, uBrightGain;
+layout(location=0) out vec4 oColor;
+layout(location=1) out vec4 oBright;
+void main() {
+  // A capsule: round at the head, fading along the streak to the tail.
+  float yy = max(abs(vLocal.y) - vHalf, 0.0);
+  float d2 = (vLocal.x * vLocal.x + yy * yy) / (vS * vS);
+  float halo = max(0.0, 1.0 - d2);
+  halo *= halo;
+  float along = vHalf > 1e-4 ? clamp((vLocal.y + vHalf) / (2.0 * vHalf), 0.0, 1.0) : 1.0;
+  vec3 c = vCol * (halo * 0.5 + exp(-d2 * 10.0) * 1.5) * mix(0.12, 1.0, along * along);
+  // The colour target is 8-bit, so each sprite's light rolls off on its own curve before it adds: a fading spark
+  // keeps its colour while a white-hot one tops out, instead of the dim ones vanishing. The glow stays linear.
+  oColor = vec4(c / (1.0 + c) * uColorGain, 0.0);
+  oBright = vec4(c * uBrightGain, 0.0);
 }`;
   const BLUR_FS = `#version 300 es
 precision highp float;
@@ -1839,6 +1974,118 @@ void main() {
       mirror.programReady = true;
       return true;
     };
+    // Fireworks' sprites: a program compiled the first time a scene hands over a batch, and one instance buffer the
+    // batch's size, both rebuilt on demand and the buffer let go after SPRITE_IDLE_MS without a batch to draw.
+    const sprite = { program: null, ready: false, vao: null, quad: null, index: null, buffer: null, capacity: 0, source: null, version: -1, usedAt: 0, drawn: 0 };
+    const ensureSpriteProgram = () => {
+      if (!sprite.program) sprite.program = compile(SPRITE_VS, SPRITE_FS, ["uViewProj", "uUp", "uFwd", "uEye", "uTime", "uPpm", "uMaxPx", "uMinPx", "uStreak", "uFogRange", "uColorGain", "uBrightGain"]);
+      if (sprite.ready) return true;
+      if (parallel && !gl.getProgramParameter(sprite.program.prog, parallel.COMPLETION_STATUS_KHR)) return false;
+      finishProgram(sprite.program);
+      sprite.ready = true;
+      return true;
+    };
+    const releaseSpriteBuffers = () => {
+      if (sprite.vao) gl.deleteVertexArray(sprite.vao);
+      for (const b of [sprite.quad, sprite.index, sprite.buffer]) if (b) gl.deleteBuffer(b);
+      sprite.vao = sprite.quad = sprite.index = sprite.buffer = sprite.source = null;
+      sprite.capacity = 0;
+      sprite.version = -1;
+    };
+    const destroySprites = () => {
+      releaseSpriteBuffers();
+      if (sprite.program) {
+        for (const sh of sprite.program.shaders) gl.deleteShader(sh);
+        gl.deleteProgram(sprite.program.prog);
+      }
+      sprite.program = null;
+      sprite.ready = false;
+    };
+    // Bring the GPU copy up to the batch: only what was written since the last frame, or every live run after the
+    // buffer was (re)made, the batch reallocated, or more runs were written than its dirty list holds.
+    const uploadSprites = (batch) => {
+      let full = batch.dirtyAll || sprite.source !== batch || sprite.version !== batch.version;
+      if (!sprite.buffer || sprite.capacity !== batch.capacity) {
+        releaseSpriteBuffers();
+        sprite.vao = gl.createVertexArray();
+        gl.bindVertexArray(sprite.vao);
+        sprite.quad = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, sprite.quad);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, 1, 1, -1, 1]), gl.STATIC_DRAW);
+        gl.enableVertexAttribArray(0);
+        gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+        gl.vertexAttribDivisor(0, 0);
+        sprite.index = gl.createBuffer();
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, sprite.index);
+        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array([0, 1, 2, 0, 2, 3]), gl.STATIC_DRAW);
+        sprite.buffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, sprite.buffer);
+        gl.bufferData(gl.ARRAY_BUFFER, batch.capacity * 64, gl.DYNAMIC_DRAW);
+        for (let i = 1; i <= 4; i++) { gl.enableVertexAttribArray(i); gl.vertexAttribDivisor(i, 1); }
+        gl.bindVertexArray(null);
+        sprite.capacity = batch.capacity;
+        full = true;
+      }
+      gl.bindBuffer(gl.ARRAY_BUFFER, sprite.buffer);
+      if (full) {
+        for (let i = 0; i < batch.rangeCount; i++) {
+          const from = batch.ranges[i * 2], n = batch.ranges[i * 2 + 1];
+          if (n > 0) gl.bufferSubData(gl.ARRAY_BUFFER, from * 64, batch.data, from * 16, n * 16);
+        }
+      } else {
+        for (let i = 0; i < batch.dirtyCount; i++) {
+          const from = batch.dirty[i * 2], to = batch.dirty[i * 2 + 1];
+          gl.bufferSubData(gl.ARRAY_BUFFER, from * 64, batch.data, from * 16, (to - from) * 16);
+        }
+      }
+      batch.dirtyCount = 0;
+      batch.dirtyAll = false;
+      sprite.source = batch;
+      sprite.version = batch.version;
+    };
+    const SPRITE_UP = new Float32Array(3), SPRITE_FWD = new Float32Array(3);
+    const drawSprites = (batch, camera, fogA, fogB) => {
+      sprite.drawn = 0;
+      if (!ensureSpriteProgram()) return;
+      uploadSprites(batch);
+      const sp = sprite.program;
+      gl.useProgram(sp.prog);
+      gl.uniformMatrix4fv(sp.u.uViewProj, false, viewProj);
+      // The view's up and forward, from the view matrix's rows; the quads are built from them.
+      SPRITE_UP[0] = view[1]; SPRITE_UP[1] = view[5]; SPRITE_UP[2] = view[9];
+      SPRITE_FWD[0] = -view[2]; SPRITE_FWD[1] = -view[6]; SPRITE_FWD[2] = -view[10];
+      gl.uniform3fv(sp.u.uUp, SPRITE_UP);
+      gl.uniform3fv(sp.u.uFwd, SPRITE_FWD);
+      gl.uniform3f(sp.u.uEye, camera.position.x, camera.position.y, camera.position.z);
+      gl.uniform1f(sp.u.uTime, batch.time);
+      // Pixels per metre at unit depth; sizes on screen are clamped against the 1270-pixel frame they were tuned on.
+      const ppm = ph / (2 * Math.tan(camera.fov / 2)), scale = ph / 1270;
+      gl.uniform1f(sp.u.uPpm, ppm);
+      gl.uniform1f(sp.u.uMaxPx, 12 * scale);
+      gl.uniform1f(sp.u.uMinPx, 1.1 * Math.max(scale, 0.75));
+      gl.uniform1f(sp.u.uStreak, 0.05);
+      gl.uniform2f(sp.u.uFogRange, fogA, fogB);
+      gl.uniform1f(sp.u.uColorGain, batch.colorGain);
+      gl.uniform1f(sp.u.uBrightGain, batch.brightGain);
+      gl.bindVertexArray(sprite.vao);
+      gl.bindBuffer(gl.ARRAY_BUFFER, sprite.buffer);
+      gl.enable(gl.BLEND);
+      gl.blendFuncSeparate(gl.ONE, gl.ONE, gl.ZERO, gl.ONE);
+      gl.depthMask(false);
+      gl.disable(gl.CULL_FACE);
+      for (let i = 0; i < batch.rangeCount; i++) {
+        const from = batch.ranges[i * 2], n = batch.ranges[i * 2 + 1];
+        if (n <= 0) continue;
+        for (let a = 0; a < 4; a++) gl.vertexAttribPointer(1 + a, 4, gl.FLOAT, false, 64, from * 64 + a * 16);
+        gl.drawElementsInstanced(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0, n);
+        sprite.drawn += n;
+      }
+      gl.enable(gl.CULL_FACE);
+      gl.depthMask(true);
+      gl.disable(gl.BLEND);
+      gl.bindVertexArray(null);
+      sprite.usedAt = performance.now();
+    };
     const buildPrograms = () => {
       ready = false;
       failure = null;
@@ -1852,7 +2099,7 @@ void main() {
         foliageShadow: compile(FOLIAGE_SHADOW_VS, FOLIAGE_SHADOW_FS, MESH_UNIFORMS),
         shadow: compile(ORDINARY_SHADOW_VS, SHADOW_FS, ["uRigCount", "uRigPass", "uRigMatrices", "uRigVisibility", "uLightViewProj", "uClipMinY", "uClipMaxY", "uObjectClip"]),
         line: compile(LINE_VS, LINE_FS, ["uViewProj", "uViewport", "uWidth", "uClipMaxY", "uObjectClip"]),
-        sky: compile(QUAD_VS, SKY_FS, ["uInvViewProj", "uHorizon", "uZenith", "uSun", "uSunDir", "uMoonDir", "uMoonSunDir", "uStarMatrix", "uStars", "uTime", "uHazeDrop", "uClouds", "uSea", "uSeaEye"]),
+        sky: compile(QUAD_VS, SKY_FS, ["uInvViewProj", "uHorizon", "uZenith", "uSun", "uSunDir", "uMoonDir", "uMoonSunDir", "uStarMatrix", "uStars", "uTime", "uHazeDrop", "uClouds", "uSea", "uSeaEye", "uGlints", "uGlintCount"]),
         blur: compile(QUAD_VS, BLUR_FS, ["uTex", "uDir"]),
         composite: compile(QUAD_VS, COMPOSITE_FS, ["uScene", "uBloom", "uBloomWide", "uBloomStrength", "uDepth", "uShaft", "uShaftColor"])
       };
@@ -3212,6 +3459,10 @@ void main() {
       lost = true;
       destroyInstanceStream();
       imageTextures = rippleBodyTextures = 0;
+      sprite.program = sprite.vao = sprite.quad = sprite.index = sprite.buffer = sprite.source = null;
+      sprite.ready = false;
+      sprite.capacity = 0;
+      sprite.version = -1;
       for (const rec of records.values()) { rec.imageTexture = rec.rippleBodyTexture = rec.rippleBodyState = null; rec.imageElement = null; }
       forgetMirror();
     };
@@ -4128,7 +4379,11 @@ void main() {
         fogFar = 0,
         matrix = null,
         clouds = 0,
-        sea = null
+        sea = null,
+        sprites = null,
+        flash = NO_FLASH,
+        glints = NO_GLINTS,
+        glintCount = 0
       } = opts;
       skyHaze=opts.hazeDrop===undefined?1:opts.hazeDrop;
       if(dsbGPU && dsbGPU.state!==opts.dsbWater){dsbGPU.dispose();dsbGPU=null;}
@@ -4168,6 +4423,8 @@ void main() {
         gl.uniform1f(pg.sky.u.uClouds, clouds);
         gl.uniform4f(pg.sky.u.uSea, sea === null ? 0 : 1, sea === null ? 0 : sea, camera.position.y, 0);
         gl.uniform2f(pg.sky.u.uSeaEye, camera.position.x, camera.position.z);
+        gl.uniform4fv(pg.sky.u.uGlints, glints);
+        gl.uniform1i(pg.sky.u.uGlintCount, glintCount);
       }
       // Set the light back far enough to bracket the shadowed volume.
       const lightDist = shadowExtent * 1.8, lightDepth = shadowExtent * 1.5;
@@ -4393,6 +4650,8 @@ void main() {
         if (nLights) gl.uniform4fv(mp.u.uLights, lights, 0, nLights * 8);
         gl.uniform1i(mp.u.uLightCount, nLights);
         gl.uniform4fv(mp.u.uSpotLight, spotLight);
+        gl.uniform4f(mp.u.uFlash, flash[4], flash[5], flash[6], flash[3]);
+        gl.uniform4f(mp.u.uFlashPos, flash[0], flash[1], flash[2], 0);
         gl.uniform3fv(mp.u.uFog, fogColor);
         gl.uniform2f(mp.u.uFogRange, fogA, fogB);
         // With no matrix running these resolve to the same constants — its readers stay unreachable behind
@@ -4464,6 +4723,11 @@ void main() {
       gl.disable(gl.CULL_FACE);
       drawParts("line", "line", false, true);
       gl.enable(gl.CULL_FACE);
+      if (sprites && sprites.rangeCount > 0 && sprites.data) drawSprites(sprites, camera, fogA, fogB);
+      else {
+        sprite.drawn = 0;
+        if (sprite.buffer && performance.now() - sprite.usedAt > SPRITE_IDLE_MS) releaseSpriteBuffers();
+      }
       if (f.samples > 0) blit(f);
       gl.disable(gl.DEPTH_TEST);
       const bw = f.bloomW, bh = f.bloomH;
@@ -4566,6 +4830,7 @@ void main() {
       destroyMirror();
       destroyFbo();
       destroyShadow();
+      destroySprites();
       if (res.matrixTexture) gl.deleteTexture(res.matrixTexture);
       for (const p of Object.values(res.programs)) gl.deleteProgram(p.prog);
       if (rigPrograms) {
@@ -4659,7 +4924,7 @@ void main() {
       get stats() {
         let shadowFinite = true;
         for (let i = 0; i < 16; i++) if (!Number.isFinite(lightViewProj[i])) shadowFinite = false;
-        return { instanceStreamCPUBytes: instanceStream.data ? instanceStream.data.byteLength : 0, instanceStreamGPUBytes: instanceStream.buffer ? instanceStream.capacity * 4 * 6 : 0, waterTextures: dsbGPU?2:0, records: records.size, active: activeRecords.length, mirrorResources: mirrorDebug.resources, imageTextures, rippleBodyTextures, shadowResources: res.shadow ? 4 : 0, shadowSize: res.shadow ? res.shadow.size : 0, shadowPassCount, shadowFinite, shadowDraws, shadowStatic: shadowStaticValid ? shadowBakedCount : 0, shadowStaticRebuilds, culled, drawn, suppressed, smallCulled, rippleSurfaces, rippleWaves };
+        return { instanceStreamCPUBytes: instanceStream.data ? instanceStream.data.byteLength : 0, instanceStreamGPUBytes: instanceStream.buffer ? instanceStream.capacity * 4 * 6 : 0, waterTextures: dsbGPU?2:0, records: records.size, active: activeRecords.length, mirrorResources: mirrorDebug.resources, imageTextures, rippleBodyTextures, shadowResources: res.shadow ? 4 : 0, shadowSize: res.shadow ? res.shadow.size : 0, shadowPassCount, shadowFinite, shadowDraws, shadowStatic: shadowStaticValid ? shadowBakedCount : 0, shadowStaticRebuilds, culled, drawn, suppressed, smallCulled, rippleSurfaces, rippleWaves, spriteProgram: sprite.ready, spriteBuffer: !!sprite.buffer, spritesDrawn: sprite.drawn };
       },
       get mirror() {
         return mirrorDebug;
