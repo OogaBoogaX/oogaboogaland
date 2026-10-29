@@ -889,8 +889,22 @@
     }
     window.BL.buildTasks.measure(() => enter(first, place));
     mark("ready");
-    tierFromBoot(window.BL.buildTasks.cpu - constructionCPU);
+    // A restored island counts as the build it replaced, so the cache never starts a device a tier higher.
+    tierFromBoot(window.BL.buildTasks.cpu - constructionCPU + (window.BL.terrainCache?.stats.credit || 0));
     raf = window.requestAnimationFrame(frame);
+    if (terrainController && window.BL.terrainCache?.stats.lastSource === "miss") fillTerrain();
+  };
+  // After a cache miss the island was built here as usual; at idle, never during a transition, the Worker builds the
+  // snapshot and stores it for the next visit. Nothing waits on it, and nothing happens without a miss to fill.
+  const fillTerrain = () => {
+    const idle = typeof window.requestIdleCallback === "function";
+    const start = () => {
+      if (destroyed) return;
+      if (transition) { schedule(); return; }
+      window.BL.terrainCache.fill(terrainController.signal)?.catch(() => {});
+    };
+    const schedule = () => (idle ? window.requestIdleCallback(start, { timeout: 2000 }) : window.setTimeout(start, 1000));
+    schedule();
   };
   window.requestAnimationFrame(() => window.setTimeout(boot, 0));
   if (DEBUG) {

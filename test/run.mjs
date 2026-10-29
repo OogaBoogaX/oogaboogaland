@@ -21336,7 +21336,44 @@ const listenOnlyMicStatusProof = async () => {
   return {listening,listeningAlone,listeningMuted,afterDrop,speakerAlone,speakerMuted,speakerOn,back};
 };
 
-// terrain-snapshot.js is a hand-kept copy of terrain.js's queries, for the opt-in Worker build. The flag-off island
+// terrain-cache.js under an in-memory IndexedDB and a stand-in Worker: a boot miss must not wait on the Worker (it starts
+// none; the page builds as usual and fills the cache later, once), a hit must count as the build it replaced for the
+// boot-quality probe, and missing storage must skip the cache entirely.
+const terrainCacheChecks = async () => {
+  const source = readFileSync(join(root, "src/js/terrain-cache.js"), "utf8"), build = "a".repeat(64);
+  const boot = (records, storage = true) => {
+    const later = fn => setTimeout(fn, 0), workers = [];
+    const request = run => { const r = {}; later(() => { r.result = run(); r.onsuccess?.(); }); return r; };
+    const indexedDB = storage ? { open: () => { const r = {}; later(() => {
+      r.result = { close() {}, transaction: () => { const t = { abort() {} }; later(() => later(() => t.oncomplete?.()));
+        return t.store = { get: key => request(() => records.get(key)), put: value => records.set(value.key, value), delete: key => records.delete(key),
+          index: () => ({ openKeyCursor: () => request(() => null) }) }, { objectStore: () => t.store, set oncomplete(f) { t.oncomplete = f; }, set onerror(f) {}, set onabort(f) {}, abort() {} }; } };
+      r.onsuccess(); }); return r; } } : undefined;
+    class Worker { constructor() { workers.push(this); } postMessage(m) { this.sent = m; later(() => this.onmessage({ data: { type: "stored", key: m.key } })); } terminate() {} }
+    let cpu = 0, restored = 0;
+    const BL = { terrainWorker: { build, url: `/js/terrain-worker-${build.slice(0, 16)}.js` },
+      buildTasks: { measure: work => { cpu += 100; return work(); }, get cpu() { return cpu; } }, models: { withScope: (scope, work) => work() },
+      terrain: { hasIsland: () => false, restoreIslandSnapshot: () => { restored++; } } };
+    const context = { window: { BL, indexedDB }, Worker, URL, DOMException, location: { origin: "https://oogabooga.land" }, setTimeout, clearTimeout };
+    runInNewContext(source, context);
+    return { cache: BL.terrainCache, workers, restored: () => restored };
+  };
+  const options = { seed: 1, roofHole: null }, key = `${build}:${JSON.stringify(options)}`;
+  const records = new Map(), miss = boot(records);
+  const missed = await miss.cache.prepare(options, "hub"), started = miss.workers.length, filling = miss.cache.fill();
+  await filling;
+  const sent = miss.workers[0]?.sent, once = miss.cache.fill() === null;
+  records.set(key, { key, build, cpu: 1200, used: 1, snapshot: {} });
+  const hit = boot(records), restored = await hit.cache.prepare(options, "hub");
+  const none = boot(new Map(), false), unavailable = await none.cache.prepare(options, "hub");
+  const result = { missed, started, sent, stored: miss.cache.stats.stored, once, restored, credit: hit.cache.stats.credit, hitWorkers: hit.workers.length,
+    hitFill: hit.cache.fill(), unavailable, noneSource: none.cache.stats.lastSource, noneFill: none.cache.fill() };
+  record("terrain cache: a boot miss builds as usual with no Worker started and fills the cache once afterwards, a hit counts as the build it replaced, and missing storage skips the cache",
+    !missed && started === 0 && sent?.key === key && sent.build === build && result.stored === 1 && once
+      && restored === true && hit.restored() === 1 && result.credit === 1100 && result.hitWorkers === 0 && result.hitFill === null
+      && unavailable === false && result.noneSource === "unavailable" && result.noneFill === null, JSON.stringify(result));
+};
+// terrain-snapshot.js is a hand-kept copy of terrain.js's queries, for the Worker build. The directly built island
 // must keep its golden digest, and the snapshot's queries, rehydrated after a structured clone (the Worker's and
 // IndexedDB's codec), must answer exactly as the direct build does on a seeded sample of every query.
 // The golden is the island as it was built before the snapshot existed.
@@ -21814,6 +21851,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   // Sealed cave guides need the hub's seal nodes, so probes reading them stay in the browser tier.
   const island = BL.terrain.island({ seed: 1 });
   terrainParityChecks(BL, island);
+  await terrainCacheChecks();
   {
     // These real c3 roof poses must follow the same limb animation as open space.
     const solid = island.solidAt, rows = [];

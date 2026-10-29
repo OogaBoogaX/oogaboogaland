@@ -1,10 +1,16 @@
-// Default-off experiment: same-origin deterministic construction in a worker, with native structured-clone storage.
-// The cache is bounded to two snapshots of this build. A failed/unavailable cache or worker falls back to ordinary terrain.
+// Opt-in with `?terrainworker=1`, where `npm run site` packaged the Worker. A boot restores the island from IndexedDB when
+// this build stored it; a miss builds it on the main thread as usual and, once the page is ready, `fill` has a
+// same-origin Worker build the same snapshot and store it itself, so the ~28 MB never crosses to this thread. The cache
+// is read only at boot, bounded to two snapshots of this build, and skipped when storage is missing or throws. The
+// Worker loads this file too, for `write`.
 (() => {
   "use strict";
   const BL = window.BL;
-  const DB = "ooga-terrain-v1", STORE = "snapshots", LIMIT = 2, DB_TIMEOUT = 1500, BUILD_TIMEOUT = 10000;
-  const stats = { attempts: 0, hits: 0, misses: 0, workers: 0, failures: 0, cacheFailures: 0, lastSource: "", transferredBytes: 0 };
+  const DB = "ooga-terrain-v1", STORE = "snapshots", LIMIT = 2, DB_TIMEOUT = 1500, FILL_TIMEOUT = 30000;
+  // `credit` is what the boot-quality probe adds for a restored island: the build CPU the Worker measured when it
+  // stored the snapshot, less the restore's own, so a cached boot is judged on the same work as a direct one.
+  const stats = { attempts: 0, hits: 0, misses: 0, workers: 0, stored: 0, failures: 0, cacheFailures: 0, lastSource: "", credit: 0 };
+  let pending = null;
   const aborted = signal => { if (signal?.aborted) throw signal.reason || new DOMException("Terrain cancelled", "AbortError"); };
   const normalize = ({ seed = 1, roofHole = null } = {}) => {
     if (!Number.isSafeInteger(seed) || seed < 0 || seed > 0xffffffff) throw new Error("Invalid terrain seed");
@@ -34,6 +40,7 @@
     request.onsuccess = () => finish(null, request.result);
     request.onerror = request.onblocked = () => finish(new Error("Terrain storage unavailable"));
   });
+  // Rejects when storage is missing, blocked or fails; callers decide what a failure means.
   const storage = async (mode, action) => {
     let db;
     try {
@@ -51,15 +58,14 @@
         transaction.onerror = transaction.onabort = () => finish(new Error("Terrain transaction unavailable"));
         try { action(store, value => { result = value; }); } catch (error) { try { transaction.abort(); } catch {} finish(error); }
       });
-    } catch { stats.cacheFailures++; return null; }
-    finally { db?.close(); }
+    } finally { db?.close(); }
   };
   const read = key => storage("readonly", (store, set) => {
     const request = store.get(key); request.onsuccess = () => set(request.result || null);
   });
-  const remove = key => storage("readwrite", store => store.delete(key));
-  const write = (key, build, snapshot) => storage("readwrite", store => {
-    store.put({ key, build, used: Date.now(), snapshot });
+  const remove = key => storage("readwrite", store => store.delete(key)).catch(() => { stats.cacheFailures++; });
+  const write = (key, build, cpu, snapshot) => storage("readwrite", store => {
+    store.put({ key, build, cpu, used: Date.now(), snapshot });
     let kept = 0;
     // An index key cursor reads no snapshot bodies while dropping old builds and excess variants.
     const request = store.index("used").openKeyCursor(null, "prev");
@@ -74,7 +80,7 @@
     aborted(signal);
     const url = new URL(descriptor.url, location.origin);
     if (url.origin !== location.origin || !/^\/js\/terrain-worker-[0-9a-f]{16}\.js$/.test(url.pathname) || url.search || url.hash) throw new Error("Invalid terrain worker");
-    const worker = new Worker(url), timer = setTimeout(() => finish(new Error("Terrain build timed out")), BUILD_TIMEOUT);
+    const worker = new Worker(url), timer = setTimeout(() => finish(new Error("Terrain build timed out")), FILL_TIMEOUT);
     stats.workers++;
     let finished = false;
     const onAbort = () => finish(signal.reason || new DOMException("Terrain cancelled", "AbortError"));
@@ -88,18 +94,20 @@
     worker.onmessage = event => {
       const message = event.data;
       if (message?.key !== key) return;
-      if (message.type !== "ready") { finish(new Error("Terrain worker failed")); return; }
-      stats.transferredBytes = message.bytes;
-      finish(null, message.snapshot);
+      if (message.type !== "stored") { finish(new Error("Terrain worker failed")); return; }
+      finish(null, true);
     };
     worker.onerror = event => { event.preventDefault(); finish(new Error("Terrain worker unavailable")); };
     worker.onmessageerror = () => finish(new Error("Terrain worker unavailable"));
     signal?.addEventListener("abort", onAbort, { once: true });
     if (signal?.aborted) onAbort();
-    else { try { worker.postMessage({ key, options }); } catch (error) { finish(error); } }
+    else { try { worker.postMessage({ key, build: descriptor.build, options }); } catch (error) { finish(error); } }
   });
+  // Boot only. True when the island is in place; false sends the caller to the ordinary build, after which a miss
+  // leaves `fill` its job.
   const prepare = async (options, scope, signal = null) => {
     const descriptor = BL.terrainWorker;
+    stats.credit = 0; pending = null;
     if (!descriptor || !/^[0-9a-f]{64}$/.test(descriptor.build) || typeof Worker !== "function") return false;
     stats.attempts++;
     try {
@@ -107,24 +115,34 @@
       if (BL.terrain.hasIsland(options)) {
         BL.buildTasks.measure(() => BL.models.withScope(scope, () => BL.terrain.island(options))); stats.lastSource = "memory"; return true;
       }
-      const key = `${descriptor.build}:${JSON.stringify(options)}`, cached = await read(key);
+      const key = `${descriptor.build}:${JSON.stringify(options)}`;
+      let cached;
+      try { cached = await read(key); } catch { stats.cacheFailures++; stats.lastSource = "unavailable"; return false; }
       aborted(signal);
-      if (cached?.build === descriptor.build) {
+      if (cached?.build === descriptor.build && Number.isFinite(cached.cpu) && cached.cpu > 0 && cached.cpu < 60000) {
+        const cpu = BL.buildTasks.cpu;
         try {
           BL.buildTasks.measure(() => BL.models.withScope(scope, () => BL.terrain.restoreIslandSnapshot(cached.snapshot, options)));
+          stats.credit = Math.max(0, cached.cpu - (BL.buildTasks.cpu - cpu));
           stats.hits++; stats.lastSource = "indexeddb"; return true;
         } catch { await remove(key); }
-      }
-      stats.misses++;
-      const snapshot = await construct(descriptor, key, options, signal);
-      aborted(signal);
-      BL.buildTasks.measure(() => BL.models.withScope(scope, () => BL.terrain.restoreIslandSnapshot(snapshot, options)));
-      await write(key, descriptor.build, snapshot);
-      aborted(signal); stats.lastSource = "worker"; return true;
+      } else if (cached) await remove(key);
+      stats.misses++; stats.lastSource = "miss"; pending = { descriptor, key, options };
+      return false;
     } catch (error) {
       if (signal?.aborted) throw error;
       stats.failures++; stats.lastSource = "fallback"; return false;
     }
   };
-  BL.terrainCache = { prepare, normalize, stats };
+  // After a boot miss, once: the Worker builds and stores the snapshot. Null when there is nothing to fill.
+  const fill = (signal = null) => {
+    if (!pending) return null;
+    const { descriptor, key, options } = pending;
+    pending = null;
+    return construct(descriptor, key, options, signal).then(() => { stats.stored++; stats.lastSource = "stored"; }, error => {
+      if (!signal?.aborted) stats.failures++;
+      throw error;
+    });
+  };
+  BL.terrainCache = { prepare, fill, normalize, write, stats };
 })();
