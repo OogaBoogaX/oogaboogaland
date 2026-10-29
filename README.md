@@ -76,7 +76,7 @@ DSB Studio has a shared session panel: **Enable Studio sound** listens without m
 
 While you are in voice, **M** mutes and unmutes your microphone on the island, in the lab, the Lightning Factory, ₿IFRÖST and the Ember Den (in Ooga Arcade and the games, M still mutes their sound), and a note stays on screen while you are muted. Your own speaker mark in the roster does the same. When nobody else in voice is in the same place as you, your microphone stays off (the note says "Alone · mic off") and turns back on by itself when someone joins; if you muted yourself, you stay muted. Walking your Ooga on the island, you hear your own footsteps; nobody else hears them.
 
-Ownership goes by GitHub login, not by name. These rules apply on the signed-in site; the plain GitHub Pages build has no accounts and every Ooga is free there. How it works: `docs/auth-and-presence.md`.
+Ownership goes by GitHub login, not by name. These rules apply on the signed-in site; the portable `oogaboogaland.html`, or any copy served without the Worker, has no accounts and every Ooga is free there. How it works: `docs/auth-and-presence.md`.
 
 ## Timechain Sphere
 
@@ -147,7 +147,7 @@ A headless Chrome suite over the DevTools protocol, a clean console required. Ne
 npm run build
 ```
 
-Writes `oogaboogaland.html`, one self-contained page with the content policy pinned to its hashes. CI commits it back after each merge to `rock`, and GitHub Pages serves it at https://oogaboogax.github.io/oogaboogaland/.
+Writes `oogaboogaland.html`, one self-contained page with the content policy pinned to its hashes. CI commits it back after each merge to `rock`. The old GitHub Pages address, https://oogaboogax.github.io/oogaboogaland/, now redirects to https://oogabooga.land/.
 
 Two Cloudflare Workers serve the same site with GitHub sign-in, the shared island and voice: https://oogaboogaland-staging.wickedsmartbitcoin.workers.dev and https://oogabooga.land (production) both deploy by hand through GitHub Actions; `docs/cloudflare-setup.md` covers the setup and local development with `wrangler dev`, and `docs/auth-and-presence.md` the sign-in flow.
 
