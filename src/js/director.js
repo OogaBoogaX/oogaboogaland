@@ -41,6 +41,9 @@
   const HUB_CACHE = params.get("hubcache") || "auto";
   const MEMORY_REPORTED = Number.isFinite(DEVICE_MEMORY) && DEVICE_MEMORY > 0;
   const KEEP_HUB = HUB_CACHE === "keep" || HUB_CACHE !== "release" && (MEMORY_REPORTED ? DEVICE_MEMORY >= 8 : !COARSE);
+  // The island cache follows the same rule: a miss's fill runs a second island build in a Worker beside the page's, and
+  // the cache is read only at boot, never for a released hub's rebuild. `?terrainworker=1` forces it, `=0` stops it.
+  const TERRAIN_CACHE = params.get("terrainworker") === "1" || params.get("terrainworker") !== "0" && KEEP_HUB;
   const mark = (name) => performance.mark(`ooga:${name}`);
   mark("boot");
   let sceneCanvas = $("scene");
@@ -844,7 +847,12 @@
   // Run boot from a task after the first frame so the leaf curtain is on screen, not the previous page.
   let destroyed = false;
   const bootBuildController = new AbortController();
-  const terrainController = params.get("terrainworker") === "1" ? new AbortController() : null;
+  // On where `npm run site` packaged the terrain Worker and the device keeps the hub (`TERRAIN_CACHE`).
+  const terrainController = TERRAIN_CACHE ? new AbortController() : null;
+  // Its chunk downloads beside the account lookup and the first frame, not after them; boot's own load below takes
+  // the same request, or retries a failed one.
+  const ISLAND_FIRST = ["hub", "drop", "orbit"].includes(Object.hasOwn(scenes, sceneId) ? sceneId : Object.keys(scenes)[0]);
+  if (terrainController && ISLAND_FIRST) window.BL.deferred.load("terrain-cache")?.catch(() => {});
   const boot = async () => {
     // A signed-in newcomer must join before crew construction, including direct routes.
     // net.start is bounded; an unavailable backend leaves the static island usable.
@@ -852,7 +860,7 @@
     if (destroyed) return;
     const constructionCPU = window.BL.buildTasks.cpu;
     let first = Object.hasOwn(scenes, sceneId) ? scenes[sceneId] : scenes[Object.keys(scenes)[0]], place = routed && routed.place;
-    if (terrainController && ["hub", "drop", "orbit"].includes(first.id)) {
+    if (terrainController && ISLAND_FIRST) {
       try {
         const ready = window.BL.deferred.load("terrain-cache"); if (ready) await ready;
         const factory = first.id === "hub" && window.BL.caves.slots.find(slot => slot.status === "open" && slot.scene === "factory");
@@ -889,8 +897,22 @@
     }
     window.BL.buildTasks.measure(() => enter(first, place));
     mark("ready");
-    tierFromBoot(window.BL.buildTasks.cpu - constructionCPU);
+    // A restored island counts as the build it replaced, so the cache never starts a device a tier higher.
+    tierFromBoot(window.BL.buildTasks.cpu - constructionCPU + (window.BL.terrainCache?.stats.credit || 0));
     raf = window.requestAnimationFrame(frame);
+    if (terrainController && window.BL.terrainCache?.stats.lastSource === "miss") fillTerrain();
+  };
+  // After a cache miss the island was built here as usual; at idle, never during a transition, the Worker builds the
+  // snapshot and stores it for the next visit. Nothing waits on it, and nothing happens without a miss to fill.
+  const fillTerrain = () => {
+    const idle = typeof window.requestIdleCallback === "function";
+    const start = () => {
+      if (destroyed) return;
+      if (transition) { schedule(); return; }
+      window.BL.terrainCache.fill(terrainController.signal)?.catch(() => {});
+    };
+    const schedule = () => (idle ? window.requestIdleCallback(start, { timeout: 2000 }) : window.setTimeout(start, 1000));
+    schedule();
   };
   window.requestAnimationFrame(() => window.setTimeout(boot, 0));
   if (DEBUG) {

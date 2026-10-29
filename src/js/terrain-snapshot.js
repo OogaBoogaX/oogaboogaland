@@ -62,6 +62,12 @@
     validate(state);
     const { UNIT, SX, SY, SZ, PX, PZ, SURFACE, ORIGIN, RADIUS, MEADOW, DEPTH, RING_HALF, PATH_UNIT, PATH_CAPACITY, PATH_LIFT, GATE_Z, PASS_HALF, STAIR_TERRACE, TIMECHAIN, TIMECHAIN_X, TIMECHAIN_Z, POOL_APPROACH, POOL_X, POOL_Z, P, PALETTE, PATH_TILE, UNDER_SPHERE_CENTER, UNDER_SPHERE_RADIUS, HEADQUARTERS_CAVE, HEADQUARTERS_FLOOR, HEADQUARTERS_CEILING, HEADQUARTERS_HEIGHT, HEADQUARTERS_ROCK, HEADQUARTERS_ROOM } = state.constants;
     const { cavities, lowerCavities, basementCavities, basementCells, basementHeights, basementCollision, rampCells, rampHeights, rampCollision, frontageCells, height, surface, land, meadow, windowColumns, windowSightPlanes, windowSightRefs, headquartersRamps, headquartersRooms, headquartersWindows, headquartersGallery, headquartersBalconies, headquartersFronts, cutawayPaths, birdseyeWindowMask, birdseyeWindowTops, birdseyeWindowCeilings, geometry, roofOpening, rampFaceOffset, rockCaves, rampSight, sightColumnWork, masterList, masterPathCount, masterPathHash, centerlines, mouths, windowFragmentCount } = state;
+    // Structured clone returns every plain array with generic elements, so a double in one is a boxed number. The road
+    // tile is the one such array the renderer reads as it reads every model's vertices; seeing it there, V8 moved each
+    // model's double `verts` to generic elements, which kept about 15 MiB of boxed numbers on the hub. Rebuilt by push,
+    // it is a double array again.
+    const verts = []; for (let i = 0; i < PATH_TILE.verts.length; i++) verts.push(PATH_TILE.verts[i]);
+    PATH_TILE.verts = verts;
     const basement = { ...state.basement, hole: { ...state.basement.hole } }, basementHole = basement.hole;
     basementHole.contains = (x, z) => {
       const dx = (Math.floor((x - ORIGIN.x) / UNIT) + 0.5) * UNIT + ORIGIN.x - basementHole.x;
