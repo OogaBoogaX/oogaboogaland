@@ -64,8 +64,9 @@
   const TIPS = ["Ghost · shoot it!", "Ghost general · beware its eye beam", "Wraith · it pulls at your soul"];
   const BRUTE_TIPS = ["Gorilla · it leaps at you and slams the ground", "Skeleton · it crawls after you", "Giant spider · it spits venom",
     "Halving Hourglass · halves your rifle while it stands"];
-  // The hourglass's gold beam, as the gorillas' green; how tall it stands, and how long its sand takes to run through.
-  const GOLD = { core: [255, 245, 215], mid: [255, 170, 40], edge: [247, 147, 26] }, GLASS_H = 3, SAND_MS = 12000;
+  // The hourglass's tower: how tall it stands (to its crystal's tip), how long its sand takes to run through, how many
+  // orbs circle it, and how wide the green beam held on its crystal is.
+  const GLASS_H = MODELS.HOURGLASS_TOP, SAND_MS = 12000, GLASS_ORBS = 10, GLASS_BEAM_W = 2.6;
   const DROP_WORDS = ["Bomb! Every ghost burns", "Shield up for everyone", "Ice! The ghosts slow down", "Health banana! Everyone's bar is full", "Double points",
     "Tess joins you! She zaps any ghost that comes near", "Lightning Network! Bolts strike every enemy", "Monkeys! One at each side, shooting with you"];
   const DROP_CUES = ["boom", "shield", "ice", "health", "double", "tess", "thunder", "monkeys"];
@@ -115,13 +116,13 @@
   const VENOM_ARC = 1.6, PUDDLE_MS = 1600, VENOM_GLOW = [125, 255, 58];
   // Where venom lands, a green ring the splash's width (sim.js SPIDER.venomR) pulses `RING_PULSES` times over `PUDDLE_MS`.
   const RING_PULSES = 3;
-  // Spiderlings dying together share one shriek: at most one each `LING_CRY_MS`.
+  // Spiderlings and ghosts dying together share one shriek (the spiderlings' `brood`): at most one each `LING_CRY_MS`.
   const LING_CRY_MS = 120;
   // A spiderling: drawn `LING_SCALE` of its mother's model, its legs changing stride every `LING_STRIDE` m it runs, and
   // the height its scatter out of her flings it. The Fiat Rush's drop in their green beams, at most `LING_BEAMS` shown
   // at once, from `LING_DROP_FROM` up.
   const LING_SCALE = 0.38, LING_STRIDE = 0.18, LING_HOP = 0.9, LING_BEAMS = 8, LING_DROP_FROM = 10;
-  const BRUTE_SCALE = 1.25, BRUTE_H = 1.5 * BRUTE_SCALE, BONES_H = 0.7, ARRIVAL = 2, ARRIVE_LAND_MS = 1100, SLAM_FELT = 14, LAND_SHAKE_S = 1, LAND_SHAKE = 0.6;
+  const BRUTE_SCALE = 1.25, BRUTE_H = 1.5 * BRUTE_SCALE, BONES_SCALE = 1.5, BONES_H = 0.7 * BONES_SCALE, ARRIVAL = 2, ARRIVE_LAND_MS = 1100, SLAM_FELT = 14, LAND_SHAKE_S = 1, LAND_SHAKE = 0.6;
   // The skeleton's crawl (m, radians): its chest's pivot height and how far it leans up, the shoulders in the chest's
   // frame and how wide its arms splay, the upper arm and forearm-to-claw lengths; each hand's path in the body's frame
   // (from `front` to `back` planted at `plant` for `stance` of the cycle, then lifted `lift` forward again), how many
@@ -150,11 +151,11 @@
     tagged: [pg("#cfe0ff", 0.09), pg("#96c8ff", 0.08), pg("#f4f7fb", 0.07)],
     zapped: [pg("#ffffff", 0.09), pg("#bfe0ff", 0.08), pg("#5aa8ff", 0.08), pg("#2a6cff", 0.07)],
     gorilla: [pg("#0f5a22", 0.12, 0.2), pg("#3dff66", 0.11), pg("#6dff8c", 0.1), pg("#093a15", 0.1, 0.1)],
-    skeleton: [pg("#ece4cf", 0.09), pg("#b9ad90", 0.08), pg("#fff8e6", 0.07), pg("#ff3b2f", 0.06)],
+    skeleton: [pg("#f8f6f0", 0.09), pg("#e4e0d6", 0.08), pg("#ffffff", 0.07), pg("#ff3b2f", 0.06)],
     // A giant spider: green and purple chitin, its red eyes, a spray of its venom.
     spider: [pg("#4fb83a", 0.11), pg("#8a3fd0", 0.1), pg("#c8ff2e", 0.08), pg("#ff2a1a", 0.06)],
-    // The hourglass: wood, glass and its orange sats.
-    hourglass: [pg("#f7931a", 0.1), pg("#cfe8ff", 0.09), pg("#4a3020", 0.09), pg("#ffd23f", 0.06)],
+    // The hourglass: its orange sats, its green crystal and runes, stone and brass.
+    hourglass: [pg("#f7931a", 0.1), pg("#7dff9a", 0.09), pg("#4a505c", 0.09), pg("#c28d34", 0.06)],
     boss: [pg("#f4f7fb", 0.22), pg("#dfe5ef", 0.18), pg("#c3ccdb", 0.15), pg("#ff3b2f", 0.15)],
     herald: [pg("#ff9a2e", 0.1), pg("#ffcf6b", 0.09), pg("#ff6a10", 0.08)]
   };
@@ -384,11 +385,12 @@
     // The skeletons: a crawling upper body in each slot too (ghost-models.js `skeletonParts`), shown in place of the
     // gorilla when the slot's `kind` is 1, every bone shootable. The chest leans up from the hips, its tail dragging and
     // its arms pulling it along; `cycle` is the crawl's phase (0..1), the left arm half a cycle from the right.
-    // One skeleton's bones, each shootable for `o` (a new-enemy card's has none).
+    // One skeleton's bones, each shootable for `o` (a new-enemy card's has none), the whole of it `BONES_SCALE` its
+    // model's size.
     const buildSkeleton = (o) => {
       const P = MODELS.skeletonParts();
       const node = (geometry, x, y, z) => createNode({ geometry, position: { x, y, z } });
-      const root = createNode({ visible: false, sightHidden: true });
+      const root = createNode({ visible: false, sightHidden: true, scale: { x: BONES_SCALE, y: BONES_SCALE, z: BONES_SCALE } });
       const torso = node(P.chest, 0, CRAWL.y, 0), tail = node(P.tail, 0, 0, -0.1), skull = node(P.skull, 0, 0.06, 0.5), jaw = node(P.jaw, 0, 0.03, 0);
       const shL = node(P.upper, CRAWL.sx, CRAWL.sy, CRAWL.sz), shR = node(P.upper, -CRAWL.sx, CRAWL.sy, CRAWL.sz);
       const foL = node(P.fore, 0, -CRAWL.l1, 0), foR = node(P.fore, 0, -CRAWL.l1, 0);
@@ -453,16 +455,36 @@
     const lingShown = new Float64Array(C.LING.max), lingBit = new Float64Array(C.LING.max), lingRun = new Float64Array(C.LING.max), lingPhase = new Int8Array(C.LING.max);
     const lingBeams = pool(LING_BEAMS, null), lingGlows = pool(LING_BEAMS, null);
     const lingX = new Float64Array(C.LING.max), lingZ = new Float64Array(C.LING.max);
-    // The hourglasses: frame, glass, and the sand above and below the neck; an orange ring pulsing round each.
+    // The hourglasses: the tower, its glass, the sand above and below the neck, its crystal and the orbs circling it; a
+    // green ring pulsing round each and the green beam held on its crystal.
     const buildGlass = (o) => {
       const P = MODELS.hourglassParts();
       const root = createNode({ visible: false, sightHidden: true }), frame = createNode({ geometry: P.frame }), glass = createNode({ geometry: P.glass });
-      const top = createNode({ geometry: P.sandTop, position: { x: 0, y: MODELS.HOURGLASS_NECK + 0.04, z: 0 } }), bottom = createNode({ geometry: P.sandBottom, position: { x: 0, y: 0.26, z: 0 } });
-      addChild(root, frame, top, bottom, glass);
-      if (o) { target(frame, o); target(glass, o); }
-      return { root, top, bottom };
+      const top = createNode({ geometry: P.sandTop, position: { x: 0, y: MODELS.HOURGLASS_NECK + 0.04, z: 0 } });
+      const bottom = createNode({ geometry: P.sandBottom, position: { x: 0, y: MODELS.HOURGLASS_FLOOR + 0.01, z: 0 } });
+      const crystal = createNode({ geometry: P.crystal, position: { x: 0, y: MODELS.HOURGLASS_CRYSTAL, z: 0 } });
+      const orbs = Array.from({ length: GLASS_ORBS }, () => createNode({ geometry: P.orb }));
+      addChild(root, frame, top, bottom, crystal, ...orbs, glass);
+      if (o) { target(frame, o); target(glass, o); target(crystal, o); }
+      return { root, top, bottom, crystal, orbs };
     };
-    const glasses = [], glassRings = pool(B.max, null);
+    // The tower's living parts at `s` seconds: its crystal turning and breathing, and its orbs circling in three tilted
+    // bands at their own heights and speeds, the middle one the other way round.
+    const poseGlass = (k, s) => {
+      k.crystal.rotation.y = s * 1.6;
+      const breathe = 1 + 0.08 * Math.sin(s * 3.2);
+      k.crystal.scale.x = k.crystal.scale.y = k.crystal.scale.z = breathe;
+      for (let n = 0; n < GLASS_ORBS; n++) {
+        const node = k.orbs[n], band = n % 3, a = (band === 1 ? -1 : 1) * s * (1.5 - 0.3 * band) + n * 2.4;
+        const r = 1.05 + 0.18 * band + 0.06 * Math.sin(s * 1.3 + n), tilt = (band - 1) * 0.35;
+        node.position.x = Math.cos(a) * r;
+        node.position.z = Math.sin(a) * r;
+        node.position.y = 0.95 + band * 0.95 + Math.sin(a) * r * tilt + 0.1 * Math.sin(s * 2.1 + n * 1.7);
+        const size = 0.85 + 0.3 * Math.sin(s * 5 + n * 1.3);
+        node.scale.x = node.scale.y = node.scale.z = size;
+      }
+    };
+    const glasses = [], glassRings = pool(B.max, null), glassBeams = pool(B.max, null);
     for (let i = 0; i < B.max; i++) {
       const k = buildGlass(bruteOwners[i]);
       addChild(group, k.root);
@@ -479,7 +501,7 @@
     // and each kind's height, base health, death pixels and hit radius.
     const bodies = rigs.map((rig, i) => [rig.root, skels[i].root, spiders[i].root, glasses[i].root]);
     const KIND_H = [BRUTE_H, BONES_H, SPIDER_H, GLASS_H], KIND_HP = [B.hp, C.BONES.hp, C.SPIDER.hp, C.HOURGLASS.hp];
-    const KIND_PIXELS = [PIXELS.gorilla, PIXELS.skeleton, PIXELS.spider, PIXELS.hourglass], KIND_HIT = [BRUTE_H * 0.55, 0.6, 0.85 * SPIDER_SCALE, 0.9];
+    const KIND_PIXELS = [PIXELS.gorilla, PIXELS.skeleton, PIXELS.spider, PIXELS.hourglass], KIND_HIT = [BRUTE_H * 0.55, 0.6 * BONES_SCALE, 0.85 * SPIDER_SCALE, 0.9];
     // A brute's body as this page draws it, how tall it stands and its full health this round.
     const bodyOf = (i, b) => bodies[i][b.kind];
     const heightOf = (b) => KIND_H[b.kind];
@@ -489,7 +511,7 @@
       const roots = bodies[i];
       for (let k = 0; k < roots.length; k++) if (k !== kind) roots[k].visible = false;
       if (kind !== 2) venoms[i].visible = spiderDollars[i].visible = false;
-      if (kind !== 3) glassRings[i].visible = false;
+      if (kind !== 3) glassRings[i].visible = glassBeams[i].visible = false;
     };
     // The elixirs on the totems: each a sprite with its glow, and which were taken as last drawn.
     const elixirNodes = pool(C.ELIXIR.max, null), elixirGlows = pool(C.ELIXIR.max, null);
@@ -505,6 +527,7 @@
     const boltNode = pool(1, null)[0], boltGlow = pool(1, null)[0];
     const beams = pool(MAX_BEAMS, MODELS.beam()), souls = pool(MAX_SOULS, MODELS.soul(), { smokeOpacity: 0.85 });
     const ring = pool(1, MODELS.shockwave())[0], zapBeam = pool(1, MODELS.zap())[0];
+    keep(MODELS.blight().dark); keep(MODELS.blight().veins);
     keep(MODELS.beam()); keep(MODELS.zap()); keep(MODELS.soul()); keep(MODELS.shockwave()); keep(MODELS.gravestone());
     keep(MODELS.orb(false)); keep(MODELS.orb(true)); keep(MODELS.rock()); keep(MODELS.laserBurst()); keep(MODELS.lightningBolt()); keep(MODELS.spiderParts().venom); keep(MODELS.spiderling(0)); keep(MODELS.spiderling(1)); keep(MODELS.dollar());
     for (let i = 0; i < C.WEAPON.damage.length - 1; i++) keep(MODELS.laserBolt(i));
@@ -749,6 +772,17 @@
     // Off: no hunt, or only its lobby. The walls, the night, the rocks and the closed island begin at LAP.
     const off = (st) => st === ST.IDLE || st === ST.GATHER;
     let nightK = 0, h0 = NaN, dim = 0;
+    // The blight: dark corrupted ground spreading out from the pile over the meadow (which lies at y 0) as the night
+    // falls, reaching a little past the ring wall, its veins pulsing, and drawing back into the pile as the dawn lifts
+    // it; laid just over the ground, under every other mark on it (the drops' glows and rings stand from 0.02 up). Its
+    // dark is solid, so the blended light over it always shows, and comes and goes by its size alone.
+    const BLIGHT_D = hub.ringRadius * 2 / 0.86 + 2;
+    const blightDark = pool(1, null)[0], blightVeins = pool(1, null)[0];
+    const drawBlight = (now) => {
+      const k = nightK, d = BLIGHT_D * (1 - (1 - k) * (1 - k) * (1 - k)), B = MODELS.blight();
+      sprite(blightDark, B.dark, 0, 0.008, 0, d, d, k > 0.002 ? 1 : 0, true);
+      sprite(blightVeins, B.veins, 0, 0.012, 0, d, d, k * (0.55 + 0.25 * Math.sin(now / 700)), true);
+    };
     const nightOf = (t) => {
       const st = S.state;
       if (off(st)) return 0;
@@ -793,14 +827,14 @@
       { art: "skeleton", layout: "clip", name: "Skeletons",
         text: "Called down in a white beam, they crawl after you on their arms with their jaws hanging open. Get too close and one lunges up and bites." },
       { art: "spider", layout: "clip", name: "Giant Spiders",
-        text: "Fast and huge. Within 7 m one rears up and spits green venom that splashes everyone where it lands. Kill it and it bursts into fifteen spiderlings." }],
+        text: "Fast and huge. Within 7 m one rears up and spits green venom that splashes everyone where it lands. Kill it and it bursts into fifteen spiderlings." },
+      { art: "hourglass", layout: "clip", name: "Halving Hourglass",
+        text: "A warded tower that drops in a green beam somewhere inside the walls and stands there under it. While any hourglass stands, every rifle shot does half damage. Smash it first." }],
       [{ art: "wraith", layout: "float", tier: TIERS.wraith, name: "Wraiths",
         text: "Black ghosts edged in white. Within 5 m a wraith grabs at your soul and takes a health cell, and it holds on until you get well away." },
       { art: "swarm", layout: "clip", name: "Fiat Rush",
         text: "When the round is down to its last two ghosts, spiderlings drop in one after another, each in a green beam, up to ten at a time. One bite each, and a bomb clears them fast." }],
-      [{ art: "hourglass", layout: "clip", name: "Halving Hourglass",
-        text: "It drops in a gold beam somewhere inside the walls and stands there. While any hourglass stands, every rifle shot does half damage. Smash it first." }],
-      null, null, null,
+      null, null, null, null,
       [{ art: "boss", layout: "float", tier: TIERS.boss, name: "The Boss",
         text: "He shows himself inside the walls three seconds at a time, spitting out every kind of enemy, then vanishes and comes back somewhere else. An hourglass comes with him." }]
     ];
@@ -827,7 +861,7 @@
           k.rig.poseManaged(1 / 12, 0, 0, 0, CARD_TURN, 0, false);
         } },
       // Crawling on its arms, its jaw chattering.
-      skeleton: { frames: 16, fps: 12, h: 1.0, y: 0.38,
+      skeleton: { frames: 16, fps: 12, h: 1.0 * BONES_SCALE, y: 0.38 * BONES_SCALE,
         build: () => { const k = buildSkeleton(null); k.root.visible = true; k.root.rotation.y = CARD_TURN; return k; },
         pose: (k, f) => {
           const u = f / 16, wave = Math.sin(u * TAU), pitch = CRAWL.pitch, chestY = CRAWL.y + 0.025 * Math.abs(wave);
@@ -875,14 +909,15 @@
             q.marks[m] = node.position.x; q.marks[m + 1] = hop + 0.62; q.marks[m + 2] = node.position.z; q.marks[m + 3] = 0.28;
           }
         } },
-      // Its sand running through, swaying a little.
-      hourglass: { frames: 24, fps: 8, h: 3.5, y: 1.5,
+      // Its sand running through, its orbs circling, swaying a little.
+      hourglass: { frames: 24, fps: 8, h: 4.4, y: 1.95,
         build: () => { const k = buildGlass(null); k.root.visible = true; return k; },
         pose: (k, f) => {
           const u = f / 24, top = Math.max(0.05, 1 - u), heap = 0.1 + 0.9 * u;
           k.top.scale.x = k.top.scale.z = Math.sqrt(top); k.top.scale.y = top;
           k.bottom.scale.x = k.bottom.scale.z = Math.sqrt(heap); k.bottom.scale.y = heap;
           k.root.rotation.y = CARD_TURN + 0.25 * Math.sin(u * TAU);
+          poseGlass(k, f / 8);
         } }
     };
     const cardFrames = Array.from({ length: CARD_MAX }, () => { const c = document.createElement("canvas"); c.width = CARD_W; c.height = CARD_H; return c; });
@@ -942,12 +977,14 @@
       const dawnWords = st === ST.DAWN && S.outcome === SIM.OUTCOME.ABANDON && t - stateAt < 4000;
       // The Fiat Rush's warning: its spiderlings are on their way.
       const rush = st === ST.ACTIVE && S.swarmAt > 0 && !S.swarmSent;
-      // A countdown's cards in turn; while a round before one ends, its first model is drawn ahead.
+      // A countdown's cards in turn, `introMs` each, then its last `COUNTDOWN_MS` without one; while a round before one
+      // ends, its first model is drawn ahead.
       const toBoss = sim.bossNext(), pages = st === ST.COUNTDOWN && !S.paused ? SIM.introPages(S.round, toBoss) : 0;
       let card = null;
       if (pages) {
         const list = INTROS[toBoss ? SIM.ROUNDS.length : S.round - 1], ms = SIM.introMs(pages), start = S.endsAt - C.COUNTDOWN_MS - pages * ms;
-        card = list[clamp(Math.floor((t - start) / ms), 0, list.length - 1)];
+        const page = Math.max(0, Math.floor((t - start) / ms));
+        card = page < pages ? list[Math.min(page, list.length - 1)] : null;
       } else if (st === ST.LAP || st === ST.NIGHT || st === ST.BREAK) {
         const next = INTRO_CLIP[st === ST.BREAK ? toBoss ? SIM.ROUNDS.length : S.round : 0];
         if (next) bakeCard(next);
@@ -1229,6 +1266,7 @@
           if (!dyingShown[i] && node.visible) {
             deathFx(g, view[v], view[v + 3], view[v + 2]);
             if (g.dying === SIM.DYING.SHOT || g.dying === SIM.DYING.PUMPKIN) audio.play("hit");
+            if (t - lingCried >= LING_CRY_MS) { lingCried = t; audio.play("brood"); }
           }
           dyingShown[i] = g.dying;
           node.visible = o.active = false;
@@ -1863,16 +1901,17 @@
       sprite(arriveGlows[i], MODELS.glowDisc(colour.mid), b.x, ground + 0.03, b.z, width, width, b.phase <= BP.FALL ? 0.6 * pulse : 0, true);
       landFlashes[i].visible = landRings[i * 2].visible = landRings[i * 2 + 1].visible = false;
     };
-    // The Halving Hourglass: called down in a gold beam, standing where it landed, its orange sand running through the
-    // neck and over again, sats trickling down it, an orange ring pulsing round its foot.
+    // The Halving Hourglass: called down in a green beam that stays on its crystal while it stands, its orange sand
+    // running through the neck and over again, sats trickling down it, orbs circling it, a green ring pulsing round its
+    // foot.
     const drawHourglass = (i, b, ground, dt, t, now) => {
       const k = glasses[i], o = bruteOwners[i];
-      arrive(i, b, ground, GOLD, 3.2, t, now);
+      arrive(i, b, ground, GREEN, 3.2, t, now);
       if (brutePhase[i] <= BP.FALL && b.phase > BP.FALL) { bruteLand[i] = t; audio.play("thump"); fx.burst(b.x, ground + 0.1, b.z, 14, DIRT, 3); }
       brutePhase[i] = b.phase;
       const shown = b.phase >= BP.FALL;
       k.root.visible = o.active = shown;
-      if (!shown) { glassRings[i].visible = false; return; }
+      if (!shown) { glassRings[i].visible = glassBeams[i].visible = false; return; }
       const zapped = b.struckAt > 0 && t >= b.struckAt, jit = zapped ? STRIKE_SHAKE * 2 : 0, r = k.root;
       r.position.x = b.x + (Math.random() - 0.5) * jit; r.position.z = b.z + (Math.random() - 0.5) * jit;
       r.position.y = ground + (b.phase === BP.FALL ? Math.max(0, b.y) : 0);
@@ -1880,9 +1919,13 @@
       const u = (t % SAND_MS) / SAND_MS, top = Math.max(0.05, 1 - u), heap = 0.1 + 0.9 * u;
       k.top.scale.x = k.top.scale.z = Math.sqrt(top); k.top.scale.y = top;
       k.bottom.scale.x = k.bottom.scale.z = Math.sqrt(heap); k.bottom.scale.y = heap;
+      poseGlass(k, now / 1000);
       if (b.phase > BP.FALL && Math.random() < dt * 14) fx.spawnParticle(PIXELS.hourglass[0], r.position.x, r.position.y + MODELS.HOURGLASS_NECK, r.position.z, 0, -1.5, 0, 0.5, 2, 0, -50);
-      const beat = 0.5 + 0.5 * Math.sin(now / 260), ring = 2.6 * (0.95 + 0.05 * beat);
-      sprite(glassRings[i], MODELS.ringOf(GOLD.mid), b.x, ground + 0.05, b.z, ring * 2 / 0.9, ring * 2 / 0.9, b.phase > BP.FALL ? 0.4 + 0.4 * beat : 0, true);
+      const beat = 0.5 + 0.5 * Math.sin(now / 260), ring = 2.6 * (0.95 + 0.05 * beat), standing = b.phase > BP.FALL;
+      sprite(glassRings[i], MODELS.ringOf(GREEN.mid), b.x, ground + 0.05, b.z, ring * 2 / 0.9, ring * 2 / 0.9, standing ? 0.4 + 0.4 * beat : 0, true);
+      // Standing, the beam stays on it from the sky down to its crystal's tip, fading in as the arrival's beam fades.
+      const held = standing ? Math.min(1, (t - bruteLand[i]) / 600) * (0.7 + 0.2 * beat) : 0;
+      sprite(glassBeams[i], MODELS.beamOf(GREEN.core, GREEN.mid, GREEN.edge, false), r.position.x, r.position.y + GLASS_H - 0.1, r.position.z, GLASS_BEAM_W, BEAM_TOP, held, false);
       if (zapped && Math.random() < 0.4) fx.spawnParticle(ZAPS[Math.random() * 3 | 0], b.x + (Math.random() - 0.5) * 1.6, ground + Math.random() * GLASS_H, b.z + (Math.random() - 0.5) * 1.6,
         (Math.random() - 0.5) * 3, Math.random() * 2, (Math.random() - 0.5) * 3, 0.25, 4, 0, -50);
     };
@@ -2242,6 +2285,11 @@
       const p = sim.playerById(id);
       return !!p && S.state >= ST.COUNTDOWN && S.state <= ST.DEFEAT && huntTime() < p.frozenUntil;
     };
+    // Whether any hunter is still standing: none once the last of them (or the only one) goes down.
+    const anyStanding = () => {
+      for (const q of sim.players) if (scored(q) && q.here && !down(q.id)) return true;
+      return false;
+    };
     let viewHeld = false, hidMine = null, downYaw = 0;
     // Gives the view and this page's Ooga back (a hunt ending, the island left).
     const letGo = () => {
@@ -2267,7 +2315,7 @@
           for (const c of holder.children.slice()) removeChild(holder, c);
           const head = headOf(q.id);
           if (head) { if (head.parent) removeChild(head.parent, head); addChild(holder, head); }
-          audio.play("thump"); audio.play("rumble", 0.8); audio.play("down");
+          audio.play("thump"); audio.play("rumble", 0.8); audio.play("down", !anyStanding());
           fx.burst(gx, graveAt[o + 1] + 0.2, gz, 14, DIRT, 2.4);
         }
         if (!isDown && graveFor[i] && !graveSank[i]) graveSank[i] = t;
@@ -2411,7 +2459,7 @@
     // the boss, with N E S W round the rim. Nothing it draws a frame allocates.
     const MAP = { range: 26, half: 30, size: 192 };
     const MAP_INK = { spider: "#c8ff2e", hourglass: "#f7931a", ring: "rgba(255,138,31,0.55)", pile: "#ffd23f", elixir: "#ff8a1f", player: "#4fa3ff", down: "#8a8f99", ghost: "#ff453a",
-      gorilla: "#3dff66", bones: "#ece4cf", boss: "#ff2a1f", me: "#ffffff", edge: "rgba(0,0,0,0.75)", letter: "#f3e9d2", north: "#ff8a1f" };
+      gorilla: "#3dff66", bones: "#f8f6f0", boss: "#ff2a1f", me: "#ffffff", edge: "rgba(0,0,0,0.75)", letter: "#f3e9d2", north: "#ff8a1f" };
     const MAP_KIND = [MAP_INK.gorilla, MAP_INK.bones, MAP_INK.spider, MAP_INK.hourglass];
     // The compass points: a letter and its way on the island (north is -z, the bearing's zero; east +x).
     const COMPASS = [["N", 0, -1], ["E", 1, 0], ["S", 0, 1], ["W", -1, 0]];
@@ -2638,6 +2686,7 @@
       if (S.state !== prevState) { onState(S.state, prevState, t); prevState = S.state; }
       spectate(waiting());
       nightK = nightOf(t);
+      drawBlight(now);
       // The playlist runs from the herald's launch to the victory banner; the mini player shows it meanwhile.
       const musicTime = S.state >= ST.LAP && S.state <= ST.BOSS || S.state === ST.VICTORY;
       audio.music(musicTime);
@@ -2682,7 +2731,7 @@
         for (const rig of rigs) rig.root.visible = false;
         for (const k of skels) k.root.visible = false;
         for (const k of spiders) { k.root.visible = false; k.planted = false; }
-        for (const list of [venoms, puddles, venomRings, lingNodes, glassRings, spiderDollars, lingDollars, lingBeams, lingGlows]) for (const n of list) n.visible = false;
+        for (const list of [venoms, puddles, venomRings, lingNodes, glassRings, glassBeams, spiderDollars, lingDollars, lingBeams, lingGlows]) for (const n of list) n.visible = false;
         for (const k of glasses) k.root.visible = false;
         hud.halving(false);
         for (const o of lingOwners) o.active = false;

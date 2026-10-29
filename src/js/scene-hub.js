@@ -7870,13 +7870,14 @@
     updatePoolEffectsActivity();
     mempoolIsland.site.node.visible = !on;
   };
-  // GAME MODE's ring: a wall round the meadow just inside the foot of the bluff (the ground leaves the meadow about
-  // 22 m from the middle), so nobody playing climbs the cliffs. It stands up over `riseS` (the lanterns along its top
+  // GAME MODE's ring: a wall round the meadow well inside the foot of the bluff (the ground starts up it about 19.5 m
+  // from the middle), so nobody playing climbs the cliffs and a shoulder camera behind someone at the wall stays out of
+  // the rock; the furthest totem's elixir (19.5 m) is still in reach from inside. It stands up over `riseS` (the lanterns along its top
   // rising with it) and sinks over `sinkS`, and while it stands it refuses a step out across it at or above the
   // meadow; anyone outside it (in a cave mouth, up the bluff) may still walk in. The wall itself is unseen:
   // `RING_PANELS` flat veils of B.C.A.'s kind, tangent to the ring, each its own geometry so the renderer draws each
   // one's own ripples and outlines, glowing in glyphs where a body touches them (`ringBodies`, `touchGameRing`).
-  const GAME_RING = { r: 21.5, height: 8, riseS: 1.5, sinkS: 1 };
+  const GAME_RING = { r: 18.5, height: 8, riseS: 1.5, sinkS: 1 };
   const GAME_RING_R2 = GAME_RING.r * GAME_RING.r;
   const RING_PANELS = 32, RING_STEP = Math.PI * 2 / RING_PANELS;
   const ringPanelGeometries = models.cached(() => {
