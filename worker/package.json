@@ -15,7 +15,7 @@
     "eval": "npm --prefix .. run build:site --silent && node eval/run.mjs"
   },
   "devDependencies": {
-    "wrangler": "^4.141.0"
+    "wrangler": "^4.153.0"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.1.0"
