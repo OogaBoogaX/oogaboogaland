@@ -12,14 +12,17 @@
   // fresh bed objects onto its nodes.
   const graphs = new WeakMap();
   // Reserved sleeping rectangles on the rainforest terraces and dry forest floor, in one fixed order: the
-  // established ridge rows, then dry forest gaps outside the walking ring and gorilla nests, then a finer fill.
+  // established ridge rows, then dry forest gaps outside the walking ring and gorilla nests, then a finer fill,
+  // then rings on the chamber floor under the lake once the forest is full.
   // Sample the whole footprint, not just its centre, to reject channels, terrace edges and props. These are
   // floor anchors, with no mattress or rendered items. The layout and its seeded scenery never move, so the
   // order is the same on every visit and page: it is searched only as far as sleepers need it.
   function* anchorSearch(layout, place, test) {
     const L = layout, footprints = [], cos = Math.cos(place.ry), sin = Math.sin(place.ry);
     const worldX = (lx, lz) => place.x + lx * cos + lz * sin, worldZ = (lx, lz) => place.z - lx * sin + lz * cos;
-    const add = (radius, bearing, angle = bearing, extra = false) => {
+    // `floor` lays the footprint on that level of rock instead of the ground's top: every sample on solid rock
+    // with open air over it.
+    const add = (radius, bearing, angle = bearing, extra = false, floor = null) => {
       const sr = Math.sin(angle), cr = Math.cos(angle), lx = Math.sin(bearing) * radius, lz = Math.cos(bearing) * radius;
       // The four rectangle axes keep supplemental sleepers clear of the original rows and each other.
       if (extra) for (const other of footprints) {
@@ -42,10 +45,11 @@
           for (const nest of L.NESTS) if (Math.abs(r - L.NEST.r) < L.NEST.halfR + 0.05
             && Math.abs(L.turn(Math.atan2(px, pz), nest.bearing) * r) < L.NEST.halfT + 0.05) return null;
         }
-        const y = L.groundAt(px, pz);
+        const y = floor === null ? L.groundAt(px, pz)
+          : L.solidAt(px, floor - L.UNIT / 2, pz) && !L.solidAt(px, floor + L.UNIT / 2, pz) ? floor : -Infinity;
         low = Math.min(low, y); high = Math.max(high, y);
       }
-      if (low < L.LEVEL.ground || high - low > 0.5 || !Number.isFinite(high)) return null;
+      if (low < (floor === null ? L.LEVEL.ground : floor) || high - low > 0.5 || !Number.isFinite(high)) return null;
       for (let a = -0.75; a <= 0.75; a += 0.25) for (let b = -1.5; b <= 1.5; b += 0.25) {
         if (!test.clear(worldX(lx + sr * a + cr * b, lz + cr * a - sr * b), place.y + high + 0.03,
           worldZ(lx + sr * a + cr * b, lz + cr * a - sr * b))) return null;
@@ -70,6 +74,17 @@
       for (let turn = 0; turn < 8; turn++) {
         const anchor = add(radius, bearing, turn * Math.PI / 8, true);
         if (anchor) { yield anchor; break; }
+      }
+    }
+    // A roster bigger than the forest sleeps on the chamber's level, dry floor, in rings along the wall and then
+    // round the shaft, off the rill at the wall and the shaft's edge. The arc from the first painting, where the
+    // view arrives, round to past the descent's junction stays clear for whoever walks in.
+    const from = L.wrap(L.RAMP.start + L.RAMP.sweep + L.JUNCTION.after + 0.5), to = L.STOPS[0] + Math.PI * 2 - 0.5;
+    for (const radius of [9.4, 7.2]) {
+      const step = 3.6 / radius, end = to - 1.5 / radius;
+      for (let bearing = from + 1.5 / radius; bearing <= end; bearing += step) {
+        const anchor = add(radius, bearing, bearing, false, L.FLOOR);
+        if (anchor) yield anchor;
       }
     }
   }
