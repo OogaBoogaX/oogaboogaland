@@ -9,7 +9,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { createHash, webcrypto } from "node:crypto";
 import { externalizeAudio } from "../scripts/distribution-audio.mjs";
-import { PICTURE_MODULES, externalizeModules, externalizePictures } from "../scripts/distribution-modules.mjs";
+import { PICTURE_MODULES, externalizeModules, externalizePage, externalizePictures } from "../scripts/distribution-modules.mjs";
 import { launch, acquire, dispose, driverError } from "./browser.mjs";
 import { writeCharacters } from "../scripts/characters.mjs";
 const emptyPeerPreviewProof = async () => {
@@ -6929,9 +6929,10 @@ if (!ONLY || onlyMatches(signedInArrival.name)) tasks.push({ name: "hub signed-i
       [[signedInRouted.name, signedInRouted.run]], { initScript: `(${signedInArrivalWire.toString()})("sleeping", false)` });
   } finally { await new Promise(resolve => server.close(resolve)); }
 } });
-// The hosted page as `npm run site` stages it: each `data-defer` group leaves the built page for its own same-origin file,
-// served here behind a switch (`refused`, path prefixes) that answers 503, as a deploy mid-flight can. The source and
-// portable pages keep every group inline, so only this page can show what a scene reads before its code arrives.
+// The hosted page as `npm run build:site` stages it: each `data-defer` group leaves the built page for its own same-origin
+// file, served here behind a switch (`refused`, path prefixes) that answers 503, as a deploy mid-flight can, and the page's
+// own script, jumbotron snapshot and stylesheet follow (`--page-assets`). The source and portable pages keep every group
+// inline, so only this page can show what a scene reads before its code arrives.
 const hostedSite = async () => {
   const html = readFileSync(join(root, "oogaboogaland.html"), "utf8"), out = mkdtempSync(join(tmpdir(), "ooga-hosted-"));
   const deferred = new Map();
@@ -6939,9 +6940,10 @@ const hostedSite = async () => {
   // A module's block in the built page runs from its marker to the next module's.
   const block = (src) => { const start = html.indexOf(`// ---- ${src} ----\n`); return html.slice(start, html.indexOf("\n\n// ---- ", start + 1)); };
   // `gone` answers 404, as a chunk a later deploy replaced does.
-  const page = externalizeModules(html, out, deferred, block), refused = [], gone = [], fetched = [], probed = [];
+  const page = externalizePage(externalizeModules(html, out, deferred, block), out, block, ["js/jumbotron-data.js"]), refused = [], gone = [], fetched = [], probed = [];
   const server = createServer((req, res) => {
     const path = req.url.split("?")[0];
+    if (path.startsWith("/css/")) { res.setHeader("content-type", "text/css"); return res.end(readFileSync(join(out, path))); }
     if (!path.startsWith("/js/")) { res.setHeader("content-type", "text/html; charset=utf-8"); return res.end(page); }
     // The loader's HEAD probe after a failure is not a download; refusal counts read `fetched` alone.
     (req.method === "HEAD" ? probed : fetched).push(path);
@@ -20385,6 +20387,24 @@ const distributionAudioChecks = async () => {
       pictures.length > 0 && files.length === pictures.length && files.every((url, i) => readFileSync(join(out, url)).equals(Buffer.from(pictures[i][2], "base64")))
       && !/data:image\//.test(bundle) && art.window.BL.stackchainArt["article-0"].image.startsWith("/art/")
       && hosted.includes(`window.BL.terrainWorker = ${JSON.stringify(terrainWorker)};`), "staged pictures/terrain descriptor mismatch");
+    // The hosted page's own script, its jumbotron snapshot and its stylesheet leave every route page as hashed files.
+    const jumbo = `// ---- js/jumbotron-data.js ----\n${readFileSync(join(root, "src/js/jumbotron-data.js"), "utf8").trim()}`;
+    const early = "\nwindow.curtain = 1;\n", css = "\nbody { color: red; }\n";
+    const main = `\nwindow.BL = window.BL || {};\n${jumbo}\n\nwindow.BL.read = window.BL.jumbotronData.meta.org + window.curtain;\n`;
+    const shell = `<meta content="default-src 'none'; script-src 'sha256-${hash(main)}' 'sha256-${hash(early)}'; style-src 'sha256-${hash(css)}'"><style>${css}</style><script data-early>${early}</script><script>${main}</script>`;
+    const paged = externalizePage(externalizeModules(shell, out, new Map(), src => src), out, src => src === "js/jumbotron-data.js" ? jumbo : null, ["js/jumbotron-data.js"]);
+    const named = (re) => [...paged.matchAll(re)].map(m => m[1]), mains = named(/<script src="(\/js\/main-[0-9a-f]{16}\.js)"><\/script>/g);
+    const order = named(/<script src="([^"]+)"><\/script>/g), sheets = named(/<link rel="stylesheet" href="(\/css\/style-[0-9a-f]{16}\.css)">/g);
+    const exact = (path) => path.includes(createHash("sha256").update(readFileSync(join(out, path))).digest("hex").slice(0, 16));
+    const policy = paged.match(/script-src ([^;]*);/)[1], loaded = { window: { curtain: 1 } }, inline = { window: { curtain: 1 } };
+    for (const path of order) runInNewContext(readFileSync(join(out, path), "utf8"), loaded);
+    runInNewContext(main, inline);
+    const headers = readFileSync(join(root, "worker/_headers"), "utf8"), site = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).scripts["build:site"].split(/\s+/);
+    record("distribution page: a staged page carries no main inline script or style, names one existing hashed main script after its data and one stylesheet, and its policy pins only the early block (rule: a stale hash or a cached 404 blanks the page)",
+      !/<script>|<style>/.test(paged) && mains.length === 1 && order.length === 2 && order[1] === mains[0] && /^\/js\/jumbotron-data-/.test(order[0]) && sheets.length === 1
+      && [...order, ...sheets].every(exact) && policy === `'self' 'sha256-${hash(early)}'` && paged.includes("style-src 'self'\"") && loaded.window.BL.read === inline.window.BL.read
+      && !/^\/(js|css)\/\*/m.test(headers) && site.includes("--page-assets") && site[site.indexOf("--headers") + 1] === "worker/_headers",
+      JSON.stringify({ order, sheets, policy, read: [loaded.window.BL.read, inline.window.BL.read] }));
   } finally { rmSync(out, { recursive: true, force: true }); }
 };
 const qualityFramebufferChecks = async () => {
