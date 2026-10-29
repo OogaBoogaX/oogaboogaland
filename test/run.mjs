@@ -5522,6 +5522,33 @@ const ghostHuntChecks = async () => {
     record("ghost hunt: a seeded hunt repeats exactly, one picked up from its snapshot mid-way (a new host) goes on the same, and its rows stay readable across a deploy", repeated && loaded && same && hunting && a.state.kills > 0 && rows && older, JSON.stringify({ repeated, loaded, same, hunting, kills: a.state.kills, rows, older }));
   }
   {
+    // Old v1 tabs have only twelve drop slots. More rewards must wait, including through a host handoff.
+    const z = begin(19);
+    let now = T0;
+    const tick = () => { now += FRAME; z.beginPresence(); z.present(1, 0, 0, 6); z.advance(now); };
+    while (now < T0 + 60000 && z.state.state !== ST.ACTIVE) tick();
+    for (let i = 0; i < z.drops.length; i++) Object.assign(z.drops[i], { on: true, id: 1000 + i, kind: 0, x: 15, z: 15, at: z.state.now });
+    z.state.pendingCount = 2; z.state.pending[0] = z.state.pending[1] = z.state.now;
+    z.state.midDropAt = z.state.now; z.state.lightningSent = 1;
+    const due = z.state.midDropAt;
+    for (let i = 0; i < 6; i++) tick();
+    const held = z.state.pendingCount === 2 && z.state.midDropAt === due;
+    const snap = JSON.parse(JSON.stringify(z.snapshot())), handed = G.create({ seed: 99, spots, lapMs: 20000 });
+    // A deployed reader's six-number drop rows must all address slots 0 through 11.
+    const readable = snap.v === 1 && snap.d.length === 12 * 6 && snap.d.every((n, i) => i % 6 || n >= 0 && n < 12);
+    const loaded = handed.load(snap) && JSON.stringify(handed.snapshot().d) === JSON.stringify(snap.d)
+      && handed.state.pendingCount === 2 && handed.state.midDropAt === due;
+    z.load(JSON.parse(JSON.stringify(handed.snapshot())));
+    z.drops[0].on = false;
+    for (let i = 0; i < 6; i++) tick();
+    const one = z.drops[0].on && z.state.pendingCount === 1 && z.state.midDropAt === due;
+    z.drops[1].on = false; z.drops[2].on = false;
+    for (let i = 0; i < 6; i++) tick();
+    const rest = z.drops[1].on && z.drops[2].on && !z.state.pendingCount && z.state.midDropAt > z.state.now;
+    record("ghost hunt: v1 drop slots survive a host handoff and full pools retain round and mid-round rewards until space opens",
+      held && readable && loaded && one && rest, JSON.stringify({ held, readable, loaded, one, rest }));
+  }
+  {
     const sim = begin(11), rounds = [], drops = { 3: false, 4: false }, gorillas = [], skeletons = [], spiders = [], brood = [], glasses = [], seenBrutes = new Set();
     let bossGlasses = 0, dropped = 0, crowded = 0;
     let maxAlive = 0, round = 0, lapToNight = false;
@@ -9169,7 +9196,7 @@ const hubGhostEntry = (melee) => ({ name: `ghost entry ${melee ? "melee" : "shoo
     B.advance((G.lapMs + C.NIGHT_MS + C.COUNTDOWN_MS) / 1000 + 2, 1 / 60);
     const position = { ...a.root.position, y: a.root.position.y - a.baseY }, heading = a.root.rotation.y;
     const crossRing = () => {
-      B.crew.relocatePlayer({ x: 20, y: H.island.surfaceAt(20, 0), z: 0 }, Math.PI / 2);
+      B.crew.relocatePlayer({ x: 17, y: H.island.surfaceAt(17, 0), z: 0 }, Math.PI / 2);
       for (let i = 0; i < 60; i++) { B.crew.steer(1, 0); B.crew.update(1 / 60); }
       const x = a.root.position.x;
       B.crew.steer(0, 0); B.crew.relocatePlayer(position, heading);
@@ -9261,7 +9288,7 @@ const hubGhostEntry = (melee) => ({ name: `ghost entry ${melee ? "melee" : "shoo
   })()`);
   record("ghost hunt: Ready progresses to an active round with ghosts and unlimited shooting; dawn restores harmless HUB weapons and carry switching", hunt.active === "ACTIVE" && hunt.ghosts > 0 && hunt.unlimited && hunt.shooting && hunt.restored, JSON.stringify(hunt));
   record("ghost hunt: gorillas keep running between host ticks and follower snapshots at 30/60/120 fps, slow with ice, and stop for attacks, stuns and pauses", hunt.running.length === 13 && hunt.running.every(r => r.states ? r.states.every(Boolean) : r.frames > 0 && r.idle === 0 && r.error < 1e-6 && r.arms > 0.3 && r.legs > 0.3), JSON.stringify(hunt.running));
-  record("ghost hunt: the ring holds and releases the player, walls seal the exits, the minimap fits and paints, a skeleton is shootable, and an elixir revives a fallen hunter", hunt.ringHeld > 20 && hunt.ringHeld <= 21.5 && hunt.ringReleased > 22 && hunt.sealed && hunt.minimap && hunt.skeleton && hunt.revived, JSON.stringify(hunt));
+  record("ghost hunt: the ring holds and releases the player, walls seal the exits, the minimap fits and paints, a skeleton is shootable, and an elixir revives a fallen hunter", hunt.ringHeld > 17 && hunt.ringHeld <= 18.5 && hunt.ringReleased > 19 && hunt.sealed && hunt.minimap && hunt.skeleton && hunt.revived, JSON.stringify(hunt));
   record("ghost hunt: teardown clears hunt UI and restores open or closed panel choices", hunt.cleared && !hunt.panels.hidden && hunt.panels.open === panels.open && hunt.panels.boards === panels.boards, JSON.stringify({ before: panels, after: hunt.panels, cleared: hunt.cleared }));
 } });
 const hubMelee = { name: "hub melee", why: "rule: focused quick taps recover their strike power over time, changing weapons cannot bypass recovery, and a charged strike doubles damage", run: async (b) => {
