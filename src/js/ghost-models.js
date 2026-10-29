@@ -14,7 +14,7 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const { hexToRgb } = BL.math;
-  const { geometry, pushVert, face, box, lathe, merge, prism, moved, variants, cached, ring, noShadow, track, tube, turn, shaded, along } = BL.models;
+  const { geometry, pushVert, face, box, lathe, merge, prism, moved, variants, cached, ring, noShadow, track, tube, turn, shaded, along, torus } = BL.models;
   const TIERS = { plain: 0, general: 1, wraith: 2, boss: 3, herald: 4 };
   const MODE = { normal: 0, flash: 1, iced: 2, tagged: 3 };
   // Each tier's wash and the outline standing for the lab's glow (draw.js); `bright` how much it blooms.
@@ -238,6 +238,68 @@
     up.addColorStop(0, "rgba(0,0,0,1)"); up.addColorStop(1, "rgba(0,0,0,0)");
     g.globalCompositeOperation = "destination-in"; g.fillStyle = up; g.fillRect(0, 0, w, h);
   }, [64, 256], false);
+  // The blight the hunt spreads over the meadow, one unit across, centred, painted once from a fixed seed so every page
+  // shows the same: `dark` the corrupted ground itself, near black and purple, lobed at its rim, mottled and cracked, a
+  // solid picture (drawn with everything opaque, so no blended light on the ground can be painted over by it), cut
+  // hard where its alpha falls below a half; `veins` the sickly green light running through it from the middle, with
+  // motes, added in light over the dark.
+  const blight = cached(() => {
+    let seed = 0x9e3779b9;
+    const rand = () => { seed = (seed + 0x6d2b79f5) | 0; let x = Math.imul(seed ^ (seed >>> 15), 1 | seed); x ^= x + Math.imul(x ^ (x >>> 7), 61 | x); return ((x ^ (x >>> 14)) >>> 0) / 4294967296; };
+    const S = 1024, R = S / 2;
+    const dark = light("blight", (g) => {
+      const body = g.createRadialGradient(R, R, 0, R, R, R * 0.86);
+      body.addColorStop(0, "rgba(14,5,20,1)"); body.addColorStop(0.88, "rgba(14,5,20,1)"); body.addColorStop(1, "rgba(14,5,20,0)");
+      g.fillStyle = body; g.fillRect(0, 0, S, S);
+      // Lobes creeping out past the body's edge.
+      for (let i = 0; i < 90; i++) {
+        const a = rand() * Math.PI * 2, br = R * (0.08 + 0.12 * rand()), rr = Math.min(R * 0.98 - br, R * (0.6 + 0.3 * rand()));
+        const x = R + Math.cos(a) * rr, y = R + Math.sin(a) * rr, lobe = g.createRadialGradient(x, y, 0, x, y, br);
+        lobe.addColorStop(0, "rgba(14,5,20,1)"); lobe.addColorStop(0.6, "rgba(14,5,20,0.65)"); lobe.addColorStop(1, "rgba(14,5,20,0)");
+        g.fillStyle = lobe; g.beginPath(); g.arc(x, y, br, 0, Math.PI * 2); g.fill();
+      }
+      // Mottling: purple bruises and black rot.
+      for (let i = 0; i < 520; i++) {
+        const a = rand() * Math.PI * 2, rr = Math.sqrt(rand()) * R * 0.8, x = R + Math.cos(a) * rr, y = R + Math.sin(a) * rr, br = 6 + rand() * 28;
+        const spot = g.createRadialGradient(x, y, 0, x, y, br), c = rand() < 0.55 ? "70,22,95" : "0,0,0", al = c === "0,0,0" ? 0.3 : 0.22;
+        spot.addColorStop(0, `rgba(${c},${al})`); spot.addColorStop(1, `rgba(${c},0)`);
+        g.fillStyle = spot; g.beginPath(); g.arc(x, y, br, 0, Math.PI * 2); g.fill();
+      }
+      // Cracks.
+      g.lineCap = "round"; g.strokeStyle = "rgba(0,0,0,0.6)";
+      for (let i = 0; i < 60; i++) {
+        const a0 = rand() * Math.PI * 2, r0 = Math.sqrt(rand()) * R * 0.75;
+        let x = R + Math.cos(a0) * r0, y = R + Math.sin(a0) * r0, h = rand() * Math.PI * 2;
+        g.lineWidth = 1.2 + rand() * 2.2; g.beginPath(); g.moveTo(x, y);
+        for (let k = 0, n = 6 + rand() * 14; k < n; k++) { h += (rand() - 0.5) * 1.1; x += Math.cos(h) * (6 + rand() * 10); y += Math.sin(h) * (6 + rand() * 10); g.lineTo(x, y); }
+        g.stroke();
+      }
+    }, [S, S], true, 0, null);
+    dark.imageSurface.soft = false;
+    const veins = light("blightVeins", (g) => {
+      g.lineCap = "round"; g.shadowColor = "rgba(60,255,40,0.95)"; g.shadowBlur = 10;
+      // A vein from (x, y) heading `h`, `w` wide, forking now and then, fading toward the rim.
+      const vein = (x, y, h, w, depth) => {
+        while (w > 0.5) {
+          const r = Math.hypot(x - R, y - R);
+          if (r > R * 0.84) return;
+          const step = 9 + rand() * 9, nx = x + Math.cos(h) * step, ny = y + Math.sin(h) * step;
+          g.strokeStyle = `rgba(110,255,60,${(0.95 * (1 - r / (R * 0.86))).toFixed(3)})`;
+          g.lineWidth = w; g.beginPath(); g.moveTo(x, y); g.lineTo(nx, ny); g.stroke();
+          x = nx; y = ny; h += (rand() - 0.5) * 0.5; w *= 0.985;
+          if (depth < 3 && rand() < 0.07) vein(x, y, h + (rand() < 0.5 ? -1 : 1) * (0.4 + rand() * 0.5), w * 0.7, depth + 1);
+        }
+      };
+      for (let i = 0; i < 16; i++) { const a = i / 16 * Math.PI * 2 + rand() * 0.3; vein(R + Math.cos(a) * 30, R + Math.sin(a) * 30, a, 3.6, 0); }
+      // Motes of the same light.
+      for (let i = 0; i < 90; i++) {
+        const a = rand() * Math.PI * 2, rr = Math.sqrt(rand()) * R * 0.8;
+        g.fillStyle = `rgba(180,255,140,${(0.5 + 0.4 * rand()).toFixed(3)})`;
+        g.beginPath(); g.arc(R + Math.cos(a) * rr, R + Math.sin(a) * rr, 1.5 + rand() * 2.5, 0, Math.PI * 2); g.fill();
+      }
+    }, [S, S], true, 0.45, "add");
+    return { dark, veins };
+  });
   /** The scorched ground where a drop struck: dark, one unit across, centred. */
   const scorch = cached(() => light("scorch", (g, w, h) => {
     const grad = g.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2);
@@ -433,7 +495,7 @@
   // tail's root to the neck; the tail trails back along -z; the skull sits on the neck with its jaw hinged under it; an
   // upper arm reaches down -y 0.3 m from its shoulder ball to the elbow, and the forearm 0.27 m on to the wrist, its
   // fingers curling forward to their claws about 0.37 m down.
-  const BONE = "#e8dfc6", JOINT = "#b8aa86", TOOTH = "#f6f0de", SOCKET = "#120c08", EYE = "#3dff6a", GLOW = 0.22;
+  const BONE = "#f8f6f0", JOINT = "#e4e0d6", TOOTH = "#ffffff", SOCKET = "#120c08", EYE = "#3dff6a", GLOW = 0.22;
   // A long bone, knobbed at both ends, `L` along +y from its foot; a ball; a vertebra's disc lying across +y.
   const longBone = (L, r, color = BONE) => turn([[0, 0], [r * 1.7, L * 0.03], [r * 1.9, L * 0.1], [r, L * 0.22], [r * 0.85, L * 0.5], [r, L * 0.78], [r * 1.9, L * 0.9], [r * 1.7, L * 0.97], [0, L]], 10, color, GLOW);
   const ball = (r, color = JOINT, emissive = GLOW) => turn(Array.from({ length: 9 }, (_, k) => [r * Math.sin(Math.PI * k / 8), -r * Math.cos(Math.PI * k / 8)]), 10, color, emissive);
@@ -583,29 +645,46 @@
     }
     return shaded(parts);
   });
-  // The Halving Hourglass, 3 m tall in its own frame: `frame` its wooden ends and three posts, orange coins round its
-  // foot; `glass` its two bulbs, half see-through; `sandTop` the orange sand above the neck (scaled down from the neck as it
-  // runs out) and `sandBottom` the mound below (scaled up from the floor as it fills). `HOURGLASS_NECK` the neck's height.
-  const WOOD_DARK = "#4a3020", WOOD_LIGHT = "#6b4528", SAND = "#f7931a", GLASS = "#cfe8ff", HOURGLASS_NECK = 1.5;
+  // The Halving Hourglass, a warded tower about 3.8 m tall: `frame` its stepped stone plinth (flat-faced) with a green
+  // rune band, moulded brass caps, four turned stone columns and a brass spire; `crystal` the green stone the spire holds
+  // (lit, its own node so it can turn); `glass` its two bulbs, half see-through; `sandTop` the orange sand above the
+  // neck (scaled down from the neck as it runs out) and `sandBottom` the mound below (scaled up from the floor as it
+  // fills); `orb` one of the small lit orbs that circle it. `HOURGLASS_NECK` the neck's height, `HOURGLASS_FLOOR` the
+  // lower bulb's, `HOURGLASS_CRYSTAL` the crystal's middle and `HOURGLASS_TOP` its tip.
+  const STONE = "#2b2e36", STONE_LIGHT = "#4a505c", BRASS = "#c28d34", RUNE = "#5dff7a", SAND = "#f7931a", GLASS = "#d6fff0";
+  const HOURGLASS_FLOOR = 0.58, HOURGLASS_NECK = 1.73, HOURGLASS_CRYSTAL = 3.62, HOURGLASS_TOP = 3.94;
   const hourglassParts = cached(() => {
-    const frame = [turn([[0.9, 0], [0.95, 0.06], [0.9, 0.22], [0.75, 0.25], [0, 0.25]], 16, WOOD_DARK, 0.08),
-      moved(turn([[0, 0], [0.75, 0], [0.9, 0.03], [0.95, 0.19], [0.9, 0.25], [0, 0.25]], 16, WOOD_DARK, 0.08), 0, 2.75, 0)];
-    for (let i = 0; i < 3; i++) {
-      const a = i * Math.PI * 2 / 3;
-      frame.push(span(Math.sin(a) * 0.75, 0.25, Math.cos(a) * 0.75, Math.sin(a) * 0.75, 2.75, Math.cos(a) * 0.75, 0.06, WOOD_LIGHT));
+    const plinth = turn([[0, 0], [1.18, 0], [1.18, 0.12], [1.04, 0.16], [1.04, 0.3], [0.9, 0.34], [0, 0.34]], 8, STONE, 0.04);
+    // A brass cap's moulding from its foot up, mirrored for the top.
+    const capProfile = [[0, 0], [0.84, 0], [0.88, 0.04], [0.84, 0.09], [0.74, 0.11], [0.76, 0.16], [0.66, 0.21], [0.5, 0.24], [0, 0.24]];
+    const cap = (y, flip) => moved(turn(flip ? capProfile.map(([r, h]) => [r, 0.24 - h]).reverse() : capProfile, 32, BRASS, 0.08), 0, y, 0);
+    // A column from its foot on the lower cap's slope to the upper cap: base, shaft with two collars, capital.
+    const TOP_CAP = HOURGLASS_NECK + 1.15, COLUMN_FOOT = HOURGLASS_FLOOR - 0.06, COLUMN_H = TOP_CAP + 0.04 - COLUMN_FOOT;
+    const column = () => turn([[0.1, 0], [0.11, 0.05], [0.07, 0.11], [0.06, 0.2], [0.05, 0.62], [0.065, 0.68], [0.05, 0.74], [0.048, 1.2],
+      [0.05, 1.66], [0.065, 1.72], [0.05, 1.78], [0.06, 2.2], [0.07, 2.29], [0.11, 2.35], [0.1, 2.4]].map(([r, y]) => [r, y * COLUMN_H / 2.4]), 12, STONE_LIGHT, 0.03);
+    const round = [cap(0.34, false), cap(TOP_CAP, true),
+      moved(torus(0.97, 0.03, RUNE, 1, 32, 6), 0, 0.31, 0), moved(torus(0.8, 0.018, RUNE, 0.8, 32, 6), 0, 0.5, 0),
+      moved(torus(0.68, 0.022, RUNE, 0.8, 32, 6), 0, TOP_CAP - 0.22, 0),
+      moved(turn([[0.34, 0], [0.36, 0.05], [0.22, 0.12], [0.14, 0.2], [0.1, 0.26], [0, 0.28]], 24, BRASS, 0.08), 0, TOP_CAP + 0.24, 0)];
+    for (let i = 0; i < 4; i++) {
+      const a = Math.PI / 4 + i * Math.PI / 2, x = Math.sin(a) * 0.68, z = Math.cos(a) * 0.68;
+      round.push(moved(column(), x, COLUMN_FOOT, z), moved(ball(0.05, RUNE, 1), x * 1.08, HOURGLASS_NECK, z * 1.08));
+      // The spire's prongs, cupping the crystal.
+      const px = Math.sin(a) * 0.17, pz = Math.cos(a) * 0.17;
+      round.push(span(px * 0.45, HOURGLASS_CRYSTAL - 0.26, pz * 0.45, px, HOURGLASS_CRYSTAL + 0.04, pz, 0.018, BRASS));
     }
-    for (let i = 0; i < 9; i++) {
-      const a = i * Math.PI * 2 / 9 + 0.3;
-      frame.push(moved(along(disc(0.11, 0.018, SAND), 0, 0, 0, Math.sin(a) * 0.4, 1, Math.cos(a) * 0.4), Math.sin(a) * 1.05, 0.04 + (i % 3) * 0.035, Math.cos(a) * 1.05));
-    }
-    const bulb = [[0.04, 0], [0.45, 0.25], [0.62, 0.6], [0.55, 0.95], [0.08, 1.2], [0.05, 1.25]];
-    const glass = merge(moved(turn(bulb.map(([r, y]) => [r, y]), 16, GLASS, 0.35), 0, 0.25, 0),
-      moved(turn(bulb.map(([r, y]) => [r, 1.25 - y]).reverse(), 16, GLASS, 0.35), 0, HOURGLASS_NECK, 0));
+    // The bulbs: flat-footed vases meeting at the neck, the lower standing in its cap's lip.
+    const bulb = [[0.42, 0], [0.52, 0.1], [0.58, 0.3], [0.56, 0.55], [0.44, 0.82], [0.22, 1.02], [0.07, 1.12], [0.06, 1.15]];
+    const glass = merge(moved(turn(bulb, 32, GLASS, 0.3), 0, HOURGLASS_FLOOR, 0),
+      moved(turn(bulb.map(([r, y]) => [r, 1.15 - y]).reverse(), 32, GLASS, 0.3), 0, HOURGLASS_NECK, 0));
     glass.glass = 0.35;
     glass.castShadow = false;
-    const sandTop = noShadow(turn([[0.02, 0], [0.45, 0.55], [0.47, 0.62], [0, 0.62]], 14, SAND, 0.5));
-    const sandBottom = noShadow(turn([[0.58, 0], [0.5, 0.18], [0.15, 0.5], [0, 0.55]], 14, SAND, 0.5));
-    return { frame: shaded(frame), glass, sandTop, sandBottom };
+    const sandTop = noShadow(turn([[0.03, 0], [0.2, 0.13], [0.4, 0.33], [0.5, 0.55], [0.51, 0.62], [0, 0.62]], 20, SAND, 0.5));
+    const sandBottom = noShadow(turn([[0.45, 0], [0.5, 0.08], [0.38, 0.3], [0.12, 0.46], [0, 0.48]], 20, SAND, 0.5));
+    const crystal = noShadow(turn([[0, -0.24], [0.15, 0], [0.11, 0.12], [0, 0.32]], 6, "#8dffa8", 1));
+    const orb = noShadow(merge(ball(0.06, "#e8ffe8", 1), ball(0.1, RUNE, 0.6)));
+    orb.glass = 0.5;
+    return { frame: shaded(round, [plinth]), crystal, glass, sandTop, sandBottom, orb };
   });
   // A glowing green "$", one unit tall, added in light over the spiders and their brood.
   const dollar = cached(() => {
@@ -633,5 +712,5 @@
   });
   const shockwave = cached(() => noShadow(ring({ r: 1, thickness: 0.05, segments: 40, color: "#7dff9a", emissive: 1 })));
 
-  BL.ghostModels = { TIERS, MODE, DROPS, prepare, ghost, portrait, viewOf, drop, glowDisc, ringOf, beamOf, scorch, bolt, bubble, wallGeometry, orb, beam, zap, soul, rock, laserBurst, laserBolt, lightningBolt, monkey, elixir, picture, skeletonParts, spiderParts, spiderling, SPIDER_HIP, SPIDER_LEG, hourglassParts, HOURGLASS_NECK, dollar, gravestone, GRAVE_TOP, shockwave };
+  BL.ghostModels = { TIERS, MODE, DROPS, prepare, ghost, portrait, viewOf, drop, glowDisc, ringOf, beamOf, blight, scorch, bolt, bubble, wallGeometry, orb, beam, zap, soul, rock, laserBurst, laserBolt, lightningBolt, monkey, elixir, picture, skeletonParts, spiderParts, spiderling, SPIDER_HIP, SPIDER_LEG, hourglassParts, HOURGLASS_FLOOR, HOURGLASS_NECK, HOURGLASS_CRYSTAL, HOURGLASS_TOP, dollar, gravestone, GRAVE_TOP, shockwave };
 })();
