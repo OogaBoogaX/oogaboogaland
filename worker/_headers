@@ -3,6 +3,6 @@
   X-Frame-Options: DENY
   Permissions-Policy: microphone=(self), camera=(), geolocation=()
 
-# The distribution builder writes only content-hashed chunks under /js/.
-/js/*
-  Cache-Control: public, max-age=31536000, immutable
+# `npm run build:site` (scripts/site.mjs --headers) stages this file and adds one immutable rule for each
+# content-hashed file it wrote under /js/ and /css/. Exact paths, never /js/*: a wildcard would also make a 404 there
+# immutable, and a browser that cached one for the page's main script would show a blank page for a year.
