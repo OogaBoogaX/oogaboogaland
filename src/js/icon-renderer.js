@@ -13,7 +13,7 @@
     if (!cursor) { cursor = BL.compactGeometry.createCursor(geometry); compactCursors.set(geometry, cursor); }
     return BL.compactGeometry.readFace(geometry, index, cursor);
   };
-  const createRenderer = (canvas, { width, height }) => {
+  const createRenderer = (canvas, { width, height, unlit = false }) => {
     const ctx = canvas.getContext("2d"), dpr = Math.min(window.devicePixelRatio || 1, 2);
     canvas.width = Math.max(1, Math.round(width * dpr));
     canvas.height = Math.max(1, Math.round(height * dpr));
@@ -122,6 +122,7 @@
         const hemi = Math.max(0.3, lerp(groundLuma, skyLuma, ny * 0.5 + 0.5));
         let k = lerp(Math.min(1, hemi + diffuse * 0.7), 1.1, Math.min(1, emissive));
         k = lerp(k, 1.3, node.scorch > 0 ? 0 : node.highlight * 0.4);
+        if (unlit) k = 1;
         const c = face.color, detail = 0.72 + (c[0] * 0.2126 + c[1] * 0.7152 + c[2] * 0.0722) / 255 * scorch * 0.28;
         const heat = 255 * detail;
         const cr = lerp(c[0] * scorch, heat, ember * 0.9);

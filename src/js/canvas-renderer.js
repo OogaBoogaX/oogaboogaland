@@ -396,7 +396,7 @@
     let waterTime = 0;
     const waterWave = new Float64Array(3), waterBodyPoint = new Float64Array(3);
     let pointLights = null, pointLightCount = 0;
-    let spotLight = null;
+    let spotLight = null, blacklight = null;
     const spotEnergy = (x, y, z, nx, ny, nz) => {
       if (!spotLight || spotLight[3] <= 0) return 0;
       const dx = x - spotLight[0], dy = y - spotLight[1], dz = z - spotLight[2], dist = Math.hypot(dx, dy, dz);
@@ -920,6 +920,23 @@
               let red = lerp(lerp(cr * (k + pointR + (beam ? beam * spotLight[8] : 0)), 214, tip * 0.88), fogRgb[0], fog);
               let green = lerp(lerp(cg * (k + pointG + (beam ? beam * spotLight[9] : 0)), 255, tip * 0.88), fogRgb[1], fog);
               let blue = lerp(lerp(cb * (k + pointB + (beam ? beam * spotLight[10] : 0)), 227, tip * 0.88), fogRgb[2], fog);
+              if (blacklight && blacklight[3] > 0) {
+                const pale = smooth((Math.min(cr, cg, cb) / 255 - 0.55) / 0.39);
+                const bright = smooth(((cr * 0.2126 + cg * 0.7152 + cb * 0.0722) / 255 - 0.55) / 0.35);
+                const fluorescence = node.geometry.glass || node.geometry.glassOpacity ? 0 : Math.max(pale, bright * 0.35) * blacklight[3] * (1 - Math.min(1, emissive)) * (1 - fog);
+                const shade = node.geometry.glass || node.geometry.glassOpacity ? 1 : lerp(0.3 + Math.max(pale, bright * 0.35) * 0.7, 1, Math.min(1, emissive));
+                const visibility = 1 - 0.3 * smooth((Math.hypot(centerX - blacklight[0], centerY - blacklight[1], centerZ - blacklight[2]) - 4) / 10);
+                // Canvas has no bloom pass, but keeps the same pale pigments and Ooga-centred darkness.
+                red = lerp(fogRgb[0], red * shade + lerp(cr, 40.8, pale * 0.95) * fluorescence, visibility);
+                green = lerp(fogRgb[1], green * shade + lerp(cg, 255, pale * 0.95) * fluorescence, visibility);
+                blue = lerp(fogRgb[2], blue * shade + lerp(cb, 102, pale * 0.95) * fluorescence, visibility);
+                if (node.geometry.imageSurface?.canvas) {
+                  rec.canvasR *= visibility; rec.canvasG *= visibility; rec.canvasB *= visibility;
+                  rec.canvasAddR = lerp(fogRgb[0], rec.canvasAddR, visibility);
+                  rec.canvasAddG = lerp(fogRgb[1], rec.canvasAddG, visibility);
+                  rec.canvasAddB = lerp(fogRgb[2], rec.canvasAddB, visibility);
+                }
+              }
               if (face.lake) {
                 // Match the WebGL waterfall palette and rectangular cells, including displaced wave lighting.
                 const flow = node.geometry.lakeFlow, curve = node.geometry.lakeFlowCurve;
@@ -1892,6 +1909,7 @@
       }
       const { light = DEFAULT_LIGHT, directStrength: strength = 1, ambientFloor: ambient = 0.3, diffuseFloor: diffuse = 0, clear = null, sky = DEFAULT_SKY, ground = DEFAULT_GROUND, horizon = null, zenith = null, fog = null, fogNear: near0 = 0, fogFar: far0 = 0, matrix = null } = opts;
       spotLight = opts.spotLight || null;
+      blacklight = opts.blacklight || null;
       matrixActive = matrix ? matrix.active : 0;
       matrixRadius = matrix ? matrix.radius : 0;
       matrixTime = matrix ? matrix.time : 0;

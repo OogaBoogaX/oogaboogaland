@@ -76,7 +76,7 @@ export class Room extends DurableObject {
       await ctx.storage.put("loopEpoch", this.loopEpoch);
       await ctx.storage.put("sweepAt", this.sweepAt);
       if (this.studio.hostId && (!this.players.has(this.studio.hostId) || this.players.get(this.studio.hostId).zone !== STUDIO_ZONE || !studioHostAllowed(env, this.studio.hostId))) this.suspendStudio();
-      // Stored cleanup retries from an alarm due now, never inside this block: each SFU call may take its 10 s, and a
+      // Stored cleanup retries from an alarm due now, never inside this block: several bounded SFU calls can accumulate, and a
       // block past 30 s resets the island's only room, presence and voice with it.
       if (this.sfu && this.cleanupJobs.length) {
         this.cleanupAt = Date.now();
@@ -579,6 +579,8 @@ export class Room extends DurableObject {
     if (!p.connectionToken || request.headers.get("x-room-token") !== p.connectionToken) return new Response(JSON.stringify({ error: "connection replaced" }), { status: 409, headers: { "content-type": "application/json" } });
     const result = (p.voiceQueue || Promise.resolve()).catch(() => {}).then(() => this.voiceOperation(op, request, p));
     p.voiceQueue = result.then(() => {}, () => {});
+    // A browser timeout must not cancel the work that later requests are queued behind.
+    this.background(p.voiceQueue);
     return result;
   }
 
@@ -634,7 +636,7 @@ export class Room extends DurableObject {
           sessionDescription: { type: "offer", sdp: body.sdp },
           tracks: [{ location: "local", mid: body.mid, trackName: VOICE_TRACK }],
         }); } catch (err) { if (p.voice.pub === publishingSession) { p.voice.pub = p.voice.pubMid = p.voice.track = p.voice.pending = null; p.ws.serializeAttachment(this.attachment(p)); }
-          await this.queueClose(publishingSession, [body.mid], true); throw err; }
+          await this.queueClose(publishingSession, [body.mid], true, true); throw err; }
         const t = res.tracks && res.tracks[0];
         if (!t || t.errorCode) return json({ error: (t && t.errorDescription) || "publish failed" }, 502);
         const mid = t.mid || body.mid;
@@ -673,7 +675,7 @@ export class Room extends DurableObject {
         try { res = await this.sfu.newTracks(receivingSession, { tracks }); } catch (err) {
           // Unknown MIDs after timeout: abandon this receiver and inspect its server allocations.
           if (p.voice.sub === receivingSession) { p.voice.sub = null; p.voice.mids = {}; p.sent = null; p.ws.serializeAttachment(this.attachment(p)); }
-          await this.queueClose(receivingSession, [], true); throw err;
+          await this.queueClose(receivingSession, [], true, true); throw err;
         }
         // A zone, body, socket, permission or publication can change while the SFU request is in flight. Keep
         // only the tracks still eligible (same publisher session and track) and close every other one, through
@@ -874,16 +876,16 @@ export class Room extends DurableObject {
     const mids = kind === "pub" ? (v.pubMid ? [v.pubMid] : []) : Object.keys(v.mids || {});
     const session = v[kind]; v[kind] = null;
     if (kind === "pub") { v.track = v.pending = v.pubMid = null; } else v.mids = {};
-    await this.queueClose(session, mids, !!session && !mids.length);
+    await this.queueClose(session, mids, !!session && !mids.length, true);
   }
 
   async clearVoice(p) {
     const old = p.voice;
     p.voice = { pub: null, sub: null, track: null, pending: null, gen: old.gen || 0, mids: {}, pubMid: null };
-    await Promise.all([this.queueClose(old.pub, old.pubMid ? [old.pubMid] : [], !!old.pub && !old.pubMid), this.queueClose(old.sub, Object.keys(old.mids || {}), !!old.sub && !Object.keys(old.mids || {}).length)]);
+    await Promise.all([this.queueClose(old.pub, old.pubMid ? [old.pubMid] : [], !!old.pub && !old.pubMid, true), this.queueClose(old.sub, Object.keys(old.mids || {}), !!old.sub && !Object.keys(old.mids || {}).length, true)]);
   }
 
-  async queueClose(session, mids, inspect = false) {
+  async queueClose(session, mids, inspect = false, deferred = false) {
     if (!this.sfu || !session || (!mids.length && !inspect)) return;
     if (!this.cleanupJobs) this.cleanupJobs = [];
     const existing = this.cleanupJobs.find(job => job.session === session);
@@ -891,16 +893,27 @@ export class Room extends DurableObject {
     else this.cleanupJobs.push({ session, at: Date.now(), revision: 0, mids: [...new Set(mids)], midVersions: Object.fromEntries(mids.map(mid => [mid, 0])), inspect, inspectUntil: inspect ? Date.now() + 20000 : 0 });
     if (this.ctx && this.ctx.storage) await this.ctx.storage.put("voiceCleanup", this.cleanupJobs);
     for (const p of this.players.values()) if (p.zone === STUDIO_ZONE) this.sendStudio(p);
-    await this.retryCleanup();
+    // Persist and arm the retry before upstream I/O. Retired sessions never hold up a new one.
+    if (!this.cleanupAt) this.cleanupAt = Date.now() + SWEEP_MS;
+    if (this.ctx && this.ctx.storage) await this.ensureSweep();
+    if (deferred) this.background(this.retryCleanup(session));
+    else await this.retryCleanup(session);
   }
 
-  async retryCleanup() {
+  async retryCleanup(session = null) {
     if (!this.sfu || !this.cleanupJobs || !this.cleanupJobs.length) return;
-    if (this.cleanupRunning) return this.cleanupRunning;
-    this.cleanupRunning = (async () => {
+    if (!session && this.cleanupRunning) return this.cleanupRunning;
+    const tasks = this.cleanupTasks ||= new Map();
+    const running = (async () => {
       for (const job of [...this.cleanupJobs]) {
+        if (!this.cleanupJobs.includes(job) || (session && job.session !== session)) continue;
+        // Only the same SFU session waits: another player's cleanup cannot stall this request.
+        while (tasks.has(job.session)) await tasks.get(job.session);
+        if (!this.cleanupJobs.includes(job)) continue;
         // A job the SFU has refused for CLEANUP_MS is given up, so a room nobody is in stops waking for it.
         if (Date.now() - (job.at ??= Date.now()) > CLEANUP_MS) { this.cleanupJobs.splice(this.cleanupJobs.indexOf(job), 1); continue; }
+        let finished;
+        tasks.set(job.session, new Promise(resolve => { finished = resolve; }));
         try {
           const revision = job.revision || 0;
           if (job.inspect) {
@@ -925,7 +938,7 @@ export class Room extends DurableObject {
           // A confirmed absent upstream session owns no tracks and needs no further retry.
           if (err.status === 404) this.cleanupJobs.splice(this.cleanupJobs.indexOf(job), 1);
           // Other failures retain ownership for the existing room alarm.
-        }
+        } finally { tasks.delete(job.session); finished(); }
       }
       // Remaining jobs retry at the next wake: at most a sweep interval away, and sooner if another wake comes first.
       if (!this.cleanupJobs.length) this.cleanupAt = 0;
@@ -936,7 +949,8 @@ export class Room extends DurableObject {
       }
       for (const p of this.players.values()) if (p.zone === STUDIO_ZONE) this.sendStudio(p);
     })();
-    try { await this.cleanupRunning; } finally { this.cleanupRunning = null; }
+    if (!session) this.cleanupRunning = running;
+    try { await running; } finally { if (this.cleanupRunning === running) this.cleanupRunning = null; }
   }
 
   async checkAccount(p) {

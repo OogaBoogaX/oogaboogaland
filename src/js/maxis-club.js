@@ -44,6 +44,7 @@
         block(root,"#302822",-13+(col+.5)*3.25,y,18,3.25,2.8,.35);
       }
     }
+    const exitDoor=block(root,"#523726",-5.6,3.85,17.72,2.8,2.9,.16);
     // Timber arrival and private threshold at the back, to the left of a low bar.
     block(root,"#523726",0,1.2,11.625,26,2.4,12.75);
     for(const x of [-8.4,-2.8]){
@@ -166,7 +167,7 @@
     const lights=new Float32Array(BL.glRenderer.POINT_LIGHT_CAPACITY*8);
     lights.set([0,5,-12,14,.42,.65,.38,0, -8,5,-8,10,.88,.39,.17,0, 8,5,-8,10,.88,.39,.17,0, -5.6,5,13,6,.95,.6,.28,0, 6,5.2,12,10,1,.55,.23,0]);
     const lighting={clear:[.024,.028,.022],sky:[.36,.31,.23],ground:[.2,.15,.1],direct:[.64,.46,.28],directStrength:.23,ambientFloor:.34,sun:{x:.2,y:.8,z:.4},shadowCenter:{x:0,y:3,z:0},shadowExtent:24,shadowStrength:.18,bloomStrength:.3,lights,lightCount:5,fog:[.024,.028,.022],fogNear:55,fogFar:85};
-    return {id:"maxis-club",root,seats,solids,lighting,groundAt:floor,ceiling:8.5,spawnYaw:0,followDistance:2.8,
+    return {id:"maxis-club",root,exitDoor,seats,solids,lighting,groundAt:floor,ceiling:8.5,spawnYaw:0,followDistance:2.8,
       spawn:{x:-5.6,y:2.4,z:16},exit:{x:-5.6,y:2.4,z:17},mediaAt:{x:7.4,y:0,z:-10.4},screen,console,
       bounds:{minX:-12.75,maxX:12.75,minZ:-14,maxZ:17.6},
       setMedia:on=>{idle.visible=!on;playing.visible=!!on;},

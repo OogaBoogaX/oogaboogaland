@@ -3,7 +3,7 @@
   "use strict";
   const zone=(route,label,x,z,rx,rz,priority=2)=>({route,label,x,z,rx,rz,priority});
   const home=(route,label)=>({route,label,priority:0});
-  const fallbacks={"svrn-society":home("home","Browse SVRN Society"),"meme-factory":home("home","Explore Meme Factory"),"without-rulers":home("home","Browse Without Rulers"),"proof-of-ink":home("featured","Browse Proof of Ink"),"big-bitcoin":home("overview","BIG BITCOIN Info"),"puppy-rescue":home("adopt","Adopt a puppy")};
+  const fallbacks={"svrn-society":home("home","Browse SVRN Society"),"meme-factory":home("home","Explore Meme Factory"),"without-rulers":home("home","Browse Without Rulers"),"proof-of-ink":home("featured","Browse Proof of Ink"),"big-bitcoin":home("overview","BIG BITCOIN Info"),"puppy-rescue":home("adopt","Adopt a puppy"),"free-wallets":null};
   const zones={
     "without-rulers":[
       zone("shirts","Browse Shirts",-5.3,1.5,2.5,1.3),zone("hoodies","Browse Hoodies",5.3,1.5,2.5,1.3),
@@ -21,10 +21,10 @@
   };
   const forRoom=room=>room.menuZones||zones[room.id]||[];
   const resolve=(room,p)=>{
-    let best=fallbacks[room.id]||home("home","Open menu"),distance=Infinity;
+    let best=room.id in fallbacks?fallbacks[room.id]:home("home","Open menu"),distance=Infinity;
     for(const z of room.menuZones||forRoom(room)){
       const dx=Math.abs(p.x-z.x),dz=Math.abs(p.z-z.z);if(dx>z.rx||dz>z.rz)continue;
-      const d=dx*dx+dz*dz;if(z.priority>best.priority||z.priority===best.priority&&d<distance){best=z;distance=d;}
+      const d=dx*dx+dz*dz;if(!best||z.priority>best.priority||z.priority===best.priority&&d<distance){best=z;distance=d;}
     }
     return best;
   };

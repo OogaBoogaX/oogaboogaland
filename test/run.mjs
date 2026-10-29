@@ -3891,7 +3891,7 @@ const orbitFlow = async (b) => {
 const SCENES = ["hub", "lab", "race", "drop", "orbit", "mine", "dsb", "factory", "hangar", "bifrost", "timechain", "poker", "arcade", "skee", "hoops", "shy", "claw", "hockey", "billiards", "darts", "pinball", "ride", "invaders", "snake", "pong", "stampede", "flap", "breaker", "dash", "stacker"];
 const LANES = Number(process.env.LANES) || 2;
 const ARGS = process.argv.slice(2);
-for (const a of ARGS) if (!SCENES.includes(a) && !["unit", "chat-unit", "integration-unit", "svrn-unit", "svrn-review", "vacancy-unit", "rescue-unit", "portal-unit", "water-baseline", "water-review", "water-unit", "stackchain-review", "stackchain-unit", "dsb-menus-unit", "maxis-unit", "exterior-unit", "rulers-unit", "ink-unit", "big-unit", "perf", "full", "poker-protocol"].includes(a)) throw new Error(`Unknown argument "${a}" (unit | perf | full | poker-protocol | ${SCENES.join(" | ")})`);
+for (const a of ARGS) if (!SCENES.includes(a) && !["unit", "chat-unit", "integration-unit", "svrn-unit", "svrn-review", "vacancy-unit", "rescue-unit", "wallets-unit", "portal-unit", "water-baseline", "water-review", "water-unit", "stackchain-review", "stackchain-unit", "dsb-menus-unit", "maxis-unit", "exterior-unit", "rulers-unit", "ink-unit", "big-unit", "perf", "full", "poker-protocol"].includes(a)) throw new Error(`Unknown argument "${a}" (unit | perf | full | poker-protocol | ${SCENES.join(" | ")})`);
 const ONLY = process.env.ONLY || ""; // Optional comma-separated substrings within the requested scenes.
 const onlyMatches = value => ONLY.split(",").some(part => value.includes(part));
 const FULL = ARGS.includes("full");
@@ -17873,18 +17873,18 @@ scene("dsb", { label: "dsb shared player", url: hubPage(dist), steps: [{ name: "
   record("dsb shared player: canonical selected actor is possessed with independent ammunition", await b.evaluate(`__ooga.dsb.phase === "land" && __ooga.pilot.player === __ooga.dsb.avatar && __ooga.pilot.player.traits.name === "rules-without-rulers" && __ooga.pilot.player.weapon.ammo === BL.crew.AMMO_MAX && __ooga.pilot.player.headOpen === BL.models.caveman(BL.contributors.traitsFor("rules-without-rulers")).headOpen`));
   const move = await b.evaluate(`(() => { const c = __ooga.pilot.player, z = c.root.position.z; window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); __ooga.advance(0.3); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" })); return Math.abs(c.root.position.z - z); })()`);
   record("dsb shared player: shared walking moves the actor", move > 0.2, String(move));
-  await b.evaluate(`document.querySelector('[data-action="dsb-lookout"]').click(); __ooga.advance(0.4)`);
-  record("dsb shared player: lookout remains a free camera", await b.evaluate('__ooga.pilot.player === null && __ooga.camera.position.y > 5'));
+  await b.evaluate(`document.getElementById("destination-hud").click(); __ooga.advance(0.4)`);
+  record("dsb shared player: the island view selector starts at overview as a free camera and keeps its CHORA label", await b.evaluate('__ooga.pilot.player === null && __ooga.camera.position.y > 5 && document.getElementById("detached-destination-name").textContent === "CHORA"'));
   const reset = await b.evaluate(`(() => {
     const B = __ooga, a = B.dsb.avatar, p = { ...a.root.position }, mode = B.pilot.mode;
     const canvas = document.getElementById("scene");
     for (const type of ["keydown", "keyup"]) canvas.dispatchEvent(new KeyboardEvent(type, { key: "0", code: "Digit0", bubbles: true, cancelable: true }));
     return { detached: !B.pilot.player && B.pilot.mode === mode,
       unmoved: Math.hypot(a.root.position.x - p.x, a.root.position.y - p.y, a.root.position.z - p.z) < 1e-6,
-      mapHidden: document.getElementById("destination-hud").hidden,
+      mapShown: !document.getElementById("destination-hud").hidden && !document.getElementById("destination-hud").disabled,
       retake: !document.getElementById("own-ooga-hud").hidden && B.hud.retakeActor?.actor === a };
   })()`);
-  record("dsb shared player: 0 keeps the lookout detached and the Ooga in place, exposes its return portrait and hides unsupported Map travel", Object.values(reset).every(Boolean), JSON.stringify(reset));
+  record("dsb shared player: 0 keeps the lookout detached and the Ooga in place, with its return portrait and island view selector available", Object.values(reset).every(Boolean), JSON.stringify(reset));
   await b.evaluate(`document.getElementById("own-ooga-hud").click(); __ooga.advance(0.4)`);
   record("dsb shared player: the last-actor portrait leaves lookout and restores the same playable actor", await b.evaluate('__ooga.pilot.player === __ooga.dsb.avatar'));
   await dsbApproach(b, "tv"); await b.key(" ");
@@ -19119,8 +19119,8 @@ const vacancyChecks = async BL => {
   record("Vacancies: frozen initial IDs are unique and contiguous 1 through 35",R.length===35&&new Set(R.map(p=>p.number)).size===35&&Array.from({length:35},(_,i)=>i+1).every(n=>V.resolve(n))&&Object.isFrozen(R)&&R.every(Object.isFrozen));
   record("Vacancies: published identities cannot silently renumber",JSON.stringify(R.map(p=>p.buildingId))===JSON.stringify([21,20,19,4,1,5,2,3,11,10,9,8,7,6,25,24,23,22,15,12,13,14,17,18,16,32,26,33,27,28,31,30,29].map(n=>"VACANT "+n).concat(["olympus-mill-east","olympus-mill-west"])));
   record("Vacancies: one two-part world sign belongs to each registered address",V.group.children.length===35&&P.every(p=>p.node.parent===V.group&&p.node.children.length===2&&p.plaque.parent===p.node&&p.lettering.parent===p.node)&&new Set(P.map(p=>p.building)).size===35);
-  const OCCUPIED={1:"Free Puppies Rescue",7:"SVRN Society"};
-  record("Vacancies: actual lettering preserves VAC numbers with only VAC 1 and VAC 7 occupied, by Free Puppies Rescue and SVRN Society",P.every(p=>p.text===(OCCUPIED[p.address.number]||"VAC "+p.address.number)&&p.lettering.geometry===BL.dsbModels.text(p.text,"#fff4df")&&(p.address.status==="occupied")===!!OCCUPIED[p.address.number]));
+  const OCCUPIED={1:"Free Puppies Rescue",2:"Free Hardware Wallets",7:"SVRN Society"};
+  record("Vacancies: actual lettering preserves VAC numbers with only VAC 1, VAC 2 and VAC 7 occupied, by Free Puppies Rescue, Free Hardware Wallets and SVRN Society",P.every(p=>p.text===(OCCUPIED[p.address.number]||"VAC "+p.address.number)&&p.lettering.geometry===BL.dsbModels.text(p.text,"#fff4df")&&(p.address.status==="occupied")===!!OCCUPIED[p.address.number]));
   S.updateWorld(W.root);
   const bounds=node=>{const lo=[Infinity,Infinity,Infinity],hi=[-Infinity,-Infinity,-Infinity],q=[];for(let i=0;i<node.geometry.verts.length;i+=3){BL.math.mat4.transformPoint(q,node.local,...node.geometry.verts.slice(i,i+3));for(let j=0;j<3;j++){lo[j]=Math.min(lo[j],q[j]);hi[j]=Math.max(hi[j],q[j]);}}return {lo,hi};};
   const placement=P.map(p=>{const b=p.building,a=bounds(p.plaque),t=bounds(p.lettering),house=p.address.type==="house",front=house?b.d/2:2.1;
@@ -19585,7 +19585,7 @@ const svrnChecks = BL => {
   let seating=true;for(const seat of R.seats){Object.assign(A.root.position,{x:seat.walkAt.x,y:A.baseY,z:seat.walkAt.z});A.hop=A.hopV=0;seating&&=C.sitPlayer(seat);C.steer(.6,0);C.look(seat.ry,.3,1);C.update(.2,1);seating&&=A.camp.seat===seat&&A.root.position.x===seat.x&&A.root.position.z===seat.z;C.steer(0,0);seating&&=C.standPlayer()&&!A.camp.seat&&!seat.sitter&&clear(A.root.position.x,A.root.position.z);}
   record("SVRN seating: two shared seats support pose, look, movement lock and safe stand",seating&&R.seats.length===2);
   const v=BL.dsbVacancies.REGISTRY.find(p=>p.number===7),e=I.registry.get("svrn-society");
-  record("SVRN address: occupied VAC 7 keeps VACANT 2 at 10/23 and original facade",v.status==="occupied"&&v.occupant==="SVRN Society"&&v.interiorId===R.id&&e.building.name===v.buildingId&&e.building.x===10&&e.building.z===23&&e.building.yaw===Math.PI/2&&e.building.w===6&&e.building.d===5&&BL.dsbVacancies.REGISTRY.filter(p=>p.status==="vacant").length===33);
+  record("SVRN address: occupied VAC 7 keeps VACANT 2 at 10/23 and original facade",v.status==="occupied"&&v.occupant==="SVRN Society"&&v.interiorId===R.id&&e.building.name===v.buildingId&&e.building.x===10&&e.building.z===23&&e.building.yaw===Math.PI/2&&e.building.w===6&&e.building.d===5&&BL.dsbVacancies.REGISTRY.filter(p=>p.status==="vacant").length===32);
   const cases=[[8.3,11,"home"],[-9,-4,"shirts"],[-9,4,"hoodies"],[9,-4,"faith"],[9,5,"hats"],[0,-11.7,"collections"],[-6.5,-8.5,"lookbook"],[0,6.5,"home"]];
   record("SVRN zones: walkable apparel, faith, hats, collections, kiosk and lounge routes",cases.every(([x,z,r])=>reachable({x,z})&&BL.dsbMenuZones.resolve(R,{x,z}).route===r),JSON.stringify(cases.map(([x,z,want])=>({x,z,want,got:BL.dsbMenuZones.resolve(R,{x,z}).route,clear:reachable({x,z})}))));
   let nodes=0,finite=true;const geometry=new Set(),walk=n=>{nodes++;if(n.geometry){geometry.add(n.geometry);finite&&=n.geometry.verts.every(Number.isFinite);}n.children.forEach(walk);};S.updateWorld(R.root);walk(R.root);
@@ -19630,7 +19630,7 @@ const rescueChecks = BL => {
     const v=BL.dsbVacancies.REGISTRY.find(p=>p.number===1),W=waterWorld(BL),land=W.land,A=W.avatar,targets=new Set(),toasts=[];
     const exterior={visible:true},weather={shared:{state:{muted:true}},inside:false,setInterior(on){this.inside=on;}};
     const I=BL.dsbInteriors.create({root:W.root,exterior,land,weather,relocate:noop,lock:noop,onChange:noop}),e=I.registry.get("puppy-rescue");
-    record("Rescue address: occupied VAC 1 keeps VACANT 21 at 5/51 with its 4 x 4 m facade, beside SVRN at VAC 7",v.status==="occupied"&&v.occupant==="Free Puppies Rescue"&&v.interiorId==="puppy-rescue"&&e.building.name===v.buildingId&&e.building.x===5&&e.building.z===51&&e.building.w===4&&e.building.d===4&&e.label==="Free Puppies Rescue"&&BL.dsbVacancies.REGISTRY.filter(p=>p.status==="vacant").length===33,JSON.stringify({v,building:e.building}));
+    record("Rescue address: occupied VAC 1 keeps VACANT 21 at 5/51 with its 4 x 4 m facade, beside SVRN at VAC 7",v.status==="occupied"&&v.occupant==="Free Puppies Rescue"&&v.interiorId==="puppy-rescue"&&e.building.name===v.buildingId&&e.building.x===5&&e.building.z===51&&e.building.w===4&&e.building.d===4&&e.label==="Free Puppies Rescue"&&BL.dsbVacancies.REGISTRY.filter(p=>p.status==="vacant").length===32,JSON.stringify({v,building:e.building}));
     I.review("puppy-rescue",true);I.update(.4);const R=I.active.room;
     const clear=(ax,az,bx=ax,bz=az)=>I.walkable(ax,az,bx,bz,0,A.bodyHeight,A),step=.25,minX=-8.5,minZ=-9.5,w=69,h=77,seen=new Uint8Array(w*h),queue=[];
     const index=(x,z)=>Math.round((z-minZ)/step)*w+Math.round((x-minX)/step),start=index(R.spawn.x,R.spawn.z);seen[start]=1;queue.push(start);
@@ -19870,6 +19870,148 @@ const rescueMenuChecks = BL => {
     M.open({breed:0,ooga:"Yellow",suggest:"Max"});const restored=M.isOpen&&!M.stats.signIn&&[pups,input.parentElement,go].every(n=>n.style.display==="");M.close();
     M.dispose();
     record("Rescue dialog: six selectable portraits in the island sheet's frame and slab, shared heading and controls, Enter adopts the sanitized name or suggestion, Escape closes, sign-in hides adoption controls, and disposal leaves no panel or handler",shown&&go.className==="chat-send"&&note.attributes.role==="status"&&chose&&fallback&&escaped&&refused&&backed&&restored&&!body.children.length&&elements.every(e=>!e.listeners.size)&&BL.dsbMenuShell.count===0,JSON.stringify({shown,chose,fallback,escaped,refused,backed,restored,choice}));
+  }finally{BL.hud=hud;for(const [k,v] of Object.entries(saved))globalThis[k]=v;}
+};
+// Rule: Free Hardware Wallets at VAC 2 keeps its address, room, fuse, chain, spaces and pools bounded, and its machine says nothing.
+const walletsChecks = BL => {
+  const W=BL.walletBombs,S=BL.scene,noop=()=>{},toasts=[];
+  // A blast sets off every live device within the chain radius of any device going off, never a spent or distant one,
+  // and the merged blast widens by the square root and hits by the count.
+  const R=W.CHAIN_RADIUS,xs=new Float32Array([0,R*.9,R*1.8,R*5,R*.5]),zs=new Float32Array(5),live=new Uint8Array([1,1,1,1,0]),out=new Uint8Array(5);
+  const n=W.chainFrom(xs,zs,live,5,0,out),chained=n===3&&out[0]&&out[1]&&out[2]&&!out[3]&&!out[4],alone=W.chainFrom(xs,zs,live,5,3,out)===1&&!out[0];
+  const one=W.blastOf(1),four=W.blastOf(4),many=W.blastOf(100),scaled=one.radius===W.BASE_RADIUS&&Math.abs(four.radius-2*W.BASE_RADIUS)<1e-9&&four.power===4*W.BASE_POWER&&many.power===W.POWER_CAP*W.BASE_POWER;
+  record("Wallets blast: a chain reaches every live device in reach, never a spent or distant one; the merged blast scales by count with a capped hit; 21 s fuse, 16 devices",chained&&alone&&scaled&&W.BOMB_CAP===16&&W.FUSE===21,JSON.stringify({n,chained,alone,scaled}));
+  const v=BL.dsbVacancies.REGISTRY.find(p=>p.number===2),Wd=waterWorld(BL),land=Wd.land,A=Wd.avatar,targets=new Set();
+  const exterior={visible:true},weather={shared:{state:{muted:true}},inside:false,setInterior(on){this.inside=on;}};
+  const I=BL.dsbInteriors.create({root:Wd.root,exterior,land,weather,relocate:noop,lock:noop,onChange:noop}),e=I.registry.get("free-wallets");
+  record("Wallets address: occupied VAC 2 keeps VACANT 20 at 26/60 with its 4 x 4 m facade, beside SVRN at VAC 7",v.status==="occupied"&&v.occupant==="Free Hardware Wallets"&&v.interiorId==="free-wallets"&&e.building.name===v.buildingId&&e.building.x===26&&e.building.z===60&&e.building.w===4&&e.building.d===4&&e.label==="Free Hardware Wallets"&&BL.dsbVacancies.REGISTRY.filter(p=>p.status==="vacant").length===32,JSON.stringify({v,building:e.building}));
+  I.review("free-wallets",true);I.update(.4);const Rm=I.active.room;
+  // Regression: flat footprint blockers prevented jumping over furniture and never supplied a landing surface.
+  const counterTop=I.groundAt(3.9,4.6,1.2,1.2,A),caseTop=I.groundAt(-4.1,-4.5,1.7,1.7,A);
+  record("Wallets furniture: counter and glass-case tops support landings, airborne travel clears the counter, walking off loses support, and floor-level bodies still collide",
+    Math.abs(counterTop-1.08)<1e-6&&Math.abs(caseTop-1.6)<1e-6
+    &&!I.walkable(2.9,4.6,4.9,4.6,0,A.bodyHeight,A)
+    &&Rm.flyable(2.9,4.6,4.9,4.6,1.2,A.bodyHeight,A)
+    &&I.walkable(3.9,4.6,2.7,4.6,counterTop,A.bodyHeight,A)&&I.groundAt(2.7,4.6,counterTop,counterTop,A)===0
+    &&Math.abs(Rm.ceilingAt(0,0,0,A)-4.29)<1e-6&&!Rm.flyable(6,4,7,4,2,A.bodyHeight,A),JSON.stringify({counterTop,caseTop}));
+  const clear=(ax,az,bx=ax,bz=az)=>I.walkable(ax,az,bx,bz,0,A.bodyHeight,A),step=.25,minX=-6.5,minZ=-7.5,w=53,h=61,seen=new Uint8Array(w*h),queue=[];
+  const index=(x,z)=>Math.round((z-minZ)/step)*w+Math.round((x-minX)/step),start=index(Rm.spawn.x,Rm.spawn.z);seen[start]=1;queue.push(start);
+  for(let head=0;head<queue.length;head++){const k=queue[head],ix=k%w,iz=Math.floor(k/w),x=minX+ix*step,z=minZ+iz*step;
+    for(const [dx,dz] of [[1,0],[-1,0],[0,1],[0,-1]]){const nx=ix+dx,nz=iz+dz,i=nz*w+nx;if(nx<0||nx>=w||nz<0||nz>=h||seen[i]||!clear(x,z,x+dx*step,z+dz*step))continue;seen[i]=1;queue.push(i);}}
+  const reachable=p=>{const i=index(p.x,p.z),ix=i%w,iz=Math.floor(i/w);for(let dx=-1;dx<=1;dx++)for(let dz=-1;dz<=1;dz++){const nx=ix+dx,nz=iz+dz;if(nx>=0&&nx<w&&nz>=0&&nz<h&&seen[nz*w+nx]&&clear(minX+nx*step,minZ+nz*step,p.x,p.z))return true;}return false;};
+  const goals=[Rm.exit,Rm.machine,...Rm.browseGoals];
+  record("Wallets navigation: Yellow reaches the machine, the small print, every review area and the exit",clear(Rm.spawn.x,Rm.spawn.z)&&goals.every(reachable),JSON.stringify({unreachable:goals.filter(p=>!reachable(p))}));
+  record("Wallets zones: only the vending machine approach offers free wallets",BL.dsbMenuZones.resolve(Rm,Rm.machine)?.route==="machine"&&BL.dsbMenuZones.resolve(Rm,{x:0,z:-5})?.label==="Free wallets"&&[{x:0,z:4},{x:2,z:-5.6},{x:0,z:-4}].every(p=>BL.dsbMenuZones.resolve(Rm,p)===null));
+  let nodes=0,finite=true;const geometry=new Set(),walk=k=>{nodes++;if(k.geometry){geometry.add(k.geometry);finite&&=k.geometry.verts.every(Number.isFinite);}k.children.forEach(walk);};walk(Rm.root);
+  let flickerOk=true;for(let t=0;t<30;t+=.05){Rm.flicker(t);flickerOk&&=Rm.lighting.lightCount===5&&Rm.lighting.lights.every(Number.isFinite);}
+  record("Wallets budget: finite shared meshes, six device cases, four cameras, five lamps (one flickering with the neon) and one slot kept for a blast's flash",finite&&flickerOk&&nodes<700&&geometry.size<60&&W.LOOKS.length===6&&Rm.counts.cases===W.LOOKS.length&&Rm.fixtures.filter(f=>f.kind==="vitrine").every(f=>f.node.position.z-.42>=Rm.bounds.minZ&&f.node.position.z+.42<=Rm.bounds.maxZ)&&Rm.counts.cameras===4&&Rm.lighting.lightCount===5&&Rm.lamps===5&&Rm.lighting.lights.length>=48,JSON.stringify({nodes,geometries:geometry.size}));
+  let tracking=true,blinking=true;
+  for(const target of [{x:-6,y:0,z:-7},{x:6,y:0,z:7},{x:0,y:2.5,z:0},{x:6,y:0,z:-7},{x:-6,y:0,z:7}]){
+    Rm.flicker(0,target,1.2);
+    for(const {head,led} of Rm.cameras){
+      const dx=target.x-head.position.x,dy=target.y+1.2-head.position.y,dz=target.z-head.position.z,length=Math.hypot(dx,dy,dz),pitch=head.rotation.x,yaw=head.rotation.y;
+      tracking&&=Math.abs(Math.sin(yaw)*Math.cos(pitch)-dx/length)<1e-10&&Math.abs(-Math.sin(pitch)-dy/length)<1e-10&&Math.abs(Math.cos(yaw)*Math.cos(pitch)-dz/length)<1e-10&&led.parent===head;
+    }
+  }
+  for(let i=0;i<Rm.cameras.length;i++){Rm.flicker(1.6-i*.23);blinking&&=Rm.cameras[i].led.glow===1;Rm.flicker(2.4-i*.23);blinking&&=Rm.cameras[i].led.glow===.05;}
+  record("Wallets CCTV: four corner heads track the player's height across the room, with attached blinking lights",Rm.cameras.length===4&&new Set(Rm.cameras.map(({head})=>Math.sign(head.position.x)+":"+Math.sign(head.position.z))).size===4&&tracking&&blinking,JSON.stringify({tracking,blinking}));
+  const balance=Rm.vendor.children.find(n=>n.children.some(c=>c.geometry===W.passpoorBalanceGeometry(0))).children[0];
+  const front={x:.12,y:0,z:-4},behind={x:.12,y:0,z:-7.6};
+  Rm.flicker(100,front);const negative=balance.geometry===W.passpoorBalanceGeometry(1);
+  Rm.flicker(101,front);const counting=balance.geometry===W.passpoorBalanceGeometry(3);
+  Rm.flicker(160,front);const capped=balance.geometry===W.passpoorBalanceGeometry(99);
+  Rm.flicker(200,front);const held=balance.geometry===W.passpoorBalanceGeometry(99);
+  Rm.flicker(201,behind);const reset=balance.geometry===W.passpoorBalanceGeometry(0);
+  Rm.flicker(202,front);const restarted=balance.geometry===W.passpoorBalanceGeometry(1);
+  Rm.flicker(203);const unobserved=balance.geometry===W.passpoorBalanceGeometry(0);
+  record("Wallets Passpoor: the visible balance counts down, holds at -99, resets when facing away or unobserved, and restarts on return",negative&&counting&&capped&&held&&reset&&restarted&&unobserved,JSON.stringify({negative,counting,capped,held,reset,restarted,unobserved}));
+  // The devices in the real Chora and the store, through the driven Ooga's own hands.
+  const fx={say:noop,sayAt:noop,burst:noop,puff:noop},children=Wd.root.children.length;let space=0;
+  const ground=(x,z,feet)=>I.active?I.groundAt(x,z):Math.max(land.groundAt(x,z),Wd.ground(x,z));
+  const sys=W.create({root:Wd.root,crew:Wd.crew,fx,hud:{toast:t=>toasts.push(t)},groundAt:ground,bounds:()=>I.active?.room.bounds||null,addTarget:k=>targets.add(k),removeTarget:k=>targets.delete(k),pickGeometry:BL.walletsRoom.PICK,muted:()=>true});
+  const T=sys.debug,run=(seconds,dt=.05)=>{for(let t=0;t<seconds;t+=dt)sys.update(dt,t,space);};
+  space=9;Object.assign(A.root.position,{x:0,y:A.baseY,z:-4.6});A.root.rotation.y=0;run(.1);
+  const first=sys.take(1),holding=sys.held()===first&&T.list()[0].state==="carried"&&T.list()[0].look==="clowncard"&&sys.take(0)<0&&/already holds/.test(toasts.at(-1));
+  const placed=sys.setDown(3,-1.5)&&T.list()[0].state==="dropped"&&T.list()[0].x===3&&T.list()[0].z===-1.5&&T.list()[0].y===0&&/being wrapped/.test(sys.refusal());
+  const far=!sys.tap(first)&&T.list()[0].state==="dropped";Object.assign(A.root.position,{x:2.4,y:A.baseY,z:-2});const picked=sys.tap(first)&&sys.held()===first;
+  A.root.rotation.y=Math.PI/2;Object.assign(A.root.position,{x:5.4,y:A.baseY,z:0});run(.05);sys.throwCarried();const flying=T.list()[0].state==="flying";run(2);const landed=T.list()[0];
+  record("Wallets hands: Take puts one device in the Ooga's hands and refuses a second, a ground tap sets it down exactly there, one in reach is picked up, and a throw at the wall lands inside the store",holding&&placed&&far&&picked&&flying&&landed.state==="dropped"&&landed.x<=Rm.bounds.maxX&&landed.x>5.4&&Math.abs(landed.y)<1e-6,JSON.stringify({holding,placed,far,picked,flying,landed}));
+  // Left in the store, it goes off unseen and unheard and sets off nothing in the Chora at the same coordinates.
+  space=0;I.request(Rm.exit);I.update(.4);const flat={x:26,z:66};Object.assign(A.root.position,{x:flat.x-6,y:ground(flat.x-6,flat.z)+A.baseY,z:flat.z});run(.1);
+  T.cool();const neighbour=T.spawn(1,landed.x,landed.z),before=T.stats(),store=T.list().find(d=>d.space===9);
+  T.timer(.1,store.slot);run(.15);
+  const hidden=!T.list().some(d=>d.space===9)&&T.list().some(d=>d.slot===neighbour[0])&&T.stats().fireballs===0&&!T.flash.t;
+  record("Wallets spaces: a device left in the store keeps its fuse out of sight and goes off silently, setting off nothing outside at the same spot",!!store&&neighbour.length===1&&hidden&&T.stats().scorches===1,JSON.stringify({before,after:T.stats()}));
+  // The Chora's chain: three set down together go off as one, a distant fourth waits, and the Ooga close by is knocked back.
+  for(const d of T.list())T.detonate(d.slot);run(.1);T.cool();
+  const cluster=T.spawn(3,flat.x,flat.z),distant=T.spawn(1,flat.x+12,flat.z);Object.assign(A.root.position,{x:flat.x-1.5,y:ground(flat.x-1.5,flat.z)+A.baseY,z:flat.z});A.hopV=0;
+  // Nobody is hurt: the blast never calls crew.damage, combat on or off.
+  let hurt=0;const damage=Wd.crew.damage;Wd.crew.damage=(...args)=>{hurt++;return damage(...args);};
+  const stamp=T.stats();T.detonate(cluster[0]);const after=T.stats(),flash=new Float32Array(8),lit=sys.flashLight(flash,0);Wd.crew.damage=damage;
+  record("Wallets chain: three devices set down together in the Chora go off as one blast, a distant one waits, the Ooga close by hops back unhurt, and the flash lights one slot",cluster.length===3&&after.walletBlasts===stamp.walletBlasts+1&&after.walletsChained-stamp.walletsChained===3&&after.wallets===1&&T.list()[0].slot===distant[0]&&A.hopV>2&&hurt===0&&lit&&flash[4]>0,JSON.stringify({stamp,after,hop:A.hopV,hurt}));
+  // Held too long: it goes off in the Ooga's hands, blackens it and says so.
+  T.detonate(distant[0]);T.cool();run(.1);sys.take(0);T.timer(.05);run(.2);
+  record("Wallets fuse: one held at zero blows up in the Ooga's hands, soots it and says Rekt",T.stats().wallets===0&&A.camp.scorch.every(k=>k===1)&&toasts.at(-1)==="Rekt",JSON.stringify(toasts.slice(-2)));
+  for(let k=0;k<W.SCORCH_CAP+6;k++){T.cool();T.spawn(1,flat.x+(k%5)*3,flat.z+Math.floor(k/5)*3);T.timer(.05);run(.1);}
+  record("Wallets pools: scorches, fireballs and devices stay within their fixed caps",T.stats().scorches<=W.SCORCH_CAP&&T.stats().fireballs<=4&&T.spawn(W.BOMB_CAP+4,flat.x,flat.z+20).length===W.BOMB_CAP&&targets.size===W.BOMB_CAP,JSON.stringify(T.stats()));
+  // Seated (the Studio's and Maxis's seats): a carried device rests on the lap without forcing the raised-arms pose,
+  // and a blast in the hands soots the Ooga but leaves it in its seat, with no hop.
+  for(const d of T.list())T.detonate(d.slot);T.cool();run(.1);
+  const seat={x:A.root.position.x,z:A.root.position.z};A.camp.seat=seat;A.catchT=0;A.hopV=0;A.camp.scorch.fill(0);sys.take(1);run(.2);
+  const lap=T.list()[0],arms=A.catchT,overHead=lap.y>A.root.position.y-A.baseY+A.bodyHeight;T.timer(.05);run(.1);
+  const seated=A.camp.seat===seat&&A.hopV===0&&A.camp.scorch.every(k=>k===1);A.camp.seat=null;
+  record("Wallets seats: a device carried to a seat rests on the lap and leaves the seated pose alone, and its blast soots the seated Ooga without a hop",arms===0&&!overHead&&lap.state==="carried"&&seated,JSON.stringify({arms,lap,hop:A.hopV,seated}));
+  // The overlay draws nothing, and sets nothing on the canvas, while no device is out.
+  let touched=0;const ctx2d=new Proxy({},{get:(o,k)=>typeof k==="string"&&/Text$/.test(k)?()=>{touched++;}:o[k],set:(o,k,v)=>{touched++;o[k]=v;return true;}});
+  sys.drawOverlay(ctx2d,()=>({x:0,y:0}));const idle=touched;T.cool();sys.take(0);run(.05);sys.drawOverlay(ctx2d,()=>({x:0,y:0}));const busy=touched;T.detonate();run(.05);
+  record("Wallets overlay: with no device out it returns before touching the canvas",idle===0&&busy>0,JSON.stringify({idle,busy}));
+  // The sound's context runs only while a device is out (and a boom rings on), the sound is on and the tab is shown.
+  const calls=[],saved={AudioContext:globalThis.AudioContext,add:document.addEventListener,remove:document.removeEventListener,hidden:document.hidden};let heard=null,unheard=null,mute=false;
+  const param=()=>({value:0,cancelScheduledValues(){},setValueAtTime(){},exponentialRampToValueAtTime(){}}),node=extra=>({connect(){},start(){},...extra});
+  globalThis.AudioContext=class{constructor(){this.state="running";this.currentTime=0;this.sampleRate=8000;this.destination={};}createGain(){return node({gain:param()});}createOscillator(){return node({frequency:param()});}
+    createBuffer(c,l){return {getChannelData:()=>new Float32Array(l)};}createBufferSource(){return node({});}createBiquadFilter(){return node({frequency:param()});}
+    resume(){this.state="running";calls.push("resume");return Promise.resolve();}suspend(){this.state="suspended";calls.push("suspend");return Promise.resolve();}close(){calls.push("close");return Promise.resolve();}};
+  document.addEventListener=(k,f)=>{if(k==="visibilitychange")heard=f;};document.removeEventListener=(k,f)=>{if(k==="visibilitychange"&&f===heard)unheard=f;};document.hidden=false;
+  try{
+    const sound=W.create({root:Wd.root,crew:Wd.crew,fx,hud:{toast:noop},groundAt:ground,bounds:()=>null,addTarget:noop,removeTarget:noop,pickGeometry:BL.walletsRoom.PICK,muted:()=>mute}),S2=sound.debug,go=sec=>{for(let t=0;t<sec;t+=.05)sound.update(.05,t,0);};
+    mute=true;sound.take(0);go(.1);const startedMuted=S2.stats().walletAudio===0&&S2.stats().walletAudible===0;
+    mute=false;go(.1);const playing=S2.stats().walletAudio===1&&S2.stats().walletAudible===1;
+    mute=true;go(.1);const muted=S2.stats().walletAudible===0&&calls.at(-1)==="suspend";mute=false;go(.1);const unmuted=S2.stats().walletAudible===1&&calls.at(-1)==="resume";
+    document.hidden=true;heard();const hiddenOff=S2.stats().walletAudible===0&&calls.at(-1)==="suspend";go(.1);const stays=calls.at(-1)==="suspend";document.hidden=false;heard();const shown=calls.at(-1)==="resume";
+    S2.detonate();go(.5);const ringing=S2.stats().walletAudible===1;go(3);const idle2=S2.stats().wallets===0&&S2.stats().walletAudible===0&&calls.at(-1)==="suspend";
+    sound.dispose();const closed=calls.at(-1)==="close"&&unheard===heard;
+    record("Wallets sound: the context runs only while a device is out or a boom rings on, the sound is on and the tab is shown, and leaving closes it and its visibility handler, including a first device taken while muted",startedMuted&&playing&&muted&&unmuted&&hiddenOff&&stays&&shown&&ringing&&idle2&&closed,JSON.stringify({startedMuted,playing,muted,unmuted,hiddenOff,stays,shown,ringing,idle2,closed,calls}));
+  }finally{globalThis.AudioContext=saved.AudioContext;document.addEventListener=saved.add;document.removeEventListener=saved.remove;document.hidden=saved.hidden;}
+  sys.dispose();const left=Wd.root.children.length;I.dispose();Wd.dispose();
+  record("Wallets disposal: every batch and pick target leaves with the visit",targets.size===0&&left===children,JSON.stringify({targets:targets.size,left,children}));
+  // The kit's and the devices' meshes join the builder caches that leaving DSB Land drops.
+  const scopes=BL.models,kitOf=BL.walletsModels.geometry,lookOf=BL.walletBombs.geometryOf;scopes.setScope("dsb");
+  const crate=kitOf("crate"),look=lookOf(0),cratesShared=kitOf("crate")===crate&&lookOf(0)===look;scopes.release("dsb",["hub"]);
+  const cratesRebuilt=kitOf("crate")!==crate&&lookOf(0)!==look;scopes.setScope(null);
+  record("Wallets caches: the kit's and the devices' meshes are shared within a visit and dropped when DSB Land is left",cratesShared&&cratesRebuilt);
+  walletsMenuChecks(BL);
+};
+// The machine through a minimal DOM: all six wallets as pictures and names alone, Take hands over the chosen one.
+const walletsMenuChecks = BL => {
+  const keys=["document","innerWidth","innerHeight"],saved=Object.fromEntries(keys.map(k=>[k,globalThis[k]])),elements=[],hud=BL.hud;
+  const element=tag=>{const e={tag,children:[],dataset:{},attributes:{},style:{setProperty(){}},classList:{add(){},remove(){},contains:()=>false},open:false,parentElement:null,textContent:"",listeners:new Map(),
+    setAttribute(k,v){this.attributes[k]=v;},removeAttribute(k){delete this.attributes[k];},appendChild(c){c.parentElement=this;this.children.push(c);return c;},append(...v){v.forEach(x=>typeof x==="string"?0:this.appendChild(x));},replaceChildren(){this.children=[];},
+    closest(q){return q==="button"?(this.tag==="button"?this:this.parentElement?.closest(q)):null;},querySelector:()=>null,querySelectorAll:()=>[],focus(){},getClientRects:()=>[{}],showModal(){this.open=true;},close(){this.open=false;},
+    remove(){if(this.parentElement)this.parentElement.children=this.parentElement.children.filter(n=>n!==this);this.parentElement=null;},addEventListener(k,f){this.listeners.set(k,f);},removeEventListener(k){this.listeners.delete(k);},
+    getContext:()=>({fillRect(){}}),get isConnected(){return !!this.parentElement;}};elements.push(e);return e;};
+  const body=element("body");globalThis.document={body,createElement:element,activeElement:body,addEventListener(){},removeEventListener(){}};globalThis.innerWidth=1440;globalThis.innerHeight=900;
+  BL.hud={...hud,signLettering:text=>{const svg=element("svg");svg.textContent=text;return svg;}};
+  try{
+    let taken=-1;const M=BL.walletsMenu.create({onTake:look=>{taken=look;}});M.open();
+    const dialog=body.children.find(n=>n.tag==="dialog"),panel=dialog.children[0],content=panel.children[2],text=[],visit=n=>{if(n.textContent)text.push(n.textContent);n.children.forEach(visit);};visit(content);
+    const picks=content.children[0].children,names=picks.map(b=>b.children[1].textContent);
+    const shown=M.isOpen&&dialog.className==="sheet-body wallets-menu"&&panel.className==="panel"&&panel.children[0].className==="panel-title"&&content.children[0].className==="slab wallets-picks"&&content.children[1].className==="chat-send wallets-take"&&names.join()==="ClownCard,Rektdger,BrickBox02,Passpoor,Jaded,SeedSnitcher"&&picks.every(b=>b.children[0].tag==="canvas")&&JSON.stringify(text)===JSON.stringify(["ClownCard","Rektdger","BrickBox02","Passpoor","Jaded","SeedSnitcher","Take"])&&!/explo|second|bomb|beep|fuse|tick/i.test(text.join(" "));
+    dialog.listeners.get("click")({target:picks[1]});dialog.listeners.get("click")({target:content.children[1]});const took=taken===0&&!M.isOpen;
+    let allTaken=true;
+    for(const b of picks){M.open();dialog.listeners.get("click")({target:b});allTaken&&=b.attributes["aria-pressed"]==="true"&&picks.filter(p=>p.attributes["aria-pressed"]==="true").length===1;dialog.listeners.get("click")({target:content.children[1]});allTaken&&=taken===Number(b.dataset.wallet)&&!M.isOpen;}
+    const lastTaken=taken;M.open();dialog.listeners.get("keydown")({type:"keydown",key:"Escape",target:dialog,preventDefault(){},stopPropagation(){}});const escaped=!M.isOpen&&taken===lastTaken;
+    M.dispose();
+    record("Wallets machine: all six wallets as pictures and names alone with Take, nothing said about what they do; Take hands over every chosen variant, Escape closes, disposal leaves nothing",shown&&took&&allTaken&&escaped&&!body.children.length&&elements.every(e=>!e.listeners.size)&&BL.dsbMenuShell.count===0,JSON.stringify({names,text,took,allTaken,escaped}));
   }finally{BL.hud=hud;for(const [k,v] of Object.entries(saved))globalThis[k]=v;}
 };
 const menuShellChecks = BL => {
@@ -20355,7 +20497,9 @@ const raceRigChecks = async () => {
     // The fragment shader, re-baselined on purpose: 487d99ac909f added uObjectSlab2 for the Factory roof bore
     // (b82d02f4 to f5f71f79), ab4ebcd sampled retained canvas surfaces (to c98cc70d) and e32e91e sampled the
     // foliage LOD atlas (to fb12fd53). Removing those additions would not restore b82d02f4 alone.
-    "fb12fd53216aa902750f5bf315e44a6334c9b24fb58afb12f28a4f5e85233677",
+    // The wallet store adds opt-in blacklight fluorescence and distance falloff (to 7db01487).
+    // uBlacklight.w is zero outside that effect; the vertex and shadow programs remain unchanged.
+    "7db01487f3d0ffd35e232946cbca13238e1346cdb56a10baaeb818f835c86abb",
     "37030f053de422aa157f017ceedef0812ed57a17c9e1b2af4aab017c0b645364"
   ];
   record("race rig strategy: ordinary mesh, fragment and shadow shader bytes retain the pre-rig fast path", ordinaryHashes.every((hash, i) => hash === expectedOrdinaryHashes[i]), JSON.stringify(ordinaryHashes));
@@ -20984,7 +21128,7 @@ const studioCatalogueProof = async () => {
 const studioVoiceLifecycleProof = async () => {
   const source=await readFile(join(root,"src/js/voice.js"),"utf8");
   const fixture=()=>{
-    const calls=[],streams=[],peers=[],elements=[],timers=new Map();let timerId=0,gum=0,permission=null,publishResponse=null;
+    const calls=[],streams=[],peers=[],elements=[],timers=new Map();let timerId=0,gum=0,permission=null,publishResponse=null,deferred=null;
     class Peer {
       constructor(){peers.push(this);this.connectionState="connected";this.iceGatheringState="complete";this.localDescription=null;this.handlers=new Map();}
       addEventListener(k,fn){this.handlers.set(k,fn);}
@@ -20996,13 +21140,13 @@ const studioVoiceLifecycleProof = async () => {
       getTransceivers(){return [];}
       close(){this.connectionState="closed";}
     }
-    class Sound {constructor(){this.pending=[];elements.push(this);}play(){return new Promise((resolve,reject)=>this.pending.push({resolve,reject}));}pause(){}}
+    class Sound {constructor(){this.pending=[];elements.push(this);}play(){return new Promise((resolve,reject)=>this.pending.push({resolve,reject}));}pause(){this.pauses=(this.pauses||0)+1;}}
     const makeStream=()=>{const track={enabled:true,stops:0,stop(){this.stops++;}},stream={track,getTracks:()=>[track],getAudioTracks:()=>[track]};streams.push(stream);return stream;};
     const win={BL:{net:{state:{connectionToken:"synthetic"},remotes:new Map(),setMuted:on=>calls.push({op:"mute",on})}},setTimeout:fn=>{timers.set(++timerId,fn);return timerId;},clearTimeout:id=>timers.delete(id),setInterval:fn=>{timers.set(++timerId,fn);return timerId;},clearInterval:id=>timers.delete(id)};
-    const context={window:win,localStorage:{getItem:()=>null,setItem(){}},AbortController,RTCPeerConnection:Peer,Audio:Sound,MediaStream:class {constructor(tracks){this.tracks=tracks;}},navigator:{mediaDevices:{enumerateDevices:async()=>[{kind:"audioinput",deviceId:"synthetic-mic",label:"Synthetic mic"},{kind:"videoinput",deviceId:"camera",label:"Camera"}],getUserMedia:constraints=>{gum++;calls.push({op:"capture",constraints});return permission||Promise.resolve(makeStream());}}},
-      fetch:async(url,options)=>{const op=url.split("/").at(-1);calls.push({op,body:JSON.parse(options.body)});if(op==="publish"&&publishResponse)return publishResponse;if(op==="pull")return {ok:true,json:async()=>({tracks:JSON.parse(options.body).ids.map(id=>({id,mid:String(id)}))})};return {ok:true,json:async()=>({sessionDescription:{type:"answer",sdp:"synthetic"}})};}};
+    const context={window:win,localStorage:{getItem:()=>null,setItem(){}},AbortController,RTCPeerConnection:Peer,Audio:Sound,MediaStream:class {constructor(tracks){this.tracks=tracks;}getTracks(){return this.tracks;}},navigator:{mediaDevices:{enumerateDevices:async()=>[{kind:"audioinput",deviceId:"synthetic-mic",label:"Synthetic mic"},{kind:"videoinput",deviceId:"camera",label:"Camera"}],getUserMedia:constraints=>{gum++;calls.push({op:"capture",constraints});return permission||Promise.resolve(makeStream());}}},
+      fetch:async(url,options)=>{const op=url.split("/").at(-1);calls.push({op,body:JSON.parse(options.body)});if(deferred?.op===op)return deferred.promise;if(op==="publish"&&publishResponse)return publishResponse;if(op==="pull")return {ok:true,json:async()=>({tracks:JSON.parse(options.body).ids.map(id=>({id,mid:String(id)}))})};return {ok:true,json:async()=>({sessionDescription:{type:"answer",sdp:"synthetic"}})};}};
     runInNewContext(source,context);
-    return {voice:win.BL.voice,calls,streams,peers,elements,timers,get gum(){return gum;},makeStream,denyPermission(){permission=Promise.reject(Object.assign(Error("denied"),{name:"NotAllowedError"}));},deferPermission(){permission=new Promise(resolve=>{this.resolvePermission=resolve;});},deferPublish(){publishResponse=new Promise(resolve=>{this.resolvePublish=()=>resolve({ok:true,json:async()=>({sessionDescription:{type:"answer",sdp:"synthetic"}})});});}};
+    return {defer(op){let finish;const promise=new Promise(resolve=>{finish=resolve;});deferred={op,promise};return data=>{deferred=null;finish({ok:true,json:async()=>data});};},voice:win.BL.voice,calls,streams,peers,elements,timers,get gum(){return gum;},makeStream,denyPermission(){permission=Promise.reject(Object.assign(Error("denied"),{name:"NotAllowedError"}));},deferPermission(){permission=new Promise(resolve=>{this.resolvePermission=resolve;});},deferPublish(){publishResponse=new Promise(resolve=>{this.resolvePublish=()=>resolve({ok:true,json:async()=>({sessionDescription:{type:"answer",sdp:"synthetic"}})});});}};
   };
   const drain=async()=>{for(let i=0;i<40;i++)await Promise.resolve();};
   const listener=fixture();await listener.voice.listen();await listener.voice.restart();await drain();
@@ -21031,7 +21175,7 @@ const studioVoiceLifecycleProof = async () => {
   const latePreviewReleased=previewStream.track.stops===1&&!preview.voice.stats.preflight&&!preview.voice.stats.publishing;
   preview.voice.setReceiveLevel(2);const boundedLevel=preview.voice.stats.receiveLevel===1;preview.voice.setReceiveLevel(-1);const receiveLevel=boundedLevel&&preview.voice.stats.receiveLevel===0;preview.voice.dispose();await drain();
   const autoplay=fixture();await autoplay.voice.listen();autoplay.voice.setPeers([71,72]);await drain();
-  for(const id of [71,72])autoplay.peers[0].handlers.get("track")({transceiver:{mid:String(id)},track:{id}});
+  for(const id of [71,72])autoplay.peers[0].handlers.get("track")({transceiver:{mid:String(id)},track:{id,stop(){}}});
   autoplay.elements[0].pending[0].reject(Error("gesture"));autoplay.elements[1].pending[0].resolve();await drain();
   const aggregateBlocked=autoplay.voice.stats.blocked&&autoplay.voice.stats.error.includes("Enable sound");
   await autoplay.voice.listen();for(const el of autoplay.elements)el.pending.at(-1).resolve();await drain();const retryClears=!autoplay.voice.stats.blocked&&!autoplay.voice.stats.error;
@@ -21040,7 +21184,19 @@ const studioVoiceLifecycleProof = async () => {
   const denied=fixture();await denied.voice.listen();denied.denyPermission();await denied.voice.preflight();
   const deniedPreviewKeepsReceiver=denied.voice.stats.ready&&denied.voice.stats.enabled&&!denied.voice.stats.error&&!!denied.voice.stats.micError&&denied.voice.stats.permission==="denied";
   await denied.voice.enable();const deniedPublishKeepsReceiver=denied.voice.stats.ready&&denied.voice.stats.enabled&&!denied.voice.stats.error&&!!denied.voice.stats.micError&&!denied.voice.stats.publishing;denied.voice.dispose();await drain();
-  return {receiveOnly,receiveOnlyAudience,audienceKeepsMute,lastListenerLeaves,listenerReturns,invalidAudience,audienceClearedOnStop,permissionCancelled,explicitUnmute,restartMute,publishCancelled,stopCancelled,localPreview,previewReleased,latePreviewReleased,previewCancelCannotStopPublication,receiveLevel,aggregateBlocked,retryClears,stalePlaybackIgnored,deniedPreviewKeepsReceiver,deniedPublishKeepsReceiver,timersReleased:[listener,audience,late,rejoin,stale,stopped,preview,autoplay,denied].every(f=>f.timers.size===0)};
+  const replaced=fixture();await replaced.voice.listen();const finishPull=replaced.defer("pull");
+  replaced.voice.setPeers([71],[1]);await drain();replaced.voice.setPeers([71],[2]);finishPull({tracks:[{id:71,mid:"old"}]});await drain();
+  const publicationReplaced=replaced.calls.some(c=>c.op==="close"&&c.body.mids.includes("old"))&&replaced.calls.filter(c=>c.op==="pull").length===2;replaced.voice.dispose();await drain();
+  const leaving=fixture();await leaving.voice.listen();leaving.voice.setPeers([71],[1]);await drain();
+  const remoteTrack={stops:0,stop(){this.stops++;}};leaving.peers[0].handlers.get("track")({transceiver:{mid:"71"},track:remoteTrack});
+  const latePull=leaving.defer("pull");leaving.voice.setPeers([71,72],[1,1]);await drain();
+  const finishLeave=leaving.defer("leave");leaving.voice.stop();latePull({tracks:[{id:72,mid:"72"}]});await drain();
+  const leaveStopsAudio=!leaving.voice.stats.enabled&&remoteTrack.stops===1&&leaving.elements.length===1&&leaving.elements.every(el=>el.muted&&el.pauses===1&&el.srcObject===null)&&leaving.peers.every(pc=>pc.connectionState==="closed");
+  finishLeave({ok:true});leaving.elements[0].pending[0].resolve();await drain();
+  const latePlaybackStaysOff=!leaving.voice.stats.enabled&&!leaving.voice.stats.hearing;leaving.voice.dispose();await drain();
+  const restarting=fixture();await restarting.voice.listen();const finishRestart=restarting.defer("leave");const restart=restarting.voice.restart();await drain();restarting.voice.stop();finishRestart({ok:true});await restart;await drain();
+  const leaveCancelsRestart=!restarting.voice.stats.enabled&&restarting.calls.filter(c=>c.op==="session").length===1;restarting.voice.dispose();await drain();
+  return {publicationReplaced,leaveStopsAudio,latePlaybackStaysOff,leaveCancelsRestart,receiveOnly,receiveOnlyAudience,audienceKeepsMute,lastListenerLeaves,listenerReturns,invalidAudience,audienceClearedOnStop,permissionCancelled,explicitUnmute,restartMute,publishCancelled,stopCancelled,localPreview,previewReleased,latePreviewReleased,previewCancelCannotStopPublication,receiveLevel,aggregateBlocked,retryClears,stalePlaybackIgnored,deniedPreviewKeepsReceiver,deniedPublishKeepsReceiver,timersReleased:[listener,audience,late,rejoin,stale,stopped,preview,autoplay,denied,replaced,leaving,restarting].every(f=>f.timers.size===0)};
 };
 
 // The real controller runs against a bounded DOM/media double: no permission prompts or SFU.
@@ -21434,6 +21590,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   if(ARGS.includes("integration-unit")){await reviewCaptureChecks();await integrationChecks(BL);return;}
   if(ARGS.includes("svrn-unit")){svrnChecks(BL);menuShellChecks(BL);return;}
   if(ARGS.includes("vacancy-unit")){await vacancyChecks(BL);return;}
+  if(ARGS.includes("wallets-unit")){walletsChecks(BL);return;}
   if(ARGS.includes("rescue-unit")){rescueChecks(BL);return;}
   if(ARGS.includes("portal-unit")){portalChecks(BL,el);return;}
   if(ARGS.includes("water-unit")){await shorelineHarnessChecks();waterChecks(BL);return;}
@@ -22587,6 +22744,107 @@ scene("dsb",{label:"rescue phone",query:"&interior=puppy-rescue&view=rescue-adop
   await rescueClick(b,".rescue-menu button[data-close]");await rescueStep(b);const back=await b.evaluate("__ooga.dsb.rescue.menu.isOpen");
   record("Rescue phone: signed out in debug, a tap on Adopt a puppy opens the adoption form, and Back closes it",button.text==="Adopt a puppy"&&!button.hidden&&rescueOffered(tapped)&&!back,JSON.stringify({button,tapped,back}));
 }},phone("rescue",{play:`${RESCUE_SIGN_IN};for(let i=0;i<4;i++)BL.scenes.dsb.update(1/60,i/60);__ooga.dsb.rescue.open()`,required:['.rescue-menu button[data-breed="0"]','.rescue-menu button[data-breed="5"]',".rescue-menu input",".rescue-menu button[data-adopt]"]})]});
+// Free Hardware Wallets at VAC 2, played with real keys and clicks: one desktop session and one phone session.
+// n sixtieths of a second of play, in updates of a twentieth: a DSB update costs tens of milliseconds on a software renderer.
+// It ends on one whole frame, so `project` and a click's pick use the camera just navigated to, not the last one drawn.
+const walletsStep=(b,n=36)=>b.evaluate(`for(let i=0;i<${Math.ceil(n/3)};i++)BL.scenes.dsb.update(1/20,i/20);__ooga.advance(1/60)`);
+// A dialog control the way a visitor reaches it: scrolled into view first, then clicked where it shows. Two frames
+// follow, as a visitor's next key would: a control the click hid (Take closes the dialog) keeps focus until one is drawn.
+const walletsClick=async(b,sel)=>{const r=await b.evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(sel)});e.scrollIntoView({block:"center"});const r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()`);await b.click(r.x,r.y);await b.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');};
+const walletsTap=async(b,x,y,z)=>{const p=await b.evaluate(`__ooga.project(${x},${y},${z},{})`);await b.click(p.x,p.y);};
+// Open ground near the Ooga where a click lands on the world itself: in view, not under a button or the overlay's
+// controls, and on no pick target. What a visitor clicks to set a device down.
+const WALLETS_SPOT=`(()=>{const D=__ooga.dsb,I=D.interiors,p=D.avatar.root.position,W=innerWidth,H=innerHeight;
+  for(const r of [2,2.8,3.6,4.4])for(let k=0;k<16;k++){const a=k*Math.PI/8,x=p.x+Math.sin(a)*r,z=p.z+Math.cos(a)*r,y=D.groundAt(x,z),s=__ooga.project(x,y,z,{});
+    if(!s||s.x<12||s.x>W-12||s.y<12||s.y>H-12||document.elementFromPoint(s.x,s.y)?.tagName!=="CANVAS"||BL.scenes.dsb.input.pick(s.x,s.y))continue;
+    // Level ground, so the point under the pointer is the one the click names.
+    if(Math.abs(D.groundAt(x+.6,z)-y)>.03||Math.abs(D.groundAt(x,z+.6)-y)>.03||Math.abs(D.groundAt(x,z,y+.5)-y)>.01)continue;
+    if(I.active?I.walkable(x,z,x,z,0,1,{bodyRadius:.7}):D.land.clearAt(x,z,.7))return {x,y,z};}
+  return null;})()`;
+const walletsUntil=(b,cond)=>b.evaluate(`(()=>{for(let i=0;i<40&&!(${cond});i++)for(let k=0;k<2;k++)BL.scenes.dsb.update(1/20,k/20);return !!(${cond});})()`);
+scene("dsb",{label:"wallets",query:"&view=wallets-door&weather=clear&time=1200",opts:{w:640,h:400},steps:[{name:"dsb wallets",why:"playthrough: VAC 2's real door enters Free Hardware Wallets, Space at the machine offers all six wallets by picture and name alone, Take hands one over with its countdown line and the keys, a floor click sets it down exactly there, Y throws the next; out in the Chora a carried device stays in hand, a ground click sets it down, devices together go off as one bigger blast and one left in the store goes off unseen; carried into the Studio's and Maxis's seats it rests on the lap and its blast leaves the Ooga seated",run:async b=>{
+  await walletsStep(b);await b.key(" ");await walletsStep(b);
+  const entry=await b.evaluate('(()=>{const D=__ooga.dsb,V=D.vacancies.resolve(2);return {id:D.interiors.active?.room.id,text:V.text,status:V.address.status,exterior:D.exterior.visible};})()');
+  record("Wallets browser: Space at VAC 2's door enters Free Hardware Wallets",entry.id==="free-wallets"&&entry.text==="Free Hardware Wallets"&&entry.status==="occupied"&&!entry.exterior,JSON.stringify(entry));
+  await b.evaluate('__ooga.pilot.navigate(__ooga.dsb.interiors.active.room.reviews["wallets-machine"])');await walletsStep(b);await b.key(" ");await walletsStep(b);
+  const dialog=await b.evaluate('(()=>{const p=document.querySelector(".wallets-menu");return {open:__ooga.dsb.walletsMenu.isOpen,engaged:p.classList.contains("dsb-menu-engaged"),names:[...p.querySelectorAll(".wallets-pick b")].map(n=>n.textContent).join(),said:p.querySelector(".wallets-content").innerText.replace(/\\s+/g," ").trim().toLowerCase()};})()');
+  await walletsClick(b,'.wallets-pick[data-wallet="0"]');await walletsClick(b,".wallets-take");await walletsStep(b,6);
+  const taken=await b.evaluate('(()=>{const D=__ooga.dsb,t=document.getElementById("toast");return {open:D.walletsMenu.isOpen,list:D.wallets.list().map(d=>d.look+":"+d.state).join(),line:D.walletLine,shown:!document.querySelector(".wallet-carry").hidden,toast:t&&!t.hidden?t.textContent:null};})()');
+  record("Wallets browser: Space at the machine offers all six wallets by picture and name alone; Take hands over the Rektdger with its countdown line and, on a desktop, Y and the ground",dialog.open&&dialog.engaged&&dialog.names==="ClownCard,Rektdger,BrickBox02,Passpoor,Jaded,SeedSnitcher"&&dialog.said==="clowncard rektdger brickbox02 passpoor jaded seedsnitcher take"&&!taken.open&&taken.list==="rektdger:carried"&&taken.line==="Carrying Rektdger · 21 s · Click the ground to place ·"&&taken.shown&&taken.toast==="Press Y to throw · Click the ground to place",JSON.stringify({dialog,taken}));
+  await b.evaluate('__ooga.pilot.navigate(__ooga.dsb.interiors.active.room.reviews["wallets-wide"])');await walletsStep(b);
+  const spot=await b.evaluate(WALLETS_SPOT);await walletsTap(b,spot.x,spot.y,spot.z);const walked=await walletsUntil(b,"!__ooga.dsb.walletWalk");
+  const placed=await b.evaluate(`(()=>{const D=__ooga.dsb,d=D.wallets.list()[0];return {state:d.state,off:Math.hypot(d.x-(${spot.x}),d.z-(${spot.z})),y:d.y,line:D.walletLine};})()`);
+  record("Wallets browser: a real click on the store floor walks the Ooga there and sets the device down exactly where clicked",walked&&placed.state==="dropped"&&placed.off<.06&&Math.abs(placed.y)<1e-6&&placed.line===null,JSON.stringify(placed));
+  await walletsStep(b,200);await b.evaluate('__ooga.pilot.navigate(__ooga.dsb.interiors.active.room.reviews["wallets-machine"])');await walletsStep(b);await b.key(" ");await walletsStep(b);
+  await walletsClick(b,'.wallets-pick[data-wallet="1"]');await walletsClick(b,".wallets-take");await walletsStep(b,6);await b.key("y");
+  const thrown=await b.evaluate('(()=>{const D=__ooga.dsb,flying=D.wallets.list().some(d=>d.state==="flying");for(let i=0;i<120;i++)BL.scenes.dsb.update(1/60,i/60);const R=D.interiors.active.room.bounds;return {flying,list:D.wallets.list().map(d=>d.look+":"+d.state).join(),inside:D.wallets.list().every(d=>d.x>=R.minX&&d.x<=R.maxX&&d.z>=R.minZ&&d.z<=R.maxZ),held:D.wallets.stats().walletsHeld};})()');
+  record("Wallets browser: Y throws the ClownCard taken next, which lands inside the store beside the first",thrown.flying&&thrown.list==="rektdger:dropped,clowncard:dropped"&&thrown.inside&&thrown.held===0,JSON.stringify(thrown));
+  // The Chora, in a block of its own names. The two lying in the store go off first, so it starts with none out.
+  {
+  await b.evaluate('(()=>{const D=__ooga.dsb;for(const d of D.wallets.list())D.wallets.detonate(d.slot);D.wallets.cool();__ooga.pilot.navigate(D.interiors.active.room.reviews["wallets-machine"]);D.takeWallet(1);D.wallets.setDown(-1.5,-3);D.wallets.cool();D.takeWallet(0);__ooga.pilot.navigate({position:D.interiors.active.room.exit,yaw:Math.PI,pitch:.12,dist:3});})()');
+  await walletsStep(b);await b.key(" ");await walletsStep(b);
+  const out=await b.evaluate('(()=>{const D=__ooga.dsb,l=D.wallets.list();return {inside:!!D.interiors.active,held:D.wallets.stats().walletsHeld,carried:l.find(d=>d.state==="carried")?.space,store:l.find(d=>d.state==="dropped")?.space,line:D.walletLine};})()');
+  record("Wallets browser: walked out of the door the Ooga still holds its device, and the one left in the store stays there",!out.inside&&out.held===1&&out.carried===0&&out.store>0&&/^Carrying Rektdger/.test(out.line),JSON.stringify(out));
+  // Out on the level promenade beside the store, where the ground under the pointer is the ground the click names.
+  await b.evaluate('(()=>{const D=__ooga.dsb;__ooga.pilot.navigate({position:{x:20.5,y:D.groundAt(20.5,61.5),z:61.5},yaw:.5,pitch:.4,dist:6});})()');await walletsStep(b);
+  const spot=await b.evaluate(WALLETS_SPOT);
+  await walletsTap(b,spot.x,spot.y,spot.z);const walked=await walletsUntil(b,"!__ooga.dsb.walletWalk");
+  const placed=await b.evaluate(`(()=>{const d=__ooga.dsb.wallets.list().find(e=>e.space===0);return {state:d.state,off:Math.hypot(d.x-(${spot.x}),d.z-(${spot.z}))};})()`);
+  record("Wallets browser: a real click on the Chora's ground sets the carried device down there",walked&&placed.state==="dropped"&&placed.off<.06,JSON.stringify({spot,placed}));
+  const quiet=await b.evaluate('(()=>{const D=__ooga.dsb,s=D.wallets.list().find(d=>d.space>0),before=D.wallets.stats();D.wallets.timer(.05,s.slot);for(let i=0;i<12;i++)BL.scenes.dsb.update(1/60,i/60);const after=D.wallets.stats();return {blasts:after.walletBlasts-before.walletBlasts,fireballs:after.fireballs,flash:__ooga.renderOpts.lightCount,left:D.wallets.list().length};})()');
+  record("Wallets browser: the device left in the store goes off unseen, with no fireball or flash in the Chora and nothing set off outside",quiet.blasts===1&&quiet.fireballs===0&&quiet.left===1,JSON.stringify(quiet));
+  await b.evaluate('(()=>{const D=__ooga.dsb;D.wallets.cool();D.takeWallet(1);})()');await walletsStep(b,6);await b.key("y");
+  const thrown=await b.evaluate('(()=>{const D=__ooga.dsb,flying=D.wallets.list().some(d=>d.state==="flying");for(let i=0;i<90;i++)BL.scenes.dsb.update(1/60,i/60);return {flying,dropped:D.wallets.stats().walletsPlaced};})()');
+  record("Wallets browser: Y throws a device in the Chora, where it lands and lies ticking",thrown.flying&&thrown.dropped===2,JSON.stringify(thrown));
+  const blast=await b.evaluate(`(()=>{const D=__ooga.dsb,first=D.wallets.list()[0];D.wallets.spawn(2,first.x+.6,first.z+.4);const before=D.wallets.stats(),lights=__ooga.renderOpts.lightCount;D.wallets.timer(.05,first.slot);for(let i=0;i<6;i++)BL.scenes.dsb.update(1/60,i/60);const after=D.wallets.stats();return {blasts:after.walletBlasts-before.walletBlasts,chained:after.walletsChained-before.walletsChained,left:after.wallets,fireballs:after.fireballs,scorches:after.scorches,lights,lit:__ooga.renderOpts.lightCount};})()`);
+  record("Wallets browser: devices lying together in the Chora go off as one bigger blast with a fireball, a scorch and a flash among the point lights",blast.blasts===1&&blast.chained>=3&&blast.fireballs===1&&blast.scorches>=1&&blast.lit===Math.min(blast.lights+1,32),JSON.stringify(blast));
+  }
+  // Seat rooms: a device carried to a seat in the Studio and in Maxis rests on the lap, Space seats the Ooga as ever,
+  // and a blast in its hands soots it where it sits, with no hop out of the seat.
+  for(const [room,k] of [["dsb-studio",19],["maxis-club",34]]){
+    const sat=await b.evaluate(`(()=>{const D=__ooga.dsb;for(const d of D.wallets.list())D.wallets.detonate(d.slot);
+      // Out of the room the Ooga is in first: a review link enters a room only from outside.
+      if(D.interiors.active){D.interiors.request(D.interiors.active.room.exit);for(let i=0;i<60&&(D.interiors.transitioning||D.interiors.active);i++)BL.scenes.dsb.update(1/15,i/15);}
+      D.interiors.review("${room}",true);for(let i=0;i<60&&(D.interiors.transitioning||D.interiors.active?.room.id!=="${room}");i++)BL.scenes.dsb.update(1/15,i/15);
+      const seat=D.interiors.active.room.seats[${k}];__ooga.pilot.navigate({position:{x:seat.walkAt.x,y:seat.floor,z:seat.walkAt.z},yaw:0,pitch:.12,dist:3});D.wallets.cool();D.takeWallet(1);for(let i=0;i<4;i++)BL.scenes.dsb.update(1/15,i/15);return D.interiors.active.room.id;})()`);
+    await b.key(" ");await walletsStep(b,12);
+    const lap=await b.evaluate('(()=>{const D=__ooga.dsb,A=D.avatar,d=D.wallets.list()[0];for(let i=0;i<6;i++)BL.scenes.dsb.update(1/15,i/15);return {seated:!!A.camp.seat,state:d?.state,arms:A.catchT,lap:d?d.y<A.root.position.y-A.baseY+A.bodyHeight:false};})()');
+    const blast=await b.evaluate('(()=>{const D=__ooga.dsb,A=D.avatar;A.hopV=0;D.wallets.timer(.05);for(let i=0;i<6;i++)BL.scenes.dsb.update(1/15,i/15);return {seated:!!A.camp.seat,hop:A.hopV,soot:A.camp.scorch.every(k=>k>.5),left:D.wallets.stats().wallets};})()');
+    await b.key(" ");await walletsStep(b,12);
+    record(`Wallets browser: in ${room==="dsb-studio"?"the Studio":"Maxis"} a carried device goes along to a seat, rests on the lap without forcing the raised arms, and its blast soots the seated Ooga without a hop out of the seat`,sat===room&&lap.seated&&lap.state==="carried"&&lap.arms<1&&lap.lap&&blast.seated&&blast.hop<=0&&blast.soot&&blast.left===0,JSON.stringify({sat,lap,blast}));
+  }
+  await b.evaluate('window.__oldWallets=__ooga.dsb.walletsMenu;__ooga.go("dsb",null,true);__ooga.advance(.05)');
+  record("Wallets browser: leaving DSB removes the machine's dialog, its handlers and the old carry line, and leaves no device",await b.evaluate('__oldWallets.stats.disposed&&!document.querySelector(".wallets-menu")&&document.querySelectorAll(".wallet-carry").length===1&&BL.dsbMenuShell.count===0&&__ooga.dsb.wallets.stats().wallets===0'));
+}}]});
+// On a phone, in one session: the machine's two pictures and Take, then the carry line with its Throw button beside the sticks.
+// At VAC 2's door, where a visitor walks out with a device: the stoop and the beach below it are not one level, so the
+// ground under the pointer is found down the pointer's ray, and a click on the Ooga itself sets the device at its feet.
+scene("dsb",{label:"wallets door",query:"&interior=free-wallets&weather=clear&time=1200",opts:{w:640,h:400},steps:[{name:"dsb wallets door",why:"regression: carried out of VAC 2's door, a click on the Ooga said there was no room (the ground behind it is in the wall) and a click on the sloping beach walked the Ooga metres off the point clicked or said no room, so a device could only be thrown; now both set it down, at the Ooga's feet and exactly where clicked",run:async b=>{
+  await walletsStep(b);
+  await b.evaluate('(()=>{const D=__ooga.dsb;__ooga.pilot.navigate(D.interiors.active.room.reviews["wallets-machine"]);D.takeWallet(0);__ooga.pilot.navigate({position:D.interiors.active.room.exit,yaw:Math.PI,pitch:.12,dist:3});})()');
+  await walletsStep(b);await b.key(" ");await walletsStep(b,60);
+  const self=await b.evaluate('(()=>{const D=__ooga.dsb,a=D.avatar,p=a.root.position,s=__ooga.project(p.x,p.y,p.z,{});return {inside:!!D.interiors.active,sx:s.x,sy:s.y,pick:BL.scenes.dsb.input.pick(s.x,s.y)?.owner?.kind||null};})()');
+  await b.click(self.sx,self.sy);const walked=await walletsUntil(b,"!__ooga.dsb.walletWalk");
+  const atFeet=await b.evaluate('(()=>{const D=__ooga.dsb,d=D.wallets.list()[0],a=D.avatar,p=a.root.position;return {state:d.state,off:Math.hypot(d.x-p.x,d.z-p.z),dy:Math.abs(d.y-(p.y-a.baseY))};})()');
+  record("Wallets browser: out of VAC 2's door, a real click on the carrying Ooga sets its device down at its feet",!self.inside&&self.pick==="caveman"&&walked&&atFeet.state==="dropped"&&atFeet.off<.6&&atFeet.dy<.05,JSON.stringify({self,atFeet}));
+  // Down the beach in front of the door, a point well below the stoop the Ooga stands on.
+  await b.evaluate('(()=>{const D=__ooga.dsb;D.wallets.cool();D.takeWallet(1);})()');await walletsStep(b,6);
+  const spot=await b.evaluate(`(()=>{const D=__ooga.dsb,p=D.avatar.root.position,feet=p.y-D.avatar.baseY,W=innerWidth,H=innerHeight;
+    for(const r of [2.5,3.5,4.5])for(let k=0;k<16;k++){const a=k*Math.PI/8,x=p.x+Math.sin(a)*r,z=p.z+Math.cos(a)*r,y=D.groundAt(x,z),s=__ooga.project(x,y,z,{});
+      if(!s||s.x<12||s.x>W-12||s.y<12||s.y>H-12||document.elementFromPoint(s.x,s.y)?.tagName!=="CANVAS"||BL.scenes.dsb.input.pick(s.x,s.y)||feet-y<.4||!D.land.clearAt(x,z,.7))continue;
+      return {x,y,z,drop:feet-y};}
+    return null;})()`);
+  await walletsTap(b,spot.x,spot.y,spot.z);const walked2=await walletsUntil(b,"!__ooga.dsb.walletWalk");
+  const sloped=await b.evaluate(`(()=>{const d=__ooga.dsb.wallets.list().find(e=>e.look==="clowncard");return {state:d.state,off:Math.hypot(d.x-(${spot.x}),d.z-(${spot.z}))};})()`);
+  record("Wallets browser: a real click on the sloping beach below VAC 2's stoop sets the device down exactly where clicked",walked2&&sloped.state==="dropped"&&sloped.off<.06,JSON.stringify({spot,sloped}));
+}}]});
+const walletsPhoneCarrying={name:"wallets phone carrying",why:"rule: every scene is readable and playable on a phone, nothing clipped and every control under a thumb",run:async b=>{
+  await b.evaluate('(()=>{const D=__ooga.dsb;D.walletsMenu.close();D.takeWallet(1);__ooga.advance(1,1/60);})()');
+  const bad=await b.evaluate(PHONE(["#joy-move","#joy-look",".wallet-carry .wallet-throw"]));
+  await walletsClick(b,".wallet-carry .wallet-throw");const thrown=await b.evaluate('__ooga.dsb.wallets.list().some(d=>d.state==="flying")');
+  record("wallets phone carrying: the carry line and its Throw button sit on screen under a thumb beside the sticks, nothing clipped, and a tap on Throw throws",bad.length===0&&thrown,JSON.stringify({bad,thrown}));
+}};
+scene("dsb",{label:"wallets phone",query:"&interior=free-wallets&view=wallets-dialog&weather=clear&time=1200",opts:{w:390,h:844,mobile:true},steps:[phone("wallets",{play:'__ooga.dsb.walletsMenu.isOpen||__ooga.dsb.walletsMenu.open()',required:['.wallets-pick[data-wallet="1"]','.wallets-pick[data-wallet="0"]','.wallets-pick[data-wallet="2"]','.wallets-pick[data-wallet="3"]','.wallets-pick[data-wallet="4"]','.wallets-pick[data-wallet="5"]',".wallets-take"]}),walletsPhoneCarrying]});
 // Review measures settled WebGL views, not the opening curtain's CSS animation.
 // Keep the driver's reduced-motion default: software compositing can delay the
 // full curtain past readiness even on the approved pre-merge build.
@@ -22607,7 +22865,7 @@ scene("dsb",{label:"SVRN visual review",query:"&view=svrn-door&weather=clear&tim
 
 scene("dsb",{label:"vacancy checkpoint",query:"&view=vac-overview&weather=clear&time=1200",opts:{w:640,h:400,readyMs:45000},steps:[{name:"dsb shoreline vacancy review",why:"contract: the integrated scene draws every vacancy sign and preserves review evidence",run:async b=>{
   const out=join(root,"untracked/vacancy-review");mkdirSync(out,{recursive:true});
-  const state=await b.evaluate('(()=>{const V=__ooga.dsb.vacancies;return {count:V.properties.length,signs:V.group.children.length,ids:V.properties.map(p=>p.address.number),texts:V.properties.every(p=>p.text===({1:"Free Puppies Rescue",7:"SVRN Society"}[p.address.number]||"VAC "+p.address.number)),visible:V.group.visible&&__ooga.dsb.exterior.visible};})()');
+  const state=await b.evaluate('(()=>{const V=__ooga.dsb.vacancies;return {count:V.properties.length,signs:V.group.children.length,ids:V.properties.map(p=>p.address.number),texts:V.properties.every(p=>p.text===({1:"Free Puppies Rescue",2:"Free Hardware Wallets",7:"SVRN Society"}[p.address.number]||"VAC "+p.address.number)),visible:V.group.visible&&__ooga.dsb.exterior.visible};})()');
   record("Vacancy browser: 35 registered signs are attached to the visible exterior",state.count===35&&state.signs===35&&state.texts&&state.visible&&new Set(state.ids).size===35,JSON.stringify(state));
   for(const name of ["vac-overview","vac-lower","vac-central","vac-upper","vac-windmills"]){
     await b.evaluate(`__ooga.pilot.goPreset(${JSON.stringify(name)});__shoreline.advance(.3)`);
@@ -22662,7 +22920,7 @@ scene("dsb",{label:"shoreline checkpoint weather",query:"&view=water-dry&weather
     record("DSB shoreline browser: "+name+" has finite water and bounded waterfall impacts",r.finite&&r.visible&&r.stats.impacts===5&&r.stats.streaks>0&&r.stats.active<=24&&r.maxActive<=24,JSON.stringify(r));
   }
   const preserved=await b.evaluate(`(()=>{const D=__ooga.dsb,O=D.olympus,L=D.land,A=D.avatar;let blocked=0;for(let i=1;i<L.trail.length;i++){const a=L.trail[i-1],b=L.trail[i];if(!L.walkable(...a.slice(0,2),...b.slice(0,2),L.heightAt(...a),A.bodyHeight,A)||!O.clearSegment(...a.slice(0,2),...b.slice(0,2),L.heightAt(...a),A.bodyHeight,A))blocked++;}return {blocked,bridges:O.bridges.length,rear:L.heightAt(-55,-91),milestones:Array.from(D.interiors.registry.keys())};})()`);
-  record("DSB shoreline browser: Sacred Way, both bridges, seven preserved venues plus SVRN, Free Puppies Rescue and deep rear Olympus remain intact",preserved.blocked===0&&preserved.bridges===2&&preserved.rear===-5&&preserved.milestones.length===9&&["meme-factory","dsb-studio","maxis-club","without-rulers","proof-of-ink","big-bitcoin","stackchain-magazine","svrn-society","puppy-rescue"].every(id=>preserved.milestones.includes(id)),JSON.stringify(preserved));
+  record("DSB shoreline browser: Sacred Way, both bridges, seven preserved venues plus SVRN, Free Puppies Rescue, Free Hardware Wallets and deep rear Olympus remain intact",preserved.blocked===0&&preserved.bridges===2&&preserved.rear===-5&&preserved.milestones.length===10&&["meme-factory","dsb-studio","maxis-club","without-rulers","proof-of-ink","big-bitcoin","stackchain-magazine","svrn-society","puppy-rescue","free-wallets"].every(id=>preserved.milestones.includes(id)),JSON.stringify(preserved));
   await shorelineFinish(b,"weather",{});
 }}]});
 scene("dsb",{label:"shoreline checkpoint reentry",query:"&view=water-dry&weather=clear&time=1200",opts:{w:480,h:320},steps:[{name:"dsb shoreline checkpoint reentry",why:"contract: two consecutive Portara trips release effects and retain identical renderer resources",run:async b=>{

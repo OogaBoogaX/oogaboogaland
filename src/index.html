@@ -156,6 +156,7 @@
       <div class="brand">
         <h1><a class="home-link" href="./" title="Back to the island"><span data-sign>Ooga Booga Land</span></a></h1>
         <p data-scene="hub" id="subtitle">an island of caves</p>
+        <p data-scene="dsb" hidden>DSB LAND</p>
         <p data-scene="lab" hidden>EntropyLab cave</p>
         <p data-scene="factory" hidden>Lightning Factory</p>
         <p data-scene="hangar" hidden>Lightning Jet Hangar</p>
@@ -295,10 +296,14 @@
         <button type="button" data-action="mute" id="race-mute" aria-label="Mute sound" aria-pressed="false">Sound</button>
         <button type="button" class="leave" data-action="leave">Back<span> to the island</span></button>
       </nav>
-      <nav class="presets" aria-label="DSB Land" data-scene="dsb" hidden>
-        <button type="button" data-action="dsb-lookout" title="Camera viewpoint · releases character control">Island overview</button>
-        <button type="button" data-action="dsb-mute" id="dsb-mute" aria-pressed="false">Mute</button>
-      </nav>
+      <button type="button" class="mode-hud dsb-sound" data-action="dsb-mute" data-scene="dsb" id="dsb-mute"
+        aria-label="Mute DSB sound" title="Mute DSB sound · M" aria-pressed="false" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path fill="currentColor" d="M3 9h4l5-4v14l-5-4H3z"/>
+          <path class="sound-waves" d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/>
+          <path class="sound-muted" d="m16 9 6 6m0-6-6 6"/>
+        </svg>
+      </button>
       <nav class="presets" aria-label="Timechain Sphere room" data-scene="timechain" hidden>
         <span class="sphere-mode" id="sphere-mode" role="status"></span>
         <button type="button" class="leave" data-action="leave">Leave<span> room</span></button>
@@ -522,6 +527,16 @@
       <button type="button" class="mode-hud" id="destination-hud" data-action="mode-preset" data-selected="false"
         aria-labelledby="detached-destination-name destination-hud-label" title="Map · cycle destinations" hidden>
         <img class="freeroam-icon" id="freeroam-icon" alt="" aria-hidden="true">
+        <svg class="dsb-island-icon" viewBox="0 0 64 48" aria-hidden="true">
+          <path fill="#195c78" d="m3 30 9-8 30-6 18 12-5 11-23 7-24-6z"/>
+          <path fill="#d8bd7b" d="m7 28 12-10 7-12 13 4 7 11 11 7-6 8-21 7-20-7z"/>
+          <path fill="#7c8b54" d="m11 27 11-8 6-11 10 4 6 11 9 5-5 6-18 6-17-6z"/>
+          <path fill="#b1b38b" d="m18 22 10-14 10 4 3 8-11-3z"/>
+          <path fill="#f4eed6" d="M20 8h13v3H20zM21 11h3v10h-3zM29 11h3v10h-3zM35 23h8v8h-8zM44 27h7v7h-7zM29 29h7v7h-7z"/>
+          <path fill="#4388b7" d="M35 21h8v3h-8zM44 25h7v3h-7zM29 27h7v3h-7zM38 27h2v4h-2zM46 30h2v4h-2zM31 32h2v4h-2z"/>
+          <path fill="#526b3c" d="m15 23-3 8h6zm6 4-3 8h6z"/>
+          <path fill="#69b6c5" d="m8 39 22 6 22-7v2l-22 7-22-6z"/>
+        </svg>
         <span class="detached-destination-name" id="detached-destination-name" aria-live="polite"></span>
         <span id="destination-hud-label" hidden>Map. Cycle destinations</span>
       </button>
@@ -1968,6 +1983,10 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/rescue-room.js" data-defer="dsb"></script>
   <script src="js/rescue-menu.js" data-defer="dsb"></script>
   <script src="js/rescue-dsb.js" data-defer="dsb"></script>
+  <script src="js/wallet-bombs.js" data-defer="dsb"></script>
+  <script src="js/wallets-models.js" data-defer="dsb"></script>
+  <script src="js/wallets-room.js" data-defer="dsb"></script>
+  <script src="js/wallets-menu.js" data-defer="dsb"></script>
   <script src="js/dsb-interiors.js" data-defer="dsb"></script>
   <script src="js/dsb-radio.js" data-defer="dsb"></script>
   <script src="js/dsb-noderunner.js" data-defer="dsb"></script>
