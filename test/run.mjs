@@ -4530,9 +4530,11 @@ const totemFeedChecks = async () => {
   const source = await readFile(new URL("../src/js/totem-feed.js", import.meta.url), "utf8");
   const settle = () => new Promise((r) => setTimeout(r, 0));
   const reply = (status, body, headers = {}) => ({ status, ok: status >= 200 && status < 300, headers: { get: (k) => headers[k] ?? null }, json: async () => body });
+  let clock = Date.now();
+  class Clock extends Date { static now() { return clock; } }
   const page = (protocol, answer) => {
     const asked = [], events = [], ticks = [];
-    const context = { location: { protocol }, document: { hidden: false, addEventListener() {}, removeEventListener() {} },
+    const context = { Date: Clock, location: { protocol }, document: { hidden: false, addEventListener() {}, removeEventListener() {} },
       window: { setInterval: (fn) => { ticks.push(fn); return 1; }, clearInterval() {} },
       fetch: async (url, options = {}) => { asked.push({ url, tag: options.headers?.["if-none-match"] || "" }); return answer(url, asked.length); } };
     runInNewContext(source, context);
@@ -4568,19 +4570,34 @@ const totemFeedChecks = async () => {
   const direct = fallback.asked.filter((a) => a.url.startsWith("/api/")).length === 1 && fallback.asked.length === 6 && fallback.asked.slice(1).every((a) => a.url.startsWith("https://api.github.com/repos/"))
     && fallback.feed.state.repos.every((r) => r.number === 9) && fallback.events.length === 4 && fallback.events.every((e) => !e.fresh);
   fallback.feed.dispose();
-  // A spent limit on the Worker is Cloudflare's shared budget: that turn reads GitHub itself, and the next asks the Worker again.
-  const limited = page("https:", (url) => /\/api\/totems\//.test(url)
-    ? reply(403, null, { ...JSON_TYPE, "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(Math.ceil(Date.now() / 1000) + 3600) }) : github(url));
-  limited.feed.start(); await settle(); limited.ticks[0](); await settle();
-  const shared = limited.asked[0].url === "/api/totems/0" && limited.asked[1].url.startsWith("https://api.github.com/repos/bitcoin/")
-    && limited.asked.filter((a) => a.url.startsWith("/api/")).length === 5 && limited.feed.state.limitedUntil === 0 && limited.feed.state.repos.every((r) => r.number === 9);
+  // A spent limit on the Worker is Cloudflare's shared budget, not this visitor's: a repository with no reading yet is
+  // read from GitHub once, then the Worker's retry-after is waited out and its later refusals send nobody to GitHub.
+  const refused = (seconds) => reply(403, { error: "feed unavailable" }, { ...JSON_TYPE, "retry-after": String(seconds), "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(Math.ceil(clock / 1000) + seconds) });
+  const limited = page("https:", (url) => /\/api\/totems\//.test(url) ? refused(3600) : github(url));
+  limited.feed.start(); await settle();
+  for (let i = 0; i < 4; i++) { clock += 90000; limited.ticks[0](); await settle(); }
+  const firstOnly = limited.asked.length === 8 && limited.asked.every((a, i) => i % 2 ? a.url.startsWith("https://api.github.com/repos/") : a.url === `/api/totems/${i / 2}`)
+    && limited.feed.state.limitedUntil === 0 && limited.feed.state.repos.every((r) => r.number === 9);
+  clock += 3600000; limited.ticks[0](); await settle();
+  const waited = limited.asked.length === 9 && limited.asked[8].url === "/api/totems/0" && limited.feed.state.repos[0].number === 9;
   limited.feed.dispose();
+  // The visitor's own GitHub limit spent as well: the Worker is still asked, and its answer lights the totem.
+  let healed = false;
+  const both = page("https:", (url) => /\/api\/totems\//.test(url)
+    ? healed ? reply(200, { repo: "bitcoin/bitcoin", number: 42, mergedAt: hour }, { ...JSON_TYPE, etag: '"0-42"' }) : refused(60)
+    : reply(403, null, { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(Math.ceil(clock / 1000) + 3600) }));
+  both.feed.start(); await settle();
+  healed = true; clock += 90000; both.ticks[0](); await settle();
+  const ownLimit = both.asked.length === 6 && both.asked.filter((a) => a.url.startsWith("https://api.github.com/")).length === 1
+    && both.asked[5].url === "/api/totems/0" && both.feed.state.limitedUntil > clock && both.feed.state.repos[0].number === 42;
+  both.feed.dispose();
+  const shared = firstOnly && waited && ownLimit;
   const file = page("file:", github);
   file.feed.start(); await settle();
   const fileDirect = file.asked.length === 4 && file.asked.every((a) => a.url.startsWith("https://api.github.com/repos/"));
   file.feed.dispose();
-  record("totem feed: the Worker's summary lights a totem without celebrating the first reading, its 304 keeps it, a newer merge is fresh, and a static host, a file page or a spent Worker limit reads GitHub itself",
-    firstQuiet && revalidated && fresh && direct && shared && fileDirect, JSON.stringify({ firstQuiet, revalidated, fresh, direct, shared, fileDirect, asked: site.asked.length, events: site.events, failures: site.feed.state.failures }));
+  record("totem feed: the Worker's summary lights a totem without celebrating the first reading, its 304 keeps it, a newer merge is fresh, a static host or a file page reads GitHub itself, and a spent Worker limit is waited out, sending only a first reading to GitHub",
+    firstQuiet && revalidated && fresh && direct && shared && fileDirect, JSON.stringify({ firstQuiet, revalidated, fresh, direct, firstOnly, waited, ownLimit, fileDirect, asked: site.asked.length, events: site.events, failures: site.feed.state.failures }));
 };
 const oogatronReplayChecks = async () => {
   const source = await readFile(new URL("../src/js/oogatron-live.js", import.meta.url), "utf8");
