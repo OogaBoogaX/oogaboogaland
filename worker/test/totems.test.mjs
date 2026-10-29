@@ -65,6 +65,21 @@ test("a spent GitHub limit is shared across repositories until reset", async () 
   assert.ok((await first.text()).length < 200);
 });
 
+test("a spent GitHub limit serves the edge's last good summary instead of sending pages to GitHub", async () => {
+  const reset = Date.parse("2026-10-22T13:00:00Z") / 1000;
+  let limited = false;
+  const f = fixture(async () => limited
+    ? new Response("", { status: 403, headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(reset) } })
+    : new Response(JSON.stringify([pull(42)])));
+  assert.equal((await f.request()).status, 200);
+  limited = true; f.advance(361000);
+  const stale = await f.request();
+  assert.equal(stale.status, 200); assert.equal((await stale.json()).number, 42); assert.equal(f.calls.length, 2);
+  assert.equal((await f.request("/api/totems/1")).status, 403); assert.equal(f.calls.length, 2);
+  f.advance(24 * 3600000);
+  assert.equal((await f.request()).status, 403);
+});
+
 test("totem routes accept only the four fixed repositories and GET", async () => {
   const f = fixture(async () => { throw new Error("No network expected"); });
   assert.equal((await f.request("/api/totems/https://attacker.example")).status, 404);
@@ -98,7 +113,7 @@ test("an authorized scan asks only api.github.com, refuses redirects and caches 
   assert.equal(target.pathname, "/repos/bitcoin/bitcoin/pulls");
   assert.equal(options.redirect, "error");
   const cached = await Promise.all([...f.entries].map(async ([key, row]) => [new URL(key).pathname, await row.response.clone().text()]));
-  assert.deepEqual(cached.map(([path]) => path).sort(), ["/__totem-cache/v1/0", "/__totem-cache/v1/0/page/1"]);
+  assert.deepEqual(cached.map(([path]) => path).sort(), ["/__totem-cache/v1/0", "/__totem-cache/v1/0/last", "/__totem-cache/v1/0/page/1"]);
   for (const [, body] of cached) assert.equal(body.includes(token) || body.includes("someone"), false);
   assert.deepEqual(JSON.parse(cached.find(([path]) => path.endsWith("/page/1"))[1]),
     { etag: '"a"', records: [{ updated: Date.parse("2026-10-22T11:00:00Z"), merged: Date.parse("2026-10-22T11:00:00Z"), base: "master", number: 42, url: "https://github.com/bitcoin/bitcoin/pull/42" }] });
