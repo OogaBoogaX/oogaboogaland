@@ -41,6 +41,9 @@
   const HUB_CACHE = params.get("hubcache") || "auto";
   const MEMORY_REPORTED = Number.isFinite(DEVICE_MEMORY) && DEVICE_MEMORY > 0;
   const KEEP_HUB = HUB_CACHE === "keep" || HUB_CACHE !== "release" && (MEMORY_REPORTED ? DEVICE_MEMORY >= 8 : !COARSE);
+  // The island cache follows the same rule: a miss's fill runs a second island build in a Worker beside the page's, and
+  // the cache is read only at boot, never for a released hub's rebuild. `?terrainworker=1` forces it, `=0` stops it.
+  const TERRAIN_CACHE = params.get("terrainworker") === "1" || params.get("terrainworker") !== "0" && KEEP_HUB;
   const mark = (name) => performance.mark(`ooga:${name}`);
   mark("boot");
   let sceneCanvas = $("scene");
@@ -844,8 +847,8 @@
   // Run boot from a task after the first frame so the leaf curtain is on screen, not the previous page.
   let destroyed = false;
   const bootBuildController = new AbortController();
-  // On by default where `npm run site` packaged the terrain Worker; `?terrainworker=0` builds every island directly.
-  const terrainController = params.get("terrainworker") !== "0" ? new AbortController() : null;
+  // On where `npm run site` packaged the terrain Worker and the device keeps the hub (`TERRAIN_CACHE`).
+  const terrainController = TERRAIN_CACHE ? new AbortController() : null;
   const boot = async () => {
     // A signed-in newcomer must join before crew construction, including direct routes.
     // net.start is bounded; an unavailable backend leaves the static island usable.

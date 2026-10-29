@@ -1,8 +1,8 @@
-// On unless `?terrainworker=0`, where `npm run site` packaged the Worker. A boot restores the island from IndexedDB when
-// this build stored it; a miss builds it on the main thread as usual and, once the page is ready, `fill` has a
-// same-origin Worker build the same snapshot and store it itself, so the ~28 MB never crosses to this thread. The cache
-// is read only at boot, bounded to two snapshots of this build, and skipped when storage is missing or throws. The
-// Worker loads this file too, for `write`.
+// On where `npm run site` packaged the Worker and the director's `TERRAIN_CACHE` (the hub's keep rule) allows. A boot
+// restores the island from IndexedDB when this build stored it; a miss builds it on the main thread as usual and, once
+// the page is ready, `fill` has a same-origin Worker build the same snapshot and store it itself, so the ~28 MB never
+// crosses to this thread. The cache is read only at boot, bounded to two snapshots of this build, and skipped when
+// storage is missing or throws. The Worker loads this file too, for `write`.
 (() => {
   "use strict";
   const BL = window.BL;

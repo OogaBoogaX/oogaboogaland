@@ -2851,6 +2851,10 @@ const { autoQualityProbe } = (() => {
     const hubMemory = [0.25, 1, 2, 4].every(gb => !keepHub(gb) && !keepHub(gb, "auto", true)) && [8, 16, 32, undefined, 0, NaN].every(gb => keepHub(gb))
       && [8, 16].every(gb => keepHub(gb, "auto", true)) && [undefined, 0, NaN].every(gb => !keepHub(gb, "auto", true) && keepHub(gb, "keep", true))
       && keepHub(4, "keep") && !keepHub(32, "release");
+    // The island cache's second build follows the keep rule, so a phone or a small device never pays for it.
+    const terrainCache = (memory, coarse, worker = null) => runInNewContext(`${policy}\nTERRAIN_CACHE`, { DEVICE_MEMORY: memory, COARSE: coarse, params: new URLSearchParams(worker === null ? {} : { terrainworker: worker }) });
+    const cacheMemory = [0.25, 1, 2, 4].every(gb => !terrainCache(gb, false) && !terrainCache(gb, true)) && [8, 16].every(gb => terrainCache(gb, false) && terrainCache(gb, true))
+      && terrainCache(undefined, false) && !terrainCache(undefined, true) && terrainCache(4, true, "1") && !terrainCache(32, false, "0");
     const opening = source.slice(source.indexOf("  const COARSE ="), source.indexOf("  const $ ="));
     const initial = (deviceMemory, coarse = false) => runInNewContext(`${opening}\nINITIAL_QUALITY`, { navigator: { deviceMemory }, window: { matchMedia: () => ({ matches: coarse }) } });
     const create = (quality = "high", renderedFrames = 100, deviceMemory) => {
@@ -2891,7 +2895,7 @@ const { autoQualityProbe } = (() => {
       const slow = create("high", 100, gb); slow.boot(slow.low * 1.2);
       return limited.renderer.quality === "medium" && low.changes.length === 0 && slow.renderer.quality === "low";
     }) && [undefined, 0, NaN, 16].every((gb) => { const ample = create("high", 100, gb); ample.boot(0); return ample.changes.length === 0; });
-    return { hubMemory, memoryBoot, healthy: healthy.changes.length === 0, gpuBound: bound.changes[0] === "medium",
+    return { hubMemory, cacheMemory, memoryBoot, healthy: healthy.changes.length === 0, gpuBound: bound.changes[0] === "medium",
       reactsIn: slowAt, reactsFast: slowAt <= 2500, ignoresSpikes: spike.changes.length === 0,
       bounded: bounded.changes.join("|") === "medium|low", warmup: warming.changes.length === 0,
       ignoresPauses: excluded.changes.length === 0, fallback: fallback.changes.length === 0,
@@ -6473,7 +6477,7 @@ const hubRetentionProof = async () => {
 };
 const adaptiveQualityChecks = async () => {
   const r = autoQualityProbe();
-  record("memory policy: devices below 8 GiB release the hub, 8 GiB retains it, unknown memory retains it with a fine pointer and releases it with a coarse one, and the explicit policy overrides either", r.hubMemory, JSON.stringify(r));
+  record("memory policy: devices below 8 GiB release the hub, 8 GiB retains it, unknown memory retains it with a fine pointer and releases it with a coarse one, and the explicit policy overrides either; the island cache's second build follows the same rule unless `terrainworker` forces it", r.hubMemory && r.cacheMemory, JSON.stringify(r));
   record("adaptive quality: a GPU-bound machine is seen through delivered frames and loses a tier within two seconds", r.healthy && r.gpuBound && r.reactsFast, JSON.stringify(r));
   record("adaptive quality: warmup, transitions, background frames and isolated spikes do not lower quality", r.warmup && r.ignoresPauses && r.ignoresSpikes && r.fallback, JSON.stringify(r));
   record("adaptive quality: steps one tier at a time and stops at the lowest", r.bounded, JSON.stringify(r));

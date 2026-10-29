@@ -1,4 +1,4 @@
-// The terrain construction worker (on by default in the staged site, off with ?terrainworker=0). Its complete content hash also keys persistent snapshots.
+// The terrain construction worker (on in the staged site where the hub is kept; ?terrainworker=1 or 0 forces it). Its complete content hash also keys persistent snapshots.
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
