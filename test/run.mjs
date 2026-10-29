@@ -21879,8 +21879,18 @@ record("character visibility source bakes: ownership wrappers share exact immuta
     const reused = nextChecks === 0 && firstChecks === firstCost, c = next.more(), nextCost = nextChecks, d = first.more();
     const extended = nextCost > 0 && nextChecks === nextCost && firstChecks === firstCost && c !== d && same(c, d) && same(c, beds[1]);
     const demand = lazy && unsearched && first.beds.length === 2 && next.beds.length === 2 && firstCost > 0 && firstCost < fullChecks;
-    record("outdoor sleep: rainforest provides separate supported anchors for the whole HQ overflow and rejects blocked footprints", beds.length >= Math.max(8, minimum) && supported && separate && blocked && demand && fresh && reused && extended,
-      JSON.stringify({ count: beds.length, minimum, supported, separate, blocked, demand, fresh, reused, extended, fullChecks, firstCost, nextCost }));
+    // The hub's scenery takes a third of the forest's anchors (48 to 31 for 35 overflow sleepers), and this tier
+    // cannot plant it, so refuse the whole forest: the search must still go on to dry, level floor under the rock,
+    // with room there for at least that third.
+    const local = (b) => { const dx = b.x - place.x, dz = b.z - place.z; return { x: dx * cos - dz * sin, y: b.y - place.y, z: dx * sin + dz * cos }; };
+    const beyond = BL.headquartersSleep.outdoorBeds(pool, (x, y, z) => { const p = local({ x, y, z }); return Math.hypot(p.x, p.z) < L.RING.path; }, Infinity);
+    const forest = BL.headquartersSleep.outdoorBeds(pool, () => true, Infinity).length - beyond.length;
+    const sheltered = beyond.length * 3 >= forest && beyond.every(b => {
+      const p = local(b);
+      return b.outdoor && L.covered(p.x, p.y + 1, p.z) && L.solidAt(p.x, p.y - L.UNIT / 2, p.z) && !L.solidAt(p.x, p.y + L.UNIT / 2, p.z);
+    }) && beyond.every((a, i) => beyond.every((b, j) => i === j || Math.hypot(a.x - b.x, a.z - b.z) >= 1.79));
+    record("outdoor sleep: rainforest provides separate supported anchors for the whole HQ overflow, rejects blocked footprints and goes on under the rock past a full forest", beds.length >= Math.max(8, minimum) && supported && separate && blocked && demand && fresh && reused && extended && sheltered,
+      JSON.stringify({ count: beds.length, minimum, supported, separate, blocked, demand, fresh, reused, extended, fullChecks, firstCost, nextCost, forest, beyond: beyond.length, sheltered }));
   }
 
   {
