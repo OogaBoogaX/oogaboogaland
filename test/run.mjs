@@ -2851,6 +2851,10 @@ const { autoQualityProbe } = (() => {
     const hubMemory = [0.25, 1, 2, 4].every(gb => !keepHub(gb) && !keepHub(gb, "auto", true)) && [8, 16, 32, undefined, 0, NaN].every(gb => keepHub(gb))
       && [8, 16].every(gb => keepHub(gb, "auto", true)) && [undefined, 0, NaN].every(gb => !keepHub(gb, "auto", true) && keepHub(gb, "keep", true))
       && keepHub(4, "keep") && !keepHub(32, "release");
+    // The island cache's second build follows the keep rule, so a phone or a small device never pays for it.
+    const terrainCache = (memory, coarse, worker = null) => runInNewContext(`${policy}\nTERRAIN_CACHE`, { DEVICE_MEMORY: memory, COARSE: coarse, params: new URLSearchParams(worker === null ? {} : { terrainworker: worker }) });
+    const cacheMemory = [0.25, 1, 2, 4].every(gb => !terrainCache(gb, false) && !terrainCache(gb, true)) && [8, 16].every(gb => terrainCache(gb, false) && terrainCache(gb, true))
+      && terrainCache(undefined, false) && !terrainCache(undefined, true) && terrainCache(4, true, "1") && !terrainCache(32, false, "0");
     const opening = source.slice(source.indexOf("  const COARSE ="), source.indexOf("  const $ ="));
     const initial = (deviceMemory, coarse = false) => runInNewContext(`${opening}\nINITIAL_QUALITY`, { navigator: { deviceMemory }, window: { matchMedia: () => ({ matches: coarse }) } });
     const create = (quality = "high", renderedFrames = 100, deviceMemory) => {
@@ -2891,7 +2895,7 @@ const { autoQualityProbe } = (() => {
       const slow = create("high", 100, gb); slow.boot(slow.low * 1.2);
       return limited.renderer.quality === "medium" && low.changes.length === 0 && slow.renderer.quality === "low";
     }) && [undefined, 0, NaN, 16].every((gb) => { const ample = create("high", 100, gb); ample.boot(0); return ample.changes.length === 0; });
-    return { hubMemory, memoryBoot, healthy: healthy.changes.length === 0, gpuBound: bound.changes[0] === "medium",
+    return { hubMemory, cacheMemory, memoryBoot, healthy: healthy.changes.length === 0, gpuBound: bound.changes[0] === "medium",
       reactsIn: slowAt, reactsFast: slowAt <= 2500, ignoresSpikes: spike.changes.length === 0,
       bounded: bounded.changes.join("|") === "medium|low", warmup: warming.changes.length === 0,
       ignoresPauses: excluded.changes.length === 0, fallback: fallback.changes.length === 0,
@@ -6490,7 +6494,7 @@ const hubRetentionProof = async () => {
 };
 const adaptiveQualityChecks = async () => {
   const r = autoQualityProbe();
-  record("memory policy: devices below 8 GiB release the hub, 8 GiB retains it, unknown memory retains it with a fine pointer and releases it with a coarse one, and the explicit policy overrides either", r.hubMemory, JSON.stringify(r));
+  record("memory policy: devices below 8 GiB release the hub, 8 GiB retains it, unknown memory retains it with a fine pointer and releases it with a coarse one, and the explicit policy overrides either; the island cache's second build follows the same rule unless `terrainworker` forces it", r.hubMemory && r.cacheMemory, JSON.stringify(r));
   record("adaptive quality: a GPU-bound machine is seen through delivered frames and loses a tier within two seconds", r.healthy && r.gpuBound && r.reactsFast, JSON.stringify(r));
   record("adaptive quality: warmup, transitions, background frames and isolated spikes do not lower quality", r.warmup && r.ignoresPauses && r.ignoresSpikes && r.fallback, JSON.stringify(r));
   record("adaptive quality: steps one tier at a time and stops at the lowest", r.bounded, JSON.stringify(r));
@@ -21373,7 +21377,44 @@ const listenOnlyMicStatusProof = async () => {
   return {listening,listeningAlone,listeningMuted,afterDrop,speakerAlone,speakerMuted,speakerOn,back};
 };
 
-// terrain-snapshot.js is a hand-kept copy of terrain.js's queries, for the opt-in Worker build. The flag-off island
+// terrain-cache.js under an in-memory IndexedDB and a stand-in Worker: a boot miss must not wait on the Worker (it starts
+// none; the page builds as usual and fills the cache later, once), a hit must count as the build it replaced for the
+// boot-quality probe, and missing storage must skip the cache entirely.
+const terrainCacheChecks = async () => {
+  const source = readFileSync(join(root, "src/js/terrain-cache.js"), "utf8"), build = "a".repeat(64);
+  const boot = (records, storage = true) => {
+    const later = fn => setTimeout(fn, 0), workers = [];
+    const request = run => { const r = {}; later(() => { r.result = run(); r.onsuccess?.(); }); return r; };
+    const indexedDB = storage ? { open: () => { const r = {}; later(() => {
+      r.result = { close() {}, transaction: () => { const t = { abort() {} }; later(() => later(() => t.oncomplete?.()));
+        return t.store = { get: key => request(() => records.get(key)), put: value => records.set(value.key, value), delete: key => records.delete(key),
+          index: () => ({ openKeyCursor: () => request(() => null) }) }, { objectStore: () => t.store, set oncomplete(f) { t.oncomplete = f; }, set onerror(f) {}, set onabort(f) {}, abort() {} }; } };
+      r.onsuccess(); }); return r; } } : undefined;
+    class Worker { constructor() { workers.push(this); } postMessage(m) { this.sent = m; later(() => this.onmessage({ data: { type: "stored", key: m.key } })); } terminate() {} }
+    let cpu = 0, restored = 0;
+    const BL = { terrainWorker: { build, url: `/js/terrain-worker-${build.slice(0, 16)}.js` },
+      buildTasks: { measure: work => { cpu += 100; return work(); }, get cpu() { return cpu; } }, models: { withScope: (scope, work) => work() },
+      terrain: { hasIsland: () => false, restoreIslandSnapshot: () => { restored++; } } };
+    const context = { window: { BL, indexedDB }, Worker, URL, DOMException, location: { origin: "https://oogabooga.land" }, setTimeout, clearTimeout };
+    runInNewContext(source, context);
+    return { cache: BL.terrainCache, workers, restored: () => restored };
+  };
+  const options = { seed: 1, roofHole: null }, key = `${build}:${JSON.stringify(options)}`;
+  const records = new Map(), miss = boot(records);
+  const missed = await miss.cache.prepare(options, "hub"), started = miss.workers.length, filling = miss.cache.fill();
+  await filling;
+  const sent = miss.workers[0]?.sent, once = miss.cache.fill() === null;
+  records.set(key, { key, build, cpu: 1200, used: 1, snapshot: {} });
+  const hit = boot(records), restored = await hit.cache.prepare(options, "hub");
+  const none = boot(new Map(), false), unavailable = await none.cache.prepare(options, "hub");
+  const result = { missed, started, sent, stored: miss.cache.stats.stored, once, restored, credit: hit.cache.stats.credit, hitWorkers: hit.workers.length,
+    hitFill: hit.cache.fill(), unavailable, noneSource: none.cache.stats.lastSource, noneFill: none.cache.fill() };
+  record("terrain cache: a boot miss builds as usual with no Worker started and fills the cache once afterwards, a hit counts as the build it replaced, and missing storage skips the cache",
+    !missed && started === 0 && sent?.key === key && sent.build === build && result.stored === 1 && once
+      && restored === true && hit.restored() === 1 && result.credit === 1100 && result.hitWorkers === 0 && result.hitFill === null
+      && unavailable === false && result.noneSource === "unavailable" && result.noneFill === null, JSON.stringify(result));
+};
+// terrain-snapshot.js is a hand-kept copy of terrain.js's queries, for the Worker build. The directly built island
 // must keep its golden digest, and the snapshot's queries, rehydrated after a structured clone (the Worker's and
 // IndexedDB's codec), must answer exactly as the direct build does on a seeded sample of every query.
 // The golden is the island as it was built before the snapshot existed.
@@ -21851,6 +21892,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   // Sealed cave guides need the hub's seal nodes, so probes reading them stay in the browser tier.
   const island = BL.terrain.island({ seed: 1 });
   terrainParityChecks(BL, island);
+  await terrainCacheChecks();
   {
     // These real c3 roof poses must follow the same limb animation as open space.
     const solid = island.solidAt, rows = [];
