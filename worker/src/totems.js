@@ -36,7 +36,7 @@ const scan = async (index, url, cache, token) => {
     const address = `https://api.github.com/repos/${repo}/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=${page}`;
     let response;
     if (typeof token === "string" && token) {
-      response = await fetch(address, { headers: { ...headers, authorization: `Bearer ${token}` }, redirect: "error", signal: AbortSignal.timeout(10000) });
+      response = await fetch(address, { headers: { ...headers, authorization: `Bearer ${token}` }, redirect: "manual", signal: AbortSignal.timeout(10000) });
       if (response.status === 401) token = null;
     }
     if (!response || response.status === 401) response = await fetch(address, { headers, signal: AbortSignal.timeout(10000) });
