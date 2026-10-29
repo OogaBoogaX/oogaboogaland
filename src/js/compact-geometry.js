@@ -1,9 +1,9 @@
-// Immutable CPU meshes, opt-in while classic face readers are migrated. The compact copy remains available
-// for context restoration and Canvas 2D; this does not change either renderer's GPU upload format.
+// Immutable CPU meshes, on by default; ?compactGeometry=0 keeps every mesh in its classic form. The compact copy
+// remains available for context restoration and Canvas 2D; this does not change either renderer's GPU upload format.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const enabled = new URLSearchParams(window.location.search).get("compactGeometry") === "1";
+  const enabled = new URLSearchParams(window.location.search).get("compactGeometry") !== "0";
   const CORE = new Set(["i", "color"]);
   const own = Object.prototype.hasOwnProperty, INDEX = /^(0|[1-9][0-9]*)$/;
   const indexOf = (key) => typeof key === "string" && INDEX.test(key) ? Number(key) : -1;

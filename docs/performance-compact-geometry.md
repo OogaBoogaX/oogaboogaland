@@ -1,6 +1,15 @@
-# Compact render meshes behind a flag (task 3.3)
+# Compact render meshes (task 3.3)
 
-`?compactGeometry=1` packs finished, immutable, render-only meshes into typed columns: voxel character bakes and their colourways, foliage LODs (including the Mempool island's fern, shrub and undergrowth), the grass tuft and the cutaway caps. Vertex positions, face offsets, corner indices and colours become typed arrays, other face fields become coded columns, and a `legacy` face list is built only for a reader that asks for `faces`. The renderers, guides, picking, weapon targets, character visibility, the camera cover and the HUD's icon renderer walk faces through a cursor (`createCursor`, `readFace`) that allocates nothing. Collision shells, the canonical island and anything Canvas or context restoration rebuilds from stay in their original form. Writing a packed mesh's faces, or reassigning its `faces` or `verts`, throws; its typed positions cannot refuse an element write. Builders that copy faces into a new mesh (`merge`, a track's sector bake) take fresh records through `copyFace`, so they leave the legacy face list empty. Off by default: `pack` returns the mesh untouched and every reader takes `faces[index]`.
+Compact storage packs finished, immutable, render-only meshes into typed columns: voxel character bakes and their colourways, foliage LODs (including the Mempool island's fern, shrub and undergrowth), the grass tuft and the cutaway caps. Vertex positions, face offsets, corner indices and colours become typed arrays, other face fields become coded columns, and a `legacy` face list is built only for a reader that asks for `faces`. The renderers, guides, picking, weapon targets, character visibility, the camera cover and the HUD's icon renderer walk faces through a cursor (`createCursor`, `readFace`) that allocates nothing. Collision shells, the canonical island and anything Canvas or context restoration rebuilds from stay in their original form. Writing a packed mesh's faces, or reassigning its `faces` or `verts`, throws; its typed positions cannot refuse an element write. Builders that copy faces into a new mesh (`merge`, a track's sector bake) take fresh records through `copyFace`, so they leave the legacy face list empty. It is on by default. `?compactGeometry=0` turns it off: `pack` returns the mesh untouched and every reader takes `faces[index]`.
+
+Hub forced-GC floor with compact storage made the default, against the previous default (off), M1 Pro on the Metal GPU, ARM64 Chrome, staged site, `deviceMemory` reported as 8 and the medium tier for both, 10 fresh profiles each run in before, after, after, before order, medians of the cold loads:
+
+| | Used heap | Backing storage | Used plus backing | Build CPU | GPU records |
+|---|---:|---:|---:|---:|---:|
+| Off | 229.8 MiB | 123.2 MiB | 353.0 MiB | 3808 ms | 776 |
+| On | 206.6 MiB | 135.0 MiB | 341.6 MiB | 3916 ms | 776 |
+
+The rest of this note is the evidence from when it was still behind `?compactGeometry=1`.
 
 Hub forced-GC floor after boot, ARM64 Chrome, staged site:
 
