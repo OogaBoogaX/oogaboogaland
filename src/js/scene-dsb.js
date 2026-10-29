@@ -4,6 +4,7 @@
   const BL=window.BL, S=BL.scene, daylight=BL.daylight;
   const params=new URLSearchParams(location.search), DEBUG=params.has("debug"), LATITUDE=37;
   const OVERVIEW={yaw:-0.08,pitch:1.22,dist:207,target:{x:-2,y:10,z:-1}};
+  const VIEW_NAMES={overview:"Overview",portara:"Portara","coastal-chora":"Chora","coastal-harbor":"Harbor","coastal-beach":"Beach","coastal-ruins":"Ruins","coastal-trail":"Sacred Way","water-falls":"Waterfalls","water-pool":"Pool","vac-windmills":"Windmills","vac-lower":"Lower town","vac-central":"Central town","vac-upper":"Upper town"};
   const JETPACK_HUD_STATE={owned:false,equipped:false,fuel:1,blocked:false};
   // Same mutable sampling surface as the hub; geography and camera stay fixed.
   const renderOpts={
@@ -17,7 +18,8 @@
   let clock,water,waterInteraction,weather,nature,detail,enrichment,interiors,exterior,noderunner,tv,studioSession,studioScreen=null,studioTools,maxisReview=false,studioReview=false,shopMenu,shopTools,shopPick=null,shopReview=false,shopMenuReview=0;
   let inkMenu,inkTools,inkPick=null,inkReview=false,inkMenuReview=0,inkLayoutObserver,inkLayoutPending=false;
   let svrnMenu,svrnPick=null,svrnReview=false;
-  let rescue=null;
+  let rescue=null,exitPick=null;
+  let wallets=null,walletsMenu=null,walletsPick=null,walletsReview=false,walletTools=null,walletText=null,walletLines=null,walletLine=null,walletSpace=0;
   let memeMenu,memeReview=false,contextReview=false,stackchainMenu,stackchainReview=false;
   let bigMenu,bigPick=null,bigReview=false,bigMenuReview=0;
   const requestInkLayout=()=>{inkLayoutPending=true;};
@@ -58,7 +60,7 @@
   let atmosphere=null,town=null,entrance=null,olympus=null,vacancies=null,collision=null;
   let root,camera,land,pilot,crew,avatar,hud,input,fx,gate,game,world,go,overlayCanvas,panel,context,leaving=false,overview=false;
   let jetpackBeforeInterior=false,detachedExit=false;
-  const VOICE_ZONES={"dsb-studio":"dsb-studio","maxis-club":"dsb-maxis","without-rulers":"dsb-without-rulers","proof-of-ink":"dsb-proof-of-ink","big-bitcoin":"dsb-big-bitcoin","meme-factory":"dsb-meme-factory","stackchain-magazine":"dsb-stackchain","svrn-society":"dsb-svrn","puppy-rescue":"dsb-puppy-rescue"};
+  const VOICE_ZONES={"dsb-studio":"dsb-studio","maxis-club":"dsb-maxis","without-rulers":"dsb-without-rulers","proof-of-ink":"dsb-proof-of-ink","big-bitcoin":"dsb-big-bitcoin","meme-factory":"dsb-meme-factory","stackchain-magazine":"dsb-stackchain","svrn-society":"dsb-svrn","puppy-rescue":"dsb-puppy-rescue","free-wallets":"dsb-free-wallets"};
   let remotes=null,unsubscribeAccount=null,footsteps=null;
   const voiceZone=()=>VOICE_ZONES[interiors?.active?.room.id]||"dsb-outside";
   const mayPossess=cave=>BL.net.mayDrive(cave.traits.name);
@@ -96,7 +98,7 @@
   };
   const sheetFocus=e=>{if(!e.target.closest(".sheet"))return;pilot.controls.reset();input.reset();crew.setWeaponTrigger(false);};
   const drawExtra=(ctx2d,project)=>{
-    remotes?.drawNames(ctx2d,project);rescue?.drawOverlay(ctx2d,project);
+    remotes?.drawNames(ctx2d,project);rescue?.drawOverlay(ctx2d,project);wallets?.drawOverlay(ctx2d,project);
     const overlay=overlayCanvas.getContext("2d");entrance?.overlay(overlay,overlayCanvas.clientWidth,overlayCanvas.clientHeight);
     if(interiors?.fade){overlay.save();overlay.fillStyle=`rgba(0,0,0,${interiors.fade})`;overlay.fillRect(0,0,overlayCanvas.clientWidth,overlayCanvas.clientHeight);overlay.restore();}
     if(!DEBUG||!weather)return;
@@ -110,7 +112,13 @@
   const before={x:0,y:0,z:0},after={x:0,y:0,z:0};
   const nearGate=()=>avatar&&Math.hypot(avatar.root.position.x+45,avatar.root.position.z+44)<10;
   const walk=()=>{overview=false;pilot.possess(avatar);pilot.navigate({position:{x:avatar.root.position.x,y:avatar.root.position.y-avatar.baseY,z:avatar.root.position.z},yaw:Math.PI,pitch:.22,dist:7});pilot.setActive(true);};
-  const overviewView=()=>{if(interiors?.active||interiors?.transitioning)return;overview=true;pilot.goPreset("overview");};
+  const presetView=name=>{
+    if(leaving||gate?.isOpen||interiors?.transitioning)return;
+    if(interiors?.active){detachedExit=!pilot.player;interiors.request(interiors.active.room.exit);return;}
+    if(!VIEW_NAMES[name])return;
+    overview=true;pilot.freeCursor();pilot.goPreset(name);hud.setDetachedView(name);hud.el.modeDestination.title="DSB island · "+VIEW_NAMES[name]+" · cycle views";
+  };
+  const overviewView=()=>presetView("overview");
   const escapeView=()=>{
     if(interiors?.transitioning)return true;
     if(pilot.escape()){overview=!pilot.player;return true;}
@@ -129,11 +137,34 @@
   const memeRoom=()=>interiors?.active?.room.id==="meme-factory"?interiors.active.room:null;
   const stackchainRoom=()=>interiors?.active?.room.id==="stackchain-magazine"?interiors.active.room:null;
   const svrnRoom=()=>interiors?.active?.room.id==="svrn-society"?interiors.active.room:null;
+  const walletsRoom=()=>interiors?.active?.room.id==="free-wallets"?interiors.active.room:null;
+  const nearBlacklight=()=>!!walletsRoom()&&avatar.hop===0&&walletsRoom().nearBlacklight(avatar.root.position,avatar.root.position.y-avatar.baseY);
+  const toggleWalletLights=()=>hud.toast(walletsRoom().toggleBlacklight()?"Blacklights on":"Blacklights off");
+  // Free Hardware Wallets: the machine hands the chosen device to the driven Ooga; a tap on open ground walks it there
+  // and sets the device down, a tap on one lying out walks over and picks it up, Y or the Throw button throws it.
+  const WALLET={bodyRadius:.15},walletWalk={on:false,x:0,z:0,slot:-1,stuck:0,lastX:0,lastZ:0},walletAt={x:0,y:0,z:0};
+  const takeWallet=look=>{if(pilot.player!==avatar)pilot.possess(avatar);const i=wallets.take(look);if(i>=0)hud.toast(matchMedia("(pointer: coarse)").matches?`A free ${BL.walletBombs.LOOKS[look].name}!`:"Press Y to throw · Click the ground to place");return i;};
+  const walkWallet=(x,z,slot)=>{if(crew.player!==avatar)return false;const p=avatar.root.position;Object.assign(walletWalk,{on:true,x,z,slot,stuck:0,lastX:p.x,lastZ:p.z});return true;};
+  const steerWallet=dt=>{
+    if(!walletWalk.on)return;
+    if(crew.player!==avatar||pilot.moving){walletWalk.on=false;return;}
+    const p=avatar.root.position,dx=walletWalk.x-p.x,dz=walletWalk.z-p.z,d=Math.hypot(dx,dz);
+    if(d<(walletWalk.slot>=0?1.2:.55)){walletWalk.on=false;crew.steer(0,0,0,0,0);if(walletWalk.slot>=0)wallets.tap(walletWalk.slot);else wallets.setDown(walletWalk.x,walletWalk.z);return;}
+    const moved=Math.hypot(p.x-walletWalk.lastX,p.z-walletWalk.lastZ);walletWalk.lastX=p.x;walletWalk.lastZ=p.z;
+    walletWalk.stuck=moved<.5*dt?walletWalk.stuck+dt:0;
+    if(walletWalk.stuck>1.2){walletWalk.on=false;crew.steer(0,0,0,0,0);hud.toast("Ooga can not get there. Tap somewhere else.");return;}
+    crew.steer(dx/d,dz/d,0,1,0,1);
+  };
+  // The carry line over the view: its text from the prebuilt lines, rewritten only when the second changes.
+  const showWalletLine=()=>{
+    const i=wallets.held(),line=i<0?null:walletLines[wallets.lookAt(i)][Math.min(BL.walletBombs.FUSE,wallets.secondsLeft(i))];
+    if(line===walletLine)return;walletLine=line;walletTools.hidden=!line;if(line)walletText.textContent=line;
+  };
   const seatRoom=()=>studioRoom()||maxisRoom()||shopRoom()||inkRoom()||bigRoom()||memeRoom()||stackchainRoom()||svrnRoom();
-  const venueMenu=()=>rescue?.menuForRoom(interiors?.active?.room)||(svrnRoom()?svrnMenu:stackchainRoom()?stackchainMenu:memeRoom()?memeMenu:shopRoom()?shopMenu:inkRoom()?inkMenu:bigRoom()?bigMenu:null);
-  const menuZone=()=>{const room=interiors?.active?.room;return room&&venueMenu()?BL.dsbMenuZones.resolve(room,avatar.root.position):null;};
-  const openVenue=()=>{const menu=venueMenu();return menu?menu.open(menuZone().route):false;};
-  const menuOpen=()=>tv?.isOpen||studioSession?.isOpen||shopMenu?.isOpen||inkMenu?.isOpen||bigMenu?.isOpen||memeMenu?.isOpen||stackchainMenu?.isOpen||svrnMenu?.isOpen||rescue?.isOpen;
+  const venueMenu=()=>rescue?.menuForRoom(interiors?.active?.room)||(walletsRoom()?walletsMenu:svrnRoom()?svrnMenu:stackchainRoom()?stackchainMenu:memeRoom()?memeMenu:shopRoom()?shopMenu:inkRoom()?inkMenu:bigRoom()?bigMenu:null);
+  const menuZone=()=>{const room=interiors?.active?.room;if(room?.id==="free-wallets"&&(avatar.hop>0||avatar.root.position.y-avatar.baseY>.3))return null;return room&&venueMenu()?BL.dsbMenuZones.resolve(room,avatar.root.position):null;};
+  const openVenue=()=>{const menu=venueMenu(),zone=menuZone();return menu&&zone?menu.open(zone.route):false;};
+  const menuOpen=()=>tv?.isOpen||studioSession?.isOpen||shopMenu?.isOpen||inkMenu?.isOpen||bigMenu?.isOpen||memeMenu?.isOpen||stackchainMenu?.isOpen||svrnMenu?.isOpen||rescue?.isOpen||walletsMenu?.isOpen;
   const nearShop=()=>{const q=shopRoom()?.mediaAt,p=avatar.root.position;return !!q&&Math.hypot(p.x-q.x,p.z-q.z)<2;};
   const nearMaxis=()=>{const q=maxisRoom()?.mediaAt,p=avatar.root.position;return !!q&&Math.hypot(p.x-q.x,p.z-q.z)<2;};
   const seatNear=()=>{
@@ -153,13 +184,15 @@
     if(!seatRoom()&&!venueMenu())return false;
     if(avatar.camp.seat){input.reset();const stood=crew.standPlayer();if(stood){pilot.exitClose();pilot.showAct();if(studioRoom())studioSession?.seat(null);}return stood;}
     const seat=seatNear();if(seat)return sit(seat);
+    if(nearBlacklight()){toggleWalletLights();return true;}
     if(interiors.target(avatar.root.position))return false;
-    if(venueMenu()){openVenue();return true;}return false;
+    if(menuZone()){openVenue();return true;}return false;
   };
-  const act=()=>{if(menuOpen())return true;if(!interiors?.transitioning&&studioAct())return true;if(nearTv()){tv.open();return true;}if(!overview&&interiors?.request(avatar.root.position))return true;if(interiors?.active)return false;if(nearGate()&&!overview){gate.open();return true;}return false;};
-  const mute=()=>{const on=weather.toggleMuted(),button=document.getElementById("dsb-mute");interiors?.audio.update(on);button.textContent=on?"Unmute":"Mute";button.setAttribute("aria-pressed",String(on));};
+  const act=()=>{if(menuOpen())return true;if(!interiors?.transitioning&&studioAct())return true;if(nearTv()){tv.open();return true;}if(!overview&&interiors?.request(avatar.root.position,avatar.root.rotation.y))return true;if(interiors?.active)return false;if(nearGate()&&!overview){gate.open();return true;}return false;};
+  const syncSound=()=>{const on=weather.shared.state.muted,button=document.getElementById("dsb-mute"),label=on?"Unmute DSB sound":"Mute DSB sound";button.setAttribute("aria-label",label);button.title=label+" · M";button.setAttribute("aria-pressed",String(on));};
+  const mute=()=>{const on=weather.toggleMuted();interiors?.audio.update(on);syncSound();};
   const modeAction=name=>!leaving&&!gate?.isOpen&&!interiors?.transitioning&&pilot.modeAction(name);
-  const action=name=>{if(entrance?.action(name))return;if(menuOpen())return;if(modeAction(name)||seatRoom()&&pilot.weaponAction(name))return;if(name==="dsb-mute")mute();else if(name==="jetpack-toggle")toggleJetpack();else if(interiors?.transitioning)return;else if(name==="dsb-lookout")overviewView();else if(name==="reset-view")pilot.resetCamera();else if(name==="dsb-context")act();else if(name==="act")pilot.action();else if(name==="leave")hud.toast("Return through the Portara at the summit.");};
+  const action=(name,value)=>{if(entrance?.action(name))return;if(menuOpen())return;if(modeAction(name)||(name.startsWith("weapon-primary")||seatRoom())&&pilot.weaponAction(name))return;if(name==="dsb-mute")mute();else if(name==="jetpack-toggle")toggleJetpack();else if(interiors?.transitioning)return;else if(name==="mode-preset")presetView(value);else if(name==="reset-view")pilot.resetCamera();else if(name==="dsb-context")act();else if(name==="act")pilot.action();else if(name==="leave")hud.toast("Return through the Portara at the summit.");};
   const shore={x:0,z:0,nx:0,nz:0};
   const deepWaterReturn=()=>{
     if(overview||crew.player!==avatar)return false;
@@ -198,35 +231,41 @@
     const allowed=c=>!BL.net.mayDrive(c.name);
     const name=own?.handle||BL.contributors.roster.find(c=>c.name===carried&&allowed(c))?.name||(!BL.net.state.backend?"YellowBrokeIt":BL.contributors.roster.find(allowed)?.name||"YellowBrokeIt");world.pilot=null;
     hud=BL.hud.create({signal:ctx.signal,roster:BL.contributors.roster,catalog:BL.models.SWAG,tierColors:BL.models.TIER_COLORS,renderIcon:BL.hud.renderIcon,lootEnabled:false});
-    hud.setAreaLabel("DSB LAND · MASTER LAYOUT");
+    hud.setDestinations(Object.keys(VIEW_NAMES),VIEW_NAMES);
+    hud.setAreaLabel("CHORA");
+    hud.el.modeDestination.title="DSB island · cycle views";
+    hud.el.modeDestinationLabel.textContent="DSB island. Cycle views";
     const hooks={};input=BL.interact.create({canvas:ctx.canvas,renderer:ctx.renderer,camera,hooks});
     const STEP=BL.pilot.WALK.step;
     const loginContexts=BL.dsbInteriors.definitions.filter(d=>land.buildings.some(b=>b.name===d.building)).map(d=>d.id);
     let restoringLogin=false;
     const groundAt=(x,z,feet,_top,actor)=>{
-      if(interiors?.active)return interiors.groundAt(x,z);
+      if(interiors?.active)return interiors.groundAt(x,z,feet,_top,actor);
       const ground=land.groundAt(x,z),at=Number.isFinite(feet)?feet:ground;
       // A falling body's edge can meet a roof or stair while its centre is still outside the top face.
       return collision?Math.max(ground,collision.solids.supportAt(x,z,at,STEP,actor?.bodyRadius||0)):ground;
     };
-    pilot=BL.pilot.create({renderer:ctx.renderer,canvas:ctx.canvas,camera,hud,mayPossess,jetpackStatus,loginContexts,loginContext:()=>interiors?.active?.room.id||null,presets:{...BL.dsbEnrichment.REVIEWS,...BL.dsbVacancies.REVIEWS,...BL.rescueRoom.VIEWS,portara:{yaw:0,pitch:.08,dist:17,target:{x:-45,y:land.heightAt(-45,-48)+BL.dsbAtmosphere.portaraAperture.height/2,z:-48}},"water-falls":{yaw:-.65,pitch:.48,dist:37,target:{x:-37,y:25,z:-16}},"water-pool":{yaw:-.9,pitch:.75,dist:22,target:{x:-45,y:14,z:0}},overview:OVERVIEW,chora:{yaw:.62,pitch:.12,dist:18,target:{x:31,y:7,z:33}}},landing:"overview",pitch:[.1,1.45],dist:[3,270],follow:{y:1,min:3,max:9,pitch:[.1,.8]},fly:{speed:8,perDist:.1,climb:5,yMax:180},clampCamera:p=>{if(interiors)interiors.clampCamera(p,avatar?.root.position);else p.y=Math.max(p.y,land.heightAt(p.x,p.z)+1);if(!interiors?.active&&land.heightAt(p.x,p.z)<BL.dsbCoast.LEVEL)p.y=Math.max(p.y,BL.dsbCoast.LEVEL+.12);},coarse:matchMedia("(pointer: coarse)").matches,onFreeAction:act,onPlayerAction:act,close:{eyeHeight:1.7,eyeRatio:.8,eyeForward:0,maxStep:.6,pitch:[-1.2,1.2],orbitDist:12,trailingDist:6,groundAt:(x,z)=>groundAt(x,z,avatar?avatar.root.position.y-avatar.baseY:undefined)}});
+    pilot=BL.pilot.create({renderer:ctx.renderer,canvas:ctx.canvas,camera,hud,mayPossess,jetpackStatus,loginContexts,loginContext:()=>interiors?.active?.room.id||null,presets:{...BL.dsbEnrichment.REVIEWS,...BL.dsbVacancies.REVIEWS,...BL.rescueRoom.VIEWS,...BL.walletsRoom.VIEWS,portara:{yaw:0,pitch:.08,dist:17,target:{x:-45,y:land.heightAt(-45,-48)+BL.dsbAtmosphere.portaraAperture.height/2,z:-48}},"water-falls":{yaw:-.65,pitch:.48,dist:37,target:{x:-37,y:25,z:-16}},"water-pool":{yaw:-.9,pitch:.75,dist:22,target:{x:-45,y:14,z:0}},overview:OVERVIEW,chora:{yaw:.62,pitch:.12,dist:18,target:{x:31,y:7,z:33}}},landing:"overview",pitch:[.1,1.45],dist:[3,270],follow:{y:1,min:3,max:9,pitch:[.1,.8]},fly:{speed:8,perDist:.1,climb:5,yMax:180},clampCamera:p=>{if(interiors)interiors.clampCamera(p,avatar?.root.position);else p.y=Math.max(p.y,land.heightAt(p.x,p.z)+1);if(!interiors?.active&&land.heightAt(p.x,p.z)<BL.dsbCoast.LEVEL)p.y=Math.max(p.y,BL.dsbCoast.LEVEL+.12);},coarse:matchMedia("(pointer: coarse)").matches,onFreeAction:act,onPlayerAction:act,close:{eyeHeight:1.7,eyeRatio:.8,eyeForward:0,maxStep:.6,pitch:[-1.2,1.2],orbitDist:12,trailingDist:6,groundAt:(x,z)=>groundAt(x,z,avatar?avatar.root.position.y-avatar.baseY:undefined)}});
     fx=BL.fx.create({root,renderer:ctx.renderer,camera,overlay:ctx.overlay,hud,tickerAt:{x:-45,y:42,z:-44}});
     const splatGeometry=BL.models.particleGeometry("#e34d32",.12,0);
     const walkable=(ax,az,bx,bz,y,h=1.5,a)=>{
       if(interiors?.active)return interiors.walkable(ax,az,bx,bz,y,h,a);
-      // The approved geography keeps its depth, deck-edge and slope gates; the collision set adds solid props on top.
+      // Grounded walkers keep the geography's depth, deck-edge and slope gates; elevated bodies use solid collision.
       if(Math.hypot(bx,bz)>125)return false;
       const solids=collision?.solids,r=a?.bodyRadius||.4;
       const terrain=land.groundAt(bx,bz),support=solids?solids.supportAt(bx,bz,y,STEP,r):-Infinity;
       const raised=support>terrain+1e-7&&Math.abs(support-y)<=STEP+1e-7;
-      if(!raised&&!land.walkable(ax,az,bx,bz,y,h,a))return false;
+      // Once roof support ends, allow the step into open air so the crew's ledge fall can take over.
+      // Include the starting ground height so walking off a harbor deck still respects its edge gate.
+      const elevated=y>Math.max(land.groundAt(ax,az),terrain)+STEP+1e-7;
+      if(!raised&&!elevated&&!land.walkable(ax,az,bx,bz,y,h,a))return false;
       const floor=groundAt(bx,bz,y,undefined,a),feet=Math.max(y,floor);
       if(floor-y>STEP+1e-7)return false;
       return !solids||solids.segmentClear(ax,feet+STEP,az,bx,feet+STEP,bz,r,Math.max(0,h-STEP))
         || solids.escapeSegmentClear(ax,feet+STEP,az,bx,feet+STEP,bz,r,Math.max(0,h-STEP));
     };
     const flyable=(ax,az,bx,bz,y,h=1.5,a)=>{
-      if(interiors?.active)return walkable(ax,az,bx,bz,y,h,a);
+      if(interiors?.active)return interiors.active.room.flyable?interiors.active.room.flyable(ax,az,bx,bz,y,h,a):walkable(ax,az,bx,bz,y,h,a);
       if(Math.hypot(bx,bz)>125||land.heightAt(bx,bz)>y+1e-7)return false;
       const r=a?.bodyRadius||.4;
       const solids=collision?.solids;
@@ -237,7 +276,7 @@
       onTomatoImpact:p=>{if(!seatRoom())return;for(let i=0;i<7;i++){const a=i*Math.PI*2/7;fx.spawnParticle(splatGeometry,p.x,p.y,p.z,Math.cos(a)*1.8,.8+(i%3)*.3,Math.sin(a)*1.8,.4,3,5,interiors.groundAt(p.x,p.z)+.06);}},
       outsideActors:()=>remotes?remotes.actors():[],outsideActorHeight:BL.remotePlayers.BODY_HEIGHT,
       root,input,hud,game:ctx.game,world:{level:0,weapons:new Map(),magazine:{owned:false,count:0,ammo:0,carrier:null}},playerName:name,weaponsEnabled:true,reloadPolicy:{near:()=>false,available:()=>false},fx,viewYaw:Math.PI,groundAt,walkable,flyable,jetpackAllowed,
-      ceilingAt:(x,z,y,a)=>interiors?.active?Infinity:collision?.solids.ceilingAt(x,z,y,a?.bodyRadius||.4)??Infinity};
+      ceilingAt:(x,z,y,a)=>interiors?.active?(interiors.active.room.ceilingAt?.(x,z,y,a)??Infinity):collision?.solids.ceilingAt(x,z,y,a?.bodyRadius||.4)??Infinity};
     crew=shared.crew=BL.crew.create(shared);pilot.bind(shared);avatar=crew.cavemen.get(name);
     crew.setJetpackOwnership(avatar,true,BL.hubModels.jetpack(),BL.hubModels.jetFlame());
     crew.wearJetpack(avatar,BL.hubModels.jetpack(),BL.hubModels.jetFlame());
@@ -245,7 +284,7 @@
     footsteps=BL.footsteps.create(); // The driven Ooga's own footsteps, heard by this page alone (footsteps.js).
     document.addEventListener("focusin",sheetFocus,{signal:ctx.signal});
     Object.assign(avatar.root.position,{x:-45,y:land.heightAt(-45,-43)+avatar.baseY,z:-43});avatar.root.rotation.y=0;
-    Object.assign(hooks,pilot.hooks);hud.onAction(action);hud.onPreset(()=>overviewView());
+    Object.assign(hooks,pilot.hooks);hud.onAction(action);hud.onPreset(presetView);
     // Shared timing/input/transport; DSB alone uses the marble's rectangular clear aperture.
     const floor=land.heightAt(-45,-48),aperture=BL.dsbAtmosphere.portaraAperture;
     gate=BL.oogaPortal.create({radius:2.5,outerRadius:2.8,aperture,position:{x:-45,y:floor+aperture.height/2,z:-48},rotation:{x:Math.PI/2,y:0,z:0},destinations:[{id:"bifrost",label:"OogaBoogaLand Bifrost",enabled:true}],menuHint:"Activate, then walk through the Portara to Bifrost.",onMenu:open=>{pilot.setActive(!open);pilot.controls.reset();input.reset();},onTraverse:()=>{if(leaving)return;world.pilot=avatar.traits.name;leaving=go("bifrost");}});
@@ -258,8 +297,28 @@
     document.body.classList.add("dsb-active");
     noderunner=BL.dsbNoderunner.create({root:exterior,land});
     weather=BL.dsbWeather.create({root:exterior,renderer:ctx.renderer,camera,land,water,params,audioFactory:noderunner.createAudio});
+    syncSound();
     input.add(noderunner.screenFace,{kind:"dsb-tv"});
-    const tap=hooks.onTap;hooks.onTap=(hit,p)=>{if(rescue.onTap(hit))return;if(hit?.owner?.kind==="studio-screen"&&studioRoom()){studioSession.open();return;}if(hit?.owner?.kind==="svrn-kiosk"&&svrnRoom()){openVenue();return;}if(hit?.owner?.kind==="big-terminal"&&bigRoom()){openVenue();return;}if(hit?.owner?.kind==="ink-kiosk"&&inkRoom()){openVenue();return;}if(hit?.owner?.kind==="rulers-kiosk"&&shopRoom()){openVenue();return;}if(hit?.owner?.kind==="dsb-tv"){if(nearTv())act();return;}tap?.(hit,p);};
+    // A ground tap while carrying: the first point down the pointer's ray that meets the floor, if a device fits there.
+    // The ray is walked down in quarter metres and the crossing halved eight times, since a slope or a step (the beach
+    // and the stoop at VAC 2's door) throws a plane at the Ooga's feet metres off the point clicked.
+    const walletFloor=(x,z)=>interiors.active?interiors.walkable(x,z,x,z,0,1,WALLET):land.groundAt(x,z)>BL.dsbCoast.LEVEL&&walkable(x-.15,z,x+.15,z,groundAt(x,z),.5,WALLET);
+    const placeWallet=p=>{
+      const feet=avatar.root.position.y-avatar.baseY;let above=null,under=null;
+      for(let y=feet+3,low=Math.min(feet,BL.dsbCoast.LEVEL)-2;y>=low;y-=.25){if(!input.groundPoint(p.x,p.y,y,walletAt))continue;if(groundAt(walletAt.x,walletAt.z,y)>=y){under=y;break;}above=y;}
+      if(under===null)return;
+      if(above!==null)for(let k=0;k<8;k++){const y=(above+under)/2;input.groundPoint(p.x,p.y,y,walletAt);if(groundAt(walletAt.x,walletAt.z,y)>=y)under=y;else above=y;}
+      input.groundPoint(p.x,p.y,under,walletAt);
+      if(walletFloor(walletAt.x,walletAt.z))walkWallet(walletAt.x,walletAt.z,-1);else hud.toast("No room there. Tap open ground.");
+    };
+    // A tap on the carrying Ooga or the device it holds sets the device down at its feet, half a step ahead (or right
+    // under it): the ground under the pointer there is behind the Ooga, often in a wall.
+    const placeAtFeet=()=>{
+      const p=avatar.root.position,h=avatar.root.rotation.y;
+      for(const d of [.5,0]){const x=p.x+Math.sin(h)*d,z=p.z+Math.cos(h)*d;if(walletFloor(x,z)){walkWallet(x,z,-1);return;}}
+      hud.toast("No room there. Tap open ground.");
+    };
+    const tap=hooks.onTap;hooks.onTap=(hit,p)=>{if(hit?.owner?.kind==="dsb-exit"&&interiors.active){if(avatar.camp.seat)crew.standPlayer();interiors.request(interiors.active.room.exit);return;}if(rescue.onTap(hit))return;if(hit?.owner?.kind==="wallet-blacklight"&&walletsRoom()){toggleWalletLights();return;}if(hit?.owner?.kind==="studio-screen"&&studioRoom()){studioSession.open();return;}const held=wallets.held();if(held>=0&&!hit){placeWallet(p);return;}if(held>=0&&(hit.owner?.kind==="caveman"&&hit.owner.cave===crew.player||hit.owner?.kind==="wallet"&&hit.owner.wallet===held)){placeAtFeet();return;}if(hit?.owner?.kind==="wallet"){if(!wallets.tap(hit.owner.wallet)&&wallets.where(hit.owner.wallet,walletAt))walkWallet(walletAt.x,walletAt.z,hit.owner.wallet);return;}if(hit?.owner?.kind==="wallet-vendor"&&walletsRoom()){openVenue();return;}if(hit?.owner?.kind==="svrn-kiosk"&&svrnRoom()){openVenue();return;}if(hit?.owner?.kind==="big-terminal"&&bigRoom()){openVenue();return;}if(hit?.owner?.kind==="ink-kiosk"&&inkRoom()){openVenue();return;}if(hit?.owner?.kind==="rulers-kiosk"&&shopRoom()){openVenue();return;}if(hit?.owner?.kind==="dsb-tv"){if(nearTv())act();return;}tap?.(hit,p);};
     tv=BL.dsbTv.create(noderunner.screen,ctx.renderer,{play:()=>noderunner.audio?.play(),radioStatus:()=>noderunner.audio?.status||"Press Play radio to enable sound",onOpen:open=>{pilot.setActive(!open);pilot.controls.reset();input.reset();}});
     nature=BL.dsbNature.create({root:exterior,land,renderer:ctx.renderer,camera,weather});
     detail=BL.dsbExterior.create({root:exterior,land,nature});
@@ -298,8 +357,10 @@
         pilot.navigate({position,target:{x:position.x,y:position.y+1.7,z:position.z},yaw,pitch:.22,dist});
         pilot.setActive(!interiors?.transitioning);
       },
-      lock:on=>{pilot.setActive(!on);pilot.controls.reset();input.reset();},
+      lock:on=>{pilot.setActive(!on);pilot.controls.reset();input.reset();hud.el.modeDestination.disabled=on;},
       onChange:(lighting,label)=>{
+        if(exitPick){input.remove(exitPick);exitPick=null;}
+        if(interiors.active?.room.exitDoor){exitPick=interiors.active.room.exitDoor;input.add(exitPick,{kind:"dsb-exit"});}
         document.body.classList.toggle("dsb-studio-active",!!studioRoom());document.body.classList.toggle("maxis-club-active",!!maxisRoom());
         if(interiors.active&&avatar.jet){jetpackBeforeInterior=true;crew.removeJetpack(avatar);}
         else if(!interiors.active&&jetpackBeforeInterior){jetpackBeforeInterior=false;crew.wearJetpack(avatar,BL.hubModels.jetpack(),BL.hubModels.jetFlame());}
@@ -316,13 +377,27 @@
         if(stackchainRoom())stackchainMenu?.enter();else stackchainMenu?.leave();
         if(svrnPick){input.remove(svrnPick.screen);svrnPick=null;}
         if(svrnRoom()){svrnMenu?.enter();svrnPick=svrnRoom();input.add(svrnPick.screen,{kind:"svrn-kiosk"});}else svrnMenu?.leave();
+        if(walletsPick){input.remove(walletsPick.screen);input.remove(walletsPick.blacklightSwitch);walletsPick=null;}
+        if(walletsRoom()){walletsPick=walletsRoom();input.add(walletsPick.screen,{kind:"wallet-vendor"});input.add(walletsPick.blacklightSwitch,{kind:"wallet-blacklight"});}
+        walletSpace=interiors.active?1+BL.dsbInteriors.definitions.findIndex(d=>d.id===interiors.active.room.id):0;walletWalk.on=false;
         if(interiors.active)tv?.close();
-        scene.renderOpts=lighting||renderOpts;hud.setAreaLabel(label);BL.net.setZone(voiceZone());
+        scene.renderOpts=lighting||renderOpts;hud.setAreaLabel(interiors.active?label:"CHORA");
+        hud.el.modeDestination.disabled=interiors.transitioning;
+        hud.el.modeDestination.title=interiors.active?"Return outside to CHORA":"DSB island · cycle views";
+        hud.el.modeDestinationLabel.textContent=interiors.active?"Return outside to CHORA":"DSB island. Cycle views";
+        BL.net.setZone(voiceZone());
       }
     });
     memeMenu=BL.memeFactoryMenu.create({onOpen:on=>{pilot.setActive(!on&&!interiors.transitioning);pilot.controls.reset();input.reset();crew.setWeaponTrigger(false);}});
     svrnMenu=BL.svrnMenu.create({onOpen:on=>{pilot.setActive(!on&&!interiors.transitioning);pilot.controls.reset();input.reset();crew.setWeaponTrigger(false);}});
     rescue=BL.rescueDsb.attach({root,crew,input,hud,fx,pilot,interiors,vacancies,land,groundAt,walkable,flyable,camera,renderer:ctx.renderer,world,reviewed:pilot.loginViewRestored});
+    walletsMenu=BL.walletsMenu.create({onTake:takeWallet,onOpen:on=>{pilot.setActive(!on&&!interiors.transitioning);pilot.controls.reset();input.reset();crew.setWeaponTrigger(false);}});
+    wallets=BL.walletBombs.create({root,crew,fx,hud,groundAt:(x,z,feet)=>groundAt(x,z,feet,undefined,WALLET),bounds:()=>interiors.active?.room.bounds||null,addTarget:(node,owner,opts)=>input.add(node,owner,opts),removeTarget:node=>input.remove(node),pickGeometry:BL.walletsRoom.PICK,muted:()=>weather.shared.state.muted});
+    // The carry line names the device and its seconds; the Throw button beside it is the phone's way to throw.
+    const touch=matchMedia("(pointer: coarse)").matches;walletLines=BL.walletBombs.LOOKS.map(l=>Array.from({length:BL.walletBombs.FUSE+1},(_,s)=>`Carrying ${l.name} · ${s} s · ${touch?"Tap":"Click"} the ground to place ·`));
+    walletTools=document.createElement("p");walletTools.className="wallet-carry";walletTools.hidden=true;walletText=document.createElement("span");
+    const throwButton=document.createElement("button");throwButton.type="button";throwButton.className="wallet-throw";throwButton.textContent="Throw";throwButton.title="Throw it (Y)";throwButton.onclick=()=>{throwButton.blur();wallets.throwCarried();};
+    walletTools.append(walletText," ",throwButton);document.body.appendChild(walletTools);walletLine=null;walletSpace=0;walletWalk.on=false;
     stackchainMenu=BL.stackchainMenu.create({onOpen:on=>{pilot.setActive(!on&&!interiors.transitioning);pilot.controls.reset();input.reset();crew.setWeaponTrigger(false);}});
     studioSession=BL.studioSession.create({onSeatRejected:()=>{if(studioRoom()&&avatar.camp.seat){crew.standPlayer();pilot.exitClose();pilot.showAct();hud.toast("That Studio seat is unavailable. Choose another.");}},onOpen:on=>{pilot.setActive(!on&&!interiors.transitioning);pilot.controls.reset();input.reset();crew.setWeaponTrigger(false);}});
     shopMenu=BL.withoutRulersMenu.create({onOpen:on=>{pilot.setActive(!on&&!interiors.transitioning);pilot.controls.reset();input.reset();crew.setWeaponTrigger(false);}});
@@ -340,15 +415,15 @@
     const program=document.createElement("button");program.type="button";program.textContent="Studio screen / audio";program.onclick=()=>{if(studioRoom())studioSession.open();};studioTools.appendChild(program);
     document.body.appendChild(studioTools);
     studioReview=false;maxisReview=false;shopReview=false;shopMenuReview=0;inkReview=false;inkMenuReview=0;
-    bigReview=false;bigMenuReview=0;memeReview=false;contextReview=false;stackchainReview=false;svrnReview=false;
+    bigReview=false;bigMenuReview=0;memeReview=false;contextReview=false;stackchainReview=false;svrnReview=false;walletsReview=false;
     scene.renderOpts=renderOpts;
-    Object.assign(scene,{root,camera,input,setInterior:weather.setInterior,debug:{get audio(){return entrance?.audio;},weather:weather.shared,renderOpts,daylight:clock,camera,pilot,crew,controls:pilot.controls,hud,dsb:{get presence(){return {zone:BL.net.state.zone,body:crew.player?.traits.name||null,...remotes.stats()};},land,vacancies,water,waterInteraction,weather,nature,detail,enrichment,groundAt:(x,z,feet)=>groundAt(x,z,feet,undefined,avatar),get town(){return town;},get atmosphere(){return atmosphere;},get entrance(){return entrance;},get olympus(){return olympus;},noderunner,tv,studioSession,shopMenu,inkMenu,bigMenu,memeMenu,stackchainMenu,svrnMenu,get rescue(){return rescue?.debug;},menuZone,openVenue,interiors,exterior,setInterior:weather.setInterior,gate,avatar,get phase(){return interiors?.active?"interior":"land";},overview:OVERVIEW}}});
+    Object.assign(scene,{root,camera,input,setInterior:weather.setInterior,debug:{get audio(){return entrance?.audio;},weather:weather.shared,renderOpts,daylight:clock,camera,pilot,crew,controls:pilot.controls,hud,dsb:{get presence(){return {zone:BL.net.state.zone,body:crew.player?.traits.name||null,...remotes.stats()};},land,vacancies,water,waterInteraction,weather,nature,detail,enrichment,groundAt:(x,z,feet)=>groundAt(x,z,feet,undefined,avatar),get town(){return town;},get atmosphere(){return atmosphere;},get entrance(){return entrance;},get olympus(){return olympus;},noderunner,tv,studioSession,shopMenu,inkMenu,bigMenu,memeMenu,stackchainMenu,svrnMenu,get wallets(){return wallets?.debug;},walletsMenu,takeWallet,get walletLine(){return walletLine;},get walletWalk(){return walletWalk.on?[walletWalk.x,walletWalk.z,walletWalk.slot]:null;},get rescue(){return rescue?.debug;},menuZone,openVenue,interiors,exterior,setInterior:weather.setInterior,gate,avatar,get phase(){return interiors?.active?"interior":"land";},overview:OVERVIEW}}});
     if(pilot.loginViewRestored){
       restoringLogin=true;
       if(pilot.loginContext)interiors.restore(pilot.loginContext);
       restoringLogin=false;
       pilot.possess(avatar);pilot.setActive(true);overview=!pilot.player;
-      studioReview=maxisReview=shopReview=inkReview=bigReview=memeReview=stackchainReview=svrnReview=contextReview=true;
+      studioReview=maxisReview=shopReview=inkReview=bigReview=memeReview=stackchainReview=svrnReview=walletsReview=contextReview=true;
     }else walk();
     unsubscribeAccount=BL.net.subscribe(accountChanged);accountChanged();
     if(pilot.loginViewRestored)return;
@@ -363,7 +438,7 @@
       overview=true;pilot.goPreset("portara");
       if(params.get("portal")==="active")gate.activate();
     }
-    if(DEBUG&&(BL.dsbEnrichment.REVIEWS[params.get("view")]||BL.dsbVacancies.REVIEWS[params.get("view")]||BL.rescueRoom.VIEWS[params.get("view")])){overview=true;pilot.goPreset(params.get("view"));}
+    if(DEBUG&&(BL.dsbEnrichment.REVIEWS[params.get("view")]||BL.dsbVacancies.REVIEWS[params.get("view")]||BL.walletsRoom.VIEWS[params.get("view")]||BL.rescueRoom.VIEWS[params.get("view")])){overview=true;pilot.goPreset(params.get("view"));}
     if(DEBUG&&params.get("view")?.startsWith("water-")){
       const view=params.get("view"),depths={"water-dry":-.65,"water-ankle":avatar.bodyHeight*.12,"water-knee":avatar.bodyHeight*.3,"water-waist":avatar.bodyHeight*.5,"water-chest":avatar.bodyHeight*.7,"water-head":BL.dsbCoast.maxDepth(avatar)-.15,"water-swash":0};
       if(Object.hasOwn(depths,view)){
@@ -382,6 +457,7 @@
     if(params.get("overview")==="1")overviewView();
     if(DEBUG&&(params.get("view")==="svrn-door"||params.get("interior")==="svrn-society"))interiors.review("svrn-society",params.get("interior")==="svrn-society");
     if(DEBUG&&(params.get("view")==="rescue-door"||params.get("interior")==="puppy-rescue"))interiors.review("puppy-rescue",params.get("interior")==="puppy-rescue");
+    if(DEBUG&&(params.get("view")==="wallets-door"||params.get("interior")==="free-wallets"))interiors.review("free-wallets",params.get("interior")==="free-wallets");
     if(DEBUG&&(params.get("view")==="stackchain-door"||params.get("interior")==="stackchain-magazine"))interiors.review("stackchain-magazine",params.get("interior")==="stackchain-magazine");
     if(DEBUG&&(params.get("view")==="meme-factory"||params.get("interior")==="meme-factory"))interiors.review("meme-factory",params.get("interior")==="meme-factory");
     if(DEBUG&&(params.get("view")==="maxis-door"||params.get("interior")==="maxis-club"))interiors.review("maxis-club",params.get("interior")==="maxis-club");
@@ -433,6 +509,11 @@
       svrnReview=true;const room=svrnRoom(),view=params.get("view");
       if(view==="svrn-seat")sit(room.seats[0]);else if(room.reviews[view])pilot.navigate(room.reviews[view]);
     }
+    if(DEBUG&&!walletsReview&&walletsRoom()&&!interiors.transitioning){
+      walletsReview=true;const room=walletsRoom(),view=params.get("view");
+      if(room.reviews[view])pilot.navigate(room.reviews[view]);
+      if(view==="wallets-dialog"){pilot.navigate(room.reviews["wallets-machine"]);walletsMenu.open();}
+    }
     if(DEBUG&&!stackchainReview&&stackchainRoom()&&!interiors.transitioning){
       stackchainReview=true;const room=stackchainRoom(),view=params.get("view");
       if(view==="stackchain-seat")sit(room.seats[0]);else if(room.reviews[view])pilot.navigate(room.reviews[view]);
@@ -459,7 +540,13 @@
     studioTools.hidden=!(studioRoom()||maxisRoom())||interiors.transitioning;
     studioSession.setMuted(weather.shared.state.muted);studioSession.update(dt);
     Object.assign(before,avatar.root.position);before.y+=avatar.bodyHeight/2-avatar.baseY;
-    if(!gate.isOpen&&!menuOpen()&&!interiors.transitioning){pilot.readInput(dt);if(!overview&&!interiors.transitioning)crew.update(dt,time);if(!interiors.active&&deepWaterReturn()){Object.assign(before,avatar.root.position);before.y+=avatar.bodyHeight/2-avatar.baseY;}pilot.update(dt);}
+    wallets.releasePose();
+    if(!gate.isOpen&&!menuOpen()&&!interiors.transitioning){pilot.readInput(dt);steerWallet(dt);if(!overview&&!interiors.transitioning)crew.update(dt,time);if(!interiors.active&&deepWaterReturn()){Object.assign(before,avatar.root.position);before.y+=avatar.bodyHeight/2-avatar.baseY;}pilot.update(dt);}
+    wallets.update(dt,time,walletSpace);showWalletLine();
+    // A blast's flash leads the Chora's point lights for its moment (the lamp it displaces goes last); the store keeps
+    // a slot for it after its own lamps.
+    if(!interiors.active&&renderOpts.lightCount<BL.glRenderer.POINT_LIGHT_CAPACITY&&wallets.flashing){renderOpts.lights.copyWithin(renderOpts.lightCount*8,0,8);wallets.flashLight(renderOpts.lights,0);renderOpts.lightCount++;}
+    const store=walletsRoom();if(store){const watched=crew.player||avatar;store.flicker(time,watched.root.position,watched.bodyHeight*.75-watched.baseY,interiors.transitioning?null:watched);store.lighting.lightCount=store.lamps+(wallets.flashLight(store.lighting.lights,store.lamps)?1:0);}
     rescue.update(dt,time,renderOpts.day);
     if(bigMenuReview>0){bigMenuReview=Math.max(0,bigMenuReview-dt);if(bigMenuReview===0&&bigRoom())bigMenu.open();}
     if(inkMenuReview>0){inkMenuReview=Math.max(0,inkMenuReview-dt);if(inkMenuReview===0&&inkRoom())inkMenu.open();}
@@ -468,9 +555,9 @@
     Object.assign(after,avatar.root.position);after.y+=avatar.bodyHeight/2-avatar.baseY;
     if(!interiors.active&&!interiors.transitioning&&!overview&&gate.traverse(before,after,avatar.bodyRadius,1,avatar.bodyHeight))return;
     detail.update(renderOpts.lampFactor);olympus.update(dt,renderOpts.lampFactor);weather.update(dt,renderOpts);waterInteraction.update(dt,time,overview?null:avatar,!interiors.active&&!interiors.transitioning);atmosphere.update(time,renderOpts,!interiors.active);noderunner.update(dt,avatar.root.position,weather.state,renderOpts.lampFactor);tv.update();if(!interiors.active){nature.update(dt,time);enrichment.update(time,renderOpts.lampFactor);}
-    const door=interiors.target(avatar.root.position);
+    const nearDoor=interiors.target(avatar.root.position),door=interiors.target(avatar.root.position,avatar.root.rotation.y);
     const nearbySeat=seatRoom()?seatNear():null,zone=menuZone();
-    const studioLabel=avatar.camp.seat?"Stand up":nearbySeat?"Sit":!door&&zone?zone.label:null;
+    const studioLabel=avatar.camp.seat?"Stand up":nearbySeat?"Sit":nearBlacklight()?(walletsRoom().blacklightMode?"Turn blacklights off":"Turn blacklights on"):!nearDoor&&zone?zone.label:null;
     const label=studioLabel||(nearTv()?"Open DSB TV":door?`${interiors.active?"Exit":"Enter"} ${door.label||door.building.name}`:"Dial Portara → Bifrost");
     if(context.textContent!==label)context.textContent=label;
     context.classList.toggle("ink-context-browse",!!inkRoom()&&!!zone&&!nearbySeat&&!door);
@@ -487,11 +574,13 @@
     memeMenu.dispose();memeMenu=null;
     svrnMenu.dispose();svrnMenu=null;if(svrnPick){input.remove(svrnPick.screen);svrnPick=null;}
     rescue.dispose();rescue=null;
+    walletsMenu.dispose();walletsMenu=null;if(walletsPick){input.remove(walletsPick.screen);input.remove(walletsPick.blacklightSwitch);walletsPick=null;}wallets.dispose();wallets=null;walletTools.remove();walletTools=walletText=walletLines=walletLine=null;walletWalk.on=false;
     stackchainMenu.dispose();stackchainMenu=null;
     bigMenu.dispose();bigMenu=null;if(bigPick){input.remove(bigPick.screen);bigPick=null;}
     inkMenu.dispose();inkMenu=null;inkTools.remove();inkTools=null;if(inkPick){input.remove(inkPick.screen);inkPick=null;}
     shopMenu.dispose();shopMenu=null;shopTools.remove();shopTools=null;if(shopPick){input.remove(shopPick.screen);shopPick=null;}
     if(studioScreen){input.remove(studioScreen);studioScreen=null;}studioSession.dispose();studioSession=null;studioTools.remove();studioTools=null;
+    if(exitPick){input.remove(exitPick);exitPick=null;}
     input.remove(noderunner.screenFace);tv.dispose();tv=null;interiors.dispose();interiors=null;collision.dispose();collision=null;exterior=null;scene.renderOpts=renderOpts;
     noderunner.dispose();noderunner=null;
     entrance?.dispose();entrance=null;waterInteraction.dispose();waterInteraction=null;vacancies.dispose();vacancies=null;olympus.dispose();olympus=null;town.dispose();town=null;atmosphere.dispose();atmosphere=null;enrichment.dispose();enrichment=null;detail.dispose();detail=null;nature.dispose();nature=null;weather.dispose();weather=null;gate.dispose();pilot.dispose();crew.dispose();fx.dispose();const targets=input.targetCount;input.dispose();hud.dispose();context.hidden=true;
@@ -500,6 +589,6 @@
     scene.setInterior=scene.debug=scene.input=null;land=avatar=crew=pilot=gate=fx=hud=input=game=null;return {targets};
   };
   // ₿IFRÖST's deferred code (the poker room's, for its window) did not arrive: DSB Land stays, and its ways home work again.
-  Object.assign(scene,{enter,update,stay:()=>{leaving=false;},leave,onKey:e=>{if(studioSession?.isOpen){if(e.key==="Escape")studioSession.close();return true;}if(entrance?.onKey(e))return true;if(rescue?.onKey(e))return true;if(svrnMenu?.isOpen){if(e.key==="Escape")svrnMenu.close();return true;}if(stackchainMenu?.isOpen){if(e.key==="Escape")stackchainMenu.close();return true;}if(memeMenu?.isOpen){if(e.key==="Escape")memeMenu.close();return true;}if(tv?.isOpen){if(e.key==="Escape")tv.close();return true;}if(bigMenu?.isOpen){if(e.key==="Escape")bigMenu.close();return true;}if(inkMenu?.isOpen){if(e.key==="Escape")inkMenu.close();return true;}if(shopMenu?.isOpen){if(e.key==="Escape")shopMenu.close();return true;}if(e.key==="0"&&!e.repeat&&!e.metaKey&&!e.ctrlKey&&!e.altKey&&!leaving&&!gate.isOpen&&!interiors.transitioning)return pilot.resetCamera();if((e.key==="x"||e.key==="X")&&!e.repeat&&!e.metaKey&&!e.ctrlKey&&!e.altKey&&modeAction("mode-toggle")){e.preventDefault();return true;}if(seatRoom()&&(e.key==="1"||e.key==="2"))return pilot.weaponMode(Number(e.key));if(seatRoom()&&e.key.toLowerCase()==="v")return pilot.weaponAction("weapon-fire");if(e.key.toLowerCase()==="t"&&seatRoom()){crew.throwTomato();return true;}if(tv?.isOpen){if(e.key==="Escape")tv.close();return true;}if(e.key.toLowerCase()==="m"){mute();return true;}if((e.key==="j"||e.key==="J")&&!e.repeat)return toggleJetpack();if(e.key==="Escape"&&!gate.isOpen)return escapeView();return false;},overlay:dt=>{const dpr=Math.min(devicePixelRatio||1,2),w=Math.round(overlayCanvas.clientWidth*dpr),h=Math.round(overlayCanvas.clientHeight*dpr);if(overlayCanvas.width!==w||overlayCanvas.height!==h){overlayCanvas.width=w;overlayCanvas.height=h;}overlayCanvas.getContext("2d").setTransform(dpr,0,0,dpr,0,0);fx.drawOverlay(dt,drawExtra);},stats:()=>({targets:input.targetCount,tweens:0,...remotes.stats(),...rescue.stats()}),liveGeometry:set=>{remotes.liveGeometry(set);if(avatar)set.add(avatar.headOpen).add(avatar.headClosed);},onDonation:(donation,counted=null)=>{game.recordDonation(donation,counted&&counted.exact);world.level=Math.min(BL.pile.MAX_BANANAS,world.level+(counted?counted.exact:BL.game.bananasFor(donation.sats)));},onLootCleared:()=>{}});
+  Object.assign(scene,{enter,update,stay:()=>{leaving=false;},leave,onKey:e=>{if(studioSession?.isOpen){if(e.key==="Escape")studioSession.close();return true;}if(entrance?.onKey(e))return true;if(rescue?.onKey(e))return true;if(walletsMenu?.isOpen){if(e.key==="Escape")walletsMenu.close();return true;}if((e.key==="y"||e.key==="Y")&&!e.repeat&&!e.metaKey&&!e.ctrlKey&&!e.altKey&&wallets.throwCarried()){e.preventDefault();return true;}if(svrnMenu?.isOpen){if(e.key==="Escape")svrnMenu.close();return true;}if(stackchainMenu?.isOpen){if(e.key==="Escape")stackchainMenu.close();return true;}if(memeMenu?.isOpen){if(e.key==="Escape")memeMenu.close();return true;}if(tv?.isOpen){if(e.key==="Escape")tv.close();return true;}if(bigMenu?.isOpen){if(e.key==="Escape")bigMenu.close();return true;}if(inkMenu?.isOpen){if(e.key==="Escape")inkMenu.close();return true;}if(shopMenu?.isOpen){if(e.key==="Escape")shopMenu.close();return true;}if(e.key==="0"&&!e.repeat&&!e.metaKey&&!e.ctrlKey&&!e.altKey&&!leaving&&!gate.isOpen&&!interiors.transitioning)return pilot.resetCamera();if((e.key==="x"||e.key==="X")&&!e.repeat&&!e.metaKey&&!e.ctrlKey&&!e.altKey&&modeAction("mode-toggle")){e.preventDefault();return true;}if(seatRoom()&&(e.key==="1"||e.key==="2"))return pilot.weaponMode(Number(e.key));if(seatRoom()&&e.key.toLowerCase()==="v")return pilot.weaponAction("weapon-fire");if(e.key.toLowerCase()==="t"&&seatRoom()){crew.throwTomato();return true;}if(tv?.isOpen){if(e.key==="Escape")tv.close();return true;}if(e.key.toLowerCase()==="m"){mute();return true;}if((e.key==="j"||e.key==="J")&&!e.repeat)return toggleJetpack();if(e.key==="Escape"&&!gate.isOpen)return escapeView();return false;},overlay:dt=>{const dpr=Math.min(devicePixelRatio||1,2),w=Math.round(overlayCanvas.clientWidth*dpr),h=Math.round(overlayCanvas.clientHeight*dpr);if(overlayCanvas.width!==w||overlayCanvas.height!==h){overlayCanvas.width=w;overlayCanvas.height=h;}overlayCanvas.getContext("2d").setTransform(dpr,0,0,dpr,0,0);fx.drawOverlay(dt,drawExtra);},stats:()=>({targets:input.targetCount,tweens:0,...remotes.stats(),...rescue.stats(),...wallets.stats()}),liveGeometry:set=>{remotes.liveGeometry(set);if(avatar)set.add(avatar.headOpen).add(avatar.headClosed);},onDonation:(donation,counted=null)=>{game.recordDonation(donation,counted&&counted.exact);world.level=Math.min(BL.pile.MAX_BANANAS,world.level+(counted?counted.exact:BL.game.bananasFor(donation.sats)));},onLootCleared:()=>{}});
   BL.scenes.dsb=scene;
 })();

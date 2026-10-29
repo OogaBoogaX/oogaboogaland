@@ -434,6 +434,8 @@ uniform vec4 uSpotLight[3];
 ${VIEW_DIRECTION_GLSL}
 uniform vec3 uFog;
 uniform vec2 uFogRange;
+// xyz follows the played character; w enables the room's fluorescence and visibility falloff.
+uniform vec4 uBlacklight;
 uniform vec4 uMatrixParams;
 uniform vec3 uMatrixOrigin;
 uniform float uMatrixGlyph;
@@ -1029,6 +1031,18 @@ void main() {
   else if (nl > 12.0 && nl < 20.0) col = lavaShade(surfaceBright);
   else if (nl > 6.0 && nl < 12.0) col = waterShade(col, n, surfaceBright);
 #endif
+  // Pale pigments fluoresce independently of the dim violet illumination. Keep their
+  // hue, with a green fluorescence for whites; dark materials and transparent glass stay dark.
+  if (uBlacklight.w > 0.0 && uGlass >= 1.0 && uGlassOpacity <= 0.0) {
+    float pale = smoothstep(0.55, 0.94, min(base.r, min(base.g, base.b)));
+    float bright = smoothstep(0.55, 0.9, dot(base, vec3(0.2126, 0.7152, 0.0722)));
+    float response = max(pale, bright * 0.35);
+    col *= mix(0.3 + response * 0.7, 1.0, emissive);
+    vec3 fluorescence = mix(base, vec3(0.16, 1.0, 0.4), pale * 0.95)
+      * response * uBlacklight.w * (1.0 - emissive);
+    col += fluorescence;
+    surfaceBright += fluorescence * 0.65;
+  }
   vec3 normalColor = clamp(mix(col, uFog, fog), 0.0, 1.0);
   vec3 normalBright = clamp((col * (emissive * 0.9 + vParams.y * 0.5 + tip * 0.85) + surfaceBright) * (1.0 - fog), 0.0, 1.0);
   float glassAlpha = uGlass < 1.0 ? clamp(uGlass + pow(1.0 - abs(dot(n, normalize(uEye - vWorld))), 2.0) * 0.55, 0.0, 1.0) : 1.0;
@@ -1044,6 +1058,12 @@ void main() {
     float glint = pow(max(dot(reflect(-uLightDir, n), view), 0.0), 36.0);
     normalColor = mix(normalColor, vec3(0.88, 1.0, 0.98), grazing * 0.7 + glint * 0.35);
     glassAlpha = mix(uGlassOpacity, 0.72, grazing) + glint * 0.12;
+  }
+  if (uBlacklight.w > 0.0) {
+    // Fade around the Ooga, never the orbit camera; dim bloom as well as the surface.
+    float visibility = 1.0 - 0.3 * smoothstep(4.0, 14.0, distance(vWorld, uBlacklight.xyz));
+    normalColor = mix(uFog, normalColor, visibility);
+    normalBright *= visibility;
   }
   oColor = vec4(mix(normalColor, matrixColorResult, front), glassAlpha);
   oBright = vec4(mix(normalBright, matrixBrightResult, front), glassAlpha);
@@ -1095,7 +1115,7 @@ void main() {
   const ORDINARY_MESH_FS = derive(MESH_FS, ["flat in vec4 vVoxel;", "uniform vec4 uVoxel;"], [/\bvVoxel\b/g, "uVoxel"]);
   // The camera's depth pre-pass: the mesh shader's cuts and nothing else, the rest compiled away.
   const DEPTH_MESH_FS = ORDINARY_MESH_FS.slice(0, ORDINARY_MESH_FS.indexOf("void main() {")) + "void main() {\n  if (clipped()) discard;\n}";
-  const MESH_UNIFORMS = ["uRigCount", "uRigPass", "uRigMatrices", "uRigParams", "uRigVoxels", "uRigVisibility", "uViewProj", "uLightViewProj", "uEye", "uViewDirection", "uLightDir", "uSky", "uGround", "uSun", "uDirectStrength", "uAmbientFloor", "uDiffuseFloor", "uShadowStrength", "uShadowFloor", "uShadowBias", "uShadow", "uShadowTexel", "uLights", "uLightCount", "uSpotLight", "uFog", "uFogRange", "uMatrixParams", "uMatrixOrigin", "uMatrixGlyph", "uMatrixCave", "uMatrixCaves", "uMatrixCaveBounds", "uMatrixCaveNear", "uMatrixPermanentCave", "uMatrixPermanentPlane", "uMatrixPermanentAperture", "uMatrixLivingGlobal", "uMatrixGlyphTex", "uMatrixSamples", "uClipMinY", "uClipMaxY", "uObjectClip", "uObjectSlab", "uObjectSlab2", "uProjective", "uMatrixGlyphOpacity", "uGlassOpacity", "uVoxel", "uWindTime", "uSway", "uSwing", "uGlass", "uLightBeam", "uLakeWaveCount", "uLakeWaves", "uLakeSurface", "uLakeSuction", "uLakeFlowEnabled", "uLakeFlowU", "uLakeFlowV", "uLakeCharge", "uLakeChargeRise", "uLakeChargeCenter", "uLakeOcclude", "uLakeWaveEnd", "uLakeBodyShape", "uLakeBodyBend", "uDSBSurface", "uDSBDepth", "uDSBEnvironment", "uCanvasSurface", "uCanvasImage", "uCanvasRect", "uCanvasCurve", "uCanvasBackground", "uCanvasScale", "uCanvasAtlas", "uCanvasAtlasMin", "uCanvasAtlasMax"];
+  const MESH_UNIFORMS = ["uRigCount", "uRigPass", "uRigMatrices", "uRigParams", "uRigVoxels", "uRigVisibility", "uViewProj", "uLightViewProj", "uEye", "uViewDirection", "uLightDir", "uSky", "uGround", "uSun", "uDirectStrength", "uAmbientFloor", "uDiffuseFloor", "uShadowStrength", "uShadowFloor", "uShadowBias", "uShadow", "uShadowTexel", "uLights", "uLightCount", "uSpotLight", "uFog", "uFogRange", "uBlacklight", "uMatrixParams", "uMatrixOrigin", "uMatrixGlyph", "uMatrixCave", "uMatrixCaves", "uMatrixCaveBounds", "uMatrixCaveNear", "uMatrixPermanentCave", "uMatrixPermanentPlane", "uMatrixPermanentAperture", "uMatrixLivingGlobal", "uMatrixGlyphTex", "uMatrixSamples", "uClipMinY", "uClipMaxY", "uObjectClip", "uObjectSlab", "uObjectSlab2", "uProjective", "uMatrixGlyphOpacity", "uGlassOpacity", "uVoxel", "uWindTime", "uSway", "uSwing", "uGlass", "uLightBeam", "uLakeWaveCount", "uLakeWaves", "uLakeSurface", "uLakeSuction", "uLakeFlowEnabled", "uLakeFlowU", "uLakeFlowV", "uLakeCharge", "uLakeChargeRise", "uLakeChargeCenter", "uLakeOcclude", "uLakeWaveEnd", "uLakeBodyShape", "uLakeBodyBend", "uDSBSurface", "uDSBDepth", "uDSBEnvironment", "uCanvasSurface", "uCanvasImage", "uCanvasRect", "uCanvasCurve", "uCanvasBackground", "uCanvasScale", "uCanvasAtlas", "uCanvasAtlasMin", "uCanvasAtlasMax"];
   const ORDINARY_SHADOW_VS = derive(SHADOW_VS, [RIG_GLSL, ""], ["rigMatrix(mat4(aM0, aM1, aM2, aM3))", "mat4(aM0, aM1, aM2, aM3)"],
     ["layout(location=6) in vec4 aM3;\n\n", "layout(location=6) in vec4 aM3;\n"]);
   const LINE_VS = `#version 300 es
@@ -3709,7 +3729,7 @@ void main() {
       gl.depthMask(true);
       gl.depthFunc(gl.LESS);
     };
-    const renderMirrorCapture = (clear, sky, ground, direct, directStrength, ambientFloor, diffuseFloor, shadowStrength, shadowFloor, shadowBias, lx, ly, lz, sh, lights, lightCount, skyOn, fog, fogNear, fogFar, matrix, spotLight, environmentFace = -1, target = mirror) => {
+    const renderMirrorCapture = (clear, sky, ground, direct, directStrength, ambientFloor, diffuseFloor, shadowStrength, shadowFloor, shadowBias, lx, ly, lz, sh, lights, lightCount, skyOn, fog, fogNear, fogFar, matrix, spotLight, blacklight, environmentFace = -1, target = mirror) => {
       const cube = environmentFace >= 0;
       if (target !== mirror) ensureReflectorTarget(target);
       else if (!cube) ensureMirrorTarget();
@@ -3753,6 +3773,7 @@ void main() {
       gl.uniform4fv(pg.mesh.u.uSpotLight, spotLight);
       gl.uniform3fv(pg.mesh.u.uFog, fog);
       gl.uniform2f(pg.mesh.u.uFogRange, fogNear, fogFar);
+      gl.uniform4f(pg.mesh.u.uBlacklight, blacklight ? blacklight[0] : 0, blacklight ? blacklight[1] : 0, blacklight ? blacklight[2] : 0, blacklight ? blacklight[3] : 0);
       // The mirror closes before the retreat reaches the pile; its reflection must still show the same partially
       // transformed world as the main view.
       gl.uniform4f(pg.mesh.u.uMatrixParams, matrix ? matrix.active : 0, matrix ? matrix.radius : 0, matrix ? matrix.time : 0, matrix ? matrix.density : 0);
@@ -4126,6 +4147,7 @@ void main() {
         fog = null,
         fogNear = 0,
         fogFar = 0,
+        blacklight = null,
         matrix = null,
         clouds = 0,
         sea = null
@@ -4290,14 +4312,14 @@ void main() {
           else if (mirror.occluded && mirror.captureValid) skipMirrorPass("occluded");
           // Skipped frames reuse the last reflection, including when the pane is only a few pixels across.
           else if (mirror.captureValid && mirror.frame++ % mirror.cadence) skipMirrorPass("cadence");
-          else renderMirrorCapture(clear, sky, ground, direct, directStrength, ambientFloor, diffuseFloor, shadowStrength, shadowFloor, shadowBias, lx, ly, lz, sh, lights, nLights, skyOn, fogColor, fogA, fogB, matrix, spotLight);
+          else renderMirrorCapture(clear, sky, ground, direct, directStrength, ambientFloor, diffuseFloor, shadowStrength, shadowFloor, shadowBias, lx, ly, lz, sh, lights, nLights, skyOn, fogColor, fogA, fogB, matrix, spotLight, blacklight);
         }
         if (mirror.shards && environmentCaptureVisible() && ensureShardProgram()) {
           ensureEnvironment(clear);
           if (environment.valid !== 63 || environment.frame++ % settings.environmentCadence === 0) {
             const face = environment.next;
             prepareEnvironmentCamera(camera, face);
-            renderMirrorCapture(clear, sky, ground, direct, directStrength, ambientFloor, diffuseFloor, shadowStrength, shadowFloor, shadowBias, lx, ly, lz, sh, lights, nLights, skyOn, fogColor, fogA, fogB, matrix, spotLight, face);
+            renderMirrorCapture(clear, sky, ground, direct, directStrength, ambientFloor, diffuseFloor, shadowStrength, shadowFloor, shadowBias, lx, ly, lz, sh, lights, nLights, skyOn, fogColor, fogA, fogB, matrix, spotLight, blacklight, face);
             environment.next = (face + 1) % 6;
           }
         }
@@ -4330,7 +4352,7 @@ void main() {
           const i = pass ? turn : best;
           if (i < 0) continue;
           const node = reflectorNodes[i], t = reflectorTargets.get(node.geometry);
-          if (prepareMirrorCamera(camera, node, t)) renderMirrorCapture(clear, sky, ground, direct, directStrength, ambientFloor, diffuseFloor, shadowStrength, shadowFloor, shadowBias, lx, ly, lz, sh, lights, nLights, skyOn, fogColor, fogA, fogB, matrix, spotLight, -1, t);
+          if (prepareMirrorCamera(camera, node, t)) renderMirrorCapture(clear, sky, ground, direct, directStrength, ambientFloor, diffuseFloor, shadowStrength, shadowFloor, shadowBias, lx, ly, lz, sh, lights, nLights, skyOn, fogColor, fogA, fogB, matrix, spotLight, blacklight, -1, t);
         }
       }
       const viewActor = opts.beforeView?.();
@@ -4395,6 +4417,7 @@ void main() {
         gl.uniform4fv(mp.u.uSpotLight, spotLight);
         gl.uniform3fv(mp.u.uFog, fogColor);
         gl.uniform2f(mp.u.uFogRange, fogA, fogB);
+        gl.uniform4f(mp.u.uBlacklight, blacklight ? blacklight[0] : 0, blacklight ? blacklight[1] : 0, blacklight ? blacklight[2] : 0, blacklight ? blacklight[3] : 0);
         // With no matrix running these resolve to the same constants — its readers stay unreachable behind
         // uMatrixParams.x 0 and uMatrixPermanentCave 0 — so only the wave's arrivals move them again.
         if (matrix || !mp.matrixNone) {

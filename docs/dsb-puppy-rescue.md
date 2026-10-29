@@ -2,7 +2,7 @@
 
 Source checkpoint: `19080eb9d236733d262c8012468005027b04210e`.
 
-VAC 1 is now occupied by **Free Puppies Rescue**. Its historical geography identity is still `VACANT 21`, at x=5 m, z=51 m, yaw −0.4229, with the same 4 × 4 m exterior footprint. The existing facade plaque now reads `Free Puppies Rescue`; the house, its door, steps, terrain, collision, plants and routes are unchanged. VAC 2–6 and VAC 8–35 keep their original numbers, identities and signs, and VAC 7 stays SVRN Society. There are 33 remaining vacant properties.
+VAC 1 is now occupied by **Free Puppies Rescue**. Its historical geography identity is still `VACANT 21`, at x=5 m, z=51 m, yaw −0.4229, with the same 4 × 4 m exterior footprint. The existing facade plaque now reads `Free Puppies Rescue`; the house, its door, steps, terrain, collision, plants and routes are unchanged. VAC 3–6 and VAC 8–35 keep their original numbers, identities and signs, VAC 2 is Free Hardware Wallets, and VAC 7 stays SVRN Society. There are 32 remaining vacant properties.
 
 The plaque is 3.7 × 0.42 m, centred 0.77 m above the address's original mounting height (3.55 m above the floor). A 4 m house carries two facade lanterns at ±1.6 m and 2.6 m, so a plaque wide enough for the name at the original height would sit behind them; above them it reads whole from the plaza and the beach. The lettering is the same DSB sign glyph geometry in cream on the venue blue.
 

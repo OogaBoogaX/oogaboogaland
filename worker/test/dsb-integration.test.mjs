@@ -679,3 +679,57 @@ test("a Studio command past the rate limit is refused before its account read", 
   assert.equal(results.length, 9, "every command still gets its result");
   assert.deepEqual(results.filter(r => !r.ok).map(r => r.commandId), ["burst-8"]);
 });
+
+// An old, unrelated SFU connection must not put every player's signalling behind its cleanup.
+test("slow retired-session cleanup does not block leave, rejoin or active subscription closure", { timeout: 2000 }, async () => {
+  const { room, add, call, pending, storage } = studioRoom(), player = add(1, { zone: "outside" });
+  player.voice = { pub: "old-pub", sub: "old-sub", pubMid: "0", mids: { "1": 2 }, track: "mic", gen: 1 };
+  let release;
+  const blocked = new Promise(resolve => { release = resolve; });
+  const closed = [];
+  room.sfu.closeTracks = async (session, mids) => { closed.push(session); if (session === "unrelated") await blocked; return { tracks: mids.map(mid => ({ mid })) }; };
+  room.sfu.newSession = async () => ({ sessionId: "replacement" });
+  const cleaning = room.queueClose("unrelated", ["3"]);
+  try {
+    assert.equal((await call(player, "leave", {})).status, 200);
+    assert.equal(player.voice.track, null);
+    assert.ok(player.ws.sent.some(m => m.t === "voice" && m.peers.length === 0));
+    assert.equal((await call(player, "session", { kind: "sub" })).status, 200);
+    player.voice.mids = { "4": 2 };
+    assert.equal((await call(player, "close", { mids: ["4"] })).status, 200);
+    assert.ok(closed.includes("replacement"));
+    assert.ok(storage.get("voiceCleanup").some(job => job.session === "unrelated"), "the delayed cleanup remains durably owned");
+  } finally { release(); await cleaning; await Promise.all(pending); }
+});
+
+test("leave persists cleanup and notifies peers before its own SFU close completes", { timeout: 2000 }, async () => {
+  const { room, add, call, pending, storage } = studioRoom(), player = add(1, { zone: "outside" }), listener = add(2, { zone: "outside" });
+  player.voice = { pub: "leaving", pubMid: "0", track: "mic", gen: 1 };
+  listener.voice = { sub: "listener", mids: {} };
+  room.updateVoice();
+  let release; const blocked = new Promise(resolve => { release = resolve; });
+  room.sfu.closeTracks = async (_session, mids) => { await blocked; return { tracks: mids.map(mid => ({ mid })) }; };
+  try {
+    assert.equal((await call(player, "leave", {})).status, 200);
+    assert.equal(listener.ws.sent.filter(m => m.t === "voice").at(-1).peers.length, 0);
+    assert.ok(storage.get("voiceCleanup").some(job => job.session === "leaving"));
+  } finally { release(); await Promise.all(pending); }
+});
+
+test("concurrent cleanup of one session closes newly queued MIDs before acknowledging them", { timeout: 2000 }, async () => {
+  const { room } = studioRoom();
+  let release, started; const firstStarted = new Promise(resolve => { started = resolve; });
+  const blocked = new Promise(resolve => { release = resolve; });
+  const closed = []; let active = 0, maximum = 0;
+  room.sfu.closeTracks = async (_session, mids) => {
+    active++; maximum = Math.max(maximum, active); closed.push([...mids]);
+    if (closed.length === 1) { started(); await blocked; }
+    active--; return { tracks: mids.map(mid => ({ mid })) };
+  };
+  const first = room.queueClose("same-session", ["0"]); await firstStarted;
+  const second = room.queueClose("same-session", ["1"]);
+  release(); await Promise.all([first, second]);
+  assert.equal(maximum, 1, "SFU mutations for one receiver remain serialized");
+  assert.deepEqual(closed, [["0"], ["1"]]);
+  assert.equal(room.cleanupJobs.length, 0);
+});
