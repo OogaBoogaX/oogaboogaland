@@ -1,4 +1,4 @@
-// Opt-in with `?terrainworker=1`, where `npm run site` packaged the Worker. A boot restores the island from IndexedDB when
+// On unless `?terrainworker=0`, where `npm run site` packaged the Worker. A boot restores the island from IndexedDB when
 // this build stored it; a miss builds it on the main thread as usual and, once the page is ready, `fill` has a
 // same-origin Worker build the same snapshot and store it itself, so the ~28 MB never crosses to this thread. The cache
 // is read only at boot, bounded to two snapshots of this build, and skipped when storage is missing or throws. The

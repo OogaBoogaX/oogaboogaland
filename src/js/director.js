@@ -844,7 +844,8 @@
   // Run boot from a task after the first frame so the leaf curtain is on screen, not the previous page.
   let destroyed = false;
   const bootBuildController = new AbortController();
-  const terrainController = params.get("terrainworker") === "1" ? new AbortController() : null;
+  // On by default where `npm run site` packaged the terrain Worker; `?terrainworker=0` builds every island directly.
+  const terrainController = params.get("terrainworker") !== "0" ? new AbortController() : null;
   const boot = async () => {
     // A signed-in newcomer must join before crew construction, including direct routes.
     // net.start is bounded; an unavailable backend leaves the static island usable.

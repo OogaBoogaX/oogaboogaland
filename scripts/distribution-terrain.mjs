@@ -1,4 +1,4 @@
-// Opt-in terrain construction worker. Its complete content hash also keys persistent snapshots.
+// The terrain construction worker (on by default in the staged site, off with ?terrainworker=0). Its complete content hash also keys persistent snapshots.
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -9,7 +9,7 @@ export const writeTerrainWorker = (root, out) => {
   const terrain = read("terrain.js"), adapter = read("terrain-snapshot.js");
   const signature = /^\/\/ Query source SHA256: ([0-9a-f]{64})$/m.exec(adapter)?.[1];
   // A terrain.js edit that moves or changes its queries leaves the snapshot adapter stale. The site still builds,
-  // without the opt-in worker: ?terrainworker=1 then finds no descriptor and builds the island as usual.
+  // without the worker: the page then finds no descriptor and builds the island as usual.
   const skip = (why) => { process.stderr.write(`terrain worker not packaged: ${why}; update and verify terrain-snapshot.js\n`); return null; };
   const blocks = [];
   for (const [start, end] of QUERY_RANGES) {
