@@ -219,8 +219,8 @@
     for (const child of source.children) if (child.visible && !child.portraitHidden) addChild(copy, copyPortraitNode(child, portraitRoot, portraitGeometry));
     return copy;
   };
-  const renderFaceIcon = (canvas, cave, gorilla = null, px = ICON_PX) => {
-    const renderer = iconRendererMod.createRenderer(canvas, { width: px, height: px, transparent: true });
+  const renderFaceIcon = (canvas, cave, gorilla = null, px = ICON_PX, unlit = false) => {
+    const renderer = iconRendererMod.createRenderer(canvas, { width: px, height: px, transparent: true, unlit });
     const source = gorilla ? gorilla.parts.head : cave.parts.head, geometry = gorilla ? source.geometry : cave.portraitHead;
     const root = createNode(), head = copyPortraitNode(source, source, geometry);
     const bounds = boundsOf(geometry), fit = (!gorilla && cave.traits.gasMask ? 0.68 : 0.78) / Math.max(bounds.radius, 0.05);
@@ -290,6 +290,7 @@
       act: $("act"),
       mode: $("mode-hud"),
       modeDestination: $("destination-hud"),
+      modeDestinationLabel: $("destination-hud-label"),
       modeFree: $("freeroam-icon"),
       modeFace: $("mode-face-icon"),
       modeHealth: $("mode-health"),
@@ -374,16 +375,17 @@
       target.addEventListener(type, fn, typeof opts === "boolean" ? { capture: opts, signal } : { ...opts, signal });
       listeners.push(() => target.removeEventListener(type, fn, opts));
     };
-    // Fit the HUB controls between the title and clock when their actual visible widths allow it.
+    // Fit the island controls between the title and clock when their actual visible widths allow it.
     // Observers only schedule a pass after layout or equipment changes; ammo and animation never poll it.
-    if (document.body.dataset.activeScene === "hub") {
+    const bannerScene = document.body.dataset.activeScene;
+    if (bannerScene === "hub" || bannerScene === "dsb") {
       let bannerFrame = 0;
       const bannerStyle = (node, property, value) => {
         if (node.style.getPropertyValue(property) !== value) node.style.setProperty(property, value);
       };
       const fitBanner = () => {
         bannerFrame = 0;
-        if (document.body.dataset.activeScene !== "hub") return;
+        if (document.body.dataset.activeScene !== bannerScene) return;
         const brand = el.brand.getBoundingClientRect(), clock = el.clock.getBoundingClientRect(), block = el.block.getBoundingClientRect();
         const topbar = getComputedStyle(el.topbar), row = getComputedStyle(el.equipmentRow);
         const fontSize = parseFloat(getComputedStyle(el.clock).fontSize) || 22;
@@ -742,12 +744,18 @@
     };
     let actionHandler = null;
     const DETACHED_NAMES = { pile: "Pile", lab: "Lab", mirror: "Mirror", underground: "HQ", basement: "Basement", mempool: "Mempool", factory: "LN Factory", arcade: "Ooga Arcade", bca: "B.C.A.", gate: "North gate", bifrost: "₿IFRÖST", timechain: "TC Sphere" };
+    let destinationLabels = DETACHED_NAMES;
     let destinationNames = [];
     let destinationIndex = -1;
     let detachedPreset = "pile", detachedNameShown = false, detachedSelectionShown = false, areaLabel = "";
-    const setDestinations = (names) => {
-      destinationNames = names.filter(name => DETACHED_NAMES[name]);
+    el.modeDestination.disabled = false;
+    el.modeDestination.title = "Map · cycle destinations";
+    el.modeDestinationLabel.textContent = "Map. Cycle destinations";
+    const setDestinations = (names, labels = DETACHED_NAMES) => {
+      destinationLabels = labels;
+      destinationNames = names.filter(name => destinationLabels[name]);
       destinationIndex = destinationNames.indexOf(detachedPreset);
+      if (!destinationLabels[detachedPreset] && destinationNames.length) detachedPreset = destinationNames[0];
       el.modeDestination.hidden = !modeVisible || !destinationNames.length;
     };
     const cycleDestinations = () => {
@@ -779,14 +787,14 @@
       if (!detachedNameShown) showAreaLabel();
     };
     const setDetachedView = (name, announce = false, position = null) => {
-      if (!DETACHED_NAMES[name]) return;
+      if (!destinationLabels[name]) return;
       detachedPreset = name;
       destinationIndex = destinationNames.indexOf(name);
       destinationAnchored = !!position;
       if (position) { destinationX = position.x; destinationY = position.y; destinationZ = position.z; }
       detachedSelectionShown = true;
       if (!announce) return;
-      el.modeDestinationName.textContent = DETACHED_NAMES[name];
+      el.modeDestinationName.textContent = destinationLabels[name];
       detachedNameShown = true;
       el.modeDestinationName.classList.add("show");
     };
@@ -884,8 +892,8 @@
           ? `${shown}'s gorilla; ${view} view; ${look}. Press to switch ${change}; hold to detach`
           : selected
           ? `${shown}; ${view} view; ${look}. Press to switch ${change}; hold to detach`
-          : `${DETACHED_NAMES[detachedPreset]} detached view. Press to cycle destinations`);
-        el.mode.title = gorilla ? `${shown}'s gorilla · ${view} · ${look} · hold to detach` : selected ? `${shown} · ${view} · ${look} · hold to detach` : `${DETACHED_NAMES[detachedPreset]} · detached`;
+          : `${destinationLabels[detachedPreset]} detached view. Press to cycle destinations`);
+        el.mode.title = gorilla ? `${shown}'s gorilla · ${view} · ${look} · hold to detach` : selected ? `${shown} · ${view} · ${look} · hold to detach` : `${destinationLabels[detachedPreset]} · detached`;
       }
     };
     setDetachedView(detachedPreset);

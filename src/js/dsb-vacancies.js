@@ -5,7 +5,7 @@
   // Occupied addresses keep their number and identity; the plaque names the establishment within its facade: name,
   // interior, plaque width and height, its lift above the address's mounting height (a 4 m house's wide plaque rises
   // clear of the facade's two lanterns), lettering size and the lettering's drop below the plaque centre.
-  const OCCUPANTS={1:["Free Puppies Rescue","puppy-rescue",3.7,.42,.77,.29,.09],7:["SVRN Society","svrn-society",4.4,.58,0,.48,.18]};
+  const OCCUPANTS={1:["Free Puppies Rescue","puppy-rescue",3.7,.42,.77,.29,.09],2:["Free Hardware Wallets","free-wallets",3.7,.42,.77,.265,.085],7:["SVRN Society","svrn-society",4.4,.58,0,.48,.18]};
   // number, existing identity, x, z, type, plaque centre above floor, front offset, mount.
   // Houses use their authored local +z facade; balcony signs attach to the outward rail.
   const REGISTRY=Object.freeze([

@@ -8,8 +8,9 @@ export const sfuClient = (env) => {
   if (!env.REALTIME_APP_ID || !env.REALTIME_SECRET) return null;
   const base = `${BASE}/${env.REALTIME_APP_ID}`;
   const headers = { authorization: `Bearer ${env.REALTIME_SECRET}`, "content-type": "application/json" };
+  // Leave time for a bounded error response before the browser's 10 s signalling deadline.
   const call = async (method, path, body) => {
-    const res = await fetch(base + path, { method, headers, signal: AbortSignal.timeout(10000), body: body ? JSON.stringify(body) : undefined });
+    const res = await fetch(base + path, { method, headers, signal: AbortSignal.timeout(5000), body: body ? JSON.stringify(body) : undefined });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.errorCode) {
       const error = new Error(`SFU request failed: ${res.status} ${data.errorCode || ""}`.trim());

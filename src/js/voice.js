@@ -148,10 +148,12 @@
       sub.blocked = true; reflectBlocked();
     });
   };
-  const silence = (s) => {
+  const silence = (s, notify = true) => {
+    s.el.muted = true;
     s.el.pause();
+    if (s.el.srcObject) for (const track of s.el.srcObject.getTracks()) track.stop();
     s.el.srcObject = null; s.blocked = false;
-    reflectBlocked();
+    if (notify) reflectBlocked();
     if (s.meter) s.meter.source.disconnect();
     s.meter = null;
   };
@@ -233,12 +235,15 @@
     dropTimers.clear();
     window.clearInterval(speakTimer);
     speakTimer = 0;
-    for (const s of subs.values()) silence(s);
-    subs.clear();
-    if (pubPc) pubPc.close();
-    if (subPc) subPc.close();
+    // Retire connections before close callbacks or UI notifications can observe them.
+    const oldPub = pubPc, oldSub = subPc;
     pubPc = subPc = null;
-    stats.enabled = false; stats.ready = false; stats.receiveState = "off";
+    stats.enabled = false;
+    if (oldPub) oldPub.close();
+    if (oldSub) oldSub.close();
+    for (const s of subs.values()) silence(s, false);
+    subs.clear();
+    stats.ready = false; stats.receiveState = "off";
     stats.blocked = false;
     if (stats.error === PLAY_BLOCKED) stats.error = "";
     stats.publishing = false;
@@ -530,14 +535,15 @@
     const add = desired.filter((id) => !subs.has(id));
     if (add.length) {
       stats.receiveState = pc.connectionState === "connected" ? "connected" : "connecting"; emit();
+      const generations = new Map(add.map(id => [id, wantedGen.get(id)]));
       const res = await api("pull", { ids: add }, token); valid();
       for (const t of res.tracks) {
         if (t.errorCode || t.id === null) continue;
         const el = new Audio();
         el.volume = stats.receiveLevel;
         el.autoplay = true;
-        el.muted = !heard(t.id);
-        subs.set(t.id, { mid: t.mid, el, meter: null, blocked: false, gen: wantedGen.get(t.id) });
+        el.muted = !heard(t.id) || generations.get(t.id) !== wantedGen.get(t.id);
+        subs.set(t.id, { mid: t.mid, el, meter: null, blocked: false, gen: generations.get(t.id) });
       }
       if (res.requiresImmediateRenegotiation && res.sessionDescription) {
         await pc.setRemoteDescription(res.sessionDescription); valid();

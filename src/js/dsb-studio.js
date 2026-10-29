@@ -8,6 +8,7 @@
     block(root,"#27202b",0,-.22,1,31,.4,36);
     block(root,"#242329",-15.5,3.2,1,.4,6.4,36);block(root,"#242329",15.5,3.2,1,.4,6.4,36);
     block(root,"#1c1c22",0,6.4,1,31,.3,36);block(root,"#242329",0,3.2,19,31,6.4,.4);
+    const exitDoor=block(root,"#44302a",0,4.45,18.72,2.8,2.9,.16);
     // Narrow arrival: archive on the left, enterable box office on the right.
     block(root,"#242329",-9.75,4.65,14.5,11.5,3.3,9);solids.push([-15.5,-4,10,19]);
     block(root,"#242329",11.25,4.65,14.5,8.5,3.3,9);solids.push([7,15.5,10,19]);
@@ -158,7 +159,7 @@
     const lights=new Float32Array(BL.glRenderer.POINT_LIGHT_CAPACITY*8);
     lights.set([5,4.4,-12,11,1.35,.85,.42,0,-5,4.4,-12,10,1.15,.72,.4,0,1,4.8,14,5,.65,.36,.16,0]);
     const lighting={clear:[.04,.03,.045],sky:[.34,.27,.26],ground:[.22,.16,.17],direct:[.66,.5,.35],directStrength:.24,ambientFloor:.29,sun:{x:.3,y:.9,z:.4},shadowCenter:{x:0,y:3,z:0},shadowExtent:22,shadowStrength:.2,bloomStrength:.3,fog:[.04,.03,.045],fogNear:55,fogFar:85,lights,lightCount:3};
-    return {id:"dsb-studio",root,seats,screen,hostSeat,stageSeats,solids,lighting,groundAt:floor,ceiling:6.4,spawnYaw:0,followDistance:3,
+    return {id:"dsb-studio",root,exitDoor,seats,screen,hostSeat,stageSeats,solids,lighting,groundAt:floor,ceiling:6.4,spawnYaw:0,followDistance:3,
       spawn:{x:0,y:3,z:17},exit:{x:0,y:3,z:18.1},jukeboxAt:{x:-1.3,y:3,z:14.3},
       bounds:{minX:-15.15,maxX:15.15,minZ:-16.25,maxZ:18.5},
       tomatoContact:(ax,ay,az,p,seat)=>{

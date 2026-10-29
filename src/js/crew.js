@@ -2936,6 +2936,14 @@
         cave.act.kind = resumeWalk.to === "spot" ? "wander" : "rush";
       }
     };
+    // Soot from a blast at close range (wallet-bombs.js): every part blackened at once and fading over `seconds`,
+    // with a little smoke, through the same char the fire leaves.
+    const soot = (cave, seconds) => {
+      const c = cave.camp;
+      c.scorch.fill(1);
+      c.fadeTime = seconds;
+      c.smokeTime = Math.min(seconds, 2);
+    };
     const ignite = (cave) => {
       if (!combatEnabled || !cave) return false;
       const c = cave.camp;
@@ -6479,7 +6487,7 @@
       get combatEnabled() { return combatEnabled; },
       get weaponsEnabled() { return weaponsEnabled; },
       cavemen, list: crewList, fanSlots, stateOf, stateCounts, workingCavemen, eatingCavemen, workingCount, eatingCount, feedableCavemen, refreshStates, refreshRosterRow, updateFan, rush, headWorldOf, applyAllSwag, wornBy, renderLocker, pokeCave, idleSay, drawDrops,
-      throwTomato, clearProjectiles, control, release, relocatePlayer, sleepPlayer, wakePlayer, sitPlayer, standPlayer, clearHeadLook, prepareDragged, recoverDragged, ignite, dropRoll, damage, fireView, steer: steerPlayer, look: lookPlayer, elevate: elevatePlayer, playerAction, jumpPlayer, poseWeapon, wearJetpack, removeJetpack, setJetpackOwnership, thrust, holdRocketJump, update, pause, dispose, stats,
+      throwTomato, clearProjectiles, control, release, relocatePlayer, sleepPlayer, wakePlayer, sitPlayer, standPlayer, clearHeadLook, prepareDragged, recoverDragged, ignite, soot, dropRoll, damage, fireView, steer: steerPlayer, look: lookPlayer, elevate: elevatePlayer, playerAction, jumpPlayer, poseWeapon, wearJetpack, removeJetpack, setJetpackOwnership, thrust, holdRocketJump, update, pause, dispose, stats,
       actorClear, builtInJetpack, toggleTint, twirl, toggleWeapon, selectWeapon, configureWeapon, swingWeapon, bashWeapon, releaseSwing, fireWeapon, setWeaponTrigger, canFire, weaponOrigin, meleeReach, meleePower, nearReload, canReload, startReload, stopReload, stopBurst, canSwapMagazine, swapMagazine, collectMagazine, collectGroundMagazine, collectAmmo, removeMagazines, hasMagazine, magazineCount, magazineAmmo, totalAmmo, workSites,
       get sleeping() { return !!(player && player.bedTravel.manual && player.state === "sleeping"); },
       get player() {
