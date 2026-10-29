@@ -8,12 +8,17 @@
 // `data-defer` move out of the pages into js/<group>-<hash>.js (scripts/distribution-modules.mjs), fetched when needed.
 // `--audio-assets` and `--image-assets` write the DSB entrance recordings and the DSB rooms' pictures as same-origin
 // files under audio/ and art/; `npm run build:site` and `npm run serve` pass both, and the portable page stays whole.
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+// `--page-assets`, last, moves the page's own script and stylesheet out of every route page into js/main-<hash>.js and
+// css/style-<hash>.css, with the jumbotron's snapshot, which every deploy rebakes, in its own
+// js/jumbotron-data-<hash>.js before the code (`externalizePage`), so the 23 pages share one cached copy. `--headers
+// <file>` writes that file as _headers plus one immutable rule per file under js/ and css/: exact paths, so a 404 there
+// (a page from one deploy asking another) is never cached for a year. `npm run build:site` passes both.
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 import { externalizeAudio } from "./distribution-audio.mjs";
-import { PICTURE_MODULES, externalizeModules, externalizePictures } from "./distribution-modules.mjs";
+import { PICTURE_MODULES, externalizeModules, externalizePage, externalizePictures } from "./distribution-modules.mjs";
 import { writeTerrainWorker } from "./distribution-terrain.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -48,6 +53,7 @@ if (process.argv.includes("--audio-assets")) shell = externalizeAudio(shell, roo
 const pictures = process.argv.includes("--image-assets");
 if (pictures) for (const src of PICTURE_MODULES) if (![...deferred.values()].some((sources) => sources.includes(src))) throw new Error(`${src}: --image-assets needs it in a data-defer group`);
 shell = externalizeModules(shell, out, deferred, block, writeTerrainWorker(root, out), pictures ? (src, text) => PICTURE_MODULES.includes(src) ? externalizePictures(src, text, out) : text : undefined);
+if (process.argv.includes("--page-assets")) shell = externalizePage(shell, out, block, ["js/jumbotron-data.js"]);
 if (shell.split("</title>").length !== 2 || shell.split("</head>").length !== 2) throw new Error("oogaboogaland.html: expected one <title> and one </head>");
 
 const esc = (text) => text.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
@@ -97,5 +103,13 @@ ${list.map((entry) => `  <url><loc>${urlOf(entry)}</loc></url>`).join("\n")}
 </urlset>
 `);
 writeFileSync(join(out, "robots.txt"), `User-agent: *\nAllow: /\nSitemap: ${site}/sitemap.xml\n`);
+const headers = process.argv.indexOf("--headers");
+if (headers > 0) {
+  const files = ["js", "css"].flatMap((dir) => existsSync(join(out, dir)) ? readdirSync(join(out, dir)).sort().map((file) => `/${dir}/${file}`) : []);
+  // Cloudflare reads at most 100 rules from _headers.
+  const rules = readFileSync(resolve(root, process.argv[headers + 1]), "utf8").trimEnd();
+  if (files.length + rules.split("\n").filter((line) => line.startsWith("/")).length > 100) throw new Error("_headers: more than 100 rules");
+  writeFileSync(join(out, "_headers"), `${rules}\n${files.map((path) => `\n${path}\n  Cache-Control: public, max-age=31536000, immutable`).join("")}\n`);
+}
 const kb = (n) => `${(n / 1024).toFixed(0)} KB`;
 console.log(`staged ${out}: ${list.length} pages of ${kb(shell.length)}, ${list.filter((entry) => entry.image).length} cards, sitemap.xml, robots.txt`);

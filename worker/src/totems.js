@@ -3,7 +3,9 @@
 // An optional GITHUB_TOKEN secret (no repository permissions) authorizes the scans: 5,000 requests an hour instead of
 // 60 per shared address, and 304s free. It goes only to api.github.com, never into a log, the cache or a reply, and never
 // follows a redirect. An expired or revoked token (401) is dropped for the rest of that scan, which carries on
-// unauthenticated, so a stale secret costs the shared limit rather than the feed.
+// unauthenticated, so a stale secret costs the shared limit rather than the feed. While GitHub refuses a scan, the
+// last good summary this edge holds (kept for a day, the window it means anything in) answers instead, so a spent
+// limit neither darkens the totems nor sends pages to GitHub for 100-PR pages themselves.
 import { json } from "./http.js";
 
 const REPOS = ["bitcoin/bitcoin", "btcpayserver/btcpayserver", "lightningnetwork/lnd", "ElementsProject/lightning"];
@@ -81,12 +83,14 @@ export const handleTotems = async (request, url, env) => {
       const job = scan(index, url, cache, env.GITHUB_TOKEN).catch(() => ({ status: 503, until: Date.now() + 60000 }))
         .then(async result => {
           await put(cache, key, result, result.status ? Math.max(1, (result.until - Date.now()) / 1000) : TTL);
+          if (!result.status) await put(cache, cacheKey(url, `${index}/last`), result, RECENT / 1000);
           return result;
         }).finally(() => running.delete(id));
       running.set(id, job);
     }
     summary = await running.get(id);
   }
+  if (summary.status) summary = await get(cache, cacheKey(url, `${index}/last`)) || summary;
   if (summary.status) return json({ error: "feed unavailable" }, summary.status, {
     "retry-after": String(Math.max(1, Math.ceil((summary.until - Date.now()) / 1000))),
     ...(summary.status === 403 || summary.status === 429 ? { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(Math.ceil(summary.until / 1000)) } : {})
