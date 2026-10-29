@@ -7,13 +7,16 @@
 // Who is shown is the scene's `visible(rec)`: the island shows players in its own zone (`onIsland` lists the
 // island's places), every other scene those in its zone (`sameZone`). The crew is optional, for a scene that
 // has none until the visitor drives, and `hide(name, on)` lets a scene hide its own decor copy of an Ooga
-// someone drives. A nameplate carries the name and, for a player in voice, the speaker: green while speaking,
-// red with a cross when they muted their microphone. Games can opt into the room's `hp` bar.
+// someone drives. A nameplate sits a few pixels over the top of the head, whatever the Ooga's height: the green
+// online dot left of the name and, for a player in voice, the speaker right of it: green while speaking, red with a
+// cross when they muted their microphone. Games can opt into the room's `hp` bar, between the name and the head.
+// With the scene's `fx`, a line of Ooga Chat is said in a bubble over its speaker's nameplate, the visitor's own
+// line over the Ooga they drive (`crew.player`).
 // One pool per scene visit: `create` in enter, `dispose` in leave, before the crew's.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const { addChild, removeChild } = BL.scene;
+  const { addChild, removeChild, boundsOf } = BL.scene;
   const MAX = 32;
   const EASE = 10;
   const SNAP = 8;
@@ -21,10 +24,15 @@
   const NAME_FONT = "bold 11px ui-monospace, monospace";
   // Preserve the existing Ooga footprint; gorillas expose their posed envelope.
   const BODY_RADIUS = 0.3, BODY_HEIGHT = 2.2;
-  // Nameplate parts, in CSS pixels: the health bar under the name, the 9-pixel speaker right of it.
-  const BAR_W = 32, BAR_H = 4, BAR_GAP = 3, ICON_GAP = 4;
-  const NAME_STROKE = "rgba(20, 14, 8, 0.85)", NAME_FILL = "#f3efe4", BAR_TRACK = "rgba(0, 0, 0, 0.55)";
+  // Nameplate parts, in CSS pixels: the name's baseline NAME_LIFT over the head's top, the health bar under the name,
+  // the online dot left of it and the 9-pixel speaker right of it, both centred on the name's letters (NAME_MID over
+  // the baseline). A chat bubble stands SPEECH_LIFT over the head, clear of the name.
+  const NAME_LIFT = 4, NAME_MID = 4, SPEECH_LIFT = 18, DOT_R = 3, BAR_W = 32, BAR_H = 4, BAR_GAP = 3, ICON_GAP = 4;
+  const BAR_LIFT = BAR_GAP + BAR_H + 1;
+  const NAME_STROKE = "rgba(20, 14, 8, 0.85)", NAME_FILL = "#f3efe4", BAR_TRACK = "rgba(0, 0, 0, 0.55)", ONLINE = "#22c55e";
   const BAR_FILL = "#d8892b", BAR_KO = "#e5533d", ICON_IDLE = "#a6a6a2", ICON_SPEAKING = "#22c55e", ICON_MUTED = "#e5533d";
+  // A chat line stays up this long once said through.
+  const CHAT_SAY = 4;
   // x, y, w, h runs on the speaker's 9x9 grid, as the roster's voice mark draws it.
   const SPEAKER = [0, 3, 2, 3, 2, 2, 1, 5, 3, 1, 1, 7];
   const WAVES = [5, 3, 1, 3, 7, 2, 1, 5];
@@ -43,9 +51,11 @@
   // swimmer's arms by it, from the position the pose transport already carries, with no simulation of its own.
   // A hub supplies its companion's style and hides its local copy through the gorilla hooks; other scenes
   // use a basic managed rig. Both bodies share the room pose, nameplate and collision actor lifecycle.
-  const create = ({ root, crew = null, posed = null, visible = sameZone, hide = null, createGorilla = null, hideGorilla = null }) => {
+  const create = ({ root, crew = null, fx = null, posed = null, visible = sameZone, hide = null, createGorilla = null, hideGorilla = null }) => {
     const net = BL.net;
     const bodies = new Map();
+    // The chat subscription, taken on the first update and again after a kept hub's suspend disposed it.
+    let unheard = null;
     const actorPool = Array.from({ length: MAX }, () => ({ id: null, x: 0, y: 0, z: 0, radius: BODY_RADIUS, height: BODY_HEIGHT }));
     const actorList = [];
 
@@ -94,13 +104,14 @@
       }
       addChild(root, cave.root);
       const motion = gorilla ? { walkPhase: NaN, walkGait: "knuckle", climb: 0, climbStride: 0, climbDirection: 0, climbSide: 0, swim: 0, lab: false, labRunIn: false, office: false, officeRise: 0 } : null;
-      const entry = { id: rec.id, body: rec.body, name, gorilla, cave, motion, baseY: gorilla ? 0 : cave.root.position.y, x: rec.x, y: rec.y, z: rec.z, yaw: rec.yaw, phase: 0, hidden: null, hiddenOverride: null };
+      const entry = { id: rec.id, body: rec.body, name, gorilla, cave, motion, baseY: gorilla ? 0 : cave.root.position.y, x: rec.x, y: rec.y, z: rec.z, yaw: rec.yaw, phase: 0, hidden: null, hiddenOverride: null, label: "", labelW: 0 };
       bodies.set(rec.id, entry);
       hideLocal(entry);
       return entry;
     };
 
     const drop = (entry) => {
+      if (fx) fx.hush(entry.cave);
       if (entry.gorilla) entry.cave.dispose();
       else removeChild(root, entry.cave.root);
       restoreLocal(entry);
@@ -148,6 +159,7 @@
     };
 
     const update = (dt) => {
+      if (fx && !unheard) unheard = net.subscribeChat(heard);
       for (const entry of bodies.values()) {
         const rec = net.remotes.get(entry.id);
         if (!rec || rec.body !== entry.body) drop(entry);
@@ -189,8 +201,25 @@
 
     const actors = () => actorList;
 
-    // Nameplates on the overlay, above each head, in the order the room sent them. Games can add the health
-    // bar under the name, with the speaker right of it; otherwise the speaker sits below the name alone.
+    // The head's top on screen and its middle across, from the corners of every visible mesh under the head as the
+    // last frame drew them; false when none projects.
+    let headMinX = Infinity, headMaxX = -Infinity, headTop = Infinity;
+    const projectHead = (node, project) => {
+      if (!node.visible) return;
+      if (node.geometry) {
+        const b = boundsOf(node.geometry), m = node.world;
+        for (let i = 0; i < 8; i++) {
+          const x = i & 1 ? b.max[0] : b.min[0], y = i & 2 ? b.max[1] : b.min[1], z = i & 4 ? b.max[2] : b.min[2];
+          const pos = project(m[0] * x + m[4] * y + m[8] * z + m[12], m[1] * x + m[5] * y + m[9] * z + m[13], m[2] * x + m[6] * y + m[10] * z + m[14]);
+          if (!pos) continue;
+          headMinX = Math.min(headMinX, pos.x); headMaxX = Math.max(headMaxX, pos.x); headTop = Math.min(headTop, pos.y);
+        }
+      }
+      for (const child of node.children) projectHead(child, project);
+    };
+
+    // Nameplates on the overlay, just over each head, in the order the room sent them: the online dot, the name and,
+    // in voice, the speaker in one row, with the health bar under the name when the game shows it.
     const drawNames = (ctx, project, showHealth = false) => {
       if (!bodies.size) return;
       ctx.save();
@@ -199,19 +228,30 @@
       ctx.textBaseline = "alphabetic";
       ctx.lineWidth = 3;
       ctx.lineJoin = "round";
+      const lift = NAME_LIFT + (showHealth ? BAR_LIFT : 0);
       for (const entry of bodies.values()) {
         const rec = net.remotes.get(entry.id);
         if (!rec || !entry.cave.root.visible) continue;
-        const height = entry.gorilla ? entry.cave.bodyHeight : entry.cave.traits.height * 2;
-        const pos = project(entry.x, entry.y + height + 0.35, entry.z);
-        if (!pos) continue;
-        const x = Math.round(pos.x), y = Math.round(pos.y);
+        headMinX = Infinity; headMaxX = -Infinity; headTop = Infinity;
+        projectHead(entry.cave.parts.head, project);
+        if (headTop === Infinity) continue;
+        entry.cave.speechLift = SPEECH_LIFT + lift - NAME_LIFT;
+        // Measured once a name: measureText allocates.
+        if (entry.label !== rec.display) { entry.label = rec.display; entry.labelW = ctx.measureText(rec.display).width; }
+        const x = Math.round((headMinX + headMaxX) / 2), y = Math.round(headTop) - lift, half = entry.labelW / 2;
         ctx.strokeStyle = NAME_STROKE;
         ctx.fillStyle = NAME_FILL;
         ctx.strokeText(rec.display, x, y);
         ctx.fillText(rec.display, x, y);
-        const left = x - BAR_W / 2, top = y + BAR_GAP;
+        ctx.beginPath();
+        ctx.arc(x - half - ICON_GAP - DOT_R, y - NAME_MID, DOT_R, 0, Math.PI * 2);
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.lineWidth = 3;
+        ctx.fillStyle = ONLINE;
+        ctx.fill();
         if (showHealth) {
+          const left = x - BAR_W / 2, top = y + BAR_GAP;
           ctx.fillStyle = NAME_STROKE;
           ctx.fillRect(left - 1, top - 1, BAR_W + 2, BAR_H + 2);
           ctx.fillStyle = BAR_TRACK;
@@ -220,12 +260,28 @@
           ctx.fillRect(left, top, Math.round(BAR_W * Math.max(0, Math.min(100, rec.hp)) / 100), BAR_H);
         }
         if (!rec.voice) continue;
-        const ix = showHealth ? left + BAR_W + ICON_GAP : x - 4.5, iy = showHealth ? top + BAR_H / 2 - 4.5 : top;
+        const ix = Math.round(x + half + ICON_GAP), iy = y - NAME_MID - 4;
         ctx.fillStyle = rec.muted ? ICON_MUTED : BL.voice.speaking(rec.id) ? ICON_SPEAKING : ICON_IDLE;
         runs(ctx, SPEAKER, ix, iy);
         runs(ctx, rec.muted ? CROSS : WAVES, ix, iy);
       }
       ctx.restore();
+    };
+
+    // A line of Ooga Chat as it is said (never the history a join brings), over its speaker if they are here.
+    const heard = (lines, joined) => {
+      if (joined) return;
+      for (const line of lines) {
+        const me = net.state.me;
+        if (me && line.login === me.login) {
+          if (crew && crew.player) fx.say(crew.player, line.text, CHAT_SAY);
+          continue;
+        }
+        for (const entry of bodies.values()) {
+          const rec = net.remotes.get(entry.id);
+          if (rec && rec.login === line.login) { fx.say(entry.cave, line.text, CHAT_SAY); break; }
+        }
+      }
     };
 
     const liveGeometry = (set) => {
@@ -238,6 +294,8 @@
     const stats = () => ({ remotePlayers: actorList.length, reservedPlayers: bodies.size });
 
     const dispose = () => {
+      if (unheard) unheard();
+      unheard = null;
       for (const entry of [...bodies.values()]) drop(entry);
       actorList.length = 0;
     };

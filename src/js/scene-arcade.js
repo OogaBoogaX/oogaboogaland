@@ -1747,7 +1747,7 @@
     unsubscribeAccount = BL.net.subscribe(accountChanged);
     seatCrowd(playerName);
     // Other signed-in players in the hall, as the Oogas they drive (after the crowd, which they may stand in for).
-    remotes = BL.remotePlayers.create({ root, crew: people, hide: hideCrowd });
+    remotes = BL.remotePlayers.create({ root, crew: people, fx, hide: hideCrowd });
     // The driven Ooga's own footsteps, heard by this page alone (footsteps.js).
     footsteps = BL.footsteps.create();
     hireCrew();

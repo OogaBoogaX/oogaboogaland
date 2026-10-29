@@ -1895,7 +1895,7 @@
     }
     unsubscribeAccount = BL.net.subscribe(accountChanged);
     // Other signed-in players in the hall, as the Oogas they drive.
-    remotes = BL.remotePlayers.create({ root, crew: people });
+    remotes = BL.remotePlayers.create({ root, crew: people, fx });
     // The driven Ooga's own footsteps, heard by this page alone (footsteps.js).
     footsteps = BL.footsteps.create();
     // The hall's own sound: its machines at work and every event where it happens (factory-audio.js).

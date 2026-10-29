@@ -411,7 +411,7 @@
     shared.outsideActorHeight = BL.remotePlayers.BODY_HEIGHT;
     crew = shared.crew = crewMod.create(shared);
     // Other signed-in players in the lab, as the Oogas they drive (the crew's own copy steps away meanwhile).
-    remotes = BL.remotePlayers.create({ root, crew });
+    remotes = BL.remotePlayers.create({ root, crew, fx });
     // The driven Ooga's own footsteps, heard by this page alone (footsteps.js).
     footsteps = BL.footsteps.create();
     mark("cavemen");
