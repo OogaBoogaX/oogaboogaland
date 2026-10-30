@@ -14192,6 +14192,25 @@ const timechainRoom = { name: "timechain room", why: "playthrough: a signed-out 
   record("timechain room: scroll reaches shoulder and orbit, release and retake work, and every view stays empty-handed with no jetpack",
     r.before === "first-person" && r.shoulder === "shoulder" && r.orbit === "orbit" && r.detached === "detached" && r.after === "first-person"
       && r.player === "portlandhodl" && !r.jet && r.jetHud && r.emptyViews && r.deniedWeapons, JSON.stringify(r));
+  await b.evaluate('document.getElementById("scene").focus()');
+  await b.key("x");
+  const dots = await b.evaluate(`(() => {
+    const B = __ooga, P = B.pilot, reticle = document.getElementById("weapon-reticle"), dot = reticle.querySelector("span"), rows = [];
+    for (let i = 0; i < 3; i++) {
+      if (i) P.hooks.onZoom(1.6, "dot-" + i);
+      B.advance(1, 1 / 60);
+      const rect = dot.getBoundingClientRect(), style = getComputedStyle(dot), cave = P.player;
+      rows.push({ mode: P.mode, aiming: P.aiming, visible: !reticle.hidden && style.visibility === "visible",
+        centered: Math.abs(rect.x + rect.width / 2 - innerWidth / 2) < 1 && Math.abs(rect.y + rect.height / 2 - innerHeight / 2) < 1,
+        dot: rect.width === 3 && rect.height === 3 && getComputedStyle(reticle.querySelector("svg")).display === "none" && getComputedStyle(dot, "::after").display === "none",
+        empty: !B.crew.weaponsEnabled && !cave.parts.club.visible && !cave.parts.gun.visible });
+    }
+    return rows;
+  })()`);
+  await b.key("x");
+  const releasedDot = await b.evaluate('(() => { __ooga.advance(0.3, 1 / 60); const off = !__ooga.pilot.aiming && document.getElementById("weapon-reticle").hidden; __ooga.pilot.enterClose(); return off; })()');
+  record("timechain room: X toggles combat mouse-look with only a fixed center dot through zoom, while both weapons stay disabled",
+    dots.every(row => row.aiming && row.visible && row.centered && row.dot && row.empty) && releasedDot, JSON.stringify({ dots, releasedDot }));
   await b.evaluate(`(() => { const B = __ooga, L = B.timechain.layout; B.pilot.navigate({ position: { x: 0, y: 0, z: L.arrival.z }, yaw: Math.PI, pitch: 0.05, dist: 4 }); B.advance(0.2, 1 / 60); })()`);
   await holdKey(b, "w", 2.5);
   const shut = await b.evaluate(`(() => { const B = __ooga, L = B.timechain.layout, p = B.pilot.player.root.position; return { z: p.z, door: L.doorZ, scene: B.scene, open: B.timechain.doors.open }; })()`);

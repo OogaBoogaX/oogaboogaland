@@ -481,7 +481,7 @@
     };
     const unsubscribeAccount = BL.net.subscribe(accountChanged);
     // Weapon shortcuts do nothing in here; right-click and scroll keep the pilot's camera controls.
-    const WEAPON_KEYS = new Set(["1", "2", "r", "x", "f", "g"]);
+    const WEAPON_KEYS = new Set(["1", "2", "r", "f", "g"]);
     const armsKeys = (e) => {
       if (e.metaKey || e.ctrlKey || e.altKey || !WEAPON_KEYS.has(e.key.toLowerCase()) || e.target && e.target.closest && e.target.closest("input, textarea, [contenteditable]")) return;
       e.preventDefault();
@@ -531,7 +531,7 @@
       if (mode.textContent !== text) mode.textContent = text;
     };
     showMode();
-    hud.hint(guide.stage ? `Entering ${room.name}` : COARSE ? "Stick walks · pinch changes view · EXIT by the doors leaves" : "W A S D walk · scroll changes view · Space at the Exit button leaves", 5000);
+    hud.hint(guide.stage ? `Entering ${room.name}` : COARSE ? "Stick walks · pinch changes view · EXIT by the doors leaves" : "W A S D walk · scroll changes view · X mouse-look · Space at Exit leaves", 5000);
 
     // The guided walks, steered as a held stick would steer them; the view turns with the walk, its pitch easing to
     // `pitch` (level on the way out, so the island's view, hung level, lines up).
@@ -556,7 +556,7 @@
       guided = false;
       people.steer(0, 0, 0, 0, 0);
       pilot.setActive(true);
-      hud.hint(COARSE ? "Stick walks · pinch changes view · EXIT by the doors leaves" : "W A S D walk · scroll changes view · Space at the Exit button leaves", 5000);
+      hud.hint(COARSE ? "Stick walks · pinch changes view · EXIT by the doors leaves" : "W A S D walk · scroll changes view · X mouse-look · Space at Exit leaves", 5000);
     };
     const runGuide = (dt) => {
       guide.t += dt;
@@ -659,6 +659,10 @@
     const overlay = (dt) => fx.drawOverlay(dt, drawExtra);
     const onKey = (e) => {
       if (e.key === "0" && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && !guide.stage) return pilot.resetCamera();
+      if (e.key.toLowerCase() === "x" && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && !guide.stage) {
+        e.preventDefault();
+        return pilot.modeAction("mode-toggle");
+      }
       if (e.key === "Escape") {
         if (!guide.stage && !pilot.escape()) walkOut();
         return true;
