@@ -841,7 +841,7 @@
       el.modeDestinationName.classList.add("show");
     };
     let gorillaEntry = null, gorillaView = "orbit", gorillaCombat = false, gorillaCombatEnabled = true;
-    let modeName = "", modeGeometry = null, modeSelected = false, modeCombat = false, modeView = "detached", modeHealth = -1, modeHealthMax = 0, modeGorilla = false;
+    let modeName = "", modeGeometry = null, modeSelected = false, modeCombat = false, modeView = "", modeHealth = -1, modeHealthMax = 0, modeGorilla = false;
     let modeCave = null, modeVisible = true, retakePortraitActor = null, retakeGeometry = null, retakePortraitGeometry = null, retakeHealth = -1, retakeHealthMax = 0;
     const retake = { actor: null, gorilla: false };
     const syncRetakeActor = () => {
@@ -891,7 +891,7 @@
       if (!visible) fadeDetachedName(true);
       const identityChanged = selected !== modeSelected || selected && name !== modeName || !!gorilla !== modeGorilla;
       const stateChanged = combat !== modeCombat || view !== modeView || combatEnabled !== modeCombatEnabled;
-      const showMode = visible && selected;
+      const showMode = visible && (selected || !retake.actor);
       if (el.mode.hidden === showMode) el.mode.hidden = !showMode;
       const showDestinations = visible && destinationNames.length > 0;
       if (el.modeDestination.hidden === showDestinations) el.modeDestination.hidden = !showDestinations;
@@ -934,8 +934,8 @@
           ? `${shown}'s gorilla; ${view} view; ${look}. Press to switch ${change}; hold to detach`
           : selected
           ? `${shown}; ${view} view; ${look}. Press to switch ${change}; hold to detach`
-          : `${destinationLabels[detachedPreset]} detached view. Press to cycle destinations`);
-        el.mode.title = gorilla ? `${shown}'s gorilla · ${view} · ${look} · hold to detach` : selected ? `${shown} · ${view} · ${look} · hold to detach` : `${destinationLabels[detachedPreset]} · detached`;
+          : "Choose an Ooga. Open the Oogas panel");
+        el.mode.title = gorilla ? `${shown}'s gorilla · ${view} · ${look} · hold to detach` : selected ? `${shown} · ${view} · ${look} · hold to detach` : "Choose an Ooga";
       }
     };
     setDetachedView(detachedPreset);
@@ -1127,7 +1127,7 @@
       if (owned !== jetpackShown) {
         jetpackShown = owned;
       }
-      if (el.jetpack.hidden !== (!owned || !!gorillaEntry)) el.jetpack.hidden = !owned || !!gorillaEntry;
+      if (el.jetpack.hidden !== (!owned || blocked || !!gorillaEntry)) el.jetpack.hidden = !owned || blocked || !!gorillaEntry;
       if (equipped !== jetpackEquipped || blocked !== jetpackBlocked) {
         jetpackEquipped = equipped;
         jetpackBlocked = blocked;
@@ -1159,7 +1159,7 @@
       el.gorillaSmash.hidden = !entry || !combatEnabled;
       el.primary.hidden = !primaryShown || !!entry;
       el.weapon.hidden = !weaponShown || !!entry;
-      el.jetpack.hidden = !jetpackShown || !!entry;
+      el.jetpack.hidden = !jetpackShown || jetpackBlocked || !!entry;
       refreshWeaponSummary();
       setMode(null);
     };
@@ -1887,6 +1887,13 @@
     on(window, "blur", () => finishPrimary(true));
     on(document, "visibilitychange", () => { if (document.hidden) finishPrimary(true); });
     on(el.primary, "contextmenu", (e) => e.preventDefault());
+    const pressMode = () => {
+      if (modeSelected) { if (actionHandler) actionHandler("mode-toggle"); }
+      else {
+        document.body.dataset.bannerOogas = "true";
+        sheet.selectTab("roster");
+      }
+    };
     const MODE_HOLD_MS = 650;
     let modePointer = -1, modeHoldTimer = 0, modeLong = false;
     const clearModeHold = () => {
@@ -1916,7 +1923,7 @@
       modePointer = -1;
       if (el.mode.hasPointerCapture(e.pointerId)) el.mode.releasePointerCapture(e.pointerId);
       clearModeHold();
-      if (!cancel && !modeLong && modeSelected && actionHandler) actionHandler("mode-toggle");
+      if (!cancel && !modeLong) pressMode();
       modeLong = false;
       el.mode.blur();
     };
@@ -1935,6 +1942,7 @@
       else if (b.dataset.action === "recipe-copy") copyRecipe(b);
       else if (b.dataset.action === "intro-go") b.closest("[data-intro]").hidden = true;
       else if (b === el.modeDestination) cycleDestinations();
+      else if (b === el.mode) pressMode();
       else if (b.dataset.action === "account-login") BL.net.login();
       else if (b.dataset.action === "account-logout") BL.net.logout();
       else if (b.dataset.action === "account-rejoin") BL.net.rejoin();
@@ -2242,6 +2250,7 @@
     };
     // End this visit; the attached sheet rows belong to the page.
     const dispose = () => {
+      delete document.body.dataset.bannerOogas;
       sheet.dispose();
       finishPrimary(true);
       window.clearTimeout(toastTimer);
@@ -2283,6 +2292,7 @@
       el.board.classList.remove("board-floating");
       el.board.removeAttribute("style");
     };
+    setMode(null);
     return {
       // Engines keep this facade while a retained scene takes a fresh visit signal and sheet state.
       renew(signal) {

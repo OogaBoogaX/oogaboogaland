@@ -584,15 +584,12 @@ body[data-active-scene="hub"] .home-link {
   }
 }
 
-/* The games own the whole screen: the island's roster and banana sheet, pull tabs and all, and its
-   chain height stay on the island and in the lab. The mine borrows the island's camera, so it
-   also hides the island's view-mode compass; Ooga Arcade plays as the mine does, empty-handed, so it
-   hides the compass and the weapon slots too. */
+/* Games keep their panels folded away until the banner's Ooga button opens the roster.
+   Ooga Arcade stays empty-handed, so its weapon slots remain hidden. */
 body[data-active-scene="race"] .sheet,
 body[data-active-scene="drop"] .sheet,
 body[data-active-scene="orbit"] .sheet,
 body[data-active-scene="mine"] .sheet,
-body[data-active-scene="mine"] .mode-hud,
 body[data-active-scene="skee"] .sheet,
 body[data-active-scene="hoops"] .sheet,
 body[data-active-scene="shy"] .sheet,
@@ -602,15 +599,6 @@ body[data-active-scene="billiards"] .sheet,
 body[data-active-scene="darts"] .sheet,
 body[data-active-scene="pinball"] .sheet,
 body[data-active-scene="ride"] .sheet,
-body[data-active-scene="skee"] .mode-hud,
-body[data-active-scene="hoops"] .mode-hud,
-body[data-active-scene="shy"] .mode-hud,
-body[data-active-scene="claw"] .mode-hud,
-body[data-active-scene="hockey"] .mode-hud,
-body[data-active-scene="billiards"] .mode-hud,
-body[data-active-scene="darts"] .mode-hud,
-body[data-active-scene="pinball"] .mode-hud,
-body[data-active-scene="ride"] .mode-hud,
 body[data-active-scene="invaders"] .sheet,
 body[data-active-scene="snake"] .sheet,
 body[data-active-scene="pong"] .sheet,
@@ -619,16 +607,7 @@ body[data-active-scene="flap"] .sheet,
 body[data-active-scene="breaker"] .sheet,
 body[data-active-scene="dash"] .sheet,
 body[data-active-scene="stacker"] .sheet,
-body[data-active-scene="invaders"] .mode-hud,
-body[data-active-scene="snake"] .mode-hud,
-body[data-active-scene="pong"] .mode-hud,
-body[data-active-scene="stampede"] .mode-hud,
-body[data-active-scene="flap"] .mode-hud,
-body[data-active-scene="breaker"] .mode-hud,
-body[data-active-scene="dash"] .mode-hud,
-body[data-active-scene="stacker"] .mode-hud,
 body[data-active-scene="arcade"] .sheet,
-body[data-active-scene="arcade"] .mode-hud,
 body[data-active-scene="arcade"] .primary-hud,
 body[data-active-scene="arcade"] .weapon-hud,
 body[data-active-scene="arcade"] .magazine-hud {
@@ -3388,8 +3367,7 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
 }
 
 .jetpack-hud:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+  display: none;
 }
 
 .mode-hud {
@@ -3626,6 +3604,7 @@ body.dsb-menu-open .rescue-equipment { visibility: hidden; pointer-events: none;
   user-select: none;
 }
 
+#mode-hud[data-selected="true"],
 .primary-hud[data-equipped="true"],
 .weapon-hud[data-equipped="true"],
 .jetpack-hud[data-equipped="true"] {
@@ -9893,3 +9872,8 @@ body[data-active-scene] #environment-sound { display: flex; align-items: center;
 /* Cave stations cycle through the OBL land button instead of a second camera toolbar. */
 .topbar .presets:is([data-scene="lab"], [data-scene="factory"], [data-scene="hangar"], [data-scene="bifrost"], [data-scene="arcade"]) [data-preset] { display: none; }
 body[data-active-scene="arcade"] #destination-hud:not([hidden]) { display: flex; }
+
+/* Keep a character control in every banner, including detached views and game scenes. */
+.mode-roster-icon { width: 34px; height: 44px; }
+#mode-hud[data-selected="true"] .mode-roster-icon { display: none; }
+body[data-banner-oogas="true"] .sheet:not([hidden]) { display: flex; }

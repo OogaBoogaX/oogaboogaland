@@ -264,14 +264,20 @@
     const name = [world.pilot, requested].find(n => BL.contributors.activeRoster.some(c => c.name === n && mayPick(c))) || (BL.contributors.activeRoster.find(mayPick) || BL.contributors.activeRoster[0]).name;
     world.pilot = null;
     const playerWorld = { level: 0, weapons: new Map(), magazine: { owned: false, count: 0, ammo: 0, carrier: null } };
-    const shared = { root, input, hud, game: ctx.game, world: playerWorld, playerName: name, weaponsEnabled: true, fx, viewYaw: 0, outsideActors: () => remotes ? remotes.actors() : NO_ACTORS, outsideActorHeight: BL.remotePlayers.BODY_HEIGHT, groundAt: () => 0, walkable: BL.pokerModels.walkable, useNear: () => select(selected) };
-    people = shared.crew = BL.crew.create(shared); pilot.bind(shared); avatar = people.cavemen.get(name);
+    const shared = { root, input, hud, game: ctx.game, world: playerWorld, playerName: name, weaponsEnabled: false, fx, viewYaw: 0, outsideActors: () => remotes ? remotes.actors() : NO_ACTORS, outsideActorHeight: BL.remotePlayers.BODY_HEIGHT, groundAt: () => 0, walkable: BL.pokerModels.walkable, useNear: () => select(selected) };
+    people = shared.crew = BL.crew.create(shared);
+    for (const cave of people.cavemen.values()) {
+      cave.weapon.primaryOwned = cave.weapon.secondaryOwned = false;
+      people.selectWeapon(0, cave);
+      cave.parts.club.visible = cave.parts.gun.visible = false;
+    }
+    pilot.bind(shared); avatar = people.cavemen.get(name);
     avatar.root.position.x = 0; avatar.root.position.y = avatar.baseY; avatar.root.position.z = 29;
     avatar.root.rotation.y = Math.PI; pilot.possess(avatar);
     if (!pilot.loginViewRestored) pilot.navigate({ position: { x: 0, y: 0, z: 29 }, yaw: 0, pitch: 0.18, dist: 4 });
     unsubscribeAccount = BL.net.subscribe(accountChanged);
     // Other signed-in players on the floor, as the Oogas they drive.
-    remotes = BL.remotePlayers.create({ root, crew: people, fx });
+    remotes = BL.remotePlayers.create({ root, crew: people, fx, posed: cave => { cave.parts.club.visible = cave.parts.gun.visible = false; } });
     // The driven Ooga's own footsteps, heard by this page alone (footsteps.js).
     footsteps = BL.footsteps.create();
     mirror.body.track(avatar.root, avatar.traits.height * 2, Math.max(avatar.headOpen.verts.length, avatar.headClosed.verts.length));
