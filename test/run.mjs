@@ -9,7 +9,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { createHash, webcrypto } from "node:crypto";
 import { externalizeAudio } from "../scripts/distribution-audio.mjs";
-import { PICTURE_MODULES, externalizeModules, externalizePictures } from "../scripts/distribution-modules.mjs";
+import { PICTURE_MODULES, externalizeModules, externalizePage, externalizePictures } from "../scripts/distribution-modules.mjs";
 import { launch, acquire, dispose, driverError } from "./browser.mjs";
 import { writeCharacters } from "../scripts/characters.mjs";
 const emptyPeerPreviewProof = async () => {
@@ -2851,6 +2851,10 @@ const { autoQualityProbe } = (() => {
     const hubMemory = [0.25, 1, 2, 4].every(gb => !keepHub(gb) && !keepHub(gb, "auto", true)) && [8, 16, 32, undefined, 0, NaN].every(gb => keepHub(gb))
       && [8, 16].every(gb => keepHub(gb, "auto", true)) && [undefined, 0, NaN].every(gb => !keepHub(gb, "auto", true) && keepHub(gb, "keep", true))
       && keepHub(4, "keep") && !keepHub(32, "release");
+    // The island cache's second build follows the keep rule, so a phone or a small device never pays for it.
+    const terrainCache = (memory, coarse, worker = null) => runInNewContext(`${policy}\nTERRAIN_CACHE`, { DEVICE_MEMORY: memory, COARSE: coarse, params: new URLSearchParams(worker === null ? {} : { terrainworker: worker }) });
+    const cacheMemory = [0.25, 1, 2, 4].every(gb => !terrainCache(gb, false) && !terrainCache(gb, true)) && [8, 16].every(gb => terrainCache(gb, false) && terrainCache(gb, true))
+      && terrainCache(undefined, false) && !terrainCache(undefined, true) && terrainCache(4, true, "1") && !terrainCache(32, false, "0");
     const opening = source.slice(source.indexOf("  const COARSE ="), source.indexOf("  const $ ="));
     const initial = (deviceMemory, coarse = false) => runInNewContext(`${opening}\nINITIAL_QUALITY`, { navigator: { deviceMemory }, window: { matchMedia: () => ({ matches: coarse }) } });
     const create = (quality = "high", renderedFrames = 100, deviceMemory) => {
@@ -2891,7 +2895,7 @@ const { autoQualityProbe } = (() => {
       const slow = create("high", 100, gb); slow.boot(slow.low * 1.2);
       return limited.renderer.quality === "medium" && low.changes.length === 0 && slow.renderer.quality === "low";
     }) && [undefined, 0, NaN, 16].every((gb) => { const ample = create("high", 100, gb); ample.boot(0); return ample.changes.length === 0; });
-    return { hubMemory, memoryBoot, healthy: healthy.changes.length === 0, gpuBound: bound.changes[0] === "medium",
+    return { hubMemory, cacheMemory, memoryBoot, healthy: healthy.changes.length === 0, gpuBound: bound.changes[0] === "medium",
       reactsIn: slowAt, reactsFast: slowAt <= 2500, ignoresSpikes: spike.changes.length === 0,
       bounded: bounded.changes.join("|") === "medium|low", warmup: warming.changes.length === 0,
       ignoresPauses: excluded.changes.length === 0, fallback: fallback.changes.length === 0,
@@ -4530,9 +4534,11 @@ const totemFeedChecks = async () => {
   const source = await readFile(new URL("../src/js/totem-feed.js", import.meta.url), "utf8");
   const settle = () => new Promise((r) => setTimeout(r, 0));
   const reply = (status, body, headers = {}) => ({ status, ok: status >= 200 && status < 300, headers: { get: (k) => headers[k] ?? null }, json: async () => body });
+  let clock = Date.now();
+  class Clock extends Date { static now() { return clock; } }
   const page = (protocol, answer) => {
     const asked = [], events = [], ticks = [];
-    const context = { location: { protocol }, document: { hidden: false, addEventListener() {}, removeEventListener() {} },
+    const context = { Date: Clock, location: { protocol }, document: { hidden: false, addEventListener() {}, removeEventListener() {} },
       window: { setInterval: (fn) => { ticks.push(fn); return 1; }, clearInterval() {} },
       fetch: async (url, options = {}) => { asked.push({ url, tag: options.headers?.["if-none-match"] || "" }); return answer(url, asked.length); } };
     runInNewContext(source, context);
@@ -4568,19 +4574,34 @@ const totemFeedChecks = async () => {
   const direct = fallback.asked.filter((a) => a.url.startsWith("/api/")).length === 1 && fallback.asked.length === 6 && fallback.asked.slice(1).every((a) => a.url.startsWith("https://api.github.com/repos/"))
     && fallback.feed.state.repos.every((r) => r.number === 9) && fallback.events.length === 4 && fallback.events.every((e) => !e.fresh);
   fallback.feed.dispose();
-  // A spent limit on the Worker is Cloudflare's shared budget: that turn reads GitHub itself, and the next asks the Worker again.
-  const limited = page("https:", (url) => /\/api\/totems\//.test(url)
-    ? reply(403, null, { ...JSON_TYPE, "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(Math.ceil(Date.now() / 1000) + 3600) }) : github(url));
-  limited.feed.start(); await settle(); limited.ticks[0](); await settle();
-  const shared = limited.asked[0].url === "/api/totems/0" && limited.asked[1].url.startsWith("https://api.github.com/repos/bitcoin/")
-    && limited.asked.filter((a) => a.url.startsWith("/api/")).length === 5 && limited.feed.state.limitedUntil === 0 && limited.feed.state.repos.every((r) => r.number === 9);
+  // A spent limit on the Worker is Cloudflare's shared budget, not this visitor's: a repository with no reading yet is
+  // read from GitHub once, then the Worker's retry-after is waited out and its later refusals send nobody to GitHub.
+  const refused = (seconds) => reply(403, { error: "feed unavailable" }, { ...JSON_TYPE, "retry-after": String(seconds), "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(Math.ceil(clock / 1000) + seconds) });
+  const limited = page("https:", (url) => /\/api\/totems\//.test(url) ? refused(3600) : github(url));
+  limited.feed.start(); await settle();
+  for (let i = 0; i < 4; i++) { clock += 90000; limited.ticks[0](); await settle(); }
+  const firstOnly = limited.asked.length === 8 && limited.asked.every((a, i) => i % 2 ? a.url.startsWith("https://api.github.com/repos/") : a.url === `/api/totems/${i / 2}`)
+    && limited.feed.state.limitedUntil === 0 && limited.feed.state.repos.every((r) => r.number === 9);
+  clock += 3600000; limited.ticks[0](); await settle();
+  const waited = limited.asked.length === 9 && limited.asked[8].url === "/api/totems/0" && limited.feed.state.repos[0].number === 9;
   limited.feed.dispose();
+  // The visitor's own GitHub limit spent as well: the Worker is still asked, and its answer lights the totem.
+  let healed = false;
+  const both = page("https:", (url) => /\/api\/totems\//.test(url)
+    ? healed ? reply(200, { repo: "bitcoin/bitcoin", number: 42, mergedAt: hour }, { ...JSON_TYPE, etag: '"0-42"' }) : refused(60)
+    : reply(403, null, { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(Math.ceil(clock / 1000) + 3600) }));
+  both.feed.start(); await settle();
+  healed = true; clock += 90000; both.ticks[0](); await settle();
+  const ownLimit = both.asked.length === 6 && both.asked.filter((a) => a.url.startsWith("https://api.github.com/")).length === 1
+    && both.asked[5].url === "/api/totems/0" && both.feed.state.limitedUntil > clock && both.feed.state.repos[0].number === 42;
+  both.feed.dispose();
+  const shared = firstOnly && waited && ownLimit;
   const file = page("file:", github);
   file.feed.start(); await settle();
   const fileDirect = file.asked.length === 4 && file.asked.every((a) => a.url.startsWith("https://api.github.com/repos/"));
   file.feed.dispose();
-  record("totem feed: the Worker's summary lights a totem without celebrating the first reading, its 304 keeps it, a newer merge is fresh, and a static host, a file page or a spent Worker limit reads GitHub itself",
-    firstQuiet && revalidated && fresh && direct && shared && fileDirect, JSON.stringify({ firstQuiet, revalidated, fresh, direct, shared, fileDirect, asked: site.asked.length, events: site.events, failures: site.feed.state.failures }));
+  record("totem feed: the Worker's summary lights a totem without celebrating the first reading, its 304 keeps it, a newer merge is fresh, a static host or a file page reads GitHub itself, and a spent Worker limit is waited out, sending only a first reading to GitHub",
+    firstQuiet && revalidated && fresh && direct && shared && fileDirect, JSON.stringify({ firstQuiet, revalidated, fresh, direct, firstOnly, waited, ownLimit, fileDirect, asked: site.asked.length, events: site.events, failures: site.feed.state.failures }));
 };
 const oogatronReplayChecks = async () => {
   const source = await readFile(new URL("../src/js/oogatron-live.js", import.meta.url), "utf8");
@@ -6473,7 +6494,7 @@ const hubRetentionProof = async () => {
 };
 const adaptiveQualityChecks = async () => {
   const r = autoQualityProbe();
-  record("memory policy: devices below 8 GiB release the hub, 8 GiB retains it, unknown memory retains it with a fine pointer and releases it with a coarse one, and the explicit policy overrides either", r.hubMemory, JSON.stringify(r));
+  record("memory policy: devices below 8 GiB release the hub, 8 GiB retains it, unknown memory retains it with a fine pointer and releases it with a coarse one, and the explicit policy overrides either; the island cache's second build follows the same rule unless `terrainworker` forces it", r.hubMemory && r.cacheMemory, JSON.stringify(r));
   record("adaptive quality: a GPU-bound machine is seen through delivered frames and loses a tier within two seconds", r.healthy && r.gpuBound && r.reactsFast, JSON.stringify(r));
   record("adaptive quality: warmup, transitions, background frames and isolated spikes do not lower quality", r.warmup && r.ignoresPauses && r.ignoresSpikes && r.fallback, JSON.stringify(r));
   record("adaptive quality: steps one tier at a time and stops at the lowest", r.bounded, JSON.stringify(r));
@@ -6912,9 +6933,10 @@ if (!ONLY || onlyMatches(signedInArrival.name)) tasks.push({ name: "hub signed-i
       [[signedInRouted.name, signedInRouted.run]], { initScript: `(${signedInArrivalWire.toString()})("sleeping", false)` });
   } finally { await new Promise(resolve => server.close(resolve)); }
 } });
-// The hosted page as `npm run site` stages it: each `data-defer` group leaves the built page for its own same-origin file,
-// served here behind a switch (`refused`, path prefixes) that answers 503, as a deploy mid-flight can. The source and
-// portable pages keep every group inline, so only this page can show what a scene reads before its code arrives.
+// The hosted page as `npm run build:site` stages it: each `data-defer` group leaves the built page for its own same-origin
+// file, served here behind a switch (`refused`, path prefixes) that answers 503, as a deploy mid-flight can, and the page's
+// own script, jumbotron snapshot and stylesheet follow (`--page-assets`). The source and portable pages keep every group
+// inline, so only this page can show what a scene reads before its code arrives.
 const hostedSite = async () => {
   const html = readFileSync(join(root, "oogaboogaland.html"), "utf8"), out = mkdtempSync(join(tmpdir(), "ooga-hosted-"));
   const deferred = new Map();
@@ -6922,9 +6944,10 @@ const hostedSite = async () => {
   // A module's block in the built page runs from its marker to the next module's.
   const block = (src) => { const start = html.indexOf(`// ---- ${src} ----\n`); return html.slice(start, html.indexOf("\n\n// ---- ", start + 1)); };
   // `gone` answers 404, as a chunk a later deploy replaced does.
-  const page = externalizeModules(html, out, deferred, block), refused = [], gone = [], fetched = [], probed = [];
+  const page = externalizePage(externalizeModules(html, out, deferred, block), out, block, ["js/jumbotron-data.js"]), refused = [], gone = [], fetched = [], probed = [];
   const server = createServer((req, res) => {
     const path = req.url.split("?")[0];
+    if (path.startsWith("/css/")) { res.setHeader("content-type", "text/css"); return res.end(readFileSync(join(out, path))); }
     if (!path.startsWith("/js/")) { res.setHeader("content-type", "text/html; charset=utf-8"); return res.end(page); }
     // The loader's HEAD probe after a failure is not a download; refusal counts read `fetched` alone.
     (req.method === "HEAD" ? probed : fetched).push(path);
@@ -20350,10 +20373,6 @@ const distributionAudioChecks = async () => {
     record("distribution audio: exact MP3 assets replace embedded text and the final script retains its literal bytes and strict CSP hash",
       descriptor.external && urls.length === 5 && urls.every((url, i) => /^\/audio\/dsb-[a-f0-9]{64}\.mp3$/.test(url) && readFileSync(join(out, url)).equals(Buffer.from(encoded[i], "base64")))
       && staged.includes(`script-src 'sha256-${hash(updated)}'`) && updated.endsWith(script.slice(script.indexOf("const literal"))) && !updated.includes(encoded[0]), "staged recording/CSP mismatch");
-    const pages = readFileSync(join(root, ".github/workflows/pages.yml"), "utf8");
-    record("distribution audio: GitHub Pages stages the same on-demand recordings as the Worker",
-      pages.split("\n").some(line => /^\s*run: node scripts\/site\.mjs _site\b/.test(line) && line.split(/\s+/).includes("--audio-assets")),
-      "Pages staging leaves the DSB recordings embedded");
     // The DSB rooms' pictures leave the deferred dsb bundle as same-origin files of the same bytes; the bundle still evaluates.
     const blocks = new Map(PICTURE_MODULES.map(src => [src, `// ---- ${src} ----\n${readFileSync(join(root, "src", src), "utf8").trim()}`]));
     const pictures = [...blocks.values()].flatMap(text => [...text.matchAll(/data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)/g)]);
@@ -20368,6 +20387,24 @@ const distributionAudioChecks = async () => {
       pictures.length > 0 && files.length === pictures.length && files.every((url, i) => readFileSync(join(out, url)).equals(Buffer.from(pictures[i][2], "base64")))
       && !/data:image\//.test(bundle) && art.window.BL.stackchainArt["article-0"].image.startsWith("/art/")
       && hosted.includes(`window.BL.terrainWorker = ${JSON.stringify(terrainWorker)};`), "staged pictures/terrain descriptor mismatch");
+    // The hosted page's own script, its jumbotron snapshot and its stylesheet leave every route page as hashed files.
+    const jumbo = `// ---- js/jumbotron-data.js ----\n${readFileSync(join(root, "src/js/jumbotron-data.js"), "utf8").trim()}`;
+    const early = "\nwindow.curtain = 1;\n", css = "\nbody { color: red; }\n";
+    const main = `\nwindow.BL = window.BL || {};\n${jumbo}\n\nwindow.BL.read = window.BL.jumbotronData.meta.org + window.curtain;\n`;
+    const shell = `<meta content="default-src 'none'; script-src 'sha256-${hash(main)}' 'sha256-${hash(early)}'; style-src 'sha256-${hash(css)}'"><style>${css}</style><script data-early>${early}</script><script>${main}</script>`;
+    const paged = externalizePage(externalizeModules(shell, out, new Map(), src => src), out, src => src === "js/jumbotron-data.js" ? jumbo : null, ["js/jumbotron-data.js"]);
+    const named = (re) => [...paged.matchAll(re)].map(m => m[1]), mains = named(/<script src="(\/js\/main-[0-9a-f]{16}\.js)"><\/script>/g);
+    const order = named(/<script src="([^"]+)"><\/script>/g), sheets = named(/<link rel="stylesheet" href="(\/css\/style-[0-9a-f]{16}\.css)">/g);
+    const exact = (path) => path.includes(createHash("sha256").update(readFileSync(join(out, path))).digest("hex").slice(0, 16));
+    const policy = paged.match(/script-src ([^;]*);/)[1], loaded = { window: { curtain: 1 } }, inline = { window: { curtain: 1 } };
+    for (const path of order) runInNewContext(readFileSync(join(out, path), "utf8"), loaded);
+    runInNewContext(main, inline);
+    const headers = readFileSync(join(root, "worker/_headers"), "utf8"), site = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).scripts["build:site"].split(/\s+/);
+    record("distribution page: a staged page carries no main inline script or style, names one existing hashed main script after its data and one stylesheet, and its policy pins only the early block (rule: a stale hash or a cached 404 blanks the page)",
+      !/<script>|<style>/.test(paged) && mains.length === 1 && order.length === 2 && order[1] === mains[0] && /^\/js\/jumbotron-data-/.test(order[0]) && sheets.length === 1
+      && [...order, ...sheets].every(exact) && policy === `'self' 'sha256-${hash(early)}'` && paged.includes("style-src 'self'\"") && loaded.window.BL.read === inline.window.BL.read
+      && !/^\/(js|css)\/\*/m.test(headers) && site.includes("--page-assets") && site[site.indexOf("--headers") + 1] === "worker/_headers",
+      JSON.stringify({ order, sheets, policy, read: [loaded.window.BL.read, inline.window.BL.read] }));
   } finally { rmSync(out, { recursive: true, force: true }); }
 };
 const qualityFramebufferChecks = async () => {
@@ -21336,7 +21373,44 @@ const listenOnlyMicStatusProof = async () => {
   return {listening,listeningAlone,listeningMuted,afterDrop,speakerAlone,speakerMuted,speakerOn,back};
 };
 
-// terrain-snapshot.js is a hand-kept copy of terrain.js's queries, for the opt-in Worker build. The flag-off island
+// terrain-cache.js under an in-memory IndexedDB and a stand-in Worker: a boot miss must not wait on the Worker (it starts
+// none; the page builds as usual and fills the cache later, once), a hit must count as the build it replaced for the
+// boot-quality probe, and missing storage must skip the cache entirely.
+const terrainCacheChecks = async () => {
+  const source = readFileSync(join(root, "src/js/terrain-cache.js"), "utf8"), build = "a".repeat(64);
+  const boot = (records, storage = true) => {
+    const later = fn => setTimeout(fn, 0), workers = [];
+    const request = run => { const r = {}; later(() => { r.result = run(); r.onsuccess?.(); }); return r; };
+    const indexedDB = storage ? { open: () => { const r = {}; later(() => {
+      r.result = { close() {}, transaction: () => { const t = { abort() {} }; later(() => later(() => t.oncomplete?.()));
+        return t.store = { get: key => request(() => records.get(key)), put: value => records.set(value.key, value), delete: key => records.delete(key),
+          index: () => ({ openKeyCursor: () => request(() => null) }) }, { objectStore: () => t.store, set oncomplete(f) { t.oncomplete = f; }, set onerror(f) {}, set onabort(f) {}, abort() {} }; } };
+      r.onsuccess(); }); return r; } } : undefined;
+    class Worker { constructor() { workers.push(this); } postMessage(m) { this.sent = m; later(() => this.onmessage({ data: { type: "stored", key: m.key } })); } terminate() {} }
+    let cpu = 0, restored = 0;
+    const BL = { terrainWorker: { build, url: `/js/terrain-worker-${build.slice(0, 16)}.js` },
+      buildTasks: { measure: work => { cpu += 100; return work(); }, get cpu() { return cpu; } }, models: { withScope: (scope, work) => work() },
+      terrain: { hasIsland: () => false, restoreIslandSnapshot: () => { restored++; } } };
+    const context = { window: { BL, indexedDB }, Worker, URL, DOMException, location: { origin: "https://oogabooga.land" }, setTimeout, clearTimeout };
+    runInNewContext(source, context);
+    return { cache: BL.terrainCache, workers, restored: () => restored };
+  };
+  const options = { seed: 1, roofHole: null }, key = `${build}:${JSON.stringify(options)}`;
+  const records = new Map(), miss = boot(records);
+  const missed = await miss.cache.prepare(options, "hub"), started = miss.workers.length, filling = miss.cache.fill();
+  await filling;
+  const sent = miss.workers[0]?.sent, once = miss.cache.fill() === null;
+  records.set(key, { key, build, cpu: 1200, used: 1, snapshot: {} });
+  const hit = boot(records), restored = await hit.cache.prepare(options, "hub");
+  const none = boot(new Map(), false), unavailable = await none.cache.prepare(options, "hub");
+  const result = { missed, started, sent, stored: miss.cache.stats.stored, once, restored, credit: hit.cache.stats.credit, hitWorkers: hit.workers.length,
+    hitFill: hit.cache.fill(), unavailable, noneSource: none.cache.stats.lastSource, noneFill: none.cache.fill() };
+  record("terrain cache: a boot miss builds as usual with no Worker started and fills the cache once afterwards, a hit counts as the build it replaced, and missing storage skips the cache",
+    !missed && started === 0 && sent?.key === key && sent.build === build && result.stored === 1 && once
+      && restored === true && hit.restored() === 1 && result.credit === 1100 && result.hitWorkers === 0 && result.hitFill === null
+      && unavailable === false && result.noneSource === "unavailable" && result.noneFill === null, JSON.stringify(result));
+};
+// terrain-snapshot.js is a hand-kept copy of terrain.js's queries, for the Worker build. The directly built island
 // must keep its golden digest, and the snapshot's queries, rehydrated after a structured clone (the Worker's and
 // IndexedDB's codec), must answer exactly as the direct build does on a seeded sample of every query.
 // The golden is the island as it was built before the snapshot existed.
@@ -21417,6 +21491,7 @@ const artifactUnitProof = () => {
     node() { return 0; }
     npm() { printf 'npm|%s\\n' "$*"; return "$UNIT_EXIT"; }
     gh() {
+      case "$*" in *"/compare/merged-sha...rock "*) printf '%s\\n' "$COMPARE"; return 0;; esac
       printf 'gh|%s|%s\\n' "$GH_TOKEN" "$*"
       case "$*" in
         *"context=Unit · the browser-free lane"*)
@@ -21427,22 +21502,26 @@ const artifactUnitProof = () => {
   `;
   const dir = mkdtempSync(join(tmpdir(), "ooga-artifact-unit-")), rows = [];
   try {
-    for (const [name, changed, unit, status, push] of [["pass", 1, 0, "none", 0], ["fail", 1, 1, "none", 0],
-      ["status", 1, 0, "success", 0], ["pending", 1, 0, "pending", 0], ["unchanged", 0, 0, "none", 0], ["concurrent", 1, 0, "none", 1]]) {
+    for (const [name, changed, unit, status, push, compare = ""] of [["pass", 1, 0, "none", 0], ["fail", 1, 1, "none", 0],
+      ["status", 1, 0, "success", 0], ["pending", 1, 0, "pending", 0], ["unchanged", 0, 0, "none", 0], ["concurrent", 1, 0, "none", 1, "ahead 0"],
+      ["diverged", 1, 0, "none", 1, "diverged 2"], ["superseded", 1, 0, "none", 1, "ahead 1"]]) {
       const result = spawnSync("bash", ["-e", "-c", doubles + script], { cwd: dir, encoding: "utf8", timeout: 5000,
         env: { ...process.env, GH_TOKEN: "character-app", UNIT_STATUS_TOKEN: "actions-job", GITHUB_REPOSITORY: "fixture/repo",
-          GITHUB_SERVER_URL: "https://github.com", GITHUB_RUN_ID: "123", GITHUB_RUN_ATTEMPT: "1",
+          GITHUB_SERVER_URL: "https://github.com", GITHUB_RUN_ID: "123", GITHUB_RUN_ATTEMPT: "1", GITHUB_SHA: "merged-sha", COMPARE: compare,
           CHANGED: String(changed), UNIT_EXIT: String(unit), STATUS_FAIL: status, PUSH_EXIT: String(push) } });
       const lines = result.stdout.split("\n"), ran = lines.indexOf("npm|run test:unit"), pushed = lines.indexOf("git|push origin HEAD:rock");
       const pending = lines.findIndex(l => l.includes("state=pending")), success = lines.findIndex(l => l.includes("state=success") && l.includes("context=Unit ·"));
-      const failure = lines.findIndex(l => l.includes("state=failure")), cleaned = lines.some(l => l.includes("git|push origin --delete"));
+      const failure = lines.findIndex(l => l.includes("state=failure")), cleaned = lines.at(-2) === "git|push origin --delete automation/site-artifact-123-1";
+      const superseded = lines.some(l => l.startsWith("::notice::rock moved past merged-sha"));
       const statuses = lines.filter(l => l.startsWith("gh|") && l.includes("context=Unit ·"));
       const identity = statuses.every(l => l.startsWith("gh|actions-job|api repos/fixture/repo/statuses/generated-sha ")
         && l.includes("target_url=https://github.com/fixture/repo/actions/runs/123"));
-      const ok = !result.error && identity && (name === "pass" ? result.status === 0 && pending < ran && ran < success && success < pushed && cleaned
-        : name === "unchanged" ? result.status === 0 && ran < 0 && pushed < 0 && !statuses.length
-        : name === "concurrent" ? result.status !== 0 && success > ran && pushed > success && !cleaned
-        : result.status !== 0 && pushed < 0 && !cleaned && (name === "fail" ? failure > ran && ran > pending && success < 0
+      const ok = !result.error && identity && (name === "unchanged" ? result.status === 0 && ran < 0 && pushed < 0 && !statuses.length && !cleaned
+        : !cleaned ? false
+        : name === "pass" ? result.status === 0 && pending < ran && ran < success && success < pushed && !superseded
+        : name === "superseded" ? result.status === 0 && success > ran && pushed > success && superseded
+        : name === "concurrent" || name === "diverged" ? result.status !== 0 && success > ran && pushed > success && !superseded
+        : result.status !== 0 && pushed < 0 && (name === "fail" ? failure > ran && ran > pending && success < 0
           : name === "status" ? success > ran && ran > pending : ran < 0 && pending >= 0));
       rows.push({ name, ok, status: result.status, output: ok ? "" : result.stdout + result.stderr });
     }
@@ -21451,7 +21530,7 @@ const artifactUnitProof = () => {
 };
 const unitChecks = async () => {
   const artifact = artifactUnitProof();
-  record("artifact workflow: tests the generated commit with the Actions-owned status and blocks rock on failed tests, status writes or concurrent pushes", artifact.parsed && artifact.rows.every(row => row.ok), JSON.stringify(artifact));
+  record("artifact workflow: tests the generated commit with the Actions-owned status and blocks rock on failed tests, status writes or concurrent pushes; a lost race passes only when rock has moved to a later CI-triggering commit, and the staging branch is always deleted", artifact.parsed && artifact.rows.every(row => row.ok), JSON.stringify(artifact));
   const previewRange=await studioPreviewRangeProof();
   record("Studio preview: local media single-byte ranges, HEAD, bounds and ignored unsupported requests",Object.values(previewRange).every(Boolean),JSON.stringify(previewRange));
   const videoSecurity=await studioVideoSecurityProof();
@@ -21814,6 +21893,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   // Sealed cave guides need the hub's seal nodes, so probes reading them stay in the browser tier.
   const island = BL.terrain.island({ seed: 1 });
   terrainParityChecks(BL, island);
+  await terrainCacheChecks();
   {
     // These real c3 roof poses must follow the same limb animation as open space.
     const solid = island.solidAt, rows = [];
@@ -21879,8 +21959,18 @@ record("character visibility source bakes: ownership wrappers share exact immuta
     const reused = nextChecks === 0 && firstChecks === firstCost, c = next.more(), nextCost = nextChecks, d = first.more();
     const extended = nextCost > 0 && nextChecks === nextCost && firstChecks === firstCost && c !== d && same(c, d) && same(c, beds[1]);
     const demand = lazy && unsearched && first.beds.length === 2 && next.beds.length === 2 && firstCost > 0 && firstCost < fullChecks;
-    record("outdoor sleep: rainforest provides separate supported anchors for the whole HQ overflow and rejects blocked footprints", beds.length >= Math.max(8, minimum) && supported && separate && blocked && demand && fresh && reused && extended,
-      JSON.stringify({ count: beds.length, minimum, supported, separate, blocked, demand, fresh, reused, extended, fullChecks, firstCost, nextCost }));
+    // The hub's scenery takes a third of the forest's anchors (48 to 31 for 35 overflow sleepers), and this tier
+    // cannot plant it, so refuse the whole forest: the search must still go on to dry, level floor under the rock,
+    // with room there for at least that third.
+    const local = (b) => { const dx = b.x - place.x, dz = b.z - place.z; return { x: dx * cos - dz * sin, y: b.y - place.y, z: dx * sin + dz * cos }; };
+    const beyond = BL.headquartersSleep.outdoorBeds(pool, (x, y, z) => { const p = local({ x, y, z }); return Math.hypot(p.x, p.z) < L.RING.path; }, Infinity);
+    const forest = BL.headquartersSleep.outdoorBeds(pool, () => true, Infinity).length - beyond.length;
+    const sheltered = beyond.length * 3 >= forest && beyond.every(b => {
+      const p = local(b);
+      return b.outdoor && L.covered(p.x, p.y + 1, p.z) && L.solidAt(p.x, p.y - L.UNIT / 2, p.z) && !L.solidAt(p.x, p.y + L.UNIT / 2, p.z);
+    }) && beyond.every((a, i) => beyond.every((b, j) => i === j || Math.hypot(a.x - b.x, a.z - b.z) >= 1.79));
+    record("outdoor sleep: rainforest provides separate supported anchors for the whole HQ overflow, rejects blocked footprints and goes on under the rock past a full forest", beds.length >= Math.max(8, minimum) && supported && separate && blocked && demand && fresh && reused && extended && sheltered,
+      JSON.stringify({ count: beds.length, minimum, supported, separate, blocked, demand, fresh, reused, extended, fullChecks, firstCost, nextCost, forest, beyond: beyond.length, sheltered }));
   }
 
   {

@@ -44,6 +44,37 @@ export function externalizeModules(html, out, deferred, block, terrainWorker = n
     .replace(oldPolicy, `script-src 'self' 'sha256-${hash(updated, "base64")}'`);
 }
 
+// Hosted pages only, after the steps above: the page's one inline script leaves for js/main-<hash>.js in the same
+// place, and its stylesheet for css/style-<hash>.css, so a browser keeps both across reloads, routes and tabs and V8
+// can cache the script's compiled code; every route page names the same files. Each module in `data` (the jumbotron's
+// snapshot, rebaked by every deploy) leaves the main script for js/<module>-<hash>.js, loaded just before it, so a
+// deploy that changes only that data keeps the code's file. Such a module must read nothing at load but window.BL.
+// The policies keep 'self' and the data-early hashes and drop the two blocks' hashes.
+export function externalizePage(html, out, block, data = []) {
+  const script = html.match(/<script>([\s\S]*?)<\/script>/), style = html.match(/<style>([\s\S]*?)<\/style>/);
+  if (!script || !style) throw new Error("distribution: expected one inline script and one inline style");
+  const scriptHash = ` 'sha256-${hash(script[1], "base64")}'`, stylePolicy = `style-src 'sha256-${hash(style[1], "base64")}'`;
+  if (html.split(scriptHash).length !== 2 || !html.includes(`script-src 'self'${scriptHash}`) || html.split(stylePolicy).length !== 2) throw new Error("distribution: page hashes not found");
+  const write = (dir, name, text) => {
+    mkdirSync(join(out, dir), { recursive: true });
+    const file = `${name}-${hash(text, "hex").slice(0, 16)}.${dir}`;
+    writeFileSync(join(out, dir, file), text);
+    return `/${dir}/${file}`;
+  };
+  let body = script[1];
+  const tags = data.map((src) => {
+    const text = block(src);
+    if (body.split(text).length !== 2) throw new Error(`distribution: ${src} is not in the page exactly once`);
+    body = body.split(text).join("");
+    return `<script src="${write("js", basename(src, ".js"), `${text}\n`)}"></script>`;
+  });
+  tags.push(`<script src="${write("js", "main", body)}"></script>`);
+  const sheet = write("css", "style", style[1]);
+  return html.replace(script[0], () => tags.join("\n"))
+    .replace(style[0], () => `<link rel="stylesheet" href="${sheet}">`)
+    .replace(scriptHash, "").replace(stylePolicy, "style-src 'self'");
+}
+
 // The DSB rooms' pictures (article thumbnails, product covers, profile previews) are data URIs in these modules, which
 // travel in the deferred dsb bundle; the menus set each as an image's src either way, under `img-src 'self' data:`.
 // Each becomes art/<module>-<sha256>.<ext> holding the same bytes, so entering DSB fetches the code alone and a picture
