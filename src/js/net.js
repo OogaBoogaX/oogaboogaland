@@ -28,8 +28,8 @@
 // The room's clock: `serverNow()` estimates it from the timestamps on `welcome` and `state`, keeping the
 // sample that arrived fastest (the least delayed), and `state.loopEpoch` is when the pile's shared
 // sound loop started, so every page can play the same moment of it.
-// The roster's marks (who is in voice, muted, the host) follow `subscribeRoster`, which also fires on a
-// body or voice change; `subscribe` stays for the account and the room. `setMuted` tells the room this
+// The roster's marks (who is in voice, muted, the host, where) follow `subscribeRoster`, which also fires on a
+// body, voice or zone change; `subscribe` stays for the account and the room. `setMuted` tells the room this
 // page muted its microphone, and `state.body` is the actor this page reports driving.
 // `setHealth` reports the driven actor's health (on a change, at most HP_MS apart), which other pages draw over
 // it; remote records carry `hp` and `ko`.
@@ -288,6 +288,7 @@
     } else if (msg.t === "zone") {
       const rec = remotes.get(msg.id);
       if (rec && typeof msg.name === "string") rec.zone = msg.name;
+      rosterChanged();
     } else if (msg.t === "host") {
       state.hostId = Number.isSafeInteger(msg.id) ? msg.id : 0;
       state.followers = Number.isSafeInteger(msg.followers) ? msg.followers : 0;
@@ -483,6 +484,7 @@
     poseAt = 0; px = NaN;
     if (moved) BL.voice.setPeers([]);
     sendZone();
+    rosterChanged();
   };
   // Voice changes without moving or hiding anybody on the shared floor.
   const setPokerVoice = table => {
