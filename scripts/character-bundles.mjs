@@ -36,7 +36,7 @@ export const createCoordinator = (gh, bot, now = () => new Date()) => {
     const key = `build-${pr.merge_commit_sha}`, marker = `<!-- obl-character-bundle:${key} -->`;
     if ((await gh.list(`issues/${pr.number}/comments`)).some((row) => row.user.login === bot && row.body.includes(marker))) return;
     await gh.api("actions/workflows/pages.yml/dispatches", "POST", { ref: "rock", inputs: { merge_sha: pr.merge_commit_sha } });
-    await comment(pr.number, key, "Post-merge Pages build and contributor reconciliation dispatched.");
+    await comment(pr.number, key, "Post-merge page build and contributor reconciliation dispatched.");
   };
   const openBundles = async () => (await gh.list("pulls?state=open&base=rock")).filter((pr) => isBundle(pr, bot));
   const rejectSubmission = async (pr, submission, error) => {
