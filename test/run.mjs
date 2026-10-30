@@ -13777,6 +13777,53 @@ const timechainBlockChecks = async () => {
   await fire(() => true);
   record("timechain blocks: under nosim the room's reader asks nothing and every panel reads PAUSED", requests.length === count && T.NAMES.every(n => paused.status(n) === "PAUSED"));
   paused.dispose();
+  runInNewContext(await readFile(new URL("../src/js/timechain-charts.js", import.meta.url), "utf8"), context);
+  const CH = context.window.BL.timechainCharts;
+  record("timechain counters: elapsed ages keep seconds across minute and hour boundaries, floor partial seconds and clamp future header times",
+    [-1000, 999, 59000, 60000, 61000, 3599000, 3600000, 3661000].map(CH.format.ago).join("|") === "0s ago|0s ago|59s ago|1:00 ago|1:01 ago|59:59 ago|1:00:00 ago|1:01:01 ago");
+  const interior = await readFile(new URL("../src/js/timechain-interior.js", import.meta.url), "utf8");
+  const keys = interior.slice(interior.indexOf("  const screenKey ="), interior.indexOf("  const TIPS ="));
+  const hang = interior.slice(interior.indexOf("  const hang ="), interior.indexOf("  // A ray against"));
+  const counters = { CH, RM: { picture: () => ({ imageSurface: { rect: [-1, -1, 2, 2] } }) } };
+  runInNewContext(`${keys}\n${hang}\nthis.screenKey = screenKey; this.cardKey = cardKey; this.hang = hang;`, counters);
+  const observed = 100000, block = { id: "block", pool: "pool", time: 40 };
+  let status = "LIVE";
+  const clockReader = { version: 0, summary: null, status: () => status, historyStatus: () => status, at: () => observed, value: () => [block] };
+  const liveKey = counters.screenKey(clockReader, 0, observed), blockKey = counters.cardKey(clockReader, 1, observed);
+  const ticking = counters.screenKey(clockReader, 0, observed + 1000) !== liveKey && counters.cardKey(clockReader, 1, observed + 1000) !== blockKey;
+  status = "STALE";
+  const staleKey = counters.screenKey(clockReader, 0, observed + 1000);
+  const staleTicking = counters.screenKey(clockReader, 0, observed + 2000) !== staleKey;
+  status = "PAUSED";
+  const pausedKey = counters.screenKey(clockReader, 0, observed);
+  record("timechain counters: live and stale readings age without a new fetch, while a paused panel and ribbon label do not repaint on the clock",
+    ticking && staleTicking && counters.screenKey(clockReader, 0, observed + 1000) === pausedKey
+      && counters.cardKey(clockReader, 0, observed) === counters.cardKey(clockReader, 0, observed + 1000));
+  let released = 0;
+  const slot = { node: { geometry: { imageSurface: {} } }, canvas: { width: 768, height: 512 }, w: 3, h: 2 }, renderer = { releaseGeometry() { released++; } };
+  counters.hang(renderer, slot);
+  const geometry = slot.node.geometry, surface = geometry.imageSurface;
+  counters.hang(renderer, slot); counters.hang(renderer, slot);
+  record("timechain counters: repainting reuses the canvas and geometry, bumps its texture version and releases the prepared image only once",
+    slot.node.geometry === geometry && geometry.imageSurface === surface && surface.canvas === slot.canvas && surface.version === 3 && released === 1 && !surface.asset);
+  // Run the room's paint scheduler on a clock, with no fetching or image decoding in the fixture.
+  let now = observed, paints = 0;
+  const makeSlot = () => ({ key: "", canvas: { getContext: () => ({ drawImage() {} }) } });
+  const screens = CH.PANELS.map(makeSlot), cards = [makeSlot(), makeSlot()], terminal = makeSlot();
+  Object.assign(counters, { Date: { now: () => now }, reader: clockReader, screens, cards, terminal, all: [...screens, ...cards, terminal],
+    holdingsIndex: 0, holdingsKeys: [""], holdingsCanvases: [{}], holdingsDirty: false, chartVersion: 0,
+    CH: { ...CH, PANELS: CH.PANELS.map(p => ({ ...p, paint() {} })), card() {}, ribbonLabel() {} } });
+  const scheduler = interior.slice(interior.indexOf("    let seenVersion ="), interior.indexOf("    const chartBoard ="));
+  const painting = { ...counters, renderer, hang: () => { paints++; } };
+  runInNewContext(`${scheduler}\nthis.paintNext = paintNext;`, painting);
+  status = "LIVE";
+  for (let i = 0; i < counters.all.length + 1; i++) painting.paintNext();
+  const initialPaints = paints;
+  painting.paintNext();
+  const quiet = paints === initialPaints, originalCard = cards[1].key;
+  for (let i = 0; i < counters.all.length; i++) { now += 1000; painting.paintNext(); }
+  record("timechain counters: a quiet frame paints nothing, each slow frame paints at most one slot, and ticking screens cannot starve block cards",
+    quiet && paints - initialPaints === counters.all.length && cards[1].key !== originalCard && clockReader.version === 0);
 };
 const sphereLocal = `T = BL.scenes.hub.debug.timechainIsland, SP = BL.timechainModels.SPOTS, local = (p) => (p.x - T.place.x) * T.sin + (p.z - T.place.z) * T.cos`;
 const sphereStand = (x, z) => `__ooga.pilot.navigate({ position: { x: T.worldX(${x}, ${z}), y: T.place.y, z: T.worldZ(${x}, ${z}) }, yaw: T.place.ry, pitch: 0.1, dist: 4 }); __ooga.advance(0.3, 1 / 60);`;

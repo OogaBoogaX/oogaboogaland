@@ -92,18 +92,15 @@
     };
   };
 
-  // A picture slot: a canvas the painters draw, and the node that shows it once its image has decoded. A slot is
-  // repainted only when its `key` (what it prints) changes; the old picture's GPU record goes when the new one hangs.
-  const slot = (node, w, h, pw, ph, painted = null) => ({ node, canvas: painted ? painted.canvas : CH.canvas(pw, ph), w, h, key: painted ? painted.key : "", live: true, loading: 0 });
+  // A picture slot keeps its canvas texture and geometry as the printed counters tick.
+  const slot = (node, w, h, pw, ph, painted = null) => ({ node, canvas: painted ? painted.canvas : CH.canvas(pw, ph), w, h, key: painted ? painted.key : "" });
   const hang = (renderer, s) => {
-    const image = new Image(), stamp = ++s.loading;
-    image.onload = () => {
-      if (!s.live || stamp !== s.loading) return;
-      const old = s.node.geometry;
-      s.node.geometry = RM.picture(image, s.canvas.width, s.canvas.height, s.w, s.h);
-      if (old) renderer.releaseGeometry(old);
-    };
-    image.src = s.canvas.toDataURL("image/png");
+    const old = s.node.geometry;
+    if (old && old.imageSurface.canvas === s.canvas) { old.imageSurface.version++; return; }
+    const geometry = RM.picture(s.canvas, s.canvas.width, s.canvas.height, s.w, s.h);
+    geometry.imageSurface = { canvas: s.canvas, version: 1, rect: geometry.imageSurface.rect };
+    s.node.geometry = geometry;
+    if (old) renderer.releaseGeometry(old);
   };
   // A ray against a slot's own rectangle, for picking a screen exactly rather than by its bounding sphere.
   const INVERSE = math.mat4.create();
@@ -119,16 +116,17 @@
 
   // What a screen or a ribbon card would print now, as a key: a slot is repainted only when its key moves. A room
   // prepared at the island's doorway paints with the same keys, so the visit keeps what was painted there.
-  const minute = () => Math.floor(Date.now() / 60000);
-  const screenKey = (reader, i) => {
+  const screenKey = (reader, i, now) => {
     let k = "";
     for (const name of CH.PANELS[i].sets) k += name === "history" ? `${reader.historyStatus()}:${reader.summary ? reader.summary.coverage + "/" + reader.summary.tip : ""}|` : `${reader.status(name)}:${reader.at(name)}|`;
-    return k + minute();
+    const primary = CH.PANELS[i].sets[0];
+    const status = CH.PANELS[i].id === "window" ? reader.historyStatus() : reader.status(primary);
+    return k + CH.freshness(status, reader.at(primary), now);
   };
-  const cardKey = (reader, i) => {
+  const cardKey = (reader, i, now) => {
     if (i === 0) return `label|${reader.status("recent")}`;
     const blocks = reader.value("recent"), b = blocks && blocks[i - 1];
-    return b ? `${b.id}|${b.pool}|${Math.floor((Date.now() / 1000 - b.time) / 60)}` : `none|${reader.status("recent")}`;
+    return b ? `${b.id}|${b.pool}|${CH.format.ago(now - b.time * 1000)}` : `none|${reader.status("recent")}`;
   };
 
   const TIPS = {
@@ -249,14 +247,14 @@
     const holdings = BL.timechainData.create(() => { holdingsDirty = true; });
     let holdingsDirty = true;
 
-    // Slots are looked at only after a reading, a new minute (the ages printed) or a new holdings page: `sweep` runs
+    // Slots are looked at only after a reading, a new second (the ages printed) or a new holdings page: `sweep` runs
     // until no key moved, so a quiet frame builds no key and paints nothing.
-    let seenVersion = -1, seenMinute = -1, sweep = true;
-    const keyOf = (s, i) => s === terminal ? `${holdingsIndex}|${holdingsKeys[holdingsIndex]}` : screens[i] === s ? screenKey(reader, i) : cardKey(reader, i);
-    // At most one picture a frame: the first slot whose key moved.
+    let seenVersion = -1, seenSecond = -1, paintAt = 0, sweep = true;
+    const keyOf = (s, i, now) => s === terminal ? `${holdingsIndex}|${holdingsKeys[holdingsIndex]}` : i < screens.length ? screenKey(reader, i, now) : cardKey(reader, i - screens.length, now);
+    // At most one picture a frame; rotate so a slow frame rate cannot starve the cards behind ticking screens.
     const paintNext = () => {
-      const m = minute();
-      if (reader.version !== seenVersion || m !== seenMinute || holdingsDirty) { seenVersion = reader.version; seenMinute = m; sweep = true; }
+      const now = Date.now(), second = Math.floor(now / 1000);
+      if (reader.version !== seenVersion || second !== seenSecond || holdingsDirty) { seenVersion = reader.version; seenSecond = second; sweep = true; }
       if (!sweep) return;
       if (holdingsDirty) {
         holdingsDirty = false;
@@ -268,31 +266,20 @@
           holdingsVersion++;
         });
       }
-      const now = Date.now();
-      for (let i = 0; i < screens.length; i++) {
-        const s = screens[i], k = keyOf(s, i);
+      for (let n = 0; n < all.length; n++) {
+        const i = (paintAt + n) % all.length, s = all[i], k = keyOf(s, i, now);
         if (k === s.key) continue;
         s.key = k;
-        CH.PANELS[i].paint(s.canvas.getContext("2d"), reader, now);
-        chartVersion++;
+        const ctx2d = s.canvas.getContext("2d");
+        if (s === terminal) ctx2d.drawImage(holdingsCanvases[holdingsIndex], 0, 0);
+        else if (i < screens.length) { CH.PANELS[i].paint(ctx2d, reader, now); chartVersion++; }
+        else {
+          const card = i - screens.length, blocks = reader.value("recent");
+          if (card === 0) CH.ribbonLabel(ctx2d, reader.status("recent"));
+          else CH.card(ctx2d, blocks && blocks[card - 1], now);
+        }
         hang(renderer, s);
-        return;
-      }
-      for (let i = 0; i < cards.length; i++) {
-        const s = cards[i], k = keyOf(s, i);
-        if (k === s.key) continue;
-        s.key = k;
-        const ctx2d = s.canvas.getContext("2d"), blocks = reader.value("recent");
-        if (i === 0) CH.ribbonLabel(ctx2d, reader.status("recent"));
-        else CH.card(ctx2d, blocks && blocks[i - 1], now);
-        hang(renderer, s);
-        return;
-      }
-      const k = keyOf(terminal, -1);
-      if (k !== terminal.key) {
-        terminal.key = k;
-        terminal.canvas.getContext("2d").drawImage(holdingsCanvases[holdingsIndex], 0, 0);
-        hang(renderer, terminal);
+        paintAt = (i + 1) % all.length;
         return;
       }
       sweep = false;
@@ -715,7 +702,6 @@
       window.removeEventListener("keydown", armsKeys, true);
       BL.net.setBody(null);
       for (const s of all) {
-        s.live = false;
         if (s.node.geometry) renderer.releaseGeometry(s.node.geometry);
         s.node.geometry = null;
       }
@@ -771,8 +757,8 @@
     };
     const ready = (async () => {
       const now = Date.now(), blocks = reader.value("recent");
-      for (let i = 0; i < built.screens.length && live; i++) await paint(built.screens[i], screens, L.screens[i].w, L.screens[i].h, CH.PANEL_W, CH.PANEL_H, screenKey(reader, i), (g) => CH.PANELS[i].paint(g, reader, now));
-      for (let i = 0; i < built.cards.length && live; i++) await paint(built.cards[i], cards, L.ribbon[i].w, L.ribbon[i].h, CH.CARD_W, CH.CARD_H, cardKey(reader, i), (g) => i ? CH.card(g, blocks && blocks[i - 1], now) : CH.ribbonLabel(g, reader.status("recent")));
+      for (let i = 0; i < built.screens.length && live; i++) await paint(built.screens[i], screens, L.screens[i].w, L.screens[i].h, CH.PANEL_W, CH.PANEL_H, screenKey(reader, i, now), (g) => CH.PANELS[i].paint(g, reader, now));
+      for (let i = 0; i < built.cards.length && live; i++) await paint(built.cards[i], cards, L.ribbon[i].w, L.ribbon[i].h, CH.CARD_W, CH.CARD_H, cardKey(reader, i, now), (g) => i ? CH.card(g, blocks && blocks[i - 1], now) : CH.ribbonLabel(g, reader.status("recent")));
     })();
     const lights = { ...RENDER_OPTS, lights: new Float32Array(BL.glRenderer.POINT_LIGHT_CAPACITY * 8), lightCount: built.lights.length, shadowExtent: L.radius * 1.2 };
     built.lights.forEach((l, i) => lights.lights.set([l[0], l[1], l[2], l[3], l[4], l[5], l[6], 0], i * 8));
