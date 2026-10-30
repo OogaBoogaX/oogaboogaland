@@ -452,6 +452,77 @@
     box({ w: 0.24, h: 0.3, d: 0.24, color: "#d8892b", offset: { x: 0.2, y: 0.25, z: 0.06 } }),
     box({ w: 0.24, h: 0.2, d: 0.24, color: "#6f9fca", offset: { x: 0.65, y: 0.2, z: 0.02 } })
   ));
+  // The plaza library's fittings inside the nook the island cuts into the hillside left of the Timechain stairs:
+  // a flagstone floor and threshold, timber shelves of books against the back of the cut, and a stone mouth round
+  // the opening with the name over it. Each shelf is one book of the reading list (`BOOKS` in scene-hub.js), its
+  // spines in that book's inks; the scene gives each shelf its pick. Local +z leads out of the mouth, y = 0 on the
+  // cut floor. The chamber is 3.6 m wide, 1.5 m deep and 2.5 m high, so the trim laps the cut rock.
+  const LIBRARY_SHELF_Y = [0.52, 1.12, 1.72];
+  const LIBRARY_BOOK_INKS = [
+    ["#d9a441", "#b5792e", "#8a5a2a", "#e3b559", "#a86b2c", "#c48a35"],
+    ["#5d8fc4", "#3f6fa8", "#7fb0d6", "#2f4f74", "#4f8f9a", "#86a9c9"],
+    ["#e8e2d2", "#cfc8b4", "#b7ae98", "#f1ece0", "#9a927e", "#d8cfb6"]
+  ];
+  const libraryNook = cached(() => {
+    const rand = mulberry32(4181), stone = ["#4a4640", "#3a3734", "#57514a"], parts = [
+      // The flagstone floor and the threshold across the mouth.
+      box({ w: 3.54, h: 0.06, d: 1.36, color: "#4a4640", offset: { y: 0.03, z: -0.66 } }),
+      box({ w: 4.35, h: 0.1, d: 0.32, color: "#3a3734", offset: { y: 0.05, z: 0.03 } }),
+      // The mouth's jambs and lintel stand just inside the cut, framing the opening under the rock ceiling.
+      box({ w: 0.14, h: 2.12, d: 0.34, color: stone[1], offset: { x: -1.695, y: 1.06, z: -0.03 } }),
+      box({ w: 0.14, h: 2.12, d: 0.34, color: stone[1], offset: { x: 1.695, y: 1.06, z: -0.03 } }),
+      box({ w: 3.6, h: 0.3, d: 0.36, color: stone[0], offset: { y: 2.27, z: -0.03 } }),
+      // The shelf unit against the back of the cut, on a dark back board.
+      box({ w: 3.3, h: 1.98, d: 0.04, color: "#241f1a", offset: { y: 1.05, z: -1.36 } }),
+      ...LIBRARY_SHELF_Y.map((y) => box({ w: 3.18, h: 0.055, d: 0.44, color: WOOD, offset: { y, z: -1.12 } }))
+    ];
+    // The name board on the lintel, its lettering cut from the shared 3x5 alphabet as solid runs.
+    parts.push(box({ w: 1.62, h: 0.24, d: 0.04, color: "#6b4524", offset: { y: 2.27, z: 0.155 } }));
+    const name = "LIBRARY", cell = 0.045;
+    let cursor = -(name.length * 4 - 1) * cell / 2;
+    for (const ch of name) {
+      const glyph = SIGN_GLYPHS[ch];
+      for (let row = 0; row < glyph.length; row++) {
+        const line = glyph[row];
+        for (let col = 0; col < line.length; col++) {
+          if (line[col] !== "1") continue;
+          let run = 1;
+          while (line[col + run] === "1") run++;
+          parts.push(box({ w: cell * run * 0.92, h: cell * 0.92, d: 0.02, color: "#f1e7cf", emissive: 0.3,
+            offset: { x: cursor + (col + run * 0.5) * cell, y: 2.27 + (2 - row) * cell, z: 0.18 } }));
+          col += run - 1;
+        }
+      }
+      cursor += 4 * cell;
+    }
+    // Three shelves; each shelf's row is one book's run of spines in its inks, with a band of lettering.
+    for (let s = 0; s < LIBRARY_SHELF_Y.length; s++) {
+      const top = LIBRARY_SHELF_Y[s] + 0.028, inks = LIBRARY_BOOK_INKS[s];
+      for (let x = -0.93, lean = false; x < 1.47;) {
+        const w = 0.06 + rand() * 0.05;
+        if (x + w > 1.47) break;
+        const h = 0.3 + rand() * 0.14, ink = inks[Math.floor(rand() * inks.length)];
+        // One book a shelf leans against its neighbour.
+        if (!lean && x > -0.6 && rand() < 0.3) {
+          lean = true;
+          parts.push(moved(turnedZ(box({ w, h, d: 0.3, color: ink }), -0.22), x + w / 2, top + h / 2, -1.2));
+        } else parts.push(box({ w, h, d: 0.3, color: ink, offset: { x: x + w / 2, y: top + h / 2, z: -1.2 } }));
+        if (rand() < 0.7) parts.push(box({ w: w * 0.7, h: 0.03, d: 0.012, color: s === 2 ? "#3a2f22" : "#f1e7cf",
+          offset: { x: x + w / 2, y: top + h * 0.62, z: -1.045 } }));
+        x += w + 0.01 + (rand() < 0.14 ? 0.045 : 0);
+      }
+      // Two books lying flat at the row's left end.
+      for (let k = 0; k < 2; k++) parts.push(box({ w: 0.26, h: 0.05, d: 0.3, color: inks[k], offset: { x: -1.275, y: top + 0.025 + k * 0.052, z: -1.2 } }));
+    }
+    return merge(...parts);
+  });
+  const libraryLamp = cached(() => merge(
+    box({ w: 0.02, h: 0.2, d: 0.02, color: "#26221f", offset: { y: -0.1 } }),
+    box({ w: 0.18, h: 0.035, d: 0.18, color: "#26221f", offset: { y: -0.21 } }),
+    box({ w: 0.14, h: 0.2, d: 0.14, color: "#ffcd6e", emissive: 1, offset: { y: -0.34 } }),
+    box({ w: 0.17, h: 0.03, d: 0.17, color: "#26221f", offset: { y: -0.46 } }),
+    box({ w: 0.012, h: 0.012, d: 0.16, color: "#26221f", offset: { y: -0.34 } })
+  ));
   const labDesk = cached(() => {
     const parts = [
       box({ w: 1.8, h: 0.12, d: 0.4, color: "#626f70", offset: { y: 1.08 } }),
@@ -1603,5 +1674,5 @@
       ...[-0.8, 0.8].map(brace)
     );
   });
-  BL.hubModels = { SIGN_GLYPHS, SIGN_ICONS, AMMO_BANANA, jetpack, jetFlame, caveMouthRim, mirrorPanel, matrixPrisonBars, sealedCaveFace, matrixLeverPlate, matrixLeverLights, matrixLeverHub, matrixLeverArm, matrixLeverGrip, matrixLeverLabels, matrixGlyph, caveSign, postSign, CAVE_SIGN_WIDTH, CAVE_SIGN_HEIGHT, gate, caveShelves, entropyLab, bedroll, tree, bush, rock, breakableRock, voxelRock, puff, clumped, leafy, pointedLeaf, flower, FLOWER_INKS, limb, padNormals, flatInto, canopySupport, withJungle, liana, sagPoints, sprig, garland, bamboo, lashing, log, thatch, altarSlab, altarBlock, woodCrate, barrel, flowerTuft, torch, grass, lawnTuft, firepit, butterfly, firefly, ember, vine, cloud, ladder, dock, TREE_HEIGHT };
+  BL.hubModels = { SIGN_GLYPHS, SIGN_ICONS, AMMO_BANANA, jetpack, jetFlame, caveMouthRim, mirrorPanel, matrixPrisonBars, sealedCaveFace, matrixLeverPlate, matrixLeverLights, matrixLeverHub, matrixLeverArm, matrixLeverGrip, matrixLeverLabels, matrixGlyph, caveSign, postSign, CAVE_SIGN_WIDTH, CAVE_SIGN_HEIGHT, gate, caveShelves, libraryNook, libraryLamp, LIBRARY_SHELF_Y, entropyLab, bedroll, tree, bush, rock, breakableRock, voxelRock, puff, clumped, leafy, pointedLeaf, flower, FLOWER_INKS, limb, padNormals, flatInto, canopySupport, withJungle, liana, sagPoints, sprig, garland, bamboo, lashing, log, thatch, altarSlab, altarBlock, woodCrate, barrel, flowerTuft, torch, grass, lawnTuft, firepit, butterfly, firefly, ember, vine, cloud, ladder, dock, TREE_HEIGHT };
 })();

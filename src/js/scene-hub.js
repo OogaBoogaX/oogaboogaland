@@ -172,6 +172,39 @@
   // How tall a remote visitor's Ooga stands for the crew's walkers (`outsideActorHeight`).
   const REMOTE_BODY_HEIGHT = 2.2;
   const SCENERY_CLEARANCE = 0.25;
+  // The plaza library: a shallow nook cut into the hillside between the headquarters and the Timechain stairs,
+  // a little further round the hill than the flight's terrace, its stone mouth facing the pile. The island cuts
+  // the chamber (the `nook` option of `terrain.island`); the scene dresses it with shelves and a stone mouth.
+  // `floor`, `width`, `depth` and `height` shape the cut; `entry` is the short cut up from the meadow to the mouth
+  // and `reach` its ground claim. A book opens in the shared board window; its link opens the site itself in a new
+  // tab, since a page from elsewhere cannot be framed here.
+  const LIBRARY = (() => {
+    const bearing = 227 * Math.PI / 180, radius = 20.75;
+    return {
+      x: Math.sin(bearing) * radius, z: -Math.cos(bearing) * radius, ry: -bearing,
+      floor: 0.25, width: 3.6, depth: 1.5, height: 2.5, entry: 1.1, reach: 2.6
+    };
+  })();
+  const BOOKS = [
+    {
+      title: "Learn Me A Bitcoin", heading: ["LEARN ME", "A BITCOIN"], site: "LEARNMEABITCOIN.COM",
+      href: "https://learnmeabitcoin.com/", label: "Read Learn Me A Bitcoin (new tab)",
+      blurb: "A plain-English guide to how Bitcoin works: keys, transactions, mining and the Lightning Network, one idea at a time.",
+      note: "Learn Me A Bitcoin explains Bitcoin a piece at a time: what a key is, how a transaction is made, what miners do, and how the Lightning Network moves sats. The link below opens it in a new tab."
+    },
+    {
+      title: "Bitcoin.org", heading: ["BITCOIN.ORG"], site: "BITCOIN.ORG",
+      href: "https://bitcoin.org/", label: "Read Bitcoin.org (new tab)",
+      blurb: "The original home of Bitcoin: what it is, how to choose a wallet, and how to run your own node.",
+      note: "Bitcoin.org answers the first questions: what Bitcoin is, how to get a wallet, how to accept payments, and how to run a full node. The link below opens it in a new tab."
+    },
+    {
+      title: "The Bitcoin Whitepaper", heading: ["THE BITCOIN", "WHITEPAPER"], site: "BITCOIN.ORG/BITCOIN.PDF",
+      href: "https://bitcoin.org/bitcoin.pdf", label: "Read the whitepaper (new tab)",
+      blurb: "Satoshi Nakamoto's 2008 paper, nine pages that set out a purely peer-to-peer version of electronic cash.",
+      note: "Bitcoin: A Peer-to-Peer Electronic Cash System, by Satoshi Nakamoto, 2008. The link below opens the paper itself in a new tab."
+    }
+  ];
   const MEADOW_INNER = 5, MEADOW_OUTER = MEADOW - 1.5, CLIFF_INNER = MEADOW + 1.5, CLIFF_OUTER = RADIUS - 1;
   const DOCK_DEG = 75, LADDER_Z = -3.6, LADDER_LEAN = 0.65;
   // Two disjoint annuli keep sparse clouds around the horizon, passing below and above the bridges.
@@ -1582,6 +1615,31 @@
     lawn.node.instanceVersion++;
     lawn.version = island.path.version;
   };
+  // The plaza library: the fitted nook in the hillside between the headquarters and the Timechain stairs, its
+  // mouth facing the pile. The island has cut its chamber; this dresses it, claims its ground and gives each
+  // shelf of books its pick. A tap on a shelf opens that book in the shared board window.
+  const buildLibrary = () => {
+    const cos = Math.cos(LIBRARY.ry), sin = Math.sin(LIBRARY.ry);
+    const node = place(hubModels.libraryNook(), LIBRARY.x, LIBRARY.z, LIBRARY.ry, LIBRARY.floor);
+    solids.add(node);
+    claim(LIBRARY.x, LIBRARY.z, LIBRARY.reach);
+    // A lantern on the left jamb, its warm light coming up with the island's other lanterns.
+    const lampX = -1.53, lampY = 2.02, lampZ = -0.04;
+    const lampNode = createNode({ geometry: hubModels.libraryLamp(), position: { x: lampX, y: lampY, z: lampZ } });
+    addChild(node, lampNode);
+    addLamp(lampNode, LAMP.lantern, LIBRARY.x + cos * lampX + sin * lampZ, LIBRARY.floor + lampY - 0.34, LIBRARY.z - sin * lampX + cos * lampZ, true, 0, "library").nightOnly = true;
+    // A pick a shelf, off the graph, over the shared faceless geometry: a tap on any book opens its book.
+    for (let i = 0; i < BOOKS.length; i++) {
+      const ly = hubModels.LIBRARY_SHELF_Y[i] + 0.36;
+      for (const lx of [-0.9, 0, 0.9]) {
+        const lz = -0.9;
+        const pick = createNode({ position: { x: LIBRARY.x + cos * lx + sin * lz, y: LIBRARY.floor + ly, z: LIBRARY.z - sin * lx + cos * lz }, geometry: PICK_GEOMETRY });
+        BL.scene.updateWorld(pick);
+        addTarget(pick, { kind: "book", index: i, priority: 2, node: pick, x: pick.position.x, y: pick.position.y, z: pick.position.z, weaponType: "none" }, { radius: 0.7 });
+      }
+    }
+    return node;
+  };
   // Palms: single palms spread evenly across the meadow, from beside the pile's ring out to the cliffs, and groves
   // of one to three on the cliff tops. Each is its own node on one of three shared geometries, so the wind bends
   // every crown on its own phase for three draws; each claims its own slot, so nothing else stands in its trunk or
@@ -1676,6 +1734,19 @@
       }
       if (best === PALM_GAP) break;
       meadowPalms.push(plant(x, z));
+    }
+    // The palm that stood against the hill in the library's frontage steps a couple of metres out into the meadow,
+    // so the widened nook and the stone above it stand clear of its crown.
+    const axis = Math.atan2(LIBRARY.x, -LIBRARY.z);
+    for (const { owner, reservation } of meadowPalms) {
+      if (!owner) continue;
+      const r = Math.hypot(owner.x, owner.z), bearing = Math.atan2(owner.x, -owner.z);
+      if (r > 20.2 || Math.abs(bearing - axis) * r > LIBRARY.width / 2 + 1.4) continue;
+      const moved = r - 2.5, x = Math.sin(bearing) * moved, z = -Math.cos(bearing) * moved;
+      owner.node.position.x = x; owner.node.position.z = z;
+      owner.node.position.y = island.surfaceAt(x, z);
+      owner.x = x; owner.z = z;
+      reservation.x = x; reservation.z = z;
     }
     // Along the cliff tops, where they break the skyline.
     const cliffTop = (x, z) => island.surfaceAt(x, z) > 2.5 && !nearMouth(x, z, 5);
@@ -5453,6 +5524,11 @@
         return o.key === "back" ? "Back · return to room choice" : o.key === "enter" ? "Enter · open selected room" : `Room ${o.key} · select`;
       case "lab-link":
         return "EntropyLab · open website in a new tab";
+      case "book":
+        return `${BOOKS[o.index].title} · open it`;
+      case "whitepaper":
+        if (wpRead) return COARSE ? "Two fingers slide the paper · pinch to zoom" : "Double-click to zoom in · right-click to zoom out · Shift+wheel slides it";
+        return COARSE ? "The whitepaper · double-tap to read" : "The whitepaper · double-click to read";
       case "prop":
         if (o.prop === "timechainentrance") return "Timechain Sphere · nine rooms, chosen at the keypad";
         if (o.prop === "timechainbridge") return "Wooden bridge · to Timechain Sphere";
@@ -5529,7 +5605,7 @@
   const reticleTarget = (hit) => {
     const o = hit.owner;
     if (hit.node === mirrorCave.node || o.kind === "cave-sign" || o.kind === "room-sign" || o.kind === "sphere-key"
-      || o.kind === "lab-link" || o.kind === "piece" || o.kind === "halloween" && o.role === "herald") return "object"; // HALLOWEEN: halloween
+      || o.kind === "lab-link" || o.kind === "piece" || o.kind === "book" || o.kind === "halloween" && o.role === "herald") return "object"; // HALLOWEEN: halloween
     if (o.kind === "cave") return o.slot.status === "open" ? "object" : "none";
     if (o.kind === "prop" && RETICLE_PROPS.has(o.prop)) return "object";
     return "none";
@@ -6097,6 +6173,12 @@
       TAP_RAY.ox + TAP_RAY.dx * depth, TAP_RAY.oy + TAP_RAY.dy * depth, TAP_RAY.oz + TAP_RAY.dz * depth);
   };
   const onTap = (hit, p) => {
+    // A tap on the page itself leaves the reading view alone; one beside it closes it, as Escape does.
+    if (wpRead) {
+      if (!wpFaceHit(p)) wpReadEnd();
+      return;
+    }
+    if (wpTime >= 0) { wpStop(); return; }
     if (factoryDeparting || bifrostDeparting || islandGuide.holding) return;
     if (gorillaBehindBillboard(hit, p)) return;
     if (debugMovementTap(hit, p)) return;
@@ -6150,6 +6232,9 @@
       }
       case "lab-link":
         window.open("https://entropylab.online", "_blank", "noopener,noreferrer");
+        break;
+      case "book":
+        openBook(o.index);
         break;
       case "prop":
         useProp(o, p);
@@ -7265,6 +7350,437 @@
     if (first) hud.setSubtitle("an island of caves");
     if (!first && !(ghosts && ghosts.quietSky)) hud.toast(PHASE_TOASTS[next]); // HALLOWEEN: quietSky
   };
+  // The plaza library's books in the shared board window: one page a book, its title, its site and what it is,
+  // with the page's link under it. A page from another site cannot be framed by this one (the content policy
+  // and the sites' own headers forbid it), so the link opens it in a new tab.
+  const LIBRARY_PAGE_W = 480, LIBRARY_PAGE_H = 270;
+  let libraryCanvas = null;
+  const wrapBookText = (text, max) => {
+    const lines = [];
+    let line = "";
+    for (const word of text.split(" ")) {
+      const next = line ? `${line} ${word}` : word;
+      if (next.length > max && line) { lines.push(line); line = word; } else line = next;
+    }
+    if (line) lines.push(line);
+    return lines;
+  };
+  const paintLibraryPage = () => {
+    if (!libraryCanvas) {
+      libraryCanvas = document.createElement("canvas");
+      libraryCanvas.width = LIBRARY_PAGE_W;
+      libraryCanvas.height = LIBRARY_PAGE_H;
+    }
+    const c2 = libraryCanvas.getContext("2d"), text = BL.jumbotron.text, book = BOOKS[libraryBoard.index];
+    c2.fillStyle = "#e9dfc4";
+    c2.fillRect(0, 0, LIBRARY_PAGE_W, LIBRARY_PAGE_H);
+    c2.strokeStyle = "#7a5a3a";
+    c2.lineWidth = 5;
+    c2.strokeRect(9, 9, LIBRARY_PAGE_W - 18, LIBRARY_PAGE_H - 18);
+    text.drawText(c2, "THE PLAZA LIBRARY", 32, 26, "#8a5a2a", 2);
+    let y = 54;
+    for (const line of book.heading) {
+      text.drawText(c2, line, 32, y, "#2a2118", 4);
+      y += 34;
+    }
+    text.drawText(c2, book.site, 32, y + 6, "#7a5a3a", 2);
+    y += 32;
+    for (const line of wrapBookText(book.blurb, 34)) {
+      text.drawText(c2, line, 32, y, "#3a2f22", 2);
+      y += 16;
+    }
+    text.drawText(c2, "OPEN THE LINK BELOW", 32, LIBRARY_PAGE_H - 36, "#8a5a2a", 2);
+    text.drawText(c2, `${libraryBoard.index + 1} / ${BOOKS.length}`, LIBRARY_PAGE_W - 70, LIBRARY_PAGE_H - 36, "#7a5a3a", 2);
+  };
+  // The whitepaper book raises a black monolith out of the crest above the library's nook, where the whole plaza sees
+  // it, its face turned back over the plaza with the whitepaper itself set into it (whitepaper-poster-data.js). First
+  // lightning strikes the ground where it will break out, a second of it, and then the stone climbs slowly out of the
+  // ground under the strike's flash. The view is taken to stand before it at the field of view it came with, held a
+  // second once the stone stands, then the island's is the visitor's again, and the stone stays standing where it broke
+  // out. A double tap on the stone opens the paper itself to read: its face becomes a window onto the whitepaper's
+  // own pages, stacked into one strip (whitepaper-pages-data.js) with the stone's dark between them, so the document
+  // slides up and down inside the stone as a viewer scrolls one, a page at a time or continuously, and zooms there,
+  // square on and held in the frame; Escape hands the view back at the field of view the character had, the poster
+  // back on the stone. Built the first time it is raised, kept for the visit, lowered out of sight when the visit ends.
+  const WP = { out: 1.7, base: 0.35, w: 1.62, h: 2.145, depth: 0.42, foot: 0.3, cap: 0.16, sink: 3.2,
+               strike: 1, rise: 3.6, flash: 0.7, flashAlpha: 0.62, shake: 3, shakeAmp: 0.08, dist: 3.6, grace: 0.7, hold: 1,
+               strikeDist: 10, strikeEye: 4.2, strikeLook: 0.35, zoom: 2.2,
+               readFov: 0.55, readAir: 1.06, readZoomStep: 1.5, readZoomMax: 6, glide: 7 };
+  let wpGroup = null, wpImage = null, wpSheet = null, wpPoster = null, wpBolt = null, wpChar = null;
+  let wpGround = 0, wpEye = null, wpLook = null, wpWideEye = null, wpWideLook = null;
+  let wpTime = -1, wpRise = 0, wpFlash = 0, wpStanding = false, wpStruck = false;
+  let wpRead = false, wpFov = 0, wpPage = 0, wpReadLeft = -1e9, wpZoom = 1, wpPanX = 0, wpScroll = 0, wpScrollTo = -1;
+  let wpStrip = null, wpStripImage = null;
+  const WP_EYE = { x: 0, y: 0, z: 0 }, WP_TARGET = { x: 0, y: 0, z: 0 };
+  // The view held for the poster, as Tess's tour holds it: the pilot let go of and given back.
+  const holdTheView = (on) => {
+    pilot.setActive(!on); pilot.controls.reset(); input.reset();
+    pilot.setExternalControl(on);
+  };
+  const wpBuild = () => {
+    const d = Math.hypot(LIBRARY.x, LIBRARY.z) || 1, dx = LIBRARY.x / d, dz = LIBRARY.z / d;
+    const x = LIBRARY.x + dx * WP.out, z = LIBRARY.z + dz * WP.out;
+    wpGround = island.surfaceAt(x, z);
+    wpImage = new Image();
+    wpImage.src = BL.whitepaperPoster.poster;
+    const group = createNode({ position: { x, y: wpGround - WP.sink, z }, rotation: { x: 0, y: Math.atan2(dx, dz), z: 0 } });
+    // The stone: a foot, the shaft the sheet is set into, and a cap.
+    const shaft = WP.h + 0.34;
+    addChild(group, createNode({ geometry: models.box({ w: WP.w + 0.5, h: WP.foot, d: WP.depth + 0.5, color: "#2a2724", offset: { y: WP.foot / 2 } }) }));
+    addChild(group, createNode({ geometry: models.box({ w: WP.w + 0.22, h: shaft, d: WP.depth, color: "#171512", offset: { y: WP.base + shaft / 2 } }) }));
+    addChild(group, createNode({ geometry: models.box({ w: WP.w + 0.36, h: WP.cap, d: WP.depth + 0.16, color: "#0e0d0c", offset: { y: WP.base + shaft + WP.cap / 2 } }) }));
+    // The sheet's own quad, facing back at the mouth, its picture drawn over it.
+    const sheet = { verts: [-WP.w / 2, 0, 0, -WP.w / 2, WP.h, 0, WP.w / 2, WP.h, 0, WP.w / 2, 0, 0],
+      faces: [{ i: [0, 1, 2, 3], color: [0, 0, 0], emissive: 0 }], lines: [], castShadow: false };
+    // The sheet faces back over the plaza, so its picture's left edge sits at +x, the side the viewer sees on their
+    // left: a negative width runs the rect that way, in both renderers.
+    sheet.imageSurface = { asset: { width: 3090, height: 4092, load: () => wpImage }, rect: [WP.w / 2, 0, -WP.w, WP.h] };
+    wpPoster = sheet;
+    wpSheet = createNode({ geometry: sheet, position: { x: 0, y: WP.base, z: -WP.depth / 2 - 0.012 } });
+    addChild(group, wpSheet);
+    // The stone answers a tap and a double tap, the second of which opens the poster to read.
+    addTarget(wpSheet, { kind: "whitepaper", node: wpSheet });
+    // The strike that opens it: a jagged bolt out of the sky onto the ground where the stone breaks out, its fork
+    // white-hot, so the whole plaza sees where it will come up before it does.
+    const rand = mulberry32(fnv1a("whitepaper-bolt")), segments = [], path = [];
+    const limb = (x0, y0, z0, x1, y1, z1, wide) => segments.push(models.box({
+      w: wide, h: Math.abs(y1 - y0) + wide / 2, d: wide, color: "#e6f0ff", emissive: 1,
+      offset: { x: (x0 + x1) / 2, y: (y0 + y1) / 2, z: (z0 + z1) / 2 }
+    }));
+    let bx = 0, by = 16, bz = 0;
+    path.push([bx, by, bz]);
+    while (by > 0.2) {
+      const nx = bx + (rand() - 0.5) * 0.8, nz = bz + (rand() - 0.5) * 0.8, ny = by - (0.5 + rand() * 0.6);
+      limb(bx, by, bz, nx, ny, nz, 0.13);
+      bx = nx; by = ny; bz = nz;
+      path.push([bx, by, bz]);
+    }
+    let fx = path[Math.floor(path.length / 3)][0], fy = path[Math.floor(path.length / 3)][1], fz = path[Math.floor(path.length / 3)][2];
+    for (let i = 0; i < 8 && fy > 0.5; i++) {
+      const nx = fx + (rand() - 0.5) * 1.3, nz = fz + (rand() - 0.5) * 1.3, ny = fy - (0.4 + rand() * 0.5);
+      limb(fx, fy, fz, nx, ny, nz, 0.08);
+      fx = nx; fy = ny; fz = nz;
+    }
+    // The walk wanders, so the bolt is shifted back until the ground it lands on is the stone's own middle.
+    wpBolt = createNode({ geometry: models.moved(models.merge(...segments), -bx, 0, -bz), position: { x, y: wpGround, z } });
+    wpBolt.geometry.castShadow = false;
+    wpBolt.visible = false;
+    addChild(root, wpBolt);
+    placed.push(wpBolt);
+    // The char it leaves: the crest blackened cell by cell around the stone's foot, laid on the ground it finds there.
+    const charVerts = [], charFaces = [], charRand = mulberry32(fnv1a("whitepaper-char")), step = 0.28, reach = 2.2;
+    for (let gx = -reach; gx <= reach; gx += step) for (let gz = -reach; gz <= reach; gz += step) {
+      const d = Math.hypot(gx, gz);
+      if (d > reach * (0.58 + charRand() * 0.42)) continue;
+      const wx = x + gx, wz = z + gz, ground = island.surfaceAt(wx, wz);
+      // Only the crest itself: the ground it falls away to is not this strike's.
+      if (ground < wpGround - 2.2) continue;
+      const i = charVerts.length / 3, half = step / 2, y = ground + 0.02;
+      charVerts.push(gx - half, y, gz - half, gx + half, y, gz - half, gx + half, y, gz + half, gx - half, y, gz + half);
+      charFaces.push({ i: [i, i + 3, i + 2, i + 1], color: d < 0.75 ? [16, 13, 11] : [38, 31, 24], emissive: 0 });
+    }
+    wpChar = createNode({ geometry: { verts: charVerts, faces: charFaces, lines: [], castShadow: false }, position: { x, y: 0, z } });
+    wpChar.visible = false;
+    addChild(root, wpChar);
+    placed.push(wpChar);
+    group.visible = false;
+    addChild(root, group);
+    wpGroup = group;
+    // Where the view stands once the stone is up: in front of the sheet's middle, the field of view left as it was.
+    wpEye = { x: x - dx * WP.dist, y: wpGround + WP.base + WP.h / 2, z: z - dz * WP.dist };
+    wpLook = { x, y: wpEye.y, z };
+    // Where the strike is watched from: ten metres back, low over the crest, on the ground it lands on.
+    wpWideEye = { x: x - dx * WP.strikeDist, y: wpGround + WP.strikeEye, z: z - dz * WP.strikeDist };
+    wpWideLook = { x, y: wpGround + WP.strikeLook, z };
+  };
+  // The whole show: the stone back in the ground, the bolt striking where it will break out, the flash, then the climb.
+  const wpShow = () => {
+    wpStanding = true;
+    wpTime = 0; wpRise = 0; wpFlash = WP.flashAlpha; wpStruck = false;
+    wpGroup.visible = true;
+    wpGroup.position.y = wpGround - WP.sink;
+    wpBolt.visible = true;
+    if (wpChar) wpChar.visible = false;
+    holdTheView(true);
+  };
+  const wpRaise = () => {
+    if (!BL.whitepaperPoster || gameMode || factoryDeparting || bifrostDeparting || islandGuide && islandGuide.holding) return false;
+    if (!wpGroup) wpBuild();
+    // Already out of the ground: the view is taken back to it, without the stone breaking out again.
+    if (wpStanding) { wpTime = WP.strike + WP.rise; holdTheView(true); return true; }
+    wpShow();
+    return true;
+  };
+  // A double tap on the ground in front of the stone runs the whole show again, from the strike.
+  const wpReplay = () => {
+    if (!wpGroup || wpRead || gameMode || factoryDeparting || bifrostDeparting || islandGuide && islandGuide.holding) return false;
+    wpShow();
+    return true;
+  };
+  // The ground in front of the stone, under the tap's ray: the terrace and the meadow it stands over, within reach of it.
+  const wpGroundHit = (p) => {
+    if (!wpGroup || !wpStanding || wpRead) return false;
+    renderer.ray(p.x, p.y, camera, TAP_RAY);
+    for (let i = 1; i <= 44; i++) {
+      const t = i * 0.35;
+      if (t > camera.far) return false;
+      const x = TAP_RAY.ox + TAP_RAY.dx * t, y = TAP_RAY.oy + TAP_RAY.dy * t, z = TAP_RAY.oz + TAP_RAY.dz * t;
+      if (y > island.surfaceAt(x, z)) continue;
+      const dx = x - wpGroup.position.x, dz = z - wpGroup.position.z;
+      // In front of the stone, on the meadow side of the crest, not the hill behind it.
+      return dx * dx + dz * dz <= 7 * 7 && dx * Math.sin(LIBRARY.ry) + dz * Math.cos(LIBRARY.ry) > 0 && y < wpGround + 1.5;
+    }
+    return false;
+  };
+  const wpStop = () => {
+    if (wpTime < 0) return;
+    wpTime = -1; wpFlash = 0; wpStruck = false;
+    if (wpBolt) wpBolt.visible = false;
+    // It stays where it broke out, so the plaza sees it once the view is the visitor's again.
+    wpRise = 1;
+    wpGroup.position.y = wpGround;
+    holdTheView(false);
+  };
+  // The whitepaper's pages (whitepaper-pages-data.js) as one tall strip with the stone's dark gap between them, the
+  // stone's face a window onto it: the reader slides the document up and down inside the stone, a page at a time or
+  // continuously, and zooms it there, as a viewer scrolls and zooms a document. One picture, one texture, one draw,
+  // built on the first read and kept for the visit.
+  const wpStripGeometry = () => {
+    if (wpStrip) return wpStrip;
+    const data = BL.whitepaperPages;
+    wpStripImage = new Image();
+    wpStripImage.src = data.strip;
+    wpStrip = { verts: wpPoster.verts, faces: [{ i: [0, 1, 2, 3], color: [0, 0, 0], emissive: 0 }], lines: [], castShadow: false };
+    wpStrip.imageSurface = { asset: { width: data.width, height: data.height, load: () => wpStripImage }, rect: [WP.w / 2, 0, -WP.w, WP.h] };
+    return wpStrip;
+  };
+  // The strip's window on the stone's face: the whole strip laid z times the face across it, scrolled to wpScroll and
+  // panned across the page, so what the face shows slides inside the stone while the stone and the view stay put.
+  const wpRect = () => {
+    const data = BL.whitepaperPages, rect = wpStrip.imageSurface.rect;
+    const total = data.count * data.page + (data.count - 1) * data.gap;
+    rect[0] = WP.w * wpZoom * (0.5 + wpPanX);
+    rect[1] = WP.h * (1 + wpZoom * (wpScroll - total) / data.page);
+    rect[2] = -WP.w * wpZoom;
+    rect[3] = WP.h * wpZoom * total / data.page;
+  };
+  // Held inside the strip and the page: the whole page across when it is at rest, its overflow once zoomed in.
+  const wpClamp = () => {
+    const data = BL.whitepaperPages, total = data.count * data.page + (data.count - 1) * data.gap;
+    wpScroll = clamp(wpScroll, 0, total - data.page / wpZoom);
+    wpPanX = clamp(wpPanX, 0.5 / wpZoom - 0.5, 0.5 - 0.5 / wpZoom);
+  };
+  const wpPageAt = (s) => {
+    const data = BL.whitepaperPages;
+    // The page the window is mostly on: the one its middle lies in.
+    return clamp(Math.floor((s + data.page / (2 * wpZoom)) / (data.page + data.gap)), 0, data.count - 1);
+  };
+  const wpNav = (on) => hud.whitepaperNav(on, `Page ${wpPage + 1} / ${BL.whitepaperPages ? BL.whitepaperPages.count : 1} · Space or ↓ next · ↑ back · Esc closes`);
+  // The poster's own face, crossed by the tap's ray with no rock in the way: a palm's broad pick may stand before it,
+  // but what the visitor aimed at is the sheet.
+  const wpFaceHit = (p) => {
+    if (!wpGroup || !wpStanding || !wpSheet) return false;
+    renderer.ray(p.x, p.y, camera, TAP_RAY);
+    const m = wpSheet.world, nx = -m[8], ny = -m[9], nz = -m[10];
+    const denom = TAP_RAY.dx * nx + TAP_RAY.dy * ny + TAP_RAY.dz * nz;
+    if (denom > -1e-6) return false; // the face is turned away from the eye
+    const t = ((m[12] - TAP_RAY.ox) * nx + (m[13] - TAP_RAY.oy) * ny + (m[14] - TAP_RAY.oz) * nz) / denom;
+    if (!(t > 0) || t > camera.far) return false;
+    const hx = TAP_RAY.ox + TAP_RAY.dx * t - m[12], hy = TAP_RAY.oy + TAP_RAY.dy * t - m[13], hz = TAP_RAY.oz + TAP_RAY.dz * t - m[14];
+    const lx = hx * m[0] + hy * m[1] + hz * m[2], ly = hx * m[4] + hy * m[5] + hz * m[6];
+    if (Math.abs(lx) > WP.w / 2 || ly < 0 || ly > WP.h) return false;
+    // No rock between the eye and the sheet: the island's own ground, sampled along the ray.
+    for (let i = 1; i <= 16; i++) {
+      const s = t * i / 17;
+      if (TAP_RAY.oy + TAP_RAY.dy * s < island.surfaceAt(TAP_RAY.ox + TAP_RAY.dx * s, TAP_RAY.oz + TAP_RAY.dz * s)) return false;
+    }
+    return true;
+  };
+  // A double tap on the stone: its face becomes a window onto the paper's pages, whole, square on to the view.
+  const wpReadStart = () => {
+    if (!wpGroup || !wpStanding || wpRead || gameMode || factoryDeparting || bifrostDeparting || islandGuide && islandGuide.holding) return false;
+    // The tap that closed the reading view is not the first half of a double tap that opens it again.
+    if (performance.now() - wpReadLeft < 600) return false;
+    if (!BL.whitepaperPages || !BL.whitepaperPages.strip) return false;
+    if (wpTime >= 0) wpStop();
+    wpRead = true; wpFov = camera.fov; wpPage = 0; wpZoom = 1; wpPanX = 0; wpScroll = 0; wpScrollTo = -1;
+    // The poster gives way to the paper while the stone is read, once its strip has decoded; it is back on it once
+    // the view is let go.
+    wpStripGeometry();
+    wpRect();
+    if (wpStripImage.complete && wpStripImage.naturalWidth) wpSheet.geometry = wpStrip;
+    holdTheView(true);
+    document.body.classList.add("wp-reading");
+    wpNav(true);
+    return true;
+  };
+  const wpReadEnd = () => {
+    if (!wpRead) return;
+    wpRead = false; wpReadLeft = performance.now(); wpZoom = 1; wpPanX = 0; wpScroll = 0; wpScrollTo = -1;
+    document.body.classList.remove("wp-reading");
+    wpNav(false);
+    wpSheet.geometry = wpPoster;
+    // The field of view goes back to the character's, as the camera does.
+    camera.fov = wpFov;
+    holdTheView(false);
+  };
+  // Zooming the paper: each double tap on it steps in 50%, each right click steps back out, down to the whole page.
+  const wpZoomIn = () => {
+    if (!wpRead) return false;
+    wpZoom = Math.min(WP.readZoomMax, wpZoom * WP.readZoomStep);
+    wpClamp();
+    return true;
+  };
+  const wpZoomOut = () => {
+    if (!wpRead) return false;
+    wpZoom = Math.max(1, wpZoom / WP.readZoomStep);
+    wpClamp();
+    return true;
+  };
+  // Shift and the wheel slide the document up and down inside the stone, as a viewer scrolls one: the wheel's
+  // distance carries it, a screen pixel this much of the strip at the stone's distance and this zoom.
+  const wpScrollBy = (delta) => {
+    if (!wpRead || !delta) return false;
+    const data = BL.whitepaperPages, reach = 2 * wpReadDist() * Math.tan(WP.readFov * 0.5);
+    wpScrollTo = -1;
+    wpScroll += delta * reach / renderer.size.height * data.page / wpZoom / WP.h;
+    wpClamp();
+    return true;
+  };
+  // The wheel zooms the paper too, continuously, in the same direction the camera's own wheel does.
+  const wpZoomBy = (factor) => {
+    if (!wpRead || !(factor > 0) || factor === 1) return false;
+    wpZoom = clamp(wpZoom / factor, 1, WP.readZoomMax);
+    wpClamp();
+    return true;
+  };
+  // Space and the arrows carry the document a page at a time, gliding to the next page's top.
+  const wpStep = (dir) => {
+    if (!wpRead) return false;
+    const data = BL.whitepaperPages, next = clamp(wpPage + dir, 0, data.count - 1);
+    if (next === wpPage) return false;
+    wpPage = next;
+    wpScrollTo = clamp(next * (data.page + data.gap), 0,
+      data.count * (data.page + data.gap) - data.gap - data.page / wpZoom);
+    wpNav(true);
+    return true;
+  };
+  // Where the reading view stands: far enough that a whole page sits in the frame with a little air around it — the
+  // page's height governing where the screen is wider than the page is tall.
+  const wpReadDist = () => {
+    const aspect = renderer.size.width / Math.max(1, renderer.size.height), tan = Math.tan(WP.readFov * 0.5);
+    return Math.max(WP.h * WP.readAir / (2 * tan), WP.w * WP.readAir / (2 * tan * aspect));
+  };
+  // Dragging and two fingers carry the document with the hand, held inside its own edges at this zoom: down shows
+  // what is above it, and the sheet is seen from behind its face, so its own +x runs to the viewer's left and the
+  // drag moves the window the other way.
+  const wpPanBy = (dx, dy) => {
+    if (!wpRead) return;
+    const data = BL.whitepaperPages, reach = 2 * wpReadDist() * Math.tan(WP.readFov * 0.5), perPixel = reach / renderer.size.height;
+    wpScrollTo = -1;
+    wpScroll -= dy * perPixel * data.page / wpZoom / WP.h;
+    wpPanX -= dx * perPixel / (WP.w * wpZoom);
+    wpClamp();
+  };
+  // The reading view: the stone square on, its face a window onto the strip, so the document slides inside it while
+  // the stone and the view stay where the fit put them.
+  const wpReadUpdate = (dt) => {
+    const k = 1 - Math.exp(-WP.glide * dt);
+    if (wpScrollTo >= 0) {
+      wpScroll += (wpScrollTo - wpScroll) * k;
+      if (Math.abs(wpScrollTo - wpScroll) < 0.5) { wpScroll = wpScrollTo; wpScrollTo = -1; }
+      wpClamp();
+    } else {
+      const page = wpPageAt(wpScroll);
+      if (page !== wpPage) { wpPage = page; wpNav(true); }
+    }
+    // The strip comes on once its picture has decoded, the poster held on the face until then.
+    if (wpSheet.geometry !== wpStrip && wpStripImage.complete && wpStripImage.naturalWidth) wpSheet.geometry = wpStrip;
+    wpRect();
+    const m = wpSheet.world, cx = m[4] * WP.h * 0.5, cy = m[5] * WP.h * 0.5, cz = m[6] * WP.h * 0.5, dist = wpReadDist();
+    WP_TARGET.x = m[12] + cx;
+    WP_TARGET.y = m[13] + cy;
+    WP_TARGET.z = m[14] + cz;
+    WP_EYE.x = WP_TARGET.x - m[8] * dist;
+    WP_EYE.y = WP_TARGET.y - m[9] * dist;
+    WP_EYE.z = WP_TARGET.z - m[10] * dist;
+    const p = camera.position, t = camera.target;
+    p.x += (WP_EYE.x - p.x) * k; p.y += (WP_EYE.y - p.y) * k; p.z += (WP_EYE.z - p.z) * k;
+    t.x += (WP_TARGET.x - t.x) * k; t.y += (WP_TARGET.y - t.y) * k; t.z += (WP_TARGET.z - t.z) * k;
+    camera.fov += (WP.readFov - camera.fov) * k;
+  };
+  const wpUpdate = (dt) => {
+    if (wpRead) { wpReadUpdate(dt); return; }
+    if (wpTime < 0) return;
+    wpTime += dt;
+    // The bolt strikes the ground where the stone will break out: three flashes of it, and sparks where it lands.
+    if (wpTime < WP.strike) {
+      wpBolt.visible = wpTime < 0.08 || (wpTime > 0.16 && wpTime < 0.5) || (wpTime > 0.62 && wpTime < 0.94);
+      if (!wpStruck && wpTime > 0.3) {
+        wpStruck = true;
+        fx.burst(wpGroup.position.x, wpGround + 0.3, wpGroup.position.z, 16, [SPARK, DUST], 2.6);
+        if (wpChar) wpChar.visible = true;
+      }
+    } else if (wpBolt.visible) wpBolt.visible = false;
+    // Then the monolith climbs slowly out of the ground, a second after the strike, under the flash it threw.
+    const rise = clamp((wpTime - WP.strike) / WP.rise, 0, 1);
+    if (rise !== wpRise) { wpRise = rise; wpGroup.position.y = wpGround - WP.sink * (1 - ease.outBack(rise)); }
+    if (wpFlash > 0) wpFlash = Math.max(0, wpFlash - dt / WP.flash);
+    // The strike is watched from ten metres back, and then the view closes in on the stone as it comes up, at the
+    // field of view it came with, so the plaza stays in sight.
+    const zoom = clamp((wpTime - WP.strike) / WP.zoom, 0, 1);
+    WP_EYE.x = wpWideEye.x + (wpEye.x - wpWideEye.x) * zoom;
+    WP_EYE.y = wpWideEye.y + (wpEye.y - wpWideEye.y) * zoom;
+    WP_EYE.z = wpWideEye.z + (wpEye.z - wpWideEye.z) * zoom;
+    WP_TARGET.x = wpWideLook.x + (wpLook.x - wpWideLook.x) * zoom;
+    WP_TARGET.y = wpWideLook.y + (wpLook.y - wpWideLook.y) * zoom;
+    WP_TARGET.z = wpWideLook.z + (wpLook.z - wpWideLook.z) * zoom;
+    const k = 1 - Math.exp(-6 * dt), p = camera.position, t = camera.target;
+    p.x += (WP_EYE.x - p.x) * k; p.y += (WP_EYE.y - p.y) * k; p.z += (WP_EYE.z - p.z) * k;
+    t.x += (WP_TARGET.x - t.x) * k; t.y += (WP_TARGET.y - t.y) * k; t.z += (WP_TARGET.z - t.z) * k;
+    // The ground shakes as the stone breaks out, settling as it stands: the eye and its target wobbled apart.
+    const shake = Math.max(0, 1 - wpTime / WP.shake);
+    if (shake > 0) {
+      const a = shake * shake * WP.shakeAmp;
+      p.x += Math.sin(wpTime * 41.3) * a;
+      p.y += Math.sin(wpTime * 33.7 + 1.7) * a * 0.7;
+      p.z += Math.sin(wpTime * 47.9 + 2.3) * a;
+      t.x += Math.sin(wpTime * 29.1 + 0.9) * a * 1.6;
+      t.y += Math.sin(wpTime * 37.3 + 2.7) * a * 1.1;
+      t.z += Math.sin(wpTime * 43.7 + 1.1) * a * 1.6;
+    }
+    // A key, a tap or a stick lets it go; not the tap that raised it. The view holds only a second once the stone
+    // stands, then the island's is the visitor's again, the stone left standing to be read.
+    if (wpTime > WP.grace) {
+      const a = pilot.controls.read();
+      if (a.x || a.y || a.up || a.yaw || a.pitch || a.orbitYaw || a.sprint) wpStop();
+    }
+    if (wpTime >= WP.strike + WP.rise + WP.hold) wpStop();
+  };
+  const libraryBoard = {
+    title: "The library", help: "Arrow keys flip between the books. A book's link opens the site in a new tab.",
+    count: BOOKS.length, index: 0, version: 0,
+    get canvas() {
+      if (!libraryCanvas) paintLibraryPage();
+      return libraryCanvas;
+    },
+    get caption() { return `${BOOKS[libraryBoard.index].title} · book ${libraryBoard.index + 1} of ${BOOKS.length}`; },
+    get note() { return BOOKS[libraryBoard.index].note; },
+    get links() { return [{ href: BOOKS[libraryBoard.index].href, label: BOOKS[libraryBoard.index].label }]; },
+    go(i) {
+      libraryBoard.index = (i + BOOKS.length) % BOOKS.length;
+      paintLibraryPage();
+      libraryBoard.version++;
+    }
+  };
+  const openBook = (index) => {
+    // The whitepaper's own book shows the whitepaper itself, set into the monolith; its page is the board's.
+    if (index === 2 && wpRaise()) return;
+    libraryBoard.index = index;
+    paintLibraryPage();
+    libraryBoard.version++;
+    hud.openBoard(libraryBoard);
+  };
   // The jumbotron's close-up in the shared board dialog, read straight off the board as it pages and repaints.
   const jumbotronBoard = {
     title: "Oogatron", help: "OogaBoogaX on the big screen. Arrow keys flip the boards.", note: "", floating: true,
@@ -7698,6 +8214,8 @@
     if (chalkboard.openNow) { /* Keep the exact camera and controlled actor pose until the board closes. */ }
     else if (clankerPlay.active) clankerPlay.update(dt);
     else pilot.update(dt);
+    // The whitepaper's monolith rising and the view gliding to it, while it holds the view.
+    wpUpdate(dt);
     // The doorway's views (the keypad's, the swoop into the eyes and back out) take over from the pilot's.
     timechainIsland.gate.view(dt);
     // Tess moves after the view is set, so a tour's glide has the last word on it.
@@ -8007,10 +8525,7 @@
       pilot.weaponMode(2);
     },
     // The view held while a player's Ooga lies under its grave: the pilot let go of, as Tess's tour does, and given back.
-    holdView: (on) => {
-      pilot.setActive(!on); pilot.controls.reset(); input.reset();
-      pilot.setExternalControl(on);
-    },
+    holdView: holdTheView,
     // While the view is held, how the visitor is steering it, read straight from the pilot's controls since the pilot
     // itself is let go of: `x` and `y` A D and W S (or the move stick), `yaw` and `orbitYaw` Q E and the arrows
     // (positive to the left), `pitch` the look stick or arrows (positive down), `sprint` the run key.
@@ -10023,6 +10538,14 @@
     cameraCover.draw(camera, bananaActor ? null : player?.root, touchesRock, occluded, cameraRockAt, cameraRockMaterialAt, cutawayPool && player ? null : guides, dt, 0, null, exteriorRamp ? guideActorVisibleAt : null);
     bananaCover.draw(camera, player, dt, guideActorVisibleAt, bananaGuides.state, null);
     drawFirstPersonFire(crew.player);
+    // The whitepaper's monolith breaks the crest under a flash that fades out slowly, gone as the view settles on the sheet.
+    if (wpFlash > 0) {
+      const context = overlayCanvas.getContext("2d");
+      context.save(); context.setTransform(1, 0, 0, 1, 0, 0);
+      context.globalAlpha = wpFlash * wpFlash; context.globalCompositeOperation = "source-over";
+      context.fillStyle = "#fff"; context.fillRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+      context.restore();
+    }
   };
 
   const onLootCleared = () => {
@@ -10053,6 +10576,16 @@
     location.reload();
   };
   const onKey = (e) => {
+    // Reading the poster: Space and the arrows step it, Escape hands the view back.
+    if (wpRead) {
+      if (e.key === "Escape") { if (!e.repeat) wpReadEnd(); }
+      else if (!e.repeat && (e.key === " " || e.key === "Spacebar" || e.key === "ArrowDown" || e.key === "ArrowRight" || e.key === "PageDown")) wpStep(1);
+      else if (!e.repeat && (e.key === "ArrowUp" || e.key === "ArrowLeft" || e.key === "PageUp")) wpStep(-1);
+      e.preventDefault();
+      return;
+    }
+    // Any key lets the whitepaper's view go.
+    if (wpTime >= 0) { if (!e.repeat) wpStop(); e.preventDefault(); return; }
     if (factoryDeparting || bifrostDeparting) return;
     if (DEBUG_POOL_BLOCK && (e.key === "p" || e.key === "P")) {
       if (!e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) {
@@ -10161,6 +10694,12 @@
     timechainIsland.gate.dispose();
     islandGuide.suspend();
     chalkboard.suspend();
+    // The whitepaper's monolith stays in the retained graph, lowered out of sight, and the view is the pilot's again.
+    wpTime = -1; wpRise = wpFlash = 0; wpStanding = false; wpStruck = false;
+    if (wpRead) wpReadEnd();
+    if (wpBolt) wpBolt.visible = false;
+    if (wpChar) wpChar.visible = false;
+    if (wpGroup) { wpGroup.visible = false; wpGroup.position.y = wpGround - WP.sink; }
     clankerPlay.dispose();
     remotes.dispose();
     npcSync.dispose();
@@ -10283,7 +10822,7 @@
     if (heldHub || ctx.from === "hub" || !ctx.from && !LAZY_BEDDING) return null;
     preparedCharacters.clear();
     const factory = caves.slots.find(slot => slot.status === "open" && slot.scene === "factory");
-    const options = { seed: SEED, roofHole: factory ? { id: factory.id, ...BL.factoryModels.ROOF_TUBE } : null };
+    const options = { seed: SEED, roofHole: factory ? { id: factory.id, ...BL.factoryModels.ROOF_TUBE } : null, nook: LIBRARY };
     const slice = { until: 0, budget: BL.buildTasks.SLICE_MS, work: 0 };
     if (!terrain.hasIsland(options)) yield* terrain.islandSteps(options, slice);
     yield* poolModels.prepareSteps();
@@ -10358,7 +10897,7 @@
     clock = daylight.createClock({ hour: hourParam, daylen: daylenParam, day: dayParam, time: timeParam, now: new Date() });
     phase = null;
     const factorySlot = caves.slots.find(slot => slot.status === "open" && slot.scene === "factory");
-    island = terrain.island({ seed: SEED, roofHole: factorySlot ? { id: factorySlot.id, ...BL.factoryModels.ROOF_TUBE } : null });
+    island = terrain.island({ seed: SEED, roofHole: factorySlot ? { id: factorySlot.id, ...BL.factoryModels.ROOF_TUBE } : null, nook: LIBRARY });
     guideWitness[0] = -1;
     cutawayPathBounds = buildCutawayPathBounds(island.cutawayPaths);
     guideSegmentClear.boxGrid = POOL_SEAMS[0].boxGrid = POOL_SEAMS[1].boxGrid = island.sightGrid;
@@ -10387,6 +10926,12 @@
     hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks, preciseHover: true });
+    // A right click while the paper is read steps the zoom back out; elsewhere the canvas keeps its menu off as before.
+    ctx.canvas.addEventListener("contextmenu", (e) => {
+      if (!wpRead) return;
+      e.preventDefault();
+      wpZoomOut();
+    }, { signal: ctx.signal });
     presets = { pile: PILE_VIEW, gate: GATE_VIEW };
     pilot = pilotMod.create({ renderer, canvas: ctx.canvas, camera, hud, presets, landing: "pile", pitch: [PITCH_MIN, PITCH_MAX], dist: [DIST_MIN, DIST_MAX], follow: FOLLOW, fly: FLY, clampTarget, clampCamera, observeOrbit: position => clampCamera(position, 0), ceilingAt, birdsEyeMin: BIRDS_EYE_MIN, birdsEyeCeiling, releaseView: releaseCameraView, enterFreeView: enterFreeCameraView, coarse: COARSE, onFreeAction: freeAction, jetpackStatus: jetpackHudStatus, mayPossess: mayDriveOoga, combatOnly: () => gameCombatOnly, close: { ...CLOSE_VIEW, maxStep: STEP_MAX, groundAt: playerSupportAt, visualGroundAt: visualSupportAt, sleepEyeFloorAt, zone: () => playerCaveIndex } });
     chalkboard = BL.chalkboard.create({
@@ -10529,6 +11074,8 @@
     buildLife();
     yield* pause(slice);
     yield* scatter(slice);
+    // The library comes after the seeded scenery, so its ground claim moves nothing already placed.
+    buildLibrary();
     mempoolIsland.claimGround();
     timechainIsland.claimGround();
     if (bifrostIsle) bifrostIsle.claimGround();
@@ -11043,16 +11590,34 @@
       hoverIgnore: () => clankerPlay.firstPerson ? clankerPlay.player : pilot.hooks.hoverIgnore(),
       onOrbit: (dx, dy) => {
         if (islandGuide.holding) return;
+        if (wpRead) { wpPanBy(dx, dy); return; }
         if (clankerPlay.active) clankerPlay.orbit(dx, dy);
         else pilot.hooks.onOrbit(dx, dy);
       },
-      onZoom: (factor, gesture, px, py) => {
+      onZoom: (factor, gesture, px, py, shift, delta) => {
         if (islandGuide.holding) return;
+        if (wpRead) {
+          // Shift and the wheel scroll the paper; the wheel alone zooms it.
+          if (shift) wpScrollBy(delta);
+          else wpZoomBy(factor);
+          return;
+        }
         if (clankerPlay.active) clankerPlay.zoom(factor, gesture);
         else pilot.hooks.onZoom(factor, gesture, px, py);
       },
+      // Two fingers carried together over the paper scroll it, as the wheel does with shift held.
+      onPan: (dx, dy) => {
+        if (wpRead) wpPanBy(0, dy);
+      },
       onDoubleTap: (hit, p) => {
         if (factoryDeparting || bifrostDeparting || islandGuide.holding) return;
+        // While the paper is read, a double tap on it steps the zoom in.
+        if (wpRead) {
+          if (wpFaceHit(p)) wpZoomIn();
+          return;
+        }
+        // A double tap on the stone opens the whitepaper's poster to read.
+        if ((hit && hit.owner.kind === "whitepaper" || wpFaceHit(p)) && wpReadStart()) return;
         if (gorillaBehindBillboard(hit, p)) return;
         if (hit && hit.owner.kind === "clanker") {
           if (selectGorilla(hit.owner.entry)) selectDebugGorilla(null);
@@ -11060,6 +11625,8 @@
         }
         if (debugMovementTap(hit, p)) return;
         if (hit && hit.owner.kind === "caveman") { selectOoga(hit.owner.cave); return; }
+        // A double tap on the ground in front of the stone runs the whole show again.
+        if (wpGroundHit(p)) { wpReplay(); return; }
         pilot.hooks.onDoubleTap(hit, p);
       }
     });
@@ -11071,6 +11638,7 @@
     hud.setDestinations(["pile", "lab", "mirror", "underground", "basement", "mempool", "factory", "arcade", "bca", "gate", "bifrost", "timechain"]);
     hud.onAction((action, value) => {
       if (factoryDeparting || bifrostDeparting || islandGuide.holding) return false;
+      if (action === "wp-next") return wpStep(1);
       if (action === "mode-retake") {
         if (pilot.player || clankerPlay.active) return;
         const last = hud.retakeActor;
@@ -11465,6 +12033,11 @@
     }
     for (const node of targets) input.remove(node);
     for (const node of placed) removeChild(root, node);
+    // The whitepaper's monolith goes with the root; its picture is made again by the next visit that raises it.
+    wpTime = -1; wpRise = wpFlash = 0; wpStanding = false;
+    if (wpRead) wpReadEnd();
+    wpGroup = wpImage = wpSheet = wpPoster = wpBolt = wpChar = null;
+    wpStrip = wpStripImage = null;
     targets.length = placed.length = claimed.length = scenery.length = sceneryClaims.length = matrixGates.length = sealedCaves.length = clouds.length = lamps.length = pilePosts.length = fireSeats.length = sleepers.length = labels.length = signDetails.length = spots.length = chillSpots.length = headquartersRimLintels.length = climbMasonry.length = props.length = meadowPalms.length = 0;
     fireHazards.length = 0;
     fireRigs = null;
@@ -11559,7 +12132,7 @@
     // The island reports its own zone as soon as an Ooga is driven (see `zoneOf`); until then it is nowhere.
     voiceZone: "none",
     micKey: true,
-    id: "hub", enter, enterSteps, update, overlay, onDonation, previewDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry, cachedGeometry, islandGeometry,
+    id: "hub", enter, enterSteps, update, overlay, onDonation, previewDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry, cachedGeometry, islandGeometry, libraryNook: LIBRARY,
     get retained() { return heldHub; }, get elapsed() { return now; },
     get retainedRoot() { return heldHub ? root : null; },
     // The Lightning Factory's builders stay warm while the island runs, since its shield walks straight in.
