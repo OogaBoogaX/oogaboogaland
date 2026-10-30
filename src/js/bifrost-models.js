@@ -261,6 +261,8 @@
     return moved(forward(lathe({ profile: [[r, 0], [r, zs], [r, zs], [r - GB, GD], [r - GB, GD], [0, GD]], segments: 16, color: (t) => t < 0.2 ? "#b87a10" : t < 0.7 ? "#ffe7a0" : "#ffc83a", emissive: 0.3 })), x, y, 0);
   };
   const gh = GW / 2, top = 1 - gh, bury = 1 - GW + GB;
+  // The lowercase's x-height and descender, in the same unit metrics as the cap line.
+  const xh = 0.66, desc = -0.3;
   // A bowl from the stem: a bar out at y0, round the right, back in at y1 (y0 > y1), its outer edge at `outer`.
   const bowl = (y0, y1, outer) => {
     const r = (y0 - y1) / 2;
@@ -294,7 +296,23 @@
       const upper = arc(cx, 1 - gh - r, rx, r, 0.75, Math.PI * 1.5), lower = arc(cx, gh + r, rx, r, Math.PI / 2, -Math.PI + 0.75);
       return [stroke([lead(upper[0], upper[1], 0.1), ...upper, ...lower.slice(1), lead(lower[lower.length - 1], lower[lower.length - 2], 0.1)])];
     } },
-    T: { width: 0.62, parts: () => [stroke([[0, top], [0.62, top]]), stroke([[0.31, 0], [0.31, bury]], { blind: [false, true] })] }
+    T: { width: 0.62, parts: () => [stroke([[0, top], [0.62, top]]), stroke([[0.31, 0], [0.31, bury]], { blind: [false, true] })] },
+    // Lowercase for the plaza's banner, cut from the same strokes: an x-height body, an ascender to the cap line
+    // and a descender below the baseline. An open round end is led on so it is longer than its chamfer.
+    i: { width: GW, parts: () => [stroke([[gh, 0], [gh, xh]]), dot(gh, xh + 0.2, 0.085)] },
+    t: { width: 0.5, parts: () => [stroke([[0.13, 0], [0.13, 1]]), stroke([[0, xh], [0.44, xh]])] },
+    c: { width: 0.55, parts: () => { const p = arc(0.3, xh / 2, 0.2, xh / 2 - gh, 0.7, TAU - 0.7); return [stroke([lead(p[0], p[1], 0.1), ...p, lead(p[p.length - 1], p[p.length - 2], 0.1)])]; } },
+    o: { width: 0.6, parts: () => [stroke(arc(0.3, xh / 2, 0.2, xh / 2 - gh, 0, TAU, TAU / 18).slice(0, -1), { closed: true })] },
+    n: { width: 0.6, parts: () => [stroke([[gh, 0], [gh, xh - 0.18], ...arc(0.3, xh - 0.18, 0.2, 0.2, Math.PI, 0).slice(1), [0.5, 0]])] },
+    h: { width: 0.6, parts: () => [stroke([[gh, 0], [gh, 1]]), stroke([[gh, xh - 0.18], ...arc(0.3, xh - 0.18, 0.2, 0.2, Math.PI, 0).slice(1), [0.5, 0]], { blind: [true, false] })] },
+    W: { width: 0.9, parts: () => [stroke([[0.12, 1], [0.28, 0], [0.45, 0.62], [0.62, 0], [0.78, 1]])] },
+    e: { width: 0.55, parts: () => { const p = arc(0.3, xh / 2, 0.2, xh / 2 - gh, 0.35, TAU - 0.35); return [stroke([[0.1, 0.38], [0.5, 0.38]]), stroke([lead(p[0], p[1], 0.1), ...p, lead(p[p.length - 1], p[p.length - 2], 0.1)])]; } },
+    p: { width: 0.4, parts: () => [stroke([[gh, desc], [gh, xh]]), stroke([[gh, xh - 0.06], ...arc(gh, xh / 2 - 0.03, 0.2, xh / 2 - 0.09, Math.PI / 2, -Math.PI / 2).slice(1), [gh, 0.06]], { blind: [true, true] })] },
+    a: { width: 0.55, parts: () => { const p = arc(0.3, xh / 2, 0.2, xh / 2 - gh, 0.35, TAU - 0.35); return [stroke([lead(p[0], p[1], 0.1), ...p, lead(p[p.length - 1], p[p.length - 2], 0.1)]), stroke([[0.5, xh - 0.04], [0.5, 0]])]; } },
+    r: { width: 0.45, parts: () => { const p = arc(0.3, xh - 0.1, 0.2, 0.2, Math.PI, Math.PI / 2); return [stroke([[gh, 0], [gh, xh]]), stroke([[gh, xh - 0.1], ...p.slice(1), lead(p[p.length - 1], p[p.length - 2], 0.1)], { blind: [true, false] })]; } },
+    D: { width: 0.62, parts: () => [stroke([[gh, 0], [gh, 1]]), stroke([[gh, 0.9], ...arc(gh, 0.5, 0.42, 0.4, Math.PI / 2, -Math.PI / 2).slice(1), [gh, 0.1]], { blind: [true, true] })] },
+    y: { width: 0.55, parts: () => [stroke([[0.1, xh], [0.3, 0.2], [0.5, xh]]), stroke([[0.5, xh], [0.5, desc], [0.2, desc]])] },
+    " ": { width: 0.4, parts: () => [] }
   };
   // Text `height` metres to the cap line, centred on x 0 with its baseline at y 0, facing +z with its back at z 0.
   // Throws on a letter with no glyph. Built fresh: callers cache what they keep.

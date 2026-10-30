@@ -7406,9 +7406,9 @@
                strike: 1, rise: 3.6, flash: 0.7, flashAlpha: 0.62, shake: 3, shakeAmp: 0.08, dist: 3.6, grace: 0.7, hold: 1,
                strikeDist: 10, strikeEye: 4.2, strikeLook: 0.35, zoom: 2.2,
                readFov: 0.55, readAir: 1.06, readZoomStep: 1.5, readZoomMax: 6, glide: 7 };
-  let wpGroup = null, wpImage = null, wpSheet = null, wpPoster = null, wpBolt = null, wpChar = null;
+  let wpGroup = null, wpImage = null, wpSheet = null, wpPoster = null, wpBolt = null, wpChar = null, wpBanner = null;
   let wpGround = 0, wpEye = null, wpLook = null, wpWideEye = null, wpWideLook = null;
-  let wpTime = -1, wpRise = 0, wpFlash = 0, wpStanding = false, wpStruck = false;
+  let wpTime = -1, wpRise = 0, wpFlash = 0, wpStanding = false, wpStruck = false, wpBannerTime = 0;
   let wpRead = false, wpFov = 0, wpPage = 0, wpReadLeft = -1e9, wpZoom = 1, wpPanX = 0, wpScroll = 0, wpScrollTo = -1, wpFill = false;
   let wpStrip = null, wpStripImage = null;
   const WP_EYE = { x: 0, y: 0, z: 0 }, WP_TARGET = { x: 0, y: 0, z: 0 };
@@ -7416,6 +7416,48 @@
   const holdTheView = (on) => {
     pilot.setActive(!on); pilot.controls.reset(); input.reset();
     pilot.setExternalControl(on);
+  };
+  // The banner that floats over the stone: "₿itcoin Whitepaper Day" in the ₿IFRÖST's chiselled font, its letters
+  // arched along a circle, turned to read from the plaza and bobbing there. One geometry a glyph, cached for the
+  // visit, so the arc costs nothing a frame.
+  const WP_BANNER = { text: "₿itcoin Whitepaper Day", height: 0.49, gap: 0.16, radius: 8.3, y: 4.05, bob: 0.055, sway: 0.018 };
+  const wpBannerGeos = new Map();
+  const wpLetter = (ch) => {
+    const hit = wpBannerGeos.get(ch);
+    if (hit) return hit;
+    const glyph = BL.bifrostModels.GLYPHS[ch];
+    if (!glyph) throw new Error(`No chiselled glyph for "${ch}"`);
+    const geometry = models.merge(...glyph.parts()), verts = geometry.verts;
+    // Unit metrics to metres, then centred on its own middle so the arc can turn each letter about it.
+    for (let i = 0; i < verts.length; i++) verts[i] *= WP_BANNER.height;
+    for (let i = 0; i < verts.length; i += 3) verts[i] -= glyph.width * WP_BANNER.height * 0.5;
+    geometry.smooth = true;
+    geometry.castShadow = false;
+    wpBannerGeos.set(ch, geometry);
+    return geometry;
+  };
+  const wpBuildBanner = () => {
+    const glyphs = BL.bifrostModels.GLYPHS, chars = [...WP_BANNER.text], gap = WP_BANNER.gap;
+    let total = gap * (chars.length - 1);
+    for (const ch of chars) total += glyphs[ch].width;
+    // The letters stand along an arc, the middle highest and each turned to face out of it, the whole turned round
+    // to face the plaza; the arc is built in the stone's own frame, so the letters' own x runs the other way.
+    const banner = createNode({ position: { x: 0, y: WP_BANNER.y, z: 0 }, rotation: { x: 0, y: Math.PI, z: 0 }, sightHidden: true });
+    let cursor = -total * 0.5;
+    for (const ch of chars) {
+      const glyph = glyphs[ch];
+      if (ch !== " ") {
+        const theta = (cursor + glyph.width * 0.5) * WP_BANNER.height / WP_BANNER.radius;
+        // The banner is turned round, so a letter's own tilt is the other way: its top leans out of the arc.
+        addChild(banner, createNode({
+          geometry: wpLetter(ch),
+          position: { x: WP_BANNER.radius * Math.sin(theta), y: WP_BANNER.radius * (Math.cos(theta) - 1), z: 0 },
+          rotation: { x: 0, y: 0, z: -theta }
+        }));
+      }
+      cursor += glyph.width + gap;
+    }
+    return banner;
   };
   const wpBuild = () => {
     const d = Math.hypot(LIBRARY.x, LIBRARY.z) || 1, dx = LIBRARY.x / d, dz = LIBRARY.z / d;
@@ -7440,6 +7482,9 @@
     addChild(group, wpSheet);
     // The stone answers a tap and a double tap, the second of which opens the poster to read.
     addTarget(wpSheet, { kind: "whitepaper", node: wpSheet });
+    // The banner floats over the cap, arched, once the stone is up.
+    wpBanner = wpBuildBanner();
+    addChild(group, wpBanner);
     // The strike that opens it: a jagged bolt out of the sky onto the ground where the stone breaks out, its fork
     // white-hot, so the whole plaza sees where it will come up before it does.
     const rand = mulberry32(fnv1a("whitepaper-bolt")), segments = [], path = [];
@@ -7730,6 +7775,12 @@
     camera.fov += (WP.readFov - camera.fov) * k;
   };
   const wpUpdate = (dt) => {
+    // The banner floats: a slow lift and a small sway of the whole arch, whatever the stone is doing.
+    if (wpBanner) {
+      wpBannerTime += dt;
+      wpBanner.position.y = WP_BANNER.y + Math.sin(wpBannerTime * 1.1) * WP_BANNER.bob;
+      wpBanner.rotation.z = Math.sin(wpBannerTime * 0.73 + 1.1) * WP_BANNER.sway;
+    }
     if (wpRead) { wpReadUpdate(dt); return; }
     if (wpTime < 0) return;
     wpTime += dt;
@@ -12059,7 +12110,8 @@
     // The whitepaper's monolith goes with the root; its picture is made again by the next visit that raises it.
     wpTime = -1; wpRise = wpFlash = 0; wpStanding = false;
     if (wpRead) wpReadEnd();
-    wpGroup = wpImage = wpSheet = wpPoster = wpBolt = wpChar = null;
+    wpGroup = wpImage = wpSheet = wpPoster = wpBolt = wpChar = wpBanner = null;
+    wpBannerGeos.clear(); wpBannerTime = 0;
     wpStrip = wpStripImage = null;
     targets.length = placed.length = claimed.length = scenery.length = sceneryClaims.length = matrixGates.length = sealedCaves.length = clouds.length = lamps.length = pilePosts.length = fireSeats.length = sleepers.length = labels.length = signDetails.length = spots.length = chillSpots.length = headquartersRimLintels.length = climbMasonry.length = props.length = meadowPalms.length = 0;
     fireHazards.length = 0;
