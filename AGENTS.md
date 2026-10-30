@@ -45,6 +45,7 @@ Classic scripts, each an IIFE with `"use strict"`, sharing `window.BL`. A file e
 
 | File | Job |
 |---|---|
+| `sound.js` | Page-wide environment mute (`oogaboogaland.audio`), shared by the banner speaker and M in every scene. Audio modules subscribe and unsubscribe on disposal; short-lived effects use `output(context)`. Live voice chat is separate and stays in the Oogas panel |
 | `qr.js` | QR code for the donation link |
 | `banana-icon.js` | The Bananas panel's nine-pixel banana as painted canvas pixels and solid sign geometry, shared by the Factory donation board and kiosk |
 | `donation-rate.js` | One shared 2140data socket while a real kiosk or the Bananas panel is open, paused while hidden, for live estimates only; `watch(onRate)` optionally receives price and stale updates, and the server prices receipts independently |
@@ -174,7 +175,7 @@ The scene contract, as `scene-lab.js` and `scene-hub.js` implement it:
 | `onDonation(donation, bananas)` | a donation event while this scene is active; `bananas` is the API's `{ exact, rounded }` in real mode, null when simulated. Every scene counts `exact` into the tally and names `rounded` in its toasts, while its show keeps the game's one to twelve. In real mode the director sets `world.level` every step from the API's pile (its count less `eatPerHour` since it arrived, whole bananas), so every browser shows the same one |
 | `onSeen(id, sats, due, left)` | optional; an on-chain payment the API saw before its block, while this scene is active: true when the scene showed it (the Factory's kiosk, for its own invoice), and otherwise the director toasts one the visitor left waiting |
 | `onKey(e)` | keys the director does not handle itself |
-| `micKey` | optional; true in a scene that shares voice and leaves M free (hub, lab, factory, ₿IFRÖST, poker): there M mutes and unmutes the microphone while in voice. A scene whose M mutes its own sound leaves it out |
+| `micKey` | legacy scene metadata, no longer read by the director: M controls environment sound everywhere; microphone and remote voice muting stay in the Oogas panel |
 | `onLootCleared()` | the locker was emptied with Shift+Delete |
 | `renderOpts` | any of `clear`, `sky`, `ground`, `sun`, `light`, `shadowCenter`, `shadowExtent`, `bloomStrength`; with `horizon` and `zenith` the sky pass draws (plus `moon`, `stars`, `time`); `clouds` (0 to 1); `windTime` (seconds; holds the WebGL2 wind sway where it stands, the Canvas 2D renderer has no sway); `lights`, a `Float32Array` of up to `POINT_LIGHT_CAPACITY` `x, y, z, radius, r, g, b, 0` entries in priority order with `lightCount`, clamped to the tier; `fog` (rgb) with `fogNear` and `fogFar`, off when absent |
 | `leave(destroy)` | tear the visit down; returns `{ targets }`, the input target count read before `input.dispose`. The hub under the keep policy suspends instead (its graph, guides and solids stay) unless `destroy` is true |
