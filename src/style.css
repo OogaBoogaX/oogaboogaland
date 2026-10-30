@@ -3822,8 +3822,8 @@ body.dsb-menu-open .rescue-equipment { visibility: hidden; pointer-events: none;
 }
 
 .weapon-icon {
-  width: 44px;
-  height: 44px;
+  width: 48px;
+  height: 48px;
   transform: translate(-2px, -1px);
 }
 
