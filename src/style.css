@@ -8199,6 +8199,17 @@ body[data-active-scene="dsb"] #destination-hud:disabled { opacity: 1; cursor: de
   line-height: 1.3;
 }
 
+/* Ember Den's rule tiles contain text only, with no leading icon column. */
+[data-intro="poker"] .game-rules li {
+  grid-template-columns: minmax(0, 1fr);
+  row-gap: 3px;
+  align-content: start;
+}
+
+[data-intro="poker"] .game-rules b {
+  white-space: normal;
+}
+
 .game-intro .actions {
   justify-content: center;
 }
