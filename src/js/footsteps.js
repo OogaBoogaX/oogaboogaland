@@ -9,7 +9,7 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const MASTER = 0.3, NOISE_SECONDS = 1, STORAGE_KEY = "oogaboogaland.audio";
+  const MASTER = 0.3, NOISE_SECONDS = 1;
   // Each foot's voice: the scuff's low-pass and the thump's pitch, a little apart so the feet do not sound alike.
   const SCUFF_HZ = [620, 760], THUMP_HZ = [74, 86];
   const SCUFF = 0.5, THUMP = 0.7, ATTACK_S = 0.004, SCUFF_S = 0.09, THUMP_S = 0.07;
@@ -17,17 +17,13 @@
   const create = () => {
     let ctx = null, master = null, scuffs = null, thumps = null, muted = false;
     let walker = null, lastPhase = 0, foot = 0, steps = 0;
-    try {
-      muted = localStorage.getItem(STORAGE_KEY) === "off";
-    } catch {
-      muted = false;
-    }
+    muted = BL.sound.muted;
 
     const open = () => {
       if (ctx || typeof AudioContext === "undefined" || navigator.userActivation && !navigator.userActivation.hasBeenActive) return false;
       ctx = new AudioContext();
       master = ctx.createGain();
-      master.gain.value = MASTER;
+      master.gain.value = muted ? 0 : MASTER;
       master.connect(ctx.destination);
       const buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * NOISE_SECONDS), ctx.sampleRate);
       const data = buffer.getChannelData(0);
@@ -93,7 +89,12 @@
       play(1);
     };
 
+    const offSound = BL.sound.subscribe(on => {
+      muted = on;
+      if (master) master.gain.setTargetAtTime(on ? 0 : MASTER, ctx.currentTime, 0.015);
+    });
     const dispose = () => {
+      offSound();
       if (ctx) ctx.close().catch(() => {});
       ctx = master = scuffs = thumps = walker = null;
     };

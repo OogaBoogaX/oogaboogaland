@@ -375,10 +375,11 @@
       target.addEventListener(type, fn, typeof opts === "boolean" ? { capture: opts, signal } : { ...opts, signal });
       listeners.push(() => target.removeEventListener(type, fn, opts));
     };
-    // Fit the island controls between the title and clock when their actual visible widths allow it.
+    // Fit each environment's controls between the title and clock when their actual visible widths allow it.
     // Observers only schedule a pass after layout or equipment changes; ammo and animation never poll it.
     const bannerScene = document.body.dataset.activeScene;
-    if (bannerScene === "hub" || bannerScene === "dsb") {
+    {
+      const presets = el.topbar.querySelector(`.presets[data-scene="${bannerScene}"]`);
       let bannerFrame = 0;
       const bannerStyle = (node, property, value) => {
         if (node.style.getPropertyValue(property) !== value) node.style.setProperty(property, value);
@@ -390,7 +391,15 @@
         const topbar = getComputedStyle(el.topbar), row = getComputedStyle(el.equipmentRow);
         const fontSize = parseFloat(getComputedStyle(el.clock).fontSize) || 22;
         const scale = Math.max(0.7, Math.min(0.85, 0.7 + (fontSize - 13) / 60));
-        const leftEdge = brand.right + 12, available = Math.min(clock.left, block.left) - 12 - leftEdge;
+        const leftEdge = brand.right + 12, available = Math.min(clock.left, block.width ? block.left : clock.left) - 12 - leftEdge;
+        let presetWidth = 0, presetCount = 0;
+        if (presets && !presets.hidden && getComputedStyle(presets).display !== "none") {
+          for (const button of presets.children) {
+            if (button.hidden || getComputedStyle(button).display === "none") continue;
+            presetWidth += button.offsetWidth; presetCount++;
+          }
+          presetWidth += Math.max(0, presetCount - 1) * (parseFloat(getComputedStyle(presets).columnGap) || 0);
+        }
         let compactWidth = 0, count = 0, expanded = false;
         for (const button of el.equipmentRow.children) {
           if (button.hidden || getComputedStyle(button).display === "none") continue;
@@ -399,8 +408,9 @@
           count++;
         }
         compactWidth += Math.max(0, count - 1) * (parseFloat(row.columnGap) || 0);
-        const banner = (compactWidth + (expanded ? 140 : 0)) * scale <= available ? "full"
-          : compactWidth * scale <= available ? "compact" : "below";
+        const presetSpace = presetWidth + (presetCount && count ? 12 : 0);
+        const banner = (compactWidth + (expanded ? 140 : 0)) * scale + presetSpace <= available ? "full"
+          : compactWidth * scale + presetSpace <= available ? "compact" : "below";
         const paddingLeft = parseFloat(topbar.paddingLeft) || 0, paddingRight = parseFloat(topbar.paddingRight) || 0;
         const topEdge = Math.min(brand.top, clock.top, block.top), bottomEdge = Math.max(brand.bottom, clock.bottom, block.bottom);
         const top = banner === "below" ? bottomEdge + 12 : (topEdge + bottomEdge - 52 * scale) / 2;
@@ -409,7 +419,18 @@
         bannerStyle(el.equipment, "--hub-equipment-left", `${banner === "below" ? paddingLeft : leftEdge}px`);
         bannerStyle(el.equipment, "--hub-equipment-top", `${top}px`);
         bannerStyle(el.equipment, "--hub-equipment-width", `${Math.max(0, window.innerWidth - paddingLeft - paddingRight) / scale}px`);
-        const bottom = `${top + el.equipmentRow.offsetHeight * scale + 8}px`;
+        const equipmentHeight = count ? el.equipmentRow.offsetHeight * scale : 0;
+        let controlsBottom = top + equipmentHeight;
+        if (presets && presetCount) {
+          const presetTop = banner === "below" ? top + equipmentHeight + (count ? 8 : 0) : (topEdge + bottomEdge - 28) / 2;
+          const equipmentWidth = (compactWidth + (banner === "full" && expanded ? 140 : 0)) * scale;
+          const presetLeft = banner === "below" ? paddingLeft : leftEdge + equipmentWidth + (count ? 12 : 0);
+          bannerStyle(presets, "--banner-presets-top", `${presetTop}px`);
+          bannerStyle(presets, "--banner-presets-left", `${presetLeft}px`);
+          bannerStyle(presets, "--banner-presets-width", `${Math.max(0, window.innerWidth - presetLeft - paddingRight)}px`);
+          controlsBottom = Math.max(controlsBottom, presetTop + presets.offsetHeight);
+        }
+        const bottom = `${Math.max(bottomEdge, controlsBottom) + 8}px`;
         bannerStyle(el.messageStack, "--hub-equipment-bottom", bottom);
         bannerStyle(el.micNote, "--hub-equipment-bottom", bottom);
       };
@@ -418,6 +439,10 @@
       };
       const bannerResize = new ResizeObserver(scheduleBanner), bannerEquipment = new MutationObserver(scheduleBanner);
       for (const node of [el.brand, el.clock, el.block, el.equipmentRow]) bannerResize.observe(node);
+      if (presets) {
+        bannerResize.observe(presets);
+        bannerEquipment.observe(presets, { attributes: true, subtree: true, childList: true, characterData: true, attributeFilter: ["hidden", "disabled"] });
+      }
       for (const button of el.equipmentRow.children) bannerEquipment.observe(button, {
         attributes: true, attributeFilter: button === el.weapon ? ["hidden", "data-equipped"] : ["hidden"]
       });
@@ -426,6 +451,7 @@
         bannerResize.disconnect();
         bannerEquipment.disconnect();
         window.cancelAnimationFrame(bannerFrame);
+        if (presets) for (const property of ["--banner-presets-top", "--banner-presets-left", "--banner-presets-width"]) presets.style.removeProperty(property);
         delete el.equipment.dataset.banner;
         for (const property of ["--hub-equipment-scale", "--hub-equipment-left", "--hub-equipment-top", "--hub-equipment-width"]) el.equipment.style.removeProperty(property);
         el.messageStack.style.removeProperty("--hub-equipment-bottom");

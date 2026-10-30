@@ -37,10 +37,9 @@
   };
   // The room's hum: a low drone and a soft fan hiss, pitched a little apart in each room, honouring the page-wide
   // mute and the tab's visibility; a context only after a gesture, closed on leaving.
-  const STORAGE_KEY = "oogaboogaland.audio";
   const ambience = (room, signal) => {
     let context = null, bus = null, sources = [], nodes = [], connected = false, disposed = false, muted = false;
-    try { muted = localStorage.getItem(STORAGE_KEY) === "off"; } catch { muted = false; }
+    muted = BL.sound.muted;
     const gate = () => {
       if (!bus) return;
       const on = !muted && !document.hidden && !disposed;
@@ -74,10 +73,12 @@
     document.addEventListener("pointerdown", gesture, { signal });
     document.addEventListener("keydown", gesture, { signal });
     document.addEventListener("visibilitychange", gate, { signal });
+    const offSound = BL.sound.subscribe(on => { muted = on; gate(); if (!on) gesture(); });
     wake();
     return {
       get stats() { return { contexts: context ? 1 : 0, sources: sources.length, connected }; },
       dispose() {
+        offSound();
         disposed = true;
         gate();
         document.removeEventListener("pointerdown", gesture);

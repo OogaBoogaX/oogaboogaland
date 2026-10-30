@@ -296,8 +296,8 @@
         <button type="button" data-action="mute" id="race-mute" aria-label="Mute sound" aria-pressed="false">Sound</button>
         <button type="button" class="leave" data-action="leave">Back<span> to the island</span></button>
       </nav>
-      <button type="button" class="mode-hud dsb-sound" data-action="dsb-mute" data-scene="dsb" id="dsb-mute"
-        aria-label="Mute DSB sound" title="Mute DSB sound · M" aria-pressed="false" hidden>
+      <button type="button" class="mode-hud environment-sound" id="environment-sound"
+        aria-label="Mute environment sounds" title="Mute environment sounds · M" aria-pressed="false">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path fill="currentColor" d="M3 9h4l5-4v14l-5-4H3z"/>
           <path class="sound-waves" d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/>
@@ -1761,6 +1761,7 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
     <div class="big-results"></div>
     <footer>Curated from the official homepage · checked 4 October 2026. The headquarters is in-world satire; market screens are decorative.</footer>
   </section>
+  <script src="js/sound.js"></script>
   <script src="js/math.js"></script>
   <script src="js/daylight.js"></script>
   <script src="js/scene.js"></script>

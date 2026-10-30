@@ -81,7 +81,7 @@
   const THUNDER_DELAY_MIN = 0.5, THUNDER_DELAY_SPREAD = 1;
   // Weather is background, not an event: the whole bed sits well under the rally and drop engines, and
   // a strike is only a few times the rain rather than the loudest thing on the page.
-  const STORAGE_KEY = "oogaboogaland.audio", MASTER = 0.3, NOISE_SECONDS = 2;
+  const MASTER = 0.3, NOISE_SECONDS = 2;
   const EASE = 1.5, DEAD_BAND = 0.02;
   // The sky stays the clock's until the overcast passes a band, wider by day, so a shower can fall
   // under a clear noon sky and a quiet night stays a clear starry night.
@@ -253,10 +253,7 @@
     // Held (`hold`, the hub's GAME MODE): no rain, cloud deck or bolt drawn and no sound, while the hub stops updating it.
     let held = false, paused = false;
     let ctx = null, master = null, noise = null, rainGain = null, windGain = null, surfGain = null, thunderGain = null, thunderFilter = null, muted = false, audioConnected = false;
-    try {
-      muted = localStorage.getItem(STORAGE_KEY) === "off";
-    } catch {
-    }
+    muted = BL.sound.muted;
     const initAudio = () => {
       if (!exterior || held || paused || ctx || typeof AudioContext === "undefined" || navigator.userActivation && !navigator.userActivation.hasBeenActive) return false;
       ctx = new AudioContext();
@@ -561,6 +558,7 @@
       audioLayer?.setEnabled?.(exterior && !muted && !held && !paused);
       if (master) master.gain.setTargetAtTime(muted || !exterior || held || paused ? 0 : MASTER, ctx.currentTime, 0.05);
     };
+    const offSound = BL.sound.subscribe(setMuted);
     const setExterior = (on) => {
       if (exterior === !!on) return;
       exterior = !!on;
@@ -624,6 +622,7 @@
       }
     };
     const dispose = () => {
+      offSound();
       removeChild(root, node);
       removeChild(root, boltNode);
       for (const cloud of clouds) removeChild(root, cloud);

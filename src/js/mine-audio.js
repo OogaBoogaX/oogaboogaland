@@ -14,14 +14,10 @@
   const VOICES = 8;
   const NOISE_SECONDS = 2;
   const MASTER = 0.5;
-  const STORAGE_KEY = "oogaboogaland.audio";
 
   const create = () => {
     let ctx = null, master = null, noise = null, ready = false, muted = false;
-    try {
-      muted = localStorage.getItem(STORAGE_KEY) === "off";
-    } catch {
-    }
+    muted = BL.sound.muted;
     const voices = [];
     let voiceNext = 0;
     const layers = { drone: null, droneGain: null, droneFilter: null, hiss: null, hissGain: null, hissFilter: null, hum: null, humGain: null };
@@ -207,13 +203,11 @@
 
     const setMuted = (value) => {
       muted = !!value;
-      try {
-        localStorage.setItem(STORAGE_KEY, muted ? "off" : "on");
-      } catch {
-      }
+      BL.sound.setMuted(muted);
       if (ready) master.gain.setTargetAtTime(muted ? 0 : MASTER, ctx.currentTime, 0.05);
       return muted;
     };
+    const offSound = BL.sound.subscribe(setMuted);
 
     return {
       cue, update, quiet, setMuted, activate,
@@ -230,6 +224,7 @@
         return state;
       },
       dispose() {
+        offSound();
         document.removeEventListener("visibilitychange", onVisibility);
         if (!ctx) return;
         quiet();

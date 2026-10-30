@@ -4882,6 +4882,48 @@ const dsbSharedDataChecks = async () => {
 };
 // The six rain steps in Node: soak alone picks them, a step holds against a hover on its boundary, and
 // the amount that falls is continuous through them.
+const environmentSoundChecks = async () => {
+  const events = new Map(), contexts = [];
+  let saved = "off", writable = true;
+  const param = () => ({ value: 0, calls: 0, setTargetAtTime(v) { this.value = v; this.calls++; },
+    setValueAtTime(v) { this.value = v; this.calls++; }, exponentialRampToValueAtTime(v) { this.value = v; this.calls++; }, cancelScheduledValues() {} });
+  const node = () => ({ gain: param(), frequency: param(), connect() {}, disconnect() {}, start() {} });
+  class AudioContext {
+    constructor() { this.state = "running"; this.currentTime = 0; this.sampleRate = 100; this.destination = {}; this.gains = []; this.events = new Map(); contexts.push(this); }
+    createGain() { const n = node(); this.gains.push(n); return n; }
+    createBuffer() { return { getChannelData: () => new Float32Array(100) }; }
+    createBufferSource() { return node(); }
+    createBiquadFilter() { return node(); }
+    createOscillator() { return node(); }
+    addEventListener(k, fn) { this.events.set(k, fn); }
+    removeEventListener(k) { this.events.delete(k); }
+    close() { this.state = "closed"; this.events.get("statechange")?.(); return Promise.resolve(); }
+  }
+  const context = { window: { addEventListener: (k, fn) => events.set(k, fn) }, AudioContext,
+    navigator: { userActivation: { hasBeenActive: true } }, localStorage: { getItem: () => saved, setItem: (k, v) => { if (!writable) throw Error("blocked"); saved = v; } } };
+  for (const file of ["sound", "footsteps"]) runInNewContext(await readFile(join(root, `src/js/${file}.js`), "utf8"), context);
+  const { sound, footsteps } = context.window.BL, feet = footsteps.create(), walker = { act: { phase: 0 }, hop: 0, ladder: null };
+  feet.update(walker); walker.act.phase = Math.PI; feet.update(walker);
+  const startsMuted = sound.muted && contexts.length === 0 && feet.steps === 1;
+  sound.toggle(); walker.act.phase = Math.PI * 2; feet.update(walker);
+  const master = contexts[0].gains[0], opened = master.gain.value === .3 && feet.open;
+  sound.toggle(); const quiet = master.gain.value === 0;
+  walker.act.phase = Math.PI * 3; feet.update(walker);
+  const countsQuiet = feet.steps === 3;
+  feet.dispose(); const calls = master.gain.calls;
+  sound.toggle(); const released = master.gain.calls === calls;
+  const fx = new AudioContext(), output = sound.output(fx), reused = output === sound.output(fx);
+  writable = false; sound.setMuted(true);
+  const blockedStorage = sound.muted && output.gain.value === 0;
+  const next = new AudioContext(), nextOutput = sound.output(next), newMuted = nextOutput.gain.value === 0;
+  events.get("storage")({ key: "oogaboogaland.audio", newValue: "on" });
+  const crossTab = !sound.muted && output.gain.value === 1 && nextOutput.gain.value === 1;
+  fx.close(); next.close(); const closedCalls = output.gain.calls;
+  sound.toggle();
+  record("environment sound: saved mute, live footsteps, new effects, storage failure, cross-tab changes and disposal share one gate",
+    startsMuted && opened && quiet && countsQuiet && released && reused && blockedStorage && newMuted && crossTab && output.gain.calls === closedCalls,
+    JSON.stringify({ startsMuted, opened, quiet, countsQuiet, released, reused, blockedStorage, newMuted, crossTab }));
+};
 const weatherStepChecks = async () => {
   const context = { window: { BL: { math: null, models: { cached: (f) => f, noShadow: (g) => g, box: () => ({}), merge: () => ({}), polyline: () => ({}), particleGeometry: () => ({}) }, scene: {} } } };
   runInNewContext(await readFile(new URL("../src/js/math.js", import.meta.url), "utf8"), context);
@@ -21887,7 +21929,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   tessAnswerChecks(BL);
   const clearance = claimClearanceProof();
   record("hub footprint clearance: conservative rejection preserves circular boundaries, live reservations and exceptional numbers", clearance.failures === 0 && clearance.cases >= 4000, JSON.stringify(clearance));
-  await deferredLoadingChecks(); await hudNoticeChecks(); await characterChecks(); await contributorActivityChecks(); await mempoolFeedChecks(); await oogatronReplayChecks(); await debugActivityStatusChecks(); await soloDebugChecks(); await adaptiveQualityChecks(); await chainSnapshotChecks(); await dsbSharedDataChecks(); await timechainDataChecks(); await timechainRoomChecks(); await timechainBlockChecks(); await weatherStepChecks(); await poolLayoutChecks(); await gameRulesChecks(); await ghostHuntChecks(); await donationClientChecks(); await poolWildlifeChecks(); await totemFeedChecks();
+  await deferredLoadingChecks(); await hudNoticeChecks(); await characterChecks(); await contributorActivityChecks(); await mempoolFeedChecks(); await oogatronReplayChecks(); await debugActivityStatusChecks(); await soloDebugChecks(); await adaptiveQualityChecks(); await chainSnapshotChecks(); await dsbSharedDataChecks(); await timechainDataChecks(); await timechainRoomChecks(); await timechainBlockChecks(); await environmentSoundChecks(); await weatherStepChecks(); await poolLayoutChecks(); await gameRulesChecks(); await ghostHuntChecks(); await donationClientChecks(); await poolWildlifeChecks(); await totemFeedChecks();
 
   // Scene state built directly instead of booted; seed 1 matches scene-hub.js.
   // Sealed cave guides need the hub's seal nodes, so probes reading them stay in the browser tier.
