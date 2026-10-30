@@ -330,6 +330,9 @@
       lights[o] = p.x; lights[o + 1] = 5.1; lights[o + 2] = p.z; lights[o + 3] = 14;
       lights[o + 4] = theme.tableLight[0]; lights[o + 5] = theme.tableLight[1]; lights[o + 6] = theme.tableLight[2];
       const v = room.tables[i]; v.pulse = Math.max(0, v.pulse - dt);
+      // Floating table names face the visitor and clear the overhead view with the fixtures.
+      v.label.visible = room.fixtures.visible;
+      if (v.label.visible) v.label.rotation.y = Math.atan2(camera.position.x - p.x, camera.position.z - p.z);
       v.agent.parts.armL.rotation.x = -0.5 - Math.sin(v.pulse / 0.7 * Math.PI) * 0.75;
       v.agent.parts.armR.rotation.x = -0.45;
       v.dealCard.visible = v.pulse > 0 && snapshots[i].phase !== "waiting";

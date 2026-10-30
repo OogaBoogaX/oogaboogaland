@@ -183,8 +183,12 @@
       // Deal left to right and print upright as seen from the gorilla's side of the table.
       const board = Array.from({ length: 5 }, (_, j) => { const n = node(g.back, (2 - j) * 0.72, 1.41); n.rotation.y = Math.PI; n.visible = false; S.addChild(group, n); return n; });
       const button = node(g.button); S.addChild(group, button); button.visible = false;
-      const label = BL.poolModels.carve(String(i + 1).padStart(2, "0"), { cell: 0.14, color: "#e5c984" });
-      S.addChild(group, node(label.geometry, -label.width / 2, 1.17, 3.18));
+      const lettering = BL.poolModels.carve(`TABLE ${i + 1}`, { cell: 0.1, color: "#ffe1a0", emissive: 1 });
+      lettering.geometry.castShadow = false;
+      const label = S.createNode({ position: { x: 0, y: 4.65, z: 0 } });
+      const text = node(lettering.geometry, -(lettering.width - 0.2) / 2);
+      text.glow = 1;
+      S.addChild(label, text); S.addChild(group, label);
       const agent = BL.agent.create({ groundAt: () => 0, x: 0, z: -3.6, managed: true, scale: 1.16 });
       agent.poseManaged(1, 0, 0, -3.6, 0, 0, false, true);
       S.addChild(agent.parts.torso, node(g.jacket));
@@ -192,7 +196,7 @@
       S.addChild(group, agent.root);
       const dealCard = node(g.back, 0, 1.5, -2.4); dealCard.visible = false; S.addChild(group, dealCard);
       S.addChild(root, group);
-      tables.push({ root: group, base, top, rim, felt, pinstripe, chairs, chips, backs, board, button, agent, dealCard, actors: new Array(SEATS.length).fill(null), version: -1, pulse: 0 });
+      tables.push({ root: group, base, top, rim, felt, pinstripe, chairs, chips, backs, board, button, label, agent, dealCard, actors: new Array(SEATS.length).fill(null), version: -1, pulse: 0 });
     }
     let current = null;
     const setTheme = id => {
