@@ -38,8 +38,8 @@
       }
       indices[v] = index;
     }
-    for (const face of geometry.faces) { yield* pause(slice); for (let i = 0; i < face.i.length; i++) { face.i[i] = indices[face.i[i]]; } }
-    for (const line of geometry.lines) { yield* pause(slice); for (let i = 0; i < line.i.length; i++) { line.i[i] = indices[line.i[i]]; } }
+    for (const face of geometry.faces) { if (due(slice, 63)) yield* pause(slice); for (let i = 0; i < face.i.length; i++) { face.i[i] = indices[face.i[i]]; } }
+    for (const line of geometry.lines) { if (due(slice, 63)) yield* pause(slice); for (let i = 0; i < line.i.length; i++) { line.i[i] = indices[line.i[i]]; } }
     geometry.verts = new Float64Array(vertices);
   };
   const compactVertices = (...args) => finishBuild(compactVerticesSteps(...args));
@@ -167,20 +167,20 @@
         };
         if (d === 2) {
           // Rows run along z: one cell per row, in memory order.
-          for (let x = 0; x < sx; x++) { yield* pause(slice); if (slabLo[x] <= k && slabHi[x] >= k - 1) for (let y = 0; y < sy; y++) {
+          for (let x = 0; x < sx; x++) { if (due(slice, 63)) yield* pause(slice); if (slabLo[x] <= k && slabHi[x] >= k - 1) for (let y = 0; y < sy; y++) {
             const r = x * sy + y;
             if (rowLo[r] <= k && rowHi[r] >= k - 1) cell(x, y);
           } }
         } else {
           // The two rows either side of the slice, over their joint solid span.
           const count = d === 0 ? sy : sx;
-          for (let m = 0; m < count; m++) { yield* pause(slice);
+          for (let m = 0; m < count; m++) { if (due(slice, 63)) yield* pause(slice);
             const near = d === 0 ? k * sy + m : m * sy + k, far = d === 0 ? near - sy : near - 1;
             const lo = Math.min(k < nd ? rowLo[near] : sz, k > 0 ? rowLo[far] : sz), hi = Math.max(k < nd ? rowHi[near] : -1, k > 0 ? rowHi[far] : -1);
             for (let z = lo; z <= hi; z++) { if (d === 0) cell(m, z); else cell(z, m); }
           }
         }
-        for (let j = j0; j <= j1; j++) { yield* pause(slice);
+        for (let j = j0; j <= j1; j++) { if (due(slice, 63)) yield* pause(slice);
           let n = j * nu + i0;
           for (let i = i0; i <= i1;) {
             const c = mask[n];

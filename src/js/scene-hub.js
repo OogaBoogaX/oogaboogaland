@@ -10278,9 +10278,9 @@
   // A released hub comes back to an island its departure dropped, and to every hub-scoped model cache with it. The pure
   // builds run here in slices behind the fade, not in the swap frame (seconds on a phone): the island, the Mempool
   // island's meshes, the rock guides' walls (BL.rockGuides.prepareSteps) and every Ooga's rig. What is left for enter
-  // is placing the props, the crew and the outline registry. Boot (unless ?lazyhub=1) and a kept hub skip it.
+  // is placing the props, the crew and the outline registry. A kept hub skips it; boot takes the same sliced path.
   const prepareHubSteps = function* (ctx) {
-    if (heldHub || ctx.from === "hub" || !ctx.from && !LAZY_BEDDING) return null;
+    if (heldHub || ctx.from === "hub") return null;
     preparedCharacters.clear();
     const factory = caves.slots.find(slot => slot.status === "open" && slot.scene === "factory");
     const options = { seed: SEED, roofHole: factory ? { id: factory.id, ...BL.factoryModels.ROOF_TUBE } : null };
@@ -10324,9 +10324,9 @@
     yield;
     slice.until = performance.now() + ENTER_SLICE_MS;
   };
-  // The island's whole visit, built in slices when the director lets it (`enterSteps`, a released hub's return) and
-  // in one go otherwise (`enter`: boot, and a kept hub's resume, which never pauses). `pause` gives the frame back once
-  // a slice has run its budget; between slices nothing of the visit runs, and the director holds the canvas's input.
+  // The island's whole visit, built in slices when the director lets it (`enterSteps`: cold boot and a released
+  // hub's return) and in one go otherwise (`enter`: a kept hub's resume, which never pauses). `pause` gives the
+  // event loop back once a slice has run its budget; between slices nothing of the visit runs, and input stays held.
   const enterSteps = function* (ctx) {
     const slice = { until: performance.now() + ENTER_SLICE_MS };
     prefetchAt = 0;

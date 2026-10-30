@@ -105,8 +105,7 @@
   const game = gameMod.create({ catalog: models.SWAG });
   window.BL.donationPopup = window.BL.donationPopup.create(game, (donation) => {
     if (donations.real) return;
-    if (active) active.onDonation(donation);
-    else game.recordDonation(donation);
+    deliverDonation(donation);
     window.BL.hud.setDonationStats(game.state);
   });
   window.BL.hud.setDonationStats(game.state);
@@ -116,6 +115,23 @@
   world.magazine = { owned: debugMagazines > 0, count: debugMagazines, ammo: debugMagazines ? 30 : 0, carrier: null };
 
   let active = null, activeMeshRigs = false, visitController = null;
+  // The first scene is the only arrival that can wait without an active donation receiver. Keep a bounded queue and
+  // let the scene record each tip when it arrives, so a boot tip is both shown and counted exactly once.
+  let bootPending = true;
+  const bootDonations = [];
+  const deliverDonation = (donation, bananas = null) => {
+    if (active) active.onDonation(donation, bananas);
+    else if (bootPending && bootDonations.length < 16) bootDonations.push({ donation, bananas });
+    else game.recordDonation(donation, bananas && bananas.exact);
+  };
+  const finishBootDonations = () => {
+    bootPending = false;
+    while (bootDonations.length) { const pending = bootDonations.shift(); active.onDonation(pending.donation, pending.bananas); }
+  };
+  const failBootDonations = () => {
+    bootPending = false;
+    while (bootDonations.length) { const pending = bootDonations.shift(); game.recordDonation(pending.donation, pending.bananas && pending.bananas.exact); }
+  };
   let sceneTime = 0;
   let transition = null;
   let fade = 0;
@@ -374,8 +390,8 @@
     // The previous visit has gone and leave cannot tear down a half-built one. Keep its controls held and offer
     // a way out, with honest wording: an entry error says nothing about whether the deployment changed.
     active = null;
-    t.entering = t.building = t.entryFailed = true;
-    visitController.abort();
+    if (t) t.entering = t.building = t.entryFailed = true;
+    visitController?.abort();
     holdInput(true);
     window.BL.hud.offerReload("Ooga Booga Land could not be opened");
     $("reload-notice").querySelector("button").focus({ preventScroll: true });
@@ -766,8 +782,8 @@
   // Each donation goes to the active scene with the API's banana count (null when simulated); in real mode the pile
   // follows the API's. The page's own Worker turns real mode on in the account's look at /api/me, so the subscription
   // waits for that look (bounded, as the boot's wait is) and a page about to go real never plays a simulated tip. A
-  // donation pushed before the first scene is ready still counts in the saved tally. An on-chain tip the visitor left
-  // the kiosk waiting on says it was theirs, in whatever scene they are, in place of the scene's own toast.
+  // donation pushed before the first scene is ready joins a bounded replay queue and counts once on arrival. An
+  // on-chain tip the visitor left the kiosk waiting on says it was theirs, in whatever scene they are, in place of the scene's own toast.
   const pileFeed = { bananas: 0, eatPerHour: 0, at: 0 };
   let unsubscribeDonations = null;
   accountReady.then(() => {
@@ -776,8 +792,7 @@
     unsubscribeDonations = donations.subscribe((donation, bananas) => {
       if (donations.receivedOwnInvoice(donation.id)) game.rememberHandle(donation.handle);
       window.BL.donationPopup.receive(donation, bananas);
-      if (active) active.onDonation(donation, bananas);
-      else game.recordDonation(donation, bananas && bananas.exact);
+      deliverDonation(donation, bananas);
       window.BL.hud.setDonationStats(game.state);
       if (donations.waited(donation.id)) {
         const n = bananas && bananas.rounded;
@@ -896,19 +911,47 @@
       try {
         const steps = window.BL.buildTasks.measure(() => models.withScope(first.id, () => first.buildSteps({ ...ctx, place, signal: bootBuildController.signal })));
         await window.BL.buildTasks.run(steps, first.id, bootBuildController.signal);
-      } catch {
+      } catch (error) {
         models.release(first.id, []);
         if (destroyed) return;
+        if (first.id === Object.keys(scenes)[0]) { failBootDonations(); entryFailed(null, error); return; }
         first = scenes[Object.keys(scenes)[0]];
         place = null;
         window.BL.hud.toast("That place could not be opened · here is the island");
       }
       if (destroyed) { models.release(first.id, []); return; }
     }
-    window.BL.buildTasks.measure(() => enter(first, place));
+    let uploadCPU = 0;
+    if (first.enterSteps) {
+      // Boot gives the event loop the same responsive construction path as a scene swap. Scenes without steps keep
+      // their ordinary enter; GPU upload timing stays out of the construction input used to choose the opening tier.
+      try {
+        holdInput(true);
+        const retainedTime = arriving(first, place);
+        const steps = models.withScope(first.id, () => first.enterSteps(ctx));
+        const step = window.BL.buildTasks.measure(() => models.withScope(first.id, () => steps.next()));
+        const finish = () => window.BL.buildTasks.measure(() => { arrived(first, place, retainedTime); finishBootDonations(); });
+        if (step.done) finish();
+        else {
+          active = null;
+          const rest = (function* () {
+            yield* steps;
+            yield;
+            const beforeUpload = performance.now();
+            yield* renderer.prepareSteps(first.root, first.renderOpts?.meshRigs === true, { until: beforeUpload + window.BL.buildTasks.SLICE_MS / 2 });
+            uploadCPU = performance.now() - beforeUpload;
+          })();
+          await window.BL.buildTasks.run(rest, first.id, bootBuildController.signal);
+          finish();
+        }
+      } catch (error) {
+        if (destroyed) { models.release(first.id, []); return; }
+        failBootDonations(); entryFailed(null, error); return;
+      }
+    } else window.BL.buildTasks.measure(() => { enter(first, place); finishBootDonations(); });
     mark("ready");
     // A restored island counts as the build it replaced, so the cache never starts a device a tier higher.
-    tierFromBoot(window.BL.buildTasks.cpu - constructionCPU + (window.BL.terrainCache?.stats.credit || 0));
+    tierFromBoot(window.BL.buildTasks.cpu - constructionCPU - uploadCPU + (window.BL.terrainCache?.stats.credit || 0));
     raf = window.requestAnimationFrame(frame);
     if (terrainController && window.BL.terrainCache?.stats.lastSource === "miss") fillTerrain();
   };

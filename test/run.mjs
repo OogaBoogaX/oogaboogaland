@@ -13279,6 +13279,88 @@ const hubEntryFailure = async (b, stage) => {
   }
   record(`hub entry failure: ${phase} Reload works through the retained input hold and opens a fresh playable island`, reloaded);
 };
+const bootFixture = async (b, body) => {
+  const url = await b.evaluate("location.href");
+  const script = await b.send("Page.addScriptToEvaluateOnNewDocument", { source: `document.addEventListener("DOMContentLoaded",()=>{${body}})` });
+  await b.open(url);
+  // Each boot gets only its own fixture; later reloads in this session must not inherit intentional failures or holds.
+  await b.send("Page.removeScriptToEvaluateOnNewDocument", { identifier: script.result.identifier });
+};
+const bootWait = (b, condition, ms = 15000) => b.evaluate(`new Promise(resolve=>{const start=performance.now(),tick=()=>{let value=false;try{value=!!(${condition});}catch{}if(value||performance.now()-start>${ms})resolve(value);else setTimeout(tick,25);};tick();})`);
+const hubBootHold = { name: "hub boot hold", why: "regression: sliced cold boot accepted canvas, HUD and keyboard input before the first visit was ready", run: async (b) => {
+  await bootFixture(b, `
+    const H=BL.scenes.hub,steps=H.enterSteps,createPilot=BL.pilot.create,S=window.__bootHold={released:false,paused:false,actions:0};
+    BL.pilot.create=(...args)=>S.pilot=createPilot(...args);
+    const createHud=BL.hud.create;BL.hud.create=(...args)=>{const hud=createHud(...args),onAction=hud.onAction;hud.onAction=fn=>onAction((...values)=>{S.actions++;return fn(...values);});return hud;};
+    H.enterSteps=function*(ctx){S.signal=ctx.signal;const it=steps(ctx);it.next();S.paused=true;while(!S.released)yield;yield*it;};
+  `);
+  const paused = await bootWait(b, "window.__bootHold?.paused");
+  if (!paused) throw new Error("cold boot did not reach its first-slice pause");
+  const before = await b.evaluate(`(()=>{const S=__bootHold;S.before=JSON.stringify({mode:S.pilot.mode,aiming:S.pilot.aiming,preset:document.getElementById("detached-destination-name").textContent});return S.before;})()`);
+  await b.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: 700, y: 450, deltaX: 0, deltaY: 120 });
+  await b.evaluate(`(()=>{const map=document.getElementById("destination-hud"),canvas=document.getElementById("scene");map.click();canvas.dispatchEvent(new PointerEvent("pointerdown",{bubbles:true,pointerId:81,pointerType:"mouse",button:0,buttons:1}));canvas.dispatchEvent(new PointerEvent("pointerup",{bubbles:true,pointerId:81,pointerType:"mouse",button:0,buttons:0}));})()`);
+  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "w", code: "KeyW" });
+  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: " ", code: "Space", text: " " });
+  const held = await b.evaluate(`(()=>{const S=__bootHold,a=S.pilot.controls.read();return {scene:__ooga.scene,actions:S.actions,inert:[...document.querySelectorAll('[data-scene="hub"],#sheet,#equipment-hud,.joysticks,#act')].every(el=>el.inert),quiet:a.x===0&&a.y===0&&a.up===0&&a.yaw===0&&a.pitch===0,unchanged:S.before===JSON.stringify({mode:S.pilot.mode,aiming:S.pilot.aiming,preset:document.getElementById("detached-destination-name").textContent})};})()`);
+  await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: " ", code: "Space" });
+  await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "w", code: "KeyW" });
+  await b.evaluate(`__bootHold.released=true`);
+  const resumed = await untilPage(b, 'B.scene==="hub"', 20000);
+  const live = await b.evaluate(`(()=>{const map=document.getElementById("destination-hud");map.click();return {live:!document.getElementById("equipment-hud").inert,actions:__bootHold.actions};})()`);
+  record("hub boot hold: cold construction refuses HUD, wheel, canvas and Space/W input, then restores a live island", paused && held.scene === null && held.actions === 0 && held.inert && held.quiet && held.unchanged && resumed && live.live && live.actions === 1, JSON.stringify({ held, resumed, live, before }));
+} };
+const hubBootFailure = { name: "hub boot failure", why: "regression: a sliced cold-boot exception left a spinning curtain and live partial controls without recovery", run: async (b) => {
+  await bootFixture(b, `
+    const H=BL.scenes.hub,S=window.__bootFailure={errors:[],report:window.reportError};window.reportError=error=>S.errors.push(error.message);
+    H.enterSteps=function*(ctx){S.signal=ctx.signal;yield;throw new Error("boot failure fixture");};
+  `);
+  const failed = await bootWait(b, "window.__bootFailure?.errors.length", 10000);
+  const state = await b.evaluate(`(()=>{const S=__bootFailure,notice=document.getElementById("reload-notice"),button=notice.querySelector("button"),rect=button?.getBoundingClientRect();return {scene:__ooga.scene,aborted:!!S.signal?.aborted,errors:S.errors,visible:!!button&&!notice.hidden&&rect.width>0&&rect.height>0,focused:document.activeElement===button,usable:!!button&&!button.closest("[inert]")};})()`);
+  record("hub boot failure: a post-yield error aborts the partial visit and offers a focused, usable Reload", failed && state.scene === null && state.aborted && state.errors.length === 1 && state.errors[0] === "boot failure fixture" && state.visible && state.focused && state.usable, JSON.stringify(state));
+} };
+const hubBootPagehide = { name: "hub boot pagehide", why: "regression: non-persisted pagehide during sliced cold boot rejected into the console instead of quietly cancelling construction", run: async (b) => {
+  await bootFixture(b, `
+    const H=BL.scenes.hub,steps=H.enterSteps,S=window.__bootPagehide={released:false,paused:false,closed:false};
+    H.enterSteps=function*(ctx){S.signal=ctx.signal;const it=steps(ctx);try{it.next();S.paused=true;while(!S.released)yield;yield*it;}finally{S.closed=true;it.return();}};
+  `);
+  const paused = await bootWait(b, "window.__bootPagehide?.paused");
+  if (!paused) throw new Error("cold boot did not reach its pagehide pause");
+  await b.evaluate(`(()=>{const S=__bootPagehide;S.cpu0=BL.buildTasks.cpu;window.dispatchEvent(new PageTransitionEvent("pagehide",{persisted:false}));S.released=true;})()`);
+  await b.sleep(150);
+  await b.evaluate(`__bootPagehide.cpu1=BL.buildTasks.cpu`);
+  await b.sleep(1200);
+  const state = await b.evaluate(`(()=>{const S=__bootPagehide,marks=performance.getEntriesByType("mark").map(m=>m.name);return {closed:S.closed,aborted:!!S.signal?.aborted,frames:__ooga.renderedFrames,ready:marks.includes("ooga:ready"),drawn:marks.includes("ooga:drawn"),cpuStopped:S.cpu1===BL.buildTasks.cpu,logs:[]};})()`);
+  state.logs = b.logs.filter(line => /AbortError|Build cancelled|Unhandled|exception/.test(line));
+  record("hub boot pagehide: non-persisted pagehide closes the generator, stops CPU and marks, and leaves no rejection or first frame", paused && state.closed && state.aborted && state.frames === 0 && !state.ready && !state.drawn && state.cpuStopped && state.logs.length === 0, JSON.stringify(state));
+} };
+const hubBootTierUploads = { name: "hub boot tier uploads", why: "regression: initial GPU upload time moved a device from Medium to Low although construction had not changed", run: async (b) => {
+  await bootFixture(b, `
+    const R=__ooga.renderer,prepare=R.prepareSteps,S=window.__bootTier={initial:null},setQuality=R.setQuality;
+    R.setQuality=function(quality){S.changes=(S.changes||[]).concat({quality,at:performance.now(),ready:performance.getEntriesByName("ooga:ready").length>0});if(S.initial===null)S.initial=quality;return setQuality.call(this,quality);};
+    R.prepareSteps=function*(...args){S.before=BL.buildTasks.cpu;yield*prepare.apply(R,args);BL.buildTasks.measure(()=>{const until=performance.now()+2000;while(performance.now()<until);});S.after=BL.buildTasks.cpu;};
+  `);
+  const ready = await bootWait(b, 'window.__ooga?.scene==="hub"', 25000);
+  const state = await b.evaluate(`({initial:__bootTier.initial,changes:__bootTier.changes,before:__bootTier.before,after:__bootTier.after,quality:__ooga.renderer.quality,cpu:BL.buildTasks.cpu,logs:[]})`);
+  state.logs = b.logs.slice();
+  record("hub boot tier uploads: an artificial 2 s upload does not force the opening quality tier to Low", ready && state.initial !== "low", JSON.stringify(state));
+} };
+const hubBootDonationReplay = { name: "hub boot donation replay", why: "regression: a donation delivered during sliced cold boot was counted but never shown by the arriving scene", run: async (b) => {
+  await b.send("Page.addScriptToEvaluateOnNewDocument", { source: `(()=>{const timer=setInterval(()=>{if(!window.BL?.donations?.subscribe)return;clearInterval(timer);const subscribe=BL.donations.subscribe;BL.donations.subscribe=(fn,opts)=>{window.__bootDonation={fn};return subscribe(fn,opts);};},0);})()` });
+  await bootFixture(b, `
+    const H=BL.scenes.hub,steps=H.enterSteps,onDonation=H.onDonation,S=window.__bootDonationState={released:false,paused:false,seen:0};
+    H.onDonation=(...args)=>{S.seen++;return onDonation(...args);};
+    H.enterSteps=function*(ctx){const it=steps(ctx);it.next();S.paused=true;while(!S.released)yield;yield*it;};
+  `);
+  const paused = await bootWait(b, "window.__bootDonationState?.paused");
+  if (!paused) throw new Error("cold boot did not reach its donation pause");
+  const captured = await b.evaluate(`!!window.__bootDonation?.fn`);
+  if (captured) await b.evaluate(`__bootDonation.fn({id:"boot-tip",sats:1200,handle:"boot-test",message:"",at:Date.now()},null)`);
+  await b.evaluate(`__bootDonationState.released=true`);
+  const ready = await bootWait(b, 'window.__ooga?.scene==="hub"', 30000);
+  const state = await b.evaluate(`({ready:${ready},captured:!!window.__bootDonation?.fn,seen:__bootDonationState.seen,donations:__ooga.game.state.donations,toast:document.getElementById("toast").textContent})`);
+  record("hub boot donation replay: the real subscription replays a boot tip to the arriving scene exactly once", paused && captured && ready && state.seen === 1 && state.donations === 1 && /1\.2K|1,200/.test(state.toast), JSON.stringify(state));
+} };
+scene("hub", { label: "boot lifecycle", query: "terrainworker=0", steps: [hubBootHold, hubBootFailure, hubBootPagehide, hubBootTierUploads, hubBootDonationReplay] });
 scene("hub", { label: "entry failure", query: "hubcache=release", steps: [{ name: "hub entry failure", why: "regression: entry errors before or after the first yield left input held with no way to recover", run: async (b) => {
   await hubEntryFailure(b, "later");
   await hubEntryFailure(b, "first");
