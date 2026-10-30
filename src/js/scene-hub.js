@@ -5527,7 +5527,7 @@
       case "book":
         return `${BOOKS[o.index].title} · open it`;
       case "whitepaper":
-        if (wpRead) return COARSE ? "Two fingers slide the paper · pinch to zoom" : "Double-click to zoom in · right-click to zoom out · Shift+wheel slides it";
+        if (wpRead) return COARSE ? "Drag to slide · two fingers to zoom" : "Double-click to zoom in · right-click back · wheel scrolls · Shift+wheel zooms";
         return COARSE ? "The whitepaper · double-tap to read" : "The whitepaper · double-click to read";
       case "prop":
         if (o.prop === "timechainentrance") return "Timechain Sphere · nine rooms, chosen at the keypad";
@@ -7409,7 +7409,7 @@
   let wpGroup = null, wpImage = null, wpSheet = null, wpPoster = null, wpBolt = null, wpChar = null;
   let wpGround = 0, wpEye = null, wpLook = null, wpWideEye = null, wpWideLook = null;
   let wpTime = -1, wpRise = 0, wpFlash = 0, wpStanding = false, wpStruck = false;
-  let wpRead = false, wpFov = 0, wpPage = 0, wpReadLeft = -1e9, wpZoom = 1, wpPanX = 0, wpScroll = 0, wpScrollTo = -1;
+  let wpRead = false, wpFov = 0, wpPage = 0, wpReadLeft = -1e9, wpZoom = 1, wpPanX = 0, wpScroll = 0, wpScrollTo = -1, wpFill = false;
   let wpStrip = null, wpStripImage = null;
   const WP_EYE = { x: 0, y: 0, z: 0 }, WP_TARGET = { x: 0, y: 0, z: 0 };
   // The view held for the poster, as Tess's tour holds it: the pilot let go of and given back.
@@ -7603,7 +7603,7 @@
     if (performance.now() - wpReadLeft < 600) return false;
     if (!BL.whitepaperPages || !BL.whitepaperPages.strip) return false;
     if (wpTime >= 0) wpStop();
-    wpRead = true; wpFov = camera.fov; wpPage = 0; wpZoom = 1; wpPanX = 0; wpScroll = 0; wpScrollTo = -1;
+    wpRead = true; wpFov = camera.fov; wpPage = 0; wpZoom = 1; wpPanX = 0; wpScroll = 0; wpScrollTo = -1; wpFill = false;
     // The poster gives way to the paper while the stone is read, once its strip has decoded; it is back on it once
     // the view is let go.
     wpStripGeometry();
@@ -7616,7 +7616,7 @@
   };
   const wpReadEnd = () => {
     if (!wpRead) return;
-    wpRead = false; wpReadLeft = performance.now(); wpZoom = 1; wpPanX = 0; wpScroll = 0; wpScrollTo = -1;
+    wpRead = false; wpReadLeft = performance.now(); wpZoom = 1; wpPanX = 0; wpScroll = 0; wpScrollTo = -1; wpFill = false;
     document.body.classList.remove("wp-reading");
     wpNav(false);
     wpSheet.geometry = wpPoster;
@@ -7624,30 +7624,36 @@
     camera.fov = wpFov;
     holdTheView(false);
   };
-  // Zooming the paper: each double tap on it steps in 50%, each right click steps back out, down to the whole page.
+  // Zooming the paper: the first double tap pushes the view in until the stone's face is as wide as the window, and
+  // each one after it steps the paper in 50%; each right click steps back out, the view to the whole stone last.
   const wpZoomIn = () => {
     if (!wpRead) return false;
+    if (!wpFill && wpFillWanted()) { wpFill = true; return true; }
     wpZoom = Math.min(WP.readZoomMax, wpZoom * WP.readZoomStep);
     wpClamp();
     return true;
   };
   const wpZoomOut = () => {
     if (!wpRead) return false;
-    wpZoom = Math.max(1, wpZoom / WP.readZoomStep);
-    wpClamp();
-    return true;
+    if (wpZoom > 1) {
+      wpZoom = Math.max(1, wpZoom / WP.readZoomStep);
+      wpClamp();
+      return true;
+    }
+    if (wpFill) { wpFill = false; return true; }
+    return false;
   };
-  // Shift and the wheel slide the document up and down inside the stone, as a viewer scrolls one: the wheel's
-  // distance carries it, a screen pixel this much of the strip at the stone's distance and this zoom.
+  // The wheel slides the document up and down inside the stone, as a viewer scrolls one: its distance carries it, a
+  // screen pixel this much of the strip at the frame the view stands at and this zoom.
   const wpScrollBy = (delta) => {
     if (!wpRead || !delta) return false;
-    const data = BL.whitepaperPages, reach = 2 * wpReadDist() * Math.tan(WP.readFov * 0.5);
+    const data = BL.whitepaperPages, frame = wpFrame();
     wpScrollTo = -1;
-    wpScroll += delta * reach / renderer.size.height * data.page / wpZoom / WP.h;
+    wpScroll += delta * frame.tall / renderer.size.height * data.page / wpZoom / WP.h;
     wpClamp();
     return true;
   };
-  // The wheel zooms the paper too, continuously, in the same direction the camera's own wheel does.
+  // Shift and the wheel zoom the paper, continuously, in the same direction the camera's own wheel does.
   const wpZoomBy = (factor) => {
     if (!wpRead || !(factor > 0) || factor === 1) return false;
     wpZoom = clamp(wpZoom / factor, 1, WP.readZoomMax);
@@ -7671,19 +7677,33 @@
     const aspect = renderer.size.width / Math.max(1, renderer.size.height), tan = Math.tan(WP.readFov * 0.5);
     return Math.max(WP.h * WP.readAir / (2 * tan), WP.w * WP.readAir / (2 * tan * aspect));
   };
-  // Dragging and two fingers carry the document with the hand, held inside its own edges at this zoom: down shows
-  // what is above it, and the sheet is seen from behind its face, so its own +x runs to the viewer's left and the
-  // drag moves the window the other way.
+  // Where the reading view stands, written in place each frame: the whole stone framed, or, once the first zoom is
+  // asked for, pushed in until the stone's face is as wide as the window. The face is then taller than the screen, so
+  // the camera stands on its top band and the document slides down through that — the page's top at the screen's top,
+  // as a viewer reads one. `tall` is the world height the screen shows, which is what a wheel notch or a drag crosses.
+  const wpFillWanted = () => WP.w / (renderer.size.width / Math.max(1, renderer.size.height)) < WP.h;
+  const WP_FRAME = { dist: 0, y: 0, tall: 0 };
+  const wpFrame = () => {
+    const aspect = renderer.size.width / Math.max(1, renderer.size.height), tan = Math.tan(WP.readFov * 0.5);
+    const fit = wpReadDist(), tall = WP.w / aspect, fill = wpFill && wpFillWanted();
+    WP_FRAME.dist = fill ? WP.w / (2 * tan * aspect) : fit;
+    WP_FRAME.y = fill ? WP.h - tall * 0.5 : WP.h * 0.5;
+    WP_FRAME.tall = fill ? tall : 2 * fit * tan;
+    return WP_FRAME;
+  };
+  // Dragging carries the document with the hand, held inside its own edges at this zoom: down shows what is above
+  // it, and the sheet is seen from behind its face, so its own +x runs to the viewer's left and the drag moves the
+  // window the other way. A screen pixel is this much of the paper at the frame the view stands at.
   const wpPanBy = (dx, dy) => {
     if (!wpRead) return;
-    const data = BL.whitepaperPages, reach = 2 * wpReadDist() * Math.tan(WP.readFov * 0.5), perPixel = reach / renderer.size.height;
+    const data = BL.whitepaperPages, frame = wpFrame(), perPixel = frame.tall / renderer.size.height;
     wpScrollTo = -1;
     wpScroll -= dy * perPixel * data.page / wpZoom / WP.h;
     wpPanX -= dx * perPixel / (WP.w * wpZoom);
     wpClamp();
   };
   // The reading view: the stone square on, its face a window onto the strip, so the document slides inside it while
-  // the stone and the view stay where the fit put them.
+  // the stone stays where it was raised — framed whole, or with its face the window's width once zoomed into.
   const wpReadUpdate = (dt) => {
     const k = 1 - Math.exp(-WP.glide * dt);
     if (wpScrollTo >= 0) {
@@ -7697,13 +7717,13 @@
     // The strip comes on once its picture has decoded, the poster held on the face until then.
     if (wpSheet.geometry !== wpStrip && wpStripImage.complete && wpStripImage.naturalWidth) wpSheet.geometry = wpStrip;
     wpRect();
-    const m = wpSheet.world, cx = m[4] * WP.h * 0.5, cy = m[5] * WP.h * 0.5, cz = m[6] * WP.h * 0.5, dist = wpReadDist();
+    const frame = wpFrame(), m = wpSheet.world, cx = m[4] * frame.y, cy = m[5] * frame.y, cz = m[6] * frame.y;
     WP_TARGET.x = m[12] + cx;
     WP_TARGET.y = m[13] + cy;
     WP_TARGET.z = m[14] + cz;
-    WP_EYE.x = WP_TARGET.x - m[8] * dist;
-    WP_EYE.y = WP_TARGET.y - m[9] * dist;
-    WP_EYE.z = WP_TARGET.z - m[10] * dist;
+    WP_EYE.x = WP_TARGET.x - m[8] * frame.dist;
+    WP_EYE.y = WP_TARGET.y - m[9] * frame.dist;
+    WP_EYE.z = WP_TARGET.z - m[10] * frame.dist;
     const p = camera.position, t = camera.target;
     p.x += (WP_EYE.x - p.x) * k; p.y += (WP_EYE.y - p.y) * k; p.z += (WP_EYE.z - p.z) * k;
     t.x += (WP_TARGET.x - t.x) * k; t.y += (WP_TARGET.y - t.y) * k; t.z += (WP_TARGET.z - t.z) * k;
@@ -11597,17 +11617,18 @@
       onZoom: (factor, gesture, px, py, shift, delta) => {
         if (islandGuide.holding) return;
         if (wpRead) {
-          // Shift and the wheel scroll the paper; the wheel alone zooms it.
-          if (shift) wpScrollBy(delta);
-          else wpZoomBy(factor);
+          // The wheel slides the paper, Shift and the wheel zoom it, and a pinch, with no distance of its own, zooms it.
+          if (!delta) wpZoomBy(factor);
+          else if (shift) wpZoomBy(Math.exp(Math.max(-1200, Math.min(1200, delta)) * 2.5e-3));
+          else wpScrollBy(delta);
           return;
         }
         if (clankerPlay.active) clankerPlay.zoom(factor, gesture);
         else pilot.hooks.onZoom(factor, gesture, px, py);
       },
-      // Two fingers carried together over the paper scroll it, as the wheel does with shift held.
+      // Two fingers carried together zoom the paper, as Shift and the wheel do: down steps out, up steps in.
       onPan: (dx, dy) => {
-        if (wpRead) wpPanBy(0, dy);
+        if (wpRead) wpZoomBy(Math.exp(dy * 4e-3));
       },
       onDoubleTap: (hit, p) => {
         if (factoryDeparting || bifrostDeparting || islandGuide.holding) return;
