@@ -434,25 +434,18 @@
   // sawtooths a fifth apart with a slow vibrato through one lowpass and one gain, all built and started once. A blast
   // only schedules automation: the pitch scoops up, the filter swells and settles, the level rises, holds and dies
   // away; another is refused while one sounds. Once a blast has died the context sleeps, so an idle horn costs nothing.
-  const MUTE_KEY = "oogaboogaland.audio";
   const SOUND = { hz: [110, 165], master: 0.5, peak: 0.2, hold: 1.4, end: 2.2 };
   const noop = () => { };
   const hornVoice = () => {
     let ctx = null, gain = null, filter = null, lfo = null, until = 0, asleep = false;
     const oscs = [];
-    const muted = () => {
-      try {
-        return localStorage.getItem(MUTE_KEY) === "off";
-      } catch {
-        return false;
-      }
-    };
+    const muted = () => BL.sound.muted;
     const init = () => {
       if (typeof AudioContext === "undefined") return;
       ctx = new AudioContext();
       const master = ctx.createGain(), depth = ctx.createGain();
       master.gain.value = SOUND.master;
-      master.connect(ctx.destination);
+      master.connect(BL.sound.output(ctx));
       gain = ctx.createGain();
       gain.gain.value = 0.0001;
       gain.connect(master);

@@ -32,7 +32,7 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const { clamp } = BL.math;
-  const NOISE_SECONDS = 2, MASTER = 0.5, STORAGE_KEY = "oogaboogaland.audio", VOLUME_KEY = "ooga-hangar-volume", PAN = 0.75;
+  const NOISE_SECONDS = 2, MASTER = 0.5, VOLUME_KEY = "ooga-hangar-volume", PAN = 0.75;
   // How loud each part of the bed sits: the hum, the drone and the air everywhere, more air inside the tunnel, the
   // neon at its loudest inside it, and each shield close to; and at how many metres each of those last falls to half.
   const LEVEL = { mains: 0.05, drone: 0.08, air: 0.045, tunnelAir: 0.035, neon: 0.05, launch: 0.11, door: 0.06 };
@@ -81,13 +81,11 @@
   // each.
   const create = (spots) => {
     let ctx = null, master = null, mix = null, muffle = null, buffer = null, ready = false, muted = false, disposed = false, since = 0, volume = 1;
+    muted = BL.sound.muted;
     try {
-      muted = localStorage.getItem(STORAGE_KEY) === "off";
       const saved = localStorage.getItem(VOLUME_KEY), v = Number(saved);
       if (saved !== null && v >= 0 && v <= 1) volume = v;
-    } catch {
-      muted = false;
-    }
+    } catch {}
     const bed = {}, test = {}, sis = {}, proj = {}, fork = {};
     // Whether the projector runs, so a context opened mid-show starts it running, and the same for the forklift.
     let projOn = false, liftOn = false, liftReady = 0, liftDrive = 0, liftPump = 0;
@@ -541,14 +539,12 @@
 
     const setMuted = (value) => {
       muted = !!value;
-      try {
-        localStorage.setItem(STORAGE_KEY, muted ? "off" : "on");
-      } catch {
-      }
+      BL.sound.setMuted(muted);
       if (ready) master.gain.setTargetAtTime(muted ? 0 : MASTER * volume, ctx.currentTime, 0.05);
       else if (!muted) activate();
       return muted;
     };
+    const offSound = BL.sound.subscribe(setMuted);
     // A hammer blow on the Jet at (x, y, z), each a little different, quieter with distance, `loud` times as loud.
     const clang = (x, y, z, loud = 1) => {
       if (!ready || muted) return;
@@ -812,6 +808,7 @@
     };
 
     const dispose = () => {
+      offSound();
       disposed = true;
       window.removeEventListener("pointerdown", activate, true);
       window.removeEventListener("keydown", activate, true);

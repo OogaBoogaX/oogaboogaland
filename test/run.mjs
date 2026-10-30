@@ -4109,6 +4109,13 @@ const canvasSurfaceCacheChecks = async () => {
     rows.every(row => Object.values(row).every(Boolean)), JSON.stringify(rows));
 };
 const deferredLoadingChecks = async () => {
+  {
+    const loads = [], BL = { scene: {}, scenes: {}, pokerThemes: { get: () => ({}) }, math: { clamp() {} },
+      glRenderer: { POINT_LIGHT_CAPACITY: 32 }, deferred: { load: id => { loads.push(id); return Promise.resolve(); } } };
+    runInNewContext(await readFile(join(root, "src/js/scene-poker.js"), "utf8"), { window: { BL } });
+    await BL.scenes.poker.prepare();
+    record("Poker shell loads before its deferred models and prepares the poker bundle", loads.length === 1 && loads[0] === "poker");
+  }
   const source = await readFile(join(root, "src/js/deferred.js"), "utf8"), rows = [];
   // `gone` names the files a deploy has removed: their HEAD probe answers 404, any other 200.
   const fixture = (gone = [], stalled = false, id = "drop") => {
@@ -4882,6 +4889,48 @@ const dsbSharedDataChecks = async () => {
 };
 // The six rain steps in Node: soak alone picks them, a step holds against a hover on its boundary, and
 // the amount that falls is continuous through them.
+const environmentSoundChecks = async () => {
+  const events = new Map(), contexts = [];
+  let saved = "off", writable = true;
+  const param = () => ({ value: 0, calls: 0, setTargetAtTime(v) { this.value = v; this.calls++; },
+    setValueAtTime(v) { this.value = v; this.calls++; }, exponentialRampToValueAtTime(v) { this.value = v; this.calls++; }, cancelScheduledValues() {} });
+  const node = () => ({ gain: param(), frequency: param(), connect() {}, disconnect() {}, start() {} });
+  class AudioContext {
+    constructor() { this.state = "running"; this.currentTime = 0; this.sampleRate = 100; this.destination = {}; this.gains = []; this.events = new Map(); contexts.push(this); }
+    createGain() { const n = node(); this.gains.push(n); return n; }
+    createBuffer() { return { getChannelData: () => new Float32Array(100) }; }
+    createBufferSource() { return node(); }
+    createBiquadFilter() { return node(); }
+    createOscillator() { return node(); }
+    addEventListener(k, fn) { this.events.set(k, fn); }
+    removeEventListener(k) { this.events.delete(k); }
+    close() { this.state = "closed"; this.events.get("statechange")?.(); return Promise.resolve(); }
+  }
+  const context = { window: { addEventListener: (k, fn) => events.set(k, fn) }, AudioContext,
+    navigator: { userActivation: { hasBeenActive: true } }, localStorage: { getItem: () => saved, setItem: (k, v) => { if (!writable) throw Error("blocked"); saved = v; } } };
+  for (const file of ["sound", "footsteps"]) runInNewContext(await readFile(join(root, `src/js/${file}.js`), "utf8"), context);
+  const { sound, footsteps } = context.window.BL, feet = footsteps.create(), walker = { act: { phase: 0 }, hop: 0, ladder: null };
+  feet.update(walker); walker.act.phase = Math.PI; feet.update(walker);
+  const startsMuted = sound.muted && contexts.length === 0 && feet.steps === 1;
+  sound.toggle(); walker.act.phase = Math.PI * 2; feet.update(walker);
+  const master = contexts[0].gains[0], opened = master.gain.value === .3 && feet.open;
+  sound.toggle(); const quiet = master.gain.value === 0;
+  walker.act.phase = Math.PI * 3; feet.update(walker);
+  const countsQuiet = feet.steps === 3;
+  feet.dispose(); const calls = master.gain.calls;
+  sound.toggle(); const released = master.gain.calls === calls;
+  const fx = new AudioContext(), output = sound.output(fx), reused = output === sound.output(fx);
+  writable = false; sound.setMuted(true);
+  const blockedStorage = sound.muted && output.gain.value === 0;
+  const next = new AudioContext(), nextOutput = sound.output(next), newMuted = nextOutput.gain.value === 0;
+  events.get("storage")({ key: "oogaboogaland.audio", newValue: "on" });
+  const crossTab = !sound.muted && output.gain.value === 1 && nextOutput.gain.value === 1;
+  fx.close(); next.close(); const closedCalls = output.gain.calls;
+  sound.toggle();
+  record("environment sound: saved mute, live footsteps, new effects, storage failure, cross-tab changes and disposal share one gate",
+    startsMuted && opened && quiet && countsQuiet && released && reused && blockedStorage && newMuted && crossTab && output.gain.calls === closedCalls,
+    JSON.stringify({ startsMuted, opened, quiet, countsQuiet, released, reused, blockedStorage, newMuted, crossTab }));
+};
 const weatherStepChecks = async () => {
   const context = { window: { BL: { math: null, models: { cached: (f) => f, noShadow: (g) => g, box: () => ({}), merge: () => ({}), polyline: () => ({}), particleGeometry: () => ({}) }, scene: {} } } };
   runInNewContext(await readFile(new URL("../src/js/math.js", import.meta.url), "utf8"), context);
@@ -17476,7 +17525,7 @@ scene("lab", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("lab", { required
 scene("race", { query: "pos=0&rain=0&draw=0", opts: PHONE_SIZE, steps: [phone("race", { card: '[data-intro="race"]', play: "window.__ooga.race.startRace()", required: ["#joy-move", "#act", "#item-btn", "#race-garage-btn", ".leave"] })] });
 scene("drop", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("drop", { card: '[data-intro="drop"]', play: "window.__ooga.drop.start()", required: ["#joy-move", "#joy-look", "#act", ".leave"] })] });
 scene("orbit", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("orbit", { card: '[data-intro="orbit"]', play: "window.__ooga.orbit.launch()", required: ["#joy-move", "#act", ".leave"] })] });
-scene("mine", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("mine", { card: "#mine-intro", required: ["#joy-move", "#joy-look", "#act", "#mine-view-btn", "#mine-pause-btn", "#mine-mute", ".leave"] })] });
+scene("mine", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("mine", { card: "#mine-intro", required: ["#joy-move", "#joy-look", "#act", "#mine-view-btn", "#mine-pause-btn", "#environment-sound", ".leave"] })] });
 scene("factory", { query: "pos=0&character=portlandhodl", opts: PHONE_SIZE, steps: [phone("factory", { required: ["#joy-move", "#joy-look", ".leave"] }), factoryGreeter] });
 scene("hangar", { query: "pos=0&character=portlandhodl", opts: PHONE_SIZE, steps: [phone("hangar", { required: ["#joy-move", "#joy-look", ".leave"] })] });
 scene("bifrost", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("bifrost", { required: ["#joy-move", "#joy-look", ".leave"] })] });
@@ -17876,7 +17925,8 @@ scene("dsb", { label: "dsb feeds and audio", url: hubPage(src, "scene=dsb"), ste
     };
   })()`);
   try {
-    await b.key("m");
+    // A trusted key activates audio; M twice leaves the page-wide environment mute (sound.js) where it was.
+    await b.key("m"); await b.key("m");
     await b.evaluate(`window.__entranceAudio = BL.dsbAudio.create(); __entranceAudio.gesture()`);
     await untilPage(b, "__entranceAudio.ready", 10000);
     const fixed = await b.evaluate(`({ uploads: document.querySelectorAll("[data-dsb-audio]").length, canReplace: typeof __entranceAudio.load === "function" })`);
@@ -18713,7 +18763,7 @@ const pokerChecks = (BL) => {
     try {
       for (let pass = 0; pass < 2; pass++) for (const theme of BL.pokerThemes.themes) {
         room.setTheme(theme.id);
-        stable &&= room.theme === theme.id && room.root.children.length === 11 &&
+        stable &&= room.theme === theme.id && room.root.children.length === 2 + room.tables.length &&
           room.tables.every((t, i) => t.top === targets[i] && t.agent === dealers[i] && t.chairs.every((c, j) => c === chairs[i][j])) &&
           first.board[0].geometry === face && first.board[0].visible && first.backs[0].visible && first.chips[0].scale.y === 7;
       }
@@ -20129,15 +20179,70 @@ const menuShellChecks = BL => {
 
 
 // net.js in a sandbox: a canned /api/me and fake sockets that record what the page sends.
-const netFixture=(BL,response,step=200)=>{
+const netFixture=(BL,response,step=200,cookie="")=>{
   const source=readFileSync(join(root,"src/js/net.js"),"utf8");
   const sockets=[],sent=[],events=new Map(),navigations=[];let calls=0,tick=1000,savedViews=0;
   class Socket {static OPEN=1;constructor(){this.readyState=1;sockets.push(this);}send(v){sent.push(typeof v==="string"?JSON.parse(v):v);}close(){this.readyState=3;}}
   const voice={setPeers:()=>{},restart:()=>{},stop:()=>{}};
   const location={protocol:"https:",host:"fixture.invalid",pathname:"/",search:"",assign:url=>navigations.push(url)},pilot={saveLoginView(){savedViews++;}};
-  const context={window:{BL:{characters:BL.characters,contributors:BL.contributors,donations:BL.donations,voice,pilot},setTimeout:()=>1,clearTimeout(){},setInterval:()=>1,clearInterval(){}},document:{hidden:false,addEventListener:(k,v)=>events.set(k,v),removeEventListener:k=>events.delete(k)},location,fetch:async(...args)=>{calls++;return response(...args);},AbortSignal,WebSocket:Socket,performance:{now:()=>tick+=step},Date,ArrayBuffer,URLSearchParams};
+  const context={window:{BL:{characters:BL.characters,contributors:BL.contributors,donations:BL.donations,voice,pilot},setTimeout:()=>1,clearTimeout(){},setInterval:()=>1,clearInterval(){}},document:{hidden:false,cookie,addEventListener:(k,v)=>events.set(k,v),removeEventListener:k=>events.delete(k)},location,fetch:async(...args)=>{calls++;return response(...args);},AbortSignal,WebSocket:Socket,performance:{now:()=>tick+=step},Date,ArrayBuffer,URLSearchParams};
   runInNewContext(source,context);
-  return {net:context.window.BL.net,voice,sockets,sent,events,location,navigations,advance(ms){tick+=ms;},get calls(){return calls;},get savedViews(){return savedViews;}};
+  return {net:context.window.BL.net,document:context.document,voice,sockets,sent,events,location,navigations,advance(ms){tick+=ms;},get calls(){return calls;},get savedViews(){return savedViews;}};
+};
+const rememberedCharacterChecks = async BL => {
+  const localBL = { ...BL };
+  runInNewContext(readFileSync(join(root, "src/js/contributors.js"), "utf8"), { window: { BL: localBL }, location: { search: "" }, URLSearchParams });
+  const reply = player => ({ ok: true, headers: { get: () => "application/json" }, json: async () => ({ player }) });
+  const fresh = netFixture(localBL, () => reply(null));
+  await fresh.net.start();
+  const guest = fresh.net.prepareLocalCharacter(), row = localBL.contributors.roster.find(c => c.name === guest.handle);
+  const count = localBL.contributors.roster.length;
+  fresh.net.prepareLocalCharacter();
+  record("arrival identity: a first visit gets one local Ooga without registering a GitHub identity or shared NPC", guest.handle === "Ooga" && guest.display === "Ooga" && row.local && row.temporary
+    && localBL.contributors.activeRoster.includes(row) && localBL.contributors.stateFor(row) === "chilling" && localBL.contributors.traitsFor(row.name).display === "Ooga"
+    && localBL.contributors.roster.length === count && !localBL.characters.get("Ooga") && !fresh.net.ownCharacter() && !fresh.sockets.length);
+  record("arrival identity: guests cannot borrow other Oogas or companions and game pickers hold their local Ooga", fresh.net.mayDrive("Ooga") === null
+    && fresh.net.mayDrive("NickDaGreek") !== null && fresh.net.mayDrive("fixture-missing") !== null && fresh.net.mayDriveGorilla("NickDaGreek") !== null
+    && fresh.net.ownAmong(localBL.contributors.roster) === "Ooga");
+  fresh.net.state.backend = false;
+  record("arrival identity: static hosting keeps the same assigned-character restriction", fresh.net.mayDrive("Ooga") === null && fresh.net.mayDrive("YellowBrokeIt") !== null);
+  const signed = netFixture(localBL, () => reply({ id: 71, login: "nickdagreek1", display: "Nick" }));
+  await signed.net.start();
+  const cookie = signed.document.cookie;
+  record("arrival identity: a successful login remembers the canonical GitHub username with bounded same-origin cookie settings", cookie.startsWith("ooga-last-github=nickdagreek1;")
+    && cookie.includes("Path=/") && cookie.includes("Max-Age=31536000") && cookie.includes("SameSite=Lax") && cookie.includes("Secure"));
+  const returning = netFixture(localBL, () => reply(null), 200, cookie.split(";")[0]);
+  await returning.net.start();
+  const preferred = returning.net.prepareLocalCharacter();
+  returning.net.setBody(preferred.handle); returning.net.sendPose(1, 0, 1, 0);
+  record("arrival identity: remembered login aliases select the right local character without authenticating or sending presence", preferred.handle === "NickDaGreek"
+    && returning.net.preferredCharacter() === preferred && !returning.net.ownCharacter() && returning.net.ownAmong(localBL.contributors.roster) === "NickDaGreek" && !returning.sockets.length && !returning.sent.length);
+  record("arrival identity: remembered visitors can drive only their assigned Ooga and companion", returning.net.mayDrive("NickDaGreek") === null
+    && returning.net.mayDriveGorilla("NickDaGreek") === null && returning.net.mayDrive("YellowBrokeIt") !== null && returning.net.mayDriveGorilla("YellowBrokeIt") !== null);
+  returning.net.remotes.set(72, { login: "nickdagreek1", body: "NickDaGreek" });
+  record("arrival identity: a remembered preference cannot take the online owner's Ooga", returning.net.mayDrive("NickDaGreek") !== null && returning.net.prepareLocalCharacter().handle === "Ooga");
+  const unknown = netFixture(localBL, () => reply(null), 200, "ooga-last-github=returning-visitor");
+  await unknown.net.start();
+  const unbundled = unknown.net.prepareLocalCharacter();
+  const lookalike = netFixture(localBL, () => reply(null), 200, "ooga-last-github=nickdagreek");
+  await lookalike.net.start();
+  record("arrival identity: an unbundled remembered login gets a local likeness without a contributor claim, never an Ooga whose handle it only matches", unbundled.handle === "returning-visitor"
+    && !localBL.characters.get(unbundled.handle) && !unknown.net.ownCharacter() && !unknown.sockets.length
+    && lookalike.net.prepareLocalCharacter().handle === "Ooga" && lookalike.net.mayDrive("NickDaGreek") !== null);
+  lookalike.net.dispose();
+  const forged = netFixture(localBL, () => reply({ id: 72, login: "YellowBrokeIt", display: "Yellow" }), 200, "ooga-last-github=nickdagreek1");
+  await forged.net.start();
+  record("arrival identity: authenticated identity wins over a changed preference cookie", forged.net.prepareLocalCharacter().handle === "YellowBrokeIt" && forged.net.mayDrive("NickDaGreek") !== null);
+  const invalid = netFixture(localBL, () => reply(null), 200, "ooga-last-github=%3Cscript%3E");
+  await invalid.net.start();
+  const bad = invalid.net.prepareLocalCharacter().handle === "Ooga";
+  Object.defineProperty(invalid.document, "cookie", { get() { throw new Error("blocked"); }, set() { throw new Error("blocked"); } });
+  const blocked = invalid.net.prepareLocalCharacter().handle === "Ooga";
+  const denied = netFixture(localBL, () => reply({ id: 71, login: "nickdagreek1", display: "Nick" }));
+  Object.defineProperty(denied.document, "cookie", { get() { throw new Error("blocked"); }, set() { throw new Error("blocked"); } });
+  await denied.net.start();
+  record("arrival identity: malformed or denied cookies fall back safely and cannot break sign-in", bad && blocked && denied.net.ownCharacter()?.handle === "NickDaGreek");
+  for (const f of [fresh, signed, returning, unknown, forged, invalid, denied]) f.net.dispose();
 };
 // Ooga Chat's wire on the page: what it sends, and the lines it hands on (chat.js keeps and shows them).
 // Execute the real chat controller with a small DOM and a controllable acknowledgement clock.
@@ -20277,12 +20382,12 @@ const integrationChecks = async BL => {
   const noOwner=!g.net.ownCharacter()&&g.net.mayDrive("NickDaGreek",false)!==null&&g.net.mayDrive("NickDaGreek",true)!==null
     &&g.net.mayDrive("fixture-missing",false)!==null&&g.net.mayDriveGorilla("NickDaGreek")!==null&&g.net.mayDriveGorilla("fixture-missing")!==null;
   g.net.state.backend=false;
-  const local=g.net.mayDrive("NickDaGreek",true)===null&&g.net.mayDriveGorilla("NickDaGreek")===null;
+  const local=g.net.mayDrive("NickDaGreek",true)!==null&&g.net.mayDriveGorilla("NickDaGreek")!==null;
   g.net.state.backend=true;g.net.state.me=null;
   permission&&=g.net.mayDriveGorilla(temporary.handle)!==null&&g.net.mayDriveGorilla("NickDaGreek")===null
     &&g.net.mayDrive(temporary.handle,false)!==null&&g.net.mayDrive("NickDaGreek",false)===null&&g.net.mayDrive("NickDaGreek",true)===null;
   g.net.state.me=account;
-  record("integration actor identity: signed-in accounts can drive only their own pair, including login aliases and temporary owners; accounts without an own character cannot borrow, while signed-out and local rules stay unchanged",permission&&noOwner&&local,JSON.stringify({permission,noOwner,local}));
+  record("integration actor identity: signed-in accounts can drive only their own pair, including login aliases and temporary owners; accounts without an own character cannot borrow, while remembered signed-out control stays with the same pair and backend failure never grants another account access",permission&&noOwner&&local,JSON.stringify({permission,noOwner,local}));
   const motion=new Float64Array([4,1.5,2,.5,-.25,0]),poses=()=>g.sent.filter(m=>m.t==="pose");
   g.net.setBody("NickDaGreek");g.net.sendPose(2,3,4,.5);
   g.net.setBody(gorilla);g.net.sendPose(2,3,4,.5,motion);
@@ -21293,7 +21398,8 @@ const studioSessionProof = async () => {
     studioCommand:(action,fields)=>{calls.commands.push({action,...fields});return true;}};
   const voice={stats:{publishing:false,muted:false,ready:false,enabled:false},subscribe:fn=>{voiceEvent=fn;return()=>calls.unsub++;},listen:()=>{calls.listen++;return new Promise(resolve=>{resolveSound=()=>{voice.stats.ready=voice.stats.enabled=true;voiceEvent();resolve();};});},enable:()=>{calls.enable++;return Promise.resolve();},stop:()=>{calls.stop++;voice.stats.ready=voice.stats.enabled=false;},dropMic:()=>calls.drop++,devices:async()=>[],preflight:async()=>true,cancelPreflight(){calls.cancelPreview++;voice.stats.permission="unknown";voice.stats.preflightPending=false;},selectDevice:async()=>true,setReceiveLevel(){}};
   voice.toggle=()=>{calls.toggle++;voice.stats.muted=!voice.stats.muted;};
-  const ctx={window:{BL:{net,voice}},document:doc,AbortController,location:{protocol:"https:"}};
+  const ctx={window:{BL:{net,voice},addEventListener(){}},document:doc,AbortController,location:{protocol:"https:"}};
+  runInNewContext(await readFile(join(root,"src/js/sound.js"),"utf8"),ctx);
   ctx.BL=ctx.window.BL;runInNewContext(await readFile(join(root,"src/js/studio-catalogue.js"),"utf8"),ctx);
   runInNewContext(await readFile(join(root,"src/js/studio-session.js"),"utf8"),ctx);
   const session=ctx.window.BL.studioSession.create({onSeatRejected:()=>calls.rejected++}),room={screen:{geometry:{}}};session.enter(room);
@@ -21303,6 +21409,10 @@ const studioSessionProof = async () => {
   panel.querySelector("[data-sound]").fire("click");
   const connecting=session.stats.soundState==="connecting"&&video.muted&&!session.stats.soundEnabled;resolveSound();for(let i=0;i<8;i++)await Promise.resolve();
   const listening=calls.listen===1&&calls.enable===0&&!video.muted&&session.stats.soundState==="ready";
+  ctx.window.BL.sound.setMuted(true);
+  const environmentMuted=video.muted&&voice.stats.enabled&&!voice.stats.muted&&calls.toggle===0&&calls.stop===0;
+  ctx.window.BL.sound.setMuted(false);
+  const environmentMute=environmentMuted&&!video.muted&&voice.stats.enabled&&calls.toggle===0&&calls.stop===0;
   voice.stats.hearing=1;voiceEvent();const audible=session.stats.soundState==="listening";voice.stats.hearing=0;voiceEvent();
   voice.stats.micError="microphone blocked";voiceEvent();const micErrorKeepsSound=session.stats.soundEnabled&&!video.muted&&session.stats.soundState==="ready"&&panel.querySelector("[data-mic-error]").textContent==="microphone blocked";
   voice.stats.permission="requesting";voice.stats.preflightPending=true;voiceEvent();const cancelAvailable=!panel.querySelector("[data-cancel-preflight]").disabled;panel.querySelector("[data-cancel-preflight]").fire("click");const pendingPreviewRelease=cancelAvailable&&calls.cancelPreview===1;
@@ -21341,7 +21451,7 @@ const studioSessionProof = async () => {
   net.state.room="live";session.leave();video.readyState=2;video.fire("canplay");const staleMetadataIgnored=video.currentTime===0;const cleaned=!room.screen.geometry.imageSurface&&video.paused&&video.muted&&!video.src&&session.stats.media===0;
   for(let i=0;i<3;i++){session.enter(room);session.leave();}
   session.dispose();accept({t:"studio",state:snapshot});
-  return {initial,connecting,listening,audible,micErrorKeepsSound,pendingPreviewRelease,previewReleaseDisabledForPublication,blocked,forbidden,discussion,mutedPublisherUnmutes,rejection,stale,nextCommand,catalogueSwap,qaWaiting,invitationConsent,finishQuestion,orderedQueue,buffering,bufferingClears,metadataRecovery,latestSourceSeek,onePendingSeek,latestSeekWaits,latestSeekAfterSettlement,seekSettles,staleMetadataIgnored,disconnected,cleaned,disposed:panel.removed&&calls.unsub===3&&body.children.length===1&&video.loads>=4};
+  return {initial,connecting,listening,environmentMute,audible,micErrorKeepsSound,pendingPreviewRelease,previewReleaseDisabledForPublication,blocked,forbidden,discussion,mutedPublisherUnmutes,rejection,stale,nextCommand,catalogueSwap,qaWaiting,invitationConsent,finishQuestion,orderedQueue,buffering,bufferingClears,metadataRecovery,latestSourceSeek,onePendingSeek,latestSeekWaits,latestSeekAfterSettlement,seekSettles,staleMetadataIgnored,disconnected,cleaned,disposed:panel.removed&&calls.unsub===3&&body.children.length===1&&video.loads>=4};
 };
 
 const studioPreviewRangeProof = async () => {
@@ -21745,6 +21855,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   await chatNetChecks(BL);
   await chatClientChecks();
   await chatAccountChecks(BL);
+  await rememberedCharacterChecks(BL);
   await integrationChecks(BL);
   footstepChecks(BL);
   await voiceAloneChecks();
@@ -21887,7 +21998,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   tessAnswerChecks(BL);
   const clearance = claimClearanceProof();
   record("hub footprint clearance: conservative rejection preserves circular boundaries, live reservations and exceptional numbers", clearance.failures === 0 && clearance.cases >= 4000, JSON.stringify(clearance));
-  await deferredLoadingChecks(); await hudNoticeChecks(); await characterChecks(); await contributorActivityChecks(); await mempoolFeedChecks(); await oogatronReplayChecks(); await debugActivityStatusChecks(); await soloDebugChecks(); await adaptiveQualityChecks(); await chainSnapshotChecks(); await dsbSharedDataChecks(); await timechainDataChecks(); await timechainRoomChecks(); await timechainBlockChecks(); await weatherStepChecks(); await poolLayoutChecks(); await gameRulesChecks(); await ghostHuntChecks(); await donationClientChecks(); await poolWildlifeChecks(); await totemFeedChecks();
+  await deferredLoadingChecks(); await hudNoticeChecks(); await characterChecks(); await contributorActivityChecks(); await mempoolFeedChecks(); await oogatronReplayChecks(); await debugActivityStatusChecks(); await soloDebugChecks(); await adaptiveQualityChecks(); await chainSnapshotChecks(); await dsbSharedDataChecks(); await timechainDataChecks(); await timechainRoomChecks(); await timechainBlockChecks(); await environmentSoundChecks(); await weatherStepChecks(); await poolLayoutChecks(); await gameRulesChecks(); await ghostHuntChecks(); await donationClientChecks(); await poolWildlifeChecks(); await totemFeedChecks();
 
   // Scene state built directly instead of booted; seed 1 matches scene-hub.js.
   // Sealed cave guides need the hub's seal nodes, so probes reading them stay in the browser tier.

@@ -375,10 +375,11 @@
       target.addEventListener(type, fn, typeof opts === "boolean" ? { capture: opts, signal } : { ...opts, signal });
       listeners.push(() => target.removeEventListener(type, fn, opts));
     };
-    // Fit the island controls between the title and clock when their actual visible widths allow it.
+    // Fit each environment's controls between the title and clock when their actual visible widths allow it.
     // Observers only schedule a pass after layout or equipment changes; ammo and animation never poll it.
     const bannerScene = document.body.dataset.activeScene;
-    if (bannerScene === "hub" || bannerScene === "dsb") {
+    {
+      const presets = el.topbar.querySelector(`.presets[data-scene="${bannerScene}"]`);
       let bannerFrame = 0;
       const bannerStyle = (node, property, value) => {
         if (node.style.getPropertyValue(property) !== value) node.style.setProperty(property, value);
@@ -390,7 +391,15 @@
         const topbar = getComputedStyle(el.topbar), row = getComputedStyle(el.equipmentRow);
         const fontSize = parseFloat(getComputedStyle(el.clock).fontSize) || 22;
         const scale = Math.max(0.7, Math.min(0.85, 0.7 + (fontSize - 13) / 60));
-        const leftEdge = brand.right + 12, available = Math.min(clock.left, block.left) - 12 - leftEdge;
+        const leftEdge = brand.right + 12, available = Math.min(clock.left, block.width ? block.left : clock.left) - 12 - leftEdge;
+        let presetWidth = 0, presetCount = 0;
+        if (presets && !presets.hidden && getComputedStyle(presets).display !== "none") {
+          for (const button of presets.children) {
+            if (button.hidden || getComputedStyle(button).display === "none") continue;
+            presetWidth += button.offsetWidth; presetCount++;
+          }
+          presetWidth += Math.max(0, presetCount - 1) * (parseFloat(getComputedStyle(presets).columnGap) || 0);
+        }
         let compactWidth = 0, count = 0, expanded = false;
         for (const button of el.equipmentRow.children) {
           if (button.hidden || getComputedStyle(button).display === "none") continue;
@@ -399,8 +408,9 @@
           count++;
         }
         compactWidth += Math.max(0, count - 1) * (parseFloat(row.columnGap) || 0);
-        const banner = (compactWidth + (expanded ? 140 : 0)) * scale <= available ? "full"
-          : compactWidth * scale <= available ? "compact" : "below";
+        const presetSpace = presetWidth + (presetCount && count ? 12 : 0);
+        const banner = (compactWidth + (expanded ? 140 : 0)) * scale + presetSpace <= available ? "full"
+          : compactWidth * scale + presetSpace <= available ? "compact" : "below";
         const paddingLeft = parseFloat(topbar.paddingLeft) || 0, paddingRight = parseFloat(topbar.paddingRight) || 0;
         const topEdge = Math.min(brand.top, clock.top, block.top), bottomEdge = Math.max(brand.bottom, clock.bottom, block.bottom);
         const top = banner === "below" ? bottomEdge + 12 : (topEdge + bottomEdge - 52 * scale) / 2;
@@ -409,7 +419,18 @@
         bannerStyle(el.equipment, "--hub-equipment-left", `${banner === "below" ? paddingLeft : leftEdge}px`);
         bannerStyle(el.equipment, "--hub-equipment-top", `${top}px`);
         bannerStyle(el.equipment, "--hub-equipment-width", `${Math.max(0, window.innerWidth - paddingLeft - paddingRight) / scale}px`);
-        const bottom = `${top + el.equipmentRow.offsetHeight * scale + 8}px`;
+        const equipmentHeight = count ? el.equipmentRow.offsetHeight * scale : 0;
+        let controlsBottom = top + equipmentHeight;
+        if (presets && presetCount) {
+          const presetTop = banner === "below" ? top + equipmentHeight + (count ? 8 : 0) : (topEdge + bottomEdge - 28) / 2;
+          const equipmentWidth = (compactWidth + (banner === "full" && expanded ? 140 : 0)) * scale;
+          const presetLeft = banner === "below" ? paddingLeft : leftEdge + equipmentWidth + (count ? 12 : 0);
+          bannerStyle(presets, "--banner-presets-top", `${presetTop}px`);
+          bannerStyle(presets, "--banner-presets-left", `${presetLeft}px`);
+          bannerStyle(presets, "--banner-presets-width", `${Math.max(0, window.innerWidth - presetLeft - paddingRight)}px`);
+          controlsBottom = Math.max(controlsBottom, presetTop + presets.offsetHeight);
+        }
+        const bottom = `${Math.max(bottomEdge, controlsBottom) + 8}px`;
         bannerStyle(el.messageStack, "--hub-equipment-bottom", bottom);
         bannerStyle(el.micNote, "--hub-equipment-bottom", bottom);
       };
@@ -418,6 +439,10 @@
       };
       const bannerResize = new ResizeObserver(scheduleBanner), bannerEquipment = new MutationObserver(scheduleBanner);
       for (const node of [el.brand, el.clock, el.block, el.equipmentRow]) bannerResize.observe(node);
+      if (presets) {
+        bannerResize.observe(presets);
+        bannerEquipment.observe(presets, { attributes: true, subtree: true, childList: true, characterData: true, attributeFilter: ["hidden", "disabled"] });
+      }
       for (const button of el.equipmentRow.children) bannerEquipment.observe(button, {
         attributes: true, attributeFilter: button === el.weapon ? ["hidden", "data-equipped"] : ["hidden"]
       });
@@ -426,6 +451,7 @@
         bannerResize.disconnect();
         bannerEquipment.disconnect();
         window.cancelAnimationFrame(bannerFrame);
+        if (presets) for (const property of ["--banner-presets-top", "--banner-presets-left", "--banner-presets-width"]) presets.style.removeProperty(property);
         delete el.equipment.dataset.banner;
         for (const property of ["--hub-equipment-scale", "--hub-equipment-left", "--hub-equipment-top", "--hub-equipment-width"]) el.equipment.style.removeProperty(property);
         el.messageStack.style.removeProperty("--hub-equipment-bottom");
@@ -780,12 +806,20 @@
       // Only a successful navigation updates the displayed destination.
       destinationIndex = (destinationIndex + 1) % destinationNames.length;
       actionHandler("mode-preset", destinationNames[destinationIndex]);
+      showDestinationLabel(el.modeDestinationName.textContent);
     };
     let destinationAnchored = false, destinationX = 0, destinationY = 0, destinationZ = 0;
-    const showAreaLabel = () => {
-      if (el.modeDestinationName.textContent !== areaLabel) el.modeDestinationName.textContent = areaLabel;
-      el.modeDestinationName.classList.toggle("show", !!areaLabel);
+    let destinationLabelTimer = 0;
+    const showDestinationLabel = text => {
+      if (el.modeDestinationName.textContent !== text) el.modeDestinationName.textContent = text;
+      window.clearTimeout(destinationLabelTimer);
+      el.modeDestinationName.classList.toggle("show", !!text);
+      destinationLabelTimer = text ? window.setTimeout(() => {
+        destinationLabelTimer = 0;
+        el.modeDestinationName.classList.remove("show");
+      }, 3000) : 0;
     };
+    const showAreaLabel = () => showDestinationLabel(areaLabel);
     const fadeDetachedName = (force = false) => {
       // Looking or zooming at an arrival does not leave that place.
       // Scenes with an anchor expire it from actual travel instead.
@@ -797,10 +831,11 @@
       showAreaLabel();
     };
     const setAreaLabel = (name, position = null) => {
+      const changed = areaLabel !== name;
       areaLabel = name;
       if (destinationAnchored && position
         && (position.x - destinationX) ** 2 + (position.y - destinationY) ** 2 + (position.z - destinationZ) ** 2 > 2.25) fadeDetachedName(true);
-      if (!detachedNameShown) showAreaLabel();
+      if (!detachedNameShown && changed) showAreaLabel();
     };
     const setDetachedView = (name, announce = false, position = null) => {
       if (!destinationLabels[name]) return;
@@ -810,12 +845,11 @@
       if (position) { destinationX = position.x; destinationY = position.y; destinationZ = position.z; }
       detachedSelectionShown = true;
       if (!announce) return;
-      el.modeDestinationName.textContent = destinationLabels[name];
       detachedNameShown = true;
-      el.modeDestinationName.classList.add("show");
+      showDestinationLabel(destinationLabels[name]);
     };
     let gorillaEntry = null, gorillaView = "orbit", gorillaCombat = false, gorillaCombatEnabled = true;
-    let modeName = "", modeGeometry = null, modeSelected = false, modeCombat = false, modeView = "detached", modeHealth = -1, modeHealthMax = 0, modeGorilla = false;
+    let modeName = "", modeGeometry = null, modeSelected = false, modeCombat = false, modeView = "", modeHealth = -1, modeHealthMax = 0, modeGorilla = false;
     let modeCave = null, modeVisible = true, retakePortraitActor = null, retakeGeometry = null, retakePortraitGeometry = null, retakeHealth = -1, retakeHealthMax = 0;
     const retake = { actor: null, gorilla: false };
     const syncRetakeActor = () => {
@@ -865,7 +899,7 @@
       if (!visible) fadeDetachedName(true);
       const identityChanged = selected !== modeSelected || selected && name !== modeName || !!gorilla !== modeGorilla;
       const stateChanged = combat !== modeCombat || view !== modeView || combatEnabled !== modeCombatEnabled;
-      const showMode = visible && selected;
+      const showMode = visible && (selected || !retake.actor);
       if (el.mode.hidden === showMode) el.mode.hidden = !showMode;
       const showDestinations = visible && destinationNames.length > 0;
       if (el.modeDestination.hidden === showDestinations) el.modeDestination.hidden = !showDestinations;
@@ -908,8 +942,8 @@
           ? `${shown}'s gorilla; ${view} view; ${look}. Press to switch ${change}; hold to detach`
           : selected
           ? `${shown}; ${view} view; ${look}. Press to switch ${change}; hold to detach`
-          : `${destinationLabels[detachedPreset]} detached view. Press to cycle destinations`);
-        el.mode.title = gorilla ? `${shown}'s gorilla · ${view} · ${look} · hold to detach` : selected ? `${shown} · ${view} · ${look} · hold to detach` : `${destinationLabels[detachedPreset]} · detached`;
+          : "Choose an Ooga. Open the Oogas panel");
+        el.mode.title = gorilla ? `${shown}'s gorilla · ${view} · ${look} · hold to detach` : selected ? `${shown} · ${view} · ${look} · hold to detach` : "Choose an Ooga";
       }
     };
     setDetachedView(detachedPreset);
@@ -1101,7 +1135,7 @@
       if (owned !== jetpackShown) {
         jetpackShown = owned;
       }
-      if (el.jetpack.hidden !== (!owned || !!gorillaEntry)) el.jetpack.hidden = !owned || !!gorillaEntry;
+      if (el.jetpack.hidden !== (!owned || blocked || !!gorillaEntry)) el.jetpack.hidden = !owned || blocked || !!gorillaEntry;
       if (equipped !== jetpackEquipped || blocked !== jetpackBlocked) {
         jetpackEquipped = equipped;
         jetpackBlocked = blocked;
@@ -1133,7 +1167,7 @@
       el.gorillaSmash.hidden = !entry || !combatEnabled;
       el.primary.hidden = !primaryShown || !!entry;
       el.weapon.hidden = !weaponShown || !!entry;
-      el.jetpack.hidden = !jetpackShown || !!entry;
+      el.jetpack.hidden = !jetpackShown || jetpackBlocked || !!entry;
       refreshWeaponSummary();
       setMode(null);
     };
@@ -1861,6 +1895,13 @@
     on(window, "blur", () => finishPrimary(true));
     on(document, "visibilitychange", () => { if (document.hidden) finishPrimary(true); });
     on(el.primary, "contextmenu", (e) => e.preventDefault());
+    const pressMode = () => {
+      if (modeSelected) { if (actionHandler) actionHandler("mode-toggle"); }
+      else {
+        document.body.dataset.bannerOogas = "true";
+        sheet.selectTab("roster");
+      }
+    };
     const MODE_HOLD_MS = 650;
     let modePointer = -1, modeHoldTimer = 0, modeLong = false;
     const clearModeHold = () => {
@@ -1890,7 +1931,7 @@
       modePointer = -1;
       if (el.mode.hasPointerCapture(e.pointerId)) el.mode.releasePointerCapture(e.pointerId);
       clearModeHold();
-      if (!cancel && !modeLong && modeSelected && actionHandler) actionHandler("mode-toggle");
+      if (!cancel && !modeLong) pressMode();
       modeLong = false;
       el.mode.blur();
     };
@@ -1909,6 +1950,7 @@
       else if (b.dataset.action === "recipe-copy") copyRecipe(b);
       else if (b.dataset.action === "intro-go") b.closest("[data-intro]").hidden = true;
       else if (b === el.modeDestination) cycleDestinations();
+      else if (b === el.mode) pressMode();
       else if (b.dataset.action === "account-login") BL.net.login();
       else if (b.dataset.action === "account-logout") BL.net.logout();
       else if (b.dataset.action === "account-rejoin") BL.net.rejoin();
@@ -2216,6 +2258,7 @@
     };
     // End this visit; the attached sheet rows belong to the page.
     const dispose = () => {
+      delete document.body.dataset.bannerOogas;
       sheet.dispose();
       finishPrimary(true);
       window.clearTimeout(toastTimer);
@@ -2256,7 +2299,10 @@
       mainBoard.dispose();
       el.board.classList.remove("board-floating");
       el.board.removeAttribute("style");
+      window.clearTimeout(destinationLabelTimer);
+      el.modeDestinationName.classList.remove("show");
     };
+    setMode(null);
     return {
       // Engines keep this facade while a retained scene takes a fresh visit signal and sheet state.
       renew(signal) {

@@ -72,6 +72,7 @@
   const DOOR_NEAR = 0, DOOR_FAR = 12, DOOR_EASE = 5, DOOR_BRIGHTEN = 3.2;
   const HANGAR_ARRIVAL = { yaw: -Math.PI / 2, pitch: 0.12, dist: FOLLOW.min, position: { x: LAYOUT.hangar.x + 1.4, y: LAYOUT.hangar.y, z: LAYOUT.hangar.z } };
   // `entrance` is the balcony's view across the core; the rest frame one station each.
+  const VIEW_NAMES = { entrance: "Overview", core: "Core", lines: "Lines", lineA: "Channel A", lineB: "Channel B", lineC: "Channel C", lineD: "Channel D", forge: "Forge", switchboard: "Switchboard", kortik: "Kortik", rebalancer: "Rebalancer", treasury: "Treasury", cooker: "Cooker", lookout: "Lookout", study: "Study", hangar: "Hangar", galleries: "Galleries" };
   const PRESETS = {
     entrance: view(0, 9, -6, 0, 0, 33),
     core: view(0, 8, -4, 0.35, 0.12, 15),
@@ -1811,15 +1812,23 @@
         else onDoubleTap(hit, p);
       }
     });
-    hud.onPreset((name) => {
+    hud.setDestinations(Object.keys(VIEW_NAMES), VIEW_NAMES);
+    hud.setAreaLabel("Lightning Factory");
+    hud.el.modeDestination.title = "Lightning Factory · cycle stations";
+    hud.el.modeDestinationLabel.textContent = "Lightning Factory views. Press to cycle stations";
+    const presetView = (name) => {
+      if (leaving || !VIEW_NAMES[name]) return;
       endBooth(scene);
       pilot.goPreset(name);
-    });
-    hud.onAction((action) => {
+      hud.setDetachedView(name, true);
+    };
+    hud.onPreset(presetView);
+    hud.onAction((action, value) => {
       if (action === "reset") { game.resetAll(); location.reload(); }
       else if (action === "leave") leaveCave();
       else if (action === "factory-mute") hud.toast(audio.setMuted(!audio.muted) ? "Sound off" : "Sound on");
       else if (action === "reset-view") pilot.resetCamera();
+      else if (action === "mode-preset") presetView(value);
       else if (action === "act") { if (!greeter || !greeter.act()) pilot.action(); }
       else if (action.startsWith("mode-")) pilot.modeAction(action);
       else if (action.startsWith("weapon-") || action === "magazine-swap") pilot.weaponAction(action);
