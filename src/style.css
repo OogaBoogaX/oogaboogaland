@@ -8135,6 +8135,13 @@ body[data-active-scene="dsb"] #destination-hud:disabled { opacity: 1; cursor: de
   animation: game-coin 2.6s ease-in-out infinite;
 }
 
+#poker-intro-banana {
+  width: 54px;
+  height: 54px;
+  transform-box: view-box;
+  transform-origin: center;
+}
+
 .game-intro-goal {
   margin: 0;
   font-size: 14px;

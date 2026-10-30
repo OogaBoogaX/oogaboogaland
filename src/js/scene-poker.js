@@ -213,12 +213,6 @@
     } catch (error) { panel.notice(error.message); }
   };
   const enter = ctx => {
-    const introBanana = document.getElementById("poker-intro-banana");
-    if (!introBanana.dataset.ready) {
-      // Use the mainland pile's own geometry, painted once; CSS keeps the welcome icon spinning.
-      introBanana.getContext("2d").drawImage(BL.hud.renderIcon({ buildNode: BL.models.banana }), 0, 0);
-      introBanana.dataset.ready = "true";
-    }
     if (!presets["table-1"]) {
     for (let i = 0; i < BL.pokerModels.TABLES.length; i++) {
       const table = BL.pokerModels.TABLES[i], name = `table-${i + 1}`;
