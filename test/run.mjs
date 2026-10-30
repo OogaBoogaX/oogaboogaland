@@ -21505,7 +21505,7 @@ const terrainCacheChecks = async () => {
     runInNewContext(source, context);
     return { cache: BL.terrainCache, workers, restored: () => restored };
   };
-  const options = { seed: 1, roofHole: null }, key = `${build}:${JSON.stringify(options)}`;
+  const options = { seed: 1, roofHole: null }, key = `${build}:${JSON.stringify({ seed: 1, roofHole: null, nook: null })}`;
   const records = new Map(), miss = boot(records);
   const missed = await miss.cache.prepare(options, "hub"), started = miss.workers.length, filling = miss.cache.fill();
   await filling;
