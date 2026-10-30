@@ -205,7 +205,8 @@
     if (!presets["table-1"]) {
     for (let i = 0; i < BL.pokerModels.TABLES.length; i++) {
       const table = BL.pokerModels.TABLES[i], name = `table-${i + 1}`;
-      presets[name] = { yaw: table.x < 0 ? -Math.PI / 2 : Math.PI / 2, pitch: .55, dist: 9, target: { x: table.x, y: 1, z: table.z } };
+      // Every dealer sits on the table's negative-Z side; look down over that shoulder at the board.
+      presets[name] = { yaw: Math.PI, pitch: 1.05, dist: 8, target: { x: table.x, y: 1.41, z: table.z } };
       VIEW_NAMES[name] = `Table ${i + 1}`;
     }
     }

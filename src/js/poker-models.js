@@ -177,7 +177,8 @@
         const cards = S.createNode({ position: { x: s.x * 0.57, y: 1.4, z: s.z * 0.57 }, rotation: { x: 0, y: s.yaw, z: 0 } });
         S.addChild(cards, node(g.back, -0.26), node(g.back, 0.26, 0.015)); cards.visible = false; backs.push(cards); S.addChild(group, cards);
       }
-      const board = Array.from({ length: 5 }, (_, j) => { const n = node(g.back, (j - 2) * 0.72, 1.41); n.visible = false; S.addChild(group, n); return n; });
+      // Deal left to right and print upright as seen from the gorilla's side of the table.
+      const board = Array.from({ length: 5 }, (_, j) => { const n = node(g.back, (2 - j) * 0.72, 1.41); n.rotation.y = Math.PI; n.visible = false; S.addChild(group, n); return n; });
       const button = node(g.button); S.addChild(group, button); button.visible = false;
       const label = BL.poolModels.carve(String(i + 1).padStart(2, "0"), { cell: 0.14, color: "#e5c984" });
       S.addChild(group, node(label.geometry, -label.width / 2, 1.17, 3.18));
