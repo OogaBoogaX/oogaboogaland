@@ -14104,17 +14104,45 @@ const timechainRoom = { name: "timechain room", why: "playthrough: a signed-out 
   record("timechain room: walking into the closed doors does nothing", shut.scene === "timechain" && shut.z < shut.door - 0.3 && shut.open === 0, JSON.stringify(shut));
 } };
 const timechainSizes = { name: "timechain sizes", why: "rule: rooms 4–6 and 7–9 are the same design at 1.5× and 2×, with the doorway, arrival and Exit button at human size and a table for 8 and 12, each its own address", run: async (b) => {
-  const rows = [];
+  const rows = [], bounds = [];
   for (const room of [4, 7, 3]) {
     await b.evaluate(roomGo(room));
     rows.push(await b.evaluate(`(() => { const B = __ooga, D = B.timechain, L = D.layout, a = B.pilot.player.root.position, w = B.pilot.player;
       return { room: D.room.id, scale: D.room.scale, radius: L.radius, door: L.door.halfW, arrivalGap: +(L.doorZ - L.arrival.z).toFixed(6), at: +Math.hypot(a.x - L.arrival.x, a.z - L.arrival.z).toFixed(3),
         button: [L.exitButton.y, +(L.doorZ - L.exitButton.z).toFixed(6), L.exitButton.x], table: B.timechain.built.table.position.z, chairs: B.timechain.built.chairs.length, screenW: L.screens[0].w, mode: D.visit.mode, hash: location.hash, view: B.pilot.mode, height: w.traits.height }; })()`));
+    bounds.push(await b.evaluate(`(() => {
+      const B = __ooga, P = B.pilot, L = B.timechain.layout, cave = P.player, modes = new Set();
+      let frames = 0, outside = 0;
+      const sample = () => {
+        for (let i = 0; i < 60; i++) {
+          B.advance(1 / 60, 1 / 60);
+          const p = B.camera.position;
+          modes.add(P.mode); frames++;
+          if (!Number.isFinite(p.x + p.y + p.z) || Math.hypot(p.x, p.z) > L.radius - 0.2 + 1e-6
+            || p.z > L.doorZ - 0.2 + 1e-6 || p.y < 0.3 - 1e-6
+            || p.y > BL.timechainRooms.ceilingAt(L, p.x, p.z) - 0.2 + 1e-6) outside++;
+        }
+      };
+      P.navigate({ position: { x: L.walkRadius - 0.6, y: 0, z: 0 }, yaw: Math.PI / 2, pitch: 0.05, dist: 4 });
+      sample();
+      P.hooks.onZoom(2, "wall-shoulder"); sample();
+      P.hooks.onZoom(2, "wall-orbit"); sample();
+      for (let i = 0; i < 8; i++) { P.hooks.onOrbit(400, i < 4 ? 300 : -300); sample(); }
+      P.modeAction("mode-toggle"); sample();
+      P.modeAction("mode-release"); sample();
+      P.hooks.onOrbit(500, -1000); P.hooks.onZoom(8, "detached-wall"); sample();
+      P.possess(cave); P.enterClose(); sample();
+      P.navigate({ position: { x: L.arrival.x, y: 0, z: L.arrival.z }, yaw: 0, pitch: 0.05, dist: 4 });
+      B.advance(0.3, 1 / 60);
+      return { room: B.timechain.room.id, frames, outside, modes: [...modes] };
+    })()`));
   }
   const same = (k) => rows.every(r => JSON.stringify(r[k]) === JSON.stringify(rows[0][k]));
   record("timechain sizes: Rooms 4 and 7 build at 1.5× and 2× around the same doorway, arrival, Exit button, table and Ooga, seating 8 and 12, solo and first person, each at its own address",
     rows[0].scale === 1.5 && rows[1].scale === 2 && rows[2].scale === 1 && rows.map(r => r.chairs).join() === "8,12,4" && rows.every(r => r.radius === 9 * r.scale && Math.abs(r.screenW - 3 * r.scale) < 1e-9 && r.at < 0.4 && r.mode === "solo" && r.view === "first-person" && r.hash === "#/sphere-" + r.room)
       && ["door", "arrivalGap", "button", "table", "height"].every(same), JSON.stringify(rows));
+  record("timechain sizes: the final camera stays inside the walls, closed doors, floor and dome in every view and transition at all three room scales",
+    bounds.every(r => r.frames >= 900 && r.outside === 0 && ["first-person", "shoulder", "orbit", "detached"].every(mode => r.modes.includes(mode))), JSON.stringify(bounds));
 } };
 const timechainSani = { name: "timechain sani", why: "regression: Sani's recliner spins with his laptop independently of frame rate, and his half-litre refills, spills and is cleaned up in every room", run: async (b) => {
   const presence = await b.evaluate(`(() => {

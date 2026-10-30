@@ -197,17 +197,25 @@
       p.y = clamp(p.y, 0.4, roof(p.x, p.z, 0.5));
     };
     const clampCamera = (p) => {
+      const x = p.x, y = p.y, z = p.z;
       const r = Math.hypot(p.x, p.z), max = L.radius - 0.25;
       if (r > max && !corridor(p)) { p.x *= max / r; p.z *= max / r; }
       if (!guided || Math.abs(p.x) > DOOR.halfW - 0.2) p.z = Math.min(p.z, L.doorZ - 0.2);
       else p.z = Math.min(p.z, L.doorZ + DOOR.vestibule - 0.3);
       p.y = clamp(p.y, 0.3, roof(p.x, p.z, 0.3));
+      return p.x !== x || p.y !== y || p.z !== z;
+    };
+    const keepCameraInside = () => {
+      const p = camera.position, x = p.x, y = p.y, z = p.z;
+      if (!clampCamera(p)) return;
+      // Orbit solvers and acquisition blends can move the eye after collision. Keep their look direction at the wall.
+      camera.target.x += p.x - x; camera.target.y += p.y - y; camera.target.z += p.z - z;
     };
     const view = { yaw: 0, pitch: 0.05, dist: 4, target: { x: L.arrival.x, y: 1.6, z: L.arrival.z } };
     const pilot = pilotMod.create({
       renderer, canvas, camera, hud, presets: { entrance: view }, landing: "entrance", pitch: [-0.2, 1.2], dist: [3, 8],
       follow: { y: 0.9, min: 3, max: 6, pitch: [0.2, 0.7] }, fly: { speed: 4, perDist: 0.4, climb: 2, yMax: L.wall - 1 },
-      clampTarget, clampCamera, ceilingAt: (x, z) => roof(x, z, 0), coarse: COARSE, mayPossess: (cave) => BL.net.mayDrive(cave.traits.name),
+      clampTarget, clampCamera, observeOrbit: keepCameraInside, ceilingAt: (x, z) => roof(x, z, 0), coarse: COARSE, mayPossess: (cave) => BL.net.mayDrive(cave.traits.name),
       jetpackStatus: () => NO_JETPACK,
       close: { eyeHeight: 1.1, eyeRatio: 0.95, eyeForward: 0.16, pitch: [-1.35, 1.35], trailingDist: 4, orbitDist: 5, maxStep: 0.6, groundAt }
     });
@@ -396,6 +404,7 @@
       if (e) arrive({ x: e.x + Math.sin(e.heading) * eyeForward(avatar, e.pitch), z: L.entry.z + e.dz + Math.cos(e.heading) * eyeForward(avatar, e.pitch) }, e.heading, -e.pitch);
       else arrive(guide.stage ? L.threshold : L.arrival);
     }
+    keepCameraInside();
     // The island's view back out of its passage (taken there before this crossing), hung at the vestibule's far end so
     // the walk out sees it fill the view as it reaches the handover point; without one, the hand over is between two
     // dark corridors.
@@ -623,6 +632,7 @@
       if (guide.stage && avatar) runGuide(dt);
       if (people) people.update(dt, elapsed);
       pilot.update(dt);
+      keepCameraInside();
       // The doors: open for a guided walk or another player's crossing here, closed otherwise.
       const want = Math.max(doors.want, performance.now() < doors.until ? 1 : 0);
       const step = REDUCED.matches ? 1 : dt / DOOR_TIME;
