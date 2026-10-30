@@ -5,6 +5,11 @@
   const BL = window.BL = window.BL || {}, { mat4 } = BL.math;
   const CAPACITY = 8, LIFETIME = 0.72, SPEED = 1.35, START_RADIUS = 0.055, WIDTH = 0.055, GLYPH_THRESHOLD = 0.55;
   const CONTACT_LIFETIME = 1, CONTACT_RADIUS = 0.32;
+  const SURFACE_CORE = 0.18, SURFACE_RADIUS = 0.9;
+  const surfaceStrengthAt = distance => {
+    const k = Math.max(0, Math.min(1, (distance - SURFACE_CORE) / (SURFACE_RADIUS - SURFACE_CORE)));
+    return 1 - k * k * (3 - 2 * k);
+  };
   const strengthAt = age => Math.exp(-5 * age) * Math.max(0, 1 - age / LIFETIME);
   // A footfall reveals a small filled patch of the same glyph streams, fading in place instead of spreading rings.
   const contactStrengthAt = age => { const k = Math.max(0, 1 - age / CONTACT_LIFETIME); return k * k * (3 - 2 * k); };
@@ -18,7 +23,8 @@
     BL.scene.updateWorld(root);
     mat4.invert(inverse, node.world);
     let next = 0;
-    const state = { waves, contact: localContact, surface, active: 0, hits: 0, time: 0, cross, absorb, strike, aimAt, continueShot, pulse, hold, update, dispose };
+    const state = { waves, contact: localContact, surface, surfaceCenter: surface ? new Float32Array(2) : null,
+      active: 0, hits: 0, time: 0, cross, absorb, strike, aimAt, continueShot, pulse, hold, update, dispose };
     const onGlass = (x, y) => x >= bounds.min[0] && x <= bounds.max[0]
       && y >= bounds.min[1] + (bounds.max[1] - bounds.min[1]) * (node.mirrorReveal || 0) && y <= bounds.max[1];
     function intersection(ax, ay, az, bx, by, bz) {
@@ -177,5 +183,6 @@
     node.mirrorRipples = state;
     return state;
   };
-  BL.mirrorRipples = { create, CAPACITY, LIFETIME, SPEED, START_RADIUS, WIDTH, GLYPH_THRESHOLD, CONTACT_LIFETIME, CONTACT_RADIUS };
+  BL.mirrorRipples = { create, CAPACITY, LIFETIME, SPEED, START_RADIUS, WIDTH, GLYPH_THRESHOLD, CONTACT_LIFETIME, CONTACT_RADIUS,
+    SURFACE_CORE, SURFACE_RADIUS, surfaceStrengthAt };
 })();

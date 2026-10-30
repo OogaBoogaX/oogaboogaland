@@ -1313,6 +1313,7 @@ uniform float uClipMaxY;
 ${CUTAWAY_GLSL}
 uniform int uRippleActive;
 uniform float uRippleContact;
+uniform vec2 uRippleCenter;
 uniform float uRippleTime;
 uniform vec4 uRipples[${BL.mirrorRipples.CAPACITY}];
 uniform sampler2D uBodyField;
@@ -1358,7 +1359,9 @@ void main() {
       vec2 offset = vMirrorLocal - wave.xy;
       float distance = length(offset);
       if (uRippleContact > 0.5) {
-        float contact = uRippleContact > 1.5 ? 1.0 : 1.0 - smoothstep(0.0, ${BL.mirrorRipples.CONTACT_RADIUS.toFixed(6)}, distance);
+        float contact = uRippleContact > 1.5
+          ? 1.0 - smoothstep(${BL.mirrorRipples.SURFACE_CORE.toFixed(6)}, ${BL.mirrorRipples.SURFACE_RADIUS.toFixed(6)}, length(vWorld.xz - uRippleCenter))
+          : 1.0 - smoothstep(0.0, ${BL.mirrorRipples.CONTACT_RADIUS.toFixed(6)}, distance);
         glyphCrest = max(glyphCrest, contact * wave.w);
         continue;
       }
@@ -1857,7 +1860,7 @@ void main() {
     };
     const ensureMirrorProgram = () => {
       if (!mirror.program) {
-        mirror.program = compile(MIRROR_VS, MIRROR_FS, ["uViewProj", "uReflectionViewProj", "uMirrorWorld", "uShard", "uReflection", "uReflectionScale", "uTint", "uPortal", "uReveal", "uRippleOnly", "uCrestTint", "uMatrixGlyphTex", "uRippleActive", "uRippleContact", "uRippleTime", "uRipples", "uBodyField", "uBodyBounds", "uBodyTexel", "uBodyContacts", "uBodyActive", "uBodyWaves", "uClipMaxY"]);
+        mirror.program = compile(MIRROR_VS, MIRROR_FS, ["uViewProj", "uReflectionViewProj", "uMirrorWorld", "uShard", "uReflection", "uReflectionScale", "uTint", "uPortal", "uReveal", "uRippleOnly", "uCrestTint", "uMatrixGlyphTex", "uRippleActive", "uRippleContact", "uRippleCenter", "uRippleTime", "uRipples", "uBodyField", "uBodyBounds", "uBodyTexel", "uBodyContacts", "uBodyActive", "uBodyWaves", "uClipMaxY"]);
         mirrorDebug.resources++;
       }
       if (mirror.programReady) return true;
@@ -3878,6 +3881,7 @@ void main() {
         mirrorDebug.ripples = ripples ? ripples.active : 0;
         gl.uniform1i(pg.u.uRippleActive, mirrorDebug.ripples);
         gl.uniform1f(pg.u.uRippleContact, ripples && ripples.contact ? ripples.surface ? 2 : 1 : 0);
+        gl.uniform2f(pg.u.uRippleCenter, ripples?.surfaceCenter?.[0] || 0, ripples?.surfaceCenter?.[1] || 0);
         gl.uniform1f(pg.u.uRippleTime, body ? body.time : ripples ? ripples.time : 0);
         gl.uniform4fv(pg.u.uRipples, ripples ? ripples.waves : NO_MIRROR_RIPPLES);
         const bodyActive = body && (body.contacts || body.active);
@@ -4001,6 +4005,7 @@ void main() {
         gl.uniform3f(pg.u.uCrestTint, tint ? tint[0] : -1, tint ? tint[1] : 0, tint ? tint[2] : 0);
         gl.uniform1i(pg.u.uRippleActive, ripples ? ripples.active : 0);
         gl.uniform1f(pg.u.uRippleContact, ripples && ripples.contact ? ripples.surface ? 2 : 1 : 0);
+        gl.uniform2f(pg.u.uRippleCenter, ripples?.surfaceCenter?.[0] || 0, ripples?.surfaceCenter?.[1] || 0);
         gl.uniform1f(pg.u.uRippleTime, bodyActive ? body.time : ripples ? ripples.time : 0);
         gl.uniform4fv(pg.u.uRipples, ripples ? ripples.waves : NO_MIRROR_RIPPLES);
         gl.bindTexture(gl.TEXTURE_2D, t.tex);
@@ -4065,6 +4070,7 @@ void main() {
         gl.uniformMatrix4fv(pg.u.uMirrorWorld, false, node.world);
         gl.uniform1i(pg.u.uRippleActive, ripples ? ripples.active : 0);
         gl.uniform1f(pg.u.uRippleContact, ripples && ripples.contact ? ripples.surface ? 2 : 1 : 0);
+        gl.uniform2f(pg.u.uRippleCenter, ripples?.surfaceCenter?.[0] || 0, ripples?.surfaceCenter?.[1] || 0);
         gl.uniform1f(pg.u.uRippleTime, bodyActive ? body.time : ripples ? ripples.time : 0);
         gl.uniform4fv(pg.u.uRipples, ripples ? ripples.waves : NO_MIRROR_RIPPLES);
         const tint = node.rippleTint;

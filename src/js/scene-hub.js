@@ -2045,7 +2045,8 @@
       // the top's glyph coordinates at its lip so each stream flows continuously over that edge.
       addChild(node, top,
         surface(HALF_WIDTH, -RUN / 2 - RISE, -RUN / 2, -RUN / 2, RUN / 2, 0, 0, -Math.PI / 2),
-        surface(HALF_WIDTH, -RISE, 0, RUN / 2, 0, 0, 0, Math.PI / 2),
+        // The upper edge meets the next riser's front, not the back of this tread.
+        surface(HALF_WIDTH, RUN / 2, RUN / 2 + RISE, RUN / 2, -RUN / 2, 0, 0, -Math.PI / 2),
         surface(RUN / 2, -RISE, 0, 0, 0, HALF_WIDTH, 0, 0),
         surface(RUN / 2, -RISE, 0, 0, 0, -HALF_WIDTH, 0, Math.PI));
       node.dockStep = 0;
@@ -2124,6 +2125,10 @@
       lit = 0;
       for (let i = 0; i < glyphs.length; i++) {
         const node = glyphs[i];
+        if (actor) {
+          node.mirrorRipples.surfaceCenter[0] = actor.root.position.x;
+          node.mirrorRipples.surfaceCenter[1] = actor.root.position.z;
+        }
         node.mirrorRipples.update(node.dockStep === standing && standing ? 0 : dt, time);
         node.visible = node.mirrorRipples.active > 0;
         if (node.visible) lit++;
@@ -2131,6 +2136,23 @@
       if (standing) {
         if (standing !== lastStep) { lastStep = standing; contacts++; }
         holdStep(standing);
+      }
+      // Adjacent treads share a riser. Keep its stronger contact so descending onto a lower tread
+      // holds the next front too, instead of inheriting the departing upper tread's fade.
+      for (const node of glyphs) {
+        node.children[1].visible = true;
+        node.children[2].visible = node.dockStep < count;
+      }
+      for (let i = 0; i < glyphs.length; i++) {
+        const node = glyphs[i];
+        if (!node.visible) continue;
+        for (let j = 0; j < glyphs.length; j++) {
+          const upper = glyphs[j];
+          if (!upper.visible || upper.dockStep !== node.dockStep + 1) continue;
+          if (upper.mirrorRipples.waves[3] >= node.mirrorRipples.waves[3]) node.children[2].visible = false;
+          else upper.children[1].visible = false;
+          break;
+        }
       }
     };
     return {

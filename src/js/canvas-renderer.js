@@ -1460,7 +1460,7 @@
     const drawMirrorRipples = (node, rec) => {
       const ripples = node.mirrorRipples;
       if (!ripples || !ripples.active) return;
-      const { CAPACITY, START_RADIUS, SPEED, WIDTH, GLYPH_THRESHOLD, CONTACT_RADIUS } = BL.mirrorRipples;
+      const { CAPACITY, START_RADIUS, SPEED, WIDTH, GLYPH_THRESHOLD, CONTACT_RADIUS, surfaceStrengthAt } = BL.mirrorRipples;
       const waves = ripples.waves;
       composeMirrorView(node);
       const m = rippleView, scale = Math.max(Math.hypot(m[0], m[1]), Math.hypot(m[4], m[5]));
@@ -1509,8 +1509,14 @@
               if (!((mask >> bit) & 1)) continue;
               const px = cx + ((bit & 3) - 1.5) * 0.021, py = cy + (2.5 - (bit >> 2)) * 0.021;
               const distance = Math.hypot(px - x, py - y);
-              if (surface) ctx.globalAlpha = bright;
-              else if (contact) {
+              if (surface) {
+                // World x/z keeps one circular footprint continuous across the tread and upright risers.
+                const world = node.world, center = ripples.surfaceCenter;
+                const falloff = surfaceStrengthAt(Math.hypot(world[0] * px + world[4] * py + world[12] - center[0],
+                  world[2] * px + world[6] * py + world[14] - center[1]));
+                if (!falloff) continue;
+                ctx.globalAlpha = bright * falloff;
+              } else if (contact) {
                 const k = Math.min(1, distance / CONTACT_RADIUS);
                 ctx.globalAlpha = bright * (1 - k * k * (3 - 2 * k)) * 0.82;
               } else {
