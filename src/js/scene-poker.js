@@ -31,7 +31,18 @@
   let theme = Themes.get("gatsby");
   const clamp = BL.math.clamp;
   const clampTarget = p => { p.x = clamp(p.x, -22, 22); p.z = clamp(p.z, -34, 34); p.y = clamp(p.y, 0.5, 7); };
-  const clampCamera = p => { p.x = clamp(p.x, -23.5, 23.5); p.z = clamp(p.z, -35.7, 35.7); p.y = clamp(p.y, 0.8, 8.5); };
+  const clampCamera = p => {
+    const x = p.x, y = p.y, z = p.z;
+    // Stay inside the wall finishes and columns, with clearance for the camera's near plane.
+    p.x = clamp(x, -23, 23); p.z = clamp(z, -35.7, 35.7); p.y = clamp(y, 0.8, 8.5);
+    return p.x !== x || p.y !== y || p.z !== z;
+  };
+  const keepCameraInside = () => {
+    const p = camera.position, x = p.x, y = p.y, z = p.z;
+    if (!clampCamera(p)) return;
+    // Orbit/overhead views supply their own look direction; retain it when stopping at a wall.
+    camera.target.x += p.x - x; camera.target.y += p.y - y; camera.target.z += p.z - z;
+  };
   const activeTable = () => session.tables[selected];
   const setTheme = id => {
     theme = Themes.get(id); room.setTheme(theme.id); panel.setTheme(theme.id);
@@ -226,7 +237,7 @@
     input = BL.interact.create({ canvas: ctx.canvas, renderer: ctx.renderer, camera, hooks });
     pilot = BL.pilot.create({ renderer: ctx.renderer, canvas: ctx.canvas, camera, hud, presets, landing: "entrance", pitch: [-0.1, 1.3], dist: [3, 32],
       follow: { y: 0.9, min: 3, max: 7, pitch: [0.25, 0.8] }, fly: { speed: 6, perDist: 0.4, climb: 4, yMax: 8 },
-      clampTarget, clampCamera, ceilingAt: () => 8.5, coarse: matchMedia("(pointer: coarse)").matches, mayPossess,
+      clampTarget, clampCamera, observeOrbit: keepCameraInside, ceilingAt: () => 8.5, coarse: matchMedia("(pointer: coarse)").matches, mayPossess,
       close: { eyeHeight: 1.1, eyeRatio: 0.95, eyeForward: 0.16, pitch: [-1.35, 1.35], trailingDist: 4, orbitDist: 5, maxStep: 0.6, groundAt: () => 0 } });
     Object.assign(hooks, pilot.hooks, {
       onHover: (hit, p) => { if (hit?.owner.kind === "poker") hud.tooltip.show(`Table ${hit.owner.index + 1} · select to play or watch`, p.x, p.y); else hud.tooltip.hide(); },
@@ -276,6 +287,7 @@
     avatar.root.position.x = 0; avatar.root.position.y = avatar.baseY; avatar.root.position.z = 29;
     avatar.root.rotation.y = Math.PI; pilot.possess(avatar);
     if (!pilot.loginViewRestored) pilot.navigate({ position: { x: 0, y: 0, z: 29 }, yaw: 0, pitch: 0.18, dist: 4 });
+    keepCameraInside();
     unsubscribeAccount = BL.net.subscribe(accountChanged);
     // Other signed-in players on the floor, as the Oogas they drive.
     remotes = BL.remotePlayers.create({ root, crew: people, fx, posed: cave => { cave.parts.club.visible = cave.parts.gun.visible = false; } });
@@ -292,6 +304,8 @@
     pilot.readInput(dt);
     if (!panel.focused) people.update(dt, elapsed);
     pilot.update(dt);
+    // Restored views and possession blends can replace the ordinary solver's camera position.
+    keepCameraInside();
     // The Ooga driven here goes to the room with where it stands and its health; other players here are shown.
     const drivenHere = people.player;
     BL.net.setBody(drivenHere ? drivenHere.traits.name : null);
