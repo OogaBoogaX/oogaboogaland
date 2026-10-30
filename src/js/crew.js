@@ -3437,6 +3437,7 @@
       fitSleepPose(cave, pose);
       travel.roll = 0;
     };
+    const playerBody = (other) => other === player || other.humanControlled || other.remoteControlled;
     const shoulderNeighbor = (cave, other) => {
       if (other === cave || !other.root.visible || other.state === "away" || other.root.quaternion || other.camp.seat) return false;
       const feet = cave.root.position.y - cave.baseY, floor = other.root.position.y - other.baseY;
@@ -3491,7 +3492,7 @@
       // Once recovery has found a safe step, let the shoulder pass finish
       // instead of immediately joining the same oscillating queue again.
       if (cave.progress.escaped || cave.shoulder.phase && cave.shoulder.other === other
-        || !b.moving || !shoulderNeighbor(cave, other) || waitingFor(other, cave)) return false;
+        || playerBody(other) || !b.moving || !shoulderNeighbor(cave, other) || waitingFor(other, cave)) return false;
       // A yielding nonworker is stationary traffic, not the leader of a worker
       // queue. Following it can close a cycle with the worker it yielded to.
       if (cave.state === "working" && other.state !== "working" && (b.waiting || b.crossing === cave || a.fx * b.fx + a.fz * b.fz < 0.95)) return false;
@@ -3508,7 +3509,7 @@
     const crossingSoon = (cave, other, holding = false) => {
       const a = cave.traffic, b = other.traffic;
       if (cave.progress.escaped || cave.shoulder.phase && cave.shoulder.other === other
-        || !b.moving || !shoulderNeighbor(cave, other) || waitingFor(other, cave)) return false;
+        || playerBody(other) || !b.moving || !shoulderNeighbor(cave, other) || waitingFor(other, cave)) return false;
       const workerFirst = cave.state !== "working" && other.state === "working";
       if (cave.state === "working" && other.state !== "working" || !workerFirst && other.index >= cave.index) return false;
       const dot = a.fx * b.fx + a.fz * b.fz;
@@ -3564,16 +3565,17 @@
       for (let i = 0; i < crewList.length; i++) {
         const other = crewList[i], p = other.root.position, floor = p.y - other.baseY;
         const gap = Math.max(SHOULDER_GAP, cave.bodyRadius + other.bodyRadius), distance = Math.hypot(x - p.x, z - p.z);
-        if (other !== cave && other.root.visible && y < floor + other.bodyHeight && y + cave.bodyHeight > floor
+        if (other !== cave && (cave === player || !playerBody(other)) && other.root.visible && y < floor + other.bodyHeight && y + cave.bodyHeight > floor
           && distance < gap && (!nearby || Math.hypot(cave.root.position.x - x, cave.root.position.z - z) < Math.max(1.5, gap + distance + 0.15))) return true;
       }
       return false;
     };
-    const outsideClear = (fromX, fromZ, x, z, y, height, radius = 0) => {
+    const outsideClear = (fromX, fromZ, x, z, y, height, radius = 0, npc = false) => {
       const bodies = ctx.outsideActors && ctx.outsideActors();
       if (!bodies) return true;
       for (let i = 0; i < bodies.length; i++) {
         const body = bodies[i];
+        if (npc && body.player) continue;
         if (y >= body.y + (body.height || ctx.outsideActorHeight) || y + height <= body.y) continue;
         if (!gapClear(fromX, fromZ, x, z, body, Math.max(OUTSIDE_GAP, (body.radius || 0) + radius))) return false;
       }
@@ -3586,18 +3588,18 @@
       const t = length ? clamp(-(ox * dx + oz * dz) / length, 0, 1) : 0;
       return (ox + dx * t) ** 2 + (oz + dz * t) ** 2 >= gap * gap - 1e-8;
     };
-    // Same swept clearance as the hub's upright actors and the lab; passing changes the path, never body radii.
+    // NPCs pass through players; all other pairs retain their swept body gaps.
     const shoulderClear = (cave, x, z) => {
       const p = cave.root.position;
       for (let otherIndex = 0; otherIndex < crewList.length; otherIndex++) {
         const other = crewList[otherIndex];
-        if (!shoulderNeighbor(cave, other)) continue;
+        if (!shoulderNeighbor(cave, other) || cave !== player && playerBody(other)) continue;
         // NPC queues keep their full body footprints; the player's deliberate shoulder pass stays unchanged.
         const gap = cave === player ? SHOULDER_GAP : Math.max(SHOULDER_GAP, cave.bodyRadius + other.bodyRadius);
         if (!gapClear(p.x, p.z, x, z, other.root.position, gap)) return false;
       }
       // Walking bodies the scene owns rather than the roster keep the same gap.
-      return outsideClear(p.x, p.z, x, z, p.y - cave.baseY, cave.bodyHeight, cave.bodyRadius);
+      return outsideClear(p.x, p.z, x, z, p.y - cave.baseY, cave.bodyHeight, cave.bodyRadius, cave !== player);
     };
     // The same gap from the other side: a scene's own walker against the whole crew.
     const actorClear = (fromX, fromZ, x, z, y, height) => {
@@ -3624,8 +3626,9 @@
           if (outsideNeighbor(cave, body)) outside = body;
           break;
         }
+        // A departed player needs no return sidestep: the NPC never left its route.
+        if (!outside) { s.outsideId = null; s.phase = s.outside.player ? 0 : 2; }
         s.outside = outside;
-        if (!outside) { s.outsideId = null; s.phase = 2; }
       }
       let bodyX = fx, bodyZ = fz, bodyReach = reach;
       const a = cave.avoidance, path = cave.pathing;
@@ -3651,7 +3654,7 @@
           const gap = npc ? Math.max(SHOULDER_GAP, cave.bodyRadius + other.bodyRadius) : SHOULDER_GAP;
           const extra = gap - SHOULDER_GAP;
           if (Math.abs(along) >= nearest || Math.abs(along) >= bodyReach + extra || Math.abs(side) >= SHOULDER_TOUCH + extra
-            || dx * dx + dz * dz < SHOULDER_GAP * SHOULDER_GAP - 1e-6) continue;
+            || !(npc && playerBody(other)) && dx * dx + dz * dz < SHOULDER_GAP * SHOULDER_GAP - 1e-6) continue;
           // A moving leader yields only to a faster walker closing from behind, not to standing or receding neighbours.
           if (along <= 0 && (along < -0.95 || (other.shoulder.snapVX - s.snapVX) * bodyX + (other.shoulder.snapVZ - s.snapVZ) * bodyZ < 0.08)) continue;
           nearest = Math.abs(along); found = other; foundGap = gap; across = side; rear = along <= 0;
@@ -3663,7 +3666,7 @@
           const along = dx * bodyX + dz * bodyZ, side = dx * bodyZ - dz * bodyX;
           const gap = Math.max(OUTSIDE_GAP, (body.radius || 0) + cave.bodyRadius), extra = gap - SHOULDER_GAP;
           if (along <= 0 || along >= nearest || along >= bodyReach + extra || Math.abs(side) >= SHOULDER_TOUCH + extra
-            || dx * dx + dz * dz < SHOULDER_GAP * SHOULDER_GAP - 1e-6) continue;
+            || !body.player && dx * dx + dz * dz < SHOULDER_GAP * SHOULDER_GAP - 1e-6) continue;
           nearest = along; found = null; foundOutside = body; foundGap = gap; across = side; rear = false;
         }
         const hit = s.obstacle, prop = !!ctx.shoulderObstacle && ctx.shoulderObstacle(cave, fx, fz, reach, hit)
@@ -3682,7 +3685,7 @@
         const side = dx * Math.cos(s.heading) - dz * Math.sin(s.heading);
         s.side = Math.abs(side) < 0.02 ? 1 : Math.sign(side);
         s.dodge = Math.abs(across) < 0.02 ? (s.rear ? -1 : 1) : Math.sign(across);
-        if (npc && !prop) {
+        if (npc && !prop && !(foundOutside ? foundOutside.player : playerBody(found))) {
           // Pick the open shoulder before advancing into a body beside a
           // wall. Keep that side for the pass instead of retrying the wall.
           const offset = Math.max(0, foundGap + 0.015 - s.dodge * across);
@@ -3726,8 +3729,12 @@
           }
         }
       }
-      if (s.phase === 2 && Math.abs(offset) < 0.005) { s.phase = 0; s.other = s.outside = s.outsideId = null; s.obstacle.node = null; return -1; }
+      const throughPlayer = npc && !s.prop && (s.outside ? s.outside.player : s.other && playerBody(s.other));
+      if (s.phase === 2 && (throughPlayer || Math.abs(offset) < 0.005)) { s.phase = 0; s.other = s.outside = s.outsideId = null; s.obstacle.node = null; return -1; }
       s.attempted = true;
+      // Players never divert an NPC's route. Keep only the shoulder twist;
+      // ordinary walking below still checks terrain, props and NPC bodies.
+      if (throughPlayer) return -1;
       const turn = Math.atan2(targetOffset - offset, s.phase === 1 ? Math.max(0.28, Math.abs(along) * 0.65) : 0.6);
       let moved = false;
       // Start with a proportional sidestep, then tighten toward the tangent in small angular steps when close.
@@ -3764,7 +3771,7 @@
         part.poseYaw = part === cave.parts.head ? 0 : s.yaw;
       }
     };
-    // Walkers use the visitor's swept body; hold one detour side until the direct route clears, never alternate.
+    // Walkers keep swept clearance from scenery and NPCs; players are passable.
     const walkerClear = (cave, x, z) => {
       const p = cave.root.position, feet = p.y - cave.baseY;
       const panic = cave.camp.panic;
@@ -3947,13 +3954,13 @@
       recoveryBodyCount = recoveryOutsideCount = 0;
       for (let n = 0; n < crewList.length; n++) {
         const other = crewList[n];
-        if (other !== cave && other.root.visible && other.state !== "away" && !other.root.quaternion && !other.camp.seat
+        if (other !== cave && !playerBody(other) && other.root.visible && other.state !== "away" && !other.root.quaternion && !other.camp.seat
           && Math.hypot(other.root.position.x - x, other.root.position.z - z) <= distance + Math.max(SHOULDER_GAP, cave.bodyRadius + other.bodyRadius)) recoveryBodies[recoveryBodyCount++] = other;
       }
       const outside = ctx.outsideActors && ctx.outsideActors();
       if (outside) for (let n = 0; n < outside.length; n++) {
         const body = outside[n];
-        if (Math.hypot(body.x - x, body.z - z) <= distance + Math.max(OUTSIDE_GAP, (body.radius || 0) + cave.bodyRadius)) recoveryOutside[recoveryOutsideCount++] = body;
+        if (!body.player && Math.hypot(body.x - x, body.z - z) <= distance + Math.max(OUTSIDE_GAP, (body.radius || 0) + cave.bodyRadius)) recoveryOutside[recoveryOutsideCount++] = body;
       }
       // A coarse edge can cross a deep corner before reaching a higher tread.
       // Follow the same short, supported steps as the walker, not the line

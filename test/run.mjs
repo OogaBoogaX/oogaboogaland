@@ -3049,8 +3049,8 @@ const { npcLaneSpacingProbe, npcLaneCornerProbe, npcLaneCurveProbe, npcLabLanePr
         }
       };
     }
-    const outside = remote ? [{ id: "blocker", x: -0.35, y: 0, z: -3, radius: 0.3, height: 2.2 },
-      { id: "spectator", x: 20, y: 0, z: 20, radius: 0.3, height: 2.2 }] : [];
+    const outside = remote ? [{ id: "blocker", player: true, x: -0.35, y: 0, z: -3, radius: 0.3, height: 2.2 },
+      { id: "spectator", player: true, x: 20, y: 0, z: 20, radius: 0.3, height: 2.2 }] : [];
     const crew = BL.crew.create({ root, world: { level: 0 }, npcPaths, outsideActors: remote ? () => outside : null,
       input: { add: (node) => targets.add(node), remove: (node) => targets.delete(node) }, hud: { setRosterRow: noop },
       game: { state: { assignments: {}, inventory: [] } }, pile: { footprintEdge: 1, pileEdge: () => 1 },
@@ -3081,7 +3081,7 @@ const { npcLaneSpacingProbe, npcLaneCornerProbe, npcLaneCurveProbe, npcLabLanePr
         const oldJumps = a.avoidance.navigation.jumps + b.avoidance.navigation.jumps;
         const duration = name === "opposing" || oscillating || jittering || stationary ? 12 : 3;
         if (stationary) {
-          // The player blocks the worker's short lane hints. Local control
+          // The player stands on the worker's short lane hints. Local control
           // idles; a remote pose hides its roster copy. Either side can close.
           a.root.position.x = b.root.position.x = -0.35; a.root.position.z = -3;
           if (remote) { a.root.visible = false; a.state = "away"; a.walk = null; }
@@ -3094,7 +3094,7 @@ const { npcLaneSpacingProbe, npcLaneCornerProbe, npcLaneCurveProbe, npcLabLanePr
           a.puppet = true;
           b.root.position.z = -7.1;
         }
-        let stall = 0, maximumStall = 0, blockedSteps = 0, reordered = false;
+        let stall = 0, maximumStall = 0, blockedSteps = 0, reordered = false, shoulderTurn = 0, passDrift = 0;
         const resets = b.progress.resets, searches = b.avoidance.navigation.searches;
         while (frames++ < Math.ceil(duration / dt) && (a.walk || b.walk)) {
           const ax = a.root.position.x, az = a.root.position.z, bx = b.root.position.x, bz = b.root.position.z;
@@ -3114,6 +3114,10 @@ const { npcLaneSpacingProbe, npcLaneCornerProbe, npcLaneCurveProbe, npcLabLanePr
             reordered = true;
           }
           crew.update(dt, time += dt); S.updateWorld(root);
+          if (stationary && Math.abs(b.root.position.z + 3) < 1) {
+            shoulderTurn = Math.max(shoulderTurn, Math.abs(b.shoulder.yaw));
+            passDrift = Math.max(passDrift, Math.abs(b.root.position.x + 0.35));
+          }
           const step = Math.hypot(b.root.position.x - bx, b.root.position.z - bz);
           if (!walkable(bx, bz, b.root.position.x, b.root.position.z)) blockedSteps++;
           stall = b.walk && step < 0.001 ? stall + dt : 0;
@@ -3135,8 +3139,8 @@ const { npcLaneSpacingProbe, npcLaneCornerProbe, npcLaneCurveProbe, npcLabLanePr
         }
         jumps = a.avoidance.navigation.jumps + b.avoidance.navigation.jumps - oldJumps;
         rows.push({ name, frames, gap, waiting, waitSeconds: waitFrames * dt, resumedGap, branched, branchReleased, deadlocked,
-          maxHop, maxStep, jumps, laneRight, laneError, laneSamples, maximumStall, blockedSteps, reordered, resets: b.progress.resets - resets,
-          searches: b.avoidance.navigation.searches - searches, requiredGap: remote ? Math.max(0.86, outside[0].radius + b.bodyRadius) : Math.max(0.68, a.bodyRadius + b.bodyRadius),
+          maxHop, maxStep, jumps, laneRight, laneError, laneSamples, maximumStall, blockedSteps, reordered, shoulderTurn, passDrift, resets: b.progress.resets - resets,
+          searches: b.avoidance.navigation.searches - searches,
           playerHeld: (remote ? a.state === "away" && !a.root.visible : crew.player === a) && a.root.position.x === -0.35 && a.root.position.z === -3,
           passed: b.root.position.z > a.root.position.z + 1, arrived: !a.walk && !b.walk });
       }
@@ -5192,9 +5196,10 @@ const workCaveTrips = async (b) => {
   for (const dt of [1 / 20, 1 / 60]) {
     for (const remote of [false, true]) for (const wall of [0, -1, 1]) {
       const player = await b.evaluate(`(${npcLaneSpacingProbe.toString()})(${JSON.stringify({ dt, stationary: true, remote, wall })})`);
-      record(`work movement cave trips: ${1 / dt}Hz workers pass a stationary ${remote ? "remote" : "local"} player with wall ${wall} without overlap or recovery searches`,
+      record(`work movement cave trips: ${1 / dt}Hz workers walk through a stationary ${remote ? "remote" : "local"} player with wall ${wall}, turning shoulders without detours or recovery searches`,
         player.disposed && player.rows.length === 1 && player.rows.every(row => row.playerHeld && row.arrived && row.passed && (!remote || row.reordered)
-          && row.gap >= row.requiredGap - 1e-6 && row.blockedSteps === 0 && row.maxStep <= 1.7 * dt + 1e-6
+          && row.gap < 0.1 && row.shoulderTurn > 0.1 && row.passDrift < 0.05 && row.maximumStall < 0.1
+          && row.blockedSteps === 0 && row.maxStep <= 1.7 * dt + 1e-6
           && row.maxHop === 0 && row.jumps === 0 && row.resets === 0 && row.searches === 0), JSON.stringify(player));
     }
     const queue = await b.evaluate(`(${npcLaneSpacingProbe.toString()})(${JSON.stringify({ dt, oscillating: true })})`);
@@ -21232,10 +21237,11 @@ const reviewCrowdAndFallbackProof = async () => {
   const far = Array.from({length:1000},(_,i)=>({...body,root:{visible:true,position:{x:20+i,y:0,z:20}}}));
   const near = {...body,root:{visible:true,position:{x:.1,y:0,z:.1}}};
   let fetches=0,gaps=0;
-  const c={crewList:[body,...far,near],ctx:{outsideActorHeight:1.5,outsideActors:()=>{fetches++;return [{x:20,y:0,z:20}];}},SHOULDER_GAP:.68,OUTSIDE_GAP:1,NAV_STEP:.025,STEP:.6,
+  const c={player:null,crewList:[body,...far,near],ctx:{outsideActorHeight:1.5,outsideActors:()=>{fetches++;return [{x:20,y:0,z:20}];}},SHOULDER_GAP:.68,OUTSIDE_GAP:1,NAV_STEP:.025,STEP:.6,
     gapClear:()=>{gaps++;return true;},npcWalkable:()=>true,groundAt:()=>0};
   const edge=source.slice(source.indexOf("    const recoveryBodies ="),source.indexOf("    const searchWalker ="));
-  runInNewContext(edge+"this.edge=recoveryHeight;",c);
+  const playerBody=source.slice(source.indexOf("    const playerBody ="),source.indexOf("    const shoulderNeighbor ="));
+  runInNewContext(playerBody+edge+"this.edge=recoveryHeight;",c);
   const clear=c.edge(body,0,0,0,.5,0,.025)===0;
   const filtered=fetches===1&&gaps===20;
   const occupied=source.slice(source.indexOf("    const spotOccupied ="),source.indexOf("    const outsideClear ="));
