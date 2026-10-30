@@ -7722,6 +7722,53 @@ const hubSheetPersistence = { name: "side panel persistence", why: "rule: panels
   }) && ["left", "right", "bottom"].every(dock => [false, true].every(open => motions.some(m => m.dock === dock && m.open === open))), JSON.stringify(motions));
   } finally { await b.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] }); }
 } };
+const hubMuteKey = { name: "voice mute key", why: "regression: M reserves voice mute across canvas, panel and dialog focus, preserves typing, and falls back to environment sound only when voice is off", run: async (b) => {
+  const r = await b.evaluate(`(() => {
+    const V = BL.voice, sound = BL.sound, saved = { ...V.stats }, environment = sound.muted, focus = document.activeElement;
+    const panel = document.createElement("div"), rows = [], fields = [];
+    panel.className = "sheet"; panel.setAttribute("role", "dialog"); document.body.append(panel);
+    let intercepted = 0;
+    const capture = e => { if (e.key.toLowerCase() === "m") { intercepted++; e.stopImmediatePropagation(); } };
+    const press = (node, extra = {}) => { node.focus(); const e = new KeyboardEvent("keydown", { key: "m", bubbles: true, cancelable: true, ...extra }); node.dispatchEvent(e); return e.defaultPrevented; };
+    try {
+      window.addEventListener("keydown", capture, true);
+      for (const state of ["enabled", "joining", "listening"]) {
+        Object.assign(V.stats, { enabled: state !== "joining", joining: state === "joining", publishing: state === "enabled", micWanted: state !== "listening" });
+        for (const tag of ["canvas", "button", "div"]) {
+          const node = tag === "canvas" ? document.getElementById("scene") : document.createElement(tag);
+          if (tag !== "canvas") { node.tabIndex = 0; panel.append(node); }
+          V.setMuted(false); intercepted = 0;
+          const down = press(node), muted = V.stats.muted, repeat = press(node, { repeat: true }), held = V.stats.muted;
+          const up = press(node, { key: "M", shiftKey: true });
+          rows.push({ state, tag, down, muted, repeat, held, up, unmuted: !V.stats.muted, intercepted,
+            environment: sound.muted === environment, micWanted: V.stats.micWanted === (state !== "listening") });
+          if (tag !== "canvas") node.remove();
+        }
+      }
+      V.stats.enabled = true; V.stats.joining = false; V.setMuted(false);
+      for (const tag of ["input", "textarea", "select", "div"]) {
+        const node = document.createElement(tag); if (tag === "div") node.contentEditable = "true"; panel.append(node);
+        intercepted = 0;
+        fields.push({ tag, typing: !press(node) && !V.stats.muted && intercepted === 1 && sound.muted === environment });
+        node.remove();
+      }
+      const canvas = document.getElementById("scene");
+      const modifiers = ["ctrlKey", "metaKey", "altKey"].every(key => !press(canvas, { [key]: true }) && !V.stats.muted);
+      window.removeEventListener("keydown", capture, true);
+      Object.assign(V.stats, { enabled: false, joining: false, publishing: false, micWanted: false });
+      const fallback = press(canvas) && sound.muted !== environment && !V.stats.muted;
+      return { rows, fields, modifiers, fallback };
+    } finally {
+      window.removeEventListener("keydown", capture, true); panel.remove();
+      Object.assign(V.stats, saved); V.setMuted(saved.muted); sound.setMuted(environment);
+      if (focus && focus.isConnected) focus.focus();
+    }
+  })()`);
+  record("voice mute key: M wins over later capture handlers in canvas, panels and dialogs while enabled, joining or listening; repeats never toggle twice or change environment sound",
+    r.rows.length === 9 && r.rows.every(row => row.down && row.muted && row.repeat && row.held && row.up && row.unmuted && !row.intercepted && row.environment && row.micWanted), JSON.stringify(r.rows));
+  record("voice mute key: inputs, message fields, editable content and modified shortcuts stay untouched, with environment mute as the voice-off fallback",
+    r.fields.every(row => row.typing) && r.modifiers && r.fallback, JSON.stringify({ fields: r.fields, modifiers: r.modifiers, fallback: r.fallback }));
+} };
 const hubChat = { name: "ooga chat", why: "regression: Chat releases pre-focus movement and fits keyboard-reduced viewports; Ooga Chat shows only with a backend, asks a signed-out visitor to sign in, keeps the last 100 lines as plain text, never pulls a reader back down, and Enter sends while Escape only leaves the input", run: async (b) => {
   // No backend in the suite: retain the saved selection while its tab is unavailable.
   await openWithSheetState(b, hubPage(src, "pos=0"), { open: true, tab: "chat" });
@@ -17558,7 +17605,7 @@ scene("hub", { label: "reset storage race", steps: [{ name: "reset storage race"
     record("browser reset: the same pooled browser clears final timer and pagehide writes before the next task", reused && kept.marker === null && kept.timer === null && kept.pagehide === null, JSON.stringify({ reused, ...kept }));
   } finally { next?.close(true); first?.close(true); rmSync(dir, { recursive: true, force: true }); }
 } }] });
-scene("hub", { label: "side panel", query: "pos=0", steps: [hubSheetPersistence, hubChat] });
+scene("hub", { label: "side panel", query: "pos=0", steps: [hubSheetPersistence, hubMuteKey, hubChat] });
 scene("hub", { label: "clock and block height", query: "pos=0&time=0900", steps: [hubBlockHeight, hubDestinationNames] });
 scene("hub", { label: "canvas2d", query: "canvas2d=1", steps: [hubMatrix, canvasTour] });
 scene("hub", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("hub", { required: ["#joy-move", "#joy-look", "#sheet-toggle", "#sheet-bananas"], sheet: true })] });
