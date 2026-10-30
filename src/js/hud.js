@@ -467,26 +467,35 @@
       const contributor = orderedRoster[rosterIndex];
       let nodes = rosterNodes.get(contributor.name);
       if (!nodes) {
-        const li = document.createElement("li"), presence = document.createElement("span"), name = document.createElement("span");
+        const li = document.createElement("li"), presence = document.createElement("span"), name = document.createElement("button");
         li.dataset.name = contributor.name;
         presence.className = "roster-presence"; presence.setAttribute("role", "img");
-        name.className = "roster-name";
-        const marks = document.createElement("span"), host = document.createElement("span"), voice = document.createElement("button");
-        marks.className = "roster-marks"; host.className = "roster-host";
+        // The name, with the host's dot right of it, opens a signed-in player's row onto where they are.
+        const label = document.createElement("span"), host = document.createElement("span");
+        name.className = "roster-name"; name.type = "button"; label.className = "roster-label";
+        host.className = "roster-host";
         host.setAttribute("role", "img"); host.setAttribute("aria-label", "Host: runs the Oogas for everyone");
         host.title = "Host: runs the Oogas for everyone";
+        name.append(label, host);
+        const marks = document.createElement("span"), voice = document.createElement("button");
+        marks.className = "roster-marks";
         voice.className = "roster-voice"; voice.type = "button"; voice.append(voiceIcon.cloneNode(true));
-        marks.append(host, voice);
+        marks.append(voice);
         const age = document.createElement("span"), state = document.createElement("span");
         age.className = "roster-age"; age.append(""); state.className = "roster-state"; state.append("");
-        li.append(presence, name, marks, age, state);
-        nodes = { li, presence, name, host, voice, age, state };
+        const where = document.createElement("div"), whereLabel = document.createElement("span"), whereValue = document.createElement("span");
+        where.className = "roster-where"; whereLabel.className = "roster-where-label"; whereLabel.textContent = "Land";
+        whereValue.className = "roster-where-value";
+        where.append(whereLabel, whereValue);
+        li.append(presence, name, marks, age, state, where);
+        nodes = { li, presence, name, label, host, voice, age, state, where, whereValue };
         rosterNodes.set(contributor.name, nodes);
       }
-      const { li, presence, name, host, voice, age, state } = nodes;
-      if (name.textContent !== contributor.display) name.textContent = contributor.display;
+      const { li, presence, name, label, host, voice, age, state, where, whereValue } = nodes;
+      if (label.textContent !== contributor.display) label.textContent = contributor.display;
       presence.dataset.online = "false"; presence.setAttribute("aria-label", "Offline"); presence.title = "Offline";
-      host.hidden = voice.hidden = true; voice.disabled = false;
+      host.hidden = voice.hidden = where.hidden = true; voice.disabled = false;
+      name.disabled = true; name.removeAttribute("aria-expanded"); whereValue.textContent = "";
       voice.dataset.voice = voice.dataset.login = ""; voice.dataset.self = "false";
       const activity = BL.contributors.contributionStateFor(contributor), ageText = BL.contributors.contributionAgeLabel(contributor);
       if (age.firstChild.data !== ageText) age.firstChild.data = ageText;
@@ -495,11 +504,18 @@
       li.hidden = activity === "away";
       if (activity === "away") { if (!awayRow.parentElement) el.roster.append(awayRow); awayCount++; }
       el.roster.append(li);
-      rosterRows.set(contributor.name, { li, presence, state, age, contributor, rosterIndex, online: false, sceneOnline: false, remoteOnline: false, netOnline: false, nextOnline: false, placedStamp: stampOf(contributor), host, voice, look: "", login: "", hostOn: false, blocked: false, self: false, nextLook: "", nextLogin: "", nextHost: false, nextSelf: false });
+      rosterRows.set(contributor.name, { li, presence, state, age, contributor, rosterIndex, online: false, sceneOnline: false, remoteOnline: false, netOnline: false, nextOnline: false, placedStamp: stampOf(contributor), host, voice, look: "", login: "", hostOn: false, blocked: false, self: false, nextLook: "", nextLogin: "", nextHost: false, nextSelf: false, name, where, whereValue, zone: "", nextZone: "", open: false });
     }
     if (!awayRow.parentElement) el.roster.append(awayRow);
     updateAwayButton();
     on(el.roster, "click", (e) => {
+      const who = e.target.closest(".roster-name");
+      if (who) {
+        who.blur();
+        const row = !who.disabled && rosterRows.get(who.parentElement.dataset.name);
+        if (row) openWhere(row, !row.open);
+        return;
+      }
       const button = e.target.closest(".roster-voice");
       if (!button || button.disabled) return;
       button.blur();
@@ -2322,6 +2338,29 @@
     const character = BL.net.characterOf(login);
     return character && liveRows.get(character.handle) || body && liveRows.get(BL.net.bodyName(body)) || null;
   };
+  // The land a signed-in player's zone stands in (docs/auth-and-presence.md, Zones), for their row's drop-down.
+  const LANDS = { outside: "The island", sphere: "Timechain Sphere", rainforest: "Mempool Island", bifrost: "\u20bfIFR\u00d6ST", lab: "EntropyLab", bca: "B.C.A.", factory: "Lightning Factory", arcade: "Ooga Arcade", mirror: "The Mirror cave", hq: "HQ", "ember-den": "Ember Den", none: "Between lands", "scene-transition": "Between lands" };
+  const landOf = (zone) => {
+    if (zone === "factory.hangar") return "Lightning Jet Hangar";
+    if (zone === "bifrost.chamber") return "\u20bfIFR\u00d6ST chamber";
+    const dot = zone.indexOf("."), group = dot < 0 ? zone : zone.slice(0, dot);
+    if (LANDS[group]) return LANDS[group];
+    if (/^sphere-\d$/.test(zone)) return `Timechain Sphere \u00b7 Room ${zone.slice(7)}`;
+    if (zone.startsWith("dsb-")) return "DSB Land";
+    if (zone.startsWith("cave-")) return "A cave on the island";
+    if (zone.startsWith("scene-")) {
+      const route = BL.routes.list.find((r) => r.scene === zone.slice(6) && !r.place);
+      return route ? route.title : "A game";
+    }
+    return zone;
+  };
+  // A row opens onto the land below its name, and closes when its player is no longer in the room.
+  const openWhere = (row, open) => {
+    row.open = open;
+    row.where.hidden = !open;
+    if (row.zone) row.name.setAttribute("aria-expanded", String(open));
+    else row.name.removeAttribute("aria-expanded");
+  };
   const paintMarks = (row) => {
     const blocked = !!row.nextLogin && BL.voice.mutedLocally(row.nextLogin);
     if (row.look !== row.nextLook || row.login !== row.nextLogin || row.blocked !== blocked || row.self !== row.nextSelf) {
@@ -2345,6 +2384,12 @@
       row.hostOn = row.nextHost;
       row.host.hidden = !row.hostOn;
     }
+    if (row.zone !== row.nextZone) {
+      row.zone = row.nextZone;
+      row.name.disabled = !row.zone;
+      row.whereValue.textContent = row.zone ? landOf(row.zone) : "";
+      openWhere(row, row.open && !!row.zone);
+    }
   };
   // A signed-in player is online on their own Ooga's row and on the row of the actor's Ooga.
   const markOnline = (login, body) => {
@@ -2355,7 +2400,7 @@
   const showVoices = () => {
     if (!liveRows) return;
     for (const row of liveRows.values()) {
-      row.nextLook = row.nextLogin = "";
+      row.nextLook = row.nextLogin = row.nextZone = "";
       row.nextHost = row.nextOnline = row.nextSelf = false;
     }
     const net = BL.net.state, voice = BL.voice.stats;
@@ -2366,6 +2411,7 @@
       for (const rec of BL.net.remotes.values()) markOnline(rec.login, rec.body);
       const self = voiceRowOf(net.me.login, net.body);
       if (self) {
+        self.nextZone = net.zone;
         if (voice.enabled) {
           self.nextLook = voice.muted ? "muted" : voice.speaking ? "speaking" : "on";
           self.nextSelf = true;
@@ -2375,6 +2421,7 @@
       for (const rec of BL.net.remotes.values()) {
         const row = voiceRowOf(rec.login, rec.body);
         if (!row) continue;
+        row.nextZone = rec.zone;
         if (rec.voice) {
           row.nextLook = rec.muted ? "muted" : BL.voice.speaking(rec.id) ? "speaking" : "on";
           row.nextLogin = rec.login;
