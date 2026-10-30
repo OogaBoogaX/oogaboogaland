@@ -1358,7 +1358,7 @@ void main() {
       vec2 offset = vMirrorLocal - wave.xy;
       float distance = length(offset);
       if (uRippleContact > 0.5) {
-        float contact = 1.0 - smoothstep(0.0, ${BL.mirrorRipples.CONTACT_RADIUS.toFixed(6)}, distance);
+        float contact = uRippleContact > 1.5 ? 1.0 : 1.0 - smoothstep(0.0, ${BL.mirrorRipples.CONTACT_RADIUS.toFixed(6)}, distance);
         glyphCrest = max(glyphCrest, contact * wave.w);
         continue;
       }
@@ -1435,12 +1435,13 @@ void main() {
         int glyph = (abs(stream * 73 + flowCell * 151) + int(floor(uRippleTime * 20.0))) & 7;
         float mask = texelFetch(uMatrixGlyphTex, ivec2(glyph * 6 + 1 + pixel.x, 5 - pixel.y), 0).r;
         vec2 coverage = 1.0 - smoothstep(vec2(0.38) - pixelFootprint * 0.5, vec2(0.38) + pixelFootprint * 0.5, abs(fract(pixelCoord) - 0.5));
-        float alpha = glyphCrest * mask * coverage.x * coverage.y * 0.82;
+        float alpha = glyphCrest * mask * coverage.x * coverage.y * (uRippleContact > 1.5 ? 1.0 : 0.82);
         float glow = (0.58 + rippleHash(stream + 101) * 0.36) * (0.48 + float(position + 1) / float(train) * 0.52);
         float tip = position == train - 1 ? 1.0 : position == train - 2 ? 0.55 : 0.0;
         vec3 base = (glyph & 1) == 0 ? vec3(24.0, 220.0, 74.0) : vec3(70.0, 255.0, 112.0);
         vec3 green = mix(base / 255.0 * mix(0.78, 1.15, glow), vec3(0.84, 1.0, 0.89), tip * 0.88);
         vec3 crest = uCrestTint.r < 0.0 ? green : mix(uCrestTint * mix(0.78, 1.15, glow), vec3(0.9, 0.97, 1.0), tip * 0.88);
+        if (uRippleContact > 1.5) crest *= 1.6;
         if (uRippleOnly > 0.5) {
           // Premultiplied glyphs reveal the actual scene behind this plane;
           // the faint crest adds light without an opaque reflection or tint.
@@ -1452,7 +1453,7 @@ void main() {
   }
   if (uRippleOnly > 0.5 && max(max(color.r, color.g), color.b) < 0.0001) discard;
   oColor = vec4(color, uRippleOnly > 0.5 ? effectAlpha : 1.0);
-  oBright = vec4(0.0);
+  oBright = uRippleContact > 1.5 ? vec4(color * 0.35, effectAlpha) : vec4(0.0);
 }`;
   const SHARD_FS = `#version 300 es
 precision highp float;
@@ -3876,7 +3877,7 @@ void main() {
         const ripples = mirror.node.mirrorRipples, body = mirror.node.mirrorBody;
         mirrorDebug.ripples = ripples ? ripples.active : 0;
         gl.uniform1i(pg.u.uRippleActive, mirrorDebug.ripples);
-        gl.uniform1f(pg.u.uRippleContact, ripples && ripples.contact ? 1 : 0);
+        gl.uniform1f(pg.u.uRippleContact, ripples && ripples.contact ? ripples.surface ? 2 : 1 : 0);
         gl.uniform1f(pg.u.uRippleTime, body ? body.time : ripples ? ripples.time : 0);
         gl.uniform4fv(pg.u.uRipples, ripples ? ripples.waves : NO_MIRROR_RIPPLES);
         const bodyActive = body && (body.contacts || body.active);
@@ -3999,7 +4000,7 @@ void main() {
         gl.activeTexture(gl.TEXTURE2);
         gl.uniform3f(pg.u.uCrestTint, tint ? tint[0] : -1, tint ? tint[1] : 0, tint ? tint[2] : 0);
         gl.uniform1i(pg.u.uRippleActive, ripples ? ripples.active : 0);
-        gl.uniform1f(pg.u.uRippleContact, ripples && ripples.contact ? 1 : 0);
+        gl.uniform1f(pg.u.uRippleContact, ripples && ripples.contact ? ripples.surface ? 2 : 1 : 0);
         gl.uniform1f(pg.u.uRippleTime, bodyActive ? body.time : ripples ? ripples.time : 0);
         gl.uniform4fv(pg.u.uRipples, ripples ? ripples.waves : NO_MIRROR_RIPPLES);
         gl.bindTexture(gl.TEXTURE_2D, t.tex);
@@ -4063,7 +4064,7 @@ void main() {
         gl.uniform4fv(pg.u.uBodyWaves, body ? body.waves : NO_MIRROR_BODY_WAVES);
         gl.uniformMatrix4fv(pg.u.uMirrorWorld, false, node.world);
         gl.uniform1i(pg.u.uRippleActive, ripples ? ripples.active : 0);
-        gl.uniform1f(pg.u.uRippleContact, ripples && ripples.contact ? 1 : 0);
+        gl.uniform1f(pg.u.uRippleContact, ripples && ripples.contact ? ripples.surface ? 2 : 1 : 0);
         gl.uniform1f(pg.u.uRippleTime, bodyActive ? body.time : ripples ? ripples.time : 0);
         gl.uniform4fv(pg.u.uRipples, ripples ? ripples.waves : NO_MIRROR_RIPPLES);
         const tint = node.rippleTint;

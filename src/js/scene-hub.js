@@ -2025,20 +2025,32 @@
   // An invisible one-way staircase continues from the dock into the sky. It
   // only arms from a grounded step off the outer deck: arriving from the air,
   // or jumping once on it, leaves every tread intangible until the visitor
-  // returns to the dock. A fixed pool of transparent tread planes reveals the cave entrance glyphs
-  // around both feet while standing there, fading one second after they leave the tread.
+  // returns to the dock. Pooled transparent treads and risers carry the cave glyphs down over
+  // the edges, staying lit under the walker and fading one second after they leave the tread.
   const buildDockStairs = (dock) => {
     const START = 4.25, RUN = 0.62, RISE = 0.5, HALF_WIDTH = 0.78, GLYPH_POOL = 12;
     const base = dock.position.y, count = Math.ceil((FLY.yMax - base) / RISE), end = START + count * RUN;
     const ry = dock.rotation.y, ux = Math.cos(ry), uz = -Math.sin(ry), vx = Math.sin(ry), vz = Math.cos(ry);
-    const glyphs = [], footPoint = new Float64Array(3);
-    for (let i = 0; i < GLYPH_POOL; i++) {
-      // Each plane owns its ripple state; the renderer batches by geometry, so give each pool slot its own mesh.
-      const geometry = { verts: [-RUN / 2, -HALF_WIDTH, 0, RUN / 2, -HALF_WIDTH, 0, RUN / 2, HALF_WIDTH, 0, -RUN / 2, HALF_WIDTH, 0],
+    const glyphs = [];
+    const surface = (halfWidth, bottom, top, x, y, z, rx, ry) => {
+      // Each face needs its own mesh: the renderer batches ripple surfaces by geometry.
+      const geometry = { verts: [-halfWidth, bottom, 0, halfWidth, bottom, 0, halfWidth, top, 0, -halfWidth, top, 0],
         faces: [{ i: [0, 1, 2, 3], color: [0, 0, 0] }, { i: [3, 2, 1, 0], color: [0, 0, 0] }], lines: [], castShadow: false, mirrorRippleOnly: true };
-      const node = createNode({ visible: false, rotation: { x: -Math.PI / 2, y: ry, z: 0 }, geometry, mirrorRippleOnly: true, matrixNative: true, sightHidden: true });
+      return createNode({ position: { x, y, z }, rotation: { x: rx, y: ry, z: 0 }, geometry, mirrorRippleOnly: true, matrixNative: true, sightHidden: true });
+    };
+    for (let i = 0; i < GLYPH_POOL; i++) {
+      const node = createNode({ visible: false, rotation: { x: 0, y: ry, z: 0 } });
+      const top = surface(HALF_WIDTH, -RUN / 2, RUN / 2, 0, 0, 0, -Math.PI / 2, -Math.PI / 2);
+      // Local -y runs toward the dock on top and vertically down on every side. The front shares
+      // the top's glyph coordinates at its lip so each stream flows continuously over that edge.
+      addChild(node, top,
+        surface(HALF_WIDTH, -RUN / 2 - RISE, -RUN / 2, -RUN / 2, RUN / 2, 0, 0, -Math.PI / 2),
+        surface(HALF_WIDTH, -RISE, 0, RUN / 2, 0, 0, 0, Math.PI / 2),
+        surface(RUN / 2, -RISE, 0, 0, 0, HALF_WIDTH, 0, 0),
+        surface(RUN / 2, -RISE, 0, 0, 0, -HALF_WIDTH, 0, Math.PI));
       node.dockStep = 0;
-      BL.mirrorRipples.create(node, { contact: true });
+      node.mirrorRipples = BL.mirrorRipples.create(top, { contact: true, surface: true });
+      for (const face of node.children) face.mirrorRipples = node.mirrorRipples;
       addChild(root, node);
       placed.push(node);
       glyphs.push(node);
@@ -2074,7 +2086,7 @@
       const floor = floorAt(index);
       return floor <= y + maxStep + 1e-7 ? floor : -Infinity;
     };
-    const holdFeet = (index, actor) => {
+    const holdStep = (index) => {
       let node = null;
       for (let i = 0; i < glyphs.length; i++) {
         if (glyphs[i].mirrorRipples.active && glyphs[i].dockStep === index) { node = glyphs[i]; break; }
@@ -2090,46 +2102,46 @@
       node.position.y = floorAt(index) + 0.018;
       node.position.z = dock.position.z + uz * along;
       node.dockStep = index;
-      // Project both soles onto the supporting tread. Each foot owns one held contact; a tread no longer
-      // under the walker keeps its last foot positions and fades without more contact writes.
-      BL.scene.updateWorld(actor.root, actor.root.parent ? actor.root.parent.world : null);
       if (!node.visible) lit++;
       node.visible = true;
       node.mirrorRipples.time = time;
-      for (let foot = 0; foot < 2; foot++) {
-        const leg = foot ? actor.parts.legR : actor.parts.legL, bounds = BL.scene.boundsOf(leg.geometry);
-        math.mat4.transformPoint(footPoint, leg.world, (bounds.min[0] + bounds.max[0]) / 2, bounds.min[1], (bounds.min[2] + bounds.max[2]) / 2);
-        // The plane's local x follows the stairs; its local y is opposite the dock's across axis.
-        const x = clamp(alongAt(footPoint[0], footPoint[2]) - along, -RUN / 2, RUN / 2);
-        const y = clamp(-acrossAt(footPoint[0], footPoint[2]), -HALF_WIDTH, HALF_WIDTH);
-        node.mirrorRipples.hold(x, y, foot);
-      }
+      node.mirrorRipples.hold(0, 0, 0);
     };
     const update = (dt, actor) => {
       time += dt;
+      let standing = 0;
+      if (active && actor === owner) {
+        if (actor.hop > 1e-7 || actor.hopV > 0 || actor.jet?.thrust) reset(true);
+        else {
+          const p = actor.root.position, along = alongAt(p.x, p.z), across = acrossAt(p.x, p.z), feet = p.y - actor.baseY;
+          // Read the supporting height, not the next tread the body's leading edge might reach.
+          const index = Math.min(count, Math.round((feet - base) / RISE));
+          if (index > 0 && Math.abs(feet - floorAt(index)) < 0.12 && Math.abs(across) <= HALF_WIDTH + PLAYER_RADIUS
+            && along >= START + (index - 1) * RUN - PLAYER_RADIUS && along <= START + index * RUN + PLAYER_RADIUS) standing = index;
+          else if (along <= START && Math.abs(across) <= 1 + PLAYER_RADIUS) reset(false);
+        }
+      }
       lit = 0;
       for (let i = 0; i < glyphs.length; i++) {
         const node = glyphs[i];
-        node.mirrorRipples.update(dt, time);
+        node.mirrorRipples.update(node.dockStep === standing && standing ? 0 : dt, time);
         node.visible = node.mirrorRipples.active > 0;
         if (node.visible) lit++;
       }
-      if (!active || actor !== owner) return;
-      if (actor.hop > 1e-7 || actor.hopV > 0 || actor.jet?.thrust) { reset(true); return; }
-      const p = actor.root.position, along = alongAt(p.x, p.z), across = acrossAt(p.x, p.z), index = indexAt(along, across);
-      if (!index) {
-        if (along <= START && Math.abs(across) <= 1 + PLAYER_RADIUS) reset(false);
-        return;
-      }
-      const feet = p.y - actor.baseY;
-      if (Math.abs(feet - floorAt(index)) < 0.08) {
-        if (index !== lastStep) { lastStep = index; contacts++; }
-        holdFeet(index, actor);
+      if (standing) {
+        if (standing !== lastStep) { lastStep = standing; contacts++; }
+        holdStep(standing);
       }
     };
     return {
       supportAt, update, reset, alongAt, acrossAt, indexAt, floorAt,
-      dispose() { for (const node of glyphs) { node.mirrorRipples.dispose(); node.visible = false; } lit = 0; },
+      dispose() {
+        for (const node of glyphs) {
+          node.mirrorRipples.dispose(); node.mirrorRipples = null; node.visible = false;
+          for (const face of node.children) face.mirrorRipples = null;
+        }
+        lit = 0;
+      },
       get inMotion() { return lit > 0; },
       base, start: START, run: RUN, rise: RISE, halfWidth: HALF_WIDTH, count, end, top: FLY.yMax, glyphs,
       get active() { return active; }, get lastStep() { return lastStep; }, get contacts() { return contacts; }, get jumpRejects() { return jumpRejects; }

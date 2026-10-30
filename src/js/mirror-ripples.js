@@ -8,7 +8,7 @@
   const strengthAt = age => Math.exp(-5 * age) * Math.max(0, 1 - age / LIFETIME);
   // A footfall reveals a small filled patch of the same glyph streams, fading in place instead of spreading rings.
   const contactStrengthAt = age => { const k = Math.max(0, 1 - age / CONTACT_LIFETIME); return k * k * (3 - 2 * k); };
-  const create = (node, { contact: localContact = false } = {}) => {
+  const create = (node, { contact: localContact = false, surface = false } = {}) => {
     const waves = new Float32Array(CAPACITY * 4), inverse = mat4.create();
     const bounds = BL.scene.boundsOf(node.geometry), a = new Float64Array(3), b = new Float64Array(3);
     const previous = mat4.create(), current = mat4.create(), contact = new Float64Array(2);
@@ -18,7 +18,7 @@
     BL.scene.updateWorld(root);
     mat4.invert(inverse, node.world);
     let next = 0;
-    const state = { waves, contact: localContact, active: 0, hits: 0, time: 0, cross, absorb, strike, aimAt, continueShot, pulse, hold, update, dispose };
+    const state = { waves, contact: localContact, surface, active: 0, hits: 0, time: 0, cross, absorb, strike, aimAt, continueShot, pulse, hold, update, dispose };
     const onGlass = (x, y) => x >= bounds.min[0] && x <= bounds.max[0]
       && y >= bounds.min[1] + (bounds.max[1] - bounds.min[1]) * (node.mirrorReveal || 0) && y <= bounds.max[1];
     function intersection(ax, ay, az, bx, by, bz) {

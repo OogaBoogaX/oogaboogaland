@@ -10,13 +10,14 @@
   const DEFAULT_MATRIX_APERTURE = new Float32Array([2.5, 3, 0.5, 0]);
   // Shared native Matrix greens, with quantized brightness so ripple pixels
   // never build RGB strings while a shot is crossing the mirror.
-  const RIPPLE_GREENS = new Array(96);
+  const RIPPLE_GREENS = new Array(96), STEP_GREENS = new Array(96);
   for (let tip = 0; tip < 3; tip++) for (let gain = 0; gain < 16; gain++) for (let odd = 0; odd < 2; odd++) {
     const emission = 0.88 + gain / 15 * 0.25, head = (tip === 2 ? 1 : tip === 1 ? 0.55 : 0) * 0.88;
     const r = Math.round(lerp((odd ? 70 : 24) * emission, 214.2, head));
     const g = Math.min(255, Math.round(lerp((odd ? 255 : 220) * emission, 255, head)));
     const b = Math.round(lerp((odd ? 112 : 74) * emission, 226.95, head));
     RIPPLE_GREENS[(tip * 16 + gain) * 2 + odd] = `rgb(${r},${g},${b})`;
+    STEP_GREENS[(tip * 16 + gain) * 2 + odd] = `rgb(${Math.min(255, Math.round(r * 1.6))},${Math.min(255, Math.round(g * 1.6))},${Math.min(255, Math.round(b * 1.6))})`;
   }
   // One shaded image per surface per frame: the first face drawn sets the surface's light for the frame, so a curved
   // board tessellated into a strip of faces shades once, not once a face. This also shares the first face's Matrix
@@ -1469,7 +1470,7 @@
         const offset = i * 4, strength = waves[offset + 3];
         if (strength <= 0) continue;
         const x = waves[offset], y = waves[offset + 1], radius = START_RADIUS + waves[offset + 2] * SPEED;
-        const contact = ripples.contact, reach = contact ? CONTACT_RADIUS : radius + WIDTH * 2;
+        const contact = ripples.contact, surface = contact && ripples.surface, reach = surface ? Infinity : contact ? CONTACT_RADIUS : radius + WIDTH * 2;
         if (x + reach < rec.mirrorMinX || x - reach > rec.mirrorMaxX || y + reach < rec.mirrorMinY || y - reach > rec.mirrorMaxY) continue;
         if (!contact) {
           const depth = Math.max(1e-7, -(m[2] * x + m[6] * y + m[14]));
@@ -1503,12 +1504,13 @@
             const glow = matrixStreams[stream + 5] * (0.48 + (position + 1) / train * 0.52);
             const gain = Math.max(0, Math.min(15, Math.round((0.78 + glow * 0.37 - 0.88) / 0.25 * 15)));
             const tip = position === train - 1 ? 2 : position === train - 2 ? 1 : 0;
-            ctx.fillStyle = RIPPLE_GREENS[(tip * 16 + gain) * 2 + (glyph & 1)];
+            ctx.fillStyle = (surface ? STEP_GREENS : RIPPLE_GREENS)[(tip * 16 + gain) * 2 + (glyph & 1)];
             for (let bit = 0; bit < 24; bit++) {
               if (!((mask >> bit) & 1)) continue;
               const px = cx + ((bit & 3) - 1.5) * 0.021, py = cy + (2.5 - (bit >> 2)) * 0.021;
               const distance = Math.hypot(px - x, py - y);
-              if (contact) {
+              if (surface) ctx.globalAlpha = bright;
+              else if (contact) {
                 const k = Math.min(1, distance / CONTACT_RADIUS);
                 ctx.globalAlpha = bright * (1 - k * k * (3 - 2 * k)) * 0.82;
               } else {

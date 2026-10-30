@@ -4614,7 +4614,7 @@ const totemFeedChecks = async () => {
   record("totem feed: the Worker's summary lights a totem without celebrating the first reading, its 304 keeps it, a newer merge is fresh, a static host or a file page reads GitHub itself, and a spent Worker limit is waited out, sending only a first reading to GitHub",
     firstQuiet && revalidated && fresh && direct && shared && fileDirect, JSON.stringify({ firstQuiet, revalidated, fresh, direct, firstOnly, waited, ownLimit, fileDirect, asked: site.asked.length, events: site.events, failures: site.feed.state.failures }));
 };
-// Dock contacts hold the portal glyphs around both feet and leave a fading trail on departed treads.
+// Dock glyphs wrap down the step, hold on its supporting height and fade only after departure.
 const dockGlyphChecks = async () => {
   const context = { window: { BL: {} } };
   for (const name of ["math", "scene", "models", "mirror-ripples"])
@@ -4637,20 +4637,27 @@ const dockGlyphChecks = async () => {
   actor.root.position.x = along; actor.root.position.y = first + actor.baseY;
   D.update(0, actor);
   const lit = D.glyphs.filter(n => n.visible), firstNode = lit[0], ripple = firstNode?.mirrorRipples;
-  const localized = lit.length === 1 && firstNode.dockStep === 1 && firstNode.geometry.mirrorRippleOnly && ripple.contact
-    && ripple.active === 2 && Math.abs(ripple.waves[0]) <= D.run / 2 + 1e-6
-    && Math.abs(ripple.waves[1] + 0.12) < 1e-5 && Math.abs(ripple.waves[5] + 0.36) < 1e-5;
+  const localized = lit.length === 1 && firstNode.dockStep === 1 && ripple.contact && ripple.surface && ripple.active === 1;
+  S.updateWorld(rootNode);
+  const top = firstNode.children[0], front = firstNode.children[1], topLip = new Float64Array(3), frontLip = new Float64Array(3);
+  BL.math.mat4.transformPoint(topLip, top.world, 0, -D.run / 2, 0);
+  BL.math.mat4.transformPoint(frontLip, front.world, 0, -D.run / 2, 0);
+  const wrapped = firstNode.children.length === 5 && firstNode.children.every(n => n.geometry.mirrorRippleOnly && n.mirrorRipples === ripple)
+    && topLip.every((v, i) => Math.abs(v - frontLip[i]) < 1e-5) && top.world[4] > 0.99
+    && firstNode.children.slice(1).every(n => n.world[5] > 0.99);
   D.update(0.5, actor);
   D.update(0.51, actor);
-  const held = firstNode.visible && ripple.active === 2 && ripple.waves[3] === 1 && ripple.waves[7] === 1
-    && ripple.hits === 2 && D.inMotion && D.contacts === 1;
-  actor.root.position.x += D.run; actor.root.position.y += D.rise;
+  // Body overlap can already predict the next step while the soles remain on the previous one.
+  actor.root.position.x = D.start + D.run - 0.35 + 0.01; actor.root.position.y += 0.09;
+  D.update(2, actor);
+  const held = firstNode.visible && ripple.active === 1 && ripple.waves[3] === 1
+    && ripple.hits === 1 && D.inMotion && D.contacts === 1 && D.indexAt(actor.root.position.x, 0.24) === 2;
+  actor.root.position.x = along + D.run; actor.root.position.y = first + actor.baseY + D.rise;
   D.update(0, actor);
   const second = D.glyphs.find(n => n.visible && n.dockStep === 2);
-  const stepped = D.glyphs.filter(n => n.visible).length === 2 && second?.mirrorRipples.active === 2 && D.contacts === 2;
+  const stepped = D.glyphs.filter(n => n.visible).length === 2 && second?.mirrorRipples.active === 1 && D.contacts === 2;
   D.update(0.5, actor);
-  const faded = ripple.active === 2 && Math.abs(ripple.waves[3] - 0.5) < 1e-6
-    && Math.abs(ripple.waves[7] - 0.5) < 1e-6 && second.mirrorRipples.waves[3] === 1 && second.mirrorRipples.waves[7] === 1;
+  const faded = ripple.active === 1 && Math.abs(ripple.waves[3] - 0.5) < 1e-6 && second.mirrorRipples.waves[3] === 1;
   D.update(0.51, actor);
   const trailExpired = !firstNode.visible && second.visible && D.inMotion && D.contacts === 2;
   actor.hop = 0.1; D.update(0.1, actor);
@@ -4658,10 +4665,11 @@ const dockGlyphChecks = async () => {
   D.update(1.01, actor);
   const expired = D.glyphs.every(n => !n.visible) && !D.inMotion;
   D.dispose();
-  record("dock glyph steps: grounded entry lights both feet continuously, departed treads fade in one second while the current tread stays lit, and jumping releases the contacts and support",
-    refused && first === 2.5 && localized && held && stepped && faded && trailExpired && jumped && expired && D.glyphs.every(n => !n.visible && !n.mirrorRipples),
-    JSON.stringify({ refused, first, localized, held, stepped, faded, trailExpired, jumped, expired }));
-  const cave = S.createNode({ geometry: firstNode.geometry }), ordinary = BL.mirrorRipples.create(cave);
+  record("dock glyph steps: streams wrap down five faces, the supporting tread stays lit through pose drift and long frames, departed treads fade in one second, and jumping releases the contact and support",
+    refused && first === 2.5 && localized && wrapped && held && stepped && faded && trailExpired && jumped && expired
+    && D.glyphs.every(n => !n.visible && !n.mirrorRipples && n.children.every(face => !face.mirrorRipples)),
+    JSON.stringify({ refused, first, localized, wrapped, held, stepped, faded, trailExpired, jumped, expired }));
+  const cave = S.createNode({ geometry: top.geometry }), ordinary = BL.mirrorRipples.create(cave);
   ordinary.pulse(0, 0); ordinary.update(0.3);
   const originalFade = Math.abs(ordinary.waves[3] - Math.exp(-1.5) * (1 - 0.3 / BL.mirrorRipples.LIFETIME)) < 1e-6;
   ordinary.update(0.5);
