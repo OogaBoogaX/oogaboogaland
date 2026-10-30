@@ -10324,9 +10324,10 @@
     yield;
     slice.until = performance.now() + ENTER_SLICE_MS;
   };
-  // The island's whole visit, built in slices when the director lets it (`enterSteps`: cold boot and a released
-  // hub's return) and in one go otherwise (`enter`: a kept hub's resume, which never pauses). `pause` gives the
-  // event loop back once a slice has run its budget; between slices nothing of the visit runs, and input stays held.
+  // The island's whole visit as a generator. The director always runs it as `enterSteps`: cold boot and a released
+  // hub's return in slices, a kept hub's resume in its first slice, since that never pauses. `enter` drains it at
+  // once for any other caller. `pause` gives the event loop back once a slice has run its budget; between slices
+  // nothing of the visit runs, and input stays held.
   const enterSteps = function* (ctx) {
     const slice = { until: performance.now() + ENTER_SLICE_MS };
     prefetchAt = 0;

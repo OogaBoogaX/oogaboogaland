@@ -907,6 +907,8 @@
       }
       if (destroyed) { models.release(first.id, []); return; }
     }
+    // Nothing has drawn yet, so a failed boot lifts the curtain off the Reload notice entryFailed offers.
+    const bootFailed = (error) => { failBootDonations(); entryFailed(null, error); openCurtain(); };
     if (first.buildSteps) {
       try {
         const steps = window.BL.buildTasks.measure(() => models.withScope(first.id, () => first.buildSteps({ ...ctx, place, signal: bootBuildController.signal })));
@@ -914,7 +916,7 @@
       } catch (error) {
         models.release(first.id, []);
         if (destroyed) return;
-        if (first.id === Object.keys(scenes)[0]) { failBootDonations(); entryFailed(null, error); return; }
+        if (first.id === Object.keys(scenes)[0]) { bootFailed(error); return; }
         first = scenes[Object.keys(scenes)[0]];
         place = null;
         window.BL.hud.toast("That place could not be opened · here is the island");
@@ -946,7 +948,7 @@
         }
       } catch (error) {
         if (destroyed) { models.release(first.id, []); return; }
-        failBootDonations(); entryFailed(null, error); return;
+        bootFailed(error); return;
       }
     } else window.BL.buildTasks.measure(() => { enter(first, place); finishBootDonations(); });
     mark("ready");

@@ -13315,8 +13315,8 @@ const hubBootFailure = { name: "hub boot failure", why: "regression: a sliced co
     H.enterSteps=function*(ctx){S.signal=ctx.signal;yield;throw new Error("boot failure fixture");};
   `);
   const failed = await bootWait(b, "window.__bootFailure?.errors.length", 10000);
-  const state = await b.evaluate(`(()=>{const S=__bootFailure,notice=document.getElementById("reload-notice"),button=notice.querySelector("button"),rect=button?.getBoundingClientRect();return {scene:__ooga.scene,aborted:!!S.signal?.aborted,errors:S.errors,visible:!!button&&!notice.hidden&&rect.width>0&&rect.height>0,focused:document.activeElement===button,usable:!!button&&!button.closest("[inert]")};})()`);
-  record("hub boot failure: a post-yield error aborts the partial visit and offers a focused, usable Reload", failed && state.scene === null && state.aborted && state.errors.length === 1 && state.errors[0] === "boot failure fixture" && state.visible && state.focused && state.usable, JSON.stringify(state));
+  const state = await b.evaluate(`(()=>{const S=__bootFailure,notice=document.getElementById("reload-notice"),button=notice.querySelector("button"),rect=button?.getBoundingClientRect();return {scene:__ooga.scene,aborted:!!S.signal?.aborted,errors:S.errors,visible:!!button&&!notice.hidden&&rect.width>0&&rect.height>0,focused:document.activeElement===button,usable:!!button&&!button.closest("[inert]"),uncovered:!document.getElementById("curtain")||document.getElementById("curtain").dataset.open==="true"};})()`);
+  record("hub boot failure: a post-yield error aborts the partial visit and offers a focused, usable Reload the curtain no longer covers", failed && state.scene === null && state.aborted && state.errors.length === 1 && state.errors[0] === "boot failure fixture" && state.visible && state.focused && state.usable && state.uncovered, JSON.stringify(state));
 } };
 const hubBootPagehide = { name: "hub boot pagehide", why: "regression: non-persisted pagehide during sliced cold boot rejected into the console instead of quietly cancelling construction", run: async (b) => {
   await bootFixture(b, `
@@ -13342,7 +13342,8 @@ const hubBootTierUploads = { name: "hub boot tier uploads", why: "regression: in
   const ready = await bootWait(b, 'window.__ooga?.scene==="hub"', 25000);
   const state = await b.evaluate(`({initial:__bootTier.initial,changes:__bootTier.changes,before:__bootTier.before,after:__bootTier.after,quality:__ooga.renderer.quality,cpu:BL.buildTasks.cpu,logs:[]})`);
   state.logs = b.logs.slice();
-  record("hub boot tier uploads: an artificial 2 s upload does not force the opening quality tier to Low", ready && state.initial !== "low", JSON.stringify(state));
+  // `before` proves the fixture wrapped the boot's uploads; without it the tier check would pass on an ordinary boot.
+  record("hub boot tier uploads: an artificial 2 s upload does not force the opening quality tier to Low", ready && state.before !== undefined && state.initial !== "low", JSON.stringify(state));
 } };
 const hubBootDonationReplay = { name: "hub boot donation replay", why: "regression: a donation delivered during sliced cold boot was counted but never shown by the arriving scene", run: async (b) => {
   await b.send("Page.addScriptToEvaluateOnNewDocument", { source: `(()=>{const timer=setInterval(()=>{if(!window.BL?.donations?.subscribe)return;clearInterval(timer);const subscribe=BL.donations.subscribe;BL.donations.subscribe=(fn,opts)=>{window.__bootDonation={fn};return subscribe(fn,opts);};},0);})()` });
