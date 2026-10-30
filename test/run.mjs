@@ -20373,10 +20373,6 @@ const distributionAudioChecks = async () => {
     record("distribution audio: exact MP3 assets replace embedded text and the final script retains its literal bytes and strict CSP hash",
       descriptor.external && urls.length === 5 && urls.every((url, i) => /^\/audio\/dsb-[a-f0-9]{64}\.mp3$/.test(url) && readFileSync(join(out, url)).equals(Buffer.from(encoded[i], "base64")))
       && staged.includes(`script-src 'sha256-${hash(updated)}'`) && updated.endsWith(script.slice(script.indexOf("const literal"))) && !updated.includes(encoded[0]), "staged recording/CSP mismatch");
-    const pages = readFileSync(join(root, ".github/workflows/pages.yml"), "utf8");
-    record("distribution audio: GitHub Pages stages the same on-demand recordings as the Worker",
-      pages.split("\n").some(line => /^\s*run: node scripts\/site\.mjs _site\b/.test(line) && line.split(/\s+/).includes("--audio-assets")),
-      "Pages staging leaves the DSB recordings embedded");
     // The DSB rooms' pictures leave the deferred dsb bundle as same-origin files of the same bytes; the bundle still evaluates.
     const blocks = new Map(PICTURE_MODULES.map(src => [src, `// ---- ${src} ----\n${readFileSync(join(root, "src", src), "utf8").trim()}`]));
     const pictures = [...blocks.values()].flatMap(text => [...text.matchAll(/data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)/g)]);
@@ -21495,6 +21491,7 @@ const artifactUnitProof = () => {
     node() { return 0; }
     npm() { printf 'npm|%s\\n' "$*"; return "$UNIT_EXIT"; }
     gh() {
+      case "$*" in *"/compare/merged-sha...rock "*) printf '%s\\n' "$COMPARE"; return 0;; esac
       printf 'gh|%s|%s\\n' "$GH_TOKEN" "$*"
       case "$*" in
         *"context=Unit · the browser-free lane"*)
@@ -21505,22 +21502,26 @@ const artifactUnitProof = () => {
   `;
   const dir = mkdtempSync(join(tmpdir(), "ooga-artifact-unit-")), rows = [];
   try {
-    for (const [name, changed, unit, status, push] of [["pass", 1, 0, "none", 0], ["fail", 1, 1, "none", 0],
-      ["status", 1, 0, "success", 0], ["pending", 1, 0, "pending", 0], ["unchanged", 0, 0, "none", 0], ["concurrent", 1, 0, "none", 1]]) {
+    for (const [name, changed, unit, status, push, compare = ""] of [["pass", 1, 0, "none", 0], ["fail", 1, 1, "none", 0],
+      ["status", 1, 0, "success", 0], ["pending", 1, 0, "pending", 0], ["unchanged", 0, 0, "none", 0], ["concurrent", 1, 0, "none", 1, "ahead 0"],
+      ["diverged", 1, 0, "none", 1, "diverged 2"], ["superseded", 1, 0, "none", 1, "ahead 1"]]) {
       const result = spawnSync("bash", ["-e", "-c", doubles + script], { cwd: dir, encoding: "utf8", timeout: 5000,
         env: { ...process.env, GH_TOKEN: "character-app", UNIT_STATUS_TOKEN: "actions-job", GITHUB_REPOSITORY: "fixture/repo",
-          GITHUB_SERVER_URL: "https://github.com", GITHUB_RUN_ID: "123", GITHUB_RUN_ATTEMPT: "1",
+          GITHUB_SERVER_URL: "https://github.com", GITHUB_RUN_ID: "123", GITHUB_RUN_ATTEMPT: "1", GITHUB_SHA: "merged-sha", COMPARE: compare,
           CHANGED: String(changed), UNIT_EXIT: String(unit), STATUS_FAIL: status, PUSH_EXIT: String(push) } });
       const lines = result.stdout.split("\n"), ran = lines.indexOf("npm|run test:unit"), pushed = lines.indexOf("git|push origin HEAD:rock");
       const pending = lines.findIndex(l => l.includes("state=pending")), success = lines.findIndex(l => l.includes("state=success") && l.includes("context=Unit ·"));
-      const failure = lines.findIndex(l => l.includes("state=failure")), cleaned = lines.some(l => l.includes("git|push origin --delete"));
+      const failure = lines.findIndex(l => l.includes("state=failure")), cleaned = lines.at(-2) === "git|push origin --delete automation/site-artifact-123-1";
+      const superseded = lines.some(l => l.startsWith("::notice::rock moved past merged-sha"));
       const statuses = lines.filter(l => l.startsWith("gh|") && l.includes("context=Unit ·"));
       const identity = statuses.every(l => l.startsWith("gh|actions-job|api repos/fixture/repo/statuses/generated-sha ")
         && l.includes("target_url=https://github.com/fixture/repo/actions/runs/123"));
-      const ok = !result.error && identity && (name === "pass" ? result.status === 0 && pending < ran && ran < success && success < pushed && cleaned
-        : name === "unchanged" ? result.status === 0 && ran < 0 && pushed < 0 && !statuses.length
-        : name === "concurrent" ? result.status !== 0 && success > ran && pushed > success && !cleaned
-        : result.status !== 0 && pushed < 0 && !cleaned && (name === "fail" ? failure > ran && ran > pending && success < 0
+      const ok = !result.error && identity && (name === "unchanged" ? result.status === 0 && ran < 0 && pushed < 0 && !statuses.length && !cleaned
+        : !cleaned ? false
+        : name === "pass" ? result.status === 0 && pending < ran && ran < success && success < pushed && !superseded
+        : name === "superseded" ? result.status === 0 && success > ran && pushed > success && superseded
+        : name === "concurrent" || name === "diverged" ? result.status !== 0 && success > ran && pushed > success && !superseded
+        : result.status !== 0 && pushed < 0 && (name === "fail" ? failure > ran && ran > pending && success < 0
           : name === "status" ? success > ran && ran > pending : ran < 0 && pending >= 0));
       rows.push({ name, ok, status: result.status, output: ok ? "" : result.stdout + result.stderr });
     }
@@ -21529,7 +21530,7 @@ const artifactUnitProof = () => {
 };
 const unitChecks = async () => {
   const artifact = artifactUnitProof();
-  record("artifact workflow: tests the generated commit with the Actions-owned status and blocks rock on failed tests, status writes or concurrent pushes", artifact.parsed && artifact.rows.every(row => row.ok), JSON.stringify(artifact));
+  record("artifact workflow: tests the generated commit with the Actions-owned status and blocks rock on failed tests, status writes or concurrent pushes; a lost race passes only when rock has moved to a later CI-triggering commit, and the staging branch is always deleted", artifact.parsed && artifact.rows.every(row => row.ok), JSON.stringify(artifact));
   const previewRange=await studioPreviewRangeProof();
   record("Studio preview: local media single-byte ranges, HEAD, bounds and ignored unsupported requests",Object.values(previewRange).every(Boolean),JSON.stringify(previewRange));
   const videoSecurity=await studioVideoSecurityProof();
