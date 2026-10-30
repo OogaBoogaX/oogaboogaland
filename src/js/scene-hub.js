@@ -70,7 +70,6 @@
   const MAGAZINE_REACH = 0.7, MAGAZINE_SCALE = 2.4;
   // Space at Ooga Arcade's mouth works from MOUTH_REACH of a point MOUTH_ACTION_Z inside its doorway.
   const MOUTH_REACH = 3.2, MOUTH_ACTION_Z = -3.6;
-  const MATRIX_TYPES = 8;
   const MATRIX_GATE_HIDDEN_Y = 3.2, MATRIX_BUTTON_REACH = 3.4, MATRIX_BUTTON_USE_REACH = 2.2;
   const MIRROR_GATE_Z = 0.28;
   const MIRROR_GATE_CLOSED = true;
@@ -2026,23 +2025,25 @@
   // An invisible one-way staircase continues from the dock into the sky. It
   // only arms from a grounded step off the outer deck: arriving from the air,
   // or jumping once on it, leaves every tread intangible until the visitor
-  // returns to the dock. A fixed glyph pool reveals nearby treads after each
-  // foot contact, without adding collision meshes or per-frame allocations.
+  // returns to the dock. A fixed pool of transparent tread planes reveals the cave entrance glyphs
+  // around both feet while standing there, fading one second after they leave the tread.
   const buildDockStairs = (dock) => {
-    const START = 4.25, RUN = 0.62, RISE = 0.5, HALF_WIDTH = 0.78, EFFECT_TIME = 2.8;
-    const REVEAL_RADIUS = 3, GLYPH_POOL = 40;
+    const START = 4.25, RUN = 0.62, RISE = 0.5, HALF_WIDTH = 0.78, GLYPH_POOL = 12;
     const base = dock.position.y, count = Math.ceil((FLY.yMax - base) / RISE), end = START + count * RUN;
     const ry = dock.rotation.y, ux = Math.cos(ry), uz = -Math.sin(ry), vx = Math.sin(ry), vz = Math.cos(ry);
-    const glyphs = [];
+    const glyphs = [], footPoint = new Float64Array(3);
     for (let i = 0; i < GLYPH_POOL; i++) {
-      const node = createNode({ visible: false, rotation: { x: -Math.PI / 2, y: ry, z: 0 }, geometry: hubModels.matrixGlyph(i % MATRIX_TYPES), glow: 1 });
-      node.dockLife = 0;
+      // Each plane owns its ripple state; the renderer batches by geometry, so give each pool slot its own mesh.
+      const geometry = { verts: [-RUN / 2, -HALF_WIDTH, 0, RUN / 2, -HALF_WIDTH, 0, RUN / 2, HALF_WIDTH, 0, -RUN / 2, HALF_WIDTH, 0],
+        faces: [{ i: [0, 1, 2, 3], color: [0, 0, 0] }, { i: [3, 2, 1, 0], color: [0, 0, 0] }], lines: [], castShadow: false, mirrorRippleOnly: true };
+      const node = createNode({ visible: false, rotation: { x: -Math.PI / 2, y: ry, z: 0 }, geometry, mirrorRippleOnly: true, matrixNative: true, sightHidden: true });
       node.dockStep = 0;
+      BL.mirrorRipples.create(node, { contact: true });
       addChild(root, node);
       placed.push(node);
       glyphs.push(node);
     }
-    let active = false, owner = null, lastStep = 0, nextGlyph = 0, contacts = 0, jumpRejects = 0;
+    let active = false, owner = null, lastStep = 0, nextGlyph = 0, contacts = 0, jumpRejects = 0, lit = 0, time = 0;
     const alongAt = (x, z) => (x - dock.position.x) * ux + (z - dock.position.z) * uz;
     const acrossAt = (x, z) => (x - dock.position.x) * vx + (z - dock.position.z) * vz;
     const indexAt = (along, across, radius = PLAYER_RADIUS) => {
@@ -2073,40 +2074,45 @@
       const floor = floorAt(index);
       return floor <= y + maxStep + 1e-7 ? floor : -Infinity;
     };
-    const reveal = (index, distance) => {
-      if (index < 1 || index > count) return;
+    const holdFeet = (index, actor) => {
       let node = null;
       for (let i = 0; i < glyphs.length; i++) {
-        if (glyphs[i].dockLife > 0 && glyphs[i].dockStep === index) { node = glyphs[i]; break; }
+        if (glyphs[i].mirrorRipples.active && glyphs[i].dockStep === index) { node = glyphs[i]; break; }
       }
       if (!node) {
         node = glyphs[nextGlyph];
         nextGlyph = (nextGlyph + 1) % glyphs.length;
+        node.mirrorRipples.waves.fill(0);
+        node.mirrorRipples.active = 0;
       }
       const along = START + (index - 0.5) * RUN;
       node.position.x = dock.position.x + ux * along;
       node.position.y = floorAt(index) + 0.018;
       node.position.z = dock.position.z + uz * along;
-      node.scale.x = node.scale.y = 4.4;
-      node.scale.z = 1;
-      node.glow = 1;
       node.dockStep = index;
-      node.dockLife = Math.max(node.dockLife, EFFECT_TIME - distance * 0.18);
+      // Project both soles onto the supporting tread. Each foot owns one held contact; a tread no longer
+      // under the walker keeps its last foot positions and fades without more contact writes.
+      BL.scene.updateWorld(actor.root, actor.root.parent ? actor.root.parent.world : null);
+      if (!node.visible) lit++;
       node.visible = true;
-    };
-    const emit = (index) => {
-      for (let offset = -REVEAL_RADIUS; offset <= REVEAL_RADIUS; offset++) reveal(index + offset, Math.abs(offset));
-      contacts++;
+      node.mirrorRipples.time = time;
+      for (let foot = 0; foot < 2; foot++) {
+        const leg = foot ? actor.parts.legR : actor.parts.legL, bounds = BL.scene.boundsOf(leg.geometry);
+        math.mat4.transformPoint(footPoint, leg.world, (bounds.min[0] + bounds.max[0]) / 2, bounds.min[1], (bounds.min[2] + bounds.max[2]) / 2);
+        // The plane's local x follows the stairs; its local y is opposite the dock's across axis.
+        const x = clamp(alongAt(footPoint[0], footPoint[2]) - along, -RUN / 2, RUN / 2);
+        const y = clamp(-acrossAt(footPoint[0], footPoint[2]), -HALF_WIDTH, HALF_WIDTH);
+        node.mirrorRipples.hold(x, y, foot);
+      }
     };
     const update = (dt, actor) => {
+      time += dt;
+      lit = 0;
       for (let i = 0; i < glyphs.length; i++) {
         const node = glyphs[i];
-        if (node.dockLife <= 0) continue;
-        node.dockLife = Math.max(0, node.dockLife - dt);
-        const k = node.dockLife / EFFECT_TIME;
-        node.scale.x = node.scale.y = 3.5 + k * 0.9;
-        node.glow = 0.35 + k * 0.65;
-        if (!node.dockLife) node.visible = false;
+        node.mirrorRipples.update(dt, time);
+        node.visible = node.mirrorRipples.active > 0;
+        if (node.visible) lit++;
       }
       if (!active || actor !== owner) return;
       if (actor.hop > 1e-7 || actor.hopV > 0 || actor.jet?.thrust) { reset(true); return; }
@@ -2116,13 +2122,15 @@
         return;
       }
       const feet = p.y - actor.baseY;
-      if (Math.abs(feet - floorAt(index)) < 0.08 && index !== lastStep) {
-        lastStep = index;
-        emit(index);
+      if (Math.abs(feet - floorAt(index)) < 0.08) {
+        if (index !== lastStep) { lastStep = index; contacts++; }
+        holdFeet(index, actor);
       }
     };
     return {
       supportAt, update, reset, alongAt, acrossAt, indexAt, floorAt,
+      dispose() { for (const node of glyphs) { node.mirrorRipples.dispose(); node.visible = false; } lit = 0; },
+      get inMotion() { return lit > 0; },
       base, start: START, run: RUN, rise: RISE, halfWidth: HALF_WIDTH, count, end, top: FLY.yMax, glyphs,
       get active() { return active; }, get lastStep() { return lastStep; }, get contacts() { return contacts; }, get jumpRejects() { return jumpRejects; }
     };
@@ -11506,6 +11514,7 @@
     CLANKER_HIT.node = CLANKER_HIT.owner = null;
     viewPoseActor = grabSupportEntry = clankerSupportActor = clankerPassingEntry = preparingGuideActor = null;
     // Drop every per-visit ref but the cached island.
+    dockStairs.dispose();
     terrainRampRoof = pathNode = altar = lawn = life = hud = hooks = input = pilot = fx = cameraCover = bananaCover = solids = rockGuides = objectGuides = sightGuides = bananaGuides = pileGuides = platformGuides = mirrorGuides = pile = crew = crates = critters = clock = presets = mirrorCave = matrixCave = matrixControl = fire = headquarters = positionDebug = dockStairs = overlayCanvas = null;
     beasts.clear();
     magazine = magazineState = weather = footsteps = mempoolIsland = timechainIsland = clankers = clankerPlay = null;
@@ -11571,7 +11580,7 @@
       // A crossing through the Timechain Sphere's doors keeps full rate, so its walk and swoop finish smoothly, and so
       // does a walk through the Factory's shield and its dissolve.
       if (timechainIsland && timechainIsland.gate.busy) return true;
-      if (factoryWalk.phase || factoryWalk.still > 0) return true;
+      if (factoryWalk.phase || factoryWalk.still > 0 || dockStairs.inMotion) return true;
       if (ghosts && ghosts.inMotion) return true; // HALLOWEEN
       if (pile.inMotion || fx.inMotion || poolEffectsActive && (weather.active || mempoolIsland.water.active) || magazine && magazine.revealed || mirrorCave.ripples.active || mirrorCave.body.active) return true;
       if (!entropyLab.phase.paused && (entropyLab.phase.ripples.active || entropyLab.phase.body.contacts || entropyLab.phase.body.active)) return true;

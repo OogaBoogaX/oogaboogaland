@@ -4614,6 +4614,60 @@ const totemFeedChecks = async () => {
   record("totem feed: the Worker's summary lights a totem without celebrating the first reading, its 304 keeps it, a newer merge is fresh, a static host or a file page reads GitHub itself, and a spent Worker limit is waited out, sending only a first reading to GitHub",
     firstQuiet && revalidated && fresh && direct && shared && fileDirect, JSON.stringify({ firstQuiet, revalidated, fresh, direct, firstOnly, waited, ownLimit, fileDirect, asked: site.asked.length, events: site.events, failures: site.feed.state.failures }));
 };
+// Dock contacts hold the portal glyphs around both feet and leave a fading trail on departed treads.
+const dockGlyphChecks = async () => {
+  const context = { window: { BL: {} } };
+  for (const name of ["math", "scene", "models", "mirror-ripples"])
+    runInNewContext(await readFile(join(root, "src/js/" + name + ".js"), "utf8"), context);
+  const BL = context.window.BL, S = BL.scene, rootNode = S.createNode(), dock = S.createNode({ position: { x: 0, y: 2, z: 0 } });
+  const actor = { root: S.createNode({ position: { x: 3.8, y: 2.5, z: 0.24 }, rotation: { x: 0, y: Math.PI / 2, z: 0 } }),
+    parts: {}, act: { phase: 0 }, baseY: 0.5, hop: 0, hopV: 0, jet: null };
+  for (const [name, x] of [["legL", 0.12], ["legR", -0.12]]) {
+    actor.parts[name] = S.createNode({ position: { x, y: -0.25, z: 0 }, geometry: BL.models.box({ w: 0.16, h: 0.5, d: 0.2, color: "#ffffff" }) });
+    S.addChild(actor.root, actor.parts[name]);
+  }
+  S.addChild(rootNode, actor.root, dock);
+  const source = await readFile(join(root, "src/js/scene-hub.js"), "utf8");
+  Object.assign(context, { BL, math: BL.math, clamp: BL.math.clamp, root: rootNode, placed: [], FLY: { yMax: 20 }, PLAYER_RADIUS: 0.35,
+    createNode: S.createNode, addChild: S.addChild, pilot: { player: actor }, dock });
+  runInNewContext(source.slice(source.indexOf("  const buildDockStairs ="), source.indexOf("  // A poked animal")) + "\nthis.stairs = buildDockStairs(dock);", context);
+  const D = context.stairs, along = D.start - 0.25;
+  const refused = D.supportAt(along, 0.24, 2, 0.5, actor, false) === -Infinity;
+  const first = D.supportAt(along, 0.24, 2, 0.5, actor, true);
+  actor.root.position.x = along; actor.root.position.y = first + actor.baseY;
+  D.update(0, actor);
+  const lit = D.glyphs.filter(n => n.visible), firstNode = lit[0], ripple = firstNode?.mirrorRipples;
+  const localized = lit.length === 1 && firstNode.dockStep === 1 && firstNode.geometry.mirrorRippleOnly && ripple.contact
+    && ripple.active === 2 && Math.abs(ripple.waves[0]) <= D.run / 2 + 1e-6
+    && Math.abs(ripple.waves[1] + 0.12) < 1e-5 && Math.abs(ripple.waves[5] + 0.36) < 1e-5;
+  D.update(0.5, actor);
+  D.update(0.51, actor);
+  const held = firstNode.visible && ripple.active === 2 && ripple.waves[3] === 1 && ripple.waves[7] === 1
+    && ripple.hits === 2 && D.inMotion && D.contacts === 1;
+  actor.root.position.x += D.run; actor.root.position.y += D.rise;
+  D.update(0, actor);
+  const second = D.glyphs.find(n => n.visible && n.dockStep === 2);
+  const stepped = D.glyphs.filter(n => n.visible).length === 2 && second?.mirrorRipples.active === 2 && D.contacts === 2;
+  D.update(0.5, actor);
+  const faded = ripple.active === 2 && Math.abs(ripple.waves[3] - 0.5) < 1e-6
+    && Math.abs(ripple.waves[7] - 0.5) < 1e-6 && second.mirrorRipples.waves[3] === 1 && second.mirrorRipples.waves[7] === 1;
+  D.update(0.51, actor);
+  const trailExpired = !firstNode.visible && second.visible && D.inMotion && D.contacts === 2;
+  actor.hop = 0.1; D.update(0.1, actor);
+  const jumped = !D.active && D.jumpRejects === 1 && D.supportAt(actor.root.position.x, 0.24, 3, 0.5, actor, false) === -Infinity;
+  D.update(1.01, actor);
+  const expired = D.glyphs.every(n => !n.visible) && !D.inMotion;
+  D.dispose();
+  record("dock glyph steps: grounded entry lights both feet continuously, departed treads fade in one second while the current tread stays lit, and jumping releases the contacts and support",
+    refused && first === 2.5 && localized && held && stepped && faded && trailExpired && jumped && expired && D.glyphs.every(n => !n.visible && !n.mirrorRipples),
+    JSON.stringify({ refused, first, localized, held, stepped, faded, trailExpired, jumped, expired }));
+  const cave = S.createNode({ geometry: firstNode.geometry }), ordinary = BL.mirrorRipples.create(cave);
+  ordinary.pulse(0, 0); ordinary.update(0.3);
+  const originalFade = Math.abs(ordinary.waves[3] - Math.exp(-1.5) * (1 - 0.3 / BL.mirrorRipples.LIFETIME)) < 1e-6;
+  ordinary.update(0.5);
+  record("cave impacts retain their original expanding-ring lifetime and fade", !ordinary.contact && originalFade && ordinary.active === 0);
+  ordinary.dispose();
+};
 const oogatronReplayChecks = async () => {
   const source = await readFile(new URL("../src/js/oogatron-live.js", import.meta.url), "utf8");
   let answer, tick;
@@ -22262,7 +22316,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   tessAnswerChecks(BL);
   const clearance = claimClearanceProof();
   record("hub footprint clearance: conservative rejection preserves circular boundaries, live reservations and exceptional numbers", clearance.failures === 0 && clearance.cases >= 4000, JSON.stringify(clearance));
-  await deferredLoadingChecks(); await hudNoticeChecks(); await characterChecks(); await contributorActivityChecks(); await mempoolFeedChecks(); await oogatronReplayChecks(); await debugActivityStatusChecks(); await soloDebugChecks(); await adaptiveQualityChecks(); await chainSnapshotChecks(); await dsbSharedDataChecks(); await timechainDataChecks(); await timechainRoomChecks(); await timechainBlockChecks(); await environmentSoundChecks(); await weatherStepChecks(); await poolLayoutChecks(); await gameRulesChecks(); await ghostHuntChecks(); await donationClientChecks(); await poolWildlifeChecks(); await totemFeedChecks();
+  await deferredLoadingChecks(); await hudNoticeChecks(); await characterChecks(); await contributorActivityChecks(); await mempoolFeedChecks(); await oogatronReplayChecks(); await dockGlyphChecks(); await debugActivityStatusChecks(); await soloDebugChecks(); await adaptiveQualityChecks(); await chainSnapshotChecks(); await dsbSharedDataChecks(); await timechainDataChecks(); await timechainRoomChecks(); await timechainBlockChecks(); await environmentSoundChecks(); await weatherStepChecks(); await poolLayoutChecks(); await gameRulesChecks(); await ghostHuntChecks(); await donationClientChecks(); await poolWildlifeChecks(); await totemFeedChecks();
 
   // Scene state built directly instead of booted; seed 1 matches scene-hub.js.
   // Sealed cave guides need the hub's seal nodes, so probes reading them stay in the browser tier.
