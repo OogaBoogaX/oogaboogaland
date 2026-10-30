@@ -280,7 +280,7 @@
     crew=shared.crew=BL.crew.create(shared);pilot.bind(shared);avatar=crew.cavemen.get(name);
     crew.setJetpackOwnership(avatar,true,BL.hubModels.jetpack(),BL.hubModels.jetFlame());
     crew.wearJetpack(avatar,BL.hubModels.jetpack(),BL.hubModels.jetFlame());
-    remotes=BL.remotePlayers.create({root,crew,visible:rec=>rec.zone===voiceZone()&&(!entrance||entrance.phase==="done")});
+    remotes=BL.remotePlayers.create({root,crew,fx,visible:rec=>rec.zone===voiceZone()&&(!entrance||entrance.phase==="done")});
     footsteps=BL.footsteps.create(); // The driven Ooga's own footsteps, heard by this page alone (footsteps.js).
     document.addEventListener("focusin",sheetFocus,{signal:ctx.signal});
     Object.assign(avatar.root.position,{x:-45,y:land.heightAt(-45,-43)+avatar.baseY,z:-43});avatar.root.rotation.y=0;
