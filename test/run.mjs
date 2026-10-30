@@ -4109,6 +4109,13 @@ const canvasSurfaceCacheChecks = async () => {
     rows.every(row => Object.values(row).every(Boolean)), JSON.stringify(rows));
 };
 const deferredLoadingChecks = async () => {
+  {
+    const loads = [], BL = { scene: {}, scenes: {}, pokerThemes: { get: () => ({}) }, math: { clamp() {} },
+      glRenderer: { POINT_LIGHT_CAPACITY: 32 }, deferred: { load: id => { loads.push(id); return Promise.resolve(); } } };
+    runInNewContext(await readFile(join(root, "src/js/scene-poker.js"), "utf8"), { window: { BL } });
+    await BL.scenes.poker.prepare();
+    record("Poker shell loads before its deferred models and prepares the poker bundle", loads.length === 1 && loads[0] === "poker");
+  }
   const source = await readFile(join(root, "src/js/deferred.js"), "utf8"), rows = [];
   // `gone` names the files a deploy has removed: their HEAD probe answers 404, any other 200.
   const fixture = (gone = [], stalled = false, id = "drop") => {

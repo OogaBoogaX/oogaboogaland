@@ -5,11 +5,6 @@
   const BL = window.BL, S = BL.scene, Themes = BL.pokerThemes;
   const presets = { entrance: { yaw: 0, pitch: 0.48, dist: 18, target: { x: 0, y: 1, z: 17 } } };
   const VIEW_NAMES = { entrance: "Overview" };
-  for (let i = 0; i < BL.pokerModels.TABLES.length; i++) {
-    const table = BL.pokerModels.TABLES[i], name = `table-${i + 1}`;
-    presets[name] = { yaw: table.x < 0 ? -Math.PI / 2 : Math.PI / 2, pitch: .55, dist: 9, target: { x: table.x, y: 1, z: table.z } };
-    VIEW_NAMES[name] = `Table ${i + 1}`;
-  }
   const renderOpts = { clear: [0.1, 0.12, 0.09], sky: [0.62, 0.57, 0.45], ground: [0.31, 0.36, 0.27],
     direct: [0.88, 0.77, 0.58], directStrength: 0.38, ambientFloor: 0.48, sun: { x: 0.2, y: 1, z: 0.3 },
     shadowCenter: { x: 0, y: 1.5, z: 0 }, shadowExtent: 35, bloomStrength: 0.24,
@@ -207,6 +202,13 @@
     } catch (error) { panel.notice(error.message); }
   };
   const enter = ctx => {
+    if (!presets["table-1"]) {
+    for (let i = 0; i < BL.pokerModels.TABLES.length; i++) {
+      const table = BL.pokerModels.TABLES[i], name = `table-${i + 1}`;
+      presets[name] = { yaw: table.x < 0 ? -Math.PI / 2 : Math.PI / 2, pitch: .55, dist: 9, target: { x: table.x, y: 1, z: table.z } };
+      VIEW_NAMES[name] = `Table ${i + 1}`;
+    }
+    }
     visit++;
     game = ctx.game; world = ctx.world; go = ctx.go; leaving = false; timer = 0; HERO = "local-player"; connecting = false;
     if (ctx.from === "bifrost") document.querySelector('[data-intro="poker"]').hidden = true;
