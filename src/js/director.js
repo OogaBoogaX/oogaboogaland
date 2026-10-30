@@ -702,7 +702,7 @@
     // M always controls environment sound; voice chat keeps its separate panel controls.
     if (key === "m" && !e.metaKey && !e.ctrlKey && !e.altKey) {
       e.preventDefault();
-      if (!e.repeat) sound.toggle();
+      sound.toggle();
       return;
     }
     // Every scene's B shortcut adds demo bananas; ordinary visits leave donations to the feed.

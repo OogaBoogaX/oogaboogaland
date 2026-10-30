@@ -750,10 +750,6 @@
       else leave();
       return true;
     }
-    if (e.key === "m" || e.key === "M") {
-      toggleMute();
-      return true;
-    }
     return false;
   };
 

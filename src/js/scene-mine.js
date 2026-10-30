@@ -1687,7 +1687,6 @@
     if (e.repeat) return;
     if (e.key === "0") setOverview(true, "den");
     else if ((e.key === "v" || e.key === "V") && phase === "run") setOverview(!overview);
-    else if (e.key === "m" || e.key === "M") mhud.setMuted(audio.setMuted(!audio.muted));
     else if ((e.key === "s" || e.key === "S") && e.shiftKey && phase === "run") sellSats();
     else if ((e.key === "c" || e.key === "C") && phase === "run") crackNearest();
     else if ((e.key === "p" || e.key === "P") && phase === "run") pause(!s.paused);

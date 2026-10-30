@@ -214,13 +214,12 @@
     } catch (error) { panel.notice(error.message); }
   };
   const enter = ctx => {
-    if (!presets["table-1"]) {
-    for (let i = 0; i < BL.pokerModels.TABLES.length; i++) {
+    // The table views wait for the deferred models; nearly overhead, the dealer's side at the bottom, the eye below
+    // the ceiling.
+    if (!presets["table-1"]) for (let i = 0; i < BL.pokerModels.TABLES.length; i++) {
       const table = BL.pokerModels.TABLES[i], name = `table-${i + 1}`;
-      // Nearly overhead, with the dealer's side at the bottom and the eye below the ceiling.
       presets[name] = { yaw: Math.PI, pitch: 1.48, dist: 7.1, target: { x: table.x, y: 1.41, z: table.z } };
       VIEW_NAMES[name] = `Table ${i + 1}`;
-    }
     }
     visit++;
     tableView = false;

@@ -656,7 +656,8 @@
     const login = rememberedLogin(), known = login && characterOf(login);
     localCharacter = known;
     if (!known || mayDrive(known.handle)) {
-      const entry = BL.contributors.addLocal(known ? "Ooga" : login || "Ooga", known || !login ? "Ooga" : login);
+      // An unbundled remembered login gets its own likeness, unless that name is already another Ooga's.
+      const entry = !known && login && BL.contributors.addLocal(login) || BL.contributors.addLocal("Ooga");
       localCharacter = { handle: entry.name, display: entry.display };
     }
     return localCharacter;
@@ -672,9 +673,12 @@
   const mayDrive = (name) => {
     const owner = BL.characters.get(name);
     if (state.me) return owner && ownCharacter() === owner ? null : "Drive your own Ooga";
-    // Explicit offline debug fixtures do not prepare a local identity. Normal arrivals always do.
-    if (!localCharacter) return state.backend ? "Drive your own Ooga" : null;
-    if (String(owner ? owner.handle : name).toLowerCase() !== localCharacter.handle.toLowerCase()) return "Drive your own Ooga";
+    // Explicit debug fixtures prepare no local identity and keep their chosen cast: any bundled Ooga, locally.
+    // Normal arrivals always prepare one.
+    if (!localCharacter) {
+      if (!state.backend || !owner) return null;
+      if (owner.temporary) return "Sign in to drive your Ooga";
+    } else if (String(owner ? owner.handle : name).toLowerCase() !== localCharacter.handle.toLowerCase()) return "Drive your own Ooga";
     if (!owner) return null;
     const who = owner.display || owner.handle;
     const ownerLogin = loginOf(owner), wanted = owner.handle.toLowerCase();

@@ -45,10 +45,11 @@
     byName.set(row.handle, temporary);
     return true;
   };
-  // A guest or remembered unbundled login is local scenery, never a registered GitHub identity or shared NPC.
+  // A guest or remembered unbundled login is local scenery, never a registered GitHub identity or shared NPC; a name
+  // another Ooga already answers to is refused (null).
   const addLocal = (name, display = name) => {
     const existing = byName.get(name.toLowerCase());
-    if (existing) return existing;
+    if (existing) return existing.local ? existing : null;
     const entry = { name, display, lastCommitAt: 0, lastContributionAt: 0, activity: new Map(), maintainer: false, temporary: true, local: true };
     roster.push(entry);
     if (solo && character === name.toLowerCase()) activeRoster.push(entry);

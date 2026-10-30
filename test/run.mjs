@@ -17525,7 +17525,7 @@ scene("lab", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("lab", { required
 scene("race", { query: "pos=0&rain=0&draw=0", opts: PHONE_SIZE, steps: [phone("race", { card: '[data-intro="race"]', play: "window.__ooga.race.startRace()", required: ["#joy-move", "#act", "#item-btn", "#race-garage-btn", ".leave"] })] });
 scene("drop", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("drop", { card: '[data-intro="drop"]', play: "window.__ooga.drop.start()", required: ["#joy-move", "#joy-look", "#act", ".leave"] })] });
 scene("orbit", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("orbit", { card: '[data-intro="orbit"]', play: "window.__ooga.orbit.launch()", required: ["#joy-move", "#act", ".leave"] })] });
-scene("mine", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("mine", { card: "#mine-intro", required: ["#joy-move", "#joy-look", "#act", "#mine-view-btn", "#mine-pause-btn", "#mine-mute", ".leave"] })] });
+scene("mine", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("mine", { card: "#mine-intro", required: ["#joy-move", "#joy-look", "#act", "#mine-view-btn", "#mine-pause-btn", "#environment-sound", ".leave"] })] });
 scene("factory", { query: "pos=0&character=portlandhodl", opts: PHONE_SIZE, steps: [phone("factory", { required: ["#joy-move", "#joy-look", ".leave"] }), factoryGreeter] });
 scene("hangar", { query: "pos=0&character=portlandhodl", opts: PHONE_SIZE, steps: [phone("hangar", { required: ["#joy-move", "#joy-look", ".leave"] })] });
 scene("bifrost", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("bifrost", { required: ["#joy-move", "#joy-look", ".leave"] })] });
@@ -17925,7 +17925,8 @@ scene("dsb", { label: "dsb feeds and audio", url: hubPage(src, "scene=dsb"), ste
     };
   })()`);
   try {
-    await b.key("m");
+    // A trusted key activates audio; M twice leaves the page-wide environment mute (sound.js) where it was.
+    await b.key("m"); await b.key("m");
     await b.evaluate(`window.__entranceAudio = BL.dsbAudio.create(); __entranceAudio.gesture()`);
     await untilPage(b, "__entranceAudio.ready", 10000);
     const fixed = await b.evaluate(`({ uploads: document.querySelectorAll("[data-dsb-audio]").length, canReplace: typeof __entranceAudio.load === "function" })`);
@@ -18762,7 +18763,7 @@ const pokerChecks = (BL) => {
     try {
       for (let pass = 0; pass < 2; pass++) for (const theme of BL.pokerThemes.themes) {
         room.setTheme(theme.id);
-        stable &&= room.theme === theme.id && room.root.children.length === 11 &&
+        stable &&= room.theme === theme.id && room.root.children.length === 2 + room.tables.length &&
           room.tables.every((t, i) => t.top === targets[i] && t.agent === dealers[i] && t.chairs.every((c, j) => c === chairs[i][j])) &&
           first.board[0].geometry === face && first.board[0].visible && first.backs[0].visible && first.chips[0].scale.y === 7;
       }
@@ -20223,8 +20224,12 @@ const rememberedCharacterChecks = async BL => {
   const unknown = netFixture(localBL, () => reply(null), 200, "ooga-last-github=returning-visitor");
   await unknown.net.start();
   const unbundled = unknown.net.prepareLocalCharacter();
-  record("arrival identity: an unbundled remembered login gets a local likeness without a contributor claim", unbundled.handle === "returning-visitor"
-    && !localBL.characters.get(unbundled.handle) && !unknown.net.ownCharacter() && !unknown.sockets.length);
+  const lookalike = netFixture(localBL, () => reply(null), 200, "ooga-last-github=nickdagreek");
+  await lookalike.net.start();
+  record("arrival identity: an unbundled remembered login gets a local likeness without a contributor claim, never an Ooga whose handle it only matches", unbundled.handle === "returning-visitor"
+    && !localBL.characters.get(unbundled.handle) && !unknown.net.ownCharacter() && !unknown.sockets.length
+    && lookalike.net.prepareLocalCharacter().handle === "Ooga" && lookalike.net.mayDrive("NickDaGreek") !== null);
+  lookalike.net.dispose();
   const forged = netFixture(localBL, () => reply({ id: 72, login: "YellowBrokeIt", display: "Yellow" }), 200, "ooga-last-github=nickdagreek1");
   await forged.net.start();
   record("arrival identity: authenticated identity wins over a changed preference cookie", forged.net.prepareLocalCharacter().handle === "YellowBrokeIt" && forged.net.mayDrive("NickDaGreek") !== null);

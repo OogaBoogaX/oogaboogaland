@@ -8272,6 +8272,13 @@ body[data-active-scene="dsb"] #destination-hud:disabled { opacity: 1; cursor: de
     grid-template-columns: 1fr;
   }
 
+  /* In one column Ember Den's headings sit beside their lines, so the card clears the touch controls. */
+  [data-intro="poker"] .game-rules li {
+    grid-template-columns: max-content minmax(0, 1fr);
+    column-gap: 8px;
+    align-items: baseline;
+  }
+
   .game-intro .game-intro-title {
     font-size: 30px;
   }
@@ -9891,6 +9898,9 @@ body.dsb-menu-open :is(.bottom-hud,.top-hud,#joy-move,#joy-look,#act,.weapon-hud
 /* Presets keep their scene actions but share the same title/controls/clock layout. */
 body[data-active-scene] .topbar { align-items: start; }
 body[data-active-scene] .topbar > .presets {
+  /* No grid placement, so the topbar's padding box (the screen's edge) holds it, as hud.js measures. */
+  grid-column: auto;
+  grid-row: auto;
   position: absolute;
   top: var(--banner-presets-top, calc(62px + var(--safe-top)));
   left: var(--banner-presets-left, 16px);
@@ -9901,12 +9911,15 @@ body[data-active-scene] .topbar > .presets {
   justify-content: flex-start;
 }
 body[data-active-scene] .topbar > .presets button { flex: 0 0 auto; }
-.topbar .presets :is([data-action="mute"], [data-action$="-mute"]) { display: none; }
+/* The hangar's Sound opens its volume and vibration panel, so it stays. */
+.topbar .presets :is([data-action="mute"], [data-action$="-mute"]):not([data-action="hangar-mute"]) { display: none; }
 body[data-active-scene] #environment-sound { display: flex; align-items: center; justify-content: center; }
 
 /* Cave stations cycle through the OBL land button instead of a second camera toolbar. */
 .topbar .presets:is([data-scene="lab"], [data-scene="factory"], [data-scene="hangar"], [data-scene="bifrost"], [data-scene="arcade"]) [data-preset] { display: none; }
 body[data-active-scene="arcade"] #destination-hud:not([hidden]) { display: flex; }
+/* Below the title the land button sits at the screen's edge, so a long place name starts under it. */
+.equipment-hud[data-banner="below"] .detached-destination-name { left: 0; transform: none; text-align: left; }
 
 /* Keep a character control in every banner, including detached views and game scenes. */
 .mode-roster-icon { width: 34px; height: 44px; }
