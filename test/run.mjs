@@ -19356,6 +19356,27 @@ const exteriorEnrichmentChecks = BL => {
   record("Exterior enrichment: repeat visits release every node and rebuild the same bounded layout",lifecycle&&root.children.length===0);
 };
 
+// Rule: a pet a character builds (`parts.dog`) walks at its Ooga's heel: lifted off the body into the crew's root,
+// it trots after its Ooga to its spot, a wall the scene's `walkable` refuses stops it, and out of reach it turns up at
+// its spot; it hides with its Ooga and goes with the crew.
+const petChecks = BL => {
+  const noop=()=>{},S=BL.scene,root=S.createNode();let wall=false;
+  const C=BL.crew.create({root,world:{level:0},playerName:"Bitcoin-Bill",input:{add:noop,remove:noop},hud:{setRosterRow:noop},game:{state:{assignments:{},inventory:[]}},viewYaw:0,groundAt:()=>0,walkable:(ax,az,bx,bz)=>!(wall&&bx>1.5),fx:{say:noop,zzzAt:noop,burst:noop,puff:noop,spawnParticle:noop,damageNumber:noop}});
+  const A=C.cavemen.get("Bitcoin-Bill"),pet=A&&A.pet,dog=A&&A.parts.dog;
+  const lifted=!!pet&&dog.parent===root&&!A.root.children.includes(dog);
+  A.root.visible=true;Object.assign(A.root.position,{x:0,y:A.baseY,z:0});A.root.rotation.y=0;
+  let t=0;const run=n=>{for(let i=0;i<n;i++){t+=1/60;C.update(1/60,t);}};
+  run(2);const spot={x:dog.position.x,z:dog.position.z};
+  const behind=spot.z<0&&Math.abs(spot.x)>0.1;
+  A.root.position.x=3;run(1);const lag=dog.position.x<2.5;run(60);
+  const followed=Math.abs(dog.position.x-(3+spot.x))<0.2&&Math.abs(dog.position.z-spot.z)<0.2;
+  A.root.position.x=-3;run(60);wall=true;A.root.position.x=4;run(60);const blocked=dog.position.x<=1.5+1e-6;
+  wall=false;A.root.position.x=40;run(1);const snapped=Math.abs(dog.position.x-(40+spot.x))<0.01;
+  A.root.visible=false;run(1);const hidden=!dog.visible;
+  C.dispose();const gone=!root.children.includes(dog);
+  record("pets: a character's dog is lifted off its Ooga, trots after it to its spot behind, stops at a wall, turns up when out of reach, hides with it and leaves with the crew",lifted&&behind&&lag&&followed&&blocked&&snapped&&hidden&&gone,JSON.stringify({lifted,spot,behind,lag,followed,blocked,snapped,hidden,gone}));
+};
+
 // Rule: the authored Maxis routes and stand points must fit the real Yellow actor, not a guessed radius.
 const maxisChecks = BL => {
   const noop=()=>{},S=BL.scene,root=S.createNode(),targets=new Set();
@@ -21863,6 +21884,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   if(ARGS.includes("exterior-unit"))return;
   maxisChecks(BL);
   if(ARGS.includes("maxis-unit"))return;
+  petChecks(BL);
   rulersChecks(BL);
   if(ARGS.includes("rulers-unit"))return;
   inkChecks(BL);

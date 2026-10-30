@@ -432,6 +432,44 @@
     const groundAt = ctx.groundAt || (() => 0);
     const walkable = ctx.walkable || (() => true);
     const npcWalkable = ctx.npcWalkable || walkable;
+    // A character's pet: the node its file builds as `parts.dog`, where it stands by its Ooga (a step behind and to one
+    // side, in the Ooga's frame), is lifted off the body into the crew's root. Each frame it trots for that spot at up
+    // to `PET_SPEED`, every step checked with the scene's `walkable` (stopped by a wall, it waits) and set on the floor
+    // under it at its own height plus a step, so it climbs no roof after its Ooga and waits underneath a flight. Out of
+    // reach (`PET_SNAP`, a door, a relocation) it turns up at its spot. Hidden with its Ooga. Allocates nothing.
+    const PET_SPEED = 9.5, PET_SNAP = 7, PET_STEP = 0.45, PET_HEIGHT = 0.5, PET_ARRIVE = 0.15;
+    const attachPet = (cave) => {
+      const node = cave.parts.dog, p = node.position;
+      removeChild(cave.root, node);
+      addChild(root, node);
+      node.visible = false;
+      cave.pet = { node, side: p.x, back: -p.z, lift: p.y, x: 0, z: 0, feet: 0, heading: 0, step: 0, warm: false };
+    };
+    const updatePet = (cave, dt) => {
+      const pet = cave.pet, r = cave.root, node = pet.node;
+      node.visible = r.visible;
+      if (!r.visible) { pet.warm = false; return; }
+      const h = r.rotation.y, sh = Math.sin(h), ch = Math.cos(h);
+      const tx = r.position.x - sh * pet.back + ch * pet.side, tz = r.position.z - ch * pet.back - sh * pet.side;
+      const feet = r.position.y - cave.baseY;
+      const dx = tx - pet.x, dz = tz - pet.z, d = Math.hypot(dx, dz);
+      let moving = false;
+      if (!pet.warm || d > PET_SNAP) {
+        pet.x = tx; pet.z = tz; pet.feet = groundAt(tx, tz, feet + PET_STEP, feet + PET_STEP, cave); pet.heading = h; pet.warm = true;
+      } else if (d > PET_ARRIVE && dt > 0) {
+        const step = Math.min(d, PET_SPEED * dt * Math.min(1, d / 1.2 + 0.25));
+        const nx = pet.x + dx / d * step, nz = pet.z + dz / d * step;
+        if (walkable(pet.x, pet.z, nx, nz, pet.feet, PET_HEIGHT, cave)) {
+          pet.x = nx; pet.z = nz; pet.step += step * 9; moving = true;
+          pet.feet = groundAt(nx, nz, pet.feet + PET_STEP, pet.feet + PET_STEP, cave);
+        }
+        pet.heading = Math.atan2(dx, dz);
+      } else if (d <= PET_ARRIVE) pet.heading = h;
+      node.position.x = pet.x; node.position.z = pet.z;
+      node.position.y = cave.baseY + pet.feet + pet.lift + (moving ? Math.abs(Math.sin(pet.step)) * 0.08 : 0);
+      node.rotation.y = pet.heading;
+      node.rotation.z = moving ? Math.sin(pet.step) * 0.08 : 0;
+    };
     const inBananas = ctx.inBananas || (() => false);
     const npcDestinationBlocked = ctx.npcDestinationBlocked || inBananas;
     const flyable = ctx.flyable || walkable;
@@ -659,6 +697,8 @@
       cave.root.visible = false;
       addChild(root, cave.root);
       addChild(root, cave.sleepWeapons);
+      // A pet a character builds (`parts.dog`) walks at its heel rather than riding on the body.
+      if (cave.parts.dog) attachPet(cave);
       if (cave.traits.gasMask) {
         // Fixed-capacity reusable puffs keep normal and huge exhales from growing the FX pool; geometry stays resident.
         cave.breathBatch = createNode({ geometry: MASK_SMOKE, sightHidden: true, instanceData: new Float32Array(MASK_SMOKE_CAP * 20), instanceCount: 0, instanceVersion: 0, fixedInstanceCapacity: true });
@@ -6376,6 +6416,8 @@
       if (combatEnabled && dt > 0) updateFireContacts();
       if (combatEnabled) updateFireThreats();
       for (let i = 0; i < crewList.length; i++) if (!crewList[i].puppet) updateMember(crewList[i], dt);
+      // Pets follow every Ooga that has one, a puppet's included, after it has moved.
+      for (let i = 0; i < crewList.length; i++) if (crewList[i].pet) updatePet(crewList[i], dt);
       if (combatEnabled) updateStunGear(dt);
       syncMagazine();
       if (combatEnabled && dt > 0) updateFireContacts();
@@ -6462,6 +6504,7 @@
         for (const node of cave.hitNodes) input.remove(node);
         removeChild(root, cave.root);
         removeChild(root, cave.sleepWeapons);
+        if (cave.pet) removeChild(root, cave.pet.node);
         if (cave.breathBatch) removeChild(root, cave.breathBatch);
       }
       cavemen.clear();
