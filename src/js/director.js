@@ -866,6 +866,8 @@
     // net.start is bounded; an unavailable backend leaves the static island usable.
     await accountReady;
     if (destroyed) return;
+    // Explicit debug fixtures retain their own cast and arrival; ordinary routes start with this visitor's Ooga.
+    if (!DEBUG) world.pilot = net.prepareLocalCharacter().handle;
     const constructionCPU = window.BL.buildTasks.cpu;
     let first = Object.hasOwn(scenes, sceneId) ? scenes[sceneId] : scenes[Object.keys(scenes)[0]], place = routed && routed.place;
     if (terrainController && ISLAND_FIRST) {

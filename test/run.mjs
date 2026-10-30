@@ -20178,15 +20178,66 @@ const menuShellChecks = BL => {
 
 
 // net.js in a sandbox: a canned /api/me and fake sockets that record what the page sends.
-const netFixture=(BL,response,step=200)=>{
+const netFixture=(BL,response,step=200,cookie="")=>{
   const source=readFileSync(join(root,"src/js/net.js"),"utf8");
   const sockets=[],sent=[],events=new Map(),navigations=[];let calls=0,tick=1000,savedViews=0;
   class Socket {static OPEN=1;constructor(){this.readyState=1;sockets.push(this);}send(v){sent.push(typeof v==="string"?JSON.parse(v):v);}close(){this.readyState=3;}}
   const voice={setPeers:()=>{},restart:()=>{},stop:()=>{}};
   const location={protocol:"https:",host:"fixture.invalid",pathname:"/",search:"",assign:url=>navigations.push(url)},pilot={saveLoginView(){savedViews++;}};
-  const context={window:{BL:{characters:BL.characters,contributors:BL.contributors,donations:BL.donations,voice,pilot},setTimeout:()=>1,clearTimeout(){},setInterval:()=>1,clearInterval(){}},document:{hidden:false,addEventListener:(k,v)=>events.set(k,v),removeEventListener:k=>events.delete(k)},location,fetch:async(...args)=>{calls++;return response(...args);},AbortSignal,WebSocket:Socket,performance:{now:()=>tick+=step},Date,ArrayBuffer,URLSearchParams};
+  const context={window:{BL:{characters:BL.characters,contributors:BL.contributors,donations:BL.donations,voice,pilot},setTimeout:()=>1,clearTimeout(){},setInterval:()=>1,clearInterval(){}},document:{hidden:false,cookie,addEventListener:(k,v)=>events.set(k,v),removeEventListener:k=>events.delete(k)},location,fetch:async(...args)=>{calls++;return response(...args);},AbortSignal,WebSocket:Socket,performance:{now:()=>tick+=step},Date,ArrayBuffer,URLSearchParams};
   runInNewContext(source,context);
-  return {net:context.window.BL.net,voice,sockets,sent,events,location,navigations,advance(ms){tick+=ms;},get calls(){return calls;},get savedViews(){return savedViews;}};
+  return {net:context.window.BL.net,document:context.document,voice,sockets,sent,events,location,navigations,advance(ms){tick+=ms;},get calls(){return calls;},get savedViews(){return savedViews;}};
+};
+const rememberedCharacterChecks = async BL => {
+  const localBL = { ...BL };
+  runInNewContext(readFileSync(join(root, "src/js/contributors.js"), "utf8"), { window: { BL: localBL }, location: { search: "" }, URLSearchParams });
+  const reply = player => ({ ok: true, headers: { get: () => "application/json" }, json: async () => ({ player }) });
+  const fresh = netFixture(localBL, () => reply(null));
+  await fresh.net.start();
+  const guest = fresh.net.prepareLocalCharacter(), row = localBL.contributors.roster.find(c => c.name === guest.handle);
+  const count = localBL.contributors.roster.length;
+  fresh.net.prepareLocalCharacter();
+  record("arrival identity: a first visit gets one local Ooga without registering a GitHub identity or shared NPC", guest.handle === "Ooga" && guest.display === "Ooga" && row.local && row.temporary
+    && localBL.contributors.activeRoster.includes(row) && localBL.contributors.stateFor(row) === "chilling" && localBL.contributors.traitsFor(row.name).display === "Ooga"
+    && localBL.contributors.roster.length === count && !localBL.characters.get("Ooga") && !fresh.net.ownCharacter() && !fresh.sockets.length);
+  record("arrival identity: guests cannot borrow other Oogas or companions and game pickers hold their local Ooga", fresh.net.mayDrive("Ooga") === null
+    && fresh.net.mayDrive("NickDaGreek") !== null && fresh.net.mayDrive("fixture-missing") !== null && fresh.net.mayDriveGorilla("NickDaGreek") !== null
+    && fresh.net.ownAmong(localBL.contributors.roster) === "Ooga");
+  fresh.net.state.backend = false;
+  record("arrival identity: static hosting keeps the same assigned-character restriction", fresh.net.mayDrive("Ooga") === null && fresh.net.mayDrive("YellowBrokeIt") !== null);
+  const signed = netFixture(localBL, () => reply({ id: 71, login: "nickdagreek1", display: "Nick" }));
+  await signed.net.start();
+  const cookie = signed.document.cookie;
+  record("arrival identity: a successful login remembers the canonical GitHub username with bounded same-origin cookie settings", cookie.startsWith("ooga-last-github=nickdagreek1;")
+    && cookie.includes("Path=/") && cookie.includes("Max-Age=31536000") && cookie.includes("SameSite=Lax") && cookie.includes("Secure"));
+  const returning = netFixture(localBL, () => reply(null), 200, cookie.split(";")[0]);
+  await returning.net.start();
+  const preferred = returning.net.prepareLocalCharacter();
+  returning.net.setBody(preferred.handle); returning.net.sendPose(1, 0, 1, 0);
+  record("arrival identity: remembered login aliases select the right local character without authenticating or sending presence", preferred.handle === "NickDaGreek"
+    && returning.net.preferredCharacter() === preferred && !returning.net.ownCharacter() && returning.net.ownAmong(localBL.contributors.roster) === "NickDaGreek" && !returning.sockets.length && !returning.sent.length);
+  record("arrival identity: remembered visitors can drive only their assigned Ooga and companion", returning.net.mayDrive("NickDaGreek") === null
+    && returning.net.mayDriveGorilla("NickDaGreek") === null && returning.net.mayDrive("YellowBrokeIt") !== null && returning.net.mayDriveGorilla("YellowBrokeIt") !== null);
+  returning.net.remotes.set(72, { login: "nickdagreek1", body: "NickDaGreek" });
+  record("arrival identity: a remembered preference cannot take the online owner's Ooga", returning.net.mayDrive("NickDaGreek") !== null && returning.net.prepareLocalCharacter().handle === "Ooga");
+  const unknown = netFixture(localBL, () => reply(null), 200, "ooga-last-github=returning-visitor");
+  await unknown.net.start();
+  const unbundled = unknown.net.prepareLocalCharacter();
+  record("arrival identity: an unbundled remembered login gets a local likeness without a contributor claim", unbundled.handle === "returning-visitor"
+    && !localBL.characters.get(unbundled.handle) && !unknown.net.ownCharacter() && !unknown.sockets.length);
+  const forged = netFixture(localBL, () => reply({ id: 72, login: "YellowBrokeIt", display: "Yellow" }), 200, "ooga-last-github=nickdagreek1");
+  await forged.net.start();
+  record("arrival identity: authenticated identity wins over a changed preference cookie", forged.net.prepareLocalCharacter().handle === "YellowBrokeIt" && forged.net.mayDrive("NickDaGreek") !== null);
+  const invalid = netFixture(localBL, () => reply(null), 200, "ooga-last-github=%3Cscript%3E");
+  await invalid.net.start();
+  const bad = invalid.net.prepareLocalCharacter().handle === "Ooga";
+  Object.defineProperty(invalid.document, "cookie", { get() { throw new Error("blocked"); }, set() { throw new Error("blocked"); } });
+  const blocked = invalid.net.prepareLocalCharacter().handle === "Ooga";
+  const denied = netFixture(localBL, () => reply({ id: 71, login: "nickdagreek1", display: "Nick" }));
+  Object.defineProperty(denied.document, "cookie", { get() { throw new Error("blocked"); }, set() { throw new Error("blocked"); } });
+  await denied.net.start();
+  record("arrival identity: malformed or denied cookies fall back safely and cannot break sign-in", bad && blocked && denied.net.ownCharacter()?.handle === "NickDaGreek");
+  for (const f of [fresh, signed, returning, unknown, forged, invalid, denied]) f.net.dispose();
 };
 // Ooga Chat's wire on the page: what it sends, and the lines it hands on (chat.js keeps and shows them).
 // Execute the real chat controller with a small DOM and a controllable acknowledgement clock.
@@ -20326,12 +20377,12 @@ const integrationChecks = async BL => {
   const noOwner=!g.net.ownCharacter()&&g.net.mayDrive("NickDaGreek",false)!==null&&g.net.mayDrive("NickDaGreek",true)!==null
     &&g.net.mayDrive("fixture-missing",false)!==null&&g.net.mayDriveGorilla("NickDaGreek")!==null&&g.net.mayDriveGorilla("fixture-missing")!==null;
   g.net.state.backend=false;
-  const local=g.net.mayDrive("NickDaGreek",true)===null&&g.net.mayDriveGorilla("NickDaGreek")===null;
+  const local=g.net.mayDrive("NickDaGreek",true)!==null&&g.net.mayDriveGorilla("NickDaGreek")!==null;
   g.net.state.backend=true;g.net.state.me=null;
   permission&&=g.net.mayDriveGorilla(temporary.handle)!==null&&g.net.mayDriveGorilla("NickDaGreek")===null
     &&g.net.mayDrive(temporary.handle,false)!==null&&g.net.mayDrive("NickDaGreek",false)===null&&g.net.mayDrive("NickDaGreek",true)===null;
   g.net.state.me=account;
-  record("integration actor identity: signed-in accounts can drive only their own pair, including login aliases and temporary owners; accounts without an own character cannot borrow, while signed-out and local rules stay unchanged",permission&&noOwner&&local,JSON.stringify({permission,noOwner,local}));
+  record("integration actor identity: signed-in accounts can drive only their own pair, including login aliases and temporary owners; accounts without an own character cannot borrow, while remembered signed-out control stays with the same pair and backend failure never grants another account access",permission&&noOwner&&local,JSON.stringify({permission,noOwner,local}));
   const motion=new Float64Array([4,1.5,2,.5,-.25,0]),poses=()=>g.sent.filter(m=>m.t==="pose");
   g.net.setBody("NickDaGreek");g.net.sendPose(2,3,4,.5);
   g.net.setBody(gorilla);g.net.sendPose(2,3,4,.5,motion);
@@ -21799,6 +21850,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   await chatNetChecks(BL);
   await chatClientChecks();
   await chatAccountChecks(BL);
+  await rememberedCharacterChecks(BL);
   await integrationChecks(BL);
   footstepChecks(BL);
   await voiceAloneChecks();

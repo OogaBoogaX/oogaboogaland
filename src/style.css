@@ -3514,7 +3514,9 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
   white-space: nowrap;
 }
 
-.detached-destination-name.show {
+.detached-destination-name.show,
+#destination-hud:hover .detached-destination-name,
+#destination-hud:focus-visible .detached-destination-name {
   opacity: 1;
   transition-duration: 0s;
 }

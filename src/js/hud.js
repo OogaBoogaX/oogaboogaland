@@ -806,12 +806,20 @@
       // Only a successful navigation updates the displayed destination.
       destinationIndex = (destinationIndex + 1) % destinationNames.length;
       actionHandler("mode-preset", destinationNames[destinationIndex]);
+      showDestinationLabel(el.modeDestinationName.textContent);
     };
     let destinationAnchored = false, destinationX = 0, destinationY = 0, destinationZ = 0;
-    const showAreaLabel = () => {
-      if (el.modeDestinationName.textContent !== areaLabel) el.modeDestinationName.textContent = areaLabel;
-      el.modeDestinationName.classList.toggle("show", !!areaLabel);
+    let destinationLabelTimer = 0;
+    const showDestinationLabel = text => {
+      if (el.modeDestinationName.textContent !== text) el.modeDestinationName.textContent = text;
+      window.clearTimeout(destinationLabelTimer);
+      el.modeDestinationName.classList.toggle("show", !!text);
+      destinationLabelTimer = text ? window.setTimeout(() => {
+        destinationLabelTimer = 0;
+        el.modeDestinationName.classList.remove("show");
+      }, 3000) : 0;
     };
+    const showAreaLabel = () => showDestinationLabel(areaLabel);
     const fadeDetachedName = (force = false) => {
       // Looking or zooming at an arrival does not leave that place.
       // Scenes with an anchor expire it from actual travel instead.
@@ -823,10 +831,11 @@
       showAreaLabel();
     };
     const setAreaLabel = (name, position = null) => {
+      const changed = areaLabel !== name;
       areaLabel = name;
       if (destinationAnchored && position
         && (position.x - destinationX) ** 2 + (position.y - destinationY) ** 2 + (position.z - destinationZ) ** 2 > 2.25) fadeDetachedName(true);
-      if (!detachedNameShown) showAreaLabel();
+      if (!detachedNameShown && changed) showAreaLabel();
     };
     const setDetachedView = (name, announce = false, position = null) => {
       if (!destinationLabels[name]) return;
@@ -836,9 +845,8 @@
       if (position) { destinationX = position.x; destinationY = position.y; destinationZ = position.z; }
       detachedSelectionShown = true;
       if (!announce) return;
-      el.modeDestinationName.textContent = destinationLabels[name];
       detachedNameShown = true;
-      el.modeDestinationName.classList.add("show");
+      showDestinationLabel(destinationLabels[name]);
     };
     let gorillaEntry = null, gorillaView = "orbit", gorillaCombat = false, gorillaCombatEnabled = true;
     let modeName = "", modeGeometry = null, modeSelected = false, modeCombat = false, modeView = "", modeHealth = -1, modeHealthMax = 0, modeGorilla = false;
@@ -2291,6 +2299,8 @@
       mainBoard.dispose();
       el.board.classList.remove("board-floating");
       el.board.removeAttribute("style");
+      window.clearTimeout(destinationLabelTimer);
+      el.modeDestinationName.classList.remove("show");
     };
     setMode(null);
     return {

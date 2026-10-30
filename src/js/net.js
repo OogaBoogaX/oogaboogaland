@@ -14,11 +14,11 @@
 //
 // Who drives which Ooga, on the page served by the Worker (`mayDrive`; the room enforces the same
 // ownership through its own copy of the cast): a signed-in contributor drives only their own Ooga, and
-// nobody else drives it while they are here. Signed-out visitors can drive available bundled Oogas
-// locally, including working ones; temporary contributors must sign in. Ownership keys on the GitHub login
+// nobody else drives it while they are here. Signed-out visitors drive only their remembered
+// character or their default local Ooga. Ownership keys on the GitHub login
 // alone (`github`, else the handle). A claim the room refuses, or an owner arriving, lands as `released`.
 // A body is its Ooga's canonical handle, or `gorilla:<handle>` for that Ooga's companion. Signed-in
-// visitors drive only their own gorilla; signed-out pages can still play companions locally.
+// visitors drive only their own gorilla; signed-out pages use only their assigned companion locally.
 // The NPC host: the room elects one page showing the island (`setHub`, which also counts a hidden tab
 // out) to run the Oogas for everyone. `state.hostId` names it; the host sends its binary pose frames with
 // `sendNpc`, and every other page reads the latest one from `npcFrame` (with `state.npcVersion` counting).
@@ -54,6 +54,20 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
+  const LOGIN_COOKIE = "ooga-last-github";
+  const validLogin = login => typeof login === "string" && /^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/i.test(login) && !login.includes("--");
+  const rememberedLogin = () => {
+    try {
+      const value = document.cookie?.split(";").map(part => part.trim()).find(part => part.startsWith(LOGIN_COOKIE + "="))?.slice(LOGIN_COOKIE.length + 1);
+      return validLogin(value) ? value.toLowerCase() : null;
+    } catch { return null; }
+  };
+  const rememberLogin = login => {
+    if (!validLogin(login)) return;
+    try { document.cookie = `${LOGIN_COOKIE}=${login.toLowerCase()}; Path=/; Max-Age=31536000; SameSite=Lax${location.protocol === "https:" ? "; Secure" : ""}`; }
+    catch { /* A denied cookie leaves this visit's authenticated account usable. */ }
+  };
+  let localCharacter = null;
   const POSE_MS = 1000 / 10;
   // Health in steps of the smallest hit, a few reports a second at most; the room's own bounds for poses.
   const HP_MS = 250, HP_STEP = 4, BOUND_XZ = 160, BOUND_Y_MIN = -130, BOUND_Y_MAX = 100;
@@ -390,7 +404,11 @@
       state.donations = data.donations === true;
       state.tess = data.tess === true;
       state.resolved = data.player === null || !!state.me;
-      if (state.me) BL.contributors.addTemporary(data.character, state.me.login);
+      if (state.me) {
+        BL.contributors.addTemporary(data.character, state.me.login);
+        rememberLogin(state.me.login);
+        localCharacter = ownCharacter();
+      }
     } catch {
       return false;
     } finally {
@@ -630,21 +648,35 @@
     return character && loginOf(character) === String(login).toLowerCase() ? character : null;
   };
   const ownCharacter = () => state.me && characterOf(state.me.login);
-  // The signed-in visitor's own Ooga when it is among `list` (anything with a `name`, a game's cast or a
-  // roster), else null: the games hold a signed-in contributor to it, as `mayDrive` does on the island.
-  const ownAmong = (list) => {
+  // A local control preference only: never used by room, microphone or sign-in checks.
+  const preferredCharacter = () => ownCharacter() || localCharacter;
+  const prepareLocalCharacter = () => {
     const own = ownCharacter();
+    if (own) return localCharacter = own;
+    const login = rememberedLogin(), known = login && characterOf(login);
+    localCharacter = known;
+    if (!known || mayDrive(known.handle)) {
+      const entry = BL.contributors.addLocal(known ? "Ooga" : login || "Ooga", known || !login ? "Ooga" : login);
+      localCharacter = { handle: entry.name, display: entry.display };
+    }
+    return localCharacter;
+  };
+  // The assigned Ooga among a game's cast or roster. This locks local game pickers too;
+  // it does not authenticate the visitor or grant a shared body.
+  const ownAmong = (list) => {
+    const own = preferredCharacter();
     return own && list.some((entry) => entry.name === own.handle) ? own.handle : null;
   };
 
   /** null when this visitor may drive the Ooga named `name`; otherwise the words that say why not. */
   const mayDrive = (name) => {
-    if (!state.backend) return null;
     const owner = BL.characters.get(name);
     if (state.me) return owner && ownCharacter() === owner ? null : "Drive your own Ooga";
-    if (!owner || owner.handle.toLowerCase() !== String(name).toLowerCase()) return null;
+    // Explicit offline debug fixtures do not prepare a local identity. Normal arrivals always do.
+    if (!localCharacter) return state.backend ? "Drive your own Ooga" : null;
+    if (String(owner ? owner.handle : name).toLowerCase() !== localCharacter.handle.toLowerCase()) return "Drive your own Ooga";
+    if (!owner) return null;
     const who = owner.display || owner.handle;
-    if (owner.temporary) return "Sign in to drive your Ooga";
     const ownerLogin = loginOf(owner), wanted = owner.handle.toLowerCase();
     for (const rec of remotes.values()) {
       if (rec.login.toLowerCase() === ownerLogin) return `${who} is here and drives this Ooga`;
@@ -654,16 +686,15 @@
   };
 
   const mayDriveGorilla = (name) => {
-    if (!state.backend) return null;
+    if (mayDrive(name)) return "Drive your own gorilla";
     const owner = BL.characters.get(name);
-    if (state.me) return owner && ownCharacter() === owner ? null : "Drive your own gorilla";
-    if (!owner) return null;
+    if (state.me || !owner) return null;
     const who = owner.display || owner.handle, ownerLogin = loginOf(owner), wanted = gorillaBody(owner.handle).toLowerCase();
     for (const rec of remotes.values()) {
       if (rec.login.toLowerCase() === ownerLogin) return `${who} is here and drives this gorilla`;
       if (rec.body && rec.body.toLowerCase() === wanted) return `Someone is already driving ${who}'s gorilla`;
     }
-    return owner.temporary ? "Sign in to drive your gorilla" : null;
+    return null;
   };
 
   const subscribe = (fn) => {
@@ -704,5 +735,5 @@
     close("off");
   };
 
-  BL.net = { subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeChat, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendGhost, subscribeGhost, sendPose, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
+  BL.net = { subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeChat, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendGhost, subscribeGhost, sendPose, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
 })();

@@ -997,7 +997,9 @@
     // this game leaves to brings the same Ooga back to the machine even on a page that opened here.
     const asked = ctx.from === null ? new URLSearchParams(location.search).get("character")?.trim().toLowerCase() : null;
     const wanted = asked ? BL.contributors.roster.find((c) => c.name.toLowerCase() === asked)?.name : world.pilot;
-    world.pilot = wanted && BL.contributors.roster.some((c) => c.name === wanted) ? wanted : BL.contributors.activeRoster[0]?.name || null;
+    world.pilot = BL.net.ownAmong(BL.contributors.roster)
+      || (wanted && !BL.net.mayDrive(wanted) && BL.contributors.roster.some(c => c.name === wanted) ? wanted
+        : BL.contributors.activeRoster.find(c => !BL.net.mayDrive(c.name))?.name || null);
     build(world.pilot);
     text(el.title, play.name);
     text(el.help, play.help);

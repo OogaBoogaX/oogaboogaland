@@ -60,15 +60,19 @@ Around the rim: **EntropyLab** (11 o'clock), **B.C.A.** (10), Banana Certified A
 
 On the Cloudflare Workers ([oogabooga.land](https://oogabooga.land), and [staging](https://oogaboogaland-staging.wickedsmartbitcoin.workers.dev)), **Contributor sign-in** at the foot of the side panel uses GitHub to share the island. Sign-in requires your own Ooga: an existing character or a temporary one verified from Oogatron's contributor feed. Everyone else can explore signed out. Signed-in players see each other as the Ooga or gorilla they drive, moving live with their name above them, while the rest of the crew keeps working around them. The panel shows how many are online. Opening the island in a second tab moves you there; the first tab offers **Play here** to move back.
 
+First-time visitors start with a local default character named **Ooga**. After a successful GitHub login, the site remembers the username in a one-year `ooga-last-github` cookie and prefers that character on later visits, even after sign-out. This is a local character preference, not a session: shared presence, ownership and voice still require authenticated sign-in. Clearing the cookie restores the default Ooga.
+
+The banner always includes an Ooga button. Its orange underline means you are controlling that character; in free roam, the portrait has no underline and clicking it resumes control. Before selecting a character, it opens the Oogas panel. Unavailable jetpacks are hidden, and the Ember Den has no weapons or weapon buttons. The location label below the island button fades after three seconds and returns on hover or keyboard focus.
+
 Signed-in players also share the crew: one player's page runs the Oogas for everyone, so each Ooga walks, works and sleeps in the same place on every screen. If that player leaves, another page takes over by itself.
 
 Who drives which Ooga:
 
 - **Contributors drive their own.** If your GitHub login owns a bundled or verified temporary character, signing in hands you your own Ooga. Contributors drive only their own pair in multiplayer.
 - **Sign-in always means an owned pair.** Signed-in players cannot borrow another contributor's Ooga or gorilla. A refused selection keeps the actor you currently control.
-- **Signed-out visitors** may play available bundled Oogas and gorillas locally, including working ones. Their page does not join the room, so it cannot check who is online elsewhere and does not publish that control. Local control alone does not show a green signed-in marker.
+- **Signed-out visitors** control only their remembered Ooga, or the default **Ooga** on a first visit, and its companion. The same restriction applies to game pickers and static hosting. Their page does not join the room or publish control, and local control alone does not show a green signed-in marker.
 - **Retake or switch.** The detached portrait retakes your last actor. **T** switches your own Ooga and gorilla while signed in, or retakes your Ooga from detached view.
-- **Companions belong to the same owner.** Signed-in contributors can drive their own gorilla, including a server-verified temporary contributor's companion. Other companions cannot be borrowed while signed in. Signed-out companion play stays local.
+- **Companions belong to the same owner.** Signed-in contributors can drive their own gorilla, including a server-verified temporary contributor's companion. Other companions cannot be borrowed. Signed-out companion play stays local.
 
 Players driving an Ooga or gorilla can also talk: **Join voice** at the foot of the panel asks for your microphone, then becomes **Mute**. You hear everyone driving an actor in the same place as you, all at the same volume: out on the island, in HQ, or inside the same cave. Step into a cave and you hear only who is in there with you.
 
