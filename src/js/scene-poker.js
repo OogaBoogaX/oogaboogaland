@@ -5,6 +5,7 @@
   const BL = window.BL, S = BL.scene, Themes = BL.pokerThemes;
   const presets = { entrance: { yaw: 0, pitch: 0.48, dist: 18, target: { x: 0, y: 1, z: 17 } } };
   const VIEW_NAMES = { entrance: "Overview" };
+  let tableView = false;
   const renderOpts = { clear: [0.1, 0.12, 0.09], sky: [0.62, 0.57, 0.45], ground: [0.31, 0.36, 0.27],
     direct: [0.88, 0.77, 0.58], directStrength: 0.38, ambientFloor: 0.48, sun: { x: 0.2, y: 1, z: 0.3 },
     shadowCenter: { x: 0, y: 1.5, z: 0 }, shadowExtent: 35, bloomStrength: 0.24,
@@ -216,12 +217,13 @@
     if (!presets["table-1"]) {
     for (let i = 0; i < BL.pokerModels.TABLES.length; i++) {
       const table = BL.pokerModels.TABLES[i], name = `table-${i + 1}`;
-      // Every dealer sits on the table's negative-Z side; look down over that shoulder at the board.
-      presets[name] = { yaw: Math.PI, pitch: 1.05, dist: 8, target: { x: table.x, y: 1.41, z: table.z } };
+      // Nearly overhead, with the dealer's side at the bottom and the eye below the ceiling.
+      presets[name] = { yaw: Math.PI, pitch: 1.48, dist: 7.1, target: { x: table.x, y: 1.41, z: table.z } };
       VIEW_NAMES[name] = `Table ${i + 1}`;
     }
     }
     visit++;
+    tableView = false;
     game = ctx.game; world = ctx.world; go = ctx.go; leaving = false; timer = 0; HERO = "local-player"; connecting = false;
     if (ctx.from === "bifrost") document.querySelector('[data-intro="poker"]').hidden = true;
     session = world.poker || (world.poker = { tables: Array.from({ length: 10 }, () => BL.pokerRules.create()), selected: 0, pendingStand: false });
@@ -249,6 +251,7 @@
     hud.el.modeDestinationLabel.textContent = "Ember Den views. Press to cycle tables";
     const presetView = name => {
       if (leaving || panel.focused || seatTable >= 0 && !pendingStand || !VIEW_NAMES[name]) return;
+      tableView = name !== "entrance";
       pilot.goPreset(name); hud.setDetachedView(name, true);
     };
     hud.onPreset(presetView);
@@ -304,6 +307,9 @@
     pilot.readInput(dt);
     if (!panel.focused) people.update(dt, elapsed);
     pilot.update(dt);
+    if (pilot.player) tableView = false;
+    // Widen the table framing instead of backing the camera through the room's ceiling.
+    if (tableView && !panel.focused) camera.fov = 2 * Math.atan(Math.tan(camera.fov / 2) * 1.4);
     // Restored views and possession blends can replace the ordinary solver's camera position.
     keepCameraInside();
     // The Ooga driven here goes to the room with where it stands and its health; other players here are shown.
