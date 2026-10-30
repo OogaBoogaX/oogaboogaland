@@ -97,7 +97,7 @@
       oscillator.type = "sine"; oscillator.frequency.setValueAtTime(kind === "turn" ? 660 : kind === "win" ? 880 : 260, now);
       oscillator.frequency.exponentialRampToValueAtTime(kind === "win" ? 1174 : 220, now + 0.11);
       gain.gain.setValueAtTime(0.0001, now); gain.gain.exponentialRampToValueAtTime(0.035, now + 0.008); gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.14);
-      oscillator.connect(gain); gain.connect(audio.destination); oscillator.start(now); oscillator.stop(now + 0.15);
+      oscillator.connect(gain); gain.connect(BL.sound.output(audio)); oscillator.start(now); oscillator.stop(now + 0.15);
       oscillator.onended = () => { oscillator.disconnect(); gain.disconnect(); };
     };
     const setAmount = (value, preset = "") => {

@@ -16,7 +16,7 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const VOICES = 14, NOISES = 6, DRUMS = 4, THROATS = 3, NOISE_SECONDS = 2, MASTER = 0.45, STORAGE_KEY = "oogaboogaland.audio";
+  const VOICES = 14, NOISES = 6, DRUMS = 4, THROATS = 3, NOISE_SECONDS = 2, MASTER = 0.45;
   // The bed's drum pulse, a step every `STEP` seconds over sixteen: the low skin drum's level on each step (0 rests)
   // and the hand drum's; every fourth bar the hand drum fills its last four steps. `AHEAD` is how far ahead `tick`
   // schedules the bed.
@@ -242,10 +242,7 @@
   const create = (withChip = false) => {
     let ctx = null, master = null, send = null, ready = false, muted = false, level = 1, pan = 0, bend = 1;
     let bed = null, bedOn = false, beatAt = 0, beatStep = 0, cricketAt = 0, cricketI = 0, crackAt = 0, roarAt = 0, birdAt = 0, callI = 0, chantAt = 0, gruntI = 0, tapI = 0;
-    try {
-      muted = localStorage.getItem(STORAGE_KEY) === "off";
-    } catch {
-    }
+    muted = BL.sound.muted;
     const voices = [], noises = [], drums = [], throats = [], running = [];
     let voiceNext = 0, noiseNext = 0, drumNext = 0, throatNext = 0;
     // The chip's four channels (two pulses, the triangle, the noise: { f, gain, osc, wave, vib, lp, until }, `until`
@@ -959,17 +956,16 @@
     };
     const setMuted = (value) => {
       muted = !!value;
-      try {
-        localStorage.setItem(STORAGE_KEY, muted ? "off" : "on");
-      } catch {
-      }
+      BL.sound.setMuted(muted);
       if (ready) master.gain.setTargetAtTime(muted ? 0 : MASTER, ctx.currentTime, 0.05);
       return muted;
     };
+    const offSound = BL.sound.subscribe(setMuted);
     return {
       cue, chip, music, pause, activate, setMuted, room, tick,
       get muted() { return muted; },
       dispose() {
+        offSound();
         document.removeEventListener("visibilitychange", onVisibility);
         M.tune = null;
         if (!ctx) return;

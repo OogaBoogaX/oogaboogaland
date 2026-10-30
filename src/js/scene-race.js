@@ -736,7 +736,6 @@
     }
     if (e.key === "e" || e.key === "E" || e.key === "Shift") useItem();
     if (e.key === "0") cam.offset = 0;
-    if (e.key === "m" || e.key === "M") toggleMute();
     if (e.key === "Enter" && phase === "garage") startRace();
     if (e.key === "Enter" && phase === "finished" && !rhud.el.next.hidden) nextRace();
     if (e.key === "b" || e.key === "B") {

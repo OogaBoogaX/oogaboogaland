@@ -45,6 +45,17 @@
     byName.set(row.handle, temporary);
     return true;
   };
+  // A guest or remembered unbundled login is local scenery, never a registered GitHub identity or shared NPC; a name
+  // another Ooga already answers to is refused (null).
+  const addLocal = (name, display = name) => {
+    const existing = byName.get(name.toLowerCase());
+    if (existing) return existing.local ? existing : null;
+    const entry = { name, display, lastCommitAt: 0, lastContributionAt: 0, activity: new Map(), maintainer: false, temporary: true, local: true };
+    roster.push(entry);
+    if (solo && character === name.toLowerCase()) activeRoster.push(entry);
+    byName.set(name.toLowerCase(), entry);
+    return entry;
+  };
   const listeners = new Set(), snapshotRepos = new Set();
   const repositoryOf = BL.activityRepos.keyOf;
   // Repeatable debug-only fixture: ooga=handle:clank:lab,obl,lf,bca (or chill/sleep).
@@ -94,6 +105,7 @@
   };
   const contributionAt = (contributor) => contributor.lastContributionAt > 0 ? contributor.lastContributionAt : contributor.lastCommitAt;
   const stateFor = (contributor, at = Date.now()) => {
+    if (contributor.local) return "chilling";
     if (debugRoster) return debugModes.get(contributor)?.state || "sleeping";
     if (debugState) return debugState;
     const state = stateAt(contributionAt(contributor), at);
@@ -239,7 +251,7 @@
     const traits = {
       ...look,
       name,
-      display: character?.display || name,
+      display: character?.display || byName.get(name.toLowerCase())?.display || name,
       slim,
       skin: look.skin || skin,
       hair: look.hair || hashedHair,
@@ -254,5 +266,5 @@
     if (look.height) traits.height = look.height;
     return traits;
   };
-  BL.contributors = { roster, activeRoster, solo, debugState, debugRoster, addTemporary, stateFor, ageLabel, contributionStateFor, contributionAgeLabel, traitsFor, voiceFor, hasRecentActivity, applyActivity, applySnapshot, subscribe, seedDebugActivity };
+  BL.contributors = { roster, activeRoster, solo, debugState, debugRoster, addTemporary, addLocal, stateFor, ageLabel, contributionStateFor, contributionAgeLabel, traitsFor, voiceFor, hasRecentActivity, applyActivity, applySnapshot, subscribe, seedDebugActivity };
 })();

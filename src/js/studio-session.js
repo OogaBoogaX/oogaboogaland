@@ -30,7 +30,8 @@
       error.textContent="";
       if(!BL.net.studioCommand(action,{...fields,playback:state?.playbackRevision,commandId:`studio-${++sequence}`}))error.textContent="The room is disconnected. Rejoin before changing the session.";
     };
-    const syncSound=()=>{soundEnabled=soundWanted&&BL.voice.stats.ready===true&&BL.voice.stats.enabled===true&&!BL.voice.stats.blocked&&!playBlocked&&!BL.voice.stats.error&&!soundFailure&&BL.voice.stats.receiveState!=="failed"&&BL.voice.stats.receiveState!=="disconnected";video.muted=!soundEnabled||muted;};
+    const syncSound=()=>{soundEnabled=soundWanted&&BL.voice.stats.ready===true&&BL.voice.stats.enabled===true&&!BL.voice.stats.blocked&&!playBlocked&&!BL.voice.stats.error&&!soundFailure&&BL.voice.stats.receiveState!=="failed"&&BL.voice.stats.receiveState!=="disconnected";video.muted=!soundEnabled||muted||BL.sound.muted;};
+    const offSound=BL.sound.subscribe(syncSound);
     const micReason=()=>{
       if(BL.net.state.room!=="live"||!state)return "Connect to the room before speaking.";
       if(state.canSpeak)return BL.voice.stats.publishing?"Your microphone is publishing. Choose Mute microphone to release it.":micRequested?"Connecting your microphone by your explicit choice…":"Your microphone remains off until you choose Join conversation.";
@@ -142,10 +143,10 @@
       leave,open:()=>{if(!active||dialog.open)return;returnFocus=document.activeElement;dialog.showModal();BL.dsbMenuShell?.present(dialog,true);onOpen(true);reflect();},close,
       seat:seat=>{seatClaim=seat;awaitingSeat=seat!==null;command(seat===null?"stand":"seat",seat===null?{}:{seat});},
       update:dt=>{if(!active)return;const talking=state?.hostId&&(isHost()?BL.voice.stats.speaking:BL.voice.speaking?.(state.hostId));const target=talking?0.35:1;programGain+=(target-programGain)*(1-Math.exp(-Math.min(dt,.1)/(talking?0.08:0.45)));if(state)video.volume=Math.max(0,Math.min(1,state.volume*programGain*personalProgram));elapsed+=dt;if(elapsed>.5){elapsed=0;reconcile();reflect();}},
-      setMuted:on=>{muted=!!on;video.muted=muted||!soundEnabled;},
+      setMuted:on=>{muted=!!on;syncSound();},
       get isOpen(){return dialog.open;},get playing(){return active&&!video.paused;},
       get stats(){return {active,epoch:state?.epoch??null,revision:state?.revision??null,anchorPosition:state?.position??null,open:dialog.open,soundEnabled,soundState:soundState(),buffering,mode:state?.mode||null,source:selectedSource,position:video.currentTime||0,media:active?1:0};},
-      dispose:()=>{leave();disposed=true;events.abort();unsubscribe();unsubscribeAccount();unsubscribeVoice();dialog.remove();}
+      dispose:()=>{offSound();leave();disposed=true;events.abort();unsubscribe();unsubscribeAccount();unsubscribeVoice();dialog.remove();}
     };
   };
   BL.studioSession={create};

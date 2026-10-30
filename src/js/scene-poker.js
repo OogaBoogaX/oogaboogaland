@@ -4,6 +4,8 @@
   // in the page, since the island's BIFROST window is tinted by them.
   const BL = window.BL, S = BL.scene, Themes = BL.pokerThemes;
   const presets = { entrance: { yaw: 0, pitch: 0.48, dist: 18, target: { x: 0, y: 1, z: 17 } } };
+  const VIEW_NAMES = { entrance: "Overview" };
+  let tableView = false;
   const renderOpts = { clear: [0.1, 0.12, 0.09], sky: [0.62, 0.57, 0.45], ground: [0.31, 0.36, 0.27],
     direct: [0.88, 0.77, 0.58], directStrength: 0.38, ambientFloor: 0.48, sun: { x: 0.2, y: 1, z: 0.3 },
     shadowCenter: { x: 0, y: 1.5, z: 0 }, shadowExtent: 35, bloomStrength: 0.24,
@@ -30,7 +32,18 @@
   let theme = Themes.get("gatsby");
   const clamp = BL.math.clamp;
   const clampTarget = p => { p.x = clamp(p.x, -22, 22); p.z = clamp(p.z, -34, 34); p.y = clamp(p.y, 0.5, 7); };
-  const clampCamera = p => { p.x = clamp(p.x, -23.5, 23.5); p.z = clamp(p.z, -35.7, 35.7); p.y = clamp(p.y, 0.8, 8.5); };
+  const clampCamera = p => {
+    const x = p.x, y = p.y, z = p.z;
+    // Stay inside the wall finishes and columns, with clearance for the camera's near plane.
+    p.x = clamp(x, -23, 23); p.z = clamp(z, -35.7, 35.7); p.y = clamp(y, 0.8, 8.5);
+    return p.x !== x || p.y !== y || p.z !== z;
+  };
+  const keepCameraInside = () => {
+    const p = camera.position, x = p.x, y = p.y, z = p.z;
+    if (!clampCamera(p)) return;
+    // Orbit/overhead views supply their own look direction; retain it when stopping at a wall.
+    camera.target.x += p.x - x; camera.target.y += p.y - y; camera.target.z += p.z - z;
+  };
   const activeTable = () => session.tables[selected];
   const setTheme = id => {
     theme = Themes.get(id); room.setTheme(theme.id); panel.setTheme(theme.id);
@@ -201,7 +214,15 @@
     } catch (error) { panel.notice(error.message); }
   };
   const enter = ctx => {
+    // The table views wait for the deferred models; nearly overhead, the dealer's side at the bottom, the eye below
+    // the ceiling.
+    if (!presets["table-1"]) for (let i = 0; i < BL.pokerModels.TABLES.length; i++) {
+      const table = BL.pokerModels.TABLES[i], name = `table-${i + 1}`;
+      presets[name] = { yaw: Math.PI, pitch: 1.48, dist: 7.1, target: { x: table.x, y: 1.41, z: table.z } };
+      VIEW_NAMES[name] = `Table ${i + 1}`;
+    }
     visit++;
+    tableView = false;
     game = ctx.game; world = ctx.world; go = ctx.go; leaving = false; timer = 0; HERO = "local-player"; connecting = false;
     if (ctx.from === "bifrost") document.querySelector('[data-intro="poker"]').hidden = true;
     session = world.poker || (world.poker = { tables: Array.from({ length: 10 }, () => BL.pokerRules.create()), selected: 0, pendingStand: false });
@@ -217,29 +238,38 @@
     input = BL.interact.create({ canvas: ctx.canvas, renderer: ctx.renderer, camera, hooks });
     pilot = BL.pilot.create({ renderer: ctx.renderer, canvas: ctx.canvas, camera, hud, presets, landing: "entrance", pitch: [-0.1, 1.3], dist: [3, 32],
       follow: { y: 0.9, min: 3, max: 7, pitch: [0.25, 0.8] }, fly: { speed: 6, perDist: 0.4, climb: 4, yMax: 8 },
-      clampTarget, clampCamera, ceilingAt: () => 8.5, coarse: matchMedia("(pointer: coarse)").matches, mayPossess,
+      clampTarget, clampCamera, observeOrbit: keepCameraInside, ceilingAt: () => 8.5, coarse: matchMedia("(pointer: coarse)").matches, mayPossess,
       close: { eyeHeight: 1.1, eyeRatio: 0.95, eyeForward: 0.16, pitch: [-1.35, 1.35], trailingDist: 4, orbitDist: 5, maxStep: 0.6, groundAt: () => 0 } });
     Object.assign(hooks, pilot.hooks, {
       onHover: (hit, p) => { if (hit?.owner.kind === "poker") hud.tooltip.show(`Table ${hit.owner.index + 1} · select to play or watch`, p.x, p.y); else hud.tooltip.hide(); },
       onTap: hit => { if (hit?.owner.kind === "poker") select(hit.owner.index); else if (hit?.owner.kind === "poker-exit") leaveFloor(); }
     });
-    hud.onPreset(pilot.goPreset);
-    hud.onAction((a, v) => { if (a === "leave") leaveFloor(); else if (a === "reset-view") pilot.resetCamera(); else if (a === "act") pilot.action(); else if (a.startsWith("mode-")) modeAction(a); });
+    hud.setDestinations(Object.keys(VIEW_NAMES), VIEW_NAMES);
+    hud.setAreaLabel("Ember Den");
+    hud.el.modeDestination.title = "Ember Den · cycle tables";
+    hud.el.modeDestinationLabel.textContent = "Ember Den views. Press to cycle tables";
+    const presetView = name => {
+      if (leaving || panel.focused || seatTable >= 0 && !pendingStand || !VIEW_NAMES[name]) return;
+      tableView = name !== "entrance";
+      pilot.goPreset(name); hud.setDetachedView(name, true);
+    };
+    hud.onPreset(presetView);
+    hud.onAction((a, v) => { if (a === "leave") leaveFloor(); else if (a === "reset-view") pilot.resetCamera(); else if (a === "act") pilot.action(); else if (a === "mode-preset") presetView(v); else if (a.startsWith("mode-")) modeAction(a); });
     fx = BL.fx.create({ root, input, hooks, hud, game: ctx.game, world, renderer: ctx.renderer, camera, overlay: ctx.overlay, tickerAt: { x: 0, y: 5, z: -34 } });
     room = BL.pokerModels.build(theme.id); S.addChild(root, room.root);
     for (let i = 0; i < 10; i++) { input.add(room.tables[i].top, { kind: "poker", index: i }); targets.push(room.tables[i].top); }
     // The return mirror is set into the far wall, facing down the central aisle.
-    const BM = BL.bifrostModels, face = BM.mirror(4);
-    const frame = S.createNode({ position: { x: 0, y: 0, z: 35.2 }, rotation: { x: 0, y: Math.PI, z: 0 } });
+    const BM = BL.bifrostModels, face = BM.mirror(4), portalZ = BL.pokerModels.PORTAL_Z;
+    const frame = S.createNode({ position: { x: 0, y: 0, z: portalZ }, rotation: { x: 0, y: Math.PI, z: 0 } });
     const stone = S.createNode({ geometry: BM.archStone() });
     const glass = S.createNode({ geometry: face.glass, position: { x: 0, y: 0, z: -BM.MIRROR_Z }, sightHidden: true, rippleTint: [0.3, 0.62, 1] });
     const label = BL.factoryModels.label("BIFROST", "", { height: 1.1 });
-    const board = S.createNode({ position: { x: 0, y: BM.WINDOW_TOP + BM.FRAME.band + 1.15, z: BM.FRAME.front + 0.2 } });
-    S.addChild(board, S.createNode({ geometry: BM.hanger(label.width, 1.35, BM.FRAME.front + 0.2) }), S.createNode({ geometry: label.back }), S.createNode({ geometry: label.face }));
+    const board = S.createNode({ position: { x: 0, y: BM.WINDOW_TOP + BM.FRAME.band + 1.15, z: portalZ - BL.pokerModels.REAR_WALL_Z + 0.07 } });
+    S.addChild(board, S.createNode({ geometry: label.back }), S.createNode({ geometry: label.face }));
     S.addChild(frame, stone, S.createNode({ geometry: BM.archGlow(), sightHidden: true }), S.createNode({ geometry: face.backing }), glass, board);
     S.addChild(root, frame);
     const opening = { minX: -BM.WINDOW.halfW, maxX: BM.WINDOW.halfW, floorY: 0, ceilingY: BM.WINDOW_TOP };
-    const phase = BL.labPhase.create(frame, { x: 0, z: 35.2, ry: Math.PI, floorY: 0, room: { w: 2 * BM.WINDOW.halfW, h: BM.WINDOW_TOP, from: 0, to: 1 } }, opening, -BM.MIRROR_Z, [0.3, 0.62, 1]);
+    const phase = BL.labPhase.create(frame, { x: 0, z: portalZ, ry: Math.PI, floorY: 0, room: { w: 2 * BM.WINDOW.halfW, h: BM.WINDOW_TOP, from: 0, to: 1 } }, opening, -BM.MIRROR_Z, [0.3, 0.62, 1]);
     phase.node.visible = false;
     glass.mirrorRipples = phase.ripples;
     mirror = { phase, glass, body: BL.mirrorBody.create(glass, new Map()) };
@@ -248,14 +278,21 @@
     const name = [world.pilot, requested].find(n => BL.contributors.activeRoster.some(c => c.name === n && mayPick(c))) || (BL.contributors.activeRoster.find(mayPick) || BL.contributors.activeRoster[0]).name;
     world.pilot = null;
     const playerWorld = { level: 0, weapons: new Map(), magazine: { owned: false, count: 0, ammo: 0, carrier: null } };
-    const shared = { root, input, hud, game: ctx.game, world: playerWorld, playerName: name, weaponsEnabled: true, fx, viewYaw: 0, outsideActors: () => remotes ? remotes.actors() : NO_ACTORS, outsideActorHeight: BL.remotePlayers.BODY_HEIGHT, groundAt: () => 0, walkable: BL.pokerModels.walkable, useNear: () => select(selected) };
-    people = shared.crew = BL.crew.create(shared); pilot.bind(shared); avatar = people.cavemen.get(name);
+    const shared = { root, input, hud, game: ctx.game, world: playerWorld, playerName: name, weaponsEnabled: false, fx, viewYaw: 0, outsideActors: () => remotes ? remotes.actors() : NO_ACTORS, outsideActorHeight: BL.remotePlayers.BODY_HEIGHT, groundAt: () => 0, walkable: BL.pokerModels.walkable, useNear: () => select(selected) };
+    people = shared.crew = BL.crew.create(shared);
+    for (const cave of people.cavemen.values()) {
+      cave.weapon.primaryOwned = cave.weapon.secondaryOwned = false;
+      people.selectWeapon(0, cave);
+      cave.parts.club.visible = cave.parts.gun.visible = false;
+    }
+    pilot.bind(shared); avatar = people.cavemen.get(name);
     avatar.root.position.x = 0; avatar.root.position.y = avatar.baseY; avatar.root.position.z = 29;
     avatar.root.rotation.y = Math.PI; pilot.possess(avatar);
     if (!pilot.loginViewRestored) pilot.navigate({ position: { x: 0, y: 0, z: 29 }, yaw: 0, pitch: 0.18, dist: 4 });
+    keepCameraInside();
     unsubscribeAccount = BL.net.subscribe(accountChanged);
     // Other signed-in players on the floor, as the Oogas they drive.
-    remotes = BL.remotePlayers.create({ root, crew: people, fx });
+    remotes = BL.remotePlayers.create({ root, crew: people, fx, posed: cave => { cave.parts.club.visible = cave.parts.gun.visible = false; } });
     // The driven Ooga's own footsteps, heard by this page alone (footsteps.js).
     footsteps = BL.footsteps.create();
     mirror.body.track(avatar.root, avatar.traits.height * 2, Math.max(avatar.headOpen.verts.length, avatar.headClosed.verts.length));
@@ -269,6 +306,13 @@
     pilot.readInput(dt);
     if (!panel.focused) people.update(dt, elapsed);
     pilot.update(dt);
+    if (pilot.player) tableView = false;
+    // Widen the table framing instead of backing the camera through the room's ceiling.
+    if (tableView && !panel.focused) camera.fov = 2 * Math.atan(Math.tan(camera.fov / 2) * 1.4);
+    // Clear the overhead sightline while keeping the tables illuminated.
+    room.fixtures.visible = !tableView || panel.focused;
+    // Restored views and possession blends can replace the ordinary solver's camera position.
+    keepCameraInside();
     // The Ooga driven here goes to the room with where it stands and its health; other players here are shown.
     const drivenHere = people.player;
     BL.net.setBody(drivenHere ? drivenHere.traits.name : null);
@@ -277,7 +321,7 @@
     footsteps.update(drivenHere);
     mirror.phase.update(dt, elapsed); mirror.body.update(dt); mirror.body.time = mirror.phase.ripples.time;
     if (pilot.player && (seatTable < 0 || pendingStand) && Math.abs(avatar.root.position.x) < BL.bifrostModels.WINDOW.halfW
-      && avatar.root.position.z > BL.pokerModels.EXIT_Z && !leaving) leaveFloor();
+      && avatar.root.position.z + avatar.bodyRadius > BL.pokerModels.EXIT_Z && !leaving) leaveFloor();
     // All ten table lights fit the lowest renderer tier; selected table goes first.
     const near = selected, lights = renderOpts.lights;
     for (let slot = 0; slot < 10; slot++) {
@@ -285,6 +329,9 @@
       lights[o] = p.x; lights[o + 1] = 5.1; lights[o + 2] = p.z; lights[o + 3] = 14;
       lights[o + 4] = theme.tableLight[0]; lights[o + 5] = theme.tableLight[1]; lights[o + 6] = theme.tableLight[2];
       const v = room.tables[i]; v.pulse = Math.max(0, v.pulse - dt);
+      // Floating table names face the visitor and clear the overhead view with the fixtures.
+      v.label.visible = room.fixtures.visible;
+      if (v.label.visible) v.label.rotation.y = Math.atan2(camera.position.x - p.x, camera.position.z - p.z);
       v.agent.parts.armL.rotation.x = -0.5 - Math.sin(v.pulse / 0.7 * Math.PI) * 0.75;
       v.agent.parts.armR.rotation.x = -0.45;
       v.dealCard.visible = v.pulse > 0 && snapshots[i].phase !== "waiting";

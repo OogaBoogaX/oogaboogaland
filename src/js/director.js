@@ -60,7 +60,16 @@
   const qualityLabel = $("quality");
   const curtain = $("curtain");
   const worldBlock = $("world-block"), worldBlockHeight = $("world-block-height");
-  const worldClock = $("world-clock");
+  const worldClock = $("world-clock"), soundButton = $("environment-sound");
+  const sound = window.BL.sound;
+  const showSound = () => {
+    const label = sound.muted ? "Unmute environment sounds" : "Mute environment sounds";
+    soundButton.setAttribute("aria-label", label); soundButton.title = `${label} · M`;
+    soundButton.setAttribute("aria-pressed", String(sound.muted));
+  };
+  const offSound = sound.subscribe(showSound);
+  soundButton.addEventListener("click", sound.toggle);
+  showSound();
   let renderer = null;
   if (!params.has("canvas2d")) {
     try {
@@ -252,8 +261,8 @@
   const coarse = window.matchMedia("(pointer: coarse)").matches;
   if (coarse) for (const n of document.querySelectorAll("[data-intro] [data-coarse]")) n.textContent = n.dataset.coarse;
   const openIntro = () => intros.find((el) => !el.hidden) || null;
-  // The microphone's note, which names M only in a scene whose M mutes the microphone (`micKey`).
-  const showMic = () => window.BL.hud.showMic(window.BL.voice.stats, !!(active && active.micKey));
+  // Microphone and remote voice muting stay in the Oogas panel.
+  const showMic = () => window.BL.hud.showMic(window.BL.voice.stats, false);
   // An arrival in three parts: `arriving` before the scene's own enter, the enter, then `arrived`. A scene with
   // `enterSteps` may run its enter in slices between them (see `swap`).
   const arriving = (next, place) => {
@@ -690,11 +699,10 @@
       location.reload();
       return;
     }
-    // M mutes and unmutes the microphone while in voice, in the scenes that share voice and leave M free
-    // (`micKey`); a game's or a hall's own M still mutes its sound.
-    if (key === "m" && active.micKey && window.BL.voice.stats.enabled && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    // M always controls environment sound; voice chat keeps its separate panel controls.
+    if (key === "m" && !e.metaKey && !e.ctrlKey && !e.altKey) {
       e.preventDefault();
-      window.BL.voice.toggle();
+      sound.toggle();
       return;
     }
     // Every scene's B shortcut adds demo bananas; ordinary visits leave donations to the feed.
@@ -858,6 +866,8 @@
     // net.start is bounded; an unavailable backend leaves the static island usable.
     await accountReady;
     if (destroyed) return;
+    // Explicit debug fixtures retain their own cast and arrival; ordinary routes start with this visitor's Ooga.
+    if (!DEBUG) world.pilot = net.prepareLocalCharacter().handle;
     const constructionCPU = window.BL.buildTasks.cpu;
     let first = Object.hasOwn(scenes, sceneId) ? scenes[sceneId] : scenes[Object.keys(scenes)[0]], place = routed && routed.place;
     if (terrainController && ISLAND_FIRST) {
@@ -998,6 +1008,7 @@
     unsubscribeMic();
     window.BL.voice.dispose();
     net.dispose();
+    offSound(); soundButton.removeEventListener("click", sound.toggle);
     window.removeEventListener("keydown", onKeyDown);
     window.removeEventListener("keyup", clearRightShift);
     window.removeEventListener("blur", clearRightShift);

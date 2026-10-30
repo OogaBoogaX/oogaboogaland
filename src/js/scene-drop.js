@@ -802,7 +802,6 @@
     }
     if (e.key === "Enter" && (phase === "board" || phase === "results")) startFlight();
     if (e.key === "0") cam.offset = cam.tilt = 0;
-    if (e.key === "m" || e.key === "M") toggleMute();
     if (e.key === "b" || e.key === "B") {
       world.level = Math.min(pileMod.MAX_BANANAS, world.level + testBananas);
       hud.toast(`+${testBananas} test bananas`);
