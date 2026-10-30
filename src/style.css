@@ -7138,6 +7138,13 @@ body[data-active-scene="poker"] .ember-den-icon {
   filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.45));
 }
 body[data-active-scene="poker"] #freeroam-icon { display: none; }
+body[data-active-scene="poker"] .ember-den-icon {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  overflow: visible;
+}
 body[data-active-scene="dsb"] :is(#freeroam-icon, #weapon-hud, #magazine-hud) { display: none !important; }
 body[data-active-scene] :is(.world-clock, .world-block) {
   right: calc(var(--hub-banner-gutter) + var(--safe-right) + 48px);
