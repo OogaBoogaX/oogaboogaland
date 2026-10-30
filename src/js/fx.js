@@ -311,8 +311,9 @@
       }
       paintSpeech(ctx, text, x, y, alpha, cave, tw, more, bob);
     };
+    // A speaker with a nameplate of its own over the head (remote-players.js) lifts its bubble by `speechLift` pixels.
     const paintSpeech = (ctx, text, x, y, alpha, cave, tw, more, bob) => {
-      const space = hud ? hud.tooltip.speechSpace(cave) : 0;
+      const space = (hud ? hud.tooltip.speechSpace(cave) : 0) + (cave && cave.speechLift || 0);
       const bottom = drawBubble(ctx, text, x, y - space, alpha, tw, more, bob);
       if (hud) hud.tooltip.belowSpeech(cave, bottom);
     };

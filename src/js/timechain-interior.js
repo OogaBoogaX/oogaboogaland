@@ -419,7 +419,7 @@
       BL.net.setZone(room.zone);
       if (guide.stage) BL.net.passDoor(room.zone, "in");
     } else { BL.net.setBody(null); BL.net.setZone("none"); }
-    remotes = shared ? BL.remotePlayers.create({ root, crew: people, hide: (name, on) => { if (name === "SaniExp") saniRemote = on; } }) : null;
+    remotes = shared ? BL.remotePlayers.create({ root, crew: people, fx, hide: (name, on) => { if (name === "SaniExp") saniRemote = on; } }) : null;
     const footsteps = BL.footsteps.create();
     const sound = ambience(room, ctx.signal);
     // Another player crossing this room's own doorway opens its doors here too (net.js `subscribeDoor`).
