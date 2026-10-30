@@ -6400,9 +6400,15 @@ body[data-active-scene] .topbar {
   padding-right: calc(var(--hub-banner-gutter) + var(--safe-right));
 }
 
-body[data-active-scene] .brand { width: max-content; }
+/* Reserve the mainland's subtitle row even in environments without a subtitle. */
+body[data-active-scene] .brand {
+  display: grid;
+  grid-template-rows: auto calc(var(--hub-meta-font) * 1.4);
+  row-gap: 2px;
+  width: max-content;
+}
 body[data-active-scene] .brand h1 { font-size: var(--hub-title-font); white-space: nowrap; }
-body[data-active-scene] .brand p { font-size: var(--hub-meta-font); }
+body[data-active-scene] .brand p { margin: 0; font-size: var(--hub-meta-font); }
 
 body[data-active-scene] .world-clock,
 body[data-active-scene] .world-block {
