@@ -4,6 +4,12 @@
   // in the page, since the island's BIFROST window is tinted by them.
   const BL = window.BL, S = BL.scene, Themes = BL.pokerThemes;
   const presets = { entrance: { yaw: 0, pitch: 0.48, dist: 18, target: { x: 0, y: 1, z: 17 } } };
+  const VIEW_NAMES = { entrance: "Overview" };
+  for (let i = 0; i < BL.pokerModels.TABLES.length; i++) {
+    const table = BL.pokerModels.TABLES[i], name = `table-${i + 1}`;
+    presets[name] = { yaw: table.x < 0 ? -Math.PI / 2 : Math.PI / 2, pitch: .55, dist: 9, target: { x: table.x, y: 1, z: table.z } };
+    VIEW_NAMES[name] = `Table ${i + 1}`;
+  }
   const renderOpts = { clear: [0.1, 0.12, 0.09], sky: [0.62, 0.57, 0.45], ground: [0.31, 0.36, 0.27],
     direct: [0.88, 0.77, 0.58], directStrength: 0.38, ambientFloor: 0.48, sun: { x: 0.2, y: 1, z: 0.3 },
     shadowCenter: { x: 0, y: 1.5, z: 0 }, shadowExtent: 35, bloomStrength: 0.24,
@@ -223,8 +229,16 @@
       onHover: (hit, p) => { if (hit?.owner.kind === "poker") hud.tooltip.show(`Table ${hit.owner.index + 1} · select to play or watch`, p.x, p.y); else hud.tooltip.hide(); },
       onTap: hit => { if (hit?.owner.kind === "poker") select(hit.owner.index); else if (hit?.owner.kind === "poker-exit") leaveFloor(); }
     });
-    hud.onPreset(pilot.goPreset);
-    hud.onAction((a, v) => { if (a === "leave") leaveFloor(); else if (a === "reset-view") pilot.resetCamera(); else if (a === "act") pilot.action(); else if (a.startsWith("mode-")) modeAction(a); });
+    hud.setDestinations(Object.keys(VIEW_NAMES), VIEW_NAMES);
+    hud.setAreaLabel("Ember Den");
+    hud.el.modeDestination.title = "Ember Den · cycle tables";
+    hud.el.modeDestinationLabel.textContent = "Ember Den views. Press to cycle tables";
+    const presetView = name => {
+      if (leaving || panel.focused || seatTable >= 0 && !pendingStand || !VIEW_NAMES[name]) return;
+      pilot.goPreset(name); hud.setDetachedView(name, true);
+    };
+    hud.onPreset(presetView);
+    hud.onAction((a, v) => { if (a === "leave") leaveFloor(); else if (a === "reset-view") pilot.resetCamera(); else if (a === "act") pilot.action(); else if (a === "mode-preset") presetView(v); else if (a.startsWith("mode-")) modeAction(a); });
     fx = BL.fx.create({ root, input, hooks, hud, game: ctx.game, world, renderer: ctx.renderer, camera, overlay: ctx.overlay, tickerAt: { x: 0, y: 5, z: -34 } });
     room = BL.pokerModels.build(theme.id); S.addChild(root, room.root);
     for (let i = 0; i < 10; i++) { input.add(room.tables[i].top, { kind: "poker", index: i }); targets.push(room.tables[i].top); }

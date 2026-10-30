@@ -9889,3 +9889,7 @@ body[data-active-scene] .topbar > .presets {
 body[data-active-scene] .topbar > .presets button { flex: 0 0 auto; }
 .topbar .presets :is([data-action="mute"], [data-action$="-mute"]) { display: none; }
 body[data-active-scene] #environment-sound { display: flex; align-items: center; justify-content: center; }
+
+/* Cave stations cycle through the OBL land button instead of a second camera toolbar. */
+.topbar .presets:is([data-scene="lab"], [data-scene="factory"], [data-scene="hangar"], [data-scene="bifrost"], [data-scene="arcade"]) [data-preset] { display: none; }
+body[data-active-scene="arcade"] #destination-hud:not([hidden]) { display: flex; }
