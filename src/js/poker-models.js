@@ -186,6 +186,7 @@
       const lettering = BL.poolModels.carve(`TABLE ${i + 1}`, { cell: 0.1, color: "#ffe1a0", emissive: 1 });
       lettering.geometry.castShadow = false;
       const label = S.createNode({ position: { x: 0, y: 4.65, z: 0 } });
+      label.scale.x = label.scale.y = label.scale.z = 0.7;
       const text = node(lettering.geometry, -(lettering.width - 0.2) / 2);
       text.glow = 1;
       S.addChild(label, text); S.addChild(group, label);
