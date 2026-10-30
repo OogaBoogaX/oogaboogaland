@@ -28,6 +28,7 @@
   const FLY = { speed: 5, perDist: 0.4, climb: 3, yMax: HALL.h - 1.5 };
   const view = (x, y, z, yaw, pitch, dist) => ({ yaw, pitch, dist, target: { x, y, z } });
   const live = LAYOUT.cabinets.filter((c) => c.game >= 0);
+  const VIEW_NAMES = { entrance: "Overview", cabinets: "Games", hoops: "Hoop Shot", skee: "Thro-ball", shy: "Coconut Toss", snacks: "Snacks" };
   const PRESETS = {
     entrance: view(0, 2, -8, 0.3, 0.22, 14),
     cabinets: view(0, 2.6, -8.2, 0, 0.1, 8.2),
@@ -36,7 +37,10 @@
     shy: view(-15.31, 1.6, -6.8, Math.PI / 2 + 0.3, 0.2, 6.5),
     snacks: view(-14.9, 1.6, 4.6, Math.PI - 0.35, 0.2, 7)
   };
-  for (const c of live) PRESETS[GAMES[c.game].id] = view(c.x, c.y + 1.4, c.z + 0.4, 0, 0.1, 4.2);
+  for (const c of live) {
+    PRESETS[GAMES[c.game].id] = view(c.x, c.y + 1.4, c.z + 0.4, 0, 0.1, 4.2);
+    VIEW_NAMES[GAMES[c.game].id] = GAMES[c.game].name;
+  }
   // A portrait screen sees a third of the hall's width at the same distance, so there these views step back and turn
   // square to their subject: all four stage cabinets, both hoops, and the snack bar's and the coconut toss's signs
   // clear the screen's edges and sit under the nav. `views` hands the pilot whichever framing the screen wants when a
@@ -851,10 +855,6 @@
   const toggleMute = () => { const off = audio.setMuted(!audio.muted); hud.toast(off ? "Sound off" : "Sound on"); };
   const onKey = (e) => {
     if (e.key === "0" && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) return pilot.resetCamera();
-    if (e.key === "m" || e.key === "M") {
-      toggleMute();
-      return true;
-    }
     if (e.key === "Escape" && !prizeUi.panel.hidden) {
       closePrizes();
       return true;
@@ -1696,10 +1696,20 @@
       },
       ...pilot.hooks
     });
-    hud.onPreset(pilot.goPreset);
-    hud.onAction((action) => {
+    hud.setDestinations(Object.keys(VIEW_NAMES), VIEW_NAMES);
+    hud.setAreaLabel("Ooga Arcade");
+    hud.el.modeDestination.title = "Ooga Arcade · cycle stations";
+    hud.el.modeDestinationLabel.textContent = "Ooga Arcade views. Press to cycle stations";
+    const presetView = (name) => {
+      if (leaving || !VIEW_NAMES[name]) return;
+      pilot.goPreset(name);
+      hud.setDetachedView(name, true);
+    };
+    hud.onPreset(presetView);
+    hud.onAction((action, value) => {
       if (action === "leave") leaveCave();
       else if (action === "reset-view") pilot.resetCamera();
+      else if (action === "mode-preset") presetView(value);
       else if (action === "mode-retake") pilot.modeAction(action);
       else if (action === "arcade-mute") toggleMute();
     });

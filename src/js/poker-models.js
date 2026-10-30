@@ -2,7 +2,9 @@
 (() => {
   "use strict";
   const BL = window.BL, M = BL.models, S = BL.scene;
-  const EXIT_Z = 35.2 + BL.bifrostModels.MIRROR_Z;
+  const REAR_WALL_Z = 36.5;
+  const PORTAL_Z = REAR_WALL_Z - BL.bifrostModels.MIRROR_Z - 0.05;
+  const EXIT_Z = PORTAL_Z + BL.bifrostModels.MIRROR_Z;
   const TABLES = Array.from({ length: 10 }, (_, i) => ({ x: i % 2 ? 11 : -11, z: 24 - Math.floor(i / 2) * 12 }));
   const SEATS = Array.from({ length: 9 }, (_, i) => {
     const a = -Math.PI / 2 + 0.55 + i * (Math.PI * 2 - 1.1) / 8;
@@ -86,7 +88,7 @@
     const theme = BL.pokerThemes.get(id), cave = theme.id !== "gatsby";
     scoped.use();
     if (cache.has(theme.id)) return cache.get(theme.id);
-    const shell = [], dressed = BL.dressing.set();
+    const shell = [], dressed = BL.dressing.set(), lamps = BL.dressing.set();
     // The same floor footprint supports either the club or geological wall
     // finishes; kit lanterns and foliage follow the chosen cave palette.
     for (let row = 0; row < 19; row++) for (let col = 0; col < 13; col++)
@@ -105,7 +107,7 @@
       }
     }
     shell.push(box(50, 10, 1, theme.stone[3], 0, 4.8, -37));
-    shell.push(box(50, 10, 1, theme.stone[3], 0, 4.8, 37));
+    shell.push(box(50, 10, 1, theme.stone[3], 0, 4.8, REAR_WALL_Z + 0.5));
     shell.push(box(50, 0.8, 76, theme.stone[4], 0, 9.5));
     for (let z = -30; z <= 30; z += 12) {
       shell.push(box(48, 0.65, 0.8, theme.wood, 0, 8.9, z));
@@ -123,16 +125,16 @@
       shell.push(tile);
     }
     for (const p of TABLES) {
-      dressed.cable(p.x, 8.8, p.z - 1.8, p.x, 8.8, p.z + 1.8, 3.1, [0.25, 0.5, 0.75], "hanging", theme.lamp);
+      lamps.cable(p.x, 8.8, p.z - 1.8, p.x, 8.8, p.z + 1.8, 3.1, [0.25, 0.5, 0.75], "hanging", theme.lamp);
       if (!cave || theme.id === "jungle") for (const dx of [-3.6, 3.6]) dressed.put("vine", p.x + dx, 8.5, p.z - 4.8, 0, dx > 0 ? 1 : 2);
     }
     // Three brass chandeliers use the existing hanging lanterns and cable kit.
     if (!cave) for (const z of [-24, 0, 24]) for (let k = 0; k < 8; k++) {
       const a = k * Math.PI / 4, x = Math.cos(a) * 1.65, zz = z + Math.sin(a) * 1.65;
-      dressed.cable(0, 8.8, z, x, 6.65, zz, 0, [1]);
+      lamps.cable(0, 8.8, z, x, 6.65, zz, 0, [1]);
     }
     if (cave) for (const z of [-24, 0, 24])
-      dressed.cable(-2, 8.9, z, 2, 8.9, z, 2.2, [0.25, 0.5, 0.75], "hanging", theme.lamp);
+      lamps.cable(-2, 8.9, z, 2, 8.9, z, 2.2, [0.25, 0.5, 0.75], "hanging", theme.lamp);
     const rock = cave ? caveWalls(theme) : null;
     if (rock) shell.push(rock.stone);
     const chair = M.merge(box(0.95, 0.22, 0.9, theme.panel, 0, 0.57), box(1.0, 1.1, 0.18, theme.wood, 0, 1, -0.4),
@@ -144,7 +146,7 @@
       box(0.1, 0.48, 0.09, "#e6b634", 0, 0.52, 0.42),
       box(0.18, 0.14, 0.1, "#f7d052", 0, 0.84, 0.42));
     const built = {
-      shell: M.merge(...shell), veins: rock?.veins || null, dressing: dressed.build(), chair, jacket, fanlight: fanlight(),
+      shell: M.merge(...shell), veins: rock?.veins || null, dressing: dressed.build(), lamps: lamps.build(), chair, jacket, fanlight: fanlight(),
       chandelier: M.lathe({ segments: 48, profile: [[1.71, 6.55], [1.71, 6.72], [1.59, 6.72], [1.59, 6.55], [1.71, 6.55]], color: theme.accent }),
       sleeve: box(0.4, 0.78, 0.43, "#292f33", 0, -0.29, 0.025),
       cuff: box(0.41, 0.12, 0.44, "#e6e1ce", 0, -0.73, 0.025),
@@ -161,7 +163,8 @@
   const card = c => BL.pokerCards.geometry(c);
   const build = (id = "gatsby") => {
     const theme = BL.pokerThemes.get(id), g = geometry(theme.id), root = S.createNode(), environment = S.createNode(), tables = [];
-    S.addChild(root, environment);
+    const fixtures = S.createNode();
+    S.addChild(root, environment, fixtures);
     for (let i = 0; i < 10; i++) {
       const p = TABLES[i], group = S.createNode({ position: { x: p.x, y: 0, z: p.z } });
       const top = node(g.stone); top.scale.x = 4.75; top.scale.z = 3.15;
@@ -177,10 +180,16 @@
         const cards = S.createNode({ position: { x: s.x * 0.57, y: 1.4, z: s.z * 0.57 }, rotation: { x: 0, y: s.yaw, z: 0 } });
         S.addChild(cards, node(g.back, -0.26), node(g.back, 0.26, 0.015)); cards.visible = false; backs.push(cards); S.addChild(group, cards);
       }
-      const board = Array.from({ length: 5 }, (_, j) => { const n = node(g.back, (j - 2) * 0.72, 1.41); n.visible = false; S.addChild(group, n); return n; });
+      // Deal left to right and print upright as seen from the gorilla's side of the table.
+      const board = Array.from({ length: 5 }, (_, j) => { const n = node(g.back, (2 - j) * 0.72, 1.41); n.rotation.y = Math.PI; n.visible = false; S.addChild(group, n); return n; });
       const button = node(g.button); S.addChild(group, button); button.visible = false;
-      const label = BL.poolModels.carve(String(i + 1).padStart(2, "0"), { cell: 0.14, color: "#e5c984" });
-      S.addChild(group, node(label.geometry, -label.width / 2, 1.17, 3.18));
+      const lettering = BL.poolModels.carve(`TABLE ${i + 1}`, { cell: 0.1, color: "#ffe1a0", emissive: 1 });
+      lettering.geometry.castShadow = false;
+      const label = S.createNode({ position: { x: 0, y: 4.65, z: 0 } });
+      label.scale.x = label.scale.y = label.scale.z = 0.7;
+      const text = node(lettering.geometry, -(lettering.width - 0.2) / 2);
+      text.glow = 1;
+      S.addChild(label, text); S.addChild(group, label);
       const agent = BL.agent.create({ groundAt: () => 0, x: 0, z: -3.6, managed: true, scale: 1.16 });
       agent.poseManaged(1, 0, 0, -3.6, 0, 0, false, true);
       S.addChild(agent.parts.torso, node(g.jacket));
@@ -188,14 +197,16 @@
       S.addChild(group, agent.root);
       const dealCard = node(g.back, 0, 1.5, -2.4); dealCard.visible = false; S.addChild(group, dealCard);
       S.addChild(root, group);
-      tables.push({ root: group, base, top, rim, felt, pinstripe, chairs, chips, backs, board, button, agent, dealCard, actors: new Array(SEATS.length).fill(null), version: -1, pulse: 0 });
+      tables.push({ root: group, base, top, rim, felt, pinstripe, chairs, chips, backs, board, button, label, agent, dealCard, actors: new Array(SEATS.length).fill(null), version: -1, pulse: 0 });
     }
     let current = null;
     const setTheme = id => {
       const next = BL.pokerThemes.get(id); if (current === next.id) return;
       const geo = geometry(next.id);
       while (environment.children.length) S.removeChild(environment, environment.children[environment.children.length - 1]);
+      while (fixtures.children.length) S.removeChild(fixtures, fixtures.children[fixtures.children.length - 1]);
       S.addChild(environment, node(geo.shell), ...BL.dressing.nodes(geo.dressing, { glow: 1 }));
+      S.addChild(fixtures, ...BL.dressing.nodes(geo.lamps, { glow: 1 }));
       if (geo.veins) { const n = node(geo.veins); n.glow = 1; S.addChild(environment, n); }
       if (next.id === "gatsby") {
         for (const side of [-1, 1]) for (const z of [-29.75, -12.75, 4.25, 21.25]) {
@@ -203,7 +214,7 @@
           panel.rotation.y = -side * Math.PI / 2; S.addChild(environment, panel);
         }
         for (const x of [-16, -8, 8, 16]) S.addChild(environment, node(geo.fanlight, x, 2.1, -36.35));
-        for (const z of [-24, 0, 24]) S.addChild(environment, node(geo.chandelier, 0, 0, z));
+        for (const z of [-24, 0, 24]) S.addChild(fixtures, node(geo.chandelier, 0, 0, z));
       }
       const title = geo.title;
       S.addChild(environment, node(title.geometry, -title.width / 2, 6.4, -36.15));
@@ -217,11 +228,12 @@
       current = next.id;
     };
     setTheme(theme.id);
-    return { root, tables, setTheme, get theme() { return current; } };
+    return { root, tables, fixtures, setTheme, get theme() { return current; } };
   };
   const walkable = (ax, az, bx, bz, y, height, actor) => {
     const r = actor?.bodyRadius || 0.4;
-    const rear = Math.abs(bx) < BL.bifrostModels.WINDOW.halfW - r ? EXIT_Z + 1.05 - r : 35.5 - r;
+    // Leave room to reach the glass, but never continue through the wall behind it.
+    const rear = Math.abs(bx) < BL.bifrostModels.WINDOW.halfW - r ? REAR_WALL_Z - 0.01 : 35.5 - r;
     if (Math.abs(bx) > 23 - r || bz < -35.5 + r || bz > rear) return false;
     // A swept ellipse catches a fast step through a table, not just its endpoint.
     for (const t of TABLES) {
@@ -237,5 +249,5 @@
     }
     return true;
   };
-  BL.pokerModels = { TABLES, SEATS, EXIT_Z, geometry, card, build, walkable };
+  BL.pokerModels = { TABLES, SEATS, REAR_WALL_Z, PORTAL_Z, EXIT_Z, geometry, card, build, walkable };
 })();

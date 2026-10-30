@@ -12,15 +12,10 @@
   const VOICES = 8;
   const NOISE_SECONDS = 2;
   const MASTER = 0.55;
-  // STORAGE_KEY is shared with the rally, so one mute covers both caves.
-  const STORAGE_KEY = "oogaboogaland.audio";
   const NOTE = (semis) => 220 * Math.pow(2, semis / 12);
   const create = () => {
     let ctx = null, master = null, noise = null, ready = false, muted = false;
-    try {
-      muted = localStorage.getItem(STORAGE_KEY) === "off";
-    } catch {
-    }
+    muted = BL.sound.muted;
     const voices = [];
     let voiceNext = 0;
     // Layers are started once and only ever shaped by gain; never restart them.
@@ -214,12 +209,11 @@
     const setMuted = (on) => {
       muted = !!on;
       if (master) master.gain.setTargetAtTime(muted ? 0 : MASTER, ctx.currentTime, 0.05);
-      try {
-        localStorage.setItem(STORAGE_KEY, muted ? "off" : "on");
-      } catch {
-      }
+      BL.sound.setMuted(muted);
     };
+    const offSound = BL.sound.subscribe(setMuted);
     const dispose = () => {
+      offSound();
       if (!ctx) return;
       quiet();
       ctx.close();

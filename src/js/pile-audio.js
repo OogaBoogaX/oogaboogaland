@@ -12,7 +12,6 @@
   const NEAR = 5, FAR = 16, MASTER = 0.175;
   const CRACKLES = 110, SNAPS = 9;
   const DRIFT_S = 0.25, DRIFT_CHECK_S = 2;
-  const STORAGE_KEY = "oogaboogaland.audio";
 
   // One loop, built for the context's own sample rate. Timings come from the seed in seconds, so the
   // pops line up across machines whatever their rate; only the noise inside a pop differs.
@@ -53,11 +52,7 @@
     const net = BL.net;
     let ctx = null, master = null, zone = null, buffer = null, source = null;
     let startedAt = 0, startOffset = 0, checkIn = 0, level = -1, muted = false;
-    try {
-      muted = localStorage.getItem(STORAGE_KEY) === "off";
-    } catch {
-      muted = false;
-    }
+    muted = BL.sound.muted;
 
     const open = () => {
       if (ctx || typeof AudioContext === "undefined" || navigator.userActivation && !navigator.userActivation.hasBeenActive) return false;
@@ -129,10 +124,13 @@
 
     const setMuted = (on) => {
       muted = !!on;
+      BL.sound.setMuted(muted);
       if (master) master.gain.setTargetAtTime(muted ? 0 : MASTER, ctx.currentTime, 0.05);
     };
+    const offSound = BL.sound.subscribe(setMuted);
 
     const dispose = () => {
+      offSound();
       if (ctx) ctx.close();
       ctx = master = zone = buffer = source = null;
       level = -1;

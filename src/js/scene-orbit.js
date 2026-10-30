@@ -1857,7 +1857,6 @@
       cam.buildPitch = 0.18;
       cam.buildZoom = 1;
     }
-    if (e.key === "m" || e.key === "M") toggleMute();
     if ((e.key === "g" || e.key === "G") && !e.repeat) {
       selection.assist = !selection.assist;
       hud.toast(selection.assist ? "Autopilot leans the climb (A D still steer)" : "Flying the climb by hand: follow the yellow line");

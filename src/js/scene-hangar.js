@@ -37,6 +37,7 @@
   const LAUNCH = { minX: -TUN.r + 0.6, maxX: TUN.r - 0.6, floorY: 0, ceilingY: TUN.y + TUN.r - 0.8 }, LAUNCH_TINT = HM.TINTS.launch;
   const view = (x, y, z, yaw, pitch, dist) => ({ yaw, pitch, dist, target: { x, y, z } });
   // `entrance` stands over the landing and looks down the runway to the tunnel's mouth, as the concept's entry view.
+  const VIEW_NAMES = { entrance: "Hangar", jet: "Jet", boards: "Boards", runway: "Runway", door: "Door" };
   const PRESETS = {
     entrance: view(0, 3.5, 6, 0, 0.1, 20),
     runway: view(0, 4.5, -62, 0, 0.05, 18),
@@ -1109,10 +1110,20 @@
       },
       ...pilot.hooks
     });
-    hud.onPreset((name) => { if (!scene.guide.holding) pilot.goPreset(name); });
-    hud.onAction((action) => {
+    hud.setDestinations(Object.keys(VIEW_NAMES), VIEW_NAMES);
+    hud.setAreaLabel("Lightning Jet Hangar");
+    hud.el.modeDestination.title = "Lightning Jet Hangar · cycle stations";
+    hud.el.modeDestinationLabel.textContent = "Lightning Jet Hangar views. Press to cycle stations";
+    const presetView = (name) => {
+      if (leaving || scene.guide.holding || !VIEW_NAMES[name]) return;
+      pilot.goPreset(name);
+      hud.setDetachedView(name, true);
+    };
+    hud.onPreset(presetView);
+    hud.onAction((action, value) => {
       if (action === "leave") leaveHangar();
       else if (action === "reset-view") pilot.resetCamera();
+      else if (action === "mode-preset") presetView(value);
       else if (action === "act") pilot.action();
       else if (action === "hangar-mute") soundPanel.toggle();
       else if (!leaving && action.startsWith("mode-")) pilot.modeAction(action);

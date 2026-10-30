@@ -7739,10 +7739,10 @@
     }
     if (ghosts) ghosts.shake(camera); // HALLOWEEN: the land shakes as the ghost walls rise
   };
-  // Signed-in visitors own their pair; bundled actors are available for local play when signed out.
+  // Every visitor controls only their assigned Ooga and its companion.
   const mayDriveOoga = (cave) => {
     if (ghosts && ghosts.waiting) return "You're in the waiting room until this hunt ends"; // HALLOWEEN: the hunt's waiting room
-    return cave.contributor ? BL.net.mayDrive(cave.traits.name) : null;
+    return BL.net.mayDrive(cave.traits.name);
   };
   const actorTransition = {};
   // Validate a new Ooga before giving up the current actor or its camera.
@@ -7799,12 +7799,12 @@
     hud.toast(refusal);
     claimOwnOoga();
   };
-  // A signed-in contributor arrives awake beside the pile, whatever their activity: once a visit,
-  // as soon as the account is known. Returning actors keep their exit; letting go stays detached.
+  // The visitor arrives awake beside the pile: their authenticated Ooga, remembered local likeness, or Ooga.
+  // Claim once per arrival. Returning actors keep their exit; letting go stays detached.
   const claimOwnOoga = () => {
     const me = BL.net.state.me;
-    if (ownOogaClaimed || !me) return false;
-    const character = BL.net.ownCharacter();
+    if (ownOogaClaimed) return false;
+    const character = BL.net.ownCharacter() || (!DEBUG && BL.net.preferredCharacter());
     const cave = character && crew.cavemen.get(character.handle);
     if (!cave) return false;
     if (pilot.player && pilot.player !== cave || clankerPlay && clankerPlay.active) {
@@ -7836,7 +7836,7 @@
       return false;
     }
     ownOogaClaimed = true;
-    hud.toast(`Welcome back, ${BL.characters.displayOf(character.handle)}: this Ooga is yours`);
+    if (me) hud.toast(`Welcome back, ${BL.characters.displayOf(character.handle)}: this Ooga is yours`);
     return true;
   };
   // GAME MODE: an island event (the ghost hunt today, others to come) clears the island for play and holds the
@@ -10233,7 +10233,7 @@
       pilot.possess(cave);
       if (ctx.from === "factory") crew.selectWeapon(cave.weapon.selectedSlot, cave);
     }
-    ownOogaClaimed = !!world.pilotDetached || !!(returningCharacter && BL.net.state.me); world.pilotDetached = false;
+    ownOogaClaimed = !!world.pilotDetached || !!(returningCharacter && BL.net.state.me) || !BL.net.state.me && ctx.from !== null; world.pilotDetached = false;
     claimOwnOoga();
     unsubscribeActivity = contributors.subscribe(() => crew.refreshStates());
     unsubscribeAccount = BL.net.subscribe(onAccountChange);
@@ -11122,7 +11122,7 @@
       if (returningCharacter && ctx.from === "factory") crew.selectWeapon(cave.weapon.selectedSlot, cave);
       if (initialCharacter) crew.configureWeapon(cave, preloadedWeapon, preloadedAmmo);
     }
-    ownOogaClaimed = !!world.pilotDetached || !!(returningCharacter && BL.net.state.me);
+    ownOogaClaimed = !!world.pilotDetached || !!(returningCharacter && BL.net.state.me) || !BL.net.state.me && ctx.from !== null;
     world.pilotDetached = false;
     claimOwnOoga();
     unsubscribeAccount = BL.net.subscribe(onAccountChange);
