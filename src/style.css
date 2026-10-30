@@ -7123,13 +7123,15 @@ body[data-active-scene] .mic-note { top: var(--hub-equipment-bottom, calc(72px +
 }
 
 /* DSB keeps controls in the existing page and its world in a separate scene. */
-.dsb-island-icon { display: none; }
-body[data-active-scene="dsb"] .dsb-island-icon {
+.dsb-island-icon, .ember-den-icon { display: none; }
+body[data-active-scene="dsb"] .dsb-island-icon,
+body[data-active-scene="poker"] .ember-den-icon {
   display: block;
   width: 56px;
   height: 44px;
   filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.45));
 }
+body[data-active-scene="poker"] #freeroam-icon { display: none; }
 body[data-active-scene="dsb"] :is(#freeroam-icon, #weapon-hud, #magazine-hud) { display: none !important; }
 body[data-active-scene] :is(.world-clock, .world-block) {
   right: calc(var(--hub-banner-gutter) + var(--safe-right) + 48px);
