@@ -435,8 +435,8 @@
     const inBananas = ctx.inBananas || (() => false);
     const npcDestinationBlocked = ctx.npcDestinationBlocked || inBananas;
     const flyable = ctx.flyable || walkable;
-    const workSites = ctx.workSites?.length ? ctx.workSites : ctx.workRoute ? [{ repo: "oogaboogax/entropylab", route: ctx.workRoute, position: ctx.workPosition, target: ctx.workTarget }] : null;
-    const workBodyTarget = ctx.workSites?.length ? ctx.workTarget : null;
+    const workSites = ctx.workSites?.length ? ctx.workSites : null;
+    const workBodyTarget = workSites ? ctx.workTarget : null;
     const workCompanionTarget = ctx.workCompanionTarget;
     // A site is eligible when the worker is fresh in either of its repos, or when it is
     // the fallback (namesake) cave and the worker's fresh repo has no cave of
@@ -740,24 +740,6 @@
       return counts;
     };
     const workingCavemen = () => [...cavemen.values()].filter((c) => c.state === "working" && !c.walk && !c.bedTravel.mode);
-    const workingCount = () => {
-      let n = 0;
-      for (let i = 0; i < crewList.length; i++) {
-        const c = crewList[i];
-        if (c.state === "working" && !c.walk && !c.bedTravel.mode) n++;
-      }
-      return n;
-    };
-    const eatingCount = () => {
-      let n = 0;
-      for (let i = 0; i < crewList.length; i++) {
-        const c = crewList[i];
-        if (c.state === "working" && !c.walk && !c.build && atPile(c)) n++;
-      }
-      return n;
-    };
-    const eatingCavemen = () => [...cavemen.values()].filter((c) => c.state === "working" && !c.walk && !c.build && atPile(c));
-    const feedableCavemen = () => [...cavemen.values()].filter((c) => c.root.visible && (c.state === "working" || c === player));
     const releaseBuild = (cave) => {
       if (!cave.build) return;
       if (!cave.build.built) buildSpots.push(cave.build.spot);
@@ -1454,7 +1436,6 @@
       a.sayAt = elapsed + 0.8 + Math.random() * 2;
       a.said = false;
     };
-    const headWorldOf = (cave) => cave.bedTravel.mode === "rest" || cave.bedTravel.mode === "lie" ? cave.sleepHead : ({ x: cave.root.position.x, y: cave.state === "sleeping" && !ctx.bedRoute ? 0.5 : cave.root.position.y - cave.baseY + cave.headOffset * 0.95 + cave.viewLift, z: cave.root.position.z });
     const meleePreviousWorld = math.mat4.create(), meleeCurrentWorld = math.mat4.create(), meleeProbeWorld = math.mat4.create(), meleeContactInverse = math.mat4.create();
     const meleeContact = { node: null, owner: null, x: 0, y: 0, z: 0, distance: 0, type: "none" };
     const weaponHit = { node: null, owner: null, x: 0, y: 0, z: 0, distance: 0, type: "none" };
@@ -3698,7 +3679,8 @@
         if (prop) s.propOffset = s.dodge > 0 ? hit.minAcross - 0.315 : hit.maxAcross + 0.315;
       }
       fx = s.forwardX; fz = s.forwardZ;
-      const offset = (p.x - s.originX) * fz - (p.z - s.originZ) * fx;
+      const throughPlayer = npc && !s.prop && (s.outside ? s.outside.player : s.other && playerBody(s.other));
+      const offset = throughPlayer ? 0 : (p.x - s.originX) * fz - (p.z - s.originZ) * fx;
       let targetOffset = 0, along = 0;
       if (s.phase === 1) {
         if (s.prop) {
@@ -3723,13 +3705,14 @@
           along = (q.x - p.x) * fx + (q.z - p.z) * fz;
           if ((s.rear ? along > gap + 0.12 : along < -gap - 0.12) || Math.hypot(q.x - p.x, q.z - p.z) > (npc ? NPC_PASS_REACH : SHOULDER_REACH) + extra + 0.5) s.phase = 2;
           else {
-            const otherOffset = (q.x - s.originX) * fz - (q.z - s.originZ) * fx;
-            targetOffset = -s.dodge * Math.max(0, gap + 0.015 - s.dodge * otherOffset);
+            if (!throughPlayer) {
+              const otherOffset = (q.x - s.originX) * fz - (q.z - s.originZ) * fx;
+              targetOffset = -s.dodge * Math.max(0, gap + 0.015 - s.dodge * otherOffset);
+            }
             s.targetYaw = (s.rear ? -1 : 1) * s.side * s.amount * SHOULDER_TWIST * clamp((SHOULDER_REACH + extra - Math.abs(along)) / 0.8, 0, 1);
           }
         }
       }
-      const throughPlayer = npc && !s.prop && (s.outside ? s.outside.player : s.other && playerBody(s.other));
       if (s.phase === 2 && (throughPlayer || Math.abs(offset) < 0.005)) { s.phase = 0; s.other = s.outside = s.outsideId = null; s.obstacle.node = null; return -1; }
       s.attempted = true;
       // Players never divert an NPC's route. Keep only the shoulder twist;
@@ -3744,7 +3727,7 @@
         const forward = Math.cos(angle) * distance, side = Math.sin(angle) * distance;
         const x = p.x + fx * forward + fz * side, z = p.z + fz * forward - fx * side;
         if (s.prop && !ctx.shoulderPropClear(cave, x, z)) continue;
-        if (!(npc ? walkerClear(cave, x, z) : shoulderClear(cave, x, z) && canStep(cave, false, p.x, p.z, x, z))) continue;
+        if (!(npc ? walkerClear(cave, x, z) : canStep(cave, false, p.x, p.z, x, z))) continue;
         p.x = x; p.z = z; p.y = groundY(cave);
         moved = true; break;
       }
@@ -3752,7 +3735,7 @@
       if (!moved) {
         const x = p.x + fx * distance, z = p.z + fz * distance;
         if ((!s.prop || ctx.shoulderPropClear(cave, x, z))
-          && (npc ? walkerClear(cave, x, z) : shoulderClear(cave, x, z) && canStep(cave, false, p.x, p.z, x, z))) {
+          && (npc ? walkerClear(cave, x, z) : canStep(cave, false, p.x, p.z, x, z))) {
           p.x = x; p.z = z; p.y = groundY(cave);
           moved = true;
         }
@@ -6493,7 +6476,7 @@
       showShot, setTint, spotOccupied, setCombatEnabled,
       get combatEnabled() { return combatEnabled; },
       get weaponsEnabled() { return weaponsEnabled; },
-      cavemen, list: crewList, fanSlots, stateOf, stateCounts, workingCavemen, eatingCavemen, workingCount, eatingCount, feedableCavemen, refreshStates, refreshRosterRow, updateFan, rush, headWorldOf, applyAllSwag, wornBy, renderLocker, pokeCave, idleSay, drawDrops,
+      cavemen, list: crewList, fanSlots, stateOf, stateCounts, workingCavemen, refreshStates, refreshRosterRow, updateFan, rush, applyAllSwag, wornBy, renderLocker, pokeCave, idleSay, drawDrops,
       throwTomato, clearProjectiles, control, release, relocatePlayer, sleepPlayer, wakePlayer, sitPlayer, standPlayer, clearHeadLook, prepareDragged, recoverDragged, ignite, soot, dropRoll, damage, fireView, steer: steerPlayer, look: lookPlayer, elevate: elevatePlayer, playerAction, jumpPlayer, poseWeapon, wearJetpack, removeJetpack, setJetpackOwnership, thrust, holdRocketJump, update, pause, dispose, stats,
       actorClear, builtInJetpack, toggleTint, twirl, toggleWeapon, selectWeapon, configureWeapon, swingWeapon, bashWeapon, releaseSwing, fireWeapon, setWeaponTrigger, canFire, weaponOrigin, meleeReach, meleePower, nearReload, canReload, startReload, stopReload, stopBurst, canSwapMagazine, swapMagazine, collectMagazine, collectGroundMagazine, collectAmmo, removeMagazines, hasMagazine, magazineCount, magazineAmmo, totalAmmo, workSites,
       get sleeping() { return !!(player && player.bedTravel.manual && player.state === "sleeping"); },

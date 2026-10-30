@@ -267,7 +267,8 @@
       }
       state.targetX = x; state.targetZ = z;
     };
-    const routeState = createState();
+    // Authored routes use centerline indices only; lane coordinates belong to live walkers.
+    const routeState = { plans: 0, route: new Int32Array(size) };
     // Bed journeys allocate their authored route only at departure.
     // They share the same surface centerlines before and after the underground portion.
     const route = (from, to) => {
@@ -280,7 +281,7 @@
       result.push(to);
       return result;
     };
-    return { createState, target, route, xAt, zAt, capacity: size, get nodes() { return count; }, buffers: xs.byteLength + zs.byteLength + centerX.byteLength + centerZ.byteLength + groups.byteLength + heads.byteLength + edges.byteLength + next.byteLength + costs.byteLength + parents.byteLength + distances.byteLength + heap.byteLength + heapIndex.byteLength + routeState.route.byteLength + routeState.laneX.byteLength + routeState.laneZ.byteLength };
+    return { createState, target, route, xAt, zAt, capacity: size, get nodes() { return count; }, buffers: xs.byteLength + zs.byteLength + centerX.byteLength + centerZ.byteLength + groups.byteLength + heads.byteLength + edges.byteLength + next.byteLength + costs.byteLength + parents.byteLength + distances.byteLength + heap.byteLength + heapIndex.byteLength + routeState.route.byteLength };
   };
   BL.npcPaths = { create };
 })();
