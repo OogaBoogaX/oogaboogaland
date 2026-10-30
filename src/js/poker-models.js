@@ -88,7 +88,7 @@
     const theme = BL.pokerThemes.get(id), cave = theme.id !== "gatsby";
     scoped.use();
     if (cache.has(theme.id)) return cache.get(theme.id);
-    const shell = [], dressed = BL.dressing.set();
+    const shell = [], dressed = BL.dressing.set(), lamps = BL.dressing.set();
     // The same floor footprint supports either the club or geological wall
     // finishes; kit lanterns and foliage follow the chosen cave palette.
     for (let row = 0; row < 19; row++) for (let col = 0; col < 13; col++)
@@ -125,16 +125,16 @@
       shell.push(tile);
     }
     for (const p of TABLES) {
-      dressed.cable(p.x, 8.8, p.z - 1.8, p.x, 8.8, p.z + 1.8, 3.1, [0.25, 0.5, 0.75], "hanging", theme.lamp);
+      lamps.cable(p.x, 8.8, p.z - 1.8, p.x, 8.8, p.z + 1.8, 3.1, [0.25, 0.5, 0.75], "hanging", theme.lamp);
       if (!cave || theme.id === "jungle") for (const dx of [-3.6, 3.6]) dressed.put("vine", p.x + dx, 8.5, p.z - 4.8, 0, dx > 0 ? 1 : 2);
     }
     // Three brass chandeliers use the existing hanging lanterns and cable kit.
     if (!cave) for (const z of [-24, 0, 24]) for (let k = 0; k < 8; k++) {
       const a = k * Math.PI / 4, x = Math.cos(a) * 1.65, zz = z + Math.sin(a) * 1.65;
-      dressed.cable(0, 8.8, z, x, 6.65, zz, 0, [1]);
+      lamps.cable(0, 8.8, z, x, 6.65, zz, 0, [1]);
     }
     if (cave) for (const z of [-24, 0, 24])
-      dressed.cable(-2, 8.9, z, 2, 8.9, z, 2.2, [0.25, 0.5, 0.75], "hanging", theme.lamp);
+      lamps.cable(-2, 8.9, z, 2, 8.9, z, 2.2, [0.25, 0.5, 0.75], "hanging", theme.lamp);
     const rock = cave ? caveWalls(theme) : null;
     if (rock) shell.push(rock.stone);
     const chair = M.merge(box(0.95, 0.22, 0.9, theme.panel, 0, 0.57), box(1.0, 1.1, 0.18, theme.wood, 0, 1, -0.4),
@@ -146,7 +146,7 @@
       box(0.1, 0.48, 0.09, "#e6b634", 0, 0.52, 0.42),
       box(0.18, 0.14, 0.1, "#f7d052", 0, 0.84, 0.42));
     const built = {
-      shell: M.merge(...shell), veins: rock?.veins || null, dressing: dressed.build(), chair, jacket, fanlight: fanlight(),
+      shell: M.merge(...shell), veins: rock?.veins || null, dressing: dressed.build(), lamps: lamps.build(), chair, jacket, fanlight: fanlight(),
       chandelier: M.lathe({ segments: 48, profile: [[1.71, 6.55], [1.71, 6.72], [1.59, 6.72], [1.59, 6.55], [1.71, 6.55]], color: theme.accent }),
       sleeve: box(0.4, 0.78, 0.43, "#292f33", 0, -0.29, 0.025),
       cuff: box(0.41, 0.12, 0.44, "#e6e1ce", 0, -0.73, 0.025),
@@ -163,7 +163,8 @@
   const card = c => BL.pokerCards.geometry(c);
   const build = (id = "gatsby") => {
     const theme = BL.pokerThemes.get(id), g = geometry(theme.id), root = S.createNode(), environment = S.createNode(), tables = [];
-    S.addChild(root, environment);
+    const fixtures = S.createNode();
+    S.addChild(root, environment, fixtures);
     for (let i = 0; i < 10; i++) {
       const p = TABLES[i], group = S.createNode({ position: { x: p.x, y: 0, z: p.z } });
       const top = node(g.stone); top.scale.x = 4.75; top.scale.z = 3.15;
@@ -198,7 +199,9 @@
       const next = BL.pokerThemes.get(id); if (current === next.id) return;
       const geo = geometry(next.id);
       while (environment.children.length) S.removeChild(environment, environment.children[environment.children.length - 1]);
+      while (fixtures.children.length) S.removeChild(fixtures, fixtures.children[fixtures.children.length - 1]);
       S.addChild(environment, node(geo.shell), ...BL.dressing.nodes(geo.dressing, { glow: 1 }));
+      S.addChild(fixtures, ...BL.dressing.nodes(geo.lamps, { glow: 1 }));
       if (geo.veins) { const n = node(geo.veins); n.glow = 1; S.addChild(environment, n); }
       if (next.id === "gatsby") {
         for (const side of [-1, 1]) for (const z of [-29.75, -12.75, 4.25, 21.25]) {
@@ -206,7 +209,7 @@
           panel.rotation.y = -side * Math.PI / 2; S.addChild(environment, panel);
         }
         for (const x of [-16, -8, 8, 16]) S.addChild(environment, node(geo.fanlight, x, 2.1, -36.35));
-        for (const z of [-24, 0, 24]) S.addChild(environment, node(geo.chandelier, 0, 0, z));
+        for (const z of [-24, 0, 24]) S.addChild(fixtures, node(geo.chandelier, 0, 0, z));
       }
       const title = geo.title;
       S.addChild(environment, node(title.geometry, -title.width / 2, 6.4, -36.15));
@@ -220,7 +223,7 @@
       current = next.id;
     };
     setTheme(theme.id);
-    return { root, tables, setTheme, get theme() { return current; } };
+    return { root, tables, fixtures, setTheme, get theme() { return current; } };
   };
   const walkable = (ax, az, bx, bz, y, height, actor) => {
     const r = actor?.bodyRadius || 0.4;

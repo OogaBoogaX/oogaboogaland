@@ -310,6 +310,8 @@
     if (pilot.player) tableView = false;
     // Widen the table framing instead of backing the camera through the room's ceiling.
     if (tableView && !panel.focused) camera.fov = 2 * Math.atan(Math.tan(camera.fov / 2) * 1.4);
+    // Clear the overhead sightline while keeping the tables illuminated.
+    room.fixtures.visible = !tableView || panel.focused;
     // Restored views and possession blends can replace the ordinary solver's camera position.
     keepCameraInside();
     // The Ooga driven here goes to the room with where it stands and its health; other players here are shown.
