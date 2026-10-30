@@ -320,6 +320,13 @@
         <button type="button" data-action="mute" id="drop-mute" aria-label="Mute sound" aria-pressed="false">Sound</button>
         <button type="button" class="leave" data-action="leave">Back<span> to the island</span></button>
       </nav>
+      <nav class="presets" aria-label="Block Frenzy" data-scene="block" hidden>
+        <button type="button" data-action="block-board" id="block-board-btn">Sides</button>
+        <button type="button" data-action="block-view" id="block-view-btn" aria-pressed="false">View</button>
+        <button type="button" data-action="block-sound" id="block-sound-btn" aria-pressed="true">Sound</button>
+        <button type="button" data-action="block-drop" id="block-drop" disabled>Drop<span> block</span></button>
+        <button type="button" class="leave" data-action="leave">Back<span> to the island</span></button>
+      </nav>
       <nav class="presets" aria-label="Mine" data-scene="mine" hidden>
         <button type="button" data-action="mine-view" id="mine-view-btn" aria-pressed="false">View</button>
         <button type="button" data-action="mine-pause" id="mine-pause-btn" aria-pressed="false">Pause</button>
@@ -870,6 +877,142 @@
         <div class="actions">
           <button type="button" data-action="drop-again">Again</button>
           <button type="button" data-action="drop-board">Board</button>
+          <button type="button" data-action="leave">Back to the island</button>
+        </div>
+      </section>
+    </div>
+    <div class="race" id="block" data-scene="block" hidden>
+      <section class="garage" id="block-board" aria-label="Block Frenzy sides">
+        <div class="garage-head">
+          <h2><span data-sign>Block Frenzy</span></h2>
+          <p class="help" id="block-board-help">Pick a side. Steal the rivals' Bitcoin block (their colour), carry it to your own stand while your block is home. First to 3 captures wins.</p>
+        </div>
+        <div class="garage-columns">
+          <div class="garage-col">
+            <h3 class="section-head">Side</h3>
+            <div class="block-sides">
+              <button type="button" class="block-side" data-team="blue" aria-pressed="true">Blue fort</button>
+              <button type="button" class="block-side" data-team="red" aria-pressed="false">Red fort</button>
+            </div>
+            <h3 class="section-head">Captures to win</h3>
+            <div class="block-sides block-targets">
+              <button type="button" class="block-side block-target" data-target="1" aria-pressed="false">1</button>
+              <button type="button" class="block-side block-target" data-target="3" aria-pressed="true">3</button>
+              <button type="button" class="block-side block-target" data-target="5" aria-pressed="false">5</button>
+              <button type="button" class="block-side block-target" data-target="7" aria-pressed="false">7</button>
+            </div>
+            <h3 class="section-head">Map</h3>
+            <div class="block-sides block-targets">
+              <button type="button" class="block-side block-target" data-map="fort" aria-pressed="true">Fort Chaos</button>
+              <button type="button" class="block-side block-target" data-map="town" aria-pressed="false">Ooga Town</button>
+              <button type="button" class="block-side block-target" data-map="jungle" aria-pressed="false">Gorilla Jungle</button>
+              <button type="button" class="block-side block-target" data-map="haunted" aria-pressed="false">Haunted Hollow</button>
+            </div>
+            <h3 class="section-head">Oogas a side</h3>
+            <div class="block-sides block-targets">
+              <button type="button" class="block-side block-target" data-size="2" aria-pressed="false">2</button>
+              <button type="button" class="block-side block-target" data-size="3" aria-pressed="true">3</button>
+              <button type="button" class="block-side block-target" data-size="4" aria-pressed="false">4</button>
+              <button type="button" class="block-side block-target" data-size="5" aria-pressed="false">5</button>
+            </div>
+            <h3 class="section-head">Bots</h3>
+            <div class="block-sides block-targets">
+              <button type="button" class="block-side block-target" data-skill="easy" aria-pressed="false">Easy</button>
+              <button type="button" class="block-side block-target" data-skill="normal" aria-pressed="true">Normal</button>
+              <button type="button" class="block-side block-target" data-skill="hard" aria-pressed="false">Hard</button>
+              <button type="button" class="block-side block-target" data-skill="expert" aria-pressed="false" title="Bots ride the catapult and ziplines, climb, jetpack over walls, stack and throw crates">Expert</button>
+            </div>
+            <div id="block-ooga-slot">
+              <h3 class="section-head"><label for="block-ooga">Your Ooga</label></h3>
+              <select class="block-ooga" id="block-ooga"></select>
+            </div>
+          </div>
+          <div class="garage-col">
+            <h3 class="section-head">Record</h3>
+            <ul class="garage-list drop-rows">
+              <li><span>Fastest win</span> <b id="block-best">none yet</b></li>
+              <li><span>Rounds</span> <b id="block-record">0 won of 0</b></li>
+            </ul>
+          </div>
+        </div>
+        <div class="garage-foot">
+          <p class="help" id="block-help">R or right click switches weapon · hold click for full-auto AK (7) · 5 sniper from a tower · E zipline or catapult · click fires · W S run · A D turn · Space jumps, twice to climb, hold for the jetpack, mash it to escape a gorilla · Shift sprints · Tab throws what you hold · F lifts crates · B new crate · C crouch · V view</p>
+          <button type="button" class="feed-open race-go" data-action="block-start"><span data-sign>Play!</span></button>
+        </div>
+      </section>
+      <div class="block-preview-name" id="block-preview-name" hidden><b></b><span>drag to turn</span><div class="block-preview-pick" id="block-preview-pick"><label for="block-ooga">Your Ooga</label></div></div>
+      <div class="race-strip" id="block-strip" hidden>
+        <div class="race-hud race-hud-left">
+          <div class="race-lap block-score" data-team="blue"><span>Blue</span><b id="block-score-blue">0</b></div>
+          <div class="race-lap block-score" data-team="red"><span>Red</span><b id="block-score-red">0</b></div>
+          <div class="race-lap block-sprint"><span>Sprint</span><div class="block-sprint-bar" aria-hidden="true"><i id="block-stamina"></i></div></div>
+          <div class="race-lap block-sprint block-jet"><span>Jet</span><div class="block-sprint-bar" aria-hidden="true"><i id="block-fuel"></i></div></div>
+          <div class="race-lap block-power" id="block-power" hidden><span>Power</span><b id="block-power-word"></b></div>
+        </div>
+        <div class="race-hud race-hud-right">
+          <div class="race-time" id="block-time">0:00</div>
+          <div class="race-lap block-state"><span>Your block</span><b id="block-own" data-state="home">home</b></div>
+          <div class="race-lap block-state"><span>Theirs</span><b id="block-theirs" data-state="home">home</b></div>
+          <div class="race-lap block-wind"><span id="block-wind-arrow" aria-hidden="true">↑</span><b id="block-wind-word">Clear</b></div>
+        </div>
+      </div>
+      <div class="race-center" id="block-center" hidden>GO!</div>
+      <canvas class="block-map" id="block-map" width="88" height="148" hidden aria-label="Map: both blocks and every Ooga"></canvas>
+      <ol class="block-feed" id="block-feed" hidden aria-live="off"><li></li><li></li><li></li><li></li></ol>
+      <button type="button" class="act block-paint" id="block-paint" hidden>Throw!</button>
+      <div class="block-tools" id="block-tools" hidden role="toolbar" aria-label="Tools">
+        <button type="button" data-tool="paint" aria-pressed="true"><kbd>1</kbd>Paint <b>∞</b></button>
+        <button type="button" data-tool="grenade" aria-pressed="false"><kbd>2</kbd>Grenade <b>3</b></button>
+        <button type="button" data-tool="rocket" aria-pressed="false"><kbd>3</kbd>Rocket <b>1</b></button>
+        <button type="button" data-tool="net" aria-pressed="false"><kbd>4</kbd>Net <b>3</b></button>
+        <button type="button" data-tool="sniper" aria-pressed="false"><kbd>5</kbd>Sniper <b>0</b></button>
+        <button type="button" data-tool="gold" class="block-tool-gold" aria-pressed="false" disabled><kbd>6</kbd>Gold AKs <b>—</b></button>
+        <button type="button" data-tool="ak" aria-pressed="false"><kbd>7</kbd>AK <b>30</b></button>
+        <button type="button" data-tool="crate" class="block-tool-crate"><kbd>B</kbd>Crate <b>3</b></button>
+        <button type="button" data-tool="grab" class="block-tool-crate" aria-pressed="false"><kbd>F</kbd>Lift</button>
+        <button type="button" data-tool="pass" class="block-tool-pass" disabled><kbd>Tab</kbd>Throw</button>
+        <button type="button" data-tool="zip" class="block-tool-pass" disabled><kbd>E</kbd>Ride</button>
+      </div>
+      <div class="block-cross" id="block-cross" hidden aria-hidden="true"></div>
+      <div class="race-notice" id="block-notice" hidden>&nbsp;</div>
+      <section class="race-results block-quiz" id="block-quiz" hidden aria-label="Quiz trap" aria-live="polite">
+        <p class="game-intro-kicker">Quiz trap · answer to break out</p>
+        <h2 class="block-quiz-q" id="block-quiz-q">&nbsp;</h2>
+        <div class="block-answers">
+          <button type="button" class="block-answer" data-answer="0">1.</button>
+          <button type="button" class="block-answer" data-answer="1">2.</button>
+          <button type="button" class="block-answer" data-answer="2">3.</button>
+          <button type="button" class="block-answer" data-answer="3">4.</button>
+        </div>
+        <p class="help" id="block-quiz-note">&nbsp;</p>
+        <div class="block-quiz-time" aria-hidden="true"><span id="block-quiz-fill"></span></div>
+      </section>
+      <section class="race-results game-intro" id="block-intro" data-intro="block" hidden aria-label="Block Frenzy">
+        <div class="game-intro-glow" aria-hidden="true"><div class="game-intro-rays"></div></div>
+        <p class="game-intro-kicker">Capture the block on Fort Chaos</p>
+        <h2 class="game-intro-title"><span data-sign>Block Frenzy</span></h2>
+        <svg class="game-intro-coin" viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true"><path fill="#b8650a" d="M2 2h12v12H2z" /><path fill="#f7931a" d="M3 3h10v10H3z" /><path fill="#fff3d6" d="M6 4h1v1H6zM8 4h1v1H8zM5 5h5v1H5zM6 6h1v1H6zM10 6h1v1H10zM6 7h4v1H6zM6 8h1v1H6zM10 8h1v1H10zM5 9h5v1H5zM6 10h1v1H6zM8 10h1v1H8z" /></svg>
+        <p class="game-intro-goal">Carry the rivals' <b>Bitcoin block</b> home three times. Nobody gets hurt: paint wears off.</p>
+        <ul class="game-rules">
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#b8650a" d="M1 1h7v7H1z" /><path fill="#f7931a" d="M2 2h5v5H2z" /><path fill="#fff3d6" d="M4 3h1v3H4z" /></svg><b>Grab their block</b><small>Touch the block in their colour in their fort. Tab throws it to a friend.</small></li>
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#3dff7a" d="M0 0h9v1H0zM0 8h9v1H0zM0 1h1v7H0zM8 1h1v7H8z" /><path fill="#b8ffcf" d="M3 2h3v1H3zM6 3h1v1H6zM5 4h1v1H5zM4 5h1v1H4zM4 7h1v1H4z" /></svg><b>Quiz traps</b><small>Green pads trap you. Answer a Bitcoin question to break out.</small></li>
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#3a8dff" d="M4 0h1v1H4zM3 1h3v1H3zM2 2h5v1H2zM1 3h7v1H1z" /><path fill="#8a8178" d="M2 4h5v5H2z" /><path fill="#f7931a" d="M4 6h1v3H4z" /></svg><b>Yours must be home</b><small>You only score while your own block sits on its stand.</small></li>
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ff4a3a" d="M3 1h3v1H3zM2 2h5v4H2zM3 6h3v1H3zM1 4h1v1H1zM7 3h1v1H7zM4 7h1v2H4z" /></svg><b>Paint stops a runner</b><small data-coarse="Paint! throws. A splatted carrier drops the block.">Click or Enter throws. A splatted carrier drops the block.</small></li>
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#f7931a" d="M3 0h3v3H3z" /><path fill="#f3efe4" d="M4 4h1v1H4zM4 6h1v1H4z" /><path fill="#9aa3ad" d="M2 8h5v1H2z" /></svg><b>Double jump</b><small data-coarse="Jump twice to reach rooftops, huts and the fort walls.">Space twice reaches rooftops, huts and the fort walls.</small></li>
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#22c55e" d="M1 4h1v1H1zM2 5h1v1H2zM3 6h1v1H3zM4 5h1v1H4zM5 4h1v1H5zM6 3h1v1H6zM7 2h1v1H7z" /></svg><b>Tools and crates</b><small data-coarse="Grenades, rockets and nets refill on your stand. Crates wall your fort.">Grenades, rockets and nets refill on your stand. B drops crates to wall your fort.</small></li>
+        </ul>
+        <div class="actions">
+          <button type="button" class="game-intro-go" data-action="intro-go">Play!</button>
+          <button type="button" data-action="leave">Back to the island</button>
+        </div>
+      </section>
+      <section class="race-results" id="block-results" hidden aria-label="Block Frenzy results">
+        <h2><span data-sign id="block-result-title">Blocks mined!</span></h2>
+        <p class="help" id="block-summary"></p>
+        <ul class="race-podium drop-rows" id="block-stats"></ul>
+        <div class="actions">
+          <button type="button" data-action="block-again">Again</button>
+          <button type="button" data-action="block-board">Sides</button>
           <button type="button" data-action="leave">Back to the island</button>
         </div>
       </section>
@@ -1913,6 +2056,11 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/drop-hud.js"></script>
   <script src="js/drop-audio.js" data-defer="drop"></script>
   <script src="js/scene-drop.js" data-defer="drop-scene"></script>
+  <script src="js/block-sim.js"></script>
+  <script src="js/block-trivia.js"></script>
+  <script src="js/block-models.js"></script>
+  <script src="js/block-audio.js"></script>
+  <script src="js/scene-block.js"></script>
   <script src="js/mine-models.js"></script>
   <script src="js/mine-sim.js"></script>
   <script src="js/mine-hud.js" data-defer="mine"></script>

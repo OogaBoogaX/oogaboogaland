@@ -3892,7 +3892,7 @@ const orbitFlow = async (b) => {
 // perf floor; `perf` runs the perf floor alone; `unit` (or nothing) runs only the global tier.
 // Two lanes limit concurrent WebGL boot pressure; four produced long startups
 // and a GPU context loss during the full suite.
-const SCENES = ["hub", "lab", "race", "drop", "orbit", "mine", "dsb", "factory", "hangar", "bifrost", "timechain", "poker", "arcade", "skee", "hoops", "shy", "claw", "hockey", "billiards", "darts", "pinball", "ride", "invaders", "snake", "pong", "stampede", "flap", "breaker", "dash", "stacker"];
+const SCENES = ["hub", "lab", "race", "drop", "block", "orbit", "mine", "dsb", "factory", "hangar", "bifrost", "timechain", "poker", "arcade", "skee", "hoops", "shy", "claw", "hockey", "billiards", "darts", "pinball", "ride", "invaders", "snake", "pong", "stampede", "flap", "breaker", "dash", "stacker"];
 const LANES = Number(process.env.LANES) || 2;
 const ARGS = process.argv.slice(2);
 for (const a of ARGS) if (!SCENES.includes(a) && !["unit", "chat-unit", "integration-unit", "svrn-unit", "svrn-review", "vacancy-unit", "rescue-unit", "wallets-unit", "portal-unit", "water-baseline", "water-review", "water-unit", "stackchain-review", "stackchain-unit", "dsb-menus-unit", "maxis-unit", "exterior-unit", "rulers-unit", "ink-unit", "big-unit", "perf", "full", "poker-protocol"].includes(a)) throw new Error(`Unknown argument "${a}" (unit | perf | full | poker-protocol | ${SCENES.join(" | ")})`);
@@ -5296,12 +5296,139 @@ const npcPaths = (backend) => [`NPC paths ${backend}`, async (b) => {
 
 // The games' rules and saves in Node, under the same localStorage the page uses: the mine's seeded sim,
 // every game's stored best, the tickets a machine spends and the jackpot wheel's odds.
-const GAME_SOURCES = ["math", "donations", "rocket-parts", "mine-rigs", "mine-sim", "game"];
+const GAME_SOURCES = ["math", "donations", "rocket-parts", "mine-rigs", "mine-sim", "block-sim", "game"];
 const gameRulesChecks = async () => {
   const store = new Map();
   const context = { window: {}, URLSearchParams, location: { search: "" }, localStorage: { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) } };
   for (const name of GAME_SOURCES) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
   const BL = context.window.BL, M = BL.mineSim, R = BL.mineRigs;
+  {
+    // Block Frenzy's rules, played through the sim's own calls: a pickup, a drop that can't be undone by standing still,
+    // scoring only while your own block is home, a splat that drops the carrier's block, which then stays put until its
+    // own side carries it back, a quiz trap that holds and protects until answered, a net that slows and grounds, a
+    // crate pushed by walking into it, and three captures deciding the round. Nothing here repeats a formula.
+    const S = BL.blockSim, A = S.ARENA, still = { x: 0, z: 0, sprint: 0, jump: 0 };
+    const sim = S.create({ team: "blue", seed: 7, prep: 0 });
+    for (const a of sim.actors) if (a.id) a.bot = false;
+    // Still air, so nothing drifts.
+    Object.assign(sim.weather, { target: 0, strength: 0, left: 1e9 });
+    const me = sim.actors[0], put = (a, x, z) => { a.x = x; a.z = z; S.tick(sim, S.CONFIG.STEP, still); };
+    const theirs = A.stands.red, mine = A.stands.blue;
+    put(me, theirs.x, theirs.z);
+    const picked = me.carrying === "red" && sim.flags.red.state === "carried";
+    const dropped = S.drop(sim, 0) && sim.flags.red.state === "dropped";
+    put(me, me.x, me.z);
+    const held = sim.flags.red.state === "dropped";
+    put(me, theirs.x + 4, theirs.z);
+    put(me, sim.flags.red.x, sim.flags.red.z);
+    const regrab = me.carrying === "red";
+    sim.flags.blue.state = "carried"; sim.flags.blue.carrier = 2;
+    put(me, mine.x, mine.z);
+    const noScoreAway = sim.score.blue === 0 && me.carrying === "red";
+    sim.flags.blue.state = "home"; sim.flags.blue.carrier = null;
+    put(me, mine.x + 0.2, mine.z);
+    const scored = sim.score.blue === 1 && sim.flags.red.state === "home" && !me.carrying;
+    put(me, theirs.x, theirs.z);
+    put(me, theirs.x + 4, theirs.z + 3);
+    const rival = sim.actors[2];
+    rival.x = me.x; rival.z = me.z - 3; rival.cooldown = 0;
+    S.fire(sim, 2, 0);
+    for (let t = 0; t < 1 && me.splat <= 0; t += S.CONFIG.STEP) S.tick(sim, S.CONFIG.STEP, still);
+    const splatted = me.splat > 0 && !me.carrying && sim.flags.red.state === "dropped";
+    for (let t = 0; t < 25; t += S.CONFIG.STEP) S.tick(sim, S.CONFIG.STEP, still);
+    const stays = sim.flags.red.state === "dropped";
+    put(rival, sim.flags.red.x, sim.flags.red.z);
+    // A touch by its own side sends a dropped block straight home.
+    const rescued = sim.flags.red.state === "home" && !rival.carrying;
+    put(rival, theirs.x, theirs.z);
+    const returned = sim.flags.red.state === "home" && !rival.carrying;
+    for (let t = 0; t < 4; t += S.CONFIG.STEP) S.tick(sim, S.CONFIG.STEP, still);
+    const [tx, tz] = A.traps[0];
+    put(me, tx, tz);
+    const trapped = me.trapped > 0, frozen = (() => { const x = me.x; S.tick(sim, 0.1, { x: 1, z: 0, sprint: 0, jump: 0 }); return me.x === x; })();
+    rival.x = me.x; rival.z = me.z - 3; rival.cooldown = 0;
+    S.fire(sim, 2, 0);
+    for (let t = 0; t < 0.6; t += S.CONFIG.STEP) S.tick(sim, S.CONFIG.STEP, still);
+    const shielded = me.splat <= 0 && me.trapped > 0;
+    const freed = S.escape(sim, 0) && me.trapped === 0 && me.guard > 0;
+    for (let t = 0; t < 3; t += S.CONFIG.STEP) S.tick(sim, S.CONFIG.STEP, still);
+    rival.x = me.x; rival.z = me.z - 3; rival.cooldown = 0; me.guard = 0;
+    S.fire(sim, 2, 0, 0, "net");
+    for (let t = 0; t < 0.6 && me.netted <= 0; t += S.CONFIG.STEP) S.tick(sim, S.CONFIG.STEP, still);
+    const y0 = me.y; S.tick(sim, S.CONFIG.STEP, { x: 0, z: 0, jump: 1 }); S.tick(sim, S.CONFIG.STEP, still);
+    const netted = me.netted > 0 && me.splat <= 0 && me.y === y0;
+    const c = sim.crates.find((k) => k.live), cx = c.x, cz = c.z;
+    me.netted = 0; me.x = cx - 1.3; me.z = cz; me.y = 0;
+    for (let t = 0; t < 0.8; t += S.CONFIG.STEP) S.tick(sim, S.CONFIG.STEP, { x: 1, z: 0, sprint: 0, jump: 0 });
+    const pushed = c.x > cx + 0.2 && Math.abs(c.z - cz) < 1e-6;
+    // A pass: the carrier throws the block ahead and a teammate down the line catches it.
+    const mate = sim.actors[1];
+    S.reset(sim); sim.prep = 0;
+    Object.assign(sim.weather, { target: 0, strength: 0, left: 1e9 });
+    put(me, theirs.x, theirs.z);
+    me.x = -16.5; me.z = 14; me.y = 0; mate.x = -16.5; mate.z = 24; mate.y = 0;
+    const threw = S.pass(sim, 0, 0) && sim.flags.red.state === "flying";
+    for (let t = 0; t < 2 && sim.flags.red.state === "flying"; t += S.CONFIG.STEP) S.tick(sim, S.CONFIG.STEP, still);
+    const caught = threw && mate.carrying === "red";
+    // Crates: lift one, stack it on another, then throw it at a rival, who is stunned.
+    for (let t = 0; t < 1; t += S.CONFIG.STEP) S.tick(sim, S.CONFIG.STEP, still);
+    mate.carrying = null; sim.flags.red.state = "dropped";
+    me.x = -16.5; me.z = 14; me.y = 0; S.tick(sim, S.CONFIG.STEP, still);
+    S.build(sim, 0, 0); S.build(sim, 0, Math.PI / 2);
+    const lifted = S.grab(sim, 0, Math.PI / 2) && me.holding;
+    const stacked = S.grab(sim, 0, 0) && sim.crates.some((k) => k.live && k.y > 1);
+    S.grab(sim, 0, 0);
+    rival.x = -16.5; rival.z = 21; rival.guard = 0; rival.splat = 0; me.cooldown = 0;
+    S.fire(sim, 0, 0, 0.05, "crate");
+    for (let t = 0; t < 1.2 && rival.splat <= 0; t += S.CONFIG.STEP) S.tick(sim, S.CONFIG.STEP, still);
+    const bonked = lifted && stacked && rival.splat > 0 && rival.bonked;
+    record("block frenzy rules: pickup, a drop held until you step out, scoring only with your own block home, a splat drops the carrier's block, which stays until its side touches it home, a quiz trap holds and shields, a net slows and grounds, a crate pushes, a pass is caught, a crate stacks and a thrown one stuns",
+      picked && dropped && held && regrab && noScoreAway && scored && splatted && stays && rescued && returned && trapped && frozen && shielded && freed && netted && pushed && caught && bonked,
+      JSON.stringify({ picked, dropped, held, regrab, noScoreAway, scored, splatted, stays, rescued, returned, trapped, frozen, shielded, freed, netted, pushed, caught, lifted, stacked, bonked }));
+    // An expert that loses its crate target must free its hands so it can rescue a block.
+    const expertFixture = () => {
+      const r = S.create({ skill: "expert", prep: 0 }), bot = r.actors[1];
+      for (const actor of r.actors) { actor.bot = false; actor.x = 18; actor.z = -35; }
+      Object.assign(bot, { x: 0, z: 20, y: 0, bot: true });
+      Object.assign(r.weather, { target: 0, strength: 0, left: 1e9 });
+      const lifted = S.grab(r, bot.id, 0);
+      Object.assign(r.flags.blue, { state: "dropped", x: 0, z: 20, y: 0, carrier: null });
+      const advance = (seconds) => { for (let n = 0; n < Math.round(seconds / S.CONFIG.STEP); n++) S.tick(r, S.CONFIG.STEP, { ...still }); };
+      return { r, bot, lifted, advance };
+    };
+    const lost = expertFixture();
+    lost.advance(2.5);
+    const waits = lost.bot.holding;
+    lost.advance(7.5);
+    record("block frenzy expert: after losing a crate target, wait three seconds, set it down and rescue the dropped home block",
+      lost.lifted && waits && !lost.bot.holding && lost.r.flags.blue.state === "home",
+      JSON.stringify({ lifted: lost.lifted, waits, holding: lost.bot.holding, flag: lost.r.flags.blue.state }));
+    const reacquired = expertFixture();
+    reacquired.advance(2);
+    Object.assign(reacquired.r.actors[2], { x: 3, z: 20, y: 0, guard: 0 });
+    reacquired.bot.cooldown = 20; // Keep a visible target without being able to throw yet.
+    reacquired.advance(1);
+    const retained = reacquired.bot.holding;
+    Object.assign(reacquired.r.actors[2], { x: 18, z: -35 });
+    reacquired.advance(2);
+    const freshWait = reacquired.bot.holding;
+    reacquired.advance(2);
+    record("block frenzy expert: reacquiring a target resets the crate-release delay even during weapon cooldown",
+      reacquired.lifted && retained && freshWait && !reacquired.bot.holding,
+      JSON.stringify({ retained, freshWait, holding: reacquired.bot.holding }));
+    const blockedCrate = expertFixture(), stack = blockedCrate.r.crates.filter((c) => !c.live).slice(0, 3);
+    for (let i = 0; i < stack.length; i++) Object.assign(stack[i], { live: true, team: "blue", x: 0, z: 18.7, y: i * S.CONFIG.CRATE_H });
+    blockedCrate.advance(4);
+    const blockedWait = blockedCrate.bot.holding;
+    for (const c of stack) c.live = false;
+    blockedCrate.advance(1);
+    record("block frenzy expert: a blocked set-down is retried as soon as the space clears",
+      blockedCrate.lifted && blockedWait && !blockedCrate.bot.holding,
+      JSON.stringify({ blockedWait, holding: blockedCrate.bot.holding }));
+    const round = (seed) => { const r = S.create({ team: "red", seed }); r.actors[0].bot = "auto"; for (let t = 0; t < 900 && !r.over; t += 1 / 30) S.step(r, 1 / 30, still), r.eventCount = 0; return JSON.stringify({ over: r.over, winner: r.winner, score: r.score, time: Math.round(r.time) }); };
+    const a = round(3), b = round(3);
+    record("block frenzy rounds: a seeded round replays exactly and reaches three captures", a === b && JSON.parse(a).over && Math.max(...Object.values(JSON.parse(a).score)) === S.CONFIG.CAPTURES, JSON.stringify({ a, b }));
+  }
   {
     const run = () => { const sim = M.create({ seed: 42 }); sim.place(R.GPU); return sim; };
     const a = run(), whole = run();
@@ -7287,6 +7414,47 @@ const dropSteer = (canopy) => `(() => { const B = window.__ooga, D = B.drop; ${E
   for (const k of ["a", "d", "q", "e"]) out[k] = +(out[k] - out.none).toFixed(1);
   out.none = +out.none.toFixed(1);
   return out; })()`;
+const blockState = `({ phase: window.__ooga.block.phase, card: !document.querySelector('[data-intro="block"]').hidden, board: !document.getElementById("block-board").hidden })`;
+const blockStart = { name: "block start", why: "rule: Space only closes the title card, Enter starts the round, and Escape frees the mouse, then goes back to the sides with nothing saved", run: async (b) => {
+  const fresh = await b.evaluate(blockState);
+  await b.key(" ");
+  const closed = await b.evaluate(blockState);
+  await b.key("Enter");
+  const play = await b.evaluate(blockState);
+  // The round locks the mouse, so the first Escape lets it go and the second goes back to the sides.
+  await b.key("Escape");
+  const freed = await b.evaluate(`({ ...${blockState}, locked: !!document.pointerLockElement })`);
+  if (freed.phase === "play") await b.key("Escape");
+  const back = await b.evaluate(`({ ...${blockState}, games: window.__ooga.game.state.block.games })`);
+  record("block start: Space closes the title card on the sides, Enter plays, Escape frees the mouse then returns to the sides unsaved", fresh.card && fresh.phase === "board" && !closed.card && closed.phase === "board" && play.phase === "play" && !freed.locked && back.phase === "board" && back.board && back.games === 0, JSON.stringify({ fresh, closed, play, freed, back }));
+} };
+// W A S D measured on screen: each key moves the Ooga its way relative to where the camera looks.
+// Steering measured on screen: W and S run the Ooga forward and back along where the camera looks, and A and D turn
+// it, the chase camera following round, A to the left on screen and D to the right.
+const blockWalk = { name: "block walk", why: "rule: W and S run the visitor's Ooga their way on screen, and A and D turn it and the camera their way", run: async (b) => {
+  await b.key("Enter");
+  const rows = {};
+  for (const k of "wsad") {
+    await b.evaluate(`(() => { const B = window.__ooga, s = B.block.sim, a = s.actors[0]; s.prep = 0; Object.assign(s.weather, { target: 0, strength: 0, left: 1e9 }); a.x = -14; a.z = 2; a.vx = a.vz = 0; for (const o of s.actors) if (o.id) { o.x = 20; o.z = o.team === s.team ? 30 : -30; } B.advance(0.6, 1 / 60); const c = B.camera, vx = c.target.x - c.position.x, vz = c.target.z - c.position.z, l = Math.hypot(vx, vz); window.__walk = { fx: vx / l, fz: vz / l, x0: a.x, z0: a.z }; })()`);
+    await holdKey(b, k, 0.5);
+    rows[k] = await b.evaluate(`(() => { const q = window.__walk, a = window.__ooga.block.sim.actors[0], c = window.__ooga.camera, dx = a.x - q.x0, dz = a.z - q.z0, vx = c.target.x - c.position.x, vz = c.target.z - c.position.z, l = Math.hypot(vx, vz); return { fwd: +(dx * q.fx + dz * q.fz).toFixed(2), turn: +((vx / l) * -q.fz + (vz / l) * q.fx).toFixed(2) }; })()`);
+  }
+  // The camera's new forward measured against the old right: negative is a turn to the left on screen.
+  const ok = rows.w.fwd > 1 && rows.s.fwd < -1 && rows.a.turn < -0.3 && rows.d.turn > 0.3;
+  record("block walk: W and S run the Ooga forward and back on screen, A turns it and the camera left and D right", ok, JSON.stringify(rows));
+} };
+const blockQuiz = { name: "block quiz", why: "rule: a quiz trap holds the visitor until a right answer, a wrong one locks the answers, and a right one frees them", run: async (b) => {
+  const r = await b.evaluate(`(() => { const B = window.__ooga, D = B.block, s = D.sim, a = s.actors[0], t = s.traps[2];
+    a.x = t.x; a.z = t.z + 0.5; B.advance(0.2, 1 / 60);
+    const open = D.quiz.open && !document.getElementById("block-quiz").hidden && a.trapped > 0;
+    D.answer((D.quiz.right + 1) % 4);
+    const locked = D.quiz.locked && a.trapped > 0;
+    return { open, locked }; })()`);
+  await b.evaluate(`new Promise((resolve) => setTimeout(resolve, 2700))`);
+  const f = await b.evaluate(`(() => { const B = window.__ooga, D = B.block, a = D.sim.actors[0]; const fresh = !D.quiz.locked && D.quiz.asked === 2; D.answer(D.quiz.right); B.advance(0.1, 1 / 60); return { fresh, free: a.trapped === 0 && !D.quiz.open && document.getElementById("block-quiz").hidden }; })()`);
+  record("block quiz: a trap opens the question, a wrong answer locks the card and brings another, a right answer breaks the bubble", r.open && r.locked && f.fresh && f.free, JSON.stringify({ ...r, ...f }));
+} };
+const blockRun = `(() => { const B = window.__ooga, D = B.block; D.start(); for (let i = 0; i < 80 && D.phase === "play"; i++) D.simulate(15, true); B.advance(0.3, 1 / 30); const save = B.game.state.block; return { ok: D.phase === "results" && !document.getElementById("block-results").hidden && save.games === 1 && save.wins === (D.result.won ? 1 : 0), phase: D.phase, result: D.result, save }; })()`;
 const dropStart = { name: "drop start", why: "regression: Space on the title card also launched the flight", run: async (b) => {
   const st = () => b.evaluate(`({ phase: window.__ooga.drop.phase, card: !document.querySelector('[data-intro="drop"]').hidden })`);
   const fresh = await st();
@@ -17292,6 +17460,7 @@ scene("race", { label:"optional rig link fallback",url:hubPage(src),steps:[{name
 }}]});
 scene("race", { query: "rain=0&draw=0", steps: [raceStart, raceOwn, raceBench, { name: "race tracks", why: "regression: the 12-slot grid spawned a free banana on Banana Bay", run: async (b) => { await b.evaluate(`window.__ooga.race.toGarage()`); await raceTracks[1](b); } }, raceRigs, raceRigContext, racePause, play("race", "a whole cup under the autopilot: one drawn field of fifteen runs every race and finishes in order, the cup medal and every track's best are saved", cupRun), raceMirror, raceAgain, trip("race")] });
 scene("drop", { steps: [dropStart, dropSteering, play("drop", "a jump lands on the target, scores its own medal and is saved as the best", dropRun), dropCrash, trip("drop"), dropOwn] });
+scene("block", { steps: [blockStart, blockWalk, blockQuiz, play("block", "a round on autopilot reaches three captures, shows its results and saves the round", blockRun), trip("block")] });
 scene("orbit", { steps: [{ name: "orbit flow", why: "regression: the spacewalk air bonus was missing from the flight log", run: orbitFlow }, orbitSteering, orbitMissed, orbitEscape, trip("orbit"), orbitOwn] });
 scene("mine", { steps: [mineResume, trip("mine"), mineControls, mineOwn] });
 // ---- The Lightning Jet Hangar ----

@@ -34,7 +34,8 @@
     { id: "race", name: "Ooga Rally", title: "RALLY", icon: "flag", light: [1, 0.85, 0.3] },
     { id: "drop", name: "Ooga Drop", title: "DROP", icon: "chute", light: [0.4, 0.8, 1] },
     { id: "orbit", name: "Ooga Orbit", title: "ORBIT", icon: "rocket", light: [0.7, 0.55, 1] },
-    { id: "mine", name: "Ooga Mine", title: "MINE", icon: "pick", light: [1, 0.6, 0.25] }
+    { id: "mine", name: "Ooga Mine", title: "MINE", icon: "pick", light: [1, 0.6, 0.25] },
+    { id: "block", name: "Block Frenzy", title: "BLOCK", icon: "flag", light: [1, 0.58, 0.1] }
   ];
   // The Ooga retro games (`retro-games.js`), one on each cabinet along the mezzanine, in the cabinets' order from the
   // fifth: scene id, name, and the marquee's words and badge. Each cabinet's trim is its screen's colour.
@@ -55,17 +56,19 @@
   // game (`retro`, its index in RETRO).
   const PAINT = [
     ["#8a5a32", "#ffd23a", "#b8402e", 0, 0], ["#7a4e2c", "#5ec8ff", "#e8dcc0", 2, 0], ["#94643a", "#b98cff", "#e8dcc0", 1, 0], ["#6e655c", "#ff9a3c", "#e8dcc0", 0, 1],
+    ["#4a4440", "#f7931a", "#3a8dff", 1, 1],
     ["#86582f", "#46ffd2", "#e8dcc0", 1, 0], ["#6a625a", "#e0452b", "#c8862c", 2, 1], ["#7c5230", "#c8ff5a", "#b8402e", 2, 0], ["#726758", "#ffd23a", "#b8402e", 0, 1],
     ["#8e5e34", "#7fe0ff", "#e8dcc0", 1, 0], ["#655c54", "#ffb02e", "#e8dcc0", 0, 1], ["#805430", "#2fd0c0", "#c8862c", 2, 0], ["#6c6258", "#ff5fa2", "#e8dcc0", 1, 1]
   ];
-  const CAB = { w: 1.24, d: 0.96, pitch: 1.5 };
-  const ARC = { x: 0, z: -0.2, r: 8, step: 0.265 };
+  // The arc's step closes up for the fifth game so the outer cabinets stay on the stage.
+  const LIVE = GAMES.length, CAB = { w: 1.24, d: 0.96, pitch: 1.5 };
+  const ARC = { x: 0, z: -0.2, r: 8, step: 0.22 };
   const CABINETS = PAINT.map(([body, trim, second, art, stone], i) => {
-    const live = i < 4;
-    const a = (i - 1.5) * ARC.step, x = live ? ARC.x + ARC.r * Math.sin(a) : (i - 4 - 3.5) * CAB.pitch;
+    const live = i < LIVE;
+    const a = (i - (LIVE - 1) / 2) * ARC.step, x = live ? ARC.x + ARC.r * Math.sin(a) : (i - LIVE - 3.5) * CAB.pitch;
     const z = live ? ARC.z - ARC.r * Math.cos(a) : MEZZ.z0 + 0.85, turn = live ? -a : 0, y = live ? STAGE.high : MEZZ.y;
     const play = { x: x + Math.sin(turn) * 1.25, z: z + Math.cos(turn) * 1.25, facing: turn + Math.PI };
-    return { index: i, x, y, z, turn, game: live ? i : -1, retro: live ? -1 : i - 4, body, trim, second, art, stone: !!stone, play };
+    return { index: i, x, y, z, turn, game: live ? i : -1, retro: live ? -1 : i - LIVE, body, trim, second, art, stone: !!stone, play };
   });
   // Everything else, each built in its own frame facing +z; `turn` stands the frame in the hall. For the carnival
   // machines the player stands at the frame's origin (`play`); the counters are built with their customers on +z.
@@ -370,6 +373,14 @@
       for (const [u, v] of [[-0.4, 0.82], [0.36, 0.64], [0.42, 0.96], [-0.32, 0.42]]) daubDot(g, ...at(u, v), s * 0.03, s * 0.03, color, e, 0, z, 5);
       return g;
     },
+    // Block Frenzy's block: a cube's front, top and side, with a bone stroke down its face for the ₿; (x, y) its foot.
+    block: (g, x, y, s, color, e, z = 0) => {
+      const h = s * 0.5, d = s * 0.18;
+      daubPoly(g, [[x - h / 2, y], [x + h / 2, y], [x + h / 2, y + h], [x - h / 2, y + h]], color, e, z);
+      daubPoly(g, [[x - h / 2, y + h], [x + h / 2, y + h], [x + h / 2 + d, y + h + d], [x - h / 2 + d, y + h + d]], EARTH_OCHRE, e, z);
+      daubPoly(g, [[x + h / 2, y], [x + h / 2 + d, y + d], [x + h / 2 + d, y + h + d], [x + h / 2, y + h]], EARTH_RED, e, z);
+      return daubStroke(g, [[x - h * 0.1, y + h * 0.15], [x - h * 0.1, y + h * 0.85]], s * 0.05, EARTH_CHALK, e, z + 0.004);
+    },
     pick: (g, x, y, s, color, e, z = 0) => {
       const at = (u, v) => [x + u * s, y + v * s], R = 0.5, cu = 0.22 - 0.6 * R, cv = 0.72 - 0.8 * R;
       daubStroke(g, [at(-0.3, 0.02), at(0.22, 0.72)], s * 0.075, color, e, z);
@@ -656,6 +667,9 @@
       ["D", 2, 0, -0.12, 0.14], ["L", 2, 0, -0.25, 0, -0.6, 0.1], ["L", 2, 0, -0.6, -0.22, -0.9, 0.08], ["L", 2, 0, -0.6, 0.22, -0.9, 0.08], ["L", 2, 0, -0.32, -0.3, -0.18, 0.07], ["L", 2, 0, -0.32, 0.3, -0.18, 0.07]],
     orbit: [["P", 0, [[-0.22, -0.5], [0.22, -0.5], [0.22, 0.4], [0, 0.85], [-0.22, 0.4]]], ["P", 1, [[-0.22, -0.5], [-0.22, -0.05], [-0.5, -0.62]]], ["P", 1, [[0.22, -0.5], [0.5, -0.62], [0.22, -0.05]]],
       ["D", 2, 0, 0.22, 0.1], ["P", 1, [[-0.15, -0.56], [0.15, -0.56], [0, -0.95]]], ["D", 2, -0.7, 0.6, 0.06], ["D", 2, 0.66, 0.2, 0.05], ["D", 2, 0.55, 0.78, 0.06], ["D", 2, -0.6, -0.2, 0.05]],
+    // Block Frenzy's block: a cube in three faces with a bone ₿ stroke down its front.
+    block: [["P", 0, [[-0.55, -0.6], [0.35, -0.6], [0.35, 0.3], [-0.55, 0.3]]], ["P", 1, [[-0.55, 0.3], [0.35, 0.3], [0.65, 0.6], [-0.25, 0.6]]], ["P", 1, [[0.35, -0.6], [0.65, -0.3], [0.65, 0.6], [0.35, 0.3]]],
+      ["L", 2, -0.25, -0.45, -0.25, 0.15, 0.09], ["L", 2, -0.25, 0.12, 0.08, 0.05, 0.08], ["L", 2, -0.25, -0.15, 0.1, -0.2, 0.08], ["L", 2, -0.25, -0.42, 0.08, -0.45, 0.08], ["L", 2, -0.12, 0.15, -0.12, 0.25, 0.05], ["L", 2, -0.12, -0.45, -0.12, -0.55, 0.05]],
     mine: [["L", 2, -0.6, -0.75, 0.3, 0.45, 0.1], ["L", 0, 0.3, 0.45, -0.1, 0.78, 0.11], ["L", 0, 0.3, 0.45, 0.72, 0.18, 0.11], ["D", 1, 0.45, -0.55, 0.13], ["D", 1, 0.74, -0.32, 0.09], ["D", 1, 0.16, -0.74, 0.08]],
     // The dark cabinets' own: a mammoth, a dancing Ooga with a club, a banana, a coconut, and the hands and spirals.
     mammoth: [["P", 0, [[-0.7, -0.2], [0.5, -0.25], [0.66, 0.05], [0.5, 0.45], [0, 0.6], [-0.55, 0.42]]], ["D", 0, 0.62, 0.22, 0.28], ["L", 0, 0.82, 0.12, 0.88, -0.45, 0.1], ["L", 0, 0.88, -0.45, 0.72, -0.6, 0.08],
@@ -695,7 +709,7 @@
     const at = (ops, z, y, s, ink = inks) => moved(turnedY(pictograph(x > 0 ? mirror(ops) : ops, s, ink, emissive), x > 0 ? Math.PI / 2 : -Math.PI / 2), x, y, z);
     const second = [inks[1], inks[1], inks[2]], bone = [inks[2], inks[2], inks[2]];
     return [
-      at(PICTOS[c.game >= 0 ? GAMES[c.game].id : TEASER_ART[c.index - 4]], 0, 0.58, 0.27),
+      at(PICTOS[c.game >= 0 ? GAMES[c.game].id : TEASER_ART[c.index - LIVE]], 0, 0.58, 0.27),
       at(dots(7, 2, 0.95, 0.2), -0.02, 0.24, 0.11),
       c.art === 2 ? at(PICTOS.spiral, -0.2, 1.42, 0.15, bone) : at(PICTOS.hand, -0.2, 1.4, 0.17, c.art ? second : inks),
       c.art === 1 ? at(zigzag(7, 0), -0.05, 1.97, 0.1) : at(dots(6, c.art ? 0 : 2, 1.1, 0.26), -0.05, 1.97, 0.1)
@@ -821,7 +835,7 @@
       // A live cabinet's back, seen from the back room: its game's pictograph over two handprints, daubed on the planks.
       if (on) {
         const art = geometry();
-        [MARK.kart, MARK.chute, MARK.rocket, MARK.pick][c.game](art, 0, 1.25, 0.55, inks[0], paint);
+        [MARK.kart, MARK.chute, MARK.rocket, MARK.pick, MARK.block][c.game](art, 0, 1.25, 0.55, inks[0], paint);
         daubHand(art, -0.2, 0.82, 0.3, 0.2, EARTH_RED, paint);
         daubHand(art, 0.2, 0.78, 0.3, -0.2, EARTH_CHALK, paint, 0.004);
         J.flatInto(g, moved(turnedY(art, Math.PI), 0, 0, -0.456));
@@ -882,7 +896,8 @@
     race: ["#0d1a0d", BANANA, "#4a4a52", "#f2efe8", RED, "#8a5a34", "#3a8f2a", "#1b1b1e", "#2e6b20"],
     drop: ["#123a66", "#5ec8ff", "#f2efe8", "#c7dcef", RED, "#c68642", BANANA, "#1b1b1e", "#ff9c86"],
     orbit: ["#0a0820", "#b98cff", "#f2efe8", "#8a86c9", RED, "#7fe0ff", "#ffb02e", BANANA, "#5a5670"],
-    mine: ["#1a120a", "#ff9a3c", "#6b6b73", "#8e8e96", BANANA, "#a8703e", "#c9ced6", "#fff3a0", "#4a4a52"]
+    mine: ["#1a120a", "#ff9a3c", "#6b6b73", "#8e8e96", BANANA, "#a8703e", "#c9ced6", "#fff3a0", "#4a4a52"],
+    block: ["#140c04", "#f7931a", "#c9a96b", "#3a8dff", "#ff4a3a", "#fff3d6", "#8a8178", "#ffd27a", "#b8650a"]
   };
   // Each game's loop, drawn into the anim box a frame at a time: `f` runs 0 to FRAMES - 1 and the loop is seamless.
   const DRAW = {
@@ -941,13 +956,27 @@
         const t = f - 9;
         for (const [vx, vy] of [[-1, -1], [-2, 0], [-1, 1], [0, -2]]) at(g, 25 + vx * t, 15 + vy * t, t < 2 ? 7 : 4);
       }
+    },
+    // Block Frenzy: a blue Ooga runs the glowing orange block home across the sand while red paint flies past.
+    block: (g, f) => {
+      rect(g, 0, 18, GRID_W, ANIM_Y1 - 17, 2);
+      rect(g, 2, 14, 3, 4, 6); rect(g, 35, 14, 3, 4, 6);
+      const ox = 6 + Math.round(f / FRAMES * 24), step = f % 4 < 2;
+      rect(g, ox, 13, 2, 2, 5); rect(g, ox, 15, 2, 2, 3);
+      at(g, ox - (step ? 1 : 0), 17, 3); at(g, ox + 1 + (step ? 1 : 0), 17, 3);
+      rect(g, ox - 1, 9, 4, 3, 1); at(g, ox, 10, 7); at(g, ox + 1, 10, 7);
+      at(g, ox - 1, 12, 5); at(g, ox + 2, 12, 5);
+      for (const [y, phase] of [[11, 0], [15, 6]]) {
+        const x = GRID_W - 1 - (phase + f * 3) % GRID_W;
+        at(g, x, y, 4); at(g, x + 1, y, 4);
+      }
     }
   };
   // A little bone lying on three rows of a pixel grid from (x, y), in palette colour `c`; `titleBones` lays one either
   // side of a screen's title, each game's in its palette's cream.
   const pixelBone = (g, x, y, c) => { at(g, x, y, c); at(g, x + 3, y, c); rect(g, x, y + 1, 4, 1, c); at(g, x, y + 2, c); at(g, x + 3, y + 2, c); };
   const titleBones = (g, c) => { pixelBone(g, 0, 3, c); pixelBone(g, GRID_W - 4, 3, c); };
-  const BONE_INK = { race: 3, drop: 2, orbit: 2, mine: 7 };
+  const BONE_INK = { race: 3, drop: 2, orbit: 2, mine: 7, block: 5 };
   // A game's loop, by its index in GAMES: the title across the top in the game's colour between two bones, then the
   // anim box.
   const attractFrames = variants((i) => {

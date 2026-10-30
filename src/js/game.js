@@ -59,7 +59,7 @@
     if (list.length > RECENT_HANDLES) list.length = RECENT_HANDLES;
   };
   const isEntry = (e, catalog) => e && typeof e === "object" && isString(e.id, 40) && catalog.some((c) => c.id === e.itemId) && LOOT_TIERS.some((t) => t.tier === e.tier) && isString(e.donationId, 64) && Number.isFinite(e.at);
-  const defaults = () => ({ inventory: [], assignments: {}, handle: "", message: "", recentHandles: [], recentDonations: [], handFed: 0, totalSats: 0, donations: 0, bananas: 0, lastTip: 0, tipDays: [], donors: [], race: { best: {}, cup: null }, drop: { best: null, jumps: 0 }, orbit: { best: null, build: null }, mine: { best: null }, arcade: { skee: 0, hoops: 0, shy: 0, claw: 0, hockey: 0, billiards: 0, darts: 0, pinball: 0, ride: 0, invaders: 0, snake: 0, pong: 0, stampede: 0, flap: 0, breaker: 0, dash: 0, stacker: 0, tickets: 0, prizes: [] } });
+  const defaults = () => ({ inventory: [], assignments: {}, handle: "", message: "", recentHandles: [], recentDonations: [], handFed: 0, totalSats: 0, donations: 0, bananas: 0, lastTip: 0, tipDays: [], donors: [], race: { best: {}, cup: null }, drop: { best: null, jumps: 0 }, orbit: { best: null, build: null }, mine: { best: null }, block: { wins: 0, games: 0, best: 0 }, arcade: { skee: 0, hoops: 0, shy: 0, claw: 0, hockey: 0, billiards: 0, darts: 0, pinball: 0, ride: 0, invaders: 0, snake: 0, pong: 0, stampede: 0, flap: 0, breaker: 0, dash: 0, stacker: 0, tickets: 0, prizes: [] } });
   // Ooga Arcade's carnival bests, each capped past the most its game can score (nine doubled 100s; the round games
   // run on), the retro cabinets' bests (`retro-games.js`, capped past any run), the ticket balance, and the prizes
   // (`ARCADE_PRIZES` ids) redeemed at the counter.
@@ -127,6 +127,11 @@
       const d = parsed.drop && parsed.drop.best;
       if (d && Number.isFinite(d.score) && d.score >= 0 && d.score < 1e6 && Number.isFinite(d.rings) && d.rings >= 0 && Number.isFinite(d.ringTotal) && d.ringTotal >= d.rings && d.ringTotal <= 99 && LANDINGS.includes(d.landing)) {
         state.drop.best = { score: Math.floor(d.score), rings: Math.floor(d.rings), ringTotal: Math.floor(d.ringTotal), landing: d.landing };
+      }
+      // Block Frenzy: rounds played and won, and the fastest win in milliseconds (0 until one is won).
+      const b = parsed.block;
+      if (b && Number.isFinite(b.games) && b.games >= 0 && b.games < 1e7 && Number.isFinite(b.wins) && b.wins >= 0 && b.wins <= b.games && Number.isFinite(b.best) && b.best >= 0 && b.best < 864e5) {
+        state.block = { wins: Math.floor(b.wins), games: Math.floor(b.games), best: Math.floor(b.best) };
       }
       const o = parsed.orbit;
       if (o && o.best && Number.isFinite(o.best.score) && o.best.score >= 0 && o.best.score < 1e6 && typeof o.best.orbit === "boolean" && ORBIT_LANDINGS.includes(o.best.landing)) {
@@ -289,6 +294,16 @@
       save(state);
       return true;
     };
+    // A finished Block Frenzy round: every one counts, a win counts as a win, and the fastest win is the best.
+    const recordBlock = ({ won, ms }) => {
+      const b = state.block;
+      b.games++;
+      const best = won && ms > 0 && (b.best === 0 || ms < b.best);
+      if (won) b.wins++;
+      if (best) b.best = Math.floor(ms);
+      save(state);
+      return best;
+    };
     const recordOrbit = ({ score, orbit, landing }) => {
       const b = state.orbit.best;
       if (b && b.score >= score) return false;
@@ -353,7 +368,7 @@
       if (seconds < 5400) return `${Math.round(seconds / 60)}m`;
       return `${(seconds / 3600).toFixed(1)}h`;
     };
-    return { state, countOf, lootFor: lootForVisitor, addItem, assign, unassign, itemOf, assignedTo, clearLoot, resetAll, recordDonation, rememberHandle, tipsWithin, recordHandFed, recordRace, recordCup, recordJump, recordDrop, recordOrbit, recordMine, recordArcade, addTickets, spendTickets, redeem, setOrbitBuild, setIdentity, forecast, formatDuration };
+    return { state, countOf, lootFor: lootForVisitor, addItem, assign, unassign, itemOf, assignedTo, clearLoot, resetAll, recordDonation, rememberHandle, tipsWithin, recordHandFed, recordRace, recordCup, recordJump, recordDrop, recordOrbit, recordBlock, recordMine, recordArcade, addTickets, spendTickets, redeem, setOrbitBuild, setIdentity, forecast, formatDuration };
   };
   BL.game = { create, LOOT_TIERS, STACK_MAX, SATS_PER_BANANA, tierFor, lootFor, bananasFor, formatLarge, formatThree, formatFeeRate };
 })();

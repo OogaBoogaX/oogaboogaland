@@ -590,10 +590,13 @@ body[data-active-scene="hub"] .home-link {
    hides the compass and the weapon slots too. */
 body[data-active-scene="race"] .sheet,
 body[data-active-scene="drop"] .sheet,
+body[data-active-scene="block"] .sheet,
 body[data-active-scene="orbit"] .sheet,
 body[data-active-scene="mine"] .sheet,
 body[data-active-scene="race"] .world-block,
 body[data-active-scene="drop"] .world-block,
+body[data-active-scene="block"] .world-block,
+body[data-active-scene="block"] .mode-hud,
 body[data-active-scene="orbit"] .world-block,
 body[data-active-scene="mine"] .world-block,
 body[data-active-scene="mine"] .mode-hud,
@@ -9895,4 +9898,398 @@ body.dsb-menu-open :is(.bottom-hud,.top-hud,#joy-move,#joy-look,#act,.weapon-hud
 }
 @media (max-width: 720px) {
   .sphere-mode { white-space: normal; max-width: 46vw; overflow-wrap: anywhere; }
+}
+
+/* Block Frenzy: the side picker's two forts, the score chips in their team colours, and the blocks' states. */
+.block-sides {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.block-side {
+  flex: 1 1 120px;
+  min-height: 44px;
+  border: 3px solid var(--wood-edge);
+  border-radius: 8px;
+  font: inherit;
+  font-weight: 700;
+  color: #fff;
+  cursor: pointer;
+}
+
+.block-target {
+  flex: 1 1 44px;
+  background: #5a3a22;
+}
+
+.block-side[data-team="blue"] {
+  background: #1d4fa8;
+}
+
+.block-side[data-team="red"] {
+  background: #a8261d;
+}
+
+.block-side[aria-pressed="false"] {
+  opacity: 0.55;
+}
+
+.block-side[aria-pressed="true"] {
+  box-shadow: 0 0 0 3px #f7931a;
+}
+
+.block-score[data-team="blue"] b {
+  color: #9cc8ff;
+}
+
+.block-score[data-team="red"] b {
+  color: #ffb0a6;
+}
+
+.block-state b {
+  font-size: 14px;
+  text-transform: uppercase;
+}
+
+.block-state b[data-state="carried"] {
+  color: #f7931a;
+}
+
+.block-state b[data-state="dropped"] {
+  color: #ffd27a;
+}
+
+/* The quiz trap's card: the question, four answers in a grid (one column on a phone), and the bubble's time left. */
+.block-quiz {
+  border-color: #3dff7a;
+  box-shadow: 0 0 0 3px rgba(61, 255, 122, 0.35), 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+
+.block-quiz-q {
+  font-size: 17px;
+  line-height: 1.3;
+  margin: 6px 0 12px;
+}
+
+.block-answers {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.block-answer {
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 2px solid var(--wood-edge);
+  border-radius: 8px;
+  background: #1c2a20;
+  color: #eaffef;
+  font: inherit;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.block-answer:hover:not(:disabled),
+.block-answer:focus-visible {
+  border-color: #3dff7a;
+}
+
+.block-answer[data-mark="right"] {
+  background: #1f6b35;
+  border-color: #3dff7a;
+}
+
+.block-answer[data-mark="wrong"] {
+  background: #6b1f1f;
+  border-color: #ff4a3a;
+}
+
+.block-answer:disabled {
+  cursor: default;
+}
+
+.block-quiz-time {
+  height: 6px;
+  margin-top: 8px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.15);
+  overflow: hidden;
+}
+
+.block-quiz-time span {
+  display: block;
+  height: 100%;
+  width: 100%;
+  background: #3dff7a;
+}
+
+@media (max-width: 560px) {
+  .block-answers {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Block Frenzy's Ooga picker on the board, and the touch paint button above the jump. */
+.block-ooga {
+  width: 100%;
+  min-height: 40px;
+  padding: 6px 8px;
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  background: #2a1d12;
+  color: #f3e6cc;
+  font: inherit;
+}
+
+.block-paint {
+  bottom: calc(118px + var(--safe-bottom));
+  background: linear-gradient(#ff7a6a, #d63a2a);
+}
+
+/* First person's crosshair: a small cross with a dot, centred on the view. */
+.block-cross {
+  position: absolute;
+  z-index: 12;
+  left: 50%;
+  top: 50%;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+  pointer-events: none;
+  background:
+    linear-gradient(#fff3d6, #fff3d6) center / 2px 22px no-repeat,
+    linear-gradient(#fff3d6, #fff3d6) center / 22px 2px no-repeat;
+  filter: drop-shadow(0 0 2px #000);
+}
+
+.block-cross::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #f7931a;
+}
+
+/* Block Frenzy's tool bar along the bottom, and the wind sign in the strip. */
+.block-tools {
+  position: absolute;
+  z-index: 12;
+  left: 50%;
+  bottom: calc(14px + var(--safe-bottom));
+  transform: translateX(-50%);
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: calc(100% - 32px);
+}
+
+.block-tools button {
+  min-height: 40px;
+  padding: 4px 10px;
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  background: rgba(30, 20, 12, 0.82);
+  color: #f3e6cc;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.block-tools button[aria-pressed="true"] {
+  border-color: #f7931a;
+  box-shadow: 0 0 0 2px rgba(247, 147, 26, 0.45);
+}
+
+.block-tools kbd {
+  margin-right: 5px;
+  font: inherit;
+  opacity: 0.6;
+}
+
+.block-tools b {
+  margin-left: 4px;
+  color: #ffd27a;
+}
+
+.block-tool-crate {
+  background: rgba(70, 44, 20, 0.88) !important;
+}
+
+.block-wind span {
+  display: inline-block;
+  font-size: 16px;
+  color: #bfe3ff;
+  transition: transform 0.2s;
+}
+
+@media (pointer: coarse) {
+  .block-tools kbd {
+    display: none;
+  }
+
+  .block-tools {
+    bottom: calc(176px + var(--safe-bottom));
+  }
+}
+
+/* Block Frenzy's sprint gauge in the strip. */
+.block-sprint-bar {
+  width: 64px;
+  height: 8px;
+  margin-top: 4px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.15);
+  overflow: hidden;
+}
+
+.block-sprint-bar i {
+  display: block;
+  height: 100%;
+  width: 100%;
+  background: #7fe08a;
+}
+
+.block-sprint-bar i[data-tired="true"] {
+  background: #f7931a;
+}
+
+.block-tools button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.block-tool-pass:not(:disabled) {
+  border-color: #f7931a;
+  background: rgba(120, 70, 10, 0.9);
+}
+
+/* Block Frenzy's mini-map, on the right below the strip, and the action feed on the left. */
+.block-map {
+  position: absolute;
+  z-index: 11;
+  right: calc(12px + var(--safe-right, 0px));
+  top: 160px;
+  width: 88px;
+  height: 148px;
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  background: rgba(30, 20, 12, 0.72);
+  pointer-events: none;
+}
+
+.block-feed {
+  position: absolute;
+  z-index: 11;
+  left: calc(12px + var(--safe-left, 0px));
+  top: 160px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-width: min(260px, 45vw);
+  pointer-events: none;
+}
+
+.block-feed li {
+  margin: 0 0 4px;
+  padding: 3px 8px;
+  border-radius: 5px;
+  background: rgba(30, 20, 12, 0.72);
+  color: #f3e6cc;
+  font-size: 11px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.block-feed li:empty {
+  display: none;
+}
+
+.block-feed li[data-team="blue"] {
+  border-left: 3px solid #3a8dff;
+}
+
+.block-feed li[data-team="red"] {
+  border-left: 3px solid #ff4a3a;
+}
+
+@media (max-width: 520px) {
+  .block-map {
+    top: 226px;
+    width: 66px;
+    height: 111px;
+  }
+
+  .block-feed li {
+    font-size: 10px;
+  }
+}
+
+/* On a wide screen Block Frenzy's board sits on the left, leaving the right for the Ooga on show, with its name
+   under it. */
+@media (min-width: 760px) {
+  #block-board {
+    left: calc(20px + var(--safe-left, 0px));
+    transform: translateY(-50%);
+    width: min(560px, 54vw);
+  }
+
+  #block-board .garage-columns {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.block-preview-name {
+  position: absolute;
+  z-index: 11;
+  right: 9vw;
+  bottom: 9%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 14px 10px;
+  border: 2px solid var(--wood-edge);
+  border-radius: 8px;
+  background: rgba(30, 20, 12, 0.82);
+  color: #f3e6cc;
+}
+
+.block-preview-pick {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+  margin-top: 4px;
+  min-width: 220px;
+}
+
+.block-preview-pick label {
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+
+.block-preview-name b {
+  font-size: 16px;
+}
+
+.block-preview-name span {
+  font-size: 10px;
+  opacity: 0.75;
+}
+
+#block-board[hidden] ~ .block-preview-name {
+  display: none;
+}
+
+/* Block Frenzy's jetpack fuel, beside the sprint gauge, in flame orange. */
+.block-jet .block-sprint-bar i {
+  background: #ff8a2a;
 }

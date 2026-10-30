@@ -27,6 +27,8 @@
         description: "Lash a rocket together, reach the Sky Top, touch the space rock and fall home shield first." },
       { path: "oogamine", scene: "mine", image: "oogamine", title: "Ooga Mine",
         description: "A mining tycoon about margin: power, heat and the halving. Mine 21 coin in an hour without going broke." },
+      { path: "blockfrenzy", scene: "block", title: "Block Frenzy",
+        description: "Capture the block on Fort Chaos: steal the rivals' glowing Bitcoin block, carry it home and splat their runners with paint. Nobody gets hurt." },
       { path: "mempool", scene: "hub", place: "mempool", image: "mempool", title: "Mempool chamber",
         description: "The live Bitcoin mempool as a rainforest lake: the backlog fills it, new blocks fall from it, and the chamber under it reads the chain out in paint." },
       { path: "dsb", scene: "dsb", title: "DSB Land",
@@ -40,7 +42,7 @@
       { path: "jet", scene: "hangar", title: "Lightning Jet Hangar",
         description: "Behind the Lightning Factory, the hangar where Lightning Jet v2 is being built: the Jet in its dock, its crew at work and the project's progress on the wall." },
       { path: "oogaarcade", scene: "arcade", title: "Ooga Arcade",
-        description: "A torchlit cave of arcade cabinets, one for every Ooga game: walk up to Ooga Rally, Drop, Orbit or Mine and play." },
+        description: "A torchlit cave of arcade cabinets, one for every Ooga game: walk up to Ooga Rally, Drop, Orbit, Mine or Block Frenzy and play." },
       { path: "sphere", scene: "hub", place: "timechain", image: "sphere", title: "Timechain Sphere",
         description: "The Timechain Sphere's doors: choose one of nine rooms at the keypad. Inside, live block and mining charts, Timechain Index holdings and Sani in his recliner." },
       // The nine rooms, each its own address: 1–3 at 1×, 4–6 at 1.5×, 7–9 at 2× (timechain-rooms.js).
