@@ -11,7 +11,7 @@
 // online dot left of the name and, for a player in voice, the speaker right of it: green while speaking, red with a
 // cross when they muted their microphone. Games can opt into the room's `hp` bar, between the name and the head.
 // With the scene's `fx`, a line of Ooga Chat is said in a bubble over its speaker's nameplate, the visitor's own
-// line over the Ooga they drive (`crew.player`).
+// line over the actor they drive (`player`, or `crew.player` when no callback is supplied).
 // One pool per scene visit: `create` in enter, `dispose` in leave, before the crew's.
 (() => {
   "use strict";
@@ -51,7 +51,7 @@
   // swimmer's arms by it, from the position the pose transport already carries, with no simulation of its own.
   // A hub supplies its companion's style and hides its local copy through the gorilla hooks; other scenes
   // use a basic managed rig. Both bodies share the room pose, nameplate and collision actor lifecycle.
-  const create = ({ root, crew = null, fx = null, posed = null, visible = sameZone, hide = null, createGorilla = null, hideGorilla = null }) => {
+  const create = ({ root, crew = null, fx = null, player = null, posed = null, visible = sameZone, hide = null, createGorilla = null, hideGorilla = null }) => {
     const net = BL.net;
     const bodies = new Map();
     // The chat subscription, taken on the first update and again after a kept hub's suspend disposed it.
@@ -102,6 +102,9 @@
         const parts = cave.parts;
         for (const key of ["snack", "gun", "jetpack", "jetFlame"]) if (parts[key]) parts[key].visible = false;
       }
+      // Remote rigs arrive after the hub's outline registry is built. Like Tess, their attached UI uses
+      // the overlay's exact visibility test instead of requiring an entry in that static registry.
+      cave.root.sightHidden = true;
       addChild(root, cave.root);
       const motion = gorilla ? { walkPhase: NaN, walkGait: "knuckle", climb: 0, climbStride: 0, climbDirection: 0, climbSide: 0, swim: 0, lab: false, labRunIn: false, office: false, officeRise: 0 } : null;
       const entry = { id: rec.id, body: rec.body, name, gorilla, cave, motion, baseY: gorilla ? 0 : cave.root.position.y, x: rec.x, y: rec.y, z: rec.z, yaw: rec.yaw, phase: 0, hidden: null, hiddenOverride: null, label: "", labelW: 0 };
@@ -274,7 +277,8 @@
       for (const line of lines) {
         const me = net.state.me;
         if (me && line.login === me.login) {
-          if (crew && crew.player) fx.say(crew.player, line.text, CHAT_SAY);
+          const speaker = player ? player() : crew && crew.player;
+          if (speaker) fx.say(speaker, line.text, CHAT_SAY);
           continue;
         }
         for (const entry of bodies.values()) {
