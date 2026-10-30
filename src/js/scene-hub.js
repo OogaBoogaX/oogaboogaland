@@ -2026,7 +2026,7 @@
   // only arms from a grounded step off the outer deck: arriving from the air,
   // or jumping once on it, leaves every tread intangible until the visitor
   // returns to the dock. Pooled transparent treads and risers carry the cave glyphs down over
-  // the edges, staying lit under the walker and fading one second after they leave the tread.
+  // the edges, staying lit under the walker and fading half a second after they leave the tread.
   const buildDockStairs = (dock) => {
     const START = 4.25, RUN = 0.62, RISE = 0.5, HALF_WIDTH = 0.78, GLYPH_POOL = 12;
     const base = dock.position.y, count = Math.ceil((FLY.yMax - base) / RISE), end = START + count * RUN;

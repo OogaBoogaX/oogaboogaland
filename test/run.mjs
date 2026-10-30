@@ -4668,9 +4668,9 @@ const dockGlyphChecks = async () => {
   const stepped = D.glyphs.filter(n => n.visible).length === 2 && second?.mirrorRipples.active === 1 && D.contacts === 2
     && !upper.visible && second.children[1].visible && second.children[2].visible
     && Math.abs(ripple.surfaceCenter[0] - second.mirrorRipples.surfaceCenter[0]) < 1e-5;
-  D.update(0.5, actor);
+  D.update(0.25, actor);
   const faded = ripple.active === 1 && Math.abs(ripple.waves[3] - 0.5) < 1e-6 && second.mirrorRipples.waves[3] === 1;
-  D.update(0.51, actor);
+  D.update(0.26, actor);
   const trailExpired = !firstNode.visible && second.visible && D.inMotion && D.contacts === 2;
   actor.root.position.x = along; actor.root.position.y = first + actor.baseY;
   D.update(0, actor); D.update(0.1, actor);

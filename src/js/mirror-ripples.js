@@ -4,8 +4,8 @@
   "use strict";
   const BL = window.BL = window.BL || {}, { mat4 } = BL.math;
   const CAPACITY = 8, LIFETIME = 0.72, SPEED = 1.35, START_RADIUS = 0.055, WIDTH = 0.055, GLYPH_THRESHOLD = 0.55;
-  const CONTACT_LIFETIME = 1, CONTACT_RADIUS = 0.32;
-  const SURFACE_CORE = 0.18, SURFACE_RADIUS = 0.9;
+  const CONTACT_LIFETIME = 0.5, CONTACT_RADIUS = 0.32;
+  const SURFACE_CORE = 0.12, SURFACE_RADIUS = 0.6;
   const surfaceStrengthAt = distance => {
     const k = Math.max(0, Math.min(1, (distance - SURFACE_CORE) / (SURFACE_RADIUS - SURFACE_CORE)));
     return 1 - k * k * (3 - 2 * k);
