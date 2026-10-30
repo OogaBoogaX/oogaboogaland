@@ -7421,9 +7421,17 @@
   // arched along a circle, turned to read from the plaza and bobbing there. One geometry a glyph, cached for the
   // visit, so the arc costs nothing a frame.
   const WP_BANNER = { text: "₿itcoin Whitepaper Day", height: 0.49, gap: 0.16, radius: 8.3, y: 4.05, bob: 0.055, sway: 0.018 };
+  // The banner's inks: the ₿ orange with a black edge, the paper's own name white and the rest black. Each is the
+  // stroke's three bands in turn — its face, the chamfer round it and the wall it stands on — so the letters keep
+  // the chisel's light while wearing the colour.
+  const WP_BANNER_INK = {
+    btc: { bands: [[255, 140, 26], [10, 10, 10], [0, 0, 0]], glow: [0.35, 0, 0] },
+    black: { bands: [[18, 18, 18], [44, 44, 44], [4, 4, 4]], glow: [0, 0, 0] },
+    white: { bands: [[246, 246, 243], [255, 255, 255], [158, 158, 152]], glow: [0.12, 0, 0] }
+  };
   const wpBannerGeos = new Map();
-  const wpLetter = (ch) => {
-    const hit = wpBannerGeos.get(ch);
+  const wpLetter = (ch, ink) => {
+    const key = `${ch}|${ink}`, hit = wpBannerGeos.get(key);
     if (hit) return hit;
     const glyph = BL.bifrostModels.GLYPHS[ch];
     if (!glyph) throw new Error(`No chiselled glyph for "${ch}"`);
@@ -7431,9 +7439,16 @@
     // Unit metrics to metres, then centred on its own middle so the arc can turn each letter about it.
     for (let i = 0; i < verts.length; i++) verts[i] *= WP_BANNER.height;
     for (let i = 0; i < verts.length; i += 3) verts[i] -= glyph.width * WP_BANNER.height * 0.5;
+    // The stroke's own glow tells its bands apart: the face, its chamfer and its wall.
+    const bands = WP_BANNER_INK[ink].bands, glow = WP_BANNER_INK[ink].glow;
+    for (const face of geometry.faces) {
+      const k = face.emissive === 0.45 ? 1 : face.emissive === 0.12 ? 2 : 0;
+      face.color = bands[k];
+      face.emissive = glow[k];
+    }
     geometry.smooth = true;
     geometry.castShadow = false;
-    wpBannerGeos.set(ch, geometry);
+    wpBannerGeos.set(key, geometry);
     return geometry;
   };
   const wpBuildBanner = () => {
@@ -7443,18 +7458,17 @@
     // The letters stand along an arc, the middle highest and each turned to face out of it, the whole turned round
     // to face the plaza; the arc is built in the stone's own frame, so the letters' own x runs the other way.
     const banner = createNode({ position: { x: 0, y: WP_BANNER.y, z: 0 }, rotation: { x: 0, y: Math.PI, z: 0 }, sightHidden: true });
-    let cursor = -total * 0.5;
+    let cursor = -total * 0.5, word = 0;
     for (const ch of chars) {
       const glyph = glyphs[ch];
-      if (ch !== " ") {
-        const theta = (cursor + glyph.width * 0.5) * WP_BANNER.height / WP_BANNER.radius;
-        // The banner is turned round, so a letter's own tilt is the other way: its top leans out of the arc.
-        addChild(banner, createNode({
-          geometry: wpLetter(ch),
-          position: { x: WP_BANNER.radius * Math.sin(theta), y: WP_BANNER.radius * (Math.cos(theta) - 1), z: 0 },
-          rotation: { x: 0, y: 0, z: -theta }
-        }));
-      }
+      if (ch === " ") { word++; cursor += glyph.width + gap; continue; }
+      const theta = (cursor + glyph.width * 0.5) * WP_BANNER.height / WP_BANNER.radius;
+      // The banner is turned round, so a letter's own tilt is the other way: its top leans out of the arc.
+      addChild(banner, createNode({
+        geometry: wpLetter(ch, ch === "₿" ? "btc" : word === 1 ? "white" : "black"),
+        position: { x: WP_BANNER.radius * Math.sin(theta), y: WP_BANNER.radius * (Math.cos(theta) - 1), z: 0 },
+        rotation: { x: 0, y: 0, z: -theta }
+      }));
       cursor += glyph.width + gap;
     }
     return banner;
