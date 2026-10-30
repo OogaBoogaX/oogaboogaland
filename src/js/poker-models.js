@@ -2,7 +2,9 @@
 (() => {
   "use strict";
   const BL = window.BL, M = BL.models, S = BL.scene;
-  const EXIT_Z = 35.2 + BL.bifrostModels.MIRROR_Z;
+  const REAR_WALL_Z = 36.5;
+  const PORTAL_Z = REAR_WALL_Z - BL.bifrostModels.MIRROR_Z - 0.05;
+  const EXIT_Z = PORTAL_Z + BL.bifrostModels.MIRROR_Z;
   const TABLES = Array.from({ length: 10 }, (_, i) => ({ x: i % 2 ? 11 : -11, z: 24 - Math.floor(i / 2) * 12 }));
   const SEATS = Array.from({ length: 9 }, (_, i) => {
     const a = -Math.PI / 2 + 0.55 + i * (Math.PI * 2 - 1.1) / 8;
@@ -105,7 +107,7 @@
       }
     }
     shell.push(box(50, 10, 1, theme.stone[3], 0, 4.8, -37));
-    shell.push(box(50, 10, 1, theme.stone[3], 0, 4.8, 37));
+    shell.push(box(50, 10, 1, theme.stone[3], 0, 4.8, REAR_WALL_Z + 0.5));
     shell.push(box(50, 0.8, 76, theme.stone[4], 0, 9.5));
     for (let z = -30; z <= 30; z += 12) {
       shell.push(box(48, 0.65, 0.8, theme.wood, 0, 8.9, z));
@@ -222,7 +224,8 @@
   };
   const walkable = (ax, az, bx, bz, y, height, actor) => {
     const r = actor?.bodyRadius || 0.4;
-    const rear = Math.abs(bx) < BL.bifrostModels.WINDOW.halfW - r ? EXIT_Z + 1.05 - r : 35.5 - r;
+    // Leave room to reach the glass, but never continue through the wall behind it.
+    const rear = Math.abs(bx) < BL.bifrostModels.WINDOW.halfW - r ? REAR_WALL_Z - 0.01 : 35.5 - r;
     if (Math.abs(bx) > 23 - r || bz < -35.5 + r || bz > rear) return false;
     // A swept ellipse catches a fast step through a table, not just its endpoint.
     for (const t of TABLES) {
@@ -238,5 +241,5 @@
     }
     return true;
   };
-  BL.pokerModels = { TABLES, SEATS, EXIT_Z, geometry, card, build, walkable };
+  BL.pokerModels = { TABLES, SEATS, REAR_WALL_Z, PORTAL_Z, EXIT_Z, geometry, card, build, walkable };
 })();

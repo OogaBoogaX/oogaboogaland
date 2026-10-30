@@ -257,17 +257,17 @@
     room = BL.pokerModels.build(theme.id); S.addChild(root, room.root);
     for (let i = 0; i < 10; i++) { input.add(room.tables[i].top, { kind: "poker", index: i }); targets.push(room.tables[i].top); }
     // The return mirror is set into the far wall, facing down the central aisle.
-    const BM = BL.bifrostModels, face = BM.mirror(4);
-    const frame = S.createNode({ position: { x: 0, y: 0, z: 35.2 }, rotation: { x: 0, y: Math.PI, z: 0 } });
+    const BM = BL.bifrostModels, face = BM.mirror(4), portalZ = BL.pokerModels.PORTAL_Z;
+    const frame = S.createNode({ position: { x: 0, y: 0, z: portalZ }, rotation: { x: 0, y: Math.PI, z: 0 } });
     const stone = S.createNode({ geometry: BM.archStone() });
     const glass = S.createNode({ geometry: face.glass, position: { x: 0, y: 0, z: -BM.MIRROR_Z }, sightHidden: true, rippleTint: [0.3, 0.62, 1] });
     const label = BL.factoryModels.label("BIFROST", "", { height: 1.1 });
-    const board = S.createNode({ position: { x: 0, y: BM.WINDOW_TOP + BM.FRAME.band + 1.15, z: BM.FRAME.front + 0.2 } });
-    S.addChild(board, S.createNode({ geometry: BM.hanger(label.width, 1.35, BM.FRAME.front + 0.2) }), S.createNode({ geometry: label.back }), S.createNode({ geometry: label.face }));
+    const board = S.createNode({ position: { x: 0, y: BM.WINDOW_TOP + BM.FRAME.band + 1.15, z: portalZ - BL.pokerModels.REAR_WALL_Z + 0.07 } });
+    S.addChild(board, S.createNode({ geometry: label.back }), S.createNode({ geometry: label.face }));
     S.addChild(frame, stone, S.createNode({ geometry: BM.archGlow(), sightHidden: true }), S.createNode({ geometry: face.backing }), glass, board);
     S.addChild(root, frame);
     const opening = { minX: -BM.WINDOW.halfW, maxX: BM.WINDOW.halfW, floorY: 0, ceilingY: BM.WINDOW_TOP };
-    const phase = BL.labPhase.create(frame, { x: 0, z: 35.2, ry: Math.PI, floorY: 0, room: { w: 2 * BM.WINDOW.halfW, h: BM.WINDOW_TOP, from: 0, to: 1 } }, opening, -BM.MIRROR_Z, [0.3, 0.62, 1]);
+    const phase = BL.labPhase.create(frame, { x: 0, z: portalZ, ry: Math.PI, floorY: 0, room: { w: 2 * BM.WINDOW.halfW, h: BM.WINDOW_TOP, from: 0, to: 1 } }, opening, -BM.MIRROR_Z, [0.3, 0.62, 1]);
     phase.node.visible = false;
     glass.mirrorRipples = phase.ripples;
     mirror = { phase, glass, body: BL.mirrorBody.create(glass, new Map()) };
@@ -314,7 +314,7 @@
     footsteps.update(drivenHere);
     mirror.phase.update(dt, elapsed); mirror.body.update(dt); mirror.body.time = mirror.phase.ripples.time;
     if (pilot.player && (seatTable < 0 || pendingStand) && Math.abs(avatar.root.position.x) < BL.bifrostModels.WINDOW.halfW
-      && avatar.root.position.z > BL.pokerModels.EXIT_Z && !leaving) leaveFloor();
+      && avatar.root.position.z + avatar.bodyRadius > BL.pokerModels.EXIT_Z && !leaving) leaveFloor();
     // All ten table lights fit the lowest renderer tier; selected table goes first.
     const near = selected, lights = renderOpts.lights;
     for (let slot = 0; slot < 10; slot++) {
