@@ -1682,10 +1682,12 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
         <output class="toast" id="toast" hidden></output>
         <div class="hint" id="hint" hidden></div>
       </div>
-      <!-- Reading the whitepaper's poster (scene-hub.js shows it): the help line, or, on a touch screen, its button. -->
+      <!-- Reading the whitepaper's poster (scene-hub.js shows it): the help line, or, on a touch screen, its buttons. -->
       <div class="wp-nav" id="wp-nav" hidden>
         <span class="wp-nav-help" id="wp-nav-help"></span>
-        <button type="button" class="wp-nav-next" data-action="wp-next">Next page</button>
+        <button type="button" class="wp-nav-step" data-action="wp-next" aria-label="Next page">&#9660;</button>
+        <button type="button" class="wp-nav-step" data-action="wp-prev" aria-label="Previous page">&#9650;</button>
+        <button type="button" class="wp-nav-step" data-action="wp-close" aria-label="Close the whitepaper">&#10005;</button>
       </div>
     </div>
     <output class="mic-note" id="mic-note" data-muted="false" hidden></output>

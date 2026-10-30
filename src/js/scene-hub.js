@@ -5527,7 +5527,7 @@
       case "book":
         return `${BOOKS[o.index].title} · open it`;
       case "whitepaper":
-        if (wpRead) return COARSE ? "Drag to slide · two fingers to zoom" : "Double-click to zoom in · right-click back · wheel scrolls · Shift+wheel zooms";
+        if (wpRead) return COARSE ? "Drag to slide · two fingers to zoom" : "Double-click to zoom in · right-click back · wheel scrolls";
         return COARSE ? "The whitepaper · double-tap to read" : "The whitepaper · double-click to read";
       case "prop":
         if (o.prop === "timechainentrance") return "Timechain Sphere · nine rooms, chosen at the keypad";
@@ -11660,6 +11660,8 @@
     hud.onAction((action, value) => {
       if (factoryDeparting || bifrostDeparting || islandGuide.holding) return false;
       if (action === "wp-next") return wpStep(1);
+      if (action === "wp-prev") return wpStep(-1);
+      if (action === "wp-close") { wpReadEnd(); return true; }
       if (action === "mode-retake") {
         if (pilot.player || clankerPlay.active) return;
         const last = hud.retakeActor;

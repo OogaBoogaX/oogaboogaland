@@ -2337,33 +2337,34 @@ body[data-active-scene="arcade"] .magazine-hud {
 .wp-nav-help {
   white-space: nowrap;
 }
-.wp-nav-next {
+.wp-nav-step {
   display: none;
 }
 @media (pointer: coarse) {
   .wp-nav-help {
     display: none;
   }
-  .wp-nav-next {
+  .wp-nav-step {
     display: inline-block;
+    min-width: 44px;
     min-height: 40px;
-    padding: 0 22px;
+    padding: 0 12px;
     border: 2px solid var(--wood-edge);
     border-radius: 6px;
     background: linear-gradient(#e2a04a, var(--accent));
     color: var(--ink);
     font: inherit;
-    font-size: 12px;
+    font-size: 15px;
     font-weight: 600;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
+    line-height: 1;
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
   }
 }
-/* The act button waits while the poster is read, and the bar stands down so the page runs to the top of the screen. */
+/* The act button and the sticks wait while the poster is read, and the bar stands down so the page runs to the top. */
 body.wp-reading .bottom-hud>.act,
-body.wp-reading .topbar {
+body.wp-reading .topbar,
+body.wp-reading .joysticks {
   display: none;
 }
 
