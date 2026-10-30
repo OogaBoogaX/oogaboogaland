@@ -312,7 +312,7 @@
       if (audio || muted() || typeof AudioContext === "undefined" || navigator.userActivation && !navigator.userActivation.hasBeenActive) return !!audio;
       const ctx = new AudioContext(), master = ctx.createGain();
       master.gain.value = 0.25;
-      master.connect(ctx.destination);
+      master.connect(BL.sound.output(ctx));
       const tone = ctx.createOscillator(), beep = ctx.createGain();
       tone.type = "square";
       tone.frequency.value = 1760;

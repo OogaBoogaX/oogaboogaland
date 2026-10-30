@@ -87,8 +87,9 @@
         else failed();
       });
     };
-    const setEnabled=on=>{enabled=!!on;if(!enabled){target=level=0;quiet();}};
+    const setEnabled=on=>{enabled=!!on&&!window.BL.sound.muted;if(!enabled){target=level=0;quiet();}};
     const play=()=>{if(context.state==="suspended")context.resume().catch(()=>{});start();};
+    const offSound=window.BL.sound.subscribe(on=>{if(on)quiet();});
     start();
     return {
       play,setEnabled,
@@ -101,7 +102,7 @@
       },
       get status(){return status;},
       get stats(){return {mode,target,level,starts,sources:disposed?0:1,liveSources:disposed?0:1,fallbackSources:fallback?fallback.stats.sources:0,liveAudible:!radio.muted&&radio.volume>0,fallbackLevel:fallback?fallback.stats.level:0,enabled,disposed,timers:Number(!!timer)+Number(!!watchdog)};},
-      dispose:()=>{if(disposed)return;disposed=true;stop();quiet();if(fallback)fallback.dispose();target=level=0;mode="disposed";}
+      dispose:()=>{if(disposed)return;offSound();disposed=true;stop();quiet();if(fallback)fallback.dispose();target=level=0;mode="disposed";}
     };
   };
   window.BL.dsbRadio={create,attenuation};

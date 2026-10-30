@@ -32,6 +32,7 @@
   // A window's view stands between it and the mechanism, looking out at it.
   const toward = (i, dist = 10.5) => { const b = SLOTS[i], r = HALL.r - 0.6; return view(Math.sin(b) * r, 3.3, Math.cos(b) * r, b + Math.PI, 0.1, dist); };
   // `entrance` stands just inside the way in and looks across the mechanism at the far windows.
+  const VIEW_NAMES = { entrance: "Overview", core: "Core", dsb: "DSB", poker: "Ember Den", sky: "Sky" };
   const PRESETS = {
     entrance: view(0, 3.2, -2, 0, 0.12, 13),
     core: view(0, 3.4, 0, 0.5, 0.16, 9.5),
@@ -674,10 +675,20 @@
       },
       ...pilot.hooks
     });
-    hud.onPreset(pilot.goPreset);
-    hud.onAction((action) => {
+    hud.setDestinations(Object.keys(VIEW_NAMES), VIEW_NAMES);
+    hud.setAreaLabel("₿IFRÖST");
+    hud.el.modeDestination.title = "₿IFRÖST · cycle stations";
+    hud.el.modeDestinationLabel.textContent = "₿IFRÖST views. Press to cycle stations";
+    const presetView = (name) => {
+      if (leaving || !VIEW_NAMES[name]) return;
+      pilot.goPreset(name);
+      hud.setDetachedView(name, true);
+    };
+    hud.onPreset(presetView);
+    hud.onAction((action, value) => {
       if (action === "leave") leaveChamber();
       else if (action === "reset-view") pilot.resetCamera();
+      else if (action === "mode-preset") presetView(value);
       else if (!leaving && action.startsWith("mode-")) pilot.modeAction(action);
     });
     fx = fxMod.create({ root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, tickerAt: { x: 0, y: 7, z: 0 } });

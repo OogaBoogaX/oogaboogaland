@@ -7,7 +7,7 @@
     let active=false,muted=false,connected=false,disposed=false;
     const gate=()=>{
       if(!bus)return;
-      const on=active&&!muted&&!document.hidden;
+      const on=active&&!muted&&!window.BL.sound.muted&&!document.hidden;
       if(on&&!connected){bus.connect(context.destination);connected=true;}
       if(!on&&connected){bus.disconnect();connected=false;}
     };
@@ -28,6 +28,7 @@
     };
     const gesture=()=>{wake();if(active&&context?.state==="suspended")context.resume().catch(()=>{});};
     document.addEventListener("pointerdown",gesture);document.addEventListener("keydown",gesture);document.addEventListener("visibilitychange",gate);
+    const offSound=window.BL.sound.subscribe(gate);
     return {
       setActive:(on,room="meme-factory")=>{active=!!on;kind=room;duck=false;wake();gate();},
       setDucked:on=>{duck=!!on;},
@@ -43,7 +44,7 @@
       },
       get stats(){return {active,connected,contexts:context?1:0,sources:context?3:0,state:context?.state||"locked"};},
       dispose:()=>{
-        disposed=true;active=false;gate();
+        offSound();disposed=true;active=false;gate();
         document.removeEventListener("pointerdown",gesture);document.removeEventListener("keydown",gesture);document.removeEventListener("visibilitychange",gate);
         if(!context)return;
         for(const source of [hum,buzz,noise]){source.stop();source.disconnect();}
