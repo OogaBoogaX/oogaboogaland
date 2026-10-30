@@ -3,8 +3,7 @@
 // `sphere-<id>`) or a solo copy (signed out: no presence, poses, voice or remote players at all). Only the room
 // entered is built; it starts its own readers, sound and inputs on entry and drops every one of them on leaving.
 //
-// First person is the only view in here: the pilot is made with `close.only`, so scroll, pinch, the mode buttons, X,
-// Escape and possession never leave the eye, and the Ooga walks empty-handed, as in the arcade, with no jetpack (a
+// First person, shoulder and orbit share the pilot's usual controls. The Ooga walks empty-handed, with no jetpack (a
 // built-in pack is taken off for the visit; the island gives the visitor's pack back on the way out). A guided arrival
 // starts where the island's crossing handed over, from the same eye, and walks in from the vestibule as the doors
 // close behind; Space at the Exit button (or Leave, or Escape) walks back out through them into the vestibule, comes to
@@ -210,7 +209,7 @@
       follow: { y: 0.9, min: 3, max: 6, pitch: [0.2, 0.7] }, fly: { speed: 4, perDist: 0.4, climb: 2, yMax: L.wall - 1 },
       clampTarget, clampCamera, ceilingAt: (x, z) => roof(x, z, 0), coarse: COARSE, mayPossess: (cave) => BL.net.mayDrive(cave.traits.name),
       jetpackStatus: () => NO_JETPACK,
-      close: { eyeHeight: 1.1, eyeRatio: 0.95, eyeForward: 0.16, pitch: [-1.35, 1.35], trailingDist: 4, orbitDist: 5, maxStep: 0.6, groundAt, only: true }
+      close: { eyeHeight: 1.1, eyeRatio: 0.95, eyeForward: 0.16, pitch: [-1.35, 1.35], trailingDist: 4, orbitDist: 5, maxStep: 0.6, groundAt }
     });
     const fx = fxMod.create({ root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, tickerAt: { x: 0, y: 4, z: 0 } });
     const targets = [];
@@ -364,11 +363,11 @@
       people = sharedCtx.crew = BL.crew.create(sharedCtx);
       pilot.bind(sharedCtx);
       avatar = people.cavemen.get(playerName);
-      // Empty-handed, as in the arcade: no rifle on the back, no aiming; and no jetpack, built in or not.
-      avatar.weapon.secondaryOwned = false;
+      // This visit owns a separate weapon map: leave both weapons outside, along with any jetpack.
+      avatar.weapon.primaryOwned = avatar.weapon.secondaryOwned = false;
       people.selectWeapon(0, avatar);
       avatar.weapon.aiming = false;
-      avatar.parts.gun.visible = false;
+      avatar.parts.club.visible = avatar.parts.gun.visible = false;
       if (avatar.jet) people.removeJetpack(avatar);
       avatar.root.position.y = avatar.baseY;
       pilot.possess(avatar);
@@ -420,7 +419,10 @@
       BL.net.setZone(room.zone);
       if (guide.stage) BL.net.passDoor(room.zone, "in");
     } else { BL.net.setBody(null); BL.net.setZone("none"); }
-    remotes = shared ? BL.remotePlayers.create({ root, crew: people, fx, hide: (name, on) => { if (name === "SaniExp") saniRemote = on; } }) : null;
+    remotes = shared ? BL.remotePlayers.create({ root, crew: people, fx,
+      hide: (name, on) => { if (name === "SaniExp") saniRemote = on; },
+      posed: (cave) => { cave.parts.club.visible = cave.parts.gun.visible = false; }
+    }) : null;
     const footsteps = BL.footsteps.create();
     const sound = ambience(room, ctx.signal);
     // Another player crossing this room's own doorway opens its doors here too (net.js `subscribeDoor`).
@@ -466,6 +468,9 @@
     const walkOut = () => {
       if (guide.stage || leaving) return;
       if (!avatar || !nearExit() && Math.hypot(avatar.root.position.x - L.doorStep.x, avatar.root.position.z - L.doorStep.z) > 3) { handOff(); return; }
+      // The doorway hands the island an eye pose, even when the room was explored in orbit or detached.
+      if (pilot.player !== avatar && !pilot.possess(avatar)) return;
+      pilot.enterClose();
       guide.stage = "toDoor"; guide.t = 0;
       guided = true;
       pilot.setActive(false);
@@ -479,20 +484,14 @@
       }
     };
     const unsubscribeAccount = BL.net.subscribe(accountChanged);
-    // Weapon keys and right-click aiming do nothing in here (registered before the pilot's, in the capture phase).
+    // Weapon shortcuts do nothing in here; right-click and scroll keep the pilot's camera controls.
     const WEAPON_KEYS = new Set(["1", "2", "r", "x", "f", "g"]);
     const armsKeys = (e) => {
       if (e.metaKey || e.ctrlKey || e.altKey || !WEAPON_KEYS.has(e.key.toLowerCase()) || e.target && e.target.closest && e.target.closest("input, textarea, [contenteditable]")) return;
       e.preventDefault();
       e.stopImmediatePropagation();
     };
-    const rightClick = (e) => {
-      if (e.button !== 2) return;
-      e.preventDefault();
-      e.stopImmediatePropagation();
-    };
     window.addEventListener("keydown", armsKeys, { capture: true, signal: ctx.signal });
-    canvas.addEventListener("pointerdown", rightClick, { capture: true, signal: ctx.signal });
 
     const tipFor = (hit) => {
       const o = hit.owner;
@@ -515,13 +514,14 @@
           if (!p || s.sitter || nearChair() !== s || !people.sitPlayer(s)) hud.toast(COARSE ? "Walk up to a free chair, then tap SIT" : "Walk up to a free chair and press Space to sit");
         } else if (o.kind === "table") hud.toast(`${room.name} · ${room.scale}× · ${shared ? "shared with whoever chose it" : "a solo copy, just for you"}`);
       },
-      ...pilot.hooks
+      ...pilot.hooks,
+      onZoom: (factor, gesture, px, py) => { if (!guide.stage) pilot.hooks.onZoom(factor, gesture, px, py); }
     });
     hud.onAction((action) => {
       if (action === "leave") walkOut();
-      else if (action === "reset-view") pilot.resetCamera();
+      else if (action === "reset-view" && !guide.stage) pilot.resetCamera();
       else if (action === "jetpack-toggle") hud.toast("No jetpacks in the Sphere");
-      else if (action.startsWith("mode-")) pilot.modeAction(action);
+      else if (action.startsWith("mode-") && !guide.stage) pilot.modeAction(action);
     });
     const mode = document.getElementById("sphere-mode"), subtitle = document.getElementById("sphere-subtitle");
     if (subtitle) subtitle.textContent = `Timechain Sphere · ${room.name}`;
@@ -535,7 +535,7 @@
       if (mode.textContent !== text) mode.textContent = text;
     };
     showMode();
-    hud.hint(guide.stage ? `Entering ${room.name}` : COARSE ? "Stick walks · drag to look · EXIT by the doors leaves" : "W A S D walk · mouse looks · Space at the Exit button leaves", 5000);
+    hud.hint(guide.stage ? `Entering ${room.name}` : COARSE ? "Stick walks · pinch changes view · EXIT by the doors leaves" : "W A S D walk · scroll changes view · Space at the Exit button leaves", 5000);
 
     // The guided walks, steered as a held stick would steer them; the view turns with the walk, its pitch easing to
     // `pitch` (level on the way out, so the island's view, hung level, lines up).
@@ -560,7 +560,7 @@
       guided = false;
       people.steer(0, 0, 0, 0, 0);
       pilot.setActive(true);
-      hud.hint(COARSE ? "Stick walks · drag to look · EXIT by the doors leaves" : "W A S D walk · mouse looks · Space at the Exit button leaves", 5000);
+      hud.hint(COARSE ? "Stick walks · pinch changes view · EXIT by the doors leaves" : "W A S D walk · scroll changes view · Space at the Exit button leaves", 5000);
     };
     const runGuide = (dt) => {
       guide.t += dt;
@@ -663,7 +663,7 @@
     const onKey = (e) => {
       if (e.key === "0" && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && !guide.stage) return pilot.resetCamera();
       if (e.key === "Escape") {
-        if (!pilot.escape() && !guide.stage) walkOut();
+        if (!guide.stage && !pilot.escape()) walkOut();
         return true;
       }
       return false;
@@ -703,7 +703,6 @@
       if (unsubscribeDoor) unsubscribeDoor();
       unsubscribeAccount();
       window.removeEventListener("keydown", armsKeys, true);
-      canvas.removeEventListener("pointerdown", rightClick, true);
       BL.net.setBody(null);
       for (const s of all) {
         s.live = false;

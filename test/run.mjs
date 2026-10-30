@@ -14072,24 +14072,32 @@ scene("hub", { label: "timechain resident", steps: [{ name: "timechain resident"
 } }] });
 const roomPage = (room, query = "") => `${src}?debug=1&nosim=1${clock(`character=portlandhodl&pos=0${query ? "&" + query : ""}`)}#/sphere-${room}`;
 const roomGo = (room) => `(() => { const B = window.__ooga; B.go("timechain", "${room}"); for (let i = 0; i < 150 && (B.transitioning || B.scene !== "timechain" || B.timechain.room.id !== ${room}); i++) B.advance(1 / 30, 1 / 30); B.advance(0.3, 1 / 30); B.housekeep(); const s = B.stats(); return { scene: B.scene, room: B.timechain.room.id, records: B.renderer.stats.records, nodes: s.allNodes, targets: s.targets, dom: s.dom, timers: s.timers, requests: s.requests }; })()`;
-const timechainRoom = { name: "timechain room", why: "playthrough: a signed-out arrival gets a solo copy of its room, first person only, without weapons or a jetpack, its screens painted, and touches no network under nosim", run: async (b) => {
+const timechainRoom = { name: "timechain room", why: "playthrough: a signed-out arrival gets a solo copy of its room with first-person, shoulder and orbit views, without weapons or a jetpack, its screens painted, and touches no network under nosim", run: async (b) => {
   const painted = await untilPage(b, 'B.scene === "timechain" && B.timechain.slots.every(s => s.shown)', 20000);
   const r = await b.evaluate(`(() => {
-    const B = __ooga, D = B.timechain, P = B.pilot, before = P.mode;
-    P.hooks.onZoom(1.6); P.hooks.onZoom(1.6); B.advance(0.3, 1 / 60);
-    const zoomed = P.mode;
-    P.modeAction("mode-toggle"); P.modeAction("mode-release"); B.advance(0.1, 1 / 60);
-    const escaped = P.escape(), cave = P.player;
+    const B = __ooga, D = B.timechain, P = B.pilot, cave = P.player, before = P.mode;
+    const empty = () => !cave.parts.club.visible && !cave.parts.gun.visible && !cave.weapon.primaryOwned && !cave.weapon.secondaryOwned;
+    let emptyViews = empty();
+    P.hooks.onZoom(1.6, "shoulder"); P.hooks.onZoom(1.6, "shoulder"); B.advance(1, 1 / 60);
+    const shoulder = P.mode; emptyViews &&= empty();
+    P.hooks.onZoom(1.6, "orbit"); B.advance(1, 1 / 60);
+    const orbit = P.mode; emptyViews &&= empty();
+    const deniedWeapons = !B.crew.selectWeapon(1, cave) && !B.crew.selectWeapon(2, cave);
+    P.modeAction("mode-release"); B.advance(0.1, 1 / 60);
+    const detached = P.mode;
+    P.possess(cave); P.enterClose(); B.advance(1, 1 / 60);
+    emptyViews &&= empty();
     return { room: D.room.id, scale: D.room.scale, radius: D.layout.radius, mode: D.visit.mode, zone: BL.net.state.zone, body: BL.net.state.body, chip: document.getElementById("sphere-mode").textContent,
-      subtitle: document.getElementById("sphere-subtitle").textContent, before, zoomed, after: P.mode, escaped, player: cave && cave.traits.name, jet: !!(cave && cave.jet), jetHud: document.getElementById("jetpack-hud").hidden,
-      gun: cave && !cave.parts.gun.visible && !cave.weapon.secondaryOwned, requests: B.stats().requests, paused: D.reader.status("recent"), hash: location.hash, sani: !!D.sani && D.sani.root.visible,
+      subtitle: document.getElementById("sphere-subtitle").textContent, before, shoulder, orbit, detached, after: P.mode, player: cave.traits.name, jet: !!cave.jet, jetHud: document.getElementById("jetpack-hud").hidden,
+      emptyViews, deniedWeapons, requests: B.stats().requests, paused: D.reader.status("recent"), hash: location.hash, sani: !!D.sani && D.sani.root.visible,
       saniState: BL.contributors.stateFor(BL.contributors.roster.find(entry => entry.name === "SaniExp")), remotes: D.remotes === null };
   })()`);
   record("timechain room: a signed-out arrival at /sphere-3 is a solo copy of Room 3 at 1× that publishes nothing, with its mode named and every screen painted",
     painted && r.room === 3 && r.scale === 1 && r.radius === 9 && r.mode === "solo" && r.zone === "none" && r.body === null && r.chip.includes("Solo visit · not signed in") && r.subtitle === "Timechain Sphere · Room 3"
       && r.hash === "#/sphere-3" && r.requests === 0 && r.paused === "PAUSED" && r.sani === (r.saniState === "sleeping" || r.saniState === "away") && r.remotes, JSON.stringify(r));
-  record("timechain room: scroll, the mode buttons and Escape all keep the eye in first person, and the Ooga carries no rifle and no jetpack",
-    [r.before, r.zoomed, r.after].every(m => m === "first-person") && r.escaped === false && r.player === "portlandhodl" && !r.jet && r.jetHud && r.gun, JSON.stringify(r));
+  record("timechain room: scroll reaches shoulder and orbit, release and retake work, and every view stays empty-handed with no jetpack",
+    r.before === "first-person" && r.shoulder === "shoulder" && r.orbit === "orbit" && r.detached === "detached" && r.after === "first-person"
+      && r.player === "portlandhodl" && !r.jet && r.jetHud && r.emptyViews && r.deniedWeapons, JSON.stringify(r));
   await b.evaluate(`(() => { const B = __ooga, L = B.timechain.layout; B.pilot.navigate({ position: { x: 0, y: 0, z: L.arrival.z }, yaw: Math.PI, pitch: 0.05, dist: 4 }); B.advance(0.2, 1 / 60); })()`);
   await holdKey(b, "w", 2.5);
   const shut = await b.evaluate(`(() => { const B = __ooga, L = B.timechain.layout, p = B.pilot.player.root.position; return { z: p.z, door: L.doorZ, scene: B.scene, open: B.timechain.doors.open }; })()`);

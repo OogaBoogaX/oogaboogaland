@@ -218,7 +218,7 @@
   };
   const create = (ctx) => {
     const { renderer, canvas, camera, hud, presets, dist: [DIST_MIN, DIST_MAX], follow, fly, clampTarget, clampCamera, coarse, close = null, ceilingAt = null, mayPossess = null } = ctx;
-    // A scene that is first person only (`close.only`, the Timechain Sphere's rooms): once the eye is entered, no
+    // A scene that is first person only (`close.only`): once the eye is entered, no
     // scroll, pinch, mode button, shortcut, Escape or letting go leaves it while the pilot lives.
     const firstOnly = !!(close && close.only);
     const handoff = cameraHandoff(camera, renderer);
