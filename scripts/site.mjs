@@ -7,13 +7,12 @@
 // cards/ holds the card images from `npm run cards`; a route without an `image` uses home's. Modules tagged
 // `data-defer` move out of the pages into js/<group>-<hash>.js (scripts/distribution-modules.mjs), fetched when needed.
 // `--audio-assets` and `--image-assets` write the DSB entrance recordings and the DSB rooms' pictures as same-origin
-// files under audio/ and art/; `npm run build:site` and `npm run serve` pass both, GitHub Pages (`pages.yml`) only
-// `--audio-assets`, and the portable page stays whole. `--page-assets`, last, moves the page's own script and stylesheet
-// out of every route page into js/main-<hash>.js and css/style-<hash>.css, with the jumbotron's snapshot, which every
-// deploy rebakes, in its own js/jumbotron-data-<hash>.js before the code (`externalizePage`), so the 23 pages share
-// one cached copy. `--headers <file>` writes that file as _headers plus one immutable rule per file under js/ and css/:
-// exact paths, so a 404 there (a page from one deploy asking another) is never cached for a year. `npm run build:site`
-// passes both.
+// files under audio/ and art/; `npm run build:site` and `npm run serve` pass both, and the portable page stays whole.
+// `--page-assets`, last, moves the page's own script and stylesheet out of every route page into js/main-<hash>.js and
+// css/style-<hash>.css, with the jumbotron's snapshot, which every deploy rebakes, in its own
+// js/jumbotron-data-<hash>.js before the code (`externalizePage`), so the 23 pages share one cached copy. `--headers
+// <file>` writes that file as _headers plus one immutable rule per file under js/ and css/: exact paths, so a 404 there
+// (a page from one deploy asking another) is never cached for a year. `npm run build:site` passes both.
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
