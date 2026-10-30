@@ -10109,7 +10109,6 @@
   const onOogatron = (event) => {
     if (event.type === "stats") {
       if (jumbotron) jumbotron.refreshData(event.stats);
-      contributors.applySnapshot(event.stats);
     }
   };
   const onTotem = (event) => { if (event.fresh) flareTotem(event.index); };

@@ -4621,19 +4621,53 @@ const oogatronReplayChecks = async () => {
     window: { setInterval(fn) { tick = fn; return 1; }, clearInterval() {} },
     fetch: () => new Promise(resolve => { answer = resolve; }) };
   runInNewContext(source, context);
-  const feed = context.window.BL.oogatronLive, early = [], late = [], later = [];
+  const feed = context.window.BL.oogatronLive, early = [], late = [], later = [], applied = [];
+  context.window.BL.contributors = { applySnapshot: stats => applied.push(stats.totals.commits) };
+  const director = await readFile(new URL("../src/js/director.js", import.meta.url), "utf8");
+  runInNewContext(director.slice(director.indexOf("  const unsubscribeOogatron ="), director.indexOf('  if (!params.has("nosim") && params.get("oogatron")')) + "\nthis.offActivity = unsubscribeOogatron;", context);
+  // The panel's own activity listener and clock do not depend on a scene's simulated crew.
+  const hudSource = await readFile(new URL("../src/js/hud.js", import.meta.url), "utf8"), rows = new Map([
+    ["local", { contributor: { name: "local" }, sceneOnline: true, remoteOnline: false }],
+    ["remote", { contributor: { name: "remote" }, sceneOnline: false, remoteOnline: true }],
+    ["absent", { contributor: { name: "absent" }, sceneOnline: false, remoteOnline: false }]
+  ]), calls = [], listeners = [];
+  let activityListener, minute, visible, released = 0;
+  const panel = { document: { hidden: false }, rosterRows: rows, listeners, setRosterRow: (...args) => calls.push(args),
+    BL: { contributors: { subscribe(fn) { activityListener = fn; return () => { activityListener = null; released++; }; } } },
+    window: { setInterval(fn, delay) { minute = fn; if (delay !== 60000) throw new Error("Unexpected roster interval"); return 7; }, clearInterval(id) { if (id === 7) { minute = null; released++; } } },
+    on(target, type, fn) { visible = fn; listeners.push(() => { visible = null; released++; }); } };
+  runInNewContext(hudSource.slice(hudSource.indexOf("    const refreshRosterActivity ="), hudSource.indexOf("    // The page-level pass marks rows online")), panel);
+  activityListener(); minute();
+  const preserved = calls.length === 6 && calls.every(([name, state, age, local, remote]) => local === rows.get(name).sceneOnline && remote === rows.get(name).remoteOnline);
+  panel.document.hidden = true; activityListener(); minute();
+  const hidden = calls.length === 6;
+  panel.document.hidden = false; visible();
+  const resumed = calls.length === 9;
+  for (const off of listeners) off();
+  record("Ooga panel: activity and minute ticks refresh every row without losing local or remote presence, hidden tabs wait for visibility, and disposal removes the listener and clock",
+    preserved && hidden && resumed && released === 3 && !activityListener && !minute && !visible, JSON.stringify({ preserved, hidden, resumed, released }));
   const stats = (commits) => ({ meta: { schema_version: 3 }, totals: { commits } });
   feed.start();
-  feed.subscribe(event => { if (event.type === "stats") early.push(event); });
+  const offEarly = feed.subscribe(event => { if (event.type === "stats") early.push(event); });
   answer({ ok: true, json: async () => stats(1) });
   await new Promise(resolve => setImmediate(resolve));
-  feed.subscribe(event => { if (event.type === "stats") late.push(event); });
+  const offLate = feed.subscribe(event => { if (event.type === "stats") late.push(event); });
   const first = early.length === 1 && late.length === 1 && early[0].stats.totals.commits === 1 && late[0] === early[0];
   tick();
   answer({ ok: true, json: async () => stats(2) });
   await new Promise(resolve => setImmediate(resolve));
-  feed.subscribe(event => later.push(event));
+  const offLater = feed.subscribe(event => later.push(event));
   const newest = early.length === 2 && late.length === 2 && later.length === 1 && later[0].stats.totals.commits === 2;
+  offEarly(); offLate(); offLater();
+  tick();
+  answer({ ok: true, json: async () => stats(3) });
+  await new Promise(resolve => setImmediate(resolve));
+  const withoutHub = applied.join() === "1,2,3";
+  context.offActivity();
+  tick();
+  answer({ ok: true, json: async () => stats(4) });
+  await new Promise(resolve => setImmediate(resolve));
+  record("Oogatron activity: the page applies every poll once with no hub subscriber, and releases its subscription at teardown", withoutHub && applied.join() === "1,2,3", JSON.stringify(applied));
   feed.dispose();
   feed.subscribe(event => later.push(event));
   record("Oogatron feed: a hub subscribing after the first response gets the newest activity before crew placement, with no stale replay after disposal",
@@ -13659,6 +13693,45 @@ const timechainRoomChecks = async () => {
   for (const name of ["math", "scene", "models", "jumbotron", "timechain-room-models"])
     runInNewContext(await readFile(join(root, "src/js/" + name + ".js"), "utf8"), context);
   const M = context.window.BL.models, RM = context.window.BL.timechainRoomModels;
+  // Exercise the real picture meshes and ray picker at every wall angle and room size.
+  const picking = { math: context.window.BL.math };
+  runInNewContext(interior.slice(interior.indexOf("  const INVERSE ="), interior.indexOf("  // What a screen or a ribbon card")) + "\nthis.pick = rectPick;", picking);
+  const curved = [], S = context.window.BL.scene, math = context.window.BL.math;
+  for (const scale of R.SCALES) {
+    const L = R.layout(scale);
+    for (const p of [...L.screens, ...L.ribbon]) {
+      const canvas = { width: 768, height: 512 }, geo = RM.picture(canvas, 768, 512, p.w, p.h, p.radius), v = geo.verts;
+      const node = S.createNode({ geometry: geo, position: { x: p.x, y: p.y, z: p.z }, rotation: { x: 0, y: -p.angle, z: 0 } });
+      S.updateWorld(node);
+      const world = [], uv = [], radii = [];
+      for (let i = 0; i < v.length; i += 3) {
+        math.mat4.transformPoint(world, node.world, v[i], v[i + 1], v[i + 2]);
+        radii.push(Math.hypot(world[0], world[2]));
+        uv.push(Math.atan2(v[i], p.radius - v[i + 2]) * p.radius);
+      }
+      const hit = picking.pick(node, p.w, p.h), samples = [0, Math.floor(geo.faces.length / 2), geo.faces.length - 1];
+      const hits = samples.every(index => {
+        const f = geo.faces[index], a = f.i[0] * 3, b = f.i[1] * 3;
+        math.mat4.transformPoint(world, node.world, (v[a] + v[b]) / 2, 0, (v[a + 2] + v[b + 2]) / 2);
+        const distance = Math.hypot(world[0], world[2]);
+        const ray = { ox: 0, oy: p.y, oz: 0, dx: world[0] / distance, dy: 0, dz: world[2] / distance };
+        return Math.abs(hit(ray) - distance) < 1e-4 && hit({ ...ray, oy: p.y + p.h }) === Infinity;
+      });
+      const outside = [-1, 1].every(side => {
+        const angle = p.angle + side * (p.w / (2 * p.radius) + 0.01);
+        return hit({ ox: 0, oy: p.y, oz: 0, dx: Math.sin(angle), dy: 0, dz: -Math.cos(angle) }) === Infinity;
+      });
+      curved.push({ scale, angle: p.angle, faces: geo.faces.length,
+        radius: Math.abs(p.radius - 8.7 * scale) < 1e-9 && radii.every(r => Math.abs(r - p.radius) < 1e-4),
+        texture: geo.imageSurface.canvas === canvas && geo.imageSurface.curve[0] === p.radius && geo.imageSurface.tessellated
+          && Math.abs(Math.min(...uv) + p.w / 2) < 1e-9 && Math.abs(Math.max(...uv) - p.w / 2) < 1e-9
+          && geo.faces.every(f => f.color.every(c => c === 255)), hits, outside });
+    }
+  }
+  record("timechain wall displays: every chart and block card follows its room radius with full-width canvas UVs and clickable centres and edges, rejecting clicks above or beside it",
+    curved.every(r => r.faces > 1 && r.faces <= 32 && r.radius && r.texture && r.hits && r.outside), JSON.stringify(curved));
+  const flat = RM.picture({}, 768, 512, 1.1, 0.68);
+  record("timechain desk and doorway pictures remain flat", flat.faces.length === 1 && !flat.imageSurface.curve && flat.verts.every((v, i) => i % 3 !== 2 || v === 0));
   // V8's trigonometric results have different last bits on Linux and macOS; keep exact geometry oracles for both.
   const expected = process.platform === "linux"
     ? ["46fddc3f3afede6a71492af33e7972d9b316a5e19a3604140d204014467e0752", "1db29f77ae158599889e8538f0de24a9d808f6a5c7eb901ce97b0a8d3a098e66", "9d1fc6a2541c405835a3ede1997a372fe0cc0aac2a66cee5e96f6b3d8beedc51"]
@@ -13668,8 +13741,28 @@ const timechainRoomChecks = async () => {
   const meshes = R.SCALES.map(scale => RM.geometries(scale)), hashes = meshes.map(hash);
   M.release("timechain", ["hub"]);
   const rebuilt = R.SCALES.map(scale => RM.geometries(scale));
-  const released = rebuilt.every((geos, i) => geos.every((g, k) => g !== meshes[i][k]) && hash(geos) === expected[i]);
-  record("timechain room caches: previews called from the hub release every size and prop without changing any geometry bytes", released && hashes.every((h, i) => h === expected[i]), JSON.stringify({ released, hashes }));
+  const released = rebuilt.every((geos, i) => geos.every((g, k) => g !== meshes[i][k]) && hash(geos) === hashes[i]);
+  record("timechain room caches: previews called from the hub release every size and prop without changing any geometry bytes", released, JSON.stringify({ released, hashes }));
+  const bezel = math.hexToRgb(RM.COLORS.bezel);
+  const frames = meshes.every((geos, i) => {
+    const radius = 8.7 * R.SCALES[i], hall = geos[0];
+    const faces = hall.faces.filter(f => f.color.every((c, k) => c === bezel[k]));
+    return faces.length > 100 && faces.every(f => f.i.every(index => {
+      const r = Math.hypot(hall.verts[index * 3], hall.verts[index * 3 + 2]);
+      return Math.min(Math.abs(r - radius - 0.01), Math.abs(r - radius - 0.11)) < 1e-8;
+    }));
+  });
+  record("timechain bezels follow the same room centre just behind the curved pictures", frames);
+  // Keep the existing byte oracle for all unchanged architecture and props by substituting only the historical
+  // flat bezel in a separate fixture. The production curved bezels and displays are checked above.
+  const legacy = { window: { BL: {} } };
+  for (const name of ["timechain-rooms", "math", "scene", "models", "jumbotron", "timechain-room-models"]) {
+    let source = await readFile(join(root, "src/js/" + name + ".js"), "utf8");
+    if (name === "timechain-room-models") source = source.replace("panelArc(p.w + pad, p.h + pad, p.radius, 0.01, back + 0.01)", "box({ w: p.w + pad, h: p.h + pad, d: back, color: C.bezel, offset: { z: -back / 2 - 0.01 } })");
+    runInNewContext(source, legacy);
+  }
+  const unchanged = R.SCALES.map(scale => hash(legacy.window.BL.timechainRoomModels.geometries(scale)));
+  record("timechain room architecture and props retain their geometry bytes apart from the curved bezels", unchanged.every((h, i) => h === expected[i]), JSON.stringify(unchanged));
   let serial = 0;
   const read = M.cached(() => ({ serial: ++serial })), outer = M.cached(() => ({})), first = outer(), failure = new Error("scope probe");
   let threw = false;
@@ -13784,7 +13877,7 @@ const timechainBlockChecks = async () => {
   const interior = await readFile(new URL("../src/js/timechain-interior.js", import.meta.url), "utf8");
   const keys = interior.slice(interior.indexOf("  const screenKey ="), interior.indexOf("  const TIPS ="));
   const hang = interior.slice(interior.indexOf("  const hang ="), interior.indexOf("  // A ray against"));
-  const counters = { CH, RM: { picture: () => ({ imageSurface: { rect: [-1, -1, 2, 2] } }) } };
+  const counters = { CH, RM: { picture: (canvas, pw, ph, w, h, radius) => ({ faces: [{ color: [0, 0, 0] }], imageSurface: { rect: [-1, -1, 2, 2], curve: [radius, 0, 0], tessellated: true } }) } };
   runInNewContext(`${keys}\n${hang}\nthis.screenKey = screenKey; this.cardKey = cardKey; this.hang = hang;`, counters);
   const observed = 100000, block = { id: "block", pool: "pool", time: 40 };
   let status = "LIVE";
@@ -13800,12 +13893,13 @@ const timechainBlockChecks = async () => {
     ticking && staleTicking && counters.screenKey(clockReader, 0, observed + 1000) === pausedKey
       && counters.cardKey(clockReader, 0, observed) === counters.cardKey(clockReader, 0, observed + 1000));
   let released = 0;
-  const slot = { node: { geometry: { imageSurface: {} } }, canvas: { width: 768, height: 512 }, w: 3, h: 2 }, renderer = { releaseGeometry() { released++; } };
+  const slot = { node: { geometry: { imageSurface: {} } }, canvas: { width: 768, height: 512 }, w: 3, h: 2, radius: 8.7 }, renderer = { releaseGeometry() { released++; } };
   counters.hang(renderer, slot);
   const geometry = slot.node.geometry, surface = geometry.imageSurface;
   counters.hang(renderer, slot); counters.hang(renderer, slot);
   record("timechain counters: repainting reuses the canvas and geometry, bumps its texture version and releases the prepared image only once",
-    slot.node.geometry === geometry && geometry.imageSurface === surface && surface.canvas === slot.canvas && surface.version === 3 && released === 1 && !surface.asset);
+    slot.node.geometry === geometry && geometry.imageSurface === surface && surface.canvas === slot.canvas && surface.version === 3 && released === 1 && !surface.asset
+      && surface.curve[0] === slot.radius && surface.tessellated && geometry.faces.every(face => face.emissive === 0.9 && face.color.every(value => value === 255)));
   // Run the room's paint scheduler on a clock, with no fetching or image decoding in the fixture.
   let now = observed, paints = 0;
   const makeSlot = () => ({ key: "", canvas: { getContext: () => ({ drawImage() {} }) } });
@@ -14168,6 +14262,21 @@ const roomPage = (room, query = "") => `${src}?debug=1&nosim=1${clock(`character
 const roomGo = (room) => `(() => { const B = window.__ooga; B.go("timechain", "${room}"); for (let i = 0; i < 150 && (B.transitioning || B.scene !== "timechain" || B.timechain.room.id !== ${room}); i++) B.advance(1 / 30, 1 / 30); B.advance(0.3, 1 / 30); B.housekeep(); const s = B.stats(); return { scene: B.scene, room: B.timechain.room.id, records: B.renderer.stats.records, nodes: s.allNodes, targets: s.targets, dom: s.dom, timers: s.timers, requests: s.requests }; })()`;
 const timechainRoom = { name: "timechain room", why: "playthrough: a signed-out arrival gets a solo copy of its room with first-person, shoulder and orbit views, without weapons or a jetpack, its screens painted, and touches no network under nosim", run: async (b) => {
   const painted = await untilPage(b, 'B.scene === "timechain" && B.timechain.slots.every(s => s.shown)', 20000);
+  const activity = await b.evaluate(`(() => {
+    const B = __ooga, C = BL.contributors, entry = C.roster.find(c => c.name === "NickDaGreek");
+    const saved = { lastCommitAt: entry.lastCommitAt, lastContributionAt: entry.lastContributionAt, activity: new Map(entry.activity) };
+    const row = document.querySelector('#roster [data-name="NickDaGreek"]'), state = row.querySelector(".roster-state"), age = row.querySelector(".roster-age");
+    try {
+      entry.lastCommitAt = entry.lastContributionAt = Date.now() - 40 * 86400000;
+      B.hud.setRosterRow(entry.name);
+      const away = row.hidden && state.dataset.state === "away", node = row, now = Date.now();
+      C.applySnapshot({ meta: { org: "OogaBoogaX", schema_version: 3 }, contributors: [{ login: entry.name, last_seen_at: new Date(now).toISOString() }] }, now);
+      return { away, fresh: !row.hidden && state.dataset.state === "working" && age.textContent === "0m ago",
+        same: document.querySelector('#roster [data-name="NickDaGreek"]') === node, scene: B.scene, player: B.pilot.player.traits.name };
+    } finally { Object.assign(entry, saved); B.hud.setRosterRow(entry.name); }
+  })()`);
+  record("timechain roster: fresh contribution data unfolds and updates an Ooga absent from the room without recreating its row or changing the driven Ooga",
+    activity.away && activity.fresh && activity.same && activity.scene === "timechain" && activity.player === "portlandhodl", JSON.stringify(activity));
   const r = await b.evaluate(`(() => {
     const B = __ooga, D = B.timechain, P = B.pilot, cave = P.player, before = P.mode;
     const empty = () => !cave.parts.club.visible && !cave.parts.gun.visible && !cave.weapon.primaryOwned && !cave.weapon.secondaryOwned;

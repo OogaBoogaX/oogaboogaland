@@ -618,6 +618,16 @@
       }
       if (moved) placeRosterRow(row);
     };
+    // Contribution data and its age stay live even in rooms with only one local Ooga.
+    // Preserve the scene's presence flags when refreshing activity across the whole panel.
+    const refreshRosterActivity = () => {
+      if (document.hidden) return;
+      for (const row of rosterRows.values()) setRosterRow(row.contributor.name, null, null, row.sceneOnline, row.remoteOnline);
+    };
+    listeners.push(BL.contributors.subscribe(refreshRosterActivity));
+    const rosterTimer = window.setInterval(refreshRosterActivity, 60000);
+    listeners.push(() => window.clearInterval(rosterTimer));
+    on(document, "visibilitychange", refreshRosterActivity);
     // The page-level pass marks rows online from the room and moves only those that changed.
     liveRows = rosterRows;
     liveOnline = (row) => {

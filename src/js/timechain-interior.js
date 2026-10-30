@@ -93,22 +93,42 @@
   };
 
   // A picture slot keeps its canvas texture and geometry as the printed counters tick.
-  const slot = (node, w, h, pw, ph, painted = null) => ({ node, canvas: painted ? painted.canvas : CH.canvas(pw, ph), w, h, key: painted ? painted.key : "" });
+  const slot = (node, w, h, pw, ph, painted = null, radius = 0) => ({ node, canvas: painted ? painted.canvas : CH.canvas(pw, ph), w, h, radius, key: painted ? painted.key : "" });
   const hang = (renderer, s) => {
     const old = s.node.geometry;
     if (old && old.imageSurface.canvas === s.canvas) { old.imageSurface.version++; return; }
-    const geometry = RM.picture(s.canvas, s.canvas.width, s.canvas.height, s.w, s.h);
-    geometry.imageSurface = { canvas: s.canvas, version: 1, rect: geometry.imageSurface.rect };
+    const geometry = RM.picture(s.canvas, s.canvas.width, s.canvas.height, s.w, s.h, s.radius);
+    // Canvas textures multiply the mesh colour; asset-backed pictures used a separate image pass.
+    const white = [255, 255, 255];
+    for (const face of geometry.faces) { face.color = white; face.emissive = 0.9; }
+    delete geometry.imageSurface.asset;
+    geometry.imageSurface.canvas = s.canvas;
+    geometry.imageSurface.version = 1;
     s.node.geometry = geometry;
     if (old) renderer.releaseGeometry(old);
   };
-  // A ray against a slot's own rectangle, for picking a screen exactly rather than by its bounding sphere.
+  // A ray against the displayed strips (or a flat desk picture), rather than a screen's bounding sphere.
   const INVERSE = math.mat4.create();
   const rectPick = (node, w, h) => (ray) => {
     math.mat4.invert(INVERSE, node.world);
     const m = INVERSE;
     const ox = m[0] * ray.ox + m[4] * ray.oy + m[8] * ray.oz + m[12], oy = m[1] * ray.ox + m[5] * ray.oy + m[9] * ray.oz + m[13], oz = m[2] * ray.ox + m[6] * ray.oy + m[10] * ray.oz + m[14];
     const dx = m[0] * ray.dx + m[4] * ray.dy + m[8] * ray.dz, dy = m[1] * ray.dx + m[5] * ray.dy + m[9] * ray.dz, dz = m[2] * ray.dx + m[6] * ray.dy + m[10] * ray.dz;
+    const geometry = node.geometry;
+    if (geometry && geometry.imageSurface && geometry.imageSurface.curve) {
+      let nearest = Infinity;
+      const v = geometry.verts;
+      for (const face of geometry.faces) {
+        const a = face.i[0] * 3, b = face.i[1] * 3, sx = v[b] - v[a], sz = v[b + 2] - v[a + 2];
+        const denominator = dz * sx - dx * sz;
+        if (Math.abs(denominator) < 1e-9) continue;
+        const t = ((v[a + 2] - oz) * sx - (v[a] - ox) * sz) / denominator;
+        if (t < 0 || t >= nearest || Math.abs(oy + dy * t) > h / 2) continue;
+        const x = ox + dx * t;
+        if (x >= Math.min(v[a], v[b]) - 1e-9 && x <= Math.max(v[a], v[b]) + 1e-9) nearest = t;
+      }
+      return nearest;
+    }
     if (Math.abs(dz) < 1e-9) return Infinity;
     const t = -oz / dz, x = ox + dx * t, y = oy + dy * t;
     return t >= 0 && Math.abs(x) <= w / 2 && Math.abs(y) <= h / 2 ? t : Infinity;
@@ -224,8 +244,8 @@
     // The screens, the ribbon and the terminal, each a picture slot.
     // The block and mining readings repaint a slot through its key (what it would print), never by callback.
     const reader = BL.timechainBlocks.create();
-    const screens = built.screens.map((node, i) => slot(node, L.screens[i].w, L.screens[i].h, CH.PANEL_W, CH.PANEL_H, prepared && prepared.screens[i]));
-    const cards = built.cards.map((node, i) => slot(node, L.ribbon[i].w, L.ribbon[i].h, CH.CARD_W, CH.CARD_H, prepared && prepared.cards[i]));
+    const screens = built.screens.map((node, i) => slot(node, L.screens[i].w, L.screens[i].h, CH.PANEL_W, CH.PANEL_H, prepared && prepared.screens[i], L.screens[i].radius));
+    const cards = built.cards.map((node, i) => slot(node, L.ribbon[i].w, L.ribbon[i].h, CH.CARD_W, CH.CARD_H, prepared && prepared.cards[i], L.ribbon[i].radius));
     const terminal = slot(built.terminal, RM.DESK_SCREEN.w, RM.DESK_SCREEN.h, CH.PANEL_W, CH.PANEL_H);
     const all = [...screens, ...cards, terminal];
     screens.forEach((s, i) => { const owner = target(s.node, { kind: "screen", index: i }); owner.pickRay = rectPick(s.node, s.w, s.h); });
@@ -748,21 +768,19 @@
     const room = ROOMS.get(roomId), L = ROOMS.layout(room.scale), built = RM.build(room.scale), reader = BL.timechainBlocks.create();
     const screens = [], cards = [], pictures = [];
     let live = true;
-    const paint = async (node, list, w, h, pw, ph, key, draw) => {
+    const paint = async (node, list, w, h, radius, pw, ph, key, draw) => {
       const canvas = CH.canvas(pw, ph);
       draw(canvas.getContext("2d"));
-      const image = new Image();
-      image.src = canvas.toDataURL("image/png");
-      await image.decode();
+      await new Promise(resolve => window.requestAnimationFrame(resolve));
       if (!live) return;
-      node.geometry = RM.picture(image, pw, ph, w, h);
+      node.geometry = RM.picture(canvas, pw, ph, w, h, radius);
       pictures.push(node.geometry);
       list.push({ key, canvas });
     };
     const ready = (async () => {
       const now = Date.now(), blocks = reader.value("recent");
-      for (let i = 0; i < built.screens.length && live; i++) await paint(built.screens[i], screens, L.screens[i].w, L.screens[i].h, CH.PANEL_W, CH.PANEL_H, screenKey(reader, i, now), (g) => CH.PANELS[i].paint(g, reader, now));
-      for (let i = 0; i < built.cards.length && live; i++) await paint(built.cards[i], cards, L.ribbon[i].w, L.ribbon[i].h, CH.CARD_W, CH.CARD_H, cardKey(reader, i, now), (g) => i ? CH.card(g, blocks && blocks[i - 1], now) : CH.ribbonLabel(g, reader.status("recent")));
+      for (let i = 0; i < built.screens.length && live; i++) await paint(built.screens[i], screens, L.screens[i].w, L.screens[i].h, L.screens[i].radius, CH.PANEL_W, CH.PANEL_H, screenKey(reader, i, now), (g) => CH.PANELS[i].paint(g, reader, now));
+      for (let i = 0; i < built.cards.length && live; i++) await paint(built.cards[i], cards, L.ribbon[i].w, L.ribbon[i].h, L.ribbon[i].radius, CH.CARD_W, CH.CARD_H, cardKey(reader, i, now), (g) => i ? CH.card(g, blocks && blocks[i - 1], now) : CH.ribbonLabel(g, reader.status("recent")));
     })();
     const lights = { ...RENDER_OPTS, lights: new Float32Array(BL.glRenderer.POINT_LIGHT_CAPACITY * 8), lightCount: built.lights.length, shadowExtent: L.radius * 1.2 };
     built.lights.forEach((l, i) => lights.lights.set([l[0], l[1], l[2], l[3], l[4], l[5], l[6], 0], i * 8));
