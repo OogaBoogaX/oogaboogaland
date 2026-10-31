@@ -7586,11 +7586,11 @@
     wpImage = new Image();
     wpImage.src = BL.whitepaperPoster.poster;
     const group = createNode({ position: { x, y: wpGround - WP.sink, z }, rotation: { x: 0, y: LIBRARY.ry + Math.PI, z: 0 } });
-    // The stone: a foot, the shaft the sheet is set into, and a cap. Its top and side borders match.
-    const border = 0.11, shaft = WP.h + border;
+    // The shaft meets the foot below the sheet, closing the slit on both faces; its top and side borders match.
+    const border = 0.11, shaft = WP.base + WP.h + border - WP.foot;
     addChild(group, createNode({ geometry: models.box({ w: WP.w + 0.5, h: WP.foot, d: WP.depth + 0.5, color: "#2a2724", offset: { y: WP.foot / 2 } }) }));
-    addChild(group, createNode({ geometry: models.box({ w: WP.w + border * 2, h: shaft, d: WP.depth, color: "#171512", offset: { y: WP.base + shaft / 2 } }) }));
-    addChild(group, createNode({ geometry: models.box({ w: WP.w + 0.36, h: WP.cap, d: WP.depth + 0.16, color: "#0e0d0c", offset: { y: WP.base + shaft + WP.cap / 2 } }) }));
+    addChild(group, createNode({ geometry: models.box({ w: WP.w + border * 2, h: shaft, d: WP.depth, color: "#171512", offset: { y: WP.foot + shaft / 2 } }) }));
+    addChild(group, createNode({ geometry: models.box({ w: WP.w + 0.36, h: WP.cap, d: WP.depth + 0.16, color: "#0e0d0c", offset: { y: WP.foot + shaft + WP.cap / 2 } }) }));
     // The sheet's own quad, facing back at the mouth, its picture drawn over it.
     const sheet = { verts: [-WP.w / 2, 0, 0, -WP.w / 2, WP.h, 0, WP.w / 2, WP.h, 0, WP.w / 2, 0, 0],
       faces: [{ i: [0, 1, 2, 3], color: [0, 0, 0], emissive: 0 }], lines: [], castShadow: false };
