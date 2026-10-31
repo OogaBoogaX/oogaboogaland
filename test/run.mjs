@@ -4719,7 +4719,7 @@ const cloudHopperFailureChecks = async engine => {
     cloudHopperModels: { cloud(radius) { platformRadius ||= radius; return S.createNode(); }, boostSurface: () => S.createNode(), updateBoostSurface: noop,
       bounceMarker: () => S.createNode(), updateBounceMarker: noop, jetpackPickup: () => S.createNode(), updateJetpackPickup: noop,
       cabinet: () => S.createNode(), updateCabinet: noop },
-    cloudHopperAudio: { create: () => ({ unlock() { audioUnlocks++; }, jump: noop, fade: noop, warn: noop, jet: noop,
+    cloudHopperAudio: { create: () => ({ unlock() { audioUnlocks++; }, song: noop, jump: noop, fade: noop, warn: noop, jet: noop,
       stage(name) { audioStage = name; }, tick() { audioTicks++; },
       level(value, seconds = 0.12) { audioLevel = value; audioFade = seconds; },
       stop() { audioStage = ""; audioLevel = 0; audioStops++; }, dispose() { audioDisposed = true; } }) },
@@ -4741,8 +4741,8 @@ const cloudHopperFailureChecks = async engine => {
   runInNewContext(controllerSource, context);
   const seaY = -70, dock = S.createNode({ position: { x: 50, y: 0, z: 0 } });
   // Level 1 already finished here and Level 2 open: a visit starts on Level 2, the old course's challenge.
-  const cloudSave = { unlocked: 2, players: [{ login: "record-holder", best: [60000] }] };
-  const game = { state: { cloudHopper: cloudSave },
+  const cloudSave = { unlocked: 2, last: 1, players: [{ login: "record-holder", best: [60000] }] };
+  const game = { state: { cloudHopper: cloudSave }, playCloudHopper: noop,
     cloudHopperBest: (login, level) => cloudSave.players.find(p => p.login === login)?.best[level - 1] || 0,
     recordCloudHopper: () => ({ best: false, unlocked: false }) };
   const hopperOptions = { root: rootNode, dock, crew, pilot, camera, game, seaY, mainlandRadius: 30,
@@ -6101,17 +6101,17 @@ const gameRulesChecks = async () => {
         !g.recordCloudHopper("", 1, 91000, 4).best, g.recordCloudHopper("", 2, 120000, 4).unlocked, g.cloudHopperBest("", 1) === 90000,
         g.cloudHopperBest("ooga", 1) === 95000, g.cloudHopperBest("ooga", 2) === 0,
         ...Array.from({ length: 8 }, (_, i) => g.recordCloudHopper(`player-${i}`, 1, 100000 + i, 4).best), g.state.cloudHopper.players.length === 8,
-        g.cloudHopperBest("", 1) === 0, g.state.cloudHopper.unlocked === 3]
+        g.cloudHopperBest("", 1) === 0, g.state.cloudHopper.unlocked === 3, (g.playCloudHopper(2), g.state.cloudHopper.last === 2)]
     };
     const again = make().state;
     const kept = again.race.best.bay.race === 100000 && again.race.best.bay.medal === "silver" && again.race.cup.medal === "silver" && again.drop.best.score === 900 && again.orbit.best.score === 1500 && again.mine.best.score === 500
-      && again.cloudHopper.unlocked === 3 && again.cloudHopper.players.length === 8 && again.cloudHopper.players[0].login === "player-7";
+      && again.cloudHopper.unlocked === 3 && again.cloudHopper.last === 2 && again.cloudHopper.players.length === 8 && again.cloudHopper.players[0].login === "player-7";
     const saved = JSON.parse(store.get("oogaboogaland.v1"));
     saved.mine.best.ending = "exploded"; saved.drop.best.landing = "pancake"; saved.race.best.bay.lap = "fast";
-    saved.cloudHopper.unlocked = 40; saved.cloudHopper.players[0].login = "bad login!"; saved.cloudHopper.players[1].best = [-5, "fast"];
+    saved.cloudHopper.unlocked = 40; saved.cloudHopper.last = 99; saved.cloudHopper.players[0].login = "bad login!"; saved.cloudHopper.players[1].best = [-5, "fast"];
     store.set("oogaboogaland.v1", JSON.stringify(saved));
     const bad = make().state, dropped = bad.mine.best === null && bad.drop.best === null && !bad.race.best.bay && bad.orbit.best.score === 1500
-      && bad.cloudHopper.unlocked === 1 && bad.cloudHopper.players.length === 7 && bad.cloudHopper.players[0].best.every(ms => ms === 0);
+      && bad.cloudHopper.unlocked === 1 && bad.cloudHopper.last === 0 && bad.cloudHopper.players.length === 7 && bad.cloudHopper.players[0].best.every(ms => ms === 0);
     // The donations board's tally: two tips today and one the day before, kept through a reload, the week holding all
     // three; a malformed day is dropped alone.
     const day = 864e5, now = Date.now();

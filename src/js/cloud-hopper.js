@@ -151,6 +151,8 @@
       const level = dockMusicLevel();
       if (level > 0) {
         if (!dockMusicOn) {
+          // The dock plays the score of the level played last.
+          audio.song(Math.max(1, game.state.cloudHopper.last) - 1);
           audio.stage("dock"); audio.level(level, 0.6); audio.unlock(); dockMusicOn = true;
         } else audio.level(level);
         audio.tick();
@@ -254,7 +256,7 @@
     // The cards choose on the intro and on the result card's Level select; the run places its own start.
     const selectLevel = (id) => {
       if (phase !== "intro" && phase !== "won" && phase !== "dq") return;
-      level = LEVELS[id - 1]; showLevels(); watchBoard();
+      level = LEVELS[id - 1]; showLevels(); watchBoard(); audio.song(level.id - 1);
     };
     // Each level's shared board, watched while its card or results show; times never cross levels.
     const watchBoard = () => {
@@ -282,7 +284,7 @@
         sessions.set(login, session);
         if (sessions.size > SESSION_PLAYERS) sessions.delete(sessions.keys().next().value);
       }
-      level = LEVELS[pickLevel() - 1]; showLevels();
+      level = LEVELS[pickLevel() - 1]; showLevels(); audio.song(level.id - 1);
       seconds = 0; latest = null; placeStart();
       watchBoard();
       setPhase("intro"); pilot.freeCursor();
@@ -307,6 +309,7 @@
       liftViewMix = 0;
       const record = played();
       seconds = startedAt = 0; latest = null; run = ++record.runs; session.lastLevel = level.id; showLevels();
+      audio.song(level.id - 1); game.playCloudHopper(level.id);
       if (watched !== level.board) watchBoard();
       scoreTicket = BL.highscores?.begin(level.board) || null;
       // Each attempt gets fresh clouds; the ghost keeps its original route.

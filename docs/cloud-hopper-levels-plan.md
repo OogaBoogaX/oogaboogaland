@@ -439,6 +439,17 @@ the `movePass` guards. Decision 3 in section 7.
   nothing essential depends on it.
 - **No physics changes.** No slippery surfaces, wind or gusts. If wanted later, they would
   be a separate proposal.
+- **Music.** *Built.* Each level has its own score in `cloud-hopper-music.js`, written for
+  its sky: Coconut Breeze (L1, bright tropical pluck-pop), Golden Hour Drift (L2, half-time
+  sunset synthwave), Cloudbreak Sprint (L3, the original trance score) and Thunderhead Run
+  (L4, dark driving trance). All four keep the old score's rules: one transport through the
+  dock, ascent, race, results and replays, with only the drums following the race and
+  entering and leaving on bar lines. Choosing another level card starts its song on the
+  playing song's next beat and crossfades the two over 2.5 s. The dock plays the level last
+  played (saved at each run's start as `game.state.cloudHopper.last`).
+- **Haze on the moon.** *Built.* Where low haze, daylight or cloud stands in front of the
+  moon, its disc's edge and terminator soften and its markings flatten, rather than only
+  dimming (WebGL in the sky shader; Canvas 2D with a blur picked from a fixed set).
 
 ## 5. Unlocks, selection, scores and ghosts
 

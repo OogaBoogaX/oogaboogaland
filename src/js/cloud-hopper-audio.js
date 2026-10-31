@@ -8,7 +8,7 @@
   const create = () => {
     let ctx = null, master = null, musicGain = null, jetGain = null, jetTone = null, jetWhine = null, jetFilter = null, music = null;
     let armed = false, disposed = false, resuming = false, jetOn = false, muted = BL.sound.muted, nextJump = 0;
-    let musicStage = "", backgroundTimer = 0;
+    let musicStage = "", musicSong = 0, backgroundTimer = 0;
     let musicLevel = 0, musicFrom = 0, musicAt = 0, musicUntil = 0, musicFade = 0.12;
     const jumps = [], clouds = [], warnings = [];
     const resultStage = value => value === "won" || value === "best" || value === "dq";
@@ -139,7 +139,7 @@
       musicFrom = 0; musicAt = ctx.currentTime; musicUntil = musicAt + musicFade;
       applyLevel();
       music = BL.cloudHopperMusic.create(ctx, musicGain, noise);
-      music.stage(musicStage);
+      music.song(musicSong); music.stage(musicStage);
       jetTone.start(); jetWhine.start(); noise.start();
       ctx.addEventListener("statechange", stateChanged);
     };
@@ -168,6 +168,13 @@
       syncBackground();
     };
     const tick = () => { if (ready()) music.tick(); };
+    // Which level's score plays (0-based). A switch while one plays starts the new score on the next beat and
+    // crossfades the two; before the context opens it only chooses the score that will start.
+    const song = (index) => {
+      if (disposed) return;
+      musicSong = index;
+      if (music) music.song(index);
+    };
     const jump = () => {
       if (!ready()) return;
       const now = ctx.currentTime, voice = jumps[nextJump];
@@ -276,7 +283,7 @@
       ctx = master = musicGain = jetGain = jetTone = jetWhine = jetFilter = music = null;
       jumps.length = clouds.length = 0;
     };
-    return { unlock, stage, level, tick, jump, fade, warn, jet, stop, dispose };
+    return { unlock, stage, level, tick, song, jump, fade, warn, jet, stop, dispose };
   };
   BL.cloudHopperAudio = { create };
 })();

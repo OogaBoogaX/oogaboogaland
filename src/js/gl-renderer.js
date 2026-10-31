@@ -1566,8 +1566,11 @@ void main() {
   float sunDisc = pow(sd, 600.0) * (1.0 - uStars);
   vec3 sun = uSun * (sunDisc + pow(sd, 6.0) * 0.18 * (1.0 - uStars));
   float moonDot = dot(d, uMoonDir);
-  float moonEdge = max(fwidth(moonDot), 0.000005);
-  float moonDisc = smoothstep(0.9985 - moonEdge, 0.9985 + moonEdge, moonDot);
+  // Haze in front of the moon diffuses it rather than only tinting it: low in the haze bank, behind thin cloud,
+  // or washed out by daylight, its edge, its terminator and its markings all soften.
+  float moonHaze = clamp(max(1.0 - smoothstep(0.02, 0.4, uMoonDir.y + uHazeDrop), 0.5 * (1.0 - uStars)) + 0.5 * uClouds, 0.0, 1.0);
+  float moonEdge = max(fwidth(moonDot), 0.000005), moonSoft = moonHaze * 0.0011;
+  float moonDisc = smoothstep(0.9985 - moonEdge - moonSoft, 0.9985 + moonEdge + moonSoft * 0.35, moonDot);
   vec3 moon = vec3(0.0), moonBright = vec3(0.0);
   if (moonDisc > 0.0 && skyMask > 0.0) {
     float moonOpacity = moonDisc * mix(0.3, 1.0, uStars);
@@ -1577,9 +1580,9 @@ void main() {
     vec3 moonUp = abs(uMoonDir.y) < 0.98 ? vec3(0.0, 1.0, 0.0) : vec3(0.0, 0.0, 1.0);
     vec3 moonRight = normalize(cross(uMoonDir, moonUp));
     moonUp = cross(moonRight, uMoonDir);
-    float albedo = moonAlbedo(vec2(dot(moonOffset, moonRight), dot(moonOffset, moonUp)));
+    float albedo = mix(moonAlbedo(vec2(dot(moonOffset, moonRight), dot(moonOffset, moonUp))), 0.86, moonHaze * 0.6);
     float moonLight = dot(moonNormal, uMoonSunDir);
-    float moonLit = smoothstep(-0.015, 0.015, moonLight);
+    float moonLit = smoothstep(-0.015 - moonHaze * 0.12, 0.015 + moonHaze * 0.12, moonLight);
     vec3 moonDay = vec3(0.8, 0.79, 0.76) * albedo * (0.18 + 0.82 * sqrt(max(0.0, moonLight)));
     vec3 earthshine = vec3(0.1, 0.11, 0.14) * albedo * (0.85 + 0.15 * moonDepth);
     // Earthshine fills the shadowed side at night; by day it still shows faintly, a dimmer disc behind the lit part.
