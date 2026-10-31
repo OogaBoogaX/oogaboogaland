@@ -12,13 +12,23 @@
   const stats = { attempts: 0, hits: 0, misses: 0, workers: 0, stored: 0, failures: 0, cacheFailures: 0, lastSource: "", credit: 0 };
   let pending = null;
   const aborted = signal => { if (signal?.aborted) throw signal.reason || new DOMException("Terrain cancelled", "AbortError"); };
-  const normalize = ({ seed = 1, roofHole = null } = {}) => {
+  const normalizeNook = (nook) => {
+    if (!nook) return null;
+    const { x, z, ry, floor, width, depth, height, entry = 0 } = nook;
+    if (![x, z, ry, floor, width, depth, height, entry].every(Number.isFinite)
+      || Math.abs(x) > 100 || Math.abs(z) > 100 || Math.abs(floor) > 12
+      || !(width > 0 && width <= 8) || !(depth > 0 && depth <= 8) || !(height > 0 && height <= 8)
+      || entry < 0 || entry > 4) throw new Error("Invalid terrain nook");
+    return { x, z, ry, floor, width, depth, height, entry };
+  };
+  const normalize = ({ seed = 1, roofHole = null, nook = null } = {}) => {
     if (!Number.isSafeInteger(seed) || seed < 0 || seed > 0xffffffff) throw new Error("Invalid terrain seed");
-    if (!roofHole) return { seed, roofHole: null };
+    const cut = normalizeNook(nook);
+    if (!roofHole) return { seed, roofHole: null, nook: cut };
     const { id, x, z, radius } = roofHole;
     if (!/^c(?:11|10|9|730|1|2|3|5)$/.test(id) || ![x, z, radius].every(Number.isFinite)
       || Math.abs(x) > 100 || Math.abs(z) > 100 || radius <= 0 || radius > 16) throw new Error("Invalid terrain roof");
-    return { seed, roofHole: { id, x, z, radius } };
+    return { seed, roofHole: { id, x, z, radius }, nook: cut };
   };
   const open = () => new Promise((resolve, reject) => {
     if (!window.indexedDB) { reject(new Error("No terrain storage")); return; }
