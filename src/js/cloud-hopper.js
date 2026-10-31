@@ -3,7 +3,7 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const { createNode, addChild, removeChild } = BL.scene;
-  const RADIUS = 4.5, DEPTH = 2.5, START_DISTANCE = 472.5, START_HEIGHT = 232.5;
+  const RADIUS = 4.5, DEPTH = 2.5;
   const LIFT_SECONDS = 6, LIFT_VIEW_SECONDS = 1.5, DOCK_LENGTH = 4;
   const START_VIEW = { height: 6, distance: 18 };
   const BOOST_SPEED = 28, BOOST_RISE = 4, BOUNCE_RISE = 22, LAUNCH_CLEARANCE = 0.04;
@@ -26,7 +26,8 @@
     const ux = Math.cos(dock.rotation.y), uz = -Math.sin(dock.rotation.y);
     const home = { x: dock.position.x + ux * (DOCK_LENGTH + RADIUS - 0.25), y: dock.position.y, z: dock.position.z + uz * (DOCK_LENGTH + RADIUS - 0.25) };
     const length = Math.hypot(home.x, home.z), nx = home.x / length, nz = home.z / length;
-    const start = { x: nx * START_DISTANCE, y: START_HEIGHT, z: nz * START_DISTANCE };
+    const start = { x: 0, y: 0, z: 0 };
+    let level = BL.cloudHopperLevels.get(2), farBefore = 0;
     const heading = Math.atan2(-nx, -nz), platform = createNode({ sightHidden: true });
     const cloud = BL.cloudHopperModels.cloud(RADIUS, RADIUS, DEPTH);
     const cabinet = BL.cloudHopperModels.cabinet();
@@ -224,6 +225,13 @@
       crew.selectWeapon(saved.slot, actor);
       saved = null; pilot.showAct();
     };
+    // A level's start stands its route out from the final cloud, which is 12 m off the coast, and its slope
+    // above that cloud, along the dock's heading.
+    const placeStart = () => {
+      Object.assign(liftGoal, ctx.finish());
+      const radius = ctx.mainlandRadius + 12 + level.route;
+      start.x = liftGoal.x + nx * radius; start.y = liftGoal.y + 18 + level.slope * level.route; start.z = liftGoal.z + nz * radius;
+    };
     const launch = () => {
       if (active()) return false;
       const cave = pilot.player;
@@ -236,7 +244,7 @@
       runnerName = login || cave.traits.name;
       session = sessions.get(login);
       if (!session) { session = { runs: 0, scores: [], best: null, lastSeed: null }; sessions.set(login, session); }
-      seconds = 0; latest = null;
+      seconds = 0; latest = null; placeStart();
       unwatchScores = BL.highscores?.watch("cloud-hopper", (board) => overlay.setHighscores(board)) || null;
       setPhase("intro"); pilot.freeCursor();
       return true;
@@ -264,9 +272,12 @@
       courseSeed = BL.math.randomInt(4294967296);
       if (courseSeed === session.lastSeed) courseSeed = (courseSeed + 1) >>> 0;
       session.lastSeed = courseSeed;
-      Object.assign(liftGoal, ctx.finish());
+      placeStart();
+      // Far starts keep the island in view.
+      if (!farBefore) farBefore = camera.far;
+      camera.far = Math.max(farBefore, Math.hypot(start.x - liftGoal.x, start.y - liftGoal.y, start.z - liftGoal.z) + 150);
       course = BL.cloudHopperCourse.create({ start, finish: liftGoal, mainlandRadius: ctx.mainlandRadius, seed: courseSeed,
-        runSpeed: BL.pilot.WALK.speed * BL.pilot.WALK.run, jumpSpeed: BL.crew.JUMP_SPEED });
+        layout: level.layout, timing: level.timing, runSpeed: BL.pilot.WALK.speed * BL.pilot.WALK.run, jumpSpeed: BL.crew.JUMP_SPEED });
       overlay.setGhost(session.best?.duration ?? null);
       for (const c of course.clouds) {
         const node = BL.cloudHopperModels.cloud(c.rx, c.rz, c.depth, c.kind, c.yaw);
@@ -353,6 +364,7 @@
     // Exits and scene changes park at the dock before the hub can release its actor.
     const cancel = (keepMusic = false) => {
       unwatchScores?.(); unwatchScores = null; scoreTicket = null;
+      if (farBefore) { camera.far = farBefore; farBefore = 0; }
       if (!active()) {
         if (!keepMusic) { audio.stop(); dockMusicOn = false; }
         return;
@@ -596,7 +608,8 @@
       get active() { return active(); }, get playing() { return playing(); }, get held() { return held(); },
       get actor() { return actor; }, get phase() { return phase; }, get time() { return seconds; },
       get bestGhost() { return session?.best || null; },
-      get course() { return course; }, looks, bound: START_DISTANCE + 80 };
+      get course() { return course; }, get start() { return start; }, get level() { return level; }, looks,
+      get bound() { return Math.hypot(start.x, start.z) + 80; } };
   };
-  BL.cloudHopper = { create, START_DISTANCE, START_HEIGHT, LIFT_SECONDS };
+  BL.cloudHopper = { create, LIFT_SECONDS };
 })();

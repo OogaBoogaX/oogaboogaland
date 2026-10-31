@@ -4678,7 +4678,7 @@ const cloudHopperFailureChecks = async engine => {
     document: { hidden: false, addEventListener(type, listener) { if (type === "visibilitychange") visibilityListeners.add(listener); },
       removeEventListener(type, listener) { if (type === "visibilitychange") visibilityListeners.delete(listener); } },
     localStorage: { getItem: key => key === guideKey ? "1" : null } };
-  for (const name of ["math", "scene", "cloud-hopper-course"])
+  for (const name of ["math", "scene", "cloud-hopper-course", "cloud-hopper-levels"])
     runInNewContext(await readFile(join(root, "src/js/" + name + ".js"), "utf8"), context);
   const BL = context.window.BL, S = BL.scene, rootNode = S.createNode(), camera = S.createCamera();
   // Repeat selected draws deliberately: every start must still produce new
@@ -4775,7 +4775,7 @@ const cloudHopperFailureChecks = async engine => {
   let musicPhases = introMusic && audioStage === "lifting" && audioLevel === 0.28 && audioStops === beforeStartStops;
   tick(BL.cloudHopper.LIFT_SECONDS);
   const briefing = hopper.phase === "briefing" && shown === "briefing" && hopper.held && !active && mode
-    && hopper.platform.position.y === BL.cloudHopper.START_HEIGHT && ghostPosition === null && !storage.has(guideKey);
+    && hopper.platform.position.y === hopper.start.y && ghostPosition === null && !storage.has(guideKey);
   const beforeGuideReset = inputResets, guidePosition = { ...actor.root.position };
   tick(0, 5);
   const guideHeld = hopper.phase === "briefing" && hopper.held && !active && hopper.time === 0 && ghostBegins === 0
@@ -4918,6 +4918,25 @@ const cloudHopperFailureChecks = async engine => {
       }
     }
   }
+  // Each level's route is the spec's: D, 21% under the old 430.5 m, then 1.42 D, 2.0164 D and 2.863288 D,
+  // measured from its start to its final cloud; each fits the cloud cap and keeps the same promises.
+  const { LEVELS } = BL.cloudHopperLevels, spec = [1, 1.42, 2.0164, 2.863288].map(k => 430.5 * 0.79 * k);
+  let levelRoutes = LEVELS.length === 4;
+  for (const level of LEVELS) {
+    const radius = 42 + level.route, course = BL.cloudHopperCourse.create({ start: { x: radius, y: 20 + level.slope * level.route, z: 0 },
+      finish: { x: 0, y: 2, z: 0 }, mainlandRadius: 30, seed: level.id, layout: level.layout, timing: level.timing });
+    const main = course.clouds.filter(c => c.main), last = main[main.length - 1];
+    levelRoutes &&= Math.abs(radius - Math.hypot(last.baseX, last.baseZ) - spec[level.id - 1]) < 0.5
+      && course.clouds.length <= BL.cloudHopperCourse.MAX_CLOUDS;
+    firmEnds &&= [0, 1, main.length - 2, main.length - 1].every(k => main[k].life === PERMANENT);
+    for (const c of course.clouds) {
+      if (c.life === PERMANENT) continue;
+      for (let slot = 0; course.windowAt(c, slot) <= course.presence(c); slot++) {
+        const at = course.windowAt(c, slot);
+        if (at + course.timing.warn + 1 >= c.arrival * course.timing.presence[0]) escaped &&= course.escapes(c.index, at);
+      }
+    }
+  }
   const stepped = (dt, steps) => {
     const course = BL.cloudHopperCourse.create(motionOptions);
     course.update(2); course.start();
@@ -4926,8 +4945,8 @@ const cloudHopperFailureChecks = async engine => {
   };
   const slow = stepped(1 / 30, 1200), fast = stepped(1 / 144, 5760), once = stepped(40, 1);
   const frameFree = [fast, once].every(other => other.every((row, i) => row.every((value, j) => Math.abs(value - slow[i][j]) < 1e-6)));
-  const lifeRows = { mixed, firmEnds, warned: warned && losses > 0, escaped, staggered, frameFree, firstWarn: earliest >= TIMING.firstWarn };
-  record("Cloud Hopper lifetimes: permanent, long-lived and ordinary clouds; every loss of support follows its full warning, a warning cloud always has a steady one in reach, linked clouds warn apart and any frame rate agrees",
+  const lifeRows = { mixed, firmEnds, warned: warned && losses > 0, escaped, staggered, frameFree, firstWarn: earliest >= TIMING.firstWarn, levelRoutes };
+  record("Cloud Hopper lifetimes and levels: permanent, long-lived and ordinary clouds; every loss of support follows its full warning, a warning cloud always has a steady one in reach, linked clouds warn apart, any frame rate agrees, and each level's route is the spec's",
     Object.values(lifeRows).every(Boolean), JSON.stringify({ ...lifeRows, losses, earliest }));
   // Isolate the launch platform as a recovery target. The same fuel can lift
   // a slow fall back to it but is spent braking a faster fall; one air jump
@@ -5122,7 +5141,7 @@ const cloudHopperFailureChecks = async engine => {
   const replayMusic = audioStops === beforeReplayStops && audioStage === "ready" && audioLevel === 1;
   const replayFramed = islandFramed && viewFrames === beforeReplayFrames + 1;
   const replay = hopper.phase === "ready" && active && mode && actor.root.visible && hopper.course !== oldCourse && !hopper.fallView()
-    && actor.root.position.y - actor.baseY === hopper.platform.position.y && hopper.platform.position.y >= BL.cloudHopper.START_HEIGHT
+    && actor.root.position.y - actor.baseY === hopper.platform.position.y && hopper.platform.position.y >= hopper.start.y
     && !actor.jetpackOwned && !actor.jet && actor.jetFuel === 0 && !actor.weapon.primaryOwned && !actor.weapon.secondaryOwned
     && ["x", "y", "z"].every(key => Math.abs(camera.up[key] - priorUp[key]) < 1e-8);
   const freshDqLayout = layout(hopper.course) !== layout(oldCourse);

@@ -4,7 +4,7 @@
   const BL = window.BL = window.BL || {};
   const { clamp, mulberry32 } = BL.math;
   const MAX_CLOUDS = 128, CLOUD_DEPTH = 2, FADE_SECONDS = 1, APPEAR_SECONDS = 0.6;
-  const CLOUD_GAP = 1.5, MAIN_RADIUS = Math.hypot(3.6, 2.6);
+  const CLOUD_GAP = 1.5;
   const GRAVITY = 9.8, PICKUP_LIFT = 0.7, PICKUP_RADIUS = 0.75, RUN_SPEED = 11.625, JUMP_SPEED = 4.8, SETTLE = 1.5, WOBBLE = 0.12;
   // Lifetime classes: a permanent cloud never fades; a long-lived one first fades long after an ordinary run
   // reaches it; an ordinary one disappears once in each of its own slots.
@@ -21,6 +21,15 @@
   const TIMING = Object.freeze({ permanent: 0.08, long: 0.2, ordinary: Object.freeze([14, 36]), longSlot: Object.freeze([60, 130]),
     warn: 2.5, hidden: Object.freeze([1.5, 3.5]), gap: 4, firstWarn: 4, stagger: 3, spine: 3, pace: 2.8, reach: 0.7, airJump: true,
     presence: Object.freeze([0.4, 2.5, 40]) });
+  // The course's shape: the along-route `step` between main landings (never under the widest swept clouds'
+  // clearance), main and `side` cloud half-sizes [rx, rx range, rz, rz range], how far a `turn` aims across
+  // and the most a landing `sway`s from the last, each cloud's swing `lane` and `speed` [least, range], side
+  // clouds per main landing (`sides`, at most `sideMax`) and how far out they sit (`offset` [least, range]),
+  // the `boost` and `bounce` shares of eligible clouds (at most `bounceMax` bounces), and the chance of a
+  // second jetpack (`twoPacks`). These defaults are the old course's.
+  const LAYOUT = Object.freeze({ step: 11.5, main: Object.freeze([2.7, 0.9, 1.9, 0.7]), side: Object.freeze([2.8, 0.7, 2.1, 0.5]),
+    turn: 40, sway: 7, lane: Object.freeze([5, 3]), speed: Object.freeze([0.9, 0.6]), sides: Infinity, sideMax: 24,
+    offset: Object.freeze([22, 12]), boost: 0.22, bounce: 0.16, bounceMax: Infinity, twoPacks: 0.45 });
   const cycleRandom = (seed, cycle, salt) => {
     let value = seed ^ Math.imul(cycle + 1, 0x9e3779b9) ^ salt;
     value = Math.imul(value ^ value >>> 16, 0x21f0aaad);
@@ -72,8 +81,11 @@
   // solidLeft reads it. supportAt returns the highest eligible top or -Infinity;
   // pass the greater of the previous/current feet heights to catch a falling body.
   // pickupAt consumes one pickup and returns its stable record; equipping belongs
-  // to the caller. runSpeed and jumpSpeed are the player's, for the fairness checks.
-  const create = ({ start, finish, mainlandRadius = 30, seed = 1, timing = TIMING, runSpeed = RUN_SPEED, jumpSpeed = JUMP_SPEED }) => {
+  // to the caller. runSpeed and jumpSpeed are the player's, for the fairness checks;
+  // `layout` and `timing` override LAYOUT's and TIMING's fields (a level's).
+  const create = ({ start, finish, mainlandRadius = 30, seed = 1, layout: shape = LAYOUT, timing: tune = TIMING,
+    runSpeed = RUN_SPEED, jumpSpeed = JUMP_SPEED }) => {
+    const layout = { ...LAYOUT, ...shape }, timing = { ...TIMING, ...tune };
     const rand = mulberry32(seed), outwardX = start.x - finish.x, outwardZ = start.z - finish.z;
     const moveRand = mulberry32(seed ^ 0x3c6ef372), orientationRand = mulberry32(seed ^ 0xa54ff53a);
     const sideRand = mulberry32(seed ^ 0xbb67ae85);
@@ -82,8 +94,8 @@
     const distance = startDistance - shoreDistance, drop = start.y - endY, sideX = -nz, sideZ = nx;
     // Slightly wider main gaps still fit a running jump. Bound their jitter
     // by the widest rotated mesh so neighbouring drift lanes stay separate.
-    const minimumStep = MAIN_RADIUS * 2 + CLOUD_GAP;
-    const count = Math.min(MAX_CLOUDS - 24, Math.max(12, Math.ceil(Math.max(drop / 9, distance / 11.5))),
+    const minimumStep = Math.hypot(layout.main[0] + layout.main[1], layout.main[2] + layout.main[3]) * 2 + CLOUD_GAP;
+    const count = Math.min(MAX_CLOUDS - 24, Math.max(12, Math.ceil(Math.max(drop / 9, distance / layout.step))),
       Math.max(6, Math.floor(distance / minimumStep)));
     const clouds = [], landings = [], pickups = [], placements = [], step = 1 / count;
     const alongJitter = Math.min(0.08, Math.max(0, 1 - minimumStep / (distance * step)));
@@ -92,7 +104,7 @@
       // Each cloud swings across the course on its own lane, speed and phase.
       // Independent lanes and clocks keep the field from swaying as one.
       const direction = moveRand() < 0.5 ? -1 : 1, moveX = sideX * direction, moveZ = sideZ * direction;
-      const moveRange = 5 + moveRand() * 3, moveSpeed = 0.9 + moveRand() * 0.6;
+      const moveRange = layout.lane[0] + moveRand() * layout.lane[1], moveSpeed = layout.speed[0] + moveRand() * layout.speed[1];
       const yaw = orientationRand() * Math.PI * 2, cosYaw = Math.cos(yaw), sinYaw = Math.sin(yaw);
       const alongHalf = Math.abs(nx * cosYaw - nz * sinYaw) * rx + Math.abs(nx * sinYaw + nz * cosYaw) * rz;
       const acrossHalf = Math.abs(sideX * cosYaw - sideZ * sinYaw) * rx + Math.abs(sideX * sinYaw + sideZ * cosYaw) * rz + moveRange;
@@ -124,36 +136,37 @@
     };
     for (let i = 0; i < count; i++) {
       if (i >= nextTurn) {
-        target = (rand() - 0.5) * 80;
+        target = (rand() - 0.5) * 2 * layout.turn;
         nextTurn = i + 1 + Math.floor(rand() * 3);
       }
       const remaining = count - 1 - i;
       // Frequent random turns break up the line; taper back toward the coast.
       const wanted = remaining < 5 ? 0 : target + (rand() - 0.5) * 12;
-      lateral += clamp(wanted - lateral, -7, 7);
-      lateral = clamp(lateral, -remaining * 7, remaining * 7);
+      lateral += clamp(wanted - lateral, -layout.sway, layout.sway);
+      lateral = clamp(lateral, -remaining * layout.sway, remaining * layout.sway);
       const last = remaining === 0, t = (i + 1) * step;
       const along = last ? 1 : t + (rand() - 0.5) * step * alongJitter;
       const down = last ? 1 : t + (rand() - 0.5) * step * 0.2;
       const radial = startDistance - distance * along;
       const x = finish.x + nx * radial + sideX * lateral, z = finish.z + nz * radial + sideZ * lateral;
       const y = start.y - drop * down;
-      landings.push(addCloud(x, y, z, 2.7 + rand() * 0.9, 1.9 + rand() * 0.7));
+      landings.push(addCloud(x, y, z, layout.main[0] + rand() * layout.main[1], layout.main[2] + rand() * layout.main[3]));
     }
     // Fill stratified segments across the whole descent instead of exhausting
     // the extra-cloud budget near the top. Alternating sides balance each
     // neighbourhood while keeping positions and heights random each play.
-    const segments = count - 5, alternatives = Math.min(24, segments), firstSide = sideRand() < 0.5 ? -1 : 1;
+    const segments = count - 5, firstSide = sideRand() < 0.5 ? -1 : 1;
+    const alternatives = Math.min(layout.sideMax, segments, MAX_CLOUDS - count, Math.round(count * layout.sides));
     for (let i = 0; i < alternatives; i++) {
       const low = Math.floor(i * segments / alternatives), high = Math.floor((i + 1) * segments / alternatives);
       const index = 2 + low + Math.floor(sideRand() * (high - low)), a = landings[index - 1], b = landings[index];
-      const t = 0.35 + sideRand() * 0.3, side = i % 2 ? -firstSide : firstSide, offset = side * (22 + sideRand() * 12);
+      const t = 0.35 + sideRand() * 0.3, side = i % 2 ? -firstSide : firstSide, offset = side * (layout.offset[0] + sideRand() * layout.offset[1]);
       addCloud(a.x + (b.x - a.x) * t + sideX * offset, a.y + (b.y - a.y) * t,
-        a.z + (b.z - a.z) * t + sideZ * offset, 2.8 + sideRand() * 0.7, 2.1 + sideRand() * 0.5, side);
+        a.z + (b.z - a.z) * t + sideZ * offset, layout.side[0] + sideRand() * layout.side[1], layout.side[2] + sideRand() * layout.side[3], side);
     }
     clouds.sort((a, b) => b.y - a.y);
     for (let i = 0; i < clouds.length; i++) clouds[i].index = i;
-    const pickupCount = rand() < 0.55 ? 1 : 2;
+    const pickupCount = rand() < 1 - layout.twoPacks ? 1 : 2;
     for (let i = 0; i < pickupCount; i++) {
       const index = i ? Math.max(4, Math.floor(count * 0.24)) : 1 + Math.floor(rand() * 2);
       const cloud = landings[index];
@@ -171,8 +184,8 @@
         || pickups.some(pickup => pickup.cloud === cloud)) continue;
       eligible.push(cloud);
       const choice = specialRand();
-      if (choice < 0.22) { cloud.kind = "boost"; boosts++; }
-      else if (choice < 0.38 && lastBounceY - cloud.y > drop * step * 1.5) {
+      if (choice < layout.boost) { cloud.kind = "boost"; boosts++; }
+      else if (choice < layout.boost + layout.bounce && bounces < layout.bounceMax && lastBounceY - cloud.y > drop * step * 1.5) {
         cloud.kind = "bounce"; bounces++; lastBounceY = cloud.y;
       }
     }
@@ -186,7 +199,7 @@
         cloud.kind = "boost"; boosts++; break;
       }
     }
-    if (!bounces && eligible.length) {
+    if (!bounces && layout.bounceMax > 0 && eligible.length) {
       const at = Math.floor(specialRand() * eligible.length);
       for (let i = 0; i < eligible.length; i++) {
         const cloud = eligible[(at + i) % eligible.length];
@@ -613,9 +626,9 @@
         && canInterceptPickup(pickup, x, feet, z, vy, speed, jump, seaY, jetSeconds, jetAccel, height, seaTime)) return true;
       return false;
     };
-    return { clouds, pickups, timing, horizon, start: begin, update, supportAt, contactAt, touchTime, pickupAt, canRecover, solidLeft,
+    return { clouds, pickups, layout, timing, horizon, start: begin, update, supportAt, contactAt, touchTime, pickupAt, canRecover, solidLeft,
       windowAt, escapes, steadyAt, linked, presence, offsetAt };
   };
-  BL.cloudHopperCourse = { create, TIMING, MAX_CLOUDS, CLOUD_DEPTH, FADE_SECONDS, APPEAR_SECONDS, PICKUP_LIFT, PICKUP_RADIUS,
+  BL.cloudHopperCourse = { create, LAYOUT, TIMING, MAX_CLOUDS, CLOUD_DEPTH, FADE_SECONDS, APPEAR_SECONDS, PICKUP_LIFT, PICKUP_RADIUS,
     PERMANENT, LONG, ORDINARY, SOLID, WARNING, FADING, HIDDEN, APPEARING };
 })();
