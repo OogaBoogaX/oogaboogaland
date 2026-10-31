@@ -8,6 +8,8 @@
   // Approximate near-side outlines, north up and east right, matching SKY_FS.
   // USGS feature centers: https://planetarynames.wr.usgs.gov/
   // NASA visual reference: https://science.nasa.gov/resource/colorful-moon/
+  // Canvas filters for a hazy moon, a whole pixel of blur each, made once.
+  const MOON_BLURS = Array.from({ length: 13 }, (_, px) => px ? `blur(${px}px)` : "none");
   const MOON_BASINS = [
     -0.72, 0.25, 0.19, 0.38, // Oceanus Procellarum's joined western lobes
     -0.59, 0.53, 0.19, 0.23,
@@ -2066,6 +2068,11 @@
               const k = -facing;
               ctx.save();
               ctx.translate(cx, cy);
+              // Haze diffuses the moon: low in the haze bank, behind thin cloud or washed out by day, it blurs (where the
+              // browser filters a canvas) and its markings fade.
+              const low = Math.min(1, Math.max(0, (moon.y - 0.02) / 0.38));
+              const moonHaze = Math.min(1, Math.max(1 - low * low * (3 - 2 * low), 0.5 * (1 - (opts.stars || 0))) + 0.5 * (opts.clouds || 0));
+              ctx.filter = MOON_BLURS[Math.min(12, Math.round(moonHaze * radius * 0.08))];
               // Clip the moon's lower limb at the physical horizon, independent
               // of the lowered haze gradient and of camera pitch or roll.
               const horizonSlope = Math.hypot(view[4], view[5]);
@@ -2081,14 +2088,12 @@
               const phaseAngle = Math.atan2(-sy, sx);
               ctx.rotate(phaseAngle);
               const moonNight = opts.stars || 0, moonAlpha = 0.3 + 0.7 * moonNight;
-              // Faint earthshine keeps the shadowed hemisphere visible at night.
-              if (moonNight > 0) {
-                ctx.globalAlpha = moonNight * moonAlpha;
-                ctx.fillStyle = "#202227";
-                ctx.beginPath();
-                ctx.arc(0, 0, radius, 0, Math.PI * 2);
-                ctx.fill();
-              }
+              // Earthshine keeps the shadowed hemisphere visible at night, and faintly by day too.
+              ctx.globalAlpha = (0.45 + 0.55 * moonNight) * moonAlpha;
+              ctx.fillStyle = "#202227";
+              ctx.beginPath();
+              ctx.arc(0, 0, radius, 0, Math.PI * 2);
+              ctx.fill();
               ctx.globalAlpha = moonAlpha;
               ctx.fillStyle = "#d4d2cc";
               ctx.beginPath();
@@ -2107,7 +2112,7 @@
               const northScreenY = view[1] * northX + view[5] * northY + view[9] * northZ;
               ctx.rotate(Math.atan2(northScreenX, northScreenY) - phaseAngle);
               ctx.scale(radius, radius);
-              ctx.globalAlpha = moonAlpha * 0.34;
+              ctx.globalAlpha = moonAlpha * 0.34 * (1 - 0.6 * moonHaze);
               ctx.fillStyle = "#666568";
               ctx.beginPath();
               for (let i = 0; i < MOON_BASINS.length; i += 4) {
@@ -2116,7 +2121,7 @@
                 ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
               }
               ctx.fill();
-              ctx.globalAlpha = moonAlpha * 0.2;
+              ctx.globalAlpha = moonAlpha * 0.2 * (1 - 0.6 * moonHaze);
               ctx.fillStyle = "#dedbd4";
               ctx.strokeStyle = "#f0ece6";
               ctx.lineWidth = 0.006;

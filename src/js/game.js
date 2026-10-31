@@ -59,7 +59,7 @@
     if (list.length > RECENT_HANDLES) list.length = RECENT_HANDLES;
   };
   const isEntry = (e, catalog) => e && typeof e === "object" && isString(e.id, 40) && catalog.some((c) => c.id === e.itemId) && LOOT_TIERS.some((t) => t.tier === e.tier) && isString(e.donationId, 64) && Number.isFinite(e.at);
-  const defaults = () => ({ inventory: [], assignments: {}, handle: "", message: "", recentHandles: [], recentDonations: [], handFed: 0, totalSats: 0, donations: 0, bananas: 0, lastTip: 0, tipDays: [], donors: [], race: { best: {}, cup: null }, drop: { best: null, jumps: 0 }, orbit: { best: null, build: null }, mine: { best: null }, arcade: { skee: 0, hoops: 0, shy: 0, claw: 0, hockey: 0, billiards: 0, darts: 0, pinball: 0, ride: 0, invaders: 0, snake: 0, pong: 0, stampede: 0, flap: 0, breaker: 0, dash: 0, stacker: 0, machines: {}, tickets: 0, prizes: [] } });
+  const defaults = () => ({ inventory: [], assignments: {}, handle: "", message: "", recentHandles: [], recentDonations: [], handFed: 0, totalSats: 0, donations: 0, bananas: 0, lastTip: 0, tipDays: [], donors: [], race: { best: {}, cup: null }, drop: { best: null, jumps: 0 }, orbit: { best: null, build: null }, mine: { best: null }, cloudHopper: { unlocked: 1, last: 0, players: [] }, arcade: { skee: 0, hoops: 0, shy: 0, claw: 0, hockey: 0, billiards: 0, darts: 0, pinball: 0, ride: 0, invaders: 0, snake: 0, pong: 0, stampede: 0, flap: 0, breaker: 0, dash: 0, stacker: 0, machines: {}, tickets: 0, prizes: [] } });
   // Ooga Arcade's carnival bests, each capped past the most its game can score (nine doubled 100s; the round games
   // run on), the retro cabinets' bests (`retro-games.js`, capped past any run), the ticket balance, and the prizes
   // (`ARCADE_PRIZES` ids) redeemed at the counter.
@@ -71,6 +71,10 @@
   const ORBIT_LANDINGS = ["pad", "islet", "island", "land", "sea", "overpressure", "stuck", "heat", "breakup", "burnup", "splat", "crash", "wreck", "debris"];
   const CUP_MEDALS = ["gold", "silver", "bronze"];
   const MINE_ENDINGS = ["goal", "time", "broke", "wrecked", "seized", "left"];
+  // Cloud Hopper's levels unlocked in this browser, the level played last (0 for none; the dock plays its score), and
+  // each player's best per level in whole milliseconds (0 for none), keyed by GitHub login ("" signed out), the most
+  // recently played first, at most CLOUD_PLAYERS of them.
+  const CLOUD_LEVELS = 8, CLOUD_PLAYERS = 8, CLOUD_LOGIN = /^(?:[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?)?$/i;
   const isTime = (v) => Number.isFinite(v) && v > 0 && v < 36e5;
   const load = (catalog) => {
     const state = defaults();
@@ -138,6 +142,14 @@
       if (m && Number.isFinite(m.sats) && m.sats >= 0 && m.sats < 1e15 && Number.isFinite(m.seconds) && m.seconds > 0 && m.seconds <= BL.mineRigs.RUN_SECONDS
         && MINE_ENDINGS.includes(m.ending) && typeof m.won === "boolean" && Number.isFinite(m.score) && m.score >= 0 && m.score < 1e7) {
         state.mine.best = { sats: Math.floor(m.sats), seconds: Math.floor(m.seconds), ending: m.ending, won: m.won, score: Math.floor(m.score), continued: m.continued === true };
+      }
+      const c = parsed.cloudHopper;
+      if (c && Number.isSafeInteger(c.unlocked) && c.unlocked >= 1 && c.unlocked <= CLOUD_LEVELS) state.cloudHopper.unlocked = c.unlocked;
+      if (c && Number.isSafeInteger(c.last) && c.last >= 1 && c.last <= CLOUD_LEVELS) state.cloudHopper.last = c.last;
+      if (c && Array.isArray(c.players)) for (const p of c.players.slice(0, CLOUD_PLAYERS)) {
+        if (!p || !isString(p.login, 39) || !CLOUD_LOGIN.test(p.login) || !Array.isArray(p.best) || p.best.length > CLOUD_LEVELS
+          || state.cloudHopper.players.some((q) => q.login === p.login)) continue;
+        state.cloudHopper.players.push({ login: p.login, best: p.best.map((ms) => (isTime(ms) ? Math.floor(ms) : 0)) });
       }
       const a = parsed.arcade;
       if (a && typeof a === "object") for (const kind in ARCADE_MAX) {
@@ -313,6 +325,29 @@
       save(state);
       return true;
     };
+    // A clean Cloud Hopper finish, signed in or out, online or not: the player's best for the level and, when
+    // it was the highest level unlocked, the next one of `levels`. Says whether either changed.
+    const recordCloudHopper = (login, level, ms, levels) => {
+      const players = state.cloudHopper.players, at = players.findIndex((p) => p.login === login);
+      const player = at < 0 ? { login, best: [] } : players.splice(at, 1)[0];
+      players.unshift(player);
+      if (players.length > CLOUD_PLAYERS) players.length = CLOUD_PLAYERS;
+      const prior = player.best[level - 1] || 0, best = !prior || ms < prior;
+      if (best) {
+        while (player.best.length < level) player.best.push(0);
+        player.best[level - 1] = Math.floor(ms);
+      }
+      const unlocked = level < levels && state.cloudHopper.unlocked === level;
+      if (unlocked) state.cloudHopper.unlocked = level + 1;
+      save(state);
+      return { best, unlocked };
+    };
+    const playCloudHopper = (level) => {
+      if (state.cloudHopper.last === level) return;
+      state.cloudHopper.last = level;
+      save(state);
+    };
+    const cloudHopperBest = (login, level) => state.cloudHopper.players.find((p) => p.login === login)?.best[level - 1] || 0;
     const arcadeBest = (machine) => state.arcade.machines[machine] || 0;
     const recordArcade = (kind, score, machine = null) => {
       if (!Object.hasOwn(ARCADE_MAX, kind) || !Number.isFinite(score) || score <= 0) return false;
@@ -366,7 +401,7 @@
       if (seconds < 5400) return `${Math.round(seconds / 60)}m`;
       return `${(seconds / 3600).toFixed(1)}h`;
     };
-    return { state, countOf, lootFor: lootForVisitor, addItem, assign, unassign, itemOf, assignedTo, clearLoot, resetAll, recordDonation, rememberHandle, tipsWithin, recordHandFed, recordRace, recordCup, recordJump, recordDrop, recordOrbit, recordMine, recordArcade, arcadeBest, addTickets, spendTickets, redeem, setOrbitBuild, setIdentity, forecast, formatDuration };
+    return { state, countOf, lootFor: lootForVisitor, addItem, assign, unassign, itemOf, assignedTo, clearLoot, resetAll, recordDonation, rememberHandle, tipsWithin, recordHandFed, recordRace, recordCup, recordJump, recordDrop, recordOrbit, recordMine, recordCloudHopper, playCloudHopper, cloudHopperBest, recordArcade, arcadeBest, addTickets, spendTickets, redeem, setOrbitBuild, setIdentity, forecast, formatDuration };
   };
   BL.game = { create, ARCADE_KINDS: Object.keys(ARCADE_MAX), LOOT_TIERS, STACK_MAX, SATS_PER_BANANA, tierFor, lootFor, bananasFor, formatLarge, formatThree, formatFeeRate };
 })();

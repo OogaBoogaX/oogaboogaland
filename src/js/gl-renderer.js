@@ -1492,6 +1492,7 @@ uniform float uHazeDrop;
 uniform float uClouds;
 uniform vec4 uSea;
 uniform vec2 uSeaEye;
+uniform vec2 uSeaFog;
 layout(location=0) out vec4 oColor;
 layout(location=1) out vec4 oBright;
 float hash(vec2 p) {
@@ -1565,8 +1566,11 @@ void main() {
   float sunDisc = pow(sd, 600.0) * (1.0 - uStars);
   vec3 sun = uSun * (sunDisc + pow(sd, 6.0) * 0.18 * (1.0 - uStars));
   float moonDot = dot(d, uMoonDir);
-  float moonEdge = max(fwidth(moonDot), 0.000005);
-  float moonDisc = smoothstep(0.9985 - moonEdge, 0.9985 + moonEdge, moonDot);
+  // Haze in front of the moon diffuses it rather than only tinting it: low in the haze bank, behind thin cloud,
+  // or washed out by daylight, its edge, its terminator and its markings all soften.
+  float moonHaze = clamp(max(1.0 - smoothstep(0.02, 0.4, uMoonDir.y + uHazeDrop), 0.5 * (1.0 - uStars)) + 0.5 * uClouds, 0.0, 1.0);
+  float moonEdge = max(fwidth(moonDot), 0.000005), moonSoft = moonHaze * 0.0011;
+  float moonDisc = smoothstep(0.9985 - moonEdge - moonSoft, 0.9985 + moonEdge + moonSoft * 0.35, moonDot);
   vec3 moon = vec3(0.0), moonBright = vec3(0.0);
   if (moonDisc > 0.0 && skyMask > 0.0) {
     float moonOpacity = moonDisc * mix(0.3, 1.0, uStars);
@@ -1576,12 +1580,13 @@ void main() {
     vec3 moonUp = abs(uMoonDir.y) < 0.98 ? vec3(0.0, 1.0, 0.0) : vec3(0.0, 0.0, 1.0);
     vec3 moonRight = normalize(cross(uMoonDir, moonUp));
     moonUp = cross(moonRight, uMoonDir);
-    float albedo = moonAlbedo(vec2(dot(moonOffset, moonRight), dot(moonOffset, moonUp)));
+    float albedo = mix(moonAlbedo(vec2(dot(moonOffset, moonRight), dot(moonOffset, moonUp))), 0.86, moonHaze * 0.6);
     float moonLight = dot(moonNormal, uMoonSunDir);
-    float moonLit = smoothstep(-0.015, 0.015, moonLight);
+    float moonLit = smoothstep(-0.015 - moonHaze * 0.12, 0.015 + moonHaze * 0.12, moonLight);
     vec3 moonDay = vec3(0.8, 0.79, 0.76) * albedo * (0.18 + 0.82 * sqrt(max(0.0, moonLight)));
     vec3 earthshine = vec3(0.1, 0.11, 0.14) * albedo * (0.85 + 0.15 * moonDepth);
-    vec3 moonSurface = mix(mix(col, earthshine, uStars), moonDay, moonLit);
+    // Earthshine fills the shadowed side at night; by day it still shows faintly, a dimmer disc behind the lit part.
+    vec3 moonSurface = mix(mix(col, earthshine, mix(0.45, 1.0, uStars)), moonDay, moonLit);
     // Keep the shadowed terrain visible and the lit terrain clear of bloom.
     moon = (moonSurface - col) * moonOpacity;
     moonBright = moonDay * moonLit * moonOpacity * 0.06;
@@ -1634,6 +1639,8 @@ void main() {
     // farther out as the eye climbs, retaining visible water below a high dive.
     float lift = max(0.0, uSea.z - uSea.y - 120.0);
     float haze = smoothstep(160.0 + lift * 1.2, 900.0 + lift * 2.5, t);
+    // A scene that asks for it (seaFog) hazes the sea with its own fog too, so the water reads as far as the clouds do.
+    if (uSeaFog.y > uSeaFog.x) haze = max(haze, smoothstep(uSeaFog.x, uSeaFog.y, t));
     // At sea level the distance haze may not finish before the ray cutoff;
     // fade water out there too so the horizon stays continuous at every height.
     col = mix(col, water, (1.0 - haze) * smoothstep(0.0005, 0.01, -d.y));
@@ -1936,7 +1943,7 @@ void main() {
         foliageShadow: compile(FOLIAGE_SHADOW_VS, FOLIAGE_SHADOW_FS, MESH_UNIFORMS),
         shadow: compile(ORDINARY_SHADOW_VS, SHADOW_FS, ["uRigCount", "uRigPass", "uRigMatrices", "uRigVisibility", "uLightViewProj", "uClipMinY", "uClipMaxY", "uObjectClip"]),
         line: compile(LINE_VS, LINE_FS, ["uViewProj", "uViewport", "uWidth", "uClipMaxY", "uObjectClip"]),
-        sky: compile(QUAD_VS, SKY_FS, ["uInvViewProj", "uHorizon", "uZenith", "uSun", "uSunDir", "uMoonDir", "uMoonSunDir", "uStarMatrix", "uStars", "uTime", "uHazeDrop", "uClouds", "uSea", "uSeaEye"]),
+        sky: compile(QUAD_VS, SKY_FS, ["uInvViewProj", "uHorizon", "uZenith", "uSun", "uSunDir", "uMoonDir", "uMoonSunDir", "uStarMatrix", "uStars", "uTime", "uHazeDrop", "uClouds", "uSea", "uSeaEye", "uSeaFog"]),
         blur: compile(QUAD_VS, BLUR_FS, ["uTex", "uDir"]),
         composite: compile(QUAD_VS, COMPOSITE_FS, ["uScene", "uBloom", "uBloomWide", "uBloomStrength", "uDepth", "uShaft", "uShaftColor"])
       };
@@ -4254,6 +4261,7 @@ void main() {
         gl.uniform1f(pg.sky.u.uClouds, clouds);
         gl.uniform4f(pg.sky.u.uSea, sea === null ? 0 : 1, sea === null ? 0 : sea, camera.position.y, 0);
         gl.uniform2f(pg.sky.u.uSeaEye, camera.position.x, camera.position.z);
+        gl.uniform2f(pg.sky.u.uSeaFog, opts.seaFog && fog ? fogNear : FOG_OFF, opts.seaFog && fog ? fogFar : FOG_OFF + 1);
       }
       // Set the light back far enough to bracket the shadowed volume.
       const lightDist = shadowExtent * 1.8, lightDepth = shadowExtent * 1.5;
