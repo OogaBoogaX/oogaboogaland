@@ -2081,14 +2081,12 @@
               const phaseAngle = Math.atan2(-sy, sx);
               ctx.rotate(phaseAngle);
               const moonNight = opts.stars || 0, moonAlpha = 0.3 + 0.7 * moonNight;
-              // Faint earthshine keeps the shadowed hemisphere visible at night.
-              if (moonNight > 0) {
-                ctx.globalAlpha = moonNight * moonAlpha;
-                ctx.fillStyle = "#202227";
-                ctx.beginPath();
-                ctx.arc(0, 0, radius, 0, Math.PI * 2);
-                ctx.fill();
-              }
+              // Earthshine keeps the shadowed hemisphere visible at night, and faintly by day too.
+              ctx.globalAlpha = (0.45 + 0.55 * moonNight) * moonAlpha;
+              ctx.fillStyle = "#202227";
+              ctx.beginPath();
+              ctx.arc(0, 0, radius, 0, Math.PI * 2);
+              ctx.fill();
               ctx.globalAlpha = moonAlpha;
               ctx.fillStyle = "#d4d2cc";
               ctx.beginPath();

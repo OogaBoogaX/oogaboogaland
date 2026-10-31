@@ -1582,7 +1582,8 @@ void main() {
     float moonLit = smoothstep(-0.015, 0.015, moonLight);
     vec3 moonDay = vec3(0.8, 0.79, 0.76) * albedo * (0.18 + 0.82 * sqrt(max(0.0, moonLight)));
     vec3 earthshine = vec3(0.1, 0.11, 0.14) * albedo * (0.85 + 0.15 * moonDepth);
-    vec3 moonSurface = mix(mix(col, earthshine, uStars), moonDay, moonLit);
+    // Earthshine fills the shadowed side at night; by day it still shows faintly, a dimmer disc behind the lit part.
+    vec3 moonSurface = mix(mix(col, earthshine, mix(0.45, 1.0, uStars)), moonDay, moonLit);
     // Keep the shadowed terrain visible and the lit terrain clear of bloom.
     moon = (moonSurface - col) * moonOpacity;
     moonBright = moonDay * moonLit * moonOpacity * 0.06;
