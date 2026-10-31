@@ -55,6 +55,9 @@
     guideArt.setAttribute("role", "img");
     introArt.alt = "An Ooga racing between clouds toward the island below.";
     introArt.draggable = resultArt.draggable = false;
+    // A hosted page serves the art as files under art/, fetched when a card first shows one; a picture that cannot be
+    // fetched leaves its card without it rather than a broken image, and the next card asks again.
+    introArt.onerror = resultArt.onerror = (event) => { event.currentTarget.hidden = true; };
     introArt.hidden = guideArt.hidden = back.hidden = true;
     glow.setAttribute("aria-hidden", "true");
     resultTime.setAttribute("aria-label", "Finish time");

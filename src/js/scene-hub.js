@@ -7585,7 +7585,7 @@
       faces: [{ i: [0, 1, 2, 3], color: [0, 0, 0], emissive: 0 }], lines: [], castShadow: false };
     // The sheet faces back over the plaza, so its picture's left edge sits at +x, the side the viewer sees on their
     // left: a negative width runs the rect that way, in both renderers.
-    sheet.imageSurface = { asset: { width: 3090, height: 4092, load: () => wpImage }, rect: [WP.w / 2, 0, -WP.w, WP.h] };
+    sheet.imageSurface = { asset: { width: 2060, height: 2728, load: () => wpImage }, rect: [WP.w / 2, 0, -WP.w, WP.h] };
     wpPoster = sheet;
     wpSheet = createNode({ geometry: sheet, position: { x: 0, y: WP.base, z: -WP.depth / 2 - 0.012 } });
     // The opposite face shares the same poster and texture, turned outwards so the paper reads normally there too.
@@ -7733,6 +7733,8 @@
     if (visit !== wpVisit || signal && signal.aborted) return false;
     if (!BL.whitepaperPoster || !BL.whitepaperPages) throw new Error("Whitepaper unavailable");
     if (!wpGroup) wpBuild();
+    // A hosted page fetches the poster as its own file; one that failed is asked for again on the next try.
+    else if (wpImage.complete && !wpImage.naturalWidth) wpImage.src = BL.whitepaperPoster.poster;
     await wpImage.decode();
     return visit === wpVisit && !(signal && signal.aborted);
   };
@@ -7740,7 +7742,7 @@
     chalkboard.openNow || clankerPlay.active || !!(ghosts && ghosts.busy) || !!(islandGuide && islandGuide.holding);
   const wpRaise = () => {
     if (wpBusy()) return false;
-    if (!wpGroup) {
+    if (!wpGroup || !wpImage.naturalWidth) {
       if (wpLoading) return true;
       wpLoading = true;
       const visit = wpVisit;

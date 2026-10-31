@@ -6,8 +6,8 @@
 // (/OogaRally/) to its address and anything else home; sitemap.xml and robots.txt list the routes, and
 // cards/ holds the card images from `npm run cards`; a route without an `image` uses home's. Modules tagged
 // `data-defer` move out of the pages into js/<group>-<hash>.js (scripts/distribution-modules.mjs), fetched when needed.
-// `--audio-assets` and `--image-assets` write the DSB entrance recordings and the DSB rooms' pictures as same-origin
-// files under audio/ and art/; `npm run build:site` and `npm run serve` pass both, and the portable page stays whole.
+// `--audio-assets` and `--image-assets` write the DSB entrance recordings and the pictures in PICTURE_MODULES (the DSB
+// rooms', the whitepaper poster, Cloud Hopper's art) as same-origin files under audio/ and art/; `npm run build:site` and `npm run serve` pass both, and the portable page stays whole.
 // `--page-assets`, last, moves the page's own script and stylesheet out of every route page into js/main-<hash>.js and
 // css/style-<hash>.css, with the jumbotron's snapshot, which every deploy rebakes, in its own
 // js/jumbotron-data-<hash>.js before the code (`externalizePage`), so the 23 pages share one cached copy. `--headers
@@ -51,8 +51,9 @@ if (process.argv.includes("--worker-page")) {
 }
 if (process.argv.includes("--audio-assets")) shell = externalizeAudio(shell, root, out);
 const pictures = process.argv.includes("--image-assets");
-if (pictures) for (const src of PICTURE_MODULES) if (![...deferred.values()].some((sources) => sources.includes(src))) throw new Error(`${src}: --image-assets needs it in a data-defer group`);
-shell = externalizeModules(shell, out, deferred, block, writeTerrainWorker(root, out), pictures ? (src, text) => PICTURE_MODULES.includes(src) ? externalizePictures(src, text, out) : text : undefined);
+// A picture module outside every data-defer group stays in the page's own script and is rewritten there.
+const inlinePictures = pictures ? PICTURE_MODULES.filter((src) => ![...deferred.values()].some((sources) => sources.includes(src))) : [];
+shell = externalizeModules(shell, out, deferred, block, writeTerrainWorker(root, out), pictures ? (src, text) => PICTURE_MODULES.includes(src) ? externalizePictures(src, text, out) : text : undefined, inlinePictures);
 if (process.argv.includes("--page-assets")) shell = externalizePage(shell, out, block, ["js/jumbotron-data.js"]);
 if (shell.split("</title>").length !== 2 || shell.split("</head>").length !== 2) throw new Error("oogaboogaland.html: expected one <title> and one </head>");
 
