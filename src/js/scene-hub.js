@@ -7616,6 +7616,7 @@
     placed.push(wpChar);
     group.visible = false;
     addChild(root, group);
+    placed.push(group);
     wpGroup = group;
     // Where the view stands once the stone is up: in front of the sheet's middle, the field of view left as it was.
     wpEye = { x: x - dx * WP.dist, y: wpGround + WP.base + WP.h / 2, z: z - dz * WP.dist };
@@ -7623,6 +7624,58 @@
     // Where the strike is watched from: ten metres back, low over the crest, on the ground it lands on.
     wpWideEye = { x: x - dx * WP.strikeDist, y: wpGround + WP.strikeEye, z: z - dz * WP.strikeDist };
     wpWideLook = { x, y: wpGround + WP.strikeLook, z };
+  };
+  // The strike's thunder, made once a visit from a fixed seed: a crack and the rumble under it, played as the bolt
+  // lands. It is the hub's only sound, so it joins the page-wide mute.
+  let wpAudio = null, wpRumble = null, wpCrack = null;
+  const wpAudioOn = () => {
+    if (wpAudio) return wpAudio;
+    if (typeof AudioContext === "undefined" || navigator.userActivation && !navigator.userActivation.hasBeenActive) return null;
+    const ctx = new AudioContext(), rand = mulberry32(fnv1a("whitepaper-thunder"));
+    // Brown noise for the rumble, brought to a peak of 0.85 so it never clips at the speakers.
+    wpRumble = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 4), ctx.sampleRate);
+    const data = wpRumble.getChannelData(0);
+    let low = 0, peak = 0;
+    for (let i = 0; i < data.length; i++) {
+      const white = rand() * 2 - 1;
+      low = (low + white * 0.05) * 0.99;
+      data[i] = low * 2.2;
+      if (Math.abs(data[i]) > peak) peak = Math.abs(data[i]);
+    }
+    const scale = peak > 0 ? 0.85 / peak : 1;
+    for (let i = 0; i < data.length; i++) data[i] *= scale;
+    // The crack is white noise of its own, short enough to cut through the rumble's band.
+    wpCrack = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 1), ctx.sampleRate);
+    const crackData = wpCrack.getChannelData(0);
+    for (let i = 0; i < crackData.length; i++) crackData[i] = (rand() * 2 - 1) * 0.6;
+    if (ctx.state === "suspended") ctx.resume().catch(() => {});
+    wpAudio = ctx;
+    return ctx;
+  };
+  const wpThunder = (when) => {
+    const ctx = wpAudioOn();
+    if (!ctx) return;
+    const out = BL.sound.output(ctx), t0 = ctx.currentTime + when;
+    // The crack, a short band of white noise, and the rumble under it, slowed and a lowpass falling away.
+    const crack = ctx.createBufferSource(), crackFilter = ctx.createBiquadFilter(), crackGain = ctx.createGain();
+    crack.buffer = wpCrack;
+    crackFilter.type = "bandpass"; crackFilter.frequency.value = 1700; crackFilter.Q.value = 0.7;
+    crackGain.gain.setValueAtTime(0, t0);
+    crackGain.gain.linearRampToValueAtTime(0.5, t0 + 0.012);
+    crackGain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.55);
+    crack.connect(crackFilter); crackFilter.connect(crackGain); crackGain.connect(out);
+    crack.start(t0); crack.stop(t0 + 0.6);
+    const rumble = ctx.createBufferSource(), rumbleFilter = ctx.createBiquadFilter(), rumbleGain = ctx.createGain();
+    rumble.buffer = wpRumble; rumble.playbackRate.value = 0.55;
+    rumbleFilter.type = "lowpass";
+    rumbleFilter.frequency.setValueAtTime(430, t0);
+    rumbleFilter.frequency.exponentialRampToValueAtTime(70, t0 + 3.2);
+    rumbleGain.gain.setValueAtTime(0, t0);
+    rumbleGain.gain.linearRampToValueAtTime(0.75, t0 + 0.07);
+    rumbleGain.gain.setValueAtTime(0.75, t0 + 0.5);
+    rumbleGain.gain.exponentialRampToValueAtTime(0.001, t0 + 3.6);
+    rumble.connect(rumbleFilter); rumbleFilter.connect(rumbleGain); rumbleGain.connect(out);
+    rumble.start(t0); rumble.stop(t0 + 3.8);
   };
   // The whole show: the stone back in the ground, the bolt striking where it will break out, the flash, then the climb.
   const wpShow = () => {
@@ -7633,10 +7686,23 @@
     wpGroup.position.y = wpGround - WP.sink;
     wpBolt.visible = true;
     if (wpChar) wpChar.visible = false;
+    wpThunder(WP.strike);
     holdTheView(true);
   };
+  // The poster and the pages are their own deferred group on a hosted page: the shelf's tap fetches them, then raises
+  // the stone. In the source tree and the portable page they are already present, so this answers at once.
+  let wpLoading = false;
   const wpRaise = () => {
-    if (!BL.whitepaperPoster || gameMode || factoryDeparting || bifrostDeparting || islandGuide && islandGuide.holding) return false;
+    if (gameMode || factoryDeparting || bifrostDeparting || islandGuide && islandGuide.holding) return false;
+    if (!BL.whitepaperPoster || !BL.whitepaperPages) {
+      if (wpLoading) return true;
+      wpLoading = true;
+      const loading = BL.deferred.load("whitepaper");
+      if (!loading) { wpLoading = false; return wpRaise(); }
+      loading.then(() => { wpLoading = false; wpRaise(); },
+        () => { wpLoading = false; hud.toast("The whitepaper could not be fetched"); });
+      return true;
+    }
     if (!wpGroup) wpBuild();
     // Already out of the ground: the view is taken back to it, without the stone breaking out again.
     if (wpStanding) { wpTime = WP.strike + WP.rise; holdTheView(true); return true; }
@@ -10899,9 +10965,14 @@
     timechainIsland.gate.dispose();
     islandGuide.suspend();
     chalkboard.suspend();
-    // The whitepaper's monolith stays in the retained graph, lowered out of sight, and the view is the pilot's again.
+    // The whitepaper's monolith stays in the retained graph, lowered out of sight, and the view is the pilot's again:
+    // a show left mid-way is stopped, which lets the view go, and an armed fly-back is dropped so the next arrival
+    // keeps the eye the director hands it.
+    if (wpTime >= 0) wpStop();
     wpTime = -1; wpRise = wpFlash = 0; wpStanding = false; wpStruck = false;
     if (wpRead) wpReadEnd();
+    wpReturn = -1;
+    if (wpAudio) { wpAudio.close().catch(() => {}); wpAudio = null; wpRumble = wpCrack = null; }
     if (wpBolt) wpBolt.visible = false;
     if (wpChar) wpChar.visible = false;
     if (wpGroup) { wpGroup.visible = false; wpGroup.position.y = wpGround - WP.sink; }
@@ -12227,6 +12298,15 @@
     }
     bifrostIsle = null;
     mirrorCave.body.dispose();
+    // The whitepaper's monolith goes with the root; its picture is made again by the next visit that raises it. Its
+    // teardown gives the view back, so it must run before the pilot goes.
+    wpTime = -1; wpRise = wpFlash = 0; wpStanding = false;
+    if (wpRead) wpReadEnd();
+    if (wpAudio) { wpAudio.close().catch(() => {}); wpAudio = null; wpRumble = wpCrack = null; }
+    wpGroup = wpImage = wpSheet = wpPoster = wpBolt = wpChar = wpBanner = null;
+    wpBannerGeos.clear(); wpBannerPairs.length = 0; wpBannerNight = null; wpBannerTime = 0;
+    wpBannerFade = 0; wpReturn = -1; wpSinkTimer = -1; wpSinkT = -1;
+    wpStrip = wpStripImage = null;
     pilot.dispose();
     if (oogatronUnsub) {
       oogatronUnsub();
@@ -12243,13 +12323,6 @@
     }
     for (const node of targets) input.remove(node);
     for (const node of placed) removeChild(root, node);
-    // The whitepaper's monolith goes with the root; its picture is made again by the next visit that raises it.
-    wpTime = -1; wpRise = wpFlash = 0; wpStanding = false;
-    if (wpRead) wpReadEnd();
-    wpGroup = wpImage = wpSheet = wpPoster = wpBolt = wpChar = wpBanner = null;
-    wpBannerGeos.clear(); wpBannerPairs.length = 0; wpBannerNight = null; wpBannerTime = 0;
-    wpBannerFade = 0; wpReturn = -1; wpSinkTimer = -1; wpSinkT = -1;
-    wpStrip = wpStripImage = null;
     targets.length = placed.length = claimed.length = scenery.length = sceneryClaims.length = matrixGates.length = sealedCaves.length = clouds.length = lamps.length = pilePosts.length = fireSeats.length = sleepers.length = labels.length = signDetails.length = spots.length = chillSpots.length = headquartersRimLintels.length = climbMasonry.length = props.length = meadowPalms.length = 0;
     fireHazards.length = 0;
     fireRigs = null;
