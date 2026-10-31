@@ -858,7 +858,7 @@
       fire(head, cup(head, 3.45, z, 0.1), z, 1, 0, 0.3);
     }
     const backRow = Math.min(...MEZZ_POSTS.map(([, z]) => z));
-    for (const bx of LAYOUT.darts) { for (const [px, pz] of MEZZ_POSTS) { yield* pause(slice);
+    for (const { x: bx } of LAYOUT.darts) { for (const [px, pz] of MEZZ_POSTS) { yield* pause(slice);
       if (pz !== backRow || Math.abs(px - bx) > 2) continue;
       const s = Math.sign(bx - px), z = pz + 0.24, head = [px + s * 0.12, 2.1, z + 0.14];
       round.push(J.bamboo(px + s * 0.02, 1.4, z, ...head, 0.04));
@@ -3339,7 +3339,7 @@
   const fameBaked = (rows) => {
     const c = 0.045, W = FAME_W * c, H = (11 + rows.length * FAME_ROW) * c, g = geometry(), h = 0.26, z = 0.004;
     daubPoly(g, [[-W / 2, -H / 2], [W / 2, -H / 2], [W / 2, H / 2], [-W / 2, H / 2]], "#5a5048", 0.06);
-    brushWord(g, "BIG OOGAS", 0, H / 2 - 4.5 * c, 0.3, 0.05, EARTH_CHALK, 0.4, z);
+    brushWord(g, "MACHINE BESTS", 0, H / 2 - 4.5 * c, 0.3, 0.05, EARTH_CHALK, 0.4, z);
     daubZigzag(g, 4 * c - W / 2, W / 2 - 5 * c, H / 2 - 9.5 * c, 0.035, 18, 0.03, EARTH_RED, 0.3, z);
     rows.forEach(([name, initials, score, mine], i) => {
       const y = H / 2 - (15.5 + i * FAME_ROW) * c, digits = String(score);

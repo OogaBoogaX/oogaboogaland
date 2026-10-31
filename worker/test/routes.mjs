@@ -7,11 +7,13 @@ import * as crypto from "../src/crypto.js";
 import * as db from "../src/db.js";
 import { createOwnedCharacterLookup } from "../src/contributor-policy.js";
 import { RULES } from "../src/tess-rules.js";
+import "../../src/js/highscore-rules.js";
 
 const load = (name, dependencies, exports) => {
   const url = new URL(`../src/${name}.js`, import.meta.url);
   const source = readFileSync(url, "utf8")
     .replace(/import\s+[\s\S]*?from\s+"[^"]+"(?:\s+with\s*\{[^}]*\})?;/g, "")
+    .replace(/import\s+"[^"]+";/g, "")
     .replace(/export\s+\{[^}]*\}\s+from\s+"[^"]+";/g, "")
     .replace(/export default /g, "const worker = ").replace(/export const /g, "const ");
   return compileFunction(`"use strict";\n${source}\nreturn { ${exports.join(", ")} };`, Object.keys(dependencies), { filename: url.pathname })(...Object.values(dependencies));
@@ -33,6 +35,7 @@ anthropic = class { constructor() { throw new Error("Unexpected Claude call"); }
   const api = load("api", { ...cookies, ...db, ...http }, ["handleApi"]);
   const donations = load("donations", http, ["handleDonations"]);
   const tess = load("tess", { ...http, Anthropic: anthropic, FACTS: facts, RULES }, ["handleTess", "pruneTess", "ask", "RESERVE"]);
-  const main = load("index", { ...http, ...db, ...auth, ...api, ...donations, ...tess }, ["worker"]);
-  return { ...http, ...auth, ...api, ...donations, ...tess, ...main };
+  const highscores = load("highscores", http, ["handleHighscores", "createHighscoreHandler"]);
+  const main = load("index", { ...http, ...db, ...auth, ...api, ...donations, ...tess, ...highscores }, ["worker"]);
+  return { ...http, ...auth, ...api, ...donations, ...tess, ...highscores, ...main };
 };

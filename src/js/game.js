@@ -59,7 +59,7 @@
     if (list.length > RECENT_HANDLES) list.length = RECENT_HANDLES;
   };
   const isEntry = (e, catalog) => e && typeof e === "object" && isString(e.id, 40) && catalog.some((c) => c.id === e.itemId) && LOOT_TIERS.some((t) => t.tier === e.tier) && isString(e.donationId, 64) && Number.isFinite(e.at);
-  const defaults = () => ({ inventory: [], assignments: {}, handle: "", message: "", recentHandles: [], recentDonations: [], handFed: 0, totalSats: 0, donations: 0, bananas: 0, lastTip: 0, tipDays: [], donors: [], race: { best: {}, cup: null }, drop: { best: null, jumps: 0 }, orbit: { best: null, build: null }, mine: { best: null }, arcade: { skee: 0, hoops: 0, shy: 0, claw: 0, hockey: 0, billiards: 0, darts: 0, pinball: 0, ride: 0, invaders: 0, snake: 0, pong: 0, stampede: 0, flap: 0, breaker: 0, dash: 0, stacker: 0, tickets: 0, prizes: [] } });
+  const defaults = () => ({ inventory: [], assignments: {}, handle: "", message: "", recentHandles: [], recentDonations: [], handFed: 0, totalSats: 0, donations: 0, bananas: 0, lastTip: 0, tipDays: [], donors: [], race: { best: {}, cup: null }, drop: { best: null, jumps: 0 }, orbit: { best: null, build: null }, mine: { best: null }, arcade: { skee: 0, hoops: 0, shy: 0, claw: 0, hockey: 0, billiards: 0, darts: 0, pinball: 0, ride: 0, invaders: 0, snake: 0, pong: 0, stampede: 0, flap: 0, breaker: 0, dash: 0, stacker: 0, machines: {}, tickets: 0, prizes: [] } });
   // Ooga Arcade's carnival bests, each capped past the most its game can score (nine doubled 100s; the round games
   // run on), the retro cabinets' bests (`retro-games.js`, capped past any run), the ticket balance, and the prizes
   // (`ARCADE_PRIZES` ids) redeemed at the counter.
@@ -142,6 +142,13 @@
       const a = parsed.arcade;
       if (a && typeof a === "object") for (const kind in ARCADE_MAX) {
         if (Number.isFinite(a[kind]) && a[kind] >= 0 && a[kind] <= ARCADE_MAX[kind]) state.arcade[kind] = Math.floor(a[kind]);
+      }
+      // Old saves grouped all copies of a game together. They cannot identify the machine that earned a score.
+      if (a && a.machines && typeof a.machines === "object") for (const kind in ARCADE_MAX) {
+        for (const id of BL.highscoreRules.games[kind].machines) {
+          const score = a.machines[id];
+          if (Number.isSafeInteger(score) && score > 0 && score <= ARCADE_MAX[kind]) state.arcade.machines[id] = score;
+        }
       }
       if (a && Number.isFinite(a.tickets) && a.tickets >= 0 && a.tickets <= TICKETS_MAX) state.arcade.tickets = Math.floor(a.tickets);
       if (a && Array.isArray(a.prizes)) state.arcade.prizes = ARCADE_PRIZES.filter((id) => a.prizes.includes(id));
@@ -306,9 +313,15 @@
       save(state);
       return true;
     };
-    const recordArcade = (kind, score) => {
-      if (!(kind in ARCADE_MAX) || !(score > state.arcade[kind])) return false;
-      state.arcade[kind] = Math.min(ARCADE_MAX[kind], Math.floor(score));
+    const arcadeBest = (machine) => state.arcade.machines[machine] || 0;
+    const recordArcade = (kind, score, machine = null) => {
+      if (!Object.hasOwn(ARCADE_MAX, kind) || !Number.isFinite(score) || score <= 0) return false;
+      if (machine !== null && !BL.highscoreRules.games[kind].machines.includes(machine)) return false;
+      const value = Math.min(ARCADE_MAX[kind], Math.floor(score));
+      if (value <= (machine === null ? state.arcade[kind] : arcadeBest(machine))) return false;
+      if (machine !== null) state.arcade.machines[machine] = value;
+      // Retain the legacy aggregate for old callers; new machine records never inherit it.
+      state.arcade[kind] = Math.max(state.arcade[kind], value);
       save(state);
       return true;
     };
@@ -353,7 +366,7 @@
       if (seconds < 5400) return `${Math.round(seconds / 60)}m`;
       return `${(seconds / 3600).toFixed(1)}h`;
     };
-    return { state, countOf, lootFor: lootForVisitor, addItem, assign, unassign, itemOf, assignedTo, clearLoot, resetAll, recordDonation, rememberHandle, tipsWithin, recordHandFed, recordRace, recordCup, recordJump, recordDrop, recordOrbit, recordMine, recordArcade, addTickets, spendTickets, redeem, setOrbitBuild, setIdentity, forecast, formatDuration };
+    return { state, countOf, lootFor: lootForVisitor, addItem, assign, unassign, itemOf, assignedTo, clearLoot, resetAll, recordDonation, rememberHandle, tipsWithin, recordHandFed, recordRace, recordCup, recordJump, recordDrop, recordOrbit, recordMine, recordArcade, arcadeBest, addTickets, spendTickets, redeem, setOrbitBuild, setIdentity, forecast, formatDuration };
   };
-  BL.game = { create, LOOT_TIERS, STACK_MAX, SATS_PER_BANANA, tierFor, lootFor, bananasFor, formatLarge, formatThree, formatFeeRate };
+  BL.game = { create, ARCADE_KINDS: Object.keys(ARCADE_MAX), LOOT_TIERS, STACK_MAX, SATS_PER_BANANA, tierFor, lootFor, bananasFor, formatLarge, formatThree, formatFeeRate };
 })();

@@ -18,6 +18,8 @@
     slice.until = performance.now() + slice.budget;
   };
   const later = () => {
+    // Hidden tabs clamp idle callbacks and timers; there is no visible frame to yield for while the page is hidden.
+    if (typeof document !== "undefined" && document.hidden) return Promise.resolve();
     if (globalThis.scheduler && typeof scheduler.postTask === "function") return scheduler.postTask(() => {}, { priority: "user-visible" });
     return new Promise(resolve => {
       if (typeof requestIdleCallback === "function") requestIdleCallback(resolve, { timeout: 16 });

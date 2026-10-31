@@ -23,7 +23,7 @@
     return null;
   };
   // `mirror()` says whether the garage is showing the mirrored tracks, whose bests live under "<id>-m".
-  const create = ({ tracks, mounts, roster, best, onPick, mirror = () => false }) => {
+  const create = ({ tracks, mounts, roster, best, onPick, mirror = () => false, highscores = () => null }) => {
     const el = {
       race: $("race"), garage: $("garage"), racers: $("garage-racers"), mounts: $("garage-mounts"), tracks: $("garage-tracks"), help: $("garage-help"),
       strip: $("race-strip"), rank: $("race-rank"), rankSuffix: $("race-rank-suffix"), field: $("race-field"), lap: $("race-lap"), laps: $("race-laps"), time: $("race-time"),
@@ -33,6 +33,10 @@
       hudLeft: document.querySelector(".race-hud-left"), pickOoga: $("garage-pick-ooga"), joyLook: $("joy-look")
     };
     const listeners = [];
+    const sharedResult = document.createElement("p");
+    sharedResult.className = "garage-note";
+    sharedResult.hidden = true;
+    el.summary.after(sharedResult);
     const on = (target, type, fn) => {
       target.addEventListener(type, fn);
       listeners.push(() => target.removeEventListener(type, fn));
@@ -119,8 +123,10 @@
         medal.className = "garage-medal";
         const note = document.createElement("span");
         note.className = "garage-note";
-        b.append(name, medal, note);
-        trackRows.set(t.id, { medal, note });
+        const shared = document.createElement("span");
+        shared.className = "garage-note";
+        b.append(name, medal, note, shared);
+        trackRows.set(t.id, { medal, note, shared });
       })));
       refreshTracks();
       mark("racer");
@@ -128,12 +134,20 @@
       mark("track");
     };
     const refreshTracks = () => {
+      const shared = highscores();
       for (const t of tracks) {
         const r = trackRows.get(t.id), b = best()[mirror() ? `${t.id}-m` : t.id];
         const medal = b ? (b.medal || medalFor(t.targets, b.race)) : null;
         r.medal.dataset.medal = medal || "";
         r.medal.textContent = medal ? medal.toUpperCase() : "NEW";
-        r.note.textContent = b ? `best ${formatTime(b.race)} · lap ${formatTime(b.lap)} · ${t.laps} laps` : `${t.laps} laps · gold under ${formatTime(t.targets.gold)}`;
+        r.note.textContent = b ? `Local best ${formatTime(b.race)} · lap ${formatTime(b.lap)} · ${t.laps} laps` : `${t.laps} laps · gold under ${formatTime(t.targets.gold)}`;
+        const key = `race-1-${mirror() ? `${t.id}-m` : t.id}`, race = shared?.[`${key}-race`], lap = shared?.[`${key}-lap`];
+        r.shared.hidden = !shared;
+        r.shared.textContent = shared ? `Shared best ${race ? formatTime(race) : "–"} · lap ${lap ? formatTime(lap) : "–"}` : "";
+        if (t.id === selection.track) {
+          sharedResult.hidden = !shared;
+          sharedResult.textContent = r.shared.textContent;
+        }
       }
     };
     // On touch the minimap sits under the left readout, clear of the stick; mapTop is measured when the strip shows.
@@ -332,6 +346,7 @@
       ctx.restore();
     };
     const dispose = () => {
+      sharedResult.remove();
       window.clearTimeout(centerTimer);
       window.clearTimeout(noticeTimer);
       for (const off of listeners) off();
