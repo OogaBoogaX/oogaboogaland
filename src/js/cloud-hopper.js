@@ -120,6 +120,9 @@
       onGuideDone: () => finishGuide(), letterSign: hud.letterSign });
     const ghost = BL.cloudHopperGhost.create({ root, renderer: ctx.renderer });
     const audio = BL.cloudHopperAudio.create();
+    // Design review only: candidate looks on a debug page that asks for them (cloud-hopper-looks.js).
+    const lookParam = /[?&]debug=1(&|$)/.test(location.search) ? new URLSearchParams(location.search).get("hopperlook") : null;
+    const looks = lookParam && BL.cloudHopperLooks ? BL.cloudHopperLooks.create({ root, camera, renderer: ctx.renderer, look: lookParam }) : null;
     const dockMusicLevel = () => {
       const cave = pilot.player;
       if (!cave || cave !== crew.player) return 0;
@@ -171,6 +174,7 @@
       for (const node of pickupNodes) removeChild(routeRoot, node);
       cloudNodes.length = boostNodes.length = bounceNodes.length = pickupNodes.length = 0;
       launchContacts.fill(0); unrecoverableAt = -1;
+      looks?.clear();
       course = null; routeRoot.visible = false;
     };
     const moveRider = () => {
@@ -192,6 +196,7 @@
       cabinet.visible = next === "idle" || next === "intro";
       pilot.setActive(!held());
       overlay.show(next, seconds, session?.scores, latest);
+      looks?.intro(next === "intro");
       audio.stage(next === "won" && latest?.run === session.scores[0]?.run ? "best" : next);
       audio.level(next === "intro" || next === "lifting" ? DOCK_MUSIC_LEVEL : 1, 0.8);
       if (next === "intro") audio.unlock();
@@ -286,6 +291,7 @@
         pickupNodes.push(node); addChild(routeRoot, node);
       }
       routeRoot.visible = true;
+      looks?.build(course, start, liftGoal, cloudNodes, cave);
       if (replay) Object.assign(platform.position, start);
       setPhase(replay ? "ready" : "lifting");
       if (!replay) ctx.mode(true);
@@ -425,6 +431,7 @@
         node.position.x = pickup.x; node.position.y = pickup.y; node.position.z = pickup.z;
         if (node.visible) BL.cloudHopperModels.updateJetpackPickup(node, camera, displayTime + i * 2);
       }
+      looks?.update(dt, displayTime);
       if (phase === "lifting") {
         age += dt;
         const t = Math.min(1, age / LIFT_SECONDS), k = t * t * (3 - 2 * t), p = platform.position;
@@ -521,6 +528,7 @@
     };
     const drawOverlay = (c2) => {
       ghost.drawName(c2);
+      looks?.overlay(c2);
       if (phase !== "lifting" && phase !== "ready" && phase !== "running") return;
       // Keep the finish readable from the clouds, anchored to the live pile
       // rather than the course's fixed camera-framing point.
@@ -544,7 +552,7 @@
       c2.restore();
     };
     const dispose = () => {
-      cancel(); overlay.dispose(); ghost.dispose(); clearRoute();
+      cancel(); overlay.dispose(); ghost.dispose(); clearRoute(); looks?.dispose();
       audio.dispose();
       document.removeEventListener("visibilitychange", onVisibility);
       removeChild(root, routeRoot); removeChild(root, platform);
@@ -552,6 +560,7 @@
     };
     const liveGeometry = (set) => {
       ghost.liveGeometry(set);
+      looks?.liveGeometry(set);
       for (const surface of boostNodes) if (surface) set.add(surface.geometry);
       for (const marker of bounceNodes) if (marker) for (const part of marker.children) set.add(part.geometry);
       for (const node of pickupNodes) for (const part of node.children) set.add(part.geometry);
@@ -580,7 +589,7 @@
       get active() { return active(); }, get playing() { return playing(); }, get held() { return held(); },
       get actor() { return actor; }, get phase() { return phase; }, get time() { return seconds; },
       get bestGhost() { return session?.best || null; },
-      get course() { return course; }, bound: START_DISTANCE + 80 };
+      get course() { return course; }, looks, bound: START_DISTANCE + 80 };
   };
   BL.cloudHopper = { create, START_DISTANCE, START_HEIGHT, LIFT_SECONDS };
 })();

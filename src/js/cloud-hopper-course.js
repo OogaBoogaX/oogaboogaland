@@ -92,7 +92,7 @@
       Math.max(6, Math.floor(distance / minimumStep)));
     const clouds = [], landings = [], pickups = [], placements = [], step = 1 / count;
     const alongJitter = Math.min(0.08, Math.max(0, 1 - minimumStep / (distance * step)));
-    let lateral = 0, movementTime = 0, beganAt = -1, driftStart = 0, driftShift = 0, nextTurn = 0, target = 0;
+    let lateral = 0, movementTime = 0, beganAt = -1, driftStart = 0, driftShift = 0, nextTurn = 0, target = 0, courseTime = 0;
     const addCloud = (x, y, z, rx, rz, side = 0) => {
       // Each cloud chooses left or right across the course for the whole run.
       // Independent lanes and fade clocks keep the field from swaying as one.
@@ -217,6 +217,7 @@
       if (beganAt >= 0 && Number.isFinite(raceTime)) movementTime = beganAt + Math.max(0, raceTime);
       else movementTime += dt;
       const time = beganAt < 0 ? 0 : movementTime - beganAt, t = Math.min(1, time / SYNC_SECONDS);
+      courseTime = time;
       // Waiting on the start cloud still has live drift. Joining a recorded
       // course blends positions, not elapsed phase, without rewinding the
       // independently randomized disappearance clock.
@@ -273,6 +274,19 @@
           if (pickup.y < finish.y - 120) pickup.active = false;
         }
       }
+    };
+    // Seconds until this cloud starts to fade, read from the same schedule as update: 0 while it fades,
+    // negative while it is gone (minus the seconds until it returns), Infinity when its clock never starts.
+    const solidLeft = (cloud) => {
+      const age = courseTime - cloud.delay;
+      if (age === -Infinity) return Infinity;
+      if (age < 0) return -age + fadeAt(cloud, 0);
+      const cycle = Math.floor(age / cloud.cycleSeconds), local = age - cycle * cloud.cycleSeconds;
+      const fade = fadeAt(cloud, cycle), appear = fade + FADE_SECONDS + hiddenFor(cloud, cycle);
+      if (local < fade) return fade - local;
+      if (local < fade + FADE_SECONDS) return 0;
+      if (local < appear) return local - appear;
+      return cloud.cycleSeconds - local + fadeAt(cloud, cycle + 1);
     };
     const supportAt = (x, z, y, maxStep, radius = 0.3) => {
       const ceiling = y + maxStep;
@@ -429,7 +443,7 @@
         && canInterceptPickup(pickup, x, feet, z, vy, speed, jump, seaY, jetSeconds, jetAccel, height, seaTime)) return true;
       return false;
     };
-    return { clouds, pickups, start: begin, update, supportAt, contactAt, touchTime, pickupAt, canRecover };
+    return { clouds, pickups, start: begin, update, supportAt, contactAt, touchTime, pickupAt, canRecover, solidLeft };
   };
   BL.cloudHopperCourse = { create, MAX_CLOUDS, CLOUD_DEPTH, FADE_SECONDS, APPEAR_SECONDS, PICKUP_LIFT, PICKUP_RADIUS };
 })();

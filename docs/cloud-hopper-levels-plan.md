@@ -425,27 +425,36 @@ the `movePass` guards. Decision 3 in section 7.
 
 ### 5.1 Unlocks and personal bests (local)
 
-- **Save.** `game.state.cloudHopper = { unlocked: 1..4, best: [ms, ms, ms, ms] }` inside the
-  existing `oogaboogaland.v1` save, with 0 meaning "no best". `game.load` checks it (integer
-  levels, times within the registry limit), `resetAll` clears it, and a new
-  `recordCloudHopper(level, ms)` saves it.
+- **Save.** `game.state.cloudHopper = { unlocked: 1..4, players: { "<login>" | "": [ms, ms, ms, ms] } }`
+  inside the existing `oogaboogaland.v1` save, with 0 meaning "no best" and `""` the
+  signed-out player. `game.load` checks it (integer levels, times within the registry limit,
+  logins in GitHub's format), `resetAll` clears it, and a new `recordCloudHopper(login,
+  level, ms)` saves it.
+- **Personal bests persist between sessions, per player.** Each player's best for each
+  level is kept across reloads and visits, keyed by the GitHub login the run was played
+  under (the same key the session results and ghosts already use), or by `""` signed out.
+  At most eight players are kept; the one who played least recently is dropped first.
+  These are the bests the level cards and the result card show, whatever the shared
+  board says.
 - **Unlocking.** Only Level 1 starts unlocked. A clean finish unlocks the next level and
-  can set the local best. A disqualification does neither.
+  can set that player's best. A disqualification does neither.
 - **Offline and signed out.** This never depends on the shared board. A valid finish
   signed out, offline, or with the account changed during the run still unlocks the next
   level.
-- **Per browser, not per account.** This matches Rally's cup and mirror, and needs no
-  server state.
+- **Unlocks per browser, bests per player.** Unlocks match Rally's cup and mirror and need
+  no server state. Ghost recordings stay in the page session (a five-minute ghost is about
+  3 MB, too much for localStorage).
 
 ### 5.2 Selection flow (modelled on Rally's garage)
 
-- **Intro card.** Between the title and Start ride, the card lists one row per level,
-  styled like `.garage-list`. Each row shows:
-  - a small painted preview of the level's environment (canvas pictures made once, as the
-    guide pictures are);
-  - the level number and name, and its route length;
-  - its status (New, the local best, or locked).
-- **Layout.** The rows sit in one row on desktop and a 2×2 grid on phones.
+- **Intro card.** Between the title and Start ride, the card shows one picture card per
+  level (chosen layout B, refined). Each card shows:
+  - a preview of the level's environment, with the level's number in the picture's
+    top-left corner;
+  - the level's name alone on its own single row;
+  - its route length and status (New, the player's best, or a lock and "Complete Level N
+    to unlock") on the rows below.
+- **Layout.** Four cards in a row on desktop, a 2×2 grid on phones.
 - **Choosing.** Arrows or Tab move between rows, a click or tap selects, and Enter or Space
   starts, keeping the existing fresh-press guard.
 - **Locked rows** still show the preview, with a lock and the line "Complete Level N to
@@ -562,7 +571,28 @@ today's board at the same time (decision 7).
 | 9 | Updraft activation | **Space when the air jump is spent**, not automatic |
 | 10 | Crumble clouds as L3's hazard | **Yes** |
 | 11 | Level names and expected times | As in 2.3; to be confirmed after a play-test measures today's times |
-| 12 | Personal bests kept across visits | **Yes**, per level in the existing save (today they last one session) |
+| 12 | Personal bests kept across visits | **Decided: yes**, per level and per player in the existing save (5.1) |
+
+## 7a. Chosen looks (decided 2026-10-31)
+
+Picked from real gameplay frames of each candidate. The candidates live in the temporary,
+debug-only `src/js/cloud-hopper-looks.js` (`?debug=1&hopperlook=<tokens>`), which goes once
+the chosen looks move into the level modules (milestones 8–12).
+
+| What | Choice |
+|---|---|
+| L1 Bluebird Hop | **B**: 08:15 morning, floating grassy islets with trees under soft painted cumulus |
+| L2 Amber Spires | **A**: 17:30 golden hour, towering cumulus stacks far around the island, light painted clouds |
+| L3 Aurora Heights | **A**: 00:30 moonlit night, stars, green aurora curtains |
+| L4 Thunderhead | **B**: dark storm, haze 50–200 m that also hazes out the sea, rain, nearer lightning |
+| X-ray | **A**: ring gauge emptying over 20 s with seconds inside; a gold ∞ diamond on permanent clouds |
+| Warning | **A**: the cloud thins in a dithered pulse that quickens as its time runs out |
+| Pickups | **B set**: stone goggles (X-ray), sky feather (Updraft), bone anchor (Anchor) |
+| Level select | **B, refined**: picture cards with the number in the picture's corner and the name on its own row |
+
+The storm's haze needed one renderer change: the sea, drawn in the sky pass, now follows the
+scene's fog when a scene asks for it (`seaFog`, WebGL). The Canvas 2D sea follows in
+milestone 12.
 
 ## 8. Acceptance criteria
 

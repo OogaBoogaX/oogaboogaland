@@ -8446,6 +8446,7 @@
       RENDER_OPTS.clouds = 0;
       RENDER_OPTS.fog = RENDER_OPTS.horizon;
       RENDER_OPTS.fogNear = 900; RENDER_OPTS.fogFar = 2000;
+      cloudHopper.looks?.sky(RENDER_OPTS);
     } else if (gameMode) RENDER_OPTS.clouds = 0;
     else weather.update(dt, RENDER_OPTS, poolShade);
     if (poolShade > 0) {
