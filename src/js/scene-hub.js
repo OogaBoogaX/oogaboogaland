@@ -7503,7 +7503,7 @@
     const c = WP_BANNER_CELL, gapOf = scale => c * scale;
     // The banner is turned round to face the plaza; its own x runs the other way, so the arc and each letter's
     // tilt are built the other way about.
-    const banner = createNode({ position: { x: 0, y: WP_BANNER.y, z: 0 }, rotation: { x: 0, y: Math.PI, z: 0 }, sightHidden: true, smokeOpacity: 0 });
+    const banner = createNode({ position: { x: 0, y: WP_BANNER.y, z: 0 }, rotation: { x: 0, y: Math.PI, z: 0 }, sightHidden: true, visible: false });
     // A line of type: a word's first letter stands a full capital and the rest are small caps, or every letter is
     // the same size for the date.
     const line = (text, smallcaps, y) => {
@@ -7531,11 +7531,11 @@
         if (arc) {
           const theta = (cursor + item.w * 0.5) / WP_BANNER.radius;
           node = createNode({
-            geometry: day,
+            geometry: day, smokeOpacity: 0,
             position: { x: WP_BANNER.radius * Math.sin(theta), y: run.y + WP_BANNER.radius * (Math.cos(theta) - 1), z: 0 },
             rotation: { x: 0, y: 0, z: -theta }
           });
-        } else node = createNode({ geometry: day, position: { x: cursor + item.w * 0.5, y: run.y, z: 0 } });
+        } else node = createNode({ geometry: day, smokeOpacity: 0, position: { x: cursor + item.w * 0.5, y: run.y, z: 0 } });
         addChild(banner, node);
         wpBannerPairs.push({ node, day, night });
         cursor += item.w + item.gap;
@@ -7873,10 +7873,12 @@
   };
   const wpUpdate = (dt) => {
     // The banner waits until the stone has fully broken out, then dissolves in; it floats from there, and takes its
-    // glowing letters as the island's lamps come on.
+    // glowing letters as the island's lamps come on. The fade lives on the letters, which carry the geometry — the
+    // banner node is a frame of its own and only holds them.
     if (wpBanner) {
       if (wpRise >= 1 && wpBannerFade < 1) wpBannerFade = Math.min(1, wpBannerFade + dt / WP_BANNER.fade);
-      wpBanner.smokeOpacity = wpBannerFade;
+      wpBanner.visible = wpBannerFade > 0;
+      for (const pair of wpBannerPairs) pair.node.smokeOpacity = wpBannerFade;
       wpBannerTime += dt;
       wpBanner.position.y = WP_BANNER.y + Math.sin(wpBannerTime * 1.1) * WP_BANNER.bob;
       wpBanner.rotation.z = Math.sin(wpBannerTime * 0.73 + 1.1) * WP_BANNER.sway;
@@ -7906,10 +7908,12 @@
       wpSinkT += dt;
       const k = Math.min(1, wpSinkT / WP.sinkTime), e = k * k * (3 - 2 * k);
       wpGroup.position.y = wpGround - WP.sink * e;
-      if (k >= 1) { wpSinkT = -1; wpStanding = false; wpGroup.visible = false; wpBannerFade = 0; }
+      if (k >= 1) { wpSinkT = -1; wpGroup.visible = false; wpBannerFade = 0; }
     } else if (wpStanding && wpTime < 0 && !wpRead && wpSinkTimer >= 0) {
       wpSinkTimer += dt;
-      if (wpSinkTimer >= WP.sinkAfter) { wpSinkTimer = -1; wpSinkT = 0; }
+      // It stops counting as standing the moment it starts down, so no shelf tap holds the view over a stone that
+      // leaves, and no double tap opens the paper on a face that sinks away.
+      if (wpSinkTimer >= WP.sinkAfter) { wpSinkTimer = -1; wpSinkT = 0; wpStanding = false; }
     }
     if (wpRead) { wpReadUpdate(dt); return; }
     if (wpTime < 0) return;
@@ -12090,6 +12094,8 @@
   const leave = (destroy = false) => {
     rememberCharacterLocations();
     stopLazyBedding();
+    // A fly-back left running must not drag a kept hub's next arrival: the eye is the director's there.
+    wpReturn = -1;
     if (reuseHub && !destroy) return suspendHub();
     heldHub = false; heldDebug = null;
     if (destroy && wpContextOn) { hubCanvas.removeEventListener("contextmenu", wpContextMenu); hubCanvas = null; wpContextOn = false; }
