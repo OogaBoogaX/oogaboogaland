@@ -444,6 +444,8 @@ the `movePass` guards. Decision 3 in section 7.
 
 ### 5.1 Unlocks and personal bests (local)
 
+*Built in milestone 5.*
+
 - **Save.** `game.state.cloudHopper = { unlocked: 1..4, players: { "<login>" | "": [ms, ms, ms, ms] } }`
   inside the existing `oogaboogaland.v1` save, with 0 meaning "no best" and `""` the
   signed-out player. `game.load` checks it (integer levels, times within the registry limit,
@@ -466,7 +468,9 @@ the `movePass` guards. Decision 3 in section 7.
 
 ### 5.2 Selection flow (modelled on Rally's garage)
 
-- **Intro card.** Between the title and Start ride, the card shows one picture card per
+*Built in milestone 5. The Play button was named Start ride; the card is wider (920 px at most) so the four cards fill it. The fade on changing level from the top is not built yet.*
+
+- **Intro card.** Between the title and Play, the card shows one picture card per
   level (chosen layout B, refined). Each card shows:
   - a preview of the level's environment, with the level's number in the picture's
     top-left corner;
@@ -477,7 +481,7 @@ the `movePass` guards. Decision 3 in section 7.
 - **Choosing.** Arrows or Tab move between rows, a click or tap selects, and Enter or Space
   starts, keeping the existing fresh-press guard.
 - **Locked rows** still show the preview, with a lock and the line "Complete Level N to
-  unlock". Start ride is disabled while one is selected.
+  unlock". Play is disabled while one is selected.
 - **Default selection.** The level played last this session, otherwise the highest
   unlocked level not yet completed, otherwise the highest unlocked.
 - **Shared board.** The panel below shows the selected level's shared board, switching its
@@ -536,6 +540,8 @@ Versions and identity:
   one included.
 
 ### 5.4 Session results and ghosts
+
+*Built with milestone 5.*
 
 - **Session results.** `sessions` (a page-life `Map` by login) becomes
   `{ levels: [{ runs, scores, best, lastSeed }, ...] }`, with the existing ten-row results

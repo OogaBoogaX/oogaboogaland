@@ -4735,12 +4735,17 @@ const cloudHopperFailureChecks = async engine => {
     }) },
     cloudHopperHud: { create(options) { callbacks = options; return {
       show(phase, time, scores, latest) { shown = phase; shownScores = scores; shownLatest = latest; },
-      update: noop, setGhost: noop, hide: noop, dispose: noop, frameY: 0.4
+      update: noop, setGhost: noop, setLevels: noop, hide: noop, dispose: noop, frameY: 0.4
     }; } } });
   const controllerSource = await readFile(join(root, "src/js/cloud-hopper.js"), "utf8");
   runInNewContext(controllerSource, context);
   const seaY = -70, dock = S.createNode({ position: { x: 50, y: 0, z: 0 } });
-  const hopperOptions = { root: rootNode, dock, crew, pilot, camera, seaY, mainlandRadius: 30,
+  // Level 1 already finished here and Level 2 open: a visit starts on Level 2, the old course's challenge.
+  const cloudSave = { unlocked: 2, players: [{ login: "record-holder", best: [60000] }] };
+  const game = { state: { cloudHopper: cloudSave },
+    cloudHopperBest: (login, level) => cloudSave.players.find(p => p.login === login)?.best[level - 1] || 0,
+    recordCloudHopper: () => ({ best: false, unlocked: false }) };
+  const hopperOptions = { root: rootNode, dock, crew, pilot, camera, game, seaY, mainlandRadius: 30,
     hud: { toast: noop }, refusal: () => null, finish: () => ({ x: 0, y: 2, z: 0 }), pileSurface: (x, z) => x === 0 && z === 0 ? 2 : -Infinity,
     mode(on) { mode = on; }, move(position) {
       const p = actor.root.position, shift = BL.math.mat4.create();
@@ -6089,14 +6094,24 @@ const gameRulesChecks = async () => {
       cup: [g.recordCup(2, 20), !g.recordCup(3, 30)],
       drop: [!g.recordDrop({ score: 0, rings: 0, ringTotal: 8, landing: "lost" }), !g.recordDrop({ score: 750, rings: 6, ringTotal: 8, landing: "pancake" }), g.recordDrop({ score: 900, rings: 5, ringTotal: 8, landing: "stand" }), !g.recordDrop({ score: 800, rings: 8, ringTotal: 8, landing: "stand" }), !g.recordDrop({ score: 5000, rings: 8, ringTotal: 8, landing: "tumble" })],
       orbit: [g.recordOrbit({ score: 1500, orbit: true, landing: "pad" }), !g.recordOrbit({ score: 1400, orbit: true, landing: "sea" })],
-      mine: [g.recordMine({ sats: 5e8, seconds: 1200, ending: "left", won: false, score: 500, continued: false }), !g.recordMine({ sats: 1e8, seconds: 900, ending: "time", won: false, score: 100, continued: false })]
+      mine: [g.recordMine({ sats: 5e8, seconds: 1200, ending: "left", won: false, score: 500, continued: false }), !g.recordMine({ sats: 1e8, seconds: 900, ending: "time", won: false, score: 100, continued: false })],
+      // Cloud Hopper: a finish of the highest open level opens the next, signed out ("") as well; each player keeps
+      // their own best per level, a slower finish keeps it, and only the eight most recent players are kept.
+      cloudHopper: [g.recordCloudHopper("", 1, 90000, 4).unlocked, g.state.cloudHopper.unlocked === 2, !g.recordCloudHopper("ooga", 1, 95000, 4).unlocked,
+        !g.recordCloudHopper("", 1, 91000, 4).best, g.recordCloudHopper("", 2, 120000, 4).unlocked, g.cloudHopperBest("", 1) === 90000,
+        g.cloudHopperBest("ooga", 1) === 95000, g.cloudHopperBest("ooga", 2) === 0,
+        ...Array.from({ length: 8 }, (_, i) => g.recordCloudHopper(`player-${i}`, 1, 100000 + i, 4).best), g.state.cloudHopper.players.length === 8,
+        g.cloudHopperBest("", 1) === 0, g.state.cloudHopper.unlocked === 3]
     };
     const again = make().state;
-    const kept = again.race.best.bay.race === 100000 && again.race.best.bay.medal === "silver" && again.race.cup.medal === "silver" && again.drop.best.score === 900 && again.orbit.best.score === 1500 && again.mine.best.score === 500;
+    const kept = again.race.best.bay.race === 100000 && again.race.best.bay.medal === "silver" && again.race.cup.medal === "silver" && again.drop.best.score === 900 && again.orbit.best.score === 1500 && again.mine.best.score === 500
+      && again.cloudHopper.unlocked === 3 && again.cloudHopper.players.length === 8 && again.cloudHopper.players[0].login === "player-7";
     const saved = JSON.parse(store.get("oogaboogaland.v1"));
     saved.mine.best.ending = "exploded"; saved.drop.best.landing = "pancake"; saved.race.best.bay.lap = "fast";
+    saved.cloudHopper.unlocked = 40; saved.cloudHopper.players[0].login = "bad login!"; saved.cloudHopper.players[1].best = [-5, "fast"];
     store.set("oogaboogaland.v1", JSON.stringify(saved));
-    const bad = make().state, dropped = bad.mine.best === null && bad.drop.best === null && !bad.race.best.bay && bad.orbit.best.score === 1500;
+    const bad = make().state, dropped = bad.mine.best === null && bad.drop.best === null && !bad.race.best.bay && bad.orbit.best.score === 1500
+      && bad.cloudHopper.unlocked === 1 && bad.cloudHopper.players.length === 7 && bad.cloudHopper.players[0].best.every(ms => ms === 0);
     // The donations board's tally: two tips today and one the day before, kept through a reload, the week holding all
     // three; a malformed day is dropped alone.
     const day = 864e5, now = Date.now();

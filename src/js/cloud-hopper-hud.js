@@ -1,4 +1,4 @@
-// A retained clock and title/results card for Cloud Hopper; the controller owns all game state.
+// A retained clock and title/results card for Cloud Hopper, with its level cards; the controller owns all game state.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -19,7 +19,7 @@
     ["finish", "Banana pile", "Land on the banana pile to stop the clock. Your fastest finish becomes a ghost you can race next time."]
   ];
   const formatTime = (value) => `${String(Math.floor(value / 6000)).padStart(2, "0")}:${String(Math.floor(value / 100) % 60).padStart(2, "0")}.${String(value % 100).padStart(2, "0")}`;
-  const create = ({ onStart, onReplay, onExit, onGuideDone, letterSign } = {}) => {
+  const create = ({ onStart, onReplay, onExit, onGuideDone, onSelect, onNext, letterSign } = {}) => {
     const node = (tag, className, text = "") => {
       const el = document.createElement(tag);
       el.className = className;
@@ -39,6 +39,20 @@
     const scoresTitle = node("h3", "cloud-hopper-scores-title", "Your best times · this session");
     const scoresList = node("ol", "race-podium"), scoresEmpty = node("p", "cloud-hopper-scores-empty", "Finish a run to put your time on the board.");
     const actions = node("div", "actions"), back = node("button", "", "Back"), play = node("button", "game-intro-go"), exit = node("button", "");
+    const next = node("button", "game-intro-go", "Next level"), select = node("button", "", "Level select");
+    // One picture card a level: its number in the picture's corner, its name alone on a row, then its route and
+    // the player's best or what unlocks it. Pictures load the first time the cards show.
+    const LEVELS = BL.cloudHopperLevels.LEVELS, levels = node("div", "cloud-hopper-levels"), cards = [];
+    for (const level of LEVELS) {
+      const card = node("button", "cloud-hopper-level"), picture = node("img", "cloud-hopper-level-art");
+      const note = node("small", "cloud-hopper-level-note");
+      card.type = "button"; picture.alt = ""; picture.draggable = false;
+      picture.onerror = (event) => { event.currentTarget.hidden = true; };
+      card.append(picture, node("span", "cloud-hopper-level-number", String(level.id)), node("b", "cloud-hopper-level-name", level.name), note);
+      card.addEventListener("click", () => onSelect?.(level.id));
+      levels.append(card); cards.push({ card, picture, note, level });
+    }
+    levels.setAttribute("role", "group"); levels.setAttribute("aria-label", "Levels");
     timer.setAttribute("aria-label", "Elapsed time");
     timer.setAttribute("aria-live", "off");
     title.setAttribute("role", "status");
@@ -61,7 +75,7 @@
     introArt.hidden = guideArt.hidden = back.hidden = true;
     glow.setAttribute("aria-hidden", "true");
     resultTime.setAttribute("aria-label", "Finish time");
-    back.type = play.type = exit.type = "button";
+    back.type = play.type = exit.type = next.type = select.type = "button";
     if (letterSign) letterSign(panelTitle, "CLOUD HOPPER");
     glow.append(rays);
     const scoreRows = [];
@@ -74,12 +88,41 @@
     }
     hud.append(name, timer, title, ghost, help);
     scoresPanel.append(scoresTitle, scoresList, scoresEmpty);
-    actions.append(back, play, exit);
-    panel.append(glow, kicker, panelTitle, goal, introArt, guideArt, resultArt, panelHelp, resultTime, scoresPanel, actions);
-    hud.hidden = panel.hidden = true;
+    actions.append(back, next, play, select, exit);
+    panel.append(glow, kicker, panelTitle, goal, levels, introArt, guideArt, resultArt, panelHelp, resultTime, scoresPanel, actions);
+    hud.hidden = panel.hidden = levels.hidden = next.hidden = select.hidden = true;
     document.body.append(hud, panel);
     let phase = "", hundredths = -1, previousFocus = null, disposed = false, frameY = 0.4;
     let guideIndex = 0, guidePictures = null, spaceTarget = null;
+    // The level choice: the one selected, the highest unlocked, the player's best per level (ms, 0 for none), and
+    // whether the result card is showing the cards instead of the result (Level select).
+    let selected = 1, unlocked = 1, bests = [], picking = false;
+    const locked = () => selected > unlocked;
+    const nextOpen = () => phase === "won" && !picking && selected < LEVELS.length && selected + 1 <= unlocked;
+    const paintLevels = () => {
+      for (const { card, picture, note, level } of cards) {
+        const closed = level.id > unlocked, best = bests[level.id - 1] || 0;
+        card.classList.toggle("selected", level.id === selected);
+        card.classList.toggle("locked", closed);
+        card.setAttribute("aria-pressed", level.id === selected ? "true" : "false");
+        note.textContent = closed ? `Complete Level ${level.id - 1} to unlock`
+          : `${Math.round(level.route)} m · ${best ? `Best ${formatTime(Math.floor(best / 10))}` : "New"}`;
+        if (!levels.hidden && !picture.src) picture.src = BL.cloudHopperArt.levels[level.id - 1];
+      }
+      name.textContent = `CLOUD HOPPER · LEVEL ${selected}`;
+      showScores(localScores, localLatest);
+      if (phase === "intro" || picking) {
+        play.disabled = locked();
+        play.textContent = phase === "intro" ? "Play" : `Play level ${selected}`;
+        if (locked()) panelHelp.textContent = `Complete Level ${selected - 1} to unlock ${LEVELS[selected - 1].name}.`;
+        else panelHelp.textContent = phase === "intro" ? COPY.intro[1] : `${LEVELS[selected - 1].name} · ${Math.round(LEVELS[selected - 1].route)} m`;
+      }
+    };
+    const setLevels = (state) => {
+      if (disposed) return;
+      ({ selected, unlocked, bests } = state);
+      paintLevels();
+    };
     // Measure on layout changes only. Leave room below the card for the
     // island's skyline, with the same horizontal centre as the timer.
     const measureFraming = () => {
@@ -119,8 +162,8 @@
       if (phase === "briefing" && guideIndex > 0) { guideIndex--; showGuide(); }
     };
     const start = () => {
-      if (phase === "intro") onStart?.();
-      else if (phase === "won" || phase === "dq") onReplay?.();
+      if (phase === "intro") { if (!locked()) onStart?.(); }
+      else if (phase === "won" || phase === "dq") { if (!picking || !locked()) onReplay?.(); }
       else if (phase === "briefing") {
         if (guideIndex < GUIDE.length - 1) { guideIndex++; showGuide(); }
         else onGuideDone?.();
@@ -128,8 +171,11 @@
     };
     const leave = () => {
       if (phase === "briefing") onGuideDone?.();
+      else if (picking) pick(false);
       else if (phase === "intro" || phase === "won" || phase === "dq") onExit?.();
     };
+    const advance = () => { if (nextOpen()) onNext?.(); };
+    const choose = () => pick(true);
     const cancel = (e) => {
       e.preventDefault(); e.stopPropagation();
       if (phase === "briefing") onExit?.();
@@ -158,11 +204,21 @@
       if (e.key === "Escape") {
         e.preventDefault();
         if (e.type === "keydown" && phase === "briefing") onExit?.();
+        else if (e.type === "keydown" && picking) pick(false);
+        return;
+      }
+      // Arrows move between the level cards wherever they show.
+      const step = e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : 0;
+      if (step && !levels.hidden) {
+        e.preventDefault();
+        if (e.type === "keydown") onSelect?.(Math.max(1, Math.min(LEVELS.length, selected + step)));
       }
     };
     back.addEventListener("click", previous);
     play.addEventListener("click", start);
     exit.addEventListener("click", leave);
+    next.addEventListener("click", advance);
+    select.addEventListener("click", choose);
     panel.addEventListener("cancel", cancel);
     panel.addEventListener("keydown", panelKey);
     panel.addEventListener("keyup", panelKey);
@@ -180,7 +236,7 @@
     const showScores = (scores, latest) => {
       localScores = scores; localLatest = latest;
       if (sharedScores) scores = sharedScores;
-      scoresTitle.textContent = sharedScores ? "Fastest times · all players" : "Your best times · this session";
+      scoresTitle.textContent = sharedScores ? `Level ${selected} · fastest times · all players` : `Level ${selected} · your best times this session`;
       scoresEmpty.textContent = sharedScores ? "No shared times yet. Sign in with GitHub to set one." : "Finish a run to put your time on the board.";
       const count = Math.min(scoreRows.length, scores.length);
       scoresList.hidden = !count;
@@ -202,22 +258,47 @@
       showScores(localScores, localLatest);
       if (phase === "intro") scoresPanel.hidden = !sharedScores;
     };
-    const show = (next, time = 0, scores = [], latest = null) => {
-      if (disposed || !COPY[next]) return;
-      update(time);
-      const ended = next === "won" || next === "dq";
-      if (ended || next === "intro") showScores(scores, latest);
-      if (phase === next) return;
-      phase = next;
+    // Level select on the result card: the level cards in place of the result, or the result back again.
+    const pick = (on) => {
+      picking = on;
       clearActivation();
-      const copy = COPY[next], intro = next === "intro", briefing = next === "briefing";
-      panel.classList.toggle("cloud-hopper-dq", next === "dq");
+      panel.classList.toggle("cloud-hopper-picking", on);
+      const ended = phase === "won" || phase === "dq";
+      levels.hidden = !on && phase !== "intro";
+      resultArt.hidden = on || !ended;
+      resultTime.hidden = on || phase !== "won";
+      scoresPanel.hidden = on || !ended;
+      select.hidden = on || !ended;
+      next.hidden = !nextOpen();
+      play.classList.toggle("game-intro-go", on || !nextOpen());
+      play.disabled = false;
+      exit.textContent = on ? "Back" : "Return to dock";
+      if (on) paintLevels();
+      else {
+        play.textContent = phase === "won" ? "Replay" : "Play again";
+        resultHelp();
+      }
+      (on ? play : nextOpen() ? next : play).focus({ preventScroll: true });
+    };
+    let helpText = "";
+    const resultHelp = () => { panelHelp.textContent = helpText; };
+    const show = (to, time = 0, scores = [], latest = null) => {
+      if (disposed || !COPY[to]) return;
+      update(time);
+      const ended = to === "won" || to === "dq";
+      if (ended || to === "intro") showScores(scores, latest);
+      if (phase === to) return;
+      phase = to; picking = false;
+      clearActivation();
+      panel.classList.remove("cloud-hopper-picking");
+      const copy = COPY[to], intro = to === "intro", briefing = to === "briefing";
+      panel.classList.toggle("cloud-hopper-dq", to === "dq");
       panel.classList.toggle("cloud-hopper-intro", intro);
       panel.classList.toggle("cloud-hopper-guide", briefing);
       title.textContent = copy[0];
       help.textContent = copy[1];
       hud.hidden = intro || briefing || ended;
-      timer.hidden = next === "lifting";
+      timer.hidden = to === "lifting";
       if (briefing) {
         // The ascent frames for the ready HUD even while the guide covers it.
         // This synchronous measurement never paints the waiting race clock.
@@ -227,35 +308,44 @@
       if (intro || briefing || ended) {
         // Equal times follow the earlier record, so only a new leader gets
         // the best-time illustration; the first clean finish sets that mark.
-        const best = next === "won" && !!latest && latest.run === scores[0]?.run;
+        const best = to === "won" && !!latest && latest.run === scores[0]?.run;
         kicker.textContent = "Ooga Arcade";
         if (letterSign) letterSign(panelTitle, "CLOUD HOPPER");
         else panelTitle.textContent = "CLOUD HOPPER";
-        goal.textContent = copy[0];
-        goal.hidden = !intro;
-        introArt.hidden = !intro;
-        if (intro) introArt.src = BL.cloudHopperArt.intro;
+        goal.textContent = ended ? `Level ${selected} · ${LEVELS[selected - 1].name}` : copy[0];
+        goal.hidden = !intro && !ended;
+        // The intro's level cards take the opening picture's place.
+        introArt.hidden = true;
+        levels.hidden = !intro;
         guideArt.hidden = back.hidden = !briefing;
         resultArt.hidden = !ended;
         if (ended) {
-          resultArt.src = BL.cloudHopperArt[next === "dq" ? "rekt" : best ? "best" : "complete"];
-          resultArt.alt = next === "dq" ? "Ooga rekt underwater after the fall."
+          resultArt.src = BL.cloudHopperArt[to === "dq" ? "rekt" : best ? "best" : "complete"];
+          resultArt.alt = to === "dq" ? "Ooga rekt underwater after the fall."
             : best ? "Ooga celebrating a new session best time." : "Ooga celebrating a completed run at the banana pile.";
         }
         panel.setAttribute("aria-describedby", ended ? `${resultArt.id} ${panelHelp.id}` : intro ? `${goal.id} ${panelHelp.id}` : panelHelp.id);
-        panelHelp.textContent = best ? "New session best!" : copy[1];
+        // A clean finish says what it earned: a session best, a personal best, the next level.
+        helpText = [best && "New session best!", latest?.personalBest && !best && "New personal best!",
+          latest?.unlocked && `Level ${selected + 1} unlocked!`].filter(Boolean).join(" ") || copy[1];
+        panelHelp.textContent = helpText;
         scoresPanel.hidden = !ended && !(intro && sharedScores);
-        resultTime.hidden = next !== "won";
-        play.textContent = intro ? "Start ride" : "Play again";
+        resultTime.hidden = to !== "won";
+        play.disabled = false;
+        play.textContent = intro ? "Play" : to === "won" ? "Replay" : "Play again";
         exit.textContent = briefing ? "Skip tips" : intro ? "Not now" : "Return to dock";
+        next.hidden = !nextOpen();
+        select.hidden = !ended;
+        play.classList.toggle("game-intro-go", !nextOpen());
+        if (intro) paintLevels();
         if (briefing) { guideIndex = 0; showGuide(); }
         if (!panel.open) {
           previousFocus = document.activeElement;
           panel.hidden = false;
           panel.showModal();
-          play.focus({ preventScroll: true });
           panel.scrollTop = 0;
         }
+        (nextOpen() ? next : play).focus({ preventScroll: true });
       } else closePanel();
       measureFraming();
     };
@@ -264,6 +354,8 @@
       if (disposed) return;
       hide(); disposed = true;
       back.removeEventListener("click", previous);
+      next.removeEventListener("click", advance);
+      select.removeEventListener("click", choose);
       play.removeEventListener("click", start);
       exit.removeEventListener("click", leave);
       panel.removeEventListener("cancel", cancel);
@@ -275,7 +367,7 @@
       guidePictures?.dispose(); guidePictures = null;
       hud.remove(); panel.remove();
     };
-    return { show, update, setGhost, setHighscores, hide, dispose, get frameY() { return frameY; } };
+    return { show, update, setGhost, setHighscores, setLevels, hide, dispose, get frameY() { return frameY; } };
   };
   BL.cloudHopperHud = { create };
 })();

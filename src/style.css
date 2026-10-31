@@ -10063,6 +10063,31 @@ body[data-banner-oogas="true"] .sheet:not([hidden]) { display: flex; }
 .cloud-hopper-guide-art { display: flex; align-items: center; justify-content: center; height: min(28dvh, 220px); margin: 4px auto 12px; }
 .cloud-hopper-guide-art canvas { display: block; max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; filter: drop-shadow(0 6px 6px rgba(0, 0, 0, 0.45)); }
 .cloud-hopper-intro-art[hidden], .cloud-hopper-guide-art[hidden] { display: none; }
+/* The level cards: the number in the picture's corner, the name alone on one row, then route and best or lock. */
+.cloud-hopper-levels { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 10px 0 12px; }
+.cloud-hopper-levels[hidden] { display: none; }
+.cloud-hopper-level { position: relative; display: flex; flex-direction: column; padding: 0 0 8px; overflow: hidden; border: 2px solid rgba(255, 246, 220, 0.18);
+  border-radius: 8px; background: rgba(10, 16, 26, 0.55); color: var(--paper); font: inherit; text-align: left; cursor: pointer; }
+.cloud-hopper-level.selected { border: 3px solid #ffd54a; background: rgba(255, 213, 74, 0.14); }
+.cloud-hopper-level.locked { cursor: default; }
+.cloud-hopper-level-art { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; background: rgba(0, 0, 0, 0.3); }
+.cloud-hopper-level.locked .cloud-hopper-level-art { filter: grayscale(0.7) brightness(0.55); }
+.cloud-hopper-level-number { position: absolute; top: 6px; left: 6px; display: flex; align-items: center; justify-content: center; min-width: 26px; height: 26px;
+  padding: 0 6px; border: 2px solid rgba(255, 246, 220, 0.45); border-radius: 6px; background: rgba(20, 14, 8, 0.85); color: #ffd54a; font-size: 15px; font-weight: 800; }
+.cloud-hopper-level.selected .cloud-hopper-level-number { border-color: #ffd54a; }
+.cloud-hopper-level.locked .cloud-hopper-level-number { color: #cbb894; }
+.cloud-hopper-level-name { display: block; margin: 6px 8px 0; font-size: 13px; letter-spacing: 0.04em; white-space: nowrap; }
+.cloud-hopper-level-note { display: block; margin: 2px 8px 0; font-size: 10px; opacity: 0.85; }
+/* The cards get a wider card to fill: the intro, and the result card while a level is being chosen. */
+.cloud-hopper-panel.cloud-hopper-intro, .cloud-hopper-panel.cloud-hopper-picking { width: min(920px, calc(100vw - 32px)); }
+.cloud-hopper-intro .cloud-hopper-levels, .cloud-hopper-picking .cloud-hopper-levels { gap: 14px; }
+.cloud-hopper-intro .cloud-hopper-level-name, .cloud-hopper-picking .cloud-hopper-level-name { margin-top: 8px; font-size: 15px; }
+.cloud-hopper-intro .cloud-hopper-level-note, .cloud-hopper-picking .cloud-hopper-level-note { font-size: 11px; }
+@media (max-width: 600px) {
+  .cloud-hopper-levels { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cloud-hopper-intro .cloud-hopper-levels, .cloud-hopper-picking .cloud-hopper-levels { gap: 10px; }
+  .cloud-hopper-intro .cloud-hopper-level-name, .cloud-hopper-picking .cloud-hopper-level-name { font-size: 13px; }
+}
 .cloud-hopper-panel.cloud-hopper-guide { width: min(480px, calc(100vw - 32px)); }
 .cloud-hopper-panel.cloud-hopper-guide .game-intro-title { font-size: 32px; }
 .cloud-hopper-guide .game-intro-who { max-width: 380px; margin: 4px auto 12px; font-size: 12px; }
