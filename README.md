@@ -80,6 +80,8 @@ DSB Studio has a shared session panel: **Enable Studio sound** listens without m
 
 **M** mutes and unmutes your microphone whenever voice is enabled or connecting, across every scene, panel and dialog. Input fields (including messages and names) and editable text keep M for typing. With voice off, **M** controls environment sounds. The speaker button beside the clock always controls environment sounds, including music, effects and your footsteps. You can also mute your microphone with your own speaker mark in the Oogas panel or its **Mute** button, and mute another player for yourself with their speaker mark. A note stays on screen while your microphone is muted. When nobody else in voice is in the same place as you, your microphone stays off (the note says "Alone · mic off") and turns back on by itself when someone joins; if you muted yourself, you stay muted. Walking your Ooga on the island, you hear your own footsteps; nobody else hears them.
 
+Music and ambience keep playing when you switch tabs or use another window. The speaker button still mutes them. The game and rendering pause while the page is hidden.
+
 Ownership goes by GitHub login, not by name. These rules apply on the signed-in site; the portable `oogaboogaland.html`, or any copy served without the Worker, has no accounts and every Ooga is free there. How it works: `docs/auth-and-presence.md`.
 
 ## Timechain Sphere

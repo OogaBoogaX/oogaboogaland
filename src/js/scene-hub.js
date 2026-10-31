@@ -754,14 +754,6 @@
     return island.faceIndex = { ramps };
   };
   const MATRIX_CAMERA_COLUMN = { caveIndex: 0, floor: 0, ceiling: 0 };
-  const cameraInsideMirror = () => {
-    if (!matrixCave) return false;
-    const eye = camera.position, m = matrixCave.mouth;
-    if ((eye.x - m.x) * matrixCave.sr + (eye.z - m.z) * matrixCave.cr >= PORTAL_Z) return false;
-    return island.cavityAt(eye.x, eye.z, MATRIX_CAMERA_COLUMN, matrixCave.caveIndex, eye.y)
-      && MATRIX_CAMERA_COLUMN.caveIndex === matrixCave.caveIndex
-      && eye.y >= MATRIX_CAMERA_COLUMN.floor && eye.y < MATRIX_CAMERA_COLUMN.ceiling;
-  };
   const inMatrixCave = () => {
     return !!matrixCave && matrixCave.portal.inside;
   };
@@ -4831,7 +4823,6 @@
     }
     return false;
   };
-  // Bananas are passable; the visitor must jump onto their stone platform.
   const playerEscapeClear = (fromX, fromZ, toX, toZ, y, height, actor, step) => {
     if (!actor || actor !== pilot.player || fromX === toX && fromZ === toZ) return false;
     // Endpoint-only head/body checks cannot free a pre-existing mesh overlap. The recovery sweep checks
@@ -4846,12 +4837,9 @@
   };
   const walkable = (fromX, fromZ, toX, toZ, y, height = 1.5, actor = pilot?.player) => {
     if (Math.hypot(toX, toZ) > FLY_BOUND || crossesSealedCave(fromX, fromZ, toX, toZ, y)) return false;
-    // Sweep the feet before ordinary step assistance lifts them. Once above
-    // the rim, jumping, landing and walking off keep their normal clearance.
-    if (altar && actor && actor === pilot.player && !cylinderSegmentClear(fromX, y, fromZ, toX, y, toZ, PLAYER_RADIUS, height, 0, 0, 0, ALTAR_HEIGHT, altar.platformRadius)) return false;
     const floor = playerSupportAt(toX, toZ, y, y, actor, true), feet = Math.max(y, floor);
     if (floor - y > STEP_MAX && floor !== characterClankerSupportAt(toX, toZ, y, STEP_MAX, actor)) return false;
-    // Feet may mount an ordinary voxel step.
+    // Feet may mount ordinary steps, including the banana platform's low rim.
     // Torso and head must fit across their whole footprint at the destination's actual elevation.
     return feet + height <= ceilingAt(toX, toZ, feet, actor) + 1e-7 && physicalClearAt(toX, feet + STEP_MAX, toZ, PLAYER_RADIUS, Math.max(0, height - STEP_MAX), actor) && propSegmentClear(fromX, feet + STEP_MAX, fromZ, toX, feet + STEP_MAX, toZ, PLAYER_RADIUS, Math.max(0, height - STEP_MAX), actor) && matrixGateSegmentClear(fromX, y, fromZ, toX, feet, toZ, PLAYER_RADIUS, height) && mirrorActorSegmentClear(fromX, y, fromZ, toX, feet, toZ, height, actor)
       || feet === y && playerEscapeClear(fromX, fromZ, toX, toZ, y, height, actor, STEP_MAX);
@@ -9964,16 +9952,6 @@
   // frame becoming 19 ms; 30 Hz spent about 19 ms on every other frame.
   const SIGHT_RECOMPUTE_HZ = 15;
   const overlay = (dt) => {
-    // The eye owns this blackout, including detached and trailing cameras.
-    // Cover all world overlays so no names or outlines reveal the empty room.
-    if (cameraInsideMirror()) {
-      const context = overlayCanvas.getContext("2d");
-      context.save(); context.setTransform(1, 0, 0, 1, 0, 0);
-      context.globalAlpha = 1; context.globalCompositeOperation = "source-over";
-      context.fillStyle = "#000"; context.fillRect(0, 0, overlayCanvas.width, overlayCanvas.height);
-      context.restore();
-      return;
-    }
     if (poolBlockHovered) showPoolBlockTooltip();
     else if (pileHovered) showPileTooltip();
     // World-anchored sleeping marks share the guide visibility cadence; their particles still move every frame.
@@ -11261,7 +11239,6 @@
           advanceClouds: updateClouds,
           portal: matrixCave.portal,
           contains: inMatrixCave,
-          cameraInside: cameraInsideMirror,
           overlayVisible: matrixOverlayVisible,
           viewApproach: viewMatrixApproach,
           viewInside: viewInsideMatrix

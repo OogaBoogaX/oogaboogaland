@@ -5,6 +5,34 @@
   const { updateWorld, traverseVisible, matrixModeOf, hiddenFromCamera, hiddenFromCutaway } = BL.scene;
   const DEFAULT_SKY = [0.5, 0.52, 0.58];
   const DEFAULT_GROUND = [0.22, 0.2, 0.19];
+  // Approximate near-side outlines, north up and east right, matching SKY_FS.
+  // USGS feature centers: https://planetarynames.wr.usgs.gov/
+  // NASA visual reference: https://science.nasa.gov/resource/colorful-moon/
+  const MOON_BASINS = [
+    -0.72, 0.25, 0.19, 0.38, // Oceanus Procellarum's joined western lobes
+    -0.59, 0.53, 0.19, 0.23,
+    -0.62, -0.08, 0.20, 0.15,
+    -0.211, 0.570, 0.30, 0.25, // Imbrium
+    -0.32, 0.12, 0.27, 0.16, // Insularum
+    -0.36, -0.15, 0.17, 0.12, // Cognitum
+    0.280, 0.458, 0.18, 0.18, // Serenitatis
+    0.507, 0.145, 0.21, 0.22, // Tranquillitatis
+    0.824, 0.279, 0.085, 0.145, // Crisium
+    0.798, -0.136, 0.12, 0.23, // Fecunditatis
+    0.548, -0.262, 0.085, 0.095, // Nectaris
+    -0.278, -0.352, 0.21, 0.20, // Nubium
+    -0.567, -0.414, 0.095, 0.11, // Humorum
+    0.069, 0.228, 0.075, 0.065, // Vaporum
+    -0.38, 0.79, 0.20, 0.035, // Frigoris' narrow northern band
+    -0.05, 0.855, 0.24, 0.035,
+    0.28, 0.815, 0.18, 0.032
+  ];
+  const MOON_CRATERS = [
+    -0.14, -0.695, 0.025, // Tycho
+    -0.323, 0.167, 0.027, // Copernicus
+    -0.61, 0.14, 0.012, // Kepler
+    -0.65, 0.43, 0.012 // Aristarchus
+  ];
   const CUBE_VIEWS = new Float32Array([1, 0, 0, 0, -1, 0, -1, 0, 0, 0, -1, 0, 0, 1, 0, 0, 0, 1, 0, -1, 0, 0, 0, -1, 0, 0, 1, 0, -1, 0, 0, 0, -1, 0, -1, 0]);
   const ENVIRONMENT_SIZE = 64, ENVIRONMENT_GRID = 4;
   const DEFAULT_MATRIX_APERTURE = new Float32Array([2.5, 3, 0.5, 0]);
@@ -2053,14 +2081,68 @@
               const k = -facing;
               ctx.save();
               ctx.translate(cx, cy);
-              ctx.rotate(Math.atan2(-sy, sx));
-              ctx.globalAlpha = 0.3 + 0.7 * (opts.stars || 0);
-              ctx.fillStyle = "#d1dff6";
+              // Clip the moon's lower limb at the physical horizon, independent
+              // of the lowered haze gradient and of camera pitch or roll.
+              const horizonSlope = Math.hypot(view[4], view[5]);
+              const horizonDistance = view[4] * (cx - width * 0.5) - view[5] * (cy - height * 0.5) - view[6] * lastF;
+              if (horizonSlope > 1e-8 && horizonDistance < radius * horizonSlope) {
+                const horizonAngle = Math.atan2(-view[5], view[4]);
+                ctx.rotate(horizonAngle);
+                ctx.beginPath();
+                ctx.rect(-horizonDistance / horizonSlope, -radius * 2, radius * 4, radius * 4);
+                ctx.clip();
+                ctx.rotate(-horizonAngle);
+              }
+              const phaseAngle = Math.atan2(-sy, sx);
+              ctx.rotate(phaseAngle);
+              const moonNight = opts.stars || 0, moonAlpha = 0.3 + 0.7 * moonNight;
+              // Faint earthshine keeps the shadowed hemisphere visible at night.
+              if (moonNight > 0) {
+                ctx.globalAlpha = moonNight * moonAlpha;
+                ctx.fillStyle = "#202227";
+                ctx.beginPath();
+                ctx.arc(0, 0, radius, 0, Math.PI * 2);
+                ctx.fill();
+              }
+              ctx.globalAlpha = moonAlpha;
+              ctx.fillStyle = "#d4d2cc";
               ctx.beginPath();
               ctx.arc(0, 0, radius, -Math.PI / 2, Math.PI / 2);
               ctx.ellipse(0, 0, Math.max(0.001, Math.abs(k) * radius), radius, 0, Math.PI / 2, k >= 0 ? Math.PI * 1.5 : -Math.PI / 2, k < 0);
               ctx.closePath();
               ctx.fill();
+              // Keep surface markings fixed to the moon's projected north,
+              // rather than turning them with the phase or the camera.
+              ctx.clip();
+              const pole = Math.abs(moon.y) > 0.98;
+              const northX = -moon.x * (pole ? moon.z : moon.y);
+              const northY = (pole ? 0 : 1) - moon.y * (pole ? moon.z : moon.y);
+              const northZ = (pole ? 1 : 0) - moon.z * (pole ? moon.z : moon.y);
+              const northScreenX = view[0] * northX + view[4] * northY + view[8] * northZ;
+              const northScreenY = view[1] * northX + view[5] * northY + view[9] * northZ;
+              ctx.rotate(Math.atan2(northScreenX, northScreenY) - phaseAngle);
+              ctx.scale(radius, radius);
+              ctx.globalAlpha = moonAlpha * 0.34;
+              ctx.fillStyle = "#666568";
+              ctx.beginPath();
+              for (let i = 0; i < MOON_BASINS.length; i += 4) {
+                const x = MOON_BASINS[i], y = -MOON_BASINS[i + 1], rx = MOON_BASINS[i + 2], ry = MOON_BASINS[i + 3];
+                ctx.moveTo(x + rx, y);
+                ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
+              }
+              ctx.fill();
+              ctx.globalAlpha = moonAlpha * 0.2;
+              ctx.fillStyle = "#dedbd4";
+              ctx.strokeStyle = "#f0ece6";
+              ctx.lineWidth = 0.006;
+              ctx.beginPath();
+              for (let i = 0; i < MOON_CRATERS.length; i += 3) {
+                const x = MOON_CRATERS[i], y = -MOON_CRATERS[i + 1], r = MOON_CRATERS[i + 2];
+                ctx.moveTo(x + r, y);
+                ctx.arc(x, y, r, 0, Math.PI * 2);
+              }
+              ctx.fill();
+              ctx.stroke();
               ctx.restore();
             }
           }

@@ -885,8 +885,8 @@
     if (geo.normals) padNormals(geo);
     return geo;
   };
-  // The drawn leaves extend beyond the old solid crown. Their upward faces
-  // catch landings, but never become walls or ceilings for walkers below.
+  // The drawn leaves' upward faces catch landings, including the lower crown
+  // which never becomes walls or ceilings for walkers below.
   // Built once with the tree and indexed by solidProps with its trunk shell.
   const canopySupport = (geo, from, to = geo.faces.length) => {
     const faces = [], v = geo.verts;
@@ -1116,9 +1116,35 @@
     }
     return merge(...parts);
   };
+  // A closed puff clipped above the walking-headroom plane. Its original upper
+  // faces remain exact; down-facing fans close the cut at the lobe's centre.
+  const crownSolid = (part, floor, cx, cz) => {
+    const v = part.verts, out = { verts: [cx, floor, cz], faces: [], lines: [] };
+    for (const face of part.faces) {
+      const indices = []; let enter = -1, exit = -1;
+      let a = face.i[face.i.length - 1] * 3, aboveA = v[a + 1] >= floor;
+      for (const vertex of face.i) {
+        const b = vertex * 3, aboveB = v[b + 1] >= floor;
+        if (aboveA !== aboveB) {
+          const t = (floor - v[a + 1]) / (v[b + 1] - v[a + 1]), index = out.verts.length / 3;
+          out.verts.push(v[a] + (v[b] - v[a]) * t, floor, v[a + 2] + (v[b + 2] - v[a + 2]) * t);
+          indices.push(index);
+          if (aboveB) enter = index; else exit = index;
+        }
+        if (aboveB) {
+          indices.push(out.verts.length / 3);
+          out.verts.push(v[b], v[b + 1], v[b + 2]);
+        }
+        a = b; aboveA = aboveB;
+      }
+      if (indices.length >= 3) out.faces.push({ i: indices, color: face.color, emissive: 0 });
+      if (enter >= 0 && exit >= 0) out.faces.push({ i: [0, enter, exit], color: face.color, emissive: 0 });
+    }
+    return out;
+  };
   // Closed, faceted foliage masses. Both detail levels keep every lobe; only its tessellation changes.
   // Mesh wobble has its own seed so reducing facets cannot move later lobes or their flowers.
-  const clumped = (geo, cx, cy, cz, rx, ry, rz, tones, rand, lod, tips = null) => {
+  const clumped = (geo, cx, cy, cz, rx, ry, rz, tones, rand, lod, tips = null, solid = null) => {
     // Eight buried triangles provide conservative visibility coverage inside the central lobe on both levels.
     // The decorative outer lobes draw and support landings, but never multiply sight-guide ray work.
     puff(geo, cx, cy, cz, rx * 0.5, ry * 0.5, rz * 0.5, tones, () => 0.5, 2, 4);
@@ -1130,21 +1156,22 @@
       const part = { verts: [], faces: [], lines: [] }, wobble = mulberry32(Math.floor(rand() * 4294967296));
       puff(part, x, y, z, rx * w, ry * h, rz * w, tones, wobble, lod ? 3 : 4, lod ? 6 : 8);
       flatInto(geo, part);
+      if (solid) solid.parts.push(crownSolid(part, solid.floor, x, z));
       if (tips) tips.push([x, y + ry * h, z]);
     }
     for (let i = detailStart; i < geo.faces.length; i++) geo.faces[i].visibility = false;
   };
-  const cartoonTree = (i, rand, shell, lod = 0, collision = null) => {
+  const cartoonTree = (i, rand, shell, floor, lod = 0, collision = null) => {
     const geo = { verts: [], faces: [], lines: [], smooth: true, normals: [], foliageVisibility: false }, tones = CANOPIES[i].map(hexToRgb);
     limb(geo, 0, -0.1, 0, 0.05, 2.1, 0.02, 0.24, 0.14, 8, BARK[0]);
     limb(geo, 0.05, 1.55, 0, 0.62, 1.95, 0.02, 0.09, 0.05, 6, BARK[1]);
     if (i % 2) limb(geo, 0, 1.5, -0.1, -0.7, 1.9, -0.3, 0.08, 0.05, 6, BARK[1]);
     // The bark keeps its smooth normals: zeros mean "not given" to the renderer.
     while (geo.normals.length < geo.verts.length) geo.normals.push(0);
-    const canopyStart = geo.faces.length;
-    for (const [cx, cy, cz, rx, ry, rz] of CROWNS[i]) clumped(geo, cx * QUARTER, cy * QUARTER, cz * QUARTER, rx * QUARTER, ry * QUARTER, rz * QUARTER, tones, rand, lod);
+    const canopyStart = geo.faces.length, solid = collision ? null : { floor, parts: [] };
+    for (const [cx, cy, cz, rx, ry, rz] of CROWNS[i]) clumped(geo, cx * QUARTER, cy * QUARTER, cz * QUARTER, rx * QUARTER, ry * QUARTER, rz * QUARTER, tones, rand, lod, null, solid);
     geo.normals = Float32Array.from(geo.normals);
-    geo.collisionGeometry = collision || merge(shell, canopySupport(geo, canopyStart));
+    geo.collisionGeometry = collision || merge(shell, ...solid.parts, canopySupport(geo, canopyStart));
     return geo;
   };
   // Tree is TREE_HEIGHT units tall.
@@ -1173,34 +1200,34 @@
       const y = voxCoords(key, CELL)[1];
       canopyFloor = Math.min(canopyFloor, y); canopyTop = Math.max(canopyTop, y + 1);
     }
-    // Keep the upper crown standable; lower leaves and branch tips let
-    // walkers through, including tall helmets on quarter-unit uphill ledges.
-    // Roots and the main trunk remain solid throughout.
+    // Preserve the original placement/headroom envelope, but only roots and
+    // the main trunk keep voxel collision. The drawn lobes supply the crown.
     const solid = vox(), middle = Math.max(11, Math.ceil((canopyFloor + canopyTop) / 2));
+    let solidRadius = 0;
     for (const [key, color] of v.map) {
       voxCoords(key, CELL);
       const x = CELL[0], y = CELL[1], z = CELL[2];
-      if (y >= middle || color < 2 && (y === 0 || x >= -1 && x <= 0 && z >= -1 && z <= 0)) solid.set(x, y, z, color);
+      const trunk = color < 2 && (y === 0 || x >= -1 && x <= 0 && z >= -1 && z <= 0);
+      if (y >= middle || trunk) solidRadius = Math.max(solidRadius, Math.hypot(Math.max(Math.abs(x), Math.abs(x + 1)), Math.max(Math.abs(z), Math.abs(z + 1))) * QUARTER);
+      if (trunk) solid.set(x, y, z, color);
     }
     const palette = ["#6b4a2b", "#4e361f", ...CANOPIES[i]];
     // Drawn as a cartoon tree: a tapered eight-sided trunk with its branch stubs under crowns of low-poly
-    // puffs on the voxel crown's own ellipsoids. Keep its solid shell and
-    // extend landing support across the visible clumps and lower crown.
+    // puffs on the voxel crown's own ellipsoids. Their clipped upper surfaces
+    // are solid; visible lower clumps catch landings without blocking walkers.
     const shell = voxGeo(solid, { unit: QUARTER, palette });
     const canopySamples = [];
-    const geometry = cartoonTree(i, () => { const value = rand(); canopySamples.push(value); return value; }, shell);
+    const geometry = cartoonTree(i, () => { const value = rand(); canopySamples.push(value); return value; }, shell, middle * QUARTER);
     // Crowns stir in the wind; the collision shell stays where it stands.
     geometry.sway = 0.003;
-    let radius = 0, solidRadius = 0;
+    let radius = 0;
     for (let j = 0; j < geometry.verts.length; j += 3) radius = Math.max(radius, Math.hypot(geometry.verts[j], geometry.verts[j + 2]));
-    const solidVerts = shell.verts;
-    for (let j = 0; j < solidVerts.length; j += 3) solidRadius = Math.max(solidRadius, Math.hypot(solidVerts[j], solidVerts[j + 2]));
     geometry.treeRadius = radius;
     geometry.treeSolidRadius = solidRadius;
     geometry.treeCanopyFloor = canopyFloor * QUARTER;
     geometry.treeSolidCanopyFloor = middle * QUARTER;
     let sample = 0;
-    const coarse = cartoonTree(i, () => canopySamples[sample++], null, 1, geometry.collisionGeometry);
+    const coarse = cartoonTree(i, () => canopySamples[sample++], null, middle * QUARTER, 1, geometry.collisionGeometry);
     return BL.models.foliageLods(geometry, coarse);
   });
   const CLUMPS = [

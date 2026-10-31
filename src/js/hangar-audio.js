@@ -6,7 +6,7 @@
 // vast hall's air breathing; and, louder as the visitor nears each, the launch tunnel's neon buzzing all round them
 // inside it, and the shimmer of each shield, the launch shield's at the tunnel's end and the door's. `listen` says
 // where the visitor hears from and which way the view faces, and `update(dt)` levels the bed from there ten times a
-// second. It honours the page-wide mute (`oogaboogaland.audio`) and the tab's visibility, and `dispose` closes it.
+// second. It honours the page-wide mute (`oogaboogaland.audio`), keeps sounding in the background, and `dispose` closes it.
 //
 // Over the bed, the engine static fire test (`test(AT)`, its whole sequence scheduled at the press on voices built
 // with the bed, so nothing starts or allocates while it plays): the booth's two-tone siren from the press to the blast;
@@ -454,7 +454,7 @@
     const activate = () => {
       if (disposed) return;
       if (ready) {
-        if (ctx.state === "suspended" && !document.hidden) ctx.resume().catch(() => {});
+        if (ctx.state === "suspended") ctx.resume().catch(() => {});
         return;
       }
       if (muted || typeof AudioContext === "undefined" || navigator.userActivation && !navigator.userActivation.hasBeenActive) return;
@@ -462,11 +462,9 @@
     };
     window.addEventListener("pointerdown", activate, true);
     window.addEventListener("keydown", activate, true);
-    // A hidden tab stops the bed; showing it again picks it up.
+    // Keep the bed playing in the background; returning can wake a context the browser suspended.
     const onVisibility = () => {
-      if (!ready) return;
-      if (document.hidden) ctx.suspend().catch(() => {});
-      else ctx.resume().catch(() => {});
+      if (ready && !document.hidden && ctx.state === "suspended") ctx.resume().catch(() => {});
     };
     document.addEventListener("visibilitychange", onVisibility);
 

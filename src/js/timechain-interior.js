@@ -35,13 +35,13 @@
     lights: new Float32Array(BL.glRenderer.POINT_LIGHT_CAPACITY * 8), lightCount: 0, bloomStrength: 0.65
   };
   // The room's hum: a low drone and a soft fan hiss, pitched a little apart in each room, honouring the page-wide
-  // mute and the tab's visibility; a context only after a gesture, closed on leaving.
+  // mute; a context only after a gesture, closed on leaving.
   const ambience = (room, signal) => {
     let context = null, bus = null, sources = [], nodes = [], connected = false, disposed = false, muted = false;
     muted = BL.sound.muted;
     const gate = () => {
       if (!bus) return;
-      const on = !muted && !document.hidden && !disposed;
+      const on = !muted && !disposed;
       if (on && !connected) { bus.connect(context.destination); connected = true; }
       if (!on && connected) { bus.disconnect(); connected = false; }
     };
@@ -71,7 +71,6 @@
     const gesture = () => { wake(); if (context && context.state === "suspended") context.resume().catch(() => {}); };
     document.addEventListener("pointerdown", gesture, { signal });
     document.addEventListener("keydown", gesture, { signal });
-    document.addEventListener("visibilitychange", gate, { signal });
     const offSound = BL.sound.subscribe(on => { muted = on; gate(); if (!on) gesture(); });
     wake();
     return {
@@ -82,7 +81,6 @@
         gate();
         document.removeEventListener("pointerdown", gesture);
         document.removeEventListener("keydown", gesture);
-        document.removeEventListener("visibilitychange", gate);
         for (const source of sources) { source.stop(); source.disconnect(); }
         for (const node of [...nodes, bus]) if (node) node.disconnect();
         sources = []; nodes = [];

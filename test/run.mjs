@@ -1159,6 +1159,31 @@ const { solidPropsProbe } = (() => {
         const top = solids.supportAt(p[0], p[2], 20, 0, 0.05);
         if (top < p[1] - 1e-6 || !solids.clearAt(p[0], top, p[2], 0.05, 1.5)) failures.push(i);
       }
+      if (name.startsWith("tree ")) {
+        // Landing height must equal the rendered surface, not merely reach it:
+        // the former voxel crown could hold the feet above the visible leaves.
+        const visible = window.BL.solidProps.create(), rendered = scene.createNode({
+          geometry: { verts: geometry.verts, faces: geometry.faces, lines: [] },
+          position: root.position, rotation: root.rotation, scale: root.scale });
+        visible.add(rendered); scene.updateWorld(rendered); visible.sync();
+        const p = new Float64Array(3);
+        let sampled = 0;
+        for (let x = 1; x < 8; x++) for (let z = 1; z < 8; z++) {
+          window.BL.math.mat4.transformPoint(p, root.world,
+            bounds.min[0] + (bounds.max[0] - bounds.min[0]) * x / 8, 0,
+            bounds.min[2] + (bounds.max[2] - bounds.min[2]) * z / 8);
+          for (const radius of [0, 0.3]) {
+            const drawn = visible.supportAt(p[0], p[2], 20, 0, radius);
+            if (!Number.isFinite(drawn) || drawn < root.position.y + low * root.scale.y) continue;
+            sampled++;
+            const top = solids.supportAt(p[0], p[2], 20, 0, radius);
+            if (Math.abs(top - drawn) > 1e-6 || !solids.clearAt(p[0], top, p[2], radius, 1.5))
+              failures.push({ x, z, radius, top, drawn });
+          }
+        }
+        if (!sampled) failures.push("no visible crown samples");
+        visible.remove(rendered);
+      }
       root.visible = false; solids.sync();
       const hidden = solids.supportAt(3, -2, 20, 0, 0.3) === -Infinity;
       canopies.push({ name, failures, hidden });
@@ -3703,7 +3728,7 @@ const session = (url, steps, opts, final) => output.run({ lines: [], results: []
     })()` });
     // Install before scripts/boot: observe every DSB runtime factory and prohibit live requests.
     if (steps.some(([name]) => name.startsWith("Ooga Portal")||name.includes("Portara aperture"))) await b.send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => {
-      const counts = window.__gateDormancy = { enter: 0, land: 0, zuzu: 0, data: 0, tv: 0, audio: 0, chat: 0, fetch: 0, socket: 0, radio: 0 };
+      const counts = window.__gateDormancy = { enter: 0, land: 0, data: 0, tv: 0, audio: 0, fetch: 0, socket: 0, radio: 0 };
       const watch = (object, key, method, counter) => {
         let value;
         Object.defineProperty(object, key, { configurable: true, get: () => value, set: next => {
@@ -3721,7 +3746,7 @@ const session = (url, steps, opts, final) => output.run({ lines: [], results: []
           gate = next; const create = next.create;
           next.create = options => create({ ...options, now: options.now || (() => window.__gateClock) });
         } });
-        for (const [key, method, counter] of [["dsbModels", "build", "land"], ["dsbAgent", "create", "zuzu"], ["dsbData", "create", "data"], ["dsbTv", "create", "tv"], ["dsbAudio", "create", "audio"], ["dsbConversation", "create", "chat"]]) watch(value, key, method, counter);
+        for (const [key, method, counter] of [["dsbModels", "build", "land"], ["dsbData", "create", "data"], ["dsbTv", "create", "tv"], ["dsbAudio", "create", "audio"]]) watch(value, key, method, counter);
         const scenes = {}; watch(scenes, "dsb", "enter", "enter"); value.scenes = scenes;
       } });
       window.fetch = () => { counts.fetch++; return Promise.reject(new Error("Unexpected network during gate test")); };
@@ -8164,6 +8189,38 @@ const hubWalking = { name: "hub walking", why: "regression: steering keys came o
   record("hub running: Left Shift speeds up forward and sideways movement in carry and shoulder views, keeps possession, releases cleanly and survives a Right Shift keyup",
     running.independent && running.rows.every(row => row.walk.pathClear && row.run.pathClear && row.walk.distance > 0.5 && row.run.distance > row.walk.distance * 1.4 && row.run.distance < row.walk.distance * 1.6
       && row.run.keptControl && row.run.sprintReleased), JSON.stringify(running));
+  const ledge = await b.evaluate(`(() => {
+    const B = __ooga, P = B.pilot, a = P.player, altar = B.altar, rows = [], radius = altar.platformRadius;
+    const key = (type, key, code, shiftKey = false) => window.dispatchEvent(new KeyboardEvent(type, { key, code, shiftKey }));
+    for (const sprint of [false, true]) {
+      P.controls.reset();
+      // Pick an open approach through the actual scenery, without asking the walkable gate under test.
+      let approach = null;
+      for (let i = 0; i < 32 && !approach; i++) {
+        const yaw = i * Math.PI / 16, dx = Math.sin(yaw), dz = Math.cos(yaw), x = dx * (radius + 1), z = dz * (radius + 1);
+        if (B.crew.list.some(other => other !== a && other.root.visible
+          && Math.hypot(other.root.position.x - dx * radius, other.root.position.z - dz * radius) < 1.6)) continue;
+        if (B.island.surfaceAt(x, z) === 0 && B.headquarters.solids.props.segmentClear(x, 0, z, dx * (radius - 0.05), 0, dz * (radius - 0.05), 0.3, a.bodyHeight))
+          approach = { x, z, yaw };
+      }
+      if (!approach) { rows.push({ sprint, approach: false }); continue; }
+      P.navigate({ position: { x: approach.x, y: 0, z: approach.z }, yaw: approach.yaw, pitch: 0.4, dist: 10 }); B.advance(0.1, 1 / 60);
+      const startFeet = a.root.position.y - a.baseY;
+      let jumped = false;
+      try {
+        if (sprint) key("keydown", "Shift", "ShiftLeft", true);
+        key("keydown", "w", "KeyW", sprint);
+        for (let i = 0; i < 90 && Math.hypot(a.root.position.x, a.root.position.z) >= radius - 0.02; i++) {
+          B.advance(1 / 60, 1 / 60); jumped ||= a.hopV > 0.01;
+        }
+        rows.push({ sprint, approach: true, startFeet, feet: a.root.position.y - a.baseY, height: altar.height,
+          onto: Math.hypot(a.root.position.x, a.root.position.z) < radius - 0.02, jumped, keptControl: P.player === a });
+      } finally { key("keyup", "w", "KeyW"); key("keyup", "Shift", "ShiftLeft"); P.controls.reset(); }
+    }
+    return rows;
+  })()`);
+  record("banana ledge: grounded walking and running step onto the stone rim without a jump",
+    ledge.every(row => row.approach && Math.abs(row.startFeet) < 0.02 && row.onto && row.feet >= row.height - 0.02 && !row.jumped && row.keptControl), JSON.stringify(ledge));
   const presence = await b.evaluate(`(() => {
     const B = __ooga, cave = B.pilot.player, net = BL.net.state, account = net.me, backend = net.backend, room = net.room;
     const remote = cave.remoteControlled, row = document.querySelector('#roster [data-name="' + cave.traits.name + '"]');
@@ -8880,31 +8937,32 @@ const labKeys = { name: "lab keys", why: "rule: B streams the test bananas onto 
   const second = await b.evaluate(`({ scene: __ooga.scene, driving: !!__ooga.pilot.player })`);
   record("lab keys: B lands 100 test bananas; Escape closes the sheet, frees soft mouse-look, detaches the Ooga and then returns to the island still detached", landed === 100 && focused && ui.scene === "lab" && ui.driving && ui.focused && ui.open === "false" && cursor.scene === "lab" && cursor.driving && !cursor.focused && !cursor.locked && first.scene === "lab" && !first.driving && second.scene === "hub" && !second.driving, JSON.stringify({ landed, focused, ui, cursor, first, second }));
 } };
-// The retired glyph room stays dark for the actual eye, independent of its actor.
-const hubMatrix = { name: "hub matrix", why: "rule: the retired glyph room is pitch black behind the mirror for free and driven cameras without allocating glyph batches", run: async b => {
+// Passing over or inside the retired glyph room must never blank the camera.
+const hubMatrix = { name: "hub matrix", why: "regression: the OBL cave blanked free and following cameras with an opaque overlay", run: async b => {
   const r = await b.evaluate(`(() => {
-    const B = __ooga, H = BL.scenes.hub, M = B.mirrorCave, m = M.mouth, D = H.debug.matrixCave;
+    const B = __ooga, H = BL.scenes.hub, M = B.mirrorCave, m = M.mouth;
     const overlay = document.getElementById("overlay"), sample = document.createElement("canvas");
     sample.width = sample.height = 8;
     const ctx = sample.getContext("2d", { willReadFrequently: true }), eye = { ...B.camera.position }, target = { ...B.camera.target };
-    const paint = z => {
+    const paint = (z, above = false) => {
       Object.assign(B.camera.position, { x: m.x + Math.sin(m.ry) * z, y: m.floorY + 1.5, z: m.z + Math.cos(m.ry) * z });
+      if (above) B.camera.position.y = B.island.surfaceAt(B.camera.position.x, B.camera.position.z) + 3;
       Object.assign(B.camera.target, { x: m.x, y: m.floorY + 1.5, z: m.z });
       H.overlay(0); ctx.clearRect(0, 0, 8, 8); ctx.drawImage(overlay, 0, 0, 8, 8);
       const pixels = ctx.getImageData(0, 0, 8, 8).data;
       let black = 0; for (let i = 0; i < pixels.length; i += 4) if (!pixels[i] && !pixels[i + 1] && !pixels[i + 2] && pixels[i + 3] === 255) black++;
-      return { inside: D.cameraInside(), black };
+      return { black };
     };
-    B.pilot.release(true); const free = paint(-2), outside = paint(2);
-    B.pilot.possess(B.cavemen.get("portlandhodl")); const driven = paint(-2), returned = paint(2);
-    let batches = 0, levers = 0;
+    B.pilot.release(true); const free = paint(-2), freeAbove = paint(-2, true), outside = paint(2);
+    B.pilot.possess(B.cavemen.get("portlandhodl")); const driven = paint(-2), drivenAbove = paint(-2, true), returned = paint(2);
+    let batches = 0;
     const visit = node => { if (node.instanceData && node.geometry?.matrixGlyph) batches++; for (const child of node.children) visit(child); };
     visit(H.root);
     const noDamage = !BL.mirrorDamage && !("damage" in M) && !("mirrorDamage" in M.node);
     Object.assign(B.camera.position, eye); Object.assign(B.camera.target, target); H.overlay(0);
-    return { free, outside, driven, returned, batches, noDamage, gateLocked: M.gate.locked, wave: !!B.renderOpts.matrix };
+    return { free, freeAbove, outside, driven, drivenAbove, returned, batches, noDamage, gateLocked: M.gate.locked, wave: !!B.renderOpts.matrix };
   })()`);
-  record("hub matrix: free and driven eyes inside see opaque black, moving outside restores the view, and no glyph batches or mirror HP exist", r.free.inside && r.free.black === 64 && r.driven.inside && r.driven.black === 64 && !r.outside.inside && r.outside.black < 64 && !r.returned.inside && r.returned.black < 64 && !r.batches && !r.wave && r.noDamage && r.gateLocked, JSON.stringify(r));
+  record("hub matrix: free and following cameras keep their view inside, above and outside the cave, without glyph batches or mirror HP", [r.free, r.freeAbove, r.outside, r.driven, r.drivenAbove, r.returned].every(view => view.black < 64) && !r.batches && !r.wave && r.noDamage && r.gateLocked, JSON.stringify(r));
   const carved = await b.evaluate(`(() => { const B = __ooga, D = BL.scenes.hub.debug, rooms = new Map(B.mouths.map(mouth => [mouth.id, mouth.room])); return {
     regions: D.caveSections.map(entry => { const room = rooms.get(entry.region.id); return { id: entry.region.id, width: entry.region.halfWidth, depth: entry.region.halfDepth, expectedWidth: room.w / 2 + 0.45, expectedDepth: (room.to + 1.6) / 2 }; }),
     sealed: B.matrixGate.sealed.map(entry => ({ id: entry.mouth.id, visible: entry.node.visible, stop: entry.stopZ }))
@@ -17935,232 +17993,6 @@ const dsbExit = async (b, home = "bifrost") => {
   })()`);
   if (!await untilPage(b, `B.scene === "${home}" && !B.transitioning`, 15000)) throw Error("DSB return did not reach " + home);
 };
-// Retained modules are exercised independently: the replacement DSB scene does not spawn Zuzu.
-const mountZuzuConversationFixture = async b => b.evaluate(`(() => {
-  const B = __ooga, S = BL.scene, parent = S.createNode(), land = BL.dsbModels.build();
-  const targets = new Set(), changes = [];
-  const input = { add: node => targets.add(node), remove: node => targets.delete(node) };
-  const clearAt = (x, z, radius) => land.landmarks.shop.clearAt(x,z,radius) && land.landmarks.tv.clearAt(x,z,radius);
-  const agent = BL.dsbAgent.create({ parent, input, clearAt, landmarks: land.landmarks });
-  let clock = 0, disposed = false;
-  const sense = { name: B.dsb.avatar.traits.name, x: -4, y: 0, z: 21, food: 0, active: true };
-  agent.update(0, clock, sense);
-  const conversation = BL.dsbConversation.create({ agent, onChange: open => changes.push(open) });
-  const button = document.createElement("button");
-  button.id = "zuzu-component-talk"; button.textContent = "Talk to Zuzu";
-  Object.assign(button.style, { position: "fixed", left: "12px", top: "90px", zIndex: "10000" });
-  const open = () => { if (agent.talk()) conversation.open(); };
-  button.addEventListener("click", open); document.body.append(button);
-  window.__zuzuFixture = {
-    agent, conversation, changes, parent, targets, button,
-    prepare() { clock += 3.1; sense.x = agent.root.position.x; sense.z = agent.root.position.z - 2; agent.update(0,clock,sense); },
-    advance(seconds, dt) { B.advance(seconds,dt); clock += seconds; agent.update(seconds,clock,sense); },
-    dispose() {
-      if (disposed) return; disposed = true;
-      conversation.dispose(); agent.dispose(); button.removeEventListener("click",open); button.remove();
-      while (land.root.children.length) S.removeChild(land.root,land.root.children[0]);
-    },
-    get disposed() { return disposed; }
-  };
-})()`);
-
-scene("dsb", { label: "dsb zuzu conversation", url: hubPage(dist), steps: [{ name: "dsb zuzu conversation", why: "contract: retained agent/conversation components preserve native UI, validated transport and disposal independently of the replacement geography", run: async (b) => {
-  record("dsb compatibility: built CSP preserves exactly the weather and DSB network permissions", await b.evaluate(`(() => {
-    const policy = document.querySelector('meta[http-equiv="Content-Security-Policy"]').content;
-    const sources = name => policy.split(";").map(s => s.trim().split(/\\s+/)).find(s => s[0] === name).slice(1).sort().join("|");
-    return sources("connect-src") === ["'self'", "https:", "wss:"].sort().join("|") && sources("worker-src") === "'self'" && sources("media-src") === ["'self'", "https://stream.noderunnersradio.com"].sort().join("|") && !policy.includes("unsafe-");
-  })()`));
-  record("dsb registry: c10 is B.C.A.'s hub office and DSB is internally addressable without a cave", await b.evaluate(`(BL.caves.slots.find(s => s.id === "c10").status === "open" && BL.caves.slots.find(s => s.id === "c10").scene === null && BL.caves.slots.find(s => s.id === "c10").place === "bca") && !BL.caves.slots.some(s => s.scene === "dsb") && !!BL.scenes.dsb`));
-  record("dsb compatibility: hub keeps the Agent module without spawning a standalone gorilla", await b.evaluate(`__ooga.scene === "hub" && !__ooga.agent && !!BL.agent && !!BL.characters.get("rules-without-rulers") && Object.hasOwn(__ooga, "agent") && Object.hasOwn(__ooga, "dsb") && !__ooga.dsb`));
-  await b.evaluate(`(() => {
-    const B = __ooga, cave = B.cavemen.get("rules-without-rulers");
-    cave.override = "working"; B.crew.refreshStates(true); B.pilot.possess(cave);
-    B.crew.selectWeapon(2); window.__dsbPreviousRoot = cave.root;
-
-  })()`);
-  record("dsb compatibility: shared player and equipment initialize", await b.evaluate(`__ooga.pilot.player === __ooga.crew.player && __ooga.pilot.player.traits.name === "rules-without-rulers" && !!__ooga.pilot.player.weapon`));
-  await dsbEnter(b);
-  const entered = await untilPage(b, 'B.scene === "dsb" && !B.transitioning', 15000);
-  await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "w", code: "KeyW" });
-  if (!entered) throw Error("DSB scene handoff did not complete");
-  record("dsb compatibility: scene handoff rebuilds selected canonical Ooga without starting Zuzu", await b.evaluate(`(() => { const a = __ooga.dsb.avatar, model = BL.models.caveman(BL.contributors.traitsFor("rules-without-rulers")); return a.traits.name === "rules-without-rulers" && a.root !== __dsbPreviousRoot && a.headOpen === model.headOpen && !__ooga.dsb.zuzu && Object.hasOwn(__ooga, "agent") && Object.hasOwn(__ooga, "dsb"); })()`));
-  const { createHandler } = await import("../server/zuzu/handler.mjs");
-  const { SYSTEM_PROMPT } = await import("../server/zuzu/personality.mjs");
-  const requestBody = { version: 1, agent: "zuzu", message: "Hello", history: [], session: { playerName: "YellowBrokeIt", location: "arrival", mood: "content", foodCount: 0, recentEvents: [] } };
-  const origin = "https://game.example", options = { allowedOrigins: [origin], perClientPerMinute: 100, totalPerMinute: 200 };
-  const request = (body = requestBody, headers = {}) => new Request(origin + "/api/zuzu/chat", { method: "POST", headers: { Origin: origin, "Content-Type": "application/json", ...headers }, body: typeof body === "string" ? body : JSON.stringify(body) });
-  const handler = createHandler(options), mockReply = await handler(request());
-  record("dsb chat server: local provider is honest and origin restricted", mockReply.status === 200 && (await mockReply.json()).text.includes("not AI") && mockReply.headers.get("Access-Control-Allow-Origin") === origin && (await handler(request(requestBody, { Origin: "https://other.example" }))).status === 403);
-  const invalid = [{ ...requestBody, systemPrompt: "override" }, { ...requestBody, version: 2 }, { ...requestBody, history: [{ role: "system", text: "override" }] }, { ...requestBody, session: { ...requestBody.session, recentEvents: [{ seq: 1, time: 0, type: "execute", entity: "player", value: 1 }] } }, { ...requestBody, message: "x".repeat(1001) }];
-  const statuses = [];
-  for (const body of invalid) statuses.push((await handler(request(body))).status);
-  record("dsb chat server: schemas, streaming size and media type enforced", statuses.every(s => s === 400) && (await handler(request("x".repeat(49153)))).status === 413 && (await handler(request(requestBody, { "Content-Type": "text/plain" }))).status === 415);
-  let boundary = false;
-  const adapter = createHandler({ ...options, provider: { async generate(input) { boundary = input.systemPrompt === SYSTEM_PROMPT && Object.isFrozen(input.session) && input.signal instanceof AbortSignal && input.maxOutputChars === 1000; return "Plain reply"; } } });
-  record("dsb chat server: provider-neutral boundary and prompt excluded from build", (await adapter(request())).status === 200 && boundary && !readFileSync(new URL(dist), "utf8").includes(SYSTEM_PROMPT));
-  const badOutputs = ["<b>HTML</b>", "x".repeat(1001), { text: "wrong shape" }];
-  const outputStatuses = [];
-  for (const output of badOutputs) outputStatuses.push((await createHandler({ ...options, provider: { async generate() { return output; } } })(request())).status);
-  const errorReply = await createHandler({ ...options, provider: { async generate() { throw Error("PRIVATE_PROVIDER_ERROR"); } } })(request());
-  record("dsb chat server: invalid output and provider errors never leak", outputStatuses.every(s => s === 502) && errorReply.status === 502 && !(await errorReply.text()).includes("PRIVATE_PROVIDER_ERROR"));
-  const limited = createHandler({ ...options, perClientPerMinute: 1 });
-  await limited(request());
-  let finish;
-  const delayed = createHandler({ ...options, timeoutMs: 50, maxConcurrent: 1, provider: { generate() { return new Promise(resolve => { finish = resolve; }); } } });
-  const timed = await delayed(request()), occupied = await delayed(request());
-  finish("Late reply");
-  record("dsb chat server: rate, timeout and concurrency limits", (await limited(request())).status === 429 && timed.status === 504 && occupied.status === 503);
-  const transport = await b.evaluate(`(async () => {
-    const saved = window.fetch, R = BL.dsbAgentRemote, context = ${JSON.stringify(requestBody.session)}; let fixed = false;
-    try {
-      window.fetch = async (url, options) => { fixed = url === "/api/zuzu/chat" && options.method === "POST" && options.credentials === "omit" && options.redirect === "error" && options.signal instanceof AbortSignal; return new Response(JSON.stringify({ version: 1, text: "Transport fixture" }), { headers: { "Content-Type": "application/json" } }); };
-      const reply = await R.create({ mode: "remote" }).send("Hello", context, [], new AbortController().signal);
-      let rejected = 0;
-      for (const mode of ["status", "type", "size"]) {
-        window.fetch = async () => new Response(mode === "size" ? "x".repeat(8193) : "{}", { status: mode === "status" ? 503 : 200, headers: { "Content-Type": mode === "type" ? "text/html" : "application/json" } });
-        try { await R.create({ mode: "remote" }).send("Hello", context, [], new AbortController().signal); } catch { rejected++; }
-      }
-      return fixed && reply.text === "Transport fixture" && rejected === 3 && R.create().mode === "mock";
-    } finally { window.fetch = saved; }
-  })()`);
-  record("dsb chat: fixed HTTP transport rejects unsafe responses and defaults to mock", transport);
-  record("retained Zuzu components: replacement DSB deliberately has no live cat or conversation", await b.evaluate('!__ooga.dsb.zuzu && !__ooga.dsb.conversation && !!BL.dsbAgent && !!BL.dsbConversation'));
-  const agentContract = await b.evaluate(`(() => {
-    const S = BL.scene, parent = S.createNode(), land = BL.dsbModels.build(), targets = new Set();
-    // A small real obstacle forces a waypoint detour between perch and arrival.
-    const clearAt = (x, z, r) => !(x > -9 - r && x < -7 + r && z > 19 - r && z < 24 + r);
-    const z = BL.dsbAgent.create({ parent, landmarks: land.landmarks, clearAt,
-      input: { add: n => targets.add(n), remove: n => targets.delete(n) },
-      brain: { observe() {}, dispose() {} } });
-    const sense = { name: "YellowBrokeIt", x: -11, y: 0, z: 21, food: 1, active: true };
-    let time = 4, result;
-    try {
-      Object.assign(z.root.position, { x: -11, z: 23 }); z.update(0, time, sense);
-      const snap = z.snapshot(); let id = snap.nextRequestId;
-      const ask = (type, extra = {}) => z.request({ visit: snap.visit, id: id++, at: time, type, ...extra });
-      const bad = [ask("eval"), ask("walk_to", { destination: "hub" }), ask("look_at", { entity: "window" }),
-        ask("say", { text: "hi", code: "x" }), ask("say", { text: "x".repeat(161) }),
-        ask("say", { text: "old", at: time - 4 }), ask("say", { text: "old visit", visit: snap.visit - 1 })];
-      const valid = ask("say", { text: "A perfectly ordinary future model sentence." });
-      const replay = z.request({ visit: snap.visit, id: id - 1, at: time, type: "stop_following" });
-      const movement = [ask("stop_following"), ask("walk_to", { destination: "arrival" })];
-      const burst = []; for (let i = 0; i < 12; i++) burst.push(ask("look_at", { entity: "player" }));
-      let safe = true, detour = false;
-      for (let i = 0; i < 600; i++) {
-        time += 0.05; z.update(0.05, time, sense); const p = z.root.position;
-        safe &&= clearAt(p.x, p.z, 0.42) && Math.hypot(p.x, p.z) <= 29.01 && p.z >= 6 && p.z <= 26;
-        detour ||= p.z < 18.6;
-      }
-      const arrived = Math.hypot(z.root.position.x + 4, z.root.position.z - 23) < 0.3;
-      sense.x = z.root.position.x; sense.z = z.root.position.z - 2; z.update(0, time + 1, sense);
-      const p = z.root.position, tomato = z.tomato(p.x, 0.65, p.z - 1, p.x, 0.65, p.z + 1);
-      z.projectile(p.x, 0.65, p.z - 1, p.x, 0.65, p.z + 1); z.event("weapon_hit"); z.event("food_activity");
-      const events = z.snapshot();
-      for (let i = 0; i < 80; i++) z.event("tomato_hit");
-      const memory = z.snapshot();
-      result = { bad, valid, replay, movement, limited: burst.includes("rate_limited"), safe, detour, arrived, tomato,
-        events: events.events.map(e => e.type), hits: events.self.weaponHits, shots: events.self.nearbyShots,
-        count: memory.events.length, tomatoHits: memory.self.tomatoHits,
-        ordered: memory.events.every((e, i, a) => !i || e.seq === a[i - 1].seq + 1),
-        frozen: Object.isFrozen(memory) && Object.isFrozen(memory.events[0]) };
-    } finally { z.dispose(); while (land.root.children.length) S.removeChild(land.root, land.root.children[0]); }
-    return { ...result, disposed: z.disposed && targets.size === 0 && parent.children.length === 0 };
-  })()`);
-  record("dsb zuzu: strict action validation rejects unsafe, stale, duplicate and excessive requests", agentContract.valid === "accepted"
-    && agentContract.bad.every(v => v !== "accepted") && agentContract.replay === "stale" && agentContract.limited
-    && agentContract.movement.every(v => v === "accepted"), JSON.stringify(agentContract));
-  record("dsb zuzu: waypoint walk detours around solid obstacles and reaches arrival inside safe bounds", agentContract.safe && agentContract.detour && agentContract.arrived, JSON.stringify(agentContract));
-  record("dsb zuzu: tomato, weapon and food observations retain events without unbounded memory", agentContract.tomato && agentContract.hits === 1 && agentContract.shots === 1
-    && ["tomato_hit", "weapon_hit", "shot_nearby", "food_seen", "food_activity"].every(type => agentContract.events.includes(type))
-    && agentContract.count === 64 && agentContract.tomatoHits === 81 && agentContract.ordered && agentContract.frozen && agentContract.disposed, JSON.stringify(agentContract));
-  try {
-    await mountZuzuConversationFixture(b);
-    const approachTalk = async () => b.evaluate('__zuzuFixture.prepare()');
-    const settle = async () => approachTalk();
-    const click = async selector => { await b.focus(true); await b.send("Page.bringToFront"); await b.evaluate(`if (document.pointerLockElement) document.exitPointerLock();`); await untilPage(b, "!document.pointerLockElement", 3000); const p = await b.evaluate(`(() => { const e = document.querySelector(${JSON.stringify(selector)}), r = e.getBoundingClientRect(), x = r.x + r.width / 2, y = r.y + r.height / 2; if (!e.contains(document.elementFromPoint(x, y))) throw Error("Blocked pointer: " + ${JSON.stringify(selector)}); return { x, y }; })()`); await b.click(p.x, p.y); };
-    const send = async message => { await b.evaluate(`document.getElementById("zuzu-message").value = ${JSON.stringify(message)}; document.getElementById("zuzu-form").requestSubmit();`); if (!await untilPage(b, "!__zuzuFixture.conversation.busy", 3000)) throw Error("Conversation did not settle"); };
-    await settle(); await b.key("2");
-    await click("#zuzu-component-talk");
-    record("retained Zuzu components: eligible agent Talk opens a focused mock panel and reports its callback", await b.evaluate(`document.getElementById("zuzu-conversation").open && document.activeElement.id === "zuzu-message" && document.getElementById("zuzu-mode").textContent.includes("no AI connected") && __zuzuFixture.changes.at(-1) === true`));
-    await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "w" });
-    const before = await b.evaluate(`({ x: __ooga.dsb.avatar.root.position.x, z: __ooga.dsb.avatar.root.position.z, shots: __ooga.dsb.avatar.weapon.shotsFired })`);
-    await b.key("w"); await b.key("v"); await b.key("t");
-    await b.send("Input.insertText", { text: " Why is the moon round? Καλημέρα 🐈" });
-    const typing = await b.evaluate(`(() => { const B = __ooga; B.advance(0.5); return { x: B.dsb.avatar.root.position.x, z: B.dsb.avatar.root.position.z, shots: B.dsb.avatar.weapon.shotsFired, text: document.getElementById("zuzu-message").value, trigger: B.dsb.avatar.weapon.triggerHeld }; })()`);
-    record("dsb chat: desktop free-form typing never moves or shoots", typing.x === before.x && typing.z === before.z && typing.shots === before.shots && !typing.trigger && typing.text.includes("wvt") && typing.text.includes("Καλημέρα"), JSON.stringify(typing));
-    await b.key("Enter");
-    record("dsb chat: Enter sends and receives validated mock text", await untilPage(b, '__zuzuFixture.conversation.history.length === 2 && !__zuzuFixture.conversation.busy && __zuzuFixture.conversation.history[1].source === "mock"', 3000));
-    await b.evaluate(`__zuzuFixture.advance(3.2);`);
-    record("dsb chat: response reaches her physical world dialogue", await b.evaluate(`__zuzuFixture.agent.dialogue.includes("local mock reply")`));
-    const validation = await b.evaluate(`(() => { const R = BL.dsbAgentRemote, context = __zuzuFixture.agent.conversationContext(), rows = Array.from({ length: 30 }, () => ({ role: "player", text: "hello" })); context.unapproved = "DO_NOT_SEND"; context.recentEvents = Array.from({ length: 40 }, (_, i) => ({ seq: i + 1, time: i, type: "food_seen", value: 1, extra: "DO_NOT_SEND" })); const body = R.makeRequest("Any ordinary topic", context, rows); const bad = ["not json", "null", JSON.stringify({ version: 2, text: "x" }), JSON.stringify({ version: 1, text: "x", actions: [] }), JSON.stringify({ version: 1, text: "<img src=x onerror=alert(1)>" }), JSON.stringify({ version: 1, text: "x".repeat(1001) }), "x".repeat(8193)]; return { rejected: bad.every(raw => { try { R.validateResponse(raw); return false; } catch { return true; } }), bounded: body.history.length === 12 && body.session.recentEvents.length === 8 && new TextEncoder().encode(JSON.stringify(body)).length <= R.LIMITS.requestBytes, selected: body.session.playerName, private: !JSON.stringify(body).includes("DO_NOT_SEND") && !Object.hasOwn(body.session, "x") }; })()`);
-    record("dsb chat: response schema/HTML/size validation and context allowlist", validation.rejected && validation.bounded && validation.private && validation.selected === "rules-without-rulers", JSON.stringify(validation));
-    for (let i = 0; i < 8; i++) await send("Free-form topic " + i);
-    record("dsb chat: history and DOM remain capped", await b.evaluate(`__zuzuFixture.conversation.history.length === 12 && document.getElementById("zuzu-history").children.length === 12`));
-    const count = await b.evaluate(`__zuzuFixture.conversation.history.map(r => r.text).join("|")`);
-    await send("x".repeat(1001));
-    record("dsb chat: overlong messages rejected before sending", await b.evaluate(`__zuzuFixture.conversation.history.map(r => r.text).join("|") === ${JSON.stringify(count)} && document.getElementById("zuzu-status").textContent.includes("1,000")`));
-    await b.key("Escape");
-    record("retained Zuzu components: Escape closes the modal, reports its callback and leaves controls idle", await b.evaluate(`!document.getElementById("zuzu-conversation").open && !__zuzuFixture.conversation.isOpen && __zuzuFixture.changes.at(-1) === false && __ooga.controls.read().y === 0`));
-    const move = await b.evaluate(`(() => { const B = __ooga, p = B.dsb.avatar.root.position, x = p.x, z = p.z; window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); B.advance(0.2); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" })); return Math.hypot(p.x - x, p.z - z); })()`);
-    record("retained Zuzu components: movement remains available after the modal closes", move > 0.1, String(move));
-    await b.send("Emulation.setDeviceMetricsOverride", { width: 390, height: 740, deviceScaleFactor: 1, mobile: true });
-    await b.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
-    await approachTalk();
-    await b.evaluate(`document.getElementById("zuzu-message").value = "";`);
-    const tap = async selector => { const p = await b.evaluate(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`); await b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [p] }); await b.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] }); };
-    await tap("#zuzu-component-talk");
-    if (!await untilPage(b, "__zuzuFixture.conversation.isOpen", 3000)) throw Error("Touch Talk did not open the conversation");
-    await tap("#zuzu-message");
-    await b.send("Input.insertText", { text: "こんにちは 🐈" });
-    await b.evaluate(`document.getElementById("zuzu-message").dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));`);
-    await b.key("Enter");
-    record("dsb chat: composition Enter does not prematurely submit", await b.evaluate(`!__zuzuFixture.conversation.busy && document.getElementById("zuzu-message").value.includes("こんにちは")`));
-    await b.evaluate(`document.getElementById("zuzu-message").dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));`);
-    await tap("#zuzu-send");
-    record("dsb chat: touch Send handles Unicode text", await untilPage(b, '__zuzuFixture.conversation.history.at(-2).text.includes("こんにちは") && __zuzuFixture.conversation.history.at(-1).source === "mock"', 3000));
-    await b.send("Emulation.setDeviceMetricsOverride", { width: 390, height: 400, deviceScaleFactor: 1, mobile: true });
-    record("dsb chat: compact panel fits a reduced mobile viewport", await b.evaluate(`(() => { const r = document.getElementById("zuzu-conversation").getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth + 1 && r.top >= 0 && r.bottom <= innerHeight + 1 && parseFloat(getComputedStyle(document.getElementById("zuzu-message")).fontSize) >= 16; })()`));
-    await tap("#zuzu-close");
-    record("dsb chat: touch Close releases conversation", await b.evaluate(`!__zuzuFixture.conversation.isOpen`));
-    await b.send("Emulation.clearDeviceMetricsOverride"); await b.send("Emulation.setTouchEmulationEnabled", { enabled: false });
-    // Install a local transport fixture through the same adapter seam as the future service.
-    await b.evaluate(`window.__zuzuTransport = { mode: "valid", body: null, finish: null }; window.__remoteFactory = BL.dsbAgentRemote.create; BL.dsbAgentRemote.create = () => __remoteFactory({ mode: "remote", timeoutMs: 500, transport: async body => { __zuzuTransport.body = JSON.parse(body); if (__zuzuTransport.mode === "unavailable") throw new Error("offline"); if (__zuzuTransport.mode === "timeout") return new Promise(resolve => { __zuzuTransport.finish = resolve; }); if (__zuzuTransport.mode === "malformed") return "broken json"; if (__zuzuTransport.mode === "html") return JSON.stringify({ version: 1, text: "<b>Not allowed</b>" }); return JSON.stringify({ version: 1, text: "A plain reply about the moon. " + "Quietly fascinating. ".repeat(20) }); } }); window.__zuzuPrevious = __zuzuFixture; __zuzuFixture.dispose(); __ooga.go("hub");`);
-    if (!await untilPage(b, 'B.scene === "hub" && !B.transitioning', 20000)) throw Error("Hub transition failed");
-    const selected=await b.evaluate(`(() => {
-      const B=__ooga, actor=B.cavemen.get("rules-without-rulers");
-      actor.override="working"; B.crew.refreshStates(true); B.pilot.possess(actor);
-      return {name:B.pilot.player?.traits.name,canonical:actor.headOpen===BL.models.caveman(BL.contributors.traitsFor("rules-without-rulers")).headOpen};
-    })()`);
-    record("retained Zuzu components: remount selects the same canonical Ooga before entry",selected.name==="rules-without-rulers"&&selected.canonical,JSON.stringify(selected));
-    await dsbEnter(b);
-    if (!await untilPage(b, 'B.scene === "dsb" && !B.transitioning', 10000)) throw Error("DSB transition failed");
-    record("retained Zuzu components: reentry preserves the selected Ooga",await b.evaluate('__ooga.dsb.avatar.traits.name === "rules-without-rulers"'));
-    await mountZuzuConversationFixture(b);
-    await settle(); await click("#zuzu-component-talk");
-    record("retained Zuzu components: disposal releases the old model, targets, native button and history before remount", await b.evaluate(`__zuzuFixture.conversation.history.length === 0 && __zuzuPrevious.disposed && __zuzuPrevious.agent.disposed && __zuzuPrevious.parent.children.length === 0 && __zuzuPrevious.targets.size === 0 && !__zuzuPrevious.button.isConnected && __zuzuPrevious.conversation.history.length === 0`));
-    await send("Tell me about the moon");
-    record("dsb chat: protected-service interface accepts full text, with bounded world excerpt", await b.evaluate(`__zuzuFixture.advance(3.2); __zuzuFixture.conversation.history.at(-1).text.length > 160 && __zuzuFixture.agent.dialogue.length <= 160 && __zuzuTransport.body.version === 1 && __zuzuTransport.body.agent === "zuzu" && __zuzuTransport.body.history.length === 0`));
-    for (const mode of ["unavailable", "timeout", "malformed", "html"]) {
-      await b.evaluate(`__zuzuTransport.mode = ${JSON.stringify(mode)}`); await send("Another normal question");
-      record("dsb chat: deterministic fallback for " + mode, await b.evaluate(`__zuzuFixture.conversation.history.at(-1).source === "fallback" && !__zuzuFixture.conversation.busy && __zuzuFixture.agent.snapshot().active && document.getElementById("zuzu-status").textContent.includes("local replies") && !document.getElementById("zuzu-history").querySelector("b, img, script")`));
-    }
-    await b.evaluate(`__zuzuTransport.mode = "timeout"; document.getElementById("zuzu-message").value = "Cancel me"; document.getElementById("zuzu-form").requestSubmit();`);
-    await click("#zuzu-close");
-    const late = await b.evaluate(`(async () => { const c = __zuzuFixture.conversation, n = c.history.length; __zuzuTransport.finish(JSON.stringify({ version: 1, text: "Late reply" })); await Promise.resolve(); await Promise.resolve(); return !c.isOpen && !c.busy && c.history.length === n && c.history.at(-1).text !== "Late reply"; })()`);
-    record("dsb chat: closing cancels pending work and rejects late replies", late);
-    await b.evaluate(`BL.dsbAgentRemote.create = __remoteFactory; __zuzuFixture.dispose();`);
-    record("retained Zuzu components: disposal leaves the replacement scene deferred", await b.evaluate('!__ooga.dsb.zuzu && !__ooga.dsb.conversation && __zuzuFixture.disposed && __zuzuFixture.targets.size === 0 && !document.getElementById("zuzu-conversation").open'));
-    await dsbExit(b);
-    const returned=await b.evaluate('({scene:__ooga.scene,name:__ooga.bifrost?.avatar.traits.name})');
-    record("retained Zuzu components: real Portara return preserves the selected Ooga",returned.scene==="bifrost"&&returned.name==="rules-without-rulers",JSON.stringify(returned));
-    await b.evaluate('delete window.__zuzuFixture; delete window.__zuzuPrevious; delete window.__zuzuTransport; delete window.__remoteFactory');
-  } finally {
-    // A failed native assertion must not leave mobile overrides or component state alive.
-    await b.send("Emulation.clearDeviceMetricsOverride").catch(() => {});
-    await b.send("Emulation.setTouchEmulationEnabled", { enabled: false }).catch(() => {});
-    await b.evaluate(`if (window.__remoteFactory) BL.dsbAgentRemote.create = __remoteFactory; window.__zuzuFixture?.dispose(); delete window.__zuzuFixture; delete window.__zuzuPrevious; delete window.__zuzuTransport; delete window.__remoteFactory;`).catch(() => {});
-  }
-} }] });
 for (const ready of [false, true]) scene("dsb", { label: "entrance audio " + ready, url: hubPage(dist, "scene=dsb&entrance=1"), steps: [{ name: "dsb entrance " + (ready ? "audio enabled" : "audio blocked"), why: "regression: blocked audio must not block entrance movement", run: async (b) => {
     await b.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
     if (ready) {
@@ -18297,6 +18129,13 @@ scene("dsb", { label: "dsb feeds and audio", url: hubPage(src, "scene=dsb"), ste
   } finally { await b.evaluate(`__entranceAudio?.dispose(); delete window.__entranceAudio; AudioContext.prototype.createBufferSource = __dsbSoundProbe.original; delete window.__dsbSoundProbe;`); }
 } }] });
 scene("dsb", { label: "dsb shared player", url: hubPage(dist), steps: [{ name: "dsb shared player", why: "contract: preserve DSB scene behavior independently of the hub entrance", run: async (b) => {
+  record("dsb compatibility: built CSP preserves exactly the weather and DSB network permissions", await b.evaluate(`(() => {
+    const policy = document.querySelector('meta[http-equiv="Content-Security-Policy"]').content;
+    const sources = name => policy.split(";").map(s => s.trim().split(/\\s+/)).find(s => s[0] === name).slice(1).sort().join("|");
+    return sources("connect-src") === ["'self'", "https:", "wss:"].sort().join("|") && sources("worker-src") === "'self'" && sources("media-src") === ["'self'", "https://stream.noderunnersradio.com"].sort().join("|") && !policy.includes("unsafe-");
+  })()`));
+  record("dsb registry: c10 is B.C.A.'s hub office and DSB is internally addressable without a cave", await b.evaluate(`(BL.caves.slots.find(s => s.id === "c10").status === "open" && BL.caves.slots.find(s => s.id === "c10").scene === null && BL.caves.slots.find(s => s.id === "c10").place === "bca") && !BL.caves.slots.some(s => s.scene === "dsb") && !!BL.scenes.dsb`));
+  record("dsb compatibility: hub keeps the Agent module without spawning a standalone gorilla", await b.evaluate(`__ooga.scene === "hub" && !__ooga.agent && !!BL.agent && !!BL.characters.get("rules-without-rulers") && Object.hasOwn(__ooga, "agent") && Object.hasOwn(__ooga, "dsb") && !__ooga.dsb`));
   await b.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
   await b.evaluate(`(() => {
     const B = __ooga, c = B.cavemen.get("rules-without-rulers");
@@ -18305,6 +18144,7 @@ scene("dsb", { label: "dsb shared player", url: hubPage(dist), steps: [{ name: "
     window.__hubAmmo = { ammo: c.weapon.ammo, spare: c.weapon.spareAmmo.join(), level: B.level };
 
   })()`);
+  record("dsb compatibility: shared player and equipment initialize", await b.evaluate(`__ooga.pilot.player === __ooga.crew.player && __ooga.pilot.player.traits.name === "rules-without-rulers" && !!__ooga.pilot.player.weapon`));
   await dsbEnter(b);
   let entryTimeout;
   const entered = await Promise.race([untilPage(b, 'B.scene === "dsb" && !B.transitioning', 15000), new Promise((_, reject) => { entryTimeout = setTimeout(() => reject(Error("DSB entry: " + b.logs.join(" | "))), 18000); })]).finally(() => clearTimeout(entryTimeout));
@@ -20406,7 +20246,7 @@ const walletsChecks = BL => {
   let touched=0;const ctx2d=new Proxy({},{get:(o,k)=>typeof k==="string"&&/Text$/.test(k)?()=>{touched++;}:o[k],set:(o,k,v)=>{touched++;o[k]=v;return true;}});
   sys.drawOverlay(ctx2d,()=>({x:0,y:0}));const idle=touched;T.cool();sys.take(0);run(.05);sys.drawOverlay(ctx2d,()=>({x:0,y:0}));const busy=touched;T.detonate();run(.05);
   record("Wallets overlay: with no device out it returns before touching the canvas",idle===0&&busy>0,JSON.stringify({idle,busy}));
-  // The sound's context runs only while a device is out (and a boom rings on), the sound is on and the tab is shown.
+  // Active cues keep sounding across tab changes; mute and an empty scene still suspend the context.
   const calls=[],saved={AudioContext:globalThis.AudioContext,add:document.addEventListener,remove:document.removeEventListener,hidden:document.hidden};let heard=null,unheard=null,mute=false;
   const param=()=>({value:0,cancelScheduledValues(){},setValueAtTime(){},exponentialRampToValueAtTime(){}}),node=extra=>({connect(){},start(){},...extra});
   globalThis.AudioContext=class{constructor(){this.state="running";this.currentTime=0;this.sampleRate=8000;this.destination={};}createGain(){return node({gain:param()});}createOscillator(){return node({frequency:param()});}
@@ -20418,10 +20258,10 @@ const walletsChecks = BL => {
     mute=true;sound.take(0);go(.1);const startedMuted=S2.stats().walletAudio===0&&S2.stats().walletAudible===0;
     mute=false;go(.1);const playing=S2.stats().walletAudio===1&&S2.stats().walletAudible===1;
     mute=true;go(.1);const muted=S2.stats().walletAudible===0&&calls.at(-1)==="suspend";mute=false;go(.1);const unmuted=S2.stats().walletAudible===1&&calls.at(-1)==="resume";
-    document.hidden=true;heard();const hiddenOff=S2.stats().walletAudible===0&&calls.at(-1)==="suspend";go(.1);const stays=calls.at(-1)==="suspend";document.hidden=false;heard();const shown=calls.at(-1)==="resume";
+    const switches=calls.length;document.hidden=true;heard?.();const hiddenOn=S2.stats().walletAudible===1&&calls.length===switches;go(.1);const stays=S2.stats().walletAudible===1&&calls.length===switches;document.hidden=false;heard?.();const shown=S2.stats().walletAudible===1&&calls.length===switches;
     S2.detonate();go(.5);const ringing=S2.stats().walletAudible===1;go(3);const idle2=S2.stats().wallets===0&&S2.stats().walletAudible===0&&calls.at(-1)==="suspend";
     sound.dispose();const closed=calls.at(-1)==="close"&&unheard===heard;
-    record("Wallets sound: the context runs only while a device is out or a boom rings on, the sound is on and the tab is shown, and leaving closes it and its visibility handler, including a first device taken while muted",startedMuted&&playing&&muted&&unmuted&&hiddenOff&&stays&&shown&&ringing&&idle2&&closed,JSON.stringify({startedMuted,playing,muted,unmuted,hiddenOff,stays,shown,ringing,idle2,closed,calls}));
+    record("Wallets sound: active cues continue across tab changes, mute and an empty scene suspend audio, and leaving closes it, including a first device taken while muted",startedMuted&&playing&&muted&&unmuted&&hiddenOn&&stays&&shown&&ringing&&idle2&&closed,JSON.stringify({startedMuted,playing,muted,unmuted,hiddenOn,stays,shown,ringing,idle2,closed,calls}));
   }finally{globalThis.AudioContext=saved.AudioContext;document.addEventListener=saved.add;document.removeEventListener=saved.remove;document.hidden=saved.hidden;}
   sys.dispose();const left=Wd.root.children.length;I.dispose();Wd.dispose();
   record("Wallets disposal: every batch and pick target leaves with the visit",targets.size===0&&left===children,JSON.stringify({targets:targets.size,left,children}));
@@ -23640,8 +23480,7 @@ scene("dsb",{label:"water checkpoint",query:"&overview=1",steps:[dsbWaterCheckpo
 scene("dsb",{label:"water checkpoint canvas",query:"&overview=1&canvas2d=1",steps:[dsbWaterCheckpoint]});
 scene("dsb",{label:"water checkpoint phone",query:"&overview=1",opts:{w:390,h:844,mobile:true},steps:[dsbWaterCheckpoint]});
 
-// The current master scene deliberately omits the old attraction prototype. Exercise its
-// environment through the same public debug surface used by the visual review.
+// Exercise the live environment through the same public debug surface used by the visual review.
 const dsbWeatherCheckpoint = { name: "dsb weather checkpoint", why: "rule: weather recovers to clear, preserves night and gates exterior sound without growing particle or GPU pools", run: async b => {
   await b.key("m"); await b.key("m"); // Real gesture unlocks the shared sound graph.
   const r = await b.evaluate(`(() => {
