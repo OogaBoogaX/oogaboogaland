@@ -300,6 +300,8 @@ Tradeoffs:
 
 ### 2.6 Warnings, made clear
 
+*Built in milestone 3, as described here (the prototype's warning style A).*
+
 - **Visual.** For W seconds the cloud's `smokeOpacity` pulses between 1 and 0.72, faster
   as it goes (2 Hz → 6 Hz), and its puffs shimmer. This uses the node's existing
   `smokeOpacity`: no new geometry, and support is unchanged. Then the existing 1 s fade

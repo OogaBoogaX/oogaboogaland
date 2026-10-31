@@ -1,5 +1,6 @@
 // Cloud Hopper's design-review prototypes, on a debug page with `hopperlook=` alone (comma-separated tokens):
-// candidate skies and set dressing per level, power-up pickups, X-ray and warning styles, and a level-select mock.
+// candidate skies and set dressing per level, power-up pickups, X-ray styles, and a level-select mock. The chosen
+// warning (a thinning pulse) is the game's own now, in cloud-hopper.js.
 // Temporary: the looks the maintainer picks move into the level modules and this file goes.
 (() => {
   "use strict";
@@ -14,7 +15,7 @@
     l3a: { hour: 0.5 }, l3b: { hour: 0.5, tint: [0.92, 0.95, 1.12] },
     l4a: { hour: 16.5, storm: 0.72, fog: [70, 260], clouds: 0.95 }, l4b: { hour: 18.6, storm: 0.86, fog: [50, 200], clouds: 1 }
   };
-  const W = 2.5, XRAY_RADIUS = 60, XRAY_HAZE_RADIUS = 120;
+  const XRAY_RADIUS = 60, XRAY_HAZE_RADIUS = 120;
   const sphere = (r, n = 8) => Array.from({ length: n + 1 }, (_, k) => [r * Math.sin(k / n * Math.PI), -r * Math.cos(k / n * Math.PI)]);
   const facing = (geo) => M.turnedX(geo, Math.PI / 2);
 
@@ -129,20 +130,19 @@
     const level = [...tokens].find(t => SKIES[t]) || null, sky = level ? SKIES[level] : null;
     const hourToken = [...tokens].find(t => /^h\d+(\.\d+)?$/.test(t));
     const xray = ["xray-a", "xray-b", "xray-c"].find(t => tokens.has(t)) || null;
-    const warn = ["warn-a", "warn-b", "warn-c"].find(t => tokens.has(t)) || null;
     const select = ["select-a", "select-b"].find(t => tokens.has(t)) || null;
     const decor = createNode({ visible: false, sightHidden: true });
     addChild(root, decor);
-    const rain = [], wisps = [], bolts = [], curtains = [], labels = [], screen = { x: 0, y: 0, depth: 0 }, edge = { x: 0, y: 0, depth: 0 };
+    const rain = [], bolts = [], curtains = [], labels = [], screen = { x: 0, y: 0, depth: 0 }, edge = { x: 0, y: 0, depth: 0 };
     const nearIndex = new Int16Array(12), nearDistance = new Float32Array(12);
-    let course = null, nodes = null, flash = 0, flashAt = 3, held = 0, time = 0, forced = [], actor = null, skyOpts = null;
+    let course = null, flash = 0, flashAt = 3, held = 0, time = 0, actor = null, skyOpts = null;
     const node = (geometry, x, y, z, s = 1, extra = {}) => {
       const n = createNode({ geometry, position: { x, y, z }, scale: { x: s, y: s, z: s }, sightHidden: true, ...extra });
       addChild(decor, n);
       return n;
     };
-    const build = (built, start, finish, cloudNodes, player) => {
-      course = built; nodes = cloudNodes; actor = player;
+    const build = (built, start, finish, player) => {
+      course = built; actor = player;
       const sx = start.x - finish.x, sz = start.z - finish.z, length = Math.hypot(sx, sz), nx = sx / length, nz = sz / length;
       const sideX = -nz, sideZ = nx, rand = mulberry32(77), shore = 42;
       const at = (along, across, y) => [finish.x + nx * along + sideX * across, y, finish.z + nz * along + sideZ * across];
@@ -206,11 +206,6 @@
           rain.push(r);
         }
       }
-      if (warn === "warn-c") for (let k = 0; k < 18; k++) {
-        const holder = node(null, 0, 0, 0, 1, { visible: false });
-        addChild(holder, BL.cloudHopperModels.cloud(0.55, 0.42, 0.4, "normal", k));
-        holder.life = -1; wisps.push(holder);
-      }
       for (const [key, [name, geometry]] of Object.entries(PICKUPS)) if (tokens.has("pickups") || tokens.has(key.slice(0, -2))) {
         const holder = node(null, 0, 0, 0, 1.6), body = createNode({ geometry: geometry(), sightHidden: true });
         addChild(holder, body); holder.body = body; holder.label = name; holder.key = key; holder.cloud = -1;
@@ -218,8 +213,6 @@
       }
       decor.visible = true;
     };
-    // Shots name the clouds to hold a warning on, and the clouds to stand the pickup candidates on.
-    const force = (list) => { forced = list; };
     // Candidates stand side by side on one cloud, across the route, so a close camera sees both.
     const placePickups = (index, spread = 2.4) => {
       const c = course.clouds[index];
@@ -231,9 +224,8 @@
 
     // A still frame holds one flash and its bolts.
     const flashNow = (level = 0.55) => { held = level; };
-    // Seconds of solid time the schedule leaves this cloud, from the course itself; a forced warning reads
-    // as part-way through its warning.
-    const left = (i) => forced.includes(i) ? W * 0.45 : course.solidLeft(course.clouds[i]);
+    // Seconds of solid time the schedule leaves this cloud, from the course itself.
+    const left = (i) => course.solidLeft(course.clouds[i]);
     const update = (dt, displayTime) => {
       if (!course) return;
       time += dt;
@@ -264,27 +256,6 @@
         holder.position.x = c.x - c.z / len * offset; holder.position.y = c.top + 1.1 + Math.sin(displayTime * 2 + holder.offset) * 0.08; holder.position.z = c.z + c.x / len * offset;
         holder.body.rotation.y = holder.face ?? displayTime * 0.8;
       }
-      if (!warn || !nodes) return;
-      for (let i = 0; i < course.clouds.length; i++) {
-        const s = left(i), c = course.clouds[i];
-        if (!(s > 0 && s < W) || !c.active) continue;
-        const k = 1 - s / W, pulse = 0.5 + 0.5 * Math.sin(displayTime * TAU * (2 + 4 * k));
-        if (warn === "warn-a" || warn === "warn-c") nodes[i].smokeOpacity = c.opacity * (1 - (warn === "warn-a" ? 0.32 : 0.14) * pulse);
-        if (warn === "warn-c" && Math.random() < dt * 9) for (const w of wisps) if (w.life < 0) {
-          const a = Math.random() * TAU;
-          w.life = 0; w.visible = true; w.from = i;
-          w.position.x = c.x + Math.cos(a) * c.rx * 0.8; w.position.y = c.top - 0.3; w.position.z = c.z + Math.sin(a) * c.rz * 0.8;
-          w.vx = Math.cos(a) * 0.9; w.vz = Math.sin(a) * 0.9;
-          break;
-        }
-      }
-      for (const w of wisps) {
-        if (w.life < 0) continue;
-        w.life += dt;
-        w.position.x += w.vx * dt; w.position.z += w.vz * dt; w.position.y += 0.7 * dt;
-        w.smokeOpacity = Math.max(0, 0.85 - w.life / 1.4);
-        if (w.life > 1.4) { w.life = -1; w.visible = false; }
-      }
     };
     const skyUpdate = (opts) => {
       if (!sky) return;
@@ -314,7 +285,9 @@
       }
       c2.setLineDash(dash); c2.stroke(); c2.setLineDash([]);
     };
-    const tone = (s) => s === Infinity ? "#ffd54a" : s <= 0 ? "#8aa0b8" : s < W ? "#ff5a45" : s < 8 ? "#ffb23e" : "#5fe08a";
+    const { WARNING, FADING } = BL.cloudHopperCourse;
+    const tone = (c, s) => s === Infinity ? "#ffd54a" : s <= 0 ? "#8aa0b8" : c.phase === WARNING || c.phase === FADING ? "#ff5a45"
+      : s < 8 ? "#ffb23e" : "#5fe08a";
     const drawXray = (c2) => {
       const p = actor.root.position, haze = level?.startsWith("l4"), radius = haze ? XRAY_HAZE_RADIUS : XRAY_RADIUS;
       const cap = renderer.size.width < 600 ? 5 : 8;
@@ -333,7 +306,7 @@
       c2.fillRect(0, 0, width, 6); c2.fillRect(0, height - 6, width, 6); c2.fillRect(0, 0, 6, height); c2.fillRect(width - 6, 0, 6, height);
       c2.textAlign = "center"; c2.textBaseline = "middle"; c2.lineJoin = "round";
       for (let n = 0; n < count; n++) {
-        const i = nearIndex[n], c = course.clouds[i], s = left(i), color = tone(s);
+        const i = nearIndex[n], c = course.clouds[i], s = left(i), color = tone(c, s);
         const q = renderer.project(c.x, c.top + 1.2, c.z, screen);
         if (!q) continue;
         const x = Math.round(q.x), y = Math.round(q.y), text = s === Infinity ? "∞" : s <= 0 ? `${Math.ceil(-s)}s` : s > 99 ? "99+" : String(Math.ceil(s));
@@ -370,22 +343,6 @@
       }
       c2.restore();
     };
-    const drawWarnRims = (c2) => {
-      c2.save();
-      for (let i = 0; i < course.clouds.length; i++) {
-        const s = left(i), c = course.clouds[i];
-        if (!(s > 0 && s < W) || !c.active) continue;
-        const pulse = 0.5 + 0.5 * Math.sin(time * TAU * 4);
-        c2.strokeStyle = `rgba(255, 170, 60, ${0.55 + 0.45 * pulse})`; c2.lineWidth = 3;
-        ellipse(c2, c, [10, 6]);
-        const q = renderer.project(c.x, c.top + 1.6, c.z, screen);
-        if (!q) continue;
-        c2.beginPath(); c2.moveTo(q.x, q.y - 12); c2.lineTo(q.x + 11, q.y + 8); c2.lineTo(q.x - 11, q.y + 8); c2.closePath();
-        c2.fillStyle = "#ffb23e"; c2.fill(); c2.strokeStyle = "rgba(20,14,8,0.9)"; c2.lineWidth = 2; c2.stroke();
-        c2.fillStyle = "#1a1208"; c2.font = "bold 12px ui-monospace, monospace"; c2.textAlign = "center"; c2.textBaseline = "middle"; c2.fillText("!", q.x, q.y + 2);
-      }
-      c2.restore();
-    };
     const drawLabels = (c2) => {
       c2.save();
       c2.font = "bold 12px ui-monospace, monospace"; c2.textAlign = "center"; c2.textBaseline = "alphabetic";
@@ -397,7 +354,7 @@
         c2.strokeText(holder.label, q.x, q.y); c2.fillText(holder.label, q.x, q.y);
       }
       if (tokens.has("caption")) {
-        const caption = [level && `Sky ${level.toUpperCase()}`, xray && `X-ray ${xray.slice(-1).toUpperCase()}`, warn && `Warning ${warn.slice(-1).toUpperCase()}`].filter(Boolean).join(" · ");
+        const caption = [level && `Sky ${level.toUpperCase()}`, xray && `X-ray ${xray.slice(-1).toUpperCase()}`].filter(Boolean).join(" · ");
         if (caption) {
           c2.textAlign = "left"; c2.font = "bold 15px ui-monospace, monospace";
           c2.strokeText(caption, 18, renderer.size.height - 18); c2.fillText(caption, 18, renderer.size.height - 18);
@@ -408,7 +365,6 @@
     const overlay = (c2) => {
       if (!course || !actor) return;
       if (xray) drawXray(c2);
-      if (warn === "warn-b") drawWarnRims(c2);
       drawLabels(c2);
     };
     // The intro card's level choice, mocked in the card itself: rows after Rally's garage, or picture cards.
@@ -459,13 +415,13 @@
     };
     const clear = () => {
       for (const n of [...decor.children]) removeChild(decor, n);
-      rain.length = wisps.length = bolts.length = curtains.length = labels.length = 0;
-      decor.visible = false; course = nodes = actor = null; forced = []; held = 0;
+      rain.length = bolts.length = curtains.length = labels.length = 0;
+      decor.visible = false; course = actor = null; held = 0;
       if (skyOpts) skyOpts.seaFog = false;
     };
     const liveGeometry = (set) => BL.scene.traverseVisible(decor, (n) => { if (n.geometry) set.add(n.geometry); });
     const dispose = () => { clear(); intro(false); removeChild(root, decor); };
-    return { build, update, sky: skyUpdate, overlay, intro, clear, dispose, liveGeometry, force, placePickups, flashNow, tokens };
+    return { build, update, sky: skyUpdate, overlay, intro, clear, dispose, liveGeometry, placePickups, flashNow, tokens };
   };
   BL.cloudHopperLooks = { create, SKIES };
 })();

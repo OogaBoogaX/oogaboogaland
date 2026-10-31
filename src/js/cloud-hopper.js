@@ -7,7 +7,7 @@
   const LIFT_SECONDS = 6, LIFT_VIEW_SECONDS = 1.5, DOCK_LENGTH = 4;
   const START_VIEW = { height: 6, distance: 18 };
   const BOOST_SPEED = 28, BOOST_RISE = 4, BOUNCE_RISE = 22, LAUNCH_CLEARANCE = 0.04;
-  const RECOVERY_GRACE_SECONDS = 0.75, DOCK_MUSIC_LEVEL = 0.28;
+  const RECOVERY_GRACE_SECONDS = 0.75, DOCK_MUSIC_LEVEL = 0.28, WARNING_THIN = 0.32;
   const GUIDE_KEY = "ooga-cloud-hopper-guide-v1";
   let guideSeen = false;
   const hasSeenGuide = () => {
@@ -16,6 +16,9 @@
     }
     return guideSeen;
   };
+  // A warning thins its cloud in a dithered pulse that quickens from 2 to 6 a second as its time runs out.
+  // It starts and ends at full opacity, and support stays whole throughout.
+  const thinning = (progress, seconds) => WARNING_THIN * (0.5 - 0.5 * Math.cos(Math.PI * 2 * seconds * progress * (2 + 2 * progress)));
   // Page-session results survive hub visits, but never mix different signed-in players.
   const sessions = new Map(), SCORE_LIMIT = 10;
   const create = (ctx) => {
@@ -112,7 +115,7 @@
       return true;
     };
     const cloudNodes = [], boostNodes = [], bounceNodes = [], pickupNodes = [];
-    const cloudFading = new Uint8Array(BL.cloudHopperCourse.MAX_CLOUDS);
+    const cloudFading = new Uint8Array(BL.cloudHopperCourse.MAX_CLOUDS), cloudWarning = new Uint8Array(BL.cloudHopperCourse.MAX_CLOUDS);
     const action = { kind: "cloud-hopper" };
     const active = () => phase !== "idle", playing = () => active() && phase !== "intro";
     const held = () => phase === "intro" || phase === "lifting" || phase === "briefing" || phase === "won" || phase === "dq";
@@ -166,7 +169,7 @@
     const clearRoute = (keepMusic = false) => {
       ghost.hide();
       if (!keepMusic) { audio.stop(); dockMusicOn = false; }
-      cloudFading.fill(0);
+      cloudFading.fill(0); cloudWarning.fill(0);
       // Cloud meshes belong to the shared island kit and stay cached after a run.
       for (const node of cloudNodes) removeChild(routeRoot, node);
       for (const node of boostNodes) if (node) removeChild(routeRoot, node);
@@ -292,7 +295,7 @@
         pickupNodes.push(node); addChild(routeRoot, node);
       }
       routeRoot.visible = true;
-      looks?.build(course, start, liftGoal, cloudNodes, cave);
+      looks?.build(course, start, liftGoal, cave);
       if (replay) Object.assign(platform.position, start);
       setPhase(replay ? "ready" : "lifting");
       if (!replay) ctx.mode(true);
@@ -411,16 +414,21 @@
       }
       for (let i = 0; i < cloudNodes.length; i++) {
         const c = course.clouds[i], node = cloudNodes[i];
-        // A single cue at fade onset, measured from the rider in all three
+        // A single cue at warning and at fade onset, measured from the rider in all three
         // dimensions. Distant events are discarded, never queued on approach.
-        if (c.fading && !cloudFading[i] && phase === "running") audio.fade(Math.hypot(c.x - p.x, c.top - p.y, c.z - p.z));
+        if (phase === "running" && (c.warning >= 0 && !cloudWarning[i] || c.fading && !cloudFading[i])) {
+          const distance = Math.hypot(c.x - p.x, c.top - p.y, c.z - p.z);
+          if (c.fading) audio.fade(distance); else audio.warn(distance);
+        }
+        cloudWarning[i] = c.warning >= 0 ? 1 : 0;
         cloudFading[i] = c.fading ? 1 : 0;
+        const opacity = c.warning >= 0 ? c.opacity * (1 - thinning(c.warning, course.timing.warn)) : c.opacity;
         node.position.x += c.x - c.previousX; node.position.z += c.z - c.previousZ;
-        node.smokeOpacity = c.opacity; node.visible = c.opacity > 0;
+        node.smokeOpacity = opacity; node.visible = c.opacity > 0;
         const surface = boostNodes[i];
         if (surface) {
           surface.position.x = c.x; surface.position.y = c.y + 0.025; surface.position.z = c.z;
-          surface.smokeOpacity = c.opacity; surface.visible = c.active;
+          surface.smokeOpacity = opacity; surface.visible = c.active;
           BL.cloudHopperModels.updateBoostSurface(surface, displayTime);
         }
         if (bounceNodes[i]) BL.cloudHopperModels.updateBounceMarker(bounceNodes[i], c, displayTime);

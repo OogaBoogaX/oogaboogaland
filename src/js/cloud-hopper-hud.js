@@ -12,7 +12,7 @@
     dq: ["Disqualified", "No landing within reach. Give the clouds another try."]
   };
   const GUIDE = [
-    ["normal", "Drifting clouds", "WASD or arrows move, Shift runs and Space jumps. Leave the starting cloud to start the clock; the clouds will drift and fade beneath your feet."],
+    ["normal", "Drifting clouds", "WASD or arrows move, Shift runs and Space jumps. Leave the starting cloud to start the clock. A cloud shimmers and whistles before it fades, so jump for one that isn't shimmering; some clouds never fade at all."],
     ["boost", "Boost clouds", "Touch any part of a pink cloud, even its sides or underside, to launch toward the island. The white arrows point the way."],
     ["bounce", "Bounce clouds", "Touch any part of a purple cloud to bounce high into the air. Steer toward your next landing while airborne."],
     ["jetpack", "Jetpacks", "Collect a pack, then use J to equip or stow it. Hold Space for lift. Extra packs refill fuel; it never regenerates, and an empty pack disappears."],

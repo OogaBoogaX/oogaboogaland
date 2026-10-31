@@ -3,14 +3,14 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const MASTER = 0.45, CLOUD_VOICES = 6, CLOUD_NEAR = 4, CLOUD_FAR = 50;
+  const MASTER = 0.45, CLOUD_VOICES = 6, CLOUD_NEAR = 4, CLOUD_FAR = 50, WARN_VOICES = 3, WARN_FAR = 40;
   const BACKGROUND_AHEAD = 2, BACKGROUND_MS = 250;
   const create = () => {
     let ctx = null, master = null, musicGain = null, jetGain = null, jetTone = null, jetWhine = null, jetFilter = null, music = null;
     let armed = false, disposed = false, resuming = false, jetOn = false, muted = BL.sound.muted, nextJump = 0;
     let musicStage = "", backgroundTimer = 0;
     let musicLevel = 0, musicFrom = 0, musicAt = 0, musicUntil = 0, musicFade = 0.12;
-    const jumps = [], clouds = [];
+    const jumps = [], clouds = [], warnings = [];
     const resultStage = value => value === "won" || value === "best" || value === "dq";
     const levelAt = now => musicUntil <= now ? musicLevel
       : musicFrom + (musicLevel - musicFrom) * Math.max(0, (now - musicAt) / (musicUntil - musicAt));
@@ -41,8 +41,8 @@
         voice.gain.gain.cancelScheduledValues(now);
         voice.gain.gain.setValueAtTime(0, now);
       }
-      for (let i = 0; i < clouds.length; i++) {
-        const voice = clouds[i];
+      for (const voices of [clouds, warnings]) for (let i = 0; i < voices.length; i++) {
+        const voice = voices[i];
         voice.gain.gain.cancelScheduledValues(now);
         voice.gain.gain.setValueAtTime(0, now);
         voice.until = 0;
@@ -112,6 +112,14 @@
         const level = gain(0, master), air = filter("lowpass", 1000, 0.45, level);
         noise.connect(filter("highpass", 150, 0.5, air));
         clouds.push({ gain: level, until: 0, level: 0 });
+      }
+      for (let i = 0; i < WARN_VOICES; i++) {
+        // A soft whistle rising over a breath of air: a cloud is about to fade.
+        const level = gain(0, master), tone = ctx.createOscillator();
+        tone.type = "sine"; tone.frequency.value = 620;
+        tone.connect(gain(0.5, level)); tone.start();
+        noise.connect(filter("bandpass", 2600, 1.2, gain(0.35, level)));
+        warnings.push({ gain: level, tone, until: 0, level: 0 });
       }
       jetGain = gain(0, master);
       // Soft exhaust, a warm motor body and a faint turbine whistle. A small
@@ -195,6 +203,29 @@
       volume.exponentialRampToValueAtTime(0.0001, now + 0.75);
       volume.setValueAtTime(0, now + 0.76);
     };
+    // A cloud's warning starts: quieter and nearer-reaching than its fade, the same voice-stealing rule.
+    const warn = (distance) => {
+      if (!ready() || !Number.isFinite(distance) || distance >= WARN_FAR) return;
+      const near = Math.max(0, Math.min(1, (WARN_FAR - distance) / (WARN_FAR - CLOUD_NEAR)));
+      const level = 0.11 * near * near, now = ctx.currentTime;
+      let voice = null;
+      for (let i = 0; i < warnings.length; i++) {
+        const candidate = warnings[i];
+        if (candidate.until <= now) { voice = candidate; break; }
+        if (!voice || candidate.level < voice.level) voice = candidate;
+      }
+      if (voice.until > now && voice.level > level) return;
+      voice.until = now + 0.62; voice.level = level;
+      const pitch = voice.tone.frequency, volume = voice.gain.gain;
+      pitch.cancelScheduledValues(now);
+      pitch.setValueAtTime(620, now);
+      pitch.exponentialRampToValueAtTime(980, now + 0.55);
+      volume.cancelScheduledValues(now);
+      volume.setValueAtTime(0, now);
+      volume.linearRampToValueAtTime(level, now + 0.08);
+      volume.exponentialRampToValueAtTime(0.0001, now + 0.6);
+      volume.setValueAtTime(0, now + 0.62);
+    };
     const jet = (on) => {
       on = !!on && !!ready();
       if (on === jetOn) return;
@@ -245,7 +276,7 @@
       ctx = master = musicGain = jetGain = jetTone = jetWhine = jetFilter = music = null;
       jumps.length = clouds.length = 0;
     };
-    return { unlock, stage, level, tick, jump, fade, jet, stop, dispose };
+    return { unlock, stage, level, tick, jump, fade, warn, jet, stop, dispose };
   };
   BL.cloudHopperAudio = { create };
 })();

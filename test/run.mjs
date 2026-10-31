@@ -4719,7 +4719,7 @@ const cloudHopperFailureChecks = async engine => {
     cloudHopperModels: { cloud(radius) { platformRadius ||= radius; return S.createNode(); }, boostSurface: () => S.createNode(), updateBoostSurface: noop,
       bounceMarker: () => S.createNode(), updateBounceMarker: noop, jetpackPickup: () => S.createNode(), updateJetpackPickup: noop,
       cabinet: () => S.createNode(), updateCabinet: noop },
-    cloudHopperAudio: { create: () => ({ unlock() { audioUnlocks++; }, jump: noop, fade: noop, jet: noop,
+    cloudHopperAudio: { create: () => ({ unlock() { audioUnlocks++; }, jump: noop, fade: noop, warn: noop, jet: noop,
       stage(name) { audioStage = name; }, tick() { audioTicks++; },
       level(value, seconds = 0.12) { audioLevel = value; audioFade = seconds; },
       stop() { audioStage = ""; audioLevel = 0; audioStops++; }, dispose() { audioDisposed = true; } }) },
