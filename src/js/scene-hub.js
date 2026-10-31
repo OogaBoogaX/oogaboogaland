@@ -7404,11 +7404,16 @@
   // back on the stone. Built the first time it is raised, kept for the visit, lowered out of sight when the visit ends.
   const WP = { out: 1.7, base: 0.35, w: 1.62, h: 2.145, depth: 0.42, foot: 0.3, cap: 0.16, sink: 3.2,
                strike: 1, rise: 3.6, flash: 0.7, flashAlpha: 0.62, shake: 3, shakeAmp: 0.08, dist: 3.6, grace: 0.7, hold: 1,
-               strikeDist: 10, strikeEye: 4.2, strikeLook: 0.35, zoom: 2.2,
+               strikeDist: 10, strikeEye: 4.2, strikeLook: 0.35, zoom: 2.2, back: 0.9,
+               sinkAfter: 300, sinkTime: 2.5,
                readFov: 0.55, readAir: 1.06, readZoomStep: 1.5, readZoomMax: 6, glide: 7 };
   let wpGroup = null, wpImage = null, wpSheet = null, wpPoster = null, wpBolt = null, wpChar = null, wpBanner = null;
   let wpGround = 0, wpEye = null, wpLook = null, wpWideEye = null, wpWideLook = null;
   let wpTime = -1, wpRise = 0, wpFlash = 0, wpStanding = false, wpStruck = false, wpBannerTime = 0;
+  // The banner dissolves in once the stone stands; the view flies back rather than jumping; and the stone sinks
+  // again five minutes after the paper was last read.
+  let wpBannerFade = 0, wpReturn = -1, wpSinkTimer = -1, wpSinkT = -1;
+  const WP_FROM = { px: 0, py: 0, pz: 0, tx: 0, ty: 0, tz: 0, fov: 0, toFov: 0 };
   let wpRead = false, wpFov = 0, wpPage = 0, wpReadLeft = -1e9, wpZoom = 1, wpPanX = 0, wpScroll = 0, wpScrollTo = -1, wpFill = false;
   let wpStrip = null, wpStripImage = null;
   const WP_EYE = { x: 0, y: 0, z: 0 }, WP_TARGET = { x: 0, y: 0, z: 0 };
@@ -7431,7 +7436,7 @@
   // arched along a circle, the whole turned round to read from the plaza and bobbing there. One geometry a glyph,
   // cached for the visit, so the arc costs nothing a frame.
   const WP_BANNER = { text: "₿itcoin Whitepaper Day", date: "31 · X · MMVIII", height: 0.49, small: 0.72, dateScale: 0.46,
-    depth: 0.12, radius: 8.3, y: 4.05, dateY: -0.62, bob: 0.055, sway: 0.018 };
+    depth: 0.12, radius: 8.3, y: 4.05, dateY: -0.62, bob: 0.055, sway: 0.018, fade: 0.8 };
   const WP_BANNER_CELL = WP_BANNER.height / 9;
   // The serif: nine rows a glyph, the stems two cells thick and the serifs one row. Only what the banner and its
   // date say is cut; a letter without a glyph throws rather than dropping out of the line.
@@ -7498,7 +7503,7 @@
     const c = WP_BANNER_CELL, gapOf = scale => c * scale;
     // The banner is turned round to face the plaza; its own x runs the other way, so the arc and each letter's
     // tilt are built the other way about.
-    const banner = createNode({ position: { x: 0, y: WP_BANNER.y, z: 0 }, rotation: { x: 0, y: Math.PI, z: 0 }, sightHidden: true });
+    const banner = createNode({ position: { x: 0, y: WP_BANNER.y, z: 0 }, rotation: { x: 0, y: Math.PI, z: 0 }, sightHidden: true, smokeOpacity: 0 });
     // A line of type: a word's first letter stands a full capital and the rest are small caps, or every letter is
     // the same size for the date.
     const line = (text, smallcaps, y) => {
@@ -7623,6 +7628,7 @@
   const wpShow = () => {
     wpStanding = true;
     wpTime = 0; wpRise = 0; wpFlash = WP.flashAlpha; wpStruck = false;
+    wpBannerFade = 0; wpSinkTimer = -1; wpSinkT = -1;
     wpGroup.visible = true;
     wpGroup.position.y = wpGround - WP.sink;
     wpBolt.visible = true;
@@ -7658,6 +7664,16 @@
     }
     return false;
   };
+  // Handing the view back: the camera flies from where it stands to the character's own, rather than jumping there.
+  // `toFov` is the field of view it goes back to — the character's, unchanged by the show, and the one it had before
+  // the paper was read.
+  const wpRelease = (toFov) => {
+    WP_FROM.px = camera.position.x; WP_FROM.py = camera.position.y; WP_FROM.pz = camera.position.z;
+    WP_FROM.tx = camera.target.x; WP_FROM.ty = camera.target.y; WP_FROM.tz = camera.target.z;
+    WP_FROM.fov = camera.fov; WP_FROM.toFov = toFov;
+    wpReturn = 0;
+    holdTheView(false);
+  };
   const wpStop = () => {
     if (wpTime < 0) return;
     wpTime = -1; wpFlash = 0; wpStruck = false;
@@ -7665,7 +7681,7 @@
     // It stays where it broke out, so the plaza sees it once the view is the visitor's again.
     wpRise = 1;
     wpGroup.position.y = wpGround;
-    holdTheView(false);
+    wpRelease(camera.fov);
   };
   // The whitepaper's pages (whitepaper-pages-data.js) as one tall strip with the stone's dark gap between them, the
   // stone's face a window onto it: the reader slides the document up and down inside the stone, a page at a time or
@@ -7746,9 +7762,9 @@
     document.body.classList.remove("wp-reading");
     wpNav(false);
     wpSheet.geometry = wpPoster;
-    // The field of view goes back to the character's, as the camera does.
-    camera.fov = wpFov;
-    holdTheView(false);
+    // The view flies back to the character's own, field of view included, and the stone starts its countdown.
+    wpRelease(wpFov);
+    wpSinkTimer = 0;
   };
   // Zooming the paper: the first double tap pushes the view in until the stone's face is as wide as the window, and
   // each one after it steps the paper in 50%; each right click steps back out, the view to the whole stone last.
@@ -7856,9 +7872,11 @@
     camera.fov += (WP.readFov - camera.fov) * k;
   };
   const wpUpdate = (dt) => {
-    // The banner floats: a slow lift and a small sway of the whole arch, whatever the stone is doing. As the island's
-    // lamps come on, its letters take their glowing versions, and the day's back as they go out.
+    // The banner waits until the stone has fully broken out, then dissolves in; it floats from there, and takes its
+    // glowing letters as the island's lamps come on.
     if (wpBanner) {
+      if (wpRise >= 1 && wpBannerFade < 1) wpBannerFade = Math.min(1, wpBannerFade + dt / WP_BANNER.fade);
+      wpBanner.smokeOpacity = wpBannerFade;
       wpBannerTime += dt;
       wpBanner.position.y = WP_BANNER.y + Math.sin(wpBannerTime * 1.1) * WP_BANNER.bob;
       wpBanner.rotation.z = Math.sin(wpBannerTime * 0.73 + 1.1) * WP_BANNER.sway;
@@ -7868,6 +7886,30 @@
         wpBannerNight = night;
         for (const pair of wpBannerPairs) pair.node.geometry = night ? pair.night : pair.day;
       }
+    }
+    // Handing the view back eases the camera from where it stood to the pilot's own, field of view included.
+    if (wpReturn >= 0) {
+      wpReturn += dt;
+      const k = Math.min(1, wpReturn / WP.back), e = k * k * (3 - 2 * k), p = camera.position, t = camera.target;
+      p.x = WP_FROM.px + (p.x - WP_FROM.px) * e;
+      p.y = WP_FROM.py + (p.y - WP_FROM.py) * e;
+      p.z = WP_FROM.pz + (p.z - WP_FROM.pz) * e;
+      t.x = WP_FROM.tx + (t.x - WP_FROM.tx) * e;
+      t.y = WP_FROM.ty + (t.y - WP_FROM.ty) * e;
+      t.z = WP_FROM.tz + (t.z - WP_FROM.tz) * e;
+      camera.fov = WP_FROM.fov + (WP_FROM.toFov - WP_FROM.fov) * e;
+      if (k >= 1) { wpReturn = -1; camera.fov = WP_FROM.toFov; }
+    }
+    // Five minutes after the paper was last read the stone sinks back into the crest, banner and all, and is gone
+    // until a book raises it again.
+    if (wpSinkT >= 0) {
+      wpSinkT += dt;
+      const k = Math.min(1, wpSinkT / WP.sinkTime), e = k * k * (3 - 2 * k);
+      wpGroup.position.y = wpGround - WP.sink * e;
+      if (k >= 1) { wpSinkT = -1; wpStanding = false; wpGroup.visible = false; wpBannerFade = 0; }
+    } else if (wpStanding && wpTime < 0 && !wpRead && wpSinkTimer >= 0) {
+      wpSinkTimer += dt;
+      if (wpSinkTimer >= WP.sinkAfter) { wpSinkTimer = -1; wpSinkT = 0; }
     }
     if (wpRead) { wpReadUpdate(dt); return; }
     if (wpTime < 0) return;
@@ -12200,6 +12242,7 @@
     if (wpRead) wpReadEnd();
     wpGroup = wpImage = wpSheet = wpPoster = wpBolt = wpChar = wpBanner = null;
     wpBannerGeos.clear(); wpBannerPairs.length = 0; wpBannerNight = null; wpBannerTime = 0;
+    wpBannerFade = 0; wpReturn = -1; wpSinkTimer = -1; wpSinkT = -1;
     wpStrip = wpStripImage = null;
     targets.length = placed.length = claimed.length = scenery.length = sceneryClaims.length = matrixGates.length = sealedCaves.length = clouds.length = lamps.length = pilePosts.length = fireSeats.length = sleepers.length = labels.length = signDetails.length = spots.length = chillSpots.length = headquartersRimLintels.length = climbMasonry.length = props.length = meadowPalms.length = 0;
     fireHazards.length = 0;
