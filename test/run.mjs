@@ -5404,6 +5404,48 @@ const gameRulesChecks = async () => {
     record("block frenzy expert: a blocked set-down is retried as soon as the space clears",
       blockedCrate.lifted && blockedWait && !blockedCrate.bot.holding,
       JSON.stringify({ blockedWait, holding: blockedCrate.bot.holding }));
+    // Piggyback: a fixture with the visitor and one bot teammate on Fort Chaos, the rivals out of the way.
+    const piggy = () => {
+      const r = S.create({ team: "blue", seed: 2, prep: 0, size: 3 });
+      for (const b of r.actors) { b.x = 18; b.z = -35; b.bot = false; }
+      Object.assign(r.weather, { target: 0, strength: 0, left: 1e9 });
+      const run = (s, input = still) => { for (let n = 0; n < Math.round(s / S.CONFIG.STEP); n++) S.tick(r, S.CONFIG.STEP, { ...input }); };
+      return { r, me: r.actors[0], b1: r.actors[1], b2: r.actors[2], run };
+    };
+    {
+      const { r, me, b1, run } = piggy();
+      Object.assign(me, { x: 0, z: 10 }); Object.assign(b1, { x: 0.9, z: 10, bot: true });
+      const on = S.hopOn(r, 0), carried = me.ride === 2 && b1.rider === 1;
+      run(1, { x: 0, z: 0, face: 1 });
+      const along = Math.hypot(me.x - b1.x, me.z - b1.z) < 0.5 && me.y > b1.y + 0.3 && Math.abs(me.heading - 1) < 1e-6;
+      b1.splat = 2; b1.netted = 3; run(0.5, { x: 0, z: 0, face: 1 });
+      const stays = me.ride === 2;
+      b1.splat = 0; b1.netted = 0; run(0.1, { x: 0, z: 0, jump: 1 });
+      const off = !me.ride && !b1.rider;
+      record("block frenzy piggyback: H climbs on a teammate's back, the rider is carried along facing its own way, stays on through the carrier's splat and net, and a jump gets down",
+        on && carried && along && stays && off, JSON.stringify({ on, carried, along, stays, off }));
+    }
+    {
+      // J: a closer teammate that can't come (splatted) doesn't stop a healthy one answering.
+      const { r, me, b1, b2, run } = piggy();
+      Object.assign(me, { x: 0, z: 10 }); Object.assign(b1, { x: 2, z: 10, bot: true, splat: 1e9 }); Object.assign(b2, { x: 6, z: 14, bot: true });
+      S.callRide(r, 0); run(4);
+      const answered = me.rider === b2.id + 1 && b2.ride === 1;
+      record("block frenzy piggyback: J brings the nearest teammate that can come onto the visitor's back, past a nearer splatted one",
+        answered, JSON.stringify({ rider: me.rider, b2ride: b2.ride }));
+    }
+    {
+      // Beside a post of the centre deck, the rider sits nearer the carrier's middle rather than inside the post.
+      const { r, me, b1, run } = piggy();
+      Object.assign(b1, { x: 2.8, z: 3.2 + S.CONFIG.BODY_R + 0.02, heading: 0, bot: false });
+      Object.assign(me, { x: 2.8, z: b1.z + 1 });
+      const on = S.hopOn(r, 0); run(0.2, { x: 0, z: 0, face: 0 });
+      const R = S.CONFIG.BODY_R * 0.9, post = [2.4, 3.2, 2.4, 3.2];
+      const cx = Math.max(post[0], Math.min(me.x, post[1])), cz = Math.max(post[2], Math.min(me.z, post[3]));
+      const clear = Math.hypot(me.x - cx, me.z - cz) >= R - 1e-6;
+      record("block frenzy piggyback: a rider beside a wall or post sits clear of it, not inside it",
+        on && me.ride === 2 && clear, JSON.stringify({ on, ride: me.ride, rider: [me.x, me.z], gap: Math.hypot(me.x - cx, me.z - cz) }));
+    }
     const round = (seed) => { const r = S.create({ team: "red", seed }); r.actors[0].bot = "auto"; for (let t = 0; t < 900 && !r.over; t += 1 / 30) S.step(r, 1 / 30, still), r.eventCount = 0; return JSON.stringify({ over: r.over, winner: r.winner, score: r.score, time: Math.round(r.time) }); };
     const a = round(3), b = round(3);
     record("block frenzy rounds: a seeded round replays exactly and reaches three captures", a === b && JSON.parse(a).over && Math.max(...Object.values(JSON.parse(a).score)) === S.CONFIG.CAPTURES, JSON.stringify({ a, b }));

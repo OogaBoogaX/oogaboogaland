@@ -773,7 +773,7 @@
       } else if (e.type === "hopon") {
         audio.cues.jump(); audio.cues.pass(0.4);
         if (me) { center("PIGGYBACK!", 800); notice(`On ${nameOf(e.by)}'s back · aim and shoot · Space (or H) hops off`, 2600); }
-        else if (e.by === 0) { center("PIGGYBACK!", 800); notice(`${nameOf(e.actor)} is on your back, shooting for you · they hop off if you're splatted`, 2600); }
+        else if (e.by === 0) { center("PIGGYBACK!", 800); notice(`${nameOf(e.actor)} is on your back, shooting for you · they stay on even if you're splatted`, 2600); }
         else say(e.actor, ["Giddy up!", "Onward!", "Hup!"], 1.2);
       } else if (e.type === "hopoff") { if (me) notice("Back on your feet", 900); }
       else if (e.type === "laseron") {

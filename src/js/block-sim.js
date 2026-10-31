@@ -799,10 +799,13 @@
   // Out of a quiz bubble (a right answer, or the bot's think time up): fresh-paint protection follows, as after a splat.
   // ---- Piggyback ----
   // Actor `id` climbs onto the back of the nearest teammate within `HOP_R`: carried along on their shoulders, free to
-  // turn and shoot (or throw a block on), until a jump, or either of them being splatted, trapped or grabbed, puts them
-  // down. The one carrying runs a little slower (`MOUNT_SLOW`). A rider may carry a block; the one under it may not
+  // turn and shoot (or throw a block on), until a jump puts them down. Splats, nets, quiz traps and blasts don't: the
+  // rider stays on through them; only what can't be ridden through (a gorilla's grab, a catapult's throw, a zipline,
+  // a ladder) does. The one carrying runs a little slower (`MOUNT_SLOW`). A rider may carry a block; the one under it may not
   // climb on someone else.
   const canRide = (a) => a.splat <= 0 && a.trapped <= 0 && !a.grabbed && !a.riding && !a.flight && !a.climbing && !a.holding && a.knock <= 0;
+  // Still able to ride on (or carry): only a grab, a throw, a zipline or a ladder ends it.
+  const canStay = (a) => !a.grabbed && !a.riding && !a.flight && !a.climbing;
   const hopOn = (sim, id = 0, onto = -1) => {
     use(sim);
     const a = sim.actors[id];
@@ -815,8 +818,24 @@
     }
     if (!best) return false;
     a.ride = best.id + 1; best.rider = a.id + 1; a.calling = 0;
+    const at = rideAt(best);
+    a.x = at.x; a.z = at.z; a.y = at.y; a.vx = a.vz = a.vy = 0;
     emit(sim, "hopon", a.team, a.id, best.x, best.y + 1.5, best.z, best.id);
     return true;
+  };
+  // Where a rider sits on `m`'s back: `RIDE_BACK` behind, or nearer its middle where a wall or a post would be in the
+  // way (the carrier itself is clear, so straight over its middle always fits). Writes RIDE_AT.
+  const RIDE_AT = { x: 0, y: 0, z: 0, crouch: false };
+  const RIDE_PROBE = { x: 0, y: 0, z: 0, crouch: false };
+  const rideAt = (m) => {
+    const sh = Math.sin(m.heading), ch = Math.cos(m.heading), y = m.y + CONFIG.RIDE_UP;
+    for (const k of [1, 0.66, 0.33, 0]) {
+      const x = m.x - sh * CONFIG.RIDE_BACK * k, z = m.z - ch * CONFIG.RIDE_BACK * k;
+      RIDE_PROBE.x = x; RIDE_PROBE.z = z; RIDE_PROBE.y = y;
+      resolve(RIDE_PROBE, CONFIG.BODY_R * 0.9, 0.05);
+      if (k === 0 || (Math.abs(RIDE_PROBE.x - x) < 1e-6 && Math.abs(RIDE_PROBE.z - z) < 1e-6)) { RIDE_AT.x = x; RIDE_AT.z = z; RIDE_AT.y = y; return RIDE_AT; }
+    }
+    return RIDE_AT;
   };
   const hopOff = (sim, a, jump = true) => {
     if (!a.ride) return;
@@ -1683,7 +1702,8 @@
       const d = Math.hypot(c.x - a.x, c.z - a.z);
       if (d > CONFIG.CALL_R) continue;
       let nearer = false;
-      for (const b of sim.actors) if (b !== a && b !== c && b.bot && b.team === a.team && !b.ride && !b.rider && Math.hypot(c.x - b.x, c.z - b.z) < d) nearer = true;
+      // Only a teammate that could actually come counts as nearer (not one splatted, trapped, riding or carrying).
+      for (const b of sim.actors) if (b !== a && b !== c && b.bot && b.team === a.team && !b.ride && !b.rider && !b.carrying && canRide(b) && Math.hypot(c.x - b.x, c.z - b.z) < d) nearer = true;
       if (nearer) continue;
       if (d < CONFIG.HOP_R && hopOn(sim, a.id, c.id)) return;
       const h = steer(sim, a, c.x, c.z), sp = sim.bots.speed * 1.2;
@@ -1996,13 +2016,15 @@
       // On a teammate's back: carried along, facing where it likes; a jump (or trouble below) puts it down.
       if (a.ride) {
         const m = sim.actors[a.ride - 1];
-        let off = !m || m.rider !== a.id + 1 || !canRide(a) || !canRide(m);
-        if (!a.bot && input.jump) { off = true; input.jump = 0; }
-        if (off) hopOff(sim, a, !!m && canRide(a));
+        let off = !m || m.rider !== a.id + 1 || !canStay(a) || !canStay(m);
+        // A jump gets down, unless the rider is splatted or stuck in a quiz.
+        if (!a.bot && input.jump) { if (a.splat <= 0 && a.trapped <= 0) off = true; input.jump = 0; }
+        if (off) hopOff(sim, a, !!m && canStay(a));
         else {
           if (a.bot) thinkBot(sim, a, dt);
           else if (input.face !== undefined) a.heading = input.face;
-          a.x = m.x - Math.sin(m.heading) * CONFIG.RIDE_BACK; a.z = m.z - Math.cos(m.heading) * CONFIG.RIDE_BACK; a.y = m.y + CONFIG.RIDE_UP;
+          const at = rideAt(m);
+          a.x = at.x; a.z = at.z; a.y = at.y;
           a.vx = m.vx; a.vz = m.vz; a.vy = 0; a.grounded = false; a.jumps = 0; a.moving = 0;
           if (a.carrying) { const f = sim.flags[a.carrying]; f.x = a.x; f.z = a.z; }
           continue;
