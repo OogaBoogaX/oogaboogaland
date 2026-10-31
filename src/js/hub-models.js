@@ -452,67 +452,80 @@
     box({ w: 0.24, h: 0.3, d: 0.24, color: "#d8892b", offset: { x: 0.2, y: 0.25, z: 0.06 } }),
     box({ w: 0.24, h: 0.2, d: 0.24, color: "#6f9fca", offset: { x: 0.65, y: 0.2, z: 0.02 } })
   ));
-  // The plaza library's fittings inside the nook the island cuts into the hillside left of the Timechain stairs:
-  // a flagstone floor and threshold, timber shelves of books against the back of the cut, and a stone mouth round
-  // the opening with the name over it. Each shelf is one book of the reading list (`BOOKS` in scene-hub.js), its
-  // spines in that book's inks; the scene gives each shelf its pick. Local +z leads out of the mouth, y = 0 on the
-  // cut floor. The chamber is 3.6 m wide, 1.5 m deep and 2.5 m high, so the trim laps the cut rock.
-  const LIBRARY_SHELF_Y = [0.52, 1.12, 1.72];
+  // The Library of Bitcoin fills a shallow cut left of the Timechain stairs. Five compact rows of books and
+  // parchment rolls sit in divided timber bays, close enough to browse from the threshold. Local +z leads out
+  // of the mouth, y = 0 on the cut floor. The cut is 5.4 m wide, 0.78 m deep and 3.3 m high.
+  const LIBRARY_SHELF_Y = [0.25, 0.79, 1.33, 1.87, 2.41];
   const LIBRARY_BOOK_INKS = [
     ["#d9a441", "#b5792e", "#8a5a2a", "#e3b559", "#a86b2c", "#c48a35"],
+    ["#8d563c", "#a86b42", "#6d4437", "#c18b58", "#885336", "#b47748"],
     ["#5d8fc4", "#3f6fa8", "#7fb0d6", "#2f4f74", "#4f8f9a", "#86a9c9"],
+    ["#637a58", "#7f9569", "#4a634c", "#9aa176", "#61755e", "#a4aa82"],
     ["#e8e2d2", "#cfc8b4", "#b7ae98", "#f1ece0", "#9a927e", "#d8cfb6"]
   ];
   const libraryNook = cached(() => {
     const rand = mulberry32(4181), stone = ["#4a4640", "#3a3734", "#57514a"], parts = [
-      // The flagstone floor and the threshold across the mouth.
-      box({ w: 3.54, h: 0.06, d: 1.36, color: "#4a4640", offset: { y: 0.03, z: -0.66 } }),
-      box({ w: 4.35, h: 0.1, d: 0.32, color: "#3a3734", offset: { y: 0.05, z: 0.03 } }),
-      // The mouth's jambs and lintel stand just inside the cut, framing the opening under the rock ceiling.
-      box({ w: 0.14, h: 2.12, d: 0.34, color: stone[1], offset: { x: -1.695, y: 1.06, z: -0.03 } }),
-      box({ w: 0.14, h: 2.12, d: 0.34, color: stone[1], offset: { x: 1.695, y: 1.06, z: -0.03 } }),
-      box({ w: 3.6, h: 0.3, d: 0.36, color: stone[0], offset: { y: 2.27, z: -0.03 } }),
-      // The shelf unit against the back of the cut, on a dark back board.
-      box({ w: 3.3, h: 1.98, d: 0.04, color: "#241f1a", offset: { y: 1.05, z: -1.36 } }),
-      ...LIBRARY_SHELF_Y.map((y) => box({ w: 3.18, h: 0.055, d: 0.44, color: WOOD, offset: { y, z: -1.12 } }))
+      box({ w: 5.34, h: 0.06, d: 0.72, color: stone[0], offset: { y: 0.03, z: -0.33 } }),
+      box({ w: 5.65, h: 0.1, d: 0.32, color: stone[1], offset: { y: 0.05, z: 0.03 } }),
+      box({ w: 0.14, h: 2.87, d: 0.34, color: stone[1], offset: { x: -2.595, y: 1.435, z: -0.03 } }),
+      box({ w: 0.14, h: 2.87, d: 0.34, color: stone[1], offset: { x: 2.595, y: 1.435, z: -0.03 } }),
+      box({ w: 5.4, h: 0.3, d: 0.36, color: stone[0], offset: { y: 3.02, z: -0.03 } }),
+      box({ w: 5.1, h: 2.76, d: 0.04, color: "#241f1a", offset: { y: 1.5, z: -0.69 } }),
+      ...LIBRARY_SHELF_Y.map((y) => box({ w: 4.98, h: 0.055, d: 0.44, color: WOOD, offset: { y, z: -0.45 } }))
     ];
-    // The name board on the lintel, its lettering cut from the shared 3x5 alphabet as solid runs.
-    parts.push(box({ w: 1.62, h: 0.24, d: 0.04, color: "#6b4524", offset: { y: 2.27, z: 0.155 } }));
-    const name = "LIBRARY", cell = 0.045;
+    // Uprights divide the rows into four bays, like the scroll cupboards of an old library.
+    for (const x of [-2.51, -1.28, 0, 1.28, 2.51]) parts.push(box({ w: 0.055, h: 2.68, d: 0.44,
+      color: "#6b4524", offset: { x, y: 1.55, z: -0.45 } }));
+    parts.push(box({ w: 3.55, h: 0.25, d: 0.04, color: "#6b4524", offset: { y: 3.02, z: 0.155 } }));
+    const name = "LIBRARY OF BITCOIN", cell = 0.045;
     let cursor = -(name.length * 4 - 1) * cell / 2;
     for (const ch of name) {
       const glyph = SIGN_GLYPHS[ch];
-      for (let row = 0; row < glyph.length; row++) {
+      if (glyph) for (let row = 0; row < glyph.length; row++) {
         const line = glyph[row];
         for (let col = 0; col < line.length; col++) {
           if (line[col] !== "1") continue;
           let run = 1;
           while (line[col + run] === "1") run++;
-          parts.push(box({ w: cell * run * 0.92, h: cell * 0.92, d: 0.02, color: "#f1e7cf", emissive: 0.3,
-            offset: { x: cursor + (col + run * 0.5) * cell, y: 2.27 + (2 - row) * cell, z: 0.18 } }));
+          parts.push(box({ w: cell * run * 0.92, h: cell * 0.92, d: 0.02, color: SIGN_INK, emissive: 1,
+            offset: { x: cursor + (col + run * 0.5) * cell, y: 3.02 + (2 - row) * cell, z: 0.18 } }));
           col += run - 1;
         }
       }
       cursor += 4 * cell;
     }
-    // Three shelves; each shelf's row is one book's run of spines in its inks, with a band of lettering.
     for (let s = 0; s < LIBRARY_SHELF_Y.length; s++) {
       const top = LIBRARY_SHELF_Y[s] + 0.028, inks = LIBRARY_BOOK_INKS[s];
-      for (let x = -0.93, lean = false; x < 1.47;) {
-        const w = 0.06 + rand() * 0.05;
-        if (x + w > 1.47) break;
-        const h = 0.3 + rand() * 0.14, ink = inks[Math.floor(rand() * inks.length)];
-        // One book a shelf leans against its neighbour.
-        if (!lean && x > -0.6 && rand() < 0.3) {
-          lean = true;
-          parts.push(moved(turnedZ(box({ w, h, d: 0.3, color: ink }), -0.22), x + w / 2, top + h / 2, -1.2));
-        } else parts.push(box({ w, h, d: 0.3, color: ink, offset: { x: x + w / 2, y: top + h / 2, z: -1.2 } }));
-        if (rand() < 0.7) parts.push(box({ w: w * 0.7, h: 0.03, d: 0.012, color: s === 2 ? "#3a2f22" : "#f1e7cf",
-          offset: { x: x + w / 2, y: top + h * 0.62, z: -1.045 } }));
-        x += w + 0.01 + (rand() < 0.14 ? 0.045 : 0);
+      for (let bay = 0; bay < 4; bay++) {
+        const center = (bay - 1.5) * 1.28;
+        if ((s + bay) % 4 === 0 || s === 3 && bay === 2) {
+          // Long, narrow parchment scrolls lie across the bay so their full length reads from the plaza.
+          // Solid paper ends and two leather ties distinguish them from hollow rolls.
+          for (let row = 0; row < 3; row++) {
+            const length = 0.8 + rand() * 0.16, half = length / 2, r = 0.045 + rand() * 0.007;
+            const paper = ["#dfcfa5", "#cdb887", "#eee0bd"][Math.floor(rand() * 3)];
+            const roll = [lathe({ profile: [[0, -half], [r * 0.88, -half], [r, -half + 0.02],
+              [r, half - 0.02], [r * 0.88, half], [0, half]], segments: 8, color: paper })];
+            for (const y of [-length * 0.24, length * 0.24]) roll.push(lathe({
+              profile: [[r + 0.003, y - 0.012], [r + 0.003, y + 0.012]], segments: 8, color: "#805634" }));
+            parts.push(moved(turnedY(turnedZ(merge(...roll), Math.PI / 2), row === 1 ? -0.12 : 0.08),
+              center + (row === 1 ? 0.04 : -0.03), top + 0.055 + row * 0.105, -0.38));
+          }
+          continue;
+        }
+        for (let x = center - 0.53, lean = false; x < center + 0.5;) {
+          const w = 0.06 + rand() * 0.05;
+          if (x + w > center + 0.53) break;
+          const h = 0.3 + rand() * 0.12, ink = inks[Math.floor(rand() * inks.length)];
+          if (!lean && x > center - 0.25 && rand() < 0.3) {
+            lean = true;
+            parts.push(moved(turnedZ(box({ w, h, d: 0.3, color: ink }), -0.15), x + w / 2, top + h / 2, -0.48));
+          } else parts.push(box({ w, h, d: 0.3, color: ink, offset: { x: x + w / 2, y: top + h / 2, z: -0.48 } }));
+          if (rand() < 0.7) parts.push(box({ w: w * 0.7, h: 0.03, d: 0.012, color: s === 4 ? "#3a2f22" : "#f1e7cf",
+            offset: { x: x + w / 2, y: top + h * 0.62, z: -0.325 } }));
+          x += w + 0.01 + (rand() < 0.14 ? 0.035 : 0);
+        }
       }
-      // Two books lying flat at the row's left end.
-      for (let k = 0; k < 2; k++) parts.push(box({ w: 0.26, h: 0.05, d: 0.3, color: inks[k], offset: { x: -1.275, y: top + 0.025 + k * 0.052, z: -1.2 } }));
     }
     return merge(...parts);
   });
