@@ -1126,15 +1126,16 @@
     for (const v of sim.vends) if (v.dark <= 0 && (a.x - v.x) ** 2 + (a.z - v.z) ** 2 < CONFIG.VEND_R * CONFIG.VEND_R) return v;
     return null;
   };
-  // Take a device from the machine: it goes over the Ooga's head, safe until it's thrown.
-  const takeWallet = (sim, id = 0) => {
+  // Take a device from the machine: it goes over the Ooga's head, safe until it's thrown. `look` is the one picked
+  // at the machine (an index into WALLETS); bots, and any pick out of range, get one at random.
+  const takeWallet = (sim, id = 0, look = -1) => {
     use(sim);
     const a = sim.actors[id], v = sim.over || a.splat > 0 || a.trapped > 0 || a.grabbed ? null : nearVend(sim, a);
     if (!v) return false;
     const k = sim.wallets.findIndex((w) => !w.live);
     if (k < 0) return false;
     const w = sim.wallets[k];
-    w.live = true; w.state = 0; w.owner = id; w.team = a.team; w.look = Math.floor(sim.rng() * WALLETS.length);
+    w.live = true; w.state = 0; w.owner = id; w.team = a.team; w.look = Number.isInteger(look) && look >= 0 && look < WALLETS.length ? look : Math.floor(sim.rng() * WALLETS.length);
     w.fuse = CONFIG.WALLET_FUSE; w.stuck = -1; w.x = a.x; w.y = a.y + 2.2; w.z = a.z; w.vx = w.vy = w.vz = 0; w.spin = 0;
     a.wallet = k; v.dark = CONFIG.VEND_COOL;
     emit(sim, "wallet", a.team, id, a.x, w.look, a.z);

@@ -331,6 +331,7 @@
 
   const showBoard = () => {
     closeQuiz();
+    closeWalletMenu();
     phase = "board";
     el.board.hidden = false;
     el.results.hidden = el.strip.hidden = el.center.hidden = el.notice.hidden = el.toolBar.hidden = el.map.hidden = el.feed.hidden = true;
@@ -381,6 +382,7 @@
   };
   const finish = () => {
     closeQuiz();
+    closeWalletMenu();
     phase = "results";
     const won = sim.winner === sim.team, ms = Math.round(sim.time * 1000);
     // The fastest win is kept for the usual first to three; every round still counts.
@@ -873,6 +875,94 @@
     cam.face = Math.atan2(AIM.x - me.x, AIM.z - me.z);
     return AIM;
   };
+  // The wallet machine's picker, as DSB Land's Free Hardware Wallets has it: the same six devices as pictures and names
+  // (portraits from `wallets-menu.js`, names in `SIM.WALLETS` order), the store's red and white panel and the shared
+  // menu shell. Pick one and Take: it goes over your head like any device from the machine. While it is open the
+  // Ooga stands still and the keys stay in the panel (1 to 6 pick, Enter takes, Escape closes); stepping away from
+  // the machine, or the round ending, closes it. Built once a visit, removed on leave.
+  const wmenu = { open: false, look: 1, root: null, picks: null, take: null };
+  const PICK_ORDER = [1, 0, 2, 3, 4, 5];
+  const walletPortrait = (i) => {
+    const FACES = BL.walletsMenu && BL.walletsMenu.FACES, f = FACES && FACES[i];
+    if (!f) return null;
+    // Rektdger is framed round its screen, as the store frames it.
+    const PX = 4, left = i === 0 ? 5 : 0, top = i === 0 ? 3 : 0, c = document.createElement("canvas");
+    c.width = (i === 0 ? 40 : f.rows[0].length) * PX; c.height = (i === 0 ? 18 : f.rows.length) * PX; c.setAttribute("aria-hidden", "true");
+    const g = c.getContext("2d");
+    f.rows.forEach((row, y) => { for (let x = 0; x < row.length; x++) if (f.ink[row[x]]) { g.fillStyle = f.ink[row[x]]; g.fillRect((x - left) * PX, (y - top) * PX, PX, PX); } });
+    return c;
+  };
+  const pickWallet = (i) => {
+    wmenu.look = i;
+    for (const b of wmenu.picks.children) b.setAttribute("aria-pressed", String(Number(b.dataset.wallet) === i));
+  };
+  const closeWalletMenu = () => {
+    if (!wmenu.open) return;
+    wmenu.open = false;
+    if (wmenu.root.open) wmenu.root.close();
+    if (BL.dsbMenuShell) BL.dsbMenuShell.present(wmenu.root, false);
+  };
+  const takePicked = () => {
+    closeWalletMenu();
+    if (!SIM.takeWallet(sim, 0, wmenu.look)) notice("Too late · step back up to the machine to take one", 1600);
+    return true;
+  };
+  const buildWalletMenu = () => {
+    const node = (tag, text, cls) => { const n = document.createElement(tag); if (text) n.textContent = text; if (cls) n.className = cls; return n; };
+    const root = node("dialog", null, "sheet-body wallets-menu block-wallets"), panel = node("section", null, "panel"), header = node("header", null, "panel-title");
+    const title = node("h2"), back = node("button", "Back", "foot-button");
+    root.setAttribute("aria-label", "Free wallets");
+    back.type = "button"; back.dataset.close = "";
+    title.setAttribute("aria-label", "Free wallets"); title.append(hudMod.signLettering("Free wallets"));
+    header.append(title, back);
+    const picks = node("div", null, "slab wallets-picks");
+    picks.setAttribute("role", "group"); picks.setAttribute("aria-label", "Pick your wallet bomb");
+    for (const i of PICK_ORDER) {
+      const b = node("button", null, "foot-button wallets-pick"), art = walletPortrait(i);
+      b.type = "button"; b.dataset.wallet = String(i);
+      if (art) b.append(art);
+      b.append(node("b", SIM.WALLETS[i].toUpperCase()));
+      picks.append(b);
+    }
+    const take = node("button", "Take", "chat-send wallets-take");
+    take.type = "button"; take.dataset.take = "";
+    const body = node("div", null, "wallets-content");
+    body.append(picks, take);
+    panel.append(header, node("p", "Free Hardware Wallets · from DSB Land's VAC 2 · pick your wallet bomb", "help"), body);
+    root.append(panel);
+    root.addEventListener("click", (e) => {
+      const b = e.target.closest("button");
+      if (!b) return;
+      if (b.dataset.wallet !== undefined) pickWallet(Number(b.dataset.wallet));
+      else if (b.dataset.take !== undefined) takePicked();
+      else if (b.dataset.close !== undefined) closeWalletMenu();
+    });
+    // Keys stay in the panel: none reaches the game while it is open.
+    const keys = (e) => {
+      e.stopPropagation();
+      if (e.type !== "keydown") return;
+      if (e.key === "Escape") { e.preventDefault(); closeWalletMenu(); }
+      else if (e.key >= "1" && e.key <= "6") { e.preventDefault(); pickWallet(PICK_ORDER[Number(e.key) - 1]); }
+      else if (e.key === "Enter" && !e.repeat && document.activeElement && document.activeElement.dataset.wallet !== undefined) { e.preventDefault(); takePicked(); }
+    };
+    root.addEventListener("keydown", keys); root.addEventListener("keyup", keys);
+    root.addEventListener("cancel", (e) => { e.preventDefault(); closeWalletMenu(); });
+    document.body.append(root);
+    wmenu.root = root; wmenu.picks = picks; wmenu.take = take;
+  };
+  const openWalletMenu = () => {
+    if (wmenu.open || phase !== "play" || !SIM.nearVend(sim, sim.actors[0])) return false;
+    if (!wmenu.root) buildWalletMenu();
+    if (locked()) document.exitPointerLock();
+    trigger = false;
+    pickWallet(wmenu.look);
+    wmenu.open = true;
+    wmenu.root.showModal();
+    if (BL.dsbMenuShell) BL.dsbMenuShell.present(wmenu.root, true);
+    const chosen = wmenu.picks.querySelector('[aria-pressed="true"]');
+    if (chosen) chosen.focus();
+    return true;
+  };
   // Lob the device over your head toward the crosshair.
   const throwWallet = () => {
     if (phase !== "play" || sim.actors[0].wallet < 0) return false;
@@ -1077,7 +1167,7 @@
   // Ride your tower's zipline down into the rival fort, from the platform by its gap.
   const zipNow = () => {
     if (phase !== "play") return false;
-    if (SIM.takeWallet(sim, 0)) return true;
+    if (openWalletMenu()) return true;
     if (SIM.launch(sim, 0)) return true;
     if (SIM.zip(sim, 0, cam.face)) return true;
     const a = sim.actors[0];
@@ -1642,6 +1732,11 @@
     RENDER_OPTS.time = elapsed;
     if (phase === "play") {
       readInput(dt);
+      // Choosing a wallet: the Ooga stands still; walking off (or being knocked away) from the machine closes the panel.
+      if (wmenu.open) {
+        move.x = move.z = move.sprint = move.jump = move.jet = move.crouch = 0;
+        if (!SIM.nearVend(sim, sim.actors[0])) closeWalletMenu();
+      }
       // Full auto: with the AK or the golden pair and the trigger held, a round goes each time the shot clock allows.
       if (trigger && (tool === "ak" || (tool === "gold" && sim.actors[0].gold)) && !quiz.open && sim.actors[0].cooldown <= 0) paint();
       // The live feed, folded in before the step: fees to weather, a new block to its reset.
@@ -2119,7 +2214,7 @@
     hud.setStats(game.state);
     hud.el.sheet.dataset.open = "false";
     el.help = document.getElementById("block-help");
-    el.help.textContent = COARSE ? "Left stick runs · right stick turns · Jump twice to climb · Paint! throws the tool you pick · View for first person" : "W S run · A D turn · Shift sprints · Space jumps, twice to climb · click fires · R or right click switches weapon · V changes view (chase, first person, Island) · two-finger swipe or the wheel zooms · X side-step (A D step sideways) · 5 sniper (from a tower) · 6 Golden Dual AKs (hold to fire) · 7 AK (hold to fire) · hold Space in the air for the jetpack · mash Space to escape a gorilla · H piggyback on a teammate, J call one onto your back · E at a FREE WALLETS machine takes one, click or Y throws it: it sticks to a rival, who won't know, and goes off 5 s later · W into a ladder climbs · E zipline or catapult · Tab throws what you hold · F lifts crates · B new crate · C crouch";
+    el.help.textContent = COARSE ? "Left stick runs · right stick turns · Jump twice to climb · Paint! throws the tool you pick · View for first person" : "W S run · A D turn · Shift sprints · Space jumps, twice to climb · click fires · R or right click switches weapon · V changes view (chase, first person, Island) · two-finger swipe or the wheel zooms · X side-step (A D step sideways) · 5 sniper (from a tower) · 6 Golden Dual AKs (hold to fire) · 7 AK (hold to fire) · hold Space in the air for the jetpack · mash Space to escape a gorilla · H piggyback on a teammate, J call one onto your back · E at a FREE WALLETS machine opens it: pick your wallet bomb and Take, click or Y throws it: it sticks to a rival, who won't know, and goes off 5 s later · W into a ladder climbs · E zipline or catapult · Tab throws what you hold · F lifts crates · B new crate · C crouch";
     showBoard();
     stateTimer = window.setInterval(() => fx.trimPool(), 6e4);
     hintTimer = window.setTimeout(() => hud.hint(COARSE ? "Pick a side, then Play!" : "Pick a side, then Play! (Enter)"), 1200);
@@ -2155,6 +2250,8 @@
     });
   };
   const leave = () => {
+    closeWalletMenu();
+    if (wmenu.root) { wmenu.root.remove(); wmenu.root = wmenu.picks = wmenu.take = null; }
     audio.dispose();
     audio = null;
     unfeed();

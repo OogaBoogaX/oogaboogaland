@@ -5446,6 +5446,19 @@ const gameRulesChecks = async () => {
       record("block frenzy piggyback: a rider beside a wall or post sits clear of it, not inside it",
         on && me.ride === 2 && clear, JSON.stringify({ on, ride: me.ride, rider: [me.x, me.z], gap: Math.hypot(me.x - cx, me.z - cz) }));
     }
+    {
+      // The machine's picker: the device chosen is the one taken; a pick out of range falls back to a random one.
+      const pickAt = (look) => {
+        const r = S.create({ team: "blue", seed: 5 }), me = r.actors[0], v = r.vends[0];
+        r.prep = 0; Object.assign(me, { x: v.x + 0.4, z: v.z, y: 0 });
+        const ok = S.takeWallet(r, 0, look);
+        return { ok, look: ok ? r.wallets[me.wallet].look : -1 };
+      };
+      const picked = [0, 1, 2, 3, 4, 5].map(pickAt), stray = pickAt(9), none = pickAt(-1);
+      record("block frenzy wallets: the device picked at the machine is the one taken, and a pick out of range gets one of the six",
+        picked.every((p, i) => p.ok && p.look === i) && stray.ok && stray.look >= 0 && stray.look < S.WALLETS.length && none.ok && none.look >= 0 && none.look < S.WALLETS.length,
+        JSON.stringify({ picked, stray, none }));
+    }
     const round = (seed) => { const r = S.create({ team: "red", seed }); r.actors[0].bot = "auto"; for (let t = 0; t < 900 && !r.over; t += 1 / 30) S.step(r, 1 / 30, still), r.eventCount = 0; return JSON.stringify({ over: r.over, winner: r.winner, score: r.score, time: Math.round(r.time) }); };
     const a = round(3), b = round(3);
     record("block frenzy rounds: a seeded round replays exactly and reaches three captures", a === b && JSON.parse(a).over && Math.max(...Object.values(JSON.parse(a).score)) === S.CONFIG.CAPTURES, JSON.stringify({ a, b }));
