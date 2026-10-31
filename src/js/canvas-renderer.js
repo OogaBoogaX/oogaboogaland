@@ -38,14 +38,13 @@
   const DEFAULT_MATRIX_APERTURE = new Float32Array([2.5, 3, 0.5, 0]);
   // Shared native Matrix greens, with quantized brightness so ripple pixels
   // never build RGB strings while a shot is crossing the mirror.
-  const RIPPLE_GREENS = new Array(96), STEP_GREENS = new Array(96);
+  const RIPPLE_GREENS = new Array(96);
   for (let tip = 0; tip < 3; tip++) for (let gain = 0; gain < 16; gain++) for (let odd = 0; odd < 2; odd++) {
     const emission = 0.88 + gain / 15 * 0.25, head = (tip === 2 ? 1 : tip === 1 ? 0.55 : 0) * 0.88;
     const r = Math.round(lerp((odd ? 70 : 24) * emission, 214.2, head));
     const g = Math.min(255, Math.round(lerp((odd ? 255 : 220) * emission, 255, head)));
     const b = Math.round(lerp((odd ? 112 : 74) * emission, 226.95, head));
     RIPPLE_GREENS[(tip * 16 + gain) * 2 + odd] = `rgb(${r},${g},${b})`;
-    STEP_GREENS[(tip * 16 + gain) * 2 + odd] = `rgb(${Math.min(255, Math.round(r * 1.6))},${Math.min(255, Math.round(g * 1.6))},${Math.min(255, Math.round(b * 1.6))})`;
   }
   // One shaded image per surface per frame: the first face drawn sets the surface's light for the frame, so a curved
   // board tessellated into a strip of faces shades once, not once a face. This also shares the first face's Matrix
@@ -1488,7 +1487,7 @@
     const drawMirrorRipples = (node, rec) => {
       const ripples = node.mirrorRipples;
       if (!ripples || !ripples.active) return;
-      const { CAPACITY, START_RADIUS, SPEED, WIDTH, GLYPH_THRESHOLD, CONTACT_RADIUS, surfaceStrengthAt } = BL.mirrorRipples;
+      const { CAPACITY, START_RADIUS, SPEED, WIDTH, GLYPH_THRESHOLD } = BL.mirrorRipples;
       const waves = ripples.waves;
       composeMirrorView(node);
       const m = rippleView, scale = Math.max(Math.hypot(m[0], m[1]), Math.hypot(m[4], m[5]));
@@ -1498,22 +1497,20 @@
         const offset = i * 4, strength = waves[offset + 3];
         if (strength <= 0) continue;
         const x = waves[offset], y = waves[offset + 1], radius = START_RADIUS + waves[offset + 2] * SPEED;
-        const contact = ripples.contact, surface = contact && ripples.surface, reach = surface ? Infinity : contact ? CONTACT_RADIUS : radius + WIDTH * 2;
+        const reach = radius + WIDTH * 2;
         if (x + reach < rec.mirrorMinX || x - reach > rec.mirrorMaxX || y + reach < rec.mirrorMinY || y - reach > rec.mirrorMaxY) continue;
-        if (!contact) {
-          const depth = Math.max(1e-7, -(m[2] * x + m[6] * y + m[14]));
-          ctx.lineWidth = Math.max(0.7, Math.min(4, 0.012 * scale * lastF / projectedDepth(depth)));
-          ctx.strokeStyle = "#21313b"; ctx.globalAlpha = strength * 0.18;
-          rippleRing(x, y, radius + WIDTH * 0.5);
-          ctx.strokeStyle = "#ebf5fa"; ctx.globalAlpha = strength * 0.34;
-          rippleRing(x, y, radius);
-          if (radius > WIDTH * 2.5) {
-            ctx.globalAlpha = strength * 0.13;
-            rippleRing(x, y, radius - WIDTH * 2.5);
-          }
-          if (strength <= GLYPH_THRESHOLD) continue;
+        const depth = Math.max(1e-7, -(m[2] * x + m[6] * y + m[14]));
+        ctx.lineWidth = Math.max(0.7, Math.min(4, 0.012 * scale * lastF / projectedDepth(depth)));
+        ctx.strokeStyle = "#21313b"; ctx.globalAlpha = strength * 0.18;
+        rippleRing(x, y, radius + WIDTH * 0.5);
+        ctx.strokeStyle = "#ebf5fa"; ctx.globalAlpha = strength * 0.34;
+        rippleRing(x, y, radius);
+        if (radius > WIDTH * 2.5) {
+          ctx.globalAlpha = strength * 0.13;
+          rippleRing(x, y, radius - WIDTH * 2.5);
         }
-        const bright = contact ? strength : Math.min(1, (strength - GLYPH_THRESHOLD) / (0.85 - GLYPH_THRESHOLD));
+        if (strength <= GLYPH_THRESHOLD) continue;
+        const bright = Math.min(1, (strength - GLYPH_THRESHOLD) / (0.85 - GLYPH_THRESHOLD));
         const mutation = Math.floor(ripples.time * 20);
         const firstColumn = Math.floor(Math.max(x - reach, rec.mirrorMinX - 0.04) / 0.12);
         const lastColumn = Math.floor(Math.min(x + reach, rec.mirrorMaxX + 0.04) / 0.12);
@@ -1527,31 +1524,19 @@
             if (position >= train) continue;
             const cx = (col + 0.5) * 0.12, cy = -travel - (row + 0.5) * 0.13;
             const distance = Math.hypot(cx - x, cy - y);
-            if (contact ? distance > reach + 0.07 : Math.abs(distance - radius) > WIDTH * 2) continue;
+            if (Math.abs(distance - radius) > WIDTH * 2) continue;
             const glyph = (Math.abs(col * 73 + row * 151) + mutation) & 7, mask = MATRIX_MASKS[glyph];
             const glow = matrixStreams[stream + 5] * (0.48 + (position + 1) / train * 0.52);
             const gain = Math.max(0, Math.min(15, Math.round((0.78 + glow * 0.37 - 0.88) / 0.25 * 15)));
             const tip = position === train - 1 ? 2 : position === train - 2 ? 1 : 0;
-            ctx.fillStyle = (surface ? STEP_GREENS : RIPPLE_GREENS)[(tip * 16 + gain) * 2 + (glyph & 1)];
+            ctx.fillStyle = RIPPLE_GREENS[(tip * 16 + gain) * 2 + (glyph & 1)];
             for (let bit = 0; bit < 24; bit++) {
               if (!((mask >> bit) & 1)) continue;
               const px = cx + ((bit & 3) - 1.5) * 0.021, py = cy + (2.5 - (bit >> 2)) * 0.021;
               const distance = Math.hypot(px - x, py - y);
-              if (surface) {
-                // World x/z keeps one circular footprint continuous across the tread and upright risers.
-                const world = node.world, center = ripples.surfaceCenter;
-                const falloff = surfaceStrengthAt(Math.hypot(world[0] * px + world[4] * py + world[12] - center[0],
-                  world[2] * px + world[6] * py + world[14] - center[1]));
-                if (!falloff) continue;
-                ctx.globalAlpha = bright * falloff;
-              } else if (contact) {
-                const k = Math.min(1, distance / CONTACT_RADIUS);
-                ctx.globalAlpha = bright * (1 - k * k * (3 - 2 * k)) * 0.82;
-              } else {
-                const crest = (distance - radius) / WIDTH;
-                if (Math.abs(crest) > 2) continue;
-                ctx.globalAlpha = bright * bright * (3 - 2 * bright) * Math.exp(-crest * crest) * 0.82;
-              }
+              const crest = (distance - radius) / WIDTH;
+              if (Math.abs(crest) > 2) continue;
+              ctx.globalAlpha = bright * bright * (3 - 2 * bright) * Math.exp(-crest * crest) * 0.82;
               ripplePixel(px, py);
             }
           }
