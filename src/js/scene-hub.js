@@ -7446,21 +7446,25 @@
     1: [".#.", "##.", ".#.", ".#.", ".#.", ".#.", ".#.", ".#.", "###"],
     3: ["####.", "....#", "....#", "....#", ".###.", "....#", "....#", "....#", "####."],
     "·": ["...", "...", "...", ".##", ".##", "##.", "...", "...", "..."],
-    "₿": ["..#..#.", ".#####.", "##...#.", "##...#.", ".#####.", "##...#.", "##...#.", ".#####.", "..#..#."]
+    "₿": ["..#.#..", "#######", "#.#.#.#", "#.#.#.#", "#######", "#.#.#.#", "#.#.#.#", "#######", "..#.#.."]
   };
-  // The banner's inks: the ₿ orange inside a black edge, the paper's own name white and the rest black.
+  // The banner's inks: the ₿ orange inside a black edge, the paper's own name white and the rest black. Each has a
+  // night version that glows — the dark letters take a warm bone there, since black has nothing to give off.
   const WP_BANNER_INK = {
-    btc: { color: "#ff8c1a", emissive: 0.35, edge: "#0a0a0a" },
-    black: { color: "#121212", emissive: 0, edge: null },
-    white: { color: "#f6f6f3", emissive: 0.12, edge: null }
+    btc: { day: { color: "#ff8c1a", emissive: 0.35, edge: "#0a0a0a" }, night: { color: "#ffa63a", emissive: 1, edge: "#0a0a0a" } },
+    black: { day: { color: "#121212", emissive: 0, edge: null }, night: { color: "#e8dcc0", emissive: 1, edge: null } },
+    white: { day: { color: "#f6f6f3", emissive: 0.85, edge: null }, night: { color: "#ffffff", emissive: 1, edge: null } }
   };
   const wpBannerGeos = new Map();
-  const wpGlyph = (ch, ink, scale) => {
-    const key = `${ch}|${ink}|${scale}`, hit = wpBannerGeos.get(key);
+  // Each letter's day and glowing night geometry, swapped as the island's lamps come on.
+  const wpBannerPairs = [];
+  let wpBannerNight = null;
+  const wpGlyph = (ch, ink, scale, night) => {
+    const key = `${ch}|${ink}|${scale}|${night ? "night" : "day"}`, hit = wpBannerGeos.get(key);
     if (hit) return hit;
     const rows = WP_SERIF[ch];
     if (!rows) throw new Error(`No banner glyph for "${ch}"`);
-    const c = WP_BANNER_CELL * scale, w = rows[0].length * c, parts = [], look = WP_BANNER_INK[ink];
+    const c = WP_BANNER_CELL * scale, w = rows[0].length * c, parts = [], look = WP_BANNER_INK[ink][night ? "night" : "day"];
     for (let row = 0; row < rows.length; row++) {
       const line = rows[row];
       for (let col = 0; col < line.length; col++) {
@@ -7506,17 +7510,19 @@
       let cursor = -run.total * 0.5, word = 0;
       for (const item of run.items) {
         if (item.ch === " ") { word++; cursor += item.w + item.gap; continue; }
+        const ink = item.ch === "₿" ? "btc" : arc && word === 1 ? "white" : "black";
+        const day = wpGlyph(item.ch, ink, item.scale, false), night = wpGlyph(item.ch, ink, item.scale, true);
+        let node;
         if (arc) {
           const theta = (cursor + item.w * 0.5) / WP_BANNER.radius;
-          addChild(banner, createNode({
-            geometry: wpGlyph(item.ch, item.ch === "₿" ? "btc" : word === 1 ? "white" : "black", item.scale),
+          node = createNode({
+            geometry: day,
             position: { x: WP_BANNER.radius * Math.sin(theta), y: run.y + WP_BANNER.radius * (Math.cos(theta) - 1), z: 0 },
             rotation: { x: 0, y: 0, z: -theta }
-          }));
-        } else addChild(banner, createNode({
-          geometry: wpGlyph(item.ch, "black", item.scale),
-          position: { x: cursor + item.w * 0.5, y: run.y, z: 0 }
-        }));
+          });
+        } else node = createNode({ geometry: day, position: { x: cursor + item.w * 0.5, y: run.y, z: 0 } });
+        addChild(banner, node);
+        wpBannerPairs.push({ node, day, night });
         cursor += item.w + item.gap;
       }
     };
@@ -7840,11 +7846,18 @@
     camera.fov += (WP.readFov - camera.fov) * k;
   };
   const wpUpdate = (dt) => {
-    // The banner floats: a slow lift and a small sway of the whole arch, whatever the stone is doing.
+    // The banner floats: a slow lift and a small sway of the whole arch, whatever the stone is doing. As the island's
+    // lamps come on, its letters take their glowing versions, and the day's back as they go out.
     if (wpBanner) {
       wpBannerTime += dt;
       wpBanner.position.y = WP_BANNER.y + Math.sin(wpBannerTime * 1.1) * WP_BANNER.bob;
       wpBanner.rotation.z = Math.sin(wpBannerTime * 0.73 + 1.1) * WP_BANNER.sway;
+      const phase = daylight.phaseAt(hour);
+      const night = phase === "dusk" || phase === "night" || phase === "midnight";
+      if (night !== wpBannerNight) {
+        wpBannerNight = night;
+        for (const pair of wpBannerPairs) pair.node.geometry = night ? pair.night : pair.day;
+      }
     }
     if (wpRead) { wpReadUpdate(dt); return; }
     if (wpTime < 0) return;
@@ -12176,7 +12189,7 @@
     wpTime = -1; wpRise = wpFlash = 0; wpStanding = false;
     if (wpRead) wpReadEnd();
     wpGroup = wpImage = wpSheet = wpPoster = wpBolt = wpChar = wpBanner = null;
-    wpBannerGeos.clear(); wpBannerTime = 0;
+    wpBannerGeos.clear(); wpBannerPairs.length = 0; wpBannerNight = null; wpBannerTime = 0;
     wpStrip = wpStripImage = null;
     targets.length = placed.length = claimed.length = scenery.length = sceneryClaims.length = matrixGates.length = sealedCaves.length = clouds.length = lamps.length = pilePosts.length = fireSeats.length = sleepers.length = labels.length = signDetails.length = spots.length = chillSpots.length = headquartersRimLintels.length = climbMasonry.length = props.length = meadowPalms.length = 0;
     fireHazards.length = 0;
