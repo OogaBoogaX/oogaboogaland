@@ -3879,9 +3879,9 @@ body.dsb-menu-open .rescue-equipment { visibility: hidden; pointer-events: none;
 }
 
 .weapon-icon {
-  width: 44px;
-  height: 44px;
-  transform: translate(-2px, -1px);
+  width: 48px;
+  height: 48px;
+  transform: translate(-2px, 2px);
 }
 
 .primary-icon {
@@ -7183,6 +7183,22 @@ body[data-active-scene] .mic-note { top: var(--hub-equipment-bottom, calc(72px +
   border-radius: 50%;
   opacity: var(--reticle-hit, 0);
   transform: translate(-50%, -50%) scale(calc(1.7 - var(--reticle-hit, 0) * 0.7));
+}
+
+/* The Sphere borrows combat mouse-look with an empty-handed, fixed center dot. */
+body[data-active-scene="timechain"] .weapon-reticle {
+  left: 50% !important;
+  top: 50% !important;
+  visibility: visible;
+}
+body[data-active-scene="timechain"] .weapon-reticle > svg,
+body[data-active-scene="timechain"] .weapon-reticle > span::after { display: none; }
+body[data-active-scene="timechain"] .weapon-reticle > span {
+  top: 50%;
+  width: 3px;
+  height: 3px;
+  background: #fff9dc;
+  visibility: visible;
 }
 
 /* DSB keeps controls in the existing page and its world in a separate scene. */

@@ -70,7 +70,6 @@
   const MAGAZINE_REACH = 0.7, MAGAZINE_SCALE = 2.4;
   // Space at Ooga Arcade's mouth works from MOUTH_REACH of a point MOUTH_ACTION_Z inside its doorway.
   const MOUTH_REACH = 3.2, MOUTH_ACTION_Z = -3.6;
-  const MATRIX_TYPES = 8;
   const MATRIX_GATE_HIDDEN_Y = 3.2, MATRIX_BUTTON_REACH = 3.4, MATRIX_BUTTON_USE_REACH = 2.2;
   const MIRROR_GATE_Z = 0.28;
   const MIRROR_GATE_CLOSED = true;
@@ -225,7 +224,7 @@
   const workCave = (slot) => slot.repo && (slot.status === "open" || slot.status === "mirror");
   const MATRIX_LIVING_PROPS = new Set(["tree"]);
   const SCREEN_CULL_PROPS = new Set(["tree", "bush", "rock", "crate", "barrel", "flower", "grass", "palm", "poolrock", "poolfern", "poollog", "canopy", "magazine"]);
-  const SOLID_PROPS = new Set(["tree", "firepit", "dock", "jumbotron", "totem", "poolbridge", "poolrock", "canopy"]);
+  const SOLID_PROPS = new Set(["tree", "firepit", "dock", "jumbotron", "totem", "poolbridge", "poolsign", "poolrock", "canopy"]);
   const CLANKER_STEP_PROPS = new Set(["poolrock"]);
   const BUSH_WORDS = ["Something rustles.", "A beetle. Ooga leaves it.", "Just a bush."];
   const PALM_WORDS = ["Coconuts. Ooga wanted bananas.", "A coconut thuds down. Ooga dodges.", "The fronds swish."];
@@ -791,14 +790,6 @@
     return island.faceIndex = { ramps };
   };
   const MATRIX_CAMERA_COLUMN = { caveIndex: 0, floor: 0, ceiling: 0 };
-  const cameraInsideMirror = () => {
-    if (!matrixCave) return false;
-    const eye = camera.position, m = matrixCave.mouth;
-    if ((eye.x - m.x) * matrixCave.sr + (eye.z - m.z) * matrixCave.cr >= PORTAL_Z) return false;
-    return island.cavityAt(eye.x, eye.z, MATRIX_CAMERA_COLUMN, matrixCave.caveIndex, eye.y)
-      && MATRIX_CAMERA_COLUMN.caveIndex === matrixCave.caveIndex
-      && eye.y >= MATRIX_CAMERA_COLUMN.floor && eye.y < MATRIX_CAMERA_COLUMN.ceiling;
-  };
   const inMatrixCave = () => {
     return !!matrixCave && matrixCave.portal.inside;
   };
@@ -1962,7 +1953,8 @@
       });
       if (mirrorCave && mirrorCave.slot === slot) mirrorCave.sign = sign;
     }
-    if (slot.status !== "mirror" && slot.scene !== "lab" && slot.scene !== "factory" && slot.place !== "bca") {
+    // The Factory's inner shield has its own crossing; its outer arch wears the shared cave veil too.
+    if (slot.status !== "mirror" && slot.scene !== "lab" && slot.place !== "bca") {
       const seal = slot.status === "dark" ? sealedCaves[sealedCaves.length - 1] : null;
       caveVeils.push({ mouth: m, group, opening: rim.geometry.openingBounds,
         plane: seal ? seal.stopZ + 0.02 : PORTAL_Z, tint: slot.scene === "arcade" ? ARCADE_VEIL_TINT : null, phase: null });
@@ -2102,23 +2094,38 @@
   // An invisible one-way staircase continues from the dock into the sky. It
   // only arms from a grounded step off the outer deck: arriving from the air,
   // or jumping once on it, leaves every tread intangible until the visitor
-  // returns to the dock. A fixed glyph pool reveals nearby treads after each
-  // foot contact, without adding collision meshes or per-frame allocations.
+  // returns to the dock. Pooled transparent treads and risers carry the cave glyphs down over
+  // the edges, staying lit under the walker and fading half a second after they leave the tread.
   const buildDockStairs = (dock) => {
-    const START = 4.25, RUN = 0.62, RISE = 0.5, HALF_WIDTH = 0.78, EFFECT_TIME = 2.8;
-    const REVEAL_RADIUS = 3, GLYPH_POOL = 40;
+    const START = 4.25, RUN = 0.62, RISE = 0.5, HALF_WIDTH = 0.78, GLYPH_POOL = 12;
     const base = dock.position.y, count = Math.ceil((FLY.yMax - base) / RISE), end = START + count * RUN;
     const ry = dock.rotation.y, ux = Math.cos(ry), uz = -Math.sin(ry), vx = Math.sin(ry), vz = Math.cos(ry);
     const glyphs = [];
+    const surface = (halfWidth, bottom, top, x, y, z, rx, ry) => {
+      // Each face needs its own mesh: the renderer batches ripple surfaces by geometry.
+      const geometry = { verts: [-halfWidth, bottom, 0, halfWidth, bottom, 0, halfWidth, top, 0, -halfWidth, top, 0],
+        faces: [{ i: [0, 1, 2, 3], color: [0, 0, 0] }, { i: [3, 2, 1, 0], color: [0, 0, 0] }], lines: [], castShadow: false, mirrorRippleOnly: true };
+      return createNode({ position: { x, y, z }, rotation: { x: rx, y: ry, z: 0 }, geometry, mirrorRippleOnly: true, matrixNative: true, sightHidden: true });
+    };
     for (let i = 0; i < GLYPH_POOL; i++) {
-      const node = createNode({ visible: false, rotation: { x: -Math.PI / 2, y: ry, z: 0 }, geometry: hubModels.matrixGlyph(i % MATRIX_TYPES), glow: 1 });
-      node.dockLife = 0;
+      const node = createNode({ visible: false, rotation: { x: 0, y: ry, z: 0 } });
+      const top = surface(HALF_WIDTH, -RUN / 2, RUN / 2, 0, 0, 0, -Math.PI / 2, -Math.PI / 2);
+      // Local -y runs toward the dock on top and vertically down on every side. The front shares
+      // the top's glyph coordinates at its lip so each stream flows continuously over that edge.
+      addChild(node, top,
+        surface(HALF_WIDTH, -RUN / 2 - RISE, -RUN / 2, -RUN / 2, RUN / 2, 0, 0, -Math.PI / 2),
+        // The upper edge meets the next riser's front, not the back of this tread.
+        surface(HALF_WIDTH, RUN / 2, RUN / 2 + RISE, RUN / 2, -RUN / 2, 0, 0, -Math.PI / 2),
+        surface(RUN / 2, -RISE, 0, 0, 0, HALF_WIDTH, 0, 0),
+        surface(RUN / 2, -RISE, 0, 0, 0, -HALF_WIDTH, 0, Math.PI));
       node.dockStep = 0;
+      node.mirrorRipples = BL.mirrorRipples.create(top, { contact: true, surface: true });
+      for (const face of node.children) face.mirrorRipples = node.mirrorRipples;
       addChild(root, node);
       placed.push(node);
       glyphs.push(node);
     }
-    let active = false, owner = null, lastStep = 0, nextGlyph = 0, contacts = 0, jumpRejects = 0;
+    let active = false, owner = null, lastStep = 0, nextGlyph = 0, contacts = 0, jumpRejects = 0, lit = 0, time = 0;
     const alongAt = (x, z) => (x - dock.position.x) * ux + (z - dock.position.z) * uz;
     const acrossAt = (x, z) => (x - dock.position.x) * vx + (z - dock.position.z) * vz;
     const indexAt = (along, across, radius = PLAYER_RADIUS) => {
@@ -2149,56 +2156,84 @@
       const floor = floorAt(index);
       return floor <= y + maxStep + 1e-7 ? floor : -Infinity;
     };
-    const reveal = (index, distance) => {
-      if (index < 1 || index > count) return;
+    const holdStep = (index) => {
       let node = null;
       for (let i = 0; i < glyphs.length; i++) {
-        if (glyphs[i].dockLife > 0 && glyphs[i].dockStep === index) { node = glyphs[i]; break; }
+        if (glyphs[i].mirrorRipples.active && glyphs[i].dockStep === index) { node = glyphs[i]; break; }
       }
       if (!node) {
         node = glyphs[nextGlyph];
         nextGlyph = (nextGlyph + 1) % glyphs.length;
+        node.mirrorRipples.waves.fill(0);
+        node.mirrorRipples.active = 0;
       }
       const along = START + (index - 0.5) * RUN;
       node.position.x = dock.position.x + ux * along;
       node.position.y = floorAt(index) + 0.018;
       node.position.z = dock.position.z + uz * along;
-      node.scale.x = node.scale.y = 4.4;
-      node.scale.z = 1;
-      node.glow = 1;
       node.dockStep = index;
-      node.dockLife = Math.max(node.dockLife, EFFECT_TIME - distance * 0.18);
+      if (!node.visible) lit++;
       node.visible = true;
-    };
-    const emit = (index) => {
-      for (let offset = -REVEAL_RADIUS; offset <= REVEAL_RADIUS; offset++) reveal(index + offset, Math.abs(offset));
-      contacts++;
+      node.mirrorRipples.time = time;
+      node.mirrorRipples.hold(0, 0, 0);
     };
     const update = (dt, actor) => {
+      time += dt;
+      let standing = 0;
+      if (active && actor === owner) {
+        if (actor.hop > 1e-7 || actor.hopV > 0 || actor.jet?.thrust) reset(true);
+        else {
+          const p = actor.root.position, along = alongAt(p.x, p.z), across = acrossAt(p.x, p.z), feet = p.y - actor.baseY;
+          // Read the supporting height, not the next tread the body's leading edge might reach.
+          const index = Math.min(count, Math.round((feet - base) / RISE));
+          if (index > 0 && Math.abs(feet - floorAt(index)) < 0.12 && Math.abs(across) <= HALF_WIDTH + PLAYER_RADIUS
+            && along >= START + (index - 1) * RUN - PLAYER_RADIUS && along <= START + index * RUN + PLAYER_RADIUS) standing = index;
+          else if (along <= START && Math.abs(across) <= 1 + PLAYER_RADIUS) reset(false);
+        }
+      }
+      lit = 0;
       for (let i = 0; i < glyphs.length; i++) {
         const node = glyphs[i];
-        if (node.dockLife <= 0) continue;
-        node.dockLife = Math.max(0, node.dockLife - dt);
-        const k = node.dockLife / EFFECT_TIME;
-        node.scale.x = node.scale.y = 3.5 + k * 0.9;
-        node.glow = 0.35 + k * 0.65;
-        if (!node.dockLife) node.visible = false;
+        if (actor) {
+          node.mirrorRipples.surfaceCenter[0] = actor.root.position.x;
+          node.mirrorRipples.surfaceCenter[1] = actor.root.position.z;
+        }
+        node.mirrorRipples.update(node.dockStep === standing && standing ? 0 : dt, time);
+        node.visible = node.mirrorRipples.active > 0;
+        if (node.visible) lit++;
       }
-      if (!active || actor !== owner) return;
-      if (actor.hop > 1e-7 || actor.hopV > 0 || actor.jet?.thrust) { reset(true); return; }
-      const p = actor.root.position, along = alongAt(p.x, p.z), across = acrossAt(p.x, p.z), index = indexAt(along, across);
-      if (!index) {
-        if (along <= START && Math.abs(across) <= 1 + PLAYER_RADIUS) reset(false);
-        return;
+      if (standing) {
+        if (standing !== lastStep) { lastStep = standing; contacts++; }
+        holdStep(standing);
       }
-      const feet = p.y - actor.baseY;
-      if (Math.abs(feet - floorAt(index)) < 0.08 && index !== lastStep) {
-        lastStep = index;
-        emit(index);
+      // Adjacent treads share a riser. Keep its stronger contact so descending onto a lower tread
+      // holds the next front too, instead of inheriting the departing upper tread's fade.
+      for (const node of glyphs) {
+        node.children[1].visible = true;
+        node.children[2].visible = node.dockStep < count;
+      }
+      for (let i = 0; i < glyphs.length; i++) {
+        const node = glyphs[i];
+        if (!node.visible) continue;
+        for (let j = 0; j < glyphs.length; j++) {
+          const upper = glyphs[j];
+          if (!upper.visible || upper.dockStep !== node.dockStep + 1) continue;
+          if (upper.mirrorRipples.waves[3] >= node.mirrorRipples.waves[3]) node.children[2].visible = false;
+          else upper.children[1].visible = false;
+          break;
+        }
       }
     };
     return {
       supportAt, update, reset, alongAt, acrossAt, indexAt, floorAt,
+      dispose() {
+        for (const node of glyphs) {
+          node.mirrorRipples.dispose(); node.mirrorRipples = null; node.visible = false;
+          for (const face of node.children) face.mirrorRipples = null;
+        }
+        lit = 0;
+      },
+      get inMotion() { return lit > 0; },
       base, start: START, run: RUN, rise: RISE, halfWidth: HALF_WIDTH, count, end, top: FLY.yMax, glyphs,
       get active() { return active; }, get lastStep() { return lastStep; }, get contacts() { return contacts; }, get jumpRejects() { return jumpRejects; }
     };
@@ -4255,6 +4290,8 @@
   };
   // Tree tops are landing surfaces for the visitor, not resting floors for wandering Oogas.
   const npcTreeSupportAllowed = (node) => !node.npcTreeSupport;
+  const npcPassesPlayer = (actor, other) => actor?.contributor && !actor.humanControlled && !actor.remoteControlled
+    && (other.humanControlled || other.remoteControlled);
   const propSupportAt = (x, z, y, rise, actor, ignoreClanker = false, passTraffic = false) => {
     const npc = actor?.contributor && actor !== pilot?.player;
     let floor = solids ? solids.supportAt(x, z, y, rise, PLAYER_RADIUS, null, null, passTraffic, npc ? npcTreeSupportAllowed : null, passTraffic) : -Infinity;
@@ -4262,7 +4299,7 @@
     if (altar && ALTAR_HEIGHT <= y + rise + 1e-7 && Math.hypot(x, z) < altar.platformRadius + PLAYER_RADIUS - 1e-7) floor = Math.max(floor, ALTAR_HEIGHT);
     if (crew && !passTraffic) for (let i = 0; i < crew.list.length; i++) {
       const other = crew.list[i];
-      if (other === actor || !other.root.visible || other.grabbedBy) continue;
+      if (other === actor || !other.root.visible || other.grabbedBy || npcPassesPlayer(actor, other)) continue;
       const b = actorBounds(other);
       if (b[4] > floor && b[4] <= y + rise + 1e-7 && bodyOverlaps(other, b, x, z, PLAYER_RADIUS)) floor = b[4];
     }
@@ -4274,7 +4311,7 @@
     if (altar && y < ALTAR_HEIGHT - 1e-7 && Math.hypot(x, z) < altar.platformRadius + radius - 1e-7) ceiling = Math.min(ceiling, 0);
     if (crew && !passTraffic) for (let i = 0; i < crew.list.length; i++) {
       const other = crew.list[i];
-      if (other === actor || !other.root.visible || other.grabbedBy || passengerOf(other, actor)) continue;
+      if (other === actor || !other.root.visible || other.grabbedBy || npcPassesPlayer(actor, other) || passengerOf(other, actor)) continue;
       const b = actorBounds(other);
       if (b[1] > y + 1e-7 && y < b[4] - 1e-7 && bodyOverlaps(other, b, x, z, radius)) ceiling = Math.min(ceiling, b[1]);
     }
@@ -4307,7 +4344,7 @@
     if (altar && !cylinderSegmentClear(x, y, z, toX, toY, toZ, radius, height, 0, 0, 0, ALTAR_HEIGHT, altar.platformRadius)) return false;
     if (crew && !passTraffic) for (let otherIndex = 0; otherIndex < crew.list.length; otherIndex++) {
       const other = crew.list[otherIndex];
-      if (other === actor || !other.root.visible || other.grabbedBy || passengerOf(other, actor) || carrying && passengerOf(actor, other)) continue;
+      if (other === actor || !other.root.visible || other.grabbedBy || npcPassesPlayer(actor, other) || passengerOf(other, actor) || carrying && passengerOf(actor, other)) continue;
       const b = actorBounds(other), p = other.root.position;
       if (other.root.quaternion) {
         if (!terrain.segmentBoxClear(x, y, z, toX - x, toY - y, toZ - z, radius, height, b[0], b[1], b[2], b[3], b[4], b[5])) return false;
@@ -4863,7 +4900,6 @@
     }
     return false;
   };
-  // Bananas are passable; the visitor must jump onto their stone platform.
   const playerEscapeClear = (fromX, fromZ, toX, toZ, y, height, actor, step) => {
     if (!actor || actor !== pilot.player || fromX === toX && fromZ === toZ) return false;
     // Endpoint-only head/body checks cannot free a pre-existing mesh overlap. The recovery sweep checks
@@ -4878,12 +4914,9 @@
   };
   const walkable = (fromX, fromZ, toX, toZ, y, height = 1.5, actor = pilot?.player) => {
     if (Math.hypot(toX, toZ) > FLY_BOUND || crossesSealedCave(fromX, fromZ, toX, toZ, y)) return false;
-    // Sweep the feet before ordinary step assistance lifts them. Once above
-    // the rim, jumping, landing and walking off keep their normal clearance.
-    if (altar && actor && actor === pilot.player && !cylinderSegmentClear(fromX, y, fromZ, toX, y, toZ, PLAYER_RADIUS, height, 0, 0, 0, ALTAR_HEIGHT, altar.platformRadius)) return false;
     const floor = playerSupportAt(toX, toZ, y, y, actor, true), feet = Math.max(y, floor);
     if (floor - y > STEP_MAX && floor !== characterClankerSupportAt(toX, toZ, y, STEP_MAX, actor)) return false;
-    // Feet may mount an ordinary voxel step.
+    // Feet may mount ordinary steps, including the banana platform's low rim.
     // Torso and head must fit across their whole footprint at the destination's actual elevation.
     return feet + height <= ceilingAt(toX, toZ, feet, actor) + 1e-7 && physicalClearAt(toX, feet + STEP_MAX, toZ, PLAYER_RADIUS, Math.max(0, height - STEP_MAX), actor) && propSegmentClear(fromX, feet + STEP_MAX, fromZ, toX, feet + STEP_MAX, toZ, PLAYER_RADIUS, Math.max(0, height - STEP_MAX), actor) && matrixGateSegmentClear(fromX, y, fromZ, toX, feet, toZ, PLAYER_RADIUS, height) && mirrorActorSegmentClear(fromX, y, fromZ, toX, feet, toZ, height, actor)
       || feet === y && playerEscapeClear(fromX, fromZ, toX, toZ, y, height, actor, STEP_MAX);
@@ -10847,16 +10880,6 @@
   // frame becoming 19 ms; 30 Hz spent about 19 ms on every other frame.
   const SIGHT_RECOMPUTE_HZ = 15;
   const overlay = (dt) => {
-    // The eye owns this blackout, including detached and trailing cameras.
-    // Cover all world overlays so no names or outlines reveal the empty room.
-    if (cameraInsideMirror()) {
-      const context = overlayCanvas.getContext("2d");
-      context.save(); context.setTransform(1, 0, 0, 1, 0, 0);
-      context.globalAlpha = 1; context.globalCompositeOperation = "source-over";
-      context.fillStyle = "#000"; context.fillRect(0, 0, overlayCanvas.width, overlayCanvas.height);
-      context.restore();
-      return;
-    }
     if (poolBlockHovered) showPoolBlockTooltip();
     else if (pileHovered) showPileTooltip();
     // World-anchored sleeping marks share the guide visibility cadence; their particles still move every frame.
@@ -11053,7 +11076,6 @@
   const onOogatron = (event) => {
     if (event.type === "stats") {
       if (jumbotron) jumbotron.refreshData(event.stats);
-      contributors.applySnapshot(event.stats);
     }
   };
   const onTotem = (event) => { if (event.fresh) flareTotem(event.index); };
@@ -11636,10 +11658,10 @@
     entropyLab.updateEquipment = updateLabEquipment;
     shared.clipProjectileTarget = entropyLab.phase.clipTarget;
     shared.absorbProjectile = (ax, ay, az, point, dt, source, workShot) => entropyLab.phase.absorb(ax, ay, az, point, dt)
+      || absorbCaveVeil(ax, ay, az, point, dt)
       || !!(factoryMouth && factoryMouth.phase.absorb(ax, ay, az, point, dt))
       || !!(bcaMouth && bcaMouth.phase.absorb(ax, ay, az, point, dt))
       || !!(bifrostIsle && bifrostIsle.phase.absorb(ax, ay, az, point, dt))
-      || absorbCaveVeil(ax, ay, az, point, dt)
       || !!(workShot && source && shared.workSites[source.work.site]?.mirrorRoom
         && mirrorCave.ripples.absorb(ax, ay, az, point));
     shared.onProjectileMove = (ax, ay, az, bx, by, bz, dt) => mirrorCave.ripples.cross(ax, ay, az, bx, by, bz, dt);
@@ -12210,7 +12232,6 @@
           advanceClouds: updateClouds,
           portal: matrixCave.portal,
           contains: inMatrixCave,
-          cameraInside: cameraInsideMirror,
           overlayVisible: matrixOverlayVisible,
           viewApproach: viewMatrixApproach,
           viewInside: viewInsideMatrix
@@ -12512,6 +12533,7 @@
     CLANKER_HIT.node = CLANKER_HIT.owner = null;
     viewPoseActor = grabSupportEntry = clankerSupportActor = clankerPassingEntry = preparingGuideActor = null;
     // Drop every per-visit ref but the cached island.
+    dockStairs.dispose();
     terrainRampRoof = pathNode = altar = lawn = life = hud = hooks = input = pilot = fx = cameraCover = bananaCover = solids = rockGuides = objectGuides = sightGuides = bananaGuides = pileGuides = platformGuides = mirrorGuides = pile = crew = crates = critters = clock = presets = mirrorCave = matrixCave = matrixControl = fire = headquarters = positionDebug = dockStairs = overlayCanvas = null;
     beasts.clear();
     magazine = magazineState = weather = footsteps = mempoolIsland = timechainIsland = clankers = clankerPlay = null;
@@ -12577,7 +12599,7 @@
       // A crossing through the Timechain Sphere's doors keeps full rate, so its walk and swoop finish smoothly, and so
       // does a walk through the Factory's shield and its dissolve.
       if (timechainIsland && timechainIsland.gate.busy) return true;
-      if (factoryWalk.phase || factoryWalk.still > 0) return true;
+      if (factoryWalk.phase || factoryWalk.still > 0 || dockStairs.inMotion) return true;
       if (ghosts && ghosts.inMotion) return true; // HALLOWEEN
       if (pile.inMotion || fx.inMotion || poolEffectsActive && (weather.active || mempoolIsland.water.active) || magazine && magazine.revealed || mirrorCave.ripples.active || mirrorCave.body.active) return true;
       if (!entropyLab.phase.paused && (entropyLab.phase.ripples.active || entropyLab.phase.body.contacts || entropyLab.phase.body.active)) return true;

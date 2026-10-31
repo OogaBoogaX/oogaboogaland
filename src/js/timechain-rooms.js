@@ -53,18 +53,18 @@
     const s = scale, R = BASE.radius * s, H = BASE.wall * s;
     // The doorway's bay is a flat chord of the round wall; the door's plane is that chord's.
     const doorZ = Math.sqrt(R * R - DOOR.bay * DOOR.bay);
-    // The screens stand just in from the wall, square to the middle, three each side of the axis.
+    // Screens follow the wall at this radius; their widths measure distance along its arc.
     const screenR = R - 0.3 * s, w = BASE.screenW * s, h = BASE.screenH * s, bottom = BASE.screenBottom * s;
     const step = (w + BASE.screenGap * s) / screenR;
     const screens = Array.from({ length: SCREENS }, (_, i) => {
       const a = (i - (SCREENS - 1) / 2) * step;
-      return { angle: a, x: screenR * Math.sin(a), z: -screenR * Math.cos(a), y: bottom + h / 2, w, h };
+      return { angle: a, radius: screenR, x: screenR * Math.sin(a), z: -screenR * Math.cos(a), y: bottom + h / 2, w, h };
     });
     // The latest-blocks ribbon over them, the label first on the left, spanning the same arc.
     const ribbonY = bottom + h + BASE.ribbonGap * s + BASE.ribbonH * s / 2, slot = SCREENS * step / RIBBON;
     const ribbon = Array.from({ length: RIBBON }, (_, i) => {
       const a = (i - (RIBBON - 1) / 2) * slot;
-      return { angle: a, x: screenR * Math.sin(a), z: -screenR * Math.cos(a), y: ribbonY, w: slot * screenR - 0.08 * s, h: BASE.ribbonH * s };
+      return { angle: a, radius: screenR, x: screenR * Math.sin(a), z: -screenR * Math.cos(a), y: ribbonY, w: slot * screenR - 0.08 * s, h: BASE.ribbonH * s };
     });
     // Furniture keeps its size and spreads with the room: the meeting table stays in the middle, growing to seat 4, 8
     // or 12 at a table top of one height, and the holdings desk and Sani's corner stand out by their walls. The chairs

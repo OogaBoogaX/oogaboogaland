@@ -1312,6 +1312,8 @@ uniform vec3 uCrestTint;
 uniform float uClipMaxY;
 ${CUTAWAY_GLSL}
 uniform int uRippleActive;
+uniform float uRippleContact;
+uniform vec2 uRippleCenter;
 uniform float uRippleTime;
 uniform vec4 uRipples[${BL.mirrorRipples.CAPACITY}];
 uniform sampler2D uBodyField;
@@ -1356,6 +1358,13 @@ void main() {
       if (wave.w <= 0.0) continue;
       vec2 offset = vMirrorLocal - wave.xy;
       float distance = length(offset);
+      if (uRippleContact > 0.5) {
+        float contact = uRippleContact > 1.5
+          ? 1.0 - smoothstep(${BL.mirrorRipples.SURFACE_CORE.toFixed(6)}, ${BL.mirrorRipples.SURFACE_RADIUS.toFixed(6)}, length(vWorld.xz - uRippleCenter))
+          : 1.0 - smoothstep(0.0, ${BL.mirrorRipples.CONTACT_RADIUS.toFixed(6)}, distance);
+        glyphCrest = max(glyphCrest, contact * wave.w);
+        continue;
+      }
       float radius = ${BL.mirrorRipples.START_RADIUS.toFixed(6)} + wave.z * ${BL.mirrorRipples.SPEED.toFixed(6)};
       float phase = (distance - radius) / ${BL.mirrorRipples.WIDTH.toFixed(6)};
       if (phase > 3.0 || phase < -5.5) continue;
@@ -1429,12 +1438,13 @@ void main() {
         int glyph = (abs(stream * 73 + flowCell * 151) + int(floor(uRippleTime * 20.0))) & 7;
         float mask = texelFetch(uMatrixGlyphTex, ivec2(glyph * 6 + 1 + pixel.x, 5 - pixel.y), 0).r;
         vec2 coverage = 1.0 - smoothstep(vec2(0.38) - pixelFootprint * 0.5, vec2(0.38) + pixelFootprint * 0.5, abs(fract(pixelCoord) - 0.5));
-        float alpha = glyphCrest * mask * coverage.x * coverage.y * 0.82;
+        float alpha = glyphCrest * mask * coverage.x * coverage.y * (uRippleContact > 1.5 ? 1.0 : 0.82);
         float glow = (0.58 + rippleHash(stream + 101) * 0.36) * (0.48 + float(position + 1) / float(train) * 0.52);
         float tip = position == train - 1 ? 1.0 : position == train - 2 ? 0.55 : 0.0;
         vec3 base = (glyph & 1) == 0 ? vec3(24.0, 220.0, 74.0) : vec3(70.0, 255.0, 112.0);
         vec3 green = mix(base / 255.0 * mix(0.78, 1.15, glow), vec3(0.84, 1.0, 0.89), tip * 0.88);
         vec3 crest = uCrestTint.r < 0.0 ? green : mix(uCrestTint * mix(0.78, 1.15, glow), vec3(0.9, 0.97, 1.0), tip * 0.88);
+        if (uRippleContact > 1.5) crest *= 1.6;
         if (uRippleOnly > 0.5) {
           // Premultiplied glyphs reveal the actual scene behind this plane;
           // the faint crest adds light without an opaque reflection or tint.
@@ -1446,7 +1456,7 @@ void main() {
   }
   if (uRippleOnly > 0.5 && max(max(color.r, color.g), color.b) < 0.0001) discard;
   oColor = vec4(color, uRippleOnly > 0.5 ? effectAlpha : 1.0);
-  oBright = vec4(0.0);
+  oBright = uRippleContact > 1.5 ? vec4(color * 0.35, effectAlpha) : vec4(0.0);
 }`;
   const SHARD_FS = `#version 300 es
 precision highp float;
@@ -1513,23 +1523,81 @@ float fbm(vec2 p) {
   }
   return v;
 }
+float moonCrater(vec2 p, vec2 centre, float radius) {
+  float r = length(p - centre) / radius;
+  return 0.12 * (smoothstep(0.7, 0.9, r) - smoothstep(0.9, 1.1, r))
+    + 0.06 * (1.0 - smoothstep(0.25, 0.8, r));
+}
+float moonBasin(vec2 p, vec4 bounds) {
+  return length((p - bounds.xy) / bounds.zw);
+}
+float moonAlbedo(vec2 p) {
+  // Approximate near-side outlines, north up and lunar east right. Positions
+  // follow the USGS mare catalog; shapes follow NASA's LRO near-side image:
+  // https://science.nasa.gov/resource/lunar-near-side/
+  // Keep these bounds in sync with Canvas MOON_BASINS.
+  float grain = fbm(p * 8.0 + vec2(21.7, 8.3));
+  float basin = moonBasin(p, vec4(-0.72, 0.25, 0.19, 0.38)); // Procellarum's western expanse
+  basin = min(basin, moonBasin(p, vec4(-0.59, 0.53, 0.19, 0.23)));
+  basin = min(basin, moonBasin(p, vec4(-0.62, -0.08, 0.20, 0.15)));
+  basin = min(basin, moonBasin(p, vec4(-0.211, 0.570, 0.30, 0.25))); // Imbrium
+  basin = min(basin, moonBasin(p, vec4(-0.32, 0.12, 0.27, 0.16))); // Insularum
+  basin = min(basin, moonBasin(p, vec4(-0.36, -0.15, 0.17, 0.12))); // Cognitum
+  basin = min(basin, moonBasin(p, vec4(0.280, 0.458, 0.18, 0.18))); // Serenitatis
+  basin = min(basin, moonBasin(p, vec4(0.507, 0.145, 0.21, 0.22))); // Tranquillitatis
+  basin = min(basin, moonBasin(p, vec4(0.824, 0.279, 0.085, 0.145))); // Isolated Crisium
+  basin = min(basin, moonBasin(p, vec4(0.798, -0.136, 0.12, 0.23))); // Fecunditatis
+  basin = min(basin, moonBasin(p, vec4(0.548, -0.262, 0.085, 0.095))); // Nectaris
+  basin = min(basin, moonBasin(p, vec4(-0.278, -0.352, 0.21, 0.20))); // Nubium
+  basin = min(basin, moonBasin(p, vec4(-0.567, -0.414, 0.095, 0.11))); // Humorum
+  basin = min(basin, moonBasin(p, vec4(0.069, 0.228, 0.075, 0.065))); // Vaporum
+  basin = min(basin, moonBasin(p, vec4(-0.38, 0.79, 0.20, 0.035))); // Frigoris' broken northern band
+  basin = min(basin, moonBasin(p, vec4(-0.05, 0.855, 0.24, 0.035)));
+  basin = min(basin, moonBasin(p, vec4(0.28, 0.815, 0.18, 0.032)));
+  float plains = 1.0 - smoothstep(0.82, 1.02, basin + (grain - 0.5) * 0.22);
+  float albedo = mix(0.92, 0.53, plains) + (grain - 0.5) * 0.10;
+  albedo += moonCrater(p, vec2(-0.14, -0.695), 0.025); // Tycho
+  albedo += moonCrater(p, vec2(-0.323, 0.167), 0.027); // Copernicus
+  albedo += moonCrater(p, vec2(-0.61, 0.14), 0.012); // Kepler
+  albedo += moonCrater(p, vec2(-0.65, 0.43), 0.012); // Aristarchus
+  return clamp(albedo, 0.4, 1.0);
+}
 void main() {
   vec4 far = uInvViewProj * vec4(vUv * 2.0 - 1.0, 1.0, 1.0);
   vec3 d = normalize(far.xyz / far.w);
   float hazeY = d.y + uHazeDrop;
+  // Altitude lowers the haze bank, not the celestial horizon. Sea-facing rays
+  // must contain no direct sun, moon or stars, including their bloom source.
+  float skyMask = smoothstep(0.0, 0.005, d.y);
   vec3 col = mix(uHorizon, uZenith, smoothstep(-0.02, 0.5, hazeY));
   col = mix(col, uHorizon * 0.55, smoothstep(0.0, 0.5, -hazeY));
   float sd = max(dot(d, uSunDir), 0.0);
   float sunDisc = pow(sd, 600.0) * (1.0 - uStars);
   vec3 sun = uSun * (sunDisc + pow(sd, 6.0) * 0.18 * (1.0 - uStars));
   float moonDot = dot(d, uMoonDir);
-  float moonDisc = smoothstep(0.9985, 0.999, moonDot) * mix(0.3, 1.0, uStars) * smoothstep(-0.02, 0.005, d.y);
-  vec3 moonOffset = (d - uMoonDir * moonDot) / sqrt(0.003);
-  vec3 moonNormal = moonOffset - uMoonDir * sqrt(max(0.0, 1.0 - dot(moonOffset, moonOffset)));
-  float moonLit = smoothstep(-0.025, 0.025, dot(moonNormal, uMoonSunDir));
-  vec3 moon = vec3(0.82, 0.88, 1.0) * moonDisc * moonLit;
+  float moonEdge = max(fwidth(moonDot), 0.000005);
+  float moonDisc = smoothstep(0.9985 - moonEdge, 0.9985 + moonEdge, moonDot);
+  vec3 moon = vec3(0.0), moonBright = vec3(0.0);
+  if (moonDisc > 0.0 && skyMask > 0.0) {
+    float moonOpacity = moonDisc * mix(0.3, 1.0, uStars);
+    vec3 moonOffset = (d - uMoonDir * moonDot) / sqrt(0.003);
+    float moonDepth = sqrt(max(0.0, 1.0 - dot(moonOffset, moonOffset)));
+    vec3 moonNormal = moonOffset - uMoonDir * moonDepth;
+    vec3 moonUp = abs(uMoonDir.y) < 0.98 ? vec3(0.0, 1.0, 0.0) : vec3(0.0, 0.0, 1.0);
+    vec3 moonRight = normalize(cross(uMoonDir, moonUp));
+    moonUp = cross(moonRight, uMoonDir);
+    float albedo = moonAlbedo(vec2(dot(moonOffset, moonRight), dot(moonOffset, moonUp)));
+    float moonLight = dot(moonNormal, uMoonSunDir);
+    float moonLit = smoothstep(-0.015, 0.015, moonLight);
+    vec3 moonDay = vec3(0.8, 0.79, 0.76) * albedo * (0.18 + 0.82 * sqrt(max(0.0, moonLight)));
+    vec3 earthshine = vec3(0.1, 0.11, 0.14) * albedo * (0.85 + 0.15 * moonDepth);
+    vec3 moonSurface = mix(mix(col, earthshine, uStars), moonDay, moonLit);
+    // Keep the shadowed terrain visible and the lit terrain clear of bloom.
+    moon = (moonSurface - col) * moonOpacity;
+    moonBright = moonDay * moonLit * moonOpacity * 0.06;
+  }
   vec3 stars = vec3(0.0);
-  if (uStars > 0.002) {
+  if (uStars > 0.002 && skyMask > 0.0) {
     vec3 starD = normalize(uStarMatrix * d);
     vec3 a = abs(starD);
     vec2 f;
@@ -1546,10 +1614,11 @@ void main() {
       float r = 0.12 + h2 * 0.18;
       float pt = 1.0 - smoothstep(0.0, r, length(fract(f) - 0.5));
       float twinkle = 0.75 + 0.25 * sin(uTime * (2.0 + h3 * 3.0) + h3 * 6.28);
-      float s = pt * (0.5 + 0.5 * h2) * twinkle * uStars * smoothstep(-0.05, 0.15, hazeY);
+      float s = pt * (0.5 + 0.5 * h2) * twinkle * uStars * smoothstep(0.0, 0.15, d.y);
       stars = mix(vec3(1.0), vec3(0.75, 0.85, 1.0), h3) * s;
     }
   }
+  stars *= 1.0 - moonDisc;
   // The sea far below the island: the view ray meets a level plane, waves from two drifting noise fields bend
   // its normal, the sky reflects by Fresnel, the sun glints, crests foam, and it hazes into the horizon.
   if (uSea.x > 0.0 && d.y < -0.0005) {
@@ -1570,10 +1639,14 @@ void main() {
     water *= mix(vec3(1.0), uHorizon * 1.35, 0.4);
     water += uSun * pow(max(dot(r, uSunDir), 0.0), 220.0) * 3.0 * day;
     water += vec3(0.85, 0.95, 1.0) * smoothstep(0.66, 0.74, h0) * 0.22 * day;
-    // Haze by distance, pushed out by however far the eye climbs past island heights, so a dive from altitude
-    // still sees blue sea below instead of a sheet of horizon colour; at island heights nothing changes.
+    // Match the sky at this viewing angle, including its altitude-shifted haze.
+    // A fixed uHorizon here left an orange/blue seam at dusk. Keep distant haze
+    // farther out as the eye climbs, retaining visible water below a high dive.
     float lift = max(0.0, uSea.z - uSea.y - 120.0);
-    col = mix(water, uHorizon, smoothstep(160.0 + lift * 1.2, 900.0 + lift * 2.5, t));
+    float haze = smoothstep(160.0 + lift * 1.2, 900.0 + lift * 2.5, t);
+    // At sea level the distance haze may not finish before the ray cutoff;
+    // fade water out there too so the horizon stays continuous at every height.
+    col = mix(col, water, (1.0 - haze) * smoothstep(0.0005, 0.01, -d.y));
   }
   // Painted cumulus on a plane over the world, drifting with time: lit toward the sun, grey underneath,
   // taking the horizon's colour at dusk and dimming to the night sky. They thin out toward the horizon.
@@ -1590,10 +1663,11 @@ void main() {
     col = mix(col, cloudCol, cover * 0.92);
     sun *= 1.0 - cover * 0.85;
     moon *= 1.0 - cover;
+    moonBright *= 1.0 - cover;
     stars *= 1.0 - cover;
   }
-  oColor = vec4(col + sun + moon + stars, 1.0);
-  oBright = vec4(uSun * sunDisc * 0.6 + moon * 0.5 + stars * 0.35, 1.0);
+  oColor = vec4(col + (sun + moon + stars) * skyMask, 1.0);
+  oBright = vec4((uSun * sunDisc * 0.6 + moonBright + stars * 0.35) * skyMask, 1.0);
 }`;
   const BLUR_FS = `#version 300 es
 precision highp float;
@@ -1850,7 +1924,7 @@ void main() {
     };
     const ensureMirrorProgram = () => {
       if (!mirror.program) {
-        mirror.program = compile(MIRROR_VS, MIRROR_FS, ["uViewProj", "uReflectionViewProj", "uMirrorWorld", "uShard", "uReflection", "uReflectionScale", "uTint", "uPortal", "uReveal", "uRippleOnly", "uCrestTint", "uMatrixGlyphTex", "uRippleActive", "uRippleTime", "uRipples", "uBodyField", "uBodyBounds", "uBodyTexel", "uBodyContacts", "uBodyActive", "uBodyWaves", "uClipMaxY"]);
+        mirror.program = compile(MIRROR_VS, MIRROR_FS, ["uViewProj", "uReflectionViewProj", "uMirrorWorld", "uShard", "uReflection", "uReflectionScale", "uTint", "uPortal", "uReveal", "uRippleOnly", "uCrestTint", "uMatrixGlyphTex", "uRippleActive", "uRippleContact", "uRippleCenter", "uRippleTime", "uRipples", "uBodyField", "uBodyBounds", "uBodyTexel", "uBodyContacts", "uBodyActive", "uBodyWaves", "uClipMaxY"]);
         mirrorDebug.resources++;
       }
       if (mirror.programReady) return true;
@@ -3870,6 +3944,8 @@ void main() {
         const ripples = mirror.node.mirrorRipples, body = mirror.node.mirrorBody;
         mirrorDebug.ripples = ripples ? ripples.active : 0;
         gl.uniform1i(pg.u.uRippleActive, mirrorDebug.ripples);
+        gl.uniform1f(pg.u.uRippleContact, ripples && ripples.contact ? ripples.surface ? 2 : 1 : 0);
+        gl.uniform2f(pg.u.uRippleCenter, ripples?.surfaceCenter?.[0] || 0, ripples?.surfaceCenter?.[1] || 0);
         gl.uniform1f(pg.u.uRippleTime, body ? body.time : ripples ? ripples.time : 0);
         gl.uniform4fv(pg.u.uRipples, ripples ? ripples.waves : NO_MIRROR_RIPPLES);
         const bodyActive = body && (body.contacts || body.active);
@@ -3992,6 +4068,8 @@ void main() {
         gl.activeTexture(gl.TEXTURE2);
         gl.uniform3f(pg.u.uCrestTint, tint ? tint[0] : -1, tint ? tint[1] : 0, tint ? tint[2] : 0);
         gl.uniform1i(pg.u.uRippleActive, ripples ? ripples.active : 0);
+        gl.uniform1f(pg.u.uRippleContact, ripples && ripples.contact ? ripples.surface ? 2 : 1 : 0);
+        gl.uniform2f(pg.u.uRippleCenter, ripples?.surfaceCenter?.[0] || 0, ripples?.surfaceCenter?.[1] || 0);
         gl.uniform1f(pg.u.uRippleTime, bodyActive ? body.time : ripples ? ripples.time : 0);
         gl.uniform4fv(pg.u.uRipples, ripples ? ripples.waves : NO_MIRROR_RIPPLES);
         gl.bindTexture(gl.TEXTURE_2D, t.tex);
@@ -4055,6 +4133,8 @@ void main() {
         gl.uniform4fv(pg.u.uBodyWaves, body ? body.waves : NO_MIRROR_BODY_WAVES);
         gl.uniformMatrix4fv(pg.u.uMirrorWorld, false, node.world);
         gl.uniform1i(pg.u.uRippleActive, ripples ? ripples.active : 0);
+        gl.uniform1f(pg.u.uRippleContact, ripples && ripples.contact ? ripples.surface ? 2 : 1 : 0);
+        gl.uniform2f(pg.u.uRippleCenter, ripples?.surfaceCenter?.[0] || 0, ripples?.surfaceCenter?.[1] || 0);
         gl.uniform1f(pg.u.uRippleTime, bodyActive ? body.time : ripples ? ripples.time : 0);
         gl.uniform4fv(pg.u.uRipples, ripples ? ripples.waves : NO_MIRROR_RIPPLES);
         const tint = node.rippleTint;
