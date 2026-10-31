@@ -190,6 +190,23 @@
     return { dark, amber: noShadow(amber) };
   });
 
+  // A vertical arc facing +z, with its circle's centre at local z=radius. Depth grows outward into the wall.
+  // Fixed angular strips give every room the same smooth silhouette and bound the render/picking work.
+  const panelArc = (w, h, radius, front = 0, back = front) => {
+    const geo = blank(), steps = Math.ceil(w / radius / 0.02), half = h / 2;
+    const at = (angle, y, depth) => [(radius + depth) * Math.sin(angle), y, radius - (radius + depth) * Math.cos(angle)];
+    for (let i = 0; i < steps; i++) {
+      const a = (i / steps - 0.5) * w / radius, b = ((i + 1) / steps - 0.5) * w / radius, mid = (a + b) / 2;
+      quad(geo, at(a, -half, front), at(b, -half, front), at(b, half, front), at(a, half, front), C.bezel, 0, [-Math.sin(mid), 0, Math.cos(mid)]);
+      if (back === front) continue;
+      quad(geo, at(a, half, back), at(b, half, back), at(b, -half, back), at(a, -half, back), C.bezel, 0, [Math.sin(mid), 0, -Math.cos(mid)]);
+      quad(geo, at(a, half, front), at(b, half, front), at(b, half, back), at(a, half, back), C.bezel, 0, [0, 1, 0]);
+      quad(geo, at(a, -half, back), at(b, -half, back), at(b, -half, front), at(a, -half, front), C.bezel, 0, [0, -1, 0]);
+      if (i === 0) quad(geo, at(a, -half, back), at(a, -half, front), at(a, half, front), at(a, half, back), C.bezel, 0, [-Math.cos(a), 0, -Math.sin(a)]);
+      if (i === steps - 1) quad(geo, at(b, -half, front), at(b, -half, back), at(b, half, back), at(b, half, front), C.bezel, 0, [Math.cos(b), 0, Math.sin(b)]);
+    }
+    return geo;
+  };
   // The hall: the round wall from bay edge to bay edge, the flat bay with the doorway cut in it and its frame, the
   // floor's tiles over a dark base, the chain of blocks and the dome.
   const hall = perScale((scale) => {
@@ -215,7 +232,7 @@
     // The screens' and cards' dark bezels, a little behind their pictures.
     for (const list of [L.screens, L.ribbon]) for (const p of list) {
       const pad = list === L.screens ? 0.16 * s : 0.06 * s, back = 0.1;
-      parts.push(moved(turnedY(box({ w: p.w + pad, h: p.h + pad, d: back, color: C.bezel, offset: { z: -back / 2 - 0.01 } }), -p.angle), p.x, p.y, p.z));
+      parts.push(moved(turnedY(panelArc(p.w + pad, p.h + pad, p.radius, 0.01, back + 0.01), -p.angle), p.x, p.y, p.z));
     }
     return merge(...parts);
   });
@@ -375,8 +392,16 @@
     ...[0, 1, 2, 3].map((i) => box({ w: 0.28 + (i % 3) * 0.13, h: 0.025, d: 0.01, color: i % 2 ? "#3ddc84" : "#f7931a", emissive: 0.85, offset: { x: -0.14, y: 0.34 - i * 0.075, z: -0.05 } }))
   ));
 
-  // A picture on a quad `w` by `h` about the origin, facing +z, from a decoded image `image` of `width` by `height`.
-  const picture = (image, width, height, w, h) => {
+  // Wall displays wrap a canvas by arc length; desk and doorway pictures remain flat.
+  const picture = (image, width, height, w, h, radius = 0) => {
+    if (radius) {
+      const geo = panelArc(w, h, radius);
+      const white = [255, 255, 255];
+      for (const face of geo.faces) { face.color = white; face.emissive = 0.9; }
+      geo.castShadow = false;
+      geo.imageSurface = { canvas: image, version: 0, rect: [-w / 2, -h / 2, w, h], curve: [radius, 0, 0], tessellated: true };
+      return geo;
+    }
     const geo = { verts: [-w / 2, -h / 2, 0, w / 2, -h / 2, 0, w / 2, h / 2, 0, -w / 2, h / 2, 0], faces: [{ i: [0, 1, 2, 3], color: [0, 0, 0], emissive: 0 }], lines: [], castShadow: false };
     geo.imageSurface = { asset: { width, height, load: () => image }, rect: [-w / 2, -h / 2, w, h] };
     return geo;

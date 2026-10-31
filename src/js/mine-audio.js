@@ -106,11 +106,9 @@
       return pick;
     };
 
-    // A hidden tab stops the room's loops and voices; showing it again picks them up.
+    // The room keeps sounding in the background; returning can wake a context the browser suspended.
     const onVisibility = () => {
-      if (!ctx || ctx.state === "closed") return;
-      if (document.hidden) ctx.suspend().catch(() => {});
-      else ctx.resume().catch(() => {});
+      if (ctx && !document.hidden && ctx.state === "suspended") ctx.resume().catch(() => {});
     };
     document.addEventListener("visibilitychange", onVisibility);
 

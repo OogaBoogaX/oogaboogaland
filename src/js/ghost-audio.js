@@ -4,7 +4,7 @@
 // decoded once into buffers, one source a play, with the hunt's playlist (the lab's boss music and five tracks, each
 // its own deferred `halloween-track-<key>` group fetched as it comes up) decoded a track at a time. One AudioContext, opened only after a gesture
 // the browser has activated; the page-wide mute (`oogaboogaland.audio`);
-// suspended while the tab is hidden; `dispose` closes it.
+// keeps playing while the tab is hidden; `dispose` closes it.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -83,7 +83,7 @@
     };
     const live = () => {
       if (!ctx && !open()) return false;
-      if (ctx.state === "suspended" && !document.hidden) ctx.resume().catch(() => {});
+      if (ctx.state === "suspended") ctx.resume().catch(() => {});
       return true;
     };
     const voice = () => {
@@ -496,13 +496,10 @@
       else if (musicWanted && !muted && live()) startMusic();
       return musicOn;
     };
-    /** Once a frame: rests the context while the tab is hidden. */
+    /** Wake a context the browser suspended; the playlist keeps playing across tab changes. */
     const update = () => {
-      if (!ctx) return;
-      if (document.hidden && ctx.state === "running") ctx.suspend().catch(() => {});
-      else if (!document.hidden && ctx.state === "suspended") ctx.resume().catch(() => {});
+      if (ctx && !document.hidden && ctx.state === "suspended") ctx.resume().catch(() => {});
     };
-    // The director stops the frame loop the moment the tab hides, so the context rests on the event itself, not a frame.
     document.addEventListener("visibilitychange", update);
     const offSound = BL.sound.subscribe(on => {
       muted = on;
