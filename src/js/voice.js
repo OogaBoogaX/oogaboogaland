@@ -7,6 +7,7 @@
 // serialised. Each remote voice plays on its own <audio> element at one volume: the room lets a player
 // hear only those in the same place (out on the island, HQ, one cave), and within it everyone is equal.
 // `enable` must run inside the click that asks for the microphone; `toggle` is the footer's button.
+// `setMuted` changes mute state without acquiring a microphone, including while joining or only listening.
 // Who is speaking is measured here, for the roster: an analyser on the microphone and on each voice
 // received, read every SPEAK_MS while voice is on (`stats.speaking` for this page, `speaking(id)` for
 // others). A player muted for this page alone (`muteLocal`, by GitHub login, kept in localStorage) is still
@@ -21,7 +22,7 @@
 // not a mute: the room is not told, and a visitor's own mute stands whoever comes and goes. In DSB Studio an
 // audience can listen without publishing, so there the room's `voice` message also counts the other receive
 // sessions (`listeners`), and that count holds the gate instead; no count ever acquires a microphone.
-// Exports enable, listen, dropMic, preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, toggle, restart, stop,
+// Exports enable, listen, dropMic, preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, setMuted, toggle, restart, stop,
 // setPeers, subscribe, dispose, inspect, speaking, muteLocal, mutedLocally and stats.
 (() => {
   "use strict";
@@ -610,5 +611,5 @@
   // For the feed panel and debugging: whom the room wants heard, whom this page pulled, and both connections.
   const inspect = () => ({ desired: desired.slice(), pulled: [...subs.keys()], publish: pubPc ? pubPc.connectionState : "none", receive: subPc ? subPc.connectionState : "none" });
 
-  BL.voice = { preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, enable, listen, dropMic, toggle, restart, stop, setPeers, subscribe, dispose, inspect, speaking, muteLocal, mutedLocally, stats };
+  BL.voice = { preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, enable, listen, dropMic, setMuted, toggle, restart, stop, setPeers, subscribe, dispose, inspect, speaking, muteLocal, mutedLocally, stats };
 })();

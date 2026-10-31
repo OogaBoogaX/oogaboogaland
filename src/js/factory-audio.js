@@ -13,7 +13,7 @@
 // way the view faces, and `cue(name, x, y, z, loud, n)` plays a cue there, quieter with distance and panned to its
 // side, `n` its note, its syllables or its kind. Kortik's cues fall off sooner, so his board comes up as the visitor
 // walks up to it, and he speaks through a throat of his own. It honours the page-wide mute (`oogaboogaland.audio`)
-// and the tab's visibility, and `dispose` closes it. `heard` counts every cue asked for, heard or not.
+// while the tab is hidden too, and `dispose` closes it. `heard` counts every cue asked for, heard or not.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -172,7 +172,7 @@
     const activate = () => {
       if (disposed) return;
       if (ready) {
-        if (ctx.state === "suspended" && !document.hidden) ctx.resume().catch(() => {});
+        if (ctx.state === "suspended") ctx.resume().catch(() => {});
         return;
       }
       if (muted || typeof AudioContext === "undefined" || navigator.userActivation && !navigator.userActivation.hasBeenActive) return;
@@ -180,11 +180,9 @@
     };
     window.addEventListener("pointerdown", activate, true);
     window.addEventListener("keydown", activate, true);
-    // A hidden tab stops the hall's loops and voices; showing it again picks them up.
+    // The hall keeps sounding in the background; returning can wake a context the browser suspended.
     const onVisibility = () => {
-      if (!ready) return;
-      if (document.hidden) ctx.suspend().catch(() => {});
-      else ctx.resume().catch(() => {});
+      if (ready && !document.hidden && ctx.state === "suspended") ctx.resume().catch(() => {});
     };
     document.addEventListener("visibilitychange", onVisibility);
 
@@ -524,7 +522,7 @@
       if (!entry) throw new Error(`No factory cue named ${name}`);
       heard[name]++;
       if (!ready) activate();
-      if (!ready || muted || document.hidden) return;
+      if (!ready || muted) return;
       place(x, y, z, entry[0]);
       AT.level = Math.max(AT.level, entry[1]) * loud * (name === "anvil" ? 1 : EVENTS);
       entry[2](n);

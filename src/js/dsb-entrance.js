@@ -106,7 +106,6 @@
     // passage hides it and the arrival does not stall on them.
     let phase = "tunnel", warmed = false, progress = 0, gait = 0, pace = 0, spark = 0, glance = 0, glanceTime = 3, lastCue = -1, flash = 0, flashHold = 0, flight = 0, fade = -1, disposed = false;
     const pose = (swing) => { const p = avatar.parts; p.legL.rotation.x = swing; p.legR.rotation.x = -swing; p.armL.rotation.x = -swing * 0.7; p.armR.rotation.x = swing * 0.7; };
-    const onVisibility = () => audio.visibility(document.hidden);
     const hud = (next) => {
       document.body.classList.toggle("dsb-entry", next === "entrance"); document.body.classList.toggle("dsb-arrival", next === "arrival");
       panel.hidden = next === "land"; panel.dataset.phase = next;
@@ -197,7 +196,7 @@
       }
       if (flashHold > 0) flashHold--; else flash = Math.max(0, flash - Math.min(dt, 0.05) * 1.3);
       if (phase === "arrival") { audio.update(1, time, false); fly(dt); if (flight >= FLIGHT_SECONDS) finish(); }
-      else if (fade > 0 && (fade -= dt) <= 0) { document.removeEventListener("visibilitychange", onVisibility); audio.dispose(); }
+      else if (fade > 0 && (fade -= dt) <= 0) audio.dispose();
       return false;
     };
     const overlay = (c, w, h) => {
@@ -221,12 +220,12 @@
     };
     const dispose = () => {
       if (disposed) return;
-      disposed = true; document.removeEventListener("visibilitychange", onVisibility); audio.dispose();
+      disposed = true; audio.dispose();
       if (phase !== "done") { show(false); hud("land"); pilot.setExternalControl(false); }
       S.removeChild(root, group); while (group.children.length) S.removeChild(group, group.children[group.children.length - 1]);
     };
     sound.hidden = false;
-    document.addEventListener("visibilitychange", onVisibility); hud("entrance");
+    hud("entrance");
     return { group, opts, audio, update, overlay, action, onKey, skip, dispose, get phase() { return phase; }, get progress() { return progress; }, get flight() { return flight; } };
   };
   BL.dsbEntrance = { create, LENGTH, FLIGHT_SECONDS };

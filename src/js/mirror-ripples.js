@@ -5,7 +5,7 @@
   const BL = window.BL = window.BL || {}, { mat4 } = BL.math;
   const CAPACITY = 8, LIFETIME = 0.72, SPEED = 1.35, START_RADIUS = 0.055, WIDTH = 0.055, GLYPH_THRESHOLD = 0.55;
   const strengthAt = age => Math.exp(-5 * age) * Math.max(0, 1 - age / LIFETIME);
-  const create = node => {
+  const create = (node) => {
     const waves = new Float32Array(CAPACITY * 4), inverse = mat4.create();
     const bounds = BL.scene.boundsOf(node.geometry), a = new Float64Array(3), b = new Float64Array(3);
     const previous = mat4.create(), current = mat4.create(), contact = new Float64Array(2);
