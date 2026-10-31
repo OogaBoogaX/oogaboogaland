@@ -29,7 +29,7 @@
     const home = { x: dock.position.x + ux * (DOCK_LENGTH + RADIUS - 0.25), y: dock.position.y, z: dock.position.z + uz * (DOCK_LENGTH + RADIUS - 0.25) };
     const length = Math.hypot(home.x, home.z), nx = home.x / length, nz = home.z / length;
     const start = { x: 0, y: 0, z: 0 };
-    let level = LEVELS[0], player = "", farBefore = 0;
+    let level = LEVELS[0], player = "", farBefore = 0, watched = "";
     const heading = Math.atan2(-nx, -nz), platform = createNode({ sightHidden: true });
     const cloud = BL.cloudHopperModels.cloud(RADIUS, RADIUS, DEPTH);
     const cabinet = BL.cloudHopperModels.cabinet();
@@ -250,7 +250,13 @@
     // The cards choose on the intro and on the result card's Level select; the run places its own start.
     const selectLevel = (id) => {
       if (phase !== "intro" && phase !== "won" && phase !== "dq") return;
-      level = LEVELS[id - 1]; showLevels();
+      level = LEVELS[id - 1]; showLevels(); watchBoard();
+    };
+    // Each level's shared board, watched while its card or results show; times never cross levels.
+    const watchBoard = () => {
+      unwatchScores?.();
+      watched = level.board;
+      unwatchScores = BL.highscores?.watch(level.board, (board) => overlay.setHighscores(board)) || null;
     };
     const nextLevel = () => {
       if (phase !== "won" || level.id >= opened()) return;
@@ -274,7 +280,7 @@
       }
       level = LEVELS[pickLevel() - 1]; showLevels();
       seconds = 0; latest = null; placeStart();
-      unwatchScores = BL.highscores?.watch("cloud-hopper", (board) => overlay.setHighscores(board)) || null;
+      watchBoard();
       setPhase("intro"); pilot.freeCursor();
       return true;
     };
@@ -297,7 +303,8 @@
       liftViewMix = 0;
       const record = played();
       seconds = startedAt = 0; latest = null; run = ++record.runs; session.lastLevel = level.id; showLevels();
-      scoreTicket = BL.highscores?.begin("cloud-hopper") || null;
+      if (watched !== level.board) watchBoard();
+      scoreTicket = BL.highscores?.begin(level.board) || null;
       // Each attempt gets fresh clouds; the ghost keeps its original route.
       courseSeed = BL.math.randomInt(4294967296);
       if (courseSeed === record.lastSeed) courseSeed = (courseSeed + 1) >>> 0;
@@ -361,7 +368,7 @@
         const saved = game.recordCloudHopper(player, level.id, Math.round(seconds * 1000), LEVELS.length);
         latest = { time: seconds, run, username: runnerName, personalBest: saved.best, unlocked: saved.unlocked };
         showLevels();
-        BL.highscores?.submit(scoreTicket, "cloud-hopper-1", Math.round(seconds * 1000));
+        BL.highscores?.submit(scoreTicket, level.board, Math.round(seconds * 1000));
         const scores = record.scores;
         let at = 0;
         while (at < scores.length && scores[at].time <= seconds) at++;
@@ -398,7 +405,7 @@
     };
     // Exits and scene changes park at the dock before the hub can release its actor.
     const cancel = (keepMusic = false) => {
-      unwatchScores?.(); unwatchScores = null; scoreTicket = null;
+      unwatchScores?.(); unwatchScores = null; scoreTicket = null; watched = "";
       if (farBefore) { camera.far = farBefore; farBefore = 0; }
       if (!active()) {
         if (!keepMusic) { audio.stop(); dockMusicOn = false; }

@@ -499,6 +499,8 @@ the `movePass` guards. Decision 3 in section 7.
 
 ### 5.3 Shared leaderboards
 
+*Built in milestone 7 as recommended. The retired board is kept and readable, but not shown in the game yet (decision 4).*
+
 **Recommended (the smallest compatible change): one attributed game per level.**
 
 - In `highscore-rules.js`, add `cloud-hopper-l1` to `cloud-hopper-l4`, each

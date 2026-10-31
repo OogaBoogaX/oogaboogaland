@@ -3,13 +3,14 @@
 // cloud's centre to the final cloud's centre 12 m off the coast. Level 1 is 21% shorter than the old course
 // (430.5 m) and each level after it 42% longer than the one before. The start stands that far out from the
 // final cloud and `slope` × R above it. `layout` and `timing` override cloud-hopper-course.js's LAYOUT and
-// TIMING; `sky` names the chosen look. `courseVersion` changes whenever a level's challenge does.
+// TIMING; `sky` names the chosen look; `board` is its shared high-score game and machine (highscore-rules.js).
+// `courseVersion` changes whenever a level's challenge does, as does that board's registry version.
 (() => {
   "use strict";
   const scope = typeof window === "undefined" ? globalThis : window;
   const BL = scope.BL = scope.BL || {};
   const BASE_ROUTE = 430.5 * 0.79, GROWTH = 1.42;
-  const level = (id, name, sky, slope, layout, timing) => Object.freeze({ id, name, sky, courseVersion: 1,
+  const level = (id, name, sky, slope, layout, timing) => Object.freeze({ id, name, sky, courseVersion: 1, board: `cloud-hopper-l${id}`,
     route: BASE_ROUTE * GROWTH ** (id - 1), slope, layout: Object.freeze({ sides: 0.55, sideMax: 64, ...layout }), timing: Object.freeze(timing) });
   const LEVELS = Object.freeze([
     // Wider, calmer clouds closer together in drop, gentle turns, more that never fade, longer warnings.
