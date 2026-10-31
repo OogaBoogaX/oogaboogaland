@@ -12388,6 +12388,7 @@
     if (destroy && wpContextOn) { hubCanvas.removeEventListener("contextmenu", wpContextMenu); hubCanvas = null; wpContextOn = false; }
     cloudHopper?.dispose(); cloudIsland?.dispose();
     cloudPileSolids?.dispose();
+    removeChild(root, cloudFinishFruit);
     cloudHopper = cloudIsland = cloudDock = cloudPile = cloudPileSolids = cloudFinishFruit = null;
     cloudOffMap.length = 0; cloudHidden.clear();
     actorTransition.sourceRoot = actorTransition.sourceHead = null;
