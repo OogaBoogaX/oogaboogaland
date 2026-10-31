@@ -17,7 +17,7 @@
       face: "none",
       hatY: 12,
       height: 1.10,
-      skin: "#3a1a12",          // dark lava rock
+      skin: "#3a1a12",
       hair: "#1a0a08",
       fur:  "#2a120c",
       eyeColor: "#ff2200",
@@ -37,7 +37,6 @@
     },
 
     dress: {
-      // Lava-rock skull head
       skull(k, v) {
         const rock   = k.color("#3a1a12");
         const rockLt = k.color("#5c2a18");
@@ -45,19 +44,15 @@
         const lavaHi = k.color("#ffaa22");
         const black  = k.color("#0a0504");
 
-        // Base skull
         v.fill(0, 6, 0, 6, 0, 5, rock);
-        // Cracks / lava veins
         v.fill(1, 1, 2, 5, 3, 3, lava);
         v.fill(5, 5, 2, 5, 3, 3, lava);
         v.fill(2, 4, 1, 1, 4, 4, lavaHi);
-        // Darker eye sockets
         v.fill(1, 2, 3, 4, 5, 5, black);
         v.fill(4, 5, 3, 4, 5, 5, black);
         return true;
       },
 
-      // Glowing red eyes
       eyes(k, v) {
         const glow = k.color("#ff2200");
         const core = k.color("#ffee44");
@@ -70,7 +65,6 @@
         return true;
       },
 
-      // Spiked black helmet with Bitcoin + broken heart
       crown(k, v) {
         const helm   = k.color("#0d0d10");
         const helmLt = k.color("#2a2a30");
@@ -79,11 +73,9 @@
         const heart  = k.color("#ff2244");
         const bone   = k.color("#e8e0d0");
 
-        // Helmet shell
         v.fill(-1, 7, 5, 8, -1, 6, helm);
         v.fill(0, 6, 8, 9, 0, 5, helmLt);
 
-        // Spikes on top
         for (const x of [0, 2, 4, 6]) {
           v.set(x, 10, 2, spike);
           v.set(x, 11, 2, spike);
@@ -91,23 +83,19 @@
         v.set(1, 10, 3, spike);
         v.set(5, 10, 3, spike);
 
-        // Bitcoin symbol (front)
         v.fill(2, 4, 6, 7, 6, 6, btc);
         v.set(3, 5, 6, btc);
         v.set(3, 8, 6, btc);
 
-        // Broken heart
         v.set(1, 6, 6, heart);
         v.set(5, 6, 6, heart);
         v.set(2, 5, 6, heart);
         v.set(4, 5, 6, heart);
 
-        // Tiny skulls on the sides
         v.set(0, 6, 5, bone);
         v.set(6, 6, 5, bone);
       },
 
-      // Dark lava body with glowing cracks
       torso(k, v) {
         const rock   = k.color("#2a120c");
         const rockLt = k.color("#4a2218");
@@ -115,7 +103,6 @@
         const lavaHi = k.color("#ff8800");
 
         v.fill(0, 8, 0, 7, 0, 5, k.jit(rock, rockLt, 0.3));
-        // Lava cracks
         v.fill(2, 2, 1, 6, 5, 5, lava);
         v.fill(6, 6, 2, 5, 5, 5, lavaHi);
         v.set(4, 4, 5, lava);
