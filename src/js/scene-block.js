@@ -523,6 +523,7 @@
     else if (t === "trap") feed(`${who} is stuck in a quiz`, e.team);
     else if (t === "burn") feed(`${who} burnt their feet in the fire!`, e.team);
     else if (t === "slip") feed(`${who} slipped on a banana peel!`, e.team);
+    else if (t === "hopon") feed(`${who} climbed on ${e.by === 0 ? "your" : `${nameOf(e.by)}'s`} back`, e.team);
     else if (t === "boo") feed(`A ghost spooked ${e.actor === 0 ? "you" : who}!`, e.team);
     else if (t === "ghostpop" && e.actor >= 0) feed(`${nameOf(e.actor)} popped a ghost`, sim.actors[e.actor].team);
     else if (t === "rekt") feed(e.by >= 0 && e.by !== e.actor ? `${nameOf(e.by)}'s wallet rekt ${who}` : `${who} got rekt by a free wallet`, e.by >= 0 ? sim.actors[e.by].team : e.team);
@@ -769,7 +770,13 @@
       } else if (e.type === "rekt") {
         if (me) { center("REKT!", 1100); notice("Wallet blast! Knocked back and sooted", 1600); }
         say(e.actor, ["Rekt", "Not your keys!", "Trust me bro?"], 1.4);
-      } else if (e.type === "laseron") {
+      } else if (e.type === "hopon") {
+        audio.cues.jump(); audio.cues.pass(0.4);
+        if (me) { center("PIGGYBACK!", 800); notice(`On ${nameOf(e.by)}'s back · aim and shoot · Space (or H) hops off`, 2600); }
+        else if (e.by === 0) { center("PIGGYBACK!", 800); notice(`${nameOf(e.actor)} is on your back, shooting for you · they hop off if you're splatted`, 2600); }
+        else say(e.actor, ["Giddy up!", "Onward!", "Hup!"], 1.2);
+      } else if (e.type === "hopoff") { if (me) notice("Back on your feet", 900); }
+      else if (e.type === "laseron") {
         audio.cues.laser(me ? 1 : 0.5);
         if (me) center("LASERS!", 800);
       } else if (e.type === "boo") {
@@ -1078,6 +1085,21 @@
     notice(sim.prep > 0 ? "The zipline opens when the round starts" : a.holding ? "Put the crate down first (F)" : "Climb a sniper tower's ladder and stand by the cable to ride", 1600);
     return false;
   };
+  // Piggyback: H climbs on the nearest teammate's back (H again, or Space, gets down); J calls a bot teammate to
+  // climb on yours.
+  const piggyback = () => {
+    if (phase !== "play") return false;
+    const me = sim.actors[0];
+    if (me.ride) { move.jump = 1; return true; }
+    if (SIM.hopOn(sim, 0)) return true;
+    notice(me.rider ? "You've already got someone on your back" : "No teammate close enough to climb on · J calls one to ride on you", 1600);
+    return false;
+  };
+  const callRider = () => {
+    if (phase !== "play") return false;
+    if (SIM.callRide(sim, 0)) { notice("Calling a teammate to climb on your back…", 1600); return true; }
+    return false;
+  };
   const dropBlock = () => {
     if (phase !== "play") return false;
     if (SIM.drop(sim, 0)) return true;
@@ -1295,6 +1317,12 @@
       const swing = Math.sin(a.phase) * Math.min(1, sp / 3);
       p.legR.rotation.x = swing * 0.6;
       p.legL.rotation.x = -swing * 0.6;
+      p.legL.rotation.z = p.legR.rotation.z = 0;
+      if (s.ride) {
+        // Piggyback: knees up round the waist below, legs apart.
+        p.legL.rotation.x = p.legR.rotation.x = -1.35;
+        p.legL.rotation.z = 0.45; p.legR.rotation.z = -0.45;
+      }
       if (s.carrying || s.holding) {
         // Both hands up holding the block (or a crate) overhead.
         p.armL.rotation.x = p.armR.rotation.x = -2.9;
@@ -1307,6 +1335,12 @@
         const kick = s.cooldown > (s.bot ? sim.bots.cool : SIM.TOOLS.paint.cool) - 0.12 ? 0.18 : 0;
         p.armR.rotation.x = (g === 2 ? -1.75 : -1.45) - kick;
         p.armL.rotation.x = g === 2 ? -1.9 : -1.25;
+      } else if (s.ride) {
+        // Riding with nothing in hand: arms round the shoulders in front.
+        p.armL.rotation.x = p.armR.rotation.x = -1.5;
+      } else if (s.rider) {
+        // Carrying a rider: hands back under its knees.
+        p.armL.rotation.x = p.armR.rotation.x = 0.55;
       } else {
         p.armR.rotation.x = s.cooldown > (s.bot ? sim.bots.cool : SIM.TOOLS.paint.cool) - 0.2 ? -1.5 : -0.2 - swing * 0.35;
         p.armL.rotation.x = -0.2 + swing * 0.35;
@@ -1679,6 +1713,8 @@
     if (TOOL_KEYS[e.key]) keyTool(TOOL_KEYS[e.key]);
     if (e.key === "t" || e.key === "T") passBlock();
     if (e.key === "y" || e.key === "Y") throwWallet();
+    if (e.key === "h" || e.key === "H") piggyback();
+    if (e.key === "j" || e.key === "J") callRider();
     if (e.key === "r" || e.key === "R") cycleTool(1);
     if (e.key === "f" || e.key === "F") grabCrate();
     if (e.key === "g" || e.key === "G") dropBlock();
@@ -2083,7 +2119,7 @@
     hud.setStats(game.state);
     hud.el.sheet.dataset.open = "false";
     el.help = document.getElementById("block-help");
-    el.help.textContent = COARSE ? "Left stick runs · right stick turns · Jump twice to climb · Paint! throws the tool you pick · View for first person" : "W S run · A D turn · Shift sprints · Space jumps, twice to climb · click fires · R or right click switches weapon · V changes view (chase, first person, Island) · two-finger swipe or the wheel zooms · X side-step (A D step sideways) · 5 sniper (from a tower) · 6 Golden Dual AKs (hold to fire) · 7 AK (hold to fire) · hold Space in the air for the jetpack · mash Space to escape a gorilla · E at a FREE WALLETS machine takes one, click or Y throws it: it sticks to a rival, who won't know, and goes off 5 s later · W into a ladder climbs · E zipline or catapult · Tab throws what you hold · F lifts crates · B new crate · C crouch";
+    el.help.textContent = COARSE ? "Left stick runs · right stick turns · Jump twice to climb · Paint! throws the tool you pick · View for first person" : "W S run · A D turn · Shift sprints · Space jumps, twice to climb · click fires · R or right click switches weapon · V changes view (chase, first person, Island) · two-finger swipe or the wheel zooms · X side-step (A D step sideways) · 5 sniper (from a tower) · 6 Golden Dual AKs (hold to fire) · 7 AK (hold to fire) · hold Space in the air for the jetpack · mash Space to escape a gorilla · H piggyback on a teammate, J call one onto your back · E at a FREE WALLETS machine takes one, click or Y throws it: it sticks to a rival, who won't know, and goes off 5 s later · W into a ladder climbs · E zipline or catapult · Tab throws what you hold · F lifts crates · B new crate · C crouch";
     showBoard();
     stateTimer = window.setInterval(() => fx.trimPool(), 6e4);
     hintTimer = window.setTimeout(() => hud.hint(COARSE ? "Pick a side, then Play!" : "Pick a side, then Play! (Enter)"), 1200);

@@ -62,7 +62,8 @@
     // `GHOST_SIGHT`, and a touch (`GHOST_R`) spooks it stiff for `SPOOK_S` (dropping a crate, not a block); then the ghost fades
     // and comes back after `GHOST_BACK`. Paint or a blast pops one sooner.
     GHOST_SPEED: 1.4, GHOST_CHASE: 3, GHOST_SIGHT: 6, GHOST_R: 0.7, SPOOK_S: 1.2, GHOST_BACK: 14, GHOST_POP: 10,
-    GOAL_R: 2.4, TOWER_TOP: 6.4, CLIMB: 3.6, ZIP_SPEED: 15, ZIP_HANG: 1.9, ZIP_R: 1.6, CACHE_S: 15, CACHE_R: 1.2
+    GOAL_R: 2.4, HOP_R: 1.8, RIDE_UP: 0.55, RIDE_BACK: 0.42, MOUNT_SLOW: 0.85, CALL_S: 6, CALL_R: 12,
+    TOWER_TOP: 6.4, CLIMB: 3.6, ZIP_SPEED: 15, ZIP_HANG: 1.9, ZIP_R: 1.6, CACHE_S: 15, CACHE_R: 1.2
   };
   // The tools: speed, upward lob, gravity, life in seconds, hit radius, burst radius (0 for none), cooldown, and how
   // many a full refill holds (0 for no limit).
@@ -554,7 +555,7 @@
       blocked: null, stuck: 0, lastX: 0, lastZ: 0, detour: 0, aim: 0, trapped: 0, think: 0, grounded: true, jumps: 0, crouch: false,
       waiting: false, stamina: 4, tired: false, sprinting: false, rest: 0, botJump: false, jump2At: 0, tries: 0, progT: 0, lastD: 0, netted: 0, grenade: 0, rocket: 0, net: 0, sniper: 0, crates: 0, holding: false, bonked: false,
       climbing: false, riding: false, zipT: 0, flight: 0, zipLine: "blue", lastKind: "paint", grabbed: 0, grabHits: 0, fuel: 2.6, jetting: false, boots: 0, laser: 0, burnt: 0, slip: 0, gold: false, akMag: 30, akReload: 0, monkeys: 0, monkeyCool: 0,
-      wallet: -1, knock: 0, soot: 0, spooked: 0, beam: 0, beamLen: 0, vendGo: 0, vendI: 0, navI: -1, navT: 0, route: "", routeT: 0, botClimb: false, botStop: false, botStraight: false, crateGo: 0, crateX: 0, crateZ: 0, routeBan: 0, jetT: 0, hopT: 0, crateT: 0, stacks: 0,
+      wallet: -1, knock: 0, soot: 0, spooked: 0, beam: 0, beamLen: 0, ride: 0, rider: 0, calling: 0, vendGo: 0, vendI: 0, navI: -1, navT: 0, route: "", routeT: 0, botClimb: false, botStop: false, botStraight: false, crateGo: 0, crateX: 0, crateZ: 0, routeBan: 0, jetT: 0, hopT: 0, crateT: 0, stacks: 0,
       detourX: 0, detourZ: 0, painted: 0, captures: 0, splats: 0, hits: 0, longShot: 0, rescues: 0
     }));
     const flags = {};
@@ -632,7 +633,7 @@
       a.captures = a.splats = a.hits = a.longShot = a.rescues = 0;
       a.fuel = CONFIG.JET_FUEL; a.jetting = false; a.grabbed = a.grabHits = 0;
       a.sniper = 0; a.climbing = a.riding = false; a.zipT = 0; a.flight = 0; a.boots = a.laser = a.beam = a.burnt = a.slip = 0; a.gold = false; a.akMag = CONFIG.AK_MAG; a.akReload = 0; a.monkeys = 0;
-      a.wallet = -1; a.knock = a.soot = a.vendGo = 0;
+      a.wallet = -1; a.knock = a.soot = a.vendGo = 0; a.ride = a.rider = a.calling = 0;
       a.route = ""; a.routeT = a.jetT = a.hopT = a.crateT = a.stacks = a.crateGo = a.routeBan = 0; a.botClimb = false;
       refill(a);
       a.crates = CONFIG.CRATE_STOCK;
@@ -796,6 +797,45 @@
     }
   };
   // Out of a quiz bubble (a right answer, or the bot's think time up): fresh-paint protection follows, as after a splat.
+  // ---- Piggyback ----
+  // Actor `id` climbs onto the back of the nearest teammate within `HOP_R`: carried along on their shoulders, free to
+  // turn and shoot (or throw a block on), until a jump, or either of them being splatted, trapped or grabbed, puts them
+  // down. The one carrying runs a little slower (`MOUNT_SLOW`). A rider may carry a block; the one under it may not
+  // climb on someone else.
+  const canRide = (a) => a.splat <= 0 && a.trapped <= 0 && !a.grabbed && !a.riding && !a.flight && !a.climbing && !a.holding && a.knock <= 0;
+  const hopOn = (sim, id = 0, onto = -1) => {
+    use(sim);
+    const a = sim.actors[id];
+    if (sim.over || a.ride || a.rider || !canRide(a)) return false;
+    let best = null, bd = CONFIG.HOP_R * CONFIG.HOP_R;
+    for (const m of sim.actors) {
+      if (m === a || m.team !== a.team || (onto >= 0 && m.id !== onto) || m.ride || m.rider || !canRide(m) || Math.abs(m.y - a.y) > 0.6) continue;
+      const d = (m.x - a.x) ** 2 + (m.z - a.z) ** 2;
+      if (d < bd) { bd = d; best = m; }
+    }
+    if (!best) return false;
+    a.ride = best.id + 1; best.rider = a.id + 1; a.calling = 0;
+    emit(sim, "hopon", a.team, a.id, best.x, best.y + 1.5, best.z, best.id);
+    return true;
+  };
+  const hopOff = (sim, a, jump = true) => {
+    if (!a.ride) return;
+    const m = sim.actors[a.ride - 1];
+    a.ride = 0; if (m) m.rider = 0;
+    a.vy = jump ? 4.5 : 0; a.grounded = false; a.jumps = 0;
+    if (m) { a.vx = -Math.sin(m.heading) * 2.5 + m.vx * 0.5; a.vz = -Math.cos(m.heading) * 2.5 + m.vz * 0.5; }
+    emit(sim, "hopoff", a.team, a.id, a.x, a.y, a.z);
+  };
+  // The visitor (or anyone) asks for a rider: for `CALL_S` the nearest free bot teammate within `CALL_R` comes and
+  // climbs on.
+  const callRide = (sim, id = 0) => {
+    use(sim);
+    const a = sim.actors[id];
+    if (sim.over || a.ride || a.rider) return false;
+    a.calling = CONFIG.CALL_S;
+    emit(sim, "callride", a.team, a.id, a.x, a.y + 2, a.z);
+    return true;
+  };
   const escape = (sim, id = 0, why = "escape") => {
     const a = sim.actors[id];
     if (a.trapped <= 0) return false;
@@ -1618,6 +1658,38 @@
   };
   const thinkBot = (sim, a, dt) => {
     if (a.splat > 0 || a.trapped > 0) { a.botClimb = false; return; }
+    // Riding: no running of its own, only turning to aim and shooting (below).
+    if (a.ride) {
+      let t = null, best = sim.bots.range * sim.bots.range;
+      for (const b of sim.actors) {
+        if (b.team === a.team || !open(b)) continue;
+        const dd = (b.x - a.x) ** 2 + (b.z - a.z) ** 2;
+        if (dd < best) { best = dd; t = b; }
+      }
+      if (t) a.heading = Math.atan2(t.x - a.x, t.z - a.z);
+      if (a.cooldown <= 0 && t && sim.prep <= 0) {
+        a.aim += dt;
+        if (a.aim >= sim.bots.aim) {
+          a.aim = 0;
+          const dist = Math.sqrt(best), yaw = a.heading + (sim.rng() - 0.5) * 2 * sim.bots.spread;
+          fire(sim, a.id, yaw, Math.min(0.12, Math.max(-0.2, (dist - 8) * -0.006 - 0.05)), a.gold ? "gold" : "paint");
+        }
+      }
+      return;
+    }
+    // A teammate calling for a rider: the nearest free bot goes and climbs on.
+    for (const c of sim.actors) {
+      if (c === a || c.team !== a.team || c.calling <= 0 || c.rider || a.carrying || a.rider) continue;
+      const d = Math.hypot(c.x - a.x, c.z - a.z);
+      if (d > CONFIG.CALL_R) continue;
+      let nearer = false;
+      for (const b of sim.actors) if (b !== a && b !== c && b.bot && b.team === a.team && !b.ride && !b.rider && Math.hypot(c.x - b.x, c.z - b.z) < d) nearer = true;
+      if (nearer) continue;
+      if (d < CONFIG.HOP_R && hopOn(sim, a.id, c.id)) return;
+      const h = steer(sim, a, c.x, c.z), sp = sim.bots.speed * 1.2;
+      a.vx = Math.sin(h) * sp; a.vz = Math.cos(h) * sp;
+      return;
+    }
     const ex = sim.bots.expert;
     if (a.carrying && a.cooldown <= 0 && sim.rng() < dt * 2) botPass(sim, a);
     a.botStop = a.botStraight = false;
@@ -1640,7 +1712,7 @@
     const d = Math.hypot(goal.x - a.x, goal.z - a.z);
     // An autopiloted player (`auto`, the suite's and the debug handle's) runs at the player's sprint.
     // A bot with the rivals' block sprints for home, as a visitor would.
-    const speed = (a.bot === "auto" ? CONFIG.SPEED * CONFIG.SPRINT : sim.bots.speed * (a.carrying && a.carrying !== a.team ? 1.3 : 1)) * (a.carrying ? CONFIG.CARRY : 1) * (a.netted > 0 ? CONFIG.NET_SLOW : 1) * (a.boots > 0 ? CONFIG.BOOTS : 1) * (a.burnt > 0 ? CONFIG.BURN_SLOW : 1);
+    const speed = (a.bot === "auto" ? CONFIG.SPEED * CONFIG.SPRINT : sim.bots.speed * (a.carrying && a.carrying !== a.team ? 1.3 : 1)) * (a.rider ? CONFIG.MOUNT_SLOW : 1) * (a.carrying ? CONFIG.CARRY : 1) * (a.netted > 0 ? CONFIG.NET_SLOW : 1) * (a.boots > 0 ? CONFIG.BOOTS : 1) * (a.burnt > 0 ? CONFIG.BURN_SLOW : 1);
     // Burnt feet: a bot hops until they cool.
     if (a.burnt > 0 && a.grounded) a.botJump = true;
     if (a.botStop) a.vx = a.vz = 0;
@@ -1921,6 +1993,22 @@
         a.vx *= k; a.vz *= k;
         if (a.slip === 0) emit(sim, "steady", a.team, a.id, a.x, a.y, a.z);
       }
+      // On a teammate's back: carried along, facing where it likes; a jump (or trouble below) puts it down.
+      if (a.ride) {
+        const m = sim.actors[a.ride - 1];
+        let off = !m || m.rider !== a.id + 1 || !canRide(a) || !canRide(m);
+        if (!a.bot && input.jump) { off = true; input.jump = 0; }
+        if (off) hopOff(sim, a, !!m && canRide(a));
+        else {
+          if (a.bot) thinkBot(sim, a, dt);
+          else if (input.face !== undefined) a.heading = input.face;
+          a.x = m.x - Math.sin(m.heading) * CONFIG.RIDE_BACK; a.z = m.z - Math.cos(m.heading) * CONFIG.RIDE_BACK; a.y = m.y + CONFIG.RIDE_UP;
+          a.vx = m.vx; a.vz = m.vz; a.vy = 0; a.grounded = false; a.jumps = 0; a.moving = 0;
+          if (a.carrying) { const f = sim.flags[a.carrying]; f.x = a.x; f.z = a.z; }
+          continue;
+        }
+      }
+      if (a.calling > 0) a.calling -= dt;
       // Held by a gorilla: no moving or throwing, only struggling (a jump press each), until free.
       if (a.grabbed) {
         let push = false;
@@ -1961,7 +2049,7 @@
           a.stamina = Math.min(CONFIG.SPRINT_S, a.stamina + dt * CONFIG.SPRINT_S / CONFIG.SPRINT_REFILL);
           if (a.tired && a.stamina >= CONFIG.SPRINT_S * CONFIG.SPRINT_MIN) a.tired = false;
         }
-        const speed = CONFIG.SPEED * (a.crouch ? CONFIG.CROUCH_SPEED : 1) * (a.sprinting ? CONFIG.SPRINT : 1) * (a.carrying ? CONFIG.CARRY : 1) * (a.netted > 0 ? CONFIG.NET_SLOW : 1) * (a.boots > 0 ? CONFIG.BOOTS : 1) * (a.burnt > 0 ? CONFIG.BURN_SLOW : 1) * (a.flight === 2 ? CONFIG.CHUTE_SPEED / CONFIG.SPEED : 1);
+        const speed = CONFIG.SPEED * (a.rider ? CONFIG.MOUNT_SLOW : 1) * (a.crouch ? CONFIG.CROUCH_SPEED : 1) * (a.sprinting ? CONFIG.SPRINT : 1) * (a.carrying ? CONFIG.CARRY : 1) * (a.netted > 0 ? CONFIG.NET_SLOW : 1) * (a.boots > 0 ? CONFIG.BOOTS : 1) * (a.burnt > 0 ? CONFIG.BURN_SLOW : 1) * (a.flight === 2 ? CONFIG.CHUTE_SPEED / CONFIG.SPEED : 1);
         const tx = input.x * speed, tz = input.z * speed, k = Math.min(1, CONFIG.ACCEL * dt);
         a.vx += (tx - a.vx) * k;
         a.vz += (tz - a.vz) * k;
@@ -2167,7 +2255,7 @@
       tick(sim, CONFIG.STEP, input);
     }
   };
-  BL.blockSim = { WALLETS, takeWallet, throwWallet, dropWallet, nearVend, CONFIG, TOOLS, KINDS, SKILLS, POWERS, ARENAS, MAPS, TEAMS, other, create, reset, step, tick, setLive, newBlock, launch, nearCatapult, fire, drop, pass, build, grab, zip, nearZip, onTower, escape, clearLine, solidAt, resolve, groundAt };
+  BL.blockSim = { hopOn, callRide, WALLETS, takeWallet, throwWallet, dropWallet, nearVend, CONFIG, TOOLS, KINDS, SKILLS, POWERS, ARENAS, MAPS, TEAMS, other, create, reset, step, tick, setLive, newBlock, launch, nearCatapult, fire, drop, pass, build, grab, zip, nearZip, onTower, escape, clearLine, solidAt, resolve, groundAt };
   // The map last stepped (or reset), for the scene's and models' reads.
   Object.defineProperty(BL.blockSim, "ARENA", { get: () => ARENA, enumerable: true });
 })();
