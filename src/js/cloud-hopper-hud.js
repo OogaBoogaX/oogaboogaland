@@ -173,7 +173,12 @@
       if (previousFocus?.isConnected && typeof previousFocus.focus === "function") previousFocus.focus({ preventScroll: true });
       previousFocus = null;
     };
+    let sharedScores = null, localScores = [], localLatest = null;
     const showScores = (scores, latest) => {
+      localScores = scores; localLatest = latest;
+      if (sharedScores) scores = sharedScores;
+      scoresTitle.textContent = sharedScores ? "Fastest times · all players" : "Your best times · this session";
+      scoresEmpty.textContent = sharedScores ? "No shared times yet. Sign in with GitHub to set one." : "Finish a run to put your time on the board.";
       const count = Math.min(scoreRows.length, scores.length);
       scoresList.hidden = !count;
       scoresEmpty.hidden = !!count;
@@ -181,17 +186,24 @@
         const { row, run, time } = scoreRows[i];
         row.hidden = i >= count;
         if (row.hidden) continue;
-        const record = scores[i], current = latest?.run === record.run;
+        const record = scores[i], current = sharedScores ? record.username.toLowerCase() === BL.net.state.me?.login.toLowerCase() : latest?.run === record.run;
         row.classList.toggle("you", current);
         run.textContent = record.username || "Guest";
         time.textContent = formatTime(Math.max(0, Math.floor(record.time * 100)));
       }
     };
+    const setHighscores = (board) => {
+      if (disposed) return;
+      sharedScores = board ? Object.entries(board.highscores).map(([username, score]) => ({ username, time: score / 1000, achieved: board.achieved?.[username] || 0 }))
+        .sort((a, b) => a.time - b.time || a.achieved - b.achieved || a.username.localeCompare(b.username)).slice(0, scoreRows.length) : null;
+      showScores(localScores, localLatest);
+      if (phase === "intro") scoresPanel.hidden = !sharedScores;
+    };
     const show = (next, time = 0, scores = [], latest = null) => {
       if (disposed || !COPY[next]) return;
       update(time);
       const ended = next === "won" || next === "dq";
-      if (ended) showScores(scores, latest);
+      if (ended || next === "intro") showScores(scores, latest);
       if (phase === next) return;
       phase = next;
       clearActivation();
@@ -229,7 +241,7 @@
         }
         panel.setAttribute("aria-describedby", ended ? `${resultArt.id} ${panelHelp.id}` : intro ? `${goal.id} ${panelHelp.id}` : panelHelp.id);
         panelHelp.textContent = best ? "New session best!" : copy[1];
-        scoresPanel.hidden = !ended;
+        scoresPanel.hidden = !ended && !(intro && sharedScores);
         resultTime.hidden = next !== "won";
         play.textContent = intro ? "Start ride" : "Play again";
         exit.textContent = briefing ? "Skip tips" : intro ? "Not now" : "Return to dock";
@@ -260,7 +272,7 @@
       guidePictures?.dispose(); guidePictures = null;
       hud.remove(); panel.remove();
     };
-    return { show, update, setGhost, hide, dispose, get frameY() { return frameY; } };
+    return { show, update, setGhost, setHighscores, hide, dispose, get frameY() { return frameY; } };
   };
   BL.cloudHopperHud = { create };
 })();
