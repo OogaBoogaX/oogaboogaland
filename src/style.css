@@ -2311,6 +2311,63 @@ body[data-active-scene="arcade"] .magazine-hud {
   transform: translate(-50%, 0);
 }
 
+/* Reading the whitepaper's poster: the help line at the foot of the screen, and, on a touch screen, the one button
+   that steps through it. */
+.wp-nav {
+  position: absolute;
+  z-index: 6;
+  left: 50%;
+  bottom: calc(16px + var(--safe-bottom));
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(620px, calc(100vw - 32px));
+  padding: 9px 16px;
+  background: linear-gradient(var(--plank), var(--wood));
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  box-shadow: 0 3px 0 var(--nail);
+  color: var(--paper);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-align: center;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
+}
+.wp-nav-help {
+  white-space: nowrap;
+}
+.wp-nav-step {
+  display: none;
+}
+@media (pointer: coarse) {
+  .wp-nav-help {
+    display: none;
+  }
+  .wp-nav-step {
+    display: inline-block;
+    min-width: 44px;
+    min-height: 40px;
+    padding: 0 12px;
+    border: 2px solid var(--wood-edge);
+    border-radius: 6px;
+    background: linear-gradient(#e2a04a, var(--accent));
+    color: var(--ink);
+    font: inherit;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+/* The act button and the sticks wait while the poster is read, and the bar stands down so the page runs to the top. */
+body.wp-reading .bottom-hud>.act,
+body.wp-reading .topbar,
+body.wp-reading .joysticks {
+  display: none;
+}
+
 /* The microphone's note: stays while muted in voice, under the clock, clear of the act button and the toasts. */
 .mic-note {
   position: absolute;
