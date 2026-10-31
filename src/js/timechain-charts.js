@@ -28,8 +28,9 @@
     return `${h} h ${m} min`;
   };
   const ago = (ms) => {
-    const s = Math.max(0, Math.round(ms / 1000));
-    return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.floor(s / 60)}m ago` : `${Math.floor(s / 3600)}h ago`;
+    const s = Math.max(0, Math.floor(ms / 1000)), seconds = String(s % 60).padStart(2, "0");
+    return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.floor(s / 60)}:${seconds} ago`
+      : `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, "0")}:${seconds} ago`;
   };
   const hashrate = (h) => h >= 1e21 ? `${(h / 1e21).toFixed(2)} ZH/s` : `${(h / 1e18).toFixed(1)} EH/s`;
   const diff = (d) => `${(d / 1e12).toFixed(2)} T`;

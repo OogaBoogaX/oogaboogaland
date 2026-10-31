@@ -3,7 +3,7 @@
 // eased toward the room's 15 Hz poses with a walk cycle while it moves, and a nameplate. The crew's own
 // copy of that Ooga is sent `away` while someone else drives it, so no Ooga stands twice, and comes back
 // when they let go; meanwhile its roster row shows the driver online (`remoteControlled`, the green dot).
-// The crew walks round remote bodies through `actors`, its `outsideActors`.
+// The crew turns its shoulders through remote players without routing around them.
 // Who is shown is the scene's `visible(rec)`: the island shows players in its own zone (`onIsland` lists the
 // island's places), every other scene those in its zone (`sameZone`). The crew is optional, for a scene that
 // has none until the visitor drives, and `hide(name, on)` lets a scene hide its own decor copy of an Ooga
@@ -56,7 +56,7 @@
     const bodies = new Map();
     // The chat subscription, taken on the first update and again after a kept hub's suspend disposed it.
     let unheard = null;
-    const actorPool = Array.from({ length: MAX }, () => ({ id: null, x: 0, y: 0, z: 0, radius: BODY_RADIUS, height: BODY_HEIGHT }));
+    const actorPool = Array.from({ length: MAX }, () => ({ id: null, player: true, x: 0, y: 0, z: 0, radius: BODY_RADIUS, height: BODY_HEIGHT }));
     const actorList = [];
 
     // The crew's Ooga of this name goes away while a remote drives it; its own override comes back after.

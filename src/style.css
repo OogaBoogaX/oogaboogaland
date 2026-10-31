@@ -3879,9 +3879,9 @@ body.dsb-menu-open .rescue-equipment { visibility: hidden; pointer-events: none;
 }
 
 .weapon-icon {
-  width: 44px;
-  height: 44px;
-  transform: translate(-2px, -1px);
+  width: 48px;
+  height: 48px;
+  transform: translate(-2px, 2px);
 }
 
 .primary-icon {
@@ -7185,6 +7185,22 @@ body[data-active-scene] .mic-note { top: var(--hub-equipment-bottom, calc(72px +
   transform: translate(-50%, -50%) scale(calc(1.7 - var(--reticle-hit, 0) * 0.7));
 }
 
+/* The Sphere borrows combat mouse-look with an empty-handed, fixed center dot. */
+body[data-active-scene="timechain"] .weapon-reticle {
+  left: 50% !important;
+  top: 50% !important;
+  visibility: visible;
+}
+body[data-active-scene="timechain"] .weapon-reticle > svg,
+body[data-active-scene="timechain"] .weapon-reticle > span::after { display: none; }
+body[data-active-scene="timechain"] .weapon-reticle > span {
+  top: 50%;
+  width: 3px;
+  height: 3px;
+  background: #fff9dc;
+  visibility: visible;
+}
+
 /* DSB keeps controls in the existing page and its world in a separate scene. */
 .dsb-island-icon, .ember-den-icon { display: none; }
 body[data-active-scene="dsb"] .dsb-island-icon,
@@ -9982,3 +9998,110 @@ body[data-active-scene="arcade"] #destination-hud:not([hidden]) { display: flex;
 .mode-roster-icon { width: 34px; height: 44px; }
 #mode-hud[data-selected="true"] .mode-roster-icon { display: none; }
 body[data-banner-oogas="true"] .sheet:not([hidden]) { display: flex; }
+
+/* Cloud Hopper keeps the route visible beneath a small clock; its title and results share the arcade's wood and stone. */
+.cloud-hopper-hud {
+  position: fixed;
+  z-index: 35;
+  top: calc(82px + var(--safe-top));
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(360px, calc(100vw - 32px));
+  padding: 12px 18px;
+  border: 1px solid #abcfe45c;
+  border-radius: 18px;
+  background: #142b40e8;
+  color: #f6fbff;
+  text-align: center;
+  pointer-events: none;
+  box-shadow: 0 5px 24px #05152645;
+}
+.cloud-hopper-hud[hidden] { display: none; }
+.cloud-hopper-name { margin: 0; color: #afdff5; font-size: 11px; font-weight: 700; letter-spacing: .16em; }
+.cloud-hopper-time { display: block; margin: 5px 0; color: #fff; font-size: 32px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.cloud-hopper-time[hidden] { display: none; }
+.cloud-hopper-status { font-weight: 700; }
+.cloud-hopper-help { margin: 5px 0 0; color: #d8e9f3; font-size: 11px; line-height: 1.5; }
+.cloud-hopper-panel {
+  position: fixed;
+  inset: auto;
+  left: 50%;
+  top: 50%;
+  margin: 0;
+  max-height: calc(100dvh - 32px - var(--safe-top) - var(--safe-bottom));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  box-shadow: 0 6px 0 rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+.cloud-hopper-panel::backdrop { background: rgba(8, 6, 4, 0.55); }
+.cloud-hopper-panel img, .cloud-hopper-panel canvas {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+/* Keep the lower half clear for the fixed camera's view of the falling Ooga. */
+.cloud-hopper-panel.cloud-hopper-dq {
+  left: 50%;
+  top: calc(25dvh + var(--safe-top) / 2);
+  right: auto;
+  width: min(500px, calc(100vw - 32px - var(--safe-left) - var(--safe-right)));
+  max-height: calc(50dvh - 24px - var(--safe-top));
+  padding: 12px 16px;
+  transform: translate(-50%, -50%);
+  animation: none;
+}
+.cloud-hopper-panel.cloud-hopper-dq[open] { display: flex; flex-direction: column; }
+.cloud-hopper-panel.cloud-hopper-dq::backdrop { background: transparent; }
+.cloud-hopper-dq > :not(.game-intro-glow) { flex-shrink: 0; }
+.cloud-hopper-dq .cloud-hopper-scores { flex-shrink: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.cloud-hopper-panel.cloud-hopper-dq .game-intro-title { margin: 4px 0 8px; font-size: 28px; }
+.cloud-hopper-panel.cloud-hopper-dq .actions { margin-top: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.cloud-hopper-result-art { display: block; width: min(100%, 320px); height: min(18dvh, 150px); margin: 4px auto 6px; object-fit: contain; }
+.cloud-hopper-dq .cloud-hopper-result-art { width: min(100%, 280px); height: min(14dvh, 120px); }
+.cloud-hopper-result-art[hidden] { display: none; }
+.cloud-hopper-intro-art { display: block; width: min(100%, 420px); height: min(30dvh, 230px); margin: 10px auto; object-fit: contain; }
+.cloud-hopper-guide-art { display: flex; align-items: center; justify-content: center; height: min(28dvh, 220px); margin: 4px auto 12px; }
+.cloud-hopper-guide-art canvas { display: block; max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; filter: drop-shadow(0 6px 6px rgba(0, 0, 0, 0.45)); }
+.cloud-hopper-intro-art[hidden], .cloud-hopper-guide-art[hidden] { display: none; }
+.cloud-hopper-panel.cloud-hopper-guide { width: min(480px, calc(100vw - 32px)); }
+.cloud-hopper-panel.cloud-hopper-guide .game-intro-title { font-size: 32px; }
+.cloud-hopper-guide .game-intro-who { max-width: 380px; margin: 4px auto 12px; font-size: 12px; }
+.cloud-hopper-panel.cloud-hopper-guide .actions { grid-template-columns: 0.8fr 1fr 0.9fr; }
+.cloud-hopper-guide .game-intro-go { animation: none; }
+.cloud-hopper-panel .game-intro-title { margin: 8px 0 14px; }
+.cloud-hopper-panel .game-intro-title .sign { max-width: 100%; }
+.cloud-hopper-panel .game-intro-who { color: var(--paper); line-height: 1.5; }
+.cloud-hopper-panel .cloud-hopper-time { margin: 14px 0; color: #f5c542; font-size: 42px; text-shadow: 0 2px 0 rgba(0, 0, 0, 0.5); }
+.cloud-hopper-scores-title { margin: 14px 0 8px; color: var(--accent-text); font-size: 12px; }
+.cloud-hopper-scores .race-podium { margin: 0; text-align: left; font-size: 12px; }
+.cloud-hopper-scores .race-podium li::before { content: none; }
+.cloud-hopper-score-rank { color: var(--accent-text); font-weight: 700; }
+.cloud-hopper-scores .race-podium li.you { background: rgba(245, 197, 66, 0.08); }
+.cloud-hopper-scores .race-podium strong { white-space: nowrap; }
+.cloud-hopper-scores-empty { margin: 0; padding: 16px 10px; border: 2px solid var(--stone-dk); border-radius: 9px 7px 10px 8px; background: var(--tablet); box-shadow: var(--tablet-shadow); color: var(--muted); font-size: 11px; line-height: 1.5; }
+.cloud-hopper-panel .actions { margin-top: 16px; }
+@media (max-width: 600px) {
+  .cloud-hopper-hud { top: calc(118px + var(--safe-top)); width: min(300px, calc(100vw - 24px)); padding: 9px 12px; }
+  .cloud-hopper-time { font-size: 26px; }
+  .cloud-hopper-panel { padding: 16px 12px; }
+  .cloud-hopper-panel.cloud-hopper-dq { padding: 12px; }
+}
+@media (max-height: 600px) {
+  .cloud-hopper-panel.cloud-hopper-dq { padding: 8px 12px; }
+  .cloud-hopper-intro-art { height: min(26dvh, 140px); margin: 4px auto; }
+  .cloud-hopper-guide-art { height: min(24dvh, 130px); margin: 0 auto 4px; }
+  .cloud-hopper-result-art { height: min(18dvh, 100px); margin: 0 auto 4px; }
+  .cloud-hopper-dq .cloud-hopper-result-art { height: min(14dvh, 72px); }
+  .cloud-hopper-dq .game-intro-kicker,
+  .cloud-hopper-dq .game-intro-title,
+  .cloud-hopper-dq .game-intro-who { display: none; }
+  .cloud-hopper-dq .cloud-hopper-scores-title { margin: 6px 0; }
+  .cloud-hopper-panel.cloud-hopper-dq .actions { margin-top: 8px; }
+}
+@media (max-width: 420px) {
+  .cloud-hopper-scores-title { font-size: 11px; }
+}
+
+body.cloud-hopper-active #destination-hud,
+body.cloud-hopper-active #own-ooga-hud,
+body.cloud-hopper-active #mode-hud { display: none; }
