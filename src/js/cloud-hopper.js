@@ -245,8 +245,12 @@
       for (let id = opened(); id > 1; id--) if (!game.cloudHopperBest(player, id)) return id;
       return game.cloudHopperBest(player, 1) ? opened() : 1;
     };
+    // The cards' state, and the selected level's bests set on this browser for the intro's Leaderboard.
     const showLevels = () => overlay.setLevels({ selected: level.id, unlocked: opened(),
-      bests: LEVELS.map((each) => game.cloudHopperBest(player, each.id)) });
+      bests: LEVELS.map((each) => game.cloudHopperBest(player, each.id)),
+      browser: game.state.cloudHopper.players.filter((each) => each.best[level.id - 1] > 0)
+        .map((each) => ({ username: each.login || "Guest", time: each.best[level.id - 1] / 1000, you: each.login === player }))
+        .sort((a, b) => a.time - b.time) });
     // The cards choose on the intro and on the result card's Level select; the run places its own start.
     const selectLevel = (id) => {
       if (phase !== "intro" && phase !== "won" && phase !== "dq") return;
@@ -269,7 +273,7 @@
       if (!near(cave.root.position.x, cave.root.position.y - cave.baseY + 1.1, cave.root.position.z)) return false;
       const refusal = ctx.refusal();
       if (refusal) { hud.toast(refusal); return false; }
-      actor = cave;
+      actor = cave; overlay.setRunner(cave);
       const login = BL.net.state.me?.login || "";
       runnerName = login || cave.traits.name; player = login.toLowerCase();
       session = sessions.get(login);

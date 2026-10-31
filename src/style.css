@@ -10060,8 +10060,8 @@ body[data-banner-oogas="true"] .sheet:not([hidden]) { display: flex; }
 /* Three buttons stay in one row on a phone: a little less padding and spacing, the same words. */
 @media (max-width: 420px) {
   .cloud-hopper-panel.cloud-hopper-dq { padding: 12px; }
-  .cloud-hopper-panel.cloud-hopper-dq .actions { gap: 6px; }
-  .cloud-hopper-panel.cloud-hopper-dq .actions button { padding: 0 4px; letter-spacing: 0.02em; }
+  .cloud-hopper-panel.cloud-hopper-dq .actions, .cloud-hopper-panel.cloud-hopper-intro .actions { gap: 6px; }
+  .cloud-hopper-panel.cloud-hopper-dq .actions button, .cloud-hopper-panel.cloud-hopper-intro .actions button { padding: 0 4px; letter-spacing: 0.02em; }
 }
 .cloud-hopper-result-art { display: block; width: min(100%, 320px); height: min(18dvh, 150px); margin: 4px auto 6px; object-fit: contain; }
 .cloud-hopper-dq .cloud-hopper-result-art { width: min(100%, 280px); height: min(12dvh, 120px); }
@@ -10077,8 +10077,11 @@ body[data-banner-oogas="true"] .sheet:not([hidden]) { display: flex; }
   border-radius: 8px; background: rgba(10, 16, 26, 0.55); color: var(--paper); font: inherit; text-align: left; cursor: pointer; }
 .cloud-hopper-level.selected { border: 3px solid #ffd54a; background: rgba(255, 213, 74, 0.14); }
 .cloud-hopper-level.locked { cursor: default; }
+.cloud-hopper-level-frame { position: relative; display: block; }
 .cloud-hopper-level-art { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; background: rgba(0, 0, 0, 0.3); }
-.cloud-hopper-level.locked .cloud-hopper-level-art { filter: grayscale(0.7) brightness(0.55); }
+/* The player's own Ooga stands on the cloud a run starts from, in the middle of each picture. */
+.cloud-hopper-level-ooga { position: absolute; left: 50%; bottom: 12%; width: auto; height: 46%; transform: translateX(-50%); pointer-events: none; }
+.cloud-hopper-level.locked .cloud-hopper-level-frame { filter: grayscale(0.7) brightness(0.55); }
 .cloud-hopper-level-number { position: absolute; top: 6px; left: 6px; display: flex; align-items: center; justify-content: center; min-width: 26px; height: 26px;
   padding: 0 6px; border: 2px solid rgba(255, 246, 220, 0.45); border-radius: 6px; background: rgba(20, 14, 8, 0.85); color: #ffd54a; font-size: 15px; font-weight: 800; }
 .cloud-hopper-level.selected .cloud-hopper-level-number { border-color: #ffd54a; }
@@ -10086,10 +10089,10 @@ body[data-banner-oogas="true"] .sheet:not([hidden]) { display: flex; }
 .cloud-hopper-level-name { display: block; margin: 6px 8px 0; font-size: 13px; letter-spacing: 0.04em; white-space: nowrap; }
 .cloud-hopper-level-note { display: block; margin: 2px 8px 0; font-size: 10px; opacity: 0.85; }
 /* The cards get a wider card to fill: the intro, and the result card while a level is being chosen. */
-.cloud-hopper-panel.cloud-hopper-intro, .cloud-hopper-panel.cloud-hopper-picking { width: min(920px, calc(100vw - 32px)); }
-.cloud-hopper-intro .cloud-hopper-levels, .cloud-hopper-picking .cloud-hopper-levels { gap: 14px; }
-.cloud-hopper-intro .cloud-hopper-level-name, .cloud-hopper-picking .cloud-hopper-level-name { margin-top: 8px; font-size: 15px; }
-.cloud-hopper-intro .cloud-hopper-level-note, .cloud-hopper-picking .cloud-hopper-level-note { font-size: 11px; }
+.cloud-hopper-panel.cloud-hopper-intro, .cloud-hopper-panel.cloud-hopper-picking { width: min(1120px, calc(100vw - 32px)); }
+.cloud-hopper-intro .cloud-hopper-levels, .cloud-hopper-picking .cloud-hopper-levels { gap: 16px; }
+.cloud-hopper-intro .cloud-hopper-level-name, .cloud-hopper-picking .cloud-hopper-level-name { margin-top: 8px; font-size: 17px; }
+.cloud-hopper-intro .cloud-hopper-level-note, .cloud-hopper-picking .cloud-hopper-level-note { font-size: 12px; }
 @media (max-width: 600px) {
   .cloud-hopper-levels { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .cloud-hopper-intro .cloud-hopper-levels, .cloud-hopper-picking .cloud-hopper-levels { gap: 10px; }
@@ -10104,6 +10107,10 @@ body[data-banner-oogas="true"] .sheet:not([hidden]) { display: flex; }
 .cloud-hopper-panel .game-intro-title .sign { max-width: 100%; }
 /* A line that wraps splits evenly, never leaving one word on its own. */
 .cloud-hopper-panel .game-intro-who { color: var(--paper); line-height: 1.5; text-wrap: balance; }
+.cloud-hopper-panel .game-intro-goal { text-wrap: balance; }
+/* The intro's three buttons share one row; Leaderboard stays pressed in while its board shows. */
+.cloud-hopper-panel.cloud-hopper-intro .actions { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.cloud-hopper-panel .actions button[aria-pressed="true"] { background: linear-gradient(var(--accent), #b8741f); box-shadow: inset 0 2px 0 rgba(0, 0, 0, 0.3); }
 .cloud-hopper-panel .cloud-hopper-time { margin: 14px 0; color: #f5c542; font-size: 42px; text-shadow: 0 2px 0 rgba(0, 0, 0, 0.5); }
 .cloud-hopper-scores-title { margin: 14px 0 8px; color: var(--accent-text); font-size: 12px; }
 .cloud-hopper-scores .race-podium { margin: 0; text-align: left; font-size: 12px; }

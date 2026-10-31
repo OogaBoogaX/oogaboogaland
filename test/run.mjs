@@ -4735,7 +4735,7 @@ const cloudHopperFailureChecks = async engine => {
     }) },
     cloudHopperHud: { create(options) { callbacks = options; return {
       show(phase, time, scores, latest) { shown = phase; shownScores = scores; shownLatest = latest; },
-      update: noop, setGhost: noop, setLevels: noop, hide: noop, dispose: noop, frameY: 0.4
+      update: noop, setGhost: noop, setLevels: noop, setRunner: noop, hide: noop, dispose: noop, frameY: 0.4
     }; } } });
   const controllerSource = await readFile(join(root, "src/js/cloud-hopper.js"), "utf8");
   runInNewContext(controllerSource, context);
