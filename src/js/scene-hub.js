@@ -8992,9 +8992,9 @@
   };
   // Where the driven Ooga is, as the room names it for voice and for who is shown (docs/auth-and-presence.md):
   // a cave by its mouth (EntropyLab, the Factory's tunnel and the Arcade's mouth share their halls' groups, HQ
-  // is one place whichever entrance), a bridged land from the foot of its bridge (the Timechain Sphere, the
-  // Mempool rainforest with its chamber and tunnels, the Bifrost isle), the island itself (`outside`), or
-  // nowhere past its edge: flying or falling off it. Allocation-free; a cave is named once.
+  // is one place whichever entrance), a bridged land from where its bridge ends (the Timechain Sphere with its
+  // doorway, the Mempool rainforest with its chamber and tunnels, the Bifrost isle), the island itself (`outside`,
+  // its bridges too), or nowhere past its edge: flying or falling off it. Allocation-free; a cave is named once.
   const CAVE_ZONES = { c11: "lab", c10: "bca", c2: "factory", c3: "arcade", c1: "mirror" };
   const ZONE_HOLD = 0.25;
   const zoneNames = [];
@@ -9011,18 +9011,99 @@
     const across = dx * timechainIsland.cos - dz * timechainIsland.sin, along = dx * timechainIsland.sin + dz * timechainIsland.cos;
     return Math.abs(across) <= s.width / 2 && along >= p.bridgeZ && along <= p.bridgeZ + s.span + 0.5 || dx * dx + dz * dz < s.radius * s.radius;
   };
-  const inRainforest = (x, feet, z) => {
-    if (!mempoolIsland) return false;
-    if (mempoolIsland.overAt(x, z) || mempoolIsland.coveredAt(x, feet + 0.5, z)) return true;
-    const p = mempoolIsland.place, s = poolModels.SITE, dx = x - p.x, dz = z - p.z;
-    const across = dx * mempoolIsland.cos - dz * mempoolIsland.sin, along = dx * mempoolIsland.sin + dz * mempoolIsland.cos;
-    return Math.abs(across) < s.width / 2 && along >= p.bridgeLocalZ + s.deckStart && along <= p.bridgeLocalZ + s.span;
-  };
+  // Over the rainforest's ground or under it; its vine bridge is the island's (`onBridge`).
+  const inRainforest = (x, feet, z) => !!mempoolIsland && (mempoolIsland.overAt(x, z) || mempoolIsland.coveredAt(x, feet + 0.5, z));
   // The isle's ground is -Infinity off it; on it, a body up to 3 m under the top (on the bridge's head) counts.
   const onBifrostIsle = (x, feet, z) => {
     if (!bifrostIsle) return false;
     const ground = bifrostIsle.site.groundAt(x, z);
     return ground > -Infinity && feet > ground - 3;
+  };
+  // A bridge belongs to the island it leaves from (#361), so the land across it starts where it ends: the vine bridge
+  // short of the rainforest's ground, ₿IFRÖST's crystal deck and its head. The Sphere keeps its porch, the doorway's
+  // keypad, queue and the walk back out (3.8 m past the waiting spot) with a metre to spare, since the room hands its
+  // doorway only to players in the Sphere's zone.
+  const SPHERE_PORCH = BL.timechainModels.SPOTS.WAIT.z + 5;
+  const onBridge = (x, feet, z) => {
+    if (timechainIsland) {
+      const p = timechainIsland.place, s = BL.timechainModels.SITE, dx = x - p.x, dz = z - p.z;
+      const across = dx * timechainIsland.cos - dz * timechainIsland.sin, along = dx * timechainIsland.sin + dz * timechainIsland.cos;
+      if (Math.abs(across) <= s.width / 2 && along > SPHERE_PORCH && along <= p.bridgeZ + s.span + 0.5) return true;
+    }
+    if (mempoolIsland && !mempoolIsland.overAt(x, z) && !mempoolIsland.coveredAt(x, feet + 0.5, z)) {
+      const p = mempoolIsland.place, s = poolModels.SITE, dx = x - p.x, dz = z - p.z;
+      const across = dx * mempoolIsland.cos - dz * mempoolIsland.sin, along = dx * mempoolIsland.sin + dz * mempoolIsland.cos;
+      if (Math.abs(across) < s.width / 2 && along >= p.bridgeLocalZ + s.deckStart && along <= p.bridgeLocalZ + s.span) return true;
+    }
+    if (bifrostIsle) {
+      const site = bifrostIsle.site, w = site.walk, ground = site.groundAt(x, z), along = (x - w.x) * w.sr + (z - w.z) * w.cr;
+      if (ground > -Infinity && feet > ground - 3 && along >= w.from && along <= w.to) return true;
+    }
+    return false;
+  };
+  // Where the island's doors stand, for the live players tab's crosshair (players.js, `setDoors`): the door the route
+  // from zone `from` takes first, into zone `step` (zone-map.js), written into `out` as a point to turn toward. A cave's
+  // door is its mouth either way (HQ's nearer one to `nearX`, `nearZ` when known); a bridged land's is its bridge's far
+  // end going there and its near end coming back; deeper in, the Factory tunnel's shield, the Arcade mouth's step into
+  // the hall, the Sphere's doors and the ₿IFRÖST isle's portal. False where this island has no such door.
+  const DOOR_Y = 1.6;
+  const HQ_MOUTHS = new Set(BL.caves.slots.filter((slot) => slot.status === "headquarters").map((slot) => slot.id));
+  let doorZones = null, doorIsland = null;
+  const mouthDoor = (zone, out, nearX, nearZ) => {
+    if (doorIsland !== island) {
+      doorIsland = island;
+      doorZones = island.mouths.map((m) => CAVE_ZONES[m.id] || (HQ_MOUTHS.has(m.id) ? "hq" : `cave-${String(m.id).toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 27)}`));
+    }
+    let best = -1, bestDistance = Infinity;
+    for (let i = 0; i < doorZones.length; i++) {
+      if (doorZones[i] !== zone) continue;
+      const m = island.mouths[i], distance = Number.isFinite(nearX) ? (m.x - nearX) * (m.x - nearX) + (m.z - nearZ) * (m.z - nearZ) : 0;
+      if (distance < bestDistance) { bestDistance = distance; best = i; }
+    }
+    if (best < 0) return false;
+    const m = island.mouths[best];
+    out.x = m.x; out.y = m.floorY + DOOR_Y; out.z = m.z;
+    return true;
+  };
+  // A bridged land's door: its bridge's far end on the way there (`into`), its near end on the way back.
+  const bridgeDoor = (zone, into, out) => {
+    if (zone === "sphere" && timechainIsland) {
+      const T = timechainIsland, along = into ? BL.timechainModels.SPOTS.THRESHOLD : T.place.bridgeZ + BL.timechainModels.SITE.span;
+      out.x = T.worldX(0, along); out.y = T.place.y + DOOR_Y; out.z = T.worldZ(0, along);
+      return true;
+    }
+    if (zone === "rainforest" && mempoolIsland) {
+      const M = mempoolIsland, along = M.place.bridgeLocalZ + (into ? poolModels.SITE.deckStart : poolModels.SITE.span);
+      out.x = M.worldX(0, along); out.y = M.place.y + DOOR_Y; out.z = M.worldZ(0, along);
+      return true;
+    }
+    if (zone === "bifrost" && bifrostIsle) {
+      const cloud = bifrostIsle.site.cloud, end = into ? cloud.end : cloud.head;
+      out.x = end.x; out.y = cloud.y + DOOR_Y; out.z = end.z;
+      return true;
+    }
+    return false;
+  };
+  const doorToward = (from, step, out, nearX, nearZ) => {
+    if (!island) return false;
+    if (step === "outside") return bridgeDoor(from, false, out) || mouthDoor(from, out, nearX, nearZ);
+    if (from === "outside") return bridgeDoor(step, true, out) || mouthDoor(step, out, nearX, nearZ);
+    if (from === "factory" && step === "factory.hall" && factoryMouth) {
+      const m = factoryMouth.mouth, along = BL.factoryModels.SHIELD_Z;
+      out.x = m.x + Math.sin(m.ry) * along; out.y = m.floorY + DOOR_Y; out.z = m.z + Math.cos(m.ry) * along;
+      return true;
+    }
+    if (from === "arcade" && step === "arcade.hall" && arcadeMouth) {
+      out.x = arcadeMouth.x; out.y = arcadeMouth.y + DOOR_Y - 1.1; out.z = arcadeMouth.z;
+      return true;
+    }
+    if (from === "sphere" && step.startsWith("sphere-")) return bridgeDoor("sphere", true, out);
+    if (from === "bifrost" && step === "bifrost.chamber" && bifrostIsle) {
+      const q = bifrostIsle.site.portal;
+      out.x = q.x; out.y = q.floorY + DOOR_Y; out.z = q.z;
+      return true;
+    }
+    return false;
   };
   const zoneOf = (cave, gorilla = false) => {
     const p = cave.root.position, feet = p.y - (gorilla ? 0 : cave.baseY);
@@ -9035,6 +9116,7 @@
           && !opening.blocked && (p.x - opening.mouth.x) * opening.sr + (p.z - opening.mouth.z) * opening.cr < opening.planeZ) return zoneName(opening.caveIndex);
       }
     }
+    if (onBridge(p.x, feet, p.z)) return "outside";
     if (onSphere(p.x, p.z)) return "sphere";
     if (inRainforest(p.x, feet, p.z)) return "rainforest";
     if (onBifrostIsle(p.x, feet, p.z)) return "bifrost";
@@ -11111,6 +11193,7 @@
     window.clearTimeout(hintTimer); hintTimer = 0;
     unsubscribeActivity(); unsubscribeActivity = null;
     unsubscribeAccount(); unsubscribeAccount = null;
+    BL.players.setDoors(null);
     unsubscribeMempool(); unsubscribeMempool = null;
     unsubscribeChain(); unsubscribeChain = null;
     if (oogatronUnsub) oogatronUnsub(); oogatronUnsub = null;
@@ -11213,6 +11296,7 @@
     claimOwnOoga();
     unsubscribeActivity = contributors.subscribe(() => crew.refreshStates());
     unsubscribeAccount = BL.net.subscribe(onAccountChange);
+    BL.players.setDoors(doorToward);
     const donate = ctx.place === "donate", routedPlace = donate ? null : ctx.place;
     const sphereExit = ctx.from === "timechain" ? world.sphereExit : null;
     world.sphereExit = null;
@@ -12165,6 +12249,7 @@
     world.pilotDetached = false;
     claimOwnOoga();
     unsubscribeAccount = BL.net.subscribe(onAccountChange);
+    BL.players.setDoors(doorToward);
     const initialFirstPerson = ctx.from === null && preloadedFirstPerson && !initialGorilla && !pilot.loginViewRestored;
     if (initialFirstPerson) pilot.enterClose(true);
     // The /donate route: the island's own view with the donation popup open. As a routed place it keeps Tess from
@@ -12430,6 +12515,7 @@
     unsubscribeActivity = null;
     if (unsubscribeAccount) unsubscribeAccount();
     unsubscribeAccount = null;
+    BL.players.setDoors(null);
     if (unsubscribeMempool) unsubscribeMempool();
     unsubscribeMempool = null;
     if (unsubscribeChain) unsubscribeChain();

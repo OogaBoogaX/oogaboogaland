@@ -21379,6 +21379,68 @@ const netFixture=(BL,response,step=200,cookie="")=>{
   runInNewContext(source,context);
   return {net:context.window.BL.net,document:context.document,voice,sockets,sent,events,location,navigations,advance(ms){tick+=ms;},get calls(){return calls;},get savedViews(){return savedViews;}};
 };
+// Rule (#361): the live players tab names each zone's group as the panels always have, apart from the zones that share a
+// land but not coordinates; it orders the visitor's group and row first and everyone else by name; its crosshair takes
+// the first step of the route between zones; and a position counts only in the zone it was reported in, so a player
+// who changed zone is placed nowhere until they move, one who let go keeps their last, and nothing is invented.
+const playersTabChecks = async BL => {
+  const context = { window: { BL: {} } };
+  runInNewContext(readFileSync(join(root, "src/js/routes.js"), "utf8"), context);
+  runInNewContext(readFileSync(join(root, "src/js/zone-map.js"), "utf8"), context);
+  const Z = context.window.BL.zoneMap;
+  const steps = [["outside", "rainforest", "rainforest"], ["outside", "factory.hall", "factory"], ["outside", "factory.hangar", "factory"], ["outside", "ember-den", "bifrost"],
+    ["outside", "dsb-studio", "bifrost"], ["outside", "scene-race", "arcade"], ["outside", "scene-skee", "arcade"], ["outside", "sphere-4", "sphere"], ["outside", "hq", "hq"],
+    ["factory", "factory.hangar", "factory.hall"], ["factory.hangar", "outside", "factory.hall"], ["factory.hangar", "arcade.hall", "factory.hall"], ["lab", "rainforest", "outside"],
+    ["bifrost.chamber", "ember-den", "ember-den"], ["ember-den", "dsb-maxis", "bifrost.chamber"], ["dsb-maxis", "dsb-studio", "dsb-outside"], ["sphere-4", "sphere-7", "sphere"],
+    ["outside", "none", null], ["none", "outside", null], ["scene-transition", "lab", null], ["lab", "lab", null], ["outside", "made-up", null], ["outside", "constructor", null], ["constructor", "lab", null]];
+  const routed = steps.map(([from, to, want]) => ({ from, to, want, got: Z.next(from, to) })).filter(r => r.got !== r.want);
+  record("players tab routes: the first step between zones goes down toward the target or up toward the island (Factory before the hangar, ₿IFRÖST before the Ember Den and DSB Land, the Arcade before its games), and nowhere has no route",
+    routed.length === 0, JSON.stringify(routed));
+  const lands = { outside: "The island", "factory.hall": "Lightning Factory", factory: "Lightning Factory", "factory.hangar": "Lightning Jet Hangar", "arcade.hall": "Ooga Arcade", "bifrost.chamber": "\u20bfIFR\u00d6ST chamber",
+    "sphere-3": "Timechain Sphere \u00b7 Room 3", "dsb-maxis": "DSB Land", "cave-c9": "A cave on the island", "scene-race": "Ooga Rally", "scene-skee": "A game", none: "Between lands", "ember-den": "Ember Den" };
+  const headings = { outside: "The island", factory: "Lightning Factory tunnel", "factory.hall": "Lightning Factory", arcade: "Ooga Arcade entrance", "arcade.hall": "Ooga Arcade",
+    "dsb-maxis": "DSB Land \u00b7 Maxis Club", "scene-race": "Ooga Rally", "scene-skee": "Ooga Arcade games", "scene-invaders": "Ooga Arcade games", "scene-transition": "Between lands" };
+  const landMiss = Object.entries(lands).filter(([zone, want]) => Z.landOf(zone) !== want), headMiss = Object.entries(headings).filter(([zone, want]) => Z.heading(Z.groupOf(zone)) !== want);
+  record("players tab groups: the roster keeps its land names; the tab heads the Factory tunnel and the Arcade entrance apart from their halls, each DSB venue apart, and the arcade's unrouted games together",
+    !landMiss.length && !headMiss.length && Z.heading("constructor") === "constructor" && Z.groupOf("scene-skee") === Z.groupOf("scene-invaders") && Z.groupOf("scene-race") !== Z.groupOf("scene-skee") && Z.groupOf("scene-transition") === "none",
+    JSON.stringify({ landMiss, headMiss }));
+  const row = (id, name, zone, self = false) => ({ id, name, group: Z.groupOf(zone), self });
+  const rows = [row(5, "zed", "lab"), row(2, "Bea", "rainforest"), row(9, "amy", "lab"), row(1, "Me", "lab", true), row(4, "carl", "factory.hall"), row(3, "Al", "rainforest"), row(7, "Ánna", "factory")];
+  const ordered = Z.arrange(rows, Z.groupOf("lab")).map(r => r.name).join();
+  record("players tab order: the visitor's zone first with their own row pinned at its head, everyone else by name; then the other zones by heading, their players by name",
+    ordered === "Me,amy,zed,carl,Ánna,Al,Bea", ordered);
+  const f = netFixture(BL, () => ({ ok: true, headers: { get: () => "application/json" }, json: async () => ({ player: { id: 71, login: "Tester", display: "Tester" } }) }));
+  let moves = 0;
+  f.net.subscribeMoves(() => moves++);
+  await f.net.start();
+  const ws = f.sockets[0], message = v => ws.onmessage({ data: JSON.stringify(v) }), rec = id => f.net.remotes.get(id);
+  message({ t: "welcome", you: { id: 71 }, now: Date.now(), players: [
+    { id: 2, login: "a", display: "A", body: "NickDaGreek", zone: "outside", x: 1, y: 0, z: 2, yaw: 0 },
+    { id: 3, login: "b", display: "B", body: null, zone: "lab", x: 5, y: 0, z: 5, yaw: 0 },
+    { id: 4, login: "c", display: "C", body: "YellowBrokeIt", zone: "outside" }] });
+  const joined = [rec(2).poseZone, rec(3).poseZone, rec(4).poseZone];
+  message({ t: "state", now: Date.now(), ps: [2, 1, 0, 2, 0, 3, 5, 0, 5, 0, 4, null, null, null, null] });
+  const repeated = moves;
+  message({ t: "zone", id: 2, name: "lab" });
+  message({ t: "state", now: Date.now(), ps: [2, 1, 0, 2, 0] });
+  const movedAway = rec(2).poseZone;
+  message({ t: "state", now: Date.now(), ps: [2, 4, 0, 6, 0.5] });
+  const arrived = rec(2).poseZone, heard = moves;
+  message({ t: "body", id: 2, name: null });
+  const letGo = rec(2).poseZone;
+  record("players tab positions: a remote's position counts only in the zone it was reported in; a repeated snapshot or a pose the room held from before is not taken, and letting go keeps the last",
+    joined.join() === "outside,," && repeated === 0 && movedAway === "outside" && arrived === "lab" && heard === 1 && letGo === "lab" && rec(2).x === 4,
+    JSON.stringify({ joined, repeated, movedAway, arrived, heard, letGo }));
+  f.net.setBody("NickDaGreek"); f.net.setZone("outside"); f.net.sendPose(3, 0, 4, 0);
+  const placed = { ...f.net.state.self };
+  f.net.setBody(null);
+  const kept = { ...f.net.state.self };
+  f.net.setZone("lab");
+  record("players tab positions: the visitor's own is their Ooga's last reported, kept after letting go, and stale once they change zone",
+    placed.x === 3 && placed.z === 4 && placed.zone === "outside" && kept.x === 3 && kept.zone === "outside" && f.net.state.self.zone !== f.net.state.zone && moves > heard,
+    JSON.stringify({ placed, kept, zone: f.net.state.zone }));
+  f.net.dispose();
+};
 const rememberedCharacterChecks = async BL => {
   const localBL = { ...BL };
   runInNewContext(readFileSync(join(root, "src/js/contributors.js"), "utf8"), { window: { BL: localBL }, location: { search: "" }, URLSearchParams });
@@ -23054,6 +23116,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   await chatClientChecks();
   await chatAccountChecks(BL);
   await rememberedCharacterChecks(BL);
+  await playersTabChecks(BL);
   await integrationChecks(BL);
   footstepChecks(BL);
   await voiceAloneChecks();

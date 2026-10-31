@@ -3,7 +3,7 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const KEY = "oogaboogaland.sheet.v1", NAMES = ["bananas", "roster", "loot", "chat"], DOCKS = ["left", "right", "bottom"], TAB_EDGE = 41;
+  const KEY = "oogaboogaland.sheet.v1", NAMES = ["bananas", "roster", "players", "loot", "chat"], DOCKS = ["left", "right", "bottom"], TAB_EDGE = 41;
   const visible = (panel) => {
     const owner = panel.closest(".sheet");
     return !!owner && !panel.hidden && !owner.hidden && owner.dataset.open === "true" && !!owner.getClientRects().length;
@@ -20,7 +20,9 @@
     let serial = 0, gesture = null, mergeTarget = null, suppressClick = false, hidden = false, folded = false, disposed = false, lootCount = 0, saveTimer = 0;
     let saved = null;
     try { saved = JSON.parse(localStorage.getItem(KEY)); } catch { /* Storage may be unavailable. */ }
-    const available = (name) => NAMES.includes(name) && (name !== "loot" || lootEnabled) && (name !== "chat" || BL.net.state.backend);
+    // The live players tab is for signed-in visitors only (players.js).
+    const available = (name) => NAMES.includes(name) && (name !== "loot" || lootEnabled) && (name !== "chat" || BL.net.state.backend)
+      && (name !== "players" || !!BL.net.state.me);
     const isOpen = (w) => !folded && w.open && available(w.tab);
     const ownerOf = (name) => windows.find((w) => w.tab === name && (w.open || w.rect));
     const notify = () => document.dispatchEvent(new Event("sheetchange"));
@@ -332,10 +334,11 @@
     on(window, "resize", layout); on(bottom, "change", layout);
     if (window.visualViewport) { on(window.visualViewport, "resize", layout); on(window.visualViewport, "scroll", layout); }
     on(window, "pagehide", () => { finish(); save(); });
-    let backend = BL.net.state.backend;
+    let backend = BL.net.state.backend, signedIn = !!BL.net.state.me;
     const unsubscribe = BL.net.subscribe(() => {
-      if (backend === BL.net.state.backend) return;
+      if (backend === BL.net.state.backend && signedIn === !!BL.net.state.me) return;
       backend = BL.net.state.backend;
+      signedIn = !!BL.net.state.me;
       finish();
       refresh(); save();
     });
