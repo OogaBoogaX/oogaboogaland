@@ -7413,6 +7413,7 @@
   // The banner dissolves in once the stone stands; the view flies back rather than jumping; and the stone sinks
   // again five minutes after the paper was last read.
   let wpBannerFade = 0, wpReturn = -1, wpSinkTimer = -1, wpSinkT = -1;
+  let wpVisit = null;
   const WP_FROM = { px: 0, py: 0, pz: 0, tx: 0, ty: 0, tz: 0, fov: 0, toFov: 0 };
   let wpRead = false, wpFov = 0, wpPage = 0, wpReadLeft = -1e9, wpZoom = 1, wpPanX = 0, wpScroll = 0, wpScrollTo = -1, wpFill = false;
   let wpStrip = null, wpStripImage = null;
@@ -7690,17 +7691,18 @@
     holdTheView(true);
   };
   // The poster and the pages are their own deferred group on a hosted page: the shelf's tap fetches them, then raises
-  // the stone. In the source tree and the portable page they are already present, so this answers at once.
-  let wpLoading = false;
+  // the stone. In the source tree and the portable page they are already present, so this answers at once. A load that
+  // settles after the visitor has left the hub does nothing: `wpVisit` names the visit allowed to raise it.
+  let wpLoad = null;
   const wpRaise = () => {
     if (gameMode || factoryDeparting || bifrostDeparting || islandGuide && islandGuide.holding) return false;
     if (!BL.whitepaperPoster || !BL.whitepaperPages) {
-      if (wpLoading) return true;
-      wpLoading = true;
-      const loading = BL.deferred.load("whitepaper");
-      if (!loading) { wpLoading = false; return wpRaise(); }
-      loading.then(() => { wpLoading = false; wpRaise(); },
-        () => { wpLoading = false; hud.toast("The whitepaper could not be fetched"); });
+      if (wpLoad) return true;
+      const visit = wpVisit, loading = BL.deferred.load("whitepaper");
+      if (!loading) return wpRaise();
+      wpLoad = loading;
+      loading.then(() => { wpLoad = null; if (wpVisit === visit) wpRaise(); },
+        () => { wpLoad = null; if (wpVisit === visit) hud.toast("The whitepaper could not be fetched"); });
       return true;
     }
     if (!wpGroup) wpBuild();
@@ -11145,6 +11147,7 @@
   const enterSteps = function* (ctx) {
     const slice = { until: performance.now() + ENTER_SLICE_MS };
     prefetchAt = 0;
+    wpVisit = {};
     reuseHub = ctx.hubPolicy === "keep";
     if (heldHub) { resumeHub(ctx); return; }
     ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
@@ -12167,6 +12170,8 @@
     stopLazyBedding();
     // A fly-back left running must not drag a kept hub's next arrival: the eye is the director's there.
     wpReturn = -1;
+    // A deferred whitepaper load that settles after this point belongs to a visit that is over.
+    wpVisit = null; wpLoad = null;
     if (reuseHub && !destroy) return suspendHub();
     heldHub = false; heldDebug = null;
     if (destroy && wpContextOn) { hubCanvas.removeEventListener("contextmenu", wpContextMenu); hubCanvas = null; wpContextOn = false; }
