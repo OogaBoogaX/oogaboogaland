@@ -77,10 +77,21 @@
     geometry.castShadow = false; geometry.cutawayPreserve = true;
     return geometry;
   });
-  const cloud = (rx, rz, depth, kind = "normal", yaw = 0) => {
+  // A night level's clouds (its sky's `night`): each kind's mesh with a soft fill, so landings read under the moon.
+  const NIGHT_FILL = 0.34;
+  const night = (source) => M.variants((index) => {
+    const geometry = M.merge(source(index));
+    for (const face of geometry.faces) face.emissive = Math.max(face.emissive || 0, NIGHT_FILL);
+    geometry.castShadow = false; geometry.cutawayPreserve = true;
+    return geometry;
+  });
+  const nightCloud = night(BL.hubModels.cloud), nightBounce = night(bounceCloud), nightBoost = night(boostCloud);
+  const cloudMesh = (index, kind = "normal", dark = false) => kind === "bounce" ? (dark ? nightBounce : bounceCloud)(index)
+    : kind === "boost" ? (dark ? nightBoost : boostCloud)(index) : (dark ? nightCloud : BL.hubModels.cloud)(index);
+  const cloud = (rx, rz, depth, kind = "normal", yaw = 0, dark = false) => {
     const across = rz > rx, aspect = Math.max(rx, rz) / Math.min(rx, rz);
     const index = aspect < 1.35 ? 0 : aspect < 1.85 ? 1 : 2;
-    const geometry = kind === "bounce" ? bounceCloud(index) : kind === "boost" ? boostCloud(index) : BL.hubModels.cloud(index);
+    const geometry = cloudMesh(index, kind, dark);
     const b = boundsOf(geometry), sx = (across ? rz : rx) * 2 / (b.max[0] - b.min[0]);
     const sy = depth / (b.max[1] - b.min[1]), sz = (across ? rx : rz) * 2 / (b.max[2] - b.min[2]);
     const x = -(b.min[0] + b.max[0]) * sx * 0.5, z = -(b.min[2] + b.max[2]) * sz * 0.5;
@@ -336,5 +347,5 @@
     };
     return { picture, dispose };
   };
-  BL.cloudHopperModels = { cloud, boostSurface, updateBoostSurface, bounceMarker, updateBounceMarker, jetpackPickup, updateJetpackPickup, cabinet, updateCabinet, createGuidePictures };
+  BL.cloudHopperModels = { cloud, cloudMesh, boostSurface, updateBoostSurface, bounceMarker, updateBounceMarker, jetpackPickup, updateJetpackPickup, cabinet, updateCabinet, createGuidePictures };
 })();

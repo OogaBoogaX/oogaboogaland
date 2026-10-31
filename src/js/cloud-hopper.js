@@ -126,6 +126,7 @@
       onGuideDone: () => finishGuide(), onSelect: (id) => selectLevel(id), onNext: () => nextLevel(), letterSign: hud.letterSign });
     const ghost = BL.cloudHopperGhost.create({ root, renderer: ctx.renderer });
     const audio = BL.cloudHopperAudio.create();
+    const scenery = BL.cloudHopperSky.create({ root });
     // Design review only: candidate looks on a debug page that asks for them (cloud-hopper-looks.js).
     const looks = BL.cloudHopperLooks ? BL.cloudHopperLooks.create({ root, camera, renderer: ctx.renderer }) : null;
     const dockMusicLevel = () => {
@@ -183,6 +184,7 @@
       for (const node of pickupNodes) removeChild(routeRoot, node);
       cloudNodes.length = boostNodes.length = bounceNodes.length = pickupNodes.length = 0;
       launchContacts.fill(0); unrecoverableAt = -1;
+      scenery.clear(); cloud.geometry = BL.cloudHopperModels.cloudMesh(0);
       looks?.clear();
       course = null; routeRoot.visible = false;
     };
@@ -317,14 +319,18 @@
       if (courseSeed === record.lastSeed) courseSeed = (courseSeed + 1) >>> 0;
       record.lastSeed = courseSeed;
       placeStart();
-      // Far starts keep the island in view.
-      if (!farBefore) farBefore = camera.far;
-      camera.far = Math.max(farBefore, Math.hypot(start.x - liftGoal.x, start.y - liftGoal.y, start.z - liftGoal.z) + 150);
       course = BL.cloudHopperCourse.create({ start, finish: liftGoal, mainlandRadius: ctx.mainlandRadius, seed: courseSeed,
         layout: level.layout, timing: level.timing, runSpeed: BL.pilot.WALK.speed * BL.pilot.WALK.run, jumpSpeed: BL.crew.JUMP_SPEED });
+      // Far starts keep the island in view, and the level's scenery too.
+      const reach = scenery.build(level, course, start, liftGoal);
+      if (!farBefore) farBefore = camera.far;
+      camera.far = Math.max(farBefore, Math.hypot(start.x - liftGoal.x, start.y - liftGoal.y, start.z - liftGoal.z) + 150, reach);
       overlay.setGhost(record.best?.courseVersion === level.courseVersion ? record.best.duration : null);
+      // A night sky's clouds, the launch cloud among them, take the night fill.
+      const dark = !!level.sky?.night;
+      cloud.geometry = BL.cloudHopperModels.cloudMesh(0, "normal", dark);
       for (const c of course.clouds) {
-        const node = BL.cloudHopperModels.cloud(c.rx, c.rz, c.depth, c.kind, c.yaw);
+        const node = BL.cloudHopperModels.cloud(c.rx, c.rz, c.depth, c.kind, c.yaw, dark);
         const surface = c.kind === "boost" ? BL.cloudHopperModels.boostSurface(c, node) : null;
         node.position.x += c.x; node.position.y += c.y; node.position.z += c.z;
         node.smokeOpacity = 1;
@@ -499,6 +505,7 @@
         node.position.x = pickup.x; node.position.y = pickup.y; node.position.z = pickup.z;
         if (node.visible) BL.cloudHopperModels.updateJetpackPickup(node, camera, displayTime + i * 2);
       }
+      scenery.update(dt);
       looks?.update(dt, displayTime);
       if (phase === "lifting") {
         age += dt;
@@ -620,7 +627,7 @@
       c2.restore();
     };
     const dispose = () => {
-      cancel(); overlay.dispose(); ghost.dispose(); clearRoute(); looks?.dispose();
+      cancel(); overlay.dispose(); ghost.dispose(); clearRoute(); scenery.dispose(); looks?.dispose();
       audio.dispose();
       document.removeEventListener("visibilitychange", onVisibility);
       removeChild(root, routeRoot); removeChild(root, platform);
@@ -658,6 +665,8 @@
       get actor() { return actor; }, get phase() { return phase; }, get time() { return seconds; },
       get bestGhost() { return session ? played().best : null; },
       get course() { return course; }, get start() { return start; }, get level() { return level; }, looks,
+      // The level's fixed sky, which the hub samples instead of its clock while a run plays.
+      get sky() { return level.sky; },
       get bound() { return Math.hypot(start.x, start.z) + 80; } };
   };
   BL.cloudHopper = { create, LIFT_SECONDS };

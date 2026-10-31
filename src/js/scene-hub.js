@@ -527,7 +527,8 @@
   let reuseHub = false, heldHub = false, heldDebug = null;
   let stateTimer = 0, hintTimer = 0, now = 0, hour = 12, unsubscribeActivity = null, unsubscribeAccount = null, ownOogaClaimed = false;
   // The daylight inputs as last sampled; sampledDay starts at a never-true 0 so the first frame always samples.
-  let sampledHour = 0, sampledDay = 0, sampledLatitude = NaN, sampledContinuousDay = 0, sampledUtcMs = 0;
+  // `sampledSky` is the Cloud Hopper level sky sampled instead of the clock, and `skyHour` the hour the sky shows.
+  let sampledHour = 0, sampledDay = 0, sampledLatitude = NaN, sampledContinuousDay = 0, sampledUtcMs = 0, sampledSky = null, skyHour = 12;
   // How far under the Mempool island's ground the view is, 0 to 1: its sun and its storm stay outside.
   let poolShade = 0, poolUnder = 0;
   // Wake before the bridge; a wider sleep radius keeps its effects steady near the boundary.
@@ -1098,7 +1099,7 @@
     // Moving pickup lights are rewritten after the cached mainland selection.
     const pickupReserved = Math.min(cloudHopper?.pickupLightsWanted() || 0, 2, tierLimit - reserved);
     const limit = tierLimit - reserved - pickupReserved;
-    const phaseNow = daylight.phaseAt(hour);
+    const phaseNow = daylight.phaseAt(skyHour);
     const lanternsOn = phaseNow === "dusk" || phaseNow === "night" || phaseNow === "midnight";
     const coilLamp = coilCharge && coilCharge.lamp, coilActive = !!coilLamp && coilCharge.level > 0.02;
     // The pits' lights follow their flames: the plaza lamp's gain and the HQ hearth's colour pulse with the flicker.
@@ -8412,12 +8413,18 @@
     now = elapsed;
     hour = clock.read();
     if (ghosts) hour = ghosts.hour(hour); // HALLOWEEN: night falls for the hunt
+    // A Cloud Hopper run flies under its level's own fixed sky, sampled once as it begins; the clock's hour still
+    // turns the island's phases, so no phase toast comes of it, while the lamps light by the sky shown.
+    const fixedSky = cloudPlaying() ? cloudHopper.sky : null;
+    skyHour = fixedSky ? fixedSky.hour : hour;
     // The ephemeris turns the sun 0.0042 deg/s of island time (a 6e-4-hour budget is 2.16 s and misses no
     // pixel), so it resamples only when an input drifts; a fast debug clock misses the budget every frame,
     // a frozen one hits from the second frame on.
-    if (clock.dayOfYear !== sampledDay || islandLatitude !== sampledLatitude || Math.abs(hour - sampledHour) >= DAY_RESAMPLE_HOUR
+    if (fixedSky ? fixedSky !== sampledSky : sampledSky || clock.dayOfYear !== sampledDay || islandLatitude !== sampledLatitude || Math.abs(hour - sampledHour) >= DAY_RESAMPLE_HOUR
       || Math.abs(clock.continuousDay - sampledContinuousDay) >= DAY_RESAMPLE_DAY || Math.abs(clock.utcMs - sampledUtcMs) >= DAY_RESAMPLE_MS) {
-      daylight.sample(hour, RENDER_OPTS, clock.dayOfYear, islandLatitude, clock.continuousDay, clock.utcMs);
+      if (fixedSky) daylight.sample(skyHour, RENDER_OPTS, BL.cloudHopperSky.DAY);
+      else daylight.sample(hour, RENDER_OPTS, clock.dayOfYear, islandLatitude, clock.continuousDay, clock.utcMs);
+      sampledSky = fixedSky;
       sampledHour = hour; sampledDay = clock.dayOfYear; sampledLatitude = islandLatitude; sampledContinuousDay = clock.continuousDay; sampledUtcMs = clock.utcMs;
       DAY_STASH.directStrength = RENDER_OPTS.directStrength; DAY_STASH.ambientFloor = RENDER_OPTS.ambientFloor;
       for (let i = 0; i < 3; i++) {
@@ -8442,8 +8449,8 @@
     poolShade += clamp(sheltered - poolShade, -dt * 1.6, dt * 1.6);
     poolUnder += clamp((cutawayPool === 2 ? 1 : 0) - poolUnder, -dt * 1.6, dt * 1.6);
     if (cloudPlaying()) {
-      // Keep the destination clear across the whole Cloud Hopper course.
-      RENDER_OPTS.clouds = 0;
+      // Keep the destination clear across the whole Cloud Hopper course: only the level's own painted clouds.
+      RENDER_OPTS.clouds = fixedSky ? fixedSky.clouds : 0;
       RENDER_OPTS.fog = RENDER_OPTS.horizon;
       RENDER_OPTS.fogNear = 900; RENDER_OPTS.fogFar = 2000;
       cloudHopper.looks?.sky(RENDER_OPTS);

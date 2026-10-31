@@ -4716,7 +4716,8 @@ const cloudHopperFailureChecks = async engine => {
       }
     } };
   Object.assign(BL, { hubModels: { jetpack: () => ({}), jetFlame: () => ({}) },
-    cloudHopperModels: { cloud(radius) { platformRadius ||= radius; return S.createNode(); }, boostSurface: () => S.createNode(), updateBoostSurface: noop,
+    cloudHopperSky: { create: () => ({ build: () => 0, update: noop, clear: noop, dispose: noop }) },
+    cloudHopperModels: { cloud(radius) { platformRadius ||= radius; return S.createNode(); }, cloudMesh: () => null, boostSurface: () => S.createNode(), updateBoostSurface: noop,
       bounceMarker: () => S.createNode(), updateBounceMarker: noop, jetpackPickup: () => S.createNode(), updateJetpackPickup: noop,
       cabinet: () => S.createNode(), updateCabinet: noop },
     cloudHopperAudio: { create: () => ({ unlock() { audioUnlocks++; }, song: noop, jump: noop, fade: noop, warn: noop, jet: noop,

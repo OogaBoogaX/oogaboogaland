@@ -1,6 +1,7 @@
 // Cloud Hopper's design-review prototypes, on a debug page with `hopperlook=` alone (comma-separated tokens):
-// candidate skies and set dressing per level, power-up pickups, X-ray styles, and a level-select mock. The chosen
-// warning (a thinning pulse) is the game's own now, in cloud-hopper.js.
+// Thunderhead's candidate skies and storm, power-up pickups, X-ray styles, and a level-select mock. The chosen
+// warning (a thinning pulse) is the game's own now, in cloud-hopper.js, and Levels 1 to 3's chosen skies and
+// scenery are theirs (cloud-hopper-levels.js, cloud-hopper-sky.js).
 // Temporary: the looks the maintainer picks move into the level modules and this file goes.
 (() => {
   "use strict";
@@ -8,11 +9,8 @@
   const { createNode, addChild, removeChild } = BL.scene;
   const M = BL.models, { hexToRgb, mulberry32, clamp } = BL.math;
   const TAU = Math.PI * 2;
-  // Each level's candidate skies: the island clock's hour, an optional colour grade, storm greying and haze.
+  // Thunderhead's candidate skies: the island clock's hour, an optional colour grade, storm greying and haze.
   const SKIES = {
-    l1a: { hour: 11, clouds: 0.22 }, l1b: { hour: 8.25, clouds: 0.36 },
-    l2a: { hour: 17.45, clouds: 0.42 }, l2b: { hour: 17.95, tint: [1.06, 0.9, 1.04], clouds: 0.5 },
-    l3a: { hour: 0.5 }, l3b: { hour: 0.5, tint: [0.92, 0.95, 1.12] },
     l4a: { hour: 16.5, storm: 0.72, fog: [70, 260], clouds: 0.95 }, l4b: { hour: 18.6, storm: 0.86, fog: [50, 200], clouds: 1 }
   };
   const XRAY_RADIUS = 60, XRAY_HAZE_RADIUS = 120;
@@ -20,37 +18,6 @@
   const facing = (geo) => M.turnedX(geo, Math.PI / 2);
 
   // ---- set dressing -------------------------------------------------------------------------------------------
-  const islet = M.variants((i) => {
-    const rand = mulberry32(911 + i), r = 3 + rand() * 1.5, depth = 4.5 + rand() * 3;
-    const rock = M.lathe({ profile: [[0.25, -depth], [r * 0.4, -depth * 0.62], [r * 0.78, -depth * 0.25], [r, -0.35], [r, 0]], segments: 7, color: "#8b6b4c" });
-    const soil = M.lathe({ profile: [[r * 1.02, -0.5], [r * 1.02, -0.1]], segments: 7, color: "#6b4a2e" });
-    const grass = M.lathe({ profile: [[r * 1.05, -0.12], [r * 0.95, 0.16], [0, 0.22]], segments: 7, color: "#73c24b" });
-    const geo = M.merge(rock, soil, grass);
-    geo.castShadow = false;
-    return geo;
-  });
-  const curtain = M.variants((i) => {
-    // A sheet in its own frame: x up its height (the hem wavy near 0), z across it, folds in y. The light beam fades
-    // it up x; the ends taper so no straight edge shows.
-    const g = M.geometry(), rows = 7, cols = 36, ids = [];
-    const low = hexToRgb("#9affcc"), mid = hexToRgb(i ? "#6fd9c4" : "#33d49c"), high = hexToRgb(i ? "#c06bff" : "#2a9fd6"), split = i ? 0.22 : 0.35;
-    for (let r = 0; r <= rows; r++) {
-      const row = [], v = r / rows;
-      for (let c = 0; c <= cols; c++) {
-        const u = c / cols, z = u - 0.5, taper = 1 - Math.pow(Math.abs(2 * z), 3);
-        const hem = 0.1 * Math.sin(u * 9 + i * 2) + 0.05 * Math.sin(u * 23);
-        row.push(M.pushVert(g, hem + v * (0.45 + 0.55 * taper), 0.22 * Math.sin(u * 7.5 + i) + 0.1 * Math.sin(u * 19 + v * 2), z));
-      }
-      ids.push(row);
-    }
-    for (let r = 0; r < rows; r++) {
-      const t = r / rows, a = t < split ? low : mid, b = t < split ? mid : high, k = t < split ? t / split : (t - split) / (1 - split);
-      const color = a.map((v, n) => Math.round(v + (b[n] - v) * k));
-      for (let c = 0; c < cols; c++) M.face(g, [ids[r][c], ids[r][c + 1], ids[r + 1][c + 1], ids[r + 1][c]], color, { emissive: 1 });
-    }
-    g.glass = i ? 0.36 : 0.3; g.lightBeam = i ? 1.5 : 1.15; g.castShadow = false;
-    return g;
-  });
   const bolt = M.cached(() => {
     const g = M.geometry(), rand = mulberry32(4242), ink = hexToRgb("#f2ecff"), lit = { emissive: 1 }, w = 0.05;
     let x = 0, y = 1;
@@ -136,7 +103,7 @@
     const select = ["select-a", "select-b"].find(t => tokens.has(t)) || null;
     const decor = createNode({ visible: false, sightHidden: true });
     addChild(root, decor);
-    const rain = [], bolts = [], curtains = [], labels = [], screen = { x: 0, y: 0, depth: 0 }, edge = { x: 0, y: 0, depth: 0 };
+    const rain = [], bolts = [], labels = [], screen = { x: 0, y: 0, depth: 0 }, edge = { x: 0, y: 0, depth: 0 };
     const nearIndex = new Int16Array(12), nearDistance = new Float32Array(12);
     let course = null, flash = 0, flashAt = 3, held = 0, time = 0, actor = null, skyOpts = null;
     const node = (geometry, x, y, z, s = 1, extra = {}) => {
@@ -147,58 +114,13 @@
     const build = (built, start, finish, player) => {
       course = built; actor = player;
       const sx = start.x - finish.x, sz = start.z - finish.z, length = Math.hypot(sx, sz), nx = sx / length, nz = sz / length;
-      const sideX = -nz, sideZ = nx, rand = mulberry32(77), shore = 42;
-      const at = (along, across, y) => [finish.x + nx * along + sideX * across, y, finish.z + nz * along + sideZ * across];
-      if (level?.startsWith("l1")) {
-        for (let k = 0; k < 18; k++) {
-          const t = (k + 0.5) / 18, along = shore + (length - shore) * t, routeY = start.y + (finish.y + 18 - start.y) * t;
-          const side = k % 2 ? 1 : -1, far = k % 3 === 2;
-          const [x, y, z] = at(along, side * (far ? 115 + rand() * 50 : 38 + rand() * 45), routeY - (far ? -4 + rand() * 12 : 16 + rand() * 30));
-          const s = far ? 2.2 + rand() : 1.2 + rand() * 0.9, base = node(islet(k % 3), x, y, z, s);
-          base.rotation.y = rand() * TAU;
-          const tree = createNode({ geometry: BL.hubModels.tree(k % 3), position: { x: 0, y: 0.15, z: 0 }, scale: { x: 0.34, y: 0.34, z: 0.34 }, sightHidden: true });
-          addChild(base, tree);
-          if (k % 2) addChild(base, createNode({ geometry: BL.hubModels.bush(k % 3), position: { x: 1.6, y: 0.15, z: -0.8 }, scale: { x: 0.5, y: 0.5, z: 0.5 }, sightHidden: true }));
-        }
-      }
-      if (level?.startsWith("l2")) {
-        const near = level === "l2b", count = near ? 10 : 9;
-        for (let k = 0; k < count; k++) {
-          let x, z;
-          if (near) {
-            const t = (k + 0.5) / count, side = k % 2 ? 1 : -1;
-            [x, , z] = at(shore + (length - shore) * t, side * (170 + rand() * 90), 0);
-          } else {
-            const a = Math.atan2(-nz, -nx) + (k % 2 ? 1 : -1) * (0.2 + rand() * 1.1), r = 380 + rand() * 320;
-            x = finish.x + Math.cos(a) * r; z = finish.z + Math.sin(a) * r;
-          }
-          const tower = createNode({ position: { x, y: -40 + rand() * 20, z }, sightHidden: true }), height = 150 + rand() * 120, width = 60 + rand() * 40;
-          addChild(decor, tower);
-          const puffs = 10;
-          for (let j = 0; j < puffs; j++) {
-            const f = j / (puffs - 1), anvil = j === puffs - 1 && rand() < 0.5, w = width * (anvil ? 1.5 : 1 - f * 0.55) * (0.8 + rand() * 0.4);
-            const puff = BL.cloudHopperModels.cloud(w / 2, w * 0.38, anvil ? w * 0.22 : w * 0.7, "normal", rand() * TAU);
-            const holder = createNode({ position: { x: (rand() - 0.5) * w * 0.45, y: height * f * 0.85 + w * 0.6, z: (rand() - 0.5) * w * 0.45 }, sightHidden: true });
-            addChild(holder, puff); addChild(tower, holder);
-          }
-        }
-      }
-      if (level?.startsWith("l3")) {
-        const violet = level === "l3b", ahead = Math.atan2(-nz, -nx);
-        for (let k = 0; k < 6; k++) {
-          const a = ahead + (k - 2.5) * 0.42 + (rand() - 0.5) * 0.2, r = 520 + rand() * 260;
-          const c = node(curtain(violet ? 1 : 0), finish.x + Math.cos(a) * r, 70 + rand() * 60, finish.z + Math.sin(a) * r, 1);
-          c.scale.x = 190 + rand() * 90; c.scale.y = 140; c.scale.z = 420 + rand() * 200;
-          c.rotation.z = Math.PI / 2; c.rotation.y = -a; c.phase = rand() * TAU;
-          curtains.push(c);
-        }
-      }
-      if (level === "l3b" || level?.startsWith("l4")) {
+      const rand = mulberry32(77);
+      if (level?.startsWith("l4")) {
         const ahead = Math.atan2(-nz, -nx);
         for (let k = 0; k < 2; k++) {
-          const a = ahead + (k ? 0.55 : -0.8), r = level?.startsWith("l4") ? 170 + k * 60 : 650;
+          const a = ahead + (k ? 0.55 : -0.8), r = 170 + k * 60;
           const b = node(bolt(), finish.x + Math.cos(a) * r, -20, finish.z + Math.sin(a) * r, 1, { visible: false });
-          b.scale.x = 90; b.scale.y = level?.startsWith("l4") ? 260 : 220; b.scale.z = 90; b.rotation.y = -a;
+          b.scale.x = 90; b.scale.y = 260; b.scale.z = 90; b.rotation.y = -a;
           bolts.push(b);
         }
       }
@@ -232,7 +154,6 @@
     const update = (dt, displayTime) => {
       if (!course) return;
       time += dt;
-      for (const c of curtains) c.rotation.x = Math.sin(time * 0.25 + c.phase) * 0.04;
       if (bolts.length) {
         if (held) { flash = held; for (const b of bolts) b.visible = true; }
         else {
@@ -418,7 +339,7 @@
     };
     const clear = () => {
       for (const n of [...decor.children]) removeChild(decor, n);
-      rain.length = bolts.length = curtains.length = labels.length = 0;
+      rain.length = bolts.length = labels.length = 0;
       decor.visible = false; course = actor = null; held = 0;
       if (skyOpts) skyOpts.seaFog = false;
     };

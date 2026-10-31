@@ -407,6 +407,13 @@ the `movePass` guards. Decision 3 in section 7.
 
 ## 4. Environments, weather and visibility
 
+*L1–L3 built in milestone 8 with the looks chosen in 7a (L1 08:15, L2 17:27, L3 00:30, all sampled on day 80):
+the sky is the level's `sky` in `cloud-hopper-levels.js`, sampled once by the hub as a run begins instead of
+its clock, whose phases still turn (so no phase toast) while the lamps follow the sky shown; the scenery is
+`cloud-hopper-sky.js`, laid each run from a fixed seed a level, with each islet stepped out across the route
+until it clears every cloud's swept lane by 6 m; the camera's far plane widens to take the scenery in. The sky
+changes as the ride up begins, without a blend. L4 keeps the island's clock until milestone 12.*
+
 - **How it is drawn.** In `scene-hub.js`, the `cloudPlaying()` branch already overrides
   clouds and fog. Each level adds a preset there. It calls `daylight.sample` at a fixed
   hour into `RENDER_OPTS` instead of the live clock: L1 11:00, L2 18:45, L3 00:30 with the
@@ -615,7 +622,8 @@ today's board at the same time (decision 7).
 
 Picked from real gameplay frames of each candidate. The candidates live in the temporary,
 debug-only `src/js/cloud-hopper-looks.js` (`?debug=1&hopperlook=<tokens>`), which goes once
-the chosen looks move into the level modules (milestones 8–12).
+the chosen looks move into the level modules (milestones 8–12). L1–L3's skies and scenery moved
+in milestone 8 and left it.
 
 | What | Choice |
 |---|---|
