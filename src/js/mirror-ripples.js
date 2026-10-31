@@ -4,16 +4,8 @@
   "use strict";
   const BL = window.BL = window.BL || {}, { mat4 } = BL.math;
   const CAPACITY = 8, LIFETIME = 0.72, SPEED = 1.35, START_RADIUS = 0.055, WIDTH = 0.055, GLYPH_THRESHOLD = 0.55;
-  const CONTACT_LIFETIME = 0.5, CONTACT_RADIUS = 0.32;
-  const SURFACE_CORE = 0.12, SURFACE_RADIUS = 0.6;
-  const surfaceStrengthAt = distance => {
-    const k = Math.max(0, Math.min(1, (distance - SURFACE_CORE) / (SURFACE_RADIUS - SURFACE_CORE)));
-    return 1 - k * k * (3 - 2 * k);
-  };
   const strengthAt = age => Math.exp(-5 * age) * Math.max(0, 1 - age / LIFETIME);
-  // A footfall reveals a small filled patch of the same glyph streams, fading in place instead of spreading rings.
-  const contactStrengthAt = age => { const k = Math.max(0, 1 - age / CONTACT_LIFETIME); return k * k * (3 - 2 * k); };
-  const create = (node, { contact: localContact = false, surface = false } = {}) => {
+  const create = (node) => {
     const waves = new Float32Array(CAPACITY * 4), inverse = mat4.create();
     const bounds = BL.scene.boundsOf(node.geometry), a = new Float64Array(3), b = new Float64Array(3);
     const previous = mat4.create(), current = mat4.create(), contact = new Float64Array(2);
@@ -23,8 +15,7 @@
     BL.scene.updateWorld(root);
     mat4.invert(inverse, node.world);
     let next = 0;
-    const state = { waves, contact: localContact, surface, surfaceCenter: surface ? new Float32Array(2) : null,
-      active: 0, hits: 0, time: 0, cross, absorb, strike, aimAt, continueShot, pulse, hold, update, dispose };
+    const state = { waves, active: 0, hits: 0, time: 0, cross, absorb, strike, aimAt, continueShot, pulse, update, dispose };
     const onGlass = (x, y) => x >= bounds.min[0] && x <= bounds.max[0]
       && y >= bounds.min[1] + (bounds.max[1] - bounds.min[1]) * (node.mirrorReveal || 0) && y <= bounds.max[1];
     function intersection(ax, ay, az, bx, by, bz) {
@@ -78,20 +69,12 @@
       const at = next * 4;
       next = (next + 1) % CAPACITY;
       if (!waves[at + 3]) state.active++;
-      waves[at] = x; waves[at + 1] = y; waves[at + 2] = age; waves[at + 3] = localContact ? contactStrengthAt(age) : strengthAt(age);
+      waves[at] = x; waves[at + 1] = y; waves[at + 2] = age; waves[at + 3] = strengthAt(age);
       state.hits++;
       return true;
     }
     function pulse(x, y, age = 0) {
       return onGlass(x, y) && emit(x, y, age);
-    }
-    // A planted foot holds one pooled contact at full strength. Once no longer held it fades normally.
-    function hold(x, y, slot) {
-      if (!localContact || !Number.isInteger(slot) || slot < 0 || slot >= CAPACITY || !onGlass(x, y)) return false;
-      const at = slot * 4;
-      if (!waves[at + 3]) { state.active++; state.hits++; }
-      waves[at] = x; waves[at + 1] = y; waves[at + 2] = 0; waves[at + 3] = 1;
-      return true;
     }
     // Clip a face's section through the mirror plane to the glass.
     // Scratch output avoids allocating contacts during a swing.
@@ -170,7 +153,7 @@
         if (!waves[at + 3]) continue;
         const age = waves[at + 2] + dt;
         waves[at + 2] = age;
-        waves[at + 3] = localContact ? contactStrengthAt(age) : age < LIFETIME ? strengthAt(age) : 0;
+        waves[at + 3] = age < LIFETIME ? strengthAt(age) : 0;
         if (waves[at + 3]) active++;
       }
       state.active = active;
@@ -183,6 +166,5 @@
     node.mirrorRipples = state;
     return state;
   };
-  BL.mirrorRipples = { create, CAPACITY, LIFETIME, SPEED, START_RADIUS, WIDTH, GLYPH_THRESHOLD, CONTACT_LIFETIME, CONTACT_RADIUS,
-    SURFACE_CORE, SURFACE_RADIUS, surfaceStrengthAt };
+  BL.mirrorRipples = { create, CAPACITY, LIFETIME, SPEED, START_RADIUS, WIDTH, GLYPH_THRESHOLD };
 })();

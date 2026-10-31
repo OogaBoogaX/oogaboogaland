@@ -259,9 +259,78 @@
   };
 
   // One visit's state: created in enter, dropped in leave.
-  let oogatronUnsub, renderer, game, world, go, lootEnabled, testBananas, root, camera, overlayCanvas, island, terrainRampRoof, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, mirrorCave, matrixCave, matrixControl, gateRain, fireRigs, firePitRig, fire, headquarters, dockStairs, jumbotron, positionDebug, remotes, npcSync;
+  let oogatronUnsub, renderer, game, world, go, lootEnabled, testBananas, root, camera, overlayCanvas, island, terrainRampRoof, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, mirrorCave, matrixCave, matrixControl, gateRain, fireRigs, firePitRig, fire, headquarters, jumbotron, positionDebug, remotes, npcSync;
   // GAME MODE (`setGameMode`): an island event holds the island still for play while it runs.
   let gameMode = false, gameCombatOnly = false;
+  let cloudHopper = null, cloudDock = null, cloudIsland = null, cloudPile = null, cloudPileSolids = null, cloudFinishFruit = null;
+  const cloudOffMap = [], cloudHidden = new Map(), CLOUD_NO_ACTORS = [];
+  const cloudMoveMatrix = math.mat4.create();
+  const cloudPlaying = () => !!cloudHopper?.playing;
+  const donationTickerVisible = () => {
+    if (!cloudHopper) return true;
+    if (cloudHopper.active) return false;
+    const cave = pilot?.player;
+    if (!cave) return true;
+    const p = cave.root.position, feet = p.y - cave.baseY;
+    // Keep the cabinet cloud quiet before Start too, including its edges.
+    return Math.abs(feet - cloudHopper.platform.position.y) > 0.45
+      || !Number.isFinite(cloudHopper.supportAt(p.x, p.z, feet, 0.45, cave.bodyRadius));
+  };
+  const worldBound = () => cloudHopper?.active ? cloudHopper.bound : FLY_BOUND;
+  const cloudRememberNodes = (first) => { for (let i = first; i < root.children.length; i++) cloudOffMap.push(root.children[i]); };
+  const cloudHide = (node) => {
+    if (!node) return;
+    if (!cloudHidden.has(node)) cloudHidden.set(node, node.visible);
+    node.visible = false;
+  };
+  const cloudHideActors = () => {
+    for (const cave of crew.list) if (cave !== cloudHopper.actor) {
+      cloudHide(cave.root); cloudHide(cave.sleepWeapons); cloudHide(cave.breathBatch);
+      if (cave.magazineModels) for (const magazine of cave.magazineModels) cloudHide(magazine?.node);
+      if (cave.stunGear) for (const drop of cave.stunGear.drops) cloudHide(drop.node);
+    }
+    for (const entry of clankers.list) cloudHide(entry.root);
+    for (const item of clankerEquipment) cloudHide(item.node);
+  };
+  const cloudMask = () => {
+    if (!cloudPlaying()) return;
+    for (const node of cloudOffMap) cloudHide(node);
+    for (const c of clouds) cloudHide(c.node);
+    cloudHideActors();
+    for (const bed of headquarters.mattresses) cloudHide(bed.node);
+    if (headquarters.outdoorBeds) for (const bed of headquarters.outdoorBeds) cloudHide(bed.node);
+  };
+  const cloudPileSurface = (x, z, y, rise, radius) => {
+    if (!cloudPlaying()) return -Infinity;
+    if (pile.shown > 0) return cloudPileSolids.supportAt(x, z, y, rise, radius);
+    // A small game-only pile keeps the goal visible even when the shared donation balance is empty.
+    const top = ALTAR_HEIGHT + 0.23;
+    return Math.hypot(x, z) < 0.55 + radius && top <= y + rise + 1e-5 ? top : -Infinity;
+  };
+  const cloudMode = (on) => {
+    cloudIsland.show(on);
+    weather.hold(on);
+    cloudFinishFruit.visible = on && pile.shown === 0;
+    document.body.classList.toggle("cloud-hopper-active", on);
+    hud.setPanelsHidden(on);
+    if (on) { cloudMask(); BL.net.setBody(null); BL.net.setZone("none"); }
+    else {
+      for (const [node, visible] of cloudHidden) node.visible = visible;
+      cloudHidden.clear();
+      crew.refreshStates();
+    }
+    solids.sync();
+  };
+  const cloudMove = (position, heading) => {
+    const p = crew.player.root.position;
+    math.mat4.identity(cloudMoveMatrix);
+    cloudMoveMatrix[12] = position.x - p.x;
+    cloudMoveMatrix[13] = position.y + crew.player.baseY - p.y;
+    cloudMoveMatrix[14] = position.z - p.z;
+    crew.relocatePlayer(position, heading);
+    pilot.transformView(cloudMoveMatrix, 0);
+    cameraPreviousValid = cameraTerrainValid = false;
+  };
   // GAME MODE's ring (`updateGameRing`): the group holding its veils, how far it has risen (0 to 1) and the seconds left
   // before it starts up; the veils themselves, each with its ripples.
   let gameRing = null, gameRingK = 0, gameRingWait = 0;
@@ -794,6 +863,7 @@
     return !!matrixCave && matrixCave.portal.inside;
   };
   const matrixOverlayVisible = (x, y, z) => {
+    if (cloudPlaying()) return false;
     if (RENDER_OPTS.birdsEyeCutaway) return y <= cutawayHeightAt(x, z);
     if (!matrixCave || !matrixCave.portal.inside) return true;
     const m = matrixCave.mouth;
@@ -860,6 +930,7 @@
     return false;
   };
   const sleepMarksVisible = (cave, x, y, z, mark = null) => {
+    if (cloudPlaying()) return false;
     // Nobody's sleep is seen through the Mempool island's rock: not from the tunnels and the chamber inside it,
     // and not a gorilla's in its nest from under the island or beyond its cliffs.
     if (poolShade > 0.5) return false;
@@ -1023,7 +1094,10 @@
     // HALLOWEEN: through the hunt's night a few slots are kept back for the hunters' lanterns (a quarter of the tier's
     // at most), filled after the lamps; a change in how many is a new key, so the lamps are chosen again.
     const tierLimit = webgl ? BL.glRenderer.QUALITY[renderer.quality].lights : 6;
-    const reserved = ghosts ? Math.min(ghosts.lanternsWanted(), Math.floor(tierLimit / 4)) : 0, limit = tierLimit - reserved;
+    const reserved = ghosts ? Math.min(ghosts.lanternsWanted(), Math.floor(tierLimit / 4)) : 0;
+    // Moving pickup lights are rewritten after the cached mainland selection.
+    const pickupReserved = Math.min(cloudHopper?.pickupLightsWanted() || 0, 2, tierLimit - reserved);
+    const limit = tierLimit - reserved - pickupReserved;
     const phaseNow = daylight.phaseAt(hour);
     const lanternsOn = phaseNow === "dusk" || phaseNow === "night" || phaseNow === "midnight";
     const coilLamp = coilCharge && coilCharge.lamp, coilActive = !!coilLamp && coilCharge.level > 0.02;
@@ -1195,6 +1269,7 @@
       lampSelValid = true;
     }
     RENDER_OPTS.lightCount = lampLights + (reserved ? ghosts.lanterns(lights, lampLights, reserved) : 0); // HALLOWEEN
+    if (pickupReserved) RENDER_OPTS.lightCount += cloudHopper.pickupLights(lights, RENDER_OPTS.lightCount, pickupReserved);
   };
   const buildFire = () => {
     let p = null;
@@ -2091,153 +2166,6 @@
     const sources = [hearth];
     return { node: room, entrances, mattresses, roomSigns, rampMarkers, lazyBeds, benches, fireHazards, lights, sources, hearth, firepit, rooms: island.headquarters.rooms, windows: island.headquarters.windows, ramps: island.headquarters.ramps, openFloor: island.headquarters.room, basement, sleepMarksVisible };
   };
-  // An invisible one-way staircase continues from the dock into the sky. It
-  // only arms from a grounded step off the outer deck: arriving from the air,
-  // or jumping once on it, leaves every tread intangible until the visitor
-  // returns to the dock. Pooled transparent treads and risers carry the cave glyphs down over
-  // the edges, staying lit under the walker and fading half a second after they leave the tread.
-  const buildDockStairs = (dock) => {
-    const START = 4.25, RUN = 0.62, RISE = 0.5, HALF_WIDTH = 0.78, GLYPH_POOL = 12;
-    const base = dock.position.y, count = Math.ceil((FLY.yMax - base) / RISE), end = START + count * RUN;
-    const ry = dock.rotation.y, ux = Math.cos(ry), uz = -Math.sin(ry), vx = Math.sin(ry), vz = Math.cos(ry);
-    const glyphs = [];
-    const surface = (halfWidth, bottom, top, x, y, z, rx, ry) => {
-      // Each face needs its own mesh: the renderer batches ripple surfaces by geometry.
-      const geometry = { verts: [-halfWidth, bottom, 0, halfWidth, bottom, 0, halfWidth, top, 0, -halfWidth, top, 0],
-        faces: [{ i: [0, 1, 2, 3], color: [0, 0, 0] }, { i: [3, 2, 1, 0], color: [0, 0, 0] }], lines: [], castShadow: false, mirrorRippleOnly: true };
-      return createNode({ position: { x, y, z }, rotation: { x: rx, y: ry, z: 0 }, geometry, mirrorRippleOnly: true, matrixNative: true, sightHidden: true });
-    };
-    for (let i = 0; i < GLYPH_POOL; i++) {
-      const node = createNode({ visible: false, rotation: { x: 0, y: ry, z: 0 } });
-      const top = surface(HALF_WIDTH, -RUN / 2, RUN / 2, 0, 0, 0, -Math.PI / 2, -Math.PI / 2);
-      // Local -y runs toward the dock on top and vertically down on every side. The front shares
-      // the top's glyph coordinates at its lip so each stream flows continuously over that edge.
-      addChild(node, top,
-        surface(HALF_WIDTH, -RUN / 2 - RISE, -RUN / 2, -RUN / 2, RUN / 2, 0, 0, -Math.PI / 2),
-        // The upper edge meets the next riser's front, not the back of this tread.
-        surface(HALF_WIDTH, RUN / 2, RUN / 2 + RISE, RUN / 2, -RUN / 2, 0, 0, -Math.PI / 2),
-        surface(RUN / 2, -RISE, 0, 0, 0, HALF_WIDTH, 0, 0),
-        surface(RUN / 2, -RISE, 0, 0, 0, -HALF_WIDTH, 0, Math.PI));
-      node.dockStep = 0;
-      node.mirrorRipples = BL.mirrorRipples.create(top, { contact: true, surface: true });
-      for (const face of node.children) face.mirrorRipples = node.mirrorRipples;
-      addChild(root, node);
-      placed.push(node);
-      glyphs.push(node);
-    }
-    let active = false, owner = null, lastStep = 0, nextGlyph = 0, contacts = 0, jumpRejects = 0, lit = 0, time = 0;
-    const alongAt = (x, z) => (x - dock.position.x) * ux + (z - dock.position.z) * uz;
-    const acrossAt = (x, z) => (x - dock.position.x) * vx + (z - dock.position.z) * vz;
-    const indexAt = (along, across, radius = PLAYER_RADIUS) => {
-      if (Math.abs(across) > HALF_WIDTH + radius || along < START - radius || along > end + radius) return 0;
-      return Math.min(count, Math.max(1, Math.floor((along + radius - START) / RUN) + 1));
-    };
-    const floorAt = (index) => Math.min(FLY.yMax, base + index * RISE);
-    const groundedOnDock = (actor) => {
-      if (!actor || actor !== pilot?.player || actor.hop !== 0 || actor.hopV > 0 || actor.jet?.thrust) return false;
-      const p = actor.root.position, feet = p.y - actor.baseY, along = alongAt(p.x, p.z), across = acrossAt(p.x, p.z);
-      return along >= 3 - PLAYER_RADIUS && along <= START + 0.1 && Math.abs(across) <= 1 + PLAYER_RADIUS && Math.abs(feet - base) < 0.08;
-    };
-    const reset = (jumped = false) => {
-      if (jumped && active) jumpRejects++;
-      active = false; owner = null; lastStep = 0;
-    };
-    const supportAt = (x, z, y, maxStep, actor, entering) => {
-      if (actor !== pilot?.player) return -Infinity;
-      if (active && (actor !== owner || actor.hop > 1e-7 || actor.hopV > 0 || actor.jet?.thrust)) reset(true);
-      const along = alongAt(x, z), across = acrossAt(x, z), index = indexAt(along, across);
-      if (!active) {
-        // Only a real walking destination may arm the first tread. Camera,
-        // spawn and ordinary ground probes pass entering=false.
-        if (!entering || index !== 1 || !groundedOnDock(actor)) return -Infinity;
-        active = true; owner = actor; lastStep = 0;
-      }
-      if (!index) return -Infinity;
-      const floor = floorAt(index);
-      return floor <= y + maxStep + 1e-7 ? floor : -Infinity;
-    };
-    const holdStep = (index) => {
-      let node = null;
-      for (let i = 0; i < glyphs.length; i++) {
-        if (glyphs[i].mirrorRipples.active && glyphs[i].dockStep === index) { node = glyphs[i]; break; }
-      }
-      if (!node) {
-        node = glyphs[nextGlyph];
-        nextGlyph = (nextGlyph + 1) % glyphs.length;
-        node.mirrorRipples.waves.fill(0);
-        node.mirrorRipples.active = 0;
-      }
-      const along = START + (index - 0.5) * RUN;
-      node.position.x = dock.position.x + ux * along;
-      node.position.y = floorAt(index) + 0.018;
-      node.position.z = dock.position.z + uz * along;
-      node.dockStep = index;
-      if (!node.visible) lit++;
-      node.visible = true;
-      node.mirrorRipples.time = time;
-      node.mirrorRipples.hold(0, 0, 0);
-    };
-    const update = (dt, actor) => {
-      time += dt;
-      let standing = 0;
-      if (active && actor === owner) {
-        if (actor.hop > 1e-7 || actor.hopV > 0 || actor.jet?.thrust) reset(true);
-        else {
-          const p = actor.root.position, along = alongAt(p.x, p.z), across = acrossAt(p.x, p.z), feet = p.y - actor.baseY;
-          // Read the supporting height, not the next tread the body's leading edge might reach.
-          const index = Math.min(count, Math.round((feet - base) / RISE));
-          if (index > 0 && Math.abs(feet - floorAt(index)) < 0.12 && Math.abs(across) <= HALF_WIDTH + PLAYER_RADIUS
-            && along >= START + (index - 1) * RUN - PLAYER_RADIUS && along <= START + index * RUN + PLAYER_RADIUS) standing = index;
-          else if (along <= START && Math.abs(across) <= 1 + PLAYER_RADIUS) reset(false);
-        }
-      }
-      lit = 0;
-      for (let i = 0; i < glyphs.length; i++) {
-        const node = glyphs[i];
-        if (actor) {
-          node.mirrorRipples.surfaceCenter[0] = actor.root.position.x;
-          node.mirrorRipples.surfaceCenter[1] = actor.root.position.z;
-        }
-        node.mirrorRipples.update(node.dockStep === standing && standing ? 0 : dt, time);
-        node.visible = node.mirrorRipples.active > 0;
-        if (node.visible) lit++;
-      }
-      if (standing) {
-        if (standing !== lastStep) { lastStep = standing; contacts++; }
-        holdStep(standing);
-      }
-      // Adjacent treads share a riser. Keep its stronger contact so descending onto a lower tread
-      // holds the next front too, instead of inheriting the departing upper tread's fade.
-      for (const node of glyphs) {
-        node.children[1].visible = true;
-        node.children[2].visible = node.dockStep < count;
-      }
-      for (let i = 0; i < glyphs.length; i++) {
-        const node = glyphs[i];
-        if (!node.visible) continue;
-        for (let j = 0; j < glyphs.length; j++) {
-          const upper = glyphs[j];
-          if (!upper.visible || upper.dockStep !== node.dockStep + 1) continue;
-          if (upper.mirrorRipples.waves[3] >= node.mirrorRipples.waves[3]) node.children[2].visible = false;
-          else upper.children[1].visible = false;
-          break;
-        }
-      }
-    };
-    return {
-      supportAt, update, reset, alongAt, acrossAt, indexAt, floorAt,
-      dispose() {
-        for (const node of glyphs) {
-          node.mirrorRipples.dispose(); node.mirrorRipples = null; node.visible = false;
-          for (const face of node.children) face.mirrorRipples = null;
-        }
-        lit = 0;
-      },
-      get inMotion() { return lit > 0; },
-      base, start: START, run: RUN, rise: RISE, halfWidth: HALF_WIDTH, count, end, top: FLY.yMax, glyphs,
-      get active() { return active; }, get lastStep() { return lastStep; }, get contacts() { return contacts; }, get jumpRejects() { return jumpRejects; }
-    };
-  };
   // A poked animal cries out from the shared bubble pool and startles: its own brain decides what that means
   // (the jaguar bolts, the monkey makes for a tree, the toucan takes off, a sleeper wakes).
   const pokeBeast = (node, kind) => {
@@ -2758,7 +2686,7 @@
   const updatePoolEffectsActivity = () => {
     const radius = poolEffectsActive ? POOL_EFFECTS_FAR : POOL_EFFECTS_NEAR;
     const player = clankerPlay?.player || pilot?.player;
-    const active = !gameMode && (nearPoolEffects(camera.position, radius) || nearPoolEffects(camera.target, radius)
+    const active = !gameMode && !cloudPlaying() && (nearPoolEffects(camera.position, radius) || nearPoolEffects(camera.target, radius)
       || !!player && nearPoolEffects(player.root.position, radius));
     if (active === poolEffectsActive) return;
     poolEffectsActive = active;
@@ -2900,8 +2828,7 @@
   const buildRim = () => {
     const d = polar(DOCK_DEG, CLIFF_OUTER);
     const dock = place(hubModels.dock(), d.x, d.z, Math.PI / 2 - DOCK_DEG * DEG, island.surfaceAt(d.x, d.z) + 0.05, "dock", 2.2);
-    dockStairs = buildDockStairs(dock);
-    headquarters.dockStairs = dockStairs;
+    cloudDock = dock;
     claim(d.x, d.z, 2.5);
     let faceX = MEADOW - 1;
     while (island.surfaceAt(faceX + island.unit / 2, LADDER_Z) < 3) faceX += island.unit;
@@ -3463,15 +3390,20 @@
   };
   const waterSupportAt = (x, z, y, rise, player) => mempoolIsland ? mempoolIsland.floatAt(x, z, y, rise, player ? player.bodyHeight * OOGA_DRAUGHT : CLOSE_VIEW.eyeHeight * OOGA_DRAUGHT) : -Infinity;
   const rageThrown = actor => !!(actor?.leap?.thrown && actor.leap.rageThrown);
-  const playerSupportAt = (x, z, y = 0, previousY = y, player = pilot?.player, dockEntry = false, ignoreClanker = false, passTraffic = false) => {
+  const playerSupportAt = (x, z, y = 0, previousY = y, player = pilot?.player, ignoreClanker = false, passTraffic = false) => {
     passTraffic = passTraffic || rageThrown(player);
     const step = player ? player.hop === 0 && player.hopV <= 0 : !pilot.freeFalling;
     const from = Math.max(y, previousY), rise = step ? STEP_MAX : 0;
-    return Math.max(island.supportAt(x, z, y, STEP_MAX, ABYSS_FLOOR, PLAYER_RADIUS), bedSupportAt(x, z, from, STEP_MAX, PLAYER_RADIUS), propSupportAt(x, z, from, rise, player, ignoreClanker, passTraffic), waterSupportAt(x, z, from, rise, player), dockStairs ? dockStairs.supportAt(x, z, from, rise, player, dockEntry) : -Infinity);
+    if (cloudPlaying()) return Math.max(island.supportAt(x, z, y, STEP_MAX, ABYSS_FLOOR, PLAYER_RADIUS),
+      solids.supportAt(x, z, from, rise, PLAYER_RADIUS),
+      ALTAR_HEIGHT <= from + rise && Math.hypot(x, z) < altar.platformRadius + PLAYER_RADIUS ? ALTAR_HEIGHT : -Infinity,
+      cloudPileSurface(x, z, from, rise, PLAYER_RADIUS), cloudHopper.supportAt(x, z, from, rise));
+    return Math.max(cloudHopper ? cloudHopper.supportAt(x, z, from, rise) : -Infinity, island.supportAt(x, z, y, STEP_MAX, ABYSS_FLOOR, PLAYER_RADIUS), bedSupportAt(x, z, from, STEP_MAX, PLAYER_RADIUS), propSupportAt(x, z, from, rise, player, ignoreClanker, passTraffic), waterSupportAt(x, z, from, rise, player));
   };
   const abyssAt = (x, z, y, actor = pilot?.player) => playerSupportAt(x, z, y, y, actor) === ABYSS_FLOOR;
   const visualSupportAt = (x, z, y) => {
-    const floor = Math.max(bedSupportAt(x, z, y, STEP_MAX, PLAYER_RADIUS), propSupportAt(x, z, y, STEP_MAX, pilot.player), waterSupportAt(x, z, y, STEP_MAX, pilot.player), dockStairs ? dockStairs.supportAt(x, z, y, STEP_MAX, pilot.player, false) : -Infinity);
+    if (cloudPlaying()) return playerSupportAt(x, z, y, y);
+    const floor = Math.max(cloudHopper ? cloudHopper.supportAt(x, z, y, STEP_MAX) : -Infinity, bedSupportAt(x, z, y, STEP_MAX, PLAYER_RADIUS), propSupportAt(x, z, y, STEP_MAX, pilot.player), waterSupportAt(x, z, y, STEP_MAX, pilot.player));
     return floor > -Infinity && floor > island.supportAt(x, z, y, STEP_MAX, ABYSS_FLOOR, PLAYER_RADIUS) ? floor : island.smoothSupportAt(x, z, y, STEP_MAX, PLAYER_RADIUS);
   };
   const PLAYER_RADIUS = 0.3;
@@ -3970,7 +3902,7 @@
     const supportY = Math.min(heldHeight, ceiling - STEP_MAX - 1e-6);
     // Query support before lowering the release. An upright body that cannot
     // fit here stays held, rather than querying through this floor to a lower level.
-    if (throwing && height < playerSupportAt(p.x, p.z, supportY, supportY, cave, false, true, rec.autonomous)) {
+    if (throwing && height < playerSupportAt(p.x, p.z, supportY, supportY, cave, true, rec.autonomous)) {
       rec.throwing = false; rec.time = 0; entry.motion.throwProgress = 0;
       return false;
     }
@@ -3993,7 +3925,7 @@
     // can put its head through a low roof. Fit it below that ceiling before
     // asking for support, or the voxel query can choose the roof as its floor.
     cave.leap.rageThrown = throwing && rec.autonomous;
-    const floor = playerSupportAt(p.x, p.z, height, height, cave, false, true, cave.leap.rageThrown);
+    const floor = playerSupportAt(p.x, p.z, height, height, cave, true, cave.leap.rageThrown);
     cave.hop = Math.max(0, height - floor);
     p.y = floor + cave.baseY + cave.hop;
     if (throwing) {
@@ -4054,7 +3986,7 @@
         const t = i / steps, angle = fromHeading + turn * t, sx = Math.sin(angle), sz = Math.cos(angle);
         const cx = x + (toX - x) * t + sz * side + sx * (behind - reach * part / 2);
         const cz = z + (toZ - z) * t - sx * side + sz * (behind - reach * part / 2);
-        const floor = playerSupportAt(cx, cz, y + (toY - y) * t + 0.35, y + (toY - y) * t + 0.35, cave, false, true, BL.clankers.rageCarrying(entry));
+        const floor = playerSupportAt(cx, cz, y + (toY - y) * t + 0.35, y + (toY - y) * t + 0.35, cave, true, BL.clankers.rageCarrying(entry));
         if (floor === ABYSS_FLOOR || Math.abs(floor - (y + (toY - y) * t)) > 0.6) return false;
         const cy = floor + 0.035;
         if (!captureSegmentClear(entry, cave, i ? ax : cx, i ? ay : cy, i ? az : cz, cx, cy, cz, BODY_RADIUS, cave.bodyHeight)) return false;
@@ -4080,7 +4012,7 @@
         const cx = x + (toX - x) * t + sz * rec.side + sx * rec.behind;
         const cz = z + (toZ - z) * t - sx * rec.side + sz * rec.behind;
         const queryY = y + (toY - y) * t + handHeight;
-        const floor = playerSupportAt(cx, cz, queryY, queryY, cave, false, true, BL.clankers.rageCarrying(entry));
+        const floor = playerSupportAt(cx, cz, queryY, queryY, cave, true, BL.clankers.rageCarrying(entry));
         if (!Number.isFinite(floor)) return false;
         // Route estimates may carry the body above a lower floor. Dropping
         // the whole shell at the prop or bridge edge would sweep it through the side;
@@ -4146,7 +4078,7 @@
   };
   const acceptCapturedPose = (entry, cave, rec, handY, preview, endpointOnly = false) => {
     const p = cave.root.position;
-    const releaseFloor = playerSupportAt(p.x, p.z, handY, handY, cave, false, true, BL.clankers.rageCarrying(entry));
+    const releaseFloor = playerSupportAt(p.x, p.z, handY, handY, cave, true, BL.clankers.rageCarrying(entry));
     const standingClear = Number.isFinite(releaseFloor) && releaseFloor !== ABYSS_FLOOR && captureSegmentClear(entry, cave,
       p.x, Math.max(handY, releaseFloor) + 0.025, p.z, p.x, releaseFloor + 0.025, p.z,
       PLAYER_RADIUS, cave.bodyHeight, PLAYER_RADIUS, cave.bodyHeight, false, false);
@@ -4185,7 +4117,7 @@
       return true;
     }
     const headReach = cave.traits.height * 0.9, sx = Math.sin(entry.heading), sz = Math.cos(entry.heading);
-    const floor = playerSupportAt(hand[0] - sx * headReach, hand[2] - sz * headReach, hand[1], hand[1], cave, false, true, BL.clankers.rageCarrying(entry));
+    const floor = playerSupportAt(hand[0] - sx * headReach, hand[2] - sz * headReach, hand[1], hand[1], cave, true, BL.clankers.rageCarrying(entry));
     cave.root.rotation.x = -Math.acos(clamp((floor + 0.12 - hand[1]) / headReach, -0.7, 0.3));
     cave.root.rotation.y = entry.heading; cave.root.rotation.z = 0;
     p.x = hand[0]; p.y = hand[1]; p.z = hand[2];
@@ -4368,6 +4300,7 @@
     return floor;
   };
   const bedCeilingAt = (x, z, y, radius) => {
+    if (cloudPlaying()) return Infinity;
     let ceiling = Infinity;
     if (!headquarters) return ceiling;
     for (const bed of headquarters.mattresses) {
@@ -4383,6 +4316,7 @@
   };
   const BED_SWEEP = new Float64Array(14);
   const bedSegmentClear = (x, y, z, toX, toY, toZ, radius, height, all = false) => {
+    if (cloudPlaying()) return true;
     if (!headquarters) return true;
     const dx = toX - x, dy = toY - y, dz = toZ - z;
     for (const bed of headquarters.mattresses) {
@@ -4402,6 +4336,7 @@
   // Stone frames are rendered boxes, separate from the carved terrain.
   // Rotate the cylinder into each fixed arch's axes; its footprint stays round.
   const entranceCeilingAt = (x, z, y, radius) => {
+    if (cloudPlaying()) return Infinity;
     let ceiling = Infinity;
     for (let i = 0; i < headquarters.entrances.length; i++) {
       const entry = headquarters.entrances[i], node = entry.node;
@@ -4541,6 +4476,7 @@
     && (!solids || solids.segmentClear(x, y, z, x, y, z, radius, height, null, radius, height, rageThrown(actor), false, false, rageThrown(actor)));
   const JETPACK_COLUMN = { caveIndex: 0, floor: 0, ceiling: 0 };
   const jetpackAllowed = (cave) => {
+    if (cloudHopper?.active) return !cloudHopper.held && cave === cloudHopper.actor;
     if (ghosts && ghosts.sealed) return false; // HALLOWEEN
     const p = cave.root.position, feet = p.y - cave.baseY;
     const basement = island.headquarters.basement, hole = basement.hole;
@@ -4655,6 +4591,7 @@
     return ceiling;
   };
   const birdsEyeCeiling = (cave, gorilla = false) => {
+    if (cloudPlaying()) return Infinity;
     const p = cave.root.position, feet = p.y - (gorilla ? 0 : cave.baseY);
     const height = gorilla ? cave.gorilla.bodyHeight : cave.bodyHeight, lift = gorilla ? 0 : Math.max(0, cave.viewLift);
     // Clip architectural roofs, not the floor the actor is standing on. Outdoors
@@ -4913,20 +4850,20 @@
       && mirrorActorSegmentClear(fromX, y, fromZ, toX, y, toZ, height, actor);
   };
   const walkable = (fromX, fromZ, toX, toZ, y, height = 1.5, actor = pilot?.player) => {
-    if (Math.hypot(toX, toZ) > FLY_BOUND || crossesSealedCave(fromX, fromZ, toX, toZ, y)) return false;
-    const floor = playerSupportAt(toX, toZ, y, y, actor, true), feet = Math.max(y, floor);
+    if (Math.hypot(toX, toZ) > worldBound() || crossesSealedCave(fromX, fromZ, toX, toZ, y)) return false;
+    const floor = playerSupportAt(toX, toZ, y, y, actor), feet = Math.max(y, floor);
     if (floor - y > STEP_MAX && floor !== characterClankerSupportAt(toX, toZ, y, STEP_MAX, actor)) return false;
     // Feet may mount ordinary steps, including the banana platform's low rim.
     // Torso and head must fit across their whole footprint at the destination's actual elevation.
     return feet + height <= ceilingAt(toX, toZ, feet, actor) + 1e-7 && physicalClearAt(toX, feet + STEP_MAX, toZ, PLAYER_RADIUS, Math.max(0, height - STEP_MAX), actor) && propSegmentClear(fromX, feet + STEP_MAX, fromZ, toX, feet + STEP_MAX, toZ, PLAYER_RADIUS, Math.max(0, height - STEP_MAX), actor) && matrixGateSegmentClear(fromX, y, fromZ, toX, feet, toZ, PLAYER_RADIUS, height) && mirrorActorSegmentClear(fromX, y, fromZ, toX, feet, toZ, height, actor)
       || feet === y && playerEscapeClear(fromX, fromZ, toX, toZ, y, height, actor, STEP_MAX);
   };
-  const flyable = (fromX, fromZ, toX, toZ, y = 0, height = 1.5, actor = pilot?.player) => (Math.hypot(toX, toZ) <= FLY_BOUND || actor?.leap?.thrown) && !crossesSealedCave(fromX, fromZ, toX, toZ, y)
+  const flyable = (fromX, fromZ, toX, toZ, y = 0, height = 1.5, actor = pilot?.player) => (Math.hypot(toX, toZ) <= worldBound() || actor?.leap?.thrown) && !crossesSealedCave(fromX, fromZ, toX, toZ, y)
     && (y + height <= ceilingAt(toX, toZ, y, actor) + 1e-7 && physicalClearAt(toX, y, toZ, PLAYER_RADIUS, height, actor) && propSegmentClear(fromX, y, fromZ, toX, y, toZ, PLAYER_RADIUS, height, actor) && bedSegmentClear(fromX, y, fromZ, toX, y, toZ, PLAYER_RADIUS, height) && matrixGateSegmentClear(fromX, y, fromZ, toX, y, toZ, PLAYER_RADIUS, height) && mirrorActorSegmentClear(fromX, y, fromZ, toX, y, toZ, height, actor)
       || playerEscapeClear(fromX, fromZ, toX, toZ, y, height, actor, 0));
   const characterCarryClear = (cave, x, y, z, toX, toY, toZ) => {
     const height = cave.bodyHeight + Math.max(0, cave.viewLift), feet = y + 1e-7, toFeet = toY + 1e-7;
-    return Math.hypot(toX, toZ) <= FLY_BOUND && !crossesSealedCave(x, z, toX, toZ, Math.min(y, toY))
+    return Math.hypot(toX, toZ) <= worldBound() && !crossesSealedCave(x, z, toX, toZ, Math.min(y, toY))
       && toY + height <= ceilingAt(toX, toZ, toY, cave) + 1e-7
       && physicalClearAt(toX, toFeet, toZ, PLAYER_RADIUS, height - 1e-7, cave)
       && island.voxelSegmentClearAt(x, feet, z, toX, toFeet, toZ, PLAYER_RADIUS, height - 1e-7)
@@ -5243,8 +5180,8 @@
   };
 
   const celebrate = (donation, bananas) => {
-    // GAME MODE: hold the crew's cheer while an island event runs; the thanks still shows.
-    if (!gameMode) {
+    // Island events hold the crew's cheer; the ticker has its own visibility gate.
+    if (!gameMode && !cloudPlaying()) {
       for (const cave of crew.workingCavemen()) {
         if (cave.build) continue;
         cave.cheer = 1.6;
@@ -5813,6 +5750,8 @@
   const WAKE_ACTION = { kind: "wake" }, ROLL_ACTION = { kind: "roll" }, STAND_ACTION = { kind: "stand" };
   const TAP_RAY = { ox: 0, oy: 0, oz: 0, dx: 0, dy: 0, dz: 0 };
   const nearbyAction = (x, y, z, reach) => {
+    if (cloudHopper?.active) return null;
+    if (cloudHopper?.near(x, y, z)) return cloudHopper.action;
     const player = pilot.player;
     if (player && player.camp.burning) return ROLL_ACTION;
     if (player && player.camp.seat) return STAND_ACTION;
@@ -5840,7 +5779,8 @@
     return null;
   };
   const useNearbyAction = (action) => {
-    if (action === WAKE_ACTION) crew.wakePlayer();
+    if (action === cloudHopper?.action) cloudHopper.launch();
+    else if (action === WAKE_ACTION) crew.wakePlayer();
     else if (action === ROLL_ACTION) crew.dropRoll();
     else if (action === STAND_ACTION) crew.standPlayer();
     else if (action.kind === "bench") crew.sitPlayer(action);
@@ -6212,6 +6152,7 @@
       TAP_RAY.ox + TAP_RAY.dx * depth, TAP_RAY.oy + TAP_RAY.dy * depth, TAP_RAY.oz + TAP_RAY.dz * depth);
   };
   const onTap = (hit, p) => {
+    if (cloudHopper?.active) return;
     // A tap on the page itself leaves the reading view alone; one beside it closes it, as Escape does.
     if (wpRead) {
       if (!wpFaceHit(p)) wpReadEnd();
@@ -6222,6 +6163,7 @@
       if (!(hit && hit.owner.kind === "whitepaper" || wpFaceHit(p))) wpStop();
       return;
     }
+    if (hit?.owner.kind === "cloud-hopper") { cloudHopper.launch(); return; }
     if (factoryDeparting || bifrostDeparting || islandGuide.holding) return;
     if (gorillaBehindBillboard(hit, p)) return;
     if (debugMovementTap(hit, p)) return;
@@ -6407,7 +6349,10 @@
     matrixControl.promptJet = equipped;
     matrixControl.promptRecovering = recovering;
     if (action) {
-      if (action === WAKE_ACTION) {
+      if (action === cloudHopper?.action) {
+        hud.hint(COARSE ? "Tap CLOUD HOPPER to play" : "Space · Play Cloud Hopper");
+        hud.setAct("CLOUD HOPPER");
+      } else if (action === WAKE_ACTION) {
         hud.hint(COARSE ? "Tap WAKE UP! to get up" : "Space wakes up · WASD changes sleeping pose");
         hud.setAct("WAKE UP!");
       } else if (action === ROLL_ACTION) {
@@ -6773,6 +6718,7 @@
     const p = player ? player.root.position : pilot.closeWanted ? camera.position : pilot.orbit.target;
     const feet = p.y - (gorilla ? 0 : player ? player.baseY : pilot.closeWanted ? CLOSE_VIEW.eyeHeight : 0);
     let area = "HUB";
+    if (cloudHopper?.active) { hud.setAreaLabel("CLOUD HOPPER", p); return; }
     if (timechainIsland && onSphere(p.x, p.z)) area = "SPHERE";
     else if (mempoolIsland && mempoolIsland.overAt(p.x, p.z)) area = mempoolIsland.coveredAt(p.x, feet + 0.5, p.z) ? "MEMPOOL" : "RAINFOREST";
     else {
@@ -6792,9 +6738,10 @@
   // An orbit's focal point may pass through the island, independently of its displayed eye.
   const clampTarget = (t) => {
     const r = Math.hypot(t.x, t.z);
-    if (r > FLY_BOUND) {
-      t.x *= FLY_BOUND / r;
-      t.z *= FLY_BOUND / r;
+    const bound = worldBound();
+    if (r > bound) {
+      t.x *= bound / r;
+      t.z *= bound / r;
     }
   };
   let exteriorEntranceIndex = 0, exteriorCeiling = Infinity;
@@ -6836,6 +6783,7 @@
   // Exact frame contacts can occur between the ordinary terrain substeps.
   const ENTRANCE_SWEEP = new Float64Array(14);
   const entranceSegmentClear = (x, y, z, toX, toY, toZ, radius = CAMERA_RADIUS) => {
+    if (cloudPlaying()) return true;
     const dx = toX - x, dy = toY - y, dz = toZ - z, span2 = dx * dx + dz * dz;
     for (let i = 0; i < headquarters.entrances.length; i++) {
       const entry = headquarters.entrances[i], node = entry.node;
@@ -7110,6 +7058,14 @@
     return feet < island.surfaceAt(p.x, p.z) - STEP_MAX && !mempoolIsland.coveredAt(p.x, feet + 0.5, p.z);
   };
   const clampCamera = (p, closeMix = 0, closeClearance = CLEARANCE, smoothStep = false, dt = 0, resetSmooth = false, directView = false, freeMove = false, preserveExitAngle = false) => {
+    // The course keeps the player's chosen camera offset even through rock.
+    // Only its DQ fall sequence holds the eye independently of the Ooga.
+    if (cloudPlaying()) {
+      setCameraCave(0); playerCaveIndex = 0;
+      cameraUnrestricted = cameraReentering = cameraTerrainValid = cameraManualContact = false;
+      camera.near = 0.1;
+      return false;
+    }
     const requestedX = p.x, requestedY = p.y, requestedZ = p.z;
     const player = pilot && pilot.player;
     const combatClose = player && pilot.aiming && !pilot.birdsEye
@@ -7780,7 +7736,7 @@
     await wpImage.decode();
     return visit === wpVisit && !(signal && signal.aborted);
   };
-  const wpBusy = () => gameMode || entering || factoryHeld || factoryDeparting || bifrostDeparting ||
+  const wpBusy = () => gameMode || cloudHopper?.active || entering || factoryHeld || factoryDeparting || bifrostDeparting ||
     chalkboard.openNow || clankerPlay.active || !!(ghosts && ghosts.busy) || !!(islandGuide && islandGuide.holding);
   const wpRaise = () => {
     if (wpBusy()) return false;
@@ -7854,7 +7810,7 @@
   };
   // A double tap on the ground in front of the stone runs the whole show again, from the strike.
   const wpReplay = () => {
-    if (!wpGroup || wpRead || gameMode || factoryDeparting || bifrostDeparting || islandGuide && islandGuide.holding) return false;
+    if (!wpGroup || wpRead || gameMode || cloudHopper?.active || factoryDeparting || bifrostDeparting || islandGuide && islandGuide.holding) return false;
     wpShow();
     return true;
   };
@@ -7970,7 +7926,7 @@
   };
   // A double tap on the stone: its face becomes a window onto the paper's pages, whole, square on to the view.
   const wpReadStart = () => {
-    if (!wpGroup || !wpStanding || wpRead || gameMode || factoryDeparting || bifrostDeparting || islandGuide && islandGuide.holding) return false;
+    if (!wpGroup || !wpStanding || wpRead || gameMode || cloudHopper?.active || factoryDeparting || bifrostDeparting || islandGuide && islandGuide.holding) return false;
     // The tap that closed the reading view is not the first half of a double tap that opens it again.
     if (performance.now() - wpReadLeft < 600) return false;
     if (!BL.whitepaperPages || !BL.whitepaperPages.strip) return false;
@@ -8423,6 +8379,15 @@
     job.handle = job.idle ? requestIdleCallback(start, { timeout: 250 }) : setTimeout(start, 0);
   };
   const update = (dt, elapsed) => {
+    cloudHopper.preUpdate(dt);
+    if (cloudPlaying()) {
+      cloudMask();
+      Object.assign(cloudPile.position, pile.core.position);
+      Object.assign(cloudPile.scale, pile.core.scale);
+      cloudFinishFruit.visible = pile.shown === 0;
+      cloudPile.visible = pile.shown > 0;
+      cloudPileSolids.sync();
+    }
     if (ghosts) ghosts.unshake(camera); // HALLOWEEN: last frame's quake comes off before anything reads the camera
     // Four cheap proximity reads a second, without building a visit or changing its actor/account state.
     if (elapsed >= prefetchAt) {
@@ -8471,10 +8436,15 @@
     // Under the Mempool island's ground the storm is muffled and the daylight shut out: no shadow reaches that
     // island, so its tunnels would otherwise stand in full sun. The fires and the water light them instead.
     // By where the eye is, not what it looks at: a view from outside aimed into the rock is still outdoors.
-    const sheltered = mempoolIsland.coveredAt(camera.position.x, camera.position.y, camera.position.z) ? 1 : 0;
+    const sheltered = !cloudPlaying() && mempoolIsland.coveredAt(camera.position.x, camera.position.y, camera.position.z) ? 1 : 0;
     poolShade += clamp(sheltered - poolShade, -dt * 1.6, dt * 1.6);
     poolUnder += clamp((cutawayPool === 2 ? 1 : 0) - poolUnder, -dt * 1.6, dt * 1.6);
-    if (gameMode) RENDER_OPTS.clouds = 0;
+    if (cloudPlaying()) {
+      // Keep the destination clear across the whole Cloud Hopper course.
+      RENDER_OPTS.clouds = 0;
+      RENDER_OPTS.fog = RENDER_OPTS.horizon;
+      RENDER_OPTS.fogNear = 900; RENDER_OPTS.fogFar = 2000;
+    } else if (gameMode) RENDER_OPTS.clouds = 0;
     else weather.update(dt, RENDER_OPTS, poolShade);
     if (poolShade > 0) {
       const keep = 1 - 0.4 * poolShade;
@@ -8507,8 +8477,8 @@
     const next = daylight.phaseAt(hour);
     if (next !== phase) setPhase(next);
     if (DEBUG) syncDaylightDebug(hour);
-    critters.update(dt, elapsed, RENDER_OPTS.day, RENDER_OPTS.stars, fire.k, 1);
-    if (!gameMode) updateClouds(dt);
+    if (!cloudPlaying()) critters.update(dt, elapsed, RENDER_OPTS.day, RENDER_OPTS.stars, fire.k, 1);
+    if (!gameMode && !cloudPlaying()) updateClouds(dt);
     updateGameRing(dt, elapsed);
     solids.sync();
     if (gameMode) updateRageThrowMap();
@@ -8520,8 +8490,8 @@
     mirrorCave.ripples.update(dt, elapsed);
     updatePortalEffects(entropyLab.phase, dt);
     for (const veil of caveVeils) updatePortalEffects(veil.phase, dt);
-    if (factoryMouth) factoryShield(dt, elapsed);
-    if (bifrostIsle) bifrostGate(dt, elapsed);
+    if (factoryMouth && !cloudPlaying()) factoryShield(dt, elapsed);
+    if (bifrostIsle && !cloudPlaying()) bifrostGate(dt, elapsed);
     if (bcaMouth) bcaVeil(dt, elapsed);
     if (factoryDeparting || bifrostDeparting) return; // The Ooga through a shield and its camera hold through the director fade.
     if (gameMode) prepareClankerStrike();
@@ -8535,7 +8505,7 @@
       rec.time = Math.min(THROW_SWING_TIME + THROW_SETTLE_TIME, rec.time + dt);
       rec.entry.motion.throwProgress = Math.min(1, rec.time / THROW_SWING_TIME);
     }
-    clankers.update(dt);
+    if (!cloudPlaying()) clankers.update(dt);
     for (let i = 0; gameMode && i < clankerCaptures.length; i++) {
       const rec = clankerCaptures[i], entry = rec.entry, cave = rec.cave;
       if (!cave) continue;
@@ -8585,19 +8555,20 @@
       if (!gameMode) timechainIsland.site.turn((elapsed % TIMECHAIN_OUTER_PERIOD) * Math.PI * 2 / TIMECHAIN_OUTER_PERIOD);
       timechainIsland.show(dt);
       // The doorway's walks steer the Ooga before the crew moves it.
-      timechainIsland.gate.update(dt);
+      if (!cloudPlaying()) timechainIsland.gate.update(dt);
     }
-    crew.update(dt, elapsed);
+    if (!cloudHopper.held) crew.update(dt, elapsed);
+    cloudHopper.postUpdate();
     for (let i = 0; i < crew.list.length; i++) {
       const cave = crew.list[i];
       if (cave.root.visible) floatPose(cave, cave.root.position.y - cave.baseY, cave.bodyHeight, cave.phase, elapsed);
     }
     footsteps.update(crew.player);
-    npcSync.update(dt);
+    if (!cloudPlaying()) npcSync.update(dt);
     shareDrivenActor(dt);
     remotes.update(dt);
-    if (ghosts) ghosts.update(dt); // HALLOWEEN
-    else if (ghostEntry) ghostEntry.update(dt); // HALLOWEEN
+    if (!cloudPlaying()) { if (ghosts) ghosts.update(dt); // HALLOWEEN
+      else if (ghostEntry) ghostEntry.update(dt); } // HALLOWEEN
     if (poolEffectsActive) {
       mempoolIsland.wildlife.update(dt, poolEffectsTime);
       for (const cave of crew.list) if (cave.root.visible) {
@@ -8613,18 +8584,17 @@
         mempoolIsland.water.wake(animal.root, p.x, p.y, p.z, radius * 2, radius);
       }
     }
-    dockStairs.update(dt, pilot.player);
     updateRoomSigns(dt);
     updateLazyBedding();
     pile.update(dt);
     const player = pilot.player;
-    if (player && !pilot.poseHeld && player.root.position.y - player.baseY < ABYSS_RESPAWN_Y && abyssAt(player.root.position.x, player.root.position.z, player.root.position.y - player.baseY)) {
+    if (player && !cloudHopper.active && !pilot.poseHeld && player.root.position.y - player.baseY < ABYSS_RESPAWN_Y && abyssAt(player.root.position.x, player.root.position.z, player.root.position.y - player.baseY)) {
       loseAbyssAmmo(player);
       respawnAtPile();
     }
     else if (!player && !pilot.poseHeld && pilot.freeFalling && camera.position.y - CLOSE_VIEW.eyeHeight < ABYSS_RESPAWN_Y && abyssAt(camera.position.x, camera.position.z, camera.position.y - CLOSE_VIEW.eyeHeight)) respawnAtPile();
     updatePlayerCave(player);
-    if (player && player.jet && !jetpackAllowed(player)) {
+    if (player && player.jet && !cloudHopper.held && !jetpackAllowed(player)) {
       crew.removeJetpack(player);
       pilot.showAct();
       hud.toast("No jetpacks under ground");
@@ -8659,20 +8629,25 @@
     stepTweens(dt);
     if (chalkboard.openNow) { /* Keep the exact camera and controlled actor pose until the board closes. */ }
     else if (clankerPlay.active) clankerPlay.update(dt);
-    else pilot.update(dt);
-    // The whitepaper's monolith rising and the view gliding to it, while it holds the view.
-    wpUpdate(dt);
+    else if (!cloudHopper.fallView()) pilot.update(dt);
+    // Whitepaper events wait while Cloud Hopper owns the camera.
+    if (!cloudHopper.active) wpUpdate(dt);
     // The doorway's views (the keypad's, the swoop into the eyes and back out) take over from the pilot's.
-    timechainIsland.gate.view(dt);
+    if (!cloudPlaying()) timechainIsland.gate.view(dt);
     // Tess moves after the view is set, so a tour's glide has the last word on it.
-    islandGuide.update(dt, elapsed);
+    if (!cloudHopper.active) islandGuide.update(dt, elapsed);
     timechainIsland.site.view(camera.position);
     for (let i = 0; i < signDetails.length; i++) {
       const sign = signDetails[i], dx = camera.position.x - sign.x, dy = camera.position.y - sign.y, dz = camera.position.z - sign.z;
       const limit = sign.node.geometry === sign.pixels ? 20 : 16;
       sign.node.geometry = dx * dx + dy * dy + dz * dz < limit * limit ? sign.pixels : sign.solid;
     }
-    updateBirdsEyeCutaway(dt);
+    if (!cloudPlaying()) updateBirdsEyeCutaway(dt);
+    else {
+      clearCutawayHidden(); RENDER_OPTS.cutawayMaxY = 1e6; RENDER_OPTS.birdsEyeCutaway = false;
+      RENDER_OPTS.cutawayFade = RENDER_OPTS.cutawayRockMix = RENDER_OPTS.cutawayRegionCount = 0;
+      cloudMask();
+    }
     updateAreaLabel();
     if (POSITION_DEBUG && elapsed >= positionDebugNext) {
       positionDebugNext = elapsed + 0.1;
@@ -8705,6 +8680,7 @@
   };
   // Every visitor controls only their assigned Ooga and its companion.
   const mayDriveOoga = (cave) => {
+    if (cloudHopper?.active && cave !== cloudHopper.actor) return "Finish Cloud Hopper before changing Oogas";
     if (ghosts && ghosts.waiting) return "You're in the waiting room until this hunt ends"; // HALLOWEEN: the hunt's waiting room
     return BL.net.mayDrive(cave.traits.name);
   };
@@ -8942,8 +8918,14 @@
   // HALLOWEEN: the entry owns its pending load and discovery subscriptions for this visit alone.
   const createGhostEntry = () => {
     if (!GHOSTS_WANTED) return;
+    const start = root.children.length;
     ghostEntry = BL.ghostEntry.create({ root, camera, island, npcSync, addTarget, removeTarget, hud, fx,
-      attach: () => (ghosts = BL.halloween.create(ghostHub())) });
+      attach: () => {
+        const first = root.children.length;
+        ghosts = BL.halloween.create(ghostHub()); cloudRememberNodes(first);
+        return ghosts;
+      } });
+    cloudRememberNodes(start);
   };
   const ghostHub = () => ({
     root, camera, renderer, fx, hud, crew, island, npcSync, coarse: COARSE, closedZones: closedCaveZones, debug: DEBUG, params, guide: islandGuide,
@@ -9061,6 +9043,7 @@
   // Both body kinds share position, health and zone transport. Gorilla locomotion
   // reuses six numbers so climbing, swimming and running survive the handoff.
   const shareDrivenActor = (dt) => {
+    if (cloudHopper?.active) return;
     const gorilla = clankerPlay && clankerPlay.player, driven = gorilla || crew.player;
     BL.net.setBody(gorilla ? gorilla.netBody : driven ? driven.traits.name : null);
     if (!driven) return;
@@ -9088,12 +9071,14 @@
   // Signed-in players are shown where this one is: the same zone while driving, every place on the island
   // while looking round free (no zone, no voice).
   const remoteShown = (rec) => {
+    if (cloudPlaying()) return false;
     if (ghosts && ghosts.down(rec.id)) return false; // HALLOWEEN: a player gone down lies under their grave
     const net = BL.net.state;
     if (net.body) return rec.zone === net.zone;
     return BL.remotePlayers.onIsland(rec.zone);
   };
   const drawExtra = (ctx2d, project) => {
+    if (cloudPlaying()) return;
     crew.drawDrops(ctx2d, project);
     remotes.drawNames(ctx2d, project, gameMode);
     if (ghosts) ghosts.drawOverlay(ctx2d, project); // HALLOWEEN
@@ -9139,6 +9124,7 @@
   // One solid mask spans both islands, the dais and fruit contact. A cheap extent check keeps the
   // Mempool grid out of the HUB's per-pixel rock texture pass.
   const cameraPoolNear = (x, z) => {
+    if (cloudPlaying()) return false;
     const dx = x - mempoolIsland.place.x, dz = z - mempoolIsland.place.z, reach = poolModels.SITE.reach + 1;
     return dx * dx + dz * dz < reach * reach;
   };
@@ -10880,6 +10866,7 @@
   // frame becoming 19 ms; 30 Hz spent about 19 ms on every other frame.
   const SIGHT_RECOMPUTE_HZ = 15;
   const overlay = (dt) => {
+    if (cloudPlaying()) { fx.drawOverlay(dt, cloudHopper.drawOverlay); return; }
     if (poolBlockHovered) showPoolBlockTooltip();
     else if (pileHovered) showPileTooltip();
     // World-anchored sleeping marks share the guide visibility cadence; their particles still move every frame.
@@ -11012,6 +10999,12 @@
     location.reload();
   };
   const onKey = (e) => {
+    if (cloudHopper?.active) {
+      if (e.key === "Escape") { e.preventDefault(); if (!e.repeat) cloudHopper.exit(); }
+      else if (!cloudHopper.held && (e.key === "j" || e.key === "J") && !e.repeat) toggleJetpack();
+      else if (!cloudHopper.held && e.key === "0" && !e.repeat) pilot.resetCamera();
+      return;
+    }
     // Reading the poster: Space and the arrows step it, Escape hands the view back.
     if (wpRead) {
       if (e.key === "Escape") { if (!e.repeat) wpReadEnd(); }
@@ -11375,7 +11368,7 @@
       wpContextOn = true;
     }
     presets = { pile: PILE_VIEW, gate: GATE_VIEW };
-    pilot = pilotMod.create({ renderer, canvas: ctx.canvas, camera, hud, presets, landing: "pile", pitch: [PITCH_MIN, PITCH_MAX], dist: [DIST_MIN, DIST_MAX], follow: FOLLOW, fly: FLY, clampTarget, clampCamera, observeOrbit: position => clampCamera(position, 0), ceilingAt, birdsEyeMin: BIRDS_EYE_MIN, birdsEyeCeiling, releaseView: releaseCameraView, enterFreeView: enterFreeCameraView, coarse: COARSE, onFreeAction: freeAction, jetpackStatus: jetpackHudStatus, mayPossess: mayDriveOoga, combatOnly: () => gameCombatOnly, close: { ...CLOSE_VIEW, maxStep: STEP_MAX, groundAt: playerSupportAt, visualGroundAt: visualSupportAt, sleepEyeFloorAt, zone: () => playerCaveIndex } });
+    pilot = pilotMod.create({ renderer, canvas: ctx.canvas, camera, hud, presets, landing: "pile", pitch: [PITCH_MIN, PITCH_MAX], dist: [DIST_MIN, DIST_MAX], follow: FOLLOW, fly: FLY, clampTarget, clampCamera, observeOrbit: (position, dt) => clampCamera(position, 0, CLEARANCE, false, dt), ceilingAt: (x, z, y, cave) => cloudPlaying() ? Infinity : ceilingAt(x, z, y, cave), birdsEyeMin: BIRDS_EYE_MIN, birdsEyeCeiling, releaseView: releaseCameraView, enterFreeView: enterFreeCameraView, coarse: COARSE, onFreeAction: freeAction, jetpackStatus: jetpackHudStatus, mayPossess: mayDriveOoga, combatOnly: () => gameCombatOnly, cameraTargets: () => !cloudPlaying(), fixedFollow: cloudPlaying, close: { ...CLOSE_VIEW, maxStep: STEP_MAX, groundAt: playerSupportAt, visualGroundAt: visualSupportAt, sleepEyeFloorAt, zone: () => playerCaveIndex } });
     chalkboard = BL.chalkboard.create({
       renderer,
       onOpen: () => { pilot.setActive(false); pilot.controls.reset(); input.reset(); hud.tooltip.hide(); },
@@ -11444,14 +11437,18 @@
     fireRigs = [];
     firePitRig = null;
     yield* pause(slice);
+    let cloudNodeStart = root.children.length;
     headquarters = buildHeadquarters();
+    cloudRememberNodes(cloudNodeStart);
     yield* pause(slice);
     const bedrolls = headquarters.mattresses;
     headquarters.sleepAnchors = bedrolls;
     yield* pause(slice);
     for (const slot of caves.slots) {
       const m = island.mouths.find((mouth) => mouth.id === slot.id);
+      cloudNodeStart = root.children.length;
       addTarget(buildMouth(slot, m), { kind: "cave", slot, priority: 1 }, { radius: 2.6 });
+      cloudRememberNodes(cloudNodeStart);
       yield* pause(slice);
       claim(m.x, m.z, 3.5);
       if (workCave(slot)) {
@@ -11470,10 +11467,12 @@
       return { x, z, ry: Math.atan2(-x, -z) };
     }).filter(Boolean);
     buildRim();
+    cloudNodeStart = root.children.length;
     mempoolIsland = yield* buildMempoolIsland(slice);
     yield* pause(slice);
     timechainIsland = yield* buildTimechainIsland(slice);
     bifrostIsle = BL.scenes.bifrost ? yield* buildBifrostIsle(archLamp, slice) : null;
+    cloudRememberNodes(cloudNodeStart);
     const firePos = buildFire();
     yield* pause(slice);
     fire = lamps[lamps.length - 1];
@@ -11511,9 +11510,13 @@
     addDressingLights();
     buildPilePosts();
     plantPalms();
+    cloudNodeStart = root.children.length;
     raiseIslets();
+    cloudRememberNodes(cloudNodeStart);
     yield* pause(slice);
+    cloudNodeStart = root.children.length;
     buildLife();
+    cloudRememberNodes(cloudNodeStart);
     yield* pause(slice);
     yield* scatter(slice);
     // The library comes after the seeded scenery, so its ground claim moves nothing already placed.
@@ -11547,10 +11550,19 @@
       ringLanterns.push(node);
     }
     spawnMagazinePickup();
+    cloudNodeStart = root.children.length;
     critters = crittersMod.create({ root, renderer, flowers: scenery.filter((o) => o.prop === "flower" && o.active), fire: firePos, secondaryFire: { x: 0, y: island.headquarters.floor, z: 0 }, meadowRadius: MEADOW, heightAt: island.surfaceAt, activeAt: effectsActiveAt });
+    cloudRememberNodes(cloudNodeStart);
     mark("props");
     const shared = { root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, overlayVisible: matrixOverlayVisible, zzzVisible: sleepMarksVisible, tickerAt: TICKER_AT, buildSpots: buildSpotsList, walkIn: WALK_IN, clampDrag, viewYaw: PILE_VIEW.yaw, bedrolls, pileScale: PILE_SCALE, pileY: ALTAR_HEIGHT + 0.02, matrixLivingPile: true, onLayout: layoutPile, crateRadius: () => Math.max(4.4, altar.platformRadius + 0.8), groundAt: playerSupportAt, ceilingAt, wanderSpot, walkable, flyable, glideJetCeiling, useNear, abyssAt, abyssRespawnY: ABYSS_RESPAWN_Y, seaY: SEA_Y, jetpackAllowed, reticleTarget, phase: () => phase };
     shared.weaponsEnabled = true;
+    shared.jetpackRefills = cave => !(cloudHopper?.active && cave === cloudHopper.actor);
+    shared.jetpackLiftOnly = cave => !!cloudHopper?.active && cave === cloudHopper.actor;
+    shared.autoLedgeJump = cave => !(cloudHopper?.active && cave === cloudHopper.actor);
+    shared.onJump = cave => cloudHopper?.onJump(cave);
+    shared.npcPaused = cloudPlaying;
+    shared.tickerVisible = donationTickerVisible;
+    shared.abyssAt = (x, z, y, actor) => !cloudHopper?.active && abyssAt(x, z, y, actor);
     shared.animationInterval = animationInterval;
     shared.deliverySource = factoryMouth ? factoryMouth.deliverySource : null;
     shared.reloadSlotRadius = () => island.path.debug.ringLoadingRadius;
@@ -11637,7 +11649,7 @@
       if (factoryMouth.hall && island.roofOpening) {
         const roof = island.roofOpening;
         const group = createNode({ position: { x: roof.x, y: roof.y - BL.factoryWindow.AXIS, z: roof.z }, rotation: { x: -Math.PI / 2, y: factoryMouth.mouth.ry, z: 0 } });
-        addChild(root, group); placed.push(group);
+        addChild(root, group); placed.push(group); cloudOffMap.push(group);
         factoryMouth.roofWindow = BL.factoryWindow.create({ group, mouth: factoryMouth.mouth, node: factoryMouth.node, roof });
         factoryMouth.hall.debug.roof = factoryMouth.roofWindow.debug;
       }
@@ -11651,6 +11663,7 @@
       b.phase = BL.labPhase.create(b.group, p, p.opening, p.fieldZ, BIFROST_TINT);
       b.heimdall = BL.bifrostHeimdall.create({ parent: root, x: h.x, y: h.y, z: h.z, heading: h.heading, fx });
       placed.push(b.heimdall.root, b.heimdall.plinth);
+      cloudOffMap.push(b.heimdall.root, b.heimdall.plinth);
       solids.add(b.heimdall.plinth);
       addProp("heimdall", b.heimdall.pick, h.x, h.z, 1.2).weaponType = "none";
     }
@@ -11669,9 +11682,9 @@
       || (!ghosts && !!ghostEntry || !!ghosts && !ghosts.busy) && owner.kind === "halloween" && owner.role === "herald" && owner.active;
     shared.onWeaponImpact = weaponImpact;
     shared.onMeleeStrike = mirrorCave.ripples.strike;
-    shared.aimSurface = mirrorCave.ripples.aimAt;
+    shared.aimSurface = (out, x, y, z) => !cloudPlaying() && mirrorCave.ripples.aimAt(out, x, y, z);
     shared.continueShot = mirrorCave.ripples.continueShot;
-    shared.fireReachable = (x, y, z, toX, toY, toZ, ignoreNode = null, precise = false) => actionReachable(x, y, z, toX, toY, toZ, precise ? 1e-6 : 0.025)
+    shared.fireReachable = (x, y, z, toX, toY, toZ, ignoreNode = null, precise = false) => cloudPlaying() ? island.sightClearAt(x, y, z, toX, toY, toZ) : actionReachable(x, y, z, toX, toY, toZ, precise ? 1e-6 : 0.025)
       && solids.segmentClear(x, y, z, toX, toY, toZ, precise ? 1e-6 : 0.01, precise ? 2e-6 : 0.02, ignoreNode)
       && matrixGateSegmentClear(x, y, z, toX, toY, toZ, precise ? 1e-6 : 0.01, precise ? 2e-6 : 0.02);
     clankerFireReachable = shared.fireReachable;
@@ -11680,7 +11693,7 @@
       && matrixGateSegmentClear(x, y, z, toX, toY, toZ, 0.01, 0.02, true);
     // Cursor selection needs a surface point, not the projectile's clearance
     // margin: that small vertical gap becomes a large miss along a distant floor.
-    shared.cursorReachable = (x, y, z, toX, toY, toZ) => actionReachable(x, y, z, toX, toY, toZ, 0.001)
+    shared.cursorReachable = (x, y, z, toX, toY, toZ) => cloudPlaying() ? island.sightClearAt(x, y, z, toX, toY, toZ) : actionReachable(x, y, z, toX, toY, toZ, 0.001)
       && solids.segmentClear(x, y, z, toX, toY, toZ, 0.001, 0.002)
       && matrixGateSegmentClear(x, y, z, toX, toY, toZ, 0.001, 0.002);
     shared.inBananas = inBananas;
@@ -11817,7 +11830,7 @@
     shared.residentPose = (cave, dt) => grabbedOogaPose(cave) || timechainResidentPose(cave, dt);
     shared.releaseGrabbed = (cave) => cave.grabbedBy && finishClankerRider(cave.grabbedBy, false);
     // Signed-in visitors elsewhere, as the Oogas they drive; the crew walks round them.
-    shared.outsideActors = () => remotes.actors();
+    shared.outsideActors = () => cloudPlaying() ? CLOUD_NO_ACTORS : remotes.actors();
     shared.outsideActorHeight = REMOTE_BODY_HEIGHT;
     shared.characterModel = takePreparedCharacter;
     yield* pause(slice);
@@ -12055,6 +12068,7 @@
         if (wpRead) wpZoomBy(Math.exp(dy * 4e-3));
       },
       onDoubleTap: (hit, p) => {
+        if (cloudHopper?.active) return;
         if (factoryDeparting || bifrostDeparting || islandGuide.holding) return;
         // While the paper is read, a double tap on it steps the zoom in.
         if (wpRead) {
@@ -12078,10 +12092,17 @@
     entering = false;
     enteringTween = null;
     now = 0;
-    hud.onPreset(name => { if (!factoryDeparting && !bifrostDeparting && !islandGuide.holding) navigate(name); });
+    hud.onPreset(name => { if (!cloudHopper?.active && !factoryDeparting && !bifrostDeparting && !islandGuide.holding) navigate(name); });
     hud.setDetachedView("pile");
     hud.setDestinations(["pile", "lab", "mirror", "underground", "basement", "mempool", "factory", "arcade", "bca", "gate", "bifrost", "timechain"]);
     hud.onAction((action, value) => {
+      if (cloudHopper?.active) {
+        if (cloudHopper.held) return false;
+        if (action === "act") pilot.action();
+        else if (action === "jetpack-toggle") toggleJetpack();
+        else if (action === "reset-view") pilot.resetCamera();
+        return false;
+      }
       if (factoryDeparting || bifrostDeparting || islandGuide.holding) return false;
       if (action === "wp-next") return wpStep(1);
       if (action === "wp-prev") return wpStep(-1);
@@ -12288,6 +12309,7 @@
     yield* pause(slice);
     // Tess greets a newcomer once a page and shows them round; nothing she does starts while the island is busy. She
     // greets only a visit that lands on the island's own view, not one sent to a place or walked back out of a cave.
+    cloudNodeStart = root.children.length;
     islandGuide = BL.hubGuide.create({
       parent: root, input, fx, camera, pilot, visitor: () => crew.player, world, hud, coarse: COARSE,
       landing: !ctx.place && !preloadedView && !returningCharacter && ctx.from !== "bifrost",
@@ -12297,6 +12319,28 @@
       targets: { totems: totems.map((t) => { const p = t.owner.node.position; return { x: p.x, y: p.y + t.eyeTop, z: p.z }; }).sort((a, b) => a.x - b.x) }
     });
     yield* pause(slice);
+    cloudRememberNodes(cloudNodeStart);
+    cloudIsland = BL.cloudHopperIsland.create({ root, island, solids });
+    cloudPile = createNode({ geometry: pile.core.geometry });
+    cloudPileSolids = BL.solidProps.create(); cloudPileSolids.add(cloudPile);
+    cloudFinishFruit = createNode({ visible: false, sightHidden: true });
+    for (let i = 0; i < 9; i++) {
+      const fruit = models.banana(), a = i * Math.PI * 2 / 6, r = i < 6 ? 0.35 : 0.16;
+      setVec(fruit.position, Math.sin(a) * r, ALTAR_HEIGHT + (i < 6 ? 0.08 : 0.21), Math.cos(a) * r);
+      setVec(fruit.scale, 0.45, 0.45, 0.45); fruit.rotation.y = a;
+      addChild(cloudFinishFruit, fruit);
+    }
+    addChild(root, cloudFinishFruit);
+    cloudHopper = BL.cloudHopper.create({ root, dock: cloudDock, crew, pilot, hud, renderer, camera, seaY: SEA_Y,
+      move: cloudMove, mode: cloudMode, pileSurface: cloudPileSurface, mainlandRadius: island.radius,
+      finish: () => ({ x: 0, y: ALTAR_HEIGHT + 2, z: 0 }),
+      pileTop: () => pile.shown > 0 ? pile.core.position.y + pile.core.scale.y * pileTopY : ALTAR_HEIGHT + 0.23,
+      refusal: () => ghosts?.busy || gameMode ? "Finish the island event before playing Cloud Hopper"
+        : wpTime >= 0 || wpRead || wpReturn >= 0 || islandGuide.holding || entering || factoryHeld || factoryDeparting || bifrostDeparting
+          ? "Finish the current tour before playing Cloud Hopper" : clankerPlay.active ? "Choose an Ooga to play Cloud Hopper" : null });
+    addTarget(cloudHopper.cabinet, { kind: "cloud-hopper" });
+    solids.add(cloudHopper.cabinet);
+    hubScene.debug.cloudHopper = cloudHopper;
     hubScene.debug.tess = islandGuide;
     // Tess wears every tier of her detail in her first frames, so each is on the GPU before she comes close: build
     // them here, a mesh a slice, rather than in her first frame.
@@ -12333,6 +12377,7 @@
   };
   const leave = (destroy = false) => {
     wpVisit++; wpSignal = null;
+    cloudHopper?.cancel();
     rememberCharacterLocations();
     stopLazyBedding();
     if (reuseHub && !destroy) return suspendHub();
@@ -12341,6 +12386,10 @@
     wpReturn = -1;
     heldHub = false; heldDebug = null;
     if (destroy && wpContextOn) { hubCanvas.removeEventListener("contextmenu", wpContextMenu); hubCanvas = null; wpContextOn = false; }
+    cloudHopper?.dispose(); cloudIsland?.dispose();
+    cloudPileSolids?.dispose();
+    cloudHopper = cloudIsland = cloudDock = cloudPile = cloudPileSolids = cloudFinishFruit = null;
+    cloudOffMap.length = 0; cloudHidden.clear();
     actorTransition.sourceRoot = actorTransition.sourceHead = null;
     factoryWalk.cave = null;
     resetRageThrowMap(false);
@@ -12533,8 +12582,7 @@
     CLANKER_HIT.node = CLANKER_HIT.owner = null;
     viewPoseActor = grabSupportEntry = clankerSupportActor = clankerPassingEntry = preparingGuideActor = null;
     // Drop every per-visit ref but the cached island.
-    dockStairs.dispose();
-    terrainRampRoof = pathNode = altar = lawn = life = hud = hooks = input = pilot = fx = cameraCover = bananaCover = solids = rockGuides = objectGuides = sightGuides = bananaGuides = pileGuides = platformGuides = mirrorGuides = pile = crew = crates = critters = clock = presets = mirrorCave = matrixCave = matrixControl = fire = headquarters = positionDebug = dockStairs = overlayCanvas = null;
+    terrainRampRoof = pathNode = altar = lawn = life = hud = hooks = input = pilot = fx = cameraCover = bananaCover = solids = rockGuides = objectGuides = sightGuides = bananaGuides = pileGuides = platformGuides = mirrorGuides = pile = crew = crates = critters = clock = presets = mirrorCave = matrixCave = matrixControl = fire = headquarters = positionDebug = overlayCanvas = null;
     beasts.clear();
     magazine = magazineState = weather = footsteps = mempoolIsland = timechainIsland = clankers = clankerPlay = null;
     hubScene.input = hubScene.debug = null;
@@ -12558,6 +12606,8 @@
     hubScene.islandGeometry(set);
   };
   const islandGeometry = (set) => {
+    if (cloudHopper) for (const geometry of cloudHopper.cabinet.frames) set.add(geometry);
+    cloudHopper?.liveGeometry(set);
     if (islandGuide) islandGuide.liveGeometry(set);
     if (ghosts) ghosts.liveGeometry(set); // HALLOWEEN
     else if (ghostEntry) ghostEntry.liveGeometry(set); // HALLOWEEN
@@ -12598,8 +12648,9 @@
     get inMotion() {
       // A crossing through the Timechain Sphere's doors keeps full rate, so its walk and swoop finish smoothly, and so
       // does a walk through the Factory's shield and its dissolve.
+      if (cloudHopper?.active) return true;
       if (timechainIsland && timechainIsland.gate.busy) return true;
-      if (factoryWalk.phase || factoryWalk.still > 0 || dockStairs.inMotion) return true;
+      if (factoryWalk.phase || factoryWalk.still > 0) return true;
       if (ghosts && ghosts.inMotion) return true; // HALLOWEEN
       if (pile.inMotion || fx.inMotion || poolEffectsActive && (weather.active || mempoolIsland.water.active) || magazine && magazine.revealed || mirrorCave.ripples.active || mirrorCave.body.active) return true;
       if (!entropyLab.phase.paused && (entropyLab.phase.ripples.active || entropyLab.phase.body.contacts || entropyLab.phase.body.active)) return true;
