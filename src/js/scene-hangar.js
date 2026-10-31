@@ -48,6 +48,16 @@
   };
   // In from the hall: on the landing a step in from the door, facing down the runway, the view in the doorway behind it.
   const ARRIVAL = { position: { x: 0, y: DOOR.y, z: DOOR.z - 3.4 }, target: { x: 0, y: DOOR.y + 1, z: DOOR.z - 3.4 }, yaw: 0, pitch: 0.12, dist: 2.8 };
+  // The walk through the door's shield either way, as the Factory's gate walks it (`factoryWindow.GLIDE`): the door as
+  // the walk takes it (its middle, the way out through it, its shield), how far in from it an arrival stands, how near
+  // the door a step back from there may come before it walks out (OUT_SLACK), and the view's reach as an Ooga comes in
+  // (IN_VIEW, IN_PITCH). The walk's phases: on in from the hall (WALK_ON) and out to it (WALK_OFF), handing over
+  // `world.hangarCrossing`. `walk` is the Factory's: which way, how long, where the Ooga stood, whether it is through,
+  // its beat in the shield, and the last frame of the place left over the first (`grab`, `still`, `hold`).
+  const DOOR_WAY = { x: DOOR.x, z: DOOR.z, ox: -Math.sin(DOOR.turn), oz: -Math.cos(DOOR.turn), plane: DOOR.plane };
+  const DOOR_IN = -((ARRIVAL.position.x - DOOR_WAY.x) * DOOR_WAY.ox + (ARRIVAL.position.z - DOOR_WAY.z) * DOOR_WAY.oz), OUT_SLACK = 1.2, IN_VIEW = 3.4, IN_PITCH = 0.45;
+  const WALK_ON = 1, WALK_OFF = 2, ARRIVE = { x: 0, z: 0, yaw: 0 };
+  const walk = { phase: 0, t: 0, x: 0, z: 0, through: false, beat: 0, grab: false, still: 0, hold: 0, settle: false };
   // The hall's own light, warm, and past the launch shield space, as ₿IFRÖST's night shows it: the sky pass paints its
   // deep gradient, its twinkling stars and a moon low in the tunnel's end; `sun` is the sun's colour, which the night
   // hides.
@@ -125,7 +135,8 @@
   const BUTTON_PRESS = { open: -1.1, swing: 0.12, hold: 0.9, dip: 0.012, again: 0.6 };
   // The forklift's power: how its lit parts glow off and on (`lit`); its beacon's dome off and running, and how bright
   // and how narrow its beam's flash is as it passes the view (`flash`, `sharp`); how fast the beacon turns (rad/s), the
-  // key (`turn`, rad/s) and the charge needle (`needle`, rad/s, so it sweeps up as the drive spins up); how long the key
+  // key (`turn`, rad/s) and the charge needle (`needle`, rad/s, so it sweeps up as the drive spins up), and how fast the
+  // speed needle follows the speed (`speedo`, a second); how long the key
   // holds at START while the drive spins up (`crank`, s) and when the dash lights at the chime (`ready`, s); and the
   // beacon's light: how far out its beam's spot falls (`reach`, m), how far it carries and its colour.
   // How high the forks lift over their rest (the forklift's units) and how fast (units a second), and how far the fork
@@ -139,13 +150,13 @@
   const DRIVE = { forward: 3.2, reverse: 1.6, accel: 2.2, brake: 5, coast: 1.8, tip: 0.25 };
   // What the driver is told once it is ready.
   const DRIVE_HINT = COARSE ? "Stick drives · tap the fork stick for the forks · tap the wheel to honk" : "W S drive · A D steer · R F forks · H horn · Space gets out";
-  const POWER = { lit: [0.12, 1], dome: [0.2, 0.7], flash: 2.6, sharp: 8, rate: 9, turn: 9, needle: 2.4, crank: 0.75, ready: 0.9, reach: 1.1, radius: 7, color: [1.6, 0.95, 0.22] };
+  const POWER = { lit: [0.12, 1], dome: [0.2, 0.7], flash: 2.6, sharp: 8, rate: 9, turn: 9, needle: 2.4, speedo: 8, crank: 0.75, ready: 0.9, reach: 1.1, radius: 7, color: [1.6, 0.95, 0.22] };
   // How near the hold-short bar the launch shield answers whoever walks up to it, and how far back they must step before
   // it answers again.
   const SHIELD_NEAR = 0.6, SHIELD_REARM = 3;
 
   let renderer, game, world, go, root, camera, hud, hooks, input, pilot, fx, agentPlay = null;
-  let people = null, avatar = null, playerWorld = null, scene = null, leaving = false, dust = null, unsubscribeAccount = null, remotes = null, footsteps = null, node = null;
+  let canvas = null, people = null, avatar = null, playerWorld = null, scene = null, leaving = false, dust = null, unsubscribeAccount = null, remotes = null, footsteps = null, node = null;
   let unsubscribeFeed = null, boardsDirty = false, audio = null, actPrompt = false, soundPanel = null;
   const NO_ACTORS = [];
   // What walks the hall besides the Oogas, for them to keep clear of: the other players' Oogas, Kortik's Sis and the
@@ -175,13 +186,71 @@
   const targets = [];
 
   // Back to the hall as the same Ooga, onto the walkway at the door, nothing held or hovered here carried out.
-  const leaveHangar = () => {
+  const leaveHangar = (instant = false) => {
     if (leaving) return;
     world.pilotDetached = !pilot.player;
     world.pilot = pilot.player ? pilot.player.traits.name : null;
-    if (!go("factory")) return;
+    if (!go("factory", null, instant)) return;
     leaving = true;
     pilot.controls.reset(); input.reset(); pilot.setActive(false); hud.tooltip.hide();
+  };
+  // On foot on the landing, heading out into the door within the walk's reach of its shield (but not from a step back
+  // from where an arrival stands), or just through it in a long frame.
+  const walkingOut = (p, previousX, previousZ, dt) => {
+    const G = BL.factoryWindow.GLIDE, d = DOOR_WAY, dx = p.x - d.x, dz = p.z - d.z, past = dx * d.ox + dz * d.oz + d.plane, side = dz * d.ox - dx * d.oz;
+    const toward = ((p.x - previousX) * d.ox + (p.z - previousZ) * d.oz) / Math.max(dt, 1e-3);
+    return Math.abs(p.y - avatar.baseY - DOOR.y) < 0.3 && Math.abs(side) < DOOR.half - 0.3 && past < 1
+      && past > Math.max(-G.reach, d.plane - DOOR_IN + OUT_SLACK) && toward > G.moving;
+  };
+  // On in through the door's shield from the hall: as far to its side and as far past it as the Ooga went through the
+  // hall's, facing down the runway, the view square behind it, and the walk on.
+  const walkIn = (c) => {
+    const G = BL.factoryWindow.GLIDE, at = BL.factoryWindow.arrival(DOOR_WAY, clamp(c.side, -1.2, 1.2), clamp(c.past, 0, G.past), ARRIVE);
+    pilot.navigate({ yaw: at.yaw, pitch: clamp(c.pitch, FOLLOW.pitch[0], IN_PITCH), dist: clamp(c.dist, FOLLOW.min, IN_VIEW), position: { x: at.x, y: DOOR.y, z: at.z } });
+    pilot.orbit.tDist = ARRIVAL.dist;
+    const p = avatar.root.position;
+    Object.assign(walk, { phase: WALK_ON, t: 0, x: p.x, z: p.z, through: false });
+  };
+  // The walk, a frame at a time, after the pilot has read the visitor's input and before the crew moves, as the
+  // Factory's gate walks it: down the door's middle at an even pace, the view swinging round behind; out through the
+  // shield it stands a beat, then the hall takes over without a fade. Anything else moving the Ooga, or a walk that runs
+  // long, lets go; so does reaching where an arrival stands.
+  const doorStep = (dt) => {
+    const w = walk, G = BL.factoryWindow.GLIDE, d = DOOR_WAY, p = avatar.root.position, o = pilot.orbit, off = w.phase === WALK_OFF;
+    const dx = p.x - d.x, dz = p.z - d.z, past = dx * d.ox + dz * d.oz + d.plane, side = dz * d.ox - dx * d.oz;
+    w.t += dt;
+    const moved = Math.hypot(p.x - w.x, p.z - w.z);
+    if (people.player !== avatar || moved > 1.2 || w.t > G.limit || !off && d.plane - past >= DOOR_IN) {
+      w.phase = 0;
+      w.through = false;
+      w.settle = people.player === avatar;
+      people.steer(0, 0, 0, 0, 0);
+      return;
+    }
+    w.x = p.x; w.z = p.z;
+    const k = off ? G.ahead : -G.ahead, wx = d.ox * k + d.oz * side * 0.6, wz = d.oz * k - d.ox * side * 0.6, l = Math.hypot(wx, wz);
+    people.steer(wx / l, wz / l, 0, 1, 0, G.speed);
+    const behind = off ? Math.atan2(-d.ox, -d.oz) : Math.atan2(d.ox, d.oz);
+    o.tYaw = o.yaw + Math.atan2(Math.sin(behind - o.yaw), Math.cos(behind - o.yaw));
+    if (!off) return;
+    if (!w.through && past >= 0) {
+      w.through = true;
+      w.beat = G.beat;
+      scene.gate.phase.ripples.pulse(side, p.y - avatar.baseY - DOOR.y + 1, 0);
+    }
+    if (!w.through || past < G.through / 2 && moved > 0.005) return;
+    if (w.beat > 0) {
+      w.beat -= dt;
+      people.steer(0, 0, 0, 0, 0);
+      return;
+    }
+    world.hangarCrossing = BL.factoryWindow.crossing(d, p, o);
+    w.phase = 0;
+    w.grab = true;
+    people.steer(0, 0, 0, 0, 0);
+    leaveHangar(true);
+    // A switch the director refuses (another under way) leaves the Ooga in the hangar.
+    if (!leaving) { world.hangarCrossing = null; w.through = w.grab = false; }
   };
   const onKey = (e) => {
     if (e.key === "0" && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && !leaving) return pilot.resetCamera();
@@ -241,6 +310,8 @@
     // The charge needle on its dial, at E while it is off (the dial's angle as painted, turned onto the face), drawn
     // after the dial's picture on Canvas 2D.
     const needle = at(FL.needle(), FL.CHARGE.at, { rotation: { x: FL.CHARGE.tilt, y: 0, z: -FL.CHARGE.from }, sightHidden: true, depthBias: -0.2 });
+    // And the speed needle on its dial, at 0 while it stands.
+    const speedo = at(FL.speedNeedle(), FL.SPEED.at, { rotation: { x: FL.SPEED.tilt, y: 0, z: -FL.SPEED.from }, sightHidden: true, depthBias: -0.2 });
     lit.glow = POWER.lit[0];
     beacon.glow = POWER.dome[0];
     screen.visible = false;
@@ -250,10 +321,10 @@
     const C = FL.CHAIN, ring = FL.chainLink(), count = Math.floor((C.sheave - C.anchor + Math.PI * C.r + C.sheave - C.carriage) / C.pitch), links = [];
     for (const side of [-1, 1]) for (let i = 0; i < count; i++) links.push(createNode({ geometry: i % 2 ? ring.b : ring.a, position: { x: side * C.x, y: 0, z: 0 }, sightHidden: true }));
     addChild(root, body, createNode({ geometry: FL.mast() }), inner, createNode({ geometry: FL.fittings() }), lit,
-      ...wheels, carriage, ...links, steering, stick, needle, beacon, button, cover, key, screen, ...doors, ...decals.body.map(picture));
+      ...wheels, carriage, ...links, steering, stick, needle, speedo, beacon, button, cover, key, screen, ...doors, ...decals.body.map(picture));
     const sn = Math.sin(turn), cs = Math.cos(turn), [, sy, sz] = P.seat.map((v) => v * FL.SCALE);
     const seat = { x: x + sz * sn, y: sy + FL.CUSHION * FL.SCALE, z: z + sz * cs, ry: turn + Math.PI, floor: 0, sitter: null, walkAt: { x: 0, z: 0 } };
-    const f = { root, body, wheels, inner, carriage, links, lift: 0, liftTo: -1, lifting: false, stick, needle, steering, helm, steer: 0, speed: 0, side: 1, getInZ: 0, beacon, button, cover, doors, key, screen, lit, seat, x, z, sn, cs, buttonY: P.button[1], pressT: -1, on: false, startT: -1, keyTo: 0, sweep: 0 };
+    const f = { root, body, wheels, inner, carriage, links, lift: 0, liftTo: -1, lifting: false, stick, needle, speedo, steering, helm, steer: 0, speed: 0, side: 1, getInZ: 0, beacon, button, cover, doors, key, screen, lit, seat, x, z, sn, cs, buttonY: P.button[1], pressT: -1, on: false, startT: -1, keyTo: 0, sweep: 0 };
     // Space in the seat starts it; running, Space gets out (and switches it off) beside the cab wherever it stands.
     seat.act = () => {
       if (!f.on) { powerOn(f); return true; }
@@ -380,6 +451,9 @@
     // The charge needle: up to its charge as it starts, back to E as it stops.
     const C = BL.forkliftModels.CHARGE, n = f.needle.rotation.z, read = -(C.from + (f.on ? C.level * C.sweep : 0)), swing = POWER.needle * dt;
     f.needle.rotation.z = n + clamp(read - n, -swing, swing);
+    // The speed needle follows how fast it goes, forward or back, in km/h on its dial.
+    const S = BL.forkliftModels.SPEED, kmh = Math.abs(f.speed) * 3.6, aim = -(S.from + Math.min(1, kmh / S.top) * S.sweep);
+    f.speedo.rotation.z += (aim - f.speedo.rotation.z) * Math.min(1, dt * POWER.speedo);
     if (!f.on || f.startT >= 0) return;
     f.sweep += POWER.rate * dt;
     f.beacon.rotation.y = f.sweep;
@@ -1180,6 +1254,11 @@
     boardsDirty = false;
     // The visitor's Ooga: `character=` on a page that opens here, else the one the hall handed over, else a free view.
     const asked = ctx.from === null ? new URLSearchParams(location.search).get("character")?.trim().toLowerCase() : null;
+    // Walked in through the hall's side of the door, the hangar comes on under the hall's last frame, which dissolves away.
+    const crossing = ctx.from === "factory" ? world.hangarCrossing : null;
+    world.hangarCrossing = null;
+    Object.assign(walk, { phase: 0, through: false, beat: 0, grab: false, still: crossing ? 1 : 0, hold: crossing ? BL.factoryWindow.GLIDE.still : 0, settle: false });
+    canvas = ctx.canvas;
     const named = asked ? contributors.roster.find((c) => c.name.toLowerCase() === asked) : null;
     const returningOwn = pilot.loginViewRestored && BL.net.ownCharacter();
     const picked = returningOwn ? contributors.roster.find(c => c.name === returningOwn.handle)
@@ -1207,7 +1286,10 @@
       }
       pilot.possess(avatar);
       people.selectWeapon(avatar.weapon.selectedSlot, avatar);
-      if (!pilot.loginViewRestored) pilot.navigate(ARRIVAL);
+      if (!pilot.loginViewRestored) {
+        if (crossing) walkIn(crossing);
+        else pilot.navigate(ARRIVAL);
+      }
       const heads = Math.max(avatar.headOpen.verts.length, avatar.headClosed.verts.length);
       scene.gate.phase.body.track(avatar.root, avatar.traits.height * 2, heads);
       scene.launch.phase.body.track(avatar.root, avatar.traits.height * 2, heads);
@@ -1298,8 +1380,19 @@
   };
   const update = (dt, elapsed) => {
     const s = scene, drivenHere = people && people.player;
+    const previousX = avatar ? avatar.root.position.x : 0, previousZ = avatar ? avatar.root.position.z : 0;
+    // The hall's last frame dissolves away once the hangar has taken over.
+    if (walk.still > 0 && (walk.hold -= dt) <= 0) walk.still = Math.max(0, walk.still - dt / BL.factoryWindow.GLIDE.dissolve);
     s.fire.unshake(camera);
     pilot.readInput(dt);
+    // The door's walk has the Ooga; once it is done the Ooga stands until the visitor lets go of moving, since the view
+    // has turned round behind it and a key still held may now mean the other way.
+    if (walk.phase) doorStep(dt);
+    else if (walk.settle) {
+      const a = pilot.controls.read();
+      if (people && people.player === avatar && (a.x || a.y)) people.steer(0, 0, 0, 0, 0);
+      else walk.settle = false;
+    }
     if (people) people.update(dt, elapsed);
     // The Ooga driven here never rests inside a crate or a chest (`hangarModels.pushOut`).
     if (drivenHere && !drivenHere.camp.seat) HM.pushOut(drivenHere.root.position, drivenHere.root.position.y - drivenHere.baseY, drivenHere.bodyRadius || 0.35);
@@ -1387,7 +1480,14 @@
     if (!leaving) {
       const through = (p, feet, margin) => Math.abs(p.x - DOOR.x) <= DOOR.half && DOOR.z - p.z <= DOOR.plane + margin && feet > DOOR.y - 0.3 && feet < DOOR.y + DOOR.top;
       if (pilot.player) {
-        if (through(pilot.player.root.position, pilot.player.root.position.y - pilot.player.baseY, 0)) leaveHangar();
+        // On foot heading out over the landing's last stretch, the walk takes it through the door's shield; anything
+        // else in the doorway (an Ooga in the air, say) goes out as it always has.
+        const p = pilot.player.root.position;
+        if (walk.phase) { /* walking itself */ }
+        else if (pilot.player === avatar && walkingOut(p, previousX, previousZ, dt)) {
+          Object.assign(walk, { phase: WALK_OFF, t: 0, x: p.x, z: p.z, through: false });
+          pilot.controls.reset(); input.reset(); hud.tooltip.hide();
+        } else if (through(p, p.y - pilot.player.baseY, 0)) leaveHangar();
       } else if (!avatar) {
         const a = pilot.controls.read();
         if (Math.hypot(a.x, a.y) > 0.05 && through(camera.position, camera.position.y, 0.9)) leaveHangar();
@@ -1400,6 +1500,10 @@
     remotes.drawNames(ctx2d, project);
     scene.sis.overlay(ctx2d, project);
     scene.fire.overlay(ctx2d);
+    // Over everything: the hall's last frame, dissolving off the hangar's first; and the hangar's own, taken once drawn
+    // as the Ooga walks out.
+    BL.factoryWindow.still(ctx2d, walk.still);
+    if (walk.grab) { walk.grab = false; BL.factoryWindow.grab(canvas); }
   };
   const overlay = (dt) => fx.drawOverlay(dt, drawExtra);
 

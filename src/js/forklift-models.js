@@ -276,6 +276,9 @@
   // arc, E at `from` round `sweep` to F (radians on the picture, clockwise as it is painted), and the charge it reads
   // (`level`, 0 to 1) while the forklift runs.
   const CHARGE = { at: dashAt(GAUGES[1][0], GAUGES[1][1], 0.006), tilt: DASH.tilt, r: GAUGES[1][2], from: Math.PI * 1.15, sweep: Math.PI * 0.7, level: 0.86 };
+  // The speed dial's needle, as the charge dial's: its pivot, the panel's tilt, and the dial's arc, 0 at `from` round
+  // `sweep` to `top`, km/h as its figures read.
+  const SPEED = { at: dashAt(GAUGES[0][0], GAUGES[0][1], 0.006), tilt: DASH.tilt, r: GAUGES[0][2], from: Math.PI * 0.75, sweep: Math.PI * 1.5, top: 20 };
   // The key in the ignition, for the scene: where it stands proud of the lock, the panel's tilt, and how far it turns
   // (radians about the lock, clockwise to the driver below 0) to ON and to START, where the lock's marks stand.
   const KEY = { at: dashAt(IGNITION[0], IGNITION[1], 0.012), tilt: DASH.tilt, on: -1, start: -1.45 };
@@ -381,13 +384,12 @@
     flat.push(moved(turnedX(mark, -Math.PI / 2), 0, 0.047, 0));
     return shaded(round, flat);
   });
-  // The charge dial's needle in its own frame, its pivot at the origin and its length along +x on the dial's face (+z
-  // out of it), and the dark cap over its pivot.
-  const needle = cached(() => {
-    const r = CHARGE.r;
-    return shaded([turnedX(turn([[0, 0], [r * 0.12, 0], [r * 0.12, 0.003], [0, 0.004]], 12, "#3a3f47"), Math.PI / 2)],
-      [box({ w: r * 0.74, h: r * 0.09, d: 0.002, color: "#ffffff", emissive: 0.6, offset: { x: r * 0.37 } })]);
-  });
+  // A dial's needle in its own frame, its pivot at the origin and its length along +x on the dial's face (+z out of
+  // it), and the dark cap over its pivot: the charge dial's white (`needle`), the speed dial's orange (`speedNeedle`).
+  const dialNeedle = (r, color, emissive) => shaded([turnedX(turn([[0, 0], [r * 0.12, 0], [r * 0.12, 0.003], [0, 0.004]], 12, "#3a3f47"), Math.PI / 2)],
+    [box({ w: r * 0.74, h: r * 0.09, d: 0.002, color, emissive, offset: { x: r * 0.37 } })]);
+  const needle = cached(() => dialNeedle(CHARGE.r, "#ffffff", 0.6));
+  const speedNeedle = cached(() => dialNeedle(SPEED.r, AMBER, 0.7));
   // The fork stick in its own frame, its pivot in the boot at the origin (`STICK`'s foot): the shaft and the red grip,
   // which the scene leans back as the forks rise and forward as they fall.
   const stick = cached(() => {
@@ -535,22 +537,20 @@
       g.fillStyle = BLACK;
       for (let x = -H; x < W + H; x += H * 0.5) { g.beginPath(); g.moveTo(x, H); g.lineTo(x + H * 0.25, H); g.lineTo(x + H * 0.25 + H, 0); g.lineTo(x + H, 0); g.closePath(); g.fill(); }
     },
-    // The speed dial: its face dark with a steel rim, ticks every unit and a long one every five with its figure, the
-    // last quarter red, and an orange needle on its cap.
+    // The speed dial: its face dark with a steel rim, ticks every unit and a long one every five with its figure, and
+    // the last quarter red (SPEED's arc); its needle is a part of its own (`speedNeedle`).
     gauge: (g, W, H) => {
-      const r = W / 2, at = (q) => Math.PI * 0.75 + q / 20 * Math.PI * 1.5;
+      const r = W / 2, at = (q) => SPEED.from + q / SPEED.top * SPEED.sweep;
       g.fillStyle = "#0c0e12"; g.beginPath(); g.arc(r, r, r * 0.96, 0, TAU); g.fill();
       g.strokeStyle = STEEL; g.lineWidth = W * 0.05; g.stroke();
       g.strokeStyle = "#d8261c"; g.lineWidth = W * 0.06; g.beginPath(); g.arc(r, r, r * 0.74, at(15), at(20)); g.stroke();
       g.strokeStyle = "#ffffff";
-      for (let q = 0; q <= 20; q++) {
+      for (let q = 0; q <= SPEED.top; q++) {
         const a = at(q), long = q % 5 === 0;
         g.lineWidth = W * (long ? 0.03 : 0.014);
         g.beginPath(); g.moveTo(r + Math.cos(a) * r * (long ? 0.6 : 0.68), r + Math.sin(a) * r * (long ? 0.6 : 0.68)); g.lineTo(r + Math.cos(a) * r * 0.8, r + Math.sin(a) * r * 0.8); g.stroke();
         if (long) write(g, String(q), r + Math.cos(a) * r * 0.42, r + Math.sin(a) * r * 0.42, W * 0.12, "#ffffff", W * 0.2);
       }
-      g.strokeStyle = AMBER; g.lineWidth = W * 0.045; g.beginPath(); g.moveTo(r, r); g.lineTo(r + Math.cos(at(3)) * r * 0.7, r + Math.sin(at(3)) * r * 0.7); g.stroke();
-      g.fillStyle = "#3a3f47"; g.beginPath(); g.arc(r, r, r * 0.12, 0, TAU); g.fill();
     },
     // The charge dial: E to F over a red, amber and green arc (CHARGE's sweep), and the bolt under it; its needle is a
     // part of its own (`needle`).
@@ -608,5 +608,5 @@
     };
   };
 
-  BL.forkliftModels = { U, SCALE, PLACES, CUSHION, FOOTPRINT, body, wheel, mast, carriage, fittings, lamps, beacon, steering, key, KEY, needle, CHARGE, stick, STICK, innerMast, CHAIN, chainLink, FORK_DECK, columns, button, cover, doors, decals };
+  BL.forkliftModels = { U, SCALE, PLACES, CUSHION, FOOTPRINT, body, wheel, mast, carriage, fittings, lamps, beacon, steering, key, KEY, needle, CHARGE, speedNeedle, SPEED, stick, STICK, innerMast, CHAIN, chainLink, FORK_DECK, columns, button, cover, doors, decals };
 })();

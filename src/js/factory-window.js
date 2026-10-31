@@ -27,7 +27,8 @@
   const AXIS = SHIELD_Z - 0.5, DEPTH = 0.8;
   // The shield's glyph crests in the emitters' cyan, the factory's CYAN.
   const TINT = hexToRgb("#5fe3ff").map((k) => k / 255);
-  // The walk through the shield, either way (scene-hub.js and scene-factory.js): it takes the played Ooga over in the
+  // The walk through the shield, either way (scene-hub.js and scene-factory.js, and the Lightning Jet Hangar's door from
+  // both sides, scene-factory.js and scene-hangar.js): it takes the played Ooga over in the
   // last `reach` metres before the shield, on its feet and `moving` metres a second or more toward it, and walks it at
   // `speed` of a walk, aiming `ahead` metres down the middle. The scene on the far side takes over with an instant
   // switch, the last frame of the one left held over its first (`still`) and dissolved away over `dissolve`, with the
@@ -54,6 +55,22 @@
     ctx.globalAlpha = Math.min(1, k * k * (3 - 2 * k));
     ctx.drawImage(held, 0, 0, ctx.canvas.width, ctx.canvas.height);
     ctx.restore();
+  };
+  // The same walk through a door turned any way: a door is its middle (`x`, `z`), the way out through it (`ox`, `oz`, a
+  // unit on the ground) and how far before its middle its shield stands that way (`plane`). `crossing` says where a
+  // walker stands as it goes through, to its right (`side`) and beyond the shield (`past`), with the view's pitch and
+  // distance; `arrival` stands it `side` to its right and `past` beyond the shield coming in through the other door,
+  // facing in (`yaw`), written into `out`.
+  const crossing = (door, p, view) => {
+    const dx = p.x - door.x, dz = p.z - door.z;
+    return { side: dz * door.ox - dx * door.oz, past: dx * door.ox + dz * door.oz + door.plane, pitch: view.pitch, dist: view.dist };
+  };
+  const arrival = (door, side, past, out) => {
+    const a = door.plane + past;
+    out.x = door.x - door.ox * a + door.oz * side;
+    out.z = door.z - door.oz * a - door.ox * side;
+    out.yaw = Math.atan2(door.ox, door.oz);
+    return out;
   };
   // The window shows while the eye stands in front of the shield, and no farther from the middle of it than FAR.
   const NEAR = 0.05, FAR = 60, MIDDLE = 1.5;
@@ -349,5 +366,5 @@
     return { root, update, suspend, resume, dispose, debug };
   };
 
-  BL.factoryWindow = { create, relief, grab, still, AXIS, DEPTH, TINT, GLIDE };
+  BL.factoryWindow = { create, relief, grab, still, crossing, arrival, AXIS, DEPTH, TINT, GLIDE };
 })();
