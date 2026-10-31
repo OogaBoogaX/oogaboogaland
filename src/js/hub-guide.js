@@ -19,6 +19,9 @@
   const BL = window.BL = window.BL || {};
   const NAME = "Tess";
   const LINES = {
+    whitepaper: "We start where Bitcoin began! Satoshi published the Bitcoin whitepaper on October 31, 2008. Its monolith stands above the Library of Bitcoin.",
+    whitepaperRead: "Double-click the whitepaper to read it here. The shelves below have more to explore!",
+    newsWhitepaper: "The Library of Bitcoin is open! Above it stands the whitepaper monolith. Double-click its face to read Satoshi's paper.",
     greeting: "Hi! I'm Tess. New here? Want a quick look round the island?",
     again: "Want a look round the island? Or ask me about it.",
     declined: "No problem! Tap me any time for a tour.",
@@ -92,6 +95,7 @@
   // The island tour, one stop a landmark: where the view looks from (`eye`) and at (`look`), and the lines she says
   // there. She hovers between the view and the landmark, off to its right, and her beam lands on `look`.
   const STOPS = [
+    { id: "whitepaper", title: "Bitcoin whitepaper", eye: [-13.8, 12, 12.9], look: [-16.4, 11.4, 15.3], lines: ["whitepaper", "whitepaperRead"] },
     { id: "pile", title: "The pile", eye: [6, 8, 11], look: [0, 1.2, 0], lines: ["pile", "crew"] },
     { id: "totems", title: "Jumbotron and totems", eye: [7, 8, 7], look: [0, 5, 26], lines: ["jumbotron", "totems"] },
     { id: "timechain", title: "Timechain Sphere", eye: [-15, 16, 4], look: [-42, 5, 17], lines: ["timechain", "timechainWalls", "timechainBoards", "timechainSani"] },
@@ -106,6 +110,7 @@
   // and her line. A new feature worth showing a returning visitor is one entry here, added at the top: a visitor's news
   // is everything listed above the newest entry they were last offered.
   const NEWS = [
+    { date: "2026-10-31", at: "whitepaper", line: "newsWhitepaper" },
     { date: "2026-10-22", at: "factory", line: "newsKortik" },
     { date: "2026-10-19", at: "timechain", line: "newsSphereRooms" },
     { date: "2026-10-18", at: "bca", line: "newsBca" },
@@ -199,6 +204,7 @@
   // takes the visitor there when they ask to go, but a question about it is left to the Worker, and "it" or "there"
   // stands for the last place only in a trip ("take me there").
   const PLACES = {
+    whitepaper: ["whitepaper", "white paper", "bitcoin whitepaper", "library", "library of bitcoin", "monolith"],
     pile: ["pile", "banana pile", "bananas pile"],
     totems: ["jumbotron", "oogatron", "totem", "totems"],
     timechain: ["timechain", "timechain sphere", "sphere", "sani"],
@@ -299,8 +305,8 @@
     title: "island guide", tour: "Island tour", ask: "Ask me about the island", greeted: "tessGreeted", toured: TOURED, about: (stop) => stop.id
   };
 
-  const create = ({ parent, input, fx, camera, pilot, visitor, world, hud, busy, coarse, quality, landing, targets = {}, guide = ISLAND_GUIDE }) => {
-    const G = guide, LN = G.lines, PLACE = G.stops, VIEWS = PLACE.map((stop) => viewOf(stop, pose())), SPOTS = PLACE.map(() => [0, 0, 0]);
+  const create = ({ parent, input, fx, camera, pilot, visitor, world, hud, busy, coarse, quality, landing, targets = {}, prepareStop = null, guide = ISLAND_GUIDE }) => {
+    const G = guide, LN = G.lines, PLACE = prepareStop ? G.stops.map((stop) => ({ ...stop })) : G.stops, VIEWS = PLACE.map((stop) => viewOf(stop, pose())), SPOTS = PLACE.map(() => [0, 0, 0]);
     const TOUR = PLACE.map((stop, i) => legOf(i, stop.title, stop.lines, LN)), WORKS = G.work;
     const rig = BL.tess.create({ parent, input, fx, camera, kind: "tess", coarse, quality }), position = rig.position;
     const state = {
@@ -476,9 +482,28 @@
     };
     // A leg at a stop glides the view there while she flies ahead, and her lines start once she is there; one where the
     // visitor is keeps the view and her by them, and she starts at once.
-    const visit = (index) => {
-      const leg = state.legs[index];
+    let stopRequest = 0, waitingForStop = false;
+    const visit = async (index) => {
+      const request = ++stopRequest, leg = state.legs[index];
       state.stop = index; state.arrived = leg.stop < 0;
+      waitingForStop = false;
+      show("tour");
+      if (leg.stop >= 0 && prepareStop) {
+        const preparing = prepareStop(PLACE[leg.stop]);
+        if (preparing) {
+          waitingForStop = true; rig.hush();
+          try { await preparing; } catch {
+            if (request !== stopRequest) return;
+            waitingForStop = false;
+            hud.toast("This tour stop could not be loaded. Please try again.");
+            endTour("cancelled"); return;
+          }
+          if (request !== stopRequest) return;
+          waitingForStop = false;
+          viewOf(PLACE[leg.stop], VIEWS[leg.stop]);
+          laySpots(camera, PLACE, SPOTS);
+        }
+      }
       if (leg.stop >= 0) {
         glideTo(VIEWS[leg.stop], GLIDE);
         const s = SPOTS[leg.stop];
@@ -513,6 +538,7 @@
     };
     // The view glides home and she flies back to the visitor, and says her last line once she is there.
     const endTour = (line) => {
+      stopRequest++; waitingForStop = false;
       rig.hush();
       glideTo(home, RETURN);
       state.closing = line; state.arrived = false;
@@ -533,6 +559,7 @@
         answered(); startTour();
       }
       else if (state.phase === "tour") {
+        if (waitingForStop) return;
         // What she is saying here comes first, a bubble at a time.
         if (state.arrived && rig.next()) { label(); return; }
         if (state.stop === state.legs.length - 1) endTour(state.kind === "news" ? "newsDone" : state.kind === "trip" ? "more" : "done");
@@ -623,6 +650,7 @@
     let lender = null;
     const lend = (driver) => {
       if (driver && !lender) {
+        stopRequest++; waitingForStop = false;
         if (state.holding) release();
         rig.hush();
         rig.mode = 0; rig.aims = null;
@@ -673,6 +701,7 @@
           else if (rig.said && !state.ask && (state.timer -= dt) <= 0) { say(state.asked ? "later" : "declined"); toWork(); }
           break;
         case "tour": {
+          if (waitingForStop) break;
           // Where the visitor is, she keeps by them; at a stop, she flies there and starts once she is nearly in place.
           const at = state.legs[state.stop].stop;
           if (at < 0) { placeBy(); rig.clearPath(3, 1); rig.push(spot.x, spot.y, spot.z); rig.track(); }
@@ -694,7 +723,7 @@
       }
       // The view: gliding to a stop, held there, and gliding home, written after the pilot's own every frame; home, it is
       // the visitor's again.
-      if (state.holding) {
+      if (state.holding && !waitingForStop) {
         state.glide = Math.min(1, state.glide + dt / state.glideTime);
         putPose(from, to, state.glide);
         if (state.phase === "returning" && state.glide >= 1) release();
@@ -726,6 +755,7 @@
     const suspend = () => {
       if (suspended) return;
       suspended = true;
+      stopRequest++; waitingForStop = false;
       if (state.ask) { state.ask.abort(); pending(null); }
       window.removeEventListener("keydown", captureKey, true);
       if (state.holding) release();

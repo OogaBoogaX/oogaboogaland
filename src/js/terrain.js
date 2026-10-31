@@ -296,6 +296,8 @@
   const UNDER_SPHERE_RADIUS = DEPTH * 1.5;
   const UNDER_SPHERE_CENTER = DEPTH - UNDER_SPHERE_RADIUS;
   const MAX_HEIGHT = 8;
+  // The four cells around a column that face a carved room's walls.
+  const WALL_STEPS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
   const BLUFF = 6;
   const MOUTH = { w: 5, h: 3, depth: 5, front: 0.5 };
   const ROOM = { w: 6, h: 4, from: 2.5, to: 6.5 };
@@ -458,9 +460,9 @@
     return result.length >= 3 ? result : null;
   };
   const ISLANDS = new Map();
-  const islandSteps = function* ({ seed = 1, roofHole = null } = {}, slice = { until: 0, budget: BL.buildTasks.SLICE_MS, work: 0 }, capture = null) {
+  const islandSteps = function* ({ seed = 1, roofHole = null, nook = null } = {}, slice = { until: 0, budget: BL.buildTasks.SLICE_MS, work: 0 }, capture = null) {
     if (slice && !slice.until) { slice.work = 0; slice.until = performance.now() + slice.budget; }
-    const cacheKey = roofHole ? `${seed}:${roofHole.id}:${roofHole.x}:${roofHole.z}:${roofHole.radius}` : seed;
+    const cacheKey = islandKey({ seed, roofHole, nook });
     const hit = ISLANDS.get(cacheKey);
     if (hit && !capture) { hit.scope.use(); return hit.value; }
     const rand = mulberry32(seed);
@@ -2143,6 +2145,57 @@
       initial: cutawayPathInitial, bottomByStation: cutawayPathBottomByStation, width: SX, height: SZ, unit: UNIT, origin: ORIGIN,
       ramps: [headquartersRamps[0], headquartersRamps[1], basement.ramps[0], basement.ramps[1]] };
     const birdseyeWindowCeilings = new Float32Array([HEADQUARTERS_CEILING, basement.ceiling]);
+    // A shallow nook cut into a hillside (the plaza library): local +z faces out of the mouth and the chamber
+    // retreats to -depth under the hill. The cut lives in the same grid as the caves, so the mesh, collision,
+    // sight and the cutaway all see one chamber. The wall and roof cells a step outside the cut are painted dark,
+    // so the room reads as cut stone rather than the hill's strata.
+    if (nook) {
+      const cos = Math.cos(nook.ry), sin = Math.sin(nook.ry), half = nook.width / 2;
+      const entry = nook.entry || 0;
+      const floorGy = SURFACE - 1 + Math.round(nook.floor / UNIT);
+      const ceilingGy = floorGy + Math.round(nook.height / UNIT);
+      const reach = Math.hypot(half, nook.depth + entry) + 2 * UNIT;
+      const gx0 = Math.max(1, Math.floor((nook.x - reach - ORIGIN.x) / UNIT));
+      const gx1 = Math.min(SX - 2, Math.ceil((nook.x + reach - ORIGIN.x) / UNIT));
+      const gz0 = Math.max(1, Math.floor((nook.z - reach - ORIGIN.z) / UNIT));
+      const gz1 = Math.min(SZ - 2, Math.ceil((nook.z + reach - ORIGIN.z) / UNIT));
+      const localX = (gx, gz) => cos * ((gx + 0.5) * UNIT + ORIGIN.x - nook.x) - sin * ((gz + 0.5) * UNIT + ORIGIN.z - nook.z);
+      const localZ = (gx, gz) => sin * ((gx + 0.5) * UNIT + ORIGIN.x - nook.x) + cos * ((gz + 0.5) * UNIT + ORIGIN.z - nook.z);
+      const inside = [];
+      for (let gx = gx0; gx <= gx1; gx++) { if (due(slice, 63)) yield* pause(slice);
+        for (let gz = gz0; gz <= gz1; gz++) {
+          const lx = localX(gx, gz), lz = localZ(gx, gz);
+          if (Math.abs(lx) > half || lz > entry || lz < -nook.depth) continue;
+          inside.push(gx, gz);
+          for (let gy = floorGy + 1; gy <= ceilingGy; gy++) grid.set(gx, gy, gz, 0);
+          grid.set(gx, floorGy, gz, P.floor);
+          // The carved column's own footing and sky: `height` is its lowest run's top (the floor) and `surface`
+          // its highest (the hill above, or the floor where the cut opens to the sky).
+          const i = gx * SZ + gz, base = gx * SY * SZ + gz;
+          let gy = 0;
+          while (gy < SY && !data[base + gy * SZ]) gy++;
+          if (gy < SY) {
+            while (gy < SY && data[base + gy * SZ]) gy++;
+            height[i] = (gy - SURFACE) * UNIT;
+            let top = SY;
+            while (top > gy && !data[base + (top - 1) * SZ]) top--;
+            surface[i] = (top - SURFACE) * UNIT;
+          }
+        }
+      }
+      for (let n = 0; n < inside.length; n += 2) {
+        const gx = inside[n], gz = inside[n + 1];
+        for (let gy = floorGy + 1; gy <= ceilingGy; gy++) {
+          for (const [ox, oz] of WALL_STEPS) {
+            if (!grid.has(gx + ox, gy, gz + oz)) continue;
+            const lz = localZ(gx + ox, gz + oz), lx = localX(gx + ox, gz + oz);
+            if (lz > entry + UNIT || lz < -nook.depth - UNIT || Math.abs(lx) > half + UNIT) continue;
+            grid.set(gx + ox, gy, gz + oz, P.inner);
+          }
+        }
+        if (grid.has(gx, ceilingGy + 1, gz)) grid.set(gx, ceilingGy + 1, gz, P.inner);
+      }
+    }
     const geometry = yield* gridGeometrySteps(grid, { unit: UNIT, palette: PALETTE, origin: ORIGIN, matrixCaves,
       floorRooms: [...headquartersRooms, ...basement.rooms], cutawayPathKeys, cutawayPathBottoms, cutawayWindowMask: birdseyeWindowMask,
       cutawayWindowTops: birdseyeWindowTops, cutawayWindowCeilings: birdseyeWindowCeilings }, slice);
@@ -2509,7 +2562,7 @@
     // the worker/IndexedDB boundary. Preserve shared array-buffer views and palette/layout object aliases.
     if (capture) {
       const hole = { ...basementHole }; delete hole.contains;
-      capture({ version: 1, options: { seed, roofHole }, gridData: data,
+      capture({ version: 1, options: { seed, roofHole, nook }, gridData: data,
         constants: { UNIT, SX, SY, SZ, PX, PZ, SURFACE, ORIGIN, RADIUS, MEADOW, DEPTH, RING_HALF, PATH_UNIT, PATH_CAPACITY, PATH_LIFT, GATE_Z, PASS_HALF, STAIR_TERRACE, TIMECHAIN, TIMECHAIN_X, TIMECHAIN_Z, POOL_APPROACH, POOL_X, POOL_Z, P, PALETTE, PATH_TILE, UNDER_SPHERE_CENTER, UNDER_SPHERE_RADIUS, HEADQUARTERS_CAVE, HEADQUARTERS_FLOOR, HEADQUARTERS_CEILING, HEADQUARTERS_HEIGHT, HEADQUARTERS_ROCK, HEADQUARTERS_ROOM },
         cavities, lowerCavities, basementCavities, basementCells, basementHeights, basementCollision, rampCells, rampHeights, rampCollision, frontageCells, height, surface, land, meadow, windowColumns, windowSightPlanes, windowSightRefs, headquartersRamps, headquartersRooms, headquartersWindows, headquartersGallery, headquartersBalconies, headquartersFronts, cutawayPaths, birdseyeWindowMask, birdseyeWindowTops, birdseyeWindowCeilings, geometry, roofOpening, rampFaceOffset, rockCaves, rampSight, sightColumnWork, masterList, masterPathCount, masterPathHash, centerlines, mouths, windowFragmentCount,
         basement: { ...basement, hole }, windowFaceCount: windowGeometry.faces.length });
@@ -2525,7 +2578,13 @@
     yield* islandSteps(options, slice, value => { snapshot = value; });
     return snapshot;
   };
-  const islandKey = ({ seed = 1, roofHole = null } = {}) => roofHole ? `${seed}:${roofHole.id}:${roofHole.x}:${roofHole.z}:${roofHole.radius}` : seed;
+  const islandKey = ({ seed = 1, roofHole = null, nook = null } = {}) => {
+    let key = String(seed);
+    if (roofHole) key += `:${roofHole.id}:${roofHole.x}:${roofHole.z}:${roofHole.radius}`;
+    // Only the fields that shape the cut, so a scene may pass its own richer spec.
+    if (nook) key += `:nook:${nook.x}:${nook.z}:${nook.ry}:${nook.floor}:${nook.width}:${nook.depth}:${nook.height}:${nook.entry || 0}`;
+    return key;
+  };
   const hasIsland = options => ISLANDS.has(islandKey(options));
   const restoreIslandSnapshot = (snapshot, options) => {
     const cacheKey = islandKey(options), hit = ISLANDS.get(cacheKey);
