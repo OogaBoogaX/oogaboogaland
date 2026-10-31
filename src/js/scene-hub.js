@@ -7446,14 +7446,15 @@
     1: [".#.", "##.", ".#.", ".#.", ".#.", ".#.", ".#.", ".#.", "###"],
     3: ["####.", "....#", "....#", "....#", ".###.", "....#", "....#", "....#", "####."],
     "·": ["...", "...", "...", ".##", ".##", "##.", "...", "...", "..."],
-    "₿": ["..#.#..", "#######", "#.#.#.#", "#.#.#.#", "#######", "#.#.#.#", "#.#.#.#", "#######", "..#.#.."]
+    "₿": ["..#.#..", ".#####.", "##...#.", "##...#.", ".#####.", "##...#.", "##...#.", ".#####.", "..#.#.."]
   };
-  // The banner's inks: the ₿ orange inside a black edge, the paper's own name white and the rest black. Each has a
-  // night version that glows — the dark letters take a warm bone there, since black has nothing to give off.
+  // The banner's inks: the ₿ orange inside a black edge, the paper's own name white inside one too, and the rest
+  // black. Each has a night version that glows — the dark letters take a warm bone there, since black has nothing
+  // to give off.
   const WP_BANNER_INK = {
     btc: { day: { color: "#ff8c1a", emissive: 0.35, edge: "#0a0a0a" }, night: { color: "#ffa63a", emissive: 1, edge: "#0a0a0a" } },
     black: { day: { color: "#121212", emissive: 0, edge: null }, night: { color: "#e8dcc0", emissive: 1, edge: null } },
-    white: { day: { color: "#f6f6f3", emissive: 0.85, edge: null }, night: { color: "#ffffff", emissive: 1, edge: null } }
+    white: { day: { color: "#f6f6f3", emissive: 0.85, edge: "#0a0a0a" }, night: { color: "#ffffff", emissive: 1, edge: "#0a0a0a" } }
   };
   const wpBannerGeos = new Map();
   // Each letter's day and glowing night geometry, swapped as the island's lamps come on.
