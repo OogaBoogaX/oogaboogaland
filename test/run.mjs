@@ -3893,7 +3893,7 @@ const orbitFlow = async (b) => {
   const log = await b.evaluate(orbitLog);
   const stored = await b.evaluate(`JSON.parse(localStorage.getItem("oogaboogaland.v1")).orbit.best`);
   record("orbit flow: Space lets go, the pod falls shield first, Space opens the chute once it is ready and it lands softly", cleared.debris === 0 && cleared.t <= 30 && falling.phase === "descent" && falling.ready && falling.alt < 135 && falling.peakHeat < 1 && chute === "open" && log.result && !log.result.failure && log.result.orbit, JSON.stringify({ cleared, falling, chute, result: log.result }));
-  record("orbit flow: the flight log shows the total big with its medal and new best, the rows add up to it, and the best is saved", log.phase === "results" && log.shown && log.final === log.result.score && log.points === log.final && log.best === "NEW BEST" && log.medal === log.result.medal?.toUpperCase() && log.rows.some(([label]) => label === "Spacewalk") && !log.rows.some(([label]) => label === "Score") && stored && stored.score === log.final && log.exit === "Back to the island", JSON.stringify({ log, stored }));
+  record("orbit flow: the flight log shows the total big with its medal and new local best, the rows add up to it, and the best is saved", log.phase === "results" && log.shown && log.final === log.result.score && log.points === log.final && log.best === "NEW LOCAL BEST" && log.medal === log.result.medal?.toUpperCase() && log.rows.some(([label]) => label === "Spacewalk") && !log.rows.some(([label]) => label === "Score") && stored && stored.score === log.final && log.exit === "Back to the island", JSON.stringify({ log, stored }));
   await b.evaluate(`document.querySelector('#orbit-results [data-action="orbit-again"]').click()`);
   await b.sleep(200);
   const again = await b.evaluate(`(() => { const O = window.__ooga.orbit; return { phase: O.phase, score: O.score, results: document.getElementById("orbit-results").hidden, debris: window.__ooga.stats().debris }; })()`);
@@ -5970,7 +5970,7 @@ const npcPaths = (backend) => [`NPC paths ${backend}`, async (b) => {
 
 // The games' rules and saves in Node, under the same localStorage the page uses: the mine's seeded sim,
 // every game's stored best, the tickets a machine spends and the jackpot wheel's odds.
-const GAME_SOURCES = ["math", "donations", "rocket-parts", "mine-rigs", "mine-sim", "game"];
+const GAME_SOURCES = ["math", "donations", "rocket-parts", "mine-rigs", "mine-sim", "highscore-rules", "game"];
 const gameRulesChecks = async () => {
   const store = new Map();
   const context = { window: {}, URLSearchParams, location: { search: "" }, localStorage: { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) } };
@@ -6043,10 +6043,38 @@ const gameRulesChecks = async () => {
     record("tickets: a spend refuses when the tickets fall short or the cost is no whole number above nothing, spending nothing, and one that goes through is saved", short && malformed && spent, JSON.stringify({ short, malformed, spent }));
   }
   {
+    store.set("oogaboogaland.v1", JSON.stringify({ arcade: { darts: 540, tickets: 17, prizes: [] } }));
+    const make = () => BL.game.create({ catalog: [] }), game = make();
+    const fresh = game.arcadeBest("darts-1") === 0 && game.arcadeBest("darts-2") === 0;
+    const first = game.recordArcade("darts", 180, "darts-1"), second = game.recordArcade("darts", 120, "darts-2");
+    const refused = !game.recordArcade("darts", 90, "darts-1") && !game.recordArcade("darts", NaN, "darts-1")
+      && !game.recordArcade("darts", 200, "darts-3") && !game.recordArcade("darts", 200, "hoops-1");
+    const reloaded = make(), distinct = reloaded.arcadeBest("darts-1") === 180 && reloaded.arcadeBest("darts-2") === 120;
+    const saved = JSON.parse(store.get("oogaboogaland.v1"));
+    Object.assign(saved.arcade.machines, { "darts-1": 541, "darts-3": 100, "hoops-1": -1, "claw-1": "200" });
+    store.set("oogaboogaland.v1", JSON.stringify(saved));
+    const checked = make(), clean = Object.keys(checked.state.arcade.machines).length === 1 && checked.arcadeBest("darts-2") === 120;
+    record("arcade saves: duplicate machines keep separate bests through reload, never inherit an unattributed legacy aggregate, and reject malformed machine records",
+      fresh && first && second && refused && distinct && clean && checked.state.arcade.tickets === 17,
+      JSON.stringify({ fresh, first, second, refused, distinct, clean }));
+  }
+  {
     // The jackpot wheel, from arcade-models.js and its scene half on the builders they load with: the house wins slowly, and every
     // wedge, from a turn at rest and one far round after many spins, stops under the clapper wherever in it the spin
     // aims, after its whole turns and less than one more.
     for (const name of ["scene", "models", "blaze", "contributor-identities", "activity-repos", "jumbotron", "hub-models", "arcade-models", "arcade-scene-models"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
+    const A = BL.arcadeModels, L = A.LAYOUT;
+    const machines = { skee: L.skee, hoops: L.hoops, shy: [L.shy], claw: L.frames.claw, hockey: L.frames.hockey,
+      billiards: L.frames.pool, darts: L.frames.darts, pinball: L.frames.pinball, ride: L.frames.ride };
+    for (const cabinet of A.CABINETS) if (cabinet.retro >= 0) machines[A.RETRO[cabinet.retro].id] = [cabinet];
+    const ids = Object.values(machines).flat().map(machine => machine.scoreId);
+    const registered = Object.entries(machines).every(([kind, rows]) => {
+      const expected = BL.highscoreRules.games[kind].machines;
+      return rows.length === expected.length && rows.every(row => expected.includes(row.scoreId));
+    });
+    record("arcade scores: every carnival and retro machine carries its own permanent registered ID, including duplicates; excluded worlds have no score contract",
+      Object.keys(machines).length === 17 && ids.length === 29 && new Set(ids).size === 29 && registered
+        && ["ghost", "poker", "dsb"].every(id => BL.highscoreRules.get(id) === null), JSON.stringify({ registered, machines: ids }));
     const { WHEEL_VALUES: V, WHEEL_COST: cost, wheelAt, wheelStop } = BL.arcadeModels;
     const ev = V.reduce((s, v) => s + v, 0) / V.length, jackpot = Math.max(...V), missed = [];
     for (const from of [0, -0.3, -1234.567]) for (let k = 0; k < V.length; k++) for (const at of [0.2, 0.5, 0.8]) {
@@ -6514,6 +6542,127 @@ const ghostHuntChecks = async () => {
       defeat && outcome === G.OUTCOME.ABANDON && empty.state.state === ST.IDLE && paused && still && heldOutcome === G.OUTCOME.ABANDON && held.state.state === ST.IDLE
         && hatched === G.CONFIG.LING.count && leftAtDefeat === 0,
       JSON.stringify({ states: [...states], outcome, paused, still, heldOutcome, hatched, leftAtDefeat }));
+  }
+};
+const highscoreClientChecks = async () => {
+  const sources = await Promise.all(["highscore-rules", "highscores"].map(name => readFile(join(root, `src/js/${name}.js`), "utf8")));
+  const flush = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
+  const fixture = (signed = false, enabled = true) => {
+    const requests = [], timers = new Map(), events = new Map(), subscribers = new Set(), toasts = [];
+    let seq = 0, now = 1000;
+    const state = { backend: enabled, highscores: enabled, resolved: true, logoutEpoch: 0, me: signed ? { id: 11, login: "score-one" } : null };
+    const net = { state, subscribe(fn) { subscribers.add(fn); return () => subscribers.delete(fn); } };
+    const context = { AbortController, Date: class extends Date { static now() { return now; } },
+      window: { BL: { net, hud: { toast: text => toasts.push(text) } },
+        setTimeout(fn, ms) { timers.set(++seq, { fn, ms }); return seq; }, clearTimeout(id) { timers.delete(id); } },
+      document: { hidden: false, addEventListener(type, fn) { events.set(type, fn); }, removeEventListener(type) { events.delete(type); } },
+      fetch: (url, options) => new Promise((resolve, reject) => {
+        const req = { url, options, resolve, reject };
+        options.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+        requests.push(req);
+      }) };
+    for (const source of sources) runInNewContext(source, context);
+    const B = context.window.BL;
+    return { scores: B.highscores, state, requests, timers, events, subscribers, toasts,
+      account(me, loggedOut = false) { state.me = me; if (loggedOut) state.logoutEpoch++; for (const fn of subscribers) fn(state); },
+      advance() { now += 31000; },
+      reply(index, game, highscores = {}, revision = 0, status = 200) {
+        const rule = B.highscoreRules.games[game], achieved = Object.fromEntries(Object.keys(highscores).map(key => [key, 1000]));
+        const data = { game, version: rule.version, scoreType: rule.scoreType, direction: rule.direction, unit: rule.unit, highscores, achieved, revision };
+        requests[index].resolve({ ok: status === 200, status, headers: { get: () => "application/json" }, json: async () => data });
+      } };
+  };
+  {
+    const f = fixture(false, false), changes = [];
+    const off = f.scores.watch("darts", value => changes.push(value));
+    const quiet = !f.requests.length && !f.timers.size && f.scores.begin("darts") === null;
+    off(); f.scores.dispose();
+    record("highscores: portable pages and Workers without the capability start no requests or timers", quiet && f.subscribers.size === 0 && f.events.size === 0);
+  }
+  {
+    const f = fixture(), changes = [], off = f.scores.watch("darts", value => changes.push(value));
+    const guestRun = f.scores.begin("darts"), publicRead = f.requests.length === 1 && f.requests[0].options.method === "GET";
+    f.reply(0, "darts"); await flush();
+    const empty = f.scores.best("darts", "darts-1") === 0 && changes.length === 2;
+    f.account({ id: 11, login: "score-one" });
+    const refused = !await f.scores.submit(guestRun, "darts-1", 100) && f.requests.every(req => req.options.method === "GET");
+    off(); const before = changes.length;
+    f.reply(1, "darts", { "darts-1": 80 }, 1); await flush();
+    const detached = changes.length === before && f.scores.best("darts", "darts-1") === 80;
+    f.scores.dispose();
+    record("highscores: signed-out players read empty and populated shared boards, their earlier runs never upload after sign-in, and leaving removes the callback",
+      publicRead && empty && refused && detached && f.timers.size === 0, JSON.stringify({ publicRead, empty, refused, detached }));
+  }
+  {
+    const f = fixture(), off = f.scores.watch("darts", () => {});
+    f.account({ id: 11, login: "score-one" });
+    f.reply(0, "darts", { "darts-1": 100 }, 1); await flush();
+    const queued = f.requests.length === 2;
+    f.reply(1, "darts", {}, 2); await flush();
+    const refreshed = f.scores.best("darts", "darts-1") === 0;
+    off(); f.scores.dispose();
+    record("highscores: an account change during an in-flight read schedules a fresh read, including removal of an older record", queued && refreshed);
+  }
+  {
+    const f = fixture(true), first = f.scores.begin("darts");
+    f.reply(0, "darts"); await flush();
+    f.account(null, true); f.account({ id: 11, login: "score-one" });
+    const loggedOut = !await f.scores.submit(first, "darts-1", 100);
+    const second = f.scores.begin("darts");
+    f.account({ id: 22, login: "score-two" });
+    const changed = !await f.scores.submit(second, "darts-1", 100);
+    const third = f.scores.begin("darts"), saving = f.scores.submit(third, "darts-1", 120);
+    const body = JSON.parse(f.requests[1].options.body);
+    f.reply(1, "darts", { "darts-1": 120 }, 1);
+    const saved = await saving, duplicate = !await f.scores.submit(third, "darts-1", 140);
+    f.scores.dispose();
+    record("highscores: logout/relogin and account switches invalidate run tickets; a current account submits once with its numeric account guard and no client username",
+      loggedOut && changed && saved && duplicate && body.playerId === 22 && !Object.hasOwn(body, "login") && f.requests.length === 2,
+      JSON.stringify({ loggedOut, changed, saved, duplicate, body, requests: f.requests.length }));
+  }
+  {
+    const f = fixture(true), ticket = f.scores.begin("race");
+    f.reply(0, "race"); await flush();
+    const lap = f.scores.submit(ticket, "race-1-bay-lap", 30000), race = f.scores.submit(ticket, "race-1-bay-race", 100000);
+    f.reply(1, "race", { "race-1-bay-lap": 30000 }, 1);
+    f.reply(2, "race", { "race-1-bay-lap": 30000, "race-1-bay-race": 100000 }, 2);
+    const saved = (await Promise.all([lap, race])).every(Boolean);
+    const duplicate = !await f.scores.submit(ticket, "race-1-bay-lap", 29000);
+    const invalid = !await f.scores.submit(ticket, "race-1-missing-lap", 10000) && !await f.scores.submit(ticket, "race-1-gorge-lap", NaN);
+    f.scores.dispose();
+    record("highscores: one race can submit its lap and race time once each, while invalid metrics and non-integer scores make no requests",
+      saved && duplicate && invalid && f.requests.length === 3, JSON.stringify({ saved, duplicate, invalid, requests: f.requests.length }));
+  }
+  {
+    const f = fixture(true), ticket = f.scores.begin("darts"), saving = f.scores.submit(ticket, "darts-1", 300);
+    f.reply(1, "darts", { "darts-1": 300 }, 2); await saving;
+    f.reply(0, "darts", { "darts-1": 100 }, 1); await flush();
+    const newer = f.scores.best("darts", "darts-1") === 300;
+    f.scores.dispose();
+    record("highscores: an older GET that finishes after an improved submission cannot replace the newer board", newer);
+  }
+  {
+    const f = fixture(true), ticket = f.scores.begin("darts");
+    f.reply(0, "darts"); await flush();
+    const saving = f.scores.submit(ticket, "darts-1", 100);
+    f.reply(1, "darts", {}, 0, 503); await flush();
+    const retry = f.requests.length === 3;
+    f.reply(2, "darts", {}, 0, 503);
+    const failed = !await saving;
+    const bounded = f.requests.length === 3 && f.toasts.length === 1 && f.timers.size === 0;
+    f.scores.dispose();
+    record("highscores: a failed write retries once, then reports that the local record is kept and releases its timeout", retry && failed && bounded, JSON.stringify({ retry, failed, bounded }));
+  }
+  {
+    const f = fixture(true), changes = [];
+    f.scores.watch("darts", value => changes.push(value));
+    const saving = f.scores.submit(f.scores.begin("darts"), "darts-1", 100), before = changes.length;
+    f.scores.dispose();
+    const failed = !await saving; await flush();
+    record("highscores: disposal aborts pending reads and writes, clears listeners and timers, and cannot notify a departed scene",
+      failed && f.requests.every(req => req.options.signal.aborted) && f.subscribers.size === 0 && f.events.size === 0
+        && f.timers.size === 0 && f.toasts.length === 0 && changes.length === before && f.scores.get("darts") === null,
+      JSON.stringify({ failed, timers: f.timers.size, changes: changes.length, before }));
   }
 };
 const donationClientChecks = async () => {
@@ -22880,7 +23029,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   const clearance = claimClearanceProof();
   record("hub footprint clearance: conservative rejection preserves circular boundaries, live reservations and exceptional numbers", clearance.failures === 0 && clearance.cases >= 4000, JSON.stringify(clearance));
   await cloudHopperFailureChecks(BL);
-  await deferredLoadingChecks(); await hudNoticeChecks(); await characterChecks(); await contributorActivityChecks(); await mempoolFeedChecks(); await oogatronReplayChecks(); await mirrorRippleChecks(); await debugActivityStatusChecks(); await soloDebugChecks(); await adaptiveQualityChecks(); await chainSnapshotChecks(); await dsbSharedDataChecks(); await timechainDataChecks(); await timechainRoomChecks(); await timechainBlockChecks(); await environmentSoundChecks(); await weatherStepChecks(); await poolLayoutChecks(); await gameRulesChecks(); await ghostHuntChecks(); await donationClientChecks(); await poolWildlifeChecks(); await totemFeedChecks();
+  await deferredLoadingChecks(); await hudNoticeChecks(); await characterChecks(); await contributorActivityChecks(); await mempoolFeedChecks(); await oogatronReplayChecks(); await mirrorRippleChecks(); await debugActivityStatusChecks(); await soloDebugChecks(); await adaptiveQualityChecks(); await chainSnapshotChecks(); await dsbSharedDataChecks(); await timechainDataChecks(); await timechainRoomChecks(); await timechainBlockChecks(); await environmentSoundChecks(); await weatherStepChecks(); await poolLayoutChecks(); await gameRulesChecks(); await highscoreClientChecks(); await ghostHuntChecks(); await donationClientChecks(); await poolWildlifeChecks(); await totemFeedChecks();
 
   // Scene state built directly instead of booted; seed 1 matches scene-hub.js.
   // Sealed cave guides need the hub's seal nodes, so probes reading them stay in the browser tier.

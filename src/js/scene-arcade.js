@@ -10,7 +10,7 @@
 //
 // Walking up to a cabinet or a carnival machine and pressing act (or tapping it) opens that game, and the game's exit
 // comes back to it as the same Ooga (`lastPlayer`). The carnival games are scenes of their own (`scene-carnival.js`);
-// here their machines stand at rest, showing their coconuts and the visitor's best. Escape, the Leave button and the
+// here their machines stand at rest, showing their coconuts and each machine's shared best (local offline). Escape, the Leave button and the
 // doorway go back to the island.
 (() => {
   "use strict";
@@ -74,7 +74,7 @@
     changer: ["Token totem", "Banana in, token out. Good trade."],
     muncher: ["Ticket muncher", "Muncher eat paper tickets. Yours safe on board. Muncher sad."],
     door: ["Back room", "Big door. Locked tight. No poker here! (maybe somewhere else?)"],
-    fame: ["Hall of fame", "Best Oogas up there. Beat them, you go up too!"],
+    fame: ["Machine records", "Shared machine bests. M is the machine number; LOC is this browser's best while offline. Sign in to set a shared record!"],
     disco: ["Spirit rattle", "Gourds clack, shells clink. Oogas dance."]
   };
   const ORDERS = ["Banana split! Ooga slurp slurp.", "Coconut milk, fresh from coconut. Ahh.", "Grub on stick. Ooga crunch!", "Lava pop. Hot hot hot. Good!"];
@@ -88,6 +88,12 @@
   // Who walked in, kept across a game so they come back out as themselves, and the ticket balance at the last visit,
   // so the wheel knows when to celebrate.
   let lastPlayer = null, lastTickets = null, unsubscribeAccount = null, remotes = null, footsteps = null;
+  const scoreSubscriptions = [];
+  const machineBest = (kind, id) => BL.highscores.best(kind, id) ?? game.arcadeBest(id);
+  const refreshScores = (kind) => {
+    for (const station of stations) if (station.kind === "machine" && station.game.kind === kind && !station.game.playing) station.game.stop();
+    if (fame && FAME_GAMES.some((entry) => entry[1] === kind)) fame.children[2].geometry = AM.fameBoard(fameRows());
+  };
   const NO_ACTORS = [];
   // An Ooga a signed-in player drives here is not also in the crowd or out strolling.
   const hideCrowd = (name, on) => {
@@ -298,7 +304,7 @@
       s.node = node;
       const host = {
         node, glow, index,
-        get best() { return game.state.arcade[kind]; },
+        get best() { return machineBest(kind, p.scoreId); },
         onEnd: () => { if (b) botDone(b); },
         burst: (lx, ly, lz, count) => { const w = toHall(p, lx, lz, BURST_AT); fx.burst(w.x, ly, w.z, count, SPARKS, 2.4); },
         cue: (name) => hear(at.x, at.z, name, 0.8),
@@ -319,7 +325,7 @@
         }
         bots.push(b);
       }
-      const station = { kind: "machine", game: g, index, bot: !!b, play: p.play, turn: p.turn, label: g.name };
+      const station = { kind: "machine", game: g, index, bot: !!b, play: p.play, turn: p.turn, label: `${g.name} · Machine ${p.scoreId.slice(p.scoreId.lastIndexOf("-") + 1)}` };
       stations.push(station);
       s.station = station;
       target(body, { kind: "machine", station }, 2.2);
@@ -455,21 +461,18 @@
   const LOOP_AT = [0];
   for (let i = 1; i <= LOOP.length; i++) { const a = LOOP[i - 1], b = LOOP[i % LOOP.length]; LOOP_AT.push(LOOP_AT[i - 1] + Math.hypot(b[0] - a[0], b[1] - a[1])); }
   const LOOP_LEN = LOOP_AT[LOOP.length], WALKERS = 3, WALK_SPEED = 1.05;
-  // The hall of fame: each game's best as the roster would have it (a score hashed from each Ooga's name, so it is
-  // the same every visit), beaten by the visitor's own best where theirs is higher, under their Ooga's initials.
-  const FAME_GAMES = [["THRO", "skee", 120, 420, 10], ["HOOP", "hoops", 18, 70, 1], ["TOSS", "shy", 5, 20, 1], ["CLAW", "claw", 25, 110, 5]];
-  const initials = (name) => (name.toUpperCase().replace(/[^A-Z0-9]/g, "") + "OOG").slice(0, 3);
-  const hangFame = (playerName) => {
-    const names = contributors.activeRoster.map((c) => c.name).filter((n) => n !== playerName), rows = [];
-    for (const [label, kind, lo, hi, step] of FAME_GAMES) {
-      let who = "OOG", best = 0;
-      for (const n of names) {
-        const v = Math.round((lo + (math.fnv1a(n + kind) % 1000) / 1000 * (hi - lo)) / step) * step;
-        if (v > best) { best = v; who = initials(n); }
-      }
-      const mine = game.state.arcade[kind];
-      rows.push(playerName && mine >= best && mine > 0 ? [label, initials(playerName), mine, true] : [label, who, best, false]);
+  // Actual records, never invented NPC scores: M1/M2 identify the winning machine, LOC an offline local best.
+  const FAME_GAMES = [["THRO", "skee"], ["HOOP", "hoops"], ["TOSS", "shy"], ["CLAW", "claw"]];
+  const fameRows = () => FAME_GAMES.map(([label, kind]) => {
+    let who = "-", best = 0;
+    for (const id of BL.highscoreRules.games[kind].machines) {
+      const shared = BL.highscores.best(kind, id), score = shared ?? game.arcadeBest(id);
+      if (score > best) { best = score; who = shared === null ? "LOC" : `M${id.slice(id.lastIndexOf("-") + 1)}`; }
     }
+    return [label, who, best, false];
+  });
+  const hangFame = () => {
+    const rows = fameRows();
     const F = LAYOUT.fame, frame = AM.fameFrame();
     fame = createNode({ position: { x: F.x, y: F.y, z: F.z }, rotation: { x: 0, y: F.turn, z: 0 } });
     addChild(fame, createNode({ geometry: frame.frame }), createNode({ geometry: frame.bulbs, sightHidden: true }), createNode({ position: { x: 0, y: 0, z: 0.01 }, geometry: AM.fameBoard(rows), sightHidden: true }));
@@ -1040,7 +1043,7 @@
   const JOBS = {
     host: { pose: "host", time: [6, 9], prop: true, talk: 0.8, cue: "grunt", tick: null, say: ["Step up! Step up!", "Ooga games! Best in cave!", "Who beat top Ooga today?", "Coconuts fly! Games on!"] },
     wheel: { pose: "wheel", time: [4, 5.5], prop: true, talk: 1, cue: "bell", tick: null, say: [`Spin the wheel! ${AM.WHEEL_COST} tickets!`, `Jackpot ${WHEEL_JACKPOT} tickets! Who spin?`] },
-    fame: { pose: "point", time: [4, 6], prop: true, talk: 0.8, cue: null, tick: null, say: ["Best Oogas up there! You next?", "Beat score, go up on stones!"] },
+    fame: { pose: "point", time: [4, 6], prop: true, talk: 0.8, cue: null, tick: null, say: ["Machine records up there! You next?", "Sign in, beat score, go up on stones!"] },
     welcome: { pose: "bow", time: [4, 6], prop: true, talk: 0.8, cue: "grunt", tick: null, say: ["Welcome to Ooga Arcade!", "Come in! Games hot!"] },
     call: { pose: "call", time: [4, 6], prop: true, talk: 0.8, cue: null, tick: null, say: ["Thro-ball! Roll coconut, win big!", "Claw sneaky. Try claw!", "Hoop! Coconut in basket!", "Coconut Toss! Bonk bonk!"] },
     totem: { pose: "reach", time: [4, 6], prop: false, talk: 0.5, cue: null, tick: ["coin", 0.55, 0.6], say: ["Totem full. Tokens ready!", "Banana in, token out!"] },
@@ -1761,7 +1764,8 @@
     // The driven Ooga's own footsteps, heard by this page alone (footsteps.js).
     footsteps = BL.footsteps.create();
     hireCrew();
-    hangFame(playerName);
+    hangFame();
+    for (const kind of BL.game.ARCADE_KINDS) scoreSubscriptions.push(BL.highscores.watch(kind, () => refreshScores(kind)));
     showShelf();
     // The hall's sound, and from the island the room powers up.
     audio = BL.carnivalAudio.create();
@@ -1947,6 +1951,8 @@
     world.pilot = traveller ? traveller.traits.name : null;
     unsubscribeAccount();
     unsubscribeAccount = null;
+    for (const unsubscribe of scoreSubscriptions) unsubscribe();
+    scoreSubscriptions.length = 0;
     BL.net.setBody(null);
     prizeUi.panel.removeEventListener("click", onPrizeClick);
     prizeUi.panel.hidden = true;

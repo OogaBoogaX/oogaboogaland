@@ -41,13 +41,13 @@ Before normal scene construction, a signed-out visitor gets the remembered chara
 ## Signing out and leaving
 
 - **Sign out** posts `/auth/logout`, which deletes that session row and clears the cookie. `/auth/logout?all=1` ends every session of the player.
-- `DELETE /api/me` deletes the player and every session.
+- `DELETE /api/me` deletes the player, every session and their attributed high scores. Unattributed machine bests remain.
 - These two removal paths accept a valid historical session even if its account no longer qualifies to sign in. The signed-out footer does not show those historical sessions. With the island open, `fetch("/api/me", { method: "DELETE" })` in the browser console removes the retained account and all its sessions; `fetch("/auth/logout", { method: "POST" })` clears only this session. Check for a 204 response. They grant no other access. Expired sessions cannot authorize removal; contact the maintainer to remove the retained player record.
 - Every state-changing request must carry the site's own `Origin` (or `Sec-Fetch-Site: same-origin`); anything else is 403.
 
 ## What is stored
 
-For a signed-in player: GitHub id, login, avatar URL, the chosen display name, sign-in and last-seen times, and for each session its token hash, times and the first 120 characters of the user agent. Nothing for visitors who never sign in. No GitHub token is ever stored.
+For a signed-in player: GitHub id, login, avatar URL, the chosen display name, sign-in and last-seen times, and for each session its token hash, times and the first 120 characters of the user agent. Completed games can also set public high scores: Cloud Hopper's top 1,024 times carry GitHub usernames; arcade machine bests carry only permanent machine IDs. Attributed records retain the stable GitHub ID privately so a login rename follows its account and deleting the account removes its records. See [Shared game high scores](highscores.md). Nothing is uploaded from signed-out games or old local saves. No GitHub token is ever stored.
 
 ## Presence
 

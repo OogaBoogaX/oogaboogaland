@@ -1027,6 +1027,7 @@
     unsubscribeVoiceMarks();
     unsubscribeMic();
     window.BL.voice.dispose();
+    window.BL.highscores.dispose();
     net.dispose();
     offSound(); soundButton.removeEventListener("click", sound.toggle);
     window.removeEventListener("keydown", onVoiceMuteKey, true);

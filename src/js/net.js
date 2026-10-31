@@ -95,7 +95,7 @@
   // room: "off" (signed out or no backend), "connecting", "live", "paused" (hidden a while), or a kick that
 // stopped it ("replaced", "full").
   const offline = new URLSearchParams(location.search);
-  const state = { backend: false, me: null, donations: false, tess: false, logoutEpoch: 0, started: false,
+  const state = { backend: false, me: null, donations: false, tess: false, highscores: false, logoutEpoch: 0, started: false,
     resolved: offline.has("nosim") || offline.get("net") === "0" || location.protocol !== "http:" && location.protocol !== "https:",
     room: "off", selfId: 0, online: 0, released: null, loopEpoch: 0, zone: "outside", body: null, bodyKind: null, bodyName: null, hostId: 0, followers: 0, npcVersion: 0, doorway: false };
   let ws = null, retry = 0, retryTimer = 0, pingTimer = 0, hiddenTimer = 0, stopped = false;
@@ -403,6 +403,7 @@
       state.me = accept(data.player);
       state.donations = data.donations === true;
       state.tess = data.tess === true;
+      state.highscores = data.highscores === true;
       state.resolved = data.player === null || !!state.me;
       if (state.me) {
         BL.contributors.addTemporary(data.character, state.me.login);
