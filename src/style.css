@@ -10102,7 +10102,8 @@ body[data-banner-oogas="true"] .sheet:not([hidden]) { display: flex; }
 .cloud-hopper-guide .game-intro-go { animation: none; }
 .cloud-hopper-panel .game-intro-title { margin: 8px 0 14px; }
 .cloud-hopper-panel .game-intro-title .sign { max-width: 100%; }
-.cloud-hopper-panel .game-intro-who { color: var(--paper); line-height: 1.5; }
+/* A line that wraps splits evenly, never leaving one word on its own. */
+.cloud-hopper-panel .game-intro-who { color: var(--paper); line-height: 1.5; text-wrap: balance; }
 .cloud-hopper-panel .cloud-hopper-time { margin: 14px 0; color: #f5c542; font-size: 42px; text-shadow: 0 2px 0 rgba(0, 0, 0, 0.5); }
 .cloud-hopper-scores-title { margin: 14px 0 8px; color: var(--accent-text); font-size: 12px; }
 .cloud-hopper-scores .race-podium { margin: 0; text-align: left; font-size: 12px; }

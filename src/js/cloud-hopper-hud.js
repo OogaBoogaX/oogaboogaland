@@ -9,7 +9,7 @@
     ready: ["Race to the banana pile", "Leave this cloud to start · J toggles a collected jetpack. Extra packs refill fuel."],
     running: ["Reach the banana pile", "Space jumps / holds jetpack lift · release to fall · J toggles your jetpack"],
     won: ["Banana pile reached!", "A clean landing and a time to beat."],
-    dq: ["Disqualified", "No landing within reach. Give the clouds another try."]
+    dq: ["Disqualified", "Splash! No cloud was within reach."]
   };
   const GUIDE = [
     ["normal", "Drifting clouds", "WASD or arrows move, Shift runs and Space jumps. Leave the starting cloud to start the clock. A cloud shimmers and whistles before it fades, so jump for one that isn't shimmering; some clouds never fade at all."],
