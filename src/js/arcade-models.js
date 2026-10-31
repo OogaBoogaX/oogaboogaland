@@ -31,22 +31,22 @@
   // The games with cabinets, as the island names them: scene id, name, the marquee's words and badge, and the
   // colour of its screen's light.
   const GAMES = [
-    { id: "race", name: "Ooga Rally", title: "RALLY", icon: "flag", light: [1, 0.85, 0.3] },
-    { id: "drop", name: "Ooga Drop", title: "DROP", icon: "chute", light: [0.4, 0.8, 1] },
-    { id: "orbit", name: "Ooga Orbit", title: "ORBIT", icon: "rocket", light: [0.7, 0.55, 1] },
-    { id: "mine", name: "Ooga Mine", title: "MINE", icon: "pick", light: [1, 0.6, 0.25] }
+    { id: "race", scoreId: "race-1", name: "Ooga Rally", title: "RALLY", icon: "flag", light: [1, 0.85, 0.3] },
+    { id: "drop", scoreId: "drop-1", name: "Ooga Drop", title: "DROP", icon: "chute", light: [0.4, 0.8, 1] },
+    { id: "orbit", scoreId: "orbit-1", name: "Ooga Orbit", title: "ORBIT", icon: "rocket", light: [0.7, 0.55, 1] },
+    { id: "mine", scoreId: "mine-1", name: "Ooga Mine", title: "MINE", icon: "pick", light: [1, 0.6, 0.25] }
   ];
   // The Ooga retro games (`retro-games.js`), one on each cabinet along the mezzanine, in the cabinets' order from the
   // fifth: scene id, name, and the marquee's words and badge. Each cabinet's trim is its screen's colour.
   const RETRO = [
-    { id: "invaders", name: "Coconut Invaders", title: "INVADERS", icon: null },
-    { id: "stampede", name: "Mammoth Stampede", title: "STAMPEDE", icon: null },
-    { id: "pong", name: "Ooga Pong", title: "PONG", icon: null },
-    { id: "snake", name: "Banana Snake", title: "SNAKE", icon: "banana" },
-    { id: "flap", name: "Ptero Flap", title: "FLAP", icon: null },
-    { id: "breaker", name: "Rock Breaker", title: "BREAKER", icon: null },
-    { id: "dash", name: "Dino Dash", title: "DASH", icon: null },
-    { id: "stacker", name: "Stone Stacker", title: "STACKER", icon: null }
+    { id: "invaders", scoreId: "invaders-1", name: "Coconut Invaders", title: "INVADERS", icon: null },
+    { id: "stampede", scoreId: "stampede-1", name: "Mammoth Stampede", title: "STAMPEDE", icon: null },
+    { id: "pong", scoreId: "pong-1", name: "Ooga Pong", title: "PONG", icon: null },
+    { id: "snake", scoreId: "snake-1", name: "Banana Snake", title: "SNAKE", icon: "banana" },
+    { id: "flap", scoreId: "flap-1", name: "Ptero Flap", title: "FLAP", icon: null },
+    { id: "breaker", scoreId: "breaker-1", name: "Rock Breaker", title: "BREAKER", icon: null },
+    { id: "dash", scoreId: "dash-1", name: "Dino Dash", title: "DASH", icon: null },
+    { id: "stacker", scoreId: "stacker-1", name: "Stone Stacker", title: "STACKER", icon: null }
   ];
   // Twelve cabinets, each carved from its own timber or stone (`body`, `stone` for the slabs), with the game's colour
   // (`trim`: its screen's light, and earthed, its cave paint and its hide), a second paint colour and a side-art
@@ -65,7 +65,7 @@
     const a = (i - 1.5) * ARC.step, x = live ? ARC.x + ARC.r * Math.sin(a) : (i - 4 - 3.5) * CAB.pitch;
     const z = live ? ARC.z - ARC.r * Math.cos(a) : MEZZ.z0 + 0.85, turn = live ? -a : 0, y = live ? STAGE.high : MEZZ.y;
     const play = { x: x + Math.sin(turn) * 1.25, z: z + Math.cos(turn) * 1.25, facing: turn + Math.PI };
-    return { index: i, x, y, z, turn, game: live ? i : -1, retro: live ? -1 : i - 4, body, trim, second, art, stone: !!stone, play };
+    return { index: i, scoreId: live ? GAMES[i].scoreId : RETRO[i - 4].scoreId, x, y, z, turn, game: live ? i : -1, retro: live ? -1 : i - 4, body, trim, second, art, stone: !!stone, play };
   });
   // Everything else, each built in its own frame facing +z; `turn` stands the frame in the hall. For the carnival
   // machines the player stands at the frame's origin (`play`); the counters are built with their customers on +z.
@@ -79,30 +79,31 @@
   // the claw machines and the pinball pair in the post bays, a dart board in each outer bay and the locked back
   // door. The token totem and the ticket muncher flank the doorway with the prize counter beside the muncher (munch,
   // then trade), and the kiddie rides stand side-on in a row right of the entry avenue, facing it.
-  const standAt = (x, z, turn) => ({ x, z, turn, play: { x, z, facing: turn + Math.PI } });
+  // Score IDs belong to the physical machine. Keep them when moving or reordering the layout.
+  const standAt = (x, z, turn, scoreId = null) => ({ x, z, turn, scoreId, play: { x, z, facing: turn + Math.PI } });
   const LAYOUT = {
     cabinets: CABINETS,
-    skee: [standAt(10, -3, 0), standAt(11.8, -3, 0)],
-    hoops: [standAt(13.76, 2.7, -Math.PI / 2), standAt(13.76, 4.9, -Math.PI / 2)],
-    shy: standAt(-13.21, -6.8, Math.PI / 2),
+    skee: [standAt(10, -3, 0, "skee-1"), standAt(11.8, -3, 0, "skee-2")],
+    hoops: [standAt(13.76, 2.7, -Math.PI / 2, "hoops-1"), standAt(13.76, 4.9, -Math.PI / 2, "hoops-2")],
+    shy: standAt(-13.21, -6.8, Math.PI / 2, "shy-1"),
     // The playable claw machine is the middle one; its player stands `CLAW.back` in front of it.
-    claw: standAt(0, -22.3, 0),
+    claw: standAt(0, -22.3, 0, "claw-2"),
     snack: { x: -14.9, z: 4.3, turn: Math.PI },
     prizes: { x: -7.2, z: 4.6, turn: Math.PI },
     tables: [[-13.4, -1.9], [-9.2, -1.9]],
-    claws: [[-3.227, -23.3], [0, -23.3], [3.227, -23.3]],
-    pinball: [[5.53, -23.1], [7.18, -23.1]],
+    claws: [[-3.227, -23.3, "claw-1"], [0, -23.3, "claw-2"], [3.227, -23.3, "claw-3"]],
+    pinball: [[5.53, -23.1, "pinball-1"], [7.18, -23.1, "pinball-2"]],
     // Air hockey: the Oogas' table on the right wall in the throwing range and one on each flank of the back room by
     // the stairs, each the table's middle and its `turn`, played from 1.75 m out along it (0: from its +z end).
     // Pool: two tables either side of the back room's plaza, played from +z. Darts: a board on the back wall under the
-    // deck in each outer post bay, [x], thrown from `DART.oche` out from it.
-    hockeys: [{ x: 16.3, z: -4.75, turn: 0 }, { x: -13.3, z: -14.15, turn: 0 }, { x: 13.55, z: -14.15, turn: 0 }],
-    pools: [{ x: -7.8, z: -14.65 }, { x: 7.8, z: -14.65 }],
-    darts: [-12.909, 12.909],
+    // deck in each outer post bay, thrown from `DART.oche` out from it.
+    hockeys: [{ x: 16.3, z: -4.75, turn: 0, scoreId: "hockey-1" }, { x: -13.3, z: -14.15, turn: 0, scoreId: "hockey-2" }, { x: 13.55, z: -14.15, turn: 0, scoreId: "hockey-3" }],
+    pools: [{ x: -7.8, z: -14.65, scoreId: "billiards-1" }, { x: 7.8, z: -14.65, scoreId: "billiards-2" }],
+    darts: [{ x: -12.909, scoreId: "darts-1" }, { x: 12.909, scoreId: "darts-2" }],
     changers: [{ x: 3.4, z: 5.5, turn: Math.PI }, { x: -3.4, z: 5.5, turn: Math.PI }],
     // The rides in the order of `ride`'s bodies: the silverback, the monkey cart, the dino and the baby mammoth, side-on
     // in a row right of the entry avenue, each facing it and played from the avenue's side.
-    rides: [{ x: 5.5, z: 4.4, turn: -Math.PI / 2 }, { x: 5.5, z: 2.6, turn: -Math.PI / 2 }, { x: 5.5, z: 0.8, turn: -Math.PI / 2 }, { x: 5.5, z: -1, turn: -Math.PI / 2 }],
+    rides: [{ x: 5.5, z: 4.4, turn: -Math.PI / 2, scoreId: "ride-1" }, { x: 5.5, z: 2.6, turn: -Math.PI / 2, scoreId: "ride-2" }, { x: 5.5, z: 0.8, turn: -Math.PI / 2, scoreId: "ride-3" }, { x: 5.5, z: -1, turn: -Math.PI / 2, scoreId: "ride-4" }],
     ropes: [[-5.8, 2.5, -5.8, 3.6], [-8.6, 2.5, -8.6, 3.6]],
     // Jungle planters, [x, z, plant (even a palm, odd a bush), y, turn]: on the floor unless `y` stands one on the
     // mezzanine's deck.
@@ -1298,11 +1299,11 @@
   // hockey tables from the end their `turn` faces, pool from the table's +z side, darts from the oche before the back
   // wall, pinball from its foot and the rides from 1.4 m in front of their faces.
   LAYOUT.frames = {
-    claw: LAYOUT.claws.map(([x, z]) => standAt(x, z + CLAW.back, 0)),
-    hockey: LAYOUT.hockeys.map((h) => standAt(h.x + Math.sin(h.turn) * 1.75, h.z + Math.cos(h.turn) * 1.75, h.turn)),
-    pool: LAYOUT.pools.map((p) => standAt(p.x, p.z + 1.35, 0)),
-    darts: LAYOUT.darts.map((x) => standAt(x, HALL.back + 0.38 + DART.oche, 0)),
-    pinball: LAYOUT.pinball.map(([x, z]) => standAt(x, z + 1.05, 0)),
+    claw: LAYOUT.claws.map(([x, z, scoreId]) => standAt(x, z + CLAW.back, 0, scoreId)),
+    hockey: LAYOUT.hockeys.map((h) => standAt(h.x + Math.sin(h.turn) * 1.75, h.z + Math.cos(h.turn) * 1.75, h.turn, h.scoreId)),
+    pool: LAYOUT.pools.map((p) => standAt(p.x, p.z + 1.35, 0, p.scoreId)),
+    darts: LAYOUT.darts.map((p) => standAt(p.x, HALL.back + 0.38 + DART.oche, 0, p.scoreId)),
+    pinball: LAYOUT.pinball.map(([x, z, scoreId]) => standAt(x, z + 1.05, 0, scoreId)),
     ride: LAYOUT.rides.map((r) => ({ ...r, play: { x: r.x + Math.sin(r.turn) * 1.4, z: r.z + Math.cos(r.turn) * 1.4, facing: r.turn + Math.PI } }))
   };
   BL.arcadeModels = {

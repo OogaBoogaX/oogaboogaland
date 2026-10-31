@@ -249,6 +249,17 @@
   };
   let canvasEl = null, actDown = false, pressedBy = "", steerId = -1;
   let phase = "intro", shownCount = -1, finalScore = 0, introEl = null, leaving = false;
+  let scoreRun = null, unsubscribeScores = null;
+  const scoreMachines = [];
+  const machineBest = (id) => BL.highscores.best(kind, id) ?? game.arcadeBest(id);
+  const refreshScores = () => {
+    const shared = BL.highscores.best(kind, machine.scoreId) !== null;
+    text(el.bestBox.firstElementChild, shared ? "Machine best" : "Local best");
+    text(el.finalBest.previousElementSibling, shared ? "Machine best" : "Local best");
+    text(el.finalBest, String(machineBest(machine.scoreId)));
+    // Idle carved boards read their host's best when stopped. A live run keeps its own score on the machine.
+    for (const g of scoreMachines) if (!g.playing && (g !== play || phase === "intro")) g.stop();
+  };
   const targets = [], shown = { score: -1, best: -1, left: -1, round: -1, target: -1, verb: null, meter: -2, w0: -1, w1: -1, long: -1, fire: null, label: null, streak: -1, mult: -1, note: null, goal: -1, final: -1 };
   // The presentation's numbers on one object, so a frame's writes change them in place: the score's roll (`from` to
   // `to`, `rollT` into it), the hit-stop (`slow`, seconds left) and a big moment's afterglow (`big`), a held press
@@ -548,7 +559,8 @@
     }
     // Once the run passes the best it started with, the Best box follows the score. A best of six figures (a
     // pinball's) is shortened, so on a phone it clears the stats beside it; any less is exact, as a best to beat is.
-    const best = T.record ? shown.score : game.state.arcade[kind];
+    const shared = BL.highscores.best(kind, machine.scoreId);
+    const best = shared ?? (T.record ? shown.score : game.arcadeBest(machine.scoreId));
     if (best !== shown.best) { shown.best = best; text(el.best, best >= 1e5 ? BL.game.formatLarge(best) : String(best)); }
     if (s.left !== shown.left) { shown.left = s.left; text(el.left, String(s.left)); }
     if (s.label !== shown.label) { shown.label = s.label; text(el.leftLabel, s.label); }
@@ -616,7 +628,8 @@
   const startPlay = () => {
     setPhase("play"); play.start(); shown.verb = null;
     if (retro) audio.music(kind);
-    T.bestAt = game.state.arcade[kind];
+    scoreRun = BL.highscores.begin(kind);
+    T.bestAt = game.arcadeBest(machine.scoreId);
     if (!coached[kind]) {
       coached[kind] = true;
       T.coachT = COACH_S; T.coachN = COACH_N;
@@ -647,7 +660,9 @@
     if (phase !== "play") return;
     setPhase("done"); T.doneT = 0.9; finalScore = score; T.buffer = 0;
     coachOff();
-    T.better = game.recordArcade(kind, score) && score > 0;
+    T.better = game.recordArcade(kind, score, machine.scoreId) && score > 0;
+    BL.highscores.submit(scoreRun, machine.scoreId, score);
+    scoreRun = null;
     T.won = play.tickets(score); T.total = game.addTickets(T.won);
     // A retro game stopped its tune when it decided the run (`over`); a run ended any other way stops it here.
     if (retro) audio.music(null);
@@ -661,7 +676,7 @@
     text(el.says, SAYS[stars]);
     text(el.final, "0");
     shown.final = 0;
-    text(el.finalBest, String(game.state.arcade[kind]));
+    text(el.finalBest, String(machineBest(machine.scoreId)));
     text(el.won, `+${T.won}`);
     text(el.tickets, String(T.total));
     el.newBest.hidden = true;
@@ -786,11 +801,11 @@
       // A retro game's host (`retro-games.js`): its big moments crack a coconut over the control panel, and its tune
       // stops the moment the run is decided (`over`), so the end's own jingle plays alone.
       const host = K.retro ? {
-        get best() { return game.state.arcade[kind]; }, aim, still, onEnd: finish, over: () => audio.music(null), popup, cue, shake, flop,
+        get best() { return machineBest(p.scoreId); }, aim, still, onEnd: finish, over: () => audio.music(null), popup, cue, shake, flop,
         crack: (big) => crack(p, K.crackAt[0], K.crackAt[1], K.crackAt[2], big)
       } : {
         node, glow,
-        get best() { return game.state.arcade[kind]; },
+        get best() { return machineBest(p.scoreId); },
         onEnd: finish,
         burst: (lx, ly, lz, count) => { const w = toHall(p, lx, ly, lz, BURST); fx.burst(w.x, w.y, w.z, count, SPARKS, 2.4); },
         popup, cue, shake, aim, index: i,
@@ -804,6 +819,7 @@
       if (parts.oche) addChild(node, createNode({ geometry: AM.dartOche() }));
       // The machine played is `slot`; the others of its kind stand at rest beside it.
       const g = K.make(host);
+      scoreMachines.push(g);
       if (i === slot) { play = g; machine = p; }
     });
     // An Ooga across the air hockey table, following its mallet: from the roster, never the visitor.
@@ -997,7 +1013,12 @@
       || (wanted && !BL.net.mayDrive(wanted) && BL.contributors.roster.some(c => c.name === wanted) ? wanted
         : BL.contributors.activeRoster.find(c => !BL.net.mayDrive(c.name))?.name || null);
     build(world.pilot);
-    text(el.title, play.name);
+    const number = machine.scoreId.slice(machine.scoreId.lastIndexOf("-") + 1);
+    text(el.title, KINDS[kind].spots.length > 1 ? `${play.name} · #${number}` : play.name);
+    text(el.record, "New local best!");
+    text(el.newBest, "New local best!");
+    refreshScores();
+    unsubscribeScores = BL.highscores.watch(kind, refreshScores);
     text(el.help, play.help);
     text(el.needLabel, KINDS[kind].need || "Need");
     text(el.roundLabel, play.roundLabel || "Round");
@@ -1021,7 +1042,7 @@
     scene.input = input;
     // `crack` and `flop` stage a big moment or a miss at a point in the played machine's frame; `watchers` counts them
     // and `spots` lists where each stands in the hall, [x, z, facing] on a wide screen, then on a tall one.
-    scene.debug = { hud, carnival: { get kind() { return kind; }, get phase() { return phase; }, get status() { return play.status; }, act, again, finish: (s) => { finish(s); }, tickets: (s) => play.tickets(s),
+    scene.debug = { hud, carnival: { get kind() { return kind; }, get machineId() { return machine.scoreId; }, get phase() { return phase; }, get status() { return play.status; }, act, again, finish: (s) => { finish(s); }, tickets: (s) => play.tickets(s),
       crack: (lx, ly, lz, big) => crack(machine, lx, ly, lz, big), flop, get watchers() { return watchers.length; }, get spots() { return watchers.map((w) => w.at); } } };
   };
 
@@ -1166,6 +1187,9 @@
   const overlay = (dt) => fx.drawOverlay(dt, drawScreen);
 
   const leaveScene = () => {
+    unsubscribeScores();
+    unsubscribeScores = scoreRun = null;
+    scoreMachines.length = 0;
     play.stop();
     window.removeEventListener("keydown", onDown);
     window.removeEventListener("keyup", onUp);
