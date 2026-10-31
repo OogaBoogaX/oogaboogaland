@@ -1807,6 +1807,130 @@ body[data-active-scene="arcade"] .magazine-hud {
   }
 }
 
+/* The live players tab (players.js): a group a zone under its heading, and a row a player with the roster's marks,
+   the crosshair that turns the camera and, for players in the visitor's zone, how far away they stand. Each cell keeps
+   its column, so a hidden crosshair or an empty distance never moves the others. */
+.players {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 8px 10px;
+}
+
+.players[hidden] {
+  display: none;
+}
+
+.players-rows {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) 14px 14px 6ch;
+  column-gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.players-rows li {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+  min-height: 22px;
+  padding: 6px 0;
+  border-top: 1px solid rgba(0, 0, 0, 0.35);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+  font-size: 12px;
+}
+
+.players-rows li:first-child {
+  border-top: 0;
+  box-shadow: none;
+}
+
+.players-rows .roster-presence { grid-column: 1; }
+.players-rows .roster-marks { grid-column: 3; }
+
+.players-name {
+  display: inline-flex;
+  grid-column: 2;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--paper);
+}
+
+.players-look {
+  display: inline-flex;
+  grid-column: 4;
+  justify-self: center;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.players-look[hidden] {
+  display: none;
+}
+
+.players-look svg {
+  width: 12px;
+  height: 12px;
+  shape-rendering: crispEdges;
+}
+
+.players-look:not([aria-disabled="true"]):hover,
+.players-look:not([aria-disabled="true"]).virtual-hover {
+  color: var(--accent-text);
+}
+
+.players-look:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.players-look[aria-disabled="true"] {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.players-distance {
+  grid-column: 5;
+  justify-self: end;
+  color: var(--paper);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* A player who let go of their Ooga: where they last stood, in red, said in words too. */
+.players-distance[data-known="last"] {
+  color: var(--danger);
+}
+
+.players-note {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.players-note[hidden] {
+  display: none;
+}
+
+@media (pointer: coarse) {
+  .players-look {
+    padding: 8px;
+    margin: -8px;
+  }
+}
+
 .roster-age {
   color: rgba(243, 239, 228, 0.55);
   font-size: 10px;

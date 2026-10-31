@@ -33,6 +33,8 @@
   const RIGHT_DOUBLE_TIME = 350, RIGHT_TAP_TRAVEL = 8;
   const LOGIN_VIEW_KEY = "ooga-login-view", LOGIN_VIEW_AGE = 10 * 60 * 1000;
   let saveActiveLoginView = null;
+  // The live pilot's turn toward a point (see `turnToward`), for the live players tab, which outlives every scene.
+  let turnActive = null;
   const readLoginView = ctx => {
     try {
       const saved = window.sessionStorage.getItem(LOGIN_VIEW_KEY);
@@ -1400,6 +1402,10 @@
         moveLyingView(-e.movementX * sensitivity, e.movementY * sensitivity);
         return;
       }
+      if (turning) {
+        if (!e.movementX && !e.movementY) return;
+        stopTurn();
+      }
       orbit.yaw = orbit.tYaw -= e.movementX * sensitivity;
       orbit.pitch = orbit.tPitch = clamp(orbit.tPitch + e.movementY * sensitivity, TRAILING_PITCH[0], TRAILING_PITCH[1]);
     };
@@ -2370,6 +2376,13 @@
     // Shoulder is a stop for the whole gesture, including momentum. Input's
     // wheel/pinch id is authoritative; callers without one use a quiet gap or reversal.
     const ZOOM_PAUSE = 220;
+    // A turn toward a point still easing in an aiming view, whose input otherwise writes the angles directly.
+    let turning = false;
+    const stopTurn = () => {
+      if (!turning) return;
+      turning = false;
+      orbit.tYaw = orbit.yaw; orbit.tPitch = orbit.pitch;
+    };
     let trailingViewInput = false, trailingZoomInput = false, zoomGesture = null, zoomAt = -Infinity, zoomDirection = 0, zoomStopped = false;
     const zoomPitch = (cave, fromDistance) => {
       if (!weaponViewReady(cave)) return;
@@ -2405,6 +2418,10 @@
         }
         if (aimView()) {
           if (dx || dy) releaseCursorAim();
+          if (turning) {
+            if (!dx && !dy) return;
+            stopTurn();
+          }
           orbit.yaw = orbit.tYaw -= dx * 0.0025;
           orbit.pitch = orbit.tPitch = clamp(orbit.tPitch + dy * 0.0025, TRAILING_PITCH[0], TRAILING_PITCH[1]);
           return;
@@ -2647,7 +2664,14 @@
         const turn = clamp(a.yaw + a.orbitYaw, -1, 1);
         if (a.x || a.y || a.up || turn || a.pitch) releaseCursorAim();
         if (lying) moveLyingView(turn * YAW_RATE * dt, a.pitch * PITCH_RATE * dt);
-        else {
+        else if (turning && !turn && !a.pitch) {
+          orbit.yaw = damp(orbit.yaw, orbit.tYaw, 14, dt);
+          orbit.pitch = damp(orbit.pitch, orbit.tPitch, 14, dt);
+          if (Math.abs(orbit.tYaw - orbit.yaw) < 1e-3 && Math.abs(orbit.tPitch - orbit.pitch) < 1e-3) {
+            orbit.yaw = orbit.tYaw; orbit.pitch = orbit.tPitch; turning = false;
+          }
+        } else {
+          stopTurn();
           orbit.yaw = orbit.tYaw += turn * YAW_RATE * dt;
           orbit.pitch = orbit.tPitch = clamp(orbit.tPitch + a.pitch * PITCH_RATE * dt, TRAILING_PITCH[0], TRAILING_PITCH[1]);
         }
@@ -3720,6 +3744,8 @@
     const dispose = (keep = false) => {
       handoff.cancel();
       if (saveActiveLoginView === saveLoginView) saveActiveLoginView = null;
+      if (turnActive === turnToward) turnActive = null;
+      turning = false;
       if (unsubscribeOwnOoga) unsubscribeOwnOoga();
       unsubscribeOwnOoga = null;
       ownAccount = ownCrew = ownOoga = null;
@@ -3783,6 +3809,7 @@
       ownAccount = ownCrew = null;
       unsubscribeOwnOoga = BL.net.subscribe(syncOwnOoga);
       saveActiveLoginView = saveLoginView;
+      turnActive = turnToward;
     };
     // The first claim can precede the first frame. Give it the landing eye,
     // or the detached eye saved before OAuth navigated away from this route.
@@ -3820,6 +3847,45 @@
       }
       syncWeaponHud(); syncModeHud();
     };
+    // Turn the view toward a world point (the live players tab: a player, or the door on the way to them). The view
+    // eases round to face it at its usual pace and, in first person, tips up or down to it; nothing moves, though in
+    // first person and the aiming views the Ooga turns on the spot with the view, as it always does there. A point
+    // seen from overhead turns the map until it lies ahead. Refused while something else holds the camera (a tour, a
+    // menu) or the Ooga lies down; true when the view turns. Input during the turn takes over at once.
+    const turnToward = (x, y, z) => {
+      if (disposed || !active || externalControl || menuOpen) return false;
+      const cave = player();
+      if (syncLyingView(cave)) return false;
+      resumePose();
+      if (birdsEye()) {
+        const p = cave.root.position, dx = x - p.x, dz = z - p.z;
+        if (dx * dx + dz * dz < 1e-6) return false;
+        const yaw = Math.atan2(-dx, -dz);
+        overheadNorthUp = false;
+        overheadTargetYaw = overheadYaw + Math.atan2(Math.sin(yaw - overheadYaw), Math.cos(yaw - overheadYaw));
+        return true;
+      }
+      // First person turns about the eye, the shoulder view about the body it looks past, any other view about what
+      // it looks at, so the point lands in the middle of the picture.
+      const aiming = aimView(), shoulder = aiming && !closeWanted;
+      // A view held on a clicked point lets go of it first, as a look does, or it would keep facing that point.
+      if (aiming) releaseCursorAim();
+      const from = closeWanted ? camera.position : shoulder ? cave.root.position : camera.target;
+      const dx = x - from.x, dz = z - from.z, horizontal = Math.hypot(dx, dz);
+      if (horizontal < 1e-3) return false;
+      let yaw = Math.atan2(-dx, -dz);
+      if (shoulder) {
+        const side = shoulderSide * cave.traits.height;
+        if (Math.abs(side) < horizontal) yaw += Math.asin(side / horizontal);
+      }
+      orbit.tYaw = orbit.yaw + Math.atan2(Math.sin(yaw - orbit.yaw), Math.cos(yaw - orbit.yaw));
+      if (closeWanted) {
+        const range = close && !cave ? close.pitch : TRAILING_PITCH;
+        orbit.tPitch = clamp(Math.atan2(from.y - y, horizontal), range[0], range[1]);
+      }
+      turning = aiming;
+      return true;
+    };
     const saveLoginView = () => {
       try {
         window.sessionStorage.removeItem(LOGIN_VIEW_KEY);
@@ -3835,6 +3901,7 @@
       } catch (_) { return false; }
     };
     saveActiveLoginView = saveLoginView;
+    turnActive = turnToward;
     return { orbit, hooks, controls, cursor: carryCursor, cameraHandoff: handoff, captureControl, capturePose, restorePose, focusAim, setMenuOpen, setExternalControl,
       // The first person's field of view at this canvas's shape (unaimed), for a view held from outside to match it.
       eyeFov: () => Math.min(MAX_FOV, Math.max(BASE_FOV, 2 * Math.atan(Math.tan(MIN_HFOV / 2) / (renderer.size.width / Math.max(1, renderer.size.height))))),
@@ -3846,7 +3913,7 @@
       get shoulderEntryMix() { return aimMix; },
       // The view being kept: "first-person", "shoulder", "birds-eye", "orbit", or "detached" with nobody driven.
       get view() { return viewMode(); },
-      bind, setActive, refreshCombat, readInput, update, syncHeadVisibility, goPreset, resetCamera, freeCursor, navigate, travelRefusal, travel, transformView, tiltView, framePoint, releaseFrame, pickCarryTarget, enterClose, exitClose, possess, release, escape, action, modeAction, weaponAction, weaponMode, showAct, suspend, resume, dispose, get player() {
+      bind, setActive, refreshCombat, readInput, update, syncHeadVisibility, turnToward, goPreset, resetCamera, freeCursor, navigate, travelRefusal, travel, transformView, tiltView, framePoint, releaseFrame, pickCarryTarget, enterClose, exitClose, possess, release, escape, action, modeAction, weaponAction, weaponMode, showAct, suspend, resume, dispose, get player() {
       return player();
     }, get assistedTarget() {
       if (birdsEye() && assistedTargetActive) return assistedTargetHit;
@@ -3877,5 +3944,6 @@
       return viewPitch;
     } };
   };
-  BL.pilot = { create, WALK, combatEntryView, saveLoginView: () => saveActiveLoginView ? saveActiveLoginView() : false };
+  BL.pilot = { create, WALK, combatEntryView, saveLoginView: () => saveActiveLoginView ? saveActiveLoginView() : false,
+    turnToward: (x, y, z) => turnActive ? turnActive(x, y, z) : false };
 })();
