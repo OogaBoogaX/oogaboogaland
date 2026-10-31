@@ -125,7 +125,10 @@
     })]
   };
 
-  const create = ({ root, camera, renderer, look }) => {
+  // Null unless the page is a debug page that asks for looks.
+  const create = ({ root, camera, renderer }) => {
+    const look = /[?&]debug=1(&|$)/.test(location.search) ? new URLSearchParams(location.search).get("hopperlook") : null;
+    if (!look) return null;
     const tokens = new Set(look.split(",").map(t => t.trim().toLowerCase()).filter(Boolean));
     const level = [...tokens].find(t => SKIES[t]) || null, sky = level ? SKIES[level] : null;
     const hourToken = [...tokens].find(t => /^h\d+(\.\d+)?$/.test(t));

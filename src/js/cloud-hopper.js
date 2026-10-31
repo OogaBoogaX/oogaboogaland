@@ -124,8 +124,7 @@
     const ghost = BL.cloudHopperGhost.create({ root, renderer: ctx.renderer });
     const audio = BL.cloudHopperAudio.create();
     // Design review only: candidate looks on a debug page that asks for them (cloud-hopper-looks.js).
-    const lookParam = /[?&]debug=1(&|$)/.test(location.search) ? new URLSearchParams(location.search).get("hopperlook") : null;
-    const looks = lookParam && BL.cloudHopperLooks ? BL.cloudHopperLooks.create({ root, camera, renderer: ctx.renderer, look: lookParam }) : null;
+    const looks = BL.cloudHopperLooks ? BL.cloudHopperLooks.create({ root, camera, renderer: ctx.renderer }) : null;
     const dockMusicLevel = () => {
       const cave = pilot.player;
       if (!cave || cave !== crew.player) return 0;
