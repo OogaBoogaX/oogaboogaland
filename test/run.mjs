@@ -21674,13 +21674,20 @@ const distributionAudioChecks = async () => {
     const body = `\nwindow.BL = {};\n${[...blocks.values()].join("\n\n")}\n`;
     const page = `<meta content="default-src 'none'; script-src 'sha256-${hash(body)}'; img-src 'self' data:"><script>${body}</script>`;
     const terrainWorker = { build: "0".repeat(64), url: "/js/terrain-worker-0000000000000000.js" };
-    const hosted = externalizeModules(page, out, new Map([["dsb", PICTURE_MODULES]]), src => blocks.get(src), terrainWorker, (src, text) => externalizePictures(src, text, out));
+    // Cloud Hopper's art stays in the page's own script (`inline`) and is rewritten there, so the first load carries addresses.
+    const inPage = ["js/cloud-hopper-art.js"];
+    const hosted = externalizeModules(page, out, new Map([["dsb", PICTURE_MODULES.filter(src => !inPage.includes(src))]]), src => blocks.get(src), terrainWorker, (src, text) => externalizePictures(src, text, out), inPage);
     const bundle = readFileSync(join(out, JSON.parse(hosted.match(/deferredScripts = (\{[^}]*\})/)[1]).dsb), "utf8"), art = { window: { BL: {} } };
+    const own = hosted.match(/<script>([\s\S]*?)<\/script>/)[1];
+    const ownArt = { window: { BL: {} } };
     runInNewContext(bundle, art);
-    const files = [...bundle.matchAll(/\/art\/[a-z-]+-[a-f0-9]{64}\.(jpg|png|webp)/g)].map(m => m[0]);
-    record("distribution pictures: the DSB rooms' data URIs leave the deferred dsb bundle as exact same-origin files, and the bundle still evaluates",
-      pictures.length > 0 && files.length === pictures.length && files.every((url, i) => readFileSync(join(out, url)).equals(Buffer.from(pictures[i][2], "base64")))
-      && !/data:image\//.test(bundle) && art.window.BL.stackchainArt["article-0"].image.startsWith("/art/")
+    runInNewContext(own, ownArt);
+    const files = [...`${bundle}\n${own}`.matchAll(/\/art\/[a-z-]+-[a-f0-9]{64}\.(jpg|png|webp)/g)].map(m => m[0]);
+    const expected = [...PICTURE_MODULES.filter(src => !inPage.includes(src)), ...inPage].flatMap(src => [...blocks.get(src).matchAll(/data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)/g)]);
+    record("distribution pictures: the DSB rooms', the whitepaper poster's and Cloud Hopper's data URIs leave the deferred bundles and the page's own script as exact same-origin files, both still evaluate, and the page's policy pins its rewritten script",
+      pictures.length > 0 && files.length === pictures.length && files.every((url, i) => readFileSync(join(out, url)).equals(Buffer.from(expected[i][2], "base64")))
+      && !/data:image\//.test(bundle) && !/data:image\//.test(own) && art.window.BL.stackchainArt["article-0"].image.startsWith("/art/")
+      && art.window.BL.whitepaperPoster.poster.startsWith("/art/") && ownArt.window.BL.cloudHopperArt.intro.startsWith("/art/") && hosted.includes(`'sha256-${hash(own)}'`)
       && hosted.includes(`window.BL.terrainWorker = ${JSON.stringify(terrainWorker)};`), "staged pictures/terrain descriptor mismatch");
     // The hosted page's own script, its jumbotron snapshot and its stylesheet leave every route page as hashed files.
     const jumbo = `// ---- js/jumbotron-data.js ----\n${readFileSync(join(root, "src/js/jumbotron-data.js"), "utf8").trim()}`;
