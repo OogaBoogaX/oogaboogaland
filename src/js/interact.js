@@ -359,8 +359,9 @@
       // notch. The camera damps the resulting target distance independently.
       const delta = scroll * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? canvas.clientHeight : 1);
       const p = local(e);
-      // A shift-wheel never zooms: it reports its distance, and the factor stays at one.
-      call("onZoom", e.shiftKey ? 1 : Math.exp(Math.max(-1200, Math.min(1200, delta)) * 2.5e-3), zoomGesture, p.x, p.y, e.shiftKey, delta);
+      // The factor is the same with Shift held or not; the scene decides what Shift means — the hub slides the paper
+      // with the wheel and zooms it with Shift, while elsewhere a shift-wheel zooms the camera as any wheel does.
+      call("onZoom", Math.exp(Math.max(-1200, Math.min(1200, delta)) * 2.5e-3), zoomGesture, p.x, p.y, e.shiftKey, delta);
     };
     const onContextMenu = (e) => e.preventDefault();
     let suspended = false;

@@ -7417,6 +7417,15 @@
     pilot.setActive(!on); pilot.controls.reset(); input.reset();
     pilot.setExternalControl(on);
   };
+  // A right click while the paper is read steps the zoom back out; elsewhere the canvas keeps its menu off as before.
+  // The canvas outlives the visit, so the listener goes on once and comes off only when the hub is destroyed, not
+  // when a kept hub is suspended and resumed.
+  let wpContextOn = false, hubCanvas = null;
+  const wpContextMenu = (e) => {
+    if (!wpRead) return;
+    e.preventDefault();
+    wpZoomOut();
+  };
   // The banner that floats over the stone: "₿itcoin Whitepaper Day" in small caps, cut from a traditional serif
   // face drawn in seven-cell-wide block runs with serif feet, and "31 · X · MMVIII" under it. Its letters are
   // arched along a circle, the whole turned round to read from the plaza and bobbing there. One geometry a glyph,
@@ -11076,12 +11085,11 @@
     hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks, preciseHover: true });
-    // A right click while the paper is read steps the zoom back out; elsewhere the canvas keeps its menu off as before.
-    ctx.canvas.addEventListener("contextmenu", (e) => {
-      if (!wpRead) return;
-      e.preventDefault();
-      wpZoomOut();
-    }, { signal: ctx.signal });
+    if (!wpContextOn) {
+      hubCanvas = ctx.canvas;
+      ctx.canvas.addEventListener("contextmenu", wpContextMenu);
+      wpContextOn = true;
+    }
     presets = { pile: PILE_VIEW, gate: GATE_VIEW };
     pilot = pilotMod.create({ renderer, canvas: ctx.canvas, camera, hud, presets, landing: "pile", pitch: [PITCH_MIN, PITCH_MAX], dist: [DIST_MIN, DIST_MAX], follow: FOLLOW, fly: FLY, clampTarget, clampCamera, observeOrbit: position => clampCamera(position, 0), ceilingAt, birdsEyeMin: BIRDS_EYE_MIN, birdsEyeCeiling, releaseView: releaseCameraView, enterFreeView: enterFreeCameraView, coarse: COARSE, onFreeAction: freeAction, jetpackStatus: jetpackHudStatus, mayPossess: mayDriveOoga, combatOnly: () => gameCombatOnly, close: { ...CLOSE_VIEW, maxStep: STEP_MAX, groundAt: playerSupportAt, visualGroundAt: visualSupportAt, sleepEyeFloorAt, zone: () => playerCaveIndex } });
     chalkboard = BL.chalkboard.create({
@@ -11747,9 +11755,9 @@
       onZoom: (factor, gesture, px, py, shift, delta) => {
         if (islandGuide.holding) return;
         if (wpRead) {
-          // The wheel slides the paper, Shift and the wheel zoom it, and a pinch, with no distance of its own, zooms it.
-          if (!delta) wpZoomBy(factor);
-          else if (shift) wpZoomBy(Math.exp(Math.max(-1200, Math.min(1200, delta)) * 2.5e-3));
+          // The wheel slides the paper; Shift and the wheel zoom it, and so does a pinch, which has no distance of
+          // its own. Outside the reading view Shift keeps its usual meaning, a wheel that zooms the camera.
+          if (shift || !delta) wpZoomBy(factor);
           else wpScrollBy(delta);
           return;
         }
@@ -12042,6 +12050,7 @@
     stopLazyBedding();
     if (reuseHub && !destroy) return suspendHub();
     heldHub = false; heldDebug = null;
+    if (destroy && wpContextOn) { hubCanvas.removeEventListener("contextmenu", wpContextMenu); hubCanvas = null; wpContextOn = false; }
     actorTransition.sourceRoot = actorTransition.sourceHead = null;
     factoryWalk.cave = null;
     resetRageThrowMap(false);
