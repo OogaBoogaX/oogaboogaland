@@ -9,7 +9,7 @@
     return `${m}:${String(s).padStart(2, "0")}.${String(h).padStart(2, "0")}`;
   };
   const medalFor = (score) => score >= MEDALS.gold ? "gold" : score >= MEDALS.silver ? "silver" : score >= MEDALS.bronze ? "bronze" : null;
-  const create = ({ roster, best, onPick }) => {
+  const create = ({ roster, best, onPick, sharedBest = () => null }) => {
     const el = {
       drop: $("drop"), board: $("drop-board"), oogas: $("drop-oogas"), bestList: $("drop-best"), medal: $("drop-medal"), help: $("drop-help"),
       strip: $("drop-strip"), alt: $("drop-alt"), rings: $("drop-rings"), ringTotal: $("drop-ring-total"), time: $("drop-time"), speed: $("drop-speed"), chute: $("drop-chute"), chuteName: $("drop-chute-name"),
@@ -75,8 +75,12 @@
       li.append(a, b);
       return li;
     };
+    const sharedResult = row("Shared best", "–");
     const refreshBest = () => {
       const b = best();
+      const shared = sharedBest();
+      sharedResult.hidden = shared === null;
+      sharedResult.lastChild.textContent = shared > 0 ? String(shared) : "–";
       const medal = b ? medalFor(b.score) : null;
       el.medal.hidden = !medal;
       if (medal) {
@@ -84,8 +88,9 @@
         el.medal.textContent = `${medal.toUpperCase()} · ${b.score}`;
       }
       el.bestList.replaceChildren(...(b
-        ? [row("Score", String(b.score)), row("Rings", `${b.rings} of ${b.ringTotal}`), row("Landing", b.landing), row("Medal", medal ? medal.toUpperCase() : "none")]
+        ? [row("Local score", String(b.score)), row("Rings", `${b.rings} of ${b.ringTotal}`), row("Landing", b.landing), row("Medal", medal ? medal.toUpperCase() : "none")]
         : [row("Score", "–"), row("Gold", `${MEDALS.gold}+`), row("Silver", `${MEDALS.silver}+`), row("Bronze", `${MEDALS.bronze}+`)]));
+      if (shared !== null) el.bestList.append(row("Shared best", shared > 0 ? String(shared) : "–"));
     };
     const show = (section) => {
       el.board.hidden = section !== "board";
@@ -146,7 +151,7 @@
       }, ms);
     };
     const results = (rows, summary) => {
-      el.score.replaceChildren(...rows.map(([label, value]) => row(label, value)));
+      el.score.replaceChildren(...rows.map(([label, value]) => row(label, value)), sharedResult);
       el.summary.textContent = summary;
       refreshBest();
       show("results");

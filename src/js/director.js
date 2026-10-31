@@ -64,12 +64,23 @@
   const sound = window.BL.sound;
   const showSound = () => {
     const label = sound.muted ? "Unmute environment sounds" : "Mute environment sounds";
-    soundButton.setAttribute("aria-label", label); soundButton.title = `${label} · M`;
+    const voice = window.BL.voice.stats;
+    soundButton.setAttribute("aria-label", label); soundButton.title = voice.enabled || voice.joining ? label : `${label} · M`;
     soundButton.setAttribute("aria-pressed", String(sound.muted));
   };
   const offSound = sound.subscribe(showSound);
   soundButton.addEventListener("click", sound.toggle);
   showSound();
+  // Reserve M before scene capture listeners and transition holds; editable fields keep it for typing.
+  const onVoiceMuteKey = (e) => {
+    const voice = window.BL.voice;
+    if (e.key.toLowerCase() !== "m" || e.metaKey || e.ctrlKey || e.altKey || !voice.stats.enabled && !voice.stats.joining) return;
+    if (e.target && (e.target.isContentEditable || e.target.closest && e.target.closest("input, textarea, select"))) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (!e.repeat) voice.setMuted(!voice.stats.muted);
+  };
+  window.addEventListener("keydown", onVoiceMuteKey, true);
   let renderer = null;
   if (!params.has("canvas2d")) {
     try {
@@ -277,8 +288,11 @@
   const coarse = window.matchMedia("(pointer: coarse)").matches;
   if (coarse) for (const n of document.querySelectorAll("[data-intro] [data-coarse]")) n.textContent = n.dataset.coarse;
   const openIntro = () => intros.find((el) => !el.hidden) || null;
-  // Microphone and remote voice muting stay in the Oogas panel.
-  const showMic = () => window.BL.hud.showMic(window.BL.voice.stats, false);
+  const showMic = () => {
+    const voice = window.BL.voice.stats;
+    window.BL.hud.showMic(voice, voice.enabled || voice.joining);
+    showSound();
+  };
   // An arrival in three parts: `arriving` before the scene's own enter, the enter, then `arrived`. A scene with
   // `enterSteps` may run its enter in slices between them (see `swap`).
   const arriving = (next, place) => {
@@ -715,7 +729,7 @@
       location.reload();
       return;
     }
-    // M always controls environment sound; voice chat keeps its separate panel controls.
+    // With voice off, M retains the environment shortcut outside focused UI.
     if (key === "m" && !e.metaKey && !e.ctrlKey && !e.altKey) {
       e.preventDefault();
       sound.toggle();
@@ -760,6 +774,10 @@
   });
   showBlockHeight(chain.snapshot);
   if (!params.has("nosim") && params.get("mempool") !== "0") mempool.start();
+  // Contributor activity belongs to the page, including while the hub is suspended or absent.
+  const unsubscribeOogatron = window.BL.oogatronLive.subscribe((event) => {
+    if (event.type === "stats") window.BL.contributors.applySnapshot(event.stats);
+  });
   if (!params.has("nosim") && params.get("oogatron") !== "0") window.BL.oogatronLive.start();
   if (!params.has("nosim") && params.get("totems") !== "0") window.BL.totemFeed.start();
   // `?chain=esplora` or `?chain=https://host/api` pins the provider; otherwise mempool.space leads
@@ -890,7 +908,8 @@
         const ready = window.BL.deferred.load("terrain-cache"); if (ready) await ready;
         const factory = first.id === "hub" && window.BL.caves.slots.find(slot => slot.status === "open" && slot.scene === "factory");
         const roofHole = factory ? { id: factory.id, ...window.BL.factoryModels.ROOF_TUBE } : null;
-        await window.BL.terrainCache.prepare({ seed: 1, roofHole }, first.id, terrainController.signal);
+        const nook = first.id === "hub" ? first.libraryNook || null : null;
+        await window.BL.terrainCache.prepare({ seed: 1, roofHole, nook }, first.id, terrainController.signal);
       } catch { /* A rejected opt-in build uses the ordinary path unless this page was destroyed. */ }
       if (destroyed) { models.release(first.id, []); return; }
     }
@@ -1044,6 +1063,7 @@
     router.dispose();
     mempool.dispose();
     chain.dispose();
+    unsubscribeOogatron();
     window.BL.oogatronLive.dispose();
     window.BL.totemFeed.dispose();
     unsubscribeAccount();
@@ -1052,8 +1072,10 @@
     unsubscribeVoiceMarks();
     unsubscribeMic();
     window.BL.voice.dispose();
+    window.BL.highscores.dispose();
     net.dispose();
     offSound(); soundButton.removeEventListener("click", sound.toggle);
+    window.removeEventListener("keydown", onVoiceMuteKey, true);
     window.removeEventListener("keydown", onKeyDown);
     window.removeEventListener("keyup", clearRightShift);
     window.removeEventListener("blur", clearRightShift);

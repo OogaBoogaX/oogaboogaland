@@ -7,7 +7,7 @@
 // the drums and voices ring in a cave echo. `cue(name, level, pan)` plays a cue quieter and to one side, for a sound
 // placed in the hall; `room(on)` fades the hall's bed in or out, a jungle cave at night (crickets, a far bird, the
 // fire's roar and crackle, a soft drum pulse and now and then the Oogas chanting), and `tick` schedules the bed a
-// moment ahead. It shares the rally's mute key.
+// moment ahead, with an audio-only timer keeping that schedule alive in a hidden tab. It shares the rally's mute key.
 //
 // The retro cabinets speak through a chip of their own (`create(true)` builds it): two pulse channels, a triangle and
 // a noise channel, as an 8-bit console's sound was. `chip(name, level)` plays a chip cue straight ahead, and
@@ -23,6 +23,7 @@
   const LOW = [1, 0, 0, 0.45, 0, 0, 0.7, 0, 0.9, 0, 0, 0.45, 0, 0.35, 0.6, 0];
   const HAND = [0, 0, 0.6, 0, 0.35, 0, 0, 0.5, 0, 0, 0.6, 0, 0.35, 0, 0, 0.25];
   const STEP = 0.2, AHEAD = 0.2;
+  const BACKGROUND_AHEAD = 2, BACKGROUND_MS = 250;
   // The throats' vowels, as their first two formants in hertz.
   const OO = [300, 780], OH = [470, 900], AH = [740, 1180], UH = [600, 1100];
 
@@ -250,6 +251,7 @@
     // its next step (`M.step`, due at `M.at`), whether it is paused, and until when it is ducked, written in place.
     const chips = [], M = { tune: null, step: 0, at: 0, paused: false, duck: 0 };
     let waves = null, marchI = 0;
+    let backgroundTimer = 0;
 
     const init = () => {
       if (ctx || typeof AudioContext === "undefined") return;
@@ -373,7 +375,9 @@
       run(bird);
       bed = { gain, roar, crackF, crack, crickets, bird, birdGain, birdPan };
       ready = true;
+      ctx.onstatechange = syncBackground;
       if (bedOn) room(true);
+      else syncBackground();
     };
     // The chip, into its own level on the master: the pulse waves and the triangle's, built from their partials;
     // two pulse channels sharing one slow vibrato, each through its own depth in cents; the triangle; the noise.
@@ -436,10 +440,31 @@
       }
       if (!navigator.userActivation || navigator.userActivation.hasBeenActive) init();
     };
+    // Only the sound clock keeps going when the director stops rendering a hidden tab. The lookahead covers
+    // delayed timer wakes; a late wake starts at the audio clock rather than replaying a backlog of notes.
+    const stopBackground = () => {
+      if (backgroundTimer) window.clearTimeout(backgroundTimer);
+      backgroundTimer = 0;
+    };
+    const backgroundActive = () => ready && !muted && document.hidden && ctx.state === "running"
+      && (bedOn || M.tune && !M.paused);
+    const backgroundTick = () => {
+      backgroundTimer = 0;
+      if (!backgroundActive()) return;
+      tick();
+      backgroundTimer = window.setTimeout(backgroundTick, BACKGROUND_MS);
+    };
+    const syncBackground = () => {
+      stopBackground();
+      if (backgroundActive()) backgroundTick();
+    };
     const onVisibility = () => {
-      if (!ctx || ctx.state === "closed") return;
-      if (document.hidden) ctx.suspend().catch(() => {});
-      else ctx.resume().catch(() => {});
+      // Return to the short foreground queue so a game cue can borrow a channel without leaving a long gap.
+      if (ready && !document.hidden) {
+        if (ctx.state === "suspended") ctx.resume().catch(() => {});
+        if (!muted && M.tune && !M.paused) reduck(ctx.currentTime);
+      }
+      syncBackground();
     };
     document.addEventListener("visibilitychange", onVisibility);
 
@@ -799,10 +824,16 @@
     };
     // How loud the tune's note at `t` plays under the duck.
     const ducked = (t) => t < M.duck ? DUCK : t < M.duck + DUCK_BACK ? DUCK + (1 - DUCK) * (t - M.duck) / DUCK_BACK : 1;
-    // Every step due before SONG_AHEAD from now, on each of its channels no cue holds; a tune that fell behind (a
-    // pause, a mute, a hidden tab) carries on from now. Allocation-free.
+    // Every step due within the lookahead, on each of its channels no cue holds; a tune that fell behind (a
+    // pause, a mute, a delayed timer) carries on from now. Allocation-free.
     const play = () => {
-      const now = ctx.currentTime, end = now + SONG_AHEAD, T = M.tune;
+      const now = ctx.currentTime, T = M.tune;
+      let end = now + (document.hidden ? BACKGROUND_AHEAD : SONG_AHEAD);
+      // A cue may still hold a chip when the tab hides. Revisit its release before queuing past it, so that
+      // channel rejoins the tune as soon as it is free instead of losing a whole background lookahead.
+      if (document.hidden) for (let c = 0; c < 4; c++) {
+        if (c !== 1 && chips[c].until > now) end = Math.min(end, chips[c].until);
+      }
       if (M.at < now) M.at = now + 0.02;
       if (chips[0].until <= now) duty(chips[0], T.duty);
       while (M.at < end) {
@@ -833,6 +864,7 @@
       M.at = M.duck = 0;
       M.paused = false;
       if (ready) hush(ctx.currentTime);
+      syncBackground();
     };
     // The steps queued but not yet begun taken back and the tune's channels silenced from `now`, so it goes on from the
     // first step not yet heard.
@@ -864,6 +896,7 @@
       if (!M.tune || M.paused === on) return;
       M.paused = on;
       if (on && ready) rewind(ctx.currentTime);
+      syncBackground();
     };
 
     // ---- the hall's bed ------------------------------------------------------------------------------------
@@ -917,7 +950,7 @@
       else grunt(at, 0.12);
       pan = 0;
     };
-    // A time the bed fell behind (a mute, a hidden tab) starts again from now.
+    // A time the bed fell behind (a mute, a delayed timer) starts again from now.
     const due = (t, now) => t < now ? now + 0.02 : t;
     const room = (on) => {
       bedOn = on;
@@ -927,14 +960,15 @@
       beatAt = cricketAt = crackAt = roarAt = at + 0.3;
       birdAt = at + 2 + Math.random() * 4;
       chantAt = at + 6 + Math.random() * 8;
+      syncBackground();
     };
     // The tune's and the bed's next moments: every event due before its lead time from now is scheduled; called per
-    // frame, allocation-free.
+    // frame, or by the hidden tab's audio timer, allocation-free.
     const tick = () => {
-      if (!ready || muted) return;
+      if (!ready || muted || ctx.state !== "running") return;
       if (M.tune && !M.paused) play();
       if (!bedOn) return;
-      const now = ctx.currentTime, end = now + AHEAD;
+      const now = ctx.currentTime, end = now + (document.hidden ? BACKGROUND_AHEAD : AHEAD);
       beatAt = due(beatAt, now);
       cricketAt = due(cricketAt, now);
       crackAt = due(crackAt, now);
@@ -950,7 +984,7 @@
       }
       while (cricketAt < end) { chirp(cricketAt); cricketAt += 0.25 + Math.random() * 0.8; }
       while (crackAt < end) { crackle(crackAt); crackAt += 0.05 + Math.random() * Math.random() * 0.5; }
-      if (roarAt < end) { bed.roar.gain.setTargetAtTime(0.07 + Math.random() * 0.07, roarAt, 0.25); roarAt += 0.3 + Math.random() * 0.5; }
+      while (roarAt < end) { bed.roar.gain.setTargetAtTime(0.07 + Math.random() * 0.07, roarAt, 0.25); roarAt += 0.3 + Math.random() * 0.5; }
       if (birdAt < end) { birdCall(birdAt); birdAt += 6 + Math.random() * 10; }
       if (chantAt < end) { chant(chantAt); chantAt += 16 + Math.random() * 22; }
     };
@@ -958,6 +992,7 @@
       muted = !!value;
       BL.sound.setMuted(muted);
       if (ready) master.gain.setTargetAtTime(muted ? 0 : MASTER, ctx.currentTime, 0.05);
+      syncBackground();
       return muted;
     };
     const offSound = BL.sound.subscribe(setMuted);
@@ -966,9 +1001,11 @@
       get muted() { return muted; },
       dispose() {
         offSound();
+        stopBackground();
         document.removeEventListener("visibilitychange", onVisibility);
         M.tune = null;
         if (!ctx) return;
+        ctx.onstatechange = null;
         for (const node of running) node.stop();
         running.length = voices.length = noises.length = drums.length = throats.length = chips.length = 0;
         bed = waves = null;

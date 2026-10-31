@@ -117,6 +117,9 @@
   let home = "hub";
   let renderer, game, world, go, root, camera, hud, mhud, hooks, input, pilot, fx, audio, crew, clock;
   let sim = null, s = null, cave = null, unsubscribeFeed = null, minuteTimer = 0;
+  let unwatchScores = null;
+  // A ranked run keeps its start identity across visits, but never trusts an older localStorage save.
+  const scoreRuns = new WeakMap();
   let phase = "intro", hudTimer = 0, paletteTimer = 0, sunTimer = 0, lightTimer = 0, ripple = 0, cardTimer = 0, saveTimer = 0;
   // The overview: the camera let off the player's Ooga to look round the chamber; any step he takes
   // brings it back behind him.
@@ -1546,6 +1549,9 @@
     smother.unit = -1;
     mhud.center("", 1);
     const improved = game.recordMine({ sats: s.minedSats, seconds: Math.max(1, Math.round(s.time)), ending: s.reason, won: s.won, score: s.score, continued: s.continued > 0 });
+    const ranked = scoreRuns.get(sim);
+    BL.highscores?.submit(ranked?.ticket, "mine-1", s.score);
+    if (ranked) ranked.ticket = null;
     audio.cue(s.won ? "win" : "lose");
     mhud.results(s, improved, game.state.mine.best, !s.won && s.reason !== "time" && s.reason !== "left");
     selection.type = "";
@@ -1576,6 +1582,10 @@
     if (!s.over && s.time > 0) mineSim.save(sim, world.mineLead);
   };
   const start = () => {
+    if (s.time === 0 && !scoreRuns.has(sim)) {
+      const ticket = BL.highscores?.begin("mine") || null;
+      scoreRuns.set(sim, { ticket, id: ticket ? BL.net.state.me.id : 0, epoch: BL.net.state.logoutEpoch });
+    }
     phase = "run";
     mhud.setSection("run");
     audio.activate();
@@ -1614,6 +1624,8 @@
       go("mine");
     } else if (action === "mine-keep") {
       if (sim.carryOn()) {
+        const ranked = scoreRuns.get(sim), account = BL.net.state;
+        if (ranked && ranked.id && ranked.id === account.me?.id && ranked.epoch === account.logoutEpoch) ranked.ticket = BL.highscores?.begin("mine") || null;
         phase = "run";
         mhud.setSection("run");
         showAct(true);
@@ -2183,10 +2195,12 @@
     // Tapping an Ooga takes him over.
     for (const op of crew.crew) for (const key of ["torso", "head"]) target(op.cave.parts[key], { kind: "ooga", id: op.index });
 
-    mhud = mineHud.create({ best: game.state.mine.best, coarse: COARSE, geometryFor, onTile: (key) => {
+    mhud = mineHud.create({ best: game.state.mine.best, coarse: COARSE, geometryFor,
+      sharedBest: () => BL.highscores?.best("mine", "mine-1") ?? null, onTile: (key) => {
       if (key[0] === "t" && s.trophy[Number(key.slice(1))]) select("trophy", Number(key.slice(1)));
       else buy(key, -1);
     }, onDrag, onDrop, onCard, onJob });
+    unwatchScores = BL.highscores?.watch("mine", () => mhud.showBest(game.state.mine.best)) || null;
     mhud.setPlayer(BL.characters.displayOf(crew.crew[0].name));
     hud.dismissOutside(mhud.el.card, () => {
       selection.type = "";
@@ -2278,6 +2292,7 @@
   };
 
   const leave = () => {
+    unwatchScores?.(); unwatchScores = null;
     window.clearInterval(minuteTimer);
     minuteTimer = 0;
     if (unsubscribeFeed) unsubscribeFeed();

@@ -98,7 +98,7 @@
     ctx.globalAlpha = 1;
     return by + bh + 2 * px;
   };
-  const create = ({ root, renderer, camera, overlay, tickerAt, hud = null, overlayVisible = null, zzzVisible = null, characterOccluded = null, renderOpts = null }) => {
+  const create = ({ root, renderer, camera, overlay, tickerAt, tickerVisible = null, hud = null, overlayVisible = null, zzzVisible = null, characterOccluded = null, renderOpts = null }) => {
     const overlayCtx = overlay.getContext("2d");
     const visibility = BL.characterVisibility.create({ root, renderer, camera, occluded: characterOccluded, renderOpts });
     const speechScreen = { x: 0, y: 0 };
@@ -292,6 +292,7 @@
       return { canvas, w, h };
     };
     const showTicker = (text, dur) => {
+      if (tickerVisible && !tickerVisible()) { ticker = null; return; }
       ticker = { text, t: 0, dur, image: null, dpr: 0 };
     };
     let overlayW = 0, overlayH = 0, overlayDpr = 1;
@@ -393,6 +394,9 @@
       }
       drawExtra(ctx, project, drawSpeech);
       if (hud) hud.tooltip.update();
+      // Drop an earlier notice when a scene hides its ticker; it must not
+      // linger over the game or reappear when the visitor leaves it.
+      if (ticker && tickerVisible && !tickerVisible()) ticker = null;
       if (ticker) {
         ticker.t += dt;
         if (ticker.t > ticker.dur) ticker = null;

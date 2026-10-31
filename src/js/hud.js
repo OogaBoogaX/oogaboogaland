@@ -288,6 +288,7 @@
       boardDots: $("board-dots"), boardPrev: $("board-prev"), boardNext: $("board-next"), boardHelp: $("board-help"),
       boardHead: $("board-head"), boardPause: $("board-pause"), boardResize: $("board-resize"),
       act: $("act"),
+      wpNav: $("wp-nav"), wpNavHelp: $("wp-nav-help"),
       mode: $("mode-hud"),
       modeDestination: $("destination-hud"),
       modeDestinationLabel: $("destination-hud-label"),
@@ -618,6 +619,16 @@
       }
       if (moved) placeRosterRow(row);
     };
+    // Contribution data and its age stay live even in rooms with only one local Ooga.
+    // Preserve the scene's presence flags when refreshing activity across the whole panel.
+    const refreshRosterActivity = () => {
+      if (document.hidden) return;
+      for (const row of rosterRows.values()) setRosterRow(row.contributor.name, null, null, row.sceneOnline, row.remoteOnline);
+    };
+    listeners.push(BL.contributors.subscribe(refreshRosterActivity));
+    const rosterTimer = window.setInterval(refreshRosterActivity, 60000);
+    listeners.push(() => window.clearInterval(rosterTimer));
+    on(document, "visibilitychange", refreshRosterActivity);
     // The page-level pass marks rows online from the room and moves only those that changed.
     liveRows = rosterRows;
     liveOnline = (row) => {
@@ -2112,6 +2123,12 @@
         if (!el.hint.classList.contains("show")) el.hint.hidden = true;
       }, MESSAGE_FADE_MS);
     };
+    // Reading the whitepaper's poster: the line that says how to step through it, or, on a touch screen, the one
+    // button that does.
+    const whitepaperNav = (on, text) => {
+      el.wpNav.hidden = !on;
+      if (on) el.wpNavHelp.textContent = text;
+    };
     const selectTab = (name) => sheet.selectTab(name);
     const foldPanels = () => sheet.fold();
     // Registered before actor controls: a popup or the sheet takes one Escape
@@ -2277,6 +2294,7 @@
       el.toast.hidden = true;
       el.hint.classList.remove("show");
       el.hint.hidden = true;
+      el.wpNav.hidden = true;
       tooltip.hide();
       clearModeHold();
       modePointer = -1;
@@ -2312,7 +2330,7 @@
         Object.defineProperties(this, Object.getOwnPropertyDescriptors(next));
         return this;
       },
-      el, openFeed, openRecipe, closeRecipe, dismissOutside, openBoard, closeBoard, updateBoard, restoreBoards, setPanelsHidden, foldPanels, setRosterRow, setStats, setAct, setMode, setDestinations, setOwnOoga, get retakeActor() { return retake.actor ? retake : null; }, setGorilla, setGorillaSmashPower, setDetachedView, fadeDetachedName, setAreaLabel, setPrimary, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, hideHint, letterSign, selectTab, onPreset, setPileValueVisible, onAssign, onUnassign, renderInventory, dispose };
+      el, openFeed, openRecipe, closeRecipe, dismissOutside, openBoard, closeBoard, updateBoard, restoreBoards, setPanelsHidden, foldPanels, setRosterRow, setStats, setAct, setMode, setDestinations, setOwnOoga, get retakeActor() { return retake.actor ? retake : null; }, setGorilla, setGorillaSmashPower, setDetachedView, fadeDetachedName, setAreaLabel, setPrimary, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, hideHint, whitepaperNav, letterSign, selectTab, onPreset, setPileValueVisible, onAssign, onUnassign, renderInventory, dispose };
   };
   // The account line in the sheet's foot is page-level: shown only when a backend answered, and
   // the director hands every change of `BL.net.state` here, whichever scene is active.
@@ -2356,7 +2374,7 @@
   // The microphone's note (#181), page-level as the account line is: muted in voice, it stays until unmuted;
   // alone in voice (nobody here to hear, so the microphone is held off), it says so until someone comes;
   // unmuting, or someone coming, says "Mic on" for MIC_ON_MS, then it goes. A mute outranks alone.
-  // `keyed` is whether M unmutes in the active scene.
+  // `keyed` is whether the page reserves M for voice mute outside editable fields.
   const MIC_ON_MS = 1500, MIC_COARSE = window.matchMedia("(pointer: coarse)").matches;
   let micShown = "", micTimer = 0;
   const showMic = (voice, keyed) => {

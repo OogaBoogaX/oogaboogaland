@@ -119,7 +119,7 @@
   const clock = (seconds) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
   const hash = (th) => th >= 1e6 ? `${(th / 1e6).toFixed(2)} EH` : th >= 1e3 ? `${(th / 1e3).toFixed(2)} PH` : `${th < 10 ? th.toFixed(2) : Math.round(th)} TH`;
 
-  const create = ({ best, coarse = false, geometryFor, onTile, onDrag, onDrop, onCard, onJob }) => {
+  const create = ({ best, coarse = false, geometryFor, onTile, onDrag, onDrop, onCard, onJob, sharedBest = () => null }) => {
     const el = {
       root: $("mine"), shop: $("mine-shop"), tabs: $("mine-tabs"), tiles: $("mine-tiles"), tip: $("mine-tip"), best: $("mine-best"),
       ops: $("mine-ops"), mined: $("mine-mined"), clock: $("mine-clock"), goal: $("mine-goal-fill"), liveScore: $("mine-live-score"), ticker: $("mine-ticker"),
@@ -144,6 +144,11 @@
       row, load: row.querySelector('[data-fill="load"]'), heat: row.querySelector('[data-fill="heat"]'), note: row.querySelector("[data-note]")
     }));
     const listeners = [];
+    const sharedIntro = document.createElement("p"), sharedResult = document.createElement("p");
+    sharedIntro.className = sharedResult.className = "help";
+    sharedIntro.hidden = sharedResult.hidden = true;
+    el.best.closest("h2").after(sharedIntro);
+    el.summary.after(sharedResult);
     const on = (target, type, fn, opts) => {
       target.addEventListener(type, fn, opts);
       listeners.push(() => target.removeEventListener(type, fn, opts));
@@ -738,11 +743,14 @@
     };
 
     const showBest = (b) => {
+      const shared = sharedBest();
+      sharedIntro.hidden = sharedResult.hidden = shared === null;
+      sharedIntro.textContent = sharedResult.textContent = shared === null ? "" : `Shared best · ${shared > 0 ? shared : "–"}`;
       const medal = b && !b.continued ? R.medalFor(b.score) : null;
       el.best.hidden = !b;
       if (!b) return;
       el.best.dataset.medal = medal || "";
-      el.best.textContent = `BEST ${b.score}${medal ? ` · ${medal.toUpperCase()}` : ""}`;
+      el.best.textContent = `LOCAL BEST ${b.score}${medal ? ` · ${medal.toUpperCase()}` : ""}`;
     };
 
     const results = (s, improved, bestNow, canContinue) => {
@@ -753,7 +761,7 @@
         el.finalMedal.dataset.medal = medal;
         el.finalMedal.textContent = medal.toUpperCase();
       }
-      el.finalBest.textContent = improved ? "NEW BEST" : bestNow ? `best ${bestNow.score}` : "";
+      el.finalBest.textContent = improved ? "NEW LOCAL BEST" : bestNow ? `local best ${bestNow.score}` : "";
       el.final.classList.toggle("is-best", improved);
       const rows = [
         ["Mined", `${coin(s.minedSats)} coin`],
@@ -797,6 +805,7 @@
         return drag.active;
       },
       dispose() {
+        sharedIntro.remove(); sharedResult.remove();
         finish(false, 0, 0);
         window.clearTimeout(clickTimer);
         window.clearTimeout(centerTimer);

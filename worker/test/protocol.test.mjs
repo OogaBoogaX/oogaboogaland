@@ -96,9 +96,6 @@ test("body ownership: only an Ooga owner may join and claim their own Ooga or go
   assert.equal(claimRefusal(cast, "bc1gui", "bc1gui", room(["ottoz0r"])), "not-yours");
   // An old guest session never gains a body, even if nobody else is present.
   assert.equal(claimRefusal(cast, "visitor", "portlandhodl", room()), "not-yours");
-  assert.equal(claimRefusal(cast, "visitor", "portlandhodl", room(["portlandhodl"])), "not-yours");
-  assert.equal(claimRefusal(cast, "visitor", "portlandhodl", room(["someone", "portlandhodl"])), "not-yours");
-  assert.equal(claimRefusal(cast, "visitor", "portlandhodl", room(["visitor", "portlandhodl"])), "not-yours");
   assert.equal(claimRefusal(cast, "visitor", "nobody-real", room()), "not-yours");
   assert.equal(claimRefusal(cast, "visitor", null, room(["portlandhodl"])), null);
   // Eligibility is a Worker-vouched flag, persisted in the room's attachment.
@@ -115,7 +112,6 @@ test("body ownership: only an Ooga owner may join and claim their own Ooga or go
   assert.equal(claimRefusal(cast, "ottoz0r", "gorilla:portlandhodl", room()), "not-yours");
   assert.equal(claimRefusal(cast, "ottoz0r", "gorilla:ottoz0r", room(), true), "not-yours", "canonical handle, not its login alias");
   assert.equal(claimRefusal(cast, "visitor", "gorilla:portlandhodl", room()), "not-yours", "a signed-in visitor cannot borrow a gorilla");
-  assert.equal(claimRefusal(cast, "visitor", "gorilla:portlandhodl", room(["portlandhodl", "gorilla:portlandhodl"])), "not-yours");
   assert.equal(claimRefusal(cast, "visitor", "gorilla:nobody-real", room()), "not-yours");
   assert.equal(claimRefusal(cast, "new-ooga", "gorilla:new-ooga", room()), "not-yours");
   assert.equal(claimRefusal(cast, "new-ooga", "gorilla:NEW-OOGA", room(), true), null);

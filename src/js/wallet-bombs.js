@@ -16,8 +16,8 @@
 // Fixed pools throughout: `BOMB_CAP` devices in typed arrays, one instanced batch a look (screen and LED glow ride the
 // instance's glow) and one of soft glowing rings under the devices on the ground, `SCORCH_CAP` scorch marks in a ring,
 // `FIREBALL_CAP` fireballs. The labels are prebuilt strings, the beep and boom two pooled synthesized voices on one
-// AudioContext opened only after a gesture and suspended while no device is out (once the last boom has rung out), DSB
-// is muted or the tab is hidden. The frame loop writes `instanceData` in place and allocates nothing; the overlay
+// AudioContext opened only after a gesture and suspended while no device is out (once the last boom has rung out) or DSB
+// is muted. Already playing cues finish while hidden. The frame loop writes `instanceData` in place and allocates nothing; the overlay
 // returns at once while no device is out. No camera shake (the camera moves only on input): the blast is a flash of point light,
 // particles from the fx pool, smoke and the boom.
 (() => {
@@ -298,7 +298,7 @@
     }
     const DEBRIS = [BL.models.particleGeometry("#ff8a1f", 0.07, 1), BL.models.particleGeometry("#ffd66b", 0.06, 1), BL.models.particleGeometry("#3d3d44", 0.07, 0), BL.models.particleGeometry("#efe6cc", 0.05, 0)];
     // Sound: one beep and one boom voice, synthesized, opened after a gesture. The context runs only while a device is
-    // out (and a boom rings on, TAIL seconds), DSB's sound is on and the tab is shown; otherwise it is suspended.
+    // out (and a boom rings on, TAIL seconds) and DSB's sound is on; otherwise it is suspended.
     let audio = null, audible = false, tail = 0, out = 0;
     const hear = (on) => {
       if (!audio || on === audible) return;
@@ -306,8 +306,6 @@
       if (on) audio.ctx.resume().catch(() => {});
       else audio.ctx.suspend().catch(() => {});
     };
-    const onVisibility = () => hear(!document.hidden && (out > 0 || tail > 0) && !muted());
-    document.addEventListener("visibilitychange", onVisibility);
     const openAudio = () => {
       if (audio || muted() || typeof AudioContext === "undefined" || navigator.userActivation && !navigator.userActivation.hasBeenActive) return !!audio;
       const ctx = new AudioContext(), master = ctx.createGain();
@@ -337,13 +335,14 @@
       return true;
     };
     const cue = (gain, level, attack, length) => {
-      if (!openAudio() || muted() || document.hidden) return;
+      if (!openAudio() || muted()) return;
       hear(true);
       const t = audio.ctx.currentTime;
       gain.cancelScheduledValues(t);
       gain.setValueAtTime(0.0001, t);
       gain.exponentialRampToValueAtTime(Math.max(0.0002, level), t + attack);
       gain.exponentialRampToValueAtTime(0.0001, t + length);
+      gain.setValueAtTime(0, t + length + 0.01);
     };
     const slot = () => {
       for (let i = 0; i < BOMB_CAP; i++) if (state[i] === FREE) return i;
@@ -558,7 +557,7 @@
       halos.instanceCount = rings;
       halos.visible = rings > 0;
       if (rings) halos.instanceVersion++;
-      const wantSound = (out > 0 || tail > 0) && !muted() && !document.hidden;
+      const wantSound = (out > 0 || tail > 0) && !muted();
       // Taking the first device while muted creates no context; unmuting must still start its sound.
       if (wantSound && !audio) openAudio();
       hear(wantSound);
@@ -636,7 +635,6 @@
       carriers.fill(null);
       picks.length = 0;
       flash.t = 0;
-      document.removeEventListener("visibilitychange", onVisibility);
       if (audio) audio.ctx.close().catch(() => {});
       audio = null; audible = false;
     };
