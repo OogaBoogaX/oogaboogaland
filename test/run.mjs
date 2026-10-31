@@ -18785,6 +18785,7 @@ const tessAnswerChecks = (BL) => {
   const H = BL.hubGuide, place = (id) => H.STOPS.findIndex((stop) => stop.id === id);
   const route = (q, last = null) => { const a = H.answer(q, last); return a === null ? "none" : a.tour ? "tour" : a.go !== null ? `trip:${H.STOPS[a.go].id}` : `say:${a.lines[0]}`; };
   const cases = [
+    ["Take me to the whitepaper", "trip:whitepaper"], ["where is the Library of Bitcoin?", "trip:whitepaper"],
     ["Take me to the games", "trip:arcade"], ["where's B.C.A.?", "trip:bca"], ["how do I get to the factory", "trip:factory"], ["hello, where is the arcade?", "trip:arcade"],
     ["What's the Mempool island?", "say:mempool"], ["tell me about ₿IFRÖST", "say:bifrost"], ["How do I donate?", "say:donate"], ["how do I move", "say:controls"],
     ["how do I sign in", "say:signIn"], ["what's new?", "say:newsIntro"], ["who are you?", "say:whoAmI"], ["hi tess", "say:hello"],
@@ -21687,7 +21688,7 @@ const terrainCacheChecks = async () => {
     runInNewContext(source, context);
     return { cache: BL.terrainCache, workers, restored: () => restored };
   };
-  const options = { seed: 1, roofHole: null }, key = `${build}:${JSON.stringify(options)}`;
+  const options = { seed: 1, roofHole: null }, key = `${build}:${JSON.stringify({ seed: 1, roofHole: null, nook: null })}`;
   const records = new Map(), miss = boot(records);
   const missed = await miss.cache.prepare(options, "hub"), started = miss.workers.length, filling = miss.cache.fill();
   await filling;
