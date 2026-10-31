@@ -7417,60 +7417,111 @@
     pilot.setActive(!on); pilot.controls.reset(); input.reset();
     pilot.setExternalControl(on);
   };
-  // The banner that floats over the stone: "₿itcoin Whitepaper Day" in the ₿IFRÖST's chiselled font, its letters
-  // arched along a circle, turned to read from the plaza and bobbing there. One geometry a glyph, cached for the
-  // visit, so the arc costs nothing a frame.
-  const WP_BANNER = { text: "₿itcoin Whitepaper Day", height: 0.49, gap: 0.16, radius: 8.3, y: 4.05, bob: 0.055, sway: 0.018 };
-  // The banner's inks: the ₿ orange with a black edge, the paper's own name white and the rest black. Each is the
-  // stroke's three bands in turn — its face, the chamfer round it and the wall it stands on — so the letters keep
-  // the chisel's light while wearing the colour.
+  // The banner that floats over the stone: "₿itcoin Whitepaper Day" in small caps, cut from a traditional serif
+  // face drawn in seven-cell-wide block runs with serif feet, and "31 · X · MMVIII" under it. Its letters are
+  // arched along a circle, the whole turned round to read from the plaza and bobbing there. One geometry a glyph,
+  // cached for the visit, so the arc costs nothing a frame.
+  const WP_BANNER = { text: "₿itcoin Whitepaper Day", date: "31 · X · MMVIII", height: 0.49, small: 0.72, dateScale: 0.46,
+    depth: 0.12, radius: 8.3, y: 4.05, dateY: -0.62, bob: 0.055, sway: 0.018 };
+  const WP_BANNER_CELL = WP_BANNER.height / 9;
+  // The serif: nine rows a glyph, the stems two cells thick and the serifs one row. Only what the banner and its
+  // date say is cut; a letter without a glyph throws rather than dropping out of the line.
+  const WP_SERIF = {
+    A: ["...#...", "..###..", "..#.#..", ".#...#.", ".#...#.", "#######", "#.....#", "#.....#", "#.....#"],
+    C: [".#####.", "#.....#", "#......", "#......", "#......", "#......", "#......", "#.....#", ".#####."],
+    D: ["#####..", "#...##.", "#.....#", "#.....#", "#.....#", "#.....#", "#.....#", "#...##.", "#####.."],
+    E: ["######", "######", "#.....", "#.....", "#####.", "#####.", "#.....", "#.....", "######"],
+    H: ["##...##", "##...##", "##...##", "##...##", "#######", "#######", "##...##", "##...##", "##...##"],
+    I: ["###", ".#.", ".#.", ".#.", ".#.", ".#.", ".#.", ".#.", "###"],
+    M: ["##...##", "###.###", "#######", "##.#.##", "##.#.##", "##...##", "##...##", "##...##", "##...##"],
+    N: ["##...##", "###..##", "###..##", "##.#.##", "##.#.##", "##..###", "##..###", "##...##", "##...##"],
+    O: [".#####.", "##...##", "##...##", "##...##", "##...##", "##...##", "##...##", "##...##", ".#####."],
+    P: ["######.", "##...##", "##...##", "##...##", "######.", "##.....", "##.....", "##.....", "##....."],
+    R: ["######.", "##...##", "##...##", "##...##", "######.", "##.##..", "##..##.", "##...##", "##....#"],
+    T: ["#######", "#######", "...##..", "...##..", "...##..", "...##..", "...##..", "...##..", "..###.."],
+    V: ["##...##", "##...##", "##...##", "##...##", ".##.##.", ".##.##.", "..###..", "..###..", "...#..."],
+    W: ["##...##", "##...##", "##...##", "##.#.##", "##.#.##", "##.#.##", "###.###", "###.###", ".#.#.#."],
+    X: ["##...##", "###.###", ".#####.", "..###..", "..###..", ".#####.", "###.###", "##...##", "##...##"],
+    Y: ["##...##", "##...##", ".##.##.", ".##.##.", "..###..", "...##..", "...##..", "...##..", "..####."],
+    1: [".#.", "##.", ".#.", ".#.", ".#.", ".#.", ".#.", ".#.", "###"],
+    3: ["####.", "....#", "....#", "....#", ".###.", "....#", "....#", "....#", "####."],
+    "·": ["...", "...", "...", ".##", ".##", "##.", "...", "...", "..."],
+    "₿": ["..#..#.", ".#####.", "##...#.", "##...#.", ".#####.", "##...#.", "##...#.", ".#####.", "..#..#."]
+  };
+  // The banner's inks: the ₿ orange inside a black edge, the paper's own name white and the rest black.
   const WP_BANNER_INK = {
-    btc: { bands: [[255, 140, 26], [10, 10, 10], [0, 0, 0]], glow: [0.35, 0, 0] },
-    black: { bands: [[18, 18, 18], [44, 44, 44], [4, 4, 4]], glow: [0, 0, 0] },
-    white: { bands: [[246, 246, 243], [255, 255, 255], [158, 158, 152]], glow: [0.12, 0, 0] }
+    btc: { color: "#ff8c1a", emissive: 0.35, edge: "#0a0a0a" },
+    black: { color: "#121212", emissive: 0, edge: null },
+    white: { color: "#f6f6f3", emissive: 0.12, edge: null }
   };
   const wpBannerGeos = new Map();
-  const wpLetter = (ch, ink) => {
-    const key = `${ch}|${ink}`, hit = wpBannerGeos.get(key);
+  const wpGlyph = (ch, ink, scale) => {
+    const key = `${ch}|${ink}|${scale}`, hit = wpBannerGeos.get(key);
     if (hit) return hit;
-    const glyph = BL.bifrostModels.GLYPHS[ch];
-    if (!glyph) throw new Error(`No chiselled glyph for "${ch}"`);
-    const geometry = models.merge(...glyph.parts()), verts = geometry.verts;
-    // Unit metrics to metres, then centred on its own middle so the arc can turn each letter about it.
-    for (let i = 0; i < verts.length; i++) verts[i] *= WP_BANNER.height;
-    for (let i = 0; i < verts.length; i += 3) verts[i] -= glyph.width * WP_BANNER.height * 0.5;
-    // The stroke's own glow tells its bands apart: the face, its chamfer and its wall.
-    const bands = WP_BANNER_INK[ink].bands, glow = WP_BANNER_INK[ink].glow;
-    for (const face of geometry.faces) {
-      const k = face.emissive === 0.45 ? 1 : face.emissive === 0.12 ? 2 : 0;
-      face.color = bands[k];
-      face.emissive = glow[k];
+    const rows = WP_SERIF[ch];
+    if (!rows) throw new Error(`No banner glyph for "${ch}"`);
+    const c = WP_BANNER_CELL * scale, w = rows[0].length * c, parts = [], look = WP_BANNER_INK[ink];
+    for (let row = 0; row < rows.length; row++) {
+      const line = rows[row];
+      for (let col = 0; col < line.length; col++) {
+        if (line[col] !== "#") continue;
+        let n = 1;
+        while (line[col + n] === "#") n++;
+        // One run of cells, centred on the glyph's middle; the ₿'s black edge is the same run a step bigger behind it.
+        const x = (col + n * 0.5) * c - w * 0.5, y = (8 - row + 0.5) * c;
+        if (look.edge) parts.push(models.box({ w: c * n + c * 0.6, h: c * 1.6, d: 0.02, color: look.edge,
+          offset: { x, y, z: -WP_BANNER.depth * 0.5 - 0.01 } }));
+        parts.push(models.box({ w: c * n, h: c, d: WP_BANNER.depth, color: look.color, emissive: look.emissive, offset: { x, y, z: 0 } }));
+        col += n - 1;
+      }
     }
-    geometry.smooth = true;
+    const geometry = models.merge(...parts);
     geometry.castShadow = false;
     wpBannerGeos.set(key, geometry);
     return geometry;
   };
   const wpBuildBanner = () => {
-    const glyphs = BL.bifrostModels.GLYPHS, chars = [...WP_BANNER.text], gap = WP_BANNER.gap;
-    let total = gap * (chars.length - 1);
-    for (const ch of chars) total += glyphs[ch].width;
-    // The letters stand along an arc, the middle highest and each turned to face out of it, the whole turned round
-    // to face the plaza; the arc is built in the stone's own frame, so the letters' own x runs the other way.
+    const c = WP_BANNER_CELL, gapOf = scale => c * scale;
+    // The banner is turned round to face the plaza; its own x runs the other way, so the arc and each letter's
+    // tilt are built the other way about.
     const banner = createNode({ position: { x: 0, y: WP_BANNER.y, z: 0 }, rotation: { x: 0, y: Math.PI, z: 0 }, sightHidden: true });
-    let cursor = -total * 0.5, word = 0;
-    for (const ch of chars) {
-      const glyph = glyphs[ch];
-      if (ch === " ") { word++; cursor += glyph.width + gap; continue; }
-      const theta = (cursor + glyph.width * 0.5) * WP_BANNER.height / WP_BANNER.radius;
-      // The banner is turned round, so a letter's own tilt is the other way: its top leans out of the arc.
-      addChild(banner, createNode({
-        geometry: wpLetter(ch, ch === "₿" ? "btc" : word === 1 ? "white" : "black"),
-        position: { x: WP_BANNER.radius * Math.sin(theta), y: WP_BANNER.radius * (Math.cos(theta) - 1), z: 0 },
-        rotation: { x: 0, y: 0, z: -theta }
-      }));
-      cursor += glyph.width + gap;
-    }
+    // A line of type: a word's first letter stands a full capital and the rest are small caps, or every letter is
+    // the same size for the date.
+    const line = (text, smallcaps, y) => {
+      const items = [];
+      let total = 0, start = true;
+      for (const ch of text) {
+        // Small caps are capitals, so every letter is looked up as one.
+        const key = ch === " " ? " " : ch.toUpperCase();
+        const scale = ch === " " ? (smallcaps ? WP_BANNER.small : WP_BANNER.dateScale) : smallcaps && start ? 1 : smallcaps ? WP_BANNER.small : WP_BANNER.dateScale;
+        const w = key === " " ? 2 * gapOf(scale) : WP_SERIF[key][0].length * c * scale;
+        items.push({ ch: key, w, scale, gap: gapOf(scale) });
+        total += w + gapOf(scale);
+        if (ch === " ") start = true; else start = false;
+      }
+      total -= items[items.length - 1].gap;
+      return { items, total, y };
+    };
+    const place = (run, arc) => {
+      let cursor = -run.total * 0.5, word = 0;
+      for (const item of run.items) {
+        if (item.ch === " ") { word++; cursor += item.w + item.gap; continue; }
+        if (arc) {
+          const theta = (cursor + item.w * 0.5) / WP_BANNER.radius;
+          addChild(banner, createNode({
+            geometry: wpGlyph(item.ch, item.ch === "₿" ? "btc" : word === 1 ? "white" : "black", item.scale),
+            position: { x: WP_BANNER.radius * Math.sin(theta), y: run.y + WP_BANNER.radius * (Math.cos(theta) - 1), z: 0 },
+            rotation: { x: 0, y: 0, z: -theta }
+          }));
+        } else addChild(banner, createNode({
+          geometry: wpGlyph(item.ch, "black", item.scale),
+          position: { x: cursor + item.w * 0.5, y: run.y, z: 0 }
+        }));
+        cursor += item.w + item.gap;
+      }
+    };
+    place(line(WP_BANNER.text, true, 0), true);
+    place(line(WP_BANNER.date, false, WP_BANNER.dateY), false);
     return banner;
   };
   const wpBuild = () => {
