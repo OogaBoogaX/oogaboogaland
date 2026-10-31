@@ -4791,7 +4791,7 @@ const cloudHopperFailureChecks = async engine => {
   musicPhases &&= audioStage === "running";
   // The director suspends frames while hidden; the independent audio clock
   // must not advance the race, its landings or its ghost during that pause.
-  const courseState = () => [...hopper.course.clouds.map(c => [c.x, c.z, c.top, c.opacity, c.active, c.movePass]),
+  const courseState = () => [...hopper.course.clouds.map(c => [c.x, c.z, c.top, c.opacity, c.active, c.phase]),
     ...hopper.course.pickups.map(p => [p.x, p.y, p.z, p.active, p.falling])];
   const sameCourseState = (before, after) => before.length === after.length && before.every((row, i) => row.every((value, j) =>
     typeof value === "boolean" ? value === after[i][j] : Math.abs(value - after[i][j]) < 1e-8));
@@ -4810,7 +4810,7 @@ const cloudHopperFailureChecks = async engine => {
   const specialOptions = { start: { x: 420, y: 310, z: 0 }, finish: { x: 0, y: 2, z: 0 }, mainlandRadius: 30, seed: 7291 };
   const specialCourse = BL.cloudHopperCourse.create(specialOptions), sameCourse = BL.cloudHopperCourse.create(specialOptions);
   // Use an oblique course so lateral motion is relative to the route, not a
-  // hard-coded world axis. Resets must happen wholly inside invisibility.
+  // hard-coded world axis. Lanes swing smoothly and never jump.
   const motionOptions = { ...specialOptions, start: { x: 252, y: 310, z: 336 } };
   const moving = BL.cloudHopperCourse.create(motionOptions), matching = BL.cloudHopperCourse.create(motionOptions);
   // Read each actual rotated footprint at both ends of its drift lane. These
@@ -4847,17 +4847,17 @@ const cloudHopperFailureChecks = async engine => {
   }
   moving.update(6); matching.update(6); moving.start(); matching.start();
   const directions = moving.clouds.map(c => Math.sign((c.x - c.baseX) * -0.8 + (c.z - c.baseZ) * 0.6));
-  let lateralOnly = directions.includes(-1) && directions.includes(1), oneWay = true, hiddenResets = true;
-  let seededMotion = true, resets = 0, excursion = 0;
+  let lateralOnly = directions.includes(-1) && directions.includes(1), smooth = true;
+  let seededMotion = true, excursion = 0;
   for (let frame = 1; frame <= 1200; frame++) {
-    const before = moving.clouds.map(c => ({ x: c.x, z: c.z, pass: c.movePass, active: c.active }));
+    const before = moving.clouds.map(c => ({ x: c.x, z: c.z }));
     moving.update(0.05, frame * 0.05); matching.update(0.05, frame * 0.05);
     for (let i = 0; i < moving.clouds.length; i++) {
       const c = moving.clouds[i], prior = before[i], twin = matching.clouds[i], dx = c.x - prior.x, dz = c.z - prior.z;
       lateralOnly &&= Math.abs(dx * 0.6 + dz * 0.8) < 1e-8;
       seededMotion &&= c.x === twin.x && c.z === twin.z && c.opacity === twin.opacity;
-      if (c.movePass !== prior.pass) { resets++; hiddenResets &&= !prior.active && !c.active; }
-      else oneWay &&= (dx * -0.8 + dz * 0.6) * directions[i] >= -1e-8;
+      // A swing, never a jump: no 50 ms step moves a cloud as far as a lane reset used to.
+      smooth &&= Math.hypot(dx, dz) < 0.2;
       const distance = Math.hypot(c.x - c.baseX, c.z - c.baseZ);
       excursion = Math.max(excursion, distance);
       lateralOnly &&= distance <= 8 + 1e-8 && Math.hypot(c.x, c.z) - Math.max(c.rx, c.rz) > motionOptions.mainlandRadius;
@@ -4866,20 +4866,69 @@ const cloudHopperFailureChecks = async engine => {
   const waiting = BL.cloudHopperCourse.create(motionOptions);
   waiting.update(3600);
   const waited = waiting.clouds.map(c => [c.x, c.z]);
-  const waitingSafe = waiting.clouds.every(c => c.active && c.opacity === 1 && c.movePass === 0
-    && Math.hypot(c.x - c.baseX, c.z - c.baseZ) <= 8 + 1e-8);
+  const waitingSafe = waiting.clouds.every(c => c.active && c.opacity === 1 && Math.hypot(c.x - c.baseX, c.z - c.baseZ) <= 8 + 1e-8);
   waiting.start(); waiting.update(0, 0);
   const departureContinuous = waiting.clouds.every((c, i) => c.x === waited[i][0] && c.z === waited[i][1]);
-  const detached = BL.cloudHopperCourse.create(motionOptions), skipped = BL.cloudHopperCourse.create(motionOptions);
+  // A pack on a cloud that never fades never falls; take one that rides a cloud that does.
+  let fallSeed = 0, fallIndex = -1;
+  while (fallIndex < 0 && fallSeed < 40) fallIndex = BL.cloudHopperCourse.create({ ...motionOptions, seed: ++fallSeed }).pickups.findIndex(p => Number.isFinite(p.cloud.firstGoneAt));
+  const detached = BL.cloudHopperCourse.create({ ...motionOptions, seed: fallSeed }), skipped = BL.cloudHopperCourse.create({ ...motionOptions, seed: fallSeed });
   detached.start(); skipped.start();
-  const goneAt = detached.pickups[0].cloud.firstGoneAt;
+  const goneAt = detached.pickups[fallIndex].cloud.firstGoneAt;
   detached.update(goneAt); skipped.update(goneAt + 2);
-  const a = detached.pickups[0], b = skipped.pickups[0];
+  const a = detached.pickups[fallIndex], b = skipped.pickups[fallIndex];
   const skippedPickup = a.falling && b.falling && a.x === b.x && a.z === b.z && b.y < a.y;
-  const motionRows = { lateralOnly, oneWay, hiddenResets: hiddenResets && resets > moving.clouds.length,
-    seededMotion, widerTravel: excursion > 5, waitingSafe, departureContinuous, skippedPickup, sweptClear, offshoreFootprints, balancedRegions };
-  record("Cloud Hopper drift: balanced seeded fields keep their full sideways lanes separated and offshore, reset only while hidden and preserve waits, departure and falling pickups",
+  const motionRows = { lateralOnly, smooth, seededMotion, widerTravel: excursion > 5, waitingSafe, departureContinuous, skippedPickup,
+    sweptClear, offshoreFootprints, balancedRegions };
+  record("Cloud Hopper drift: balanced seeded fields keep their full sideways lanes separated and offshore, swing smoothly and preserve waits, departure and falling pickups",
     Object.values(motionRows).every(Boolean), JSON.stringify({ ...motionRows, minimumCloudGap, regionCounts }));
+  // Every course mixes permanent, long-lived and ordinary clouds and starts and ends on permanent landings.
+  // Every loss of support follows its full warning and fade; whenever a cloud starts warning while a run may
+  // be on it, a steady cloud is in reach; linked ordinary clouds' first warnings stay apart; nothing warns
+  // before the first warning time; and stepping at any frame rate, or in one long frame, agrees.
+  const { PERMANENT, LONG, ORDINARY, WARNING, TIMING } = BL.cloudHopperCourse;
+  let mixed = true, firmEnds = true, warned = true, escaped = true, staggered = true, losses = 0, earliest = Infinity;
+  for (let seed = 1; seed <= 4; seed++) {
+    const course = BL.cloudHopperCourse.create({ ...motionOptions, seed }), clouds = course.clouds, main = clouds.filter(c => c.main);
+    const lives = new Set(clouds.map(c => c.life));
+    mixed &&= lives.has(PERMANENT) && lives.has(LONG) && lives.has(ORDINARY);
+    firmEnds &&= [0, 1, main.length - 2, main.length - 1].every(k => main[k].life === PERMANENT);
+    for (const c of clouds) {
+      if (c.life === PERMANENT) continue;
+      earliest = Math.min(earliest, course.windowAt(c, 0));
+      for (let slot = 0; course.windowAt(c, slot) <= course.presence(c); slot++) {
+        const at = course.windowAt(c, slot);
+        if (at + TIMING.warn + 1 >= c.arrival * TIMING.presence[0]) escaped &&= course.escapes(c.index, at);
+      }
+      if (c.life === ORDINARY) for (const d of clouds) {
+        if (d === c || d.life !== ORDINARY || !course.linked(c.index, d.index) && !course.linked(d.index, c.index)) continue;
+        for (let ka = 0; ka < 2; ka++) for (let kb = 0; kb < 2; kb++) staggered &&= Math.abs(course.windowAt(c, ka) - course.windowAt(d, kb)) >= TIMING.stagger;
+      }
+    }
+    course.start();
+    const warnedAt = new Float64Array(clouds.length).fill(-1);
+    for (let k = 1; k <= 4000; k++) {
+      course.update(0.05, k * 0.05);
+      for (const c of clouds) {
+        if (c.phase === WARNING && warnedAt[c.index] < 0) warnedAt[c.index] = k * 0.05;
+        if (!c.previousActive || c.active) continue;
+        losses++;
+        warned &&= warnedAt[c.index] >= 0 && k * 0.05 - warnedAt[c.index] >= TIMING.warn + 1 - 0.051;
+        warnedAt[c.index] = -1;
+      }
+    }
+  }
+  const stepped = (dt, steps) => {
+    const course = BL.cloudHopperCourse.create(motionOptions);
+    course.update(2); course.start();
+    for (let k = 1; k <= steps; k++) course.update(dt, 40 * k / steps);
+    return course.clouds.map(c => [c.x, c.z, c.top, c.opacity, c.phase]);
+  };
+  const slow = stepped(1 / 30, 1200), fast = stepped(1 / 144, 5760), once = stepped(40, 1);
+  const frameFree = [fast, once].every(other => other.every((row, i) => row.every((value, j) => Math.abs(value - slow[i][j]) < 1e-6)));
+  const lifeRows = { mixed, firmEnds, warned: warned && losses > 0, escaped, staggered, frameFree, firstWarn: earliest >= TIMING.firstWarn };
+  record("Cloud Hopper lifetimes: permanent, long-lived and ordinary clouds; every loss of support follows its full warning, a warning cloud always has a steady one in reach, linked clouds warn apart and any frame rate agrees",
+    Object.values(lifeRows).every(Boolean), JSON.stringify({ ...lifeRows, losses, earliest }));
   // Isolate the launch platform as a recovery target. The same fuel can lift
   // a slow fall back to it but is spent braking a faster fall; one air jump
   // remains a real alternative, never two jumps from one remaining charge.
@@ -4914,7 +4963,7 @@ const cloudHopperFailureChecks = async engine => {
     && specialCourse.clouds[0].kind === "normal" && specialCourse.clouds.slice(-3).every(c => c.kind === "normal")
     && specialCourse.pickups.every(p => p.cloud.kind === "normal")
     && specialCourse.clouds.some(c => c.kind === "boost" && Math.abs(c.cosYaw * c.boostZ + c.sinYaw * c.boostX) > 0.01);
-  const strip = specialCourse.clouds.find(c => c.kind === "boost"), bounce = hopper.course.clouds.find(c => c.kind === "bounce");
+  const strip = specialCourse.clouds.find(c => c.kind === "boost" && Number.isFinite(c.firstGoneAt)), bounce = hopper.course.clouds.find(c => c.kind === "bounce");
   const boost = hopper.course.clouds.find(c => c.kind === "boost");
   let contacts = specialCourse.contactAt(strip.x, strip.z, strip.top) === strip
     && !specialCourse.contactAt(strip.x, strip.z, strip.top + 0.2)
@@ -5020,15 +5069,14 @@ const cloudHopperFailureChecks = async engine => {
   record("Cloud Hopper special clouds: stationary, side, underside and swept touches launch once until separation",
     bodyContacts && stationaryBoost && forwardBoost && singleBoost && highBounce && singleBounce && airborneLaunches && heldContacts,
     JSON.stringify({ bodyContacts, stationaryBoost, forwardBoost, singleBoost, highBounce, singleBounce, airborneLaunches, heldContacts }));
-  // A normal frame carries planted feet, but a wall-clock skip across a
-  // hidden lane reset must not transport the rider to the cloud's return.
+  // A normal frame carries planted feet, and so does a long wall-clock skip:
+  // lanes swing without jumping, so the rider stays planted on the cloud.
   actor.jet.thrust = false; actor.hop = actor.hopV = 0;
   Object.assign(actor.root.position, { x: landing.x, y: landing.top + actor.baseY, z: landing.z });
   now += 1000 / 60; hopper.preUpdate(1 / 60);
   const carried = Math.hypot(actor.root.position.x - landing.x, actor.root.position.z - landing.z) < 1e-8;
-  const planted = { ...actor.root.position }, plantedPass = landing.movePass;
-  now += (landing.firstGoneAt + landing.cycleSeconds) * 1000; hopper.preUpdate(1 / 60);
-  const skippedCarry = landing.movePass !== plantedPass && ["x", "y", "z"].every(key => actor.root.position[key] === planted[key]);
+  now += 30000; hopper.preUpdate(1 / 60);
+  const longCarry = Math.hypot(actor.root.position.x - landing.x, actor.root.position.z - landing.z) < 1e-8;
   actor.jetpackOwned = true; actor.jet = pack(); actor.jetFuel = 0.01;
   Object.assign(actor.root.position, { x: landing.x, y: landing.top + actor.baseY + 3, z: landing.z });
   actor.hop = 3; actor.hopV = -1; actor.jumps = 2; tick(1 / 60);
@@ -5177,7 +5225,7 @@ const cloudHopperFailureChecks = async engine => {
   const guideSkipped = hopper.phase === "ready" && active && !hopper.held;
   hopper.dispose();
   const rows = { startsAtDock, opened, lifting, ready, ascentFramed, departed, seededSpecials, contacts, ordinaryCloud, stationaryBoost, forwardBoost, singleBoost,
-    highBounce, singleBounce, idlePackBounce, poweredBounce, carried, skippedCarry, brakingFuel, singleRecoveryJump, brakingBeforeWater,
+    highBounce, singleBounce, idlePackBounce, poweredBounce, carried, longCarry, brakingFuel, singleRecoveryJump, brakingBeforeWater,
     overheadPickup, fallingPickup, delayedPickup,
     recoverable, graceStarted, graceHeld, graceReset, early, cut, fixed, framed, descending, submerged, replay, replayFramed,
     savedGhost, namedRun, racingGhost, stagedGhost, syncedGhost, freshDqLayout, freshWinLayout, independentDrift, freshEntryLayout, backgroundPaused, backgroundResumed,

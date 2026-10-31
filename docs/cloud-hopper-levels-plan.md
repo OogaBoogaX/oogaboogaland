@@ -198,7 +198,7 @@ play-testing within the stated bounds.
 | Main half-sizes (rx, rz) | 2.7–3.6, 1.9–2.6 | 3.1–4.1, 2.2–3.0 | today's | 2.3–3.1, 1.6–2.2 | today's |
 | Lateral turn target / per-hop limit | ±40 / 7 m | ±25 / 5 m | ±40 / 7 m | ±50 / 8 m | ±50 / 8 m |
 | Lifetime classes P / L / O / C (2.4) | 0 / 0 / 100 / 0 | 30 / 30 / 40 / 0 | 18 / 27 / 55 / 0 | 10 / 25 / 50 / 15 | 12 / 28 / 45 / 15 |
-| Permanent spine (2.5) | none | ≤1 hop to a P | ≤2 hops | ≤2 hops | ≤2 hops |
+| Permanent spine (2.5) | none | ≤1 hop to a P | ≤3 hops | ≤2 hops | ≤2 hops |
 | Ordinary solid span per cycle | 4–12 s | 12–40 s | 7–30 s | 5–24 s | 5–24 s |
 | Long-lived solid span | — | 70–150 s | 50–120 s | 40–100 s | 40–100 s |
 | Warning, then fade | none, then 1 s | 3.0 s, then 1 s | 2.5 s, then 1 s | 2.0 s, then 1 s | 2.0 s, then 1 s |
@@ -253,19 +253,23 @@ Fixed placements:
    warning, not from the clock. Boost and bounce launches fly longer and are excluded on
    purpose. They are a deliberate choice, and their landing zones are generated with a P or
    L cloud inside the launch's reach.
-2. **There is always a safe way forward.** At generation, a forward reach graph is built:
-   cloud *a* reaches *b* if *b* is no higher than a full jump above *a* and the edge gap is
-   within the level's guaranteed reach. Reach is conservative: 70% of the running-jump
-   envelope from 1.3. Every main landing must reach a P cloud within *k* hops (k = 1 in
-   L1, 2 in L2–L4). Every alternative must reach the main line or a P cloud in one hop. A
-   cloud that breaks this promotes the nearest forward neighbour to P (or to L in L3 and
-   L4), then is checked again. This runs once per course: about 120² pair tests, with the
-   neighbour lists in a flat `Int16Array`.
-3. **Neighbouring clouds do not fade together.** In the first cycles, two O clouds that
-   reach each other may not start warnings within 3 s of each other. At generation the
-   later one's phase is shifted by up to half its period. This is soft: after a few cycles
-   the different periods drift apart naturally. It removes the 6–20 s pile-up at the start
-   (finding 1.1), and the run's first 4 s has no warnings within reach of the launch cloud.
+2. **There is always a safe way forward.** *Built in milestone 2.* During a run each
+   cloud's position is a function of race time alone (2.8), so where every cloud stands at
+   any warning is known when the course is built. Cloud *a* reaches *b* at time *t* when *b*
+   is no higher than *a* and the gap between their edges there is inside 70% of the running
+   jump's reach (1.3), less how far *b* can drift during the flight. Whenever a cloud starts
+   a warning while a run may be on it (from 0.4× to 2.5× its expected arrival, plus 40 s),
+   a cloud it reaches then must be steady, or the coast must be in reach. Clouds are
+   settled from the bottom up, each by its own clock alone: shift it along its slot, then
+   make it long-lived, then long-lived past every run's presence, which always settles. No
+   neighbour ever has to change. Separately, every main landing links to a P cloud within
+   *k* hops (with lanes at their centres); a gap makes the farthest main landing within
+   *k* hops permanent. Building the checks takes about 0.5 ms per course.
+3. **Neighbouring clouds do not fade together.** *Built.* Two linked O clouds may not start
+   their first two warnings within 3 s of each other; settling shifts the later one along
+   its clock, or makes it long-lived. First warnings come no sooner than 4 s after
+   departure and spread out from there (measured: 5th percentile 12 s, median 81 s), which
+   removes the 6–20 s pile-up at the start (finding 1.1).
 4. **Why streaks stop.** If the cloud you redirect to is not warning, it holds you for the
    whole flight (rule 1). If every visible option is warning, rule 2 still leaves a P cloud
    within *k* hops. So two failures in a row need two separate misjudgements. Independent
@@ -274,6 +278,17 @@ Fixed placements:
    other. Lifetimes are broad and drawn again each cycle. Positions, turns and yaw change
    every play. Waiting to see which clouds never fade costs time on a raced clock, and
    that trade is the intended route choice.
+
+Measured on today's course over 100 seeds:
+
+- A cloud that is not warning when you jump still holds you 1.8 s later in 100% of cases
+  (today: 90.4%).
+- Counting jumps onto clouds already warning, 1.7% have no support when you land and 3.8%
+  are fading or gone (today: 9.6% and 21.7%).
+- Main landings are 25% permanent, 22% long-lived and 53% ordinary, the Level 2 mix with
+  the spine at 3 hops and 8% of clouds drawn permanent before it. Today's side
+  alternatives sit too far out (22–34 m) to link back to the main line, so most settle as
+  long-lived. Milestone 4 places them closer for each level.
 
 Tradeoffs:
 
@@ -318,15 +333,17 @@ Tradeoffs:
 disappearance:
 
 `offset(t) = range · sin(ω t + φ)`, with `range` 5–8 m (today's lane) and
-`ω = speed / range`, where `speed` is 0.9–1.5 m/s (today's `moveSpeed`).
+`ω = speed / range`, where `speed` is 0.9–1.5 m/s (today's `moveSpeed`). *Built, and
+chosen:* during a run *t* is race time, so positions are known when the course is built.
+While a rider waits at the start each swing's phase wobbles slightly (0.12 rad at most),
+and the run's first 1.5 s eases that wobble away, so motion stays continuous.
 
 - **No jumps for any class.** Rider carry, `touchTime` and pickups no longer need
   `movePass`, and permanent clouds keep moving without ever teleporting.
 - **Always inside the measured lane.** The offshore, swept-clearance and recovery checks
   already use the lane's ends, so they hold unchanged.
-- **Waiting cannot move a cloud out of reach**, because it never leaves its lane. Motion
-  time runs from course creation and continues through departure (`start()` keeps
-  returning the phase saved with ghosts).
+- **Waiting cannot move a cloud out of reach**, because it never leaves its lane. `start()`
+  still returns the waiting time kept with ghosts.
 - **Falling pickups** detach at `firstGoneAt` (∞ for P clouds) at `offset(firstGoneAt)`,
   exactly as before.
 

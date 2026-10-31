@@ -3,36 +3,29 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const { clamp, mulberry32 } = BL.math;
-  const MAX_CLOUDS = 128, CLOUD_DEPTH = 2, FADE_SECONDS = 1, APPEAR_SECONDS = 0.45, SYNC_SECONDS = 0.5;
+  const MAX_CLOUDS = 128, CLOUD_DEPTH = 2, FADE_SECONDS = 1, APPEAR_SECONDS = 0.6;
   const CLOUD_GAP = 1.5, MAIN_RADIUS = Math.hypot(3.6, 2.6);
-  const HIDDEN_MIN_SECONDS = 1.2, HIDDEN_RANGE_SECONDS = 2, GRAVITY = 9.8, PICKUP_LIFT = 0.7, PICKUP_RADIUS = 0.75;
+  const GRAVITY = 9.8, PICKUP_LIFT = 0.7, PICKUP_RADIUS = 0.75, RUN_SPEED = 11.625, JUMP_SPEED = 4.8, SETTLE = 1.5, WOBBLE = 0.12;
+  // Lifetime classes: a permanent cloud never fades; a long-lived one first fades long after an ordinary run
+  // reaches it; an ordinary one disappears once in each of its own slots.
+  const PERMANENT = 0, LONG = 1, ORDINARY = 2;
+  // The phases a disappearance passes through. A warning keeps full support; the fade still holds a rider, sinking.
+  const SOLID = 0, WARNING = 1, FADING = 2, HIDDEN = 3, APPEARING = 4;
+  // The course's timing. Shares are of the clouds drawn before the fixed and promoted permanent ones; slots are
+  // seconds (one disappearance each, log-uniform per cloud); `gap` is the least solid time between two of one
+  // cloud's disappearances; `stagger` keeps reachable ordinary clouds' first two warnings apart; `spine` is the
+  // most forward hops from a main landing to a permanent cloud; `pace` the seconds a hop is expected to take;
+  // `reach` the share of a running jump (with the air jump when `airJump`) the fairness checks count on;
+  // `presence` [early, late, extra] the span a rider may be on a cloud, from early × to late × its expected
+  // arrival plus extra seconds. These defaults keep roughly today's challenge, the plan's Level 2.
+  const TIMING = Object.freeze({ permanent: 0.08, long: 0.2, ordinary: Object.freeze([14, 36]), longSlot: Object.freeze([60, 130]),
+    warn: 2.5, hidden: Object.freeze([1.5, 3.5]), gap: 4, firstWarn: 4, stagger: 3, spine: 3, pace: 2.8, reach: 0.7, airJump: true,
+    presence: Object.freeze([0.4, 2.5, 40]) });
   const cycleRandom = (seed, cycle, salt) => {
     let value = seed ^ Math.imul(cycle + 1, 0x9e3779b9) ^ salt;
     value = Math.imul(value ^ value >>> 16, 0x21f0aaad);
     value = Math.imul(value ^ value >>> 15, 0x735a2d97);
     return ((value ^ value >>> 15) >>> 0) / 4294967296;
-  };
-  // Spread fades across each cloud's own cycle, leaving room to fully return
-  // before its next cycle begins. Shared periods made whole regions pulse.
-  const fadeAt = (cloud, cycle) => 2 + cycleRandom(cloud.seed, cycle, 0x632be5ab)
-    * (cloud.cycleSeconds - FADE_SECONDS - HIDDEN_MIN_SECONDS - HIDDEN_RANGE_SECONDS - APPEAR_SECONDS - 2.5);
-  const hiddenFor = (cloud, cycle) => HIDDEN_MIN_SECONDS + cycleRandom(cloud.seed, cycle, 0x85157af5) * HIDDEN_RANGE_SECONDS;
-  const movePassAt = (cloud, time) => {
-    const age = time - cloud.delay;
-    if (age < 0) return 0;
-    const cycle = Math.floor(age / cloud.cycleSeconds), local = age - cycle * cloud.cycleSeconds;
-    // Return to the other end only halfway through complete invisibility.
-    const reset = fadeAt(cloud, cycle) + FADE_SECONDS + hiddenFor(cloud, cycle) * 0.5;
-    return cycle + (local >= reset ? 1 : 0);
-  };
-  const driftAt = (cloud, time, pass) => {
-    // Waiting before departure cannot send the course out of reach. Drift
-    // toward the edge without reversing or disappearing before the clock.
-    if (!pass) return cloud.moveRange * -Math.expm1(-time * cloud.moveSpeed / cloud.moveRange);
-    const cycle = pass - 1;
-    const appear = cloud.delay + cycle * cloud.cycleSeconds + fadeAt(cloud, cycle) + FADE_SECONDS + hiddenFor(cloud, cycle);
-    const gone = cloud.delay + pass * cloud.cycleSeconds + fadeAt(cloud, pass) + FADE_SECONDS;
-    return cloud.moveRange * (2 * clamp((time - appear) / (gone - appear), 0, 1) - 1);
   };
   const contains = (cloud, x, z, radius) => {
     const dx = x - cloud.x, dz = z - cloud.z;
@@ -44,7 +37,7 @@
   // ragged outer puffs. Standing support remains the separate top query.
   const touchTime = (cloud, x, z, feet, height, radius = 0.3, fromX, fromZ, fromFeet) => {
     if (!cloud.active || cloud.kind === "normal") return Infinity;
-    const sweep = fromX !== undefined && cloud.previousActive && cloud.previousPass === cloud.movePass;
+    const sweep = fromX !== undefined && cloud.previousActive;
     const dx = x - cloud.x, dz = z - cloud.z;
     const bx = sweep ? fromX - cloud.previousX : dx, bz = sweep ? fromZ - cloud.previousZ : dz;
     const x0 = bx * cloud.cosYaw - bz * cloud.sinYaw, z0 = bx * cloud.sinYaw + bz * cloud.cosYaw;
@@ -70,15 +63,17 @@
 
   // start/finish are feet positions; finish is the mainland pile, not a cloud.
   // The route stops offshore, with every cloud's entire motion over water.
-  // Clouds drift from creation; start(driftTime) arms their fading clock once
-  // the rider leaves and returns the phase kept with a ghost recording. An
-  // optional recorded phase reproduces that course's drift. update(dt, raceTime)
-  // can follow the race clock directly; previousX/Z carry a planted rider.
-  // A record's y is its full-opacity top; top sinks as it fades. supportAt
-  // returns the highest eligible top or -Infinity; pass the greater of the
-  // previous/current feet heights to catch a falling body. pickupAt consumes
-  // one pickup and returns its stable record; equipping belongs to the caller.
-  const create = ({ start, finish, mainlandRadius = 30, seed = 1 }) => {
+  // Clouds swing smoothly across their lanes from creation; start() arms their
+  // disappearance clocks once the rider leaves and returns the drift time kept
+  // with a ghost recording. update(dt, raceTime) can follow the race clock
+  // directly, and every cloud's state is a closed-form function of that time;
+  // previousX/Z carry a planted rider. A record's y is its full-opacity top; top
+  // sinks as it fades. `phase` and `warning` say where its schedule stands and
+  // solidLeft reads it. supportAt returns the highest eligible top or -Infinity;
+  // pass the greater of the previous/current feet heights to catch a falling body.
+  // pickupAt consumes one pickup and returns its stable record; equipping belongs
+  // to the caller. runSpeed and jumpSpeed are the player's, for the fairness checks.
+  const create = ({ start, finish, mainlandRadius = 30, seed = 1, timing = TIMING, runSpeed = RUN_SPEED, jumpSpeed = JUMP_SPEED }) => {
     const rand = mulberry32(seed), outwardX = start.x - finish.x, outwardZ = start.z - finish.z;
     const moveRand = mulberry32(seed ^ 0x3c6ef372), orientationRand = mulberry32(seed ^ 0xa54ff53a);
     const sideRand = mulberry32(seed ^ 0xbb67ae85);
@@ -92,10 +87,10 @@
       Math.max(6, Math.floor(distance / minimumStep)));
     const clouds = [], landings = [], pickups = [], placements = [], step = 1 / count;
     const alongJitter = Math.min(0.08, Math.max(0, 1 - minimumStep / (distance * step)));
-    let lateral = 0, movementTime = 0, beganAt = -1, driftStart = 0, driftShift = 0, nextTurn = 0, target = 0, courseTime = 0;
+    let lateral = 0, movementTime = 0, beganAt = -1, nextTurn = 0, target = 0, courseTime = 0;
     const addCloud = (x, y, z, rx, rz, side = 0) => {
-      // Each cloud chooses left or right across the course for the whole run.
-      // Independent lanes and fade clocks keep the field from swaying as one.
+      // Each cloud swings across the course on its own lane, speed and phase.
+      // Independent lanes and clocks keep the field from swaying as one.
       const direction = moveRand() < 0.5 ? -1 : 1, moveX = sideX * direction, moveZ = sideZ * direction;
       const moveRange = 5 + moveRand() * 3, moveSpeed = 0.9 + moveRand() * 0.6;
       const yaw = orientationRand() * Math.PI * 2, cosYaw = Math.cos(yaw), sinYaw = Math.sin(yaw);
@@ -117,12 +112,13 @@
         index: clouds.length, x, y, z, rx, rz, depth: CLOUD_DEPTH, top: y, opacity: 1, active: true, fading: false,
         yaw, cosYaw, sinYaw,
         kind: "normal", boostX: 0, boostZ: 0,
-        baseX: x, baseZ: z, previousX: x, previousZ: z, previousActive: true, previousPass: 0,
-        moveX, moveZ, moveRange, moveSpeed, movePass: 0,
-        seed: (rand() * 4294967296) >>> 0, delay: 3 + rand() * 7, cycleSeconds: 0, firstGoneAt: 0
+        baseX: x, baseZ: z, previousX: x, previousZ: z, previousActive: true,
+        moveX, moveZ, moveRange, moveSpeed, swing: 0,
+        // The second draw is each cloud's clock phase, which keeps a seed's landings where they always were.
+        seed: (rand() * 4294967296) >>> 0, clock: rand(), life: ORDINARY, late: false, main: !side, arrival: 0, held: 0,
+        slotSeconds: 0, t0: 0, firstGoneAt: 0, phase: SOLID, progress: 0, warning: -1, windowStart: 0, windowEnd: 0
       };
-      cloud.cycleSeconds = 9 + cycleRandom(cloud.seed, 0, 0x9e6c63d1) * 6;
-      cloud.firstGoneAt = cloud.delay + fadeAt(cloud, 0) + FADE_SECONDS;
+      cloud.swing = cycleRandom(cloud.seed, 0, 0x7f4a7c15) * Math.PI * 2;
       clouds.push(cloud);
       return cloud;
     };
@@ -205,49 +201,233 @@
         cloud.boostZ = -nz;
       }
     }
-    const begin = (driftTime = movementTime) => {
+    // ---- lifetimes --------------------------------------------------------------------------------------------
+    // Every disappearance is a closed-form function of race time: a cloud's clock starts at t0 and is cut into
+    // slots of slotSeconds, each holding one warning, fade, hidden span and return at a seeded place inside it,
+    // with half the least solid gap kept clear at either end. Each slot draws its own place and hidden span.
+    const W = timing.warn, GONE = W + FADE_SECONDS, gapHalf = timing.gap / 2;
+    const expected = count * timing.pace, horizon = expected * 3;
+    const hiddenFor = (cloud, slot) => timing.hidden[0] + cycleRandom(cloud.seed, slot, 0x85157af5) * (timing.hidden[1] - timing.hidden[0]);
+    const windowAt = (cloud, slot) => {
+      if (cloud.life === PERMANENT) return Infinity;
+      const span = GONE + hiddenFor(cloud, slot) + APPEAR_SECONDS;
+      return cloud.t0 + slot * cloud.slotSeconds + gapHalf + cycleRandom(cloud.seed, slot, 0x632be5ab) * (cloud.slotSeconds - span - timing.gap);
+    };
+    // Fully solid and not warning at time t.
+    const steadyAt = (cloud, t) => {
+      if (cloud.life === PERMANENT || t < cloud.t0) return true;
+      const slot = Math.floor((t - cloud.t0) / cloud.slotSeconds), local = t - windowAt(cloud, slot);
+      return local < 0 || local >= GONE + hiddenFor(cloud, slot) + APPEAR_SECONDS;
+    };
+    // Writes phase and its progress, windowStart (the current or next warning) and windowEnd (the end of a
+    // current disappearance's return).
+    const evaluate = (cloud, t) => {
+      cloud.phase = SOLID; cloud.progress = 0;
+      if (cloud.life === PERMANENT) { cloud.windowStart = cloud.windowEnd = Infinity; return; }
+      const slot = t < cloud.t0 ? 0 : Math.floor((t - cloud.t0) / cloud.slotSeconds), start = windowAt(cloud, slot), local = t - start;
+      cloud.windowStart = start;
+      if (local < 0) return;
+      const hidden = hiddenFor(cloud, slot), back = GONE + hidden;
+      cloud.windowEnd = start + back + APPEAR_SECONDS;
+      if (local < W) { cloud.phase = WARNING; cloud.progress = local / W; }
+      else if (local < GONE) { cloud.phase = FADING; cloud.progress = (local - W) / FADE_SECONDS; }
+      else if (local < back) { cloud.phase = HIDDEN; cloud.progress = (local - GONE) / hidden; }
+      else if (local < back + APPEAR_SECONDS) { cloud.phase = APPEARING; cloud.progress = (local - back) / APPEAR_SECONDS; }
+      else cloud.windowStart = windowAt(cloud, slot + 1);
+    };
+    // The span a rider may be on this cloud, from early to late runs.
+    const presence = (cloud) => cloud.arrival * timing.presence[1] + timing.presence[2];
+    const schedule = (cloud, shift = 0) => {
+      if (cloud.life === PERMANENT) { cloud.slotSeconds = cloud.t0 = cloud.firstGoneAt = Infinity; return; }
+      const long = cloud.life === LONG, range = long ? timing.longSlot : timing.ordinary;
+      cloud.slotSeconds = range[0] * Math.pow(range[1] / range[0], cycleRandom(cloud.seed, 0, long ? 0x4f1bbcdc : 0x9e6c63d1));
+      // A long-lived cloud's first warning waits well past when an ordinary run reaches it; a late one past
+      // every run's presence on it.
+      const first = cloud.late ? presence(cloud) : long ? Math.max(timing.firstWarn, cloud.arrival * 1.6 + 20) : timing.firstWarn;
+      cloud.t0 = first - gapHalf + cloud.clock * cloud.slotSeconds * (long ? 0.4 : 1) + shift;
+      cloud.firstGoneAt = windowAt(cloud, 0) + GONE;
+    };
+    // Classes come from their own stream, so a seed's landings, specials and pickups stay where they were.
+    const lifeRand = mulberry32(seed ^ 0x2545f491);
+    for (const cloud of clouds) {
+      const r = lifeRand();
+      cloud.life = r < timing.permanent ? PERMANENT : r < timing.permanent + timing.long ? LONG : ORDINARY;
+    }
+    // A run starts and ends on clouds that never fade.
+    for (const k of [0, 1, count - 2, count - 1]) landings[k].life = PERMANENT;
+    for (const cloud of clouds) {
+      const along = (cloud.baseX - finish.x) * nx + (cloud.baseZ - finish.z) * nz;
+      cloud.arrival = clamp((startDistance - along) / distance, 0, 1) * expected;
+      schedule(cloud);
+    }
+
+    // ---- motion ---------------------------------------------------------------------------------------------------
+    // Each cloud swings smoothly across its lane. During a run its offset is a function of race time alone, so
+    // where every cloud stands at any warning is known here. Waiting at the start only wobbles each swing's
+    // phase, a wobble the run's first SETTLE seconds ease away: the field stays alive and every move continuous.
+    const offsetAt = (cloud, t, wobble = 0) => cloud.moveRange * Math.sin(cloud.swing + t * cloud.moveSpeed / cloud.moveRange + wobble);
+    const wobbleAt = (cloud, waited) => WOBBLE * Math.sin(waited * 0.6 + cloud.swing);
+
+    // ---- reach ----------------------------------------------------------------------------------------------------
+    // a reaches b at race time t when b is no higher than a (later in the height order) and the gap between
+    // their edges there is inside `reach` of a running jump dropping between their tops, less how far b can
+    // move during that flight. Candidates are the clouds a could reach with both lanes at their closest; links
+    // only ever point down the course, so settling clouds from the bottom up never revisits one.
+    const flight = (fall) => (jumpSpeed + Math.sqrt(jumpSpeed * jumpSpeed + 2 * GRAVITY * Math.max(0, fall))) / GRAVITY
+      + (timing.airJump ? 2 * jumpSpeed / GRAVITY : 0);
+    const reachFor = (fall) => timing.reach * runSpeed * flight(fall);
+    const near = (cloud) => Math.min(cloud.rx, cloud.rz);
+    const reachesAt = (a, b, t) => {
+      const oa = offsetAt(a, t), ob = offsetAt(b, t), fall = a.y - b.y;
+      const gap = Math.hypot(b.baseX + b.moveX * ob - a.baseX - a.moveX * oa, b.baseZ + b.moveZ * ob - a.baseZ - a.moveZ * oa) - near(a) - near(b);
+      return gap <= reachFor(fall) - b.moveSpeed * flight(fall);
+    };
+    // Lanes at their centres: the nominal links the spine and the stagger read.
+    const nominal = (a, b, lanes) => {
+      const dx = b.baseX - a.baseX, dz = b.baseZ - a.baseZ;
+      const across = Math.max(0, Math.abs(dx * sideX + dz * sideZ) - lanes * (a.moveRange + b.moveRange));
+      return Math.hypot(dx * nx + dz * nz, across) - near(a) - near(b) <= reachFor(a.y - b.y);
+    };
+    const n = clouds.length, firstCandidate = new Int16Array(n + 1), firstLink = new Int16Array(n + 1), foundCandidates = [], foundLinks = [];
+    for (let i = 0; i < n; i++) {
+      firstCandidate[i] = foundCandidates.length; firstLink[i] = foundLinks.length;
+      for (let j = i + 1; j < n; j++) {
+        if (clouds[j].y > clouds[i].y) continue;
+        if (nominal(clouds[i], clouds[j], 1)) foundCandidates.push(j);
+        if (nominal(clouds[i], clouds[j], 0)) foundLinks.push(j);
+      }
+    }
+    firstCandidate[n] = foundCandidates.length; firstLink[n] = foundLinks.length;
+    const candidates = Int16Array.from(foundCandidates), links = Int16Array.from(foundLinks);
+    const linked = (i, j) => {
+      for (let e = firstLink[i]; e < firstLink[i + 1]; e++) if (links[e] === j) return true;
+      return false;
+    };
+    // The mainland's coast is ground that never fades.
+    const shoreAt = (cloud, t) => {
+      const offset = offsetAt(cloud, t);
+      return Math.hypot(cloud.baseX + cloud.moveX * offset - finish.x, cloud.baseZ + cloud.moveZ * offset - finish.z)
+        - mainlandRadius - near(cloud) <= reachFor(cloud.y - finish.y);
+    };
+
+    // ---- fairness -------------------------------------------------------------------------------------------------
+    // Whenever a cloud starts a warning while a rider may be on it, a cloud it reaches then is steady (or the
+    // coast is in reach): warning and fade outlast the jump, so that target still holds when they land.
+    const escapes = (i, t) => {
+      const cloud = clouds[i];
+      if (shoreAt(cloud, t)) return true;
+      for (let e = firstCandidate[i]; e < firstCandidate[i + 1]; e++) {
+        const other = clouds[candidates[e]];
+        if (steadyAt(other, t) && reachesAt(cloud, other, t)) return true;
+      }
+      return false;
+    };
+    const settled = (i) => {
+      const cloud = clouds[i], early = cloud.arrival * timing.presence[0], late = presence(cloud);
+      for (let slot = 0; ; slot++) {
+        const start = windowAt(cloud, slot);
+        if (start > late) return true;
+        if (start + GONE >= early && !escapes(i, start)) return false;
+      }
+    };
+    // Linked ordinary clouds may not start their first two warnings within `stagger` seconds of each other.
+    const clashes = (a, b) => {
+      for (let ka = 0; ka < 2; ka++) for (let kb = 0; kb < 2; kb++) {
+        if (Math.abs(windowAt(a, ka) - windowAt(b, kb)) < timing.stagger) return true;
+      }
+      return false;
+    };
+    const crowded = (i) => {
+      for (let j = i + 1; j < n; j++) {
+        if (clouds[j].life === ORDINARY && (linked(i, j) || linked(j, i)) && clashes(clouds[i], clouds[j])) return true;
+      }
+      return false;
+    };
+    // Settle from the bottom up, each cloud by its own clock alone: shift it along its slot, then try it
+    // long-lived, then long-lived past every rider's presence, which always settles. No neighbour changes.
+    for (let i = n - 1; i >= 0; i--) {
+      const cloud = clouds[i];
+      if (cloud.life === PERMANENT) continue;
+      let done = false;
+      for (let stage = cloud.life === ORDINARY ? 0 : 1; stage < 3 && !done; stage++) {
+        cloud.life = stage ? LONG : ORDINARY; cloud.late = stage === 2;
+        for (let attempt = 0, shift = 0; attempt < (cloud.late ? 1 : 7) && !done; attempt++) {
+          schedule(cloud, shift);
+          done = settled(i) && (cloud.life !== ORDINARY || !crowded(i));
+          shift += cloud.slotSeconds / 7;
+        }
+      }
+    }
+    // Every main landing links to a permanent cloud or the coast within `spine` hops. One that does not makes
+    // permanent the farthest main landing it reaches in that many hops, or itself when it reaches none.
+    // Permanence only adds steady ground, so the settled clocks stay settled.
+    const visited = new Uint8Array(n), queue = new Int16Array(n), hops = new Uint8Array(n);
+    const spineFrom = (from) => {
+      visited.fill(0);
+      let head = 0, tail = 0;
+      queue[tail++] = from; visited[from] = 1; hops[from] = 0;
+      while (head < tail) {
+        const i = queue[head++];
+        if (clouds[i].life === PERMANENT || shoreAt(clouds[i], clouds[i].arrival)) return true;
+        if (hops[i] === timing.spine) continue;
+        for (let e = firstLink[i]; e < firstLink[i + 1]; e++) {
+          const j = links[e];
+          if (visited[j]) continue;
+          visited[j] = 1; hops[j] = hops[i] + 1; queue[tail++] = j;
+        }
+      }
+      return false;
+    };
+    for (let k = 0; k < count; k++) {
+      const from = landings[k].index;
+      if (spineFrom(from)) continue;
+      let next = from;
+      for (let h = 0; h < timing.spine; h++) {
+        let far = next;
+        for (let m = k + 1; m < count; m++) if (linked(next, landings[m].index)) far = landings[m].index;
+        if (far === next) break;
+        next = far;
+      }
+      clouds[next].life = PERMANENT; schedule(clouds[next]);
+    }
+    for (const cloud of clouds) {
+      const offset = offsetAt(cloud, 0, wobbleAt(cloud, 0));
+      cloud.x = cloud.previousX = cloud.baseX + cloud.moveX * offset;
+      cloud.z = cloud.previousZ = cloud.baseZ + cloud.moveZ * offset;
+      evaluate(cloud, 0);
+    }
+
+    // ---- the clock ----------------------------------------------------------------------------------------------
+    const begin = () => {
       if (beganAt < 0) {
         beganAt = movementTime;
-        driftStart = Number.isFinite(driftTime) ? driftTime : movementTime;
-        driftShift = driftStart - movementTime;
+        for (const cloud of clouds) cloud.held = wobbleAt(cloud, movementTime);
       }
-      return driftStart;
+      return beganAt;
     };
     const update = (dt, raceTime) => {
       if (beganAt >= 0 && Number.isFinite(raceTime)) movementTime = beganAt + Math.max(0, raceTime);
       else movementTime += dt;
-      const time = beganAt < 0 ? 0 : movementTime - beganAt, t = Math.min(1, time / SYNC_SECONDS);
+      const time = beganAt < 0 ? 0 : movementTime - beganAt;
       courseTime = time;
-      // Waiting on the start cloud still has live drift. Joining a recorded
-      // course blends positions, not elapsed phase, without rewinding the
-      // independently randomized disappearance clock.
-      const driftTime = beganAt < 0 ? movementTime : driftStart + time, blend = t * t * (3 - 2 * t);
-      const syncing = driftShift !== 0 && blend < 1;
       for (let i = 0; i < clouds.length; i++) {
-        const cloud = clouds[i], age = time - cloud.delay;
-        cloud.previousActive = cloud.active; cloud.previousPass = cloud.movePass;
-        cloud.movePass = movePassAt(cloud, time);
-        let drift = driftAt(cloud, cloud.movePass ? time : driftTime, cloud.movePass);
-        if (syncing) drift += (driftAt(cloud, movementTime, 0) - drift) * (1 - blend);
+        const cloud = clouds[i];
+        cloud.previousActive = cloud.active;
         cloud.previousX = cloud.x; cloud.previousZ = cloud.z;
-        cloud.x = cloud.baseX + cloud.moveX * drift;
-        cloud.z = cloud.baseZ + cloud.moveZ * drift;
-        let opacity = 1, fading = false;
-        if (age >= 0) {
-          // Direct evaluation keeps both the work and the timing bounded even
-          // after a long frame. Each cycle gets a fresh seeded disappearance.
-          const cycle = Math.floor(age / cloud.cycleSeconds), local = age - cycle * cloud.cycleSeconds;
-          const fade = fadeAt(cloud, cycle), gone = fade + FADE_SECONDS;
-          const appear = gone + hiddenFor(cloud, cycle);
-          if (local >= fade && local < gone) {
-            opacity = 1 - (local - fade) / FADE_SECONDS;
-            fading = true;
-          } else if (local >= gone && local < appear) opacity = 0;
-          else if (local >= appear && local < appear + APPEAR_SECONDS) opacity = (local - appear) / APPEAR_SECONDS;
-        }
+        // Never a jump, so a rider is carried and a sweep holds over a frame of any length; direct evaluation
+        // keeps long frames exact. The wobble held at departure eases out over the run's first SETTLE seconds.
+        const settle = Math.min(1, time / SETTLE);
+        const offset = beganAt < 0 ? offsetAt(cloud, 0, wobbleAt(cloud, movementTime))
+          : offsetAt(cloud, time, cloud.held * (1 - settle * settle * (3 - 2 * settle)));
+        cloud.x = cloud.baseX + cloud.moveX * offset;
+        cloud.z = cloud.baseZ + cloud.moveZ * offset;
+        evaluate(cloud, time);
+        const opacity = cloud.phase === FADING ? 1 - cloud.progress : cloud.phase === HIDDEN ? 0
+          : cloud.phase === APPEARING ? cloud.progress : 1;
         cloud.opacity = opacity;
         cloud.active = opacity > 0;
-        cloud.fading = fading;
+        cloud.fading = cloud.phase === FADING;
+        cloud.warning = cloud.phase === WARNING ? cloud.progress : -1;
         cloud.top = cloud.y - cloud.depth * (1 - opacity);
       }
       for (let i = 0; i < pickups.length; i++) {
@@ -262,10 +442,9 @@
           // Detach at the exact zero-opacity instant, even if a frame spans the
           // whole disappearance. A returning cloud never recalls its pickup.
           if (!pickup.falling) {
-            // The phase blend ends well before any cloud first disappears.
-            const drift = driftAt(cloud, driftStart + cloud.firstGoneAt, 0);
-            pickup.x = cloud.baseX + cloud.moveX * drift;
-            pickup.z = cloud.baseZ + cloud.moveZ * drift;
+            const offset = offsetAt(cloud, cloud.firstGoneAt);
+            pickup.x = cloud.baseX + cloud.moveX * offset;
+            pickup.z = cloud.baseZ + cloud.moveZ * offset;
             pickup.falling = true;
           }
           const speed = cloud.depth / FADE_SECONDS;
@@ -275,19 +454,10 @@
         }
       }
     };
-    // Seconds until this cloud starts to fade, read from the same schedule as update: 0 while it fades,
-    // negative while it is gone (minus the seconds until it returns), Infinity when its clock never starts.
-    const solidLeft = (cloud) => {
-      const age = courseTime - cloud.delay;
-      if (age === -Infinity) return Infinity;
-      if (age < 0) return -age + fadeAt(cloud, 0);
-      const cycle = Math.floor(age / cloud.cycleSeconds), local = age - cycle * cloud.cycleSeconds;
-      const fade = fadeAt(cloud, cycle), appear = fade + FADE_SECONDS + hiddenFor(cloud, cycle);
-      if (local < fade) return fade - local;
-      if (local < fade + FADE_SECONDS) return 0;
-      if (local < appear) return local - appear;
-      return cloud.cycleSeconds - local + fadeAt(cloud, cycle + 1);
-    };
+    // Seconds of support this cloud has left by its schedule, read after update: Infinity when it never fades,
+    // the time to the end of its fade otherwise, or minus the time until it is back while it is gone.
+    const solidLeft = (cloud) => cloud.phase === HIDDEN || cloud.phase === APPEARING ? courseTime - cloud.windowEnd
+      : cloud.windowStart + GONE - courseTime;
     const supportAt = (x, z, y, maxStep, radius = 0.3) => {
       const ceiling = y + maxStep;
       let top = -Infinity;
@@ -443,7 +613,9 @@
         && canInterceptPickup(pickup, x, feet, z, vy, speed, jump, seaY, jetSeconds, jetAccel, height, seaTime)) return true;
       return false;
     };
-    return { clouds, pickups, start: begin, update, supportAt, contactAt, touchTime, pickupAt, canRecover, solidLeft };
+    return { clouds, pickups, timing, horizon, start: begin, update, supportAt, contactAt, touchTime, pickupAt, canRecover, solidLeft,
+      windowAt, escapes, steadyAt, linked, presence, offsetAt };
   };
-  BL.cloudHopperCourse = { create, MAX_CLOUDS, CLOUD_DEPTH, FADE_SECONDS, APPEAR_SECONDS, PICKUP_LIFT, PICKUP_RADIUS };
+  BL.cloudHopperCourse = { create, TIMING, MAX_CLOUDS, CLOUD_DEPTH, FADE_SECONDS, APPEAR_SECONDS, PICKUP_LIFT, PICKUP_RADIUS,
+    PERMANENT, LONG, ORDINARY, SOLID, WARNING, FADING, HIDDEN, APPEARING };
 })();

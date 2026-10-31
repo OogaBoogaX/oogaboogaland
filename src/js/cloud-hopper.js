@@ -263,7 +263,8 @@
       if (courseSeed === session.lastSeed) courseSeed = (courseSeed + 1) >>> 0;
       session.lastSeed = courseSeed;
       Object.assign(liftGoal, ctx.finish());
-      course = BL.cloudHopperCourse.create({ start, finish: liftGoal, mainlandRadius: ctx.mainlandRadius, seed: courseSeed });
+      course = BL.cloudHopperCourse.create({ start, finish: liftGoal, mainlandRadius: ctx.mainlandRadius, seed: courseSeed,
+        runSpeed: BL.pilot.WALK.speed * BL.pilot.WALK.run, jumpSpeed: BL.crew.JUMP_SPEED });
       overlay.setGhost(session.best?.duration ?? null);
       for (const c of course.clouds) {
         const node = BL.cloudHopperModels.cloud(c.rx, c.rz, c.depth, c.kind, c.yaw);
@@ -396,16 +397,15 @@
       if (!course || phase === "won") return;
       Object.assign(beforeStep, actor.root.position); stepTime = dt;
       // Carry planted feet with the drifting, dissolving surface before ordinary gravity runs.
-      let riding = null, oldTop = 0, ridingPass = 0;
+      let riding = null, oldTop = 0;
       const p = actor.root.position, feet = p.y - actor.baseY;
       if (!held() && actor.hop < 0.001 && actor.hopV <= 0 && !actor.jet?.thrust) {
         const contact = course.contactAt(p.x, p.z, feet);
-        if (contact && Math.abs(feet - contact.top) < 0.06) { riding = contact; oldTop = contact.top; ridingPass = contact.movePass; }
+        if (contact && Math.abs(feet - contact.top) < 0.06) { riding = contact; oldTop = contact.top; }
       }
       course.update(dt, phase === "running" ? (raceNow() - startedAt) / 1000 : undefined);
-      // A long frame may span a fully hidden lane reset. Never carry the
-      // rider across that gap to the cloud's next appearance.
-      if (riding && riding.movePass === ridingPass) {
+      // Lanes swing smoothly, so a planted rider rides the cloud's whole move however long the frame.
+      if (riding) {
         p.x += riding.x - riding.previousX; p.z += riding.z - riding.previousZ;
         if (riding.top < oldTop) p.y += riding.top - oldTop;
       }

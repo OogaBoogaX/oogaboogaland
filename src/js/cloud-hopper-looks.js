@@ -136,7 +136,6 @@
     const rain = [], wisps = [], bolts = [], curtains = [], labels = [], screen = { x: 0, y: 0, depth: 0 }, edge = { x: 0, y: 0, depth: 0 };
     const nearIndex = new Int16Array(12), nearDistance = new Float32Array(12);
     let course = null, nodes = null, flash = 0, flashAt = 3, held = 0, time = 0, forced = [], actor = null, skyOpts = null;
-    const permanent = new Uint8Array(BL.cloudHopperCourse.MAX_CLOUDS);
     const node = (geometry, x, y, z, s = 1, extra = {}) => {
       const n = createNode({ geometry, position: { x, y, z }, scale: { x: s, y: s, z: s }, sightHidden: true, ...extra });
       addChild(decor, n);
@@ -147,14 +146,6 @@
       const sx = start.x - finish.x, sz = start.z - finish.z, length = Math.hypot(sx, sz), nx = sx / length, nz = sz / length;
       const sideX = -nz, sideZ = nx, rand = mulberry32(77), shore = 42;
       const at = (along, across, y) => [finish.x + nx * along + sideX * across, y, finish.z + nz * along + sideZ * across];
-      if (tokens.has("perm")) {
-        // Stand-in for the permanent class: a cloud whose clock never starts never fades.
-        permanent.fill(0);
-        for (let i = 0; i < course.clouds.length; i++) {
-          if (i > 1 && (i * 2654435761 >>> 0) % 100 >= 20) continue;
-          course.clouds[i].delay = Infinity; course.clouds[i].firstGoneAt = Infinity; permanent[i] = 1;
-        }
-      }
       if (level?.startsWith("l1")) {
         for (let k = 0; k < 18; k++) {
           const t = (k + 0.5) / 18, along = shore + (length - shore) * t, routeY = start.y + (finish.y + 18 - start.y) * t;
@@ -237,15 +228,12 @@
         labels[i].face = Math.atan2(c.x, c.z) + (i ? -0.45 : 0.45);
       }
     };
-    // Stand-in for the permanent class on named clouds, so a shot can show its marker.
-    const makePermanent = (indices) => {
-      for (const i of indices) { course.clouds[i].delay = Infinity; course.clouds[i].firstGoneAt = Infinity; permanent[i] = 1; }
-    };
+
     // A still frame holds one flash and its bolts.
     const flashNow = (level = 0.55) => { held = level; };
     // Seconds of solid time the schedule leaves this cloud, from the course itself; a forced warning reads
     // as part-way through its warning.
-    const left = (i) => forced.includes(i) ? W * 0.45 : permanent[i] ? Infinity : course.solidLeft(course.clouds[i]);
+    const left = (i) => forced.includes(i) ? W * 0.45 : course.solidLeft(course.clouds[i]);
     const update = (dt, displayTime) => {
       if (!course) return;
       time += dt;
@@ -477,7 +465,7 @@
     };
     const liveGeometry = (set) => BL.scene.traverseVisible(decor, (n) => { if (n.geometry) set.add(n.geometry); });
     const dispose = () => { clear(); intro(false); removeChild(root, decor); };
-    return { build, update, sky: skyUpdate, overlay, intro, clear, dispose, liveGeometry, force, placePickups, makePermanent, flashNow, tokens };
+    return { build, update, sky: skyUpdate, overlay, intro, clear, dispose, liveGeometry, force, placePickups, flashNow, tokens };
   };
   BL.cloudHopperLooks = { create, SKIES };
 })();
