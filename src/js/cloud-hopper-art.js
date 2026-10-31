@@ -1,5 +1,5 @@
 // Cloud Hopper opening and result illustrations, embedded from src/art/cloud-hopper-*.webp
-// so source, hosted and portable pages share the same self-contained assets.
+// so the source and portable pages are self-contained; a hosted page serves them as files under art/ (`--image-assets`).
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
