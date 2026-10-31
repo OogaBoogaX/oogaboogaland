@@ -1,7 +1,7 @@
 // Cloud Hopper's scores, one for each level, all original and all thirty-two bars on the same plan: a melody over
 // slowly changing chords, offbeat answering notes, a bass under them and drums that only the race lets in.
 //   Level 1 "Coconut Breeze": 112 BPM tropical pluck-pop in G major, bright and bouncy, for the morning islets.
-//   Level 2 "Golden Hour Drift": 96 BPM half-time sunset synthwave in D major, long warm notes over lush pads.
+//   Level 2 "Golden Hour Groove": 118 BPM sunset disco-synthwave in D major, octave bass and offbeat hats under a saw hook.
 //   Level 3 "Cloudbreak Sprint": 128 BPM progressive trance in B minor, the restrained motif under the aurora.
 //   Level 4 "Thunderhead Run": 140 BPM dark driving trance in D minor, rolling bass and a tense phrygian edge.
 // One transport spans the dock, ascent, races, results and replays; only the drums follow the race state, entering
@@ -80,39 +80,39 @@
       echo: 0.18
     },
     {
-      name: "Golden Hour Drift", bpm: 96,
+      name: "Golden Hour Groove", bpm: 118,
       melody: line([
-        "f#5 - - - - - - - e5 - - - . . . .",
-        "d5 - - - - - - - - - - - . . . .",
-        "c#5 - - - - - - - d5 - - - e5 - - -",
-        "f#5 - - - - - - - - - - - . . . .",
-        "g5 - - - - - - - f#5 - - - . . . .",
-        "e5 - - - - - - - d5 - - - . . . .",
-        "e5 - - - - - - - - - - - c#5 - - -",
-        "e5 - - - - - - - . . . . . . . .",
-        "a5 - - - - - - - f#5 - - - . . . .",
-        "e5 - - - - - - - d5 - - - . . . .",
-        "c#5 - - - - - - - e5 - - - a5 - - -",
-        "f#5 - - - - - - - - - - - . . . .",
-        "g5 - - - - - - - b4 - - - . . . .",
-        "d5 - - - - - - - . . . . . . . .",
-        "c#5 - - - - - - - e5 - - - f#5 - - -",
-        "e5 - - - - - - - - - - - . . . ."
+        "a4 . d5 . f#5 - e5 . f#5 . a5 - . f#5 e5 .",
+        "d5 - . e5 . f#5 - . e5 - . c#5 - . . .",
+        "b4 . d5 . f#5 - e5 . f#5 . b5 - . a5 f#5 .",
+        "d5 - . c#5 . d5 - . f#5 - - - . . . .",
+        "g5 . f#5 . d5 - b4 . d5 . f#5 - . g5 f#5 .",
+        "d5 - . c#5 . b4 - . c#5 - . d5 - . . .",
+        "e5 . e5 . b4 - e5 . f#5 . e5 - . d5 b4 .",
+        "a4 - - - . . b4 . d5 - . e5 - - . .",
+        "f#5 . a5 . f#5 - e5 . d5 . e5 - . f#5 a5 .",
+        "a5 - . f#5 . e5 - . f#5 - . a5 - . . .",
+        "b5 . a5 . f#5 - d5 . f#5 . a5 - . b5 a5 .",
+        "f#5 - . e5 . d5 - . c#5 - - - . . . .",
+        "e5 . g5 . b5 - a5 . g5 . f#5 - . e5 d5 .",
+        "e5 - . f#5 . g5 - . b5 - . a5 - . . .",
+        "a5 . f#5 . c#5 - e5 . f#5 . a5 - . c#6 a5 .",
+        "e5 - - - . . f#5 . e5 - . c#5 - - . ."
       ]),
       // Dmaj9, Bm9, Gmaj7#11, Asus2, Em9, F#m7.
       chords: [[54, 57, 61, 64], [54, 57, 61, 62], [55, 59, 61, 66], [57, 59, 64, 66], [55, 59, 62, 66], [57, 61, 64, 66]],
       harmony: [0, 1, 2, 3, 0, 1, 4, 5, 0, 1, 2, 3, 0, 1, 4, 5], roots: [38, 35, 31, 33, 38, 35, 28, 30, 38, 35, 31, 33, 38, 35, 28, 30],
       walk: [0, 3, 1, 2],
-      lead: { type: "sawtooth", spread: 6, level: [0.09, 0.11], cutoff: [1000, 1350], attack: 0.08, held: true, gap: 0.03 },
-      pads: { types: ["sawtooth", "sawtooth", "triangle", "sawtooth"], spreads: [7, 5, 4, 8], level: 0.13, cutoff: [900, 1250], attack: 0.6 },
-      arp: { type: "triangle", steps: on(2, 6, 10, 14), breakdown: on(6, 14), level: 0.06, length: 3, cutoff: 1500, attack: 0.012 },
-      bass: { type: "sawtooth", steps: on(0, 10), level: 0.26, length: 5, cutoff: 520 },
-      sub: { steps: on(0, 10), level: 0.4, length: 5.5 },
-      kick: { steps: on(0, 10), breakdown: on(0), level: 0.7, soft: 0.3 },
-      clap: { steps: on(8), level: 0.19 },
-      hat: { steps: on(0, 2, 4, 6, 8, 10, 12, 14), level: 0.035, length: 0.03 },
-      openHat: { steps: on(14), level: 0.055, length: 0.16 },
-      echo: 0.26
+      lead: { type: "sawtooth", spread: 8, level: [0.08, 0.095], cutoff: [1900, 2500], attack: 0.006, held: false, gap: 0.02 },
+      pads: { types: ["sawtooth", "sawtooth", "triangle", "sawtooth"], spreads: [7, 5, 4, 8], level: 0.1, cutoff: [950, 1300], attack: 0.3 },
+      arp: { type: "square", steps: on(2, 3, 6, 10, 11, 14), breakdown: on(2, 6, 10, 14), level: 0.045, length: 1.2, cutoff: 2200, attack: 0.003 },
+      bass: { type: "sawtooth", steps: on(2, 6, 10, 14), level: 0.24, length: 1.6, cutoff: 820 },
+      sub: { steps: on(0, 4, 8, 12), level: 0.36, length: 1.8 },
+      kick: { steps: on(0, 4, 8, 12), breakdown: on(0, 8), level: 0.65, soft: 0.3 },
+      clap: { steps: on(4, 12), level: 0.16 },
+      hat: { steps: on(1, 3, 5, 7, 9, 11, 13, 15), level: 0.025, length: 0.02 },
+      openHat: { steps: on(2, 6, 10, 14), level: 0.045, length: 0.09 },
+      echo: 0.2
     },
     {
       name: "Cloudbreak Sprint", bpm: 128,

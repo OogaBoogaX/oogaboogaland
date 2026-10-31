@@ -440,8 +440,8 @@ the `movePass` guards. Decision 3 in section 7.
 - **No physics changes.** No slippery surfaces, wind or gusts. If wanted later, they would
   be a separate proposal.
 - **Music.** *Built.* Each level has its own score in `cloud-hopper-music.js`, written for
-  its sky: Coconut Breeze (L1, bright tropical pluck-pop), Golden Hour Drift (L2, half-time
-  sunset synthwave), Cloudbreak Sprint (L3, the original trance score) and Thunderhead Run
+  its sky: Coconut Breeze (L1, bright tropical pluck-pop), Golden Hour Groove (L2, upbeat
+  sunset disco-synthwave), Cloudbreak Sprint (L3, the original trance score) and Thunderhead Run
   (L4, dark driving trance). All four keep the old score's rules: one transport through the
   dock, ascent, race, results and replays, with only the drums following the race and
   entering and leaving on bar lines. Choosing another level card starts its song on the
