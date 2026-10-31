@@ -15,7 +15,7 @@ npm run watch   # the same, rebuilding on every change under src/
 
 ## The island
 
-Oogas can swing, fire their AK-47s, reload and swap magazines in the HUB, with normal animations and ammunition use but no damage. Damage, regeneration, knockouts, dropped gear, gorilla rage and grabbing/throwing remain game-only; other walking scenes keep attacks disabled. **X still switches between cursor look and click-and-drag look**, with the same first-person, shoulder and bird's-eye views. The camera modes called carry/combat below remain available independently of damage.
+Oogas can swing, fire their AK-47s, reload and swap magazines in the HUB, with normal animations and ammunition use but no damage. DSB's seated venue interactions also allow harmless shots and tomato throws. Damage, regeneration, knockouts, dropped gear, gorilla rage and grabbing/throwing remain game-only. **X still switches between cursor look and click-and-drag look**, with the same first-person, shoulder and bird's-eye views. The camera modes called carry/combat below remain available independently of damage.
 
 Click, shoot or club the restless ghost to open the ghost-hunt lobby. Its menu frees the cursor to choose Ready or Not this time. Closing it restores crosshair mouse-look if you are in combat mode; declining in carry mode keeps its free cursor. During the hunt, controlled characters stay in combat mode, including after switching or retaking control: X and the portrait cannot switch to carry until the hunt ends. Scroll and right-click still change views, and Tab or Escape can still free the cursor.
 

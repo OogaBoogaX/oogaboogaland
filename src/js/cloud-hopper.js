@@ -38,7 +38,7 @@
     let phase = "idle", actor = null, saved = null, course = null, age = 0, startedAt = 0, seconds = 0, displayTime = 0;
     let session = null, latest = null, run = 0, courseSeed = 0, courseDrift = 0;
     let unrecoverableAt = -1;
-    let runnerName = "", dockMusicOn = false;
+    let runnerName = "", dockMusicOn = false, scoreTicket = null, unwatchScores = null;
     // Rendering and player physics pause in a hidden tab. Keep the race's
     // wall clock on that same timeline while the soundtrack plays on.
     let hiddenAt = document.hidden ? performance.now() : -1, hiddenTime = 0;
@@ -230,6 +230,7 @@
       session = sessions.get(login);
       if (!session) { session = { runs: 0, scores: [], best: null, lastSeed: null }; sessions.set(login, session); }
       seconds = 0; latest = null;
+      unwatchScores = BL.highscores?.watch("cloud-hopper", (board) => overlay.setHighscores(board)) || null;
       setPhase("intro"); pilot.freeCursor();
       return true;
     };
@@ -251,6 +252,7 @@
       Object.assign(from, platform.position);
       liftViewMix = 0;
       seconds = startedAt = 0; latest = null; run = ++session.runs;
+      scoreTicket = BL.highscores?.begin("cloud-hopper") || null;
       // Each attempt gets fresh clouds; the ghost keeps its original route.
       courseSeed = BL.math.randomInt(4294967296);
       if (courseSeed === session.lastSeed) courseSeed = (courseSeed + 1) >>> 0;
@@ -304,6 +306,7 @@
           }
         }
         latest = { time: seconds, run, username: runnerName };
+        BL.highscores?.submit(scoreTicket, "cloud-hopper-1", Math.round(seconds * 1000));
         const scores = session.scores;
         let at = 0;
         while (at < scores.length && scores[at].time <= seconds) at++;
@@ -334,11 +337,13 @@
         if (actor.jet) crew.cutJet(actor);
       }
       ghost.hide();
+      scoreTicket = null;
       setPhase(won ? "won" : "dq");
       pilot.freeCursor();
     };
     // Exits and scene changes park at the dock before the hub can release its actor.
     const cancel = (keepMusic = false) => {
+      unwatchScores?.(); unwatchScores = null; scoreTicket = null;
       if (!active()) {
         if (!keepMusic) { audio.stop(); dockMusicOn = false; }
         return;

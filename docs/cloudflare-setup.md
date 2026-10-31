@@ -13,8 +13,8 @@ The two share code and nothing else: each has its own D1 database, room, OAuth A
 
 | Thing | Name | Set where |
 |---|---|---|
-| D1 database | `oogaboogaland-staging`, `oogaboogaland-production` | `d1_databases` (`database_id`), migrations in `worker/migrations` |
-| Rate limiters | `AUTH_LIMITER` 10 sign-ins a minute per IP; `ROOM_LIMITER` 20 room connections and `VOICE_LIMITER` 120 voice calls a minute per player; `TESS_LIMITER` 5 questions to Tess a minute per IP | `ratelimits` (staging namespaces 2001–2005, production 1001–1005) |
+| D1 database | `oogaboogaland-staging`, `oogaboogaland-production`; accounts, Tess and shared game high scores | `d1_databases` (`database_id`), migrations in `worker/migrations` |
+| Rate limiters | `AUTH_LIMITER` 10 sign-ins a minute per IP; `ROOM_LIMITER` 20 room connections and `VOICE_LIMITER` 120 voice calls a minute per player; `TESS_LIMITER` 5 questions to Tess a minute per IP; `HIGHSCORE_LIMITER` 120 public score reads per IP or submissions per account per minute, on separate keys | `ratelimits` (staging namespaces 2001–2006, production 1001–1006) |
 | Durable Object | `Room`, one named `island` | `durable_objects`, `migrations` |
 | Cron | daily 04:00 UTC, purges expired sessions and Tess's questions not asked for 90 days | `triggers` |
 | Service binding | `DONATIONS` → `bananapayserver-staging`'s `PageApi` on staging, `bananapayserver-production`'s on production | `services`, with `/donations/*` in `run_worker_first`. The bound Worker must exist before a deploy carries the binding |
@@ -65,6 +65,12 @@ npm run dev                             # http://localhost:8787, with the stagin
 ```
 
 The local OAuth App has homepage `http://localhost:8787` and callback `http://localhost:8787/auth/callback`. `npm run dev` builds `_site/` and passes `--local-upstream localhost:8787`, so the Origin check sees the local address. Local D1 and the room live in `.wrangler/` and never touch staging.
+
+Shared game records use this same database through `0003_highscores.sql`: one JSON high-score
+row per game, public reads and signed-in submissions. No additional D1 resource is required.
+Apply local migrations before previewing the boards; the staging and production workflows
+apply them before deploy as usual. See [Shared game high scores](highscores.md) for the game
+inventory, duplicate machine IDs, identity lifecycle and rollout checks.
 
 To show production donation totals and the leaderboard with the local page, sign in to
 Wrangler and run this from the repository root:

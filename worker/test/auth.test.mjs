@@ -81,9 +81,10 @@ test("the page never receives the avatar url or ban fields", () => {
 
 test("the page takes real donations only from a Worker with the bananapayserver binding, and asks Tess's questions only of one with her key", async () => {
   const me = async (env) => (await handleApi(new Request("https://site.test/api/me"), { SITE_ORIGIN: "https://site.test", ...env }, new URL("https://site.test/api/me"))).json();
-  assert.deepEqual(await me({}), { player: null, character: null, donations: false, tess: false });
-  assert.deepEqual(await me({ DONATIONS: {} }), { player: null, character: null, donations: true, tess: false });
-  assert.deepEqual(await me({ ANTHROPIC_API_KEY: "sk-test" }), { player: null, character: null, donations: false, tess: true });
+  assert.deepEqual(await me({}), { player: null, character: null, donations: false, tess: false, highscores: false });
+  assert.deepEqual(await me({ DONATIONS: {} }), { player: null, character: null, donations: true, tess: false, highscores: false });
+  assert.deepEqual(await me({ ANTHROPIC_API_KEY: "sk-test" }), { player: null, character: null, donations: false, tess: true, highscores: false });
+  assert.equal((await me({ DB: {} })).highscores, true);
 });
 
 const SITE = "https://site.test", FAR = 4102444800;
@@ -153,7 +154,7 @@ test("old nonowner sessions receive no identity and cannot reach account, room o
   for (const login of ["visitor", "cave-name"]) {
     const DB = database(login), env = { SITE_ORIGIN: SITE, DB,
       ROOM: { getByName: () => { throw new Error("Ineligible session reached the room binding"); } } };
-    assert.deepEqual(await (await worker.fetch(requestFor("/api/me"), env)).json(), { player: null, character: null, donations: false, tess: false });
+    assert.deepEqual(await (await worker.fetch(requestFor("/api/me"), env)).json(), { player: null, character: null, donations: false, tess: false, highscores: true });
     assert.equal((await worker.fetch(requestFor("/api/me", "PATCH"), env)).status, 401);
     assert.equal((await worker.fetch(requestFor("/room", "GET", { upgrade: "websocket", "x-player-contributor": "1" }), env)).status, 401);
     assert.equal((await worker.fetch(requestFor("/api/voice/publish", "POST"), env)).status, 401);
