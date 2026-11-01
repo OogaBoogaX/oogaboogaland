@@ -12,14 +12,20 @@
   const readRect = (rect) => rect && [rect.x, rect.y, rect.width, rect.height].every(Number.isFinite)
     && Math.abs(rect.x) <= 100000 && Math.abs(rect.y) <= 100000 && rect.width > 0 && rect.width <= 10000
     && rect.height > 0 && rect.height <= 10000 ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : null;
+  // Scene HUDs come and go, but the latest choice belongs to this page even when
+  // storage is blocked. Only explicit panel changes update it; game hiding does not.
+  let shared = null;
   const create = ({ lootEnabled, signal }) => {
     const root = document.getElementById("sheet"), parent = root.parentElement;
     const content = root.querySelector(".sheet-content"), nav = root.querySelector(".sheet-panels"), footer = root.querySelector(".sheet-foot");
     const panels = [...content.children], templates = [...nav.children].map((tab) => tab.cloneNode(true));
     const windows = [], listeners = [], bottom = window.matchMedia("(width < 1140px)");
     let serial = 0, gesture = null, mergeTarget = null, suppressClick = false, hidden = false, folded = false, disposed = false, lootCount = 0, saveTimer = 0;
-    let saved = null;
-    try { saved = JSON.parse(localStorage.getItem(KEY)); } catch { /* Storage may be unavailable. */ }
+    if (!shared) {
+      try { shared = JSON.parse(localStorage.getItem(KEY)); } catch { /* Storage may be unavailable. */ }
+    }
+    const saved = shared;
+    folded = saved?.folded === true;
     // The live players tab is for signed-in visitors only (players.js).
     const available = (name) => NAMES.includes(name) && (name !== "loot" || lootEnabled) && (name !== "chat" || BL.net.state.backend)
       && (name !== "players" || !!BL.net.state.me);
@@ -33,10 +39,9 @@
     const save = () => {
       window.clearTimeout(saveTimer); saveTimer = 0;
       if (disposed) return;
-      try {
-        localStorage.setItem(KEY, JSON.stringify({ open: main.open, tab: main.tab,
-          height: savedHeight, rect: main.rect, dock: main.dock, windows: windows.filter((w) => w !== main).map((w) => ({ open: w.open, tab: w.tab, rect: w.rect, dock: w.dock })) }));
-      } catch { /* Storage may be unavailable. */ }
+      shared = { open: main.open, tab: main.tab, folded,
+        height: savedHeight, rect: main.rect, dock: main.dock, windows: windows.filter((w) => w !== main).map((w) => ({ open: w.open, tab: w.tab, rect: w.rect, dock: w.dock })) };
+      try { localStorage.setItem(KEY, JSON.stringify(shared)); } catch { /* Storage may be unavailable. */ }
     };
     const scheduleSave = () => {
       if (!disposed && !saveTimer) saveTimer = window.setTimeout(save, 100);
@@ -52,7 +57,7 @@
     };
     const fit = (w) => {
       w.node.dataset.open = String(isOpen(w));
-      // Only the untouched launcher and temporary scene fold use the default edge.
+      // Only the untouched launcher and a folded panel use the default edge.
       // Keep the open rectangle; CSS slides the whole panel and rail to its edge.
       if (!w.rect || w.node === root && folded) {
         for (const name of ["left", "top", "width", "height"]) w.node.style.removeProperty(name);
@@ -347,7 +352,7 @@
     return {
       setLootCount(count) { lootCount = count; showLootCount(); },
       selectTab(name) { select(ownerOf(name) || main, name); },
-      fold() { finish(); folded = true; if (document.activeElement?.closest(".sheet")) document.activeElement.blur(); refresh(); },
+      fold() { finish(); folded = true; if (document.activeElement?.closest(".sheet")) document.activeElement.blur(); refresh(); save(); },
       escape() {
         const w = [...windows].reverse().find((w) => !w.node.hidden && w.node.dataset.open === "true" && w.node.getClientRects().length);
         if (!w) return false;

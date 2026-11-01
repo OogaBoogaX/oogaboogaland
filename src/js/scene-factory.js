@@ -716,7 +716,7 @@
   };
 
   // ---- the kiosk, while a visitor works it ------------------------------------------------------------------------
-  // The view glides in square to the kiosk's glass and holds there, the visitor's Ooga and the side sheet out of the
+  // The view glides in square to the kiosk's glass and holds there, the visitor's Ooga out of the
   // way, while the kiosk's flow is laid over the glass and takes the taps and keys; leaving, it glides back and hands
   // the controls back. A paid tip waits on the screen for the visitor to watch it: the view then glides round to the
   // show, the cooker takes the tip on the way, and the view comes back once the bananas are out or the visitor moves.
@@ -754,13 +754,12 @@
     b.ease = ease;
     readPose(b.from);
   };
-  // The visitor's Ooga and the side sheet step out of the screen's way, and back.
+  // The visitor's Ooga steps out of the kiosk screen's way, and back.
   const boothAside = (s, aside) => {
     const b = s.booth;
     if (b.hidden === aside) return;
     b.hidden = aside;
     if (avatar) avatar.root.visible = !aside;
-    hud.setPanelsHidden(aside);
   };
   // The Ooga's controls (the act button, the aim's reticle and the equipment by the title) stay hidden while the kiosk
   // has the view, and come back as they were.
@@ -1738,9 +1737,8 @@
     ({ renderer, game, world, go, agentPlay } = ctx);
     camera = createCamera({ fov: 55, near: 0.3, far: 150 });
     root = createNode();
-    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
+    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled, escapeHeld: () => !!scene.booth.mode });
     hud.setAreaLabel("LF");
-    if (window.matchMedia("(max-width: 720px), (max-height: 500px)").matches) hud.foldPanels();
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
     const clampTarget = (p) => {

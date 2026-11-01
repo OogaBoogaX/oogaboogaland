@@ -286,6 +286,7 @@
 
   const toBoard = () => {
     phase = "board";
+    hud.setPanelsHidden(false);
     dhud.lockDiver(ownDiver());
     parkPlane();
     if (diver) {
@@ -319,6 +320,7 @@
     layCourse(game.recordJump());
     toBoard();
     phase = "climb";
+    hud.setPanelsHidden(true);
     scoreTicket = BL.highscores?.begin("drop") || null;
     dhud.show("flight");
     dhud.setRings(0, RING_COUNT);
@@ -377,6 +379,7 @@
   const finish = (landing, dist) => {
     if (!diver) return;
     phase = "results";
+    hud.setPanelsHidden(false);
     const p = diver.state.p, pileDist = Math.hypot(p.x, p.z), near = Math.min(dist, pileDist);
     const accuracy = landing === "lost" || crashed(landing) ? 0 : Math.round(SCORE.land * clamp(1 - near / SCORE.landRadius, 0, 1));
     const stood = landing === "stand" ? SCORE.stand : landing === "stumble" ? SCORE.stumble : 0;
@@ -981,7 +984,6 @@
     for (const c of contributors.activeRoster) hud.setRosterRow(c.name, contributors.stateFor(c), contributors.ageLabel(c));
     if (lootEnabled) renderLocker();
     hud.setStats(game.state);
-    hud.foldPanels();
     dhud.el.help.textContent = COARSE ? "Left stick pitches and rolls · right stick turns · the button jumps, pulls and flares" : "W S pitch · A D roll · Q E turn · Space jumps, pulls the chute · S flares · drag to look";
     toBoard();
     stateTimer = window.setInterval(() => {

@@ -584,30 +584,7 @@ body[data-active-scene="hub"] .home-link {
   }
 }
 
-/* Games keep their panels folded away until the banner's Ooga button opens the roster.
-   Ooga Arcade stays empty-handed, so its weapon slots remain hidden. */
-body[data-active-scene="race"] .sheet,
-body[data-active-scene="drop"] .sheet,
-body[data-active-scene="orbit"] .sheet,
-body[data-active-scene="mine"] .sheet,
-body[data-active-scene="skee"] .sheet,
-body[data-active-scene="hoops"] .sheet,
-body[data-active-scene="shy"] .sheet,
-body[data-active-scene="claw"] .sheet,
-body[data-active-scene="hockey"] .sheet,
-body[data-active-scene="billiards"] .sheet,
-body[data-active-scene="darts"] .sheet,
-body[data-active-scene="pinball"] .sheet,
-body[data-active-scene="ride"] .sheet,
-body[data-active-scene="invaders"] .sheet,
-body[data-active-scene="snake"] .sheet,
-body[data-active-scene="pong"] .sheet,
-body[data-active-scene="stampede"] .sheet,
-body[data-active-scene="flap"] .sheet,
-body[data-active-scene="breaker"] .sheet,
-body[data-active-scene="dash"] .sheet,
-body[data-active-scene="stacker"] .sheet,
-body[data-active-scene="arcade"] .sheet,
+/* The Arcade venue stays empty-handed; gameplay hides panels through the HUD. */
 body[data-active-scene="arcade"] .primary-hud,
 body[data-active-scene="arcade"] .weapon-hud,
 body[data-active-scene="arcade"] .magazine-hud {
@@ -9390,7 +9367,6 @@ body[data-active-scene="stacker"] .joysticks {
 }
 
 /* Ember Den: a walkable room, a readable lobby, and a focused table. */
-body[data-active-scene="poker"] .sheet { display: none; }
 
 #poker {
   --pk-accent: #dfbe77; --pk-bright: #f4dda2; --pk-ink: #213023;
@@ -10121,7 +10097,6 @@ body[data-active-scene="arcade"] #destination-hud:not([hidden]) { display: flex;
 /* Keep a character control in every banner, including detached views and game scenes. */
 .mode-roster-icon { width: 34px; height: 44px; }
 #mode-hud[data-selected="true"] .mode-roster-icon { display: none; }
-body[data-banner-oogas="true"] .sheet:not([hidden]) { display: flex; }
 
 /* Cloud Hopper keeps the route visible beneath a small clock; its title and results share the arcade's wood and stone. */
 .cloud-hopper-hud {

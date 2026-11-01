@@ -260,7 +260,7 @@
   // The sheet belongs to the page. Reuse attached rows across visits; only current roster names stay in this map.
   const rosterNodes = new Map();
   let rosterAway = null, donorRows = null, donationRows = null;
-  const create = ({ roster, catalog, tierColors, renderIcon, lootEnabled = false, healthEnabled = false, signal = null }) => {
+  const create = ({ roster, catalog, tierColors, renderIcon, lootEnabled = false, healthEnabled = false, signal = null, escapeHeld = null }) => {
     const lifetime = signal ? null : new AbortController();
     signal = signal || lifetime.signal;
     const el = {
@@ -1812,7 +1812,7 @@
       mainBoard.update(elapsed);
       if (!panelsHidden) for (let i = 0; i < floatingBoards.length; i++) floatingBoards[i].update(elapsed);
     };
-    // A hunt or kiosk borrows the play area without changing the visitor's saved panel choices.
+    // Active gameplay borrows the play area without changing the visitor's saved panel choices.
     const setPanelsHidden = (on) => {
       on = !!on;
       if (on === panelsHidden) return;
@@ -2153,7 +2153,9 @@
           break;
         }
       }
-      if (!closed) closed = sheet.escape();
+      // A scene-owned screen (the Factory kiosk) keeps Escape while its controls
+      // have focus. Focusing a panel still lets the visitor close that panel.
+      if (!closed && !(escapeHeld?.() && !e.target.closest?.(".sheet"))) closed = sheet.escape();
       if (closed) { e.preventDefault(); e.stopImmediatePropagation(); }
     }, true);
     let presetHandler = null;
@@ -2324,7 +2326,7 @@
     return {
       // Engines keep this facade while a retained scene takes a fresh visit signal and sheet state.
       renew(signal) {
-        const next = create({ roster, catalog, tierColors, renderIcon, lootEnabled, healthEnabled, signal });
+        const next = create({ roster, catalog, tierColors, renderIcon, lootEnabled, healthEnabled, signal, escapeHeld });
         next.tooltip.setVisibility(this.tooltip.visibility);
         next.onAction(actionHandler); next.onPreset(presetHandler); next.onAssign(assignHandler); next.onUnassign(unassignHandler);
         Object.defineProperties(this, Object.getOwnPropertyDescriptors(next));

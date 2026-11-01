@@ -312,7 +312,6 @@
     weather.hold(on);
     cloudFinishFruit.visible = on && pile.shown === 0;
     document.body.classList.toggle("cloud-hopper-active", on);
-    hud.setPanelsHidden(on);
     if (on) { cloudMask(); BL.net.setBody(null); BL.net.setZone("none"); }
     else {
       for (const [node, visible] of cloudHidden) node.visible = visible;
@@ -8938,7 +8937,6 @@
     // Keep ring timing separate from the event's combat policy.
     ringDelay: delayGameRing,
     lobbyOpen: (on, restore) => {
-      hud.setPanelsHidden(on || gameMode);
       pilot.setMenuOpen(on, restore);
     },
     // The waiting room: the driven Ooga let go of (the free camera to watch from), and at the end the visitor's own

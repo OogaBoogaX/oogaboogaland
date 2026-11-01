@@ -196,6 +196,7 @@
     if (phase !== "garage") racers.draw();
     applyOwn();
     phase = "garage";
+    hud.setPanelsHidden(false);
     fx.clearParticles();
     cup.active = false;
     cup.done = false;
@@ -214,6 +215,7 @@
     hud.hideHint();
     placeRacers();
     phase = "countdown";
+    hud.setPanelsHidden(true);
     countdown = COUNTDOWN;
     accumulator = 0;
     finishedAt = 0;
@@ -315,6 +317,7 @@
   const finishRace = () => {
     if (!racers.player) return;
     phase = "finished";
+    hud.setPanelsHidden(false);
     const p = racers.player;
     // The lap delta reads the record before it is written.
     lapBefore = game.state.race.best[bestKey()] ? game.state.race.best[bestKey()].lap : 0;
@@ -864,7 +867,6 @@
     for (const cave of contributors.activeRoster) hud.setRosterRow(cave.name, contributors.stateFor(cave), contributors.ageLabel(cave));
     if (lootEnabled) renderLocker();
     hud.setStats(game.state);
-    hud.foldPanels();
     rhud.el.joyLook.hidden = true;
     rhud.el.help.textContent = COARSE ? "Drag to look round the garage · left stick steers · hold Drift · tap Throw" : "Drag to look round the garage · W A S D or arrows drive · hold Space to drift, tap to hop · E throws · Q looks back · Escape pauses";
     phase = "garage";

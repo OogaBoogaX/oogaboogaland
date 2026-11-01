@@ -1546,6 +1546,7 @@
   const finish = () => {
     if (phase === "results") return;
     phase = "results";
+    hud.setPanelsHidden(false);
     smother.unit = -1;
     mhud.center("", 1);
     const improved = game.recordMine({ sats: s.minedSats, seconds: Math.max(1, Math.round(s.time)), ending: s.reason, won: s.won, score: s.score, continued: s.continued > 0 });
@@ -1587,6 +1588,7 @@
       scoreRuns.set(sim, { ticket, id: ticket ? BL.net.state.me.id : 0, epoch: BL.net.state.logoutEpoch });
     }
     phase = "run";
+    hud.setPanelsHidden(true);
     mhud.setSection("run");
     audio.activate();
     showAct(true);
@@ -1627,6 +1629,7 @@
         const ranked = scoreRuns.get(sim), account = BL.net.state;
         if (ranked && ranked.id && ranked.id === account.me?.id && ranked.epoch === account.logoutEpoch) ranked.ticket = BL.highscores?.begin("mine") || null;
         phase = "run";
+        hud.setPanelsHidden(true);
         mhud.setSection("run");
         showAct(true);
         hud.toast("Back to work. The debts are gone; the score keeps what you mined, and wears no medal.");
@@ -2220,7 +2223,7 @@
     hud.onPreset(pilot.goPreset);
     hud.onAction(onAction);
     hud.setStats(game.state);
-    hud.foldPanels();
+    hud.setPanelsHidden(phase === "run");
 
     mhud.setSection(phase);
     if (phase === "results") mhud.results(s, false, game.state.mine.best, !s.won && s.reason !== "time" && s.reason !== "left");
