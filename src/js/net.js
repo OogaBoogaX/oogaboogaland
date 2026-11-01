@@ -48,7 +48,12 @@
 // socket goes. Without the feature these send nothing and return false, and the sphere crosses on this page alone.
 // `recheck` looks at /api/me again after a look that went unanswered (the keypad's Retry), bounded as the first.
 // `setPokerVoice(table)` scopes Ember Den voice to one table, or the floor when null, without moving the body.
-// Exports start, recheck, subscribe, subscribeRoster, subscribeChat, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setPokerVoice, setHub,
+// Where players stand, for the live players tab (players.js): a remote's `poseZone` is the zone its position was reported
+// in, so a player who changed zone has none there until they move (the room re-sends the last pose it holds, from the
+// zone before), and one who let go of their Ooga keeps the last. `state.self` is this page's own last reported
+// position and the zone it was in, kept after letting go. `subscribeMoves` hears positions change: the room's
+// snapshots and this page's own reports, a few times a second at most, nothing while nobody moves.
+// Exports start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setPokerVoice, setHub,
 // setMuted, setHealth, sendNpc, sendChat, sendGhost and subscribeGhost (HALLOWEEN), npcFrame, sendPose, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla,
 // ownCharacter, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX and CHAT_KEEP.
 (() => {
@@ -88,6 +93,7 @@
   const subscribers = new Set();
   const doorSubscribers = new Set();
   const rosterSubscribers = new Set();
+  const moveSubscribers = new Set();
   const studioSubscribers = new Set();
   const studioEmit = message => { for (const fn of studioSubscribers) fn(message); };
   const chatSubscribers = new Set();
@@ -97,7 +103,8 @@
   const offline = new URLSearchParams(location.search);
   const state = { backend: false, me: null, donations: false, tess: false, highscores: false, logoutEpoch: 0, started: false,
     resolved: offline.has("nosim") || offline.get("net") === "0" || location.protocol !== "http:" && location.protocol !== "https:",
-    room: "off", selfId: 0, online: 0, released: null, loopEpoch: 0, zone: "outside", body: null, bodyKind: null, bodyName: null, hostId: 0, followers: 0, npcVersion: 0, doorway: false };
+    room: "off", selfId: 0, online: 0, released: null, loopEpoch: 0, zone: "outside", body: null, bodyKind: null, bodyName: null, hostId: 0, followers: 0, npcVersion: 0, doorway: false,
+    self: { x: NaN, y: NaN, z: NaN, zone: "" } };
   let ws = null, retry = 0, retryTimer = 0, pingTimer = 0, hiddenTimer = 0, stopped = false;
   let npcFrame = null, inHub = false, hubSent = null;
   let zone = "outside", body = null, muted = false, hpSent = 100, koSent = false, hpAt = 0, poseAt = 0, px = NaN, py = NaN, pz = NaN, pyaw = NaN;
@@ -117,6 +124,9 @@
 
   const rosterChanged = () => {
     for (const fn of rosterSubscribers) fn();
+  };
+  const moved = () => {
+    for (const fn of moveSubscribers) fn();
   };
   const emit = () => {
     for (const fn of subscribers) fn(state);
@@ -169,7 +179,7 @@
 
   const upsert = (p) => {
     if (!p || !Number.isSafeInteger(p.id) || p.id === state.selfId) return;
-    const rec = remotes.get(p.id) || { id: p.id, login: "", display: "", body: null, bodyKind: null, bodyName: null, zone: "outside", voice: false, muted: false, hp: 100, ko: false, x: 0, y: 0, z: 0, yaw: 0, g: null, gData: null };
+    const rec = remotes.get(p.id) || { id: p.id, login: "", display: "", body: null, bodyKind: null, bodyName: null, zone: "outside", voice: false, muted: false, hp: 100, ko: false, x: 0, y: 0, z: 0, yaw: 0, poseZone: null, g: null, gData: null };
     rec.login = String(p.login);
     rec.display = String(p.display || p.login);
     rec.body = typeof p.body === "string" ? p.body : null;
@@ -183,6 +193,9 @@
     rec.ko = p.ko === true;
     rec.muted = p.muted === true;
     rec.x = +p.x || 0; rec.y = +p.y || 0; rec.z = +p.z || 0; rec.yaw = +p.yaw || 0;
+    // A pose the room holds for someone driving is where they stand now; for anyone else it may be from a zone they
+    // have since left, so it is not taken (`poseZone`).
+    rec.poseZone = typeof p.x === "number" && rec.body ? rec.zone : null;
     remotes.set(p.id, rec);
   };
 
@@ -226,9 +239,15 @@
     } else if (msg.t === "state") {
       clockSample(msg.now);
       const ps = msg.ps;
+      let changed = false;
       for (let i = 0; i + 4 < ps.length; i += 5) {
         const rec = remotes.get(ps[i]);
         if (!rec) continue;
+        // Every snapshot repeats everyone's last pose; only a new one says where a player stands in their zone now.
+        if (typeof ps[i + 1] === "number" && (ps[i + 1] !== rec.x || ps[i + 2] !== rec.y || ps[i + 3] !== rec.z || ps[i + 4] !== rec.yaw)) {
+          rec.poseZone = rec.zone;
+          changed = true;
+        }
         rec.x = ps[i + 1]; rec.y = ps[i + 2]; rec.z = ps[i + 3]; rec.yaw = ps[i + 4];
       }
       const gs = msg.gs;
@@ -236,6 +255,7 @@
         const rec = remotes.get(gs[i]);
         if (rec) readGorillaPose(rec, gs, i + 1);
       }
+      if (changed) moved();
     } else if (msg.t === "welcome") {
       retry = 0;
       clockKnown = false;
@@ -604,6 +624,8 @@
       for (let i = 0; i < 6; i++) if (!Number.isFinite(g[i])) { valid = false; break; }
       if (valid) poseHasG = true;
     }
+    const self = state.self;
+    self.x = x; self.y = y; self.z = z; self.zone = zone;
     if (now - poseAt < POSE_MS) return;
     // The room drops a pose outside its bounds, which would freeze this Ooga on other pages: hold it at the edge.
     x = Math.max(-BOUND_XZ, Math.min(BOUND_XZ, x));
@@ -626,6 +648,7 @@
       extra = `,"g":[${g[0]},${g[1].toFixed(3)},${g[2].toFixed(3)},${g[3].toFixed(3)},${g[4].toFixed(3)},${g[5].toFixed(3)}]`;
     }
     if (state.room === "live") send(`{"t":"pose","x":${x.toFixed(3)},"y":${y.toFixed(3)},"z":${z.toFixed(3)},"yaw":${yaw.toFixed(3)}${extra}}`);
+    moved();
   };
 
   // The doorway: each sends only to a live room that knows it, and says whether it did.
@@ -710,6 +733,10 @@
     rosterSubscribers.add(fn);
     return () => rosterSubscribers.delete(fn);
   };
+  const subscribeMoves = (fn) => {
+    moveSubscribers.add(fn);
+    return () => moveSubscribers.delete(fn);
+  };
   const subscribeChat = (fn) => {
     chatSubscribers.add(fn);
     return () => chatSubscribers.delete(fn);
@@ -733,6 +760,7 @@
     window.clearTimeout(hiddenTimer);
     subscribers.clear();
     rosterSubscribers.clear();
+    moveSubscribers.clear();
     studioSubscribers.clear();
     chatSubscribers.clear();
     doorSubscribers.clear();
@@ -740,5 +768,5 @@
     close("off");
   };
 
-  BL.net = { subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeChat, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendGhost, subscribeGhost, sendPose, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
+  BL.net = { subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendGhost, subscribeGhost, sendPose, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
 })();
