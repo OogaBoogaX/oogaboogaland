@@ -150,7 +150,9 @@
         for (const tab of w.tabs) {
           const name = tab.dataset.tab, selected = open && name === w.tab;
           const owner = ownerOf(name);
-          tab.hidden = !available(name) || !folded && !!owner && owner !== w;
+          // The main rail launches unowned tabs; detached rails keep only their own.
+          // A temporary fold gathers every available tab back onto the main rail.
+          tab.hidden = !available(name) || !folded && (owner ? owner !== w : w !== main);
           tab.setAttribute("aria-selected", String(selected)); tab.tabIndex = selected || !open && !tab.hidden && !index ? 0 : -1;
           tab.setAttribute("aria-controls", `${name}-panel`);
           tab.title = selected ? w === main ? "Click to close · drag to move" : "Click to close · drag to move or drop onto another panel to merge"
