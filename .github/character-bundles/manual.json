@@ -1,17 +1,7 @@
 {
   "version": 1,
   "lane": "manual",
-  "openedOn": "2026-10-31",
-  "round": "83a0bd86f04ac9ff347ee58429e0c7d40106ff1f",
-  "entries": [
-    {
-      "pr": 372,
-      "head": "f90413f718405d7c0203d4e9011df558307876ba",
-      "author": "Global-DSB",
-      "path": "src/characters/Global-DSB.js",
-      "base": null,
-      "hash": "5b270757116ab0b53f302d488964e951c398d502cb969ea5c6a253a6c906bf53",
-      "lane": "manual"
-    }
-  ]
+  "openedOn": "2026-11-01",
+  "round": "e62859d1e681581083fcab343d63a140cccf41ad",
+  "entries": []
 }
