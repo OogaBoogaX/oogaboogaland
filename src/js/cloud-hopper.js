@@ -189,6 +189,7 @@
     };
     const setPhase = (next) => {
       phase = next; age = 0;
+      hud.setPanelsHidden(next === "lifting" || next === "briefing" || next === "ready" || next === "running");
       cabinet.visible = next === "idle" || next === "intro";
       pilot.setActive(!held());
       overlay.show(next, seconds, session?.scores, latest);
@@ -354,6 +355,7 @@
       cabinet.visible = true;
       if (park) ctx.mode(false);
       clearRoute(keepMusic); phase = "idle";
+      hud.setPanelsHidden(false);
       ghost.clear();
       if (park) {
         Object.assign(platform.position, home);

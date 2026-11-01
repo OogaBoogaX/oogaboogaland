@@ -520,6 +520,7 @@
 
   const toBuild = () => {
     phase = "build";
+    hud.setPanelsHidden(false);
     rhud.lockPilot(!!ownPilot());
     flight = null;
     release = null;
@@ -555,6 +556,7 @@
     flight = rocketMod.create({ stack, groundAt, onDrop });
     flight.reset(spot.x, spot.padY, spot.z);
     phase = "count";
+    hud.setPanelsHidden(true);
     phaseT = 0;
     countShown = 0;
     gauge = 0;
@@ -838,6 +840,7 @@
   const finish = () => {
     const s = flight.state;
     phase = "results";
+    hud.setPanelsHidden(false);
     const place = failure ? null : where();
     const dist = Math.hypot(s.p.x - spot.x, s.p.z - spot.z);
     let landScore = 0;
@@ -2012,7 +2015,6 @@
     for (const c of contributors.roster) hud.setRosterRow(c.name, contributors.stateFor(c), contributors.ageLabel(c));
     if (lootEnabled) renderLocker();
     hud.setStats(game.state);
-    hud.foldPanels();
     rhud.el.help.textContent = COARSE
       ? "The button does each step · left stick steers"
       : "Space does each step · G autopilot · V spacewalk\nW S push · A D steer";

@@ -602,7 +602,10 @@
 
   // ---- the flow -------------------------------------------------------------------------------------------
   // The phase, mirrored on the HUD's root for the stylesheet (the action button and meter hide under the cards).
-  const setPhase = (p) => { phase = p; el.root.dataset.phase = p; };
+  const setPhase = (p) => {
+    phase = p; el.root.dataset.phase = p;
+    hud.setPanelsHidden(p !== "intro" && p !== "results");
+  };
   // A run's HUD back to its start: the score at 0, the goal bar empty, no ribbon, streak, held press or hit-stop.
   const resetRun = () => {
     T.from = T.to = 0; T.rollT = ROLL; T.lit = 0; T.record = T.hailed = false; T.buffer = T.slow = T.big = 0;
