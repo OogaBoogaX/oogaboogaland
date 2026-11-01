@@ -3728,6 +3728,19 @@ const session = (url, steps, opts, final) => output.run({ lines: [], results: []
     // Force destruction even in POOL mode: a timed-out Chrome must never return to the pool.
     const browser = b;
     watchdog = setTimeout(() => { overran = true; browser.close(true); }, Math.max(0, SESSION_MS-(Date.now()-t0)));
+    // These resource checks compare repeated room visits, not the first upload of a roaming dog's fixed pool.
+    // Observe the rescue's own nodes at construction; never infer ownership from a scene-child index.
+    if (steps.some(([name]) => name === "dsb interior checkpoint" || name === "dsb studio checkpoint")) await b.send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => {
+      window.BL = {}; let module;
+      Object.defineProperty(BL, "rescueDogs", { configurable: true, get: () => module, set: next => {
+        module = next; const create = next.create;
+        next.create = options => {
+          const before = new Set(options.root.children), dogs = create(options);
+          window.__dsbRescueBatches = options.root.children.filter(node => !before.has(node) && node.fixedInstanceCapacity);
+          return dogs;
+        };
+      } });
+    })()` });
     if(process.env.DSB_TRACE==="1") {
       const evaluate=b.evaluate;
       b.evaluate=async code=>{console.log("DSB STEP",Date.now()-started,String(code).slice(0,150));const value=await evaluate(code);console.log("DSB DONE",Date.now()-started);return value;};
@@ -18866,7 +18879,33 @@ scene("hub", { label: "guide", query: "character=portlandhodl&jetpack=1", steps:
 // Native pointer-lock assertions need sole focus; another browser lane can
 // steal capture and spend this long scenario's deadline waiting for it back.
 scene("hub", { label: "birds-eye combat", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", exclusive: true, steps: [hubBirdsEye] });
-scene("hub", { label: "birds-eye combat projection and targets", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", steps: [hubBirdsEyeProjection, gameCombat(hubBirdsEyeTargets), hubCombatReplay] });
+const hubPlayersAim = { name: "players camera targeting", why: "regression: the Players crosshair left orbit and shoulder views at their old pitch, missing a player despite turning toward their bearing", run: async (b) => {
+  const rows = await b.evaluate(`(() => {
+    const B = __ooga, P = B.pilot, a = P.player || B.cavemen.get("portlandhodl"), rows = [];
+    a.override = "chilling"; B.refreshStates(); P.possess(a);
+    // Clear the inherited shoulder stop through the public view controls before choosing carry orbit.
+    P.enterClose(); P.exitClose(false);
+    if (a.weapon.aiming) P.modeAction("mode-toggle");
+    P.navigate({ position: { x: 0, y: 0, z: 10 }, yaw: 0, pitch: 0.5, dist: 8 }); B.advance(1, 1 / 60);
+    const target = { x: a.root.position.x + 15, y: a.root.position.y + 1, z: a.root.position.z + 10 };
+    for (const mode of ["orbit", "shoulder", "first-person"]) {
+      if (mode === "shoulder") P.modeAction("mode-toggle");
+      if (mode === "first-person") P.enterClose(true);
+      B.advance(1, 1 / 60);
+      const before = { ...a.root.position }, accepted = BL.pilot.turnToward(target.x, target.y, target.z);
+      B.advance(2, 1 / 60);
+      const C = B.camera, dx = target.x - C.position.x, dy = target.y - C.position.y, dz = target.z - C.position.z;
+      const fx = C.target.x - C.position.x, fy = C.target.y - C.position.y, fz = C.target.z - C.position.z;
+      rows.push({ mode, actual: P.view, accepted,
+        alignment: (dx * fx + dy * fy + dz * fz) / Math.hypot(dx, dy, dz) / Math.hypot(fx, fy, fz),
+        moved: Math.hypot(a.root.position.x - before.x, a.root.position.y - before.y, a.root.position.z - before.z) });
+    }
+    return rows;
+  })()`);
+  record("players camera targeting: orbit, shoulder and first person face the selected point within half a degree without translating the Ooga",
+    rows.every(row => row.accepted && row.mode === row.actual && row.alignment > Math.cos(Math.PI / 360) && row.moved < 1e-6), JSON.stringify(rows));
+} };
+scene("hub", { label: "birds-eye combat projection and targets", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", steps: [hubBirdsEyeProjection, gameCombat(hubBirdsEyeTargets), hubCombatReplay, hubPlayersAim] });
 scene("hub", { label: "birds-eye lower floors", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", steps: [hubBirdsEyeFloors] });
 scene("hub", { label: "mirror", query: "status=chillin", steps: [hubJumbotron, hubMirrorMedium, hubMirror] });
 scene("hub", { label: "matrix", steps: [hubMatrix] });
@@ -21379,6 +21418,68 @@ const netFixture=(BL,response,step=200,cookie="")=>{
   runInNewContext(source,context);
   return {net:context.window.BL.net,document:context.document,voice,sockets,sent,events,location,navigations,advance(ms){tick+=ms;},get calls(){return calls;},get savedViews(){return savedViews;}};
 };
+// Rule (#361): the live players tab names each zone's group as the panels always have, apart from the zones that share a
+// land but not coordinates; it orders the visitor's group and row first and everyone else by name; its crosshair takes
+// the first step of the route between zones; and a position counts only in the zone it was reported in, so a player
+// who changed zone is placed nowhere until they move, one who let go keeps their last, and nothing is invented.
+const playersTabChecks = async BL => {
+  const context = { window: { BL: {} } };
+  runInNewContext(readFileSync(join(root, "src/js/routes.js"), "utf8"), context);
+  runInNewContext(readFileSync(join(root, "src/js/zone-map.js"), "utf8"), context);
+  const Z = context.window.BL.zoneMap;
+  const steps = [["outside", "rainforest", "rainforest"], ["outside", "factory.hall", "factory"], ["outside", "factory.hangar", "factory"], ["outside", "ember-den", "bifrost"],
+    ["outside", "dsb-studio", "bifrost"], ["outside", "scene-race", "arcade"], ["outside", "scene-skee", "arcade"], ["outside", "sphere-4", "sphere"], ["outside", "hq", "hq"],
+    ["factory", "factory.hangar", "factory.hall"], ["factory.hangar", "outside", "factory.hall"], ["factory.hangar", "arcade.hall", "factory.hall"], ["lab", "rainforest", "outside"],
+    ["bifrost.chamber", "ember-den", "ember-den"], ["ember-den", "dsb-maxis", "bifrost.chamber"], ["dsb-maxis", "dsb-studio", "dsb-outside"], ["sphere-4", "sphere-7", "sphere"],
+    ["outside", "none", null], ["none", "outside", null], ["scene-transition", "lab", null], ["lab", "lab", null], ["outside", "made-up", null], ["outside", "constructor", null], ["constructor", "lab", null]];
+  const routed = steps.map(([from, to, want]) => ({ from, to, want, got: Z.next(from, to) })).filter(r => r.got !== r.want);
+  record("players tab routes: the first step between zones goes down toward the target or up toward the island (Factory before the hangar, ₿IFRÖST before the Ember Den and DSB Land, the Arcade before its games), and nowhere has no route",
+    routed.length === 0, JSON.stringify(routed));
+  const lands = { outside: "The island", "factory.hall": "Lightning Factory", factory: "Lightning Factory", "factory.hangar": "Lightning Jet Hangar", "arcade.hall": "Ooga Arcade", "bifrost.chamber": "\u20bfIFR\u00d6ST chamber",
+    "sphere-3": "Timechain Sphere \u00b7 Room 3", "dsb-maxis": "DSB Land", "cave-c9": "A cave on the island", "scene-race": "Ooga Rally", "scene-skee": "A game", none: "Between lands", "ember-den": "Ember Den" };
+  const headings = { outside: "The island", factory: "Lightning Factory tunnel", "factory.hall": "Lightning Factory", arcade: "Ooga Arcade entrance", "arcade.hall": "Ooga Arcade",
+    "dsb-maxis": "DSB Land \u00b7 Maxis Club", "scene-race": "Ooga Rally", "scene-skee": "Ooga Arcade games", "scene-invaders": "Ooga Arcade games", "scene-transition": "Between lands" };
+  const landMiss = Object.entries(lands).filter(([zone, want]) => Z.landOf(zone) !== want), headMiss = Object.entries(headings).filter(([zone, want]) => Z.heading(Z.groupOf(zone)) !== want);
+  record("players tab groups: the roster keeps its land names; the tab heads the Factory tunnel and the Arcade entrance apart from their halls, each DSB venue apart, and the arcade's unrouted games together",
+    !landMiss.length && !headMiss.length && Z.heading("constructor") === "constructor" && Z.groupOf("scene-skee") === Z.groupOf("scene-invaders") && Z.groupOf("scene-race") !== Z.groupOf("scene-skee") && Z.groupOf("scene-transition") === "none",
+    JSON.stringify({ landMiss, headMiss }));
+  const row = (id, name, zone, self = false) => ({ id, name, group: Z.groupOf(zone), self });
+  const rows = [row(5, "zed", "lab"), row(2, "Bea", "rainforest"), row(9, "amy", "lab"), row(1, "Me", "lab", true), row(4, "carl", "factory.hall"), row(3, "Al", "rainforest"), row(7, "Ánna", "factory")];
+  const ordered = Z.arrange(rows, Z.groupOf("lab")).map(r => r.name).join();
+  record("players tab order: the visitor's zone first with their own row pinned at its head, everyone else by name; then the other zones by heading, their players by name",
+    ordered === "Me,amy,zed,carl,Ánna,Al,Bea", ordered);
+  const f = netFixture(BL, () => ({ ok: true, headers: { get: () => "application/json" }, json: async () => ({ player: { id: 71, login: "Tester", display: "Tester" } }) }));
+  let moves = 0;
+  f.net.subscribeMoves(() => moves++);
+  await f.net.start();
+  const ws = f.sockets[0], message = v => ws.onmessage({ data: JSON.stringify(v) }), rec = id => f.net.remotes.get(id);
+  message({ t: "welcome", you: { id: 71 }, now: Date.now(), players: [
+    { id: 2, login: "a", display: "A", body: "NickDaGreek", zone: "outside", x: 1, y: 0, z: 2, yaw: 0 },
+    { id: 3, login: "b", display: "B", body: null, zone: "lab", x: 5, y: 0, z: 5, yaw: 0 },
+    { id: 4, login: "c", display: "C", body: "YellowBrokeIt", zone: "outside" }] });
+  const joined = [rec(2).poseZone, rec(3).poseZone, rec(4).poseZone];
+  message({ t: "state", now: Date.now(), ps: [2, 1, 0, 2, 0, 3, 5, 0, 5, 0, 4, null, null, null, null] });
+  const repeated = moves;
+  message({ t: "zone", id: 2, name: "lab" });
+  message({ t: "state", now: Date.now(), ps: [2, 1, 0, 2, 0] });
+  const movedAway = rec(2).poseZone;
+  message({ t: "state", now: Date.now(), ps: [2, 4, 0, 6, 0.5] });
+  const arrived = rec(2).poseZone, heard = moves;
+  message({ t: "body", id: 2, name: null });
+  const letGo = rec(2).poseZone;
+  record("players tab positions: a remote's position counts only in the zone it was reported in; a repeated snapshot or a pose the room held from before is not taken, and letting go keeps the last",
+    joined.join() === "outside,," && repeated === 0 && movedAway === "outside" && arrived === "lab" && heard === 1 && letGo === "lab" && rec(2).x === 4,
+    JSON.stringify({ joined, repeated, movedAway, arrived, heard, letGo }));
+  f.net.setBody("NickDaGreek"); f.net.setZone("outside"); f.net.sendPose(3, 0, 4, 0);
+  const placed = { ...f.net.state.self };
+  f.net.setBody(null);
+  const kept = { ...f.net.state.self };
+  f.net.setZone("lab");
+  record("players tab positions: the visitor's own is their Ooga's last reported, kept after letting go, and stale once they change zone",
+    placed.x === 3 && placed.z === 4 && placed.zone === "outside" && kept.x === 3 && kept.zone === "outside" && f.net.state.self.zone !== f.net.state.zone && moves > heard,
+    JSON.stringify({ placed, kept, zone: f.net.state.zone }));
+  f.net.dispose();
+};
 const rememberedCharacterChecks = async BL => {
   const localBL = { ...BL };
   runInNewContext(readFileSync(join(root, "src/js/contributors.js"), "utf8"), { window: { BL: localBL }, location: { search: "" }, URLSearchParams });
@@ -23054,6 +23155,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   await chatClientChecks();
   await chatAccountChecks(BL);
   await rememberedCharacterChecks(BL);
+  await playersTabChecks(BL);
   await integrationChecks(BL);
   footstepChecks(BL);
   await voiceAloneChecks();
@@ -24091,8 +24193,11 @@ scene("dsb",{label:"SVRN checkpoint",query:"&view=svrn-door&weather=storm&time=1
   const routes=await b.evaluate('(()=>{const D=__ooga.dsb,M=D.svrnMenu,p=document.querySelector(".svrn-menu");let okay=true;for(const page of BL.svrnData.pages){p.querySelector(`[data-route="${page.id}"]`).click();okay&&=M.stats.route===page.id&&Array.from(p.querySelectorAll("a")).every(a=>new URL(a.href).origin===BL.svrnData.origin&&a.target==="_blank"&&a.rel==="noopener noreferrer");}return {okay,forms:p.querySelectorAll("form,input,iframe").length};})()');
   record("SVRN browser: all sixteen catalog routes use safe official links with no transaction/account forms",routes.okay&&routes.forms===0,JSON.stringify(routes));
   await b.key("Escape");await step();
+  // Advancing the scene does not flush the browser's focus fixup after closing a native dialog.
+  // A Space sent to its formerly focused button is correctly consumed as UI input, not a seat action.
+  const menuClosed = await untilPage(b, '!B.dsb.svrnMenu.isOpen && !document.activeElement.closest(".svrn-menu")');
   await b.evaluate('(()=>{const B=__ooga,R=B.dsb.interiors.active.room,s=R.seats[0];B.pilot.navigate({position:{...s.walkAt,y:0},yaw:s.viewYaw,pitch:.12,dist:3});return s.walkAt;})()');await step();await b.key(" ");await step();
-  record("SVRN browser: shared seat interaction locks the lounge pose",await b.evaluate('__ooga.dsb.avatar.camp.seat===__ooga.dsb.interiors.active.room.seats[0]'));
+  record("SVRN browser: shared seat interaction locks the lounge pose",menuClosed && await b.evaluate('__ooga.dsb.avatar.camp.seat===__ooga.dsb.interiors.active.room.seats[0]'),JSON.stringify({menuClosed}));
   await b.key(" ");await step();record("SVRN browser: shared stand interaction restores the floor",await b.evaluate('!__ooga.dsb.avatar.camp.seat&&Math.abs(__ooga.dsb.avatar.root.position.y-__ooga.dsb.avatar.baseY)<.01'));
   const snapshot=()=>b.evaluate('(()=>{const I=__ooga.dsb.interiors,R=I.active.room;let nodes=0;const visit=n=>{nodes++;n.children.forEach(visit);};visit(R.root);return {nodes,rooms:I.rooms.size,targets:BL.scenes.dsb.input.targetCount,contexts:I.audio.stats.contexts,panels:document.querySelectorAll(".svrn-menu").length};})()');
   const base=await snapshot();let roundtrip=true;
@@ -24686,6 +24791,25 @@ const dsbHarborCheckpoint = { name:"dsb harbor checkpoint", why:"rule: normal wa
 scene("dsb",{label:"harbor checkpoint",query:"&weather=clear&time=1200",steps:[dsbHarborCheckpoint]});
 scene("dsb",{label:"harbor checkpoint phone",query:"&weather=clear&time=1200",opts:{w:390,h:844,mobile:true},steps:[dsbHarborCheckpoint]});
 
+// Rescue dogs have two shadow variants of body/legs/tail for each breed, plus poop and flies, all built once.
+// Their camera-dependent visibility (and a brief muzzle flash/banana projectile) may first upload after the
+// warm itinerary. Prepare only those exact existing meshes, without changing any scene state or resource bound.
+const warmDsbRoomResidents = async b => {
+  const r = await b.evaluate(`(() => {
+    const B = __ooga, nodes = window.__dsbRescueBatches || [], before = nodes.map(n => [n.geometry, n.visible, n.instanceCount, n.instanceData]);
+    const geometries = new Set(nodes.map(n => n.geometry));
+    geometries.add(B.dsb.avatar.parts.gunFlash.geometry); geometries.add(B.dsb.avatar.parts.snack.geometry);
+    let prepared = true;
+    for (const geometry of geometries) prepared = B.renderer.prepareGeometry(geometry) && prepared;
+    const resident = new Set(B.renderer.geometryRecords()), records = B.renderer.stats.records;
+    for (const geometry of geometries) prepared = B.renderer.prepareGeometry(geometry) && prepared;
+    return { batches: nodes.length, expected: BL.rescueDogs.BREEDS.length * 6 + 2, geometries: geometries.size,
+      prepared: prepared && [...geometries].every(g => resident.has(g)), idempotent: B.renderer.stats.records === records,
+      unchanged: nodes.every((n, i) => n.geometry === before[i][0] && n.visible === before[i][1] && n.instanceCount === before[i][2] && n.instanceData === before[i][3]) };
+  })()`);
+  record("DSB room residency: the finite rescue batches, muzzle flash and banana warm once without changing visibility, counts or instance storage",
+    r.batches === r.expected && r.geometries === r.expected + 2 && r.prepared && r.idempotent && r.unchanged, JSON.stringify(r));
+};
 const dsbInteriorCheckpoint = { name: "dsb interior checkpoint", why: "rule: a real door isolates its room and returns the same player to current exterior weather without accumulating resources", run: async b => {
   const step=()=>b.evaluate('for(let i=0;i<36;i++)BL.scenes.dsb.update(1/60,i/60)');
   const tap=async()=>{
@@ -24721,6 +24845,7 @@ const dsbInteriorCheckpoint = { name: "dsb interior checkpoint", why: "rule: a r
     const result=await b.send("DOMDebugger.getEventListeners",{objectId:obj.result.result.objectId});
     await b.send("Runtime.releaseObject",{objectId:obj.result.result.objectId});return result.result.listeners.length;
   };
+  await warmDsbRoomResidents(b);
   const initial=await snapshot(),base=initial.counts,listeners=await listenerCount();
   let cycles=1;
   for(;cycles<10;cycles++){await tap();await b.evaluate('__ooga.pilot.navigate({position:__ooga.dsb.interiors.active.room.spawn,yaw:Math.PI,pitch:.22,dist:3})');await step();await tap();}
@@ -24891,6 +25016,7 @@ const dsbStudioCheckpoint = {name:"dsb studio checkpoint",why:"playthrough: Stud
     B.pilot.navigate({position:{x:s.walkAt.x,y:s.floor,z:s.walkAt.z},yaw:0,pitch:.12,dist:3});B.crew.sitPlayer(s);B.crew.throwTomato();B.advance(1);B.crew.standPlayer();
     let splat=null;const visit=n=>{if(n.visible&&n.geometry&&n.geometry.verts.length===24&&n.geometry.faces[0].color[0]===227)splat=n;for(const c of n.children)visit(c);};visit(BL.scenes.dsb.root);
     if(splat){const x=splat.world[12],z=splat.world[14];B.pilot.navigate({position:{x,y:B.dsb.interiors.groundAt(x,z),z},yaw:0,pitch:.6,dist:4});B.advance(.5);}})()`);
+  await warmDsbRoomResidents(b);
   const throws0=await b.evaluate('__ooga.crew.stats().tomatoesThrown');
   let baseline=null;
   // Warm the whole guest/host itinerary, then repeat the same views and interactions before comparing residency.
