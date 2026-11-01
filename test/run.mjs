@@ -18879,7 +18879,7 @@ scene("hub", { label: "guide", query: "character=portlandhodl&jetpack=1", steps:
 // Native pointer-lock assertions need sole focus; another browser lane can
 // steal capture and spend this long scenario's deadline waiting for it back.
 scene("hub", { label: "birds-eye combat", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", exclusive: true, steps: [hubBirdsEye] });
-const hubPlayersAim = { name: "players camera targeting", why: "regression: the Players crosshair left orbit and shoulder views at their old pitch, missing a player despite turning toward their bearing", run: async (b) => {
+const hubPlayersAim = { name: "players camera targeting", why: "regression: the Players crosshair aimed through the orbit avatar, hiding its target behind the head; shoulder and first person must still centre it", run: async (b) => {
   const rows = await b.evaluate(`(() => {
     const B = __ooga, P = B.pilot, a = P.player || B.cavemen.get("portlandhodl"), rows = [];
     a.override = "chilling"; B.refreshStates(); P.possess(a);
@@ -18887,8 +18887,57 @@ const hubPlayersAim = { name: "players camera targeting", why: "regression: the 
     P.enterClose(); P.exitClose(false);
     if (a.weapon.aiming) P.modeAction("mode-toggle");
     P.navigate({ position: { x: 0, y: 0, z: 10 }, yaw: 0, pitch: 0.5, dist: 8 }); B.advance(1, 1 / 60);
+    const framing = [], world = new Float64Array(3), screen = {};
+    const headTop = node => {
+      if (!node.visible) return Infinity;
+      let top = Infinity;
+      if (node.geometry) {
+        const bounds = BL.scene.boundsOf(node.geometry);
+        for (let corner = 0; corner < 8; corner++) {
+          BL.math.mat4.transformPoint(world, node.world, bounds[corner & 1 ? "max" : "min"][0],
+            bounds[corner & 2 ? "max" : "min"][1], bounds[corner & 4 ? "max" : "min"][2]);
+          const point = B.project(world[0], world[1], world[2], screen);
+          if (point) top = Math.min(top, point.y);
+        }
+      }
+      for (const child of node.children) top = Math.min(top, headTop(child));
+      return top;
+    };
+    for (const dist of [3, 8, 20]) for (const offset of [[3, 1, 2], [30, 1, 20], [10, 8, 6], [10, -8, 6]]) {
+      P.releaseFrame(true);
+      P.navigate({ position: { x: 0, y: 0, z: 10 }, yaw: 0, pitch: 0.5, dist }); B.advance(1, 1 / 60);
+      const before = { ...a.root.position }, distance = P.orbit.tDist;
+      const target = { x: before.x + offset[0], y: before.y + offset[1], z: before.z + offset[2] };
+      const accepted = BL.pilot.turnToward(target.x, target.y, target.z);
+      B.advance(3, 1 / 60);
+      const point = B.project(target.x, target.y, target.z, {}), size = B.renderer.size;
+      framing.push({ dist, offset, accepted, mode: P.view,
+        gap: point ? (headTop(a.parts.head) - point.y) / size.height : -1,
+        x: point ? point.x / size.width : -1, y: point ? point.y / size.height : -1,
+        zoom: P.orbit.tDist - distance,
+        moved: Math.hypot(a.root.position.x - before.x, a.root.position.y - before.y, a.root.position.z - before.z) });
+    }
+    // Orbit entered from bird's-eye combat has a separate root-centred solver; targeting must release it too.
+    P.modeAction("mode-toggle"); B.advance(1, 1 / 60);
+    const overhead = P.view === "birds-eye";
+    P.modeAction("mode-toggle"); B.advance(1, 1 / 60);
+    {
+      const before = { ...a.root.position }, distance = P.orbit.tDist;
+      const target = { x: before.x + 15, y: before.y + 1, z: before.z + 10 };
+      const accepted = BL.pilot.turnToward(target.x, target.y, target.z);
+      B.advance(3, 1 / 60);
+      const point = B.project(target.x, target.y, target.z, {}), size = B.renderer.size;
+      framing.push({ fromBirdsEye: true, dist: distance, accepted: overhead && accepted, mode: P.view,
+        gap: point ? (headTop(a.parts.head) - point.y) / size.height : -1,
+        x: point ? point.x / size.width : -1, y: point ? point.y / size.height : -1,
+        zoom: P.orbit.tDist - distance,
+        moved: Math.hypot(a.root.position.x - before.x, a.root.position.y - before.y, a.root.position.z - before.z) });
+    }
+    rows.push({ framing });
+    P.releaseFrame(true);
+    P.navigate({ position: { x: 0, y: 0, z: 10 }, yaw: 0, pitch: 0.5, dist: 8 }); B.advance(1, 1 / 60);
     const target = { x: a.root.position.x + 15, y: a.root.position.y + 1, z: a.root.position.z + 10 };
-    for (const mode of ["orbit", "shoulder", "first-person"]) {
+    for (const mode of ["shoulder", "first-person"]) {
       if (mode === "shoulder") P.modeAction("mode-toggle");
       if (mode === "first-person") P.enterClose(true);
       B.advance(1, 1 / 60);
@@ -18902,10 +18951,17 @@ const hubPlayersAim = { name: "players camera targeting", why: "regression: the 
     }
     return rows;
   })()`);
-  record("players camera targeting: orbit, shoulder and first person face the selected point within half a degree without translating the Ooga",
+  const framing = rows.shift().framing;
+  record("players camera targeting: near/far and raised/lower orbit targets clear the head at each zoom without moving the Ooga",
+    framing.every(row => row.accepted && row.mode === "orbit" && row.gap >= 0.025 && row.gap < 0.2
+      && Math.abs(row.x - 0.5) < 0.05 && row.y > 0.2 && row.y < 0.6 && row.zoom === 0 && row.moved < 1e-6), JSON.stringify(framing));
+  record("players camera targeting: shoulder and first person still centre the selected point within half a degree without translating the Ooga",
     rows.every(row => row.accepted && row.mode === row.actual && row.alignment > Math.cos(Math.PI / 360) && row.moved < 1e-6), JSON.stringify(rows));
 } };
-scene("hub", { label: "birds-eye combat projection and targets", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", steps: [hubBirdsEyeProjection, gameCombat(hubBirdsEyeTargets), hubCombatReplay, hubPlayersAim] });
+scene("hub", { label: "birds-eye combat projection and targets", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", steps: [hubBirdsEyeProjection, gameCombat(hubBirdsEyeTargets), hubCombatReplay] });
+for (const character of ["portlandhodl", "w-s-bitcoin"]) for (const opts of [{ w: 1920, h: 1080 }, PHONE_SIZE]) {
+  scene("hub", { label: "players camera targeting " + character, query: "solo=1&character=" + character + "&weapon=1&mode=shoulder&combat=1", opts, steps: [hubPlayersAim] });
+}
 scene("hub", { label: "birds-eye lower floors", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", steps: [hubBirdsEyeFloors] });
 scene("hub", { label: "mirror", query: "status=chillin", steps: [hubJumbotron, hubMirrorMedium, hubMirror] });
 scene("hub", { label: "matrix", steps: [hubMatrix] });

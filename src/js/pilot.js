@@ -3870,7 +3870,8 @@
       const aiming = aimView(), shoulder = aiming && !closeWanted;
       // A view held on a clicked point lets go of it first, as a look does, or it would keep facing that point.
       if (aiming) releaseCursorAim();
-      const from = closeWanted ? camera.position : shoulder ? cave.root.position : camera.target;
+      const orbitFollow = cave && follow && !aiming && !closeWanted;
+      const from = closeWanted ? camera.position : shoulder || orbitFollow ? cave.root.position : camera.target;
       const dx = x - from.x, dz = z - from.z, horizontal = Math.hypot(dx, dz);
       if (horizontal < 1e-3) return false;
       let yaw = Math.atan2(-dx, -dz);
@@ -3887,6 +3888,42 @@
           if (pitch < look) low = pitch; else high = pitch;
         }
         orbit.tPitch = (low + high) * 0.5;
+      } else if (orbitFollow) {
+        endCenteredCarry();
+        // Centre the selected point on a ray passing above the whole head (including hats), rather than through
+        // the follow anchor in the torso. Solve only on the click; ordinary camera damping owns the transition.
+        // The eight world bounds corners also cover wide heads when looking uphill or downhill at close zoom.
+        updateWorld(cave.root, cave.root.parent ? cave.root.parent.world : undefined);
+        mat4.identity(headInverse);
+        headBounds[0] = headBounds[1] = headBounds[2] = Infinity;
+        headBounds[3] = headBounds[4] = headBounds[5] = -Infinity;
+        includeHeadPart(cave.parts.head);
+        const base = from.y - cave.baseY + follow.y + cave.viewLift;
+        const top = Number.isFinite(headBounds[4]) ? headBounds[4] : from.y + cave.bodyHeight;
+        const distance = orbit.tDist, sx = dx / horizontal, sz = dz / horizontal;
+        const aspect = renderer.size.width / Math.max(1, renderer.size.height);
+        const fov = clamp(2 * Math.atan(Math.tan(MIN_HFOV / 2) / aspect), BASE_FOV, MAX_FOV);
+        const gap = 0.08 * Math.tan(fov * 0.5);
+        let low = base, high = Math.max(base, top, y) + horizontal + distance + 1;
+        for (let i = 0; i < 32; i++) {
+          const anchor = (low + high) * 0.5, pitch = Math.atan2(anchor - y, horizontal);
+          const cp = Math.cos(pitch), sp = Math.sin(pitch);
+          let clear = true;
+          for (let corner = 0; corner < 8; corner++) {
+            const along = (headBounds[corner & 1 ? 3 : 0] - from.x) * sx
+              + (headBounds[corner & 4 ? 5 : 2] - from.z) * sz;
+            const height = headBounds[corner & 2 ? 4 : 1] - anchor;
+            const depth = distance + along * cp - height * sp;
+            if (depth <= camera.near || (along * sp + height * cp) / depth > -gap) { clear = false; break; }
+          }
+          if (clear) high = anchor; else low = anchor;
+        }
+        frameLiftWanted = high - base;
+        orbit.tPitch = clamp(Math.atan2(high - y, horizontal), TRAILING_PITCH[0], TRAILING_PITCH[1]);
+        stopCarryExit();
+        headOrbit = exitAngleHold = false;
+        trailingPitchChosen = true;
+        zoomTilt = false; zoomPitchVelocity = 0;
       } else {
         const range = closeWanted && close && !cave ? close.pitch : TRAILING_PITCH;
         orbit.tPitch = clamp(Math.atan2(from.y - y, horizontal), range[0], range[1]);
