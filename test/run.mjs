@@ -4753,8 +4753,9 @@ const cloudHopperFailureChecks = async engine => {
   const controllerSource = await readFile(join(root, "src/js/cloud-hopper.js"), "utf8");
   runInNewContext(controllerSource, context);
   const seaY = -70, dock = S.createNode({ position: { x: 50, y: 0, z: 0 } });
+  let panelsHidden = false;
   const hopperOptions = { root: rootNode, dock, crew, pilot, camera, seaY, mainlandRadius: 30,
-    hud: { toast: noop }, refusal: () => null, finish: () => ({ x: 0, y: 2, z: 0 }), pileSurface: (x, z) => x === 0 && z === 0 ? 2 : -Infinity,
+    hud: { toast: noop, setPanelsHidden(on) { panelsHidden = on; } }, refusal: () => null, finish: () => ({ x: 0, y: 2, z: 0 }), pileSurface: (x, z) => x === 0 && z === 0 ? 2 : -Infinity,
     mode(on) { mode = on; }, move(position) {
       const p = actor.root.position, shift = BL.math.mat4.create();
       shift[12] = position.x - p.x; shift[13] = position.y + actor.baseY - p.y; shift[14] = position.z - p.z;
@@ -4782,9 +4783,9 @@ const cloudHopperFailureChecks = async engine => {
   tick(0);
   const waitingMusic = audioStage === "dock" && audioLevel === 0.28;
   const beforeStartStops = audioStops;
-  const opened = hopper.launch() && hopper.phase === "intro" && !active && !mode;
+  const opened = hopper.launch() && hopper.phase === "intro" && !active && !mode && !panelsHidden;
   const introMusic = audioStage === "intro" && audioLevel === 0.28 && audioStops === beforeStartStops;
-  callbacks.onStart(); const lifting = hopper.phase === "lifting" && mode && !actor.jetpackOwned;
+  callbacks.onStart(); const lifting = hopper.phase === "lifting" && mode && !actor.jetpackOwned && panelsHidden;
   let musicPhases = introMusic && audioStage === "lifting" && audioLevel === 0.28 && audioStops === beforeStartStops;
   tick(BL.cloudHopper.LIFT_SECONDS);
   const briefing = hopper.phase === "briefing" && shown === "briefing" && hopper.held && !active && mode
@@ -5063,7 +5064,7 @@ const cloudHopperFailureChecks = async engine => {
   const graceReset = hopper.phase === "running" && active && !hopper.fallView();
   const beforeDqStops = audioStops;
   tick(0.02);
-  const early = hopper.phase === "dq" && shown === "dq" && !active && actor.jetFuel > 0 && actor.root.position.y - actor.baseY > seaY;
+  const early = hopper.phase === "dq" && shown === "dq" && !active && !panelsHidden && actor.jetFuel > 0 && actor.root.position.y - actor.baseY > seaY;
   const cut = cuts === 1 && !actor.jet.thrust && !actor.jet.spending && actor.jet.power === 0 && !actor.jet.flame.visible;
   const stoppedTime = hopper.time, firstY = actor.root.position.y;
   const dqMusic = audioStage === "dq" && audioStops === beforeDqStops, beforeFallTicks = audioTicks;
@@ -5110,7 +5111,7 @@ const cloudHopperFailureChecks = async engine => {
   const beforeFinishStops = audioStops;
   land(13);
   const firstGhost = hopper.bestGhost;
-  const savedGhost = hopper.phase === "won" && Math.abs(firstGhost?.duration - 20) < 1e-8 && ghostFinishes === 1 && firstGhost.driftTime >= 0;
+  const savedGhost = hopper.phase === "won" && !panelsHidden && Math.abs(firstGhost?.duration - 20) < 1e-8 && ghostFinishes === 1 && firstGhost.driftTime >= 0;
   record("Cloud Hopper finish: flying over the pile keeps the clock running until feet land on its surface", airborneClock && savedGhost);
   const namedRun = firstGhost?.username === "record-holder" && shownScores?.[0]?.username === "record-holder"
     && shownLatest?.username === "record-holder";
@@ -8303,6 +8304,113 @@ const sheetMovementKeys = async b => {
   }
   return JSON.stringify(rows);
 };
+// Ordinary travel must not borrow a game's suppression or a mobile scene's fold.
+const sharedPanelTravel = { name: "shared panel travel", why: "regression: Arcade CSS, kiosk hiding and mobile entry folds discarded the visible shared choice across ordinary travel", run: async b => {
+  const read = () => b.evaluate(`(() => { const s = document.getElementById("sheet"); return {
+    scene: __ooga.scene, open: s.dataset.open, hidden: s.hidden, painted: getComputedStyle(s).display !== "none",
+    tab: s.querySelector('[aria-selected="true"]')?.dataset.tab || null,
+    panels: document.querySelectorAll(".sheet").length, content: document.querySelectorAll(".sheet [data-panel]").length,
+    saved: JSON.parse(localStorage.getItem("oogaboogaland.sheet.v1")), subscriptions: __panelTravel.live.size
+  }; })()`);
+  const listeners = async () => {
+    const r = await b.send("Runtime.evaluate", { expression: `JSON.stringify([window, document, document.getElementById("sheet").parentElement].map(node => Object.values(getEventListeners(node)).reduce((n, rows) => n + rows.length, 0)))`, includeCommandLineAPI: true, returnByValue: true });
+    return JSON.parse(r.result.result.value);
+  };
+  await b.evaluate(`(() => {
+    const live = new Set(), subscribe = BL.net.subscribe;
+    window.__panelTravel = { live, subscribe };
+    BL.net.subscribe = fn => { const off = subscribe(fn); live.add(fn); return () => { live.delete(fn); off(); }; };
+    BL.net.state.backend = true; BL.chat.account(BL.net.state); window.dispatchEvent(new Event("resize"));
+    __ooga.hud.selectTab("chat");
+  })()`);
+  const rounds = [];
+  try {
+    await tourGo(b, "hub");
+    let state = await read();
+    record("shared panel: Chat selected in Arcade stays open on mainland", state.open === "true" && state.tab === "chat" && state.painted, JSON.stringify(state));
+    await tourGo(b, "arcade");
+    await b.evaluate('__ooga.hud.selectTab("bananas")');
+    for (let pass = 0; pass < 2; pass++) {
+      const rows = [];
+      if (pass) await b.evaluate('document.getElementById("sheet-bananas").click()');
+      for (const id of ["hub", "lab", "factory", "hangar", "bifrost", "poker", "arcade"]) {
+        await tourGo(b, id); state = await read(); rows.push(state);
+        if (id === "hub") record("shared panel: latest Arcade selection returns to the mainland " + (pass ? "closed" : "open"), state.saved.tab === "bananas" && state.open === String(!pass), JSON.stringify(state));
+      }
+      await b.evaluate('__ooga.hud.selectTab("bananas")');
+      const metrics = await b.evaluate(`(() => { const costs = []; for (let i = 0; i < 24; i++) { const t = performance.now(); __ooga.advance(1 / 60, 1 / 60); costs.push(performance.now() - t); } costs.sort((a,b)=>a-b); return { median: costs[12], p95: costs[22], dom: document.getElementsByTagName("*").length }; })()`);
+      rounds.push({ subscriptions: state.subscriptions, listeners: await listeners(), metrics });
+      record("shared panel: ordinary environments preserve the " + (pass ? "closed" : "open") + " choice and one content owner", rows.every(r => r.scene && r.painted && !r.hidden && r.open === String(!pass) && r.saved.tab === "bananas" && r.panels === 1 && r.content === 5), JSON.stringify(rows));
+    }
+    record("shared panel: repeated travel keeps net subscriptions, DOM and event listeners bounded", rounds[0].subscriptions === rounds[1].subscriptions && rounds[0].metrics.dom === rounds[1].metrics.dom && JSON.stringify(rounds[0].listeners) === JSON.stringify(rounds[1].listeners), JSON.stringify(rounds));
+    await b.evaluate('__ooga.hud.selectTab("bananas"); __ooga.hud.foldPanels()');
+    await tourGo(b, "factory"); state = await read();
+    record("shared panel: an intentional fold survives ordinary travel", state.open === "false" && state.saved.folded && state.saved.tab === "bananas" && !state.hidden && state.painted, JSON.stringify(state));
+    // A storage failure must not turn a scene return into an obsolete disk snapshot.
+    await b.evaluate(`(() => { const set = Storage.prototype.setItem; __panelTravel.set = set; Storage.prototype.setItem = function(key, value) { if (key === "oogaboogaland.sheet.v1") throw new DOMException("blocked", "SecurityError"); return set.call(this, key, value); }; __ooga.hud.selectTab("roster"); })()`);
+    await tourGo(b, "arcade"); state = await read();
+    record("shared panel: storage unavailable still preserves the latest tab and open state", state.open === "true" && state.tab === "roster" && state.painted, JSON.stringify(state));
+  } finally {
+    await b.evaluate('BL.net.subscribe = __panelTravel.subscribe; if (__panelTravel.set) Storage.prototype.setItem = __panelTravel.set; delete window.__panelTravel;');
+  }
+} };
+const sharedPanelBuildings = { name: "shared panel buildings", why: "regression: all registered DSB rooms share the exterior panel choice and layout across repeated visits", run: async b => {
+  await b.evaluate('__ooga.advance(1,1/60); __ooga.hud.selectTab("bananas")');
+  const ids = await b.evaluate('[...__ooga.dsb.interiors.registry.keys()]');
+  const rows = [];
+  for (let pass = 0; pass < 2; pass++) {
+    if (pass) await b.evaluate('document.getElementById("sheet-bananas").click()');
+    for (const id of ids) {
+      const r = await b.evaluate(`(() => { const I = __ooga.dsb.interiors; I.review(${JSON.stringify(id)}, true); __ooga.advance(.5,1/60);
+        const s = document.getElementById("sheet"), inside = I.active?.definition.id, shown = !s.hidden && getComputedStyle(s).display !== "none", open = s.dataset.open;
+        I.request(I.active.room.exit); __ooga.advance(.5,1/60); return { inside, shown, open, exited: !I.active, after: s.dataset.open, panels: document.querySelectorAll(".sheet").length }; })()`);
+      rows.push(r);
+      record("shared panel: " + id + " preserves " + (pass ? "closed" : "open") + " state on entry and exit", r.inside === id && r.shown && r.open === String(!pass) && r.after === r.open && r.exited && r.panels === 1, JSON.stringify(r));
+    }
+  }
+  await tourGo(b, "bifrost");
+  record("shared panel: DSB's latest closed choice returns through Bifrost", await b.evaluate('document.getElementById("sheet").dataset.open === "false" && !document.getElementById("sheet").hidden'));
+} };
+const sharedPanelGameplay = { name: "shared panel gameplay", why: "regression: only an active game suppresses the panel; game end and exit restore the latest choice without a banner override", run: async b => {
+  await b.evaluate('__ooga.hud.selectTab("bananas")');
+  const rows = [];
+  for (let pass = 0; pass < 2; pass++) {
+    await tourGo(b, "skee");
+    rows.push(await b.evaluate(`(() => { const H = __ooga.hud, s = document.getElementById("sheet"), C = BL.scenes.skee.debug.carnival;
+      const intro = !s.hidden && s.dataset.open === "true";
+      C.again(); __ooga.advance(4,1/60);
+      const playing = s.hidden && s.querySelector(".sheet-body").inert;
+      document.getElementById("mode-hud").click(); H.selectTab("roster"); window.dispatchEvent(new Event("resize"));
+      const held = s.hidden; C.finish(0); __ooga.advance(1.1,1/60);
+      const ended = !s.hidden && s.dataset.open === "true" && s.querySelector('[aria-selected="true"]').dataset.tab === "roster";
+      return { intro, playing, held, ended }; })()`));
+    await tourGo(b, "arcade");
+    rows[rows.length - 1].returned = await b.evaluate('!document.getElementById("sheet").hidden && document.getElementById("sheet").dataset.open === "true" && document.querySelector("#sheet [aria-selected=true]").dataset.tab === "roster"');
+  }
+  record("shared panel: repeated game start, end and exit restore the latest tab", rows.every(r => Object.values(r).every(Boolean)), JSON.stringify(rows));
+  for (const [id, start, end] of [
+    ["race", "__ooga.race.startRace()", "__ooga.race.finishRace()"],
+    ["drop", "__ooga.drop.start()", '__ooga.drop.finish("lost", 0)'],
+    ["orbit", "__ooga.orbit.launch()", "__ooga.orbit.toBuild()"],
+    ["mine", "__ooga.mine.start()", '__ooga.mine.sim.end("left"); __ooga.mine.finish()'],
+    ["poker", 'BL.scenes.poker.debug.poker.action("quick")', null]
+  ]) {
+    await tourGo(b, id);
+    const r = await b.evaluate(`(() => { const s = document.getElementById("sheet"); const idle = !s.hidden;
+      ${start}; const playing = s.hidden; const tab = document.getElementById("sheet-bananas"); if (tab.getAttribute("aria-selected") !== "true") tab.click();
+      ${end || ""}; return { idle, playing, ended: ${end ? "!s.hidden" : "true"} }; })()`);
+    await tourGo(b, "arcade");
+    r.returned = await b.evaluate('!document.getElementById("sheet").hidden && document.getElementById("sheet").dataset.open === "true" && document.querySelector("#sheet [aria-selected=true]").dataset.tab === "bananas"');
+    record("shared panel: " + id + " suppresses only active play and restores the current choice", Object.values(r).every(Boolean), JSON.stringify(r));
+  }
+
+} };
+for (const mobile of [false, true]) {
+  const opts = mobile ? { w: 390, h: 844, mobile: true } : {};
+  scene("arcade", { label: "shared panel travel", opts, steps: [sharedPanelTravel] });
+  scene("dsb", { label: "shared panel buildings", query: "overview=1&weather=clear&time=1200", opts, httpMedia: true, steps: [sharedPanelBuildings] });
+  scene("arcade", { label: "shared panel gameplay", opts, steps: [sharedPanelGameplay] });
+}
 const hubSheetPersistence = { name: "side panel persistence", why: "rule: panels dock to left, right or bottom, slide their panels and rails together when closed, restore each open or closed layout, merge without duplicate ownership or losing account controls, and return keyboard control on a canvas press", run: async (b) => {
   const url = hubPage(src, "pos=0");
   const settled = () => untilPage(b, `[...document.querySelectorAll(".sheet")].every(node => !node.getAnimations({ subtree: true }).some(animation => animation.transitionProperty && (animation.playState === "running" || animation.playState === "pending")))`);
@@ -8388,6 +8496,12 @@ const hubSheetPersistence = { name: "side panel persistence", why: "rule: panels
     && !last.saved.open && last.saved.tab === "bananas" && last.saved.dock === "right" && last.saved.windows[0].dock === "left", JSON.stringify({ multiple, one, last }));
   await b.open(url); await untilReady(b);
   const closedReload = await b.evaluate(read);
+  const uniqueTabs = state => {
+    const tabs = state.all.filter(panel => !panel.hidden).flatMap(panel => panel.tabs.map(tab => tab.name));
+    return tabs.length === new Set(tabs).size && state.all.filter(panel => panel.id !== "sheet").every(panel => panel.tabs.length === 1);
+  };
+  record("side panel: unowned tabs appear only on the main rail, including when detached panels close and reload",
+    [multiple, one, last, closedReload].every(uniqueTabs), JSON.stringify({ multiple: multiple.all, closed: last.all, restored: closedReload.all }));
   await toggle(".sheet:not(#sheet) [data-tab='roster']");
   await toggle("#sheet-bananas");
   const reopened = await b.evaluate(read);
@@ -8450,7 +8564,7 @@ const hubSheetPersistence = { name: "side panel persistence", why: "rule: panels
     BL.hud.showAccount(BL.net.state);
     return { hidden, folded, same, account, returned, count: document.querySelectorAll(".sheet").length };
   })()`);
-  record("side panel: temporary suppression and folding survive resize without changing saved choices, and detached-only panels retain one shared Feed button and account controls", Object.values(held).every(Boolean) && held.count === 2, JSON.stringify(held));
+  record("side panel: temporary suppression and folding survive resize, reopening restores the saved layout, and detached-only panels retain one shared Feed button and account controls", Object.values(held).every(Boolean) && held.count === 2, JSON.stringify(held));
   if (!await settled()) throw Error("The restored panels did not finish opening");
   // A closed source rail can be merged into another panel, focusing its tab and removing only its own rail.
   await toggle(".sheet:not(#sheet) [data-tab='roster']");
@@ -13444,8 +13558,8 @@ const factoryCooker = { name: "factory cooker", why: "rule: a tip in the factory
     JSON.stringify({ opened, typed, quoted, invoiced, paid, watching: r.watching, back: r.back }));
   const panelsAfter = await b.evaluate(`({ shown: [...document.querySelectorAll(".sheet")].filter(node => !node.hidden && node.dataset.open === "true").length,
     saved: localStorage.getItem("oogaboogaland.sheet.v1") })`);
-  record("factory kiosk: every island panel stays hidden through resize while the kiosk owns the view, then returns with its saved layout intact",
-    panelsDuring.count === 2 && panelsDuring.hidden && panelsDuring.saved === panelLayout && panelsAfter.shown === 2 && panelsAfter.saved === panelLayout, JSON.stringify({ panelsDuring, panelsAfter }));
+  record("factory kiosk: island panels remain available through resize while the kiosk owns the view, with their saved layout intact",
+    panelsDuring.count === 2 && !panelsDuring.hidden && panelsDuring.saved === panelLayout && panelsAfter.shown === 2 && panelsAfter.saved === panelLayout, JSON.stringify({ panelsDuring, panelsAfter }));
   record("factory cooker: a tip's bananas count once, the moment it arrives, and each leaves through the ceiling tube; no sat of it rides a line or lights a bay, and the core never surges for it", r.counted.level === r.n && !r.recounted && r.rippled === 0 && r.out === r.n && r.routed === 0 && r.lit === 0 && !r.surged, JSON.stringify(r));
   record("factory cooker: bananas rise vertically from the chute into the overhead intake", r.vertical > 0 && r.drift < 0.001 && r.high > r.intake, JSON.stringify({ samples: r.vertical, drift: r.drift, high: r.high, intake: r.intake }));
   record("factory cooker: the cooker's board and the donations board on the wall show the last tip rounded and never the tipper's handle, message or a time", r.board.rounded && !r.board.named && !r.board.timed, JSON.stringify(r.board));
@@ -21478,6 +21592,30 @@ const netFixture=(BL,response,step=200,cookie="")=>{
 // land but not coordinates; it orders the visitor's group and row first and everyone else by name; its crosshair takes
 // the first step of the route between zones; and a position counts only in the zone it was reported in, so a player
 // who changed zone is placed nowhere until they move, one who let go keeps their last, and nothing is invented.
+const sheetRailChecks = async () => {
+  const source = await readFile(join(root, "src/js/sheet.js"), "utf8");
+  const refresh = source.slice(source.indexOf("    const refresh = () => {"), source.indexOf("    const close = (w) => {"));
+  const names = ["bananas", "roster", "players", "loot", "chat"];
+  const make = tab => ({ tab, rect: {}, open: false, tabs: names.map(name => ({ dataset: { tab: name }, setAttribute() {}, style: { setProperty() {} } })),
+    node: { dataset: { dock: "right" } }, body: { setAttribute() {} }, nav: { setAttribute() {} } });
+  const main = make("roster"), detached = make("players"), windows = [main, detached];
+  const context = { panels: [], windows, main, folded: false, hidden: false, signedIn: true,
+    available: name => name !== "players" || context.signedIn, ownerOf: name => windows.find(w => w.tab === name),
+    isOpen: w => !context.folded && w.open, fit() {}, placeFooter() {}, showLootCount() {}, notify() {} };
+  runInNewContext(refresh + ";this.refresh = refresh;", context);
+  const read = () => windows.filter(w => !w.node.hidden).map(w => w.tabs.filter(t => !t.hidden).map(t => t.dataset.tab));
+  context.refresh(); const closed = read();
+  detached.open = true; context.refresh(); const opened = read();
+  context.folded = true; context.refresh(); const folded = read();
+  context.folded = false; context.signedIn = false; context.refresh(); const signedOut = read();
+  context.signedIn = true; context.refresh(); const signedIn = read();
+  const unique = rows => rows.flat().length === new Set(rows.flat()).size;
+  record("side panel rails: unowned tabs stay on main, detached Players keeps only its own tab, folding gathers tabs, and sign-out/in restores ownership without duplicates",
+    [closed, opened, folded, signedOut, signedIn].every(unique) && closed[0].join() === "bananas,roster,loot,chat" && closed[1].join() === "players"
+      && opened[1].join() === "players" && folded.length === 1 && folded[0].length === names.length
+      && signedOut.length === 1 && !signedOut[0].includes("players") && signedIn[1].join() === "players",
+    JSON.stringify({ closed, opened, folded, signedOut, signedIn }));
+};
 const playersTabChecks = async BL => {
   const context = { window: { BL: {} } };
   runInNewContext(readFileSync(join(root, "src/js/routes.js"), "utf8"), context);
@@ -23212,6 +23350,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   await chatAccountChecks(BL);
   await rememberedCharacterChecks(BL);
   await playersTabChecks(BL);
+  await sheetRailChecks();
   await integrationChecks(BL);
   footstepChecks(BL);
   await voiceAloneChecks();
