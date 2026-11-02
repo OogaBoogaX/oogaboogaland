@@ -10059,9 +10059,10 @@ const hubChalkboardReach = { name: "chalkboard reach", why: "rule: only an Ooga 
 } };
 // A remote player stands near the pile as the room would place them: the roster's shortest and tallest Oogas, then a
 // gorilla. portlandhodl, the widest Ooga, drops onto each, rides the short one as it walks and rises as a jetpack
-// would, walks off it, then walks and jumps at the tall one, which no jump clears. The spot has nothing else to stand
-// on near it: a tree's crown is a landing surface, and a rider lifted within a step of one steps onto it.
-const hubPlayerStacking = { name: "players stand on players", why: "regression: landing on another player from above sank into their body; their head holds the lander, carries it as they walk or fly and lets go when they leave, and a jump into them is held off as a walk is", run: async (b) => {
+// would, walks off it, then walks and jumps at the tall one, which no jump clears. Its gorilla, driven, then does the
+// same. The spot has nothing else to stand on near it: a tree's crown is a landing surface, and a rider lifted within
+// a step of one steps onto it.
+const hubPlayerStacking = { name: "players stand on players", why: "regression: landing on another player from above sank into their body, and a driven gorilla passed straight through them; their head holds the lander, Ooga or gorilla, carries it as they walk or fly and lets go when they leave, and a jump or fall into them is held off as a walk is", run: async (b) => {
   const SHORT = "NickDaGreek", TALL = "rules-without-rulers";
   const drops = await b.evaluate(`(() => {
     const B = __ooga, a = B.cavemen.get("portlandhodl"), net = BL.net, p = a.root.position;
@@ -10138,7 +10139,85 @@ const hubPlayerStacking = { name: "players stand on players", why: "regression: 
     return { walk: run(false), jump: run(true) };
   })()`);
   await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "w", code: "KeyW" });
-  await b.evaluate(`(() => { BL.net.remotes.delete(window.__stack.id); delete window.__stack; __ooga.advance(0.3, 1 / 60); })()`);
+  // The visitor's gorilla gets the same: it lands on the short Ooga's head, rides them, falls when they leave, and
+  // walking into the tall one with W is held off.
+  const driven = await b.evaluate(`(() => {
+    const B = __ooga, S = window.__stack, net = BL.net, G = B.clankerPlay, C = B.clankers, a = B.cavemen.get("portlandhodl");
+    const e = C.list.find(entry => entry.owner === a), p = e.root.position;
+    B.pilot.release(true);
+    e.active = e.root.visible = true; G.possess(e); if (C.sleeping(e)) C.wake();
+    if (G.player !== e) return { possessed: false };
+    const out = { possessed: true, radius: e.gorilla.bodyRadius, height: BL.crew.bodyHeightOf(BL.models.caveman(BL.contributors.traitsFor("${SHORT}"))) };
+    net.remotes.delete(S.id); S.put("${SHORT}", "ooga"); B.advance(0.5, 1 / 60);
+    const rec = net.remotes.get(S.id), sample = () => ({ feet: p.y - rec.y, off: Math.hypot(p.x - rec.x, p.z - rec.z) });
+    C.respawn(e, S.x + 0.2, S.ground + 4, S.z); C.supportRemoved(); B.advance(2.5, 1 / 60);
+    out.landed = sample();
+    for (let i = 0; i < 60; i++) { rec.x += 2 / 60; B.advance(1 / 60, 1 / 60); }
+    B.advance(0.5, 1 / 60); out.walked = sample();
+    for (let i = 0; i < 90; i++) { rec.y += 3 / 90; B.advance(1 / 60, 1 / 60); }
+    B.advance(0.5, 1 / 60); out.up = sample();
+    for (let i = 0; i < 90; i++) { rec.y -= 3 / 90; B.advance(1 / 60, 1 / 60); }
+    B.advance(0.5, 1 / 60); out.down = sample();
+    net.remotes.delete(S.id); B.advance(1.5, 1 / 60);
+    out.left = p.y - B.island.surfaceAt(p.x, p.z);
+    // 3 m out from the tall Ooga, facing them, for W below. A walking gorilla's posed envelope reaches further
+    // than a standing one's, so it stops further out than its standing radius.
+    S.put("${TALL}", "ooga"); B.advance(0.5, 1 / 60);
+    const fx = S.x + Math.sin(S.ang) * 3, fz = S.z + Math.cos(S.ang) * 3;
+    C.respawn(e, fx, B.island.surfaceAt(fx, fz), fz);
+    B.pilot.orbit.yaw = B.pilot.orbit.tYaw = S.ang;
+    B.advance(0.5, 1 / 60);
+    out.approach = { start: Math.hypot(p.x - S.x, p.z - S.z) };
+    return out;
+  })()`);
+  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "w", text: "w", code: "KeyW" });
+  if (driven.possessed) Object.assign(driven.approach, await b.evaluate(`(() => {
+    const B = __ooga, S = window.__stack, e = B.clankerPlay.player, p = e.root.position;
+    let nearest = Infinity, radius = 0;
+    for (let i = 0; i < 90; i++) {
+      B.advance(1 / 60, 1 / 60);
+      const distance = Math.hypot(p.x - S.x, p.z - S.z);
+      if (distance < nearest) { nearest = distance; radius = e.gorilla.bodyRadius; }
+    }
+    return { nearest, radius };
+  })()`));
+  await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "w", code: "KeyW" });
+  await b.evaluate(`(() => { __ooga.clankerPlay.release(); BL.net.remotes.delete(window.__stack.id); delete window.__stack; __ooga.advance(0.3, 1 / 60); })()`);
+  // Climbing, too: the gorilla climbs the cliff beside mouth c1 and crests onto its roof; with a player standing just
+  // past the crest it holds on the wall below them, and finishes the climb once they leave.
+  const climb = await b.evaluate(`(() => {
+    const B = __ooga, C = B.clankers, net = BL.net, a = B.cavemen.get("portlandhodl"), e = C.list.find(x => x.owner === a), p = e.root.position;
+    const m = B.mouths.find(m => m.id === "c1"), sx = Math.sin(m.ry), sz = Math.cos(m.ry), side = 3.4, id = 390391, heading = m.ry + Math.PI;
+    const px = m.x - sx * 1.05 + sz * side, pz = m.z - sz * 1.05 - sx * side, py = B.island.surfaceAt(px, pz);
+    const x = m.x + sx * 3 + sz * side, z = m.z + sz * 3 - sx * side, y = B.island.surfaceAt(x, z);
+    const up = () => C.control({ x: -sx, z: -sz, heading, climbAxis: 1 });
+    const run = (player, frames) => {
+      B.pilot.release(true); C.release(); net.remotes.delete(id);
+      Object.assign(p, { x, y, z });
+      Object.assign(e, { active: true, controlled: false, recover: 0, lounge: "", loungeDepart: false, parked: false, biped: false, heading, speed: 0, pound: 0, beat: 0, stand: 0 });
+      Object.assign(e.drive, { airborne: false, passiveFall: false, grounded: true, resume: false, vx: 0, vy: 0, vz: 0, motionRecover: 0, motionEnvelope: false });
+      Object.assign(e.climb, { active: false, free: false, mountPending: false, handoffDirection: 0, openingStagePending: false, retry: 0,
+        searchPending: false, searchDeferred: false, claimPending: false, crestPending: false });
+      e.jump.active = e.fire.burning = e.fire.rolling = false; e.root.visible = true;
+      Object.assign(e.motion, { climb: 0, climbBlend: NaN, mantle: 0, supportOffset: 0, landing: 0, takeoff: 0 });
+      e.gorilla.poseManaged(2, x, y, z, heading, 0, false, false, "", e.motion);
+      BL.scene.updateWorld(BL.scenes.hub.root); B.headquarters.solids.props.sync(); C.possess(e); B.advance(0.5, 1 / 60);
+      if (player) net.remotes.set(id, { id, login: "stack-peer", display: "Stack peer", body: "${TALL}", bodyKind: "ooga", bodyName: "${TALL}", zone: "outside", x: px, y: py, z: pz, yaw: 0 });
+      let top = -Infinity, nearest = Infinity, radius = 0;
+      for (let i = 0; i < frames; i++) {
+        up(); B.advance(1 / 60, 1 / 60); top = Math.max(top, p.y);
+        const distance = Math.hypot(p.x - px, p.z - pz);
+        if (Math.abs(p.y - py) < 2.5 && distance < nearest) { nearest = distance; radius = e.gorilla.bodyRadius; }
+      }
+      return { top, nearest, radius };
+    };
+    const out = { roof: py, free: run(false, 420), held: run(true, 420) };
+    net.remotes.delete(id);
+    for (let i = 0; i < 300; i++) { up(); B.advance(1 / 60, 1 / 60); }
+    out.resumed = p.y;
+    C.release(); B.advance(0.3, 1 / 60);
+    return out;
+  })()`);
   const [short, tall, gorilla] = drops;
   record("players stand on players: a drop onto another player rests on their head at their own height, short or tall, and on a gorilla's back, then falls to the ground when they leave",
     drops.length === 3 && drops.every(row => row.shown === 1 && row.off < 0.2 && Math.abs(row.left) < 1e-3)
@@ -10155,6 +10234,18 @@ const hubPlayerStacking = { name: "players stand on players", why: "regression: 
   record("players stand on players: a jump at a player too tall to clear is held off as far as a walk at them is",
     approach.walk.nearest < 2 && approach.jump.accepted && approach.jump.peak > 0.5 && approach.jump.nearest >= approach.walk.nearest - 0.02,
     JSON.stringify(approach));
+  record("players stand on players: the visitor's gorilla lands on a player's head at their height, rides them as they walk, rise 3 m and come down, and falls to the ground when they leave",
+    driven.possessed && Math.abs(driven.landed.feet - driven.height) < 0.03 && driven.landed.off < 0.25
+      && ["walked", "up", "down"].every(k => Math.abs(driven[k].feet - driven.landed.feet) < 0.03 && Math.abs(driven[k].off - driven.landed.off) < 0.05)
+      && Math.abs(driven.left) < 0.02,
+    JSON.stringify(driven));
+  record("players stand on players: the visitor's gorilla climbing a cliff holds on the wall below a player at its crest, their centre outside its body, and finishes the climb once they leave",
+    climb.free.top >= climb.roof - 0.05 && climb.held.top < climb.roof - 0.3 && climb.held.nearest >= climb.held.radius
+      && climb.resumed >= climb.roof - 0.05,
+    JSON.stringify(climb));
+  record("players stand on players: the visitor's gorilla walking into a player is held off, their centre outside its body",
+    driven.possessed && driven.approach.nearest < driven.approach.start - 0.3 && driven.approach.nearest >= driven.approach.radius,
+    JSON.stringify(driven.approach));
 } };
 const hubCloudCamera ={ name: "cloud hopper fixed camera", why: "regression: scenery, rock and downhill movement changed the racing camera's angle and distance", run: async (b) => {
   const r = await b.evaluate(`(() => {

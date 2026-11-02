@@ -2419,6 +2419,8 @@
         && !ctx.climbPeersClear(e, x, y, z, nx, ny, nz, heading, heading)) return false;
       if (e.motion.dragging && ctx.rageCarryClear
         && !ctx.rageCarryClear(e, x, y, z, nx, ny, nz, heading, heading)) return false;
+      // Other players hold the visitor's gorilla off on a wall as they do on foot (the scene's `playersClear`).
+      if (e.controlled && ctx.playersClear && !ctx.playersClear(e, x, y, z, nx, ny, nz)) return false;
       // The upright rectangle owns wall support. On the wall, only the core
       // and actual props are swept; individual stone voxels are not blockers.
       const radius = wallTravel || e.controlled ? 0.12 : 0.42;
@@ -2429,6 +2431,7 @@
     const climbWalkClear = (e, x, y, z, nx, ny, nz, heading, actors = true) => {
       if (autonomousChill(e) && !chillCaveClear(x, y, z, nx, ny, nz, true)) return false;
       if (actors && ctx.climbPeersClear && !ctx.climbPeersClear(e, x, y, z, nx, ny, nz, heading, heading)) return false;
+      if (e.controlled && ctx.playersClear && !ctx.playersClear(e, x, y, z, nx, ny, nz)) return false;
       return ctx.climbClear ? ctx.climbClear(e, x, y + 0.65, z, nx, ny + 0.65, nz,
         0.42, 0.5, false, actors, !ctx.climbPeersClear)
         : clear(x, y + 0.65, z, nx, ny + 0.65, nz, 0.42, 0.5, e);
