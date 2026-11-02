@@ -1,4 +1,5 @@
 import { parseStudioCommand, studioCanSpeak, STUDIO_ZONE } from "./studio-policy.js";
+import "../../src/js/chat-policy.js";
 // The room's wire format and the limits it enforces, as pure functions the tests can reach.
 //
 // Client → room:  { t: "pose", x, y, z, yaw }   the driven body's feet and heading, at most MOVE_HZ
@@ -47,7 +48,7 @@ import { parseStudioCommand, studioCanSpeak, STUDIO_ZONE } from "./studio-policy
 // Chat: one conversation for the whole island. The room names the speaker from the session (`login`, and
 // `name`, their display name), never from the frame, keeps the last CHAT_KEEP lines in memory alone (never
 // storage: a room that sleeps, restarts or is redeployed has forgotten them) and hands them to each socket
-// that joins. A line is CHAT_MAX characters at most after `sanitizeChat`. A chat frame gets its own size
+// that joins. A line is CHAT_MAX UTF-16 units at most under the shared chat policy. A chat frame gets its own size
 // limit: one that starts with CHAT_PREFIX, as the page sends it, may run to CHAT_FRAME_MAX and is ignored past
 // it, so a long line is dropped rather than closing the socket; every other frame keeps MESSAGE_MAX.
 // "ping" answers "pong" without waking the room (setWebSocketAutoResponse).
@@ -81,7 +82,8 @@ export const CLOSE_KICK = 4000;
 export const NPC_FRAME_MAX = 128 * 112 * 4 + 131072;
 export const NPC_HZ = 20;
 export const CLOSE_PROTOCOL = 4400;
-export const CHAT_MAX = 160;
+export const CHAT_MAX = globalThis.BL.chatPolicy.MAX;
+export const CHAT_FEATURE = globalThis.BL.chatPolicy.FEATURE;
 export const CHAT_KEEP = 100;
 // Accepted retry ids survive reconnects while this room instance holds them; oldest ids expire at the cap.
 export const CHAT_RETRY_KEEP = CHAT_KEEP * MAX_PLAYERS;
@@ -129,9 +131,8 @@ const ghostHits = (h) => {
   for (let i = 0; i < h.length; i += 2) if (!ghostHit(h[i], h[i + 1])) return null;
   return { t: "ghost", k: "hits", h: h.slice() };
 };
-// The character set of donation messages (`donations.sanitize` in src/js/donations.js), checked against it in worker/test.
-export const CHAT_STRIP = /[^\w .,!?'@#:-]/g;
-export const sanitizeChat = (text) => String(text).replace(CHAT_STRIP, "").trim();
+// Compatibility name: invalid chat is refused, never stripped or truncated. Same policy as the page.
+export const sanitizeChat = (text) => globalThis.BL.chatPolicy.error(text) ? "" : globalThis.BL.chatPolicy.text(text);
 
 const finite = (v) => typeof v === "number" && Number.isFinite(v);
 const round = (v) => Math.round(v * 1000) / 1000;
