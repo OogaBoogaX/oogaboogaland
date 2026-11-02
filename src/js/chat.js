@@ -10,6 +10,9 @@
 // A refusal or disconnect keeps the draft and id, unless the player edits it into a different message.
 // Escape leaves the input with the sheet open. Keys typed in the sheet never reach a scene
 // (controls.js, director.js). On a phone the sheet rises above the keyboard while the input has focus.
+// Unread lines (#430): a line from someone else that this page had not had, heard while the visitor is not in the
+// panel, counts on the tab until they look at it (`sheet.watchViews`). The first lines the room hands over on arrival
+// do not count; on a rejoin (a reconnect, a tab back from the background), only lines newer than any this page had.
 // Exports account (fed `BL.net.state`), heard (fed the room's lines) and stats.
 (() => {
   "use strict";
@@ -31,6 +34,8 @@
   const identity = $("chat-identity"), accountLogin = $("chat-account-login"), displayForm = $("chat-display-form"), displayInput = $("chat-display"), displaySave = $("chat-display-save"), displayStatus = $("chat-display-status");
   let identityId = "", identityDisplay = "", displaySaving = false, displayComposing = false;
   let showing = false, drawn = true, live = false, me = "", composing = false, pending = null, notice = "", revision = 0, logoutEpoch = 0, ackTimer = 0;
+  let unread = 0, newest = -1, synced = false;
+  const setUnread = (count) => { unread = count; BL.sheet.setBadge("chat", count); };
   const stopWaiting = () => { window.clearTimeout(ackTimer); ackTimer = 0; if (pending) pending.awaiting = false; };
 
   const row = (line) => {
@@ -95,11 +100,21 @@
       update();
       return;
     }
+    let fresh = 0;
     if (joined) {
       const seen = new Set(lines.map((line) => line.id));
-      for (const line of list) if (!seen.has(line.id)) lines.push(line);
+      for (const line of list) if (!seen.has(line.id)) {
+        lines.push(line);
+        if (synced && line.id > newest && line.login.toLowerCase() !== me) fresh++;
+      }
       lines.sort((a, b) => a.id - b.id);
-    } else for (const line of list) lines.push(line);
+      synced = true;
+    } else for (const line of list) {
+      lines.push(line);
+      if (line.id > newest && line.login.toLowerCase() !== me) fresh++;
+    }
+    for (const line of list) if (line.id > newest) newest = line.id;
+    if (fresh && !BL.sheet.attending(panel)) setUnread(unread + fresh);
     const over = Math.max(0, lines.length - CHAT_KEEP);
     if (over) lines.splice(0, over);
     if (!showing) {
@@ -146,6 +161,7 @@
       logoutEpoch = epoch;
       stopWaiting(); pending = null; notice = ""; revision++; input.value = "";
       lines.length = 0; log.replaceChildren(); drawn = true;
+      newest = -1; synced = false; setUnread(0);
       announce("Signed out. Local chat and draft cleared.");
     }
     if (identity) {
@@ -277,7 +293,8 @@
     if (viewport && (document.activeElement === input || document.activeElement === displayInput)) fit();
   });
 
+  BL.sheet.watchViews(panel, () => { if (unread) setUnread(0); });
   net.subscribe(account);
   net.subscribeChat(heard);
-  BL.chat = { account, heard, get stats() { return { lines: lines.length, rows: log.childElementCount, showing, drawn, live }; } };
+  BL.chat = { account, heard, get stats() { return { lines: lines.length, rows: log.childElementCount, showing, drawn, live, unread }; } };
 })();
