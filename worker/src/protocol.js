@@ -6,6 +6,7 @@ import { parseStudioCommand, studioCanSpeak, STUDIO_ZONE } from "./studio-policy
 //                 { t: "zone", name }            where that body is (see Zones below)
 //                 { t: "poker-voice", table }   0-9 while watching a table, null for the Ember Den floor
 //                 { t: "hub", on }               this page shows the island and is visible (host candidates)
+//                 { t: "visible", on }           HALLOWEEN: this page is visible (the ghost arena's host candidates)
 //                 { t: "mute", on }              this page muted its own microphone, for everyone's roster
 //                 { t: "hp", v, ko }             the driven body's health (normalized 0-100) and knockout flag
 //                 pose.g                         optional gorilla locomotion: [flags, speed, stride, climb, side, swim]
@@ -13,8 +14,10 @@ import { parseStudioCommand, studioCanSpeak, STUDIO_ZONE } from "./studio-policy
 //                 { t: "studio", action, playback?, commandId?, ... }  a DSB Studio seat or host command; transport
 //                                checks `playback` against the state's playbackRevision
 //                                (`parseStudioCommand` in studio-policy.js; see docs/dsb-studio-session.md)
-//                 { t: "ghost", k, g?, d?, h? }  HALLOWEEN: the ghost hunt's `start`, `ready` or `pause`, or `hits` h, for the host
-//                 binary                         the NPC host's frame of every Ooga's pose, relayed as is
+//                 { t: "ghost", k, g?, d?, h? }  HALLOWEEN: the ghost hunt's `start`, `ready`, `pause` or `leave`, or `hits` h, for its
+//                                host, from a page in the arcade's ghost arena
+//                 binary                         the NPC host's frame of every Ooga's pose, relayed as is; or,
+//                                                led by GHOST_MAGIC, the ghost arena host's hunt state
 // Room → client:  welcome { you, players, tickHz, now, loopEpoch, connectionToken }, join { p }, leave { id, reason },
 //                 body { id, name }, state { now, ps: [id, x, y, z, yaw, ...], gs? }, kick { reason },
 //                 state.gs                       gorilla locomotion in [id, ...g] runs; welcome/join carry g too
@@ -34,7 +37,10 @@ import { parseStudioCommand, studioCanSpeak, STUDIO_ZONE } from "./studio-policy
 //                 chat-ack { clientId }     the sender's line was accepted, including a recognized retry
 //                 chat-rejected { clientId?, reason }  refused; rate retries keep the same id
 //                 chat-history { messages }  after welcome: the lines the room still holds, oldest first
-//                 ghost { k, g, d, from }    HALLOWEEN: a follower's start or hit, relayed to the NPC host alone
+//                 ghost { k, g, d, from }    HALLOWEEN: a follower's start or hit, relayed to its hunt's host alone
+//                 ghost-host { id, followers }  who runs the ghost arena's hunt (0 for nobody) and how many pages in
+//                                            the arena follow it; welcome carries ghostHost and ghostFollowers; binary
+//                                            frames led by GHOST_MAGIC from it, to pages in the arena
 // Zones: `<group>` or `<group>.<place>`. Voice is shared within a group; who is shown is matched on the whole
 // name, since a place inside a group can have coordinates of its own (the Factory's tunnel on the island and
 // its hall). `none` is nowhere: off the island's edge, or between scenes; it shares voice with nobody.
@@ -98,13 +104,25 @@ export const DOOR_TRANSIT_MS = 12000;
 export const DOOR_PASS_MS = 8000;
 export const DOOR_HZ = 4;
 export const DOOR_BURST = 6;
-// HALLOWEEN: the ghost hunt's reports to the host: a follower's hits, every target's summed damage a tenth of a second
+// HALLOWEEN: the arcade's ghost hunt's reports to its host: a follower's hits, every target's summed damage a tenth of a second
 // at a time in one `hits` report (up to 60 a target), so any mix of rifle and monkey fire stays at ten reports a second;
 // the rest of the budget is for a start or pause.
 export const GHOST_HZ = 20;
 export const GHOST_BURST = 24;
 // A follower's batch: up to GHOST_BATCH targets, each a ghost id (0 the boss) and its summed damage, as one report.
 export const GHOST_BATCH = 16;
+// The arcade's ghost arena runs its own hunt: its pages (zone `arcade.arena`, or `arcade-hunt` while a hunt keeps its
+// voice to itself) elect a ghost host of their own, follower reports from the arena go to it, and it sends the hunt's
+// state as a binary frame led by GHOST_MAGIC ("GHST"), up to GHOST_FRAME_MAX bytes and GHOST_FRAME_HZ a second, which
+// the room hands to every other page in the arena and keeps for the next to walk in. Only a visible page may host
+// (`ghostCandidate`): a hidden one runs no frames, so it would send nothing while every follower's hunt froze.
+export const GHOST_ARENA_ZONES = ["arcade.arena", "arcade-hunt"];
+export const inGhostArena = (p) => GHOST_ARENA_ZONES.includes(p.zone);
+export const ghostCandidate = (p) => p.visible && inGhostArena(p);
+export const GHOST_MAGIC = 0x54534847;
+export const GHOST_FRAME_MAX = 65536;
+export const GHOST_FRAME_HZ = 5;
+export const GHOST_FRAME_BURST = 6;
 const ghostHit = (g, d) => Number.isInteger(g) && g >= 0 && g < 65536 && Number.isInteger(d) && d >= 1 && d <= 60;
 const ghostHits = (h) => {
   if (!Array.isArray(h) || h.length < 2 || h.length > GHOST_BATCH * 2 || h.length % 2) return null;
@@ -155,6 +173,7 @@ export const parseClientMessage = (text) => {
     return typeof msg.name === "string" && BODY_NAME.test(msg.name) ? { t: "body", name: msg.name } : null;
   }
   if (msg.t === "hub") return typeof msg.on === "boolean" ? { t: "hub", on: msg.on } : null;
+  if (msg.t === "visible") return typeof msg.on === "boolean" ? { t: "visible", on: msg.on } : null;
   if (msg.t === "mute") return typeof msg.on === "boolean" ? { t: "mute", on: msg.on } : null;
   if (msg.t === "hp") return finite(msg.v) && typeof msg.ko === "boolean" ? { t: "hp", v: Math.max(0, Math.min(100, Math.round(msg.v))), ko: msg.ko } : null;
   if (msg.t === "zone") return typeof msg.name === "string" && ZONE_NAME.test(msg.name) ? { t: "zone", name: msg.name } : null;
@@ -178,7 +197,7 @@ export const parseClientMessage = (text) => {
   }
   // HALLOWEEN: a follower's word to the ghost hunt's host.
   if (msg.t === "ghost") {
-    if (msg.k === "start" || msg.k === "pause" || msg.k === "ready") return { t: "ghost", k: msg.k };
+    if (msg.k === "start" || msg.k === "pause" || msg.k === "ready" || msg.k === "leave") return { t: "ghost", k: msg.k };
     if (msg.k === "hits") return ghostHits(msg.h);
     return msg.k === "hit" && ghostHit(msg.g, msg.d) ? { t: "ghost", k: "hit", g: msg.g, d: msg.d } : null;
   }
@@ -293,21 +312,23 @@ export const voicePeers = (players, studio = null) => {
 // follow. The sitting host (`incumbent`) keeps the role while it still shows the island (`inHub`: in the hub
 // scene and visible); otherwise it goes to the page longest in the room among those that do. So a page that
 // hides and comes back returns as a follower and catches up from the host's frames, never taking hosting
-// back with its own stale state. 0 when no page qualifies.
-export const electHost = (players, incumbent = 0) => {
+// back with its own stale state. 0 when no page qualifies. `on` says who qualifies (the arena's ghost hunt elects
+// its own host among the visible pages in its arena, `ghostCandidate`).
+const showsIsland = (p) => p.inHub;
+export const electHost = (players, incumbent = 0, on = showsIsland) => {
   let best = null;
   for (const p of players) {
-    if (!p.inHub) continue;
+    if (!on(p)) continue;
     if (p.id === incumbent) return p.id;
     if (!best || p.joinedAt < best.joinedAt || (p.joinedAt === best.joinedAt && p.id < best.id)) best = p;
   }
   return best ? best.id : 0;
 };
 
-/** How many pages follow the NPC host: every other page showing the island. 0 with no host. */
-export const npcFollowers = (players, hostId) => {
+/** How many pages follow the NPC host: every other page showing the island (or as `on` says). 0 with no host. */
+export const npcFollowers = (players, hostId, on = showsIsland) => {
   if (!hostId) return 0;
   let count = 0;
-  for (const p of players) if (p.inHub && p.id !== hostId) count++;
+  for (const p of players) if (on(p) && p.id !== hostId) count++;
   return count;
 };

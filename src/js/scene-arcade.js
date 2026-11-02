@@ -20,7 +20,7 @@
   const AM = BL.arcadeModels;
   const { clamp } = math;
   const { createNode, addChild, removeChild, createCamera, stepTweens, tweenCount, traverseVisible, boundsOf } = BL.scene;
-  const { HALL, STAGE, MEZZ, GAMES, LAYOUT, CAB, SCREEN, FRAMES, FPS } = AM;
+  const { HALL, STAGE, MEZZ, HAUNT, GAMES, LAYOUT, CAB, SCREEN, FRAMES, FPS } = AM;
 
   const COARSE = window.matchMedia("(pointer: coarse)").matches;
   const PITCH = [-0.2, 1.3], DIST = [3, 27];
@@ -81,6 +81,11 @@
 
   let renderer, game, world, go, root, camera, hud, hooks, input, pilot, fx, agentPlay = null;
   let leaving = false, openingGame = false, people = null, avatar = null, playerWorld = null, screens = null, shownFrame = -1, prompt = null;
+  // HALLOWEEN: the ghost arena's hunt: its herald before the hunt loads, the hunt, its channel to the room, GAME MODE,
+  // the iron fence across the hallway's mouth (how far up), the totems and their lit parts, whether the visitor's Ooga carries its rifle
+  // (in the arena), the voice zone it reports and the one it is turning to.
+  let ghostEntry = null, ghosts = null, ghostChannel = null, tess = null, gameMode = false, fence = null, fenceK = 0, totemsAt = [], totemLife = [], armed = false, rifleWas = false;
+  let zoneNow = "arcade.hall", zoneHeld = 0, exitButton = null;
   let stations = null, blocks = null, carnival = null, staff = null, orders = 0, ticketBoard = null, prizeUi = null;
   let crowd = null, spin = null;
   let audio = null, bots = null, walkers = null, motes = null, power = null, disco = null, fame = null, shelf = null, lit = null;
@@ -203,6 +208,51 @@
     const hall = AM.hall(), frame = AM.signFrame(), S = LAYOUT.sign;
     addChild(root, createNode({ geometry: hall.floor }), createNode({ geometry: hall.rock }), createNode({ geometry: hall.timber }),
       createNode({ geometry: hall.outside, sightHidden: true }));
+    // The haunted hallway off the deck's right end, and its carved sign over the mouth, facing the hall.
+    const haunt = AM.haunt(), ghostSign = BL.hubModels.caveSign("Ghost Hunter", "ghost", false, true), gb = boundsOf(ghostSign), gk = 3.2 / (gb.max[0] - gb.min[0]);
+    addChild(root, createNode({ geometry: haunt.rock }), createNode({ geometry: haunt.props }), createNode({ geometry: haunt.glass, sightHidden: true }),
+      createNode({ position: { x: HALL.halfW - 0.28, y: HAUNT.y + HAUNT.h + 0.62, z: (HAUNT.z0 + HAUNT.z1) / 2 }, rotation: { x: 0, y: -Math.PI / 2, z: 0 }, scale: { x: gk, y: gk, z: gk }, geometry: ghostSign }));
+    // The arena's steel doors, shut, each leaf a node of its own.
+    const steel = AM.steelDoor();
+    for (const d of haunt.doors) {
+      const node = createNode({ position: { x: d.x, y: d.y, z: d.z }, rotation: { x: 0, y: d.turn, z: 0 }, geometry: steel.frame });
+      addChild(node, createNode({ geometry: steel.left }), createNode({ geometry: steel.right }));
+      addChild(root, node);
+    }
+    // The gargoyles on the arena's wall top, over the hallway's mouth and every other bay, looking down into it, a
+    // white letter on each one's chest.
+    for (const g of haunt.perches) {
+      const node = createNode({ position: { x: g.x, y: g.y, z: g.z }, rotation: { x: 0, y: g.turn, z: 0 }, scale: { x: GARGOYLE_SCALE, y: GARGOYLE_SCALE, z: GARGOYLE_SCALE }, geometry: AM.gargoyle() });
+      if (g.letter) addChild(node, createNode({ geometry: AM.gargoyleLetter(g.letter) }));
+      addChild(root, node);
+    }
+    // The ghost hunt's totems, the hub's four with their name boards, their eyes burning and runes, faces and bands
+    // lit as a fresh merge lights the hub's, always (no feed behind them), each holding its elixir out over the arena
+    // (the hunt hangs it); and the iron fence that rises across the hallway's mouth while a hunt runs.
+    totemsAt = haunt.totems;
+    totemLife = totemsAt.map((t, i) => {
+      const M = BL.totemModels, L = M.layout(i), node = createNode({ position: { x: t.x, y: t.y, z: t.z }, rotation: { x: 0, y: t.turn, z: 0 }, geometry: M.body(i) });
+      addChild(root, node);
+      const slices = BL.totemGlow.bands(M.glyphs(i), TOTEM_SLICE);
+      let lo = Infinity, hi = -Infinity;
+      for (const { y } of slices) { lo = Math.min(lo, y); hi = Math.max(hi, y); }
+      for (const [, y] of L.eyes) { lo = Math.min(lo, y); hi = Math.max(hi, y); }
+      const u = (y) => (y - lo) / (hi - lo), runes = slices.map(({ geometry, y }) => ({ node: createNode({ geometry }), u: u(y) }));
+      const features = createNode({ geometry: M.featureHighlights(i) }), rings = [];
+      L.rings.forEach((y, level) => {
+        for (let k = 0; k < M.RING_SEGMENTS; k++) {
+          rings.push({ node: createNode({ geometry: M.ringSector(i), position: { x: 0, y, z: 0 }, rotation: { x: 0, y: -k / M.RING_SEGMENTS * Math.PI * 2, z: 0 }, visible: false }),
+            a: ((k - M.RING_SEGMENTS / 4 + M.RING_SEGMENTS) % M.RING_SEGMENTS + 0.5) / M.RING_SEGMENTS, level });
+        }
+      });
+      const flames = L.eyes.map(([x, y, z, size]) => ({ node: createNode({ position: { x, y, z }, scale: { x: size, y: size, z: size }, geometry: AM.blaze() }), size, u: u(y) }));
+      for (const part of [...runes, ...rings, ...flames]) addChild(node, part.node);
+      addChild(node, features);
+      return { runes, features, rings, flames, pattern: BL.totemGlow.pattern(BL.totemFeed.REPOS[i].word) };
+    });
+    fence = createNode({ position: { x: FENCE_X, y: HAUNT.y - AM.IRON_FENCE.h, z: (HAUNT.z0 + HAUNT.z1) / 2 }, rotation: { x: 0, y: Math.PI / 2, z: 0 }, geometry: AM.ironFence(), visible: false });
+    addChild(root, fence);
+    fenceK = 0;
     // The fires, and the ceiling with the mammoth hung under it: each flame its own node on the one flame geometry,
     // so each flickers on its own clock; the tikis and fire bowls standing on a floor or the deck stand in the way.
     const lamps = AM.lanterns(), lampGlass = createNode({ geometry: lamps.glass, sightHidden: true });
@@ -845,18 +895,26 @@
   // nothing here and a right-click never aims. Registered before the pilot's listeners, in the capture phase.
   const WEAPON_KEYS = new Set(["1", "2", "r"]);
   const armsKeys = (e) => {
-    if (e.metaKey || e.ctrlKey || e.altKey || !WEAPON_KEYS.has(e.key.toLowerCase())) return;
+    if (armed || e.metaKey || e.ctrlKey || e.altKey || !WEAPON_KEYS.has(e.key.toLowerCase())) return;
     e.preventDefault();
     e.stopImmediatePropagation();
   };
   const rightClick = (e) => {
-    if (e.button !== 2) return;
+    if (armed || e.button !== 2) return;
     e.preventDefault();
     e.stopImmediatePropagation();
   };
   let canvasEl = null;
   const toggleMute = () => { const off = audio.setMuted(!audio.muted); hud.toast(off ? "Sound off" : "Sound on"); };
   const onKey = (e) => {
+    if (ghosts && ghosts.key(e)) return true; // HALLOWEEN
+    // In the ghost arena the rifle is out: X aims, 1 and 2 pick the club or the rifle, G swaps, V fires.
+    if (armed && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      if ((e.key === "x" || e.key === "X") && pilot.modeAction("mode-toggle")) return true;
+      if ((e.key === "1" || e.key === "2") && pilot.weaponMode(Number(e.key))) return true;
+      if (e.key === "g" || e.key === "G") { pilot.weaponAction("weapon-toggle"); return true; }
+      if (e.key === "v" || e.key === "V") { pilot.weaponAction("weapon-fire"); return true; }
+    }
     if (e.key === "0" && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) return pilot.resetCamera();
     if (e.key === "Escape" && !prizeUi.panel.hidden) {
       closePrizes();
@@ -911,11 +969,76 @@
   };
   // The shared slots go to the fires nearest the view, nearest first, by repeated minimum: no sort, no list. Each
   // flickers, its light's strength wavering on its own clock.
+  // In the haunted hallway and the arena the hall's lamps light nothing in sight, so the fires take every slot, and
+  // in the arena the ghost's pale green glow the first; the arena's night over it all: stars over a dark blue fading
+  // to black, a cold moonlight for the hall's warm fill, a thin blue haze far off, and the view reaching across it.
+  // The hall's lamps and look are put back as the view leaves.
+  const NIGHT = { stars: 1, sun: [0, 0, 0], sunDirection: { x: 0, y: -1, z: 0 }, direct: [0.35, 0.42, 0.62], fog: [0.02, 0.025, 0.05], fogNear: 45, fogFar: 140 };
+  // Its sky and fill, copied each frame into the colours the hunt's night darkens in place (`ghosts.shade`).
+  const NIGHT_TONES = { horizon: [0.05, 0.06, 0.12], zenith: [0.005, 0.008, 0.025], sky: [0.2, 0.24, 0.38], ground: [0.06, 0.06, 0.08], clear: [0.01, 0.012, 0.025] };
+  const TONES = {};
+  for (const key in NIGHT_TONES) TONES[key] = NIGHT_TONES[key].slice();
+  const CAVE = { directStrength: RENDER_OPTS.directStrength, ambientFloor: RENDER_OPTS.ambientFloor };
+  for (const key in NIGHT) CAVE[key] = RENDER_OPTS[key];
+  for (const key in NIGHT_TONES) CAVE[key] = RENDER_OPTS[key];
+  // The herald over the arena's middle (its foot `HERALD_FLOAT` up, bobbing) and its pale green glow.
+  const GHOST_GLOW = [14, 0.5, 1, 0.72], HERALD_HEIGHT = 2.6, HERALD_FLOAT = 1.1;
+  const GARGOYLE_SCALE = 6.4, TOTEM_SLICE = 0.3;
+  let hauntLit = false;
+  // The arena's totems, lit always as the hub's are on a merge's day: runes in their pattern up the pole, the painted
+  // faces breathing, a bright front circling each band and the eye fires leaping as the pattern passes them.
+  const lightTotems = (elapsed) => {
+    for (let i = 0; i < totemLife.length; i++) {
+      const o = totemLife[i], t = elapsed + i * 3.1;
+      for (let k = 0; k < o.runes.length; k++) {
+        const r = o.runes[k], lit = 0.25 + 0.75 * o.pattern(r.u, t, i);
+        r.node.glow = 0.45 + 0.55 * lit;
+        r.node.highlight = 0.45 + 1.6 * lit;
+      }
+      const pulse = 0.5 + 0.5 * Math.sin(elapsed * 2.2 + i * 1.7), shine = 0.38 * pulse * pulse;
+      o.features.visible = shine > 0.02;
+      o.features.glow = shine;
+      o.features.highlight = 0.55 * shine;
+      for (let k = 0; k < o.rings.length; k++) {
+        const r = o.rings[k], lit = BL.totemGlow.ring(r.a, t, r.level);
+        r.node.visible = lit > 0.01;
+        r.node.glow = lit;
+        r.node.highlight = lit * 2.2;
+      }
+      for (let k = 0; k < o.flames.length; k++) {
+        const f = o.flames[k], flick = Math.sin(elapsed * 11 + k * 2.3 + i) * 0.08 + Math.sin(elapsed * 17.3 + k * 1.1) * 0.05;
+        const fire = 0.75 + 0.75 * o.pattern(f.u, t, i);
+        f.node.scale.x = f.node.scale.z = f.size * fire;
+        f.node.scale.y = f.size * fire * (1 + flick);
+      }
+    }
+  };
   const glowNear = (elapsed) => {
-    const F = AM.lanterns(), P = F.lights, n = P.length / 3, t = pilot.orbit.target, L = RENDER_OPTS.lights;
+    const F = AM.lanterns(), P = F.lights, n = P.length / 3, t = pilot.orbit.target, L = RENDER_OPTS.lights, haunted = inHaunt(t.x, t.z) && t.y > HAUNT.y;
+    if (haunted !== hauntLit) {
+      if (haunted) { for (const key in NIGHT) RENDER_OPTS[key] = NIGHT[key]; for (const key in TONES) RENDER_OPTS[key] = TONES[key]; }
+      else for (const key in CAVE) RENDER_OPTS[key] = CAVE[key];
+      camera.far = haunted ? 130 : 60;
+      if (!haunted) lightUp();
+    }
+    hauntLit = haunted;
+    if (haunted) {
+      for (const key in NIGHT_TONES) for (let i = 0; i < 3; i++) TONES[key][i] = NIGHT_TONES[key][i];
+      RENDER_OPTS.directStrength = CAVE.directStrength; RENDER_OPTS.ambientFloor = CAVE.ambientFloor;
+      if (ghosts) ghosts.shade(RENDER_OPTS);
+    }
+    const arena = haunted && t.x > HAUNT.end;
+    let from = arena ? 1 : haunted ? 0 : fixedLights;
+    if (arena) {
+      const k = 0.85 + 0.15 * Math.sin(elapsed * 1.3);
+      L[0] = ARENA.x; L[1] = HAUNT.y + HERALD_FLOAT + HERALD_HEIGHT * 0.6; L[2] = ARENA.z; L[3] = GHOST_GLOW[0];
+      L[4] = GHOST_GLOW[1] * k; L[5] = GHOST_GLOW[2] * k; L[6] = GHOST_GLOW[3] * k; L[7] = 0;
+      // Through the hunt's night a lantern over each hunter still standing, nearest the view first.
+      if (ghosts) from += ghosts.lanterns(L, 1, Math.min(ghosts.lanternsWanted(), RENDER_OPTS.lightCount - 2));
+    }
     if (!poolScore) poolScore = new Float32Array(n);
     for (let i = 0; i < n; i++) { const o = i * 3, dx = P[o] - t.x, dz = P[o + 2] - t.z; poolScore[i] = dx * dx + dz * dz; }
-    for (let slot = fixedLights; slot < RENDER_OPTS.lightCount; slot++) {
+    for (let slot = from; slot < RENDER_OPTS.lightCount; slot++) {
       let best = 0, bestD = Infinity;
       for (let i = 0; i < n; i++) if (poolScore[i] < bestD) { bestD = poolScore[i]; best = i; }
       poolScore[best] = Infinity;
@@ -923,6 +1046,123 @@
       L[w] = P[o]; L[w + 1] = P[o + 1]; L[w + 2] = P[o + 2]; L[w + 3] = g[0];
       L[w + 4] = g[1] * k; L[w + 5] = g[2] * k; L[w + 6] = g[3] * k; L[w + 7] = 0;
     }
+  };
+
+  // HALLOWEEN: the ghost hunt in the arena (ghost-game.js), handed this adapter in place of the island's: the hunt works
+  // about the arena's middle (`origin`), with its herald floating there, ghosts coming in over the wall top (`ARENA_SPOTS`),
+  // the elixirs on the totems, no blight, at most four hunters, and those who wait walked out to the hallway. GAME
+  // MODE turns combat on and raises the iron fence.
+  const PARAMS = new URLSearchParams(location.search), DEBUG = PARAMS.get("debug") === "1";
+  const ARENA_ZONES = new Set(["arcade.arena", "arcade-hunt"]), HALL_ZONES = new Set(["arcade.hall", "arcade.arena", "arcade-hunt"]);
+  const HUNTERS = 4, FENCE_S = 1.4;
+  // Tess for the hunt's Tess drop: out of sight until the hunt flies her (`lend`), made with the hunt.
+  const arenaTess = () => {
+    const rig = BL.tess.create({ parent: root, input, fx, camera, kind: "tess", coarse: COARSE, quality: () => renderer.quality });
+    rig.root.visible = false;
+    let driver = null;
+    return {
+      lend: (d) => { driver = d; if (!d) rig.root.visible = false; },
+      update: (dt, elapsed) => { if (driver) { driver(rig, dt); rig.update(dt, elapsed); } },
+      liveGeometry: (set) => rig.liveGeometry(set),
+      dispose: () => rig.dispose()
+    };
+  };
+  // The arena's ground as the hunt asks it, about its middle: flat, round, no paths or mouths.
+  const ARENA_GROUND = {
+    surfaceAt: () => 0, onLand: (x, z) => Math.hypot(x, z) < HAUNT.arena.r, isPath: () => false, mouths: []
+  };
+  // Where ghosts come in: over the wall top all round but the hallway's mouth, as [x, y, z, bearing] about the middle
+  // (bearing from -z toward +x, rising).
+  const ARENA_SPOTS = (() => {
+    const out = [], mouth = 1.5 * Math.PI;
+    for (let i = 0; i < 90; i++) {
+      const a = i / 90 * Math.PI * 2;
+      if (Math.abs(((a - mouth + Math.PI * 3) % (Math.PI * 2)) - Math.PI) < 0.22) continue;
+      out.push(Math.sin(a) * (HAUNT.arena.r - 1), HAUNT.arena.wall + 1.2, -Math.cos(a) * (HAUNT.arena.r - 1), a);
+    }
+    return Float64Array.from(out);
+  })();
+  const HERALD_AT = { x: 0, y: 0, z: 0 };
+  const heraldAt = (now, x, y, z) => {
+    HERALD_AT.x = x; HERALD_AT.y = y + HERALD_FLOAT + 0.12 * Math.sin(now / 1000 * 1.3); HERALD_AT.z = z;
+    return HERALD_AT;
+  };
+  const addTarget = (node, owner) => input.add(node, owner);
+  const removeTarget = (node) => input.remove(node);
+  const isPlayerAttack = (source) => !!source && !!people && source === people.player;
+  const weaponImpact = (source, hit, dx, dy, dz, power = 1, projectile = null) => {
+    if (hit.owner.kind !== "halloween") return;
+    if (ghosts) ghosts.hit(source, hit, power, isPlayerAttack(source), !!projectile);
+    else if (ghostEntry && hit.owner.role === "herald") ghostEntry.hit(isPlayerAttack(source), !!projectile);
+  };
+  // Outside a hunt a weapon meets only the herald waiting to be woken.
+  const weaponInteraction = (owner) => owner.kind === "halloween" && owner.role === "herald" && owner.active;
+  const setGameMode = (on) => {
+    on = !!on;
+    if (on === gameMode) return;
+    gameMode = on;
+    if (people) people.setCombatEnabled(on);
+    pilot.refreshCombat();
+    // The Ooga list stays up through a hunt, as it does in the hall.
+    document.body.classList.toggle("game-mode", on);
+  };
+  // The visitor's Ooga carries its rifle in the arena alone, never short of rounds there; back in the hall it goes
+  // empty-handed again.
+  const arm = (on) => {
+    armed = on;
+    document.body.classList.toggle("arena-armed", on);
+    const w = avatar.weapon;
+    if (on) { rifleWas = w.unlimited; w.unlimited = true; w.secondaryOwned = true; avatar.parts.gun.visible = true; }
+    else {
+      if (pilot.aiming) pilot.modeAction("mode-toggle");
+      people.selectWeapon(0, avatar);
+      w.unlimited = rifleWas; w.secondaryOwned = false; w.aiming = false; avatar.parts.gun.visible = false;
+    }
+    pilot.refreshCombat();
+  };
+  // Not in the hunt (it filled, or they never readied): walked out to the hallway before the fence rises, facing in.
+  const sendToHallway = () => {
+    if (!avatar || pilot.player !== avatar) return;
+    const p = avatar.root.position;
+    if (p.x < FENCE_X - 0.5) return;
+    const x = FENCE_X - 4, z = (HAUNT.z0 + HAUNT.z1) / 2;
+    p.x = x; p.z = z; p.y = avatar.baseY + HAUNT.y;
+    avatar.root.rotation.y = Math.PI / 2;
+    pilot.navigate({ position: { x, y: HAUNT.y, z }, yaw: -Math.PI / 2, pitch: 0.18, dist: 4 });
+  };
+  const arenaHunt = () => ({
+    root, camera, renderer, fx, hud, crew: people, island: ARENA_GROUND, npcSync: ghostChannel, coarse: COARSE, debug: DEBUG, params: PARAMS,
+    guide: tess, addTarget, removeTarget, mayDriveOoga: mayPossess, zoneOf: () => zoneNow,
+    selectOoga: (cave) => { pilot.possess(cave); return pilot.player === cave; },
+    heraldGeometry: ghostEntry && ghostEntry.herald.geometry, gorillaActive: () => false,
+    gameMode: setGameMode,
+    lobbyOpen: (on, restore) => pilot.setMenuOpen(on, restore),
+    spectate: (on) => { if (on) sendToHallway(); },
+    readyGun: () => {
+      if (!armed) return;
+      if (!pilot.aiming) pilot.modeAction("mode-toggle");
+      pilot.weaponMode(2);
+    },
+    holdView: (on) => { pilot.setActive(!on); pilot.controls.reset(); input.reset(); pilot.setExternalControl(on); },
+    heldAxes: () => pilot.controls.read(),
+    ringRadius: HAUNT.arena.r - 2,
+    elixirSpots: totemsAt.map((t) => t.elixir),
+    pileRadius: () => GHOST_KEEP - 0.3,
+    pileTop: () => HERALD_FLOAT + 0.9,
+    // Nudges the driven Ooga along the floor (a ghost's knock, a wraith's pull) where it could walk.
+    pull: (cave, dx, dz) => {
+      const p = cave.root.position, feet = p.y - cave.baseY;
+      if (cave.health.stunned || !walkableFor(p.x, p.z, p.x + dx, p.z + dz, feet, cave.bodyHeight, cave)) return;
+      p.x += dx; p.z += dz;
+    },
+    origin: { x: HAUNT.arena.x, y: HAUNT.y, z: HAUNT.arena.z }, spots: ARENA_SPOTS, heraldAt: (now) => heraldAt(now, 0, 0, 0),
+    heraldHeight: HERALD_HEIGHT, inZone: (zone) => ARENA_ZONES.has(zone), arenaRadius: HAUNT.arena.r, maxPlayers: HUNTERS, gatherAt: "the ghost",
+    tapWakes: true, blight: false, waitingToast: "A hunt is on · wait in the hallway until the arena opens"
+  });
+  const attachHunt = () => {
+    tess = arenaTess();
+    ghosts = BL.halloween.create(arenaHunt());
+    return ghosts;
   };
 
   // A walker is held off things by its torso, not its arms: a square `BODY` m either side of its middle (all of it,
@@ -933,7 +1173,24 @@
   const BODY = 0.4, SIDE_FACE = HALL.halfW - 0.49, FRONT_FACE = HALL.front - 0.27, BACK_FACE = HALL.back + 0.15, JAMB = HALL.door - 0.35;
   // How far a body of half-width r at (x, z) reaches through the walls, negative when it is clear of them: the front
   // wall stands either side of the doorway, whose jambs run on out through the rock.
-  const wallDepth = (x, z, r) => Math.max(Math.abs(x) + r - SIDE_FACE, BACK_FACE + r - z, Math.min(z + r - FRONT_FACE, Math.abs(x) + r - JAMB));
+  // A body on the deck's level (`feet` given) may go on through the right wall into the haunted hallway, held
+  // `HAUNT_SIDE` off its walls, where its pumpkins and torches stand, and out into the arena, held `ARENA_SIDE` off
+  // its wall and `GHOST_KEEP` from its middle, outside the ghost's ring and the bones round it.
+  // Its totems stand in the way, each `keep` round; while a hunt runs the iron fence closes the mouth, FENCE_GAP either
+  // side of FENCE_X.
+  const ARENA = HAUNT.arena, HAUNT_SIDE = 0.65, ARENA_SIDE = 0.75, GHOST_KEEP = 3.7, FENCE_X = HAUNT.end - 0.05, FENCE_GAP = 0.15;
+  const wallDepth = (x, z, r, feet = 0) => {
+    const hall = Math.max(Math.abs(x) + r - SIDE_FACE, BACK_FACE + r - z, Math.min(z + r - FRONT_FACE, Math.abs(x) + r - JAMB));
+    if (feet < HAUNT.y - 1) return hall;
+    const d = Math.hypot(x - ARENA.x, z - ARENA.z), fenced = fenceK > 0.15;
+    let arena = Math.max(d + r - ARENA.r + ARENA_SIDE, GHOST_KEEP + r - d, fenced ? FENCE_X + FENCE_GAP + r - x : -Infinity);
+    for (let i = 0; i < totemsAt.length; i++) arena = Math.max(arena, AM.ARENA_TOTEMS.keep + r - Math.hypot(x - totemsAt[i].x, z - totemsAt[i].z));
+    return Math.min(hall, Math.max(HALL.halfW - 2 + r - x, x + r - (fenced ? FENCE_X - FENCE_GAP : HAUNT.end + 2), HAUNT.z0 + HAUNT_SIDE + r - z, z + r - HAUNT.z1 + HAUNT_SIDE), arena);
+  };
+  // Whether a body at (x, z) with its feet at `feet` is in the arena (the hunt's ground; its hallway is not).
+  const inArenaRing = (x, z, feet) => feet > HAUNT.y - 1 && Math.hypot(x - ARENA.x, z - ARENA.z) < ARENA.r;
+  // Whether (x, z) is in the haunted hallway, its mouth or the arena.
+  const inHaunt = (x, z) => x > HALL.halfW - 1 && z > HAUNT.z0 && z < HAUNT.z1 || Math.hypot(x - ARENA.x, z - ARENA.z) < ARENA.r + 1;
   // The deck's rail between the stairs and each stair's handrail on the hall's side (the other runs along the side
   // wall, which keeps a walker off it already), boxes as `blocks` are ([x0, x1, z0, z1, and the feet from, to]), so a
   // walker keeps its body inside a stair and behind the rail, and off a stair's side from the floor. The deck rail's
@@ -944,7 +1201,8 @@
     return [c - 0.11, c + 0.11, head, foot + 0.11, -1, MEZZ.y + 2];
   })];
   // The floors a walker stands on, the highest within a step of its feet: the cave floor, the stage's two rings, the
-  // mezzanine's deck and the stair up to it (a ramp, running a little on past both ends). Allocation-free.
+  // mezzanine's deck and the stair up to it (a ramp, running a little on past both ends), and the haunted hallway's
+  // and the arena's floor, level with the deck. Allocation-free.
   const STEP = 0.6, STAIRS = MEZZ.stairs.map(([x, foot, , head]) => ({ x0: x - MEZZ.stairW / 2, x1: x + MEZZ.stairW / 2, foot, head, run: foot - head }));
   const supportAt = (x, z, feet) => {
     const reach = feet + STEP;
@@ -953,6 +1211,7 @@
     if (d <= STAGE.inner && STAGE.high <= reach) best = STAGE.high;
     else if (d <= STAGE.r && STAGE.low <= reach) best = STAGE.low;
     if (z >= MEZZ.z0 && z <= MEZZ.z1 && MEZZ.y <= reach) best = MEZZ.y;
+    if (HAUNT.y > best && HAUNT.y <= reach && x > HALL.halfW - 1 && inHaunt(x, z)) best = HAUNT.y;
     for (let i = 0; i < STAIRS.length; i++) {
       const st = STAIRS[i];
       if (x < st.x0 || x > st.x1 || z > st.foot + 0.3 || z < st.head - 0.3) continue;
@@ -989,8 +1248,8 @@
   // stands, even a play spot tucked close to its machine, the Ooga can always walk away or along, never into.
   const walkableFor = (ax, az, bx, bz, y, height, actor) => {
     const r = Math.min(actor.bodyRadius || BODY, BODY);
-    if (bz > HALL.front + 2 || supportAt(bx, bz, y) < y - STEP || underStair(bx, bz, y)) return false;
-    if (wallDepth(bx, bz, r) > Math.max(0, wallDepth(ax, az, r)) + 1e-6) return false;
+    if (bz > HALL.front + 2 && bx < HALL.halfW || supportAt(bx, bz, y) < y - STEP || underStair(bx, bz, y)) return false;
+    if (wallDepth(bx, bz, r, y) > Math.max(0, wallDepth(ax, az, r, y)) + 1e-6) return false;
     for (let i = 0; i < blocks.length; i++) if (!clearOf(blocks[i], ax, az, bx, bz, r, y)) return false;
     for (let i = 0; i < RAILS.length; i++) if (!clearOf(RAILS[i], ax, az, bx, bz, r, y)) return false;
     return true;
@@ -1650,7 +1909,25 @@
     hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
+    // In the haunted hallway the view's target and the camera keep to the passage under its roof, and in the arena
+    // inside its wall and under its top, `pad` from each.
+    const haunting = () => avatar && feetOf() > HAUNT.y - 1 && inHaunt(avatar.root.position.x, avatar.root.position.z);
+    const keepHaunted = (p, pad) => {
+      if (p.x > HAUNT.end) {
+        const dx = p.x - ARENA.x, dz = p.z - ARENA.z, d = Math.hypot(dx, dz), m = ARENA.r - pad * 2;
+        if (d > m) { p.x = ARENA.x + dx / d * m; p.z = ARENA.z + dz / d * m; }
+        p.y = clamp(p.y, HAUNT.y + pad, HAUNT.y + ARENA.wall - pad);
+        return;
+      }
+      p.y = clamp(p.y, HAUNT.y + pad, HAUNT.y + HAUNT.h - pad);
+      p.z = clamp(p.z, HAUNT.z0 + pad, HAUNT.z1 - pad);
+    };
     const clampTarget = (p) => {
+      if (haunting()) {
+        p.x = Math.max(p.x, HALL.halfW - 2);
+        keepHaunted(p, 0.6);
+        return;
+      }
       p.x = clamp(p.x, -HALL.halfW + 2, HALL.halfW - 2);
       p.y = clamp(p.y, 0.5, HALL.h - 2);
       p.z = clamp(p.z, HALL.back + 2, HALL.front - 1);
@@ -1658,6 +1935,10 @@
     // Under the mezzanine the camera keeps below the deck, easing down as the Ooga walks in, so the deck's edge
     // never fills the view.
     const clampCamera = (p) => {
+      if (haunting() && p.x > HALL.halfW - 0.8) {
+        keepHaunted(p, 0.4);
+        return;
+      }
       p.x = clamp(p.x, -HALL.halfW + 0.8, HALL.halfW - 0.8);
       const under = avatar && feetOf() < 1 ? clamp((MEZZ.z1 + 1 - avatar.root.position.z) / 1.2, 0, 1) : 0;
       p.y = clamp(p.y, 0.5, under ? MEZZ.y - 0.45 + (1 - under) * (HALL.h - MEZZ.y) : HALL.h - 0.8);
@@ -1665,11 +1946,12 @@
     };
     pilot = pilotMod.create({
       renderer, canvas: ctx.canvas, camera, hud, presets: views, landing: "entrance", pitch: PITCH, dist: DIST,
-      follow: FOLLOW, fly: FLY, clampTarget, clampCamera, ceilingAt: () => HALL.h - 1, coarse: COARSE, mayPossess,
+      follow: FOLLOW, fly: FLY, clampTarget, clampCamera, ceilingAt: () => HALL.h - 1, coarse: COARSE, mayPossess, combatOnly: () => gameMode,
       close: { eyeHeight: 1.1, eyeRatio: 0.95, eyeForward: 0.16, pitch: [-1.35, 1.35], trailingDist: 4, orbitDist: 5, maxStep: 0.6, groundAt: (x, z) => supportAt(x, z, feetOf()) }
     });
     const tipFor = (hit) => {
       const o = hit.owner;
+      if (o.kind === "halloween") return o.tooltip();
       if (o.kind === "cabinet") return `${GAMES[o.game].name} · ${COARSE ? "tap" : "click"} to play`;
       if (o.kind === "machine") return `${o.station.label} · walk up and press ${COARSE ? "PLAY" : "Space"}`;
       if (o.kind === "prizes") return `Prize counter · ${shownTickets()} tickets`;
@@ -1687,6 +1969,8 @@
       onTap: (hit) => {
         if (!hit) return;
         const o = hit.owner;
+        // The herald and the hunt answer a tap only from inside the arena.
+        if (o.kind === "halloween") { if (armed && o.tap) o.tap(); return; }
         if (o.kind === "cabinet") return play(o.game);
         if (o.kind === "machine") return open(o.station.game.kind, o.station.index);
         if (o.kind === "snack") return order();
@@ -1714,6 +1998,9 @@
       else if (action === "mode-preset") presetView(value);
       else if (action === "mode-retake") pilot.modeAction(action);
       else if (action === "arcade-mute") toggleMute();
+      else if (action === "ghost-exit" && ghosts) { ghosts.quit(); sendToHallway(); }
+      else if (armed && action.startsWith("mode-")) pilot.modeAction(action);
+      else if (armed && (action.startsWith("weapon-") || action === "magazine-swap")) pilot.weaponAction(action);
     });
     fx = fxMod.create({ root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, tickerAt: { x: 0, y: 5, z: -6 } });
     const panel = document.getElementById("prize-panel");
@@ -1738,7 +2025,11 @@
     world.pilot = null;
     if (playerName) {
       playerWorld = { level: 0, weapons: new Map(), magazine: { owned: false, count: 0, ammo: 0, carrier: null } };
-      const shared = { root, input, hud, game, world: playerWorld, playerName, fx, viewYaw: 0, outsideActors: () => remotes ? remotes.actors() : NO_ACTORS, outsideActorHeight: BL.remotePlayers.BODY_HEIGHT, groundAt: groundFor, walkable: walkableFor, useNear };
+      const shared = { root, input, hud, game, world: playerWorld, playerName, fx, viewYaw: 0, outsideActors: () => remotes ? remotes.actors() : NO_ACTORS, outsideActorHeight: BL.remotePlayers.BODY_HEIGHT, groundAt: groundFor, walkable: walkableFor, useNear,
+        // The rifle and club work in the ghost arena alone (`arm`); there they wake the herald and fight the hunt.
+        weaponsEnabled: true, onWeaponImpact: weaponImpact, weaponInteraction,
+        onShot: (cave, from, to) => { if (ghosts && cave === people.player) ghosts.shot(from, to); },
+        shotGeometry: () => ghosts && ghosts.hunting ? ghosts.shotGeometry() : null };
       people = shared.crew = BL.crew.create(shared);
       pilot.bind(shared);
       avatar = people.cavemen.get(playerName);
@@ -1759,7 +2050,15 @@
     unsubscribeAccount = BL.net.subscribe(accountChanged);
     seatCrowd(playerName);
     // Other signed-in players in the hall, as the Oogas they drive (after the crowd, which they may stand in for).
-    remotes = BL.remotePlayers.create({ root, crew: people, fx, hide: hideCrowd });
+    remotes = BL.remotePlayers.create({ root, crew: people, fx, hide: hideCrowd, visible: (rec) => HALL_ZONES.has(rec.zone) && !(ghosts && ghosts.down(rec.id)) });
+    // HALLOWEEN: the ghost hunt, played in the arena: its herald over the middle until a click or a shot from inside
+    // wakes it and its code loads, kept in step with the others in the arena through the room (`ghostChannel`).
+    zoneNow = "arcade.hall"; zoneHeld = 0; armed = false;
+    exitButton = document.getElementById("ghost-exit");
+    exitButton.hidden = true;
+    ghostChannel = BL.ghostEntry.channel();
+    ghostEntry = BL.ghostEntry.create({ root, camera, npcSync: ghostChannel, addTarget, removeTarget, hud, fx, attach: attachHunt,
+      heraldAt: (now) => heraldAt(now, ARENA.x, HAUNT.y, ARENA.z), heraldHeight: HERALD_HEIGHT, tapWakes: true });
     // The driven Ooga's own footsteps, heard by this page alone (footsteps.js).
     footsteps = BL.footsteps.create();
     hireCrew();
@@ -1803,7 +2102,10 @@
     arcadeScene.input = input;
     arcadeScene.debug = {
       hud, camera, controls: pilot.controls, pilot, crew: people, cavemen: people ? people.cavemen : null,
-      arcade: { screens, crowd, walkers, bots, spin, play, open, stations, carnival, nearStation, supportAt, blocks, audio, staff, life, get frame() { return shownFrame; } }
+      arcade: { screens, crowd, walkers, bots, spin, play, open, stations, carnival, nearStation, supportAt, blocks, audio, staff, life, get frame() { return shownFrame; } },
+      // HALLOWEEN: the arena's hunt (its herald's until it has loaded).
+      get halloween() { return ghosts ? ghosts.debug : ghostEntry && ghostEntry.debug; },
+      get arena() { return { armed, zone: zoneNow, fence: fenceK, gameMode }; }
     };
   };
 
@@ -1861,6 +2163,7 @@
   // station, the lamps nearest the view, and the way out.
   let prefetchAt = 0;
   const update = (dt, elapsed) => {
+    if (ghosts) ghosts.unshake(camera);
     if (elapsed >= prefetchAt) {
       prefetchAt = elapsed + 0.25;
       const p = pilot.player ? pilot.player.root.position : camera.position;
@@ -1882,6 +2185,17 @@
     }
     remotes.update(dt);
     footsteps.update(drivenHere);
+    // The ghost arena: the rifle in hand inside it, and the voice zone it reports (cut off from the hall's while a hunt
+    // runs), held a quarter second before it changes.
+    const feet = drivenHere ? drivenHere.root.position.y - drivenHere.baseY : 0;
+    const inRing = !!drivenHere && drivenHere === avatar && inArenaRing(drivenHere.root.position.x, drivenHere.root.position.z, feet);
+    if (inRing !== armed && avatar) arm(inRing);
+    const zone = inRing ? ghosts && ghosts.hunting ? "arcade-hunt" : "arcade.arena" : "arcade.hall";
+    if (zone === zoneNow) zoneHeld = 0;
+    else if ((zoneHeld += dt) >= 0.25) { zoneNow = zone; zoneHeld = 0; BL.net.setZone(zoneNow); }
+    // Exit hunt shows while this visitor hunts in the arena.
+    const hunter = armed && !!ghosts && ghosts.inHunt;
+    if (exitButton.hidden === hunter) exitButton.hidden = !hunter;
     // The loop, then PRESS START blinking, then the loop again; the best line shows with the loop.
     const frame = Math.floor(elapsed * FPS) % (FRAMES + AM.START_FRAMES);
     if (frame !== shownFrame) {
@@ -1935,12 +2249,23 @@
       }
       if (p.z > EXIT_Z + 1.2 && Math.abs(p.x) < HALL.door) leaveCave();
     }
+    ghostChannel.update(dt);
+    if (ghosts) { ghosts.update(dt); tess.update(dt, elapsed); }
+    else ghostEntry.update(dt);
+    fenceK = clamp(fenceK + clamp((gameMode ? 1 : 0) - fenceK, -dt / FENCE_S, dt / FENCE_S), 0, 1);
+    fence.visible = fenceK > 0;
+    fence.position.y = HAUNT.y - AM.IRON_FENCE.h * (1 - fenceK);
     glowNear(elapsed);
+    if (hauntLit) lightTotems(elapsed);
     stepTweens(dt);
     fx.update(dt, elapsed);
+    if (ghosts) ghosts.shake(camera);
   };
   const TAP_SOUNDS = { door: "knock", changer: "coin", muncher: "spit", wheel: "click", disco: "ding", fame: "ding", off: "ding", sign: "grunt" };
-  const drawExtra = (ctx2d, project) => remotes.drawNames(ctx2d, project);
+  const drawExtra = (ctx2d, project) => {
+    remotes.drawNames(ctx2d, project);
+    if (ghosts) ghosts.drawOverlay(ctx2d, project);
+  };
   const overlay = (dt) => fx.drawOverlay(dt, drawExtra);
 
   const leave = () => {
@@ -1953,6 +2278,17 @@
     for (const unsubscribe of scoreSubscriptions) unsubscribe();
     scoreSubscriptions.length = 0;
     BL.net.setBody(null);
+    // HALLOWEEN: the hunt and its herald let go of (combat off, the view and the Ooga given back), the rifle put away.
+    if (ghosts) { ghosts.dispose(); tess.dispose(); }
+    ghostEntry.dispose();
+    ghostChannel.dispose();
+    setGameMode(false);
+    if (armed) arm(false);
+    document.body.classList.remove("arena-armed", "game-mode");
+    exitButton.hidden = true;
+    ghosts = ghostEntry = ghostChannel = tess = fence = exitButton = null;
+    totemsAt = [];
+    totemLife = [];
     prizeUi.panel.removeEventListener("click", onPrizeClick);
     prizeUi.panel.hidden = true;
     window.removeEventListener("keydown", armsKeys, true);
@@ -1998,6 +2334,8 @@
     if (staff) for (const g of staff) g.agent.liveGeometry(set);
     if (avatar) set.add(avatar.headOpen).add(avatar.headClosed);
     if (remotes) remotes.liveGeometry(set);
+    if (ghosts) { ghosts.liveGeometry(set); tess.liveGeometry(set); }
+    else if (ghostEntry) ghostEntry.liveGeometry(set);
   };
   const stats = () => {
     let nodes = 0;
@@ -2012,7 +2350,7 @@
     id: "arcade", buildSteps: () => AM.buildSteps(), enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null, agent: null, agentView: null, agentControls: null, agentHandoff: null,
     get inMotion() {
-      return false;
+      return !!(ghosts && ghosts.inMotion);
     }
   });
   arcadeScene.prepare = () => { const loading = BL.deferred.load("arcade"); return loading ? loading.then(() => null) : null; };

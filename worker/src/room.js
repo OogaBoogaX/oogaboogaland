@@ -25,6 +25,7 @@ import {
   CLOSE_KICK, CLOSE_PROTOCOL, MAX_PLAYERS, MOVE_HZ, STALE_MS, SWEEP_MS, CLEANUP_MS, TICK_HZ,
   NPC_FRAME_MAX, NPC_HZ, OUTSIDE, HP_HZ, VOICE_TRACK, CHAT_HZ, CHAT_BURST, CHAT_BUCKET_KEEP, CHAT_RETRY_KEEP,
   DOOR_ZONE, DOOR_ROOM, DOOR_GRANT_MS, DOOR_TRANSIT_MS, DOOR_PASS_MS, DOOR_HZ, DOOR_BURST, GHOST_HZ, GHOST_BURST,
+  GHOST_MAGIC, GHOST_FRAME_MAX, GHOST_FRAME_HZ, GHOST_FRAME_BURST, inGhostArena, ghostCandidate,
   chatLog, castIndex, bodyName, ownedBody, electHost, npcFollowers, claimRefusal, parseClientMessage, playerFromHeaders, spawnPoint, takeToken, voicePeers,
 } from "./protocol.js";
 import { sha256Hex } from "./crypto.js";
@@ -48,6 +49,10 @@ export class Room extends DurableObject {
     this.hostId = 0;
     this.followers = 0;
     this.lastNpc = null;
+    // The arcade's ghost arena: its own hunt's host, how many follow it, and its last state frame.
+    this.ghostHostId = 0;
+    this.ghostFollowers = 0;
+    this.lastGhost = null;
     this.chat = chatLog();
     this.chatId = 0;
     this.chatAccepted = new Map();
@@ -95,10 +100,12 @@ export class Room extends DurableObject {
     this.restoreDoor();
     this.hostId = electHost(this.players.values());
     this.followers = npcFollowers(this.players.values(), this.hostId);
+    this.ghostHostId = electHost(this.players.values(), 0, ghostCandidate);
+    this.ghostFollowers = npcFollowers(this.players.values(), this.ghostHostId, inGhostArena);
   }
 
   record(ws, a) {
-    return { ws, voice: { pub: null, sub: null, track: null, gen: 0, mids: {}, pubMid: null }, muted: false, hp: 100, ko: false, g: null, sent: null, zone: OUTSIDE, pokerVoice: null, inHub: false, joinedAt: Date.now(), door: null, passes: [], ...a, bucket: { tokens: MOVE_HZ, at: Date.now() }, npcBucket: { tokens: NPC_HZ, at: Date.now() }, hpBucket: { tokens: HP_HZ, at: Date.now() }, doorBucket: { tokens: DOOR_BURST, at: Date.now() }, ghostBucket: { tokens: GHOST_BURST, at: Date.now() } /* HALLOWEEN */, chatBucket: this.chatBucketFor(a.id, Date.now()), seenAt: Date.now() };
+    return { ws, voice: { pub: null, sub: null, track: null, gen: 0, mids: {}, pubMid: null }, muted: false, hp: 100, ko: false, g: null, sent: null, zone: OUTSIDE, pokerVoice: null, inHub: false, visible: true, joinedAt: Date.now(), door: null, passes: [], ...a, bucket: { tokens: MOVE_HZ, at: Date.now() }, npcBucket: { tokens: NPC_HZ, at: Date.now() }, hpBucket: { tokens: HP_HZ, at: Date.now() }, doorBucket: { tokens: DOOR_BURST, at: Date.now() }, ghostBucket: { tokens: GHOST_BURST, at: Date.now() }, ghostFrameBucket: { tokens: GHOST_FRAME_BURST, at: Date.now() }, chatBucket: this.chatBucketFor(a.id, Date.now()), seenAt: Date.now() };
   }
 
   // Retain account debt across socket records, only while awake. Reclaim fully replenished
@@ -116,7 +123,7 @@ export class Room extends DurableObject {
   }
 
   attachment(p) {
-    return { id: p.id, login: p.login, display: p.display, contributor: p.contributor, body: p.body, connectionToken: p.connectionToken, studioSeat: p.studioSeat, studioRevoked: !!p.studioRevoked, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, voice: p.voice, muted: p.muted, hp: p.hp, ko: p.ko, sent: p.sent, zone: p.zone, pokerVoice: p.pokerVoice, inHub: p.inHub, joinedAt: p.joinedAt, door: p.door, passes: p.passes };
+    return { id: p.id, login: p.login, display: p.display, contributor: p.contributor, body: p.body, connectionToken: p.connectionToken, studioSeat: p.studioSeat, studioRevoked: !!p.studioRevoked, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, voice: p.voice, muted: p.muted, hp: p.hp, ko: p.ko, sent: p.sent, zone: p.zone, pokerVoice: p.pokerVoice, inHub: p.inHub, visible: p.visible, joinedAt: p.joinedAt, door: p.door, passes: p.passes };
   }
 
   view(p) {
@@ -302,7 +309,7 @@ export class Room extends DurableObject {
 
     const others = [];
     for (const o of this.players.values()) if (o !== p) others.push(this.view(o));
-    this.send(server, { t: "welcome", you: this.view(p), players: others, connectionToken: p.connectionToken, tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers, features: ["door"] });
+    this.send(server, { t: "welcome", you: this.view(p), players: others, connectionToken: p.connectionToken, tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers, ghostHost: this.ghostHostId, ghostFollowers: this.ghostFollowers, features: ["door"] });
     // A message of its own after welcome, so a page that does not know chat ignores it; empty after the room slept.
     this.send(server, { t: "chat-history", messages: this.chat.list() });
     this.broadcast({ t: "join", p: this.view(p) }, server);
@@ -323,7 +330,8 @@ export class Room extends DurableObject {
     if (!p) return;
     if (!ownedBody(CAST, p.login, p.contributor)) { this.evict(p, "revoked"); return; }
     if (typeof message !== "string") {
-      this.npcFrame(p, message);
+      if (message instanceof ArrayBuffer && message.byteLength >= 4 && new DataView(message).getUint32(0, true) === GHOST_MAGIC) this.ghostFrame(p, message);
+      else this.npcFrame(p, message);
       return;
     }
     const msg = parseClientMessage(typeof message === "string" ? message : "");
@@ -349,6 +357,11 @@ export class Room extends DurableObject {
       this.electHost();
       // A page arriving on the island catches up with the NPCs at once rather than at the next frame.
       if (p.inHub && p.id !== this.hostId && this.lastNpc) this.send(p.ws, this.lastNpc);
+    } else if (msg.t === "visible") {
+      // HALLOWEEN: a page hidden in the ghost arena hands its hosting on; shown again, it comes back a follower.
+      if (msg.on === p.visible) return;
+      p.visible = msg.on;
+      this.electGhostHost();
     } else if (msg.t === "zone") {
       if (msg.name === p.zone) return;
       if (msg.name !== DOOR_ZONE) this.cancelDoor(p);
@@ -356,6 +369,9 @@ export class Room extends DurableObject {
       const leavingStudio = p.zone === STUDIO_ZONE;
       p.zone = msg.name;
       p.pokerVoice = null;
+      this.electGhostHost();
+      // A page walking into the ghost arena catches up with its hunt (a lobby open, a hunt on) at once.
+      if (inGhostArena(p) && p.id !== this.ghostHostId && this.lastGhost) this.send(p.ws, this.lastGhost);
       if (leavingStudio) this.leaveStudio(p);
       if (p.zone === STUDIO_ZONE) { this.enforceStudio(); this.sendStudio(p); }
       this.broadcast({ t: "zone", id: p.id, name: p.zone });
@@ -385,12 +401,12 @@ export class Room extends DurableObject {
     } else if (msg.t === "door") {
       return this.doorMessage(p, msg);
     } else if (msg.t === "ghost") {
-      // HALLOWEEN: a follower on the island tells the host of the ghost hunt; nobody else hears it, nothing is kept.
-      if (!p.inHub || !p.body || p.id === this.hostId) return;
+      // HALLOWEEN: a follower in the ghost arena tells its hunt's host; nobody else hears it, nothing is kept.
+      if (!inGhostArena(p) || !p.body || p.id === this.ghostHostId) return;
       if (!p.ghostBucket) p.ghostBucket = { tokens: GHOST_BURST, at: p.seenAt };
       if (!takeToken(p.ghostBucket, GHOST_HZ, p.seenAt, GHOST_BURST)) return;
-      const host = this.players.get(this.hostId);
-      if (host && host.inHub) this.send(host.ws, { ...msg, from: p.id });
+      const host = this.players.get(this.ghostHostId);
+      if (host && inGhostArena(host)) this.send(host.ws, { ...msg, from: p.id });
     } else if (msg.t === "body") {
       if (msg.name === p.body) return;
       const refusal = claimRefusal(CAST, p.login, msg.name, this.players.values(), p.contributor);
@@ -433,6 +449,7 @@ export class Room extends DurableObject {
     this.players.delete(p.id);
     this.broadcast({ t: "leave", id: p.id, reason });
     this.electHost();
+    this.electGhostHost();
     this.updateVoice();
     if (!this.players.size && this.flushTimer) {
       clearTimeout(this.flushTimer);
@@ -524,6 +541,28 @@ export class Room extends DurableObject {
     this.followers = followers;
     if (!id) this.lastNpc = null;
     this.broadcast({ t: "host", id, followers });
+  }
+
+  // The ghost arena's host, among the visible pages in it, by the NPC host's rule; every page hears who it is. The
+  // kept frame goes with a change of host, and when nobody follows, since the host then stops sending and the frame
+  // would hand the next page in a hunt that has moved on (it sends again within a quarter second of a follower).
+  electGhostHost() {
+    const id = electHost(this.players.values(), this.ghostHostId, ghostCandidate);
+    const followers = npcFollowers(this.players.values(), id, inGhostArena);
+    if (id !== this.ghostHostId || !followers) this.lastGhost = null;
+    if (id === this.ghostHostId && followers === this.ghostFollowers) return;
+    this.ghostHostId = id;
+    this.ghostFollowers = followers;
+    this.broadcast({ t: "ghost-host", id, followers });
+  }
+
+  // A binary frame led by GHOST_MAGIC is the arena hunt's state: taken only from its host while in the arena, capped
+  // in size and rate, kept for the next page to walk in, and relayed unchanged to every other page in the arena.
+  ghostFrame(p, data) {
+    if (p.id !== this.ghostHostId || !inGhostArena(p) || data.byteLength > GHOST_FRAME_MAX) return;
+    if (!takeToken(p.ghostFrameBucket, GHOST_FRAME_HZ, Date.now(), GHOST_FRAME_BURST)) return;
+    if (this.ghostFollowers) this.lastGhost = data;
+    for (const q of this.players.values()) if (q !== p && inGhostArena(q)) this.send(q.ws, data);
   }
 
   // A binary frame is the NPC host's poses: taken only from the current host, capped in size and rate,

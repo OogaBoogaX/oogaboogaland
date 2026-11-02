@@ -584,10 +584,10 @@ body[data-active-scene="hub"] .home-link {
   }
 }
 
-/* The Arcade venue stays empty-handed; gameplay hides panels through the HUD. */
-body[data-active-scene="arcade"] .primary-hud,
-body[data-active-scene="arcade"] .weapon-hud,
-body[data-active-scene="arcade"] .magazine-hud {
+/* The Arcade venue stays empty-handed but for its ghost arena; gameplay hides panels through the HUD. */
+body[data-active-scene="arcade"]:not(.arena-armed) .primary-hud,
+body[data-active-scene="arcade"]:not(.arena-armed) .weapon-hud,
+body[data-active-scene="arcade"]:not(.arena-armed) .magazine-hud {
   display: none;
 }
 

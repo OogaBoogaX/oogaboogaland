@@ -48,8 +48,6 @@
     const TQ = quat.create();
     let role = "solo", hostId = null, sendIn = 0, sinceSent = 0, sentFloats = -1, seen = -1, frames = 0, events = [], elapsed = 0;
     const poseFlags = new Int32Array(n).fill(-1);
-    // HALLOWEEN: the ghost hunt rides the events as one `gh` record (ghost-sync.js): `write` on the host, `read` on a follower.
-    let extra = null;
 
     const driven = (cave) => cave === crew.player || !!cave.remoteControlled;
     const holders = list.map((cave) => [cave.parts.armL, cave.parts.armR, cave.root, cave.sleepWeapons]);
@@ -207,8 +205,6 @@
         k++;
       }
       const floats = HEADER + k * RECORD, bytes = floats * 4;
-      const hunt = extra && events.length < EVENTS_MAX ? extra.write() : null; // HALLOWEEN
-      if (hunt) events.push(hunt); // HALLOWEEN
       // Nothing moved and nothing happened: skip, but not for longer than KEEP_S.
       if (!events.length && floats === sentFloats && sinceSent < KEEP_S) {
         let same = true;
@@ -232,7 +228,6 @@
     };
 
     const replay = (event) => {
-      if (event.k === "gh") { if (extra) extra.read(event); return; } // HALLOWEEN
       const cave = event.i >= 0 && event.i < n ? list[event.i] : null;
       if (event.k === "b") {
         const geos = event.kind === "dust" ? BL.crew.LAND_DUST : event.kind === "sparks" ? BL.crew.JET_SPARKS : null;
@@ -466,8 +461,7 @@
       resetEvents();
     };
 
-    return { update, dispose, fx: recordingFx, recordShot, recordPlan, recordHit, get role() { return role; }, get frames() { return frames; },
-      get extra() { return extra; }, set extra(value) { extra = value; } }; // HALLOWEEN: extra
+    return { update, dispose, fx: recordingFx, recordShot, recordPlan, recordHit, get role() { return role; }, get frames() { return frames; } };
   };
 
   BL.npcSync = { create, FORMAT, RECORD };

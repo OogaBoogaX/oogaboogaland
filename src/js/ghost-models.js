@@ -7,9 +7,8 @@
 // and drops are hard cut-outs (their edge is their alpha at half); only the light round the drops is soft. A sprite stands one unit tall on y 0 (the
 // hunt scales it), its outline just past its edges. The drops are the lab's pictures (the bomb drawn as the lab drew it)
 // and the light round them the lab's gradients: a glow disc, a ring, a beam and a falling streak, in each drop's colour.
-// Also the ecto-walls over each cave and bridge, the eye beam and soul stream (a unit beam along +z, scaled to its
-// length), the grave of a player gone down and the bomb's shockwave ring. Everything is a scoped cache: built on first
-// use, dropped with the hub.
+// Also the eye beam and soul stream (a unit beam along +z, scaled to its length), the grave of a player gone down and
+// the bomb's shockwave ring. Everything is a scoped cache: built on first use, dropped with the scene.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -342,95 +341,6 @@
   }, [96, 512], false, 1.2);
 
   // ---------- the rest ----------
-  // A jack-o'-lantern one unit across (radius 1 at its waist), centred, its carved face lit toward +z: a ribbed lathe
-  // of orange skin with a stem, the eyes, nose and gap-toothed grin following its curve.
-  const pumpkin = cached(() => {
-    const geo = geometry(), segments = 16, skin = hexToRgb("#e8701a"), shade = hexToRgb("#b8520f"), lit = hexToRgb("#ffcc33");
-    const PROFILE = [[0.08, -0.84], [0.55, -0.76], [0.9, -0.45], [1, 0], [0.92, 0.4], [0.62, 0.7], [0.16, 0.8]];
-    const rib = (a) => 0.92 + 0.08 * Math.abs(Math.cos(a * 4));
-    const rings = PROFILE.map(([r, y]) => {
-      const ids = [];
-      for (let k = 0; k < segments; k++) {
-        const a = k / segments * Math.PI * 2, rr = r * rib(a);
-        ids.push(pushVert(geo, Math.cos(a) * rr, y, Math.sin(a) * rr));
-      }
-      return ids;
-    });
-    for (let p = 0; p < rings.length - 1; p++) for (let k = 0; k < segments; k++) {
-      const k2 = (k + 1) % segments;
-      face(geo, [rings[p][k], rings[p + 1][k], rings[p + 1][k2], rings[p][k2]], k % 2 ? shade : skin, { emissive: 0.22 });
-    }
-    // The carving: each point laid just proud of the skin in front of it.
-    const radiusAt = (y) => {
-      for (let i = 0; i < PROFILE.length - 1; i++) {
-        const [r0, y0] = PROFILE[i], [r1, y1] = PROFILE[i + 1];
-        if (y <= y1) return r0 + (r1 - r0) * Math.max(0, (y - y0) / (y1 - y0));
-      }
-      return 0.16;
-    };
-    const carve = (points) => {
-      const ids = [];
-      for (let i = 0; i < points.length; i += 2) {
-        const x = points[i], y = points[i + 1], r = radiusAt(y) * 0.92;
-        ids.push(pushVert(geo, x, y, Math.sqrt(Math.max(0, r * r - x * x)) + 0.03));
-      }
-      face(geo, ids, lit, { emissive: 1 });
-    };
-    carve([-0.46, 0.12, -0.14, 0.12, -0.3, 0.4]);
-    carve([0.14, 0.12, 0.46, 0.12, 0.3, 0.4]);
-    carve([-0.08, -0.06, 0.08, -0.06, 0, 0.08]);
-    const grin = (x) => -0.44 + 0.3 * x * x;
-    for (const [x0, x1] of [[-0.58, -0.36], [-0.29, -0.06], [0.06, 0.29], [0.36, 0.58]]) carve([x0, grin(x0), x1, grin(x1), x1, grin(x1) + 0.17, x0, grin(x0) + 0.17]);
-    const out = merge(geo, box({ w: 0.14, h: 0.28, d: 0.14, color: "#4f4220", offset: { y: 0.9 } }));
-    out.castShadow = false;
-    return out;
-  });
-  // A ghost wall: a sheet of black, ragged at the crest and dripping at the foot, `width` across and `height` tall,
-  // standing on y 0 and centred on x 0, its two faces along ±z, a lit jack-o'-lantern on its front (+z, the meadow side).
-  const mix = (a, b, t) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
-  const wall = variants((key) => {
-    const width = Math.floor(key / 100) / 10, height = key % 100 / 10, geo = geometry();
-    const cols = Math.max(6, Math.round(width / 0.4)), rows = 6;
-    const bottom = hexToRgb("#0b0a0d"), top = hexToRgb("#1b1820");
-    const grid = [];
-    for (let j = 0; j <= rows; j++) {
-      const row = [];
-      for (let i = 0; i <= cols; i++) {
-        const u = i / cols, x = (u - 0.5) * width;
-        let y = j / rows * height;
-        if (j === rows) y += 0.22 * Math.sin(i * 1.7) + 0.12 * Math.sin(i * 3.1 + 1);
-        if (j === 0) y -= 0.12 * Math.max(0, Math.sin(i * 2.3 + 0.4));
-        const z = 0.07 * Math.sin(x * 2.1 + y * 1.3);
-        row.push(x, y, z);
-      }
-      grid.push(row);
-    }
-    const sides = [];
-    for (const side of [1, -1]) {
-      const ids = grid.map((row) => {
-        const out = [];
-        for (let i = 0; i < row.length; i += 3) out.push(pushVert(geo, row[i], row[i + 1], row[i + 2] + side * 0.05));
-        return out;
-      });
-      sides.push(ids);
-      for (let j = 0; j < rows; j++) {
-        const c = mix(bottom, top, j / (rows - 1));
-        for (let i = 0; i < cols; i++) {
-          const q = [ids[j][i], ids[j][i + 1], ids[j + 1][i + 1], ids[j + 1][i]];
-          face(geo, side > 0 ? q : q.reverse(), c, { emissive: 0.03 });
-        }
-      }
-    }
-    const crest = hexToRgb("#26222c"), front = sides[0][rows], back = sides[1][rows];
-    for (let i = 0; i < cols; i++) face(geo, [front[i], front[i + 1], back[i + 1], back[i]], crest, { emissive: 0.03 });
-    const size = Math.min(0.62, height * 0.19, width * 0.14), lantern = pumpkin(), parts = [geo];
-    const moved = { verts: lantern.verts.map((v, i) => i % 3 === 0 ? v * size : i % 3 === 1 ? v * size + height * 0.52 : v * size + 0.05 + size * 0.55), faces: lantern.faces, lines: [] };
-    parts.push(moved);
-    const out = merge(...parts);
-    out.castShadow = false;
-    return out;
-  });
-  const wallGeometry = (width, height) => wall(Math.round(width * 10) * 100 + Math.round(height * 10));
   // An orb that circles a general (blue, lit), or a wraith or the herald (black, a pale rim).
   const orbs = [
     cached(() => noShadow(lathe({ profile: [[0.01, -0.08], [0.06, -0.06], [0.08, 0], [0.06, 0.06], [0.01, 0.08]], segments: 8, color: "#4f9dff", emissive: 1 }))),
@@ -712,5 +622,5 @@
   });
   const shockwave = cached(() => noShadow(ring({ r: 1, thickness: 0.05, segments: 40, color: "#7dff9a", emissive: 1 })));
 
-  BL.ghostModels = { TIERS, MODE, DROPS, prepare, ghost, portrait, viewOf, drop, glowDisc, ringOf, beamOf, blight, scorch, bolt, bubble, wallGeometry, orb, beam, zap, soul, rock, laserBurst, laserBolt, lightningBolt, monkey, elixir, picture, skeletonParts, spiderParts, spiderling, SPIDER_HIP, SPIDER_LEG, hourglassParts, HOURGLASS_FLOOR, HOURGLASS_NECK, HOURGLASS_CRYSTAL, HOURGLASS_TOP, dollar, gravestone, GRAVE_TOP, shockwave };
+  BL.ghostModels = { TIERS, MODE, DROPS, prepare, ghost, portrait, viewOf, drop, glowDisc, ringOf, beamOf, blight, scorch, bolt, bubble, orb, beam, zap, soul, rock, laserBurst, laserBolt, lightningBolt, monkey, elixir, picture, skeletonParts, spiderParts, spiderling, SPIDER_HIP, SPIDER_LEG, hourglassParts, HOURGLASS_FLOOR, HOURGLASS_NECK, HOURGLASS_CRYSTAL, HOURGLASS_TOP, dollar, gravestone, GRAVE_TOP, shockwave };
 })();

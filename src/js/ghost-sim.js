@@ -57,8 +57,8 @@
     TICK_MS: 50, MAX_GHOSTS: 32, MAX_DROPS: 12, MAX_PLAYERS: 16, MAX_PENDING: 24,
     // The lobby: how long players have to gather and ready up once the herald is woken.
     GATHER_MS: 30000,
-    // A won hunt holds its banner and podium `VICTORY_MS` (five seconds past the ten it once held) before the dawn.
-    NIGHT_MS: 3500, COUNTDOWN_MS: 4000, BREAK_MS: 6000, VICTORY_MS: 15000, DAWN_MS: 6000, ABANDON_MS: 15000,
+    // A won hunt holds its banner and podium `VICTORY_MS` before the dawn.
+    NIGHT_MS: 3500, COUNTDOWN_MS: 4000, BREAK_MS: 6000, VICTORY_MS: 7500, DAWN_MS: 6000, ABANDON_MS: 15000,
     // A round that brings in new enemies opens with a card for each in turn, its countdown `INTRO_MS` longer for every
     // card: `INTRO_PAGES[round - 1]` of them, the last the boss's (round 8). Round 1 ghosts and gorillas; round 2
     // generals, skeletons, the spider and the hourglass; round 3 wraiths and the Fiat Rush; then the boss.
@@ -93,9 +93,10 @@
     // middle (clear of every hunter by `clearR`, and `moveR` from where he was), spits `spit` enemies of any kind at
     // `spitAtMs` into it (one more for every `spitPlayers` players past the first; `SPIT` weighs the kinds), vanishes
     // and comes again elsewhere `goneMs` later. Only while he shows can he be shot. His generals still come over the
-    // bluff in waves.
+    // bluff in waves. His health (`hp`, `hpPerPlayer` more for each player past the first, at most `hpMax`) is twice the
+    // hub hunt's.
     BOSS: { y: 1.5, minR: 6, maxR: 16, clearR: 6, moveR: 8, shownMs: 3000, goneMs: 1500, spitAtMs: 1200, spit: 3, spitPlayers: 2,
-      launchMs: 700, launchSpeed: 4, burnMs: 600, kills: 5, hp: 200, hpPerPlayer: 100, hpMax: 600, radius: 2.4, height: 7.6, generals: 20, generalGroup: 4, generalEvery: 6000, generalFirst: 4000 },
+      launchMs: 700, launchSpeed: 4, burnMs: 600, kills: 5, hp: 400, hpPerPlayer: 200, hpMax: 1200, radius: 2.4, height: 7.6, generals: 20, generalGroup: 4, generalEvery: 6000, generalFirst: 4000 },
     // What the boss spits, weighed: a plain ghost, a general, a wraith, a skeleton, a gorilla (a full pool of the last
     // two gives a plain ghost instead).
     SPIT: [0.45, 0.2, 0.15, 0.12, 0.08],
@@ -270,9 +271,10 @@
    * One hunt. `seed` seeds its random draws; `spots` is the crest's spawn spots as [x, y, z, bearing] runs (bearing in
    * radians, increasing); `lapMs` how long the herald's lap takes on this island; `pile` where the banana pile stands and
    * how near it a player takes the lightning drop (read as it is at each step, so the caller may grow it); `elixirs`
-   * where each elixir hangs on its totem ({ x, z }, at most ELIXIR.max).
+   * where each elixir hangs on its totem ({ x, z }, at most ELIXIR.max); `maxReady` how many may ready up in a lobby
+   * (the hunt's whole roster), which starts as soon as that many have.
    */
-  const create = ({ seed = 1, spots, lapMs = 20000, pile = { x: 0, z: 0, r: 3 }, elixirs = [] } = {}) => {
+  const create = ({ seed = 1, spots, lapMs = 20000, pile = { x: 0, z: 0, r: 3 }, elixirs = [], maxReady = C.MAX_PLAYERS } = {}) => {
     const s = { epoch: 0, pending: new Float64Array(C.MAX_PENDING) };
     for (const f of STATE_ALL) s[f] = 0;
     const ghosts = Array.from({ length: C.MAX_GHOSTS }, newGhost);
@@ -324,6 +326,12 @@
       p.id = id;
       p.seg = C.PLAYER_SEGMENTS;
       return p;
+    };
+    // Whether the lobby has its roster: `maxReady` players ready.
+    const full = () => {
+      let n = 0;
+      for (const q of players) if (q.on && q.ready) n++;
+      return n >= maxReady;
     };
     // Once the walls rise the roster is fixed: only those who readied up in the lobby (`inGame`) are in the hunt.
     // Anyone else, those who did not ready and those who came later, waits it out.
@@ -1200,7 +1208,7 @@
         if (here) s.emptySince = 0;
         else if (!s.emptySince) s.emptySince = now;
         const quiet = !here && now - s.emptySince >= C.ABANDON_MS;
-        if (hostReady && here && readyHere === here || now >= s.endsAt || quiet) {
+        if (hostReady && here && (readyHere === here || readyAny >= maxReady) || now >= s.endsAt || quiet) {
           for (const p of players) { p.inGame = p.on && p.ready ? 1 : 0; if (p.on && !p.inGame) p.on = p.here = false; }
           if (hostReady && readyAny && !quiet) { s.lapAt = now; s.emptySince = 0; enter(STATE.LAP); }
           else { const lap = s.lapMs; reset(); s.lapMs = lap; }
@@ -1249,11 +1257,21 @@
       if (on) { s.paused = 1; s.pausedFor = 0; } else { s.paused = 0; s.epoch = now - s.now; }
       return true;
     };
+    /** Player `id` quits the hunt under way (the arena's Exit): out of its roster for good; with no hunter left, dawn. */
+    const leave = (id) => {
+      const p = playerById(id);
+      if (!p || !rosterFixed()) return false;
+      p.on = p.here = false;
+      p.inGame = 0;
+      if (s.state >= STATE.LAP && s.state < STATE.VICTORY && !players.some((q) => q.on && q.inGame)) { s.outcome = OUTCOME.ABANDON; enter(STATE.DAWN); }
+      return true;
+    };
     /** Player `id` is ready to hunt (the lobby's Ready, or clicking the herald again); false outside the lobby. */
     const ready = (id) => {
       if (s.state !== STATE.GATHER) return false;
       const p = slotFor(id);
       if (!p) return false;
+      if (!p.ready && full()) return false;
       p.ready = 1;
       return true;
     };
@@ -1538,7 +1556,7 @@
     };
 
     return {
-      state: s, ghosts, players, drops, brutes, lings, round, settings, debug, brutesAlive, bossShown, bossNext, halving, beginPresence, present, playerById, advance, start, ready, pause, hit, snapshot, load, clear, jump,
+      state: s, ghosts, players, drops, brutes, lings, round, settings, debug, brutesAlive, bossShown, bossNext, halving, beginPresence, present, playerById, advance, start, ready, full, leave, pause, hit, snapshot, load, clear, jump,
       get ticks() { return ticks; }, get presence() { return presence; },
       frozen: (p) => frozen(p), alive, radiusOf, dawnMs
     };
