@@ -891,25 +891,12 @@
     }
   };
 
-  // The arcade plays like Ooga Mine: the Ooga walks empty-handed with the camera behind, so the weapon keys do
-  // nothing here and a right-click never aims. Registered before the pilot's listeners, in the capture phase.
-  const WEAPON_KEYS = new Set(["1", "2", "r"]);
-  const armsKeys = (e) => {
-    if (armed || e.metaKey || e.ctrlKey || e.altKey || !WEAPON_KEYS.has(e.key.toLowerCase())) return;
-    e.preventDefault();
-    e.stopImmediatePropagation();
-  };
-  const rightClick = (e) => {
-    if (armed || e.button !== 2) return;
-    e.preventDefault();
-    e.stopImmediatePropagation();
-  };
-  let canvasEl = null;
   const toggleMute = () => { const off = audio.setMuted(!audio.muted); hud.toast(off ? "Sound off" : "Sound on"); };
   const onKey = (e) => {
     if (ghosts && ghosts.key(e)) return true; // HALLOWEEN
-    // In the ghost arena the rifle is out: X aims, 1 and 2 pick the club or the rifle, G swaps, V fires.
-    if (armed && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    // The visitor's Ooga carries its club and rifle through the whole arcade, as on the island (#420): X aims, 1 and 2
+    // pick the club or the rifle, G swaps, V fires. Outside a hunt they meet nothing but the herald.
+    if (!e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) {
       if ((e.key === "x" || e.key === "X") && pilot.modeAction("mode-toggle")) return true;
       if ((e.key === "1" || e.key === "2") && pilot.weaponMode(Number(e.key))) return true;
       if (e.key === "g" || e.key === "G") { pilot.weaponAction("weapon-toggle"); return true; }
@@ -1106,18 +1093,12 @@
     // The Ooga list stays up through a hunt, as it does in the hall.
     document.body.classList.toggle("game-mode", on);
   };
-  // The visitor's Ooga carries its rifle in the arena alone, never short of rounds there; back in the hall it goes
-  // empty-handed again.
+  // In the arena the visitor's rifle never runs short of rounds; back in the hall it has what it had, still in hand.
   const arm = (on) => {
     armed = on;
-    document.body.classList.toggle("arena-armed", on);
     const w = avatar.weapon;
-    if (on) { rifleWas = w.unlimited; w.unlimited = true; w.secondaryOwned = true; avatar.parts.gun.visible = true; }
-    else {
-      if (pilot.aiming) pilot.modeAction("mode-toggle");
-      people.selectWeapon(0, avatar);
-      w.unlimited = rifleWas; w.secondaryOwned = false; w.aiming = false; avatar.parts.gun.visible = false;
-    }
+    if (on) { rifleWas = w.unlimited; w.unlimited = true; }
+    else w.unlimited = rifleWas;
     pilot.refreshCombat();
   };
   // Not in the hunt (it filled, or they never readied): walked out to the hallway before the fence rises, facing in.
@@ -1246,22 +1227,59 @@
   // nor take the body further into a wall, a rail or a machine than it already is, each on its own
   // (so being deep in one, as off the stage's side among the roots, is no way into the next): from wherever it
   // stands, even a play spot tucked close to its machine, the Ooga can always walk away or along, never into.
-  const walkableFor = (ax, az, bx, bz, y, height, actor) => {
+  // A step in the air, a jump's or a fall's: the walls, the stairs' undersides, the rails and the blocks hold it as they
+  // hold a walk, but the floor may lie any way below, so a walking or running jump carries on as on the island (#420).
+  const flyableFor = (ax, az, bx, bz, y, height, actor) => {
     const r = Math.min(actor.bodyRadius || BODY, BODY);
-    if (bz > HALL.front + 2 && bx < HALL.halfW || supportAt(bx, bz, y) < y - STEP || underStair(bx, bz, y)) return false;
+    if (bz > HALL.front + 2 && bx < HALL.halfW || underStair(bx, bz, y)) return false;
     if (wallDepth(bx, bz, r, y) > Math.max(0, wallDepth(ax, az, r, y)) + 1e-6) return false;
     for (let i = 0; i < blocks.length; i++) if (!clearOf(blocks[i], ax, az, bx, bz, r, y)) return false;
     for (let i = 0; i < RAILS.length; i++) if (!clearOf(RAILS[i], ax, az, bx, bz, r, y)) return false;
     return true;
   };
+  // On foot, a step also keeps the floor within a step below.
+  const walkableFor = (ax, az, bx, bz, y, height, actor) => supportAt(bx, bz, y) >= y - STEP && flyableFor(ax, az, bx, bz, y, height, actor);
   const feetOf = () => avatar ? avatar.root.position.y - avatar.baseY : 0;
-  // The station nearest (x, z) on the walker's own level: the deck's cabinets stand over the claws and pinball.
+  // Open air a view passes through (#420): the hall over its floor and under its roof, but for the deck's floor; the
+  // haunted hallway; and the arena, open to the sky. Rock, walls and floors are all the rest.
+  const DECK_SLAB = 0.35, SIGHT_STEP = 0.25, SIGHT_END = 0.4;
+  const airAt = (x, y, z) => {
+    if (Math.abs(x) < HALL.halfW && z > HALL.back && z < HALL.front && y > 0 && y < HALL.h) return !(z < MEZZ.z1 && y > MEZZ.y - DECK_SLAB && y < MEZZ.y);
+    if (x > HALL.halfW - 1 && x < HAUNT.end + 2 && z > HAUNT.z0 && z < HAUNT.z1 && y > HAUNT.y && y < HAUNT.y + HAUNT.h) return true;
+    return y > HAUNT.y && Math.hypot(x - ARENA.x, z - ARENA.z) < ARENA.r;
+  };
+  // Whether no rock, wall or floor stands between a and b, by open air every SIGHT_STEP along the line: a view starting
+  // inside rock (a camera pressed into a wall) counts from its first open point, and the last SIGHT_END before b is not
+  // asked, so a game standing against a wall is still seen. Allocation-free.
+  const sightClear = (ax, ay, az, bx, by, bz) => {
+    const dx = bx - ax, dy = by - ay, dz = bz - az, length = Math.hypot(dx, dy, dz), n = Math.floor((length - SIGHT_END) / SIGHT_STEP);
+    let open = false;
+    for (let i = 0; i <= n; i++) {
+      const t = i * SIGHT_STEP / length;
+      if (airAt(ax + dx * t, ay + dy * t, az + dz * t)) open = true;
+      else if (open) return false;
+    }
+    return true;
+  };
+  // A pick seen from the camera; its target's middle stands for it.
+  const inView = (hit) => { const m = hit.node.world, c = camera.position; return sightClear(c.x, c.y, c.z, m[12], m[13], m[14]); };
+  // What the overlay draws at a place (an NPC's line, a player's name, the hunt's marks) shows only where it can be seen:
+  // from inside the arena, nothing from outside the hallway and the arena, without a test, and otherwise along an open
+  // line from the view (fx's `overlayVisible`, and `characterOccluded` for a line over a character's head).
+  const pointHidden = (x, y, z) => {
+    if (armed && !inHaunt(x, z)) return true;
+    const c = camera.position;
+    return !sightClear(c.x, c.y, c.z, x, y, z);
+  };
+  const speakerHidden = (cave) => { const p = cave.root.position; return pointHidden(p.x, p.y + 1.2, p.z); };
+  // The station nearest (x, z) on the walker's own level and in its sight: the deck's cabinets stand over the claws and
+  // pinball, and nothing is played through a wall or a floor.
   const nearStation = (x, z, reach) => {
     let found = null, best = reach * reach;
     const feet = feetOf();
     for (let i = 0; i < stations.length; i++) {
-      const p = stations[i].play, d = (x - p.x) * (x - p.x) + (z - p.z) * (z - p.z);
-      if (d < best && Math.abs((stations[i].y || 0) - feet) < 1.2) { best = d; found = stations[i]; }
+      const s = stations[i], p = s.play, d = (x - p.x) * (x - p.x) + (z - p.z) * (z - p.z), y = s.y || 0;
+      if (d < best && Math.abs(y - feet) < 1.2 && sightClear(x, feet + 1.1, z, p.x, y + 1.1, p.z)) { best = d; found = s; }
     }
     return found;
   };
@@ -1901,9 +1919,6 @@
   const enter = (ctx) => {
     prefetchAt = 0;
     ({ renderer, game, world, go, agentPlay } = ctx);
-    canvasEl = ctx.canvas;
-    window.addEventListener("keydown", armsKeys, { capture: true, signal: ctx.signal });
-    canvasEl.addEventListener("pointerdown", rightClick, { capture: true, signal: ctx.signal });
     camera = createCamera({ fov: 55, near: 0.2, far: 60 });
     root = createNode();
     hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
@@ -1960,14 +1975,16 @@
       return TIPS[o.kind] ? TIPS[o.kind][0] : "";
     };
     Object.assign(hooks, {
+      // Nothing through a wall or a floor: no tooltip, and no game started by a tap.
       onHover: (hit, p) => {
+        if (hit && !inView(hit)) hit = null;
         if (hit?.owner.kind === "cabinet" && GAMES[hit.owner.game]) BL.deferred.prefetchScene(GAMES[hit.owner.game].id);
         if (hit) hud.tooltip.show(tipFor(hit), p.x, p.y);
         else hud.tooltip.hide();
       },
-      onHoverMove: (hit, p) => hud.tooltip.show(tipFor(hit), p.x, p.y),
+      onHoverMove: (hit, p) => { if (hit && inView(hit)) hud.tooltip.show(tipFor(hit), p.x, p.y); else hud.tooltip.hide(); },
       onTap: (hit) => {
-        if (!hit) return;
+        if (!hit || !inView(hit)) return;
         const o = hit.owner;
         // The herald and the hunt answer a tap only from inside the arena.
         if (o.kind === "halloween") { if (armed && o.tap) o.tap(); return; }
@@ -1999,10 +2016,10 @@
       else if (action === "mode-retake") pilot.modeAction(action);
       else if (action === "arcade-mute") toggleMute();
       else if (action === "ghost-exit" && ghosts) { ghosts.quit(); sendToHallway(); }
-      else if (armed && action.startsWith("mode-")) pilot.modeAction(action);
-      else if (armed && (action.startsWith("weapon-") || action === "magazine-swap")) pilot.weaponAction(action);
+      else if (action.startsWith("mode-")) pilot.modeAction(action);
+      else if (action.startsWith("weapon-") || action === "magazine-swap") pilot.weaponAction(action);
     });
-    fx = fxMod.create({ root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, tickerAt: { x: 0, y: 5, z: -6 } });
+    fx = fxMod.create({ root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, tickerAt: { x: 0, y: 5, z: -6 }, overlayVisible: (x, y, z) => !pointHidden(x, y, z), characterOccluded: speakerHidden });
     const panel = document.getElementById("prize-panel");
     prizeUi = { panel, tickets: document.getElementById("prize-tickets"), items: [...panel.querySelectorAll(".prize")] };
     panel.hidden = true;
@@ -2025,7 +2042,7 @@
     world.pilot = null;
     if (playerName) {
       playerWorld = { level: 0, weapons: new Map(), magazine: { owned: false, count: 0, ammo: 0, carrier: null } };
-      const shared = { root, input, hud, game, world: playerWorld, playerName, fx, viewYaw: 0, outsideActors: () => remotes ? remotes.actors() : NO_ACTORS, outsideActorHeight: BL.remotePlayers.BODY_HEIGHT, groundAt: groundFor, walkable: walkableFor, useNear,
+      const shared = { root, input, hud, game, world: playerWorld, playerName, fx, viewYaw: 0, outsideActors: () => remotes ? remotes.actors() : NO_ACTORS, outsideActorHeight: BL.remotePlayers.BODY_HEIGHT, groundAt: groundFor, walkable: walkableFor, flyable: flyableFor, useNear,
         // The rifle and club work in the ghost arena alone (`arm`); there they wake the herald and fight the hunt.
         weaponsEnabled: true, onWeaponImpact: weaponImpact, weaponInteraction,
         onShot: (cave, from, to) => { if (ghosts && cave === people.player) ghosts.shot(from, to); },
@@ -2039,11 +2056,10 @@
       avatar.root.rotation.y = at.facing;
       pilot.possess(avatar);
       if (!pilot.loginViewRestored) pilot.navigate({ position: { x: at.x, y: avatar.root.position.y - avatar.baseY, z: at.z }, yaw: at.facing - Math.PI, pitch: 0.18, dist: 4 });
-      // Empty-handed, as in Ooga Mine: no rifle on the back, no aiming, and the mine's words for the controls.
-      avatar.weapon.secondaryOwned = false;
+      // Empty-handed on arrival, the rifle on its back: 1 and 2 take the club or the rifle here as on the island.
+      avatar.weapon.secondaryOwned = true;
       people.selectWeapon(0, avatar);
       avatar.weapon.aiming = false;
-      avatar.parts.gun.visible = false;
       hud.hint(COARSE ? "Stick walks · PLAY at a game" : "W A S D walk · mouse or Q E turn · Space plays what is next to you", 6000);
     } else if (from >= 0) pilot.goPreset(GAMES[from].id);
     lastPlayer = playerName;
@@ -2102,7 +2118,7 @@
     arcadeScene.input = input;
     arcadeScene.debug = {
       hud, camera, controls: pilot.controls, pilot, crew: people, cavemen: people ? people.cavemen : null,
-      arcade: { screens, crowd, walkers, bots, spin, play, open, stations, carnival, nearStation, supportAt, blocks, audio, staff, life, get frame() { return shownFrame; } },
+      arcade: { screens, crowd, walkers, bots, spin, play, open, stations, carnival, nearStation, supportAt, walkable: walkableFor, flyable: flyableFor, sightClear, pointHidden, blocks, audio, staff, life, get frame() { return shownFrame; } },
       // HALLOWEEN: the arena's hunt (its herald's until it has loaded).
       get halloween() { return ghosts ? ghosts.debug : ghostEntry && ghostEntry.debug; },
       get arena() { return { armed, zone: zoneNow, fence: fenceK, gameMode }; }
@@ -2284,16 +2300,13 @@
     ghostChannel.dispose();
     setGameMode(false);
     if (armed) arm(false);
-    document.body.classList.remove("arena-armed", "game-mode");
+    document.body.classList.remove("game-mode");
     exitButton.hidden = true;
     ghosts = ghostEntry = ghostChannel = tess = fence = exitButton = null;
     totemsAt = [];
     totemLife = [];
     prizeUi.panel.removeEventListener("click", onPrizeClick);
     prizeUi.panel.hidden = true;
-    window.removeEventListener("keydown", armsKeys, true);
-    canvasEl.removeEventListener("pointerdown", rightClick, true);
-    canvasEl = null;
     for (const g of staff) g.agent.dispose();
     for (const id in JOBS) JOBS[id].spots.length = 0;
     CAND.fill(null);

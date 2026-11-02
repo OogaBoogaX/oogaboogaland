@@ -1122,16 +1122,17 @@
     return shaded(round, flat);
   });
   // A white letter on a gargoyle's chest, in the signs' 3x5 alphabet, each block set on the curve of its breast and
-  // belly as they lean with it; the gargoyles spell `GARGOYLE_WORDS` round the wall from the one over the mouth.
+  // belly as they lean with it; the gargoyles spell `GARGOYLE_WORDS` round the wall from the one over the mouth. The M
+  // is the carved signs' five-wide one, centred as the others are, since a three-wide M reads as an H (#420).
   const GARGOYLE_WORDS = "FREE SAMOURAI", GARGOYLE_CELL = 0.045;
   const gargoyleLetter = (() => {
     const made = new Map(), dome = (x, y, cy, cz, rx, ry, rz) => { const q = 1 - (x / rx) ** 2 - ((y - cy) / ry) ** 2; return q > 0 ? cz + rz * Math.sqrt(q) : -Infinity; };
     return (ch) => {
       if (!made.has(ch)) {
-        const C = GARGOYLE_CELL, cells = [];
-        BL.hubModels.SIGN_GLYPHS[ch].forEach((row, r) => [...row].forEach((on, c) => {
+        const C = GARGOYLE_CELL, cells = [], glyph = ch === "M" ? BL.hubModels.CARVED_M : BL.hubModels.SIGN_GLYPHS[ch], mid = (glyph[0].length - 1) / 2;
+        glyph.forEach((row, r) => [...row].forEach((on, c) => {
           if (on !== "1") return;
-          const x = (c - 1) * C, y = 0.54 - (r + 0.5) * C, z = Math.max(dome(x, y, 0.46, 0.02, 0.26, 0.3, 0.34), dome(x, y, 0.58, 0.24, 0.23, 0.22, 0.2));
+          const x = (c - mid) * C, y = 0.54 - (r + 0.5) * C, z = Math.max(dome(x, y, 0.46, 0.02, 0.26, 0.3, 0.34), dome(x, y, 0.58, 0.24, 0.23, 0.22, 0.2));
           cells.push(box({ w: C * 0.94, h: C * 0.94, d: 0.05, color: "#f2efe6", emissive: 0.55, offset: { x, y, z: z + 0.008 } }));
         }));
         made.set(ch, moved(turnedX(merge(...cells), 0.3), 0, 0.3, -0.12));
