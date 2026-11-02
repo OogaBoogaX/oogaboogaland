@@ -56,7 +56,7 @@ A signed-in visitor holds one WebSocket to `/room` for the page life. The Worker
 | Direction | Message | Meaning |
 |---|---|---|
 | client → room | `{ t: "body", name }` | Ooga handle, `gorilla:<handle>` for its companion, or `null` when detached/in a game |
-| client → room | `{ t: "pose", x, y, z, yaw, g? }` | the body's feet and heading, at most 10 a second from the page, 20 allowed; optional bounded gorilla locomotion below |
+| client → room | `{ t: "pose", x, y, z, yaw, g?, j? }` | the body's feet and heading, at most 10 a second from the page, 20 allowed; optional bounded gorilla locomotion, or an Ooga's jetpack `j`, below |
 | client → room | `{ t: "zone", name }` | where that body is (see Zones below): voice is shared within its group, players are shown within the same zone |
 | client → room | `{ t: "blend", to, k }` | crossing a bridge (#392): `k` of 20 steps from the zone's end toward zone `to`, which must be one the zone's crossing reaches; `{ to: null, k: 0 }` for none. Sent on a step's change, 4 a second at most from the page, 8 allowed; a new zone ends it |
 | client → room | `{ t: "hub", on }` | this page shows the island in a visible tab: it can host the NPCs and receives their frames |
@@ -68,11 +68,11 @@ A signed-in visitor holds one WebSocket to `/room` for the page life. The Worker
 | client → room | binary led by `GHST` | HALLOWEEN: the ghost arena host's hunt state (`net.sendGhostState`), JSON after the four bytes, up to 64 KB and 5 a second, only while someone in the arena follows; relayed unchanged to every other page in the arena, the last kept for the next to walk in |
 | client → room | binary | the NPC host's frame: Ooga poses, gear, status and work, then its events (see The crew in step) |
 | client → room | `"ping"` every 10 s | answered `"pong"` without waking the room |
-| room → client | `welcome { you, players, tickHz, now, loopEpoch, host, followers }` | on connect: everyone else, their last pose, whether each is in voice (`voice`) and muted (`muted`), and their health (`hp`, `ko`) |
+| room → client | `welcome { you, players, tickHz, now, loopEpoch, host, followers }` | on connect: everyone else, their last pose and jetpack (`j`), whether each is in voice (`voice`) and muted (`muted`), and their health (`hp`, `ko`) |
 | room → client | `chat-history { messages }` | right after `welcome`: the chat lines the room still holds, oldest first, at most 100 |
 | room → client | `chat { id, at, login, name, text }` | a chat line, to everyone (the speaker too) |
 | room → client | `join { p }`, `leave { id, reason }`, `body { id, name }` | the roster changing |
-| room → client | `state { now, ps, gs? }` | at most 15 a second while poses arrive, none while nothing changes: `ps` is flat `id, x, y, z, yaw` runs; optional `gs` is `id, ...g` runs |
+| room → client | `state { now, ps, gs?, js? }` | at most 15 a second while poses arrive, none while nothing changes: `ps` is flat `id, x, y, z, yaw` runs; optional `gs` is `id, ...g` runs; optional `js` is `id, j` pairs for every player wearing a jetpack, so anyone else in `ps` has none |
 | room → client | `host { id, followers }` | the page that runs the NPCs now (0 for none) and how many pages follow it; binary frames from it follow while any do |
 | room → client | `voice { peers, gens }` | the ids this player should hear and each one's publication count (a new count is a microphone published again, pulled again); sent when that changes, and after every zone message |
 | room → client | `blend { id, to, k }` | another player's crossing changed; `welcome` and `join` carry every player's `blendTo` and `blendK`, and a `zone` resets it |
@@ -86,6 +86,8 @@ A signed-in visitor holds one WebSocket to `/room` for the page life. The Worker
 Frames the room cannot read close with 4400, as does any frame over 256 characters except a chat line; out-of-bounds poses, unknown types and unusable chat lines are ignored. The pure rules are in `worker/src/protocol.js` with their checks in `worker/test/`.
 
 Gorilla locomotion `g` is six finite numbers: `[flags, speed, climbStride, climbDirection, climbSide, swim]`. The flag bits are airborne (1), biped (2), climbing (4), running (8), lab (16), office (32) and asleep (64); flags must be an integer 0–127. The remaining values are clamped to ±20, ±1,000,000, ±1, ±1 and 0–1 respectively. While asleep, `climbDirection` carries the resting pose (-1 left, 0 back, 1 right), and the remote rig suppresses movement and other locomotion. Only a gorilla body retains them. Changing body clears locomotion and resets health; the page invalidates its pose cache and reports the new actor even at identical coordinates. Welcome/join records include `g`, and room attachments preserve it through hibernation. This adds no idle timer or change to the five-number position stride.
+
+An Ooga's jetpack `j` is an integer 0–7, for drawing only: 1 while worn, plus its flame's power (0–3) times 2 (`crew.jetFlags`), which other pages show on that Ooga with the same flicker (`remote-players.js`). The page sends it with a pose only when it changes, and a pose without it means none. Only an Ooga keeps one: a gorilla's is dropped, and a body change clears it. Welcome/join records and room attachments carry it as they do `g`, and each snapshot's `js` lists every non-zero one.
 
 Old open pages still understand Ooga poses but interpret `gorilla:<handle>` as an unknown Ooga handle. They can show a hashed Ooga alongside their still-active local gorilla, rather than the remote companion. Refresh all participating pages together for multiplayer companion play; the room does not negotiate client versions. The extension carries locomotion, not attacks, captive Oogas, throws or authoritative combat damage.
 

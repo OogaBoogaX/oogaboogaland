@@ -67,6 +67,33 @@ test("room broadcasts DSB zone changes, persists them and keeps ownership enforc
   assert.equal(room.view(player).zone, "scene-bifrost");
 });
 
+test("room carries an Ooga's jetpack to every page and drops it with the body", () => {
+  const Room = roomClass(), room = Object.create(Room.prototype), sent = [];
+  room.players = new Map(); room.chatBuckets = new Map(); room.voiceSig = new Map();
+  let attachment;
+  const ws = { deserializeAttachment: () => ({ id: 1 }), serializeAttachment: value => { attachment = value; }, send: text => sent.push(JSON.parse(text)) };
+  const player = room.record(ws, { id: 1, login: "YellowBrokeIt", display: "Yellow", body: "YellowBrokeIt", x: 0, y: 0, z: 0, yaw: 0 });
+  room.players.set(1, player);
+  room.scheduleFlush = () => {};
+  const state = () => sent.filter(m => m.t === "state").at(-1);
+  room.webSocketMessage(ws, JSON.stringify({ t: "pose", x: 1, y: 6, z: 1, yaw: 0, j: 5 }));
+  assert.equal(attachment.j, 5, "a room that sleeps wakes with the jetpack still on");
+  assert.equal(room.view(player).j, 5, "late joiners see it");
+  room.snapshot();
+  assert.deepEqual(state().ps, [1, 1, 6, 1, 0], "position records keep five fields");
+  assert.deepEqual(state().js, [1, 5]);
+  room.webSocketMessage(ws, JSON.stringify({ t: "pose", x: 1, y: 6, z: 1, yaw: 0 }));
+  assert.equal(player.j, 0, "a pose without one takes it off");
+  assert.ok(room.dirty, "taking it off without moving still schedules a snapshot");
+  room.snapshot();
+  assert.equal("js" in state(), false, "with nobody wearing one the snapshot carries none");
+  room.webSocketMessage(ws, JSON.stringify({ t: "pose", x: 1, y: 6, z: 1, yaw: 0, j: 3 }));
+  room.webSocketMessage(ws, JSON.stringify({ t: "body", name: "gorilla:YellowBrokeIt" }));
+  assert.equal(player.j, 0, "another body starts without it");
+  room.webSocketMessage(ws, JSON.stringify({ t: "pose", x: 1, y: 6, z: 1, yaw: 0, j: 3 }));
+  assert.equal(player.j, 0, "a gorilla never wears one");
+});
+
 test("voice lists survive the room sleeping and follow a microphone published again", () => {
   const Room = roomClass();
   const socket = (id, store) => ({ sent: [], deserializeAttachment: () => store.a, serializeAttachment(value) { store.a = JSON.parse(JSON.stringify(value)); }, send(text) { this.sent.push(JSON.parse(text)); } });

@@ -35,6 +35,8 @@
 // it; remote records carry `hp` and `ko`.
 // Gorilla poses optionally add `g`: flags (air, biped, climb, run, lab, office, sleep), speed, climb stride,
 // climb direction, climb side and swim. Each remote reuses its six values; ordinary poses keep their format.
+// An Ooga's pose may add `j`, its jetpack for other pages to draw (`crew.jetFlags`: 1 while worn, plus the flame's
+// power times 2), sent on a change; remote records carry it as `jet`, 0 for none.
 // Ooga Chat: `sendChat` sends a line (validated by chat-policy.js, CHAT_MAX UTF-16 units at most) while the
 // room is live; `subscribeChat` hears the room's lines as `fn(lines, joined, receipt)`: one new line, or on every
 // (re)join the lines the room still holds, which chat.js merges; a rejection keeps the draft. The room names each line's
@@ -117,7 +119,7 @@
   let npcFrame = null, inHub = false, hubSent = null, visibleSent = null;
   let zone = "outside", body = null, muted = false, hpSent = 100, koSent = false, hpAt = 0, poseAt = 0, px = NaN, py = NaN, pz = NaN, pyaw = NaN;
   const gSent = new Float64Array(6);
-  let gKnown = false, poseHasG = false;
+  let gKnown = false, poseHasG = false, jetSent = 0;
   let clockOffset = 0, clockKnown = false;
   let pokerVoice = null;
   // A server timestamp minus the arrival time is the true offset less the trip; the largest such
@@ -212,7 +214,7 @@
 
   const upsert = (p) => {
     if (!p || !Number.isSafeInteger(p.id) || p.id === state.selfId) return;
-    const rec = remotes.get(p.id) || { id: p.id, login: "", display: "", body: null, bodyKind: null, bodyName: null, zone: "outside", voice: false, muted: false, hp: 100, ko: false, x: 0, y: 0, z: 0, yaw: 0, poseZone: null, g: null, gData: null };
+    const rec = remotes.get(p.id) || { id: p.id, login: "", display: "", body: null, bodyKind: null, bodyName: null, zone: "outside", voice: false, muted: false, hp: 100, ko: false, x: 0, y: 0, z: 0, yaw: 0, poseZone: null, g: null, gData: null, jet: 0 };
     rec.login = String(p.login);
     rec.display = String(p.display || p.login);
     rec.body = typeof p.body === "string" ? p.body : null;
@@ -220,6 +222,7 @@
     rec.bodyName = bodyName(rec.body);
     rec.g = null;
     if (Array.isArray(p.g) && p.g.length === 6) readGorillaPose(rec, p.g);
+    rec.jet = Number.isInteger(p.j) && p.j > 0 && p.j <= 7 ? p.j : 0;
     rec.zone = typeof p.zone === "string" ? p.zone : "outside";
     rec.voice = p.voice === true;
     rec.hp = Number.isFinite(p.hp) ? p.hp : 100;
@@ -285,11 +288,18 @@
           changed = true;
         }
         rec.x = ps[i + 1]; rec.y = ps[i + 2]; rec.z = ps[i + 3]; rec.yaw = ps[i + 4];
+        // `js` lists every jetpack; anyone in the snapshot without one has none.
+        rec.jet = 0;
       }
       const gs = msg.gs;
       if (Array.isArray(gs)) for (let i = 0; i + 6 < gs.length; i += 7) {
         const rec = remotes.get(gs[i]);
         if (rec) readGorillaPose(rec, gs, i + 1);
+      }
+      const js = msg.js;
+      if (Array.isArray(js)) for (let i = 0; i + 1 < js.length; i += 2) {
+        const rec = remotes.get(js[i]), j = js[i + 1];
+        if (rec && Number.isInteger(j) && j > 0 && j <= 7) rec.jet = j;
       }
       if (changed) moved();
     } else if (msg.t === "welcome") {
@@ -317,7 +327,8 @@
       // appear, or become voice-eligible, in a room without its last bounded pose.
       const restoredPose = body && Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz) && Number.isFinite(pyaw);
       if (restoredPose) {
-        const extra = state.bodyKind === "gorilla" && poseHasG ? `,"g":[${gSent[0]},${gSent[1].toFixed(3)},${gSent[2].toFixed(3)},${gSent[3].toFixed(3)},${gSent[4].toFixed(3)},${gSent[5].toFixed(3)}]` : "";
+        const extra = state.bodyKind === "gorilla" && poseHasG ? `,"g":[${gSent[0]},${gSent[1].toFixed(3)},${gSent[2].toFixed(3)},${gSent[3].toFixed(3)},${gSent[4].toFixed(3)},${gSent[5].toFixed(3)}]`
+          : jetSent ? `,"j":${jetSent}` : "";
         send(`{"t":"pose","x":${px.toFixed(3)},"y":${py.toFixed(3)},"z":${pz.toFixed(3)},"yaw":${pyaw.toFixed(3)}${extra}}`);
       }
       sendZone();
@@ -350,6 +361,7 @@
         rec.bodyKind = bodyKind(rec.body);
         rec.bodyName = bodyName(rec.body);
         rec.g = null;
+        rec.jet = 0;
         rec.hp = 100;
         rec.ko = false;
       }
@@ -665,6 +677,7 @@
     state.bodyName = bodyName(name);
     poseAt = 0; px = NaN;
     gKnown = poseHasG = false;
+    jetSent = 0;
     sendBody();
     // The room starts another actor at full health.
     hpSent = 100; koSent = false; hpAt = 0;
@@ -703,8 +716,8 @@
     return true;
   };
 
-  // Throttled to POSE_MS and skipped while nothing moved; a changed gorilla pose also earns a report.
-  const sendPose = (x, y, z, yaw, g = null) => {
+  // Throttled to POSE_MS and skipped while nothing moved; a changed gorilla pose or jetpack also earns a report.
+  const sendPose = (x, y, z, yaw, g = null, jet = 0) => {
     const now = performance.now();
     if (state.bodyKind === "gorilla" && g && g.length === 6) {
       let valid = true;
@@ -720,7 +733,8 @@
     y = Math.max(BOUND_Y_MIN, Math.min(BOUND_Y_MAX, y));
     if (state.bodyKind !== "gorilla") g = null;
     if (g) for (let i = 0; i < 6; i++) if (!Number.isFinite(g[i])) { g = null; break; }
-    let changed = !!g && !gKnown;
+    if (state.bodyKind === "gorilla" || !Number.isInteger(jet) || jet < 0 || jet > 7) jet = 0;
+    let changed = !!g && !gKnown || jet !== jetSent;
     if (g && !changed) for (let i = 0; i < 6; i++) if (g[i] !== gSent[i]) { changed = true; break; }
     // Even when the complete pose is unchanged, remember that its cached locomotion is valid for reconnect.
     if (g) poseHasG = true;
@@ -734,6 +748,8 @@
       gKnown = true;
       extra = `,"g":[${g[0]},${g[1].toFixed(3)},${g[2].toFixed(3)},${g[3].toFixed(3)},${g[4].toFixed(3)},${g[5].toFixed(3)}]`;
     }
+    jetSent = jet;
+    if (jet) extra += `,"j":${jet}`;
     if (state.room === "live") send(`{"t":"pose","x":${x.toFixed(3)},"y":${y.toFixed(3)},"z":${z.toFixed(3)},"yaw":${yaw.toFixed(3)}${extra}}`);
     moved();
   };

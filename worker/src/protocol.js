@@ -13,6 +13,8 @@ import "../../src/js/voice-blend.js";
 //                 { t: "mute", on }              this page muted its own microphone, for everyone's roster
 //                 { t: "hp", v, ko }             the driven body's health (normalized 0-100) and knockout flag
 //                 pose.g                         optional gorilla locomotion: [flags, speed, stride, climb, side, swim]
+//                 pose.j                         optional jetpack, for drawing only: 1 while an Ooga wears one, plus its
+//                                                flame's power (0-3) times 2; absent is none
 //                 { t: "chat", text, clientId? }            a line for Ooga Chat (see Chat below)
 //                 { t: "studio", action, playback?, commandId?, ... }  a DSB Studio seat or host command; transport
 //                                checks `playback` against the state's playbackRevision
@@ -22,8 +24,10 @@ import "../../src/js/voice-blend.js";
 //                 binary                         the NPC host's frame of every Ooga's pose, relayed as is; or,
 //                                                led by GHOST_MAGIC, the ghost arena host's hunt state
 // Room → client:  welcome { you, players, tickHz, now, loopEpoch, connectionToken }, join { p }, leave { id, reason },
-//                 body { id, name }, state { now, ps: [id, x, y, z, yaw, ...], gs? }, kick { reason },
+//                 body { id, name }, state { now, ps: [id, x, y, z, yaw, ...], gs?, js? }, kick { reason },
 //                 state.gs                       gorilla locomotion in [id, ...g] runs; welcome/join carry g too
+//                 state.js                       [id, j] pairs for every player with a jetpack; anyone else in ps has
+//                                                none; welcome/join carry j too
 //                 release { name, reason }   the Ooga this socket claimed is not, or no longer, its to drive
 //                 host { id, followers }     who runs the NPCs now (0 for nobody) and how many pages follow
 //                                            them (a host with none sends nothing); binary NPC frames from them
@@ -172,6 +176,10 @@ export const parseClientMessage = (text) => {
       if (!Array.isArray(g) || g.length !== 6 || !g.every(finite) || !Number.isInteger(g[0]) || g[0] < 0 || g[0] > 127) return null;
       pose.g = [g[0], round(Math.max(-20, Math.min(20, g[1]))), round(Math.max(-1e6, Math.min(1e6, g[2]))),
         round(Math.max(-1, Math.min(1, g[3]))), round(Math.max(-1, Math.min(1, g[4]))), round(Math.max(0, Math.min(1, g[5])))];
+    }
+    if (msg.j !== undefined) {
+      if (!Number.isInteger(msg.j) || msg.j < 0 || msg.j > 7) return null;
+      if (msg.j) pose.j = msg.j;
     }
     return pose;
   }
