@@ -237,7 +237,7 @@
   // hall's, facing down the runway, the view square behind it, and the walk on.
   const walkIn = (c) => {
     const G = BL.factoryWindow.GLIDE, at = BL.factoryWindow.arrival(DOOR_WAY, clamp(c.side, -1.2, 1.2), clamp(c.past, 0, G.past), ARRIVE);
-    pilot.navigate({ yaw: at.yaw, pitch: clamp(c.pitch, FOLLOW.pitch[0], IN_PITCH), dist: clamp(c.dist, FOLLOW.min, IN_VIEW), position: { x: at.x, y: DOOR.y, z: at.z } });
+    pilot.navigate({ yaw: at.yaw, pitch: clamp(c.pitch, FOLLOW.pitch[0], IN_PITCH), dist: clamp(c.dist, FOLLOW.min, IN_VIEW), position: { x: at.x, y: DOOR.y, z: at.z }, framed: true });
     pilot.orbit.tDist = ARRIVAL.dist;
     const p = avatar.root.position;
     Object.assign(walk, { phase: WALK_ON, t: 0, x: p.x, z: p.z, through: false });
@@ -1191,6 +1191,8 @@
       p.z = Math.min(p.z, HALL.front - 1.6 - lean);
     };
     pilot = pilotMod.create({
+      // The visitor's view, combat and weapon come in from the last scene and go on to the next (pilot.js `carried`).
+      carry: true,
       renderer, canvas: ctx.canvas, camera, hud, presets: PRESETS, landing: "entrance", pitch: PITCH, dist: DIST,
       follow: FOLLOW, fly: FLY, clampTarget, clampCamera, ceilingAt: () => HALL.h - 1.5, coarse: COARSE, mayPossess,
       close: { eyeHeight: 1.1, eyeRatio: 0.95, eyeForward: 0.16, pitch: [-1.35, 1.35], trailingDist: 4, orbitDist: 5, maxStep: 0.6, groundAt: (x, z) => HM.supportAt(x, z, feetOf()) }
@@ -1327,8 +1329,8 @@
         Object.assign(avatar.root.position, { x: ARRIVAL.position.x, y: ARRIVAL.position.y + avatar.baseY, z: ARRIVAL.position.z });
         avatar.root.rotation.y = ARRIVAL.yaw + Math.PI;
       }
-      pilot.possess(avatar);
-      people.selectWeapon(avatar.weapon.selectedSlot, avatar);
+      // In as it left the last scene (pilot.js `arrive`); with nothing carried, armed, as before.
+      if (!pilot.arrive(avatar)) people.selectWeapon(avatar.weapon.selectedSlot, avatar);
       if (!pilot.loginViewRestored) {
         if (crossing) walkIn(crossing);
         else pilot.navigate(ARRIVAL);
