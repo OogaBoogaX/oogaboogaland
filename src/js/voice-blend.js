@@ -1,6 +1,10 @@
-// Voice across a crossing (#392), shared unchanged by the classic page and the Worker: where two zones of different
-// voice groups meet in one scene's coordinates (a bridge between the island and a bridged land), a player on the
-// crossing hears both, each by an equal-power share of how far along it they are. A crossing is reported as the zone it
+// Voice across a crossing (#392), shared unchanged by the classic page and the Worker: where two places meet in one
+// scene's coordinates, a player on the crossing hears both, each by an equal-power share of how far along it they are.
+// The crossings are the bridges between the island and each bridged land, and the slopes between levels: the island
+// down into HQ by its entrance ramps, HQ down into its basement, and the rainforest's surface down into its tunnels
+// and chamber. A level below is a place of its own (`hq-basement`, `rainforest-under`) that no page reports as its
+// zone: a player there stays in the zone above, all the way across to it, so who they see and how far away is
+// unchanged and only what they hear is. A crossing is reported as the zone it
 // leads to (`to`) and the progress toward it, which the page keeps exact and the room and other pages get in STEPS steps.
 // Places are zones, not groups, so a crossing reaches the land's outside and never another place of its group (the
 // chamber behind ₿IFRÖST's arch).
@@ -14,8 +18,10 @@
   const scope = typeof window === "undefined" ? globalThis : window;
   const BL = scope.BL = scope.BL || {};
   const STEPS = 20;
-  // Zones whose voices blend across the crossing between them, each pair in one scene's coordinates.
-  const PAIRS = [["outside", "rainforest"], ["outside", "sphere"], ["outside", "bifrost"]];
+  // Places whose voices blend across the crossing between them, each pair in one scene's coordinates: the bridges, then
+  // the levels, upper first.
+  const PAIRS = [["outside", "rainforest"], ["outside", "sphere"], ["outside", "bifrost"],
+    ["outside", "hq"], ["hq", "hq-basement"], ["rainforest", "rainforest-under"]];
   const adjacent = (a, b) => {
     for (const [x, y] of PAIRS) if (x === a && y === b || x === b && y === a) return true;
     return false;

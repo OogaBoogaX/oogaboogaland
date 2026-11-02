@@ -16575,7 +16575,7 @@ scene("hub", { label: "chilling", query: "status=chillin&pos=0",
     && traffic.clear.every(row => !row.waited && row.moved), JSON.stringify(traffic));
 } }] });
 // #392: walking each bridge reports the crossing the room and the page fade voices by.
-const hubVoiceCrossings = { name: "voice crossings", why: "rule: on each bridge a player hears the island fade into the land ahead by how far along they stand, and back again walking home", run: async (b) => {
+const hubVoiceCrossings = { name: "voice crossings", why: "rule: on each bridge and down each slope between levels a player hears the two places fade into each other by how far along they stand, and back again", run: async (b) => {
   const r = await b.evaluate(`(() => {
     const B = __ooga, D = BL.scenes.hub.debug, net = BL.net.state, T = D.timechainIsland, M = __ooga.poolIsland, F = D.bifrost;
     B.pilot.possess(B.cavemen.get("portlandhodl"));
@@ -16609,6 +16609,27 @@ const hubVoiceCrossings = { name: "voice crossings", why: "rule: on each bridge 
     && !row.land.to && row.land.zone === land && row.back.to === "outside" && Math.abs(row.back.t - 0.25) <= 0.05 && row.back.zone === land
     && row.backHeld.to === land && Math.abs(row.backHeld.t - 0.75) <= 0.05 && row.backHeld.zone === "outside" && !row.away.to && row.away.zone === "outside");
   record("voice crossings: each bridge reports its land and how far along, the island's zone held to its far end, and walking back from the land the island ahead", ok, JSON.stringify(r));
+  // Levels: down HQ's entrance ramp, its basement's ramp and the rainforest's descent, by height, only where each slope is.
+  const lv = await b.evaluate(`(() => {
+    const B = __ooga, D = BL.scenes.hub.debug, H = D.island.headquarters, M = __ooga.poolIsland, L = BL.poolLayout, net = BL.net.state;
+    const at = (x, y, z) => { B.pilot.navigate({ position: { x, y, z }, yaw: 0, pitch: 0.4, dist: 6 }); B.advance(0.6, 1 / 60); return { to: net.blendTo, t: +net.blendT.toFixed(2), zone: net.zone }; };
+    const near = (samples, y) => samples.reduce((best, p) => Math.abs(p.y - y) < Math.abs(best.y - y) ? p : best);
+    const world = (lx, ly, lz) => [M.worldX(lx, lz), M.place.y + ly, M.worldZ(lx, lz)], down = L.rampPoint(50), room = H.basement.rooms[0];
+    const entrance = near(H.ramps[0].samples, H.floor / 2), stair = near(H.basement.ramps[0].samples, (H.floor + H.basement.floor) / 2);
+    return {
+      entrance: at(entrance.x, entrance.y, entrance.z), floor: at(H.room.x, H.floor, H.room.z), stair: at(stair.x, stair.y, stair.z),
+      basement: at(room.x, H.basement.floor, room.z), backUp: at(H.room.x, H.floor, H.room.z),
+      descent: at(...world(down.x, down.y, down.z)), chamber: at(...world(9, L.FLOOR, 0)), court: at(...world(0, 0, 20)), lake: at(...world(2, -2.5, 2)),
+      depth: (-0.75 - down.y) / (-0.75 - L.FLOOR) };
+  })()`);
+  // Halfway down an entrance ramp from either side: the island's zone crossing to HQ, or HQ's crossing back up.
+  const intoHq = lv.entrance.zone === "outside" && lv.entrance.to === "hq" ? lv.entrance.t : lv.entrance.zone === "hq" && lv.entrance.to === "outside" ? 1 - lv.entrance.t : NaN;
+  record("voice crossings: down HQ's entrance ramps, its basement's and the rainforest's descent a player hears both levels by height, each level alone on it, never the lake over the chamber",
+    Math.abs(intoHq - 0.5) <= 0.05 && !lv.floor.to && lv.floor.zone === "hq" && lv.stair.to === "hq-basement" && Math.abs(lv.stair.t - 0.5) <= 0.05 && lv.stair.zone === "hq"
+      && lv.basement.to === "hq-basement" && lv.basement.t === 1 && lv.basement.zone === "hq" && !lv.backUp.to
+      && lv.descent.to === "rainforest-under" && Math.abs(lv.descent.t - lv.depth) <= 0.05 && lv.descent.zone === "rainforest"
+      && lv.chamber.to === "rainforest-under" && lv.chamber.t === 1 && !lv.court.to && lv.court.zone === "rainforest" && !lv.lake.to,
+    JSON.stringify(lv));
 } };
 scene("hub", { label: "player stacking", query: "solo=1&character=portlandhodl&pos=0", steps: [hubPlayerStacking, hubChalkboardReach, hubVoiceCrossings] });
 scene("hub", { label: "lab flask approach", query: "solo=1&character=portlandhodl&status=clankin", steps: [{ name: "gorilla lab exit through Oogas", why: "regression: Ooga occupancy, body sweeps and head support blocked gorillas leaving the lab", run: async (b) => {
