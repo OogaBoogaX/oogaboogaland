@@ -59,8 +59,9 @@
 
   // `root`: the scene's root; `jet`: the Jet's node and `nozzles` its nozzles' (sooted by the blast, or null); `fx`: the
   // scene's particles; `audio`: the hangar's sound; `hold(on)`: the controls taken from the presser and the view from
-  // the pilot, and given back; `toast(text)` for the result.
-  const create = ({ root, jet, nozzles, fx, audio, hold, toast }) => {
+  // the pilot, and given back; `toast(text)` for the result; `busy()`, whether something else has the engines now, so
+  // the button only buzzes no.
+  const create = ({ root, jet, nozzles, fx, audio, hold, toast, busy = null }) => {
     const L = HM.LAYOUT.fireTest, F = HM.FIRE, P = HM.fireStation(), E = HM.exhaust(), B = HM.blast(), c = Math.cos(L.turn), s = Math.sin(L.turn);
     const at = (p, dy = 0) => ({ x: p[0], y: p[1] + dy, z: p[2] });
     const hidden = (geometry, options) => createNode({ geometry, sightHidden: true, visible: false, ...options });
@@ -84,8 +85,10 @@
     addChild(group, body, createNode({ geometry: P.details, depthBias: FRONT }), button, guard, createNode({ position: at(F.hinge), geometry: P.hinge }),
       ...globes, ...bars, strobe, ...lamps, ...leds, ...strips, ...Object.values(screens), ...timers, ...scopes,
       ...F.pictures.map(([key, x, y, z]) => createNode({ position: { x, y, z }, geometry: HM.firePicture(key), sightHidden: true, depthBias: FRONT })));
-    const cables = createNode({ geometry: HM.fireCables() });
+    // Its cables: the runs along the floor to their ports, and the droops up to their plugs, which ride with the Jet.
+    const cables = createNode({ geometry: HM.fireCables().floor }), droops = createNode({ geometry: HM.fireCables().droop });
     addChild(root, group, cables);
+    addChild(jet, droops);
     const booth = { x: L.x, y: 2.5, z: L.z };
 
     // ---- the plumes, one at each nozzle's exit, blowing along +z ----
@@ -127,8 +130,10 @@
       g.fillStyle = grad; g.fillRect(0, 0, 256, 256);
     }
 
-    // `t` is the time since the press, -1 while the booth stands ready; `clock` times the blinking and flicker.
-    let t = -1, clock = 0, phase = "ready", shown = "ready", timerShown = -1, near = false, boomed = false, spark = 0, dust = 0, rumbleAt = 0, rumbling = false;
+    // `t` is the time since the press, -1 while the booth stands ready; `clock` times the blinking and flicker. Between
+    // tests the engines burn as `engines` last asked (`idleThrust`, `idleHeat`, `idleEach`), cold unless something
+    // drives them.
+    let t = -1, clock = 0, phase = "ready", shown = "ready", timerShown = -1, near = false, boomed = false, spark = 0, dust = 0, rumbleAt = 0, rumbling = false, idleThrust = 0, idleHeat = 0, idleEach = null;
     // The presser while the blast has them: who, which way they faced; whether the test holds the controls and the view;
     // the view's glide and its shake.
     let presser = null, heading = 0, holding = false, quake = 0, glide = 0, from = false;
@@ -142,8 +147,13 @@
     const POSE = quat.create(), BIRDS = quat.create(), TILT = quat.fromAxisAngle(quat.create(), 1, 0, 0, Math.PI / 2), SPIN = quat.create();
     const SHAKE = { x: 0, y: 0, z: 0, tx: 0, ty: 0, tz: 0, on: false };
     const ready = () => t < 0;
+    // The press, or while something else has the engines (`busy`) the denied buzz and nothing more.
     const press = () => {
       if (t >= 0) return false;
+      if (busy && busy()) {
+        audio.denied(booth.x, booth.y, booth.z);
+        return true;
+      }
       t = 0;
       boomed = false;
       audio.test(AT);
@@ -285,13 +295,14 @@
       ring.visible = shell.visible = false;
     };
 
-    // The plumes at `thrust` (0 out, 1 full), the throats at `heat` (0 cold, 1 blue-white), the heat's rings with them,
-    // and the Jet shuddering on its gear.
-    const burn = (thrust, heat) => {
-      for (const p of plumes) {
-        const lit = thrust > 0.02, flick = 1 + Math.sin(clock * 31 + p.x) * 0.05 + Math.sin(clock * 57) * 0.03;
-        p.hot.visible = heat > 0.02; p.hot.glow = Math.min(1, heat * 1.6);
-        p.blue.visible = heat > 0.8; p.blue.glow = (heat - 0.8) * 5;
+    // The plumes at `thrust` (0 out, 1 full), the throats at `heat` (0 cold, 1 blue-white), each throat's times its own
+    // in `each` when given, the heat's rings with them, and the Jet shuddering on its gear (`shook` while it does).
+    let shook = false;
+    const burn = (thrust, heat, each) => {
+      for (let i = 0; i < plumes.length; i++) {
+        const p = plumes[i], h = each ? heat * each[i] : heat, lit = thrust > 0.02, flick = 1 + Math.sin(clock * 31 + p.x) * 0.05 + Math.sin(clock * 57) * 0.03;
+        p.hot.visible = h > 0.02; p.hot.glow = Math.min(1, h * 1.6);
+        p.blue.visible = h > 0.8; p.blue.glow = (h - 0.8) * 5;
         for (const n of [p.envelope, p.mantle, p.core]) {
           n.visible = lit;
           n.scale.x = n.scale.y = 0.75 + thrust * 0.25 * flick;
@@ -311,8 +322,15 @@
           h.scale.x = h.scale.y = 0.95 + u * 0.5 + Math.sin(clock * 17 + i) * 0.04;
         }
       }
-      jet.position.x = jetX + (thrust > 0 ? (Math.random() - 0.5) * 0.024 * thrust : 0);
-      jet.position.y = jetY + (thrust > 0 ? (Math.random() - 0.5) * 0.016 * thrust : 0);
+      // The shudder only while they burn, settled back once, so the Jet is left to whatever else moves it between.
+      if (thrust > 0) {
+        jet.position.x = jetX + (Math.random() - 0.5) * 0.024 * thrust;
+        jet.position.y = jetY + (Math.random() - 0.5) * 0.016 * thrust;
+        shook = true;
+      } else if (shook) {
+        jet.position.x = jetX; jet.position.y = jetY;
+        shook = false;
+      }
     };
     // How hard the plumes burn now: lighting up under fire, and in the malfunction coughing out and catching again on a
     // fixed pattern, ragged.
@@ -392,9 +410,11 @@
         timerShown = left;
       }
 
-      // The engines: the throats glowing through the spool-up, the plumes, dust blown aft, sparks spat in the malfunction.
-      const thrust = thrustAt(), heat = phase === "spool" ? (t - AT.spool) / (AT.fire - AT.spool) * 0.8 : thrust > 0 ? 0.8 + thrust * 0.2 : 0;
-      burn(thrust, heat);
+      // The engines: the throats glowing through the spool-up, the plumes, dust blown aft, sparks spat in the malfunction;
+      // between tests as `engines` drives them.
+      const thrust = running ? thrustAt() : idleThrust;
+      const heat = !running ? idleHeat : phase === "spool" ? (t - AT.spool) / (AT.fire - AT.spool) * 0.8 : thrust > 0 ? 0.8 + thrust * 0.2 : 0;
+      burn(thrust, heat, running ? null : idleEach);
       if (thrust > 0.3 && (dust -= dt) <= 0) {
         dust = 0.05;
         for (const p of plumes) fx.spawnParticle(DUST, p.x + (Math.random() - 0.5) * 1.6, 0.08, p.z + 1.5 + Math.random() * 5, (Math.random() - 0.5) * 0.8, 0.4 + Math.random() * 0.6, 5 + Math.random() * 3, 0.7, 4, 0.6);
@@ -535,6 +555,10 @@
       g.globalAlpha = 1;
     };
 
+    // The engines between tests, from the next frame: `thrust`, `heat` and `each` (each throat's share of the heat, in
+    // the nozzles' order, or null for all alike) as `burn` takes them, the plumes lit, the Jet shuddering and the throats
+    // glowing as they say. The test's own run overrides them.
+    const engines = (thrust, heat, each = null) => { idleThrust = thrust; idleHeat = heat; idleEach = each; };
     // Leaving mid-test: the presser stands with their controls back, the pad stops, the Jet settles; the nodes go with
     // the scene's root.
     const dispose = () => {
@@ -548,7 +572,7 @@
     };
 
     return {
-      group, body, cables, press, update, useNear, actLabel, view, unshake, lights, overlay, dispose, AT, blast: blastAt,
+      group, body, cables, press, update, useNear, actLabel, view, unshake, lights, overlay, engines, dispose, AT, blast: blastAt,
       get phase() { return phase; }, get t() { return t; }, get near() { return near; }, get ready() { return ready(); }, get out() { return !!presser; }
     };
   };

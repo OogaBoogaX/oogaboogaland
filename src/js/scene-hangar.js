@@ -48,6 +48,16 @@
   };
   // In from the hall: on the landing a step in from the door, facing down the runway, the view in the doorway behind it.
   const ARRIVAL = { position: { x: 0, y: DOOR.y, z: DOOR.z - 3.4 }, target: { x: 0, y: DOOR.y + 1, z: DOOR.z - 3.4 }, yaw: 0, pitch: 0.12, dist: 2.8 };
+  // The walk through the door's shield either way, as the Factory's gate walks it (`factoryWindow.GLIDE`): the door as
+  // the walk takes it (its middle, the way out through it, its shield), how far in from it an arrival stands, how near
+  // the door a step back from there may come before it walks out (OUT_SLACK), and the view's reach as an Ooga comes in
+  // (IN_VIEW, IN_PITCH). The walk's phases: on in from the hall (WALK_ON) and out to it (WALK_OFF), handing over
+  // `world.hangarCrossing`. `walk` is the Factory's: which way, how long, where the Ooga stood, whether it is through,
+  // its beat in the shield, and the last frame of the place left over the first (`grab`, `still`, `hold`).
+  const DOOR_WAY = { x: DOOR.x, z: DOOR.z, ox: -Math.sin(DOOR.turn), oz: -Math.cos(DOOR.turn), plane: DOOR.plane };
+  const DOOR_IN = -((ARRIVAL.position.x - DOOR_WAY.x) * DOOR_WAY.ox + (ARRIVAL.position.z - DOOR_WAY.z) * DOOR_WAY.oz), OUT_SLACK = 1.2, IN_VIEW = 3.4, IN_PITCH = 0.45;
+  const WALK_ON = 1, WALK_OFF = 2, ARRIVE = { x: 0, z: 0, yaw: 0 };
+  const walk = { phase: 0, t: 0, x: 0, z: 0, through: false, beat: 0, grab: false, still: 0, hold: 0, settle: false };
   // The hall's own light, warm, and past the launch shield space, as ₿IFRÖST's night shows it: the sky pass paints its
   // deep gradient, its twinkling stars and a moon low in the tunnel's end; `sun` is the sun's colour, which the night
   // hides.
@@ -59,6 +69,10 @@
     shadowCenter: { x: 2.5, y: 6, z: -2 }, shadowExtent: 42,
     lights: new Float32Array(BL.glRenderer.POINT_LIGHT_CAPACITY * 8), lightCount: 0, bloomStrength: 1
   };
+  // The hall's own light at full, which an anomaly dims (its `ambient`).
+  // Where the Jet's nose gear stands along it, m from its middle, which the lowrider's bang comes from.
+  const NOSE_GEAR = -9.3;
+  const SKY = RENDER_OPTS.sky.slice(), GROUND = RENDER_OPTS.ground.slice(), DIRECT = RENDER_OPTS.directStrength, FLOOR = RENDER_OPTS.ambientFloor;
   // The space past the shield, from ₿IFRÖST's dome (`bifrostModels.sky`): its stars, the twinkling ones in their halos,
   // the galaxy's band and its shooting stars on a dome tipped so its zenith looks back down the tunnel and turned so
   // the band crosses the tunnel's end; and its ringed giant and its red world, turning with their moons going round,
@@ -76,7 +90,7 @@
   // The tunnel's neon burns past full (`NEON_GLOW`), each frame's strip shimmering at its own pace, and every
   // `NEON_STUTTER` seconds one stutters, dipping twice as a tired tube does; the light at the tunnel's mouth follows
   // its first strip (`MOUTH_LIGHT`).
-  const NEON_GLOW = 1.7, NEON_STUTTER = [2.5, 7], MOUTH_LIGHT = HM.TINTS.mouth;
+  const NEON_GLOW = 1.7, NEON_STUTTER = [2.5, 7], MOUTH_LIGHT = HM.TINTS.mouth, MOUTH_SLOT = 6;
   // The floor lamps breathe a little, each at its own pace, and every `LAMP_STUTTER` seconds one stutters, failing four
   // times in half a second (`LAMP_FAILS`, from and to, s, at `LAMP_DIM` of its light); and every `RABBIT` seconds a
   // pulse runs down the runway's marker lamps toward the launch tunnel at `RABBIT_SPEED` m/s, each brightening by up to
@@ -125,7 +139,8 @@
   const BUTTON_PRESS = { open: -1.1, swing: 0.12, hold: 0.9, dip: 0.012, again: 0.6 };
   // The forklift's power: how its lit parts glow off and on (`lit`); its beacon's dome off and running, and how bright
   // and how narrow its beam's flash is as it passes the view (`flash`, `sharp`); how fast the beacon turns (rad/s), the
-  // key (`turn`, rad/s) and the charge needle (`needle`, rad/s, so it sweeps up as the drive spins up); how long the key
+  // key (`turn`, rad/s) and the charge needle (`needle`, rad/s, so it sweeps up as the drive spins up), and how fast the
+  // speed needle follows the speed (`speedo`, a second); how long the key
   // holds at START while the drive spins up (`crank`, s) and when the dash lights at the chime (`ready`, s); and the
   // beacon's light: how far out its beam's spot falls (`reach`, m), how far it carries and its colour.
   // How high the forks lift over their rest (the forklift's units) and how fast (units a second), and how far the fork
@@ -139,13 +154,13 @@
   const DRIVE = { forward: 3.2, reverse: 1.6, accel: 2.2, brake: 5, coast: 1.8, tip: 0.25 };
   // What the driver is told once it is ready.
   const DRIVE_HINT = COARSE ? "Stick drives · tap the fork stick for the forks · tap the wheel to honk" : "W S drive · A D steer · R F forks · H horn · Space gets out";
-  const POWER = { lit: [0.12, 1], dome: [0.2, 0.7], flash: 2.6, sharp: 8, rate: 9, turn: 9, needle: 2.4, crank: 0.75, ready: 0.9, reach: 1.1, radius: 7, color: [1.6, 0.95, 0.22] };
+  const POWER = { lit: [0.12, 1], dome: [0.2, 0.7], flash: 2.6, sharp: 8, rate: 9, turn: 9, needle: 2.4, speedo: 8, crank: 0.75, ready: 0.9, reach: 1.1, radius: 7, color: [1.6, 0.95, 0.22] };
   // How near the hold-short bar the launch shield answers whoever walks up to it, and how far back they must step before
   // it answers again.
   const SHIELD_NEAR = 0.6, SHIELD_REARM = 3;
 
   let renderer, game, world, go, root, camera, hud, hooks, input, pilot, fx, agentPlay = null;
-  let people = null, avatar = null, playerWorld = null, scene = null, leaving = false, dust = null, unsubscribeAccount = null, remotes = null, footsteps = null, node = null;
+  let canvas = null, people = null, avatar = null, playerWorld = null, scene = null, leaving = false, dust = null, unsubscribeAccount = null, remotes = null, footsteps = null, node = null;
   let unsubscribeFeed = null, boardsDirty = false, audio = null, actPrompt = false, soundPanel = null;
   const NO_ACTORS = [];
   // What walks the hall besides the Oogas, for them to keep clear of: the other players' Oogas, Kortik's Sis and the
@@ -162,6 +177,33 @@
   // On the Worker's page the island's driving rules hold in here too, and the Ooga driven is reported to the room every
   // frame, so signed-in players in the hangar hear each other and those in the hall (voice needs a driven Ooga).
   const mayPossess = (cave) => BL.net.mayDrive(cave.traits.name);
+  // Whether an Ooga stands on the Jet: the one driven here, or another player's.
+  const jetRidden = () => {
+    const a = scene.anomaly, d = people && people.player, others = remotes ? remotes.actors() : NO_ACTORS;
+    if (d && a.standsOn(d.root.position.x, d.root.position.y - d.baseY, d.root.position.z)) return true;
+    for (let i = 0; i < others.length; i++) if (a.standsOn(others[i].x, others[i].y, others[i].z)) return true;
+    return false;
+  };
+  // Whether `test(x, z, feet, height, radius)` holds for anything that walks the hall: the Ooga driven here, the other
+  // players' Oogas where they are shown and where the room last put them (a late update counts at once), Kortik's Sis,
+  // the crew and the forklift. The room's records are walked with one callback made once, `nearTest` and `nearHit` its state.
+  const BODY = { height: BL.remotePlayers.BODY_HEIGHT, radius: 0.4 };
+  let nearTest = null, nearHit = false;
+  const roomBody = (rec) => {
+    if (!nearHit && rec.body && rec.zone === hangarScene.voiceZone && nearTest(rec.x, rec.z, rec.y, BODY.height, BODY.radius)) nearHit = true;
+  };
+  const nearJet = (test) => {
+    const d = people && people.player, others = remotes ? remotes.actors() : NO_ACTORS, sis = scene.sis.actor;
+    if (d && test(d.root.position.x, d.root.position.z, d.root.position.y - d.baseY, BODY.height, d.bodyRadius || BODY.radius)) return true;
+    for (let i = 0; i < others.length; i++) { const o = others[i]; if (test(o.x, o.z, o.y, o.height, o.radius)) return true; }
+    if (test(sis.x, sis.z, sis.y, sis.height, sis.radius)) return true;
+    for (let i = 0; i < scene.crewActors.length; i++) { const c = scene.crewActors[i]; if (test(c.x, c.z, c.y, c.height, c.radius)) return true; }
+    for (let i = 0; i < scene.forklift.blocks.length; i++) { const b = scene.forklift.blocks[i]; if (test(b.x, b.z, 0, BLOCKS.height, b.radius)) return true; }
+    nearTest = test; nearHit = false;
+    BL.net.remotes.forEach(roomBody);
+    nearTest = null;
+    return nearHit;
+  };
   const accountChanged = () => {
     if (!avatar) return;
     const released = BL.net.state.released;
@@ -175,13 +217,71 @@
   const targets = [];
 
   // Back to the hall as the same Ooga, onto the walkway at the door, nothing held or hovered here carried out.
-  const leaveHangar = () => {
+  const leaveHangar = (instant = false) => {
     if (leaving) return;
     world.pilotDetached = !pilot.player;
     world.pilot = pilot.player ? pilot.player.traits.name : null;
-    if (!go("factory")) return;
+    if (!go("factory", null, instant)) return;
     leaving = true;
     pilot.controls.reset(); input.reset(); pilot.setActive(false); hud.tooltip.hide();
+  };
+  // On foot on the landing, heading out into the door within the walk's reach of its shield (but not from a step back
+  // from where an arrival stands), or just through it in a long frame.
+  const walkingOut = (p, previousX, previousZ, dt) => {
+    const G = BL.factoryWindow.GLIDE, d = DOOR_WAY, dx = p.x - d.x, dz = p.z - d.z, past = dx * d.ox + dz * d.oz + d.plane, side = dz * d.ox - dx * d.oz;
+    const toward = ((p.x - previousX) * d.ox + (p.z - previousZ) * d.oz) / Math.max(dt, 1e-3);
+    return Math.abs(p.y - avatar.baseY - DOOR.y) < 0.3 && Math.abs(side) < DOOR.half - 0.3 && past < 1
+      && past > Math.max(-G.reach, d.plane - DOOR_IN + OUT_SLACK) && toward > G.moving;
+  };
+  // On in through the door's shield from the hall: as far to its side and as far past it as the Ooga went through the
+  // hall's, facing down the runway, the view square behind it, and the walk on.
+  const walkIn = (c) => {
+    const G = BL.factoryWindow.GLIDE, at = BL.factoryWindow.arrival(DOOR_WAY, clamp(c.side, -1.2, 1.2), clamp(c.past, 0, G.past), ARRIVE);
+    pilot.navigate({ yaw: at.yaw, pitch: clamp(c.pitch, FOLLOW.pitch[0], IN_PITCH), dist: clamp(c.dist, FOLLOW.min, IN_VIEW), position: { x: at.x, y: DOOR.y, z: at.z } });
+    pilot.orbit.tDist = ARRIVAL.dist;
+    const p = avatar.root.position;
+    Object.assign(walk, { phase: WALK_ON, t: 0, x: p.x, z: p.z, through: false });
+  };
+  // The walk, a frame at a time, after the pilot has read the visitor's input and before the crew moves, as the
+  // Factory's gate walks it: down the door's middle at an even pace, the view swinging round behind; out through the
+  // shield it stands a beat, then the hall takes over without a fade. Anything else moving the Ooga, or a walk that runs
+  // long, lets go; so does reaching where an arrival stands.
+  const doorStep = (dt) => {
+    const w = walk, G = BL.factoryWindow.GLIDE, d = DOOR_WAY, p = avatar.root.position, o = pilot.orbit, off = w.phase === WALK_OFF;
+    const dx = p.x - d.x, dz = p.z - d.z, past = dx * d.ox + dz * d.oz + d.plane, side = dz * d.ox - dx * d.oz;
+    w.t += dt;
+    const moved = Math.hypot(p.x - w.x, p.z - w.z);
+    if (people.player !== avatar || moved > 1.2 || w.t > G.limit || !off && d.plane - past >= DOOR_IN) {
+      w.phase = 0;
+      w.through = false;
+      w.settle = people.player === avatar;
+      people.steer(0, 0, 0, 0, 0);
+      return;
+    }
+    w.x = p.x; w.z = p.z;
+    const k = off ? G.ahead : -G.ahead, wx = d.ox * k + d.oz * side * 0.6, wz = d.oz * k - d.ox * side * 0.6, l = Math.hypot(wx, wz);
+    people.steer(wx / l, wz / l, 0, 1, 0, G.speed);
+    const behind = off ? Math.atan2(-d.ox, -d.oz) : Math.atan2(d.ox, d.oz);
+    o.tYaw = o.yaw + Math.atan2(Math.sin(behind - o.yaw), Math.cos(behind - o.yaw));
+    if (!off) return;
+    if (!w.through && past >= 0) {
+      w.through = true;
+      w.beat = G.beat;
+      scene.gate.phase.ripples.pulse(side, p.y - avatar.baseY - DOOR.y + 1, 0);
+    }
+    if (!w.through || past < G.through / 2 && moved > 0.005) return;
+    if (w.beat > 0) {
+      w.beat -= dt;
+      people.steer(0, 0, 0, 0, 0);
+      return;
+    }
+    world.hangarCrossing = BL.factoryWindow.crossing(d, p, o);
+    w.phase = 0;
+    w.grab = true;
+    people.steer(0, 0, 0, 0, 0);
+    leaveHangar(true);
+    // A switch the director refuses (another under way) leaves the Ooga in the hangar.
+    if (!leaving) { world.hangarCrossing = null; w.through = w.grab = false; }
   };
   const onKey = (e) => {
     if (e.key === "0" && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && !leaving) return pilot.resetCamera();
@@ -241,6 +341,8 @@
     // The charge needle on its dial, at E while it is off (the dial's angle as painted, turned onto the face), drawn
     // after the dial's picture on Canvas 2D.
     const needle = at(FL.needle(), FL.CHARGE.at, { rotation: { x: FL.CHARGE.tilt, y: 0, z: -FL.CHARGE.from }, sightHidden: true, depthBias: -0.2 });
+    // And the speed needle on its dial, at 0 while it stands.
+    const speedo = at(FL.speedNeedle(), FL.SPEED.at, { rotation: { x: FL.SPEED.tilt, y: 0, z: -FL.SPEED.from }, sightHidden: true, depthBias: -0.2 });
     lit.glow = POWER.lit[0];
     beacon.glow = POWER.dome[0];
     screen.visible = false;
@@ -250,10 +352,10 @@
     const C = FL.CHAIN, ring = FL.chainLink(), count = Math.floor((C.sheave - C.anchor + Math.PI * C.r + C.sheave - C.carriage) / C.pitch), links = [];
     for (const side of [-1, 1]) for (let i = 0; i < count; i++) links.push(createNode({ geometry: i % 2 ? ring.b : ring.a, position: { x: side * C.x, y: 0, z: 0 }, sightHidden: true }));
     addChild(root, body, createNode({ geometry: FL.mast() }), inner, createNode({ geometry: FL.fittings() }), lit,
-      ...wheels, carriage, ...links, steering, stick, needle, beacon, button, cover, key, screen, ...doors, ...decals.body.map(picture));
+      ...wheels, carriage, ...links, steering, stick, needle, speedo, beacon, button, cover, key, screen, ...doors, ...decals.body.map(picture));
     const sn = Math.sin(turn), cs = Math.cos(turn), [, sy, sz] = P.seat.map((v) => v * FL.SCALE);
     const seat = { x: x + sz * sn, y: sy + FL.CUSHION * FL.SCALE, z: z + sz * cs, ry: turn + Math.PI, floor: 0, sitter: null, walkAt: { x: 0, z: 0 } };
-    const f = { root, body, wheels, inner, carriage, links, lift: 0, liftTo: -1, lifting: false, stick, needle, steering, helm, steer: 0, speed: 0, side: 1, getInZ: 0, beacon, button, cover, doors, key, screen, lit, seat, x, z, sn, cs, buttonY: P.button[1], pressT: -1, on: false, startT: -1, keyTo: 0, sweep: 0 };
+    const f = { root, body, wheels, inner, carriage, links, lift: 0, liftTo: -1, lifting: false, stick, needle, speedo, steering, helm, steer: 0, speed: 0, side: 1, getInZ: 0, beacon, button, cover, doors, key, screen, lit, seat, x, z, sn, cs, buttonY: P.button[1], pressT: -1, on: false, startT: -1, keyTo: 0, sweep: 0 };
     // Space in the seat starts it; running, Space gets out (and switches it off) beside the cab wherever it stands.
     seat.act = () => {
       if (!f.on) { powerOn(f); return true; }
@@ -380,6 +482,9 @@
     // The charge needle: up to its charge as it starts, back to E as it stops.
     const C = BL.forkliftModels.CHARGE, n = f.needle.rotation.z, read = -(C.from + (f.on ? C.level * C.sweep : 0)), swing = POWER.needle * dt;
     f.needle.rotation.z = n + clamp(read - n, -swing, swing);
+    // The speed needle follows how fast it goes, forward or back, in km/h on its dial.
+    const S = BL.forkliftModels.SPEED, kmh = Math.abs(f.speed) * 3.6, aim = -(S.from + Math.min(1, kmh / S.top) * S.sweep);
+    f.speedo.rotation.z += (aim - f.speedo.rotation.z) * Math.min(1, dt * POWER.speedo);
     if (!f.on || f.startT >= 0) return;
     f.sweep += POWER.rate * dt;
     f.beacon.rotation.y = f.sweep;
@@ -568,8 +673,8 @@
     });
     addChild(root, space);
   };
-  // The neon's flicker, and the mouth's light with it.
-  const neonLife = (s, dt, elapsed) => {
+  // The neon's flicker, and the mouth's light with it, as dim as an anomaly has the hall's lights (`dim`).
+  const neonLife = (s, dt, elapsed, dim) => {
     s.stutterWait -= dt;
     if (s.stutterWait <= 0) {
       s.stutterWait = NEON_STUTTER[0] + Math.random() * (NEON_STUTTER[1] - NEON_STUTTER[0]);
@@ -580,9 +685,9 @@
     for (let i = 0; i < s.neon.length; i++) {
       let k = NEON_GLOW * (0.93 + 0.05 * Math.sin(elapsed * (7.3 + i * 1.7) + i * 2.3) + 0.03 * Math.sin(elapsed * (19.1 + i * 3.1) + i));
       if (i === s.stutter && (since < 0.06 || since > 0.14 && since < 0.21)) k *= 0.22;
-      s.neon[i].glow = k;
+      s.neon[i].glow = k * dim;
     }
-    const f = s.neon[0].glow / NEON_GLOW, o = 6 * 8, Lt = RENDER_OPTS.lights;
+    const f = s.neon[0].glow / NEON_GLOW, o = MOUTH_SLOT * 8, Lt = RENDER_OPTS.lights;
     Lt[o + 4] = MOUTH_LIGHT[0] * f; Lt[o + 5] = MOUTH_LIGHT[1] * f; Lt[o + 6] = MOUTH_LIGHT[2] * f;
   };
   // The boards' Jets: resting at their spots, then now and then waking (engines lit, a shudder), leaving their board each
@@ -663,8 +768,9 @@
       }
     }
   };
-  // The lamps' life: the floor lamps breathing and one now and then stuttering; the runway's rabbit.
-  const lampLife = (s, dt, elapsed) => {
+  // The lamps' life: the floor lamps breathing and one now and then stuttering; the runway's rabbit, or the one an
+  // anomaly runs the wrong way (its `rabbit`, where its front is); all as dim as an anomaly has the hall's lights (`dim`).
+  const lampLife = (s, dt, elapsed, dim) => {
     if ((s.lampWait -= dt) <= 0) {
       s.lampWait = LAMP_STUTTER[0] + Math.random() * (LAMP_STUTTER[1] - LAMP_STUTTER[0]);
       s.lampOut = Math.floor(Math.random() * s.lamps.length);
@@ -673,15 +779,15 @@
     const since = elapsed - s.lampAt;
     let out = false;
     for (let i = 0; i < LAMP_FAILS.length; i += 2) if (since >= LAMP_FAILS[i] && since < LAMP_FAILS[i + 1]) out = true;
-    for (let i = 0; i < s.lamps.length; i++) s.lamps[i].glow = out && i === s.lampOut ? LAMP_DIM : 1 + 0.04 * Math.sin(elapsed * (2.1 + i * 0.37) + i * 1.9);
+    for (let i = 0; i < s.lamps.length; i++) s.lamps[i].glow = (out && i === s.lampOut ? LAMP_DIM : 1 + 0.04 * Math.sin(elapsed * (2.1 + i * 0.37) + i * 1.9)) * dim;
     if ((s.rabbitWait -= dt) <= 0) {
       s.rabbitWait = RABBIT[0] + Math.random() * (RABBIT[1] - RABBIT[0]);
       s.rabbitAt = elapsed;
     }
-    const front = LAYOUT.runway.z0 - (elapsed - s.rabbitAt) * RABBIT_SPEED;
+    const back = s.anomaly.rabbit, front = back !== null ? back : LAYOUT.runway.z0 - (elapsed - s.rabbitAt) * RABBIT_SPEED;
     for (let i = 0; i < s.markers.length; i++) {
       const d = (s.markers[i].position.z - front) / RABBIT_WIDTH;
-      s.markers[i].glow = 1 + RABBIT_GLOW * Math.exp(-d * d);
+      s.markers[i].glow = (1 + RABBIT_GLOW * Math.exp(-d * d)) * dim;
     }
   };
   // Space's life: stars twinkle a group at a time with their halos, the planets and their rings spin, moons go round
@@ -717,13 +823,15 @@
   // The hangar for a visit: the hall and everything standing in it from the cached builds, the signs, the boards, the
   // Jet at its dock, the door back to the hall with its shield, the launch shield and space past it.
   const build = () => {
-    const L = LAYOUT, s = { crew: [] }, shell = HM.shell(), runway = HM.runway(), tunnel = HM.tunnel(), dressed = HM.dressing(), fixtures = HM.fixtures(), frames = HM.boardFrames();
+    const L = LAYOUT, s = { crew: [], dimmed: 1, ambient: 1 }, shell = HM.shell(), runway = HM.runway(), tunnel = HM.tunnel(), dressed = HM.dressing(), fixtures = HM.fixtures(), frames = HM.boardFrames();
+    // The lanterns' and the fixtures' glass, which an anomaly dims with the hall's lights.
+    s.glass = [createNode({ geometry: dressed.glass, sightHidden: true }), createNode({ geometry: fixtures.glow, sightHidden: true }), createNode({ geometry: fixtures.glass, sightHidden: true })];
     addChild(root, createNode({ geometry: shell.rock }), createNode({ geometry: shell.vault }), createNode({ geometry: shell.backing }),
       createNode({ geometry: HM.landing() }), createNode({ geometry: runway.flat }),
       createNode({ geometry: tunnel.stone }),
       createNode({ geometry: HM.catwalks() }), createNode({ geometry: dressed.iron }), createNode({ geometry: dressed.banners }),
-      createNode({ geometry: dressed.frame }), createNode({ geometry: dressed.glass, sightHidden: true }), createNode({ geometry: fixtures.glow, sightHidden: true }),
-      createNode({ geometry: fixtures.frame }), createNode({ geometry: fixtures.glass, sightHidden: true }), createNode({ geometry: HM.dock() }));
+      createNode({ geometry: dressed.frame }), s.glass[0], s.glass[1],
+      createNode({ geometry: fixtures.frame }), s.glass[2], createNode({ geometry: HM.dock() }));
     s.mouth = createNode({ geometry: tunnel.iron });
     // The tunnel's neon, a strip on every frame, each flickering on its own (`neonLife`).
     s.neon = tunnel.neonZ.map((z) => createNode({ position: { x: 0, y: 0, z }, geometry: tunnel.neon, sightHidden: true }));
@@ -851,7 +959,7 @@
     s.crewActors = [];
     for (const [x, y, z, radius, heading] of LAYOUT.crew) {
       const walkable = (fx, fz, nx, nz) => Math.hypot(nx - x, nz - z) < radius + 0.4 && HM.supportAt(nx, nz, y) === y && HM.clearAt(nx, nz, y, CREW_BODY, fx, fz)
-        && clearOfOoga(fx, fz, nx, nz, y);
+        && clearOfOoga(fx, fz, nx, nz, y) && !(scene.anomaly.keepsOut(nx, nz, y, CREW_HEIGHT, CREW_BODY) && !scene.anomaly.keepsOut(fx, fz, y, CREW_HEIGHT, CREW_BODY));
       const agent = BL.agent.create({ groundAt: () => y, walkable, form: "ape", x, z, heading, scale: 0.86 });
       addChild(agent.parts.head, createNode({ position: { x: 0, y: 0.6, z: 0.05 }, geometry: hat }));
       addChild(agent.parts.torso, createNode({ geometry: vest }));
@@ -911,11 +1019,14 @@
   };
   const lightUp = () => {
     HM.fixedLights().forEach((l, i) => lamp(i, ...l));
+    for (let i = 0; i < 3; i++) { RENDER_OPTS.sky[i] = SKY[i]; RENDER_OPTS.ground[i] = GROUND[i]; }
+    RENDER_OPTS.directStrength = DIRECT; RENDER_OPTS.ambientFloor = FLOOR;
     RENDER_OPTS.lightCount = Math.min(BL.glRenderer.POINT_LIGHT_CAPACITY, FIXED + lanternPool().length / 4);
   };
   let poolScore = null;
-  // The shared slots go to the lanterns nearest the view, nearest first, by repeated minimum: no sort, no list.
-  const glowNear = (elapsed, from) => {
+  // The shared slots go to the lanterns nearest the view, nearest first, by repeated minimum: no sort, no list; as dim
+  // as an anomaly has the hall's lights (`dim`).
+  const glowNear = (elapsed, from, dim) => {
     const P = lanternPool(), n = P.length / 4, t = pilot.orbit.target, Lt = RENDER_OPTS.lights;
     if (!poolScore) poolScore = new Float32Array(n);
     for (let i = 0; i < n; i++) {
@@ -926,7 +1037,7 @@
       let best = 0, bestD = Infinity;
       for (let i = 0; i < n; i++) if (poolScore[i] < bestD) { bestD = poolScore[i]; best = i; }
       poolScore[best] = Infinity;
-      const k = 0.9 + Math.sin(elapsed * 9.3 + best * 1.7) * 0.06 + Math.sin(elapsed * 23.7 + best * 5.3) * 0.04, w = slot * 8;
+      const k = (0.9 + Math.sin(elapsed * 9.3 + best * 1.7) * 0.06 + Math.sin(elapsed * 23.7 + best * 5.3) * 0.04) * dim, w = slot * 8;
       Lt[w] = P[best * 4]; Lt[w + 1] = P[best * 4 + 1]; Lt[w + 2] = P[best * 4 + 2]; Lt[w + 3] = P[best * 4 + 3];
       Lt[w + 4] = LANTERN_GLOW[0] * k; Lt[w + 5] = LANTERN_GLOW[1] * k; Lt[w + 6] = LANTERN_GLOW[2] * k; Lt[w + 7] = 0;
     }
@@ -1138,22 +1249,28 @@
     hireCrew(scene);
     const F = LAYOUT.fireTest, exits = JM.EXHAUST;
     audio = BL.hangarAudio.create({ door: { x: DOOR.x, y: DOOR.y + 2, z: DOOR.z }, launch: { x: 0, y: TUN.y, z: TUN.z1 }, tunnel: { y: TUN.y, z0: TUN.z0, z1: TUN.z1 },
-      booth: { x: F.x, y: 2, z: F.z }, engines: { x: LAYOUT.jet.x, y: exits[0].y, z: LAYOUT.jet.z + exits[0].z + 2 }, projector: HM.projector().lens, screen: HM.filmScreen().picture,
+      booth: { x: F.x, y: 2, z: F.z }, engines: { x: LAYOUT.jet.x, y: exits[0].y, z: LAYOUT.jet.z + exits[0].z + 2, gap: Math.abs(exits[0].x) }, gear: { x: LAYOUT.jet.x, y: 0.5, z: LAYOUT.jet.z + NOSE_GEAR }, projector: HM.projector().lens, screen: HM.filmScreen().picture,
       forklift: { x: LAYOUT.forklift.x, y: 1.6, z: LAYOUT.forklift.z } });
     // The engine static fire test's booth beside the runway (`hangar-fire.js`), and its settings: the Sound
     // button opens the hangar's sound panel, its level and the pad's vibration.
     scene.fire = BL.hangarFire.create({ root, jet: scene.jet, nozzles: scene.jet.children[0] || null, fx, audio, hold: (on) => {
       pilot.setActive(!on);
       pilot.setExternalControl(on);
-    }, toast: hud.toast });
+    }, toast: hud.toast, busy: () => !!scene.anomaly && scene.anomaly.playing });
     input.add(scene.fire.body, { kind: "firetest", preset: null }, { radius: 1.6 });
     targets.push(scene.fire.body);
     soundPanel = openSoundPanel();
     // Kortik's Sis, the hangar's chief engineer (`sis.js`).
-    scene.sis = BL.sis.create({ fx, audio, fire: scene.fire, jet: scene.jet, toast: hud.toast, blocks: () => scene.forklift.blocks });
+    scene.sis = BL.sis.create({ fx, audio, fire: scene.fire, jet: scene.jet, toast: hud.toast, blocks: () => scene.forklift.blocks,
+      avoid: (x, z, feet, height, radius) => !!scene.anomaly && scene.anomaly.keepsOut(x, z, feet, height, radius) });
     addChild(root, scene.sis.node, scene.sis.props);
     input.add(scene.sis.body, { kind: "sis", preset: null }, { radius: 1.2 });
     targets.push(scene.sis.body);
+    // The Jet acting up on its own now and then (`hangar-anomaly.js`): not on a test page unless `anomaly=` asks, which
+    // under debug also sets the wait between them, s. It asks whether any Ooga stands on the Jet (`jetRidden`), and
+    // whether anything that walks the hall comes near it (`nearJet`).
+    const every = DEBUG ? Number(params.get("anomaly")) : NaN;
+    scene.anomaly = BL.hangarAnomaly.create({ root, fire: scene.fire, sis: scene.sis, fx, audio, jet: scene.jet, stage: JET_STAGE, auto: !params.has("nosim") || every > 0, gap: every > 0 ? every : null, riders: () => jetRidden(), near: (test) => nearJet(test) });
     // The terminals by the runway and the film show they start (`hangar-terminals.js`), its mood page reading hers.
     scene.terminals = BL.hangarTerminals.create({ root, audio, mood: () => scene.sis.mood, toast: hud.toast });
     for (const n of scene.terminals.nodes) {
@@ -1180,6 +1297,11 @@
     boardsDirty = false;
     // The visitor's Ooga: `character=` on a page that opens here, else the one the hall handed over, else a free view.
     const asked = ctx.from === null ? new URLSearchParams(location.search).get("character")?.trim().toLowerCase() : null;
+    // Walked in through the hall's side of the door, the hangar comes on under the hall's last frame, which dissolves away.
+    const crossing = ctx.from === "factory" ? world.hangarCrossing : null;
+    world.hangarCrossing = null;
+    Object.assign(walk, { phase: 0, through: false, beat: 0, grab: false, still: crossing ? 1 : 0, hold: crossing ? BL.factoryWindow.GLIDE.still : 0, settle: false });
+    canvas = ctx.canvas;
     const named = asked ? contributors.roster.find((c) => c.name.toLowerCase() === asked) : null;
     const returningOwn = pilot.loginViewRestored && BL.net.ownCharacter();
     const picked = returningOwn ? contributors.roster.find(c => c.name === returningOwn.handle)
@@ -1207,7 +1329,10 @@
       }
       pilot.possess(avatar);
       people.selectWeapon(avatar.weapon.selectedSlot, avatar);
-      if (!pilot.loginViewRestored) pilot.navigate(ARRIVAL);
+      if (!pilot.loginViewRestored) {
+        if (crossing) walkIn(crossing);
+        else pilot.navigate(ARRIVAL);
+      }
       const heads = Math.max(avatar.headOpen.verts.length, avatar.headClosed.verts.length);
       scene.gate.phase.body.track(avatar.root, avatar.traits.height * 2, heads);
       scene.launch.phase.body.track(avatar.root, avatar.traits.height * 2, heads);
@@ -1227,7 +1352,7 @@
     hangarScene.input = input;
     hangarScene.debug = {
       hud, camera, controls: pilot.controls, pilot, crew: people, cavemen: people ? people.cavemen : null,
-      hangar: { layout: LAYOUT, feed: BL.jetFeed, get scene() { return scene; }, get avatar() { return avatar; }, get audio() { return audio; }, get fire() { return scene && scene.fire; }, get sis() { return scene && scene.sis && scene.sis.debug; }, get terminals() { return scene && scene.terminals && scene.terminals.debug; }, get guide() { return scene && scene.guide; } }
+      hangar: { layout: LAYOUT, feed: BL.jetFeed, get scene() { return scene; }, get avatar() { return avatar; }, get audio() { return audio; }, get fire() { return scene && scene.fire; }, get sis() { return scene && scene.sis && scene.sis.debug; }, get anomaly() { return scene && scene.anomaly && scene.anomaly.debug; }, get terminals() { return scene && scene.terminals && scene.terminals.debug; }, get guide() { return scene && scene.guide; } }
     };
   };
   const feetOf = () => avatar ? avatar.root.position.y - avatar.baseY : 0;
@@ -1298,12 +1423,25 @@
   };
   const update = (dt, elapsed) => {
     const s = scene, drivenHere = people && people.player;
+    const previousX = avatar ? avatar.root.position.x : 0, previousZ = avatar ? avatar.root.position.z : 0;
+    // The hall's last frame dissolves away once the hangar has taken over.
+    if (walk.still > 0 && (walk.hold -= dt) <= 0) walk.still = Math.max(0, walk.still - dt / BL.factoryWindow.GLIDE.dissolve);
     s.fire.unshake(camera);
     pilot.readInput(dt);
+    // The door's walk has the Ooga; once it is done the Ooga stands until the visitor lets go of moving, since the view
+    // has turned round behind it and a key still held may now mean the other way.
+    if (walk.phase) doorStep(dt);
+    else if (walk.settle) {
+      const a = pilot.controls.read();
+      if (people && people.player === avatar && (a.x || a.y)) people.steer(0, 0, 0, 0, 0);
+      else walk.settle = false;
+    }
     if (people) people.update(dt, elapsed);
     // The Ooga driven here never rests inside a crate or a chest (`hangarModels.pushOut`).
     if (drivenHere && !drivenHere.camp.seat) HM.pushOut(drivenHere.root.position, drivenHere.root.position.y - drivenHere.baseY, drivenHere.bodyRadius || 0.35);
-    // The static fire test, after the crew has moved, so a presser it knocks down lies where the crew left them.
+    // The Jet acting up on its own, driving the engines before the static fire test burns them; then the test, after
+    // the crew has moved, so a presser it knocks down lies where the crew left them.
+    s.anomaly.update(dt);
     s.fire.update(dt, drivenHere);
     pressLife(s.forklift, dt);
     powerLife(s.forklift, dt);
@@ -1348,9 +1486,19 @@
     const who = drivenHere ? drivenHere.root.position : pilot.orbit.target;
     const want = clamp((DOOR_FAR - Math.max(0, Math.hypot(who.x - DOOR.x, who.y - DOOR.y - 1, who.z - DOOR.z) - 2)) / (DOOR_FAR - DOOR_NEAR), 0, 1);
     s.gate.near += (want * want - s.gate.near) * Math.min(1, dt * DOOR_EASE);
-    s.doorGlow.glow = 1 + DOOR_BRIGHTEN * s.gate.near;
-    const Lt = RENDER_OPTS.lights, power = 1 + DOOR_POWER * s.gate.near;
+    const Lt = RENDER_OPTS.lights, dim = s.anomaly.dim, amb = s.anomaly.ambient, power = (1 + DOOR_POWER * s.gate.near) * dim;
+    s.doorGlow.glow = (1 + DOOR_BRIGHTEN * s.gate.near) * dim;
     Lt[3] = DOOR_LIGHT[3] + DOOR_REACH * s.gate.near; Lt[4] = DOOR_LIGHT[4] * power; Lt[5] = DOOR_LIGHT[5] * power; Lt[6] = DOOR_LIGHT[6] * power;
+    // The hall's lights as dim as an anomaly has them: the door's above, the other fixed ones (the tunnel mouth's goes
+    // with the neon), the hall's own light as its `ambient` says, and the lanterns' and fixtures' glass.
+    if (dim !== s.dimmed || amb !== s.ambient) {
+      s.dimmed = dim; s.ambient = amb;
+      const F = HM.fixedLights();
+      for (let i = 1; i < FIXED; i++) if (i !== MOUTH_SLOT) { const l = F[i], o = i * 8; Lt[o + 4] = l[4] * dim; Lt[o + 5] = l[5] * dim; Lt[o + 6] = l[6] * dim; }
+      for (let i = 0; i < 3; i++) { RENDER_OPTS.sky[i] = SKY[i] * amb; RENDER_OPTS.ground[i] = GROUND[i] * amb; }
+      RENDER_OPTS.directStrength = DIRECT * amb; RENDER_OPTS.ambientFloor = FLOOR * amb;
+      for (const g of s.glass) g.glow = dim;
+    }
     hum(s.gate, OPENING, dt, elapsed, 0.12 * (1 - 0.65 * s.gate.near));
     hum(s.launch, LAUNCH, dt, elapsed, 0.18);
     // Walked up to the hold-short bar, the launch shield ripples where they stand and says, once an approach, that it is
@@ -1363,14 +1511,17 @@
         hud.toast("Launch shield · sealed. The runway opens when Jet v2 is ready.");
       } else if (z > TUN.holdShort + SHIELD_REARM) s.launch.armed = true;
     }
-    // The fire test's lights, the film's, the forklift's beacon's and Tess's own, then the lanterns'.
-    const fired = FIXED + s.fire.lights(RENDER_OPTS.lights, FIXED), shown = fired + s.terminals.lights(RENDER_OPTS.lights, fired);
+    // The fire test's lights (the booth's as dim as an anomaly has the hall's), an anomaly's, the film's, the forklift's
+    // beacon's and Tess's own, then the lanterns'.
+    const fired = FIXED + s.fire.lights(RENDER_OPTS.lights, FIXED), odd = fired + s.anomaly.lights(RENDER_OPTS.lights, fired);
+    for (let i = FIXED; i < fired; i++) { const o = i * 8; Lt[o + 4] *= dim; Lt[o + 5] *= dim; Lt[o + 6] *= dim; }
+    const shown = odd + s.terminals.lights(RENDER_OPTS.lights, odd);
     const beamed = shown + beaconLight(s.forklift, RENDER_OPTS.lights, shown);
     s.guide.light(RENDER_OPTS.lights, beamed * 8);
-    glowNear(elapsed, beamed + 1);
+    glowNear(elapsed, beamed + 1, dim);
     heavens(s, dt, elapsed);
-    neonLife(s, dt, elapsed);
-    lampLife(s, dt, elapsed);
+    neonLife(s, dt, elapsed, dim);
+    lampLife(s, dt, elapsed, dim);
     boardJets(s, dt);
     dust.update(elapsed, pilot.orbit.target.x, pilot.orbit.target.z);
     for (let i = 0; i < s.crew.length; i++) {
@@ -1387,7 +1538,14 @@
     if (!leaving) {
       const through = (p, feet, margin) => Math.abs(p.x - DOOR.x) <= DOOR.half && DOOR.z - p.z <= DOOR.plane + margin && feet > DOOR.y - 0.3 && feet < DOOR.y + DOOR.top;
       if (pilot.player) {
-        if (through(pilot.player.root.position, pilot.player.root.position.y - pilot.player.baseY, 0)) leaveHangar();
+        // On foot heading out over the landing's last stretch, the walk takes it through the door's shield; anything
+        // else in the doorway (an Ooga in the air, say) goes out as it always has.
+        const p = pilot.player.root.position;
+        if (walk.phase) { /* walking itself */ }
+        else if (pilot.player === avatar && walkingOut(p, previousX, previousZ, dt)) {
+          Object.assign(walk, { phase: WALK_OFF, t: 0, x: p.x, z: p.z, through: false });
+          pilot.controls.reset(); input.reset(); hud.tooltip.hide();
+        } else if (through(p, p.y - pilot.player.baseY, 0)) leaveHangar();
       } else if (!avatar) {
         const a = pilot.controls.read();
         if (Math.hypot(a.x, a.y) > 0.05 && through(camera.position, camera.position.y, 0.9)) leaveHangar();
@@ -1400,6 +1558,10 @@
     remotes.drawNames(ctx2d, project);
     scene.sis.overlay(ctx2d, project);
     scene.fire.overlay(ctx2d);
+    // Over everything: the hall's last frame, dissolving off the hangar's first; and the hangar's own, taken once drawn
+    // as the Ooga walks out.
+    BL.factoryWindow.still(ctx2d, walk.still);
+    if (walk.grab) { walk.grab = false; BL.factoryWindow.grab(canvas); }
   };
   const overlay = (dt) => fx.drawOverlay(dt, drawExtra);
 
@@ -1420,6 +1582,7 @@
     scene.gate.phase.dispose();
     scene.launch.phase.dispose();
     if (scene.window) scene.window.dispose();
+    scene.anomaly.dispose();
     scene.fire.dispose();
     scene.guide.dispose();
     soundPanel.dispose();
@@ -1448,6 +1611,7 @@
     if (scene) {
       scene.gate.phase.liveGeometry(set); scene.launch.phase.liveGeometry(set);
       scene.sis.liveGeometry(set);
+      scene.anomaly.liveGeometry(set);
       scene.terminals.liveGeometry(set);
       scene.guide.liveGeometry(set);
       for (const a of scene.crew) a.liveGeometry(set);
