@@ -14,12 +14,25 @@
 // Cost: rows are placed only when someone joins, leaves or changes zone, body or name, and only while the panel shows;
 // distances and crosshairs are rewritten as positions arrive (`subscribeMoves`, a few times a second at most), and only
 // what changed. No timers. Exports setDoors and stats.
+// While the visitor is in voice the tab also holds their hearing range (#380, `BL.voice.setRadius`): the slider's last
+// stop is no limit, and a distance at or past the range is dimmed, since that voice is faded out for them. A voice in
+// another place of the group, which shows no distance, is silenced by a range without a mark here. The slider is not
+// offered where an audio element's volume cannot be set (iOS and iPadOS), since it would do nothing there.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
   const net = BL.net, Z = BL.zoneMap;
   const $ = (id) => document.getElementById(id);
   const sheet = $("sheet"), panel = $("players-panel"), list = $("players-list"), status = $("players-status"), count = $("players-count");
+  const hearing = $("players-hearing"), range = $("players-hearing-range"), rangeValue = $("players-hearing-value"), V = BL.voice;
+  // The slider's stops run RADIUS_MIN..RADIUS_MAX metres, and one more stop past them is no limit.
+  const RANGE_STEP = Number(range.step);
+  range.min = String(V.RADIUS_MIN);
+  range.max = String(V.RADIUS_MAX + RANGE_STEP);
+  // Whether this browser plays an audio element at the volume it is given; iOS keeps every element at 1.
+  const probe = document.createElement("audio");
+  probe.volume = 0.5;
+  const VOLUME_SETS = probe.volume === 0.5;
   const ROOM_WORDS = { off: "Not connected.", connecting: "Joining the island…", paused: "Paused while the tab was hidden.", replaced: "Open in another tab.", full: "The island is full.", revoked: "Your account access was revoked." };
   const LOOK = { player: "Look at player", known: "Look at last known position", door: "Look toward entrance", nowhere: "Location unavailable", route: "Route unavailable" };
   // A player is turned toward at about their middle; a door at the height the scene gives.
@@ -34,7 +47,7 @@
   crosshair.append(crosshairPath);
 
   const rows = new Map(), groups = new Map(), order = [], door = { x: 0, y: 0, z: 0 };
-  let serial = 0, pass = 0, showing = false, stale = true, doors = null, shownZone = "";
+  let serial = 0, pass = 0, showing = false, stale = true, doors = null, shownZone = "", shownRadius = -1, shownHearing = null;
   const makeRow = () => {
     const li = document.createElement("li"), presence = document.createElement("span"), name = document.createElement("span");
     const label = document.createElement("span"), host = document.createElement("span"), marks = document.createElement("span");
@@ -55,7 +68,7 @@
     distance.append(note);
     li.append(presence, name, marks, look, distance);
     return { li, label, host, voice, button: look, distance, note, id: 0, self: false, name: "", zone: "", group: "", seen: 0,
-      aim: "", voiceLook: "", voiceLogin: "", voiceSelf: false, blocked: false, hostOn: false, metres: -1, lastKnown: false };
+      aim: "", voiceLook: "", voiceLogin: "", voiceSelf: false, blocked: false, hostOn: false, metres: -1, lastKnown: false, far: false };
   };
   const selfRow = makeRow();
   selfRow.self = true;
@@ -111,8 +124,8 @@
   // Distances and crosshairs, from where everyone stands now.
   const measure = () => {
     if (!showing || stale) return;
-    const s = net.state, me = s.self, mine = s.zone, placed = me.zone === mine;
-    shownZone = mine;
+    const s = net.state, me = s.self, mine = s.zone, placed = me.zone === mine, radius = VOLUME_SETS && V.stats.enabled ? V.stats.radius : 0;
+    shownZone = mine; shownRadius = radius;
     for (const row of rows.values()) {
       const rec = net.remotes.get(row.id);
       if (!rec) continue;
@@ -140,7 +153,24 @@
         row.distance.title = lastKnown && metres >= 0 ? "Last known location" : "";
         row.note.hidden = !(lastKnown && metres >= 0);
       }
+      const far = radius > 0 && metres >= radius;
+      if (row.far !== far) { row.far = far; row.distance.dataset.far = String(far); }
     }
+  };
+
+  // The hearing range's slider, shown while the visitor is in voice; a new range redraws which distances are dimmed.
+  const paintHearing = () => {
+    if (!showing || stale) return;
+    const voice = V.stats, shown = VOLUME_SETS && voice.enabled && net.state.room === "live";
+    if (shown !== shownHearing) { shownHearing = shown; hearing.hidden = !shown; }
+    if (!shown) {
+      if (shownRadius > 0) measure();
+      return;
+    }
+    const words = voice.radius ? `${voice.radius} m` : "No limit", value = String(voice.radius || V.RADIUS_MAX + RANGE_STEP);
+    if (rangeValue.textContent !== words) { rangeValue.textContent = words; range.setAttribute("aria-valuetext", words); }
+    if (range.value !== value && document.activeElement !== range) range.value = value;
+    if (voice.radius !== shownRadius) measure();
   };
 
   // Who is in the room and where: rows placed by group and name, groups by the visitor's own first, then heading.
@@ -152,6 +182,7 @@
     if (status.textContent !== words) status.textContent = words;
     status.hidden = !words;
     list.hidden = !live;
+    paintHearing();
     const chip = live ? `${s.online} online` : "Offline";
     if (count.textContent !== chip) count.textContent = chip;
     count.dataset.tone = live ? "live" : "idle";
@@ -230,10 +261,15 @@
   watch.observe(panel, { attributes: true, attributeFilter: ["hidden"] });
   watch.observe(sheet, { attributes: true, attributeFilter: ["data-open", "hidden"] });
   document.addEventListener("sheetchange", updateShowing);
+  // The slider's last stop is past RADIUS_MAX, which setRadius takes as no limit. A pointer lets go of it once set, so M and
+  // the other keys reach the page again; from the keyboard it keeps the focus to step on.
+  range.addEventListener("input", () => V.setRadius(Number(range.value)));
+  range.addEventListener("pointerup", () => range.blur());
   net.subscribe(render);
   net.subscribeRoster(render);
   net.subscribeMoves(measure);
   BL.voice.subscribe(paintMarks);
+  BL.voice.subscribe(paintHearing);
   // The scene the visitor is in names its doors (`fn(from, step, out, nearX, nearZ)`, true with `out` written), or null.
   const setDoors = (fn) => {
     doors = fn;

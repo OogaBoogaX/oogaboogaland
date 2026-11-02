@@ -5,7 +5,8 @@
 // never holds credentials or another player's session. The room says whom to hear (`setPeers`, from its
 // `voice` message) and this module makes it so one change at a time, since a session's changes must be
 // serialised. Each remote voice plays on its own <audio> element at one volume: the room lets a player
-// hear only those in the same place (out on the island, HQ, one cave), and within it everyone is equal.
+// hear only those in the same place (out on the island, HQ, one cave), and within it everyone is equal,
+// unless this visitor turns their own hearing range down (below).
 // `enable` must run inside the click that asks for the microphone; `toggle` is the footer's button.
 // `setMuted` changes mute state without acquiring a microphone, including while joining or only listening.
 // Who is speaking is measured here, for the roster: an analyser on the microphone and on each voice
@@ -22,8 +23,19 @@
 // not a mute: the room is not told, and a visitor's own mute stands whoever comes and goes. In DSB Studio an
 // audience can listen without publishing, so there the room's `voice` message also counts the other receive
 // sessions (`listeners`), and that count holds the gate instead; no count ever acquires a microphone.
+// Hearing range (#380): a visitor may turn their own hearing down from no limit to RADIUS_MIN..RADIUS_MAX metres
+// (`setRadius`, `stats.radius`, 0 for no limit, kept in localStorage). It changes only how loud this page plays each
+// voice it receives, never the microphone or what anyone else hears; the room still decides who is pulled, so nothing
+// is saved on the network. A voice plays at full within half the radius and fades to silence at it along a smoothstep,
+// so it never cuts in or out at the edge (`falloff`). Distances are this page's last reported position (`net.state.self`)
+// to each remote's, in the place both stand in: a voice in another place of the same voice group, which has coordinates
+// of its own, or one not yet placed here counts as past the radius; a page with no position of its own here plays everyone.
+// Gains are worked out on the speaking meter's own 150 ms read, so nothing runs while voice is off, and each moves at
+// most NEAR_STEP a read, so a jump (a new radius, a teleport) fades over about a second. A local mute still wins.
+// The gain is the element's `volume`, which iOS and iPadOS ignore (it always reads 1), as they do the receive level;
+// players.js offers the range only where a volume can be set.
 // Exports enable, listen, dropMic, preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, setMuted, toggle, restart, stop,
-// setPeers, subscribe, dispose, inspect, speaking, muteLocal, mutedLocally and stats.
+// setPeers, subscribe, dispose, inspect, speaking, muteLocal, mutedLocally, setRadius, falloff, RADIUS_MIN, RADIUS_MAX and stats.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -34,11 +46,13 @@
   // Speaking: RMS over SPEAK_ON starts it at once; SPEAK_HOLD quiet reads in a row end it, so words do not flicker.
   const SPEAK_MS = 150, SPEAK_ON = 0.02, SPEAK_HOLD = 4, SAMPLES = 1024;
   const MUTED_KEY = "oogaboogaland.voice-muted", MUTED_MAX = 512;
+  // Hearing range: the radius in metres (0 is no limit), the share of it at full volume, and a gain's most change a read.
+  const RADIUS_KEY = "oogaboogaland.voice-radius", RADIUS_MIN = 5, RADIUS_MAX = 60, FULL_SHARE = 0.5, NEAR_STEP = 0.15;
   const subscribers = new Set();
   const subs = new Map();
   // Each wanted voice's publication count from the room: a new count is a microphone published again.
   const wantedGen = new Map();
-  const stats = { enabled: false, muted: false, alone: false, micWanted: false, speaking: false, joining: false, peers: 0, hearing: 0, error: "", micError: "", publishing: false, blocked: false, ready: false, preflight: false, preflightPending: false, permission: "unknown", deviceId: "", receiveLevel: 1, micLevel: 0, receiveState: "off" };
+  const stats = { enabled: false, muted: false, alone: false, micWanted: false, speaking: false, joining: false, peers: 0, hearing: 0, error: "", micError: "", publishing: false, blocked: false, ready: false, preflight: false, preflightPending: false, permission: "unknown", deviceId: "", receiveLevel: 1, micLevel: 0, receiveState: "off", radius: 0 };
   const samples = new Float32Array(SAMPLES);
   const mutedLogins = new Set();
   let mic = null, pubPc = null, subPc = null, desired = [], queue = Promise.resolve();
@@ -56,6 +70,16 @@
     if (Array.isArray(saved)) for (const login of saved.slice(0, MUTED_MAX)) if (typeof login === "string" && login.length <= 39) mutedLogins.add(login.toLowerCase());
   } catch {
     // No list, or storage is off: nobody is muted.
+  }
+  // A radius in metres, held to the range; anything else (0, past RADIUS_MAX, not a number) is no limit.
+  const radiusOf = (value) => {
+    const metres = Math.round(Number(value));
+    return metres > 0 && metres <= RADIUS_MAX ? Math.max(RADIUS_MIN, metres) : 0;
+  };
+  try {
+    stats.radius = radiusOf(localStorage.getItem(RADIUS_KEY));
+  } catch {
+    // Storage is off: no limit.
   }
 
   const emit = () => {
@@ -119,10 +143,36 @@
   const listenSub = (s) => {
     if (readMeter(s.meter)) changed = true;
   };
+
+  // How loud a voice `metres` away plays within a hearing radius: full to FULL_SHARE of it, then a smoothstep down to
+  // silence at the radius, flat at both ends so it never jumps; 0 for the radius is no limit. A distance that is not a
+  // number plays nothing, so an element's volume is never set to NaN.
+  const falloff = (metres, radius) => {
+    if (!radius) return 1;
+    const t = (radius - metres) / (radius * (1 - FULL_SHARE));
+    return t >= 1 ? 1 : t > 0 ? t * t * (3 - 2 * t) : 0;
+  };
+  // The gain the hearing range wants for one remote voice now, measured in the place both players stand in.
+  const nearness = (id) => {
+    if (!stats.radius) return 1;
+    const s = BL.net.state, me = s.self, zone = s.zone;
+    if (me.zone !== zone) return 1;
+    const rec = BL.net.remotes.get(id);
+    if (!rec || rec.zone !== zone || rec.poseZone !== zone) return 0;
+    return falloff(Math.hypot(rec.x - me.x, rec.y - me.y, rec.z - me.z), stats.radius);
+  };
+  const playVolume = (s) => stats.receiveLevel * s.near;
+  const nearSub = (s, id) => {
+    const want = nearness(id), near = s.near;
+    if (want === near) return;
+    s.near = want > near ? Math.min(want, near + NEAR_STEP) : Math.max(want, near - NEAR_STEP);
+    s.el.volume = playVolume(s);
+  };
   const poll = () => {
     changed = false;
     readMeter(micMeter);
     subs.forEach(listenSub);
+    subs.forEach(nearSub);
     const self = stats.publishing && !!(micMeter && micMeter.speaking) && !stats.muted && !stats.alone;
     if (self !== stats.speaking) {
       stats.speaking = self;
@@ -328,7 +378,19 @@
     const level = Number(value);
     if (!Number.isFinite(level)) return;
     stats.receiveLevel = Math.max(0, Math.min(1, level));
-    for (const sub of subs.values()) sub.el.volume = stats.receiveLevel;
+    for (const sub of subs.values()) sub.el.volume = playVolume(sub);
+    emit();
+  };
+  // This visitor's hearing range, for this browser on every visit; the next meter read eases each voice toward it.
+  const setRadius = (metres) => {
+    const radius = radiusOf(metres);
+    if (radius === stats.radius) return;
+    stats.radius = radius;
+    try {
+      localStorage.setItem(RADIUS_KEY, String(radius));
+    } catch {
+      // Storage off: the range lasts this page.
+    }
     emit();
   };
   const enable = async (preserveMute = false) => {
@@ -540,11 +602,11 @@
       const res = await api("pull", { ids: add }, token); valid();
       for (const t of res.tracks) {
         if (t.errorCode || t.id === null) continue;
-        const el = new Audio();
-        el.volume = stats.receiveLevel;
+        const el = new Audio(), sub = { mid: t.mid, el, meter: null, blocked: false, gen: generations.get(t.id), near: nearness(t.id) };
+        el.volume = playVolume(sub);
         el.autoplay = true;
         el.muted = !heard(t.id) || generations.get(t.id) !== wantedGen.get(t.id);
-        subs.set(t.id, { mid: t.mid, el, meter: null, blocked: false, gen: generations.get(t.id) });
+        subs.set(t.id, sub);
       }
       if (res.requiresImmediateRenegotiation && res.sessionDescription) {
         await pc.setRemoteDescription(res.sessionDescription); valid();
@@ -611,5 +673,5 @@
   // For the feed panel and debugging: whom the room wants heard, whom this page pulled, and both connections.
   const inspect = () => ({ desired: desired.slice(), pulled: [...subs.keys()], publish: pubPc ? pubPc.connectionState : "none", receive: subPc ? subPc.connectionState : "none" });
 
-  BL.voice = { preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, enable, listen, dropMic, setMuted, toggle, restart, stop, setPeers, subscribe, dispose, inspect, speaking, muteLocal, mutedLocally, stats };
+  BL.voice = { preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, enable, listen, dropMic, setMuted, toggle, restart, stop, setPeers, subscribe, dispose, inspect, speaking, muteLocal, mutedLocally, setRadius, falloff, RADIUS_MIN, RADIUS_MAX, stats };
 })();

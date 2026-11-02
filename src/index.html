@@ -408,6 +408,12 @@
           <h2><span data-sign>Players online</span></h2>
           <span class="panel-chip" id="players-count" data-tone="idle">Offline</span>
         </header>
+        <div class="players-hearing" id="players-hearing" hidden>
+          <label class="players-hearing-label" for="players-hearing-range">Hearing range</label>
+          <input type="range" id="players-hearing-range" min="5" max="65" step="5" value="65" aria-describedby="players-hearing-help" aria-valuetext="No limit">
+          <output class="players-hearing-value" id="players-hearing-value" for="players-hearing-range">No limit</output>
+          <span class="players-hearing-help" id="players-hearing-help">Far voices fade, for you alone</span>
+        </div>
         <div class="players slab" id="players-list"></div>
         <p class="help players-status" id="players-status" hidden></p>
       </section>
