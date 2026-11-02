@@ -11883,18 +11883,42 @@
       const p = cave.root.position, feet = p.y - cave.baseY;
       return Math.abs(bedSupportAt(p.x, p.z, feet, 1e-4, 0) - feet) < 1e-4 ? island.supportAt(p.x, p.z, feet, STEP_MAX, -120, sleepNavigation.radius) : feet;
     };
-    shared.bedRoute = (cave, bed, toBed) => {
-      const home = cave.slot || WALK_IN;
-      return sleepNavigation.route(cave.root.position.x, planFeet(cave), cave.root.position.z, bed, toBed, home.x, home.z, !toBed && cave.state === "chilling");
+    const forestNavigation = headquarters.outdoorNavigation = BL.headquartersSleep.outdoorNavigation({ pool: mempoolIsland, island, props: solids });
+    shared.bedPlan = function* (cave, bed, toBed) {
+      const p = cave.root.position, home = cave.slot || WALK_IN, from = { x: p.x, y: planFeet(cave), z: p.z };
+      const entry = forestNavigation.entry, outside = forestNavigation.contains(p.x, p.z);
+      // A sleeper can wake before reaching the bridge. Its former outdoor bed
+      // must not send a mainland return through the forest's attachment search.
+      if (!outside && (!bed?.outdoor || !toBed)) return yield* sleepNavigation.plan(from.x, from.y, from.z, bed, toBed, home.x, home.z, !toBed && cave.state === "chilling");
+      if (toBed && bed.outdoor) {
+        const approach = outside ? [from] : from.y < -0.1
+          ? yield* sleepNavigation.plan(from.x, from.y, from.z, null, false, entry.x, entry.z)
+          : shared.npcPaths.route(from, entry);
+        if (!approach) return null;
+        const forest = yield* forestNavigation.plan(outside ? from : entry, bed);
+        return forest ? approach.concat(forest.slice(1)) : null;
+      }
+      const forest = yield* forestNavigation.plan(from, entry);
+      if (!forest) return null;
+      if (toBed) {
+        const inside = yield* sleepNavigation.plan(entry.x, entry.y, entry.z, bed, true, home.x, home.z);
+        return inside ? forest.concat(inside.slice(1)) : null;
+      }
+      // Positive forest elevations are not the home meadow. Retain the bridge
+      // walk until its foot before handing a worker back to ordinary routing.
+      const result = cave.state === "chilling" ? forest : forest.concat(shared.npcPaths.route(entry, { x: home.x, y: island.surfaceAt(home.x, home.z), z: home.z }).slice(1));
+      result.surfaceStart = forest.length - 1;
+      return result;
     };
-    shared.bedPlan = (cave, bed, toBed) => {
-      const home = cave.slot || WALK_IN;
-      return sleepNavigation.plan(cave.root.position.x, planFeet(cave), cave.root.position.z, bed, toBed, home.x, home.z, !toBed && cave.state === "chilling");
+    shared.bedRoute = (cave, bed, toBed) => {
+      const plan = shared.bedPlan(cave, bed, toBed);
+      for (;;) { const step = plan.next(); if (step.done) return step.value; }
     };
     shared.bedRouteClear = (cave, to) => {
       const p = cave.root.position;
       sleepRouteFrom.x = p.x; sleepRouteFrom.y = p.y - cave.baseY; sleepRouteFrom.z = p.z;
-      return sleepNavigation.clearSegment(sleepRouteFrom, to, false, 0.3);
+      return forestNavigation.contains(p.x, p.z) || forestNavigation.contains(to.x, to.z)
+        ? forestNavigation.clearSegment(sleepRouteFrom, to) : sleepNavigation.clearSegment(sleepRouteFrom, to, false, 0.3);
     };
     shared.workSites = caves.slots.filter(workCave).map((slot) => {
       const mouth = island.mouths.find((entry) => entry.id === slot.id), sr = Math.sin(mouth.ry), cr = Math.cos(mouth.ry);
