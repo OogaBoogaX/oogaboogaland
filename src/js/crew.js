@@ -1177,6 +1177,7 @@
     // The first waypoint of a route's tail that stays on the surface past every ramp, found once per route: a worker
     // walking out of bed hands over to ordinary work routing there. Never past the last leg, which ends any route.
     const surfaceTail = (route) => {
+      if (route.surfaceStart !== undefined) return route.surfaceStart;
       let i = route.length - 1;
       while (i > 0 && route[i - 1].y >= -1e-7) i--;
       return i;
@@ -1266,7 +1267,7 @@
       r.visible = true;
       if (!visible && !settle) setVec(r.position, walkIn.x, cave.baseY + groundAt(walkIn.x, walkIn.z, Infinity, Infinity, cave), walkIn.z);
       if (claimBedroll(cave)) {
-        if (settle || cave.bedroll.outdoor) {
+        if (settle) {
           // An existing sleeper is already in bed on entry. Reuse the final
           // lie-down pose without planning or animating a trip from the pile.
           cave.walk = null;
@@ -1369,7 +1370,7 @@
       if (ctx.bedRoute && cave.state === "sleeping") {
         // An overflow sleeper may have neither a bed nor a visible waiting spot.
         // Settle a newly active Ooga normally instead of routing from an absent bed.
-        if (!cave.bedroll || cave.bedroll.outdoor) {
+        if (!cave.bedroll) {
           standFromBed(cave); releaseBedroll(cave);
           cave.state = "away"; applyState(cave, state, true); return;
         }
@@ -1378,7 +1379,7 @@
         // The lying pose is centered over the mattress. Start the return at its
         // authored floor-side approach, clear of the next sleeper and the bed's collision shell.
         // An Ooga still on its way to bed turns back from where it stands.
-        if (lying) setVec(cave.root.position, bed.walkAt.x, cave.baseY + bed.walkAt.y, bed.walkAt.z);
+        if (lying) { const at = bed.walkAt || bed; setVec(cave.root.position, at.x, cave.baseY + at.y, at.z); }
         releaseBedroll(cave);
         cave.state = state;
         cave.parts.head.geometry = cave.headOpen;
@@ -4305,7 +4306,13 @@
       if (travel.mode === "rest" && cave.bedroll?.outdoor && cave !== player && (travel.retry -= dt) <= 0) {
         travel.retry = 1;
         const previous = cave.bedroll;
-        if (claimBedroll(cave) && cave.bedroll !== previous) { startSleep(cave, true); return; }
+        if (claimBedroll(cave) && cave.bedroll !== previous) {
+          const next = cave.bedroll;
+          // Stand up at the old outdoor bed before starting the walk to a
+          // newly vacant indoor one; the new mattress is not the current floor.
+          cave.bedroll = previous; standFromBed(cave); cave.bedroll = next;
+          startSleep(cave); return;
+        }
       }
       if (travel.mode === "landing") {
         runPlayer(cave, dt, false);
@@ -4325,7 +4332,7 @@
           travel.retry -= dt;
           if (travel.retry <= 0) {
             if (!cave.root.visible) startSleep(cave, true);
-            else if (claimBedroll(cave)) startSleep(cave, !!cave.bedroll.outdoor);
+            else if (claimBedroll(cave)) startSleep(cave);
             else travel.retry = 1;
           }
           return;
