@@ -108,7 +108,7 @@
       // scenery instead tags only the decorative faces in its geometry.
       const visit = (node, inheritedRagePass) => {
         const ragePass = inheritedRagePass || !!node.ragePass;
-        if (node.geometry && node.geometry.faces.length && !node.instanceData && !registered.has(node)) {
+        if (node.geometry && (node.geometry.collisionGeometry || node.geometry).faces.length && !node.instanceData && !registered.has(node)) {
           const geometry = geometryOf(node.geometry);
           if (geometry.nodes.length) {
             const count = geometry.triangles.length / 3;

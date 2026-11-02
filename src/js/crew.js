@@ -646,7 +646,7 @@
         jetpackFlameGeometry: null,
         jetFuel: 1,
         jetRecovering: false,
-        riding: { support: null, x: 0, y: 0, z: 0, vy: 0, updated: false, continuous: false },
+        riding: { support: null, outside: null, x: 0, y: 0, z: 0, vy: 0, updated: false, continuous: false },
         grabbedBy: null,
         viewLift: 0,
         peek: 0,
@@ -2823,23 +2823,35 @@
       cave.act.kind = cave === player ? "player" : "idle";
       cave.act.until = elapsed + 0.35;
     };
-    const standPlayer = (cave = player) => {
+    const standPlayer = (cave = player, animate = false) => {
       if (!cave || !cave.camp.seat) return false;
       const seat = cave.camp.seat;
+      const moving = cave === player && Math.hypot(steer.x, steer.z) > 0.05 && !cave.weapon.aiming;
+      if (animate && seat.exit) {
+        if (moving) seat.exit.target.ry = Math.atan2(steer.x, steer.z);
+        return true;
+      }
       let exitZ = seat.walkAt.z, clear = false;
       for (let i = 0; i < 3; i++) {
         exitZ = seat.walkAt.z + (i === 1 ? 0.65 : i === 2 ? -0.65 : 0);
         if (walkable(seat.walkAt.x, exitZ, seat.walkAt.x, exitZ, seat.floor, cave.bodyHeight, cave)) { clear = true; break; }
       }
       if (!clear) return false;
-      seat.sitter = null;
-      cave.camp.seat = null;
-      cave.root.quaternion = null;
-      cave.root.rotation.x = cave.root.rotation.z = 0;
-      standPose(cave);
-      setVec(cave.root.position, seat.walkAt.x, seat.floor + cave.baseY, exitZ);
-      cave.hop = cave.hopV = 0;
-      return true;
+      const finish = () => {
+        if (cave.camp.seat !== seat || !walkable(seat.walkAt.x, exitZ, seat.walkAt.x, exitZ, seat.floor, cave.bodyHeight, cave)) return false;
+        seat.sitter = null;
+        seat.entry = seat.exit = null;
+        cave.camp.seat = null;
+        cave.root.quaternion = null;
+        cave.root.rotation.x = cave.root.rotation.z = 0;
+        standPose(cave);
+        setVec(cave.root.position, seat.walkAt.x, seat.floor + cave.baseY, exitZ);
+        cave.hop = cave.hopV = 0;
+        return true;
+      };
+      // Normal input may animate a seat's exit. Forced scene/actor cleanup stays immediate.
+      return animate && seat.leave ? seat.leave(cave, { x: seat.walkAt.x, y: seat.floor + cave.baseY, z: exitZ,
+        ry: moving ? Math.atan2(steer.x, steer.z) : cave.root.rotation.y }, finish) : finish();
     };
     const sitPlayer = (seat) => {
       const cave = player;
@@ -3091,7 +3103,7 @@
         }
       }
       if (c.seat) {
-        if (cave === player && !c.seat.lockMovement && Math.hypot(steer.x, steer.z) > 0.05 && standPlayer(cave)) return false;
+        if (cave === player && !c.seat.lockMovement && Math.hypot(steer.x, steer.z) > 0.05 && standPlayer(cave, true) && !c.seat) return false;
         standPose(cave);
         parts.legR.rotation.x = parts.legL.rotation.x = -Math.PI / 2;
         parts.armR.rotation.x = parts.armL.rotation.x = -0.75;
@@ -3553,16 +3565,41 @@
       }
       return false;
     };
-    const outsideClear = (fromX, fromZ, x, z, y, height, radius = 0, npc = false) => {
+    const outsideClear = (fromX, fromZ, x, z, y, height, radius = 0, npc = false, players = false) => {
       const bodies = ctx.outsideActors && ctx.outsideActors();
       if (!bodies) return true;
       for (let i = 0; i < bodies.length; i++) {
         const body = bodies[i];
-        if (npc && body.player) continue;
+        if (npc && body.player || players && !body.player) continue;
         if (y >= body.y + (body.height || ctx.outsideActorHeight) || y + height <= body.y) continue;
         if (!gapClear(fromX, fromZ, x, z, body, Math.max(OUTSIDE_GAP, (body.radius || 0) + radius))) return false;
       }
       return true;
+    };
+    // Another player's body is solid from above too: its top holds the driven Ooga anywhere the gap above would hold
+    // it off from the side, so it never comes down inside the body. A scene with character support adds this to its
+    // own (`groundAt`); NPCs pass through players, so they never stand on one.
+    const outsideSupportAt = (cave, x, z, y, rise) => {
+      const bodies = cave && cave === player && ctx.outsideActors ? ctx.outsideActors() : null;
+      let floor = -Infinity;
+      if (bodies) for (let i = 0; i < bodies.length; i++) {
+        const body = bodies[i], top = body.y + (body.height || ctx.outsideActorHeight), gap = Math.max(OUTSIDE_GAP, (body.radius || 0) + cave.bodyRadius);
+        if (body.player && top > floor && top <= y + rise + 1e-7 && (x - body.x) ** 2 + (z - body.z) ** 2 < gap * gap - 1e-8) floor = top;
+      }
+      return floor;
+    };
+    // The player whose top the driven Ooga stood on before the scene last moved them (`dx`, `dz`, and `dy` for their
+    // top), so it rides that move as a passenger rides the crew.
+    const outsideRide = (cave) => {
+      if (cave.hop > 0 || cave.hopV > 0 || !ctx.outsideActors) return null;
+      const bodies = ctx.outsideActors(), p = cave.root.position, feet = p.y - cave.baseY;
+      for (let i = 0; i < bodies.length; i++) {
+        const body = bodies[i];
+        if (!body.player) continue;
+        const top = body.y - body.dy + (body.height || ctx.outsideActorHeight), gap = Math.max(OUTSIDE_GAP, (body.radius || 0) + cave.bodyRadius);
+        if (Math.abs(top - feet) <= 1e-6 && (p.x - body.x + body.dx) ** 2 + (p.z - body.z + body.dz) ** 2 < gap * gap - 1e-8) return body;
+      }
+      return null;
     };
     const gapClear = (fromX, fromZ, x, z, q, gap = SHOULDER_GAP) => {
       const dx = x - fromX, dz = z - fromZ, length = dx * dx + dz * dz;
@@ -4725,6 +4762,8 @@
       // On foot, the scene's own walkers are bodies to walk round, not through.
       if (!flying && cave.hop <= 0 && (!shoulderClear(cave, toX, toZ)
         || !outsideClear(fromX, fromZ, toX, toZ, y, height, cave.bodyRadius))) return false;
+      // Other players hold off a jump or a flight as they do a walk, so neither comes down inside one.
+      if ((flying || cave.hop > 0) && !outsideClear(fromX, fromZ, toX, toZ, y, height, cave.bodyRadius, false, true)) return false;
       return flying || cave.hop > 0
         ? flyable(fromX, fromZ, toX, toZ, y, height, cave) && groundAt(toX, toZ, y, y, cave) <= y
         : walkable(fromX, fromZ, toX, toZ, y, height, cave);
@@ -5837,7 +5876,7 @@
       if (!player || player.grabbedBy || player.health.stunned) return false;
       if (player.camp.burning) return dropRoll();
       // A seat may take the act itself (`seat.act`, true when it did), as the forklift's starts it; else it stands up.
-      if (player.camp.seat) return player.camp.seat.act && player.camp.seat.act() || standPlayer();
+      if (player.camp.seat) return player.camp.seat.act && player.camp.seat.act() || standPlayer(player, true);
       if (player.bedTravel.manual) return wakePlayer();
       if (weaponsEnabled && !player.weapon.reloading && !player.weapon.swapTime && !player.weapon.reloadHandoff && player.weapon.equipped && reloadMissing(player) > 0 && nearReload(player)) {
         if (!startReload(player)) hud.hint("No bananas in the pile");
@@ -6206,11 +6245,11 @@
       // Test both endpoints against the same current heap. A resize or a
       // relocation between frames must not masquerade as an exit.
       const wasInBananas = cave.root.visible && (cave.state === "working" || cave.state === "chilling") && inBananas(cave);
-      const support = riding.support;
+      const support = riding.support, outside = riding.outside;
       if (support && support.root.visible && support.riding.continuous) {
         const q = support.root.position, from = support.riding;
         ctx.carryCharacter(cave, q.x - from.x, q.y - from.y, q.z - from.z);
-      }
+      } else if (outside) ctx.carryCharacter(cave, outside.dx, outside.dy, outside.dz);
       const ownX = p.x, ownY = p.y, ownZ = p.z;
       const w = cave.weapon, club = cave.parts.club, meleeBefore = w.meleeTime, bashBefore = w.bashTime;
       const meleeRelease = w.meleeStrikeTime + MELEE_RECOVER;
@@ -6365,7 +6404,7 @@
         const cave = crewList[caveIndex];
         if (npcPaused && cave !== player) continue;
         const s = cave.shoulder, riding = cave.riding, p = cave.root.position;
-        riding.support = null; riding.updated = riding.continuous = false;
+        riding.support = riding.outside = null; riding.updated = riding.continuous = false;
         riding.x = p.x; riding.y = p.y; riding.z = p.z;
         riding.vy = cave.hopV;
         s.snapX = p.x; s.snapZ = p.z;
@@ -6380,6 +6419,8 @@
         const cave = crewList[i];
         cave.riding.support = ctx.characterSupportAt(cave);
       }
+      // The driven Ooga on another player's head rides their move, where the scene carries passengers.
+      if (dt > 0 && player && ctx.carryCharacter && !player.riding.support) player.riding.outside = outsideRide(player);
       if (!npcPaused && combatEnabled && dt > 0) updateFireContacts();
       if (!npcPaused && combatEnabled) updateFireThreats();
       for (let i = 0; i < crewList.length; i++) if (!crewList[i].puppet && (!npcPaused || crewList[i] === player)) updateMember(crewList[i], dt);
@@ -6387,7 +6428,7 @@
       if (!npcPaused || player) syncMagazine(npcPaused ? player : null);
       if (!npcPaused && combatEnabled && dt > 0) updateFireContacts();
       // Collision exclusions belong to this ordered update only; input and relocation see ordinary bodies.
-      for (let i = 0; i < crewList.length; i++) crewList[i].riding.support = null;
+      for (let i = 0; i < crewList.length; i++) crewList[i].riding.support = crewList[i].riding.outside = null;
     };
     const pause = () => { window.clearTimeout(recipeTimer); recipeTimer = 0; };
     const setCombatEnabled = (on) => {
@@ -6495,12 +6536,12 @@
       get weaponsEnabled() { return weaponsEnabled; },
       cavemen, list: crewList, fanSlots, stateOf, stateCounts, workingCavemen, refreshStates, refreshRosterRow, updateFan, rush, applyAllSwag, wornBy, renderLocker, pokeCave, idleSay, drawDrops,
       throwTomato, clearProjectiles, control, release, relocatePlayer, sleepPlayer, wakePlayer, sitPlayer, standPlayer, clearHeadLook, prepareDragged, recoverDragged, ignite, soot, dropRoll, damage, fireView, steer: steerPlayer, look: lookPlayer, elevate: elevatePlayer, playerAction, jumpPlayer, poseWeapon, wearJetpack, removeJetpack, setJetpackOwnership, cutJet, thrust, holdRocketJump, update, pause, dispose, stats,
-      actorClear, builtInJetpack, toggleTint, twirl, toggleWeapon, selectWeapon, configureWeapon, swingWeapon, bashWeapon, releaseSwing, fireWeapon, setWeaponTrigger, canFire, weaponOrigin, meleeReach, meleePower, nearReload, canReload, startReload, stopReload, stopBurst, canSwapMagazine, swapMagazine, collectMagazine, collectGroundMagazine, collectAmmo, removeMagazines, hasMagazine, magazineCount, magazineAmmo, totalAmmo, workSites,
+      actorClear, outsideSupportAt, builtInJetpack, toggleTint, twirl, toggleWeapon, selectWeapon, configureWeapon, swingWeapon, bashWeapon, releaseSwing, fireWeapon, setWeaponTrigger, canFire, weaponOrigin, meleeReach, meleePower, nearReload, canReload, startReload, stopReload, stopBurst, canSwapMagazine, swapMagazine, collectMagazine, collectGroundMagazine, collectAmmo, removeMagazines, hasMagazine, magazineCount, magazineAmmo, totalAmmo, workSites,
       get sleeping() { return !!(player && player.bedTravel.manual && player.state === "sleeping"); },
       get player() {
         return player;
       }
     };
   };
-  BL.crew = { create, LAND_DUST, JET_SPARKS, EAT_RATE, AMMO_MAX, AMMO_PER_BANANA, RELOAD_PERIOD, BURST_ROUNDS, BURST_STEP, MELEE_TAP_TIME, MELEE_CHARGE_DELAY, HEALTH_MAX, HEALTH_REGEN_DELAY, HEALTH_REGEN_RATE, JUMP_SPEED, JET_ACCEL, JET_SPEED, JET_RISE, JET_FUEL_SECONDS, JET_MOVE_SECONDS, JET_REFILL_SECONDS, JET_LAUNCH_FUEL };
+  BL.crew = { create, bodyHeightOf, LAND_DUST, JET_SPARKS, EAT_RATE, AMMO_MAX, AMMO_PER_BANANA, RELOAD_PERIOD, BURST_ROUNDS, BURST_STEP, MELEE_TAP_TIME, MELEE_CHARGE_DELAY, HEALTH_MAX, HEALTH_REGEN_DELAY, HEALTH_REGEN_RATE, JUMP_SPEED, JET_ACCEL, JET_SPEED, JET_RISE, JET_FUEL_SECONDS, JET_MOVE_SECONDS, JET_REFILL_SECONDS, JET_LAUNCH_FUEL };
 })();

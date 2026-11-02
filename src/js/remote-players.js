@@ -22,7 +22,8 @@
   const SNAP = 8;
   const WALK_SPEED = 0.35;
   const NAME_FONT = "bold 11px ui-monospace, monospace";
-  // Preserve the existing Ooga footprint; gorillas expose their posed envelope.
+  // Preserve the existing Ooga footprint; an Ooga stands as tall as its own head (the crew's `bodyHeightOf`) and
+  // gorillas expose their posed envelope. BODY_HEIGHT is the scenes' `outsideActorHeight` for a body without one.
   const BODY_RADIUS = 0.3, BODY_HEIGHT = 2.2;
   // Nameplate parts, in CSS pixels: the name's baseline NAME_LIFT over the head's top, the health bar under the name,
   // the online dot left of it and the 9-pixel speaker right of it, both centred on the name's letters (NAME_MID over
@@ -56,7 +57,8 @@
     const bodies = new Map();
     // The chat subscription, taken on the first update and again after a kept hub's suspend disposed it.
     let unheard = null;
-    const actorPool = Array.from({ length: MAX }, () => ({ id: null, player: true, x: 0, y: 0, z: 0, radius: BODY_RADIUS, height: BODY_HEIGHT }));
+    // `dx`, `dz` and `dy` are what the body's feet and top did in the last update, which a player on its head rides.
+    const actorPool = Array.from({ length: MAX }, () => ({ id: null, player: true, x: 0, y: 0, z: 0, dx: 0, dy: 0, dz: 0, radius: BODY_RADIUS, height: BODY_HEIGHT }));
     const actorList = [];
 
     // The crew's Ooga of this name goes away while a remote drives it; its own override comes back after.
@@ -105,9 +107,11 @@
       // Remote rigs arrive after the hub's outline registry is built. Like Tess, their attached UI uses
       // the overlay's exact visibility test instead of requiring an entry in that static registry.
       cave.root.sightHidden = true;
+      // Measured as built, before it is placed: feet at the root's own height, as the crew measures its Oogas.
+      const height = gorilla ? 0 : BL.crew.bodyHeightOf(cave);
       addChild(root, cave.root);
       const motion = gorilla ? { walkPhase: NaN, walkGait: "knuckle", climb: 0, climbStride: 0, climbDirection: 0, climbSide: 0, swim: 0, lab: false, labRunIn: false, office: false, officeRise: 0 } : null;
-      const entry = { id: rec.id, body: rec.body, name, gorilla, cave, motion, baseY: gorilla ? 0 : cave.root.position.y, x: rec.x, y: rec.y, z: rec.z, yaw: rec.yaw, phase: 0, hidden: null, hiddenOverride: null, label: "", labelW: 0 };
+      const entry = { id: rec.id, body: rec.body, name, gorilla, cave, motion, baseY: gorilla ? 0 : cave.root.position.y, height, top: NaN, dTop: 0, x: rec.x, y: rec.y, z: rec.z, yaw: rec.yaw, phase: 0, hidden: null, hiddenOverride: null, label: "", labelW: 0 };
       bodies.set(rec.id, entry);
       hideLocal(entry);
       return entry;
@@ -190,13 +194,18 @@
           pose(entry, dt);
           if (posed) posed(entry.cave, entry.cave.root.position.y - entry.baseY);
         }
+        // The top's move carries a player standing on it; a snap carries nobody.
+        const height = entry.gorilla ? entry.cave.bodyHeight : entry.height, top = entry.y + height;
+        entry.dTop = far || Number.isNaN(entry.top) ? 0 : top - entry.top;
+        entry.top = top;
         entry.cave.root.visible = visible(rec) && !(!entry.gorilla && crew && crew.player && crew.player.traits.name === entry.name);
         if (!entry.cave.root.visible) continue;
         const actor = actorPool[n++];
         actor.id = entry.id;
         actor.x = entry.x; actor.y = entry.y; actor.z = entry.z;
+        actor.dx = entry.dx; actor.dy = entry.dTop; actor.dz = entry.dz;
         actor.radius = entry.gorilla ? entry.cave.bodyRadius : BODY_RADIUS;
-        actor.height = entry.gorilla ? entry.cave.bodyHeight : BODY_HEIGHT;
+        actor.height = height;
       }
       actorList.length = 0;
       for (let i = 0; i < n; i++) actorList.push(actorPool[i]);
