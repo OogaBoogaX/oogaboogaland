@@ -9241,14 +9241,48 @@
   let zoneHeld = null, zoneHeldFor = 0;
   // Both body kinds share position, health and zone transport. Gorilla locomotion
   // reuses six numbers so climbing, swimming and running survive the handoff.
-  // The crossing the driven body is on (#392), against the zone reported for it: from the island across a bridge, back
-  // from the far land onto it, or just off its far end before the new zone has held (all the way across).
+  // Voice between levels (#392, voice-blend.js): on a slope from one level down to the next, `out.from` is the upper
+  // place, `out.to` the lower and `out.t` how far down, 0 at the upper level's height and 1 at the lower's. Each is
+  // bounded by where its slope stands, never by height alone: HQ's entrance ramps (their carved space, from the
+  // island's surface down to HQ's floor), HQ's basement and the ramps to it (in HQ's own zone, below its floor, where
+  // nothing else is), and the rainforest's tunnels, chamber, ledge and galleries (anywhere in its zone below its lowest terrace, bar the
+  // lake's water over the chamber), down to the chamber's floor. `zone` is where the body is, as `zoneOf` has it.
+  const LEVEL_AT = { from: "", to: "", t: 0 }, LEVEL_COLUMN = { floor: 0, ceiling: 0 };
+  // Below the rainforest's lowest terrace (its channel beds, half a metre down) a body is on its way underground.
+  const POOL_TERRACE = 0.75;
+  const levelCrossing = (x, feet, z, zone, out) => {
+    const H = island.headquarters;
+    if (zone === "hq" || zone === "outside") {
+      const column = LEVEL_COLUMN, B = H.basement;
+      if (zone === "hq" && feet < H.floor) {
+        out.from = "hq"; out.to = "hq-basement"; out.t = clamp((H.floor - feet) / (H.floor - B.floor), 0, 1);
+        return out.t > 0;
+      }
+      if (feet > H.floor && feet < 0 && island.rampColumnAt(x, z, false, column) && feet >= column.floor - 0.25 && feet < column.ceiling) {
+        out.from = "outside"; out.to = "hq"; out.t = clamp(feet / H.floor, 0, 1);
+        return out.t > 0;
+      }
+    }
+    if (zone === "rainforest" && mempoolIsland) {
+      const M = mempoolIsland, L = BL.poolLayout, local = feet - M.place.y, lx = M.localX(x, z), lz = M.localZ(x, z);
+      if (local < -POOL_TERRACE && (lx * lx + lz * lz >= L.LAKE_R * L.LAKE_R || M.coveredAt(x, feet + 0.5, z))) {
+        out.from = "rainforest"; out.to = "rainforest-under"; out.t = clamp((-POOL_TERRACE - local) / (-POOL_TERRACE - L.FLOOR), 0, 1);
+        return true;
+      }
+    }
+    return false;
+  };
+  // The crossing the driven body is on (#392), against the zone reported for it: from the upper place across a bridge
+  // or down a slope, back from the far place onto it, or just off its far end before the new zone has held (all the
+  // way across). A body on a level below stays in the zone above, all the way down.
   const shareBlend = (driven, gorilla, zone) => {
     const p = driven.root.position, feet = p.y - (gorilla ? 0 : driven.baseY), reported = BL.net.state.zone, at = BRIDGE_AT;
-    if ((gorilla || !playerCaveIndex) && onBridge(p.x, feet, p.z, at)) {
-      if (reported === "outside") return BL.net.setBlend(at.to, at.t);
-      if (reported === at.to) return BL.net.setBlend("outside", 1 - at.t);
-    } else if (zone !== reported && BL.voiceBlend.adjacent(reported, zone)) return BL.net.setBlend(zone, 1);
+    let from = null, to = null, t = 0;
+    if ((gorilla || !playerCaveIndex) && onBridge(p.x, feet, p.z, at)) { from = "outside"; to = at.to; t = at.t; }
+    else if (levelCrossing(p.x, feet, p.z, zone, LEVEL_AT)) { from = LEVEL_AT.from; to = LEVEL_AT.to; t = LEVEL_AT.t; }
+    if (from && reported === from) return BL.net.setBlend(to, t);
+    if (from && reported === to) return BL.net.setBlend(from, 1 - t);
+    if (zone !== reported && BL.voiceBlend.adjacent(reported, zone)) return BL.net.setBlend(zone, 1);
     BL.net.setBlend(null, 0);
   };
   const shareDrivenActor = (dt) => {
@@ -12514,7 +12548,7 @@
         get gameMode() { return gameMode; },
         selectDebugGorilla,
         get timechainIsland() { return timechainIsland; },
-        poolBridgeFar,
+        poolBridgeFar, levelCrossing,
         get factory() { return factoryMouth && factoryMouth.hall ? factoryMouth.hall.debug : null; },
         get bifrost() { return bifrostIsle; },
         get footsteps() { return footsteps; },
