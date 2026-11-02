@@ -35,7 +35,7 @@
 // it; remote records carry `hp` and `ko`.
 // Gorilla poses optionally add `g`: flags (air, biped, climb, run, lab, office, sleep), speed, climb stride,
 // climb direction, climb side and swim. Each remote reuses its six values; ordinary poses keep their format.
-// Ooga Chat: `sendChat` sends a line (sanitized as donation messages are, CHAT_MAX characters at most) while the
+// Ooga Chat: `sendChat` sends a line (validated by chat-policy.js, CHAT_MAX UTF-16 units at most) while the
 // room is live; `subscribeChat` hears the room's lines as `fn(lines, joined, receipt)`: one new line, or on every
 // (re)join the lines the room still holds, which chat.js merges; a rejection keeps the draft. The room names each line's
 // speaker; the page keeps nothing (chat.js shows them).
@@ -80,7 +80,7 @@
   const HIDDEN_PAUSE_MS = 5 * 60000;
   const BACKOFF_MS = 500, BACKOFF_MAX_MS = 15000;
   // The room's own limits (worker/src/protocol.js): characters in a line, lines it holds.
-  const CHAT_MAX = 160, CHAT_KEEP = 100;
+  const CHAT_MAX = BL.chatPolicy.MAX, CHAT_KEEP = 100;
   const GORILLA_PREFIX = "gorilla:";
   const bodyKind = (name) => name ? name.startsWith(GORILLA_PREFIX) ? "gorilla" : "ooga" : null;
   const bodyName = (name) => name && name.startsWith(GORILLA_PREFIX) ? name.slice(GORILLA_PREFIX.length) : name;
@@ -104,7 +104,7 @@
   const state = { backend: false, me: null, donations: false, tess: false, highscores: false, logoutEpoch: 0, started: false,
     resolved: offline.has("nosim") || offline.get("net") === "0" || location.protocol !== "http:" && location.protocol !== "https:",
     room: "off", selfId: 0, online: 0, released: null, loopEpoch: 0, zone: "outside", body: null, bodyKind: null, bodyName: null, hostId: 0, followers: 0, ghostHostId: 0, ghostFollowers: 0, npcVersion: 0, doorway: false,
-    self: { x: NaN, y: NaN, z: NaN, zone: "" } };
+    self: { x: NaN, y: NaN, z: NaN, zone: "" }, chatUnicode: false };
   let ws = null, retry = 0, retryTimer = 0, pingTimer = 0, hiddenTimer = 0, stopped = false;
   let npcFrame = null, inHub = false, hubSent = null, visibleSent = null;
   let zone = "outside", body = null, muted = false, hpSent = 100, koSent = false, hpAt = 0, poseAt = 0, px = NaN, py = NaN, pz = NaN, pyaw = NaN;
@@ -141,6 +141,7 @@
 
   const setRoom = (room) => {
     state.room = room;
+    if (room !== "live") state.chatUnicode = false;
     if (room !== "live") { state.studio = null; state.connectionToken = ""; studioEmit({t:"studio-state",state:null}); }
     state.online = room === "live" ? remotes.size + 1 : 0;
     emit();
@@ -207,8 +208,8 @@
   };
 
   // Only the fields chat.js shows; the room already sanitized the text and named the speaker.
-  const chatLine = (m) => m && Number.isSafeInteger(m.id) && typeof m.login === "string" && typeof m.text === "string"
-    ? { id: m.id, at: Number.isFinite(m.at) ? m.at : 0, login: m.login, name: typeof m.name === "string" && m.name ? m.name : m.login, text: m.text.slice(0, CHAT_MAX) }
+  const chatLine = (m) => m && Number.isSafeInteger(m.id) && typeof m.login === "string" && typeof m.text === "string" && !BL.chatPolicy.error(m.text)
+    ? { id: m.id, at: Number.isFinite(m.at) ? m.at : 0, login: m.login, name: typeof m.name === "string" && m.name ? m.name : m.login, text: BL.chatPolicy.text(m.text) }
     : null;
   const chatHeard = (lines, replace, receipt = null) => {
     for (const fn of chatSubscribers) fn(lines, replace, receipt);
@@ -276,6 +277,7 @@
       state.selfId = msg.you.id;
       state.connectionToken = typeof msg.connectionToken === "string" ? msg.connectionToken : "";
       state.doorway = Array.isArray(msg.features) && msg.features.includes("door");
+      state.chatUnicode = Array.isArray(msg.features) && msg.features.includes(BL.chatPolicy.FEATURE);
       remotes.clear();
       for (const p of msg.players) upsert(p);
       setRoom("live");
@@ -649,9 +651,11 @@
     sendMute();
   };
 
-  // One line of Ooga Chat; false when it was not sent (not live, empty, or too long once sanitized).
+  // One line of Ooga Chat; false when it was not sent (not live, invalid, overlong or unsupported by an older server).
   const sendChat = (text, clientId) => {
-    const line = BL.donations.sanitize(text, Infinity);
+    if (BL.chatPolicy.error(text)) return false;
+    const line = BL.chatPolicy.text(text);
+    if (!state.chatUnicode && !BL.chatPolicy.legacy(line)) return false;
     if (state.room !== "live" || !ws || ws.readyState !== WebSocket.OPEN || !line || line.length > CHAT_MAX) return false;
     if (clientId !== undefined && !chatIdValid(clientId)) return false;
     send(JSON.stringify({ t: "chat", text: line, ...(clientId === undefined ? {} : { clientId }) }));

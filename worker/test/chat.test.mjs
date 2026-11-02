@@ -13,31 +13,36 @@ import * as studio from "../src/studio-policy.js";
 const { CHAT_BURST, CHAT_FRAME_MAX, CHAT_HZ, CHAT_KEEP, CHAT_MAX, CHAT_RETRY_KEEP, MESSAGE_MAX, chatLog, parseClientMessage, sanitizeChat, takeToken } = protocol;
 const chat = (text) => JSON.stringify({ t: "chat", text });
 
-test("a chat line is sanitized text of 1 to CHAT_MAX characters; anything else is ignored, never fatal", () => {
+test("a chat line is lossless text of 1 to CHAT_MAX UTF-16 units; anything else is ignored, never fatal", () => {
   assert.deepEqual(parseClientMessage(chat("Ooga booga!")), { t: "chat", text: "Ooga booga!" });
   assert.deepEqual(parseClientMessage(chat("  padded  ")), { t: "chat", text: "padded" });
-  for (const bad of ["", "   ", "\n\t", "<>{}[]", "🍌🍌"]) assert.equal(parseClientMessage(chat(bad)), null, JSON.stringify(bad));
+  for (const bad of ["", "   ", "\n\t", "x\u0000", "x\u202e", "\ud800", "\udc00"]) assert.equal(parseClientMessage(chat(bad)), null, JSON.stringify(bad));
   for (const bad of [{ t: "chat" }, { t: "chat", text: 42 }, { t: "chat", text: null }, { t: "chat", text: ["hi"] }]) assert.equal(parseClientMessage(JSON.stringify(bad)), null);
   assert.deepEqual(parseClientMessage(chat("a".repeat(CHAT_MAX))), { t: "chat", text: "a".repeat(CHAT_MAX) });
   assert.equal(parseClientMessage(chat("a".repeat(CHAT_MAX + 1))), null, "one over the limit is dropped, not cut");
-  // The limit counts what is left after sanitizing.
-  assert.deepEqual(parseClientMessage(chat("a".repeat(CHAT_MAX - 10) + "<>".repeat(40))), { t: "chat", text: "a".repeat(CHAT_MAX - 10) });
+  // No stripping can conceal an overlong message.
+  assert.equal(parseClientMessage(chat("a".repeat(CHAT_MAX - 10) + "<>".repeat(40))), null);
+  assert.equal(parseClientMessage(chat("🍌".repeat(80))).text.length, 160);
+  assert.equal(parseClientMessage(chat("🍌".repeat(80) + "x")), null);
 });
 
 test("client-supplied names and ids are dropped: a chat parses to its text alone", () => {
   assert.deepEqual(parseClientMessage(JSON.stringify({ t: "chat", text: "hi", login: "satoshi", name: "Satoshi", id: 1, at: 0 })), { t: "chat", text: "hi" });
 });
 
-test("sanitize keeps the donation message character set and strips markup", () => {
-  assert.equal(sanitizeChat('<img src=x onerror="alert(1)">hi'), "img srcx onerroralert1hi");
-  assert.equal(sanitizeChat("gm @ooga #1: it's 4:20, ok? yes! a-b_c."), "gm @ooga #1: it's 4:20, ok? yes! a-b_c.");
-  assert.equal(sanitizeChat("café ünïcode\u0000\u202e"), "caf ncode");
-  // The same rule as donations.sanitize, read from the page's own module.
+test("shared chat policy preserves Unicode and markup as data; donations keep their own policy", () => {
   const context = { window: {} };
-  runInNewContext(readFileSync(new URL("../../src/js/donations.js", import.meta.url), "utf8"), context);
-  const donation = context.window.BL.donations.sanitize;
-  const samples = [String.fromCharCode(...Array.from({ length: 128 }, (_, i) => i)), "  <b>bold</b> & \"quotes\"  ", "émoji 🍌 and ✓", "a\nb\tc"];
-  for (const s of samples) assert.equal(sanitizeChat(s), donation(s, Infinity), JSON.stringify(s));
+  for (const f of ["chat-policy", "donations"]) runInNewContext(readFileSync(new URL(`../../src/js/${f}.js`, import.meta.url), "utf8"), context);
+  const policy = context.window.BL.chatPolicy;
+  const samples = ["it’s working", "hello & welcome", "https://oogabooga.land", "café", "hello 🍌", "a+b=a", "👩‍👩‍👧‍👦", "✈️", "e\u0301", "中文 العربية", '<img src=x onerror="alert(1)">', "javascript:alert(1)", "'); DROP TABLE chat;--"];
+  for (const text of samples) {
+    assert.equal(policy.error(text), null);
+    assert.equal(sanitizeChat(text), text);
+    assert.equal(parseClientMessage(chat(text)).text, text);
+  }
+  for (const text of ["a\nb", "x\u0085", "x\u202e", "x\u2066", "\ud800", "\udc00", "x\u2028y"])
+    assert.equal(sanitizeChat(text), "", JSON.stringify(text));
+  assert.equal(context.window.BL.donations.sanitize("café 🍌", Infinity), "caf");
 });
 
 test("a long chat frame is ignored, not closed; every other frame keeps MESSAGE_MAX", () => {
@@ -46,8 +51,8 @@ test("a long chat frame is ignored, not closed; every other frame keeps MESSAGE_
   assert.equal(parseClientMessage(long), null, "a chat frame over MESSAGE_MAX is read and its overlong line dropped");
   assert.equal(parseClientMessage(chat("a".repeat(CHAT_FRAME_MAX))), null, "past CHAT_FRAME_MAX it is dropped unread");
   assert.equal(parseClientMessage(chat("a".repeat(1 << 20))), null);
-  // A raw line that sanitizes under the limit still arrives, even in a frame over MESSAGE_MAX.
-  assert.deepEqual(parseClientMessage(chat("hello " + "\u2603".repeat(300))), { t: "chat", text: "hello" });
+  // Unicode counts toward the same limit; it is never stripped to make a line fit.
+  assert.equal(parseClientMessage(chat("hello " + "\u2603".repeat(300))), null);
   // Everything else as before.
   assert.equal(parseClientMessage(" ".repeat(MESSAGE_MAX + 1)), false);
   assert.equal(parseClientMessage(JSON.stringify({ t: "zone", name: "x".repeat(MESSAGE_MAX) })), false);
@@ -248,18 +253,19 @@ test("room: a joiner gets welcome then the held lines; a line goes to everyone, 
   const a = await join(r, 1, "ooga", "Ooga");
   assert.deepEqual(a.sent.map((m) => m.t).slice(0, 2), ["welcome", "chat-history"], "history follows welcome as its own message");
   assert.deepEqual(a.sent[1].messages, []);
+  assert(a.sent[0].features.includes(protocol.CHAT_FEATURE), "welcome advertises the lossless policy");
   const b = await join(r, 2, "booga", "Booga");
-  await r.webSocketMessage(a, JSON.stringify({ t: "chat", text: "hi <b>all</b>", login: "satoshi", name: "Satoshi", id: 7 }));
+  await r.webSocketMessage(a, JSON.stringify({ t: "chat", text: "it’s café 🍌 & https://oogabooga.land <b>all</b>", login: "satoshi", name: "Satoshi", id: 7 }));
   for (const ws of [a, b]) {
     const [m] = said(ws);
     assert.equal(m.login, "ooga");
     assert.equal(m.name, "Ooga");
-    assert.equal(m.text, "hi ballb");
+    assert.equal(m.text, "it’s café 🍌 & https://oogabooga.land <b>all</b>");
     assert.ok(Number.isSafeInteger(m.id) && m.id !== 7 && Number.isFinite(m.at));
     assert.deepEqual(Object.keys(m).sort(), ["at", "id", "login", "name", "t", "text"]);
   }
   const c = await join(r, 3, "late", "Late");
-  assert.deepEqual(c.sent[1].messages.map((m) => [m.login, m.name, m.text]), [["ooga", "Ooga", "hi ballb"]]);
+  assert.deepEqual(c.sent[1].messages.map((m) => [m.login, m.name, m.text]), [["ooga", "Ooga", "it’s café 🍌 & https://oogabooga.land <b>all</b>"]]);
 });
 
 test("room: a joiner gets exactly the last CHAT_KEEP lines in order; ids only grow", async () => {
