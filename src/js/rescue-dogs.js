@@ -54,7 +54,7 @@
   // Its Ooga down, it lands within LAND_REACH of it on dry open ground; the jetpack sits on its back at JET_SCALE.
   // Held up in the air longer than HELD_UP with no way on (a canopy over it, a wall ahead), it turns up where it is
   // going.
-  const LIFT = 1.2, FLY_SIDE = 1.2, FLY_UP = 0.4, FLY_GAIN = 3, CATCH_UP = 1.35, FLY_FAR = 30, LAND_REACH = 14, JET_SCALE = 0.55, HELD_UP = 1.5, CLIMB_OVER = 8;
+  const LIFT = 1.2, FLY_SIDE = 1.2, FLY_UP = 0.4, FLY_GAIN = BL.crew.COMPANION_FLIGHT.gain, FLY_FAR = 30, LAND_REACH = 14, JET_SCALE = 0.55, HELD_UP = 1.5;
   const FREE = 0, KENNEL = 1, FOLLOW = 2, SIT = 3, EAT = 4, SQUAT = 5, NAP = 6, HOME = 7, STRAY = 8, FLY = 9, LAND = 10;
   const STATE_NAMES = ["free", "kennel", "follow", "sit", "eat", "poop", "sleep", "home", "stray", "fly", "land"];
   // Where a dog is: the Chora, the rescue's yard, or with its Ooga. `update` takes the visitor's as CHORA, YARD or ROOM
@@ -696,24 +696,18 @@
     // Flies slot i toward (tx, ty, tz), as fast and as steep as a jetpack goes: a wall or roof in its way it climbs
     // over, up to CLIMB_OVER above where it is going, never through; it keeps clear of the floor under it. True once
     // it is there.
+    const flight = { x: 0, y: 0, z: 0, heading: 0, speed: 0, phase: 0 };
+    const flightFloor = (x, z, feet) => {
+      const y = ground(x, z, feet);
+      return y > -100 ? y : feet;
+    };
     const flyTo = (i, tx, ty, tz, dt) => {
-      const dx = tx - px[i], dz = tz - pz[i], d = Math.sqrt(dx * dx + dz * dz);
-      const want = Math.min(JET_SPEED * CATCH_UP, d * FLY_GAIN);
-      speed[i] += (want - speed[i]) * Math.min(1, dt * 4);
-      if (d > 0.1) turn(i, Math.atan2(dx, dz), dt * 6);
-      let rise = Math.max(-JET_RISE, Math.min(JET_RISE, (ty - py[i]) * FLY_GAIN));
-      if (d > 0.02 && speed[i] > 0.01) {
-        const go = Math.min(speed[i] * dt, d), nx = px[i] + dx / d * go, nz = pz[i] + dz / d * go;
-        if (flyClear(px[i], pz[i], nx, nz, py[i])) { px[i] = nx; pz[i] = nz; }
-        else { speed[i] = 0; rise = py[i] < ty + CLIMB_OVER ? JET_RISE : Math.min(rise, 0); }
-      }
-      // The floor under it, not one within a step over its feet: in the air it climbs no mast or crane a step at a time.
-      let floor = floorOf(i);
-      if (floor > py[i] + 0.05) floor = floorOf(i, py[i] - 0.65);
-      const y = Math.max(py[i] + rise * dt, floor + 0.15);
-      if (flyClear(px[i], pz[i], px[i], pz[i], y)) py[i] = y;
-      phase[i] += dt * 4;
-      return d < 0.15 && Math.abs(ty - py[i]) < 0.15;
+      flight.x = px[i]; flight.y = py[i]; flight.z = pz[i];
+      flight.heading = yaw[i]; flight.speed = speed[i]; flight.phase = phase[i];
+      const arrived = BL.crew.flyCompanion(flight, tx, ty, tz, dt, flightFloor, flyClear);
+      px[i] = flight.x; py[i] = flight.y; pz[i] = flight.z;
+      yaw[i] = flight.heading; speed[i] = flight.speed; phase[i] = flight.phase;
+      return arrived;
     };
     // Horizontal steering burns fuel too; Space is only the upward part of a powered flight.
     const jetting = (cave) => !!cave.jet && !cave.jetRecovering && cave.jetFuel > 0 && (cave.jet.power > 0 || cave.jet.thrust);
