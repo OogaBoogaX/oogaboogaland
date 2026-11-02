@@ -17,6 +17,10 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const { addChild, removeChild, boundsOf } = BL.scene;
+  const { quat } = BL.math;
+  // A remote strike's arm swing, raised then brought down, in seconds; and the scratch the gun hold works in.
+  const SWING_TIME = 0.35;
+  const GUN_ARM = quat.create(), GUN_GRIP = quat.create(), GUN_HAND = quat.create(), GUN_AT = new Float64Array(3);
   const MAX = 32;
   const EASE = 10;
   const SNAP = 8;
@@ -55,8 +59,9 @@
   const create = ({ root, crew = null, fx = null, player = null, posed = null, visible = sameZone, hide = null, createGorilla = null, hideGorilla = null }) => {
     const net = BL.net;
     const bodies = new Map();
-    // The chat subscription, taken on the first update and again after a kept hub's suspend disposed it.
-    let unheard = null;
+    // The chat subscription, taken on the first update and again after a kept hub's suspend disposed it; the
+    // shot and strike subscriptions the same way.
+    let unheard = null, unshot = null, unswung = null;
     // `dx`, `dz` and `dy` are what the body's feet and top did in the last update, which a player on its head rides.
     const actorPool = Array.from({ length: MAX }, () => ({ id: null, player: true, x: 0, y: 0, z: 0, dx: 0, dy: 0, dz: 0, radius: BODY_RADIUS, height: BODY_HEIGHT }));
     const actorList = [];
@@ -111,7 +116,7 @@
       const height = gorilla ? 0 : BL.crew.bodyHeightOf(cave);
       addChild(root, cave.root);
       const motion = gorilla ? { walkPhase: NaN, walkGait: "knuckle", climb: 0, climbStride: 0, climbDirection: 0, climbSide: 0, swim: 0, lab: false, labRunIn: false, office: false, officeRise: 0 } : null;
-      const entry = { id: rec.id, body: rec.body, name, gorilla, cave, motion, baseY: gorilla ? 0 : cave.root.position.y, height, top: NaN, dTop: 0, jetNode: null, jetFlame: null, x: rec.x, y: rec.y, z: rec.z, yaw: rec.yaw, phase: 0, hidden: null, hiddenOverride: null, label: "", labelW: 0 };
+      const entry = { id: rec.id, body: rec.body, name, gorilla, cave, motion, baseY: gorilla ? 0 : cave.root.position.y, height, top: NaN, dTop: 0, jetNode: null, jetFlame: null, swing: 0, x: rec.x, y: rec.y, z: rec.z, yaw: rec.yaw, phase: 0, hidden: null, hiddenOverride: null, label: "", labelW: 0 };
       bodies.set(rec.id, entry);
       hideLocal(entry);
       return entry;
@@ -180,10 +185,47 @@
       flame.visible = entry.jetNode.visible && power > 0;
       if (flame.visible) flame.scale.y = (0.7 + Math.sin(jetClock * 40 + entry.id) * 0.3) * power / 2;
     };
+    // Their weapons from the room's `weapon` (net.js), drawn in simple poses rather than the crew's own: the gun in
+    // place of the club while it is out (the club as their model carries it otherwise, as before, slung or drawn),
+    // the gun's bananas by the crew's rule, the gun in the right palm as the crew holds it to aim, the arm raised
+    // while they aim, and a strike's swing.
+    const showWeapon = (entry, weapon, dt) => {
+      const cave = entry.cave, parts = cave.parts, arm = parts.armR, gun = parts.gun, held = weapon & 3, h = cave.traits.height;
+      parts.club.visible = held !== 2;
+      gun.visible = held === 2;
+      if (entry.swing > 0) entry.swing = Math.max(0, entry.swing - dt);
+      if (entry.swing > 0) {
+        const t = 1 - entry.swing / SWING_TIME;
+        arm.rotation.x = t < 0.35 ? -0.2 - 2.4 * t / 0.35 : -2.6 + 3.2 * (t - 0.35) / 0.65;
+      } else if (held === 2 && weapon & 4) arm.rotation.x = -Math.PI / 2;
+      if (held !== 2) return;
+      const rounds = weapon >> 3;
+      for (let i = 0; i < parts.gunBananas.length; i++) parts.gunBananas[i].visible = rounds > (i + 1) * BL.crew.BURST_ROUNDS;
+      // The crew's aim hold (poseWeapon): the palm at the end of the turned arm, the rifle pivoting round its grip.
+      quat.fromEuler(GUN_ARM, arm.rotation.x, arm.rotation.y, 0);
+      quat.fromEuler(GUN_GRIP, 0, Math.PI / 2, 0);
+      quat.multiply(GUN_HAND, GUN_ARM, GUN_GRIP);
+      quat.rotateVec(GUN_AT, GUN_HAND, 0, -0.625 * h, 0.15 * h);
+      const palmX = arm.position.x + GUN_AT[0], palmY = arm.position.y + GUN_AT[1], palmZ = arm.position.z + GUN_AT[2];
+      quat.fromEuler(GUN_GRIP, Math.PI / 2, 0, 0);
+      quat.multiply(gun.quaternion, GUN_ARM, GUN_GRIP);
+      quat.rotateVec(GUN_AT, gun.quaternion, 0, -0.14 * h, -0.184 * h);
+      gun.position.x = palmX - GUN_AT[0]; gun.position.y = palmY - GUN_AT[1]; gun.position.z = palmZ - GUN_AT[2];
+    };
+    // Another player's banana flies as the crew's replayed shots do, with no hits; their strike swings the arm.
+    const shotHeard = (id, a) => {
+      const entry = bodies.get(id);
+      if (entry && !entry.gorilla && entry.cave.root.visible && crew && crew.showShot) crew.showShot(null, a[0], a[1], a[2], a[3], a[4], a[5]);
+    };
+    const swingHeard = (id) => {
+      const entry = bodies.get(id);
+      if (entry && !entry.gorilla) entry.swing = SWING_TIME;
+    };
 
     const update = (dt) => {
       jetClock += dt;
       if (fx && !unheard) unheard = net.subscribeChat(heard);
+      if (!unshot && net.subscribeShots) { unshot = net.subscribeShots(shotHeard); unswung = net.subscribeSwings(swingHeard); }
       for (const entry of bodies.values()) {
         const rec = net.remotes.get(entry.id);
         if (!rec || rec.body !== entry.body) drop(entry);
@@ -210,6 +252,7 @@
         else {
           pose(entry, dt);
           showJet(entry, rec.jet);
+          showWeapon(entry, rec.weapon | 0, dt);
           if (posed) posed(entry.cave, entry.cave.root.position.y - entry.baseY);
         }
         // The top's move carries a player standing on it; a snap carries nobody.
@@ -326,7 +369,8 @@
 
     const dispose = () => {
       if (unheard) unheard();
-      unheard = null;
+      if (unshot) { unshot(); unswung(); }
+      unheard = unshot = unswung = null;
       for (const entry of [...bodies.values()]) drop(entry);
       actorList.length = 0;
     };

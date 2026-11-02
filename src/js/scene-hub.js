@@ -9310,10 +9310,10 @@
     } else if (driven.camp.seat && driven.camp.seat.kind === "hammock") {
       // A resting Ooga reports the seat's still point, so its swing sends nothing; every page swings its own bed.
       const seat = driven.camp.seat;
-      BL.net.sendPose(seat.restX, seat.restY + driven.traits.height * 0.08 - driven.baseY, seat.restZ, seat.ry, null, BL.crew.jetFlags(driven));
+      BL.net.sendPose(seat.restX, seat.restY + driven.traits.height * 0.08 - driven.baseY, seat.restZ, seat.ry, null, BL.crew.jetFlags(driven), BL.crew.weaponFlags(driven));
       BL.net.setHealth(driven.health.value, driven.health.stunned);
     } else {
-      BL.net.sendPose(p.x, p.y - driven.baseY, p.z, driven.root.rotation.y, null, BL.crew.jetFlags(driven));
+      BL.net.sendPose(p.x, p.y - driven.baseY, p.z, driven.root.rotation.y, null, BL.crew.jetFlags(driven), BL.crew.weaponFlags(driven));
       BL.net.setHealth(driven.health.value, driven.health.stunned);
     }
   };
