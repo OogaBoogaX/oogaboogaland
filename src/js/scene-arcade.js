@@ -1960,6 +1960,8 @@
       p.z = clamp(p.z, HALL.back + 0.8, HALL.front + (Math.abs(p.x) < HALL.door - 0.5 ? 3 : -0.8));
     };
     pilot = pilotMod.create({
+      // The visitor's view, combat and weapon come in from the last scene and go on to the next (pilot.js `carried`).
+      carry: true,
       renderer, canvas: ctx.canvas, camera, hud, presets: views, landing: "entrance", pitch: PITCH, dist: DIST,
       follow: FOLLOW, fly: FLY, clampTarget, clampCamera, ceilingAt: () => HALL.h - 1, coarse: COARSE, mayPossess, combatOnly: () => gameMode,
       close: { eyeHeight: 1.1, eyeRatio: 0.95, eyeForward: 0.16, pitch: [-1.35, 1.35], trailingDist: 4, orbitDist: 5, maxStep: 0.6, groundAt: (x, z) => supportAt(x, z, feetOf()) }
@@ -2041,25 +2043,32 @@
     const playerName = wantedEntry && mayPick(wantedEntry) ? wanted : contributors.activeRoster.find(mayPick)?.name || null;
     world.pilot = null;
     if (playerName) {
-      playerWorld = { level: 0, weapons: new Map(), magazine: { owned: false, count: 0, ammo: 0, carrier: null } };
+      // The visitor's weapons and rounds are the page's (`world.weapons`), so none come back refilled at the door.
+      playerWorld = { level: 0, weapons: world.weapons, magazine: world.magazine };
       const shared = { root, input, hud, game, world: playerWorld, playerName, fx, viewYaw: 0, outsideActors: () => remotes ? remotes.actors() : NO_ACTORS, outsideActorHeight: BL.remotePlayers.BODY_HEIGHT, groundAt: groundFor, walkable: walkableFor, flyable: flyableFor, useNear,
         // The rifle and club work in the ghost arena alone (`arm`); there they wake the herald and fight the hunt.
         weaponsEnabled: true, onWeaponImpact: weaponImpact, weaponInteraction,
         onShot: (cave, from, to) => { if (ghosts && cave === people.player) ghosts.shot(from, to); },
         shotGeometry: () => ghosts && ghosts.hunting ? ghosts.shotGeometry() : null };
       people = shared.crew = BL.crew.create(shared);
+      world.weapons = playerWorld.weapons;
+      world.magazine = playerWorld.magazine;
       pilot.bind(shared);
       avatar = people.cavemen.get(playerName);
       // At a machine an Ooga plays, a step back from its spot, where that Ooga stands again.
       const at = from >= 0 ? live.find((c) => c.game === from).play : retroFrom ? retroFrom.play : machineFrom ? (machineFrom.bot ? toHall({ x: machineFrom.play.x, z: machineFrom.play.z, turn: machineFrom.turn }, 0, 1.3, { facing: machineFrom.play.facing }) : machineFrom.play) : { x: 0, z: HALL.front - 1.5, facing: Math.PI };
       Object.assign(avatar.root.position, { x: at.x, y: avatar.baseY + supportAt(at.x, at.z, retroFrom ? MEZZ.y : 1), z: at.z });
       avatar.root.rotation.y = at.facing;
-      pilot.possess(avatar);
-      if (!pilot.loginViewRestored) pilot.navigate({ position: { x: at.x, y: avatar.root.position.y - avatar.baseY, z: at.z }, yaw: at.facing - Math.PI, pitch: 0.18, dist: 4 });
-      // Empty-handed on arrival, the rifle on its back: 1 and 2 take the club or the rifle here as on the island.
+      // The rifle is the visitor's here, and the Ooga comes in as it left the last scene (pilot.js `arrive`): with nothing
+      // carried, empty-handed with the rifle on its back.
       avatar.weapon.secondaryOwned = true;
-      people.selectWeapon(0, avatar);
-      avatar.weapon.aiming = false;
+      const carried = pilot.arrive(avatar);
+      if (!pilot.loginViewRestored) pilot.navigate({ position: { x: at.x, y: avatar.root.position.y - avatar.baseY, z: at.z }, yaw: at.facing - Math.PI, pitch: 0.18, dist: 4 });
+      // 1 and 2 take the club or the rifle here as on the island.
+      if (!carried) {
+        people.selectWeapon(0, avatar);
+        avatar.weapon.aiming = false;
+      }
       hud.hint(COARSE ? "Stick walks · PLAY at a game" : "W A S D walk · mouse or Q E turn · Space plays what is next to you", 6000);
     } else if (from >= 0) pilot.goPreset(GAMES[from].id);
     lastPlayer = playerName;

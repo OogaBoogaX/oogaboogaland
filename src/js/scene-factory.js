@@ -1142,7 +1142,7 @@
   // island's, facing in, the view square behind it, and the walk on.
   const walkIn = (c) => {
     const G = BL.factoryWindow.GLIDE, pitch = clamp(c.pitch, FOLLOW.pitch[0], IN_PITCH);
-    pilot.navigate({ yaw: 0, pitch, dist: clamp(c.dist, FOLLOW.min, IN_VIEW), position: { x: clamp(c.across, -1.2, 1.2), y: LAYOUT.entrance.y, z: GATE_Z - clamp(c.past, 0, G.past) } });
+    pilot.navigate({ yaw: 0, pitch, dist: clamp(c.dist, FOLLOW.min, IN_VIEW), position: { x: clamp(c.across, -1.2, 1.2), y: LAYOUT.entrance.y, z: GATE_Z - clamp(c.past, 0, G.past) }, framed: true });
     // The view eases back out to where an arrival's stands as the Ooga walks on.
     pilot.orbit.tDist = ARRIVAL.dist;
     const p = avatar.root.position;
@@ -1210,7 +1210,7 @@
   // through the hangar's, facing out along the walkway, the view square behind it, and the walk on.
   const walkInHangar = (c) => {
     const G = BL.factoryWindow.GLIDE, at = BL.factoryWindow.arrival(HANGAR_WAY, clamp(c.side, -1.2, 1.2), clamp(c.past, 0, G.past), ARRIVE);
-    pilot.navigate({ yaw: at.yaw, pitch: clamp(c.pitch, FOLLOW.pitch[0], IN_PITCH), dist: clamp(c.dist, FOLLOW.min, IN_VIEW), position: { x: at.x, y: LAYOUT.hangar.y, z: at.z } });
+    pilot.navigate({ yaw: at.yaw, pitch: clamp(c.pitch, FOLLOW.pitch[0], IN_PITCH), dist: clamp(c.dist, FOLLOW.min, IN_VIEW), position: { x: at.x, y: LAYOUT.hangar.y, z: at.z }, framed: true });
     pilot.orbit.tDist = HANGAR_ARRIVAL.dist;
     const p = avatar.root.position;
     Object.assign(walk, { phase: HANGAR_ON, t: 0, x: p.x, z: p.z, through: false });
@@ -1820,6 +1820,8 @@
       p.z = clamp(p.z, HALL.back + 2 + lean, Math.abs(p.x) < 6 ? exitReach(p.x, p.y) : HALL.front - 2 - lean);
     };
     pilot = pilotMod.create({
+      // The visitor's view, combat and weapon come in from the last scene and go on to the next (pilot.js `carried`).
+      carry: true,
       renderer, canvas: ctx.canvas, camera, hud, presets: PRESETS, landing: "entrance", pitch: PITCH, dist: DIST,
       follow: FOLLOW, fly: FLY, clampTarget, clampCamera, ceilingAt: () => HALL.h - 2, coarse: COARSE, mayPossess,
       close: { eyeHeight: 1.1, eyeRatio: 0.95, eyeForward: 0.16, pitch: [-1.35, 1.35], trailingDist: 4, orbitDist: 5, maxStep: 0.6, groundAt: (x, z) => FM.supportAt(x, z, feetOf()) }
@@ -1951,8 +1953,8 @@
         Object.assign(avatar.root.position, { x: arrival.position.x, y: arrival.position.y + avatar.baseY, z: arrival.position.z });
         avatar.root.rotation.y = arrival.yaw + Math.PI;
       }
-      pilot.possess(avatar);
-      people.selectWeapon(avatar.weapon.selectedSlot, avatar);
+      // In as it left the last scene (pilot.js `arrive`); with nothing carried, armed, as before.
+      if (!pilot.arrive(avatar)) people.selectWeapon(avatar.weapon.selectedSlot, avatar);
       // An arrival, as on the island: the Ooga stands a step inside the gate facing the core and the view starts
       // settled over its shoulder, never sweeping in from wherever the new camera began. Walked in through the island's
       // shield, it comes on through the gate's in its light instead, and walks on to that step.
