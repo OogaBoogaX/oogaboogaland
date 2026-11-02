@@ -1901,10 +1901,64 @@ body[data-active-scene="arcade"] .magazine-hud {
   display: none;
 }
 
+/* A player whose voice the visitor's hearing range has faded out. */
+.players-distance[data-far="true"] {
+  opacity: 0.45;
+}
+
+/* The hearing range (#380): its label, the slider and the range in metres on one line, a short note under them. */
+.players-hearing {
+  flex: none;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) minmax(8ch, auto);
+  align-items: center;
+  column-gap: 8px;
+}
+
+.players-hearing[hidden] {
+  display: none;
+}
+
+.players-hearing-label {
+  color: rgba(243, 239, 228, 0.72);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.players-hearing input[type="range"] {
+  width: 100%;
+  min-width: 0;
+  height: 26px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.players-hearing-value {
+  justify-self: end;
+  color: var(--paper);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.players-hearing-help {
+  grid-column: 1 / -1;
+  color: rgba(243, 239, 228, 0.62);
+  font-size: 9.5px;
+  white-space: nowrap;
+}
+
 @media (pointer: coarse) {
   .players-look {
     padding: 8px;
     margin: -8px;
+  }
+
+  .players-hearing input[type="range"] {
+    height: 32px;
   }
 }
 

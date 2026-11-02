@@ -21128,6 +21128,46 @@ const voiceAloneChecks = async () => {
     is(rows.mutedAlone,true,true,false)&&is(rows.mutedWithOther,false,true,false)&&is(rows.unmutedAlone,true,false,false)&&is(rows.twoOthers,false,false,true)&&
     rows.netMuted==="false,true,false"&&rows.emitted&&!rows.stopped.alone&&!rows.stopped.muted,JSON.stringify(rows));
 };
+// #380: a visitor's hearing range only changes how loud this page plays the voices it receives. voice.js runs in the same
+// fixture with remotes placed round the visitor, and its own 150 ms meter read (captured from setInterval) is stepped by hand.
+const voiceHearingChecks = async () => {
+  const source=readFileSync(join(root,"src/js/voice.js"),"utf8"),ops=[],netMuted=[],timers=new Map(),els=[];let timerId=0;
+  const track={enabled:true,stop(){}},stream={getAudioTracks:()=>[track],getTracks:()=>[track]};
+  class Pc {constructor(){this.connectionState="connected";this.iceGatheringState="complete";this.localDescription={sdp:"v=0"};}addTransceiver(){return {mid:"0"};}async createOffer(){return {};}async createAnswer(){return {};}async setLocalDescription(){}async setRemoteDescription(){}addEventListener(){}removeEventListener(){}getTransceivers(){return [];}close(){}}
+  // A real element throws on a volume outside 0..1 or not a number, so this one does too.
+  class Audio {constructor(){this.muted=false;this.level=1;els.push(this);}get volume(){return this.level;}set volume(v){if(!(v>=0&&v<=1))throw new TypeError(`volume ${v}`);this.level=v;}pause(){}play(){return Promise.resolve();}}
+  const fetch=async(url,o)=>{const op=url.split("/").pop(),body=JSON.parse(o.body);ops.push(op);return {ok:true,json:async()=>op==="pull"?{tracks:body.ids.map(id=>({id,mid:String(id)}))}:{sessionDescription:{}}};};
+  const remote=(login,zone,x,z,placed=true)=>({login,zone,poseZone:placed?zone:null,x,y:0,z});
+  const remotes=new Map([[2,remote("near","factory",3,0)],[3,remote("mid","factory",0,15)],[4,remote("hall","factory.hall",1,0)],[5,remote("new","factory",2,0,false)]]);
+  const state={connectionToken:"synthetic",zone:"factory",self:{x:0,y:0,z:0,zone:"factory"}},store=new Map();
+  const load=()=>{const context={window:{BL:{net:{state,setMuted:on=>netMuted.push(on),remotes}},setTimeout:()=>0,clearTimeout(){},setInterval:fn=>{timers.set(++timerId,fn);return timerId;},clearInterval:id=>timers.delete(id)},localStorage:{getItem:k=>store.has(k)?store.get(k):null,setItem:(k,v)=>store.set(k,String(v))},navigator:{mediaDevices:{getUserMedia:async()=>stream}},RTCPeerConnection:Pc,Audio,MediaStream:class{},fetch,AbortController,Promise,JSON,Error,Map,Set,Float32Array,Math,Number,String};
+    runInNewContext(source,context);return context.window.BL.voice;};
+  const V=load(),settle=()=>new Promise(r=>setTimeout(r,0)),tick=(n=1)=>{for(let i=0;i<n;i++)for(const fn of timers.values())fn();};
+  const volumes=()=>els.map(el=>+el.volume.toFixed(3)).join(",");
+  const rows={};
+  await V.enable();await settle();V.setPeers([2,3,4,5],[1,1,1,1]);await settle();
+  tick(3);rows.noLimit=volumes();rows.radius0=V.stats.radius;
+  const sent=ops.length,muteCalls=netMuted.length;
+  V.setRadius(20);tick();rows.firstRead=volumes();tick(10);rows.settled=volumes();await settle();
+  rows.stored=store.get("oogaboogaland.voice-radius");rows.mic=track.enabled;rows.quiet=ops.length===sent&&netMuted.length===muteCalls;
+  // A voice pulled once the range is set starts at its own level, never at full first.
+  remotes.set(6,remote("far","factory",0,40));V.setPeers([2,3,4,5,6],[1,1,1,1,1]);await settle();rows.joinedFar=els.length===5?+els[4].volume.toFixed(3):-1;
+  V.setReceiveLevel(0.5);rows.level=volumes();V.setReceiveLevel(1);
+  V.muteLocal("mid",true);tick();rows.localMute=els[1].muted&&!els[0].muted;V.muteLocal("mid",false);rows.unmuted=!els[1].muted;
+  remotes.get(5).poseZone="factory";tick(10);rows.placed=+els[3].volume.toFixed(3);
+  state.self.zone="factory.hall";tick(10);rows.unplacedSelf=volumes();state.self.zone="factory";
+  V.setRadius(65);tick(10);rows.back=volumes();rows.radius65=V.stats.radius;
+  const F=V.falloff;let step=0,rising=false;for(let d=0;d<=25;d+=0.01){const a=F(d,20),b=F(d+0.01,20);step=Math.max(step,Math.abs(b-a));if(b>a+1e-12)rising=true;}
+  rows.curve={full:F(10,20),half:F(15,20),edge:F(20,20),past:F(30,20),step:+step.toFixed(4),rising,noLimit:F(1e6,0),unknown:F(NaN,20)};
+  V.setRadius(20);
+  const checked=["abc","-3","999","2","20"].map(v=>{store.set("oogaboogaland.voice-radius",v);return load().stats.radius;}).join(",");
+  V.stop();rows.timersAfterStop=timers.size;rows.checked=checked;
+  record("voice hearing range: voices fade smoothly with distance in the visitor's own place, others past it go quiet, a voice joining starts at its own level, no limit is the old full volume, a local mute and the receive level still hold, and neither the microphone nor the room hears of it",
+    rows.noLimit==="1,1,1,1"&&rows.radius0===0&&rows.firstRead==="1,0.85,0.85,0.85"&&rows.settled==="1,0.5,0,0"&&rows.stored==="20"&&rows.mic&&rows.quiet&&rows.joinedFar===0&&
+    rows.level==="0.5,0.25,0,0,0"&&rows.localMute&&rows.unmuted&&rows.placed===1&&rows.unplacedSelf==="1,1,1,1,1"&&rows.back==="1,1,1,1,1"&&rows.radius65===0&&
+    rows.curve.full===1&&rows.curve.half===0.5&&rows.curve.edge===0&&rows.curve.past===0&&rows.curve.step<0.005&&!rows.curve.rising&&rows.curve.noLimit===1&&rows.curve.unknown===0&&
+    rows.checked==="0,0,0,5,20"&&rows.timersAfterStop===0,JSON.stringify(rows));
+};
 const exteriorEnrichmentChecks = BL => {
   const S=BL.scene,root=S.createNode(),land=BL.dsbGeography.build(),renderer={kind:"webgl2",quality:"high"},camera=S.createCamera();camera.position.y=110;
   const nature=BL.dsbNature.create({root,land,renderer,camera,weather:{state:{wind:{strength:.2}}}}),detail=BL.dsbExterior.create({root,land,nature});
@@ -23779,6 +23819,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   await integrationChecks(BL);
   footstepChecks(BL);
   await voiceAloneChecks();
+  await voiceHearingChecks();
   exteriorEnrichmentChecks(BL);
   if(ARGS.includes("exterior-unit"))return;
   maxisChecks(BL);
