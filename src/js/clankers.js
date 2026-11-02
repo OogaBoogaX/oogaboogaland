@@ -113,7 +113,16 @@
     const alive = (cave) => cave.state === "working" || cave.state === "chilling";
     // Every gorilla nobody drives away at once (`setAway`, the hub's GAME MODE), as if its Ooga were; back after.
     let allAway = false;
-    const setAway = (on) => { allAway = !!on; };
+    const setAway = (on) => {
+      on = !!on;
+      if (on === allAway || disposed) return;
+      allAway = on;
+      if (on) return;
+      // An island event has released the population. Reconcile hidden companions now,
+      // including sleepers, rather than waiting for another simulation frame.
+      if (ctx.sleep) bedsToday();
+      for (const e of list) if (!e.active && !e.remoteControlled) updateEntry(e, 0);
+    };
     // Asleep is the Ooga's standing state, by its contributions: not the moment it stirs to eat a donation or
     // flee a fire, which would send its gorilla home over the bridge and straight back. One standing in for an
     // Ooga somebody else is driving is away, not asleep.
@@ -2090,7 +2099,7 @@
         hasSlot: false, slotIndex: -1, slotX: 0, slotY: 0, slotZ: 0, goalX: 0, goalY: 0, goalZ: 0,
         random: mulberry32(fnv1a(`clanker/${owner.id || owner.traits.name || i}`)),
         // Its bed while its Ooga sleeps: see `updateSleep`.
-        sleep: { stage: "", slot: -1, leg: 0, count: 0, path: new Float64Array(SLEEP_POINTS * 2), mark: 0, pose: "", stall: 0, near: Infinity },
+        sleep: { stage: "", slot: -1, home: -1, leg: 0, count: 0, path: new Float64Array(SLEEP_POINTS * 2), mark: 0, pose: "", stall: 0, near: Infinity },
         // Its desk or wait spot in B.C.A. and where it is in the routine: see `workOffice`.
         office: { stage: "", desk: -1, wait: -1, time: 0, count: 0, index: 0, path: new Float64Array(OFFICE_POINTS * 2), seed,
           cycle: 0, work: "", left: 0, stroke: 0, turn: 0, held: 0 },
@@ -6308,37 +6317,46 @@
     };
     // Sleep. A gorilla sleeps when its Ooga does and where the scene keeps beds (`ctx.sleep`: `slots`, each with its
     // root point, heading and `nest`, and `path(slot, out)`, the dry way there from the home island as x, z pairs).
-    // It reserves a bed before it sets out and keeps it through the walk, the sleep, the waking and the walk
-    // home; beds are dealt for the day by a hash of the roster's names (`bedsToday`), so the choice is random,
-    // reproducible, the same on every page, and never reshuffled under a sleeper. Stages: "go" along the path, "settle" turning onto the bed, "asleep", then "return" back
+    // It reserves a bed before it sets out and keeps it through the walk and sleep, releasing it on waking.
+    // The daily name hash deals free beds among current sleepers, never reshuffling an occupied bed.
+    // Stages: "go" along the path, "settle" turning onto the bed, "asleep", then "return" back
     // along the path once its Ooga wakes, after which the ordinary work and chill machinery takes over.
     // Selection keeps a settled sleeper in bed until Space wakes it. A release while its Ooga still sleeps
     // walks an awakened gorilla back to bed from where it stands.
     const SLEEP_POSES = ["left", "right", "back"], SLEEP_REACH = 1.1, SLEEP_ARRIVE = 0.3, SLEEP_STALL = 25, SLEEP_MARK = 1.9, DAY_MS = 86400000;
-    // Who sleeps where today: every gorilla's bed, worked out once a day from the roster's names alone. Each takes
-    // the first bed still free in its own shuffled order, in roster order, so the answer never depends on who
-    // happened to fall asleep first, and every page looking at the island sees the same gorilla in the same bed
-    // without a word passing between them. A bed already taken is kept past midnight until its sleeper leaves it.
+    // Only current sleepers take part in the daily deal. Keep occupied beds stable
+    // across activity changes and midnight. A driven gorilla keeps its existing bed
+    // until release, even if its owner wakes; only sleepers get new reservations.
+    // The authored 20 beds remain the capacity: excess sleepers stay hidden until a
+    // bed is released, rather than overlapping another sleeper or inventing new ground.
     let bedDay = -1;
-    const bedOf = [];
+    const bedOf = new Int16Array(list.length).fill(-1), bedSleeping = new Uint8Array(list.length);
+    const bedUsed = new Uint8Array(ctx.sleep ? ctx.sleep.slots.length : 0);
     const bedsToday = () => {
       const day = Math.floor(Date.now() / DAY_MS), beds = ctx.sleep.slots.length;
-      if (day === bedDay && bedOf.length === list.length) return bedOf;
-      bedDay = day;
-      const taken = new Uint8Array(beds);
-      bedOf.length = list.length;
+      let changed = day !== bedDay;
       for (let i = 0; i < list.length; i++) {
+        const asleep = sleeps(list[i].owner) && !list[i].remoteControlled ? 1 : 0;
+        if (bedSleeping[i] !== asleep) changed = true;
+        bedSleeping[i] = asleep;
+      }
+      if (!changed) return;
+      bedDay = day; bedUsed.fill(0); bedOf.fill(-1);
+      for (let i = 0; i < list.length; i++) {
+        const slot = list[i].sleep.slot;
+        if (slot >= 0) { bedOf[i] = slot; bedUsed[slot] = 1; }
+      }
+      for (let i = 0; i < list.length; i++) {
+        if (!bedSleeping[i] || bedOf[i] >= 0) continue;
         const name = list[i].owner.traits.name;
         let best = -1, lowest = Infinity;
-        // The bed with the lowest hash for this name and day among those still free: a shuffle without a list.
         for (let b = 0; b < beds; b++) {
-          const order = taken[b] ? Infinity : fnv1a(`bed/${day}/${name}/${b}`);
+          const order = bedUsed[b] ? Infinity : fnv1a(`bed/${day}/${name}/${b}`);
           if (order < lowest) { lowest = order; best = b; }
         }
         bedOf[i] = best;
-        if (best >= 0) taken[best] = 1;
+        if (best >= 0) bedUsed[best] = 1;
       }
-      return bedOf;
     };
     const bedTaken = (slot, but) => {
       for (const other of list) if (other !== but && other.sleep.slot === slot) return true;
@@ -6346,14 +6364,14 @@
     };
     const releaseBed = (e) => {
       const s = e.sleep;
-      s.stage = ""; s.slot = -1;
+      s.stage = ""; s.slot = -1; bedDay = -1;
       e.gorilla.chest.scale.y = 1;
     };
     const reserveBed = (e) => {
       const s = e.sleep, beds = ctx.sleep.slots;
       if (s.slot >= 0) return true;
-      let slot = bedsToday()[e.index];
-      // Its own bed, unless a sleeper from before midnight still lies in it: then the first one nobody has.
+      let slot = bedOf[e.index];
+      // A reservation made since the last deal wins; use another free bed if needed.
       if (slot >= 0 && bedTaken(slot, e)) {
         slot = -1;
         for (let b = 0; b < beds.length && slot < 0; b++) if (!bedTaken(b, e)) slot = b;
@@ -6409,7 +6427,8 @@
         if (e.lounge) { leaveLounge(e); e.lounge = ""; e.loungeDepart = false; e.recover = Math.max(e.recover, 0.65); }
         e.mode = "sleeping"; e.phase = "sleep"; e.route = ""; e.exitFootprint = true;
         s.count = site.path(s.slot, s.path);
-        s.leg = s.stage === "return" ? Math.min(s.count - 1, s.leg + 1) : sleepLegFrom(e);
+        // A newly dealt bed has a different path; the old return leg belongs only to its old bed.
+        s.leg = s.stage === "return" && s.home === s.slot ? Math.min(s.count - 1, s.leg + 1) : sleepLegFrom(e);
         s.stage = "go"; s.stall = 0; s.near = Infinity;
       }
       if (s.stage === "go") {
@@ -6470,6 +6489,8 @@
     const updateWake = (e, dt, beforeX, beforeY, beforeZ) => {
       const s = e.sleep, p = e.root.position;
       if (s.stage !== "return") {
+        // The path home is stored separately; a waking gorilla no longer owns a bed.
+        s.home = s.slot; s.slot = -1; bedDay = -1;
         e.gorilla.chest.scale.y = 1;
         if (e.lounge) { e.lounge = ""; e.loungeDepart = false; e.recover = Math.max(e.recover, 1.2); }
         e.footprintMode = "walk";
@@ -7166,6 +7187,7 @@
     };
     const update = (dt) => {
       if (disposed || !(dt > 0)) return;
+      if (ctx.sleep && !allAway) bedsToday();
       if (combatEnabled && rage) rage.frame(elapsed);
       if (labEscape && (!labEscape.active || labEscape.controlled || labEscape.fire.burning
         || labEscape.climb.active || labEscape.jump.active || labEscape.drive.airborne)) {
