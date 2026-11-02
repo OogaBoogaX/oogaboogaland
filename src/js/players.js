@@ -18,6 +18,13 @@
 // stop is no limit, and a distance at or past the range is dimmed, since that voice is faded out for them. A voice in
 // another place of the group, which shows no distance, is silenced by a range without a mark here. The slider is not
 // offered where an audio element's volume cannot be set (iOS and iPadOS), since it would do nothing there.
+// Joins (#430, `net.subscribePresence`): a player who comes online while the visitor is in the room is named on screen
+// (`hud.toast`, read out by assistive technology) and counted on the tab until the visitor looks at it
+// (`sheet.watchViews`), unless they are in the panel as it happens. Those already there when the visitor (re)joins are
+// not named, nor is one who comes back within REJOIN_QUIET of leaving (a reconnect, a reload, a newer tab). Joins close
+// together share one message while it shows. With "Read joins aloud" ticked (this browser's choice, in localStorage) the names are
+// spoken too, one utterance at a time: names that arrive while one plays wait and are said together after it, and the
+// page-wide mute (`BL.sound`) silences it, leaving the message. Speech starts only from the box, a gesture.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -25,6 +32,7 @@
   const $ = (id) => document.getElementById(id);
   const sheet = $("sheet"), panel = $("players-panel"), list = $("players-list"), status = $("players-status"), count = $("players-count");
   const hearing = $("players-hearing"), range = $("players-hearing-range"), rangeValue = $("players-hearing-value"), V = BL.voice;
+  const speak = $("players-speak"), speakBox = $("players-speak-input"), synth = window.speechSynthesis || null, toastBox = $("toast");
   // The slider's stops run RADIUS_MIN..RADIUS_MAX metres, and one more stop past them is no limit.
   const RANGE_STEP = Number(range.step);
   range.min = String(V.RADIUS_MIN);
@@ -265,6 +273,71 @@
   // the other keys reach the page again; from the keyboard it keeps the focus to step on.
   range.addEventListener("input", () => V.setRadius(Number(range.value)));
   range.addEventListener("pointerup", () => range.blur());
+  // Joins: named, counted until looked at, and spoken when asked.
+  const REJOIN_QUIET = 120000, TOAST_MS = 2800, SPEECH_STUCK_MS = 15000, NAMES_SHOWN = 3, SPEAK_KEY = "oogaboogaland.players.speak";
+  const leftAt = new Map(), shown = { names: [], extra: 0 }, said = { names: [], extra: 0 };
+  let unread = 0, shownAt = -Infinity, shownText = "", speaking = false, speakingAt = 0, speakOn = false;
+  const add = (list, name) => { if (list.names.length < NAMES_SHOWN) list.names.push(name); else list.extra++; };
+  const words = (list) => {
+    const all = list.extra ? [...list.names, `${list.extra} ${list.extra === 1 ? "other" : "others"}`] : list.names;
+    return all.length === 1 ? `${all[0]} is online` : `${all.slice(0, -1).join(", ")} and ${all[all.length - 1]} are online`;
+  };
+  const setUnread = (count) => { unread = count; BL.sheet.setBadge("players", count); };
+  const utter = (text) => {
+    const line = new SpeechSynthesisUtterance(text);
+    line.onend = line.onerror = sayNext;
+    speaking = true; speakingAt = performance.now();
+    synth.speak(line);
+  };
+  const sayNext = () => {
+    speaking = false;
+    if (!said.names.length) return;
+    const text = words(said);
+    said.names.length = 0; said.extra = 0;
+    if (speakOn && !BL.sound.muted) utter(text);
+  };
+  const say = (name) => {
+    if (!synth || !speakOn || BL.sound.muted) return;
+    add(said, name);
+    if (!speaking || performance.now() - speakingAt > SPEECH_STUCK_MS) sayNext();
+  };
+  const hush = () => {
+    said.names.length = 0; said.extra = 0;
+    if (synth && speaking) synth.cancel();
+    speaking = false;
+  };
+  net.subscribePresence((rec, joined) => {
+    const now = performance.now();
+    for (const [id, at] of leftAt) if (now - at > REJOIN_QUIET) leftAt.delete(id);
+    if (!joined) { leftAt.set(rec.id, now); return; }
+    if (leftAt.delete(rec.id)) return;
+    if (!BL.sheet.attending(panel)) setUnread(unread + 1);
+    // A join adds to the message only while it is still the one on screen.
+    if (now - shownAt > TOAST_MS || toastBox.hidden || toastBox.textContent !== shownText) { shown.names.length = 0; shown.extra = 0; }
+    add(shown, rec.display);
+    shownAt = now; shownText = words(shown);
+    BL.hud.toast(shownText);
+    say(rec.display);
+  });
+  BL.sheet.watchViews(panel, () => { if (unread) setUnread(0); });
+  net.subscribe(() => {
+    if (net.state.me || !unread && !leftAt.size) return;
+    setUnread(0); leftAt.clear(); hush();
+  });
+  if (synth) {
+    try { speakOn = localStorage.getItem(SPEAK_KEY) === "on"; } catch { /* Storage may be unavailable. */ }
+    speakBox.checked = speakOn;
+    speak.hidden = false;
+    speakBox.addEventListener("change", () => {
+      speakOn = speakBox.checked;
+      try { localStorage.setItem(SPEAK_KEY, speakOn ? "on" : "off"); } catch { /* Storage may be unavailable. */ }
+      hush();
+      // Said from the tick itself, the gesture a phone's browser needs before it speaks the joins that follow.
+      if (speakOn && !BL.sound.muted) utter("Joins will be read aloud");
+    });
+    speakBox.addEventListener("click", (e) => { if (e.detail) speakBox.blur(); });
+    BL.sound.subscribe((muted) => { if (muted) hush(); });
+  }
   net.subscribe(render);
   net.subscribeRoster(render);
   net.subscribeMoves(measure);
@@ -275,5 +348,5 @@
     doors = fn;
     measure();
   };
-  BL.players = { setDoors, get stats() { return { showing, rows: rows.size, groups: groups.size }; } };
+  BL.players = { setDoors, get stats() { return { showing, rows: rows.size, groups: groups.size, unread, speakOn }; } };
 })();
