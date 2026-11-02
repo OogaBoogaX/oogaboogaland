@@ -1,11 +1,13 @@
 import { parseStudioCommand, studioCanSpeak, STUDIO_ZONE } from "./studio-policy.js";
 import "../../src/js/chat-policy.js";
+import "../../src/js/voice-blend.js";
 // The room's wire format and the limits it enforces, as pure functions the tests can reach.
 //
 // Client → room:  { t: "pose", x, y, z, yaw }   the driven body's feet and heading, at most MOVE_HZ
 //                 { t: "body", name }            Ooga handle, `gorilla:<handle>` for its companion, or null
 //                 { t: "zone", name }            where that body is (see Zones below)
 //                 { t: "poker-voice", table }   0-9 while watching a table, null for the Ember Den floor
+//                 { t: "blend", to, k }          crossing toward voice group `to`, k of BLEND.STEPS along (null, 0: none)
 //                 { t: "hub", on }               this page shows the island and is visible (host candidates)
 //                 { t: "visible", on }           HALLOWEEN: this page is visible (the ghost arena's host candidates)
 //                 { t: "mute", on }              this page muted its own microphone, for everyone's roster
@@ -28,6 +30,7 @@ import "../../src/js/chat-policy.js";
 //                 vstate { id, voice, muted }  a player's microphone went live or off, or they muted it; welcome
 //                                            and join carry the same two fields on every player, and hp and ko
 //                 hp { id, v, ko }           a player's driven Ooga's health changed
+//                 blend { id, to, k }        a player's crossing changed; welcome and join carry blendTo and blendK
 //                 voice { peers, gens }      whom to hear, and each one's publication count (a new count is a
 //                                            microphone published again, to be pulled again); in the Studio also
 //                                            `listeners`, the other receive sessions there
@@ -74,6 +77,9 @@ export const OUTSIDE = "outside";
 export const NOWHERE = "none";
 // Health reports: a fight sends a few a second at most; at full health nothing is sent.
 export const HP_HZ = 4;
+// Voice across a crossing (#392, src/js/voice-blend.js): a page sends its step along one a few times a second at most.
+export const BLEND = globalThis.BL.voiceBlend;
+export const BLEND_HZ = 8;
 // Close codes: 4000 follows a `kick` (replaced, stale, full); 4400 is a message the room cannot read.
 export const CLOSE_KICK = 4000;
 // NPC frames: the host sends about 4 a second, only while a page follows; a frame of every Ooga's pose is a few kilobytes.
@@ -178,6 +184,8 @@ export const parseClientMessage = (text) => {
   if (msg.t === "mute") return typeof msg.on === "boolean" ? { t: "mute", on: msg.on } : null;
   if (msg.t === "hp") return finite(msg.v) && typeof msg.ko === "boolean" ? { t: "hp", v: Math.max(0, Math.min(100, Math.round(msg.v))), ko: msg.ko } : null;
   if (msg.t === "zone") return typeof msg.name === "string" && ZONE_NAME.test(msg.name) ? { t: "zone", name: msg.name } : null;
+  if (msg.t === "blend") return msg.to === null && msg.k === 0 ? { t: "blend", to: null, k: 0 }
+    : typeof msg.to === "string" && ZONE_NAME.test(msg.to) && !msg.to.includes(".") && Number.isInteger(msg.k) && msg.k > 0 && msg.k <= BLEND.STEPS ? { t: "blend", to: msg.to, k: msg.k } : null;
   if (msg.t === "chat") {
     if (typeof msg.text !== "string") return null;
     const line = sanitizeChat(msg.text);
@@ -283,6 +291,8 @@ export const claimRefusal = (index, login, body, _players, contributor = false) 
 // Voice: who hears whom. Players driving an Ooga or gorilla hear each other at one volume in the same
 // zone group (the island, a bridged land, one cave or portal; see Zones above). A listener with a receiving
 // session hears every other player in its group with a published microphone; nobody hears anyone `none`.
+// On a crossing between two adjacent groups (#392, `BLEND.PAIRS`) a player is in both, by its step along it
+// (`blendTo`, `blendK`), and hears whoever shares a place with it (`BLEND.shares`); the page sets the volumes.
 // The room decides and re-checks it on every pull.
 export const VOICE_TRACK = "mic";
 
@@ -291,6 +301,12 @@ export const zoneGroup = (zone) => {
   const dot = typeof zone === "string" ? zone.indexOf(".") : -1;
   return dot < 0 ? zone : zone.slice(0, dot);
 };
+
+/** Whether listener `p` (in voice group `group`) and speaker `q` share a place. With neither crossing, a group; with
+ * either, a zone, so a crossing's far end never reaches into another place of its group (₿IFRÖST's chamber). */
+const sharesPlace = (p, group, q) => p.blendTo || q.blendTo
+  ? BLEND.shares(p.zone, p.blendTo || null, p.blendK || 0, q.zone, q.blendTo || null, q.blendK || 0)
+  : zoneGroup(q.zone) === group;
 
 /** Map of player id → sorted ids that player should hear. */
 export const voicePeers = (players, studio = null) => {
@@ -301,7 +317,7 @@ export const voicePeers = (players, studio = null) => {
     // Both restrictions hold together: a bodiless listener counts only inside the Studio, a Studio
     // speaker only while permitted, and Ember Den voice only between players at the same poker table.
     if ((p.body || (studio && p.zone === STUDIO_ZONE)) && p.voice && p.voice.sub && group !== NOWHERE) {
-      for (const q of players) if (q !== p && (q.body || (studio && q.zone === STUDIO_ZONE)) && zoneGroup(q.zone) === group && (group !== "ember-den" || (p.pokerVoice ?? null) === (q.pokerVoice ?? null)) && q.voice && q.voice.track && (!studio || q.zone !== STUDIO_ZONE || studioCanSpeak(studio, q))) ids.push(q.id);
+      for (const q of players) if (q !== p && (q.body || (studio && q.zone === STUDIO_ZONE)) && sharesPlace(p, group, q) && (group !== "ember-den" || (p.pokerVoice ?? null) === (q.pokerVoice ?? null)) && q.voice && q.voice.track && (!studio || q.zone !== STUDIO_ZONE || studioCanSpeak(studio, q))) ids.push(q.id);
       ids.sort((a, b) => a - b);
     }
     out.set(p.id, ids);

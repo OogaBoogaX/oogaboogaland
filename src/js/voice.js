@@ -32,6 +32,9 @@
 // of its own, or one not yet placed here counts as past the radius; a page with no position of its own here plays everyone.
 // Gains are worked out on the speaking meter's own 150 ms read, so nothing runs while voice is off, and each moves at
 // most NEAR_STEP a read, so a jump (a new radius, a teleport) fades over about a second. A local mute still wins.
+// Crossings (#392): on a bridge between two places (voice-blend.js) the room also lets a player hear the place ahead,
+// and each voice plays at its equal-power share (`BL.voiceBlend.gain`, from `net.state.blendT` and the speaker's step),
+// times the hearing range's, so the two places fade into each other along the crossing. It eases as the range does.
 // Where a voice's level goes: its element's `volume` wherever the browser honours one, as before. iOS and iPadOS ignore
 // an element's volume (it always reads 1), so there (`GAIN_PLAY`) each voice plays through a Web Audio gain fed by its
 // speaking meter's own source, in the context the Join click made, while its element stays muted and only keeps the
@@ -164,14 +167,21 @@
     const t = (radius - metres) / (radius * (1 - FULL_SHARE));
     return t >= 1 ? 1 : t > 0 ? t * t * (3 - 2 * t) : 0;
   };
-  // The gain the hearing range wants for one remote voice now, measured in the place both players stand in.
+  // The gain one remote voice wants now: its share across a crossing (#392), times the hearing range's, measured in
+  // the place both players stand in. Two zones a crossing joins share coordinates, so a voice across it is measured too.
   const nearness = (id) => {
-    if (!stats.radius) return 1;
-    const s = BL.net.state, me = s.self, zone = s.zone;
-    if (me.zone !== zone) return 1;
-    const rec = BL.net.remotes.get(id);
-    if (!rec || rec.zone !== zone || rec.poseZone !== zone) return 0;
-    return falloff(Math.hypot(rec.x - me.x, rec.y - me.y, rec.z - me.z), stats.radius);
+    const s = BL.net.state, zone = s.zone, rec = BL.net.remotes.get(id);
+    let share = 1;
+    if (s.blendTo || rec && rec.blendTo) {
+      if (!rec) return 0;
+      share = BL.voiceBlend.gain(zone, s.blendTo, s.blendT, rec.zone, rec.blendTo, rec.blendK / BL.voiceBlend.STEPS);
+    }
+    if (!stats.radius) return share;
+    const me = s.self;
+    if (me.zone !== zone) return share;
+    const across = rec && (rec.zone === zone || rec.zone === s.blendTo || rec.blendTo === zone);
+    if (!across || rec.poseZone !== rec.zone) return 0;
+    return share * falloff(Math.hypot(rec.x - me.x, rec.y - me.y, rec.z - me.z), stats.radius);
   };
   const playVolume = (s) => stats.receiveLevel * s.near;
   // A voice's level where it plays: its element's volume, or on GAIN_PLAY its gain (nothing until its track lands), which
