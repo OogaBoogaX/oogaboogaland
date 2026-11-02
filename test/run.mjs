@@ -14409,6 +14409,89 @@ const arcadeWalking ={ name: "arcade walking", why: "rule: W A S D walk the visi
   const ooga = await walkKeys(b, "portlandhodl", 0, -1, [0, 2.2], 0.5);
   record("arcade walking: W A S D walk the visitor's Ooga away, left, back and right on screen on the hall floor from two camera angles", allWalk(ooga), JSON.stringify(ooga));
 } };
+// Rule (#420): in Ooga Arcade a walking jump carries on as on the island; 2 takes the AK-47 in the hall; and from the
+// ghost arena the hall's games take no hover or tap through the rock and its speakers' lines do not show, while in the
+// hall a game in sight still shows its tooltip and a speaker close by its line.
+const arcadeHall = { name: "arcade hall", why: "regression: a jump in Ooga Arcade stopped dead in the air, the AK-47 could not be taken outside the arena, and from the arena the hall's games took hovers and taps and its speakers' lines showed through the rock", run: async (b) => {
+  // A clear 13 m run on the hall floor along the camera's forward, the run-up and the jump at walking speed, with no
+  // station near enough to take Space.
+  const start = await b.evaluate(`(() => {
+    const B = __ooga, A = B.arcade, a = B.cavemen.get("portlandhodl");
+    if (B.crew.player !== a) B.pilot.possess(a);
+    a.weapon.equipped = a.weapon.primaryEquipped = false;
+    for (let x = -14; x <= 14; x += 2) for (let z = 4; z >= -2; z -= 2) for (const yaw of [0, Math.PI / 2, Math.PI, -Math.PI / 2]) {
+      B.pilot.navigate({ position: { x, y: 0, z }, yaw, pitch: 0.2, dist: 4 }); B.advance(0.1, 1 / 60);
+      const c = B.camera, p = a.root.position, fx = c.target.x - c.position.x, fz = c.target.z - c.position.z, l = Math.hypot(fx, fz);
+      let clear = true;
+      for (let s = 0; s < 13 && clear; s += 0.25) {
+        const ax = p.x + fx / l * s, az = p.z + fz / l * s, bx = p.x + fx / l * (s + 0.25), bz = p.z + fz / l * (s + 0.25);
+        clear = A.walkable(ax, az, bx, bz, 0, a.bodyHeight, a) && !A.nearStation(bx, bz, 2.6);
+      }
+      if (clear) return { x: p.x, z: p.z };
+    }
+    return null;
+  })()`);
+  if (!start) throw new Error("arcade hall: no clear run on the hall floor");
+  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "w", text: "w", code: "KeyW" });
+  const walk = await b.evaluate(`(() => { const B = __ooga, p = B.pilot.player.root.position; B.advance(0.2, 1 / 60); const x = p.x, z = p.z; B.advance(0.2, 1 / 60); return Math.hypot(p.x - x, p.z - z) / 0.2; })()`);
+  await b.key(" ");
+  const air = await b.evaluate(`(() => {
+    const B = __ooga, a = B.pilot.player, p = a.root.position, x = p.x, z = p.z;
+    let t = 0, up = false, peak = 0;
+    for (let i = 0; i < 180; i++) { B.advance(1 / 60, 1 / 60); t += 1 / 60; peak = Math.max(peak, a.hop); if (a.hop > 0.05) up = true; else if (up) break; }
+    return { t: +t.toFixed(3), peak: +peak.toFixed(2), speed: +(Math.hypot(p.x - x, p.z - z) / t).toFixed(2) };
+  })()`);
+  await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "w", code: "KeyW" });
+  record("arcade hall: a walking jump on the hall floor clears the step height and carries on at walking speed until it lands",
+    air.peak > 0.6 && air.speed > walk * 0.85, JSON.stringify({ start, walk: +walk.toFixed(2), air }));
+  await b.key("2");
+  const ak = await b.evaluate(`(() => { const B = __ooga, a = B.pilot.player; B.advance(0.3, 1 / 60); const hud = document.querySelector(".weapon-hud"); return { equipped: a.weapon.equipped, gun: a.parts.gun.visible, hud: !!hud && getComputedStyle(hud).display !== "none" }; })()`);
+  record("arcade hall: 2 puts the AK-47 in the Ooga's hands in the hall, with the weapon HUD showing", ak.equipped && ak.gun && ak.hud, JSON.stringify(ak));
+  // From the arena, facing the hall: a pixel the input picks a hall game at takes neither a hover nor a tap, and a line
+  // said over the stage does not show.
+  const HALL_KINDS = '["cabinet","machine","snack","prizes","wheel","ride","sign","changer","muncher","door","fame","disco"]';
+  // The first pixel, scanning the screen, the input picks a target at whose kind `wanted` names.
+  const findPick = (wanted) => `(() => {
+    const B = __ooga, wanted = ${wanted};
+    for (let y = 8; y < innerHeight; y += 6) for (let x = 8; x < innerWidth; x += 6) {
+      const hit = B.input.pick(x, y);
+      if (hit && wanted.includes(hit.owner.kind)) return { x, y, kind: hit.owner.kind };
+    }
+    return null;
+  })()`;
+  const inArena = await b.evaluate(`(() => {
+    const B = __ooga, H = BL.arcadeModels.HAUNT, S = BL.arcadeModels.STAGE;
+    B.pilot.navigate({ position: { x: H.arena.x - 16, y: H.y, z: H.arena.z }, yaw: Math.PI / 2, pitch: 0.05, dist: 4 }); B.advance(0.5, 1 / 60);
+    return { armed: BL.scenes.arcade.debug.arena.armed, hidden: B.arcade.pointHidden(S.x, 2.2, S.z) };
+  })()`);
+  const through = await b.evaluate(findPick(HALL_KINDS));
+  let hovered = null, tapped = null;
+  if (through) {
+    await b.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: through.x, y: through.y });
+    hovered = await b.evaluate(`(() => { __ooga.advance(0.2, 1 / 60); return document.getElementById("tooltip").hidden; })()`);
+    await b.click(through.x, through.y);
+    tapped = await b.evaluate(`(() => { const B = __ooga; B.advance(0.5, 1 / 60); return { scene: B.scene, moving: !!B.transitioning }; })()`);
+  }
+  record("arcade hall: from the ghost arena a hall game under the pointer takes no tooltip and no tap through the rock, and a line said over the stage does not show",
+    inArena.armed && inArena.hidden === true && !!through && hovered === true && tapped.scene === "arcade" && !tapped.moving,
+    JSON.stringify({ inArena, through, hovered, tapped }));
+  // Back in the hall facing the stage: a cabinet in sight shows its tooltip, and a line over the stage shows.
+  const inHall = await b.evaluate(`(() => {
+    const B = __ooga, S = BL.arcadeModels.STAGE;
+    B.pilot.navigate({ position: { x: 0, y: 0, z: 4 }, yaw: 0, pitch: 0.12, dist: 5 }); B.advance(0.5, 1 / 60);
+    return { armed: BL.scenes.arcade.debug.arena.armed, hidden: B.arcade.pointHidden(S.x, 2.2, S.z) };
+  })()`);
+  const cabinet = await b.evaluate(findPick('["cabinet"]'));
+  let shown = null;
+  if (cabinet) {
+    await b.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: cabinet.x, y: cabinet.y });
+    shown = await b.evaluate(`(() => { __ooga.advance(0.2, 1 / 60); const t = document.getElementById("tooltip"); return t.hidden ? null : document.getElementById("tooltip-text").textContent; })()`);
+    await b.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 2, y: 2 });
+  }
+  await b.evaluate(`(() => { const B = __ooga, a = B.pilot.player; B.crew.selectWeapon(0, a); B.advance(0.2, 1 / 60); })()`);
+  record("arcade hall: back in the hall a cabinet in sight shows its tooltip and a line over the stage shows again",
+    !inHall.armed && inHall.hidden === false && !!cabinet && typeof shown === "string" && shown.includes("to play"), JSON.stringify({ inHall, cabinet, shown }));
+} };
 const arcadePlay = { name: "arcade play", why: "rule: a cabinet starts its game, the game's exit comes back to that cabinet as the same Ooga, and Escape leaves for the island", run: async (b) => {
   await b.evaluate(`(() => { const B = window.__ooga, a = B.cavemen.get("portlandhodl"), s = window.BL.arcadeModels.CABINETS[0].play; if (B.crew.player !== a) B.pilot.possess(a); a.root.position.x = s.x; a.root.position.z = s.z; B.advance(0.2, 1 / 60); })()`);
   await b.key(" ");
@@ -19355,7 +19438,7 @@ scene("bifrost", { url: hubPage(src, "solo=1&character=portlandhodl"), steps: [b
 scene("bifrost", { label: "dsb round trip", query: "character=portlandhodl", steps: [bifrostDsb] });
 scene("bifrost", { label: "poker round trip", query: "character=portlandhodl", steps: [bifrostPoker] });
 scene("bifrost", { label: "canvas2d", url: hubPage(src, "canvas2d=1"), steps: [bifrostCanvas] });
-scene("arcade", { query: "character=portlandhodl", steps: [arcadeWalking, arcadeMachine, arcadePlay, trip("arcade")] });
+scene("arcade", { query: "character=portlandhodl", steps: [arcadeWalking, arcadeMachine, arcadeHall, arcadePlay, trip("arcade")] });
 scene("skee", { steps: [carnivalPlay("skee", 0.5), trip("skee")] });
 scene("hoops", { steps: [carnivalPlay("hoops", 0.2), trip("hoops")] });
 scene("shy", { steps: [carnivalPlay("shy", 0.7), trip("shy")] });
