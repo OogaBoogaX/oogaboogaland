@@ -125,14 +125,18 @@
   watch.observe(panel, { attributes: true, attributeFilter: ["hidden"] });
   watch.observe(sheet, { attributes: true, attributeFilter: ["data-open", "hidden"] });
 
-  // What is left of a line once sanitized as the room will.
+  // Validate exactly as the room will; only surrounding whitespace is trimmed.
   const update = () => {
-    const length = BL.donations.sanitize(input.value, Infinity).length;
-    const unsupported = /[^\w .,!'?@#:-]/.test(input.value);
-    const feedback = unsupported ? "Use letters A–Z, a–z, digits, spaces and _ . , ! ? ' @ # : - only. Remove unsupported characters before sending." : notice;
+    const policy = BL.chatPolicy, length = policy.text(input.value).length, problem = policy.error(input.value);
+    const unsupported = !problem && !net.state.chatUnicode && !policy.legacy(policy.text(input.value));
+    const feedback = problem === "controls" ? "Remove control characters, line breaks or directional formatting before sending."
+      : problem === "unicode" ? "This draft contains incomplete Unicode. Edit it before sending."
+      : problem === "length" ? "Message is over 160 UTF-16 units. Shorten it before sending."
+      : unsupported ? "This server does not yet support extended chat text. Keep the draft and reconnect after the server update."
+      : notice;
     left.textContent = String(CHAT_MAX - length);
     left.dataset.over = String(length > CHAT_MAX);
-    sendButton.disabled = !live || !!(pending && pending.awaiting) || !length || length > CHAT_MAX || unsupported;
+    sendButton.disabled = !live || !!(pending && pending.awaiting) || !!problem || unsupported;
     status.hidden = live && !feedback;
     if (live) statusText.textContent = feedback;
     announce(statusText.textContent);
@@ -170,7 +174,7 @@
   const submit = () => {
     if (composing || sendButton.disabled) return;
     const draft = input.value;
-    const text = BL.donations.sanitize(draft, Infinity);
+    const text = BL.chatPolicy.text(draft);
     if (!pending || pending.text !== text) pending = { clientId: window.crypto.randomUUID(), text };
     pending.draft = draft;
     pending.revision = revision;
