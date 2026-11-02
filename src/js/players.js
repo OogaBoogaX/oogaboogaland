@@ -16,8 +16,8 @@
 // what changed. No timers. Exports setDoors and stats.
 // While the visitor is in voice the tab also holds their hearing range (#380, `BL.voice.setRadius`): the slider's last
 // stop is no limit, and a distance at or past the range is dimmed, since that voice is faded out for them. A voice in
-// another place of the group, which shows no distance, is silenced by a range without a mark here. The slider is not
-// offered where an audio element's volume cannot be set (iOS and iPadOS), since it would do nothing there.
+// another place of the group, which shows no distance, is silenced by a range without a mark here. The slider is offered
+// wherever voice.js can fade a voice (`fades`): by its element's volume, or on iOS and iPadOS through a Web Audio gain.
 // Joins (#430, `net.subscribePresence`): a player who comes online while the visitor is in the room is named on screen
 // (`hud.toast`, read out by assistive technology) and counted on the tab until the visitor looks at it
 // (`sheet.watchViews`), unless they are in the panel as it happens. Those already there when the visitor (re)joins are
@@ -37,10 +37,6 @@
   const RANGE_STEP = Number(range.step);
   range.min = String(V.RADIUS_MIN);
   range.max = String(V.RADIUS_MAX + RANGE_STEP);
-  // Whether this browser plays an audio element at the volume it is given; iOS keeps every element at 1.
-  const probe = document.createElement("audio");
-  probe.volume = 0.5;
-  const VOLUME_SETS = probe.volume === 0.5;
   const ROOM_WORDS = { off: "Not connected.", connecting: "Joining the island…", paused: "Paused while the tab was hidden.", replaced: "Open in another tab.", full: "The island is full.", revoked: "Your account access was revoked." };
   const LOOK = { player: "Look at player", known: "Look at last known position", door: "Look toward entrance", nowhere: "Location unavailable", route: "Route unavailable" };
   // A player is turned toward at about their middle; a door at the height the scene gives.
@@ -132,7 +128,7 @@
   // Distances and crosshairs, from where everyone stands now.
   const measure = () => {
     if (!showing || stale) return;
-    const s = net.state, me = s.self, mine = s.zone, placed = me.zone === mine, radius = VOLUME_SETS && V.stats.enabled ? V.stats.radius : 0;
+    const s = net.state, me = s.self, mine = s.zone, placed = me.zone === mine, radius = V.fades && V.stats.enabled ? V.stats.radius : 0;
     shownZone = mine; shownRadius = radius;
     for (const row of rows.values()) {
       const rec = net.remotes.get(row.id);
@@ -169,7 +165,7 @@
   // The hearing range's slider, shown while the visitor is in voice; a new range redraws which distances are dimmed.
   const paintHearing = () => {
     if (!showing || stale) return;
-    const voice = V.stats, shown = VOLUME_SETS && voice.enabled && net.state.room === "live";
+    const voice = V.stats, shown = V.fades && voice.enabled && net.state.room === "live";
     if (shown !== shownHearing) { shownHearing = shown; hearing.hidden = !shown; }
     if (!shown) {
       if (shownRadius > 0) measure();
