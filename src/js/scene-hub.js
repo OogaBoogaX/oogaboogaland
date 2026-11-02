@@ -1503,6 +1503,9 @@
     c.level = level;
   };
   const CHALKBOARD_X = 6.75, CHALKBOARD_Z = 2.15, CHALKBOARD_YAW = -0.57;
+  // Writing on the chalkboard takes an Ooga standing in front of it, within the reach the Sphere's keypad allows
+  // (timechain-models.js KEYPAD_REACH), its feet about level with the board's foot.
+  const CHALKBOARD_REACH = 2.4, CHALKBOARD_RISE = 1.2;
   let chalkboardDressing = null, chalkboardClearance = null;
   const placeChalkboard = (m, group) => {
     const sr = Math.sin(m.ry), cr = Math.cos(m.ry);
@@ -1518,7 +1521,7 @@
     const boardGroup = createNode({ position: { x: CHALKBOARD_X, y, z: CHALKBOARD_Z }, rotation: { x: 0, y: CHALKBOARD_YAW, z: 0 } });
     addChild(group, boardGroup);
     const facing = m.ry + CHALKBOARD_YAW;
-    chalkboardClearance = { x: wx, z: wz, rightX: Math.cos(facing), rightZ: -Math.sin(facing), frontX: Math.sin(facing), frontZ: Math.cos(facing) };
+    chalkboardClearance = { x: wx, y: m.floorY + y, z: wz, rightX: Math.cos(facing), rightZ: -Math.sin(facing), frontX: Math.sin(facing), frontZ: Math.cos(facing) };
     addDressing(chalkboardDressing, boardGroup, wx, m.floorY + y, wz, `${m.id}:chalkboard`, false);
     const sa = Math.sin(CHALKBOARD_YAW), ca = Math.cos(CHALKBOARD_YAW);
     addPieceTargets(chalkboardDressing.picks, (px, py, pz) => {
@@ -5617,6 +5620,7 @@
         if (o.prop === "totem") return totemTip(o.totem);
         return PROP_TIPS[o.prop] || "";
       case "piece":
+        if (o.piece === "chalkboard") return COARSE ? "Chalkboard · walk up and tap to write or erase" : "Chalkboard · walk up and press Space to write or erase";
         return PIECES[o.piece] ? PIECES[o.piece][0] : "";
       default:
         return "";
@@ -5854,6 +5858,21 @@
     reactProp(o, p);
   };
   const WAKE_ACTION = { kind: "wake" }, ROLL_ACTION = { kind: "roll" }, STAND_ACTION = { kind: "stand" };
+  const CHALK_ACTION = { kind: "chalkboard" };
+  // Whether a body 1.1 m over feet at (x, z) stands where it may write on the chalkboard: in front, within reach.
+  const nearChalkboard = (x, y, z) => {
+    const b = chalkboardClearance;
+    if (!b) return false;
+    const dx = x - b.x, dz = z - b.z;
+    return dx * dx + dz * dz < CHALKBOARD_REACH * CHALKBOARD_REACH && dx * b.frontX + dz * b.frontZ > 0
+      && Math.abs(y - 1.1 - b.y) < CHALKBOARD_RISE;
+  };
+  // The driven Ooga, if it may write on the board now; else why not, for a toast.
+  const chalkboardRefusal = () => {
+    const player = pilot.player, at = player && player.root.position;
+    if (!player) return "Only an Ooga can write. Double-tap one, then walk it up to the chalkboard.";
+    return nearChalkboard(at.x, at.y - player.baseY + 1.1, at.z) ? null : "Walk up to the chalkboard to write on it.";
+  };
   const TAP_RAY = { ox: 0, oy: 0, oz: 0, dx: 0, dy: 0, dz: 0 };
   const nearbyAction = (x, y, z, reach) => {
     if (cloudHopper?.active) return null;
@@ -5887,6 +5906,7 @@
     }
     if (arcadeMouth && actionWithinReach(x, y, z, arcadeMouth.x, arcadeMouth.y, arcadeMouth.z, MOUTH_REACH)) return arcadeMouth;
     if (player && timechainIsland.gate && timechainIsland.gate.nearKeypad(x, y, z)) return timechainIsland.gate.action;
+    if (player && nearChalkboard(x, y, z)) return CHALK_ACTION;
     return null;
   };
   const useNearbyAction = (action) => {
@@ -5899,6 +5919,7 @@
     else if (action.kind === "hammock") restInHammock(action);
     else if (action.sleep) crew.sleepPlayer(action);
     else if (action === timechainIsland.gate.action) timechainIsland.gate.engage();
+    else if (action === CHALK_ACTION) chalkboard.open(null);
     else enterCave(action.slot);
   };
   const freeAction = () => {
@@ -6290,8 +6311,12 @@
         break;
       case "piece":
         if (o.piece === "chalkboard") {
-          const bounds = document.getElementById("scene").getBoundingClientRect();
-          chalkboard.open({ x: bounds.left + p.x, y: bounds.top + p.y });
+          const refusal = chalkboardRefusal();
+          if (refusal) hud.toast(refusal);
+          else {
+            const bounds = document.getElementById("scene").getBoundingClientRect();
+            chalkboard.open({ x: bounds.left + p.x, y: bounds.top + p.y });
+          }
         }
         else pokePiece(o);
         break;
@@ -6485,6 +6510,9 @@
       } else if (action === timechainIsland.gate.action) {
         hud.hint(COARSE ? "Tap USE KEYPAD to choose a room" : "Space · Use keypad to choose a room");
         hud.setAct("USE KEYPAD");
+      } else if (action === CHALK_ACTION) {
+        hud.hint(COARSE ? "Tap WRITE to use the chalkboard" : "Press Space to write on the chalkboard");
+        hud.setAct("WRITE");
       } else {
         hud.hint(COARSE ? "Tap ENTER ARCADE to go in" : "Press Space to enter Ooga Arcade");
         if (player) hud.setAct("ENTER ARCADE");
@@ -8749,7 +8777,9 @@
     fx.update(dt);
     stepTweens(dt);
     if (hammock) hammock.syncRopes(RENDER_OPTS.windTime, renderer.kind === "webgl2");
-    if (chalkboard.openNow) { /* Keep the exact camera and controlled actor pose until the board closes. */ }
+    // Keep the exact camera and controlled actor pose until the board closes; losing the Ooga, or its being moved
+    // away from the board, closes it.
+    if (chalkboard.openNow) { if (chalkboardRefusal()) chalkboard.close(); }
     else if (clankerPlay.active) clankerPlay.update(dt);
     else if (!cloudHopper.fallView()) pilot.update(dt);
     // Whitepaper events wait while Cloud Hopper owns the camera.
@@ -12388,6 +12418,7 @@
         get factory() { return factoryMouth && factoryMouth.hall ? factoryMouth.hall.debug : null; },
         get bifrost() { return bifrostIsle; },
         get footsteps() { return footsteps; },
+        get chalkboardAt() { return chalkboardClearance; },
         slots: pile.slots, drops: pile.drops, core: pile.core, shell: pile.shell, delivery: pile.delivery, spillEffect: pile.spillEffect, cavemen: crew.cavemen, crates: crates.list, lab: null, hud, applyAllSwag: crew.applyAllSwag, renderLocker: crew.renderLocker, demoTip, setPileLevel: pile.setLevel, refreshStates: crew.refreshStates, trimPool: fx.trimPool,
         get shown() {
           return pile.shown;
