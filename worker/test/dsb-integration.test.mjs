@@ -94,6 +94,44 @@ test("room carries an Ooga's jetpack to every page and drops it with the body", 
   assert.equal(player.j, 0, "a gorilla never wears one");
 });
 
+test("room carries an Ooga's weapons and relays its shots and strikes to its own zone alone", () => {
+  const Room = roomClass(), room = Object.create(Room.prototype);
+  room.players = new Map(); room.chatBuckets = new Map(); room.voiceSig = new Map();
+  room.scheduleFlush = () => {};
+  const join = (id, login, zone) => {
+    const sent = [], store = {};
+    const ws = { deserializeAttachment: () => ({ id }), serializeAttachment: value => { store.a = value; }, send: text => sent.push(JSON.parse(text)) };
+    const p = room.record(ws, { id, login, display: login, body: login, x: 0, y: 0, z: 0, yaw: 0, zone });
+    room.players.set(id, p);
+    return { ws, p, sent, store };
+  };
+  const shooter = join(1, "YellowBrokeIt", "outside"), near = join(2, "w-s-bitcoin", "outside"), away = join(3, "NickDaGreek", "dsb-outside");
+  const w = 2 | 4 | 12 << 3;
+  room.webSocketMessage(shooter.ws, JSON.stringify({ t: "pose", x: 1, y: 0, z: 1, yaw: 0, w }));
+  assert.equal(shooter.store.a.w, w, "a room that sleeps wakes with the weapon still in hand");
+  assert.equal(room.view(shooter.p).w, w, "late joiners see it");
+  room.snapshot();
+  assert.deepEqual(near.sent.filter(m => m.t === "state").at(-1).ws, [1, w]);
+  const a = [1, 1.5, 1, 20, 1, 5];
+  room.webSocketMessage(shooter.ws, JSON.stringify({ t: "shot", a }));
+  room.webSocketMessage(shooter.ws, JSON.stringify({ t: "swing" }));
+  assert.deepEqual(near.sent.filter(m => m.t === "shot" || m.t === "swing"), [{ t: "shot", id: 1, a }, { t: "swing", id: 1 }],
+    "a player in the same zone sees the shot and the strike");
+  assert.equal(away.sent.some(m => m.t === "shot" || m.t === "swing"), false, "another zone hears neither");
+  assert.equal(shooter.sent.some(m => m.t === "shot" || m.t === "swing"), false, "the shooter's own page already drew them");
+  for (let i = 0; i < 20; i++) room.webSocketMessage(shooter.ws, JSON.stringify({ t: "shot", a }));
+  assert.equal(near.sent.filter(m => m.t === "shot").length, 6, "a burst past the bucket is dropped");
+  room.webSocketMessage(shooter.ws, JSON.stringify({ t: "body", name: "gorilla:YellowBrokeIt" }));
+  assert.equal(shooter.p.w, 0, "another body starts empty-handed");
+  const before = near.sent.length;
+  shooter.p.shotBucket = shooter.p.swingBucket = null;
+  room.webSocketMessage(shooter.ws, JSON.stringify({ t: "shot", a }));
+  room.webSocketMessage(shooter.ws, JSON.stringify({ t: "swing" }));
+  room.webSocketMessage(shooter.ws, JSON.stringify({ t: "pose", x: 1, y: 0, z: 1, yaw: 0, w }));
+  assert.equal(near.sent.slice(before).some(m => m.t === "shot" || m.t === "swing"), false, "a gorilla neither shoots nor swings for others");
+  assert.equal(shooter.p.w, 0, "nor holds a weapon");
+});
+
 test("voice lists survive the room sleeping and follow a microphone published again", () => {
   const Room = roomClass();
   const socket = (id, store) => ({ sent: [], deserializeAttachment: () => store.a, serializeAttachment(value) { store.a = JSON.parse(JSON.stringify(value)); }, send(text) { this.sent.push(JSON.parse(text)); } });

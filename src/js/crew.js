@@ -419,6 +419,13 @@
   // What other pages need to draw a caveman's jetpack (`net.sendPose`'s `jet`): 1 while worn, plus its flame's power
   // (0 to 3) times 2.
   const jetFlags = (cave) => cave && cave.jet ? 1 | cave.jet.power << 1 : 0;
+  // What other pages need to draw a caveman's weapons (`net.sendPose`'s `weapon`): the one in hand (1 its primary,
+  // 2 the gun, 0 neither), 4 while aiming, and the gun's rounds (0 to 31) from bit 3.
+  const weaponFlags = (cave) => {
+    if (!cave || !cave.weapon) return 0;
+    const w = cave.weapon, rounds = w.unlimited ? AMMO_MAX : Math.max(0, Math.min(31, w.ammo | 0));
+    return (w.equipped ? 2 : w.primaryEquipped ? 1 : 0) | (w.aiming ? 4 : 0) | rounds << 3;
+  };
   // Cache the head's full pitch envelope once, attachments included; ceiling look-up must fit the movement body.
   const bodyHeightOf = (cave) => {
     BL.scene.updateWorld(cave.root);
@@ -1778,6 +1785,8 @@
       bullet.source = cave; bullet.feedback = false; bullet.visual = false;
       // The room's NPC host records each shot for the pages following it (npc-sync.js).
       if (ctx.onShot) ctx.onShot(cave, from, to);
+      // Other players see the visitor's own shots fly (remote-players.js replays them with no hits).
+      if (cave === player && BL.net) BL.net.sendShot(from.x, from.y, from.z, to.x, to.y, to.z);
     };
     // A shot replayed from the NPC host: the same flight, with no hits, no mirror crossing and no gorilla
     // impact (the host's events carry those).
@@ -2010,6 +2019,8 @@
         weaponOrigin(weaponStart, cave, true);
         hitMeleeTarget(cave);
       }
+      // A strike other players see; a held swing tells them when it is let go (releaseSwing).
+      if (!held && cave === player && BL.net) BL.net.sendSwing();
       return true;
     };
     const bashWeapon = (cave = player) => {
@@ -2047,6 +2058,7 @@
         weaponOrigin(weaponStart, cave, true);
         hitMeleeTarget(cave);
       }
+      if (!cancel && cave === player && BL.net) BL.net.sendSwing();
       return true;
     };
     // Thrusters built into a character sit wherever its own model puts them, so
@@ -6697,5 +6709,5 @@
       }
     };
   };
-  BL.crew = { create, bodyHeightOf, jetpackNode, jetFlags, flyCompanion, COMPANION_FLIGHT, LAND_DUST, JET_SPARKS, EAT_RATE, AMMO_MAX, AMMO_PER_BANANA, RELOAD_PERIOD, BURST_ROUNDS, BURST_STEP, MELEE_TAP_TIME, MELEE_CHARGE_DELAY, HEALTH_MAX, HEALTH_REGEN_DELAY, HEALTH_REGEN_RATE, JUMP_SPEED, JET_ACCEL, JET_SPEED, JET_RISE, JET_FUEL_SECONDS, JET_MOVE_SECONDS, JET_REFILL_SECONDS, JET_LAUNCH_FUEL };
+  BL.crew = { create, bodyHeightOf, jetpackNode, jetFlags, weaponFlags, flyCompanion, COMPANION_FLIGHT, LAND_DUST, JET_SPARKS, EAT_RATE, AMMO_MAX, AMMO_PER_BANANA, RELOAD_PERIOD, BURST_ROUNDS, BURST_STEP, MELEE_TAP_TIME, MELEE_CHARGE_DELAY, HEALTH_MAX, HEALTH_REGEN_DELAY, HEALTH_REGEN_RATE, JUMP_SPEED, JET_ACCEL, JET_SPEED, JET_RISE, JET_FUEL_SECONDS, JET_MOVE_SECONDS, JET_REFILL_SECONDS, JET_LAUNCH_FUEL };
 })();

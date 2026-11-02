@@ -16,6 +16,17 @@ test("poses inside the bounds are accepted, rounded and their yaw wrapped", () =
   assert.deepEqual(g.g, [127, 20, -1e6, 1, -1, 1], "gorilla locomotion, including sleep, is bounded independently of position");
   assert.equal(parseClientMessage(JSON.stringify({ t: "pose", x: 0, y: 25, z: 0, yaw: 0, j: 7 })).j, 7, "a worn jetpack at full thrust rides the pose");
   assert.equal("j" in parseClientMessage(JSON.stringify({ t: "pose", x: 0, y: 25, z: 0, yaw: 0, j: 0 })), false, "no jetpack adds nothing");
+  assert.equal(parseClientMessage(JSON.stringify({ t: "pose", x: 0, y: 25, z: 0, yaw: 0, w: 255 })).w, 255, "the gun in hand, aimed, with every round, rides the pose");
+  assert.equal("w" in parseClientMessage(JSON.stringify({ t: "pose", x: 0, y: 25, z: 0, yaw: 0, w: 0 })), false, "empty hands add nothing");
+});
+
+test("a shot is six numbers inside the room's bounds and a shot's reach, rounded; a swing is just the strike", () => {
+  assert.deepEqual(parseClientMessage(JSON.stringify({ t: "shot", a: [1.23456, 2, 3, 30, 4, -5] })), { t: "shot", a: [1.235, 2, 3, 30, 4, -5] });
+  assert.deepEqual(parseClientMessage('{"t":"swing"}'), { t: "swing" });
+  for (const a of [null, [], [1, 2, 3, 4, 5], [1, 2, 3, 4, 5, 6, 7], [1, 2, 3, 4, "5", 6], [BOUND_XZ + 1, 0, 0, 0, 0, 0],
+    [0, BOUND_Y_MAX + 1, 0, 0, 0, 0], [0, 0, 0, 0, 0, -BOUND_XZ - 1], [-100, 0, 0, 100, 0, 0]]) {
+    assert.equal(parseClientMessage(JSON.stringify({ t: "shot", a })), null, JSON.stringify(a));
+  }
 });
 
 test("poses out of bounds or not numbers are ignored, not fatal", () => {
@@ -28,6 +39,9 @@ test("poses out of bounds or not numbers are ignored, not fatal", () => {
   }
   for (const j of [8, -1, 1.5, "1", null, true]) {
     assert.equal(parseClientMessage(JSON.stringify({ t: "pose", x: 0, y: 0, z: 0, yaw: 0, j })), null, JSON.stringify(j));
+  }
+  for (const w of [256, -1, 2.5, "2", null, false]) {
+    assert.equal(parseClientMessage(JSON.stringify({ t: "pose", x: 0, y: 0, z: 0, yaw: 0, w })), null, JSON.stringify(w));
   }
 });
 
