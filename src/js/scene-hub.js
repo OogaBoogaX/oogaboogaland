@@ -8650,7 +8650,10 @@
       rec.time = Math.min(THROW_SWING_TIME + THROW_SETTLE_TIME, rec.time + dt);
       rec.entry.motion.throwProgress = Math.min(1, rec.time / THROW_SWING_TIME);
     }
-    if (!cloudPlaying()) clankers.update(dt);
+    if (!cloudPlaying()) {
+      rideClankerPlayer();
+      clankers.update(dt);
+    }
     for (let i = 0; gameMode && i < clankerCaptures.length; i++) {
       const rec = clankerCaptures[i], entry = rec.entry, cave = rec.cave;
       if (!cave) continue;
@@ -9638,7 +9641,8 @@
     return clankerCenterClear(entry, x, y, z, toX, toY, toZ, true)
       && island.clearAt(toX, to, toZ, radius, 0.12)
       && island.voxelSegmentClearAt(x, from, z, toX, to, toZ, radius, 0.12)
-      && solids.segmentClear(x, from, z, toX, to, toZ, radius, 0.12, null, radius, 0.12, true, false, false, entry.rage.active);
+      && solids.segmentClear(x, from, z, toX, to, toZ, radius, 0.12, null, radius, 0.12, true, false, false, entry.rage.active)
+      && clankerPlayersClear(entry, x, y, z, toX, toY, toZ);
   };
   const clankerPlatformEntryAt = (x, y, z, out) => {
     const hq = island.headquarters, radius = Math.hypot(x, z), angle = Math.atan2(x, -z);
@@ -9763,8 +9767,55 @@
       CLANKER_REST_FOOTING, clankerWalkSolidAt, clankerWalkTransitionClear,
       island.hullClearAt, entry, 2, 0, true, clankerPointFootingAt);
   };
+  // Other players are solid to the gorilla the visitor drives, as they are to a driven Ooga (`crew.outsideSupportAt`).
+  // Its body is the cylinder their pages see (the rig's posed envelope): their bodies hold it off and their tops hold
+  // it up on that one footprint. NPC gorillas still run under players.
+  const clankerPlayers = (entry) => entry && entry.controlled && remotes && !cloudPlaying() ? remotes.actors() : null;
+  const clankerPlayersClear = (entry, x, y, z, toX, toY, toZ, carrier = null) => {
+    const bodies = clankerPlayers(entry);
+    if (bodies) for (let i = 0; i < bodies.length; i++) {
+      const body = bodies[i];
+      if (body.player && body !== carrier && !cylinderSegmentClear(x, y, z, toX, toY, toZ, entry.gorilla.bodyRadius, entry.gorilla.bodyHeight,
+        body.x, body.z, body.y, body.y + body.height, body.radius)) return false;
+    }
+    return true;
+  };
+  const clankerPlayersSupportAt = (entry, x, z, y, step) => {
+    const bodies = clankerPlayers(entry);
+    let floor = ABYSS_FLOOR;
+    if (bodies) for (let i = 0; i < bodies.length; i++) {
+      const body = bodies[i], top = body.y + body.height, reach = entry.gorilla.bodyRadius + body.radius;
+      if (body.player && top > floor && top <= y + step + 1e-7 && (x - body.x) ** 2 + (z - body.z) ** 2 < reach * reach - 1e-8) floor = top;
+    }
+    return floor;
+  };
+  // Standing on a player's head, the driven gorilla rides the move the remote pool last made them (`dx`, `dz`, and
+  // `dy` for their top), as a driven Ooga does. Once nobody holds it up its footing is gone, and it falls.
+  let clankerOnPlayer = false;
+  const rideClankerPlayer = () => {
+    const entry = clankerPlay && clankerPlay.active ? clankerPlay.player : null, riding = clankerOnPlayer;
+    clankerOnPlayer = false;
+    const bodies = clankerPlayers(entry);
+    if (!bodies || !entry.active || entry.climb.active || entry.jump.active || entry.drive.airborne) return;
+    const p = entry.root.position;
+    for (let i = 0; i < bodies.length; i++) {
+      const body = bodies[i], reach = entry.gorilla.bodyRadius + body.radius;
+      if (!body.player || Math.abs(body.y - body.dy + body.height - p.y) > 1e-4
+        || (p.x - body.x + body.dx) ** 2 + (p.z - body.z + body.dz) ** 2 >= reach * reach - 1e-8) continue;
+      // The same proof as any of its moves, less the player it stands on; every other player still holds it off.
+      const steps = Math.max(1, Math.ceil(Math.hypot(body.dx, body.dy, body.dz) / 0.125));
+      const dx = body.dx / steps, dy = body.dy / steps, dz = body.dz / steps;
+      for (let n = 0; n < steps; n++) {
+        if (!clankerClear(p.x, p.y, p.z, p.x + dx, p.y + dy, p.z + dz, entry.radius, entry.height, entry, null, entry.heading, entry.heading, body)) break;
+        p.x += dx; p.y += dy; p.z += dz;
+      }
+      clankerOnPlayer = true;
+      return;
+    }
+    if (riding) clankers.supportRemoved();
+  };
   const clankerClear = (x, y, z, toX, toY, toZ, radius, height, entry = null, ignore = null,
-    fromHeading = entry ? entry.heading : 0, toHeading = fromHeading) => {
+    fromHeading = entry ? entry.heading : 0, toHeading = fromHeading, carrier = null) => {
     if (entry) entry.walkPoseChecked = false;
     const previousEntry = clankerPassingEntry;
     // A lab crowd overlap must not trap an airborne gorilla at its current XZ.
@@ -9781,7 +9832,8 @@
         if (!verticalLabJump && !entry.planningLabTraffic && !entry.planningRoam && (entry.motion.lab || !entry.controlled)
           && !clankerPeersClear(entry, x, y, z, toX, toY, toZ, fromHeading, toHeading)) return false;
       }
-      return clankerRigClear(x, y, z, toX, toY, toZ, radius, height, entry, ignore, fromHeading, toHeading);
+      return clankerRigClear(x, y, z, toX, toY, toZ, radius, height, entry, ignore, fromHeading, toHeading)
+        && clankerPlayersClear(entry, x, y, z, toX, toY, toZ, carrier);
     } finally {
       clankerPassingEntry = previousEntry;
     }
@@ -9990,7 +10042,7 @@
   };
   const CLANKER_RECTANGLE = { halfForward: 0, halfSide: 0, centerForward: 0 };
   const CLANKER_TERRAIN_RAMP = { groundX: 0, groundZ: 0, uneven: 0 };
-  const clankerSupportAt = (entry, x, z, y, step, heading = entry.heading, props = true) => {
+  const clankerSceneSupportAt = (entry, x, z, y, step, heading = entry.heading, props = true) => {
     // Tree tops are landing surfaces for the driven gorilla, not floors for a roaming one (as for Oogas).
     const accept = entry.controlled ? null : npcTreeSupportAllowed;
     const padSupportAt = entry.rage.active ? clankerRagePadSupportAt : clankerPadSupportAt;
@@ -10058,6 +10110,11 @@
       }
     }
     return floor;
+  };
+  // The scene's support, and other players' tops for the gorilla the visitor drives.
+  const clankerSupportAt = (entry, x, z, y, step, heading = entry.heading, props = true) => {
+    const floor = clankerSceneSupportAt(entry, x, z, y, step, heading, props);
+    return props ? Math.max(floor, clankerPlayersSupportAt(entry, x, z, y, step)) : floor;
   };
   const clankerPadSupportAt = (x, z, y, step, props, skipRageProps = false) => {
     const floor = island.supportAt(x, z, y, Math.min(step, STEP_MAX), ABYSS_FLOOR);
@@ -12178,7 +12235,7 @@
         solids.supportAt(x, z, y, 0.02, 0, null, null, false, null, !!entry?.rage?.active)),
       isGrass: island.isGrassAt, restSurfaceClear: clankerRestSurfaceClear, onLand: island.onLand,
       roamRadius: island.radius, meadowRadius: island.meadowRadius,
-      clear: clankerClear, tallObstacleAhead: clankerTallObstacleAhead,
+      clear: clankerClear, playersClear: clankerPlayersClear, tallObstacleAhead: clankerTallObstacleAhead,
       onPound: poundClankerEquipment,
       fireContact: clankerFireContact, fireReachable: shared.fireReachable, fireClear: clankerFireClear,
       canSmash: canClankerSmash, supportAt: clankerSupportAt, terrainSupportAt: clankerTerrainSupportAt,
@@ -12597,7 +12654,7 @@
     islandGuide.dispose();
     islandGuide = null;
     // GAME MODE ends with the visit; the island comes back built afresh.
-    gameMode = gameCombatOnly = false;
+    gameMode = gameCombatOnly = clankerOnPlayer = false;
     for (const node of ringPanels) { node.mirrorRipples.dispose(); if (node.mirrorBody) node.mirrorBody.dispose(); }
     gameRing = null;
     gameRingK = gameRingWait = ringLanterns.length = ringPanels.length = ringPulseWait = 0;
