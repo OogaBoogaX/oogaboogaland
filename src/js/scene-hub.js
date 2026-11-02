@@ -18,9 +18,6 @@
   const DEBUG_TOTEM_GLOW = DEBUG && params.get("totemglow") === "1";
   const DEBUG_GORILLA_MOVE = DEBUG && (params.get("gorillamove") === "1" || params.get("climbers") === "1");
   const DEBUG_GORILLA_RAGE = DEBUG && params.get("gorillarage") === "1";
-  // HALLOWEEN: the ghost hunt comes with the island unless a page opts out (`halloween=0`); the suite's quiet pages
-  // (`nosim`) leave it out unless they ask for it (`halloween=1`).
-  const GHOSTS_WANTED = params.get("halloween") === "1" || params.get("halloween") !== "0" && !params.has("nosim");
   const timeParam = DEBUG ? params.get("time") : null;
   const hourParam = DEBUG ? parseFloat(params.get("hour")) : NaN;
   const daylenParam = DEBUG ? parseFloat(params.get("daylen")) : NaN;
@@ -337,8 +334,6 @@
   // Its floating lanterns (one node each over one geometry), and whether they showed last frame.
   const ringLanterns = [];
   let ringLanternsShown = false;
-  // HALLOWEEN: the lightweight herald, the hunt once a player starts or joins, and its walls' seal.
-  let ghosts = null, ghostEntry = null, ghostSeal = null;
   let magazine, magazineState, clankers, clankerPlay, clankerMeshes, clankerPartOwners, grabSupportEntry = null, entropyLab, chalkboard, factoryMouth = null, arcadeMouth = null, bcaMouth = null, glCanvas = null;
   const dragHand = new Float64Array(3), dragFoot = new Float64Array(3);
   const THROW_SWING_TIME = 0.28, THROW_SETTLE_TIME = 0.2, THROW_CARRY_SPEED_MAX = 8;
@@ -1090,13 +1085,10 @@
   const updateLamps = (dt, elapsed, spark) => {
     const lights = RENDER_OPTS.lights;
     const webgl = renderer.kind === "webgl2";
-    // HALLOWEEN: through the hunt's night a few slots are kept back for the hunters' lanterns (a quarter of the tier's
-    // at most), filled after the lamps; a change in how many is a new key, so the lamps are chosen again.
     const tierLimit = webgl ? BL.glRenderer.QUALITY[renderer.quality].lights : 6;
-    const reserved = ghosts ? Math.min(ghosts.lanternsWanted(), Math.floor(tierLimit / 4)) : 0;
     // Moving pickup lights are rewritten after the cached mainland selection.
-    const pickupReserved = Math.min(cloudHopper?.pickupLightsWanted() || 0, 2, tierLimit - reserved);
-    const limit = tierLimit - reserved - pickupReserved;
+    const pickupReserved = Math.min(cloudHopper?.pickupLightsWanted() || 0, 2, tierLimit);
+    const limit = tierLimit - pickupReserved;
     const phaseNow = daylight.phaseAt(hour);
     const lanternsOn = phaseNow === "dusk" || phaseNow === "night" || phaseNow === "midnight";
     const coilLamp = coilCharge && coilCharge.lamp, coilActive = !!coilLamp && coilCharge.level > 0.02;
@@ -1267,7 +1259,7 @@
       key.lanternsOn = lanternsOn; key.coilActive = coilActive; key.cave = cameraCaveIndex; key.limit = limit;
       lampSelValid = true;
     }
-    RENDER_OPTS.lightCount = lampLights + (reserved ? ghosts.lanterns(lights, lampLights, reserved) : 0); // HALLOWEEN
+    RENDER_OPTS.lightCount = lampLights;
     if (pickupReserved) RENDER_OPTS.lightCount += cloudHopper.pickupLights(lights, RENDER_OPTS.lightCount, pickupReserved);
   };
   const buildFire = () => {
@@ -3157,12 +3149,6 @@
   };
   const isPlayerAttack = source => !!source && (source === crew.player || source.controlled && source.actionControlled);
   const weaponImpact = (source, hit, dx, dy, dz, power = 1, projectile = null) => {
-    // Waking the herald opens a game; it is an interaction before combat exists.
-    if (hit.owner.kind === "halloween" && hit.owner.role === "herald") {
-      if (ghosts) ghosts.hit(source, hit, power, isPlayerAttack(source), !!projectile);
-      else if (ghostEntry) ghostEntry.hit(isPlayerAttack(source), !!projectile);
-      return;
-    }
     if (hit.node === mirrorCave.node) {
       // Ordinary HUB melee reports its contact without the combat-only sweep effect.
       if (!gameMode && !projectile) mirrorCave.ripples.cross(hit.x - dx * 0.02, hit.y - dy * 0.02, hit.z - dz * 0.02,
@@ -3186,7 +3172,6 @@
         clankers.bananaHit(hit.owner.entry, source, projectile.serial);
       return;
     }
-    if (hit.owner.kind === "halloween") { ghosts.hit(source, hit, power, isPlayerAttack(source), !!projectile); return; } // HALLOWEEN
     hitRoomSign(source, hit, dx, dy, dz);
   };
   const drop = (list, value) => {
@@ -3232,7 +3217,7 @@
       return true;
     }
     if (!jetpackAllowed(cave)) {
-      hud.toast(ghosts && ghosts.sealed ? "No jetpacks while the ghosts are out" : "No jetpacks under ground"); // HALLOWEEN: ghosts
+      hud.toast("No jetpacks under ground");
       return false;
     }
     return equipJetpack(cave);
@@ -4600,7 +4585,6 @@
   const JETPACK_COLUMN = { caveIndex: 0, floor: 0, ceiling: 0 };
   const jetpackAllowed = (cave) => {
     if (cloudHopper?.active) return !cloudHopper.held && cave === cloudHopper.actor;
-    if (ghosts && ghosts.sealed) return false; // HALLOWEEN
     const p = cave.root.position, feet = p.y - cave.baseY;
     const basement = island.headquarters.basement, hole = basement.hole;
     // Keep thrust through the open shaft and its bevel until the whole body clears the lip.
@@ -4946,7 +4930,6 @@
     updateCutawayWholeVisibility();
   };
   const crossesSealedCave = (fromX, fromZ, toX, toZ, y = 0) => {
-    if (ghostSeal !== null && ghostSeal(fromX, fromZ, toX, toZ, y)) return true; // HALLOWEEN: the ghost walls
     if (crossesGameRing(fromX, fromZ, toX, toZ, y)) return true;
     for (let i = 0; i < sealedCaves.length; i++) {
       const sealed = sealedCaves[i], m = sealed.mouth, sr = sealed.sr, cr = sealed.cr;
@@ -5604,8 +5587,6 @@
     switch (o.kind) {
       case "tess":
         return COARSE ? `${BL.hubGuide.NAME} the guide · tap for a tour` : `${BL.hubGuide.NAME} the guide · click for a tour`;
-      case "halloween": // HALLOWEEN
-        return o.tooltip();
       case "caveman":
         return o.cave.traits.display;
       case "clanker":
@@ -5705,7 +5686,7 @@
   const reticleTarget = (hit) => {
     const o = hit.owner;
     if (hit.node === mirrorCave.node || o.kind === "cave-sign" || o.kind === "room-sign" || o.kind === "sphere-key"
-      || o.kind === "lab-link" || o.kind === "piece" || o.kind === "book" || o.kind === "halloween" && o.role === "herald") return "object"; // HALLOWEEN: halloween
+      || o.kind === "lab-link" || o.kind === "piece" || o.kind === "book") return "object";
     if (o.kind === "cave") return o.slot.status === "open" ? "object" : "none";
     if (o.kind === "prop" && RETICLE_PROPS.has(o.prop)) return "object";
     return "none";
@@ -6194,7 +6175,6 @@
   // takes it on the way in.
   const enterCave = (slot) => {
     if (slot.scene === "lab") return;
-    if (ghosts && ghosts.sealed) { hud.toast("The ghost walls hold every cave shut"); return; } // HALLOWEEN
     if (!slot.scene) { if (slot.place) navigate(slot.place); return; }
     if (entering) return;
     world.pilot = pilot.player ? pilot.player.traits.name : null;
@@ -6304,9 +6284,6 @@
     switch (o.kind) {
       case "tess":
         islandGuide.tap();
-        break;
-      case "halloween": // HALLOWEEN
-        o.tap();
         break;
       case "caveman":
         crew.pokeCave(o.cave);
@@ -6692,7 +6669,7 @@
     const travel = preserveActor && !!player, controller = gorilla ? clankerPlay : pilot;
     const close = gorilla ? clankerPlay.firstPerson : pilot.closeWanted, basement = name === "basement", underground = name === "underground" || basement;
     if (travel) {
-      const refusal = controller.travelRefusal() || name !== "pile" && ghosts && ghosts.refuseTravel(); // HALLOWEEN: ghosts
+      const refusal = controller.travelRefusal();
       if (refusal) { hud.toast(refusal); return refusal; }
     }
     const randomPile = respawn && name === "pile";
@@ -7488,7 +7465,7 @@
     const first = phase === null;
     phase = next;
     if (first) hud.setSubtitle("an island of caves");
-    if (!first && !(ghosts && ghosts.quietSky)) hud.toast(PHASE_TOASTS[next]); // HALLOWEEN: quietSky
+    if (!first) hud.toast(PHASE_TOASTS[next]);
   };
   // The plaza library's books in the shared board window: one page a book, its title, its site and what it is,
   // with the page's link under it. A page from another site cannot be framed by this one (the content policy
@@ -7550,7 +7527,7 @@
   let wpCharAge = 0;
   // This anniversary is October 31 and November 1, 2026, in the visitor's local calendar, not a yearly trigger.
   const WP_WEEKEND_START = new Date(2026, 9, 31).getTime(), WP_WEEKEND_END = new Date(2026, 10, 2).getTime();
-  // Quiet captures and deterministic scene checks opt out of unsolicited events, as they do the ghost hunt.
+  // Quiet captures and deterministic scene checks opt out of unsolicited events.
   const WP_WEEKEND_WANTED = !params.has("nosim") || DEBUG && params.get("whitepaperday") === "1";
   const WP_SEEN = "ooga-whitepaper-weekend-2026:", wpSeenAccounts = new Set();
   let wpVisit = 0, wpSignal = null, wpWeekend = false, wpEventAge = 0, wpEventRetry = 0;
@@ -7880,7 +7857,7 @@
     return visit === wpVisit && !(signal && signal.aborted);
   };
   const wpBusy = () => gameMode || cloudHopper?.active || entering || factoryHeld || factoryDeparting || bifrostDeparting ||
-    chalkboard.openNow || clankerPlay.active || !!(ghosts && ghosts.busy) || !!(islandGuide && islandGuide.holding);
+    chalkboard.openNow || clankerPlay.active || !!(islandGuide && islandGuide.holding);
   const wpRaise = () => {
     if (wpBusy()) return false;
     if (!wpGroup || !wpImage.naturalWidth) {
@@ -8531,7 +8508,6 @@
       cloudPile.visible = pile.shown > 0;
       cloudPileSolids.sync();
     }
-    if (ghosts) ghosts.unshake(camera); // HALLOWEEN: last frame's quake comes off before anything reads the camera
     // Four cheap proximity reads a second, without building a visit or changing its actor/account state.
     if (elapsed >= prefetchAt) {
       prefetchAt = elapsed + 0.25;
@@ -8552,7 +8528,6 @@
     if (life) { life.gulls.update(elapsed); life.shore.update(elapsed); life.boats.update(elapsed); }
     now = elapsed;
     hour = clock.read();
-    if (ghosts) hour = ghosts.hour(hour); // HALLOWEEN: night falls for the hunt
     // The ephemeris turns the sun 0.0042 deg/s of island time (a 6e-4-hour budget is 2.16 s and misses no
     // pixel), so it resamples only when an input drifts; a fast debug clock misses the budget every frame,
     // a frozen one hits from the second frame on.
@@ -8594,7 +8569,6 @@
       RENDER_OPTS.directStrength *= 1 - 0.92 * poolShade;
       for (let i = 0; i < 3; i++) { RENDER_OPTS.sky[i] *= keep; RENDER_OPTS.ground[i] *= keep; }
     }
-    if (ghosts) ghosts.shade(RENDER_OPTS); // HALLOWEEN: the boss dims the sky
     if (poolEffectsActive) {
       mempoolIsland.water.update(dt, poolEffectsTime, Date.now());
       mempoolIsland.paintings.update(dt);
@@ -8716,8 +8690,6 @@
     if (!cloudPlaying()) npcSync.update(dt);
     shareDrivenActor(dt);
     remotes.update(dt);
-    if (!cloudPlaying()) { if (ghosts) ghosts.update(dt); // HALLOWEEN
-      else if (ghostEntry) ghostEntry.update(dt); } // HALLOWEEN
     if (poolEffectsActive) {
       mempoolIsland.wildlife.update(dt, poolEffectsTime);
       for (const cave of crew.list) if (cave.root.visible) {
@@ -8826,12 +8798,10 @@
       bcaMouth.phase.body.update(dt);
       bcaMouth.phase.body.time = bcaMouth.phase.ripples.time;
     }
-    if (ghosts) ghosts.shake(camera); // HALLOWEEN: the land shakes as the ghost walls rise
   };
   // Every visitor controls only their assigned Ooga and its companion.
   const mayDriveOoga = (cave) => {
     if (cloudHopper?.active && cave !== cloudHopper.actor) return "Finish Cloud Hopper before changing Oogas";
-    if (ghosts && ghosts.waiting) return "You're in the waiting room until this hunt ends"; // HALLOWEEN: the hunt's waiting room
     return BL.net.mayDrive(cave.traits.name);
   };
   const actorTransition = {};
@@ -8844,7 +8814,6 @@
     const refusal = mayDriveOoga(cave);
     if (refusal) { hud.toast(refusal); return false; }
     if (cave.remoteControlled) { hud.toast(`Someone is already driving ${cave.traits.display}`); return false; }
-    if (ghosts) ghosts.release(cave); // HALLOWEEN: an Ooga cleared away for the hunt comes back to be driven
     if (crew.stateOf(cave) === "away" || cave.state !== "working" && cave.state !== "chilling" && cave.state !== "sleeping") {
       hud.toast(`${cave.traits.display} is in another place`);
       return false;
@@ -8929,13 +8898,12 @@
     if (me) hud.toast(`Welcome back, ${BL.characters.displayOf(character.handle)}: this Ooga is yours`);
     return true;
   };
-  // GAME MODE: an island event (the ghost hunt today, others to come) clears the island for play and holds the
+  // GAME MODE: an island event clears the island for play and holds the
   // scenery still while it runs: every gorilla nobody drives goes away (clankers' `setAway`), the trees stop swaying
   // (the renderer's `windTime` held where it stood), the meadow's fire pit goes out (`updateLamps`),
   // the Timechain Sphere stops turning, the island's clouds and the Mempool island's weather go (`weather.hold`), and
   // the Mempool island itself is hidden and left unrun. All of it comes back when the event lets go, and in `leave`.
-  // The ring stands up `ringDelay` seconds after the event begins (the ghost hunt waits for its gates) and sinks as
-  // it ends.
+  // The ring stands up `ringDelay` seconds after the event begins and sinks as it ends.
   const setGameMode = (on, combatOnly = false) => {
     on = !!on;
     combatOnly = on && !!combatOnly;
@@ -9065,67 +9033,6 @@
     }
   };
   const delayGameRing = seconds => { gameRingWait = Math.max(0, seconds); };
-  // HALLOWEEN: the entry owns its pending load and discovery subscriptions for this visit alone.
-  const createGhostEntry = () => {
-    if (!GHOSTS_WANTED) return;
-    const start = root.children.length;
-    ghostEntry = BL.ghostEntry.create({ root, camera, island, npcSync, addTarget, removeTarget, hud, fx,
-      attach: () => {
-        const first = root.children.length;
-        ghosts = BL.halloween.create(ghostHub()); cloudRememberNodes(first);
-        return ghosts;
-      } });
-    cloudRememberNodes(start);
-  };
-  const ghostHub = () => ({
-    root, camera, renderer, fx, hud, crew, island, npcSync, coarse: COARSE, closedZones: closedCaveZones, debug: DEBUG, params, guide: islandGuide,
-    openMouths: island.mouths.filter((m) => !sealedCaves.some((sealed) => sealed.mouth === m)),
-    addTarget, removeTarget, selectOoga, mayDriveOoga, zoneOf, heraldGeometry: ghostEntry && ghostEntry.herald.geometry,
-    gorillaActive: () => !!(clankerPlay && clankerPlay.active),
-    gameMode: on => setGameMode(on, true),
-    // Keep ring timing separate from the event's combat policy.
-    ringDelay: delayGameRing,
-    lobbyOpen: (on, restore) => {
-      pilot.setMenuOpen(on, restore);
-    },
-    // The waiting room: the driven Ooga let go of (the free camera to watch from), and at the end the visitor's own
-    // Ooga given back.
-    spectate: (on) => {
-      if (on) { if (pilot.player) pilot.modeAction("mode-release"); return; }
-      const own = BL.net.ownCharacter(), cave = own && crew.cavemen.get(own.handle);
-      if (cave && !pilot.player && !cave.remoteControlled) selectOoga(cave);
-    },
-    remoteUnderlying: (cave, override) => remotes.setUnderlying(cave, override),
-    // The driven Ooga's rifle out and the view in combat, as 2 and X would have it.
-    readyGun: () => {
-      if (!pilot.aiming) pilot.modeAction("mode-toggle");
-      pilot.weaponMode(2);
-    },
-    // The view held while a player's Ooga lies under its grave: the pilot let go of, as Tess's tour does, and given back.
-    holdView: holdTheView,
-    // While the view is held, how the visitor is steering it, read straight from the pilot's controls since the pilot
-    // itself is let go of: `x` and `y` A D and W S (or the move stick), `yaw` and `orbitYaw` Q E and the arrows
-    // (positive to the left), `pitch` the look stick or arrows (positive down), `sprint` the run key.
-    heldAxes: () => pilot.controls.read(),
-    // GAME MODE's ring wall's radius, for the minimap.
-    ringRadius: GAME_RING.r,
-    // Where each totem's elixir hangs: on its pole's front, facing the pile, at chest height.
-    elixirSpots: TOTEM_SPOTS.map(([x, z], i) => {
-      const d = Math.hypot(x, z), out = BL.totemModels.layout(i).reach + 0.12;
-      return { x: x - x / d * out, y: island.surfaceAt(x, z) + 1.35, z: z - z / d * out };
-    }),
-    // The banana pile at the island's middle: its platform's reach and the top of the pile as it stands now.
-    pileRadius: () => altar.platformRadius,
-    pileTop: () => pile.core.position.y + pile.core.scale.y * pileTopY,
-    setSeal: (fn) => { ghostSeal = fn; },
-    dropJetpack: (cave) => { crew.removeJetpack(cave); pilot.showAct(); },
-    // Nudges the driven Ooga along the ground (a ghost's knock, a wraith's pull) where it could walk.
-    pull: (cave, dx, dz) => {
-      const p = cave.root.position, feet = p.y - cave.baseY;
-      if (cave.health.stunned || !walkable(p.x, p.z, p.x + dx, p.z + dz, feet, cave.bodyHeight, cave)) return;
-      p.x += dx; p.z += dz;
-    }
-  });
   const cycleOwnActor = () => {
     const character = BL.net.ownCharacter();
     if (!character) { hud.toast("Sign in as a contributor to switch between your Ooga and gorilla"); return; }
@@ -9308,7 +9215,6 @@
   // while looking round free (no zone, no voice).
   const remoteShown = (rec) => {
     if (cloudPlaying()) return false;
-    if (ghosts && ghosts.down(rec.id)) return false; // HALLOWEEN: a player gone down lies under their grave
     const net = BL.net.state;
     if (net.body) return rec.zone === net.zone;
     return BL.remotePlayers.onIsland(rec.zone);
@@ -9317,7 +9223,6 @@
     if (cloudPlaying()) return;
     crew.drawDrops(ctx2d, project);
     remotes.drawNames(ctx2d, project, gameMode);
-    if (ghosts) ghosts.drawOverlay(ctx2d, project); // HALLOWEEN
     if (debugSelectedGorilla) {
       const entry = debugSelectedGorilla, move = entry.debugMove, p = entry.root.position;
       ctx2d.save();
@@ -11259,7 +11164,6 @@
       }
       return;
     }
-    if (ghosts && ghosts.key(e)) { e.preventDefault(); return; } // HALLOWEEN: the ghost hunt's debug keys
     if (e.key === "Escape" && islandGuide.escape()) { e.preventDefault(); return; }
     // While Tess's tour holds the view the island's keys wait, actor switches (T) among them; Enter and → are hers.
     if (islandGuide.holding) return;
@@ -11312,10 +11216,7 @@
     stopLazyBedding();
     // A kept hammock stays hung; its sitter gets up to go.
     if (hammock) vacateHammock();
-    // A kept island ends its hunt and its game as a full leave does, and lowers the ring at once.
-    if (ghostEntry) { ghostEntry.dispose(); ghostEntry = null; }
-    if (ghosts) { ghosts.dispose(); ghosts = null; }
-    ghostSeal = null;
+    // A kept island ends its game as a full leave does, and lowers the ring at once.
     setGameMode(false);
     gameRingK = gameRingWait = ringPulseWait = 0; gameRing.visible = false;
     // The veils' waves and glyph outlines end with the visit as leave ends them; an outline is made again where a body
@@ -11476,7 +11377,6 @@
       updatePositionDebug(true);
     }
     updatePoolEffectsActivity();
-    createGhostEntry();
   };
   // Prepare only raw character rigs: the published crew, its stable roster order, input, health and NPC/remote
   // registration are still created together by enter. No partly populated actor registry reaches a live scene.
@@ -11919,8 +11819,7 @@
       || !!(workShot && source && shared.workSites[source.work.site]?.mirrorRoom
         && mirrorCave.ripples.absorb(ax, ay, az, point));
     shared.onProjectileMove = (ax, ay, az, bx, by, bz, dt) => mirrorCave.ripples.cross(ax, ay, az, bx, by, bz, dt);
-    shared.weaponInteraction = (owner, node) => node === mirrorCave.node
-      || (!ghosts && !!ghostEntry || !!ghosts && !ghosts.busy) && owner.kind === "halloween" && owner.role === "herald" && owner.active;
+    shared.weaponInteraction = (owner, node) => node === mirrorCave.node;
     shared.onWeaponImpact = weaponImpact;
     shared.onMeleeStrike = mirrorCave.ripples.strike;
     shared.aimSurface = (out, x, y, z) => !cloudPlaying() && mirrorCave.ripples.aimAt(out, x, y, z);
@@ -12111,11 +12010,7 @@
       npcSync.recordHit(cave);
       return workHit(cave);
     };
-    shared.onShot = (cave, from, to) => {
-      npcSync.recordShot(cave, from, to);
-      if (ghosts && cave === crew.player) ghosts.shot(from, to); // HALLOWEEN: the visitor's banana rounds sound, and the orb fires with them
-    };
-    shared.shotGeometry = () => ghosts && ghosts.hunting ? ghosts.shotGeometry() : null; // HALLOWEEN: rifles fire rocks, then lasers, through the hunt
+    shared.onShot = (cave, from, to) => npcSync.recordShot(cave, from, to);
     BL.net.setHub(true);
     for (const cave of crew.list) crew.setJetpackOwnership(cave, true, hubModels.jetpack(), hubModels.jetFlame());
     mirrorCave.body = BL.mirrorBody.create(mirrorCave.node, crew.cavemen);
@@ -12557,7 +12452,7 @@
       parent: root, input, fx, camera, pilot, visitor: () => crew.player, world, hud, coarse: COARSE,
       landing: !ctx.place && !preloadedView && !returningCharacter && ctx.from !== "bifrost",
       prepareStop: wpTourStop,
-      quality: () => renderer.quality, busy: () => wpTime >= 0 || wpRead || wpReturn >= 0 || wpEventPending() || chalkboard.openNow || clankerPlay.active || factoryDeparting || bifrostDeparting || !!(ghosts && ghosts.busy), // HALLOWEEN: ghosts
+      quality: () => renderer.quality, busy: () => wpTime >= 0 || wpRead || wpReturn >= 0 || wpEventPending() || chalkboard.openNow || clankerPlay.active || factoryDeparting || bifrostDeparting,
       // What her beam sweeps across on the totems' line: their eyes, west to east.
       targets: { totems: totems.map((t) => { const p = t.owner.node.position; return { x: p.x, y: p.y + t.eyeTop, z: p.z }; }).sort((a, b) => a.x - b.x) }
     });
@@ -12578,7 +12473,7 @@
       move: cloudMove, mode: cloudMode, pileSurface: cloudPileSurface, mainlandRadius: island.radius,
       finish: () => ({ x: 0, y: ALTAR_HEIGHT + 2, z: 0 }),
       pileTop: () => pile.shown > 0 ? pile.core.position.y + pile.core.scale.y * pileTopY : ALTAR_HEIGHT + 0.23,
-      refusal: () => ghosts?.busy || gameMode ? "Finish the island event before playing Cloud Hopper"
+      refusal: () => gameMode ? "Finish the island event before playing Cloud Hopper"
         : wpTime >= 0 || wpRead || wpReturn >= 0 || islandGuide.holding || entering || factoryHeld || factoryDeparting || bifrostDeparting
           ? "Finish the current tour before playing Cloud Hopper" : clankerPlay.active ? "Choose an Ooga to play Cloud Hopper" : null });
     addTarget(cloudHopper.cabinet, { kind: "cloud-hopper" });
@@ -12590,7 +12485,6 @@
     const tessTiers = new Set();
     islandGuide.liveGeometry(tessTiers);
     for (const geometry of tessTiers) { renderer.prepareGeometry(geometry); yield* pause(slice); }
-    Object.defineProperty(hubScene.debug, "halloween", { get: () => ghosts ? ghosts.debug : ghostEntry && ghostEntry.debug, enumerable: true }); // HALLOWEEN
     mark("visibility-start");
     fx.warmVisibility(crew);
     fx.warmBlockers();
@@ -12598,8 +12492,6 @@
     mark("covered-view-start");
     yield* prepareCoveredView(ctx.overlay, slice);
     mark("covered-view");
-    // Remote hunt callbacks may attach the full game; subscribe only once every construction slice is complete.
-    createGhostEntry();
     totemUnsub = BL.totemFeed.subscribe(onTotem);
     hintTimer = window.setTimeout(() => {
       if (!pilot.player && !clankerPlay.active && !matrixControl.promptAction) hud.hint(COARSE ? "Drag to look · pinch to eye level · sticks to fly · tap a cave" : "Drag to look · scroll to eye level · WASD to fly · tap a cave to enter");
@@ -12646,10 +12538,6 @@
     selectDebugGorilla(null);
     islandGuide.dispose();
     islandGuide = null;
-    // HALLOWEEN: the entry cancels its handoff before the hunt and the crew, fx and targets they use leave.
-    if (ghostEntry) { ghostEntry.dispose(); ghostEntry = null; }
-    if (ghosts) { ghosts.dispose(); ghosts = null; }
-    ghostSeal = null;
     // GAME MODE ends with the visit; the island comes back built afresh.
     gameMode = gameCombatOnly = false;
     for (const node of ringPanels) { node.mirrorRipples.dispose(); if (node.mirrorBody) node.mirrorBody.dispose(); }
@@ -12856,8 +12744,6 @@
     if (cloudHopper) for (const geometry of cloudHopper.cabinet.frames) set.add(geometry);
     cloudHopper?.liveGeometry(set);
     if (islandGuide) islandGuide.liveGeometry(set);
-    if (ghosts) ghosts.liveGeometry(set); // HALLOWEEN
-    else if (ghostEntry) ghostEntry.liveGeometry(set); // HALLOWEEN
     mempoolIsland.water.liveGeometry(set);
     pile.liveGeometry(set);
     clankers.liveGeometry(set);
@@ -12880,7 +12766,7 @@
     let nodes = 0;
     traverseVisible(root, () => nodes++);
     const all = (n) => 1 + n.children.reduce((sum, c) => sum + all(c), 0);
-    return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...crates.stats(), ...crew.stats(), ...pile.stats(), ...critters.stats(), ...mempoolIsland.water.stats(), ...weather.stats(), ...remotes.stats(), ghosts: ghosts ? ghosts.stats().ghosts : 0 /* HALLOWEEN */ };
+    return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...crates.stats(), ...crew.stats(), ...pile.stats(), ...critters.stats(), ...mempoolIsland.water.stats(), ...weather.stats(), ...remotes.stats() };
   };
   const hubScene = {
     // The island reports its own zone as soon as an Ooga is driven (see `zoneOf`); until then it is nowhere.
@@ -12898,7 +12784,6 @@
       if (cloudHopper?.active) return true;
       if (timechainIsland && timechainIsland.gate.busy) return true;
       if (factoryWalk.phase || factoryWalk.still > 0) return true;
-      if (ghosts && ghosts.inMotion) return true; // HALLOWEEN
       if (pile.inMotion || fx.inMotion || poolEffectsActive && (weather.active || mempoolIsland.water.active) || magazine && magazine.revealed || mirrorCave.ripples.active || mirrorCave.body.active) return true;
       if (!entropyLab.phase.paused && (entropyLab.phase.ripples.active || entropyLab.phase.body.contacts || entropyLab.phase.body.active)) return true;
       for (const veil of caveVeils) {

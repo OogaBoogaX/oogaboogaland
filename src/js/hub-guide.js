@@ -645,7 +645,7 @@
       if (!e.repeat) forward();
     };
     window.addEventListener("keydown", captureKey, true);
-    // A place may borrow her (the ghost hunt, ghost-game.js, HALLOWEEN; the hangar, while Kortik's Sis smashes the Jet):
+    // A place may borrow her (the hangar, while Kortik's Sis smashes the Jet):
     // while lent she drops whatever she was doing and `driver(rig, dt)` flies her; given back, she goes back to work.
     let lender = null;
     const lend = (driver) => {

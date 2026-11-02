@@ -314,7 +314,7 @@
     };
 
     // The override an Ooga hidden for its remote driver goes back to when they let go, for a scene that changed it
-    // meanwhile (HALLOWEEN: the hunt gives back what it cleared); false when nobody remote holds it.
+    // meanwhile; false when nobody remote holds it.
     const setUnderlying = (cave, override) => {
       for (const entry of bodies.values()) if (entry.hidden === cave) { entry.hiddenOverride = override; return true; }
       return false;

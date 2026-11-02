@@ -241,7 +241,7 @@
     renderer.dispose();
   };
   // An Ooga standing square to the view, whole, as it stands posed now: its built parts copied (hidden ones left out)
-  // and turned to face the camera, `w` by `h` pixels. A podium's portraits (HALLOWEEN: the ghost hunt's winners).
+  // and turned to face the camera, `w` by `h` pixels. A podium's portraits (HALLOWEEN: the arcade's ghost hunt's winners).
   const renderBodyIcon = (canvas, cave, w, h) => {
     const renderer = iconRendererMod.createRenderer(canvas, { width: w, height: h, transparent: true });
     const root = createNode(), body = copyPortraitNode(cave.root, null, null), tall = cave.bodyHeight;
