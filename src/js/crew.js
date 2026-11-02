@@ -1510,13 +1510,18 @@
     const refreshStates = (settle = false) => {
       if (ctx.playerName) return;
       const entries = [...cavemen.values()];
-      const next = new Map(entries.map((cave) => [cave, stateOf(cave)]));
+      const next = new Map(entries.map((cave) => [cave, cave.puppet && cave !== player && !cave.remoteControlled ? cave.state : stateOf(cave)]));
       fanRadius = wantedFanRadius();
       assignFanSlots(entries, (cave) => next.get(cave) === "working");
       // Waking/away actors release beds first; sleepers then claim newest-first.
       entries.sort((a, b) => Number(next.get(a) === "sleeping") - Number(next.get(b) === "sleeping") ||
         (next.get(a) === "sleeping" ? sleepPriority(a, b) : a.index - b.index));
       for (const cave of entries) {
+        // The room host owns a puppet's activity as well as its pose. A local
+        // poll may have older timestamps: do not start a second transition
+        // (or settle it elsewhere) before the next host frame corrects it.
+        // Taking local/remote control still wins before sync releases the puppet.
+        if (cave.puppet && cave !== player && !cave.remoteControlled) { refreshRosterRow(cave); continue; }
         const target = next.get(cave);
         if (target === "away") { applyState(cave, target, settle); refreshRosterRow(cave); continue; }
         if (cave === player) {

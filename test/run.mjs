@@ -23650,6 +23650,53 @@ const artifactUnitProof = () => {
   } finally { rmSync(dir, { recursive: true, force: true }); }
   return { parsed: true, rows };
 };
+const npcActivityRefreshProof = (BL) => {
+  const S = BL.scene, C = BL.contributors, noop = () => {}, now = Date.now(), hour = 3600000;
+  const saved = C.roster.map(c => ({ lastCommitAt: c.lastCommitAt, lastContributionAt: c.lastContributionAt, maintainer: c.maintainer }));
+  const ages = { working: 0.25 * hour, chilling: 2 * hour, sleeping: 48 * hour, away: 31 * 24 * hour };
+  const savedNet = BL.net, rows = [];
+  let crew, sync;
+  try {
+    C.roster.forEach(c => { c.lastCommitAt = c.lastContributionAt = now - ages.away; c.maintainer = false; });
+    crew = BL.crew.create({ root: S.createNode(), world: { level: 0 }, input: { add: noop, remove: noop }, hud: { setRosterRow: noop },
+      game: { state: { assignments: {}, inventory: [] } }, pile: { footprintEdge: 1, pileEdge: () => 1 }, viewYaw: 0,
+      buildSpots: [], walkIn: { x: 0, z: 3 }, groundAt: () => 0, walkable: () => true, bedrolls: [],
+      outdoorBedrolls: [{ x: 25, y: 0, z: 25, outdoor: true, node: { rotation: { y: 0 } } }],
+      bedRoute: () => null, wanderSpot: out => { Object.assign(out, { x: -15, z: -15, ry: 0 }); return true; },
+      fx: { say: noop, zzzAt: noop, burst: noop, puff: noop, spawnParticle: noop, damageNumber: noop }
+    });
+    const c = crew.list[0];
+    const stamp = state => { c.contributor.lastCommitAt = c.contributor.lastContributionAt = now - ages[state]; };
+    const snapshot = () => JSON.stringify({ state: c.state, visible: c.root.visible, position: c.root.position,
+      rotation: c.root.rotation, quaternion: c.root.quaternion && Array.from(c.root.quaternion),
+      bed: !!c.bedroll, travel: c.bedTravel.mode, walk: c.walk, act: c.act.kind, phase: c.work.phase });
+    for (const [host, local] of [["working", "chilling"], ["chilling", "working"], ["sleeping", "working"], ["working", "sleeping"], ["working", "away"]]) {
+      for (const settle of [false, true]) {
+        stamp("away"); crew.refreshStates(); stamp(host); crew.refreshStates(true);
+        BL.net = { state: { room: "live", hostId: "host", selfId: "host", followers: 1, npcVersion: 1 },
+          sendNpc(bytes) { this.npcFrame = bytes.slice().buffer; } };
+        sync = BL.npcSync.create({ crew, fx: {}, onPlan: noop, onHit: noop, onModelChange: noop });
+        sync.update(0.3); BL.net.state.selfId = "follower"; sync.update(0.3);
+        const before = snapshot(), position = { ...c.root.position };
+        stamp(local); crew.refreshStates(settle);
+        const preserved = c.puppet && snapshot() === before;
+        const refreshState = c.state, displacement = Math.hypot(c.root.position.x - position.x, c.root.position.y - position.y, c.root.position.z - position.z);
+        sync.update(0.3);
+        const restoredByHost = c.state === host;
+        sync.dispose(); sync = null;
+        crew.refreshStates();
+        rows.push({ host, local, settle, preserved, refreshState, displacement, restoredByHost, resumedLocally: !c.puppet && c.state === local });
+      }
+    }
+    return rows;
+  } finally {
+    if (sync) sync.dispose();
+    if (crew) crew.dispose();
+    BL.net = savedNet;
+    C.roster.forEach((c, i) => Object.assign(c, saved[i]));
+  }
+};
+
 const unitChecks = async () => {
   const artifact = artifactUnitProof();
   record("artifact workflow: tests the generated commit with the Actions-owned status and blocks rock on failed tests, status writes or concurrent pushes; a lost race passes only when rock has moved to a later CI-triggering commit, and the staging branch is always deleted", artifact.parsed && artifact.rows.every(row => row.ok), JSON.stringify(artifact));
@@ -24019,6 +24066,10 @@ record("character visibility source bakes: ownership wrappers share exact immuta
 
   // Scene state built directly instead of booted; seed 1 matches scene-hub.js.
   // Sealed cave guides need the hub's seal nodes, so probes reading them stay in the browser tier.
+  const npcActivity = npcActivityRefreshProof(BL);
+  record("NPC activity refresh: followers keep host states and poses despite local activity, then resume local transitions on release",
+    npcActivity.every(row => row.preserved && row.restoredByHost && row.resumedLocally), JSON.stringify(npcActivity));
+
   const island = BL.terrain.island({ seed: 1 });
   terrainParityChecks(BL, island);
   await terrainCacheChecks();
