@@ -67,6 +67,52 @@ test("room broadcasts DSB zone changes, persists them and keeps ownership enforc
   assert.equal(room.view(player).zone, "scene-bifrost");
 });
 
+test("room passes DSB wallets to the pages in their zone, and hands the live ones to whoever walks in", () => {
+  const Room = roomClass(), room = Object.create(Room.prototype), now = Date.now();
+  room.players = new Map(); room.chatBuckets = new Map(); room.voiceSig = new Map();
+  room.scheduleFlush = () => {};
+  const join = (id, login, zone) => {
+    const sent = [];
+    const ws = { deserializeAttachment: () => ({ id }), serializeAttachment() {}, send: text => sent.push(JSON.parse(text)) };
+    const p = room.record(ws, { id, login, display: login, contributor: true, body: login, x: 0, y: 0, z: 0, yaw: 0, zone });
+    room.players.set(id, p);
+    return { ws, p, sent };
+  };
+  const send = (who, msg) => { who.p.walletBucket = null; room.webSocketMessage(who.ws, JSON.stringify({ t: "wallet", ...msg })); };
+  const heard = (who) => who.sent.filter(m => m.t === "wallet" || m.t === "wallets");
+  const owner = join(1, "YellowBrokeIt", "dsb-outside"), near = join(2, "w-s-bitcoin", "dsb-outside"), hub = join(3, "NickDaGreek", "outside"), store = join(4, "bc1gui", "dsb-free-wallets");
+  send(owner, { k: "take", u: 7, l: 2, f: 21 });
+  const [taken] = heard(near);
+  assert.deepEqual(taken.w.slice(0, 4), [1, 7, 2, "c"], "a player in the same zone sees it carried");
+  assert.ok(Math.abs(taken.w[11] - (now + 21000)) < 1000, "and its fuse's end on the room's clock");
+  assert.equal(heard(hub).length + heard(owner).length, 0, "nobody else, and not the owner, hears it");
+  send(owner, { k: "throw", u: 7, f: 18, x: 1, y: 0, z: 2, vx: 1, vy: 2, vz: 3 });
+  assert.deepEqual(heard(near).at(-1).w.slice(3, 10), ["f", 1, 0, 2, 1, 2, 3]);
+  send(owner, { k: "take", u: 8, l: 0, f: 21 });
+  send(owner, { k: "take", u: 9, l: 0, f: 21 });
+  assert.equal(heard(near).at(-1).w[1], 8, "one carried at a time");
+  room.webSocketMessage(owner.ws, JSON.stringify({ t: "zone", name: "dsb-free-wallets" }));
+  assert.deepEqual(heard(store).at(-1).w.slice(1, 4), [8, 0, "c"], "the one carried walks into the store with its owner");
+  room.webSocketMessage(hub.ws, JSON.stringify({ t: "zone", name: "dsb-outside" }));
+  assert.deepEqual(heard(hub).at(-1).list.map(w => w.slice(1, 4)), [[7, 2, "f"]], "walking in shows the live ones there, not those carried elsewhere");
+  send(owner, { k: "blast", u: [7] });
+  assert.deepEqual(heard(near).at(-1), { t: "wallet", k: "blast", id: 1, u: [7] }, "a blast reaches the zone where the wallet lay");
+  assert.equal(heard(store).some(m => m.k === "blast"), false);
+  assert.deepEqual(Array.from(owner.p.wallets, w => w.u), [8], "and the room forgets it");
+  send(owner, { k: "down", u: 8, f: 15, x: 0, y: 0, z: 0 });
+  for (let u = 20; u < 30; u++) { send(owner, { k: "take", u, l: 0, f: 21 }); send(owner, { k: "down", u, f: 20, x: 0, y: 0, z: 0 }); }
+  assert.equal(owner.p.wallets.length, protocol.WALLET_CAP, "at most WALLET_CAP live at once");
+  const before = heard(store).length;
+  owner.p.walletBucket = null;
+  for (let i = 0; i < 20; i++) room.webSocketMessage(owner.ws, JSON.stringify({ t: "wallet", k: "up", u: 8, f: 10 }));
+  assert.equal(heard(store).length - before, protocol.WALLET_BURST, "a burst past the bucket is dropped");
+  room.webSocketMessage(owner.ws, JSON.stringify({ t: "body", name: "gorilla:YellowBrokeIt" }));
+  send(owner, { k: "up", u: 8, f: 9 });
+  room.webSocketMessage(near.ws, JSON.stringify({ t: "zone", name: "outside" }));
+  send(near, { k: "take", u: 1, l: 0, f: 21 });
+  assert.equal(heard(store).length - before, protocol.WALLET_BURST, "a gorilla, or a player out of DSB, sends none");
+});
+
 test("room carries an Ooga's jetpack to every page and drops it with the body", () => {
   const Room = roomClass(), room = Object.create(Room.prototype), sent = [];
   room.players = new Map(); room.chatBuckets = new Map(); room.voiceSig = new Map();

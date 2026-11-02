@@ -26,6 +26,7 @@ import {
   NPC_FRAME_MAX, NPC_HZ, OUTSIDE, HP_HZ, VOICE_TRACK, CHAT_HZ, CHAT_BURST, CHAT_BUCKET_KEEP, CHAT_RETRY_KEEP, CHAT_FEATURE,
   DOOR_ZONE, DOOR_ROOM, DOOR_GRANT_MS, DOOR_TRANSIT_MS, DOOR_PASS_MS, DOOR_HZ, DOOR_BURST, GHOST_HZ, GHOST_BURST, SHOT_HZ, SHOT_BURST, SWING_HZ, SWING_BURST,
   GHOST_MAGIC, GHOST_FRAME_MAX, GHOST_FRAME_HZ, GHOST_FRAME_BURST, inGhostArena, ghostCandidate,
+  WALLET_CAP, WALLET_HZ, WALLET_BURST,
   chatLog, castIndex, bodyName, ownedBody, electHost, npcFollowers, claimRefusal, parseClientMessage, playerFromHeaders, spawnPoint, takeToken, voicePeers,
   BLEND, BLEND_HZ,
 } from "./protocol.js";
@@ -381,6 +382,7 @@ export class Room extends DurableObject {
       // A page walking into the ghost arena catches up with its hunt (a lobby open, a hunt on) at once.
       if (inGhostArena(p) && p.id !== this.ghostHostId && this.lastGhost) this.send(p.ws, this.lastGhost);
       if (leavingStudio) this.leaveStudio(p);
+      this.walletsArrive(p);
       if (p.zone === STUDIO_ZONE) { this.enforceStudio(); this.sendStudio(p); }
       this.broadcast({ t: "zone", id: p.id, name: p.zone });
       // The page let go of every voice when it moved, so it always hears where it is now, changed list or not.
@@ -419,6 +421,9 @@ export class Room extends DurableObject {
       return this.say(p, msg.text, msg.clientId);
     } else if (msg.t === "door") {
       return this.doorMessage(p, msg);
+    } else if (msg.t === "wallet") {
+      // Nothing in the attachment changes: a room that sleeps forgets the wallets, which end within a minute anyway.
+      return this.walletMessage(p, msg);
     } else if (msg.t === "ghost") {
       // HALLOWEEN: a follower in the ghost arena tells its hunt's host; nobody else hears it, nothing is kept.
       if (!inGhostArena(p) || !p.body || p.id === this.ghostHostId) return;
@@ -817,6 +822,55 @@ export class Room extends DurableObject {
     if (!this.studio) return;
     const seats = [...this.players.values()].filter(q => q.zone === STUDIO_ZONE && Number.isInteger(q.studioSeat)).map(q => ({ id: q.id, seat: q.studioSeat }));
     this.send(p.ws, { t: "studio-state", state: { ...this.studio, duration: (studioSource(this.studio.source) || {}).duration || 0, cleanupPending: !!(this.cleanupJobs && this.cleanupJobs.length), seats, allowedHost: studioHostAllowed(this.env, p.id), canSpeak: studioCanSpeak(this.studio, p) } });
+  }
+
+  // DSB Land's free hardware wallets (WALLET_CAP in protocol.js). A player's live ones, a little past their end so a
+  // late blast still finds them; where one is (its carrier's zone while carried); and the state other pages draw.
+  liveWallets(p, now) { return (p.wallets || []).filter(w => w.end > now - 5000); }
+  walletZone(p, w) { return w.s === "c" ? p.zone : w.zone; }
+  walletView(p, w) { return [p.id, w.u, w.l, w.s, w.x, w.y, w.z, w.vx, w.vy, w.vz, w.at, w.end]; }
+  walletSend(zone, msg, except) {
+    const text = JSON.stringify(msg);
+    for (const o of this.players.values()) if (o !== except && o.zone === zone) this.send(o.ws, text);
+  }
+
+  walletMessage(p, msg) {
+    if (!p.body || p.body.startsWith("gorilla:") || !p.zone.startsWith("dsb-")) return;
+    if (!p.walletBucket) p.walletBucket = { tokens: WALLET_BURST, at: p.seenAt };
+    if (!takeToken(p.walletBucket, WALLET_HZ, p.seenAt, WALLET_BURST)) return;
+    const now = p.seenAt, list = this.liveWallets(p, now);
+    p.wallets = list;
+    if (msg.k === "blast") {
+      const gone = list.filter(w => msg.u.includes(w.u));
+      if (!gone.length) return;
+      p.wallets = list.filter(w => !msg.u.includes(w.u));
+      return this.walletSend(this.walletZone(p, gone[0]), { t: "wallet", k: "blast", id: p.id, u: gone.map(w => w.u) }, p);
+    }
+    let w = list.find(v => v.u === msg.u);
+    const carrying = list.some(v => v.s === "c" && v !== w);
+    if (msg.k === "take") {
+      if (w || carrying || list.length >= WALLET_CAP) return;
+      w = { u: msg.u, l: msg.l, s: "c", x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, at: now, end: 0, zone: null };
+      list.push(w);
+    } else if (!w || msg.k === "up" && carrying) return;
+    w.at = now;
+    w.end = now + msg.f * 1000;
+    if (msg.k === "up" || msg.k === "take") { w.s = "c"; w.zone = null; }
+    else {
+      w.s = msg.k === "down" ? "d" : "f"; w.zone = p.zone;
+      w.x = msg.x; w.y = msg.y; w.z = msg.z; w.vx = msg.vx || 0; w.vy = msg.vy || 0; w.vz = msg.vz || 0;
+    }
+    this.walletSend(this.walletZone(p, w), { t: "wallet", k: msg.k, w: this.walletView(p, w) }, p);
+  }
+
+  // A page arriving in a DSB zone gets the live wallets there, and the one it carries in reaches the pages there.
+  walletsArrive(p) {
+    if (!p.zone.startsWith("dsb-")) return;
+    const now = Date.now(), list = [];
+    for (const o of this.players.values()) if (o !== p) for (const w of this.liveWallets(o, now)) if (w.end > now && this.walletZone(o, w) === p.zone) list.push(this.walletView(o, w));
+    if (list.length) this.send(p.ws, { t: "wallets", list });
+    const carried = this.liveWallets(p, now).find(w => w.s === "c" && w.end > now);
+    if (carried) this.walletSend(p.zone, { t: "wallet", k: "take", w: this.walletView(p, carried) }, p);
   }
 
   persistStudio() {

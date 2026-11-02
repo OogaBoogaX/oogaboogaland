@@ -13,6 +13,13 @@
 // and picked only in their own space, so the rooms and the Chora share coordinates. One left behind keeps its fuse and
 // goes off unseen and unheard, setting off only those in its own space.
 //
+// Signed in, the devices are shared (`send`, `heard`; protocol.js WALLET_CAP): each page runs its own visitor's
+// devices and sends what happens to them; another player's is a mirror here (`owner` their room id) drawn from those
+// events: carried over their head (`remoteAt`), set down, or flying from the throw. A blast heard sets the mirror off
+// and chains into devices here as one of this page's own would, and this page reports its own that went. A mirror
+// whose blast never comes (its owner left) goes off LATE seconds after its fuse's end; one carried by nobody here
+// just goes. Mirrors cannot be picked up.
+//
 // Fixed pools throughout: `BOMB_CAP` devices in typed arrays, one instanced batch a look (screen and LED glow ride the
 // instance's glow) and one of soft glowing rings under the devices on the ground, `SCORCH_CAP` scorch marks in a ring,
 // `FIREBALL_CAP` fireballs. The labels are prebuilt strings, the beep and boom two pooled synthesized voices on one
@@ -30,6 +37,11 @@
   const GRAVITY = 9.8, THROW_SPEED = 3.2, THROW_LIFT = 2.6, FLASH_SECONDS = 0.35, SCORCH_SECONDS = 25;
   // The sound keeps running this long after the last device is gone, so the last boom rings out.
   const TAIL = 2.5;
+  // A mirror waits this long past its fuse's end for its owner's blast before it goes off by itself.
+  const LATE = 1.5;
+  // Other players' mirrors take at most MIRROR_CAP of the pool, so the most this page's own visitor can have out at once
+  // (one every COOLDOWN for FUSE seconds) always has room, however many play nearby; mirrors past it are not drawn.
+  const MIRROR_CAP = BOMB_CAP - Math.ceil(FUSE / COOLDOWN);
   // Drawn this much larger than the models, so they read across a lane; a name shows over a device nearer the
   // driven Ooga than NAME_NEAR, and one is picked up from PICK_REACH.
   const SCALE = 1.6, NAME_NEAR = 4, PICK_REACH = 2.5;
@@ -245,7 +257,7 @@
 
   // `groundAt(x, z, feet)` is the floor wherever the visitor is, `bounds()` the walls of the room they are in (null
   // outside), which a thrown device bounces back off; `muted()` says whether DSB's sound is off.
-  const create = ({ root, crew, fx, hud, groundAt, bounds, addTarget, removeTarget, pickGeometry, muted }) => {
+  const create = ({ root, crew, fx, hud, groundAt, bounds, addTarget, removeTarget, pickGeometry, muted, send = null, remoteAt = null, now = Date.now }) => {
     const { createNode, addChild, removeChild, updateWorld } = BL.scene;
     const batch = (geometry, cap) => createNode({ geometry, instanceData: new Float32Array(cap * 20), instanceCount: 0, instanceVersion: 0, visible: false, fixedInstanceCapacity: true });
     const devices = LOOKS.map((look, i) => batch(geometryOf(i), BOMB_CAP));
@@ -260,6 +272,9 @@
     const vx = new Float32Array(BOMB_CAP), vy = new Float32Array(BOMB_CAP), vz = new Float32Array(BOMB_CAP);
     const timer = new Float32Array(BOMB_CAP), yaw = new Float32Array(BOMB_CAP), roll = new Float32Array(BOMB_CAP);
     const carriers = new Array(BOMB_CAP).fill(null);
+    // Whose each device is (0 this page's, else a player's room id), its number for the room, and a mirror's wait.
+    const owner = new Int32Array(BOMB_CAP), uid = new Uint16Array(BOMB_CAP), late = new Float32Array(BOMB_CAP);
+    const gone = [];
     const scorchAt = new Float32Array(SCORCH_CAP * 4), scorchAge = new Float32Array(SCORCH_CAP).fill(SCORCH_SECONDS), scorchSpace = new Uint8Array(SCORCH_CAP);
     const flash = { x: 0, y: 0, z: 0, t: 0, strength: 0 };
     const cursor = new Int32Array(LOOKS.length);
@@ -353,6 +368,7 @@
       if (i < 0) return -1;
       serial++;
       state[i] = s; lookOf[i] = look; timer[i] = FUSE; carriers[i] = carrier; space[i] = here;
+      owner[i] = 0; uid[i] = serial % 65535 + 1; late[i] = LATE;
       px[i] = x; py[i] = y; pz[i] = z; vx[i] = vy[i] = vz[i] = 0; yaw[i] = (fnv1a(`wallet/${serial}/yaw`) % 628) / 100; roll[i] = 0;
       return i;
     };
@@ -382,6 +398,7 @@
         return -1;
       }
       const player = crew.player, i = spawn(0, 0, 0, look, CARRIED, player);
+      if (send && i >= 0) send({ k: "take", u: uid[i], l: look, f: FUSE });
       cooldown = COOLDOWN;
       fx.say(player, "Free wallet! Ooga rich!", 2);
       openAudio();
@@ -392,6 +409,7 @@
       const cave = carriers[i], h = cave.root.rotation.y;
       state[i] = FLYING; carriers[i] = null;
       vx[i] = Math.sin(h) * THROW_SPEED; vz[i] = Math.cos(h) * THROW_SPEED; vy[i] = THROW_LIFT;
+      tell(i, "throw");
       fx.say(cave, "Ooga no want. YEET!", 1.6);
     };
     const throwCarried = () => {
@@ -407,6 +425,7 @@
       state[i] = DROPPED; carriers[i] = null;
       releasePose();
       px[i] = x; pz[i] = z; py[i] = groundAt(x, z, py[i] - 1); roll[i] = 0;
+      tell(i, "down");
       fx.say(crew.player, "Ooga put it here. Tick tick.", 1.6);
       return true;
     };
@@ -414,10 +433,11 @@
     // (the scene walks it over), else with a toast of its seconds.
     const tap = (i) => {
       const player = crew.player;
-      if (state[i] === DROPPED && player && carried(player) < 0) {
+      if (state[i] === DROPPED && !owner[i] && player && carried(player) < 0) {
         const dx = px[i] - player.root.position.x, dz = pz[i] - player.root.position.z;
         if (dx * dx + dz * dz >= PICK_REACH * PICK_REACH) return false;
         state[i] = CARRIED; carriers[i] = player;
+        tell(i, "up");
         fx.say(player, "Ooga pick up. Still ticking?", 1.8);
         return true;
       }
@@ -426,7 +446,7 @@
     };
     // Where device i lies on the ground, into `out`; null unless it is on the ground.
     const where = (i, out) => {
-      if (state[i] !== DROPPED) return null;
+      if (state[i] !== DROPPED || owner[i]) return null;
       out.x = px[i]; out.y = py[i]; out.z = pz[i];
       return out;
     };
@@ -437,13 +457,16 @@
       for (let i = 0; i < BOMB_CAP; i++) live[i] = state[i] !== FREE && space[i] === site ? 1 : 0;
       const n = chainFrom(px, pz, live, BOMB_CAP, start, going);
       let x = 0, y = 0, z = 0, victim = null;
+      gone.length = 0;
       for (let i = 0; i < BOMB_CAP; i++) {
         if (!going[i]) continue;
+        if (!owner[i]) gone.push(uid[i]);
         x += px[i]; y += py[i]; z += pz[i];
         if (state[i] === CARRIED && !victim) { victim = carriers[i]; releasePose(); }
         state[i] = FREE; carriers[i] = null;
       }
       x /= n; y /= n; z /= n;
+      if (send && gone.length) send({ k: "blast", u: gone.slice(0, 16) });
       const { radius, power } = blastOf(n);
       blasts++;
       if (n > 1) chained += n;
@@ -477,6 +500,53 @@
       if (audio) { tail = TAIL; cue(audio.boom, Math.min(1, 0.55 + n * 0.12), 0.01, 1.1 + Math.min(1, n * 0.15)); }
       return n;
     };
+    // One of this page's own devices, as the room passes it on: where it is now and its seconds left.
+    const tell = (i, k) => {
+      if (!send) return;
+      const f = Math.max(0, Math.min(FUSE, timer[i]));
+      if (k === "up") send({ k, u: uid[i], f });
+      else if (k === "down") send({ k, u: uid[i], f, x: px[i], y: py[i], z: pz[i] });
+      else send({ k, u: uid[i], f, x: px[i], y: py[i], z: pz[i], vx: vx[i], vy: vy[i], vz: vz[i] });
+    };
+    const mirrorOf = (id, u) => {
+      for (let i = 0; i < BOMB_CAP; i++) if (state[i] !== FREE && owner[i] === id && uid[i] === u) return i;
+      return -1;
+    };
+    const mirrors = () => {
+      let n = 0;
+      for (let i = 0; i < BOMB_CAP; i++) if (state[i] !== FREE && owner[i]) n++;
+      return n;
+    };
+    // Another player's device as the room has it, [id, u, look, state, x, y, z, vx, vy, vz, at, end], made or moved
+    // here in the visitor's space; one thrown is flown on by its age.
+    const mirror = (w) => {
+      const [id, u, look, s, x, y, z, wx, wy, wz, at, end] = w;
+      if (!Number.isSafeInteger(id) || !Number.isInteger(look) || look < 0 || look >= LOOKS.length || ![x, y, z, wx, wy, wz, at, end].every(Number.isFinite)) return;
+      let i = mirrorOf(id, u);
+      if (i < 0) { if (mirrors() >= MIRROR_CAP || (i = spawn(x, y, z, look)) < 0) return; }
+      owner[i] = id; uid[i] = u; lookOf[i] = look; space[i] = here; carriers[i] = null;
+      const t = now();
+      timer[i] = Math.min(FUSE, (end - t) / 1000); late[i] = LATE;
+      px[i] = x; py[i] = y; pz[i] = z; vx[i] = wx; vy[i] = wy; vz[i] = wz;
+      if (s === "c") state[i] = CARRIED;
+      else if (s === "d") { state[i] = DROPPED; roll[i] = 0; }
+      else {
+        const age = Math.max(0, Math.min(2, (t - at) / 1000));
+        px[i] += wx * age; pz[i] += wz * age; py[i] += wy * age - GRAVITY * age * age / 2; vy[i] -= GRAVITY * age;
+        const floor = groundAt(px[i], pz[i], py[i] + 0.3);
+        if (py[i] <= floor) { py[i] = floor; state[i] = DROPPED; roll[i] = 0; } else state[i] = FLYING;
+      }
+    };
+    // What the room passes on from other players (net.js subscribeWallets).
+    const heard = (msg) => {
+      if (msg.t === "wallets") { if (Array.isArray(msg.list)) for (const w of msg.list) if (Array.isArray(w) && w.length === 12) mirror(w); return; }
+      if (msg.k === "blast") {
+        if (!Array.isArray(msg.u)) return;
+        for (const u of msg.u) { const i = mirrorOf(msg.id, u); if (i >= 0) detonate(i); }
+        return;
+      }
+      if (Array.isArray(msg.w) && msg.w.length === 12) mirror(msg.w);
+    };
     // `at` is the visitor's space: 0 for the Chora, else the scene's number for the room.
     const update = (dt, elapsed, at) => {
       releasePose();
@@ -490,14 +560,21 @@
       for (let i = 0; i < BOMB_CAP; i++) {
         if (state[i] === FREE) continue;
         if ((timer[i] -= dt) <= 0) {
-          detonate(i);
-          continue;
+          // A mirror holds at zero a moment for its owner's blast; one carried off by nobody here just goes.
+          if (owner[i] && (late[i] -= dt) > 0) timer[i] = 0;
+          else if (owner[i] && state[i] === CARRIED) { state[i] = FREE; continue; }
+          else { detonate(i); continue; }
         }
-        if (state[i] === CARRIED) {
+        if (state[i] === CARRIED && owner[i]) {
+          const a = remoteAt(owner[i]);
+          if (!a) { if (picks[i].visible) picks[i].visible = false; continue; }
+          px[i] = a.x; py[i] = a.y + a.height + 0.08; pz[i] = a.z; roll[i] = 0; space[i] = here;
+        } else if (state[i] === CARRIED) {
           const cave = carriers[i];
           space[i] = here;
           if (!cave.root.visible || cave.health.stunned || cave !== crew.player) {
             state[i] = FLYING; carriers[i] = null; vx[i] = vz[i] = 0; vy[i] = 1;
+            tell(i, "throw");
           } else if (cave.camp.seat) {
             // Seated, it rests on the Ooga's lap and the arms keep the seated pose.
             const p = cave.root.position, h = cave.root.rotation.y;
@@ -617,7 +694,7 @@
         if (state[i] === FREE || space[i] !== here) continue;
         const pos = project(px[i], py[i] + 0.42, pz[i]);
         if (!pos) continue;
-        const left = Math.ceil(timer[i]), jitter = shake > 0 ? Math.sin(shake * 90 + i) * 3 : 0;
+        const left = Math.max(0, Math.ceil(timer[i])), jitter = shake > 0 ? Math.sin(shake * 90 + i) * 3 : 0;
         const dx = px[i] - ox, dz = pz[i] - oz, named = state[i] === CARRIED || player && dx * dx + dz * dz < NAME_NEAR * NAME_NEAR;
         const text = named ? NAMED[lookOf[i]][left] : SECONDS[left];
         ctx.fillStyle = left <= 10 ? "#ff4b3a" : "#f6ecd2";
@@ -667,12 +744,12 @@
       },
       list() {
         const out = [];
-        for (let i = 0; i < BOMB_CAP; i++) if (state[i] !== FREE) out.push({ slot: i, look: LOOKS[lookOf[i]].id, state: STATE_NAMES[state[i]], space: space[i], timer: timer[i], x: px[i], y: py[i], z: pz[i] });
+        for (let i = 0; i < BOMB_CAP; i++) if (state[i] !== FREE) out.push({ slot: i, look: LOOKS[lookOf[i]].id, state: STATE_NAMES[state[i]], space: space[i], timer: timer[i], x: px[i], y: py[i], z: pz[i], owner: owner[i], uid: uid[i] });
         return out;
       },
       flash, get here() { return here; }
     };
-    return { update, releasePose, drawOverlay, flashLight, get flashing() { return flash.t > 0; }, take, refusal, throwCarried, setDown, tap, where, held, lookAt, secondsLeft, stats, dispose, debug };
+    return { update, releasePose, drawOverlay, flashLight, get flashing() { return flash.t > 0; }, take, refusal, throwCarried, setDown, tap, where, held, lookAt, secondsLeft, heard, stats, dispose, debug };
   };
-  BL.walletBombs = { create, BOMB_CAP, SCORCH_CAP, FUSE, CHAIN_RADIUS, BASE_RADIUS, BASE_POWER, POWER_CAP, SCALE, LOOKS, geometryOf, snitchPhotoGeometry, passpoorScreenGeometry, passpoorBalanceGeometry, jadedTrackingGeometry, jadedEyesGeometry, blastOf, chainFrom };
+  BL.walletBombs = { create, BOMB_CAP, MIRROR_CAP, SCORCH_CAP, FUSE, CHAIN_RADIUS, BASE_RADIUS, BASE_POWER, POWER_CAP, SCALE, LOOKS, geometryOf, snitchPhotoGeometry, passpoorScreenGeometry, passpoorBalanceGeometry, jadedTrackingGeometry, jadedEyesGeometry, blastOf, chainFrom };
 })();

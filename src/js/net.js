@@ -35,6 +35,8 @@
 // it; remote records carry `hp` and `ko`.
 // Gorilla poses optionally add `g`: flags (air, biped, climb, run, lab, office, sleep), speed, climb stride,
 // climb direction, climb side and swim. Each remote reuses its six values; ordinary poses keep their format.
+// DSB Land's wallets: `sendWallet` sends one of the visitor's own devices' events (protocol.js WALLET_CAP) and
+// `subscribeWallets` hears others' `wallet` and `wallets` messages as they come.
 // An Ooga's pose may add `j`, its jetpack for other pages to draw (`crew.jetFlags`: 1 while worn, plus the flame's
 // power times 2), sent on a change; remote records carry it as `jet`, 0 for none. It may add `w`, its weapons
 // (`crew.weaponFlags`: the one in hand, aiming, the gun's rounds), the same way; remote records carry it as `weapon`.
@@ -66,8 +68,8 @@
 // keeps the voices this page hears, since it already plays them.
 // `subscribePresence` hears `fn(rec, true)` for a player who joins the room while this page is in it, never for those
 // already there on this page's (re)join, and `fn(rec, false)` when one leaves (players.js names the joins, #430).
-// Exports start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub,
-// setMuted, setHealth, sendNpc, sendChat, sendGhost, subscribeGhost, sendGhostState and subscribeGhostState (HALLOWEEN), npcFrame, sendPose, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla,
+// Exports start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub,
+// setMuted, setHealth, sendNpc, sendChat, sendGhost, subscribeGhost, sendGhostState and subscribeGhostState (HALLOWEEN), npcFrame, sendPose, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla,
 // ownCharacter, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX and CHAT_KEEP.
 (() => {
   "use strict";
@@ -110,6 +112,7 @@
   const studioSubscribers = new Set();
   const studioEmit = message => { for (const fn of studioSubscribers) fn(message); };
   const chatSubscribers = new Set();
+  const walletSubscribers = new Set();
   const shotSubscribers = new Set(), swingSubscribers = new Set();
   const presenceSubscribers = new Set();
   const remotes = new Map();
@@ -418,6 +421,8 @@
     } else if (msg.t === "chat-ack" || msg.t === "chat-rejected") {
       if (chatIdValid(msg.clientId))
         chatHeard([], false, { clientId: msg.clientId, accepted: msg.t === "chat-ack", conflict: msg.reason === "conflict" });
+    } else if (msg.t === "wallet" || msg.t === "wallets") {
+      for (const fn of walletSubscribers) fn(msg);
     } else if (msg.t === "chat-history") {
       if (!Array.isArray(msg.messages)) return;
       const lines = [];
@@ -877,6 +882,18 @@
     chatSubscribers.add(fn);
     return () => chatSubscribers.delete(fn);
   };
+  // DSB Land's free hardware wallets (wallet-bombs.js): one of the visitor's own devices' events, for the pages in
+  // the same zone, sent only for an Ooga in a live room; and what the room passes on from others, each message as it
+  // came (wallet-bombs.js `heard` checks it).
+  const sendWallet = (msg) => {
+    if (state.room !== "live" || !body || state.bodyKind === "gorilla") return false;
+    send(JSON.stringify({ t: "wallet", ...msg }));
+    return true;
+  };
+  const subscribeWallets = (fn) => {
+    walletSubscribers.add(fn);
+    return () => walletSubscribers.delete(fn);
+  };
   const subscribeShots = (fn) => {
     shotSubscribers.add(fn);
     return () => shotSubscribers.delete(fn);
@@ -911,6 +928,7 @@
     moveSubscribers.clear();
     studioSubscribers.clear();
     chatSubscribers.clear();
+    walletSubscribers.clear();
     shotSubscribers.clear(); swingSubscribers.clear();
     presenceSubscribers.clear();
     doorSubscribers.clear();
@@ -918,5 +936,5 @@
     close("off");
   };
 
-  BL.net = { subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendGhost, subscribeGhost, sendGhostState, subscribeGhostState, sendPose, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
+  BL.net = { subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendGhost, subscribeGhost, sendGhostState, subscribeGhostState, sendPose, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
 })();

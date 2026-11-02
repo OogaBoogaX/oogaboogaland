@@ -19,7 +19,7 @@
   let inkMenu,inkTools,inkPick=null,inkReview=false,inkMenuReview=0,inkLayoutObserver,inkLayoutPending=false;
   let svrnMenu,svrnPick=null,svrnReview=false;
   let rescue=null,exitPick=null;
-  let wallets=null,walletsMenu=null,walletsPick=null,walletsReview=false,walletTools=null,walletText=null,walletLines=null,walletLine=null,walletSpace=0;
+  let wallets=null,unheardWallets=null,walletsMenu=null,walletsPick=null,walletsReview=false,walletTools=null,walletText=null,walletLines=null,walletLine=null,walletSpace=0;
   let memeMenu,memeReview=false,contextReview=false,stackchainMenu,stackchainReview=false;
   let bigMenu,bigPick=null,bigReview=false,bigMenuReview=0;
   const requestInkLayout=()=>{inkLayoutPending=true;};
@@ -392,7 +392,11 @@
     svrnMenu=BL.svrnMenu.create({onOpen:on=>{pilot.setActive(!on&&!interiors.transitioning);pilot.controls.reset();input.reset();crew.setWeaponTrigger(false);}});
     rescue=BL.rescueDsb.attach({root,crew,input,hud,fx,pilot,interiors,vacancies,land,groundAt,walkable,flyable,camera,renderer:ctx.renderer,world,reviewed:pilot.loginViewRestored});
     walletsMenu=BL.walletsMenu.create({onTake:takeWallet,onOpen:on=>{pilot.setActive(!on&&!interiors.transitioning);pilot.controls.reset();input.reset();crew.setWeaponTrigger(false);}});
-    wallets=BL.walletBombs.create({root,crew,fx,hud,groundAt:(x,z,feet)=>groundAt(x,z,feet,undefined,WALLET),bounds:()=>interiors.active?.room.bounds||null,addTarget:(node,owner,opts)=>input.add(node,owner,opts),removeTarget:node=>input.remove(node),pickGeometry:BL.walletsRoom.PICK,muted:()=>weather.shared.state.muted});
+    wallets=BL.walletBombs.create({root,crew,fx,hud,groundAt:(x,z,feet)=>groundAt(x,z,feet,undefined,WALLET),bounds:()=>interiors.active?.room.bounds||null,addTarget:(node,owner,opts)=>input.add(node,owner,opts),removeTarget:node=>input.remove(node),pickGeometry:BL.walletsRoom.PICK,muted:()=>weather.shared.state.muted,
+      // Signed in, the devices are shared with the players in the same zone (net.js sendWallet, subscribeWallets).
+      send:m=>BL.net.sendWallet(m),now:()=>BL.net.serverNow(),
+      remoteAt:id=>{const list=remotes.actors();for(let k=0;k<list.length;k++)if(list[k].id===id)return list[k];return null;}});
+    unheardWallets=BL.net.subscribeWallets(m=>wallets.heard(m));
     // The carry line names the device and its seconds; the Throw button beside it is the phone's way to throw.
     const touch=matchMedia("(pointer: coarse)").matches;walletLines=BL.walletBombs.LOOKS.map(l=>Array.from({length:BL.walletBombs.FUSE+1},(_,s)=>`Carrying ${l.name} · ${s} s · ${touch?"Tap":"Click"} the ground to place ·`));
     walletTools=document.createElement("p");walletTools.className="wallet-carry";walletTools.hidden=true;walletText=document.createElement("span");
@@ -574,7 +578,7 @@
     memeMenu.dispose();memeMenu=null;
     svrnMenu.dispose();svrnMenu=null;if(svrnPick){input.remove(svrnPick.screen);svrnPick=null;}
     rescue.dispose();rescue=null;
-    walletsMenu.dispose();walletsMenu=null;if(walletsPick){input.remove(walletsPick.screen);input.remove(walletsPick.blacklightSwitch);walletsPick=null;}wallets.dispose();wallets=null;walletTools.remove();walletTools=walletText=walletLines=walletLine=null;walletWalk.on=false;
+    walletsMenu.dispose();walletsMenu=null;if(walletsPick){input.remove(walletsPick.screen);input.remove(walletsPick.blacklightSwitch);walletsPick=null;}unheardWallets();unheardWallets=null;wallets.dispose();wallets=null;walletTools.remove();walletTools=walletText=walletLines=walletLine=null;walletWalk.on=false;
     stackchainMenu.dispose();stackchainMenu=null;
     bigMenu.dispose();bigMenu=null;if(bigPick){input.remove(bigPick.screen);bigPick=null;}
     inkMenu.dispose();inkMenu=null;inkTools.remove();inkTools=null;if(inkPick){input.remove(inkPick.screen);inkPick=null;}

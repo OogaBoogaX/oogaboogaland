@@ -22416,6 +22416,39 @@ const rescueMenuChecks = BL => {
     record("Rescue dialog: six selectable portraits in the island sheet's frame and slab, shared heading and controls, Enter adopts the sanitized name or suggestion, Escape closes, sign-in hides adoption controls, and disposal leaves no panel or handler",shown&&go.className==="chat-send"&&note.attributes.role==="status"&&chose&&fallback&&escaped&&refused&&backed&&restored&&!body.children.length&&elements.every(e=>!e.listeners.size)&&BL.dsbMenuShell.count===0,JSON.stringify({shown,chose,fallback,escaped,refused,backed,restored,choice}));
   }finally{BL.hud=hud;for(const [k,v] of Object.entries(saved))globalThis[k]=v;}
 };
+// Rule (#387): signed in, a page sends its own devices' events and draws other players' as mirrors: carried over
+// their head, flown on from a throw by its age, never picked up here, set off by their blast, which chains into this
+// page's own and is reported as this page's blast, and gone a moment past their end when no blast comes. A flat world
+// and one stub Ooga, which never holds a device across a frame, so no grip pose is needed.
+const walletShareChecks = BL => {
+  const W=BL.walletBombs,noop=()=>{},root=BL.scene.createNode(),toasts=[],sent=[];
+  const ooga={root:{position:{x:0,y:.5,z:0},rotation:{y:Math.PI/2},visible:true},baseY:.5,bodyHeight:1.6,health:{stunned:false},camp:{seat:null},hopV:0,leap:{vx:0,vz:0},traits:{height:1.6}};
+  const crew={list:[ooga],player:ooga,soot:noop},fx={say:noop,sayAt:noop,burst:noop,puff:noop};
+  let clock=1e6;const peer={id:72,x:6,y:0,z:0,height:1.6};
+  const shared=W.create({root,crew,fx,hud:{toast:t=>toasts.push(t)},groundAt:()=>0,bounds:()=>null,addTarget:noop,removeTarget:noop,pickGeometry:BL.walletsRoom.PICK,muted:()=>true,
+    send:m=>sent.push(m),now:()=>clock,remoteAt:id=>id===peer.id?peer:null}),S=shared.debug;
+  const go=sec=>{for(let t=0;t<sec;t+=.05){clock+=50;shared.update(.05,t,0);}},mine=()=>S.list().filter(d=>!d.owner),theirs=u=>S.list().find(d=>d.owner===72&&d.uid===u);
+  const w=(u,look,state,x,y,z,vx,vy,vz,age,left)=>({t:"wallet",k:state==="c"?"take":state==="d"?"down":"throw",w:[72,u,look,state,x,y,z,vx,vy,vz,clock-age,clock+left]});
+  shared.take(2);const took=sent.at(-1),u=took.u;shared.throwCarried();const threw=sent.at(-1);
+  const own=took.k==="take"&&took.l===2&&took.f===W.FUSE&&threw.k==="throw"&&threw.u===u&&threw.vx>3&&threw.vy>2;
+  shared.heard(w(5,1,"c",0,0,0,0,0,0,0,21000));go(.05);const held=theirs(5);
+  const overHead=held?.state==="carried"&&held.x===peer.x&&Math.abs(held.y-(peer.y+peer.height+.08))<1e-5;
+  shared.heard(w(6,0,"f",0,1.5,6,2,1,0,500,15000));const flown=theirs(6);
+  const aged=flown?.state==="flying"&&Math.abs(flown.x-1)<1e-4;
+  go(2);const before=sent.length;
+  shared.heard(w(7,0,"d",.4,0,0,0,0,0,0,15000));const laid=theirs(7);
+  const untouchable=!shared.tap(laid.slot)&&theirs(7).state==="dropped"&&!shared.where(laid.slot,{})&&sent.length===before;
+  S.cool();shared.take(0);const second=sent.at(-1).u;shared.setDown(1,0);
+  shared.heard({t:"wallet",k:"blast",id:72,u:[7]});
+  const chained=!theirs(7)&&!mine().some(d=>d.uid===second)&&sent.at(-1).k==="blast"&&sent.at(-1).u.includes(second);
+  go(25);const lapsed=!S.list().some(d=>d.owner===72);
+  // A crowd's devices never take the slots this page's own need: they fill MIRROR_CAP at most, and a take still works.
+  for(let k=0;k<W.BOMB_CAP;k++)shared.heard({t:"wallet",k:"down",w:[80+k%3,100+k,0,"d",k,0,9,0,0,0,clock,clock+15000]});
+  const crowd=S.list().filter(d=>d.owner).length;S.cool();const kept=crowd===W.MIRROR_CAP&&shared.take(1)>=0;
+  record("Wallets shared: a page sends its own devices' events and draws another player's carried over their head, flown on by its age and never picked up here; their blast chains into this page's own, reported as its blast, theirs go off by themselves once past their end, and a crowd's never fill the slots this page's own need",
+    own&&overHead&&aged&&untouchable&&chained&&lapsed&&kept,JSON.stringify({own,overHead,held,aged,flown,untouchable,chained,lapsed,crowd,kept,sent:sent.slice(-3)}));
+  shared.dispose();
+};
 // Rule: Free Hardware Wallets at VAC 2 keeps its address, room, fuse, chain, spaces and pools bounded, and its machine says nothing.
 const walletsChecks = BL => {
   const W=BL.walletBombs,S=BL.scene,noop=()=>{},toasts=[];
@@ -24526,6 +24559,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   await playersTabChecks(BL);
   await sheetRailChecks();
   await integrationChecks(BL);
+  walletShareChecks(BL);
   footstepChecks(BL);
   await voiceAloneChecks();
   await voiceHearingChecks();
