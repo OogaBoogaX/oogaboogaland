@@ -111,7 +111,9 @@
   };
   const before={x:0,y:0,z:0},after={x:0,y:0,z:0};
   const nearGate=()=>avatar&&Math.hypot(avatar.root.position.x+45,avatar.root.position.z+44)<10;
-  const walk=()=>{overview=false;pilot.possess(avatar);pilot.navigate({position:{x:avatar.root.position.x,y:avatar.root.position.y-avatar.baseY,z:avatar.root.position.z},yaw:Math.PI,pitch:.22,dist:7});pilot.setActive(true);};
+  // In as it left the last scene (pilot.js `arrive`): view, combat, weapon, and the look, pitch and zoom the navigate keeps.
+  // Each building frames its own room at its door, as before.
+  const walk=()=>{overview=false;pilot.arrive(avatar);pilot.navigate({position:{x:avatar.root.position.x,y:avatar.root.position.y-avatar.baseY,z:avatar.root.position.z},yaw:Math.PI,pitch:.22,dist:7});pilot.setActive(true);};
   const presetView=name=>{
     if(leaving||gate?.isOpen||interiors?.transitioning)return;
     if(interiors?.active){detachedExit=!pilot.player;interiors.request(interiors.active.room.exit);return;}
@@ -244,7 +246,7 @@
       // A falling body's edge can meet a roof or stair while its centre is still outside the top face.
       return collision?Math.max(ground,collision.solids.supportAt(x,z,at,STEP,actor?.bodyRadius||0)):ground;
     };
-    pilot=BL.pilot.create({renderer:ctx.renderer,canvas:ctx.canvas,camera,hud,mayPossess,jetpackStatus,loginContexts,loginContext:()=>interiors?.active?.room.id||null,presets:{...BL.dsbEnrichment.REVIEWS,...BL.dsbVacancies.REVIEWS,...BL.rescueRoom.VIEWS,...BL.walletsRoom.VIEWS,portara:{yaw:0,pitch:.08,dist:17,target:{x:-45,y:land.heightAt(-45,-48)+BL.dsbAtmosphere.portaraAperture.height/2,z:-48}},"water-falls":{yaw:-.65,pitch:.48,dist:37,target:{x:-37,y:25,z:-16}},"water-pool":{yaw:-.9,pitch:.75,dist:22,target:{x:-45,y:14,z:0}},overview:OVERVIEW,chora:{yaw:.62,pitch:.12,dist:18,target:{x:31,y:7,z:33}}},landing:"overview",pitch:[.1,1.45],dist:[3,270],follow:{y:1,min:3,max:9,pitch:[.1,.8]},fly:{speed:8,perDist:.1,climb:5,yMax:180},clampCamera:p=>{if(interiors)interiors.clampCamera(p,avatar?.root.position);else p.y=Math.max(p.y,land.heightAt(p.x,p.z)+1);if(!interiors?.active&&land.heightAt(p.x,p.z)<BL.dsbCoast.LEVEL)p.y=Math.max(p.y,BL.dsbCoast.LEVEL+.12);},coarse:matchMedia("(pointer: coarse)").matches,onFreeAction:act,onPlayerAction:act,close:{eyeHeight:1.7,eyeRatio:.8,eyeForward:0,maxStep:.6,pitch:[-1.2,1.2],orbitDist:12,trailingDist:6,groundAt:(x,z)=>groundAt(x,z,avatar?avatar.root.position.y-avatar.baseY:undefined)}});
+    pilot=BL.pilot.create({carry:true,renderer:ctx.renderer,canvas:ctx.canvas,camera,hud,mayPossess,jetpackStatus,loginContexts,loginContext:()=>interiors?.active?.room.id||null,presets:{...BL.dsbEnrichment.REVIEWS,...BL.dsbVacancies.REVIEWS,...BL.rescueRoom.VIEWS,...BL.walletsRoom.VIEWS,portara:{yaw:0,pitch:.08,dist:17,target:{x:-45,y:land.heightAt(-45,-48)+BL.dsbAtmosphere.portaraAperture.height/2,z:-48}},"water-falls":{yaw:-.65,pitch:.48,dist:37,target:{x:-37,y:25,z:-16}},"water-pool":{yaw:-.9,pitch:.75,dist:22,target:{x:-45,y:14,z:0}},overview:OVERVIEW,chora:{yaw:.62,pitch:.12,dist:18,target:{x:31,y:7,z:33}}},landing:"overview",pitch:[.1,1.45],dist:[3,270],follow:{y:1,min:3,max:9,pitch:[.1,.8]},fly:{speed:8,perDist:.1,climb:5,yMax:180},clampCamera:p=>{if(interiors)interiors.clampCamera(p,avatar?.root.position);else p.y=Math.max(p.y,land.heightAt(p.x,p.z)+1);if(!interiors?.active&&land.heightAt(p.x,p.z)<BL.dsbCoast.LEVEL)p.y=Math.max(p.y,BL.dsbCoast.LEVEL+.12);},coarse:matchMedia("(pointer: coarse)").matches,onFreeAction:act,onPlayerAction:act,close:{eyeHeight:1.7,eyeRatio:.8,eyeForward:0,maxStep:.6,pitch:[-1.2,1.2],orbitDist:12,trailingDist:6,groundAt:(x,z)=>groundAt(x,z,avatar?avatar.root.position.y-avatar.baseY:undefined)}});
     fx=BL.fx.create({root,renderer:ctx.renderer,camera,overlay:ctx.overlay,hud,tickerAt:{x:-45,y:42,z:-44}});
     const splatGeometry=BL.models.particleGeometry("#e34d32",.12,0);
     const walkable=(ax,az,bx,bz,y,h=1.5,a)=>{
@@ -274,7 +276,7 @@
       tomatoContact:(x,y,z,p)=>seatRoom()?.tomatoContact(x,y,z,p,avatar.camp.seat),
       onTomatoImpact:p=>{if(!seatRoom())return;for(let i=0;i<7;i++){const a=i*Math.PI*2/7;fx.spawnParticle(splatGeometry,p.x,p.y,p.z,Math.cos(a)*1.8,.8+(i%3)*.3,Math.sin(a)*1.8,.4,3,5,interiors.groundAt(p.x,p.z)+.06);}},
       outsideActors:()=>remotes?remotes.actors():[],outsideActorHeight:BL.remotePlayers.BODY_HEIGHT,
-      root,input,hud,game:ctx.game,world:{level:0,weapons:new Map(),magazine:{owned:false,count:0,ammo:0,carrier:null}},playerName:name,weaponsEnabled:true,reloadPolicy:{near:()=>false,available:()=>false},fx,viewYaw:Math.PI,groundAt,walkable,flyable,jetpackAllowed,
+      root,input,hud,game:ctx.game,world:{level:0,weapons:ctx.world.weapons||(ctx.world.weapons=new Map()),magazine:ctx.world.magazine||(ctx.world.magazine={owned:false,count:0,ammo:0,carrier:null})},playerName:name,weaponsEnabled:true,reloadPolicy:{near:()=>false,available:()=>false},fx,viewYaw:Math.PI,groundAt,walkable,flyable,jetpackAllowed,
       ceilingAt:(x,z,y,a)=>interiors?.active?(interiors.active.room.ceilingAt?.(x,z,y,a)??Infinity):collision?.solids.ceilingAt(x,z,y,a?.bodyRadius||.4)??Infinity};
     crew=shared.crew=BL.crew.create(shared);pilot.bind(shared);avatar=crew.cavemen.get(name);
     crew.setJetpackOwnership(avatar,true,BL.hubModels.jetpack(),BL.hubModels.jetFlame());
