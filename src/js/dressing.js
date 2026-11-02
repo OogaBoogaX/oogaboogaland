@@ -11,7 +11,7 @@
 // baked set's nodes. A theme's `inside` list and `ceiling` lamp runs in scene-hub.js furnish the room behind
 // a mouth from the kit's pieces.
 //
-// Beyond sets: `palm(v)` three swaying cartoon palm meshes (not voxels) placed as their own nodes, `islet(v)` the terraced sea stacks on the horizon (variant 1 has a sea arch), `motes(opts)` a
+// Beyond sets: `palm(v)` three swaying cartoon palm meshes (not voxels) placed as their own nodes (`palmTrunk(v, y)` their trunk's middle and radius at a height), `islet(v)` the terraced sea stacks on the horizon (variant 1 has a sea arch), `motes(opts)` a
 // fixed field of glowing dust that wraps round the view (`update(elapsed, x, z)`), `flock(opts)` one
 // instanced batch of wheeling gulls and `fleet(opts)` log rafts on the sea, each with `update(elapsed)`.
 //
@@ -1131,11 +1131,19 @@
   // its edges notched into leaflets, light on top and dark beneath, with three short fronds standing up.
   const TRUNK = ["#9a7148", "#83603c", "#6f4f30"].map(hexToRgb), NUT = hexToRgb("#6b4a26");
   const FROND = ["#3f9a34", "#5fbf3f", "#86d652", "#2c6e2a"].map(hexToRgb);
+  // Variant v's trunk height and how far its top leans out along the node's +x.
+  const palmShape = (v) => ({ H: 3.9 + v * 0.45, LEAN: 0.8 + v * 0.3 });
+  // The trunk's middle at height y over its foot, as the node's local +x offset, and its radius there: what the hub's
+  // hammock ties round. Turn the offset by the node's yaw for the world.
+  const palmTrunk = (v, y) => {
+    const { H, LEAN } = palmShape(v), t = Math.min(1, Math.max(0, y / H));
+    return { x: LEAN * t * t, r: 0.2 - 0.07 * t };
+  };
   const palmGeometry = (v, lod = 0) => {
     const geo = { verts: [], faces: [], lines: [] }, rand = mulberry32(700 + v);
     const vert = (x, y, z) => (geo.verts.push(x, y, z), geo.verts.length / 3 - 1);
     const quad = (a, b, c, d, color) => geo.faces.push({ i: [a, b, c, d], color, emissive: 0 });
-    const H = 3.9 + v * 0.45, LEAN = 0.8 + v * 0.3, SEG = 10, SIDES = 8;
+    const { H, LEAN } = palmShape(v), SEG = 10, SIDES = 8;
     const axis = (t) => LEAN * t * t;
     // Trunk: each segment flares at its foot and narrows to its top; a ledge joins it to the segment below.
     let below = null;
@@ -1424,5 +1432,5 @@
     }
     const geometry=merge(...bits);studioCache.set(kind,geometry);return geometry;
   };
-  BL.dressing = { U, PALETTE, KIT, LIGHT_RGB, COIL_LIGHT, studio, set, coilRig, motes, palm, islet, nodes, flock, fleet };
+  BL.dressing = { U, PALETTE, KIT, LIGHT_RGB, COIL_LIGHT, studio, set, coilRig, motes, palm, palmTrunk, islet, nodes, flock, fleet };
 })();
