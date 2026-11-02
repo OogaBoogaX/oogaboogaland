@@ -53,9 +53,14 @@
 // zone before), and one who let go of their Ooga keeps the last. `state.self` is this page's own last reported
 // position and the zone it was in, kept after letting go. `subscribeMoves` hears positions change: the room's
 // snapshots and this page's own reports, a few times a second at most, nothing while nobody moves.
+// A crossing (#392, voice-blend.js): `setBlend(to, t)` says the driven body is `t` (0 to 1) of the way from its zone's
+// group toward the adjacent group `to` (null for none). `state.blendTo` and `state.blendT` keep it exact for this page's
+// own volumes; the room gets it in BLEND.STEPS steps, at most BLEND_MS apart, and every remote record carries the
+// other players' steps (`blendTo`, `blendK`), reset by their next zone. A zone change into the group being crossed into
+// keeps the voices this page hears, since it already plays them.
 // `subscribePresence` hears `fn(rec, true)` for a player who joins the room while this page is in it, never for those
 // already there on this page's (re)join, and `fn(rec, false)` when one leaves (players.js names the joins, #430).
-// Exports start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setPokerVoice, setHub,
+// Exports start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub,
 // setMuted, setHealth, sendNpc, sendChat, sendGhost, subscribeGhost, sendGhostState and subscribeGhostState (HALLOWEEN), npcFrame, sendPose, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla,
 // ownCharacter, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX and CHAT_KEEP.
 (() => {
@@ -107,7 +112,7 @@
   const state = { backend: false, me: null, donations: false, tess: false, highscores: false, logoutEpoch: 0, started: false,
     resolved: offline.has("nosim") || offline.get("net") === "0" || location.protocol !== "http:" && location.protocol !== "https:",
     room: "off", selfId: 0, online: 0, released: null, loopEpoch: 0, zone: "outside", body: null, bodyKind: null, bodyName: null, hostId: 0, followers: 0, ghostHostId: 0, ghostFollowers: 0, npcVersion: 0, doorway: false,
-    self: { x: NaN, y: NaN, z: NaN, zone: "" }, chatUnicode: false };
+    self: { x: NaN, y: NaN, z: NaN, zone: "" }, chatUnicode: false, blendTo: null, blendT: 0 };
   let ws = null, retry = 0, retryTimer = 0, pingTimer = 0, hiddenTimer = 0, stopped = false;
   let npcFrame = null, inHub = false, hubSent = null, visibleSent = null;
   let zone = "outside", body = null, muted = false, hpSent = 100, koSent = false, hpAt = 0, poseAt = 0, px = NaN, py = NaN, pz = NaN, pyaw = NaN;
@@ -156,6 +161,23 @@
 
   const sendBody = () => send(JSON.stringify({ t: "body", name: body }));
   const sendZone = () => send(JSON.stringify({ t: "zone", name: zone }));
+  // The crossing last sent (`to`/`k`), "" when the room holds none of this page's: after a zone, which resets it there.
+  const BLEND = BL.voiceBlend, BLEND_MS = 250;
+  let blendSent = "", blendAt = -Infinity;
+  const sendBlend = () => {
+    if (state.room !== "live" || !body) return;
+    const k = state.blendTo ? Math.max(1, Math.min(BLEND.STEPS, Math.round(state.blendT * BLEND.STEPS))) : 0, key = k ? `${state.blendTo}:${k}` : "";
+    const now = performance.now();
+    if (key === blendSent || now - blendAt < BLEND_MS) return;
+    blendSent = key; blendAt = now;
+    send(JSON.stringify({ t: "blend", to: k ? state.blendTo : null, k }));
+  };
+  const setBlend = (to, t) => {
+    const on = !!to && t > 0;
+    state.blendTo = on ? to : null;
+    state.blendT = on ? Math.min(1, t) : 0;
+    sendBlend();
+  };
   const sendPokerVoice = () => { if (zone === "ember-den") send(JSON.stringify({ t: "poker-voice", table: pokerVoice })); };
   const sendMute = () => send(muted ? '{"t":"mute","on":true}' : '{"t":"mute","on":false}');
   // What the room hears is "showing the island now": the hub scene, in a visible tab.
@@ -207,6 +229,8 @@
     // A pose the room holds for someone driving is where they stand now; for anyone else it may be from a zone they
     // have since left, so it is not taken (`poseZone`).
     rec.poseZone = typeof p.x === "number" && rec.body ? rec.zone : null;
+    rec.blendTo = typeof p.blendTo === "string" && Number.isInteger(p.blendK) && p.blendK > 0 ? p.blendTo : null;
+    rec.blendK = rec.blendTo ? Math.min(BLEND.STEPS, p.blendK) : 0;
     remotes.set(p.id, rec);
   };
 
@@ -297,6 +321,7 @@
         send(`{"t":"pose","x":${px.toFixed(3)},"y":${py.toFixed(3)},"z":${pz.toFixed(3)},"yaw":${pyaw.toFixed(3)}${extra}}`);
       }
       sendZone();
+      blendSent = ""; blendAt = -Infinity; sendBlend();
       sendPokerVoice();
       if (muted) sendMute();
       // A fresh room record starts at full health; the next report sends ours if it differs.
@@ -342,8 +367,14 @@
       rec.ko = msg.ko === true;
     } else if (msg.t === "zone") {
       const rec = remotes.get(msg.id);
-      if (rec && typeof msg.name === "string") rec.zone = msg.name;
+      if (rec && typeof msg.name === "string") { rec.zone = msg.name; rec.blendTo = null; rec.blendK = 0; }
       rosterChanged();
+    } else if (msg.t === "blend") {
+      const rec = remotes.get(msg.id);
+      if (rec) {
+        rec.blendTo = typeof msg.to === "string" && Number.isInteger(msg.k) && msg.k > 0 ? msg.to : null;
+        rec.blendK = rec.blendTo ? Math.min(BLEND.STEPS, msg.k) : 0;
+      }
     } else if (msg.t === "host") {
       state.hostId = Number.isSafeInteger(msg.id) ? msg.id : 0;
       state.followers = Number.isSafeInteger(msg.followers) ? msg.followers : 0;
@@ -543,12 +574,14 @@
   };
   const setZone = (name) => {
     if (name === zone) return;
-    const moved = !sameGroup(name, zone);
+    const moved = !sameGroup(name, zone) && name !== state.blendTo;
     zone = state.zone = name;
     pokerVoice = null;
     poseAt = 0; px = NaN;
     if (moved) BL.voice.setPeers([]);
     sendZone();
+    // The room dropped this page's crossing with its old zone: the next one is sent afresh.
+    blendSent = ""; blendAt = -Infinity;
     rosterChanged();
   };
   // Voice changes without moving or hiding anybody on the shared floor.
@@ -827,5 +860,5 @@
     close("off");
   };
 
-  BL.net = { subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendGhost, subscribeGhost, sendGhostState, subscribeGhostState, sendPose, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
+  BL.net = { subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendGhost, subscribeGhost, sendGhostState, subscribeGhostState, sendPose, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
 })();

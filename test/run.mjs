@@ -16574,7 +16574,43 @@ scene("hub", { label: "chilling", query: "status=chillin&pos=0",
     traffic.rows.every(row => row.waiting >= 1.1 && row.drift < 1e-6 && row.retained && row.released && row.raised > 0.5 && row.walked > 2 && !row.replans && !row.resets)
     && traffic.clear.every(row => !row.waited && row.moved), JSON.stringify(traffic));
 } }] });
-scene("hub", { label: "player stacking", query: "solo=1&character=portlandhodl&pos=0", steps: [hubPlayerStacking, hubChalkboardReach] });
+// #392: walking each bridge reports the crossing the room and the page fade voices by.
+const hubVoiceCrossings = { name: "voice crossings", why: "rule: on each bridge a player hears the island fade into the land ahead by how far along they stand, and back again walking home", run: async (b) => {
+  const r = await b.evaluate(`(() => {
+    const B = __ooga, D = BL.scenes.hub.debug, net = BL.net.state, T = D.timechainIsland, M = __ooga.poolIsland, F = D.bifrost;
+    B.pilot.possess(B.cavemen.get("portlandhodl"));
+    // A point short of a bridge stands on the island's own ground.
+    const at = (p, wait) => { if (!Number.isFinite(p.y)) p.y = D.island.heightAt(p.x, p.z); B.pilot.navigate({ position: p, yaw: 0, pitch: 0.4, dist: 6 }); B.advance(wait, 1 / 60); return { to: net.blendTo, t: +net.blendT.toFixed(2), zone: net.zone }; };
+    // Each bridge as points from its island end (0) to where its land's zone begins (1), and a step onto the land.
+    const sphereNear = T.place.bridgeZ + BL.timechainModels.SITE.span + 0.5, porch = BL.timechainModels.SPOTS.WAIT.z + 5;
+    const pool = M.place, poolNear = pool.bridgeLocalZ + BL.poolModels.SITE.span, poolFar = D.poolBridgeFar();
+    const w = F.site.walk, fifo = (along) => ({ x: w.x + w.sr * along, z: w.z + w.cr * along });
+    const bridges = {
+      sphere: (t) => { const a = sphereNear - t * (sphereNear - porch); return { x: T.worldX(0, a), y: T.place.y, z: T.worldZ(0, a) }; },
+      rainforest: (t) => { const a = poolNear - t * (poolNear - poolFar); return { x: M.worldX(0, a), y: pool.y, z: M.worldZ(0, a) }; },
+      bifrost: (t) => { const q = fifo(w.to - t * (w.to - w.from)); return { x: q.x, y: F.site.groundAt(q.x, q.z), z: q.z }; },
+    };
+    const out = {};
+    for (const [land, point] of Object.entries(bridges)) {
+      const row = out[land] = {};
+      const home = (p) => ({ ...p, y: NaN });
+      row.home = at(home(point(-0.1)), 0.5);
+      for (const t of [0.1, 0.5, 0.9]) row[t] = at(point(t), 0.5);
+      row.land = at(point(1.4), 0.5);
+      // Back onto the bridge from the land: until the island's zone holds, the island is ahead.
+      row.back = at(point(0.75), 0.05);
+      row.backHeld = at(point(0.75), 0.5);
+      row.away = at(home(point(-0.1)), 0.5);
+    }
+    return out;
+  })()`);
+  const ok = Object.entries(r).every(([land, row]) => !row.home.to && row.home.zone === "outside"
+    && [0.1, 0.5, 0.9].every((t) => row[t].to === land && Math.abs(row[t].t - t) <= 0.05 && row[t].zone === "outside")
+    && !row.land.to && row.land.zone === land && row.back.to === "outside" && Math.abs(row.back.t - 0.25) <= 0.05 && row.back.zone === land
+    && row.backHeld.to === land && Math.abs(row.backHeld.t - 0.75) <= 0.05 && row.backHeld.zone === "outside" && !row.away.to && row.away.zone === "outside");
+  record("voice crossings: each bridge reports its land and how far along, the island's zone held to its far end, and walking back from the land the island ahead", ok, JSON.stringify(r));
+} };
+scene("hub", { label: "player stacking", query: "solo=1&character=portlandhodl&pos=0", steps: [hubPlayerStacking, hubChalkboardReach, hubVoiceCrossings] });
 scene("hub", { label: "lab flask approach", query: "solo=1&character=portlandhodl&status=clankin", steps: [{ name: "gorilla lab exit through Oogas", why: "regression: Ooga occupancy, body sweeps and head support blocked gorillas leaving the lab", run: async (b) => {
   const state = await b.evaluate(`(() => {
     const B = __ooga, C = B.clankers, e = C.list[0], owner = e.owner, m = B.headquarters.entropyLab.mouth;
@@ -21568,6 +21604,7 @@ const voiceHearingChecks = async () => {
     const win={BL:{net:{state,setMuted:on=>netMuted.push(on),remotes}},setTimeout:()=>0,clearTimeout(){},setInterval:fn=>{timers.set(++timerId,fn);return timerId;},clearInterval:id=>timers.delete(id),addEventListener:(k,fn)=>handlers.set(k,fn)};
     const context={window:win,document:{createElement:()=>probe},localStorage:{getItem:k=>store.has(k)?store.get(k):null,setItem:(k,v)=>store.set(k,String(v))},navigator:{mediaDevices:{getUserMedia:async()=>stream}},RTCPeerConnection:Pc,Audio,MediaStream,fetch,AbortController,Promise,JSON,Error,Map,Set,Float32Array,Math,Number,String};
     if(webAudio)win.AudioContext=context.AudioContext=Ctx;
+    runInNewContext(readFileSync(join(root,"src/js/voice-blend.js"),"utf8"),context);
     runInNewContext(source,context);
     const V=win.BL.voice,elOf=id=>els[pulled.lastIndexOf(id)],gainOf=id=>gains.filter(g=>g.id===id&&g.out.size).at(-1);
     // What a voice sounds at: its element's volume unless muted, or on iOS its live gain's level (the element must stay muted).
@@ -21616,6 +21653,25 @@ const voiceHearingChecks = async () => {
   const bare=rig(true,false).V;io.noWebAudio=!bare.fades&&bare.inspect().playback==="element";
   record("voice hearing range on iOS and iPadOS: where an element's volume is ignored each voice plays through a gain that sounds as the desktop does at every step, its element stays muted, the gain goes straight to the output, a suspended context blocks the voices until a trusted tap wakes it, and a restart or stop lets go of every node",
     shared(io)&&io.playback==="gain"&&io.elementsMuted&&io.toOutput&&io.asleep&&io.untrusted&&io.woken&&io.restartReleased&&io.stopped&&io.noWebAudio,JSON.stringify(io));
+  // #392: on a crossing each voice plays at its equal-power share (an islander, a forester and a second crosser halfway),
+  // on iOS through its gain as on the desktop, and the hearing range is measured across the crossing.
+  const crossing=async ios=>{
+    const r=rig(ios),V=r.V,s=r.state,out={};
+    r.remotes.clear();r.remotes.set(2,remote("isl","outside",5,0));r.remotes.set(3,remote("for","rainforest",5,30));
+    r.remotes.set(4,{...remote("cro","outside",0,15),blendTo:"rainforest",blendK:10});
+    Object.assign(s,{zone:"outside",self:{x:0,y:0,z:0,zone:"outside"},blendTo:"rainforest",blendT:0.5});
+    await V.enable();await settle();V.setPeers([2,3,4],[1,1,1]);await settle();r.land([2,3,4]);
+    r.tick(10);out.half=r.levels([2,3,4]);
+    s.blendT=0.9;r.tick(10);out.near=r.levels([2,3,4]);
+    s.blendT=1;r.tick(10);out.end=r.levels([2,3,4]);
+    Object.assign(s,{zone:"rainforest",blendTo:null,blendT:0});s.self.zone="rainforest";r.tick(10);out.over=r.levels([3,4]);
+    V.setRadius(40);r.tick(10);out.radius=r.levels([3,4]);
+    V.stop();
+    return out;
+  };
+  const cross={desk:await crossing(false),ios:await crossing(true)};
+  record("voice crossing: along a bridge the island fades out as the land ahead fades in, equal-power, a second crosser plays by how near, the far side hears a crosser by its share, iOS sounds the same, and the hearing range reaches across",
+    [cross.desk,cross.ios].every(c=>c.half==="0.707,0.707,1"&&c.near==="0.156,0.988,0.809"&&c.end==="0,1,0.707"&&c.over==="1,0.707"&&c.radius==="0.469,0.707"),JSON.stringify(cross));
 };
 const exteriorEnrichmentChecks = BL => {
   const S=BL.scene,root=S.createNode(),land=BL.dsbGeography.build(),renderer={kind:"webgl2",quality:"high"},camera=S.createCamera();camera.position.y=110;
