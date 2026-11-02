@@ -91,6 +91,38 @@ const emptyPeerPreviewProof = async () => {
   }
   return {cases,samples,callbacks,failures,contact,arms,rollback};
 };
+const gorillaSleepRouteProof = () => {
+  const source = readFileSync(join(root, "src/js/clankers.js"), "utf8");
+  const section = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
+  // Run the real wake/re-sleep controllers with fixed dry paths. Reservations
+  // supply either the old bed or another bed after an overflow sleeper took it.
+  const controllers = section("    const sleepLegFrom =", "    // Rage shares");
+  const rows = [];
+  for (const slot of [0, 1, 2]) {
+    const paths = [[0, 0, 10, 0, 20, 0, 30, 0], [0, 0, 22, 5, 40, 10, 60, 15], [0, 0, 22, 5, 60, 15]];
+    const e = { active: true, root: { position: { x: 22, y: 0, z: 0 } },
+      sleep: { stage: "asleep", slot: 0, home: -1, leg: 3, count: 4, path: new Float64Array(48), stall: 0, near: Infinity },
+      gorilla: { chest: { scale: { y: 1 } } }, lab: { item: -1 }, motion: {}, jump: { active: false },
+      roam: {}, climb: { active: false }, lounge: "", recover: 0, retry: 0 };
+    e.sleep.path.set(paths[0]);
+    const noop = () => {};
+    const context = { e, slot, paths, bedDay: 0, SLEEP_REACH: 1.1, SLEEP_ARRIVE: 0.3, SLEEP_STALL: 25, SPEED: 2.7,
+      ctx: { sleep: { slots: [{ y: 0 }, { y: 0 }, { y: 0 }], path: (i, out) => { out.set(paths[i]); return paths[i].length / 2; } } },
+      reserveBed: actor => { actor.sleep.slot = slot; return true; },
+      releasePortal: noop, releaseLab: noop, releaseOffice: noop, clearWallSearch: noop, poseEntry: noop, move: noop,
+      setGoal: (actor, x, y, z) => { actor.goalX = x; actor.goalY = y; actor.goalZ = z; } };
+    runInNewContext(controllers + `
+      updateWake(e, 0, 22, 0, 0);
+      globalThis.woke = { home: e.sleep.home, slot: e.sleep.slot, leg: e.sleep.leg, stage: e.sleep.stage };
+      updateSleep(e, 0, 22, 0, 0);
+    `, context);
+    rows.push({ slot, woke: context.woke, leg: e.sleep.leg, stage: e.sleep.stage, goal: [e.goalX, e.goalZ],
+      ok: context.woke.home === 0 && context.woke.slot === -1 && context.woke.stage === "return" && context.woke.leg === 2
+        && e.sleep.stage === "go" && e.sleep.leg === (slot === 0 ? 3 : 1)
+        && e.goalX === (slot === 0 ? 30 : 22) && e.goalZ === (slot === 0 ? 0 : 5) });
+  }
+  return rows;
+};
 // Rule: exercise the actual bounded rage state machine with a small physical
 // adapter. Collision and the rendered carry are covered by the hub regressions.
 const gorillaRageProof = async () => {
@@ -10893,6 +10925,69 @@ const gameCombat = step => ({ ...step, run: async b => {
   try { await step.run(b); }
   finally { await b.evaluate(`BL.scenes.hub.debug.setGameMode(false)`); }
 } });
+const hubGorillaPopulation = { name: "gorilla population restoration", why: "regression: non-sleepers consumed rainforest beds and island event exit deferred the gorilla population handoff", run: async b => {
+  const r = await b.evaluate(`(() => {
+    const B = __ooga, H = BL.scenes.hub.debug, C = H.clankers;
+    B.pilot.release();
+    const entries = C.list, worker = entries[0], chiller = entries[1], away = entries[2];
+    const sleepers = entries.slice(-2);
+    const reset = many => {
+      C.setAway(true); C.update(1 / 30);
+      for (const e of entries) e.owner.override = "away";
+      worker.owner.override = "working"; chiller.owner.override = "chilling";
+      for (const e of many) e.owner.override = "sleeping";
+      B.crew.refreshStates(true);
+      C.setAway(false);
+    };
+    const visible = e => e.active && e.root.visible;
+    const normal = () => visible(worker) && worker.mode === "working" && visible(chiller) && chiller.mode === "chilling"
+      && !visible(away) && sleepers.every(e => visible(e) && e.sleep.slot >= 0)
+      && [worker, chiller, away].every(e => e.sleep.slot < 0);
+    reset(sleepers);
+    const lateSleepers = normal(), firstSlots = sleepers.map(e => e.sleep.slot);
+    C.update(1 / 30);
+    const stable = sleepers.every((e, i) => e.sleep.slot === firstSlots[i]);
+    // More actual sleepers than beds: exactly the authored capacity, no shared
+    // bed, then a newly free bed reaches a waiting sleeper without a reload.
+    const many = entries.slice(3, 25);
+    reset(many);
+    const occupied = many.filter(e => e.sleep.slot >= 0), waiting = many.filter(e => e.sleep.slot < 0);
+    const capped = occupied.length === 20 && new Set(occupied.map(e => e.sleep.slot)).size === 20
+      && waiting.length === 2 && waiting.every(e => !visible(e));
+    // Space wakes a driven gorilla without releasing its bed. Its owner can
+    // wake and sleep again while it is driven; overflow must not take that bed.
+    const driven = occupied[0], drivenSlot = driven.sleep.slot;
+    const drove = C.possess(driven) && C.wake();
+    driven.owner.override = "chilling"; B.crew.refreshStates(true);
+    C.update(1 / 30); C.update(1 / 30);
+    const heldWhileDriven = drove && driven.controlled && driven.sleep.slot === drivenSlot
+      && waiting.every(e => e.sleep.slot < 0 && !visible(e));
+    driven.owner.override = "sleeping"; B.crew.refreshStates(true); C.release();
+    C.update(1 / 30);
+    const reserved = many.filter(e => e.sleep.slot >= 0);
+    const uniqueAfterRelease = driven.sleep.slot === drivenSlot && reserved.length === 20
+      && new Set(reserved.map(e => e.sleep.slot)).size === 20;
+    const waking = occupied[0], held = occupied.slice(1).map(e => [e, e.sleep.slot]);
+    waking.owner.override = "chilling"; B.crew.refreshStates(true);
+    C.update(1 / 30); C.update(1 / 30);
+    const reused = waking.sleep.slot < 0 && visible(waking) && waiting.some(e => visible(e) && e.sleep.slot >= 0)
+      && held.every(([e, slot]) => e.sleep.slot === slot);
+    reset(sleepers);
+    // Exercise the current island event contract directly. The hunt now belongs
+    // to Ooga Arcade and never hides the island's companion population.
+    H.setGameMode(true); C.update(1 / 30);
+    const hidden = [worker, chiller, ...sleepers].every(e => !visible(e) && e.sleep.slot < 0);
+    H.setGameMode(false); // No clanker frame: event exit itself must reconcile.
+    const restored = normal();
+    const restoredSlots = sleepers.map(e => e.sleep.slot);
+    H.setGameMode(false);
+    const stableExit = normal() && sleepers.every((e, i) => e.sleep.slot === restoredSlots[i]);
+    return { lateSleepers, stable, capped, reused, heldWhileDriven, uniqueAfterRelease, hidden, restored, stableExit,
+      population: [worker, chiller, away, ...sleepers].map(e => ({ state: e.owner.state, mode: e.mode, active: e.active, visible: e.root.visible, bed: e.sleep.slot })) };
+  })()`);
+  record("gorilla population: late-roster sleepers get exclusive beds; working, chilling and away owners get none; overflow waits at the 20-bed cap, respects driven reservations and reuses released beds", r.lateSleepers && r.stable && r.capped && r.reused && r.heldWhileDriven && r.uniqueAfterRelease, JSON.stringify(r));
+  record("gorilla population: island game mode hides companions and its exit immediately restores current working, chilling and sleeping gorillas; repeated exit keeps their beds", r.hidden && r.restored && r.stableExit, JSON.stringify(r));
+} };
 const hubCombatGate = { name: "hub game-only combat", why: "rule: ordinary visits retain harmless weapons and both look modes while damage, health simulation, rage and grabs stay off, and ending a game clears its transient combat state", run: async b => {
   const r = await b.evaluate(`(() => {
     const B = __ooga, H = BL.scenes.hub.debug, C = B.clankers, P = B.pilot, a = B.cavemen.get("portlandhodl"), e = C.list.find(entry => entry.owner === a);
@@ -19524,6 +19619,7 @@ scene("poker", { opts: PHONE_SIZE, steps: [phone("poker", { card: '[data-intro="
   record("poker phone: nine seat choices and two private cards fit the panel", r.fits && r.seats === 9 && r.cards === 2, JSON.stringify(r));
   if (process.env.POKER_SHOTS) await b.screenshot(join(process.env.POKER_SHOTS, "poker-phone.png"));
 } }] });
+scene("hub", { label: "gorilla population restoration", query: "status=clankin", exclusive: true, steps: [hubGorillaPopulation] });
 scene("hub", { label: "weapons", query: "character=portlandhodl&weapon=2&mag=1&ammo=6&jetpack=1&gorillarage=1", steps: [hubCombatGate, ...[hubAk, hubMelee, hubJetpack].map(gameCombat)] });
 // Her greeting comes once a page, to a fresh landing nothing has moved, so the guide has its own page.
 scene("hub", { label: "guide", query: "character=portlandhodl&jetpack=1", steps: [hubGuide, hubAsk] });
@@ -23839,6 +23935,8 @@ const unitChecks = async () => {
   const retention = await hubRetentionProof();
   record("scene keeps: Factory builders survive a hub return, ordinary departures release them and only kept hubs hand off island meshes", retention.cases === 8 && retention.failures === 0, JSON.stringify(retention));
   await gpuGeometryDiagnosticChecks();
+  const sleepRoutes = gorillaSleepRouteProof();
+  record("gorilla re-sleep regression: waking remembers its former bed; the same bed keeps its return leg and a changed bed chooses the nearest waypoint on its own path", sleepRoutes.every(row => row.ok), JSON.stringify(sleepRoutes));
   const rage = await gorillaRageProof();
   record("gorilla rage: distinct rolling hits, only agitating Oogas targeted, held capture through planning and swing, bounded throws, exact expiry, zero health and account/lifecycle cancellation", Object.values(rage).every(Boolean), JSON.stringify(rage));
   const reviewCrowd=await reviewCrowdAndFallbackProof();
