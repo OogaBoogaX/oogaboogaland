@@ -260,3 +260,16 @@ test("NPC followers: every other page showing the island, so a lone host sends n
   assert.equal(npcFollowers(two, electHost(two)), 1);
   assert.equal(npcFollowers(two, 0), 0, "no host, no followers");
 });
+
+test("a wallet event is a device number, its fuse and, where it lies or flies, a bounded place; anything else is ignored", () => {
+  const parse = (m) => parseClientMessage(JSON.stringify({ t: "wallet", ...m }));
+  assert.deepEqual(parse({ k: "take", u: 7, l: 2, f: 21 }), { t: "wallet", k: "take", u: 7, l: 2, f: 21 });
+  assert.deepEqual(parse({ k: "down", u: 7, f: 12.34567, x: 1.23456, y: 0, z: -3 }), { t: "wallet", k: "down", u: 7, f: 12.346, x: 1.235, y: 0, z: -3 });
+  assert.deepEqual(parse({ k: "throw", u: 7, f: 3, x: 1, y: 2, z: 3, vx: 3.2, vy: 2.6, vz: -1 }), { t: "wallet", k: "throw", u: 7, f: 3, x: 1, y: 2, z: 3, vx: 3.2, vy: 2.6, vz: -1 });
+  assert.deepEqual(parse({ k: "up", u: 7, f: 9 }), { t: "wallet", k: "up", u: 7, f: 9 });
+  assert.deepEqual(parse({ k: "blast", u: [7, 8] }), { t: "wallet", k: "blast", u: [7, 8] });
+  for (const bad of [{ k: "take", u: 0, l: 1, f: 21 }, { k: "take", u: 7, l: 16, f: 21 }, { k: "take", u: 7, l: 1, f: 61 }, { k: "up", u: 7 },
+    { k: "down", u: 7, f: 1, x: BOUND_XZ + 1, y: 0, z: 0 }, { k: "throw", u: 7, f: 1, x: 0, y: 0, z: 0, vx: 21, vy: 0, vz: 0 },
+    { k: "blast", u: [] }, { k: "blast", u: Array(17).fill(1) }, { k: "steal", u: 7, f: 1 }])
+    assert.equal(parse(bad), null, JSON.stringify(bad));
+});

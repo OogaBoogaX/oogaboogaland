@@ -25,6 +25,8 @@ import "../../src/js/voice-blend.js";
 //                                (`parseStudioCommand` in studio-policy.js; see docs/dsb-studio-session.md)
 //                 { t: "ghost", k, g?, d?, h? }  HALLOWEEN: the ghost hunt's `start`, `ready`, `pause` or `leave`, or `hits` h, for its
 //                                host, from a page in the arcade's ghost arena
+//                 { t: "wallet", k, u, ... }   DSB Land: one of the driven Ooga's free hardware wallets taken, set
+//                                                down, picked up, thrown or blown (see WALLET_CAP below)
 //                 binary                         the NPC host's frame of every Ooga's pose, relayed as is; or,
 //                                                led by GHOST_MAGIC, the ghost arena host's hunt state
 // Room → client:  welcome { you, players, tickHz, now, loopEpoch, connectionToken }, join { p }, leave { id, reason },
@@ -51,6 +53,11 @@ import "../../src/js/voice-blend.js";
 //                 chat-ack { clientId }     the sender's line was accepted, including a recognized retry
 //                 chat-rejected { clientId?, reason }  refused; rate retries keep the same id
 //                 chat-history { messages }  after welcome: the lines the room still holds, oldest first
+//                 wallet { k, w }            another player's wallet event, to their zone: `w` is the wallet as
+//                                            [id, u, look, state, x, y, z, vx, vy, vz, at, end], state "c" carried,
+//                                            "d" set down or "f" thrown, at and end on the room's clock;
+//                                            wallet { k: "blast", id, u } their wallets that went off together.
+//                                            wallets { list } on entering a DSB zone: the live wallets there, each a w
 //                 ghost { k, g, d, from }    HALLOWEEN: a follower's start or hit, relayed to its hunt's host alone
 //                 ghost-host { id, followers }  who runs the ghost arena's hunt (0 for nobody) and how many pages in
 //                                            the arena follow it; welcome carries ghostHost and ghostFollowers; binary
@@ -134,6 +141,18 @@ export const SWING_HZ = 4;
 export const SWING_BURST = 4;
 export const GHOST_HZ = 20;
 export const GHOST_BURST = 24;
+// DSB Land's free hardware wallets (wallet-bombs.js): every page runs its own visitor's devices, and the room passes
+// their events to the pages in the same zone, keeping each player's live ones (WALLET_CAP at most) for whoever joins
+// or walks into that zone later. A device is `u` (1-65535, the page's own number for it), its look `l`, and with
+// every event the owner's seconds left on its fuse `f`, which the room turns into `end` on its own clock, so every
+// page counts it down together. `take` (carried), `down` at x, y, z, `up` (carried again), `throw` from x, y, z at
+// vx, vy, vz, and `blast` (the owner's devices that went off together, `u` a list). Nothing is hit or kept past a
+// device's end; drawing only.
+export const WALLET_CAP = 8;
+export const WALLET_HZ = 8;
+export const WALLET_BURST = 8;
+export const WALLET_FUSE_MAX = 60;
+const walletId = (u) => Number.isInteger(u) && u >= 1 && u <= 65535;
 // A follower's batch: up to GHOST_BATCH targets, each a ghost id (0 the boss) and its summed damage, as one report.
 export const GHOST_BATCH = 16;
 // The arcade's ghost arena runs its own hunt: its pages (zone `arcade.arena`, or `arcade-hunt` while a hunt keeps its
@@ -228,6 +247,21 @@ export const parseClientMessage = (text) => {
     if (msg.op === "pass") return typeof msg.door === "string" && DOOR_ROOM.test(msg.door) && (msg.dir === "in" || msg.dir === "out")
       ? { t: "door", op: "pass", door: msg.door, dir: msg.dir } : null;
     return null;
+  }
+  if (msg.t === "wallet") {
+    const { k, u } = msg;
+    if (k === "blast") return Array.isArray(u) && u.length >= 1 && u.length <= 16 && u.every(walletId) ? { t: "wallet", k, u: u.slice() } : null;
+    if (!walletId(u) || !finite(msg.f) || msg.f < 0 || msg.f > WALLET_FUSE_MAX) return null;
+    const f = round(msg.f);
+    if (k === "take") return Number.isInteger(msg.l) && msg.l >= 0 && msg.l < 16 ? { t: "wallet", k, u, l: msg.l, f } : null;
+    if (k === "up") return { t: "wallet", k, u, f };
+    if (k !== "down" && k !== "throw") return null;
+    const { x, y, z } = msg;
+    if (!finite(x) || !finite(y) || !finite(z) || Math.abs(x) > BOUND_XZ || Math.abs(z) > BOUND_XZ || y < BOUND_Y_MIN || y > BOUND_Y_MAX) return null;
+    if (k === "down") return { t: "wallet", k, u, f, x: round(x), y: round(y), z: round(z) };
+    const { vx, vy, vz } = msg;
+    if (![vx, vy, vz].every(v => finite(v) && Math.abs(v) <= 20)) return null;
+    return { t: "wallet", k, u, f, x: round(x), y: round(y), z: round(z), vx: round(vx), vy: round(vy), vz: round(vz) };
   }
   // HALLOWEEN: a follower's word to the ghost hunt's host.
   if (msg.t === "ghost") {
