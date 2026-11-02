@@ -19105,20 +19105,22 @@ const hangarWalking = { name: "hangar walking", why: "rule: W A S D walk the vis
   const ooga = await walkKeys(b, "portlandhodl", -1.5, 2, [0, 2.2], 0.5);
   record("hangar walking: W A S D walk the visitor's Ooga away, left, back and right on screen on the runway from two camera angles", allWalk(ooga), JSON.stringify(ooga));
 } };
-const hangarDoor = { name: "hangar door", why: "rule: the hangar's door takes the same Ooga out onto the Factory's landing and back in, on foot", run: async (b) => {
+const hangarDoor = { name: "hangar door", why: "rule: the hangar's door walks the same Ooga through, out onto the Factory's landing and back in, on to where an arrival stands each side", run: async (b) => {
   // From the hangar's landing, walked out through its door.
   await b.evaluate(`(() => { const B = window.__ooga, a = B.cavemen.get("portlandhodl"), D = B.hangar.layout.door; if (B.crew.player !== a) B.pilot.possess(a); B.pilot.navigate({ position: { x: D.x, y: D.y, z: D.z - 2.5 }, yaw: Math.PI, pitch: 0.2, dist: 5 }); B.advance(0.5, 1 / 60); })()`);
   await walkToward(b, 0, 1, 3);
   const out = await untilPage(b, 'B.scene === "factory" && !B.transitioning', 15000);
-  const landed = await b.evaluate(`(() => { const a = window.__ooga.pilot.player, L = BL.factoryModels.LAYOUT.hangarLanding, p = a && a.root.position;
+  // The walk carries it on from the door to where an arrival stands.
+  const landed = await b.evaluate(`(() => { window.__ooga.advance(3, 1 / 60); const a = window.__ooga.pilot.player, L = BL.factoryModels.LAYOUT.hangarLanding, p = a && a.root.position;
     return a && { name: a.traits.name, x: +p.x.toFixed(2), z: +p.z.toFixed(2), feet: +(p.y - a.baseY).toFixed(2),
-      on: Math.abs(p.x - L.x) < L.w / 2 && Math.abs(p.z - L.z) < L.d / 2 && Math.abs(p.y - a.baseY - L.y) < 0.05 }; })()`);
+      on: Math.abs(p.x - L.x) < L.w / 2 && Math.abs(p.z - L.z) < L.d / 2 && Math.abs(p.y - a.baseY - L.y) < 0.05, out: p.x - BL.factoryModels.LAYOUT.hangar.x }; })()`);
   // And back in from where it stands, the door behind it.
   await walkToward(b, -1, 0, 4);
   const back = await untilPage(b, 'B.scene === "hangar" && !B.transitioning', 15000);
-  const inside = await b.evaluate(`(() => { const a = window.__ooga.pilot.player; return a && a.traits.name; })()`);
-  record("hangar door: walking out through the door lands the same Ooga on the Factory's landing before it, and walking back in takes it into the hangar",
-    out && !!landed && landed.name === "portlandhodl" && landed.on && back && inside === "portlandhodl", JSON.stringify({ out, landed, back, inside }));
+  const inside = await b.evaluate(`(() => { window.__ooga.advance(3, 1 / 60); const a = window.__ooga.pilot.player, D = __ooga.hangar.layout.door, p = a && a.root.position;
+    return a && { name: a.traits.name, in: +(D.z - p.z).toFixed(2), across: +(p.x - D.x).toFixed(2) }; })()`);
+  record("hangar door: walking out through the door walks the same Ooga through onto the Factory's landing and on across it, and walking back in walks it through and on down the hangar's landing",
+    out && !!landed && landed.name === "portlandhodl" && landed.on && landed.out > 2 && back && !!inside && inside.name === "portlandhodl" && inside.in > 3, JSON.stringify({ out, landed, back, inside }));
 } };
 const hangarFire = { name: "hangar static fire", why: "playthrough: the static fire test runs from the press through the blast to its result, holding the presser's controls meanwhile and handing them back, and the booth is ready again after its cooldown", run: async (b) => {
   const r = await b.evaluate(`(() => {
@@ -19146,7 +19148,64 @@ const hangarFire = { name: "hangar static fire", why: "playthrough: the static f
 scene("factory", { query: "character=portlandhodl", steps: [factoryWalking, factoryGreeter, factoryLadders, factoryRailingJump, factoryWeapons, factoryForward, factoryForge, factoryShields, factoryKortik, trip("factory")] });
 scene("factory", { label: "cooker", query: "character=portlandhodl", steps: [donation("factory", { stat: "cooker.out", seconds: 14, where: "the cooker sends its bananas up through the ceiling tube" }), donationDetails, factoryCooker, trip("factory")] });
 scene("factory", { label: "entrance", url: hubPage(src, "character=portlandhodl"), steps: [factoryFloor, factoryEntrance] });
-scene("hangar", { query: "character=portlandhodl", steps: [hangarWalking, hangarDoor, hangarFire, trip("hangar")] });
+const hangarAnomalies = { name: "hangar anomalies", why: "rule: each of the Jet's engine anomalies plays through on its own without touching the visitor's controls, refuses the static fire's button meanwhile, spooks Kortik's Sis, and leaves the engines cold, the Jet exactly at rest and the hall's lights full", run: async (b) => {
+  const r = await b.evaluate(`(() => {
+    const B = window.__ooga, a = B.cavemen.get("portlandhodl"), A = B.hangar.anomaly, F = B.hangar.fire, S = B.hangar.sis, sc = B.hangar.scene, jet = sc.jet, J = jet.position, L = B.hangar.layout.jet;
+    const plain = BL.jetModels.jet(BL.jetModels.STAGE), key = (down) => window.dispatchEvent(new KeyboardEvent(down ? "keydown" : "keyup", { key: "w", code: "KeyW", bubbles: true }));
+    if (B.crew.player !== a) B.pilot.possess(a);
+    const out = {};
+    for (const kind of ["misfire", "phantom", "lightning", "blackout", "lowrider", "shuffle"]) {
+      // Off down the runway, away from the Jet; for the shuffle Kortik's Sis by the door too, so nothing holds it off.
+      B.pilot.navigate({ position: { x: -1.5, y: 0, z: 2 }, yaw: 0, pitch: 0.3, dist: 6 });
+      if (kind === "shuffle") { S.go("door"); B.advance(6, 1 / 30); } else B.advance(0.5, 1 / 30);
+      let played = false;
+      for (let n = 0; n < 8 && !played; n++) { A.play(kind); B.advance(1 / 60, 1 / 60); played = A.kind === kind; if (!played) B.advance(2, 1 / 30); }
+      const peak = { heat: 0, dim: 1, glow: 1, rx: 0, rz: 0, along: 0, spooked: false };
+      const run = (seconds) => { for (let i = 0; i < Math.round(seconds * 30); i++) { B.advance(1 / 30, 1 / 30); peak.heat = Math.max(peak.heat, A.heat); peak.dim = Math.min(peak.dim, A.dim); peak.glow = Math.max(peak.glow, jet.geometry === plain ? 0 : jet.glow); peak.rx = Math.max(peak.rx, Math.abs(jet.rotation.x)); peak.rz = Math.max(peak.rz, Math.abs(jet.rotation.z)); peak.along = Math.max(peak.along, Math.abs(J.z - L.z)); peak.spooked = peak.spooked || S.fit > 0 || !!S.scare; } };
+      run(1.5);
+      const p = a.root.position, x = p.x, z = p.z;
+      key(true); run(0.5); key(false);
+      const free = +Math.hypot(p.x - x, p.z - z).toFixed(2), pressed = F.press(), refused = F.t < 0;
+      run(BL.hangarAnomaly[{ misfire: "MISFIRE", phantom: "REVS", lightning: "ZAP", blackout: "BLACKOUT", lowrider: "LOWRIDER", shuffle: "SHUFFLE" }[kind]].end);
+      out[kind] = { played, free, pressed, refused, spooked: peak.spooked, heat: +peak.heat.toFixed(2), dim: +peak.dim.toFixed(2), glow: +peak.glow.toFixed(2), rx: +peak.rx.toFixed(4), rz: +peak.rz.toFixed(4), along: +peak.along.toFixed(3),
+        over: A.kind === null && A.heat === 0 && A.dim === 1 && sc.anomaly.ambient === 1, rest: J.x === L.x && J.y === 0 && J.z === L.z && jet.rotation.x === 0 && jet.rotation.z === 0 && jet.geometry === plain && jet.glow === 1, booth: F.phase };
+    }
+    return out;
+  })()`);
+  const done = (k) => r[k] && r[k].played && r[k].free > 1 && r[k].pressed && r[k].refused && r[k].spooked && r[k].over && r[k].rest && r[k].booth === "ready";
+  const seen = { misfire: r.misfire.heat > 0.5 && r.misfire.dim < 0.7, phantom: r.phantom.heat > 0.3 && r.phantom.dim === 1, lightning: r.lightning.dim < 0.6 && r.lightning.glow > 0.9,
+    blackout: r.blackout.dim < 0.1, lowrider: r.lowrider.rx > 0.03, shuffle: r.shuffle.along > 0.15 && r.shuffle.rz > 0.009 && r.shuffle.along <= 0.2 && r.shuffle.rz <= 0.0105 };
+  record("hangar anomalies: the failed start, phantom revs, lightning, blackout, lowrider and shuffle each play through with the visitor's W still walking, the static fire's button only buzzing and Kortik's Sis reacting, each doing its own thing, and each ends with the engines cold, the Jet exactly at rest and the lights full",
+    Object.keys(seen).every((k) => done(k) && seen[k]), JSON.stringify(r));
+} };
+const hangarShuffleSafety = { name: "hangar shuffle safety", why: "rule: the Jet only moves with nobody in its way: the shuffle stops that frame at its exact rest pose when an Ooga steps up beside it, a frame stalls or a late room update puts another player there, and neither it nor the lowrider starts with someone in the way or on the Jet", run: async (b) => {
+  const r = await b.evaluate(`(() => {
+    const B = window.__ooga, a = B.cavemen.get("portlandhodl"), A = B.hangar.anomaly, S = B.hangar.sis, jet = B.hangar.scene.jet, J = jet.position, L = B.hangar.layout.jet, p = a.root.position;
+    const atRest = () => J.x === L.x && J.y === 0 && J.z === L.z && jet.rotation.x === 0 && jet.rotation.z === 0;
+    if (B.crew.player !== a) B.pilot.possess(a);
+    const away = () => { B.pilot.navigate({ position: { x: -1.5, y: 0, z: 2 }, yaw: 0, pitch: 0.3, dist: 6 }); S.go("door"); B.advance(3, 1 / 30); };
+    // A shuffle under way, tried until nothing holds it off, a second in.
+    const start = () => { for (let n = 0; n < 8; n++) { A.play("shuffle"); B.advance(1 / 60, 1 / 60); if (A.kind === "shuffle") break; B.advance(2, 1 / 30); } B.advance(1, 1 / 60); return A.kind === "shuffle" && !atRest(); };
+    const out = {};
+    // Beside the nose gear, at a walker's height, where the Jet may reach.
+    const gear = { x: L.x + 1.6, z: L.z - 9.3 };
+    away(); out.moving = start(); p.x = gear.x; p.z = gear.z; B.advance(1 / 60, 1 / 60); out.approach = { kind: A.kind, rest: atRest() };
+    away(); const moving = start(); B.advance(0.25, 0.25); out.hitch = { moving, kind: A.kind, rest: atRest() };
+    away(); const live = start(); BL.net.remotes.set("probe", { id: "probe", body: "someone", zone: "factory.hangar", x: gear.x, y: 0, z: gear.z }); B.advance(1 / 60, 1 / 60);
+    out.late = { moving: live, kind: A.kind, rest: atRest() };
+    BL.net.remotes.delete("probe");
+    // Nor do they start: the shuffle with the Ooga beside the gear, the lowrider with it standing on the Jet.
+    away(); p.x = gear.x; p.z = gear.z; B.advance(1 / 60, 1 / 60); A.play("shuffle"); B.advance(1 / 60, 1 / 60); out.held = { kind: A.kind, rest: atRest() };
+    const C = BL.jetModels.columns(BL.jetModels.STAGE), top = C.top[(0 - C.i0) * C.nk + (0 - C.k0)];
+    p.x = L.x; p.z = L.z; p.y = top + a.baseY; B.advance(1 / 60, 1 / 60); A.play("lowrider"); B.advance(1 / 60, 1 / 60); out.rider = { kind: A.kind, rest: atRest(), top: +top.toFixed(2) };
+    away();
+    return out;
+  })()`);
+  record("hangar shuffle safety: an Ooga stepping up beside the nose gear, a stalled frame and a late room update each stop the moving Jet that frame at its exact rest pose, and neither the shuffle nor the lowrider starts with an Ooga in the way or on the Jet",
+    r.moving && r.approach.kind === null && r.approach.rest && r.hitch.moving && r.hitch.kind === null && r.hitch.rest && r.late.moving && r.late.kind === null && r.late.rest
+      && r.held.kind === null && r.held.rest && r.rider.kind === null && r.rider.rest, JSON.stringify(r));
+} };
+scene("hangar", { query: "character=portlandhodl", steps: [hangarWalking, hangarDoor, hangarFire, hangarAnomalies, hangarShuffleSafety, trip("hangar")] });
 scene("factory", { label: "canvas2d", query: "canvas2d=1&character=portlandhodl", steps: [factoryCanvas, factoryGreeter] });
 scene("bifrost", { url: hubPage(src, "solo=1&character=portlandhodl"), steps: [bifrostEntrance, bifrostWalking, bifrostExit, trip("bifrost")] });
 scene("bifrost", { label: "dsb round trip", query: "character=portlandhodl", steps: [bifrostDsb] });

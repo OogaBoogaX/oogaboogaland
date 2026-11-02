@@ -1076,27 +1076,34 @@
       lamps: [lamp("#3fe07a"), lamp("#ffc93a"), lamp("#ff3a2e")], leds: [led("#ffb02e"), led("#ff7a2a")]
     };
   });
-  // The cables from the console's back across the floor to boxes under the engine pods, in the hangar's frame.
-  // The booth's cables: from its back along the floor to under the Jet's tail end, and each up from there in a droop to
-  // its plug on the Jet's underside (`LAYOUT.fireTest.cables`), at the bottom of the Jet's cells there
-  // (`jetModels.columns`), a steel connector with a yellow collar.
+  // The booth's cables: from its back along the floor to a port a little over a metre from under the Jet's tail end, and
+  // from the port up in a droop to its plug on the Jet's underside (`LAYOUT.fireTest.cables`), at the bottom of the
+  // Jet's cells there (`jetModels.columns`), a steel connector with a yellow collar. In two: `floor`, the runs and their
+  // ports in the hangar's frame; and `droop`, each droop and its plug in the Jet's frame, to ride with the Jet as the
+  // hangar's anomalies move it, its foot running down through its port's slot on under the floor (`PORT`), so the cable
+  // feeds through the slot as the Jet moves and never parts from it.
+  const PORT = { w: 0.5, d: 0.72, h: 0.05, slot: [0.22, 0.6], below: 0.5, over: 1.15 };
   const fireCables = cached(() => {
-    const T = LAYOUT.fireTest, c = Math.cos(T.turn), s = Math.sin(T.turn), parts = [], J = JM.columns(), j = LAYOUT.jet;
+    const T = LAYOUT.fireTest, c = Math.cos(T.turn), s = Math.sin(T.turn), floor = [], droop = [], J = JM.columns(), j = LAYOUT.jet;
     const back = (x, z) => [T.x + x * c + z * s, T.z - x * s + z * c];
     const under = (x, z) => J.bottom[(Math.floor((x - j.x) / J.U) - J.i0) * J.nk + Math.floor((z - j.z) / J.U) - J.k0];
     T.cables.forEach(([px, pz], i) => {
       const color = i === 1 ? "#d9862a" : FIRE_BLACK, py = under(px, pz) - 0.12, [ax, az] = back(-0.6 + i * 0.6, -0.65);
-      // Where it comes down onto the floor: a little over a metre from under its plug, toward the booth.
+      // Where its port is: a little over a metre from under its plug, toward the booth.
       const l = Math.hypot(ax - px, az - pz), fx = px + (ax - px) / l * 1.3, fz = pz + (az - pz) / l * 1.3;
       const mx = (ax + fx) / 2 + (i - 1) * 0.8, mz = (az + fz) / 2 + 0.6;
-      parts.push(floorCable(ax, az, mx, mz, fx, fz, color));
-      parts.push(models.tube({
-        path: (t) => { const u = 1 - t; return { x: u * u * px + 2 * u * t * (px + (fx - px) * 0.15) + t * t * fx, y: u * u * py + 2 * u * t * 0.15 + t * t * 0.05, z: u * u * pz + 2 * u * t * (pz + (fz - pz) * 0.15) + t * t * fz }; },
+      floor.push(floorCable(ax, az, mx, mz, fx, fz, color));
+      // The port: a low steel plate, its dark slot along the Jet.
+      floor.push(box({ w: PORT.w, h: PORT.h, d: PORT.d, color: FIRE_STEEL, offset: { x: fx, y: PORT.h / 2, z: fz } }),
+        box({ w: PORT.slot[0], h: 0.01, d: PORT.slot[1], color: FIRE_SLOT, offset: { x: fx, y: PORT.h + 0.005, z: fz } }));
+      // The droop: from the plug over and straight down into the port, on below the floor.
+      droop.push(models.tube({
+        path: (t) => { const u = 1 - t; return { x: u * u * px + 2 * u * t * fx + t * t * fx, y: u * u * py + 2 * u * t * PORT.over - t * t * PORT.below, z: u * u * pz + 2 * u * t * fz + t * t * fz }; },
         radius: () => 0.05, rings: 18, segments: 6, colorFn: () => color
       }));
-      parts.push(bevelBox({ w: 0.2, h: 0.16, d: 0.2, color: FIRE_STEEL, bevel: 0.03, offset: { x: px, y: py + 0.06, z: pz } }), box({ w: 0.22, h: 0.04, d: 0.22, color: PAINT, offset: { x: px, y: py - 0.02, z: pz } }));
+      droop.push(bevelBox({ w: 0.2, h: 0.16, d: 0.2, color: FIRE_STEEL, bevel: 0.03, offset: { x: px, y: py + 0.06, z: pz } }), box({ w: 0.22, h: 0.04, d: 0.22, color: PAINT, offset: { x: px, y: py - 0.02, z: pz } }));
     });
-    return merge(...parts);
+    return { floor: merge(...floor), droop: moved(merge(...droop), -j.x, 0, -j.z) };
   });
 
   // The Jet's exhaust for the test, built at a nozzle's exit and blowing along +z: the plume, a white-hot core in a blue

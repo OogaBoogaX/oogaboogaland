@@ -32,6 +32,18 @@
 // they roar, cries "THAT ENGINE ISN'T—" as they falter, and the blast knocks her flat on her back, sooted and smoking.
 // She comes to with the presser, gets up blaming everyone else, and goes to hammer the engine.
 //
+// When the Jet acts up on its own (`spook`, from `hangar-anomaly.js`) she drops whatever she is doing and reacts, a
+// different way each time (`SCARES`): she jumps out of her skin and screams at the engines; dives behind a stack of
+// crates and peeks over it until it goes quiet; charges the engines with her hammer up, and lowers it slowly once they
+// die; runs to the booth and slaps every switch, protesting she touched nothing; yells through the door at her brother,
+// who yells back that it wasn't him; creeps up with her goggles down and prods the Jet at arm's length; or freezes,
+// turns her head very slowly and walks off the other way. Then she goes back to her own routine. Smashing the Jet or
+// storming off she only jumps or yells at her brother, and the static fire still has her first. When lightning runs
+// over the Jet and cracks (`zap`), she is zapped if she stands near it: stiff and shaking, sparks off her, then dazed,
+// sooted and smoking. In the dark (`dark`) her eyes glow. When the Jet bounces to a beat (`groove`), she finds herself
+// bobbing along to it, catches herself, and goes red: "I DID NOT JUST DO THAT." When it shifts in its bay, she jumps
+// and yells at it where she stands: "HEY! STAY WHERE I PUT YOU!"
+//
 // She walks a grid of her part of the hall built once a visit from the hangar's own checks (`HM.clearAt`,
 // `HM.supportAt`, `HM.walkable`), each cell with a place on the floor and one up the Jet's stair or along its gangway
 // where those stand over it, kept off the runway, out of the static fire booth's box and clear of the crew's posts; a
@@ -56,7 +68,7 @@
   const LOW = 0.65, RISE = 0.5, UP = HM.LAYOUT.gangway.y - 0.5;
   // How long each thing takes, s, [least, most]; how likely each is when she picks the next, by its kind; how long the
   // visitor may stand in her way before she goes elsewhere.
-  const TIMES = { fix: [6, 10], inspect: [4.5, 7], admire: [5, 7], glare: [3, 5], pace: [7, 10], yell: [3.2, 4], smash: [60, 60] }, BLOCKED = 1.4;
+  const TIMES = { fix: [6, 10], inspect: [4.5, 7], admire: [5, 7], glare: [3, 5], pace: [7, 10], yell: [3.2, 4], smash: [60, 60], scare: [20, 20] }, BLOCKED = 1.4;
   const WEIGHT = { fix: 0.4, inspect: 0.22, admire: 0.14, pace: 0.12, glare: 0.12 };
   // Running at the visitor: from how far (across the runway she stops at its edge and yells over it), how often at
   // most, how likely when she picks, and how near she stops.
@@ -93,12 +105,16 @@
     fixed: ["There. Fixed it."],
     panic: ["WHO PRESSED THAT?!", "THAT ENGINE ISN'T—"],
     blame: ["THAT WASN'T MY FAULT!", "WHO TOUCHED MY ENGINES?!", "I TOLD YOU THAT ENGINE WASN'T READY!", "NOBODY SAW THAT. NOBODY!"],
+    spook: ["WHO THE #@$% IS STARTING MY ENGINES?!", "WHAT THE #@$% WAS THAT?!"],
+    hide: ["...is it gone?"], charge: ["OH, YOU WANT SOME OF THIS?!"], charged: ["Yeah. That's what I thought."], booth: ["I DIDN'T TOUCH ANYTHING!"],
+    brother: ["KORTIK! WAS THAT YOU?!"], prod: ["THIS THING IS POSSESSED!"], nope: ["...nope."], zapped: ["...ow."], groove: ["I DID NOT JUST DO THAT."], stay: ["HEY! STAY WHERE I PUT YOU!"],
     tess: ["TESS! BUZZ OFF!", "NOT NOW, TESS!", "GET OUT OF MY FACE, YOU FLYING TOASTER!", "I CAN'T SEE THE #@$%ING JET!", "I'M FIXING IT! LEAVE ME BE!"]
   };
   // How she says each (a style of `hangarAudio.voice`); how often a line about the Jet or Lightning comes out a rare
   // one instead, and a yell a scream.
   const STYLE = { jet: "yell", lightning: "yell", hammer: "yell", rage: "scream", charge: "scream", caught: "yell", mutter: "mutter", hope: "soft", rare: "yell", panic: "scream", blame: "yell",
-    poke: "yell", rampage: "scream", smash: "yell", shove: "yell", chase: "scream", meltdown: "scream", sulk: "yell", fixed: "mutter", hush: "scream", quarrel: "scream", tess: "yell" };
+    poke: "yell", rampage: "scream", smash: "yell", shove: "yell", chase: "scream", meltdown: "scream", sulk: "yell", fixed: "mutter", hush: "scream", quarrel: "scream", tess: "yell", spook: "scream",
+    hide: "soft", charge: "scream", charged: "mutter", booth: "yell", brother: "scream", prod: "yell", nope: "soft", zapped: "mutter", groove: "yell", stay: "scream" };
   const RARE = 0.08, SCREAM = 0.2;
   // The static fire: where she runs to, the nearer of them (beside the booth and by the far wall's crates, both where
   // the test's show view keeps her in frame lying down); how far off she may stay put and cower; how near the blast
@@ -126,6 +142,23 @@
   // whisper, the warning light, the scream, the hunt for the hammer, the hammer picked up; and how many blows put the
   // light out. The light's blink, s each way.
   const QUARREL = { first: [35, 60], every: [80, 150], answer: 0.4, shout: 2.6 };
+  // The Jet acting up on its own: her reactions, never the same twice running, and the ones she has while smashing the
+  // Jet or storming off. How long her jump takes and how high it goes, m, and the least she stays turned on the engines
+  // after it, s; how far behind a stack of crates she hides, m, how low she crouches there, m, how often she peeks over
+  // it and for how long, s; the longest she waits for it to go quiet, s; how long she takes to lower the hammer once it
+  // has; how long she slaps the booth's switches; how fast she creeps up to prod the Jet, m/s, over its last `near`
+  // metres, and how long a prod takes; and how long she freezes, and turns her head, before she backs off. Her
+  // brother's answer through the door.
+  const SCARES = ["jump", "hide", "charge", "booth", "brother", "prod", "nope"], IN_PLACE = ["jump", "brother"];
+  const SPOOK = { jump: 0.45, hop: 0.38, least: 2.4, behind: 1.05, crouch: 0.55, peek: [1.2, 2], peekLen: 0.55, wait: 10, lower: 1.4, slap: 2.2, creep: 0.9, near: 3, prod: 0.9, freeze: 0.5, turn: 1.4 };
+  const KORTIK_ANSWER = "WASN'T ME!";
+  // Lightning through the Jet: how near its length she must stand to be zapped, m; how long she shakes, and how long
+  // the whole of it lasts, s.
+  const ZAP = { reach: 5, shock: 1.1, len: 3.4 };
+  // How much brighter her eyes glow in the dark, at its darkest.
+  const EYES = 3;
+  // The Jet bouncing to a beat: how long she bobs along before she catches herself, s, and how deep each bob is, m.
+  const GROOVE = { bob: 3, deep: 0.09 };
   const HUSH = { chance: 0.15, every: 150, down: 0.7, whisper: 1.3, light: 4.4, scream: 5, hunt: 6.9, grab: 7.5, blows: 3, blink: 0.18 };
   // The tally at her feet while she smashes: its font, its pips' size and gap, px.
   const TALLY_FONT = "bold 10px ui-monospace, monospace", PIP = 9, PIP_GAP = 4;
@@ -136,11 +169,14 @@
   ));
 
   // `fx` for her lines and sparks, `audio` for her voice, her boots and her hammer's clang, `fire` the static fire test
-  // she freaks out at, `jet` the Jet's node, which her rampage rocks, and `toast` for what the visitor should know.
-  const create = ({ fx, audio, fire, jet, toast, blocks = null }) => {
+  // she freaks out at, `jet` the Jet's node, which her rampage rocks, `toast` for what the visitor should know, `blocks`
+  // the circles she walks round, and `avoid(x, z, feet, height, radius)`, where she must not step into now.
+  const create = ({ fx, audio, fire, jet, toast, blocks = null, avoid = null }) => {
     const S = HM.LAYOUT.sis, k = SM.rig(), P = k.parts, H = k.heads, rand = BL.math.mulberry32(0x5153), B = HM.blast(), SPARK = B.spark, IRON = B.iron;
     // The Jet's paint flying off it: its white and its livery's blue.
     const CHIPS = [BL.models.particleGeometry("#eeeae2", 0.1, 0), BL.models.particleGeometry("#2a4fb8", 0.1, 0)];
+    // The sparks off her when she is zapped.
+    const ZAP_SPARK = BL.models.particleGeometry("#a8ecff", 0.05, 1);
     // What she leaves about the hall in her quiet moment, for the scene to stand in it (`props`): the hammer laid on the
     // floor and the warning light on the Jet, each hidden until then.
     const props = createNode({}), floorHammer = createNode({ geometry: P.hammer.geometry }), beacon = createNode({ geometry: BEACON() });
@@ -317,7 +353,7 @@
     const A = BL.hangarFire.AT;
     let panicking = false, warned = false, down = 0, slideX = 0, slideZ = 0, soot = 0, smokeAt = 0;
     const startPanic = () => {
-      panicking = true; warned = false; down = 0; t = 0;
+      panicking = true; warned = false; down = 0; t = 0; scare = null; kortikIn = 0;
       if (doing === "hush") endHush();
       rampage = storming = false; anger = 0; fitT = 0;
       say(LINES.panic[0], STYLE.panic, 2.4);
@@ -351,6 +387,8 @@
       }
       return null;
     };
+    // Whether a step to (nx, nz) would take her in where she must keep out of now (`avoid`), from outside it.
+    const keptAway = (nx, nz) => !!avoid && avoid(nx, nz, feet, HEIGHT, RADIUS) && !avoid(p.x, p.z, feet, HEIGHT, RADIUS);
     // The visitor's spot moved to just short of their Ooga, if she can get there, or null.
     const visit = (driven) => {
       const q = driven.root.position, d = Math.hypot(q.x - p.x, q.z - p.z);
@@ -406,7 +444,8 @@
     };
     // ---- poking her ----
     // Her anger (0 to POKE.rage) and how long before it cools a level; where the last poke came from and when; the fit
-    // she is in (1 to 4 by her anger, 5 shoved off while she smashes, 6 her meltdown's tantrum) and its time left;
+    // she is in (1 to 4 by her anger, 5 shoved off while she smashes, 6 her meltdown's tantrum, 7 shouting back at
+    // Kortik, 8 spooked by the Jet, 9 backing off from it, 10 zapped by it, 11 bobbing to its beat) and its time left;
     // whether she is smashing the Jet, the quick pokes' tally that stops her, the blows left at her spot and the pokes
     // there, and since when; when she may go off again; whether she is storming off to sulk; a chase's time left and its
     // line said; whether the visitor's Ooga stands near enough to poke her; and how hard the Jet is rocking.
@@ -514,7 +553,7 @@
     const RIVALRY = BL.kortik.RIVALRY, D = HM.LAYOUT.door, DOOR_AT = { x: D.x, y: D.y + 0.5, z: D.z - 0.6 }, HEARD = RIVALRY.map(([his]) => "KORTIK: " + his);
     let quarrelIn = pick(QUARREL.first[0], QUARREL.first[1]), quarrel = 0, answerIn = 0;
     // Whether she is free to hear him, or to answer: none of her fits, tempers, trips at the visitor or the static fire.
-    const free = () => !panicking && !rampage && !storming && fitT <= 0 && doing !== "chase" && doing !== "hush" && spot !== visitorSpot && talk <= 0;
+    const free = () => !panicking && !rampage && !storming && fitT <= 0 && doing !== "chase" && doing !== "hush" && spot !== visitorSpot && !scare && talk <= 0;
     const hearKortik = () => {
       quarrel = Math.floor(rand() * RIVALRY.length);
       fx.sayAt(DOOR_AT.x, D.y + 3.6, DOOR_AT.z, HEARD[quarrel], 3.2);
@@ -526,6 +565,120 @@
       fit(7);
       say(RIVALRY[quarrel][1], STYLE.quarrel, QUARREL.shout);
       fitLen = fitT = Math.max(QUARREL.shout, talk + 0.4);
+    };
+    // The Jet acting up on its own at (x, z), the engines: one of her reactions (`SCARES`, or the one `kind` asks for),
+    // never the same twice running, only `IN_PLACE` ones while she smashes or storms off. Jumping, yelling at her brother
+    // and backing off start where she stands, as fits; the rest walk her to a place first (`scareSpot`, of the kind
+    // "scare") and play out there; hiding and charging wait there for the engines to go quiet (`settle`). It ends her
+    // quiet moment. Not while the static fire has her.
+    let spookAt = 0, spookSaid = false, spookPool = "spook", scare = null, lastScare = null, settled = false, settledAt = 0, peekAt = 0, peekT = 0, kortikIn = 0, engX = 0, engZ = 0, slowLook = null;
+    const scareSpot = { name: "scare", x: 0, z: 0, kind: "scare", lx: 0, ly: 3, lz: 0, cell: -1, dur: 0, paceYaw: 0 };
+    // The stacked crates on her ground, to hide behind; where she stands beside the booth's console, and what she slaps.
+    const STACKS = HM.LAYOUT.crates.filter(([x, z, , n]) => n === 2 && x > X0 && x < X1 && z > Z0 && z < Z1);
+    const BOOTH = [F.x - 1, F.z + 3.2, F.x - 1.2, F.z + 1];
+    // How far round a stack's far side, radians either way of straight on from the engines, and how far out, m, she may
+    // hide behind it.
+    const HIDE_TURNS = [0, 0.45, -0.45, 0.9, -0.9], HIDE_REACH = [SPOOK.behind, SPOOK.behind + 0.5];
+    const HEARD_ANSWER = "KORTIK: " + KORTIK_ANSWER;
+    // Where a walking reaction takes her, as a place on her grid, with what she faces there in `scareSpot`; -1 if she
+    // can't: behind the nearest stack of crates from the engines, hiding; an engine's spot, charging; beside the booth's
+    // console; or the nearest of her spots on the floor where she works on the Jet, prodding it.
+    const scareGoal = (kind) => {
+      scareSpot.lx = engX; scareSpot.ly = 3; scareSpot.lz = engZ;
+      if (kind === "hide") {
+        // Round each stack from the engines' side to its far side, the nearest stack first that has open floor there.
+        let goal = -1, bestD = Infinity;
+        for (const c of STACKS) {
+          const d = Math.hypot(c[0] - p.x, c[1] - p.z), away = Math.atan2(c[0] - engX, c[1] - engZ);
+          if (d >= bestD) continue;
+          for (const turn of HIDE_TURNS) for (const r of HIDE_REACH) {
+            const gx = c[0] + Math.sin(away + turn) * r, gz = c[1] + Math.cos(away + turn) * r, cell = nearestOpen(gx, gz, 0);
+            if (cell >= 0 && Math.hypot(cx(cell) - gx, cz(cell) - gz) < CELL) { goal = cell; bestD = d; break; }
+          }
+        }
+        return goal;
+      }
+      if (kind === "booth") {
+        scareSpot.lx = BOOTH[2]; scareSpot.ly = 1.2; scareSpot.lz = BOOTH[3];
+        return nearestOpen(BOOTH[0], BOOTH[1], 0);
+      }
+      let best = null, bestD = Infinity;
+      for (const s of spots) {
+        if (kind === "charge" ? !s.name.includes("engine") : s.kind !== "fix" && s.kind !== "inspect" || feetOf[s.cell] > LOW) continue;
+        const d = Math.hypot(s.x - p.x, s.z - p.z);
+        if (d < bestD) { bestD = d; best = s; }
+      }
+      if (!best) return -1;
+      if (kind === "prod") { scareSpot.lx = best.lx; scareSpot.ly = best.ly; scareSpot.lz = best.lz; }
+      return best.cell;
+    };
+    const spook = (x, z, kind = null) => {
+      if (panicking) return false;
+      if (doing === "hush") { endHush(); doing = "glare"; t = 0; spot.dur = pick(TIMES.glare[0], TIMES.glare[1]); }
+      engX = x; engZ = z; settled = false; spookSaid = false; spookAt = clock; peekAt = 0; peekT = 0;
+      const choices = rampage || storming ? IN_PLACE : SCARES;
+      if (!kind) do kind = one(choices); while (kind === lastScare && choices.length > 1);
+      lastScare = scare = kind;
+      pokeX = x; pokeZ = z;
+      if (kind === "brother") {
+        // Turned to the door, her hands cupped at her mouth; his answer comes back through it once she is done.
+        pokeX = DOOR_AT.x; pokeZ = DOOR_AT.z;
+        fit(7);
+        say(LINES.brother[0], STYLE.brother, 2.2);
+        kortikIn = talk + 0.5;
+        fitLen = fitT = kortikIn + 2.4;
+        return true;
+      }
+      // A jump where she stands, and her line at the Jet once she lands: the ordinary one, or, asked (`stay`), at it for
+      // shifting in its bay.
+      if (kind === "jump" || kind === "stay" || kind === "nope") {
+        spookPool = kind === "stay" ? "stay" : "spook";
+        fit(kind === "nope" ? 9 : 8);
+        fitLen = fitT = kind === "nope" ? SPOOK.freeze + SPOOK.turn + 1.4 : SPOOK.jump + SPOOK.least;
+        return true;
+      }
+      const goal = scareGoal(kind);
+      if (goal < 0) return spook(x, z, "jump");
+      scareSpot.cell = goal; scareSpot.x = cx(goal); scareSpot.z = cz(goal);
+      fitT = 0;
+      goTo(scareSpot);
+      if (doing === "walk") speed = kind === "prod" ? SPOOK.creep : RUN;
+      if (kind === "charge") sayFrom("charge", 1.8);
+      return true;
+    };
+    // The engines gone quiet.
+    const settle = () => { settled = true; settledAt = clock; };
+    // The hall's lights out by `k` (0 lit, 1 dark): her eyes glowing in it.
+    const dark = (k) => { P.head.glow = 1 + EYES * k; };
+    // The Jet bouncing to a beat `beat` seconds long: bobbing along where she stands, then caught. Whether she did, not
+    // while she smashes, storms off or the static fire has her.
+    let grooveBeat = 0.6;
+    const groove = (beat) => {
+      if (panicking || rampage || storming) return false;
+      if (doing === "hush") { endHush(); doing = "glare"; t = 0; spot.dur = pick(TIMES.glare[0], TIMES.glare[1]); }
+      grooveBeat = beat; spookAt = clock; spookSaid = false; scare = null;
+      fit(11);
+      fitLen = fitT = GROOVE.bob + 2.4;
+      return true;
+    };
+    // Lightning cracking over the Jet, along x = `x` from `z0` to `z1`: zapped if she stands within ZAP.reach of it,
+    // whatever reaction she was in; whether she was. Not while the static fire has her.
+    let zapAt = 0, zapSpark = 0;
+    const zap = (x, z0, z1) => {
+      const dz = p.z < z0 ? z0 - p.z : p.z > z1 ? p.z - z1 : 0;
+      if (panicking || Math.hypot(p.x - x, dz) > ZAP.reach) return false;
+      scare = null; zapAt = clock; spookSaid = false; soot = PANIC.soot;
+      fit(10);
+      fitLen = fitT = ZAP.len;
+      return true;
+    };
+    // A reaction played out: back to her routine.
+    const unscare = () => { scare = null; goTo(nextSpot(seen)); };
+    // Backing off: her spot farthest from the engines.
+    const awaySpot = () => {
+      let best = spots[0], bestD = -1;
+      for (const s of spots) { const d = Math.hypot(s.x - engX, s.z - engZ); if (s !== last && d > bestD) { bestD = d; best = s; } }
+      return best;
     };
     // The quiet moment: when the next may come, whether debugging has asked for one, the blows at the light so far,
     // and the beats said.
@@ -579,6 +732,7 @@
       talk = Math.max(0, talk - dt);
       stand();
       let face = H.open, wantYaw = yaw, stepping = false, glareAt = null, swingNow = -1, swingLen = SWING, hop = 0;
+      slowLook = null;
       // Her anger cooling while she is left alone; while she smashes, the tally of quick pokes draining between them,
       // and her calling it fixed once she has kept at it long enough; and whether the visitor's Ooga can poke her.
       if (anger > 0 && !rampage && (coolAt -= dt) <= 0) { anger--; coolAt = POKE.calm; }
@@ -594,6 +748,8 @@
       near = !!driven && !panicking && Math.hypot(driven.root.position.x - p.x, driven.root.position.z - p.z) < POKE.reach && Math.abs(feetAt(driven) - feet) < POKE.rise;
       // Kortik shouting through the door now and then while she is free to hear it, and her answer once his line is out.
       if (answerIn > 0) { if ((answerIn -= dt) <= 0 && !panicking && !rampage) answerKortik(); }
+      // Her brother yelling back through the door that it wasn't him.
+      if (kortikIn > 0 && (kortikIn -= dt) <= 0) { fx.sayAt(DOOR_AT.x, D.y + 3.6, DOOR_AT.z, HEARD_ANSWER, 2.4); audio.voice(KORTIK_ANSWER, "kortik", DOOR_AT); }
       else if ((quarrelIn -= dt) <= 0) { quarrelIn = pick(QUARREL.every[0], QUARREL.every[1]); if (free()) hearKortik(); }
       const ft = fire ? fire.t : -1;
       if (!panicking && ft >= 0 && ft < A.boom) startPanic();
@@ -682,10 +838,75 @@
           want.lean = 0.12; want.headX = -0.15;
           want.armLx = -2.1; want.armLz = 0.55; want.foreLx = -1.5; want.foreLz = -0.7;
           want.armRx = -2.1; want.armRz = -0.55; want.foreRx = -1.5; want.foreRz = 0.7;
+        } else if (fitKind === 8) {
+          // Spooked by the Jet: a jump with her arms flung up, then turned on the engines, red, screaming at them with the
+          // hammer up and her fist shaking.
+          const a = clock - spookAt;
+          if (a < SPOOK.jump) {
+            hop = Math.sin(a / SPOOK.jump * Math.PI) * SPOOK.hop;
+            face = H.open;
+            want.armLx = -2.9; want.armLz = 0.9; want.foreLx = -0.3; want.foreLz = 0;
+            want.armRx = -2.7; want.armRz = -0.6; want.foreRx = -0.4; want.lean = -0.15;
+          } else {
+            if (!spookSaid) { spookSaid = true; sayFrom(spookPool, SPOOK.least); fitT = Math.max(fitT, talk + 0.4); }
+            want.armLx = -2.5 + Math.sin(clock * 16) * 0.3; want.armLz = 0.35; want.foreLx = -0.8; want.foreLz = 0;
+            want.armRx = -2.2; want.foreRx = -1.2; want.lean = 0.08;
+          }
+        } else if (fitKind === 9) {
+          // Backing off: frozen mid-step, her head turning very slowly to the engines, a whisper; then off the other way.
+          const a = clock - spookAt;
+          let d = Math.atan2(engX - p.x, engZ - p.z) - yaw;
+          d -= TAU * Math.round(d / TAU);
+          wantYaw = yaw;
+          face = H.open;
+          want.armLx = 0.25; want.armLz = 0.3; want.foreLx = -0.15; want.foreLz = 0;
+          slowLook = a < SPOOK.freeze ? 0 : Math.max(-1.3, Math.min(1.3, d));
+          if (a > SPOOK.freeze + SPOOK.turn && !spookSaid) { spookSaid = true; sayFrom("nope", 1.6); }
+        } else if (fitKind === 11) {
+          // Bobbing to the beat, her head nodding and her free arm swinging, wherever she was looking; then frozen, red,
+          // caught at it.
+          const a = clock - spookAt, beat = Math.sin(a / grooveBeat * TAU);
+          wantYaw = yaw;
+          if (a < GROOVE.bob) {
+            face = H.open;
+            want.crouch = GROOVE.deep * (0.5 + 0.5 * beat); want.headX = 0.15 + 0.15 * beat; want.sway = 0.05 * Math.sin(a / grooveBeat * Math.PI);
+            want.armLx = -0.6 - 0.4 * beat; want.armLz = 0.4; want.foreLx = -1; want.foreLz = 0;
+          } else {
+            face = H.redOpen;
+            want.armLx = 0.1; want.armLz = 0.2; want.foreLx = -0.1; want.foreLz = 0; want.armRx = -0.3; want.lean = -0.05;
+            if (!spookSaid) { spookSaid = true; sayFrom("groove", 2.2); fitT = Math.max(fitT, talk + 0.5); }
+          }
+        } else if (fitKind === 10) {
+          // Zapped: stiff, arms out, shaking, sparks crackling off her; then dazed, sooted and smoking, muttering.
+          const a = clock - zapAt;
+          wantYaw = yaw;
+          if (a < ZAP.shock) {
+            face = H.open;
+            hop = Math.abs(Math.sin(clock * 47)) * 0.05;
+            want.armLx = -1.1; want.armLz = 1.3; want.foreLx = -0.1; want.foreLz = 0;
+            want.armRx = -1.1; want.armRz = -1.3; want.foreRx = -0.1; want.foreRz = 0;
+            if ((zapSpark -= dt) <= 0) {
+              zapSpark = 0.05;
+              fx.spawnParticle(ZAP_SPARK, p.x + (rand() - 0.5) * 0.8, p.y + 0.3 + rand() * 1.2, p.z + (rand() - 0.5) * 0.8, (rand() - 0.5) * 3, rand() * 2, (rand() - 0.5) * 3, 0.3, 10, 6);
+            }
+          } else {
+            face = a < ZAP.shock + 0.9 ? H.closed : H.open;
+            want.headZ = Math.sin(clock * 3) * 0.2; want.lean = 0.05; want.crouch = 0.06;
+            want.armLx = 0.2; want.armLz = 0.35; want.foreLx = -0.2; want.foreLz = 0; want.armRx = -0.3; want.foreRx = -0.6;
+            if (!spookSaid && a > ZAP.shock + 0.6) { spookSaid = true; sayFrom("zapped", 1.4); }
+          }
         } else {
           want.crouch = Math.max(0, Math.sin(clock * 14)) * 0.08;
           want.armLx = -2.6 + Math.sin(clock * 17) * 0.4; want.armLz = 0.4; want.foreLx = -0.8; want.foreLz = 0;
           want.armRx = -2.4 + Math.cos(clock * 15) * 0.4; want.armRz = -0.4; want.foreRx = -1;
+        }
+        // Zapped on the way somewhere or at a reaction's place: on with her routine instead.
+        if (fitT <= 0 && fitKind === 10 && (doing === "scare" || spot === scareSpot)) goTo(nextSpot(seen));
+        // A reaction played where she stood, over: on with what she was doing, or, backing off, away from the engines.
+        if (fitT <= 0 && (scare === "jump" || scare === "stay" || scare === "brother" || scare === "nope")) {
+          const away = scare === "nope";
+          scare = null;
+          if (away) { goTo(awaySpot()); if (doing === "walk") speed = WALK; }
         }
       } else if (doing === "chase") {
         // After whoever poked her, fist up, on her own ground, for a few seconds or until they are out of reach.
@@ -718,6 +939,9 @@
           blocked += dt;
           glareAt = block;
           if (blocked > BLOCKED) goTo(nextSpot(null));
+        } else if (keptAway(nx, nz)) {
+          blocked += dt;
+          if (blocked > BLOCKED) goTo(nextSpot(null));
         } else {
           stepping = along(dt);
           if (arrived) { arrive(); stepping = false; }
@@ -733,6 +957,18 @@
           face = H.redOpen;
           want.armRx = -2.6; want.armRz = -0.25; want.foreRx = -0.5; want.hamX = Math.PI - 0.5;
         } else if (storming) face = H.redOpen;
+        else if (spot === scareSpot) {
+          // Off to react: charging red with the hammer up, running to hide with a hand over her head, storming to the
+          // booth, or creeping up goggles down with the hammer out in front of her.
+          if (scare === "charge") { face = H.redOpen; want.armRx = -2.6; want.armRz = -0.25; want.foreRx = -0.5; want.hamX = Math.PI - 0.5; }
+          else if (scare === "hide") { want.armLx = -2.6; want.armLz = 0.4; want.foreLx = -1.4; want.foreLz = 0; }
+          else if (scare === "booth") face = H.redOpen;
+          else {
+            // Creeping only the last few metres.
+            speed = Math.hypot(scareSpot.x - p.x, scareSpot.z - p.z) > SPOOK.near ? WALK : SPOOK.creep;
+            face = H.goggles; want.lean = -0.12; want.armRx = -1.5; want.armRz = -0.1; want.foreRx = -0.2; want.foreRz = 0; want.hamX = Math.PI / 2;
+          }
+        }
       } else if (doing === "pace") {
         // Up and down a three-metre line, fast, head down, turning sharply at each end, muttering.
         speed = 2.2;
@@ -740,7 +976,7 @@
         paceA += paceDir * speed * dt;
         if (Math.abs(paceA) > half) { paceA = Math.sign(paceA) * half; paceDir = -paceDir; maybeSay("mutter", 0.35); }
         const nx = paceX + hx * paceA, nz = paceZ + hz * paceA;
-        if (HM.walkable(p.x, p.z, nx, nz, feet, RADIUS)) { p.x = nx; p.z = nz; feet = HM.supportAt(p.x, p.z, feet); stepping = true; } else paceDir = -paceDir;
+        if (HM.walkable(p.x, p.z, nx, nz, feet, RADIUS) && !keptAway(nx, nz)) { p.x = nx; p.z = nz; feet = HM.supportAt(p.x, p.z, feet); stepping = true; } else paceDir = -paceDir;
         wantYaw = Math.atan2(hx * paceDir, hz * paceDir);
         want.headX = 0.3; want.armLx = 0; want.armLz = 0.18; want.foreLx = -0.35; want.foreLz = 0;
         if (t > spot.dur) goTo(nextSpot(driven));
@@ -833,6 +1069,67 @@
           const on = t >= HUSH.light && Math.floor((t - HUSH.light) / HUSH.blink) % 2 === 0;
           if (on && !beacon.visible) audio.beep(beacon.position.x, beacon.position.y, beacon.position.z);
           beacon.visible = on;
+        } else if (doing === "scare") {
+          // A reaction where it took her, until it plays out and she goes back to her routine. How long the engines have
+          // been quiet (-1 while they aren't, and quiet anyway once she has waited long enough).
+          const quiet = settled ? clock - settledAt : t > SPOOK.wait ? t - SPOOK.wait : -1;
+          if (scare === "hide") {
+            // Crouched behind the crates, her arms over her head, peeking over them now and then; once it is quiet,
+            // up again, whispering.
+            face = H.open;
+            if (quiet < 0) {
+              if (peekT > 0) peekT -= dt;
+              else if (clock >= peekAt) { peekT = SPOOK.peekLen; peekAt = clock + pick(SPOOK.peek[0], SPOOK.peek[1]); }
+              const peeking = peekT > 0;
+              want.crouch = peeking ? 0.2 : SPOOK.crouch; want.lean = peeking ? 0 : 0.25; want.headX = peeking ? -0.15 : 0.3;
+              if (!peeking) {
+                want.armLx = -2.9; want.armLz = 0.25; want.foreLx = -1.6; want.foreLz = 0;
+                want.armRx = -2.9; want.armRz = -0.25; want.foreRx = -1.6; want.foreRz = 0;
+              }
+            } else {
+              want.crouch = quiet < 0.6 ? 0.2 : 0;
+              if (quiet > 0.7 && !spookSaid) { spookSaid = true; sayFrom("hide", 2); }
+              else if (spookSaid && talk <= 0) unscare();
+            }
+          } else if (scare === "charge") {
+            // Red, the hammer up over her head and her fist shaking at the engines; once they have died, the hammer
+            // lowered slowly, and a mutter.
+            if (quiet < 0) {
+              face = H.redOpen;
+              want.armRx = -3; want.armRz = -0.2; want.foreRx = -0.6; want.hamX = Math.PI - 0.4; want.lean = 0.15;
+              want.armLx = -2.4 + Math.sin(clock * 16) * 0.3; want.armLz = 0.35; want.foreLx = -0.8; want.foreLz = 0;
+            } else {
+              const k2 = Math.min(1, quiet / SPOOK.lower);
+              want.armRx = -3 + (POSE.armR[0] + 3) * k2; want.armRz = -0.2 + (POSE.armR[2] + 0.2) * k2; want.foreRx = -0.6 + (POSE.foreR[0] + 0.6) * k2;
+              want.hamX = Math.PI - 0.4 + (POSE.hammer[0] - Math.PI + 0.4) * k2;
+              if (k2 >= 1 && !spookSaid) { spookSaid = true; sayFrom("charged", 2.4); }
+              else if (spookSaid && talk <= 0) unscare();
+            }
+          } else if (scare === "booth") {
+            // Slapping every switch on the booth, red; then turned round with her arms out: it wasn't her.
+            face = H.redOpen;
+            if (t < SPOOK.slap) {
+              const s2 = Math.sin(clock * 21);
+              want.lean = 0.2; want.armLx = -1.35 + s2 * 0.45; want.armLz = 0.3; want.foreLx = -0.3; want.foreLz = 0;
+              want.armRx = -1.35 - s2 * 0.45; want.armRz = -0.3; want.foreRx = -0.3; want.foreRz = 0;
+            } else {
+              if (driven) wantYaw = Math.atan2(driven.root.position.x - p.x, driven.root.position.z - p.z);
+              want.armLx = -0.5; want.armLz = 1.25; want.foreLx = -0.2; want.foreLz = 0;
+              want.armRx = -0.5; want.armRz = -1.25; want.foreRx = -0.2; want.foreRz = 0; want.headZ = 0.15;
+              if (!spookSaid) { spookSaid = true; sayFrom("booth", 2.4); }
+              else if (talk <= 0) unscare();
+            }
+          } else {
+            // Goggles down, leaning back, prodding the Jet three times with the hammer at arm's length; at the second,
+            // a jump back and her line.
+            face = H.goggles;
+            const n = Math.floor(t / SPOOK.prod), jab = n < 3 ? Math.sin(Math.min(1, (t % SPOOK.prod) / SPOOK.prod * 2) * Math.PI) : 0;
+            want.lean = -0.15 + jab * 0.12; want.armRx = -1.5 - jab * 0.25; want.armRz = -0.1; want.foreRx = -0.2 + jab * 0.2; want.foreRz = 0; want.hamX = Math.PI / 2;
+            want.armLx = -0.7; want.armLz = 0.6; want.foreLx = -1.3; want.foreLz = 0;
+            if (n === 1 && t % SPOOK.prod < 0.3) hop = Math.sin((t % SPOOK.prod) / 0.3 * Math.PI) * 0.15;
+            if (n >= 1 && !spookSaid) { spookSaid = true; sayFrom("prod", 2.2); }
+            else if (n >= 3 && talk <= 0) unscare();
+          }
         } else if (doing === "glare" && storming) {
           // Sulking by the door, red, her arms folded.
           face = H.redOpen;
@@ -944,7 +1241,9 @@
         }
       }
       if (doing === "glare" && !wantLook) wantLook = Math.sin(clock * 0.7) * 0.4;
-      look += (wantLook - look) * Math.min(1, dt * FOLLOW);
+      // Backing off, her head turning very slowly.
+      if (slowLook !== null) wantLook = slowLook;
+      look += (wantLook - look) * Math.min(1, dt * (slowLook !== null ? 1.6 : FOLLOW));
       P.head.rotation.y = look;
       P.head.rotation.x = cur.headX;
       P.head.rotation.z = cur.headZ;
@@ -996,6 +1295,8 @@
       hush: (name = "wingtip") => { const s = spots.find((q) => q.name === name && q.kind === "fix"); if (s) { forceHush = true; goTo(s); } return !!s; },
       get fit() { return fitT > 0 ? fitKind : 0; },
       quarrel: () => { if (free()) hearKortik(); return answerIn > 0; },
+      spook: (kind) => spook(HM.LAYOUT.jet.x, HM.LAYOUT.jet.z + BL.jetModels.EXHAUST[0].z, kind), settle: () => settle(), get scare() { return scare; },
+      zap: () => zap(HM.LAYOUT.jet.x, HM.LAYOUT.jet.z - 15, HM.LAYOUT.jet.z + 15),
       get anger() { return anger; }, get rampaging() { return rampage; }, get pips() { return pips; }, get storming() { return storming; }, get near() { return near; },
       get doing() { return doing; }, get panicking() { return panicking; }, get down() { return down; }, get spot() { return spot && spot.name; }, get spots() { return spots.map((s) => s.name); }, get path() { return pathN; },
       get position() { return { x: p.x, y: feet, z: p.z }; }, open: () => { let n = 0; for (let i = 0; i < M; i++) n += open[i]; return n; }
@@ -1008,7 +1309,7 @@
       tess = at;
     };
     // How cross she is, 0 to 4 by her anger, 5 while she smashes: the terminals' mood page shows it.
-    return { node, props, body: P.torso, actor, update, liveGeometry, poke, useNear, actLabel, overlay, distract, debug, get near() { return near; }, get rampaging() { return rampage; }, get mood() { return rampage ? 5 : Math.min(4, anger); } };
+    return { node, props, body: P.torso, actor, update, liveGeometry, poke, spook, settle, zap, dark, groove, useNear, actLabel, overlay, distract, debug, get near() { return near; }, get rampaging() { return rampage; }, get mood() { return rampage ? 5 : Math.min(4, anger); } };
   };
 
   BL.sis = { create };
