@@ -21220,6 +21220,56 @@ const exteriorEnrichmentChecks = BL => {
   record("Exterior enrichment: repeat visits release every node and rebuild the same bounded layout",lifecycle&&root.children.length===0);
 };
 
+// Rule: a pet a character builds (`parts.dog`) walks at its Ooga's heel: lifted off the body into the crew's root,
+// it trots after its Ooga to its spot, a wall the scene's `walkable` refuses stops it, and out of reach it turns up at
+// its spot; it hides with its Ooga and goes with the crew.
+const petChecks = BL => {
+  const noop=()=>{},S=BL.scene,root=S.createNode();let wall=false,missing=false,cliff=false,offsetWall=false,npcPaused=false;
+  const C=BL.crew.create({root,world:{level:0},playerName:"Bitcoin-Bill",input:{add:noop,remove:noop},hud:{setRosterRow:noop},game:{state:{assignments:{},inventory:[]}},viewYaw:0,npcPaused:()=>npcPaused,
+    groundAt:x=>missing?-Infinity:cliff&&x>1?-50:0,walkable:(ax,az,bx,bz)=>!(wall&&bx>1.5)&&!(offsetWall&&bx>0.3),fx:{say:noop,zzzAt:noop,burst:noop,puff:noop,spawnParticle:noop,damageNumber:noop}});
+  const A=C.cavemen.get("Bitcoin-Bill"),pet=A&&A.pet,dog=A&&A.parts.dog;
+  const lifted=!!pet&&dog.parent===root&&!A.root.children.includes(dog);
+  A.root.visible=true;Object.assign(A.root.position,{x:0,y:A.baseY,z:0});A.root.rotation.y=0;
+  let t=0;const run=n=>{for(let i=0;i<n;i++){t+=1/60;C.update(1/60,t);}};
+  run(2);const spot={x:dog.position.x,z:dog.position.z};
+  const behind=spot.z<0&&Math.abs(spot.x)>0.1;
+  A.root.position.x=3;run(1);const lag=dog.position.x<2.5;run(60);
+  const followed=Math.abs(dog.position.x-(3+spot.x))<0.2&&Math.abs(dog.position.z-spot.z)<0.2;
+  A.root.position.x=-3;run(60);wall=true;A.root.position.x=4;run(60);const blocked=dog.position.x<=1.5+1e-6;
+  wall=false;A.root.position.x=40;run(1);const snapped=Math.abs(dog.position.x-(40+spot.x))<0.01;
+  // Freeze the owner's pose so only the follower's own floor and placement rules are exercised.
+  A.puppet=true;missing=true;A.root.position.x=80;run(1);
+  const noGround=!dog.visible&&Number.isFinite(dog.position.y);
+  missing=false;offsetWall=true;A.root.position.x=0;run(1);
+  const safeSpawn=dog.visible&&dog.position.x<=0.3&&Number.isFinite(dog.position.y);
+  offsetWall=false;cliff=true;A.root.position.x=3;run(90);
+  const noCliff=dog.position.x<=1&&pet.feet===0;
+  cliff=false;npcPaused=true;const heldX=dog.position.x;A.root.position.x=5;run(30);
+  const pausedNpc=dog.position.x===heldX;
+  C.control(A);run(30);const driven=dog.position.x>heldX;
+  npcPaused=false;A.root.position.x=0;A.root.position.y=A.baseY+4;A.hopV=1;A.jetFuel=1;
+  A.jet={power:1,thrust:true};run(120);
+  const flew=pet.mode===1&&pet.feet>3.8&&pet.pack.visible&&pet.flame.visible;
+  const heldFeet=pet.feet;C.update(0,t);const pausedFlight=pet.feet===heldFeet;
+  A.jet.power=0;A.jet.thrust=false;A.hopV=-2;A.root.position.y=A.baseY;run(180);
+  const landed=pet.mode===0&&Math.abs(pet.feet)<1e-6&&pet.pack.visible&&!pet.flame.visible;
+  A.jet=null;A.hopV=0;run(1);const unequipped=!pet.pack.visible&&!pet.flame.visible;
+  record("pets: the authored dog uses the shared DSB flight path, follows a jetpack owner, holds at dt zero, lands after thrust ends and hides equipment when removed",
+    flew&&pausedFlight&&landed&&unequipped,JSON.stringify({flew,pausedFlight,landed,unequipped,feet:pet.feet}));
+  const air={x:0,y:0.2,z:0,heading:0,speed:0,phase:0};
+  BL.crew.flyCompanion(air,0,10,0,1,()=>0,(ax,az,bx,bz,y)=>y<1);
+  const roof=air.y<1;
+  BL.crew.flyCompanion(air,10,0.2,0,1,()=>0,(ax,az,bx,bz,y)=>bx<0.5);
+  const wallAir=air.x<0.5;
+  record("pets: shared adopted/authored dog flight sweeps vertical clearance and refuses horizontal walls even over long steps",roof&&wallAir,JSON.stringify({roof,wallAir}));
+  npcPaused=false;C.release();A.puppet=false;
+  record("pets: missing ground hides safely, blocked relocation chooses clear ground, a cliff stops the dog, and NPC pause holds its pet while a driven owner's pet follows",
+    noGround&&safeSpawn&&noCliff&&pausedNpc&&driven,JSON.stringify({noGround,safeSpawn,noCliff,pausedNpc,driven}));
+  A.root.visible=false;run(1);const hidden=!dog.visible;
+  C.dispose();const gone=!root.children.includes(dog);
+  record("pets: a character's dog is lifted off its Ooga, trots after it to its spot behind, stops at a wall, turns up when out of reach, hides with it and leaves with the crew",lifted&&behind&&lag&&followed&&blocked&&snapped&&hidden&&gone,JSON.stringify({lifted,spot,behind,lag,followed,blocked,snapped,hidden,gone}));
+};
+
 // Rule: the authored Maxis routes and stand points must fit the real Yellow actor, not a guessed radius.
 const maxisChecks = BL => {
   const noop=()=>{},S=BL.scene,root=S.createNode(),targets=new Set();
@@ -21728,7 +21778,11 @@ const rescueFlightChecks = BL => {
   const T=sys.debug,p=cave.root.position,feet=()=>p.y-cave.baseY,bad=[],abreast={along:0,across:[Infinity,-Infinity],up:0};let flew=false,jetShown=false;
   // One tenth of a second: the Ooga moved by `move` (its feet put on what lies under them unless it flies), the dog's
   // whereabouts checked: never inside the house, never under the water, on the ground never up on the roof.
-  const tick=(move,label)=>{move();sys.update(.1,0,1,D.CHORA);const d=T.dog(),onGround=["follow","sit","eat","poop","sleep"].includes(d.state);
+  const tick=(move,label)=>{move();
+    // Equipment visibility is asserted below, so keep the follow-camera in range
+    // throughout the long sea crossing rather than culling the dog off screen.
+    camera.position.x=p.x;camera.position.z=p.z-40;camera.target.x=p.x;camera.target.z=p.z;
+    sys.update(.1,0,1,D.CHORA);const d=T.dog(),onGround=["follow","sit","eat","poop","sleep"].includes(d.state);
     flew||=d.state==="fly";jetShown||=d.jet&&d.flame;
     if(house(d.x,d.z)&&d.y<ROOF-.01||d.y<(sea(d.x)?0:terrain(d.x,d.z))-.01||onGround&&(house(d.x,d.z)||sea(d.x)||d.y>terrain(d.x,d.z)+.01))bad.push({label,...d});};
   const walk=(x,z)=>()=>{const dx=x-p.x,dz=z-p.z,d=Math.hypot(dx,dz),k=Math.min(1,.42/(d||1));p.x+=dx*k;p.z+=dz*k;cave.root.rotation.y=Math.atan2(dx,dz);p.y=terrain(p.x,p.z)+cave.baseY;};
@@ -23824,6 +23878,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   if(ARGS.includes("exterior-unit"))return;
   maxisChecks(BL);
   if(ARGS.includes("maxis-unit"))return;
+  petChecks(BL);
   rulersChecks(BL);
   if(ARGS.includes("rulers-unit"))return;
   inkChecks(BL);
