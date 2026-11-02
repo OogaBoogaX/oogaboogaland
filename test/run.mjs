@@ -9992,6 +9992,39 @@ const hubFall = { name: "hub fall", why: "rule: abyss falls return players and N
       && landed(row.reference) && row.landing.frames <= 8 && landed(row.landing)),
     JSON.stringify({ ...r, respawns }));
 } };
+// The chalkboard writes only for an Ooga standing at it (#391): a tap from afar or with no Ooga is refused with a
+// reason, Space and a tap work at the board, and moving the Ooga off closes it.
+const hubChalkboardReach = { name: "chalkboard reach", why: "rule: only an Ooga standing at the chalkboard may write on it; a tap from across the island opened it", run: async (b) => {
+  // Stands the Ooga `along` metres out in front of the board and a little to its left, facing it, and gives back
+  // a point on the board's right half on screen, clear of the Ooga.
+  const stand = (along) => b.evaluate(`(() => {
+    const B = __ooga, a = B.cavemen.get("portlandhodl"), c = BL.scenes.hub.debug.chalkboardAt;
+    if (B.crew.player !== a) B.pilot.possess(a);
+    const x = c.x + c.frontX * ${along} - c.rightX * 0.6, z = c.z + c.frontZ * ${along} - c.rightZ * 0.6;
+    B.pilot.navigate({ position: { x, y: B.island.surfaceAt(x, z), z }, yaw: Math.atan2(c.frontX, c.frontZ), pitch: 0.15, dist: 4 });
+    B.advance(0.5, 1 / 60);
+    return B.project(c.x + c.rightX * 0.45, c.y + 1.25, c.z + c.rightZ * 0.45, {});
+  })()`);
+  const look = () => b.evaluate(`(() => ({ open: document.getElementById("chalk-modal").open, toast: document.getElementById("toast").textContent, act: document.getElementById("act").textContent.trim() }))()`);
+  const tapAt = async (point) => { await b.click(point.x, point.y); await b.sleep(50); return look(); };
+  const farTap = await tapAt(await stand(5));
+  await stand(1.3);
+  const nearAct = await look();
+  await b.key(" ");
+  const spaced = await look();
+  // Carried off while writing: the board closes on the next frame.
+  await stand(5);
+  const carried = await look();
+  const nearTap = await tapAt(await stand(1.3));
+  await b.evaluate(`document.getElementById("chalk-close").click()`);
+  const point = await stand(5);
+  await b.evaluate(`(() => { __ooga.pilot.release(true); __ooga.advance(0.3, 1 / 60); })()`);
+  const loose = await tapAt(point);
+  record("chalkboard reach: a tap from afar or with no Ooga is refused with why, while at the board Space and a tap open it and being moved off closes it",
+    !farTap.open && farTap.toast === "Walk up to the chalkboard to write on it." && nearAct.act === "WRITE" && spaced.open && !carried.open
+      && nearTap.open && !loose.open && loose.toast.startsWith("Only an Ooga can write."),
+    JSON.stringify({ farTap, nearAct, spaced, carried, nearTap, loose }));
+} };
 // A remote player stands near the pile as the room would place them: the roster's shortest and tallest Oogas, then a
 // gorilla. portlandhodl, the widest Ooga, drops onto each, rides the short one as it walks and rises as a jetpack
 // would, walks off it, then walks and jumps at the tall one, which no jump clears. The spot has nothing else to stand
@@ -16235,7 +16268,7 @@ scene("hub", { label: "chilling", query: "status=chillin&pos=0",
     traffic.rows.every(row => row.waiting >= 1.1 && row.drift < 1e-6 && row.retained && row.released && row.raised > 0.5 && row.walked > 2 && !row.replans && !row.resets)
     && traffic.clear.every(row => !row.waited && row.moved), JSON.stringify(traffic));
 } }] });
-scene("hub", { label: "player stacking", query: "solo=1&character=portlandhodl&pos=0", steps: [hubPlayerStacking] });
+scene("hub", { label: "player stacking", query: "solo=1&character=portlandhodl&pos=0", steps: [hubPlayerStacking, hubChalkboardReach] });
 scene("hub", { label: "lab flask approach", query: "solo=1&character=portlandhodl&status=clankin", steps: [{ name: "gorilla lab exit through Oogas", why: "regression: Ooga occupancy, body sweeps and head support blocked gorillas leaving the lab", run: async (b) => {
   const state = await b.evaluate(`(() => {
     const B = __ooga, C = B.clankers, e = C.list[0], owner = e.owner, m = B.headquarters.entropyLab.mouth;

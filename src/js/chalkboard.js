@@ -406,6 +406,7 @@
         if (focal) dialog.style.transformOrigin = `${Math.round(focal.x / innerWidth * 100)}% ${Math.round(focal.y / innerHeight * 100)}%`;
         dialog.showModal();
       },
+      close() { if (dialog.open) dialog.close(); },
       dispose() {
         suspend();
         if (node) {
