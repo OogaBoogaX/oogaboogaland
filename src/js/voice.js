@@ -32,10 +32,17 @@
 // of its own, or one not yet placed here counts as past the radius; a page with no position of its own here plays everyone.
 // Gains are worked out on the speaking meter's own 150 ms read, so nothing runs while voice is off, and each moves at
 // most NEAR_STEP a read, so a jump (a new radius, a teleport) fades over about a second. A local mute still wins.
-// The gain is the element's `volume`, which iOS and iPadOS ignore (it always reads 1), as they do the receive level;
-// players.js offers the range only where a volume can be set.
+// Where a voice's level goes: its element's `volume` wherever the browser honours one, as before. iOS and iPadOS ignore
+// an element's volume (it always reads 1), so there (`GAIN_PLAY`) each voice plays through a Web Audio gain fed by its
+// speaking meter's own source, in the context the Join click made, while its element stays muted and only keeps the
+// stream flowing; the gain carries the receive level, the hearing range and the local mute alike. The gain goes straight
+// to the context's output, never through the page-wide environment mute (sound.js), which voice has never joined. Its
+// nodes are made when a voice's track lands and disconnected when the voice is dropped, a restart or a stop (`unplug`).
+// Safari suspends or interrupts that context (a call, another app), which silences every voice, so then the voices
+// count as blocked, as a refused element play does, and the next tap or key wakes it (`wake`). `fades` says whether a
+// range can be heard at all: where the element's volume is honoured, or through a gain.
 // Exports enable, listen, dropMic, preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, setMuted, toggle, restart, stop,
-// setPeers, subscribe, dispose, inspect, speaking, muteLocal, mutedLocally, setRadius, falloff, RADIUS_MIN, RADIUS_MAX and stats.
+// setPeers, subscribe, dispose, inspect, speaking, muteLocal, mutedLocally, setRadius, falloff, fades, RADIUS_MIN, RADIUS_MAX and stats.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -48,6 +55,11 @@
   const MUTED_KEY = "oogaboogaland.voice-muted", MUTED_MAX = 512;
   // Hearing range: the radius in metres (0 is no limit), the share of it at full volume, and a gain's most change a read.
   const RADIUS_KEY = "oogaboogaland.voice-radius", RADIUS_MIN = 5, RADIUS_MAX = 60, FULL_SHARE = 0.5, NEAR_STEP = 0.15;
+  // Whether this browser plays an element at the volume it is given; iOS and iPadOS keep every element at 1. Where it does
+  // not and Web Audio is there, voices play through gains, each change eased over GAIN_TAU seconds so it never clicks.
+  const probe = document.createElement("audio");
+  probe.volume = 0.5;
+  const ELEMENT_VOLUME = probe.volume === 0.5, GAIN_PLAY = !ELEMENT_VOLUME && typeof window.AudioContext === "function", GAIN_TAU = 0.05;
   const subscribers = new Set();
   const subs = new Map();
   // Each wanted voice's publication count from the room: a new count is a microphone published again.
@@ -162,11 +174,24 @@
     return falloff(Math.hypot(rec.x - me.x, rec.y - me.y, rec.z - me.z), stats.radius);
   };
   const playVolume = (s) => stats.receiveLevel * s.near;
+  // A voice's level where it plays: its element's volume, or on GAIN_PLAY its gain (nothing until its track lands), which
+  // also carries whether it is heard at all.
+  const setLevel = (s) => {
+    if (!GAIN_PLAY) s.el.volume = playVolume(s);
+    else if (s.gain) s.gain.gain.setTargetAtTime(s.on ? playVolume(s) : 0, audio.currentTime, GAIN_TAU);
+  };
+  // Plays a received voice or silences it for this page: its element's mute, or on GAIN_PLAY its gain, the element
+  // staying muted.
+  const hear = (s, on) => {
+    s.on = on;
+    if (GAIN_PLAY) setLevel(s);
+    else s.el.muted = !on;
+  };
   const nearSub = (s, id) => {
     const want = nearness(id), near = s.near;
     if (want === near) return;
     s.near = want > near ? Math.min(want, near + NEAR_STEP) : Math.max(want, near - NEAR_STEP);
-    s.el.volume = playVolume(s);
+    setLevel(s);
   };
   const poll = () => {
     changed = false;
@@ -182,8 +207,11 @@
   };
 
   const PLAY_BLOCKED = "Press Enable sound to hear voices";
+  // A voice with media is blocked until a gesture when its element's play was refused, or on GAIN_PLAY while the
+  // context is not running.
   const reflectBlocked = () => {
-    stats.blocked = [...subs.values()].some((sub) => sub.blocked && sub.el.srcObject);
+    const asleep = GAIN_PLAY && !!audio && audio.state !== "running";
+    stats.blocked = [...subs.values()].some((sub) => (sub.blocked || asleep) && sub.el.srcObject);
     if (stats.blocked) stats.error = PLAY_BLOCKED;
     else if (stats.error === PLAY_BLOCKED) stats.error = "";
     emit();
@@ -199,14 +227,27 @@
       sub.blocked = true; reflectBlocked();
     });
   };
+  // On GAIN_PLAY a voice sounds through a gain on its meter's own source, straight to the context's output. Its first
+  // level is set at once, so a voice that lands faded or muted never starts at full.
+  const plug = (s) => {
+    s.gain = audio.createGain();
+    s.gain.gain.value = s.on ? playVolume(s) : 0;
+    s.meter.source.connect(s.gain);
+    s.gain.connect(audio.destination);
+  };
+  // Lets go of a voice's audio nodes; a source is bound to its one stream, so nothing here is kept for reuse.
+  const unplug = (s) => {
+    if (s.meter) s.meter.source.disconnect();
+    if (s.gain) s.gain.disconnect();
+    s.meter = s.gain = null;
+  };
   const silence = (s, notify = true) => {
     s.el.muted = true;
     s.el.pause();
     if (s.el.srcObject) for (const track of s.el.srcObject.getTracks()) track.stop();
     s.el.srcObject = null; s.blocked = false;
     if (notify) reflectBlocked();
-    if (s.meter) s.meter.source.disconnect();
-    s.meter = null;
+    unplug(s);
   };
 
   // Whether this page plays a remote voice: the room wants it heard and this visitor has not muted them.
@@ -303,10 +344,22 @@
   };
 
   const activate = () => {
-    if (!audio && window.AudioContext) audio = new AudioContext();
+    if (!audio && window.AudioContext) {
+      audio = new AudioContext();
+      if (GAIN_PLAY) audio.addEventListener("statechange", reflectBlocked);
+    }
     if (audio) audio.resume().catch(() => {});
     for (const s of subs.values()) playSub(s);
   };
+  // On GAIN_PLAY a tap or key wakes a context Safari left suspended or interrupted, inside that gesture as it requires;
+  // a touch counts as a gesture only as it lifts, so pointerup rather than pointerdown.
+  const wake = (e) => {
+    if (e.isTrusted && audio && audio.state !== "running" && audio.state !== "closed") audio.resume().catch(() => {});
+  };
+  if (GAIN_PLAY) {
+    window.addEventListener("pointerup", wake, true);
+    window.addEventListener("keydown", wake, true);
+  }
 
   // Listening does not acquire or publish a microphone. Both entry points run inside a gesture.
   const listen = async () => {
@@ -378,7 +431,7 @@
     const level = Number(value);
     if (!Number.isFinite(level)) return;
     stats.receiveLevel = Math.max(0, Math.min(1, level));
-    for (const sub of subs.values()) sub.el.volume = playVolume(sub);
+    subs.forEach(setLevel);
     emit();
   };
   // This visitor's hearing range, for this browser on every visit; the next meter read eases each voice toward it.
@@ -457,8 +510,11 @@
       if (token !== lifecycle || pc !== subPc) return;
       for (const s of subs.values()) {
         if (s.mid !== e.transceiver.mid) continue;
+        // A track landing again for the same voice replaces its nodes, so it never plays twice.
+        unplug(s);
         s.el.srcObject = new MediaStream([e.track]);
         s.meter = meter(s.el.srcObject);
+        if (GAIN_PLAY) plug(s);
         playSub(s);
       }
       countHearing();
@@ -539,7 +595,7 @@
     listenerCount = Number.isSafeInteger(listeners) && listeners >= 0 && listeners < 32 ? listeners : null;
     wantedGen.clear();
     for (let i = 0; i < ids.length; i++) wantedGen.set(ids[i], gens ? gens[i] : 0);
-    for (const [id, s] of subs) s.el.muted = !heard(id);
+    for (const [id, s] of subs) hear(s, heard(id));
     const was = stats.alone;
     gate();
     if (stats.alone !== was) emit();
@@ -602,10 +658,11 @@
       const res = await api("pull", { ids: add }, token); valid();
       for (const t of res.tracks) {
         if (t.errorCode || t.id === null) continue;
-        const el = new Audio(), sub = { mid: t.mid, el, meter: null, blocked: false, gen: generations.get(t.id), near: nearness(t.id) };
-        el.volume = playVolume(sub);
+        const el = new Audio(), sub = { mid: t.mid, el, meter: null, gain: null, on: false, blocked: false, gen: generations.get(t.id), near: nearness(t.id) };
+        setLevel(sub);
         el.autoplay = true;
-        el.muted = !heard(t.id) || generations.get(t.id) !== wantedGen.get(t.id);
+        el.muted = true;
+        hear(sub, heard(t.id) && generations.get(t.id) === wantedGen.get(t.id));
         subs.set(t.id, sub);
       }
       if (res.requiresImmediateRenegotiation && res.sessionDescription) {
@@ -655,7 +712,7 @@
     } catch {
       // Storage off: the mute lasts this page.
     }
-    for (const [id, s] of subs) s.el.muted = !heard(id);
+    for (const [id, s] of subs) hear(s, heard(id));
     emit();
   };
   const mutedLocally = (login) => mutedLogins.has(String(login).toLowerCase());
@@ -670,8 +727,10 @@
     subscribers.clear();
   };
 
-  // For the feed panel and debugging: whom the room wants heard, whom this page pulled, and both connections.
-  const inspect = () => ({ desired: desired.slice(), pulled: [...subs.keys()], publish: pubPc ? pubPc.connectionState : "none", receive: subPc ? subPc.connectionState : "none" });
+  // For the feed panel and debugging: whom the room wants heard, whom this page pulled, both connections, where voices play
+  // and the context's state.
+  const inspect = () => ({ desired: desired.slice(), pulled: [...subs.keys()], publish: pubPc ? pubPc.connectionState : "none", receive: subPc ? subPc.connectionState : "none",
+    playback: GAIN_PLAY ? "gain" : "element", context: audio ? audio.state : "none" });
 
-  BL.voice = { preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, enable, listen, dropMic, setMuted, toggle, restart, stop, setPeers, subscribe, dispose, inspect, speaking, muteLocal, mutedLocally, setRadius, falloff, RADIUS_MIN, RADIUS_MAX, stats };
+  BL.voice = { preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, enable, listen, dropMic, setMuted, toggle, restart, stop, setPeers, subscribe, dispose, inspect, speaking, muteLocal, mutedLocally, setRadius, falloff, fades: ELEMENT_VOLUME || GAIN_PLAY, RADIUS_MIN, RADIUS_MAX, stats };
 })();
