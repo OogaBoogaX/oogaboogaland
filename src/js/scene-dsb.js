@@ -86,7 +86,7 @@
     const driven=!travelling&&crew.player;
     BL.net.setZone(travelling?"dsb-transit":voiceZone());
     BL.net.setBody(driven?driven.traits.name:null);
-    if(driven){const p=driven.root.position;BL.net.sendPose(p.x,p.y-driven.baseY,p.z,driven.root.rotation.y);BL.net.setHealth(driven.health.value,driven.health.stunned);}
+    if(driven){const p=driven.root.position;BL.net.sendPose(p.x,p.y-driven.baseY,p.z,driven.root.rotation.y,null,BL.crew.jetFlags(driven));BL.net.setHealth(driven.health.value,driven.health.stunned);}
   };
   const accountChanged=()=>{
     if(!avatar)return;

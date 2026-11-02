@@ -22951,6 +22951,23 @@ const integrationChecks = async BL => {
   gm({t:"kick",reason:"replaced"});g.net.rejoin();gw=g.sockets.at(-1);gm({t:"welcome",you:{id:71},players:[{id:72,login:"peer",body:"gorilla:w-s-bitcoin",zone:"outside",g:[1,0,0,0,0,0]}],now:Date.now()});
   g.net.sendPose(2,3,4,.5,motion);
   record("integration gorilla reconnect: rejoining restores body and unchanged locomotion, including another player's airborne late-join pose",g.sockets.length===2&&g.sent.some(m=>m.t==="body"&&m.name===gorilla)&&poses().length===beforeRejoin+1&&poses().at(-1).g[0]===8&&g.net.remotes.get(72).g[0]===1);
+  // An Ooga's jetpack rides its pose as `j`, on a change only and never for a gorilla; remotes keep it as `jet`.
+  const jetBefore=poses().length;
+  g.net.setBody("NickDaGreek");g.advance(101);g.net.sendPose(7,3,4,.5,null,5);
+  const jetOn=poses().length===jetBefore+1&&poses().at(-1).j===5;
+  g.advance(101);g.net.sendPose(7,3,4,.5,null,5);const jetQuiet=poses().length===jetBefore+1;
+  g.advance(101);g.net.sendPose(7,3,4,.5,null,1);const jetChanged=poses().length===jetBefore+2&&poses().at(-1).j===1;
+  g.advance(101);g.net.sendPose(7,3,4,.5,null,0);const jetOff=poses().length===jetBefore+3&&!Object.hasOwn(poses().at(-1),"j");
+  g.net.setBody(gorilla);g.advance(101);g.net.sendPose(7,3,4,.5,motion,5);const gorillaBare=!Object.hasOwn(poses().at(-1),"j");
+  gm({t:"join",p:{id:73,login:"flyer",body:"YellowBrokeIt",zone:"outside",x:0,y:9,z:0,yaw:0,j:5}});
+  const flyer=g.net.remotes.get(73),joinJet=flyer?.jet===5;
+  gm({t:"state",ps:[73,0,9,0,0],js:[73,3]});const streamed=flyer?.jet===3;
+  gm({t:"state",ps:[73,0,9,0,0]});const absent=flyer?.jet===0;
+  gm({t:"state",ps:[73,0,9,0,0],js:[73,9]});const invalid=flyer?.jet===0;
+  gm({t:"state",ps:[73,0,9,0,0],js:[73,7]});gm({t:"body",id:73,name:"gorilla:YellowBrokeIt"});const bodyCleared=flyer?.jet===0;
+  record("integration jetpacks: an Ooga's pose carries its jetpack only when it changes and never for a gorilla; remotes read it at join and from every snapshot, where none listed or a bad value means none, and a body change clears it",
+    jetOn&&jetQuiet&&jetChanged&&jetOff&&gorillaBare&&joinJet&&streamed&&absent&&invalid&&bodyCleared,
+    JSON.stringify({jetOn,jetQuiet,jetChanged,jetOff,gorillaBare,joinJet,streamed,absent,invalid,bodyCleared}));
   g.net.dispose();
   const oldNet=BL.net,sceneRoot=BL.scene.createNode(),records=new Map(),cavemen=new Map();
   const crew={cavemen,player:null,refreshStates(){}};
@@ -22960,6 +22977,14 @@ const integrationChecks = async BL => {
   record("integration remotes: hub actors stay out of DSB",pool.stats().remotePlayers===0&&sceneRoot.children.every(n=>!n.visible));
   records.get(72).zone="dsb-outside";pool.update(.1);
   record("integration remotes: exterior shares one body and collision actor",pool.stats().remotePlayers===1&&pool.actors().length===1);
+  const jetNodes=()=>{const out=[],walk=n=>{if(n.geometry===BL.hubModels.jetpack())out.push(n);for(const c of n.children)walk(c);};walk(sceneRoot);return out;};
+  records.get(72).jet=5;pool.update(.1);
+  const pack=jetNodes()[0],flame=pack&&pack.children[0];
+  const burning=!!pack&&pack.visible&&flame.visible&&flame.scale.y>0;
+  records.get(72).jet=1;pool.update(.1);const worn=!!pack&&pack.visible&&!flame.visible;
+  records.get(72).jet=0;pool.update(.1);const off=!!pack&&!pack.visible&&!flame.visible&&jetNodes().length===1;
+  record("integration remotes: another player's jetpack shows while they wear it, with its flame while it burns, and goes when they take it off, on one reused node",
+    burning&&worn&&off,JSON.stringify({burning,worn,off}));
   records.get(72).zone="dsb-studio";pool.update(.1);
   record("integration remotes: a venue actor leaves the exterior immediately",pool.stats().remotePlayers===0);
   records.get(72).zone="dsb-outside";crew.player={traits:{name:"w-s-bitcoin"}};pool.update(.1);

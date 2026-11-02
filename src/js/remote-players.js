@@ -111,7 +111,7 @@
       const height = gorilla ? 0 : BL.crew.bodyHeightOf(cave);
       addChild(root, cave.root);
       const motion = gorilla ? { walkPhase: NaN, walkGait: "knuckle", climb: 0, climbStride: 0, climbDirection: 0, climbSide: 0, swim: 0, lab: false, labRunIn: false, office: false, officeRise: 0 } : null;
-      const entry = { id: rec.id, body: rec.body, name, gorilla, cave, motion, baseY: gorilla ? 0 : cave.root.position.y, height, top: NaN, dTop: 0, x: rec.x, y: rec.y, z: rec.z, yaw: rec.yaw, phase: 0, hidden: null, hiddenOverride: null, label: "", labelW: 0 };
+      const entry = { id: rec.id, body: rec.body, name, gorilla, cave, motion, baseY: gorilla ? 0 : cave.root.position.y, height, top: NaN, dTop: 0, jetNode: null, jetFlame: null, x: rec.x, y: rec.y, z: rec.z, yaw: rec.yaw, phase: 0, hidden: null, hiddenOverride: null, label: "", labelW: 0 };
       bodies.set(rec.id, entry);
       hideLocal(entry);
       return entry;
@@ -165,7 +165,24 @@
       entry.cave.poseManaged(dt, entry.x, entry.y, entry.z, entry.yaw, speed, !!(flags & 1), !!(flags & 2), lounge, motion);
     };
 
+    // Their jetpack from the room's `jet` (net.js): the character's built-in one, or the hub's model, put on as the
+    // crew puts one on (`crew.jetpackNode`) the first time it shows. The flame flickers as the crew's does.
+    let jetClock = 0;
+    const showJet = (entry, jet) => {
+      const cave = entry.cave, parts = cave.parts;
+      if (!entry.jetNode) {
+        if (!jet) return;
+        entry.jetNode = parts.jetpack || BL.crew.jetpackNode(cave.root, cave.traits.height, 0, BL.hubModels.jetpack(), BL.hubModels.jetFlame());
+        entry.jetFlame = parts.jetpack ? parts.jetFlame : entry.jetNode.children[0];
+      }
+      const power = jet >> 1, flame = entry.jetFlame;
+      entry.jetNode.visible = (jet & 1) === 1;
+      flame.visible = entry.jetNode.visible && power > 0;
+      if (flame.visible) flame.scale.y = (0.7 + Math.sin(jetClock * 40 + entry.id) * 0.3) * power / 2;
+    };
+
     const update = (dt) => {
+      jetClock += dt;
       if (fx && !unheard) unheard = net.subscribeChat(heard);
       for (const entry of bodies.values()) {
         const rec = net.remotes.get(entry.id);
@@ -192,6 +209,7 @@
         if (entry.gorilla) poseGorilla(entry, rec, dt);
         else {
           pose(entry, dt);
+          showJet(entry, rec.jet);
           if (posed) posed(entry.cave, entry.cave.root.position.y - entry.baseY);
         }
         // The top's move carries a player standing on it; a snap carries nobody.

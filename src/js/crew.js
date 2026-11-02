@@ -408,6 +408,17 @@
       }
     });
   };
+  // A jetpack on a caveman's back with its flame, hidden, as its only child: the crew's own, and another player's
+  // (remote-players.js). `lift` raises it with the caveman's view.
+  const jetpackNode = (root, height, lift, geometry, flameGeometry) => {
+    const node = createNode({ position: { x: 0, y: 0.06 * height + lift, z: -0.18 * height }, scale: { x: height, y: height, z: height }, geometry });
+    addChild(node, createNode({ geometry: flameGeometry, visible: false }));
+    addChild(root, node);
+    return node;
+  };
+  // What other pages need to draw a caveman's jetpack (`net.sendPose`'s `jet`): 1 while worn, plus its flame's power
+  // (0 to 3) times 2.
+  const jetFlags = (cave) => cave && cave.jet ? 1 | cave.jet.power << 1 : 0;
   // Cache the head's full pitch envelope once, attachments included; ceiling look-up must fit the movement body.
   const bodyHeightOf = (cave) => {
     BL.scene.updateWorld(cave.root);
@@ -5633,12 +5644,8 @@
     };
     // ---------- the jetpack ----------
     const makeJetpack = (cave, geometry, flameGeometry) => {
-      const h = cave.traits.height;
-      const node = createNode({ position: { x: 0, y: 0.06 * h + cave.viewLift, z: -0.18 * h }, scale: { x: h, y: h, z: h }, geometry });
-      const flame = createNode({ geometry: flameGeometry, visible: false });
-      addChild(node, flame);
-      addChild(cave.root, node);
-      cave.jet = { node, flame, thrust: false, spending: false, power: 0, puff: 0 };
+      const node = jetpackNode(cave.root, cave.traits.height, cave.viewLift, geometry, flameGeometry);
+      cave.jet = { node, flame: node.children[0], thrust: false, spending: false, power: 0, puff: 0 };
       return node;
     };
     const builtInJetpack = (cave) => !!cave.parts.jetpack;
@@ -6690,5 +6697,5 @@
       }
     };
   };
-  BL.crew = { create, bodyHeightOf, flyCompanion, COMPANION_FLIGHT, LAND_DUST, JET_SPARKS, EAT_RATE, AMMO_MAX, AMMO_PER_BANANA, RELOAD_PERIOD, BURST_ROUNDS, BURST_STEP, MELEE_TAP_TIME, MELEE_CHARGE_DELAY, HEALTH_MAX, HEALTH_REGEN_DELAY, HEALTH_REGEN_RATE, JUMP_SPEED, JET_ACCEL, JET_SPEED, JET_RISE, JET_FUEL_SECONDS, JET_MOVE_SECONDS, JET_REFILL_SECONDS, JET_LAUNCH_FUEL };
+  BL.crew = { create, bodyHeightOf, jetpackNode, jetFlags, flyCompanion, COMPANION_FLIGHT, LAND_DUST, JET_SPARKS, EAT_RATE, AMMO_MAX, AMMO_PER_BANANA, RELOAD_PERIOD, BURST_ROUNDS, BURST_STEP, MELEE_TAP_TIME, MELEE_CHARGE_DELAY, HEALTH_MAX, HEALTH_REGEN_DELAY, HEALTH_REGEN_RATE, JUMP_SPEED, JET_ACCEL, JET_SPEED, JET_RISE, JET_FUEL_SECONDS, JET_MOVE_SECONDS, JET_REFILL_SECONDS, JET_LAUNCH_FUEL };
 })();
