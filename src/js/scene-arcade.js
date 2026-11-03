@@ -84,7 +84,7 @@
   // HALLOWEEN: the ghost arena's hunt: its herald before the hunt loads, the hunt, its channel to the room, GAME MODE,
   // the iron fence across the hallway's mouth (how far up), the totems and their lit parts, whether the visitor's Ooga carries its rifle
   // (in the arena), the voice zone it reports and the one it is turning to.
-  let ghostEntry = null, ghosts = null, ghostChannel = null, tess = null, gameMode = false, fence = null, fenceK = 0, totemsAt = [], totemLife = [], armed = false, rifleWas = false;
+  let ghostEntry = null, ghosts = null, ghostChannel = null, tess = null, gameMode = false, fence = null, fenceK = 0, totemsAt = [], totemLife = [], lasers = [], armed = false, rifleWas = false;
   let zoneNow = "arcade.hall", zoneHeld = 0, exitButton = null;
   let stations = null, blocks = null, carnival = null, staff = null, orders = 0, ticketBoard = null, prizeUi = null;
   let crowd = null, spin = null;
@@ -225,6 +225,14 @@
       const node = createNode({ position: { x: g.x, y: g.y, z: g.z }, rotation: { x: 0, y: g.turn, z: 0 }, scale: { x: GARGOYLE_SCALE, y: GARGOYLE_SCALE, z: GARGOYLE_SCALE }, geometry: AM.gargoyle() });
       if (g.letter) addChild(node, createNode({ geometry: AM.gargoyleLetter(g.letter) }));
       addChild(root, node);
+      // A green laser from each eye, unlit until the herald launches (`shineLasers`), each placed at its eye's front.
+      const c = Math.cos(g.turn), sn = Math.sin(g.turn);
+      for (const [ex, ey, ez] of AM.GARGOYLE_EYES) {
+        const x = ex * GARGOYLE_SCALE, z = ez * GARGOYLE_SCALE;
+        const laser = createNode({ geometry: AM.gargoyleLaser(), visible: false, position: { x: g.x + x * c + z * sn, y: g.y + ey * GARGOYLE_SCALE, z: g.z - x * sn + z * c } });
+        addChild(root, laser);
+        lasers.push(laser);
+      }
     }
     // The ghost hunt's totems, the hub's four with their name boards, their eyes burning and runes, faces and bands
     // lit as a fresh merge lights the hub's, always (no feed behind them), each holding its elixir out over the arena
@@ -971,6 +979,21 @@
   // The herald over the arena's middle (its foot `HERALD_FLOAT` up, bobbing) and its pale green glow.
   const GHOST_GLOW = [14, 0.5, 1, 0.72], HERALD_HEIGHT = 2.6, HERALD_FLOAT = 1.1;
   const GARGOYLE_SCALE = 6.4, TOTEM_SLICE = 0.3;
+  // As the herald launches the gargoyles' eyes shine green lasers down onto it, held on it as it shoots up the beam and
+  // thinning out with it (the hunt's `launch`); each rod flickers on its own.
+  const shineLasers = (elapsed) => {
+    const L = ghosts ? ghosts.launch : null, k = L ? L.k : 0, on = k > 0.02;
+    for (let i = 0; i < lasers.length; i++) {
+      const n = lasers[i];
+      n.visible = on;
+      if (!on) continue;
+      const dx = L.x - n.position.x, dy = L.y - n.position.y, dz = L.z - n.position.z, d = Math.hypot(dx, dy, dz);
+      n.rotation.y = Math.atan2(dx, dz);
+      n.rotation.x = -Math.asin(dy / d);
+      n.scale.z = d;
+      n.scale.x = n.scale.y = k * (0.8 + 0.2 * Math.sin(elapsed * 37 + i * 1.9));
+    }
+  };
   let hauntLit = false;
   // The arena's totems, lit always as the hub's are on a merge's day: runes in their pattern up the pole, the painted
   // faces breathing, a bright front circling each band and the eye fires leaping as the pattern passes them.
@@ -1040,7 +1063,7 @@
   // the elixirs on the totems, no blight, at most four hunters, and those who wait walked out to the hallway. GAME
   // MODE turns combat on and raises the iron fence.
   const PARAMS = new URLSearchParams(location.search), DEBUG = PARAMS.get("debug") === "1";
-  const ARENA_ZONES = new Set(["arcade.arena", "arcade-hunt"]), HALL_ZONES = new Set(["arcade.hall", "arcade.arena", "arcade-hunt"]);
+  const ARENA_ZONES = new Set(["arcade.arena", "arcade-hunt"]), HALL_ZONES = new Set(["arcade.hall", "arcade.haunt", "arcade.arena", "arcade-hunt"]);
   const HUNTERS = 4, FENCE_S = 1.4;
   // Tess for the hunt's Tess drop: out of sight until the hunt flies her (`lend`), made with the hunt.
   const arenaTess = () => {
@@ -1097,7 +1120,12 @@
   const arm = (on) => {
     armed = on;
     const w = avatar.weapon;
-    if (on) { rifleWas = w.unlimited; w.unlimited = true; }
+    if (on) {
+      rifleWas = w.unlimited; w.unlimited = true;
+      // The rifle in hand, not just carried, so a shot can wake the herald (a carried rifle never fires).
+      pilot.weaponMode(2);
+      hud.hint(COARSE ? "Rifle out · tap the ghost or shoot it to start the hunt" : "Rifle out · X to aim, then shoot the ghost (or click it) to start the hunt", 6000);
+    }
     else w.unlimited = rifleWas;
     pilot.refreshCombat();
   };
@@ -1156,7 +1184,8 @@
   // wall stands either side of the doorway, whose jambs run on out through the rock.
   // A body on the deck's level (`feet` given) may go on through the right wall into the haunted hallway, held
   // `HAUNT_SIDE` off its walls, where its pumpkins and torches stand, and out into the arena, held `ARENA_SIDE` off
-  // its wall and `GHOST_KEEP` from its middle, outside the ghost's ring and the bones round it.
+  // its wall and, while no hunt is on, `GHOST_KEEP` from its middle, outside the ghost's ring and the bones round it
+  // (in a hunt the herald is gone and the hunters may cross it).
   // Its totems stand in the way, each `keep` round; while a hunt runs the iron fence closes the mouth, FENCE_GAP either
   // side of FENCE_X.
   const ARENA = HAUNT.arena, HAUNT_SIDE = 0.65, ARENA_SIDE = 0.75, GHOST_KEEP = 3.7, FENCE_X = HAUNT.end - 0.05, FENCE_GAP = 0.15;
@@ -1164,7 +1193,7 @@
     const hall = Math.max(Math.abs(x) + r - SIDE_FACE, BACK_FACE + r - z, Math.min(z + r - FRONT_FACE, Math.abs(x) + r - JAMB));
     if (feet < HAUNT.y - 1) return hall;
     const d = Math.hypot(x - ARENA.x, z - ARENA.z), fenced = fenceK > 0.15;
-    let arena = Math.max(d + r - ARENA.r + ARENA_SIDE, GHOST_KEEP + r - d, fenced ? FENCE_X + FENCE_GAP + r - x : -Infinity);
+    let arena = Math.max(d + r - ARENA.r + ARENA_SIDE, gameMode ? -Infinity : GHOST_KEEP + r - d, fenced ? FENCE_X + FENCE_GAP + r - x : -Infinity);
     for (let i = 0; i < totemsAt.length; i++) arena = Math.max(arena, AM.ARENA_TOTEMS.keep + r - Math.hypot(x - totemsAt[i].x, z - totemsAt[i].z));
     return Math.min(hall, Math.max(HALL.halfW - 2 + r - x, x + r - (fenced ? FENCE_X - FENCE_GAP : HAUNT.end + 2), HAUNT.z0 + HAUNT_SIDE + r - z, z + r - HAUNT.z1 + HAUNT_SIDE), arena);
   };
@@ -1963,7 +1992,7 @@
       // The visitor's view, combat and weapon come in from the last scene and go on to the next (pilot.js `carried`).
       carry: true,
       renderer, canvas: ctx.canvas, camera, hud, presets: views, landing: "entrance", pitch: PITCH, dist: DIST,
-      follow: FOLLOW, fly: FLY, clampTarget, clampCamera, ceilingAt: () => HALL.h - 1, coarse: COARSE, mayPossess, combatOnly: () => gameMode,
+      follow: FOLLOW, fly: FLY, clampTarget, clampCamera, ceilingAt: () => HALL.h - 1, coarse: COARSE, mayPossess, combatOnly: () => gameMode && armed,
       close: { eyeHeight: 1.1, eyeRatio: 0.95, eyeForward: 0.16, pitch: [-1.35, 1.35], trailingDist: 4, orbitDist: 5, maxStep: 0.6, groundAt: (x, z) => supportAt(x, z, feetOf()) }
     });
     const tipFor = (hit) => {
@@ -2215,7 +2244,10 @@
     const feet = drivenHere ? drivenHere.root.position.y - drivenHere.baseY : 0;
     const inRing = !!drivenHere && drivenHere === avatar && inArenaRing(drivenHere.root.position.x, drivenHere.root.position.z, feet);
     if (inRing !== armed && avatar) arm(inRing);
-    const zone = inRing ? ghosts && ghosts.hunting ? "arcade-hunt" : "arcade.arena" : "arcade.hall";
+    // The hallway is a zone of its own (still the hall's voice) so the room hands it the hunt too: a spectator there
+    // watches it through the fence.
+    const inHallway = !inRing && !!drivenHere && feet > HAUNT.y - 1 && inHaunt(drivenHere.root.position.x, drivenHere.root.position.z);
+    const zone = inRing ? ghosts && ghosts.hunting ? "arcade-hunt" : "arcade.arena" : inHallway ? "arcade.haunt" : "arcade.hall";
     if (zone === zoneNow) zoneHeld = 0;
     else if ((zoneHeld += dt) >= 0.25) { zoneNow = zone; zoneHeld = 0; BL.net.setZone(zoneNow); }
     // Exit hunt shows while this visitor hunts in the arena.
@@ -2281,7 +2313,7 @@
     fence.visible = fenceK > 0;
     fence.position.y = HAUNT.y - AM.IRON_FENCE.h * (1 - fenceK);
     glowNear(elapsed);
-    if (hauntLit) lightTotems(elapsed);
+    if (hauntLit) { lightTotems(elapsed); shineLasers(elapsed); }
     stepTweens(dt);
     fx.update(dt, elapsed);
     if (ghosts) ghosts.shake(camera);
@@ -2314,6 +2346,7 @@
     ghosts = ghostEntry = ghostChannel = tess = fence = exitButton = null;
     totemsAt = [];
     totemLife = [];
+    lasers = [];
     prizeUi.panel.removeEventListener("click", onPrizeClick);
     prizeUi.panel.hidden = true;
     for (const g of staff) g.agent.dispose();
