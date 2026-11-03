@@ -4,6 +4,10 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const KEY = "oogaboogaland.sheet.v1", NAMES = ["bananas", "roster", "players", "loot", "chat"], DOCKS = ["left", "right", "bottom"], TAB_EDGE = 41;
+  // A touch drawer's sticks need this much of the screen left over it.
+  const STICK_ROOM = 320;
+  // A phone's tabs start 16px in and stop short of the 44px chevron tab at the far right.
+  const PHONE_TAB_INSET = 80;
   const visible = (panel) => {
     const owner = panel.closest(".sheet");
     return !!owner && !panel.hidden && !owner.hidden && owner.dataset.open === "true" && !!owner.getClientRects().length;
@@ -23,7 +27,7 @@
   // put back on screen by a scene change, a fold or a layout restore is not looked at.
   const watchViews = (panel, fn) => {
     const name = panel.dataset.panel, onTab = (e) => e.target.closest?.(`.sheet [data-tab="${name}"]`);
-    document.addEventListener("click", (e) => { if (onTab(e)) fn(); });
+    document.addEventListener("click", (e) => { if (onTab(e) || e.target.closest?.(".sheet-expand") && visible(panel)) fn(); });
     document.addEventListener("focusin", (e) => { if (onTab(e) && visible(panel)) fn(); });
     for (const type of ["pointerdown", "focusin", "wheel", "touchstart"])
       panel.addEventListener(type, () => { if (visible(panel)) fn(); }, { passive: true });
@@ -40,7 +44,13 @@
     const root = document.getElementById("sheet"), parent = root.parentElement;
     const content = root.querySelector(".sheet-content"), nav = root.querySelector(".sheet-panels"), footer = root.querySelector(".sheet-foot");
     const panels = [...content.children], templates = [...nav.children].map((tab) => tab.cloneNode(true));
-    const windows = [], listeners = [], bottom = window.matchMedia("(width < 1140px)");
+    const windows = [], listeners = [], bottom = window.matchMedia("(width < 1140px)"), coarse = window.matchMedia("(pointer: coarse)");
+    const phone = window.matchMedia("(pointer: coarse) and (max-width: 720px), (pointer: coarse) and (max-height: 500px)");
+    // A touch drawer's default height, from style.css: it can be dragged back to this, and the sticks always fit over it.
+    const drawerShare = parseFloat(getComputedStyle(root).getPropertyValue("--drawer-share")) / 100;
+    const drawerHeight = (b) => Math.ceil(b.height * drawerShare);
+    // Where a phone's up tab lifts the drawer: the default, or in landscape, where that shows hardly anything, most of the screen.
+    const fullHeight = (b) => b.width > b.height ? Math.ceil(b.height * 0.6) : drawerHeight(b);
     let serial = 0, gesture = null, mergeTarget = null, suppressClick = false, hidden = false, folded = false, disposed = false, lootCount = 0, saveTimer = 0;
     if (!shared) {
       try { shared = JSON.parse(localStorage.getItem(KEY)); } catch { /* Storage may be unavailable. */ }
@@ -51,7 +61,8 @@
     const available = (name) => NAMES.includes(name) && (name !== "loot" || lootEnabled) && (name !== "chat" || BL.net.state.backend)
       && (name !== "players" || !!BL.net.state.me);
     const isOpen = (w) => !folded && w.open && available(w.tab);
-    const ownerOf = (name) => windows.find((w) => w.tab === name && (w.open || w.rect));
+    // On a phone every tab folds into the main drawer; separate panels stay saved, hidden, for a larger screen.
+    const ownerOf = (name) => windows.find((w) => (w.node === root || !phone.matches) && w.tab === name && (w.open || w.rect || w.kept));
     const notify = () => document.dispatchEvent(new Event("sheetchange"));
     const on = (target, type, fn, options) => {
       target.addEventListener(type, fn, { ...options, signal });
@@ -60,7 +71,7 @@
     const save = () => {
       window.clearTimeout(saveTimer); saveTimer = 0;
       if (disposed) return;
-      shared = { open: main.open, tab: main.tab, folded,
+      shared = { open: main.open, tab: main.tab, folded, drawer: 2,
         height: savedHeight, rect: main.rect, dock: main.dock, windows: windows.filter((w) => w !== main).map((w) => ({ open: w.open, tab: w.tab, rect: w.rect, dock: w.dock })) };
       try { localStorage.setItem(KEY, JSON.stringify(shared)); } catch { /* Storage may be unavailable. */ }
     };
@@ -84,21 +95,31 @@
         for (const name of ["left", "top", "width", "height"]) w.node.style.removeProperty(name);
         w.node.dataset.sized = "false";
         w.node.dataset.dock = bottom.matches ? "bottom" : "right";
+        if (w.node === root) { root.dataset.sticks = "true"; parent.style.removeProperty("--drawer-height"); }
+        if (phone.matches) w.node.style.setProperty("--sheet-tab-step", `${Math.min(72, (viewport().width - PHONE_TAB_INSET) / Math.max(1, w.tabCount || NAMES.length))}px`);
+        else w.node.style.removeProperty("--sheet-tab-step");
         return;
       }
       const b = viewport(), preferred = w.rect, r = w.bounds || (w.bounds = { ...preferred });
       if (!w.dock) w.dock = nearestDock(preferred);
-      const atBottom = w.dock === "bottom", width = Math.max(1, b.width - (atBottom ? 0 : TAB_EDGE)), height = Math.max(1, b.height - (atBottom ? TAB_EDGE : 0));
+      // A phone's panels stay a full-width drawer at the foot of the screen: only their height moves. The dock stays saved.
+      const dock = phone.matches ? "bottom" : w.dock, atBottom = dock === "bottom", width = Math.max(1, b.width - (atBottom ? 0 : TAB_EDGE)), height = Math.max(1, b.height - (atBottom ? TAB_EDGE : 0));
       // Fitting a keyboard-reduced viewport must not overwrite the saved size.
       // Minimum sizes belong to explicit resizing, not closing a short default drawer.
-      r.width = Math.min(width, Math.max(1, preferred.width));
+      r.width = phone.matches ? width : Math.min(width, Math.max(1, preferred.width));
       r.height = Math.min(height, Math.max(1, preferred.height));
-      r.x = w.dock === "left" ? b.x : w.dock === "right" ? b.x + b.width - r.width : Math.max(b.x, Math.min(b.x + b.width - r.width, preferred.x));
+      r.x = dock === "left" || phone.matches ? b.x : dock === "right" ? b.x + b.width - r.width : Math.max(b.x, Math.min(b.x + b.width - r.width, preferred.x));
       r.y = atBottom ? b.y + b.height - r.height : Math.max(b.y, Math.min(b.y + b.height - r.height, preferred.y));
-      w.node.dataset.sized = "true"; w.node.dataset.dock = w.dock;
+      w.node.dataset.sized = "true"; w.node.dataset.dock = dock;
       w.node.style.left = `${r.x}px`; w.node.style.top = `${r.y}px`;
       w.node.style.width = `${r.width}px`; w.node.style.height = `${r.height}px`;
-      w.node.style.setProperty("--sheet-tab-step", `${Math.min(atBottom ? 72 : 64, (atBottom ? r.width : r.height - 7) / Math.max(1, w.tabCount || NAMES.length))}px`);
+      w.node.style.setProperty("--sheet-tab-step", `${Math.min(atBottom ? 72 : 64, (atBottom ? r.width - (phone.matches ? PHONE_TAB_INSET : 0) : r.height - 7) / Math.max(1, w.tabCount || NAMES.length))}px`);
+      if (w.node === root) {
+        const lift = atBottom && r.height <= Math.max(b.height - STICK_ROOM, drawerHeight(b));
+        root.dataset.sticks = String(lift);
+        if (lift) parent.style.setProperty("--drawer-height", `${r.height}px`);
+        else parent.style.removeProperty("--drawer-height");
+      }
     };
     const placeFooter = () => {
       const owner = isOpen(main) ? main : [...windows].reverse().find(isOpen) || main;
@@ -127,7 +148,9 @@
     else root.style.removeProperty("--sheet-height");
     root.dataset.paired = "false";
     root.dataset.open = String(saved?.open === true);
-    const main = makeWindow(root, NAMES.includes(saved?.tab) ? saved.tab : "roster", readRect(saved?.rect), saved?.dock);
+    // A phone's closed drawer used to save its size as if the visitor had chosen it; those saves count for nothing.
+    const staleDrawer = coarse.matches && saved?.dock === "bottom" && saved?.drawer !== 2;
+    const main = makeWindow(root, NAMES.includes(saved?.tab) ? saved.tab : "roster", staleDrawer ? null : readRect(saved?.rect), staleDrawer ? null : saved?.dock);
     const addWindow = (tab, rect, dock, open = true) => {
       const node = document.createElement("aside"), body = document.createElement("div"), holder = document.createElement("div");
       const tabs = document.createElement("nav");
@@ -160,6 +183,12 @@
         if (name !== "loot") tab.setAttribute("aria-label", count ? `${label}, ${text} new` : label);
       }
     };
+    const expand = root.querySelector(".sheet-expand");
+    const showExpand = () => {
+      const open = isOpen(main), up = !open || main.node.getBoundingClientRect().height < fullHeight(viewport()) - 1;
+      const label = !open ? "Open panel" : up ? "Raise panel" : "Close panel";
+      expand.dataset.dir = up ? "up" : "down"; expand.title = label; expand.setAttribute("aria-label", label);
+    };
     paintBadges = showCounts;
     const refresh = () => {
       for (const panel of panels) {
@@ -181,23 +210,26 @@
           tab.hidden = !available(name) || !folded && (owner ? owner !== w : w !== main);
           tab.setAttribute("aria-selected", String(selected)); tab.tabIndex = selected || !open && !tab.hidden && !index ? 0 : -1;
           tab.setAttribute("aria-controls", `${name}-panel`);
-          tab.title = selected ? w === main ? "Click to close · drag to move" : "Click to close · drag to move or drop onto another panel to merge"
+          tab.title = phone.matches ? selected ? "Tap to close" : "Tap to open" : selected ? w === main ? "Click to close · drag to move" : "Click to close · drag to move or drop onto another panel to merge"
             : owner === w ? "Click to reopen · drag to move or merge" : "Click to select · drag to open a separate panel";
           if (!tab.hidden) tab.style.setProperty("--sheet-tab-index", String(index++));
         }
         w.tabCount = index;
         fit(w);
         w.nav.setAttribute("aria-orientation", w.node.dataset.dock === "bottom" ? "horizontal" : "vertical");
-        w.node.hidden = hidden || folded && w !== main || !index || w !== main && !available(w.tab);
+        w.node.hidden = hidden || (folded || phone.matches) && w !== main || !index || w !== main && !available(w.tab);
         w.body.inert = !open || w.node.hidden;
         w.body.setAttribute("aria-hidden", String(w.body.inert));
       }
-      placeFooter(); showCounts();
+      placeFooter(); showCounts(); showExpand();
       notify();
     };
     const close = (w) => {
       if (w.node.contains(document.activeElement)) document.activeElement.blur();
-      measure(w); w.open = false;
+      // A phone's untouched drawer stays untouched, so the sticks keep riding above it.
+      if (!coarse.matches || w.node.dataset.dock !== "bottom") measure(w);
+      else w.kept = true;
+      w.open = false;
       refresh(); save();
     };
     const remove = (w) => {
@@ -244,7 +276,7 @@
     const finish = (target = null) => {
       if (!gesture) return;
       const g = gesture; gesture = null;
-      suppressClick = g.moved;
+      suppressClick = g.moved || !!g.slid;
       if (g.handle.hasPointerCapture(g.id)) g.handle.releasePointerCapture(g.id);
       showMergeTarget(null);
       g.w.node.classList.remove("sheet-tab-drag", "sheet-moving");
@@ -273,8 +305,8 @@
       if (e.isTrusted) handle.setPointerCapture(e.pointerId);
     });
     const resize = (w, r, corner, dx, dy) => {
-      const b = viewport(), minLeft = b.x + (w.dock === "right" ? TAB_EDGE : 0), maxRight = b.x + b.width - (w.dock === "left" ? TAB_EDGE : 0);
-      const minTop = b.y + (w.dock === "bottom" ? TAB_EDGE : 0), minWidth = Math.min(300, Math.max(1, maxRight - minLeft)), minHeight = Math.min(263, Math.max(1, b.y + b.height - minTop));
+      const dock = w.node.dataset.dock, b = viewport(), minLeft = b.x + (dock === "right" ? TAB_EDGE : 0), maxRight = b.x + b.width - (dock === "left" ? TAB_EDGE : 0);
+      const minTop = b.y + (dock === "bottom" ? TAB_EDGE : 0), minWidth = Math.min(300, Math.max(1, maxRight - minLeft)), minHeight = Math.min(coarse.matches && dock === "bottom" ? drawerHeight(b) : 263, Math.max(1, b.y + b.height - minTop));
       let left = r.x, top = r.y, right = r.x + r.width, foot = r.y + r.height;
       if (corner.includes("w")) left = Math.max(minLeft, Math.min(right - minWidth, left + dx));
       else if (corner.includes("e")) right = Math.min(maxRight, Math.max(left + minWidth, right + dx));
@@ -282,12 +314,21 @@
       else if (corner.includes("s")) foot = Math.min(b.y + b.height, Math.max(top + minHeight, foot + dy));
       Object.assign(w.rect, { x: left, y: top, width: right - left, height: foot - top });
       fit(w);
+      if (w === main) showExpand();
+    };
+    const raise = () => {
+      measure(main);
+      const b = viewport(), height = fullHeight(b);
+      main.rect.height = height; main.rect.y = b.y + b.height - height;
+      refresh(); save();
     };
     on(window, "pointermove", (e) => {
       const g = gesture;
       if (!g || e.pointerId !== g.id) return;
       const dx = e.clientX - g.x, dy = e.clientY - g.y;
       if (!g.moved && dx * dx + dy * dy < 36) return;
+      // A phone's tabs do not drag: a finger that slides off one has changed its mind.
+      if (g.tab && phone.matches) { g.slid = true; return; }
       e.preventDefault(); e.stopPropagation();
       if (!g.moved) {
         g.moved = true;
@@ -311,7 +352,7 @@
       else {
         g.w.rect.x = g.rect.x + dx; g.w.rect.y = g.rect.y + dy;
         g.w.bounds.x = g.w.rect.x; g.w.bounds.y = g.w.rect.y;
-        g.w.dock = nearestDock(g.w.bounds);
+        if (!phone.matches) g.w.dock = nearestDock(g.w.bounds);
         fit(g.w);
       }
       showMergeTarget(targetAt(g, e.clientX, e.clientY));
@@ -328,6 +369,13 @@
       const w = findWindow(e.target);
       if (!w) return;
       if (suppressClick && e.detail !== 0) { suppressClick = false; e.preventDefault(); e.stopImmediatePropagation(); return; }
+      if (e.target.closest(".sheet-expand")) {
+        expand.blur();
+        if (!isOpen(main)) select(main, available(main.tab) ? main.tab : "roster");
+        else if (expand.dataset.dir === "up") raise();
+        else close(main);
+        return;
+      }
       const tab = e.target.closest("[data-tab]");
       if (tab) {
         if (tab.dataset.tab === w.tab && w.node.dataset.open === "true") close(w);
@@ -349,7 +397,7 @@
         const step = e.shiftKey ? 32 : 10, dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
         const dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
         if (handle.dataset.corner || handle.dataset.edge) resize(w, w.bounds, handle.dataset.corner || handle.dataset.edge, dx, dy);
-        else { w.bounds.x += dx; w.bounds.y += dy; w.rect.x = w.bounds.x; w.rect.y = w.bounds.y; w.dock = nearestDock(w.bounds); fit(w); }
+        else { w.bounds.x += dx; w.bounds.y += dy; w.rect.x = w.bounds.x; w.rect.y = w.bounds.y; if (!phone.matches) w.dock = nearestDock(w.bounds); fit(w); }
         refresh(); save();
       }
     });
@@ -364,7 +412,7 @@
       fit(w); refresh(); save();
     });
     const layout = () => { finish(); refresh(); scheduleSave(); };
-    on(window, "resize", layout); on(bottom, "change", layout);
+    on(window, "resize", layout); on(bottom, "change", layout); on(phone, "change", layout);
     if (window.visualViewport) { on(window.visualViewport, "resize", layout); on(window.visualViewport, "scroll", layout); }
     on(window, "pagehide", () => { finish(); save(); });
     let backend = BL.net.state.backend, signedIn = !!BL.net.state.me;

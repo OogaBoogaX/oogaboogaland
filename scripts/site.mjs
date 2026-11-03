@@ -33,6 +33,8 @@ const { site, name, list } = routes;
 rmSync(out, { recursive: true, force: true });
 mkdirSync(join(out, "cards"), { recursive: true });
 mkdirSync(join(out, "media"), { recursive: true });
+copyFileSync(join(root, "src/apple-touch-icon.png"), join(out, "apple-touch-icon.png"));
+copyFileSync(join(root, "src/manifest.webmanifest"), join(out, "manifest.webmanifest"));
 // Stage only catalogue-reviewed assets; never proxy or fetch a supplied media URL.
 const mediaContext = {};
 vm.runInNewContext(readFileSync(join(root, "src/js/studio-catalogue.js"), "utf8"), mediaContext);
@@ -80,7 +82,7 @@ const head = (entry) => {
 for (const entry of list) {
   const page = shell
     .replace(/<title>[^<]*<\/title>/, `<title>${esc(routes.title(entry))}</title>`)
-    .replace("</head>", `  ${head(entry)}\n</head>`);
+    .replace("</head>", `  <link rel="manifest" href="manifest.webmanifest">\n  ${head(entry)}\n</head>`);
   writeFileSync(join(out, entry.path ? `${entry.path}.html` : "index.html"), page);
   if (!entry.image) continue;
   const image = join(root, "cards", `${entry.image}.jpg`);

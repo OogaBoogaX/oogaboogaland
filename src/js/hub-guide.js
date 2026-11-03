@@ -56,6 +56,7 @@
     thanks: "Any time!",
     whoAmI: "I'm Tess, the island's guide. I work its machines and show people round.",
     donate: "Press Feed the Ooga Boogas in the island's drawer: Lightning or on-chain.",
+    donatePhone: "On a phone the drawer skips Feed the Ooga Boogas, so you can see who's talking. Open /donate: Lightning or on-chain.",
     donateKiosk: "Or tip at the Lightning Factory's kiosk and watch your sats cook into bananas.",
     controls: "W A S D moves, drag looks round, scroll zooms, and Space jumps or uses things.",
     controlsMore: "Double-click an Ooga to play it, and hold Left Shift to run.",
@@ -252,7 +253,7 @@
     if (has(q, WORDS.tour)) return { lines: [], go: null, place: null, tour: true };
     const any = placeIn(q, false), place = placeIn(q, true), trip = any >= 0 ? any : last !== null && has(q, WORDS.there) ? last : -1;
     if (trip >= 0 && has(q, WORDS.trip)) return reply(STOPS[trip].lines, trip, trip);
-    if (has(q, WORDS.donate)) return reply(["donate", "donateKiosk"], null, STOPS.findIndex((stop) => stop.id === "factory"));
+    if (has(q, WORDS.donate)) return reply([matchMedia("(pointer: coarse) and (max-width: 720px), (pointer: coarse) and (max-height: 500px)").matches ? "donatePhone" : "donate", "donateKiosk"], null, STOPS.findIndex((stop) => stop.id === "factory"));
     if (place < 0 && has(q, WORDS.controls)) return reply(["controls", "controlsMore", "controlsPhone"]);
     if (has(q, WORDS.signIn)) return reply(["signIn", "signInPerks"]);
     if (place < 0 && has(q, WORDS.news)) return reply(["newsIntro", ...NEWS.slice(0, 3).map((n) => n.line)]);

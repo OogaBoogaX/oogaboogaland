@@ -1,4 +1,4 @@
-// The live players tab beside Ooga Boogas (#361), for signed-in visitors: every player in the island room, grouped by
+// The Online Oogas tab beside Contributing Oogas (#361), for signed-in visitors: every player in the island room, grouped by
 // the zone they are in (zone-map.js), the visitor's own group first with their own row at its head, then the other
 // groups by heading and everyone in a group by name. A row keeps the roster's marks (the online dot, the host's dot,
 // the voice mark, which mutes as it does there), a crosshair that turns the camera (`BL.pilot.turnToward`) and, for
