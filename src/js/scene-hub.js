@@ -1504,7 +1504,7 @@
     if (c.needle) c.needle.rotation.z = Math.PI / 2 - dial * Math.PI;
     c.level = level;
   };
-  const CHALKBOARD_X = 6.75, CHALKBOARD_Z = 2.15, CHALKBOARD_YAW = -0.57;
+  const CHALKBOARD_X = 6.75, CHALKBOARD_Z = 2.15, CHALKBOARD_YAW = -0.57, CHALKBOARD_SCALE = 1.4;
   // Writing on the chalkboard takes an Ooga standing in front of it, within the reach the Sphere's keypad allows
   // (timechain-models.js KEYPAD_REACH), its feet about level with the board's foot.
   const CHALKBOARD_REACH = 2.4, CHALKBOARD_RISE = 1.2;
@@ -1519,8 +1519,12 @@
       const set = BL.dressing.set();
       set.put("chalkboard", 0, 0, 0);
       chalkboardDressing = set.build();
+      // The pick centres and radii live outside the scene graph; match the whole board's scale below.
+      for (let i = 0; i < chalkboardDressing.picks.length; i += 6)
+        for (let j = 2; j < 6; j++) chalkboardDressing.picks[i + j] *= CHALKBOARD_SCALE;
     }
-    const boardGroup = createNode({ position: { x: CHALKBOARD_X, y, z: CHALKBOARD_Z }, rotation: { x: 0, y: CHALKBOARD_YAW, z: 0 } });
+    const boardGroup = createNode({ position: { x: CHALKBOARD_X, y, z: CHALKBOARD_Z }, rotation: { x: 0, y: CHALKBOARD_YAW, z: 0 },
+      scale: { x: CHALKBOARD_SCALE, y: CHALKBOARD_SCALE, z: CHALKBOARD_SCALE } });
     addChild(group, boardGroup);
     const facing = m.ry + CHALKBOARD_YAW;
     chalkboardClearance = { x: wx, y: m.floorY + y, z: wz, rightX: Math.cos(facing), rightZ: -Math.sin(facing), frontX: Math.sin(facing), frontZ: Math.cos(facing) };
@@ -1532,7 +1536,7 @@
       return { x: m.x + cr * lx + sr * lz, y: m.floorY + y + py, z: m.z - sr * lx + cr * lz };
     });
     chalkboard.attach(boardGroup, 0, 0, 0);
-    claim(wx, wz, 0.8);
+    claim(wx, wz, 0.8 * CHALKBOARD_SCALE);
   };
   const dressMouth = (slot, m, group) => {
     // The Canvas 2D fallback keeps the plain island, but the writable board remains available.
@@ -3098,7 +3102,7 @@
       const board = chalkboardClearance, dx = o.x - board.x, dz = o.z - board.z;
       const across = dx * board.rightX + dz * board.rightZ, front = dx * board.frontX + dz * board.frontZ;
       // Keep the board's face and both edges clear without moving the seeded meadow scatter.
-      if (Math.abs(across) < 1.8 + o.footprint && front > 0 && front < 2.4 + o.footprint) return 3;
+      if (Math.abs(across) < 1.8 * CHALKBOARD_SCALE + o.footprint && front > 0 && front < 2.4 + o.footprint) return 3;
     }
     if (Math.hypot(o.x, o.z) - o.footprint < clearance - 1e-9) return 1;
     if (island.path.overlaps(o.x, o.z, o.footprint) || island.overlapsStairs(o.x, o.z, o.footprint)) return 2;
@@ -5618,6 +5622,7 @@
         if (o.prop === "totem") return totemTip(o.totem);
         return PROP_TIPS[o.prop] || "";
       case "piece":
+        if (o.piece === "chalkboard" && chalkboard.writer) return `Chalkboard · ${chalkboard.writer} is writing`;
         if (o.piece === "chalkboard") return COARSE ? "Chalkboard · walk up and tap to write or erase" : "Chalkboard · walk up and press Space to write or erase";
         return PIECES[o.piece] ? PIECES[o.piece][0] : "";
       default:
@@ -8807,7 +8812,8 @@
     stepTweens(dt);
     if (hammock) hammock.syncRopes(RENDER_OPTS.windTime, renderer.kind === "webgl2");
     // Keep the exact camera and controlled actor pose until the board closes; losing the Ooga, or its being moved
-    // away from the board, closes it.
+    // away from the board, closes it, or stops waiting for the room to hand it over.
+    if (chalkboard.waiting && chalkboardRefusal()) chalkboard.close();
     if (chalkboard.openNow) { if (chalkboardRefusal()) chalkboard.close(); }
     else if (clankerPlay.active) clankerPlay.update(dt);
     else if (!cloudHopper.fallView()) pilot.update(dt);
@@ -11712,7 +11718,8 @@
     chalkboard = BL.chalkboard.create({
       renderer,
       onOpen: () => { pilot.setActive(false); pilot.controls.reset(); input.reset(); hud.tooltip.hide(); },
-      onClose: () => { pilot.setActive(true); pilot.controls.reset(); input.reset(); }
+      onClose: () => { pilot.setActive(true); pilot.controls.reset(); input.reset(); },
+      onRefused: (text) => hud.toast(text)
     });
     yield* pause(slice);
     terrainRampRoof = BL.terrainCutaway.createRampRoof(island.cutawaySource, island.geometry, renderer.releaseGeometry);

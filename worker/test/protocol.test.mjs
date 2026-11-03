@@ -1,7 +1,7 @@
 // Pure checks on the room's wire format and limits: no Durable Object, no sockets.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { BOUND_XZ, BOUND_Y_MIN, BOUND_Y_MAX, MESSAGE_MAX, MOVE_HZ, parseClientMessage, playerFromHeaders, spawnPoint, takeToken } from "../src/protocol.js";
+import { BOUND_XZ, BOUND_Y_MIN, BOUND_Y_MAX, CHALK, MESSAGE_MAX, MOVE_HZ, parseClientMessage, playerFromHeaders, spawnPoint, takeToken } from "../src/protocol.js";
 
 test("poses inside the bounds are accepted, rounded and their yaw wrapped", () => {
   const m = parseClientMessage(JSON.stringify({ t: "pose", x: 1.23456, y: -7, z: 3, yaw: 7 }));
@@ -259,6 +259,48 @@ test("NPC followers: every other page showing the island, so a lone host sends n
   const two = [p(1, 10, true), p(2, 20, true), p(3, 30, false)];
   assert.equal(npcFollowers(two, electHost(two)), 1);
   assert.equal(npcFollowers(two, 0), 0, "no host, no followers");
+});
+
+test("chalkboard edits are small integers in frames under the limit, refused whole when malformed", () => {
+  const parse = (m) => parseClientMessage(JSON.stringify({ t: "chalk", ...m }));
+  assert.deepEqual(parse({ k: "take" }), { t: "chalk", k: "take" });
+  assert.deepEqual(parse({ k: "drop", extra: 1 }), { t: "chalk", k: "drop" });
+  assert.deepEqual(parse({ k: "line", m: "e", p: [1, 2, 3, 4] }), { t: "chalk", k: "line", m: "e", p: [1, 2, 3, 4] });
+  assert.deepEqual(parse({ k: "type", c: [["é", 10, 20], ["🍌", 1000, 0]] }), { t: "chalk", k: "type", c: [["é", 10, 20], ["🍌", 1000, 0]] });
+  assert.deepEqual(parse({ k: "wipe", to: "original" }), { t: "chalk", k: "wipe", to: "original" });
+  for (const bad of [{ k: "line", m: "c", p: [1, 2] }, { k: "line", m: "x", p: [1, 2, 3, 4] }, { k: "more", p: [1, 2, 3] },
+    { k: "more", p: [1, 1001] }, { k: "more", p: [0.5, 1] }, { k: "type", c: [["ab", 1, 1]] }, { k: "type", c: [["\u0007", 1, 1]] },
+    { k: "type", c: [] }, { k: "wipe", to: "all" }, { k: "steal" }])
+    assert.equal(parse(bad), null, JSON.stringify(bad));
+  // The page's fullest frames: a line's chunk at the board's far corner, and a chunk of characters JSON escapes.
+  const line = JSON.stringify({ t: "chalk", k: "line", m: "c", p: Array(CHALK.CHUNK * 2).fill(1000) });
+  const typed = JSON.stringify({ t: "chalk", k: "type", c: Array(CHALK.TYPE_CHUNK).fill(["\\", 1000, 1000]) });
+  assert.ok(line.length <= MESSAGE_MAX && typed.length <= MESSAGE_MAX, `${line.length} ${typed.length}`);
+  assert.equal(parseClientMessage(line).p.length, CHALK.CHUNK * 2);
+});
+
+test("a chalkboard edit applies the same anywhere: lines and characters stop at the limits, backspace reaches only its own session", () => {
+  const board = CHALK.board(), start = board.marks.length, session = CHALK.session(board);
+  assert.equal(CHALK.apply(board, { k: "back" }, session), "nothing", "the original message is not a typed character");
+  assert.equal(CHALK.apply(board, { k: "more", p: [1, 1] }, session), "closed", "no line is open");
+  assert.equal(CHALK.apply(board, { k: "line", m: "c", p: [0, 0, 500, 1000] }, session), null);
+  assert.deepEqual(board.marks.at(-1), { t: "c", s: 2, p: [0, 0, 0.5, 1] });
+  assert.equal(CHALK.apply(board, { k: "type", c: [["a", 250, 500]] }, session), null);
+  assert.equal(CHALK.apply(board, { k: "back" }, session), null);
+  assert.equal(board.marks.length, start + 1);
+  const other = CHALK.session(board);
+  CHALK.apply(board, { k: "type", c: [["b", 1, 1]] }, session);
+  assert.equal(CHALK.apply(board, { k: "back" }, CHALK.session(board)), "nothing", "a later session cannot take back an earlier one's writing");
+  assert.equal(other.from, start + 1);
+  const long = CHALK.board([]), s = CHALK.session(long);
+  CHALK.apply(long, { k: "line", m: "c", p: [0, 0, 1, 1] }, s);
+  for (let i = 0; i < CHALK.LINE_POINTS; i++) CHALK.apply(long, { k: "more", p: [i % 1000, 5] }, s);
+  assert.equal(long.marks[0].p.length, CHALK.LINE_POINTS * 2, "a line stops at its point limit");
+  assert.equal(long.points, CHALK.LINE_POINTS);
+  assert.deepEqual(CHALK.restore(long.marks), long.marks, "and a board at its limits reads back");
+  assert.equal(CHALK.apply(long, { k: "wipe", to: "clean" }, s), null);
+  assert.deepEqual(long, { marks: [], points: 0 });
+  assert.equal(CHALK.restore([{ t: "t", ch: "\u0000", p: [0, 0] }]), null);
 });
 
 test("a wallet event is a device number, its fuse and, where it lies or flies, a bounded place; anything else is ignored", () => {
