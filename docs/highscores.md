@@ -17,7 +17,7 @@ them. Every duplicate has its own record.
 
 | Game | IDs / records | Comparison |
 |---|---|---|
-| Cloud Hopper | One board per level, `cloud-hopper-l1` to `cloud-hopper-l4` (each its own game and machine); one best per GitHub username on each | Lowest completion time, integer milliseconds; levels never compared |
+| Cloud Hopper | One board per level, `cloud-hopper-l1` to `cloud-hopper-l4` (each its own game and machine); fastest distinct runs, with repeated GitHub usernames allowed in the top ten | Lowest completion time, integer milliseconds; levels never compared |
 | Cloud Hopper, before levels | `cloud-hopper` / `cloud-hopper-1`, retired: read, never written | As above |
 | Ooga Rally | One cabinet; `race-1-{bay,gorge,peak}[-m]-{lap,race}` | Lowest time, integer milliseconds; each track, mirror and metric separate |
 | Ooga Drop | `drop-1` | Highest eligible landing score |
@@ -70,10 +70,17 @@ update, including when sign-out, account deletion or a username claim raced the 
 Unattributed machine scores retain no owner and survive account deletion.
 
 Each Cloud Hopper board retains the all-time top 1,024 personal bests, so its JSON row remains
-bounded. A newcomer enters a full board only by beating its last score; ties keep the
+bounded. Migration `0007_cloud_hopper_runs.sql` also retains up to 1,024 distinct finishes per
+level in `cloud_hopper_runs`. Its public `runs` array contains the fastest ten, ordered by
+milliseconds, first achievement, numeric account ID and run ID; multiple rows may name the
+same player. Personal bests remain eligible if their run fell outside retained history and
+other accounts are later removed. The list and revision are read in one SQL snapshot.
+The migration imports only existing bests and leaves their scores, timestamps and replay
+pointers intact. It cannot reconstruct overwritten historical finishes. A newcomer enters
+a full board only by beating its last score; ties keep the
 existing player. Its SQL update and removal of the last entry are one D1 batch transaction.
-Machine dictionaries are bounded by the registry's fixed machine IDs. There is no run
-history or per-frame telemetry table.
+Machine dictionaries are bounded by the registry's fixed machine IDs. The retained run
+history is bounded; there is no per-frame telemetry table.
 
 ## API and client lifecycle
 
@@ -90,7 +97,12 @@ history or per-frame telemetry table.
 - `POST /api/highscores/<game>` accepts `{machine, score, version, playerId}`. The Worker
   resolves identity from the existing session. `playerId` is only a guard against a
   different account's cookie replacing the account that began the run; a mismatch is 409.
-  Caller-supplied usernames or extra fields are rejected.
+  For level boards, an optional UUID `runId` identifies one completed run. The page reuses
+  its replay ticket token as that ID when available, including numeric fallback after an
+  upload timeout, or generates a UUID when replay tickets are unavailable. Retrying a
+  retained ID cannot append or alter its run. Older clients without an ID retain their
+  personal-best submission behavior; accepted improvements are preserved as legacy runs.
+  Caller-supplied usernames or other extra fields are rejected.
 - Writes require same-site request metadata, JSON bodies of at most 512 bytes, a known
   game and machine, the current scoring version, and a positive integer within its game's
   bound. The server compares and replaces an entry inside SQL; retries, worse scores and
@@ -106,8 +118,9 @@ The new `highscoreSnapshots` capability enables combined Arcade reads; older Wor
 keep the per-game read contract.
 It captures the signed-in account at the start of a run and checks it again at completion.
 Starting signed out, signing out mid-run, or changing accounts makes that run local only.
-The Worker also authenticates every submission. There is no server-issued run ticket or
-server replay in this version: a client can fabricate a plausible score. These are
+The Worker also authenticates every submission. Optional winning replays have session-bound
+tickets, but numeric submissions remain client-reported: a client can fabricate a plausible
+score. These are
 community high scores, not proof of a competitively verified performance.
 
 Local personal records remain playable offline. Shared records begin empty; existing
@@ -116,7 +129,7 @@ whose identity was not stored. Fetches happen when boards are used and submissio
 at eligible completion, never in a per-frame loop.
 
 Cloud Hopper's timer shows the selected level's global leader, following the same time,
-achievement timestamp and username ordering as its shared top ten. Loading, unavailable,
+achievement timestamp and stable identity ordering as its shared top ten. Loading, unavailable,
 empty and stale replies are labeled; a failed refresh retains the last good shared result.
 Browser personal bests remain separately labeled in the selection/results panel. Only the
 selected board is watched, using the existing entry, run-start and tab-return refreshes.
@@ -134,7 +147,9 @@ score rules; continued and ordinary runs share the machine record.
 Only a successful change to a score row calls `ROOM.getByName("island").refreshHighscores(game)`.
 This binding-only RPC has no public HTTP or WebSocket command. It accepts a game id,
 reads D1 itself and broadcasts `{t: "highscore", board}` on the existing signed-in sockets.
-Rejected, equal and worse scores do not call it. The Worker uses `waitUntil` so room
+Rejected scores and duplicate submissions do not call it. A distinct Cloud Hopper finish
+retained in the run board notifies watchers even when it is slower than that player’s best.
+The Worker uses `waitUntil` so room
 latency does not delay the submitter's score response. No guest live socket is opened.
 
 `0004_highscore_notifications.sql` adds a pending-revision table with at most one row
@@ -201,7 +216,8 @@ browser networking; they do not replace a two-player staging smoke test or CI at
 ## Wrangler and rollout
 
 The existing migration directory and deploy workflows apply `0004_highscore_notifications.sql` and
-`0005_cloud_hopper_levels.sql` before the Worker. The latter adds the four level rows. No
+`0005_cloud_hopper_levels.sql`, `0006_cloud_hopper_replays.sql` and `0007_cloud_hopper_runs.sql`
+before the Worker. These add the level rows, replay registry and bounded run history. No
 `d1 create`, new database binding, secret, Durable Object or scheduled job is needed.
 The configs add limiter namespaces `2006` on staging and `1006` in production; the local
 donations preview uses `3006` and still keeps scores in its local D1.

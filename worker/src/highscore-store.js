@@ -10,9 +10,25 @@ const view = row => {
   // The write rules bound these dictionaries; also bound frames before parsing unexpected database data.
   if (row.highscores.length > 100000 || row.achieved.length > 100000) throw new Error("Oversized scores");
   return { game: row.game_id, highscores: JSON.parse(row.highscores), achieved: JSON.parse(row.achieved), version: rule.version,
-    scoreType: rule.scoreType, direction: rule.direction, unit: rule.unit, revision: row.revision };
+    scoreType: rule.scoreType, direction: rule.direction, unit: rule.unit, revision: row.revision,
+    ...(row.runs === undefined ? {} : { runs: JSON.parse(row.runs) }) };
 };
-export const readHighscores = async (db, game) => view(await db.prepare(`SELECT ${COLUMNS} FROM game_highscores WHERE game_id = ?`).bind(game).first());
+export const readHighscores = async (db, game) => {
+  // Read the run list and revision in one SQLite snapshot; a delayed list cannot carry a newer revision.
+  const runs = /^cloud-hopper-l[1-4]$/.test(game) ? `, (SELECT json_group_array(json_object(
+    'username', username, 'score', score, 'achieved', achieved)) FROM (
+      SELECT r.run_id, lower(p.login) AS username, r.score, r.achieved, r.player_id FROM cloud_hopper_runs r
+      JOIN players p ON p.id = r.player_id WHERE r.game = game_highscores.game_id
+      UNION ALL
+      SELECT 'best', h.key, h.value, json_extract(g.achieved, '$.' || json_quote(h.key)),
+        json_extract(g.owners, '$.' || json_quote(h.key))
+      FROM game_highscores g, json_each(g.highscores) h WHERE g.game_id = game_highscores.game_id
+        AND NOT EXISTS (SELECT 1 FROM cloud_hopper_runs r WHERE r.game = g.game_id
+          AND r.player_id = json_extract(g.owners, '$.' || json_quote(h.key)) AND r.score = h.value
+          AND r.achieved = json_extract(g.achieved, '$.' || json_quote(h.key)))
+      ORDER BY score, achieved, player_id, run_id LIMIT 10)) AS runs` : "";
+  return view(await db.prepare(`SELECT ${COLUMNS}${runs} FROM game_highscores WHERE game_id = ?`).bind(game).first());
+};
 export const readArcade = async db => {
   const { results } = await db.prepare(`SELECT ${COLUMNS} FROM game_highscores WHERE game_id IN (${rules.arcade.map(() => "?").join(",")})`)
     .bind(...rules.arcade).all();

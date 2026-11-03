@@ -59,16 +59,17 @@ const arcadeSnapshot = async (url, db, cache) => {
   try { return await pending; } finally { if (running.get(url.origin) === pending) running.delete(url.origin); }
 };
 
-export const improve = async (db, game, rule, machine, score, found, after = [], ticket = null) => {
+export const improve = async (db, game, rule, machine, score, found, after = [], ticket = null, runId = ticket?.token || null) => {
   const { player, session } = found;
   const attributed = rule.scoreType === "ooga", key = attributed ? player.login.toLowerCase() : machine;
-  const path = "$." + JSON.stringify(key), at = Date.now();
+  const path = "$." + JSON.stringify(key), at = Date.now(), level = /^cloud-hopper-l[1-4]$/.test(game);
   const better = rule.direction === "asc" ? "<" : ">", worst = rule.direction === "asc" ? "MAX" : "MIN";
   const change = db.prepare(`UPDATE game_highscores SET
     highscores = json_set(highscores, ?1, ?2),
     owners = CASE WHEN ?3 THEN json_set(owners, ?1, ?4) ELSE owners END,
     achieved = json_set(achieved, ?1, MAX(updated_at + 1, ?5)), revision = revision + 1, updated_at = MAX(updated_at + 1, ?5)
     WHERE game_id = ?6 AND rules_version = ?7
+      ${level && runId ? `AND NOT EXISTS (SELECT 1 FROM cloud_hopper_runs WHERE game = ?6 AND player_id = ?4 AND run_id = ?13)` : ""}
       ${ticket ? `AND EXISTS (SELECT 1 FROM cloud_hopper_replay_tickets WHERE token = ?11 AND hash = ?12
         AND player_id = ?4 AND game = ?6 AND session_hash = ?10 AND expires_at > ?5)` : ""}
       AND EXISTS (SELECT 1 FROM players WHERE id = ?4 AND login = ?8 AND banned_at IS NULL)
@@ -78,7 +79,7 @@ export const improve = async (db, game, rule, machine, score, found, after = [],
       AND (NOT ?3 OR json_extract(highscores, ?1) IS NOT NULL
         OR (SELECT count(*) FROM json_each(highscores)) < ?9
         OR ?2 ${better} (SELECT ${worst}(value) FROM json_each(highscores)))`)
-    .bind(path, score, attributed ? 1 : 0, player.id, at, game, rule.version, player.login, PLAYER_LIMIT, session.token_hash, ...(ticket ? [ticket.token, ticket.hash] : []));
+    .bind(path, score, attributed ? 1 : 0, player.id, at, game, rule.version, player.login, PLAYER_LIMIT, session.token_hash, ...(ticket || level && runId ? [ticket?.token || null, ticket?.hash || null] : []), ...(level && runId ? [runId] : []));
   if (!attributed) return (await change.run()).meta.changes > 0;
   // At most one newcomer entered the bounded board. Drop its worst entry in the same D1
   // transaction, with the latest achievement losing a tie, then the larger stable account id.
@@ -87,11 +88,24 @@ export const improve = async (db, game, rule, machine, score, found, after = [],
     CROSS JOIN json_each(achieved, '$.' || json_quote(h.key)) a
     CROSS JOIN json_each(owners, '$.' || json_quote(h.key)) o
     ORDER BY h.value ${order}, a.value DESC, o.value DESC LIMIT 1)`;
-  const result = await db.batch([change, db.prepare(`UPDATE game_highscores SET
+  const run = level ? db.prepare(`INSERT OR IGNORE INTO cloud_hopper_runs(game, run_id, player_id, score, achieved)
+    SELECT ?6, COALESCE(?13, 'legacy:' || ?4 || ':' || ?2 || ':' || json_extract(achieved, ?1)), ?4, ?2,
+      CASE WHEN changes() > 0 THEN json_extract(achieved, ?1) ELSE MAX(updated_at + 1, ?5) END
+    FROM game_highscores WHERE game_id = ?6 AND rules_version = ?7
+      AND (?13 IS NOT NULL OR changes() > 0)
+      AND EXISTS (SELECT 1 FROM players WHERE id = ?4 AND login = ?8 AND banned_at IS NULL)
+      AND EXISTS (SELECT 1 FROM sessions WHERE token_hash = ?10 AND player_id = ?4 AND expires_at > unixepoch())
+      ${ticket ? `AND EXISTS (SELECT 1 FROM cloud_hopper_replay_tickets WHERE token = ?11 AND hash = ?12
+        AND player_id = ?4 AND game = ?6 AND session_hash = ?10 AND expires_at > ?5)` : ""}
+      AND ((SELECT count(*) FROM cloud_hopper_runs WHERE game = ?6) < ?9
+        OR ?2 < (SELECT MAX(score) FROM cloud_hopper_runs WHERE game = ?6))`)
+    .bind(path, score, attributed ? 1 : 0, player.id, at, game, rule.version, player.login, PLAYER_LIMIT,
+      session.token_hash, ticket?.token || null, ticket?.hash || null, runId) : null;
+  const result = await db.batch([change, ...(run ? [run] : []), db.prepare(`UPDATE game_highscores SET
     highscores = json_remove(highscores, ${last}), owners = json_remove(owners, ${last}),
     achieved = json_remove(achieved, ${last})
     WHERE game_id = ? AND (SELECT count(*) FROM json_each(highscores)) > ?`).bind(game, PLAYER_LIMIT), ...after]);
-  return result[0].meta.changes > 0;
+  return result[0].meta.changes > 0 || !!run && result[1].meta.changes > 0;
 };
 
 // Injecting the session boundary lets the route's actual SQL run against SQLite in its checks.
@@ -113,10 +127,11 @@ export const createHighscoreHandler = (sessionFor = getSessionFromRequest, cache
       if (raw === null) return json({ error: "too large" }, 413);
       let body;
       try { body = JSON.parse(raw); } catch { return json({ error: "bad json" }, 400); }
-      if (!body || Array.isArray(body) || typeof body !== "object" || Object.keys(body).some(key => !["machine", "score", "version", "playerId"].includes(key))
+      if (!body || Array.isArray(body) || typeof body !== "object" || Object.keys(body).some(key => !["machine", "score", "version", "playerId", ...(/^cloud-hopper-l[1-4]$/.test(game) ? ["runId"] : [])].includes(key))
+        || (body.runId !== undefined && (typeof body.runId !== "string" || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(body.runId)))
         || body.version !== rule.version || !rules.valid(game, body.machine, body.score)) return json({ error: "invalid score" }, 400);
       if (body.playerId !== found.player.id) return json({ error: "account changed" }, 409);
-      const changed = await improve(env.DB, game, rule, body.machine, body.score, found);
+      const changed = await improve(env.DB, game, rule, body.machine, body.score, found, [], null, body.runId || null);
       if (changed && env.ROOM) {
         // RPC is available only through the Worker binding, never an HTTP or client message route.
         // The room reads authoritative D1; the caller supplies no score. Durable recovery remains on failure.

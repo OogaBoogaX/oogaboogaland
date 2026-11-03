@@ -29,6 +29,18 @@
       highscores[key] = score;
       achieved[key] = at;
     }
+    let runs;
+    if (data.runs !== undefined) {
+      if (!/^cloud-hopper-l[1-4]$/.test(id) || !Array.isArray(data.runs) || data.runs.length > 10) return null;
+      runs = [];
+      for (const run of data.runs) {
+        if (!isObject(run) || typeof run.username !== "string" || !validLogin(run.username)
+          || !Number.isSafeInteger(run.score) || run.score <= 0 || run.score > game.max
+          || !Number.isSafeInteger(run.achieved) || run.achieved < 0
+          || runs.length && (run.score < runs.at(-1).score || run.score === runs.at(-1).score && run.achieved < runs.at(-1).achieved)) return null;
+        runs.push({ username: run.username, score: run.score, achieved: run.achieved });
+      }
+    }
     const r = data.replay;
     const replay = r && /^[a-f0-9]{64}$/.test(r.hash) && r.version === 1 && r.courseVersion === game.version
       && Number.isSafeInteger(r.bytes) && r.bytes > 0 && r.bytes <= 12 * 1024 * 1024
@@ -36,7 +48,7 @@
       && keys.every(key => highscores[key] > r.score || highscores[key] === r.score && achieved[key] >= r.achieved)
       ? { hash: r.hash, version: 1, courseVersion: r.courseVersion, bytes: r.bytes, username: r.username, score: r.score, achieved: r.achieved } : null;
     return { game: id, version: game.version, scoreType: game.scoreType, direction: game.direction, unit: game.unit,
-      highscores, achieved, revision: data.revision, replay };
+      highscores, achieved, revision: data.revision, replay, ...(runs ? { runs } : {}) };
   };
   // Optional status subscribers keep loading/failure copy separate from existing score callbacks.
   const statusOf = entry => !available() ? entry.data ? "stale" : net.state.resolved ? "unavailable" : "loading" : entry.status;
@@ -199,6 +211,7 @@
     if (!available() || !net.state.resolved || !net.state.me) return null;
     const token = {};
     tickets.set(token, { game: id, playerId: net.state.me.id, generation, sent: new Set(),
+      runId: /^cloud-hopper-l[1-4]$/.test(id) ? crypto.randomUUID() : null,
       replay: BL.cloudHopperReplays?.startTicket(id) });
     return token;
   };
@@ -212,6 +225,10 @@
     writes++;
     const body = { machine, score, version: rules.get(ticket.game).version, playerId: ticket.playerId };
     try {
+      // The replay ticket is also this run's identity on the numeric fallback. A lost
+      // upload response must never append the same finish twice.
+      if (ticket.runId) body.runId = (await ticket.replay)?.token || ticket.runId;
+      if (!current(ticket)) return false;
       const known = get(ticket.game), fastest = known && Math.min(...Object.values(known.highscores));
       if (recording && ticket.replay && BL.cloudHopperReplays && (!known || score <= fastest)) {
         const replay = { ...recording, version: 1, game: ticket.game, playerId: ticket.playerId };
@@ -220,7 +237,7 @@
         if (data && current(ticket)) { publish(ticket.game, data); return true; }
         // Storage/format/capacity failure must not discard the accepted numeric score.
       }
-      // A lost response can safely retry: the Worker only improves records, and preserves equal scores' timestamps.
+      // A lost response retries the same run identity; machine records still only improve.
       for (let attempt = 0; attempt < 2 && current(ticket); attempt++) {
         const result = await request(ticket.game, body);
         if (stopped) return false;

@@ -6841,6 +6841,12 @@ const cloudHopperRecordChecks = async () => {
       H.setHighscores({ highscores: {}, achieved: {} }); const empty = text() === 'No times yet' && button.hidden;
       BL.net.state.me = { login: 'winner' }; H.setHighscores({ highscores: { winner: 19740 }, achieved: {} });
       const signed = text().includes('winner') && document.querySelector('.race-podium li').classList.contains('you');
+      H.setHighscores({ highscores: { winner: 18000 }, achieved: { winner: 3 }, runs: [
+        { username: 'winner', score: 18000, achieved: 3 }, { username: 'winner', score: 19740, achieved: 1 },
+        { username: 'other', score: 20000, achieved: 2 }] });
+      const rows = [...document.querySelectorAll('.race-podium li')];
+      const repeated = rows[0].textContent.includes('winner') && rows[1].textContent.includes('winner')
+        && rows[0].classList.contains('you') && rows[1].classList.contains('you') && text().includes('00:18.00');
       H.setReplayState('off'); button.click();
       const off = !button.disabled && toggles === 1 && button.getAttribute('aria-pressed') === 'false'
         && button.nextElementSibling.classList.contains('cloud-hopper-record-time');
@@ -6851,7 +6857,7 @@ const cloudHopperRecordChecks = async () => {
       H.setLevels({ selected: 2, unlocked: 4, bests: [0, 26540, 0, 0] });
       H.setHighscores({ highscores: { 'long-player-name-with-thirty-nine-chars': 19740 }, achieved: {} });
       H.setHighscoreStatus('stale'); H.show('ready');
-      return { loading, unavailable, leader, refreshing, stale, running, isolated, locked, empty, signed, off, busy, on, retry, missing };
+      return { loading, unavailable, leader, refreshing, stale, running, isolated, locked, empty, signed, repeated, off, busy, on, retry, missing };
     })()`);
     record("cloud hopper record: global leader/ties, four levels, guest/account reads, no local fallback, empty/error/stale states and disabled replay", Object.values(state).every(Boolean), JSON.stringify(state));
     for (const [w, h] of [[1440, 900], [390, 844], [844, 390], [320, 568]]) {
@@ -6888,7 +6894,7 @@ const highscoreClientChecks = async () => {
     let seq = 0, now = 1000;
     const state = { backend: enabled, highscores: enabled, highscoreSnapshots: true, resolved: true, logoutEpoch: 0, me: signed ? { id: 11, login: "score-one" } : null };
     const net = { state, subscribeHighscores(fn) { live.add(fn); return () => live.delete(fn); }, subscribe(fn) { subscribers.add(fn); return () => subscribers.delete(fn); } };
-    const context = { AbortController, Date: class extends Date { static now() { return now; } },
+    const context = { AbortController, crypto: globalThis.crypto, Date: class extends Date { static now() { return now; } },
       window: { BL: { net, hud: { toast: text => toasts.push(text) } },
         setTimeout(fn, ms) { timers.set(++seq, { fn, ms }); return seq; }, clearTimeout(id) { timers.delete(id); } },
       document: { hidden: false, addEventListener(type, fn) { events.set(type, fn); }, removeEventListener(type) { events.delete(type); } },
@@ -6926,7 +6932,7 @@ const highscoreClientChecks = async () => {
     const ticket = f.scores.begin(game); f.reply(0, game); await flush();
     const pending = f.scores.submit(ticket, game, 1000, { duration: 1 }); await flush();
     const fallback = f.requests.length === 2 && f.requests[1].options.method === "POST"
-      && JSON.parse(f.requests[1].options.body).score === 1000;
+      && JSON.parse(f.requests[1].options.body).score === 1000 && JSON.parse(f.requests[1].options.body).runId === "test";
     f.reply(1, game, { "score-one": 1000 }, 1); const saved = await pending;
     f.scores.dispose();
     const other = fixture(true); let release;
@@ -6936,6 +6942,28 @@ const highscoreClientChecks = async () => {
     other.account({ id: 12, login: "other" }); release(null); const refused = !await changed;
     const noWrite = other.requests.every(r => r.options.method === "GET"); other.scores.dispose();
     record("highscores: replay upload failure preserves the numeric score, but account changes prevent any fallback write", fallback && saved && refused && noWrite);
+  }
+  {
+    const f = fixture(true), game = "cloud-hopper-l1", run = f.scores.begin(game);
+    f.reply(0, game); await flush();
+    const saving = f.scores.submit(run, game, 30742); await flush();
+    const first = JSON.parse(f.requests[1].options.body);
+    f.reply(1, game, {}, 0, 503); await flush();
+    const retry = JSON.parse(f.requests[2].options.body);
+    const rule = f.rules.get(game), runs = [
+      { username: "score-one", score: 29000, achieved: 2 }, { username: "score-one", score: 30742, achieved: 1 }];
+    const board = { game, version: 1, scoreType: rule.scoreType, direction: rule.direction, unit: rule.unit,
+      highscores: { "score-one": 29000 }, achieved: { "score-one": 2 }, revision: 3, runs };
+    f.requests[2].resolve({ ok: true, headers: { get: () => "application/json" }, json: async () => board });
+    const saved = await saving, accepted = f.scores.get(game).runs;
+    const next = f.scores.begin(game), again = f.scores.submit(next, game, 28000); await flush();
+    const distinct = JSON.parse(f.requests[3].options.body).runId !== first.runId;
+    f.requests[3].resolve({ ok: true, headers: { get: () => "application/json" }, json: async () => ({ ...board, revision: 4,
+      runs: [{ username: "score-one", score: -1, achieved: 1 }] }) });
+    await again;
+    record("highscores: distinct runs retain duplicate usernames, retry one stable ID and reject malformed run lists",
+      saved && first.runId === retry.runId && distinct && accepted.length === 2 && f.scores.get(game).revision === 3);
+    f.scores.dispose();
   }
   {
     // Regression: a failed refresh previously left an apparently current board, with no loading/error signal.
