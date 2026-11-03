@@ -533,6 +533,7 @@
         </span>
         <span class="sheet-foot-meta">
           <span class="account-room" id="account-room" hidden></span>
+          <button type="button" class="account-mic" id="account-mic" aria-haspopup="listbox" aria-expanded="false" aria-label="Microphone" hidden><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill-rule="evenodd" d="M12 1a4 4 0 0 1 4 4v6a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4Zm-2.2 3.1h4.4v1h-4.4Zm0 2.6h4.4v1h-4.4Z"/><path d="M4 9v2a8 8 0 0 0 16 0V9M12 19v3M8 22h8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
           <span class="quality" id="quality" aria-live="polite"></span>
           <button type="button" class="link" data-action="reset">Reset demo</button>
         </span>
@@ -1727,6 +1728,7 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
       </div>
     </div>
     <output class="mic-note" id="mic-note" data-muted="false" hidden></output>
+    <div class="mic-menu" id="mic-menu" role="listbox" aria-label="Microphone" hidden></div>
     <!-- HALLOWEEN: the ghost hunt's HUD (ghost-hud.js shows and hides it; no data-scene, or every arrival would show it). -->
     <ol class="ghost-scores" id="ghost-scores" aria-label="Hunters' points" hidden></ol>
     <p class="ghost-halving" id="ghost-halving" role="status" hidden>Halving · rifles at half power</p>

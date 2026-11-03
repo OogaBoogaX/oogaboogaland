@@ -1850,6 +1850,24 @@
     dismissOutside(el.recipe, closeRecipe);
     dismissOutside(el.board, () => mainBoard.close());
     dismissOutside($("donation-popup"), () => BL.donationPopup.closeOutside());
+    // The microphone button names the live device in its tooltip and lists the others on a click. Its own click is
+    // the exception to the outside press, so it closes and opens on the same press as a toggle rather than reopening.
+    const micButton = $("account-mic"), micMenu = $("mic-menu");
+    on(micButton, "click", () => { if (micMenuOpen) closeMicMenu(); else void openMicMenu(); });
+    on(micMenu, "click", (e) => {
+      const row = e.target.closest(".mic-option");
+      if (!row) return;
+      closeMicMenu();
+      micButton.blur();
+      void BL.voice.selectDevice(row.dataset.deviceId);
+    });
+    on(document, "pointerdown", (e) => {
+      if (!micMenuOpen || micMenu.contains(e.target) || micButton.contains(e.target)) return;
+      closeMicMenu();
+    }, true);
+    // Escape is taken by the window's handler above, before the sheet's; a resize or rotation moves the button the
+    // list was laid beside, so the list goes rather than sitting where it no longer belongs.
+    on(window, "resize", () => closeMicMenu());
     // The prompt is written to be pasted, so it leaves in one click.
     const copyRecipe = (button) => {
       const text = el.recipeText.textContent;
@@ -2140,6 +2158,9 @@
       // Chat owns IME state and first returns focus from its editor to its tab.
       if (e.target.id === "chat-input" || e.target.id === "chat-display") return;
       if (document.querySelector("dialog:modal") || e.target.closest && e.target.closest('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+      // The microphone list sits outside the sheet's windows and outside the `outside` list (its own press toggles
+      // it), so Escape takes it before the sheet closes.
+      if (micMenuOpen) { closeMicMenu(); e.preventDefault(); e.stopImmediatePropagation(); return; }
       let closed = false;
       if (!panelsHidden && floatingBoards.length) {
         floatingBoards[floatingBoards.length - 1].escape();
@@ -2297,6 +2318,7 @@
       el.hint.classList.remove("show");
       el.hint.hidden = true;
       el.wpNav.hidden = true;
+      closeMicMenu();
       tooltip.hide();
       clearModeHold();
       modePointer = -1;
@@ -2340,7 +2362,51 @@
   // Net and voice emits re-run this several times a second with the same outcome; last-written
   // records keep an unchanged textContent from re-invalidating the line.
   let accountBackend = null, accountMe = null, accountName = null, accountWords = null, accountWordsHidden = null;
-  let accountLive = null, accountRejoinHidden = null, accountVoiceHidden = null, accountVoiceWords = null, accountVoicePressed = null, accountLeaveHidden = null, accountVoiceDisabled = null, accountVoiceTip = null;
+  // The microphone picker. The button is hidden until a microphone is live or previewed, since the browser gives no
+  // device name before permission; its tooltip names the device and says a click picks another, and the list is asked
+  // for on the click (labels are blank before that) and laid above the button as a fixed popover.
+  let micMenuOpen = false, micMenuBusy = false;
+  const closeMicMenu = () => {
+    if (!micMenuOpen) return;
+    micMenuOpen = false;
+    const menu = $("mic-menu");
+    menu.hidden = true;
+    menu.replaceChildren();
+    $("account-mic").setAttribute("aria-expanded", "false");
+  };
+  const openMicMenu = async () => {
+    if (micMenuBusy || micMenuOpen) return;
+    micMenuBusy = true;
+    try {
+      const devices = await BL.voice.devices();
+      const inputs = devices.filter((device) => device.deviceId);
+      if (!inputs.length) return;
+      const menu = $("mic-menu"), button = $("account-mic");
+      // The microphone can drop while the list is in flight; a hidden glyph has nowhere to open the list beside.
+      if (button.hidden) return;
+      menu.replaceChildren();
+      for (const device of inputs) {
+        const row = document.createElement("button");
+        row.type = "button"; row.className = "mic-option"; row.dataset.deviceId = device.deviceId;
+        row.setAttribute("role", "option");
+        row.setAttribute("aria-selected", String(device.deviceId === BL.voice.stats.deviceId));
+        row.textContent = device.label || "Microphone";
+        menu.append(row);
+      }
+      menu.hidden = false;
+      micMenuOpen = true;
+      const rect = button.getBoundingClientRect(), width = menu.offsetWidth;
+      // Above the button, and never past the screen's edge: a long label on a narrow sheet must still fit.
+      menu.style.left = `${Math.round(Math.max(8, Math.min(rect.left, window.innerWidth - width - 8)))}px`;
+      menu.style.top = `${Math.round(Math.max(8, rect.top - menu.offsetHeight - 6))}px`;
+      button.setAttribute("aria-expanded", "true");
+    } catch {
+      // No list to offer: the tooltip still says which microphone is on.
+    } finally {
+      micMenuBusy = false;
+    }
+  };
+  let accountLive = null, accountRejoinHidden = null, accountVoiceHidden = null, accountVoiceWords = null, accountVoicePressed = null, accountLeaveHidden = null, accountVoiceDisabled = null, accountVoiceTip = null, accountMicName = null;
   // What voice needs cannot change in a page's life: worked out once, so the button can name what this browser lacks
   // before the visitor is asked to join.
   let voiceSupportReason = null;
@@ -2389,6 +2455,16 @@
     if (voiceTip !== accountVoiceTip) { accountVoiceTip = voiceTip; voiceButton.title = voiceTip; }
     const pressed = String(voice.enabled && !voice.muted);
     if (pressed !== accountVoicePressed) { accountVoicePressed = pressed; voiceButton.setAttribute("aria-pressed", pressed); }
+    // The microphone this page is on: a glyph whose tooltip names the device and says a click picks another. It stays
+    // hidden until a microphone is live or previewed, since the browser names no device before permission.
+    const micName = (voice.publishing || voice.preflight) && voice.deviceLabel ? voice.deviceLabel : "";
+    if (micName !== accountMicName) {
+      accountMicName = micName;
+      const micLine = $("account-mic");
+      micLine.hidden = !micName;
+      micLine.title = micName ? `${micName} \u00b7 Click to choose a different microphone` : "";
+      if (!micName) closeMicMenu();
+    }
     const leaveHidden = voiceHidden || !voice.enabled;
     if (leaveHidden !== accountLeaveHidden) { accountLeaveHidden = leaveHidden; $("account-voice-leave").hidden = leaveHidden; }
   };

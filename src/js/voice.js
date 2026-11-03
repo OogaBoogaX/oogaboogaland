@@ -67,10 +67,10 @@
   const subs = new Map();
   // Each wanted voice's publication count from the room: a new count is a microphone published again.
   const wantedGen = new Map();
-  const stats = { enabled: false, muted: false, alone: false, micWanted: false, speaking: false, joining: false, peers: 0, hearing: 0, error: "", micError: "", publishing: false, blocked: false, ready: false, preflight: false, preflightPending: false, permission: "unknown", deviceId: "", receiveLevel: 1, micLevel: 0, receiveState: "off", radius: 0 };
+  const stats = { enabled: false, muted: false, alone: false, micWanted: false, speaking: false, joining: false, peers: 0, hearing: 0, error: "", micError: "", publishing: false, blocked: false, ready: false, preflight: false, preflightPending: false, permission: "unknown", deviceId: "", deviceLabel: "", receiveLevel: 1, micLevel: 0, receiveState: "off", radius: 0 };
   const samples = new Float32Array(SAMPLES);
   const mutedLogins = new Set();
-  let mic = null, pubPc = null, subPc = null, desired = [], queue = Promise.resolve();
+  let mic = null, pubPc = null, pubSender = null, subPc = null, desired = [], queue = Promise.resolve();
   let listenerCount = null;
   let lifecycle = 0, micGeneration = 0, microphoneWanted = stats.micWanted = false;
   let cleanup = Promise.resolve(), receiverOpening = null;
@@ -352,6 +352,7 @@
       pubPc = pc;
       try {
         const tx = pc.addTransceiver(mic.getAudioTracks()[0], { direction: "sendonly" });
+        pubSender = tx.sender;
         const offer = await pc.createOffer(); valid();
         await pc.setLocalDescription(offer); valid();
         await gathered(pc); valid();
@@ -362,7 +363,7 @@
         await api("live", null, token); valid();
         return;
       } catch (err) {
-        pc.close(); if (pubPc === pc) pubPc = null;
+        pc.close(); if (pubPc === pc) { pubPc = null; pubSender = null; }
         valid();
         if (attempt) throw err;
       }
@@ -378,7 +379,7 @@
     speakTimer = 0;
     // Retire connections before close callbacks or UI notifications can observe them.
     const oldPub = pubPc, oldSub = subPc;
-    pubPc = subPc = null;
+    pubPc = subPc = null; pubSender = null;
     stats.enabled = false;
     if (oldPub) oldPub.close();
     if (oldSub) oldSub.close();
@@ -435,8 +436,18 @@
       if (token === lifecycle) { stats.joining = false; emit(); }
     }
   };
-  const micConstraints = () => ({ audio: { echoCancellation: true, noiseSuppression: true,
-    autoGainControl: true, ...(stats.deviceId ? { deviceId: { exact: stats.deviceId } } : {}) } });
+  const micConstraints = (deviceId = stats.deviceId) => ({ audio: { echoCancellation: true, noiseSuppression: true,
+    autoGainControl: true, ...(deviceId ? { deviceId: { exact: deviceId } } : {}) } });
+  // The microphone this page is on, as its track names it, so a visitor with several knows which one is live, and
+  // the device id it reports, so the picker marks the right row after a plain Join.
+  const nameMic = (stream) => {
+    const track = stream.getAudioTracks()[0];
+    stats.deviceLabel = track && track.label ? track.label : "";
+    if (track && typeof track.getSettings === "function") {
+      const settings = track.getSettings();
+      if (settings && settings.deviceId) stats.deviceId = settings.deviceId;
+    }
+  };
   const devices = async () => {
     const list = await navigator.mediaDevices.enumerateDevices();
     return list.filter((device) => device.kind === "audioinput").map((device) => ({ deviceId: device.deviceId, label: device.label }));
@@ -457,6 +468,7 @@
         for (const track of stream.getTracks()) track.stop(); return false;
       }
       mic = stream; micMeter = meter(stream);
+      nameMic(stream);
       stats.preflight = true; stats.preflightPending = false; stats.permission = "granted";
       window.clearInterval(speakTimer); speakTimer = window.setInterval(poll, SPEAK_MS);
       emit(); return true;
@@ -480,7 +492,49 @@
     if (!stats.enabled) { window.clearInterval(speakTimer); speakTimer = 0; }
     emit();
   };
+  // Switching microphone during a call keeps it: the publishing sender's track is replaced, so the same publication
+  // carries the new device — the room's count does not move and nobody re-pulls — and the receive side is untouched.
+  // A device that cannot be acquired leaves the old microphone publishing and says why.
+  const swapDevice = async (deviceId) => {
+    const token = lifecycle;
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia(micConstraints(deviceId));
+    } catch (err) {
+      if (token === lifecycle) {
+        stats.micError = err.name === "NotAllowedError" ? "microphone blocked" : "microphone unavailable";
+        emit();
+      }
+      return false;
+    }
+    const track = stream.getAudioTracks()[0];
+    if (token !== lifecycle || !track || !pubSender || !pubPc || pubPc.connectionState === "closed") {
+      for (const t of stream.getTracks()) t.stop();
+      return false;
+    }
+    const old = mic;
+    try {
+      await pubSender.replaceTrack(track);
+    } catch {
+      for (const t of stream.getTracks()) t.stop();
+      if (token === lifecycle) { stats.micError = "microphone could not be switched"; emit(); }
+      return false;
+    }
+    if (token !== lifecycle) { for (const t of stream.getTracks()) t.stop(); return false; }
+    mic = stream; stats.micError = "";
+    nameMic(stream);
+    track.enabled = !stats.muted && !stats.alone;
+    if (micMeter) micMeter.source.disconnect();
+    micMeter = meter(stream);
+    stats.deviceId = deviceId;
+    if (old && old !== stream) for (const t of old.getTracks()) t.stop();
+    emit();
+    return true;
+  };
   const selectDevice = async (deviceId) => {
+    // A call in progress keeps it: the new device replaces the track it publishes. A preview, or a listener with no
+    // microphone, goes the old way, releasing the microphone first.
+    if (stats.publishing && !stats.joining) return swapDevice(deviceId);
     if (stats.publishing || microphoneWanted) dropMic();
     return preflight(deviceId);
   };
@@ -517,6 +571,7 @@
       const stream = mic || await navigator.mediaDevices.getUserMedia(micConstraints());
       if (token !== lifecycle || generation !== micGeneration || !microphoneWanted) { for (const track of stream.getTracks()) track.stop(); return; }
       mic = stream; stats.permission = "granted";
+      nameMic(stream);
       for (const track of mic.getAudioTracks()) track.enabled = !stats.muted;
       micMeter = micMeter || meter(mic);
       gate();
@@ -636,7 +691,7 @@
     if (micMeter) micMeter.source.disconnect();
     micMeter = null;
     if (pubPc) pubPc.close();
-    pubPc = null; stats.publishing = false; stats.speaking = false; stats.alone = false;
+    pubPc = null; pubSender = null; stats.publishing = false; stats.speaking = false; stats.alone = false;
     stats.muted = true; BL.net.setMuted(true);
     cleanup = api("unpublish").catch(() => {});
     emit();
