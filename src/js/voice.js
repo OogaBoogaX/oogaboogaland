@@ -44,8 +44,8 @@
 // Safari suspends or interrupts that context (a call, another app), which silences every voice, so then the voices
 // count as blocked, as a refused element play does, and the next tap or key wakes it (`wake`). `fades` says whether a
 // range can be heard at all: where the element's volume is honoured, or through a gain.
-// Exports enable, listen, dropMic, preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, setMuted, toggle, restart, stop,
-// setPeers, subscribe, dispose, inspect, speaking, muteLocal, mutedLocally, setRadius, falloff, fades, RADIUS_MIN, RADIUS_MAX and stats.
+// Exports support, probe, ICE_BLOCKED, enable, listen, dropMic, preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, setMuted,
+// toggle, restart, stop, setPeers, subscribe, dispose, inspect, speaking, muteLocal, mutedLocally, setRadius, falloff, fades, RADIUS_MIN, RADIUS_MAX and stats.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -60,9 +60,9 @@
   const RADIUS_KEY = "oogaboogaland.voice-radius", RADIUS_MIN = 5, RADIUS_MAX = 60, FULL_SHARE = 0.5, NEAR_STEP = 0.15;
   // Whether this browser plays an element at the volume it is given; iOS and iPadOS keep every element at 1. Where it does
   // not and Web Audio is there, voices play through gains, each change eased over GAIN_TAU seconds so it never clicks.
-  const probe = document.createElement("audio");
-  probe.volume = 0.5;
-  const ELEMENT_VOLUME = probe.volume === 0.5, GAIN_PLAY = !ELEMENT_VOLUME && typeof window.AudioContext === "function", GAIN_TAU = 0.05;
+  const volumeProbe = document.createElement("audio");
+  volumeProbe.volume = 0.5;
+  const ELEMENT_VOLUME = volumeProbe.volume === 0.5, GAIN_PLAY = !ELEMENT_VOLUME && typeof window.AudioContext === "function", GAIN_TAU = 0.05;
   const subscribers = new Set();
   const subs = new Map();
   // Each wanted voice's publication count from the room: a new count is a microphone published again.
@@ -101,6 +101,16 @@
     for (const fn of subscribers) fn(stats);
   };
 
+  // What voice needs, and what this page has: a secure page (the microphone API is not offered on one that is not),
+  // WebRTC, and the microphone API. Checked before anything is asked for, so a browser that cannot do it says so
+  // plainly instead of failing later as a microphone problem.
+  const support = () => ({
+    secure: window.isSecureContext !== false,
+    webrtc: typeof RTCPeerConnection === "function",
+    mic: !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)
+  });
+  const supportError = (s) => !s.secure ? "voice needs a secure page (https)" : !s.webrtc ? "this browser has no WebRTC" : !s.mic ? "this browser has no microphone API" : "";
+
   const gathered = (pc) => new Promise((resolve) => {
     if (pc.iceGatheringState === "complete") return resolve();
     const done = () => {
@@ -114,6 +124,35 @@
     const timer = window.setTimeout(done, ICE_GATHER_MS);
     pc.addEventListener("icegatheringstatechange", onChange);
   });
+
+  // A browser told to keep WebRTC off the local network gathers no candidates at all, so the SFU can never reach the
+  // page: a VPN's "WebRTC leak protection" does this by setting Brave's IP handling policy to disable non-proxied UDP.
+  // One throwaway connection, without a microphone, answers whether candidates come at all; a good answer is kept for
+  // the page, a bad one is asked again next time, so turning the protection off fixes the next join.
+  const ICE_BLOCKED = "WebRTC blocked";
+  let iceProbe = null;
+  const probe = () => {
+    if (iceProbe) return iceProbe;
+    const run = (async () => {
+      if (typeof RTCPeerConnection !== "function") return { ok: false, candidates: 0, blocked: false };
+      const pc = new RTCPeerConnection(ICE);
+      try {
+        pc.addTransceiver("audio", { direction: "sendonly" });
+        await pc.setLocalDescription(await pc.createOffer());
+        await gathered(pc);
+        const sdp = pc.localDescription ? pc.localDescription.sdp : "";
+        const candidates = (sdp.match(/^a=candidate:/gm) || []).length;
+        // Gathering finished and there is nothing: only then is WebRTC blocked. A probe that could not run says
+        // nothing about the network, so the join tries as it always did.
+        return { ok: candidates > 0, candidates, blocked: candidates === 0 };
+      } catch {
+        return { ok: false, candidates: 0, blocked: false };
+      } finally { pc.close(); }
+    })();
+    iceProbe = run;
+    run.then((r) => { if (!r.ok && iceProbe === run) iceProbe = null; }, () => { if (iceProbe === run) iceProbe = null; });
+    return run;
+  };
 
   // Pulling a publication before its connection is up fails, so the mic is announced only once connected.
   const connected = (pc) => new Promise((resolve, reject) => {
@@ -373,11 +412,17 @@
 
   // Listening does not acquire or publish a microphone. Both entry points run inside a gesture.
   const listen = async () => {
+    // Listening asks for no microphone, but the receiving side still needs WebRTC on a secure page.
+    const s = support(), missing = s.secure ? s.webrtc ? "" : "this browser has no WebRTC" : "voice needs a secure page (https)";
+    if (missing) { stats.error = missing; emit(); return; }
     activate();
     if (stats.enabled || stats.joining) return;
     const token = lifecycle;
     stats.joining = true; stats.error = ""; emit();
     try {
+      const ice = await probe();
+      if (token !== lifecycle) return;
+      if (ice.blocked) { stats.error = ICE_BLOCKED; teardown(); return; }
       await openReceiver(token);
       if (token !== lifecycle) return;
       stats.enabled = true; stats.ready = true;
@@ -399,6 +444,8 @@
   // Hardware preview is local only: it never calls the SFU or grants publication consent.
   const preflight = async (deviceId = stats.deviceId) => {
     if (stats.publishing || stats.joining) return false;
+    const missing = supportError(support());
+    if (missing) { stats.micError = missing; emit(); return false; }
     cancelPreflight();
     stats.deviceId = String(deviceId || "");
     activate();
@@ -457,10 +504,12 @@
     emit();
   };
   const enable = async (preserveMute = false) => {
+    const missing = supportError(support());
+    if (missing) { stats.error = missing; emit(); return; }
     activate();
     if (stats.joining || stats.publishing) return;
     const token = lifecycle, generation = ++micGeneration;
-    stats.joining = true; stats.micError = ""; microphoneWanted = stats.micWanted = true; stats.permission = "requesting"; stats.preflight = false; stats.preflightPending = false;
+    stats.joining = true; stats.micError = ""; stats.error = ""; microphoneWanted = stats.micWanted = true; stats.permission = "requesting"; stats.preflight = false; stats.preflightPending = false;
     if (!preserveMute) stats.muted = false;
     emit();
     let openingReceiver = false;
@@ -471,6 +520,11 @@
       for (const track of mic.getAudioTracks()) track.enabled = !stats.muted;
       micMeter = micMeter || meter(mic);
       gate();
+      // No candidates means the SFU can never reach this page: say why rather than wait out the publish. A gather
+      // that could not run says nothing, so the publish goes ahead.
+      const ice = await probe();
+      if (token !== lifecycle || generation !== micGeneration || !microphoneWanted) return;
+      if (ice.blocked) { stats.error = ICE_BLOCKED; dropMic(); return; }
       await publish(token, generation);
       if (token !== lifecycle || generation !== micGeneration || !microphoneWanted) return;
       stats.publishing = true;
@@ -742,5 +796,5 @@
   const inspect = () => ({ desired: desired.slice(), pulled: [...subs.keys()], publish: pubPc ? pubPc.connectionState : "none", receive: subPc ? subPc.connectionState : "none",
     playback: GAIN_PLAY ? "gain" : "element", context: audio ? audio.state : "none" });
 
-  BL.voice = { preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, enable, listen, dropMic, setMuted, toggle, restart, stop, setPeers, subscribe, dispose, inspect, speaking, muteLocal, mutedLocally, setRadius, falloff, fades: ELEMENT_VOLUME || GAIN_PLAY, RADIUS_MIN, RADIUS_MAX, stats };
+  BL.voice = { support, probe, ICE_BLOCKED, preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, enable, listen, dropMic, setMuted, toggle, restart, stop, setPeers, subscribe, dispose, inspect, speaking, muteLocal, mutedLocally, setRadius, falloff, fades: ELEMENT_VOLUME || GAIN_PLAY, RADIUS_MIN, RADIUS_MAX, stats };
 })();

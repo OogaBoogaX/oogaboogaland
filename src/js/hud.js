@@ -2340,7 +2340,17 @@
   // Net and voice emits re-run this several times a second with the same outcome; last-written
   // records keep an unchanged textContent from re-invalidating the line.
   let accountBackend = null, accountMe = null, accountName = null, accountWords = null, accountWordsHidden = null;
-  let accountLive = null, accountRejoinHidden = null, accountVoiceHidden = null, accountVoiceWords = null, accountVoicePressed = null, accountLeaveHidden = null;
+  let accountLive = null, accountRejoinHidden = null, accountVoiceHidden = null, accountVoiceWords = null, accountVoicePressed = null, accountLeaveHidden = null, accountVoiceDisabled = null, accountVoiceTip = null;
+  // What voice needs cannot change in a page's life: worked out once, so the button can name what this browser lacks
+  // before the visitor is asked to join.
+  let voiceSupportReason = null;
+  const voiceReason = () => {
+    if (voiceSupportReason === null) {
+      const support = BL.voice && BL.voice.support ? BL.voice.support() : { secure: true, webrtc: true, mic: true };
+      voiceSupportReason = !support.secure ? "Voice needs a secure page" : !support.webrtc ? "This browser has no WebRTC" : !support.mic ? "This browser has no microphone" : "";
+    }
+    return voiceSupportReason;
+  };
   const showAccount = ({ backend, me, room, online }) => {
     const hasMe = !!me;
     if (!!backend !== accountBackend) { accountBackend = !!backend; $("account").hidden = !backend; }
@@ -2366,8 +2376,17 @@
     const voice = BL.voice.stats, voiceButton = $("account-voice");
     const voiceHidden = room !== "live";
     if (voiceHidden !== accountVoiceHidden) { accountVoiceHidden = voiceHidden; voiceButton.hidden = voiceHidden; }
-    const voiceWords = voice.joining ? "Joining voice" : (voice.error || voice.micError) && !voice.enabled ? `Voice: ${voice.error || voice.micError}` : !voice.enabled ? "Join voice" : voice.muted ? "Unmute" : "Mute";
+    const reason = voiceReason();
+    const voiceWords = reason ? reason : voice.joining ? "Joining voice" : (voice.error || voice.micError) && !voice.enabled ? `Voice: ${voice.error || voice.micError}` : !voice.enabled ? "Join voice" : voice.muted ? "Unmute" : "Mute";
     if (voiceWords !== accountVoiceWords) { accountVoiceWords = voiceWords; voiceButton.textContent = voiceWords; }
+    const voiceDisabled = !!reason;
+    if (voiceDisabled !== accountVoiceDisabled) { accountVoiceDisabled = voiceDisabled; voiceButton.disabled = voiceDisabled; }
+    // A blocked WebRTC explains itself in a tooltip, and only while it is the reason: a VPN's leak protection is what
+    // usually does it, by turning off non-proxied UDP (Brave's "WebRTC IP handling policy").
+    const voiceTip = voice.error === BL.voice.ICE_BLOCKED
+      ? "A VPN's leak protection can block WebRTC by setting the browser's IP handling policy to disable non-proxied UDP (Brave specific). Allow WebRTC for this site, or turn that protection off."
+      : "";
+    if (voiceTip !== accountVoiceTip) { accountVoiceTip = voiceTip; voiceButton.title = voiceTip; }
     const pressed = String(voice.enabled && !voice.muted);
     if (pressed !== accountVoicePressed) { accountVoicePressed = pressed; voiceButton.setAttribute("aria-pressed", pressed); }
     const leaveHidden = voiceHidden || !voice.enabled;
