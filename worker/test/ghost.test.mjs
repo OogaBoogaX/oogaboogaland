@@ -146,6 +146,28 @@ test("a hidden page hands the arena's hosting on, and comes back a follower", as
   assert.equal(protocol.parseClientMessage('{"t":"visible","on":"yes"}'), null, "a visibility report must be a flag");
 });
 
+test("a spectator in the arena's hallway watches the hunt but neither hosts nor reports to it", async () => {
+  const h = harness();
+  const a = await h.join(1, "a"), b = await h.join(2, "b"), c = await h.join(3, "c");
+  for (const [ws, name] of [[a, "a"], [b, "b"], [c, "c"]]) await h.send(ws, { t: "body", name });
+  await h.send(a, { t: "zone", name: "arcade-hunt" });
+  await h.send(b, { t: "zone", name: "arcade.haunt" });
+  await h.send(c, { t: "zone", name: "arcade.hall" });
+  assert.equal(h.room.ghostHostId, 1);
+  assert.equal(h.room.ghostFollowers, 1, "the hallway's spectator follows, so the host sends");
+  const frame = new ArrayBuffer(16);
+  new DataView(frame).setUint32(0, protocol.GHOST_MAGIC, true);
+  await h.room.webSocketMessage(a, frame);
+  assert.equal(b.bins.length, 1, "the hallway hears the hunt");
+  assert.equal(c.bins.length, 0, "the rest of the hall does not");
+  await h.send(b, { t: "ghost", k: "ready" });
+  assert.equal(ghosts(a).length, 0, "a spectator outside the arena cannot ready up");
+  await h.send(a, { t: "zone", name: "arcade.haunt" });
+  assert.equal(h.room.ghostHostId, 0, "nobody in the hallway hosts");
+  await h.send(c, { t: "zone", name: "arcade.haunt" });
+  assert.equal(c.bins.length, 0, "and with no host, no kept frame is handed on");
+});
+
 test("the arena's kept frame is dropped once nobody follows, so the next page in is not handed a stale hunt", async () => {
   const h = harness();
   const a = await h.join(1, "a"), b = await h.join(2, "b"), c = await h.join(3, "c");

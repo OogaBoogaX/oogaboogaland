@@ -25,7 +25,7 @@ import {
   CLOSE_KICK, CLOSE_PROTOCOL, MAX_PLAYERS, MOVE_HZ, STALE_MS, SWEEP_MS, CLEANUP_MS, TICK_HZ,
   NPC_FRAME_MAX, NPC_HZ, OUTSIDE, HP_HZ, VOICE_TRACK, CHAT_HZ, CHAT_BURST, CHAT_BUCKET_KEEP, CHAT_RETRY_KEEP, CHAT_FEATURE,
   DOOR_ZONE, DOOR_ROOM, DOOR_GRANT_MS, DOOR_TRANSIT_MS, DOOR_PASS_MS, DOOR_HZ, DOOR_BURST, GHOST_HZ, GHOST_BURST, SHOT_HZ, SHOT_BURST, SWING_HZ, SWING_BURST,
-  GHOST_MAGIC, GHOST_FRAME_MAX, GHOST_FRAME_HZ, GHOST_FRAME_BURST, inGhostArena, ghostCandidate,
+  GHOST_MAGIC, GHOST_FRAME_MAX, GHOST_FRAME_HZ, GHOST_FRAME_BURST, inGhostArena, ghostCandidate, watchesGhost,
   WALLET_CAP, WALLET_HZ, WALLET_BURST,
   chatLog, castIndex, bodyName, ownedBody, electHost, npcFollowers, claimRefusal, parseClientMessage, playerFromHeaders, spawnPoint, takeToken, voicePeers,
   BLEND, BLEND_HZ,
@@ -105,7 +105,7 @@ export class Room extends DurableObject {
     this.hostId = electHost(this.players.values());
     this.followers = npcFollowers(this.players.values(), this.hostId);
     this.ghostHostId = electHost(this.players.values(), 0, ghostCandidate);
-    this.ghostFollowers = npcFollowers(this.players.values(), this.ghostHostId, inGhostArena);
+    this.ghostFollowers = npcFollowers(this.players.values(), this.ghostHostId, watchesGhost);
   }
 
   record(ws, a) {
@@ -394,8 +394,8 @@ export class Room extends DurableObject {
       // theirs on this broadcast).
       p.blendTo = null; p.blendK = 0;
       this.electGhostHost();
-      // A page walking into the ghost arena catches up with its hunt (a lobby open, a hunt on) at once.
-      if (inGhostArena(p) && p.id !== this.ghostHostId && this.lastGhost) this.send(p.ws, this.lastGhost);
+      // A page walking into the ghost arena or its hallway catches up with its hunt (a lobby open, a hunt on) at once.
+      if (watchesGhost(p) && p.id !== this.ghostHostId && this.lastGhost) this.send(p.ws, this.lastGhost);
       if (leavingStudio) this.leaveStudio(p);
       this.walletsArrive(p);
       if (p.zone === STUDIO_ZONE) { this.enforceStudio(); this.sendStudio(p); }
@@ -600,12 +600,13 @@ export class Room extends DurableObject {
     this.broadcast({ t: "host", id, followers });
   }
 
-  // The ghost arena's host, among the visible pages in it, by the NPC host's rule; every page hears who it is. The
+  // The ghost arena's host, among the visible pages in it, by the NPC host's rule, followed by every other page in the
+  // arena or its hallway; every page hears who it is. The
   // kept frame goes with a change of host, and when nobody follows, since the host then stops sending and the frame
   // would hand the next page in a hunt that has moved on (it sends again within a quarter second of a follower).
   electGhostHost() {
     const id = electHost(this.players.values(), this.ghostHostId, ghostCandidate);
-    const followers = npcFollowers(this.players.values(), id, inGhostArena);
+    const followers = npcFollowers(this.players.values(), id, watchesGhost);
     if (id !== this.ghostHostId || !followers) this.lastGhost = null;
     if (id === this.ghostHostId && followers === this.ghostFollowers) return;
     this.ghostHostId = id;
@@ -614,12 +615,13 @@ export class Room extends DurableObject {
   }
 
   // A binary frame led by GHOST_MAGIC is the arena hunt's state: taken only from its host while in the arena, capped
-  // in size and rate, kept for the next page to walk in, and relayed unchanged to every other page in the arena.
+  // in size and rate, kept for the next page to walk in, and relayed unchanged to every other page in the arena or its
+  // hallway.
   ghostFrame(p, data) {
     if (p.id !== this.ghostHostId || !inGhostArena(p) || data.byteLength > GHOST_FRAME_MAX) return;
     if (!takeToken(p.ghostFrameBucket, GHOST_FRAME_HZ, Date.now(), GHOST_FRAME_BURST)) return;
     if (this.ghostFollowers) this.lastGhost = data;
-    for (const q of this.players.values()) if (q !== p && inGhostArena(q)) this.send(q.ws, data);
+    for (const q of this.players.values()) if (q !== p && watchesGhost(q)) this.send(q.ws, data);
   }
 
   // A binary frame is the NPC host's poses: taken only from the current host, capped in size and rate,

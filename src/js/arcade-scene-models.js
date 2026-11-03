@@ -1121,6 +1121,14 @@
     flat.push(bevelBox({ w: 0.9, h: 0.3, d: 1.2, color: S1, bevel: 0.05, offset: { y: 0.15, z: -0.3 } }), bevelBox({ w: 0.66, h: 0.26, d: 0.5, color: S1, bevel: 0.04, offset: { y: -0.12, z: 0.02 } }));
     return shaded(round, flat);
   });
+  // Where a gargoyle's eyes look out, in its own frame (the fronts of its glowing eyes, leant with its body as `perch`
+  // leans it), and the green laser the scene shines from each down onto the herald as it launches: a glowing rod a
+  // metre along +z from the origin, stretched and aimed by its node.
+  const GARGOYLE_EYES = [-1, 1].map((f) => {
+    const y = 0.765, z = 0.635 + 0.022, c = Math.cos(0.3), sn = Math.sin(0.3);
+    return [f * 0.075, y * c - z * sn + 0.3, y * sn + z * c - 0.12];
+  });
+  const gargoyleLaser = cached(() => unshadowed(box({ w: 0.035, h: 0.035, d: 1, color: HAUNT_GLOW, emissive: 1, offset: { z: 0.5 } })));
   // A white letter on a gargoyle's chest, in the signs' 3x5 alphabet, each block set on the curve of its breast and
   // belly as they lean with it; the gargoyles spell `GARGOYLE_WORDS` round the wall from the one over the mouth. The M
   // is the carved signs' five-wide one, centred as the others are, since a three-wide M reads as an H (#420).
@@ -4621,6 +4629,6 @@
   };
   Object.assign(BL.arcadeModels, {
     buildSteps,
-    haunt, steelDoor, gargoyle, gargoyleLetter, ARENA_TOTEMS, ironFence, IRON_FENCE, spotCan, spotRods, wheelAt, wheelStop, lanterns, ceiling, stage, mezzanine, wheel, clawMachine, claw, pinball, pinAt, airHockey, hockeyPieces, changer, ropes, retroFrames, retroStart, retroLine, ride, rideBeat, poolRing, dartSight, boardPost, pinFlipper, pinLight, pinTooth, pinRamp, clawMark, poolTable, poolBall, poolCue, poolDot, dartBoard, dart, dartOche, clawBooth, clawPrize, ticketStrip, fameBoard, fameFrame, prizeShelf, pennants, discoBall, speakers, tableProps, trashBin, ticketBucket, directory, wornPatch, backDoor, chainLink, prize, prizeCounter, staffHat, staffVest, staffProp, bulbFrame, zoneSign, posterFrame, posterArt, table, planterPot, hall, signFrame, attractStart, bestLine, digit, board, skeeLane, skeeDot, hoopMachine, hoop, coconutShy, coconut, shyVine, coconutBall, balls, meter, arrow, snackBar
+    haunt, steelDoor, gargoyle, gargoyleLetter, GARGOYLE_EYES, gargoyleLaser, ARENA_TOTEMS, ironFence, IRON_FENCE, spotCan, spotRods, wheelAt, wheelStop, lanterns, ceiling, stage, mezzanine, wheel, clawMachine, claw, pinball, pinAt, airHockey, hockeyPieces, changer, ropes, retroFrames, retroStart, retroLine, ride, rideBeat, poolRing, dartSight, boardPost, pinFlipper, pinLight, pinTooth, pinRamp, clawMark, poolTable, poolBall, poolCue, poolDot, dartBoard, dart, dartOche, clawBooth, clawPrize, ticketStrip, fameBoard, fameFrame, prizeShelf, pennants, discoBall, speakers, tableProps, trashBin, ticketBucket, directory, wornPatch, backDoor, chainLink, prize, prizeCounter, staffHat, staffVest, staffProp, bulbFrame, zoneSign, posterFrame, posterArt, table, planterPot, hall, signFrame, attractStart, bestLine, digit, board, skeeLane, skeeDot, hoopMachine, hoop, coconutShy, coconut, shyVine, coconutBall, balls, meter, arrow, snackBar
   });
 })();

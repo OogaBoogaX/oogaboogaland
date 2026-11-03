@@ -326,6 +326,9 @@
     const boltDrop = pool(1, MODELS.lightningBolt())[0], strikeNodes = pool(STRIKES, null), strikeGlows = pool(STRIKES, null);
     const strikeHeard = new Float64Array(STRIKES);
     const heraldWisps = pool(HERALD_WISPS, null), heraldBeam = pool(1, null)[0], heraldGlow = pool(1, null)[0];
+    // The herald's launch as the scene may dress it: how strongly its beam holds it (0 to 1) and where its middle is, in
+    // the scene's own frame (`launch`).
+    const LAUNCH = { k: 0, x: 0, y: 0, z: 0 };
     // The gorillas: the island's own gorilla rig in its glowing code green, one per slot, every part shootable; each
     // slot's arrival beam, ground glow, landing flash and two rings.
     const B = C.BRUTE, BP = SIM.BRUTE_PHASE;
@@ -578,7 +581,8 @@
     // While the lobby is open (and this visitor has not said "not this time"): who is there and who is ready, and the
     // seconds left; drawn again only when one of those changes.
     const drawLobby = (t) => {
-      if (S.state !== ST.GATHER || declined) { lobbyShown = -1; hud.lobby(null); return; }
+      // Only a page in the arena is invited (a spectator watching from outside it follows the hunt but never the lobby).
+      if (S.state !== ST.GATHER || declined || !inZone(hub.zoneOf(crew.player))) { lobbyShown = -1; hud.lobby(null); return; }
       const secs = Math.max(0, Math.ceil((S.endsAt - t) / 1000));
       let count = 0, readyBits = 0, ids = 0, meReady = false, hostReady = !S.startedBy;
       for (const q of sim.players) {
@@ -1451,6 +1455,7 @@
       const ground = held || vanishing ? island.surfaceAt(at.x, at.z) : 0;
       if (held && !beamed) { beamed = true; audio.play("arrive"); }
       const beamK = held ? 1 : vanishing ? Math.min(1, 2.5 * (1 - (since - HERALD_BEAM_MS) / VANISH_MS)) : 0, reach = held ? Math.min(1, since / 300) : 1;
+      LAUNCH.k = held ? reach : beamK;
       sprite(heraldBeam, MODELS.beamOf(HERALD_BEAM.core, HERALD_BEAM.mid, HERALD_BEAM.edge, false), at.x, ground + BEAM_TOP * (1 - reach), at.z, 1.4 * 3, BEAM_TOP * reach, beamK, false);
       sprite(heraldGlow, MODELS.glowDisc(HERALD_BEAM.mid), at.x, ground + 0.03, at.z, 3, 3, 0.7 * beamK * (0.8 + 0.2 * Math.sin(now / 90)), true);
       if (!herald.visible) { for (const n of heraldWisps) n.visible = false; return; }
@@ -1483,6 +1488,7 @@
         if (Math.random() < dt * 2.5) fx.spawnParticle(EMBERS[Math.random() * 3 | 0], at.x + (Math.random() - 0.5) * 0.6, at.y + 0.2, at.z + (Math.random() - 0.5) * 0.6, 0, 0.3, 0, 1.2, 1, -0.3, -50);
       }
       p.x = heraldX = at.x; p.y = at.y + rise; p.z = heraldZ = at.z;
+      LAUNCH.x = O.x + p.x; LAUNCH.y = O.y + p.y + HERALD_SIZE * 0.55; LAUNCH.z = O.z + p.z;
       const foot = p.y;
       herald.scale.x = herald.scale.y = herald.scale.z = size;
       face(herald, size);
@@ -2943,7 +2949,7 @@
     return {
       start: () => { if (S.state === ST.IDLE) tapHerald(); }, quit, receive: sync.receive, restore,
       update, drawOverlay, hit, shot, key, down, get waiting() { return spectating; }, shotGeometry: () => { const tier = rifleTier(); return tier ? MODELS.laserBolt(tier - 1) : MODELS.rock(); }, lanternsWanted, lanterns, shade, shake, unshake, dispose, liveGeometry, debug,
-      get hunting() { return !off(S.state); },
+      get hunting() { return !off(S.state); }, get launch() { return LAUNCH; },
       get inHunt() { return !off(S.state) && !quitting && !!sim.playerById(myId())?.inGame; },
       get inMotion() { return S.state !== ST.IDLE || sim.alive() > 0; },
       stats: () => ({ ghosts: sim.alive() + sim.brutesAlive() })
