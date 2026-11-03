@@ -394,8 +394,11 @@
     const setHighscores = (board) => {
       if (disposed) return;
       sharedStatus = board ? "ready" : "loading";
-      sharedScores = board ? Object.entries(board.highscores).map(([username, score]) => ({ username, milliseconds: score, time: score / 1000, achieved: board.achieved?.[username] || 0 }))
-        .sort((a, b) => a.time - b.time || a.achieved - b.achieved || a.username.localeCompare(b.username)).slice(0, scoreRows.length) : null;
+      const runs = board && (board.runs || Object.entries(board.highscores)
+        .map(([username, score]) => ({ username, score, achieved: board.achieved?.[username] || 0 }))
+        .sort((a, b) => a.score - b.score || a.achieved - b.achieved || a.username.localeCompare(b.username)));
+      sharedScores = runs ? runs.slice(0, scoreRows.length)
+        .map(run => ({ ...run, milliseconds: run.score, time: run.score / 1000 })) : null;
       showScores(localScores, localLatest);
     };
     // Level select on the result card: the level cards in place of the result, or the result back again.

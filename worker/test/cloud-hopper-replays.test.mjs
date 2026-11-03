@@ -22,7 +22,7 @@ const recording = (duration = 1, playerId = 1, username = "winner", game = GAME)
 };
 const database = () => {
   const sql = new DatabaseSync(":memory:"); sql.exec("PRAGMA foreign_keys=ON");
-  for (const name of ["0001_init", "0002_tess", "0003_highscores", "0004_highscore_notifications", "0005_cloud_hopper_levels", "0006_cloud_hopper_replays"])
+  for (const name of ["0001_init", "0002_tess", "0003_highscores", "0004_highscore_notifications", "0005_cloud_hopper_levels", "0006_cloud_hopper_replays", "0007_cloud_hopper_runs"])
     sql.exec(readFileSync(new URL(`../migrations/${name}.sql`, import.meta.url), "utf8"));
   const statement = (query, args = []) => {
     const execute = method => {
@@ -270,11 +270,11 @@ test("D1 rollback leaves a tracked orphan, retry repairs it and pointer-only rec
   assert.equal(f.DB.sql.prepare("SELECT state FROM cloud_hopper_replay_objects").get().state, "staged");
   f.DB.sql.exec("DROP TRIGGER fail_publish");
   const recovered = await (await f.finish(a, recording(), token)).json();
-  assert.ok(recovered.replay); assert.equal(recovered.revision, 2);
-  assert.equal(f.DB.sql.prepare("SELECT revision FROM highscore_notifications WHERE game_id = ?").get(GAME).revision, 2);
+  assert.ok(recovered.replay); assert.equal(recovered.revision, 3);
+  assert.equal(f.DB.sql.prepare("SELECT revision FROM highscore_notifications WHERE game_id = ?").get(GAME).revision, 3);
   f.DB.sql.exec("DELETE FROM cloud_hopper_replay_winners");
   const repaired = await (await f.finish(a, recording(), token)).json();
-  assert.equal(repaired.revision, 3); assert.deepEqual(repaired.replay, recovered.replay);
+  assert.equal(repaired.revision, 4); assert.deepEqual(repaired.replay, recovered.replay);
   const before = f.objects.size;
   const original = f.env.CLOUD_HOPPER_REPLAYS.delete;
   f.env.CLOUD_HOPPER_REPLAYS.delete = async () => { throw Error("storage unavailable"); };
@@ -285,4 +285,26 @@ test("D1 rollback leaves a tracked orphan, retry repairs it and pointer-only rec
   assert.equal(f.objects.size, before + 1); assert.ok((await f.read(GAME)).replay);
   f.env.CLOUD_HOPPER_REPLAYS.delete = original;
   await routes.pruneCloudHopperReplays(f.env); assert.equal(f.objects.size, 1);
+});
+
+
+test("same-player replay finishes remain separate; upload retry and numeric fallback share one run", async t => {
+  const f = await setup(t), a = await f.account();
+  const first = await f.start(a);
+  await f.finish(a, recording(2), first);
+  const second = await f.start(a);
+  const won = await (await f.finish(a, recording(1), second)).json();
+  assert.deepEqual(won.runs.map(r => r.score), [1000, 2000]);
+  assert.equal(won.replay.score, won.runs[0].score);
+  assert.equal(won.replay.achieved, won.runs[0].achieved);
+  await f.finish(a, recording(1), second);
+  const numeric = score => new Request(`${SITE}/api/highscores/${GAME}`, { method: "POST", headers: { origin: SITE, "content-type": "application/json" },
+    body: JSON.stringify({ machine: GAME, score, version: 1, playerId: 1, runId: second }) });
+  await a.scores(numeric(1000), f.env); await a.scores(numeric(100), f.env);
+  assert.deepEqual(await f.read(GAME), won);
+  await f.finish(a, recording(3), await f.start(a));
+  const slower = await f.read(GAME);
+  assert.deepEqual(slower.runs.map(r => r.score), [1000, 2000, 3000]);
+  assert.deepEqual(slower.replay, won.replay);
+  assert.equal(f.objects.size, 2); // Only the two successive winning recordings went to R2.
 });
