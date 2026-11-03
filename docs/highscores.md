@@ -17,7 +17,8 @@ them. Every duplicate has its own record.
 
 | Game | IDs / records | Comparison |
 |---|---|---|
-| Cloud Hopper | `cloud-hopper-1`; one best per GitHub username | Lowest completion time, integer milliseconds |
+| Cloud Hopper | One board per level, `cloud-hopper-l1` to `cloud-hopper-l4` (each its own game and machine); one best per GitHub username on each | Lowest completion time, integer milliseconds; levels never compared |
+| Cloud Hopper, before levels | `cloud-hopper` / `cloud-hopper-1`, retired: read, never written | As above |
 | Ooga Rally | One cabinet; `race-1-{bay,gorge,peak}[-m]-{lap,race}` | Lowest time, integer milliseconds; each track, mirror and metric separate |
 | Ooga Drop | `drop-1` | Highest eligible landing score |
 | Ooga Orbit | `orbit-1` | Highest flight score |
@@ -38,7 +39,9 @@ pays tickets but has no high-score result; ticket balances, prizes and Rally cup
 remain local progression rather than additional shared boards. Attract-mode NPC games do
 not submit scores.
 
-The existing displays determine the record type. Cloud Hopper has an attributed board.
+The existing displays determine the record type. Each Cloud Hopper level has an attributed board; the single
+board from before the levels keeps its records, retired (`retired: true` in the registry: reads answer, writes
+are refused with 400, and the identity triggers still move or remove its names).
 The other games keep unattributed bests, with independent entries for each physical
 machine or Rally track/mode. A race's finishing order is that race's podium, not an
 all-time record for its simulated opponents.
@@ -48,7 +51,7 @@ all-time record for its simulated opponents.
 `highscores` is JSON text whose values are integer scores. For example:
 
 ```json
-{"game_id":"cloud-hopper","highscores":{"player-one":48320,"player-two":51140}}
+{"game_id":"cloud-hopper-l2","highscores":{"player-one":48320,"player-two":51140}}
 {"game_id":"darts","highscores":{"darts-1":420,"darts-2":360}}
 ```
 
@@ -66,7 +69,7 @@ A submission checks that its session is still present and unexpired inside the s
 update, including when sign-out, account deletion or a username claim raced the request.
 Unattributed machine scores retain no owner and survive account deletion.
 
-Cloud Hopper retains the all-time top 1,024 personal bests, so the JSON row remains
+Each Cloud Hopper board retains the all-time top 1,024 personal bests, so its JSON row remains
 bounded. A newcomer enters a full board only by beating its last score; ties keep the
 existing player. Its SQL update and removal of the last entry are one D1 batch transaction.
 Machine dictionaries are bounded by the registry's fixed machine IDs. There is no run
@@ -111,6 +114,15 @@ Local personal records remain playable offline. Shared records begin empty; exis
 localStorage scores are never uploaded after sign-in or assigned to a duplicate machine
 whose identity was not stored. Fetches happen when boards are used and submissions happen
 at eligible completion, never in a per-frame loop.
+
+Cloud Hopper's timer shows the selected level's global leader, following the same time,
+achievement timestamp and username ordering as its shared top ten. Loading, unavailable,
+empty and stale replies are labeled; a failed refresh retains the last good shared result.
+Browser personal bests remain separately labeled in the selection/results panel. Only the
+selected board is watched, using the existing entry, run-start and tab-return refreshes.
+The score API carries no shared winning replay, so the timer's ghost button is disabled
+when a leader exists and absent on an empty board. It never uses a local personal ghost
+as that leader's replay. Existing personal session playback remains independent.
 
 Mine keeps its start-account eligibility across visits in the same page. Runs restored
 from localStorage after a reload remain local, since the page cannot establish who began
@@ -188,7 +200,8 @@ browser networking; they do not replace a two-player staging smoke test or CI at
 
 ## Wrangler and rollout
 
-The existing migration directory and deploy workflows apply the new notification migration before the Worker. No
+The existing migration directory and deploy workflows apply `0004_highscore_notifications.sql` and
+`0005_cloud_hopper_levels.sql` before the Worker. The latter adds the four level rows. No
 `d1 create`, new database binding, secret, Durable Object or scheduled job is needed.
 The configs add limiter namespaces `2006` on staging and `1006` in production; the local
 donations preview uses `3006` and still keeps scores in its local D1.

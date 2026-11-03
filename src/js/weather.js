@@ -688,5 +688,6 @@
     };
   };
 
-  BL.weather = { STEPS, CLEAR_NIGHT, CLEAR_DAY, STORM_TAU, ARRIVALS_FRESH_MS, stepFor, wetAt, cloudFor, create };
+  // `rainDrop` is also Cloud Hopper's storm rain (cloud-hopper-sky.js).
+  BL.weather = { STEPS, CLEAR_NIGHT, CLEAR_DAY, STORM_TAU, ARRIVALS_FRESH_MS, stepFor, wetAt, cloudFor, create, rainDrop };
 })();

@@ -13,13 +13,103 @@
     for (const face of geometry.faces) face.emissive = 0.28;
     return M.characterGeometry(geometry);
   });
-  const pickupAura = M.cached(() => {
+  // Power-up pickups (plan 3, the chosen B set), each round its own middle at pickup size: carved stone goggles with
+  // glowing lenses (X-ray), a sky feather in a wind ring (Updraft), and a grappling hook on a coil of vine rope. A modest
+  // fill keeps them readable at night and in the storm, as the jetpack's.
+  const POWERS = ["xray", "updraft", "hook"];
+  // The grappling hook, flying shank first along +z: a bone shank, the rope's eye behind it, and three iron prongs
+  // curling forward and back at its head, lashed on with vine.
+  const hookHead = M.cached(() => {
+    const parts = [M.turnedX(M.lathe({ profile: [[0.045, -0.4], [0.06, -0.3], [0.05, 0.05], [0.075, 0.12], [0, 0.2]], segments: 8, color: "#efe6cf" }), Math.PI / 2),
+      M.moved(M.turnedX(M.torus(0.07, 0.02, "#6b4a2b", 0, 10, 5), Math.PI / 2), 0, 0, -0.46)];
+    for (let k = 0; k < 3; k++) {
+      const prong = M.tube({ path: (t) => { const a = t * 2.3; return { x: 0.18 - 0.18 * Math.cos(a), y: 0, z: 0.1 + 0.18 * Math.sin(a) }; },
+        radius: (t) => 0.036 - 0.022 * t, rings: 10, segments: 6, colorFn: () => "#9a8f80" });
+      parts.push(M.turnedZ(prong, k * Math.PI * 2 / 3));
+    }
+    for (let k = 0; k < 3; k++) parts.push(M.box({ w: 0.15, h: 0.15, d: 0.035, color: "#4f8a35", offset: { z: -0.22 + k * 0.07 } }));
+    const geometry = M.merge(...parts);
+    for (const face of geometry.faces) face.emissive = Math.max(face.emissive || 0, 0.22);
+    geometry.castShadow = false;
+    return geometry;
+  });
+  // The hook's rope, one unit down +z, its length the node's z scale.
+  const rope = M.cached(() => {
+    const geometry = M.box({ w: 0.08, h: 0.08, d: 1, color: "#8a7040", emissive: 0.35, offset: { z: 0.5 } });
+    geometry.castShadow = false;
+    return geometry;
+  });
+  const facing = (geo) => M.turnedX(geo, Math.PI / 2);
+  // X-ray's carved stone goggles (the chosen C): chunky stone rims notched with glowing runes round dark glowing lenses
+  // with scanning rings, bridged in stone, and a leather strap. `R` is a lens's radius and `gap` the lenses' half
+  // spacing, their plane at z 0 facing +z; the strap runs from each rim's outer edge out to ±`side` and round behind to
+  // `back` behind that plane, squared off by `square` (0 round, nearer 1 hugging a box), never across the lenses.
+  const goggles = (R, gap, side, back, square) => {
+    const parts = [], tube = 0.05 * R / 0.17;
+    for (const s of [-1, 1]) {
+      const x = s * gap;
+      parts.push(M.moved(facing(M.torus(R, tube * 1.35, "#8f8a82", 0, 8, 4)), x, 0, 0));
+      parts.push(M.moved(facing(M.lathe({ profile: [[R * 0.85, 0], [0, R * 0.08]], segments: 16, color: "#1d5f6a", emissive: 0.5 })), x, 0, tube * 0.2));
+      for (const r of [0.55, 0.3]) parts.push(M.moved(facing(M.torus(R * r, tube * 0.18, "#7ffcff", 1, 16, 4)), x, 0, tube * 0.35));
+      for (const a of [0.8, 2.35, 3.9, 5.5]) parts.push(M.box({ w: tube * 0.5, h: tube * 1.1, d: tube * 0.4, color: "#7ffcff", emissive: 1,
+        offset: { x: x + Math.cos(a) * R, y: Math.sin(a) * R, z: tube * 1.2 } }));
+    }
+    parts.push(M.box({ w: gap * 2 - R * 2 + tube, h: tube * 1.2, d: tube, color: "#8f8a82", offset: { y: R * 0.25 } }));
+    const edge = gap + R + tube * 0.5, band = tube * 0.9, bend = 1 - square;
+    const path = (t) => {
+      const c = Math.cos(Math.PI * t), sn = Math.sin(Math.PI * t);
+      return { x: -side * Math.sign(c) * Math.abs(c) ** bend, y: 0, z: -tube - (back - tube) * sn ** bend };
+    };
+    parts.push(M.tube({ path, radius: () => band, rings: 24, segments: 5, colorFn: () => "#5a4a3a" }));
+    for (const s of [-1, 1]) if (side > edge) parts.push(M.box({ w: side - edge, h: band * 2, d: band * 2, color: "#5a4a3a", offset: { x: s * (edge + side) / 2, z: -tube } }));
+    return M.merge(...parts);
+  };
+  // The goggles worn over an Ooga's eyes on its face anchor (fractions of its height), the lenses just in front of its
+  // face and the strap round the back of its head, one geometry for each size of head.
+  const wornGeometry = new Map();
+  const wornGoggles = (cave) => {
+    const h = cave.parts.face.scale.x, b = boundsOf(cave.parts.head.geometry);
+    const z = b.max[2] / h + 0.03, side = Math.max(-b.min[0], b.max[0]) / h + 0.02, back = z - b.min[2] / h + 0.02, key = side.toFixed(3) + ":" + back.toFixed(3);
+    let geometry = wornGeometry.get(key);
+    if (!geometry) {
+      geometry = goggles(0.08, 0.125, side, back, 0.7);
+      geometry.castShadow = false;
+      wornGeometry.set(key, geometry = M.characterGeometry(geometry));
+    }
+    return createNode({ geometry, position: { x: 0, y: 0.16, z } });
+  };
+  const powerBody = M.variants((i) => {
+    let geometry;
+    if (POWERS[i] === "xray") {
+      geometry = goggles(0.17, 0.21, 0.42, 0.32, 0);
+    } else if (POWERS[i] === "updraft") {
+      const parts = [M.box({ w: 0.035, h: 0.95, d: 0.035, color: "#e9e2cf" }), M.moved(M.turnedZ(M.torus(0.42, 0.016, "#f4fbff", 0.7, 22, 4), -0.3), 0, 0.05, 0)];
+      for (let k = 0; k < 9; k++) {
+        const y = -0.3 + k * 0.085, w = 0.24 * Math.sin(Math.PI * (k + 0.6) / 9.6), tip = k > 6;
+        const color = tip ? "#3fd0c6" : k % 2 ? "#f6f4ee" : "#e4e9ef";
+        parts.push(M.box({ w, h: 0.07, d: 0.02, color, emissive: tip ? 0.4 : 0.1, offset: { x: -w / 2 - 0.015, y: y + 0.012 } }));
+        parts.push(M.box({ w, h: 0.07, d: 0.02, color, emissive: tip ? 0.4 : 0.1, offset: { x: w / 2 + 0.015, y } }));
+      }
+      geometry = M.turnedZ(M.merge(...parts), 0.25);
+    } else {
+      // The hook standing prongs up on two coils of its rope.
+      geometry = M.merge(M.moved(M.turnedX(M.merge(hookHead()), -Math.PI / 2), 0, 0.12, 0),
+        M.moved(M.torus(0.3, 0.04, "#8a7040", 0, 18, 6), 0, -0.3, 0), M.moved(M.torus(0.26, 0.04, "#7a6236", 0, 18, 6), 0.03, -0.24, 0.02));
+    }
+    for (const face of geometry.faces) face.emissive = Math.max(face.emissive || 0, 0.22);
+    geometry.castShadow = false;
+    return M.characterGeometry(geometry);
+  });
+  // Each pickup's glow in its own tint: the jetpack's blue, X-ray's cyan, the feather's mint, the hook's gold.
+  const AURAS = [["220,246,255", "142,216,255", "108,190,255"], ["205,255,255", "90,232,255", "40,200,255"],
+    ["228,255,238", "150,240,192", "100,220,160"], ["255,246,214", "255,214,120", "240,180,60"]];
+  const pickupAura = M.variants((tint) => {
     const canvas = document.createElement("canvas");
     canvas.width = canvas.height = 128;
-    const paint = canvas.getContext("2d"), gradient = paint.createRadialGradient(64, 64, 0, 64, 64, 64);
-    gradient.addColorStop(0, "rgba(220,246,255,0.8)");
-    gradient.addColorStop(0.35, "rgba(142,216,255,0.4)");
-    gradient.addColorStop(1, "rgba(108,190,255,0)");
+    const paint = canvas.getContext("2d"), gradient = paint.createRadialGradient(64, 64, 0, 64, 64, 64), [inner, middle, outer] = AURAS[tint];
+    gradient.addColorStop(0, `rgba(${inner},0.8)`);
+    gradient.addColorStop(0.35, `rgba(${middle},0.4)`);
+    gradient.addColorStop(1, `rgba(${outer},0)`);
     paint.fillStyle = gradient; paint.fillRect(0, 0, 128, 128);
     const image = new Image();
     image.src = canvas.toDataURL("image/png");
@@ -29,22 +119,23 @@
       rect: [-0.5, -0.5, 1, 1], cutout: true, soft: true, blend: "add", bright: 0.2 };
     return geometry;
   });
-  const jetpackPickup = () => {
+  // A floating pickup of `kind` (a jetpack, or a power-up), turning in its own glow.
+  const pickup = (kind = "jetpack") => {
+    const tint = kind === "jetpack" ? 0 : 1 + POWERS.indexOf(kind);
     const node = createNode({ scale: { x: 1.6, y: 1.6, z: 1.6 }, sightHidden: true });
-    node.body = createNode({ geometry: pickupBody(), sightHidden: true });
+    node.body = createNode({ geometry: tint ? powerBody(tint - 1) : pickupBody(), sightHidden: true });
     node.bodyBounds = boundsOf(node.body.geometry);
-    node.aura = createNode({ geometry: pickupAura(),
+    node.aura = createNode({ geometry: pickupAura(tint),
       scale: { x: 1.35, y: 1.6, z: 1 }, smokeOpacity: 0.22, sightHidden: true });
-    node.pool = createNode({ geometry: pickupAura(), position: { x: 0, y: -0.18, z: 0 },
+    node.pool = createNode({ geometry: pickupAura(tint), position: { x: 0, y: -0.18, z: 0 },
       rotation: { x: -Math.PI / 2, y: 0, z: 0 }, scale: { x: 1.25, y: 1.25, z: 1 }, smokeOpacity: 0.3, sightHidden: true });
     addChild(node, node.body, node.aura, node.pool);
     return node;
   };
-  const updateJetpackPickup = (node, camera, time) => {
-    const pulse = 0.92 + Math.sin(time * 2.4) * 0.08;
+  // `haze` is the level's fog [near, far] when it has one, which the glow fades into with distance as the body does,
+  // since a blended picture takes no fog of its own.
+  const updateJetpackPickup = (node, camera, time, haze = null) => {
     node.body.rotation.y = time;
-    // Only the surrounding light breathes; the metal's fill stays steady.
-    node.aura.smokeOpacity = 0.22 * pulse; node.pool.smokeOpacity = 0.3 * pulse;
     const bounds = node.bodyBounds, center = bounds.center, c = Math.cos(time), s = Math.sin(time);
     const x = c * center[0] + s * center[2], y = center[1], z = c * center[2] - s * center[0];
     let dx = camera.position.x - node.position.x - x * node.scale.x;
@@ -52,6 +143,10 @@
     let dz = camera.position.z - node.position.z - z * node.scale.z;
     let distance = Math.hypot(dx, dy, dz);
     if (distance < 1e-6) { dx = dy = 0; dz = distance = 1; }
+    // Only the surrounding light breathes; the metal's fill stays steady.
+    const t = haze ? Math.max(0, Math.min(1, (distance - haze[0]) / (haze[1] - haze[0]))) : 0;
+    const glow = (0.92 + Math.sin(time * 2.4) * 0.08) * (1 - t * t * (3 - 2 * t));
+    node.aura.smokeOpacity = 0.22 * glow; node.pool.smokeOpacity = 0.3 * glow;
     // Put the whole billboard behind the rotating pack's bounds. A plane
     // through the tanks depth-clips into a pale band across their faces.
     const back = (bounds.radius + 0.08) / distance;
@@ -61,6 +156,12 @@
     node.aura.rotation.y = Math.atan2(dx, dz);
     node.aura.rotation.x = -Math.atan2(dy, Math.hypot(dx, dz));
   };
+  // A leaf for the sky feather's gust.
+  const leaf = M.cached(() => {
+    const geometry = M.merge(M.box({ w: 0.24, h: 0.03, d: 0.12, color: "#79d46b", emissive: 0.3 }), M.box({ w: 0.12, h: 0.032, d: 0.06, color: "#a6e88f", emissive: 0.3, offset: { x: 0.04 } }));
+    geometry.castShadow = false;
+    return geometry;
+  });
   const bounceCloud = M.variants((index) => {
     // Copy through the model builder so packed clouds stay immutable too.
     // Voxel detail is a spatial grid; face colours hold its two cloud tones.
@@ -77,10 +178,21 @@
     geometry.castShadow = false; geometry.cutawayPreserve = true;
     return geometry;
   });
-  const cloud = (rx, rz, depth, kind = "normal", yaw = 0) => {
+  // A night level's clouds (its sky's `night`): each kind's mesh with a soft fill, so landings read under the moon.
+  const NIGHT_FILL = 0.34;
+  const night = (source) => M.variants((index) => {
+    const geometry = M.merge(source(index));
+    for (const face of geometry.faces) face.emissive = Math.max(face.emissive || 0, NIGHT_FILL);
+    geometry.castShadow = false; geometry.cutawayPreserve = true;
+    return geometry;
+  });
+  const nightCloud = night(BL.hubModels.cloud), nightBounce = night(bounceCloud), nightBoost = night(boostCloud);
+  const cloudMesh = (index, kind = "normal", dark = false) => kind === "bounce" ? (dark ? nightBounce : bounceCloud)(index)
+    : kind === "boost" ? (dark ? nightBoost : boostCloud)(index) : (dark ? nightCloud : BL.hubModels.cloud)(index);
+  const cloud = (rx, rz, depth, kind = "normal", yaw = 0, dark = false) => {
     const across = rz > rx, aspect = Math.max(rx, rz) / Math.min(rx, rz);
     const index = aspect < 1.35 ? 0 : aspect < 1.85 ? 1 : 2;
-    const geometry = kind === "bounce" ? bounceCloud(index) : kind === "boost" ? boostCloud(index) : BL.hubModels.cloud(index);
+    const geometry = cloudMesh(index, kind, dark);
     const b = boundsOf(geometry), sx = (across ? rz : rx) * 2 / (b.max[0] - b.min[0]);
     const sy = depth / (b.max[1] - b.min[1]), sz = (across ? rx : rz) * 2 / (b.max[2] - b.min[2]);
     const x = -(b.min[0] + b.max[0]) * sx * 0.5, z = -(b.min[2] + b.max[2]) * sz * 0.5;
@@ -204,6 +316,29 @@
     const geometry = node.frames[Math.floor(time * BL.arcadeModels.FPS) % node.frames.length];
     if (node.screen.geometry !== geometry) node.screen.geometry = geometry;
   };
+  // The gust card's wind: strokes blowing across over a cloud, each a straight run [x0, x1] at [y, z] that ends in a
+  // curl of `r` turning up (1) or down (-1), drawn as short glowing bars.
+  const GUST_STROKES = [[-3.4, 1.2, 1.25, 0.7, 0.45, 1], [-2.8, 1.9, 0.55, -0.3, 0.38, -1], [-2.2, 0.6, 1.95, -0.8, 0.32, 1],
+    [-3.8, -2.6, 0.85, 1.1, 0, 0], [2.6, 3.6, 1.55, 0.1, 0, 0], [-1, 0.2, 2.45, 0.3, 0, 0]];
+  const gustStrokes = () => {
+    const parts = [], bar = (x0, y0, x1, y1, z) => {
+      const length = Math.hypot(x1 - x0, y1 - y0);
+      parts.push(M.moved(M.turnedZ(M.box({ w: length + 0.08, h: 0.09, d: 0.09, color: "#dff4ff", emissive: 0.7 }), Math.atan2(y1 - y0, x1 - x0)),
+        (x0 + x1) / 2, (y0 + y1) / 2, z));
+    };
+    for (const [x0, x1, y, z, r, turn] of GUST_STROKES) {
+      bar(x0, y, x1, y, z);
+      if (!r) continue;
+      // Round from the run's end about a centre r above (or below) it, three quarters of a turn, tightening.
+      let px = x1, py = y;
+      for (let k = 1; k <= 12; k++) {
+        const t = k / 12, angle = -Math.PI / 2 + t * Math.PI * 1.5, radius = r * (1 - 0.4 * t);
+        const x = x1 + Math.cos(angle) * radius, yy = y + turn * (r + Math.sin(angle) * radius);
+        bar(px, py, x, yy, z); px = x; py = yy;
+      }
+    }
+    return M.noShadow(M.merge(...parts));
+  };
   // The first-play cards use the same transparent model portraits as Ghost
   // Hunter. Build and draw each once when requested, without a second frame loop.
   const createGuidePictures = () => {
@@ -256,8 +391,15 @@
           updateBounceMarker(marker, { x: 0, z: 0, top: 0, rx: 2.7, rz: 1.9, yaw: 0, seed: 0, active: true, opacity: 1 }, 0.6);
           addChild(root, marker);
         }
+      } else if (kind === "tornado") {
+        addChild(root, BL.cloudHopperTornado.still());
+      } else if (kind === "gust") {
+        addChild(root, cloud(2.7, 1.9, 1.6), createNode({ geometry: gustStrokes() }));
       } else if (kind === "jetpack") {
         addChild(root, cloud(0.48, 0.32, 0.22), createNode({ geometry: BL.hubModels.jetpack(), position: { x: 0, y: 0.18, z: 0 } }));
+      } else if (POWERS.includes(kind)) {
+        addChild(root, cloud(0.48, 0.32, 0.22), createNode({ geometry: powerBody(POWERS.indexOf(kind)), position: { x: 0, y: 0.32, z: 0 },
+          rotation: { x: 0, y: 0.4, z: 0 }, scale: { x: 0.5, y: 0.5, z: 0.5 } }));
       }
       else if (kind === "finish") {
         // Snapshot the actual 1,000-banana mound without touching the live pile.
@@ -336,5 +478,6 @@
     };
     return { picture, dispose };
   };
-  BL.cloudHopperModels = { cloud, boostSurface, updateBoostSurface, bounceMarker, updateBounceMarker, jetpackPickup, updateJetpackPickup, cabinet, updateCabinet, createGuidePictures };
+  BL.cloudHopperModels = { cloud, cloudMesh, boostSurface, updateBoostSurface, bounceMarker, updateBounceMarker, pickup, jetpackPickup: () => pickup("jetpack"),
+    updateJetpackPickup, hookHead, rope, leaf, wornGoggles, cabinet, updateCabinet, createGuidePictures };
 })();

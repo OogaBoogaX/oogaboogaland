@@ -98,7 +98,7 @@
     const raw = {}, shown = {}, up = { x: 0, y: 1, z: 0 };
     const rotation = quat.create(), endpointRotation = quat.create();
     const forward = new Float64Array(3), top = new Float64Array(3);
-    let active = false, elapsed = 0, nativePosition = false;
+    let active = false, elapsed = 0, nativePosition = false, duration = CAMERA_HANDOFF_TIME;
     let sourceHead = null, sourceRoot = null, sourceHeadHidden = false;
     const restoreHead = () => {
       if (sourceHead) sourceHead.cameraHidden = sourceHeadHidden;
@@ -160,9 +160,10 @@
       const dx = pose.targetX - pose.eyeX, dy = pose.targetY - pose.eyeY, dz = pose.targetZ - pose.eyeZ;
       viewRotation(out, dx, dy, dz, pose.upX, pose.upY, pose.upZ, Math.atan2(-dx, -dz));
     };
-    const begin = (source, followPosition = false) => {
+    // `seconds`, for a scripted view settling back into the player's own, is how long the blend takes.
+    const begin = (source, followPosition = false, seconds = CAMERA_HANDOFF_TIME) => {
       cancel();
-      nativePosition = followPosition;
+      nativePosition = followPosition; duration = seconds;
       capturePose(raw);
       for (let i = 0; i < CAMERA_POSE_FIELDS.length; i++) {
         const key = CAMERA_POSE_FIELDS[i]; shown[key] = source[key];
@@ -186,10 +187,10 @@
       // Endpoint solvers retain their own camera history. Never feed the
       // displayed acquisition blend back into collision or orbit damping.
       capturePose(raw);
-      const before = ease(elapsed / CAMERA_HANDOFF_TIME);
-      elapsed = Math.min(CAMERA_HANDOFF_TIME, elapsed + Math.max(0, dt));
-      if (elapsed === CAMERA_HANDOFF_TIME) { active = false; checkHead(); return true; }
-      const amount = (ease(elapsed / CAMERA_HANDOFF_TIME) - before) / (1 - before);
+      const before = ease(elapsed / duration);
+      elapsed = Math.min(duration, elapsed + Math.max(0, dt));
+      if (elapsed === duration) { active = false; checkHead(); return true; }
+      const amount = (ease(elapsed / duration) - before) / (1 - before);
       if (amount > 0) {
         const fromLength = Math.hypot(shown.targetX - shown.eyeX, shown.targetY - shown.eyeY, shown.targetZ - shown.eyeZ);
         const toLength = Math.hypot(raw.targetX - raw.eyeX, raw.targetY - raw.eyeY, raw.targetZ - raw.eyeZ);
@@ -428,6 +429,9 @@
       const cave = player();
       return weaponViewReady(cave) && cave.weapon.aiming;
     };
+    // A scene may keep combat out of the overhead view (`noOverhead`, Cloud Hopper's): combat then keeps to the
+    // shoulder and first person, X entering it at the shoulder and nothing leaving the shoulder for overhead.
+    const noOverhead = () => !!ctx.noOverhead?.();
     const aimView = () => {
       const cave = player();
       return weaponViewReady(cave) && (closeWanted || shoulderView);
@@ -1529,6 +1533,7 @@
       if (e.type === "pointercancel") {
         ads = mouseAds = false;
         aimLeftAccepted = aimLeftFocused = false;
+        if (primaryTaken) { primaryTaken = false; ctx.primaryAction(false); }
         const cave = player();
         crew.stopBurst(cave);
         crew.releaseSwing(cave, true);
@@ -1548,7 +1553,9 @@
           if (!alreadyFocused) return;
         }
         resumePose();
-        if (e.button === 0) {
+        // A scene may take the left button first (`primaryAction`, Cloud Hopper's grappling hook), and then its release.
+        if (e.button === 0 && ctx.primaryAction?.(true)) primaryTaken = true;
+        else if (e.button === 0) {
           attackReleaseBlocked = !crew.weaponsEnabled;
           if (player().weapon.primaryEquipped) crew.swingWeapon(player(), true, ads);
           else {
@@ -1563,7 +1570,8 @@
           if (!attackReleaseBlocked && e.buttons & 1 && !player().weapon.primaryEquipped && crew.setWeaponTrigger(true, true)) aimLeftAccepted = true;
         }
       } else if (e.type === "pointerup" || e.type === "pointermove") {
-        if (e.button === 0) {
+        if (e.button === 0 && primaryTaken) { primaryTaken = false; ctx.primaryAction(false); }
+        else if (e.button === 0) {
           releaseAimAttack(e);
           releasePrimary(player(), ads);
         }
@@ -1853,7 +1861,7 @@
       if (!closeWanted || firstOnly) return;
       clearRightGesture();
       const cave = player();
-      shoulderView = !!cave && shoulder;
+      shoulderView = !!cave && (shoulder || cave.weapon.aiming && noOverhead());
       if (aimView()) {
         if (cave && !cave.camp.rolling) lockCurrentAimPoint();
         closeWanted = false;
@@ -2046,7 +2054,7 @@
     const shooterView = (active, px = null, py = null, scroll = false) => {
       resumePose();
       const cave = player();
-      if (!weaponViewReady(cave)) return;
+      if (!weaponViewReady(cave) || !active && cave.weapon.aiming && noOverhead()) return;
       clearRightGesture();
       if (active && birdsEye() && !closeWanted) {
         anchorOverheadPointer(cave);
@@ -2160,7 +2168,7 @@
         return true;
       }
       const enteringOrbit = !cave.weapon.aiming && !closeWanted && !shoulderView;
-      const enteringView = enteringOrbit ? combatEntryView(camera.position, cave.root.position) : null;
+      const enteringView = enteringOrbit ? noOverhead() ? "shoulder" : combatEntryView(camera.position, cave.root.position) : null;
       if (enteringOrbit) {
         captureControl(controlTransition);
         if (handoff.active) eyeMotionValid = false;
@@ -2532,6 +2540,8 @@
             zoomStopped = true;
             return;
           }
+          // Combat that may not go overhead stops at the shoulder.
+          if (noOverhead() && cave.weapon.aiming) { zoomStopped = true; return; }
           shooterView(false, null, null, true);
           if (birdsEye()) {
             overheadWanted = clamp(overheadWanted * factor, Math.min(overheadWanted, overheadScrollMin(cave)), Math.max(overheadWanted, DIST_MAX));
@@ -2670,10 +2680,12 @@
     // the sights (in bird's-eye it takes the shoulder, as right-click does). X is R, Y is G, B is F and View is X.
     // Each press is acted on once; a trigger held when the pilot lets go of input is let go of with it, and LT also
     // when combat ends. Letting go of LT leaves a right-click aim held with the mouse.
-    let padFrame = -1, padFire = false, padAds = false;
+    // `primaryTaken` and `padPrimary`: a scene's `primaryAction` took the mouse's left press or the pad's RT.
+    let padFrame = -1, padFire = false, padAds = false, padPrimary = false, primaryTaken = false;
     const resetPad = () => { padFrame = pad.frame; padFire = padAds = mouseAds = ads = false; };
     const readPad = () => {
       const live = active && !externalControl && !menuOpen;
+      if (padPrimary && (!live || !(pad.held & PAD.rt))) { padPrimary = false; ctx.primaryAction(false); }
       if (padFire && (!live || !(pad.held & PAD.rt))) {
         padFire = false;
         weaponAction("weapon-primary-up");
@@ -2692,7 +2704,8 @@
         if (birdsEye()) shooterView(true, renderer.size.width / 2, renderer.size.height / 2);
         else padAds = ads = true;
       }
-      if (pad.pressed & PAD.rt) {
+      if (pad.pressed & PAD.rt && ctx.primaryAction?.(true)) padPrimary = true;
+      else if (pad.pressed & PAD.rt) {
         if (!armed()) weaponAction("weapon-fire");
         else padFire = weaponAction(cave.weapon.primaryEquipped ? "weapon-primary-down" : "weapon-fire", true);
       }

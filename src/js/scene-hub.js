@@ -309,6 +309,7 @@
     weather.hold(on);
     cloudFinishFruit.visible = on && pile.shown === 0;
     document.body.classList.toggle("cloud-hopper-active", on);
+    if (wpHolder) wpHolder.visible = !on;
     if (on) { cloudMask(); BL.net.setBody(null); BL.net.setZone("none"); }
     else {
       for (const [node, visible] of cloudHidden) node.visible = visible;
@@ -521,7 +522,8 @@
   let reuseHub = false, heldHub = false, heldDebug = null;
   let stateTimer = 0, hintTimer = 0, now = 0, hour = 12, unsubscribeActivity = null, unsubscribeAccount = null, ownOogaClaimed = false;
   // The daylight inputs as last sampled; sampledDay starts at a never-true 0 so the first frame always samples.
-  let sampledHour = 0, sampledDay = 0, sampledLatitude = NaN, sampledContinuousDay = 0, sampledUtcMs = 0;
+  // `sampledSky` is the Cloud Hopper level sky sampled instead of the clock, and `skyHour` the hour the sky shows.
+  let sampledHour = 0, sampledDay = 0, sampledLatitude = NaN, sampledContinuousDay = 0, sampledUtcMs = 0, sampledSky = null, skyHour = 12;
   // How far under the Mempool island's ground the view is, 0 to 1: its sun and its storm stay outside.
   let poolShade = 0, poolUnder = 0;
   // Wake before the bridge; a wider sleep radius keeps its effects steady near the boundary.
@@ -1089,7 +1091,7 @@
     // Moving pickup lights are rewritten after the cached mainland selection.
     const pickupReserved = Math.min(cloudHopper?.pickupLightsWanted() || 0, 2, tierLimit);
     const limit = tierLimit - pickupReserved;
-    const phaseNow = daylight.phaseAt(hour);
+    const phaseNow = daylight.phaseAt(skyHour);
     const lanternsOn = phaseNow === "dusk" || phaseNow === "night" || phaseNow === "midnight";
     const coilLamp = coilCharge && coilCharge.lamp, coilActive = !!coilLamp && coilCharge.level > 0.02;
     // The pits' lights follow their flames: the plaza lamp's gain and the HQ hearth's colour pulse with the flicker.
@@ -7552,6 +7554,8 @@
                sinkAfter: 300, sinkTime: 2.5, charHold: 8, charFade: 12,
                readFov: 0.55, readAir: 1.06, readZoomStep: 1.5, readZoomMax: 6, glide: 7 };
   let wpGroup = null, wpImage = null, wpSheet = null, wpBackSheet = null, wpReadingSheet = null, wpPoster = null, wpBolt = null, wpChar = null, wpBanner = null;
+  // The stone, its bolt and its char hang under one node, which Cloud Hopper hides while a run plays.
+  let wpHolder = null;
   let wpCharAge = 0;
   // This anniversary is October 31 and November 1, 2026, in the visitor's local calendar, not a yearly trigger.
   const WP_WEEKEND_START = new Date(2026, 9, 31).getTime(), WP_WEEKEND_END = new Date(2026, 10, 2).getTime();
@@ -7714,6 +7718,9 @@
     return banner;
   };
   const wpBuild = () => {
+    wpHolder = createNode({});
+    wpHolder.visible = !cloudPlaying();
+    addChild(root, wpHolder);
     // Follow the bookshelf's centreline into the cliff; the stone and its camera share the shelf's facing.
     const dx = -Math.sin(LIBRARY.ry), dz = -Math.cos(LIBRARY.ry);
     const x = LIBRARY.x + dx * WP.out, z = LIBRARY.z + dz * WP.out;
@@ -7768,7 +7775,7 @@
     wpBolt = createNode({ geometry: models.moved(models.merge(...segments), -bx, 0, -bz), position: { x, y: wpGround, z } });
     wpBolt.geometry.castShadow = false;
     wpBolt.visible = false;
-    addChild(root, wpBolt);
+    addChild(wpHolder, wpBolt);
     placed.push(wpBolt);
     // The char it leaves: the crest blackened cell by cell around the stone's foot, laid on the ground it finds there.
     const charVerts = [], charFaces = [], charRand = mulberry32(fnv1a("whitepaper-char")), step = 0.28, reach = 2.2;
@@ -7784,10 +7791,10 @@
     }
     wpChar = createNode({ geometry: { verts: charVerts, faces: charFaces, lines: [], castShadow: false }, position: { x, y: 0, z } });
     wpChar.visible = false;
-    addChild(root, wpChar);
+    addChild(wpHolder, wpChar);
     placed.push(wpChar);
     group.visible = false;
-    addChild(root, group);
+    addChild(wpHolder, group);
     placed.push(group);
     wpGroup = group;
     // Where the view stands once the stone is up: in front of the sheet's middle, the field of view left as it was.
@@ -8556,12 +8563,21 @@
     if (life) { life.gulls.update(elapsed); life.shore.update(elapsed); life.boats.update(elapsed); }
     now = elapsed;
     hour = clock.read();
+    // A Cloud Hopper run flies under its level's own fixed sky, sampled once as it begins; the clock's hour still
+    // turns the island's phases, so no phase toast comes of it, while the lamps light by the sky shown.
+    const fixedSky = cloudPlaying() ? cloudHopper.sky : null;
+    skyHour = fixedSky ? fixedSky.hour : hour;
     // The ephemeris turns the sun 0.0042 deg/s of island time (a 6e-4-hour budget is 2.16 s and misses no
     // pixel), so it resamples only when an input drifts; a fast debug clock misses the budget every frame,
     // a frozen one hits from the second frame on.
-    if (clock.dayOfYear !== sampledDay || islandLatitude !== sampledLatitude || Math.abs(hour - sampledHour) >= DAY_RESAMPLE_HOUR
+    if (fixedSky ? fixedSky !== sampledSky : sampledSky || clock.dayOfYear !== sampledDay || islandLatitude !== sampledLatitude || Math.abs(hour - sampledHour) >= DAY_RESAMPLE_HOUR
       || Math.abs(clock.continuousDay - sampledContinuousDay) >= DAY_RESAMPLE_DAY || Math.abs(clock.utcMs - sampledUtcMs) >= DAY_RESAMPLE_MS) {
-      daylight.sample(hour, RENDER_OPTS, clock.dayOfYear, islandLatitude, clock.continuousDay, clock.utcMs);
+      if (fixedSky) {
+        daylight.sample(skyHour, RENDER_OPTS, BL.cloudHopperSky.DAY);
+        // A storm level greys its sample once, before the stash keeps it.
+        if (fixedSky.storm) BL.cloudHopperSky.grade(RENDER_OPTS, fixedSky.storm);
+      } else daylight.sample(hour, RENDER_OPTS, clock.dayOfYear, islandLatitude, clock.continuousDay, clock.utcMs);
+      sampledSky = fixedSky;
       sampledHour = hour; sampledDay = clock.dayOfYear; sampledLatitude = islandLatitude; sampledContinuousDay = clock.continuousDay; sampledUtcMs = clock.utcMs;
       DAY_STASH.directStrength = RENDER_OPTS.directStrength; DAY_STASH.ambientFloor = RENDER_OPTS.ambientFloor;
       for (let i = 0; i < 3; i++) {
@@ -8585,11 +8601,15 @@
     const sheltered = !cloudPlaying() && mempoolIsland.coveredAt(camera.position.x, camera.position.y, camera.position.z) ? 1 : 0;
     poolShade += clamp(sheltered - poolShade, -dt * 1.6, dt * 1.6);
     poolUnder += clamp((cutawayPool === 2 ? 1 : 0) - poolUnder, -dt * 1.6, dt * 1.6);
+    // A storm level's haze takes in the sea too.
+    RENDER_OPTS.seaFog = !!fixedSky?.fog;
     if (cloudPlaying()) {
-      // Keep the destination clear across the whole Cloud Hopper course.
-      RENDER_OPTS.clouds = 0;
+      // Keep the destination clear across the whole Cloud Hopper course: only the level's own painted clouds, and
+      // its own haze where it has one (Thunderhead's), which its lightning lifts with the sky.
+      RENDER_OPTS.clouds = fixedSky ? fixedSky.clouds : 0;
       RENDER_OPTS.fog = RENDER_OPTS.horizon;
-      RENDER_OPTS.fogNear = 900; RENDER_OPTS.fogFar = 2000;
+      RENDER_OPTS.fogNear = fixedSky?.fog ? fixedSky.fog[0] : 900; RENDER_OPTS.fogFar = fixedSky?.fog ? fixedSky.fog[1] : 2000;
+      if (cloudHopper.flash > 0) BL.cloudHopperSky.flash(RENDER_OPTS, cloudHopper.flash);
     } else if (gameMode) RENDER_OPTS.clouds = 0;
     else weather.update(dt, RENDER_OPTS, poolShade);
     if (poolShade > 0) {
@@ -11167,7 +11187,16 @@
   // frame becoming 19 ms; 30 Hz spent about 19 ms on every other frame.
   const SIGHT_RECOMPUTE_HZ = 15;
   const overlay = (dt) => {
-    if (cloudPlaying()) { fx.drawOverlay(dt, cloudHopper.drawOverlay); return; }
+    if (cloudPlaying()) {
+      fx.drawOverlay(dt, cloudHopper.drawOverlay);
+      // An Ooga inside a tornado, or behind it, shows its outline through the funnel, keyed dark so it reads on the
+      // white, unless the view is its own eyes.
+      if (crew.player && cloudHopper.hiddenByTornado && (cloudHopper.swept >= 0 || pilot.closeMix < 1)) {
+        cameraCover.state.opacity = 0.9;
+        cameraCover.draw(camera, crew.player.root, false, true, cameraRockAt, cameraRockMaterialAt, null, dt, 1, null, null, true);
+      }
+      return;
+    }
     if (poolBlockHovered) showPoolBlockTooltip();
     else if (pileHovered) showPileTooltip();
     // World-anchored sleeping marks share the guide visibility cadence; their particles still move every frame.
@@ -11672,7 +11701,7 @@
       wpContextOn = true;
     }
     presets = { pile: PILE_VIEW, gate: GATE_VIEW };
-    pilot = pilotMod.create({ carry: true, renderer, canvas: ctx.canvas, camera, hud, presets, landing: "pile", pitch: [PITCH_MIN, PITCH_MAX], dist: [DIST_MIN, DIST_MAX], follow: FOLLOW, fly: FLY, clampTarget, clampCamera, observeOrbit: (position, dt) => clampCamera(position, 0, CLEARANCE, false, dt), ceilingAt: (x, z, y, cave) => cloudPlaying() ? Infinity : ceilingAt(x, z, y, cave), birdsEyeMin: BIRDS_EYE_MIN, birdsEyeCeiling, releaseView: releaseCameraView, enterFreeView: enterFreeCameraView, coarse: COARSE, onFreeAction: freeAction, jetpackStatus: jetpackHudStatus, mayPossess: mayDriveOoga, combatOnly: () => gameCombatOnly, cameraTargets: () => !cloudPlaying(), fixedFollow: cloudPlaying, close: { ...CLOSE_VIEW, maxStep: STEP_MAX, groundAt: playerSupportAt, visualGroundAt: visualSupportAt, sleepEyeFloorAt, zone: () => playerCaveIndex } });
+    pilot = pilotMod.create({ carry: true, renderer, canvas: ctx.canvas, camera, hud, presets, landing: "pile", pitch: [PITCH_MIN, PITCH_MAX], dist: [DIST_MIN, DIST_MAX], follow: FOLLOW, fly: FLY, clampTarget, clampCamera, observeOrbit: (position, dt) => clampCamera(position, 0, CLEARANCE, false, dt), ceilingAt: (x, z, y, cave) => cloudPlaying() ? Infinity : ceilingAt(x, z, y, cave), birdsEyeMin: BIRDS_EYE_MIN, birdsEyeCeiling, releaseView: releaseCameraView, enterFreeView: enterFreeCameraView, coarse: COARSE, onFreeAction: freeAction, jetpackStatus: jetpackHudStatus, mayPossess: mayDriveOoga, combatOnly: () => gameCombatOnly || !!cloudHopper?.playing, noOverhead: () => !!cloudHopper?.active, primaryAction: (down) => !!cloudHopper?.hookAction(down), cameraTargets: () => !cloudPlaying(), fixedFollow: cloudPlaying, close: { ...CLOSE_VIEW, maxStep: STEP_MAX, groundAt: playerSupportAt, visualGroundAt: visualSupportAt, sleepEyeFloorAt, zone: () => playerCaveIndex } });
     chalkboard = BL.chalkboard.create({
       renderer,
       onOpen: () => { pilot.setActive(false); pilot.controls.reset(); input.reset(); hud.tooltip.hide(); },
@@ -11864,6 +11893,8 @@
     shared.jetpackLiftOnly = cave => !!cloudHopper?.active && cave === cloudHopper.actor;
     shared.autoLedgeJump = cave => !(cloudHopper?.active && cave === cloudHopper.actor);
     shared.onJump = cave => cloudHopper?.onJump(cave);
+    // Space with both jumps spent: Cloud Hopper's sky feather, when one is held.
+    shared.spentJump = cave => !!cloudHopper?.updraft(cave);
     shared.npcPaused = cloudPlaying;
     shared.tickerVisible = donationTickerVisible;
     shared.abyssAt = (x, z, y, actor) => !cloudHopper?.active && abyssAt(x, z, y, actor);
@@ -12658,7 +12689,7 @@
       addChild(cloudFinishFruit, fruit);
     }
     addChild(root, cloudFinishFruit);
-    cloudHopper = BL.cloudHopper.create({ root, dock: cloudDock, crew, pilot, hud, renderer, camera, seaY: SEA_Y,
+    cloudHopper = BL.cloudHopper.create({ root, dock: cloudDock, crew, pilot, hud, renderer, camera, game, seaY: SEA_Y,
       move: cloudMove, mode: cloudMode, pileSurface: cloudPileSurface, mainlandRadius: island.radius,
       finish: () => ({ x: 0, y: ALTAR_HEIGHT + 2, z: 0 }),
       pileTop: () => pile.shown > 0 ? pile.core.position.y + pile.core.scale.y * pileTopY : ALTAR_HEIGHT + 0.23,
