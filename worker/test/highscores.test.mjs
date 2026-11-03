@@ -315,7 +315,7 @@ test("outbox rollback, failed delivery and commit during acknowledgement cannot 
 
 test("rename and account removal enqueue authoritative boards without growing an event history", async t => {
   const { DB, handler, env } = await setup(t);
-  await handler(write("cloud-hopper-l1", "cloud-hopper-l1", 10000), env);
+  assert.equal((await handler(write("cloud-hopper-l1", "cloud-hopper-l1", 10000), env)).status, 200);
   await player(DB, 1, "renamed-player");
   assert.equal(DB.sql.prepare("SELECT count(*) AS n FROM highscore_notifications").get().n, 1);
   const boards = [];

@@ -1,4 +1,4 @@
-// A page-session best run: bounded pose samples and one non-interactive translucent Ooga.
+// Bounded pose capture and one non-interactive translucent Ooga, rebuilt from its recorded appearance.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -12,6 +12,43 @@
     const geometries = new Map();
     let samples = null, count = 0, interval = SAMPLE_SECONDS, nextAt = 0, lastAt = -1, capturing = false, name = "", username = "";
     let rig = null, nodes = null, rest = null, playback = null, cursor = 0, staged = false;
+    let appearance = null, built = null;
+    const snapshot = actor => {
+      const out = { version: 1, nodes: [], geometries: [], parts: [] }, indices = new Map(), meshes = new Map();
+      const excluded = new Set([actor.parts.club, actor.parts.gun, actor.parts.snack, actor.jet?.node]);
+      const visit = (node, parent) => {
+        if (!node || excluded.has(node)) return;
+        if (out.nodes.length >= 256) throw new Error("Replay appearance exceeds node limit");
+        const index = out.nodes.length; indices.set(node, index);
+        let geometry = -1;
+        if (node.geometry) {
+          geometry = meshes.get(node.geometry);
+          if (geometry === undefined) {
+            geometry = out.geometries.length; meshes.set(node.geometry, geometry);
+            const mesh = BL.models.merge(node.geometry);
+            const faces = list => list.map(f => ({ i: [...f.i], color: [...f.color], emissive: Math.max(0, Math.min(1, f.emissive || 0)) }));
+            out.geometries.push({ verts: [...mesh.verts], faces: faces(mesh.faces), lines: faces(mesh.lines) });
+          }
+        }
+        const p = node.position, s = node.scale, q = node.quaternion || quat.fromEuler(rotation, node.rotation.x, node.rotation.y, node.rotation.z);
+        out.nodes.push({ parent, geometry, pose: [p.x, p.y, p.z, ...q, s.x, s.y, s.z,
+          node.poseYaw || 0, node.poseLean || 0, node.poseLeanY || 0, node.visible ? 1 : 0] });
+        for (const child of node.children) visit(child, index);
+      };
+      visit(actor.root, -1);
+      // Appearance is model-local: staging adds the current cloud's height once.
+      // Motion samples below retain the actual world position, including departure lift.
+      const origin = out.nodes[0].pose;
+      origin[0] = origin[2] = 0; origin[1] = actor.baseY;
+      out.parts = PARTS.map(key => indices.get(key === "root" ? actor.root : actor.parts[key]) ?? -1);
+      const h = actor.traits.height;
+      const jet = createNode({ geometry: BL.hubModels.jetpack(), visible: false,
+        position: { x: 0, y: 0.06 * h, z: -0.18 * h }, scale: { x: h, y: h, z: h } });
+      const flame = createNode({ geometry: BL.hubModels.jetFlame(), visible: false });
+      addChild(jet, flame); visit(jet, 0);
+      out.parts[9] = indices.get(jet) ?? -1; out.parts[10] = indices.get(flame) ?? -1;
+      return BL.cloudHopperReplayCodec?.validAppearance(out) ? out : null;
+    };
     const thin = () => {
       // Keep the first and last poses while halving interior samples. Very
       // long successful runs still get a complete ghost at a coarser cadence.
@@ -62,6 +99,8 @@
       count = 0; interval = SAMPLE_SECONDS; nextAt = 0; lastAt = -1; capturing = true;
       name = actor.traits.name;
       username = handle || name;
+      // Captured once, outside the frame loop; custom clothes are data, never executable dress functions.
+      try { appearance = snapshot(actor); } catch { appearance = null; }
       sourceNodes[0] = actor.root;
       for (let i = 1; i < 9; i++) sourceNodes[i] = actor.parts[PARTS[i]] || null;
       record(0, actor, true);
@@ -74,7 +113,7 @@
       if (!count) return null;
       // The saved run owns only plain metadata and a compact typed copy, so
       // later captures and scene disposal cannot mutate it or retain actors.
-      return { name, username, duration: time, count, samples: samples.slice(0, count * STRIDE) };
+      return { name, username, appearance, duration: time, count, samples: samples.slice(0, count * STRIDE) };
     };
     const ghostGeometry = (source) => {
       let geometry = geometries.get(source);
@@ -96,25 +135,23 @@
     };
     const dropRig = () => {
       if (rig) removeChild(root, rig.root);
-      rig = nodes = rest = null; staged = false;
+      rig = nodes = rest = built = null; staged = false;
       for (const geometry of geometries.values()) renderer.releaseGeometry(geometry);
       geometries.clear();
     };
     const build = (recording) => {
       dropRig();
-      rig = BL.models.caveman(BL.contributors.traitsFor(recording.name));
-      for (const key of ["club", "gun", "snack"]) {
-        const node = rig.parts[key];
-        if (node?.parent) removeChild(node.parent, node);
-      }
-      if (!rig.parts.jetpack) {
-        const h = rig.traits.height;
-        rig.parts.jetpack = createNode({ geometry: BL.hubModels.jetpack(), visible: false,
-          position: { x: 0, y: 0.06 * h, z: -0.18 * h }, scale: { x: h, y: h, z: h } });
-        rig.parts.jetFlame = createNode({ geometry: BL.hubModels.jetFlame(), visible: false });
-        addChild(rig.parts.jetpack, rig.parts.jetFlame);
-        addChild(rig.root, rig.parts.jetpack);
-      }
+      const look = recording.appearance;
+      if (!BL.cloudHopperReplayCodec?.validAppearance(look)) return;
+      const tree = look.nodes.map(n => {
+        const p = n.pose;
+        return createNode({ position: { x: p[0], y: p[1], z: p[2] }, quaternion: new Float32Array(p.slice(3, 7)),
+          scale: { x: p[7], y: p[8], z: p[9] }, poseYaw: p[10], poseLean: p[11], poseLeanY: p[12], visible: !!p[13],
+          geometry: n.geometry < 0 ? null : look.geometries[n.geometry] });
+      });
+      for (let i = 1; i < tree.length; i++) addChild(tree[look.nodes[i].parent], tree[i]);
+      rig = { root: tree[0], parts: Object.fromEntries(PARTS.map((key, i) => [key, tree[look.parts[i]] || null])) };
+      built = recording;
       const visit = (node) => {
         node.sightHidden = true; node.cameraHidden = false;
         if (node.geometry) node.geometry = ghostGeometry(node.geometry);
@@ -172,7 +209,8 @@
     };
     const play = (recording, position = null, heading = 0) => {
       if (!recording?.count) { hide(); return; }
-      if (!rig || rig.traits.name !== recording.name) build(recording);
+      if (!rig || built !== recording) build(recording);
+      if (!rig) return;
       playback = recording; cursor = 0; staged = false;
       update(0);
       if (position) {
@@ -186,7 +224,8 @@
         const p = rig.root.position;
         p.x = position.x; p.y = position.y + rest[0].position.y; p.z = position.z;
         quat.fromEuler(rig.root.quaternion, 0, heading, 0);
-        rig.parts.jetpack.visible = rig.parts.jetFlame.visible = false;
+        if (rig.parts.jetpack) rig.parts.jetpack.visible = false;
+        if (rig.parts.jetFlame) rig.parts.jetFlame.visible = false;
         rig.root.visible = true;
         Object.assign(readyPosition, p); readyRotation.set(rig.root.quaternion); staged = true;
       }
@@ -226,7 +265,7 @@
     const clear = () => {
       hide(); dropRig(); capturing = false;
       sourceNodes.fill(null);
-      samples = null; count = 0; lastAt = -1; name = username = "";
+      samples = appearance = null; count = 0; lastAt = -1; name = username = "";
     };
     const liveGeometry = (set) => { for (const geometry of geometries.values()) set.add(geometry); };
     return { begin, record, finish, play, update, drawName, hide, clear, liveGeometry, dispose: clear };

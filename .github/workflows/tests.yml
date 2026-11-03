@@ -26,3 +26,5 @@ jobs:
           package-manager-cache: false
       - name: Run the unit lane
         run: npm run test:unit
+      - name: Check shared Cloud Hopper replay publication and playback
+        run: node --test worker/test/cloud-hopper-replays.test.mjs worker/test/highscores.test.mjs

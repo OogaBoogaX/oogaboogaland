@@ -3,6 +3,7 @@
 import "../../src/js/highscore-rules.js";
 import { readHighscores, readArcade } from "./highscore-store.js";
 import { allowed, clientIp, fromSite, getSessionFromRequest, json } from "./http.js";
+import { winnerReplay } from "./cloud-hopper-replay-store.js";
 
 const rules = globalThis.BL.highscoreRules;
 const BODY_MAX = 512;
@@ -24,6 +25,16 @@ const readBody = async (request) => {
     }
     return new TextDecoder().decode(bytes.subarray(0, used));
   } finally { reader.releaseLock(); }
+};
+
+export const readScores = async (db, game, rule, replayEnabled = false) => {
+  const board = await readHighscores(db, game);
+  if (!replayEnabled || !/^cloud-hopper-l[1-4]$/.test(game)) return board;
+  let replay = await winnerReplay(db, game);
+  if (replay && (board.highscores[replay.username] !== replay.score || board.achieved[replay.username] !== replay.achieved
+    || Object.keys(board.highscores).some(key => board.highscores[key] < replay.score
+      || board.highscores[key] === replay.score && board.achieved[key] < replay.achieved))) replay = null;
+  return { ...board, replay };
 };
 
 const SNAPSHOT_MS = 30000;
@@ -48,7 +59,7 @@ const arcadeSnapshot = async (url, db, cache) => {
   try { return await pending; } finally { if (running.get(url.origin) === pending) running.delete(url.origin); }
 };
 
-const improve = async (db, game, rule, machine, score, found) => {
+export const improve = async (db, game, rule, machine, score, found, after = [], ticket = null) => {
   const { player, session } = found;
   const attributed = rule.scoreType === "ooga", key = attributed ? player.login.toLowerCase() : machine;
   const path = "$." + JSON.stringify(key), at = Date.now();
@@ -58,6 +69,8 @@ const improve = async (db, game, rule, machine, score, found) => {
     owners = CASE WHEN ?3 THEN json_set(owners, ?1, ?4) ELSE owners END,
     achieved = json_set(achieved, ?1, MAX(updated_at + 1, ?5)), revision = revision + 1, updated_at = MAX(updated_at + 1, ?5)
     WHERE game_id = ?6 AND rules_version = ?7
+      ${ticket ? `AND EXISTS (SELECT 1 FROM cloud_hopper_replay_tickets WHERE token = ?11 AND hash = ?12
+        AND player_id = ?4 AND game = ?6 AND session_hash = ?10 AND expires_at > ?5)` : ""}
       AND EXISTS (SELECT 1 FROM players WHERE id = ?4 AND login = ?8 AND banned_at IS NULL)
       AND EXISTS (SELECT 1 FROM sessions WHERE token_hash = ?10 AND player_id = ?4 AND expires_at > unixepoch())
       AND (NOT ?3 OR json_extract(owners, ?1) IS NULL OR json_extract(owners, ?1) = ?4)
@@ -65,7 +78,7 @@ const improve = async (db, game, rule, machine, score, found) => {
       AND (NOT ?3 OR json_extract(highscores, ?1) IS NOT NULL
         OR (SELECT count(*) FROM json_each(highscores)) < ?9
         OR ?2 ${better} (SELECT ${worst}(value) FROM json_each(highscores)))`)
-    .bind(path, score, attributed ? 1 : 0, player.id, at, game, rule.version, player.login, PLAYER_LIMIT, session.token_hash);
+    .bind(path, score, attributed ? 1 : 0, player.id, at, game, rule.version, player.login, PLAYER_LIMIT, session.token_hash, ...(ticket ? [ticket.token, ticket.hash] : []));
   if (!attributed) return (await change.run()).meta.changes > 0;
   // At most one newcomer entered the bounded board. Drop its worst entry in the same D1
   // transaction, with the latest achievement losing a tie, then the larger stable account id.
@@ -77,7 +90,7 @@ const improve = async (db, game, rule, machine, score, found) => {
   const result = await db.batch([change, db.prepare(`UPDATE game_highscores SET
     highscores = json_remove(highscores, ${last}), owners = json_remove(owners, ${last}),
     achieved = json_remove(achieved, ${last})
-    WHERE game_id = ? AND (SELECT count(*) FROM json_each(highscores)) > ?`).bind(game, PLAYER_LIMIT)]);
+    WHERE game_id = ? AND (SELECT count(*) FROM json_each(highscores)) > ?`).bind(game, PLAYER_LIMIT), ...after]);
   return result[0].meta.changes > 0;
 };
 
@@ -118,7 +131,7 @@ export const createHighscoreHandler = (sessionFor = getSessionFromRequest, cache
       const saved = await arcadeSnapshot(url, env.DB, cacheFor());
       return json({ boards: saved.boards, refreshAfterMs: Math.max(0, saved.expiresAt - Date.now()) });
     }
-    const scores = await readHighscores(env.DB, game);
+    const scores = await readScores(env.DB, game, rule, !!env.CLOUD_HOPPER_REPLAYS);
     return scores ? json(scores) : closed();
   } catch { return closed(); }
 };

@@ -9,6 +9,7 @@ import * as highscoreStore from "../src/highscore-store.js";
 import { createOwnedCharacterLookup } from "../src/contributor-policy.js";
 import { RULES } from "../src/tess-rules.js";
 import "../../src/js/highscore-rules.js";
+import "../../src/js/cloud-hopper-replay-codec.js";
 
 const load = (name, dependencies, exports) => {
   const url = new URL(`../src/${name}.js`, import.meta.url);
@@ -36,7 +37,9 @@ anthropic = class { constructor() { throw new Error("Unexpected Claude call"); }
   const api = load("api", { ...cookies, ...db, ...http }, ["handleApi"]);
   const donations = load("donations", http, ["handleDonations"]);
   const tess = load("tess", { ...http, Anthropic: anthropic, FACTS: facts, RULES }, ["handleTess", "pruneTess", "ask", "RESERVE"]);
-  const highscores = load("highscores", { ...http, ...highscoreStore }, ["handleHighscores", "createHighscoreHandler"]);
-  const main = load("index", { ...http, ...db, ...auth, ...api, ...donations, ...tess, ...highscores }, ["worker"]);
-  return { ...http, ...auth, ...api, ...donations, ...tess, ...highscores, ...main };
+  const replayStore = load("cloud-hopper-replay-store", {}, ["winnerSQL", "liveSQL", "winnerReplay", "pruneCloudHopperReplays"]);
+  const highscores = load("highscores", { ...http, ...highscoreStore, ...replayStore }, ["handleHighscores", "createHighscoreHandler", "readScores", "improve"]);
+  const replays = load("cloud-hopper-replays", { ...http, ...replayStore, ...highscores }, ["handleCloudHopperReplays", "createReplayHandler"]);
+  const main = load("index", { ...http, ...db, ...auth, ...api, ...donations, ...tess, ...highscores, ...replays, ...replayStore }, ["worker"]);
+  return { ...http, ...auth, ...api, ...donations, ...tess, ...highscores, ...replays, ...replayStore, ...main };
 };

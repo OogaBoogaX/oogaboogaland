@@ -4709,6 +4709,7 @@ const totemFeedChecks = async () => {
 };
 // Regression: any remaining jetpack fuel deferred an unrecoverable fall's DQ and fixed camera until the water.
 const cloudHopperFailureChecks = async engine => {
+  const captures = [];
   let now = 0, callbacks, shown = "", active = true, mode = false, cuts = 0, headChecks = 0;
   let ghostPlayed = null, ghostTime = -1, ghostBegins = 0, ghostFinishes = 0, ghostHidden = true;
   let ghostUsername = "", shownScores = [], shownLatest = null;
@@ -4761,7 +4762,9 @@ const cloudHopperFailureChecks = async engine => {
         p.z = matrix[2] * x + matrix[6] * y + matrix[10] * z + matrix[14];
       }
     } };
-  Object.assign(BL, { hubModels: { jetpack: () => ({}), jetFlame: () => ({}) },
+  Object.assign(BL, { highscores: { begin: () => ({}), watch: (_id, fn) => { fn(null); return () => {}; },
+    submit: (_token, _game, _score, recording) => captures.push(recording) },
+    hubModels: { jetpack: () => ({}), jetFlame: () => ({}) },
     cloudHopperSky: { create: () => ({ build: () => 0, update: noop, clear: noop, dispose: noop, flash: 0 }) },
     cloudHopperTornado: { SPOTS: [0.5], create: () => ({ start: noop, update: noop, clear: noop, axisAt: noop, radiusAt: () => 0, dispose: noop, liveGeometry: noop, active: false, down: false, strength: 0, forming: 0, flash: 0 }) },
     cloudHopperGust: { WARN: 2.5, create: () => ({ start: noop, update: noop, clear: noop, dispose: noop, liveGeometry: noop, state: "calm", active: false, strength: 0, warning: 0, pushX: 0, pushZ: 0 }) },
@@ -5260,7 +5263,7 @@ const cloudHopperFailureChecks = async engine => {
   const winningLayout = layout(hopper.course);
   const beforeFinishStops = audioStops;
   land(13);
-  const firstGhost = hopper.bestGhost;
+  const firstGhost = captures[0];
   const savedGhost = hopper.phase === "won" && !panelsHidden && Math.abs(firstGhost?.duration - 20) < 1e-8 && ghostFinishes === 1 && firstGhost.driftTime >= 0;
   record("Cloud Hopper finish: flying over the pile keeps the clock running until feet land on its surface", airborneClock && savedGhost);
   const namedRun = firstGhost?.username === "record-holder" && shownScores?.[0]?.username === "record-holder"
@@ -5273,22 +5276,20 @@ const cloudHopperFailureChecks = async engine => {
   callbacks.onReplay();
   const winReplayMusic = audioStops === beforeWinReplayStops && audioStage === "ready" && audioLevel === 1;
   const freshWinLayout = layout(hopper.course) !== winningLayout;
-  const racingGhost = ghostPlayed === firstGhost && ghostTime === 0;
+  const racingGhost = ghostPlayed === null && ghostHidden;
   const platform = hopper.platform.position, stageX = ghostPosition?.x - platform.x, stageZ = ghostPosition?.z - platform.z;
   const stageRadius = Math.hypot(stageX, stageZ);
-  const stagedGhost = ghostPosition?.y === platform.y && stageRadius > platformRadius * 0.8 && stageRadius < platformRadius
-    && stageX * platform.x + stageZ * platform.z < 0
-    && Math.sin(ghostHeading) * stageX + Math.cos(ghostHeading) * stageZ > stageRadius * 0.99;
+  const stagedGhost = ghostHidden && !hopper.bestGhost;
   tick(1.7); depart(); tick(0.1, 7);
-  const syncedGhost = Math.abs(ghostTime - 7) < 1e-8 && ghostPlayed === firstGhost;
+  const syncedGhost = Math.abs(ghostTime - 7) < 1e-8 && ghostPlayed === null;
   const independentDrift = hopper.course.start() > 1.7 && hopper.course.start() !== firstGhost.driftTime;
   land(18);
-  const slowerKept = hopper.bestGhost === firstGhost && ghostFinishes === 1 && Math.abs(hopper.time - 25) < 1e-8;
+  const slowerKept = !hopper.bestGhost && ghostFinishes === 2 && captures[1].duration === 25 && Math.abs(hopper.time - 25) < 1e-8;
   const completionMusic = audioStage === "won";
   callbacks.onReplay(); depart(); land(10);
-  const fastestGhost = hopper.bestGhost;
+  const fastestGhost = captures[2];
   const fasterSaved = fastestGhost !== firstGhost && Math.abs(fastestGhost?.duration - 10) < 1e-8
-    && Math.abs(firstGhost?.duration - 20) < 1e-8 && ghostFinishes === 2;
+    && Math.abs(firstGhost?.duration - 20) < 1e-8 && ghostFinishes === 3;
   const newBestMusic = audioStage === "best";
   callbacks.onReplay(); depart();
   Object.assign(actor.root.position, { x: 1000, y: 100 + actor.baseY, z: 0 }); actor.hopV = -30; actor.jumps = 2;
@@ -5298,7 +5299,7 @@ const cloudHopperFailureChecks = async engine => {
   const freshGrace = hopper.phase === "running" && active;
   actor.root.position.y = seaY + actor.baseY; tick(0.01);
   const waterImmediate = freshGrace && hopper.phase === "dq";
-  const dqKept = hopper.phase === "dq" && hopper.bestGhost === fastestGhost && ghostFinishes === 2 && ghostHidden && ghostBegins === 5;
+  const dqKept = hopper.phase === "dq" && !hopper.bestGhost && ghostFinishes === 3 && ghostHidden && ghostBegins === 5;
   const overheadFramed = hopper.fallView() && lowerHalf() && camera.position.x === 1000 && camera.position.y === 120 && camera.position.z === 0;
   tick(10);
   const hiddenExit = !actor.root.visible && hopper.fallView();
@@ -5324,10 +5325,10 @@ const cloudHopperFailureChecks = async engine => {
   const leftMusic = audioStage === "" && audioLevel === 0;
   Object.assign(actor.root.position, dockPosition); hopper.preUpdate(0);
   const beforeReentryStops = audioStops;
-  const reopened = hopper.launch() && hopper.phase === "intro" && hopper.bestGhost === fastestGhost;
+  const reopened = hopper.launch() && hopper.phase === "intro" && !hopper.bestGhost;
   callbacks.onStart();
   const freshEntryLayout = reopened && hopper.phase === "lifting" && layout(hopper.course) !== exitedLayout
-    && hopper.bestGhost === fastestGhost && seedDraw === seedDraws.length;
+    && !hopper.bestGhost && seedDraw === seedDraws.length;
   const reentryMusic = audioStage === "lifting" && audioLevel === 0.28 && audioStops === beforeReentryStops;
   const ascentLevels = [audioLevel];
   tick(BL.cloudHopper.LIFT_SECONDS / 4); ascentLevels.push(audioLevel);
@@ -5347,7 +5348,7 @@ const cloudHopperFailureChecks = async engine => {
     savedGhost, namedRun, racingGhost, stagedGhost, syncedGhost, freshDqLayout, freshWinLayout, independentDrift, freshEntryLayout, backgroundPaused, backgroundResumed,
     slowerKept, fasterSaved, waterImmediate, dqKept, overheadFramed, hiddenExit, restored,
     disposed: rootNode.children.length === 1 && visibilityListeners.size === 0 };
-  record("Cloud Hopper regression: hopeless falls show DQ with the Ooga below the panel; fresh courses retain the original session ghost, replay resets and exit restores gear",
+  record("Cloud Hopper regression: clean finishes forward recordings, fresh courses never replay a browser best, DQ/replay/exit preserve controls and gear",
     Object.values(rows).every(Boolean), JSON.stringify(rows));
   const musicRows = { offDockMusic, dockEntryMusic, dockFadeMusic, dockEdgeMusic, waitingMusic, musicPhases, fallMusic,
     replayMusic, winReplayMusic, resultMusic, completionMusic, newBestMusic, exitMusic, cancelMusic, returnedMusic,
@@ -6815,13 +6816,14 @@ const cloudHopperRecordChecks = async () => {
     for (let i = 0; i < 40 && !await b.evaluate("!!window.BL?.cloudHopperHud"); i++) await b.sleep(25);
     const state = await b.evaluate(`(() => {
       BL.net = { state: { me: null } }; BL.cloudHopperArt = { levels: Array(4).fill("../../src/art/cloud-hopper-intro.webp") };
-      const H = window.recordHud = BL.cloudHopperHud.create();
+      let toggles = 0;
+      const H = window.recordHud = BL.cloudHopperHud.create({ onGhost: () => toggles++ });
       H.setLevels({ selected: 2, unlocked: 2, bests: [0, 9500, 0, 0] }); H.show("ready");
       const line = document.querySelector('.cloud-hopper-record'), button = line.querySelector('button'), text = () => line.textContent;
       const loading = text().includes('Loading global best') && button.hidden && !text().includes('09.50');
       H.setHighscoreStatus('unavailable'); const unavailable = text().includes('Global best unavailable') && button.hidden;
       H.setHighscores({ highscores: { bob: 20000, alice: 19740, carol: 19740, dave: 19740 }, achieved: { alice: 2, carol: 1, dave: 1 } });
-      const leader = text() === 'Global best · carol · 00:19.74' && !button.hidden && button.disabled && button.getAttribute('aria-pressed') === 'false';
+      const leader = text().includes('Global best · carol') && text().includes('00:19.74') && !button.hidden && button.disabled && button.getAttribute('aria-pressed') === 'false';
       H.setHighscoreStatus('refreshing'); const refreshing = text().includes('carol') && text().includes('updating');
       H.setHighscoreStatus('stale'); const stale = text().includes('carol') && text().includes('out of date');
       H.setHighscoreStatus('ready'); H.show('running', 3);
@@ -6839,10 +6841,17 @@ const cloudHopperRecordChecks = async () => {
       H.setHighscores({ highscores: {}, achieved: {} }); const empty = text() === 'No times yet' && button.hidden;
       BL.net.state.me = { login: 'winner' }; H.setHighscores({ highscores: { winner: 19740 }, achieved: {} });
       const signed = text().includes('winner') && document.querySelector('.race-podium li').classList.contains('you');
+      H.setReplayState('off'); button.click();
+      const off = !button.disabled && toggles === 1 && button.getAttribute('aria-pressed') === 'false'
+        && button.nextElementSibling.classList.contains('cloud-hopper-record-time');
+      H.setReplayState('loading'); const busy = button.getAttribute('aria-busy') === 'true';
+      H.setReplayState('on'); const on = button.getAttribute('aria-pressed') === 'true';
+      H.setReplayState('error'); const retry = !button.disabled && button.title.includes('retry');
+      H.setReplayState('unavailable'); const missing = button.disabled && button.title === 'No winning replay yet';
       H.setLevels({ selected: 2, unlocked: 4, bests: [0, 26540, 0, 0] });
       H.setHighscores({ highscores: { 'long-player-name-with-thirty-nine-chars': 19740 }, achieved: {} });
       H.setHighscoreStatus('stale'); H.show('ready');
-      return { loading, unavailable, leader, refreshing, stale, running, isolated, locked, empty, signed };
+      return { loading, unavailable, leader, refreshing, stale, running, isolated, locked, empty, signed, off, busy, on, retry, missing };
     })()`);
     record("cloud hopper record: global leader/ties, four levels, guest/account reads, no local fallback, empty/error/stale states and disabled replay", Object.values(state).every(Boolean), JSON.stringify(state));
     for (const [w, h] of [[1440, 900], [390, 844], [844, 390], [320, 568]]) {
@@ -6890,7 +6899,7 @@ const highscoreClientChecks = async () => {
       }) };
     for (const source of sources) runInNewContext(source, context);
     const B = context.window.BL;
-    return { scores: B.highscores, rules: B.highscoreRules, context, live, state, requests, timers, events, subscribers, toasts,
+    return { BL: B, scores: B.highscores, rules: B.highscoreRules, context, live, state, requests, timers, events, subscribers, toasts,
       account(me, loggedOut = false) { state.me = me; if (loggedOut) state.logoutEpoch++; for (const fn of subscribers) fn(state); },
       advance(ms = 31000) { now += ms; },
       connection(token) { state.room = token ? "live" : "connecting"; state.connectionToken = token; for (const fn of subscribers) fn(state); },
@@ -6911,6 +6920,23 @@ const highscoreClientChecks = async () => {
         requests[index].resolve({ ok: status === 200, status, headers: { get: () => "application/json" }, json: async () => data });
       } };
   };
+  {
+    const f = fixture(true), game = "cloud-hopper-l1";
+    f.BL.cloudHopperReplays = { startTicket: () => Promise.resolve({ token: "test" }), submit: async () => null };
+    const ticket = f.scores.begin(game); f.reply(0, game); await flush();
+    const pending = f.scores.submit(ticket, game, 1000, { duration: 1 }); await flush();
+    const fallback = f.requests.length === 2 && f.requests[1].options.method === "POST"
+      && JSON.parse(f.requests[1].options.body).score === 1000;
+    f.reply(1, game, { "score-one": 1000 }, 1); const saved = await pending;
+    f.scores.dispose();
+    const other = fixture(true); let release;
+    other.BL.cloudHopperReplays = { startTicket: () => Promise.resolve({ token: "test" }), submit: () => new Promise(done => { release = done; }) };
+    const run = other.scores.begin(game); other.reply(0, game); await flush();
+    const changed = other.scores.submit(run, game, 1000, { duration: 1 }); await flush();
+    other.account({ id: 12, login: "other" }); release(null); const refused = !await changed;
+    const noWrite = other.requests.every(r => r.options.method === "GET"); other.scores.dispose();
+    record("highscores: replay upload failure preserves the numeric score, but account changes prevent any fallback write", fallback && saved && refused && noWrite);
+  }
   {
     // Regression: a failed refresh previously left an apparently current board, with no loading/error signal.
     const f = fixture(), states = [], changes = [];
@@ -7110,6 +7136,19 @@ const highscoreClientChecks = async () => {
     const fresh = f.requests.length === before + 1 && f.requests.at(-1).url === "/api/highscores/race";
     f.scores.dispose(); await flush();
     record("highscores: reconnect invalidates unwatched per-game snapshots before a later watch", fresh);
+  }
+  {
+    const f = fixture(true), off = f.scores.watch("cloud-hopper-l1", () => {});
+    f.reply(0, "cloud-hopper-l1", { "score-one": 10000 }, 1); await flush();
+    f.push("cloud-hopper-l1", { "score-one": 9000 }, 2);
+    const refresh = f.requests.length === 2 && f.requests[1].url === "/api/highscores/cloud-hopper-l1";
+    const retained = f.scores.get("cloud-hopper-l1").revision === 1;
+    f.reply(1, "cloud-hopper-l1", { "score-one": 9000 }, 2); await flush();
+    const fresh = f.scores.get("cloud-hopper-l1").revision === 2;
+    off(); f.push("cloud-hopper-l1", { "score-one": 8000 }, 3);
+    const detached = f.requests.length === 2;
+    f.scores.dispose();
+    record("highscores: Cloud Hopper room updates fetch coherent replay metadata only while watched", refresh && retained && fresh && detached);
   }
   {
     const f = fixture(); f.state.highscoreSnapshots = false;

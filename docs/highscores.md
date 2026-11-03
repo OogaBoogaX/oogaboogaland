@@ -120,9 +120,9 @@ achievement timestamp and username ordering as its shared top ten. Loading, unav
 empty and stale replies are labeled; a failed refresh retains the last good shared result.
 Browser personal bests remain separately labeled in the selection/results panel. Only the
 selected board is watched, using the existing entry, run-start and tab-return refreshes.
-The score API carries no shared winning replay, so the timer's ghost button is disabled
-when a leader exists and absent on an empty board. It never uses a local personal ghost
-as that leader's replay. Existing personal session playback remains independent.
+When the optional replay storage is configured, the timer can load the current winner's recording on demand.
+No available recording means a disabled ghost control; there is no personal/session ghost fallback.
+See [Shared winning replays](cloud-hopper-replays.md) for format, publication, retention and deployment requirements.
 
 Mine keeps its start-account eligibility across visits in the same page. Runs restored
 from localStorage after a reload remain local, since the page cannot establish who began
