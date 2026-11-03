@@ -1,3 +1,6 @@
+export { hockey } from "./hockey.js";
+import "../../src/js/hockey-wire.js";
+export const HOCKEY = globalThis.BL.hockeyWire;
 import { parseStudioCommand, studioCanSpeak, STUDIO_ZONE } from "./studio-policy.js";
 import "../../src/js/chat-policy.js";
 import "../../src/js/voice-blend.js";
@@ -199,6 +202,7 @@ export const parseClientMessage = (text) => {
   if (!msg || typeof msg !== "object" || Array.isArray(msg)) return false;
   // Only chat earns the longer frame: a repeated key could make a chat-prefixed frame parse as anything.
   if (text.length > MESSAGE_MAX && msg.t !== "chat") return false;
+  if (msg.t === "hockey") return HOCKEY.parse(msg);
   if (msg.t === "studio") return parseStudioCommand(msg);
   if (msg.t === "pose") {
     const { x, y, z, yaw } = msg;

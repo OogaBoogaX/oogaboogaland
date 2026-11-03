@@ -1246,7 +1246,7 @@
   // below the ice where it never crosses the player's view, and leaves sprouting up from its corners' lashings,
   // framing the Ooga above the far rail. `lit` is the paint, which flares on a goal. The puck, a slice of coconut,
   // and a stone mallet with a bone grip are apart (`hockeyPieces`) for the scene to play with.
-  const HOCKEY = { w: 2.2, d: 1.1, y: 0.82 };
+  const HOCKEY = { w: 2.2, d: 1.1, y: 0.82, scale: BL.hockeyWire.SCALE };
 
   // ---- the kiddie rides ------------------------------------------------------------------------------------
   // The coin rides of the ride corral by the doorway, each built facing +z: `base` is the round plinth, `RIDE_R` round
@@ -1326,7 +1326,7 @@
   // wall, pinball from its foot and the rides from 1.4 m in front of their faces.
   LAYOUT.frames = {
     claw: LAYOUT.claws.map(([x, z, scoreId]) => standAt(x, z + CLAW.back, 0, scoreId)),
-    hockey: LAYOUT.hockeys.map((h) => standAt(h.x + Math.sin(h.turn) * 1.75, h.z + Math.cos(h.turn) * 1.75, h.turn, h.scoreId)),
+    hockey: LAYOUT.hockeys.map((h) => standAt(h.x + Math.sin(h.turn) * (HOCKEY.w * HOCKEY.scale / 2 + 0.65), h.z + Math.cos(h.turn) * (HOCKEY.w * HOCKEY.scale / 2 + 0.65), h.turn, h.scoreId)),
     pool: LAYOUT.pools.map((p) => standAt(p.x, p.z + 1.35, 0, p.scoreId)),
     darts: LAYOUT.darts.map((p) => standAt(p.x, HALL.back + 0.38 + DART.oche, 0, p.scoreId)),
     pinball: LAYOUT.pinball.map(([x, z, scoreId]) => standAt(x, z + 1.05, 0, scoreId)),

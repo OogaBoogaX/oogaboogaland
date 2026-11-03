@@ -63,7 +63,7 @@
   // Ooga Arcade's carnival bests, each capped past the most its game can score (nine doubled 100s; the round games
   // run on), the retro cabinets' bests (`retro-games.js`, capped past any run), the ticket balance, and the prizes
   // (`ARCADE_PRIZES` ids) redeemed at the counter.
-  const ARCADE_MAX = { skee: 1800, hoops: 9999, shy: 999, claw: 400, hockey: 200, billiards: 200, darts: 540, pinball: 9999999, ride: 9999,
+  const ARCADE_MAX = { skee: 1800, hoops: 9999, shy: 999, claw: 400, hockey: 0, billiards: 200, darts: 540, pinball: 9999999, ride: 9999,
     invaders: 50000, snake: 120000, pong: 99999, stampede: 75000, flap: 20000, breaker: 50000, dash: 99999, stacker: 999999 }, TICKETS_MAX = 1e7;
   const ARCADE_PRIZES = ["banana-plush", "coconut-cup", "bone-kazoo", "gold-sticker", "gorilla-plush", "crown"];
   // A drop best is a landing on your feet: a crash keeps its ring points on the card but is never a best.
@@ -154,11 +154,11 @@
       }
       const a = parsed.arcade;
       if (a && typeof a === "object") for (const kind in ARCADE_MAX) {
-        if (Number.isFinite(a[kind]) && a[kind] >= 0 && a[kind] <= ARCADE_MAX[kind]) state.arcade[kind] = Math.floor(a[kind]);
+        if (kind !== "hockey" && Number.isFinite(a[kind]) && a[kind] >= 0 && a[kind] <= ARCADE_MAX[kind]) state.arcade[kind] = Math.floor(a[kind]);
       }
       // Old saves grouped all copies of a game together. They cannot identify the machine that earned a score.
       if (a && a.machines && typeof a.machines === "object") for (const kind in ARCADE_MAX) {
-        for (const id of BL.highscoreRules.games[kind].machines) {
+        for (const id of BL.highscoreRules.games[kind]?.machines || []) {
           const score = a.machines[id];
           if (Number.isSafeInteger(score) && score > 0 && score <= ARCADE_MAX[kind]) state.arcade.machines[id] = score;
         }
@@ -349,9 +349,9 @@
       save(state);
     };
     const cloudHopperBest = (login, level) => state.cloudHopper.players.find((p) => p.login === login)?.best[level - 1] || 0;
-    const arcadeBest = (machine) => state.arcade.machines[machine] || 0;
+    const arcadeBest = (machine) => machine?.startsWith("hockey-") ? 0 : state.arcade.machines[machine] || 0;
     const recordArcade = (kind, score, machine = null) => {
-      if (!Object.hasOwn(ARCADE_MAX, kind) || !Number.isFinite(score) || score <= 0) return false;
+      if (kind === "hockey" || !Object.hasOwn(ARCADE_MAX, kind) || !Number.isFinite(score) || score <= 0) return false;
       if (machine !== null && !BL.highscoreRules.games[kind].machines.includes(machine)) return false;
       const value = Math.min(ARCADE_MAX[kind], Math.floor(score));
       if (value <= (machine === null ? state.arcade[kind] : arcadeBest(machine))) return false;

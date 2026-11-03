@@ -27,7 +27,6 @@ them. Every duplicate has its own record.
 | Hoop Shot | `hoops-1`, `hoops-2` | Highest score |
 | Coconut Toss | `shy-1` | Highest score |
 | Claw | `claw-1` through `claw-3` | Highest score |
-| Air Hockey | `hockey-1` through `hockey-3` | Highest score |
 | Pool | `billiards-1`, `billiards-2` | Highest score |
 | Darts | `darts-1`, `darts-2` | Highest score |
 | Pinball | `pinball-1`, `pinball-2` | Highest score |
@@ -247,6 +246,8 @@ otherwise.
 When a scoring rule changes incompatibly, bump its shared registry version and use a new
 migration to reset that game's dictionaries and increase `revision`. Keep `revision`
 monotonic across resets. Do not silently reinterpret existing scores under new rules.
+
+Air Hockey is scoreless for leaderboard purposes: its points are match goals only. Local bests are ignored, its public GET/POST highscore route is unavailable, and aggregate Arcade snapshots omit it. Historical D1 rows remain stored without being served or updated.
 
 Completed eligible Cloud Hopper runs appear immediately in provisional score order with “saving...”.
 Pending uploads are separate from confirmed records and never select a winning ghost. Confirmed
