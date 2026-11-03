@@ -111,6 +111,11 @@
   const rosterSubscribers = new Set();
   const moveSubscribers = new Set();
   const studioSubscribers = new Set();
+  const hockeySubscribers = new Set();
+  const hockeyTables = [null, null, null];
+  const hockeyEmit = m => { for (const fn of hockeySubscribers) fn(m); };
+  const subscribeHockey = fn => { hockeySubscribers.add(fn); return () => hockeySubscribers.delete(fn); };
+  const sendHockey = m => { if (!state.hockey || state.room !== "live") return false; send(JSON.stringify({ t: "hockey", ...m })); return true; };
   const studioEmit = message => { for (const fn of studioSubscribers) fn(message); };
   const chatSubscribers = new Set();
   const walletSubscribers = new Set();
@@ -161,6 +166,7 @@
   const setRoom = (room) => {
     state.room = room;
     if (room !== "live") state.chatUnicode = false;
+    if (room !== "live") { hockeyTables.fill(null); hockeyEmit({ k: "lost" }); state.hockey = false; }
     if (room !== "live") { state.studio = null; state.connectionToken = ""; studioEmit({t:"studio-state",state:null}); }
     state.online = room === "live" ? remotes.size + 1 : 0;
     emit();
@@ -288,6 +294,12 @@
       studioEmit(msg);
     } else if (msg.t === "studio-result") {
       studioEmit(msg);
+    } else if (msg.t === "hockey") {
+      if (Number.isInteger(msg.i) && msg.i >= 0 && msg.i < 3) {
+        if (msg.k === "table") hockeyTables[msg.i] = msg.phase === "closed" ? null : msg;
+        if (msg.k === "frame" && hockeyTables[msg.i]?.s === msg.s && msg.q > hockeyTables[msg.i].q && BL.hockeyWire.validFrame(msg.a)) Object.assign(hockeyTables[msg.i], { a: msg.a, q: msg.q, now: msg.now });
+        hockeyEmit(msg);
+      }
     } else if (msg.t === "state") {
       clockSample(msg.now);
       const ps = msg.ps;
@@ -331,6 +343,7 @@
       state.ghostFollowers = Number.isSafeInteger(msg.ghostFollowers) ? msg.ghostFollowers : 0;
       state.selfId = msg.you.id;
       state.connectionToken = typeof msg.connectionToken === "string" ? msg.connectionToken : "";
+      state.hockey = Array.isArray(msg.features) && msg.features.includes("hockey-v2");
       state.doorway = Array.isArray(msg.features) && msg.features.includes("door");
       state.chatUnicode = Array.isArray(msg.features) && msg.features.includes(BL.chatPolicy.FEATURE);
       remotes.clear();
@@ -697,7 +710,16 @@
     if (ws && ws.readyState === WebSocket.OPEN && state.hostId === state.selfId) ws.send(view);
   };
 
+  // A synchronous Arcade ↔ hockey scene handoff keeps the same driven body and voice subscriptions.
+  let holdingBody = false;
+  const handoffBody = fn => {
+    holdingBody = true;
+    try { return fn(); }
+    catch (error) { holdingBody = false; setBody(null); throw error; }
+    finally { holdingBody = false; }
+  };
   const setBody = (name) => {
+    if (holdingBody && name === null) return;
     if (name === body) return;
     body = state.body = name;
     state.bodyKind = bodyKind(name);
@@ -942,5 +964,5 @@
     close("off");
   };
 
-  BL.net = { subscribeHighscores, subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendGhost, subscribeGhost, sendGhostState, subscribeGhostState, sendPose, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
+  BL.net = { handoffBody, hockeyTables, subscribeHockey, sendHockey, subscribeHighscores, subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendGhost, subscribeGhost, sendGhostState, subscribeGhostState, sendPose, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
 })();

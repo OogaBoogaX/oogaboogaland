@@ -24,7 +24,6 @@
     hoops: { max: 9999, machines: ["hoops-1", "hoops-2"] },
     shy: { max: 999, machines: ["shy-1"] },
     claw: { max: 400, machines: ["claw-1", "claw-2", "claw-3"] },
-    hockey: { max: 200, machines: ["hockey-1", "hockey-2", "hockey-3"] },
     billiards: { max: 200, machines: ["billiards-1", "billiards-2"] },
     darts: { max: 540, machines: ["darts-1", "darts-2"] },
     pinball: { max: 9999999, machines: ["pinball-1", "pinball-2"] },
@@ -52,7 +51,7 @@
     const game = get(id);
     return !!game && !game.retired && game.machines.includes(machine) && Number.isSafeInteger(score) && score > 0 && score <= game.max;
   };
-  const arcade = Object.freeze(["skee", "hoops", "shy", "claw", "hockey", "billiards", "darts", "pinball", "ride",
+  const arcade = Object.freeze(["skee", "hoops", "shy", "claw", "billiards", "darts", "pinball", "ride",
     "invaders", "snake", "pong", "stampede", "flap", "breaker", "dash", "stacker"]);
   BL.highscoreRules = { games, get, valid, arcade, MAX_PLAYERS: 1024 };
 })();

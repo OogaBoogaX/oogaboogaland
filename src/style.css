@@ -8933,6 +8933,8 @@ body.mine-dragging #tooltip {
   gap: 12px;
 }
 
+#carnival-best-box[hidden], .carnival-rows li[hidden], .carnival-act[hidden] { display: none; }
+
 .carnival-best b {
   font-variant-numeric: tabular-nums;
 }
@@ -10556,3 +10558,8 @@ body[data-active-scene="arcade"] #destination-hud:not([hidden]) { display: flex;
 body.cloud-hopper-active #destination-hud,
 body.cloud-hopper-active #own-ooga-hud,
 body.cloud-hopper-active #mode-hud { display: none; }
+
+/* Players read shared hockey scores inside the goal half-circles. */
+#carnival[data-kind="hockey"][data-hockey-shared="true"] .carnival-scores,
+#carnival[data-kind="hockey"][data-hockey-shared="true"] .race-hud-right > .race-lap:nth-child(-n+2) { display: none; }
+#carnival[data-kind="hockey"][data-hockey-shared="true"] .carnival-coach { top: calc(64px + var(--safe-top)); bottom: auto; }

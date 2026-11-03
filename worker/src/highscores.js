@@ -40,7 +40,7 @@ export const readScores = async (db, game, rule, replayEnabled = false) => {
 const SNAPSHOT_MS = 30000;
 const snapshots = new WeakMap();
 const arcadeSnapshot = async (url, db, cache) => {
-  const key = new Request(new URL("/__highscores-cache/v1/arcade", url.origin));
+  const key = new Request(new URL("/__highscores-cache/v2/arcade", url.origin));
   if (cache) {
     try {
       const hit = await cache.match(key), saved = hit && await hit.json();

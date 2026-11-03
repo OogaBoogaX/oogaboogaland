@@ -382,7 +382,7 @@
       return false;
     };
 
-    return { update, actors, drawNames, liveGeometry, stats, setUnderlying, dispose };
+    return { update, actors, drawNames, liveGeometry, stats, setUnderlying, dispose, body: id => bodies.get(id)?.cave || null };
   };
 
   BL.remotePlayers = { create, onIsland, sameZone, MAX, BODY_HEIGHT };

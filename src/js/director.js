@@ -419,7 +419,7 @@
   // visit) enters in slices instead: the departed scene is gone, nothing updates, draws or takes a key, and the screen
   // holds (black, or an instant crossing's last frame) until the last slice, when `done` carries the transition on.
   // A first slice that finishes the enter (a kept hub resuming) completes in the same frame, as `enter` would.
-  const swap = (next, place, done) => {
+  const swapScenes = (next, place, done) => {
     const leaving = active;
     wakeAudio();
     agentPlay.stop(true);
@@ -459,6 +459,10 @@
       done();
     }).catch(error => entryFailed(t, error));
     return false;
+  };
+  const swap = (next, place, done) => {
+    const hockey = !next.enterSteps && (active.id === "arcade" && next.id === "hockey" || active.id === "hockey" && next.id === "arcade");
+    return hockey ? window.BL.net.handoffBody(() => swapScenes(next, place, done)) : swapScenes(next, place, done);
   };
   // Where a settled transition lands: its own scene, or where its preparation redirected it.
   const landing = (t) => t.redirect ? { next: scenes[t.redirect.scene], place: t.redirect.place ?? null } : { next: t.next, place: t.place };
