@@ -1,17 +1,18 @@
 // Builds and stages the site (scripts/site.mjs into untracked/site) and serves it locally; --watch rebuilds
-// on every change under src/. Everything outside `/src/` uses Worker-style audio and picture assets, so
+// on every change under src/, staging beside the site and swapping it in whole, so a page open meanwhile never
+// finds a file gone and a failed build leaves the last good site in place. Everything outside `/src/` uses Worker-style audio and picture assets, so
 // /rally answers from rally.html and an unknown path from 404.html; `/src/` is the unbundled source tree,
 // which gives DevTools real file names while the same flags apply to both.
 import { previewResponse } from "./preview-response.mjs";
 import { spawn } from "node:child_process";
-import { readFileSync, statSync, watch } from "node:fs";
+import { existsSync, readFileSync, renameSync, rmSync, statSync, watch } from "node:fs";
 import { createServer } from "node:http";
 import { dirname, extname, join, normalize, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const build = join(root, "scripts", "site.mjs");
-const site = join(root, "untracked", "site");
+const site = join(root, "untracked", "site"), next = `${site}-next`, old = `${site}-old`;
 const src = join(root, "src");
 const watching = process.argv.includes("--watch");
 const port = Number(process.env.PORT) || 8080;
@@ -47,10 +48,19 @@ function rebuild() {
   }
   building = new Promise((resolve) => {
     const started = Date.now();
-    const child = spawn(process.execPath, [build, site, "--audio-assets", "--image-assets"], { cwd: root, stdio: "inherit" });
+    const child = spawn(process.execPath, [build, next, "--audio-assets", "--image-assets"], { cwd: root, stdio: "inherit" });
     child.on("exit", (code) => {
-      if (code !== 0) console.log(`build failed (exit ${code}); serving the previous page`);
-      else console.log(`rebuilt in ${Date.now() - started} ms`);
+      if (code !== 0) {
+        rmSync(next, { recursive: true, force: true });
+        console.log(`build failed (exit ${code}); serving the previous page`);
+      } else {
+        // Two renames, so the site is missing only between them, not for the whole build.
+        rmSync(old, { recursive: true, force: true });
+        if (existsSync(site)) renameSync(site, old);
+        renameSync(next, site);
+        rmSync(old, { recursive: true, force: true });
+        console.log(`rebuilt in ${Date.now() - started} ms`);
+      }
       building = null;
       if (queued) {
         queued = false;
@@ -71,7 +81,7 @@ function send(res, status, body, type) {
   res.end(body);
 }
 
-// A rebuild restages the site, so a file can be gone between the check and the read: that is a 404, never a crash.
+// A rebuild swaps the site in, so a file can be gone between the check and the read: that is a 404, never a crash.
 function readOrNull(path) {
   try {
     return statSync(path).isFile() ? readFileSync(path) : null;

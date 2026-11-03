@@ -10195,8 +10195,72 @@ body[data-active-scene="arcade"] #destination-hud:not([hidden]) { display: flex;
 .cloud-hopper-name { margin: 0; color: #afdff5; font-size: 11px; font-weight: 700; letter-spacing: .16em; }
 .cloud-hopper-time { display: block; margin: 5px 0; color: #fff; font-size: 32px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; }
 .cloud-hopper-time[hidden] { display: none; }
+.cloud-hopper-record { display: flex; align-items: center; justify-content: center; gap: 7px; }
+.cloud-hopper-record-text { min-width: 0; overflow-wrap: anywhere; }
+.cloud-hopper-record-ghost { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 26px;
+  width: 26px; min-width: 26px; height: 25px; min-height: 0; margin: 0; padding: 4px; border: 1px solid #6f899766;
+  border-radius: 6px; background: #0e2031; color: #7c94a5; box-shadow: none; cursor: default; }
+.cloud-hopper-record-ghost[hidden] { display: none; }
+.cloud-hopper-record-ghost svg { display: block; width: 14px; height: 14px; }
 .cloud-hopper-status { font-weight: 700; }
+/* Power-ups held, as buttons in the banner's equipment row beside the jetpack's, only while one applies, each edged
+   in its own colour: X-ray's goggles with its seconds (blinking red its last two), the feather, the hook (brighter
+   while thrown); on a touch screen the hook's button is held to throw. */
+.cloud-hopper-power { cursor: default; }
+.cloud-hopper-power-readout { font-weight: 700; letter-spacing: .04em; }
+.cloud-hopper-power.xray { border-bottom-color: #4fe3ff; }
+.cloud-hopper-power.xray .cloud-hopper-power-readout { color: #9ef2ff; }
+.cloud-hopper-power.xray.ending .cloud-hopper-power-readout { color: var(--danger); animation: cloud-hopper-blink .5s steps(2, jump-none) infinite; }
+.cloud-hopper-power.updraft { border-bottom-color: #7fe0a8; }
+.cloud-hopper-power.updraft .cloud-hopper-power-readout { color: #c4f7d6; }
+.cloud-hopper-power.hook { border-bottom-color: #c9a24a; cursor: pointer; touch-action: none; }
+.cloud-hopper-power.hook .cloud-hopper-power-readout { color: #f2d58a; }
+.cloud-hopper-power.hook.thrown { border-bottom-color: #ffd54a; }
+.cloud-hopper-power.hook.thrown .cloud-hopper-power-readout { color: #fff0b8; }
+@keyframes cloud-hopper-blink { 50% { opacity: .25; } }
+/* A gust's cue: a pale band of wind down the edge of the screen it comes from, its chevrons pointing the way it
+   blows, pulsing while it warns and streaming while it blows. */
+.cloud-hopper-gust {
+  position: fixed;
+  z-index: 34;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: min(22vw, 170px);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 10px;
+  padding: 0 16px;
+  pointer-events: none;
+  background: linear-gradient(to right, #c8ecff59, #c8ecff1f 55%, transparent);
+  color: #eaf8ff;
+  animation: cloud-hopper-gust-pulse .7s ease-in-out infinite alternate;
+}
+.cloud-hopper-gust[hidden] { display: none; }
+.cloud-hopper-gust[data-from="right"] { left: auto; right: 0; align-items: flex-end; background: linear-gradient(to left, #c8ecff59, #c8ecff1f 55%, transparent); }
+.cloud-hopper-gust-word { font-weight: 800; font-size: 15px; letter-spacing: .2em; text-shadow: 0 1px 3px #0009, 0 0 10px #8fdcff; }
+.cloud-hopper-gust-arrows { display: flex; gap: 4px; }
+.cloud-hopper-gust[data-from="right"] .cloud-hopper-gust-arrows { transform: scaleX(-1); }
+.cloud-hopper-gust-arrows i { width: 16px; height: 16px; border: solid #eaf8ff; border-width: 4px 4px 0 0; transform: rotate(45deg); filter: drop-shadow(0 0 4px #8fdcff); animation: cloud-hopper-gust-chevron 1.2s linear infinite; }
+.cloud-hopper-gust-arrows i:nth-child(2) { animation-delay: .2s; }
+.cloud-hopper-gust-arrows i:nth-child(3) { animation-delay: .4s; }
+.cloud-hopper-gust[data-state="blowing"] { animation: none; background: linear-gradient(to right, #c8ecff8c, #c8ecff33 55%, transparent); }
+.cloud-hopper-gust[data-state="blowing"][data-from="right"] { background: linear-gradient(to left, #c8ecff8c, #c8ecff33 55%, transparent); }
+.cloud-hopper-gust[data-state="blowing"] .cloud-hopper-gust-arrows i { animation-duration: .45s; }
+@keyframes cloud-hopper-gust-pulse { from { opacity: .45; } to { opacity: 1; } }
+@keyframes cloud-hopper-gust-chevron { 0% { opacity: .2; translate: -6px 0; } 40% { opacity: 1; } 100% { opacity: .2; translate: 6px 0; } }
 .cloud-hopper-help { margin: 5px 0 0; color: #d8e9f3; font-size: 11px; line-height: 1.5; }
+/* Under the clock, the lines fold up into it as the run starts, shrinking and fading until the card holds only the name
+   and the clock; the next run opens them at once. */
+.cloud-hopper-brief { display: grid; grid-template-rows: 1fr; transform-origin: 50% 0; }
+.cloud-hopper-brief > div { min-height: 0; overflow: hidden; }
+.cloud-hopper-running .cloud-hopper-brief { grid-template-rows: 0fr; opacity: 0; transform: translateY(-6px) scale(0.9);
+  transition: grid-template-rows .7s cubic-bezier(.4, 0, .2, 1) .35s, opacity .5s ease .35s, transform .7s cubic-bezier(.4, 0, .2, 1) .35s; }
+.cloud-hopper-running .cloud-hopper-time { margin-bottom: 0; transition: margin .7s cubic-bezier(.4, 0, .2, 1) .35s; }
+@media (prefers-reduced-motion: reduce) { .cloud-hopper-running .cloud-hopper-brief, .cloud-hopper-running .cloud-hopper-time { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .cloud-hopper-gust, .cloud-hopper-gust-arrows i { animation: none; } }
 .cloud-hopper-panel {
   position: fixed;
   inset: auto;
@@ -10214,30 +10278,69 @@ body[data-active-scene="arcade"] #destination-hud:not([hidden]) { display: flex;
   user-select: none;
   -webkit-user-drag: none;
 }
-/* Keep the lower half clear for the fixed camera's view of the falling Ooga. */
+/* Keep the fixed camera's view of the falling Ooga (framed at 75% height) clear below, and the top bar clear above. */
 .cloud-hopper-panel.cloud-hopper-dq {
   left: 50%;
-  top: calc(25dvh + var(--safe-top) / 2);
+  top: calc(72px + var(--safe-top));
   right: auto;
-  width: min(500px, calc(100vw - 32px - var(--safe-left) - var(--safe-right)));
-  max-height: calc(50dvh - 24px - var(--safe-top));
+  width: min(760px, calc(100vw - 32px - var(--safe-left) - var(--safe-right)));
+  max-height: calc(66dvh - 80px - var(--safe-top));
   padding: 12px 16px;
-  transform: translate(-50%, -50%);
+  transform: translateX(-50%);
   animation: none;
 }
 .cloud-hopper-panel.cloud-hopper-dq[open] { display: flex; flex-direction: column; }
 .cloud-hopper-panel.cloud-hopper-dq::backdrop { background: transparent; }
 .cloud-hopper-dq > :not(.game-intro-glow) { flex-shrink: 0; }
-.cloud-hopper-dq .cloud-hopper-scores { flex-shrink: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+/* Only a window too short for its board (a phone on its side) scrolls it, under a thin bar in the card's colours. */
+.cloud-hopper-dq .cloud-hopper-scores { flex-shrink: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: rgba(245, 197, 66, 0.45) transparent; }
+.cloud-hopper-dq .cloud-hopper-scores-title { margin: 8px 0 6px; }
 .cloud-hopper-panel.cloud-hopper-dq .game-intro-title { margin: 4px 0 8px; font-size: 28px; }
-.cloud-hopper-panel.cloud-hopper-dq .actions { margin-top: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.cloud-hopper-panel.cloud-hopper-dq .actions { margin-top: 10px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.cloud-hopper-panel.cloud-hopper-dq.cloud-hopper-picking .actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+/* Choosing a level, the card holds the level cards and their board under them, and may use the window's height. */
+.cloud-hopper-panel.cloud-hopper-dq.cloud-hopper-picking { max-height: calc(100dvh - 88px - var(--safe-top) - var(--safe-bottom)); }
+/* Three buttons stay in one row on a phone: a little less padding and spacing, the same words. */
+@media (max-width: 420px) {
+  .cloud-hopper-panel.cloud-hopper-dq { padding: 12px; }
+  .cloud-hopper-panel.cloud-hopper-dq .actions, .cloud-hopper-panel.cloud-hopper-intro .actions { gap: 6px; }
+  .cloud-hopper-panel.cloud-hopper-dq .actions button, .cloud-hopper-panel.cloud-hopper-intro .actions button { padding: 0 4px; letter-spacing: 0.02em; }
+}
 .cloud-hopper-result-art { display: block; width: min(100%, 320px); height: min(18dvh, 150px); margin: 4px auto 6px; object-fit: contain; }
-.cloud-hopper-dq .cloud-hopper-result-art { width: min(100%, 280px); height: min(14dvh, 120px); }
+.cloud-hopper-dq .cloud-hopper-result-art { width: min(100%, 260px); height: min(10dvh, 104px); }
 .cloud-hopper-result-art[hidden] { display: none; }
 .cloud-hopper-intro-art { display: block; width: min(100%, 420px); height: min(30dvh, 230px); margin: 10px auto; object-fit: contain; }
 .cloud-hopper-guide-art { display: flex; align-items: center; justify-content: center; height: min(28dvh, 220px); margin: 4px auto 12px; }
 .cloud-hopper-guide-art canvas { display: block; max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; filter: drop-shadow(0 6px 6px rgba(0, 0, 0, 0.45)); }
 .cloud-hopper-intro-art[hidden], .cloud-hopper-guide-art[hidden] { display: none; }
+/* The level cards: the number in the picture's corner, the name alone on one row, then route and best or lock. */
+.cloud-hopper-levels { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 10px 0 12px; }
+.cloud-hopper-levels[hidden] { display: none; }
+.cloud-hopper-level { position: relative; display: flex; flex-direction: column; padding: 0 0 8px; overflow: hidden; border: 2px solid rgba(255, 246, 220, 0.18);
+  border-radius: 8px; background: rgba(10, 16, 26, 0.55); color: var(--paper); font: inherit; text-align: left; cursor: pointer; }
+.cloud-hopper-level.selected { border: 3px solid #ffd54a; background: rgba(255, 213, 74, 0.14); }
+.cloud-hopper-level.locked { cursor: default; }
+.cloud-hopper-level-frame { position: relative; display: block; }
+.cloud-hopper-level-art { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; background: rgba(0, 0, 0, 0.3); }
+/* The player's own Ooga stands on the cloud a run starts from, in the middle of each picture. */
+.cloud-hopper-level-ooga { position: absolute; left: 50%; bottom: 12%; width: auto; height: 46%; transform: translateX(-50%); pointer-events: none; }
+.cloud-hopper-level.locked .cloud-hopper-level-frame { filter: grayscale(0.7) brightness(0.55); }
+.cloud-hopper-level-number { position: absolute; top: 6px; left: 6px; display: flex; align-items: center; justify-content: center; min-width: 26px; height: 26px;
+  padding: 0 6px; border: 2px solid rgba(255, 246, 220, 0.45); border-radius: 6px; background: rgba(20, 14, 8, 0.85); color: #ffd54a; font-size: 15px; font-weight: 800; }
+.cloud-hopper-level.selected .cloud-hopper-level-number { border-color: #ffd54a; }
+.cloud-hopper-level.locked .cloud-hopper-level-number { color: #cbb894; }
+.cloud-hopper-level-name { display: block; margin: 6px 8px 0; font-size: 13px; letter-spacing: 0.04em; white-space: nowrap; }
+.cloud-hopper-level-note { display: block; margin: 2px 8px 0; font-size: 10px; opacity: 0.85; }
+/* The cards get a wider card to fill: the intro, and the result card while a level is being chosen. */
+.cloud-hopper-panel.cloud-hopper-intro, .cloud-hopper-panel.cloud-hopper-picking { width: min(1120px, calc(100vw - 32px)); }
+.cloud-hopper-intro .cloud-hopper-levels, .cloud-hopper-picking .cloud-hopper-levels { gap: 16px; }
+.cloud-hopper-intro .cloud-hopper-level-name, .cloud-hopper-picking .cloud-hopper-level-name { margin-top: 8px; font-size: 17px; }
+.cloud-hopper-intro .cloud-hopper-level-note, .cloud-hopper-picking .cloud-hopper-level-note { font-size: 12px; }
+@media (max-width: 600px) {
+  .cloud-hopper-levels { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cloud-hopper-intro .cloud-hopper-levels, .cloud-hopper-picking .cloud-hopper-levels { gap: 10px; }
+  .cloud-hopper-intro .cloud-hopper-level-name, .cloud-hopper-picking .cloud-hopper-level-name { font-size: 13px; }
+}
 .cloud-hopper-panel.cloud-hopper-guide { width: min(480px, calc(100vw - 32px)); }
 .cloud-hopper-panel.cloud-hopper-guide .game-intro-title { font-size: 32px; }
 .cloud-hopper-guide .game-intro-who { max-width: 380px; margin: 4px auto 12px; font-size: 12px; }
@@ -10245,7 +10348,11 @@ body[data-active-scene="arcade"] #destination-hud:not([hidden]) { display: flex;
 .cloud-hopper-guide .game-intro-go { animation: none; }
 .cloud-hopper-panel .game-intro-title { margin: 8px 0 14px; }
 .cloud-hopper-panel .game-intro-title .sign { max-width: 100%; }
-.cloud-hopper-panel .game-intro-who { color: var(--paper); line-height: 1.5; }
+/* A line that wraps splits evenly, never leaving one word on its own. */
+.cloud-hopper-panel .game-intro-who { color: var(--paper); line-height: 1.5; text-wrap: balance; }
+.cloud-hopper-panel .game-intro-goal { text-wrap: balance; }
+/* The intro's two buttons share one row. */
+.cloud-hopper-panel.cloud-hopper-intro .actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .cloud-hopper-panel .cloud-hopper-time { margin: 14px 0; color: #f5c542; font-size: 42px; text-shadow: 0 2px 0 rgba(0, 0, 0, 0.5); }
 .cloud-hopper-scores-title { margin: 14px 0 8px; color: var(--accent-text); font-size: 12px; }
 .cloud-hopper-scores .race-podium { margin: 0; text-align: left; font-size: 12px; }
@@ -10253,13 +10360,53 @@ body[data-active-scene="arcade"] #destination-hud:not([hidden]) { display: flex;
 .cloud-hopper-score-rank { color: var(--accent-text); font-weight: 700; }
 .cloud-hopper-scores .race-podium li.you { background: rgba(245, 197, 66, 0.08); }
 .cloud-hopper-scores .race-podium strong { white-space: nowrap; }
-.cloud-hopper-scores-empty { margin: 0; padding: 16px 10px; border: 2px solid var(--stone-dk); border-radius: 9px 7px 10px 8px; background: var(--tablet); box-shadow: var(--tablet-shadow); color: var(--muted); font-size: 11px; line-height: 1.5; }
+.cloud-hopper-scores .race-podium span:not(.cloud-hopper-score-rank) { overflow-wrap: anywhere; }
+/* A place no one has taken yet stays on the board, empty. */
+.cloud-hopper-scores .race-podium li.empty { color: var(--muted); }
+/* The ten places stand in two columns of five, so a board fits its card without scrolling. */
+/* Each place carries its own side padding, so a highlighted one reaches the board's edges and fills its half, a
+   thin line between the halves; the board's rounded corners clip it. */
+.cloud-hopper-scores .race-podium { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(5, auto); grid-auto-flow: column; padding: 0; overflow: hidden; }
+.cloud-hopper-scores .race-podium li:nth-child(5) { border-bottom: 0; box-shadow: none; }
+.cloud-hopper-scores .race-podium li { padding: 4px 12px; }
+.cloud-hopper-scores .race-podium li:nth-child(n + 6) { border-left: 1px solid rgba(0, 0, 0, 0.35); }
+/* The DQ card, kept clear of the falling Ooga below, sets its places a little closer and leaves the empty ones to
+   say no one has a time yet. */
+.cloud-hopper-dq .cloud-hopper-scores .race-podium li { padding: 3px 12px; }
+.cloud-hopper-dq .cloud-hopper-scores-empty { display: none; }
+.cloud-hopper-scores-empty { margin: 8px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.cloud-hopper-scores-status, .cloud-hopper-personal-best { margin: 5px 0; color: var(--paper); font-size: 11px; line-height: 1.4; }
+.cloud-hopper-personal-best { color: var(--accent-text); }
 .cloud-hopper-panel .actions { margin-top: 16px; }
+/* The panel's buttons by what they do: banana gold goes on, leaf green chooses, light gray steps back, stone leaves. */
+.cloud-hopper-panel .actions button[data-role="go"] { background: linear-gradient(#ffe27a, #f0b62a); color: var(--ink); }
+.cloud-hopper-panel .actions button[data-role="go"]:hover, .cloud-hopper-panel .actions button[data-role="go"].virtual-hover { background: linear-gradient(#fff0a8, #ffe27a); }
+.cloud-hopper-panel .actions button[data-role="choose"] { background: linear-gradient(#a6d97f, #5f9e3f); color: #13260b; }
+.cloud-hopper-panel .actions button[data-role="choose"]:hover, .cloud-hopper-panel .actions button[data-role="choose"].virtual-hover { background: linear-gradient(#c2e8a3, #a6d97f); }
+.cloud-hopper-panel .actions button[data-role="back"] { background: linear-gradient(#bdb8b0, #87827b); color: var(--ink); }
+.cloud-hopper-panel .actions button[data-role="back"]:hover, .cloud-hopper-panel .actions button[data-role="back"].virtual-hover { background: linear-gradient(#d1cdc6, #bdb8b0); }
+.cloud-hopper-panel .actions button[data-role="leave"] { background: linear-gradient(#77706a, #4a4541); color: var(--paper); }
+.cloud-hopper-panel .actions button[data-role="leave"]:hover, .cloud-hopper-panel .actions button[data-role="leave"].virtual-hover { background: linear-gradient(#8a837c, #77706a); }
+.cloud-hopper-panel .actions button:disabled { opacity: 0.55; cursor: default; }
 @media (max-width: 600px) {
   .cloud-hopper-hud { top: calc(118px + var(--safe-top)); width: min(300px, calc(100vw - 24px)); padding: 9px 12px; }
   .cloud-hopper-time { font-size: 26px; }
   .cloud-hopper-panel { padding: 16px 12px; }
   .cloud-hopper-panel.cloud-hopper-dq { padding: 12px; }
+}
+/* A shorter window leaves the DQ card its level's name for a heading and a smaller picture, and the intro wider,
+   lower pictures, so each card's board still fits without scrolling. */
+@media (max-height: 760px) {
+  .cloud-hopper-intro .cloud-hopper-level-art, .cloud-hopper-picking .cloud-hopper-level-art { aspect-ratio: 2 / 1; }
+  .cloud-hopper-intro .cloud-hopper-levels, .cloud-hopper-picking .cloud-hopper-levels { margin: 6px 0 8px; }
+  .cloud-hopper-intro .cloud-hopper-scores-title, .cloud-hopper-picking .cloud-hopper-scores-title { margin: 8px 0 6px; }
+  .cloud-hopper-panel.cloud-hopper-intro .game-intro-title { margin: 4px 0 8px; }
+}
+@media (max-height: 720px) {
+  .cloud-hopper-dq .game-intro-kicker, .cloud-hopper-dq .game-intro-title { display: none; }
+  .cloud-hopper-panel.cloud-hopper-dq { padding: 10px 14px; }
+  .cloud-hopper-dq .cloud-hopper-result-art { height: min(8dvh, 104px); margin: 2px auto 4px; }
+  .cloud-hopper-panel.cloud-hopper-dq .actions { margin-top: 6px; }
 }
 @media (max-height: 600px) {
   .cloud-hopper-panel.cloud-hopper-dq { padding: 8px 12px; }

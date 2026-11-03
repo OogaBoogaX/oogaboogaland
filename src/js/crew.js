@@ -6025,7 +6025,8 @@
       }
       if (grounded(player)) player.jumps = 0;
       else player.jumps = Math.max(1, player.jumps);
-      if (player.jumps >= 2 && !inBananas(player)) return false;
+      // With both jumps spent the scene may still use the press (`spentJump`, Cloud Hopper's sky feather): true when it did.
+      if (player.jumps >= 2 && !inBananas(player)) return !!ctx.spentJump?.(player);
       // Takeoff clears step smoothing (elevatePlayer(0)) before testing headroom.
       elevatePlayer(0);
       player.jumps++;
