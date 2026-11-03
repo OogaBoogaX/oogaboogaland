@@ -65,7 +65,7 @@
       portrait: { min: [-1, -2, 0], max: [7, 6, 8] }
     },
     voice: {
-      poke: "Bitcoin the easy way!",
+      poke: "clank clank",
       idle: [
         "Roll the dice, make the seed.",
         "Not your keys, not your coconuts.",
