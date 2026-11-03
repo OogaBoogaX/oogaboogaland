@@ -22028,7 +22028,7 @@ const footstepChecks = BL => {
 const voiceAloneChecks = async () => {
   const source=readFileSync(join(root,"src/js/voice.js"),"utf8"),ops=[],netMuted=[],emits=[];
   const track={enabled:true,stop(){}},stream={getAudioTracks:()=>[track],getTracks:()=>[track]};
-  class Pc {constructor(){this.connectionState="connected";this.iceGatheringState="complete";this.localDescription={sdp:"v=0"};}addTransceiver(){return {mid:"0"};}async createOffer(){return {};}async createAnswer(){return {};}async setLocalDescription(){}async setRemoteDescription(){}addEventListener(){}removeEventListener(){}getTransceivers(){return [];}close(){}}
+  class Pc {constructor(){this.connectionState="connected";this.iceGatheringState="complete";this.localDescription={sdp:"v=0\r\na=candidate:1 1 udp 2122260223 127.0.0.1 9 typ host\r\n"};}addTransceiver(){return {mid:"0"};}async createOffer(){return {};}async createAnswer(){return {};}async setLocalDescription(){}async setRemoteDescription(){}addEventListener(){}removeEventListener(){}getTransceivers(){return [];}close(){}}
   class Audio {constructor(){this.muted=false;}pause(){}play(){return Promise.resolve();}}
   const fetch=async(url,o)=>{const op=url.split("/").pop(),body=JSON.parse(o.body);ops.push({op,mic:track.enabled});return {ok:true,json:async()=>op==="pull"?{tracks:body.ids.map((id,i)=>({id,mid:String(i+1)}))}:{sessionDescription:{}}};};
   const context={window:{BL:{net:{state:{connectionToken:"synthetic"},setMuted:on=>netMuted.push(on),remotes:new Map()}},setTimeout:()=>1,clearTimeout(){},setInterval:()=>1,clearInterval(){}},document:{createElement:()=>({})},localStorage:{getItem:()=>null,setItem(){}},navigator:{mediaDevices:{getUserMedia:async()=>stream}},RTCPeerConnection:Pc,Audio,MediaStream:class{},fetch,AbortController,Promise,JSON,Error,Map,Set,Float32Array,Math};
@@ -22052,6 +22052,60 @@ const voiceAloneChecks = async () => {
     is(rows.mutedAlone,true,true,false)&&is(rows.mutedWithOther,false,true,false)&&is(rows.unmutedAlone,true,false,false)&&is(rows.twoOthers,false,false,true)&&
     rows.netMuted==="false,true,false"&&rows.emitted&&!rows.stopped.alone&&!rows.stopped.muted,JSON.stringify(rows));
 };
+// rule: the microphone glyph's level comes from the meter's own copy of the capture track. A mute or the alone gate must
+// switch off the published track and never the copy, so the level still moves while muted; and every way the microphone is
+// let go (a device switch, hanging up, a cancelled preview, stop) must stop the copy too, or the microphone stays open.
+// voice.js runs with a fake Worker, peer connection and AudioContext whose analyser reads `level`, streams whose clone()
+// hands out tracks of their own (inheriting the source's enabled state, as a browser's do), and its meter read stepped by hand.
+const voiceMeterCopyChecks = async () => {
+  const source=readFileSync(join(root,"src/js/voice.js"),"utf8"),settle=()=>new Promise(r=>setTimeout(r,0));
+  const timers=new Map(),streams=[],clones=[];let timerId=0,level=0;
+  const makeStream=(from=null)=>{
+    const track={enabled:from?from.track.enabled:true,stops:0,stop(){this.stops++;}};
+    const stream={track,getAudioTracks:()=>[track],getTracks:()=>[track],clone(){const copy=makeStream(stream);clones.push(copy);return copy;}};
+    if(!from)streams.push(stream);
+    return stream;
+  };
+  class Pc {constructor(){this.connectionState="connected";this.iceGatheringState="complete";this.localDescription={sdp:"v=0\r\na=candidate:1 1 udp 2122260223 127.0.0.1 9 typ host\r\n"};}addTransceiver(){return {mid:"0",sender:{replaceTrack:async()=>{}}};}async createOffer(){return {};}async createAnswer(){return {};}async setLocalDescription(){}async setRemoteDescription(){}addEventListener(){}removeEventListener(){}getTransceivers(){return [];}close(){}}
+  class Audio {constructor(){this.muted=false;this.volume=1;}pause(){}play(){return Promise.resolve();}}
+  class Ctx {constructor(){this.state="running";}addEventListener(){}resume(){return Promise.resolve();}close(){this.state="closed";return Promise.resolve();}
+    createMediaStreamSource(){return {connect(){},disconnect(){}};}
+    createAnalyser(){return {fftSize:0,connect(){},getFloatTimeDomainData:a=>a.fill(level)};}}
+  const fetch=async(url,o)=>{const op=url.split("/").pop(),body=JSON.parse(o.body);return {ok:true,json:async()=>op==="pull"?{tracks:body.ids.map(id=>({id,mid:String(id)}))}:{sessionDescription:{}}};};
+  const win={BL:{net:{state:{connectionToken:"synthetic",zone:"outside"},setMuted(){},remotes:new Map()}},setTimeout:()=>0,clearTimeout(){},setInterval:fn=>{timers.set(++timerId,fn);return timerId;},clearInterval:id=>timers.delete(id),addEventListener(){},AudioContext:Ctx};
+  const context={window:win,document:{createElement:()=>({volume:1})},localStorage:{getItem:()=>null,setItem(){}},navigator:{mediaDevices:{getUserMedia:async()=>makeStream()}},RTCPeerConnection:Pc,AudioContext:Ctx,Audio,MediaStream:class{},fetch,AbortController,Promise,JSON,Error,Map,Set,Float32Array,Math,Number,String};
+  runInNewContext(readFileSync(join(root,"src/js/voice-blend.js"),"utf8"),context);
+  runInNewContext(source,context);
+  const V=win.BL.voice,tick=()=>{for(const fn of timers.values())fn();},rows={};
+  await V.enable();await settle();
+  const pub0=streams[0].track,copy0=clones[0]&&clones[0].track;
+  rows.copied=!!copy0&&copy0!==pub0;
+  rows.aloneHeldOff=V.stats.alone&&!pub0.enabled&&!!copy0&&copy0.enabled;
+  V.setPeers([2],[1]);await settle();
+  rows.heard=!V.stats.alone&&pub0.enabled&&copy0.enabled;
+  V.setMuted(true);
+  rows.mutedHeldOff=!pub0.enabled&&copy0.enabled;
+  let reads=0;const off=V.subscribeLevel(()=>reads++);
+  level=0.1;tick();const quiet=V.stats.micLevel;level=0.3;tick();const loud=V.stats.micLevel;off();
+  rows.levelMovesMuted=Math.abs(quiet-0.1)<1e-6&&Math.abs(loud-0.3)<1e-6&&reads===2;
+  // A switch while muted: the new capture track starts disabled, and the copy taken of it is switched on regardless.
+  await V.selectDevice("other-mic");await settle();
+  const copy1=clones[1]&&clones[1].track;
+  rows.swapStopsOld=copy0.stops===1&&pub0.stops===1&&!!copy1&&copy1.stops===0&&V.stats.publishing;
+  rows.swapCopyOnUnderMute=!streams[1].track.enabled&&!!copy1&&copy1.enabled;
+  V.dropMic();await settle();
+  rows.dropStops=copy1.stops===1&&streams[1].track.stops===1;
+  await V.preflight();await settle();
+  const copy2=clones[2]&&clones[2].track;V.cancelPreflight();
+  rows.cancelStops=!!copy2&&copy2.stops===1&&streams[2].track.stops===1;
+  await V.enable();await settle();
+  const copy3=clones[3]&&clones[3].track;V.stop();await settle();
+  rows.stopStops=!!copy3&&copy3.stops===1&&streams[3].track.stops===1;
+  rows.noneLeftOpen=clones.length===4&&clones.every(c=>c.track.stops>=1);
+  V.dispose();
+  record("voice meter copy: the level reads its own copy of the microphone, on through mute and the alone gate so it moves while muted, and a switch, hang-up, cancelled preview or stop each stop the copy with the capture",
+    Object.values(rows).every(Boolean),JSON.stringify(rows));
+};
 // #380: a visitor's hearing range only changes how loud this page plays the voices it receives. voice.js runs with remotes placed
 // round the visitor, a fake Worker, peer connection and AudioContext, and its own 150 ms meter read (captured from setInterval)
 // stepped by hand: once as a browser that honours an element's volume, and once as iOS, which keeps every element at 1, where
@@ -22065,7 +22119,7 @@ const voiceHearingChecks = async () => {
     const remotes=new Map([[2,remote("near","factory",3,0)],[3,remote("mid","factory",0,15)],[4,remote("hall","factory.hall",1,0)],[5,remote("new","factory",2,0,false)]]);
     const state={connectionToken:"synthetic",zone:"factory",self:{x:0,y:0,z:0,zone:"factory"}};
     const track={enabled:true,stop(){}},stream={getAudioTracks:()=>[track],getTracks:()=>[track]};
-    class Pc {constructor(){this.connectionState="connected";this.iceGatheringState="complete";this.localDescription={sdp:"v=0"};}addTransceiver(){return {mid:"0"};}async createOffer(){return {};}async createAnswer(){return {};}async setLocalDescription(){}async setRemoteDescription(){}addEventListener(k,fn){if(k==="track")onTrack=fn;}removeEventListener(){}getTransceivers(){return [];}close(){}}
+    class Pc {constructor(){this.connectionState="connected";this.iceGatheringState="complete";this.localDescription={sdp:"v=0\r\na=candidate:1 1 udp 2122260223 127.0.0.1 9 typ host\r\n"};}addTransceiver(){return {mid:"0"};}async createOffer(){return {};}async createAnswer(){return {};}async setLocalDescription(){}async setRemoteDescription(){}addEventListener(k,fn){if(k==="track")onTrack=fn;}removeEventListener(){}getTransceivers(){return [];}close(){}}
     // A real element throws on a volume outside 0..1 or not a number, and iOS's also ignores any it is given.
     const volume=o=>Object.defineProperty(o,"volume",{get(){return o.level;},set(v){if(!(v>=0&&v<=1))throw new TypeError(`volume ${v}`);if(!ios)o.level=v;}});
     class Audio {constructor(){this.muted=false;this.level=1;this.srcObject=null;volume(this);els.push(this);}pause(){}play(){return Promise.resolve();}}
@@ -24421,8 +24475,8 @@ const studioVoiceLifecycleProof = async () => {
       constructor(){peers.push(this);this.connectionState="connected";this.iceGatheringState="complete";this.localDescription=null;this.handlers=new Map();}
       addEventListener(k,fn){this.handlers.set(k,fn);}
       removeEventListener(k){this.handlers.delete(k);}
-      addTransceiver(track){this.track=track;return {mid:"0"};}
-      createOffer(){return Promise.resolve({type:"offer",sdp:"synthetic"});}
+      addTransceiver(track){this.track=track;this.sender={replaceTrack:async t=>{this.sent=t;}};return {mid:"0",sender:this.sender};}
+      createOffer(){return Promise.resolve({type:"offer",sdp:"v=0\r\na=candidate:1 1 udp 2122260223 127.0.0.1 9 typ host\r\n"});}
       setLocalDescription(d){this.localDescription=d;return Promise.resolve();}
       setRemoteDescription(){return Promise.resolve();}
       getTransceivers(){return [];}
@@ -24451,7 +24505,11 @@ const studioVoiceLifecycleProof = async () => {
   const rejoin=fixture();await rejoin.voice.enable();rejoin.voice.dropMic();await drain();const revoked=rejoin.streams[0].track.stops===1&&!rejoin.voice.stats.publishing&&rejoin.voice.stats.muted;
   await rejoin.voice.enable();const heldAlone=rejoin.voice.stats.alone&&!rejoin.streams[1].track.enabled;rejoin.voice.setPeers([71]);await drain();const explicitUnmute=heldAlone&&revoked&&rejoin.gum===2&&rejoin.voice.stats.publishing&&!rejoin.voice.stats.muted&&!rejoin.voice.stats.alone&&rejoin.streams[1].track.enabled;
   rejoin.voice.toggle();const mutedBefore=rejoin.voice.stats.muted;await rejoin.voice.restart();await drain();
-  const restartMute=mutedBefore&&rejoin.voice.stats.publishing&&rejoin.voice.stats.muted&&!rejoin.streams[1].track.enabled&&rejoin.gum===2;rejoin.voice.dispose();await drain();
+  const restartMute=mutedBefore&&rejoin.voice.stats.publishing&&rejoin.voice.stats.muted&&!rejoin.streams[1].track.enabled&&rejoin.gum===2;
+  rejoin.voice.toggle();const unpublishesBeforeSwap=rejoin.calls.filter(c=>c.op==="unpublish").length;
+  const swapped=await rejoin.voice.selectDevice("other-mic");await drain();
+  const swapKeepsCall=swapped&&rejoin.voice.stats.publishing&&!rejoin.voice.stats.muted&&rejoin.streams[2].track.enabled&&rejoin.calls.filter(c=>c.op==="unpublish").length===unpublishesBeforeSwap&&rejoin.gum===3&&rejoin.voice.stats.deviceId==="other-mic";
+  rejoin.voice.dispose();await drain();
   const stale=fixture();stale.deferPublish();const publishing=stale.voice.enable();await drain();const reachedPublish=stale.calls.some(c=>c.op==="publish");stale.voice.cancelPreflight();const previewCancelCannotStopPublication=stale.streams[0].track.stops===0;stale.voice.dropMic();stale.resolvePublish();await publishing;await drain();
   const publishCancelled=reachedPublish&&!stale.voice.stats.publishing&&!stale.calls.some(c=>c.op==="live")&&stale.streams[0].track.stops===1;stale.voice.dispose();await drain();
   const stopped=fixture();stopped.deferPublish();const stoppedPublish=stopped.voice.enable();await drain();stopped.voice.stop();stopped.resolvePublish();await stoppedPublish;await drain();
@@ -24463,7 +24521,7 @@ const studioVoiceLifecycleProof = async () => {
   const latePreviewReleased=previewStream.track.stops===1&&!preview.voice.stats.preflight&&!preview.voice.stats.publishing;
   preview.voice.setReceiveLevel(2);const boundedLevel=preview.voice.stats.receiveLevel===1;preview.voice.setReceiveLevel(-1);const receiveLevel=boundedLevel&&preview.voice.stats.receiveLevel===0;preview.voice.dispose();await drain();
   const autoplay=fixture();await autoplay.voice.listen();autoplay.voice.setPeers([71,72]);await drain();
-  for(const id of [71,72])autoplay.peers[0].handlers.get("track")({transceiver:{mid:String(id)},track:{id,stop(){}}});
+  for(const id of [71,72])autoplay.peers.at(-1).handlers.get("track")({transceiver:{mid:String(id)},track:{id,stop(){}}});
   autoplay.elements[0].pending[0].reject(Error("gesture"));autoplay.elements[1].pending[0].resolve();await drain();
   const aggregateBlocked=autoplay.voice.stats.blocked&&autoplay.voice.stats.error.includes("Enable sound");
   await autoplay.voice.listen();for(const el of autoplay.elements)el.pending.at(-1).resolve();await drain();const retryClears=!autoplay.voice.stats.blocked&&!autoplay.voice.stats.error;
@@ -24476,7 +24534,7 @@ const studioVoiceLifecycleProof = async () => {
   replaced.voice.setPeers([71],[1]);await drain();replaced.voice.setPeers([71],[2]);finishPull({tracks:[{id:71,mid:"old"}]});await drain();
   const publicationReplaced=replaced.calls.some(c=>c.op==="close"&&c.body.mids.includes("old"))&&replaced.calls.filter(c=>c.op==="pull").length===2;replaced.voice.dispose();await drain();
   const leaving=fixture();await leaving.voice.listen();leaving.voice.setPeers([71],[1]);await drain();
-  const remoteTrack={stops:0,stop(){this.stops++;}};leaving.peers[0].handlers.get("track")({transceiver:{mid:"71"},track:remoteTrack});
+  const remoteTrack={stops:0,stop(){this.stops++;}};leaving.peers.at(-1).handlers.get("track")({transceiver:{mid:"71"},track:remoteTrack});
   const latePull=leaving.defer("pull");leaving.voice.setPeers([71,72],[1,1]);await drain();
   const finishLeave=leaving.defer("leave");leaving.voice.stop();latePull({tracks:[{id:72,mid:"72"}]});await drain();
   const leaveStopsAudio=!leaving.voice.stats.enabled&&remoteTrack.stops===1&&leaving.elements.length===1&&leaving.elements.every(el=>el.muted&&el.pauses===1&&el.srcObject===null)&&leaving.peers.every(pc=>pc.connectionState==="closed");
@@ -24484,7 +24542,7 @@ const studioVoiceLifecycleProof = async () => {
   const latePlaybackStaysOff=!leaving.voice.stats.enabled&&!leaving.voice.stats.hearing;leaving.voice.dispose();await drain();
   const restarting=fixture();await restarting.voice.listen();const finishRestart=restarting.defer("leave");const restart=restarting.voice.restart();await drain();restarting.voice.stop();finishRestart({ok:true});await restart;await drain();
   const leaveCancelsRestart=!restarting.voice.stats.enabled&&restarting.calls.filter(c=>c.op==="session").length===1;restarting.voice.dispose();await drain();
-  return {publicationReplaced,leaveStopsAudio,latePlaybackStaysOff,leaveCancelsRestart,receiveOnly,receiveOnlyAudience,audienceKeepsMute,lastListenerLeaves,listenerReturns,invalidAudience,audienceClearedOnStop,permissionCancelled,explicitUnmute,restartMute,publishCancelled,stopCancelled,localPreview,previewReleased,latePreviewReleased,previewCancelCannotStopPublication,receiveLevel,aggregateBlocked,retryClears,stalePlaybackIgnored,deniedPreviewKeepsReceiver,deniedPublishKeepsReceiver,timersReleased:[listener,audience,late,rejoin,stale,stopped,preview,autoplay,denied,replaced,leaving,restarting].every(f=>f.timers.size===0)};
+  return {publicationReplaced,swapKeepsCall,leaveStopsAudio,latePlaybackStaysOff,leaveCancelsRestart,receiveOnly,receiveOnlyAudience,audienceKeepsMute,lastListenerLeaves,listenerReturns,invalidAudience,audienceClearedOnStop,permissionCancelled,explicitUnmute,restartMute,publishCancelled,stopCancelled,localPreview,previewReleased,latePreviewReleased,previewCancelCannotStopPublication,receiveLevel,aggregateBlocked,retryClears,stalePlaybackIgnored,deniedPreviewKeepsReceiver,deniedPublishKeepsReceiver,timersReleased:[listener,audience,late,rejoin,stale,stopped,preview,autoplay,denied,replaced,leaving,restarting].every(f=>f.timers.size===0)};
 };
 
 // The real controller runs against a bounded DOM/media double: no permission prompts or SFU.
@@ -25032,6 +25090,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   walletShareChecks(BL);
   footstepChecks(BL);
   await voiceAloneChecks();
+  await voiceMeterCopyChecks();
   await voiceHearingChecks();
   exteriorEnrichmentChecks(BL);
   if(ARGS.includes("exterior-unit"))return;

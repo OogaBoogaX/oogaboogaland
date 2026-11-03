@@ -792,6 +792,8 @@
   const unsubscribeRosterMarks = net.subscribeRoster(window.BL.hud.showVoices);
   const unsubscribeVoiceMarks = window.BL.voice.subscribe(window.BL.hud.showVoices);
   const unsubscribeMic = window.BL.voice.subscribe(showMic);
+  // The microphone glyph's level segments, every meter read while a microphone is metered.
+  const unsubscribeMicLevel = window.BL.voice.subscribeLevel(window.BL.hud.showMicLevel);
   const accountReady = !params.has("nosim") && params.get("net") !== "0" ? net.start() : Promise.resolve();
   // A tab opened in the background waits for its first look before it holds any socket.
   if (document.hidden) {
@@ -1072,6 +1074,7 @@
     unsubscribeRosterMarks();
     unsubscribeVoiceMarks();
     unsubscribeMic();
+    unsubscribeMicLevel();
     window.BL.voice.dispose();
     window.BL.highscores.dispose();
     net.dispose();
