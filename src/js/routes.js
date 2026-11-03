@@ -15,8 +15,8 @@
       return entry.path ? `${entry.title} · ${this.name}` : `${this.name} · ${entry.title}`;
     },
     list: [
-      { path: "", scene: "hub", image: "home", title: "an island of caves where bananas feed EntropyLab contributors",
-        description: "A floating island of caves where donated bananas feed the voxel cavemen of OogaBoogaX. Race, skydive, mine and fly, under weather from the live Bitcoin mempool." },
+      { path: "", scene: "hub", image: "home", title: "a virtual world for open-source contributors",
+        description: "Ooga Booga Land is a virtual world where open-source contributors collaborate and track contributions across Team Ooga Booga’s repositories." },
       { path: "donate", scene: "hub", place: "donate", title: "Feed the Ooga Boogas",
         description: "Feed the Ooga Boogas with a donation of bananas on Ooga Booga Land." },
       { path: "oogarally", scene: "race", image: "oogarally", title: "Ooga Rally",

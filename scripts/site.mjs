@@ -10,7 +10,8 @@
 // rooms', the whitepaper poster, Cloud Hopper's art) as same-origin files under audio/ and art/; `npm run build:site` and `npm run serve` pass both, and the portable page stays whole.
 // `--page-assets`, last, moves the page's own script and stylesheet out of every route page into js/main-<hash>.js and
 // css/style-<hash>.css, with the jumbotron's snapshot, which every deploy rebakes, in its own
-// js/jumbotron-data-<hash>.js before the code (`externalizePage`), so the 23 pages share one cached copy. `--headers
+// js/jumbotron-data-<hash>.js before the code (`externalizePage`), so the 23 pages share one cached copy. The favicons go out as files too (favicon-32.png,
+// favicon-64.png, favicon.ico, apple-touch-icon.png and its -precomposed twin), so none of those addresses answers 404. `--headers
 // <file>` writes that file as _headers plus one immutable rule per file under js/ and css/: exact paths, so a 404 there
 // (a page from one deploy asking another) is never cached for a year. `npm run build:site` passes both.
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
@@ -18,6 +19,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 import { externalizeAudio } from "./distribution-audio.mjs";
+import { stageIcons } from "./distribution-icons.mjs";
 import { PICTURE_MODULES, externalizeModules, externalizePage, externalizePictures } from "./distribution-modules.mjs";
 import { writeTerrainWorker } from "./distribution-terrain.mjs";
 
@@ -46,6 +48,9 @@ for (const source of mediaContext.BL.studioMedia.sources) for (const path of [so
 for (const file of mediaFiles) copyFileSync(join(root, "src/media", file), join(out, "media", file));
 
 let shell = readFileSync(join(root, "oogaboogaland.html"), "utf8");
+// Search crawlers and browsers need fetchable favicon URLs: the portable page's exact PNG bytes at stable paths, with
+// /favicon.ico made from them and the existing Apple touch icon kept with its legacy alias (scripts/distribution-icons.mjs).
+shell = stageIcons(shell, out);
 if (process.argv.includes("--worker-page")) {
   const tag = '<html lang="en">';
   if (!shell.includes(tag)) throw new Error("oogaboogaland.html: expected <html lang=\"en\">");
