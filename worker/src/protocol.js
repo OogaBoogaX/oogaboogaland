@@ -3,6 +3,7 @@ import "../../src/js/hockey-wire.js";
 export const HOCKEY = globalThis.BL.hockeyWire;
 import { parseStudioCommand, studioCanSpeak, STUDIO_ZONE } from "./studio-policy.js";
 import "../../src/js/chat-policy.js";
+import "../../src/js/chalk-board.js";
 import "../../src/js/voice-blend.js";
 // The room's wire format and the limits it enforces, as pure functions the tests can reach.
 //
@@ -28,6 +29,8 @@ import "../../src/js/voice-blend.js";
 //                                (`parseStudioCommand` in studio-policy.js; see docs/dsb-studio-session.md)
 //                 { t: "ghost", k, g?, d?, h? }  HALLOWEEN: the ghost hunt's `start`, `ready`, `pause` or `leave`, or `hits` h, for its
 //                                host, from a page in the arcade's ghost arena
+//                 { t: "chalk", k, ... }        the EntropyLab chalkboard: `take` or `drop` the board, or an edit by
+//                                                whoever holds it (chalk-board.js; see CHALK_HZ below)
 //                 { t: "wallet", k, u, ... }   DSB Land: one of the driven Ooga's free hardware wallets taken, set
 //                                                down, picked up, thrown or blown (see WALLET_CAP below)
 //                 binary                         the NPC host's frame of every Ooga's pose, relayed as is; or,
@@ -56,6 +59,10 @@ import "../../src/js/voice-blend.js";
 //                 chat-ack { clientId }     the sender's line was accepted, including a recognized retry
 //                 chat-rejected { clientId?, reason }  refused; rate retries keep the same id
 //                 chat-history { messages }  after welcome: the lines the room still holds, oldest first
+//                 chalk-board { marks, editor }  after welcome: the chalkboard as the room holds it, and who holds it
+//                 chalk-lock { id }          who holds the chalkboard now (0 for nobody), to everyone
+//                 chalk { id, k, ... }       the holder's edit, to everyone else; chalk-refused { why, name? } to a
+//                                            page whose take was refused (`away`, `busy` with the holder's name)
 //                 wallet { k, w }            another player's wallet event, to their zone: `w` is the wallet as
 //                                            [id, u, look, state, x, y, z, vx, vy, vz, at, end], state "c" carried,
 //                                            "d" set down or "f" thrown, at and end on the room's clock;
@@ -144,6 +151,22 @@ export const SWING_HZ = 4;
 export const SWING_BURST = 4;
 export const GHOST_HZ = 20;
 export const GHOST_BURST = 24;
+// Chalkboard: the EntropyLab board on the island, kept for good. One page at a time holds it, and only while its
+// Ooga stands at the board in the island's `outside` zone (chalk-board.js `near`, against the last pose it sent);
+// moving off, changing zone or body, or leaving lets it go. A holder silent for CHALK_IDLE_MS can be taken over by the
+// next Ooga to ask, so nobody holds it for good, with no timer. Edits arrive batched (a line's points, typed
+// characters) at most CHALK_HZ a second. An edit over the rate is dropped unanswered; one that does not apply, or one
+// from a holder whose earlier edits were dropped, sends the holder the board as the room has it instead (CHALK_TELL_MS). The board goes to storage at most every CHALK_SAVE_MS while someone writes, at
+// once on a wipe, and when the holder lets go, never for each point.
+export const CHALK_HZ = 30;
+export const CHALK_BURST = 30;
+export const CHALK_IDLE_MS = 60000;
+export const CHALK_SAVE_MS = 5000;
+// A board sent back to correct a page (an edit that did not apply, or one from a page without the board) reaches that
+// page at most once every CHALK_TELL_MS, so no stream of edit frames makes the room send a full board for each.
+export const CHALK_TELL_MS = 2000;
+export const CHALK = globalThis.BL.chalkBoard;
+export const CHALK_FEATURE = CHALK.FEATURE;
 // DSB Land's free hardware wallets (wallet-bombs.js): every page runs its own visitor's devices, and the room passes
 // their events to the pages in the same zone, keeping each player's live ones (WALLET_CAP at most) for whoever joins
 // or walks into that zone later. A device is `u` (1-65535, the page's own number for it), its look `l`, and with
@@ -245,6 +268,11 @@ export const parseClientMessage = (text) => {
     if (msg.clientId === undefined) return { t: "chat", text: line };
     return typeof msg.clientId === "string" && msg.clientId.length > 0 && msg.clientId.length <= 64 && !/[^\w-]/.test(msg.clientId)
       ? { t: "chat", text: line, clientId: msg.clientId } : null;
+  }
+  if (msg.t === "chalk") {
+    if (msg.k === "take" || msg.k === "drop") return { t: "chalk", k: msg.k };
+    const op = CHALK.parse(msg);
+    return op ? { t: "chalk", ...op } : null;
   }
   if (msg.t === "door") {
     if (msg.op === "ask") return (msg.dir === "in" || msg.dir === "out") && Number.isInteger(msg.room) && msg.room >= 1 && msg.room <= 9

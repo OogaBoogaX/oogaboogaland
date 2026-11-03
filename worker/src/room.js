@@ -26,6 +26,7 @@ import {
   NPC_FRAME_MAX, NPC_HZ, OUTSIDE, HP_HZ, VOICE_TRACK, CHAT_HZ, CHAT_BURST, CHAT_BUCKET_KEEP, CHAT_RETRY_KEEP, CHAT_FEATURE,
   DOOR_ZONE, DOOR_ROOM, DOOR_GRANT_MS, DOOR_TRANSIT_MS, DOOR_PASS_MS, DOOR_HZ, DOOR_BURST, GHOST_HZ, GHOST_BURST, SHOT_HZ, SHOT_BURST, SWING_HZ, SWING_BURST,
   GHOST_MAGIC, GHOST_FRAME_MAX, GHOST_FRAME_HZ, GHOST_FRAME_BURST, inGhostArena, ghostCandidate, watchesGhost,
+  CHALK, CHALK_HZ, CHALK_BURST, CHALK_IDLE_MS, CHALK_SAVE_MS, CHALK_TELL_MS, CHALK_FEATURE,
   WALLET_CAP, WALLET_HZ, WALLET_BURST,
   chatLog, castIndex, bodyName, ownedBody, electHost, npcFollowers, claimRefusal, parseClientMessage, playerFromHeaders, spawnPoint, takeToken, voicePeers,
   BLEND, BLEND_HZ,
@@ -46,6 +47,12 @@ export class Room extends DurableObject {
     this.highscoreRevisions = new Map();
     this.studio = studioState();
     this.cleanupJobs = [];
+    // The EntropyLab chalkboard (chalk-board.js), who holds it ({ id, session, at }) and when it last went to storage.
+    this.chalk = CHALK.board();
+    this.chalkEditor = null;
+    this.chalkTimer = 0;
+    this.chalkDirty = false;
+    this.chalkStored = false;
     this.spawnSlot = 0;
     this.dirty = false;
     this.flushTimer = 0;
@@ -81,6 +88,14 @@ export class Room extends DurableObject {
       this.studio.hands = [...new Set((Array.isArray(this.studio.hands) ? this.studio.hands : []).filter(seated))].slice(0, MAX_PLAYERS);
       this.studio.invited = this.studio.mode === "qa" ? [...new Set((Array.isArray(this.studio.invited) ? this.studio.invited : []).filter(seated))].slice(0, MAX_PLAYERS) : [];
       this.cleanupJobs = (await ctx.storage.get("voiceCleanup")) || [];
+      const chalk = await ctx.storage.get("chalk"), marks = chalk && CHALK.restore(chalk.marks);
+      if (marks) this.chalk = CHALK.board(marks);
+      this.chalkStored = chalk !== undefined;
+      // Older versions stored the original drawing too; it can always be rebuilt locally.
+      if (this.chalkStored && CHALK.preset(this.chalk) === "original") {
+        await ctx.storage.delete("chalk");
+        this.chalkStored = false;
+      }
       const stored = await ctx.storage.get(["loopEpoch", "sweepAt"]);
       this.loopEpoch = stored.get("loopEpoch") || Date.now();
       this.sweepAt = stored.get("sweepAt") || Date.now() + SWEEP_MS;
@@ -328,9 +343,10 @@ export class Room extends DurableObject {
 
     const others = [];
     for (const o of this.players.values()) if (o !== p) others.push(this.view(o));
-    this.send(server, { t: "welcome", you: this.view(p), players: others, connectionToken: p.connectionToken, tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers, ghostHost: this.ghostHostId, ghostFollowers: this.ghostFollowers, features: ["door", CHAT_FEATURE, "hockey-v2"] });
+    this.send(server, { t: "welcome", you: this.view(p), players: others, connectionToken: p.connectionToken, tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers, ghostHost: this.ghostHostId, ghostFollowers: this.ghostFollowers, features: ["door", CHAT_FEATURE, CHALK_FEATURE, "hockey-v2"] });
     // A message of its own after welcome, so a page that does not know chat ignores it; empty after the room slept.
     this.send(server, { t: "chat-history", messages: this.chat.list() });
+    this.send(server, { t: "chalk-board", marks: this.chalk.marks, editor: this.chalkEditor ? this.chalkEditor.id : 0 });
     this.broadcast({ t: "join", p: this.view(p) }, server);
     this.sendStudio(p);
     this.updateVoice();
@@ -373,6 +389,7 @@ export class Room extends DurableObject {
       p.j = ooga && msg.j ? msg.j : 0;
       p.w = ooga && msg.w ? msg.w : 0;
       if (Number.isInteger(p.studioSeat) && !studioSeatAllowed(p, p.studioSeat, this.players.values())) { delete p.studioSeat; this.removeStudioSpeaker(p.id); this.studio.revision++; this.persistStudio(); this.enforceStudio(); }
+      if (this.chalkEditor && this.chalkEditor.id === p.id && this.chalkRefusal(p)) this.chalkLetGo(p);
       this.dirty = true;
       this.scheduleFlush();
     } else if (msg.t === "hub") {
@@ -395,6 +412,7 @@ export class Room extends DurableObject {
       p.zone = msg.name;
       hockey.arrive(this, p);
       p.pokerVoice = null;
+      if (this.chalkEditor && this.chalkEditor.id === p.id && this.chalkRefusal(p)) this.chalkLetGo(p);
       // A crossing belongs to the zone it started from; the page reports the next one after its zone (everyone resets
       // theirs on this broadcast).
       p.blendTo = null; p.blendK = 0;
@@ -441,6 +459,8 @@ export class Room extends DurableObject {
       return this.say(p, msg.text, msg.clientId);
     } else if (msg.t === "door") {
       return this.doorMessage(p, msg);
+    } else if (msg.t === "chalk") {
+      return this.chalkMessage(p, msg);
     } else if (msg.t === "wallet") {
       // Nothing in the attachment changes: a room that sleeps forgets the wallets, which end within a minute anyway.
       return this.walletMessage(p, msg);
@@ -473,6 +493,7 @@ export class Room extends DurableObject {
         p.body = msg.name;
       }
       if (!p.body) { this.cancelDoor(p); this.clearPasses(p); }
+      this.chalkLetGo(p);
       // Another body, or none: its normalized health is reported afresh.
       p.hp = 100;
       p.ko = false;
@@ -502,6 +523,7 @@ export class Room extends DurableObject {
     this.cancelDoor(p);
     this.clearPasses(p);
     this.leaveStudio(p);
+    this.chalkLetGo(p);
     this.background(this.clearVoice(p));
     this.players.delete(p.id);
     this.broadcast({ t: "leave", id: p.id, reason });
@@ -523,6 +545,7 @@ export class Room extends DurableObject {
     p.g = null;
     p.j = p.w = 0;
     this.leaveStudio(p);
+    this.chalkLetGo(p);
     p.ws.serializeAttachment(this.attachment(p));
     this.broadcast({ t: "body", id: p.id, name: null });
     this.updateVoice();
@@ -847,6 +870,97 @@ export class Room extends DurableObject {
     if (!this.studio) return;
     const seats = [...this.players.values()].filter(q => q.zone === STUDIO_ZONE && Number.isInteger(q.studioSeat)).map(q => ({ id: q.id, seat: q.studioSeat }));
     this.send(p.ws, { t: "studio-state", state: { ...this.studio, duration: (studioSource(this.studio.source) || {}).duration || 0, cleanupPending: !!(this.cleanupJobs && this.cleanupJobs.length), seats, allowedHost: studioHostAllowed(this.env, p.id), canSpeak: studioCanSpeak(this.studio, p) } });
+  }
+
+  // The chalkboard (chalk-board.js, CHALK_HZ in protocol.js): why this player may not write on it now, or null.
+  chalkRefusal(p) {
+    if (!p.body || p.body.startsWith("gorilla:") || p.zone !== OUTSIDE) return "away";
+    return CHALK.near(p.x, p.y, p.z) ? null : "away";
+  }
+
+  chalkMessage(p, msg) {
+    const C = CHALK, now = p.seenAt, editor = this.chalkEditor, holding = !!editor && editor.id === p.id;
+    if (msg.k === "drop") {
+      if (holding) this.chalkLetGo(p);
+      return;
+    }
+    if (!p.chalkBucket) p.chalkBucket = { tokens: CHALK_BURST, at: now };
+    const paced = takeToken(p.chalkBucket, CHALK_HZ, now, CHALK_BURST), refusal = this.chalkRefusal(p);
+    const other = editor && !holding ? this.players.get(editor.id) : null, taken = !!other && now - editor.at < CHALK_IDLE_MS;
+    if (msg.k === "take") {
+      if (refusal || taken || !paced) return this.send(p.ws, { t: "chalk-refused", why: refusal || (taken ? "busy" : "wait"), ...(taken && !refusal ? { name: other.display || other.login } : {}) });
+      if (holding) { editor.at = now; return this.send(p.ws, { t: "chalk-lock", id: p.id }); }
+      this.chalkGrant(p, now);
+      return;
+    }
+    // An edit over the rate is dropped unanswered, and a holder's page is then behind the room: its next edit gets the
+    // board back instead of being applied.
+    if (!paced) {
+      if (holding) p.chalkBehind = true;
+      return;
+    }
+    // An edit from a page that does not hold the board: the room slept and forgot the holder, or the page lost it and
+    // has not heard yet. A free board goes back to an Ooga still standing at it; otherwise the page gets the board
+    // as it is and who holds it.
+    if (!holding) {
+      if (refusal || taken) return this.chalkTell(p, editor && other ? editor.id : 0, now);
+      this.chalkGrant(p, now);
+    } else if (refusal) return this.chalkLetGo(p);
+    const held = this.chalkEditor;
+    held.at = now;
+    if (p.chalkBehind) return this.chalkResync(p, now);
+    // Older pages may still send repeated wipes. They need no relay, save or timer.
+    if (msg.k === "wipe" && C.preset(this.chalk) === msg.to) return;
+    if (C.apply(this.chalk, msg, held.session)) return this.chalkResync(p, now);
+    this.broadcast({ ...msg, id: p.id }, p.ws);
+    this.chalkDirty = true;
+    if (msg.k === "wipe") this.chalkSave();
+    else if (!this.chalkTimer) this.chalkTimer = setTimeout(() => { this.chalkTimer = 0; this.chalkSave(); }, CHALK_SAVE_MS);
+  }
+
+  chalkGrant(p, now) {
+    if (this.chalkEditor) this.chalkSave();
+    this.chalkEditor = { id: p.id, session: CHALK.session(this.chalk), at: now };
+    this.broadcast({ t: "chalk-lock", id: p.id });
+  }
+
+  // The board as the room has it, to one page, at most once every CHALK_TELL_MS; whether it went.
+  chalkTell(p, editor, now) {
+    if (now - (p.chalkToldAt || 0) < CHALK_TELL_MS) return false;
+    p.chalkToldAt = now;
+    this.send(p.ws, { t: "chalk-board", marks: this.chalk.marks, editor });
+    return true;
+  }
+
+  // The holder's page and the room disagree: the room's board wins, and the holder starts a fresh line. Until it can
+  // be told, the holder stays behind and its edits are not applied.
+  chalkResync(p, now) {
+    p.chalkBehind = !this.chalkTell(p, p.id, now);
+    if (!p.chalkBehind) this.chalkEditor.session = CHALK.session(this.chalk);
+  }
+
+  chalkLetGo(p) {
+    if (!this.chalkEditor || this.chalkEditor.id !== p.id) return;
+    this.chalkEditor = null;
+    this.chalkSave();
+    this.broadcast({ t: "chalk-lock", id: 0 });
+  }
+
+  // At most one write every CHALK_SAVE_MS while someone writes (a short timer after an edit, which also keeps the
+  // room awake until its last edit is stored), and one at once on a wipe or when the holder lets go.
+  chalkSave() {
+    if (this.chalkTimer) { clearTimeout(this.chalkTimer); this.chalkTimer = 0; }
+    if (!this.chalkDirty) return;
+    this.chalkDirty = false;
+    if (!this.ctx || !this.ctx.storage) return;
+    if (CHALK.preset(this.chalk) === "original") {
+      if (this.chalkStored) this.background(this.ctx.storage.delete("chalk"));
+      this.chalkStored = false;
+    } else {
+      // An empty marks array is the blank marker; absence means the original board.
+      this.background(this.ctx.storage.put("chalk", { marks: this.chalk.marks }));
+      this.chalkStored = true;
+    }
   }
 
   // DSB Land's free hardware wallets (WALLET_CAP in protocol.js). A player's live ones, a little past their end so a

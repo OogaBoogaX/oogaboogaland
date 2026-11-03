@@ -10496,6 +10496,9 @@ const hubChalkboardReach = { name: "chalkboard reach", why: "rule: only an Ooga 
     B.advance(0.5, 1 / 60);
     return B.project(c.x + c.rightX * 0.45, c.y + 1.25, c.z + c.rightZ * 0.45, {});
   })()`);
+  // The room checks a writer's pose against chalk-board.js AT: it must be where the hub stands the board.
+  const spot = await b.evaluate(`(() => { const c = BL.scenes.hub.debug.chalkboardAt, A = BL.chalkBoard.AT; return { at: [c.x, c.y, c.z, c.frontX, c.frontZ].map(v => +v.toFixed(3)), off: Math.hypot(c.x - A.x, c.z - A.z), rise: Math.abs(c.y - A.y), turn: Math.hypot(c.frontX - A.frontX, c.frontZ - A.frontZ) }; })()`);
+  const placed = spot.off < 0.05 && spot.rise < 0.05 && spot.turn < 0.01;
   const look = () => b.evaluate(`(() => ({ open: document.getElementById("chalk-modal").open, toast: document.getElementById("toast").textContent, act: document.getElementById("act").textContent.trim() }))()`);
   const tapAt = async (point) => { await b.click(point.x, point.y); await b.sleep(50); return look(); };
   const farTap = await tapAt(await stand(5));
@@ -10511,10 +10514,10 @@ const hubChalkboardReach = { name: "chalkboard reach", why: "rule: only an Ooga 
   const point = await stand(5);
   await b.evaluate(`(() => { __ooga.pilot.release(true); __ooga.advance(0.3, 1 / 60); })()`);
   const loose = await tapAt(point);
-  record("chalkboard reach: a tap from afar or with no Ooga is refused with why, while at the board Space and a tap open it and being moved off closes it",
-    !farTap.open && farTap.toast === "Walk up to the chalkboard to write on it." && nearAct.act === "WRITE" && spaced.open && !carried.open
+  record("chalkboard reach: a tap from afar or with no Ooga is refused with why, while at the board Space and a tap open it and being moved off closes it; the room's spot for the board is where the hub stands it",
+    placed && !farTap.open && farTap.toast === "Walk up to the chalkboard to write on it." && nearAct.act === "WRITE" && spaced.open && !carried.open
       && nearTap.open && !loose.open && loose.toast.startsWith("Only an Ooga can write."),
-    JSON.stringify({ farTap, nearAct, spaced, carried, nearTap, loose }));
+    JSON.stringify({ spot, farTap, nearAct, spaced, carried, nearTap, loose }));
 } };
 // A remote player stands near the pile as the room would place them: the roster's shortest and tallest Oogas, then a
 // gorilla. portlandhodl, the widest Ooga, drops onto each, rides the short one as it walks and rises as a jetpack
@@ -23634,7 +23637,7 @@ const netFixture=(BL,response,step=200,cookie="")=>{
   class Socket {static OPEN=1;constructor(){this.readyState=1;sockets.push(this);}send(v){sent.push(typeof v==="string"?JSON.parse(v):v);}close(){this.readyState=3;}}
   const voice={setPeers:()=>{},restart:()=>{},stop:()=>{}};
   const location={protocol:"https:",host:"fixture.invalid",pathname:"/",search:"",assign:url=>navigations.push(url)},pilot={saveLoginView(){savedViews++;}};
-  const context={window:{BL:{characters:BL.characters,contributors:BL.contributors,donations:BL.donations,chatPolicy:BL.chatPolicy,voice,pilot},setTimeout:()=>1,clearTimeout(){},setInterval:()=>1,clearInterval(){}},document:{hidden:false,cookie,addEventListener:(k,v)=>events.set(k,v),removeEventListener:k=>events.delete(k)},location,fetch:async(...args)=>{calls++;return response(...args);},AbortSignal,WebSocket:Socket,performance:{now:()=>tick+=step},Date,ArrayBuffer,URLSearchParams};
+  const context={window:{BL:{characters:BL.characters,contributors:BL.contributors,donations:BL.donations,chatPolicy:BL.chatPolicy,chalkBoard:BL.chalkBoard,voice,pilot},setTimeout:()=>1,clearTimeout(){},setInterval:()=>1,clearInterval(){}},document:{hidden:false,cookie,addEventListener:(k,v)=>events.set(k,v),removeEventListener:k=>events.delete(k)},location,fetch:async(...args)=>{calls++;return response(...args);},AbortSignal,WebSocket:Socket,performance:{now:()=>tick+=step},Date,ArrayBuffer,URLSearchParams};
   runInNewContext(source,context);
   return {net:context.window.BL.net,document:context.document,voice,sockets,sent,events,location,navigations,advance(ms){tick+=ms;},get calls(){return calls;},get savedViews(){return savedViews;}};
 };
@@ -23778,6 +23781,67 @@ const rememberedCharacterChecks = async BL => {
   await denied.net.start();
   record("arrival identity: malformed or denied cookies fall back safely and cannot break sign-in", bad && blocked && denied.net.ownCharacter()?.handle === "NickDaGreek");
   for (const f of [fresh, signed, returning, unknown, forged, invalid, denied]) f.net.dispose();
+};
+// Rule (#391): the chalkboard on the page edits only through the shared contract. Alone it keeps the visitor's own
+// board; signed in to a room that shares it, it opens only once the room says this page holds it, sends what it
+// draws and types, follows another's writing, and shuts with a reason when the board is taken from it.
+const chalkboardClientChecks = async (BL) => {
+  const nodes = new Map(), timers = [], refusals = [];
+  let stored = null;
+  const element = () => ({ handlers: {}, style: {}, dataset: {}, hidden: false, disabled: false, value: "", textContent: "",
+    classList: { toggle() {}, add() {}, remove() {} }, setAttribute() {}, focus() {}, blur() {}, addEventListener(type, fn) { this.handlers[type] = fn; } });
+  const ctx = new Proxy({}, { get: (t, k) => k in t ? t[k] : k === "measureText" ? () => ({ width: 30 }) : () => {}, set: (t, k, v) => (t[k] = v, true) });
+  const document = { pointerLockElement: null, getElementById(id) {
+    if (!nodes.has(id)) nodes.set(id, Object.assign(element(), id === "chalk-modal" ? { open: false, showModal() { this.open = true; }, close() { if (this.open) { this.open = false; this.handlers.close(); } } }
+      : id === "chalk-canvas" ? { getContext: () => ctx, getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 500 }), setPointerCapture() {}, hasPointerCapture: () => true, releasePointerCapture() {} } : {}));
+    return nodes.get(id);
+  } };
+  const C = BL.chalkBoard, f = netFixture(BL, () => ({ ok: true, headers: { get: () => "application/json" }, json: async () => ({ player: { id: 71, login: "YellowBrokeIt", display: "Yellow" } }) }));
+  const window = { BL: { chalkBoard: C, net: f.net } };
+  runInNewContext(await readFile(join(root, "src/js/chalkboard.js"), "utf8"), { window, document, AbortController, setTimeout: fn => timers.push(fn), clearTimeout() {},
+    requestAnimationFrame: () => 1, cancelAnimationFrame() {}, localStorage: { getItem: () => null, setItem(k, v) { stored = JSON.parse(v); } } });
+  const board = window.BL.chalkboard.create({ renderer: {}, onOpen() {}, onClose() {}, onRefused: text => refusals.push(text) });
+  const dialog = document.getElementById("chalk-modal"), canvas = document.getElementById("chalk-canvas"), input = document.getElementById("chalk-type-input");
+  const pointer = (type, x, y) => canvas.handlers[type]({ isPrimary: true, button: 0, pointerId: 1, pointerType: "mouse", clientX: x, clientY: y, preventDefault() {} });
+  const stroke = (...points) => { pointer("pointerdown", ...points[0]); for (const p of points.slice(1)) pointer("pointermove", ...p); pointer("pointerup", ...points.at(-1)); };
+  const tick = () => { for (const fn of timers.splice(0)) fn(); };
+  // Alone: a line and a dot on the visitor's own board, kept in this browser.
+  board.open(null);
+  stroke([100, 100], [200, 150], [300, 200]); stroke([400, 400]);
+  dialog.close();
+  const own = stored?.length === C.initial().length + 2 && stored.at(-2).p.length === 6 && stored.at(-1).p.length === 4;
+  // Shared: the room hands the board over; opening it asks to hold it first.
+  await f.net.start(); const ws = f.sockets[0], room = v => ws.onmessage({ data: JSON.stringify(v) });
+  room({ t: "welcome", you: { id: 71 }, players: [{ id: 72, login: "peer", display: "Peer", body: "w-s-bitcoin", zone: "outside", x: 0, y: 0, z: 0, yaw: 0 }], now: Date.now(), features: [C.FEATURE] });
+  room({ t: "chalk-board", marks: C.initial(), editor: 0 });
+  board.open(null);
+  const asked = !dialog.open && f.sent.at(-1).t === "chalk" && f.sent.at(-1).k === "take";
+  room({ t: "chalk-lock", id: 71 });
+  const granted = dialog.open;
+  const before = f.sent.length;
+  stroke([100, 100], [200, 200], [300, 300]);
+  const drawn = f.sent.slice(before).map(({ t, ...m }) => m);
+  const sentLine = JSON.stringify(drawn) === JSON.stringify([{ k: "line", m: "c", p: [125, 200, 250, 400] }, { k: "more", p: [375, 600] }]);
+  document.getElementById("chalk-keyboard").handlers.click();
+  input.value = "hi"; input.handlers.input({ isComposing: false }); tick();
+  const sentText = f.sent.at(-1).k === "type" && f.sent.at(-1).c.map(c => c[0]).join("") === "hi";
+  document.getElementById("chalk-close").handlers.click();
+  const letGo = !dialog.open && f.sent.at(-1).k === "drop" && stored?.length === C.initial().length + 2;
+  // Another's writing arrives as it is made, and the board names them while they hold it.
+  room({ t: "chalk-lock", id: 72 }); room({ t: "chalk", id: 72, k: "type", c: [["z", 10, 10]] });
+  const followed = f.net.state.chalk.board.marks.at(-1).ch === "z" && board.writer === "Peer";
+  board.open(null); room({ t: "chalk-refused", why: "busy", name: "Peer" });
+  const busy = !dialog.open && refusals.at(-1) === "Peer is writing on the chalkboard. Wait for them to finish.";
+  // Holding it, then losing it to another, shuts it with their name.
+  room({ t: "chalk-lock", id: 0 }); board.open(null); room({ t: "chalk-lock", id: 71 }); const reopened = dialog.open;
+  room({ t: "chalk-lock", id: 72 });
+  const taken = reopened && !dialog.open && refusals.at(-1) === "Peer has the chalkboard now.";
+  f.net.state.room = "paused"; board.open(null);
+  const offline = !dialog.open && refusals.at(-1).startsWith("Reconnecting");
+  record("chalkboard client: alone the visitor writes on their own board; shared, the board opens once the room grants it, sends lines and text as drawn, follows another's writing and shuts with a reason when taken or refused",
+    own && asked && granted && sentLine && sentText && letGo && followed && busy && taken && offline,
+    JSON.stringify({ own, asked, granted, sentLine, drawn, sentText, letGo, followed, busy, taken, offline, refusals }));
+  board.dispose?.(); f.net.dispose();
 };
 // Ooga Chat's wire on the page: what it sends, and the lines it hands on (chat.js keeps and shows them).
 // Execute the real chat controller with a small DOM and a controllable acknowledgement clock.
@@ -23931,6 +23995,40 @@ const integrationChecks = async BL => {
   record("integration network: leaving DSB clears its body and zone",f.sent.at(-2).t==="body"&&f.sent.at(-2).name===null&&f.sent.at(-1).name==="scene-bifrost");
   message({t:"leave",id:72});f.net.dispose();
   record("integration network: disposal clears presence and visibility listeners",f.net.remotes.size===0&&f.events.size===0&&ws.readyState===3);
+  // Rule (#391): a room that keeps the chalkboard hands it over after welcome, and the page's copy follows the holder's
+  // edits alone; the visitor's own wait to go a few to a frame, in order, while it holds the board; an older room
+  // leaves the page its own board.
+  {
+    const C=BL.chalkBoard,c=fixture(()=>({ok:true,headers:{get:()=>"application/json"},json:async()=>({player:{id:71,login:"YellowBrokeIt",display:"Yellow"}})}));
+    await c.net.start();const cw=c.sockets[0],cm=v=>cw.onmessage({data:JSON.stringify(v)}),events=[];
+    c.net.subscribeChalk(kind=>events.push(kind));
+    const welcome=features=>cm({t:"welcome",you:{id:71},players:[{id:72,login:"peer",display:"Peer",body:"w-s-bitcoin",zone:"outside",x:0,y:0,z:0,yaw:0}],now:Date.now(),features});
+    welcome([C.FEATURE]);cm({t:"chalk-board",marks:C.initial(),editor:72});
+    const handed=c.net.state.chalk?.board.marks.length===C.initial().length&&c.net.state.chalk.editor===72&&events.join()==="board";
+    cm({t:"chalk",id:72,k:"line",m:"c",p:[0,0,500,500]});cm({t:"chalk",id:73,k:"line",m:"c",p:[0,0,1,1]});
+    const followed=c.net.state.chalk.board.marks.length===C.initial().length+1&&events.filter(e=>e==="op").length===1;
+    const unheld=c.net.chalkEdit({k:"line",m:"c",p:[1,1,2,2]})==="away"&&c.net.takeChalk()&&c.sent.at(-1).k==="take";
+    cm({t:"chalk-lock",id:71});const before=c.sent.length;
+    c.net.chalkEdit({k:"line",m:"e",p:[10,10,20,20]});
+    const lineAtOnce=c.sent.length===before+1&&c.sent.at(-1).k==="line";
+    for(let i=0;i<C.CHUNK+5;i++)c.net.chalkEdit({k:"more",p:[30+i,40]});
+    const held=c.sent.length===before+1;c.net.flushChalk();
+    const more=c.sent.slice(before+1),batched=more.length===2&&more[0].p.length===C.CHUNK*2&&more[1].p.length===10;
+    c.net.chalkEdit({k:"type",c:[["a",1,1]]});c.net.chalkEdit({k:"type",c:[["b",2,1]]});c.net.chalkEdit({k:"back"});
+    const ordered=c.sent.at(-2).k==="type"&&c.sent.at(-2).c.length===2&&c.sent.at(-1).k==="back";
+    let quietWipes=true;
+    for(const to of ["clean","original"]){
+      c.net.chalkEdit({k:"wipe",to});const sent=c.sent.length;
+      quietWipes=quietWipes&&c.net.chalkEdit({k:"wipe",to})===null;
+      c.net.flushChalk();quietWipes=quietWipes&&c.sent.length===sent;
+    }
+    c.net.dropChalk();const dropped=c.sent.at(-1).k==="drop"&&c.net.state.chalk.editor===0;
+    cm({t:"chalk-refused",why:"busy",name:"Peer"});const refused=events.at(-1)==="refused";
+    welcome([]);const older=c.net.state.chalk===null&&events.at(-1)==="board";
+    record("integration chalkboard: a room that keeps the chalkboard hands it over and the page follows its holder's edits alone; the visitor's own go in order a few to a frame while they hold it; an older room leaves the page its own",
+      handed&&followed&&unheld&&lineAtOnce&&held&&batched&&ordered&&quietWipes&&dropped&&refused&&older,JSON.stringify({handed,followed,unheld,lineAtOnce,held,batched,ordered,quietWipes,dropped,refused,older}));
+    c.net.dispose();
+  }
   // Rule: a companion keeps its authenticated owner and real pose when a visitor switches bodies.
   const temporary={handle:"fixture-visitor",temporary:true};
   const registry={get:name=>String(name).toLowerCase()===temporary.handle?temporary:BL.characters.get(name)};
@@ -25539,6 +25637,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   if(ARGS.includes("dsb-menus-unit")){stackchainChecks(BL);memeFactoryChecks(BL);menuShellChecks(BL);maxisChecks(BL);rulersChecks(BL);inkChecks(BL);bigBitcoinChecks(BL);return;}
   await chatNetChecks(BL);
   await chatClientChecks();
+  await chalkboardClientChecks(BL);
   await chatAccountChecks(BL);
   await rememberedCharacterChecks(BL);
   await playersTabChecks(BL);

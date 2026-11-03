@@ -1,27 +1,15 @@
-// The EntropyLab chalkboard keeps one bounded list of marks for its close-up and its world-space writing.
+// The EntropyLab chalkboard keeps one bounded list of marks for its close-up and its world-space writing. Every
+// edit goes through chalk-board.js `apply`: on the visitor's own board, kept in this browser, or, signed in to a room
+// that shares it, on the room's board (net.js `state.chalk`), which the page edits only while it holds it.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const KEY = "ooga-chalkboard-v2", OLD_KEY = "ooga-chalkboard-v1", MAX_STROKES = 550, MAX_POINTS = 10000;
+  const C = BL.chalkBoard;
+  const KEY = "ooga-chalkboard-v2", OLD_KEY = "ooga-chalkboard-v1", MAX_STROKES = C.MAX_MARKS, MAX_POINTS = C.MAX_POINTS;
   const W = 800, H = 500, BOARD_W = 1.5, BOARD_H = 0.875, BOARD_FACE_Z = -1 / 16 + 0.002;
   const GRID_W = 160, GRID_H = 100, WASH_MS = 650, DRAW_MS = 700, WASH_BANDS = 6, WORLD_UPDATE_MS = 100;
   const TEXT_FONT = "58.125px 'Bradley Hand', 'Marker Felt', cursive", TEXT_SIZE = 60, TEXT_LINE = 84.375, TEXT_MARGIN = 32;
   const clamp = (v) => Math.max(0, Math.min(1, v));
-  const initial = () => {
-    const marks = [];
-    for (const [row, text] of ["01101010110", "11111101101"].entries()) {
-      for (let i = 0; i < text.length; i++) {
-        const x = 0.5 + (i - (text.length - 1) / 2) * 0.075, y = 0.39 + row * 0.22, size = 1.75;
-        const wobble = Math.sin(i * 8.1 + row * 3.2) * 0.003 * size;
-        if (text[i] === "0") marks.push({ t: "c", p: [x - 0.011 * size, y - 0.041 * size, x + wobble, y - 0.047 * size,
-          x + 0.014 * size, y - 0.027 * size, x + 0.016 * size, y + 0.021 * size, x + 0.008 * size, y + 0.046 * size,
-          x - 0.011 * size, y + 0.04 * size, x - 0.016 * size, y + 0.009 * size, x - 0.011 * size, y - 0.041 * size] });
-        else marks.push({ t: "c", p: [x - 0.014 * size, y - 0.022 * size, x, y - 0.045 * size,
-          x + 0.004 * size + wobble, y + 0.043 * size, x - 0.013 * size, y + 0.045 * size, x + 0.018 * size, y + 0.042 * size] });
-      }
-    }
-    return marks;
-  };
   const read = (key) => {
     try {
       const raw = localStorage.getItem(key);
@@ -79,7 +67,7 @@
     surface.version++;
     return geo;
   };
-  const create = ({ renderer, onOpen, onClose }) => {
+  const create = ({ renderer, onOpen, onClose, onRefused }) => {
     const dialog = document.getElementById("chalk-modal"), frame = document.getElementById("chalk-frame");
     const canvas = document.getElementById("chalk-canvas"), ctx = canvas.getContext("2d", { alpha: false, willReadFrequently: true });
     const pointer = document.getElementById("chalk-pointer"), caret = document.getElementById("chalk-caret"), typeInput = document.getElementById("chalk-type-input"), hint = document.getElementById("chalk-hint");
@@ -93,10 +81,17 @@
       bindings.push([target, type, fn, opts]);
       target.addEventListener(type, fn, { ...opts, signal: listeners.signal });
     };
-    const startingMarks = initial(), saved = read(KEY), legacy = saved === null ? read(OLD_KEY) : null;
-    const marks = saved !== null ? saved : legacy !== null ? startingMarks.concat(legacy) : startingMarks.slice();
+    const net = BL.net, startingMarks = C.initial(), saved = read(KEY), legacy = saved === null ? read(OLD_KEY) : null;
+    const local = C.board(saved !== null ? saved : legacy !== null ? startingMarks.concat(legacy) : startingMarks.slice());
+    let localSession = C.session(local);
+    const shared = () => net && net.state.chalk;
+    const holding = () => { const c = shared(); return !!c && !!c.editor && c.editor === net.state.selfId; };
+    const board = () => { const c = shared(); return c ? c.board : local; };
+    const lastMark = () => { const marks = board().marks; return marks[marks.length - 1]; };
+    const edit = (op) => shared() ? net.chalkEdit(op) : C.apply(local, op, localSession);
     const startingSegments = startingMarks.reduce((n, mark) => n + mark.p.length / 2 - 1, 0);
-    let node = null, tool = null, stroke = null, pointCount = marks.reduce((n, mark) => n + mark.p.length / 2, 0);
+    // A stroke being drawn: its tool, its last point in thousandths, and whether its line has begun.
+    let node = null, tool = null, stroke = null, pending = false, pendingFocal = null, unheard = null;
     let changed = false, activePointer = -1, animation = null, liveTimer = 0, worldDirty = false;
     let cursorX = TEXT_MARGIN, cursorY = TEXT_MARGIN + TEXT_SIZE, textStartX = TEXT_MARGIN;
     const typeHistory = [];
@@ -140,13 +135,14 @@
     };
     const paint = () => {
       paintBase();
-      for (const mark of marks) {
+      for (const mark of board().marks) {
         if (mark.t === "t") paintText(mark);
         else for (let i = 2; i < mark.p.length; i += 2) paintSegment(mark, i);
       }
     };
     const syncWorld = () => {
       liveTimer = 0;
+      if (holding()) net.flushChalk();
       if (!worldDirty || !node) return;
       geometryFor(ctx, node.geometry);
       worldDirty = false;
@@ -179,15 +175,15 @@
           continue;
         }
         if (/[\x00-\x1f\x7f]/.test(ch)) continue;
-        if (marks.length >= MAX_STROKES || pointCount >= MAX_POINTS) { hint.textContent = "Board is full"; break; }
+        const b = board();
+        if (b.marks.length >= MAX_STROKES || b.points >= MAX_POINTS) { hint.textContent = "Board is full"; break; }
         ctx.font = TEXT_FONT;
         const advance = Math.max(12, ctx.measureText(ch).width + 2);
         const x = cursorX, y = cursorY;
         if (cursorX + advance > W - TEXT_MARGIN && !newTextLine()) break;
-        const mark = { t: "t", ch, p: [cursorX / W, cursorY / H] };
-        marks.push(mark);
+        if (edit({ k: "type", c: [[ch, Math.round(cursorX / W * 1000), Math.round(cursorY / H * 1000)]] })) break;
+        const mark = lastMark();
         typeHistory.push({ x, y, mark });
-        pointCount++;
         paintText(mark);
         cursorX += advance;
         placeCaret();
@@ -201,9 +197,7 @@
       cursorX = previous.x;
       cursorY = previous.y;
       placeCaret();
-      if (!previous.mark) return;
-      marks.pop();
-      pointCount--;
+      if (!previous.mark || edit({ k: "back" })) return;
       paint();
       changed = true;
       markWorld();
@@ -213,9 +207,7 @@
       cancelAnimationFrame(animation.raf);
       const type = animation.type;
       animation = null;
-      marks.length = 0;
-      if (type === "reset") marks.push(...startingMarks);
-      pointCount = marks.reduce((n, mark) => n + mark.p.length / 2, 0);
+      edit({ k: "wipe", to: type === "reset" ? "original" : "clean" });
       changed = true;
       clean.disabled = reset.disabled = eraser.disabled = chalk.disabled = keyboard.disabled = false;
       select("c");
@@ -255,7 +247,7 @@
       if (stroke) return;
       select(null);
       pointer.classList.remove("visible");
-      const wash = type === "clean" || marks.length > 0;
+      const wash = type === "clean" || board().marks.length > 0;
       clean.disabled = reset.disabled = eraser.disabled = chalk.disabled = keyboard.disabled = true;
       hint.textContent = type === "reset" ? wash ? "Washing, then rewriting…" : "Rewriting original message…" : "Washing the board…";
       animation = { type, wash, started: 0, raf: requestAnimationFrame(washFrame) };
@@ -283,15 +275,37 @@
       pointer.style.top = `${y}px`;
       pointer.classList.add("visible");
     };
+    // In thousandths of the board, as edits carry them.
+    const thousandths = (e) => { const [x, y] = coords(e); return [Math.round(x * 1000), Math.round(y * 1000)]; };
+    // A line begins at its second point; one that takes no more points starts afresh from the next.
     const addPoint = (e) => {
-      if (!stroke || pointCount >= MAX_POINTS) return;
-      const [x, y] = coords(e), p = stroke.p, last = p.length - 2;
-      if (Math.hypot(x - p[last], y - p[last + 1]) < 0.003) return;
-      p.push(Math.round(x * 1000) / 1000, Math.round(y * 1000) / 1000);
-      pointCount++;
-      paintSegment(stroke, p.length - 2);
+      if (!stroke) return;
+      const [x, y] = thousandths(e);
+      if (Math.hypot(x - stroke.x, y - stroke.y) < 3) return;
+      const failed = edit(stroke.line ? { k: "more", p: [x, y] } : { k: "line", m: stroke.m, p: [stroke.x, stroke.y, x, y] });
+      stroke.x = x; stroke.y = y; stroke.line = !failed;
+      if (failed) return;
+      const mark = lastMark();
+      paintSegment(mark, mark.p.length - 2);
       changed = true;
       markWorld();
+    };
+    // A press that never moved leaves a dot of chalk, and nothing for the eraser.
+    const finishStroke = () => {
+      if (stroke && !stroke.line && stroke.m === "c" && !edit({ k: "line", m: "c", p: [stroke.x, stroke.y, Math.min(1000, stroke.x + 1), stroke.y] })) {
+        paintSegment(lastMark(), 2);
+        changed = true;
+        markWorld();
+      }
+      stroke = null;
+    };
+    // Another's edit on the shared board, drawn as it comes.
+    const paintOp = (op) => {
+      const marks = board().marks, mark = marks[marks.length - 1];
+      if ((op.k === "line" || op.k === "more") && mark && mark.t !== "t") {
+        for (let i = Math.max(2, op.k === "line" ? 2 : mark.p.length - op.p.length); i < mark.p.length; i += 2) paintSegment(mark, i);
+      } else if (op.k === "type") for (let i = Math.max(0, marks.length - op.c.length); i < marks.length; i++) paintText(marks[i]);
+      else paint();
     };
     on(canvas, "pointerdown", (e) => {
       if (tool === "k") {
@@ -306,11 +320,11 @@
         typeInput.focus({ preventScroll: true });
         return;
       }
-      if (stroke || !e.isPrimary || e.button !== 0 || !tool || marks.length >= MAX_STROKES || pointCount >= MAX_POINTS) return;
+      const b = board();
+      if (stroke || !e.isPrimary || e.button !== 0 || !tool || b.marks.length >= MAX_STROKES || b.points >= MAX_POINTS) return;
       e.preventDefault();
-      const [x, y] = coords(e);
-      stroke = { t: tool, s: tool === "c" ? 2 : 4, p: [Math.round(x * 1000) / 1000, Math.round(y * 1000) / 1000] };
-      marks.push(stroke); pointCount++;
+      const [x, y] = thousandths(e);
+      stroke = { m: tool, x, y, line: false };
       activePointer = e.pointerId;
       canvas.setPointerCapture(e.pointerId);
       movePointer(e);
@@ -318,16 +332,8 @@
     on(canvas, "pointermove", (e) => { movePointer(e); if (e.pointerId === activePointer) addPoint(e); }, { signal: listeners.signal });
     const endStroke = (e) => {
       if (!stroke || e.pointerId !== activePointer) return;
-      if (stroke.p.length === 2) {
-        if (stroke.t === "e") { marks.pop(); pointCount--; }
-        else {
-          const x = Math.min(1, stroke.p[0] + 0.001), y = stroke.p[1];
-          stroke.p.push(x, y); pointCount++; paintSegment(stroke, 2); changed = true;
-          markWorld();
-        }
-      }
+      finishStroke();
       flushWorld();
-      stroke = null;
       if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
       activePointer = -1;
       if (e.pointerType === "touch") pointer.classList.remove("visible");
@@ -362,22 +368,62 @@
       finishAnimation();
       if (activePointer >= 0 && canvas.hasPointerCapture(activePointer)) canvas.releasePointerCapture(activePointer);
       activePointer = -1;
-      if (stroke && stroke.p.length === 2) {
-        if (stroke.t === "e") { marks.pop(); pointCount--; }
-        else { stroke.p.push(Math.min(1, stroke.p[0] + 0.001), stroke.p[1]); changed = true; }
-      }
-      stroke = null; pointer.classList.remove("visible");
+      finishStroke();
+      pointer.classList.remove("visible");
       typeInput.value = "";
+      // A shared board goes back to the room; the visitor's own stays in this browser.
+      if (shared()) net.dropChalk();
+      else if (changed) write(local.marks);
       if (changed) {
         paint();
-        write(marks);
         worldDirty = true;
         changed = false;
       }
       flushWorld();
       onClose();
     }, { signal: listeners.signal });
+    const nameOf = (id) => { const rec = net.remotes.get(id); return rec ? rec.display : "Someone"; };
+    // The shared board's news (net.js `subscribeChalk`): another's edit or a new board drawn as it comes, and the
+    // lock, which opens the board here once it is this page's and closes it when it no longer is.
+    const heard = (kind, detail) => {
+      if (kind === "op") paintOp(detail);
+      else if (kind === "board") {
+        if (stroke) stroke.line = false;
+        if (dialog.open && !holding()) { dialog.close(); return; }
+        paint();
+      } else if (kind === "lock") {
+        const c = shared(), mine = holding();
+        if (pending && (mine || net.state.room !== "live")) { pending = false; if (mine) show(pendingFocal); }
+        // Granted after the visitor gave up waiting: hand it straight back.
+        else if (mine && !dialog.open) net.dropChalk();
+        else if (dialog.open && !mine) { dialog.close(); onRefused(c && c.editor ? `${nameOf(c.editor)} has the chalkboard now.` : "The chalkboard was let go."); }
+        return;
+      } else if (kind === "refused") {
+        if (!pending) return;
+        pending = false;
+        onRefused(detail.why === "busy" ? `${detail.name || "Someone"} is writing on the chalkboard. Wait for them to finish.`
+          : detail.why === "wait" ? "Wait a moment, then try the chalkboard again." : "Walk up to the chalkboard to write on it.");
+        return;
+      }
+      markWorld();
+    };
+    const listen = () => { if (net && !unheard) unheard = net.subscribeChalk(heard); };
+    const show = (focal) => {
+      if (dialog.open) return;
+      if (!shared()) localSession = C.session(local);
+      cursorX = textStartX = TEXT_MARGIN;
+      cursorY = TEXT_MARGIN + TEXT_SIZE;
+      select("c");
+      paint();
+      onOpen();
+      if (document.pointerLockElement) document.exitPointerLock();
+      if (focal) dialog.style.transformOrigin = `${Math.round(focal.x / innerWidth * 100)}% ${Math.round(focal.y / innerHeight * 100)}%`;
+      dialog.showModal();
+    };
+    listen();
     const suspend = () => {
+      if (unheard) { unheard(); unheard = null; }
+      pending = false;
       listeners.abort();
       if (animation) { cancelAnimationFrame(animation.raf); animation = null; }
       if (liveTimer) { clearTimeout(liveTimer); liveTimer = 0; }
@@ -387,6 +433,10 @@
       if (!listeners.signal.aborted) return;
       listeners = new AbortController();
       for (const [target, type, fn, opts] of bindings) target.addEventListener(type, fn, { ...opts, signal: listeners.signal });
+      // The shared board may have moved on while the island was away.
+      listen();
+      paint();
+      markWorld();
     };
     return {
       suspend, resume,
@@ -395,18 +445,15 @@
         node = BL.scene.createNode({ position: { x, y, z }, rotation: { x: 0, y: angle, z: 0 }, geometry: geometryFor(ctx), sightHidden: true });
         BL.scene.addChild(parent, node);
       },
+      // A shared board opens once the room says this page holds it.
       open(focal) {
-        if (dialog.open) return;
-        cursorX = textStartX = TEXT_MARGIN;
-        cursorY = TEXT_MARGIN + TEXT_SIZE;
-        select("c");
-        paint();
-        onOpen();
-        if (document.pointerLockElement) document.exitPointerLock();
-        if (focal) dialog.style.transformOrigin = `${Math.round(focal.x / innerWidth * 100)}% ${Math.round(focal.y / innerHeight * 100)}%`;
-        dialog.showModal();
+        if (dialog.open || pending) return;
+        const c = shared();
+        if (c && net.state.room !== "live") { onRefused("Reconnecting to the island. Try the chalkboard again in a moment."); return; }
+        if (c && !holding()) { pending = true; pendingFocal = focal || null; net.takeChalk(); return; }
+        show(focal);
       },
-      close() { if (dialog.open) dialog.close(); },
+      close() { pending = false; if (dialog.open) dialog.close(); },
       dispose() {
         suspend();
         if (node) {
@@ -416,7 +463,11 @@
         }
         node = null;
       },
-      get openNow() { return dialog.open; }
+      get openNow() { return dialog.open; },
+      // Waiting for the room to grant the shared board.
+      get waiting() { return pending; },
+      // Who else holds the shared board now, by name, or null.
+      get writer() { const c = shared(); return c && c.editor && c.editor !== net.state.selfId ? nameOf(c.editor) : null; }
     };
   };
   BL.chalkboard = { create };
