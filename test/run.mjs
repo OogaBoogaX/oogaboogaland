@@ -3988,7 +3988,7 @@ const orbitFlow = async (b) => {
 const SCENES = ["hub", "lab", "race", "drop", "orbit", "mine", "dsb", "factory", "hangar", "bifrost", "timechain", "poker", "arcade", "skee", "hoops", "shy", "claw", "hockey", "billiards", "darts", "pinball", "ride", "invaders", "snake", "pong", "stampede", "flap", "breaker", "dash", "stacker"];
 const LANES = Number(process.env.LANES) || 2;
 const ARGS = process.argv.slice(2);
-for (const a of ARGS) if (!SCENES.includes(a) && !["unit", "chat-unit", "integration-unit", "svrn-unit", "svrn-review", "vacancy-unit", "rescue-unit", "wallets-unit", "portal-unit", "water-baseline", "water-review", "water-unit", "stackchain-review", "stackchain-unit", "dsb-menus-unit", "maxis-unit", "exterior-unit", "rulers-unit", "ink-unit", "big-unit", "perf", "full", "poker-protocol"].includes(a)) throw new Error(`Unknown argument "${a}" (unit | perf | full | poker-protocol | ${SCENES.join(" | ")})`);
+for (const a of ARGS) if (!SCENES.includes(a) && !["unit", "highscores-unit", "chat-unit", "integration-unit", "svrn-unit", "svrn-review", "vacancy-unit", "rescue-unit", "wallets-unit", "portal-unit", "water-baseline", "water-review", "water-unit", "stackchain-review", "stackchain-unit", "dsb-menus-unit", "maxis-unit", "exterior-unit", "rulers-unit", "ink-unit", "big-unit", "perf", "full", "poker-protocol"].includes(a)) throw new Error(`Unknown argument "${a}" (unit | perf | full | poker-protocol | ${SCENES.join(" | ")})`);
 const ONLY = process.env.ONLY || ""; // Optional comma-separated substrings within the requested scenes.
 const onlyMatches = value => ONLY.split(",").some(part => value.includes(part));
 const FULL = ARGS.includes("full");
@@ -6676,10 +6676,10 @@ const highscoreClientChecks = async () => {
   const sources = await Promise.all(["highscore-rules", "highscores"].map(name => readFile(join(root, `src/js/${name}.js`), "utf8")));
   const flush = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
   const fixture = (signed = false, enabled = true) => {
-    const requests = [], timers = new Map(), events = new Map(), subscribers = new Set(), toasts = [];
+    const requests = [], timers = new Map(), events = new Map(), subscribers = new Set(), live = new Set(), toasts = [];
     let seq = 0, now = 1000;
-    const state = { backend: enabled, highscores: enabled, resolved: true, logoutEpoch: 0, me: signed ? { id: 11, login: "score-one" } : null };
-    const net = { state, subscribe(fn) { subscribers.add(fn); return () => subscribers.delete(fn); } };
+    const state = { backend: enabled, highscores: enabled, highscoreSnapshots: true, resolved: true, logoutEpoch: 0, me: signed ? { id: 11, login: "score-one" } : null };
+    const net = { state, subscribeHighscores(fn) { live.add(fn); return () => live.delete(fn); }, subscribe(fn) { subscribers.add(fn); return () => subscribers.delete(fn); } };
     const context = { AbortController, Date: class extends Date { static now() { return now; } },
       window: { BL: { net, hud: { toast: text => toasts.push(text) } },
         setTimeout(fn, ms) { timers.set(++seq, { fn, ms }); return seq; }, clearTimeout(id) { timers.delete(id); } },
@@ -6691,12 +6691,24 @@ const highscoreClientChecks = async () => {
       }) };
     for (const source of sources) runInNewContext(source, context);
     const B = context.window.BL;
-    return { scores: B.highscores, state, requests, timers, events, subscribers, toasts,
+    return { scores: B.highscores, rules: B.highscoreRules, context, live, state, requests, timers, events, subscribers, toasts,
       account(me, loggedOut = false) { state.me = me; if (loggedOut) state.logoutEpoch++; for (const fn of subscribers) fn(state); },
-      advance() { now += 31000; },
+      advance(ms = 31000) { now += ms; },
+      connection(token) { state.room = token ? "live" : "connecting"; state.connectionToken = token; for (const fn of subscribers) fn(state); },
+      push(game, highscores, revision) {
+        const rule = B.highscoreRules.games[game];
+        for (const fn of live) fn({ game, version: rule.version, scoreType: rule.scoreType, direction: rule.direction, unit: rule.unit,
+          highscores, achieved: Object.fromEntries(Object.keys(highscores).map(key => [key, 1000])), revision });
+      },
+      fire() { const next = [...timers].find(([, value]) => value.ms !== 6000); if (!next) return false; timers.delete(next[0]); next[1].fn(); return true; },
       reply(index, game, highscores = {}, revision = 0, status = 200) {
         const rule = B.highscoreRules.games[game], achieved = Object.fromEntries(Object.keys(highscores).map(key => [key, 1000]));
-        const data = { game, version: rule.version, scoreType: rule.scoreType, direction: rule.direction, unit: rule.unit, highscores, achieved, revision };
+        let data = { game, version: rule.version, scoreType: rule.scoreType, direction: rule.direction, unit: rule.unit, highscores, achieved, revision };
+        if (/\/arcade(?:-live)?$/.test(requests[index].url)) data = { refreshAfterMs: 30000, boards: B.highscoreRules.arcade.map(id => {
+          if (id === game) return data;
+          const rule = B.highscoreRules.games[id];
+          return { game: id, version: rule.version, scoreType: rule.scoreType, direction: rule.direction, unit: rule.unit, highscores: {}, achieved: {}, revision: 0 };
+        }) };
         requests[index].resolve({ ok: status === 200, status, headers: { get: () => "application/json" }, json: async () => data });
       } };
   };
@@ -6737,15 +6749,16 @@ const highscoreClientChecks = async () => {
     f.account(null, true); f.account({ id: 11, login: "score-one" });
     const loggedOut = !await f.scores.submit(first, "darts-1", 100);
     const second = f.scores.begin("darts");
+    f.reply(1, "darts"); await flush();
     f.account({ id: 22, login: "score-two" });
     const changed = !await f.scores.submit(second, "darts-1", 100);
     const third = f.scores.begin("darts"), saving = f.scores.submit(third, "darts-1", 120);
-    const body = JSON.parse(f.requests[1].options.body);
-    f.reply(1, "darts", { "darts-1": 120 }, 1);
+    const body = JSON.parse(f.requests[3].options.body);
+    f.reply(3, "darts", { "darts-1": 120 }, 1);
     const saved = await saving, duplicate = !await f.scores.submit(third, "darts-1", 140);
     f.scores.dispose();
     record("highscores: logout/relogin and account switches invalidate run tickets; a current account submits once with its numeric account guard and no client username",
-      loggedOut && changed && saved && duplicate && body.playerId === 22 && !Object.hasOwn(body, "login") && f.requests.length === 2,
+      loggedOut && changed && saved && duplicate && body.playerId === 22 && !Object.hasOwn(body, "login") && f.requests.length === 4,
       JSON.stringify({ loggedOut, changed, saved, duplicate, body, requests: f.requests.length }));
   }
   {
@@ -6791,6 +6804,80 @@ const highscoreClientChecks = async () => {
       failed && f.requests.every(req => req.options.signal.aborted) && f.subscribers.size === 0 && f.events.size === 0
         && f.timers.size === 0 && f.toasts.length === 0 && changes.length === before && f.scores.get("darts") === null,
       JSON.stringify({ failed, timers: f.timers.size, changes: changes.length, before }));
+  }
+  {
+    const f = fixture(), offs = f.rules.arcade.map(id => f.scores.watch(id, () => {}));
+    const one = f.requests.length === 1 && f.requests[0].url === "/api/highscores/arcade";
+    f.reply(0, "darts", { "darts-1": 90 }, 1); await flush();
+    const oneTimer = f.timers.size === 1;
+    f.advance(); f.fire();
+    const refreshed = f.requests.length === 2;
+    f.reply(1, "darts", {}, 0, 503); await flush();
+    const retained = f.scores.best("darts", "darts-1") === 90;
+    f.context.document.hidden = true; f.events.get("visibilitychange")();
+    const hidden = f.timers.size === 0;
+    f.advance(); f.context.document.hidden = false; f.events.get("visibilitychange")();
+    const resumed = f.requests.length === 3;
+    f.reply(2, "darts", { "darts-1": 100 }, 2); await flush();
+    offs.forEach(off => off());
+    const left = f.timers.size === 0;
+    f.scores.dispose();
+    record("highscores: seventeen guest watches share one snapshot and one visible refresh timer; failure retains scores, hidden and departed scenes stop refreshing",
+      one && oneTimer && refreshed && retained && hidden && resumed && left && f.live.size === 0,
+      JSON.stringify({ one, oneTimer, refreshed, retained, hidden, resumed, left }));
+  }
+  {
+    const f = fixture(), off = f.scores.watch("darts", () => {});
+    const boards = f.rules.arcade.map(game => { const rule = f.rules.get(game); return { game, version: 1, scoreType: rule.scoreType,
+      direction: rule.direction, unit: rule.unit, highscores: {}, achieved: {}, revision: 0 }; });
+    f.requests[0].resolve({ ok: true, headers: { get: () => "application/json" }, json: async () => ({ boards, refreshAfterMs: 5000 }) });
+    await flush();
+    const remaining = [...f.timers.values()][0]?.ms === 5100;
+    f.advance(5100); f.fire();
+    const refreshed = f.requests.length === 2;
+    f.requests[1].resolve({ ok: true, headers: { get: () => "application/json" }, json: async () => ({ boards: [boards[0]], refreshAfterMs: 30000 }) });
+    await flush();
+    const kept = f.scores.get("darts")?.revision === 0;
+    off(); f.scores.dispose();
+    record("highscores: guest refresh uses remaining edge lifetime and refuses incomplete snapshots", remaining && refreshed && kept);
+  }
+  {
+    const f = fixture(true), changes = [], off = f.scores.watch("darts", board => changes.push(board));
+    f.connection("first");
+    f.push("darts", { "darts-1": 250 }, 4);
+    f.reply(0, "darts", { "darts-1": 100 }, 1); await flush();
+    f.reply(1, "darts", { "darts-1": 200 }, 3); await flush();
+    const before = changes.length;
+    f.push("darts", { "darts-1": 250 }, 4); f.push("darts", { "darts-1": 300 }, 3);
+    const ordered = f.scores.best("darts", "darts-1") === 250 && changes.length === before;
+    const noPolling = f.timers.size === 0 && !f.fire();
+    f.connection(null); f.connection("second");
+    const reconnect = f.requests.length === 3 && f.requests[2].url === "/api/highscores/arcade-live";
+    f.reply(2, "darts", { "darts-1": 400 }, 5); await flush();
+    const recovered = f.scores.best("darts", "darts-1") === 400;
+    f.account(null, true); f.push("darts", { "darts-1": 450 }, 6);
+    const guestIgnored = f.scores.best("darts", "darts-1") === 400;
+    off(); f.scores.dispose(); await flush();
+    record("highscores: live revisions beat stale snapshots, duplicates do not repaint, reconnect reads fresh, signed-in clients never poll, and guests ignore broadcasts",
+      ordered && noPolling && reconnect && recovered && guestIgnored, JSON.stringify({ ordered, noPolling, reconnect, recovered, guestIgnored }));
+  }
+  {
+    const f = fixture(true), off = f.scores.watch("race", () => {});
+    f.connection("first");
+    f.reply(0, "race"); await flush(); f.reply(1, "race"); await flush();
+    off(); f.connection(null); f.connection("second");
+    const before = f.requests.length;
+    f.scores.watch("race", () => {});
+    const fresh = f.requests.length === before + 1 && f.requests.at(-1).url === "/api/highscores/race";
+    f.scores.dispose(); await flush();
+    record("highscores: reconnect invalidates unwatched per-game snapshots before a later watch", fresh);
+  }
+  {
+    const f = fixture(); f.state.highscoreSnapshots = false;
+    f.scores.watch("darts", () => {});
+    const legacy = f.requests[0].url === "/api/highscores/darts";
+    f.scores.dispose(); await flush();
+    record("highscores: an older Worker keeps the per-game public read contract", legacy);
   }
 };
 const donationClientChecks = async () => {
@@ -22909,7 +22996,15 @@ const chatNetChecks = async BL => {
   ws.readyState = 3;
   record("ooga chat wire: stable retry ids are sent unchanged and receipts preserve their correlation; invalid ids and closed sockets cannot send",
     rolledBack&&retries.join()==="true,true,false"&&retryFrames.length===2&&retryFrames.every(m=>m.text==="same")&&receipts.length===2&&receipts[1].accepted&&receipts[1].clientId==="retry-1"&&!f.net.sendChat("closed", "retry-1"),JSON.stringify({retries,retryFrames,receipts}));
+  const scoreEvents = [], offScores = f.net.subscribeHighscores(board => scoreEvents.push(board));
+  message({ t: "highscore", board: { game: "darts", revision: 1 } });
+  offScores(); message({ t: "highscore", board: { game: "darts", revision: 2 } });
+  const once = scoreEvents.length === 1 && scoreEvents[0].revision === 1;
+  f.net.subscribeHighscores(board => scoreEvents.push(board));
+  const lateMessage = ws.onmessage;
   f.net.dispose();
+  lateMessage({ data: JSON.stringify({ t: "highscore", board: { game: "darts", revision: 3 } }) });
+  record("highscores wire: the existing room dispatches board updates and removes listeners on unsubscribe and disposal", once && scoreEvents.length === 1);
 };
 const integrationChecks = async BL => {
   const savedAccount = BL.net.state.me;
@@ -24502,6 +24597,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
     }
     renderer.dispose();I.dispose();W.dispose();document.createElement=oldCreate;console.log("Exported "+rows.length+" actual Canvas water review views to "+out);return;
   }
+  if(ARGS.includes("highscores-unit")){await highscoreClientChecks();return;}
   if(ARGS.includes("chat-unit")){await chatNetChecks(BL);await chatClientChecks();await chatAccountChecks(BL);return;}
   if(ARGS.includes("integration-unit")){await reviewCaptureChecks();await integrationChecks(BL);return;}
   if(ARGS.includes("svrn-unit")){svrnChecks(BL);menuShellChecks(BL);return;}

@@ -8,6 +8,7 @@ import * as protocol from "../src/protocol.js";
 import { sha256Hex } from "../src/crypto.js";
 import { getPlayer } from "../src/db.js";
 import { sfuClient } from "../src/sfu.js";
+import { deliverHighscores } from "../src/highscore-store.js";
 import * as studio from "../src/studio-policy.js";
 
 const { CHAT_BURST, CHAT_FRAME_MAX, CHAT_HZ, CHAT_KEEP, CHAT_MAX, CHAT_RETRY_KEEP, MESSAGE_MAX, chatLog, parseClientMessage, sanitizeChat, takeToken } = protocol;
@@ -110,7 +111,7 @@ const host = (clock = Date, env = {}) => {
     .replace(/import\s+[\s\S]*?from\s+"[^"]+";/g, "")
     .replace("export class Room", "class Room") + "\nglobalThis.Room = Room;";
   const context = {
-    ...protocol, ...studio, sfuClient, sha256Hex, getPlayer, CAST_ROWS: [{ handle: "YellowBrokeIt", github_login: "YellowBrokeIt" }, { handle: "bc1gui", github_login: "ottoz0r" }],
+    ...protocol, ...studio, deliverHighscores, sfuClient, sha256Hex, getPlayer, CAST_ROWS: [{ handle: "YellowBrokeIt", github_login: "YellowBrokeIt" }, { handle: "bc1gui", github_login: "ottoz0r" }],
     DurableObject: class { constructor(ctx, env) { this.ctx = ctx; this.env = env; } },
     WebSocketPair, Response, WebSocketRequestResponsePair: class {}, URL, crypto, Date: clock, Map, Set, setTimeout, clearTimeout, console,
   };
@@ -525,4 +526,36 @@ test("room: async hashing ignores a socket replaced before acceptance", async ()
   assert.equal(r.chatAccepted.size, 0);
   await r.webSocketMessage(newer, requestLine("replaced-during-hash"));
   assert.equal(said(newer).length, 1);
+});
+
+test("room: score RPC reads D1, deduplicates, survives hibernation, and alarm recovers a missed notification", async () => {
+  let revision = 1, pending = true, reads = 0;
+  const DB = { prepare(query) { let args; return { bind(...values) { args = values; return this; },
+    async all() { reads++; return { results: pending ? [{ game_id: "darts", revision }] : [] }; },
+    async first() {
+      if (query.includes("FROM players")) return { id: 1, login: "YellowBrokeIt", banned_at: null };
+      return { game_id: "darts", highscores: JSON.stringify({ "darts-1": revision * 100 }), achieved: '{"darts-1":1000}',
+        score_type: "machine", direction: "desc", unit: "points", rules_version: 1, revision };
+    },
+    async run() { if (revision <= args[1]) pending = false; return { meta: { changes: 1 } }; },
+  }; } };
+  const { room, join } = host(Date, { DB }), r = room();
+  await r.refreshHighscores("darts"); assert.equal(reads, 0, "no subscribers means no recovery reads");
+  const one = await join(r, 1, "YellowBrokeIt", "Yellow"), two = await join(r, 2, "ottoz0r", "Other");
+  await r.webSocketMessage(one, JSON.stringify({ t: "highscore", game: "darts", revision: 999, highscores: { "darts-1": 999 } }));
+  assert.equal(one.sent.filter(m => m.t === "highscore").length, 0, "client-announced scores are ignored");
+  assert.equal((await r.fetch({ url: "https://island.invalid/highscores", headers: new Headers() })).status, 426);
+  await Promise.all([r.refreshHighscores("darts"), r.refreshHighscores("darts")]);
+  for (const ws of [one, two]) {
+    const updates = ws.sent.filter(m => m.t === "highscore");
+    assert.equal(updates.length, 1); assert.equal(updates[0].board.highscores["darts-1"], 100);
+  }
+  revision = 2; pending = true;
+  const woke = room(); // attachments rehydrate the two existing hibernatable sockets
+  woke.ctx.getWebSocketAutoResponseTimestamp = () => new Date();
+  woke.sweepAt = 0;
+  await woke.alarm();
+  for (const ws of [one, two]) assert.equal(ws.sent.filter(m => m.t === "highscore").at(-1).board.revision, 2);
+  assert.equal(pending, false);
+  assert.equal(woke.flushTimer, 0, "no recurring score timer prevents hibernation");
 });

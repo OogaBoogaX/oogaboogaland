@@ -1,6 +1,7 @@
 // Shared game records: reads are public; only the current GitHub session may improve one.
 // The JSON entry is compared and replaced inside SQL, so concurrent finishes cannot lose a best.
 import "../../src/js/highscore-rules.js";
+import { readHighscores, readArcade } from "./highscore-store.js";
 import { allowed, clientIp, fromSite, getSessionFromRequest, json } from "./http.js";
 
 const rules = globalThis.BL.highscoreRules;
@@ -25,12 +26,26 @@ const readBody = async (request) => {
   } finally { reader.releaseLock(); }
 };
 
-const readScores = async (db, game, rule) => {
-  const row = await db.prepare("SELECT highscores, achieved, score_type, direction, unit, rules_version, revision FROM game_highscores WHERE game_id = ?")
-    .bind(game).first();
-  if (!row || row.rules_version !== rule.version || row.score_type !== rule.scoreType || row.direction !== rule.direction || row.unit !== rule.unit) return null;
-  return { game, highscores: JSON.parse(row.highscores), achieved: JSON.parse(row.achieved), version: rule.version,
-    scoreType: rule.scoreType, direction: rule.direction, unit: rule.unit, revision: row.revision };
+const SNAPSHOT_MS = 30000;
+const snapshots = new WeakMap();
+const arcadeSnapshot = async (url, db, cache) => {
+  const key = new Request(new URL("/__highscores-cache/v1/arcade", url.origin));
+  if (cache) {
+    try {
+      const hit = await cache.match(key), saved = hit && await hit.json();
+      if (saved && saved.expiresAt > Date.now()) return saved;
+    } catch { /* A cache failure still permits a fresh public read. */ }
+  }
+  // Coalesce concurrent misses in this isolate. Other data centers have independent caches.
+  let running = snapshots.get(db);
+  if (!running) { running = new Map(); snapshots.set(db, running); }
+  if (!running.has(url.origin)) running.set(url.origin, (async () => {
+    const boards = await readArcade(db), saved = { boards, expiresAt: Date.now() + SNAPSHOT_MS };
+    if (cache) try { await cache.put(key, json(saved, 200, { "cache-control": "public, max-age=30" })); } catch { /* Serve the fresh read. */ }
+    return saved;
+  })());
+  const pending = running.get(url.origin);
+  try { return await pending; } finally { if (running.get(url.origin) === pending) running.delete(url.origin); }
 };
 
 const improve = async (db, game, rule, machine, score, found) => {
@@ -51,7 +66,7 @@ const improve = async (db, game, rule, machine, score, found) => {
         OR (SELECT count(*) FROM json_each(highscores)) < ?9
         OR ?2 ${better} (SELECT ${worst}(value) FROM json_each(highscores)))`)
     .bind(path, score, attributed ? 1 : 0, player.id, at, game, rule.version, player.login, PLAYER_LIMIT, session.token_hash);
-  if (!attributed) { await change.run(); return; }
+  if (!attributed) return (await change.run()).meta.changes > 0;
   // At most one newcomer entered the bounded board. Drop its worst entry in the same D1
   // transaction, with the latest achievement losing a tie, then the larger stable account id.
   const order = rule.direction === "asc" ? "DESC" : "ASC";
@@ -59,17 +74,19 @@ const improve = async (db, game, rule, machine, score, found) => {
     CROSS JOIN json_each(achieved, '$.' || json_quote(h.key)) a
     CROSS JOIN json_each(owners, '$.' || json_quote(h.key)) o
     ORDER BY h.value ${order}, a.value DESC, o.value DESC LIMIT 1)`;
-  await db.batch([change, db.prepare(`UPDATE game_highscores SET
+  const result = await db.batch([change, db.prepare(`UPDATE game_highscores SET
     highscores = json_remove(highscores, ${last}), owners = json_remove(owners, ${last}),
     achieved = json_remove(achieved, ${last})
     WHERE game_id = ? AND (SELECT count(*) FROM json_each(highscores)) > ?`).bind(game, PLAYER_LIMIT)]);
+  return result[0].meta.changes > 0;
 };
 
 // Injecting the session boundary lets the route's actual SQL run against SQLite in its checks.
-export const createHighscoreHandler = (sessionFor = getSessionFromRequest) => async (request, env) => {
+export const createHighscoreHandler = (sessionFor = getSessionFromRequest, cacheFor = () => globalThis.caches?.default) => async (request, env, ctx) => {
   const url = new URL(request.url), game = url.pathname.slice("/api/highscores/".length), rule = rules.get(game);
-  if (!url.pathname.startsWith("/api/highscores/") || !rule || url.search) return json({ error: "not found" }, 404);
-  if (request.method !== "GET" && request.method !== "POST") return json({ error: "method not allowed" }, 405, { allow: "GET, POST" });
+  const snapshot = game === "arcade" || game === "arcade-live";
+  if (!url.pathname.startsWith("/api/highscores/") || (!rule && !snapshot) || url.search) return json({ error: "not found" }, 404);
+  if ((snapshot && request.method !== "GET") || (request.method !== "GET" && request.method !== "POST")) return json({ error: "method not allowed" }, 405, { allow: snapshot ? "GET" : "GET, POST" });
   if (!env.DB) return closed();
   try {
     if (request.method === "POST") {
@@ -86,11 +103,22 @@ export const createHighscoreHandler = (sessionFor = getSessionFromRequest) => as
       if (!body || Array.isArray(body) || typeof body !== "object" || Object.keys(body).some(key => !["machine", "score", "version", "playerId"].includes(key))
         || body.version !== rule.version || !rules.valid(game, body.machine, body.score)) return json({ error: "invalid score" }, 400);
       if (body.playerId !== found.player.id) return json({ error: "account changed" }, 409);
-      await improve(env.DB, game, rule, body.machine, body.score, found);
+      const changed = await improve(env.DB, game, rule, body.machine, body.score, found);
+      if (changed && env.ROOM) {
+        // RPC is available only through the Worker binding, never an HTTP or client message route.
+        // The room reads authoritative D1; the caller supplies no score. Durable recovery remains on failure.
+        const notify = Promise.resolve().then(() => env.ROOM.getByName("island").refreshHighscores(game)).catch(() => {});
+        if (ctx) ctx.waitUntil(notify); else await notify;
+      }
     } else if (!(await allowed(env.HIGHSCORE_LIMITER, "read:" + clientIp(request)))) {
       return json({ error: "too many reads" }, 429, { "retry-after": "60" });
     }
-    const scores = await readScores(env.DB, game, rule);
+    if (snapshot) {
+      if (game === "arcade-live") return json({ boards: await readArcade(env.DB), refreshAfterMs: 0 });
+      const saved = await arcadeSnapshot(url, env.DB, cacheFor());
+      return json({ boards: saved.boards, refreshAfterMs: Math.max(0, saved.expiresAt - Date.now()) });
+    }
+    const scores = await readHighscores(env.DB, game);
     return scores ? json(scores) : closed();
   } catch { return closed(); }
 };

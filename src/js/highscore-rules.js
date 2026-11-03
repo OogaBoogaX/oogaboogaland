@@ -46,5 +46,7 @@
     const game = get(id);
     return !!game && game.machines.includes(machine) && Number.isSafeInteger(score) && score > 0 && score <= game.max;
   };
-  BL.highscoreRules = { games, get, valid, MAX_PLAYERS: 1024 };
+  const arcade = Object.freeze(["skee", "hoops", "shy", "claw", "hockey", "billiards", "darts", "pinball", "ride",
+    "invaders", "snake", "pong", "stampede", "flap", "breaker", "dash", "stacker"]);
+  BL.highscoreRules = { games, get, valid, arcade, MAX_PLAYERS: 1024 };
 })();

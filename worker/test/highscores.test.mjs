@@ -8,13 +8,14 @@ import { deletePlayer, upsertPlayerFromGitHub } from "../src/db.js";
 import { createSession } from "../src/db.js";
 import { sha256Hex } from "../src/crypto.js";
 import { routeFixture } from "./routes.mjs";
+import { deliverHighscores } from "../src/highscore-store.js";
 
 const SITE = "https://site.test", RULES = globalThis.BL.highscoreRules;
 const { createHighscoreHandler } = routeFixture();
 const database = () => {
   const sql = new DatabaseSync(":memory:");
   sql.exec("PRAGMA foreign_keys = ON");
-  for (const name of ["0001_init.sql", "0002_tess.sql", "0003_highscores.sql"]) {
+  for (const name of ["0001_init.sql", "0002_tess.sql", "0003_highscores.sql", "0004_highscore_notifications.sql"]) {
     sql.exec(readFileSync(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
   }
   const statement = (query, args = []) => {
@@ -29,6 +30,7 @@ const database = () => {
         const row = execute("get");
         return row ? column ? row[column] : { ...row } : null;
       },
+      all: async () => ({ success: true, results: execute("all").map(row => ({ ...row })) }),
       execute: () => ({ success: true, meta: execute("run") }),
       run: async () => ({ success: true, meta: execute("run") }),
     };
@@ -204,4 +206,106 @@ test("the limiter separates public reads and account writes, and missing storage
   assert.equal((await handler(read("darts"), { SITE_ORIGIN: SITE })).status, 503);
   const broken = { ...env, DB: { prepare() { throw new Error("unavailable"); } } };
   assert.equal((await handler(read("darts"), broken)).status, 503);
+});
+
+test("Arcade snapshot coalesces misses, shares public data across cookies, and live reads bypass it", async t => {
+  const { DB, env, handler } = await setup(t);
+  const cache = new Map(); let puts = 0, reads = 0;
+  const prepare = DB.prepare;
+  DB.prepare = query => { if (query.includes("game_id IN")) reads++; return prepare(query); };
+  const publicHandler = createHighscoreHandler(() => { throw new Error("Public read asked for identity"); }, () => ({
+    match: async key => cache.get(key.url)?.clone(),
+    put: async (key, response) => { puts++; assert.equal([...key.headers].length, 0); cache.set(key.url, response.clone()); },
+  }));
+  const request = cookie => new Request(`${SITE}/api/highscores/arcade`, { headers: { cookie, authorization: "Bearer ignored" } });
+  const responses = await Promise.all(Array.from({ length: 17 }, (_, i) => publicHandler(request(`session=${i}`), env)));
+  assert.equal(reads, 1); assert.equal(puts, 1);
+  for (const response of responses) {
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    assert.equal(response.headers.get("set-cookie"), null);
+    const data = await response.json();
+    assert.deepEqual(data.boards.map(b => b.game).sort(), [...RULES.arcade].sort());
+    assert.ok(data.refreshAfterMs > 0 && data.refreshAfterMs <= 30000);
+    assert.ok(data.boards.every(b => !Object.hasOwn(b, "owners") && !Object.hasOwn(b, "playerId")));
+  }
+  await handler(write("darts", "darts-1", 99), env);
+  const cached = await (await publicHandler(request("new-cookie"), env)).json();
+  assert.deepEqual(cached.boards.find(b => b.game === "darts").highscores, {});
+  assert.equal(reads, 1);
+  const live = await (await publicHandler(read("arcade-live"), env)).json();
+  assert.equal(live.boards.find(b => b.game === "darts").highscores["darts-1"], 99);
+  assert.equal(reads, 2); assert.equal(puts, 1);
+  const [key, response] = [...cache][0], saved = await response.json();
+  saved.expiresAt = Date.now() - 1; cache.set(key, Response.json(saved));
+  assert.equal((await (await publicHandler(request(""), env)).json()).boards.find(b => b.game === "darts").highscores["darts-1"], 99);
+  assert.equal(reads, 3); assert.equal(puts, 2);
+  t.diagnostic("Measured: 17 concurrent guest HTTP calls -> 1 aggregate SELECT returning 17 rows; subsequent cache hit -> 0 D1 score reads.");
+});
+
+test("snapshot errors, unsupported methods, queries and rate limits never fill the cache", async t => {
+  const { DB, env } = await setup(t); let puts = 0;
+  const handler = createHighscoreHandler(async () => null, () => ({ match: async () => null, put: async () => puts++ }));
+  assert.equal((await handler(write("arcade", "darts-1", 10), env)).status, 405);
+  assert.equal((await handler(new Request(`${SITE}/api/highscores/arcade?personal=1`), env)).status, 404);
+  assert.equal((await handler(read("arcade"), { ...env, HIGHSCORE_LIMITER: { limit: async () => ({ success: false }) } })).status, 429);
+  DB.sql.prepare("DELETE FROM game_highscores WHERE game_id = 'darts'").run();
+  assert.equal((await handler(read("arcade"), env)).status, 503);
+  assert.equal(puts, 0);
+});
+
+test("committed improvements notify the binding only; unchanged or rejected scores never wake the room", async t => {
+  const { DB, handler, env } = await setup(t), notifications = [], pending = [];
+  env.ROOM = { getByName(name) { assert.equal(name, "island"); return { refreshHighscores: async game => {
+    assert.equal(DB.sql.prepare("SELECT revision FROM highscore_notifications WHERE game_id = ?").get(game).revision, 1);
+    assert.deepEqual(JSON.parse(DB.sql.prepare("SELECT highscores FROM game_highscores WHERE game_id = ?").get(game).highscores), { "darts-1": 100 });
+    notifications.push(game); throw new Error("Room temporarily unavailable");
+  } }; } };
+  const response = await handler(write("darts", "darts-1", 100), env, { waitUntil: promise => pending.push(promise) });
+  await Promise.all(pending);
+  assert.equal(response.status, 200); assert.deepEqual(notifications, ["darts"]);
+  for (const score of [100, 90, 0, 999999]) await handler(write("darts", "darts-1", score), env);
+  assert.deepEqual(notifications, ["darts"]);
+  assert.equal(DB.sql.prepare("SELECT count(*) AS n FROM highscore_notifications").get().n, 1);
+  const delivered = [];
+  await deliverHighscores(DB, board => { delivered.push(board); return true; });
+  assert.equal(delivered[0].highscores["darts-1"], 100);
+  assert.equal(DB.sql.prepare("SELECT count(*) AS n FROM highscore_notifications").get().n, 0);
+});
+
+test("outbox rollback, failed delivery and commit during acknowledgement cannot lose a revision", async t => {
+  const { DB, handler, env } = await setup(t);
+  DB.sql.exec("CREATE TRIGGER reject_score AFTER UPDATE ON game_highscores BEGIN SELECT RAISE(ABORT, 'unavailable'); END");
+  assert.equal((await handler(write("darts", "darts-1", 100), env)).status, 503);
+  assert.equal(DB.sql.prepare("SELECT count(*) AS n FROM highscore_notifications").get().n, 0);
+  DB.sql.exec("DROP TRIGGER reject_score");
+  await handler(write("darts", "darts-1", 100), env);
+  await assert.rejects(deliverHighscores(DB, () => { throw new Error("delivery failed"); }));
+  assert.equal(DB.sql.prepare("SELECT revision FROM highscore_notifications").get().revision, 1);
+  await deliverHighscores(DB, () => false);
+  assert.equal(DB.sql.prepare("SELECT count(*) AS n FROM highscore_notifications").get().n, 1);
+  await deliverHighscores(DB, board => {
+    assert.equal(board.revision, 1);
+    DB.sql.exec("UPDATE game_highscores SET revision = revision + 1, highscores = '{\"darts-1\":200}' WHERE game_id = 'darts'");
+    return true;
+  });
+  assert.equal(DB.sql.prepare("SELECT revision FROM highscore_notifications").get().revision, 2);
+  const delivered = [];
+  await deliverHighscores(DB, board => { delivered.push(board); return true; });
+  assert.equal(delivered[0].revision, 2); assert.equal(delivered[0].highscores["darts-1"], 200);
+  await deliverHighscores(DB, () => assert.fail("Already acknowledged"));
+});
+
+test("rename and account removal enqueue authoritative boards without growing an event history", async t => {
+  const { DB, handler, env } = await setup(t);
+  await handler(write("cloud-hopper", "cloud-hopper-1", 10000), env);
+  await player(DB, 1, "renamed-player");
+  assert.equal(DB.sql.prepare("SELECT count(*) AS n FROM highscore_notifications").get().n, 1);
+  const boards = [];
+  await deliverHighscores(DB, board => { boards.push(board); return true; });
+  assert.deepEqual(boards[0].highscores, { "renamed-player": 10000 });
+  await deletePlayer(DB, 1);
+  await deliverHighscores(DB, board => { boards.push(board); return true; });
+  assert.deepEqual(boards[1].highscores, {});
+  assert.ok(boards[1].revision > boards[0].revision);
 });

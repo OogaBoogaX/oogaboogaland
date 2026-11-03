@@ -32,6 +32,7 @@ import {
 } from "./protocol.js";
 import { sha256Hex } from "./crypto.js";
 import { getPlayer } from "./db.js";
+import { deliverHighscores } from "./highscore-store.js";
 import { sfuClient } from "./sfu.js";
 import { STUDIO_TRANSPORT, STUDIO_ZONE, studioState, studioHostAllowed, studioCanSpeak, studioPosition, studioSeatAllowed, studioSource } from "./studio-policy.js";
 import CAST_ROWS from "./characters.gen.json";
@@ -42,6 +43,7 @@ export class Room extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.players = new Map();
+    this.highscoreRevisions = new Map();
     this.studio = studioState();
     this.cleanupJobs = [];
     this.spawnSlot = 0;
@@ -280,6 +282,19 @@ export class Room extends DurableObject {
       this.broadcastZone(pass.door, { t: "transit-end", cycle: pass.cycle });
     }
     p.passes = [];
+  }
+
+  // Binding-only notification. No new timers, sockets or storage writes in the room.
+  async refreshHighscores(game = null) {
+    if (!this.env.DB || !this.players.size) return;
+    await deliverHighscores(this.env.DB, board => {
+      if (!this.players.size) return false;
+      if (board.revision > (this.highscoreRevisions.get(board.game) ?? -1)) {
+        this.broadcast({ t: "highscore", board });
+        this.highscoreRevisions.set(board.game, board.revision);
+      }
+      return true;
+    }, game);
   }
 
   async fetch(request) {
@@ -1146,6 +1161,7 @@ export class Room extends DurableObject {
     // A cancelled lease can leave its earlier alarm in place. Before the recorded sweep deadline that wake only
     // expires door state and reschedules; it must not turn account reads and stale checks into a high-frequency poll.
     if (sweepDue) {
+      try { await this.refreshHighscores(); } catch { /* Pending D1 revisions survive until the next sweep. */ }
       for (const p of [...this.players.values()]) {
         if (!ownedBody(CAST, p.login, p.contributor)) { this.evict(p, "revoked"); continue; }
         // The existing operator D1 ban also ends active presence at the next successful sweep.
