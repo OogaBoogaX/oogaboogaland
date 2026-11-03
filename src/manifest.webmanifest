@@ -1,0 +1,11 @@
+{
+  "name": "Ooga Booga Land",
+  "short_name": "OogaBoogaLand",
+  "display": "standalone",
+  "background_color": "#0a0a0b",
+  "theme_color": "#0a0a0b",
+  "start_url": "/",
+  "icons": [
+    { "src": "apple-touch-icon.png", "sizes": "180x180", "type": "image/png" }
+  ]
+}

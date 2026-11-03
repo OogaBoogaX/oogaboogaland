@@ -31,6 +31,17 @@
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
+  /* An installed web app has no browser toolbar. --home-chrome is how far the touch cluster can drop. */
+  --home-chrome: 0px;
+  --stick-inset: 96px;
+  --stick-size: 112px;
+  --act-inset: 64px;
+  /* A touch drawer's default height in percent of the screen; sheet.js reads it. */
+  --drawer-share: 24;
+}
+
+@media (display-mode: standalone) {
+  :root { --home-chrome: 36px; }
 }
 
 * {
@@ -48,6 +59,12 @@ body {
   line-height: 1.4;
   overflow: hidden;
   -webkit-text-size-adjust: 100%;
+}
+
+/* An installed web app on iOS can lay out smaller than the screen under height: 100%; 100vh fills it. */
+@media (display-mode: standalone) {
+  html,
+  body { height: 100vh; }
 }
 
 button,
@@ -689,6 +706,46 @@ body[data-active-scene="hub"] .home-link {
 .sheet[data-dock="bottom"][data-open="true"]:not([hidden])~.joysticks,
 .sheet[data-dock="bottom"][data-open="true"]:not([hidden])~.bottom-hud>.act { display: none; }
 
+/* On a touch screen the drawer stays at the foot of the screen and pushes the sticks and the act button up
+   over its tabs, so the roster of who's talking stays up while the visitor keeps walking. sheet.js writes a resized drawer's --drawer-height, and takes data-sticks away
+   from one too tall to leave them room: they step aside as before, as they do for the chat's keyboard. */
+@media (pointer: coarse) {
+  :root {
+    --drawer-clear: 51px;
+    --drawer-height: min(calc(var(--drawer-share) * 1vh), calc(100dvh - var(--stick-size) - var(--drawer-clear) - 86px - var(--safe-top)));
+  }
+
+  .joysticks,
+  .bottom-hud { --drawer-lift: calc(var(--drawer-height) + var(--drawer-clear)); }
+
+  .sheet[data-dock="bottom"][data-sized="false"] { height: var(--drawer-height); }
+
+  /* The drawer's foot stays short: its last row sits just over the home indicator. */
+  .sheet[data-dock="bottom"] .sheet-body { padding-bottom: 0; }
+  .sheet[data-dock="bottom"] .sheet-foot {
+    gap: 0 12px;
+    padding: 2px 14px max(2px, calc(var(--safe-bottom) - 20px));
+  }
+  .sheet[data-dock="bottom"] .foot-button { min-height: 30px; }
+  .sheet[data-dock="bottom"] .sheet-foot .link { min-height: 26px; }
+
+  .sheet[data-dock="bottom"][data-sticks="true"][data-open="true"]:not([hidden])~.joysticks,
+  .sheet[data-dock="bottom"][data-sticks="true"][data-open="true"]:not([hidden])~.bottom-hud>.act { display: block; }
+
+  .sheet[data-dock="bottom"][data-sticks="true"][data-open="true"]:not([hidden])~.joysticks .joystick { bottom: var(--drawer-lift); }
+  .sheet[data-dock="bottom"][data-sticks="true"][data-open="true"]:not([hidden])~.bottom-hud>.act {
+    bottom: calc(var(--drawer-lift) + var(--act-inset) - var(--stick-inset));
+  }
+
+  .sheet[data-dock="bottom"][data-sticks="true"][data-open="true"][data-keyboard]:not([hidden])~.joysticks,
+  .sheet[data-dock="bottom"][data-sticks="true"][data-open="true"][data-keyboard]:not([hidden])~.bottom-hud>.act { display: none; }
+}
+
+/* Past 720px the act button stands in the bottom stack, so the stack rides up instead. */
+@media (pointer: coarse) and (min-width: 721px) {
+  .sheet[data-dock="bottom"][data-sticks="true"][data-open="true"]:not([hidden])~.bottom-hud { bottom: var(--drawer-lift); }
+}
+
 .sheet[data-dock="bottom"] .sheet-toggle {
   top: -39px;
   left: 72px;
@@ -729,7 +786,44 @@ body[data-active-scene="hub"] .home-link {
   left: calc(var(--sheet-tab-index, 0) * var(--sheet-tab-step, 72px));
   width: min(64px, var(--sheet-tab-step, 72px));
 }
+/* A phone's closed tabs lie along the foot of the screen, clear of its rounded corner. */
+@media (pointer: coarse) {
+  .sheet[data-dock="bottom"] .sheet-toggle {
+    left: calc(16px + var(--safe-left) + var(--sheet-tab-index, 0) * var(--sheet-tab-step, 72px));
+    width: min(64px, var(--sheet-tab-step, 72px));
+  }
+  .sheet[data-sized="true"][data-dock="bottom"] .sheet-toggle {
+    left: calc(16px + var(--safe-left) + var(--sheet-tab-index, 0) * var(--sheet-tab-step, 72px));
+  }
+}
 .sheet[data-sized="true"] .sheet-toggle svg { max-height: 100%; }
+
+/* A phone's drawer drops Feed the Ooga Boogas and keeps a small tab at the far right: up opens or lifts it, down closes it. */
+.sheet-expand { display: none; }
+@media (pointer: coarse) and (max-width: 720px), (pointer: coarse) and (max-height: 500px) {
+  .sheet[data-dock="bottom"] .sheet-foot > .feed-open { display: none; }
+
+  .sheet[data-dock="bottom"] .sheet-expand {
+    display: block;
+    position: absolute;
+    top: -30px;
+    right: calc(10px + var(--safe-right));
+    width: 44px;
+    height: 30px;
+    padding: 0;
+    border: 3px solid var(--wood-edge);
+    border-bottom: 0;
+    border-radius: 8px 8px 0 0;
+    background: linear-gradient(var(--wood), var(--wood-dk));
+    color: var(--paper);
+    cursor: pointer;
+    pointer-events: auto;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+.sheet-expand svg { display: block; width: 16px; height: 16px; margin: auto; }
+.sheet-expand[data-dir="down"] svg { transform: rotate(180deg); }
 .sheet.sheet-moving { transition: none; }
 .sheet.sheet-tab-drag { opacity: 0.7; }
 .sheet-merge-target .sheet-body,
@@ -1939,6 +2033,39 @@ body[data-active-scene="hub"] .home-link {
   margin: 0;
   accent-color: var(--accent);
   cursor: pointer;
+}
+
+/* A phone's short drawer keeps Read joins aloud on the title's line, left of the online count. */
+@media (pointer: coarse) and (max-width: 720px), (pointer: coarse) and (max-height: 500px) {
+  .panel[data-panel="players"]:not([hidden]) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    column-gap: 8px;
+    row-gap: 0;
+  }
+  .panel[data-panel="players"] > .panel-title { display: contents; }
+  .panel[data-panel="players"] .panel-title h2,
+  .panel[data-panel="players"] > .players-speak,
+  .panel[data-panel="players"] #players-count { grid-row: 1; align-self: center; }
+  .panel[data-panel="players"] > .players-speak { grid-column: 2; }
+  .panel[data-panel="players"] #players-count { grid-column: 3; }
+  .panel[data-panel="players"] > .players-hearing,
+  .panel[data-panel="players"] > .players,
+  .panel[data-panel="players"] > .players-status { grid-column: 1 / -1; margin-top: 10px; }
+  .panel[data-panel="players"] > .players-hearing { grid-row: 2; }
+  .panel[data-panel="players"] > .players { grid-row: 3; }
+  .panel[data-panel="players"] > .players-status { grid-row: 4; }
+}
+
+/* Narrow phones give the join-reading option its own row, clear of the full panel name. */
+@media (pointer: coarse) and (max-width: 360px) {
+  .panel[data-panel="players"]:not([hidden]) { grid-template-rows: auto auto auto minmax(0, 1fr) auto; }
+  .panel[data-panel="players"] .panel-title h2 { grid-column: 1 / 3; }
+  .panel[data-panel="players"] > .players-speak { grid-row: 2; grid-column: 1 / -1; }
+  .panel[data-panel="players"] > .players-hearing { grid-row: 3; }
+  .panel[data-panel="players"] > .players { grid-row: 4; }
+  .panel[data-panel="players"] > .players-status { grid-row: 5; }
 }
 
 .players-hearing-label {
@@ -4162,9 +4289,9 @@ body.dsb-menu-open .rescue-equipment { visibility: hidden; pointer-events: none;
 
 .joystick {
   position: absolute;
-  bottom: calc(96px + var(--safe-bottom));
-  width: 112px;
-  height: 112px;
+  bottom: calc(max(48px, var(--stick-inset) - var(--home-chrome)) + var(--safe-bottom));
+  width: var(--stick-size);
+  height: var(--stick-size);
   border-radius: 50%;
   background: rgba(18, 18, 20, 0.35);
   border: 2px solid rgba(255, 255, 255, 0.18);
@@ -4218,7 +4345,7 @@ body.dsb-menu-open .rescue-equipment { visibility: hidden; pointer-events: none;
   position: absolute;
   z-index: 13;
   left: 50%;
-  bottom: calc(64px + var(--safe-bottom));
+  bottom: calc(max(48px, var(--act-inset) - var(--home-chrome)) + var(--safe-bottom));
   transform: translateX(-50%);
   min-height: 44px;
   padding: 0 22px;
@@ -6848,10 +6975,10 @@ body[data-active-scene] .mic-note { top: var(--hub-equipment-bottom, calc(72px +
     padding: 6px 14px calc(6px + var(--safe-bottom));
   }
 
-  .joystick {
-    bottom: calc(84px + var(--safe-bottom));
-    width: 100px;
-    height: 100px;
+  :root {
+    --stick-inset: 84px;
+    --stick-size: 100px;
+    --act-inset: 112px;
   }
 
   .equipment-hud {
@@ -6861,10 +6988,6 @@ body[data-active-scene] .mic-note { top: var(--hub-equipment-bottom, calc(72px +
 
   .topbar:not(:has(.presets:not([hidden])))~.equipment-hud {
     top: calc(55px + var(--safe-top));
-  }
-
-  .act {
-    bottom: calc(112px + var(--safe-bottom));
   }
 
   .garage {
@@ -6938,7 +7061,7 @@ body[data-active-scene] .mic-note { top: var(--hub-equipment-bottom, calc(72px +
   }
 
   .race-item-btn {
-    bottom: calc(112px + var(--safe-bottom));
+    bottom: calc(max(48px, var(--act-inset) - var(--home-chrome)) + var(--safe-bottom));
   }
 }
 
@@ -7014,16 +7137,15 @@ body[data-active-scene] .mic-note { top: var(--hub-equipment-bottom, calc(72px +
     top: auto;
   }
 
-  .joystick {
-    bottom: calc(70px + var(--safe-bottom));
-    width: 96px;
-    height: 96px;
+  :root {
+    --stick-inset: 70px;
+    --stick-size: 96px;
+    --act-inset: 96px;
   }
 
   .act {
     left: auto;
     right: calc(140px + var(--safe-right));
-    bottom: calc(96px + var(--safe-bottom));
     z-index: 13;
     transform: none;
   }

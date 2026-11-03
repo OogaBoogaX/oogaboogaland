@@ -263,13 +263,17 @@
     if (!keyboardSheet) return;
     keyboardSheet.style.removeProperty("--chat-keyboard");
     keyboardSheet.style.removeProperty("--chat-viewport");
+    delete keyboardSheet.dataset.keyboard;
     keyboardSheet = null;
   };
   const fit = () => {
     const owner = panel.closest(".sheet");
     if (keyboardSheet !== owner) { clearFit(); keyboardSheet = owner; }
     if (!owner) return;
-    owner.style.setProperty("--chat-keyboard", `${Math.max(0, Math.round(window.innerHeight - viewport.height - viewport.offsetTop))}px`);
+    const keyboard = Math.max(0, Math.round(window.innerHeight - viewport.height - viewport.offsetTop));
+    owner.style.setProperty("--chat-keyboard", `${keyboard}px`);
+    if (keyboard > 0) owner.dataset.keyboard = "true";
+    else delete owner.dataset.keyboard;
     owner.style.setProperty("--chat-viewport", `${Math.floor(viewport.height)}px`);
     // A short landscape viewport scrolls the panel rather than hiding the focused editor.
     const field = document.activeElement;
