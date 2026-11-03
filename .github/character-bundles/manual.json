@@ -1,16 +1,16 @@
 {
   "version": 1,
   "lane": "manual",
-  "openedOn": "2026-10-31",
-  "round": "83a0bd86f04ac9ff347ee58429e0c7d40106ff1f",
+  "openedOn": "2026-11-03",
+  "round": "0f3b6ca1e43d3354d8cf7fea18a72a77d4af9e2d",
   "entries": [
     {
-      "pr": 372,
-      "head": "f90413f718405d7c0203d4e9011df558307876ba",
-      "author": "Global-DSB",
-      "path": "src/characters/Global-DSB.js",
-      "base": null,
-      "hash": "5b270757116ab0b53f302d488964e951c398d502cb969ea5c6a253a6c906bf53",
+      "pr": 439,
+      "head": "2f11bddb8c93ca8c1b62aae95368aaaafa965cfc",
+      "author": "Bitcoin-Bill",
+      "path": "src/characters/Bitcoin-Bill.js",
+      "base": "ae1893ff00fcb4d2d3a53df8ec0b5e43939150b9",
+      "hash": "fb6daa270d4fe7a1652a72166d648d3b1962c057ddfadf78803d1f1249d9fd3a",
       "lane": "manual"
     }
   ]
