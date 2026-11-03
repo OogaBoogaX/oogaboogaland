@@ -103,10 +103,10 @@
     const aimRay = { ox: 0, oy: 0, oz: 0, dx: 0, dy: 0, dz: 0 }, aimHit = { x: 0, y: 0, z: 0, t: 0, cloud: null };
     // Rendering and player physics pause in a hidden tab. Keep the race's
     // wall clock on that same timeline while the soundtrack plays on.
-    let hiddenAt = document.hidden ? performance.now() : -1, hiddenTime = 0;
+    let helpHeld = false, hiddenAt = document.hidden ? performance.now() : -1, hiddenTime = 0;
     const raceNow = () => (hiddenAt < 0 ? performance.now() : hiddenAt) - hiddenTime;
     const onVisibility = () => {
-      if (document.hidden) {
+      if (document.hidden || helpHeld) {
         if (hiddenAt < 0) hiddenAt = performance.now();
       } else if (hiddenAt >= 0) {
         hiddenTime += performance.now() - hiddenAt;
@@ -1223,7 +1223,22 @@
       }
       return count;
     };
-    return { platform, cabinet, action, launch, near, exit, cancel, preUpdate, postUpdate, onJump, updraft, hookAction, fallView, supportAt, dispose, liveGeometry, pickupLightsWanted, pickupLights, drawOverlay,
+    const controlsHelpHold = on => {
+      helpHeld = on; onVisibility();
+      if (hookDown) hookAction(false);
+    };
+    const controlsHelp = touch => {
+      if (held()) return { title: "Cloud Hopper · " + (phase === "lifting" ? "Riding the lift" : "Waiting"), rows: [BL.controlsHelp.row(touch ? [] : BL.controls.shortcutKeys("escape"), "Exit Cloud Hopper", touch ? "Exit button" : "")] };
+      const H = BL.controlsHelp, rows = [touch ? H.row([], "Move", "Left stick") : H.movement("Move")];
+      if (!touch) rows.push(H.row(["shiftleft"], "Run"));
+      rows.push(H.row(touch ? [] : [" "], "Jump / use a sky feather", touch ? "Jump button" : ""));
+      if ((pilot.player?.jetpackOwned || pilot.player?.jet)) rows.push(H.row(touch ? [] : BL.controls.shortcutKeys("jetpack"), "Wear / remove collected jetpack; hold jump to climb", touch ? "Jetpack button" : ""));
+      if (hookHeld) rows.push(H.row([], "Aim at a cloud and hold to reel in; release to fly on", touch ? "Hook button" : "Left mouse"));
+      if (!touch && !held()) rows.push(H.row(BL.controls.shortcutKeys("resetView"), "Reset camera"));
+      rows.push(H.row(touch ? [] : BL.controls.shortcutKeys("escape"), "Exit Cloud Hopper", touch ? "Exit button" : ""));
+      return { title: "Cloud Hopper", rows };
+    };
+    return { controlsHelp, controlsHelpHold, platform, cabinet, action, launch, near, exit, cancel, preUpdate, postUpdate, onJump, updraft, hookAction, fallView, supportAt, dispose, liveGeometry, pickupLightsWanted, pickupLights, drawOverlay,
       get active() { return active(); }, get playing() { return playing(); }, get held() { return held(); },
       get actor() { return actor; }, get phase() { return phase; }, get time() { return seconds; },
       get course() { return course; }, get start() { return start; }, get level() { return level; },

@@ -61,7 +61,7 @@
 
   // One visit's state: made in enter(), dropped in leave().
   let renderer, game, world, go, lootEnabled, testBananas, root, camera, lab, hud, hooks, input, pilot, fx, pile, crew, crates, pulseNodes, agent, agentPlay;
-  let stateTimer = 0, hintTimer = 0, unsubscribeActivity = null, dust = null, remotes = null, footsteps = null;
+  let stateTimer = 0, unsubscribeActivity = null, dust = null, remotes = null, footsteps = null;
   const NO_ACTORS = [];
   const propTargets = [];
   const addProp = (node, owner, opts) => {
@@ -338,18 +338,18 @@
     location.reload();
   };
   const onKey = (e) => {
-    if (e.key === "0" && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) { pilot.resetCamera(); return; }
-    if ((e.key === "x" || e.key === "X") && !e.repeat && pilot.modeAction("mode-toggle")) return;
-    if ((e.key === "1" || e.key === "2") && pilot.weaponMode(Number(e.key))) return;
-    if (e.key === "Escape") {
+    if (BL.controls.matches(e, "resetView") && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) { pilot.resetCamera(); return; }
+    if (BL.controls.matches(e, "view") && !e.repeat && pilot.modeAction("mode-toggle")) return;
+    if (BL.controls.matches(e, "weapon") && pilot.weaponMode(Number(e.key))) return;
+    if (BL.controls.matches(e, "escape")) {
       if (!pilot.escape()) go("hub");
       return;
     }
     // N spins a driven Ooga's nunchaku, C changes the colourway of one built with two.
-    if ((e.key === "n" || e.key === "N") && !e.repeat && crew.twirl()) return;
-    if ((e.key === "c" || e.key === "C") && !e.repeat && crew.toggleTint(crew.player)) return;
-    if (e.key === "g" || e.key === "G") pilot.weaponAction("weapon-toggle");
-    if (e.key === "v" || e.key === "V") pilot.weaponAction("weapon-fire");
+    if (BL.controls.matches(e, "twirl") && !e.repeat && crew.twirl()) return;
+    if (BL.controls.matches(e, "tint") && !e.repeat && crew.toggleTint(crew.player)) return;
+    if (BL.controls.matches(e, "swapWeapon")) pilot.weaponAction("weapon-toggle");
+    if (BL.controls.matches(e, "attack")) pilot.weaponAction("weapon-fire");
     if (e.key === "b" || e.key === "B") addTestBananas(testBananas);
     if (e.key === "l" || e.key === "L") demoTip(120000);
     if (e.key === "p" || e.key === "P") {
@@ -508,7 +508,6 @@
     }
     hud.setStats(game.state);
     pile.syncPile(true);
-    hintTimer = window.setTimeout(() => hud.hint(COARSE ? "Drag to look · pinch to zoom · sticks to fly" : "Drag to orbit · scroll to zoom · WASD to fly"), 1200);
     // The lab has no Agent until Shift+A calls one in, so a lab visit holds no
     // Agent geometry of its own.
     Object.assign(labScene, { agentView: pilot.orbit, agentControls: pilot.controls, agentHandoff: () => pilot.release(true), summonAgent });
@@ -534,7 +533,6 @@
     window.clearInterval(stateTimer);
     unsubscribeActivity();
     unsubscribeActivity = null;
-    window.clearTimeout(hintTimer);
     crates.dispose();
     pile.dispose();
     remotes.dispose();
@@ -578,5 +576,14 @@
     }
   };
   BL.scenes = BL.scenes || {};
+  labScene.controlsHelp = touch => {
+    const H = BL.controlsHelp, help = pilot.controlsHelp(touch, ["weapon", "attack", "swapWeapon"]), player = pilot.player;
+    if (!touch && player) {
+      if (!pilot.birdsEye && player.traits.nunchaku && player.state !== "sleeping" && !player.camp.burning && !player.camp.rolling) help.rows.push(H.row(BL.controls.shortcutKeys("twirl"), "Twirl nunchaku"));
+      if (player.tint) help.rows.push(H.row(BL.controls.shortcutKeys("tint"), "Change colourway"));
+    }
+    help.title = "Lab · " + help.title; return help;
+  };
+  labScene.controlsHelpHold = on => { pilot.controls.reset(); pilot.setMenuOpen(on, false); };
   BL.scenes.lab = labScene;
 })();

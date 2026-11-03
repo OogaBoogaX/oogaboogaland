@@ -375,11 +375,11 @@
     pilot.setActive(true);
   };
   const onKey = (e) => {
-    if (e.key === "0" && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && !leaving) return pilot.resetCamera();
-    if ((e.key === "x" || e.key === "X") && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && !leaving) {
+    if (BL.controls.matches(e, "resetView") && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && !leaving) return pilot.resetCamera();
+    if (BL.controls.matches(e, "view") && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && !leaving) {
       if (pilot.modeAction("mode-toggle")) { e.preventDefault(); return true; }
     }
-    if (e.key === "Escape") {
+    if (BL.controls.matches(e, "escape")) {
       if (!pilot.escape()) leaveChamber();
       return true;
     }
@@ -1105,5 +1105,7 @@
     }
   };
   BL.scenes = BL.scenes || {};
+  bifrostScene.controlsHelp = touch => { const help = pilot.controlsHelp(touch); help.title = "₿IFRÖST · " + help.title; return help; };
+  bifrostScene.controlsHelpHold = on => { pilot.controls.reset(); pilot.setMenuOpen(on, false); };
   BL.scenes.bifrost = bifrostScene;
 })();

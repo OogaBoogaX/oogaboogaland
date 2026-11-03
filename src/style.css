@@ -7523,7 +7523,7 @@ body[data-active-scene="poker"] .ember-den-icon {
 }
 body[data-active-scene="dsb"] :is(#freeroam-icon, #weapon-hud, #magazine-hud) { display: none !important; }
 body[data-active-scene] :is(.world-clock, .world-block) {
-  right: calc(var(--hub-banner-gutter) + var(--safe-right) + 48px);
+  right: calc(var(--hub-banner-gutter) + var(--safe-right) + 92px);
 }
 .environment-sound {
   position: absolute;
@@ -10559,6 +10559,28 @@ body.cloud-hopper-active #destination-hud,
 body.cloud-hopper-active #own-ooga-hud,
 body.cloud-hopper-active #mode-hud { display: none; }
 
+/* Controls reference: a quiet native modal, with real, independently lit keycaps. */
+body[data-active-scene] #controls-help-button { display: flex; align-items: center; justify-content: center; }
+.controls-help-button { position: absolute; top: calc(10px + var(--safe-top)); right: calc(var(--hub-banner-gutter) + var(--safe-right) + 44px); width: 36px; height: 36px; }
+.controls-help-button svg { width: 24px; height: 24px; }
+.controls-help { width: min(480px, calc(100vw - 24px)); padding: 16px; max-height: calc(100dvh - 32px - var(--safe-top) - var(--safe-bottom)); overflow-y: auto; overscroll-behavior: contain; }
+#controls-help-context { margin: 8px 0 4px; color: var(--gold, #ffd84a); font-size: 12px; }
+#controls-help-note { margin: 4px 0 8px; font-size: 12px; line-height: 1.4; opacity: .8; }
+.controls-list { margin-top: 8px; }
+.controls-row { display: grid; grid-template-columns: 174px minmax(0, 1fr); align-items: center; gap: 12px; padding: 5px 0; border-top: 1px solid #f3efe424; font-size: 12px; line-height: 1.4; }
+.controls-keys { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.controls-keys kbd, .controls-gesture { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; min-height: 24px; padding: 2px 5px; border: 1px solid #f3efe465; border-bottom-width: 3px; border-radius: 4px; background: #24252a; color: #f3efe4; font: inherit; }
+.controls-keys kbd[data-pressed="true"] { background: #ffd84a; color: #171308; border-color: transparent; }
+.controls-key-cluster { display: grid; grid-template-columns: repeat(3, 24px); gap: 3px; }
+.controls-key-cluster :is([data-key="w"], [data-key="arrowup"]) { grid-area: 1 / 2; }
+.controls-key-cluster :is([data-key="a"], [data-key="arrowleft"]) { grid-area: 2 / 1; }
+.controls-key-cluster :is([data-key="s"], [data-key="arrowdown"]) { grid-area: 2 / 2; }
+.controls-key-cluster :is([data-key="d"], [data-key="arrowright"]) { grid-area: 2 / 3; }
+.controls-aliases { display: flex; flex-wrap: wrap; gap: 4px; }
+@media (max-width: 420px) {
+  .controls-help { padding: 12px; }
+  .controls-row { grid-template-columns: minmax(110px, 1fr) 1.1fr; gap: 8px; }
+}
 /* Players read shared hockey scores inside the goal half-circles. */
 #carnival[data-kind="hockey"][data-hockey-shared="true"] .carnival-scores,
 #carnival[data-kind="hockey"][data-hockey-shared="true"] .race-hud-right > .race-lap:nth-child(-n+2) { display: none; }

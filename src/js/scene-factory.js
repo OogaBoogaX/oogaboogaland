@@ -1263,16 +1263,16 @@
   };
   const onKey = (e) => {
     if (scene.booth.mode) return boothKey(scene, e);
-    if (e.key === "0" && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) return pilot.resetCamera();
-    if ((e.key === "x" || e.key === "X") && !e.repeat && pilot.modeAction("mode-toggle")) return true;
-    if ((e.key === "1" || e.key === "2") && pilot.weaponMode(Number(e.key))) return true;
-    if (e.key === "g" || e.key === "G") return pilot.weaponAction("weapon-toggle");
-    if (e.key === "v" || e.key === "V") return pilot.weaponAction("weapon-fire");
+    if (BL.controls.matches(e, "resetView") && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) return pilot.resetCamera();
+    if (BL.controls.matches(e, "view") && !e.repeat && pilot.modeAction("mode-toggle")) return true;
+    if (BL.controls.matches(e, "weapon") && pilot.weaponMode(Number(e.key))) return true;
+    if (BL.controls.matches(e, "swapWeapon")) return pilot.weaponAction("weapon-toggle");
+    if (BL.controls.matches(e, "attack")) return pilot.weaponAction("weapon-fire");
     if (e.key === "l" || e.key === "L") {
       demoTip(120000);
       return true;
     }
-    if (e.key === "Escape") {
+    if (BL.controls.matches(e, "escape")) {
       // The guide closes before the cursor, the Ooga and the cave are left.
       if (greeter && greeter.escape()) return true;
       if (!pilot.escape()) leaveCave();
@@ -2570,5 +2570,7 @@
     }
   });
   BL.scenes = BL.scenes || {};
+  factoryScene.controlsHelp = touch => { const help = pilot.controlsHelp(touch, ["weapon", "attack", "swapWeapon"]); help.title = "Lightning Factory · " + help.title; return help; };
+  factoryScene.controlsHelpHold = on => { pilot.controls.reset(); pilot.setMenuOpen(on, false); };
   BL.scenes.factory = factoryScene;
 })();
