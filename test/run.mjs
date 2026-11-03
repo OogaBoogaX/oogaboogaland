@@ -15046,10 +15046,10 @@ const arcadeWalking ={ name: "arcade walking", why: "rule: W A S D walk the visi
   const ooga = await walkKeys(b, "portlandhodl", 0, -1, [0, 2.2], 0.5);
   record("arcade walking: W A S D walk the visitor's Ooga away, left, back and right on screen on the hall floor from two camera angles", allWalk(ooga), JSON.stringify(ooga));
 } };
-// Rule (#420): in Ooga Arcade a walking jump carries on as on the island; 2 takes the AK-47 in the hall; and from the
+// In Ooga Arcade a walking jump carries on as on the island; the hall parks weapons; and from the
 // ghost arena the hall's games take no hover or tap through the rock and its speakers' lines do not show, while in the
 // hall a game in sight still shows its tooltip and a speaker close by its line.
-const arcadeHall = { name: "arcade hall", why: "regression: a jump in Ooga Arcade stopped dead in the air, the AK-47 could not be taken outside the arena, and from the arena the hall's games took hovers and taps and its speakers' lines showed through the rock", run: async (b) => {
+const arcadeHall = { name: "arcade hall", why: "regression: a jump in Ooga Arcade stopped dead in the air, ordinary weapons must be unavailable outside the arena, and from the arena the hall's games took hovers and taps and its speakers' lines showed through the rock", run: async (b) => {
   // A clear 13 m run on the hall floor along the camera's forward, the run-up and the jump at walking speed, with no
   // station near enough to take Space.
   const start = await b.evaluate(`(() => {
@@ -15083,7 +15083,7 @@ const arcadeHall = { name: "arcade hall", why: "regression: a jump in Ooga Arcad
     air.peak > 0.6 && air.speed > walk * 0.85, JSON.stringify({ start, walk: +walk.toFixed(2), air }));
   await b.key("2");
   const ak = await b.evaluate(`(() => { const B = __ooga, a = B.pilot.player; B.advance(0.3, 1 / 60); const hud = document.querySelector(".weapon-hud"); return { equipped: a.weapon.equipped, gun: a.parts.gun.visible, hud: !!hud && getComputedStyle(hud).display !== "none" }; })()`);
-  record("arcade hall: 2 puts the AK-47 in the Ooga's hands in the hall, with the weapon HUD showing", ak.equipped && ak.gun && ak.hud, JSON.stringify(ak));
+  record("arcade hall: 2 cannot equip or display the AK-47 outside the arena", !ak.equipped && !ak.gun, JSON.stringify(ak));
   // From the arena, facing the hall: a pixel the input picks a hall game at takes neither a hover nor a tap, and a line
   // said over the stage does not show.
   const HALL_KINDS = '["cabinet","machine","snack","prizes","wheel","ride","sign","changer","muncher","door","fame","disco"]';
@@ -15129,44 +15129,210 @@ const arcadeHall = { name: "arcade hall", why: "regression: a jump in Ooga Arcad
   record("arcade hall: back in the hall a cabinet in sight shows its tooltip and a line over the stage shows again",
     !inHall.armed && inHall.hidden === false && !!cabinet && typeof shown === "string" && shown.includes("to play"), JSON.stringify({ inHall, cabinet, shown }));
 } };
-// Rule (#421): the visitor's view, combat, weapon in hand, rounds and zoom go with the Ooga out of Ooga Arcade's door
-// and back in at its mouth, a change made on the island comes back in, and a key held at the door is not still held.
-const arcadeCarry = { name: "arcade carry", why: "regression: walking out of a scene and back in reset the view, combat and the weapon in hand, and refilled the rifle", run: async (b) => {
-  const state = `(() => {
-    const B = __ooga, a = B.pilot.player, w = a ? a.weapon : null, o = B.pilot.orbit, t = B.pilot.captureControl({});
-    const rel = a ? Math.atan2(Math.sin(o.yaw - a.root.rotation.y), Math.cos(o.yaw - a.root.rotation.y)) : null;
-    return { scene: B.scene, who: a ? a.traits.name : null, view: t.view, combat: !!(w && w.aiming), held: w ? (w.equipped ? 2 : w.primaryEquipped ? 1 : 0) : -1,
-      ammo: w ? w.ammo : -1, dist: +o.dist.toFixed(2), rel: rel === null ? null : +rel.toFixed(2) };
-  })()`;
-  const arrive = (scene) => b.evaluate(`(async () => { const B = __ooga, t0 = performance.now(); while ((B.transitioning || B.scene !== "${scene}") && performance.now() - t0 < 20000) { B.advance(1 / 30, 1 / 30); await new Promise(r => setTimeout(r, 0)); } B.advance(0.3, 1 / 30); return B.scene; })()`);
-  // In the hall: the rifle in hand, combat on and a few rounds fired.
-  await b.evaluate(`(() => { const B = __ooga, a = B.cavemen.get("portlandhodl"); if (B.crew.player !== a) B.pilot.possess(a); B.pilot.navigate({ position: { x: 0, y: 0, z: 2 }, yaw: Math.PI / 2, pitch: 0.3, dist: 6 }); B.advance(0.3, 1 / 60); })()`);
-  for (const k of ["2", "x"]) { await b.key(k); await b.evaluate("__ooga.advance(0.4, 1 / 60)"); }
-  for (let i = 0; i < 2; i++) { await b.key("v"); await b.evaluate("__ooga.advance(0.6, 1 / 60)"); }
-  const before = await b.evaluate(state);
-  // Out of the door holding W, onto the island.
-  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "w", text: "w", code: "KeyW" });
-  await b.evaluate(`(() => { const B = __ooga, a = B.pilot.player; a.root.position.x = 0; a.root.position.z = BL.arcadeModels.HALL.front + 1.3; B.advance(0.2, 1 / 60); })()`);
-  const out = await arrive("hub");
-  await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "w", code: "KeyW" });
-  const island = await b.evaluate(state);
-  const still = await b.evaluate(`(() => { const B = __ooga, p = B.pilot.player.root.position, x = p.x, z = p.z, ammo = B.pilot.player.weapon.ammo; B.advance(1, 1 / 60); return { moved: +Math.hypot(p.x - x, p.z - z).toFixed(3), fired: ammo - B.pilot.player.weapon.ammo }; })()`);
-  // On the island: the club in hand and combat off, then back in at the mouth.
-  for (const k of ["1", "x"]) { await b.key(k); await b.evaluate("__ooga.advance(0.4, 1 / 60)"); }
-  const changed = await b.evaluate(state);
-  await b.evaluate(`(() => { const B = window.__ooga, slot = window.BL.caves.slots.find((s) => s.scene === "arcade"), m = B.mouths.find((m) => m.id === slot.id); B.pilot.navigate({ position: { x: m.x - Math.sin(m.ry) * 1.2, y: m.floorY, z: m.z - Math.cos(m.ry) * 1.2 }, yaw: m.ry, pitch: 0.4, dist: 10 }); B.advance(0.5, 1 / 60); })()`);
-  const kept = await b.evaluate(state);
-  await b.key(" ");
-  const back = await arrive("arcade");
-  const hall = await b.evaluate(state);
-  const same = (x, y) => x.who === y.who && x.view === y.view && x.combat === y.combat && x.held === y.held && x.ammo === y.ammo && Math.abs(x.dist - y.dist) < 0.05 && Math.abs(x.rel - y.rel) < 0.05;
-  record("arcade carry: out of the arcade's door the Ooga keeps its view, combat, rifle in hand, part-spent magazine, look and zoom, and the W held at the door is not still held",
-    out === "hub" && before.held === 2 && before.combat && before.ammo < 30 && same(before, island) && still.moved < 0.05 && still.fired === 0,
-    JSON.stringify({ out, before, island, still }));
-  record("arcade carry: the club and carry mode chosen on the island come back into the arcade, with the same rounds, look and zoom",
-    back === "arcade" && changed.held === 1 && !changed.combat && same(kept, hall), JSON.stringify({ back, changed, kept, hall }));
+const arcadeRemoteWeapons = { name: "arcade remote weapons", why: "regression: the remote unarmed pose showed visitors' clubs in the weapon-free Arcade", run: async (b) => {
+  const result = await b.evaluate(`(() => {
+    const B = __ooga, N = BL.net, H = BL.arcadeModels.HAUNT, A = H.arena;
+    const id = 99445, previous = N.remotes.get(id), build = BL.models.caveman, rows = [], outside = [];
+    const peer = { id, login: "peer", display: "Peer", body: "w-s-bitcoin", zone: "arcade.hall", x: 0, y: 0, z: 4, yaw: 0, weapon: 0, jet: 0 };
+    let cave = null, pool = null;
+    const read = () => ({ visible: cave.root.visible, club: cave.parts.club.visible, gun: cave.parts.gun.visible });
+    try {
+      BL.models.caveman = (...args) => { cave = build(...args); return cave; };
+      N.remotes.set(id, peer); B.advance(0.1, 1 / 60);
+      BL.models.caveman = build;
+      for (const [place, x, y, z, zone] of [
+        ["hall", 0, 0, 4, "arcade.hall"],
+        ["haunt", H.end - 4, H.y, A.z, "arcade.haunt"],
+        ["arena", A.x, H.y, A.z, "arcade.arena"],
+        ["below arena", A.x, H.y - 2, A.z, "arcade.arena"],
+        ["returned hall", 0, 0, 4, "arcade.hall"]
+      ]) {
+        Object.assign(peer, { x, y, z, zone });
+        for (const held of [0, 1, 2]) {
+          peer.weapon = held | 4 | 12 << 3; B.advance(0.6, 1 / 60);
+          rows.push({ place, held, ...read() });
+        }
+      }
+      N.remotes.delete(id); B.advance(0.1, 1 / 60);
+      const removed = !cave.root.parent;
+      // A new remote arriving after the first visitor left gets the same scene policy.
+      BL.models.caveman = (...args) => { cave = build(...args); return cave; };
+      N.remotes.set(id, peer); B.advance(0.1, 1 / 60);
+      BL.models.caveman = build;
+      const rejoined = read();
+      // The ordinary remote renderer still shows outside loadouts without Arcade's policy.
+      const root = BL.scene.createNode();
+      pool = BL.remotePlayers.create({ root, visible: rec => rec.id === id });
+      BL.models.caveman = (...args) => { cave = build(...args); return cave; };
+      pool.update(0.1); BL.models.caveman = build;
+      for (const held of [0, 1, 2]) { peer.weapon = held; pool.update(0.1); outside.push({ held, ...read() }); }
+      return { rows, removed, rejoined, outside };
+    } finally {
+      BL.models.caveman = build;
+      if (pool) pool.dispose();
+      N.remotes.delete(id); B.advance(0.1, 1 / 60);
+      if (previous) N.remotes.set(id, previous);
+    }
+  })()`);
+  record("arcade remote weapons: all remote held states hide clubs and hall rifles, preserve arena rifles, and hide them again on return and rejoin",
+    result.rows.length === 15 && result.rows.every(r => r.visible && !r.club && r.gun === (r.place === "arena" && r.held === 2)) && result.removed && result.rejoined.visible && !result.rejoined.club && !result.rejoined.gun, JSON.stringify(result));
+  record("arcade remote weapons: the shared renderer keeps outside clubs and rifles unchanged",
+    result.outside.length === 3 && result.outside.every(r => r.visible && r.club === (r.held !== 2) && r.gun === (r.held === 2)), JSON.stringify(result.outside));
 } };
-const arcadePlay = { name: "arcade play", why: "rule: Cloud Hopper replaces the front-left cabinet, returns the same equipped Ooga safely, and Rally stays out of order", run: async (b) => {
+// #428: a hallway page receives the running hunt without becoming a hunter or borrowing arena ammunition.
+const arcadeSpectatorAmmo = { name: "arcade hallway ammunition", why: "regression: a hallway-only spectator receiving a running hunt gained unlimited rifle ammunition despite never entering the arena", run: async (b) => {
+  await b.evaluate(`(async () => {
+    const B = __ooga, N = BL.net, H = BL.arcadeModels.HAUNT;
+    const W = window.__hallAmmo = { fetch: window.fetch, WebSocket: window.WebSocket, sockets: [] };
+    window.fetch = (url, options) => String(url) === "/api/me" ? Promise.resolve({ ok: true, status: 200, headers: { get: () => "application/json" }, json: async () => ({ player: { id: 71, login: "portlandhodl", display: "portlandhodl" } }) }) : W.fetch(url, options);
+    window.WebSocket = class { static OPEN = 1; constructor() { this.readyState = 1; W.sockets.push(this); } send() {} close() { this.readyState = 3; } };
+    N.state.started = true; N.state.resolved = false;
+    await N.recheck();
+    W.socket = W.sockets.at(-1);
+    W.socket.onmessage({ data: JSON.stringify({ t: "welcome", you: { id: 71 }, now: Date.now(), ghostHost: 2, ghostFollowers: 1, players: [] }) });
+    const a = B.cavemen.get("portlandhodl");
+    if (B.crew.player !== a) B.pilot.possess(a);
+    B.pilot.navigate({ position: { x: H.end - 4, y: H.y, z: (H.z0 + H.z1) / 2 }, yaw: -Math.PI / 2, pitch: 0.18, dist: 4 });
+    B.advance(0.5, 1 / 60);
+    a.weapon.unlimited = false; a.weapon.ammo = 7;
+    B.pilot.weaponMode(2);
+    W.read = () => { const w = B.pilot.player.weapon, A = BL.scenes.arcade.debug.arena; return { unlimited: w.unlimited, ammo: w.ammo, equipped: w.equipped, aiming: w.aiming, armed: A.armed, zone: A.zone }; };
+    W.before = W.read();
+    await BL.deferred.load("halloween");
+    const G = BL.ghostSim;
+    W.host = G.create({ seed: 17, spots: [], lapMs: 20000 });
+    W.host.start(N.serverNow(), 2);
+    W.send = (state) => {
+      W.host.jump(G.STATE[state]);
+      const bytes = new TextEncoder().encode(JSON.stringify(W.host.snapshot())), frame = new Uint8Array(bytes.length + 4);
+      new DataView(frame.buffer).setUint32(0, 0x54534847, true); frame.set(bytes, 4);
+      W.socket.onmessage({ data: frame.buffer });
+    };
+    W.send("LAP");
+  })()`);
+  await untilPage(b, 'B.halloween && !!B.halloween.sim', 15000);
+  const result = await b.evaluate(`(() => {
+    const B = __ooga, W = __hallAmmo, rows = [];
+    for (const state of ["LAP", "NIGHT", "COUNTDOWN", "ACTIVE", "BREAK", "BOSS", "VICTORY", "DEFEAT"]) {
+      W.send(state); B.advance(0.1, 1 / 60);
+      rows.push({ state, received: B.halloween.state, ...W.read() });
+    }
+    return { before: W.before, rows, role: B.halloween.role, hunter: !!B.halloween.sim.playerById(71)?.inGame };
+  })()`);
+  await b.key("v");
+  const after = await b.evaluate(`(() => { __ooga.advance(0.6, 1 / 60); const W = __hallAmmo, fired = W.read(); W.send("DAWN"); __ooga.advance(0.1, 1 / 60); return { fired, restored: W.read() }; })()`);
+  await b.evaluate(`(() => { const W = __hallAmmo; W.socket.close(); BL.net.state.room = "off"; window.fetch = W.fetch; window.WebSocket = W.WebSocket; })()`);
+  const kept = result.rows.every(r => !r.armed && r.zone === "arcade.haunt" && r.received === r.state && !r.unlimited && r.ammo === result.before.ammo && r.equipped === result.before.equipped && r.aiming === result.before.aiming);
+  record("arcade hallway ammunition: a signed-in hallway-only spectator keeps weapon state through every hunt phase, rejects firing and keeps the same ammunition policy at dawn",
+    !result.before.armed && result.before.zone === "arcade.haunt" && result.role === "follow" && !result.hunter && kept && after.fired.ammo === result.before.ammo && !after.fired.equipped && !after.fired.unlimited && !after.restored.unlimited,
+    JSON.stringify({ ...result, ...after }));
+} };
+// Carry aim intent and cursor focus across the real doorway, while parking weapons only during the visit.
+const arcadeCarry = { name: "arcade carry", why: "regression: Arcade transitions lost mouse-look focus, could leave combat players by the pile, and must restore the parked outside loadout", run: async (b) => {
+  const arrive = async (scene) => untilPage(b, `B.scene === "${scene}" && !B.transitioning`, 20000);
+  const leave = async () => {
+    await b.evaluate(`(() => { const B = __ooga, a = B.pilot.player; a.root.position.x = 0; a.root.position.z = BL.arcadeModels.HALL.front + 1.3; B.advance(0.2, 1 / 60); })()`);
+    return arrive("hub");
+  };
+  const read = `(() => {
+    const B = __ooga, a = B.pilot.player, w = a.weapon, t = B.pilot.captureControl({}), o = B.pilot.orbit;
+    const m = B.mouths?.find(m => m.id === BL.caves.slots.find(s => s.scene === "arcade").id), p = a.root.position;
+    return { who: a.traits.name, view: t.view, combat: w.aiming, focused: t.focused, held: w.equipped ? 2 : w.primaryEquipped ? 1 : 0,
+      primary: w.primaryOwned, secondary: w.secondaryOwned, gun: a.parts.gun.visible, club: a.parts.club.visible,
+      ammo: w.ammo, spare: w.spareAmmo.slice(), unlimited: w.unlimited, dist: o.dist,
+      along: m ? (p.x - m.x) * Math.sin(m.ry) + (p.z - m.z) * Math.cos(m.ry) : null,
+      across: m ? (p.x - m.x) * Math.cos(m.ry) - (p.z - m.z) * Math.sin(m.ry) : null,
+      feet: p.y - a.baseY, floor: m?.floorY };
+  })()`;
+  await leave();
+  const rows = [];
+  for (const mode of ["focused", "released", "carry"]) {
+    await b.evaluate(`(() => {
+      const B = __ooga, a = B.pilot.player, w = a.weapon;
+      B.pilot.weaponMode(2); w.ammo = 11; if (!w.spareAmmo.length) B.crew.collectMagazine(a); w.spareAmmo[0] = 4; w.unlimited = false; B.pilot.enterClose();
+      if (w.aiming !== ${mode !== 'carry'}) B.pilot.modeAction("mode-toggle");
+      const m = B.mouths.find(m => m.id === BL.caves.slots.find(s => s.scene === "arcade").id);
+      B.pilot.navigate({ position: { x: m.x - Math.sin(m.ry) * 1.2, y: m.floorY, z: m.z - Math.cos(m.ry) * 1.2 }, yaw: m.ry, pitch: 0.3, dist: 6 });
+      ${mode === 'focused' ? 'B.pilot.focusAim();' : 'B.pilot.freeCursor();'}
+      B.advance(0.2, 1 / 60);
+    })()`);
+    const before = await b.evaluate(read);
+    await b.key(" "); await arrive("arcade");
+    const hall = await b.evaluate(read);
+    // All ordinary weapon routes meet the same ownership/action gate, including the touch HUD.
+    for (const key of ["1", "2", "g", "v", "r"]) await b.key(key);
+    await b.evaluate(`(() => { const B = __ooga; for (const action of ["weapon-primary", "weapon-secondary", "weapon-fire", "magazine-swap"]) B.pilot.weaponAction(action); B.advance(0.8, 1 / 60); })()`);
+    const blocked = await b.evaluate(read);
+    const mouse = await b.evaluate(`(() => { const B = __ooga, before = B.pilot.orbit.yaw; document.getElementById("scene").dispatchEvent(new MouseEvent("mousemove", { bubbles: true, movementX: 35, movementY: 0 })); B.advance(0.1, 1 / 60); return Math.abs(B.pilot.orbit.yaw - before); })()`);
+    let arena = null;
+    if (mode === "focused") arena = await b.evaluate(`(() => {
+      const B = __ooga, H = BL.arcadeModels.HAUNT;
+      B.pilot.navigate({ position: { x: H.arena.x - 16, y: H.y, z: H.arena.z }, yaw: Math.PI / 2, pitch: 0.1, dist: 4 });
+      B.advance(0.5, 1 / 60); B.pilot.weaponAction("magazine-swap"); B.advance(2, 1 / 60);
+      const w = B.pilot.player.weapon;
+      return { armed: BL.scenes.arcade.debug.arena.armed, equipped: w.equipped, unlimited: w.unlimited, ammo: w.ammo, spare: w.spareAmmo.slice() };
+    })()`);
+    await leave();
+    const outside = await b.evaluate(read);
+    rows.push({ mode, before, hall, blocked, mouse, arena, outside });
+  }
+  record("arcade carry: combat and released cursor intent survive both doorways, hall weapons cannot act, and the outside loadout and ammunition return inside the mainland overhang in every control mode",
+    rows.every(r => r.hall.who === r.before.who && r.hall.combat === r.before.combat && r.hall.focused === r.before.focused
+      && !r.hall.held && !r.hall.gun && !r.hall.club && !r.hall.primary && !r.hall.secondary
+      && !r.blocked.held && r.blocked.ammo === 11 && r.blocked.spare[0] === 4 && !r.blocked.unlimited
+      && (r.mode !== "focused" || r.mouse > 0.001) && (r.mode !== "released" || r.mouse < 0.001)
+      && (r.mode !== "focused" || r.arena.armed && r.arena.equipped && r.arena.unlimited && r.arena.ammo === 4 && r.arena.spare[0] === 11)
+      && r.outside.who === r.before.who && r.outside.held === r.before.held && r.outside.combat === r.before.combat
+      && r.outside.focused === r.before.focused && r.outside.ammo === 11 && r.outside.spare[0] === 4
+      && r.outside.primary === r.before.primary && r.outside.secondary === r.before.secondary && !r.outside.unlimited
+      && r.outside.along < 0 && r.outside.along > -3 && Math.abs(r.outside.across) < 0.5 && Math.abs(r.outside.feet - r.outside.floor) < 0.1), JSON.stringify(rows));
+  // Leave the shared scene session in the Arcade for the following playthrough.
+  await b.key(" "); await arrive("arcade");
+} };
+const arcadeMaintenance = { name: "arcade maintenance", why: "regression: simulated visitors played machines and Clankers diverted or greeted when a live player stood in their path", run: async (b) => {
+  const r = await b.evaluate(`(() => {
+    const B = __ooga, A = B.arcade, a = B.pilot.player, rows = [];
+    for (const g of A.staff) {
+      const p = g.agent.root.position;
+      // Put the live player beside each worker while it completes part of its job.
+      a.root.position.x = p.x; a.root.position.z = p.z; a.root.position.y = p.y + a.baseY;
+      B.advance(0.5, 1 / 60);
+      rows.push({ role: g.role.id, phase: g.phase });
+    }
+    B.advance(15, 1 / 60);
+    B.pilot.navigate({ position: { x: 0, y: 0, z: 2 }, yaw: 0, pitch: 0.2, dist: 5 });
+    return { crowd: A.crowd.length, walkers: A.walkers.length, bots: A.bots.length, staff: A.staff.length,
+      playing: A.carnival.some(g => g.playing), rows, jobs: A.staff.map(g => ({ phase: g.phase, done: g.done, walked: g.walked })) };
+  })()`);
+  record("arcade maintenance: only the live player and maintenance Clankers remain, machines never start bot games, and nearby players cause no greetings or chats",
+    r.crowd === 0 && r.walkers === 0 && r.bots === 0 && r.staff === 6 && !r.playing
+    && r.rows.every(g => g.phase !== "greet" && g.phase !== "chat") && r.jobs.some(g => g.done > 0 || g.walked > 0), JSON.stringify(r));
+} };
+const arcadeStage = { name: "arcade stage approaches", why: "regression: oversized decorative root collision boxes blocked walking onto the central stage from its sides and back", run: async (b) => {
+  const r = await b.evaluate(`(() => {
+    const B = __ooga, A = B.arcade, S = BL.arcadeModels.STAGE, a = B.pilot.player, rows = [];
+    // Walk inward through both actual stage steps from all cardinal, diagonal and intervening directions.
+    for (let i = 0; i < 16; i++) {
+      const angle = i * Math.PI / 8, dx = Math.sin(angle), dz = Math.cos(angle);
+      // The two side cabinets reach the inner ring. Approach those sides just forward of their solid bodies.
+      const side = i === 4 || i === 12;
+      let x = S.x + dx * (S.r + 0.65), z = S.z + dz * (S.r + 0.65) + (side ? 1.7 : 0), y = 0, clear = true;
+      for (let j = 0; j < (side ? 32 : 24); j++) {
+        const nx = x - dx * 0.05, nz = z - dz * 0.05;
+        if (!A.walkable(x, z, nx, nz, y, a.bodyHeight, a)) { clear = false; break; }
+        x = nx; z = nz; y = A.supportAt(x, z, y);
+      }
+      rows.push({ angle, clear, y });
+    }
+    // Cabinet collision remains real: a clear play spot cannot walk straight through its cabinet.
+    const c = BL.arcadeModels.CABINETS[1], p = c.play;
+    const cabinet = A.walkable(p.x, p.z, c.x, c.z, S.high, a.bodyHeight, a);
+    return { rows, cabinet };
+  })()`);
+  record("arcade stage approaches: every side and diagonal can step continuously up both rings while cabinets still block bodies",
+    r.rows.every(x => x.clear && Math.abs(x.y - 0.36) < 0.001) && !r.cabinet, JSON.stringify(r));
+} };
+const arcadePlay = { name: "arcade play", why: "rule: Cloud Hopper replaces the front-left cabinet, returns the same unarmed Ooga safely, and Rally stays out of order", run: async (b) => {
   const dir = join(root, "untracked", "cloud-hopper-arcade"); mkdirSync(dir, { recursive: true });
   const layout = await b.evaluate(`(() => {
     const B = __ooga, A = BL.arcadeModels, actor = B.cavemen.get('portlandhodl'), front = A.CABINETS[0], rally = A.CABINETS.find(c => A.GAMES[c.game]?.id === 'race');
@@ -15184,8 +15350,11 @@ const arcadePlay = { name: "arcade play", why: "rule: Cloud Hopper replaces the 
   await b.screenshot(join(dir, 'rally-repair-close.png'));
   const blocked = await b.evaluate(`(() => { const B = __ooga; B.arcade.play(0); return B.scene === 'arcade' && !B.transitioning; })()`);
   await b.evaluate(`(() => { const B = __ooga, a = B.cavemen.get('portlandhodl'), s = BL.arcadeModels.CABINETS[0].play;
-    if (B.crew.player !== a) B.pilot.possess(a); B.crew.selectWeapon(2, a);
-    a.root.position.x = s.x; a.root.position.z = s.z; a.root.position.y = a.baseY + BL.arcadeModels.STAGE.high;
+    if (B.crew.player !== a) B.pilot.possess(a);
+    // Prior steps may leave combat focus or a mezzanine view; enter from the cabinet's stage.
+    if (a.weapon.aiming) B.pilot.modeAction('mode-toggle');
+    B.pilot.freeCursor();
+    B.pilot.navigate({ position: { x: s.x, y: BL.arcadeModels.STAGE.high, z: s.z }, yaw: 0, pitch: 0.2, dist: 5 });
     B.advance(0.2,1/60); })()`);
   await b.key(' ');
   const entered = await untilPage(b, `B.scene === 'hub' && !B.transitioning && BL.scenes.hub.debug.cloudHopper.phase === 'intro'`, 30000);
@@ -15215,7 +15384,8 @@ const arcadePlay = { name: "arcade play", why: "rule: Cloud Hopper replaces the 
   const returned = await untilPage(b, `B.scene === 'arcade' && !B.transitioning`, 30000);
   const back = await b.evaluate(`(() => { const B=__ooga,p=B.pilot.player,s=BL.arcadeModels.CABINETS[0].play;
     return { who:p?.traits.name, off:p?Math.hypot(p.root.position.x-s.x,p.root.position.z-s.z):999,
-      equipped:!!p?.weapon.equipped, owns:!!p?.weapon.primaryOwned && !!p?.weapon.secondaryOwned }; })()`);
+      unarmed:!!p && !p.weapon.equipped && !p.weapon.primaryEquipped && !p.parts.club.visible && !p.parts.gun.visible,
+      parked:!!p && !p.weapon.primaryOwned && !p.weapon.secondaryOwned }; })()`);
   // A second visit proves the kept/rebuilt hub can launch again; cancel from level select too.
   await b.key(' '); const again = await untilPage(b, `B.scene === 'hub' && !B.transitioning && BL.scenes.hub.debug.cloudHopper.phase === 'intro'`, 30000);
   await b.key('Escape'); const cancelled = await untilPage(b, `B.scene === 'arcade' && !B.transitioning`, 30000);
@@ -15228,7 +15398,8 @@ const arcadePlay = { name: "arcade play", why: "rule: Cloud Hopper replaces the 
     && layout.deck === 3.2 && layout.walkable && layout.label.includes('out of order') && blocked && entered && before.who === 'portlandhodl'
     && before.phase === 'lifting' && before.unarmed && before.previewSafe && before.dockGone
     && rising.phase === 'lifting' && rising.y > before.y && rising.unarmed && returned && back.who === 'portlandhodl'
-    && back.off < 0.5 && back.equipped && back.owns && again && cancelled && routed, JSON.stringify(state));
+    && back.off < 0.5 && back.unarmed && back.parked && again && cancelled && routed, JSON.stringify(state));
+
 } };
 const arcadeMachine = { name: "arcade machine", why: "rule: Space at a carnival machine opens its game, and leaving the game brings the same Ooga back to that machine", run: async (b) => {
   await b.evaluate(`(() => { const B = window.__ooga, st = B.arcade.stations.find((s) => s.kind === "machine" && s.game.kind === "skee"), p = B.pilot.player.root.position; p.x = st.play.x; p.z = st.play.z; B.advance(0.2, 1 / 60); })()`);
@@ -20219,7 +20390,9 @@ scene("bifrost", { url: hubPage(src, "solo=1&character=portlandhodl"), steps: [b
 scene("bifrost", { label: "dsb round trip", query: "character=portlandhodl", steps: [bifrostDsb] });
 scene("bifrost", { label: "poker round trip", query: "character=portlandhodl", steps: [bifrostPoker] });
 scene("bifrost", { label: "canvas2d", url: hubPage(src, "canvas2d=1"), steps: [bifrostCanvas] });
-scene("arcade", { query: "character=portlandhodl", steps: [arcadeWalking, arcadeMachine, arcadeHall, arcadeCarry, arcadePlay, trip("arcade")] });
+scene("arcade", { query: "character=portlandhodl", steps: [arcadeWalking, arcadeMachine, arcadeHall, arcadeCarry, arcadeMaintenance, arcadeStage, arcadePlay, trip("arcade")] });
+scene("arcade", { query: "character=portlandhodl", steps: [arcadeSpectatorAmmo] });
+scene("arcade", { query: "character=portlandhodl", steps: [arcadeRemoteWeapons] });
 scene("skee", { steps: [carnivalPlay("skee", 0.5), trip("skee")] });
 scene("hoops", { steps: [carnivalPlay("hoops", 0.2), trip("hoops")] });
 scene("shy", { steps: [carnivalPlay("shy", 0.7), trip("shy")] });

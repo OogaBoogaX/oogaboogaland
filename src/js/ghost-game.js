@@ -527,7 +527,8 @@
       if (cave === crew.player && !hub.gorillaActive()) hub.readyGun();
     };
     const disarmHunters = () => {
-      for (const [cave, was] of ammo) cave.weapon.unlimited = was;
+      // Only revoke ammunition this hunt granted. The arena may already have revoked its own loan on exit.
+      for (const [cave, was] of ammo) if (!was) cave.weapon.unlimited = false;
       ammo.clear();
     };
 
@@ -2598,7 +2599,8 @@
       landShake = Math.max(0, landShake - dt);
       // The landing shake holds for its second, easing off over the last quarter of one.
       quake = Math.max(quakeOf(t), jolt, LAND_SHAKE * Math.min(1, landShake / 0.25));
-      if (S.state >= ST.LAP && S.state <= ST.DEFEAT) armHunter(crew.player);
+      // Hallway pages follow the hunt too, but keep their ordinary weapon and ammunition policy.
+      if (localHere && S.state >= ST.LAP && S.state <= ST.DEFEAT) armHunter(crew.player);
       dim += clamp((S.bossOn && S.state === ST.BOSS ? 1 : 0) - dim, -dt / 1.5, dt / 1.5);
       hush += clamp((bannerUp && S.state !== ST.IDLE ? 1 : 0) - hush, -dt / BANNER_OUT_S, dt / BANNER_IN_S);
       drawHerald(dt, t, now);

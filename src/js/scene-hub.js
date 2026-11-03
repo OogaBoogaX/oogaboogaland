@@ -6075,6 +6075,18 @@
     const p = player.root.position;
     Object.assign(factoryWalk, { phase: FACTORY_WALK_OUT, cave: player, t: 0, x: p.x, z: p.z, seen: true, through: false, still: 1, hold: G.still });
   };
+  // Step out into the mainland's Arcade overhang, independent of the carried camera/combat mode.
+  // This is a doorway arrival, not the map destination's exterior framing (which can be blocked).
+  const arriveFromArcade = () => {
+    const m = island.mouths.find((mouth) => mouth.id === arcadeMouth.slot.id);
+    pilot.navigate({ position: { x: m.x - Math.sin(m.ry) * 1.2, y: m.floorY, z: m.z - Math.cos(m.ry) * 1.2 },
+      yaw: m.ry + Math.PI, pitch: 0.18, dist: FOLLOW.min });
+    cameraPreviousValid = cameraTerrainValid = cameraTerrainRecovering = cameraManualContact = false;
+    cameraTrailPlayer = null; cameraTrailCount = cameraTrailNext = 0;
+    caveEntryPlayer = null;
+    updatePlayerCave(pilot.player);
+    setCameraCave(playerCaveIndex);
+  };
   // B.C.A.'s veil, in a banker's lamp amber, where the lab's stands, so the gorillas' suits show from where they cross.
   const BCA_TINT = [1, 0.78, 0.4], BCA_VEIL_Z = 0.5;
   const bcaVeil = (dt, elapsed) => {
@@ -11545,6 +11557,7 @@
     world.factoryCrossing = null;
     if (returningCharacter && sphereExit && pilot.player) timechainIsland.gate.arrive(sphereExit);
     else if (returningCharacter && factoryCrossing && pilot.player && factoryMouth) arriveFromFactory(factoryCrossing);
+    else if (returningCharacter && ctx.from === "arcade" && pilot.player && arcadeMouth) arriveFromArcade();
     else if (returningCharacter) navigate(ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" ? ctx.from : ctx.from === "timechain" ? "timechain" : "pile", false, false);
     else navigate(routedPlace || (ctx.from === "bifrost" ? "bifrost" : "pile"), false, false);
     if (donate) hud.openFeed();
@@ -12526,6 +12539,7 @@
     world.factoryCrossing = null;
     if (returningCharacter && sphereExit && pilot.player) timechainIsland.gate.arrive(sphereExit);
     else if (returningCharacter && factoryCrossing && pilot.player && factoryMouth) arriveFromFactory(factoryCrossing);
+    else if (returningCharacter && ctx.from === "arcade" && pilot.player && arcadeMouth) arriveFromArcade();
     else if (returningCharacter) navigate(ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" ? ctx.from : ctx.from === "timechain" ? "timechain" : "pile", false, false);
     else if (ctx.from === "bifrost" && !routedPlace) navigate("bifrost", false, false);
     else if (!signedInArrival && !pilot.loginViewRestored && !crew.sleeping && !initialGorilla && (routedPlace || preloadedView || initialCharacter || initialFirstPerson)) navigate(routedPlace || preloadedView || "pile", false, false);
