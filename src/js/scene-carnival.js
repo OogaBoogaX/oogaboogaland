@@ -785,13 +785,13 @@
     go("arcade", slot);
   };
   const onKey = (e) => {
-    if (e.key === " " || e.key === "Enter") {
+    if (BL.controls.matches(e, "act")) {
       if (phase === "play") act();
       else if (phase === "results") onCard();
       else return false;
       return true;
     }
-    if (e.key === "Escape") {
+    if (BL.controls.matches(e, "escape")) {
       if (phase === "play" || phase === "pause") togglePause();
       else leave();
       return true;
@@ -1352,6 +1352,16 @@
     SCENES[id] = BL.scenes[id] = {
       id, voiceZone: id === "hockey" ? "arcade.hall" : undefined, prepare: () => { const loading = BL.deferred.load("arcade"); return loading ? loading.then(() => null) : null; }, enter: (ctx) => enter(ctx, id), update, overlay, onDonation, onKey, onLootCleared: () => {}, renderOpts: RENDER_OPTS,
       leave: leaveScene, stats, liveGeometry, root: null, camera: null, input: null, debug: null, agent: null, agentView: null, agentControls: null, agentHandoff: null,
+      controlsHelp(touch) {
+        const H = BL.controlsHelp, rows = H.fromCopy((play.coach || COACH[kind])[touch ? 1 : 0], touch);
+        if (!touch && play.aims) rows.unshift(H.row(BL.controls.keysFor("left", "right"), "Move / steer"));
+        rows.push(H.row(touch ? [] : BL.controls.shortcutKeys("act"), el.act.textContent || "Play", touch ? "Tap" : ""));
+        if (!touch) rows.push(H.row(BL.controls.shortcutKeys("escape"), "Pause / back"));
+        else if (phase === "pause") rows.push(H.row([], "Resume playing", "Resume button"));
+        if (touch) rows.push(H.row([], "Return to arcade", "Back button"));
+        return { title: play.name, rows };
+      },
+      controlsHelpHold() { held.left = held.right = held.up = held.down = false; aim.hold = aim.steps = aim.y = aim.stepsY = 0; },
       get inMotion() { return phase === "play" || phase === "count"; }
     };
   }

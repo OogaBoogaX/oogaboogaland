@@ -70,6 +70,9 @@
     soundButton.setAttribute("aria-label", label); soundButton.title = voice.enabled || voice.joining ? label : `${label} · M`;
     soundButton.setAttribute("aria-pressed", String(sound.muted));
   };
+  let helpHeld = false;
+  const controlsHelp = BL.controlsHelp.create({ current: () => active, ready: () => !!active && !transition,
+    hold: on => { helpHeld = on; rightShift = false; gamepad.hold(on); } });
   const offSound = sound.subscribe(showSound);
   soundButton.addEventListener("click", sound.toggle);
   showSound();
@@ -265,6 +268,7 @@
     const next = scenes[id];
     if (!next) throw new Error(`Unknown scene "${id}"`);
     if (transition) return false;
+    controlsHelp.close();
     transition = { next, place, out: true, t: 0, held: 0, instant, ready: true, redirect: null, failed: null, controller: new AbortController() };
     if (next.prepare) {
       try { settle(transition, models.withScope(next.id, () => next.prepare(place, { ...ctx, signal: transition.controller.signal }, next.id))); }
@@ -628,16 +632,17 @@
     if (transition) stepTransition(dt);
     // Hold the fully black frame while resumable pure builders run; the old visit keeps its graph and controls.
     if (transition && transition.building) { drawFade(); return; }
+    if (helpHeld) dt = 0;
     sceneTime += dt;
     // In real mode the API owns the pile, so every browser shows the same one: its last count less what has been
     // eaten since it arrived, in whole bananas.
     if (pileFeed.at) world.level = Math.min(pileMod.MAX_BANANAS, Math.max(0, Math.floor(pileFeed.bananas - pileFeed.eatPerHour * (performance.now() - pileFeed.at) / 36e5)));
-    active.update(dt, sceneTime);
+    if (!helpHeld) active.update(dt, sceneTime);
     if (POSITION_DEBUG && active.id !== "hub" && elapsed >= positionDebugNext) {
       positionDebugNext = elapsed + 0.1;
       updatePositionDebug(false);
     }
-    agentPlay.update(dt);
+    if (!helpHeld) agentPlay.update(dt);
     updateWorldClock(now);
     const drawn = renderer.render(active.root, active.camera, active.renderOpts, activeMeshRigs);
     if (drawn && !firstDraw) {
@@ -1054,6 +1059,7 @@
     window.__ooga = ooga;
   }
   const destroy = () => {
+    controlsHelp.dispose();
     destroyed = true;
     bootBuildController.abort();
     transition?.controller.abort();

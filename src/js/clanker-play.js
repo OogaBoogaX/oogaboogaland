@@ -449,7 +449,7 @@
         consume(event);
         if (!jumpKey && !event.repeat) { jumpKey = true; beginJump(); }
       } else if (key === "shift" && event.code !== "ShiftRight" && event.location !== 2) { run = true; consume(event); }
-      else if (key === "g") {
+      else if (BL.controls.matches(event, "grab")) {
         if (!clankers.combatEnabled) return;
         consume(event);
         if (clankers.sleeping(player)) return;
@@ -460,16 +460,16 @@
           if (smashPointer < 0) grabActive = !!(grabOoga && grabOoga(player));
         }
       }
-      else if (key === "1") {
+      else if (BL.controls.matches(event, "smash")) {
         consume(event);
         if (!event.repeat) action("gorilla-smash");
-      } else if (key === "x") {
+      } else if (BL.controls.matches(event, "view")) {
         consume(event);
         if (!event.repeat) action("mode-toggle");
-      } else if (key === "n") {
+      } else if (BL.controls.matches(event, "north")) {
         consume(event);
         if (view === "birds-eye") { orbit.tYaw = orbit.yaw + Math.atan2(-Math.sin(orbit.yaw), Math.cos(orbit.yaw)); viewChanged = true; }
-      } else if (key === "c") {
+      } else if (BL.controls.matches(event, "chest")) {
         consume(event);
         if (!event.repeat) action("gorilla-beat");
       } else if (key === "v" || key === "j" || key.length === 1 && key >= "3" && key <= "9") consume(event);
@@ -482,7 +482,7 @@
         jumpKey = false; event.preventDefault();
       }
       else if (event.key === "Shift" && event.code !== "ShiftRight" && event.location !== 2) { run = false; event.preventDefault(); }
-      else if (event.key.toLowerCase() === "g") {
+      else if (BL.controls.matches(event, "grab")) {
         consume(event);
         grabHeld = grabSpent = false;
         const throwing = throwPointer;
@@ -1084,7 +1084,29 @@
       disposed = false;
       for (const [node, type, callback, options] of listeners) node.addEventListener(type, callback, options);
     };
-    return { possess, release, escape, respawn, travelRefusal, travel, freeCursor, resetCamera, captureControl, readInput, update, action, orbit: moveView, zoom, cancelInput, refreshCombat, resume, dispose,
+    const controlsHelp = touch => {
+      const H = BL.controlsHelp, rows = [touch ? H.row([], "Walk / climb", "Left stick") : H.movement("Walk / climb")];
+      rows.push(H.row(touch ? [] : [" "], clankers.sleeping(player) ? "Wake up" : "Jump / double jump", touch ? "Action button" : ""));
+      if (!touch) {
+        rows.push(H.row(["shiftleft"], "Run"), H.row(BL.controls.keysFor("yawLeft", "yawRight"), "Turn the view"));
+        if (!isCombat()) rows.push(H.row(BL.controls.keysFor("pitchDown", "pitchUp"), "Tilt the view"));
+        if (view === "birds-eye") rows.push(H.row(BL.controls.shortcutKeys("north"), "Face north"));
+        if (isCombat() && view === "shoulder") rows.push(H.row(["shiftright"], "Tap to swap shoulder · hold with A/D to peek"));
+        if (!combatOnly?.() && !clankers.sleeping(player)) rows.push(H.row(BL.controls.shortcutKeys("view"), "Toggle view control"));
+        rows.push(H.row(BL.controls.shortcutKeys("chest"), "Beat chest"), H.row(BL.controls.shortcutKeys("resetView"), "Reset camera"));
+      }
+      rows.push(H.row([], "Look around / change distance", touch ? "Drag / pinch" : "Drag / scroll"));
+      if (clankers.combatEnabled && !clankers.sleeping(player)) {
+        rows.push(H.row(touch ? [] : BL.controls.shortcutKeys("smash"), "Smash · hold and release the button to charge", touch ? "Smash button" : isCombat() ? "Smash button / left mouse" : "Smash button"));
+        if (!touch) rows.push(H.row(BL.controls.shortcutKeys("grab"), "Hold to grab a nearby Ooga · release to drop"), H.row(BL.controls.shortcutKeys("grab"), "Keep G held, then charge and release the mouse to throw", "Left mouse"));
+      }
+      if (!touch) {
+        if (isCombat()) rows.push(H.row(["tab"], "Release mouse cursor"));
+        rows.push(H.row(BL.controls.shortcutKeys("escape"), "Release cursor / let go"));
+      }
+      return { title: "Island · Controlling a gorilla", rows };
+    };
+    return { controlsHelp, possess, release, escape, respawn, travelRefusal, travel, freeCursor, resetCamera, captureControl, readInput, update, action, orbit: moveView, zoom, cancelInput, refreshCombat, resume, dispose,
       get active() { return !!player; }, get player() { return player; }, get view() { return view; },
       get birdsEye() { return !!player && view === "birds-eye"; }, get birdsEyeMix() { return player ? camera.orthoMix || 0 : 0; },
       get firstPerson() { return !!player && view === "first-person"; },

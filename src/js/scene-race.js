@@ -66,7 +66,7 @@
   let home = "hub";
   let renderer, game, world, go, lootEnabled, testBananas, root, camera, hud, rhud, hooks, input, fx, controls, track, racers, items, audio, weather, agent;
   let phase = "garage", countdown = 0, accumulator = 0, sceneTime = 0, finishedAt = 0;
-  let stateTimer = 0, hintTimer = 0, unsubscribeAccount = null;
+  let stateTimer = 0, unsubscribeAccount = null;
   let scoreTicket = null, unwatchScores = null;
   // revAt is the countdown time the throttle was first held through; -1 while it is off.
   let revAt = -1, crowdSwell = 0, driftTaught = 0;
@@ -211,7 +211,6 @@
   const startRace = () => {
     if (!racers.racers.length) return;
     scoreTicket = BL.highscores?.begin("race") || null;
-    window.clearTimeout(hintTimer);
     hud.hideHint();
     placeRacers();
     phase = "countdown";
@@ -737,17 +736,18 @@
   const demoTip = (sats) => {
     if (!donations.real) onDonation({ id: `demo-${Date.now()}`, sats, handle: game.state.handle, message: game.state.message, at: Date.now() });
   };
+  const controlCopy = touch => touch ? "Drag to look round the garage · left stick steers · hold Drift · tap Throw" : "Drag to look round the garage · W A S D or arrows drive · hold Space to drift, tap to hop · E throws · Q looks back · Escape pauses";
   const onKey = (e) => {
-    if (e.key === "Escape") {
+    if (BL.controls.matches(e, "escape")) {
       if (phase === "racing") pause(true);
       else if (phase === "paused") pause(false);
       else if (phase === "finished") toGarage();
       else go(home);
     }
-    if (e.key === "e" || e.key === "E" || e.key === "Shift") useItem();
-    if (e.key === "0") cam.offset = 0;
-    if (e.key === "Enter" && phase === "garage") startRace();
-    if (e.key === "Enter" && phase === "finished" && !rhud.el.next.hidden) nextRace();
+    if (BL.controls.matches(e, "item")) useItem();
+    if (BL.controls.matches(e, "resetView")) cam.offset = 0;
+    if (BL.controls.matches(e, "start") && phase === "garage") startRace();
+    if (BL.controls.matches(e, "start") && phase === "finished" && !rhud.el.next.hidden) nextRace();
     if (e.key === "b" || e.key === "B") {
       world.level = Math.min(pileMod.MAX_BANANAS, world.level + testBananas);
       hud.toast(`+${testBananas} test bananas`);
@@ -868,7 +868,7 @@
     if (lootEnabled) renderLocker();
     hud.setStats(game.state);
     rhud.el.joyLook.hidden = true;
-    rhud.el.help.textContent = COARSE ? "Drag to look round the garage · left stick steers · hold Drift · tap Throw" : "Drag to look round the garage · W A S D or arrows drive · hold Space to drift, tap to hop · E throws · Q looks back · Escape pauses";
+    rhud.el.help.textContent = controlCopy(COARSE);
     phase = "garage";
     cam.garageYaw = cam.garageLift = 0;
     toGarage();
@@ -876,10 +876,6 @@
       for (const cave of contributors.activeRoster) hud.setRosterRow(cave.name, contributors.stateFor(cave), contributors.ageLabel(cave));
       fx.trimPool();
     }, 6e4);
-    hintTimer = window.setTimeout(() => {
-      const pick = ownRacer() ? "a ride and a track" : "an Ooga, a ride and a track";
-      hud.hint(COARSE ? `Tap ${pick}, then Race!` : `Pick ${pick}, then Race! (Enter)`);
-    }, 1200);
     window.addEventListener("blur", onBlur, { signal: ctx.signal });
     unsubscribeAccount = BL.net.subscribe(accountChanged);
     Object.assign(raceScene, {
@@ -929,7 +925,6 @@
   const leave = () => {
     unwatchScores?.(); unwatchScores = null; scoreTicket = null;
     window.clearInterval(stateTimer);
-    window.clearTimeout(hintTimer);
     window.removeEventListener("blur", onBlur);
     unsubscribeAccount();
     unsubscribeAccount = null;
@@ -977,5 +972,18 @@
     }
   });
   BL.scenes = BL.scenes || {};
+  raceScene.controlsHelp = touch => {
+    const H = BL.controlsHelp, rows = [];
+    if (touch) rows.push(...H.fromCopy(controlCopy(true), true));
+    else {
+      rows.push(H.movement(COARSE ? "Steer / brake · automatic throttle in touch layout" : "W accelerates · S brakes · A/D steer"),
+        H.row(BL.controls.keysFor("up"), "Hold to drift · release to boost · tap to hop"),
+        H.row(BL.controls.shortcutKeys("item"), "Use held item"), H.row(BL.controls.keysFor("yawLeft"), "Look back"),
+        H.row(BL.controls.shortcutKeys("resetView"), "Reset camera"), H.row([], "Look around", "Drag"));
+    }
+    if (phase === "garage" || phase === "finished" && !rhud.el.next.hidden) rows.push(H.row(touch ? [] : BL.controls.shortcutKeys("start"), phase === "garage" ? "Start race" : "Next race", touch ? "Race button" : ""));
+    rows.push(H.row(touch ? [] : BL.controls.shortcutKeys("escape"), touch ? "Leave the race" : phase === "racing" || phase === "paused" ? "Pause / resume" : "Back", touch ? "Back button" : ""));
+    return { title: "Ooga Rally", rows };
+  };
   BL.scenes.race = raceScene;
 })();

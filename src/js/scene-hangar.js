@@ -152,8 +152,7 @@
   // Its drive, metres a second: top speed forward and in reverse, and how fast it gathers speed, brakes against the
   // throttle and coasts to a stop (a second); and its fork tips as obstacles meet them, how far round (m).
   const DRIVE = { forward: 3.2, reverse: 1.6, accel: 2.2, brake: 5, coast: 1.8, tip: 0.25 };
-  // What the driver is told once it is ready.
-  const DRIVE_HINT = COARSE ? "Stick drives · tap the fork stick for the forks · tap the wheel to honk" : "W S drive · A D steer · R F forks · H horn · Space gets out";
+  // Forklift power-up animation and control reach.
   const POWER = { lit: [0.12, 1], dome: [0.2, 0.7], flash: 2.6, sharp: 8, rate: 9, turn: 9, needle: 2.4, speedo: 8, crank: 0.75, ready: 0.9, reach: 1.1, radius: 7, color: [1.6, 0.95, 0.22] };
   // How near the hold-short bar the launch shield answers whoever walks up to it, and how far back they must step before
   // it answers again.
@@ -284,12 +283,12 @@
     if (!leaving) { world.hangarCrossing = null; w.through = w.grab = false; }
   };
   const onKey = (e) => {
-    if (e.key === "0" && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && !leaving) return pilot.resetCamera();
-    if ((e.key === "h" || e.key === "H") && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && scene && honk(scene.forklift, people && people.player, false)) return true;
-    if ((e.key === "x" || e.key === "X") && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && !leaving) {
+    if (BL.controls.matches(e, "resetView") && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && !leaving) return pilot.resetCamera();
+    if (BL.controls.matches(e, "horn") && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && scene && honk(scene.forklift, people && people.player, false)) return true;
+    if (BL.controls.matches(e, "view") && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && !leaving) {
       if (pilot.modeAction("mode-toggle")) { e.preventDefault(); return true; }
     }
-    if (e.key === "Escape") {
+    if (BL.controls.matches(e, "escape")) {
       if (scene && scene.guide.escape()) { e.preventDefault(); return true; }
       if (!pilot.escape()) leaveHangar();
       return true;
@@ -475,7 +474,7 @@
     if (f.startT >= 0) {
       f.startT += dt;
       if (f.startT > POWER.crank) f.keyTo = BL.forkliftModels.KEY.on;
-      if (f.startT > POWER.ready) { f.startT = -1; f.lit.glow = POWER.lit[1]; f.screen.visible = true; hud.hint(DRIVE_HINT, 6000); }
+      if (f.startT > POWER.ready) { f.startT = -1; f.lit.glow = POWER.lit[1]; f.screen.visible = true; }
     }
     const k = f.key.rotation.z, step = POWER.turn * dt;
     f.key.rotation.z = k + clamp(f.keyTo - k, -step, step);
@@ -1632,6 +1631,19 @@
     // Voice zone: the Factory's group, which the hall shares (`factory.hall`).
     voiceZone: "factory.hangar",
     micKey: true,
+    controlsHelp: touch => {
+      const H = BL.controlsHelp, f = scene.forklift;
+      if (pilot.player?.camp.seat === f.seat) {
+        const rows = [H.row([], "Turn forklift power on / off", touch ? "Tap ignition key" : "Click ignition key")];
+        if (f.on && f.startT < 0) rows.push(touch ? H.row([], "Drive / steer", "Left stick") : H.movement("W/S drive · A/D steer"), H.row(touch ? [] : BL.controls.keysFor("pitchDown", "pitchUp"), "Raise / lower forks", touch ? "Tap fork stick" : ""));
+        if (f.on) rows.push(H.row(touch ? [] : BL.controls.shortcutKeys("horn"), "Honk horn", touch ? "Tap steering wheel" : ""));
+        rows.push(H.row(touch ? [] : [" "], "Get out", touch ? "Action button" : ""), H.row([], "Look around", touch ? "Drag / pinch" : "Drag / scroll"));
+        if (!touch) rows.push(H.row(BL.controls.shortcutKeys("resetView"), "Reset camera"), H.row(BL.controls.shortcutKeys("escape"), "Release cursor / let go"));
+        return { title: "Lightning Jet Hangar · Forklift", rows };
+      }
+      const help = pilot.controlsHelp(touch); help.title = "Lightning Jet Hangar · " + help.title; return help;
+    },
+    controlsHelpHold: on => { pilot.controls.reset(); pilot.setMenuOpen(on, false); },
     id: "hangar", enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null, agent: null, agentView: null, agentControls: null, agentHandoff: null,
     get inMotion() {

@@ -7,6 +7,15 @@
     w: "forward", s: "back", a: "left", d: "right", q: "yawLeft", e: "yawRight", r: "pitchDown", f: "pitchUp",
     z: "up", " ": "up", x: "down", arrowup: "forward", arrowdown: "back", arrowleft: "left", arrowright: "right", shift: "sprint"
   };
+  // The help panel reads the same movement bindings as the input handler.
+  const keysFor = (...actions) => Object.keys(KEYS).filter(key => actions.includes(KEYS[key]));
+  // Discrete shortcuts shared by scene handlers and their reference rows.
+  const SHORTCUTS = { view: ["x"], resetView: ["0"], weapon: ["1", "2"], swapWeapon: ["g"], attack: ["v"], reload: ["r"], bash: ["f"], jetpack: ["j"], actor: ["t"], escape: ["escape"], start: ["enter"], item: ["e", "shift"], autopilot: ["g"], spacewalk: ["v"], mineView: ["v"], crack: ["c"], pause: ["p"], act: [" ", "enter"] };
+  const shortcutKeys = action => SHORTCUTS[action];
+  Object.assign(SHORTCUTS, { north: ["n"], twirl: ["n"], tint: ["c"], horn: ["h"], tomato: ["t"], throwWallet: ["y"], grab: ["g"], smash: ["1"], chest: ["c"] });
+  const matches = (e, action) => SHORTCUTS[action].includes(e.key.toLowerCase());
+  const resets = new Set();
+  const resetAll = () => { for (const reset of resets) reset(); };
   const KNOB = 18;
   // How long after a press's pointer lifts its own click may still arrive (a phone sends it a beat later).
   const CLICK_GRACE = 1000;
@@ -254,6 +263,7 @@
     };
     let listening = true;
     const dispose = () => {
+      resets.delete(reset);
       if (!listening) return;
       listening = false;
       window.removeEventListener("keydown", onKeyDown);
@@ -287,8 +297,10 @@
       boostPointer = null;
     };
     const reset = () => { onBlur(); if (moveStick) moveStick.reset(); if (lookStick) lookStick.reset(); };
+    resets.add(reset);
     const borrowPitch = (on) => { pitchBorrowed = !!on; };
     const resume = () => {
+      resets.add(reset);
       if (listening) return;
       reset();
       listening = true;
@@ -318,5 +330,5 @@
     };
     return { read, axes, clearPointer, reset, consumeTab, resume, borrowPitch, dispose, get rightShift() { return !!held.peek; } };
   };
-  BL.controls = { create, uiKey };
+  BL.controls = { create, uiKey, keysFor, shortcutKeys, matches, resetAll };
 })();
