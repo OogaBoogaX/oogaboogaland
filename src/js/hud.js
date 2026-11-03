@@ -2362,6 +2362,26 @@
   // Net and voice emits re-run this several times a second with the same outcome; last-written
   // records keep an unchanged textContent from re-invalidating the line.
   let accountBackend = null, accountMe = null, accountName = null, accountWords = null, accountWordsHidden = null;
+  // The microphone's level in the glyph's four capsule segments, lit from the bottom, read every SPEAK_MS from voice
+  // (`subscribeLevel`): RMS in decibels from MIC_FLOOR_DB (nothing lit) to MIC_TOP_DB (all four), so ordinary speech
+  // lights two or three. A mute lights them red; the level still moves under it. Only a changed segment is touched.
+  const MIC_FLOOR_DB = -50, MIC_TOP_DB = -10;
+  let micSegs = null, micLit = -1, micMutedShown = null;
+  const paintMicLevel = (lit, muted) => {
+    if (!micSegs) micSegs = [...document.querySelectorAll("#account-mic .mic-seg")].sort((a, b) => a.dataset.seg - b.dataset.seg);
+    if (lit !== micLit) {
+      // Only the segments between the old and the new count change; the first paint writes them all.
+      const from = micLit < 0 ? 0 : Math.min(lit, micLit), to = micLit < 0 ? micSegs.length : Math.max(lit, micLit);
+      for (let i = from; i < to; i++) micSegs[i].dataset.on = String(i < lit);
+      micLit = lit;
+    }
+    if (muted !== micMutedShown) { micMutedShown = muted; $("account-mic").dataset.muted = String(muted); }
+  };
+  const showMicLevel = (voice) => {
+    const db = voice.micLevel > 0 ? 20 * Math.log10(voice.micLevel) : -Infinity;
+    const lit = Math.max(0, Math.min(4, Math.round((db - MIC_FLOOR_DB) / (MIC_TOP_DB - MIC_FLOOR_DB) * 4)));
+    paintMicLevel(lit, voice.muted && (voice.publishing || voice.joining));
+  };
   // The microphone picker. The button is hidden until a microphone is live or previewed, since the browser gives no
   // device name before permission; its tooltip names the device and says a click picks another, and the list is asked
   // for on the click (labels are blank before that) and laid above the button as a fixed popover.
@@ -2463,8 +2483,11 @@
       const micLine = $("account-mic");
       micLine.hidden = !micName;
       micLine.title = micName ? `${micName} \u00b7 Click to choose a different microphone` : "";
-      if (!micName) closeMicMenu();
+      if (!micName) { closeMicMenu(); paintMicLevel(0, false); }
     }
+    // A mute or unmute emits here at once, so the segments turn red or green now rather than on the next meter read;
+    // nothing is written unless the lit count or the mute changed.
+    if (micName) showMicLevel(voice);
     const leaveHidden = voiceHidden || !voice.enabled;
     if (leaveHidden !== accountLeaveHidden) { accountLeaveHidden = leaveHidden; $("account-voice-leave").hidden = leaveHidden; }
   };
@@ -2605,5 +2628,5 @@
       else b.textContent = `Back to ${place}`;
     }
   };
-  BL.hud = { create, renderIcon, renderFaceIcon, renderBodyIcon, signLettering, showAccount, showMic, showVoices, setDonationStats, donationValueText, toast, offerReload, holdRow, leaveTo, STATE_LABELS, statusFor, voiceIcon, voiceWords };
+  BL.hud = { create, renderIcon, renderFaceIcon, renderBodyIcon, signLettering, showAccount, showMic, showMicLevel, showVoices, setDonationStats, donationValueText, toast, offerReload, holdRow, leaveTo, STATE_LABELS, statusFor, voiceIcon, voiceWords };
 })();

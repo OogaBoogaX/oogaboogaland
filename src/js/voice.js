@@ -45,7 +45,8 @@
 // count as blocked, as a refused element play does, and the next tap or key wakes it (`wake`). `fades` says whether a
 // range can be heard at all: where the element's volume is honoured, or through a gain.
 // Exports support, probe, ICE_BLOCKED, enable, listen, dropMic, preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, setMuted,
-// toggle, restart, stop, setPeers, subscribe, dispose, inspect, speaking, muteLocal, mutedLocally, setRadius, falloff, fades, RADIUS_MIN, RADIUS_MAX and stats.
+// toggle, restart, stop, setPeers, subscribe, subscribeLevel, dispose, inspect, speaking, muteLocal, mutedLocally, setRadius, falloff, fades,
+// RADIUS_MIN, RADIUS_MAX and stats.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -64,6 +65,8 @@
   volumeProbe.volume = 0.5;
   const ELEMENT_VOLUME = volumeProbe.volume === 0.5, GAIN_PLAY = !ELEMENT_VOLUME && typeof window.AudioContext === "function", GAIN_TAU = 0.05;
   const subscribers = new Set();
+  // Called on every meter read (SPEAK_MS) while a microphone is metered, with `stats.micLevel` fresh: the HUD's level.
+  const levelSubscribers = new Set();
   const subs = new Map();
   // Each wanted voice's publication count from the room: a new count is a microphone published again.
   const wantedGen = new Map();
@@ -178,6 +181,23 @@
     source.connect(analyser);
     return { source, analyser, quiet: 0, speaking: false };
   };
+  // The microphone's meter reads its own copy of the track, which a mute or the alone gate never disables, so its level
+  // keeps moving while the microphone is held off; the copy is stopped with the meter. A copy inherits a disabled track's
+  // state, so it is switched on as it is made.
+  const micMeterOf = (stream) => {
+    const copy = typeof stream.clone === "function" ? stream.clone() : stream;
+    if (copy !== stream) for (const t of copy.getAudioTracks()) t.enabled = true;
+    const m = meter(copy);
+    if (m) m.copy = copy === stream ? null : copy;
+    else if (copy !== stream) for (const t of copy.getTracks()) t.stop();
+    return m;
+  };
+  const dropMicMeter = () => {
+    if (!micMeter) return;
+    micMeter.source.disconnect();
+    if (micMeter.copy) for (const t of micMeter.copy.getTracks()) t.stop();
+    micMeter = null;
+  };
 
   // One read of a meter; true when its speaking flag changed.
   const readMeter = (m) => {
@@ -253,6 +273,9 @@
       changed = true;
     }
     if (changed || stats.preflight) emit();
+    // The glyph's level segments follow every read, muted or not, without the heavier emit; last, so nothing the HUD
+    // does can hold up speaking detection or the remote meters.
+    if (micMeter) for (const fn of levelSubscribers) fn(stats);
   };
 
   const PLAY_BLOCKED = "Press Enable sound to hear voices";
@@ -467,7 +490,7 @@
       if (token !== lifecycle || generation !== micGeneration) {
         for (const track of stream.getTracks()) track.stop(); return false;
       }
-      mic = stream; micMeter = meter(stream);
+      mic = stream; micMeter = micMeterOf(stream);
       nameMic(stream);
       stats.preflight = true; stats.preflightPending = false; stats.permission = "granted";
       window.clearInterval(speakTimer); speakTimer = window.setInterval(poll, SPEAK_MS);
@@ -486,8 +509,8 @@
     micGeneration++;
     if (mic) for (const track of mic.getTracks()) track.stop();
     mic = null;
-    if (micMeter) micMeter.source.disconnect();
-    micMeter = null; stats.preflight = false; stats.preflightPending = false; stats.micLevel = 0;
+    dropMicMeter();
+    stats.preflight = false; stats.preflightPending = false; stats.micLevel = 0;
     if (stats.permission === "requesting") stats.permission = "unknown";
     if (!stats.enabled) { window.clearInterval(speakTimer); speakTimer = 0; }
     emit();
@@ -524,8 +547,8 @@
     mic = stream; stats.micError = "";
     nameMic(stream);
     track.enabled = !stats.muted && !stats.alone;
-    if (micMeter) micMeter.source.disconnect();
-    micMeter = meter(stream);
+    dropMicMeter();
+    micMeter = micMeterOf(stream);
     stats.deviceId = deviceId;
     if (old && old !== stream) for (const t of old.getTracks()) t.stop();
     emit();
@@ -573,7 +596,7 @@
       mic = stream; stats.permission = "granted";
       nameMic(stream);
       for (const track of mic.getAudioTracks()) track.enabled = !stats.muted;
-      micMeter = micMeter || meter(mic);
+      micMeter = micMeter || micMeterOf(mic);
       gate();
       // No candidates means the SFU can never reach this page: say why rather than wait out the publish. A gather
       // that could not run says nothing, so the publish goes ahead.
@@ -669,8 +692,7 @@
     if (mic) for (const t of mic.getTracks()) t.stop();
     mic = null; stats.preflight = false; stats.preflightPending = false; stats.micLevel = 0;
     if (stats.permission === "requesting") stats.permission = "unknown";
-    if (micMeter) micMeter.source.disconnect();
-    micMeter = null;
+    dropMicMeter();
     if (audio) audio.close().catch(() => {});
     audio = null;
     stats.muted = stats.alone = false; stats.micError = "";
@@ -688,8 +710,7 @@
     if (mic) for (const track of mic.getTracks()) track.stop();
     mic = null; stats.preflight = false; stats.preflightPending = false; stats.micLevel = 0;
     if (stats.permission === "requesting") stats.permission = "unknown";
-    if (micMeter) micMeter.source.disconnect();
-    micMeter = null;
+    dropMicMeter();
     if (pubPc) pubPc.close();
     pubPc = null; pubSender = null; stats.publishing = false; stats.speaking = false; stats.alone = false;
     stats.muted = true; BL.net.setMuted(true);
@@ -840,10 +861,14 @@
     subscribers.add(fn);
     return () => subscribers.delete(fn);
   };
+  const subscribeLevel = (fn) => {
+    levelSubscribers.add(fn);
+    return () => levelSubscribers.delete(fn);
+  };
 
   const dispose = () => {
     stop();
-    subscribers.clear();
+    subscribers.clear(); levelSubscribers.clear();
   };
 
   // For the feed panel and debugging: whom the room wants heard, whom this page pulled, both connections, where voices play
@@ -851,5 +876,5 @@
   const inspect = () => ({ desired: desired.slice(), pulled: [...subs.keys()], publish: pubPc ? pubPc.connectionState : "none", receive: subPc ? subPc.connectionState : "none",
     playback: GAIN_PLAY ? "gain" : "element", context: audio ? audio.state : "none" });
 
-  BL.voice = { support, probe, ICE_BLOCKED, preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, enable, listen, dropMic, setMuted, toggle, restart, stop, setPeers, subscribe, dispose, inspect, speaking, muteLocal, mutedLocally, setRadius, falloff, fades: ELEMENT_VOLUME || GAIN_PLAY, RADIUS_MIN, RADIUS_MAX, stats };
+  BL.voice = { support, probe, ICE_BLOCKED, preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, enable, listen, dropMic, setMuted, toggle, restart, stop, setPeers, subscribe, subscribeLevel, dispose, inspect, speaking, muteLocal, mutedLocally, setRadius, falloff, fades: ELEMENT_VOLUME || GAIN_PLAY, RADIUS_MIN, RADIUS_MAX, stats };
 })();

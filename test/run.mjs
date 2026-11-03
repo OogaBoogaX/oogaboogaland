@@ -22052,6 +22052,60 @@ const voiceAloneChecks = async () => {
     is(rows.mutedAlone,true,true,false)&&is(rows.mutedWithOther,false,true,false)&&is(rows.unmutedAlone,true,false,false)&&is(rows.twoOthers,false,false,true)&&
     rows.netMuted==="false,true,false"&&rows.emitted&&!rows.stopped.alone&&!rows.stopped.muted,JSON.stringify(rows));
 };
+// rule: the microphone glyph's level comes from the meter's own copy of the capture track. A mute or the alone gate must
+// switch off the published track and never the copy, so the level still moves while muted; and every way the microphone is
+// let go (a device switch, hanging up, a cancelled preview, stop) must stop the copy too, or the microphone stays open.
+// voice.js runs with a fake Worker, peer connection and AudioContext whose analyser reads `level`, streams whose clone()
+// hands out tracks of their own (inheriting the source's enabled state, as a browser's do), and its meter read stepped by hand.
+const voiceMeterCopyChecks = async () => {
+  const source=readFileSync(join(root,"src/js/voice.js"),"utf8"),settle=()=>new Promise(r=>setTimeout(r,0));
+  const timers=new Map(),streams=[],clones=[];let timerId=0,level=0;
+  const makeStream=(from=null)=>{
+    const track={enabled:from?from.track.enabled:true,stops:0,stop(){this.stops++;}};
+    const stream={track,getAudioTracks:()=>[track],getTracks:()=>[track],clone(){const copy=makeStream(stream);clones.push(copy);return copy;}};
+    if(!from)streams.push(stream);
+    return stream;
+  };
+  class Pc {constructor(){this.connectionState="connected";this.iceGatheringState="complete";this.localDescription={sdp:"v=0\r\na=candidate:1 1 udp 2122260223 127.0.0.1 9 typ host\r\n"};}addTransceiver(){return {mid:"0",sender:{replaceTrack:async()=>{}}};}async createOffer(){return {};}async createAnswer(){return {};}async setLocalDescription(){}async setRemoteDescription(){}addEventListener(){}removeEventListener(){}getTransceivers(){return [];}close(){}}
+  class Audio {constructor(){this.muted=false;this.volume=1;}pause(){}play(){return Promise.resolve();}}
+  class Ctx {constructor(){this.state="running";}addEventListener(){}resume(){return Promise.resolve();}close(){this.state="closed";return Promise.resolve();}
+    createMediaStreamSource(){return {connect(){},disconnect(){}};}
+    createAnalyser(){return {fftSize:0,connect(){},getFloatTimeDomainData:a=>a.fill(level)};}}
+  const fetch=async(url,o)=>{const op=url.split("/").pop(),body=JSON.parse(o.body);return {ok:true,json:async()=>op==="pull"?{tracks:body.ids.map(id=>({id,mid:String(id)}))}:{sessionDescription:{}}};};
+  const win={BL:{net:{state:{connectionToken:"synthetic",zone:"outside"},setMuted(){},remotes:new Map()}},setTimeout:()=>0,clearTimeout(){},setInterval:fn=>{timers.set(++timerId,fn);return timerId;},clearInterval:id=>timers.delete(id),addEventListener(){},AudioContext:Ctx};
+  const context={window:win,document:{createElement:()=>({volume:1})},localStorage:{getItem:()=>null,setItem(){}},navigator:{mediaDevices:{getUserMedia:async()=>makeStream()}},RTCPeerConnection:Pc,AudioContext:Ctx,Audio,MediaStream:class{},fetch,AbortController,Promise,JSON,Error,Map,Set,Float32Array,Math,Number,String};
+  runInNewContext(readFileSync(join(root,"src/js/voice-blend.js"),"utf8"),context);
+  runInNewContext(source,context);
+  const V=win.BL.voice,tick=()=>{for(const fn of timers.values())fn();},rows={};
+  await V.enable();await settle();
+  const pub0=streams[0].track,copy0=clones[0]&&clones[0].track;
+  rows.copied=!!copy0&&copy0!==pub0;
+  rows.aloneHeldOff=V.stats.alone&&!pub0.enabled&&!!copy0&&copy0.enabled;
+  V.setPeers([2],[1]);await settle();
+  rows.heard=!V.stats.alone&&pub0.enabled&&copy0.enabled;
+  V.setMuted(true);
+  rows.mutedHeldOff=!pub0.enabled&&copy0.enabled;
+  let reads=0;const off=V.subscribeLevel(()=>reads++);
+  level=0.1;tick();const quiet=V.stats.micLevel;level=0.3;tick();const loud=V.stats.micLevel;off();
+  rows.levelMovesMuted=Math.abs(quiet-0.1)<1e-6&&Math.abs(loud-0.3)<1e-6&&reads===2;
+  // A switch while muted: the new capture track starts disabled, and the copy taken of it is switched on regardless.
+  await V.selectDevice("other-mic");await settle();
+  const copy1=clones[1]&&clones[1].track;
+  rows.swapStopsOld=copy0.stops===1&&pub0.stops===1&&!!copy1&&copy1.stops===0&&V.stats.publishing;
+  rows.swapCopyOnUnderMute=!streams[1].track.enabled&&!!copy1&&copy1.enabled;
+  V.dropMic();await settle();
+  rows.dropStops=copy1.stops===1&&streams[1].track.stops===1;
+  await V.preflight();await settle();
+  const copy2=clones[2]&&clones[2].track;V.cancelPreflight();
+  rows.cancelStops=!!copy2&&copy2.stops===1&&streams[2].track.stops===1;
+  await V.enable();await settle();
+  const copy3=clones[3]&&clones[3].track;V.stop();await settle();
+  rows.stopStops=!!copy3&&copy3.stops===1&&streams[3].track.stops===1;
+  rows.noneLeftOpen=clones.length===4&&clones.every(c=>c.track.stops>=1);
+  V.dispose();
+  record("voice meter copy: the level reads its own copy of the microphone, on through mute and the alone gate so it moves while muted, and a switch, hang-up, cancelled preview or stop each stop the copy with the capture",
+    Object.values(rows).every(Boolean),JSON.stringify(rows));
+};
 // #380: a visitor's hearing range only changes how loud this page plays the voices it receives. voice.js runs with remotes placed
 // round the visitor, a fake Worker, peer connection and AudioContext, and its own 150 ms meter read (captured from setInterval)
 // stepped by hand: once as a browser that honours an element's volume, and once as iOS, which keeps every element at 1, where
@@ -25036,6 +25090,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   walletShareChecks(BL);
   footstepChecks(BL);
   await voiceAloneChecks();
+  await voiceMeterCopyChecks();
   await voiceHearingChecks();
   exteriorEnrichmentChecks(BL);
   if(ARGS.includes("exterior-unit"))return;

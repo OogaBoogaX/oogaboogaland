@@ -2426,6 +2426,11 @@ body[data-active-scene="hub"] .home-link {
 .account-mic svg { display: block; width: 100%; height: 100%; }
 .account-mic:hover, .account-mic[aria-expanded="true"] { color: var(--paper); }
 .account-mic:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* The capsule's four segments are the microphone's level, lit from the bottom: green, or red while the microphone is
+   muted, since the level still moves under a mute. */
+.mic-seg { fill: #000; }
+.mic-seg[data-on="true"] { fill: var(--ok); }
+.account-mic[data-muted="true"] .mic-seg[data-on="true"] { fill: var(--danger); }
 
 /* The device list: fixed, above the button that opened it, so the sheet never clips it. */
 .mic-menu {
