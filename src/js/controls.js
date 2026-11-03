@@ -8,6 +8,8 @@
     z: "up", " ": "up", x: "down", arrowup: "forward", arrowdown: "back", arrowleft: "left", arrowright: "right", shift: "sprint"
   };
   const KNOB = 18;
+  // How long after a press's pointer lifts its own click may still arrive (a phone sends it a beat later).
+  const CLICK_GRACE = 1000;
   const SHIFT_KEYS = ["ShiftLeft", "ShiftRight", "Shift"];
   const keyName = (e) => e.key === "Shift" && (e.code === "ShiftRight" || e.location === 2) ? "peek" : KEYS[e.key.toLowerCase()];
   const uiKey = (e) => e.target && (e.target.isContentEditable || e.target.closest
@@ -79,7 +81,7 @@
     const held = { forward: 0, back: 0, left: 0, right: 0, yawLeft: 0, yawRight: 0, pitchDown: 0, pitchUp: 0, up: 0, space: 0, down: 0, boost: 0, chord: 0, sprint: 0, peek: 0 };
     const axes = { x: 0, y: 0, up: 0, yaw: 0, pitch: 0, keyPitch: 0, orbitYaw: 0, sprint: 0, peek: 0, shiftTap: 0 };
     let pitchBorrowed = false;
-    let spaceDown = false, boostPointer = null, boostClick = false, shiftAt = 0, shiftUsed = false, shiftTap = 0;
+    let spaceDown = false, boostPointer = null, boostClick = false, boostLift = 0, shiftAt = 0, shiftUsed = false, shiftTap = 0;
     let padFrame = -1, padUp = 0, padSprint = 0;
     const downKeys = new Set(), blockedKeys = new Set();
     let tabConsumed = false;
@@ -155,7 +157,8 @@
       for (const name in held) held[name] = 0;
       spaceDown = false;
       boostPointer = null;
-      boostClick = false;
+      // A press that acted keeps its claim on its own click, which may never come now, for CLICK_GRACE from here.
+      if (boostClick) boostLift = Math.min(boostLift, performance.now());
       shiftAt = shiftTap = 0;
       shiftUsed = false;
       // A pad press not yet read is dropped too, so closing a menu never acts on the press made inside it.
@@ -173,30 +176,37 @@
     const moveStick = move ? joystick(move) : null;
     const lookStick = look ? joystick(look) : null;
     // A pointer press has the same action/thrust priority as Space.
-    // Consume its later click so a tap never acts twice or jumps on landing.
+    // Consume its later click so a tap never acts twice or jumps on landing: the press owns its click until it
+    // comes, through any reset of held input, whatever `detail` the browser gives it, and before any listener on the
+    // button (the HUD's acts on a click); a click with no press, a keyboard's or an assistive tap, still acts.
     const onBoostDown = (e) => {
       if (!pressActions) { held.boost = 1; return; }
       if (boostPointer !== null) return;
       boostPointer = e.pointerId;
       boostClick = !!onAction;
+      boostLift = Infinity;
       held.boost = onAction && onAction() ? 0 : 1;
     };
     const onBoostUp = (e) => {
       if (!pressActions) { held.boost = 0; return; }
+      // The click follows the lift, so the grace runs from here, even after a reset of held input started it early.
+      if (boostClick) boostLift = performance.now();
       if (e.pointerId !== boostPointer) return;
       boostPointer = null;
       held.boost = 0;
     };
     const onBoostClick = (e) => {
-      if (boostClick && e.detail > 0) { e.preventDefault(); e.stopImmediatePropagation(); boost.blur(); }
+      if (!boostClick || !boost.contains(e.target)) return;
       boostClick = false;
+      if (performance.now() - boostLift > CLICK_GRACE) return;
+      e.preventDefault(); e.stopImmediatePropagation(); boost.blur();
     };
     if (boost) {
       boost.addEventListener("pointerdown", onBoostDown);
       boost.addEventListener("pointerup", onBoostUp);
       boost.addEventListener("pointercancel", onBoostUp);
       boost.addEventListener("pointerleave", onBoostUp);
-      if (pressActions) boost.addEventListener("click", onBoostClick, true);
+      if (pressActions) window.addEventListener("click", onBoostClick, true);
     }
     // Both mouse buttons down means forward (as W); a chorded press arrives as a move event.
     const onChord = (e) => {
@@ -260,7 +270,7 @@
         boost.removeEventListener("pointerup", onBoostUp);
         boost.removeEventListener("pointercancel", onBoostUp);
         boost.removeEventListener("pointerleave", onBoostUp);
-        if (pressActions) boost.removeEventListener("click", onBoostClick, true);
+        if (pressActions) window.removeEventListener("click", onBoostClick, true);
       }
       if (chord) {
         chord.removeEventListener("pointerdown", onChord);
@@ -275,7 +285,6 @@
     const clearPointer = () => {
       held.chord = held.boost = 0;
       boostPointer = null;
-      boostClick = false;
     };
     const reset = () => { onBlur(); if (moveStick) moveStick.reset(); if (lookStick) lookStick.reset(); };
     const borrowPitch = (on) => { pitchBorrowed = !!on; };
@@ -296,7 +305,7 @@
         boost.addEventListener("pointerup", onBoostUp);
         boost.addEventListener("pointercancel", onBoostUp);
         boost.addEventListener("pointerleave", onBoostUp);
-        if (pressActions) boost.addEventListener("click", onBoostClick, true);
+        if (pressActions) window.addEventListener("click", onBoostClick, true);
       }
       if (chord) {
         chord.addEventListener("pointerdown", onChord);
