@@ -20,7 +20,7 @@
     ["normal", "Drifting clouds", "WASD moves, Shift runs and Space jumps. The clock starts when you leave this cloud. A shimmering cloud is about to fade."],
     ["boost", "Boost clouds", "Touch a pink cloud anywhere to launch toward the island."],
     ["jetpack", "Jetpacks", "Press J to wear a jetpack, then hold Space to fly up. Fuel never refills, so grab another pack for more."],
-    ["finish", "Banana pile", "Land on the banana pile to stop the clock. Your best run comes back as a ghost to race."]
+    ["finish", "Banana pile", "Land on the banana pile to stop the clock. Toggle the global record ghost in the timer to compare runs. Clouds change each run; the ghost shows its original route."]
   ];
   // Bounce clouds (from Level 2), Aurora Heights' gusts, Thunderhead's tornadoes and the power-ups, each introduced the
   // first time a session plays a level that carries it.
@@ -33,7 +33,7 @@
     hook: ["hook", "Grappling hook", "Aim at a cloud and hold click (RT on a pad) to reel yourself in. Let go to fly on. Miss, and it's gone."]
   };
   const formatTime = (value) => `${String(Math.floor(value / 6000)).padStart(2, "0")}:${String(Math.floor(value / 100) % 60).padStart(2, "0")}.${String(value % 100).padStart(2, "0")}`;
-  const create = ({ onStart, onReplay, onExit, onGuideDone, onSelect, onNext, onHook, letterSign } = {}) => {
+  const create = ({ onStart, onReplay, onExit, onGuideDone, onSelect, onNext, onHook, onGhost, letterSign } = {}) => {
     const node = (tag, className, text = "") => {
       const el = document.createElement(tag);
       el.className = className;
@@ -75,7 +75,19 @@
     recordGhost.title = "Winning replay unavailable";
     recordGhost.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 22V10C3 4 6.5 1 12 1s9 3 9 9v12l-3-2.5-3 2.5-3-2.5-3 2.5-3-2.5Z"/>'
       + '<ellipse cx="9" cy="10" rx="1.2" ry="1.9" fill="#17232e"/><ellipse cx="15" cy="10" rx="1.2" ry="1.9" fill="#17232e"/></svg>';
-    record.setAttribute("role", "status"); record.append(recordText, recordGhost);
+    const recordTime = node("span", "cloud-hopper-record-time"), recordTail = node("span", "cloud-hopper-record-tail");
+    recordTail.append(recordGhost, recordTime);
+    record.setAttribute("role", "status"); record.append(recordText, recordTail);
+    const toggleGhost = event => { event.stopPropagation(); onGhost?.(); };
+    recordGhost.addEventListener("click", toggleGhost);
+    const setReplayState = state => {
+      recordGhost.disabled = state === "unavailable";
+      recordGhost.setAttribute("aria-pressed", String(state === "on" || state === "loading"));
+      recordGhost.setAttribute("aria-busy", String(state === "loading"));
+      recordGhost.title = state === "unavailable" ? "No winning replay yet" : state === "error" ? "Replay unavailable · retry"
+        : state === "loading" ? "Loading winning replay · click to cancel" : state === "on" ? "Hide global record ghost" : "Show global record ghost · historical route";
+      recordGhost.setAttribute("aria-label", recordGhost.title);
+    };
     const help = node("p", "cloud-hopper-help"), panel = node("dialog", "race-results game-intro cloud-hopper-panel");
     const glow = node("div", "game-intro-glow"), rays = node("div", "game-intro-rays");
     const kicker = node("p", "game-intro-kicker", "Ooga Arcade"), panelTitle = node("h2", "game-intro-title", "CLOUD HOPPER");
@@ -349,11 +361,12 @@
         : sharedStatus === "unavailable" ? "Shared leaderboard unavailable"
         : "All players · fastest times";
       const leader = sharedScores?.[0];
-      recordText.textContent = leader ? `Global best · ${leader.username} · ${formatTime(Math.floor(leader.milliseconds / 10))}`
-        + (sharedStatus === "stale" ? " · may be out of date" : sharedStatus === "refreshing" ? " · updating" : "")
+      recordText.textContent = leader ? `Global best · ${leader.username}`
         : sharedStatus === "ready" ? "No times yet" : sharedStatus === "unavailable" ? "Global best unavailable" : "Loading global best…";
+      recordTime.textContent = leader ? formatTime(Math.floor(leader.milliseconds / 10))
+        + (sharedStatus === "stale" ? " · may be out of date" : sharedStatus === "refreshing" ? " · updating" : "") : "";
       recordText.title = recordText.textContent;
-      // Shared scores carry no winning replay. Never enable this control using a personal/session ghost.
+      // Only the shared replay controller can enable this control; personal bests supply no ghost.
       recordGhost.hidden = !leader;
       const best = bests[selected - 1] || 0;
       personalBest.textContent = `Your best on this browser · ${best ? formatTime(Math.floor(best / 10)) : "no finish yet"}`;
@@ -501,6 +514,7 @@
       select.removeEventListener("click", choose);
       play.removeEventListener("click", start);
       exit.removeEventListener("click", leave);
+      recordGhost.removeEventListener("click", toggleGhost);
       panel.removeEventListener("cancel", cancel);
       panel.removeEventListener("keydown", panelKey);
       panel.removeEventListener("keyup", panelKey);
@@ -538,7 +552,7 @@
       gustCue.dataset.state = state; gustCue.dataset.from = fromLeft ? "left" : "right";
       shownGust = state; shownFrom = fromLeft;
     };
-    return { show, update, setHighscores, setHighscoreStatus, setLevels, setRunner, setGuide, setPowers, setGust, setDq, hide, dispose, get frameY() { return frameY; } };
+    return { show, update, setHighscores, setHighscoreStatus, setReplayState, setLevels, setRunner, setGuide, setPowers, setGust, setDq, hide, dispose, get frameY() { return frameY; } };
   };
   BL.cloudHopperHud = { create };
 })();

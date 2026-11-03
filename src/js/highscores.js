@@ -29,8 +29,14 @@
       highscores[key] = score;
       achieved[key] = at;
     }
+    const r = data.replay;
+    const replay = r && /^[a-f0-9]{64}$/.test(r.hash) && r.version === 1 && r.courseVersion === game.version
+      && Number.isSafeInteger(r.bytes) && r.bytes > 0 && r.bytes <= 12 * 1024 * 1024
+      && highscores[r.username] === r.score && achieved[r.username] === r.achieved
+      && keys.every(key => highscores[key] > r.score || highscores[key] === r.score && achieved[key] >= r.achieved)
+      ? { hash: r.hash, version: 1, courseVersion: r.courseVersion, bytes: r.bytes, username: r.username, score: r.score, achieved: r.achieved } : null;
     return { game: id, version: game.version, scoreType: game.scoreType, direction: game.direction, unit: game.unit,
-      highscores, achieved, revision: data.revision };
+      highscores, achieved, revision: data.revision, replay };
   };
   // Optional status subscribers keep loading/failure copy separate from existing score callbacks.
   const statusOf = entry => !available() ? entry.data ? "stale" : net.state.resolved ? "unavailable" : "loading" : entry.status;
@@ -41,7 +47,7 @@
     if (entry.data && data.revision < entry.data.revision) return;
     entry.at = Date.now();
     entry.status = "ready";
-    if (entry.data && data.revision === entry.data.revision) { notifyStatus(entry); return; }
+    if (entry.data && data.revision === entry.data.revision && data.replay?.hash === entry.data.replay?.hash) { notifyStatus(entry); return; }
     entry.data = data;
     for (const fn of entry.listeners) fn(data);
     notifyStatus(entry);
@@ -130,7 +136,11 @@
   const onLive = board => {
     if (!available() || !net.state.me) return;
     const data = accept(board?.game, board);
-    if (data) publish(data.game, data);
+    if (!data) return;
+    if (/^cloud-hopper-l[1-4]$/.test(data.game)) {
+      // Room notifications contain scores only. Read the matching replay pointer through the public route.
+      if (entries.get(data.game).listeners.size) loadOne(data.game, true);
+    } else publish(data.game, data);
   };
   const refreshWatched = force => {
     let arcadeRead = false;
@@ -188,11 +198,12 @@
     load(id);
     if (!available() || !net.state.resolved || !net.state.me) return null;
     const token = {};
-    tickets.set(token, { game: id, playerId: net.state.me.id, generation, sent: new Set() });
+    tickets.set(token, { game: id, playerId: net.state.me.id, generation, sent: new Set(),
+      replay: BL.cloudHopperReplays?.startTicket(id) });
     return token;
   };
   const current = ticket => available() && net.state.resolved && ticket.generation === generation && ticket.playerId === net.state.me?.id;
-  const submit = async (token, machine, score) => {
+  const submit = async (token, machine, score, recording = null) => {
     const ticket = token && tickets.get(token);
     onAccount();
     if (!ticket || !current(ticket) || !rules.valid(ticket.game, machine, score) || ticket.sent.has(machine)) return false;
@@ -201,6 +212,14 @@
     writes++;
     const body = { machine, score, version: rules.get(ticket.game).version, playerId: ticket.playerId };
     try {
+      const known = get(ticket.game), fastest = known && Math.min(...Object.values(known.highscores));
+      if (recording && ticket.replay && BL.cloudHopperReplays && (!known || score <= fastest)) {
+        const replay = { ...recording, version: 1, game: ticket.game, playerId: ticket.playerId };
+        const uploaded = await BL.cloudHopperReplays.submit(ticket.game, ticket.replay, replay, () => current(ticket));
+        const data = uploaded && accept(ticket.game, uploaded);
+        if (data && current(ticket)) { publish(ticket.game, data); return true; }
+        // Storage/format/capacity failure must not discard the accepted numeric score.
+      }
       // A lost response can safely retry: the Worker only improves records, and preserves equal scores' timestamps.
       for (let attempt = 0; attempt < 2 && current(ticket); attempt++) {
         const result = await request(ticket.game, body);

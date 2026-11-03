@@ -29,6 +29,9 @@
     "REALTIME_APP_ID": "c7ad1d5bf43116572f082ebe18011061"
     // Secrets, never here: `wrangler secret put GITHUB_CLIENT_SECRET --config wrangler.production.jsonc`, and REALTIME_SECRET.
   },
+  // Private production replay storage; public reads are served through the Worker.
+  // See docs/cloud-hopper-replays.md for validation and bounded retention.
+  "r2_buckets": [{ "binding": "CLOUD_HOPPER_REPLAYS", "bucket_name": "oogaboogaland-production-replays" }],
   "d1_databases": [
     {
       "binding": "DB",

@@ -10195,13 +10195,18 @@ body[data-active-scene="arcade"] #destination-hud:not([hidden]) { display: flex;
 .cloud-hopper-name { margin: 0; color: #afdff5; font-size: 11px; font-weight: 700; letter-spacing: .16em; }
 .cloud-hopper-time { display: block; margin: 5px 0; color: #fff; font-size: 32px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; }
 .cloud-hopper-time[hidden] { display: none; }
-.cloud-hopper-record { display: flex; align-items: center; justify-content: center; gap: 7px; }
+.cloud-hopper-record { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 7px; }
 .cloud-hopper-record-text { min-width: 0; overflow-wrap: anywhere; }
+.cloud-hopper-record-tail { display: inline-flex; max-width: 100%; align-items: center; gap: 5px; }
+.cloud-hopper-record-time { font-variant-numeric: tabular-nums; }
 .cloud-hopper-record-ghost { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 26px;
   width: 26px; min-width: 26px; height: 25px; min-height: 0; margin: 0; padding: 4px; border: 1px solid #6f899766;
   border-radius: 6px; background: #0e2031; color: #7c94a5; box-shadow: none; cursor: default; }
 .cloud-hopper-record-ghost[hidden] { display: none; }
 .cloud-hopper-record-ghost svg { display: block; width: 14px; height: 14px; }
+.cloud-hopper-record-ghost:not(:disabled) { pointer-events: auto; cursor: pointer; }
+.cloud-hopper-record-ghost[aria-pressed="true"] { color: #ddfaff; border-color: #8aeaff; background: #24566f; }
+.cloud-hopper-record-ghost:focus-visible { outline: 2px solid #8aeaff; outline-offset: 2px; }
 .cloud-hopper-status { font-weight: 700; }
 /* Power-ups held, as buttons in the banner's equipment row beside the jetpack's, only while one applies, each edged
    in its own colour: X-ray's goggles with its seconds (blinking red its last two), the feather, the hook (brighter
