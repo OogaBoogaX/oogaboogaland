@@ -2329,6 +2329,7 @@
       if (!ctx.carry) return;
       const c = carried || (carried = {}), w = cave.weapon, overhead = birdsEye(), feet = cave.root.position.y - cave.baseY;
       c.name = cave.traits.name; c.view = resumeSleepOverhead ? "birds-eye" : viewMode(); c.combat = !!w.aiming;
+      c.focused = softAimFocused || document.pointerLockElement === canvas;
       c.relYaw = (overhead ? overheadYaw : orbit.yaw) - cave.root.rotation.y;
       c.pitch = overhead ? Math.PI / 2 : orbit.pitch; c.distance = overhead ? overheadHeight - cave.baseY : orbit.dist;
       c.height = overhead ? overheadHeight - feet : camera.position.y - feet; c.side = shoulderSideTarget < 0 ? -1 : 1;
@@ -2343,12 +2344,15 @@
     const arrive = (cave) => {
       const c = ctx.carry && !loginView && carried && carried.name === cave.traits.name ? carried : null;
       if (!c) { possess(cave); return false; }
-      const t = captureControl(arrivalTransition), feet = cave.root.position.y - cave.baseY, held = c.held, ammo = c.ammo;
+      const t = captureControl(arrivalTransition), feet = cave.root.position.y - cave.baseY, held = c.held, ammo = c.ammo, focused = c.focused;
       t.active = true; t.view = c.view; t.combat = c.combat; t.yaw = cave.root.rotation.y + c.relYaw; t.pitch = c.pitch;
       t.distance = c.distance; t.height = c.view === "birds-eye" ? feet + c.height : c.height; t.side = c.side; t.focused = false;
       // Letting go of an Ooga already driven rewrites `carried`: the look the navigate keeps is copied first.
       arrivalKeep.relYaw = c.relYaw; arrivalKeep.pitch = c.pitch; arrivalKeep.distance = c.distance;
       if (!possess(cave, t)) return false;
+      // A scene load may finish after its input gesture. Restore mouse-look without requesting native lock;
+      // the next canvas gesture can capture it. A deliberately released cursor stays released.
+      if (focused) focusAim();
       handoff.cancel();
       // The weapon and rounds it left with: once let go of, the Ooga works as the crew's again through the fade, and its
       // work can take up the rifle or fire it.

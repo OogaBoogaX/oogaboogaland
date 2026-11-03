@@ -5,8 +5,8 @@
 // with claw machines, pinball and dart boards under it; pool and air hockey in the back room before it. Sports on the right (two skee-ball lanes, air hockey and
 // two hoop shots), the coconut shy, the food court and the snack bar on the left, each carnival machine opening a
 // game of its own (`scene-carnival.js`); a prize counter by the doorway where the tickets they pay buy prizes; the
-// game-room gorillas, the arcade's uniformed staff, going from job to job round the hall; and Oogas from the roster
-// playing everything the visitor is not.
+// game-room gorillas, the arcade's uniformed maintenance staff, going from job to job round the hall.
+// Every Ooga visitor is a live player; machines run attract displays until a player starts them.
 //
 // Walking up to a cabinet or a carnival machine and pressing act (or tapping it) opens that game, and the game's exit
 // comes back to it as the same Ooga (`lastPlayer`). The carnival games are scenes of their own (`scene-carnival.js`);
@@ -88,6 +88,7 @@
   // (in the arena), the voice zone it reports and the one it is turning to.
   let ghostEntry = null, ghosts = null, ghostChannel = null, tess = null, gameMode = false, fence = null, fenceK = 0, totemsAt = [], totemLife = [], lasers = [], armed = false, rifleWas = false;
   let zoneNow = "arcade.hall", zoneHeld = 0, exitButton = null;
+  let outsideWeapon = null;
   let stations = null, blocks = null, carnival = null, staff = null, orders = 0, ticketBoard = null, prizeUi = null;
   let crowd = null, spin = null;
   let audio = null, bots = null, walkers = null, motes = null, power = null, disco = null, fame = null, shelf = null, lit = null;
@@ -102,12 +103,7 @@
     if (fame && FAME_GAMES.some((entry) => entry[1] === kind)) fame.children[2].geometry = AM.fameBoard(fameRows());
   };
   const NO_ACTORS = [];
-  // An Ooga a signed-in player drives here is not also in the crowd or out strolling.
-  const hideCrowd = (name, on) => {
-    for (const list of [crowd, walkers]) if (list) for (const m of list) if (m.cave.traits.name === name) m.cave.root.visible = !on;
-  };
-  // On the Worker's page the island's driving rules hold in here too, and the Ooga driven is reported to the
-  // room every frame, so signed-in players in the hall hear each other (voice needs a driven Ooga).
+  // The island's ownership rules also govern local possession and room presence here.
   const mayPossess = (cave) => BL.net.mayDrive(cave.traits.name, contributors.stateFor(cave.contributor) === "working");
   const mayPick = (c) => !BL.net.mayDrive(c.name, contributors.stateFor(c) === "working");
   const accountChanged = () => {
@@ -187,27 +183,6 @@
   const square = (x, z, r, feet = FLOOR_FEET) => blocks.push([x - r, x + r, z - r, z + r, feet[0], feet[1]]);
   // The dressing's pieces that stand on a floor in a walker's way, blocked round their pick spheres.
   const STANDING = new Set(["barrel"]);
-  // The stump's roots and ferns over the floor round its sides and back (never its front, where the visitor steps
-  // up): two boxes across the stump, [half-width, reach behind its middle], one wide and one deep, both to
-  // `ROOTS_FRONT` m in front of its middle, so a walker slides round them. They are in the way of feet on the floor
-  // only: an Ooga on the stage may step down over the roots and walk out, but none walks in over them.
-  const ROOTS = [[5.29, 3.22], [3.22, 5.29]], ROOTS_FRONT = 2.53, ROOT_FEET = [-1, STAGE.low / 2];
-
-  // Oogas from the roster at play, each in a pose the scene animates with part rotations only: at a claw machine,
-  // pinball, air hockey, skee-ball lane 2 and hoop shot 2, at the food court's tables, queueing at the snack bar and
-  // cheering the cabinets from the ring's front-left, off the doorway's view of their screens. [x, z, facing, pose];
-  // seated ones sit on a stool of the table they face, the air hockey pair at the two ends of their table, along its
-  // `turn`.
-  const H0 = LAYOUT.hockeys[0], H0X = Math.sin(H0.turn) * 1.45, H0Z = Math.cos(H0.turn) * 1.45;
-  const CROWD = [
-    [LAYOUT.skee[1].x, LAYOUT.skee[1].z, Math.PI, "skee"], [LAYOUT.hoops[1].x, LAYOUT.hoops[1].z, Math.PI / 2, "shoot"],
-    [H0.x + H0X, H0.z + H0Z, H0.turn + Math.PI, "hockey"], [H0.x - H0X, H0.z - H0Z, H0.turn, "hockey"],
-    [LAYOUT.pinball[0][0], LAYOUT.pinball[0][1] + 1.05, Math.PI, "pinball"], [LAYOUT.claws[0][0], LAYOUT.claws[0][1] + 0.95, Math.PI, "claw"],
-    [LAYOUT.tables[0][0], LAYOUT.tables[0][1] + 0.85, Math.PI, "sit"], [LAYOUT.tables[1][0], LAYOUT.tables[1][1] + 0.85, Math.PI, "sit"],
-    [-16.6, 2.3, 0, "queue"], [STAGE.x - 3.4, STAGE.z + 3.8, 2.41, "cheer"]
-  ];
-  // A sitter's hips rest on the stool's top; a standing Ooga's arms hang this far out from its middle.
-  const SEAT_Y = 0.6, CROWD_REACH = 0.55;
   const build = () => {
     const hall = AM.hall(), frame = AM.signFrame(), S = LAYOUT.sign;
     addChild(root, createNode({ geometry: hall.floor }), createNode({ geometry: hall.rock }), createNode({ geometry: hall.timber }),
@@ -294,7 +269,7 @@
     for (const [x, z] of AM.MEZZ_POSTS) square(x, z, 0.24);
     // The back row of columns' faces, which the door and the dart boards on the back wall between them are flush with.
     const columnFace = Math.min(...AM.MEZZ_POSTS.map(([, z]) => z)) + 0.24;
-    for (const [w, back] of ROOTS) blocks.push([STAGE.x - w, STAGE.x + w, STAGE.z - back, STAGE.z + ROOTS_FRONT, ...ROOT_FEET]);
+    // The low decorative roots are step-over dressing; only the cabinets block the stage's approaches.
     const picks = dressing().picks;
     for (let i = 0; i < picks.length; i += 6) if (STANDING.has(picks[i])) square(picks[i + 2], picks[i + 4], picks[i + 5] + 0.06, picks[i + 3] > MEZZ.y - 0.5 ? DECK_FEET : FLOOR_FEET);
     for (const [x, y, z, , , reach] of LAYOUT.stores) square(x, z, reach + 0.06, y ? DECK_FEET : FLOOR_FEET);
@@ -362,12 +337,11 @@
       stations.push(on ? { kind: "cabinet", game: c.game, play: c.play, y: c.y, label: named.name + (named.unavailable ? " · out of order" : "") } : { kind: "retro", retro: c.retro, id: named.id, play: c.play, y: c.y, label: named.name });
     }
     // Every game in the hall: each machine in its frame with its game over nodes under it, and a station in front of
-    // it that opens that game at that machine. Oogas from the roster play some of them for real (`bot`), and when
-    // the visitor takes one over they step aside for as long as the game lasts.
+    // it that opens that game at that machine.
     carnival = [];
     bots = [];
     life = [];
-    const machine = (p, parts, make, kind, box, index, bot, slot) => {
+    const machine = (p, parts, make, kind, box, index) => {
       // A machine whose geometry stands off its player's spot sits on a child node `dz` along, `dy` up, turned by `turn`.
       const node = framed(p), body = createNode({ geometry: parts.body }), glow = createNode({ geometry: parts.glow, sightHidden: true });
       const holder = parts.dz || parts.dy || parts.turn ? createNode({ position: { x: 0, y: parts.dy || 0, z: parts.dz || 0 }, rotation: { x: 0, y: parts.turn || 0, z: 0 } }) : node;
@@ -378,56 +352,44 @@
       if (parts.oche) addChild(node, createNode({ geometry: AM.dartOche() }));
       addChild(root, node);
       const mid = box ? (box[2] + box[3]) / 2 : (parts.dz || 0), at = toHall(p, 0, mid, {});
-      const b = bot ? { p, at, cool: 2 + bots.length * 1.5, wait: 0, spool: -1, strip: null, member: null, aim: { x: 0 } } : null;
       wave(glow, at.x, at.z);
-      const s = liven(kind, glow, body, at, p.play, b);
+      const s = liven(kind, glow, body, at, p.play, null);
       s.node = node;
       const host = {
         node, glow, index,
         get best() { return machineBest(kind, p.scoreId); },
-        onEnd: () => { if (b) botDone(b); },
+        onEnd: () => {},
         burst: (lx, ly, lz, count) => { const w = toHall(p, lx, lz, BURST_AT); fx.burst(w.x, ly, w.z, count, SPARKS, 2.4); },
         cue: (name) => hear(at.x, at.z, name, 0.8),
-        aim: b ? b.aim : { x: 0 },
-        // An Ooga's big moment at the machine: it flashes and the Oogas round it cheer.
-        crack: b ? (lx, ly, lz, big) => { if (big) cheerAround(s); } : undefined
+        aim: { x: 0 }
       };
       const g = make(host);
       s.g = g;
       carnival.push(g);
       if (box) blocks.push(blockOf(p, ...box));
-      if (b) {
-        b.g = g;
-        // Its tickets spool out of the slot at `slot` in the machine's frame.
-        if (slot) {
-          b.strip = createNode({ position: { x: slot[0], y: slot[1], z: slot[2] }, geometry: AM.ticketStrip(), scale: { x: 1, y: 0.01, z: 1 }, visible: false, sightHidden: true });
-          addChild(node, b.strip);
-        }
-        bots.push(b);
-      }
-      const station = { kind: "machine", game: g, index, bot: !!b, play: p.play, turn: p.turn, label: `${g.name} · Machine ${p.scoreId.slice(p.scoreId.lastIndexOf("-") + 1)}` };
+      const station = { kind: "machine", game: g, index, bot: false, play: p.play, turn: p.turn, label: `${g.name} · Machine ${p.scoreId.slice(p.scoreId.lastIndexOf("-") + 1)}` };
       stations.push(station);
       s.station = station;
       target(body, { kind: "machine", station }, 2.2);
       return station;
     };
     const F = LAYOUT.frames;
-    LAYOUT.hoops.forEach((p, i) => machine(p, AM.hoopMachine(), BL.arcadeGames.hoopShot, "hoops", [-0.82, 0.82, -3.75, -0.15], i, i === 1, [0.62, 0.78, -0.13]));
-    LAYOUT.skee.forEach((p, i) => machine(p, AM.skeeLane(), BL.arcadeGames.skeeball, "skee", [-0.62, 0.62, -6.5, -0.09], i, i === 1, [0.42, 0.72, -0.12]));
-    machine(LAYOUT.shy, AM.coconutShy(), BL.arcadeGames.coconutShy, "shy", [-1.9, 1.9, -4.3, -0.35], 0, false);
+    LAYOUT.hoops.forEach((p, i) => machine(p, AM.hoopMachine(), BL.arcadeGames.hoopShot, "hoops", [-0.82, 0.82, -3.75, -0.15], i));
+    LAYOUT.skee.forEach((p, i) => machine(p, AM.skeeLane(), BL.arcadeGames.skeeball, "skee", [-0.62, 0.62, -6.5, -0.09], i));
+    machine(LAYOUT.shy, AM.coconutShy(), BL.arcadeGames.coconutShy, "shy", [-1.9, 1.9, -4.3, -0.35], 0);
     // The claws' blocks reach half-way to the posts either side of their bays, so the narrow gaps between the booths,
     // their scoreboards and the posts are closed rather than squeezed into. The air hockey table's scoreboards stand on
     // posts beyond its far end, wider than the table, and the pool tables' behind theirs: a block of their own.
-    F.claw.forEach((p, i) => machine(p, AM.clawBooth(i), BL.arcadeGames.clawGame, "claw", [-1.4, 1.4, -1.52, -0.28], i, i === 0));
-    F.pinball.forEach((p, i) => { const t = AM.pinball(i); machine(p, { body: t.body, glow: t.lit, glass: t.glass, dz: -1.05 }, BL.arcadeGames.pinballGame, "pinball", [-0.43, 0.43, -1.84, -0.2], i, i === 0); });
-    F.hockey.forEach((p, i) => { const a = AM.airHockey(); machine(p, { body: a.body, glow: a.lit, dz: -1.75, turn: Math.PI / 2 }, BL.arcadeGames.airHockey, "hockey", [-0.65, 0.65, -2.95, -0.55], i, i === 0); blocks.push(blockOf(p, -1.1, 1.15, -3.25, -3.06)); });
-    F.pool.forEach((p, i) => { const t = AM.poolTable(i); machine(p, { body: t.body, glow: t.glow, lamp: t.lamp, dz: -1.35 }, BL.arcadeGames.poolGame, "billiards", [-1.35, 1.35, -2.08, -0.62], i, false); blocks.push(blockOf(p, -1.03, 1.0, -2.35, -2.08)); });
-    F.darts.forEach((p, i) => machine(p, { body: AM.dartBoard(), dz: -AM.DART.oche, dy: AM.DART.y, oche: true }, BL.arcadeGames.dartsGame, "darts", null, i, false));
+    F.claw.forEach((p, i) => machine(p, AM.clawBooth(i), BL.arcadeGames.clawGame, "claw", [-1.4, 1.4, -1.52, -0.28], i));
+    F.pinball.forEach((p, i) => { const t = AM.pinball(i); machine(p, { body: t.body, glow: t.lit, glass: t.glass, dz: -1.05 }, BL.arcadeGames.pinballGame, "pinball", [-0.43, 0.43, -1.84, -0.2], i); });
+    F.hockey.forEach((p, i) => { const a = AM.airHockey(); machine(p, { body: a.body, glow: a.lit, dz: -1.75, turn: Math.PI / 2 }, BL.arcadeGames.airHockey, "hockey", [-0.65, 0.65, -2.95, -0.55], i); blocks.push(blockOf(p, -1.1, 1.15, -3.25, -3.06)); });
+    F.pool.forEach((p, i) => { const t = AM.poolTable(i); machine(p, { body: t.body, glow: t.glow, lamp: t.lamp, dz: -1.35 }, BL.arcadeGames.poolGame, "billiards", [-1.35, 1.35, -2.08, -0.62], i); blocks.push(blockOf(p, -1.03, 1.0, -2.35, -2.08)); });
+    F.darts.forEach((p, i) => machine(p, { body: AM.dartBoard(), dz: -AM.DART.oche, dy: AM.DART.y, oche: true }, BL.arcadeGames.dartsGame, "darts", null, i));
     // Each board hangs at a walker's height on the back wall between two columns: in the way across its hide from the
     // rock to the columns' faces, so nobody walks into it and a walker sliding along the columns catches on none.
     const boardBox = boundsOf(AM.dartBoard());
     for (const p of F.darts) blocks.push([p.x + boardBox.min[0], p.x + boardBox.max[0], HALL.back, columnFace, ...FLOOR_FEET]);
-    F.ride.forEach((p, i) => machine(p, { body: AM.ride(i).base }, BL.arcadeGames.rideGame, "ride", [-0.7, 0.7, -0.88, 0.98], i, false));
+    F.ride.forEach((p, i) => machine(p, { body: AM.ride(i).base }, BL.arcadeGames.rideGame, "ride", [-0.7, 0.7, -0.88, 0.98], i));
     // The doorway's token changer and ticket muncher (each in the way as far as it stands, the muncher shallower),
     // and the prize queue's ropes.
     LAYOUT.changers.forEach((p, i) => {
@@ -508,39 +470,6 @@
     for (let i = 0; i < MOTES; i++) { const n = createNode({ geometry: AM.spark(0), scale: { x: 0.5, y: 0.5, z: 0.5 }, sightHidden: true }); addChild(root, n); motes.push({ node: n, a: 0.2 + (i * 0.37) % 0.4, b: 0.15 + (i * 0.53) % 0.3, p: i * 2.39 }); }
   };
   const MOTES = 36;
-  // The Oogas at play: the roster's own, never the visitor, in turn round the spots.
-  const seatCrowd = (playerName) => {
-    crowd = [];
-    walkers = [];
-    const names = contributors.activeRoster.map((c) => c.name).filter((n) => n !== playerName);
-    if (!names.length) return;
-    CROWD.forEach(([x, z, facing, pose], i) => {
-      const cave = models.caveman(contributors.traitsFor(names[i % names.length])), feet = supportAt(x, z, 1);
-      if (cave.parts.gun) cave.parts.gun.visible = false;
-      const base = pose === "sit" ? SEAT_Y : cave.root.position.y + feet;
-      Object.assign(cave.root.position, { x, y: base, z });
-      cave.root.rotation.y = facing;
-      if (pose === "sit") cave.parts.legR.rotation.x = cave.parts.legL.rotation.x = -1.45;
-      addChild(root, cave.root);
-      crowd.push({ cave, pose, facing, t: i * 1.37, x, z, y: base, wave: 0, greet: 0, swing: 0, cheer: 0 });
-      // Each is in the way as far as its hanging arms reach, a sitter by its stool's side of the table.
-      square(x, z, pose === "sit" ? 0.45 : CROWD_REACH, [feet - 1, feet + 2]);
-    });
-    // Each played machine's Ooga, so it swings when the game takes its shot and cheers at the end.
-    for (const b of bots) b.member = crowd.find((m) => Math.hypot(m.x - b.p.x, m.z - b.p.z) < 0.1) || null;
-    // Walkers: a few more Oogas strolling a loop round the stage, stopping to watch the claws and the lanes.
-    for (let i = 0; i < WALKERS; i++) {
-      const cave = models.caveman(contributors.traitsFor(names[(CROWD.length + i) % names.length]));
-      if (cave.parts.gun) cave.parts.gun.visible = false;
-      addChild(root, cave.root);
-      walkers.push({ cave, s: i * LOOP_LEN / WALKERS, dir: i % 2 ? -1 : 1, pause: 0, leg: i, base: cave.root.position.y, x: 0, z: 0, wave: 0, greet: 0, cheer: 0 });
-    }
-  };
-  // The walkers' loop, clear of everything on the floor, and where they stop: [x, z, seconds].
-  const LOOP = [[-1.4, 3.2, 0], [-2.8, -1.4, 0], [-7, -3.4, 0], [-7.6, -9.4, 2.5], [-4.6, -13.9, 0], [-2.2, -16.6, 3], [2.2, -16.6, 0], [4.6, -13.9, 0], [7.2, -10.4, 2.5], [7.3, -4.4, 0], [3, -2.6, 0], [1.4, 3.2, 0]];
-  const LOOP_AT = [0];
-  for (let i = 1; i <= LOOP.length; i++) { const a = LOOP[i - 1], b = LOOP[i % LOOP.length]; LOOP_AT.push(LOOP_AT[i - 1] + Math.hypot(b[0] - a[0], b[1] - a[1])); }
-  const LOOP_LEN = LOOP_AT[LOOP.length], WALKERS = 3, WALK_SPEED = 1.05;
   // Actual records, never invented NPC scores: M1/M2 identify the winning machine, LOC an offline local best.
   const FAME_GAMES = [["THRO", "skee"], ["HOOP", "hoops"], ["TOSS", "shy"], ["CLAW", "claw"]];
   const fameRows = () => FAME_GAMES.map(([label, kind]) => {
@@ -589,7 +518,6 @@
     renderPrizes();
     prizeUi.panel.hidden = false;
     pilot.setActive(false);
-    staff.clerk.poke();
   };
   const closePrizes = () => {
     if (prizeUi.panel.hidden) return;
@@ -607,12 +535,10 @@
     hud.toast(`${prize.name}! Yours now. Ooga proud!`);
     const w = toHall(LAYOUT.prizes, 0, 0, {});
     fx.burst(w.x, 2.2, w.z, 36, SPARKS, 2.6);
-    staff.clerk.poke();
     hear(w.x, w.z, "bell");
     showShelf();
   };
   const order = () => {
-    staff.vendor.poke();
     hud.toast(ORDERS[orders++ % ORDERS.length]);
     const w = toHall(LAYOUT.snack, 0, 0, {});
     hear(w.x, w.z, "crunch");
@@ -629,8 +555,6 @@
   // spot is where the whole wheel shows over the cabinets' crowns). One spin at a time; a visitor who leaves while
   // one turns hears of its win on the way back in, with the room's welcome for more tickets (`leave`, `enter`).
   const WHEEL_TURNS = 3;
-  const WHEEL_SORRY = ["Aww. Wheel stingy. Spin again?", "Small tickets. Big one next time!", "Wheel tease you. Ooga try again!"];
-  let sorry = 0;
   const shownTickets = () => game.state.arcade.tickets - (spin.t >= 0 ? spin.value : 0);
   const spinWheel = () => {
     if (spin.t >= 0) return;
@@ -653,7 +577,6 @@
     }
     hear(p.x, p.z, "coin");
     hear(W.x, W.z, "swish", 1.2);
-    crewSays(staff[0], "Round and round! Where stop?");
   };
   // Where it stopped: its tickets (saved at the draw) on the boards, the toast, and a party as big as the win. The
   // pods flash for any; at or over the cost the room lights up, embers fly from the wheel and the room cheers with the
@@ -667,11 +590,10 @@
     hud.toast(`BIG SPIN: +${v} ticket${v === 1 ? "" : "s"}!${jackpot ? " JACKPOT!" : ""}`);
     hear(W.x, W.z, "spit", 1.2);
     spin.flash = jackpot ? 6 : big ? 3 : 1.5;
-    if (!big) return hostSays(WHEEL_SORRY[sorry++ % WHEEL_SORRY.length], false);
+    if (!big) return;
     spin.party = spin.flash;
     fx.burst(W.x, W.y, W.z + 0.4, jackpot ? 70 : 30, SPARKS, jackpot ? 3.2 : 2.4);
     roomCheers();
-    hostSays(jackpot ? "JACKPOT! Ooga rich!" : "Big spin! Good win, Ooga!", true);
     if (jackpot) hear(W.x, W.z + 3, "ooga", 1.2);
   };
 
@@ -703,85 +625,6 @@
     hear(x, z, name, loud);
   };
 
-  // ---- the Oogas who play for real ------------------------------------------------------------------------
-  // A played machine's Ooga starts a game, then takes each shot when the game offers it: skee-ball's aim at once
-  // and its roll with the meter near the green, a hoop shot with the meter near the green, so it scores like a good
-  // player with the odd miss. At the end its tickets spool out, it cheers, and after a breather it plays again.
-  const playBots = (dt) => {
-    for (let i = 0; i < bots.length; i++) {
-      const b = bots[i], g = b.g, st = g.status;
-      if (b.spool >= 0) {
-        b.spool += dt;
-        if (b.strip) b.strip.scale.y = Math.min(0.9, b.spool * 0.7) + 0.01;
-        if (b.spool > 4.5) { b.spool = -1; if (b.strip) b.strip.visible = false; }
-      }
-      if (!g.playing) {
-        b.cool -= dt;
-        if (b.cool <= 0) { g.attract(0, 0); g.start(); b.wait = 0.8; hear(b.at.x, b.at.z, "coin", 0.7); }
-        continue;
-      }
-      if (g.kind === "hockey") b.aim.x = Math.max(-1, Math.min(1, g.puckU * 1.1));
-      b.wait -= dt;
-      if (b.wait > 0 || !st.verb) continue;
-      const slop = 0.06, inWindow = st.meter >= st.window0 - slop && st.meter <= st.window1 + slop;
-      if (st.meter >= 0 && !inWindow) continue;
-      g.act();
-      b.wait = 0.5 + Math.random() * 0.9;
-      if (b.member) b.member.swing = 1;
-    }
-  };
-  const botDone = (b) => {
-    b.cool = 5;
-    b.spool = 0;
-    if (b.strip) { b.strip.visible = true; b.strip.scale.y = 0.01; }
-    hear(b.at.x, b.at.z, "spit", 0.9);
-    if (b.member) b.member.wave = 2;
-  };
-
-  // ---- the walkers, greetings and cheers ---------------------------------------------------------------------
-  const walk = (dt, elapsed) => {
-    for (let i = 0; i < walkers.length; i++) {
-      const w = walkers[i], P = w.cave.parts, r = w.cave.root;
-      if (w.pause > 0) w.pause -= dt;
-      else {
-        const before = w.s;
-        w.s = (w.s + w.dir * WALK_SPEED * dt + LOOP_LEN) % LOOP_LEN;
-        // A stop at a waypoint it just passed.
-        for (let k = 0; k < LOOP.length; k++) if (LOOP[k][2] && ((w.dir > 0 && before < LOOP_AT[k] && w.s >= LOOP_AT[k]) || (w.dir < 0 && before > LOOP_AT[k] && w.s <= LOOP_AT[k]))) w.pause = LOOP[k][2];
-      }
-      let k = 0;
-      while (k < LOOP.length - 1 && LOOP_AT[k + 1] <= w.s) k++;
-      const a = LOOP[k], b = LOOP[(k + 1) % LOOP.length], t = (w.s - LOOP_AT[k]) / (LOOP_AT[k + 1] - LOOP_AT[k]);
-      w.x = a[0] + (b[0] - a[0]) * t; w.z = a[1] + (b[1] - a[1]) * t;
-      r.position.x = w.x; r.position.z = w.z; r.position.y = w.base;
-      const moving = w.pause <= 0, stride = moving ? Math.sin(elapsed * 7 + w.leg) * 0.55 : 0;
-      r.rotation.y = Math.atan2((b[0] - a[0]) * w.dir, (b[1] - a[1]) * w.dir);
-      P.legR.rotation.x = stride; P.legL.rotation.x = -stride;
-      P.armR.rotation.x = -stride * 0.6;
-      P.armL.rotation.x = w.wave > 0 || w.cheer > 0 || cheerT > 0 ? -2.6 + Math.sin(elapsed * 12) * 0.3 : stride * 0.6;
-      w.wave = Math.max(0, w.wave - dt);
-      w.cheer = Math.max(0, w.cheer - dt);
-    }
-  };
-  // Any Ooga the visitor walks up to waves and says hello, once in a while; every Ooga cheers when the room does.
-  const HELLOS = ["Ooga!", "Ooga booga!", "Claw sneaky. You try!", "Me beat your score!", "Coconut go bonk!", "Fire warm. Games fun.", "Ooga ooga!", "Me want crown prize!", "Hoo hoo! Welcome!", "Spin wheel! Maybe jackpot!"];
-  let hello = 0;
-  // Ooga m at (x, y, z), dt on, with the visitor at p.
-  const hail = (m, x, y, z, p, dt) => {
-    m.greet = Math.max(0, m.greet - dt);
-    if (m.greet > 0 || Math.abs(x - p.x) > 2.2 || Math.abs(z - p.z) > 2.2 || Math.hypot(x - p.x, z - p.z) > 2.2) return;
-    m.greet = 14;
-    m.wave = 1.6;
-    fx.sayAt(x, y + 2.2, z, HELLOS[hello++ % HELLOS.length], 1.8);
-    hear(x, z, "grunt", 0.7);
-  };
-  const greet = (dt) => {
-    cheerT = Math.max(0, cheerT - dt);
-    if (!avatar) return;
-    const p = avatar.root.position;
-    for (let i = 0; i < crowd.length; i++) { const m = crowd[i]; hail(m, m.x, m.y, m.z, p, dt); }
-    for (let i = 0; i < walkers.length; i++) { const w = walkers[i]; hail(w, w.x, 0, w.z, p, dt); }
-  };
   const roomCheers = () => {
     cheerT = 3;
     const W = LAYOUT.wheel;
@@ -830,13 +673,8 @@
   // time in a while it plays its showpiece and a short call and the nearest Ooga or gorilla calls them over. A big
   // moment at a machine an Ooga plays (its game's `crack`) flashes it and the Oogas round it cheer; coming back from a
   // machine with more tickets flashes that one. Allocation-free.
-  const INVITE = 2.2, CALL_GAP = 7, COOL = 20, CHEER_R = 6;
-  const CALLS = {
-    skee: "Thro-ball! Roll coconut up!", hoops: "Hoop! Coconut in basket!", shy: "Coconut Toss! Bonk them off!", claw: "Claw sneaky. Grab idol!",
-    pinball: "Pinball! Flip coconut!", hockey: "Air hockey! Beat Ooga!", billiards: "Pool! Sink coconuts!", darts: "Darts! Hit bull, Ooga!",
-    ride: "Ride beast! Bump to drum!", snack: "Hungry? Snack bar!", prizes: "Tickets buy prizes!"
-  };
-  let life = null, invited = null, callT = 0;
+  const INVITE = 2.2, COOL = 20;
+  let life = null, invited = null;
   // One of them: its kind, game (none for the counters, totem and muncher), lit node, body and frame, the Ooga playing
   // it if any, its middle and play spot, its place in its row, and the running numbers.
   const liven = (kind, glow, body, at, play, bot) => {
@@ -846,34 +684,7 @@
     life.push(s);
     return s;
   };
-  // A big moment at s: it flashes, and the Oogas within `CHEER_R` m (not the one playing it) cheer, a few seconds apart.
-  const cheerAround = (s) => {
-    s.flash = Math.max(s.flash, 1.2);
-    if (s.cheer > 0) return;
-    s.cheer = 4;
-    const who = s.bot.member;
-    for (let i = 0; i < crowd.length; i++) { const m = crowd[i]; if (m !== who && Math.abs(m.x - s.x) + Math.abs(m.z - s.z) < CHEER_R) m.cheer = 2; }
-    for (let i = 0; i < walkers.length; i++) { const w = walkers[i]; if (Math.abs(w.x - s.x) + Math.abs(w.z - s.z) < CHEER_R) w.cheer = 2; }
-    hear(s.x, s.z, "cheer", 0.5);
-  };
-  // The nearest Ooga at play or strolling (not one who has just said hello) or gorilla on the floor not already
-  // speaking, within 8 m of s's play spot, calls the visitor over, and that counts as its hello. True if one did.
-  const callOver = (s) => {
-    let best = 64, m = null, g = null;
-    for (let i = 0; i < crowd.length + walkers.length; i++) {
-      const o = i < crowd.length ? crowd[i] : walkers[i - crowd.length], d = (o.x - s.px) * (o.x - s.px) + (o.z - s.pz) * (o.z - s.pz);
-      if (d < best && o.greet < 11) { best = d; m = o; }
-    }
-    if (crewSay <= 0) for (let i = 0; i < staff.length; i++) {
-      const o = staff[i], q = o.agent.root.position, d = (q.x - s.px) * (q.x - s.px) + (q.z - s.pz) * (q.z - s.pz);
-      if (!o.deck && d < best) { best = d; g = o; }
-    }
-    if (g) { crewSays(g, CALLS[s.kind]); g.greetCool = Math.max(g.greetCool, 30); }
-    else if (m) { m.wave = 1.6; m.greet = 14; fx.sayAt(m.x, (m.pose ? m.y : 0) + 2.2, m.z, CALLS[s.kind], 2); }
-    return g !== null || m !== null;
-  };
   const stationLife = (dt, elapsed) => {
-    callT = Math.max(0, callT - dt);
     const q = avatar && !leaving && feetOf() < 1 ? avatar.root.position : null, near = q ? nearStation(q.x, q.z, INVITE) : null;
     let now = null;
     for (let i = 0; i < life.length; i++) {
@@ -916,7 +727,7 @@
         now.cool = COOL;
         if (now.g !== null && !now.g.playing) { now.g.tease(); now.next = Math.max(now.next, 8); if (now.bot) now.bot.cool = Math.max(now.bot.cool, 2); }
         hear(now.px, now.pz, "star0", 0.6);
-        if (callT <= 0 && callOver(now)) callT = CALL_GAP;
+
       }
     }
   };
@@ -924,7 +735,7 @@
   const toggleMute = () => { const off = audio.setMuted(!audio.muted); hud.toast(off ? "Sound off" : "Sound on"); };
   const onKey = (e) => {
     if (ghosts && ghosts.key(e)) return true; // HALLOWEEN
-    // The visitor's Ooga carries its club and rifle through the whole arcade, as on the island (#420): X aims, 1 and 2
+    // X keeps mouse-look available; ownership gates weapon actions outside the arena. 1 and 2
     // pick the club or the rifle, G swaps, V fires. Outside a hunt they meet nothing but the herald.
     if (!e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) {
       if ((e.key === "x" || e.key === "X") && pilot.modeAction("mode-toggle")) return true;
@@ -1138,17 +949,25 @@
     // The Ooga list stays up through a hunt, as it does in the hall.
     document.body.classList.toggle("game-mode", on);
   };
-  // In the arena the visitor's rifle never runs short of rounds; back in the hall it has what it had, still in hand.
+  // The outside loadout is parked for this visit. The arena lends a rifle; the hall never has usable weapons.
+  const putWeaponsAway = () => {
+    const w = avatar.weapon;
+    people.selectWeapon(0, avatar);
+    w.primaryOwned = w.secondaryOwned = false;
+    people.poseWeapon(avatar);
+    pilot.refreshCombat();
+  };
   const arm = (on) => {
     armed = on;
     const w = avatar.weapon;
     if (on) {
       rifleWas = w.unlimited; w.unlimited = true;
+      w.secondaryOwned = true;
       // The rifle in hand, not just carried, so a shot can wake the herald (a carried rifle never fires).
       pilot.weaponMode(2);
       hud.hint(COARSE ? "Rifle out · tap the ghost or shoot it to start the hunt" : "Rifle out · X to aim, then shoot the ghost (or click it) to start the hunt", 6000);
     }
-    else w.unlimited = rifleWas;
+    else { w.unlimited = rifleWas; putWeaponsAway(); }
     pilot.refreshCombat();
   };
   // Not in the hunt (it filled, or they never readied): walked out to the hallway before the fence rises, facing in.
@@ -1345,25 +1164,17 @@
   // Six gorillas run the hall, one crew in the staff's red and gold with each role's own piece (`AM.staffHat`,
   // `AM.staffVest`, and the `AM.staffProp` its jobs take in hand). Each works a routine of jobs picked at random
   // (cosmetic, so `Math.random`): it walks there on a route planned round everything in the hall (the deck's attendant
-  // on the deck), turns to the work, does it for a few seconds with part rotations and its prop, now and then stops for
-  // a word with an Ooga, and moves on. The nearest one greets the visitor walking up, and the gamemaster leads the room
-  // when the wheel pays out. They give way to the visitor, the strolling Oogas and each other, and block nobody.
+  // on the deck), turns to its maintenance work, then moves on. They avoid one another and scenery,
+  // but neither react to nor block live players.
   // Each role: its hat, uniform and prop (-1 none) and the arm holding it, whether it walks upright (prop in hand) or
-  // on its knuckles, whether it keeps to the deck, its jobs (one listed twice comes up twice as often), its greeting
-  // for the visitor and its words with an Ooga.
+  // on its knuckles, whether it keeps to the deck and its jobs (one listed twice comes up twice as often).
   const ROLES = [
-    { id: "gamemaster", hat: 0, vest: 0, prop: 0, hand: "armR", upright: true, deck: false, start: "host", jobs: ["host", "host", "wheel", "fame", "welcome", "call", "call"],
-      hello: "Welcome, welcome! Step right up!", chat: ["You play good, Ooga!", "Big score coming. Me feel it!", "Spin wheel! Jackpot waiting!"] },
-    { id: "attendant", hat: 1, vest: 1, prop: -1, hand: "armL", upright: false, deck: false, start: "totem", jobs: ["totem", "muncher", "tokens", "tokens", "whistle"],
-      hello: "Need tokens? Me got tokens!", chat: ["More tokens? Me got!", "No bite tokens, Ooga.", "Play fair. Have fun!"] },
-    { id: "mechanic", hat: 2, vest: 2, prop: 1, hand: "armL", upright: false, deck: false, start: "fix", jobs: ["fix", "fix", "fix", "tap"],
-      hello: "All machines fixed. Go play!", chat: ["Machine sound funny? Tell me.", "No kick machine, Ooga!", "Me fix. Me smart."] },
-    { id: "runner", hat: 3, vest: 3, prop: 2, hand: "armL", upright: true, deck: false, start: "fill", jobs: ["fill", "serve"],
-      hello: "Coconut? Fresh off tree!", chat: ["Thirsty? Coconut coming!", "Slurp slurp, good!", "Grub on stick later!"] },
-    { id: "clerk", hat: 1, vest: 4, prop: 3, hand: "armL", upright: false, deck: false, start: "stock", jobs: ["stock", "stock", "claw", "tickets", "tickets", "muncher", "bucket"],
-      hello: "Tickets buy prizes! Come see!", chat: ["Many tickets! Prize soon!", "Crown prize shiny. You want?", "Count tickets. Me count good."] },
-    { id: "keeper", hat: 1, vest: 4, prop: 4, hand: "armL", upright: false, deck: true, start: "dust", jobs: ["dust", "dust", "fan", "rail"],
-      hello: "Hoo! Old games up here! Come play!", chat: ["Dust gone. Games shiny.", "Fire up here warm!", "Coconut Invaders! Me love."] }
+    { id: "gamemaster", hat: 0, vest: 0, prop: 1, hand: "armR", upright: true, deck: false, start: "tap", jobs: ["tap", "fix"] },
+    { id: "attendant", hat: 1, vest: 1, prop: -1, hand: "armL", upright: false, deck: false, start: "totem", jobs: ["totem", "muncher"] },
+    { id: "mechanic", hat: 2, vest: 2, prop: 1, hand: "armL", upright: false, deck: false, start: "fix", jobs: ["fix", "fix", "fix", "tap"] },
+    { id: "runner", hat: 3, vest: 3, prop: 2, hand: "armL", upright: true, deck: false, start: "fill", jobs: ["fill", "serve"] },
+    { id: "clerk", hat: 1, vest: 4, prop: 3, hand: "armL", upright: false, deck: false, start: "stock", jobs: ["stock", "claw", "muncher", "bucket"] },
+    { id: "keeper", hat: 1, vest: 4, prop: 4, hand: "armL", upright: false, deck: true, start: "dust", jobs: ["dust", "dust", "fan"] }
   ];
   // Each job: the pose it is worked in, how long (s), whether the role's prop comes out, how often it speaks up and
   // what it says, a cue at the start and one repeated while it works ([name, every s, loudness]). Its spots are laid
@@ -1391,8 +1202,6 @@
     rail: { pose: "rail", time: [3.5, 5], prop: false, talk: 0.8, cue: null, tick: null, say: ["Ooga! Games up here!", "Hoo hoo! Me see you!"] }
   };
   for (const id in JOBS) Object.assign(JOBS[id], { id, spots: [] });
-  // What an Ooga says back.
-  const REPLIES = ["Ooga!", "Hoo! Thanks!", "Me win big!", "Ooga booga!", "Slurp!", "Yes yes!"];
   const CREW_SCALE = 0.72, CREW_BODY = 0.38, CREW_AHEAD = 0.2, GIVE_WAY = 1, CREW_TOUCH = 0.75, ROUTE_CAP = 24, AVOID_R = 1.35;
   // Where each prop sits on its arm (the fist is at its end), whether it is held level whatever the arm does (the
   // tray, and the roll so its strip hangs), and otherwise its turn about x (out along the arm); the tray sits between
@@ -1554,9 +1363,6 @@
   const avoidFor = (g, crowded) => {
     plan.avoidN = 0;
     for (let i = 0; i < staff.length; i++) { const o = staff[i], q = o.agent.root.position; if (o !== g && o.deck === g.deck && (crowded || o.phase !== "walk")) avoidAdd(g, q.x, q.z); }
-    if (!crowded) return;
-    if (avatar && Math.abs(feetOf() - g.agent.root.position.y) < 1) avoidAdd(g, avatar.root.position.x, avatar.root.position.z);
-    if (!g.deck && g.stuck < 0.5) for (let i = 0; i < walkers.length; i++) avoidAdd(g, walkers[i].x, walkers[i].z);
   };
   // Sets g walking its route to (g.tx, g.tz); false when there is none.
   const route = (g, crowded) => {
@@ -1575,12 +1381,8 @@
 
   // A gorilla's step: its torso, a square `CREW_BODY` m either side of a middle `CREW_AHEAD` m out ahead of its feet,
   // held off walls, rails and blocks as an Ooga's is, on its own level (the floor and the stage, never the stairs, or
-  // the deck and never off it), and giving way: it never walks on closer than `GIVE_WAY` m into the visitor, a
-  // strolling Ooga, a gorilla standing at work or one walking ahead of it in the crew's order (so two walking never
-  // both wait on each other from afar; any other only closer than `CREW_TOUCH`, where the one behind has already
-  // stopped); routes keep `AVOID_R` m off them, wider, so a detour is never refused. A strolling Ooga
-  // walks on regardless, so after half a second of waiting on one the gorilla goes on too; and after a second hemmed
-  // in by the crew (one at work in a narrow way, two nose to nose) it squeezes past.
+  // the deck and never off it). Staff give way to each other in rank order; live players do not alter their route.
+  // After a second hemmed in by another worker it squeezes past.
   const giveWay = (ax, az, bx, bz, ox, oz, r) => {
     const to = (bx - ox) * (bx - ox) + (bz - oz) * (bz - oz);
     return to >= r * r || to >= (ax - ox) * (ax - ox) + (az - oz) * (az - oz);
@@ -1592,8 +1394,7 @@
     if (wallDepth(x1, z1, CREW_BODY) > Math.max(0, wallDepth(x0, z0, CREW_BODY)) + 1e-6) return false;
     for (let i = 0; i < blocks.length; i++) if (!clearOf(blocks[i], x0, z0, x1, z1, CREW_BODY, y)) return false;
     for (let i = 0; i < RAILS.length; i++) if (!clearOf(RAILS[i], x0, z0, x1, z1, CREW_BODY, y)) return false;
-    if (avatar && Math.abs(feetOf() - y) < 1 && !giveWay(x0, z0, x1, z1, avatar.root.position.x, avatar.root.position.z, GIVE_WAY)) return false;
-    if (!g.deck && g.stuck < 0.5) for (let i = 0; i < walkers.length; i++) if (!giveWay(x0, z0, x1, z1, walkers[i].x, walkers[i].z, GIVE_WAY)) return false;
+
     if (g.stuck < 1) for (let i = 0; i < staff.length; i++) { const o = staff[i]; if (o !== g && o.deck === g.deck && !giveWay(x0, z0, x1, z1, o.mx, o.mz, i < g.rank || o.phase !== "walk" ? GIVE_WAY : CREW_TOUCH)) return false; }
     return true;
   };
@@ -1618,24 +1419,10 @@
     LAYOUT.changers.forEach((p, i) => { toHall(p, 0, 1.15, at); spot(i ? "muncher" : "totem", at.x, at.z, p.turn + Math.PI); });
     // The attendant keeps an eye on the kiddie rides from the entry avenue, by the silverback and by the baby mammoth.
     for (const [x, z, i] of [[3.1, 3.5, 0], [3.1, -0.1, 3]]) { const r = LAYOUT.rides[i]; spot("whistle", x, z, toward(x, z, r.x, r.z)); }
-    // Beside an Ooga: at its side or a little behind, wherever the floor is open, facing it.
-    const beside = (id, m) => {
-      const f = m.facing, sx = Math.cos(f), sz = -Math.sin(f), fx0 = Math.sin(f), fz0 = Math.cos(f);
-      for (const [side, back] of [[1.35, 0.45], [-1.35, 0.45], [0, 1.5], [1.55, -0.2], [-1.55, -0.2]]) {
-        const x = m.x + sx * side - fx0 * back, z = m.z + sz * side - fz0 * back, c = cellAt(x, z);
-        if (c >= 0 && plan.open[c] & FLOOR) return spot(id, x, z, toward(x, z, m.x, m.z), m);
-      }
-    };
-    for (let i = 0; i < crowd.length; i++) {
-      const m = crowd[i];
-      if (m.pose === "skee" || m.pose === "shoot") { beside("tokens", m); beside("tickets", m); }
-      else if (m.pose === "claw" || m.pose === "pinball" || m.pose === "hockey") beside("tokens", m);
-      else if (m.pose === "cheer" || m.pose === "queue") beside("serve", m);
-    }
     // Every machine and cabinet nobody plays, from its player's spot; the pool tables from each side too.
     for (let i = 0; i < stations.length; i++) {
       const st = stations[i], p = st.play;
-      if ((st.kind !== "machine" && st.kind !== "cabinet") || (st.kind === "cabinet" && GAMES[st.game].unavailable) || (st.game && st.game.kind === "darts") || crowd.some((m) => Math.abs(m.x - p.x) + Math.abs(m.z - p.z) < 1.2)) continue;
+      if ((st.kind !== "machine" && st.kind !== "cabinet") || (st.kind === "cabinet" && GAMES[st.game].unavailable) || (st.game && st.game.kind === "darts")) continue;
       spot("fix", p.x, p.z, p.facing);
       if (st.kind === "machine" && st.game.kind === "claw") spot("claw", p.x, p.z, p.facing);
     }
@@ -1643,11 +1430,10 @@
     toHall(LAYOUT.snack, -1.1, 1.75, at); spot("fill", at.x, at.z, LAYOUT.snack.turn + Math.PI);
     // A table is served from its first open side with no one sitting there, and its sitter answers.
     for (const [x, z] of LAYOUT.tables) {
-      const sitter = crowd.find((m) => m.pose === "sit" && Math.abs(m.x - x) < 1.6 && Math.abs(m.z - z) < 1.6) || null;
       for (const [dx, dz] of [[0, -1.45], [1.75, 0.2], [-1.75, 0.2], [0, 1.9]]) {
         const c = cellAt(x + dx, z + dz);
-        if (c < 0 || !(plan.open[c] & FLOOR) || (sitter && Math.hypot(sitter.x - x - dx, sitter.z - z - dz) < 1)) continue;
-        spot("serve", x + dx, z + dz, toward(x + dx, z + dz, x, z), sitter);
+        if (c < 0 || !(plan.open[c] & FLOOR)) continue;
+        spot("serve", x + dx, z + dz, toward(x + dx, z + dz, x, z));
         break;
       }
     }
@@ -1665,30 +1451,22 @@
     for (const x of [-8, -3.5, 3.5, 8]) spot("rail", x, MEZZ.z1 - 0.95, 0);
   };
 
-  // Whether spot s is within 1.5 m of the visitor, on the level of feet at y: no gorilla starts or takes a job there
-  // (back from a game, the visitor stands at that machine's play spot).
-  const byVisitor = (s, y) => {
-    if (!avatar || Math.abs(feetOf() - y) >= 1) return false;
-    const q = avatar.root.position;
-    return (s.x - q.x) * (s.x - q.x) + (s.z - q.z) * (s.z - q.z) < 2.25;
-  };
-  // Hires the crew for the visit, once the room, its Oogas and the visitor are in place: each gorilla starts at work
-  // at its first job's first free spot clear of the visitor.
+  // Maintenance routes depend on scenery and other staff, never on live players.
   const hireCrew = () => {
     layPlan();
     layJobs();
-    crewSay = crewGreet = 0;
+    crewSay = 0;
     staff = [];
     for (const role of ROLES) {
-      const spots = JOBS[role.start].spots, level = role.deck ? MEZZ.y : 0;
-      const s = spots.find((q) => !q.taken && !byVisitor(q, level)) || spots.find((q) => !q.taken), y = role.deck ? MEZZ.y : supportAt(s.x, s.z, 0.5);
+      const spots = JOBS[role.start].spots;
+      const s = spots.find((q) => !q.taken), y = role.deck ? MEZZ.y : supportAt(s.x, s.z, 0.5);
       const pts = Array.from({ length: ROUTE_CAP }, () => ({ x: 0, z: 0 })), routes = [null];
       for (let n = 1; n <= ROUTE_CAP; n++) routes.push(pts.slice(0, n));
       const g = {
         role, rank: staff.length, deck: role.deck, agent: null, prop: null, pts, routes, n: 0, routeLen: 0, partial: false,
         phase: "work", t: 0, dur: 0, spot: s, last: null, job: s.job, face: s.facing, tx: s.x, tz: s.z,
-        stuck: 0, skip: 0, ax: s.x, az: s.z, replan: 0, walkT: 0, walkMax: 0, blend: 1, carry: 0, carrying: false, greetCool: 0, resume: "", resumeT: 0, resumeDur: 0,
-        said: false, tick: 0, spun: false, replied: false, chatted: false, with: null, mx: s.x, mz: s.z, walked: 0, done: 0
+        stuck: 0, skip: 0, ax: s.x, az: s.z, replan: 0, walkT: 0, walkMax: 0, blend: 1, carry: 0, carrying: false,
+        said: false, tick: 0, spun: false,  mx: s.x, mz: s.z, walked: 0, done: 0
       };
       g.agent = BL.agent.create({ groundAt: (x, z) => supportAt(x, z, g.agent ? g.agent.root.position.y : y), walkable: (ax, az, bx, bz, feet) => crewStep(g, ax, az, bx, bz, feet), form: "ape", x: s.x, z: s.z, heading: s.facing, scale: CREW_SCALE });
       const P = g.agent.parts;
@@ -1725,7 +1503,7 @@
       if (g.role.id === "runner" && (job === JOBS.serve) !== g.carrying) continue;
       for (let k = 0; k < job.spots.length && n < CAND.length; k++) {
         const s = job.spots[k], d = (s.x - p.x) * (s.x - p.x) + (s.z - p.z) * (s.z - p.z);
-        if (s.taken || s === g.last || claimedNear(g, s) || d < near * near || d > far * far || byVisitor(s, p.y)) continue;
+        if (s.taken || s === g.last || claimedNear(g, s) || d < near * near || d > far * far) continue;
         CAND[n++] = s;
       }
     }
@@ -1752,66 +1530,25 @@
     const job = g.job, p = g.agent.root.position;
     g.agent.place(p.x, p.z, g.agent.heading);
     g.phase = "work"; g.t = 0; g.dur = job.time[0] + Math.random() * (job.time[1] - job.time[0]);
-    g.said = g.spun = g.replied = false; g.tick = 0.3;
+    g.said = g.spun = false; g.tick = 0.3;
   };
-  // A word with the nearest Ooga at play or strolling within 3.2 m (not on the deck), who waves and answers.
-  const chat = (g) => {
-    if (g.deck) return false;
-    const p = g.agent.root.position;
-    let near = null, best = 3.2 * 3.2;
-    for (let i = 0; i < crowd.length + walkers.length; i++) {
-      const m = i < crowd.length ? crowd[i] : walkers[i - crowd.length], q = m.cave.root.position, d = (q.x - p.x) * (q.x - p.x) + (q.z - p.z) * (q.z - p.z);
-      if (d < best) { best = d; near = m; }
-    }
-    if (!near) return false;
-    g.phase = "chat"; g.t = 0; g.dur = 2.6; g.with = near; g.replied = false; g.chatted = true;
-    crewSays(g, g.role.chat[Math.floor(Math.random() * g.role.chat.length)]);
-    near.wave = 1.8;
-    return true;
-  };
-  // The end of whatever g was doing: back to the work or walk a greeting broke into, a word after a job now and then,
-  // else the next job.
   const finish = (g) => {
-    if (g.phase === "greet" || g.phase === "cheer") {
-      if (g.resume === "work" && g.spot) { g.phase = "work"; g.t = g.resumeT; g.dur = g.resumeDur; g.face = g.spot.facing; return; }
-      if (g.resume === "walk" && g.spot) { g.phase = "walk"; g.t = 0; g.walkT = 0; g.stuck = 0; if (route(g, true)) return; }
-      return nextJob(g);
-    }
     if (g.phase === "work") {
       g.done++;
       if (g.job === JOBS.fill) g.carrying = true;
       if (g.job === JOBS.serve) g.carrying = false;
-      if (!g.chatted && Math.random() < 0.3 && chat(g)) return;
     }
-    g.chatted = g.phase === "chat";
     nextJob(g);
   };
-  // A greeting or a cheer breaks into whatever g was doing, stopping it where it is.
-  const interrupt = (g, phase, dur, face) => {
-    const p = g.agent.root.position;
-    if (g.phase !== "greet" && g.phase !== "cheer") { g.resume = g.phase; g.resumeT = g.t; g.resumeDur = g.dur; }
-    g.phase = phase; g.t = 0; g.dur = dur; g.face = face;
-    g.agent.place(p.x, p.z, g.agent.heading);
-  };
   // One line at a time from the crew, and only from one near the visitor, over its head.
-  let crewSay = 0, crewGreet = 0;
+  let crewSay = 0;
   const crewSays = (g, text, always = false) => {
     const p = g.agent.root.position, q = avatar ? avatar.root.position : pilot.orbit.target;
     if ((!always && crewSay > 0) || Math.abs(p.x - q.x) + Math.abs(p.z - q.z) > 16) return;
     crewSay = 2.4;
     fx.sayAt(p.x, p.y + 2, p.z, text, 1.9);
   };
-  // The gamemaster takes up the wheel's moments with his line: a cheer toward it (a big win, the visitor back with
-  // more tickets), or with `cheer` false a wave to the visitor (a small win).
-  const hostSays = (text, cheer) => {
-    const g = staff[0], p = g.agent.root.position, W = LAYOUT.wheel;
-    interrupt(g, cheer ? "cheer" : "greet", cheer ? 3.5 : 2.4, Math.atan2(W.x - p.x, W.z - p.z));
-    crewSays(g, text, true);
-    hear(p.x, p.z, cheer ? "ooga" : "grunt", 0.8);
-  };
-  // While at work: its line and cue once it has settled, the cue repeated as it works, and what the job does to the
-  // room: the wheel drifts on under a push (never a spin that stops on a value), the fanned fire flares, and the Ooga
-  // it is done for waves and answers.
+  // Maintenance cues belong to the current job, independent of the visitor's actions.
   const work = (g, dt) => {
     const job = g.job, s = g.spot, p = g.agent.root.position;
     if (!g.said && g.t > 0.5) {
@@ -1824,14 +1561,7 @@
     if (job === JOBS.fill && g.t > g.dur * 0.55) g.carrying = true;
     if (job === JOBS.serve && g.t > g.dur * 0.55) g.carrying = false;
     if (s.flame >= 0) { const f = lit.flames[s.flame], k = 1.25 + Math.sin(g.t * 9) * 0.15; f.node.scale.x *= k; f.node.scale.y *= k; f.node.scale.z *= k; f.node.glow *= k; }
-    if (s.member && !g.replied && g.t > 1.4) { g.replied = true; answer(s.member); }
   };
-  const answer = (m) => {
-    const q = m.cave.root.position;
-    m.wave = 1.6;
-    fx.sayAt(q.x, (m.pose ? m.y : 0) + 2.2, q.z, REPLIES[Math.floor(Math.random() * REPLIES.length)], 1.6);
-  };
-
   // The pose g works in, as target angles into `POSE`: the chest's lean from upright, the thighs' swing (forward
   // negative; the hips sink to keep the feet down), each arm's raise from hanging straight down (a quarter turn
   // points it ahead, a half turn straight up) and its swing out to the side, the right forearm's twist, and the
@@ -1840,7 +1570,7 @@
   const posture = (g, i) => {
     const Z = POSE, t = g.t, kind = g.phase === "work" ? g.job.pose : g.phase;
     Z.pitch = 0.1; Z.legs = 0; Z.lx = Z.rx = 0.15; Z.lz = Z.rz = Z.ry = 0; Z.hx = 0.05; Z.hy = 0;
-    if (kind === "cheer" || (cheerT > 0 && kind !== "greet")) { Z.lx = Z.rx = 2.85 + Math.sin(t * 9 + i) * 0.15; Z.lz = -0.3; Z.rz = 0.3; Z.pitch = 0.05; Z.hx = -0.3; return; }
+    if (kind === "cheer") { Z.lx = Z.rx = 2.85 + Math.sin(t * 9 + i) * 0.15; Z.lz = -0.3; Z.rz = 0.3; Z.pitch = 0.05; Z.hx = -0.3; return; }
     switch (kind) {
       case "host": Z.pitch = 0.08; Z.lx = 1.7 + Math.sin(t * 3) * 0.12; Z.lz = -0.3; Z.rx = 1.1 + Math.sin(t * 1.7) * 0.5; Z.rz = 0.55; Z.hx = -0.1; Z.hy = Math.sin(t * 0.9) * 0.45; break;
       case "wheel": Z.pitch = 0.05; Z.lx = Z.rx = 2.65 + Math.sin(t * 4) * 0.1; Z.lz = -0.45; Z.rz = 0.45; Z.hx = -0.35; break;
@@ -1905,28 +1635,9 @@
   // next job instead, so none stands stuck.
   const crewUpdate = (dt) => {
     crewSay = Math.max(0, crewSay - dt);
-    crewGreet = Math.max(0, crewGreet - dt);
-    if (avatar && crewGreet <= 0) {
-      const q = avatar.root.position, feet = feetOf();
-      let near = null, best = 2.6 * 2.6;
-      for (let i = 0; i < staff.length; i++) {
-        const g = staff[i], p = g.agent.root.position, d = (p.x - q.x) * (p.x - q.x) + (p.z - q.z) * (p.z - q.z);
-        if (g.greetCool <= 0 && g.phase !== "greet" && g.phase !== "cheer" && Math.abs(p.y - feet) < 1 && d < best) { best = d; near = g; }
-      }
-      if (near) {
-        crewGreet = 4;
-        near.greetCool = 30;
-        interrupt(near, "greet", 2.4, 0);
-        crewSays(near, near.role.hello, true);
-        hear(q.x, q.z, "grunt", 0.7);
-      }
-    }
     for (let i = 0; i < staff.length; i++) {
       const g = staff[i], a = g.agent, p = a.root.position;
       g.t += dt;
-      g.greetCool = Math.max(0, g.greetCool - dt);
-      if (g.phase === "greet" && avatar) g.face = Math.atan2(avatar.root.position.x - p.x, avatar.root.position.z - p.z);
-      if (g.phase === "chat") { const q = g.with.cave.root.position; g.face = Math.atan2(q.x - p.x, q.z - p.z); if (!g.replied && g.t > 1.1) { g.replied = true; answer(g.with); } }
       // Standing: turned toward its work and up on its feet; walking upright, kept upright.
       if (g.phase === "walk") { if (g.role.upright && a.walking && !a.beating) a.setGait("upright"); }
       else if (!a.beating) {
@@ -1959,7 +1670,7 @@
       }
       const standing = g.phase !== "walk" && g.phase !== "wait" && !a.beating;
       g.blend += ((standing ? 1 : 0) - g.blend) * Math.min(1, dt * 7);
-      const hold = g.role.id === "gamemaster" ? g.phase === "walk" : g.carrying && (g.phase !== "work" || cheerT > 0);
+      const hold = g.role.id === "gamemaster" ? g.phase === "walk" : g.carrying && (g.phase !== "work");
       g.carry += ((hold && !a.beating ? 1 : 0) - g.carry) * Math.min(1, dt * 7);
       pose(g, i);
       g.mx = p.x + Math.sin(a.heading) * CREW_AHEAD;
@@ -2112,23 +1823,32 @@
       const at = from >= 0 ? live.find((c) => c.game === from).play : retroFrom ? retroFrom.play : machineFrom ? (machineFrom.bot ? toHall({ x: machineFrom.play.x, z: machineFrom.play.z, turn: machineFrom.turn }, 0, 1.3, { facing: machineFrom.play.facing }) : machineFrom.play) : { x: 0, z: HALL.front - 1.5, facing: Math.PI };
       Object.assign(avatar.root.position, { x: at.x, y: avatar.baseY + supportAt(at.x, at.z, retroFrom || from >= 0 && live.find(c => c.game === from).y === MEZZ.y ? MEZZ.y : 1), z: at.z });
       avatar.root.rotation.y = at.facing;
-      // The rifle is the visitor's here, and the Ooga comes in as it left the last scene (pilot.js `arrive`): with nothing
-      // carried, empty-handed with the rifle on its back.
-      avatar.weapon.secondaryOwned = true;
+      // Carry the view and record the outside loadout before parking its weapons for the visit.
       const carried = pilot.arrive(avatar);
       if (!pilot.loginViewRestored) pilot.navigate({ position: { x: at.x, y: avatar.root.position.y - avatar.baseY, z: at.z }, yaw: at.facing - Math.PI, pitch: 0.18, dist: 4 });
-      // 1 and 2 take the club or the rifle here as on the island.
+      // A direct arrival has no outside weapon in hand.
       if (!carried) {
         people.selectWeapon(0, avatar);
         avatar.weapon.aiming = false;
       }
+      const w = avatar.weapon;
+      outsideWeapon = { primaryOwned: w.primaryOwned, secondaryOwned: w.secondaryOwned, selectedSlot: w.selectedSlot,
+        held: w.equipped ? 2 : w.primaryEquipped ? 1 : 0, unlimited: w.unlimited, ammo: w.ammo, spareAmmo: w.spareAmmo.slice() };
+      putWeaponsAway();
       hud.hint(COARSE ? "Stick walks · PLAY at a game" : "W A S D walk · mouse or Q E turn · Space plays what is next to you", 6000);
     } else if (from >= 0) pilot.goPreset(GAMES[from].id);
     lastPlayer = playerName;
     unsubscribeAccount = BL.net.subscribe(accountChanged);
-    seatCrowd(playerName);
-    // Other signed-in players in the hall, as the Oogas they drive (after the crowd, which they may stand in for).
-    remotes = BL.remotePlayers.create({ root, crew: people, fx, hide: hideCrowd, visible: (rec) => HALL_ZONES.has(rec.zone) && !(ghosts && ghosts.down(rec.id)) });
+    crowd = []; walkers = [];
+    // Other signed-in players keep their real Ooga or gorilla avatars; no simulated roster crowd is created.
+    remotes = BL.remotePlayers.create({ root, crew: people, fx,
+      visible: (rec) => HALL_ZONES.has(rec.zone) && !(ghosts && ghosts.down(rec.id)),
+      posed: (cave, feet) => {
+        // The shared unarmed pose keeps a club outside; Arcade parks it for every visitor.
+        if (cave.parts.club) cave.parts.club.visible = false;
+        if (cave.parts.gun && !inArenaRing(cave.root.position.x, cave.root.position.z, feet)) cave.parts.gun.visible = false;
+      }
+    });
     // HALLOWEEN: the ghost hunt, played in the arena: its herald over the middle until a click or a shot from inside
     // wakes it and its code loads, kept in step with the others in the arena through the room (`ghostChannel`).
     zoneNow = "arcade.hall"; zoneHeld = 0; armed = false;
@@ -2159,11 +1879,9 @@
       fx.burst(LAYOUT.wheel.x, LAYOUT.wheel.y, LAYOUT.wheel.z + 0.4, 40, SPARKS, 2.8);
       hud.toast(`+${won} tickets! ${tickets} on the board. Ooga rich!`);
       roomCheers();
-      hostSays("More tickets! Ooga rich!", true);
     }
     // Back at a machine: it holds its call for a while, and flashes and throws embers if it paid tickets.
     invited = null;
-    callT = 0;
     const back = machineFrom ? life.find((s) => s.station === machineFrom) : null;
     if (back) {
       back.cool = COOL;
@@ -2185,56 +1903,6 @@
       get halloween() { return ghosts ? ghosts.debug : ghostEntry && ghostEntry.debug; },
       get arena() { return { armed, zone: zoneNow, fence: fenceK, gameMode }; }
     };
-  };
-
-  // The crowd, from part rotations alone: allocation-free. Each pose is a loop on the
-  // Ooga's own clock `t`, so no two play in step.
-  const tri = (p) => Math.abs(p - Math.floor(p + 0.5)) * 2;
-  const animateCrowd = (dt, elapsed) => {
-    for (let i = 0; i < crowd.length; i++) {
-      const m = crowd[i], P = m.cave.parts, t = (m.t += dt);
-      let armR = 0, armL = 0, head = 0, sway = 0;
-      if (m.pose === "claw" || m.pose === "pinball") {
-        armR = -1.05 + Math.sin(t * 8) * 0.07;
-        armL = m.pose === "pinball" ? -1.05 - Math.max(0, Math.sin(t * 6.5)) * 0.25 : -1.1 + Math.sin(t * 5 + 1) * 0.12;
-        head = 0.25 + Math.sin(t * 1.3) * 0.05;
-      } else if (m.pose === "hockey") {
-        armL = -0.85 + Math.sin(t * 4.6) * 0.3;
-        armR = -0.3;
-        head = 0.35;
-        sway = Math.sin(t * 2.3) * 0.2;
-      } else if (m.pose === "skee") {
-        // Swung by its game: back, then through to the release, when the machine takes its roll.
-        const k = m.swing;
-        armL = k > 0.6 ? (1 - k) / 0.4 * 0.8 : k > 0 ? 0.8 - (0.6 - k) / 0.6 * 2.2 : -0.1;
-        armR = -0.3;
-        head = 0.1;
-      } else if (m.pose === "shoot") {
-        const up = m.swing > 0 ? Math.sin(m.swing * Math.PI) : 0;
-        armR = armL = -0.6 - up * 2.1;
-        head = -0.25 * up;
-      } else if (m.pose === "sit") {
-        armL = -1.2 - Math.max(0, Math.sin(t * 1.8)) * 0.9;
-        armR = -0.9;
-        head = 0.1 + Math.sin(t * 1.8) * 0.08;
-      } else if (m.pose === "queue") {
-        P.head.rotation.y = Math.sin(t * 0.6) * 0.5;
-        armR = armL = Math.sin(t * 1.1) * 0.1;
-      } else {
-        const up = Math.max(0, Math.sin(t * 1.6)) ** 3;
-        armR = armL = -2.8 * up;
-        head = -0.3;
-      }
-      m.swing = Math.max(0, m.swing - dt * 1.6);
-      m.wave = Math.max(0, m.wave - dt);
-      m.cheer = Math.max(0, m.cheer - dt);
-      if ((cheerT > 0 || m.cheer > 0) && m.pose !== "sit") armR = armL = -2.4 - Math.abs(Math.sin(t * 7)) * 0.4;
-      else if (m.wave > 0) armL = -2.6 + Math.sin(t * 12) * 0.3;
-      P.armR.rotation.x = armR;
-      P.armL.rotation.x = armL;
-      P.head.rotation.x = head;
-      m.cave.root.rotation.y = m.facing + sway;
-    }
   };
 
   // Per frame, allocation-free: the walker and camera, the screens' loops, the carnival, the staff, the prompt at a
@@ -2317,10 +1985,7 @@
     const peg = Math.floor(-spin.face.rotation.z / (Math.PI * 2 / AM.WHEEL_VALUES.length)), spinning = spin.t >= 0, flashing = spin.party > 0 || spin.flash > 0;
     if (peg !== wheelTick) { wheelTick = peg; hear(LAYOUT.wheel.x, LAYOUT.wheel.z, "click", spinning ? 1.2 : spin.speed > 1 ? 0.8 : 0.35, spinning ? 1.45 - 0.75 * Math.min(1, spin.speed / 12) : 1); }
     for (let i = 0; i < spin.bulbs.length; i++) spin.bulbs[i].glow = spinning ? (wheelTick % 3 === i ? 1.8 : 0.3) : flashing ? (Math.floor(elapsed * 12) & 1 ? 1.4 : 0.35) : 1;
-    animateCrowd(dt, elapsed);
-    playBots(dt);
-    walk(dt, elapsed);
-    greet(dt);
+    cheerT = Math.max(0, cheerT - dt);
     lights(dt, elapsed);
     crewUpdate(dt);
     ambience(dt);
@@ -2372,6 +2037,18 @@
     ghostChannel.dispose();
     setGameMode(false);
     if (armed) arm(false);
+    if (avatar && outsideWeapon) {
+      const w = avatar.weapon;
+      w.primaryOwned = outsideWeapon.primaryOwned; w.secondaryOwned = outsideWeapon.secondaryOwned;
+      w.unlimited = outsideWeapon.unlimited;
+      // Arena swaps and knockout drops belong to the borrowed rifle, not the parked mainland magazines.
+      // Combat cleanup above returns the drops before these original counts are restored.
+      w.ammo = outsideWeapon.ammo;
+      w.spareAmmo.splice(0, w.spareAmmo.length, ...outsideWeapon.spareAmmo);
+      people.selectWeapon(outsideWeapon.held, avatar);
+      w.selectedSlot = outsideWeapon.selectedSlot;
+      outsideWeapon = null;
+    }
     document.body.classList.remove("game-mode");
     exitButton.hidden = true;
     ghosts = ghostEntry = ghostChannel = tess = fence = exitButton = null;
@@ -2391,9 +2068,10 @@
     remotes = null;
     footsteps.dispose();
     footsteps = null;
+    // Remember the restored outside loadout before disposing the crew clears its player.
+    pilot.dispose();
     if (people) people.dispose();
     fx.dispose();
-    pilot.dispose();
     for (const node of targets) input.remove(node);
     targets.length = 0;
     while (root.children.length) removeChild(root, root.children[root.children.length - 1]);
