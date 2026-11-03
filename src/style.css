@@ -10504,9 +10504,7 @@ body[data-active-scene="arcade"] #destination-hud:not([hidden]) { display: flex;
 /* The DQ card, kept clear of the falling Ooga below, sets its places a little closer and leaves the empty ones to
    say no one has a time yet. */
 .cloud-hopper-dq .cloud-hopper-scores .race-podium li { padding: 3px 12px; }
-.cloud-hopper-dq .cloud-hopper-scores-empty { display: none; }
-.cloud-hopper-scores-empty { margin: 8px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
-.cloud-hopper-scores-status, .cloud-hopper-personal-best { margin: 5px 0; color: var(--paper); font-size: 11px; line-height: 1.4; }
+.cloud-hopper-scores-status, .cloud-hopper-personal-best, .cloud-hopper-uploads { margin: 5px 0; color: var(--paper); font-size: 11px; line-height: 1.4; }
 .cloud-hopper-personal-best { color: var(--accent-text); }
 .cloud-hopper-panel .actions { margin-top: 16px; }
 /* The panel's buttons by what they do: banana gold goes on, leaf green chooses, light gray steps back, stone leaves. */

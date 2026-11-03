@@ -72,16 +72,17 @@
   const create = (ctx) => {
     const { root, dock, crew, pilot, hud, camera, game } = ctx;
     const ux = Math.cos(dock.rotation.y), uz = -Math.sin(dock.rotation.y);
-    const home = { x: dock.position.x + ux * (DOCK_LENGTH + RADIUS - 0.25), y: dock.position.y, z: dock.position.z + uz * (DOCK_LENGTH + RADIUS - 0.25) };
+    const home = ctx.launchPoint || { x: dock.position.x + ux * (DOCK_LENGTH + RADIUS - 0.25), y: dock.position.y, z: dock.position.z + uz * (DOCK_LENGTH + RADIUS - 0.25) };
     const length = Math.hypot(home.x, home.z), nx = home.x / length, nz = home.z / length;
     const start = { x: 0, y: 0, z: 0 };
     let level = LEVELS[0], player = "", farBefore = 0, watched = "", boardStatus = "loading";
     const heading = Math.atan2(-nx, -nz), platform = createNode({ sightHidden: true });
     const cloud = BL.cloudHopperModels.cloud(RADIUS, RADIUS, DEPTH);
-    const cabinet = BL.cloudHopperModels.cabinet();
+    const cabinet = ctx.arcade ? createNode({ visible: false }) : BL.cloudHopperModels.cabinet();
     cabinet.position.x = nx * 1.5; cabinet.position.z = nz * 1.5; cabinet.rotation.y = heading;
     addChild(platform, cloud, cabinet); addChild(root, platform);
     Object.assign(platform.position, home);
+    platform.visible = !ctx.arcade;
     const routeRoot = createNode({ visible: false, sightHidden: true });
     addChild(root, routeRoot);
     const from = { x: 0, y: 0, z: 0 }, carry = { x: 0, y: 0, z: 0 };
@@ -324,7 +325,7 @@
     const setPhase = (next) => {
       phase = next; age = 0;
       hud.setPanelsHidden(next === "lifting" || next === "briefing" || next === "ready" || next === "running");
-      cabinet.visible = next === "idle" || next === "intro";
+      cabinet.visible = !ctx.arcade && (next === "idle" || next === "intro");
       pilot.setActive(!held());
       overlay.show(next, seconds, session && played().scores, latest);
       audio.stage(next === "won" && latest?.run === played().scores[0]?.run ? "best" : next);
@@ -353,6 +354,14 @@
       if (pilot.view === "first-person" || pilot.view === "shoulder") turnLiftView(1);
       settleView();
       stageGhost();
+    };
+    const prepareEquipment = cave => {
+      if (!saved) saved = { jetOwned: cave.jetpackOwned, jetWorn: !!cave.jet, fuel: cave.jetFuel, recovering: cave.jetRecovering,
+        primary: cave.weapon.primaryOwned, secondary: cave.weapon.secondaryOwned, slot: cave.weapon.equipped ? 2 : cave.weapon.primaryEquipped ? 1 : 0,
+        aiming: cave.weapon.aiming };
+      cave.weapon.primaryOwned = cave.weapon.secondaryOwned = false; crew.selectWeapon(0, cave);
+      crew.setJetpackOwnership(cave, false); cave.jetFuel = 0; cave.jetRecovering = false;
+      crew.clearProjectiles();
     };
     const restoreEquipment = () => {
       if (!saved || !actor) return;
@@ -399,7 +408,8 @@
       ghost.clear();
       replays?.select(level.board, level.courseVersion);
       unwatchScores = BL.highscores?.watch(level.board, board => replays ? replays.update(board) : overlay.setHighscores(board),
-        status => { boardStatus = status; overlay.setHighscoreStatus(status); }) || null;
+        status => { boardStatus = status; overlay.setHighscoreStatus(status); },
+        submissions => overlay.setSubmissions(submissions)) || null;
       if (!BL.highscores) overlay.setHighscoreStatus("unavailable");
     };
     // The next level rides up from beside the island to its own start, as a first run does.
@@ -407,14 +417,16 @@
       if (phase !== "won" || level.id >= opened()) return;
       level = LEVELS[level.id]; beginRun(true);
     };
-    const launch = () => {
+    const launch = (fromArcade = false) => {
       if (active()) return false;
       const cave = pilot.player;
       if (!cave || cave !== crew.player) { hud.toast("Choose an Ooga and walk onto the Cloud Hopper cloud"); return false; }
-      if (!near(cave.root.position.x, cave.root.position.y - cave.baseY + 1.1, cave.root.position.z)) return false;
+      if (ctx.arcade ? !fromArcade : !near(cave.root.position.x, cave.root.position.y - cave.baseY + 1.1, cave.root.position.z)) return false;
       const refusal = ctx.refusal();
       if (refusal) { hud.toast(refusal); return false; }
-      actor = cave; overlay.setRunner(cave);
+      actor = cave; prepareEquipment(cave); platform.visible = true;
+      if (ctx.arcade) { Object.assign(platform.position, home); moveRider(); }
+      overlay.setRunner(cave);
       const login = BL.net.state.me?.login || "";
       runnerName = login || cave.traits.name; player = login.toLowerCase();
       session = sessions.get(login);
@@ -436,12 +448,7 @@
       if (!cave || pilot.player !== cave || crew.player !== cave) { cancel(); return false; }
       const refusal = ctx.refusal();
       if (refusal) { hud.toast(refusal); return false; }
-      if (!saved) saved = { jetOwned: cave.jetpackOwned, jetWorn: !!cave.jet, fuel: cave.jetFuel, recovering: cave.jetRecovering,
-        primary: cave.weapon.primaryOwned, secondary: cave.weapon.secondaryOwned, slot: cave.weapon.equipped ? 2 : cave.weapon.primaryEquipped ? 1 : 0,
-        aiming: cave.weapon.aiming };
-      crew.selectWeapon(0, cave); cave.weapon.primaryOwned = cave.weapon.secondaryOwned = false;
-      crew.setJetpackOwnership(cave, false); cave.jetFuel = 0; cave.jetRecovering = false;
-      crew.clearProjectiles();
+      prepareEquipment(cave);
       endFall(); endSweep();
       clearRoute(true);
       audio.unlock();
@@ -516,7 +523,7 @@
       }
       return true;
     };
-    const near = (x, y, z) => !active() && Math.abs(y - 1.1 - platform.position.y) < 0.45
+    const near = (x, y, z) => !ctx.arcade && !active() && Math.abs(y - 1.1 - platform.position.y) < 0.45
       && Math.hypot(x - platform.position.x, z - platform.position.z) < RADIUS - 0.4;
     // `how` a run is lost: "water" (into the sea, or out of reach of every cloud) or "tornado" (swept up its core).
     const finish = (won, how = "water") => {
@@ -588,7 +595,7 @@
       const park = playing();
       endFall(); endSweep();
       pilot.releaseFrame(true);
-      cabinet.visible = true;
+      cabinet.visible = !ctx.arcade;
       if (park) ctx.mode(false);
       clearRoute(keepMusic); phase = "idle";
       hud.setPanelsHidden(false);
@@ -597,19 +604,22 @@
         Object.assign(platform.position, home);
         if (pilot.player === actor && crew.player === actor) moveRider();
       }
-      restoreEquipment(); actor = null; session = latest = null; runnerName = "";
+      restoreEquipment();
+      if (ctx.arcade) { platform.visible = false; ctx.park(); }
+      actor = null; session = latest = null; runnerName = "";
       overlay.hide(); pilot.setActive(true); pilot.controls.reset();
     };
     const exit = () => {
       if (!active()) return false;
-      cancel(true);
-      audio.stage("dock"); audio.level(dockMusicLevel(), 0.8); dockMusicOn = true;
+      cancel(!ctx.arcade);
+      if (ctx.arcade) ctx.onExit();
+      else { audio.stage("dock"); audio.level(dockMusicLevel(), 0.8); dockMusicOn = true; }
       return true;
     };
     const preUpdate = (dt) => {
       displayTime += dt;
       if (cabinet.visible) BL.cloudHopperModels.updateCabinet(cabinet, displayTime);
-      if (!active()) { updateDockMusic(); return; }
+      if (!active()) { if (!ctx.arcade) updateDockMusic(); return; }
       if (pilot.player !== actor || crew.player !== actor) { cancel(); return; }
       audio.tick();
       if (falling) {
@@ -734,7 +744,7 @@
     };
     const platformSupport = (x, z, y, rise, radius) => {
       const p = platform.position, r = RADIUS + radius;
-      return (x - p.x) ** 2 + (z - p.z) ** 2 <= r * r && p.y <= y + rise + 1e-5 ? p.y : -Infinity;
+      return platform.visible && (x - p.x) ** 2 + (z - p.z) ** 2 <= r * r && p.y <= y + rise + 1e-5 ? p.y : -Infinity;
     };
     const supportAt = (x, z, y, rise, radius = 0.3) => Math.max(platformSupport(x, z, y, rise, radius),
       course && !held() ? course.supportAt(x, z, y, rise, radius) : -Infinity);

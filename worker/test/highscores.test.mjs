@@ -336,6 +336,7 @@ test("distinct Cloud Hopper finishes share a username, retries are idempotent an
   let board = await scores(handler, env, game);
   assert.deepEqual(board.runs.map(r => [r.username, r.score]), [["player-one", 29000], ["player-one", 30742], ["player-one", 31000]]);
   assert.equal(board.runs[0].achieved, board.achieved["player-one"]);
+  assert.equal(board.runs[0].id, await sha256Hex(JSON.stringify([game, 1, runId(2)])));
   await submit(2, 29000); await submit(2, 100); // A reused ID cannot change the accepted run or personal best.
   assert.deepEqual(await scores(handler, env, game), board);
   const other = await authenticated(DB, await player(DB, 2, "other"));
@@ -347,7 +348,7 @@ test("distinct Cloud Hopper finishes share a username, retries are idempotent an
   board = await scores(handler, env, game);
   assert.equal(board.runs.length, 10);
   assert.equal(board.runs.at(-1).score, 32009);
-  assert.ok(board.runs.every(r => Object.keys(r).sort().join() === "achieved,score,username"));
+  assert.ok(board.runs.every(r => Object.keys(r).sort().join() === "achieved,id,score,username"));
   assert.deepEqual((await scores(handler, env, "cloud-hopper-l2")).runs, []);
   await player(DB, 1, "renamed");
   board = await scores(handler, env, game);
@@ -394,7 +395,7 @@ test("run migration preserves the existing score, timestamp and replay pointer w
   assert.deepEqual(DB.sql.prepare("SELECT * FROM game_highscores WHERE game_id = ?").get(game), before);
   const response = await handler(read(game), { DB, CLOUD_HOPPER_REPLAYS: {} });
   const board = await response.json();
-  assert.deepEqual(board.runs, [{ username: "player-one", score: 29000, achieved: 1234 }]);
+  assert.deepEqual(board.runs.map(({ id, ...run }) => run), [{ username: "player-one", score: 29000, achieved: 1234 }]);
   assert.equal(board.replay.hash, "a".repeat(64));
 });
 
@@ -408,5 +409,5 @@ test("retained personal bests still fill the board after a player's faster run h
   assert.equal(DB.sql.prepare("SELECT count(*) n FROM cloud_hopper_runs WHERE player_id = 2").get().n, 0);
   await deletePlayer(DB, 1);
   const board = await scores(handler, env, game);
-  assert.deepEqual(board.runs, [{ username: "other", score: 50000, achieved: board.achieved.other }]);
+  assert.deepEqual(board.runs.map(({ id, ...run }) => run), [{ username: "other", score: 50000, achieved: board.achieved.other }]);
 });

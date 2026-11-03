@@ -73,7 +73,9 @@ Each Cloud Hopper board retains the all-time top 1,024 personal bests, so its JS
 bounded. Migration `0007_cloud_hopper_runs.sql` also retains up to 1,024 distinct finishes per
 level in `cloud_hopper_runs`. Its public `runs` array contains the fastest ten, ordered by
 milliseconds, first achievement, numeric account ID and run ID; multiple rows may name the
-same player. Personal bests remain eligible if their run fell outside retained history and
+same player. Each run also has a public `id`, the SHA-256 hex fingerprint of
+`JSON.stringify([game, playerId, runId])`; raw replay tickets and numeric account IDs remain private.
+Personal bests remain eligible if their run fell outside retained history and
 other accounts are later removed. The list and revision are read in one SQL snapshot.
 The migration imports only existing bests and leaves their scores, timestamps and replay
 pointers intact. It cannot reconstruct overwritten historical finishes. A newcomer enters
@@ -245,3 +247,10 @@ otherwise.
 When a scoring rule changes incompatibly, bump its shared registry version and use a new
 migration to reset that game's dictionaries and increase `revision`. Keep `revision`
 monotonic across resets. Do not silently reinterpret existing scores under new rules.
+
+Completed eligible Cloud Hopper runs appear immediately in provisional score order with “saving...”.
+Pending uploads are separate from confirmed records and never select a winning ghost. Confirmed
+responses reconcile the server order, with public run fingerprints preventing duplicate rows when
+a live read beats the upload response. Failed uploads retain a labelled local time outside the
+shared ranking; at most ten pending/failed notices per level are held for the current account.
+Account changes clear these notices, and level watches detach on leaving.

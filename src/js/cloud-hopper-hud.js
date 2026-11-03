@@ -96,7 +96,8 @@
     const resultArt = node("img", "cloud-hopper-result-art");
     const resultTime = node("p", "cloud-hopper-time"), scoresPanel = node("section", "cloud-hopper-scores");
     const scoresTitle = node("h3", "cloud-hopper-scores-title", "Shared top 10");
-    const scoresList = node("ol", "race-podium"), scoresEmpty = node("p", "cloud-hopper-scores-empty", "Finish a run to put your time on the board.");
+    const scoresList = node("ol", "race-podium"), uploads = node("p", "cloud-hopper-uploads");
+    uploads.setAttribute("role", "status"); uploads.hidden = true;
     const scoresStatus = node("p", "cloud-hopper-scores-status", "Loading shared times…");
     const personalBest = node("p", "cloud-hopper-personal-best");
     scoresStatus.setAttribute("role", "status");
@@ -125,7 +126,7 @@
       if (disposed || runner === cave.traits.name) return;
       runner = cave.traits.name;
       const scratch = document.createElement("canvas");
-      BL.hud.renderBodyIcon(scratch, cave, OOGA_W, OOGA_H);
+      BL.hud.renderBodyIcon(scratch, cave, OOGA_W, OOGA_H, false);
       for (const { ooga } of cards) {
         const paint = ooga.getContext("2d");
         paint.clearRect(0, 0, OOGA_W, OOGA_H); paint.drawImage(scratch, 0, 0, OOGA_W, OOGA_H);
@@ -178,7 +179,7 @@
     briefLines.append(title); brief.append(briefLines);
     instructionLines.append(help); instructions.append(instructionLines);
     hud.append(name, timer, brief, record, instructions);
-    scoresPanel.append(scoresTitle, scoresStatus, scoresList, scoresEmpty, personalBest);
+    scoresPanel.append(scoresTitle, scoresStatus, scoresList, uploads, personalBest);
     actions.append(back, next, play, select, exit);
     panel.append(glow, kicker, panelTitle, goal, levels, introArt, guideArt, resultArt, panelHelp, resultTime, scoresPanel, actions);
     hud.hidden = panel.hidden = levels.hidden = next.hidden = select.hidden = true;
@@ -215,7 +216,7 @@
     };
     const setLevels = (state) => {
       if (disposed) return;
-      if (selected !== state.selected) { sharedScores = null; sharedStatus = "loading"; }
+      if (selected !== state.selected) { sharedScores = null; submissions = []; sharedStatus = "loading"; }
       ({ selected, unlocked, bests } = state);
       paintLevels();
       // The board under the cards follows the level chosen.
@@ -351,7 +352,7 @@
       if (previousFocus?.isConnected && typeof previousFocus.focus === "function") previousFocus.focus({ preventScroll: true });
       previousFocus = null;
     };
-    let sharedScores = null, sharedStatus = "loading", localScores = [], localLatest = null;
+    let sharedScores = null, submissions = [], sharedStatus = "loading", localScores = [], localLatest = null;
     const showScores = (scores, latest) => {
       localScores = scores; localLatest = latest;
       scoresTitle.textContent = `Level ${selected} · ${LEVELS[selected - 1].name} · shared top 10`;
@@ -370,21 +371,31 @@
       recordGhost.hidden = !leader;
       const best = bests[selected - 1] || 0;
       personalBest.textContent = `Your best on this browser · ${best ? formatTime(Math.floor(best / 10)) : "no finish yet"}`;
-      // Browser/session bests never fill the shared board, even while offline. Keep the last good shared reply.
-      scores = sharedScores || [];
+      // Pending uploads join the ranking provisionally; the global record and ghost above stay confirmed.
+      scores = [...(sharedScores || [])];
+      for (const pending of submissions) if (pending.status === "saving" && !scores.some(run => run.id && run.id === pending.id)) {
+        let at = 0;
+        while (at < scores.length && scores[at].milliseconds <= pending.score) at++;
+        scores.splice(at, 0, { ...pending, milliseconds: pending.score, time: pending.score / 1000 });
+      }
+      uploads.hidden = !submissions.length;
+      uploads.textContent = submissions.map(run => `${formatTime(Math.floor(run.score / 10))} · ${run.status === "saving"
+        ? "saving... · provisional position" : "couldn’t be uploaded · kept on this browser"}`).join(" · ");
       const count = Math.min(scoreRows.length, scores.length);
-      scoresEmpty.textContent = "No shared times yet. Sign in with GitHub to set one.";
-      scoresEmpty.hidden = !!count || sharedStatus !== "ready";
       for (let i = 0; i < scoreRows.length; i++) {
         const { row, run, time } = scoreRows[i];
         row.classList.toggle("empty", i >= count);
         if (i >= count) { row.classList.remove("you"); run.textContent = time.textContent = "—"; continue; }
         const record = scores[i];
         row.classList.toggle("you", record.username.toLowerCase() === BL.net.state.me?.login.toLowerCase());
-        run.textContent = record.username;
+        run.textContent = record.username + (record.status === "saving" ? " · saving..." : "");
         run.title = record.username;
         time.textContent = formatTime(Math.max(0, Math.floor(record.time * 100)));
       }
+    };
+    const setSubmissions = (value) => {
+      if (disposed) return;
+      submissions = value; showScores(localScores, localLatest);
     };
     const setHighscoreStatus = (status) => {
       if (disposed) return;
@@ -421,7 +432,7 @@
       next.hidden = !nextOpen();
       play.classList.toggle("game-intro-go", on || !nextOpen());
       play.disabled = false;
-      exit.textContent = on ? "Back" : "Return to dock"; exit.dataset.role = on ? "back" : "leave";
+      exit.textContent = on ? "Back" : "Return to arcade"; exit.dataset.role = on ? "back" : "leave";
       showScores(localScores, localLatest);
       if (on) paintLevels();
       else {
@@ -490,7 +501,7 @@
         resultTime.hidden = to !== "won";
         play.disabled = false;
         play.textContent = intro ? "Play" : to === "won" ? "Replay" : "Play again";
-        exit.textContent = briefing ? "Skip tips" : intro ? "Not now" : "Return to dock"; exit.dataset.role = "leave";
+        exit.textContent = briefing ? "Skip tips" : intro ? "Not now" : "Return to arcade"; exit.dataset.role = "leave";
         next.hidden = !nextOpen();
         select.hidden = !ended;
         play.classList.toggle("game-intro-go", !nextOpen());
@@ -555,7 +566,7 @@
       gustCue.dataset.state = state; gustCue.dataset.from = fromLeft ? "left" : "right";
       shownGust = state; shownFrom = fromLeft;
     };
-    return { show, update, setHighscores, setHighscoreStatus, setReplayState, setLevels, setRunner, setGuide, setPowers, setGust, setDq, hide, dispose, get frameY() { return frameY; } };
+    return { show, update, setHighscores, setHighscoreStatus, setSubmissions, setReplayState, setLevels, setRunner, setGuide, setPowers, setGust, setDq, hide, dispose, get frameY() { return frameY; } };
   };
   BL.cloudHopperHud = { create };
 })();

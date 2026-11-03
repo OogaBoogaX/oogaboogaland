@@ -3988,13 +3988,13 @@ const orbitFlow = async (b) => {
 const SCENES = ["hub", "lab", "race", "drop", "orbit", "mine", "dsb", "factory", "hangar", "bifrost", "timechain", "poker", "arcade", "skee", "hoops", "shy", "claw", "hockey", "billiards", "darts", "pinball", "ride", "invaders", "snake", "pong", "stampede", "flap", "breaker", "dash", "stacker"];
 const LANES = Number(process.env.LANES) || 2;
 const ARGS = process.argv.slice(2);
-for (const a of ARGS) if (!SCENES.includes(a) && !["unit", "cloud-hopper-record", "cloud-hopper-controller", "highscores-unit", "chat-unit", "integration-unit", "svrn-unit", "svrn-review", "vacancy-unit", "rescue-unit", "wallets-unit", "portal-unit", "water-baseline", "water-review", "water-unit", "stackchain-review", "stackchain-unit", "dsb-menus-unit", "maxis-unit", "exterior-unit", "rulers-unit", "ink-unit", "big-unit", "perf", "full", "poker-protocol"].includes(a)) throw new Error(`Unknown argument "${a}" (unit | perf | full | poker-protocol | ${SCENES.join(" | ")})`);
+for (const a of ARGS) if (!SCENES.includes(a) && !["unit", "cloud-hopper-arcade", "cloud-hopper-record", "cloud-hopper-controller", "highscores-unit", "chat-unit", "integration-unit", "svrn-unit", "svrn-review", "vacancy-unit", "rescue-unit", "wallets-unit", "portal-unit", "water-baseline", "water-review", "water-unit", "stackchain-review", "stackchain-unit", "dsb-menus-unit", "maxis-unit", "exterior-unit", "rulers-unit", "ink-unit", "big-unit", "perf", "full", "poker-protocol"].includes(a)) throw new Error(`Unknown argument "${a}" (unit | perf | full | poker-protocol | ${SCENES.join(" | ")})`);
 const ONLY = process.env.ONLY || ""; // Optional comma-separated substrings within the requested scenes.
 const onlyMatches = value => ONLY.split(",").some(part => value.includes(part));
 const FULL = ARGS.includes("full");
 const PICKED = FULL ? SCENES : SCENES.filter((s) => ARGS.includes(s));
 const PERF = FULL || ARGS.includes("perf");
-const UNIT = !(ARGS.length === 1 && ["perf", "poker-protocol", "cloud-hopper-record"].includes(ARGS[0]));
+const UNIT = !(ARGS.length === 1 && ["perf", "poker-protocol", "cloud-hopper-record", "cloud-hopper-arcade"].includes(ARGS[0]));
 const PROTOCOL = FULL || ARGS.includes("poker-protocol");
 // What keeps the cruft out: every step says why it exists, or the run does not start.
 const WHY = /^(regression|playthrough|rule|contract): \S/;
@@ -4008,7 +4008,8 @@ const scene = (id, { query = "", steps, perf = false, opts = {}, label = "", url
     const t0 = Date.now();
     const media = httpMedia && !testOrigin ? await mediaSourceServer() : null;
     try {
-      const address = url || sceneUrl(id, query);
+      // Rally is retired from visitor entry, but its existing checks still exercise the preserved game.
+      const address = (url || sceneUrl(id, query)) + (id === "race" ? "&wip=race" : "");
       await fold(media ? `${media.origin}/src/index.html${new URL(address).search}` : address, chosen.map((s) => [s.name, s.run, s.open]), opts);
     } finally { if (media) await media.close(); }
     const took = (Date.now() - t0) / 1000;
@@ -4739,7 +4740,8 @@ const cloudHopperFailureChecks = async engine => {
     weapon: { primaryOwned: true, secondaryOwned: true, primaryEquipped: false, equipped: true } };
   S.addChild(rootNode, actor.root);
   const crew = { player: actor, clearProjectiles: noop, elevate: noop,
-    selectWeapon(slot, cave) { cave.weapon.primaryEquipped = slot === 1; cave.weapon.equipped = slot === 2; },
+    selectWeapon(slot, cave) { cave.weapon.primaryEquipped = slot === 1; cave.weapon.equipped = slot === 2;
+      cave.visibleWeapons = cave.weapon.primaryOwned || cave.weapon.secondaryOwned; },
     setJetpackOwnership(cave, owned) { cave.jetpackOwned = owned; if (!owned) cave.jet = null; },
     wearJetpack(cave) { cave.jet = pack(); }, removeJetpack(cave) { cave.jet = null; },
     cutJet(cave) { cuts++; cave.jet.thrust = cave.jet.spending = false; cave.jet.power = cave.jet.puff = 0; cave.jet.flame.visible = false; } };
@@ -4855,7 +4857,7 @@ const cloudHopperFailureChecks = async engine => {
   const beforeStartStops = audioStops;
   const opened = hopper.launch() && hopper.phase === "intro" && !active && !mode && !panelsHidden;
   const introMusic = audioStage === "intro" && audioLevel === 0.28 && audioStops === beforeStartStops;
-  callbacks.onStart(); const lifting = hopper.phase === "lifting" && mode && !actor.jetpackOwned && panelsHidden;
+  callbacks.onStart(); const lifting = hopper.phase === "lifting" && mode && !actor.jetpackOwned && panelsHidden && !actor.visibleWeapons;
   let musicPhases = introMusic && audioStage === "lifting" && audioLevel === 0.28 && audioStops === beforeStartStops;
   tick(BL.cloudHopper.LIFT_SECONDS);
   const briefing = hopper.phase === "briefing" && shown === "briefing" && hopper.held && !active && mode
@@ -6838,7 +6840,8 @@ const cloudHopperRecordChecks = async () => {
       }
       H.setLevels({ selected: 3, unlocked: 2, bests: [0, 9500, 0, 0] }); H.show('intro');
       const locked = document.querySelector('.cloud-hopper-panel .game-intro-go:not([hidden])').disabled && text().includes('Loading global best');
-      H.setHighscores({ highscores: {}, achieved: {} }); const empty = text() === 'No times yet' && button.hidden;
+      H.setHighscores({ highscores: {}, achieved: {} }); const empty = text() === 'No times yet' && button.hidden
+        && !document.querySelector('.cloud-hopper-scores-empty');
       BL.net.state.me = { login: 'winner' }; H.setHighscores({ highscores: { winner: 19740 }, achieved: {} });
       const signed = text().includes('winner') && document.querySelector('.race-podium li').classList.contains('you');
       H.setHighscores({ highscores: { winner: 18000 }, achieved: { winner: 3 }, runs: [
@@ -6847,6 +6850,15 @@ const cloudHopperRecordChecks = async () => {
       const rows = [...document.querySelectorAll('.race-podium li')];
       const repeated = rows[0].textContent.includes('winner') && rows[1].textContent.includes('winner')
         && rows[0].classList.contains('you') && rows[1].classList.contains('you') && text().includes('00:18.00');
+      H.setSubmissions([{ id: 'pending', username: 'winner', score: 17000, status: 'saving' }]);
+      const optimistic = rows[0].textContent.includes('saving...') && rows[0].textContent.includes('00:17.00')
+        && text().includes('00:18.00');
+      H.setSubmissions([{ id: 'pending', username: 'winner', score: 17000, status: 'failed' }]);
+      const failedUpload = !rows.some(row => row.textContent.includes('00:17.00'))
+        && document.querySelector('.cloud-hopper-uploads').textContent.includes('couldn’t be uploaded');
+      H.setLevels({ selected: 4, unlocked: 4, bests: [] });
+      const uploadIsolated = document.querySelector('.cloud-hopper-uploads').hidden;
+      H.setHighscores({ highscores: { winner: 18000 }, achieved: {} });
       H.setReplayState('off'); button.click();
       const off = !button.disabled && toggles === 1 && button.getAttribute('aria-pressed') === 'false'
         && button.nextElementSibling.classList.contains('cloud-hopper-record-time');
@@ -6857,7 +6869,7 @@ const cloudHopperRecordChecks = async () => {
       H.setLevels({ selected: 2, unlocked: 4, bests: [0, 26540, 0, 0] });
       H.setHighscores({ highscores: { 'long-player-name-with-thirty-nine-chars': 19740 }, achieved: {} });
       H.setHighscoreStatus('stale'); H.show('ready');
-      return { loading, unavailable, leader, refreshing, stale, running, isolated, locked, empty, signed, repeated, off, busy, on, retry, missing };
+      return { loading, unavailable, leader, refreshing, stale, running, isolated, locked, empty, signed, repeated, optimistic, failedUpload, uploadIsolated, off, busy, on, retry, missing };
     })()`);
     record("cloud hopper record: global leader/ties, four levels, guest/account reads, no local fallback, empty/error/stale states and disabled replay", Object.values(state).every(Boolean), JSON.stringify(state));
     for (const [w, h] of [[1440, 900], [390, 844], [844, 390], [320, 568]]) {
@@ -6888,13 +6900,22 @@ const cloudHopperRecordChecks = async () => {
 };
 const highscoreClientChecks = async () => {
   const sources = await Promise.all(["highscore-rules", "highscores"].map(name => readFile(join(root, `src/js/${name}.js`), "utf8")));
-  const flush = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
+  // WebCrypto finishes on the worker pool, not after a fixed number of event-loop turns.
+  // Drain its real promises before assertions inspect the requests they unlock.
+  const hashes = new Set(), testCrypto = { randomUUID: () => globalThis.crypto.randomUUID(), subtle: {
+    digest(...args) {
+      const pending = globalThis.crypto.subtle.digest(...args); hashes.add(pending);
+      pending.then(() => hashes.delete(pending), () => hashes.delete(pending));
+      return pending;
+    }
+  } };
+  const flush = async () => { for (let i = 0; i < 30; i++) { await Promise.allSettled([...hashes]); await new Promise(setImmediate); } };
   const fixture = (signed = false, enabled = true) => {
     const requests = [], timers = new Map(), events = new Map(), subscribers = new Set(), live = new Set(), toasts = [];
     let seq = 0, now = 1000;
     const state = { backend: enabled, highscores: enabled, highscoreSnapshots: true, resolved: true, logoutEpoch: 0, me: signed ? { id: 11, login: "score-one" } : null };
     const net = { state, subscribeHighscores(fn) { live.add(fn); return () => live.delete(fn); }, subscribe(fn) { subscribers.add(fn); return () => subscribers.delete(fn); } };
-    const context = { AbortController, crypto: globalThis.crypto, Date: class extends Date { static now() { return now; } },
+    const context = { AbortController, TextEncoder, crypto: testCrypto, Date: class extends Date { static now() { return now; } },
       window: { BL: { net, hud: { toast: text => toasts.push(text) } },
         setTimeout(fn, ms) { timers.set(++seq, { fn, ms }); return seq; }, clearTimeout(id) { timers.delete(id); } },
       document: { hidden: false, addEventListener(type, fn) { events.set(type, fn); }, removeEventListener(type) { events.delete(type); } },
@@ -6964,6 +6985,42 @@ const highscoreClientChecks = async () => {
     record("highscores: distinct runs retain duplicate usernames, retry one stable ID and reject malformed run lists",
       saved && first.runId === retry.runId && distinct && accepted.length === 2 && f.scores.get(game).revision === 3);
     f.scores.dispose();
+  }
+  {
+    const f = fixture(true), game = "cloud-hopper-l1", notices = [], boards = [];
+    const off = f.scores.watch(game, board => boards.push(board), null, rows => notices.push(rows.map(row => ({ ...row }))));
+    f.reply(0, game, { rival: 30000 }, 1); await flush();
+    const first = f.scores.begin(game), second = f.scores.begin(game);
+    const a = f.scores.submit(first, game, 20000), b = f.scores.submit(second, game, 20000);
+    const immediate = notices.at(-1).length === 2 && notices.at(-1).every(row => row.status === "saving")
+      && f.scores.get(game).highscores.rival === 30000;
+    await flush();
+    const bodies = f.requests.slice(1).map(req => JSON.parse(req.options.body));
+    const id = async body => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",
+      new TextEncoder().encode(JSON.stringify([game, 11, body.runId])))), n => n.toString(16).padStart(2, "0")).join("");
+    const ids = await Promise.all(bodies.map(id));
+    const rule = f.rules.get(game), board = { game, version: rule.version, scoreType: rule.scoreType, direction: rule.direction,
+      unit: rule.unit, revision: 3, highscores: { 'score-one': 20000, rival: 30000 }, achieved: { 'score-one': 10, rival: 1 },
+      runs: ids.map((id, i) => ({ id, username: 'score-one', score: 20000, achieved: 10 + i })) };
+    const respond = (index, data) => f.requests[index].resolve({ ok: true, headers: { get: () => "application/json" }, json: async () => data });
+    // A later write response can confirm both runs before the earlier POST returns.
+    respond(2, board); const savedB = await b;
+    const reconciled = notices.at(-1).length === 0 && f.scores.get(game).runs.length === 2;
+    respond(1, { ...board, revision: 2, runs: [board.runs[0]] }); const savedA = await a;
+    const ordered = f.scores.get(game).revision === 3 && f.scores.get(game).runs.length === 2;
+    const failedRun = f.scores.begin(game), failed = f.scores.submit(failedRun, game, 40000); await flush();
+    // Both bounded numeric attempts time out. The failed time remains a notice, outside the public board.
+    for (let i = 0; i < 2; i++) { const timer = [...f.timers.values()].find(timer => timer.ms === 6000); timer.fn(); await flush(); }
+    const rejected = !await failed && notices.at(-1)[0]?.status === "failed" && f.scores.get(game).runs.length === 2;
+    const old = f.scores.begin(game), stale = f.scores.submit(old, game, 10000); await flush();
+    const pendingIndex = f.requests.length - 1;
+    f.account({ id: 22, login: "other" });
+    const cleared = notices.at(-1).length === 0;
+    respond(pendingIndex, { ...board, revision: 4 }); const refused = !await stale;
+    off(); const before = notices.length; f.scores.dispose();
+    record("highscores: optimistic uploads are immediate, distinct tied runs reconcile out of order, timeouts stay local and account changes discard late writes",
+      immediate && savedA && savedB && reconciled && ordered && rejected && cleared && refused && notices.length === before,
+      JSON.stringify({ immediate, savedA, savedB, reconciled, ordered, rejected, cleared, refused }));
   }
   {
     // Regression: a failed refresh previously left an apparently current board, with no loading/error signal.
@@ -15109,19 +15166,69 @@ const arcadeCarry = { name: "arcade carry", why: "regression: walking out of a s
   record("arcade carry: the club and carry mode chosen on the island come back into the arcade, with the same rounds, look and zoom",
     back === "arcade" && changed.held === 1 && !changed.combat && same(kept, hall), JSON.stringify({ back, changed, kept, hall }));
 } };
-const arcadePlay = { name: "arcade play", why: "rule: a cabinet starts its game, the game's exit comes back to that cabinet as the same Ooga, and Escape leaves for the island", run: async (b) => {
-  await b.evaluate(`(() => { const B = window.__ooga, a = B.cavemen.get("portlandhodl"), s = window.BL.arcadeModels.CABINETS[0].play; if (B.crew.player !== a) B.pilot.possess(a); a.root.position.x = s.x; a.root.position.z = s.z; B.advance(0.2, 1 / 60); })()`);
-  await b.key(" ");
-  const played = await untilPage(b, 'B.scene === "race" && !B.transitioning', 15000);
-  const raced = await b.evaluate(`(() => { const go = document.querySelector('[data-intro="race"] [data-action="intro-go"]'); if (go && go.offsetParent) go.click(); const leave = document.querySelector('nav[data-scene="race"] .leave'), seen = { racer: window.__ooga.racers.player.name, exit: leave.textContent }; leave.click(); return seen; })()`);
-  await untilPage(b, 'B.scene === "arcade" && !B.transitioning', 15000);
-  const back = await b.evaluate(`(() => { const B = window.__ooga, p = B.pilot.player, s = window.BL.arcadeModels.CABINETS[0].play; return { scene: B.scene, who: p && p.traits.name, off: p ? Math.hypot(p.root.position.x - s.x, p.root.position.z - s.z) : null }; })()`);
-  await b.key("Escape");
-  const detached = await b.evaluate(`({ scene: __ooga.scene, driving: !!__ooga.pilot.player })`);
-  await b.key("Escape");
-  await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
-  const out = await b.evaluate(`(() => { const B = window.__ooga, p = B.pilot.player; return { scene: B.scene, who: p && p.traits.name }; })()`);
-  record("arcade play: Space at the Rally cabinet starts Ooga Rally with the same Ooga racing and its exit back to arcade, leaving the race returns that Ooga to the cabinet, and Escape detaches before returning to the island still detached", played && raced.racer === "portlandhodl" && raced.exit === "Back to arcade" && back.scene === "arcade" && back.who === "portlandhodl" && back.off < 0.5 && detached.scene === "arcade" && !detached.driving && out.scene === "hub" && !out.who, JSON.stringify({ played, raced, back, detached, out }));
+const arcadePlay = { name: "arcade play", why: "rule: Cloud Hopper replaces the front-left cabinet, returns the same equipped Ooga safely, and Rally stays out of order", run: async (b) => {
+  const dir = join(root, "untracked", "cloud-hopper-arcade"); mkdirSync(dir, { recursive: true });
+  const layout = await b.evaluate(`(() => {
+    const B = __ooga, A = BL.arcadeModels, actor = B.cavemen.get('portlandhodl'), front = A.CABINETS[0], rally = A.CABINETS.find(c => A.GAMES[c.game]?.id === 'race');
+    const invaders = A.CABINETS.find(c => A.RETRO[c.retro]?.id === 'invaders');
+    const flame = A.lanterns().flames.find(f => f[0] > rally.x && f[0] < invaders.x && f[1] > A.MEZZ.y);
+    B.pilot.goPreset('cabinets'); B.advance(1, 1/60);
+    return { front: A.GAMES[front.game].id, rally: { x: rally.x, y: rally.y, z: rally.z, turn: rally.turn, service: rally.service },
+      invaders: { x: invaders.x, z: invaders.z }, flame: flame?.[0],
+      deck: B.arcade.supportAt(rally.play.x, rally.play.z, A.MEZZ.y),
+      walkable: B.arcade.walkable(rally.play.x, rally.play.z, rally.play.x, rally.play.z + 0.4, A.MEZZ.y, actor.bodyHeight, actor),
+      label: B.arcade.stations.find(st => st.kind === 'cabinet' && st.game === rally.game).label };
+  })()`);
+  await b.screenshot(join(dir, 'arcade-front.png'));
+  await b.evaluate(`__ooga.pilot.goPreset('race'); __ooga.advance(1,1/60)`);
+  await b.screenshot(join(dir, 'rally-repair-close.png'));
+  const blocked = await b.evaluate(`(() => { const B = __ooga; B.arcade.play(0); return B.scene === 'arcade' && !B.transitioning; })()`);
+  await b.evaluate(`(() => { const B = __ooga, a = B.cavemen.get('portlandhodl'), s = BL.arcadeModels.CABINETS[0].play;
+    if (B.crew.player !== a) B.pilot.possess(a); B.crew.selectWeapon(2, a);
+    a.root.position.x = s.x; a.root.position.z = s.z; a.root.position.y = a.baseY + BL.arcadeModels.STAGE.high;
+    B.advance(0.2,1/60); })()`);
+  await b.key(' ');
+  const entered = await untilPage(b, `B.scene === 'hub' && !B.transitioning && BL.scenes.hub.debug.cloudHopper.phase === 'intro'`, 30000);
+  if (!entered) {
+    const state = await b.evaluate(`({ scene: __ooga.scene, transitioning: __ooga.transitioning, phase: BL.scenes.hub.debug?.cloudHopper?.phase, who: __ooga.pilot.player?.traits.name })`);
+    record('arcade play: Cloud Hopper launches unarmed, rises, preserves preview gear, returns safely twice and blocks Rally', false, JSON.stringify({ entered, state, layout })); return;
+  }
+  const before = await b.evaluate(`(() => { const B = __ooga, H = BL.scenes.hub.debug.cloudHopper, p = B.pilot.player;
+    const weapons = new Set([p.parts.club.geometry, p.parts.gun.geometry, ...p.parts.gun.children.map(n => n.geometry)]);
+    let armedPreview = false; const create = BL.iconRenderer.createRenderer;
+    BL.iconRenderer.createRenderer = (...args) => { const renderer = create(...args), render = renderer.render;
+      renderer.render = (root, camera) => { BL.scene.traverseVisible(root, node => { if (node.geometry && weapons.has(node.geometry)) armedPreview = true; }); return render(root,camera); }; return renderer; };
+    const canvas = document.createElement('canvas'), club = p.parts.club.visible, gun = p.parts.gun.visible;
+    p.parts.club.visible = p.parts.gun.visible = true;
+    BL.hud.renderBodyIcon(canvas,p,96,128,false); BL.iconRenderer.createRenderer = create;
+    const previewSafe = !armedPreview && p.parts.club.visible && p.parts.gun.visible;
+    p.parts.club.visible = club; p.parts.gun.visible = gun;
+    document.querySelector('.cloud-hopper-panel .game-intro-go:not([hidden])').click();
+    return { who: p.traits.name, phase: H.phase, unarmed: !p.parts.club.visible && !p.parts.gun.visible,
+      previewSafe, y: H.platform.position.y, dockGone: !B.props.some(prop => prop.prop === 'dock') };
+  })()`);
+  await b.evaluate(`__ooga.advance(2,1/60)`);
+  const rising = await b.evaluate(`(() => { const H = BL.scenes.hub.debug.cloudHopper, p = __ooga.pilot.player;
+    return { phase: H.phase, y: H.platform.position.y, unarmed: !p.parts.club.visible && !p.parts.gun.visible }; })()`);
+  await b.screenshot(join(dir, 'ascent.png'));
+  await b.key('Escape');
+  const returned = await untilPage(b, `B.scene === 'arcade' && !B.transitioning`, 30000);
+  const back = await b.evaluate(`(() => { const B=__ooga,p=B.pilot.player,s=BL.arcadeModels.CABINETS[0].play;
+    return { who:p?.traits.name, off:p?Math.hypot(p.root.position.x-s.x,p.root.position.z-s.z):999,
+      equipped:!!p?.weapon.equipped, owns:!!p?.weapon.primaryOwned && !!p?.weapon.secondaryOwned }; })()`);
+  // A second visit proves the kept/rebuilt hub can launch again; cancel from level select too.
+  await b.key(' '); const again = await untilPage(b, `B.scene === 'hub' && !B.transitioning && BL.scenes.hub.debug.cloudHopper.phase === 'intro'`, 30000);
+  await b.key('Escape'); const cancelled = await untilPage(b, `B.scene === 'arcade' && !B.transitioning`, 30000);
+  await b.evaluate(`__ooga.go('race')`); const routed = await untilPage(b, `B.scene === 'arcade' && !B.transitioning`, 30000);
+  const state = { layout, blocked, entered, before, rising, returned, back, again, cancelled, routed };
+  writeFileSync(join(dir,'journey.json'),JSON.stringify(state,null,2));
+  record('arcade play: Cloud Hopper launches unarmed, rises, preserves preview gear, returns safely twice and blocks Rally',
+    layout.front === 'cloud-hopper' && layout.rally.x < layout.flame && layout.flame < layout.invaders.x && layout.rally.z === layout.invaders.z
+    && layout.rally.y === 3.2 && layout.rally.turn === 0 && layout.rally.service
+    && layout.deck === 3.2 && layout.walkable && layout.label.includes('out of order') && blocked && entered && before.who === 'portlandhodl'
+    && before.phase === 'lifting' && before.unarmed && before.previewSafe && before.dockGone
+    && rising.phase === 'lifting' && rising.y > before.y && rising.unarmed && returned && back.who === 'portlandhodl'
+    && back.off < 0.5 && back.equipped && back.owns && again && cancelled && routed, JSON.stringify(state));
 } };
 const arcadeMachine = { name: "arcade machine", why: "rule: Space at a carnival machine opens its game, and leaving the game brings the same Ooga back to that machine", run: async (b) => {
   await b.evaluate(`(() => { const B = window.__ooga, st = B.arcade.stations.find((s) => s.kind === "machine" && s.game.kind === "skee"), p = B.pilot.player.root.position; p.x = st.play.x; p.z = st.play.z; B.advance(0.2, 1 / 60); })()`);
@@ -19983,7 +20090,7 @@ scene("hub", { label: "mirror clanker", query: "solo=1&character=portlandhodl&st
 } }] });
 scene("hub", { perf: true, query: "bananas=1000", opts: { w: 1920, h: 1080, perf: true, motion: true }, steps: [{ name: "wall movement performance", why: "regression: frame rate fell moving behind cave walls during a donation", run: wallPerformance }] });
 scene("lab", { steps: [donation("lab"), labWalking, labKeys, trip("lab")] });
-scene("race", { label:"optional rig link fallback",url:hubPage(src),steps:[{name:"race optional rig link fallback",why:"regression: an optional uniform-limited rig must preserve WebGL and every original CPU driver",run:async b=>{
+scene("race", { label:"optional rig link fallback",url:hubPage(src, "scene=hub"),steps:[{name:"race optional rig link fallback",why:"regression: an optional uniform-limited rig must preserve WebGL and every original CPU driver",run:async b=>{
   await b.evaluate(`(()=>{
     const gl=document.getElementById("scene").getContext("webgl2"),create=gl.createProgram,parameter=gl.getProgramParameter,pending=new Set();
     window.__rigFault={gl,create,parameter,pending};
@@ -27049,6 +27156,10 @@ const runTasks = async () => {
 };
 if (!PICKED.length && !PERF) console.log(`Global tier only. Name scenes to test them too: npm test -- ${SCENES.join(" ")} | full`);
 await runTasks();
+if (ARGS.includes("cloud-hopper-arcade")) {
+  await fold(sceneUrl("arcade", "character=portlandhodl&hubcache=keep"), [[arcadePlay.name, arcadePlay.run]]);
+  await dispose();
+}
 if (ARGS.includes("cloud-hopper-record")) { await highscoreClientChecks(); await cloudHopperRecordChecks(); }
 // The shim installs browser globals in this process, so it runs after the browser lanes finish with Chrome.
 if (UNIT || ARGS.includes("cloud-hopper-controller")) await unitChecks();

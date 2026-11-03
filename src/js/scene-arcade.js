@@ -38,7 +38,8 @@
     snacks: view(-14.9, 1.6, 4.6, Math.PI - 0.35, 0.2, 7)
   };
   for (const c of live) {
-    PRESETS[GAMES[c.game].id] = view(c.x, c.y + 1.4, c.z + 0.4, 0, 0.1, 4.2);
+    const turn = c.y === MEZZ.y ? c.turn : 0;
+    PRESETS[GAMES[c.game].id] = view(c.x + Math.sin(turn) * 0.4, c.y + 1.4, c.z + Math.cos(turn) * 0.4, turn, 0.1, 4.2);
     VIEW_NAMES[GAMES[c.game].id] = GAMES[c.game].name;
   }
   // A portrait screen sees a third of the hall's width at the same distance, so there these views step back and turn
@@ -80,6 +81,7 @@
   const ORDERS = ["Banana split! Ooga slurp slurp.", "Coconut milk, fresh from coconut. Ahh.", "Grub on stick. Ooga crunch!", "Lava pop. Hot hot hot. Good!"];
 
   let renderer, game, world, go, root, camera, hud, hooks, input, pilot, fx, agentPlay = null;
+  let repair = null;
   let leaving = false, openingGame = false, people = null, avatar = null, playerWorld = null, screens = null, shownFrame = -1, prompt = null;
   // HALLOWEEN: the ghost arena's hunt: its herald before the hunt loads, the hunt, its channel to the room, GAME MODE,
   // the iron fence across the hallway's mouth (how far up), the totems and their lit parts, whether the visitor's Ooga carries its rifle
@@ -157,16 +159,18 @@
   // Into a game; a carnival machine names which of its kind (`place`), and the game comes back to it.
   const open = (id, place = null) => {
     if (leaving) return;
+    if (id === "race") { hud.toast("Ooga Rally · out of order"); return; }
     if (go(id, place)) leaving = openingGame = true;
   };
-  const play = (i) => open(GAMES[i].id);
+  const play = (i) => GAMES[i].id === "cloud-hopper" ? open("hub", "cloud-hopper") : open(GAMES[i].id);
   // The game's deferred code did not arrive: the visitor stays in the hall, and its cabinets and way out work again.
   const stay = () => { leaving = openingGame = false; };
 
   // The line under each loop: the visitor's best in that game, or a call to play. A retro game's best is an arcade one.
   const bestOf = (id) => {
     const s = game.state;
-    if (id === "race") return s.race.cup ? `${s.race.cup.medal.toUpperCase()} CUP` : "PLAY!";
+    if (id === "race") return "";
+    if (id === "cloud-hopper") return "PLAY!";
     if (id in s.arcade) return s.arcade[id] ? `HI ${s.arcade[id]}` : "PLAY!";
     const best = s[id].best;
     return best ? `HI ${best.score}` : "PLAY!";
@@ -333,11 +337,29 @@
       addChild(screen, best);
       screens.push({ node: screen, best, frames, start: on ? AM.attractStart(c.game) : AM.retroStart(c.retro) });
       addChild(node, body, signNode(named.title, named.icon, MQ.w, 0, MQ.y, MQ.z), screen);
+      if (c.service) {
+        const bay = createNode({ geometry: AM.rallyRepairBay() });
+        const panel = createNode({ geometry: AM.cabinetPanel(c.index), position: { x: -1.08, y: 0.1, z: 0.28 }, rotation: { x: -0.22, y: -0.4, z: -0.12 } });
+        const clanker = BL.agent.create({ groundAt: () => 0, form: "ape", x: -0.32, z: 1.3, heading: Math.PI - 0.35, scale: 0.65 });
+        clanker.chest.rotation.x = 1.35;
+        clanker.parts.head.rotation.x = -0.4;
+        clanker.parts.armR.rotation.x = -2.65;
+        clanker.parts.armL.rotation.x = -2.7;
+        // The handle sits in the right palm; its tip reaches into the bay as the wrist turns.
+        const driver = createNode({ geometry: AM.repairDriver(), position: { x: 0.04, y: -0.84, z: 0.48 },
+          rotation: { x: 2.6, y: 0, z: 0 }, scale: { x: 1.54, y: 1.54, z: 1.54 } });
+        addChild(clanker.parts.armR, driver);
+        addChild(node, bay, panel, clanker.root);
+        repair = { clanker, driver };
+        // The detached panel and worker occupy only this service bay; keep the aisle and fire approach clear.
+        blocks.push(blockOf(c, -1.7, 0.65, -0.15, 1.78, DECK_FEET));
+        target(clanker.root, { kind: "repair" }, 0.7);
+      }
       addChild(root, node);
       wave(body, c.x, c.z); wave(screen, c.x, c.z);
       target(body, on ? { kind: "cabinet", game: c.game } : { kind: "retro", retro: c.retro }, 1.3);
-      blocks.push(blockOf(c, -CAB.w / 2, CAB.w / 2, -CAB.d / 2, CAB.d / 2, on ? FLOOR_FEET : DECK_FEET));
-      stations.push(on ? { kind: "cabinet", game: c.game, play: c.play, label: named.name } : { kind: "retro", retro: c.retro, id: named.id, play: c.play, y: c.y, label: named.name });
+      blocks.push(blockOf(c, -CAB.w / 2, CAB.w / 2, -CAB.d / 2, CAB.d / 2, c.y === MEZZ.y ? DECK_FEET : FLOOR_FEET));
+      stations.push(on ? { kind: "cabinet", game: c.game, play: c.play, y: c.y, label: named.name + (named.unavailable ? " · out of order" : "") } : { kind: "retro", retro: c.retro, id: named.id, play: c.play, y: c.y, label: named.name });
     }
     // Every game in the hall: each machine in its frame with its game over nodes under it, and a station in front of
     // it that opens that game at that machine. Oogas from the roster play some of them for real (`bot`), and when
@@ -1613,7 +1635,7 @@
     // Every machine and cabinet nobody plays, from its player's spot; the pool tables from each side too.
     for (let i = 0; i < stations.length; i++) {
       const st = stations[i], p = st.play;
-      if ((st.kind !== "machine" && st.kind !== "cabinet") || (st.game && st.game.kind === "darts") || crowd.some((m) => Math.abs(m.x - p.x) + Math.abs(m.z - p.z) < 1.2)) continue;
+      if ((st.kind !== "machine" && st.kind !== "cabinet") || (st.kind === "cabinet" && GAMES[st.game].unavailable) || (st.game && st.game.kind === "darts") || crowd.some((m) => Math.abs(m.x - p.x) + Math.abs(m.z - p.z) < 1.2)) continue;
       spot("fix", p.x, p.z, p.facing);
       if (st.kind === "machine" && st.game.kind === "claw") spot("claw", p.x, p.z, p.facing);
     }
@@ -1998,7 +2020,8 @@
     const tipFor = (hit) => {
       const o = hit.owner;
       if (o.kind === "halloween") return o.tooltip();
-      if (o.kind === "cabinet") return `${GAMES[o.game].name} · ${COARSE ? "tap" : "click"} to play`;
+      if (o.kind === "repair") return "Clanker repairing Ooga Rally · out of order";
+      if (o.kind === "cabinet") return GAMES[o.game].unavailable ? "Ooga Rally · out of order" : `${GAMES[o.game].name} · ${COARSE ? "tap" : "click"} to play`;
       if (o.kind === "machine") return `${o.station.label} · walk up and press ${COARSE ? "PLAY" : "Space"}`;
       if (o.kind === "prizes") return `Prize counter · ${shownTickets()} tickets`;
       if (o.kind === "wheel") return `Jackpot wheel · ${AM.WHEEL_COST} tickets a spin`;
@@ -2009,7 +2032,7 @@
       // Nothing through a wall or a floor: no tooltip, and no game started by a tap.
       onHover: (hit, p) => {
         if (hit && !inView(hit)) hit = null;
-        if (hit?.owner.kind === "cabinet" && GAMES[hit.owner.game]) BL.deferred.prefetchScene(GAMES[hit.owner.game].id);
+        if (hit?.owner.kind === "cabinet" && GAMES[hit.owner.game] && !GAMES[hit.owner.game].unavailable && GAMES[hit.owner.game].id !== "cloud-hopper") BL.deferred.prefetchScene(GAMES[hit.owner.game].id);
         if (hit) hud.tooltip.show(tipFor(hit), p.x, p.y);
         else hud.tooltip.hide();
       },
@@ -2019,6 +2042,7 @@
         const o = hit.owner;
         // The herald and the hunt answer a tap only from inside the arena.
         if (o.kind === "halloween") { if (armed && o.tap) o.tap(); return; }
+        if (o.kind === "repair") return hud.toast("Clanker is repairing Ooga Rally · out of order");
         if (o.kind === "cabinet") return play(o.game);
         if (o.kind === "machine") return open(o.station.game.kind, o.station.index);
         if (o.kind === "snack") return order();
@@ -2063,7 +2087,7 @@
     // walked in comes through the doorway. A page that opens here takes `character=`
     // instead, as the island does. With nobody named, the roster's default pick walks in, so the arcade always has
     // someone to play it.
-    const from = GAMES.findIndex((g) => g.id === ctx.from), machineFrom = stations.find((st) => st.kind === "machine" && st.game.kind === ctx.from && st.index === (ctx.place || 0));
+    const from = GAMES.findIndex((g) => g.id === (ctx.place === "cloud-hopper-return" ? "cloud-hopper" : ctx.from)), machineFrom = stations.find((st) => st.kind === "machine" && st.game.kind === ctx.from && st.index === (ctx.place || 0));
     const retroFrom = stations.find((st) => st.kind === "retro" && st.id === ctx.from) || null;
     const asked = ctx.from === null ? new URLSearchParams(location.search).get("character")?.trim().toLowerCase() : null;
     const named = asked ? contributors.roster.find((c) => c.name.toLowerCase() === asked) : null;
@@ -2086,7 +2110,7 @@
       avatar = people.cavemen.get(playerName);
       // At a machine an Ooga plays, a step back from its spot, where that Ooga stands again.
       const at = from >= 0 ? live.find((c) => c.game === from).play : retroFrom ? retroFrom.play : machineFrom ? (machineFrom.bot ? toHall({ x: machineFrom.play.x, z: machineFrom.play.z, turn: machineFrom.turn }, 0, 1.3, { facing: machineFrom.play.facing }) : machineFrom.play) : { x: 0, z: HALL.front - 1.5, facing: Math.PI };
-      Object.assign(avatar.root.position, { x: at.x, y: avatar.baseY + supportAt(at.x, at.z, retroFrom ? MEZZ.y : 1), z: at.z });
+      Object.assign(avatar.root.position, { x: at.x, y: avatar.baseY + supportAt(at.x, at.z, retroFrom || from >= 0 && live.find(c => c.game === from).y === MEZZ.y ? MEZZ.y : 1), z: at.z });
       avatar.root.rotation.y = at.facing;
       // The rifle is the visitor's here, and the Ooga comes in as it left the last scene (pilot.js `arrive`): with nothing
       // carried, empty-handed with the rifle on its back.
@@ -2218,12 +2242,19 @@
   let prefetchAt = 0;
   const update = (dt, elapsed) => {
     if (ghosts) ghosts.unshake(camera);
+    if (repair) {
+      // One fixed work pose, with short turns separated by a pause. No pathfinding, effects pool or new geometry.
+      const turn = Math.max(0, Math.sin(elapsed * 1.6));
+      repair.driver.rotation.z = Math.sin(elapsed * 8) * 0.45 * turn;
+      repair.clanker.parts.armR.rotation.z = Math.sin(elapsed * 8) * 0.025 * turn;
+      repair.clanker.parts.head.rotation.y = Math.sin(elapsed * 0.7) * 0.035;
+    }
     if (elapsed >= prefetchAt) {
       prefetchAt = elapsed + 0.25;
       const p = pilot.player ? pilot.player.root.position : camera.position;
       for (let i = 0; i < live.length; i++) {
         const c = live[i], dx = p.x - c.x, dy = p.y - c.y, dz = p.z - c.z;
-        if (GAMES[c.game] && dx * dx + dy * dy + dz * dz <= 225) BL.deferred.prefetchScene(GAMES[c.game].id);
+        if (GAMES[c.game] && !GAMES[c.game].unavailable && GAMES[c.game].id !== "cloud-hopper" && dx * dx + dy * dy + dz * dz <= 225) BL.deferred.prefetchScene(GAMES[c.game].id);
       }
     }
     pilot.readInput(dt);
@@ -2350,6 +2381,7 @@
     prizeUi.panel.removeEventListener("click", onPrizeClick);
     prizeUi.panel.hidden = true;
     for (const g of staff) g.agent.dispose();
+    repair?.clanker.dispose(); repair = null;
     for (const id in JOBS) JOBS[id].spots.length = 0;
     CAND.fill(null);
     // A spin still turning has its win saved but not shown: left out here, it shows on the way back in (`enter`).
@@ -2387,6 +2419,7 @@
     for (let d = 0; d < 10; d++) set.add(AM.digit(d));
     set.add(AM.coconut(0)).add(AM.coconut(1)).add(AM.pinLight(0)).add(AM.pinLight(1));
     if (staff) for (const g of staff) g.agent.liveGeometry(set);
+    if (repair) repair.clanker.liveGeometry(set);
     if (avatar) set.add(avatar.headOpen).add(avatar.headClosed);
     if (remotes) remotes.liveGeometry(set);
     if (ghosts) { ghosts.liveGeometry(set); tess.liveGeometry(set); }

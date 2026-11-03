@@ -209,14 +209,14 @@
     renderer.render(root, camera);
     renderer.dispose();
   };
-  const copyPortraitNode = (source, portraitRoot, portraitGeometry) => {
+  const copyPortraitNode = (source, portraitRoot, portraitGeometry, excluded = null) => {
     if (source.portraitHidden) return null;
     const copy = createNode({ geometry: source === portraitRoot ? portraitGeometry : source.geometry });
     Object.assign(copy.position, source.position);
     Object.assign(copy.rotation, source.rotation);
     Object.assign(copy.scale, source.scale);
     copy.visible = source.visible;
-    for (const child of source.children) if (child.visible && !child.portraitHidden) addChild(copy, copyPortraitNode(child, portraitRoot, portraitGeometry));
+    for (const child of source.children) if (child.visible && !child.portraitHidden && !excluded?.has(child)) addChild(copy, copyPortraitNode(child, portraitRoot, portraitGeometry, excluded));
     return copy;
   };
   const renderFaceIcon = (canvas, cave, gorilla = null, px = ICON_PX, unlit = false) => {
@@ -242,9 +242,10 @@
   };
   // An Ooga standing square to the view, whole, as it stands posed now: its built parts copied (hidden ones left out)
   // and turned to face the camera, `w` by `h` pixels. A podium's portraits (HALLOWEEN: the arcade's ghost hunt's winners).
-  const renderBodyIcon = (canvas, cave, w, h) => {
+  const renderBodyIcon = (canvas, cave, w, h, weapons = true) => {
     const renderer = iconRendererMod.createRenderer(canvas, { width: w, height: h, transparent: true });
-    const root = createNode(), body = copyPortraitNode(cave.root, null, null), tall = cave.bodyHeight;
+    const excluded = weapons ? null : new Set([cave.parts.club, cave.parts.gun]);
+    const root = createNode(), body = copyPortraitNode(cave.root, null, null, excluded), tall = cave.bodyHeight;
     body.visible = true;
     body.position.x = body.position.z = 0;
     body.position.y = cave.baseY;
