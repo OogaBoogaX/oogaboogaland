@@ -76,6 +76,14 @@ history or per-frame telemetry table.
 
 - `GET /api/highscores/<game>` is public and returns `{game, highscores, achieved,
   scoreType, direction, unit, version, revision}`. Reads do not create players or sessions.
+- `GET /api/highscores/arcade` returns `{boards, refreshAfterMs}` for the 17 Arcade
+  machine kinds in `highscoreRules.arcade`, using one indexed `IN` query. A public-only
+  synthetic Cache API entry shares that snapshot at the current Cloudflare data center
+  for 30 seconds; concurrent misses share work within an isolate. Cookie and authorization
+  headers are never copied into the key or response. Missing rows and failures are not cached.
+- `GET /api/highscores/arcade-live` returns the same public boards directly from D1,
+  bypassing the edge snapshot. Both snapshot routes are GET-only and use the public read
+  limiter. The signed-in client chooses the fresh route; it contains no account-specific data.
 - `POST /api/highscores/<game>` accepts `{machine, score, version, playerId}`. The Worker
   resolves identity from the existing session. `playerId` is only a guard against a
   different account's cookie replacing the account that began the run; a mismatch is 409.
@@ -86,11 +94,13 @@ history or per-frame telemetry table.
   equal scores cannot undo a better result.
 - `HIGHSCORE_LIMITER` allows 120 requests per minute per key, separating public reads by
   IP from writes by account. Rate-limited replies are 429; unavailable storage replies
-  with `closed` and 503. Responses are `no-store`, including public reads, so subsequent
-  reads reflect account deletion and score changes.
+  with `closed` and 503. HTTP responses to browsers are `no-store`. Only the separate
+  public Arcade cache entry has a TTL; individual boards and the live snapshot stay fresh.
 
 `/api/me` advertises `highscores` when this Worker has D1. The shared page client uses
 that capability before requesting scores, preserving portable pages and older Workers.
+The new `highscoreSnapshots` capability enables combined Arcade reads; older Workers
+keep the per-game read contract.
 It captures the signed-in account at the start of a run and checks it again at completion.
 Starting signed out, signing out mid-run, or changing accounts makes that run local only.
 The Worker also authenticates every submission. There is no server-issued run ticket or
@@ -107,9 +117,78 @@ from localStorage after a reload remain local, since the page cannot establish w
 them. Continuing an eligible run retains that account requirement and uses Mine's existing
 score rules; continued and ordinary runs share the machine record.
 
+## Live delivery and recovery
+
+Only a successful change to a score row calls `ROOM.getByName("island").refreshHighscores(game)`.
+This binding-only RPC has no public HTTP or WebSocket command. It accepts a game id,
+reads D1 itself and broadcasts `{t: "highscore", board}` on the existing signed-in sockets.
+Rejected, equal and worse scores do not call it. The Worker uses `waitUntil` so room
+latency does not delay the submitter's score response. No guest live socket is opened.
+
+`0004_highscore_notifications.sql` adds a pending-revision table with at most one row
+per game. Its trigger runs in the score transaction, also covering identity cleanup.
+The room acknowledges only revisions it has read and sent: a newer concurrent commit
+cannot be removed by an older acknowledgement. Failed delivery, failed acknowledgement
+and a Worker dying after commit leave recoverable work. The existing one-minute room
+sweep drains pending changes while players are connected; no additional alarm or interval
+is created, and an empty room does no recovery reads. Rename/removal is delivered by this
+sweep. A restart can redeliver a revision; clients and the awake room deduplicate it.
+
+Boards are complete replacements of one game's public projection, not whole-Arcade
+broadcasts. The existing registry bounds machine entries and 1,024 attributed entries;
+the server also refuses dictionaries larger than 100,000 characters each before parsing.
+Private ownership never reaches the wire. Client validation and monotonic per-game
+revisions reject malformed, duplicate and reordered data, including a stale HTTP response
+arriving after a newer socket update. The ordinary D1 binding reads the primary; do not
+switch these reads to unconstrained replica sessions.
+
+A live connection token change forces fresh reads of watched boards after welcome.
+Unwatched snapshots are invalidated by that token before their next use. This closes the
+snapshot/subscription race and recovers messages lost with a disconnected socket. Signed-in
+pages do not poll scores; normal delivery is immediate after commit and the room read,
+not a guaranteed latency SLA. A failed notification can take the next successful one-minute
+sweep to recover (longer during an outage).
+
+Guest watches use one page timer only while the document is visible and a board is watched.
+For Arcade, it uses the response's remaining cache lifetime, plus 100 ms (minimum 1 second),
+not another 30 seconds after an old cached response. Hiding the page or leaving its last
+board cancels the timer. Returning to a visible page refreshes due boards; errors retain
+the last good scores and back off for 30 seconds. The intended guest lag is about 30 seconds
+plus request time and timer scheduling, not a strict upper bound during network failures.
+
+## Cost and verification
+
+A fresh Arcade visit makes one browser request instead of 17 (94.1% fewer). A cache miss
+reads 17 game rows in one SQL query; a cache hit reads none. Cache API hits still invoke
+the Worker, and independent data centers and isolates can have independent misses.
+Visible guests refresh once per cache lifetime, adding requests that the old static open
+screen did not make. Counts per fresh visit must not be confused with total session traffic.
+
+The focused SQLite/cache fixture measures 17 simultaneous requests coalescing into one
+17-row query, then a cache hit making zero score queries. Client fixtures measure one
+request for 17 watches, visible-only refreshes and no signed-in score timer. Room fixtures
+measure one board frame per connected player and no duplicate frame for the same revision
+while awake, plus recovery after rehydration. A changed score adds a pending-row write,
+one RPC, an outbox lookup, a board read and conditional acknowledgement; its normal score
+write and submitter response remain. Each active-room maintenance sweep adds one bounded
+pending-table query, even when there are no pending changes.
+
+Calculated examples: 100,000 fresh visits go from 1.7 million score requests to 100,000;
+1 million visits go from 17 million to 1 million. With one island room and 20 connected
+players, 10,000 delivered changes produce 200,000 outgoing board frames and normally
+10,000 notification RPCs, before retries/coalescing. These are operation estimates, not
+measured Cloudflare bills. CPU, D1 billed row metrics, cache hit rate across data centers,
+actual commit-to-screen latency and long-lived guest traffic require staging measurements.
+
+Focused checks when authorized: `node test/run.mjs highscores-unit`, `node test/run.mjs chat-unit`,
+and `node --test worker/test/highscores.test.mjs worker/test/chat.test.mjs worker/test/protocol.test.mjs worker/test/auth.test.mjs`.
+They cover real SQLite transactions/triggers, failure retention, notification/commit races,
+room rehydration and client ordering/lifecycle. They mock Cloudflare cache/room hosting and
+browser networking; they do not replace a two-player staging smoke test or CI at the PR head.
+
 ## Wrangler and rollout
 
-The existing migration directory and deploy workflows already apply this migration. No
+The existing migration directory and deploy workflows apply the new notification migration before the Worker. No
 `d1 create`, new database binding, secret, Durable Object or scheduled job is needed.
 The configs add limiter namespaces `2006` on staging and `1006` in production; the local
 donations preview uses `3006` and still keeps scores in its local D1.

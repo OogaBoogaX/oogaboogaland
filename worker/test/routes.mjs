@@ -5,6 +5,7 @@ import { compileFunction } from "node:vm";
 import * as cookies from "../src/cookies.js";
 import * as crypto from "../src/crypto.js";
 import * as db from "../src/db.js";
+import * as highscoreStore from "../src/highscore-store.js";
 import { createOwnedCharacterLookup } from "../src/contributor-policy.js";
 import { RULES } from "../src/tess-rules.js";
 import "../../src/js/highscore-rules.js";
@@ -35,7 +36,7 @@ anthropic = class { constructor() { throw new Error("Unexpected Claude call"); }
   const api = load("api", { ...cookies, ...db, ...http }, ["handleApi"]);
   const donations = load("donations", http, ["handleDonations"]);
   const tess = load("tess", { ...http, Anthropic: anthropic, FACTS: facts, RULES }, ["handleTess", "pruneTess", "ask", "RESERVE"]);
-  const highscores = load("highscores", http, ["handleHighscores", "createHighscoreHandler"]);
+  const highscores = load("highscores", { ...http, ...highscoreStore }, ["handleHighscores", "createHighscoreHandler"]);
   const main = load("index", { ...http, ...db, ...auth, ...api, ...donations, ...tess, ...highscores }, ["worker"]);
   return { ...http, ...auth, ...api, ...donations, ...tess, ...highscores, ...main };
 };

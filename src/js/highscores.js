@@ -6,14 +6,17 @@
   const BL = window.BL = window.BL || {};
   const rules = BL.highscoreRules, net = BL.net;
   const FRESH_MS = 30000, TIMEOUT_MS = 6000, MAX_WRITES = 4;
-  const entries = new Map(Object.keys(rules.games).map(id => [id, { data: null, at: 0, loading: null, refresh: false, listeners: new Set() }]));
+  const entries = new Map(Object.keys(rules.games).map(id => [id, { data: null, at: 0, source: null, loading: null, refresh: false, listeners: new Set() }]));
   const tickets = new WeakMap(), requests = new Set();
+  const arcade = { loading: null, refresh: false, nextAt: 0, source: null };
+  let liveOff = null, refreshTimer = 0, connection = null;
   let unsubscribe = null, stopped = false, generation = 0, writes = 0, accountId = null, logoutEpoch = -1, enabled = false;
   const available = () => !stopped && net.state.backend && net.state.highscores === true;
   const isObject = value => !!value && typeof value === "object" && !Array.isArray(value);
   const validLogin = value => /^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/i.test(value) && !value.includes("--");
   const accept = (id, data) => {
     const game = rules.get(id);
+    if (!game) return null;
     if (!isObject(data) || data.game !== id || data.version !== game.version || data.scoreType !== game.scoreType
       || data.direction !== game.direction || data.unit !== game.unit || !Number.isSafeInteger(data.revision) || data.revision < 0
       || !isObject(data.highscores) || !isObject(data.achieved)) return null;
@@ -38,6 +41,13 @@
     entry.data = data;
     for (const fn of entry.listeners) fn(data);
   };
+  const snapshotData = data => {
+    if (!isObject(data) || !Array.isArray(data.boards) || data.boards.length !== rules.arcade.length
+      || !Number.isFinite(data.refreshAfterMs) || data.refreshAfterMs < 0 || data.refreshAfterMs > FRESH_MS) return null;
+    const boards = data.boards.map(board => accept(board?.game, board));
+    if (boards.some(board => !board || !rules.arcade.includes(board.game)) || new Set(boards.map(board => board.game)).size !== rules.arcade.length) return null;
+    return { boards, refreshAfterMs: data.refreshAfterMs };
+  };
   const request = async (id, body = null) => {
     const controller = new AbortController();
     const timer = window.setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -48,7 +58,7 @@
         cache: "no-store", signal: controller.signal, ...(body ? { body: JSON.stringify(body) } : {}) });
       if (!response.ok) return { data: null, retry: response.status >= 500 };
       if (!(response.headers.get("content-type") || "").startsWith("application/json")) return { data: null, retry: false };
-      return { data: accept(id, await response.json()), retry: false };
+      return { data: id === "arcade" || id === "arcade-live" ? snapshotData(await response.json()) : accept(id, await response.json()), retry: false };
     } catch {
       return { data: null, retry: !stopped };
     } finally {
@@ -56,32 +66,90 @@
       requests.delete(controller);
     }
   };
-  const load = (id, force = false) => {
+  const loadOne = (id, force = false) => {
     const entry = entries.get(id);
     if (!entry || !available() || document.hidden) return;
-    if (entry.loading) { entry.refresh ||= force; return; }
-    if (!force && entry.at && Date.now() - entry.at < FRESH_MS) return;
+    const source = `${generation}:${connection || ""}`;
+    if (entry.loading) { entry.refresh ||= force || entry.source !== source; return; }
+    if (!force && entry.source === source && entry.at && Date.now() - entry.at < FRESH_MS) return;
+    entry.source = source;
     entry.at = Date.now(); // Failed reads are bounded too; entry/visibility changes can retry after this interval.
     entry.loading = request(id).then(result => {
       if (!stopped && result.data) publish(id, result.data);
     }).finally(() => {
       entry.loading = null;
+      scheduleGuest();
       if (entry.refresh) { entry.refresh = false; if (entry.listeners.size) load(id, true); }
     });
   };
+  const combined = id => net.state.highscoreSnapshots === true && rules.arcade.includes(id);
+  const watchedArcade = () => rules.arcade.some(id => entries.get(id).listeners.size);
+  const scheduleGuest = () => {
+    window.clearTimeout(refreshTimer); refreshTimer = 0;
+    if (!available() || net.state.me || document.hidden) return;
+    let due = Infinity;
+    for (const [id, entry] of entries) if (entry.listeners.size) {
+      if (combined(id)) { if (!arcade.loading) due = Math.min(due, arcade.nextAt); }
+      else if (!entry.loading) due = Math.min(due, entry.at + FRESH_MS);
+    }
+    if (due !== Infinity) refreshTimer = window.setTimeout(() => {
+      refreshTimer = 0;
+      for (const [id, entry] of entries) if (entry.listeners.size) load(id);
+      scheduleGuest();
+    }, Math.max(1000, due - Date.now() + 100));
+  };
+  const loadArcade = (force = false) => {
+    if (!available() || document.hidden) return;
+    const source = `${generation}:${connection || ""}`;
+    if (arcade.loading) { arcade.refresh ||= force || arcade.source !== source; return; }
+    if (!force && arcade.source === source && Date.now() < arcade.nextAt) return;
+    arcade.source = source;
+    arcade.nextAt = Date.now() + FRESH_MS; // Back off on failure while keeping the last good boards.
+    const signed = !!net.state.me;
+    arcade.loading = request(signed ? "arcade-live" : "arcade").then(result => {
+      if (stopped || !result.data) return;
+      for (const board of result.data.boards) publish(board.game, board);
+      // Use the remaining edge lifetime, not another whole browser TTL on top of it.
+      arcade.nextAt = Date.now() + (signed ? FRESH_MS : result.data.refreshAfterMs);
+    }).finally(() => {
+      arcade.loading = null;
+      if (arcade.refresh) { arcade.refresh = false; if (watchedArcade()) loadArcade(true); }
+      scheduleGuest();
+    });
+  };
+  const load = (id, force = false) => combined(id) ? loadArcade(force) : loadOne(id, force);
+  const onLive = board => {
+    if (!available() || !net.state.me) return;
+    const data = accept(board?.game, board);
+    if (data) publish(data.game, data);
+  };
+  const refreshWatched = force => {
+    let arcadeRead = false;
+    for (const [id, entry] of entries) if (entry.listeners.size) {
+      if (combined(id)) { if (!arcadeRead) loadArcade(force); arcadeRead = true; }
+      else loadOne(id, force);
+    }
+  };
   const onAccount = () => {
     const nextId = net.state.me?.id || null, nextEnabled = available(), nextEpoch = net.state.logoutEpoch;
-    if (nextId === accountId && nextEpoch === logoutEpoch && nextEnabled === enabled) return;
+    const nextConnection = net.state.room === "live" ? net.state.connectionToken || "live" : null;
+    const accountChanged = nextId !== accountId || nextEpoch !== logoutEpoch || nextEnabled !== enabled;
+    const joined = nextConnection && nextConnection !== connection;
     if (nextId !== accountId || nextEpoch !== logoutEpoch) generation++;
-    accountId = nextId; logoutEpoch = nextEpoch; enabled = nextEnabled;
-    for (const [id, entry] of entries) if (entry.listeners.size) load(id, true);
+    accountId = nextId; logoutEpoch = nextEpoch; enabled = nextEnabled; connection = nextConnection;
+    // Join first, then read: changes committed during the snapshot also arrive over the socket.
+    // Revisions settle either arrival order, and reconnect recovers messages lost with the old socket.
+    if (accountChanged || joined) refreshWatched(true);
+    scheduleGuest();
   };
   const onVisibility = () => {
-    if (!document.hidden) for (const [id, entry] of entries) if (entry.listeners.size) load(id);
+    if (!document.hidden) refreshWatched(!!net.state.me);
+    scheduleGuest();
   };
   const start = () => {
     if (unsubscribe || stopped) return;
     unsubscribe = net.subscribe(onAccount);
+    liveOff = net.subscribeHighscores(onLive);
     document.addEventListener("visibilitychange", onVisibility);
     onAccount();
   };
@@ -92,7 +160,8 @@
     entry.listeners.add(fn);
     fn(entry.data);
     load(id);
-    return () => entry.listeners.delete(fn);
+    scheduleGuest();
+    return () => { entry.listeners.delete(fn); scheduleGuest(); };
   };
   const get = id => entries.get(id)?.data || null;
   // Zero means the shared board is loaded but this machine has no record. Null means use a labelled local best.
@@ -136,6 +205,8 @@
     generation++;
     unsubscribe?.();
     unsubscribe = null;
+    liveOff?.(); liveOff = null;
+    window.clearTimeout(refreshTimer); refreshTimer = 0;
     document.removeEventListener("visibilitychange", onVisibility);
     for (const controller of requests) controller.abort();
     for (const entry of entries.values()) { entry.listeners.clear(); entry.data = null; }
