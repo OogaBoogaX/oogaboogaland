@@ -13,6 +13,8 @@
   // and its cave seals, unless the page opts in: ?wip=<scene id> opens that game and lands in it, wip=1 opens
   // every one. No debug needed, so anyone can play a shared link. Its saves are left alone for the day it opens.
   const WIP = params.get("wip");
+  // Rally stays closed to visitors; its retained suite explicitly opts into the maintenance scene.
+  const RALLY_TEST = DEBUG && WIP === "race";
   for (const id of Object.keys(scenes)) if (scenes[id].wip && WIP !== "1" && WIP !== id) delete scenes[id];
   for (const slot of window.BL.caves.slots) if (slot.scene && !scenes[slot.scene]) Object.assign(slot, { scene: null, status: "dark" });
   // Loot crates, locker tab and worn swag; the suite turns them on with ?debug=1&loot=1
@@ -259,6 +261,7 @@
     } else t.redirect = answer || null;
   };
   const go = (id, place = null, instant = false) => {
+    if (id === "race" && !RALLY_TEST) { id = "arcade"; place = "rally-out-of-order"; }
     const next = scenes[id];
     if (!next) throw new Error(`Unknown scene "${id}"`);
     if (transition) return false;
@@ -884,7 +887,7 @@
   // EntropyLab currently lives in its island cave; retain the isolated scene for debug checks only.
   const routed = router.current();
   const requestedScene = (routed && routed.scene) || params.get("scene") || (WIP !== "1" ? WIP : null);
-  const sceneId = requestedScene === "lab" && !DEBUG ? null : requestedScene;
+  const sceneId = requestedScene === "race" && !RALLY_TEST ? "arcade" : requestedScene === "lab" && !DEBUG ? null : requestedScene;
   // Building the first scene holds the main thread with nothing painted yet.
   // Run boot from a task after the first frame so the leaf curtain is on screen, not the previous page.
   let destroyed = false;

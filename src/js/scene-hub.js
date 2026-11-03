@@ -205,7 +205,7 @@
     }
   ];
   const MEADOW_INNER = 5, MEADOW_OUTER = MEADOW - 1.5, CLIFF_INNER = MEADOW + 1.5, CLIFF_OUTER = RADIUS - 1;
-  const DOCK_DEG = 75, LADDER_Z = -3.6, LADDER_LEAN = 0.65;
+  const LADDER_Z = -3.6, LADDER_LEAN = 0.65;
   // Two disjoint annuli keep sparse clouds around the horizon, passing below and above the bridges.
   // Nine clouds per ring leave room for the widest mesh; each ring keeps its angular spacing.
   const CLOUDS_PER_TRACK = 9;
@@ -259,7 +259,7 @@
   let oogatronUnsub, renderer, game, world, go, lootEnabled, testBananas, root, camera, overlayCanvas, island, terrainRampRoof, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, mirrorCave, matrixCave, matrixControl, gateRain, fireRigs, firePitRig, fire, headquarters, jumbotron, positionDebug, remotes, npcSync;
   // GAME MODE (`setGameMode`): an island event holds the island still for play while it runs.
   let gameMode = false, gameCombatOnly = false;
-  let cloudHopper = null, cloudDock = null, cloudIsland = null, cloudPile = null, cloudPileSolids = null, cloudFinishFruit = null;
+  let cloudHopper = null, cloudIsland = null, cloudPile = null, cloudPileSolids = null, cloudFinishFruit = null;
   const cloudOffMap = [], cloudHidden = new Map(), CLOUD_NO_ACTORS = [];
   const cloudMoveMatrix = math.mat4.create();
   const cloudPlaying = () => !!cloudHopper?.playing;
@@ -2942,12 +2942,8 @@
     cave.root.position.x = T.place.x; cave.root.position.z = T.place.z; cave.root.position.y = T.place.y + cave.baseY;
     return true;
   };
-  // Dock over the drop and ladder on the bluff
+  // The ladder on the bluff; the former Cloud Hopper dock is retired.
   const buildRim = () => {
-    const d = polar(DOCK_DEG, CLIFF_OUTER);
-    const dock = place(hubModels.dock(), d.x, d.z, Math.PI / 2 - DOCK_DEG * DEG, island.surfaceAt(d.x, d.z) + 0.05, "dock", 2.2);
-    cloudDock = dock;
-    claim(d.x, d.z, 2.5);
     let faceX = MEADOW - 1;
     while (island.surfaceAt(faceX + island.unit / 2, LADDER_Z) < 3) faceX += island.unit;
     const foot = faceX - LADDER_LEAN - 0.06;
@@ -5878,7 +5874,6 @@
   const TAP_RAY = { ox: 0, oy: 0, oz: 0, dx: 0, dy: 0, dz: 0 };
   const nearbyAction = (x, y, z, reach) => {
     if (cloudHopper?.active) return null;
-    if (cloudHopper?.near(x, y, z)) return cloudHopper.action;
     const player = pilot.player;
     if (player && player.camp.burning) return ROLL_ACTION;
     if (player && player.camp.seat) return STAND_ACTION;
@@ -6298,7 +6293,6 @@
       if (!(hit && hit.owner.kind === "whitepaper" || wpFaceHit(p))) wpStop();
       return;
     }
-    if (hit?.owner.kind === "cloud-hopper") { cloudHopper.launch(); return; }
     if (factoryDeparting || bifrostDeparting || islandGuide.holding) return;
     if (gorillaBehindBillboard(hit, p)) return;
     if (debugMovementTap(hit, p)) return;
@@ -11569,6 +11563,7 @@
       updatePositionDebug(true);
     }
     updatePoolEffectsActivity();
+    if (ctx.from === "arcade" && ctx.place === "cloud-hopper") cloudHopper.launch(true);
   };
   // Prepare only raw character rigs: the published crew, its stable roster order, input, health and NPC/remote
   // registration are still created together by enter. No partly populated actor registry reaches a live scene.
@@ -12689,15 +12684,18 @@
       addChild(cloudFinishFruit, fruit);
     }
     addChild(root, cloudFinishFruit);
-    cloudHopper = BL.cloudHopper.create({ root, dock: cloudDock, crew, pilot, hud, renderer, camera, game, seaY: SEA_Y,
+    // The arcade cabinet hands the same Ooga to a launch cloud above its cave roof. No outdoor entrance or dock.
+    const mouth = island.mouths.find(mouth => mouth.id === arcadeMouth.slot.id);
+    const launchPoint = { x: mouth.x, y: island.surfaceAt(mouth.x, mouth.z) + 4, z: mouth.z };
+    cloudHopper = BL.cloudHopper.create({ root, dock: { position: launchPoint, rotation: { y: mouth.ry } }, launchPoint, arcade: true,
+      park: () => navigate("arcade", false, false), onExit: () => go("arcade", "cloud-hopper-return"),
+      crew, pilot, hud, renderer, camera, game, seaY: SEA_Y,
       move: cloudMove, mode: cloudMode, pileSurface: cloudPileSurface, mainlandRadius: island.radius,
       finish: () => ({ x: 0, y: ALTAR_HEIGHT + 2, z: 0 }),
       pileTop: () => pile.shown > 0 ? pile.core.position.y + pile.core.scale.y * pileTopY : ALTAR_HEIGHT + 0.23,
       refusal: () => gameMode ? "Finish the island event before playing Cloud Hopper"
         : wpTime >= 0 || wpRead || wpReturn >= 0 || islandGuide.holding || entering || factoryHeld || factoryDeparting || bifrostDeparting
           ? "Finish the current tour before playing Cloud Hopper" : clankerPlay.active ? "Choose an Ooga to play Cloud Hopper" : null });
-    addTarget(cloudHopper.cabinet, { kind: "cloud-hopper" });
-    solids.add(cloudHopper.cabinet);
     hubScene.debug.cloudHopper = cloudHopper;
     hubScene.debug.tess = islandGuide;
     // Tess wears every tier of her detail in her first frames, so each is on the GPU before she comes close: build
@@ -12716,6 +12714,7 @@
     hintTimer = window.setTimeout(() => {
       if (!pilot.player && !clankerPlay.active && !matrixControl.promptAction) hud.hint(COARSE ? "Drag to look · pinch to eye level · sticks to fly · tap a cave" : "Drag to look · scroll to eye level · WASD to fly · tap a cave to enter");
     }, 1200);
+    if (ctx.from === "arcade" && ctx.place === "cloud-hopper") cloudHopper.launch(true);
     if (DEBUG_GORILLA_MOVE) hud.toast("Gorilla movement debug · click a gorilla, then a destination");
   };
   const enter = (ctx) => { const steps = enterSteps(ctx); while (!steps.next().done); };
@@ -12745,7 +12744,7 @@
     cloudHopper?.dispose(); cloudIsland?.dispose();
     cloudPileSolids?.dispose();
     removeChild(root, cloudFinishFruit);
-    cloudHopper = cloudIsland = cloudDock = cloudPile = cloudPileSolids = cloudFinishFruit = null;
+    cloudHopper = cloudIsland = cloudPile = cloudPileSolids = cloudFinishFruit = null;
     cloudOffMap.length = 0; cloudHidden.clear();
     actorTransition.sourceRoot = actorTransition.sourceHead = null;
     factoryWalk.cave = null;
@@ -12962,7 +12961,7 @@
     hubScene.islandGeometry(set);
   };
   const islandGeometry = (set) => {
-    if (cloudHopper) for (const geometry of cloudHopper.cabinet.frames) set.add(geometry);
+    if (cloudHopper?.cabinet.frames) for (const geometry of cloudHopper.cabinet.frames) set.add(geometry);
     cloudHopper?.liveGeometry(set);
     if (islandGuide) islandGuide.liveGeometry(set);
     mempoolIsland.water.liveGeometry(set);

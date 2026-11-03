@@ -40,10 +40,11 @@
   // The games with cabinets, as the island names them: scene id, name, the marquee's words and badge, and the
   // colour of its screen's light.
   const GAMES = [
-    { id: "race", scoreId: "race-1", name: "Ooga Rally", title: "RALLY", icon: "flag", light: [1, 0.85, 0.3] },
+    { id: "race", scoreId: "race-1", name: "Ooga Rally", unavailable: true, title: "RALLY", icon: "flag", light: [1, 0.85, 0.3] },
     { id: "drop", scoreId: "drop-1", name: "Ooga Drop", title: "DROP", icon: "chute", light: [0.4, 0.8, 1] },
     { id: "orbit", scoreId: "orbit-1", name: "Ooga Orbit", title: "ORBIT", icon: "rocket", light: [0.7, 0.55, 1] },
-    { id: "mine", scoreId: "mine-1", name: "Ooga Mine", title: "MINE", icon: "pick", light: [1, 0.6, 0.25] }
+    { id: "mine", scoreId: "mine-1", name: "Ooga Mine", title: "MINE", icon: "pick", light: [1, 0.6, 0.25] },
+    { id: "cloud-hopper", name: "Cloud Hopper", title: "CLOUD HOPPER", icon: "cloud", light: [0.4, 0.8, 1] }
   ];
   // The Ooga retro games (`retro-games.js`), one on each cabinet along the mezzanine, in the cabinets' order from the
   // fifth: scene id, name, and the marquee's words and badge. Each cabinet's trim is its screen's colour.
@@ -76,6 +77,12 @@
     const play = { x: x + Math.sin(turn) * 1.25, z: z + Math.cos(turn) * 1.25, facing: turn + Math.PI };
     return { index: i, scoreId: live ? GAMES[i].scoreId : RETRO[i - 4].scoreId, x, y, z, turn, game: live ? i : -1, retro: live ? -1 : i - 4, body, trim, second, art, stone: !!stone, play };
   });
+  // Rally stands left of Invaders across the existing fire bowl at x -6.5, facing the same aisle.
+  // Cloud Hopper inherits Rally's exact stage frame and play spot; the other twelve positions stay authored.
+  const rally = { ...CABINETS[0], index: CABINETS.length, x: -7.75, y: MEZZ.y, z: CABINETS[4].z, turn: 0, service: true,
+    play: { x: -7.75, z: CABINETS[4].z + 1.8, facing: Math.PI } };
+  CABINETS[0] = { ...CABINETS[0], game: 4, scoreId: null, pictograph: "cloudHopper", trim: "#d8efff", second: "#5ec8ff" };
+  CABINETS.push(rally);
   // Everything else, each built in its own frame facing +z; `turn` stands the frame in the hall. For the carnival
   // machines the player stands at the frame's origin (`play`); the counters are built with their customers on +z.
   // Laid out in districts round the stage, with the main aisles at least 3 m wide, every other walkway at least
@@ -766,10 +773,21 @@
     }
     return parts;
   };
+  // The removable lower door, including its original hide, handprints, tiki coin mouth and rope stitching.
+  const buildCabinetPanel = c => {
+    const J = BL.hubModels, hide = leather(c.trim, HIDE_TONES[c.index % 3]), ink = mulberry32(1900 + c.index);
+    const body = shaded([], [bevelBox({ w: 1.04, h: 0.86, d: 0.06, color: hide, bevel: 0.02, offset: { y: 0.55, z: 0.42 } }),
+      ...tikiMouth(0.17, 0.1, 0.55).map(p => moved(p, 0, 0.46, 0.45)),
+      hideMarks(c.index % 3, -0.49, 0.49, 0.26, 0.94, 0.4515, hide, [[-0.3, 0.8, 0.1], [0.3, 0.8, 0.1], [0, 0.46, 0.26]], ink),
+      moved(pictograph(PICTOS.hand, 0.085, [c.trim, c.trim, c.trim], 0.7), 0.3, 0.8, 0.456),
+      moved(pictograph(mirror(PICTOS.hand), 0.085, [c.trim, c.trim, c.trim], 0.7), -0.3, 0.8, 0.456)]);
+    return J.withJungle(body, g => J.liana(g, [[-0.49, 0.25, 0.458], [0.49, 0.25, 0.458], [0.49, 0.95, 0.458], [-0.49, 0.95, 0.458], [-0.49, 0.25, 0.458]], 0.011, 0.011, ROPE));
+  };
+  const cabinetPanel = variants(i => buildCabinetPanel(CABINETS[i]));
   // The hall and Cloud Hopper share the same carved body, trim, controls and jungle dressing.
   const buildCabinet = (c, named) => {
     const i = c.index, on = c.game >= 0, parts = [], round = [], J = BL.hubModels;
-    const hide = leather(c.trim, HIDE_TONES[i % 3]), inks = [earth(c.trim), earth(c.second), BONE], cuts = c.stone ? SLABS : PLANKS, edge = c.stone ? tint(c.body, 0.68) : BARK;
+    const inks = [earth(c.trim), earth(c.second), BONE], cuts = c.stone ? SLABS : PLANKS, edge = c.stone ? tint(c.body, 0.68) : BARK;
     for (const s of [-1, 1]) {
       // The side: planks (or slabs) a shade apart with a hair of dark between them, and the bark edge round all but
       // the base's front corner, where the bamboo post stands.
@@ -787,10 +805,9 @@
       : [0, 1, 2, 3].map((k) => bevelBox({ w: 0.255, h: 2.1, d: 0.06, color: tint(c.body, PLANK_TONES[k + 1]), bevel: 0.02, offset: { x: -0.39 + k * 0.26, y: 1.09, z: -0.42 } }));
     parts.push(
       ...back,
-      bevelBox({ w: 1.04, h: 0.86, d: 0.06, color: hide, bevel: 0.02, offset: { y: 0.55, z: 0.42 } }),
+      ...(!c.service ? [buildCabinetPanel(c)] : []),
       bevelBox({ w: 1.06, h: 0.045, d: 0.8, color: tint(c.body, 0.9), bevel: 0.015, offset: { y: 2.118, z: -0.06 } }),
       box({ w: 1.04, h: 0.1, d: 0.02, color: TIMBER_DK, offset: { y: 0.18, z: 0.455 } }),
-      ...tikiMouth(0.17, 0.1, 0.55).map((p) => moved(p, 0, 0.46, 0.45)),
       box({ w: 1.04, h: 0.04, d: 0.28, color: TIMBER_DK, offset: { y: 1.78, z: 0.18 } })
     );
     // The crest: a log laid along the lid, carved into a tiki's heavy brow and two bone eyes with the fire in their
@@ -832,11 +849,9 @@
     );
     const body = shaded(round, parts), rand = mulberry32(900 + i), v = i % 2 ? -1 : 1;
     const geo = J.withJungle(body, (g) => {
-      // The paint: both sides, the hide's markings clear of the tiki mouth and the two handprints slapped on it.
-      const ink = mulberry32(1900 + i), paint = 0.16, slap = [c.trim, c.trim, c.trim];
-      J.flatInto(g, ...sideArt(0.602, c, inks, paint), ...sideArt(-0.602, c, inks, paint),
-        hideMarks(i % 3, -0.49, 0.49, 0.26, 0.94, 0.4515, hide, [[-0.3, 0.8, 0.1], [0.3, 0.8, 0.1], [0, 0.46, 0.26]], ink),
-        moved(pictograph(PICTOS.hand, 0.085, slap, 0.7), 0.3, 0.8, 0.456), moved(pictograph(mirror(PICTOS.hand), 0.085, slap, 0.7), -0.3, 0.8, 0.456));
+      // Side paint stays on the cabinet when its front panel is removed.
+      const paint = 0.16;
+      J.flatInto(g, ...sideArt(0.602, c, inks, paint), ...sideArt(-0.602, c, inks, paint));
       // A live cabinet's back, seen from the back room: its game's pictograph over two handprints, daubed on the planks.
       if (on) {
         const art = c.pictograph ? moved(pictograph(PICTOS[c.pictograph], 0.34, inks, paint), 0, 1.5, 0) : geometry();
@@ -847,7 +862,6 @@
       }
       // The rope: stitched round the hide, down each side's front edge and lashed round it by the screen and the
       // marquee.
-      J.liana(g, [[-0.49, 0.25, 0.458], [0.49, 0.25, 0.458], [0.49, 0.95, 0.458], [-0.49, 0.95, 0.458], [-0.49, 0.25, 0.458]], 0.011, 0.011, ROPE);
       for (const s of [-1, 1]) {
         J.liana(g, EDGE.slice(1, 6).map(([z, y]) => [s * 0.618, y, z]), 0.014, 0.014, ROPE);
         tuck(g, J.lashing(s * 0.56, 1.44, 0.075, 0, 0.72, -0.15, 0.06));
@@ -905,6 +919,7 @@
   const ANIM_Y0 = 9;
   const ANIM_Y1 = 21;
   const PALETTES = {
+    "cloud-hopper": ["#123a66", "#5ec8ff", "#f2efe8", "#c7dcef", "#b8402e", "#c68642", BANANA, "#253d25", "#78ad4b"],
     race: ["#0d1a0d", BANANA, "#4a4a52", "#f2efe8", RED, "#8a5a34", "#3a8f2a", "#1b1b1e", "#2e6b20"],
     drop: ["#123a66", "#5ec8ff", "#f2efe8", "#c7dcef", RED, "#c68642", BANANA, "#1b1b1e", "#ff9c86"],
     orbit: ["#0a0820", "#b98cff", "#f2efe8", "#8a86c9", RED, "#7fe0ff", "#ffb02e", BANANA, "#5a5670"],
@@ -973,15 +988,17 @@
   // side of a screen's title, each game's in its palette's cream.
   const pixelBone = (g, x, y, c) => { at(g, x, y, c); at(g, x + 3, y, c); rect(g, x, y + 1, 4, 1, c); at(g, x, y + 2, c); at(g, x + 3, y + 2, c); };
   const titleBones = (g, c) => { pixelBone(g, 0, 3, c); pixelBone(g, GRID_W - 4, 3, c); };
-  const BONE_INK = { race: 3, drop: 2, orbit: 2, mine: 7 };
+  const BONE_INK = { "cloud-hopper": 2, race: 3, drop: 2, orbit: 2, mine: 7 };
   // A game's loop, by its index in GAMES: the title across the top in the game's colour between two bones, then the
   // anim box.
   const attractFrames = variants((i) => {
+    if (GAMES[i].id === "cloud-hopper") return cloudHopperFrames();
     const game = GAMES[i], palette = PALETTES[game.id], frames = [];
     for (let f = 0; f < FRAMES; f++) {
       const g = grid(GRID_W, GRID_H);
       centred(g, game.title, 1, 1);
-      DRAW[game.id](g, f);
+      if (game.unavailable) { centred(g, "OUT OF", 11, 3); centred(g, "ORDER", 19, 3); }
+      else DRAW[game.id](g, f);
       titleBones(g, BONE_INK[game.id]);
       frames.push(bake(g, palette, PIXEL, 0.45));
     }
@@ -1316,7 +1333,7 @@
     ride: LAYOUT.rides.map((r) => ({ ...r, play: { x: r.x + Math.sin(r.turn) * 1.4, z: r.z + Math.cos(r.turn) * 1.4, facing: r.turn + Math.PI } }))
   };
   BL.arcadeModels = {
-    HALL, STAGE, MEZZ, HAUNT, MEZZ_POSTS, GAMES, CABINETS, LAYOUT, CAB, SCREEN, FRAMES, FPS, START_FRAMES, SKEE, HOOP, SHY, METER_LEN, METER_WINDOW, SIGN_FRAME, POSTER_SCALE, MARQUEE, PRIZES, SPOTS, SPOT_Y, SPOT_FIRE, spark, CLAW, PIN, HOCKEY, WHEEL_VALUES, WHEEL_COST, blaze, MAMMOTH_AT, RETRO, RIDE_Y, RIDE_SEATS, RIDE_BEAT, POOL, POOL_COLORS, DART, FAME, PRIZE_SHELF, MAT_Y, cabinet, attractFrames, CLOUD_HOPPER, cloudHopperCabinet, cloudHopperFrames
+    HALL, STAGE, MEZZ, HAUNT, MEZZ_POSTS, GAMES, CABINETS, LAYOUT, CAB, SCREEN, FRAMES, FPS, START_FRAMES, SKEE, HOOP, SHY, METER_LEN, METER_WINDOW, SIGN_FRAME, POSTER_SCALE, MARQUEE, PRIZES, SPOTS, SPOT_Y, SPOT_FIRE, spark, CLAW, PIN, HOCKEY, WHEEL_VALUES, WHEEL_COST, blaze, MAMMOTH_AT, RETRO, RIDE_Y, RIDE_SEATS, RIDE_BEAT, POOL, POOL_COLORS, DART, FAME, PRIZE_SHELF, MAT_Y, cabinet, cabinetPanel, attractFrames, CLOUD_HOPPER, cloudHopperCabinet, cloudHopperFrames
   };
   // Private lexical bindings used by the scene-only extension; read once when that group evaluates.
   BL.arcadeModelsSceneKit = { BANANA, BANANA_LEAF_TONES, BARK, BL, BONE, BONE_INK, CABINETS, CLAW, DART, DOT, EARTH_BLACK, EARTH_CHALK, EARTH_OCHRE, EARTH_RED, EMBER_GLOW, FAME, FAME_ROW, FAME_W, FRAMES, GAMES, GLASS_DK, GLYPH_H, GLYPH_W, GRID_H, GRID_W, HALL, HAUNT, HOCKEY, HOOP, LAYOUT, MAMMOTH_AT, MARK, MAT_Y, METER_LEN, METER_WINDOW, MEZZ, MEZZ_POSTS, NUTS, PALETTES, PICTOS, PIN, PIXEL, POOL, POOL_COLORS, POSTER_SCALE, PRIZES, PRIZE_SHELF, RETRO, RIDE_BEAT, RIDE_Y, ROPE, SCREEN, SHY, SIGN_FRAME, SKEE, SPOTS, SPOT_Y, STAGE, TIMBER_DK, TIMBER_LT, TRACKING, WHEEL_COST, WHEEL_VALUES, along, at, bake, bananaLeaf, band, beam, bevelBox, blaze, boneTusk, box, cached, ccw, centred, daubDot, daubHand, daubPoly, daubStroke, daubTaper, daubZigzag, dots, earth, face, facing, flame, geometry, grid, hexToRgb, hide, lathe, leafBlade, line, merge, mirror, moved, mulberry32, nut, oval, pictograph, prism, pushVert, rect, ring, scaled, shaded, sideShape, signBinding, stone, strip, text, textWidth, tikiMouth, tint, titleBones, torus, tuck, turn, turnedX, turnedY, turnedZ, unshadowed, variants, zigzag };
