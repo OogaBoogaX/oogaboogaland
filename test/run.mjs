@@ -20404,7 +20404,59 @@ scene("timechain", { url: roomPage(3), opts: PHONE_SIZE, steps: [phone("timechai
 // The keypad's controls are its physical keys: from the first person a phone shows, each is on screen with nothing of
 // the page's over it (the hint over the view takes no pointer, so it is checked as text, not as a control).
 const sphereKeypadPhone = phone("hub", { play: `(() => { const B = __ooga, ${sphereLocal}; ${sphereStand("0.7", "13.8")} T.gate.engage(); B.advance(0.6, 1 / 60); })()`, required: [] });
-scene("hub", { label: "sphere keypad", query: "solo=1&character=portlandhodl&view=timechain&pos=0", opts: PHONE_SIZE, steps: [{ ...sphereKeypadPhone, name: "sphere keypad phone", run: async (b) => {
+// A tap on the act button: the press acts, and its own click, however late or however the browser reports it, never acts again.
+const hubHammockTap = { name: "hub hammock tap", why: "rule: on a phone one tap on REST lies back and stays, one on STAND UP! gets up, and the button's label is never selected", run: async (b) => {
+  const tap = async (p) => {
+    const down = b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [p], timestamp: Date.now() / 1000 });
+    await b.sleep(60);
+    await Promise.all([down, b.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [], timestamp: Date.now() / 1000 })]);
+  };
+  const state = `(() => { const B = __ooga, a = B.crew.player, s = a.camp.seat; return { seat: !!s, lying: !!s?.lying, exit: !!s?.exit, act: document.getElementById("act").textContent, heard: __actHeard }; })()`;
+  const at = await b.evaluate(`(() => {
+    const B = __ooga, H = BL.scenes.hub.debug.hammock, s = H.seats[0];
+    B.pilot.possess(B.cavemen.get("portlandhodl"));
+    B.pilot.navigate({ position: { x: s.walkAt.x, y: s.floor, z: s.walkAt.z }, yaw: s.ry, pitch: 0.5, dist: 6 }); B.advance(0.5, 1 / 60);
+    const e = document.getElementById("act"), r = e.getBoundingClientRect();
+    window.__actHeard = 0; e.addEventListener("click", () => __actHeard++);
+    return { act: e.textContent, x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  })()`);
+  await tap(at);
+  await b.evaluate(`__ooga.advance(1.5, 1 / 60)`);
+  const rest = await b.evaluate(state);
+  record("hub hammock tap: one tap on REST lies back and stays after the finger lifts, its own click reaching nothing on the button",
+    at.act === "REST" && rest.lying && !rest.exit && rest.act === "STAND UP!" && rest.heard === 0, JSON.stringify({ at, rest }));
+  await tap(at);
+  await b.evaluate(`__ooga.advance(2, 1 / 60)`);
+  const up = await b.evaluate(state);
+  // As a phone may send it: the press, a reset of held input (the page losing focus), the lift, then a click with no detail.
+  const late = await b.evaluate(`(() => {
+    const B = __ooga, e = document.getElementById("act"), o = { bubbles: true, pointerId: 41, pointerType: "touch", isPrimary: true };
+    e.dispatchEvent(new PointerEvent("pointerdown", o)); window.dispatchEvent(new Event("blur"));
+    e.dispatchEvent(new PointerEvent("pointerup", o)); e.dispatchEvent(new PointerEvent("pointerleave", o));
+    e.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 0 })); B.advance(1.5, 1 / 60);
+    return ${state};
+  })()`);
+  // A click with no press before it, a keyboard's or an assistive tap, still acts.
+  const keyed = await b.evaluate(`(() => { document.getElementById("act").click(); __ooga.advance(2, 1 / 60); return ${state}; })()`);
+  record("hub hammock tap: one tap on STAND UP! gets up once; a press whose click comes late after a reset acts once; a click with no press still acts",
+    !up.seat && up.act === "REST" && late.lying && !late.exit && late.heard === 0 && !keyed.seat && keyed.heard === 1, JSON.stringify({ up, late, keyed }));
+  // A reset while the finger is still down, then a hold past the click grace before it lifts: the grace runs from the lift.
+  const held = await b.evaluate(`(async () => {
+    const B = __ooga, e = document.getElementById("act"), o = { bubbles: true, pointerId: 42, pointerType: "touch", isPrimary: true };
+    e.dispatchEvent(new PointerEvent("pointerdown", o)); window.dispatchEvent(new Event("blur"));
+    await new Promise((r) => setTimeout(r, 1300));
+    e.dispatchEvent(new PointerEvent("pointerup", o)); e.dispatchEvent(new PointerEvent("pointerleave", o));
+    e.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 0 })); B.advance(1.5, 1 / 60);
+    return ${state};
+  })()`);
+  record("hub hammock tap: a press reset mid-hold and lifted after the click grace still owns its own click",
+    held.lying && !held.exit && held.heard === keyed.heard, JSON.stringify({ keyed, held }));
+  const label = await b.evaluate(`(() => { const e = document.getElementById("act"), s = getSelection(); s.selectAllChildren(e); const text = String(s); s.removeAllRanges();
+    return { text, name: e.textContent, focusable: e.tabIndex >= 0 && !e.disabled }; })()`);
+  record("hub hammock tap: selecting all leaves the act button's label out, which keeps its name and focus",
+    label.text === "" && label.name === held.act && label.focusable, JSON.stringify(label));
+} };
+scene("hub", { label: "sphere keypad", query: "solo=1&character=portlandhodl&view=timechain&pos=0", opts: PHONE_SIZE, steps: [hubHammockTap, { ...sphereKeypadPhone, name: "sphere keypad phone", run: async (b) => {
   await sphereKeypadPhone.run(b);
   const keys = await b.evaluate(`(() => { const B = __ooga, T = BL.scenes.hub.debug.timechainIsland, out = {};
     return T.site.keys.map((k) => { const w = k.node.world; B.renderer.project(w[12], w[13], w[14], out); const hit = document.elementFromPoint(out.x, out.y);

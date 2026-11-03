@@ -4233,6 +4233,10 @@ body.dsb-menu-open .rescue-equipment { visibility: hidden; pointer-events: none;
   box-shadow: 0 3px 0 var(--nail);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
+  /* A held press (climbing, a long tap) must not select the label or open the phone's text menu. */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .act:hover,
