@@ -301,6 +301,20 @@ test("a chalkboard edit applies the same anywhere: lines and characters stop at 
   assert.equal(CHALK.apply(long, { k: "wipe", to: "clean" }, s), null);
   assert.deepEqual(long, { marks: [], points: 0 });
   assert.equal(CHALK.restore([{ t: "t", ch: "\u0000", p: [0, 0] }]), null);
+  // Text is atomic at the total point limit too, even when plenty of mark slots remain.
+  for (const [points, characters, accepted] of [[9999, 2, false], [9999, 1, true], [10000, 1, false]]) {
+    const marks = Array.from({ length: 10 }, (_, i) => ({ t: "c", s: 2, p: Array((i < 9 ? 1000 : points - 9000) * 2).fill(0.5) }));
+    assert.ok(CHALK.restore(marks));
+    const b = CHALK.board(marks), session = { open: 9, from: 0 }, before = structuredClone({ b, session });
+    const op = CHALK.parse({ k: "type", c: [["a", 100, 100], ["b", 200, 100]].slice(0, characters) });
+    assert.equal(CHALK.apply(b, op, session), accepted ? null : "full");
+    if (accepted) {
+      assert.equal(b.points, CHALK.MAX_POINTS);
+      assert.equal(b.marks.length, 11);
+      assert.equal(session.open, -1);
+    } else assert.deepEqual({ b, session }, before, "refused text changes neither marks, points nor the open line");
+    assert.ok(CHALK.restore(b.marks));
+  }
 });
 
 test("a wallet event is a device number, its fuse and, where it lies or flies, a bounded place; anything else is ignored", () => {
