@@ -12,10 +12,10 @@ import { deliverHighscores } from "../src/highscore-store.js";
 
 const SITE = "https://site.test", RULES = globalThis.BL.highscoreRules;
 const { createHighscoreHandler } = routeFixture();
-const database = (runs = true) => {
+const database = (runs = true, cabinets = true) => {
   const sql = new DatabaseSync(":memory:");
   sql.exec("PRAGMA foreign_keys = ON");
-  for (const name of ["0001_init.sql", "0002_tess.sql", "0003_highscores.sql", "0004_highscore_notifications.sql", "0005_cloud_hopper_levels.sql", "0006_cloud_hopper_replays.sql", ...(runs ? ["0007_cloud_hopper_runs.sql"] : [])]) {
+  for (const name of ["0001_init.sql", "0002_tess.sql", "0003_highscores.sql", "0004_highscore_notifications.sql", "0005_cloud_hopper_levels.sql", "0006_cloud_hopper_replays.sql", ...(runs ? ["0007_cloud_hopper_runs.sql"] : []), ...(cabinets ? ["0008_cabinet_runs.sql"] : [])]) {
     sql.exec(readFileSync(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
   }
   const statement = (query, args = []) => {
@@ -419,4 +419,104 @@ test("historical hockey records remain stored but cannot be read, updated or inc
   assert.equal((await handler(write("hockey","hockey-1",7),env)).status,404);
   const snapshot=await scores(handler,env,"arcade");assert.ok(snapshot.boards.every(board=>board.game!=="hockey"));
   assert.equal(DB.sql.prepare("SELECT highscores FROM game_highscores WHERE game_id='hockey'").get().highscores,'{"hockey-1":120}');
+});
+
+
+test("all eleven video cabinets publish attributed top runs without changing legacy machine records", async t => {
+  const { handler, env } = await setup(t);
+  assert.equal(RULES.cabinets.length, 11);
+  for (const game of RULES.cabinets) {
+    const machine = RULES.get(game).machines[0];
+    await handler(write(game, machine, 9000), env); // Historical/legacy record has no invented owner.
+    assert.deepEqual((await scores(handler, env, game)).runs, []);
+    await Promise.all([1000, 2000, 1500].map((score, i) => handler(write(game, machine, score, { runId: runId(i) }), env)));
+    const board = await scores(handler, env, game);
+    assert.deepEqual(board.highscores, { [machine]: 9000 });
+    assert.deepEqual(board.runs.map(r => [r.username, r.score]), [["player-one", 2000], ["player-one", 1500], ["player-one", 1000]]);
+    assert.ok(board.runs.every(r => Object.keys(r).sort().join() === "achieved,id,score,username"));
+    assert.equal(board.runs[0].id, await sha256Hex(JSON.stringify([game, 1, runId(1)])));
+  }
+  const snapshot = await scores(handler, env, "arcade-live");
+  for (const board of snapshot.boards) {
+    if (RULES.cabinets.includes(board.game)) assert.deepEqual(board.runs, (await scores(handler, env, board.game)).runs);
+    else assert.equal(board.runs, undefined);
+  }
+  const cached = await scores(handler, env, "arcade");
+  assert.deepEqual(cached.boards.find(b => b.game === "snake").runs, snapshot.boards.find(b => b.game === "snake").runs);
+  assert.equal((await scores(handler, env, "race")).runs, undefined);
+});
+
+test("cabinet run retries, top-ten ordering, identity changes and notifications preserve authoritative results", async t => {
+  const { DB, handler, env } = await setup(t), game = "drop", machine = "drop-1";
+  const submit = (n, score) => handler(write(game, machine, score, { runId: runId(n) }), env);
+  await submit(1, 500); await submit(2, 900); await submit(3, 700);
+  let board = await scores(handler, env, game);
+  assert.deepEqual(board.runs.map(r => r.score), [900, 700, 500]);
+  await submit(2, 900); await submit(2, 99999);
+  assert.deepEqual(await scores(handler, env, game), board);
+  const other = await authenticated(DB, await player(DB, 2, "other"));
+  await other(write(game, machine, 900, { playerId: 2, runId: runId(2) }), env);
+  await submit(4, 900);
+  board = await scores(handler, env, game);
+  assert.deepEqual(board.runs.slice(0, 3).map(r => r.username), ["player-one", "other", "player-one"]);
+  for (let n = 5; n < 16; n++) await submit(n, 100 + n);
+  board = await scores(handler, env, game);
+  assert.equal(board.runs.length, 10);
+  assert.deepEqual(board.runs.map(r => r.score), [900, 900, 900, 700, 500, 115, 114, 113, 112, 111]);
+  const notices = [];
+  env.ROOM = { getByName: () => ({ refreshHighscores: async id => notices.push(id) }) };
+  await submit(16, 800); // Not a machine best, but a new ranked finish still wakes clients.
+  assert.deepEqual(notices, [game]);
+  const delivered = [];
+  await deliverHighscores(DB, data => { delivered.push(data); return true; }, game);
+  assert.equal(delivered[0].runs[3].score, 800);
+  await player(DB, 1, "renamed");
+  board = await scores(handler, env, game);
+  assert.ok(board.runs.every(r => r.username === "renamed" || r.username === "other"));
+  assert.ok(board.revision > delivered[0].revision);
+  await player(DB, 3, "renamed");
+  assert.deepEqual((await scores(handler, env, game)).runs.map(r => r.username), ["other"]);
+  await submit(20, 1000); // A revoked old session cannot restore attributed rows or improve the record.
+  assert.deepEqual((await scores(handler, env, game)).highscores, { [machine]: 900 });
+  await deletePlayer(DB, 2);
+  board = await scores(handler, env, game);
+  assert.deepEqual(board.runs, []);
+  assert.deepEqual(board.highscores, { [machine]: 900 });
+  for (const id of ["", "injected", 7, null]) assert.equal((await handler(write(game, machine, 100, { runId: id }), env)).status, 400);
+  assert.equal((await handler(write(game, machine, 100, { runId: runId(30), playerId: 2 }), env)).status, 409);
+});
+
+test("cabinet run retention keeps the best 1024, stable ties and private account ownership", async t => {
+  const { DB, handler, env } = await setup(t), game = "snake";
+  const insert = DB.sql.prepare("INSERT INTO cabinet_runs(game, run_id, player_id, score, achieved) VALUES (?, ?, 1, ?, ?)");
+  for (let i = 1; i <= 1024; i++) insert.run(game, runId(i), i, i);
+  await handler(write(game, "snake-1", 1, { runId: runId(1025) }), env);
+  assert.equal(DB.sql.prepare("SELECT count(*) n FROM cabinet_runs").get().n, 1024);
+  assert.equal(DB.sql.prepare("SELECT count(*) n FROM cabinet_runs WHERE run_id = ?").get(runId(1025)).n, 0);
+  await handler(write(game, "snake-1", 2000, { runId: runId(1026) }), env);
+  assert.equal(DB.sql.prepare("SELECT MIN(score) worst FROM cabinet_runs").get().worst, 2);
+  assert.equal(DB.sql.prepare("SELECT count(*) n FROM cabinet_runs").get().n, 1024);
+  const board = await scores(handler, env, game);
+  assert.deepEqual(board.runs.map(r => r.score), [2000, 1024, 1023, 1022, 1021, 1020, 1019, 1018, 1017, 1016]);
+  DB.sql.prepare("DELETE FROM sessions WHERE player_id = 1").run();
+  await handler(write(game, "snake-1", 3000, { runId: runId(1027) }), env);
+  assert.deepEqual(await scores(handler, env, game), board);
+  await player(DB, 2, "other");
+  const tied = DB.sql.prepare("INSERT INTO cabinet_runs(game, run_id, player_id, score, achieved) VALUES ('mine', ?, ?, 3000, 10)");
+  tied.run(runId(2), 2); tied.run(runId(9), 1); tied.run(runId(8), 1);
+  const ties = await scores(handler, env, "mine");
+  assert.deepEqual(ties.runs.map(r => r.username), ["player-one", "player-one", "other"]);
+  assert.equal(ties.runs[0].id, await sha256Hex(JSON.stringify(["mine", 1, runId(8)])));
+});
+
+test("cabinet migration leaves unattributed historical records intact and starts an empty run list", async t => {
+  const DB = database(true, false); t.after(() => DB.sql.close());
+  const handler = await authenticated(DB, await player(DB));
+  DB.sql.exec(`UPDATE game_highscores SET highscores='{"mine-1":15000}', achieved='{"mine-1":123}', revision=7 WHERE game_id='mine'`);
+  const before = DB.sql.prepare("SELECT * FROM game_highscores WHERE game_id='mine'").get();
+  DB.sql.exec(readFileSync(new URL("../migrations/0008_cabinet_runs.sql", import.meta.url), "utf8"));
+  assert.deepEqual(DB.sql.prepare("SELECT * FROM game_highscores WHERE game_id='mine'").get(), before);
+  const board = await scores(handler, { DB }, "mine");
+  assert.deepEqual(board.highscores, { "mine-1": 15000 });
+  assert.deepEqual(board.runs, []);
 });

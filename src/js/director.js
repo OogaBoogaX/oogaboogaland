@@ -263,7 +263,11 @@
       });
     } else t.redirect = answer || null;
   };
+  let cabinetView = null;
   const go = (id, place = null, instant = false) => {
+    if (cabinetView?.route(id, place)) return true;
+    // Public game links take the same cabinet entrance; debug scene fixtures remain isolated.
+    if (!DEBUG && !cabinetView?.active && BL.arcadeCabinets.get(id)) { place = `cabinet:${id}`; id = "arcade"; }
     if (id === "race" && !RALLY_TEST) { id = "arcade"; place = "rally-out-of-order"; }
     const next = scenes[id];
     if (!next) throw new Error(`Unknown scene "${id}"`);
@@ -288,13 +292,15 @@
   });
   const agentPlay = BL.agent.createPlay();
   const ctx = { renderer, canvas: sceneCanvas, overlay: overlayCanvas, game, world, go, lootEnabled: LOOT_ENABLED, testBananas: TEST_BANANAS, agentPlay, hubPolicy: KEEP_HUB ? "keep" : "release", from: null, place: null, signal: null };
+  cabinetView = window.BL.arcadeView.create({ canvas: sceneCanvas, renderer, go });
+  ctx.cabinet = cabinetView;
   const sceneSections = [...document.querySelectorAll("[data-scene]")];
   // The title cards of the games that have no phase of their own for one: shown on every arrival,
   // closed by their button, Enter, Space or Escape, and nothing else reaches the scene while one shows.
   const intros = [...document.querySelectorAll("[data-intro]")];
   const coarse = window.matchMedia("(pointer: coarse)").matches;
   if (coarse) for (const n of document.querySelectorAll("[data-intro] [data-coarse]")) n.textContent = n.dataset.coarse;
-  const openIntro = () => intros.find((el) => !el.hidden) || null;
+  const openIntro = () => { for (const el of intros) if (!el.hidden) return el; return null; };
   const showMic = () => {
     const voice = window.BL.voice.stats;
     window.BL.hud.showMic(voice, voice.enabled || voice.joining);
@@ -302,6 +308,7 @@
   };
   // An arrival in three parts: `arriving` before the scene's own enter, the enter, then `arrived`. A scene with
   // `enterSteps` may run its enter in slices between them (see `swap`).
+  const arcadeScenes = new Set([...window.BL.arcadeCabinets.entries.map(c => c.id), "race", "skee", "hoops", "shy", "claw", "hockey", "billiards", "darts", "pinball", "ride"]);
   const arriving = (next, place) => {
     const retainedTime = next.retained ? next.elapsed : 0;
     ctx.from = active ? active.id : null;
@@ -309,8 +316,9 @@
     positionDebug.removeEventListener("click", copyPositionDebug);
     for (const el of sceneSections) el.hidden = el.classList.contains("hub-presets") || el.dataset.scene !== next.id;
     for (const el of intros) el.hidden = el.dataset.intro !== next.id;
-    // The page styles by scene too: the games hide the island's sheet, see style.css.
+    // Arcade games share the hall's controls and start with folded social panels.
     document.body.dataset.activeScene = next.id;
+    document.body.classList.toggle("arcade-game", arcadeScenes.has(next.id) || next.id === "hub" && place === "cloud-hopper");
     window.BL.net.setBody(null);
     window.BL.net.setBlend(null, 0);
     // The scene's own zone (`voiceZone`), else one of its own; the island and DSB Land report theirs as they go.
@@ -323,6 +331,7 @@
   const arrived = (next, place, retainedTime) => {
     activeMeshRigs = next.renderOpts?.meshRigs === true;
     active = next;
+    cabinetView.arrived(next);
     // Rasterize hidden render alternatives before the curtain lifts or the visitor can zoom out.
     renderer.prepareScene(liveGeometry());
     showMic();
@@ -395,7 +404,8 @@
   };
   document.addEventListener("pointerdown", focusWorld, true);
   const heldEvent = (e) => {
-    if (!inputHeld || e.target.closest && e.target.closest("#reload-notice")) return;
+    if (!inputHeld || e.target.closest && e.target.closest("#reload-notice, .cabinet-exit")) return;
+    if (e.type === "keydown" && e.key === "Escape" && cabinetView.active) cabinetView.route("arcade");
     if (e.type !== "touchstart" && e.type !== "touchmove") e.preventDefault();
     e.stopImmediatePropagation();
   };
@@ -412,6 +422,7 @@
     // The previous visit has gone and leave cannot tear down a half-built one. Keep its controls held and offer
     // a way out, with honest wording: an entry error says nothing about whether the deployment changed.
     active = null;
+    window.BL.net.leaveCabinet();
     if (t) t.entering = t.building = t.entryFailed = true;
     visitController?.abort();
     holdInput(true);
@@ -465,8 +476,9 @@
     return false;
   };
   const swap = (next, place, done) => {
-    const hockey = !next.enterSteps && (active.id === "arcade" && next.id === "hockey" || active.id === "hockey" && next.id === "arcade");
-    return hockey ? window.BL.net.handoffBody(() => swapScenes(next, place, done)) : swapScenes(next, place, done);
+    // Physical games keep their player and voice in the hall through both sides of the scene handoff.
+    const arcade = !next.enterSteps && active.voiceZone === "arcade.hall" && next.voiceZone === "arcade.hall";
+    return arcade ? window.BL.net.handoffBody(() => swapScenes(next, place, done)) : swapScenes(next, place, done);
   };
   // Where a settled transition lands: its own scene, or where its preparation redirected it.
   const landing = (t) => t.redirect ? { next: scenes[t.redirect.scene], place: t.redirect.place ?? null } : { next: t.next, place: t.place };
@@ -509,6 +521,7 @@
     transition.controller.abort();
     transition = null;
     if (active) holdInput(false);
+    if (failed) cabinetView.failed();
     if (failed && active && active.stay) active.stay();
     router.settled();
   };
@@ -633,16 +646,19 @@
     // Hold the fully black frame while resumable pure builders run; the old visit keeps its graph and controls.
     if (transition && transition.building) { drawFade(); return; }
     if (helpHeld) dt = 0;
-    sceneTime += dt;
+    if (!transition) holdInput(!!cabinetView.held);
+    const sceneDt = cabinetView.held ? 0 : dt;
+    sceneTime += sceneDt;
     // In real mode the API owns the pile, so every browser shows the same one: its last count less what has been
     // eaten since it arrived, in whole bananas.
     if (pileFeed.at) world.level = Math.min(pileMod.MAX_BANANAS, Math.max(0, Math.floor(pileFeed.bananas - pileFeed.eatPerHour * (performance.now() - pileFeed.at) / 36e5)));
-    if (!helpHeld) active.update(dt, sceneTime);
+    if (!helpHeld) active.update(sceneDt, sceneTime);
+    cabinetView.update(dt, active, !!openIntro() || !!active.cabinetMenu, !!transition);
     if (POSITION_DEBUG && active.id !== "hub" && elapsed >= positionDebugNext) {
       positionDebugNext = elapsed + 0.1;
       updatePositionDebug(false);
     }
-    if (!helpHeld) agentPlay.update(dt);
+    if (!helpHeld) agentPlay.update(sceneDt);
     updateWorldClock(now);
     const drawn = renderer.render(active.root, active.camera, active.renderOpts, activeMeshRigs);
     if (drawn && !firstDraw) {
@@ -663,7 +679,8 @@
       return;
     }
     active.input.update();
-    active.overlay(dt);
+    active.overlay(sceneDt);
+    cabinetView.afterDraw();
     if (fade > 0 || transition && transition.instant && !transition.ready) drawFade();
   };
   const frame = (now) => {
@@ -695,6 +712,9 @@
     if (e.repeat) return;
     if (window.BL.controls.uiKey(e)) return;
     const intro = openIntro();
+    if (cabinetView.active && e.key === "Escape" && (intro || active.cabinetMenu)) {
+      e.preventDefault(); e.stopImmediatePropagation(); go("arcade"); return;
+    }
     if (intro) {
       // Registered at boot, before any scene's controls, so this keeps the key from them too.
       e.stopImmediatePropagation();
@@ -916,6 +936,7 @@
     if (!DEBUG) world.pilot = net.prepareLocalCharacter().handle;
     const constructionCPU = window.BL.buildTasks.cpu;
     let first = Object.hasOwn(scenes, sceneId) ? scenes[sceneId] : scenes[Object.keys(scenes)[0]], place = routed && routed.place;
+    if (!DEBUG && BL.arcadeCabinets.get(first.id)) { place = `cabinet:${first.id}`; first = scenes.arcade; }
     if (terrainController && ISLAND_FIRST) {
       try {
         const ready = window.BL.deferred.load("terrain-cache"); if (ready) await ready;
@@ -1005,6 +1026,7 @@
   if (DEBUG) {
     const ooga = {
       game,
+      cabinet: cabinetView,
       renderer,
       startLevel: START_BANANAS,
       hubPolicy: ctx.hubPolicy,
@@ -1028,7 +1050,7 @@
         return active ? active.id : null;
       },
       get transitioning() {
-        return transition !== null;
+        return transition !== null || !!cabinetView.held;
       },
       get fade() {
         return fade;
@@ -1059,6 +1081,7 @@
     window.__ooga = ooga;
   }
   const destroy = () => {
+    cabinetView.dispose();
     controlsHelp.dispose();
     destroyed = true;
     bootBuildController.abort();

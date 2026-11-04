@@ -290,3 +290,63 @@ test("shared hockey presentation derives one solo Clanker and head scores from t
   tables[0]=null;view.update(.1);assert.equal(root.children.length,0);
   view.dispose();assert.equal(root.children.length,0);
 });
+
+
+test("every video cabinet arbitrates simultaneous players, pins presence and releases only its own request", async t => {
+  const h = harness(t), a = await seat(h, 1, "a"), b = await seat(h, 2, "b");
+  let q = 0;
+  for (const cabinet of protocol.CABINETS.entries) {
+    const claim = { t: "cabinet", op: "take", id: cabinet.id, q: ++q };
+    h.advance(1000);
+    await Promise.all([h.send(a.ws, claim), h.send(b.ws, claim)]);
+    assert.equal(h.room.players.get(1).cabinet.id, cabinet.id);
+    assert.ok(!h.room.players.get(2).cabinet);
+    assert.equal(b.ws.sent.filter(m => m.t === "cabinet").at(-1).ok, false);
+    h.send(a.ws, { t: "pose", x: 99, y: 20, z: 99, yaw: 0 });
+    h.send(a.ws, { t: "zone", name: "outside" });
+    h.send(a.ws, { t: "body", name: null });
+    const p = h.room.players.get(1);
+    assert.deepEqual([p.x, p.y, p.z, p.yaw, p.body, p.zone], [cabinet.x, cabinet.y, cabinet.z, cabinet.yaw, "a", "arcade.hall"]);
+    // Playing a cabinet keeps the hall's two-way voice; the active ghost hunt stays in its separate group.
+    const listener = h.room.players.get(2), voice = { sub: "listen", track: "mic" };
+    p.voice = listener.voice = voice;
+    const ghost = { id: 3, body: "c", zone: "arcade-hunt", voice };
+    const peers = protocol.voicePeers([p, listener, ghost]);
+    assert.deepEqual(peers.get(1), [2]);
+    assert.deepEqual(peers.get(2), [1]);
+    assert.deepEqual(peers.get(3), []);
+    h.send(b.ws, { ...claim, op: "leave" });
+    h.send(a.ws, { ...claim, op: "leave", q: q + 1 });
+    assert.equal(p.cabinet.id, cabinet.id);
+    h.send(a.ws, { ...claim, op: "leave" });
+    assert.equal(p.cabinet, null);
+    h.advance(1000); h.send(b.ws, claim);
+    assert.equal(h.room.players.get(2).cabinet.id, cabinet.id);
+    h.send(b.ws, { ...claim, op: "leave" });
+  }
+  for (const patch of [{ id: "race" }, { id: "hockey" }, { q: 0 }, { q: 1.5 }, { op: "steal" }]) {
+    assert.equal(protocol.parseClientMessage(JSON.stringify({ t: "cabinet", id: "mine", q: 1, op: "take", ...patch })), null);
+  }
+  if (h.room.flushTimer) clearTimeout(h.room.flushTimer);
+});
+
+test("cabinet ownership survives hibernation but not disconnect, body revocation or socket replacement", async t => {
+  const h = harness(t), a = await seat(h, 1, "a"), b = await seat(h, 2, "b");
+  const claim = { t: "cabinet", op: "take", id: "mine", q: 1 };
+  h.send(a.ws, claim);
+  await h.wake();
+  h.send(b.ws, claim);
+  assert.equal(h.room.players.get(1).cabinet.id, "mine");
+  h.room.drop(h.room.players.get(1), "closed");
+  h.advance(1000); h.send(b.ws, claim);
+  assert.equal(h.room.players.get(2).cabinet.id, "mine");
+  h.room.release(h.room.players.get(2), "revoked");
+  assert.equal(h.room.players.get(2).cabinet, null);
+  h.send(b.ws, claim);
+  assert.equal(b.ws.sent.filter(m => m.t === "cabinet").at(-1).ok, false);
+  h.send(b.ws, { t: "body", name: "b" }); h.advance(1000); h.send(b.ws, claim);
+  const replaced = await h.join(2, "b");
+  assert.notEqual(replaced, b.ws);
+  assert.ok(!h.room.players.get(2).cabinet);
+  if (h.room.flushTimer) clearTimeout(h.room.flushTimer);
+});

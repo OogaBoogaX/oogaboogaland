@@ -10618,3 +10618,148 @@ body[data-active-scene] #controls-help-button { display: flex; align-items: cent
 #carnival[data-kind="hockey"][data-hockey-shared="true"] .carnival-scores,
 #carnival[data-kind="hockey"][data-hockey-shared="true"] .race-hud-right > .race-lap:nth-child(-n+2) { display: none; }
 #carnival[data-kind="hockey"][data-hockey-shared="true"] .carnival-coach { top: calc(64px + var(--safe-top)); bottom: auto; }
+
+/* Keep the avatar and exit on one mobile row, clear of both the score and the playfield. */
+@media (max-width: 720px) {
+  body.arcade-game[data-cabinet-phase="playing"] #equipment-hud { top: calc(54px + var(--safe-top)); left: calc(8px + var(--safe-left)); }
+  body.arcade-game[data-cabinet-phase="playing"] .topbar > .presets { top: calc(54px + var(--safe-top)); left: calc(74px + var(--safe-left)); max-width: calc(100% - 82px - var(--safe-left) - var(--safe-right)); }
+  body.arcade-game[data-cabinet-phase="playing"] .topbar > .presets button { min-height: 40px; }
+  body[data-cabinet-phase="playing"] #drop-board { top: calc(104px + var(--safe-top)); bottom: calc(16px + var(--safe-bottom)); max-height: none; transform: translateX(-50%); }
+  body[data-cabinet-phase="playing"] .mine-strip { top: calc(104px + var(--safe-top)); }
+}
+
+.arcade-banner-name { text-decoration: none; }
+@media (max-width: 720px) {
+  .arcade-banner-name > span { display: none; }
+  .arcade-banner-name::after { content: "OA"; }
+}
+
+/* Menus fill the measured glass; its real control silhouettes stay in the foreground. */
+#cabinet-backdrop { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+#cabinet-backdrop[hidden], #cabinet-foreground[hidden] { display: none; }
+#cabinet-foreground { width: 100vw; height: 100vh; max-width: none; max-height: none; pointer-events: none; z-index: 200; margin: 0; padding: 0; }
+.stage.cabinet-display { position: absolute; overflow: hidden; isolation: isolate; background: #080604; container-type: inline-size; --safe-top: 0px; --safe-bottom: 0px; --safe-left: 0px; --safe-right: 0px; }
+.cabinet-display :is(.topbar, .bottom-bar, .joysticks, #equipment-hud, #mode-hud, #act, #position-debug) { visibility: hidden; }
+body[data-cabinet-phase]:not([data-cabinet-phase="idle"]):not([data-cabinet-phase="playing"]) :is(#position-debug, .equipment-hud, .mode-hud, .joysticks) { visibility: hidden; }
+body[data-cabinet-phase]:not([data-cabinet-phase="idle"]):not([data-cabinet-phase="playing"]) .sheet { visibility: hidden; }
+.cabinet-display .race:has(.game-intro:not([hidden])) :is(.race-hud, .carnival-coach, .carnival-touch) { visibility: hidden; }
+.cabinet-display .game-intro:not([hidden]) {
+  display: flex; flex-direction: column; gap: 6px; position: absolute; inset: 0;
+  width: 100%; height: 100%; max-width: none; max-height: none; min-height: 0;
+  transform: none; padding: 12px; margin: 0; border: 0; border-radius: 0; box-shadow: none;
+  overflow: hidden; animation: none;
+}
+.cabinet-display .game-intro > * { flex-shrink: 0; }
+.cabinet-display .game-intro :is(.game-intro-coin, .game-intro-kicker, .game-intro-who, .game-intro-glow) { display: none; }
+.cabinet-display .game-intro .game-intro-title { margin: 0; font-size: clamp(20px, 4cqw, 40px); line-height: 1.15; }
+.cabinet-display .game-intro .game-intro-goal { margin: 0; font-size: clamp(11px, 2cqw, 18px); line-height: 1.35; }
+.cabinet-display .game-intro .game-rules {
+  flex: 1 1 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin: 2px 0; align-content: center;
+}
+.cabinet-display .game-intro .game-rules li { grid-template-columns: 28px minmax(0, 1fr); gap: 5px 10px; padding: 14px; animation: none; }
+.cabinet-display .game-intro .game-rule-icon { width: 24px; height: 24px; }
+.cabinet-display .game-intro .game-rules b { white-space: normal; font-size: clamp(11px, 2cqw, 18px); }
+.cabinet-display .game-intro .game-rules small { font-size: clamp(10px, 1.7cqw, 15px); line-height: 1.3; }
+.cabinet-display .game-intro .actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0; }
+.cabinet-display .game-intro .actions button { min-width: 0; min-height: 44px; padding: 6px 8px; font-size: clamp(13px, 2.4cqw, 20px); letter-spacing: 0.02em; animation: none; }
+@container (max-width: 480px) {
+  .cabinet-display .game-intro:not([hidden]) { padding: 8px; gap: 4px; }
+  .cabinet-display .game-intro .game-rules { align-content: start; }
+  .cabinet-display .game-intro .game-rules li { grid-template-columns: 16px minmax(0, 1fr); padding: 4px; gap: 2px 4px; }
+  .cabinet-display .game-intro .game-rule-icon { width: 14px; height: 14px; }
+  .cabinet-display .game-intro .game-rules b { font-size: 11px; }
+  .cabinet-display .game-intro .game-rules small { font-size: 10px; }
+}
+body[data-cabinet-phase]:not([data-cabinet-phase="idle"]) :is(.game-intro, .race-results, .game-rules li) { animation: none; }
+/* Cabinet scoreboards use the same ten ranked places and footer navigation as Cloud Hopper. */
+.cabinet-display .game-intro .cabinet-leaderboard { flex: 1 1 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.cabinet-leaderboard h3 { margin: 4px 0; color: var(--accent-text); font-size: 13px; }
+.cabinet-leaderboard p { margin: 4px 0 6px; font-size: 11px; line-height: 1.3; }
+.cabinet-leaderboard ol { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(5, auto); grid-auto-flow: column; padding: 0; margin: 0; list-style: none; border: 2px solid var(--stone-dk); border-radius: 8px; background: var(--tablet); overflow: hidden; }
+.cabinet-leaderboard li { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; align-items: baseline; gap: 5px; padding: 4px 10px; font-size: 12px; text-align: left; border-bottom: 1px solid #0005; }
+.cabinet-leaderboard li:nth-child(n + 6) { border-left: 1px solid #0005; }
+.cabinet-leaderboard li:nth-child(5), .cabinet-leaderboard li:last-child { border-bottom: 0; }
+.cabinet-leaderboard li > span:first-child { color: var(--accent-text); font-weight: bold; }
+.cabinet-leaderboard li > span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cabinet-leaderboard li.empty { color: var(--muted); }
+.cabinet-leaderboard li.you { background: #f5c54222; }
+.cabinet-leaderboard-toggle { display: none; }
+.arcade-game .race .cabinet-leaderboard-toggle[aria-expanded="true"] { --arcade-button: linear-gradient(#bdb8b0, #87827b); --arcade-button-hover: linear-gradient(#d1cdc6, #bdb8b0); color: var(--ink); }
+@container (max-width: 480px) {
+  .cabinet-display .game-intro.cabinet-has-leaderboard .actions { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }
+  .cabinet-display .game-intro.cabinet-has-leaderboard .actions button { padding: 6px 3px; font-size: 12px; letter-spacing: 0; }
+  .cabinet-display .cabinet-leaderboard-toggle { display: block; }
+  .cabinet-display .game-intro:not(.cabinet-show-scores) .cabinet-leaderboard,
+  .cabinet-display .game-intro.cabinet-show-scores :is(.game-rules, .game-intro-goal) { display: none; }
+  .cabinet-leaderboard li { grid-template-columns: 12px minmax(0, 1fr) auto; padding: 4px 5px; font-size: 11px; gap: 3px; }
+  .cabinet-leaderboard h3 { font-size: 12px; }
+}
+/* Native dialogs escape the stage's clipping; position Cloud Hopper in the same measured aperture. */
+body:is([data-cabinet-phase="menu"], [data-cabinet-phase="expanding"], [data-cabinet-phase="shrinking"]) .cloud-hopper-panel {
+  left: var(--cabinet-center-x); top: var(--cabinet-center-y);
+  width: var(--cabinet-width); max-width: none; max-height: var(--cabinet-height);
+  padding: 12px; border: 0; border-radius: 0; box-shadow: none; animation: none;
+}
+body[data-cabinet-phase="menu"] .cloud-hopper-panel.cloud-hopper-intro[open] { display: flex; flex-direction: column; gap: 6px; height: var(--cabinet-height); overflow: hidden; }
+body[data-cabinet-phase="menu"] .cloud-hopper-intro :is(.game-intro-kicker, .game-intro-who, .game-intro-glow) { display: none; }
+body[data-cabinet-phase="menu"] .cloud-hopper-intro .game-intro-title { margin: 0; font-size: 28px; }
+body[data-cabinet-phase="menu"] .cloud-hopper-intro .game-intro-goal { font-size: 13px; }
+body[data-cabinet-phase="menu"] .cloud-hopper-intro .cloud-hopper-levels { flex: 1 1 0; min-height: 0; overflow-y: auto; gap: 8px; margin: 2px 0; align-content: center; }
+body[data-cabinet-phase="menu"] .cloud-hopper-intro .cloud-hopper-level-name { white-space: normal; font-size: 14px; }
+body[data-cabinet-phase="menu"] .cloud-hopper-intro .actions { flex-shrink: 0; margin: 0; gap: 8px; }
+body[data-cabinet-phase="menu"] .cloud-hopper-intro .actions button { min-height: 44px; padding: 6px 8px; font-size: 13px; animation: none; }
+body:is([data-cabinet-phase="menu"], [data-cabinet-phase="expanding"], [data-cabinet-phase="shrinking"]) .cloud-hopper-panel::backdrop { background: transparent; }
+.cabinet-scores-toggle { display: none; }
+body[data-cabinet-phase="menu"] .cloud-hopper-intro .cloud-hopper-scores { flex: 1 1 0; min-height: 0; overflow-y: auto; }
+body[data-cabinet-phase="menu"] .cloud-hopper-intro .cloud-hopper-scores-title { margin: 4px 0; }
+@media (max-width: 600px) {
+  body[data-cabinet-phase="menu"] .cloud-hopper-intro .actions { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }
+  body[data-cabinet-phase="menu"] .cloud-hopper-intro .actions button { padding: 6px 3px; font-size: 12px; letter-spacing: 0; }
+  body[data-cabinet-phase="menu"] .cloud-hopper-intro .cabinet-scores-toggle { display: block; }
+  body[data-cabinet-phase="menu"] .cloud-hopper-intro:not(.cabinet-scores-open) .cloud-hopper-scores,
+  body[data-cabinet-phase="menu"] .cloud-hopper-intro.cabinet-scores-open .cloud-hopper-levels,
+  body[data-cabinet-phase="menu"] .cloud-hopper-intro .game-intro-goal { display: none; }
+  body[data-cabinet-phase="menu"] .cloud-hopper-intro .cloud-hopper-scores .race-podium { font-size: 11px; }
+  body[data-cabinet-phase="menu"] .cloud-hopper-intro .cloud-hopper-scores .race-podium li { padding: 3px 5px; }
+  body[data-cabinet-phase="menu"] .cloud-hopper-panel.cloud-hopper-intro { padding: 8px; gap: 4px; }
+  body[data-cabinet-phase="menu"] .cloud-hopper-intro .game-intro-title { font-size: 20px; }
+  body[data-cabinet-phase="menu"] .cloud-hopper-intro .game-intro-goal { font-size: 11px; }
+  body[data-cabinet-phase="menu"] .cloud-hopper-intro .cloud-hopper-levels { gap: 5px; }
+  body[data-cabinet-phase="menu"] .cloud-hopper-level { display: grid; grid-template-columns: 36px minmax(0, 1fr); align-items: center; gap: 2px 5px; padding: 4px; text-align: left; }
+  body[data-cabinet-phase="menu"] .cloud-hopper-level-frame { grid-row: span 2; }
+  body[data-cabinet-phase="menu"] .cloud-hopper-level-art { height: 36px; }
+  body[data-cabinet-phase="menu"] .cloud-hopper-level-number { display: none; }
+  body[data-cabinet-phase="menu"] .cloud-hopper-intro .cloud-hopper-level-name { font-size: 11px; margin: 0; letter-spacing: 0; }
+  body[data-cabinet-phase="menu"] .cloud-hopper-intro .cloud-hopper-level-note { font-size: 10px; margin: 0; }
+}
+.cabinet-exit { position: fixed; top: calc(12px + var(--safe-top)); left: calc(12px + var(--safe-left)); bottom: auto; z-index: 100; padding: 8px 12px; }
+
+/* Cloud Hopper's action palette throughout the arcade: gold plays, green chooses,
+   light stone goes back/resumes, dark stone leaves. Text and pressed/disabled states remain explicit. */
+.arcade-game :is(.race, .presets) button {
+  --arcade-button: linear-gradient(#a6d97f, #5f9e3f);
+  --arcade-button-hover: linear-gradient(#c2e8a3, #a6d97f);
+  background: var(--arcade-button); color: #13260b;
+}
+.arcade-game :is(.race, .presets) button:is(.game-intro-go, .race-go, .act,
+  [data-action$="-start"], [data-action$="-again"], [data-action$="-next"], [data-action="orbit-launch"], [data-action="carnival-act"]) {
+  --arcade-button: linear-gradient(#ffe27a, #f0b62a);
+  --arcade-button-hover: linear-gradient(#fff0a8, #ffe27a); color: var(--ink);
+}
+.arcade-game :is(.race, .presets) button:is([data-action$="-pause"], [data-action$="-resume"],
+  [data-action="garage"], [data-action="orbit-build"], [data-action="mine-card-close"], .panel-fold) {
+  --arcade-button: linear-gradient(#bdb8b0, #87827b);
+  --arcade-button-hover: linear-gradient(#d1cdc6, #bdb8b0); color: var(--ink);
+}
+.arcade-game :is(.race, .presets) button:is([data-action="leave"], [data-action="mine-abandon"]) {
+  --arcade-button: linear-gradient(#77706a, #4a4541);
+  --arcade-button-hover: linear-gradient(#8a837c, #77706a); color: var(--paper);
+}
+.arcade-game :is(.race, .presets) button:is(:hover, .virtual-hover):not(:disabled) { background: var(--arcade-button-hover); }
+.arcade-game :is(.race, .presets) button:disabled { opacity: 0.55; cursor: default; }
+.cabinet-exit { background: linear-gradient(#77706a, #4a4541); color: var(--paper); }
+.cabinet-exit:hover { background: linear-gradient(#8a837c, #77706a); }
+
+/* Arcade player controls remain reachable above game cards, including Cloud Hopper. */
+body.arcade-game .cloud-hopper-panel { z-index: 40; }

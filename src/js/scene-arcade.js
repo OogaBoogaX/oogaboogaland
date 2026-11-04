@@ -81,8 +81,11 @@
   const ORDERS = ["Banana split! Ooga slurp slurp.", "Coconut milk, fresh from coconut. Ahh.", "Grub on stick. Ooga crunch!", "Lava pop. Hot hot hot. Good!"];
 
   let renderer, game, world, go, root, camera, hud, hooks, input, pilot, fx, agentPlay = null;
-  let repair = null;
-  let leaving = false, openingGame = false, people = null, avatar = null, playerWorld = null, screens = null, shownFrame = -1, prompt = null;
+  let repair = null, cabinetView = null, openingRequest = 0, queuedCabinet = null;
+  const cabinetHidden = new Map();
+  let cabinetFocus = null;
+  let captureOnArrival = false;
+  let leaving = false, openingGame = false, people = null, avatar = null, playerWorld = null, screens = null, shownFrame = -1, prompt = null, promptOccupied = null;
   // HALLOWEEN: the ghost arena's hunt: its herald before the hunt loads, the hunt, its channel to the room, GAME MODE,
   // the iron fence across the hallway's mouth (how far up), the totems and their lit parts, whether the visitor's Ooga carries its rifle
   // (in the arena), the voice zone it reports and the one it is turning to.
@@ -157,11 +160,42 @@
   const open = (id, place = null) => {
     if (leaving) return;
     if (id === "race") { hud.toast("Ooga Rally · out of order"); return; }
-    if (go(id, place)) leaving = openingGame = true;
+    const cabinetId = id === "hub" && place === "cloud-hopper" ? "cloud-hopper" : id;
+    const cabinet = LAYOUT.cabinets.find(c => (c.game >= 0 ? GAMES[c.game].id : AM.RETRO[c.retro].id) === cabinetId);
+    if (!cabinet) { if (go(id, place)) leaving = openingGame = true; return; }
+    const occupied = BL.net.cabinetSeats.get(cabinetId);
+    if (occupied && occupied.player !== BL.net.state.selfId) { hud.toast(`${occupied.name} is playing · cabinet occupied`); return; }
+    const actor = pilot.player || avatar;
+    if (!actor) { hud.toast("Choose your Ooga before opening a cabinet"); return; }
+    const request = ++openingRequest;
+    leaving = true;
+    pilot.controls.reset();
+    const at = BL.arcadeCabinets.get(cabinetId);
+    actor.root.position.x = at.x; actor.root.position.y = at.y + actor.baseY; actor.root.position.z = at.z;
+    actor.root.rotation.y = at.yaw;
+    BL.net.setBody(actor.traits.name); BL.net.setZone("arcade.hall");
+    BL.net.sendPose(at.x, at.y, at.z, at.yaw);
+    BL.net.takeCabinet(cabinetId).then(reason => {
+      if (request !== openingRequest || !hud) return;
+      if (reason) { leaving = false; hud.toast(reason); return; }
+      openingGame = true; cabinetFocus = cabinet;
+      cabinetView.begin(cabinetId, cabinet, camera, screens[LAYOUT.cabinets.indexOf(cabinet)].node);
+    });
   };
   const play = (i) => GAMES[i].id === "cloud-hopper" ? open("hub", "cloud-hopper") : open(GAMES[i].id);
-  // The game's deferred code did not arrive: the visitor stays in the hall, and its cabinets and way out work again.
-  const stay = () => { leaving = openingGame = false; };
+  const revealCabinetPlayers = () => {
+    for (const [node, before] of cabinetHidden) node.cameraHidden = before;
+    cabinetHidden.clear();
+  };
+  const hideCabinetActor = (node, at = node?.position) => {
+    if (!node || !cabinetFocus) return;
+    const dx = at.x - cabinetFocus.x, dz = at.z - cabinetFocus.z;
+    if (dx * dx + dz * dz > 16 || Math.abs(at.y - cabinetFocus.y) > 3) return;
+    if (!cabinetHidden.has(node)) cabinetHidden.set(node, node.cameraHidden);
+    node.cameraHidden = true;
+  };
+  // A cabinet return or interrupted load makes the hall playable again.
+  const stay = () => { leaving = openingGame = false; revealCabinetPlayers(); cabinetFocus = null; captureOnArrival = true; };
 
   // The line under each loop: the visitor's best in that game, or a call to play. A retro game's best is an arcade one.
   const bestOf = (id) => {
@@ -326,7 +360,7 @@
           rotation: { x: 2.6, y: 0, z: 0 }, scale: { x: 1.54, y: 1.54, z: 1.54 } });
         addChild(clanker.parts.armR, driver);
         addChild(node, bay, panel, clanker.root);
-        repair = { clanker, driver };
+        repair = { clanker, driver, cabinet: c };
         // The detached panel and worker occupy only this service bay; keep the aisle and fire approach clear.
         blocks.push(blockOf(c, -1.7, 0.65, -0.15, 1.78, DECK_FEET));
         target(clanker.root, { kind: "repair" }, 0.7);
@@ -730,6 +764,7 @@
 
   const toggleMute = () => { const off = audio.setMuted(!audio.muted); hud.toast(off ? "Sound off" : "Sound on"); };
   const onKey = (e) => {
+    if (leaving && !openingGame && e.key === "Escape") { openingRequest++; leaving = false; BL.net.leaveCabinet(); return true; }
     if (ghosts && ghosts.key(e)) return true; // HALLOWEEN
     // X keeps mouse-look available; ownership gates weapon actions outside the arena. 1 and 2
     // pick the club or the rifle, G swaps, V fires. Outside a hunt they meet nothing but the herald.
@@ -1140,17 +1175,20 @@
   const speakerHidden = (cave) => { const p = cave.root.position; return pointHidden(p.x, p.y + 1.2, p.z); };
   // The station nearest (x, z) on the walker's own level and in its sight: the deck's cabinets stand over the claws and
   // pinball, and nothing is played through a wall or a floor.
-  const nearStation = (x, z, reach) => {
+  const nearStation = (x, z, reach, playable = false) => {
     let found = null, best = reach * reach;
     const feet = feetOf();
+    // Space remains a jump unless the visitor is planted and looking into the station.
+    if (playable && (!avatar || avatar.hop > 0 || avatar.hopV > 0 || Math.abs(feet - supportAt(x, z, feet)) > 0.05)) return null;
     for (let i = 0; i < stations.length; i++) {
       const s = stations[i], p = s.play, d = (x - p.x) * (x - p.x) + (z - p.z) * (z - p.z), y = s.y || 0;
+      if (playable && Math.cos(avatar.root.rotation.y - p.facing) < 0.5) continue;
       if (d < best && Math.abs(y - feet) < 1.2 && sightClear(x, feet + 1.1, z, p.x, y + 1.1, p.z)) { best = d; found = s; }
     }
     return found;
   };
   const useNear = (x, z, reach) => {
-    const s = nearStation(x, z, Math.max(reach, REACH));
+    const s = nearStation(x, z, Math.max(reach, REACH), true);
     if (!s) return false;
     useStation(s);
     return true;
@@ -1162,15 +1200,15 @@
   // (cosmetic, so `Math.random`): it walks there on a route planned round everything in the hall (the deck's attendant
   // on the deck), turns to its maintenance work, then moves on. They avoid one another and scenery,
   // but neither react to nor block live players.
-  // Each role: its hat, uniform and prop (-1 none) and the arm holding it, whether it walks upright (prop in hand) or
-  // on its knuckles, whether it keeps to the deck and its jobs (one listed twice comes up twice as often).
+  // Each role: its hat, uniform and prop (-1 none) and the arm holding it, whether it keeps to the deck and its
+  // jobs (one listed twice comes up twice as often). All staff walk upright between jobs.
   const ROLES = [
     { id: "gamemaster", hat: 0, vest: 0, prop: 1, hand: "armR", upright: true, deck: false, start: "tap", jobs: ["tap", "fix"] },
-    { id: "attendant", hat: 1, vest: 1, prop: -1, hand: "armL", upright: false, deck: false, start: "totem", jobs: ["totem", "muncher"] },
-    { id: "mechanic", hat: 2, vest: 2, prop: 1, hand: "armL", upright: false, deck: false, start: "fix", jobs: ["fix", "fix", "fix", "tap"] },
+    { id: "attendant", hat: 1, vest: 1, prop: -1, hand: "armL", upright: true, deck: false, start: "totem", jobs: ["totem", "muncher"] },
+    { id: "mechanic", hat: 2, vest: 2, prop: 1, hand: "armL", upright: true, deck: false, start: "fix", jobs: ["fix", "fix", "fix", "tap"] },
     { id: "runner", hat: 3, vest: 3, prop: 2, hand: "armL", upright: true, deck: false, start: "fill", jobs: ["fill", "serve"] },
-    { id: "clerk", hat: 1, vest: 4, prop: 3, hand: "armL", upright: false, deck: false, start: "stock", jobs: ["stock", "claw", "muncher", "bucket"] },
-    { id: "keeper", hat: 1, vest: 4, prop: 4, hand: "armL", upright: false, deck: true, start: "dust", jobs: ["dust", "dust", "fan"] }
+    { id: "clerk", hat: 1, vest: 4, prop: 3, hand: "armL", upright: true, deck: false, start: "stock", jobs: ["stock", "claw", "muncher", "bucket"] },
+    { id: "keeper", hat: 1, vest: 4, prop: 4, hand: "armL", upright: true, deck: true, start: "dust", jobs: ["dust", "dust", "fan"] }
   ];
   // Each job: the pose it is worked in, how long (s), whether the role's prop comes out, how often it speaks up and
   // what it says, a cue at the start and one repeated while it works ([name, every s, loudness]). Its spots are laid
@@ -1639,7 +1677,7 @@
       else if (!a.beating) {
         const turn = Math.atan2(Math.sin(g.face - a.heading), Math.cos(g.face - a.heading));
         if (Math.abs(turn) > 0.004) a.place(p.x, p.z, a.heading + turn * (1 - Math.exp(-7 * dt)));
-        a.setGait(g.phase === "wait" ? "idle" : "beat");
+        a.setGait(g.phase === "wait" ? "upright" : "beat");
       }
       const x0 = p.x, z0 = p.z;
       a.update(dt);
@@ -1676,7 +1714,9 @@
 
   const enter = (ctx) => {
     prefetchAt = 0;
+    queuedCabinet = typeof ctx.place === "string" && ctx.place.startsWith("cabinet:") ? ctx.place.slice(8) : null;
     ({ renderer, game, world, go, agentPlay } = ctx);
+    cabinetView = ctx.cabinet;
     camera = createCamera({ fov: 55, near: 0.2, far: 60 });
     root = createNode();
     hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
@@ -1726,6 +1766,10 @@
     });
     const tipFor = (hit) => {
       const o = hit.owner;
+      const cabinetId = o.kind === "cabinet" ? GAMES[o.game].id : o.kind === "retro" ? AM.RETRO[o.retro].id : null;
+      const occupied = cabinetId && BL.net.cabinetSeats.get(cabinetId);
+      if (occupied) return `${occupied.name} is playing · cabinet occupied`;
+      if (o.kind === "retro") return `${AM.RETRO[o.retro].name} · ${COARSE ? "tap" : "click"} to play`;
       if (o.kind === "halloween") return o.tooltip();
       if (o.kind === "repair") return "Clanker repairing Ooga Rally · out of order";
       if (o.kind === "cabinet") return GAMES[o.game].unavailable ? "Ooga Rally · out of order" : `${GAMES[o.game].name} · ${COARSE ? "tap" : "click"} to play`;
@@ -1751,6 +1795,7 @@
         if (o.kind === "halloween") { if (armed && o.tap) o.tap(); return; }
         if (o.kind === "repair") return hud.toast("Clanker is repairing Ooga Rally · out of order");
         if (o.kind === "cabinet") return play(o.game);
+        if (o.kind === "retro") return open(AM.RETRO[o.retro].id, 0);
         if (o.kind === "machine") return open(o.station.game.kind, o.station.index);
         if (o.kind === "snack") return order();
         if (o.kind === "prizes") return openPrizes();
@@ -1887,6 +1932,7 @@
     }
     lightUp();
     leaving = openingGame = false;
+    captureOnArrival = true;
     shownFrame = -1;
     prompt = null;
     orders = 0;
@@ -1907,6 +1953,13 @@
   // station, the lamps nearest the view, and the way out.
   let prefetchAt = 0;
   const update = (dt, elapsed) => {
+    if (queuedCabinet) { const id = queuedCabinet; queuedCabinet = null; open(id); }
+    // A scene handoff restores soft mouse-look only. Capture once when the hall
+    // is playable again, after the cabinet's return zoom; Escape stays released.
+    if (captureOnArrival && !leaving && !cabinetView.active) {
+      captureOnArrival = false;
+      pilot.focusAim(true);
+    }
     if (ghosts) ghosts.unshake(camera);
     if (repair) {
       // One fixed work pose, with short turns separated by a pause. No pathfinding, effects pool or new geometry.
@@ -1923,7 +1976,7 @@
         if (GAMES[c.game] && !GAMES[c.game].unavailable && GAMES[c.game].id !== "cloud-hopper" && dx * dx + dy * dy + dz * dz <= 225) BL.deferred.prefetchScene(GAMES[c.game].id);
       }
     }
-    pilot.readInput(dt);
+    if (!leaving) pilot.readInput(dt);
     if (people) people.update(dt, elapsed);
     pilot.update(dt);
     // The Ooga driven here goes to the room with where it stands and its health; other players here are shown.
@@ -1988,17 +2041,29 @@
     cheerT = Math.max(0, cheerT - dt);
     lights(dt, elapsed);
     crewUpdate(dt);
+    // The close camera passes through visitors and staff near the cabinet. Hide their local rendering after
+    // their pose updates, preserving both simulation and shared presence; the hall restores them on return.
+    const cabinetPhase = cabinetView.phase, cabinetCamera = cabinetPhase === "approach" || cabinetPhase === "loading" || cabinetPhase === "return";
+    if (cabinetCamera) {
+      hideCabinetActor((pilot.player || avatar)?.root);
+      if (people) for (const cave of people.cavemen.values()) hideCabinetActor(cave.root);
+      for (const g of staff) hideCabinetActor(g.agent.root);
+      for (const actor of remotes.actors()) hideCabinetActor(remotes.body(actor.id)?.root);
+      if (repair) hideCabinetActor(repair.clanker.root, repair.cabinet);
+    } else if (cabinetHidden.size) revealCabinetPlayers();
     ambience(dt);
     audio.tick(dt);
     if (pilot.player && !leaving) {
-      const p = avatar.root.position, near = nearStation(p.x, p.z, INVITE);
-      if (near !== prompt) {
-        prompt = near;
+      const p = avatar.root.position, near = nearStation(p.x, p.z, INVITE, true);
+      const cabinetId = near?.kind === "cabinet" ? GAMES[near.game].id : near?.kind === "retro" ? near.id : null;
+      const occupied = cabinetId && BL.net.cabinetSeats.get(cabinetId);
+      if (near !== prompt || occupied !== promptOccupied) {
+        prompt = near; promptOccupied = occupied;
         if (near) {
           const verb = near.kind === "snack" ? "order at " : near.kind === "prizes" ? "shop at " : "", act = near.kind === "snack" ? "ORDER" : near.kind === "prizes" ? "PRIZES" : near.kind === "wheel" ? "SPIN" : "PLAY";
-          hud.hint(near.kind === "wheel" ? `${COARSE ? act : "Space: spin"} (${AM.WHEEL_COST} tickets)` : `${COARSE ? act : "Space"}: ${verb}${near.label}`);
+          hud.hint(occupied ? `${near.label} · ${occupied.name} is playing` : near.kind === "wheel" ? `${COARSE ? act : "Space: spin"} (${AM.WHEEL_COST} tickets)` : `${COARSE ? act : "Space"}: ${verb}${near.label}`);
           hud.setAct(act);
-        } else pilot.showAct();
+        } else { hud.hideHint(); pilot.showAct(); }
       }
       if (p.z > EXIT_Z + 1.2 && Math.abs(p.x) < HALL.door) leaveCave();
     }
@@ -2023,6 +2088,10 @@
   const overlay = (dt) => fx.drawOverlay(dt, drawExtra);
 
   const leave = () => {
+    captureOnArrival = false;
+    revealCabinetPlayers();
+    openingRequest++;
+    if (!openingGame) BL.net.leaveCabinet();
     // Whoever walked in goes on as themselves: into a game, or back out to the island at this mouth.
     const traveller = pilot.player || openingGame && avatar;
     world.pilotDetached = !traveller;
