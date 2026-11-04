@@ -157,7 +157,7 @@
   const hockeyTables = [null, null, null];
   const hockeyEmit = m => { for (const fn of hockeySubscribers) fn(m); };
   const subscribeHockey = fn => { hockeySubscribers.add(fn); return () => hockeySubscribers.delete(fn); };
-  const sendHockey = m => { if (!state.hockey || state.room !== "live") return false; send(JSON.stringify({ t: "hockey", ...m })); return true; };
+  const sendHockey = m => { if (!state.hockey || state.room !== "live" || !ws || ws.readyState !== WebSocket.OPEN) return false; send(JSON.stringify({ t: "hockey", ...m, v: 4 })); return true; };
   const studioEmit = message => { for (const fn of studioSubscribers) fn(message); };
   const chatSubscribers = new Set();
   // The shared chalkboard's listeners, and the page's own edits waiting to go (merged into frames of a few points).
@@ -400,7 +400,7 @@
       state.selfId = msg.you.id;
       state.connectionToken = typeof msg.connectionToken === "string" ? msg.connectionToken : "";
       state.cabinets = Array.isArray(msg.features) && msg.features.includes(BL.arcadeCabinets.FEATURE);
-      state.hockey = Array.isArray(msg.features) && msg.features.includes("hockey-v2");
+      state.hockey = Array.isArray(msg.features) && msg.features.includes("hockey-v4");
       state.doorway = Array.isArray(msg.features) && msg.features.includes("door");
       state.chatUnicode = Array.isArray(msg.features) && msg.features.includes(BL.chatPolicy.FEATURE);
       // A room that keeps the chalkboard sends it next (chalk-board); an older one leaves the page its own board.

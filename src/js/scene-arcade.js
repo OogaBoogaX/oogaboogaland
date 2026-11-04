@@ -163,7 +163,10 @@
     if (id === "race") { hud.toast("Ooga Rally · out of order"); return; }
     const cabinetId = id === "hub" && place === "cloud-hopper" ? "cloud-hopper" : id;
     const cabinet = LAYOUT.cabinets.find(c => (c.game >= 0 ? GAMES[c.game].id : AM.RETRO[c.retro].id) === cabinetId);
-    if (!cabinet) { if (go(id, place)) leaving = openingGame = true; return; }
+    if (!cabinet) {
+      const preferred = id === "hockey" && Number.isInteger(place) && BL.hockeyWire.TABLES[place] && avatar && avatar.root.position.z < BL.hockeyWire.TABLES[place][1] ? 1 : 0;
+      if (go(id, place)) { if (id === "hockey") world.hockeyEnd = preferred; leaving = openingGame = true; } return;
+    }
     const occupied = BL.net.cabinetSeats.get(cabinetId);
     if (occupied && occupied.player !== BL.net.state.selfId) { hud.toast(`${occupied.name} is playing · cabinet occupied`); return; }
     const actor = pilot.player || avatar;
@@ -419,7 +422,12 @@
     // hockey scores float above players, leaving its former far-end board posts clear.
     F.claw.forEach((p, i) => machine(p, AM.clawBooth(i), BL.arcadeGames.clawGame, "claw", [-1.4, 1.4, -1.52, -0.28], i));
     F.pinball.forEach((p, i) => { const t = AM.pinball(i); machine(p, { body: t.body, glow: t.lit, glass: t.glass, dz: -1.05 }, BL.arcadeGames.pinballGame, "pinball", [-0.43, 0.43, -1.84, -0.2], i); });
-    F.hockey.forEach((p, i) => { const a = AM.airHockey(); machine(p, { body: a.body, glow: a.lit, dz: -AM.HOCKEY.w * AM.HOCKEY.scale / 2 - 0.65, turn: Math.PI / 2, scale: AM.HOCKEY.scale }, BL.arcadeGames.airHockey, "hockey", [-0.65 * AM.HOCKEY.scale, 0.65 * AM.HOCKEY.scale, -0.65 - (AM.HOCKEY.w + 0.1) * AM.HOCKEY.scale, -0.65 + 0.1 * AM.HOCKEY.scale], i); });
+    F.hockey.forEach((p, i) => {
+      const a = AM.airHockey(), station = machine(p, { body: a.body, glow: a.lit, dz: -AM.HOCKEY.w * AM.HOCKEY.scale / 2 - 0.65, turn: Math.PI / 2, scale: AM.HOCKEY.scale }, BL.arcadeGames.airHockey, "hockey", [-0.65 * AM.HOCKEY.scale, 0.65 * AM.HOCKEY.scale, -0.65 - (AM.HOCKEY.w + 0.1) * AM.HOCKEY.scale, -0.65 + 0.1 * AM.HOCKEY.scale], i);
+      // Both ends open the same physical table and the same two-seat session.
+      const far = BL.hockeyWire.seat(i, 1, 0, {});
+      stations.push({ ...station, play: { x: far.x, z: far.z, facing: far.yaw } });
+    });
     F.pool.forEach((p, i) => { const t = AM.poolTable(i); machine(p, { body: t.body, glow: t.glow, lamp: t.lamp, dz: -1.35 }, BL.arcadeGames.poolGame, "billiards", [-1.35, 1.35, -2.08, -0.62], i); blocks.push(blockOf(p, -1.03, 1.0, -2.35, -2.08)); });
     F.darts.forEach((p, i) => machine(p, { body: AM.dartBoard(), dz: -AM.DART.oche, dy: AM.DART.y, oche: true }, BL.arcadeGames.dartsGame, "darts", null, i));
     // Each board hangs at a walker's height on the back wall between two columns: in the way across its hide from the

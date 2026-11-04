@@ -6517,6 +6517,83 @@ const gameRulesChecks = async () => {
     // wedge, from a turn at rest and one far round after many spins, stops under the clapper wherever in it the spin
     // aims, after its whole turns and less than one more.
     for (const name of ["scene", "models", "blaze", "contributor-identities", "activity-repos", "jumbotron", "hub-models", "hockey-wire", "arcade-models", "arcade-scene-models"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
+    runInNewContext(await readFile(new URL("../src/js/arcade-games.js", import.meta.url), "utf8"), context);
+    // Solo smash assistance must never send an out-of-bounds authoritative frame at a rail.
+    const soloAim={x:1}, solo=BL.arcadeGames.airHockey({node:BL.scene.createNode(),aim:soloAim,onEnd(){},burst(){}});
+    solo.shared(true);solo.multiplayer(false);solo.start();let soloInvalid=0,soloEdge=false;
+    for(let i=0;i<18000&&solo.playing;i++){const old=solo.capture();soloAim.x=old[0]<0?-1:1;if(i%18===0)solo.act();solo.update(1/240);const f=solo.capture();soloInvalid+=!BL.hockeyWire.validFrame(f);soloEdge ||= Math.abs(f[4])===480;}
+    record("hockey solo: rail-assisted smashes retain radius clearance and valid shared frames",soloInvalid===0&&soloEdge,JSON.stringify({soloInvalid,soloEdge}));solo.stop();
+    // Put the real solo simulation at each rail, then trigger its actual smash-assist path.
+    const exposed={scene:BL.scene,arcadeModels:BL.arcadeModels,hockeyWire:BL.hockeyWire};
+    const hockeySource=await readFile(new URL("../src/js/arcade-games.js",import.meta.url),"utf8");
+    const instrumented=hockeySource.replace("    const put = (n, o) =>", "    host.railProbe = { P, M };\n    const put = (n, o) =>");
+    if(instrumented===hockeySource)throw Error("hockey rail probe anchor missing");
+    runInNewContext(instrumented,{window:{BL:exposed}});
+    const railCases=[];
+    for(const side of [-1,1]){
+      const host={node:BL.scene.createNode(),aim:{x:side},onEnd(){},burst(){}};
+      const game=exposed.arcadeGames.airHockey(host);game.shared(true);game.start();
+      host.railProbe.P.u=side*.5;host.railProbe.M.u=side*.48;game.act();game.update(1/240);
+      const a=game.capture().slice();railCases.push({side,u:a[4],accepted:!!BL.hockeyWire.parse({t:"hockey",v:4,k:"frame",i:0,s:"0123456789abcdef",q:0,a})});game.stop();
+    }
+    record("hockey solo rail regression: smash assist keeps both mallet edges and transmitted frames legal",railCases.every(r=>r.u===r.side*480&&r.accepted),JSON.stringify(railCases));
+    const aimH={x:0,depth:0}, rootH=BL.scene.createNode(), h=BL.arcadeGames.airHockey({node:rootH,aim:aimH,onEnd(){},burst(){}});
+    h.shared(true);h.multiplayer(true);h.start();
+    const edges=[];
+    for(const [x,y] of [[-2,-1],[-2,.5],[-2,2],[2,-1],[2,.5],[2,2],[0,-1],[0,2]]) {
+      aimH.x=x;aimH.depth=y;h.peerInput(x,y);h.update(1/60);edges.push(h.capture().slice(4,8));
+    }
+    const legal=edges.every(a=>Math.abs(a[0])<=480&&a[1]>=70&&a[1]<=1030&&Math.abs(a[2])<=480&&a[3]>=1170&&a[3]<=2130)
+      &&edges[0][0]===-480&&edges[1][0]===-480&&edges[0][1]!==edges[1][1]&&edges[2][1]===1030;
+    const mirrorRoot=BL.scene.createNode(), mirrorAim={x:0,depth:0}, mirror=BL.arcadeGames.airHockey({node:mirrorRoot,aim:mirrorAim,onEnd(){},burst(){}});
+    mirror.shared(true);mirror.multiplayer(true);mirror.start();mirror.update(1/60);const nearZ=mirrorRoot.children[1].position.z;
+    mirror.orientation(1);const farZ=mirrorRoot.children[1].position.z,opponentZ=mirrorRoot.children[2].position.z;
+    record("hockey chosen end: mirrored host and opponent mallets occupy opposite physical ends",farZ<opponentZ&&nearZ>opponentZ,JSON.stringify({nearZ,farZ,opponentZ}));mirror.stop();
+    const guestAim={x:1,depth:1}, guestRoot=BL.scene.createNode(), guest=BL.arcadeGames.airHockey({node:guestRoot,aim:guestAim,onEnd(){},burst(){}});
+    guest.multiplayer(true,1);guest.follow(.016);const initial=guestRoot.children[2].position.x;
+    const snap=[0,660,0,0,0,200,0,2000,0,0,-1,0,-1000,-1000,0,0,1,0];guest.receive(snap,1);guest.follow(.016);
+    const predicted=guestRoot.children[2].position.x===initial&&initial<0&&guest.capture()[6]===0;
+    const strikeAim={x:-1,depth:(.66-.07)/.96}, strike=BL.arcadeGames.airHockey({node:BL.scene.createNode(),aim:strikeAim,onEnd(){},burst(){}});
+    strike.shared(true);strike.multiplayer(true);strike.start();for(let i=0;i<456;i++)strike.update(1/240);
+    const before=strike.capture()[17];strikeAim.x=1;strike.update(1/240);const shot=strike.capture().slice();
+    const swept=shot[17]===before+1&&shot[2]>0&&Math.hypot(shot[2],shot[3])<=7501;
+    record("hockey responsiveness: immediate legal host targets and guest presentation survive a delayed snapshot, with swept capped fast strikes",legal&&predicted&&swept,JSON.stringify({edges,initial,predicted,shot,before}));
+    // The far mallet starts on one side of the puck, then crosses and returns within one host frame.
+    const remoteAim={x:0,depth:0}, remoteGame=BL.arcadeGames.airHockey({node:BL.scene.createNode(),aim:remoteAim,onEnd(){},burst(){}});
+    remoteGame.shared(true);remoteGame.multiplayer(true);remoteGame.start();remoteGame.peerInput(-1,.6);
+    let state;for(let i=0;i<1200;i++){remoteGame.update(1/240);state=remoteGame.capture().slice();if(state[1]>=1500&&state[1]<1600)break;}
+    const v=state[1], d=Math.round((2.2-v/1000-.07)/.96*1000);remoteGame.peerInput(-1,d/1000);remoteGame.update(1/240);
+    const beforeRemote=remoteGame.capture()[17];remoteGame.peerPath([1000,d,-1000,d],false);remoteGame.update(1/120);
+    const remoteShot=remoteGame.capture().slice(), reversal=remoteShot[17]>beforeRemote&&Math.hypot(remoteShot[2],remoteShot[3])<=7501&&remoteShot[6]===480;
+    record("hockey guest stroke: ordered out-and-back segments cross the puck within one host frame with a bounded strike",reversal,JSON.stringify({v,d,beforeRemote,remoteShot}));
+    remoteGame.stop();
+    const makeRemote=()=>{const game=BL.arcadeGames.airHockey({node:BL.scene.createNode(),aim:{x:0,depth:0},onEnd(){},burst(){}});game.shared(true);game.multiplayer(true);game.start();game.peerInput(-1,.6);for(let i=0;i<1200;i++){game.update(1/240);const a=game.capture();if(a[1]>=1500&&a[1]<1600)break;}const a=game.capture().slice(),y=Math.round((2.2-a[1]/1000-.07)/.96*1000);game.peerInput(-1,y/1000);game.update(1/240);return {game,y};};
+    const batched=makeRemote(), count=batched.game.capture()[17];batched.game.peerPath([1000,batched.y],false);batched.game.peerPath([-1000,batched.y],false);batched.game.update(1/120);
+    const twoPackets=batched.game.capture().slice();
+    const overflow=makeRemote(), clacksBefore=overflow.game.capture()[17], many=[];for(let i=0;i<32;i++)many.push(-1000,overflow.y);
+    overflow.game.peerPath(many,false);overflow.game.peerPath([1000,overflow.y],false);overflow.game.update(1/240);const afterOverflow=overflow.game.capture().slice();
+    record("hockey guest backlog: packets replay in order; overflow resynchronizes without a fabricated strike",twoPackets[17]>count&&twoPackets[6]===480&&afterOverflow[17]===clacksBefore&&afterOverflow[6]===-480,JSON.stringify({twoPackets,count,afterOverflow,clacksBefore}));
+    const gentle=makeRemote(), previous=gentle.game.capture().slice(), side=previous[0]>=0?-1:1;
+    const start=previous[0]/1000+side*.13, target=previous[0]/1000+side*.10;
+    gentle.game.peerPath([Math.round(-start/.48*1000),gentle.y],true);gentle.game.update(1/240);
+    const gentleBefore=gentle.game.capture()[17];gentle.game.peerPath([Math.round(-target/.48*1000),gentle.y],false);gentle.game.update(1/240);
+    const gentleShot=gentle.game.capture().slice();
+    record("hockey guest impact: a small sampled movement uses the packet interval rather than the replay step",gentleShot[17]===gentleBefore+1&&Math.hypot(gentleShot[2],gentleShot[3])<3000,JSON.stringify({previous,gentleBefore,gentleShot}));
+    gentle.game.stop();
+    batched.game.stop();overflow.game.stop();
+    const hostAim={x:-1,depth:(.66-.07)/.96}, hostGame=BL.arcadeGames.airHockey({node:BL.scene.createNode(),aim:hostAim,onEnd(){},burst(){}});
+    hostGame.shared(true);hostGame.multiplayer(true);hostGame.start();for(let i=0;i<456;i++)hostGame.update(1/240);
+    const hostBefore=hostGame.capture()[17];hostGame.localPoint(1,hostAim.depth);hostGame.localPoint(-1,hostAim.depth);hostGame.update(1/120);
+    const hostShot=hostGame.capture().slice();
+    record("hockey host stroke: an out-and-back between display frames sweeps the puck and returns to the cursor",hostShot[17]>hostBefore&&hostShot[4]===-480&&Math.hypot(hostShot[2],hostShot[3])<=7501,JSON.stringify({hostBefore,hostShot}));
+    hostGame.stop();
+    const hostOverflowAim={x:-1,depth:(.66-.07)/.96}, hostOverflow=BL.arcadeGames.airHockey({node:BL.scene.createNode(),aim:hostOverflowAim,onEnd(){},burst(){}});
+    hostOverflow.shared(true);hostOverflow.multiplayer(true);hostOverflow.start();for(let i=0;i<456;i++)hostOverflow.update(1/240);
+    const hostOverflowBefore=hostOverflow.capture()[17];for(let i=0;i<32;i++)hostOverflow.localPoint(i%2?-1:-.9,hostOverflowAim.depth);
+    hostOverflowAim.x=1;hostOverflow.localPoint(1,hostOverflowAim.depth);hostOverflow.update(1/240);const hostOverflowAfter=hostOverflow.capture().slice();
+    record("hockey host backlog: overflow resynchronizes without a fabricated strike",hostOverflowAfter[17]===hostOverflowBefore&&hostOverflowAfter[4]===480,JSON.stringify({hostOverflowBefore,hostOverflowAfter}));
+    hostOverflow.stop();
+    h.stop();guest.stop();strike.stop();
     const A = BL.arcadeModels, L = A.LAYOUT;
     const machines = { skee: L.skee, hoops: L.hoops, shy: [L.shy], claw: L.frames.claw,
       billiards: L.frames.pool, darts: L.frames.darts, pinball: L.frames.pinball, ride: L.frames.ride };
@@ -15818,6 +15895,8 @@ const arcadeMachine = { name: "arcade machine", why: "rule: Space at a carnival 
     return rows;
   })()`);
   record("arcade machine: every game requires grounded feet and a forward-facing player, including takeoff and descent",eligibility.length>12 && eligibility.every(r=>r.facing&&r.away&&r.sideways&&r.takeoff&&r.falling),JSON.stringify(eligibility));
+  const hockeyEnds=await b.evaluate(`(() => {const B=__ooga,A=B.arcade,W=BL.hockeyWire,actor=B.pilot.player;return W.TABLES.map((center,i)=>{const rows=A.stations.filter(s=>s.kind==="machine"&&s.game.kind==="hockey"&&s.index===i);return {i,count:rows.length,same:rows.length===2&&rows[0].game===rows[1].game,near:rows.some(s=>s.play.z>center[1]),far:rows.some(s=>s.play.z<center[1]),facing:rows.length===2&&Math.cos(rows[0].play.facing-rows[1].play.facing)<-.99,reachable:rows.every(s=>{const p=s.play;return [[-.8,0],[.8,0],[0,p.z>center[1]?.8:-.8]].some(([dx,dz])=>A.walkable(p.x+dx,p.z+dz,p.x,p.z,0,actor.bodyHeight,actor));})};});})()`);
+  record("arcade hockey: both opposite ends open the same physical table",hockeyEnds.length===3&&hockeyEnds.every(x=>x.count===2&&x.same&&x.near&&x.far&&x.facing&&x.reachable),JSON.stringify(hockeyEnds));
   await b.evaluate(`(() => {const B=__ooga,st=B.arcade.stations.find(s=>s.kind==="machine"&&s.game.kind==="skee");B.pilot.navigate({position:{x:st.play.x,y:0,z:st.play.z},yaw:st.play.facing-Math.PI,pitch:.2,dist:4});B.advance(.2,1/60);})()`);
   const invited=await b.evaluate(`document.getElementById("hint").classList.contains("show") && document.getElementById("hint").textContent.includes("Space:")`);
   await b.evaluate(`(() => {const B=__ooga,a=B.pilot.player;a.root.rotation.y+=Math.PI;B.advance(.02,1/60);})()`);
@@ -15869,18 +15948,44 @@ const hockeyHallSample = { name: "hockey hall sample", why: "rule: live table sn
   record("hockey hall sample: snapshots reached the actual hall nodes while rendered frames and avatars remained bounded",result.frames>0&&result.rows.length===2&&result.rows.every(r=>Number.isFinite(r.p95Ms)),JSON.stringify(result));
   console.log("HOCKEY_RENDER "+JSON.stringify(result));
 } };
+const hockeyChosenEnd = { name: "hockey chosen end", why: "regression: the player entering from the far end keeps that end and the other player occupies the opposite end", run: async b => {
+  await b.evaluate(`(() => {
+    const N=BL.net,B=__ooga,V=window.__hockeyEndFixture={listeners:new Set(),poses:[],messages:[]};
+    V.send=N.sendHockey;V.subscribe=N.subscribeHockey;V.pose=N.sendPose;V.me=N.state.me;V.room=N.state.room;V.id=N.state.selfId;V.feature=N.state.hockey;
+    N.state.me={id:1,login:"portlandhodl",display:"portlandhodl"};N.state.selfId=1;N.state.hockey=true;N.state.room="live";N.setBody("portlandhodl");
+    V.emit=m=>{for(const fn of V.listeners)fn(m);};N.subscribeHockey=fn=>{V.listeners.add(fn);return()=>V.listeners.delete(fn);};
+    N.sendPose=(x,y,z,yaw)=>{V.poses.push({x,y,z,yaw});return true;};
+    N.sendHockey=m=>{V.messages.push(JSON.parse(JSON.stringify(m)));if(m.k==="join")queueMicrotask(()=>V.emit({k:"table",i:0,s:"0123456789abcdef",e:V.forceEnd ?? m.e,ids:[1,2],ready:[false,false],phase:"lobby",q:-1}));if(m.k==="ready")queueMicrotask(()=>V.emit({k:"table",i:0,s:"0123456789abcdef",e:1,ids:[1,2],ready:[true,true],phase:"play",q:-1}));return true;};
+    const seat=BL.hockeyWire.seat(0,1,0,{});B.pilot.navigate({position:{x:seat.x,y:0,z:seat.z},yaw:seat.yaw-Math.PI,pitch:.2,dist:4});B.arcade.open("hockey",0);
+  })()`);
+  await untilPage(b,'B.scene === "hockey" && !B.transitioning && B.carnival?.side === 1',20000);
+  await b.key("Enter");await untilPage(b,'B.carnival?.phase === "count" || B.carnival?.phase === "play"',5000);
+  await b.evaluate(`__ooga.advance(3.5,1/60)`);
+  await b.evaluate(`(() => {const W=BL.hockeyWire,canvas=document.querySelector("canvas"),r=canvas.getBoundingClientRect(),p=__ooga.project(W.TABLES[0][0]+.2,.825,W.TABLES[0][1]-.5,{});canvas.dispatchEvent(new PointerEvent("pointermove",{clientX:r.left+p.x,clientY:r.top+p.y,pointerType:"mouse",isPrimary:true,bubbles:true}));__ooga.advance(1/60,1/60);})()`);
+  const result=await b.evaluate(`(() => {const V=__hockeyEndFixture,W=BL.hockeyWire,B=__ooga,positions=[];const visit=n=>{if(n.geometry===BL.arcadeModels.hockeyPieces().mallet)positions.push(n);for(const c of n.children)visit(c);};BL.scene.updateWorld(BL.scenes.hockey.root);visit(BL.scenes.hockey.root);const host=positions[0]?.world[14],guest=positions[1]?.world[14],hostX=positions[0]?.world[12];return {hostX,end:V.messages.find(m=>m.k==="join")?.e,side:B.carnival.side,pose:V.poses.at(-1),host,guest,center:W.TABLES[0][1],centerX:W.TABLES[0][0],up:BL.scenes.hockey.camera.up.z,phase:B.carnival.phase};})()`);
+  await b.evaluate(`__ooga.go("arcade",0)`);await untilPage(b,'B.scene === "arcade" && !B.transitioning',20000);
+  await b.evaluate(`(() => {const V=__hockeyEndFixture,N=BL.net,B=__ooga;N.state.me={id:2,login:"portlandhodl",display:"portlandhodl"};N.state.selfId=2;V.forceEnd=1;V.poses.length=0;V.messages.length=0;const p=BL.hockeyWire.seat(0,0,0,{});B.pilot.navigate({position:{x:p.x,y:0,z:p.z},yaw:p.yaw-Math.PI,pitch:.2,dist:4});B.arcade.open("hockey",0);})()`);
+  await untilPage(b,'B.scene === "hockey" && !B.transitioning && B.carnival?.shared',20000);
+  await b.key("Enter");await untilPage(b,'B.carnival?.phase === "count" || B.carnival?.phase === "play"',5000);await b.evaluate(`__ooga.advance(3.5,1/60)`);
+  await b.evaluate(`(() => {const W=BL.hockeyWire,canvas=document.querySelector("canvas"),r=canvas.getBoundingClientRect(),p=__ooga.project(W.TABLES[0][0]+.2,.825,W.TABLES[0][1]+.5,{});canvas.dispatchEvent(new PointerEvent("pointermove",{clientX:r.left+p.x,clientY:r.top+p.y,pointerType:"mouse",isPrimary:true,bubbles:true}));__ooga.advance(1/60,1/60);})()`);
+  const guest=await b.evaluate(`(() => {const V=__hockeyEndFixture,B=__ooga,W=BL.hockeyWire,positions=[];const visit=n=>{if(n.geometry===BL.arcadeModels.hockeyPieces().mallet)positions.push(n);for(const c of n.children)visit(c);};BL.scene.updateWorld(BL.scenes.hockey.root);visit(BL.scenes.hockey.root);return {side:B.carnival.side,pose:V.poses.at(-1),host:positions[0]?.world[14],guest:positions[1]?.world[14],guestX:positions[1]?.world[12],centerX:W.TABLES[0][0],center:W.TABLES[0][1],up:BL.scenes.hockey.camera.up.z,phase:B.carnival.phase};})()`);
+  await b.evaluate(`__ooga.go("arcade",0)`);await untilPage(b,'B.scene === "arcade" && !B.transitioning',20000);
+  await b.evaluate(`(() => {const V=__hockeyEndFixture,N=BL.net;N.sendHockey=V.send;N.subscribeHockey=V.subscribe;N.sendPose=V.pose;N.state.me=V.me;N.state.room=V.room;N.state.selfId=V.id;N.state.hockey=V.feature;delete window.__hockeyEndFixture;})()`);
+  record("hockey chosen end: a host entering from far remains there and the opponent mallet is opposite",result.end===1&&result.side===1&&result.pose?.z<result.center&&result.host<result.center&&result.guest>result.center&&Math.abs(result.hostX-result.centerX-.2)<.02&&result.up===1&&result.phase==="play"&&guest.side===0&&guest.pose?.z>guest.center&&guest.host<guest.center&&guest.guest>guest.center&&Math.abs(guest.guestX-guest.centerX-.2)<.02&&guest.up===-1&&guest.phase==="play",JSON.stringify({result,guest}));
+} };
 const hockeySharedVisit = { name: "hockey shared visit", why: "contract: lobby, opposite camera, keyboard input, ending and hall return preserve the claimed Ooga, audio preferences and subscriptions", run: async b => {
   await b.evaluate(`(() => {
     const N=BL.net, V=window.__hockeyVisit={listeners:new Set(),sent:[],releases:0,peerClears:0,side:1};
     V.send=N.sendHockey;V.subscribe=N.subscribeHockey;V.peers=BL.voice.setPeers;
     V.me=N.state.me;V.room=N.state.room;V.id=N.state.selfId;V.feature=N.state.hockey;
     N.state.me={id:2,login:"portlandhodl",display:"portlandhodl"};N.state.selfId=2;N.state.hockey=true;N.state.room="live";
+    V.noSocket=N.sendHockey({k:"join",i:0})===false;
     N.setBody("portlandhodl");V.off=N.subscribeRoster(()=>{if(!N.state.body)V.releases++;});
     BL.voice.setPeers=(...args)=>{if(!args[0].length)V.peerClears++;return V.peers(...args);};
     V.emit=m=>{for(const fn of V.listeners)fn(m);};
     N.subscribeHockey=fn=>{V.listeners.add(fn);return()=>V.listeners.delete(fn);};
     N.sendHockey=m=>{V.sent.push(m);if(m.k==="join")queueMicrotask(()=>V.emit({k:"table",i:0,s:"0123456789abcdef",ids:[1,2],ready:[false,false],phase:"lobby",q:-1}));if(m.k==="ready")queueMicrotask(()=>V.emit({k:"table",i:0,s:"0123456789abcdef",ids:[1,2],ready:[true,true],phase:"play",q:-1}));return true;};
-    V.muted=BL.sound.muted;BL.sound.setMuted(true);V.voiceMuted=BL.voice.stats.muted;V.radius=BL.voice.stats.radius;V.level=BL.voice.stats.receiveLevel;BL.voice.setMuted(true);BL.voice.setRadius(10);BL.voice.setReceiveLevel(.35);V.localMute=BL.voice.mutedLocally("hockey-fixture");BL.voice.muteLocal("hockey-fixture",true);
+    V.muted=BL.sound.muted;BL.sound.setMuted(true);V.voiceMuted=BL.voice.stats.muted;V.radius=BL.voice.stats.radius;V.level=BL.voice.stats.receiveLevel;BL.voice.setMuted(true);BL.voice.setRadius(10);BL.voice.setReceiveLevel(.35);V.localMute=BL.voice.mutedLocally(900000001);BL.voice.muteLocal(900000001,true);
     __ooga.go("hockey",0);
   })()`);
   await untilPage(b, 'B.scene === "hockey" && !B.transitioning && B.carnival?.side === 1', 20000);
@@ -15899,9 +16004,9 @@ const hockeySharedVisit = { name: "hockey shared visit", why: "contract: lobby, 
   await b.key("Enter");await untilPage(b,'B.carnival?.phase === "count"',5000);
   const earlyEnd=await b.evaluate(`(() => {const a=[0,660,0,0,0,200,0,2000,0,7,-1,0,-1000,-1000,0,7,0,0];__hockeyVisit.emit({k:"frame",i:0,s:"0123456789abcdef",q:2,a});__ooga.advance(1.5,1/60);return __ooga.carnival.phase;})()`);
   await b.evaluate(`__ooga.go("arcade",0)`);await untilPage(b,'B.scene === "arcade" && !B.transitioning',20000);
-  const back=await b.evaluate(`(() => {const V=__hockeyVisit,N=BL.net;const r={body:N.state.body,zone:N.state.zone,releases:V.releases,peerClears:V.peerClears,listeners:V.listeners.size,leave:V.sent.filter(m=>m.k==="leave").length,voice:BL.voice.stats.muted,radius:BL.voice.stats.radius,level:BL.voice.stats.receiveLevel,localMute:BL.voice.mutedLocally("hockey-fixture"),muted:BL.sound.muted};V.off();N.sendHockey=V.send;N.subscribeHockey=V.subscribe;BL.voice.setPeers=V.peers;BL.sound.setMuted(V.muted);BL.voice.setMuted(V.voiceMuted);BL.voice.setRadius(V.radius);BL.voice.setReceiveLevel(V.level);BL.voice.muteLocal("hockey-fixture",V.localMute);N.state.me=V.me;N.state.room=V.room;N.state.selfId=V.id;N.state.hockey=V.feature;return r;})()`);
-  record("hockey shared visit: the panel is a two-player lobby, overhead far-side camera and mouse send two-axis input without smash or meter",lobby.shown&&lobby.phase==="intro"&&lobby.text.includes("Both")&&play.side===1&&play.overhead&&play.upZ===1&&play.controlsHidden&&play.bestHidden&&play.inputs.some(x=>x>0)&&play.rightPixels>0,JSON.stringify({lobby,play}));
-  record("hockey shared visit: ending from the menu reaches results, the body and Arcade voice never drop, mute/radius/volume persist, server close preserves completed results and releases subscriptions",ending.phase==="results"&&back.body==="portlandhodl"&&back.zone==="arcade.hall"&&!back.releases&&!back.peerClears&&back.leave===1&&earlyEnd==="results"&&departed.phase==="results"&&!departed.results&&departed.pause&&back.listeners===1&&play.muted&&ending.muted&&back.muted&&play.voice&&back.voice&&back.localMute&&play.radius===10&&back.radius===10&&play.level===.35&&back.level===.35,JSON.stringify({play,ending,departed,earlyEnd,back}));
+  const back=await b.evaluate(`(() => {const V=__hockeyVisit,N=BL.net;const r={noSocket:V.noSocket,body:N.state.body,zone:N.state.zone,releases:V.releases,peerClears:V.peerClears,listeners:V.listeners.size,leave:V.sent.filter(m=>m.k==="leave").length,voice:BL.voice.stats.muted,radius:BL.voice.stats.radius,level:BL.voice.stats.receiveLevel,localMute:BL.voice.mutedLocally(900000001),muted:BL.sound.muted};V.off();N.sendHockey=V.send;N.subscribeHockey=V.subscribe;BL.voice.setPeers=V.peers;BL.sound.setMuted(V.muted);BL.voice.setMuted(V.voiceMuted);BL.voice.setRadius(V.radius);BL.voice.setReceiveLevel(V.level);BL.voice.muteLocal(900000001,V.localMute);N.state.me=V.me;N.state.room=V.room;N.state.selfId=V.id;N.state.hockey=V.feature;return r;})()`);
+  record("hockey shared visit: the panel is a two-player lobby, overhead far-side camera and mouse send two-axis input without smash or meter",lobby.shown&&lobby.phase==="intro"&&lobby.text.includes("Both")&&play.side===1&&play.overhead&&play.upZ===1&&play.controlsHidden&&play.bestHidden&&play.inputs.some(x=>x>0)&&Math.abs(play.rightPixels)<1,JSON.stringify({lobby,play}));
+  record("hockey shared visit: ending from the menu reaches results, the body and Arcade voice never drop, mute/radius/volume persist, server close preserves completed results and releases subscriptions",ending.phase==="results"&&back.noSocket&&back.body==="portlandhodl"&&back.zone==="arcade.hall"&&!back.releases&&!back.peerClears&&back.leave===1&&earlyEnd==="results"&&departed.phase==="results"&&!departed.results&&departed.pause&&back.listeners===1&&play.muted&&ending.muted&&back.muted&&play.voice&&back.voice&&back.localMute&&play.radius===10&&back.radius===10&&play.level===.35&&back.level===.35,JSON.stringify({play,ending,departed,earlyEnd,back}));
 } };
 const hockeyPilot = { name: "hockey pilot", why: "rule: the real hockey physics and shared session keep bounded frames, two human controls, interpolation, physical scale and cleanup", run: async b => {
   const result = await b.evaluate(`(() => {
@@ -21075,6 +21180,7 @@ scene("shy", { steps: [carnivalPlay("shy", 0.7), trip("shy")] });
 scene("claw", { steps: [carnivalPlay("claw", 0.6), trip("claw")] });
 scene("hockey", { steps: [hockeyPilot, carnivalPlay("hockey", 0.5), trip("hockey")] });
 scene("arcade", { query: "character=portlandhodl", steps: [hockeySharedVisit] });
+scene("arcade", { query: "character=portlandhodl", steps: [hockeyChosenEnd] });
 scene("arcade", {query:"character=portlandhodl",opts:{w:1440,h:900,perf:true},steps:[hockeyHallSample]});
 scene("arcade", {query:"character=portlandhodl",opts:{w:390,h:844,mobile:true,perf:true},steps:[hockeyHallSample]});
 scene("arcade", { query: "character=portlandhodl", opts: {w:390,h:844,mobile:true}, steps: [hockeySharedVisit] });
