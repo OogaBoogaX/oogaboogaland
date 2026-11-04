@@ -2105,7 +2105,7 @@
     dash: ["#6fae3a", "#3a6e24", "#2f8a3a", "#8a5a2c", "#1b1410", "#c68642", "#3a2414", "#b98cff"],
     stacker: ["#8e8e96", "#5a5a62", "#d9953a", "#6fae3a", "#c8583a", "#4a7ab0", "#2fb8a0", "#fff3a0"]
   };
-  const retroPalette = (r) => ["#07080d", CABINETS[4 + r].trim, BONE, BANANA, "#8a5210", ...RETRO_INKS[RETRO[r].id]];
+  const retroPalette = (r) => ["#07080d", CABINETS.find((c) => c.retro === r).trim, BONE, BANANA, "#8a5210", ...RETRO_INKS[RETRO[r].id]];
   const smallCentred = (g, s, y, c) => {
     const G = BL.hubModels.SIGN_GLYPHS;
     let x = Math.floor((g.w - (s.length * 4 - 1)) / 2);
@@ -3109,6 +3109,13 @@
         daubDot(g, -0.48, -0.02, 0.12, 0.12, EARTH_CHALK, e, 0, 0, 14);
         daubDot(g, -0.43, 0.01, 0.1, 0.1, "#6e4c2e", 0, 0, 0.002, 14);
         for (const [x, y] of [[0.5, 0.05], [0.62, -0.25], [-0.6, -0.4], [0.4, -0.45], [-0.3, 0.12]]) daubDot(g, x, y, 0.022, 0.022, EARTH_CHALK, e, 0.3, 0, 5);
+      },
+      block: () => {
+        daubPoly(g, [[-0.3, -0.55], [0.22, -0.55], [0.22, -0.05], [-0.3, -0.05]], EARTH_OCHRE, e, z);
+        daubPoly(g, [[-0.3, -0.05], [0.22, -0.05], [0.4, 0.08], [-0.12, 0.08]], "#d9953a", e, z);
+        daubPoly(g, [[0.22, -0.55], [0.4, -0.42], [0.4, 0.08], [0.22, -0.05]], "#a8703e", e, z);
+        daubStroke(g, [[-0.12, -0.48], [-0.12, -0.12]], 0.03, EARTH_CHALK, e, z * 2);
+        for (const [x, y] of [[-0.55, -0.3], [0.6, -0.2], [-0.5, -0.5], [0.55, -0.48]]) daubDot(g, x, y, 0.06, 0.05, EARTH_RED, e, 0, z, 8);
       },
       mine: () => {
         daubPoly(g, [[-0.66, -0.55], [0.66, -0.55], [0.52, -0.38], [0.2, -0.3], [-0.24, -0.33], [-0.56, -0.42]], EARTH_BLACK, 0, 0);
