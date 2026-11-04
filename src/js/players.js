@@ -16,10 +16,10 @@
 // what changed. No timers. An Ooga thump (thump.js) shows a mallet beside its thumper's voice mark for a moment (`pulse`): every
 // row holds that mark's cell from the start, shown and hidden by visibility, so it never moves a name or a control, and its
 // animation's end hides it again; `clearPulses` hides them all at once. Exports setDoors, pulse, clearPulses and stats.
-// While the visitor is in voice the tab also holds their hearing range (#380, `BL.voice.setRadius`): the slider's last
+// The tab always holds the visitor's hearing range (#380, `BL.voice.setRadius`), ready before joining: the slider's last
 // stop is no limit, and a distance at or past the range is dimmed, since that voice is muted for them. A voice in
 // another place of the group, which shows no distance, is silenced by a range without a mark here. The slider is offered
-// wherever voice.js can set a voice's level (`fades`): by its element's volume, or on iOS and iPadOS through a Web Audio gain.
+// before any audio is active; Web Audio supplies quieting and boost once the listener joins.
 // Hearing range and join-reading live together under the panel's Advanced settings disclosure.
 // Joins (#430, `net.subscribePresence`): a player who comes online while the visitor is in the room is named on screen
 // (`hud.toast`, read out by assistive technology) and counted on the tab until the visitor looks at it
@@ -27,7 +27,7 @@
 // not named, nor is one who comes back within REJOIN_QUIET of leaving (a reconnect, a reload, a newer tab). Joins close
 // together share one message while it shows. With "Read joins aloud" ticked (this browser's choice, in localStorage) the names are
 // spoken too, one utterance at a time: names that arrive while one plays wait and are said together after it, and the
-// page-wide mute (`BL.sound`) silences it, leaving the message. Speech starts only from the box, a gesture.
+// Read joins aloud checkbox alone controls it, independently of environment sound. Speech starts from the box, a gesture.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -54,20 +54,30 @@
   crosshair.append(crosshairPath);
 
   const rows = new Map(), groups = new Map(), order = [], door = { x: 0, y: 0, z: 0 };
-  let serial = 0, pass = 0, showing = false, stale = true, doors = null, shownZone = "", shownRadius = -1, shownHearing = null;
+  let serial = 0, pass = 0, showing = false, stale = true, doors = null, shownZone = "", shownRadius = -1;
   const makeRow = () => {
     const li = document.createElement("li"), presence = document.createElement("span"), name = document.createElement("span");
     const label = document.createElement("span"), host = document.createElement("span"), marks = document.createElement("span");
     const voice = document.createElement("button"), look = document.createElement("button"), distance = document.createElement("span");
     const note = document.createElement("span"), id = `players-name-${++serial}`;
+    const toggle = document.createElement("button"), volume = document.createElement("div"), volumeLabel = document.createElement("label");
+    const slider = document.createElement("input"), value = document.createElement("output");
+    toggle.type = "button"; toggle.className = "roster-name players-name-toggle";
+    toggle.setAttribute("aria-expanded", "false"); toggle.setAttribute("aria-controls", `${id}-volume`);
+    volume.className = "players-volume"; volume.id = `${id}-volume`; volume.hidden = true;
+    volumeLabel.className = "players-hearing-label"; volumeLabel.htmlFor = `${id}-range`; volumeLabel.textContent = "Volume";
+    slider.type = "range"; slider.className = "players-volume-range"; slider.id = `${id}-range`;
+    slider.min = "0"; slider.max = String(V.VOLUME_MAX * 100); slider.step = "5"; slider.value = "100";
+    value.className = "players-volume-value"; value.htmlFor = slider.id; value.textContent = "100%";
+    volume.append(volumeLabel, slider, value);
     presence.className = "roster-presence"; presence.dataset.online = "true"; presence.setAttribute("role", "img");
     presence.setAttribute("aria-label", "Online"); presence.title = "Online";
     name.className = "players-name"; label.className = "roster-label"; label.id = id;
     host.className = "roster-host"; host.hidden = true; host.setAttribute("role", "img");
     host.setAttribute("aria-label", "Host: runs the Oogas for everyone"); host.title = "Host: runs the Oogas for everyone";
-    name.append(label, host);
+    toggle.append(label); name.append(toggle, host);
     marks.className = "roster-marks";
-    voice.className = "roster-voice"; voice.type = "button"; voice.hidden = true; voice.append(BL.hud.voiceIcon.cloneNode(true));
+    voice.className = "roster-voice"; voice.type = "button"; voice.hidden = true; voice.setAttribute("aria-describedby", id); voice.append(BL.hud.voiceIcon.cloneNode(true));
     marks.append(voice);
     const thump = document.createElement("span");
     thump.className = "players-thump"; thump.dataset.on = "false"; thump.setAttribute("aria-hidden", "true");
@@ -76,13 +86,15 @@
     distance.className = "players-distance"; distance.append("");
     note.className = "players-note"; note.textContent = ", last known location"; note.hidden = true;
     distance.append(note);
-    li.append(presence, name, marks, thump, look, distance);
-    return { li, label, host, voice, thump, pulse: null, button: look, distance, note, id: 0, self: false, name: "", zone: "", group: "", seen: 0,
+    li.append(presence, name, marks, thump, look, distance, volume);
+    return { li, label, toggle, volume, slider, value, host, voice, thump, pulse: null, button: look, distance, note, id: 0, self: false, name: "", zone: "", group: "", seen: 0,
       aim: "", voiceLook: "", voiceLogin: "", voiceSelf: false, blocked: false, hostOn: false, metres: -1, lastKnown: false, far: false };
   };
   const selfRow = makeRow();
   selfRow.self = true;
   selfRow.button.hidden = true;
+  selfRow.toggle.disabled = true;
+  selfRow.toggle.removeAttribute("aria-expanded"); selfRow.toggle.removeAttribute("aria-controls");
   const groupFor = (key) => {
     let group = groups.get(key);
     if (!group) {
@@ -114,11 +126,15 @@
       const rec = net.remotes.get(row.id);
       if (!rec) continue;
       const look = rec.voice ? rec.muted ? "muted" : BL.voice.speaking(rec.id) ? "speaking" : "on" : "";
-      paintMark(row, look, rec.voice ? rec.login : "", false, rec.id === s.hostId);
+      paintMark(row, look || "off", rec.login, false, rec.id === s.hostId);
+      const level = V.volumeOf(row.id), words = `${Math.round(level * 100)}%`;
+      if (row.slider.value !== String(level * 100)) row.slider.value = String(level * 100);
+      if (row.value.textContent !== words) row.value.textContent = words;
+      row.slider.setAttribute("aria-valuetext", words);
     }
   };
   const paintMark = (row, look, login, self, host) => {
-    const blocked = !!login && BL.voice.mutedLocally(login);
+    const blocked = !!login && BL.voice.mutedLocally(row.id);
     if (row.voiceLook !== look || row.voiceLogin !== login || row.voiceSelf !== self || row.blocked !== blocked) {
       row.voiceLook = look; row.voiceLogin = login; row.voiceSelf = self; row.blocked = blocked;
       const button = row.voice, words = BL.hud.voiceWords(look, self, blocked, login);
@@ -163,7 +179,7 @@
   // Distances and crosshairs, from where everyone stands now.
   const measure = () => {
     if (!showing || stale) return;
-    const s = net.state, me = s.self, mine = s.zone, placed = me.zone === mine, radius = V.fades && V.stats.enabled ? V.stats.radius : 0;
+    const s = net.state, me = s.self, mine = s.zone, placed = me.zone === mine, radius = V.stats.radius;
     shownZone = mine; shownRadius = radius;
     for (const row of rows.values()) {
       const rec = net.remotes.get(row.id);
@@ -197,15 +213,11 @@
     }
   };
 
-  // The hearing range's slider, shown while the visitor is in voice; a new range redraws which distances are dimmed.
+  // Hearing range is ready even alone and before voice joins; changing it never acquires a microphone.
   const paintHearing = () => {
     if (!showing || stale) return;
-    const voice = V.stats, shown = V.fades && voice.enabled && net.state.room === "live";
-    if (shown !== shownHearing) { shownHearing = shown; hearing.hidden = !shown; }
-    if (!shown) {
-      if (shownRadius > 0) measure();
-      return;
-    }
+    const voice = V.stats;
+    hearing.hidden = false;
     const words = voice.radius ? `${voice.radius} m` : "No limit", value = String(voice.radius || V.RADIUS_MAX + RANGE_STEP);
     if (rangeValue.textContent !== words) { rangeValue.textContent = words; range.setAttribute("aria-valuetext", words); }
     if (range.value !== value && document.activeElement !== range) range.value = value;
@@ -254,6 +266,7 @@
       if (group.ul.children[rowIndex] !== row.li) group.ul.insertBefore(row.li, group.ul.children[rowIndex] || null);
       rowIndex++;
       if (row.label.textContent !== row.name) row.label.textContent = row.name;
+      if (!row.self) row.slider.setAttribute("aria-label", `Volume for ${row.name}`);
     }
     for (const [key, entry] of groups) if (entry.seen !== pass) { entry.section.remove(); groups.delete(key); }
     paintMarks();
@@ -276,11 +289,20 @@
   list.addEventListener("click", (e) => {
     const voice = e.target.closest(".roster-voice");
     if (voice) {
-      voice.blur();
+      if (e.detail) voice.blur();
       if (voice.disabled) return;
       // The visitor's own mark mutes and unmutes their microphone; anyone else's mutes them for this visitor.
       if (voice.dataset.self === "true") BL.voice.toggle();
-      else BL.voice.muteLocal(voice.dataset.login, voice.getAttribute("aria-pressed") !== "true");
+      else BL.voice.muteLocal(Number(voice.closest("li").dataset.id), voice.getAttribute("aria-pressed") !== "true");
+      return;
+    }
+    const toggle = e.target.closest(".players-name-toggle");
+    if (toggle && !toggle.disabled) {
+      const row = rows.get(Number(toggle.closest("li").dataset.id));
+      if (row) {
+        const open = toggle.getAttribute("aria-expanded") !== "true";
+        toggle.setAttribute("aria-expanded", String(open)); row.volume.hidden = !open;
+      }
       return;
     }
     const look = e.target.closest(".players-look");
@@ -288,6 +310,15 @@
     look.blur();
     const row = rows.get(Number(look.closest("li").dataset.id));
     if (row && look.getAttribute("aria-disabled") !== "true") lookAt(row);
+  });
+
+  list.addEventListener("input", (e) => {
+    if (!e.target.matches(".players-volume-range")) return;
+    const row = rows.get(Number(e.target.closest("li").dataset.id));
+    if (!row || !net.remotes.has(row.id)) return;
+    V.setVolume(row.id, Number(row.slider.value) / 100);
+    const words = `${Math.round(V.volumeOf(row.id) * 100)}%`;
+    row.value.textContent = words; row.slider.setAttribute("aria-valuetext", words);
   });
 
   // Marks and distances are not kept up while hidden, so the panel is drawn afresh whenever it shows again.
@@ -307,7 +338,7 @@
   // Joins: named, counted until looked at, and spoken when asked.
   const REJOIN_QUIET = 120000, TOAST_MS = 2800, SPEECH_STUCK_MS = 15000, NAMES_SHOWN = 3, SPEAK_KEY = "oogaboogaland.players.speak";
   const leftAt = new Map(), shown = { names: [], extra: 0 }, said = { names: [], extra: 0 };
-  let unread = 0, shownAt = -Infinity, shownText = "", speaking = false, speakingAt = 0, speakOn = false;
+  let unread = 0, shownAt = -Infinity, shownText = "", speaking = false, speakingAt = 0, speakOn = false, speechSerial = 0;
   const add = (list, name) => { if (list.names.length < NAMES_SHOWN) list.names.push(name); else list.extra++; };
   const words = (list) => {
     const all = list.extra ? [...list.names, `${list.extra} ${list.extra === 1 ? "other" : "others"}`] : list.names;
@@ -316,7 +347,8 @@
   const setUnread = (count) => { unread = count; BL.sheet.setBadge("players", count); };
   const utter = (text) => {
     const line = new SpeechSynthesisUtterance(text);
-    line.onend = line.onerror = sayNext;
+    const serial = ++speechSerial;
+    line.onend = line.onerror = () => { if (serial === speechSerial) sayNext(); };
     speaking = true; speakingAt = performance.now();
     synth.speak(line);
   };
@@ -325,17 +357,18 @@
     if (!said.names.length) return;
     const text = words(said);
     said.names.length = 0; said.extra = 0;
-    if (speakOn && !BL.sound.muted) utter(text);
+    if (speakOn) utter(text);
   };
   const say = (name) => {
-    if (!synth || !speakOn || BL.sound.muted) return;
+    if (!synth || !speakOn) return;
     add(said, name);
     if (!speaking || performance.now() - speakingAt > SPEECH_STUCK_MS) sayNext();
   };
   const hush = () => {
     said.names.length = 0; said.extra = 0;
-    if (synth && speaking) synth.cancel();
-    speaking = false;
+    const active = speaking;
+    speechSerial++; speaking = false;
+    if (synth && active) synth.cancel();
   };
   net.subscribePresence((rec, joined) => {
     const now = performance.now();
@@ -352,8 +385,9 @@
   });
   BL.sheet.watchViews(panel, () => { if (unread) setUnread(0); });
   net.subscribe(() => {
-    if (net.state.me || !unread && !leftAt.size) return;
-    setUnread(0); leftAt.clear(); hush();
+    if (net.state.me) return;
+    if (unread) setUnread(0);
+    leftAt.clear(); hush();
   });
   if (synth) {
     try { speakOn = localStorage.getItem(SPEAK_KEY) === "on"; } catch { /* Storage may be unavailable. */ }
@@ -364,10 +398,9 @@
       try { localStorage.setItem(SPEAK_KEY, speakOn ? "on" : "off"); } catch { /* Storage may be unavailable. */ }
       hush();
       // Said from the tick itself, the gesture a phone's browser needs before it speaks the joins that follow.
-      if (speakOn && !BL.sound.muted) utter("Joins will be read aloud");
+      if (speakOn) utter("Joins will be read aloud");
     });
     speakBox.addEventListener("click", (e) => { if (e.detail) speakBox.blur(); });
-    BL.sound.subscribe((muted) => { if (muted) hush(); });
   }
   net.subscribe(render);
   net.subscribeRoster(render);

@@ -2412,7 +2412,7 @@
   // (their own Ooga, else the one they drive) shows the host dot and their voice. The director hands every
   // room and voice change here; only marks that changed are touched, and rows never move for them.
   let liveRows = null, liveOnline = null, liveSignedIn = false;
-  const VOICE_WORDS = { on: "In voice", speaking: "Speaking", muted: "Muted their microphone" };
+  const VOICE_WORDS = { off: "Not in voice", on: "In voice", speaking: "Speaking", muted: "Muted their microphone" };
   // A voice mark's tooltip and label, shared with the live players tab: the visitor's own mark works their microphone,
   // anyone else's mutes them for this visitor (`login` empty when there is nobody to mute).
   const voiceWords = (look, self, blocked, login) => !look ? "" : self ? look === "muted" ? "Your microphone is muted: click to unmute" : "Your microphone: click to mute"

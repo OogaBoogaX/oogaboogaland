@@ -21040,12 +21040,13 @@ const hubJoinAlerts = { name: "join alerts", why: "rule: a player who comes onli
   // The Players panel is the saved selection, so it shows as soon as the visitor is signed in, without being looked at.
   await openWithSheetState(b, hubPage(src, "pos=0"), { open: true, tab: "players" });
   await b.evaluate(`(async () => {
-    const W = window.__joins = { fetch: window.fetch, WebSocket: window.WebSocket, said: [], sockets: [] };
+    const W = window.__joins = { fetch: window.fetch, WebSocket: window.WebSocket, said: [], lines: [], cancelled: 0, sockets: [] };
     window.fetch = (url, options) => String(url) === "/api/me" ? Promise.resolve({ ok: true, status: 200, headers: { get: () => "application/json" }, json: async () => ({ player: { id: 71, login: "Tester", display: "Tester" } }) })
       : String(url) === "/auth/logout" ? Promise.resolve({ ok: true }) : W.fetch(url, options);
     window.WebSocket = class { static OPEN = 1; constructor() { this.readyState = 1; W.sockets.push(this); } send() {} close() { this.readyState = 3; } };
-    speechSynthesis.speak = (line) => { W.said.push(line.text); setTimeout(() => line.onend && line.onend(), 0); };
-    speechSynthesis.cancel = () => {};
+    speechSynthesis.speak = (line) => { W.said.push(line.text); W.lines.push(line); };
+    speechSynthesis.cancel = () => { W.cancelled++; };
+    W.finish = () => { const line = W.lines.at(-1); if (line?.onend) line.onend(); };
     BL.net.state.started = true; BL.net.state.resolved = false;
     await BL.net.recheck();
     W.room = (m) => W.sockets.at(-1).onmessage({ data: JSON.stringify(m) });
@@ -21105,15 +21106,95 @@ const hubJoinAlerts = { name: "join alerts", why: "rule: a player who comes onli
   await b.sleep(50);
   await b.click(settings.x, settings.y);
   const collapsed = await b.evaluate(`!document.getElementById("players-settings").open && document.getElementById("players-speak-input").checked`);
-  const spoken = await b.evaluate(`new Promise((resolve) => { const W = __joins; W.join(6, "Eve"); setTimeout(() => { W.join(7, "Fay"); W.join(8, "Gus"); W.join(9, "Hal");
-    setTimeout(() => { BL.sound.setMuted(true); W.join(20, "Ivy"); const muted = W.read(); BL.sound.setMuted(false);
-      resolve({ said: W.said.slice(), muted, saved: localStorage.getItem("oogaboogaland.players.speak") }); }, 30); }, 30); })`);
-  const out = await b.evaluate(`(async () => { const W = __joins; await BL.net.logout(); const r = W.read();
+  const spoken = await b.evaluate(`(() => {
+    const W = __joins, box = document.getElementById("players-speak-input"), out = {};
+    W.finish(); W.join(6, "Eve"); const beforeMute = W.said.length;
+    BL.sound.setMuted(true); W.join(7, "Fay"); W.join(8, "Gus");
+    out.queuedWhileMuted = W.said.length === beforeMute && W.cancelled === 0;
+    W.finish(); W.join(9, "Hal"); BL.sound.setMuted(false); W.finish(); W.finish();
+    BL.sound.setMuted(true); W.join(20, "Ivy"); out.muted = W.read();
+    W.join(21, "Jan"); const stale = W.lines.at(-1);
+    box.checked = false; box.dispatchEvent(new Event("change"));
+    out.disabled = W.cancelled === 1 && localStorage.getItem("oogaboogaland.players.speak") === "off";
+    W.join(22, "Kay"); const quiet = W.said.length;
+    if (stale.onend) stale.onend(); out.cancelledQueue = W.said.length === quiet;
+    box.checked = true; box.dispatchEvent(new Event("change"));
+    if (stale.onend) stale.onend(); W.join(23, "Lou");
+    out.staleIgnored = W.said.at(-1) === "Joins will be read aloud";
+    W.finish(); W.finish(); BL.sound.setMuted(false);
+    return { ...out, said: W.said.slice(), saved: localStorage.getItem("oogaboogaland.players.speak") };
+  })()`);
+  await b.focus(true);
+  const out = await b.evaluate(`(async () => {
+    const W = __joins; document.getElementById("players-speak-input").focus(); W.join(24, "Pat"); W.join(25, "Quin");
+    const before = W.read(), stale = W.lines.at(-1), count = W.said.length; await BL.net.logout();
+    if (stale.onend) stale.onend(); const r = { ...W.read(), stoppedWithoutBadge: before.players === "" && W.cancelled === 2 && W.said.length === count };
     delete speechSynthesis.speak; delete speechSynthesis.cancel; window.fetch = W.fetch; window.WebSocket = W.WebSocket;
-    Object.assign(BL.net.state, { backend: false, started: false, resolved: true }); BL.hud.showAccount(BL.net.state); delete window.__joins; return r; })()`);
-  record("join alerts: joins are read aloud only once the box is ticked, one at a time with waiting names said together, never while muted, which keeps the message; signing out clears both counts",
-    collapsed && settings.closed && settings.grouped && settings.step === "1" && settings.min === "1" && settings.max === "61" && box.shown && box.said === 0 && spoken.saved === "on" && spoken.said.join("|") === "Joins will be read aloud|Eve is online|Fay is online|Gus and Hal are online"
-      && spoken.muted.toast === "Dee, Eve, Fay and 3 others are online" && out.players === "" && out.chat === "", JSON.stringify({ settings, collapsed, box, spoken, out }));
+    Object.assign(BL.net.state, { backend: false, started: false, resolved: true }); BL.hud.showAccount(BL.net.state); delete window.__joins; return r;
+  })()`);
+  await b.focus(false);
+  record("join alerts: enabled speech continues and queues across environmental mute; disabling cancels current and waiting joins, stale callbacks cannot revive them, and signing out clears both counts",
+    collapsed && settings.closed && settings.grouped && settings.step === "1" && settings.min === "1" && settings.max === "61" && box.shown && box.said === 0 && spoken.saved === "on" && spoken.queuedWhileMuted && spoken.disabled && spoken.cancelledQueue && spoken.staleIgnored
+      && spoken.said.join("|") === "Joins will be read aloud|Eve is online|Fay and Gus are online|Hal is online|Ivy is online|Joins will be read aloud|Lou is online"
+      && spoken.muted.toast === "Dee, Eve, Fay and 3 others are online" && out.players === "" && out.chat === "" && out.stoppedWithoutBadge, JSON.stringify({ box, spoken, out }));
+  await b.open(hubPage(src, "pos=0")); await untilReady(b);
+  record("join alerts: the enabled reading choice survives reload", await b.evaluate('BL.players.stats.speakOn&&document.getElementById("players-speak-input").checked'));
+
+} };
+// #443: operate the real controls with native keyboard/touch events while voice has never connected.
+const hubPlayerPreferences = { name: "player preferences", why: "regression: hearing range and individual mute were hidden before voice, and player names had no independent volume disclosure", run: async b => {
+  await openWithSheetState(b, hubPage(src, "pos=0"), { open: true, tab: "players" });
+  await b.evaluate(`(async () => {
+    const W = window.__playerPrefs = { fetch: window.fetch, WebSocket: window.WebSocket, gum: navigator.mediaDevices.getUserMedia, aim: BL.pilot.turnToward, captures: 0, voiceCalls: 0, turns: 0, sockets: [], activations: [] };
+    window.fetch = (url, options) => String(url) === "/api/me" ? Promise.resolve({ ok: true, status: 200, headers: { get: () => "application/json" }, json: async () => ({ player: { id: 71, login: "listener", display: "Listener" } }) })
+      : String(url) === "/auth/logout" ? Promise.resolve({ ok: true }) : String(url).startsWith("/api/voice/") ? (W.voiceCalls++, Promise.resolve({ ok: false, json: async () => ({ error: "unexpected voice request" }) })) : W.fetch(url, options);
+    navigator.mediaDevices.getUserMedia = () => { W.captures++; return Promise.reject(new Error("unexpected microphone request")); };
+    BL.pilot.turnToward = () => { W.turns++; return true; };
+    window.WebSocket = class { static OPEN = 1; constructor() { this.readyState = 1; W.sockets.push(this); } send() {} close() { this.readyState = 3; } };
+    BL.net.state.started = true; BL.net.state.resolved = false; await BL.net.recheck();
+    W.room = m => W.sockets.at(-1).onmessage({ data: JSON.stringify(m) });
+    W.welcome = players => W.room({ t: "welcome", you: { id: 71 }, now: Date.now(), players });
+    W.welcome([]);
+    W.peer = (id, zone) => ({ id, login: "peer" + id, display: "Peer " + id, zone, x: 2, y: 0, z: 3, yaw: 0 });
+    W.mobile = matchMedia("(pointer: coarse)").matches;
+  })()`);
+  await b.evaluate(`document.getElementById("players-settings").open = true`);
+  const alone = await b.evaluate(`(() => { const e = document.getElementById("players-hearing-range"); return { shown: !document.getElementById("players-hearing").hidden, enabled: !e.disabled, voice: BL.voice.stats.enabled, peers: BL.net.remotes.size }; })()`);
+  await b.focus(true);
+  try {
+    await b.evaluate('document.getElementById("players-hearing-range").focus()');
+    await b.key("Home"); await b.key("ArrowRight");
+    const range = await b.evaluate('({ radius: BL.voice.stats.radius, value: document.getElementById("players-hearing-range").value, focus: document.activeElement.id })');
+    record("player preferences: hearing range is accessible while alone before joining, and native keyboard changes keep focus and request no voice", alone.shown && alone.enabled && !alone.voice && alone.peers === 0 && range.radius === 2 && range.value === "2" && range.focus === "players-hearing-range", JSON.stringify({ alone, range }));
+    await b.evaluate('__playerPrefs.welcome([__playerPrefs.peer(2,"outside"),__playerPrefs.peer(3,"factory.hall")])');
+    const activate = async selector => {
+      const at = await b.evaluate(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); e.scrollIntoView({ block: "nearest" }); const r = e.getBoundingClientRect(), x = r.x+r.width/2, y = r.y+r.height/2; const at = { x, y, mobile:__playerPrefs.mobile, hit: e.contains(document.elementFromPoint(x,y)), width:r.width, height:r.height }; __playerPrefs.activations.push({ selector:${JSON.stringify(selector)}, ...at }); return at; })()`);
+      if (at.mobile) { await b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: at.x, y: at.y }] }); await b.sleep(40); await b.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] }); }
+      else {
+        await b.evaluate(`document.querySelector(${JSON.stringify(selector)}).focus()`);
+        // Chromium's native Enter activation needs the return character and key code, as a physical keyboard supplies.
+        await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13, text: "\r", unmodifiedText: "\r" });
+        await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
+      }
+    };
+    await activate('#players-list li[data-id="2"] .players-name-toggle');
+    const open = await b.evaluate(`(() => { const r = document.querySelector('#players-list li[data-id="2"]'), n = r.querySelector('.players-name-toggle'), v = r.querySelector('.players-volume-range'), p = r.querySelector('.players-volume'); return { open: n.getAttribute('aria-expanded') === 'true' && !p.hidden, controls: n.getAttribute('aria-controls') === p.id, label: v.getAttribute('aria-label'), min: v.min, max: v.max, mute: r.querySelector('.roster-voice').getAttribute('aria-pressed') }; })()`);
+    await b.evaluate(`document.querySelector('#players-list li[data-id="2"] .players-volume-range').focus()`);
+    await b.key("ArrowRight");
+    const stepped = await b.evaluate('BL.voice.volumeOf(2)');
+    await activate('#players-list li[data-id="2"] .roster-voice');
+    await b.evaluate(`(() => { const e = document.querySelector('#players-list li[data-id="2"] .players-volume-range'); e.value = "150"; e.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+    await activate('#players-list li[data-id="3"] .players-name-toggle');
+    const second = await b.evaluate(`(() => { const r = document.querySelector('#players-list li[data-id="3"]'), e = r.querySelector('.players-volume-range'); e.value = "50"; e.dispatchEvent(new Event("input", { bubbles: true })); return { first: BL.voice.volumeOf(2), second: BL.voice.volumeOf(3), muted: BL.voice.mutedLocally(2), unmuted: !BL.voice.mutedLocally(3) }; })()`);
+    await b.evaluate(`(() => { const W = __playerPrefs; W.room({ t: "zone", id: 2, name: "factory.hall" }); BL.net.setZone("lab"); })()`);
+    const away = await b.evaluate(`(() => { const r = document.querySelector('#players-list li[data-id="2"]'), e = r.querySelector('.players-volume-range'); e.value = "175"; e.dispatchEvent(new Event("input", { bubbles: true })); return { expanded: r.querySelector('.players-name-toggle').getAttribute('aria-expanded'), value: BL.voice.volumeOf(2), label: e.getAttribute('aria-valuetext'), muted: BL.voice.mutedLocally(2) }; })()`);
+    await b.evaluate(`(() => { const W = __playerPrefs; W.room({ t: "zone", id: 2, name: "outside" }); BL.net.setZone("outside"); W.welcome([W.peer(2,"outside"),W.peer(3,"factory.hall")]); })()`);
+    const back = await b.evaluate(`(() => { const W = __playerPrefs, r = document.querySelector('#players-list li[data-id="2"]'), slider = r.querySelector('.players-volume-range'), panel = document.getElementById('players-panel'); slider.blur(); const b = slider.getBoundingClientRect(), p = panel.getBoundingClientRect(); return { first: BL.voice.volumeOf(2), second: BL.voice.volumeOf(3), mute: r.querySelector('.roster-voice').getAttribute('aria-pressed'), radius: BL.voice.stats.radius, captures: W.captures, calls: W.voiceCalls, turns: W.turns, joined: BL.voice.stats.enabled || BL.voice.stats.joining, fits: b.width > 0 && b.left >= p.left && b.right <= p.right && panel.scrollWidth <= panel.clientWidth + 1, saved: localStorage.getItem('oogaboogaland.voice-players.71'), mobile: W.mobile, activations: W.activations }; })()`);
+    record("player preferences: names expand from keyboard or touch independently of mute and targeting; separate sliders and mute remain adjustable across environments and reconnects before joining", open.open && open.controls && /Peer 2/.test(open.label) && open.min === "0" && open.max === "200" && open.mute === "false" && stepped === 1.05 && second.first === 1.5 && second.second === .5 && second.muted && second.unmuted && away.expanded === "true" && away.value === 1.75 && away.label === "175%" && away.muted && back.first === 1.75 && back.second === .5 && back.mute === "true" && back.radius === 2 && !back.captures && !back.calls && !back.turns && !back.joined && back.fits && !!back.saved, JSON.stringify({ open, stepped, second, away, back }));
+  } finally {
+    await b.focus(false);
+    await b.evaluate(`(async () => { const W = __playerPrefs; await BL.net.logout(); window.fetch = W.fetch; window.WebSocket = W.WebSocket; navigator.mediaDevices.getUserMedia = W.gum; BL.pilot.turnToward = W.aim; Object.assign(BL.net.state, { backend: false, started: false, resolved: true }); BL.hud.showAccount(BL.net.state); delete window.__playerPrefs; })()`);
+  }
 } };
 const controlsHelpCheck = { name: "controls reference", why: "regression: help must isolate practice input, release held keys and return movement after closing, including on hybrid devices", run: async b => {
   const initial = await b.evaluate(`(() => {
@@ -21187,6 +21268,8 @@ scene("hangar", { label: "controls reference forklift", query: "character=portla
 } }] });
 scene("hub", { label: "side panel", query: "pos=0", steps: [hubSheetPersistence, hubMuteKey, hubChat] });
 scene("hub", { label: "join alerts", query: "pos=0", steps: [hubJoinAlerts] });
+scene("hub", { label: "player preferences", query: "pos=0", steps: [hubPlayerPreferences] });
+scene("hub", { label: "player preferences", query: "pos=0", opts: PHONE_SIZE, steps: [hubPlayerPreferences] });
 scene("hub", { label: "clock and block height", query: "pos=0&time=0900", steps: [hubBlockHeight, hubDestinationNames] });
 scene("hub", { label: "canvas2d", query: "canvas2d=1", steps: [hubMatrix, canvasTour] });
 scene("hub", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("hub", { required: ["#joy-move", "#joy-look", "#sheet-toggle", "#sheet-bananas"], sheet: true }), { name: "hub home screen", why: "rule: an iPhone home-screen web app is named OogaBoogaLand and carries its own icon", run: async (b) => {
@@ -22826,7 +22909,7 @@ const voiceAloneChecks = async () => {
   class Pc {constructor(){this.connectionState="connected";this.iceGatheringState="complete";this.localDescription={sdp:"v=0"};}addTransceiver(){return {mid:"0"};}async createOffer(){return {};}async createAnswer(){return {};}async setLocalDescription(){}async setRemoteDescription(){}addEventListener(){}removeEventListener(){}getTransceivers(){return [];}close(){}}
   class Audio {constructor(){this.muted=false;}pause(){}play(){return Promise.resolve();}}
   const fetch=async(url,o)=>{const op=url.split("/").pop(),body=JSON.parse(o.body);ops.push({op,mic:track.enabled});return {ok:true,json:async()=>op==="pull"?{tracks:body.ids.map((id,i)=>({id,mid:String(i+1)}))}:{sessionDescription:{}}};};
-  const context={window:{BL:{net:{state:{connectionToken:"synthetic"},setMuted:on=>netMuted.push(on),remotes:new Map()}},setTimeout:()=>1,clearTimeout(){},setInterval:()=>1,clearInterval(){}},document:{createElement:()=>({})},localStorage:{getItem:()=>null,setItem(){}},navigator:{mediaDevices:{getUserMedia:async()=>stream}},RTCPeerConnection:Pc,Audio,MediaStream:class{},fetch,AbortController,Promise,JSON,Error,Map,Set,Float32Array,Math};
+  const context={window:{BL:{net:{state:{connectionToken:"synthetic",me:{id:900,login:"listener"}},setMuted:on=>netMuted.push(on),remotes:new Map(),subscribe:()=>()=>{}}},setTimeout:()=>1,clearTimeout(){},setInterval:()=>1,clearInterval(){}},document:{createElement:()=>({})},localStorage:{getItem:()=>null,setItem(){}},navigator:{mediaDevices:{getUserMedia:async()=>stream}},RTCPeerConnection:Pc,Audio,MediaStream:class{},fetch,AbortController,Promise,JSON,Error,Map,Set,Float32Array,Math};
   runInNewContext(source,context);
   const V=context.window.BL.voice,settle=()=>new Promise(r=>setTimeout(r,0)),read=()=>({alone:V.stats.alone,muted:V.stats.muted,mic:track.enabled});
   const remote = { id: 185141343, login: "Bitcoin-Bill" };
@@ -22856,16 +22939,16 @@ const voiceAloneChecks = async () => {
 };
 // #380: a visitor's hearing range only changes how loud this page plays the voices it receives. voice.js runs with remotes placed
 // round the visitor, a fake Worker, peer connection and AudioContext, and its own 150 ms meter read (captured from setInterval)
-// stepped by hand: once as a browser that honours an element's volume, and once as iOS, which keeps every element at 1, where
-// each voice must play through a gain instead and sound the same as the first at every step.
+// stepped by hand on desktop and iOS. Both use Web Audio gains so a saved boost can exceed an element's 0..1 volume.
+// iOS keeps every element at 1; both paths must sound the same at every step.
 const voiceHearingChecks = async () => {
   const source=readFileSync(join(root,"src/js/contributor-identities.js"),"utf8")+readFileSync(join(root,"src/js/voice.js"),"utf8"),settle=()=>new Promise(r=>setTimeout(r,0));
   const remote=(login,zone,x,z,placed=true)=>({login,zone,poseZone:placed?zone:null,x,y:0,z});
-  const rig=(ios,webAudio=true,saved=null)=>{
-    const ops=[],netMuted=[],timers=new Map(),els=[],pulled=[],gains=[],ctxs=[],handlers=new Map(),store=new Map();let timerId=0,onTrack=null;
+  const rig=(ios,webAudio=true,saved=null,store=new Map())=>{
+    const ops=[],netMuted=[],timers=new Map(),els=[],pulled=[],gains=[],limiters=[],ctxs=[],handlers=new Map(),subscribers=new Set();let timerId=0,onTrack=null,captures=0;
     if(saved!==null)store.set("oogaboogaland.voice-radius",saved);
     const remotes=new Map([[2,remote("near","factory",3,0)],[3,remote("mid","factory",0,15)],[4,remote("hall","factory.hall",1,0)],[5,remote("new","factory",2,0,false)]]);
-    const state={connectionToken:"synthetic",zone:"factory",self:{x:0,y:0,z:0,zone:"factory"}};
+    const state={connectionToken:"synthetic",me:{id:71,login:"listener"},zone:"factory",self:{x:0,y:0,z:0,zone:"factory"}};
     const track={enabled:true,stop(){}},stream={getAudioTracks:()=>[track],getTracks:()=>[track]};
     class Pc {constructor(){this.connectionState="connected";this.iceGatheringState="complete";this.localDescription={sdp:"v=0"};}addTransceiver(){return {mid:"0"};}async createOffer(){return {};}async createAnswer(){return {};}async setLocalDescription(){}async setRemoteDescription(){}addEventListener(k,fn){if(k==="track")onTrack=fn;}removeEventListener(){}getTransceivers(){return [];}close(){}}
     // A real element throws on a volume outside 0..1 or not a number, and iOS's also ignores any it is given.
@@ -22878,21 +22961,23 @@ const voiceHearingChecks = async () => {
       resume(){this.set("running");return Promise.resolve();}close(){this.set("closed");return Promise.resolve();}
       createMediaStreamSource(st){return new Node("source",st.getTracks()[0].id);}
       createAnalyser(){const n=new Node("analyser");n.getFloatTimeDomainData=a=>a.fill(0.1);return n;}
-      createGain(){const n=new Node("gain");n.gain={value:1,instant:false,cancelled:false,setTargetAtTime(v){this.value=v;this.instant=false;},cancelScheduledValues(){this.cancelled=true;},setValueAtTime(v){this.value=v;this.instant=this.cancelled;this.cancelled=false;}};gains.push(n);return n;}}
+      createGain(){const n=new Node("gain");n.gain={value:1,instant:false,cancelled:false,setTargetAtTime(v){this.value=v;this.instant=false;},cancelScheduledValues(){this.cancelled=true;},setValueAtTime(v){this.value=v;this.instant=this.cancelled;this.cancelled=false;}};gains.push(n);return n;}
+      createDynamicsCompressor(){const n=new Node("limiter");for(const key of ["threshold","knee","ratio","attack","release"])n[key]={value:0};limiters.push(n);return n;}}
     const fetch=async(url,o)=>{const op=url.split("/").pop(),body=JSON.parse(o.body);ops.push(op);if(op==="pull")pulled.push(...body.ids);return {ok:true,json:async()=>op==="pull"?{tracks:body.ids.map(id=>({id,mid:String(id)}))}:{sessionDescription:{}}};};
     const probe={level:1};volume(probe);
-    const win={BL:{net:{state,setMuted:on=>netMuted.push(on),remotes}},setTimeout:()=>0,clearTimeout(){},setInterval:fn=>{timers.set(++timerId,fn);return timerId;},clearInterval:id=>timers.delete(id),addEventListener:(k,fn)=>handlers.set(k,fn)};
-    const context={window:win,document:{createElement:()=>probe},localStorage:{getItem:k=>store.has(k)?store.get(k):null,setItem:(k,v)=>store.set(k,String(v))},navigator:{mediaDevices:{getUserMedia:async()=>stream}},RTCPeerConnection:Pc,Audio,MediaStream,fetch,AbortController,Promise,JSON,Error,Map,Set,Float32Array,Math,Number,String};
+    const win={BL:{net:{state,setMuted:on=>netMuted.push(on),remotes,subscribe:fn=>{subscribers.add(fn);return()=>subscribers.delete(fn);}}},setTimeout:()=>0,clearTimeout(){},setInterval:fn=>{timers.set(++timerId,fn);return timerId;},clearInterval:id=>timers.delete(id),addEventListener:(k,fn)=>handlers.set(k,fn)};
+    const context={window:win,document:{createElement:()=>probe},localStorage:{getItem:k=>store.has(k)?store.get(k):null,setItem:(k,v)=>store.set(k,String(v))},navigator:{mediaDevices:{getUserMedia:async()=>{captures++;return stream;}}},RTCPeerConnection:Pc,Audio,MediaStream,fetch,AbortController,Promise,JSON,Error,Map,Set,Float32Array,Math,Number,String};
     if(webAudio)win.AudioContext=context.AudioContext=Ctx;
     runInNewContext(readFileSync(join(root,"src/js/voice-blend.js"),"utf8"),context);
     runInNewContext(source,context);
     const V=win.BL.voice,elOf=id=>els[pulled.lastIndexOf(id)],gainOf=id=>gains.filter(g=>g.id===id&&g.out.size).at(-1);
-    // What a voice sounds at: its element's volume unless muted, or on iOS its live gain's level (the element must stay muted).
-    const audible=id=>ios?(gainOf(id)?gainOf(id).gain.value:0):(elOf(id).muted?0:elOf(id).volume);
-    return {V,ops,netMuted,timers,els,gains,ctxs,handlers,store,remotes,state,track,
+    // What a voice sounds at: the connected playback gain, or its element when Web Audio is unavailable.
+    const audible=id=>webAudio?(gainOf(id)?gainOf(id).gain.value:0):(elOf(id).muted?0:elOf(id).volume);
+    return {V,ops,netMuted,timers,els,gains,limiters,ctxs,handlers,store,remotes,state,track,get captures(){return captures;},
+      account:me=>{state.me=me;for(const fn of subscribers)fn(state);},
       land:ids=>{for(const id of ids)onTrack({transceiver:{mid:String(id)},track:{id,stop(){}}});},
       tick:(n=1)=>{for(let i=0;i<n;i++)for(const fn of timers.values())fn();},
-      instant:id=>!ios||gainOf(id)?.gain.instant===true,
+      instant:id=>!webAudio||gainOf(id)?.gain.instant===true,
       levels:ids=>ids.map(id=>+audible(id).toFixed(3)).join(",")};
   };
   const play=async r=>{
@@ -22920,17 +23005,17 @@ const voiceHearingChecks = async () => {
   const shared=rows=>rows.noLimit==="1,1,1,1"&&rows.radius0===0&&rows.speaking&&rows.immediate==="1,1,0,0"&&rows.instant&&rows.firstRead==="1,1,0,0"&&rows.settled==="1,1,0,0"&&rows.stored==="20"&&rows.mic&&rows.quiet&&
     rows.joinedFar==="0"&&rows.level==="0.5,0.5,0,0,0"&&rows.localMute==="1,0,0,0,0"&&rows.unmuted==="1,1,0,0,0"&&rows.inside==="1"&&rows.edge==="0"&&rows.thumpInside===1&&rows.thumpEdge===0&&rows.returned==="1"&&rows.preciseEdge==="0"&&rows.preciseInside==="1"&&rows.precision===16&&rows.placed==="1"&&rows.unplacedSelf==="1,1,1,1,1"&&rows.back==="1,1,1,1,1"&&rows.radius65===0&&rows.fades;
   const desk=rig(false),rows=await play(desk);
-  rows.noGains=desk.gains.length===0&&desk.handlers.size===0;
+  rows.gainPlayback=desk.gains.length===5&&desk.els.every(el=>el.muted)&&desk.handlers.has("pointerup");
   const F=desk.V.falloff;
   rows.cutoff={inside:F(19.999,20),edge:F(20,20),past:F(20.001,20),noLimit:F(1e6,0),unknown:F(NaN,20)};
   rows.checked=["abc","-3","999","2","20"].map(v=>rig(false,true,v).V.stats.radius).join(",");
   desk.V.stop();rows.timersAfterStop=desk.timers.size;
   record("voice hearing range: a hard cutoff keeps full volume inside the visitor's range, silences voices at its edge on the next movement read, applies slider changes immediately in 1 m steps, a voice joining starts at its own level, no limit is the old full volume, a local mute and the receive level still hold, and neither the microphone nor the room hears of it",
-    shared(rows)&&rows.playback==="element"&&rows.noGains&&
+    shared(rows)&&rows.playback==="gain"&&rows.gainPlayback&&
     rows.cutoff.inside===1&&rows.cutoff.edge===0&&rows.cutoff.past===0&&rows.cutoff.noLimit===1&&rows.cutoff.unknown===0&&
     rows.checked==="0,0,0,2,20"&&rows.timersAfterStop===0,JSON.stringify(rows));
   const ios=rig(true),io=await play(ios),ctx=ios.ctxs[0],live=()=>ios.gains.filter(g=>g.out.size);
-  io.elementsMuted=ios.els.every(el=>el.muted);io.toOutput=live().length===5&&live().every(g=>g.out.size===1&&g.out.has(ctx.destination));
+  io.elementsMuted=ios.els.every(el=>el.muted);io.toOutput=live().length===5&&live().every(g=>g.out.size===1&&[...g.out].every(l=>l.kind==="limiter"&&l.out.size===1&&l.out.has(ctx.destination)&&l.ratio.value===1));
   ctx.set("interrupted");io.asleep=ios.V.stats.blocked;
   ios.handlers.get("pointerup")({isTrusted:false});io.untrusted=ctx.state==="interrupted";
   ios.handlers.get("pointerup")({isTrusted:true});await settle();io.woken=ctx.state==="running"&&!ios.V.stats.blocked;
@@ -22939,6 +23024,45 @@ const voiceHearingChecks = async () => {
   const bare=rig(true,false).V;io.noWebAudio=!bare.fades&&bare.inspect().playback==="element";
   record("voice hearing range on iOS and iPadOS: where an element's volume is ignored each voice plays through a gain that sounds as the desktop does at every step, its element stays muted, the gain goes straight to the output, a suspended context blocks the voices until a trusted tap wakes it, and a restart or stop lets go of every node",
     shared(io)&&io.playback==="gain"&&io.elementsMuted&&io.toOutput&&io.asleep&&io.untrusted&&io.woken&&io.restartReleased&&io.stopped&&io.noWebAudio,JSON.stringify(io));
+  // #443: save a player's settings before there is any microphone, context or receive session. A new module instance
+  // models a reload; its first track must use those settings, without one audible frame at the default gain.
+  const preferences=async ios=>{
+    // #459 also wrote speaker IDs into this browser-wide list; neither format identifies its listener.
+    const legacy=JSON.stringify(["near","mid","github:2","github:3"]);
+    const saved=new Map([["oogaboogaland.voice-muted",legacy]]),first=rig(ios,true,null,saved),out={};
+    first.V.setRadius(20);first.V.muteLocal(2,true);first.V.setVolume(2,2);first.V.setVolume(3,1.5);first.V.setVolume(4,.25);
+    out.prejoin=first.V.mutedLocally(2)&&first.V.volumeOf(2)===2&&first.V.volumeOf(3)===1.5&&first.ctxs.length===0&&first.ops.length===0&&first.captures===0;
+    first.V.dispose();
+    const r=rig(ios,true,null,saved),V=r.V,ids=[2,3,4];
+    out.reload=V.mutedLocally(2)&&!V.mutedLocally(3)&&V.volumeOf(2)===2&&V.volumeOf(3)===1.5&&V.volumeOf(4)===.25&&V.stats.radius===20;
+    await V.listen();await settle();V.setPeers(ids,[1,1,1]);await settle();
+    // A speaker can cross the cutoff while its requested track is still arriving.
+    r.remotes.get(3).z=20;r.land(ids);out.landedOutside=r.levels([3])==="0";
+    r.remotes.get(3).z=15;r.tick();
+    out.initial=r.levels(ids);out.receiveOnly=r.captures===0;
+    out.limited=r.gains.every(g=>g.out.size===1&&[...g.out].every(l=>l.kind==="limiter"&&l.out.has(r.ctxs[0].destination)&&l.threshold.value===-1&&l.knee.value===0&&l.ratio.value===(g.id===4?1:20)));
+    V.muteLocal(2,false);out.boost=r.levels(ids);
+    V.muteLocal(3,true);V.setVolume(3,.5);out.muteWins=r.levels(ids);out.volumeIndependent=V.volumeOf(3)===.5;
+    V.setVolume(4,2);r.tick(10);out.boundary=r.levels([4]);
+    // A remote changing environment remains adjustable while inaudible, and keeps its setting on returning.
+    Object.assign(r.remotes.get(4),{zone:"factory",poseZone:"factory"});r.tick(10);out.returned=r.levels([4]);
+    V.setVolume(4,.25);r.state.zone="factory.hall";r.state.self.zone="factory.hall";r.tick(10);out.listenerAway=r.levels([4]);
+    r.state.zone="factory";r.state.self.zone="factory";r.tick(10);out.listenerBack=r.levels([4]);
+    r.remotes.get(2).login="renamed";r.remotes.set(22,remote("near","factory",3,0));
+    out.identity=V.volumeOf(2)===2&&V.volumeOf("renamed")===2&&V.volumeOf(22)===1&&!V.mutedLocally(22);
+    // Switching listeners immediately removes the old listener's mute and boost, including on an already landed track.
+    r.account({id:72,login:"second-listener"});out.otherAccount=V.volumeOf(2)===1&&!V.mutedLocally(3)&&r.levels([2,3])==="1,1";
+    V.muteLocal(2,true);V.setVolume(2,.25);r.account({id:71,login:"listener-renamed"});
+    out.restored=V.volumeOf(2)===2&&!V.mutedLocally(2)&&V.mutedLocally(3)&&r.levels([2,3])==="2,0";
+    r.account(null);out.signedOut=V.volumeOf(2)===1&&!V.mutedLocally(3)&&r.levels(ids)==="0,0,0";
+    const before=r.ops.length;V.setVolume(2,2);V.muteLocal(2,true);out.localOnly=r.ops.length===before&&r.captures===0;
+    out.legacyUntouched=saved.get("oogaboogaland.voice-muted")===legacy;
+    V.dispose();out.disposed=r.timers.size===0&&r.gains.every(g=>!g.out.size)&&r.limiters.every(l=>!l.out.size);
+    return out;
+  };
+  const savedPlayers={desktop:await preferences(false),ios:await preferences(true)};
+  record("voice player preferences: prejoin settings request no microphone or connection, reload applies mute and real boost before the first track, volume never unmutes or bypasses range and zones, stable identities survive renames and environments, and shared-browser accounts remain separate",
+    Object.values(savedPlayers).every(r=>r.prejoin&&r.reload&&r.landedOutside&&r.receiveOnly&&r.limited&&r.initial==="0,1.5,0"&&r.boost==="2,1.5,0"&&r.muteWins==="2,0,0"&&r.volumeIndependent&&r.boundary==="0"&&r.returned==="2"&&r.listenerAway==="0"&&r.listenerBack==="0.25"&&r.identity&&r.otherAccount&&r.restored&&r.signedOut&&r.localOnly&&r.legacyUntouched&&r.disposed),JSON.stringify(savedPlayers));
   // #392: on a crossing each voice plays at its equal-power share (an islander, a forester and a second crosser halfway),
   // on iOS through its gain as on the desktop, and the hearing range is measured across the crossing.
   const crossing=async ios=>{
@@ -24469,7 +24593,7 @@ const thumpChecks = async BL => {
       net: { state: { room: "live", me: { login: "me", display: "Me" }, selfId: 1, online: 3, zone: "outside", hostId: 0, self: { x: 0, y: 0, z: 0, zone: "outside" } }, remotes,
         subscribe() {}, subscribeRoster() {}, subscribeMoves() {}, subscribePresence() {} },
       hud: { voiceIcon: make("svg"), malletIcon: make("svg"), voiceWords: () => "In voice", toast() {} },
-      voice: { stats: { enabled: true, muted: false, speaking: false, radius: 0 }, fades: false, RADIUS_MIN: 5, RADIUS_MAX: 60, subscribe() {}, speaking: () => false, mutedLocally: () => false, setRadius() {} },
+      voice: { stats: { enabled: true, muted: false, speaking: false, radius: 0 }, fades: false, RADIUS_MIN: 5, RADIUS_MAX: 60, VOLUME_MAX: 2, subscribe() {}, speaking: () => false, mutedLocally: () => false, volumeOf: () => 1, setVolume() {}, setRadius() {} },
       sheet: { visible: () => true, setBadge() {}, watchViews() {}, attending: () => true }, sound: { muted: false, subscribe() {} }, pilot: { turnToward() {} } });
     runInNewContext(await readFile(join(root, "src/js/players.js"), "utf8"), context);
     handlers.sheetchange();
@@ -24498,7 +24622,7 @@ const thumpChecks = async BL => {
   const columnOf = (selector) => +((ruleOf(selector).match(/grid-column:\s*(\d+);/) || [, NaN])[1]);
   const columns = { marks: +((css.match(/\.players-rows \.roster-marks \{ grid-column: (\d+); \}/) || [, NaN])[1]), thump: columnOf(".players-thump"), look: columnOf(".players-look"), distance: columnOf(".players-distance") };
   const thumpRule = ruleOf(".players-thump");
-  const shapeOk = cell.rows === 3 && cell.before.every((s) => s === "roster-presence players-name roster-marks players-thump players-look players-distance");
+  const shapeOk = cell.rows === 3 && cell.before.every((s) => s === "roster-presence players-name roster-marks players-thump players-look players-distance players-volume");
   record("ooga thump Online Oogas: every row holds the mallet's cell from the start between the voice mark and the crosshair, with a fixed column of its own that hides by visibility and takes no pointer; a pulse and its end change only that cell's state, never a row's cells, their order or anything hidden",
     shapeOk && cell.pulsed.join() === "true,true" && cell.pulses === 2 && cell.during.every((d) => d.same && d.hidden === false) && cell.during.filter((d) => d.on === "true").length === 2
       && cell.during.filter((d) => d.on === "true").every((d) => d.label === "Thumped" && d.ariaHidden === null) && cell.during.filter((d) => d.on === "false").every((d) => d.ariaHidden === "true")
@@ -25698,7 +25822,7 @@ const studioVoiceLifecycleProof = async () => {
     }
     class Sound {constructor(){this.pending=[];elements.push(this);}play(){return new Promise((resolve,reject)=>this.pending.push({resolve,reject}));}pause(){this.pauses=(this.pauses||0)+1;}}
     const makeStream=()=>{const track={enabled:true,stops:0,stop(){this.stops++;}},stream={track,getTracks:()=>[track],getAudioTracks:()=>[track]};streams.push(stream);return stream;};
-    const win={BL:{net:{state:{connectionToken:"synthetic"},remotes:new Map(),setMuted:on=>calls.push({op:"mute",on})}},setTimeout:fn=>{timers.set(++timerId,fn);return timerId;},clearTimeout:id=>timers.delete(id),setInterval:fn=>{timers.set(++timerId,fn);return timerId;},clearInterval:id=>timers.delete(id)};
+    const win={BL:{net:{state:{connectionToken:"synthetic",me:{id:900,login:"listener"}},remotes:new Map(),subscribe:()=>()=>{},setMuted:on=>calls.push({op:"mute",on})}},setTimeout:fn=>{timers.set(++timerId,fn);return timerId;},clearTimeout:id=>timers.delete(id),setInterval:fn=>{timers.set(++timerId,fn);return timerId;},clearInterval:id=>timers.delete(id)};
     const context={window:win,document:{createElement:()=>({})},localStorage:{getItem:()=>null,setItem(){}},AbortController,RTCPeerConnection:Peer,Audio:Sound,MediaStream:class {constructor(tracks){this.tracks=tracks;}getTracks(){return this.tracks;}},navigator:{mediaDevices:{enumerateDevices:async()=>[{kind:"audioinput",deviceId:"synthetic-mic",label:"Synthetic mic"},{kind:"videoinput",deviceId:"camera",label:"Camera"}],getUserMedia:constraints=>{gum++;calls.push({op:"capture",constraints});return permission||Promise.resolve(makeStream());}}},
       fetch:async(url,options)=>{const op=url.split("/").at(-1);calls.push({op,body:JSON.parse(options.body)});if(deferred?.op===op)return deferred.promise;if(op==="publish"&&publishResponse)return publishResponse;if(op==="pull")return {ok:true,json:async()=>({tracks:JSON.parse(options.body).ids.map(id=>({id,mid:String(id)}))})};return {ok:true,json:async()=>({sessionDescription:{type:"answer",sdp:"synthetic"}})};}};
     runInNewContext(source,context);
