@@ -17,8 +17,8 @@
     list: [
       { path: "", scene: "hub", image: "home", title: "a virtual world for open-source contributors",
         description: "Ooga Booga Land is a virtual world where open-source contributors collaborate and track contributions across Team Ooga Booga’s repositories." },
-      { path: "donate", scene: "hub", place: "donate", title: "Feed the Ooga Boogas",
-        description: "Feed the Ooga Boogas with a donation of bananas on Ooga Booga Land." },
+      { path: "donate", scene: "hub", place: "donate", title: "Feed the Oogas",
+        description: "Feed the Oogas with a donation of bananas on Ooga Booga Land." },
       { path: "oogarally", scene: "race", image: "oogarally", title: "Ooga Rally",
         description: "Kart racing round a floating island. Three tracks, three laps: podium on all of them and take the Cup." },
       { path: "oogadrop", scene: "drop", image: "oogadrop", title: "Ooga Drop",

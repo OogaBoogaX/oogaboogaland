@@ -42,7 +42,7 @@
   let shared = null;
   const create = ({ lootEnabled, signal }) => {
     const root = document.getElementById("sheet"), parent = root.parentElement;
-    const content = root.querySelector(".sheet-content"), nav = root.querySelector(".sheet-panels"), footer = root.querySelector(".sheet-foot");
+    const content = root.querySelector(".sheet-content"), nav = root.querySelector(".sheet-panels");
     const panels = [...content.children], templates = [...nav.children].map((tab) => tab.cloneNode(true));
     const windows = [], listeners = [], bottom = window.matchMedia("(width < 1140px)"), coarse = window.matchMedia("(pointer: coarse)");
     const phone = window.matchMedia("(pointer: coarse) and (max-width: 720px), (pointer: coarse) and (max-height: 500px)");
@@ -57,9 +57,9 @@
     }
     const saved = shared;
     folded = saved?.folded === true;
-    // The live players tab is for signed-in visitors only (players.js).
-    const available = (name) => NAMES.includes(name) && (name !== "loot" || lootEnabled) && (name !== "chat" || BL.net.state.backend)
-      && (name !== "players" || !!BL.net.state.me);
+    // Online Oogas and Ooga Chat are for signed-in visitors only.
+    const available = (name) => NAMES.includes(name) && (name !== "loot" || lootEnabled)
+      && (name !== "players" && name !== "chat" || !!BL.net.state.me);
     const isOpen = (w) => !folded && w.open && available(w.tab);
     // On a phone every tab folds into the main drawer; separate panels stay saved, hidden, for a larger screen.
     const ownerOf = (name) => windows.find((w) => (w.node === root || !phone.matches) && w.tab === name && (w.open || w.rect || w.kept));
@@ -122,15 +122,10 @@
         else parent.style.removeProperty("--drawer-height");
       }
     };
-    const placeFooter = () => {
-      const owner = isOpen(main) ? main : [...windows].reverse().find(isOpen) || main;
-      if (footer.parentElement !== owner.body) owner.body.append(footer);
-    };
     const front = (w) => {
       const i = windows.indexOf(w);
       windows.splice(i, 1); windows.push(w);
       for (let j = 0; j < windows.length; j++) windows[j].node.style.zIndex = String((playing ? 90 : 13) + j);
-      placeFooter();
     };
     const observe = new MutationObserver(notify);
     const makeWindow = (node, tab, rect, dock) => {
@@ -222,7 +217,7 @@
         w.body.inert = !open || w.node.hidden;
         w.body.setAttribute("aria-hidden", String(w.body.inert));
       }
-      placeFooter(); showCounts(); showExpand();
+      showCounts(); showExpand();
       notify();
     };
     const close = (w) => {
@@ -416,10 +411,9 @@
     on(window, "resize", layout); on(bottom, "change", layout); on(phone, "change", layout);
     if (window.visualViewport) { on(window.visualViewport, "resize", layout); on(window.visualViewport, "scroll", layout); }
     on(window, "pagehide", () => { finish(); save(); });
-    let backend = BL.net.state.backend, signedIn = !!BL.net.state.me;
+    let signedIn = !!BL.net.state.me;
     const unsubscribe = BL.net.subscribe(() => {
-      if (backend === BL.net.state.backend && signedIn === !!BL.net.state.me) return;
-      backend = BL.net.state.backend;
+      if (signedIn === !!BL.net.state.me) return;
       signedIn = !!BL.net.state.me;
       finish();
       refresh(); save();
@@ -463,8 +457,7 @@
         if (paintBadges === showCounts) paintBadges = null;
         for (const off of listeners) off();
         listeners.length = 0;
-        for (const panel of panels) { content.append(panel); panel.hidden = panel.dataset.panel !== main.tab; }
-        main.body.append(footer);
+        for (const panel of panels) { content.append(panel); panel.hidden = !available(panel.dataset.panel) || panel.dataset.panel !== main.tab; }
         main.body.inert = false; main.body.removeAttribute("aria-hidden");
         for (const w of windows) if (w !== main) w.node.remove();
         root.querySelector(".sheet-drag").remove();

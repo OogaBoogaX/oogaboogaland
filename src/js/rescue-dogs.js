@@ -589,7 +589,7 @@
         return false;
       }
       if (!pile.eat()) {
-        hud.toast("The banana pile is empty. Feed the Ooga Boogas first!");
+        hud.toast("The banana pile is empty. Feed the Oogas first!");
         return false;
       }
       e.hunger = 0;

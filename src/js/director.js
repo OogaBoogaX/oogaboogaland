@@ -59,7 +59,6 @@
     overlayCssH = overlayCanvas.clientHeight;
   });
   overlayObserver.observe(overlayCanvas);
-  const qualityLabel = $("quality");
   const curtain = $("curtain");
   const worldBlock = $("world-block"), worldBlockHeight = $("world-block-height");
   const worldClock = $("world-clock"), soundButton = $("environment-sound");
@@ -114,10 +113,6 @@
     }
   }
   mark("renderer");
-  const showQuality = () => {
-    qualityLabel.textContent = `${renderer.kind} · ${renderer.quality}`;
-  };
-  showQuality();
   const game = gameMod.create({ catalog: models.SWAG });
   window.BL.donationPopup = window.BL.donationPopup.create(game, (donation) => {
     if (donations.real) return;
@@ -604,7 +599,6 @@
     if (++perf.bad < 2) return;
     perf.bad = 0;
     renderer.setQuality(QUALITY_ORDER[idx + 1]);
-    showQuality();
   };
   // Boot time is a device probe no browser can refuse: Safari masks GPU strings, where thresholds matter most.
   // BOOT_MEDIUM / BOOT_LOW measure synchronous CPU across prepare, construction slices and enter, without await
@@ -616,7 +610,6 @@
     const wanted = ms > BOOT_LOW ? "low" : ms > BOOT_MEDIUM || MEMORY_LIMITED ? "medium" : null;
     if (!wanted || QUALITY_ORDER.indexOf(wanted) <= QUALITY_ORDER.indexOf(renderer.quality)) return;
     renderer.setQuality(wanted);
-    showQuality();
   };
 
   // Full rate while focused; 30 fps only when another window is in front.

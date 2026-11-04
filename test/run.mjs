@@ -5420,7 +5420,7 @@ const oogatronReplayChecks = async () => {
     BL: { contributors: { subscribe(fn) { activityListener = fn; return () => { activityListener = null; released++; }; } } },
     window: { setInterval(fn, delay) { minute = fn; if (delay !== 60000) throw new Error("Unexpected roster interval"); return 7; }, clearInterval(id) { if (id === 7) { minute = null; released++; } } },
     on(target, type, fn) { visible = fn; listeners.push(() => { visible = null; released++; }); } };
-  runInNewContext(hudSource.slice(hudSource.indexOf("    const refreshRosterActivity ="), hudSource.indexOf("    // The page-level pass marks rows online")), panel);
+  runInNewContext(hudSource.slice(hudSource.indexOf("    const refreshRosterActivity ="), hudSource.indexOf("    liveRows = rosterRows;")), panel);
   activityListener(); minute();
   const preserved = calls.length === 6 && calls.every(([name, state, age, local, remote]) => local === rows.get(name).sceneOnline && remote === rows.get(name).remoteOnline);
   panel.document.hidden = true; activityListener(); minute();
@@ -9502,16 +9502,19 @@ const hubSheetPersistence = { name: "side panel persistence", why: "rule: panels
     const same = before === localStorage.getItem("oogaboogaland.sheet.v1");
     document.getElementById("sheet-bananas").click();
     BL.hud.showAccount({ backend: true, me: null, room: "off", online: 0 });
-    const footer = document.querySelector(".sheet-foot"), owner = footer.closest(".sheet"), login = document.getElementById("account-login");
-    const account = owner.id !== "sheet" && !owner.hidden && owner.dataset.open === "true" && !!login.getClientRects().length && getComputedStyle(login).visibility === "visible" && document.querySelectorAll("#account-login").length === 1
-      && document.querySelectorAll(".sheet .feed-open").length === 1 && document.querySelectorAll(".sheet #account").length === 1
-      && !!footer.querySelector(".feed-open") && !!footer.querySelector("#account") && !!footer.querySelector(".feed-open").getClientRects().length;
+    const login = document.getElementById("account-login"), feed = document.querySelector('.sheet [data-action="feed"]'), owner = login.closest(".sheet");
+    const account = owner.id !== "sheet" && !owner.hidden && owner.dataset.open === "true" && !!login.getClientRects().length && getComputedStyle(login).visibility === "visible"
+      && login.closest("[data-panel]").dataset.panel === "roster" && feed.closest("[data-panel]").dataset.panel === "bananas"
+      && document.querySelectorAll("#account-login").length === 1 && document.querySelectorAll('.sheet [data-action="feed"]').length === 1
+      && !document.querySelector('.sheet-foot, #quality, .sheet [data-action="reset"]');
     H.selectTab("bananas");
-    const returned = footer.closest(".sheet").id === "sheet";
+    const returned = login.closest(".sheet") === owner && feed.closest(".sheet").id === "sheet"
+      && !!feed.getClientRects().length && getComputedStyle(feed).visibility === "visible"
+      && getComputedStyle(login).minHeight === getComputedStyle(feed).minHeight && parseFloat(getComputedStyle(login).minHeight) >= 44;
     BL.hud.showAccount(BL.net.state);
     return { hidden, folded, same, account, returned, count: document.querySelectorAll(".sheet").length };
   })()`);
-  record("side panel: temporary suppression and folding survive resize, reopening restores the saved layout, and detached-only panels retain one shared Feed button and account controls", Object.values(held).every(Boolean) && held.count === 2, JSON.stringify(held));
+  record("side panel: temporary suppression and folding survive resize, reopening restores the saved layout, and donation/account actions stay with their own panels at the same button height", Object.values(held).every(Boolean) && held.count === 2, JSON.stringify(held));
   if (!await settled()) throw Error("The restored panels did not finish opening");
   // A closed source rail can be merged into another panel, focusing its tab and removing only its own rail.
   await toggle(".sheet:not(#sheet) [data-tab='roster']");
@@ -9635,7 +9638,7 @@ const hubMuteKey = { name: "voice mute key", why: "regression: M reserves voice 
   record("voice mute key: inputs, message fields, editable content and modified shortcuts stay untouched, with environment mute as the voice-off fallback",
     r.fields.every(row => row.typing) && r.modifiers && r.fallback, JSON.stringify({ fields: r.fields, modifiers: r.modifiers, fallback: r.fallback }));
 } };
-const hubChat = { name: "ooga chat", why: "regression: Chat releases pre-focus movement and fits keyboard-reduced viewports; Ooga Chat shows only with a backend, asks a signed-out visitor to sign in, keeps the last 100 lines as plain text, never pulls a reader back down, and Enter sends while Escape only leaves the input", run: async (b) => {
+const hubChat = { name: "ooga chat", why: "regression: Chat releases pre-focus movement and fits keyboard-reduced viewports; Ooga Chat stays hidden while signed out like Online Oogas, keeps the last 100 lines as plain text, never pulls a reader back down, and Enter sends while Escape only leaves the input", run: async (b) => {
   // No backend in the suite: retain the saved selection while its tab is unavailable.
   await openWithSheetState(b, hubPage(src, "pos=0"), { open: true, tab: "chat" });
   const none = await b.evaluate(`({ hidden: document.getElementById("chat-tab").hidden, tab: document.querySelector("[data-tab][aria-selected='true']")?.dataset.tab || null,
@@ -9646,8 +9649,10 @@ const hubChat = { name: "ooga chat", why: "regression: Chat releases pre-focus m
     BL.net.state.backend = true;
     C.account({ backend: true, me: null, room: "off" });
     window.dispatchEvent(new Event("resize"));
-    out.signedOut = !tab.hidden && !$("chat-panel").hidden && input.disabled && send.disabled && !$("chat-status").hidden && $("chat-status-text").textContent.includes("Sign in to chat") && document.activeElement !== input;
-    C.account({ backend: true, me: { id: 9, login: "Tester", display: "Tester" }, room: "live" });
+    out.signedOut = tab.hidden && $("chat-panel").hidden && $("players-tab").hidden && input.disabled && send.disabled && document.activeElement !== input;
+    BL.net.state.me = { id: 9, login: "Tester", display: "Tester" };
+    C.account({ backend: true, me: BL.net.state.me, room: "live" });
+    window.dispatchEvent(new Event("resize"));
     tab.click();
     out.folded = $("sheet").dataset.open === "false";
     tab.click();
@@ -9755,9 +9760,13 @@ const hubChat = { name: "ooga chat", why: "regression: Chat releases pre-focus m
     input.focus(); input.dispatchEvent(new CompositionEvent("compositionstart"));
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true, isComposing: true }));
     out.ime = document.activeElement === input; input.dispatchEvent(new CompositionEvent("compositionend"));
+    BL.net.state.me = null;
     C.account({ backend: true, me: null, room: "off", logoutEpoch: 1 });
-    out.logout = input.value === "" && log.childElementCount === 0 && C.stats.lines === 0;
-    C.account({ backend: true, me: { id: 9, login: "Tester" }, room: "live", logoutEpoch: 1 });
+    window.dispatchEvent(new Event("resize"));
+    out.logout = input.value === "" && log.childElementCount === 0 && C.stats.lines === 0 && tab.hidden && $("chat-panel").hidden && $("players-tab").hidden;
+    BL.net.state.me = { id: 9, login: "Tester" };
+    C.account({ backend: true, me: BL.net.state.me, room: "live", logoutEpoch: 1 });
+    window.dispatchEvent(new Event("resize"));
     input.value = "  hello b  ";
     input.dispatchEvent(new Event("input"));
     window.__chatSent = [];
@@ -9957,19 +9966,26 @@ const hubWalking = { name: "hub walking", why: "regression: steering keys came o
     const B = __ooga, cave = B.pilot.player, net = BL.net.state, account = net.me, backend = net.backend, room = net.room;
     const remote = cave.remoteControlled, row = document.querySelector('#roster [data-name="' + cave.traits.name + '"]');
     const dot = row.querySelector(".roster-presence"), activity = row.querySelector(".roster-state").dataset.state;
+    const order = () => [...row.parentElement.children].filter(li => li.dataset.name).map(li => li.dataset.name).join(","), before = order();
+    let stableOrder = true;
     try {
       net.me = null; net.backend = false; net.room = "off";
       B.crew.refreshRosterRow(cave); BL.hud.showVoices();
       const staticOffline = dot.dataset.online === "false" && BL.hud.statusFor(cave) !== "online";
+      stableOrder &&= order() === before;
       net.backend = true; BL.hud.showVoices();
       const signedOut = dot.dataset.online === "false";
+      stableOrder &&= order() === before;
       net.me = { id: 71, login: cave.traits.name, display: cave.traits.display }; BL.hud.showVoices();
       const signedIn = dot.dataset.online === "true" && BL.hud.statusFor(cave) === "online";
+      stableOrder &&= order() === before;
       net.me = null; BL.hud.showVoices();
       const signedOutAgain = dot.dataset.online === "false" && BL.hud.statusFor(cave) !== "online";
+      stableOrder &&= order() === before;
       cave.remoteControlled = true; B.crew.refreshRosterRow(cave); BL.hud.showVoices();
       const remoteOnline = dot.dataset.online === "true" && BL.hud.statusFor(cave) === "online";
-      return { staticOffline, signedOut, signedIn, signedOutAgain, remoteOnline,
+      stableOrder &&= order() === before;
+      return { staticOffline, signedOut, signedIn, signedOutAgain, remoteOnline, stableOrder,
         selection: B.pilot.player === cave && document.getElementById("mode-hud").dataset.selected === "true",
         activity: row.querySelector(".roster-state").dataset.state === activity };
     } finally {
@@ -9977,7 +9993,7 @@ const hubWalking = { name: "hub walking", why: "regression: steering keys came o
       B.crew.refreshRosterRow(cave); BL.hud.showVoices();
     }
   })()`);
-  record("presence markers: local selection stays offline on static and signed-out pages, login and logout repaint cached rows, and remote presence keeps its green dot without changing selection or activity", Object.values(presence).every(Boolean), JSON.stringify(presence));
+  record("presence markers: local selection stays offline on static and signed-out pages, login and logout repaint cached rows, and remote presence keeps its green dot without changing selection, activity or contribution order", Object.values(presence).every(Boolean), JSON.stringify(presence));
   await b.evaluate(`window.__ooga.pilot.release(true)`);
   await agentShortcut(b);
   const agent = await b.evaluate(`window.__ooga.agent`);
@@ -10098,7 +10114,7 @@ const hubAsk = { name: "hub ask", why: "rule: a question typed to Tess is answer
     for (let t = 0; t < 20 && s.phase !== "offer"; t += 1 / 30) { if (s.phase === "tour") go.click(); B.advance(1 / 30, 1 / 30); }
     trip.back = s.phase === "offer" && !s.holding && s.kind === "island";
     asking("How do I donate?"); B.advance(0.3, 1 / 30);
-    const answered = s.phase === "offer" && !s.holding && said().includes("Feed the Ooga Boogas");
+    const answered = s.phase === "offer" && !s.holding && said().includes("Feed the Oogas");
     asking("what is bitcoin"); B.advance(0.3, 1 / 30);
     const offline = s.phase === "offer" && said().includes("know that one yet");
     document.querySelector(".greeter-menu .greeter-row button:last-child").click();
@@ -10132,7 +10148,7 @@ const hubAsk = { name: "hub ask", why: "rule: a question typed to Tess is answer
   const asked = await b.evaluate(`(() => {
     const B = __ooga, G = BL.scenes.hub.debug.tess, s = G.state;
     B.advance(0.3, 1 / 30);
-    return { phase: s.phase, holding: s.holding, said: JSON.stringify(G.speech && G.speech.beats || "").includes("Feed the Ooga Boogas") };
+    return { phase: s.phase, holding: s.holding, said: JSON.stringify(G.speech && G.speech.beats || "").includes("Feed the Oogas") };
   })()`);
   await b.evaluate(`document.querySelector(".greeter-chip").focus()`);
   await press("Enter", "Enter", 13, "\r");
@@ -10178,7 +10194,7 @@ const hubAsk = { name: "hub ask", why: "rule: a question typed to Tess is answer
   const second = await b.evaluate(`(() => {
     const B = __ooga, G = BL.scenes.hub.debug.tess, s = G.state;
     B.advance(0.3, 1 / 30);
-    const r = { said: JSON.stringify(G.speech && G.speech.beats || "").includes("Feed the Ooga Boogas"), calls: window.__held.calls, draft: document.querySelector(".greeter-ask input").value };
+    const r = { said: JSON.stringify(G.speech && G.speech.beats || "").includes("Feed the Oogas"), calls: window.__held.calls, draft: document.querySelector(".greeter-ask input").value };
     window.fetch = window.__held.real; BL.net.state.tess = false; delete window.__held;
     document.querySelector(".greeter-menu .greeter-row button:last-child").click();
     return r;
@@ -13951,9 +13967,19 @@ const phone = (id, { card = null, play = null, required, sheet = false }) => ({ 
     await b.evaluate(`document.getElementById("sheet-toggle").click()`);
     for (let i = 0; i < 200 && !(await b.evaluate(`(() => { const s = document.getElementById("sheet"), t = getComputedStyle(s).transform; return s.dataset.open === "true" && (t === "none" || new DOMMatrix(t).m42 === 0); })()`)); i++) await b.sleep(50);
     seen.sheet = await b.evaluate(PHONE(["#sheet-toggle", "#sheet-bananas", "#joy-move", "#joy-look"]));
-    seen.feedHidden = await b.evaluate(`getComputedStyle(document.querySelector(".sheet-foot > .feed-open")).display === "none"`);
+    seen.actions = await b.evaluate(`(() => {
+      const H = __ooga.hud, login = document.getElementById("account-login"), feed = document.querySelector('.sheet [data-action="feed"]');
+      BL.hud.showAccount({ backend: true, me: null, room: "off", online: 0 });
+      H.selectTab("roster");
+      const a = login.getBoundingClientRect(), roster = BL.sheet.visible(login.closest(".panel")) && !BL.sheet.visible(feed.closest(".panel"));
+      H.selectTab("bananas");
+      const b = feed.getBoundingClientRect(), bananas = BL.sheet.visible(feed.closest(".panel")) && !BL.sheet.visible(login.closest(".panel"));
+      H.selectTab("roster"); BL.hud.showAccount(BL.net.state);
+      return roster && bananas && a.height >= 44 && a.width === b.width && a.height === b.height
+        && !document.querySelector('.sheet-foot, #quality, .sheet [data-action="reset"]');
+    })()`);
   }
-  const ok = (!card || seen.card.touch.coarse && seen.card.touch.touchWording && seen.card.bad.length === 0 && seen.card.closed) && seen.play.length === 0 && (!sheet || seen.sheet.length === 0 && seen.feedHidden);
+  const ok = (!card || seen.card.touch.coarse && seen.card.touch.touchWording && seen.card.bad.length === 0 && seen.card.closed) && seen.play.length === 0 && (!sheet || seen.sheet.length === 0 && seen.actions);
   record(`${id} phone: ${card ? "the title card reads in touch words and its go button starts the game, then " : ""}nothing is clipped, wrapped by accident or off screen, and every control is under a thumb${sheet ? ", with the sheet open and the sticks still free" : ""}`, ok, JSON.stringify(seen));
 } });
 
@@ -21051,11 +21077,18 @@ const hubJoinAlerts = { name: "join alerts", why: "rule: a player who comes onli
   record("join alerts: looking at a tab clears its count alone, and a line heard while typing in the chat needs no count",
     viewed.chatViewed.chat === "" && viewed.chatViewed.players === "2" && viewed.typing.inPanel === "" && viewed.typing.away === "1" && viewed.playersViewed.players === "" && viewed.playersViewed.chat === "1",
     JSON.stringify(viewed));
+  const settings = await b.evaluate(`(() => {
+    const details = document.getElementById("players-settings"), summary = details.querySelector("summary"), r = summary.getBoundingClientRect(), range = document.getElementById("players-hearing-range");
+    return { closed: !details.open, x: r.x + r.width / 2, y: r.y + r.height / 2, grouped: details.contains(range) && details.contains(document.getElementById("players-speak-input")), step: range.step, min: range.min, max: range.max };
+  })()`);
+  await b.click(settings.x, settings.y);
   // Another message on screen ends the shared one, so Dee starts a new one.
   const box = await b.evaluate(`(() => { const r = document.getElementById("players-speak-input").getBoundingClientRect(); BL.hud.toast("Something else"); __joins.join(5, "Dee");
-    return { x: r.x + r.width / 2, y: r.y + r.height / 2, shown: !document.getElementById("players-speak").hidden, said: __joins.said.length }; })()`);
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2, shown: document.getElementById("players-settings").open && !document.getElementById("players-speak").hidden, said: __joins.said.length }; })()`);
   await b.click(box.x, box.y);
   await b.sleep(50);
+  await b.click(settings.x, settings.y);
+  const collapsed = await b.evaluate(`!document.getElementById("players-settings").open && document.getElementById("players-speak-input").checked`);
   const spoken = await b.evaluate(`new Promise((resolve) => { const W = __joins; W.join(6, "Eve"); setTimeout(() => { W.join(7, "Fay"); W.join(8, "Gus"); W.join(9, "Hal");
     setTimeout(() => { BL.sound.setMuted(true); W.join(20, "Ivy"); const muted = W.read(); BL.sound.setMuted(false);
       resolve({ said: W.said.slice(), muted, saved: localStorage.getItem("oogaboogaland.players.speak") }); }, 30); }, 30); })`);
@@ -21063,8 +21096,8 @@ const hubJoinAlerts = { name: "join alerts", why: "rule: a player who comes onli
     delete speechSynthesis.speak; delete speechSynthesis.cancel; window.fetch = W.fetch; window.WebSocket = W.WebSocket;
     Object.assign(BL.net.state, { backend: false, started: false, resolved: true }); BL.hud.showAccount(BL.net.state); delete window.__joins; return r; })()`);
   record("join alerts: joins are read aloud only once the box is ticked, one at a time with waiting names said together, never while muted, which keeps the message; signing out clears both counts",
-    box.shown && box.said === 0 && spoken.saved === "on" && spoken.said.join("|") === "Joins will be read aloud|Eve is online|Fay is online|Gus and Hal are online"
-      && spoken.muted.toast === "Dee, Eve, Fay and 3 others are online" && out.players === "" && out.chat === "", JSON.stringify({ box, spoken, out }));
+    collapsed && settings.closed && settings.grouped && settings.step === "1" && settings.min === "1" && settings.max === "61" && box.shown && box.said === 0 && spoken.saved === "on" && spoken.said.join("|") === "Joins will be read aloud|Eve is online|Fay is online|Gus and Hal are online"
+      && spoken.muted.toast === "Dee, Eve, Fay and 3 others are online" && out.players === "" && out.chat === "", JSON.stringify({ settings, collapsed, box, spoken, out }));
 } };
 const controlsHelpCheck = { name: "controls reference", why: "regression: help must isolate practice input, release held keys and return movement after closing, including on hybrid devices", run: async b => {
   const initial = await b.evaluate(`(() => {
@@ -22822,7 +22855,7 @@ const voiceHearingChecks = async () => {
       resume(){this.set("running");return Promise.resolve();}close(){this.set("closed");return Promise.resolve();}
       createMediaStreamSource(st){return new Node("source",st.getTracks()[0].id);}
       createAnalyser(){const n=new Node("analyser");n.getFloatTimeDomainData=a=>a.fill(0.1);return n;}
-      createGain(){const n=new Node("gain");n.gain={value:1,setTargetAtTime(v){this.value=v;}};gains.push(n);return n;}}
+      createGain(){const n=new Node("gain");n.gain={value:1,instant:false,cancelled:false,setTargetAtTime(v){this.value=v;this.instant=false;},cancelScheduledValues(){this.cancelled=true;},setValueAtTime(v){this.value=v;this.instant=this.cancelled;this.cancelled=false;}};gains.push(n);return n;}}
     const fetch=async(url,o)=>{const op=url.split("/").pop(),body=JSON.parse(o.body);ops.push(op);if(op==="pull")pulled.push(...body.ids);return {ok:true,json:async()=>op==="pull"?{tracks:body.ids.map(id=>({id,mid:String(id)}))}:{sessionDescription:{}}};};
     const probe={level:1};volume(probe);
     const win={BL:{net:{state,setMuted:on=>netMuted.push(on),remotes}},setTimeout:()=>0,clearTimeout(){},setInterval:fn=>{timers.set(++timerId,fn);return timerId;},clearInterval:id=>timers.delete(id),addEventListener:(k,fn)=>handlers.set(k,fn)};
@@ -22836,6 +22869,7 @@ const voiceHearingChecks = async () => {
     return {V,ops,netMuted,timers,els,gains,ctxs,handlers,store,remotes,state,track,
       land:ids=>{for(const id of ids)onTrack({transceiver:{mid:String(id)},track:{id,stop(){}}});},
       tick:(n=1)=>{for(let i=0;i<n;i++)for(const fn of timers.values())fn();},
+      instant:id=>!ios||gainOf(id)?.gain.instant===true,
       levels:ids=>ids.map(id=>+audible(id).toFixed(3)).join(",")};
   };
   const play=async r=>{
@@ -22843,30 +22877,35 @@ const voiceHearingChecks = async () => {
     await V.enable();await settle();V.setPeers(ids,[1,1,1,1]);await settle();r.land(ids);
     r.tick(3);rows.noLimit=r.levels(ids);rows.radius0=V.stats.radius;rows.speaking=V.speaking(2);
     const sent=r.ops.length,muteCalls=r.netMuted.length;
-    V.setRadius(20);r.tick();rows.firstRead=r.levels(ids);r.tick(10);rows.settled=r.levels(ids);await settle();
+    V.setRadius(20);rows.immediate=r.levels(ids);rows.instant=r.instant(4);r.tick();rows.firstRead=r.levels(ids);r.tick(10);rows.settled=r.levels(ids);await settle();
     rows.stored=r.store.get("oogaboogaland.voice-radius");rows.mic=r.track.enabled;rows.quiet=r.ops.length===sent&&r.netMuted.length===muteCalls;
     // A voice pulled once the range is set starts at its own level, never at full first.
     r.remotes.set(6,remote("far","factory",0,40));V.setPeers(all,[1,1,1,1,1]);await settle();r.land([6]);rows.joinedFar=r.levels([6]);
     V.setReceiveLevel(0.5);rows.level=r.levels(all);V.setReceiveLevel(1);
     V.muteLocal("mid",true);r.tick();rows.localMute=r.levels(all);V.muteLocal("mid",false);rows.unmuted=r.levels(all);
+    const mid=r.remotes.get(3);
+    mid.z=19.999;r.tick();rows.inside=r.levels([3]);rows.thumpInside=V.nearness(3);
+    mid.z=20;r.tick();rows.edge=r.levels([3]);rows.thumpEdge=V.nearness(3);rows.instant&&=r.instant(3);
+    mid.z=19.999;r.tick();rows.returned=r.levels([3]);rows.instant&&=r.instant(3);
+    mid.z=15;V.setRadius(15);rows.preciseEdge=r.levels([3]);V.setRadius(16);rows.preciseInside=r.levels([3]);rows.precision=V.stats.radius;V.setRadius(20);
     r.remotes.get(5).poseZone="factory";r.tick(10);rows.placed=r.levels([5]);
     r.state.self.zone="factory.hall";r.tick(10);rows.unplacedSelf=r.levels(all);r.state.self.zone="factory";
     V.setRadius(65);r.tick(10);rows.back=r.levels(all);rows.radius65=V.stats.radius;
     rows.fades=V.fades;rows.playback=V.inspect().playback;
     return rows;
   };
-  const shared=rows=>rows.noLimit==="1,1,1,1"&&rows.radius0===0&&rows.speaking&&rows.firstRead==="1,0.85,0.85,0.85"&&rows.settled==="1,0.5,0,0"&&rows.stored==="20"&&rows.mic&&rows.quiet&&
-    rows.joinedFar==="0"&&rows.level==="0.5,0.25,0,0,0"&&rows.localMute==="1,0,0,0,0"&&rows.unmuted==="1,0.5,0,0,0"&&rows.placed==="1"&&rows.unplacedSelf==="1,1,1,1,1"&&rows.back==="1,1,1,1,1"&&rows.radius65===0&&rows.fades;
+  const shared=rows=>rows.noLimit==="1,1,1,1"&&rows.radius0===0&&rows.speaking&&rows.immediate==="1,1,0,0"&&rows.instant&&rows.firstRead==="1,1,0,0"&&rows.settled==="1,1,0,0"&&rows.stored==="20"&&rows.mic&&rows.quiet&&
+    rows.joinedFar==="0"&&rows.level==="0.5,0.5,0,0,0"&&rows.localMute==="1,0,0,0,0"&&rows.unmuted==="1,1,0,0,0"&&rows.inside==="1"&&rows.edge==="0"&&rows.thumpInside===1&&rows.thumpEdge===0&&rows.returned==="1"&&rows.preciseEdge==="0"&&rows.preciseInside==="1"&&rows.precision===16&&rows.placed==="1"&&rows.unplacedSelf==="1,1,1,1,1"&&rows.back==="1,1,1,1,1"&&rows.radius65===0&&rows.fades;
   const desk=rig(false),rows=await play(desk);
   rows.noGains=desk.gains.length===0&&desk.handlers.size===0;
-  const F=desk.V.falloff;let step=0,rising=false;for(let d=0;d<=25;d+=0.01){const a=F(d,20),b=F(d+0.01,20);step=Math.max(step,Math.abs(b-a));if(b>a+1e-12)rising=true;}
-  rows.curve={full:F(10,20),half:F(15,20),edge:F(20,20),past:F(30,20),step:+step.toFixed(4),rising,noLimit:F(1e6,0),unknown:F(NaN,20)};
+  const F=desk.V.falloff;
+  rows.cutoff={inside:F(19.999,20),edge:F(20,20),past:F(20.001,20),noLimit:F(1e6,0),unknown:F(NaN,20)};
   rows.checked=["abc","-3","999","2","20"].map(v=>rig(false,true,v).V.stats.radius).join(",");
   desk.V.stop();rows.timersAfterStop=desk.timers.size;
-  record("voice hearing range: voices fade smoothly with distance in the visitor's own place, others past it go quiet, a voice joining starts at its own level, no limit is the old full volume, a local mute and the receive level still hold, and neither the microphone nor the room hears of it",
+  record("voice hearing range: a hard cutoff keeps full volume inside the visitor's range, silences voices at its edge on the next movement read, applies slider changes immediately in 1 m steps, a voice joining starts at its own level, no limit is the old full volume, a local mute and the receive level still hold, and neither the microphone nor the room hears of it",
     shared(rows)&&rows.playback==="element"&&rows.noGains&&
-    rows.curve.full===1&&rows.curve.half===0.5&&rows.curve.edge===0&&rows.curve.past===0&&rows.curve.step<0.005&&!rows.curve.rising&&rows.curve.noLimit===1&&rows.curve.unknown===0&&
-    rows.checked==="0,0,0,5,20"&&rows.timersAfterStop===0,JSON.stringify(rows));
+    rows.cutoff.inside===1&&rows.cutoff.edge===0&&rows.cutoff.past===0&&rows.cutoff.noLimit===1&&rows.cutoff.unknown===0&&
+    rows.checked==="0,0,0,2,20"&&rows.timersAfterStop===0,JSON.stringify(rows));
   const ios=rig(true),io=await play(ios),ctx=ios.ctxs[0],live=()=>ios.gains.filter(g=>g.out.size);
   io.elementsMuted=ios.els.every(el=>el.muted);io.toOutput=live().length===5&&live().every(g=>g.out.size===1&&g.out.has(ctx.destination));
   ctx.set("interrupted");io.asleep=ios.V.stats.blocked;
@@ -22889,13 +22928,13 @@ const voiceHearingChecks = async () => {
     s.blendT=0.9;r.tick(10);out.near=r.levels([2,3,4]);
     s.blendT=1;r.tick(10);out.end=r.levels([2,3,4]);
     Object.assign(s,{zone:"rainforest",blendTo:null,blendT:0});s.self.zone="rainforest";r.tick(10);out.over=r.levels([3,4]);
-    V.setRadius(40);r.tick(10);out.radius=r.levels([3,4]);
+    V.setRadius(40);r.tick(10);out.radius=r.levels([3,4]);V.setRadius(30);out.cutoff=r.levels([3,4]);out.thump=[3,4].map(id=>+V.nearness(id).toFixed(3)).join(",");
     V.stop();
     return out;
   };
   const cross={desk:await crossing(false),ios:await crossing(true)};
   record("voice crossing: along a bridge the island fades out as the land ahead fades in, equal-power, a second crosser plays by how near, the far side hears a crosser by its share, iOS sounds the same, and the hearing range reaches across",
-    [cross.desk,cross.ios].every(c=>c.half==="0.707,0.707,1"&&c.near==="0.156,0.988,0.809"&&c.end==="0,1,0.707"&&c.over==="1,0.707"&&c.radius==="0.469,0.707"),JSON.stringify(cross));
+    [cross.desk,cross.ios].every(c=>c.half==="0.707,0.707,1"&&c.near==="0.156,0.988,0.809"&&c.end==="0,1,0.707"&&c.over==="1,0.707"&&c.radius==="1,0.707"&&c.cutoff==="0,0.707"&&c.thump===c.cutoff),JSON.stringify(cross));
 };
 const exteriorEnrichmentChecks = BL => {
   const S=BL.scene,root=S.createNode(),land=BL.dsbGeography.build(),renderer={kind:"webgl2",quality:"high"},camera=S.createCamera();camera.position.y=110;
@@ -23919,8 +23958,8 @@ const sheetRailChecks = async () => {
     node: { dataset: { dock: "right" } }, body: { setAttribute() {} }, nav: { setAttribute() {} } });
   const main = make("roster"), detached = make("players"), windows = [main, detached];
   const context = { panels: [], windows, main, folded: false, hidden: false, signedIn: true, phone: { matches: false },
-    available: name => name !== "players" || context.signedIn, ownerOf: name => windows.find(w => w.tab === name),
-    isOpen: w => !context.folded && w.open, fit() {}, placeFooter() {}, showCounts() {}, showExpand() {}, notify() {} };
+    available: name => name !== "players" && name !== "chat" || context.signedIn, ownerOf: name => windows.find(w => w.tab === name),
+    isOpen: w => !context.folded && w.open, fit() {}, showCounts() {}, showExpand() {}, notify() {} };
   runInNewContext(refresh + ";this.refresh = refresh;", context);
   const read = () => windows.filter(w => !w.node.hidden).map(w => w.tabs.filter(t => !t.hidden).map(t => t.dataset.tab));
   context.refresh(); const closed = read();
@@ -23932,7 +23971,7 @@ const sheetRailChecks = async () => {
   record("side panel rails: unowned tabs stay on main, detached Players keeps only its own tab, folding gathers tabs, and sign-out/in restores ownership without duplicates",
     [closed, opened, folded, signedOut, signedIn].every(unique) && closed[0].join() === "bananas,roster,loot,chat" && closed[1].join() === "players"
       && opened[1].join() === "players" && folded.length === 1 && folded[0].length === names.length
-      && signedOut.length === 1 && !signedOut[0].includes("players") && signedIn[1].join() === "players",
+      && signedOut.length === 1 && !signedOut[0].includes("players") && !signedOut[0].includes("chat") && signedIn[1].join() === "players",
     JSON.stringify({ closed, opened, folded, signedOut, signedIn }));
 };
 const playersTabChecks = async BL => {
