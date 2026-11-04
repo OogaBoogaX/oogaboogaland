@@ -41,7 +41,7 @@ not submit scores.
 The existing displays determine the record type. Each Cloud Hopper level has an attributed board; the single
 board from before the levels keeps its records, retired (`retired: true` in the registry: reads answer, writes
 are refused with 400, and the identity triggers still move or remove its names).
-The other games keep unattributed bests, with independent entries for each physical
+The other games retain unattributed bests, with independent entries for each physical
 machine or Rally track/mode. A race's finishing order is that race's podium, not an
 all-time record for its simulated opponents.
 
@@ -83,19 +83,39 @@ existing player. Its SQL update and removal of the last entry are one D1 batch t
 Machine dictionaries are bounded by the registry's fixed machine IDs. The retained run
 history is bounded; there is no per-frame telemetry table.
 
+The eight retro video cabinets plus Drop, Orbit and Mine also publish an attributed top-ten
+run board. `highscoreRules.cabinets` is their eleven-game allowlist. Migration
+`0008_cabinet_runs.sql` adds `cabinet_runs`, retaining the best 1,024 distinct finishes per
+game. The additive public `runs` array uses the same `{id, username, score, achieved}` shape
+as Cloud Hopper, ordered by score descending, achievement ascending, numeric account ID,
+then run ID. Repeated usernames are allowed. The existing machine record and its meaning
+remain unchanged; historical machine scores lack an owner, so the migration does not
+invent attributed rows. Physical multiplayer machines do not gain run boards.
+
+New cabinet clients send one UUID `runId` per completed signed-in run. A duplicate identity
+cannot update either the accepted run or machine record. Legacy requests without `runId`
+still improve the machine record only. Both writes and their session checks share a D1
+transaction. Non-record finishes can enter the leaderboard and increment its revision,
+notifying live clients through the same durable outbox. Names follow renames, reused names
+lose the prior account's attribution, and account deletion removes its runs while retaining
+the unattributed machine record. No scores are uploaded from local saves.
+
 ## API and client lifecycle
 
 - `GET /api/highscores/<game>` is public and returns `{game, highscores, achieved,
-  scoreType, direction, unit, version, revision}`. Reads do not create players or sessions.
-- `GET /api/highscores/arcade` returns `{boards, refreshAfterMs}` for the 17 Arcade
-  machine kinds in `highscoreRules.arcade`, using one indexed `IN` query. A public-only
+  scoreType, direction, unit, version, revision}` plus `runs` for Cloud Hopper levels and
+  the eleven cabinet leaderboards. Reads do not create players or sessions.
+- `GET /api/highscores/arcade` returns `{boards, refreshAfterMs}` for the 16 Arcade
+  machine kinds in `highscoreRules.arcade`, using one indexed `IN` query with the retro run
+  lists in the same SQL snapshot. A public-only
   synthetic Cache API entry shares that snapshot at the current Cloudflare data center
   for 30 seconds; concurrent misses share work within an isolate. Cookie and authorization
   headers are never copied into the key or response. Missing rows and failures are not cached.
 - `GET /api/highscores/arcade-live` returns the same public boards directly from D1,
   bypassing the edge snapshot. Both snapshot routes are GET-only and use the public read
   limiter. The signed-in client chooses the fresh route; it contains no account-specific data.
-- `POST /api/highscores/<game>` accepts `{machine, score, version, playerId}`. The Worker
+- `POST /api/highscores/<game>` accepts `{machine, score, version, playerId}` and optional
+  `runId` for Cloud Hopper levels and the eleven cabinet boards. The Worker
   resolves identity from the existing session. `playerId` is only a guard against a
   different account's cookie replacing the account that began the run; a mismatch is 409.
   For level boards, an optional UUID `runId` identifies one completed run. The page reuses
@@ -217,7 +237,8 @@ browser networking; they do not replace a two-player staging smoke test or CI at
 ## Wrangler and rollout
 
 The existing migration directory and deploy workflows apply `0004_highscore_notifications.sql` and
-`0005_cloud_hopper_levels.sql`, `0006_cloud_hopper_replays.sql` and `0007_cloud_hopper_runs.sql`
+`0005_cloud_hopper_levels.sql`, `0006_cloud_hopper_replays.sql`, `0007_cloud_hopper_runs.sql` and
+`0008_cabinet_runs.sql`
 before the Worker. These add the level rows, replay registry and bounded run history. No
 `d1 create`, new database binding, secret, Durable Object or scheduled job is needed.
 The configs add limiter namespaces `2006` on staging and `1006` in production; the local

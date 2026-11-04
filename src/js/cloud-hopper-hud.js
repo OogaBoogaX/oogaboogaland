@@ -95,6 +95,17 @@
     const introArt = node("img", "cloud-hopper-intro-art"), guideArt = node("div", "cloud-hopper-guide-art");
     const resultArt = node("img", "cloud-hopper-result-art");
     const resultTime = node("p", "cloud-hopper-time"), scoresPanel = node("section", "cloud-hopper-scores");
+    const cabinetScores = node("button", "cabinet-scores-toggle", "Leaderboard");
+    cabinetScores.type = "button"; cabinetScores.dataset.role = "choose";
+    cabinetScores.setAttribute("aria-expanded", "false");
+    cabinetScores.setAttribute("aria-controls", "cloud-hopper-scores");
+    scoresPanel.id = "cloud-hopper-scores";
+    cabinetScores.addEventListener("click", () => {
+      const open = panel.classList.toggle("cabinet-scores-open");
+      cabinetScores.dataset.role = open ? "back" : "choose";
+      cabinetScores.textContent = open ? "Levels" : "Leaderboard";
+      cabinetScores.setAttribute("aria-expanded", String(open));
+    });
     const scoresTitle = node("h3", "cloud-hopper-scores-title", "Shared top 10");
     const scoresList = node("ol", "race-podium"), uploads = node("p", "cloud-hopper-uploads");
     uploads.setAttribute("role", "status"); uploads.hidden = true;
@@ -180,7 +191,7 @@
     instructionLines.append(help); instructions.append(instructionLines);
     hud.append(name, timer, brief, record, instructions);
     scoresPanel.append(scoresTitle, scoresStatus, scoresList, uploads, personalBest);
-    actions.append(back, next, play, select, exit);
+    actions.append(back, next, play, cabinetScores, select, exit);
     panel.append(glow, kicker, panelTitle, goal, levels, introArt, guideArt, resultArt, panelHelp, resultTime, scoresPanel, actions);
     hud.hidden = panel.hidden = levels.hidden = next.hidden = select.hidden = true;
     document.body.append(hud, panel, gustCue);
@@ -455,7 +466,8 @@
       phase = to; picking = false;
       showScores(localScores, localLatest);
       clearActivation();
-      panel.classList.remove("cloud-hopper-picking");
+      panel.classList.remove("cloud-hopper-picking", "cabinet-scores-open");
+      cabinetScores.dataset.role = "choose"; cabinetScores.textContent = "Leaderboard"; cabinetScores.setAttribute("aria-expanded", "false");
       const copy = to === "dq" && dqKind === "tornado" ? COPY.swept : COPY[to], intro = to === "intro", briefing = to === "briefing";
       panel.classList.toggle("cloud-hopper-dq", to === "dq");
       panel.classList.toggle("cloud-hopper-intro", intro);
@@ -510,7 +522,9 @@
         if (!panel.open) {
           previousFocus = document.activeElement;
           panel.hidden = false;
-          panel.showModal();
+          // Arcade voice/player tabs remain usable beside the game card.
+          if (document.body.classList.contains("arcade-game")) panel.show();
+          else panel.showModal();
           panel.scrollTop = 0;
         }
         if (briefing) fitGuide();

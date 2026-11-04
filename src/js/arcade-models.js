@@ -828,9 +828,11 @@
     deck.push(box({ w: 0.2, h: 0.004, d: 0.08, color: "#d8c09a", offset: { x: -0.02, y: 0.046, z: -0.1 } }));
     deck.push(moved(lathe({ profile: [[0.05, 0], [0.05, 0.012], [0.018, 0.02], [0.018, 0.13], [0, 0.13]], segments: 10, color: BONE }), -0.3, 0.04, 0.03));
     BUTTON_INKS.forEach((color, k) => deck.push(moved(shellButton(0.052, color), 0.03 + k * 0.15, 0.04, k === 1 ? -0.03 : 0.05)));
-    parts.push(moved(turnedX(merge(...deck), 0.32), 0, 1.03, 0.3));
+    const controlPanel = moved(turnedX(merge(...deck), 0.32), 0, 1.03, 0.3);
+    parts.push(controlPanel);
     // The joystick's knob, a coconut, round so it shades smooth.
-    round.push(moved(turnedX(moved(nut("husk", 0.05, false, false), -0.3, 0.2, 0.03), 0.32), 0, 1.03, 0.3));
+    const joystick = moved(turnedX(moved(nut("husk", 0.05, false, false), -0.3, 0.2, 0.03), 0.32), 0, 1.03, 0.3);
+    round.push(joystick);
     // The bezel: rough stone bars round the glass, their inner edges on the screen's, painted corners.
     const W = SCREEN.w / 2 + 0.05, H = SCREEN.h / 2 + 0.05, stone = c.stone ? tint(c.body, 1.15) : STONE_LT, bezel = [
       bevelBox({ w: W * 2 + 0.14, h: 0.12, d: 0.08, color: stone, bevel: 0.025, offset: { y: H + 0.01 } }),
@@ -901,6 +903,9 @@
       }
     });
     geo.collisionGeometry = body;
+    // Exact rendered control faces, in cabinet-local coordinates, for the menu's one-shot foreground mask.
+    // This CPU-only geometry never adds a scene node or renderer record.
+    geo.cabinetForeground = merge(controlPanel, joystick);
     return geo;
   };
   // One per cabinet slot, by its index in CABINETS; the standalone cloud cabinet does not add a hall slot.

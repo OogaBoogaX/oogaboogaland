@@ -12,7 +12,19 @@ const view = row => {
   if (row.highscores.length > 100000 || row.achieved.length > 100000) throw new Error("Oversized scores");
   return { game: row.game_id, highscores: JSON.parse(row.highscores), achieved: JSON.parse(row.achieved), version: rule.version,
     scoreType: rule.scoreType, direction: rule.direction, unit: rule.unit, revision: row.revision,
-    ...(row.runs === undefined ? {} : { runs: JSON.parse(row.runs) }) };
+    ...(row.runs == null ? {} : { runs: JSON.parse(row.runs) }) };
+};
+const cabinetRuns = `(SELECT json_group_array(json_object('username', username, 'score', score,
+  'achieved', achieved, 'runId', run_id, 'playerId', player_id)) FROM (
+    SELECT r.run_id, lower(p.login) AS username, r.score, r.achieved, r.player_id FROM cabinet_runs r
+    JOIN players p ON p.id = r.player_id WHERE r.game = game_highscores.game_id
+    ORDER BY score DESC, achieved, player_id, run_id LIMIT 10))`;
+const publicBoard = async row => {
+  const board = view(row);
+  // Fingerprints reconcile retries without publishing raw run tickets or account IDs.
+  if (board.runs) board.runs = await Promise.all(board.runs.map(async ({ runId, playerId, ...run }) =>
+    ({ ...run, id: await sha256Hex(JSON.stringify([board.game, playerId, runId])) })));
+  return board;
 };
 export const readHighscores = async (db, game) => {
   // Read the run list and revision in one SQLite snapshot; a delayed list cannot carry a newer revision.
@@ -27,18 +39,14 @@ export const readHighscores = async (db, game) => {
         AND NOT EXISTS (SELECT 1 FROM cloud_hopper_runs r WHERE r.game = g.game_id
           AND r.player_id = json_extract(g.owners, '$.' || json_quote(h.key)) AND r.score = h.value
           AND r.achieved = json_extract(g.achieved, '$.' || json_quote(h.key)))
-      ORDER BY score, achieved, player_id, run_id LIMIT 10)) AS runs` : "";
-  const board = view(await db.prepare(`SELECT ${COLUMNS}${runs} FROM game_highscores WHERE game_id = ?`).bind(game).first());
-  // A public fingerprint reconciles optimistic rows without exposing replay ticket tokens or account IDs.
-  if (board.runs) board.runs = await Promise.all(board.runs.map(async ({ runId, playerId, ...run }) =>
-    ({ ...run, id: await sha256Hex(JSON.stringify([game, playerId, runId])) })));
-  return board;
+      ORDER BY score, achieved, player_id, run_id LIMIT 10)) AS runs` : rules.cabinets.includes(game) ? `, ${cabinetRuns} AS runs` : "";
+  return publicBoard(await db.prepare(`SELECT ${COLUMNS}${runs} FROM game_highscores WHERE game_id = ?`).bind(game).first());
 };
 export const readArcade = async db => {
-  const { results } = await db.prepare(`SELECT ${COLUMNS} FROM game_highscores WHERE game_id IN (${rules.arcade.map(() => "?").join(",")})`)
+  const { results } = await db.prepare(`SELECT ${COLUMNS}, CASE WHEN game_id IN (${rules.cabinets.map(id => "'" + id + "'").join(",")}) THEN ${cabinetRuns} END AS runs FROM game_highscores WHERE game_id IN (${rules.arcade.map(() => "?").join(",")})`)
     .bind(...rules.arcade).all();
   if (results.length !== rules.arcade.length) throw new Error("Incomplete arcade scores");
-  return results.map(view);
+  return Promise.all(results.map(publicBoard));
 };
 
 // The trigger records a change in the score's transaction, including rename/removal. A failed

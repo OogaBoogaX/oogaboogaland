@@ -31,14 +31,15 @@
     }
     let runs;
     if (data.runs !== undefined) {
-      if (!/^cloud-hopper-l[1-4]$/.test(id) || !Array.isArray(data.runs) || data.runs.length > 10) return null;
+      if ((!/^cloud-hopper-l[1-4]$/.test(id) && !rules.cabinets.includes(id)) || !Array.isArray(data.runs) || data.runs.length > 10) return null;
       runs = [];
       for (const run of data.runs) {
         if (!isObject(run) || typeof run.username !== "string" || !validLogin(run.username)
           || !Number.isSafeInteger(run.score) || run.score <= 0 || run.score > game.max
+          || rules.cabinets.includes(id) && run.id === undefined
           || run.id !== undefined && (typeof run.id !== "string" || !/^[a-f0-9]{64}$/.test(run.id) || runs.some(row => row.id === run.id))
           || !Number.isSafeInteger(run.achieved) || run.achieved < 0
-          || runs.length && (run.score < runs.at(-1).score || run.score === runs.at(-1).score && run.achieved < runs.at(-1).achieved)) return null;
+          || runs.length && ((game.direction === "asc" ? run.score < runs.at(-1).score : run.score > runs.at(-1).score) || run.score === runs.at(-1).score && run.achieved < runs.at(-1).achieved)) return null;
         runs.push({ username: run.username, score: run.score, achieved: run.achieved, ...(run.id ? { id: run.id } : {}) });
       }
     }
@@ -141,8 +142,19 @@
     arcade.source = source;
     arcade.nextAt = Date.now() + FRESH_MS; // Back off on failure while keeping the last good boards.
     const signed = !!net.state.me;
+    for (const id of rules.arcade) {
+      const entry = entries.get(id);
+      entry.status = entry.data ? "refreshing" : "loading"; notifyStatus(entry);
+    }
     arcade.loading = request(signed ? "arcade-live" : "arcade").then(result => {
-      if (stopped || !result.data) return;
+      if (stopped) return;
+      if (!result.data) {
+        for (const id of rules.arcade) {
+          const entry = entries.get(id);
+          entry.status = entry.data ? "stale" : "unavailable"; notifyStatus(entry);
+        }
+        return;
+      }
       for (const board of result.data.boards) publish(board.game, board);
       // Use the remaining edge lifetime, not another whole browser TTL on top of it.
       arcade.nextAt = Date.now() + (signed ? FRESH_MS : result.data.refreshAfterMs);
@@ -224,7 +236,7 @@
     if (!available() || !net.state.resolved || !net.state.me) return null;
     const token = {};
     tickets.set(token, { game: id, playerId: net.state.me.id, generation, sent: new Set(),
-      runId: /^cloud-hopper-l[1-4]$/.test(id) ? crypto.randomUUID() : null,
+      runId: /^cloud-hopper-l[1-4]$/.test(id) || rules.cabinets.includes(id) ? crypto.randomUUID() : null,
       replay: BL.cloudHopperReplays?.startTicket(id) });
     return token;
   };
