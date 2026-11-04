@@ -160,7 +160,7 @@ test("long outages record a recovery gate instead of skipping world time", async
 
 test("unknown schema/world and invalid or oversized state fail closed without resetting storage", async () => {
   const h = harness(), ticket = await h.host.begin("a", 60000), saved = h.store.read();
-  for (const patch of [{ schema: 1 }, { schema: 3 }, { world: "future-world" }, { runUntil: saved.wallAt + HOST.maxRunMs + 1 },
+  for (const patch of [{ schema: 1 }, { schema: 2 }, { schema: 4 }, { world: "future-world" }, { runUntil: saved.wallAt + HOST.maxRunMs + 1 },
     { leaseUntil: saved.wallAt + HOST.leaseMs + 1 }, { simulation: { ...saved.simulation, seed: NaN } },
     { simulation: { ...saved.simulation, padding: "x".repeat(HOST.checkpointBytes) } }]) {
     const damaged = { ...saved, ...patch }; h.store.corrupt(damaged);

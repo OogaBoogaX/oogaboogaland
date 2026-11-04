@@ -81,13 +81,21 @@ export class SessionRegistry {
   #clock = 0;
   #next = 1;
   #ready = true;
+  #remaining = Infinity;
+  #used = 0;
 
   // adapter (host-owned, trusted): stepPassive(motion & { bodyId, zone, kind }, dtMs) -> motion (with yaw);
   // npcFor(bodyId) -> existing NPC id or null; validateOccupancy({ bodyId, zone, x, y, z }, { kind, id }) -> true to admit.
-  // A passive step requires a real collision adapter: refusing a missing adapter is safer than silently freezing a
-  // disconnected airborne body.
-  constructor({ protocol, world, adapter = {} } = {}) {
+  // A passive step requires a real collision adapter. passiveBudget, when supplied,
+  // is shared by every call on this registry instance: restore once per host
+  // transaction. The standalone default retains the original complete sweep
+  // (still bounded by 64 bodies * 1200 substeps). A budget must cover one body's
+  // full grace so authenticated reconnect priority cannot starve it.
+  constructor({ protocol, world, adapter = {}, passiveBudget } = {}) {
     if (!isVersion(protocol) || !isVersion(world)) throw new TypeError("host-sessions needs protocol and world versions");
+    if (passiveBudget !== undefined && (!Number.isSafeInteger(passiveBudget) || passiveBudget < GRACE_MS / PASSIVE_STEP_MS
+      || passiveBudget > MAX_SESSIONS * GRACE_MS / PASSIVE_STEP_MS)) throw new TypeError("host-sessions: invalid passive budget");
+    this.#remaining = passiveBudget ?? Infinity;
     this.protocol = protocol;
     this.world = world;
     this.adapter = adapter;
@@ -162,9 +170,10 @@ export class SessionRegistry {
   // nothing and never extends a deadline. Then records whose token is in liveTokens keep their transport, every other live
   // record enters grace from its persisted lastSeenAt (never from now), grace deadlines stay as saved, and anything already
   // due departs. Malformed input throws before anything changes; if an adapter throws, discard this instance and restore again.
-  recover(now, liveTokens = [], closes = []) {
+  recover(now, liveTokens = [], closes = [], priorityAccount = null) {
     if (this.#ready) throw new Error("host-sessions: recover() only follows restore()");
     if (!isTime(now)) throw new TypeError("host-sessions: time must be epoch milliseconds");
+    if (priorityAccount !== null && !isAccount(priorityAccount)) throw new TypeError("host-sessions: invalid recovery priority");
     if (!Array.isArray(liveTokens) || liveTokens.length > MAX_SESSIONS || !liveTokens.every((t) => typeof t === "string")) {
       throw new TypeError("host-sessions: liveTokens must be at most MAX_SESSIONS strings");
     }
@@ -186,7 +195,7 @@ export class SessionRegistry {
       if (r.state !== "live" || live.has(r.token)) continue;
       this.#toGrace(r, r.lastSeenAt, effects);
     }
-    this.#sweep(t, effects);
+    this.#sweep(t, effects, priorityAccount);
     this.#ready = true;
     return { effects };
   }
@@ -224,6 +233,11 @@ export class SessionRegistry {
     let resumed = false;
     if (r) {
       if (r.bodyId !== bodyId) return refuse("account-bound", effects);
+      // A bounded recovery may still be behind. Never reclaim an old pose or
+      // revive an expired body. The host's typed connect prioritizes this account
+      // before reaching here, so a timely authenticated reconnect need not wait
+      // behind unrelated recovery work.
+      if (r.state === "grace" && (r.stepAt < Math.min(t, r.deadline) || t >= r.deadline)) return refuse("recovering", effects);
       resumed = r.state === "grace";
       if (!resumed) {
         r.motion.vx = r.motion.vz = 0;
@@ -374,6 +388,15 @@ export class SessionRegistry {
 
   get size() { return this.#sessions.size; }
 
+  work(now = this.#clock) {
+    const t = this.#at(now);
+    let pendingBodies = 0, pendingSteps = 0;
+    for (const r of this.#sessions.values()) if (r.state === "grace" && r.stepAt < Math.min(t, r.deadline)) {
+      pendingBodies++; pendingSteps += Math.ceil((Math.min(t, r.deadline) - r.stepAt) / PASSIVE_STEP_MS);
+    }
+    return { steps: this.#used, pendingBodies, pendingSteps };
+  }
+
   checkpoint() {
     const sessions = [...this.#sessions.values()].sort((a, b) => a.generation - b.generation).map((r) => structuredClone(r));
     return { v: CHECKPOINT_VERSION, protocol: this.protocol, world: this.world, clock: this.#clock,
@@ -433,14 +456,23 @@ export class SessionRegistry {
   }
 
   // Two phases, so an adapter that throws leaves the registry untouched.
-  #sweep(t, effects) {
-    const due = [], steps = [];
-    for (const r of this.#sessions.values()) {
-      if (r.state !== "grace") continue;
-      const until = Math.min(t, r.deadline);
-      if (until > r.stepAt) steps.push([r, this.#step(r, until - r.stepAt), until]);
-      if (t >= r.deadline) due.push([r, this.#handback(r.bodyId)]);
+  #sweep(t, effects, priorityAccount = null) {
+    const due = [], steps = [], grace = [...this.#sessions.values()].filter(r => r.state === "grace");
+    // Persisted cursors make older unfinished work first on the next operation.
+    // A reconnect gets up to its whole 60-second interval before other bodies.
+    if (this.#remaining !== Infinity) grace.sort((a, b) =>
+      Number(b.accountId === priorityAccount) - Number(a.accountId === priorityAccount) || a.stepAt - b.stepAt || a.generation - b.generation);
+    let remaining = this.#remaining, used = 0;
+    for (const r of grace) {
+      const until = Math.min(t, r.deadline, r.stepAt + remaining * PASSIVE_STEP_MS);
+      if (until > r.stepAt) {
+        steps.push([r, this.#step(r, until - r.stepAt), until]);
+        const count = Math.ceil((until - r.stepAt) / PASSIVE_STEP_MS);
+        remaining -= count; used += count;
+      }
+      if (t >= r.deadline && until >= r.deadline) due.push([r, this.#handback(r.bodyId)]);
     }
+    this.#remaining = remaining; this.#used += used;
     for (const [r, motion, until] of steps) { r.motion = motion; r.stepAt = until; }
     for (const [r, handback] of due) this.#depart(r, "expired", r.deadline, handback, effects);
   }

@@ -5,9 +5,10 @@ import { SessionRegistry } from "./host-sessions.js";
 import "../../src/js/npc-authority.js";
 export const SESSION_PROTOCOL = "host-session-v2";
 export const HOST = Object.freeze({
-  schema: 2, key: "virtual-host-v1", stepMs: 250, maxSteps: 8, maxLagMs: 30000,
+  schema: 3, key: "virtual-host-v1", stepMs: 250, maxSteps: 8, maxLagMs: 30000,
   leaseMs: 10000, maxRunMs: 15 * 60000, checkpointBytes: 96 * 1024,
   snapshotBytes: 32 * 1024, maxNpcs: 128, maxFollowers: 32, deliveryMs: 250,
+  passiveSteps: 4096,
 });
 const encoder = new TextEncoder();
 const id = value => typeof value === "string" && /^[a-zA-Z0-9_.:-]{1,80}$/.test(value);
@@ -166,7 +167,7 @@ export class VirtualHost {
         r.status = registry?.size ? "draining" : "stopped";
         r.wallAt = now; r.leaseUntil = r.status === "draining" ? now + HOST.leaseMs : now;
         await this.save(tx, r);
-        return { status: r.status, steps: 0, snapshot: null, recovery, effects };
+        return { status: r.status, steps: 0, snapshot: null, recovery, effects, work: registry?.work(now) };
       }
       const lag = now - r.wallCursor;
       if (lag > HOST.maxLagMs) {
@@ -176,7 +177,12 @@ export class VirtualHost {
         r.status = registry?.size ? "draining" : "backlog"; r.runUntil = now;
         r.leaseUntil = registry?.size ? now + HOST.leaseMs : now; r.wallAt = now;
         await this.save(tx, r);
-        return { status: r.status, lagMs: lag, steps: 0, snapshot: null, recovery, effects };
+        return { status: r.status, lagMs: lag, steps: 0, snapshot: null, recovery, effects, work: registry?.work(now) };
+      }
+      if (registry?.work(now).pendingSteps) {
+        this.settle(r, registry); r.wallAt = now; r.leaseUntil = now + HOST.leaseMs;
+        await this.save(tx, r);
+        return { status: r.status, recovering: true, steps: 0, snapshot: null, recovery, work: registry.work(now) };
       }
       const steps = Math.min(HOST.maxSteps, Math.floor(lag / HOST.stepMs));
       if (!steps && !registry) return { status: r.status, lagMs: lag, steps, snapshot: null, recovery };
@@ -190,26 +196,32 @@ export class VirtualHost {
       r.wallAt = now; r.leaseUntil = now + HOST.leaseMs;
       await this.save(tx, r);
       const snapshot = publicSnapshot(r, this.simulation.project(r.simulation));
-      return { status: r.status, lagMs: now - r.wallCursor, steps, snapshot, recovery };
+      return { status: r.status, lagMs: now - r.wallCursor, steps, snapshot, recovery, work: registry?.work(now) };
     });
   }
 
   // liveTokens must come from the authenticated Room's surviving transports, never client input.
   // Recover + operation + the registry's bounded departure outbox share one commit. Publish the
   // returned effects only after this resolves; read/ack pending departures via the same method.
-  async sessions(ticket, liveTokens, apply, closes = []) {
+  async sessions(ticket, liveTokens, apply, closes = [], priorityAccount = null) {
     return this.storage.transaction(async tx => {
       const now = this.now(), r = await this.read(tx);
       this.owns(r, ticket, now);
       if (now >= r.runUntil || r.status !== "running") fail("run closed to session operations");
-      const { registry, recovery } = this.registry(r, now, liveTokens, closes, true);
+      const { registry, recovery } = this.registry(r, now, liveTokens, closes, true, priorityAccount);
       this.settle(r, registry);
       const result = apply(registry, now);
       if (result?.then) fail("session operation must be synchronous");
       this.settle(r, registry); r.wallAt = now;
       await this.save(tx, r);
-      return structuredClone({ recovery, result });
+      return structuredClone({ recovery, result, work: registry.work(now) });
     });
+  }
+
+  // claim.accountId is supplied by authenticated host code, not a browser id.
+  // Budget always covers this body's complete grace before unrelated recovery.
+  async connect(ticket, liveTokens, claim) {
+    return this.sessions(ticket, liveTokens, (registry, now) => registry.connect(claim, now), [], claim?.accountId);
   }
 
   // A close is an explicit server observation, not an inferred missing transport. Retrying a
@@ -228,6 +240,7 @@ export class VirtualHost {
       const now = this.now(), r = await this.read(tx);
       this.owns(r, ticket, now);
       if (r.status !== "running" || now >= r.runUntil) fail("run closed to pose publication");
+      if (r.sessions?.sessions.some(s => s.state === "grace" && s.stepAt < Math.min(r.sessions.clock, s.deadline))) fail("body recovery pending");
       const frame = this.simulation.poses(structuredClone(r.simulation));
       if (!globalThis.BL.npcAuthority.poses(frame)) fail("invalid host poses");
       return { ticket: this.ticket(r), sequence: r.revision, at: r.simulatedAt,
@@ -235,17 +248,17 @@ export class VirtualHost {
     });
   }
 
-  registry(r, now, liveTokens, closes = [], create = false) {
+  registry(r, now, liveTokens, closes = [], create = false, priorityAccount = null) {
     if (!r.sessions && !create) return { registry: null, recovery: { effects: [] } };
     if (!Array.isArray(liveTokens)) fail("authenticated transport census required");
-    const options = { protocol: SESSION_PROTOCOL, world: r.world, adapter: {
+    const options = { protocol: SESSION_PROTOCOL, world: r.world, passiveBudget: HOST.passiveSteps, adapter: {
       stepPassive: (motion, ms) => this.sessionAdapter.stepPassive(motion, ms, r.simulation),
       validateOccupancy: (body, resource) => this.sessionAdapter.validateOccupancy?.(body, resource, r.simulation) === true,
       npcFor: bodyId => this.simulation.npcFor(r.simulation, bodyId),
     } };
     // Validate census/close bounds on first admission too, not only once a checkpoint exists.
     const registry = SessionRegistry.restore(r.sessions || new SessionRegistry(options).checkpoint(), options);
-    const recovery = registry.recover(now, liveTokens, closes);
+    const recovery = registry.recover(now, liveTokens, closes, priorityAccount);
     return { registry, recovery };
   }
 
@@ -270,7 +283,7 @@ export class VirtualHost {
       r.runUntil = Math.min(now, r.runUntil); r.status = registry?.size ? "draining" : "stopped";
       r.wallAt = now; r.leaseUntil = registry?.size ? now + HOST.leaseMs : now;
       await this.save(tx, r);
-      return { status: r.status, recovery, effects };
+      return { status: r.status, recovery, effects, work: registry?.work(now) };
     });
   }
 }

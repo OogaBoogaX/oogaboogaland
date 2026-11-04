@@ -677,7 +677,80 @@ Room's close outbox, independent body tracks (#379), the reusable pose path
 
 ## Verification record
 
+### Recovery work budgeting and capacity admission
+
+The host now shares a **4,096 passive-substep budget per transaction** across
+restore, recovery, callbacks, drain and stop. A body cursor advances only as far
+as committed physics; unfinished records keep their original last-presence and
+deadline. The next transaction serves the oldest unfinished cursors. All 64
+complete grace intervals therefore take 19 operations instead of one operation
+with 76,800 calls. `work` reports performed steps and pending bodies/steps. A
+failed commit preserves the previous cursor and ownership; replacement owners
+continue from those cursors. The budget counts callback work, not a promise of
+Cloudflare CPU time: each callback still needs a measured bounded world query.
+
+The typed `VirtualHost.connect(ticket, liveTokens, claim)` must be used for
+authenticated admission/reconnect. It prioritizes that account's complete passive
+continuation before unrelated bodies. A reconnect accepted before its saved
+deadline can reclaim its resulting pose even when others remain behind; one at
+the deadline cannot revive it. Generic internal `sessions` callbacks do not get
+this automatic priority and `registry.connect` returns `recovering` instead of
+handing back a stale pose. Repeated callbacks cannot replenish the transaction
+budget. Arrival/close command persistence across Room RPCs still requires the
+unfinished authenticated outbox; this internal API does not implement it.
+
+While previously committed recovery is unfinished, NPC time does not advance and
+pose publication refuses the partial state. Late expiry settlement can span
+several transactions, but its recorded departure time stays the original deadline
+and possession cannot be reclaimed after it. Occupancy and handback settle with
+the completed body, atomically; a future runner must schedule these bounded
+operations promptly and account for this processing interval. No automatic loop
+was added. Host checkpoint/public snapshot schema is now **3**, rejecting prior
+host schema 2 without modifying it. The private session codec remains version 2.
+No implicit migration, reset or production rollout is performed.
+
+`node worker/eval/host-recovery.mjs` drives actual host admission and recovery,
+including JSON validation, copying and serialization, over the same authored
+Clanker/platform fixtures and atomic in-memory storage. It refuses an oversized
+claim without changing committed state. The local capacity sequence measured:
+
+| Authored actors | Sessions admitted | Peak checkpoint bytes | Recovery writes | Total recovery bytes written |
+|---|---:|---:|---:|---:|
+| 1 | 64 | 32,932 | 19 | 619,051 |
+| 32 | 64 | 56,461 | 19 | 1,066,102 |
+| 64 | 64 | 80,749 | 19 | 1,527,574 |
+| 96 | 50 | 98,065 | 15 | 1,466,870 |
+| 128 | 1 | 98,010 | 1 | 98,002 |
+
+Across these five finite sequences, maximum operation time was 14.2494 ms (first
+case); the 64-actor/64-session case measured p50/p95 4.6929/4.8884 ms over its 19
+operations, with 92.738 ms total process CPU. The new budget reduces peak work
+but increases checkpoint writes/serialization; these are not DO billing figures.
+There is one sequence per capacity, not a production percentile guarantee.
+96 actors left only 239 bytes at peak; 128 actors admitted just one of these
+particular sessions. These are **unsafe activation margins**, not supported
+production capacities. Complete actor fields, worst-case numeric/string growth,
+future motion and other world data require reserved headroom and an explicit
+admission policy with a compact complete codec before activation. The 96 KiB cap
+is unchanged. Geometry complexity, peers/animated support, real storage/RPC,
+account costs and browser rendering remain unmeasured.
+
+The first evaluator run correctly reached terminal `backlog` after settling its
+last body but incorrectly tried to tick again, receiving `host fenced`. Its loop
+was fixed to stop at both terminal states and the rerun passed. No production
+code or check threshold was relaxed for that evaluator correction.
+
 Verified locally November 4, 2026 on Node v22.23.4:
+
+- Recovery budgeting: **38/38** initially affected lifecycle/host/passive checks
+  passed; the full focused host batch passed **74/74**, including exact airborne
+  equality against an uninterrupted 60-second reference, failed writes, owner
+  replacement, duplicate close, last-millisecond/exact-deadline reclaim, no budget
+  replenishment through callbacks and refusal of partial-state pose publication.
+  Older host schema 2 is rejected. Logs: `verification-budget-{first,host}.log`;
+  capacity and cost evidence: `verification-budget-cost.json` in the task workspace.
+  Unit **408/408**, build (**316 scripts**), five touched JS/MJS syntax checks
+  and whitespace passed. No Hub/full/browser rerun; the failure ledger is unchanged.
 
 - Clanker flight increment: initial integration failed all three new checks on
   the real 2.25 m shape exceeding the old 2 m mesh cap. One adapter repair passed
