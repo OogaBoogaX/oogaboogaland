@@ -266,6 +266,15 @@ export class VirtualHost {
     return registry ? { ...registry.work(now), attemptedSteps: HOST.passiveSteps - budget.left } : undefined;
   }
 
+  // A reader is valid only until the next simulation mutation. It is local to
+  // this transaction attempt, never retained on VirtualHost or in storage.
+  npcLookup(r) {
+    if (!this.simulation.readQueries) return bodyId => this.simulation.npcFor(r.simulation, bodyId);
+    const queries = this.simulation.readQueries(r.simulation);
+    if (!queries || typeof queries.npcFor !== "function" || queries.then) fail("invalid simulation queries");
+    return bodyId => queries.npcFor(bodyId);
+  }
+
   registry(r, now, liveTokens, { closes = [], create = false, priorityAccount = null, budget = { left: HOST.passiveSteps } } = {}) {
     if (!r.sessions && !create) return { registry: null, recovery: { effects: [] } };
     if (!Array.isArray(liveTokens)) fail("authenticated transport census required");
@@ -279,7 +288,7 @@ export class VirtualHost {
         return this.sessionAdapter.stepPassive(motion, ms, r.simulation);
       },
       validateOccupancy: (body, resource) => this.sessionAdapter.validateOccupancy?.(body, resource, r.simulation) === true,
-      npcFor: bodyId => this.simulation.npcFor(r.simulation, bodyId),
+      npcFor: this.npcLookup(r),
     } };
     // Validate census/close bounds on first admission too, not only once a checkpoint exists.
     const registry = SessionRegistry.restore(r.sessions || new SessionRegistry(options).checkpoint(), options);
@@ -288,14 +297,21 @@ export class VirtualHost {
   }
 
   settle(r, registry) {
+    let lookup = null, changed = false;
     for (const intent of registry.pending()) {
       if (intent.applied) continue;
       if (intent.handback) {
-        if (this.simulation.npcFor(r.simulation, intent.bodyId) !== intent.handback.npc) fail("handoff world changed");
+        if (!lookup) lookup = this.npcLookup(r);
+        if (lookup(intent.bodyId) !== intent.handback.npc) fail("handoff world changed");
         if (this.simulation.handoff(r.simulation, intent) !== true) fail("handoff refused");
+        changed = true;
+        lookup = null; // A handoff may change another body's NPC eligibility too.
       }
       registry.markApplied(intent.id);
     }
+    // sessions() invokes its caller after settling recovered departures. Any
+    // subsequent release must see that handoff's world, not the recovery reader.
+    if (changed) registry.adapter.npcFor = this.npcLookup(r);
     r.sessions = registry.checkpoint();
   }
 

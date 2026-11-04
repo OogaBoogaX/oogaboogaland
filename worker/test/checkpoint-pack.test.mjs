@@ -53,3 +53,21 @@ test("compact simulation follows the original Clanker flight exactly after every
   assert.throws(() => broken.step(state, 50), /failed frame/); assert.deepEqual(state, before);
   assert.throws(() => compactSimulation({ ...source, step: () => Promise.resolve() }, 4096).step(state, 50), /synchronous/);
 });
+
+test("ownership queries share an immutable phase snapshot and a new phase observes handoff changes", () => {
+  const snapshots = new Set();
+  const source = { version: "query-fixture", initial: () => ({ owners: { body: "npc" } }), validate: () => true,
+    step() {}, project: () => ({}), npcFor(s, id) {
+      snapshots.add(s);
+      assert.ok(Object.isFrozen(s) && Object.isFrozen(s.owners));
+      if (id === "mutate") s.owners.body = "poisoned";
+      return s.owners[id] || null;
+    }, handoff(s) { s.owners.body = "replacement"; return true; } };
+  const adapter = compactSimulation(source, 4096), state = adapter.initial(), first = adapter.readQueries(state);
+  for (let i = 0; i < 64; i++) assert.equal(first.npcFor("body"), "npc");
+  assert.equal(snapshots.size, 1, "one decode per read phase, not one per departing body");
+  assert.throws(() => first.npcFor("mutate"), TypeError); assert.equal(first.npcFor("body"), "npc");
+  adapter.handoff(state, {});
+  assert.equal(adapter.readQueries(state).npcFor("body"), "replacement"); assert.equal(snapshots.size, 2);
+  assert.equal(createCheckpointPack(4096).unpack(state).owners.body, "replacement");
+});

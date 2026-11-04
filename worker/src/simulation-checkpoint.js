@@ -9,6 +9,13 @@ export function compactSimulation(simulation, checkpointBytes) {
   }
   const sync = value => { if (value?.then) throw new Error("simulation must be synchronous"); return value; };
   const assign = (to, from) => { to.v = from.v; to.shapes = from.shapes; to.data = from.data; };
+  const freeze = value => {
+    if (value && typeof value === "object") {
+      for (const child of Object.values(value)) freeze(child);
+      Object.freeze(value);
+    }
+    return value;
+  };
   const wrapped = { version, checkpointBytes,
     initial: now => codec.pack(sync(simulation.initial(now))),
     validate: state => sync(simulation.validate(codec.unpack(state))) === true,
@@ -17,6 +24,17 @@ export function compactSimulation(simulation, checkpointBytes) {
     },
     project: state => sync(simulation.project(codec.unpack(state))),
     npcFor: (state, id) => sync(simulation.npcFor(codec.unpack(state), id)),
+    // One transaction's read-only phase, discarded before any world mutation.
+    // Decode lazily: ordinary live ticks often need no ownership lookups. The
+    // private frozen copy prevents one query from poisoning another; no cache
+    // survives a transaction retry, step or handoff, and no actor is retained globally.
+    readQueries(state) {
+      let snapshot;
+      return { npcFor(id) {
+        if (snapshot === undefined) snapshot = freeze(codec.unpack(state));
+        return sync(simulation.npcFor(snapshot, id));
+      } };
+    },
     handoff(state, intent) {
       const runtime = codec.unpack(state), result = sync(simulation.handoff(runtime, intent));
       if (result === true) assign(state, codec.pack(runtime));

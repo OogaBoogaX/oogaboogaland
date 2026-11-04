@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { HOST, SESSION_PROTOCOL, VirtualHost, LatestHostDelivery, boundedJSON, publicSnapshot } from "../src/virtual-host.js";
 import { createNpcPose } from "../src/npc-pose.js";
+import { compactSimulation } from "../src/simulation-checkpoint.js";
 import { rig } from "./fixtures/npc-pose-rig.mjs";
 
 // A serial, rollback-capable storage fixture. It models transaction atomicity, not Cloudflare
@@ -59,6 +60,40 @@ const bodyClaim = () => ({ protocol: SESSION_PROTOCOL, world: simulation.version
   body: { kind: "ooga", motion: { x: 1, y: 10, z: 2, yaw: 0.7, vx: 3, vy: -1, vz: 2, grounded: false },
     equipment: { weapon: "gun", mode: "combat", magazine: 17, spareAmmo: [5, 22], jetpack: true, fuel: 0.4,
       primaryOwned: true, secondaryOwned: true, selectedSlot: 2, unlimited: false, jetpackOwned: true } } });
+
+test("a cached ownership read cannot hand back a second body after the first handoff changes its NPC", async () => {
+  const adapter = compactSimulation({ ...simulation, initial: () => ({ ...simulation.initial(), owners: { resident: "first", second: "second" } }),
+    npcFor: (s, id) => s.owners[id] || null,
+    handoff(s) { s.owners.second = "replacement"; return true; } }, 4096);
+  const h = harness(adapter), ticket = await h.host.begin("owner", 60000);
+  const joined = (await h.host.sessions(ticket, [], (r, at) => [
+    r.connect({ ...bodyClaim(), world: adapter.version }, at),
+    r.connect({ ...bodyClaim(), world: adapter.version, accountId: 2, bodyId: "second" }, at),
+  ])).result;
+  assert.ok(joined.every(j => j.ok)); const before = h.store.read();
+  await assert.rejects(h.host.sessions(ticket, joined.map(j => j.session.token), (r, at) => {
+    for (const j of joined) assert.equal(r.release(j.session, at).ok, true);
+  }), /handoff world changed/);
+  assert.deepEqual(h.store.read(), before, "neither handback nor body departure commits on a changed owner");
+});
+
+test("a release following recovered handback observes the new NPC eligibility in the same transaction", async () => {
+  const adapter = compactSimulation({ ...simulation, initial: () => ({ ...simulation.initial(), owners: { resident: "first", second: "second" } }),
+    npcFor: (s, id) => s.owners[id] || null,
+    handoff(s) { s.owners.second = "replacement"; return true; } }, 4096);
+  const h = harness(adapter); let ticket = await h.host.begin("owner", 120000);
+  const joined = (await h.host.sessions(ticket, [], (r, at) => [
+    r.connect({ ...bodyClaim(), world: adapter.version }, at),
+    r.connect({ ...bodyClaim(), world: adapter.version, accountId: 2, bodyId: "second" }, at),
+  ])).result;
+  await h.host.disconnect(ticket, joined.map(j => j.session.token), joined[0].session, 100000);
+  h.at(160000); ticket = await h.make().claim("replacement-owner");
+  await h.host.sessions(ticket, [joined[1].session.token], (r, at) => assert.equal(r.release(joined[1].session, at).ok, true));
+  const pending = h.store.read().sessions.pending;
+  assert.equal(pending.find(p => p.bodyId === "resident").handback.npc, "first");
+  assert.equal(pending.find(p => p.bodyId === "second").handback.npc, "replacement");
+  assert.ok(pending.every(p => p.applied));
+});
 
 test("pose publication requires a valid adapter, cannot mutate saved state, and fences closed runs", async () => {
   const missing = harness(), ticket = await missing.host.begin("a", 60000);

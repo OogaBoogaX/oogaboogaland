@@ -826,7 +826,8 @@ old schema, expansion attacks and overrun preserve the prior checkpoint.
 
 Production cost validation remains blocked by the absent production world/runner
 and account/runtime measurements. No Wrangler executable is installed in this
-checkout; no runtime was installed or deployment attempted. Cloudflare's current
+checkout. The subsequent local runtime experiment below uses an already cached runtime outside the checkout;
+no runtime was installed or deployment attempted. Cloudflare's current
 [pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/)
 meters active/non-hibernating wall time, not local CPU samples; SQLite `put`
 costs rows, whereas legacy KV storage uses 4 KB units. Account allocations are
@@ -850,8 +851,246 @@ and Clanker projection, exact browser reclaim, authenticated body outbox and
 free-arm/green-beam rendering remain unfinished, with #379/#464 boundaries intact.
 Tess is unchanged. No timer, paid loop, environment enablement or deployment added.
 
+### Local Durable Object storage and ownership query costs
+
+`worker/eval/host-runtime.mjs` bundles its separate local fixture entrypoint and
+runs the real `VirtualHost` against workerd's SQLite Durable Object transactions.
+It requires `HOST_RUNTIME_PACKAGE` to name an already installed Miniflare
+`package.json`; it never installs dependencies, loads a Wrangler account config,
+authenticates or deploys. It binds loopback, disables telemetry/CF lookup, blocks
+outbound fetch, and uses fresh temporary storage that it removes afterward. This
+entrypoint is not imported or bound by the deployed Worker.
+
+The cache available for this experiment was **Miniflare 5.20261001.0-alpha**,
+**workerd 1.20261001.1**, with compatibility date **2026-10-01**. Its associated
+Wrangler is 4.147.0, older than the repository's declared ^4.153.0. Consequently,
+this closes a local-storage evidence gap, not the locked deployment-runtime or
+production validation gate. Authored clock, mesh, inventory and partial actor
+adapters remain the same as the Node capacity fixture.
+
+Both 32-NPC/64-slot and 106-NPC/30-slot sequences completed 120 active steps,
+refused excess admission, rolled back a write after `put`, and retained their
+exact checkpoint after disposing and starting a new workerd process. The new
+owner reclaimed the same body one millisecond before expiry with a new token,
+unchanged equipment and completed passive motion. A stale owner was rejected;
+other departures kept their original deadlines and did not spawn NPCs. Recovery
+did not replay the saved simulation. No outgoing fetch or unexpected runtime log
+was observed. This is orderly process reconstruction, not an abrupt kill or a
+Cloudflare eviction test.
+
+The initial smoke run could not bind loopback inside the sandbox. The permitted
+local run then exposed a temporary-bundle module-root configuration error before
+any assertion. Minimal plain/crypto/SQLite probes and isolated source initialization
+passed; setting the generated bundle's module root fixed startup. The first
+executed smoke sequence then exposed an incorrect evaluator assumption: observing
+a grace at deadline-minus-1ms splits its final integration interval, so the total
+was 76,802 calls rather than 76,800. The evaluator now measures and asserts exact
+elapsed passive milliseconds: `slots * 60000 - 1`, plus the unchanged 4,096-call
+per-operation cap. The corrected smoke and full runs passed. No product threshold
+or simulation rule changed for those evaluator corrections.
+
+Profiling identified repeated whole-world decoding for `npcFor` queries during
+expiry. `compactSimulation.readQueries` now provides one lazy, recursively frozen
+snapshot for a transaction's read phase. A query cannot mutate another query's
+view. No snapshot survives a transaction attempt. `VirtualHost` creates a fresh
+reader after each actual handoff, including before the session callback following
+recovered handback. Tests cover both refusal of a now-invalid second handback and
+a new release correctly observing changed eligibility in that same transaction.
+Simulation steps, checkpoints, schema, ownership and deadlines are unchanged.
+This is not a persistent ownership index and does not cache updates.
+
+Two serial local sequences measured the following end-to-end dispatch times. The
+first used per-query decoding, the second the phase reader. They include local
+serialization, process dispatch and SQLite. These are small observational samples,
+not a controlled production speedup or Cloudflare CPU/duration figures:
+
+| NPCs / retained slots | Reader | Active p50 / p95 ms (120 samples) | Recovery p50 / p95 ms | Recovery ticks after priority reclaim |
+|---|---|---:|---:|---:|
+| 32 / 64 | Per-query | 17.841 / 23.215 | 23.971 / 30.867 | 18 |
+| 32 / 64 | Phase snapshot | 15.416 / 18.430 | 14.532 / 17.030 | 18 |
+| 106 / 30 | Per-query | 56.726 / 80.525 | 52.849 / 80.647 | 8 |
+| 106 / 30 | Phase snapshot | 40.767 / 42.417 | 30.863 / 32.586 | 8 |
+
+The priority reconnect itself performs one bounded recovery operation; the table
+counts subsequent ticks. Serialization/write counts were identical between runs:
+106 actors wrote **8,573,420 bytes over 120 active writes**, then **578,608 over
+eight recovery ticks** after reclaim. Total passive time was **1,799,999 ms over
+36,002 calls** for 30 bodies (3,839,999 ms / 76,802 calls for 64). The local SQLite
+directories were roughly 4.4–4.5 MB including runtime/WAL files; these are not
+billable stored-state sizes. Production account cost remains unmeasured.
+Evidence: `verification-runtime-{load,query-load}.json` in the task workspace.
+The final run with explicit same-body, new-token, unchanged-equipment and
+no-runtime-log assertions also passed (`verification-runtime-query-final.json`):
+106 actors measured 37.091 / 40.427 ms active p50 / p95 and 28.975 / 31.578 ms
+recovery p50 / p95. Write counts and serialized bytes were unchanged. The timing
+variation reinforces that these local samples cannot establish production costs.
+
+The renewed browser review leaves these integration requirements unresolved:
+
+- `crew.control` changes activity/pose and `crew.relocatePlayer` clears hop,
+  leap, jump credits, rocket/thrust, ladder and support state. `clankers.possess`
+  reconstructs or clears drive velocity and releases reservations. Exact reclaim
+  needs explicit validated capture/restore APIs, not calls to these existing paths.
+- `remote-players.js` currently reconstructs Clanker display with `poseManaged`
+  from the small `g` motion summary. Managed rigs also carry easing/phase, form,
+  clipped coat/suit geometry and a reparented lab item. That summary cannot supply
+  exact host rig projection or restore its coupled simulation. A full posed-rig
+  representation and stable world/item references must precede client application.
+- The current server pose frame accepts only the existing 112-float Ooga records.
+  Clanker delivery must be version-negotiated and costed with #388/#389; silently
+  treating a gorilla as an Ooga record or enlarging the frame cap is unsafe.
+- #379 must provide the independent player/NPC track boundary; #464 owns reusable
+  live-player equipment/pose presentation. The grace body needs that path for its
+  free-arm/open-hand indicator and idempotent green-beam departure. Room's immediate
+  voice/transport cleanup must remain separate from body retention.
+
+No browser handoff or visual behavior was changed by this cost increment. It does
+not make #377 ready. Tess remains excluded.
+
+### Exact managed Clanker display projection
+
+`agent.createPoseProjector(world)` now captures and applies the actual managed
+rig through `clanker-pose.js`. It includes local transforms and Float32
+quaternions, visibility, ground/lean transforms, scorch/ember/glow, native/living
+color flags, ape/code geometry, clipped lab coats, office suits and their seated
+legs, and the held vessel plus its glass-shell children. It does not reconstruct
+animation from the small `g` movement summary. Application selects the existing
+geometry, applies every transform and recomputes bounds without advancing time
+or fitting the resting body again.
+
+The explicit world id must identify the compatible world/assets revision. A
+profile also checks scale, clothing configuration, suit color and clipping-mouth
+coordinates; the exact node-parent layout must match. An external held item must
+already be bound to both rigs by the world adapter under the same stable id.
+Projection does not spawn, resolve or reparent shared items. Unknown attachments,
+mismatched items/worlds/profiles, unsupported clothing, cycles, sparse/accessor
+arrays, invalid numeric tails and future versions are refused before changing
+the receiver. Each pose is bounded to 24 nodes, 24 scalar fields per node and
+16 KiB serialized JSON. No event stream or firing/thrust input is included.
+
+The browser-free test uses the actual Agent geometry, managed animation and
+renderer matrix functions over 90 pose transitions, two follower rigs, a midway
+rig reconstruction, and a fresh JS context with newly built geometry. It compares
+selected meshes, palettes, clip planes, world transforms and pose bytes through
+lab work, office seating, climbing, rolling, swimming, grooming, airborne poses,
+held glass, invisible bodies and native-color transitions. Reapplying a snapshot
+is idempotent. Rejected snapshots leave the receiver untouched. This proves the
+projection/application path, not a browser/GPU test or full actor recovery.
+
+`node worker/eval/clanker-pose.mjs` measures 53 actual managed rigs and two local
+followers over 120 authored frames. The JSON representation reached **1,603
+bytes for one actor** and **73,499 bytes for the roster**, with **8,771,044
+serialized bytes** across the run. That exceeds the existing 32 KiB public
+snapshot limit and also the roughly 57 KiB Ooga pose-frame limit, before adding
+Oogas. A full-roster JSON packet is therefore not a viable delivery contract.
+The limits were not increased and no new transport was enabled. Versioned
+encoding and transport negotiation must be coordinated with #388/#389; raw JSON
+cannot be passed to the existing Ooga publisher. The lossless packet increment
+below fits this measured load without chunking or increasing the delivery cap.
+
+Review removed repeated descriptor validation while walking already-validated
+ancestor rows. The serial measurement after that change was 37.408 / 40.021 ms
+p50 / p95 for projection, serialization and two applications together, with
+5,191.974 ms total process CPU including source posing. Those local Node/VM
+samples are not production CPU, network or billing figures. With the final
+unknown-attachment guard, the serial run measured 40.807 / 44.522 ms p50 / p95,
+5,712.515 ms total process CPU, and the same payload sizes. Evidence:
+`verification-clanker-pose-cost-final-guarded.json` in the task workspace.
+
+This is display state only: it does not preserve animation easing state for the
+next authoritative tick, Clanker AI/controllers, velocity, health, jump credits,
+inventory or reservations. `clankers.possess` is still unsuitable for exact body
+reclaim. No automatic path calls the new API; authoritative Room delivery,
+browser body reclaim, grace/free-arm and departure-beam rendering remain
+unfinished. #379 independent tracks and #464 player presentation remain their
+own work. Tess is excluded. No permanent runner or production action was added.
+
+### Lossless bounded mixed-pose packets
+
+`npc-pose-packet.js` adds a standalone complete-snapshot encoding for Oogas and
+Clankers together. Its wire cap is **32 KiB**, unchanged from the public snapshot
+budget. It has a separate **128 KiB** expanded-packet cap, at most **128 actors
+combined**, the existing per-Clanker node/scalar bounds, and no previous-frame
+dependency. Each packet can reconstruct a late join or reconnect on its own.
+It does not accumulate chunks, history, previous dictionaries or per-client
+queues. An oversized or incompressible snapshot is refused as a whole; no actor
+is omitted and no cap is increased automatically.
+
+Ooga records remain their original binary bytes. Clanker scalars use exact tags
+for zero, one, minus one and negative zero, Float32 only when exactly representable,
+and Float64 otherwise. A bounded byte compressor uses one candidate per hash and
+at most 64 KiB of backwards history. It is dependency-free and linear in bounded
+input/output work. Expansion checks literal lengths, backwards distances,
+overlapping copies, exact output size and complete input consumption. A
+noncryptographic checksum detects accidental corruption; it is not authentication
+and must be enclosed by the existing authenticated/fenced authority contract.
+Decoded poses still pass their semantic and rig-profile validation. The codec
+does not infer body ownership or execute events.
+
+Mixed-load checks preserve all Ooga bytes and every Clanker scalar exactly,
+including negative zero; reconstructed packets are canonical. Actual follower
+rigs match the source transforms after decoding. Corrupt headers/checksums,
+truncated blocks, invalid backreferences, oversized expansion, duplicate actors,
+wrong worlds, actor-count overflow, and incompressible valid legacy records are
+refused. A 128-Clanker boundary case decodes; a highly compressible input whose
+expanded state exceeds the cap is refused before compression. Invalid frames
+cannot poison subsequent independent frames.
+
+The finite evaluator now includes 53 Oogas through the actual pose encoder and
+53 actual managed Clanker rigs, two local receivers and 120 frames. Its varied
+case uses distinct headings/phases, all suit colors and eight bound vessels:
+
+| Measurement | Varied 106-actor fixture |
+|---|---:|
+| Largest compressed complete packet | 7,918 bytes / 32,768 cap |
+| Largest expanded packet | 66,736 bytes / 131,072 cap |
+| Total compressed bytes, 120 packets | 919,749 |
+| Raw Clanker JSON alone, largest frame | 75,181 bytes |
+| Projection, encode, decode and two applications, p50 / p95 | 44.139 / 47.687 ms |
+| Total process CPU including source posing | 6,153.102 ms |
+
+An earlier more repetitive fixture peaked at 3,434 bytes; it is not the sole
+capacity evidence. These are authored local Node/VM loads, not full NPC AI,
+production physics, browser/GPU, network or billing measurements. Ooga rigs in
+the cost fixture are authored DTOs using the real encoder. No affordability or
+general worst-case compression claim follows; refusing high-entropy overflow is
+part of the contract. Evidence: `verification-mixed-packet-{cost,varied-cost}.json`
+and `verification-mixed-packet-{first,review}.log` in the task workspace.
+
+The codec is loaded but not enabled for live delivery. Existing authority/Room
+decoders deliberately reject its new magic/version. It must gain explicit
+capability negotiation, fencing and bounded latest-frame delivery before being
+used by the publisher. In particular, browsers must freeze independent Clanker
+AI before applying server poses, resolve held-item ownership, and preserve the
+separate player movement/voice paths. The new codec alone does not complete
+Room/client integration, full actor recovery, exact player reclaim or disconnect
+visuals. Those requirements remain open; #377 is still draft and Tess is excluded.
+
 Verified locally November 4, 2026 on Node v22.23.4:
 
+- Mixed-packet increment: **88/88** focused host checks, **408/408** unit checks
+  and the **318-script** build passed. No new failing checks. The varied mixed
+  load completed all 120 frames with exact Ooga bytes and final Clanker display
+  parity for both receivers. Existing STOP-restricted browser checks remain
+  unrun. Logs: `verification-mixed-packet-{host,unit,build}.log`.
+- Managed Clanker projection increment: **86/86** focused host checks and the
+  subsequent **5/5** pose review checks passed; **408/408** unit checks and the
+  317-script build passed. Syntax checked all 11 locally touched JS/MJS files.
+  The final attachment-guard review passed **5/5** and its build passed (logs
+  `verification-clanker-pose-final-{focus,build}.log`). Generated HTML
+  remains excluded; the existing Hub failure ledger is unchanged and no
+  STOP-restricted browser checks were rerun. Evidence:
+  `verification-clanker-pose-{host,review,unit,build}.log`,
+  `verification-clanker-pose-syntax.json`, and the finite cost JSON records.
+
+- Local runtime/query increment: **84/84** focused host checks, **408/408** unit
+  checks, the 316-script build, syntax checks for all six touched JS/MJS files,
+  and whitespace validation passed. Generated HTML was restored and excluded.
+  The final finite SQLite runtime sequence passed both load profiles, with no
+  outbound fetches or unexpected logs. Hub/full/browser checks were not rerun;
+  the 20-entry failure ledger is unchanged. Evidence:
+  `verification-query-{host,unit,build}.log`, `verification-query-syntax.json`,
+  and `verification-runtime-query-final.json` in the task workspace.
 - Recovery budgeting: **38/38** initially affected lifecycle/host/passive checks
   passed; the full focused host batch passed **74/74**, including exact airborne
   equality against an uninterrupted 60-second reference, failed writes, owner

@@ -1699,9 +1699,40 @@
       state.pace = null;
       onIdle = null;
     };
+    // Display-only snapshots of the actual rig, including clipped clothes and
+    // the held vessel's glass shell. World code must bind matching item identities
+    // before applying a pose. This never possesses, advances or restores AI.
+    const createPoseProjector = (world) => {
+      if (!managed || !BL.clankerPose) throw new Error("managed Clanker projection unavailable");
+      const clip = value => value ? [value.mouth.x, value.mouth.z, value.mouth.ry, value.mouth.floorY] : [0, 0, 0, 0];
+      const profile = [scale, (coatClip ? 1 : 0) + (suitClip ? 2 + 4 * (suitColor % SUITS.length) : 0), ...clip(coatClip), ...clip(suitClip)];
+      const projection = BL.clankerPose.create({ world, profile, held: () => labFlask !== labPlaceholder,
+        nodes: () => {
+          const list = previewNodes.slice();
+          const children = node => { for (const child of node.children) {
+            if (list.length >= BL.clankerPose.MAX_NODES || list.includes(child)) throw new Error("invalid Clanker pose projection");
+            list.push(child); children(child);
+          } };
+          children(labFlask);
+          for (const node of list) if (new Set(node.children).size !== node.children.length
+            || node.children.some(child => child.parent !== node || !list.includes(child))) throw new Error("invalid Clanker pose projection");
+          return list;
+        },
+        appearance: () => [state.form, +state.lab, +state.coatSplit, +state.suit, +state.suitSplit, +state.seatLegs],
+        setAppearance: values => {
+          if (values[2] && !coatClip || (values[3] || values[4] || values[5]) && !suitClip) throw new Error("invalid Clanker pose projection");
+          state.lab = !!values[1]; state.coatSplit = !!values[2]; state.suit = !!values[3]; state.suitSplit = !!values[4]; state.seatLegs = !!values[5];
+          setForm(values[0], true);
+        } });
+      return { capture: projection.capture, apply(snapshot, item = null) {
+        projection.apply(snapshot, item);
+        for (const node of previewNodes) updateLocal(node);
+        refreshGeometry(); measureBody(false); return true;
+      } };
+    };
     const agent = {
       root, parts, hips, chest, update, setForm, setGait, walk, pace, place, poke, jump, reveal, setDriven, drive, toggleStyle, liveGeometry, dispose,
-      managed, poseManaged, climbPoseClear, climbCenter, bodyHull, walkPoseClear, walkSupportAt, labPoseClear, mouth, bodyTarget, envelope, feed, pound, cancelSmash, beat, holdLabItem, releaseLabItem,
+      managed, poseManaged, createPoseProjector, climbPoseClear, climbCenter, bodyHull, walkPoseClear, walkSupportAt, labPoseClear, mouth, bodyTarget, envelope, feed, pound, cancelSmash, beat, holdLabItem, releaseLabItem,
       get labFlask() { return labFlask; },
       get labItem() { return labFlask === labPlaceholder ? null : labFlask; },
       get labPickupBench() { return state.labBench; },
