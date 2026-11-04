@@ -96,7 +96,7 @@ const gorillaSleepRouteProof = () => {
   const section = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
   // Run the real wake/re-sleep controllers with fixed dry paths. Reservations
   // supply either the old bed or another bed after an overflow sleeper took it.
-  const controllers = section("    const sleepLegFrom =", "    // Rage shares");
+  const controllers = section("    const SLEEP_POSES =", "\n") + "\n" + section("    const sleepLegFrom =", "    // Rage shares");
   const rows = [];
   for (const slot of [0, 1, 2]) {
     const paths = [[0, 0, 10, 0, 20, 0, 30, 0], [0, 0, 22, 5, 40, 10, 60, 15], [0, 0, 22, 5, 60, 15]];
@@ -106,7 +106,7 @@ const gorillaSleepRouteProof = () => {
       roam: {}, climb: { active: false }, lounge: "", recover: 0, retry: 0 };
     e.sleep.path.set(paths[0]);
     const noop = () => {};
-    const context = { e, slot, paths, bedDay: 0, SLEEP_REACH: 1.1, SLEEP_ARRIVE: 0.3, SLEEP_STALL: 25, SPEED: 2.7,
+    const context = { e, slot, paths, bedDay: 0, sleepBeam: null, SLEEP_REACH: 1.1, SLEEP_ARRIVE: 0.3, SLEEP_STALL: 25, SPEED: 2.7,
       ctx: { sleep: { slots: [{ y: 0 }, { y: 0 }, { y: 0 }], path: (i, out) => { out.set(paths[i]); return paths[i].length / 2; } } },
       reserveBed: actor => { actor.sleep.slot = slot; return true; },
       releasePortal: noop, releaseLab: noop, releaseOffice: noop, clearWallSearch: noop, poseEntry: noop, move: noop,
@@ -122,6 +122,176 @@ const gorillaSleepRouteProof = () => {
         && e.goalX === (slot === 0 ? 30 : 22) && e.goalZ === (slot === 0 ? 0 : 5) });
   }
   return rows;
+};
+// Synthetic blocked-route tests run the production controllers; they do not identify a real island obstruction.
+const gorillaSleepStallProof = () => {
+  const source = readFileSync(join(root, "src/js/clankers.js"), "utf8");
+  const section = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
+  const controllers = section("    const SLEEP_POSES =", "\n") + "\n" + section("    const releaseBed =", "    const reserveBed")
+    + section("    const sleepLegFrom =", "    // Rage shares");
+  const script = controllers + `
+    let t = 0, walked = 0, done = false, jumps = 0, skipped = 0, fresh = null, unexpected = 0;
+    let departure = -1, arrival = -1, maxTries = 0, denied = false, backwalk = 0;
+    const move = (actor, step, speed) => {
+      if (!open(t, actor)) return;
+      const p = actor.root.position, dx = actor.goalX - p.x, dz = actor.goalZ - p.z, d = Math.hypot(dx, dz);
+      const go = Math.min(d, speed * pace * step);
+      if (d > 0) { p.x += dx / d * go; p.z += dz / d * go; walked += go; if (actor.sleep.retrying) backwalk += go; }
+    };
+    for (; t < limit && !done; t += dt) {
+      const p = e.root.position, s = e.sleep, x = p.x, z = p.z, leg = s.leg, stage = s.stage;
+      walked = 0;
+      if (jumpPause) e.jump.active = t >= 0.5 && t < 3.5;
+      if (denyDuringBeam && stage === "beamOut") denied = true;
+      if (rageDuringBeam && stage === "beamOut" && s.beamTime + dt >= SLEEP_BEAM) e.rage.active = true;
+      blockedLanding = landingBlocked || denied;
+      if (wakeDuringBeam && stage === "beamOut") wakeAt = t;
+      if (releaseDuringBeam && stage === "beamOut") { releaseBed(e); done = true; }
+      else if (t >= wakeAt) done = !updateWake(e, dt, p.x, p.y, p.z);
+      else updateSleep(e, dt, p.x, p.y, p.z);
+      if (t >= wakeAt && stage !== "return" && fresh === null) fresh = s.stuck === -1 && s.tries === 0;
+      maxTries = Math.max(maxTries, s.tries);
+      if (s.stage === "beamOut" && departure < 0) departure = t;
+      if (Math.hypot(p.x - x, p.z - z) - walked > 1e-9) {
+        jumps++;
+        if (stage !== "beamOut" || s.stage !== "beamIn" || p.x !== 30 || p.z !== 0) unexpected++;
+        arrival = t;
+      }
+      const passed = s.stage === stage && (stage === "return" && s.leg < leg || stage === "go" && s.leg > leg);
+      if (passed && Math.hypot(s.path[leg * 2] - x, s.path[leg * 2 + 1] - z) >= SLEEP_REACH) skipped++;
+      if (t < wakeAt && s.stage === "asleep") done = true;
+    }
+    globalThis.out = { t, done, jumps, unexpected, skipped, fresh, departure, arrival, maxTries,
+      stage: e.sleep.stage, slot: e.sleep.slot, bedDay, phase: e.phase, x: e.root.position.x, backwalk,
+      beamVisible: visible, outFrames, inFrames, form: e.gorilla.form, native: e.root.matrixNative };
+  `;
+  const path = [0, 0, 10, 0, 20, 0, 30, 0], noop = () => {};
+  const blocked = (t, e) => e.sleep.leg < 1;
+  const cases = [
+    { name: "bed unreachable: two retries inside two seconds, then 90ms out and in", open: blocked,
+      ok: r => r.stage === "asleep" && r.slot === 0 && r.x === 30 && r.maxTries === 2 && r.departure >= 2 && r.departure < 2.2
+        && r.arrival - r.departure >= 0.09 && r.arrival - r.departure < 0.12 && r.outFrames > 0 && r.inFrames > 0 && !r.beamVisible },
+    { name: "mid-leg obstruction makes short backsteps without renewing the budget", open: (t, e) => e.goalX < e.root.position.x || e.root.position.x < 4,
+      ok: r => r.stage === "asleep" && r.backwalk > 1.2 && r.maxTries === 2 && r.departure > 3 && r.departure < 4 },
+    { name: "temporary blockage clears before two seconds", open: (t, e) => t > 0.8 || blocked(t, e),
+      ok: r => r.stage === "asleep" && r.jumps === 0 && r.departure === -1 },
+    { name: "long slow walk keeps resetting stall budget", pace: 0.1, open: () => true,
+      ok: r => r.stage === "asleep" && r.jumps === 0 && r.t > 100 },
+    { name: "very slow forward movement prevents retry-induced stalls", pace: 0.05, open: () => true,
+      ok: r => r.stage === "asleep" && r.jumps === 0 && r.maxTries === 0 && r.t > 200 },
+    { name: "meaningful forward progress resets two-second budget", open: (t, e) => t > 1.2 && t < 1.6 || blocked(t, e),
+      ok: r => r.stage === "asleep" && r.departure > 3 && r.departure < 3.8 },
+    { name: "getting up pauses the stall budget", recover: 12, open: blocked,
+      ok: r => r.stage === "asleep" && r.departure >= 14 && r.departure < 14.3 },
+    { name: "jumping pauses the stall budget", jumpPause: true, open: blocked,
+      ok: r => r.stage === "asleep" && r.departure >= 5 && r.departure < 5.3 },
+    { name: "occupied landing retains reservation and never starts a beam", landingBlocked: true, limit: 20, open: blocked,
+      ok: r => !r.done && r.stage === "go" && r.slot === 0 && r.jumps === 0 && r.departure === -1 },
+    { name: "player entering destination during departure cancels transfer", denyDuringBeam: true, limit: 20, open: blocked,
+      ok: r => !r.done && r.stage === "go" && r.slot === 0 && r.jumps === 0 && !r.beamVisible },
+    { name: "rage starting on the transfer frame prevents teleport", rageDuringBeam: true, limit: 12, open: blocked,
+      ok: r => !r.done && r.stage === "go" && r.jumps === 0 && !r.beamVisible },
+    { name: "owner waking during departure cancels beam and resets retries", wakeDuringBeam: true, open: blocked,
+      ok: r => r.done && r.fresh && r.stage === "" && r.slot === -1 && r.jumps === 0 && !r.beamVisible },
+    { name: "release during departure clears effect and reservation", releaseDuringBeam: true, open: blocked,
+      ok: r => r.done && r.stage === "" && r.slot === -1 && r.jumps === 0 && !r.beamVisible },
+    { name: "home unreachable hands over to chill without skipping", wakeAt: 0, start: 30, open: (t, e) => e.sleep.leg > 2,
+      ok: r => r.stage === "" && r.slot === -1 && r.phase === "chill" && r.x === 30 && r.jumps === 0 },
+    { name: "home reached after a hold-up", wakeAt: 0, start: 30, open: (t, e) => t > 40 || e.sleep.leg !== 1,
+      ok: r => r.stage === "" && r.phase === "chill" && Math.abs(r.x) < 1.1 && r.jumps === 0 },
+    { name: "woken while held up", wakeAt: 4, open: (t, e) => t >= 4 || e.sleep.leg < 2,
+      ok: r => r.fresh && r.stage === "" && r.phase === "chill" && Math.abs(r.x) < 1.1 && r.jumps === 0 },
+  ];
+  return cases.concat([30, 120].map(fps => ({ ...cases[0], name: `bounded beam at ${fps} fps`, dt: 1 / fps }))).map(c => {
+    const asleep = c.start === 30;
+    const e = { active: true, index: 0, heading: 0, speed: 0, mode: "", phase: "", route: "", rest: 0, lounge: asleep ? "left" : "", recover: c.recover || 0, retry: 0,
+      root: { position: { x: c.start || 0, y: 0, z: 0 } }, owner: { traits: { name: "stall" } },
+      sleep: { stage: asleep ? "asleep" : "", slot: asleep ? 0 : -1, home: -1, leg: asleep ? 3 : 0, count: asleep ? 4 : 0, path: new Float64Array(48),
+        mark: 0, pose: "left", stall: 0, near: Infinity, stuck: -1, tries: 0, forwardLeg: -1, forwardNear: Infinity, beamTime: 0, beamWait: 0 },
+      gorilla: { chest: { scale: { y: 1 } }, poseManaged: noop, mouth: noop }, lab: { item: -1 }, motion: {}, jump: { active: false },
+      roam: {}, climb: { active: false }, rage: { active: false } };
+    e.sleep.path.set(path);
+    e.gorilla.root = e.root; e.gorilla.form = "ape"; e.root.matrixNative = false;
+    e.gorilla.setForm = form => { e.gorilla.form = form; };
+    const context = { e, dt: c.dt || 1 / 60, pace: c.pace || 1, limit: c.limit || 300, wakeAt: c.wakeAt ?? Infinity, open: c.open, bedDay: 0, SPEED: 2.7,
+      sleepBeam: { show: (slot, x, y, z, heading, progress, incoming) => { context.visible = true; context[incoming ? "inFrames" : "outFrames"]++; }, hide: () => { context.visible = false; } },
+      visible: false, outFrames: 0, inFrames: 0, blockedLanding: false, landingBlocked: !!c.landingBlocked,
+      jumpPause: !!c.jumpPause, rageDuringBeam: !!c.rageDuringBeam, updateJump: noop,
+      denyDuringBeam: !!c.denyDuringBeam, wakeDuringBeam: !!c.wakeDuringBeam, releaseDuringBeam: !!c.releaseDuringBeam,
+      bedTaken: () => false,
+      ctx: { sleep: { slots: [{ x: 30, y: 0, z: 0, heading: 0 }], path: (i, out) => { out.set(path); return path.length / 2; } }, restPoseClear: () => !context.blockedLanding },
+      reserveBed: actor => { actor.sleep.slot = 0; actor.sleep.pose = "left"; return true; },
+      caveAt: () => -1, clamp: (v, lo, hi) => Math.min(hi, Math.max(lo, v)),
+      releasePortal: noop, releaseLab: noop, releaseOffice: noop, clearWallSearch: noop, leaveLounge: noop, poseEntry: noop,
+      setGoal: (actor, x, y, z) => { actor.goalX = x; actor.goalY = y; actor.goalZ = z; } };
+    runInNewContext(script, context);
+    const r = context.out;
+    return { name: c.name, ...r, ok: r.unexpected === 0 && r.skipped === 0 && (c.rageDuringBeam || r.form === "ape" && !r.native) && c.ok(r) };
+  });
+};
+// Run the hub's real landing/player predicate, including the NPC exception to walking collision.
+const sleepLandingPlayersProof = () => {
+  const source = readFileSync(join(root, "src/js/scene-hub.js"), "utf8");
+  const section = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
+  const bodies = [], crew = { player: null }, context = { crew, remotes: { actors: () => bodies } };
+  runInNewContext(section("  const cylinderSegmentClear =", "  const actorBounds =")
+    + section("  const clankerBedPlayersClear =", "  const clankerPlayersSupportAt =")
+    + "globalThis.clear = clankerBedPlayersClear;", context);
+  const e = { controlled: false, gorilla: { bodyRadius: 1.9, bodyHeight: 2.2 } }, bed = { x: 4, y: 2, z: 6 };
+  const rows = { empty: context.clear(e, bed) };
+  crew.player = { root: { visible: true, position: { x: 4, y: 2.5, z: 6 } }, baseY: 0.5, bodyHeight: 1.8, bodyRadius: 0.4 };
+  rows.local = !context.clear(e, bed);
+  crew.player.root.position.y = 6; rows.above = context.clear(e, bed);
+  crew.player = null;
+  bodies.push({ player: true, x: 4, y: 2, z: 6, height: 1.8, radius: 0.4 });
+  rows.remote = !context.clear(e, bed);
+  bodies[0].x = 8; rows.cleared = context.clear(e, bed);
+  const actor = { ...e, root: { position: { x: 0, y: 0, z: 0 }, rotation: { y: 0 } }, heading: 0, climb: {}, motion: {},
+    gorilla: { bodyRadius: 1.9, bodyHeight: 2.2, climbPoseClear(dt, x, y, z, heading, motion, solid, transition, entry) {
+      this.bodyRadius = 3;
+      try { return transition(entry, x, y, z, x, y, z, 3, 2.2); }
+      finally { this.bodyRadius = 1.9; }
+    } } };
+  bodies[0].x = bed.x + 2.8;
+  rows.standingGap = context.clear(actor, bed);
+  Object.assign(context, { clankerCenterClear: () => true, clankerPeersClear: () => true,
+    clankerClimbTransitionClear: () => true, island: { solidAt: () => false } });
+  runInNewContext(section("  let clankerBedLanding =", "  let clankerExitBodyPending =")
+    + "globalThis.poseClear = clankerRestPoseClear; globalThis.landingHeld = () => clankerBedLanding;", context);
+  rows.lyingBlocked = !context.poseClear(actor, 2, "left", true, bed.x, bed.y, bed.z, 0, null, 0, bed);
+  rows.previewReset = context.landingHeld() === null && actor.gorilla.bodyRadius === 1.9
+    && context.poseClear(actor, 2, "left", true, bed.x, bed.y, bed.z, 0);
+  return rows;
+};
+// The visual pool keeps fixed storage, preserves another bed's active pulse when a slot is removed,
+// follows live reduced motion, and removes all scene ownership on disposal.
+const sleepBeamPoolProof = () => {
+  const media = { matches: false }, context = { window: { BL: {}, matchMedia: () => media } };
+  for (const name of ["math", "scene"]) runInNewContext(readFileSync(join(root, `src/js/${name}.js`), "utf8"), context);
+  const BL = context.window.BL, originals = Array.from({ length: 8 }, () => ({ verts: [0, 0, 0], faces: [], matrixGlyph: true }));
+  BL.hubModels = { matrixGlyph: i => originals[i] };
+  runInNewContext(readFileSync(join(root, "src/js/sleep-beam.js"), "utf8"), context);
+  const sceneRoot = BL.scene.createNode(), beam = BL.sleepBeam.create({ root: sceneRoot, capacity: 20 }), nodes = sceneRoot.children.slice();
+  const buffers = nodes.map(n => n.instanceData), sizes = buffers.map(b => b.length);
+  beam.show(0, 1, 2, 3, 0, 0.4, false);
+  const one = nodes.map(n => n.instanceCount), first = nodes.map(n => n.instanceData.slice(0, n.instanceCount * 20));
+  beam.show(19, 40, 2, 3, 0, 0.4, true);
+  const last = nodes.map((n, i) => n.instanceData.slice(one[i] * 20, 2 * one[i] * 20));
+  beam.hide(0);
+  const compacted = nodes.every((n, i) => n.instanceCount === one[i] && last[i].every((v, j) => v === n.instanceData[j]));
+  beam.hide(19);
+  for (let step = 1; step < 200; step++) for (let slot = 0; slot < 20; slot++) beam.show(slot, slot * 5, 0, 0, 0.3, step % 99 / 100, !!(step & 1));
+  const bounded = nodes.length === 8 && nodes.every((n, i) => n.instanceData === buffers[i] && n.instanceData.length === sizes[i] && n.instanceCount === one[i] * 20);
+  media.matches = true;
+  for (let slot = 0; slot < 20; slot++) beam.show(slot, 0, 0, 0, 0, 0.5, false);
+  const calm = nodes.every(n => !n.visible && !n.instanceCount);
+  media.matches = false; beam.show(0, 1, 2, 3, 0, 0.4, false);
+  const deterministic = nodes.every((n, i) => first[i].every((v, j) => v === n.instanceData[j]));
+  beam.clear(); const kept = new Set(); beam.liveGeometry(kept);
+  const clean = nodes.every(n => !n.visible && !n.instanceCount) && kept.size === 8
+    && nodes.every((n, i) => n.geometry !== originals[i] && n.geometry.verts === originals[i].verts);
+  beam.dispose(); beam.dispose(); const released = new Set(); beam.liveGeometry(released);
+  return { compacted, bounded, calm, deterministic, clean, disposed: !sceneRoot.children.length && !released.size };
 };
 // Rule: exercise the actual bounded rage state machine with a small physical
 // adapter. Collision and the rendered carry are covered by the hub regressions.
@@ -11590,11 +11760,36 @@ const hubGorillaPopulation = { name: "gorilla population restoration", why: "reg
     const restoredSlots = sleepers.map(e => e.sleep.slot);
     H.setGameMode(false);
     const stableExit = normal() && sleepers.every((e, i) => e.sleep.slot === restoredSlots[i]);
-    return { lateSleepers, stable, capped, reused, heldWhileDriven, uniqueAfterRelease, hidden, restored, stableExit,
+    // Real ownership entry points must cancel a pulse immediately, in either half of the transfer.
+    const beamEntry = sleepers[0], noBeam = () => !BL.scenes.hub.root.children.some(n => n.geometry?.matrixGlyph && n.fixedInstanceCapacity && n.visible && n.instanceCount);
+    beamEntry.sleep.stage = "beamOut"; beamEntry.sleep.beamTime = 0;
+    C.update(1 / 60);
+    const before = { ...beamEntry.root.position }, heldSlot = beamEntry.sleep.slot;
+    const selected = C.possess(beamEntry); C.update(0.25);
+    const beamPossession = selected && beamEntry.controlled && beamEntry.sleep.stage === "" && beamEntry.sleep.slot === heldSlot
+      && Math.hypot(beamEntry.root.position.x - before.x, beamEntry.root.position.z - before.z) < 0.001 && noBeam() && beamEntry.gorilla.form === "ape" && !beamEntry.root.matrixNative;
+    C.release(); reset(sleepers);
+    beamEntry.sleep.stage = "beamIn"; beamEntry.sleep.beamTime = 0.02;
+    C.update(1 / 60); C.possess(beamEntry);
+    const beamArrivalPossession = C.sleeping(beamEntry) && beamEntry.sleep.slot >= 0 && noBeam() && beamEntry.gorilla.form === "ape" && !beamEntry.root.matrixNative;
+    C.release(); reset(sleepers);
+    beamEntry.sleep.stage = "beamOut"; beamEntry.sleep.beamTime = 0;
+    C.update(1 / 60); C.setRemote(beamEntry.owner.traits.name, true);
+    const beamRemote = beamEntry.remoteControlled && !visible(beamEntry) && beamEntry.sleep.slot === -1 && noBeam() && beamEntry.gorilla.form === "ape" && !beamEntry.root.matrixNative;
+    C.setRemote(beamEntry.owner.traits.name, false); reset(sleepers);
+    beamEntry.sleep.stage = "beamOut"; beamEntry.sleep.beamTime = 0;
+    C.update(1 / 60); C.setAway(true); C.update(1 / 30);
+    const beamReset = !visible(beamEntry) && beamEntry.sleep.slot === -1 && noBeam() && beamEntry.gorilla.form === "ape" && !beamEntry.root.matrixNative;
+    C.setAway(false);
+    beamEntry.sleep.stage = "beamOut"; beamEntry.sleep.beamTime = 0;
+    C.update(1 / 60); C.cancelSleepBeams();
+    const beamSuspend = noBeam() && beamEntry.sleep.stage === "go" && beamEntry.gorilla.form === "ape" && !beamEntry.root.matrixNative;
+    return { beamSuspend, lateSleepers, stable, capped, reused, heldWhileDriven, uniqueAfterRelease, hidden, restored, stableExit, beamPossession, beamArrivalPossession, beamRemote, beamReset,
       population: [worker, chiller, away, ...sleepers].map(e => ({ state: e.owner.state, mode: e.mode, active: e.active, visible: e.root.visible, bed: e.sleep.slot })) };
   })()`);
   record("gorilla population: late-roster sleepers get exclusive beds; working, chilling and away owners get none; overflow waits at the 20-bed cap, respects driven reservations and reuses released beds", r.lateSleepers && r.stable && r.capped && r.reused && r.heldWhileDriven && r.uniqueAfterRelease, JSON.stringify(r));
   record("gorilla population: island game mode hides companions and its exit immediately restores current working, chilling and sleeping gorillas; repeated exit keeps their beds", r.hidden && r.restored && r.stableExit, JSON.stringify(r));
+  record("gorilla sleep beam: possession, remote takeover and population reset cancel both transfer stages without displacing a driven character", r.beamPossession && r.beamArrivalPossession && r.beamRemote && r.beamReset && r.beamSuspend, JSON.stringify(r));
 } };
 const hubCombatGate = { name: "hub game-only combat", why: "rule: ordinary visits retain harmless weapons and both look modes while damage, health simulation, rage and grabs stay off, and ending a game clears its transient combat state", run: async b => {
   const r = await b.evaluate(`(() => {
@@ -20918,7 +21113,7 @@ scene("poker", { opts: PHONE_SIZE, steps: [phone("poker", { card: '[data-intro="
   record("poker phone: nine seat choices and two private cards fit the panel", r.fits && r.seats === 9 && r.cards === 2, JSON.stringify(r));
   if (process.env.POKER_SHOTS) await b.screenshot(join(process.env.POKER_SHOTS, "poker-phone.png"));
 } }] });
-scene("hub", { label: "gorilla population restoration", query: "status=clankin", exclusive: true, steps: [hubGorillaPopulation] });
+scene("hub", { label: "gorilla population restoration", query: "status=clankin", exclusive: true, opts: { motion: true }, steps: [hubGorillaPopulation] });
 scene("hub", { label: "weapons", query: "character=portlandhodl&weapon=2&mag=1&ammo=6&jetpack=1&gorillarage=1", steps: [hubCombatGate, ...[hubAk, hubMelee, hubJetpack].map(gameCombat)] });
 // Her greeting comes once a page, to a fresh landing nothing has moved, so the guide has its own page.
 scene("hub", { label: "guide", query: "character=portlandhodl&jetpack=1", steps: [hubGuide, hubAsk] });
@@ -26219,6 +26414,12 @@ const unitChecks = async () => {
   await gpuGeometryDiagnosticChecks();
   const sleepRoutes = gorillaSleepRouteProof();
   record("gorilla re-sleep regression: waking remembers its former bed; the same bed keeps its return leg and a changed bed chooses the nearest waypoint on its own path", sleepRoutes.every(row => row.ok), JSON.stringify(sleepRoutes));
+  const sleepLandingPlayers = sleepLandingPlayersProof();
+  record("gorilla sleep landing: the real hub predicate protects local and remote players while allowing vertically clear beds", Object.values(sleepLandingPlayers).every(Boolean), JSON.stringify(sleepLandingPlayers));
+  const sleepBeamPool = sleepBeamPoolProof();
+  record("gorilla sleep beam: fixed pool, slot isolation, live reduced motion and scene cleanup", Object.values(sleepBeamPool).every(Boolean), JSON.stringify(sleepBeamPool));
+  const sleepStalls = gorillaSleepStallProof();
+  record("gorilla sleep stall regression: two seconds without forward progress permits a bounded beam to a clear reserved bed; progress, waits, cancellation and walking home retain their contracts", sleepStalls.every(row => row.ok), JSON.stringify(sleepStalls));
   const rage = await gorillaRageProof();
   record("gorilla rage: distinct rolling hits, only agitating Oogas targeted, held capture through planning and swing, bounded throws, exact expiry, zero health and account/lifecycle cancellation", Object.values(rage).every(Boolean), JSON.stringify(rage));
   const reviewCrowd=await reviewCrowdAndFallbackProof();
