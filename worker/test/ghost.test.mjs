@@ -75,8 +75,8 @@ test("a follower's ghost report reaches the arena's host alone, and nothing from
   const h = harness();
   const host = await h.join(1, "a"), follower = await h.join(2, "b"), away = await h.join(3, "c");
   for (const [ws, name] of [[host, "a"], [follower, "b"], [away, "c"]]) await h.send(ws, { t: "body", name });
-  await h.send(host, { t: "zone", name: "arcade.arena" });
-  await h.send(follower, { t: "zone", name: "arcade.arena" });
+  await h.send(host, { t: "zone", name: "ghost-arena" });
+  await h.send(follower, { t: "zone", name: "ghost-arena" });
   await h.send(away, { t: "hub", on: true });
   assert.equal(h.room.ghostHostId, 1, "the first page in the arena hosts");
   await h.send(follower, { t: "ghost", k: "hit", g: 4, d: 2 });
@@ -92,7 +92,7 @@ test("a follower's ghost report reaches the arena's host alone, and nothing from
 test("a follower's ghost reports are throttled to a burst, and come back with time", async () => {
   const h = harness();
   const host = await h.join(1, "a"), follower = await h.join(2, "b");
-  for (const [ws, name] of [[host, "a"], [follower, "b"]]) { await h.send(ws, { t: "body", name }); await h.send(ws, { t: "zone", name: "arcade.arena" }); }
+  for (const [ws, name] of [[host, "a"], [follower, "b"]]) { await h.send(ws, { t: "body", name }); await h.send(ws, { t: "zone", name: "ghost-arena" }); }
   for (let i = 0; i < protocol.GHOST_BURST + 8; i++) await h.send(follower, { t: "ghost", k: "hit", g: i, d: 1 });
   assert.equal(ghosts(host).length, protocol.GHOST_BURST);
   h.advance(1000);
@@ -105,8 +105,8 @@ test("the ghost arena elects its own host; its state frames reach the arena alon
   const a = await h.join(1, "a"), b = await h.join(2, "b"), c = await h.join(3, "c");
   for (const [ws, name] of [[a, "a"], [b, "b"], [c, "c"]]) await h.send(ws, { t: "body", name });
   await h.send(c, { t: "hub", on: true });
-  await h.send(a, { t: "zone", name: "arcade.arena" });
-  await h.send(b, { t: "zone", name: "arcade.arena" });
+  await h.send(a, { t: "zone", name: "ghost-arena" });
+  await h.send(b, { t: "zone", name: "ghost-arena" });
   assert.equal(h.room.ghostHostId, 1, "the first page in the arena hosts its hunt");
   assert.equal(h.room.hostId, 3, "the island keeps its own NPC host");
   await h.send(b, { t: "ghost", k: "ready" });
@@ -133,7 +133,7 @@ test("the ghost arena elects its own host; its state frames reach the arena alon
 test("a hidden page hands the arena's hosting on, and comes back a follower", async () => {
   const h = harness();
   const a = await h.join(1, "a"), b = await h.join(2, "b");
-  for (const [ws, name] of [[a, "a"], [b, "b"]]) { await h.send(ws, { t: "body", name }); await h.send(ws, { t: "zone", name: "arcade.arena" }); }
+  for (const [ws, name] of [[a, "a"], [b, "b"]]) { await h.send(ws, { t: "body", name }); await h.send(ws, { t: "zone", name: "ghost-arena" }); }
   assert.equal(h.room.ghostHostId, 1);
   await h.send(a, { t: "visible", on: false });
   assert.equal(h.room.ghostHostId, 2, "the visible page takes the hunt over");
@@ -162,6 +162,16 @@ test("a spectator in the arena's hallway watches the hunt but neither hosts nor 
   assert.equal(c.bins.length, 0, "the rest of the hall does not");
   await h.send(b, { t: "ghost", k: "ready" });
   assert.equal(ghosts(a).length, 0, "a spectator outside the arena cannot ready up");
+  // #422: past the hallway's midpoint the spectator is on the arena's half: still watching, still not a hunter, and not
+  // handed the kept frame again for a step it already follows.
+  await h.send(b, { t: "zone", name: "ghost-arena.haunt" });
+  assert.equal(b.bins.length, 1, "crossing the hallway's midpoint resends nothing");
+  await h.room.webSocketMessage(a, frame);
+  assert.equal(b.bins.length, 2, "the arena's half of the hallway hears the hunt");
+  await h.send(b, { t: "ghost", k: "ready" });
+  assert.equal(ghosts(a).length, 0, "and cannot ready up either");
+  assert.equal(h.room.ghostFollowers, 1);
+  assert.ok(protocol.inGhostArena({ zone: "arcade.arena" }), "a page loaded before #422 still reports the arena by its old zone");
   await h.send(a, { t: "zone", name: "arcade.haunt" });
   assert.equal(h.room.ghostHostId, 0, "nobody in the hallway hosts");
   await h.send(c, { t: "zone", name: "arcade.haunt" });
@@ -182,6 +192,30 @@ test("the arena's kept frame is dropped once nobody follows, so the next page in
   assert.equal(h.room.lastGhost, null, "the last follower leaving drops the kept frame");
   await h.room.webSocketMessage(a, frame);
   assert.equal(h.room.lastGhost, null, "nor is one kept while nobody follows");
-  await h.send(c, { t: "zone", name: "arcade.arena" });
+  await h.send(c, { t: "zone", name: "ghost-arena" });
   assert.equal(c.bins.length, 0, "the next page in waits for the host's own frame");
+});
+
+// #422: a rifle fired in the arena is the hunt's sound for everyone watching it, each page hearing it once; a shot from
+// the hallway stays in its own zone, so a spectator's page never reaches the arena's hunters.
+test("an arena shot reaches the arena and both halves of its hallway once each, never the hall; a hallway shot stays in the hallway", async () => {
+  const h = harness();
+  const a = await h.join(1, "a"), b = await h.join(2, "b"), c = await h.join(3, "c");
+  for (const [ws, name] of [[a, "a"], [b, "b"], [c, "c"]]) await h.send(ws, { t: "body", name });
+  await h.send(a, { t: "zone", name: "ghost-arena" });
+  await h.send(b, { t: "zone", name: "ghost-arena.haunt" });
+  await h.send(c, { t: "zone", name: "arcade.haunt" });
+  const shots = (ws) => ws.sent.filter((m) => m.t === "shot");
+  const fire = async (ws) => { h.advance(1000); await h.send(ws, { t: "shot", a: [60, 4, -20, 62, 4, -20] }); };
+  await fire(a);
+  assert.deepEqual([shots(a).length, shots(b).length, shots(c).length], [0, 1, 1], "both hallway halves, once each, and not back to the shooter");
+  assert.equal(shots(b)[0].id, 1);
+  await h.send(c, { t: "zone", name: "arcade.hall" });
+  await fire(a);
+  assert.deepEqual([shots(b).length, shots(c).length], [2, 1], "the hall hears no arena shot");
+  await fire(b);
+  assert.deepEqual([shots(a).length, shots(c).length], [0, 1], "a hallway shot reaches neither the arena nor the hall");
+  await h.send(a, { t: "zone", name: "arcade-hunt" });
+  await fire(a);
+  assert.equal(shots(b).length, 3, "a page loaded before #422, hunting in `arcade-hunt`, is the arena too");
 });
