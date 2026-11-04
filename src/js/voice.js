@@ -35,6 +35,8 @@
 // Crossings (#392): on a bridge between two places (voice-blend.js) the room also lets a player hear the place ahead,
 // and each voice plays at its equal-power share (`BL.voiceBlend.gain`, from `net.state.blendT` and the speaker's step),
 // gated by the hearing range, so the two places fade into each other along the crossing. Only this share eases by NEAR_STEP.
+// Ooga Arcade's hall, its haunted hallway and Ghost Hunter's Arena are zones in one scene's coordinates (#422,
+// `BL.voiceBlend.sameFrame`), so the range is measured between them too.
 // Where a voice's level goes: with Web Audio (`GAIN_PLAY`), each voice plays through a gain fed by its
 // speaking meter's own source, in the context the Join click made, while its element stays muted and only keeps the
 // stream flowing; the gain carries the receive level, the hearing range, local volume and mute alike. A limiter after
@@ -211,7 +213,8 @@
     if (!stats.radius) return 1;
     const s = BL.net.state, zone = s.zone, me = s.self, rec = BL.net.remotes.get(id);
     if (me.zone !== zone) return 1;
-    const across = rec && (rec.zone === zone || rec.zone === s.blendTo || rec.blendTo === zone);
+    const frame = BL.voiceBlend.sameFrame;
+    const across = rec && (frame(rec.zone, zone) || rec.zone === s.blendTo || rec.blendTo === zone);
     if (!across || rec.poseZone !== rec.zone) return 0;
     return falloff(Math.hypot(rec.x - me.x, rec.y - me.y, rec.z - me.z), stats.radius);
   };

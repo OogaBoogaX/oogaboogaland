@@ -200,6 +200,8 @@
     const audio = BL.ghostAudio.create(), hud = BL.ghostHud.create({ coarse: hub.coarse, onMusic: () => audio.toggleMusic(), onSkip: () => audio.skip(),
       onReady: () => readyUp(), onDecline: () => decline(), onLobby: hub.lobbyOpen,
       onSpectate: (mode) => watchFrom(mode), onSpectateNext: () => { specId = nextStanding(specId); } });
+    // A remote shot can arrive before the first update after the deferred hunt loads.
+    audio.level(hub.hearing ? hub.hearing() : 1);
     // Every mesh the hunt has shown, kept on the GPU for the visit (`liveGeometry`): frames swap in and out.
     const used = [];
     const keep = (geometry) => {
@@ -493,7 +495,17 @@
     for (let i = 0; i < C.WEAPON.damage.length - 1; i++) keep(MODELS.laserBolt(i));
 
     // ---------- the hunt's place on this page ----------
-    const restore = (snap) => { if (sim.load(snap)) heardAt = clock(); };
+    // A snapshot after a gap (a page joining a hunt under way, or back from where no frames came) holds the cues its first
+    // frame would play for everything that happened meanwhile (`catchUp`, `audio.hush`); a hunt seen from its lobby or
+    // frame by frame plays them all.
+    const CATCH_UP_MS = 1500;
+    let catchUp = false, snapAt = -Infinity;
+    const restore = (snap) => {
+      if (!sim.load(snap)) return;
+      const now = clock();
+      if (S.state !== ST.IDLE && S.state !== ST.GATHER && (prevState === ST.IDLE || now - snapAt > CATCH_UP_MS)) catchUp = true;
+      heardAt = snapAt = now;
+    };
     const sync = BL.ghostSync.create({
       npcSync,
       write: () => S.state !== ST.IDLE || clock() - idleAt < 3000 ? sim.snapshot() : null,
@@ -688,6 +700,31 @@
       if (bot.on) sim.present(SIM.REVIVE_BOT, bot.x, bot.y, bot.z);
     };
     const bot = { on: false, x: 0, y: 0, z: 0, dropAt: 0, head: "" };
+
+    // ---------- what a spectator hears of the hunters ----------
+    // A hunter hears their own hurt (`followMe`) and their own hits (`hitAs`); a page not in the hunt (a hallway
+    // spectator, or a hunter who left it) hears any hunter's hurt from the snapshots, at most one cue a frame. A slot's
+    // first sight of a hunter only takes its count, so joining late sounds nothing that happened before.
+    const segSeen = new Int8Array(C.MAX_PLAYERS).fill(-1), idSeen = new Float64Array(C.MAX_PLAYERS);
+    const hearHurts = () => {
+      const me = sim.playerById(myId()), hunter = !!me && !!me.inGame && !quitting, fight = S.state >= ST.COUNTDOWN && S.state <= ST.DEFEAT;
+      let hurt = false;
+      for (let i = 0; i < C.MAX_PLAYERS; i++) {
+        const q = sim.players[i];
+        if (!fight || !q.on || !q.inGame || q.id === myId()) { segSeen[i] = -1; continue; }
+        if (idSeen[i] !== q.id) { idSeen[i] = q.id; segSeen[i] = -1; }
+        if (segSeen[i] >= 0 && q.seg < segSeen[i]) hurt = true;
+        segSeen[i] = q.seg;
+      }
+      if (hurt && !hunter) audio.play("hurt");
+    };
+    // Another player's rifle in the arena (net.js `subscribeShots`; the room relays an arena player's shots to the arena
+    // and both halves of its hallway, `watchesGhost`): its sound, once, at this page's level. A shot from outside the
+    // arena sounds nothing here; this page's own sounds in `shot`.
+    const offShots = net.subscribeShots((id) => {
+      const rec = net.remotes.get(id);
+      if (rec && inZone(rec.zone)) audio.play("shot");
+    });
 
     // ---------- this page's own Ooga in the hunt ----------
     let segShown = -1, knockT = 0, knockX = 0, knockZ = 0;
@@ -2586,13 +2623,19 @@
       }
       lastRole = role;
       if (role === "follow") flushHits(now);
+      // How much of the hunt's music and sound this page hears (`hub.hearing`, #422): all of it in the arena, a hallway
+      // spectator's share by where they stand, set before this frame's cues so every one of them plays at it.
+      const heard = hub.hearing ? hub.hearing() : 1;
+      audio.level(heard);
+      audio.hush(catchUp);
       const t = huntTime();
       if (S.state !== prevState) { onState(S.state, prevState, t); prevState = S.state; }
       spectate(waiting());
       nightK = nightOf(t);
       drawBlight(now);
-      // The playlist runs from the herald's launch to the victory banner; the mini player shows it meanwhile.
-      const musicTime = S.state >= ST.LAP && S.state <= ST.BOSS || S.state === ST.VICTORY;
+      // The playlist runs from the herald's launch to the victory banner, wherever the hunt is heard; the mini player
+      // shows it meanwhile.
+      const musicTime = (S.state >= ST.LAP && S.state <= ST.BOSS || S.state === ST.VICTORY) && heard > 0;
       audio.music(musicTime);
       hud.player(musicTime ? audio.nowPlaying : null, audio.musicOn, audio.tracks > 1);
       jolt = Math.max(0, jolt - dt * 2.2);
@@ -2651,9 +2694,11 @@
           if (geo) { keep(geo); warm++; }
         }
       }
+      hearHurts();
       drawRing(dt);
       drawHud(t);
       drawMinimap(t);
+      if (catchUp) { catchUp = false; audio.hush(false); }
       audio.update();
     };
 
@@ -2924,6 +2969,7 @@
       letGo();
       disarmHunters();
       guide.lend(null);
+      offShots();
       audio.dispose();
       hud.dispose();
       removeChild(root, group);
@@ -2937,6 +2983,7 @@
       get state() { return Object.keys(ST).find((k) => ST[k] === S.state); },
       get round() { return S.round; },
       get role() { return npcSync.role; },
+      get audio() { return audio; },
       start: () => { if (npcSync.role === "follow") sync.start(); else sim.start(clock(), myId(), SKIP); },
       /** Straight to a state by name ("BOSS", "BREAK", ...), and a round for a countdown. */
       skip: (state, round) => sim.jump(ST[state], round),
