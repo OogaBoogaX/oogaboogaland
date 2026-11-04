@@ -2,7 +2,8 @@
 // can leave a trail, and off-path destinations retain their final approach.
 (() => {
   "use strict";
-  const BL = window.BL = window.BL || {};
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
   const CAPACITY = 4096, SPACING = 0.25, LOOK_AHEAD = 0.45, LANE_OFFSET = 0.35;
   const create = ({ island, walkable, surfaceAt = island.surfaceAt, pointAllowed = null }) => {
     const path = island.path, size = CAPACITY;
@@ -281,7 +282,36 @@
       result.push(to);
       return result;
     };
-    return { createState, target, route, xAt, zAt, capacity: size, get nodes() { return count; }, buffers: xs.byteLength + zs.byteLength + centerX.byteLength + centerZ.byteLength + groups.byteLength + heads.byteLength + edges.byteLength + next.byteLength + costs.byteLength + parents.byteLength + distances.byteLength + heap.byteLength + heapIndex.byteLength + routeState.route.byteLength };
+    // Persist only an actor's used route, never graph scratch buffers or scene nodes. The caller's
+    // world version must cover geometry and query semantics; path.version fences topology changes.
+    const capture = (state) => ({ v: 1, pathVersion: path.version, version: state.version,
+      tx: Number.isNaN(state.tx) ? null : state.tx, tz: Number.isNaN(state.tz) ? null : state.tz,
+      count: state.count, index: state.index, plans: state.plans, targetX: state.targetX, targetZ: state.targetZ,
+      route: Array.from(state.route.subarray(0, state.count)),
+      laneX: Array.from(state.laneX.subarray(0, state.count)), laneZ: Array.from(state.laneZ.subarray(0, state.count)) });
+    const restore = (saved) => {
+      const keys = ["v", "pathVersion", "version", "tx", "tz", "count", "index", "plans", "targetX", "targetZ", "route", "laneX", "laneZ"];
+      const coordinate = value => Number.isFinite(value) && Math.abs(value) <= 10000;
+      if (!saved || Object.keys(saved).length !== keys.length || !keys.every(key => Object.hasOwn(saved, key))
+        || saved.v !== 1 || saved.pathVersion !== path.version || !Number.isSafeInteger(saved.version) || saved.version < -1
+        || !Number.isInteger(saved.count) || saved.count < 0 || saved.count > size
+        || !Number.isInteger(saved.index) || saved.index < 0 || saved.index > saved.count
+        || !Number.isSafeInteger(saved.plans) || saved.plans < 0
+        || ![saved.targetX, saved.targetZ].every(coordinate)
+        || ![saved.tx, saved.tz].every(value => value === null || coordinate(value))
+        || ![saved.route, saved.laneX, saved.laneZ].every(array => Array.isArray(array)
+          && array.length === saved.count && Object.keys(array).length === saved.count)
+        || !saved.laneX.every(coordinate) || !saved.laneZ.every(coordinate)
+        || saved.count > 0 && saved.version !== path.version) throw new Error("Invalid NPC route checkpoint");
+      if (version !== path.version) rebuild();
+      if (!saved.route.every(i => Number.isInteger(i) && i >= 0 && i < count)) throw new Error("Invalid NPC route node");
+      const state = createState();
+      for (const key of ["version", "count", "index", "plans", "targetX", "targetZ"]) state[key] = saved[key];
+      state.tx = saved.tx === null ? NaN : saved.tx; state.tz = saved.tz === null ? NaN : saved.tz;
+      state.route.set(saved.route); state.laneX.set(saved.laneX); state.laneZ.set(saved.laneZ);
+      return state;
+    };
+    return { createState, target, route, capture, restore, xAt, zAt, capacity: size, get nodes() { return count; }, buffers: xs.byteLength + zs.byteLength + centerX.byteLength + centerZ.byteLength + groups.byteLength + heads.byteLength + edges.byteLength + next.byteLength + costs.byteLength + parents.byteLength + distances.byteLength + heap.byteLength + heapIndex.byteLength + routeState.route.byteLength };
   };
   BL.npcPaths = { create };
 })();

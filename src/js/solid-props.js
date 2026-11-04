@@ -3,7 +3,8 @@
 // `shoulderAt` and `isActive`.
 (() => {
   "use strict";
-  const BL = window.BL = window.BL || {};
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
   const { mat4 } = BL.math;
   const EPS = 1e-7, geometries = new WeakMap();
   // Props use their render mesh or an explicit collision shell; a shared local-space tree preserves openings in

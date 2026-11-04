@@ -1,0 +1,544 @@
+# Virtual host: inactive implementation draft
+
+Part of #377; **does not close it**. Baseline: `rock` at
+`17659ddfa0079f24bea84d872e29e532530bd7e4`. No deployed Worker import, class export,
+binding, route, migration, alarm, timer, dependency or production data changes.
+The current browser host still runs. This draft must not be described as an
+always-on NPC world or an enabled disconnect feature.
+
+## Implemented and still missing
+
+`worker/src/virtual-host.js` implements transactional ownership fencing, finite
+host runs, fixed-step recovery with bounded catch-up, a versioned checkpoint,
+atomic session operations and bounded public snapshot delivery. Its simulation
+adapter is required, synchronous and data-only. General host tests use a named
+deterministic fixture. The extraction tests additionally exercise the actual
+surface planner, RNG and Ooga work-trip transitions with explicitly authored
+world/weapon adapters; they do not run the complete Ooga/Clanker simulation.
+
+`worker/src/host-sessions.js` implements single body/session ownership, 60-second
+disconnect grace, duplicate-session fencing, passive-body integration, equipment
+retention, occupancy lifecycle and durable departure intents. The actual island
+collision adapter and browser presentation/transport are not connected.
+
+The existing `npc-paths.js` surface-route planner is now usable headlessly through
+`worker/src/npc-navigation.js`, with bounded route capture/restore. Its existing
+routing algorithm is unchanged and both browser and host import the same source.
+This is the first real NPC extraction boundary, not a new AI: tests use authored
+test geometry and recorded actor positions, not the full hub collision bundle.
+
+`worker/src/npc-random.js` also loads the existing Clanker `math.mulberry32`
+generator headlessly. An opt-in capture word preserves its exact future draws;
+normal browser callers retain the same API/sequence without a capture closure.
+The versioned checkpoint is at most 25 JSON bytes per stream. Golden outputs
+recorded from the base, actor independence and failed-commit/owner-recovery tests
+guard continuation. This supplies a reusable state boundary, **not** a completed
+Clanker adapter: its current browser caller has not opted into checkpoints, and
+Ooga crypto/Math.random choices still need a deliberate authoritative input policy.
+
+`src/js/npc-work.js` now contains the existing Ooga site selection and work-trip
+transitions, called by both browser `crew.js` and `worker/src/npc-work.js`. The
+6,816-byte `runWork` function moved unchanged. Planning's three injected callbacks
+preserve browser randomness, route planning and companion notification semantics.
+Host checkpoints retain work phases, waypoint indices, positions, aim/readiness,
+timers, rest and reload-slot flags, with strict world/catalog compatibility.
+This is a real state-machine extraction; world movement, aim, weapon/reload and
+Clanker behavior remain explicit adapters, not newly invented replacements.
+
+The existing mesh kernels (`convex.js`, `solid-props.js`) now also load headlessly.
+`src/js/npc-clearance.js` shares the hub's unchanged voluntary NPC clearance policy;
+the browser resolves its current island at query time after each visit rebuild.
+`worker/src/mesh-collision.js` prepares bounded, explicitly authored flat mesh
+catalogs, hashes their content and restores collision poses before rebuilding
+query caches. This is a real collision boundary, **not** an export of the hub's
+terrain, moving actor rigs or world rules. Unknown scene features fail closed.
+
+The complete headless Ooga/Clanker simulation, production Durable Object runner,
+browser follower conversion, authenticated protocol negotiation, independent
+tracks, disconnect handoff and visual rendering remain integration gates. Neither
+mocked storage nor fixture motion establishes Cloudflare or live-world behavior.
+
+Tess is explicitly excluded following the later user decision. Keep her existing
+behavior; #466 is a design discussion before shared-state/queue implementation.
+No Tess source changes are included here.
+
+## Feasibility findings from current source
+
+| Current boundary | Consequence |
+| --- | --- |
+| `room.js` elects a player browser and relays its `npcFrame`; `npc-sync.js` uses FORMAT 2, 112 floats per Ooga plus events | The frame is a pose display format, not an AI recovery checkpoint. It omits random generator state and much route, timer and reservation state. |
+| `crew.js` builds model geometry at module load, drives rendering parts and uses random decisions; `clankers.js` depends on scene nodes, `agent`, support/clearance queries, authored routes and effects | Neither can simply be imported into a Durable Object. A DOM/window shim or a frozen pose relay does not solve headless simulation. |
+| `scene-hub.js` supplies work sites, terrain, buildings, stairs, ceilings, collision callbacks and update order | Extract versioned world data/query adapters before enabling headless AI. Preserve structural navigation and category-specific behavior. |
+| `npc-sync.js` excludes possessed bodies; gorilla work also reacts to crew events | #379 must supply the continuous independent tracks and possession representation. Do not duplicate their AI in this host. |
+| Room `pose` carries position/yaw and compact `g`, `j`, `w` display fields | It lacks vertical velocity, exact fuel/reserve ammunition and the complete controlled-body handoff. These must be explicitly added and validated; do not infer them from visual flags. |
+| Room `drop` immediately releases body/cabinet and voice; a newer login currently evicts the previous one | Grace must integrate with these paths atomically. Changing only close handling would strand locks or permit duplicate bodies. |
+| Hub/remote presentation does not provide this lifecycle's free-arm indicator | #464 consumes semantic grace state; #453 supplies the green-glyph reference. No new competing visual transport here. |
+
+Before extraction is accepted, the real simulation checkpoint must cover positions,
+velocities, activity inputs and timestamps, travel phase/waypoint progress, timers,
+bed/work reservations, random state and decisions that affect future movement.
+Rendering-only particles, speech history and fired projectiles are not replayed.
+Use captured world versions, not runtime-generated client geometry, as recovery
+compatibility keys. #402's transition behavior remains separate.
+
+## Host contract
+
+`new VirtualHost({storage, simulation, sessionAdapter, clock})` needs a transactional
+Durable Object storage-compatible adapter. `simulation` supplies `version`,
+`initial`, `validate`, `step(state, milliseconds, simulationTime)` and `project`.
+It also requires `npcFor(state, bodyId)` and `handoff(state, departure)`. Both read
+the transaction's simulation state. The host requires successful handback before
+marking the departure applied, and never calls handoff when no NPC exists.
+All callbacks must be synchronous, deterministic and free of network/other external
+side effects because a transaction can retry. `sessionAdapter.stepPassive` is
+required even when no player is present; missing physics cannot silently freeze a
+body. Optional occupancy validation defaults to refusing a claim.
+
+- `begin(owner, durationMs)` is a trusted operator action, never a browser join.
+  Duration is at most 15 minutes. It resumes existing state, never resets it.
+- `claim(owner)` takes an expired 10-second lease within the same finite run or
+  its existing-session drain, including late recovery that only completes expiry. It
+  increments its persisted fence. Every subsequent write checks owner, fence,
+  world version, lease and run deadline inside the transaction.
+- `tick(ticket, liveTokens)` advances grace bodies and expiry in the same transaction
+  as at most eight 250 ms simulation steps. The authenticated transport census is
+  mandatory once session state exists, including an empty census. Duplicate calls at
+  the same time do not step twice. Backlog beyond 30 seconds pauses the run instead
+  of skipping AI time or running unlimited recovery work. These are draft bounds,
+  **not a measured or approved production cadence**.
+- An explicit `begin(owner, durationMs, {resumePaused:true})` can resume after a
+  long outage/stopped run: keep NPC state, timers and RNG, re-anchor the wall cursor,
+  and record the unsimulated interval in `pausedMs`. This loses wall-time progress
+  during the outage and is not seamless recovery. Logical `simulatedAt` does not
+  jump, so absolute AI timers keep their remaining duration. Wall-clock session
+  deadlines are untouched. A new run cannot start until existing bodies drain.
+- `sessions(ticket, liveTokens, operation)` reconstructs the registry, recovers
+  against the authenticated Room's surviving socket tokens and commits the operation
+  with its bounded pending departures. Publish returned results only after success.
+  A failed commit cannot announce ownership or an expiry. No browser supplies the
+  token list, account identity, ownership decision, physics adapter or NPC existence.
+- `disconnect(ticket, liveTokens, ref, closedAt)` applies a trusted observed close
+  before inferring missing transports. This is the close entrypoint; a generic
+  registry callback that disconnects after recovery has the wrong ordering. Room
+  must deliver pending close observations before removing those tokens from the
+  logical census supplied to other operations, including after outbox replay.
+- `stop(ticket, liveTokens)` stops admission and NPC stepping, drains already
+  accepted bodies and retains earlier grace deadlines. The run deadline does the
+  same automatically on tick. Still-live bodies get at most 60 seconds from that
+  persisted stop time; a late restart never extends it. Once no bodies remain,
+  status becomes stopped; applied visual tombstones need no recurring wake.
+  No method starts an alarm/interval. An eventual runner must schedule bounded
+  wakes independently of visitors, complete this finite drain and then stop.
+  It must not auto-start another run.
+  A crash in the final lease window may leave the rest of that finite run idle.
+
+Storage holds one overwritten checkpoint (96 KiB maximum), not an archive.
+Unknown/corrupt schema, world or state fails closed without deleting the stored
+record. Host/session schema 2 refuses the old unpublished schema 1 rather than
+inventing missing magazine/body fields. A stale runner cannot overwrite a new owner. Transaction tests cover
+rollback and competing claims; actual Durable Object storage/output gates and
+alarm execution still require a local Cloudflare runtime test.
+
+## Disconnect and occupancy contract
+
+The confirmed close of the current `(accountId, generation, token)` starts grace
+for exactly 60,000 ms. Stale sockets cannot disconnect, update or release a
+replacement. A duplicate live connection rotates generation/token and neutralizes
+old held movement. Reconnect strictly before the deadline preserves the same body,
+resulting position and heading, Ooga/Clanker kind, selected weapon/slot, gear
+ownership, carry/combat mode, current magazine, ordered counts of up to two spare
+magazines, unlimited-ammo flag, jetpack ownership/equipment and normalized fuel.
+At the deadline it cannot reclaim the old body. The actual client codec must still
+map these fields from current equipment without inferring them from pose flags.
+
+Passive motion plus body ID, kind and zone are passed to the physics adapter; equipment, deadlines and
+ownership are not writable through it. Horizontal held movement is neutralized;
+vertical velocity remains. Recovery is divided into at most 50 ms segments, capped
+by the 60-second grace window (up to 1,200 adapter calls per body). The adapter must
+use real swept collision, gravity and scene transitions. Worst-case 64-body recovery
+is an explicit CPU measurement gate. A fixture ledge is not proof of island,
+Clanker support, water, ladder, abyss or game-scene collision.
+
+The body contains no saved held inputs, thrust, shots, swing/reload action or event
+history. The future handoff must cancel incomplete reload/firing/thrust without
+granting ammo/fuel; current finite inventory values remain. Ordinary connected
+movement stays on its current path. Only grace-body passive motion changes owner.
+Voice disconnect/cleanup continues immediately on its existing path; grace is not
+permission to retain audio or route it through a host browser.
+
+Grace exposes `presentation: "open-hand"`: #464 must choose the free arm, raise it
+and show an open hand while respecting equipment, then clear it on reconnect. The
+host emits a stable `depart:<generation>` intent with a green departure and an
+optional existing-NPC handback. No NPC means departure only: no spawn or arrival
+beam. Late consumers must reconcile current state, not replay old beam/actions.
+Departure tombstones retain the body's zone, motion and exact equipment. The NPC
+lookup and handback use transaction-local simulation state; handback and the
+`applied` marker commit atomically. An unapplied departure cannot be acknowledged.
+Applied tombstones survive until visual delivery acknowledgement, but recovery
+never reapplies the handback. Effects are idempotent by generation; pending departures survive crashes and block
+reclaim until applied/acknowledged. A full outbox refuses new bodies rather than
+dropping an unacknowledged departure. It shares 64 slots with sessions.
+
+A restart with no surviving transport derives grace from persisted `lastSeenAt`;
+it never assigns a fresh 60 seconds from restart. Saved grace deadlines survive
+every restart. Delayed presence persistence can shorten the available grace after
+a crash; checkpoint frequency must be selected against that accuracy/cost tradeoff.
+Already expired bodies depart without replaying the missing interval's motion.
+
+One hammock/cabinet resource per session; no resource has two owners. Retain through
+grace/reconnect; release on expiry, explicit logout/release, revocation or zone
+departure. This deliberately follows the new #377 request over the old immediate
+cabinet-disconnect rule, but is not enabled in current Room. #461 must reconcile
+gear from occupancy, and #463 must stop game input and clean up the seat without
+moving hockey physics to this host. New claims require authoritative proximity and
+resource validation. Changed/missing scene resources after a world migration require
+an explicit cleanup migration before resume.
+
+## Bounded delivery and deployment
+
+Public snapshots allowlist NPC identity/category, root pose, activity/phase, route
+progress and RNG seed plus the hub pile count. No private session/body/equipment or
+voice fields. At most 128 NPCs and 32 KiB UTF-8; over-budget output rejects the
+transaction. #378 owns cached guest storage, delivery and reconciliation. Guests
+must not subscribe to the live Room through this helper.
+
+`LatestHostDelivery` retains one snapshot and at most 32 follower cursors, sends at
+most four times a second per follower, refuses obsolete epoch/sequence and skips
+backpressured sends. Rejoin is idempotent. A slow follower gets the latest complete
+state, not queued history. The real transport must supply genuine pending-byte
+accounting or ACK-based backpressure; passing a constant zero is not acceptable.
+The helper reports messages, UTF-8 bytes and skipped sends. These counters measure
+only successful adapter sends, not Cloudflare billing or client render cost.
+
+Production activation must be a separate, reviewed rollout after the remaining
+gates pass. Negotiate an exact host/session/world capability before admission.
+Persist one authority mode/epoch for the world. In server mode, reject all old
+browser NPC publications and do not elect a browser fallback if the host is down;
+freeze at the latest state with a reconnect indication. Old clients must reload
+or remain in an isolated local experience, never share a second authority.
+
+Schema migration must preserve NPC RNG/routes/timers, absolute grace deadlines,
+session fencing and occupancy. Unknown newer state is read-only on rollback.
+Drain/fence sessions before changing mode; do not roll code back to browser host
+election while a server lease remains active. Conversion to the old pose-only
+format loses recovery state and cannot be an automatic rollback. No migration or
+mixed-version deployment has been executed by this PR.
+
+## Resource envelope and cost gate
+
+The hard bounds above protect a draft, not production performance guarantees.
+One bounded local measurement of the existing planner on the authored 10 m test
+line used 41 graph nodes and 33 route nodes: 778,240 bytes of graph typed arrays,
+81,920 bytes per actor's typed arrays and a 593-byte JSON route checkpoint. The
+first plan took 0.61 ms; 100 restores had p50 0.0094 ms, p95 0.0215 ms and maximum
+0.089 ms on this local run. These numbers exclude real island geometry, full AI,
+the complete roster, storage/serialization and rendering; they do not estimate
+Cloudflare CPU or billing. Restoring an actor allocates its bounded route buffers,
+so a production adapter should retain them between commits and measure recovery
+allocation separately. Do not copy the test adapter's restore-on-every-step pattern
+into a permanent runner.
+
+At the maximum 32 KiB × 4 Hz × 32 followers, outbound payload alone reaches
+4 MiB/s; that is a ceiling to reduce through measured compact state and interest
+management, not an acceptable target. A 250 ms durable commit cadence would mean
+10,368,000 checkpoint writes over 30 days; it needs a real batching/recovery study.
+
+[Cloudflare pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/)
+checked November 4, 2026: duration uses allocated 128 MB, even with fewer actual
+bytes. One continuously awake object for 30 days uses 331,776 GB-s. Paid allowances
+include 400,000 GB-s and 1 million requests per month, shared with other usage;
+overage is rounded up to billing units ($12.50/million GB-s, $0.15/million requests).
+SQLite includes 50 million written rows/month, then $1/million; each alarm schedules
+a written row. Alarm invocations count as requests. One-second wakes alone mean
+2,592,000 invocations and alarm writes in 30 days, before checkpoints and traffic.
+This is arithmetic, not an account estimate: staging, production, other objects,
+Worker charges, storage and actual remaining allowances are unmeasured. No promise
+of zero incremental cost, and no permanent loop has been enabled.
+
+[Alarm semantics](https://developers.cloudflare.com/durable-objects/api/alarms/)
+require retry-safe handling; at-least-once execution is not a precise simulation
+clock. [Platform limits](https://developers.cloudflare.com/durable-objects/platform/limits/)
+also constrain CPU and storage. Our checkpoint cap is below the legacy 128 KiB
+value cap as well as SQLite's larger cap; this is not a CPU/memory measurement.
+
+Before activation, agree budgets and measure matched baseline/final revisions:
+zero-player server simulation; normal and busy shared hub; 2 and 32 clients;
+burst/reconnect/restart and maximum grace recovery. Record frame-time p50/p95/p99,
+FPS, simulation/pose/render/effect CPU, heap, payload bytes, sends/second/fanout,
+actual DO duration/requests/storage writes and checkpoint recovery error. Use
+bounded sessions, a physical phone where available (label emulation separately),
+and account metrics. After companions land, run one combined NPC/dog/ghost,
+flame/projectile and voice check and link the evidence. None of those live or
+physical-device measurements is claimed here.
+
+## Next integration increments
+
+1. Map the session codec to actual Ooga/Clanker equipment and body support; consume
+   authenticated close observations before census removal. A dedicated WorldHost
+   and Room need a bounded durable command outbox and idempotent acknowledgements,
+   because their storage transactions cannot be atomic together. Live pose relay
+   and immediate voice cleanup stay on their current paths.
+2. Complete the extracted work trip's real movement, aim, inventory and coupled
+   Clanker plan/hit adapters, with their state in the same checkpoint. The trip
+   transitions are now shared by browser and host. Preserve current behavior;
+   use explicit per-actor RNG words and logical clocks. Keep #379's independent
+   tracks/possession representation as the interface, not a competing implementation.
+3. Export the actual world into versioned terrain/prop/support queries. Shared mesh
+   kernels and voluntary NPC clearance are now available, but the bounded flat-TRS
+   adapter has only authored fixture catalogs. Reuse the existing terrain
+   snapshot approach where possible. Persist bounded sleep-route search state and
+   work/bed reservations rather than generators, scene references or machine-time
+   budgets. Surface-route checkpointing alone does not supply these systems.
+4. Run a finite local Durable Object exercise with zero browsers, restart, write
+   failures and a final-session drain. Then integrate explicit server-follow
+   negotiation and epoch fencing, with no browser AI fallback in shared server mode.
+5. Resolve the failed hub checks and verify the complete client/host behavior with
+   two clients, slow receivers and reconnects. Measure actual checkpoint sizes,
+   physics/query CPU, memory, fanout and account costs before proposing activation.
+
+The current surface planner's graph scratch buffers are rebuilt, not persisted.
+Actor checkpoints retain used route indices, exact cached lanes and progress,
+bounded by the planner's existing 4,096 nodes; the host's total 96 KiB cap still
+applies. Topology/world mismatches must refuse recovery. Tests show the same route
+continues after a new host owner without replanning, but do not establish the
+full-roster memory/size envelope or complete island navigation parity.
+
+Random words must commit with the actor's choices in the same world checkpoint.
+Never retain a mutable RNG outside a retried transaction: restore its word from
+that transaction's state, then commit its captured continuation with the result.
+The host regression exercises a failed write and owner replacement against an
+uninterrupted stream, including conditional extra draws. Its choices are explicitly
+a fixture; the separate work-trip tests use the extracted transitions. Existing seeded callers use
+the unchanged draw body; `randomInt` and its crypto source are untouched.
+
+### Work-trip recovery boundary
+
+`createWorkCheckpoint(world, routeLengths)` owns only `cave.work`, not an entire
+Ooga. It rejects unknown versions/worlds, changed site counts or route lengths,
+out-of-range waypoint/site indices, malformed vectors, extra fields and nonfinite
+state. Captures/restores copy vectors and route catalogs rather than aliasing live
+state. Bounds are 32 sites, 4,096 points per route and finite world coordinates.
+World versions must also change for geometry, site order, eligibility and adapter
+semantics; equal route lengths alone do not establish compatibility.
+
+Motion, RNG, exact magazine state, reload/burst clocks, reservations, activity input
+cursors and companion transitions belong to the **same enclosing transaction**.
+Callbacks cannot perform network I/O or publish effects before commit. Recovering
+work must not restore old transient player actions or replay previous effects to a
+late follower. Browser callbacks remain their original local implementations;
+no authority mode, player movement, voice or disconnect presentation is switched.
+
+Six golden traces were recorded from the original `crew.js` source at the base:
+normal, maintainer rest, occupied/target-unready, site closure, spare magazines,
+and unavailable reload slot. They cover all five trip phases. Test fixtures compare
+the complete state/callback trace, restore after every frame, and exercise actual
+host failed writes and owner replacement from each phase. Two follower fixtures
+and a late joiner consume bounded latest snapshots of that state, without action
+history. These use authored motion/aim/inventory callbacks and in-memory storage;
+they are not real transport, island collision, full Clanker or Durable Object tests.
+
+`node scripts/record-npc-work-baseline.mjs` reproduces the golden file from the
+local base commit, checking the original function source hash before execution.
+It does not fetch missing history or run a browser. Object keys are sorted before
+hashing; array order, including magazines and notifications, is retained. The
+initial fixture omits `weapon.workSite`, matching a browser actor before its first
+assignment; the enclosing production codec must validate assigned weapon-site IDs.
+
+The original `selectWorkSite` can leave partial site/position changes if its
+position adapter refuses. That behavior is preserved, not silently repaired here.
+A headless adapter must return valid state or abort its enclosing transaction;
+the work codec is not a rollback mechanism for arbitrary adapter side effects.
+Likewise, test rollback retains authored counters in the transactional fixture;
+it does not establish transactional behavior of the current browser Clanker hooks.
+
+The browser now uses the extracted module, so the earlier Hub source-attribution
+report applies to the preceding v3 patch, not a full parity verification of this
+new crew change. The twenty failing Hub assertions are deliberately not rerun.
+Complete browser parity remains a gate, alongside real adapter/runtime integration.
+
+### Collision and NPC clearance boundary
+
+`prepareMeshCollision` requires a versioned, data-only catalog. Bounds are 128 flat
+nodes, 64 geometries, 16,384 total unique vertices and fan triangles, 32,768
+triangles summed over all placed nodes, 2 MiB of normalized
+catalog JSON and 48 KiB of pose checkpoint JSON. The full host checkpoint remains
+capped at 96 KiB. Registration order is retained for collision tie-breaks. SHA-256
+covers geometry, flags, node order and initial transforms as well as the world ID
+and explicit collision-kernel version (`solid-props-1`);
+pose recovery refuses a changed catalog even when someone reuses a version name.
+Object key order does not affect the fingerprint. Bump the kernel version when
+changing query semantics; it is not an automatic source-code hash. Adapter semantics must still
+bump the enclosing simulation version.
+
+The adapter preserves face `gorillaStep`, `supportOnly` and `ragePass`, and node
+`shoulderOnly`, `climbMasonry`, `gorillaStepAll` and `ragePass` flags. Its exposed
+queries use normal collision behavior without skip/escape options. It accepts only
+positive, nonsingular scales, Euler rotations, visibility and world-space flat
+nodes. Hierarchy, quaternion animation, instances, `collisionGeometry` and special
+`gorillaSteps` arrays are rejected, not ignored. A production exporter must resolve
+these features explicitly, retain mesh winding/closed shells and prove parity.
+Voxel terrain, occupancy, full animated bodies and special shoulder queries are
+still separate. No production catalog is included.
+
+Checkpoints retain ordered node IDs and poses, never BVHs or renderer references.
+Restores validate the entire saved state before mutation and copy their vectors.
+Preparation/hashing occurs outside the host transaction. The fixture rebuilds a
+runtime for each simulation step so an aborted write cannot leak a moved obstacle
+through a retained cache. Production reuse needs an equivalent reset discipline
+and allocation/CPU measurements; copying this fixture into an always-on loop is
+not an acceptable resource plan.
+
+The shared 1,783-byte `npcWalkable` function is unchanged apart from indentation.
+The Worker wrapper requires all seven world rules and both mesh-query callbacks,
+rejects asynchronous/nonboolean decisions and invalid support, and limits a
+single voluntary step to four metres (at most 27 pile samples plus its origin).
+These bounds do not apply to the browser. A `-Infinity` no-support result refuses
+the move without aborting the tick; NaN, positive infinity and out-of-range support
+abort as malformed adapter state. A production support adapter must retain the
+hub's finite abyss-floor policy. The four-metre wrapper is for a single voluntary
+step, not all original crew probes (direct pile-slot probes may be longer); those
+call sites require their own bounded query policy before full integration. This policy is neither `walkToward`, recovery search,
+jump/gravity integration nor the complete `walkWorkTo` adapter. Those controllers
+also own crowd/shoulder state, recovery search buffers, threat response and pose
+updates; moving only their call site would lose state on restart.
+
+Focused tests compare 80 decision/callback traces against a captured original
+function from the base revision and exercise the real mesh kernels with authored
+closed shells, treads, ceilings, support-only faces and changed visibility/poses.
+Failed-write/owner-replacement tests use the actual host and collision adapters,
+but the small movement stepper and serial in-memory storage remain test fixtures.
+The shared source comparison is recorded outside the checkout. This extraction
+changes browser hub wiring; the earlier Hub failure-attribution report is not a
+runtime parity result for it. No restricted Hub assertion is rerun.
+
+## Verification record
+
+Verified locally November 4, 2026 on Node v22.23.4:
+
+- 31/31 host/session/navigation Node tests passed; the same batch included the existing
+  replay/high-score checks, for **72/72 total** (about 0.4 seconds for the fixture
+  process, not a real simulation CPU benchmark).
+- The earlier root browser-free lane passed **408/408**. The follow-up `npm test -- hub`
+  included this lane and real browser checks: **884/905 passed in 9.3 minutes**,
+  with 21 failures across 20 unique checks, recorded below. Every ledger entry has
+  streak 1; no assertion retry, threshold change or STOP occurred.
+  The earlier green unit result is not a complete browser pass.
+- Build, `node --check` on all seven changed/new JS/MJS files, and whitespace
+  checks passed. The generated single-file site is not committed.
+- CI now runs the host/session/navigation tests alongside its existing lanes.
+- After tightening first-admission census/close bounds, the targeted host lane
+  passed **15/15** again; syntax and whitespace were rechecked for that change.
+- RNG follow-up: **408/408** browser-free unit checks passed. The focused host
+  batch passed 33/34 on its first run: the new RNG fixture incorrectly projected
+  `hub.choice`, which the strict public contract correctly refused. Its one fix
+  changed the fixture to the required `hub.pile` shape, without weakening host
+  validation or assertions. The RNG file then passed **3/3**; all 31 existing
+  host/session/navigation checks passed in the original batch. Build and all ten
+  touched JS/MJS syntax checks passed. No Hub checks were rerun; its twenty
+  ledger entries remain byte-equivalent in content with streak 1. Local evidence:
+  `verification-rng-host.log`, `verification-rng-repair.log`,
+  `verification-rng-unit.log` and `verification-rng-build.log`.
+- Work-trip follow-up: **408/408** browser-free unit checks passed. The first
+  focused host batch passed **39/40**: moving the fixture's unassigned weapon-site
+  property changed JSON insertion order and therefore its raw golden hash, while
+  phase/callback traces matched. One correction canonicalized object keys and
+  regenerated traces from the hash-verified original source, without changing
+  assertions or using the new controller as its oracle. The six work tests then
+  passed **6/6**; the other 34 checks passed in the original batch. Across 2,520
+  frame restores, maximum work-checkpoint JSON was **390 bytes**, and complete
+  single-actor fixture JSON **1,105 bytes**. These exclude real world/rig/collision
+  state, full inventory effects and runtime/account cost. Build and syntax passed.
+  The Hub ledger remains unchanged; no Hub or STOP-restricted assertion reran.
+- A bounded read-only Claude Max review found the codec's unsafe phase/index
+  combinations before testing. Outbound negative indices and return indices past
+  the final waypoint now refuse restore. Independent review also confirmed browser
+  callback initialization order, the original route-planning guard and no Tess edits.
+- Collision/clearance follow-up: **408/408** unit checks passed. The focused
+  host batch passed **46/47** initially. Its one failure was a new fixture expecting
+  a long diagonal descent to clear a tread corner; the original swept mesh code
+  correctly blocked that trajectory. One fixture correction now asserts that
+  long descent is blocked and a clear edge descent succeeds; no kernel or tolerance
+  changed. The collision file then passed **7/7**, and all other 40 host checks
+  passed in the initial batch. Build (312 scripts), **23/23** JS/MJS syntax checks
+  and whitespace passed. Hub assertions were not rerun; the twenty-entry ledger
+  remains unchanged. Logs: `verification-collision-host.log`,
+  `verification-collision-repair.log`, `verification-collision-unit.log`,
+  `verification-collision-build.log`, `verification-collision-syntax.log`.
+- The collision fixture's 128 placed cubes used a 28,725-byte catalog and
+  15,381-byte checkpoint. Its 128 sweeps visited 2,048 candidates and tested
+  384 triangles. Shared geometry contains 12 triangles; placed copies total
+  1,536. These are authored-fixture counters/bytes, not production CPU, heap,
+  Durable Object or account-cost evidence.
+- A bounded read-only Claude Max review confirmed live island binding and script
+  order and identified replicated-triangle cost and unsupported-support handling.
+  The adapter now caps placed triangles, treats no-support as a refused move,
+  and fingerprints an explicit kernel version. Independent review verified both
+  collision algorithms unchanged and the original clearance source/fixture hash.
+  Full crew probes exceeding four metres, production geometry export, semantics
+  migration and closed-shell authoring remain explicit integration gates.
+- Claude Code used the existing authenticated Max subscription for the bounded
+  session implementation, a read-only review and bounded follow-up registry fixes.
+  Parent review added missing-
+  collision refusal, bounded passive substeps, duplicate-input neutralization,
+  lease/run validation, explicit paused recovery, idempotent subscriber registration
+  and host/session transaction tests. Follow-up regressions cover explicit close
+  ordering, idle grace ticks, bounded drain, exact inventory, durable body tombstones,
+  logical-time resume and atomic NPC handback. No API key or billing setting was enabled.
+
+Fixtures cover competing authority, deterministic restart, failed commits, mixed
+versions, payload/fanout/backpressure, the exact grace deadline, stale sessions,
+occupancy, passive falling and unchanged ammo/fuel. They do not provide an actual
+Durable Object, complete browser, two-client or physical-phone pass. Other than the
+bounded planner measurement above, no full-world performance, load,
+production data, merge or deployment operation was performed. The outstanding
+integration/performance gates above remain required before activation/completion.
+
+The browser failures below were recorded before the RNG/work extraction and remain
+unresolved. No clean baseline hub run was available, so they are not labelled
+pre-existing. At that earlier increment, source comparison confirmed the existing
+16,348-byte route algorithm is identical to the base; the browser still uses
+`createState`, `target` and `route`, while the new checkpoint methods are unused
+by its current scene. No concrete causal fix in this increment was identified,
+and unrelated controls, Tess, hammock layout and game behavior were not changed.
+Do not rerun failing assertions without a diagnosis/fix; follow the ledger STOP rule.
+
+| Failed browser checks | Failures |
+| --- | ---: |
+| Cloud Hopper: props/ghost camera obstruction, downhill/airborne relative camera, real-rock crossing camera, results/replay framing and held keys | 4 |
+| Hub round trip: outdoor bed ownership on leaving/returning | 1 |
+| Hammock moving tips/occupant/approved tree bounds | 1 |
+| Chilling arrival and working arrival state/bed placement | 2 |
+| Player-on-player support: landing, moving/rising support, gorilla riding support and gorilla walking collision | 4 |
+| Lab jobs/room exits and gorilla apron descent | 2 |
+| Jetpack toggle/climb/abyss inventory and stun/drop-tag behavior | 2 |
+| Guide handoff: walking release and jetpack release during a tour | 2 |
+| Matrix camera/glyph batches, reported in both renderer runs | 2 |
+| Canvas 2D multi-scene tour | 1 |
+
+The local handoff preserves the complete failure names/details in
+`verification-fixes-ledger.json` and the full run in `verification-fixes-hub.log`.
+These local logs are not production evidence or a successful two-client check.
+
+### Source review of the 20 failures
+
+The follow-up reviewed the existing logs, each failed predicate and current/base
+source without rerunning any Hub checks. No failure was attributable to the patch
+on this evidence. Six unique checks have existing fixture/admission mismatches:
+all four Hopper checks call the refused non-arcade launch; the matrix test counts
+the eight existing sleep-beam glyph batches across the whole hub; the Canvas tour
+expects Rally entry without its required maintenance opt-in. These are source
+findings, not a successful baseline test run.
+
+The remaining fourteen stay unresolved: one outdoor bed-state predicate; the near
+hammock anchor coordinate; five occupied inner fire seats instead of six; four
+remote body/support checks; one actor's feet 0.1875 above the working-arrival
+surface; two lab job/animation predicates; apron blocking/recovery; two jetpack
+checks starting with the pack unworn; and two guide checks lacking post-tour
+clearance or an initially climbing actor. In particular, the lab doorway exits
+and matrix opacity samples passed their predicates. No related game behavior,
+test threshold, layout or Tess source was changed to clear these failures.
+
+The local handoff's `review-377/HUB-FAILURE-ATTRIBUTION.md` maps all twenty exact
+ledger entries to source and evidence; `source-comparison.json` records hashes.
+The RNG and work extractions postdate this Hub run and have separate focused
+verification; the prior result does not establish browser parity for them.

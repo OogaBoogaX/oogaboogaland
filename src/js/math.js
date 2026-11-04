@@ -1,6 +1,7 @@
 (() => {
   "use strict";
-  const BL = window.BL = window.BL || {};
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
   const lerp = (a, b, t) => a + (b - a) * t;
   const damp = (current, target, rate, dt) => lerp(current, target, 1 - Math.exp(-rate * dt));
@@ -27,11 +28,17 @@
     }
     return hash >>> 0;
   };
-  const mulberry32 = (seed) => () => {
-    seed = seed + 1831565813 | 0;
-    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
-    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
-    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  const mulberry32 = (seed, checkpoint = false) => {
+    const random = () => {
+      seed = seed + 1831565813 | 0;
+      let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+    // Opt in only for persisted simulation streams. Existing callers keep the
+    // same draws and no extra per-stream closure; capturing never consumes a draw.
+    if (checkpoint) random.capture = () => seed >>> 0;
+    return random;
   };
   const RANDOM_BUF = new Uint32Array(1);
   const randomInt = (n) => {

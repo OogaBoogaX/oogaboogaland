@@ -5159,32 +5159,15 @@
     const feet = onTimechain ? playerSupportAt(x, z, Infinity, Infinity, cave) : island.surfaceAt(x, z);
     return npcRampRoofAt(x, feet, z) || npcClosedCaveAt(x, z, feet, cave.bodyHeight) || npcPileAt(x, feet, z, cave.bodyHeight) || npcWorkZoneAt(cave, x, feet, z) || !npcFireClear(x, feet, z, x, feet, z, cave.bodyHeight) || !walkable(x, z, x, z, feet, cave.bodyHeight, cave);
   };
-  const npcWalkable = (fromX, fromZ, toX, toZ, y, height, actor) => {
-    if (!walkable(fromX, fromZ, toX, toZ, y, height, actor)) return false;
-    // Sweep to the actual downhill support too.
-    // Checking at the previous, higher floor can clear a move whose lowered torso intersects the wall.
-    const feet = playerSupportAt(toX, toZ, y, y, actor);
-    if (npcRampRoofAt(toX, feet, toZ) && !npcRampRoofAt(fromX, y, fromZ)) return false;
-    if (!npcClosedCaveClear(fromX, y, fromZ, toX, feet, toZ, height)) return false;
-    if (!npcWorkZoneClear(actor, fromX, y, fromZ, toX, feet, toZ)) return false;
-    if (!npcFireClear(fromX, y, fromZ, toX, feet, toZ, height)) return false;
-    // Voluntary walkers go around fruit, but a growing pile or a landing may put one inside.
-    // Keep their way out passable rather than trapping them.
-    if (!npcPileAt(fromX, y, fromZ, height)) {
-      const steps = Math.max(1, Math.ceil(Math.hypot(toX - fromX, toZ - fromZ) / 0.15));
-      for (let i = 1; i <= steps; i++) {
-        const t = i / steps;
-        if (npcPileAt(lerp(fromX, toX, t), lerp(y, feet, t), lerp(fromZ, toZ, t), height)) return false;
-      }
-    }
-    // Supported ascent lifts onto a tread before moving across it. A diagonal
-    // torso sweep from the old floor would falsely hit a legal half-metre
-    // riser at its outer corner. Descents still sweep the actual falling edge.
-    const sweepY = Math.max(y, feet);
-    return island.clearAt(toX, feet + 1e-5, toZ, 0, 0.01) && island.clearAt(toX, feet + 0.3, toZ, PLAYER_RADIUS, height - 0.3)
-      && (feet <= y || island.clearAt(fromX, sweepY + 0.3, fromZ, PLAYER_RADIUS, height - 0.3))
-      && island.voxelSegmentClearAt(fromX, sweepY + 0.3, fromZ, toX, feet + 0.3, toZ, PLAYER_RADIUS, height - 0.3);
-  };
+  const npcWalkable = BL.npcClearance.create({ walkable, playerSupportAt, npcRampRoofAt,
+    npcClosedCaveClear, npcWorkZoneClear, npcFireClear, npcPileAt, PLAYER_RADIUS, lerp,
+    // The island is rebuilt between visits; resolve it at query time.
+    island: {
+      clearAt: (x, y, z, radius, height) => island.clearAt(x, y, z, radius, height),
+      voxelSegmentClearAt: (x, y, z, toX, toY, toZ, radius, height) =>
+        island.voxelSegmentClearAt(x, y, z, toX, toY, toZ, radius, height),
+    },
+  });
   // The route graph describes connected architecture only.
   // Scenery and other walkers are avoided by the same swept steps used during the actual walk.
   const sleepRouteClear = (fromX, fromZ, toX, toZ, y, height) => {

@@ -1,0 +1,708 @@
+{
+  "base": "17659ddfa0079f24bea84d872e29e532530bd7e4",
+  "sourceSha256": "5ed373151c2eb476ebb3f2b744806185f8e2d2e754436e0582f076f6a790de12",
+  "encoding": "sorted-object-keys-v1",
+  "scope": "Original crew transition source; authored movement/aim/inventory adapters, not full hub parity",
+  "scenarios": {
+    "normal": {
+      "frames": 420,
+      "sha256": "998c1230d1f8e0de0df65f1cd10d449b526bc58cab3fffaef89f65df8c5d08f6",
+      "transitions": [
+        {
+          "frame": 1,
+          "phase": "outbound",
+          "site": 0,
+          "ammo": 30
+        },
+        {
+          "frame": 9,
+          "phase": "station",
+          "site": 0,
+          "ammo": 30
+        },
+        {
+          "frame": 13,
+          "phase": "shoot",
+          "site": 0,
+          "ammo": 30
+        },
+        {
+          "frame": 106,
+          "phase": "return",
+          "site": 0,
+          "ammo": 0
+        },
+        {
+          "frame": 119,
+          "phase": "reload",
+          "site": 0,
+          "ammo": 0
+        },
+        {
+          "frame": 123,
+          "phase": "outbound",
+          "site": 1,
+          "ammo": 30
+        },
+        {
+          "frame": 132,
+          "phase": "station",
+          "site": 1,
+          "ammo": 30
+        },
+        {
+          "frame": 136,
+          "phase": "shoot",
+          "site": 1,
+          "ammo": 30
+        },
+        {
+          "frame": 229,
+          "phase": "return",
+          "site": 1,
+          "ammo": 0
+        },
+        {
+          "frame": 242,
+          "phase": "reload",
+          "site": 1,
+          "ammo": 0
+        },
+        {
+          "frame": 246,
+          "phase": "outbound",
+          "site": 0,
+          "ammo": 30
+        },
+        {
+          "frame": 255,
+          "phase": "station",
+          "site": 0,
+          "ammo": 30
+        },
+        {
+          "frame": 259,
+          "phase": "shoot",
+          "site": 0,
+          "ammo": 30
+        },
+        {
+          "frame": 352,
+          "phase": "return",
+          "site": 0,
+          "ammo": 0
+        },
+        {
+          "frame": 365,
+          "phase": "reload",
+          "site": 0,
+          "ammo": 0
+        },
+        {
+          "frame": 369,
+          "phase": "outbound",
+          "site": 1,
+          "ammo": 30
+        },
+        {
+          "frame": 378,
+          "phase": "station",
+          "site": 1,
+          "ammo": 30
+        },
+        {
+          "frame": 382,
+          "phase": "shoot",
+          "site": 1,
+          "ammo": 30
+        }
+      ],
+      "events": {
+        "plans": [
+          {
+            "frame": 0,
+            "site": 0
+          },
+          {
+            "frame": 101,
+            "site": 1
+          },
+          {
+            "frame": 224,
+            "site": 0
+          },
+          {
+            "frame": 347,
+            "site": 1
+          }
+        ],
+        "shots": 103,
+        "reloads": 3,
+        "resets": 0,
+        "stops": 0,
+        "paths": 4
+      }
+    },
+    "maintainer": {
+      "frames": 420,
+      "sha256": "bdcf01dbbdac15433fbeeec9e69418bf7e1c0b6bfc8e235f90f2f9a1e6ef11e8",
+      "transitions": [
+        {
+          "frame": 1,
+          "phase": "outbound",
+          "site": 0,
+          "ammo": 30
+        },
+        {
+          "frame": 9,
+          "phase": "station",
+          "site": 0,
+          "ammo": 30
+        },
+        {
+          "frame": 13,
+          "phase": "shoot",
+          "site": 0,
+          "ammo": 30
+        },
+        {
+          "frame": 106,
+          "phase": "return",
+          "site": 0,
+          "ammo": 0
+        },
+        {
+          "frame": 119,
+          "phase": "reload",
+          "site": 0,
+          "ammo": 0
+        },
+        {
+          "frame": 294,
+          "phase": "outbound",
+          "site": 1,
+          "ammo": 30
+        },
+        {
+          "frame": 303,
+          "phase": "station",
+          "site": 1,
+          "ammo": 30
+        },
+        {
+          "frame": 307,
+          "phase": "shoot",
+          "site": 1,
+          "ammo": 30
+        },
+        {
+          "frame": 400,
+          "phase": "return",
+          "site": 1,
+          "ammo": 0
+        },
+        {
+          "frame": 413,
+          "phase": "reload",
+          "site": 1,
+          "ammo": 0
+        }
+      ],
+      "events": {
+        "plans": [
+          {
+            "frame": 0,
+            "site": 0
+          },
+          {
+            "frame": 101,
+            "site": 1
+          },
+          {
+            "frame": 395,
+            "site": 0
+          }
+        ],
+        "shots": 60,
+        "reloads": 2,
+        "resets": 0,
+        "stops": 0,
+        "paths": 2
+      }
+    },
+    "occupied": {
+      "frames": 420,
+      "sha256": "3fdf85c5fc0eb2f3ce6961a184ecdc7880027f7668e2b2e14f61ada8694440dd",
+      "transitions": [
+        {
+          "frame": 1,
+          "phase": "outbound",
+          "site": 0,
+          "ammo": 30
+        },
+        {
+          "frame": 9,
+          "phase": "station",
+          "site": 0,
+          "ammo": 30
+        },
+        {
+          "frame": 13,
+          "phase": "shoot",
+          "site": 0,
+          "ammo": 30
+        },
+        {
+          "frame": 143,
+          "phase": "return",
+          "site": 0,
+          "ammo": 0
+        },
+        {
+          "frame": 156,
+          "phase": "reload",
+          "site": 0,
+          "ammo": 0
+        },
+        {
+          "frame": 160,
+          "phase": "outbound",
+          "site": 1,
+          "ammo": 30
+        },
+        {
+          "frame": 169,
+          "phase": "station",
+          "site": 1,
+          "ammo": 30
+        },
+        {
+          "frame": 173,
+          "phase": "shoot",
+          "site": 1,
+          "ammo": 30
+        },
+        {
+          "frame": 266,
+          "phase": "return",
+          "site": 1,
+          "ammo": 0
+        },
+        {
+          "frame": 279,
+          "phase": "reload",
+          "site": 1,
+          "ammo": 0
+        },
+        {
+          "frame": 283,
+          "phase": "outbound",
+          "site": 0,
+          "ammo": 30
+        },
+        {
+          "frame": 292,
+          "phase": "station",
+          "site": 0,
+          "ammo": 30
+        },
+        {
+          "frame": 296,
+          "phase": "shoot",
+          "site": 0,
+          "ammo": 30
+        },
+        {
+          "frame": 389,
+          "phase": "return",
+          "site": 0,
+          "ammo": 0
+        },
+        {
+          "frame": 402,
+          "phase": "reload",
+          "site": 0,
+          "ammo": 0
+        },
+        {
+          "frame": 406,
+          "phase": "outbound",
+          "site": 1,
+          "ammo": 30
+        },
+        {
+          "frame": 415,
+          "phase": "station",
+          "site": 1,
+          "ammo": 30
+        },
+        {
+          "frame": 419,
+          "phase": "shoot",
+          "site": 1,
+          "ammo": 30
+        }
+      ],
+      "events": {
+        "plans": [
+          {
+            "frame": 0,
+            "site": 0
+          },
+          {
+            "frame": 138,
+            "site": 1
+          },
+          {
+            "frame": 261,
+            "site": 0
+          },
+          {
+            "frame": 384,
+            "site": 1
+          }
+        ],
+        "shots": 90,
+        "reloads": 3,
+        "resets": 0,
+        "stops": 0,
+        "paths": 4
+      }
+    },
+    "closed": {
+      "frames": 420,
+      "sha256": "ca5cab5d05c6280e8848900d9b30cb8003b6cbdd53fafd6b5a0159830d977715",
+      "transitions": [
+        {
+          "frame": 1,
+          "phase": "outbound",
+          "site": 0,
+          "ammo": 30
+        },
+        {
+          "frame": 9,
+          "phase": "station",
+          "site": 0,
+          "ammo": 30
+        },
+        {
+          "frame": 13,
+          "phase": "shoot",
+          "site": 0,
+          "ammo": 30
+        },
+        {
+          "frame": 51,
+          "phase": "return",
+          "site": 0,
+          "ammo": 18
+        },
+        {
+          "frame": 63,
+          "phase": "reload",
+          "site": 0,
+          "ammo": 18
+        },
+        {
+          "frame": 66,
+          "phase": "outbound",
+          "site": 1,
+          "ammo": 30
+        },
+        {
+          "frame": 75,
+          "phase": "station",
+          "site": 1,
+          "ammo": 30
+        },
+        {
+          "frame": 79,
+          "phase": "shoot",
+          "site": 1,
+          "ammo": 30
+        },
+        {
+          "frame": 172,
+          "phase": "return",
+          "site": 1,
+          "ammo": 0
+        },
+        {
+          "frame": 185,
+          "phase": "reload",
+          "site": 1,
+          "ammo": 0
+        },
+        {
+          "frame": 189,
+          "phase": "outbound",
+          "site": 1,
+          "ammo": 30
+        },
+        {
+          "frame": 198,
+          "phase": "station",
+          "site": 1,
+          "ammo": 30
+        },
+        {
+          "frame": 202,
+          "phase": "shoot",
+          "site": 1,
+          "ammo": 30
+        },
+        {
+          "frame": 295,
+          "phase": "return",
+          "site": 1,
+          "ammo": 0
+        },
+        {
+          "frame": 308,
+          "phase": "reload",
+          "site": 1,
+          "ammo": 0
+        },
+        {
+          "frame": 312,
+          "phase": "outbound",
+          "site": 1,
+          "ammo": 30
+        },
+        {
+          "frame": 321,
+          "phase": "station",
+          "site": 1,
+          "ammo": 30
+        },
+        {
+          "frame": 325,
+          "phase": "shoot",
+          "site": 1,
+          "ammo": 30
+        },
+        {
+          "frame": 418,
+          "phase": "return",
+          "site": 1,
+          "ammo": 0
+        }
+      ],
+      "events": {
+        "plans": [
+          {
+            "frame": 0,
+            "site": 0
+          },
+          {
+            "frame": 50,
+            "site": 1
+          },
+          {
+            "frame": 167,
+            "site": 1
+          },
+          {
+            "frame": 290,
+            "site": 1
+          },
+          {
+            "frame": 413,
+            "site": 1
+          }
+        ],
+        "shots": 102,
+        "reloads": 3,
+        "resets": 0,
+        "stops": 0,
+        "paths": 4
+      }
+    },
+    "spare": {
+      "frames": 420,
+      "sha256": "412b0e52bb508e13fdf10e38c28472e0fc6626c42773a3b06aa3561009824f83",
+      "transitions": [
+        {
+          "frame": 1,
+          "phase": "outbound",
+          "site": 0,
+          "ammo": 30
+        },
+        {
+          "frame": 9,
+          "phase": "station",
+          "site": 0,
+          "ammo": 30
+        },
+        {
+          "frame": 13,
+          "phase": "shoot",
+          "site": 0,
+          "ammo": 30
+        },
+        {
+          "frame": 188,
+          "phase": "return",
+          "site": 0,
+          "ammo": 0
+        },
+        {
+          "frame": 201,
+          "phase": "reload",
+          "site": 0,
+          "ammo": 0
+        },
+        {
+          "frame": 205,
+          "phase": "outbound",
+          "site": 1,
+          "ammo": 30
+        },
+        {
+          "frame": 214,
+          "phase": "station",
+          "site": 1,
+          "ammo": 30
+        },
+        {
+          "frame": 218,
+          "phase": "shoot",
+          "site": 1,
+          "ammo": 30
+        }
+      ],
+      "events": {
+        "plans": [
+          {
+            "frame": 0,
+            "site": 0
+          },
+          {
+            "frame": 183,
+            "site": 1
+          }
+        ],
+        "shots": 122,
+        "reloads": 1,
+        "resets": 0,
+        "stops": 0,
+        "paths": 2
+      }
+    },
+    "no-slot": {
+      "frames": 420,
+      "sha256": "45e5a07f6c002fb35d6ba0211c71e41ddd59d050f53dc50bdcd92e6e43d9a68e",
+      "transitions": [
+        {
+          "frame": 1,
+          "phase": "outbound",
+          "site": 0,
+          "ammo": 30
+        },
+        {
+          "frame": 9,
+          "phase": "station",
+          "site": 0,
+          "ammo": 30
+        },
+        {
+          "frame": 13,
+          "phase": "shoot",
+          "site": 0,
+          "ammo": 30
+        },
+        {
+          "frame": 106,
+          "phase": "return",
+          "site": 0,
+          "ammo": 0
+        },
+        {
+          "frame": 185,
+          "phase": "reload",
+          "site": 0,
+          "ammo": 0
+        },
+        {
+          "frame": 189,
+          "phase": "outbound",
+          "site": 1,
+          "ammo": 30
+        },
+        {
+          "frame": 198,
+          "phase": "station",
+          "site": 1,
+          "ammo": 30
+        },
+        {
+          "frame": 202,
+          "phase": "shoot",
+          "site": 1,
+          "ammo": 30
+        },
+        {
+          "frame": 295,
+          "phase": "return",
+          "site": 1,
+          "ammo": 0
+        },
+        {
+          "frame": 308,
+          "phase": "reload",
+          "site": 1,
+          "ammo": 0
+        },
+        {
+          "frame": 312,
+          "phase": "outbound",
+          "site": 0,
+          "ammo": 30
+        },
+        {
+          "frame": 321,
+          "phase": "station",
+          "site": 0,
+          "ammo": 30
+        },
+        {
+          "frame": 325,
+          "phase": "shoot",
+          "site": 0,
+          "ammo": 30
+        },
+        {
+          "frame": 418,
+          "phase": "return",
+          "site": 0,
+          "ammo": 0
+        }
+      ],
+      "events": {
+        "plans": [
+          {
+            "frame": 0,
+            "site": 0
+          },
+          {
+            "frame": 101,
+            "site": 1
+          },
+          {
+            "frame": 290,
+            "site": 0
+          },
+          {
+            "frame": 413,
+            "site": 1
+          }
+        ],
+        "shots": 90,
+        "reloads": 2,
+        "resets": 0,
+        "stops": 0,
+        "paths": 3
+      }
+    }
+  }
+}

@@ -1,6 +1,7 @@
 (() => {
   "use strict";
-  const BL = window.BL = window.BL || {};
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
   // GJK vs the convex hull of vertical cylinders at both sweep ends; shared module scratch, so non-reentrant.
   const simplex = new Float64Array(12);
   const CONTACT = 1e-7, POINT_CONTACT = 1e-9, TOLERANCE = 1e-12;
