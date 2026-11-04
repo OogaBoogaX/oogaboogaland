@@ -6,7 +6,11 @@
   const BL = scope.BL = scope.BL || {};
   const MAGIC = 0x4150434e, HEADER = 32, MAX = 16 + 128 * 112 * 4;
   const integer = n => Number.isSafeInteger(n) && n >= 0;
-  const descriptor = a => !!a && a.v === 1 && integer(a.revision) && a.revision > 0
+  // Mixed format is opt-in. Loading its codec must never upgrade an existing
+  // browser before both actor families obey the server ownership fence.
+  const descriptor = (a, mixed = false) => !!a
+    && (a.v === 1 && a.format === undefined || mixed && a.v === 2 && a.format === "mixed-1" && a.mode === "server")
+    && integer(a.revision) && a.revision > 0
     && (a.mode === "browser" && a.world === null && a.epoch === 0
       || a.mode === "server" && typeof a.world === "string" && /^[A-Za-z0-9_.:-]{1,80}$/.test(a.world)
         && integer(a.epoch) && a.epoch > 0);
@@ -25,32 +29,38 @@
     }
     return true;
   };
-  const pack = (a, sequence, data) => {
-    if (!descriptor(a) || a.mode !== "server" || !integer(sequence) || !sequence || !poses(data)) throw new Error("invalid NPC snapshot");
+  const posesFor = (a, data, mixed = false) => {
+    if (!descriptor(a, mixed) || a.mode !== "server") return false;
+    if (a.v === 1) return poses(data);
+    try { return BL.npcPosePacket.unpack(data).world === a.world; } catch { return false; }
+  };
+  const pack = (a, sequence, data, mixed = false) => {
+    if (!integer(sequence) || !sequence || !posesFor(a, data, mixed)) throw new Error("invalid NPC snapshot");
     const out = new ArrayBuffer(HEADER + data.byteLength), h = new DataView(out);
-    h.setUint32(0, MAGIC, true); h.setUint32(4, 1, true);
+    h.setUint32(0, MAGIC, true); h.setUint32(4, a.v, true);
     h.setFloat64(8, a.revision, true); h.setFloat64(16, a.epoch, true); h.setFloat64(24, sequence, true);
     new Uint8Array(out, HEADER).set(new Uint8Array(data));
     return out;
   };
-  const create = () => {
+  const create = ({ mixed = false } = {}) => {
     let current = null, sequence = 0, last = null;
     return {
       get current() { return current; },
       accept(a) {
-        if (!descriptor(a) || current && a.revision < current.revision) return false;
-        if (current && a.revision === current.revision) return a.mode === current.mode && a.world === current.world && a.epoch === current.epoch;
-        current = Object.freeze({ v: 1, revision: a.revision, mode: a.mode, world: a.world, epoch: a.epoch });
+        if (!descriptor(a, mixed) || current && a.revision < current.revision) return false;
+        if (current && a.revision === current.revision) return a.v === current.v && a.format === current.format
+          && a.mode === current.mode && a.world === current.world && a.epoch === current.epoch;
+        current = Object.freeze({ v: a.v, ...(a.v === 2 ? { format: a.format } : {}), revision: a.revision, mode: a.mode, world: a.world, epoch: a.epoch });
         sequence = 0; last = null;
         return true;
       },
       frame(data) {
         if (current?.mode !== "server" || !(data instanceof ArrayBuffer) || data.byteLength < HEADER + 16 || data.byteLength > HEADER + MAX) return null;
         const h = new DataView(data), next = h.getFloat64(24, true);
-        if (h.getUint32(0, true) !== MAGIC || h.getUint32(4, true) !== 1 || h.getFloat64(8, true) !== current.revision
-          || h.getFloat64(16, true) !== current.epoch || !integer(next) || next < sequence) return null;
+        if (h.getUint32(0, true) !== MAGIC || h.getUint32(4, true) !== current.v || h.getFloat64(8, true) !== current.revision
+          || h.getFloat64(16, true) !== current.epoch || !integer(next) || !next || next < sequence) return null;
         const frame = data.slice(HEADER);
-        if (!poses(frame)) return null;
+        if (!posesFor(current, frame, mixed)) return null;
         if (next === sequence) {
           const bytes = new Uint8Array(frame), old = new Uint8Array(last);
           if (bytes.length !== old.length || bytes.some((v, i) => v !== old[i])) return null;
@@ -60,5 +70,5 @@
       },
     };
   };
-  BL.npcAuthority = { MAGIC, MAX, descriptor, poses, pack, create };
+  BL.npcAuthority = { MAGIC, MAX, descriptor, poses, posesFor, pack, create };
 })();

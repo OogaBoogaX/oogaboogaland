@@ -324,7 +324,10 @@
       // An unknown explicit authority version is incompatible, not permission
       // to elect ourselves. A later valid release can still clear this guard.
       const revision = Number.isSafeInteger(value?.revision) && value.revision > 0 ? value.revision : 0;
-      if (!state.npcAuthority || revision > state.npcAuthority.revision) state.npcAuthority = { mode: "server", revision, incompatible: true };
+      if (!state.npcAuthority || revision > state.npcAuthority.revision) {
+        state.npcAuthority = { mode: "server", revision, incompatible: true };
+        npcFrame = null; state.npcVersion++;
+      }
       return false;
     }
     state.npcAuthority = npcAuthority.current;
@@ -336,6 +339,7 @@
     if (e.data instanceof ArrayBuffer) {
       if (e.data.byteLength >= 4 && new DataView(e.data).getUint32(0, true) === GHOST_MAGIC) { ghostFrame(e.data); return; } // HALLOWEEN
       if (state.npcAuthority?.mode === "server") {
+        if (state.npcAuthority.incompatible) return;
         const frame = npcAuthority.frame(e.data);
         if (!frame) return;
         npcFrame = frame;

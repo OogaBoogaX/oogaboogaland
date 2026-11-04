@@ -1057,17 +1057,71 @@ general worst-case compression claim follows; refusing high-entropy overflow is
 part of the contract. Evidence: `verification-mixed-packet-{cost,varied-cost}.json`
 and `verification-mixed-packet-{first,review}.log` in the task workspace.
 
-The codec is loaded but not enabled for live delivery. Existing authority/Room
-decoders deliberately reject its new magic/version. It must gain explicit
-capability negotiation, fencing and bounded latest-frame delivery before being
-used by the publisher. In particular, browsers must freeze independent Clanker
+The codec is loaded but not enabled for live delivery. The preview negotiation
+below makes the format explicit; the existing host publisher and browser still
+use only Ooga frames. In particular, browsers must freeze independent Clanker
 AI before applying server poses, resolve held-item ownership, and preserve the
 separate player movement/voice paths. The new codec alone does not complete
 Room/client integration, full actor recovery, exact player reclaim or disconnect
 visuals. Those requirements remain open; #377 is still draft and Tess is excluded.
 
+### Mixed Room capability preview, still disabled
+
+Room's internal mixed preview requires both `VIRTUAL_HOST_PREVIEW=1` and
+`VIRTUAL_HOST_MIXED_PREVIEW=1`, an explicit `format: "mixed-1"` acquisition, and
+every occupant advertising `?npc-authority=2`. Neither flag is set in a deployed
+configuration. The browser still advertises version 1; loading the codec does
+not opt it in. Version 2 clients must also understand version 1. Unknown client
+versions and incompatible replacement sockets are refused before evicting the
+existing connection. Occupant checks run inside the authority transition gate.
+
+The durable assignment and authority envelope use version 2 for mixed data,
+with format, revision, world and epoch bound to the assignment. Legacy version 1
+records remain readable; unknown or incomplete records fail closed. A format
+cannot change within a revision or with a stale owner. Mixed packets must decode
+within the existing bounds and name the assigned world. Legacy Ooga payloads
+cannot be published into a mixed assignment. The legacy `poses` validator stays
+unchanged; format dispatch does not recursively invoke the mixed decoder.
+
+The existing 250 ms publication interval, 32-viewer cap, one latest durable frame
+and one outstanding credit per socket remain. Room caches one checked envelope
+for the latest committed frame, so fanout does not decompress/wrap once per
+viewer. Replacement clears that cache; no intermediate frame queue is retained.
+Failed writes emit nothing. Duplicate publications compare exact bytes, including
+after lease expiry. Repeated hibernation wakes retain outstanding credit, and a
+late join receives the complete latest snapshot. Removing the preview flags
+retains the authority fence and readable committed snapshot; a deliberate release
+can return to version 1 without re-enabling mixed publication. Older builds must
+receive that explicit release before rollback.
+
+Review found that an incompatible newer descriptor could leave the browser's
+older compatible parser eligible to accept stale frames. The browser now clears
+its retained frame and refuses both stale and unsupported frames while the
+incompatible fence is latched; it acknowledges neither. Only a newer compatible
+descriptor clears the fence. This does not enable mixed browser rendering.
+
+The actual Room and codec test uses 53 Oogas, 53 managed Clankers and 32 mocked
+sockets. Its first 2,628-byte packet delivers 85,120 bytes including 32-byte
+envelopes, with one envelope validation for the entire fanout. It checks the
+33rd-viewer refusal, two exact decoded receivers, actual selected follower rig
+parity, late join, reconstruction, failed writes, lost replies, replacement,
+stale tickets, unknown formats and explicit release. This repetitive integration
+fixture does not replace the more varied 7,918-byte cost fixture above, nor does
+it measure real socket buffers, Durable Object CPU or production costs.
+
+This increment does not connect `publishHostPoses` to the mixed format. Actual
+headless Clanker simulation, the browser's Clanker ownership gate, shared item
+identity, exact browser body reclaim, grace/open-hand and beam visuals remain
+required before client opt-in. No production resource, timer or permanent loop
+was enabled. Evidence: `verification-mixed-room-{first,review,fanout,host,compat}.log`.
+
 Verified locally November 4, 2026 on Node v22.23.4:
 
+- Mixed Room increment: **91/91** focused host checks and **75/75** Room
+  compatibility checks, **408/408** unit checks, the **318-script** build, all
+  five touched JS/MJS syntax checks and whitespace validation passed. The
+  20-entry Hub failure ledger is unchanged; no STOP-restricted checks reran.
+  No new failing checks or threshold changes.
 - Mixed-packet increment: **88/88** focused host checks, **408/408** unit checks
   and the **318-script** build passed. No new failing checks. The varied mixed
   load completed all 120 frames with exact Ooga bytes and final Clanker display

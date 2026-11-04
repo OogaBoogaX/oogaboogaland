@@ -40,7 +40,7 @@ import { deliverHighscores } from "./highscore-store.js";
 import { sfuClient } from "./sfu.js";
 import { STUDIO_TRANSPORT, STUDIO_ZONE, studioState, studioHostAllowed, studioCanSpeak, studioPosition, studioSeatAllowed, studioSource } from "./studio-policy.js";
 import CAST_ROWS from "./characters.gen.json";
-import { RoomNpcAuthority, validateNpcAuthority, npcAuthorityView, packNpcSnapshot } from "./room-npc-authority.js";
+import { RoomNpcAuthority, validateNpcAuthority, npcAuthorityView, npcProtocolSupports, packNpcSnapshot } from "./room-npc-authority.js";
 
 const CAST = castIndex(CAST_ROWS);
 
@@ -331,8 +331,9 @@ export class Room extends DurableObject {
     const who = playerFromHeaders(request.headers);
     if (!who || !ownedBody(CAST, who.login, who.contributor, who.id)) return new Response("Contributors with an Ooga only", { status: 403 });
 
-    const npcProtocol = new URL(request.url).searchParams.get("npc-authority") === "1" ? 1 : 0;
-    if (this.npcAuthority?.mode === "server" && (!npcProtocol || !this.players.has(who.id) && this.players.size >= 32)) {
+    const requestedProtocol = new URL(request.url).searchParams.get("npc-authority");
+    const npcProtocol = requestedProtocol === "2" ? 2 : requestedProtocol === "1" ? 1 : 0;
+    if (this.npcAuthority?.mode === "server" && (!npcProtocolSupports(npcProtocol, this.npcAuthority) || !this.players.has(who.id) && this.players.size >= 32)) {
       return new Response("NPC authority requires a compatible client and an available preview slot", { status: 409 });
     }
     const pair = new WebSocketPair();
@@ -712,16 +713,20 @@ export class Room extends DurableObject {
     if (!r) return null;
     return { authority: npcAuthorityView(r), sequence: r.sequence, at: r.at,
       leaseUntil: r.leaseUntil, runUntil: r.runUntil,
-      owns: r.mode === "server" && ticket?.revision === r.revision && ticket.world === r.world
+      owns: r.mode === "server" && ticket?.revision === r.revision && ticket.v === r.v && ticket.format === r.format && ticket.world === r.world
         && ticket.epoch === r.epoch && ticket.owner === r.owner };
   }
 
   async configureNpcAuthority(expectedRevision, next) {
     if (this.env.VIRTUAL_HOST_PREVIEW !== "1") throw new Error("NPC authority preview disabled");
-    if (next?.mode === "server" && (this.players.size > 32 || [...this.players.values()].some(p => p.npcProtocol !== 1))) {
-      throw new Error("NPC authority incompatible occupants");
-    }
     return this.ctx.blockConcurrencyWhile(async () => {
+      // Check occupants while joins are blocked, not before entering the gate.
+      // No deployed config or browser advertises the unfinished mixed format.
+      if (next?.mode === "server" && next.format === "mixed-1" && this.env.VIRTUAL_HOST_MIXED_PREVIEW !== "1") throw new Error("NPC mixed preview disabled");
+      const requested = { v: next?.format === "mixed-1" ? 2 : 1 };
+      if (next?.mode === "server" && (this.players.size > 32 || [...this.players.values()].some(p => !npcProtocolSupports(p.npcProtocol, requested)))) {
+        throw new Error("NPC authority incompatible occupants");
+      }
       const r = await new RoomNpcAuthority(this.ctx.storage, () => Date.now()).change(expectedRevision, next);
       this.applyNpcAuthority(r);
       return npcAuthorityView(r);
@@ -731,6 +736,7 @@ export class Room extends DurableObject {
   async publishNpcSnapshot(ticket, sequence, frame) {
     if (this.env.VIRTUAL_HOST_PREVIEW !== "1") throw new Error("NPC authority preview disabled");
     return this.ctx.blockConcurrencyWhile(async () => {
+      if (this.npcAuthority?.v === 2 && this.env.VIRTUAL_HOST_MIXED_PREVIEW !== "1") throw new Error("NPC mixed preview disabled");
       const { record, duplicate } = await new RoomNpcAuthority(this.ctx.storage, () => Date.now()).publish(ticket, sequence, frame);
       this.applyNpcAuthority(record);
       return { revision: record.revision, sequence: record.sequence, duplicate };
@@ -742,6 +748,7 @@ export class Room extends DurableObject {
     if (old && (r.revision < old.revision || r.revision === old.revision && r.sequence < old.sequence)) return;
     const changed = !old || old.revision !== r.revision;
     this.npcAuthority = r;
+    this.npcPacked = null;
     if (changed) {
       this.lastNpc = null;
       for (const p of this.players.values()) {
@@ -753,7 +760,7 @@ export class Room extends DurableObject {
       }
       // Incompatible sockets can survive a deployment in attachments. Their
       // ordinary close path still releases voice and unrelated occupancy now.
-      if (r.mode === "server") for (const p of this.players.values()) if (p.npcProtocol !== 1) this.evict(p, "protocol");
+      if (r.mode === "server") for (const p of this.players.values()) if (!npcProtocolSupports(p.npcProtocol, r)) this.evict(p, "protocol");
       // Announce the selected browser host before its release descriptor, so
       // clients stay server-fenced until the replacement identity is known.
       this.electHost();
@@ -764,13 +771,15 @@ export class Room extends DurableObject {
 
   sendNpcSnapshot(p) {
     const r = this.npcAuthority;
-    if (r?.mode !== "server" || !r.frame || !p.inHub || p.npcProtocol !== 1 || p.npcSent
+    if (r?.mode !== "server" || !r.frame || !p.inHub || !npcProtocolSupports(p.npcProtocol, r) || p.npcSent
       || p.npcAck?.revision === r.revision && p.npcAck.sequence === r.sequence) return;
     // One unacknowledged frame per socket, one latest durable frame for the room.
     // Slow clients skip intermediate states; no per-client frame queue or timer.
     p.npcSent = { revision: r.revision, sequence: r.sequence };
     p.ws.serializeAttachment(this.attachment(p));
-    this.send(p.ws, packNpcSnapshot(r));
+    // Validate/decompress and wrap once for the whole fanout, not per viewer.
+    // The cache is only this committed latest frame and is cleared on replacement.
+    this.send(p.ws, this.npcPacked || (this.npcPacked = packNpcSnapshot(r)));
   }
 
   // Also after any page's `hub` flag changes: the host sends frames only while someone follows.

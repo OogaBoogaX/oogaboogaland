@@ -2,17 +2,21 @@
 // An operator/runner must coordinate these CAS transitions with VirtualHost's
 // committed ticket. Room fencing cannot make two separate DO commits atomic.
 import "../../src/js/npc-authority.js";
+import "../../src/js/clanker-pose.js";
+import "../../src/js/npc-pose-packet.js";
 const wire = globalThis.BL.npcAuthority;
 export const ROOM_NPC = Object.freeze({ key: "npc-authority-v1", leaseMs: 10000, runMs: 900000, deliveryMs: 250 });
 const integer = n => Number.isSafeInteger(n) && n >= 0;
 const id = s => typeof s === "string" && /^[A-Za-z0-9_.:-]{1,80}$/.test(s);
 const fail = () => { throw new Error("NPC authority fenced or invalid"); };
-export const npcAuthorityView = r => r ? { v: 1, revision: r.revision, mode: r.mode, world: r.world, epoch: r.epoch } : null;
+export const npcAuthorityView = r => r ? { v: r.v, ...(r.v === 2 ? { format: r.format } : {}), revision: r.revision, mode: r.mode, world: r.world, epoch: r.epoch } : null;
+export const npcProtocolSupports = (protocol, r) => (protocol === 1 || protocol === 2) && (r.v === 1 || r.v === 2 && protocol === 2);
 export function validateNpcAuthority(r) {
-  if (!r || Object.keys(r).sort().join(",") !== "at,epoch,frame,leaseUntil,mode,owner,revision,runUntil,sequence,v,world" || !wire.descriptor(r) || ![r.leaseUntil, r.runUntil, r.sequence, r.at].every(integer)) fail();
+  const keys = r?.v === 2 ? "at,epoch,format,frame,leaseUntil,mode,owner,revision,runUntil,sequence,v,world" : "at,epoch,frame,leaseUntil,mode,owner,revision,runUntil,sequence,v,world";
+  if (!r || Object.keys(r).sort().join(",") !== keys || !wire.descriptor(r, true) || ![r.leaseUntil, r.runUntil, r.sequence, r.at].every(integer)) fail();
   if (r.mode === "server") {
     if (!id(r.owner) || r.leaseUntil > r.runUntil || r.leaseUntil - r.at > ROOM_NPC.leaseMs || r.runUntil - r.at > ROOM_NPC.runMs
-      || (r.frame === null ? r.sequence !== 0 : !r.sequence || !wire.poses(r.frame))) fail();
+      || (r.frame === null ? r.sequence !== 0 : !r.sequence || !wire.posesFor(r, r.frame, true))) fail();
   } else if (r.owner !== null || r.frame !== null || r.sequence !== 0 || r.leaseUntil !== 0 || r.runUntil !== 0) fail();
   return r;
 }
@@ -26,10 +30,11 @@ export class RoomNpcAuthority {
       const base = { v: 1, revision: expected + 1, sequence: 0, frame: null, at: now };
       let result;
       if (next?.mode === "server") {
+        if (next.format !== undefined && next.format !== "mixed-1") fail();
         if (!id(next.world) || !id(next.owner) || !integer(next.epoch) || !next.epoch || !integer(next.runUntil)
           || next.runUntil <= now || next.runUntil - now > ROOM_NPC.runMs
           || r?.mode === "server" && (now < r.leaseUntil || next.world === r.world && next.epoch <= r.epoch)) fail();
-        result = { ...base, mode: "server", world: next.world, epoch: next.epoch, owner: next.owner,
+        result = { ...base, ...(next.format === "mixed-1" ? { v: 2, format: next.format } : {}), mode: "server", world: next.world, epoch: next.epoch, owner: next.owner,
           runUntil: next.runUntil, leaseUntil: Math.min(next.runUntil, now + ROOM_NPC.leaseMs) };
       } else if (next?.mode === "browser") {
         // Explicit release must name the current private ticket, even after lease expiry.
@@ -41,13 +46,14 @@ export class RoomNpcAuthority {
     });
   }
   async publish(ticket, sequence, frame) {
-    if (!wire.poses(frame) || !integer(sequence) || !sequence) fail();
+    if (!(frame instanceof ArrayBuffer) || frame.byteLength > wire.MAX || !integer(sequence) || !sequence) fail();
     // Copy before the first await: the caller cannot change data during the commit.
     const copy = frame.slice(0);
     return this.storage.transaction(async tx => {
       const r = await this.read(tx), now = this.clock();
       if (!r || r.mode !== "server" || !integer(now) || now < r.at
-        || ticket?.revision !== r.revision || ticket.world !== r.world || ticket.epoch !== r.epoch || ticket.owner !== r.owner) fail();
+        || ticket?.revision !== r.revision || ticket.v !== r.v || ticket.format !== r.format
+        || ticket.world !== r.world || ticket.epoch !== r.epoch || ticket.owner !== r.owner || !wire.posesFor(r, copy, true)) fail();
       if (sequence === r.sequence) {
         const old = new Uint8Array(r.frame), bytes = new Uint8Array(copy);
         if (old.length !== bytes.length || old.some((v, i) => v !== bytes[i])) fail();
@@ -61,4 +67,4 @@ export class RoomNpcAuthority {
     });
   }
 }
-export const packNpcSnapshot = (r) => r?.mode === "server" && r.frame ? wire.pack(npcAuthorityView(r), r.sequence, r.frame) : null;
+export const packNpcSnapshot = (r) => r?.mode === "server" && r.frame ? wire.pack(npcAuthorityView(r), r.sequence, r.frame, true) : null;
