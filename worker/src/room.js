@@ -415,23 +415,27 @@ export class Room extends DurableObject {
       if (msg.name === p.zone) return;
       if (msg.name !== DOOR_ZONE) this.cancelDoor(p);
       if (msg.name !== p.zone) this.clearPasses(p);
-      const leavingStudio = p.zone === STUDIO_ZONE;
+      const leavingStudio = p.zone === STUDIO_ZONE, watched = watchesGhost(p), from = p.zone;
       if (msg.name !== "arcade.hall") hockey.leave(this, p.id);
       p.zone = msg.name;
       hockey.arrive(this, p);
       p.pokerVoice = null;
       if (this.chalkEditor && this.chalkEditor.id === p.id && this.chalkRefusal(p)) this.chalkLetGo(p);
-      // A crossing belongs to the zone it started from; the page reports the next one after its zone (everyone resets
-      // theirs on this broadcast).
-      p.blendTo = null; p.blendK = 0;
+      // A crossing belongs to the zone it started from (everyone resets theirs on this broadcast). A zone that is the
+      // place being crossed into turns it round, so the same places stay heard: off a crossing's far end that is none,
+      // and across the arcade hallway's midpoint (#422) the same crossing seen from its other end. Else the page reports
+      // its next one after its zone.
+      const across = p.blendTo && BLEND.place(p.zone) === BLEND.place(p.blendTo) && BLEND.STEPS - p.blendK > 0;
+      p.blendTo = across ? BLEND.place(from) : null; p.blendK = across ? BLEND.STEPS - p.blendK : 0;
       this.electGhostHost();
       // A page walking into the ghost arena or its hallway catches up with its hunt (a lobby open, a hunt on) at once.
-      if (watchesGhost(p) && p.id !== this.ghostHostId && this.lastGhost) this.send(p.ws, this.lastGhost);
+      if (watchesGhost(p) && !watched && p.id !== this.ghostHostId && this.lastGhost) this.send(p.ws, this.lastGhost);
       if (leavingStudio) this.leaveStudio(p);
       this.walletsArrive(p);
       if (p.zone === STUDIO_ZONE) { this.enforceStudio(); this.sendStudio(p); }
       this.broadcast({ t: "zone", id: p.id, name: p.zone });
-      // The page let go of every voice when it moved, so it always hears where it is now, changed list or not.
+      if (p.blendTo) this.broadcast({ t: "blend", id: p.id, to: p.blendTo, k: p.blendK }, p.ws);
+      // A page that moved groups let go of every voice, so it always hears where it is now, changed list or not.
       p.sent = null;
       this.enforceStudio(); this.updateVoice();
       this.replayDoor(p);
@@ -490,7 +494,10 @@ export class Room extends DurableObject {
         : p.swingBucket || (p.swingBucket = { tokens: burst, at: p.seenAt });
       if (!takeToken(bucket, shot ? SHOT_HZ : SWING_HZ, p.seenAt, burst)) return;
       const out = JSON.stringify(shot ? { t: "shot", id: p.id, a: msg.a } : { t: "swing", id: p.id });
-      for (const other of this.players.values()) if (other !== p && other.zone === p.zone) this.send(other.ws, out);
+      // HALLOWEEN (#422): one fired in the ghost arena also reaches its hallway's spectators (`watchesGhost`), who see and
+      // hear the hunt; one from the hallway stays there.
+      const arena = inGhostArena(p);
+      for (const other of this.players.values()) if (other !== p && (arena ? watchesGhost(other) : other.zone === p.zone)) this.send(other.ws, out);
       return;
     } else if (msg.t === "body") {
       if (msg.name === p.body) return;

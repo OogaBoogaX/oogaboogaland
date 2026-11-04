@@ -47,8 +47,8 @@
 // power times 2), sent on a change; remote records carry it as `jet`, 0 for none. It may add `w`, its weapons
 // (`crew.weaponFlags`: the one in hand, aiming, the gun's rounds), the same way; remote records carry it as `weapon`.
 // `sendShot` and `sendSwing` report the visitor's own Ooga firing a banana (from and to) and striking, which the
-// room relays to players in the same zone; `subscribeShots` hears theirs as `fn(id, a)` and `subscribeSwings` as
-// `fn(id)`, for drawing only.
+// room relays to players in the same zone (from the ghost arena, to the arena and its hallway, #422); `subscribeShots`
+// hears theirs as `fn(id, a)` and `subscribeSwings` as `fn(id)`, for drawing and the hunt's shot sound only.
 // Ooga Chat: `sendChat` sends a line (validated by chat-policy.js, CHAT_MAX UTF-16 units at most) while the
 // room is live; `subscribeChat` hears the room's lines as `fn(lines, joined, receipt)`: one new line, or on every
 // (re)join the lines the room still holds, which chat.js merges; a rejection keeps the draft. The room names each line's
@@ -74,8 +74,10 @@
 // A crossing (#392, voice-blend.js): `setBlend(to, t)` says the driven body is `t` (0 to 1) of the way from its zone's
 // group toward the adjacent group `to` (null for none). `state.blendTo` and `state.blendT` keep it exact for this page's
 // own volumes; the room gets it in BLEND.STEPS steps, at most BLEND_MS apart, and every remote record carries the
-// other players' steps (`blendTo`, `blendK`), reset by their next zone. A zone change into the group being crossed into
-// keeps the voices this page hears, since it already plays them.
+// other players' steps (`blendTo`, `blendK`), ended by their next zone unless it is the place they were crossing into,
+// which turns the crossing round here as the room does (the room's `blend` after it says the same). A zone change into
+// the place being crossed into keeps the voices this page hears, since it already plays them, and turns the crossing
+// round, as the room does.
 // `subscribePresence` hears `fn(rec, true)` for a player who joins the room while this page is in it, never for those
 // already there on this page's (re)join, and `fn(rec, false)` when one leaves (players.js names the joins, #430).
 // Exports start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribeChalk, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub,
@@ -222,7 +224,7 @@
 
   const sendBody = () => send(JSON.stringify({ t: "body", name: body }));
   const sendZone = () => send(JSON.stringify({ t: "zone", name: zone }));
-  // The crossing last sent (`to`/`k`), "" when the room holds none of this page's: after a zone, which resets it there.
+  // The crossing last sent (`to`/`k`), "" for none; null after a zone forces the next report, including a clear.
   const BLEND = BL.voiceBlend, BLEND_MS = 250;
   let blendSent = "", blendAt = -Infinity;
   const sendBlend = () => {
@@ -467,7 +469,15 @@
       rec.ko = msg.ko === true;
     } else if (msg.t === "zone") {
       const rec = remotes.get(msg.id);
-      if (rec && typeof msg.name === "string") { rec.zone = msg.name; rec.blendTo = null; rec.blendK = 0; }
+      if (rec && typeof msg.name === "string") {
+        // A position stays where it stood across zones of one scene's coordinates (the arcade's hallway halves, #422).
+        if (rec.poseZone && BLEND.sameFrame(rec.poseZone, msg.name)) rec.poseZone = msg.name;
+        // Into the place it was crossing into, its crossing turns round as the room turns it (the room's `blend` after
+        // this says the same), so its voice never plays a moment at the wrong share; any other zone ends it.
+        const across = !!rec.blendTo && BLEND.place(msg.name) === BLEND.place(rec.blendTo) && BLEND.STEPS - rec.blendK > 0;
+        rec.blendTo = across ? BLEND.place(rec.zone) : null; rec.blendK = across ? BLEND.STEPS - rec.blendK : 0;
+        rec.zone = msg.name;
+      }
       rosterChanged();
     } else if (msg.t === "blend") {
       const rec = remotes.get(msg.id);
@@ -708,14 +718,23 @@
   const setZone = (name) => {
     if (cabinetAnchor) return;
     if (name === zone) return;
-    const moved = !sameGroup(name, zone) && name !== state.blendTo;
+    // Into the place being crossed into (voice-blend.js `place`): the crossing turns round as the room turns it, off a
+    // bridge's far end to none and across the arcade hallway's midpoint (#422) to the same crossing from its other end.
+    const across = !!state.blendTo && BLEND.place(name) === BLEND.place(state.blendTo);
+    const moved = !sameGroup(name, zone) && !across;
+    if (across) {
+      const back = (1 - state.blendT) * BLEND.STEPS >= 0.5;
+      state.blendTo = back ? BLEND.place(zone) : null;
+      state.blendT = back ? 1 - state.blendT : 0;
+    }
     zone = state.zone = name;
     pokerVoice = state.pokerVoice = null;
     poseAt = 0; px = NaN;
     if (moved) BL.voice.setPeers([]);
     sendZone();
-    // The room dropped this page's crossing with its old zone: the next one is sent afresh.
-    blendSent = ""; blendAt = -Infinity;
+    // The room may have inverted an older quantized step, even when this page is already at the endpoint. Always send
+    // the next crossing, including none, so that stale remainder cannot keep the land just left audible.
+    blendSent = null; blendAt = -Infinity;
     rosterChanged();
   };
   // Voice changes without moving or hiding anybody on the shared floor.
@@ -767,7 +786,7 @@
   // HALLOWEEN: the ghost hunt's word to its host (ghost-sync.js): a start or a hit, relayed to the arcade's ghost
   // arena's host (`ghostHostId`) alone, from a page in the arena.
   let ghostHeard = null, ghostStateHeard = null;
-  const GHOST_MAGIC = 0x54534847, GHOST_ZONES = ["arcade.arena", "arcade-hunt"];
+  const GHOST_MAGIC = 0x54534847, GHOST_ZONES = ["ghost-arena", "arcade-hunt"];
   const inGhostArena = () => GHOST_ZONES.includes(state.zone);
   const sendGhost = (msg) => {
     if (state.room === "live" && inGhostArena() && state.ghostHostId && state.ghostHostId !== state.selfId) send(JSON.stringify(msg));

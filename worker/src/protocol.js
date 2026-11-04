@@ -202,15 +202,18 @@ export const WALLET_FUSE_MAX = 60;
 const walletId = (u) => Number.isInteger(u) && u >= 1 && u <= 65535;
 // A follower's batch: up to GHOST_BATCH targets, each a ghost id (0 the boss) and its summed damage, as one report.
 export const GHOST_BATCH = 16;
-// The arcade's ghost arena runs its own hunt: its pages (zone `arcade.arena`, or `arcade-hunt` while a hunt keeps its
-// voice to itself) elect a ghost host of their own, follower reports from the arena go to it, and it sends the hunt's
+// The arcade's ghost arena runs its own hunt: its pages (zone `ghost-arena`, Ghost Hunter's Arena, a voice region of its
+// own (#422) whether a hunt runs or not; `arcade-hunt` from a page loaded before #422) elect a ghost host of their own,
+// follower reports from the arena go to it, and it sends the hunt's
 // state as a binary frame led by GHOST_MAGIC ("GHST"), up to GHOST_FRAME_MAX bytes and GHOST_FRAME_HZ a second, which
 // the room hands to every other page in the arena and keeps for the next to walk in. Only a visible page may host
 // (`ghostCandidate`): a hidden one runs no frames, so it would send nothing while every follower's hunt froze. The
-// arena's hallway (`arcade.haunt`) watches: its pages hear the frames and count as followers, so a spectator walked out
-// sees the hunt through the fence, but they neither host nor report to the host (`watchesGhost`).
-export const GHOST_ARENA_ZONES = ["arcade.arena", "arcade-hunt"];
-export const GHOST_WATCH_ZONES = [...GHOST_ARENA_ZONES, "arcade.haunt"];
+// arena's hallway watches, both its halves (`arcade.haunt` toward the hall, `ghost-arena.haunt` toward the arena): its
+// pages hear the frames and count as followers, so a spectator walked out sees and hears the hunt through the fence,
+// but they neither host nor report to the host (`watchesGhost`). `arcade.arena` is the arena's zone before #422, kept
+// for a page loaded before it.
+export const GHOST_ARENA_ZONES = ["ghost-arena", "arcade-hunt", "arcade.arena"];
+export const GHOST_WATCH_ZONES = [...GHOST_ARENA_ZONES, "arcade.haunt", "ghost-arena.haunt"];
 export const inGhostArena = (p) => GHOST_ARENA_ZONES.includes(p.zone);
 export const watchesGhost = (p) => GHOST_WATCH_ZONES.includes(p.zone);
 export const ghostCandidate = (p) => p.visible && inGhostArena(p);
@@ -437,11 +440,15 @@ export const claimRefusal = (index, login, body, _players, contributor = false, 
 // session hears every other player in its group with a published microphone; nobody hears anyone `none`.
 // On a crossing between two adjacent groups (#392, `BLEND.PAIRS`) a player is in both, by its step along it
 // (`blendTo`, `blendK`), and hears whoever shares a place with it (`BLEND.shares`); the page sets the volumes.
+// Ooga Arcade (`arcade`) and Ghost Hunter's Arena (`ghost-arena`) are two groups joined by the haunted hallway, each
+// a place as a whole (`BLEND.place`), so its crossing reaches nothing else. The arena is one region with or without a
+// hunt; its older names (`arcade-hunt`, `arcade.arena`) are that region (`BLEND.ALIASES`), never the Arcade's.
 // The room decides and re-checks it on every pull.
 export const VOICE_TRACK = "mic";
 
-/** The voice group of a zone name: the part before its `.place`. */
+/** The voice group of a zone name: its alias's (`BLEND.ALIASES`), else the part before its `.place`. */
 export const zoneGroup = (zone) => {
+  if (typeof zone === "string" && Object.hasOwn(BLEND.ALIASES, zone)) return BLEND.ALIASES[zone];
   const dot = typeof zone === "string" ? zone.indexOf(".") : -1;
   return dot < 0 ? zone : zone.slice(0, dot);
 };
