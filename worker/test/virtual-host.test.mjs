@@ -35,7 +35,7 @@ function storage() {
 // A deterministic data-only fixture, explicitly NOT the existing Ooga/Clanker simulation.
 // Random state, a travel phase and a timer must survive a new host object without reseeding.
 const simulation = {
-  version: "fixture-world-1",
+  version: "fixture-world-1", checkpointBytes: 30 * 1024,
   initial: () => ({ seed: 17, steps: 0, x: 0, phase: "outbound", timer: 0 }),
   validate: s => s && Number.isInteger(s.seed) && s.seed >= 0 && s.seed <= 0xffffffff
     && Number.isSafeInteger(s.steps) && Number.isFinite(s.x) && Number.isFinite(s.timer)
@@ -160,7 +160,7 @@ test("long outages record a recovery gate instead of skipping world time", async
 
 test("unknown schema/world and invalid or oversized state fail closed without resetting storage", async () => {
   const h = harness(), ticket = await h.host.begin("a", 60000), saved = h.store.read();
-  for (const patch of [{ schema: 1 }, { schema: 2 }, { schema: 4 }, { world: "future-world" }, { runUntil: saved.wallAt + HOST.maxRunMs + 1 },
+  for (const patch of [{ schema: 1 }, { schema: 2 }, { schema: 3 }, { schema: 5 }, { world: "future-world" }, { runUntil: saved.wallAt + HOST.maxRunMs + 1 },
     { leaseUntil: saved.wallAt + HOST.leaseMs + 1 }, { simulation: { ...saved.simulation, seed: NaN } },
     { simulation: { ...saved.simulation, padding: "x".repeat(HOST.checkpointBytes) } }]) {
     const damaged = { ...saved, ...patch }; h.store.corrupt(damaged);

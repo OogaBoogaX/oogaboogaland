@@ -59,7 +59,7 @@ test("VirtualHost commits the real route cursor and continues it identically aft
     function host() {
       const paths = make(island());
       const simulation = {
-        version: "real-navigation-test-1",
+        version: "real-navigation-test-1", checkpointBytes: 30 * 1024,
         initial: () => ({ cursor: paths.capture(paths.createState()), steps: 0 }),
         validate(s) { paths.restore(s.cursor); return Number.isSafeInteger(s.steps) && s.steps >= 0; },
         step(s) {

@@ -149,7 +149,7 @@ test("host retries and takeover rebuild authoritative collision poses without re
       if (fail) { fail = false; throw new Error("injected collision write failure"); }
       value = next; return result;
     } };
-    const simulation = { version: "collision-fixture-1",
+    const simulation = { checkpointBytes: 30 * 1024, version: "collision-fixture-1",
       initial: () => ({ meshes: prepared.create().capture(), x: -1, steps: 0, blocked: 0 }),
       validate: s => Number.isFinite(s.x) && Number.isInteger(s.steps) && Number.isInteger(s.blocked) && prepared.validate(s.meshes),
       step(s) {

@@ -59,7 +59,7 @@ test("VirtualHost retries and owner recovery preserve committed NPC random choic
     } };
     function host() {
       const simulation = {
-        version: "real-rng-test-1",
+        version: "real-rng-test-1", checkpointBytes: 30 * 1024,
         // Authored choice fixture, not a replacement Clanker state machine.
         initial: () => ({ rng: createNpcRandom(vectors[4][0]).capture(), steps: 0, choice: 0 }),
         validate(s) { restoreNpcRandom(s.rng); return Number.isSafeInteger(s.steps) && s.steps >= 0

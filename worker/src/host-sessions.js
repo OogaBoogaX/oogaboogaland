@@ -91,10 +91,12 @@ export class SessionRegistry {
   // transaction. The standalone default retains the original complete sweep
   // (still bounded by 64 bodies * 1200 substeps). A budget must cover one body's
   // full grace so authenticated reconnect priority cannot starve it.
-  constructor({ protocol, world, adapter = {}, passiveBudget } = {}) {
+  constructor({ protocol, world, adapter = {}, passiveBudget, maxSessions = MAX_SESSIONS } = {}) {
     if (!isVersion(protocol) || !isVersion(world)) throw new TypeError("host-sessions needs protocol and world versions");
     if (passiveBudget !== undefined && (!Number.isSafeInteger(passiveBudget) || passiveBudget < GRACE_MS / PASSIVE_STEP_MS
       || passiveBudget > MAX_SESSIONS * GRACE_MS / PASSIVE_STEP_MS)) throw new TypeError("host-sessions: invalid passive budget");
+    if (!Number.isSafeInteger(maxSessions) || maxSessions < 1 || maxSessions > MAX_SESSIONS) throw new TypeError("host-sessions: invalid capacity");
+    this.maxSessions = maxSessions;
     this.#remaining = passiveBudget ?? Infinity;
     this.protocol = protocol;
     this.world = world;
@@ -110,7 +112,7 @@ export class SessionRegistry {
     if (v !== CHECKPOINT_VERSION) fail("version");
     if (protocol !== r.protocol || world !== r.world) fail("protocol or world mismatch");
     if (!isTime(clock) || !Number.isSafeInteger(nextGeneration) || nextGeneration < 1) fail("counters");
-    if (!Array.isArray(sessions) || !Array.isArray(pending) || sessions.length + pending.length > MAX_SESSIONS) fail("capacity");
+    if (!Array.isArray(sessions) || !Array.isArray(pending) || sessions.length + pending.length > r.maxSessions) fail("capacity");
     const bodies = new Set(), tokens = new Set(), generations = new Set(), held = new Set();
     const generation = (g) => {
       if (!Number.isSafeInteger(g) || g < 1 || g >= nextGeneration || generations.has(g)) fail("generation");
@@ -247,7 +249,7 @@ export class SessionRegistry {
     } else {
       if (this.#pending.some((p) => p.bodyId === bodyId)) return refuse("departing", effects);
       for (const o of this.#sessions.values()) if (o.bodyId === bodyId) return refuse("body-owned", effects);
-      if (this.#sessions.size + this.#pending.length >= MAX_SESSIONS) return refuse("full", effects);
+      if (this.#sessions.size + this.#pending.length >= this.maxSessions) return refuse("full", effects);
       if (!body) return refuse("invalid", effects);
       r = { accountId, bodyId, kind: body.kind, generation: 0, token: "", zone, state: "live", lastSeenAt: t, deadline: null,
         stepAt: t, motion: body.motion, equipment: body.equipment, occupancy: null };

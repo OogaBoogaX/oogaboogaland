@@ -129,7 +129,7 @@ test("host commits combined work, real movement, routes and search state before 
       if (fail) { fail = false; throw new Error("injected walker commit failure"); }
       value = next; return result;
     } };
-    const simulation = { version: world, initial: () => f.encode(f.initial()),
+    const simulation = { checkpointBytes: 30 * 1024, version: world, initial: () => f.encode(f.initial()),
       validate(s) { f.decode(s); return true; },
       step(s, ms) { const state = f.decode(s); f.runtime(state).step(ms / 1000); Object.assign(s, f.encode(state)); },
       project: s => ({ npcs: [{ id: "walker", kind: "ooga", ...s.actor.root.position, yaw: s.actor.root.rotation.y,

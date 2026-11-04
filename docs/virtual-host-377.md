@@ -157,7 +157,7 @@ body. Optional occupancy validation defaults to refusing a claim.
 
 Storage holds one overwritten checkpoint (96 KiB maximum), not an archive.
 Unknown/corrupt schema, world or state fails closed without deleting the stored
-record. Host schema 3 refuses earlier host schemas without migrating them; private
+record. Host schema 4 refuses earlier host schemas without migrating them; private
 session schema 2 still refuses schema 1 rather than inventing missing magazine/body
 fields. A stale runner cannot overwrite a new owner. Transaction tests cover
 rollback and competing claims; actual Durable Object storage/output gates and
@@ -714,14 +714,14 @@ several transactions, but its recorded departure time stays the original deadlin
 and possession cannot be reclaimed after it. Occupancy and handback settle with
 the completed body, atomically; a future runner must schedule these bounded
 operations promptly and account for this processing interval. No automatic loop
-was added. Host checkpoint/public snapshot schema is now **3**, rejecting prior
-host schema 2 without modifying it. The private session codec remains version 2.
+was added. That increment used host schema 3; the capacity increment below now
+uses schema 4 and rejects earlier schemas without modifying them. The private session codec remains version 2.
 No implicit migration, reset or production rollout is performed.
 
-`node worker/eval/host-recovery.mjs` drives actual host admission and recovery,
-including JSON validation, copying and serialization, over the same authored
-Clanker/platform fixtures and atomic in-memory storage. It refuses an oversized
-claim without changing committed state. The local capacity sequence measured:
+`node worker/eval/host-recovery.mjs` at commit `cbf6d3e9` drove actual host
+admission and recovery over authored Clanker/platform fixtures and atomic
+in-memory storage. These historical unreserved results motivated the reservation
+and mixed-roster experiment below; the current evaluator has been replaced:
 
 | Authored actors | Sessions admitted | Peak checkpoint bytes | Recovery writes | Total recovery bytes written |
 |---|---:|---:|---:|---:|
@@ -748,6 +748,107 @@ The first evaluator run correctly reached terminal `backlog` after settling its
 last body but incorrectly tried to tick again, receiving `host fenced`. Its loop
 was fixed to stop at both terminal states and the rerun passed. No production
 code or check threshold was relaxed for that evaluator correction.
+
+### Reserved capacity and mixed-roster checkpoints
+
+The registry currently contains **53 characters** (`node scripts/characters.mjs
+--json`); `clankers.js` creates one Clanker per crew Ooga. That means **106
+potential NPC bodies**, before player tracks; it is not a measured simultaneous
+active-world count. Room's 32 viewers and the registry's 64 retained body slots
+are different limits: live bodies, disconnected bodies and unacknowledged
+visual departures all consume retained slots.
+
+Host schema **4** requires and persists a simulation `checkpointBytes` maximum.
+Admission reserves that entire maximum, 2,048 metadata bytes, and **1,024 bytes
+per retained slot**, rather than looking only at today's serialized size:
+
+`maxSessions = min(64, floor((98304 - 2048 - simulationBudget) / 1024))`
+
+A full profile returns `full` before allocating a new body; duplicate/reclaim
+operations retain their slot. Departures retain theirs until acknowledged.
+Changing the budget or loading an older host schema fails closed, without a
+silent migration/reset. The same 96 KiB physical limit remains. Simulation state
+is separately bounded to 16,000 encoded nodes, metadata to 128 and each slot to
+48, leaving the sum below the original 20,000-node whole-record limit. Slot
+byte/node limits are checked on every commit. Tests overestimate all float
+encodings with 25 ASCII digits plus string quotes, use maximal identifiers,
+16-digit counters/timestamps, occupancy and both session/departure forms. A new
+body schema must rederive these bounds; schema 2 still lacks full actor state.
+
+`compactSimulation` is opt-in: it stores repeated object field names once per
+ordered shape, retaining numeric precision, array order and negative zero.
+There is no general compression dependency or rounding. Its world version
+includes format and budget. It rejects cycles, aliases, non-data properties,
+nonfinite numbers, ambiguous arrays, excessive dictionaries/depth/nodes and
+expanded data over 256 KiB. Decoding charges repeated key bytes before allocating
+each object to bound expansion. Shared world geometry belongs once in the world,
+not duplicated in each actor. The mixed fixture consequently stores its authored
+mesh once; this is not a complete production geometry/actor codec.
+
+The finite evaluator now exercises 120 active quarter-second steps followed by
+a complete simultaneous grace recovery, serially on Node v22.23.4. Oogas use the
+real work/walker controller; Clankers use the real flight controller. Inventories,
+crowd interactions, rigs and the world remain fixtures. All accepted sessions
+and departure records fit after growth, failure and restart:
+
+| NPC bodies (equal pairs) | Declared simulation bytes | Retained slots | Peak total bytes | Active p50 / p95 ms | Recovery operations / bytes written |
+|---|---:|---:|---:|---:|---:|
+| 2 | 30,720 | 64 | 35,434 | 2.752 / 3.640 | 19 / 665,810 |
+| 32 | 30,720 | 64 | 50,995 | 13.716 / 16.066 | 19 / 960,747 |
+| 64 | 49,152 | 46 | 58,705 | 24.694 / 28.085 | 14 / 816,253 |
+| 106 | 65,536 | 30 | 72,634 | 39.687 / 45.225 | 9 / 650,722 |
+
+At 106 actors, initial simulation data fell from **133,057 to 47,180 bytes**;
+its measured peak was **57,415**, leaving **8,121 bytes inside its declared
+budget** and **25,670 bytes total physical headroom**. This profile admits 30
+retained bodies, **fewer than Room's 32-viewer ceiling**. A future Room body path
+must respect profile admission and retained grace/tombstones rather than infer
+capacity from viewer count. The capacity fixture explicitly refuses more than
+53 pairs; it does not promise that 128 complete actors fit. Completing actors
+or increasing the roster requires a new measured profile/world or a different
+storage architecture, not removing these bounds.
+
+Packing costs CPU: at 106 actors the 120 active transactions used **6,339.817 ms
+process CPU** and wrote **8,573,259 bytes**; nine recovery operations used
+**411.166 ms CPU**, p50/p95 **37.491/45.186 ms**. Repeated `npcFor` queries still
+unpack the whole world. A bounded ownership index and reusable transaction-local
+runtime are candidates for profiling, but are not implemented. These local
+sequences include validation/copying and authored adapters, not Cloudflare
+storage, cold starts or multi-world load. They are not production percentiles
+or an affordability result. Evidence: `verification-capacity-cost-final.json`.
+
+The 106-actor test also compares every decoded state to the original unwrapped
+controllers, exercises JSON persistence, a failed transaction, host replacement,
+a last-millisecond body reclaim and absent-NPC departures without replaying NPC
+steps. Separate tests fill all 64 slots, grow the simulation to its exact declared
+maximum, retain occupied bodies and drain into departures. Budget mismatch,
+old schema, expansion attacks and overrun preserve the prior checkpoint.
+
+Production cost validation remains blocked by the absent production world/runner
+and account/runtime measurements. No Wrangler executable is installed in this
+checkout; no runtime was installed or deployment attempted. Cloudflare's current
+[pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/)
+meters active/non-hibernating wall time, not local CPU samples; SQLite `put`
+costs rows, whereas legacy KV storage uses 4 KB units. Account allocations are
+shared and unknown here. A hypothetical 4 Hz writer makes **3,600 writes per
+15-minute run**, at most **337.5 MiB of serialized checkpoint traffic** under
+this application cap, before additional session/recovery writes. Continuous
+4 Hz operation would make **345,600 writes/day**, already above the documented
+100,000/day free SQLite write allowance. These are arithmetic scenarios, not
+enabled schedules or invoice predictions. Cloudflare's
+[limits](https://developers.cloudflare.com/durable-objects/platform/limits/)
+allow larger storage values than this application's deliberate 96 KiB cap;
+increasing that cap would not establish safe CPU, fanout or recovery costs.
+
+Current local verification: **81/81** focused host tests, including seven new
+capacity/codec/roster checks; the separate codec review passed **6/6** after
+rejecting hidden/accessor/symbol state and strengthening maximal-number tests.
+Unit **408/408**, build (**316 scripts**), **19** touched JS/MJS syntax checks
+and whitespace passed. No thresholds were weakened; no Hub/full/browser checks
+were rerun. Full actor
+and Clanker projection, exact browser reclaim, authenticated body outbox and
+free-arm/green-beam rendering remain unfinished, with #379/#464 boundaries intact.
+Tess is unchanged. No timer, paid loop, environment enablement or deployment added.
 
 Verified locally November 4, 2026 on Node v22.23.4:
 

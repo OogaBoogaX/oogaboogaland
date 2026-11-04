@@ -23,7 +23,7 @@ async function harness(height = 4) {
   } };
   const project = createNpcPose(123, 1);
   // Fixture ownership/rig only; the 64 passive bodies use actual mesh physics.
-  const simulation = { version: "budget-fixture", initial: () => ({ steps: 0, handbacks: [] }),
+  const simulation = { checkpointBytes: 30 * 1024, version: "budget-fixture", initial: () => ({ steps: 0, handbacks: [] }),
     validate: s => Number.isSafeInteger(s.steps) && Array.isArray(s.handbacks),
     step(s) { s.steps++; }, project: () => ({ npcs: [], hub: { pile: 0 } }), poses: () => project([]),
     npcFor: (_, id) => id === "body-0" ? "npc-0" : null,

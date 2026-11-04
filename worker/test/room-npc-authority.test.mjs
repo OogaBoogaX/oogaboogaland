@@ -163,7 +163,7 @@ test('committed host poses reach actual Room, reconcile lost replies and recover
   } };
   // The world step is deliberately authored; projection and both authority implementations are real.
   const project = createNpcPose(123, 1), actor = rig();
-  const simulation = { version: 'bridge-fixture-1', initial: () => ({ x: 0, steps: 0 }), validate: s => Number.isFinite(s.x) && Number.isInteger(s.steps),
+  const simulation = { checkpointBytes: 30 * 1024, version: 'bridge-fixture-1', initial: () => ({ x: 0, steps: 0 }), validate: s => Number.isFinite(s.x) && Number.isInteger(s.steps),
     step(s) { s.x++; s.steps++; }, project: () => ({ npcs: [], hub: { pile: 0 } }), npcFor: () => null, handoff: () => false,
     poses(s) { actor.root.position.x = s.x; return project([{ index: 0, actor }]); } };
   const make = () => new VirtualHost({ storage: store, simulation, sessionAdapter: { stepPassive: m => m }, clock: () => now });

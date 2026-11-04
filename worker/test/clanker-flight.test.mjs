@@ -100,7 +100,7 @@ test("actual Clanker flight and coupled body state recover through failed host w
       let next = structuredClone(data); const result = await fn({ get: async () => structuredClone(next), put: async (_, r) => { next = structuredClone(r); } });
       if (fail) { fail = false; throw Error("flight write failed"); } data = next; return result;
     } };
-    const simulation = { version: world,
+    const simulation = { checkpointBytes: 30 * 1024, version: world,
       initial() { const e = initial(); f.controller.prepareJump(e, 0, 0, -4, 1.5); return capture(e); },
       validate(s) { codec.restore(s.jump); return true; },
       step(s, ms) { const e = restore(s); if (e.jump.active) f.controller.updateJump(e, ms / 1000); Object.assign(s, capture(e)); },

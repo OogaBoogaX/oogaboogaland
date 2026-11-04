@@ -5,10 +5,10 @@ import { SessionRegistry } from "./host-sessions.js";
 import "../../src/js/npc-authority.js";
 export const SESSION_PROTOCOL = "host-session-v2";
 export const HOST = Object.freeze({
-  schema: 3, key: "virtual-host-v1", stepMs: 250, maxSteps: 8, maxLagMs: 30000,
+  schema: 4, key: "virtual-host-v1", stepMs: 250, maxSteps: 8, maxLagMs: 30000,
   leaseMs: 10000, maxRunMs: 15 * 60000, checkpointBytes: 96 * 1024,
   snapshotBytes: 32 * 1024, maxNpcs: 128, maxFollowers: 32, deliveryMs: 250,
-  passiveSteps: 4096,
+  passiveSteps: 4096, metadataBytes: 2048, sessionSlotBytes: 1024, simulationNodes: 16000, sessionSlotNodes: 48, metadataNodes: 128,
 });
 const encoder = new TextEncoder();
 const id = value => typeof value === "string" && /^[a-zA-Z0-9_.:-]{1,80}$/.test(value);
@@ -19,10 +19,10 @@ const exact = (value, keys) => value && typeof value === "object" && !Array.isAr
 
 // Reject non-JSON state instead of silently losing NaN, undefined, sparse arrays, or prototypes.
 // Limits bound validation work as well as encoded size. Checkpoints contain no executable objects.
-export function boundedJSON(value, maxBytes) {
+export function boundedJSON(value, maxBytes, maxNodes = 20000) {
   let nodes = 0;
   const visit = (v, depth) => {
-    if (++nodes > 20000 || depth > 24) fail("state complexity");
+    if (++nodes > maxNodes || depth > 24) fail("state complexity");
     if (v === null || typeof v === "boolean") return;
     if (typeof v === "number") { if (!Number.isFinite(v)) fail("nonfinite state"); return; }
     if (typeof v === "string") { if (v.length > maxBytes) fail("state size"); return; }
@@ -71,9 +71,13 @@ export class VirtualHost {
   constructor({ storage, simulation, sessionAdapter = {}, clock = Date.now }) {
     if (!storage?.transaction || !id(simulation?.version)
       || !["initial", "validate", "step", "project", "npcFor", "handoff"].every(k => typeof simulation[k] === "function")
-      || typeof sessionAdapter.stepPassive !== "function") fail("host adapters");
+      || typeof sessionAdapter.stepPassive !== "function"
+      || !Number.isSafeInteger(simulation.checkpointBytes) || simulation.checkpointBytes < 256
+      || simulation.checkpointBytes > HOST.checkpointBytes - HOST.metadataBytes - HOST.sessionSlotBytes) fail("host adapters");
     this.storage = storage;
     this.simulation = simulation;
+    this.checkpointBytes = simulation.checkpointBytes;
+    this.maxSessions = Math.min(64, Math.floor((HOST.checkpointBytes - HOST.metadataBytes - this.checkpointBytes) / HOST.sessionSlotBytes));
     this.sessionAdapter = sessionAdapter;
     this.clock = clock;
   }
@@ -81,17 +85,25 @@ export class VirtualHost {
   now() { const now = this.clock(); if (!time(now)) fail("host clock"); return now; }
 
   validate(r) {
-    if (!exact(r, ["schema", "world", "fence", "revision", "owner", "leaseUntil", "runUntil", "wallAt", "wallCursor", "simulatedAt", "pausedMs", "status", "simulation", "sessions"])
-      || r.schema !== HOST.schema || r.world !== this.simulation.version) fail("incompatible checkpoint");
+    if (!exact(r, ["schema", "world", "budget", "fence", "revision", "owner", "leaseUntil", "runUntil", "wallAt", "wallCursor", "simulatedAt", "pausedMs", "status", "simulation", "sessions"])
+      || r.schema !== HOST.schema || r.world !== this.simulation.version || r.budget !== this.checkpointBytes) fail("incompatible checkpoint");
     if (![r.fence, r.revision, r.leaseUntil, r.runUntil, r.wallAt, r.wallCursor, r.simulatedAt, r.pausedMs].every(time)
       || r.simulatedAt + r.pausedMs !== r.wallCursor || r.wallCursor > r.wallAt || !id(r.owner)
       || r.runUntil - r.wallAt > HOST.maxRunMs || r.leaseUntil - r.wallAt > HOST.leaseMs
       || r.fence < 1 || r.revision < 1
       || !["running", "draining", "stopped", "backlog"].includes(r.status)) fail("invalid checkpoint");
     boundedJSON(r, HOST.checkpointBytes);
+    boundedJSON(r.simulation, this.checkpointBytes, HOST.simulationNodes);
+    // Reserve maximum future world growth and one worst-case schema-2 record per
+    // retained body/departure, including array separators. Refuse admission before
+    // the checkpoint fills; expiration and resource/number growth need this space.
+    const slots = (r.sessions?.sessions.length || 0) + (r.sessions?.pending.length || 0);
+    if (this.checkpointBytes + HOST.metadataBytes + slots * HOST.sessionSlotBytes > HOST.checkpointBytes) fail("checkpoint capacity");
+    boundedJSON({ ...r, simulation: null, sessions: r.sessions && { ...r.sessions, sessions: [], pending: [] } }, HOST.metadataBytes, HOST.metadataNodes);
+    for (const item of [...(r.sessions?.sessions || []), ...(r.sessions?.pending || [])]) boundedJSON(item, HOST.sessionSlotBytes - 1, HOST.sessionSlotNodes);
     if (this.simulation.validate(r.simulation) !== true) fail("invalid simulation");
     if (r.sessions !== null) {
-      SessionRegistry.restore(r.sessions, { protocol: SESSION_PROTOCOL, world: r.world });
+      SessionRegistry.restore(r.sessions, { protocol: SESSION_PROTOCOL, world: r.world, maxSessions: this.maxSessions });
       if (r.sessions.clock > r.wallAt) fail("invalid session clock");
     }
     return r;
@@ -124,7 +136,7 @@ export class VirtualHost {
       if (r && now < r.wallAt) fail("clock moved backwards");
       if (r && r.status === "running" && now < r.runUntil) fail("run already active");
       if (r?.sessions?.sessions.length) fail("session drain required");
-      if (!r) r = { schema: HOST.schema, world: this.simulation.version, fence: 0, revision: 0,
+      if (!r) r = { schema: HOST.schema, world: this.simulation.version, budget: this.checkpointBytes, fence: 0, revision: 0,
         owner, leaseUntil: now, runUntil: now, wallAt: now, wallCursor: now, simulatedAt: now, pausedMs: 0, status: "stopped",
         simulation: this.simulation.initial(now), sessions: null };
       if (now - r.wallCursor > HOST.maxLagMs) {
@@ -257,7 +269,7 @@ export class VirtualHost {
   registry(r, now, liveTokens, { closes = [], create = false, priorityAccount = null, budget = { left: HOST.passiveSteps } } = {}) {
     if (!r.sessions && !create) return { registry: null, recovery: { effects: [] } };
     if (!Array.isArray(liveTokens)) fail("authenticated transport census required");
-    const options = { protocol: SESSION_PROTOCOL, world: r.world, passiveBudget: HOST.passiveSteps, adapter: {
+    const options = { protocol: SESSION_PROTOCOL, world: r.world, maxSessions: this.maxSessions, passiveBudget: HOST.passiveSteps, adapter: {
       stepPassive: (motion, ms) => {
         // Storage can rerun this callback against a fresh checkpoint. Attempts
         // share the outer operation budget; exhaustion aborts without publishing

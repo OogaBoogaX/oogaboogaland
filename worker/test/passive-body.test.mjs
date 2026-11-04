@@ -80,7 +80,7 @@ test('VirtualHost commits real passive landing with handback and rolls both back
   let data=new Map(),now=100000,fail=false;
   const storage={async transaction(fn){const draft=structuredClone(data);const result=await fn({get:async k=>structuredClone(draft.get(k)),put:async(k,v)=>{if(fail){fail=false;throw Error('storage unavailable');}draft.set(k,structuredClone(v));}});data=draft;return result;}};
   // Authored NPC ownership only; physics is the actual passive/mesh integration.
-  const simulation={version:'walker-fixture-1',initial:()=>({handbacks:0,body:null}),validate:s=>Number.isInteger(s.handbacks),step(){},project:()=>({npcs:[],hub:{pile:0}}),
+  const simulation={checkpointBytes:30*1024,version:'walker-fixture-1',initial:()=>({handbacks:0,body:null}),validate:s=>Number.isInteger(s.handbacks),step(){},project:()=>({npcs:[],hub:{pile:0}}),
     npcFor:(_s,id)=>id==='resident'?'resident-npc':null,handoff(s,intent){s.handbacks++;s.body=intent.body;return true;}};
   const create=()=>new VirtualHost({storage,simulation,sessionAdapter:{stepPassive:p.step},clock:()=>now});
   const host=create(),first=await host.begin('runner-a',120000);

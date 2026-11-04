@@ -93,7 +93,7 @@ function hostHarness(seed) {
     value = next; return result;
   } };
   const simulation = {
-    version: "work-fixture-1", initial: () => structuredClone(seed),
+    version: "work-fixture-1", checkpointBytes: 30 * 1024, initial: () => structuredClone(seed),
     validate(s) { decode(s); return true; },
     step(saved, ms) {
       const state = decode(saved);
