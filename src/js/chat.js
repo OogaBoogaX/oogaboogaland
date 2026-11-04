@@ -1,6 +1,6 @@
 // Ooga Chat, the sheet's last tab: one live conversation for every signed-in player on the island, on the
-// page the Worker serves (docs/auth-and-presence.md). The tab shows only where a backend answered; signed
-// out, the input is off and the panel offers the footer's sign-in. The room names each speaker and holds
+// page the Worker serves (docs/auth-and-presence.md). Like Online Oogas, the tab is hidden while signed
+// out. Contributor sign-in lives in the Contributing Oogas panel. The room names each speaker and holds
 // the last CHAT_KEEP lines in its memory alone, not persisted to the database: a reload fetches the room history, and a
 // room that slept forgets it; an open page keeps what it saw until reload or explicit logout.
 // Cost: a line heard while the panel is not showing only joins a capped array, and the rows are drawn in one

@@ -697,7 +697,6 @@ body[data-active-scene="hub"] .home-link {
 
 .sheet[data-dock="bottom"] .sheet-body {
   border-bottom: 0;
-  padding-top: 12px;
   padding-bottom: var(--safe-bottom);
   box-shadow: 0 -6px 30px rgba(0, 0, 0, 0.35);
 }
@@ -719,15 +718,6 @@ body[data-active-scene="hub"] .home-link {
   .bottom-hud { --drawer-lift: calc(var(--drawer-height) + var(--drawer-clear)); }
 
   .sheet[data-dock="bottom"][data-sized="false"] { height: var(--drawer-height); }
-
-  /* The drawer's foot stays short: its last row sits just over the home indicator. */
-  .sheet[data-dock="bottom"] .sheet-body { padding-bottom: 0; }
-  .sheet[data-dock="bottom"] .sheet-foot {
-    gap: 0 12px;
-    padding: 2px 14px max(2px, calc(var(--safe-bottom) - 20px));
-  }
-  .sheet[data-dock="bottom"] .foot-button { min-height: 30px; }
-  .sheet[data-dock="bottom"] .sheet-foot .link { min-height: 26px; }
 
   .sheet[data-dock="bottom"][data-sticks="true"][data-open="true"]:not([hidden])~.joysticks,
   .sheet[data-dock="bottom"][data-sticks="true"][data-open="true"]:not([hidden])~.bottom-hud>.act { display: block; }
@@ -798,11 +788,9 @@ body[data-active-scene="hub"] .home-link {
 }
 .sheet[data-sized="true"] .sheet-toggle svg { max-height: 100%; }
 
-/* A phone's drawer drops Feed the Ooga Boogas and keeps a small tab at the far right: up opens or lifts it, down closes it. */
+/* A phone's drawer keeps a small tab at the far right: up opens or lifts it, down closes it. */
 .sheet-expand { display: none; }
 @media (pointer: coarse) and (max-width: 720px), (pointer: coarse) and (max-height: 500px) {
-  .sheet[data-dock="bottom"] .sheet-foot > .feed-open { display: none; }
-
   .sheet[data-dock="bottom"] .sheet-expand {
     display: block;
     position: absolute;
@@ -958,8 +946,6 @@ body[data-active-scene="hub"] .home-link {
   white-space: nowrap;
   filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.6));
 }
-
-.sheet-foot > .feed-open { flex: none; margin: 0 0 4px; }
 
 .roster-hint:not(:has(> :not([hidden]))) { display: none; }
 
@@ -1471,7 +1457,8 @@ body[data-active-scene="hub"] .home-link {
   text-shadow: 0 1px 0 rgba(0, 0, 0, 0.4);
 }
 
-.feed-open {
+.feed-open,
+.panel-primary {
   display: block;
   width: 100%;
   margin-top: 14px;
@@ -1487,14 +1474,20 @@ body[data-active-scene="hub"] .home-link {
   transition: background-color 0.15s ease;
 }
 
-.feed-open .sign path {
+.panel-primary { flex: none; margin: 0; }
+
+.feed-open .sign path,
+.panel-primary .sign path {
   stroke: currentColor;
   stroke-width: 0.3;
 }
 
 .feed-open:hover,
 .feed-open.virtual-hover,
-.feed-open:focus-visible {
+.feed-open:focus-visible,
+.panel-primary:hover,
+.panel-primary.virtual-hover,
+.panel-primary:focus-visible {
   background: linear-gradient(#f0b05a, #e2a04a);
   outline: none;
 }
@@ -2013,7 +2006,7 @@ body[data-active-scene="hub"] .home-link {
   display: none;
 }
 
-/* A player whose voice the visitor's hearing range has faded out. */
+/* A player at or beyond the visitor's hearing range. */
 .players-distance[data-far="true"] {
   opacity: 0.45;
 }
@@ -2058,38 +2051,17 @@ body[data-active-scene="hub"] .home-link {
   cursor: pointer;
 }
 
-/* A phone's short drawer keeps Read joins aloud on the title's line, left of the online count. */
-@media (pointer: coarse) and (max-width: 720px), (pointer: coarse) and (max-height: 500px) {
-  .panel[data-panel="players"]:not([hidden]) {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto auto;
-    grid-template-rows: auto auto minmax(0, 1fr) auto;
-    column-gap: 8px;
-    row-gap: 0;
-  }
-  .panel[data-panel="players"] > .panel-title { display: contents; }
-  .panel[data-panel="players"] .panel-title h2,
-  .panel[data-panel="players"] > .players-speak,
-  .panel[data-panel="players"] #players-count { grid-row: 1; align-self: center; }
-  .panel[data-panel="players"] > .players-speak { grid-column: 2; }
-  .panel[data-panel="players"] #players-count { grid-column: 3; }
-  .panel[data-panel="players"] > .players-hearing,
-  .panel[data-panel="players"] > .players,
-  .panel[data-panel="players"] > .players-status { grid-column: 1 / -1; margin-top: 10px; }
-  .panel[data-panel="players"] > .players-hearing { grid-row: 2; }
-  .panel[data-panel="players"] > .players { grid-row: 3; }
-  .panel[data-panel="players"] > .players-status { grid-row: 4; }
+/* Native disclosure keeps advanced settings together on every panel layout. */
+.players-settings { flex: none; }
+.players-settings:not(:has(.players-settings-content > :not([hidden]))) { display: none; }
+.players-settings > summary {
+  padding: 6px 0;
+  color: var(--paper);
+  font-size: 11px;
+  cursor: pointer;
 }
-
-/* Narrow phones give the join-reading option its own row, clear of the full panel name. */
-@media (pointer: coarse) and (max-width: 360px) {
-  .panel[data-panel="players"]:not([hidden]) { grid-template-rows: auto auto auto minmax(0, 1fr) auto; }
-  .panel[data-panel="players"] .panel-title h2 { grid-column: 1 / 3; }
-  .panel[data-panel="players"] > .players-speak { grid-row: 2; grid-column: 1 / -1; }
-  .panel[data-panel="players"] > .players-hearing { grid-row: 3; }
-  .panel[data-panel="players"] > .players { grid-row: 4; }
-  .panel[data-panel="players"] > .players-status { grid-row: 5; }
-}
+.players-settings > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.players-settings-content { display: grid; gap: 8px; padding-top: 8px; }
 
 .players-hearing-label {
   color: rgba(243, 239, 228, 0.72);
@@ -2120,7 +2092,6 @@ body[data-active-scene="hub"] .home-link {
   grid-column: 1 / -1;
   color: rgba(243, 239, 228, 0.62);
   font-size: 9.5px;
-  white-space: nowrap;
 }
 
 @media (pointer: coarse) {
@@ -2371,23 +2342,11 @@ body[data-active-scene="hub"] .home-link {
   cursor: not-allowed;
 }
 
-/* The drawer's foot: account and voice controls above a separate, centred renderer and demo-reset row. */
-.sheet-foot {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px 12px;
-  padding: 8px 14px;
-  border-top: 2px solid var(--wood-edge);
-  background: rgba(0, 0, 0, 0.16);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
-  flex: none;
-}
-
+/* Account controls stay with the Contributing Oogas panel, including when detached. */
 .account {
   display: flex;
-  flex: 1 1 100%;
+  flex: none;
+  width: 100%;
   align-items: center;
   justify-content: center;
   flex-wrap: wrap;
@@ -2402,7 +2361,8 @@ body[data-active-scene="hub"] .home-link {
   min-width: 0;
 }
 
-.account-who:not(:has(> :not([hidden]))) { display: none; }
+.account-who:not(:has(> :not([hidden]))),
+.account-actions:not(:has(> :not([hidden]))) { display: none; }
 
 .account-name {
   min-width: 0;
@@ -2474,25 +2434,9 @@ body[data-active-scene="hub"] .home-link {
 /* In voice with the microphone live, the voice button wears the presence green. */
 .foot-button[aria-pressed="true"] { border-color: rgba(34, 197, 94, 0.75); }
 
-.sheet-foot-meta {
-  display: inline-flex;
-  flex: 0 0 100%;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-}
-
 @media (pointer: coarse) {
   .foot-button { min-height: 40px; }
-  .sheet-foot .link { min-height: 40px; }
-}
-
-.quality {
-  margin: 0;
-  color: rgba(243, 239, 228, 0.6);
-  font-size: 9.5px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  .account .link { min-height: 40px; }
 }
 
 .bottom-hud,
@@ -7002,10 +6946,6 @@ body[data-active-scene] .mic-note { top: var(--hub-equipment-bottom, calc(72px +
     max-height: 7em;
     margin-top: 4px;
     transform: translateY(0);
-  }
-
-  .sheet-foot {
-    padding: 6px 14px calc(6px + var(--safe-bottom));
   }
 
   :root {

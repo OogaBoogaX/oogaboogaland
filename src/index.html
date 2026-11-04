@@ -377,13 +377,8 @@
         <button type="button" class="sheet-toggle sheet-toggle-players" role="tab" data-tab="players"
           aria-selected="false" id="players-tab" aria-controls="players-panel" aria-label="Online Oogas" hidden>
           <span class="sheet-tab-face">
-          <svg viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true">
-            <path fill="#2b1b10" d="M5 0h3v1H5zM4 4h5v3H4z" />
-            <path fill="#c98a5b" d="M5 1h3v2H5zM1 3h3v2H1z" />
-            <path fill="#2b1b10" d="M1 2h3v1H1z" />
-            <path fill="#141414" d="M5 1h1v1H5zM7 1h1v1H7zM1 3h1v1H1zM3 3h1v1H3z" />
-            <path fill="#4a2c14" d="M0 6h5v3H0z" />
-            <path fill="#22c55e" d="M8 7h1v2H8z" />
+          <svg viewBox="0 0 9 9" aria-hidden="true">
+            <circle cx="4.5" cy="4.5" r="2.5" fill="#22c55e" />
           </svg><span class="tab-count" hidden></span>
           </span>
         </button>
@@ -419,19 +414,38 @@
         </header>
         <ul id="roster" class="roster slab" aria-label="Contributing Oogas"></ul>
         <p class="help roster-hint" data-scene="hub"><span id="world-loot-hint" hidden>Something is hidden out there.</span></p>
+        <div class="account" id="account" hidden>
+          <button type="button" class="panel-primary" data-action="account-login" id="account-login" aria-label="Contributor sign-in with GitHub" title="Contributors can sign in with GitHub to control their own Ooga and gorilla."><span data-sign>Contributor sign-in</span></button>
+          <span class="account-who">
+            <span class="account-name" id="account-name" hidden></span>
+            <span class="account-room" id="account-room" hidden></span>
+          </span>
+          <span class="account-actions">
+            <button type="button" class="foot-button foot-primary" data-action="account-rejoin" id="account-rejoin" hidden>Play here</button>
+            <button type="button" class="foot-button" data-action="account-voice" id="account-voice" aria-pressed="false" hidden>Join voice</button>
+            <button type="button" class="foot-button" data-action="account-voice-leave" id="account-voice-leave" hidden>Leave voice</button>
+            <button type="button" class="foot-button foot-thump" data-action="account-thump" id="account-thump" hidden title="Thump your mallet in support instead of unmuting" aria-label="Thump: support in voice without unmuting">Thump</button>
+            <button type="button" class="link" data-action="account-logout" id="account-logout" hidden>Sign out</button>
+          </span>
+        </div>
       </section>
       <section class="panel" data-panel="players" id="players-panel" role="tabpanel" aria-labelledby="players-tab" hidden>
         <header class="panel-title">
           <h2><span data-sign>Online Oogas</span></h2>
           <span class="panel-chip" id="players-count" data-tone="idle">Offline</span>
         </header>
-        <div class="players-hearing" id="players-hearing" hidden>
-          <label class="players-hearing-label" for="players-hearing-range">Hearing range</label>
-          <input type="range" id="players-hearing-range" min="5" max="65" step="5" value="65" aria-describedby="players-hearing-help" aria-valuetext="No limit">
-          <output class="players-hearing-value" id="players-hearing-value" for="players-hearing-range">No limit</output>
-          <span class="players-hearing-help" id="players-hearing-help">Far voices fade, for you alone</span>
-        </div>
-        <label class="players-speak" id="players-speak" hidden><input type="checkbox" id="players-speak-input"> Read joins aloud</label>
+        <details class="players-settings" id="players-settings">
+          <summary>Advanced settings</summary>
+          <div class="players-settings-content">
+            <div class="players-hearing" id="players-hearing" hidden>
+              <label class="players-hearing-label" for="players-hearing-range">Hearing range</label>
+              <input type="range" id="players-hearing-range" min="1" max="61" step="1" value="61" aria-describedby="players-hearing-help" aria-valuetext="No limit">
+              <output class="players-hearing-value" id="players-hearing-value" for="players-hearing-range">No limit</output>
+              <span class="players-hearing-help" id="players-hearing-help">Voices at or beyond this range are muted for you</span>
+            </div>
+            <label class="players-speak" id="players-speak" hidden><input type="checkbox" id="players-speak-input"> Read joins aloud</label>
+          </div>
+        </details>
         <div class="players slab" id="players-list"></div>
         <p class="help players-status" id="players-status" hidden></p>
       </section>
@@ -487,6 +501,7 @@
           </section>
           <p class="banana-board-note" id="banana-board-note">Demo donations saved in this browser.</p>
         </div>
+        <button type="button" class="panel-primary feed-open" data-action="feed"><span data-sign>Feed the Oogas</span></button>
       </section>
       <section class="panel" data-panel="loot" id="loot-panel" role="tabpanel" aria-labelledby="loot-tab" hidden>
         <header class="panel-title">
@@ -526,27 +541,6 @@
         </form>
       </section>
       </div>
-      <footer class="sheet-foot">
-        <button type="button" class="feed-open" data-action="feed"><span data-sign>Feed the Ooga Boogas</span></button>
-        <span class="account" id="account" hidden>
-          <span class="account-who">
-            <span class="account-name" id="account-name" hidden></span>
-          </span>
-          <span class="account-actions">
-            <button type="button" class="foot-button foot-primary" data-action="account-login" id="account-login" aria-label="Contributor sign-in with GitHub" title="Contributors can sign in with GitHub to control their own Ooga and gorilla.">Contributor sign-in</button>
-            <button type="button" class="foot-button foot-primary" data-action="account-rejoin" id="account-rejoin" hidden>Play here</button>
-            <button type="button" class="foot-button" data-action="account-voice" id="account-voice" aria-pressed="false" hidden>Join voice</button>
-            <button type="button" class="foot-button" data-action="account-voice-leave" id="account-voice-leave" hidden>Leave voice</button>
-            <button type="button" class="foot-button foot-thump" data-action="account-thump" id="account-thump" hidden title="Thump your mallet in support instead of unmuting" aria-label="Thump: support in voice without unmuting">Thump</button>
-            <button type="button" class="link" data-action="account-logout" id="account-logout" hidden>Sign out</button>
-          </span>
-        </span>
-        <span class="sheet-foot-meta">
-          <span class="account-room" id="account-room" hidden></span>
-          <span class="quality" id="quality" aria-live="polite"></span>
-          <button type="button" class="link" data-action="reset">Reset demo</button>
-        </span>
-      </footer>
       </div>
     </aside>
 
@@ -1627,7 +1621,7 @@
     </div>
     <dialog class="modal donation-popup" id="donation-popup" aria-labelledby="donation-title">
       <div class="panel-head">
-        <h2 id="donation-title"><span data-sign>Feed the Ooga Boogas</span></h2>
+        <h2 id="donation-title"><span data-sign>Feed the Oogas</span></h2>
         <button type="button" class="modal-close" id="donation-close" aria-label="Close donation">&times;</button>
       </div>
       <canvas id="donation-screen" width="400" height="400" tabindex="0" aria-label="Donation screen. Type an amount, press Enter to continue, A for your name and message. In the name field, the arrow shows previous names; Down Arrow previews a suggestion, Tab or Enter accepts it, and Escape cancels it. O for on-chain, C to copy, and Escape to go back."></canvas>

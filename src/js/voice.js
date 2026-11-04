@@ -7,7 +7,7 @@
 // serialised. Each remote voice plays on its own <audio> element at one volume: the room lets a player
 // hear only those in the same place (out on the island, HQ, one cave), and within it everyone is equal,
 // unless this visitor turns their own hearing range down (below).
-// `enable` must run inside the click that asks for the microphone; `toggle` is the footer's button.
+// `enable` must run inside the click that asks for the microphone; `toggle` is the account's button.
 // `setMuted` changes mute state without acquiring a microphone, including while joining or only listening.
 // Who is speaking is measured here, for the roster: an analyser on the microphone and on each voice
 // received, read every SPEAK_MS while voice is on (`stats.speaking` for this page, `speaking(id)` for
@@ -26,15 +26,15 @@
 // Hearing range (#380): a visitor may turn their own hearing down from no limit to RADIUS_MIN..RADIUS_MAX metres
 // (`setRadius`, `stats.radius`, 0 for no limit, kept in localStorage). It changes only how loud this page plays each
 // voice it receives, never the microphone or what anyone else hears; the room still decides who is pulled, so nothing
-// is saved on the network. A voice plays at full within half the radius and fades to silence at it along a smoothstep,
-// so it never cuts in or out at the edge (`falloff`). Distances are this page's last reported position (`net.state.self`)
+// is saved on the network. A voice plays at full inside the radius and is silent at or beyond it (`falloff`).
+// Distances are this page's last reported position (`net.state.self`)
 // to each remote's, in the place both stand in: a voice in another place of the same voice group, which has coordinates
 // of its own, or one not yet placed here counts as past the radius; a page with no position of its own here plays everyone.
-// Gains are worked out on the speaking meter's own 150 ms read, so nothing runs while voice is off, and each moves at
-// most NEAR_STEP a read, so a jump (a new radius, a teleport) fades over about a second. A local mute still wins.
+// Movement updates the cutoff on the speaking meter's own 150 ms read; changing the range applies it immediately.
+// No distance fade or volume ramp crosses the cutoff. A local mute still wins.
 // Crossings (#392): on a bridge between two places (voice-blend.js) the room also lets a player hear the place ahead,
 // and each voice plays at its equal-power share (`BL.voiceBlend.gain`, from `net.state.blendT` and the speaker's step),
-// times the hearing range's, so the two places fade into each other along the crossing. It eases as the range does.
+// gated by the hearing range, so the two places fade into each other along the crossing. Only this share eases by NEAR_STEP.
 // Where a voice's level goes: its element's `volume` wherever the browser honours one, as before. iOS and iPadOS ignore
 // an element's volume (it always reads 1), so there (`GAIN_PLAY`) each voice plays through a Web Audio gain fed by its
 // speaking meter's own source, in the context the Join click made, while its element stays muted and only keeps the
@@ -58,10 +58,10 @@
   // Speaking: RMS over SPEAK_ON starts it at once; SPEAK_HOLD quiet reads in a row end it, so words do not flicker.
   const SPEAK_MS = 150, SPEAK_ON = 0.02, SPEAK_HOLD = 4, SAMPLES = 1024;
   const MUTED_KEY = "oogaboogaland.voice-muted", MUTED_MAX = 512;
-  // Hearing range: the radius in metres (0 is no limit), the share of it at full volume, and a gain's most change a read.
-  const RADIUS_KEY = "oogaboogaland.voice-radius", RADIUS_MIN = 5, RADIUS_MAX = 60, FULL_SHARE = 0.5, NEAR_STEP = 0.15;
+  // Hearing range in metres (0 is no limit), and a crossing share's most change per meter read.
+  const RADIUS_KEY = "oogaboogaland.voice-radius", RADIUS_MIN = 1, RADIUS_MAX = 60, NEAR_STEP = 0.15;
   // Whether this browser plays an element at the volume it is given; iOS and iPadOS keep every element at 1. Where it does
-  // not and Web Audio is there, voices play through gains, each change eased over GAIN_TAU seconds so it never clicks.
+  // not and Web Audio is there, voices play through gains. Level changes ease over GAIN_TAU, except the range cutoff.
   const probe = document.createElement("audio");
   probe.volume = 0.5;
   const ELEMENT_VOLUME = probe.volume === 0.5, GAIN_PLAY = !ELEMENT_VOLUME && typeof window.AudioContext === "function", GAIN_TAU = 0.05;
@@ -161,16 +161,10 @@
     if (readMeter(s.meter)) changed = true;
   };
 
-  // How loud a voice `metres` away plays within a hearing radius: full to FULL_SHARE of it, then a smoothstep down to
-  // silence at the radius, flat at both ends so it never jumps; 0 for the radius is no limit. A distance that is not a
-  // number plays nothing, so an element's volume is never set to NaN.
-  const falloff = (metres, radius) => {
-    if (!radius) return 1;
-    const t = (radius - metres) / (radius * (1 - FULL_SHARE));
-    return t >= 1 ? 1 : t > 0 ? t * t * (3 - 2 * t) : 0;
-  };
-  // The gain one remote voice wants now: its share across a crossing (#392), times the hearing range's, measured in
-  // the place both players stand in. Two zones a crossing joins share coordinates, so a voice across it is measured too.
+  // Full volume inside the radius, silence at or beyond it; 0 for the radius is no limit.
+  // Unknown distances are silent while a range is set.
+  const falloff = (metres, radius) => !radius || Number.isFinite(metres) && metres < radius ? 1 : 0;
+  // The smoothly changing share across a crossing (#392), independent of the hard hearing-range cutoff.
   const nearness = (id) => {
     const s = BL.net.state, zone = s.zone, rec = BL.net.remotes.get(id);
     let share = 1;
@@ -178,19 +172,29 @@
       if (!rec) return 0;
       share = BL.voiceBlend.gain(zone, s.blendTo, s.blendT, rec.zone, rec.blendTo, rec.blendK / BL.voiceBlend.STEPS);
     }
-    if (!stats.radius) return share;
-    const me = s.self;
-    if (me.zone !== zone) return share;
+    return share;
+  };
+  // Two zones a crossing joins share coordinates, so a voice across it is measured too.
+  const withinRange = (id) => {
+    if (!stats.radius) return 1;
+    const s = BL.net.state, zone = s.zone, me = s.self, rec = BL.net.remotes.get(id);
+    if (me.zone !== zone) return 1;
     const across = rec && (rec.zone === zone || rec.zone === s.blendTo || rec.blendTo === zone);
     if (!across || rec.poseZone !== rec.zone) return 0;
-    return share * falloff(Math.hypot(rec.x - me.x, rec.y - me.y, rec.z - me.z), stats.radius);
+    return falloff(Math.hypot(rec.x - me.x, rec.y - me.y, rec.z - me.z), stats.radius);
   };
-  const playVolume = (s) => stats.receiveLevel * s.near;
+  const playVolume = (s) => stats.receiveLevel * s.near * s.inRange;
   // A voice's level where it plays: its element's volume, or on GAIN_PLAY its gain (nothing until its track lands), which
   // also carries whether it is heard at all.
-  const setLevel = (s) => {
+  const setLevel = (s, immediate = false) => {
     if (!GAIN_PLAY) s.el.volume = playVolume(s);
-    else if (s.gain) s.gain.gain.setTargetAtTime(s.on ? playVolume(s) : 0, audio.currentTime, GAIN_TAU);
+    else if (s.gain) {
+      const gain = s.gain.gain, level = s.on ? playVolume(s) : 0;
+      if (immediate) {
+        gain.cancelScheduledValues(audio.currentTime);
+        gain.setValueAtTime(level, audio.currentTime);
+      } else gain.setTargetAtTime(level, audio.currentTime, GAIN_TAU);
+    }
   };
   // Plays a received voice or silences it for this page: its element's mute, or on GAIN_PLAY its gain, the element
   // staying muted.
@@ -200,10 +204,11 @@
     else s.el.muted = !on;
   };
   const nearSub = (s, id) => {
-    const want = nearness(id), near = s.near;
-    if (want === near) return;
+    const want = nearness(id), near = s.near, inRange = withinRange(id), cutoff = inRange !== s.inRange;
+    if (want === near && !cutoff) return;
+    s.inRange = inRange;
     s.near = want > near ? Math.min(want, near + NEAR_STEP) : Math.max(want, near - NEAR_STEP);
-    setLevel(s);
+    setLevel(s, cutoff);
   };
   const poll = () => {
     changed = false;
@@ -443,10 +448,10 @@
     const level = Number(value);
     if (!Number.isFinite(level)) return;
     stats.receiveLevel = Math.max(0, Math.min(1, level));
-    subs.forEach(setLevel);
+    subs.forEach((s) => setLevel(s));
     emit();
   };
-  // This visitor's hearing range, for this browser on every visit; the next meter read eases each voice toward it.
+  // This visitor's hearing range, for this browser on every visit; apply its cutoff immediately.
   const setRadius = (metres) => {
     const radius = radiusOf(metres);
     if (radius === stats.radius) return;
@@ -456,6 +461,7 @@
     } catch {
       // Storage off: the range lasts this page.
     }
+    subs.forEach(nearSub);
     emit();
   };
   const enable = async (preserveMute = false) => {
@@ -670,7 +676,7 @@
       const res = await api("pull", { ids: add }, token); valid();
       for (const t of res.tracks) {
         if (t.errorCode || t.id === null) continue;
-        const el = new Audio(), sub = { mid: t.mid, el, meter: null, gain: null, on: false, blocked: false, gen: generations.get(t.id), near: nearness(t.id) };
+        const el = new Audio(), sub = { mid: t.mid, el, meter: null, gain: null, on: false, blocked: false, gen: generations.get(t.id), near: nearness(t.id), inRange: withinRange(t.id) };
         setLevel(sub);
         el.autoplay = true;
         el.muted = true;
@@ -744,5 +750,5 @@
   const inspect = () => ({ desired: desired.slice(), pulled: [...subs.keys()], publish: pubPc ? pubPc.connectionState : "none", receive: subPc ? subPc.connectionState : "none",
     playback: GAIN_PLAY ? "gain" : "element", context: audio ? audio.state : "none" });
 
-  BL.voice = { preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, enable, listen, dropMic, setMuted, toggle, restart, stop, setPeers, subscribe, dispose, inspect, speaking, muteLocal, mutedLocally, setRadius, falloff, nearness, fades: ELEMENT_VOLUME || GAIN_PLAY, RADIUS_MIN, RADIUS_MAX, stats };
+  BL.voice = { preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, enable, listen, dropMic, setMuted, toggle, restart, stop, setPeers, subscribe, dispose, inspect, speaking, muteLocal, mutedLocally, setRadius, falloff, nearness: (id) => withinRange(id) * nearness(id), fades: ELEMENT_VOLUME || GAIN_PLAY, RADIUS_MIN, RADIUS_MAX, stats };
 })();
