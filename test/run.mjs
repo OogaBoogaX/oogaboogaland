@@ -23825,6 +23825,23 @@ const chalkboardClientChecks = async (BL) => {
   document.getElementById("chalk-keyboard").handlers.click();
   input.value = "hi"; input.handlers.input({ isComposing: false }); tick();
   const sentText = f.sent.at(-1).k === "type" && f.sent.at(-1).c.map(c => c[0]).join("") === "hi";
+  // Regression (#425): input is per-character locally, but accepted characters share a wire frame.
+  const capacity = [], marksAt = n => Array.from({ length: n }, () => ({ t: "t", ch: "x", p: [0.1, 0.2] }));
+  for (const [n, text] of [[548, "ab"], [549, "ab"], [550, "a"]]) {
+    room({ t: "chalk-board", marks: marksAt(n), editor: 71 });
+    const before = f.sent.length;
+    input.value = text; input.handlers.input({ isComposing: false }); tick();
+    const frames = f.sent.slice(before).filter(m => m.t === "chalk" && m.k === "type");
+    capacity.push({ n, marks: f.net.state.chalk.board.marks.length, frames: frames.map(m => m.c.map(c => c[0]).join("")) });
+  }
+  room({ t: "chalk-board", marks: marksAt(549), editor: 71 });
+  const beforeBatch = f.sent.length, beforeBoard = JSON.stringify(f.net.state.chalk.board);
+  const refusedBatch = f.net.chalkEdit({ k: "type", c: [["a", 100, 100], ["b", 200, 100]] });
+  f.net.flushChalk();
+  record("chalkboard capacity: normal input batches fitting characters, keeps only the final fitting character at 549, and rejects overflowing frames without changing or queueing them",
+    JSON.stringify(capacity) === JSON.stringify([{ n: 548, marks: 550, frames: ["ab"] }, { n: 549, marks: 550, frames: ["a"] }, { n: 550, marks: 550, frames: [] }])
+      && refusedBatch === "full" && f.sent.length === beforeBatch && JSON.stringify(f.net.state.chalk.board) === beforeBoard,
+    JSON.stringify({ capacity, refusedBatch, sent: f.sent.length - beforeBatch }));
   document.getElementById("chalk-close").handlers.click();
   const letGo = !dialog.open && f.sent.at(-1).k === "drop" && stored?.length === C.initial().length + 2;
   // Another's writing arrives as it is made, and the board names them while they hold it.
