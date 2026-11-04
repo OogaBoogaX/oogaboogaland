@@ -119,7 +119,9 @@ body. Optional occupancy validation defaults to refusing a claim.
   increments its persisted fence. Every subsequent write checks owner, fence,
   world version, lease and run deadline inside the transaction.
 - `tick(ticket, liveTokens)` advances grace bodies and expiry in the same transaction
-  as at most eight 250 ms simulation steps. The authenticated transport census is
+  as at most eight 250 ms simulation steps. Passive recovery shares a 4,096-step
+  transaction budget; unfinished recovery pauses NPC stepping and pose publication.
+  The authenticated transport census is
   mandatory once session state exists, including an empty census. Duplicate calls at
   the same time do not step twice. Backlog beyond 30 seconds pauses the run instead
   of skipping AI time or running unlimited recovery work. These are draft bounds,
@@ -135,6 +137,9 @@ body. Optional occupancy validation defaults to refusing a claim.
   with its bounded pending departures. Publish returned results only after success.
   A failed commit cannot announce ownership or an expiry. No browser supplies the
   token list, account identity, ownership decision, physics adapter or NPC existence.
+- `connect(ticket, liveTokens, claim)` is the authenticated admission/reconnect
+  entrypoint. It prioritizes that account's passive continuation within the same
+  budget; generic registry callbacks must not substitute for timely reconnect.
 - `disconnect(ticket, liveTokens, ref, closedAt)` applies a trusted observed close
   before inferring missing transports. This is the close entrypoint; a generic
   registry callback that disconnects after recovery has the wrong ordering. Room
@@ -152,8 +157,9 @@ body. Optional occupancy validation defaults to refusing a claim.
 
 Storage holds one overwritten checkpoint (96 KiB maximum), not an archive.
 Unknown/corrupt schema, world or state fails closed without deleting the stored
-record. Host/session schema 2 refuses the old unpublished schema 1 rather than
-inventing missing magazine/body fields. A stale runner cannot overwrite a new owner. Transaction tests cover
+record. Host schema 3 refuses earlier host schemas without migrating them; private
+session schema 2 still refuses schema 1 rather than inventing missing magazine/body
+fields. A stale runner cannot overwrite a new owner. Transaction tests cover
 rollback and competing claims; actual Durable Object storage/output gates and
 alarm execution still require a local Cloudflare runtime test.
 
