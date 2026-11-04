@@ -12,6 +12,14 @@
 // cross when they muted their microphone. Games can opt into the room's `hp` bar, between the name and the head.
 // With the scene's `fx`, a line of Ooga Chat is said in a bubble over its speaker's nameplate, the visitor's own
 // line over the actor they drive (`player`, or `crew.player` when no callback is supplied).
+// An Ooga thump (thump.js) reaches the active scene's pool through `thumped(id)` (0 for the visitor's own body): a still
+// remote Ooga taps its club once (`BL.crew.thumpArm`), a remote gorilla beats its chest when its rig allows, the
+// visitor's own Ooga taps through `crew.thump`; any other body (moving, seated, climbing, carried, holding a tool, a
+// driven gorilla, or under Calm) gets a small mallet over its head for a moment instead. Only arms move; nothing
+// physical changes. It answers a stereo pan from where that body was last drawn, 0 when it was not. `clearThumps` ends
+// every mallet and tap at once when the visitor's voice group changes: the visitor's own club tap (`crew.cancelThump`)
+// and a chest beat only while a thump started it (`beatOwned`), through the rig's own interrupt (`motion.workExit`).
+// A beat begun by anything else is left alone.
 // One pool per scene visit: `create` in enter, `dispose` in leave, before the crew's.
 (() => {
   "use strict";
@@ -35,6 +43,13 @@
   const NAME_LIFT = 4, NAME_MID = 4, SPEECH_LIFT = 18, DOT_R = 3, BAR_W = 32, BAR_H = 4, BAR_GAP = 3, ICON_GAP = 4;
   const BAR_LIFT = BAR_GAP + BAR_H + 1;
   const NAME_STROKE = "rgba(20, 14, 8, 0.85)", NAME_FILL = "#f3efe4", BAR_TRACK = "rgba(0, 0, 0, 0.55)", ONLINE = "#22c55e";
+  // The thump's fallback mallet, on the same 9x9 grid: x, y, w, h runs, drawn ICON_LIFT over the nameplate or head.
+  const MALLET = [1, 1, 7, 3, 4, 4, 1, 5], MALLET_FILL = "#d8892b", ICON_TIME = 1.2, ICON_LIFT = 12;
+  // Gorilla flags a chest beat must not interrupt: airborne, climbing, the lab's and the office's stances, asleep.
+  const BEAT_BLOCKED = 1 | 4 | 16 | 32 | 64;
+  const CALM = window.matchMedia("(prefers-reduced-motion: reduce)");
+  // The pool of the scene that updated last: only the active scene's pool updates.
+  let activePool = null;
   const BAR_FILL = "#d8892b", BAR_KO = "#e5533d", ICON_IDLE = "#a6a6a2", ICON_SPEAKING = "#22c55e", ICON_MUTED = "#e5533d";
   // A chat line stays up this long once said through.
   const CHAT_SAY = 4;
@@ -115,8 +130,9 @@
       // Measured as built, before it is placed: feet at the root's own height, as the crew measures its Oogas.
       const height = gorilla ? 0 : BL.crew.bodyHeightOf(cave);
       addChild(root, cave.root);
-      const motion = gorilla ? { walkPhase: NaN, walkGait: "knuckle", climb: 0, climbStride: 0, climbDirection: 0, climbSide: 0, swim: 0, lab: false, labRunIn: false, office: false, officeRise: 0 } : null;
-      const entry = { id: rec.id, body: rec.body, name, gorilla, cave, motion, baseY: gorilla ? 0 : cave.root.position.y, height, top: NaN, dTop: 0, jetNode: null, jetFlame: null, swing: 0, x: rec.x, y: rec.y, z: rec.z, yaw: rec.yaw, phase: 0, hidden: null, hiddenOverride: null, label: "", labelW: 0 };
+      const motion = gorilla ? { walkPhase: NaN, walkGait: "knuckle", climb: 0, climbStride: 0, climbDirection: 0, climbSide: 0, swim: 0, lab: false, labRunIn: false, office: false, officeRise: 0, workExit: false } : null;
+      const entry = { id: rec.id, body: rec.body, name, gorilla, cave, motion, baseY: gorilla ? 0 : cave.root.position.y, height, top: NaN, dTop: 0, jetNode: null, jetFlame: null, swing: 0, x: rec.x, y: rec.y, z: rec.z, yaw: rec.yaw, phase: 0, hidden: null, hiddenOverride: null, label: "", labelW: 0,
+        still: false, thumpT: 0, icon: 0, screenX: NaN, beatOwned: false };
       bodies.set(rec.id, entry);
       hideLocal(entry);
       return entry;
@@ -134,6 +150,9 @@
       const { cave } = entry;
       const parts = cave.parts;
       const moved = Math.hypot(entry.dx, entry.dz) / Math.max(dt, 1e-3);
+      entry.still = moved <= WALK_SPEED;
+      // A walk, a strike or a gun out (`showWeapon` hides the club) ends a tap at once.
+      if (!entry.still || entry.swing > 0 || !parts.club.visible) entry.thumpT = 0;
       if (moved > WALK_SPEED) {
         entry.phase += dt * 10;
         const swing = Math.sin(entry.phase);
@@ -145,6 +164,10 @@
         entry.phase = 0;
         parts.legL.rotation.x = parts.legR.rotation.x = 0;
         parts.armL.rotation.x = parts.armR.rotation.x = -0.2;
+        if (entry.thumpT > 0) {
+          entry.thumpT = Math.max(0, entry.thumpT - dt);
+          parts.armR.rotation.x = BL.crew.thumpArm(1 - entry.thumpT / BL.crew.THUMP_TIME);
+        }
       }
       cave.root.position.x = entry.x;
       cave.root.position.y = entry.y + entry.baseY + Math.abs(Math.sin(entry.phase)) * 0.04;
@@ -168,8 +191,13 @@
       const speed = sleeping ? 0 : g ? g[1] : Math.hypot(entry.dx, entry.dz) / Math.max(dt, 1e-3);
       const lounge = sleeping ? g[3] < -0.5 ? "left" : g[3] > 0.5 ? "right" : "back" : "";
       entry.cave.poseManaged(dt, entry.x, entry.y, entry.z, entry.yaw, speed, !!(flags & 1), !!(flags & 2), lounge, motion);
+      // A thump's beat is the thump's only while it lasts; the interrupt is asked for one pose.
+      motion.workExit = false;
+      if (entry.beatOwned && !entry.cave.beating) entry.beatOwned = false;
     };
 
+    // The visitor's own body's fallback mallet, and the overlay last drawn on, for a thump's pan.
+    let selfIcon = 0, selfBody = null, overlay = null;
     // Their jetpack from the room's `jet` (net.js): the character's built-in one, or the hub's model, put on as the
     // crew puts one on (`crew.jetpackNode`) the first time it shows. The flame flickers as the crew's does.
     let jetClock = 0;
@@ -224,6 +252,8 @@
 
     const update = (dt) => {
       jetClock += dt;
+      activePool = pool;
+      if (selfIcon > 0) selfIcon = Math.max(0, selfIcon - dt);
       if (fx && !unheard) unheard = net.subscribeChat(heard);
       if (!unshot && net.subscribeShots) { unshot = net.subscribeShots(shotHeard); unswung = net.subscribeSwings(swingHeard); }
       for (const entry of bodies.values()) {
@@ -248,6 +278,7 @@
         entry.z += entry.dz;
         entry.yaw += Math.atan2(Math.sin(rec.yaw - entry.yaw), Math.cos(rec.yaw - entry.yaw)) * t;
         if (far) entry.dx = entry.dz = 0;
+        if (entry.icon > 0) entry.icon = Math.max(0, entry.icon - dt);
         if (entry.gorilla) poseGorilla(entry, rec, dt);
         else {
           pose(entry, dt);
@@ -293,9 +324,22 @@
 
     // Nameplates on the overlay, just over each head, in the order the room sent them: the online dot, the name and,
     // in voice, the speaker in one row, with the health bar under the name when the game shows it.
+    const mallet = (ctx, x, y) => {
+      ctx.fillStyle = NAME_STROKE;
+      for (let i = 0; i < MALLET.length; i += 4) ctx.fillRect(x + MALLET[i] - 1, y + MALLET[i + 1] - 1, MALLET[i + 2] + 2, MALLET[i + 3] + 2);
+      ctx.fillStyle = MALLET_FILL;
+      runs(ctx, MALLET, x, y);
+    };
     const drawNames = (ctx, project, showHealth = false) => {
-      if (!bodies.size) return;
+      overlay = ctx.canvas;
+      if (!bodies.size && selfIcon <= 0) return;
       ctx.save();
+      if (selfIcon > 0) {
+        const rig = selfBody && (selfBody.parts ? selfBody : selfBody.gorilla);
+        headMinX = Infinity; headMaxX = -Infinity; headTop = Infinity;
+        if (rig && rig.parts && rig.parts.head && rig.root.visible) projectHead(rig.parts.head, project);
+        if (headTop !== Infinity) mallet(ctx, Math.round((headMinX + headMaxX) / 2) - 4, Math.round(headTop) - ICON_LIFT - 9);
+      }
       ctx.font = NAME_FONT;
       ctx.textAlign = "center";
       ctx.textBaseline = "alphabetic";
@@ -312,6 +356,8 @@
         // Measured once a name: measureText allocates.
         if (entry.label !== rec.display) { entry.label = rec.display; entry.labelW = ctx.measureText(rec.display).width; }
         const x = Math.round((headMinX + headMaxX) / 2), y = Math.round(headTop) - lift, half = entry.labelW / 2;
+        entry.screenX = x;
+        if (entry.icon > 0) mallet(ctx, x - 4, y - ICON_LIFT - 9);
         ctx.strokeStyle = NAME_STROKE;
         ctx.fillStyle = NAME_FILL;
         ctx.strokeText(rec.display, x, y);
@@ -358,6 +404,42 @@
       }
     };
 
+    // A thump from player `id`, or 0 for the visitor's own: the body's one-off, or its mallet; the pan, or null with no body.
+    const thumped = (id) => {
+      const calm = CALM.matches;
+      if (id === 0) {
+        const body = player ? player() : crew && crew.player;
+        if (!body) return null;
+        if (calm || !crew || body !== crew.player || !crew.thump(body)) { selfIcon = ICON_TIME; selfBody = body; }
+        return 0;
+      }
+      const entry = bodies.get(id), rec = net.remotes.get(id);
+      if (!entry || !rec || !entry.cave.root.visible) return null;
+      let tapped = false;
+      if (!calm && entry.gorilla) {
+        const g = rec.g;
+        tapped = !(g && (g[0] & BEAT_BLOCKED || g[5] > 0)) && entry.cave.beat();
+        // Only a beat this thump started becomes the thump's; one that could not start leaves ownership as it was.
+        if (tapped) entry.beatOwned = true;
+      } else if (!calm && entry.still && !(entry.swing > 0) && entry.cave.parts.club.visible) {
+        entry.thumpT = BL.crew.THUMP_TIME;
+        tapped = true;
+      }
+      if (!tapped) entry.icon = ICON_TIME;
+      const w = overlay ? overlay.clientWidth : 0;
+      return w > 0 && Number.isFinite(entry.screenX) ? Math.max(-1, Math.min(1, entry.screenX / w * 2 - 1)) : 0;
+    };
+
+    // The visitor's voice group changed (thump.js): every mallet and club tap from the one before goes now.
+    const clearThumps = () => {
+      selfIcon = 0;
+      if (crew) crew.cancelThump();
+      for (const entry of bodies.values()) {
+        entry.icon = entry.thumpT = 0;
+        if (entry.beatOwned) { entry.beatOwned = false; entry.motion.workExit = true; }
+      }
+    };
+
     const liveGeometry = (set) => {
       for (const entry of bodies.values()) {
         if (entry.gorilla) entry.cave.liveGeometry(set);
@@ -365,9 +447,12 @@
       }
     };
 
-    const stats = () => ({ remotePlayers: actorList.length, reservedPlayers: bodies.size });
+    const stats = () => ({ remotePlayers: actorList.length, reservedPlayers: bodies.size, thumpIcons: (selfIcon > 0 ? 1 : 0) + [...bodies.values()].filter((e) => e.icon > 0).length,
+      thumpTaps: [...bodies.values()].filter((e) => e.thumpT > 0).length, thumpBeats: [...bodies.values()].filter((e) => e.gorilla && e.cave.beating).length });
 
     const dispose = () => {
+      if (activePool === pool) activePool = null;
+      selfBody = overlay = null;
       if (unheard) unheard();
       if (unshot) { unshot(); unswung(); }
       unheard = unshot = unswung = null;
@@ -382,8 +467,11 @@
       return false;
     };
 
-    return { update, actors, drawNames, liveGeometry, stats, setUnderlying, dispose, body: id => bodies.get(id)?.cave || null };
+    const pool = { update, actors, drawNames, liveGeometry, stats, setUnderlying, thumped, clearThumps, dispose, body: id => bodies.get(id)?.cave || null };
+    return pool;
   };
+  const thumped = (id) => activePool ? activePool.thumped(id) : null;
+  const clearThumps = () => { if (activePool) activePool.clearThumps(); };
 
-  BL.remotePlayers = { create, onIsland, sameZone, MAX, BODY_HEIGHT };
+  BL.remotePlayers = { create, thumped, clearThumps, onIsland, sameZone, MAX, BODY_HEIGHT };
 })();
