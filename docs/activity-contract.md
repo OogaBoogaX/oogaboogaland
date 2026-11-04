@@ -111,7 +111,7 @@ Malformed, future, repeated, and older timestamps do not replace newer activity.
 allocation-free work-route query; pass the canonical lowercase repository key.
 `stateFor(contributor)` and `ageLabel(contributor)` use the newest timestamp across
 projects. The roster orders characters from newest to oldest activity and displays
-minute-level ages for the first hour. `subscribe(callback)` reports accepted activity
+minute-level ages for the first hour. Online presence never changes that order. `subscribe(callback)` reports accepted activity
 batches and returns an unsubscribe function. These updates supplement the existing
 minute status refresh, which advances every visible age and lets working status expire
 without receiving a new event.

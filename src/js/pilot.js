@@ -4047,7 +4047,7 @@
         if (!touch && birdsEye()) add("north", "Face north", "");
         if (crew.weaponsEnabled && !cave.grabbedBy && !crew.sleeping && (!cave.camp.seat || cave.camp.seat.allowWeapons) && !cave.bedTravel.mode && (cave.weapon.primaryOwned || cave.weapon.secondaryOwned)) {
           if (touch || shortcuts.includes("weapon")) rows.push(H.row(touch ? [] : BL.controls.shortcutKeys("weapon").filter(key => key === "1" ? cave.weapon.primaryOwned : cave.weapon.secondaryOwned), "Select owned weapon", touch ? "Weapon buttons" : ""));
-          if (touch || shortcuts.includes("attack") || armed()) rows.push(H.row(touch || !shortcuts.includes("attack") ? [] : BL.controls.shortcutKeys("attack"), "Hit / shoot", touch ? "Attack button" : armed() ? "Left mouse click" : "Left click in view control"));
+          if (touch || shortcuts.includes("attack") || armed()) rows.push(H.row(touch || !shortcuts.includes("attack") ? [] : BL.controls.shortcutKeys("attack"), "Hit / shoot", touch ? "Attack button" : armed() ? "Left mouse click" : "Left click in combat mode"));
           if (!touch && shortcuts.includes("swapWeapon")) add("swapWeapon", "Swap weapon", "Weapon buttons");
           if (cave.weapon.equipped) {
             add("reload", ctx.reloadAnywhere ? "Reload" : "Swap magazine", "Magazine button");
