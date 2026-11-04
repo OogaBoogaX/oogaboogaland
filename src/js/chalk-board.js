@@ -91,8 +91,8 @@
     return null;
   };
   const session = (b) => ({ open: -1, from: b.marks.length });
-  // Applies a parsed edit to the board in place; null when it applied, else why not. A line or characters that
-  // would pass the limits stop at them, as drawing on a full board does.
+  // Applies a parsed edit to the board in place; null when it applied, else why not. Text frames that would pass
+  // either capacity limit are refused before changing the board or session; drawing stops at its point limits.
   const apply = (b, op, s) => {
     const marks = b.marks;
     if (op.k === "line") {
@@ -103,9 +103,9 @@
     }
     if (op.k === "more") return s.open >= 0 && s.open === marks.length - 1 ? more(b, op.p, s) : "closed";
     if (op.k === "type") {
+      if (marks.length + op.c.length > MAX_MARKS || b.points + op.c.length > MAX_POINTS) return "full";
       s.open = -1;
       for (const [ch, x, y] of op.c) {
-        if (marks.length >= MAX_MARKS || b.points >= MAX_POINTS) return "full";
         marks.push({ t: "t", ch, p: [x / 1000, y / 1000] });
         b.points++;
       }

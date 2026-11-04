@@ -168,3 +168,58 @@ test("room: the board lets go when its writer walks off, changes body or zone, l
   assert.equal(heard(a, "chalk-lock").at(-1).id, 0, "leaving the island");
   assert.equal(r.chalkTimer, 0, "no save left waiting");
 });
+
+// Regression: a refused frame must not leave a character visible only to its writer, or only in memory.
+test("room: typing at capacity keeps the writer, observers and saved board consistent", async (t) => {
+  for (const [marks, characters, accepted] of [[549, 2, false], [549, 1, true], [550, 1, false], [550, 2, false], [548, 2, true]]) {
+    await t.test(`${marks} marks, ${characters} characters`, async () => {
+      const h = host(), initial = Array.from({ length: marks }, () => ({ t: "t", ch: "x", p: [0.1, 0.2] }));
+      h.saved.set("chalk", { marks: initial });
+      const r = await h.room(), a = await h.join(r, 1, "ooga"), b = await h.join(r, 2, "booga");
+      // These copies follow the same shared contract as the writer and observer; socket payloads are detached.
+      const writer = CHALK.board(structuredClone(heard(a, "chalk-board").at(-1).marks));
+      const observer = CHALK.board(structuredClone(heard(b, "chalk-board").at(-1).marks));
+      const writerSession = CHALK.session(writer), observerSession = CHALK.session(observer);
+      send(r, a, { t: "pose", ...at(1) });
+      send(r, a, { t: "chalk", k: "take" });
+      assert.equal(r.chalkDirty, false, "the restored board starts clean");
+      assert.equal(r.chalkTimer, 0);
+      assert.equal(h.chalkWrites.length, 0);
+      const frame = { t: "chalk", k: "type", c: [["a", 300, 400], ["b", 500, 400]].slice(0, characters) };
+      assert.ok(protocol.parseClientMessage(JSON.stringify(frame)), "the frame is valid on the wire");
+      const boards = heard(a, "chalk-board").length;
+      const local = CHALK.apply(writer, CHALK.parse(frame), writerSession);
+      // Send even if the current client refuses locally: an older or custom client can still submit this frame.
+      send(r, a, frame);
+      assert.equal(r.chalk.marks.length, marks + (accepted ? characters : 0), "no partial application");
+      assert.equal(r.chalk.points, r.chalk.marks.length);
+      assert.equal(local, accepted ? null : "full");
+      const edits = heard(b, "chalk");
+      assert.equal(edits.length, accepted ? 1 : 0, "accepted frames relay exactly once; rejected frames never relay");
+      for (const edit of edits) assert.equal(CHALK.apply(observer, CHALK.parse(edit), observerSession), null);
+      assert.equal(heard(a, "chalk").length, 0, "the writer never receives its own edit back");
+      assert.equal(heard(a, "chalk-board").length, boards + (accepted ? 0 : 1), "only a rejection resyncs the writer");
+      if (!accepted) {
+        const snapshot = heard(a, "chalk-board").at(-1);
+        assert.equal(snapshot.editor, 1);
+        assert.deepEqual(snapshot.marks, initial, "resync contains no accepted prefix");
+        assert.deepEqual(writer.marks, snapshot.marks);
+      } else assert.deepEqual(edits[0], { ...frame, id: 1 });
+      assert.deepEqual(writer, r.chalk);
+      assert.deepEqual(observer, r.chalk, "the observer and writer agree with the room");
+      assert.equal(r.chalkDirty, accepted);
+      assert.equal(!!r.chalkTimer, accepted, "only accepted edits schedule a save");
+      assert.equal(h.chalkWrites.length, 0, "typing is batched, not saved per frame");
+      assert.deepEqual(h.saved.get("chalk").marks, initial, "stored data stays unchanged until the save");
+      send(r, a, { t: "chalk", k: "drop" });
+      await h.settle();
+      assert.equal(r.chalkDirty, false);
+      assert.equal(r.chalkTimer, 0);
+      assert.deepEqual(h.chalkWrites, accepted ? ["put"] : [], "release saves accepted changes only");
+      assert.deepEqual(h.saved.get("chalk").marks, writer.marks);
+      const woken = await h.room(), late = await h.join(woken, 3, "late");
+      assert.deepEqual(woken.chalk, writer, "reload preserves the agreed board");
+      assert.deepEqual(heard(late, "chalk-board").at(-1).marks, observer.marks, "a late client sees the same board");
+    });
+  }
+});
