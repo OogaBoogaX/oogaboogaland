@@ -474,7 +474,7 @@
       panel.classList.toggle("cloud-hopper-guide", briefing);
       title.textContent = copy[0];
       help.textContent = copy[1];
-      hud.hidden = intro || briefing || ended;
+      hud.hidden = intro || to === "lifting" || briefing || ended;
       hud.classList.toggle("cloud-hopper-running", to === "running");
       if (briefing) {
         // The ascent frames for the ready HUD even while the guide covers it.

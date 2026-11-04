@@ -88,6 +88,7 @@
     const from = { x: 0, y: 0, z: 0 }, carry = { x: 0, y: 0, z: 0 };
     const liftGoal = { x: 0, y: 0, z: 0 }, ghostStart = { x: 0, y: 0, z: 0 };
     const targetScreen = { x: 0, y: 0, depth: 0 };
+    let rideView = "shoulder";
     let phase = "idle", actor = null, saved = null, course = null, age = 0, startedAt = 0, seconds = 0, displayTime = 0;
     let session = null, latest = null, run = 0, courseSeed = 0, courseDrift = 0;
     let unrecoverableAt = -1;
@@ -314,6 +315,11 @@
     const holdView = () => { pilot.cameraHandoff.capture(settlePose); };
     const settleView = () => { pilot.cameraHandoff.begin(settlePose, false, SETTLE_SECONDS); };
     const turnLiftView = (mix) => {
+      if (ctx.arcade && phase === "lifting") {
+        // Show the rider and cloud even when play uses first person. The retained play view returns at the top.
+        pilot.framePoint(liftGoal, 0.4, 1, START_VIEW);
+        return;
+      }
       const blend = mix === 1 ? 1 : (mix - liftViewMix) / Math.max(1e-9, 1 - liftViewMix);
       const closeView = pilot.view === "first-person" || pilot.view === "shoulder";
       // Keep the selected view across rides and replays. Only orbit needs
@@ -442,9 +448,10 @@
       return true;
     };
     const beginRun = (ride = false) => {
-      const replay = phase === "won" || phase === "dq", climb = (!replay || ride) && !ctx.cabinet?.();
+      const replay = phase === "won" || phase === "dq", climb = ctx.arcade || !replay || ride;
       if (phase !== "intro" && !replay || level.id > opened()) return false;
       const cave = actor;
+      rideView = pilot.view;
       if (!cave || pilot.player !== cave || crew.player !== cave) { cancel(); return false; }
       const refusal = ctx.refusal();
       if (refusal) { hud.toast(refusal); return false; }
@@ -452,7 +459,7 @@
       endFall(); endSweep();
       clearRoute(true);
       audio.unlock();
-      if (ride) Object.assign(platform.position, home);
+      if (climb) Object.assign(platform.position, home);
       Object.assign(from, platform.position);
       liftViewMix = 0;
       const record = played();
@@ -506,8 +513,7 @@
       }
       routeRoot.visible = true;
       if (!climb) Object.assign(platform.position, start);
-      // A replay starts at the top at once, after a card for any power-up of the level not met yet; a ride shows
-      // those cards at the top.
+      // Every arcade attempt rides from beside the island; guidance waits until the cloud reaches the top.
       const items = climb ? null : newItems(), guide = !climb && !hasSeenGuide(), briefing = guide || !!items?.length;
       if (briefing) overlay.setGuide(guide, items);
       setPhase(climb ? "lifting" : briefing ? "briefing" : "ready");
@@ -516,6 +522,7 @@
       if (!cave.weapon.aiming) pilot.modeAction("mode-toggle");
       if (!replay) ctx.mode(true);
       moveRider();
+      if (climb && ctx.arcade) turnLiftView(0);
       if (!climb) {
         if (!briefing) stageGhost();
         pilot.controls.reset(); turnLiftView(1);
@@ -734,6 +741,12 @@
         const view = Math.min(1, age / LIFT_VIEW_SECONDS);
         if (t === 1) {
           holdView();
+          if (ctx.arcade) {
+            pilot.releaseFrame(true);
+            pilot.enterClose();
+            if (rideView !== "first-person") pilot.exitClose();
+            if (!actor.weapon.aiming) pilot.modeAction("mode-toggle");
+          }
           pilot.controls.reset();
           const items = newItems();
           if (hasSeenGuide() && !items.length) { setPhase("ready"); stageGhost(); }
