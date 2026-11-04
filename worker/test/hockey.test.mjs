@@ -44,7 +44,7 @@ const harness = t => {
     await h.room.fetch({ url: "https://island.invalid/room", headers: new Headers({ upgrade: "websocket", "x-player-id": String(id), "x-player-login": login, "x-player-contributor": "0" }) });
     return accepted[before];
   };
-  const send = (ws, msg) => h.room.webSocketMessage(ws, JSON.stringify(msg));
+  const send = (ws, msg) => h.room.webSocketMessage(ws, JSON.stringify(msg.t === "hockey" ? { v: 4, ...(msg.k === "join" ? { e: 0 } : {}), ...msg } : msg));
   h.join=join;h.send=send;h.wake=async()=>{if(h.room.flushTimer)clearTimeout(h.room.flushTimer);h.room=new context.Room(ctx,{});await initialized;return h.room;};
   return h;
 };
@@ -63,21 +63,52 @@ const cmd = (h,p,k,extra={}) => {
   h.send(p.ws,{t:"hockey",k,i:0,s:h.room.hockeyTables[0]?.s,...extra});
 };
 test("hockey parser bounds every coordinate, action, sequence and payload", () => {
-  const base={t:"hockey",k:"frame",i:0,s:"0123456789abcdef",q:1,a:frame()};
+  const base={t:"hockey",v:4,k:"frame",i:0,s:"0123456789abcdef",q:1,a:frame()};
   assert.ok(protocol.parseClientMessage(JSON.stringify(base)));
   for (const patch of [{i:3},{s:"wrong"},{q:-1},{q:1.1},{a:[]},{a:[...frame(),1]},{a:frame().map(()=>null)},{k:"take-over"}]) assert.equal(protocol.parseClientMessage(JSON.stringify({...base,...patch})),null);
   for (let i=0;i<18;i++) { const a=frame(); a[i]=1e9; assert.equal(protocol.parseClientMessage(JSON.stringify({...base,a})),null,`field ${i}`); }
   assert.equal(protocol.parseClientMessage(JSON.stringify({...base,padding:"x".repeat(256)})),false);
   assert.ok(Buffer.byteLength(JSON.stringify(base))<=protocol.MESSAGE_MAX);
-  const input={t:"hockey",k:"input",i:0,s:base.s,q:1,x:0,y:500};
+  const join={t:"hockey",v:4,k:"join",i:0,e:1};assert.equal(protocol.parseClientMessage(JSON.stringify(join)).e,1);
+  for(const e of [-1,2,null,1.5,"1",undefined])assert.equal(protocol.parseClientMessage(JSON.stringify({...join,e})),null);
+  assert.equal(protocol.parseClientMessage(JSON.stringify({...join,v:3})),null,"older clients cannot enter a mirrored game");
+  const input={t:"hockey",v:4,k:"input",i:0,s:base.s,q:1,x:0,y:500};
   assert.ok(protocol.parseClientMessage(JSON.stringify(input)));
   for(const patch of [{x:1001},{y:-1},{y:1001},{y:.5},{y:null},{y:undefined,hit:1}]) assert.equal(protocol.parseClientMessage(JSON.stringify({...input,...patch})),null);
+  const path={...input,p:[-1000,0,1000,1000,0,500],d:0};
+  assert.ok(protocol.parseClientMessage(JSON.stringify(path)));
+  for(const patch of [{p:[]},{p:[0]},{p:[0,500,0]},{p:Array(14).fill(0)},{p:[1001,500,0,500]},{p:[0,-1,0,500]},{p:[0,500.1,0,500]},{p:[0,501]},{d:2},{d:true},{d:undefined},{p:undefined,d:0}])
+    assert.equal(protocol.parseClientMessage(JSON.stringify({...path,...patch})),null,JSON.stringify(patch));
+  const widest={...input,q:2147483647,x:-1000,y:1000,p:Array(6).fill([-1000,1000]).flat(),d:1};
+  assert.ok(JSON.stringify(widest).length<=protocol.MESSAGE_MAX);
   const bonus=frame();bonus[14]=10;assert.equal(protocol.parseClientMessage(JSON.stringify({...base,a:bonus})),null);
+});
+test("an older live attachment is closed on wake and older clients cannot join or drive v4", async t => {
+  const h=harness(t), a=await seat(h,1,"a"), b=await seat(h,2,"b");
+  h.send(a.ws,{t:"hockey",v:undefined,k:"join",i:0});assert.equal(h.room.hockeyTables[0],null,"old client cannot reserve a v3 table");
+  cmd(h,a,"join");assert.ok(h.room.hockeyTables[0]);
+  h.send(b.ws,{t:"hockey",v:undefined,k:"join",i:0});assert.deepEqual([...h.room.hockeyTables[0].ids],[1,0],"old client cannot join v3 lobby");
+  cmd(h,b,"join");const s=h.room.hockeyTables[0];
+  h.send(a.ws,{t:"hockey",v:undefined,k:"ready",i:0,s:s.s});
+  assert.deepEqual([...s.ready],[false,false],"old ready cannot start a v3 match");
+  cmd(h,a,"ready");cmd(h,b,"ready");
+  const before=messages(a.ws).length;
+  h.send(a.ws,{t:"hockey",v:2,k:"frame",i:0,s:s.s,q:0,a:frame()});
+  assert.equal(s.q,-1,"old host frames cannot drive a v4 match");
+  h.send(b.ws,{t:"hockey",v:undefined,k:"input",i:0,s:s.s,q:0,x:1000,y:500});
+  assert.equal(messages(a.ws).length,before,"old input cannot drive a v3 match");
+  a.ws.store.hockey.wire=3;await h.wake();
+  assert.equal(h.room.hockeyTables[0],null,"legacy live attachment cannot restore");
+  assert.equal(a.ws.store.hockey,null,"legacy attachment is cleared");
+  assert.ok(messages(a.ws).some(m=>m.k==="table"&&m.phase==="closed"),"seats are notified of closure");
+  h.room.webSocketClose(a.ws);h.room.webSocketClose(b.ws);
 });
 test("two authenticated lobby seats require both ready; spectators cannot steal a started solo or human game", async t => {
   const h=harness(t), a=await seat(h,1,"a"), b=await seat(h,2,"b"), c=await seat(h,3,"c");
-  cmd(h,a,"join"); cmd(h,b,"join");
-  const s=h.room.hockeyTables[0]; assert.deepEqual([...s.ids],[1,2]);
+  const far=W.seat(0,1,0,{}),near=W.seat(0,0,0,{});
+  h.send(a.ws,{t:"pose",x:far.x,y:0,z:far.z,yaw:far.yaw});h.send(b.ws,{t:"pose",x:near.x,y:0,z:near.z,yaw:near.yaw});
+  cmd(h,a,"join",{e:1}); cmd(h,b,"join",{e:1});
+  const s=h.room.hockeyTables[0]; assert.deepEqual([...s.ids],[1,2]);assert.equal(s.e,1,"first player retains the far end");assert.equal(messages(a.ws).at(-1).e,1);assert.equal(messages(b.ws).at(-1).e,1);assert.ok(near.z>W.TABLES[0][1]&&far.z<W.TABLES[0][1],"two seats occupy opposite ends");
   cmd(h,b,"ready"); assert.equal(s.phase,"lobby"); cmd(h,a,"ready"); assert.equal(s.phase,"play");
   cmd(h,c,"join"); assert.equal(messages(c.ws).at(-1).k,"busy"); assert.deepEqual([...s.ids],[1,2]);
   cmd(h,c,"frame",{q:5,a:frame()}); assert.equal(s.q,-1);
@@ -100,6 +131,11 @@ test("host frames and guest inputs are sequenced, compact, zone-scoped, rate-bou
   const bad=frame();bad[8]=bad[14]=4;cmd(h,a,"frame",{q:1,a:bad});assert.equal(s.q,0);
   cmd(h,b,"input",{q:1,x:1000,y:500});assert.equal(messages(a.ws).at(-1).k,"input");
   const count=messages(a.ws).length;cmd(h,b,"input",{q:1,x:-1000,y:600});assert.equal(messages(a.ws).length,count);
+  cmd(h,b,"input",{q:2,x:1000,y:500,p:[-1000,500,1000,500],d:0});
+  assert.deepEqual(messages(a.ws).at(-1).p,[-1000,500,1000,500]);assert.equal(messages(a.ws).at(-1).d,0);
+  const pathCount=messages(a.ws).length;cmd(h,b,"input",{q:2,x:0,y:500,p:[0,500],d:1});assert.equal(messages(a.ws).length,pathCount);
+  cmd(h,a,"input",{q:3,x:0,y:500,p:[0,500],d:1});assert.equal(messages(a.ws).length,pathCount,"host may not spoof guest paths");
+  cmd(h,b,"input",{q:3,x:0,y:500,p:[0,501],d:0});assert.equal(messages(a.ws).length,pathCount,"malformed path is rejected");
   for(let q=2;q<200;q++)cmd(h,a,"frame",{q,a:frame()});
   assert.ok(s.q<12,`burst stopped at ${s.q}`);assert.equal(messages(c.ws).length,before);
   assert.equal(h.writes.length,writesBeforeFrames,"frames/inputs never write storage");
@@ -109,8 +145,8 @@ test("host frames and guest inputs are sequenced, compact, zone-scoped, rate-bou
 });
 test("seat release, expiry, body/zone changes, socket replacement and wake restore cannot resurrect an abandoned game",async t=>{
   const h=harness(t),a=await seat(h,1,"a"),b=await seat(h,2,"b");
-  cmd(h,a,"join");cmd(h,b,"join");
-  const original=h.room.hockeyTables[0], wake = await h.wake();
+  cmd(h,a,"join",{e:1});cmd(h,b,"join");
+  const original=h.room.hockeyTables[0], wake = await h.wake();assert.equal(wake.hockeyTables[0].e,1,"table orientation survives hibernation");
   assert.deepEqual([...wake.hockeyTables[0].ids],[1,2]);
   assert.notEqual(wake.hockeyTables[0],original,"wake reconstructs from serialized socket attachments");
   h.send(b.ws,{t:"zone",name:"outside"});assert.equal(h.room.hockeyTables[0],null);
@@ -134,23 +170,43 @@ test("joining requires an owned Ooga near a table, and leaving hockey retains Ar
 test("serialized session-to-Room transport retries a dropped join, cancels before acknowledgement, relays input and closes both seats",async t=>{
   const h=harness(t), a=await seat(h,1,"a"), b=await seat(h,2,"b"), pending=[];
   const clients=[];
-  const connect=p=>{
-    const listeners=new Set(), row={starts:0,ends:0,closed:0,inputs:[],frames:[],a:frame(),index:p.ws.sent.length};
-    const net={state:{selfId:p.p.id,room:"live"},subscribeHockey:fn=>{listeners.add(fn);return()=>listeners.delete(fn);},sendHockey:m=>{pending.push([p.ws,JSON.stringify({t:"hockey",...m})]);return true;},sendPose:(x,y,z,yaw)=>pending.push([p.ws,JSON.stringify({t:"pose",x,y,z,yaw})])};
-    const BL={hockeyWire:W,net};runInNewContext(readFileSync(new URL("../../src/js/hockey-session.js",import.meta.url),"utf8"),{window:{BL},performance});
-    const play={shared(){},multiplayer(){},capture:()=>row.a,receive:a=>row.frames.push([...a]),peerInput:(x,y)=>row.inputs.push([x,y]),peerIdle(){},act(){},remoteAct(){}};
-    row.session=BL.hockeySession.create({slot:0,play,aim:{x:1,depth:.5},lobby(){},sideChanged(){},start(){row.starts++;},end(){row.ends++;},closed(){row.closed++;}});
+  const connect=(p,preferredEnd=0)=>{
+    const listeners=new Set(), row={starts:0,ends:0,closed:0,inputs:[],local:[],paths:[],frames:[],a:frame(),index:p.ws.sent.length};
+    const net={state:{selfId:p.p.id,room:"live"},subscribeHockey:fn=>{listeners.add(fn);return()=>listeners.delete(fn);},sendHockey:m=>{pending.push([p.ws,JSON.stringify({t:"hockey",...m,v:4})]);return true;},sendPose:(x,y,z,yaw)=>pending.push([p.ws,JSON.stringify({t:"pose",x,y,z,yaw})])};
+    const BL={hockeyWire:W,net};runInNewContext(readFileSync(new URL("../../src/js/hockey-session.js",import.meta.url),"utf8"),{window:{BL},performance:{now:()=>Date.now()}});
+    const play={shared(){},multiplayer(){},capture:()=>row.a,receive:a=>row.frames.push([...a]),peerInput:(x,y)=>row.inputs.push([x,y]),localPoint:(x,y)=>row.local.push([x,y]),peerPath:(p,d)=>{row.paths.push({p:[...p],d});row.inputs.push([p[p.length-2]/1000,p[p.length-1]/1000]);},peerIdle(){},act(){},remoteAct(){}};
+    row.aim={x:1,depth:.5};row.session=BL.hockeySession.create({slot:0,play,aim:row.aim,preferredEnd,lobby(){},sideChanged(){},start(){row.starts++;},end(){row.ends++;},closed(){row.closed++;}});
     row.deliver=()=>{while(row.index<p.ws.sent.length){const m=JSON.parse(JSON.stringify(p.ws.sent[row.index++]));if(m.t==="hockey")for(const fn of listeners)fn(m);}};
     clients.push(row);return row;
   };
   const pump=()=>{while(pending.length){const [ws,json]=pending.shift();h.room.webSocketMessage(ws,json);}for(const c of clients)c.deliver();};
-  let host=connect(a);host.session.tick(.1,false);host.session.dispose();pump();
+  let host=connect(a,1);host.session.tick(.1,false);host.session.dispose();pump();
   assert.equal(h.room.hockeyTables[0],null,"queued join followed by cancellation does not strand a lobby");
-  a.p.hockeyBuckets.control={tokens:0,at:Date.now()};host=connect(a);host.session.tick(.1,false);pump();assert.equal(host.session.table,null);
+  a.p.hockeyBuckets.control={tokens:0,at:Date.now()};host=connect(a,1);host.session.tick(.1,false);pump();assert.equal(host.session.table,null);
   h.advance(5100);host.session.tick(1.1,false);pump();assert.ok(host.session.table,"unacknowledged join retries after the real room bucket refills");
-  const guest=connect(b);guest.session.tick(.1,false);pump();host.session.ready();guest.session.ready();pump();
+  const guest=connect(b,1);guest.session.tick(.1,false);pump();host.session.ready();guest.session.ready();pump();
   assert.equal(host.starts,1);assert.equal(guest.starts,1);
-  guest.session.act();guest.session.tick(.1,true);pump();assert.deepEqual(host.inputs.at(-1),[1,.5]);
+  host.session.tick(.001,false);guest.session.tick(.001,false);pump();
+  assert.ok(a.p.z<W.TABLES[0][1]&&b.p.z>W.TABLES[0][1],"host keeps the chosen far end and guest uses the opposite end");
+  host.session.point(-1,.5);host.session.point(1,.5);assert.deepEqual(host.local,[[-1,.5],[1,.5]],"host pointer reversals reach local physics");
+  guest.session.act();guest.session.point(-1,.5);guest.session.point(1,.5);guest.session.tick(.1,true);pump();assert.deepEqual(host.inputs.at(-1),[1,.5]);
+  assert.deepEqual(host.paths.at(-1),{p:[-1000,500,1000,500],d:false},"out-and-back points survive the serialized Worker relay");
+  h.advance(100);for(let n=0;n<7;n++)guest.session.point(n/10,n%2?.6:.5);guest.session.tick(.1,true);pump();
+  assert.deepEqual(host.paths.at(-1),{p:[600,500,1000,500],d:true},"overflow resynchronizes before later points");
+  h.advance(100);guest.aim.x=0;
+  for(let n=0;n<=100;n++)guest.session.point(n/100,.5);
+  for(let n=99;n>=0;n--)guest.session.point(n/100,.5);
+  guest.session.tick(.1,true);pump();
+  assert.deepEqual(host.paths.at(-1),{p:[0,500,1000,500,0,500],d:false},"dense collinear out-and-back retains its reversal without overflow");
+  h.advance(600);host.session.tick(.1,false);guest.session.point(.7,.5);guest.session.tick(.1,true);pump();
+  assert.equal(host.paths.at(-1).d,true,"the first packet after idle resynchronizes even without a sequence gap");
+  h.advance(600);guest.session.point(.8,.5);guest.session.tick(.1,true);pump();
+  assert.equal(host.paths.at(-1).d,true,"arrival after a host stall resynchronizes even without an intervening host tick");
+  h.advance(100);const sessionId=h.room.hockeyTables[0].s;
+  h.send(b.ws,{t:"hockey",k:"input",i:0,s:sessionId,q:6,x:0,y:500,p:[0,500],d:0});host.deliver();
+  assert.deepEqual(host.paths.at(-1),{p:[0,500],d:true},"a sequence gap resynchronizes without a phantom stroke");
+  const received=host.paths.length;h.send(b.ws,{t:"hockey",k:"input",i:0,s:sessionId,q:5,x:-1000,y:500,p:[-1000,500],d:0});host.deliver();
+  assert.equal(host.paths.length,received,"out-of-order input never reaches host physics");
   host.session.tick(.1,true);pump();assert.equal(guest.frames.length,1);assert.deepEqual(guest.frames[0],host.a);
   for(let goal=1;goal<=6;goal++){h.advance(100);host.a=frame();host.a[8]=host.a[14]=goal;host.session.tick(.1,true);pump();}
   h.advance(100);host.a=frame();host.a[8]=host.a[14]=7;host.a[16]=0;host.session.finish();pump();assert.equal(guest.ends,1);assert.equal(h.room.hockeyTables[0].phase,"done");
@@ -224,10 +280,10 @@ test("ledger capacity never evicts retained debt, rejected writes fail closed an
 });
 
 test("hall replay retries wait for connectivity, restart after loss and retire unconfirmed stale cache",()=>{
-  const callbacks=new Set(),sent=[],stops=[0,0,0],games=stops.map((_,i)=>({stop(){stops[i]++;},receive(){}}));
-  const net={state:{room:"off"},hockeyTables:[{k:"table",i:0,s:"0123456789abcdef",phase:"play",q:1,a:frame()},null,null],subscribeHockey:fn=>{callbacks.add(fn);return()=>callbacks.delete(fn);},sendHockey:m=>sent.push(m)};
-  const BL={hockeyWire:W,net};runInNewContext(readFileSync(new URL("../../src/js/hockey-session.js",import.meta.url),"utf8"),{window:{BL},performance});
-  const watch=BL.hockeySession.watch(games);watch.update(60);assert.equal(sent.length,0);net.state.room="live";watch.update(.1);assert.equal(sent.length,1);
+  const callbacks=new Set(),sent=[],stops=[0,0,0],orientation=[null,null,null],games=stops.map((_,i)=>({stop(){stops[i]++;},receive(){},orientation(side){orientation[i]=side;}}));
+  const net={state:{room:"off"},hockeyTables:[{k:"table",i:0,s:"0123456789abcdef",e:1,phase:"play",q:1,a:frame()},null,null],subscribeHockey:fn=>{callbacks.add(fn);return()=>callbacks.delete(fn);},sendHockey:m=>sent.push(m)};
+  const BL={hockeyWire:W,net};runInNewContext(readFileSync(new URL("../../src/js/hockey-session.js",import.meta.url),"utf8"),{window:{BL},performance:{now:()=>Date.now()}});
+  const watch=BL.hockeySession.watch(games);assert.equal(orientation[0],1,"late hall observers restore the first player's chosen end");watch.update(60);assert.equal(sent.length,0);net.state.room="live";watch.update(.1);assert.equal(sent.length,1);
   for(const fn of callbacks)fn({k:"table",i:0,s:"ffffffffffffffff",phase:"closed"});
   const before=stops[0];watch.update(13);assert.equal(stops[0],before+1);watch.update(13);assert.equal(stops[0],before+1,"expiry clears stale presentation only once");
   for(const fn of callbacks)fn({k:"lost"});watch.update(.1);assert.equal(sent.length,2,"reconnect starts a fresh bounded retry window");watch.dispose();assert.equal(callbacks.size,0);

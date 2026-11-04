@@ -26,7 +26,7 @@
         const t = net.hockeyTables[i], active = t && (t.phase === "play" || t.phase === "done");
         if (t && own) {
           const side = t.ids.indexOf(net.state.selfId);
-          if (side >= 0) { W.seat(i, side, 0, seat); own.root.visible = true; own.root.position.x = seat.x; own.root.position.y = ownBase; own.root.position.z = seat.z; own.root.rotation.y = seat.yaw; }
+          if (side >= 0) { W.seat(i, side ^ (t.e === 1 ? 1 : 0), 0, seat); own.root.visible = true; own.root.position.x = seat.x; own.root.position.y = ownBase; own.root.position.z = seat.z; own.root.rotation.y = seat.yaw; }
         }
         if (!active || t.ids[1]) { if (bots[i]) { bots[i].rig.dispose(); bots[i] = null; } }
         else {
@@ -42,8 +42,8 @@
           // A short clear route behind the far rail, in from the central aisle. All viewers use server start time.
           const center = W.TABLES[i], sign = center[0] < 0 ? 1 : -1;
           const k = Math.max(0, Math.min(1, (now - b.start) / APPROACH_MS)), walk = Math.min(1, k / 0.8);
-          const across = games[i]?.rivalU || 0, x = center[0] + sign * 1.5 * (1 - walk) + across * W.SCALE * 0.65 * walk;
-          const z = center[1] - W.SEAT, facing = -sign * Math.PI / 2 * (1 - Math.max(0, (k - 0.8) / 0.2));
+          const across = (games[i]?.rivalU || 0) * (t.e === 1 ? -1 : 1), x = center[0] + sign * 1.5 * (1 - walk) + across * W.SCALE * 0.65 * walk;
+          const z = center[1] + (t.e === 1 ? W.SEAT : -W.SEAT), facing = (t.e === 1 ? Math.PI : 0) - sign * Math.PI / 2 * (1 - Math.max(0, (k - 0.8) / 0.2));
           b.rig.poseManaged(dt, x, 0, z, facing, walk < 1 ? 0.8 : 0, false, true);
           if (k === 1) {
             b.rig.parts.armR.rotation.x = -0.85;
@@ -78,7 +78,7 @@
           if (showSelf) {
             // Center small digits inside the goal half-circle, behind the resting mallet.
             const H = BL.arcadeModels.HOCKEY, center = W.TABLES[i];
-            const sign = side ? -1 : 1;
+            const sign = (side ^ (t.e === 1 ? 1 : 0)) ? -1 : 1;
             const p = project(center[0], H.y + 0.01, center[1] + sign * (H.w / 2 - 0.075) * W.SCALE);
             if (p) { ctx.strokeText(score, Math.round(p.x), Math.round(p.y)); ctx.fillText(score, Math.round(p.x), Math.round(p.y)); }
             continue;
