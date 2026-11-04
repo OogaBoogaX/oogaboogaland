@@ -25879,9 +25879,9 @@ const shaderDerivationProof = async () => {
 // Exercise the production recovery and DSB support gates with a corner whose
 // final destination is across a wall, and with a level platform over deep water.
 const reviewMovementProof = async () => {
-  const crewSource = await readFile(join(root, "src/js/crew.js"), "utf8");
-  const recovery = crewSource.slice(crewSource.indexOf("    const recoverWalker ="), crewSource.indexOf("    const jumpWalker ="));
-  const jump = crewSource.slice(crewSource.indexOf("    const jumpWalker ="), crewSource.indexOf("    const walkToward ="));
+  const walkerSource = await readFile(join(root, "src/js/npc-walker.js"), "utf8");
+  const recovery = walkerSource.slice(walkerSource.indexOf("    const recoverWalker ="), walkerSource.indexOf("    const jumpWalker ="));
+  const jump = walkerSource.slice(walkerSource.indexOf("    const jumpWalker ="), walkerSource.indexOf("    const walkToward ="));
   const nav = { mode: 0, costs: new Float32Array(441), parents: new Int16Array(441), closed: new Uint8Array(441), heights: new Float32Array(441), path: new Int16Array(441), searches: 0, expansions: 0 };
   const a = { tx: NaN, tz: NaN, goalX: NaN, goalZ: NaN, pathIndex: -1, pathVersion: -1, best: Infinity, stalled: 0, navigation: nav };
   const cave = { root: { position: { x: 0, y: 0, z: 0 } }, baseY: 0, avoidance: a, traffic: { waiting: false },
@@ -25933,13 +25933,14 @@ this.near = () => recoverWalker(cave, 0, 0.25, 0.1); this.search = () => searchW
 
 const reviewCrowdAndFallbackProof = async () => {
   const source = await readFile(join(root,"src/js/crew.js"),"utf8");
+  const walkerSource = await readFile(join(root,"src/js/npc-walker.js"),"utf8");
   const body = { root:{visible:true,position:{x:0,y:0,z:0}},baseY:0,bodyHeight:1.5,bodyRadius:.4,state:"chilling",camp:{seat:null} };
   const far = Array.from({length:1000},(_,i)=>({...body,root:{visible:true,position:{x:20+i,y:0,z:20}}}));
   const near = {...body,root:{visible:true,position:{x:.1,y:0,z:.1}}};
   let fetches=0,gaps=0;
   const c={player:null,crewList:[body,...far,near],ctx:{outsideActorHeight:1.5,outsideActors:()=>{fetches++;return [{x:20,y:0,z:20}];}},SHOULDER_GAP:.68,OUTSIDE_GAP:1,NAV_STEP:.025,STEP:.6,
     gapClear:()=>{gaps++;return true;},npcWalkable:()=>true,groundAt:()=>0};
-  const edge=source.slice(source.indexOf("    const recoveryBodies ="),source.indexOf("    const searchWalker ="));
+  const edge=walkerSource.slice(walkerSource.indexOf("    const recoveryBodies ="),walkerSource.indexOf("    const searchWalker ="));
   const playerBody=source.slice(source.indexOf("    const playerBody ="),source.indexOf("    const shoulderNeighbor ="));
   runInNewContext(playerBody+edge+"this.edge=recoveryHeight;",c);
   const clear=c.edge(body,0,0,0,.5,0,.025)===0;

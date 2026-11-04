@@ -42,8 +42,8 @@ transitions, called by both browser `crew.js` and `worker/src/npc-work.js`. The
 preserve browser randomness, route planning and companion notification semantics.
 Host checkpoints retain work phases, waypoint indices, positions, aim/readiness,
 timers, rest and reload-slot flags, with strict world/catalog compatibility.
-This is a real state-machine extraction; world movement, aim, weapon/reload and
-Clanker behavior remain explicit adapters, not newly invented replacements.
+This is a real state-machine extraction; supported walking is shared below, while
+world/crowd queries, aim, weapon/reload and Clanker behavior remain explicit adapters.
 
 The existing mesh kernels (`convex.js`, `solid-props.js`) now also load headlessly.
 `src/js/npc-clearance.js` shares the hub's unchanged voluntary NPC clearance policy;
@@ -52,6 +52,13 @@ the browser resolves its current island at query time after each visit rebuild.
 catalogs, hashes their content and restores collision poses before rebuilding
 query caches. This is a real collision boundary, **not** an export of the hub's
 terrain, moving actor rigs or world rules. Unknown scene features fail closed.
+
+The crew's `recoverWalker`, `recoveryHeight`, `searchWalker`, `jumpWalker`,
+`walkToward` and `walkWorkTo` now live in shared `src/js/npc-walker.js`. The complete
+17,515-byte function block is unchanged, alongside its avoidance initializer.
+Headless composition now uses actual supported movement and recovery search with
+the existing work controller, surface planner and mesh kernels. Crowd/shoulder,
+pose, weapon/reload and airborne integration remain explicit caller boundaries.
 
 The complete headless Ooga/Clanker simulation, production Durable Object runner,
 browser follower conversion, authenticated protocol negotiation, independent
@@ -278,9 +285,9 @@ physical-device measurements is claimed here.
    and Room need a bounded durable command outbox and idempotent acknowledgements,
    because their storage transactions cannot be atomic together. Live pose relay
    and immediate voice cleanup stay on their current paths.
-2. Complete the extracted work trip's real movement, aim, inventory and coupled
+2. Complete airborne/crowd behavior, aim, inventory and coupled
    Clanker plan/hit adapters, with their state in the same checkpoint. The trip
-   transitions are now shared by browser and host. Preserve current behavior;
+   transitions and supported walker/search are now shared by browser and host. Preserve current behavior;
    use explicit per-actor RNG words and logical clocks. Keep #379's independent
    tracks/possession representation as the interface, not a competing implementation.
 3. Export the actual world into versioned terrain/prop/support queries. Shared mesh
@@ -411,6 +418,61 @@ The shared source comparison is recorded outside the checkout. This extraction
 changes browser hub wiring; the earlier Hub failure-attribution report is not a
 runtime parity result for it. No restricted Hub assertion is rerun.
 
+### Supported walker and local search boundary
+
+`createWalkerCheckpoint(world)` owns only avoidance/local search. It encodes the
+existing NaN target and Infinity best-distance sentinels explicitly, retains active
+search entries and parent/cost/height/closed state, and preserves the selected path,
+index, counters and jump decision. The original search has 441 cells and expands
+at most six nodes per call. Strictly decreasing parent costs reject corrupted
+cycles before the original parent-walk can run. State is copied, Float32 values
+must round-trip exactly, and checkpoints are capped at 32 KiB per walker inside
+the host's overall 96 KiB cap. Inactive search buffers are canonicalized: they are
+never consulted before the original code initializes a new search. Path/counters
+and jump scalars remain intact. The cap does not imply a full roster will fit.
+
+Root position/yaw, work gait, surface routes, traffic, crowd/reservations, progress
+backoff and hop/leap state must commit in the same actor transaction. The fixtures
+do this with actual work/route/walker/mesh code over an authored world. Their
+weapon/reload, crowd, pose and storage hooks remain labelled fixtures. Selecting
+jump mode 4 preserves its decision and velocity; the walker waits for the caller's
+existing airborne integrator. This is not yet a full Ooga/Clanker actor codec.
+
+Worker calls require explicit world/crowd callbacks and bound elapsed time to
+250 ms, a direct movement request to one metre and goals to 64 metres. Internal
+search edges retain the original 0.025 m sweep size; landing candidates retain
+the original 120-step cap. Boolean/support results must be synchronous and valid,
+saved targets/search origins/jump destinations and cached route hints are checked
+against the actor, external crowds are capped at 128, and shoulder progress cannot create a
+non-progressing movement loop. These are inactive adapter bounds, not changed
+browser movement rules. World callbacks must still be transaction-local and free
+of external effects; throwing after a bad callback cannot undo its side effects.
+The raw browser callbacks are not made transactional by moving their caller.
+
+### Room/client integration findings
+
+The current Room constructor elects a browser from restored socket attachments,
+`electHost` republishes a browser ID after departures, and `npcFrame` accepts that
+browser's FORMAT 2 display buffer. `net.close` resets host state; `npc-sync.update`
+then selects solo mode and releases puppets. Missing records also release individual
+puppets. Those behaviors are correct for the current browser-host contract, but
+cannot be carried into server authority: a stale/absent server frame must not start
+a second AI simulation. A new protocol needs an explicit authority mode plus
+world/epoch/sequence fencing, retained across transient reconnects, with an explicit
+release/migration boundary. A numeric host-ID sentinel is insufficient.
+
+Room `drop` immediately releases cabinets, doors, Studio/chalk and voice. The host's
+60-second body/occupancy deadline cannot be implemented by delaying this whole
+function: voice and unrelated occupancy have their own lifecycles. Room attachments
+also lack exact ammo/fuel, vertical velocity and the complete body mode. The next
+integration must add a bounded authenticated body command/outbox, preserve confirmed
+close timestamps, reconcile duplicate connections and acknowledge handoff idempotently
+across Room/WorldHost storage boundaries. No such bridge is activated here. The
+current display buffer also cannot be generated faithfully from the host's small
+public position snapshot; #379/#464 must retain their track/presentation ownership,
+with #388/#389 owning transport. No new competing wire format or browser authority
+fallback was introduced by this movement increment.
+
 ## Verification record
 
 Verified locally November 4, 2026 on Node v22.23.4:
@@ -476,6 +538,32 @@ Verified locally November 4, 2026 on Node v22.23.4:
   collision algorithms unchanged and the original clearance source/fixture hash.
   Full crew probes exceeding four metres, production geometry export, semantics
   migration and closed-shell authoring remain explicit integration gates.
+- Walker/search follow-up: all **47 existing host checks passed** initially;
+  the five new tests stopped at a shared fixture setup typo (a geometry object
+  called as a function). The unit lane also stopped because two source-extraction
+  proofs still read moved functions from `crew.js`. One correction used the
+  geometry object directly and pointed those unchanged proofs at `npc-walker.js`.
+  The new walker file then passed **5/5** and unit **408/408**. Assertions and
+  thresholds were retained. Build (313 scripts), all **6/6** changed/new JS/MJS
+  syntax checks and whitespace passed. No Hub assertion reran; its ledger is
+  unchanged. Logs: `verification-walker-host.log`, `verification-walker-repair.log`,
+  `verification-walker-unit.log`, `verification-walker-unit-repair.log`,
+  `verification-walker-build.log`, `verification-walker-syntax.log`.
+- The composed work/walker/route/mesh fixture matches the original walker decisions
+  for 500 frames including traffic waits, yields and backoff. Actual local search
+  and obstacle traversal retain continuation through 240 reconstructions (modes
+  1, 2 and 0); peak walker JSON is **2,868 bytes** in that single authored scene.
+  A separate authored failed-search state exercises actual jump selection and
+  mode-4 waiting. Host tests commit movement, search, routes and work together
+  across failed writes and owner replacement. These do not establish full crowd,
+  airborne physics, browser parity, 4 Hz simulation fidelity or production cost.
+- Bounded Claude Max review and independent inspection confirmed browser hook
+  initialization and found a reused VM test context and unbounded saved-target
+  recheck. Both were corrected before the test batch. Independent review also
+  guarded non-progressing shoulder callbacks and preserved work's explicit cache
+  invalidation before recovery resets. The 17,515-byte function block and captured
+  original source match exactly. The new codec's per-actor cap is not a claim that
+  128 concurrent searches fit the host's 96 KiB total checkpoint budget.
 - Claude Code used the existing authenticated Max subscription for the bounded
   session implementation, a read-only review and bounded follow-up registry fixes.
   Parent review added missing-
