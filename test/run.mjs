@@ -4798,7 +4798,7 @@ const cloudHopperFailureChecks = async engine => {
   let panelsHidden = false;
   // Level 1 already finished here and Level 2 open: a visit starts on Level 2, the old course's challenge.
   const cloudSave = { unlocked: 2, last: 1, players: [{ login: "record-holder", best: [60000] }] };
-  const game = { state: { cloudHopper: cloudSave }, playCloudHopper: noop,
+  const game = { state: { cloudHopper: cloudSave }, playCloudHopper: noop, cloudHopperPlayer: account => account?.login?.toLowerCase() || "",
     cloudHopperBest: (login, level) => cloudSave.players.find(p => p.login === login)?.best[level - 1] || 0,
     recordCloudHopper: () => ({ best: false, unlocked: false }) };
   const hopperOptions = { root: rootNode, dock, crew, pilot, camera, game, seaY, mainlandRadius: 30,
@@ -6227,12 +6227,28 @@ const npcPaths = (backend) => [`NPC paths ${backend}`, async (b) => {
 
 // The games' rules and saves in Node, under the same localStorage the page uses: the mine's seeded sim,
 // every game's stored best, the tickets a machine spends and the jackpot wheel's odds.
-const GAME_SOURCES = ["math", "donations", "rocket-parts", "mine-rigs", "mine-sim", "highscore-rules", "game", "cloud-hopper-levels"];
+const GAME_SOURCES = ["math", "contributor-identities", "donations", "rocket-parts", "mine-rigs", "mine-sim", "highscore-rules", "game", "cloud-hopper-levels"];
 const gameRulesChecks = async () => {
   const store = new Map();
   const context = { window: {}, URLSearchParams, location: { search: "" }, localStorage: { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) } };
   for (const name of GAME_SOURCES) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
   const BL = context.window.BL, M = BL.mineSim, R = BL.mineRigs;
+  {
+    const g = BL.game.create({ catalog: [] });
+    g.recordCloudHopper("bitcoin-bill", 1, 50000, 4);
+    g.recordCloudHopper("bitcoin-bill", 2, 70000, 4);
+    g.recordCloudHopper("bitclank-bill", 1, 40000, 4);
+    g.recordCloudHopper("bitclank-bill", 2, 80000, 4);
+    g.recordCloudHopper("other", 1, 60000, 4);
+    const key = g.cloudHopperPlayer({ id: 185141343, login: "Bitclank-Bill" });
+    const reloaded = BL.game.create({ catalog: [] });
+    const claimant = reloaded.cloudHopperPlayer({ id: 99, login: "Bitcoin-Bill" });
+    record("Cloud Hopper rename: verified ID merges per-level minimums once, survives reload, preserves others and rejects old-login inheritance",
+      key === "github:185141343" && reloaded.cloudHopperBest(key, 1) === 40000 && reloaded.cloudHopperBest(key, 2) === 70000
+      && reloaded.cloudHopperBest("other", 1) === 60000 && reloaded.cloudHopperBest(claimant, 1) === 0
+      && reloaded.cloudHopperPlayer({ id: 185141343, login: "Bitclank-Bill" }) === key);
+    store.clear();
+  }
   {
     const run = () => { const sim = M.create({ seed: 42 }); sim.place(R.GPU); return sim; };
     const a = run(), whole = run();
@@ -22805,7 +22821,7 @@ const footstepChecks = BL => {
 // when someone is listed, without touching the visitor's own mute or telling the room. voice.js runs in a fixture
 // with a fake microphone, peer connection and Worker, so every state of the track is read directly.
 const voiceAloneChecks = async () => {
-  const source=readFileSync(join(root,"src/js/voice.js"),"utf8"),ops=[],netMuted=[],emits=[];
+  const source=readFileSync(join(root,"src/js/contributor-identities.js"),"utf8")+readFileSync(join(root,"src/js/voice.js"),"utf8"),ops=[],netMuted=[],emits=[];
   const track={enabled:true,stop(){}},stream={getAudioTracks:()=>[track],getTracks:()=>[track]};
   class Pc {constructor(){this.connectionState="connected";this.iceGatheringState="complete";this.localDescription={sdp:"v=0"};}addTransceiver(){return {mid:"0"};}async createOffer(){return {};}async createAnswer(){return {};}async setLocalDescription(){}async setRemoteDescription(){}addEventListener(){}removeEventListener(){}getTransceivers(){return [];}close(){}}
   class Audio {constructor(){this.muted=false;}pause(){}play(){return Promise.resolve();}}
@@ -22813,6 +22829,13 @@ const voiceAloneChecks = async () => {
   const context={window:{BL:{net:{state:{connectionToken:"synthetic"},setMuted:on=>netMuted.push(on),remotes:new Map()}},setTimeout:()=>1,clearTimeout(){},setInterval:()=>1,clearInterval(){}},document:{createElement:()=>({})},localStorage:{getItem:()=>null,setItem(){}},navigator:{mediaDevices:{getUserMedia:async()=>stream}},RTCPeerConnection:Pc,Audio,MediaStream:class{},fetch,AbortController,Promise,JSON,Error,Map,Set,Float32Array,Math};
   runInNewContext(source,context);
   const V=context.window.BL.voice,settle=()=>new Promise(r=>setTimeout(r,0)),read=()=>({alone:V.stats.alone,muted:V.stats.muted,mic:track.enabled});
+  const remote = { id: 185141343, login: "Bitcoin-Bill" };
+  context.window.BL.net.remotes.set(remote.id, remote);
+  V.muteLocal(remote.login, true); remote.login = "Bitclank-Bill";
+  context.window.BL.net.remotes.set(99, { id: 99, login: "Bitcoin-Bill" });
+  record("voice rename: muted numeric owner stays muted and a reused login does not inherit the preference",
+    V.mutedLocally("Bitclank-Bill") && !V.mutedLocally("Bitcoin-Bill"));
+  V.muteLocal(remote.login, false); context.window.BL.net.remotes.clear();
   V.subscribe(st=>emits.push(st.alone));
   const rows={};
   await V.enable();await settle();
@@ -22836,7 +22859,7 @@ const voiceAloneChecks = async () => {
 // stepped by hand: once as a browser that honours an element's volume, and once as iOS, which keeps every element at 1, where
 // each voice must play through a gain instead and sound the same as the first at every step.
 const voiceHearingChecks = async () => {
-  const source=readFileSync(join(root,"src/js/voice.js"),"utf8"),settle=()=>new Promise(r=>setTimeout(r,0));
+  const source=readFileSync(join(root,"src/js/contributor-identities.js"),"utf8")+readFileSync(join(root,"src/js/voice.js"),"utf8"),settle=()=>new Promise(r=>setTimeout(r,0));
   const remote=(login,zone,x,z,placed=true)=>({login,zone,poseZone:placed?zone:null,x,y:0,z});
   const rig=(ios,webAudio=true,saved=null)=>{
     const ops=[],netMuted=[],timers=new Map(),els=[],pulled=[],gains=[],ctxs=[],handlers=new Map(),store=new Map();let timerId=0,onTrack=null;
@@ -23400,6 +23423,14 @@ const rescueChecks = BL => {
     store.set(RD.KEY,JSON.stringify({dogs:{"ooga-1":pup("Rex",1,1)},poops:[1,2,"x"],scooped:-1}));const b=RD.load(),dropped=Object.keys(b.dogs).length===1&&!b.poops.length&&b.scooped===0;
     store.set(RD.KEY,"{");const c=RD.load(),unreadable=!Object.keys(c.dogs).length&&!c.poops.length&&c.scooped===0;
     RD.save({dogs:{"ooga-1":pup("Rex",1,1,.1234567)},poops:[1.25,0,-2],scooped:4});const written=JSON.parse(store.get(RD.KEY)),rounded=written.dogs["ooga-1"].hunger===.123&&written.poops[0]===1.25&&written.scooped===4;
+    const ownerDog=pup("Bill Pup",1,123,.2),claimantDog=pup("Other Pup",2,456,.3);
+    RD.save({dogs:{"bitcoin-bill":ownerDog,"github:99":claimantDog},poops:[1,0,2],scooped:4});
+    const identityBefore=store.get(RD.KEY),restored=RD.load();
+    const keyBefore=RD.accountKey({id:185141343,login:"Bitcoin-Bill"}),keyAfter=RD.accountKey({id:185141343,login:"Bitclank-Bill"}),otherKey=RD.accountKey({id:99,login:"Bitcoin-Bill"});
+    record("Rescue identity: numeric owner keeps the original dog across a rename; a reused login has its own persisted dog without rewriting either save",
+      keyBefore===keyAfter&&restored.dogs[keyAfter]?.name==="Bill Pup"&&restored.dogs[otherKey]?.name==="Other Pup"
+      &&RD.accountKey({login:"Bitcoin-Bill"})===null&&RD.accountKey(null)===null
+      &&RD.accountKey({id:3,login:"Someone"})==="someone"&&store.get(RD.KEY)===identityBefore&&restored.scooped===4);
     const g=BL.game.create({catalog:[]}),apart=!("rescue" in g.state)&&!g.adoptDog&&!BL.game.RESCUE;store.set("oogaboogaland.v1","{}");g.resetAll();const reset=!store.has(RD.KEY)&&!store.has("oogaboogaland.v1");
     const hungry=D.hungerAfter(0,D.HUNGRY*D.HUNGER_SECONDS-1)<D.HUNGRY&&D.hungerAfter(0,D.HUNGRY*D.HUNGER_SECONDS+1)>=D.HUNGRY&&D.hungerAfter(.99,1e6)===1;
     // Loading: every rescue module in DSB Land's deferred group, before dsb-interiors.js, which reads BL.rescueRoom.
@@ -23904,7 +23935,7 @@ const netFixture=(BL,response,step=200,cookie="")=>{
   class Socket {static OPEN=1;constructor(){this.readyState=1;sockets.push(this);}send(v){sent.push(typeof v==="string"?JSON.parse(v):v);}close(){this.readyState=3;}}
   const voice={setPeers:()=>{},restart:()=>{},stop:()=>{}};
   const location={protocol:"https:",host:"fixture.invalid",pathname:"/",search:"",assign:url=>navigations.push(url)},pilot={saveLoginView(){savedViews++;}};
-  const context={window:{BL:{characters:BL.characters,contributors:BL.contributors,donations:BL.donations,chatPolicy:BL.chatPolicy,arcadeCabinets:BL.arcadeCabinets,chalkBoard:BL.chalkBoard,voice,pilot},setTimeout:()=>1,clearTimeout(){},setInterval:()=>1,clearInterval(){}},document:{hidden:false,cookie,addEventListener:(k,v)=>events.set(k,v),removeEventListener:k=>events.delete(k)},location,fetch:async(...args)=>{calls++;return response(...args);},AbortSignal,WebSocket:Socket,performance:{now:()=>tick+=step},Date,ArrayBuffer,URLSearchParams};
+  const context={window:{BL:{characters:BL.characters,accountIdentities:BL.accountIdentities,contributors:BL.contributors,donations:BL.donations,chatPolicy:BL.chatPolicy,arcadeCabinets:BL.arcadeCabinets,chalkBoard:BL.chalkBoard,voice,pilot},setTimeout:()=>1,clearTimeout(){},setInterval:()=>1,clearInterval(){}},document:{hidden:false,cookie,addEventListener:(k,v)=>events.set(k,v),removeEventListener:k=>events.delete(k)},location,fetch:async(...args)=>{calls++;return response(...args);},AbortSignal,WebSocket:Socket,performance:{now:()=>tick+=step},Date,ArrayBuffer,URLSearchParams};
   runInNewContext(source,context);
   return {net:context.window.BL.net,document:context.document,voice,sockets,sent,events,location,navigations,advance(ms){tick+=ms;},get calls(){return calls;},get savedViews(){return savedViews;}};
 };

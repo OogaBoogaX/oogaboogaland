@@ -15,8 +15,8 @@
 // Who drives which Ooga, on the page served by the Worker (`mayDrive`; the room enforces the same
 // ownership through its own copy of the cast): a signed-in contributor drives only their own Ooga, and
 // nobody else drives it while they are here. Signed-out visitors drive only their remembered
-// character or their default local Ooga. Ownership keys on the GitHub login
-// alone (`github`, else the handle). A claim the room refuses, or an owner arriving, lands as `released`.
+// character or their default local Ooga. Verified account bindings use GitHub IDs; other ownership
+// keys on the GitHub login (`github`, else the handle). A claim the room refuses, or an owner arriving, lands as `released`.
 // A body is its Ooga's canonical handle, or `gorilla:<handle>` for that Ooga's companion. Signed-in
 // visitors drive only their own gorilla; signed-out pages use only their assigned companion locally.
 // The NPC host: the room elects one page showing the island (`setHub`, which also counts a hidden tab
@@ -933,11 +933,14 @@
 
   const loginOf = (character) => (character.github || character.handle).toLowerCase();
   // The character whose GitHub login this is; a handle that only looks like the login does not count.
-  const characterOf = (login) => {
+  const characterOf = (login, id) => {
+    const account = BL.accountIdentities.accountForId(id);
+    if (account) return BL.characters.get(account.handle);
     const character = BL.characters.get(login);
+    if (id !== undefined && character && BL.accountIdentities.accountForHandle(character.handle)) return null;
     return character && loginOf(character) === String(login).toLowerCase() ? character : null;
   };
-  const ownCharacter = () => state.me && characterOf(state.me.login);
+  const ownCharacter = () => state.me && characterOf(state.me.login, state.me.id);
   // A local control preference only: never used by room, microphone or sign-in checks.
   const preferredCharacter = () => ownCharacter() || localCharacter;
   const prepareLocalCharacter = () => {
@@ -971,9 +974,9 @@
     } else if (String(owner ? owner.handle : name).toLowerCase() !== localCharacter.handle.toLowerCase()) return "Drive your own Ooga";
     if (!owner) return null;
     const who = owner.display || owner.handle;
-    const ownerLogin = loginOf(owner), wanted = owner.handle.toLowerCase();
+    const wanted = owner.handle.toLowerCase();
     for (const rec of remotes.values()) {
-      if (rec.login.toLowerCase() === ownerLogin) return `${who} is here and drives this Ooga`;
+      if (characterOf(rec.login, rec.id) === owner) return `${who} is here and drives this Ooga`;
       if (rec.body && rec.body.toLowerCase() === wanted) return `Someone is already driving ${who}`;
     }
     return null;
@@ -983,9 +986,9 @@
     if (mayDrive(name)) return "Drive your own gorilla";
     const owner = BL.characters.get(name);
     if (state.me || !owner) return null;
-    const who = owner.display || owner.handle, ownerLogin = loginOf(owner), wanted = gorillaBody(owner.handle).toLowerCase();
+    const who = owner.display || owner.handle, wanted = gorillaBody(owner.handle).toLowerCase();
     for (const rec of remotes.values()) {
-      if (rec.login.toLowerCase() === ownerLogin) return `${who} is here and drives this gorilla`;
+      if (characterOf(rec.login, rec.id) === owner) return `${who} is here and drives this gorilla`;
       if (rec.body && rec.body.toLowerCase() === wanted) return `Someone is already driving ${who}'s gorilla`;
     }
     return null;

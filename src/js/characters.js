@@ -24,8 +24,11 @@
     list.sort((a, b) => a.joined - b.joined || (a.handle < b.handle ? -1 : 1));
   };
   const get = (handle) => byHandle.get(String(handle).toLowerCase()) || null;
+  // External activity is keyed by current GitHub login, never by a permanent art handle.
+  const ownedBy = (login) => { const c = get(login); return c && (c.github || c.handle).toLowerCase() === String(login).toLowerCase() ? c : null; };
+  const displayOfLogin = (login) => { const c = ownedBy(login); return (c && (c.display || c.handle)) || String(login); };
   const all = () => list;
   // The one in-game name for a handle or login; unknown names pass through.
   const displayOf = (name) => { const c = get(name); return (c && (c.display || c.handle)) || String(name); };
-  BL.characters = { add, get, all, displayOf };
+  BL.characters = { add, get, ownedBy, all, displayOf, displayOfLogin };
 })();

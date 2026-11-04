@@ -1,5 +1,5 @@
 // Confirmed attribution only. Shared unchanged by the page, snapshot bake and Worker.
-// These are contribution credits, never OAuth aliases or permission to drive an Ooga.
+// Contribution aliases never grant access. The separate accountIdentities table pins verified numeric owners.
 (() => {
   "use strict";
   const scope = typeof window === "undefined" ? globalThis : window;
@@ -106,4 +106,11 @@
     return repos === input.repos && recent === input.recent ? result : { ...result, repos, recent };
   };
   BL.contributorIdentities = { OWNERS, ownerOf, normalizeStats };
+  // Verified with GitHub /user/185141343 on 2026-11-04. Keep the authored handle;
+  // no proposed login is authorized here. Only an authenticated numeric ID matches.
+  const ACCOUNTS = Object.freeze([Object.freeze({ id: 185141343, handle: "Bitcoin-Bill", legacyLogin: "bitcoin-bill" })]);
+  const accountForId = id => ACCOUNTS.find(row => row.id === id) || null;
+  const accountForHandle = handle => ACCOUNTS.find(row => row.handle.toLowerCase() === String(handle).toLowerCase()) || null;
+  BL.accountIdentities = { accountForId, accountForHandle };
+
 })();
