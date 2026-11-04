@@ -310,7 +310,7 @@
     cloudFinishFruit.visible = on && pile.shown === 0;
     document.body.classList.toggle("cloud-hopper-active", on);
     if (wpHolder) wpHolder.visible = !on;
-    if (on) { cloudMask(); BL.net.setBody(null); BL.net.setZone("none"); }
+    if (on) { clankers.cancelSleepBeams(); cloudMask(); BL.net.setBody(null); BL.net.setZone("none"); }
     else {
       for (const [node, visible] of cloudHidden) node.visible = visible;
       cloudHidden.clear();
@@ -9885,6 +9885,24 @@
     }
     return true;
   };
+  // NPC walking deliberately passes under players. A discontinuous bed landing must still keep
+  // clear of both the locally driven Ooga and every remote player's current body.
+  const clankerBedPlayersClear = (entry, bed) => {
+    const radius = entry.gorilla.bodyRadius, height = entry.gorilla.bodyHeight;
+    const local = crew.player;
+    if (local && local.root.visible) {
+      const p = local.root.position, feet = p.y - local.baseY;
+      if (!cylinderSegmentClear(bed.x, bed.y, bed.z, bed.x, bed.y, bed.z, radius, height,
+        p.x, p.z, feet, feet + local.bodyHeight, local.bodyRadius)) return false;
+    }
+    const bodies = remotes ? remotes.actors() : null;
+    if (bodies) for (let i = 0; i < bodies.length; i++) {
+      const body = bodies[i];
+      if (body.player && !cylinderSegmentClear(bed.x, bed.y, bed.z, bed.x, bed.y, bed.z, radius, height,
+        body.x, body.z, body.y, body.y + body.height, body.radius)) return false;
+    }
+    return true;
+  };
   const clankerPlayersSupportAt = (entry, x, z, y, step) => {
     const bodies = clankerPlayers(entry);
     let floor = ABYSS_FLOOR;
@@ -9984,8 +10002,11 @@
     } finally { clankerPassingEntry = previous; }
   };
   clankerClimbTransitionClear.needsHull = true;
+  let clankerBedLanding = null;
   const clankerRestTransitionClear = (entry, x, y, z, nx, ny, nz, radius, height, actors, riders, toRadius, toHeight) => {
     const c = entry.climb;
+    // The preview has posed the whole rig at the bed, so this radius includes its lying head and feet.
+    if (clankerBedLanding && !clankerBedPlayersClear(entry, clankerBedLanding)) return false;
     if (c.peerCheck) {
       c.peerCheck = false;
       const p = entry.root.position;
@@ -9996,16 +10017,17 @@
       radius, height, actors, riders, toRadius, toHeight, false);
   };
   const clankerRestPoseClear = (entry, dt, lounge, staticPose = false,
-    x = entry.root.position.x, y = entry.root.position.y, z = entry.root.position.z, heading = entry.heading, fromLounge = null, sequenceStep = 0) => {
+    x = entry.root.position.x, y = entry.root.position.y, z = entry.root.position.z, heading = entry.heading, fromLounge = null, sequenceStep = 0, bedLanding = null) => {
     const p = entry.root.position, c = entry.climb;
     const sx = staticPose ? x : p.x, sy = staticPose ? y : p.y, sz = staticPose ? z : p.z;
     const fromHeading = staticPose ? heading : entry.heading;
     if (!entry.motion.lab && !clankerCenterClear(entry, sx, sy, sz, x, y, z, false, fromHeading, heading)) return false;
     c.peerX = sx; c.peerY = sy; c.peerZ = sz; c.peerHeading = fromHeading; c.peerCheck = true;
+    clankerBedLanding = bedLanding;
     try {
       return entry.gorilla.climbPoseClear(dt, x, y, z, heading, entry.motion,
         island.solidAt, clankerRestTransitionClear, entry, 0, staticPose, lounge, fromLounge, sequenceStep);
-    } finally { c.peerCheck = false; }
+    } finally { c.peerCheck = false; clankerBedLanding = null; }
   };
   clankerRestTransitionClear.beginPose = entry => { entry.climb.peerCheck = true; };
   let clankerExitBodyPending = false;

@@ -67,6 +67,7 @@
         || walkingRampAt(p.x, p.y, p.z, heading);
     };
     const inClimbArea = (e) => !ctx.climbAreaAt || ctx.climbAreaAt(e.root.position.x, e.root.position.y, e.root.position.z);
+    const sleepBeam = ctx.sleep ? BL.sleepBeam.create({ root: ctx.root, capacity: ctx.sleep.slots.length }) : null;
     const list = [], byOwner = new Map(), portals = new Array(sites.length).fill(null);
     // Stations are authored once in world space: { x, y, z, heading, kind,
     // side, enabled? }. labInside owns the entrance plane, independently of assignment.
@@ -117,7 +118,7 @@
       on = !!on;
       if (on === allAway || disposed) return;
       allAway = on;
-      if (on) return;
+      if (on) { cancelSleepBeams(); return; }
       // An island event has released the population. Reconcile hidden companions now,
       // including sleepers, rather than waiting for another simulation frame.
       if (ctx.sleep) bedsToday();
@@ -2099,7 +2100,7 @@
         hasSlot: false, slotIndex: -1, slotX: 0, slotY: 0, slotZ: 0, goalX: 0, goalY: 0, goalZ: 0,
         random: mulberry32(fnv1a(`clanker/${owner.id || owner.traits.name || i}`)),
         // Its bed while its Ooga sleeps: see `updateSleep`.
-        sleep: { stage: "", slot: -1, home: -1, leg: 0, count: 0, path: new Float64Array(SLEEP_POINTS * 2), mark: 0, pose: "", stall: 0, near: Infinity },
+        sleep: { stage: "", slot: -1, home: -1, leg: 0, count: 0, path: new Float64Array(SLEEP_POINTS * 2), mark: 0, pose: "", stall: 0, near: Infinity, stuck: -1, tries: 0, forwardLeg: -1, forwardNear: Infinity, retrying: false, retryX: 0, retryZ: 0, beamTime: 0, beamWait: 0, beamForm: "", beamNative: false },
         // Its desk or wait spot in B.C.A. and where it is in the routine: see `workOffice`.
         office: { stage: "", desk: -1, wait: -1, time: 0, count: 0, index: 0, path: new Float64Array(OFFICE_POINTS * 2), seed,
           cycle: 0, work: "", left: 0, stroke: 0, turn: 0, held: 0 },
@@ -5323,6 +5324,7 @@
       if (rage) rage.cancel(e, "possession");
       if (ctx.rageRelease) ctx.rageRelease(e);
       release(); player = e; e.controlled = true; e.drive.resume = false;
+      cancelSleepBeam(e);
       const asleep = sleeping(e);
       // Selecting a settled sleeper keeps its bed and pose until an explicit wake.
       if (e.sleep.stage && !asleep) { e.sleep.stage = ""; e.gorilla.chest.scale.y = 1; e.exitFootprint = false; }
@@ -6324,9 +6326,11 @@
     // The daily name hash deals free beds among current sleepers, never reshuffling an occupied bed.
     // Stages: "go" along the path, "settle" turning onto the bed, "asleep", then "return" back
     // along the path once its Ooga wakes, after which the ordinary work and chill machinery takes over.
+    // Walking retries share a two-second no-forward-progress budget. If they fail, a sleeper beams to its
+    // reserved bed in two 90 ms pulses. A waking gorilla still walks home or hands over to chill where it is.
     // Selection keeps a settled sleeper in bed until Space wakes it. A release while its Ooga still sleeps
     // walks an awakened gorilla back to bed from where it stands.
-    const SLEEP_POSES = ["left", "right", "back"], SLEEP_REACH = 1.1, SLEEP_ARRIVE = 0.3, SLEEP_STALL = 25, SLEEP_MARK = 1.9, DAY_MS = 86400000;
+    const SLEEP_POSES = ["left", "right", "back"], SLEEP_REACH = 1.1, SLEEP_ARRIVE = 0.3, SLEEP_STALL = 25, SLEEP_BLOCKED = 2, SLEEP_PROGRESS = 0.05, SLEEP_BEAM = 0.09, SLEEP_TRIES = 2, SLEEP_MARK = 1.9, DAY_MS = 86400000;
     // Only current sleepers take part in the daily deal. Keep occupied beds stable
     // across activity changes and midnight. A driven gorilla keeps its existing bed
     // until release, even if its owner wakes; only sleepers get new reservations.
@@ -6367,7 +6371,8 @@
     };
     const releaseBed = (e) => {
       const s = e.sleep;
-      s.stage = ""; s.slot = -1; bedDay = -1;
+      cancelSleepBeam(e);
+      s.stage = ""; s.slot = -1; s.beamWait = 0; s.retrying = false; bedDay = -1;
       e.gorilla.chest.scale.y = 1;
     };
     const reserveBed = (e) => {
@@ -6398,6 +6403,73 @@
       const s = e.sleep, bed = ctx.sleep.slots[s.slot];
       e.heading = bed.heading; e.speed = 0; e.lounge = s.pose; e.loungeDepart = false; e.loungeHeading = bed.heading;
       e.footprintMode = "sit"; s.stage = "asleep"; s.mark = SLEEP_MARK * 0.5;
+    };
+    // A leg that stalls is walked again from the point it came from (`back`: -1 toward home, +1 toward the bed).
+    // The tries count until it gets past the leg it first stalled on; false once they are spent.
+    const retryLeg = (e, back) => {
+      const s = e.sleep;
+      s.stall = 0; s.near = Infinity;
+      if (s.stuck < 0) s.stuck = s.leg;
+      if (++s.tries > SLEEP_TRIES) return false;
+      s.leg = Math.min(s.count - 1, Math.max(0, s.leg + back));
+      return true;
+    };
+    // While it beams it shows the Agent's original green code form (as rage does), drawn native so no Matrix mode
+    // repaints it; only this rig changes. `s.beamForm` holds the form it wore before, "" when nothing is held. The
+    // end restores that form and native flag exactly, unless something else (rage) has since changed its look.
+    const sleepBeamLook = (e, on) => {
+      const s = e.sleep, g = e.gorilla, root = g.root;
+      if (on === !!s.beamForm) return;
+      if (on) {
+        s.beamForm = g.form || "ape"; s.beamNative = !!root.matrixNative;
+        g.setForm("code"); root.matrixNative = true;
+        return;
+      }
+      if (!e.rage?.active && g.form === "code" && root.matrixNative === true) { g.setForm(s.beamForm); root.matrixNative = s.beamNative; }
+      s.beamForm = ""; s.beamNative = false;
+    };
+    const cancelSleepBeam = (e) => {
+      const s = e.sleep;
+      sleepBeamLook(e, false);
+      if (sleepBeam && s.slot >= 0) sleepBeam.hide(s.slot);
+      if (s.stage === "beamOut") s.stage = "go";
+      else if (s.stage === "beamIn") s.stage = "asleep";
+      s.beamTime = 0;
+    };
+    const cancelSleepBeams = () => {
+      for (const e of list) if (e.sleep.beamForm || e.sleep.stage === "beamOut" || e.sleep.stage === "beamIn") cancelSleepBeam(e);
+      if (sleepBeam) sleepBeam.clear();
+    };
+    // Recheck the destination at the transfer too: another player may enter it during departure.
+    const sleepLandingClear = (e) => {
+      const s = e.sleep, bed = ctx.sleep.slots[s.slot];
+      return !!bed && !bedTaken(s.slot, e) && (!ctx.restPoseClear
+        || ctx.restPoseClear(e, 2, s.pose, true, bed.x, bed.y, bed.z, bed.heading, null, 0, bed));
+    };
+    const beginSleepBeam = (e) => {
+      const s = e.sleep;
+      if (e.controlled || e.remoteControlled || e.rage?.active || e.fire?.burning || e.fire?.rolling || !sleepLandingClear(e)) { s.beamWait = 1; return; }
+      s.stage = "beamOut"; s.beamTime = 0; e.speed = 0;
+    };
+    const updateSleepBeam = (e, dt) => {
+      const s = e.sleep, p = e.root.position;
+      if (e.rage?.active || e.fire?.burning || e.fire?.rolling) { cancelSleepBeam(e); return; }
+      s.beamTime += dt;
+      if (s.stage === "beamOut" && s.beamTime >= SLEEP_BEAM) {
+        if (!sleepLandingClear(e)) { cancelSleepBeam(e); s.beamWait = 1; return; }
+        const bed = ctx.sleep.slots[s.slot];
+        p.x = bed.x; p.y = bed.y; p.z = bed.z;
+        e.motion.supportOffset = e.motion.takeoff = e.motion.landing = 0;
+        e.recover = 0; e.exitFootprint = false;
+        layDown(e);
+        // This is a deliberate discontinuity, never a walk swept from the source to the bed.
+        e.gorilla.poseManaged(2, p.x, p.y, p.z, e.heading, 0, false, false, e.lounge, e.motion);
+        s.stage = "beamIn"; s.beamTime -= SLEEP_BEAM;
+      }
+      if (s.stage === "beamIn" && s.beamTime >= SLEEP_BEAM) { cancelSleepBeam(e); return; }
+      // Reduced motion (read live) keeps both the glyphs and the color flicker off.
+      sleepBeamLook(e, !!sleepBeam && !sleepBeam.still);
+      if (sleepBeam) sleepBeam.show(s.slot, p.x, p.y, p.z, e.heading, s.beamTime / SLEEP_BEAM, s.stage === "beamIn", e.gorilla.root);
     };
     // True while sleep owns the entry this frame. False hands it back to the caller: to hide it (no bed to be had)
     // or to let the ordinary update walk it out of a cave, down from a roof or back to its bench first.
@@ -6432,13 +6504,20 @@
         s.count = site.path(s.slot, s.path);
         // A newly dealt bed has a different path; the old return leg belongs only to its old bed.
         s.leg = s.stage === "return" && s.home === s.slot ? Math.min(s.count - 1, s.leg + 1) : sleepLegFrom(e);
-        s.stage = "go"; s.stall = 0; s.near = Infinity;
+        s.stage = "go"; s.stall = 0; s.near = Infinity; s.stuck = -1; s.tries = 0;
+        s.forwardLeg = s.leg; s.forwardNear = Infinity; s.beamWait = 0; s.retrying = false;
       }
+      if (s.stage === "beamOut" || s.stage === "beamIn") { updateSleepBeam(e, dt); return true; }
       if (s.stage === "go") {
-        const last = s.leg >= s.count - 1, gx = s.path[s.leg * 2], gz = s.path[s.leg * 2 + 1], d = Math.hypot(gx - p.x, gz - p.z);
-        if (d < (last ? SLEEP_ARRIVE : SLEEP_REACH)) {
-          if (last) { s.stage = "settle"; e.speed = 0; }
-          else { s.leg++; s.near = Infinity; }
+        s.beamWait = Math.max(0, s.beamWait - dt);
+        const last = !s.retrying && s.leg >= s.count - 1, gx = s.retrying ? s.retryX : s.path[s.leg * 2], gz = s.retrying ? s.retryZ : s.path[s.leg * 2 + 1], d = Math.hypot(gx - p.x, gz - p.z);
+        if (d < (last || s.retrying ? SLEEP_ARRIVE : SLEEP_REACH)) {
+          if (s.retrying) { s.retrying = false; s.stall += dt; }
+          else {
+            if (s.leg >= s.forwardLeg) { s.stall = 0; s.stuck = -1; s.tries = 0; }
+            if (last) { s.stage = "settle"; e.speed = 0; }
+            else { s.leg++; s.near = Infinity; }
+          }
         } else {
           // The first two points are the home island's own ground: a goal known to lie below lets a sleeper that
           // starts on a roof climb or hop down to it, as a stroller bound for the meadow does.
@@ -6446,26 +6525,30 @@
           // A hop it has begun is finished, and it gets to its feet before it walks, as on any other errand.
           // A blocked walk marks itself as waiting at a doorway, which forbids a climb: a sleeper has no doorway.
           e.route = "";
+          const waiting = e.jump.active || e.climb.active || e.recover > 0;
           if (e.jump.active) updateJump(e, dt);
           else if (e.recover > 0) { e.recover = Math.max(0, e.recover - dt); e.speed = 0; }
           else move(e, dt, SPEED);
-          // A way that cannot be walked is not a reason to stand in the forest all night: after a long stall the
-          // sleeper is simply found in its bed.
-          if (d < s.near - 0.25) { s.near = d; s.stall = 0; }
-          else if (s.stall > 3 && !last && !e.jump.active && !e.climb.active && e.recover <= 0 && e.retry <= 0 && p.y > e.goalY + 0.8) {
-            // Held up on high ground with the way on below it: hop down, as a stroller leaving a roof does.
+          // Count lack of forward progress, not journey length or the distance gained by a backtrack.
+          // Jumps, climbs and getting to its feet are deliberate waits and do not spend this budget.
+          const distance = Math.hypot(gx - p.x, gz - p.z);
+          if (!s.retrying && (s.leg > s.forwardLeg || s.leg === s.forwardLeg && distance < s.forwardNear - SLEEP_PROGRESS)) {
+            s.forwardLeg = s.leg; s.forwardNear = distance; s.stall = 0; s.tries = 0; s.stuck = -1;
+          } else if (!waiting && !e.jump.active && !e.climb.active) s.stall += dt;
+          if (s.stall > 3 && !last && !e.jump.active && !e.climb.active && e.recover <= 0 && e.retry <= 0 && p.y > e.goalY + 0.8) {
             const desired = Math.atan2(gx - p.x, gz - p.z);
             e.retry = 1.2;
             for (let i = 0; i < STEERING.length; i++) if (tryJump(e, desired + STEERING[i] * e.turn)) { e.heading = desired + STEERING[i] * e.turn; break; }
-            s.stall += dt;
           }
-          else if ((s.stall += dt) > SLEEP_STALL) {
-            // Placed, not walked: the pose is set outright, as a spawn's is, with no step to certify.
-            const bed = site.slots[s.slot];
-            p.x = bed.x; p.y = bed.y; p.z = bed.z; e.jump.active = false;
-            layDown(e);
-            e.gorilla.poseManaged(2, p.x, p.y, p.z, e.heading, 0, false, false, e.lounge, e.motion);
-            return true;
+          if (!waiting && !e.jump.active && !e.climb.active) {
+            if (s.stall >= SLEEP_BLOCKED && !s.beamWait) beginSleepBeam(e);
+            else if (!s.retrying && s.tries < SLEEP_TRIES && s.stall >= SLEEP_BLOCKED * (s.tries + 1) / (SLEEP_TRIES + 1)) {
+              // A short backstep can finish within this budget; walking an entire earlier leg often cannot.
+              // Keep the forward waypoint and its best distance, so a retry never masquerades as progress.
+              const at = Math.max(0, s.leg - 1), dx = s.path[at * 2] - p.x, dz = s.path[at * 2 + 1] - p.z;
+              const distance = Math.hypot(dx, dz), scale = distance > 0 ? Math.min(1, distance) / distance : 0;
+              s.retryX = p.x + dx * scale; s.retryZ = p.z + dz * scale; s.retrying = distance > SLEEP_ARRIVE; s.tries++;
+            }
           }
         }
       }
@@ -6492,6 +6575,7 @@
     const updateWake = (e, dt, beforeX, beforeY, beforeZ) => {
       const s = e.sleep, p = e.root.position;
       if (s.stage !== "return") {
+        cancelSleepBeam(e);
         // The path home is stored separately; a waking gorilla no longer owns a bed.
         s.home = s.slot; s.slot = -1; bedDay = -1;
         e.gorilla.chest.scale.y = 1;
@@ -6500,19 +6584,21 @@
         // Back along the path from the point nearest where it stands: its bed if it reached it.
         const at = sleepLegFrom(e);
         s.leg = Math.max(0, Math.hypot(s.path[at * 2] - p.x, s.path[at * 2 + 1] - p.z) < SLEEP_REACH ? at - 1 : at);
-        s.stage = "return"; s.stall = 0; s.near = Infinity;
+        s.stage = "return"; s.retrying = false; s.stall = 0; s.near = Infinity; s.stuck = -1; s.tries = 0;
       }
       const gx = s.path[s.leg * 2], gz = s.path[s.leg * 2 + 1], d = Math.hypot(gx - p.x, gz - p.z);
-      if (d < SLEEP_REACH || (s.stall += dt) > SLEEP_STALL) {
+      let over = false;
+      if (d < SLEEP_REACH) {
         s.stall = 0;
+        if (s.leg === s.stuck) { s.stuck = -1; s.tries = 0; }
         // Home is the first point of the path, down the approach stair in the meadow: a gorilla is not left
         // standing at the bridge's head, where the walkers come and go.
-        if (s.leg <= 0) {
-          releaseBed(e);
-          e.exitFootprint = false; e.mode = ""; e.phase = "chill"; e.route = ""; e.rest = 0;
-          return false;
-        }
-        s.leg--; s.near = Infinity;
+        if (s.leg <= 0) over = true;
+        else { s.leg--; s.near = Infinity; }
+      } else if ((s.stall += dt) > SLEEP_STALL && !e.jump.active) {
+        // A leg it cannot walk is walked again from the point it came from. Failing that it stops where it is and the
+        // ordinary chill takes over there, rather than skipping on to a point of the way it never reached.
+        over = !retryLeg(e, 1);
       } else {
         if (d < s.near - 0.25) { s.near = d; s.stall = 0; }
         setGoal(e, gx, p.y, gz);
@@ -6520,6 +6606,11 @@
         if (e.jump.active) updateJump(e, dt);
         else if (e.recover > 0) { e.recover = Math.max(0, e.recover - dt); e.speed = 0; }
         else move(e, dt, SPEED);
+      }
+      if (over) {
+        releaseBed(e);
+        e.exitFootprint = false; e.mode = ""; e.phase = "chill"; e.route = ""; e.rest = 0;
+        return false;
       }
       poseEntry(e, dt, beforeX, beforeY, beforeZ);
       return true;
@@ -6739,6 +6830,9 @@
       }
     });
     const updateEntry = (e, dt) => {
+      if ((e.sleep.stage === "beamOut" || e.sleep.stage === "beamIn")
+        && (e.remoteControlled || e.controlled || allAway || !sleeps(e.owner) || e.fire.burning || e.fire.rolling
+          || e.climb.active || e.jump.active || e.drive.airborne || e.rage.active)) cancelSleepBeam(e);
       if (e.remoteControlled) { e.startled.active = false; return; }
       if (e.controlled || e.rage.active || e.fire.burning || e.fire.rolling || !e.active) e.startled.active = false;
       // Expiry, health and account/activity cancellation precede regeneration
@@ -7328,14 +7422,16 @@
       }
       return { capacity: list.length, active, working, chilling, overflow, airborne, hits, pounds, beats, stuck, replans, recoveries, elapsed };
     };
-    const liveGeometry = (set) => { for (let i = 0; i < list.length; i++) if (list[i].active) list[i].gorilla.liveGeometry(set); };
+    const liveGeometry = (set) => { if (sleepBeam) sleepBeam.liveGeometry(set); for (let i = 0; i < list.length; i++) if (list[i].active) list[i].gorilla.liveGeometry(set); };
     const dispose = () => {
+      if (sleepBeam) sleepBeam.dispose();
       if (rage) rage.dispose();
       disposed = true; player = null;
       if (wallSearch) wallSearch.owner = null;
       for (let i = 0; i < list.length; i++) {
         const e = list[i];
         if (e.tracked && ctx.untrack) ctx.untrack(e);
+        sleepBeamLook(e, false);
         e.gorilla.dispose(); e.active = e.tracked = e.debugMove.active = false;
       }
       list.length = 0; byOwner.clear();
@@ -7358,7 +7454,7 @@
     };
     return { list, sync, update, startleHill, target, companionTarget, hit, damage, bananaHit, debugRage, setCombatEnabled, plan, startLabShuttle, debugMove, cancelDebugMove, stats, liveGeometry, dispose, contactAt,
       debugLoungeSpots, wallSupported,
-      possess, release, sleeping, wake, setAway, setRemote, createRemote, respawn, travelRefusal, travel, control, cancelInput, smash, smashPower, quickSmash, chestBeat, ignite, dropRoll, supportRemoved,
+      possess, release, sleeping, wake, setAway, cancelSleepBeams, setRemote, createRemote, respawn, travelRefusal, travel, control, cancelInput, smash, smashPower, quickSmash, chestBeat, ignite, dropRoll, supportRemoved,
       get combatEnabled() { return combatEnabled; }, get player() { return player; } };
   };
   BL.clankers = { create, rageCarrying, WALK_RADIUS, WALK_HEIGHT, PROP_STEP, RAGE_SPEED };
