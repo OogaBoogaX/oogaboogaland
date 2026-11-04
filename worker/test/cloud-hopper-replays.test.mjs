@@ -22,7 +22,7 @@ const recording = (duration = 1, playerId = 1, username = "winner", game = GAME)
 };
 const database = () => {
   const sql = new DatabaseSync(":memory:"); sql.exec("PRAGMA foreign_keys=ON");
-  for (const name of ["0001_init", "0002_tess", "0003_highscores", "0004_highscore_notifications", "0005_cloud_hopper_levels", "0006_cloud_hopper_replays", "0007_cloud_hopper_runs"])
+  for (const name of ["0001_init", "0002_tess", "0003_highscores", "0004_highscore_notifications", "0005_cloud_hopper_levels", "0006_cloud_hopper_replays", "0007_cloud_hopper_runs", "0008_cabinet_runs", "0009_identity_collision_guard"])
     sql.exec(readFileSync(new URL(`../migrations/${name}.sql`, import.meta.url), "utf8"));
   const statement = (query, args = []) => {
     const execute = method => {

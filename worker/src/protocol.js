@@ -5,6 +5,7 @@ import "../../src/js/hockey-wire.js";
 export const HOCKEY = globalThis.BL.hockeyWire;
 import { parseStudioCommand, studioCanSpeak, STUDIO_ZONE } from "./studio-policy.js";
 import "../../src/js/chat-policy.js";
+import "../../src/js/contributor-identities.js";
 import "../../src/js/chalk-board.js";
 import "../../src/js/voice-blend.js";
 // The room's wire format and the limits it enforces, as pure functions the tests can reach.
@@ -412,19 +413,22 @@ export const castIndex = (cast) => {
   return { owners, handleOf };
 };
 
-export const ownedBody = (index, login, contributor = false) => {
+export const ownedBody = (index, login, contributor = false, id) => {
   if (typeof login !== "string") return null;
+  const account = globalThis.BL.accountIdentities.accountForId(id);
+  if (account) return index.owners.has(account.handle.toLowerCase()) ? account.handle.toLowerCase() : null;
   const me = login.toLowerCase();
   const own = index.handleOf.get(me);
+  if (own && globalThis.BL.accountIdentities.accountForHandle(own)) return null;
   // Only the Worker can vouch for this fallback. Never shadow a curated alias,
   // never grant another visitor an unbundled body, and never mutate the shared cast.
   return own || (contributor && !index.owners.has(me) ? me : null);
 };
 
 /** null when `login` owns `body`; otherwise the refusal reason. */
-export const claimRefusal = (index, login, body, _players, contributor = false) => {
+export const claimRefusal = (index, login, body, _players, contributor = false, id) => {
   if (body === null) return null;
-  const own = ownedBody(index, login, contributor);
+  const own = ownedBody(index, login, contributor, id);
   return own && own === bodyName(body).toLowerCase() ? null : "not-yours";
 };
 

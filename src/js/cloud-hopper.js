@@ -428,11 +428,11 @@
       if (ctx.arcade) { Object.assign(platform.position, home); moveRider(); }
       overlay.setRunner(cave);
       const login = BL.net.state.me?.login || "";
-      runnerName = login || cave.traits.name; player = login.toLowerCase();
-      session = sessions.get(login);
+      runnerName = login || cave.traits.name; player = game.cloudHopperPlayer(BL.net.state.me);
+      session = sessions.get(player);
       if (!session) {
         session = { levels: LEVELS.map(() => ({ runs: 0, scores: [], lastSeed: null })), lastLevel: 0 };
-        sessions.set(login, session);
+        sessions.set(player, session);
         if (sessions.size > SESSION_PLAYERS) sessions.delete(sessions.keys().next().value);
       }
       level = LEVELS[pickLevel() - 1]; showLevels(); audio.song(level.id - 1);

@@ -90,8 +90,8 @@ test("the page takes real donations only from a Worker with the bananapayserver 
 const SITE = "https://site.test", FAR = 4102444800;
 const CAST = [{ handle: "Cave-Name", github_login: "real-owner",
   joined_at: "2026-09-01T00:00:00Z", last_commit_at: "2026-10-01T00:00:00Z" }];
-const database = (login) => {
-  const writes = [], player = { id: 123, login, banned_at: null, created_at: 1,
+const database = (login, id = 123) => {
+  const writes = [], player = { id, login, banned_at: null, created_at: 1,
     token_hash: "h", expires_at: FAR, last_used_at: FAR };
   return { writes, prepare: (sql) => ({ bind: (...values) => ({ sql, values,
     first: async () => player, run: async () => { writes.push({ sql, values }); return {}; } }) }),
@@ -103,10 +103,10 @@ const requestFor = (path, method = "GET", extra = {}) => new Request(SITE + path
 const callbackFor = (next = "/") => new Request(`${SITE}/auth/callback?code=code&state=held`, {
   headers: { cookie: `__Host-obl_oauth=held.${btoa(encodeURIComponent(next))}` },
 });
-const github = (login) => async (url) => {
+const github = (login, id = 123) => async (url) => {
   if (url === "https://github.com/login/oauth/access_token") return Response.json({ access_token: "token" });
   assert.equal(url, "https://api.github.com/user");
-  return Response.json({ id: 123, login, type: "User" });
+  return Response.json({ id, login, type: "User" });
 };
 
 test("OAuth rejects nonowners without account writes and returns only to same-site destinations after URL normalization", async () => {
@@ -196,4 +196,31 @@ test("formerly eligible visitors can clear their own sessions or delete their ac
     assert.equal(DB.writes[0].values[0], 123);
     if (method === "DELETE") assert.match(DB.writes[1].sql, /DELETE FROM players WHERE id/);
   }
+});
+
+
+test("OAuth and existing sessions use the verified account ID across the rename", async () => {
+  const cast = [{ ...CAST[0], handle: "Bitcoin-Bill", github_login: "Bitcoin-Bill" }];
+  for (const login of ["Bitcoin-Bill", "Bitclank-Bill"]) {
+    const routes = routeFixture({ cast, fetcher: github(login,185141343) });
+    const DB = database(login,185141343), env = { SITE_ORIGIN: SITE, DB };
+    const request = callbackFor();
+    assert.equal((await routes.handleAuth(request,env,new URL(request.url))).status,302);
+    const me = await (await routes.worker.fetch(requestFor("/api/me"),env)).json();
+    assert.equal(me.player.id,185141343);
+    assert.equal(me.character.handle,"Bitcoin-Bill");
+  }
+  const routes = routeFixture({ cast, fetcher: github("Bitcoin-Bill",99) });
+  const request = callbackFor(), DB = database("Bitcoin-Bill",99);
+  assert.match((await routes.handleAuth(request,{ SITE_ORIGIN:SITE,DB },new URL(request.url))).headers.get("location"),/contributor-required/);
+  assert.equal(DB.writes.length,0);
+});
+
+test("a database identity collision returns a recoverable response without creating a session", async () => {
+  const routes = routeFixture({ cast:CAST,fetcher:github("real-owner") });
+  let calls=0;
+  const DB = { prepare: () => { calls++; return { bind: () => ({ run: async () => { throw new Error("D1_ERROR: identity collision"); } }) }; } };
+  const request=callbackFor(),response=await routes.handleAuth(request,{ SITE_ORIGIN:SITE,DB },new URL(request.url));
+  assert.equal(response.status,409); assert.equal(calls,1);
+  assert.ok(!response.headers.get("set-cookie").includes("__Host-obl_session="));
 });
