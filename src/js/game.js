@@ -72,9 +72,9 @@
   const CUP_MEDALS = ["gold", "silver", "bronze"];
   const MINE_ENDINGS = ["goal", "time", "broke", "wrecked", "seized", "left"];
   // Cloud Hopper's levels unlocked in this browser, the level played last (0 for none; the dock plays its score), and
-  // each player's best per level in whole milliseconds (0 for none), keyed by GitHub login ("" signed out), the most
+  // each player's best per level in whole milliseconds (0 for none), keyed by login or a migrated GitHub ID ("" signed out), the most
   // recently played first, at most CLOUD_PLAYERS of them.
-  const CLOUD_LEVELS = 8, CLOUD_PLAYERS = 8, CLOUD_LOGIN = /^(?:[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?)?$/i;
+  const CLOUD_LEVELS = 8, CLOUD_PLAYERS = 8, CLOUD_LOGIN = /^(?:github:[1-9][0-9]{0,15}|[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?)?$/i;
   const isTime = (v) => Number.isFinite(v) && v > 0 && v < 36e5;
   const load = (catalog) => {
     const state = defaults();
@@ -348,6 +348,29 @@
       state.cloudHopper.last = level;
       save(state);
     };
+    const cloudHopperPlayer = (account) => {
+      if (!account || !Number.isSafeInteger(account.id) || account.id <= 0) return "";
+      const binding = BL.accountIdentities.accountForId(account.id);
+      const reserved = BL.accountIdentities.accountForHandle(account.login);
+      if (!binding && !reserved) return String(account.login).toLowerCase();
+      const key = `github:${account.id}`, players = state.cloudHopper.players;
+      if (players.some(p => p.login === key)) return key;
+      const legacy = binding ? binding.legacyLogin : null;
+      // A pinned old login is never imported by its next claimant. Login-only saves
+      // are unverified browser preferences; they are never uploaded as shared scores.
+      const current = String(account.login).toLowerCase();
+      const names = [key, ...(legacy ? [legacy] : []), ...(!reserved || reserved.id === account.id ? [current] : [])];
+      const rows = players.filter(p => names.includes(p.login.toLowerCase()));
+      if (!rows.length) return key;
+      const best = [];
+      for (const row of rows) for (let i = 0; i < row.best.length; i++) {
+        const ms = row.best[i];
+        best[i] = ms && (!best[i] || ms < best[i]) ? ms : best[i] || 0;
+      }
+      state.cloudHopper.players = [{ login: key, best }, ...players.filter(p => !rows.includes(p))].slice(0, CLOUD_PLAYERS);
+      save(state);
+      return key;
+    };
     const cloudHopperBest = (login, level) => state.cloudHopper.players.find((p) => p.login === login)?.best[level - 1] || 0;
     const arcadeBest = (machine) => machine?.startsWith("hockey-") ? 0 : state.arcade.machines[machine] || 0;
     const recordArcade = (kind, score, machine = null) => {
@@ -402,7 +425,7 @@
       if (seconds < 5400) return `${Math.round(seconds / 60)}m`;
       return `${(seconds / 3600).toFixed(1)}h`;
     };
-    return { state, countOf, lootFor: lootForVisitor, addItem, assign, unassign, itemOf, assignedTo, clearLoot, resetAll, recordDonation, rememberHandle, tipsWithin, recordHandFed, recordRace, recordCup, recordJump, recordDrop, recordOrbit, recordMine, recordCloudHopper, playCloudHopper, cloudHopperBest, recordArcade, arcadeBest, addTickets, spendTickets, redeem, setOrbitBuild, setIdentity, forecast, formatDuration };
+    return { state, countOf, lootFor: lootForVisitor, addItem, assign, unassign, itemOf, assignedTo, clearLoot, resetAll, recordDonation, rememberHandle, tipsWithin, recordHandFed, recordRace, recordCup, recordJump, recordDrop, recordOrbit, recordMine, recordCloudHopper, playCloudHopper, cloudHopperBest, cloudHopperPlayer, recordArcade, arcadeBest, addTickets, spendTickets, redeem, setOrbitBuild, setIdentity, forecast, formatDuration };
   };
   BL.game = { create, ARCADE_KINDS: Object.keys(ARCADE_MAX), LOOT_TIERS, STACK_MAX, SATS_PER_BANANA, tierFor, lootFor, bananasFor, formatLarge, formatThree, formatFeeRate };
 })();

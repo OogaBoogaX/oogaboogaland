@@ -93,10 +93,15 @@ export const createOwnedCharacterLookup = (cast, lookup = createContributorLooku
       lastCommit: Math.floor(Date.parse(row.last_commit_at) / 1000),
     });
   }
-  return async (login) => {
+  return async (login, id) => {
     if (typeof login !== "string" || !LOGIN.test(login) || login.includes("--")) return null;
+    const account = globalThis.BL.accountIdentities.accountForId(id);
+    if (account) {
+      for (const row of owners.values()) if (row.handle.toLowerCase() === account.handle.toLowerCase()) return row;
+      return null;
+    }
     const key = login.toLowerCase(), own = owners.get(key);
-    if (own) return own;
+    if (own) return globalThis.BL.accountIdentities.accountForHandle(own.handle) ? null : own;
     if (handles.has(key)) return null;
     return lookup(login);
   };

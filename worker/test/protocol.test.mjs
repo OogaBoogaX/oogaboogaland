@@ -1,7 +1,7 @@
 // Pure checks on the room's wire format and limits: no Durable Object, no sockets.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { BOUND_XZ, BOUND_Y_MIN, BOUND_Y_MAX, CHALK, MESSAGE_MAX, MOVE_HZ, parseClientMessage, playerFromHeaders, spawnPoint, takeToken } from "../src/protocol.js";
+import { castIndex, claimRefusal, BOUND_XZ, BOUND_Y_MIN, BOUND_Y_MAX, CHALK, MESSAGE_MAX, MOVE_HZ, parseClientMessage, playerFromHeaders, spawnPoint, takeToken } from "../src/protocol.js";
 
 test("poses inside the bounds are accepted, rounded and their yaw wrapped", () => {
   const m = parseClientMessage(JSON.stringify({ t: "pose", x: 1.23456, y: -7, z: 3, yaw: 7 }));
@@ -328,4 +328,14 @@ test("a wallet event is a device number, its fuse and, where it lies or flies, a
     { k: "down", u: 7, f: 1, x: BOUND_XZ + 1, y: 0, z: 0 }, { k: "throw", u: 7, f: 1, x: 0, y: 0, z: 0, vx: 21, vy: 0, vz: 0 },
     { k: "blast", u: [] }, { k: "blast", u: Array(17).fill(1) }, { k: "steal", u: 7, f: 1 }])
     assert.equal(parse(bad), null, JSON.stringify(bad));
+});
+
+
+test("numeric owner retains the same Ooga and gorilla while a reused login cannot drive either", () => {
+  const index = castIndex([{ handle: "Bitcoin-Bill", github_login: "Bitcoin-Bill" }]);
+  for (const login of ["Bitcoin-Bill", "Bitclank-Bill"])
+    for (const body of ["Bitcoin-Bill", "gorilla:Bitcoin-Bill"])
+      assert.equal(claimRefusal(index, login, body, [], true, 185141343), null);
+  for (const body of ["Bitcoin-Bill", "gorilla:Bitcoin-Bill"])
+    assert.equal(claimRefusal(index, "Bitcoin-Bill", body, [], true, 99), "not-yours");
 });

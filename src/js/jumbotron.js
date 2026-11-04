@@ -141,7 +141,7 @@
     issues: normalizeBoard(lb && lb.issues)
   });
   // Board rows carry GitHub logins; a character maps its login to the in-game name.
-  const displayLabel = (c) => c.login.startsWith("email:") ? "anonymous" : BL.characters.displayOf(c.login);
+  const displayLabel = (c) => c.login.startsWith("email:") ? "anonymous" : BL.characters.displayOfLogin(c.login);
 
   // Oogatron schema 3 (/v2/stats): org-wide totals/leaderboards, a per-repo
   // breakdown with its own leaderboards and last activity, plus the recent

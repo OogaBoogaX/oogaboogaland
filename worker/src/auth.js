@@ -79,13 +79,19 @@ const callback = async (request, env, url) => {
   if (!Number.isSafeInteger(profile.id) || typeof profile.login !== "string" || profile.type !== "User") {
     return text("GitHub sent an unexpected profile.", 502, { "set-cookie": clearState });
   }
-  if (!(await contributorFor(profile.login))) {
+  if (!(await contributorFor(profile.login, profile.id))) {
     const destination = new URL(next, env.SITE_ORIGIN);
     destination.searchParams.set("signin", "contributor-required");
     return redirect(destination.pathname + destination.search + destination.hash, [clearState]);
   }
 
-  const player = await upsertPlayerFromGitHub(env.DB, { id: profile.id, login: profile.login, avatar_url: profile.avatar_url });
+  let player;
+  try {
+    player = await upsertPlayerFromGitHub(env.DB, { id: profile.id, login: profile.login, avatar_url: profile.avatar_url });
+  } catch (error) {
+    if (!String(error.message).includes("identity collision")) throw error;
+    return text("This username needs an account migration review. Your records have been preserved. Try again after the account owner refreshes their sign-in.", 409, { "set-cookie": clearState });
+  }
   if (player.banned_at) return text("This account cannot sign in.", 403, { "set-cookie": clearState });
   const session = await createSession(env.DB, player.id, request.headers.get("user-agent"));
   return redirect(next, [clearState, serializeCookie(names.session, session, { maxAge: SESSION_SECONDS, secure })]);

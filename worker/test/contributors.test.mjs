@@ -608,3 +608,46 @@ test("the browser accepts one matching temporary identity without reordering the
   assert.equal(c.activeRoster[1].temporary, true);
   assert.equal(BL.characters.get("new-ooga").temporary, true);
 });
+
+
+test("verified numeric owner keeps the custom character across renames; old-login claimants fail closed", async () => {
+  const lookup = createOwnedCharacterLookup([{ handle: "Bitcoin-Bill", github_login: "Bitcoin-Bill",
+    joined_at: "2026-09-01T00:00:00Z", last_commit_at: "2026-10-04T11:00:00Z" }], async () => { throw new Error("Pinned identity must not consult fallback"); });
+  for (const login of ["Bitcoin-Bill", "Bitclank-Bill", "BITCLANK-BILL"])
+    assert.equal((await lookup(login, 185141343)).handle, "Bitcoin-Bill");
+  assert.equal(await lookup("Bitcoin-Bill", 99), null);
+  assert.equal(await lookup("Bitcoin-Bill"), null);
+});
+
+test("cutover preparation emits nothing until both GitHub lookups verify the renamed numeric account", async () => {
+  const { prepareAccountMigration } = await import("../../scripts/account-migration.mjs");
+  const input = { id:42, oldLogin:"old-name", newLogin:"new-name", lastOldAt:"2026-11-01T00:00:00.000Z" }, now = Date.parse("2026-11-02T00:00:00Z");
+  await assert.rejects(prepareAccountMigration(input,async () => Response.json({ id:42,login:"old-name" }),now),/not verified/);
+  await assert.rejects(prepareAccountMigration(input,async url => Response.json({ id:url.includes("user/42")?42:99,login:"new-name" }),now),/different account/);
+  const result = await prepareAccountMigration(input,async () => Response.json({ id:42,login:"new-name" }),now);
+  assert.equal(result.sql.oogaboogaland.length,2);
+  assert.ok(result.sql.oogaboogaland[0].includes("WHERE id=42 AND lower(login)='old-name'"));
+  assert.ok(result.sql.oogatron[0].includes(input.lastOldAt));
+  await assert.rejects(prepareAccountMigration({ ...input,lastOldAt:"2027-01-01T00:00:00.000Z" },async () => assert.fail(),now),/ISO UTC/);
+});
+
+
+test("activity and public labels use the current owner login, never a reused permanent art handle", () => {
+  const context = { window: {}, URLSearchParams, location: { search: "" } };
+  for (const name of ["math", "characters", "contributor-identities", "activity-repos"])
+    runInNewContext(readFileSync(new URL(`../../src/js/${name}.js`, import.meta.url), "utf8"), context);
+  const BL = context.window.BL;
+  BL.characters.add({ handle: "Bitcoin-Bill", github: "Bitclank-Bill", display: "Bill", joined: 1, lastCommit: 2 });
+  runInNewContext(readFileSync(new URL("../../src/js/contributors.js", import.meta.url), "utf8"), context);
+  assert.equal(BL.characters.get("Bitcoin-Bill").handle, "Bitcoin-Bill", "art references stay stable");
+  assert.equal(BL.characters.ownedBy("bitcoin-bill"), null);
+  assert.equal(BL.characters.displayOfLogin("bitcoin-bill"), "bitcoin-bill");
+  assert.equal(BL.characters.displayOfLogin("BITCLANK-BILL"), "Bill");
+  const c = BL.contributors, before = c.roster[0].lastCommitAt;
+  assert.equal(c.applySnapshot(snapshot(person("Bitcoin-Bill")), NOW), 0);
+  assert.equal(c.roster[0].lastCommitAt, before);
+  assert.equal(c.roster[0].lastContributionAt, 0);
+  assert.equal(c.applySnapshot(snapshot(person("Bitclank-Bill")), NOW), 1);
+  assert.equal(c.roster[0].lastCommitAt, Date.parse(person("Bitclank-Bill").last_seen_at));
+  assert.equal(c.roster[0].lastContributionAt, c.roster[0].lastCommitAt);
+});

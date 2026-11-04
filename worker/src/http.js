@@ -52,7 +52,7 @@ const findSession = async (request, env, removal) => {
     const found = await getSession(env.DB, token);
     if (!found) return null;
     if (removal) return { ...found, token };
-    const character = await contributorFor(found.player.login);
+    const character = await contributorFor(found.player.login, found.player.id);
     return character ? { ...found, token, character } : null;
   } catch (err) {
     console.error("session lookup failed", err);

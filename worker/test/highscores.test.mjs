@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
-import { deletePlayer, upsertPlayerFromGitHub } from "../src/db.js";
+import { deletePlayer, getSession, upsertPlayerFromGitHub } from "../src/db.js";
 import { createSession } from "../src/db.js";
 import { sha256Hex } from "../src/crypto.js";
 import { routeFixture } from "./routes.mjs";
@@ -12,10 +12,10 @@ import { deliverHighscores } from "../src/highscore-store.js";
 
 const SITE = "https://site.test", RULES = globalThis.BL.highscoreRules;
 const { createHighscoreHandler } = routeFixture();
-const database = (runs = true, cabinets = true) => {
+const database = (runs = true, cabinets = true, guard = runs && cabinets) => {
   const sql = new DatabaseSync(":memory:");
   sql.exec("PRAGMA foreign_keys = ON");
-  for (const name of ["0001_init.sql", "0002_tess.sql", "0003_highscores.sql", "0004_highscore_notifications.sql", "0005_cloud_hopper_levels.sql", "0006_cloud_hopper_replays.sql", ...(runs ? ["0007_cloud_hopper_runs.sql"] : []), ...(cabinets ? ["0008_cabinet_runs.sql"] : [])]) {
+  for (const name of ["0001_init.sql", "0002_tess.sql", "0003_highscores.sql", "0004_highscore_notifications.sql", "0005_cloud_hopper_levels.sql", "0006_cloud_hopper_replays.sql", ...(runs ? ["0007_cloud_hopper_runs.sql"] : []), ...(cabinets ? ["0008_cabinet_runs.sql"] : []), ...(guard ? ["0009_identity_collision_guard.sql"] : [])]) {
     sql.exec(readFileSync(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
   }
   const statement = (query, args = []) => {
@@ -153,7 +153,11 @@ test("Cloud Hopper's levels keep separate boards; the board from before them rea
 test("a reused GitHub login cannot inherit a different account's record", async (t) => {
   const { DB, handler, env } = await setup(t, 1, "reused-name");
   await handler(write("cloud-hopper-l1", "cloud-hopper-l1", 47000), env);
+  await assert.rejects(player(DB, 2, "Reused-Name"), /identity collision/);
+  assert.deepEqual((await scores(handler, env, "cloud-hopper-l1")).highscores, { "reused-name": 47000 });
+  await player(DB, 1, "refreshed-name");
   await player(DB, 2, "Reused-Name");
+  await deletePlayer(DB, 1);
   assert.deepEqual((await scores(handler, env, "cloud-hopper-l1")).highscores, {});
   // A stale request that authenticated before the claim still cannot use its revoked session.
   await handler(write("cloud-hopper-l1", "cloud-hopper-l1", 1000), env);
@@ -353,7 +357,12 @@ test("distinct Cloud Hopper finishes share a username, retries are idempotent an
   await player(DB, 1, "renamed");
   board = await scores(handler, env, game);
   assert.ok(board.runs.every(r => r.username === "renamed" || r.username === "other"));
-  await player(DB, 3, "renamed"); // Reused login does not inherit any of the former owner's runs.
+  const beforeClaim = DB.sql.prepare("SELECT * FROM cloud_hopper_runs ORDER BY game, player_id, run_id").all();
+  await assert.rejects(player(DB, 3, "renamed"), /identity collision/);
+  assert.deepEqual(DB.sql.prepare("SELECT * FROM cloud_hopper_runs ORDER BY game, player_id, run_id").all(), beforeClaim);
+  await player(DB, 1, "current-name");
+  await player(DB, 3, "renamed");
+  await deletePlayer(DB, 1); // Only explicit account deletion removes that account's runs.
   assert.deepEqual((await scores(handler, env, game)).runs.map(r => r.username), ["other"]);
   await deletePlayer(DB, 2);
   assert.deepEqual((await scores(handler, env, game)).runs, []);
@@ -422,6 +431,127 @@ test("historical hockey records remain stored but cannot be read, updated or inc
 });
 
 
+test("identity guard installs without data changes and preserves every board through claimant-first writes and rename", async t => {
+  const DB = database(true, true, false); t.after(() => DB.sql.close());
+  const handler = await authenticated(DB, await player(DB, 1, "original")), env = { DB, SITE_ORIGIN: SITE };
+  for (const game of ["cloud-hopper-l1", "cloud-hopper-l2", "cloud-hopper-l3", "cloud-hopper-l4"])
+    await handler(write(game, game, 47000, { runId: runId(1) }), env);
+  const other = await authenticated(DB, await player(DB, 2, "other"));
+  for (const game of RULES.cabinets) {
+    const machine = RULES.get(game).machines[0];
+    await handler(write(game, machine, 3000, { runId: runId(1) }), env);
+    await handler(write(game, machine, 2000, { runId: runId(2) }), env);
+    await other(write(game, machine, 4000, { playerId: 2, runId: runId(1) }), env);
+  }
+  const tables = ["players", "sessions", "game_highscores", "cloud_hopper_runs", "cabinet_runs", "cloud_hopper_replay_objects", "cloud_hopper_replay_winners", "cloud_hopper_replay_tickets", "highscore_notifications"];
+  const snapshot = () => tables.map(table => DB.sql.prepare(`SELECT * FROM ${table}`).all());
+  const before = snapshot();
+  DB.sql.exec(readFileSync(new URL("../migrations/0009_identity_collision_guard.sql", import.meta.url), "utf8"));
+  assert.deepEqual(snapshot(), before);
+  await assert.rejects(player(DB, 3, "ORIGINAL"), /identity collision/);
+  assert.deepEqual(snapshot(), before);
+  await assert.rejects(player(DB, 2, "Original"), /identity collision/);
+  assert.deepEqual(snapshot(), before);
+  await assert.rejects(player(DB, 1, "OTHER"), /identity collision/);
+  assert.deepEqual(snapshot(), before);
+  const cabinets = await Promise.all(RULES.cabinets.map(game => scores(handler, env, game)));
+  await player(DB, 1, "new-name");
+  await player(DB, 3, "original");
+  for (const game of ["cloud-hopper-l1", "cloud-hopper-l2", "cloud-hopper-l3", "cloud-hopper-l4"])
+    assert.deepEqual((await scores(handler, env, game)).highscores, { "new-name": 47000 });
+  assert.equal(DB.sql.prepare("SELECT count(*) n FROM cloud_hopper_runs WHERE player_id=1").get().n, 4);
+  for (const table of ["sessions", "cloud_hopper_runs", "cabinet_runs", "cloud_hopper_replay_objects", "cloud_hopper_replay_winners", "cloud_hopper_replay_tickets"])
+    assert.deepEqual(DB.sql.prepare(`SELECT * FROM ${table}`).all(), before[tables.indexOf(table)]);
+  const live = await scores(handler, env, "arcade-live"), publicSnapshot = await scores(handler, env, "arcade"), notices = [];
+  await deliverHighscores(DB, board => { notices.push(board); return true; });
+  for (const previous of cabinets) {
+    const expected = previous.runs.map(run => ({ ...run, username: run.username === "original" ? "new-name" : run.username }));
+    const board = await scores(handler, env, previous.game);
+    assert.deepEqual(board.runs, expected);
+    assert.deepEqual(board.highscores, previous.highscores);
+    assert.deepEqual(board.achieved, previous.achieved);
+    assert.ok(board.revision > previous.revision);
+    assert.deepEqual(notices.find(b => b.game === previous.game).runs, expected);
+    if (RULES.arcade.includes(previous.game)) for (const boards of [live.boards, publicSnapshot.boards])
+      assert.deepEqual(boards.find(b => b.game === previous.game).runs, expected);
+  }
+});
+
+test("returning players with legacy duplicate logins revoke stale sessions but preserve every owner's history and reject new claims", async t => {
+  const DB = database(true, true, false); t.after(() => DB.sql.close());
+  await player(DB, 1, "Shared"); await player(DB, 2, "shared"); await player(DB, 4, "other");
+  const tokens = new Map();
+  for (const id of [1,2,4]) tokens.set(id,await createSession(DB,id,"existing"));
+  DB.sql.exec(`UPDATE game_highscores SET highscores='{"shared":47000}',owners='{"shared":1}',achieved='{"shared":10}' WHERE game_id='cloud-hopper-l1'`);
+  for (const id of [1,2,4]) {
+    DB.sql.prepare("INSERT INTO cloud_hopper_runs(game,run_id,player_id,score,achieved) VALUES('cloud-hopper-l1',?,?,?,?)").run(runId(id),id,46000+id*1000,10*id);
+    for (const game of RULES.cabinets)
+      DB.sql.prepare("INSERT INTO cabinet_runs(game,run_id,player_id,score,achieved) VALUES(?,?,?,?,?)").run(game,runId(id),id,1000*id,10*id);
+  }
+  const hash = "b".repeat(64);
+  DB.sql.prepare("INSERT INTO cloud_hopper_replay_objects(hash,game,player_id,score,bytes,course_version,expires_at,state) VALUES (?,'cloud-hopper-l1',1,47000,100,1,9999999999999,'ready')").run(hash);
+  DB.sql.prepare("INSERT INTO cloud_hopper_replay_winners(game,player_id,score,achieved,hash) VALUES ('cloud-hopper-l1',1,47000,10,?)").run(hash);
+  const tables = ["sessions","game_highscores","cloud_hopper_runs","cabinet_runs","cloud_hopper_replay_objects","cloud_hopper_replay_winners","cloud_hopper_replay_tickets","highscore_notifications"];
+  const snapshot = () => tables.map(table => DB.sql.prepare(`SELECT * FROM ${table}`).all());
+  const before = snapshot();
+  DB.sql.exec(readFileSync(new URL("../migrations/0009_identity_collision_guard.sql",import.meta.url),"utf8"));
+  assert.deepEqual(snapshot(),before);
+  const refreshed = before.map((rows,i) => tables[i] === "sessions" ? rows.filter(row => row.player_id !== 1) : rows);
+  for (const [id,login] of [[2,"shared"],[2,"SHARED"]]) {
+    await player(DB,id,login);
+    assert.deepEqual(snapshot(),refreshed);
+    assert.equal(await getSession(DB,tokens.get(1)),null);
+    assert.equal((await getSession(DB,tokens.get(2))).player.id,2);
+    assert.equal((await getSession(DB,tokens.get(4))).player.id,4);
+  }
+  await assert.rejects(player(DB,3,"shared"),/identity collision/);
+  await assert.rejects(player(DB,4,"SHARED"),/identity collision/);
+  assert.deepEqual(snapshot(),refreshed);
+  await player(DB,1,"current-name");
+  for (const table of ["sessions","cloud_hopper_runs","cabinet_runs","cloud_hopper_replay_objects","cloud_hopper_replay_winners","cloud_hopper_replay_tickets"])
+    assert.deepEqual(DB.sql.prepare(`SELECT * FROM ${table}`).all(),refreshed[tables.indexOf(table)]);
+  assert.deepEqual(JSON.parse(DB.sql.prepare("SELECT highscores FROM game_highscores WHERE game_id='cloud-hopper-l1'").get().highscores),{"current-name":47000});
+});
+
+test("same-ID duplicate names retain the faster score, original timestamp and replay pointer", async t => {
+  const { DB, handler, env } = await setup(t, 1, "old");
+  const game = "cloud-hopper-l1", hash = "a".repeat(64);
+  DB.sql.prepare("UPDATE game_highscores SET highscores=?,owners=?,achieved=? WHERE game_id=?")
+    .run('{"old":50000,"new":40000,"other":60000}', '{"old":1,"new":1,"other":2}', '{"old":10,"new":20,"other":30}', game);
+  DB.sql.prepare("INSERT INTO cloud_hopper_replay_objects(hash,game,player_id,score,bytes,course_version,expires_at,state) VALUES (?,?,1,40000,100,1,9999999999999,'ready')").run(hash,game);
+  DB.sql.prepare("INSERT INTO cloud_hopper_replay_winners(game,player_id,score,achieved,hash) VALUES (?,1,40000,20,?)").run(game,hash);
+  const before = DB.sql.prepare("SELECT * FROM cloud_hopper_replay_winners").all();
+  await player(DB, 1, "new");
+  const board = await scores(handler, env, game);
+  assert.deepEqual(board.highscores, { new: 40000, other: 60000 });
+  assert.deepEqual(board.achieved, { new: 20, other: 30 });
+  assert.deepEqual(DB.sql.prepare("SELECT * FROM cloud_hopper_replay_winners").all(), before);
+});
+
+
+test("same-account score merge respects both directions, earliest ties, and refuses another score owner", async t => {
+  for (const [direction, oldScore, newScore, oldAt, newAt, score, achieved] of [
+    ["asc", 30, 40, 20, 10, 30, 20], ["desc", 30, 40, 20, 10, 40, 10],
+    ["desc", 40, 30, 20, 10, 40, 20], ["asc", 30, 30, 20, 10, 30, 10],
+    ["desc", 30, 30, 10, 20, 30, 10],
+  ]) {
+    const { DB } = await setup(t, 1, "old"), game = "cloud-hopper-l1";
+    DB.sql.prepare("UPDATE game_highscores SET direction=?,highscores=?,owners=?,achieved=? WHERE game_id=?")
+      .run(direction, JSON.stringify({ old: oldScore, new: newScore }), '{"old":1,"new":1}', JSON.stringify({ old: oldAt, new: newAt }), game);
+    await player(DB, 1, "new");
+    const row = DB.sql.prepare("SELECT highscores,achieved FROM game_highscores WHERE game_id=?").get(game);
+    assert.deepEqual(JSON.parse(row.highscores), { new: score });
+    assert.deepEqual(JSON.parse(row.achieved), { new: achieved });
+  }
+  const { DB } = await setup(t, 1, "old");
+  DB.sql.prepare("UPDATE game_highscores SET highscores=?,owners=?,achieved=? WHERE game_id='cloud-hopper-l1'")
+    .run('{"destination":123}', '{"destination":99}', '{"destination":10}');
+  const before = DB.sql.prepare("SELECT * FROM game_highscores").all();
+  await assert.rejects(player(DB, 1, "destination"), /identity collision/);
+  assert.deepEqual(DB.sql.prepare("SELECT * FROM game_highscores").all(), before);
+  assert.equal(DB.sql.prepare("SELECT login FROM players WHERE id=1").get().login, "old");
+});
+
 test("all eleven video cabinets publish attributed top runs without changing legacy machine records", async t => {
   const { handler, env } = await setup(t);
   assert.equal(RULES.cabinets.length, 11);
@@ -474,7 +604,13 @@ test("cabinet run retries, top-ten ordering, identity changes and notifications 
   board = await scores(handler, env, game);
   assert.ok(board.runs.every(r => r.username === "renamed" || r.username === "other"));
   assert.ok(board.revision > delivered[0].revision);
+  const beforeClaim = DB.sql.prepare("SELECT * FROM cabinet_runs ORDER BY game, player_id, run_id").all();
+  await assert.rejects(player(DB, 3, "renamed"), /identity collision/);
+  assert.deepEqual(DB.sql.prepare("SELECT * FROM cabinet_runs ORDER BY game, player_id, run_id").all(), beforeClaim);
+  await player(DB, 1, "current-name");
   await player(DB, 3, "renamed");
+  assert.deepEqual(DB.sql.prepare("SELECT * FROM cabinet_runs ORDER BY game, player_id, run_id").all(), beforeClaim);
+  await deletePlayer(DB, 1); // Only explicit account deletion removes this account's runs and session.
   assert.deepEqual((await scores(handler, env, game)).runs.map(r => r.username), ["other"]);
   await submit(20, 1000); // A revoked old session cannot restore attributed rows or improve the record.
   assert.deepEqual((await scores(handler, env, game)).highscores, { [machine]: 900 });
