@@ -9,12 +9,182 @@ import { checkCharacterIdentities, identityAdvice } from "../../scripts/contribu
 import { declaredIdentity, mayAuthorIdentity } from "../../scripts/character-identity.mjs";
 import { CharacterRejection, parseSafeCharacter, scanCharacter, safeCharacterSource, checkOwner, isGitHubDisplayRename } from "../../scripts/character-safety.mjs";
 import { LANES, digest, due, inspectSubmission, manifestPath, readManifest, queuedCharacters, reviewDecision } from "../../scripts/character-submissions.mjs";
-import { createCoordinator } from "../../scripts/character-bundles.mjs";
+import { createCoordinator, runAccountRenameChecks } from "../../scripts/character-bundles.mjs";
 import { BOT, OPERATORS, isOperator } from "../../scripts/character-operators.mjs";
+import { inspectAccountRename, onlyAccountLoginChanged } from "../../scripts/character-account-rename.mjs";
+import { createGitHub } from "../../scripts/character-github.mjs";
 
 const NOW = Date.parse("2026-10-04T12:00:00Z");
 const person = (login, extra = {}) => ({ login, counts: { commits: 1 }, first_seen_at: "2026-09-01T00:00:00Z", last_seen_at: "2026-10-04T11:00:00Z", ...extra });
 const snapshot = (...rows) => ({ meta: { org: "OogaBoogaX", schema_version: 3, generated_at: new Date(NOW).toISOString() }, contributors: rows });
+
+const accountRenameFixture = () => {
+  const rock = "a".repeat(40), head = "b".repeat(40), path = "src/characters/Bitcoin-Bill.js", repo = "example/land";
+  const base = readFileSync(new URL("../../src/characters/Bitcoin-Bill.js", import.meta.url), "utf8");
+  const f = { rock, head, path, repo, base, source: base.replace('github: "Bitcoin-Bill"', 'github: "Bitclank-Bill"'),
+    permission: "admin", commits: [{ sha: head }], reviews: [], calls: [], signed: true,
+    account: { id: 185141343, login: "Bitclank-Bill", type: "User" }, revisionFiles: [{ filename: path, status: "modified" }] };
+  f.pr = { number: 7, state: "open", draft: false, user: { ...OPERATORS[0], type: "User" }, base: { ref: "rock", repo: { full_name: repo } }, head: { sha: head, repo: { full_name: repo } } };
+  f.gh = { repo,
+    api: async (url, method, data) => {
+      f.calls.push({ url, method, data });
+      if (url === "pulls/7") return f.pr;
+      if (url === "git/ref/heads/rock") return { object: { sha: rock } };
+      if (url.startsWith("statuses/")) return {};
+      if (url.startsWith("collaborators/")) return { permission: f.permission };
+      if (url.startsWith("compare/")) return { merge_base_commit: { sha: rock }, total_commits: f.commits.length, files: f.diffFiles || [{ filename: path, status: "modified" }] };
+      if (url.startsWith("commits/")) return { author: f.revisionAuthor || f.pr.user, parents: [{ sha: rock }], files: f.revisionFiles, commit: { verification: { verified: f.signed } } };
+      throw new Error(`Unexpected request ${url}`);
+    },
+    list: async (url) => {
+      if (url === "pulls/7/commits") return f.commits;
+      if (url === "pulls/7/reviews") return f.reviews;
+      if (url === "pulls?state=open&base=rock") return [f.pr];
+      throw new Error(`Unexpected list ${url}`);
+    },
+    tree: async () => new Map([[path, {}]]),
+    file: async (ref) => ({ sha: ref === rock ? "c".repeat(40) : "d".repeat(40), source: ref === rock ? f.base : ref === head ? f.source : f.earlierSource }),
+    account: async (lookup) => f.lookup ? f.lookup(lookup) : f.account
+  };
+  return f;
+};
+
+test("same-ID account rename accepts only a verified github-only signed operator PR", async () => {
+  const f = accountRenameFixture(), inspect = () => inspectAccountRename(f.gh, f.pr, f.rock);
+  assert.equal(onlyAccountLoginChanged(f.base, f.source), true);
+  assert.equal((await inspect()).githubId, 185141343);
+  assert.equal((await inspect()).newLogin, "Bitclank-Bill");
+  f.account.login = "Bitcoin-Bill";
+  await assert.rejects(inspect, /not verified/);
+  f.account.login = "Bitclank-Bill";
+  f.lookup = async (key) => ({ ...f.account, id: typeof key === "number" ? 185141343 : 123 });
+  await assert.rejects(inspect, /not verified/);
+  f.lookup = async () => { throw new Error("GitHub unavailable"); };
+  await assert.rejects(inspect, /unavailable/);
+  f.lookup = null; f.account.type = "Bot";
+  await assert.rejects(inspect, /not verified/);
+  f.account.type = "User"; f.pr.user.id = 123;
+  await assert.rejects(inspect, /operator-authored/);
+  f.pr.user = { ...OPERATORS[0], type: "User" }; f.permission = "write";
+  await assert.rejects(inspect, /Maintain\/Admin/);
+  f.permission = "admin"; f.signed = false;
+  await assert.rejects(inspect, /signed operator/);
+  f.signed = true; f.pr.head.repo.full_name = "someone/fork";
+  await assert.rejects(inspect, /in this repository/);
+});
+
+test("same-ID account rename rejects mixed diffs, reverted code changes and stale PR heads", async () => {
+  const f = accountRenameFixture(), inspect = () => inspectAccountRename(f.gh, f.pr, f.rock);
+  const valid = f.source;
+  f.source += "\n// unrelated edit\n";
+  await assert.rejects(inspect, /only.*github line/);
+  f.source = valid; f.diffFiles = [...f.revisionFiles, { filename: "README.md", status: "modified" }];
+  await assert.rejects(inspect, /only.*github line/);
+  f.diffFiles = null; f.revisionFiles.push({ filename: "worker/src/auth.js", status: "modified" });
+  await assert.rejects(inspect, /signed operator/);
+  f.revisionFiles.pop(); f.commits.unshift({ sha: "e".repeat(40) }); f.earlierSource = valid + "\n// reverted edit\n";
+  await assert.rejects(inspect, /history contains another change/);
+  f.commits.shift();
+  f.lookup = async () => { f.pr = { ...f.pr, head: { ...f.pr.head, sha: "f".repeat(40) } }; return f.account; };
+  await assert.rejects(inspect, /changed during verification/);
+  assert.throws(() => checkOwner({ handle: "Bitcoin-Bill", github: "Bitclank-Bill" },
+    { handle: "Bitcoin-Bill", github: "Bitcoin-Bill" }, OPERATORS[0].login, true), /separate maintainer-reviewed PR/);
+});
+
+test("account-rename checks require another operator's exact-head approval and perform no bundle or merge writes", async () => {
+  const f = accountRenameFixture(), coordinator = createCoordinator(f.gh, "private-app[bot]");
+  const gate = () => f.calls.filter((call) => call.data?.context === "Character bundle safety").at(-1)?.data.state;
+  assert.equal(await runAccountRenameChecks(coordinator, { action: "synchronize", pull_request: { number: 7 } }), true);
+  assert.equal(gate(), "pending");
+  f.reviews = [{ user: f.pr.user, state: "APPROVED", commit_id: f.head }];
+  await coordinator.accountRename(7); assert.equal(gate(), "pending");
+  f.reviews = [{ user: { ...OPERATORS[1], type: "User" }, state: "APPROVED", commit_id: "old" }];
+  await coordinator.accountRename(7); assert.equal(gate(), "pending");
+  f.reviews[0].commit_id = f.head;
+  await runAccountRenameChecks(coordinator, { workflow_run: { event: "pull_request_review" } }); assert.equal(gate(), "success");
+  f.reviews.push({ ...f.reviews[0], state: "DISMISSED" });
+  await runAccountRenameChecks(coordinator, { schedule: "17,37,57 * * * *" }); assert.equal(gate(), "pending");
+  f.account.id = 123;
+  await assert.rejects(() => coordinator.accountRename(7), /not verified/);
+  assert.equal(gate(), "failure");
+  f.account.id = 185141343; f.pr.user = { ...f.pr.user, login: "former-operator" };
+  await assert.rejects(() => coordinator.refreshAccountRenames(), /operator-authored/);
+  assert.equal(gate(), "failure");
+  f.pr.user = { ...OPERATORS[0], type: "User" };
+  assert.ok(f.calls.filter((call) => call.method && call.method !== "GET").every((call) => call.url.startsWith("statuses/")));
+  const before = f.calls.filter((call) => call.method === "POST").length;
+  f.account.id = 185141343; f.source = f.base.replace('display: "Bitclank Bill"', 'display: "Different display"');
+  assert.equal(await coordinator.accountRename(7), false);
+  assert.equal(f.calls.filter((call) => call.method === "POST").length, before);
+});
+
+test("rename refresh failures leave unidentified PR statuses untouched but identified renames fail closed", async () => {
+  for (const scenario of ["timeout", "5xx", "truncated", "file", "declaration"]) {
+    const f = accountRenameFixture(), api = f.gh.api, file = f.gh.file;
+    // An ordinary code PR or bot bundle must keep its required statuses, even
+    // when discovery fails before the refresh can tell which kind of PR it is.
+    f.diffFiles = [{ filename: "README.md", status: "modified" }];
+    if (scenario === "5xx") f.pr.user = { login: "private-app[bot]", type: "Bot" };
+    f.gh.api = async (url, ...rest) => {
+      if (url.startsWith("compare/")) {
+        if (scenario === "timeout" || scenario === "5xx") throw new Error(`GitHub ${scenario}`);
+        if (scenario === "truncated") return { merge_base_commit: { sha: f.rock }, files: Array(300).fill(f.diffFiles[0]) };
+      }
+      return api(url, ...rest);
+    };
+    if (scenario === "file" || scenario === "declaration") {
+      f.diffFiles = null; f.source = f.base;
+      f.gh.file = async (...args) => {
+        if (scenario === "file") throw new Error("GitHub blob unavailable");
+        return { ...await file(...args), source: "/* incomplete declaration" };
+      };
+    }
+    const coordinator = createCoordinator(f.gh, "private-app[bot]");
+    await assert.rejects(() => runAccountRenameChecks(coordinator, { schedule: "17,37,57 * * * *" }));
+    assert.equal(f.calls.filter((call) => call.method === "POST").length, 0, scenario);
+    f.gh.api = api; f.gh.file = file;
+    if (scenario === "file" || scenario === "declaration") f.source = f.base;
+    await coordinator.refreshAccountRenames();
+    assert.equal(f.calls.filter((call) => call.method === "POST").length, 0, `${scenario} recovery`);
+  }
+  const f = accountRenameFixture(), coordinator = createCoordinator(f.gh, "private-app[bot]");
+  f.lookup = async () => { throw new Error("GitHub unavailable after owner change identified"); };
+  await assert.rejects(() => coordinator.refreshAccountRenames(), /unavailable/);
+  assert.deepEqual(f.calls.filter((call) => call.method === "POST").map((call) => [call.data.context, call.data.state]),
+    [["Character intake", "failure"], ["Character bundle safety", "failure"]]);
+  f.lookup = null;
+  f.reviews = [{ user: { ...OPERATORS[1], type: "User" }, state: "APPROVED", commit_id: f.head }];
+  await coordinator.refreshAccountRenames();
+  assert.deepEqual(f.calls.filter((call) => call.method === "POST").slice(-2).map((call) => call.data.state), ["success", "success"]);
+});
+
+test("account lookup uses GitHub's ID and login endpoints without following supplied URLs", async () => {
+  const calls = [], gh = createGitHub("example/land", "test-token", async (url, init) => {
+    calls.push({ url, method: init.method }); return { ok: true, status: 200, json: async () => ({ id: 185141343 }) };
+  });
+  await gh.account(185141343); await gh.account("Bitclank-Bill");
+  assert.deepEqual(calls, [{ url: "https://api.github.com/user/185141343", method: "GET" }, { url: "https://api.github.com/users/Bitclank-Bill", method: "GET" }]);
+});
+
+test("verified account rename refuses competing queued work and another character's login", async () => {
+  const f = accountRenameFixture(), bot = "private-app[bot]", queueHead = "d".repeat(40);
+  const bundle = { number: 9, state: "open", user: { login: bot }, base: { ref: "rock", repo: { full_name: f.repo } },
+    head: { sha: queueHead, ref: "automation/characters-manual-test", repo: { full_name: f.repo } } };
+  const api = f.gh.api, list = f.gh.list, file = f.gh.file;
+  f.gh.api = async (url, ...rest) => url === "pulls/9" ? bundle
+    : url === `commits/${queueHead}` ? { author: { login: bot }, commit: { verification: { verified: true } } } : api(url, ...rest);
+  f.gh.list = async (url) => url === "pulls?state=open&base=rock" ? [f.pr, bundle] : list(url);
+  f.gh.file = async (ref, path) => ref === queueHead ? { sha: queueHead, source: path === manifestPath("manual")
+    ? JSON.stringify({ version: 1, lane: "manual", openedOn: "2026-11-04", entries: [{ path: f.path, pr: 5, head: "e".repeat(40),
+      base: "c".repeat(40), hash: digest(f.base), author: "owner", lane: "manual" }] }) : f.base } : file(ref, path);
+  const coordinator = createCoordinator(f.gh, bot);
+  await assert.rejects(() => coordinator.accountRename(7), /competing queued/);
+  f.gh.list = list; f.gh.file = async (ref, path) => path === "src/characters/other.js"
+    ? { source: 'BL.characters.add({handle:"other",github:"Bitclank-Bill"});' } : file(ref, path);
+  f.gh.tree = async () => new Map([[f.path, {}], ["src/characters/other.js", {}]]);
+  await assert.rejects(() => coordinator.accountRename(7), /different character file/);
+  assert.ok(f.calls.filter((call) => call.method && call.method !== "GET").every((call) => call.url.startsWith("statuses/")));
+});
 
 test("daily character intake accepts only bounded data and never executes source", () => {
   const source = characterSource({ handle: "owner", joined: 1, lastCommit: 2 });

@@ -2,6 +2,8 @@
 
 This PR prepares the transition; it does not rename the account or activate a new displayed owner. Bill's original planning commits remain in the PR history. Implementation and operator preparation are being handled at the maintainer's request.
 
+Current operator decision: BananaPayServer #29 is closed without merge. Leave that service unchanged for this cutover and exclude the generator's BananaPayServer statement group; no absence of pending invoices is inferred. The historical three-service steps below apply only to OBL and Oogatron for this case. The [verified account migration path](account-rename-operator-path.md) supplies the separate same-ID character PR, required checks during a generation pause, and per-database atomic file-execution procedure. An ordinary maintainer PR or the cosmetic display-name lane alone does not authorize changing `github`.
+
 ## Verified identity and current state
 
 GitHub `/user/185141343` returned `Bitcoin-Bill` on 2026-11-04. `/users/Bitclank-Bill` returned 404; that is not proof that GitHub will allow the name. The rename has **not** been verified. Preserve numeric account ID `185141343`, file/handle `src/characters/Bitcoin-Bill.js` / `Bitcoin-Bill`, display `Bitclank Bill`, authored appearance, dates, voice (`clank clank`) and companion.

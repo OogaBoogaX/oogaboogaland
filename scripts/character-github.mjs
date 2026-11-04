@@ -57,5 +57,7 @@ export const createGitHub = (repo, token, fetcher = fetch) => {
     });
     return result.data.createCommitOnBranch.commit.oid;
   };
-  return { repo, api, list, tree, file, commit };
+  const account = (idOrLogin) => request(Number.isSafeInteger(idOrLogin)
+    ? `user/${idOrLogin}` : `users/${encodeURIComponent(idOrLogin)}`);
+  return { repo, api, list, tree, file, commit, account };
 };
