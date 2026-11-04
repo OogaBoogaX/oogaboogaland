@@ -32,6 +32,7 @@ const roomClass = (extra = {}) => {
 };
 test("room broadcasts DSB zone changes, persists them and keeps ownership enforcement", () => {
   const Room = roomClass(), room = Object.create(Room.prototype), sent = [];
+  room.hockeyTables = [null, null, null];
   room.players = new Map(); room.chatBuckets = new Map(); room.voiceSig = new Map();
   let attachment;
   const ws = { deserializeAttachment: () => ({ id: 1 }), serializeAttachment: value => { attachment = value; }, send: text => sent.push(JSON.parse(text)) };
@@ -69,6 +70,7 @@ test("room broadcasts DSB zone changes, persists them and keeps ownership enforc
 
 test("room passes DSB wallets to the pages in their zone, and hands the live ones to whoever walks in", () => {
   const Room = roomClass(), room = Object.create(Room.prototype), now = Date.now();
+  room.hockeyTables = [null, null, null];
   room.players = new Map(); room.chatBuckets = new Map(); room.voiceSig = new Map();
   room.scheduleFlush = () => {};
   const join = (id, login, zone) => {
@@ -236,6 +238,7 @@ test("SFU stays unavailable without secrets and uses bounded upstream calls with
 
 const studioRoom = () => {
   const Room = roomClass(), room = Object.create(Room.prototype);
+  room.hockeyTables = [null, null, null];
   room.players = new Map(); room.chatBuckets = new Map(); room.studio = studio.studioState(1000); room.env = { STUDIO_HOST_IDS: "1,3" }; room.cleanupJobs = [];
   room.doorQueue = []; room.doorActive = null; room.doorPasses = new Map(); room.sweepAt = 0;
   const pending = [], storage = new Map();
@@ -540,7 +543,7 @@ test("Studio wake migrates old snapshots, clamps catalogue edits and rechecks co
       { id: 2, login: "synthetic-attendee", contributor: true, zone: studio.STUDIO_ZONE, body: "synthetic-attendee", studioSeat: 0 }
     ];
     const sockets = attachments.map(a => ({ deserializeAttachment: () => a, serializeAttachment() {}, send() {} }));
-    const ctx = { setWebSocketAutoResponse() {}, getWebSockets: () => sockets, blockConcurrencyWhile: fn => pending.push(fn()), waitUntil: p => pending.push(p), storage: { get: async key => Array.isArray(key) ? new Map() : key === "studio" ? structuredClone(saved) : null, put: async () => {} } };
+    const ctx = { setWebSocketAutoResponse() {}, getWebSockets: () => sockets, blockConcurrencyWhile: fn => pending.push(fn()), waitUntil: p => pending.push(p), storage: { get: async key => Array.isArray(key) ? new Map() : key === "studio" ? structuredClone(saved) : undefined, put: async () => {} } };
     const room = new Room(ctx, { STUDIO_HOST_IDS: ids }); await Promise.all(pending); return room;
   };
   const legacy = { ...studio.studioState(1000), hostId: 1, mode: "presentation", source: "sample-quiet", position: 99, playing: false };
@@ -557,6 +560,7 @@ test("Studio wake migrates old snapshots, clamps catalogue edits and rechecks co
 // Regression: a table voice choice survives hibernation, but never a scene change.
 test("room scopes poker voice to Ember Den and clears it on departure", () => {
   const Room = roomClass(), room = Object.create(Room.prototype);
+  room.hockeyTables = [null, null, null];
   room.players = new Map(); room.chatBuckets = new Map(); room.sfu = {};
   let attachment;
   const ws = { deserializeAttachment: () => ({ id: 1 }), serializeAttachment: value => { attachment = value; }, send() {} };
