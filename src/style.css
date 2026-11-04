@@ -1875,7 +1875,9 @@ body[data-active-scene="hub"] .home-link {
 
 /* The live players tab (players.js): a group a zone under its heading, and a row a player with the roster's marks,
    the crosshair that turns the camera and, for players in the visitor's zone, how far away they stand. Each cell keeps
-   its column, so a hidden crosshair or an empty distance never moves the others. */
+   its column, so a hidden crosshair or an empty distance never moves the others. An Ooga thump's mallet (thump.js) has
+   its own column beside the voice mark in every row, shown and hidden by visibility alone, so it never moves a name or
+   a control, and takes no pointer, so it never covers one. */
 .players {
   display: flex;
   flex-direction: column;
@@ -1889,7 +1891,7 @@ body[data-active-scene="hub"] .home-link {
 
 .players-rows {
   display: grid;
-  grid-template-columns: 8px minmax(0, 1fr) 14px 14px 6ch;
+  grid-template-columns: 8px minmax(0, 1fr) 14px 12px 14px 6ch;
   column-gap: 8px;
   margin: 0;
   padding: 0;
@@ -1916,6 +1918,27 @@ body[data-active-scene="hub"] .home-link {
 .players-rows .roster-presence { grid-column: 1; }
 .players-rows .roster-marks { grid-column: 3; }
 
+.players-thump {
+  display: inline-flex;
+  grid-column: 4;
+  justify-self: center;
+  width: 12px;
+  height: 12px;
+  color: var(--accent);
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.players-thump[data-on="true"] {
+  visibility: visible;
+}
+
+.players-thump svg {
+  width: 12px;
+  height: 12px;
+  shape-rendering: crispEdges;
+}
+
 .players-name {
   display: inline-flex;
   grid-column: 2;
@@ -1927,7 +1950,7 @@ body[data-active-scene="hub"] .home-link {
 
 .players-look {
   display: inline-flex;
-  grid-column: 4;
+  grid-column: 5;
   justify-self: center;
   padding: 0;
   border: 0;
@@ -1962,7 +1985,7 @@ body[data-active-scene="hub"] .home-link {
 }
 
 .players-distance {
-  grid-column: 5;
+  grid-column: 6;
   justify-self: end;
   color: var(--paper);
   font-size: 11px;
@@ -2694,6 +2717,16 @@ body.wp-reading .joysticks {
   color: #ffb3a6;
   border-color: var(--danger);
 }
+
+/* Thump beside the voice controls: its mallet before the word, and quick repeated taps never zoom a phone. */
+.foot-thump {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  touch-action: manipulation;
+}
+
+.foot-thump .pixel-mallet { width: 11px; height: 11px; shape-rendering: crispEdges; }
 
 /* HALLOWEEN: the ghost hunt (ghost-hud.js). The round line and the visitor's bar under the clock and the hint, the
    banners across the middle, the flash when a ghost gets you; none of it takes a pointer. */

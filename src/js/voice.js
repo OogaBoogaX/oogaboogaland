@@ -45,7 +45,9 @@
 // count as blocked, as a refused element play does, and the next tap or key wakes it (`wake`). `fades` says whether a
 // range can be heard at all: where the element's volume is honoured, or through a gain.
 // Exports enable, listen, dropMic, preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, setMuted, toggle, restart, stop,
-// setPeers, subscribe, dispose, inspect, speaking, muteLocal, mutedLocally, setRadius, falloff, fades, RADIUS_MIN, RADIUS_MAX and stats.
+// setPeers, subscribe, dispose, inspect, speaking, muteLocal, mutedLocally, setRadius, falloff, nearness (the share of a
+// player's voice this page's hearing range and crossing would let it hear, 0 to 1; thump.js sounds a thump by it), fades,
+// RADIUS_MIN, RADIUS_MAX and stats.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -742,5 +744,5 @@
   const inspect = () => ({ desired: desired.slice(), pulled: [...subs.keys()], publish: pubPc ? pubPc.connectionState : "none", receive: subPc ? subPc.connectionState : "none",
     playback: GAIN_PLAY ? "gain" : "element", context: audio ? audio.state : "none" });
 
-  BL.voice = { preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, enable, listen, dropMic, setMuted, toggle, restart, stop, setPeers, subscribe, dispose, inspect, speaking, muteLocal, mutedLocally, setRadius, falloff, fades: ELEMENT_VOLUME || GAIN_PLAY, RADIUS_MIN, RADIUS_MAX, stats };
+  BL.voice = { preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, enable, listen, dropMic, setMuted, toggle, restart, stop, setPeers, subscribe, dispose, inspect, speaking, muteLocal, mutedLocally, setRadius, falloff, nearness, fades: ELEMENT_VOLUME || GAIN_PLAY, RADIUS_MIN, RADIUS_MAX, stats };
 })();

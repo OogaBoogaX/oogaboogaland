@@ -19,16 +19,19 @@
 // Chat: each line is named from the session, rate limited per account across awake-room reconnects, sent to every socket and kept in a
 // ring of the last CHAT_KEEP in memory alone, which a joiner gets after `welcome`. No durable chat storage: a room
 // that hibernates, restarts or is redeployed wakes with an empty ring, and the lines are gone.
+// Thumps: a voice participant's reaction, relayed to its voice place alone (`thumpPeers`, with `thumpAudible` marking the
+// copies whose recipient would hear it) within a per-account bucket; nothing is kept, timed or answered, and the
+// attachment is untouched.
 
 import { DurableObject } from "cloudflare:workers";
 import {
   hockey, CLOSE_KICK, CLOSE_PROTOCOL, MAX_PLAYERS, MOVE_HZ, STALE_MS, SWEEP_MS, CLEANUP_MS, TICK_HZ,
   NPC_FRAME_MAX, NPC_HZ, OUTSIDE, HP_HZ, VOICE_TRACK, CHAT_HZ, CHAT_BURST, CHAT_BUCKET_KEEP, CHAT_RETRY_KEEP, CHAT_FEATURE,
-  DOOR_ZONE, DOOR_ROOM, DOOR_GRANT_MS, DOOR_TRANSIT_MS, DOOR_PASS_MS, DOOR_HZ, DOOR_BURST, GHOST_HZ, GHOST_BURST, SHOT_HZ, SHOT_BURST, SWING_HZ, SWING_BURST,
+  DOOR_ZONE, DOOR_ROOM, DOOR_GRANT_MS, DOOR_TRANSIT_MS, DOOR_PASS_MS, DOOR_HZ, DOOR_BURST, GHOST_HZ, GHOST_BURST, SHOT_HZ, SHOT_BURST, SWING_HZ, SWING_BURST, THUMP_HZ, THUMP_BURST,
   GHOST_MAGIC, GHOST_FRAME_MAX, GHOST_FRAME_HZ, GHOST_FRAME_BURST, inGhostArena, ghostCandidate, watchesGhost,
   CHALK, CHALK_HZ, CHALK_BURST, CHALK_IDLE_MS, CHALK_SAVE_MS, CHALK_TELL_MS, CHALK_FEATURE,
   WALLET_CAP, WALLET_HZ, WALLET_BURST,
-  chatLog, castIndex, bodyName, ownedBody, electHost, npcFollowers, claimRefusal, parseClientMessage, playerFromHeaders, spawnPoint, takeToken, voicePeers,
+  chatLog, castIndex, bodyName, ownedBody, electHost, npcFollowers, claimRefusal, parseClientMessage, playerFromHeaders, spawnPoint, takeToken, voicePeers, thumpPeers, thumpAudible, thumpBucketFor,
   BLEND, BLEND_HZ,
 } from "./protocol.js";
 import { sha256Hex } from "./crypto.js";
@@ -68,6 +71,7 @@ export class Room extends DurableObject {
     this.chatId = 0;
     this.chatAccepted = new Map();
     this.chatBuckets = new Map();
+    this.thumpBuckets = new Map();
     this.doorQueue = [];
     this.doorActive = null;
     this.doorPasses = new Map();
@@ -457,6 +461,9 @@ export class Room extends DurableObject {
     } else if (msg.t === "chat") {
       // Nothing in the attachment changes.
       return this.say(p, msg.text, msg.clientId);
+    } else if (msg.t === "thump") {
+      // Nothing in the attachment changes.
+      return this.thump(p);
     } else if (msg.t === "door") {
       return this.doorMessage(p, msg);
     } else if (msg.t === "chalk") {
@@ -618,6 +625,18 @@ export class Room extends DurableObject {
     this.chat.push(line);
     this.broadcast({ t: "chat", ...line });
     if (key) this.send(p.ws, { t: "chat-ack", clientId });
+  }
+
+  // A thump from a voice participant goes to everyone in voice in its place as one tiny frame, never back to the sender,
+  // marked `a: 1` for those who would hear the sender speak; over the bucket, or with nobody to see it, it is dropped
+  // without a word.
+  thump(p) {
+    const peers = thumpPeers(this.players.values(), p, this.studio);
+    if (!peers.length) return;
+    if (!p.thumpBucket) p.thumpBucket = thumpBucketFor(this.thumpBuckets, p.id, p.seenAt, this.players);
+    if (!p.thumpBucket || !takeToken(p.thumpBucket, THUMP_HZ, p.seenAt, THUMP_BURST)) return;
+    const seen = `{"t":"thump","id":${p.id}}`, heard = `{"t":"thump","id":${p.id},"a":1}`;
+    for (const q of peers) this.send(q.ws, thumpAudible(q, p, this.studio) ? heard : seen);
   }
 
   // Also after any page's `hub` flag changes: the host sends frames only while someone follows.
