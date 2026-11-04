@@ -1941,6 +1941,35 @@ body[data-active-scene="hub"] .home-link {
   color: var(--paper);
 }
 
+/* A player's own disclosure keeps volume apart from mute and camera targeting. */
+.players-volume {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: auto minmax(0, 1fr) 5ch;
+  align-items: center;
+  column-gap: 8px;
+  margin-top: 6px;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.players-volume[hidden] { display: none; }
+
+.players-volume-range {
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.players-volume-value {
+  justify-self: end;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
 .players-look {
   display: inline-flex;
   grid-column: 5;
