@@ -29,7 +29,7 @@ concurrency:
 jobs:
   bundle:
     if: >-
-      vars.CHARACTER_BUNDLES_ENABLED == 'true' &&
+      (vars.CHARACTER_BUNDLES_ENABLED == 'true' || vars.CHARACTER_ACCOUNT_RENAMES_ENABLED == 'true') &&
       (github.event_name != 'workflow_dispatch' ||
        ((github.actor_id == '95375789' || github.actor_id == '72945059') &&
         (github.triggering_actor == 'w-s-bitcoin' || github.triggering_actor == '2140data')))
@@ -63,3 +63,4 @@ jobs:
           CHARACTER_TOKEN: ${{ steps.app.outputs.token || github.token }}
           CHARACTER_APP_SLUG: ${{ steps.app.outputs.app-slug }}
           CHARACTER_BOT_LOGIN: ${{ vars.CHARACTER_BOT_LOGIN || 'github-actions[bot]' }}
+          CHARACTER_ACCOUNT_RENAMES_ONLY: ${{ vars.CHARACTER_BUNDLES_ENABLED != 'true' && vars.CHARACTER_ACCOUNT_RENAMES_ENABLED == 'true' }}
