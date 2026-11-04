@@ -157,17 +157,18 @@ export class VirtualHost {
   // The same durable transaction advances grace even when there are no clients or NPC steps.
   // Once session state exists, callers must provide the authenticated transport census explicitly.
   async tick(ticket, liveTokens) {
+    const budget = { left: HOST.passiveSteps };
     return this.storage.transaction(async tx => {
       const now = this.now(), r = await this.read(tx);
       this.owns(r, ticket, now);
-      const { registry, recovery } = this.registry(r, now, liveTokens);
+      const { registry, recovery } = this.registry(r, now, liveTokens, { budget });
       if (now >= r.runUntil || r.status === "draining") {
         const effects = registry ? registry.drain(r.runUntil, now).effects : [];
         if (registry) this.settle(r, registry);
         r.status = registry?.size ? "draining" : "stopped";
         r.wallAt = now; r.leaseUntil = r.status === "draining" ? now + HOST.leaseMs : now;
         await this.save(tx, r);
-        return { status: r.status, steps: 0, snapshot: null, recovery, effects, work: registry?.work(now) };
+        return { status: r.status, steps: 0, snapshot: null, recovery, effects, work: this.work(registry, now, budget) };
       }
       const lag = now - r.wallCursor;
       if (lag > HOST.maxLagMs) {
@@ -177,12 +178,12 @@ export class VirtualHost {
         r.status = registry?.size ? "draining" : "backlog"; r.runUntil = now;
         r.leaseUntil = registry?.size ? now + HOST.leaseMs : now; r.wallAt = now;
         await this.save(tx, r);
-        return { status: r.status, lagMs: lag, steps: 0, snapshot: null, recovery, effects, work: registry?.work(now) };
+        return { status: r.status, lagMs: lag, steps: 0, snapshot: null, recovery, effects, work: this.work(registry, now, budget) };
       }
       if (registry?.work(now).pendingSteps) {
         this.settle(r, registry); r.wallAt = now; r.leaseUntil = now + HOST.leaseMs;
         await this.save(tx, r);
-        return { status: r.status, recovering: true, steps: 0, snapshot: null, recovery, work: registry.work(now) };
+        return { status: r.status, recovering: true, steps: 0, snapshot: null, recovery, work: this.work(registry, now, budget) };
       }
       const steps = Math.min(HOST.maxSteps, Math.floor(lag / HOST.stepMs));
       if (!steps && !registry) return { status: r.status, lagMs: lag, steps, snapshot: null, recovery };
@@ -196,7 +197,7 @@ export class VirtualHost {
       r.wallAt = now; r.leaseUntil = now + HOST.leaseMs;
       await this.save(tx, r);
       const snapshot = publicSnapshot(r, this.simulation.project(r.simulation));
-      return { status: r.status, lagMs: now - r.wallCursor, steps, snapshot, recovery, work: registry?.work(now) };
+      return { status: r.status, lagMs: now - r.wallCursor, steps, snapshot, recovery, work: this.work(registry, now, budget) };
     });
   }
 
@@ -204,17 +205,18 @@ export class VirtualHost {
   // Recover + operation + the registry's bounded departure outbox share one commit. Publish the
   // returned effects only after this resolves; read/ack pending departures via the same method.
   async sessions(ticket, liveTokens, apply, closes = [], priorityAccount = null) {
+    const budget = { left: HOST.passiveSteps };
     return this.storage.transaction(async tx => {
       const now = this.now(), r = await this.read(tx);
       this.owns(r, ticket, now);
       if (now >= r.runUntil || r.status !== "running") fail("run closed to session operations");
-      const { registry, recovery } = this.registry(r, now, liveTokens, closes, true, priorityAccount);
+      const { registry, recovery } = this.registry(r, now, liveTokens, { closes, create: true, priorityAccount, budget });
       this.settle(r, registry);
       const result = apply(registry, now);
       if (result?.then) fail("session operation must be synchronous");
       this.settle(r, registry); r.wallAt = now;
       await this.save(tx, r);
-      return structuredClone({ recovery, result, work: registry.work(now) });
+      return structuredClone({ recovery, result, work: this.work(registry, now, budget) });
     });
   }
 
@@ -248,11 +250,22 @@ export class VirtualHost {
     });
   }
 
-  registry(r, now, liveTokens, closes = [], create = false, priorityAccount = null) {
+  work(registry, now, budget) {
+    return registry ? { ...registry.work(now), attemptedSteps: HOST.passiveSteps - budget.left } : undefined;
+  }
+
+  registry(r, now, liveTokens, { closes = [], create = false, priorityAccount = null, budget = { left: HOST.passiveSteps } } = {}) {
     if (!r.sessions && !create) return { registry: null, recovery: { effects: [] } };
     if (!Array.isArray(liveTokens)) fail("authenticated transport census required");
     const options = { protocol: SESSION_PROTOCOL, world: r.world, passiveBudget: HOST.passiveSteps, adapter: {
-      stepPassive: (motion, ms) => this.sessionAdapter.stepPassive(motion, ms, r.simulation),
+      stepPassive: (motion, ms) => {
+        // Storage can rerun this callback against a fresh checkpoint. Attempts
+        // share the outer operation budget; exhaustion aborts without publishing
+        // any speculative progress. A later explicit operation may try again.
+        if (budget.left <= 0) fail("passive operation budget exhausted");
+        budget.left--;
+        return this.sessionAdapter.stepPassive(motion, ms, r.simulation);
+      },
       validateOccupancy: (body, resource) => this.sessionAdapter.validateOccupancy?.(body, resource, r.simulation) === true,
       npcFor: bodyId => this.simulation.npcFor(r.simulation, bodyId),
     } };
@@ -275,15 +288,16 @@ export class VirtualHost {
   }
 
   async stop(ticket, liveTokens) {
+    const budget = { left: HOST.passiveSteps };
     return this.storage.transaction(async tx => {
       const now = this.now(), r = await this.read(tx); this.owns(r, ticket, now);
-      const { registry, recovery } = this.registry(r, now, liveTokens);
+      const { registry, recovery } = this.registry(r, now, liveTokens, { budget });
       const effects = registry ? registry.drain(Math.min(now, r.runUntil), now).effects : [];
       if (registry) this.settle(r, registry);
       r.runUntil = Math.min(now, r.runUntil); r.status = registry?.size ? "draining" : "stopped";
       r.wallAt = now; r.leaseUntil = registry?.size ? now + HOST.leaseMs : now;
       await this.save(tx, r);
-      return { status: r.status, recovery, effects, work: registry?.work(now) };
+      return { status: r.status, recovery, effects, work: this.work(registry, now, budget) };
     });
   }
 }

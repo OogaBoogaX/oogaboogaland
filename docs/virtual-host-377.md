@@ -692,7 +692,10 @@ deadline. The next transaction serves the oldest unfinished cursors. All 64
 complete grace intervals therefore take 19 operations instead of one operation
 with 76,800 calls. `work` reports performed steps and pending bodies/steps. A
 failed commit preserves the previous cursor and ownership; replacement owners
-continue from those cursors. The budget counts callback work, not a promise of
+continue from those cursors. Automatic storage-transaction retries share an outer
+operation meter too: exhaustion aborts the operation without publishing attempted
+progress; a later explicit operation can try again. `work.attemptedSteps` includes
+discarded attempts, while `work.steps` describes committed progress. The budget counts callback work, not a promise of
 Cloudflare CPU time: each callback still needs a measured bounded world query.
 
 The typed `VirtualHost.connect(ticket, liveTokens, claim)` must be used for
@@ -728,9 +731,9 @@ claim without changing committed state. The local capacity sequence measured:
 | 96 | 50 | 98,065 | 15 | 1,466,870 |
 | 128 | 1 | 98,010 | 1 | 98,002 |
 
-Across these five finite sequences, maximum operation time was 14.2494 ms (first
-case); the 64-actor/64-session case measured p50/p95 4.6929/4.8884 ms over its 19
-operations, with 92.738 ms total process CPU. The new budget reduces peak work
+Across these five finite sequences, maximum operation time was 16.1782 ms (first
+case); the 64-actor/64-session case measured p50/p95 5.5618/5.7263 ms over its 19
+operations, with 109.422 ms total process CPU. The new budget reduces peak work
 but increases checkpoint writes/serialization; these are not DO billing figures.
 There is one sequence per capacity, not a production percentile guarantee.
 96 actors left only 239 bytes at peak; 128 actors admitted just one of these
@@ -752,9 +755,13 @@ Verified locally November 4, 2026 on Node v22.23.4:
   passed; the full focused host batch passed **74/74**, including exact airborne
   equality against an uninterrupted 60-second reference, failed writes, owner
   replacement, duplicate close, last-millisecond/exact-deadline reclaim, no budget
-  replenishment through callbacks and refusal of partial-state pose publication.
-  Older host schema 2 is rejected. Logs: `verification-budget-{first,host}.log`;
-  capacity and cost evidence: `verification-budget-cost.json` in the task workspace.
+  replenishment through callbacks or automatic transaction retries, and refusal
+  of partial-state pose publication.
+  The retry review passed all **38/38** affected checks, including accounting for
+  successful retried attempts and preserving the checkpoint on exhausted retries.
+  Final retry checks: `verification-budget-retry-final.log`. Older host schema 2 is
+  rejected. Logs: `verification-budget-{first,host}.log`;
+  capacity and cost evidence: `verification-budget-cost-final.json` in the task workspace.
   Unit **408/408**, build (**316 scripts**), five touched JS/MJS syntax checks
   and whitespace passed. No Hub/full/browser rerun; the failure ledger is unchanged.
 

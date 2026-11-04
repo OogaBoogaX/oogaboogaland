@@ -13,10 +13,12 @@ const claim = i => ({ protocol: SESSION_PROTOCOL, world: "budget-fixture", accou
 
 async function harness(height = 4) {
   const f = await prepare(), world = { ...f.mesh, radius: 2.25, height: 2.8 }, passive = createPassiveBody({ world: () => world, gravity: 9.8 });
-  let data, now = 100000, calls = 0, fail = false;
+  let data, now = 100000, calls = 0, fail = false, retry = false;
   const storage = { async transaction(fn) {
     let next = structuredClone(data);
-    const result = await fn({ get: async () => structuredClone(next), put: async (_, value) => { next = structuredClone(value); } });
+    const attempt = () => fn({ get: async () => structuredClone(next), put: async (_, value) => { next = structuredClone(value); } });
+    let result = await attempt();
+    if (retry) { retry = false; next = structuredClone(data); result = await attempt(); }
     if (fail) { fail = false; throw Error("budget write failed"); } data = next; return result;
   } };
   const project = createNpcPose(123, 1);
@@ -35,7 +37,7 @@ async function harness(height = 4) {
   assert.ok(joined.every(r => r.ok));
   await host.sessions(ticket, joined.map(r => r.session.token), (r, at) => joined.forEach(j => r.disconnect(j.session, at)));
   return { host, ticket, joined, make, at: value => { now = value; }, calls: () => calls,
-    read: () => structuredClone(data), fail: () => { fail = true; } };
+    read: () => structuredClone(data), fail: () => { fail = true; }, retry: () => { retry = true; } };
 }
 
 test("maximum grace recovery is budgeted across durable commits, rollback and owner replacement", async t => {
@@ -43,6 +45,10 @@ test("maximum grace recovery is budgeted across durable commits, rollback and ow
   let runner = h.make(), ticket = await runner.claim("restart"), before = h.read(), count = h.calls();
   h.fail(); await assert.rejects(runner.tick(ticket, []), /budget write failed/);
   assert.deepEqual(h.read(), before); assert.ok(h.calls() - count <= HOST.passiveSteps);
+  count = h.calls(); h.retry();
+  await assert.rejects(runner.tick(ticket, []), /passive operation budget exhausted/);
+  assert.equal(h.calls() - count, HOST.passiveSteps, "storage retries cannot multiply the outer operation budget");
+  assert.deepEqual(h.read(), before, "retry exhaustion commits no speculative cursor or handback");
   let work = 0, commits = 0, last;
   do {
     count = h.calls(); last = await runner.tick(ticket, []); commits++; work += last.work.steps;
@@ -89,7 +95,11 @@ test("a timely reconnect gets its own complete physics continuation ahead of unr
 });
 
 test("partially recovered state cannot publish poses or advance NPC time, and survives reconstruction", async () => {
-  const h = await harness(); h.at(125000); const ticket = await h.host.claim("restart");
+  const h = await harness(); h.at(100100); h.retry();
+  const retried = await h.host.tick(h.ticket, []);
+  assert.equal(retried.work.steps, 128); assert.equal(retried.work.attemptedSteps, 256);
+  assert.equal(h.calls(), 256, "successful retry reports all attempted physics work, not just committed progress");
+  h.at(125000); const ticket = await h.host.claim("restart");
   let last = await h.host.tick(ticket, []);
   assert.equal(last.recovering, true); assert.equal(last.steps, 0); assert.equal(h.read().simulation.steps, 0);
   await assert.rejects(h.host.poses(ticket), /body recovery pending/);
