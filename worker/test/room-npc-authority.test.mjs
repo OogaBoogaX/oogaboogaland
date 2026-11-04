@@ -5,6 +5,11 @@ import { runInNewContext } from "node:vm";
 import * as protocol from "../src/protocol.js";
 import * as studioPolicy from "../src/studio-policy.js";
 import * as authority from "../src/room-npc-authority.js";
+import "../../src/js/npc-pose.js";
+import { createNpcPose } from "../src/npc-pose.js";
+import { VirtualHost, HOST } from "../src/virtual-host.js";
+import { publishHostPoses } from "../src/host-room.js";
+import { rig } from "./fixtures/npc-pose-rig.mjs";
 import { sha256Hex } from "../src/crypto.js";
 import { getPlayer } from "../src/db.js";
 const wire = globalThis.BL.npcAuthority;
@@ -52,6 +57,7 @@ test('Room commits authority before delivery, refuses browser writes, coalesces 
   await h.room(false);await h.room(false);
   const restored=await h.room(false);assert.equal(binary(b).length,1,'unacknowledged credit survives repeated hibernation wakes');assert.equal(restored.npcAuthority.sequence,3);assert.equal(restored.hostId,0,'removing preview flag cannot restore browser authority');
   const c=await h.join(restored,3);h.send(restored,c.ws,{t:'hub',on:true});
+  assert.ok(c.ws.sent.findIndex(m=>m.t==='npc-authority') < c.ws.sent.findIndex(m=>m.t==='welcome'), 'authority precedes welcome/feature negotiation');
   assert.equal(binary(c.ws).length,1);assert.equal(new Float32Array(read.frame(binary(c.ws)[0]),16)[2],3);
   assert.ok(h.stored.get(authority.ROOM_NPC.key).frame.byteLength<=wire.MAX);
   // Current legacy transport release stays immediate; no grace delay on voice/occupancy cleanup.
@@ -105,7 +111,9 @@ test('actual net retains authority through close, refuses stale epochs and legac
   const c=client();await c.net.start();const ws=c.sockets[0];assert.ok(ws.url.endsWith('?npc-authority=1'));
   const send=m=>ws.onmessage({data:typeof m==='object'&&!(m instanceof ArrayBuffer)?JSON.stringify(m):m});
   const a={v:1,revision:1,mode:'server',world:'world-1',epoch:1};
-  send({t:'welcome',you:{id:1},players:[],features:[],host:1,npcAuthority:a,now:1000});
+  send({t:'npc-authority',authority:a});
+  assert.equal(c.net.state.npcAuthority.mode,'server','initial authority is latched before welcome');
+  send({t:'welcome',you:{id:1},players:[],features:[],host:1,now:1000});
   const packed=wire.pack(a,1,frame());send(packed);assert.equal(c.sent.at(-1).t,'npc-ack');
   const count=c.sent.length;c.net.sendNpc(frame());assert.equal(c.sent.length,count);
   ws.onclose();assert.equal(c.net.state.npcAuthority.mode,'server');
@@ -140,4 +148,71 @@ test('actual npc-sync freezes before crew update, including no frame, mismatched
   BL.net.npcFrame=frame(1,999);BL.net.state.npcVersion++;sync.update(.05);assert.equal(a.puppet,true,'incompatible roster cannot enable local AI');
   BL.net.state.npcAuthority={mode:'browser',revision:2};sync.prepare();sync.update(.05);assert.equal(a.puppet,false);
   sync.dispose();
+});
+
+test('committed host poses reach actual Room, reconcile lost replies and recover without replaying simulation', async t => {
+  const h = host(), room = await h.room(), a = (await h.join(room, 1)).ws, b = (await h.join(room, 2)).ws;
+  h.send(room, a, { t: 'hub', on: true }); h.send(room, b, { t: 'hub', on: true });
+  let now = 100000, saved, writes = 0, failWrite = false;
+  const store = { async transaction(fn) {
+    let next = structuredClone(saved), changed = false;
+    const result = await fn({ get: async () => structuredClone(next), put: async (_, value) => { next = structuredClone(value); changed = true; } });
+    if (changed && failWrite) { failWrite = false; throw Error('host write failed'); }
+    if (changed) { saved = next; writes++; }
+    return result;
+  } };
+  // The world step is deliberately authored; projection and both authority implementations are real.
+  const project = createNpcPose(123, 1), actor = rig();
+  const simulation = { version: 'bridge-fixture-1', initial: () => ({ x: 0, steps: 0 }), validate: s => Number.isFinite(s.x) && Number.isInteger(s.steps),
+    step(s) { s.x++; s.steps++; }, project: () => ({ npcs: [], hub: { pile: 0 } }), npcFor: () => null, handoff: () => false,
+    poses(s) { actor.root.position.x = s.x; return project([{ index: 0, actor }]); } };
+  const make = () => new VirtualHost({ storage: store, simulation, sessionAdapter: { stepPassive: m => m }, clock: () => now });
+  const first = make(), ticket = await first.begin('runner-a', 60000);
+  let lostClaim = true, lostPublish = true;
+  const rpc = { npcAuthorityStatus: value => room.npcAuthorityStatus(value),
+    async configureNpcAuthority(...args) { const result = await room.configureNpcAuthority(...args); if (lostClaim) { lostClaim = false; throw Error('claim reply lost'); } return result; },
+    async publishNpcSnapshot(...args) { const result = await room.publishNpcSnapshot(...args); if (lostPublish) { lostPublish = false; throw Error('publish reply lost'); } return result; } };
+  await assert.rejects(publishHostPoses(first, rpc, ticket), /explicit Room/);
+  assert.equal(room.npcAuthority, null);
+  assert.equal((await publishHostPoses(first, rpc, ticket, { acquire: true })).status, 'reconciled');
+  assert.equal(saved.simulation.steps, 0); assert.equal(writes, 1, 'publication cannot step or rewrite host state');
+  assert.equal(binary(a).length, 1); assert.equal(binary(b).length, 1);
+  const read = wire.create(); read.accept(room.npcAuthorityStatus().authority);
+  const x = ws => new Float32Array(read.frame(binary(ws).at(-1)), 16)[2];
+  assert.equal(x(a), 0);
+  now = 100250; h.at(now); failWrite = true;
+  await assert.rejects(first.tick(ticket), /host write failed/);
+  await publishHostPoses(first, room, ticket);
+  assert.equal(x(a), 0, 'failed simulation write cannot appear in a frame');
+  for (let i = 1; i <= 20; i++) {
+    now = 100000 + i * 250; h.at(now);
+    await first.tick(ticket); await publishHostPoses(first, room, ticket);
+    h.send(room, a, { t: 'npc-ack', revision: room.npcAuthority.revision, sequence: room.players.get(1).npcSent.sequence });
+  }
+  assert.equal(saved.simulation.steps, 20); assert.equal(binary(b).length, 1, 'stalled follower still owns just one delivery credit');
+  assert.equal(x(a), 20);
+  const late = (await h.join(room, 3)).ws; h.send(room, late, { t: 'hub', on: true });
+  assert.equal(x(late), 20);
+  const restoredRoom = await h.room(), resumed = make();
+  assert.equal((await publishHostPoses(resumed, restoredRoom, ticket)).duplicate, true);
+  assert.equal(binary(b).length, 1);
+  now += 10000; h.at(now);
+  const next = await resumed.claim('runner-b');
+  await assert.rejects(publishHostPoses(first, restoredRoom, ticket), /fenced/);
+  await resumed.tick(next);
+  assert.equal((await publishHostPoses(resumed, restoredRoom, next, { acquire: true })).status, 'published');
+  assert.equal(saved.simulation.steps, 28, 'bounded catch-up occurs only in tick');
+  assert.equal(restoredRoom.npcAuthority.epoch, next.fence);
+  assert.equal(binary(b).length, 2, 'one new credit after explicit authority replacement');
+  const beforeRelease = restoredRoom.npcAuthorityStatus().authority, latestRoomFrameBytes = h.stored.get(authority.ROOM_NPC.key).frame.byteLength;
+  await restoredRoom.configureNpcAuthority(beforeRelease.revision, { mode: 'browser', world: next.world, epoch: next.fence, owner: next.owner });
+  await assert.rejects(publishHostPoses(resumed, restoredRoom, next), /explicit Room/);
+  assert.equal(restoredRoom.npcAuthority.mode, 'browser', 'ordinary publication cannot undo explicit release');
+  now = 160000; h.at(now);
+  await assert.rejects(publishHostPoses(resumed, restoredRoom, next), /fenced|closed/);
+  t.diagnostic(JSON.stringify({ scope: 'authored one-actor world, actual encoder/host/Room, mocked storage and sockets',
+    hostWrites: writes, hostCheckpointBytes: Buffer.byteLength(JSON.stringify(saved)),
+    latestRoomFrameBytes,
+    deliveredBytes: [a, b, late].flatMap(binary).reduce((n, frame) => n + frame.byteLength, 0),
+    stalledFollowerFramesBeforeTakeover: 1 }));
 });

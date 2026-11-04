@@ -2,6 +2,7 @@
 // The simulation adapter must be deterministic, synchronous, data-only, and side-effect free:
 // storage transactions may retry. #379 owns independent NPC tracks; live movement and voice stay separate.
 import { SessionRegistry } from "./host-sessions.js";
+import "../../src/js/npc-authority.js";
 export const SESSION_PROTOCOL = "host-session-v2";
 export const HOST = Object.freeze({
   schema: 2, key: "virtual-host-v1", stepMs: 250, maxSteps: 8, maxLagMs: 30000,
@@ -216,6 +217,22 @@ export class VirtualHost {
   async disconnect(ticket, liveTokens, ref, closedAt) {
     const closeRef = { accountId: ref?.accountId, generation: ref?.generation, token: ref?.token };
     return this.sessions(ticket, liveTokens, registry => registry.view(closeRef.accountId), [{ ref: closeRef, at: closedAt }]);
+  }
+
+  // Project only a committed checkpoint, without stepping, renewing or writing it.
+  // The optional full-rig adapter must be pure and deterministic. Public x/y/z
+  // snapshots cannot substitute for it. A caller cannot publish uncommitted work.
+  async poses(ticket) {
+    if (typeof this.simulation.poses !== "function") fail("NPC pose adapter required");
+    return this.storage.transaction(async tx => {
+      const now = this.now(), r = await this.read(tx);
+      this.owns(r, ticket, now);
+      if (r.status !== "running" || now >= r.runUntil) fail("run closed to pose publication");
+      const frame = this.simulation.poses(structuredClone(r.simulation));
+      if (!globalThis.BL.npcAuthority.poses(frame)) fail("invalid host poses");
+      return { ticket: this.ticket(r), sequence: r.revision, at: r.simulatedAt,
+        runUntil: r.runUntil, frame: frame.slice(0) };
+    });
   }
 
   registry(r, now, liveTokens, closes = [], create = false) {

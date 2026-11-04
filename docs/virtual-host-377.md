@@ -194,7 +194,8 @@ A restart with no surviving transport derives grace from persisted `lastSeenAt`;
 it never assigns a fresh 60 seconds from restart. Saved grace deadlines survive
 every restart. Delayed presence persistence can shorten the available grace after
 a crash; checkpoint frequency must be selected against that accuracy/cost tradeoff.
-Already expired bodies depart without replaying the missing interval's motion.
+Already expired bodies integrate passive motion only through their saved deadline,
+then depart; they never replay held inputs, shots or thrust.
 
 One hammock/cabinet resource per session; no resource has two owners. Retain through
 grace/reconnect; release on expiry, explicit logout/release, revocation or zone
@@ -465,8 +466,9 @@ nothing extends the run or starts a timer. `Room.configureNpcAuthority` and
 No checked-in environment sets that flag and no HTTP route calls these methods.
 The internal read-only `npcAuthorityStatus(ticket)` reconciles an uncertain configure
 or publish outcome without exposing owner credentials or replaying a mutation.
-The future runner must coordinate them with its committed VirtualHost ticket;
-fencing Room cannot make the two independent storage commits atomic.
+`host-room.js` now coordinates one explicit publication from a committed
+VirtualHost ticket. A runner still has to supply the complete simulation and
+schedule; fencing Room cannot make the two independent storage commits atomic.
 
 After the authority commit, Room stops browser election/frame admission and tells
 compatible clients the descriptor. The client latches it across close/reconnect;
@@ -513,6 +515,67 @@ payload ceiling is 7,346,176 bytes/second. These arithmetic ceilings are deliber
 not called cheap: no full-roster CPU/heap, Cloudflare runtime or account billing
 measurement has been performed. A permanent paid loop remains forbidden.
 
+### Committed pose projection and Room publication
+
+The browser's 112-float Ooga encoder now lives in `src/js/npc-pose.js`; its function
+block moved unchanged. Browser hosting still uses the same holders, reused buffer,
+event handling and cadence. `worker/src/npc-pose.js` projects explicitly supplied
+posed rigs with bounded capacity, stable slot ordering and zero padding. Its
+canonical output does not depend on a previous frame's unused quaternion bytes,
+so a reconstructed checkpoint can reproduce a byte-identical retry. It rejects
+malformed/nonfinite records and explicitly controlled/remote/temporary entries.
+The complete simulation adapter must also exclude the locally driven body; this
+codec does not discover ownership from a scene or create a rig from public x/y/z.
+
+`VirtualHost.poses(ticket)` projects a copy of a committed simulation checkpoint,
+returns its revision and finite run deadline, and does not step AI, write storage
+or renew ownership. Missing pose adapters, expired/fenced owners and closed runs
+fail before Room changes. `publishHostPoses` reconciles Room ownership, rechecks
+the host, then publishes that exact frame. If host state changed during those
+RPCs, it returns `superseded` without publishing. A lost configure reply is read
+back; a lost publication reply requires an identical-payload duplicate check.
+Same sequence alone is insufficient evidence. A new Room claim requires explicit
+`{acquire:true}`; ordinary publication cannot undo an intentional browser release.
+There is no retry loop, timer, binding, deployed export or automatic activation.
+
+Both DOs still commit separately. This helper cannot cancel an already in-flight
+publication at the instant another host takes over; Room's independent lease/CAS
+is the final admission gate. A future runner must account for the temporary frozen
+interval while an old Room lease expires, and explicitly drain sessions before
+release/migration. The helper deliberately never releases to browser AI on errors.
+It projects twice to detect superseded host state; the local projection measurement
+below excludes that coordinator, checkpoint validation/copying and RPC/storage cost.
+
+The actual Room test now consumes committed VirtualHost frames and covers lost
+configure/publish replies, failed host writes, reconstruction of both objects,
+late join, a stalled receiver, new ownership and explicit release. In the authored
+one-actor run, 23 host writes retained a 258-byte checkpoint, Room retained a
+464-byte frame, and three fixture sockets received 12,896 bytes in total. A stalled
+socket received one frame before owner replacement. These are fixture counters,
+not platform billing. No shot/event tail was delivered.
+
+Run `node worker/eval/host-projection.mjs` for a finite, offline encoder comparison
+(20 warmups and 240 measured samples per case). On Node 22.23.4, macOS arm64, the
+128-authored-rig original encoder/frame copy measured p50 0.0234 ms / p95 0.1296 ms;
+the shared encoder with bounded projection measured 0.0575 / 0.1984 ms. Total CPU
+for 240 samples was 12.110 / 26.430 ms. Both produced 57,360-byte frames. This is a
+matched projection fixture, not a full-page or production-world baseline. Heap
+deltas included garbage collection and are not retained-memory bounds. Full AI,
+geometry construction, Clankers, body recovery, storage, browser rendering and DO
+charges remain unmeasured. The maximum fanout ceiling remains 7,346,176 bytes/s;
+these timings do not make that acceptable or authorize an always-on loop.
+
+Current companion inspection confirms #379 and #464 remain open with their required
+implementations absent. Existing Ooga control/relocation resets hop/leap state;
+Clanker possession reconstructs or zeroes drive velocity and hides the local NPC
+when remotely controlled. Reusing those calls as an exact airborne reclaim would
+lose state or prematurely hand back the body. #379 must supply the independent
+track boundary. #464 must supply the reusable live-player equipment/pose path for
+the semantic free-arm indicator; this change does not create a competing visual
+transport. Clanker clothing, carried lab items, climb support and coupled work
+state also require a full actor checkpoint/projector. The new Ooga display codec
+does not complete those integrations.
+
 ### Passive body recovery and remaining body handoff
 
 `passive-body.js` now integrates the SessionRegistry's disconnect motion through
@@ -548,6 +611,29 @@ transport or the disconnected-body motion adapter.
 ## Verification record
 
 Verified locally November 4, 2026 on Node v22.23.4:
+
+- Latest projection/publication increment: **66/66** focused host tests passed;
+  after the explicit-acquisition review fix, the affected actual Room/bridge file
+  passed **6/6**; the final adapter-bound and immutable-projection checks passed
+  **19/19** in the affected host/pose files. Encoder parity covers 200 pose/equipment transitions against the
+  recorded original function, full capacity, reconstruction and the actual browser
+  host path. Unit **408/408**, build (**315 scripts**) and all eleven touched JS/MJS
+  syntax checks passed. No Hub/full/browser rerun and no changed failure ledger.
+  Logs: `verification-projection-host.log`, `verification-projection-review.log`,
+  `verification-projection-unit.log`, `verification-projection-build.log`, and
+  `verification-projection-cost-final.json` in the task workspace.
+- Current `rock` advanced again to `350cf2bceef6881841ef946ac3f46d9518b4c7a6`
+  with #465 hockey and #468 account changes. The authority descriptor now precedes
+  welcome on the ordered socket, leaving upstream feature negotiation unchanged.
+  Actual Room/compatibility checks passed **81/81**, and the final ordering check
+  passed **6/6**. All five overlapping files combine in a three-way file preview;
+  no branch merge/rebase or upstream authorship rewrite was performed. Remote
+  combined CI still needs verification on publication.
+- The latest bounded Claude CLI extraction attempt was rejected by automatic
+  approval review before execution because sending repository code to that
+  external service was not accepted as authorized. It was not retried; this
+  increment was implemented and reviewed locally. Earlier successful Claude work
+  and its authorship remain preserved; no API billing or signing settings changed.
 
 - 31/31 host/session/navigation Node tests passed; the same batch included the existing
   replay/high-score checks, for **72/72 total** (about 0.4 seconds for the fixture
@@ -671,7 +757,7 @@ Fixtures cover competing authority, deterministic restart, failed commits, mixed
 versions, payload/fanout/backpressure, the exact grace deadline, stale sessions,
 occupancy, passive falling and unchanged ammo/fuel. They do not provide an actual
 Durable Object, complete browser, two-client or physical-phone pass. Other than the
-bounded planner measurement above, no full-world performance, load,
+bounded planner and projection measurements above, no full-world performance, load,
 production data, merge or deployment operation was performed. The outstanding
 integration/performance gates above remain required before activation/completion.
 

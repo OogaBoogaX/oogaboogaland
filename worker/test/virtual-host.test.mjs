@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { HOST, SESSION_PROTOCOL, VirtualHost, LatestHostDelivery, boundedJSON, publicSnapshot } from "../src/virtual-host.js";
+import { createNpcPose } from "../src/npc-pose.js";
+import { rig } from "./fixtures/npc-pose-rig.mjs";
 
 // A serial, rollback-capable storage fixture. It models transaction atomicity, not Cloudflare
 // scheduling, CPU billing, alarm precision or the production scene's collision geometry.
@@ -57,6 +59,23 @@ const bodyClaim = () => ({ protocol: SESSION_PROTOCOL, world: simulation.version
   body: { kind: "ooga", motion: { x: 1, y: 10, z: 2, yaw: 0.7, vx: 3, vy: -1, vz: 2, grounded: false },
     equipment: { weapon: "gun", mode: "combat", magazine: 17, spareAmmo: [5, 22], jetpack: true, fuel: 0.4,
       primaryOwned: true, secondaryOwned: true, selectedSlot: 2, unlimited: false, jetpackOwned: true } } });
+
+test("pose publication requires a valid adapter, cannot mutate saved state, and fences closed runs", async () => {
+  const missing = harness(), ticket = await missing.host.begin("a", 60000);
+  await assert.rejects(missing.host.poses(ticket), /adapter required/);
+  const actor = rig(), project = createNpcPose(123, 1);
+  const adapter = { ...simulation, poses(s) { s.x = 999; return project([{ index: 0, actor }]); } };
+  const h = harness(adapter), t = await h.host.begin("a", 1000), before = h.store.read();
+  const first = await h.host.poses(t); new Float32Array(first.frame, 16)[2] = 99;
+  assert.deepEqual(h.store.read(), before);
+  assert.equal(new Float32Array((await h.host.poses(t)).frame, 16)[2], 0);
+  adapter.poses = () => new ArrayBuffer(0);
+  await assert.rejects(h.host.poses(t), /invalid host poses/);
+  adapter.poses = () => project([{ index: 0, actor }]);
+  h.at(101000);
+  await assert.rejects(h.host.poses(t), /closed/);
+  assert.equal(h.store.writes, 1);
+});
 
 test("host progresses with zero players and persists simulation before returning snapshots", async () => {
   const h = harness(), ticket = await h.host.begin("runner-a", 60000);
