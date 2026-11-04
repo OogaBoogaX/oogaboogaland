@@ -22,6 +22,8 @@
 // The NPC host: the room elects one page showing the island (`setHub`, which also counts a hidden tab
 // out) to run the Oogas for everyone. `state.hostId` names it; the host sends its binary pose frames with
 // `sendNpc`, and every other page reads the latest one from `npcFrame` (with `state.npcVersion` counting).
+// An explicit server-authority preview is separately latched in `state.npcAuthority`;
+// its pose snapshots are fenced and acknowledged, and transport close never releases that authority.
 // `state.followers` is how many pages follow the host; with none, the host sends nothing.
 // A tab hidden for HIDDEN_PAUSE_MS leaves the room (`paused`, voice stopped) and comes back when it is
 // looked at again, so a forgotten tab does not hold the room, the host role or voice.
@@ -170,9 +172,10 @@
   const offline = new URLSearchParams(location.search);
   const state = { backend: false, me: null, donations: false, tess: false, highscores: false, highscoreSnapshots: false, logoutEpoch: 0, started: false,
     resolved: offline.has("nosim") || offline.get("net") === "0" || location.protocol !== "http:" && location.protocol !== "https:",
-    room: "off", selfId: 0, online: 0, released: null, loopEpoch: 0, zone: "outside", body: null, bodyKind: null, bodyName: null, hostId: 0, followers: 0, ghostHostId: 0, ghostFollowers: 0, npcVersion: 0, doorway: false, pokerVoice: null,
+    room: "off", selfId: 0, online: 0, released: null, loopEpoch: 0, zone: "outside", body: null, bodyKind: null, bodyName: null, hostId: 0, followers: 0, ghostHostId: 0, ghostFollowers: 0, npcVersion: 0, npcAuthority: null, doorway: false, pokerVoice: null,
     self: { x: NaN, y: NaN, z: NaN, zone: "" }, chatUnicode: false, chalk: null, blendTo: null, blendT: 0 };
   let ws = null, retry = 0, retryTimer = 0, pingTimer = 0, hiddenTimer = 0, stopped = false;
+  const npcAuthority = BL.npcAuthority.create();
   let npcFrame = null, inHub = false, hubSent = null, visibleSent = null;
   let zone = "outside", body = null, muted = false, hpSent = 100, koSent = false, hpAt = 0, poseAt = 0, px = NaN, py = NaN, pz = NaN, pyaw = NaN;
   const gSent = new Float64Array(6);
@@ -314,10 +317,36 @@
     && (m.dir === "in" || m.dir === "out") && Number.isFinite(m.at) && Number.isFinite(m.exp)
     ? { t: "transit", cycle: m.cycle, actor: m.actor, door: m.door, dir: m.dir, at: m.at, exp: m.exp } : null;
 
+  const acceptNpcAuthority = value => {
+    const before = npcAuthority.current;
+    if (state.npcAuthority?.incompatible && !(value?.revision > state.npcAuthority.revision)) return false;
+    if (!npcAuthority.accept(value)) {
+      // An unknown explicit authority version is incompatible, not permission
+      // to elect ourselves. A later valid release can still clear this guard.
+      const revision = Number.isSafeInteger(value?.revision) && value.revision > 0 ? value.revision : 0;
+      if (!state.npcAuthority || revision > state.npcAuthority.revision) state.npcAuthority = { mode: "server", revision, incompatible: true };
+      return false;
+    }
+    state.npcAuthority = npcAuthority.current;
+    if (before !== npcAuthority.current) { npcFrame = null; state.npcVersion++; }
+    return true;
+  };
+
   const onMessage = (e) => {
     if (e.data instanceof ArrayBuffer) {
       if (e.data.byteLength >= 4 && new DataView(e.data).getUint32(0, true) === GHOST_MAGIC) { ghostFrame(e.data); return; } // HALLOWEEN
-      npcFrame = e.data;
+      if (state.npcAuthority?.mode === "server") {
+        const frame = npcAuthority.frame(e.data);
+        if (!frame) return;
+        npcFrame = frame;
+        const header = new DataView(e.data);
+        send(JSON.stringify({ t: "npc-ack", revision: header.getFloat64(8, true), sequence: header.getFloat64(24, true) }));
+      } else {
+        // An authority frame received before its descriptor must never become
+        // a legacy frame or implicitly authorize this browser to run NPC AI.
+        if (e.data.byteLength >= 4 && new DataView(e.data).getUint32(0, true) === BL.npcAuthority.MAGIC) return;
+        npcFrame = e.data;
+      }
       state.npcVersion++;
       return;
     }
@@ -386,7 +415,11 @@
         if (rec && Number.isInteger(w) && w > 0 && w <= 255) rec.weapon = w;
       }
       if (changed) moved();
+    } else if (msg.t === "npc-authority") {
+      if (acceptNpcAuthority(msg.authority)) emit();
     } else if (msg.t === "welcome") {
+      // Missing/older authority on a reconnect never releases a server latch.
+      if (msg.npcAuthority) acceptNpcAuthority(msg.npcAuthority);
       retry = 0;
       clockKnown = false;
       clockSample(msg.now);
@@ -589,7 +622,7 @@
     retryTimer = 0;
     if (stopped || ws || !state.me) return;
     setRoom("connecting");
-    ws = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/room`);
+    ws = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/room?npc-authority=1`);
     ws.binaryType = "arraybuffer";
     ws.onmessage = onMessage;
     ws.onopen = () => {
@@ -801,7 +834,7 @@
 
   // The host's frame of Oogas, sent as bytes (a typed array view is sent as just its own bytes).
   const sendNpc = (view) => {
-    if (ws && ws.readyState === WebSocket.OPEN && state.hostId === state.selfId) ws.send(view);
+    if (state.npcAuthority?.mode !== "server" && ws && ws.readyState === WebSocket.OPEN && state.hostId === state.selfId) ws.send(view);
   };
 
   // A synchronous handoff between Arcade hall scenes keeps the same driven body and voice subscriptions.

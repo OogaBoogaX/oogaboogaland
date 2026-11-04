@@ -277,6 +277,8 @@ export const parseClientMessage = (text) => {
     if (msg.name === null) return { t: "body", name: null };
     return typeof msg.name === "string" && BODY_NAME.test(msg.name) ? { t: "body", name: msg.name } : null;
   }
+  if (msg.t === "npc-ack") return Number.isSafeInteger(msg.revision) && msg.revision > 0
+    && Number.isSafeInteger(msg.sequence) && msg.sequence > 0 ? { t: "npc-ack", revision: msg.revision, sequence: msg.sequence } : null;
   if (msg.t === "hub") return typeof msg.on === "boolean" ? { t: "hub", on: msg.on } : null;
   if (msg.t === "visible") return typeof msg.on === "boolean" ? { t: "visible", on: msg.on } : null;
   if (msg.t === "mute") return typeof msg.on === "boolean" ? { t: "mute", on: msg.on } : null;

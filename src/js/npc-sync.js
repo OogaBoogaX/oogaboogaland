@@ -4,7 +4,9 @@
 // (`cave.puppet`, which makes crew.update skip their AI) and are eased toward the latest frame here, after
 // the crew's update. An Ooga someone drives is never in a frame and never a puppet: the driver's page
 // runs it and the others show it through remote-players.js. With no room, no host or when hosting, every
-// Ooga runs its own AI as before.
+// Ooga runs its own AI as before. An explicit server-authority preview instead
+// keeps undriven Oogas as puppets through missing frames and reconnect; prepare()
+// runs before crew.update so negotiation never grants a frame of local AI.
 //
 // A frame: a Uint32 header [FORMAT, signature of ordered crew names and work sites, record count, event bytes], one RECORD
 // of floats per Ooga, then the events since the last frame as UTF-8 JSON. A record carries what shows:
@@ -46,7 +48,7 @@
     // Each puppet's own quaternions: the crew's are never written from here.
     const quats = list.map(() => ({ root: quat.create(), armL: quat.create(), armR: quat.create(), head: quat.create(), club: quat.create(), gun: quat.create() }));
     const TQ = quat.create();
-    let role = "solo", hostId = null, sendIn = 0, sinceSent = 0, sentFloats = -1, seen = -1, frames = 0, events = [], elapsed = 0;
+    let role = "solo", hostId = null, authorityRevision = 0, sendIn = 0, sinceSent = 0, sentFloats = -1, seen = -1, frames = 0, events = [], elapsed = 0;
     const poseFlags = new Int32Array(n).fill(-1);
 
     const driven = (cave) => cave === crew.player || !!cave.remoteControlled;
@@ -406,16 +408,18 @@
     const update = (dt) => {
       elapsed += dt;
       const st = net.state;
-      const next = st.room !== "live" || !st.hostId ? "solo" : st.hostId === st.selfId ? "host" : "follow";
+      const server = st.npcAuthority?.mode === "server";
+      const revision = st.npcAuthority?.revision || 0;
+      const next = server ? "server" : st.room !== "live" || !st.hostId ? "solo" : st.hostId === st.selfId ? "host" : "follow";
       const hostChanged = hostId !== null && st.hostId !== hostId;
-      if (next !== role || hostChanged) {
+      if (next !== role || hostChanged || authorityRevision !== revision) {
         // A new host or leaving follow hands the Oogas back to their own AI where they stand.
-        if (role === "follow") release();
-        role = next; hostId = st.hostId;
+        if (role === "follow" || role === "server") release();
+        role = next; hostId = st.hostId; authorityRevision = revision;
         sendIn = 0;
         sentFloats = -1;
         // net retains the previous host's frame until another binary message arrives.
-        seen = hostChanged ? st.npcVersion : -1;
+        seen = hostChanged && !server ? st.npcVersion : -1;
         resetEvents();
       }
       if (role === "host") {
@@ -434,7 +438,7 @@
         }
         return;
       }
-      if (role !== "follow") return;
+      if (role !== "follow" && role !== "server") return;
       if (st.npcVersion !== seen) {
         seen = st.npcVersion;
         decode(net.npcFrame);
@@ -445,7 +449,7 @@
           cave.puppet = false;
           continue;
         }
-        cave.puppet = !!have[i];
+        cave.puppet = role === "server" || !!have[i];
         if (have[i]) apply(i, cave, dt);
       }
       if (pendingEvents) {
@@ -455,13 +459,21 @@
       }
     };
 
+    // Called before crew.update, including the first frame after negotiation.
+    // Missing/stale/mismatched snapshots freeze NPCs, never release local AI.
+    // Live driven bodies retain their ordinary player/remote movement path.
+    const prepare = () => {
+      if (net.state.npcAuthority?.mode === "server") for (let i = 0; i < n; i++) list[i].puppet = !driven(list[i]);
+    };
+    prepare();
+
     const dispose = () => {
       release();
       role = "solo";
       resetEvents();
     };
 
-    return { update, dispose, fx: recordingFx, recordShot, recordPlan, recordHit, get role() { return role; }, get frames() { return frames; } };
+    return { prepare, update, dispose, fx: recordingFx, recordShot, recordPlan, recordHit, get role() { return role; }, get frames() { return frames; } };
   };
 
   BL.npcSync = { create, FORMAT, RECORD };

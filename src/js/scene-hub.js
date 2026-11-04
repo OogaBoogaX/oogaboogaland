@@ -8719,6 +8719,7 @@
       // The doorway's walks steer the Ooga before the crew moves it.
       if (!cloudPlaying()) timechainIsland.gate.update(dt);
     }
+    npcSync.prepare();
     if (!cloudHopper.held) crew.update(dt, elapsed);
     cloudHopper.postUpdate();
     if (hammock) {

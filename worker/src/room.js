@@ -40,6 +40,7 @@ import { deliverHighscores } from "./highscore-store.js";
 import { sfuClient } from "./sfu.js";
 import { STUDIO_TRANSPORT, STUDIO_ZONE, studioState, studioHostAllowed, studioCanSpeak, studioPosition, studioSeatAllowed, studioSource } from "./studio-policy.js";
 import CAST_ROWS from "./characters.gen.json";
+import { RoomNpcAuthority, validateNpcAuthority, npcAuthorityView, packNpcSnapshot } from "./room-npc-authority.js";
 
 const CAST = castIndex(CAST_ROWS);
 
@@ -63,6 +64,7 @@ export class Room extends DurableObject {
     this.hostId = 0;
     this.followers = 0;
     this.lastNpc = null;
+    this.npcAuthority = null;
     // The arcade's ghost arena: its own hunt's host, how many follow it, and its last state frame.
     this.ghostHostId = 0;
     this.ghostFollowers = 0;
@@ -83,6 +85,10 @@ export class Room extends DurableObject {
     // hear the same crackle at the same moment. Stored, so a woken or redeployed room keeps the phase.
     this.loopEpoch = 0;
     ctx.blockConcurrencyWhile(async () => {
+      // A saved server assignment stays fenced even if preview configuration is
+      // removed. Older builds need an explicit release before rollback.
+      const authority = await ctx.storage.get("npc-authority-v1");
+      if (authority !== undefined) this.applyNpcAuthority(validateNpcAuthority(authority));
       await hockey.loadLimits(this);
       hockey.restore(this);
       this.studio = (await ctx.storage.get("studio")) || this.studio;
@@ -148,7 +154,7 @@ export class Room extends DurableObject {
   }
 
   attachment(p) {
-    return { cabinet: p.cabinet || null, cabinetBucket: p.cabinetBucket || null, hockey: p.hockey || null, hockeyBuckets: p.hockeyBuckets || null, id: p.id, login: p.login, display: p.display, contributor: p.contributor, body: p.body, connectionToken: p.connectionToken, studioSeat: p.studioSeat, studioRevoked: !!p.studioRevoked, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, j: p.j, w: p.w, voice: p.voice, muted: p.muted, hp: p.hp, ko: p.ko, sent: p.sent, zone: p.zone, pokerVoice: p.pokerVoice, inHub: p.inHub, visible: p.visible, joinedAt: p.joinedAt, door: p.door, passes: p.passes, blendTo: p.blendTo, blendK: p.blendK };
+    return { npcProtocol: p.npcProtocol || 0, npcSent: p.npcSent || null, npcAck: p.npcAck || null, cabinet: p.cabinet || null, cabinetBucket: p.cabinetBucket || null, hockey: p.hockey || null, hockeyBuckets: p.hockeyBuckets || null, id: p.id, login: p.login, display: p.display, contributor: p.contributor, body: p.body, connectionToken: p.connectionToken, studioSeat: p.studioSeat, studioRevoked: !!p.studioRevoked, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, j: p.j, w: p.w, voice: p.voice, muted: p.muted, hp: p.hp, ko: p.ko, sent: p.sent, zone: p.zone, pokerVoice: p.pokerVoice, inHub: p.inHub, visible: p.visible, joinedAt: p.joinedAt, door: p.door, passes: p.passes, blendTo: p.blendTo, blendK: p.blendK };
   }
 
   view(p) {
@@ -325,6 +331,10 @@ export class Room extends DurableObject {
     const who = playerFromHeaders(request.headers);
     if (!who || !ownedBody(CAST, who.login, who.contributor, who.id)) return new Response("Contributors with an Ooga only", { status: 403 });
 
+    const npcProtocol = new URL(request.url).searchParams.get("npc-authority") === "1" ? 1 : 0;
+    if (this.npcAuthority?.mode === "server" && (!npcProtocol || !this.players.has(who.id) && this.players.size >= 32)) {
+      return new Response("NPC authority requires a compatible client and an available preview slot", { status: 409 });
+    }
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     this.ctx.acceptWebSocket(server, [String(who.id)]);
@@ -338,7 +348,7 @@ export class Room extends DurableObject {
     }
 
     const spawn = spawnPoint(this.spawnSlot++);
-    const p = this.record(server, { ...who, connectionToken: crypto.randomUUID(), body: null, x: spawn.x, y: 0, z: spawn.z, yaw: spawn.yaw });
+    const p = this.record(server, { ...who, npcProtocol, connectionToken: crypto.randomUUID(), body: null, x: spawn.x, y: 0, z: spawn.z, yaw: spawn.yaw });
     server.serializeAttachment(this.attachment(p));
     // An owner arriving takes either body back from whoever holds it.
     const own = ownedBody(CAST, p.login, p.contributor, p.id);
@@ -347,7 +357,7 @@ export class Room extends DurableObject {
 
     const others = [];
     for (const o of this.players.values()) if (o !== p) others.push(this.view(o));
-    this.send(server, { t: "welcome", you: this.view(p), players: others, connectionToken: p.connectionToken, tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers, ghostHost: this.ghostHostId, ghostFollowers: this.ghostFollowers, features: [CABINETS.FEATURE, "door", CHAT_FEATURE, CHALK_FEATURE, "hockey-v2"] });
+    this.send(server, { t: "welcome", you: this.view(p), players: others, connectionToken: p.connectionToken, tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, npcAuthority: this.npcAuthority ? npcAuthorityView(this.npcAuthority) : null, host: this.hostId, followers: this.followers, ghostHost: this.ghostHostId, ghostFollowers: this.ghostFollowers, features: [CABINETS.FEATURE, "door", CHAT_FEATURE, CHALK_FEATURE, "hockey-v2"] });
     // A message of its own after welcome, so a page that does not know chat ignores it; empty after the room slept.
     this.send(server, { t: "chat-history", messages: this.chat.list() });
     this.sendCabinets(server);
@@ -382,6 +392,14 @@ export class Room extends DurableObject {
     }
     p.seenAt = Date.now();
     if (!msg) return;
+    if (msg.t === "npc-ack") {
+      if (p.npcSent && msg.revision === p.npcSent.revision && msg.sequence === p.npcSent.sequence) {
+        p.npcAck = p.npcSent; p.npcSent = null;
+        p.ws.serializeAttachment(this.attachment(p));
+        this.sendNpcSnapshot(p);
+      }
+      return;
+    }
     if (msg.t === "cabinet") { this.cabinetMessage(p, msg); return; }
     // While playing, the room owns the floor pose and body, regardless of game-scene reports.
     if (p.cabinet && ["pose", "zone", "body", "blend", "hp", "shot", "swing", "hockey"].includes(msg.t)) return;
@@ -405,7 +423,8 @@ export class Room extends DurableObject {
       p.inHub = msg.on;
       this.electHost();
       // A page arriving on the island catches up with the NPCs at once rather than at the next frame.
-      if (p.inHub && p.id !== this.hostId && this.lastNpc) this.send(p.ws, this.lastNpc);
+      if (this.npcAuthority?.mode === "server") this.sendNpcSnapshot(p);
+      else if (p.inHub && p.id !== this.hostId && this.lastNpc) this.send(p.ws, this.lastNpc);
     } else if (msg.t === "visible") {
       // HALLOWEEN: a page hidden in the ghost arena hands its hosting on; shown again, it comes back a follower.
       if (msg.on === p.visible) return;
@@ -682,8 +701,80 @@ export class Room extends DurableObject {
     for (const q of peers) this.send(q.ws, thumpAudible(q, p, this.studio) ? heard : seen);
   }
 
+  // Internal RPCs, deliberately unavailable unless explicitly enabled in a
+  // local preview. No deployed config sets this flag and no HTTP route calls it.
+  npcAuthorityStatus(ticket) {
+    const r = this.npcAuthority;
+    if (!r) return null;
+    return { authority: npcAuthorityView(r), sequence: r.sequence, at: r.at,
+      leaseUntil: r.leaseUntil, runUntil: r.runUntil,
+      owns: r.mode === "server" && ticket?.revision === r.revision && ticket.world === r.world
+        && ticket.epoch === r.epoch && ticket.owner === r.owner };
+  }
+
+  async configureNpcAuthority(expectedRevision, next) {
+    if (this.env.VIRTUAL_HOST_PREVIEW !== "1") throw new Error("NPC authority preview disabled");
+    if (next?.mode === "server" && (this.players.size > 32 || [...this.players.values()].some(p => p.npcProtocol !== 1))) {
+      throw new Error("NPC authority incompatible occupants");
+    }
+    return this.ctx.blockConcurrencyWhile(async () => {
+      const r = await new RoomNpcAuthority(this.ctx.storage, () => Date.now()).change(expectedRevision, next);
+      this.applyNpcAuthority(r);
+      return npcAuthorityView(r);
+    });
+  }
+
+  async publishNpcSnapshot(ticket, sequence, frame) {
+    if (this.env.VIRTUAL_HOST_PREVIEW !== "1") throw new Error("NPC authority preview disabled");
+    return this.ctx.blockConcurrencyWhile(async () => {
+      const { record, duplicate } = await new RoomNpcAuthority(this.ctx.storage, () => Date.now()).publish(ticket, sequence, frame);
+      this.applyNpcAuthority(record);
+      return { revision: record.revision, sequence: record.sequence, duplicate };
+    });
+  }
+
+  applyNpcAuthority(r) {
+    const old = this.npcAuthority;
+    if (old && (r.revision < old.revision || r.revision === old.revision && r.sequence < old.sequence)) return;
+    const changed = !old || old.revision !== r.revision;
+    this.npcAuthority = r;
+    if (changed) {
+      this.lastNpc = null;
+      for (const p of this.players.values()) {
+        // Credit survives hibernation too. Repeated wakes cannot enqueue another
+        // frame for a socket still holding the previous unacknowledged one.
+        if (p.npcSent?.revision !== r.revision) p.npcSent = null;
+        if (p.npcAck?.revision !== r.revision) p.npcAck = null;
+        p.ws.serializeAttachment(this.attachment(p));
+      }
+      // Incompatible sockets can survive a deployment in attachments. Their
+      // ordinary close path still releases voice and unrelated occupancy now.
+      if (r.mode === "server") for (const p of this.players.values()) if (p.npcProtocol !== 1) this.evict(p, "protocol");
+      // Announce the selected browser host before its release descriptor, so
+      // clients stay server-fenced until the replacement identity is known.
+      this.electHost();
+      this.broadcast({ t: "npc-authority", authority: npcAuthorityView(r) });
+    }
+    for (const p of this.players.values()) this.sendNpcSnapshot(p);
+  }
+
+  sendNpcSnapshot(p) {
+    const r = this.npcAuthority;
+    if (r?.mode !== "server" || !r.frame || !p.inHub || p.npcProtocol !== 1 || p.npcSent
+      || p.npcAck?.revision === r.revision && p.npcAck.sequence === r.sequence) return;
+    // One unacknowledged frame per socket, one latest durable frame for the room.
+    // Slow clients skip intermediate states; no per-client frame queue or timer.
+    p.npcSent = { revision: r.revision, sequence: r.sequence };
+    p.ws.serializeAttachment(this.attachment(p));
+    this.send(p.ws, packNpcSnapshot(r));
+  }
+
   // Also after any page's `hub` flag changes: the host sends frames only while someone follows.
   electHost() {
+    if (this.npcAuthority?.mode === "server") {
+      this.hostId = 0; this.followers = 0; this.lastNpc = null;
+      return;
+    }
     const id = electHost(this.players.values(), this.hostId);
     const followers = npcFollowers(this.players.values(), id);
     if (id === this.hostId && followers === this.followers) return;
@@ -720,7 +811,7 @@ export class Room extends DurableObject {
   // A binary frame is the NPC host's poses: taken only from the current host, capped in size and rate,
   // and relayed unchanged to every other page showing the island.
   npcFrame(p, data) {
-    if (p.id !== this.hostId || !p.inHub) return;
+    if (this.npcAuthority?.mode === "server" || p.id !== this.hostId || !p.inHub) return;
     if (!(data instanceof ArrayBuffer) || data.byteLength > NPC_FRAME_MAX) return;
     if (!takeToken(p.npcBucket, NPC_HZ, Date.now())) return;
     p.seenAt = Date.now();

@@ -437,10 +437,11 @@ export class SessionRegistry {
     const due = [], steps = [];
     for (const r of this.#sessions.values()) {
       if (r.state !== "grace") continue;
+      const until = Math.min(t, r.deadline);
+      if (until > r.stepAt) steps.push([r, this.#step(r, until - r.stepAt), until]);
       if (t >= r.deadline) due.push([r, this.#handback(r.bodyId)]);
-      else if (t > r.stepAt) steps.push([r, this.#step(r, t - r.stepAt)]);
     }
-    for (const [r, motion] of steps) { r.motion = motion; r.stepAt = t; }
+    for (const [r, motion, until] of steps) { r.motion = motion; r.stepAt = until; }
     for (const [r, handback] of due) this.#depart(r, "expired", r.deadline, handback, effects);
   }
 

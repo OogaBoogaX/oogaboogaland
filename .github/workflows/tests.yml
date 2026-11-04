@@ -29,4 +29,6 @@ jobs:
       - name: Check shared Cloud Hopper replay publication and playback
         run: node --test worker/test/cloud-hopper-replays.test.mjs worker/test/highscores.test.mjs
       - name: Check virtual-host authority and disconnect recovery
-        run: node --test worker/test/host-sessions.test.mjs worker/test/virtual-host.test.mjs worker/test/npc-navigation.test.mjs worker/test/npc-random.test.mjs worker/test/npc-work.test.mjs worker/test/npc-collision.test.mjs worker/test/npc-walker.test.mjs
+        run: node --test worker/test/host-sessions.test.mjs worker/test/virtual-host.test.mjs worker/test/npc-navigation.test.mjs worker/test/npc-random.test.mjs worker/test/npc-work.test.mjs worker/test/npc-collision.test.mjs worker/test/npc-walker.test.mjs worker/test/room-npc-authority.test.mjs worker/test/passive-body.test.mjs
+      - name: Check Room compatibility around authority negotiation
+        run: node --test worker/test/protocol.test.mjs worker/test/doorway.test.mjs worker/test/voice-blend.test.mjs worker/test/hockey.test.mjs worker/test/chat.test.mjs

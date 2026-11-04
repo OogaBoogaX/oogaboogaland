@@ -1,9 +1,13 @@
 # Virtual host: inactive implementation draft
 
 Part of #377; **does not close it**. Baseline: `rock` at
-`17659ddfa0079f24bea84d872e29e532530bd7e4`. No deployed Worker import, class export,
-binding, route, migration, alarm, timer, dependency or production data changes.
-The current browser host still runs. This draft must not be described as an
+`17659ddfa0079f24bea84d872e29e532530bd7e4`. Room now imports an authority adapter,
+and the client understands its preview negotiation. No configuration enables it;
+there is no new binding, HTTP route, migration, alarm, timer, dependency or production
+data change. The current browser host still runs by default.
+During this increment `rock` advanced to `1a87a4eb9d91330638f029b38e456188385d00a1`
+with #462 voice changes. Overlapping paths were reviewed; fixture prerequisite
+loading was placed away from the new voice context so both changes combine. This draft must not be described as an
 always-on NPC world or an enabled disconnect feature.
 
 ## Implemented and still missing
@@ -296,9 +300,10 @@ physical-device measurements is claimed here.
    snapshot approach where possible. Persist bounded sleep-route search state and
    work/bed reservations rather than generators, scene references or machine-time
    budgets. Surface-route checkpointing alone does not supply these systems.
-4. Run a finite local Durable Object exercise with zero browsers, restart, write
-   failures and a final-session drain. Then integrate explicit server-follow
-   negotiation and epoch fencing, with no browser AI fallback in shared server mode.
+4. Connect the gated Room/client authority bridge to a complete host and pose
+   projector, then run a finite local Durable Object exercise with zero browsers,
+   restart, failed writes and a final-session drain. The new bridge tests execute
+   real Room/net/npc-sync code with authored platform services, not a DO runtime.
 5. Resolve the failed hub checks and verify the complete client/host behavior with
    two clients, slow receivers and reconnects. Measure actual checkpoint sizes,
    physics/query CPU, memory, fanout and account costs before proposing activation.
@@ -449,29 +454,96 @@ browser movement rules. World callbacks must still be transaction-local and free
 of external effects; throwing after a bad callback cannot undo its side effects.
 The raw browser callbacks are not made transactional by moving their caller.
 
-### Room/client integration findings
+### Room/client authority preview
 
-The current Room constructor elects a browser from restored socket attachments,
-`electHost` republishes a browser ID after departures, and `npcFrame` accepts that
-browser's FORMAT 2 display buffer. `net.close` resets host state; `npc-sync.update`
-then selects solo mode and releases puppets. Missing records also release individual
-puppets. Those behaviors are correct for the current browser-host contract, but
-cannot be carried into server authority: a stale/absent server frame must not start
-a second AI simulation. A new protocol needs an explicit authority mode plus
-world/epoch/sequence fencing, retained across transient reconnects, with an explicit
-release/migration boundary. A numeric host-ID sentinel is insufficient.
+The legacy path still elects a browser and relays FORMAT 2 frames. The new
+`room-npc-authority.js` adapter supplies a durable, compare-and-swap assignment
+with a monotonic revision, explicit mode/world/epoch, private owner, ten-second
+lease and at most a fifteen-minute run. New snapshots renew only the lease;
+nothing extends the run or starts a timer. `Room.configureNpcAuthority` and
+`publishNpcSnapshot` are internal RPCs gated by `VIRTUAL_HOST_PREVIEW === "1"`.
+No checked-in environment sets that flag and no HTTP route calls these methods.
+The internal read-only `npcAuthorityStatus(ticket)` reconciles an uncertain configure
+or publish outcome without exposing owner credentials or replaying a mutation.
+The future runner must coordinate them with its committed VirtualHost ticket;
+fencing Room cannot make the two independent storage commits atomic.
 
-Room `drop` immediately releases cabinets, doors, Studio/chalk and voice. The host's
-60-second body/occupancy deadline cannot be implemented by delaying this whole
-function: voice and unrelated occupancy have their own lifecycles. Room attachments
-also lack exact ammo/fuel, vertical velocity and the complete body mode. The next
-integration must add a bounded authenticated body command/outbox, preserve confirmed
-close timestamps, reconcile duplicate connections and acknowledge handoff idempotently
-across Room/WorldHost storage boundaries. No such bridge is activated here. The
-current display buffer also cannot be generated faithfully from the host's small
-public position snapshot; #379/#464 must retain their track/presentation ownership,
-with #388/#389 owning transport. No new competing wire format or browser authority
-fallback was introduced by this movement increment.
+After the authority commit, Room stops browser election/frame admission and tells
+compatible clients the descriptor. The client latches it across close/reconnect;
+missing frames and mismatched roster signatures freeze undriven Oogas, including
+before the first `crew.update`, rather than permitting local AI. Explicit newer
+release switches back to the existing browser contract; Room announces the chosen
+browser host before releasing the fence. Ordinary driven bodies and voice retain
+their existing paths. This snapshot adapter covers the existing Ooga pose format;
+Clanker simulation/projection remains an activation gate.
+
+A 32-byte preview envelope adds revision/epoch/sequence to the **unchanged** FORMAT 2
+pose buffer. It is capped at 57,392 bytes (57,360 pose bytes plus envelope), with
+128 records and no event tail. Replaying persisted firing/effect events on join
+would be incorrect; event delivery and independent tracks remain with #379/#388/#389.
+The complete display pose must be projected from actual actor/rig state; a public
+position snapshot is insufficient and no synthetic projector claims otherwise.
+This preview framing is not an approved transport rollout or a replacement for
+those companion issues. #464 retains visual fidelity.
+
+Only one unacknowledged snapshot per socket is allowed. Room keeps one latest
+committed frame, skips intermediate frames for slow clients and delivers the newest
+on a matching acknowledgement. Credit is persisted in socket attachments across hibernation; repeated wakes cannot
+enqueue additional unacknowledged frames. No per-client history, resend timer or guessed
+pending-byte count. A client that never acknowledges intentionally stalls until
+reconnect or a new authority revision; unbounded timeout resends
+would defeat the limit. Pose-only identical duplicates can be acknowledged after
+reconnect, while changed duplicates and stale revisions/epochs/sequences are refused.
+An identical publish retry can reconcile a committed result after lease/run expiry;
+it does not write, renew the lease or admit a new frame.
+
+Preview admission is limited to 32 compatible connected players; configuration
+refuses incompatible occupants. A server-assigned Room rejects old connecting
+clients and closes incompatible restored sockets via their ordinary cleanup path.
+Removing the preview flag from a build that understands this record keeps the
+server fence. **Before rolling back to a build that predates this protocol, explicitly
+release to browser mode and confirm clients received it.** Older code cannot honor
+the stored fence. Unknown saved versions fail initialization; unknown newer client
+descriptors freeze instead of silently downgrading. Backward clocks refuse mutations.
+
+The hard data envelope is one 57,360-byte durable pose frame plus metadata and one
+57,392-byte in-flight frame per admitted socket (at most 1,836,544 bytes across 32
+sockets, excluding platform overhead). At four new frames/second the all-full-frame
+payload ceiling is 7,346,176 bytes/second. These arithmetic ceilings are deliberately
+not called cheap: no full-roster CPU/heap, Cloudflare runtime or account billing
+measurement has been performed. A permanent paid loop remains forbidden.
+
+### Passive body recovery and remaining body handoff
+
+`passive-body.js` now integrates the SessionRegistry's disconnect motion through
+explicit zone/shape support, ceiling and swept-solid queries. The new tests use
+actual shared mesh kernels with authored flat geometry. Gravity proceeds in at
+most 50 ms steps, falls without invented ground, stops at support/ceilings/walls,
+and uses at most twelve extra probes for an unresolved swept contact. Landing
+clears horizontal velocity. Registry disconnect already neutralizes held horizontal
+motion, and the adapter has no access to equipment, firing, reload or thrust.
+Exact ammo/fuel/mode remain in the session record. It rejects unsupported shapes,
+penetration and invalid adapters rather than pretending they were simulated.
+
+Expiry now simulates the remaining interval **up to the saved deadline**, even
+when recovery occurs after it, before producing the green departure and existing-NPC
+handback intent. Previously a due record could skip this last interval. The maximum
+catch-up is 1,200 steps per body (76,800 for 64 bodies), each with bounded world
+queries; these limits still need production cost measurement. Finite-step physics
+is not a claim of frame-rate independence under arbitrary differently partitioned
+wake times. Water, abyss policy, moving/animated supports, Clanker rig shapes and
+production world export remain explicit adapter requirements.
+
+Room `drop` still releases cabinets, doors, Studio/chalk and voice immediately.
+The body grace cannot be implemented by delaying that whole function. Room
+attachments still lack exact ammo/fuel, vertical velocity and the complete body
+mode. A bounded authenticated body command/outbox must preserve confirmed close
+times, reconcile duplicate sessions and acknowledge handoff idempotently across
+Room/WorldHost before this feature can be enabled. Browser equipment capture,
+reclaim application, free-arm/open-hand rendering, green beam and visual handback
+are not integrated. The full NPC airborne/crowd/weapon/Clanker state machine is
+also unfinished. These are implementation gates, not completed by the preview
+transport or the disconnected-body motion adapter.
 
 ## Verification record
 
@@ -564,6 +636,28 @@ Verified locally November 4, 2026 on Node v22.23.4:
   invalidation before recovery resets. The 17,515-byte function block and captured
   original source match exactly. The new codec's per-actor cap is not a claim that
   128 concurrent searches fit the host's 96 KiB total checkpoint budget.
+- Room/body follow-up: initial focused host/session/Room/body batch passed **36/37**.
+  Its only failure was the new Room harness swallowing a failed initialization
+  promise; one harness correction retained that rejection, and the Room file
+  passed **5/5**. Existing protocol/doorway/voice/hockey/chat checks passed **75/75**.
+  Independent review then added release-ordering, ambiguous-publish reconciliation,
+  unknown-version fencing and landing-stop checks; the two new files passed **9/9**.
+  Unit **408/408**, build (314 scripts) and **12/12** touched JS/MJS syntax checks passed. No Hub/browser/full
+  rerun. Existing predicates and thresholds were not weakened.
+- Further independent inspection found that socket credit must survive hibernation,
+  not only live in Room memory. It is now in attachments; repeated-wake tests passed
+  **5/5**, and the affected Room compatibility checks again passed **75/75** after
+  that change. The actual passive/mesh integration also passed **5/5**, including
+  VirtualHost failed-write rollback of landing and handback and no replay after
+  restart. Final new-test total is ten; existing host tests are unchanged.
+- Bounded read-only Claude Max review completed successfully with no permission
+  denials. Independent triage retained strict one-outstanding-frame backpressure
+  instead of the suggested timeout resend, because a non-reading socket must not
+  accumulate more frames. Held horizontal motion was already neutralized by the
+  registry; the passive adapter also now clears it on landing. Rollback limits and
+  backward-clock refusal are explicit. Logs: `verification-authority-focused.log`,
+  `verification-authority-repair.log`, `verification-authority-room-regressions.log`,
+  `verification-authority-review.log`, `claude-review-authority-result.json`.
 - Claude Code used the existing authenticated Max subscription for the bounded
   session implementation, a read-only review and bounded follow-up registry fixes.
   Parent review added missing-
