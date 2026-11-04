@@ -1730,9 +1730,37 @@
         refreshGeometry(); measureBody(false); return true;
       } };
     };
+    // Unlike display projection, continuation restores the state used by the
+    // next poseManaged step. World code must first bind the exact held item and
+    // bench identity. This does not claim a body or restore its outer controller.
+    const createManagedCheckpoint = (world) => {
+      if (!managed || !BL.clankerState) throw new Error("managed Clanker continuation unavailable");
+      const projection = createPoseProjector(world);
+      return {
+        capture({ item = null, bench = null } = {}) {
+          if (onIdle) throw new Error("invalid managed Clanker continuation");
+          return BL.clankerState.capture(state, projection.capture(item), officeHands, labGripY, bench);
+        },
+        restore(snapshot, { item = null, bench = null } = {}) {
+          if (onIdle) throw new Error("invalid managed Clanker continuation");
+          const saved = BL.clankerState.restore(snapshot, bench);
+          // All state/identity checks precede the projection's own atomic checks.
+          // It changes only this rig's existing geometry and transforms.
+          if (!Object.is(saved.grip, labGripY)) throw new Error("invalid managed Clanker continuation");
+          projection.apply(saved.pose, item);
+          Object.assign(state, saved.state); officeHands.set(saved.hands);
+          // The pose decoder may have created quaternion arrays. Rebind the
+          // buffers that the next animation step writes, without losing values.
+          if (hips.quaternion) { rollQuaternion.set(hips.quaternion); hips.quaternion = rollQuaternion; }
+          if (labFlask.quaternion) { labItemRotation.set(labFlask.quaternion); labFlask.quaternion = labItemRotation; }
+          refreshGeometry(); measureBody(false);
+          return true;
+        }
+      };
+    };
     const agent = {
       root, parts, hips, chest, update, setForm, setGait, walk, pace, place, poke, jump, reveal, setDriven, drive, toggleStyle, liveGeometry, dispose,
-      managed, poseManaged, createPoseProjector, climbPoseClear, climbCenter, bodyHull, walkPoseClear, walkSupportAt, labPoseClear, mouth, bodyTarget, envelope, feed, pound, cancelSmash, beat, holdLabItem, releaseLabItem,
+      managed, poseManaged, createPoseProjector, createManagedCheckpoint, climbPoseClear, climbCenter, bodyHull, walkPoseClear, walkSupportAt, labPoseClear, mouth, bodyTarget, envelope, feed, pound, cancelSmash, beat, holdLabItem, releaseLabItem,
       get labFlask() { return labFlask; },
       get labItem() { return labFlask === labPlaceholder ? null : labFlask; },
       get labPickupBench() { return state.labBench; },

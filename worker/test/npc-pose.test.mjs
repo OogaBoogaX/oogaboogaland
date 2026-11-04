@@ -6,6 +6,7 @@ import { runInNewContext } from "node:vm";
 import { createNpcPose } from "../src/npc-pose.js";
 import { rig } from "./fixtures/npc-pose-rig.mjs";
 import { managedRigs } from "./fixtures/clanker-pose-rig.mjs";
+import { createCheckpointPack } from "../src/checkpoint-pack.js";
 import "../../src/js/clanker-pose.js";
 import "../../src/js/npc-pose-packet.js";
 const pose = globalThis.BL.npcPose;
@@ -177,6 +178,86 @@ test("bounded mixed packet preserves 53 Ooga and 53 actual Clanker poses without
   assert.equal(globalThis.BL.npcAuthority.poses(packet), false, "old transport must not silently accept a new format");
   assert.equal(codec.unpack(codec.pack("a", createNpcPose(0, 1)([]), [])).clankers.length, 0);
   for (const r of rigs) r.dispose();
+});
+
+test("managed Clanker continuation preserves subsequent real animation, collision bounds and held items after reconstruction", () => {
+  const world="continuation-fixture-1",f=managedRigs(),source=f.make(),bench={name:'fixture-bench'};
+  const bind=(fixture,actor)=>{const item=fixture.B.scene.createNode({geometry:fixture.B.agent.labFlaskGeometry(0)});fixture.B.models.attachGlassShell(item);assert.equal(actor.holdLabItem(item),true);};
+  bind(f,source);const writer=source.createManagedCheckpoint(world);
+  let fresh=managedRigs(),resumed=fresh.make(),otherBench={name:'reconstructed-bench'};bind(fresh,resumed);
+  let reader=resumed.createManagedCheckpoint(world),maxBytes=0;
+  const options=(actor,table)=>({item:'vessel:1',bench:actor.labPickupBench?{id:'bench:1',value:table}:null});
+  reader.restore(JSON.parse(JSON.stringify(writer.capture(options(source,bench)))) ,options(resumed,otherBench));
+  for(let step=0;step<144;step++){
+    if(step && step%11===0){
+      const snapshot=JSON.parse(JSON.stringify(writer.capture(options(source,bench))));resumed.dispose();fresh=managedRigs();resumed=fresh.make();bind(fresh,resumed);
+      otherBench={name:'another-reconstructed-bench'};reader=resumed.createManagedCheckpoint(world);
+      reader.restore(snapshot,{item:'vessel:1',bench:snapshot.bench?{id:'bench:1',value:otherBench}:null});
+    }
+    const phase=Math.floor(step/6)%12,x=phase<2?0:phase===2?20:40;
+    const motion=table=>phase<2?{lab:true,labWork:'carry',labReach:.7,labBench:table,labRoll:.2,labDie:phase===1}
+      :phase===2?{office:true,officeSeat:.9,officeWork:'type',officeHands:[20,1,1,21,1,1]}
+        :phase===3?{climb:.8,climbStride:step/10,climbSide:.2}:phase===4?{roll:.8,rollAngle:1.2,rollSide:.5}
+          :phase===5?{swim:true}:phase===6?{groom:.7,groomSide:step%2?-1:1,sitLook:.2}:phase===7?{takeoff:.6}
+            :phase===8?{landing:.3}:phase===9?{dragging:true,throwProgress:.4}:{};
+    for(const [actor,table]of [[source,bench],[resumed,otherBench]]){
+      actor.setForm(step%13<5?'code':'ape');
+      if(step===60)actor.feed();if(step===66)actor.beat();if(step===72)actor.pound(true,.6);
+      actor.poseManaged(.035+(step%3)/100,x,phase===7?2:0,step/13,.7,phase===7?2.8:phase===11?-1:0,
+        phase===7,phase===10?'squeeze':false,phase===6?'sit':phase===11?'left':'',motion(table));
+    }
+    source.root.position.x=step%17===0?-0:source.root.position.x;
+    resumed.root.position.x=step%17===0?-0:resumed.root.position.x;
+    const a=writer.capture(options(source,bench)),b=reader.capture(options(resumed,otherBench));
+    assert.equal(JSON.stringify(a),JSON.stringify(b),`next-step continuation ${step}`);
+    const shapeA={},shapeB={};source.envelope(shapeA);resumed.envelope(shapeB);assert.deepEqual(shapeA,shapeB);
+    maxBytes=Math.max(maxBytes,Buffer.byteLength(JSON.stringify(a)));
+    const frozen=JSON.stringify(a);reader.restore(JSON.parse(frozen),options(resumed,otherBench));
+    assert.equal(JSON.stringify(reader.capture(options(resumed,otherBench))),frozen,'idempotent restore does not advance animation');
+    if(step%17===0)assert.ok(Object.is(resumed.root.position.x,-0),'JSON round trip retains signed zero');
+  }
+  assert.ok(maxBytes<=f.B.clankerState.MAX_BYTES);source.dispose();resumed.dispose();
+});
+
+test("managed continuation rejects unsupported or corrupt state and bindings before touching the destination",()=>{
+  const f=managedRigs(),a=f.make(),b=f.make(),world='continuation-validation';
+  a.poseManaged(.1,1,2,3,.6,2,true);const sender=a.createManagedCheckpoint(world),receiver=b.createManagedCheckpoint(world),snapshot=sender.capture();
+  const before=JSON.stringify(receiver.capture());
+  const edits=[s=>s.v++,s=>s.pose.world='other',s=>s.pose.profile[0]++,s=>s.values.pop(),s=>s.values[0]='unknown',
+    s=>s.values[s.values.length-1]=Infinity,s=>s.values[0]=null,s=>delete s.values[3],s=>s.hands.push(0),s=>s.hands[0]=NaN,
+    s=>s.grip+=.5,s=>s.bench='unbound',s=>s.pose.nodes[3][0]=3,s=>s.extra=true];
+  for(const edit of edits){const bad=structuredClone(snapshot);edit(bad);assert.throws(()=>receiver.restore(bad),/continuation|projection/);assert.equal(JSON.stringify(receiver.capture()),before);}
+  const accessor=structuredClone(snapshot);let reads=0;Object.defineProperty(accessor.values,'3',{get(){reads++;return 0;}});
+  assert.throws(()=>receiver.restore(accessor),/continuation/);assert.equal(reads,0);
+  const extra=structuredClone(snapshot);Object.defineProperty(extra.hands,'extra',{value:1});assert.throws(()=>receiver.restore(extra),/continuation/);
+  a.walk([{x:1,z:2}]);assert.throws(()=>sender.capture(),/continuation/,'standalone route state is not silently discarded');
+  b.onIdle=()=>{throw Error('must not call');};assert.throws(()=>receiver.restore(snapshot),/continuation/);b.onIdle=null;
+  const unmanaged=f.B.agent.create({groundAt:()=>0});assert.throws(()=>unmanaged.createManagedCheckpoint(world),/unavailable/);
+  for(const actor of[a,b,unmanaged])actor.dispose();
+});
+
+test("53 continuing Clanker rigs survive bounded roster and existing host storage packing without a prior frame",()=>{
+  const f=managedRigs(),world='continuation-roster',actors=Array.from({length:53},f.make),codec=f.B.clankerState,storage=createCheckpointPack(64*1024);
+  const records=actors.map((actor,index)=>{
+    actor.poseManaged(.05,index/7,0,index/11,.7+index/10,0,false,false,'',{roll:.8,rollAngle:index/9,rollSide:.5});
+    return {index,snapshot:actor.createManagedCheckpoint(world).capture()};
+  });
+  const packed=JSON.parse(JSON.stringify(codec.packRoster(world,records)));
+  const saved=storage.pack(packed),restored=storage.unpack(JSON.parse(JSON.stringify(saved))),decoded=codec.unpackRoster(restored);
+  assert.equal(JSON.stringify(decoded),JSON.stringify(records));
+  assert.equal(JSON.stringify(codec.packRoster(world,[...records].reverse())),JSON.stringify(packed));
+  assert.equal(JSON.stringify(codec.unpackRoster(codec.packRoster(world,[]))),'[]');
+  for(const edit of [s=>s.v++,s=>s.world='other',s=>s.actors.pop(),s=>s.actors[1][0]=s.actors[0][0],s=>s.actors[0][1].pop(),
+    s=>s.poses[0]='ff'+s.poses[0].slice(2),s=>s.poses.push('00'.repeat(2049)),s=>s.actors[0][2][0]=NaN]){
+    const invalid=structuredClone(packed);edit(invalid);assert.throws(()=>codec.unpackRoster(invalid),/continuation|packet/);
+  }
+  const getter={snapshot:records[0].snapshot};let reads=0;Object.defineProperty(getter,'index',{get(){reads++;return 0;}});
+  assert.throws(()=>codec.packRoster(world,[getter]),/continuation/);assert.equal(reads,0);
+  assert.throws(()=>codec.packRoster('other',records),/continuation/);
+  for(let i=0;i<actors.length;i++){
+    const follower=f.make(),checkpoint=follower.createManagedCheckpoint(world);checkpoint.restore(decoded[i].snapshot);
+    assert.equal(f.display(follower),f.display(actors[i]));follower.dispose();actors[i].dispose();
+  }
 });
 
 test("mixed packet bounds reject malformed compression, expansion, counts, versions and corrupted or incomplete frames", () => {

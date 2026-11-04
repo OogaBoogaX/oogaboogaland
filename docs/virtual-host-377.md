@@ -1115,8 +1115,109 @@ identity, exact browser body reclaim, grace/open-hand and beam visuals remain
 required before client opt-in. No production resource, timer or permanent loop
 was enabled. Evidence: `verification-mixed-room-{first,review,fanout,host,compat}.log`.
 
+### Managed animation continuation and aggregate capacity
+
+`agent.createManagedCheckpoint(world)` now captures/restores the actual managed
+Clanker rig's animation state as well as its display pose. `clanker-state.js`
+uses versioned ordered fields, exact finite numbers, explicit unset/NaN walk-phase
+sentinels and signed-zero tags that survive JSON. It retains easing, stride,
+grooming, rolling, office hand targets, lab grip, clothing/form and the pose used
+by the next `poseManaged` step. Held items and pickup benches require matching
+world-owned identity bindings; no reference, callback, route or geometry is
+serialized. Unsupported standalone routes, preview-only items, unknown fields,
+bad bindings and malformed state fail before target mutation. Restore rebinds
+the roll/item quaternion buffers used by subsequent animation and recomputes
+bounds without moving the body. No live caller uses this API yet.
+
+This is **rig animation continuation**, not the outer Clanker AI or complete
+player body. It does not grant ownership, restore health/reservations or replace
+the authenticated Room body outbox. Exact browser reclaim still needs its own
+complete controller/body codec and an admission profile that actually fits.
+
+Tests run 144 real animation steps with repeated fresh JS contexts, held glass,
+bench rebinding, lab/office transitions, climbing, rolling, swimming, grooming,
+airborne/landing, squeezing, form changes and animation triggers. Continued
+poses and collision bounds match the uninterrupted source; restore is idempotent.
+The first run caught a valid `undefined` walk phase missing from the codec. Its
+explicit sentinel fixed the source error and the same check passed. No threshold
+was relaxed. The roster codec packs all poses together through the existing
+lossless packet format and keeps animation columns separate, with a **64 KiB**
+roster cap and **24 KiB** per-rig cap; the host's own limits are unchanged.
+
+A finite 120-frame experiment with 53 varied actual rigs, eight bound vessels
+and the existing authored work/flight fixture measured:
+
+| Measurement | Local result |
+|---|---:|
+| Raw animation roster peak | 102,200 bytes |
+| Roster with packed poses | 36,561 bytes |
+| Roster through existing storage packer | 37,074 bytes |
+| Capture, pack, storage round trip and rig restore, p50 / p95 | 152.785 / 156.515 ms |
+| Combined 106-actor fixture plus animation, raw peak | 182,846 bytes |
+| Combined JSON-tree nodes / existing cap | 17,644 / 13,000 |
+| Combined checkpoints refused | 120 / 120 |
+
+**Combined admission is blocked.** The animation roster fits alone; adding it to
+the current 106-actor fixture does not fit the existing representation. It is
+not valid to add these records to the previously measured 72,633-byte host
+checkpoint or claim its former margin still holds. The experiment deliberately
+retains all byte/node limits. Further representation/storage work and full-body
+budgeting are required before activation. Timings exclude assertion/display
+comparison from the listed path; total process CPU, including world/rig steps
+and verification, was 27,192.624 ms. These Node/VM results are not billed DO CPU,
+production duration or an affordability claim. Evidence:
+`verification-continuation-cost-final.json` in the task workspace.
+
+### Disconnect presentation, not yet connected to live sessions
+
+`host-presence.js` renders committed grace views and applied departure intents
+over existing actual Ooga/Clanker rigs. `prepare()` restores the previous limb
+transform before the caller applies the next authoritative pose; `render()` then
+raises the explicitly bound free arm and displays a green open-hand icon. The
+arm direction accounts for the torso, reclining and peek transforms. A fixed
+local angle failed the initial real-Clanker test; converting the raised direction
+through its actual parent transform fixed it. The same test now passes without
+moving the root, changing equipment or detaching the held vessel.
+
+Bindings include the body generation. Mismatched generations, duplicate bodies,
+occupied hands and malformed tails are refused before changing limbs. A missing
+binding never creates an NPC. The helper currently requires direct actor children
+of an identity scene root. It is a presentation layer and must run after physics;
+it neither advances passive motion nor hands player control back. The caller
+must still implement authoritative body identity and delivery.
+
+Expiry uses `sleep-beam.js` and its existing green historical glyphs. Up to 64
+retained bodies use four fixed pools of 16, within the existing per-pool cap of
+20; no cap was raised. Progress comes from the original committed departure
+timestamp over 700 ms. A late observer or restart past that interval does not
+restart the beam or resolve/spawn a body. Unapplied intents are not completed.
+The helper does not acknowledge durable intents or change body visibility;
+those actions belong to the still-unfinished handoff integration. Reduced motion,
+geometry collection, exact limb restoration and disposal are covered.
+
+The maximum-load local evaluator measured 64 hands over 120 samples and 64
+simultaneous beams over 43 samples: hands p50/p95 **0.351/0.605 ms**, beams
+**2.064/2.875 ms** (maximum 12.216 ms). Fixed glyph instance storage is
+**245,760 bytes**, 3,072 glyph instances, at most 32 glyph batches and one shared
+hand geometry. This measures actual scene matrices/geometry in Node, not GPU
+uploads/draws, browser/phone appearance, network latency or production costs.
+The larger simultaneous GPU load remains a validation gate. Both new modules
+are loaded but unused by the live scene; no capability, preview flag or runner
+was activated. Evidence: `verification-presence-cost-final.json` and
+`verification-presence-{first,repair}.log` in the task workspace.
+
 Verified locally November 4, 2026 on Node v22.23.4:
 
+- Managed continuation and disconnect presentation increment: **96/96** focused
+  host checks, **408/408** unit checks, the final **320-script** build, eight
+  touched JS/MJS syntax checks and whitespace validation passed. Subsequent
+  continuation/presentation review passed **18/18**; the final presentation
+  allocation cleanup passed **8/8**. The existing 20-entry browser failure ledger
+  is semantically unchanged; no Hub/full/browser check reran. Initial failures
+  and their diagnosed source fixes are recorded above. Logs:
+  `verification-continuation-presence-{host,unit,review,build-final}.log`,
+  `verification-presence-final.log` and
+  `verification-continuation-presence-static.json`.
 - Mixed Room increment: **91/91** focused host checks and **75/75** Room
   compatibility checks, **408/408** unit checks, the **318-script** build, all
   five touched JS/MJS syntax checks and whitespace validation passed. The

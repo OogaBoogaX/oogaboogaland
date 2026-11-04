@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createPassiveBody, PASSIVE } from "../src/passive-body.js";
 import { SessionRegistry, GRACE_MS } from "../src/host-sessions.js";
 import { prepare } from "./fixtures/npc-walker-fixture.mjs";
+import { managedRigs } from "./fixtures/clanker-pose-rig.mjs";
 const motion = (o={}) => ({x:0,y:4,z:3,yaw:.7,vx:0,vy:0,vz:0,grounded:false,...o});
 const equipment = () => ({weapon:'gun',mode:'combat',magazine:17,spareAmmo:[4,22],primaryOwned:true,secondaryOwned:true,selectedSlot:2,unlimited:false,jetpack:true,jetpackOwned:true,fuel:.37});
 const claim = () => ({protocol:'body-test',world:'walker-fixture-1',accountId:1,bodyId:'resident',zone:'outside',body:{kind:'ooga',motion:motion(),equipment:equipment()}});
@@ -93,4 +94,47 @@ test('VirtualHost commits real passive landing with handback and rolls both back
   assert.equal(saved.sessions.pending[0].applied,true);assert.equal(saved.sessions.pending[0].at,160000);
   now=200000;const again=await create().begin('runner-c',60000,{resumePaused:true});await create().tick(again,[]);
   assert.equal(data.get(HOST.key).simulation.handbacks,1,'committed handback never replays after restart');
+});
+
+test('committed grace views raise only the free arm, keep equipment and falling bodies, and restore exactly on reclaim',()=>{
+  const f=managedRigs({presence:true}),B=f.B,root=B.scene.createNode(),clanker=f.make();B.scene.addChild(root,clanker.root);
+  const ooga=B.models.caveman({name:'presence-fixture',skin:'#b08060',hair:'#38281c',fur:'#846040',height:1.4,belly:1,rand:B.math.mulberry32(3)});
+  B.scene.addChild(root,ooga.root);ooga.parts.snack.visible=false;clanker.poseManaged(.05,1,4,3,.7,2,true);
+  const flask=B.scene.createNode({geometry:B.agent.labFlaskGeometry(0)});B.models.attachGlassShell(flask);assert.equal(clanker.holdLabItem(flask),true);
+  const options={protocol:'body-test',world:'walker-fixture-1',adapter:{stepPassive:m=>({...m,y:m.y-.1})}},reg=new SessionRegistry(options);
+  const first=reg.connect(claim(),100000).session,second=reg.connect({...claim(),accountId:2,bodyId:'clanker',body:{kind:'clanker',motion:motion(),equipment:equipment()}},100000).session;
+  reg.disconnect(first,100000);reg.disconnect(second,100000);reg.advance(100050);
+  const presence=B.hostPresence.create({root,capacity:2,resolve:id=>({actor:id==='clanker'?clanker:ooga,freeArm:id==='clanker'?'armR':'armL',generation:id==='clanker'?2:1})});
+  const beforeOoga={...ooga.parts.armL.rotation},beforeClanker=JSON.stringify(clanker.createPoseProjector('presence').capture('vessel'));
+  const views=[reg.view(1),reg.view(2)],equipmentBefore=JSON.stringify(views.map(v=>v.equipment));
+  presence.prepare();clanker.root.position.y=views[1].motion.y;const y=clanker.root.position.y;
+  presence.render({now:100050,views,departures:[]});assert.equal(presence.hands,2);assert.equal(clanker.root.position.y,y);
+  assert.equal(clanker.labItem,flask);assert.equal(flask.parent,clanker.parts.armL);assert.equal(JSON.stringify(views.map(v=>v.equipment)),equipmentBefore);
+  assert.ok(clanker.parts.armR.world[5]<0,'raised arm points its down-axis up');
+  assert.ok(ooga.parts.armL.world[5]<0);assert.throws(()=>presence.render({now:100050,views,departures:[]}),/presentation/,'prepare must precede the next pose');
+  presence.prepare();assert.deepEqual({...ooga.parts.armL.rotation},beforeOoga);
+  clanker.root.position.y=4;assert.equal(JSON.stringify(clanker.createPoseProjector('presence').capture('vessel')),beforeClanker);
+  const back=reg.connect({...claim(),body:undefined},100050);assert.equal(back.resumed,true);
+  presence.render({now:100050,views:[reg.view(1),reg.view(2)],departures:[]});assert.equal(presence.hands,1);
+  presence.prepare();const unchanged=JSON.stringify(clanker.createPoseProjector('presence').capture('vessel'));
+  const bad=[reg.view(2),{...reg.view(1),state:'bad'}];assert.throws(()=>presence.render({now:100051,views:bad,departures:[]}),/presentation/);
+  assert.throws(()=>presence.render({now:100051,views:[{...reg.view(2),generation:1}],departures:[]}),/presentation/,'old generation cannot pose a replacement body');
+  assert.equal(JSON.stringify(clanker.createPoseProjector('presence').capture('vessel')),unchanged);
+  presence.dispose();assert.equal(root.children.length,2);assert.equal(presence.liveGeometry(new Set()).size,0);clanker.dispose();
+});
+
+test('64 simultaneous departures use bounded existing glyph pools, original deadlines and reduced-motion cleanup',()=>{
+  const f=managedRigs({presence:true}),B=f.B,root=B.scene.createNode(),actors=Array.from({length:64},(_,i)=>{const a=f.make();a.poseManaged(.05,i*3,0,0,.3,0);B.scene.addChild(root,a.root);return a;});
+  let resolves=0;const resolve=id=>{resolves++;const i=Number(id.slice(5));return {actor:actors[i],freeArm:'armR',generation:i+1};};
+  const presence=B.hostPresence.create({root,capacity:64,resolve}),departures=actors.map((_,i)=>({type:'depart',glyph:'green',applied:true,bodyId:`body-${i}`,generation:i+1,at:160000,body:{kind:'clanker'}}));
+  const batches=root.children.at(-1).children.filter(n=>n.instanceData),bytes=batches.reduce((n,b)=>n+b.instanceData.byteLength,0);
+  assert.equal(bytes,64*48*20*4);assert.ok(batches.length<=32);assert.ok(batches.every(b=>b.geometry.matrixGlyph));
+  presence.prepare();presence.render({now:160350,views:[],departures});assert.equal(presence.beams,64);assert.equal(resolves,64);
+  assert.equal(batches.reduce((n,b)=>n+b.instanceCount,0),64*48);assert.equal(batches.reduce((n,b)=>n+b.instanceData.byteLength,0),bytes);
+  f.setReduced(true);presence.prepare();presence.render({now:160400,views:[],departures});assert.equal(presence.beams,0);assert.ok(batches.every(b=>!b.visible));
+  f.setReduced(false);presence.prepare();presence.render({now:160700,views:[],departures});assert.equal(presence.beams,0);assert.equal(presence.expired,64);const calls=resolves;
+  presence.prepare();presence.render({now:160701,views:[],departures:[{...departures[0],applied:false}]});assert.equal(presence.expired,0,'unapplied intent is not visually completed');
+  presence.dispose();const late=B.hostPresence.create({root,capacity:64,resolve});late.prepare();late.render({now:200000,views:[],departures});
+  assert.equal(resolves,calls,'restart cannot restart an expired beam or spawn absent bodies');assert.equal(late.beams,0);
+  late.dispose();assert.equal(root.children.length,64);for(const actor of actors)actor.dispose();assert.equal(root.children.length,0);
 });
