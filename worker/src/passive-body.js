@@ -2,7 +2,7 @@
 // World adapters supply the actual support/ceiling/swept-solid kernels for the
 // body's zone and shape. Moving rigs, water/abyss policy and Clanker poses still
 // require production world adapters; this is not a replacement for crew.update.
-export const PASSIVE = Object.freeze({ stepMs: 50, position: 10000, speed: 100, probes: 12, skin: .0001 });
+export const PASSIVE = Object.freeze({ stepMs: 50, position: 10000, speed: 100, probes: 12, skin: .0001, radius: 3 });
 const finite = (n, bound) => Number.isFinite(n) && Math.abs(n) <= bound;
 const bad = () => { throw new Error("invalid passive body adapter or motion"); };
 export function createPassiveBody({ world, gravity }) {
@@ -13,7 +13,7 @@ export function createPassiveBody({ world, gravity }) {
       || !finite(input.yaw,2*Math.PI) || typeof input.grounded !== "boolean" || !Number.isFinite(dtMs) || dtMs <= 0 || dtMs > PASSIVE.stepMs) bad();
     const w = world({ bodyId: input.bodyId, zone: input.zone, kind: input.kind });
     if (!w || !["supportAt","ceilingAt","segmentClear"].every(k => typeof w[k] === "function")
-      || !finite(w.radius,2) || w.radius <= 0 || !finite(w.height,10) || w.height <= .3) bad();
+      || !finite(w.radius,PASSIVE.radius) || w.radius <= 0 || !finite(w.height,10) || w.height <= .3) bad();
     const support = (x,z,y) => { const v=w.supportAt(x,z,y,0,w.radius); if (v!==-Infinity && !finite(v,PASSIVE.position)) bad(); return v; };
     const ceiling = (x,z,y) => { const v=w.ceilingAt(x,z,y,w.radius); if (v!==Infinity && !finite(v,PASSIVE.position)) bad(); return v; };
     const clear = (x,y,z,tx,ty,tz) => { const v=w.segmentClear(x,y,z,tx,ty,tz,w.radius,w.height); if(typeof v!=="boolean") bad(); return v; };

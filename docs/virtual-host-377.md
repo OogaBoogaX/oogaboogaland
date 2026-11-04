@@ -64,6 +64,13 @@ Headless composition now uses actual supported movement and recovery search with
 the existing work controller, surface planner and mesh kernels. Crowd/shoulder,
 pose, weapon/reload and airborne integration remain explicit caller boundaries.
 
+The Clanker's existing `prepareJump` and `updateJump` now live in shared
+`src/js/clanker-flight.js`, imported by both the browser and an inactive Worker
+adapter. Preflight, reversal, blocked-arc release and wall-arrival decisions are
+unchanged. Bounded arc continuation survives reconstruction with its caller's
+coupled body state. This does not provide the remaining drive gravity, climbing,
+rage, lab work, rig animation or Clanker display projection.
+
 The complete headless Ooga/Clanker simulation, production Durable Object runner,
 browser follower conversion, authenticated protocol negotiation, independent
 tracks, disconnect handoff and visual rendering remain integration gates. Neither
@@ -608,11 +615,80 @@ are not integrated. The full NPC airborne/crowd/weapon/Clanker state machine is
 also unfinished. These are implementation gates, not completed by the preview
 transport or the disconnected-body motion adapter.
 
+### Clanker flight and measured recovery costs
+
+`worker/src/clanker-flight.js` wraps the actual browser arc controller with
+explicit synchronous world, peer and rig queries. Each step is at most 250 ms;
+sample buffers are capped at 32 segments, checkpoints at 4 KiB, and schema,
+world and sample count must match on restore. The normal browser uses the shared
+functions directly, preserving its existing scratch object and callbacks.
+Original function blocks are retained as a hashed parity fixture from `af1abb83`.
+
+The checkpoint holds from/to/lift, progress, duration, reverse/blocked state and
+wall/cave-exit flags. Its `points` buffer is scratch: preflight writes point zero
+and each successive segment before reading it, while flight and reservation
+checks use the arc parameters. Restore allocates an empty buffer. Tests compare
+fresh preflight points, every resumed flight sample, subsequent flights and a
+refused partial preflight against the original controller. Runtime validation
+checks finite bounded fields without serializing a checkpoint each step.
+Position, drive/gravity state, climb/captive state, occupancy and work still
+belong in one enclosing actor checkpoint; the fixture's coupled snapshot is
+not a production actor codec.
+
+Integration found the mesh/passive wrappers admitted radii only up to 2 m,
+rejecting the actual flight controller's 2.25 m envelope. Their explicit cap is
+now 3 m, covering that and the existing 2.9 m managed smash envelope; tests still
+refuse 3.01 m. Mesh/node/triangle, height and step bounds are unchanged. A radius
+envelope is not a rig silhouette or proof of captive/wall collision correctness.
+
+`node worker/eval/clanker-flight.mjs` makes a finite offline measurement. On
+Node 22.23.4/macOS arm64, 120 samples of 128 authored actors used 26,112 collision
+queries per variant. Original flight measured p50/p95 0.0763/0.2251 ms, the bounded
+shared controller 0.0736/0.1707 ms. The original runs in a VM context and neither
+variant includes full AI or rigs; these figures do not establish a production
+speedup. Before removing per-step checkpoint serialization the wrapper measured
+1.2355/1.6221 ms on the same fixture. The coupled 128-actor fixture shrank from
+163,201 to 97,153 JSON bytes by excluding scratch points. That leaves only 1,151
+bytes of the 98,304-byte host budget **before sessions and other world state**:
+it is not evidence that a full roster fits. Do not raise the cap to hide this;
+production admission and a compact complete actor codec remain necessary.
+
+Five local recoveries of all 64 grace bodies through the real mesh/passive
+kernels used exactly 76,800 substeps each. p50 was 54.9703 ms, maximum 68.7189 ms
+(also the five-sample p95); session/departure checkpoints were 31,781/31,068 bytes.
+The bodies share an authored static platform and have no peer collisions.
+Complex island geometry, moving supports, actor overlap resolution, serialization
+of the full world, RPC/storage, DO CPU/duration and account usage remain unmeasured.
+This is a reason to bound recovery work per invocation before activation, not
+permission for a permanent paid loop. No production resources were accessed.
+
+The body handoff review also found state missing from session schema 2: Ooga
+`jumps`/`hopV`/leap continuation and health/recovery, Clanker `drive.jumps` and
+health/form, and supported seat/ladder/grab modes. The existing motion record has
+vertical velocity but cannot reconstruct all those controller states. Reusing
+`crew.control`/`relocatePlayer` or `clankers.possess` would reset them. A versioned
+complete body codec must precede admission; older records must be explicitly
+rejected or migrated under a reviewed policy. Equipment application must restore
+ordered magazines and exact fuel without calling ownership/grant paths, cancel
+reload/burst/thrust holds, and reconcile resource changes newer than the last
+confirmed checkpoint. This increment does not change live movement authority.
+Room's close outbox, independent body tracks (#379), the reusable pose path
+(#464), free-arm/open-hand rendering and green-beam handback are still unfinished.
+
 ## Verification record
 
 Verified locally November 4, 2026 on Node v22.23.4:
 
-- Latest projection/publication increment: **66/66** focused host tests passed;
+- Clanker flight increment: initial integration failed all three new checks on
+  the real 2.25 m shape exceeding the old 2 m mesh cap. One adapter repair passed
+  all **16/16** affected flight/passive/collision checks. Scratch-checkpoint and
+  validation review then passed the affected **3/3**; the final host batch passed
+  **71/71**, including partial-preflight/restart parity. Unit **408/408**, build
+  (**316 scripts**), nine touched JS/MJS syntax checks and whitespace passed.
+  No Hub/full/browser rerun; the 20-entry failure ledger is unchanged. Logs and finite measurements are in
+  `verification-clanker-{flight-first,flight-repair,flight-review,host,unit}.log`
+  and `verification-clanker-cost-{first,final}.json` in the task workspace.
+- Previous projection/publication increment: **66/66** focused host tests passed;
   after the explicit-acquisition review fix, the affected actual Room/bridge file
   passed **6/6**; the final adapter-bound and immutable-projection checks passed
   **19/19** in the affected host/pose files. Encoder parity covers 200 pose/equipment transitions against the

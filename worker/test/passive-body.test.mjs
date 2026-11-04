@@ -7,7 +7,20 @@ const motion = (o={}) => ({x:0,y:4,z:3,yaw:.7,vx:0,vy:0,vz:0,grounded:false,...o
 const equipment = () => ({weapon:'gun',mode:'combat',magazine:17,spareAmmo:[4,22],primaryOwned:true,secondaryOwned:true,selectedSlot:2,unlimited:false,jetpack:true,jetpackOwned:true,fuel:.37});
 const claim = () => ({protocol:'body-test',world:'walker-fixture-1',accountId:1,bodyId:'resident',zone:'outside',body:{kind:'ooga',motion:motion(),equipment:equipment()}});
 const withId = m => ({bodyId:'resident',zone:'outside',kind:'ooga',...m});
-async function physics(){const f=await prepare(),mesh=f.catalog.create();let calls=0;const step=createPassiveBody({gravity:12,world:()=>{calls++;return {...mesh,radius:.2,height:1.8};}});return {mesh,step,get calls(){return calls;}};}
+async function physics(radius=.2,height=1.8){const f=await prepare(),mesh=f.catalog.create();let calls=0;const step=createPassiveBody({gravity:12,world:()=>{calls++;return {...mesh,radius,height};}});return {mesh,step,get calls(){return calls;}};}
+
+test('Clanker flight-sized grace body falls and reclaims without narrowing its collision shape',async()=>{
+  const p=await physics(2.25,2.8),options={protocol:'body-test',world:'walker-fixture-1',adapter:{stepPassive:p.step}};
+  const reg=new SessionRegistry(options),c=claim();c.body.kind='clanker';c.body.motion=motion({x:-4,z:-4,vy:-2});
+  const old=reg.connect(c,100000).session;reg.disconnect(old,100000);
+  const resumed=SessionRegistry.restore(reg.checkpoint(),options);resumed.recover(101000,[]);
+  const result=resumed.connect({...c,body:undefined},101000);
+  assert.equal(result.resumed,true);assert.equal(result.view.kind,'clanker');assert.equal(result.view.motion.y,0);
+  assert.deepEqual(result.view.equipment,c.body.equipment);
+  assert.throws(()=>p.mesh.clearAt(0,1,0,3.01,2.8),/invalid/);
+  const unsupported=await physics(3.01,2.8);
+  assert.throws(()=>unsupported.step({...withId(motion()),kind:'clanker'},50),/invalid/);
+});
 
 test('passive gravity uses real mesh support, swept walls and ceilings, with no thrust or artificial floor',async()=>{
   const p=await physics();let m=motion();for(let i=0;i<40;i++)m=p.step(withId(m),50);

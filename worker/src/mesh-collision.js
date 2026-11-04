@@ -5,7 +5,8 @@ import "../../src/js/convex.js";
 import "../../src/js/solid-props.js";
 
 export const COLLISION = Object.freeze({ kernel: "solid-props-1", nodes: 128, geometries: 64, vertices: 16384,
-  triangles: 16384, placedTriangles: 32768, bundleBytes: 2 * 1024 * 1024, checkpointBytes: 48 * 1024 });
+  triangles: 16384, placedTriangles: 32768, bundleBytes: 2 * 1024 * 1024, checkpointBytes: 48 * 1024,
+  radius: 3 }); // Existing Clanker flight is 2.25; its managed smash envelope reaches 2.9.
 const bad = () => { throw new Error("invalid mesh collision state"); };
 const exact = (o, keys) => o && typeof o === "object" && !Array.isArray(o)
   && (Object.getPrototypeOf(o) === Object.prototype || Object.getPrototypeOf(o) === null)
@@ -122,5 +123,5 @@ export async function prepareMeshCollision(input) {
 }
 
 function check(x, y, z, radius, height) {
-  if (![x, y, z].every(n => finite(n)) || !finite(radius, 2) || radius < 0 || !finite(height, 10) || height < 0) bad();
+  if (![x, y, z].every(n => finite(n)) || !finite(radius, COLLISION.radius) || radius < 0 || !finite(height, 10) || height < 0) bad();
 }
