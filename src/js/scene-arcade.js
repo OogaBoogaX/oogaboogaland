@@ -355,6 +355,8 @@
         const bay = createNode({ geometry: AM.rallyRepairBay() });
         const panel = createNode({ geometry: AM.cabinetPanel(c.index), position: { x: -1.08, y: 0.1, z: 0.28 }, rotation: { x: -0.22, y: -0.4, z: -0.12 } });
         const clanker = BL.agent.create({ groundAt: () => 0, form: "ape", x: -0.32, z: 1.3, heading: Math.PI - 0.35, scale: 0.65 });
+        addChild(clanker.parts.head, createNode({ geometry: AM.staffHat(2) }));
+        addChild(clanker.parts.torso, createNode({ geometry: AM.staffVest(2) }));
         clanker.chest.rotation.x = 1.35;
         clanker.parts.head.rotation.x = -0.4;
         clanker.parts.armR.rotation.x = -2.65;

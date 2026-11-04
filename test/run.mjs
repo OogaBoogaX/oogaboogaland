@@ -15811,18 +15811,34 @@ const arcadePlay = { name: "arcade play", why: "rule: Cloud Hopper replaces the 
     record('arcade play: Cloud Hopper launches unarmed through the cabinet, preserves preview gear, returns safely twice and blocks Rally', false, JSON.stringify({ entered, state, layout })); return;
   }
   const before = await b.evaluate(`(() => { const B = __ooga, H = BL.scenes.hub.debug.cloudHopper, p = B.pilot.player;
-    const weapons = new Set([p.parts.club.geometry, p.parts.gun.geometry, ...p.parts.gun.children.map(n => n.geometry)]);
-    let armedPreview = false; const create = BL.iconRenderer.createRenderer;
-    BL.iconRenderer.createRenderer = (...args) => { const renderer = create(...args), render = renderer.render;
-      renderer.render = (root, camera) => { BL.scene.traverseVisible(root, node => { if (node.geometry && weapons.has(node.geometry)) armedPreview = true; }); return render(root,camera); }; return renderer; };
+    // Gun rounds share their mesh with spare belt magazines; use the actual weapon bodies
+    // as witnesses, and require the carried spare gear to remain in the unarmed portrait.
+    const weapons = new Set([p.parts.club.geometry, p.parts.gunBody.geometry]);
+    const spares = p.magazineModels.filter(m => m?.node.parent && m.node.visible).map(m => m.node.geometry);
+    const seenWeapons = new Set(), seenSpares = new Set(), create = BL.iconRenderer.createRenderer;
     const canvas = document.createElement('canvas'), club = p.parts.club.visible, gun = p.parts.gun.visible;
-    p.parts.club.visible = p.parts.gun.visible = true;
-    BL.hud.renderBodyIcon(canvas,p,96,128,false); BL.iconRenderer.createRenderer = create;
-    const previewSafe = !armedPreview && p.parts.club.visible && p.parts.gun.visible;
-    p.parts.club.visible = club; p.parts.gun.visible = gun;
+    let previewSafe = false, previewDetail;
+    BL.iconRenderer.createRenderer = (...args) => { const renderer = create(...args), render = renderer.render;
+      renderer.render = (root, camera) => { BL.scene.traverseVisible(root, node => {
+        if (weapons.has(node.geometry)) seenWeapons.add(node.geometry);
+        if (spares.includes(node.geometry)) seenSpares.add(node.geometry);
+      }); return render(root,camera); }; return renderer; };
+    try {
+      p.parts.club.visible = p.parts.gun.visible = true;
+      BL.hud.renderBodyIcon(canvas,p,96,128,true);
+      const detectsWeapons = seenWeapons.size === weapons.size;
+      seenWeapons.clear(); seenSpares.clear();
+      BL.hud.renderBodyIcon(canvas,p,96,128,false);
+      previewDetail = { detectsWeapons, weapons: seenWeapons.size, spares: spares.length,
+        preservesSpares: spares.every(g => seenSpares.has(g)), club: p.parts.club.visible, gun: p.parts.gun.visible };
+      previewSafe = detectsWeapons && !seenWeapons.size && previewDetail.preservesSpares && p.parts.club.visible && p.parts.gun.visible;
+    } finally {
+      BL.iconRenderer.createRenderer = create;
+      p.parts.club.visible = club; p.parts.gun.visible = gun;
+    }
     document.querySelector('.cloud-hopper-panel .game-intro-go:not([hidden])').click();
     return { who: p.traits.name, phase: H.phase, unarmed: !p.parts.club.visible && !p.parts.gun.visible,
-      previewSafe, y: H.platform.position.y, dockGone: !B.props.some(prop => prop.prop === 'dock') };
+      previewSafe, previewDetail, y: H.platform.position.y, dockGone: !B.props.some(prop => prop.prop === 'dock') };
   })()`);
   await b.evaluate(`__ooga.advance(2,1/60)`);
   const rising = await b.evaluate(`(() => { const H = BL.scenes.hub.debug.cloudHopper, p = __ooga.pilot.player;
@@ -15844,8 +15860,8 @@ const arcadePlay = { name: "arcade play", why: "rule: Cloud Hopper replaces the 
     layout.front === 'cloud-hopper' && layout.rally.x < layout.flame && layout.flame < layout.invaders.x && layout.rally.z === layout.invaders.z
     && layout.rally.y === 3.2 && layout.rally.turn === 0 && layout.rally.service
     && layout.deck === 3.2 && layout.walkable && layout.label.includes('out of order') && blocked && entered && before.who === 'portlandhodl'
-    && ['ready','briefing'].includes(before.phase) && before.unarmed && before.previewSafe && before.dockGone
-    && ['ready','briefing'].includes(rising.phase) && rising.y === before.y && rising.unarmed && returned && back.who === 'portlandhodl'
+    && before.phase === 'lifting' && before.unarmed && before.previewSafe && before.dockGone
+    && rising.phase === 'lifting' && rising.y > before.y && rising.unarmed && returned && back.who === 'portlandhodl'
     && back.off < 0.5 && back.unarmed && back.parked && again && cancelled && routed, JSON.stringify(state));
 
 } };
@@ -21059,6 +21075,75 @@ scene("bifrost", { url: hubPage(src, "solo=1&character=portlandhodl"), steps: [b
 scene("bifrost", { label: "dsb round trip", query: "character=portlandhodl", steps: [bifrostDsb] });
 scene("bifrost", { label: "poker round trip", query: "character=portlandhodl", steps: [bifrostPoker] });
 scene("bifrost", { label: "canvas2d", url: hubPage(src, "canvas2d=1"), steps: [bifrostCanvas] });
+// Exercise the real Cloud Hopper controls between measured frames, including result-card starts.
+const cloudCabinetJourney = async (b, dir, shape) => {
+  await b.evaluate(`window.__cabinetRaf = requestAnimationFrame; window.requestAnimationFrame = () => 0`);
+  await b.sleep(50); // Let the already queued frame finish; advance now owns the displayed frames.
+  const state = `(() => { const B=__ooga,H=BL.scenes.hub.debug.cloudHopper,s=document.getElementById('stage'),r=s.getBoundingClientRect(),p=document.querySelector('.cloud-hopper-panel'),m=new DOMMatrix(getComputedStyle(s).transform); return {
+    phase:H.phase,cabinet:B.cabinet.phase,view:B.pilot.view,y:H.platform.position.y,top:H.start.y,level:H.level.id,time:H.time,
+    panel:p.open && !p.hidden && getComputedStyle(p).visibility!=='hidden',actor:H.actor.root.visible,
+    rider:(()=>{const a=H.actor,q=B.project(a.root.position.x,a.root.position.y-a.baseY+a.bodyHeight*.5,a.root.position.z,{});return !!q && q.x>0 && q.x<s.clientWidth && q.y>0 && q.y<s.clientHeight && a.parts.head.visible;})(),
+    width:r.width,height:r.height,ratio:r.width/r.height,viewport:innerWidth/innerHeight,scaleX:m.a,scaleY:m.d,
+    full:!s.classList.contains('cabinet-display'),backdrop:!document.getElementById('cabinet-backdrop').hidden
+  }; })()`;
+  const shot = async label => { await b.screenshot(join(dir, `cloud-hopper-${shape}-${label}.png`)); return b.evaluate(state); };
+  const click = label => b.evaluate(`(() => { const b=[...document.querySelectorAll('.cloud-hopper-panel .actions button')].find(b=>!b.hidden && b.textContent.trim()===${JSON.stringify(label)}); if(!b) throw new Error('Missing action: '+${JSON.stringify(label)}); b.click(); })()`);
+  const advance = seconds => b.evaluate(`__ooga.advance(${seconds},1/60)`);
+  const rows = [];
+  try {
+    await click('Play'); await advance(1/60); rows.push(await shot('ascent-start'));
+    await advance(2); rows.push(await shot('ascent-middle'));
+    await advance(4.1); rows.push(await shot('ascent-top'));
+    record(`Cloud Hopper cabinet ${shape}: Start closes selection and the live cloud rises during an undistorted zoom, immersive at the top`,
+      rows[0].phase==='lifting' && !rows[0].panel && rows[0].actor && rows[0].rider && rows[0].y<rows[0].top && rows[0].cabinet==='expanding'
+      && rows[1].phase==='lifting' && rows[1].y>rows[0].y && rows[1].width>rows[0].width && !rows[1].panel && rows[1].rider
+      && rows[2].y===rows[2].top && rows[2].cabinet==='playing' && rows[2].full && !rows[2].backdrop
+      && rows.every(r=>r.time===0 && Math.abs(r.ratio-r.viewport)<0.001 && r.scaleX===r.scaleY), JSON.stringify(rows));
+    const skip = async () => { await b.evaluate(`if(BL.scenes.hub.debug.cloudHopper.phase==='briefing') document.querySelector('.cloud-hopper-guide .actions button:last-child').click()`); await advance(1.1); };
+    await skip();
+    // Social checks wait for real rendered frames; resume the display loop while they run.
+    await b.evaluate(`window.requestAnimationFrame=window.__cabinetRaf;document.dispatchEvent(new Event('visibilitychange'))`);
+    await arcadeSocialPanels(b, `cabinet cloud-hopper ${shape}`);
+    await b.evaluate(`window.requestAnimationFrame=()=>0`); await b.sleep(50);
+    const finish = async won => b.evaluate(`(() => { const B=__ooga,H=BL.scenes.hub.debug.cloudHopper,a=H.actor;
+      a.hop=.1;a.hopV=1;H.postUpdate();
+      ${won ? "B.setPileLevel(0); B.advance(.1,1/60); Object.assign(a.root.position,{x:0,y:B.altar.height+.23+a.baseY,z:0});a.hop=a.hopV=0;" : "a.root.position.y=-1000;a.hopV=-20;"}
+      H.postUpdate(); B.advance(1/60,1/60);
+    })()`);
+    const rides = [];
+    for (const [label, won, action] of [['death',false,'Play again'],['complete',true,'Replay'],['levels',true,'Play level 2']]) {
+      await finish(won); const result = await shot(label);
+      if(label==='levels') {
+        await click('Level select');
+        await b.evaluate(`document.querySelectorAll('.cloud-hopper-level')[1].click()`);
+        rows.push(await shot('level-select'));
+      }
+      await click(action); const start = await b.evaluate(state);
+      await advance(2); const middle=await shot(label+'-ascent');
+      await advance(4.1); const top=await b.evaluate(state);
+      rides.push({label,result,start,middle,top}); await skip();
+    }
+    record(`Cloud Hopper cabinet ${shape}: death, completion, replay and another level stay immersed and every attempt ascends from home`,
+      rides.every(r=>r.result.phase===(r.label==='death'?'dq':'won') && r.result.panel
+        && r.start.phase==='lifting' && r.start.y<r.start.top && !r.start.panel
+        && r.middle.phase==='lifting' && r.middle.y>r.start.y && r.top.y===r.top.top
+        && [r.result,r.start,r.middle,r.top].every(v=>v.cabinet==='playing' && v.full && !v.backdrop))
+      && rows.at(-1).panel && rows.at(-1).full && rides.at(-1).top.level===2,JSON.stringify(rides));
+    await finish(false);
+    await click('Return to arcade');
+    const exit=[];
+    for(const [label,seconds] of [['exit-start',.0167],['exit-middle',.25],['exit-glass',.35]]) {
+      await advance(seconds); exit.push(await shot(label));
+    }
+    record(`Cloud Hopper cabinet ${shape}: explicit return withdraws continuously with a hidden result card and equal image scales`,
+      exit.every(r=>r.cabinet==='shrinking' && !r.panel && Math.abs(r.ratio-r.viewport)<.001 && r.scaleX===r.scaleY)
+      && exit[0].width>exit[1].width && exit[1].width>exit[2].width,JSON.stringify(exit));
+    writeFileSync(join(dir,`cloud-hopper-${shape}-transitions.json`),JSON.stringify({entry:rows,rides,exit},null,2));
+    return { expanded: rows[2].cabinet==='playing', full: rows[2].full && !rows[2].backdrop };
+  } finally {
+    await b.evaluate(`window.requestAnimationFrame=window.__cabinetRaf;delete window.__cabinetRaf;document.dispatchEvent(new Event('visibilitychange'))`);
+  }
+};
 const cabinetVisit = id => ({ name: `cabinet ${id}`, why: "rule: each cabinet contains usable menu controls, expands its game and returns the same player with combat mouse capture and no retained UI", run: async b => {
   const dir = join(root, "untracked", "cabinet-review", "visual-pass"); mkdirSync(dir, { recursive: true });
   const shape = await b.evaluate(`innerWidth < 600 ? 'phone' : __ooga.renderer.kind === 'canvas2d' ? 'canvas2d' : 'desktop'`);
@@ -21106,30 +21191,42 @@ const cabinetVisit = id => ({ name: `cabinet ${id}`, why: "rule: each cabinet co
     record(`cabinet ${id}: ${shape} attributed top ten fits the glass without starting play`, scores.fit && scores.phase==='menu' && scores.rows.length===10 && scores.rows[0].name==='same-player' && scores.rows[1].name==='same-player' && scores.rows[0].score==='1,000' && scores.rows[9].score==='775', JSON.stringify(scores));
     if (shape === "phone") { await activateToggle(); await b.evaluate(`document.querySelector('.cabinet-leaderboard-toggle').blur()`); }
   }
+  let cloudJourney = null;
   if (id === "cloud-hopper") {
     if (shape === "phone") await b.evaluate(`document.querySelector('.cabinet-scores-toggle').click()`);
     const leaderboard = await b.evaluate(`(() => { const e=document.querySelector('.cloud-hopper-panel .cloud-hopper-scores'), r=e.getBoundingClientRect(), p=e.closest('dialog').getBoundingClientRect();return !e.hidden && r.width>0 && r.height>40 && r.top>=p.top && r.bottom<=p.bottom; })()`);
     await b.screenshot(join(dir, `${id}-${shape}-leaderboard.png`));
     record(`cabinet Cloud Hopper: ${shape} leaderboard remains available inside glass`, leaderboard);
     if (shape === "phone") await b.evaluate(`document.querySelector('.cabinet-scores-toggle').click()`);
-    await b.evaluate(`document.querySelector('.cloud-hopper-panel .game-intro-go:not([hidden])').click()`);
+    cloudJourney = await cloudCabinetJourney(b, dir, shape);
   }
   else if (id === "mine") await b.evaluate(`document.querySelector('[data-action="mine-start"]').click()`);
   else await b.key("Enter");
-  const expanded = await untilPage(b, `B.cabinet.phase === 'playing'`, 10000);
-  const full = await b.evaluate(`document.getElementById('stage').clientWidth === innerWidth && document.getElementById('cabinet-backdrop').hidden && document.getElementById('cabinet-foreground').hidden && !document.querySelector('.cabinet-leaderboard') && __ooga.fade === 0`);
+  const expanded = cloudJourney ? cloudJourney.expanded : await untilPage(b, `B.cabinet.phase === 'playing'`, 10000);
+  const full = cloudJourney ? cloudJourney.full : await b.evaluate(`document.getElementById('stage').clientWidth === innerWidth && document.getElementById('cabinet-backdrop').hidden && document.getElementById('cabinet-foreground').hidden && !document.querySelector('.cabinet-leaderboard') && __ooga.fade === 0`);
   if (shape === "phone" && id !== "cloud-hopper") {
     const header = await b.evaluate(`(() => { const e=document.getElementById('equipment-hud'), p=document.querySelector('.topbar .presets:not([hidden])'); const buttons=p ? [...p.querySelectorAll('button')].filter(b=>!b.hidden && b.getClientRects().length) : []; return {equipment:e.getBoundingClientRect().top,presets:p?.getBoundingClientRect().top,tappable:buttons.every(b=>{const r=b.getBoundingClientRect();return b.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));})}; })()`);
     record(`cabinet ${id}: phone header controls return above the game`, header.equipment < 180 && (!header.presets || header.presets < 180) && header.tappable, JSON.stringify(header));
   }
-  await arcadeSocialPanels(b, `cabinet ${id} ${shape}`);
-  await b.screenshot(join(dir, `${id}-${shape}-play.png`));
-  await b.evaluate(`__ooga.go('arcade')`);
+  if (id !== "cloud-hopper") {
+    await arcadeSocialPanels(b, `cabinet ${id} ${shape}`);
+    await b.screenshot(join(dir, `${id}-${shape}-play.png`));
+    await b.evaluate(`__ooga.go('arcade')`);
+  }
   const returned = await untilPage(b, `B.scene === 'arcade' && !B.transitioning`, 30000);
   if (shape === "desktop") await untilPage(b, 'document.pointerLockElement === document.getElementById("scene")');
   const back = await b.evaluate(`(() => { const p=__ooga.pilot.player, at=BL.arcadeCabinets.get(${JSON.stringify(id)});return {who:p?.traits.name,locked:document.pointerLockElement===document.getElementById('scene'),off:p?Math.hypot(p.root.position.x-at.x,p.root.position.z-at.z):999,clean:!__ooga.cabinet.active && !document.getElementById('stage').classList.contains('cabinet-display')}; })()`);
   await b.screenshot(join(dir, `${id}-${shape}-return.png`));
   record(`cabinet ${id}: menu in glass, full-screen game, same Ooga at cabinet, clean return`, menu && framed.inside && !framed.fade && expanded && full && returned && back.who === 'portlandhodl' && back.off < .1 && back.clean && (shape !== 'desktop' || back.locked), JSON.stringify({framed,expanded,full,returned,back}));
+  if (id === "cloud-hopper") {
+    await b.evaluate(`__ooga.arcade.open('hub','cloud-hopper')`);
+    const reopened=await untilPage(b, `B.cabinet.phase==='menu'`,30000);
+    const partial=await b.evaluate(`(() => { document.querySelector('.cloud-hopper-panel .game-intro-go:not([hidden])').click();__ooga.advance(1.5,1/60);
+      const s=document.getElementById('stage'),before=s.getBoundingClientRect().width,phase=BL.scenes.hub.debug.cloudHopper.phase;
+      __ooga.go('arcade');__ooga.advance(.1,1/60);return {phase,before,after:s.getBoundingClientRect().width,panel:document.querySelector('.cloud-hopper-panel').open};})()`);
+    const cancelled=await untilPage(b,`B.scene==='arcade' && !B.transitioning`,30000);
+    record(`Cloud Hopper cabinet ${shape}: a later visit can cancel a partial ascent without expanding again or sticking`,reopened && cancelled && partial.phase==='lifting' && partial.after<partial.before && !partial.panel,JSON.stringify(partial));
+  }
 } });
 for (const id of ["cloud-hopper", "drop", "orbit", "mine", "invaders", "stampede", "pong", "snake", "flap", "breaker", "dash", "stacker"]) {
   scene("arcade", { label: `cabinet ${id} desktop`, exclusive: true, query: "character=portlandhodl&pos=0", opts: { motion: true }, steps: [cabinetVisit(id)] });

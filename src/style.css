@@ -10665,7 +10665,7 @@ body[data-cabinet-phase]:not([data-cabinet-phase="idle"]) :is(.game-intro, .race
   .cabinet-leaderboard h3 { font-size: 12px; }
 }
 /* Native dialogs escape the stage's clipping; position Cloud Hopper in the same measured aperture. */
-body:is([data-cabinet-phase="menu"], [data-cabinet-phase="expanding"], [data-cabinet-phase="shrinking"]) .cloud-hopper-panel {
+body[data-cabinet-phase="menu"] .cloud-hopper-panel {
   left: var(--cabinet-center-x); top: var(--cabinet-center-y);
   width: var(--cabinet-width); max-width: none; max-height: var(--cabinet-height);
   padding: 12px; border: 0; border-radius: 0; box-shadow: none; animation: none;
@@ -10678,7 +10678,8 @@ body[data-cabinet-phase="menu"] .cloud-hopper-intro .cloud-hopper-levels { flex:
 body[data-cabinet-phase="menu"] .cloud-hopper-intro .cloud-hopper-level-name { white-space: normal; font-size: 14px; }
 body[data-cabinet-phase="menu"] .cloud-hopper-intro .actions { flex-shrink: 0; margin: 0; gap: 8px; }
 body[data-cabinet-phase="menu"] .cloud-hopper-intro .actions button { min-height: 44px; padding: 6px 8px; font-size: 13px; animation: none; }
-body:is([data-cabinet-phase="menu"], [data-cabinet-phase="expanding"], [data-cabinet-phase="shrinking"]) .cloud-hopper-panel::backdrop { background: transparent; }
+body[data-cabinet-phase="menu"] .cloud-hopper-panel::backdrop { background: transparent; }
+body:is([data-cabinet-phase="shrinking"], [data-cabinet-phase="leaving"]) :is(.cloud-hopper-panel, .cloud-hopper-hud) { visibility: hidden; }
 .cabinet-scores-toggle { display: none; }
 body[data-cabinet-phase="menu"] .cloud-hopper-intro .cloud-hopper-scores { flex: 1 1 0; min-height: 0; overflow-y: auto; }
 body[data-cabinet-phase="menu"] .cloud-hopper-intro .cloud-hopper-scores-title { margin: 4px 0; }
