@@ -1,3 +1,5 @@
+import "../../src/js/arcade-cabinets.js";
+export const CABINETS = globalThis.BL.arcadeCabinets;
 export { hockey } from "./hockey.js";
 import "../../src/js/hockey-wire.js";
 export const HOCKEY = globalThis.BL.hockeyWire;
@@ -243,6 +245,8 @@ export const parseClientMessage = (text) => {
   if (!msg || typeof msg !== "object" || Array.isArray(msg)) return false;
   // Only chat earns the longer frame: a repeated key could make a chat-prefixed frame parse as anything.
   if (text.length > MESSAGE_MAX && msg.t !== "chat") return false;
+  if (msg.t === "cabinet") return CABINETS.get(msg.id) && (msg.op === "take" || msg.op === "leave") && Number.isSafeInteger(msg.q) && msg.q > 0
+    ? { t: "cabinet", op: msg.op, id: msg.id, q: msg.q } : null;
   if (msg.t === "hockey") return HOCKEY.parse(msg);
   if (msg.t === "studio") return parseStudioCommand(msg);
   if (msg.t === "pose") {

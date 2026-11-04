@@ -2065,7 +2065,7 @@
     // The ramp, and the ember before its mouth: slow while it waits, quick while a combo is on, burning in multiball.
     const ramp = createNode({ geometry: AM.pinRamp(), position: { x: 0, y: 0, z: D }, sightHidden: true }), arrow = createNode({ geometry: LIT[0], sightHidden: true });
     addChild(g, ...balls.map((b) => b.node), ...flippers, ...lanes.map((l) => l.node), ...teeth.map((k) => k.node), ramp, arrow);
-    const board = scoreboard(g, "PINBALL", 5, "#ffd98a", { x: 0, y: 2.05, z: D - T.l / 2 - 0.05 });
+    const board = scoreboard(g, "PINBALL", 6, "#ffd98a", { x: 0, y: 2.05, z: D - T.l / 2 - 0.05 });
     const flash = flasher(host), status = makeStatus("Coconuts");
     board.show(host.best);
     // Walls as segments [u0, v0, u1, v1]: the sides, the top, the shooter lane's wall, the slopes down to the

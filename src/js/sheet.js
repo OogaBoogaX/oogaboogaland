@@ -68,9 +68,10 @@
       target.addEventListener(type, fn, { ...options, signal });
       listeners.push(() => target.removeEventListener(type, fn, options));
     };
+    let playing = null;
     const save = () => {
       window.clearTimeout(saveTimer); saveTimer = 0;
-      if (disposed) return;
+      if (disposed || playing) return;
       shared = { open: main.open, tab: main.tab, folded, drawer: 2,
         height: savedHeight, rect: main.rect, dock: main.dock, windows: windows.filter((w) => w !== main).map((w) => ({ open: w.open, tab: w.tab, rect: w.rect, dock: w.dock })) };
       try { localStorage.setItem(KEY, JSON.stringify(shared)); } catch { /* Storage may be unavailable. */ }
@@ -128,7 +129,7 @@
     const front = (w) => {
       const i = windows.indexOf(w);
       windows.splice(i, 1); windows.push(w);
-      for (let j = 0; j < windows.length; j++) windows[j].node.style.zIndex = String(13 + j);
+      for (let j = 0; j < windows.length; j++) windows[j].node.style.zIndex = String((playing ? 90 : 13) + j);
       placeFooter();
     };
     const observe = new MutationObserver(notify);
@@ -425,7 +426,29 @@
     });
     refresh();
     for (let i = 0; i < windows.length; i++) windows[i].node.style.zIndex = String(13 + i);
+    // Games start folded without overwriting the visitor's ordinary panel choices.
+    const setPlaying = (on) => {
+      if (!!playing === !!on) return;
+      finish();
+      if (on) {
+        playing = { folded, windows: windows.map(w => ({ node: w.node, open: w.open, tab: w.tab })) };
+        for (const w of windows) w.open = false;
+        folded = true;
+        if (document.activeElement?.closest(".sheet")) document.activeElement.blur();
+      } else {
+        folded = playing.folded;
+        for (const w of windows) {
+          const saved = playing.windows.find(p => p.node === w.node);
+          w.open = saved?.open || false;
+          if (saved) w.tab = saved.tab;
+        }
+        playing = null;
+      }
+      for (let i = 0; i < windows.length; i++) windows[i].node.style.zIndex = String((playing ? 90 : 13) + i);
+      refresh();
+    };
     return {
+      setPlaying,
       setLootCount(count) { lootCount = count; showCounts(); },
       selectTab(name) { select(ownerOf(name) || main, name); },
       fold() { finish(); folded = true; if (document.activeElement?.closest(".sheet")) document.activeElement.blur(); refresh(); save(); },
@@ -434,9 +457,9 @@
         if (!w) return false;
         finish(); close(w); return true;
       },
-      setHidden(on) { finish(); hidden = !!on; if (hidden && document.activeElement?.closest(".sheet")) document.activeElement.blur(); refresh(); },
+      setHidden(on) { if (hidden === !!on) return; finish(); hidden = !!on; if (hidden && document.activeElement?.closest(".sheet")) document.activeElement.blur(); refresh(); },
       dispose() {
-        finish(); save(); disposed = true; observe.disconnect(); unsubscribe();
+        setPlaying(false); finish(); save(); disposed = true; observe.disconnect(); unsubscribe();
         if (paintBadges === showCounts) paintBadges = null;
         for (const off of listeners) off();
         listeners.length = 0;
