@@ -174,7 +174,7 @@
 
   let hockeySession = null, hockeyRemotes = null, hockeyAmbience = null, hockeyLobby = null, hockeyPlayers = null;
   const HOCKEY_SEAT = { x: 0, y: 0, z: 0, yaw: 0 };
-  let hockeySide = 0;
+  let hockeySide = 0, hockeyPreferredEnd = 0;
   const hockeyView = side => {
     if (side === hockeySide) return;
     const cx = BL.hockeyWire.TABLES[slot][0], cz = BL.hockeyWire.TABLES[slot][1];
@@ -216,15 +216,17 @@
     if (!play) return;
     if (hockeySession?.human) {
       if (phase !== "play" || !e.isPrimary) return;
-      renderer.ray(e.offsetX * renderer.size.width / canvasEl.clientWidth, e.offsetY * renderer.size.height / canvasEl.clientHeight, camera, HOCKEY_RAY);
+      const rect = canvasEl.getBoundingClientRect();
+      renderer.ray((e.clientX - rect.left) * renderer.size.width / rect.width, (e.clientY - rect.top) * renderer.size.height / rect.height, camera, HOCKEY_RAY);
       if (HOCKEY_RAY.dy >= -0.001) return;
       const AH = AM.HOCKEY, t = (AH.y + 0.005 - HOCKEY_RAY.oy) / HOCKEY_RAY.dy;
       if (t < 0) return;
       const center = BL.hockeyWire.TABLES[slot], sign = hockeySide ? -1 : 1;
       const u = (HOCKEY_RAY.ox + HOCKEY_RAY.dx * t - center[0]) * sign / AH.scale;
       const v = AH.w / 2 - (HOCKEY_RAY.oz + HOCKEY_RAY.dz * t - center[1]) * sign / AH.scale;
-      aim.x = Math.max(-1, Math.min(1, u / (AH.d / 2 - 0.07)));
-      aim.depth = Math.max(0, Math.min(1, (v - 0.07) / (AH.w / 2 - 0.14)));
+      aim.x = Math.max(-1, Math.min(1, u / BL.hockeyWire.MALLET_X));
+      aim.depth = Math.max(0, Math.min(1, (v - BL.hockeyWire.MALLET_RADIUS) / BL.hockeyWire.MALLET_DEPTH));
+      hockeySession.point(aim.x, aim.depth);
       return;
     }
     if (!play.aims || play.taps) { if (e.type === "pointerdown" && e.button === 0) act(); return; }
@@ -264,6 +266,8 @@
       while (DRAG.ny - y >= notch) { aim.stepsY--; DRAG.ny -= notch; DRAG.x = x; }
     }
   };
+  // Mouse hover keeps sliding along a rail even after leaving the canvas or crossing a HUD element.
+  const onHockeyPoint = e => { if (hockeySession?.human && e.target !== canvasEl && e.pointerType === "mouse") onPoint(e); };
   const onLift = (e) => { if (e.pointerId === steerId) steerId = -1; DRAG.down = false; };
   const onTapped = () => { if (play.aims && !play.taps && !(retro && pressedBy === "mouse")) act(); };
   const onActDown = (e) => {
@@ -989,9 +993,9 @@
       el.root.dataset.hockeyShared = "true";
       text(el.needLabel, "To win");
       text(el.help, "One point per goal. First to seven, with no time limit. Leaving ends the match for both players. Live play continues while this menu is open.");
-      hockeySession = BL.hockeySession.create({ slot, play, aim,
+      hockeySession = BL.hockeySession.create({ slot, play, aim, preferredEnd: hockeyPreferredEnd,
         lobby: message => { text(hockeyLobby, message); introEl.hidden = false; },
-        sideChanged: side => { hockeyView(side); BL.hockeyWire.seat(slot, side, 0, HOCKEY_SEAT); },
+        sideChanged: (side, flip) => { const physical = side ^ flip; hockeyView(physical); BL.hockeyWire.seat(slot, physical, 0, HOCKEY_SEAT); },
         start: () => {
           el.act.hidden = hockeySession.human;
           if (hockeySession.human) {
@@ -1008,13 +1012,14 @@
   const enter = (ctx, id) => {
     cabinetView = ctx.cabinet;
     ({ renderer, game, world, go } = ctx);
-    kind = id; hockeySide = 0; aim.depth = 0.13 / 0.96;
+    kind = id; hockeySide = 0; hockeyPreferredEnd = id === "hockey" && world.hockeyEnd === 1 ? 1 : 0; world.hockeyEnd = null; aim.depth = 0.13 / 0.96;
     slot = Number.isInteger(ctx.place) && KINDS[id].spots[ctx.place] ? ctx.place : 0;
     aim.x = aim.hold = aim.steps = aim.y = aim.stepsY = 0; held.left = held.right = held.up = held.down = DRAG.down = false;
     canvasEl = ctx.canvas;
     window.addEventListener("keydown", onDown, { signal: ctx.signal });
     window.addEventListener("keyup", onUp, { signal: ctx.signal });
     canvasEl.addEventListener("pointermove", onPoint, { signal: ctx.signal });
+    if (kind === "hockey") window.addEventListener("pointermove", onHockeyPoint, { signal: ctx.signal });
     canvasEl.addEventListener("pointerdown", onPoint, { signal: ctx.signal });
     canvasEl.addEventListener("pointerup", onLift, { signal: ctx.signal });
     canvasEl.addEventListener("pointercancel", onLift, { signal: ctx.signal });
@@ -1100,7 +1105,8 @@
     BL.net.setBody(world.pilot);
     if (kind !== "hockey") BL.net.sendPose(machine.play.x, machine.y || 0, machine.play.z, machine.play.facing);
     if (kind === "hockey") {
-      BL.hockeyWire.seat(slot, 0, 0, HOCKEY_SEAT);
+      play.orientation(hockeyPreferredEnd); hockeyView(hockeyPreferredEnd);
+      BL.hockeyWire.seat(slot, hockeyPreferredEnd, 0, HOCKEY_SEAT);
       BL.net.sendPose(HOCKEY_SEAT.x, 0, HOCKEY_SEAT.z, HOCKEY_SEAT.yaw);
       hockeyAmbience = BL.arcadeAmbience.create(audio, HOCKEY_SEAT, camera);
       hockeyRemotes = BL.remotePlayers.create({ root, fx, visible: rec => rec.zone === BL.hockeyWire.ZONE,
@@ -1181,7 +1187,7 @@
     }
     T.slow = Math.max(0, T.slow - dt);
     T.big = Math.max(0, T.big - dt);
-    if (hockeySession?.follower) { if (play.following) play.follow(dt); }
+    if (hockeySession?.follower) play.follow(dt);
     else if (phase !== "pause" || hockeySession) play.update(!hockeySession?.human && pace < 1 && !play.status.verb ? dt * pace : dt);
     audio.tick();
     if (rival) {
@@ -1316,6 +1322,7 @@
     window.removeEventListener("keydown", onDown);
     window.removeEventListener("keyup", onUp);
     canvasEl.removeEventListener("pointermove", onPoint);
+    window.removeEventListener("pointermove", onHockeyPoint);
     canvasEl.removeEventListener("pointerdown", onPoint);
     canvasEl.removeEventListener("pointerup", onLift);
     canvasEl.removeEventListener("pointercancel", onLift);

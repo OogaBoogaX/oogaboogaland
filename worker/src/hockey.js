@@ -11,14 +11,14 @@ export const hockey = {
       const s = p.hockey;
       if (s && s.ids[0] === p.id && s.i >= 0 && s.i < 3) {
         const proof = room.hockeyLimits?.proofs[s.i];
-        if (proof && proof.s === s.s && proof.v === 2 && s.ids.every((id, side) => id === proof.ids[side] && (!id || room.players.get(id)?.connectionToken === proof.tokens[side]))) room.hockeyTables[s.i] = s;
+        if (s.wire === 4 && (s.e === 0 || s.e === 1) && proof && proof.s === s.s && proof.v === 2 && s.ids.every((id, side) => id === proof.ids[side] && (!id || room.players.get(id)?.connectionToken === proof.tokens[side]))) room.hockeyTables[s.i] = s;
         else hockey.clear(room, s); // An attachment alone cannot prove that an admission write committed.
       }
     }
     hockey.sweep(room);
   },
   tell(room, s, to = null) {
-    const msg = { t: "hockey", k: "table", i: s.i, s: s.s, ids: s.ids, ready: s.ready, phase: s.phase, start: s.start || 0, q: s.q, a: s.a, now: Date.now() };
+    const msg = { t: "hockey", k: "table", i: s.i, s: s.s, ids: s.ids, ready: s.ready, e: s.e, phase: s.phase, start: s.start || 0, q: s.q, a: s.a, now: Date.now() };
     if (to) room.send(to.ws, msg); else room.broadcastZone(W.ZONE, msg);
   },
   save(room, s) {
@@ -36,7 +36,7 @@ export const hockey = {
   },
   sweep(room) {
     const now = Date.now();
-    for (const s of room.hockeyTables || []) if (s && ((s.phase !== "play" && now - (s.doneAt || s.created) > 240000) || s.ids.some((id, side) => id && (!W.near(room.players.get(id), s.i) || now - s.seen[side] > W.IDLE_MS)))) hockey.clear(room, s);
+    for (const s of room.hockeyTables || []) if (s && ((s.wire !== 4 || (s.e !== 0 && s.e !== 1)) || ((s.phase !== "play" && now - (s.doneAt || s.created) > 240000) || s.ids.some((id, side) => id && (!W.near(room.players.get(id), s.i) || now - s.seen[side] > W.IDLE_MS))))) hockey.clear(room, s);
   },
   arrive(room, p) {
     hockey.sweep(room);
@@ -75,7 +75,7 @@ export const hockey = {
       const proof = { s: sid, ids, tokens: ids.map(id => id ? room.players.get(id).connectionToken : null), v: 2 };
       if (!hockeyLimits.admit(room, p, m.i, !s, proof)) return;
       if (!s) {
-        s = { created: now, i: m.i, s: sid, ids: [p.id, 0], ready: [false, false], seen: [now, now], phase: "lobby", q: -1, inputQ: -1, a: null };
+        s = { wire: 4, e: m.e, created: now, i: m.i, s: sid, ids: [p.id, 0], ready: [false, false], seen: [now, now], phase: "lobby", q: -1, inputQ: -1, a: null };
         room.hockeyTables[m.i] = s;
       } else if (s.phase === "lobby" && !s.ids[1]) { s.ids[1] = p.id; s.seen[1] = now; s.ready = [false, false]; }
       else { room.send(p.ws, { t: "hockey", k: "busy", i: m.i }); return; }
@@ -103,7 +103,9 @@ export const hockey = {
     }
     if (m.k === "input" && side === 1 && s.phase === "play" && m.q > s.inputQ) {
       s.inputQ = m.q;
-      room.send(room.players.get(s.ids[0]).ws, { t: "hockey", k: "input", i: s.i, s: s.s, q: m.q, x: m.x, y: m.y });
+      const input = { t: "hockey", k: "input", i: s.i, s: s.s, q: m.q, x: m.x, y: m.y, v: 4 };
+      if (m.p) { input.p = m.p; input.d = m.d; }
+      room.send(room.players.get(s.ids[0]).ws, input);
     }
     hockey.save(room, s);
   }
