@@ -15,7 +15,9 @@
   const number = n => Number.isFinite(n) && Math.abs(n) <= 1000000;
   const bool = n => n === 0 || n === 1;
   const fields = ["v", "world", "profile", "appearance", "held", "nodes"];
+  const checked = new WeakSet();
   const validate = s => {
+    if (checked.has(s)) return true;
     if (!s || typeof s !== "object" || Reflect.ownKeys(s).length !== fields.length
       || fields.some(k => !Object.getOwnPropertyDescriptor(s, k) || !("value" in Object.getOwnPropertyDescriptor(s, k)))
       || s.v !== VERSION || !id(s.world) || !(s.held === null || id(s.held))
@@ -42,6 +44,14 @@
     if (new TextEncoder().encode(JSON.stringify(s)).byteLength > MAX_BYTES) bad();
     return true;
   };
+  // Only a fully validated, deeply frozen value may skip repeated validation.
+  // Weak ownership retains no frame or rig after its consumer releases it.
+  const immutable = snapshot => {
+    validate(snapshot);
+    for (const row of snapshot.nodes) Object.freeze(row);
+    Object.freeze(snapshot.nodes); Object.freeze(snapshot.profile); Object.freeze(snapshot.appearance);
+    Object.freeze(snapshot); checked.add(snapshot); return snapshot;
+  };
   const create = ({ world, profile, nodes, appearance, setAppearance, held }) => {
     if (!id(world) || !dense(profile, 10) || !profile.every(number)) bad();
     profile = profile.slice();
@@ -51,13 +61,15 @@
       if (!Array.isArray(list) || list.length > MAX_NODES || new Set(list).size !== list.length) bad();
       return list;
     };
-    const capture = (item = null) => {
+    const capture = (item = null, freeze = false) => {
+      if (typeof freeze !== "boolean") bad();
       const list = current(item);
       const result = { v: VERSION, world, profile: profile.slice(), appearance: appearance(), held: item,
         nodes: list.map((n, i) => [i === 0 ? -1 : list.indexOf(n.parent), +n.visible, +!!n.quaternion,
           n.position.x, n.position.y, n.position.z, n.rotation.x, n.rotation.y, n.rotation.z,
           n.scale.x, n.scale.y, n.scale.z, ...(n.quaternion ? Array.from(n.quaternion) : [0, 0, 0, 0]),
           n.poseYaw ?? 0, n.poseLean ?? 0, n.poseLeanY ?? 0, n.glow, n.scorch, n.ember, +!!n.matrixNative, +!!n.matrixLiving]) };
+      if (freeze) return immutable(result);
       validate(result); return result;
     };
     const axes = ["x", "y", "z"];
@@ -85,5 +97,5 @@
     };
     return { capture, apply };
   };
-  BL.clankerPose = { VERSION, MAX_NODES, MAX_BYTES, WIDTH, validate, create };
+  BL.clankerPose = { VERSION, MAX_NODES, MAX_BYTES, WIDTH, validate, immutable, create };
 })();

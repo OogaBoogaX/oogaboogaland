@@ -260,6 +260,49 @@ test("53 continuing Clanker rigs survive bounded roster and existing host storag
   }
 });
 
+test("compact animation roster preserves exact continuation and refuses malformed bounded scalar records",()=>{
+  const f=managedRigs(),codec=f.B.clankerState,world='compact-continuation',actors=Array.from({length:53},f.make);
+  const records=actors.map((a,index)=>{
+    a.poseManaged(.07,index/7,0,index/11,index/10,2,false,false,'',{roll:.8,rollAngle:index/9,rollSide:.5});
+    if(index===0)a.root.position.x=-0;
+    return {index,snapshot:a.createManagedCheckpoint(world).capture()};
+  });
+  const packed=JSON.parse(JSON.stringify(codec.packRoster(world,records,true)));
+  assert.ok(Object.isFrozen(records[0].snapshot) && Object.isFrozen(records[0].snapshot.pose.nodes[0]));
+  assert.throws(()=>{records[0].snapshot.values[0]='poison';},TypeError);
+  assert.throws(()=>{records[0].snapshot.pose.nodes[0][3]=99;},TypeError);
+  const storage=createCheckpointPack(65536),decoded=codec.unpackRoster(storage.unpack(storage.pack(packed)));
+  assert.equal(packed.v,2);assert.equal(JSON.stringify(decoded),JSON.stringify(records));
+  assert.equal(JSON.stringify(codec.packRoster(world,[...records].reverse(),true)),JSON.stringify(packed));
+  assert.equal(JSON.stringify(codec.unpackRoster(codec.packRoster(world,[],true))),'[]');
+  assert.ok(Buffer.byteLength(JSON.stringify(packed))<Buffer.byteLength(JSON.stringify(codec.packRoster(world,records))));
+  for(let i=0;i<actors.length;i++){
+    const follower=f.make(),reader=follower.createManagedCheckpoint(world);reader.restore(decoded[i].snapshot);
+    assert.equal(f.display(follower),f.display(actors[i]));
+    for(const actor of [follower,actors[i]])actor.poseManaged(.03,i/5,0,i/9,.3,2,false,false,'',{roll:.4,rollAngle:.7,rollSide:.3});
+    assert.equal(JSON.stringify(reader.capture()),JSON.stringify(actors[i].createManagedCheckpoint(world).capture()));
+    follower.dispose();
+  }
+  const mutate=(s,fn)=>{const b=Buffer.from(s.actors[0][1],'base64');fn(b);s.actors[0][1]=b.toString('base64');};
+  const edits=[s=>s.v=99,s=>s.actors.pop(),s=>s.actors[1][0]=0,s=>s.actors[0].push(null),
+    s=>s.actors[0][1]='AA==AAAA',s=>s.actors[0][1]='AB==',s=>s.actors[0][1]='A'.repeat(4096),
+    s=>s.actors[0][1]=Buffer.from([1,255,0]).toString('base64'),
+    s=>s.actors[0][1]=Buffer.from([1,0,40]).toString('base64'),
+    s=>s.actors[0][1]=Buffer.from([1,0,254]).toString('base64'),
+    s=>s.actors[0][1]=Buffer.from([1,0,8]).toString('base64'), // explicit enum default is noncanonical
+    s=>mutate(s,b=>b[0]++),s=>s.poses[0]='AAAA'+s.poses[0].slice(4),
+    s=>s.poses.push('AA=='),s=>s.world='other'];
+  for(const edit of edits){const bad=structuredClone(packed);edit(bad);assert.throws(()=>codec.unpackRoster(bad),/continuation|packet/);}
+  for(const tag of [254,255])for(const number of [NaN,Infinity,-0,0,1]){
+    const b=Buffer.alloc(3+(tag===254?4:8));b[0]=1;b[1]=3;b[2]=tag;
+    if(tag===254)b.writeFloatLE(number,3);else b.writeDoubleLE(number,3);
+    const bad=structuredClone(packed);bad.actors[0][1]=b.toString('base64');assert.throws(()=>codec.unpackRoster(bad),/continuation/);
+  }
+  let reads=0;const getter=structuredClone(packed);Object.defineProperty(getter.actors[0],'1',{get(){reads++;return '';}});
+  assert.throws(()=>codec.unpackRoster(getter),/continuation/);assert.equal(reads,0);
+  for(const actor of actors)actor.dispose();
+});
+
 test("mixed packet bounds reject malformed compression, expansion, counts, versions and corrupted or incomplete frames", () => {
   const f = managedRigs(), actor = f.make(), codec = globalThis.BL.npcPosePacket, world = "packet-bounds";
   const ooga = createNpcPose(1, 1)([{ index: 0, actor: rig() }]);

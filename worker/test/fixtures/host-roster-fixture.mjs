@@ -5,18 +5,23 @@ import { prepare as prepareWalker } from "./npc-walker-fixture.mjs";
 import { initial, prepare, capture, restore } from "./clanker-flight-fixture.mjs";
 import { compactSimulation } from "../../src/simulation-checkpoint.js";
 
-export async function rosterFixture(pairs, budget = 64 * 1024) {
+export async function rosterFixture(pairs, budget = 64 * 1024, varied = false) {
   if (!Number.isInteger(pairs) || pairs < 1 || pairs > 53) throw Error("roster fixture supports 1..53 pairs; remeasure before growth");
   const walker = await prepareWalker(), flight = await prepare();
-  const source = { version: `roster-fixture-${pairs}`, checkpointBytes: budget,
+  const source = { version: `roster-fixture-${pairs}${varied ? '-varied' : ''}`, checkpointBytes: budget,
     initial() {
       return { meshes: walker.initial().meshes,
         oogas: Array.from({ length: pairs }, (_, i) => {
           const s = walker.initial(); s.actor.index = i;
+          if (varied) {
+            s.rng.word = (1351747683 + Math.imul(i, 2654435761)) >>> 0;
+            s.actor.root.position.x = -2 + i % 9 / 2; s.actor.root.position.z = -1 + i % 7 / 3;
+            for (let step = 0; step < i % 31; step++) walker.runtime(s).step(.05);
+          }
           const saved = walker.encode(s); delete saved.meshes; return saved;
         }),
-        clankers: Array.from({ length: pairs }, () => {
-          const e = initial(); flight.controller.prepareJump(e, 0, 0, -4, 1.5); return capture(e);
+        clankers: Array.from({ length: pairs }, (_, i) => {
+          const e = initial(); flight.controller.prepareJump(e, varied ? i / 100 : 0, 0, varied ? -4 + i / 70 : -4, varied ? 1.5 + i / 53 : 1.5); return capture(e);
         }) };
     },
     validate(s) {

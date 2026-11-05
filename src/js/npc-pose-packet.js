@@ -84,7 +84,8 @@
     header.setUint32(0, MAGIC, true); header.setUint32(4, VERSION, true); header.setUint32(8, at, true); header.setUint32(12, hash(content), true);
     new Uint8Array(result, HEADER).set(compressed); return result;
   };
-  const unpack = buffer => {
+  const unpack = (buffer, immutable = false) => {
+    if (typeof immutable !== "boolean") bad();
     if (!(buffer instanceof ArrayBuffer) || buffer.byteLength <= HEADER || buffer.byteLength > MAX) bad();
     const header = new DataView(buffer);
     if (header.getUint32(0, true) !== MAGIC || header.getUint32(4, true) !== VERSION) bad();
@@ -115,7 +116,8 @@
       if (nodes < 11 || nodes > BL.clankerPose.MAX_NODES) bad();
       const pose = { v: BL.clankerPose.VERSION, world, profile, appearance, held,
         nodes: Array.from({ length: nodes }, () => Array.from({ length: BL.clankerPose.WIDTH }, number)) };
-      BL.clankerPose.validate(pose); clankers.push({ index, pose });
+      if (immutable) BL.clankerPose.immutable(pose); else BL.clankerPose.validate(pose);
+      clankers.push({ index, pose });
     }
     if (at !== raw.length) bad();
     return { world, ooga, clankers };

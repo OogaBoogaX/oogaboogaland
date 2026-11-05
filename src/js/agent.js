@@ -1739,7 +1739,7 @@
       return {
         capture({ item = null, bench = null } = {}) {
           if (onIdle) throw new Error("invalid managed Clanker continuation");
-          return BL.clankerState.capture(state, projection.capture(item), officeHands, labGripY, bench);
+          return BL.clankerState.capture(state, projection.capture(item, true), officeHands, labGripY, bench);
         },
         restore(snapshot, { item = null, bench = null } = {}) {
           if (onIdle) throw new Error("invalid managed Clanker continuation");

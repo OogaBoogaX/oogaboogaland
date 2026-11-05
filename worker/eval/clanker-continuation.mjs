@@ -6,7 +6,7 @@ import { rosterFixture } from "../test/fixtures/host-roster-fixture.mjs";
 import { createCheckpointPack, PACK } from "../src/checkpoint-pack.js";
 
 const f=managedRigs(),count=53,world="continuation-cost-1",codec=f.B.clankerState;
-const fixture=await rosterFixture(count),simulation=fixture.source.initial(),storage=createCheckpointPack(64*1024);
+const fixture=await rosterFixture(count,64*1024,process.argv.includes('--varied')),simulation=fixture.source.initial(),storage=createCheckpointPack(64*1024,{intern:true});
 const make=(_,i)=>f.B.agent.create({...f.options,suitColor:i%f.B.agent.SUIT_COLORS});
 const actors=Array.from({length:count},make),resumed=Array.from({length:count},make);
 const held=actors.map((_,i)=>i%7?null:`vessel:${i}`),benches=actors.map((_,i)=>({id:i}));
@@ -15,7 +15,7 @@ for(let i=0;i<count;i++)if(held[i])for(const actor of [actors[i],resumed[i]]){
 }
 const writers=actors.map(a=>a.createManagedCheckpoint(world)),readers=resumed.map(a=>a.createManagedCheckpoint(world));
 const binding=(actor,i)=>({item:held[i],bench:actor.labPickupBench?{id:`bench:${i}`,value:benches[i]}:null});
-const samples=[],cpuStart=process.cpuUsage();let maxRaw=0,maxRoster=0,maxStored=0,maxCombinedRaw=0,maxCombinedNodes=0,combinedRefusals=0,maxCombinedStored=0;
+const samples=[],combinedSamples=[],cpuStart=process.cpuUsage();let maxRaw=0,maxRoster=0,maxStored=0,maxCombinedRaw=0,maxCombinedNodes=0,combinedRefusals=0,maxCombinedStored=0;
 const nodes=value=>value&&typeof value==='object'?1+Object.values(value).reduce((n,v)=>n+nodes(v),0):1;
 for(let frame=0;frame<120;frame++){
   fixture.source.step(simulation,50);
@@ -29,7 +29,7 @@ for(let frame=0;frame<120;frame++){
   }
   const at=performance.now(),records=writers.map((writer,index)=>({index,snapshot:writer.capture(binding(actors[index],index))}));
   maxRaw=Math.max(maxRaw,Buffer.byteLength(JSON.stringify(records)));
-  const packed=codec.packRoster(world,records),plain=JSON.parse(JSON.stringify(packed));
+  const packed=codec.packRoster(world,records,true),plain=JSON.parse(JSON.stringify(packed));
   maxRoster=Math.max(maxRoster,Buffer.byteLength(JSON.stringify(plain)));
   const saved=storage.pack(plain);maxStored=Math.max(maxStored,Buffer.byteLength(JSON.stringify(saved)));
   const restored=codec.unpackRoster(storage.unpack(JSON.parse(JSON.stringify(saved))));
@@ -43,17 +43,22 @@ for(let frame=0;frame<120;frame++){
     assert.equal(f.display(resumed[i]),f.display(actors[i]));
   }
   const combined={simulation,rigs:plain};maxCombinedRaw=Math.max(maxCombinedRaw,Buffer.byteLength(JSON.stringify(combined)));maxCombinedNodes=Math.max(maxCombinedNodes,nodes(combined));
-  try {const value=storage.pack(combined);maxCombinedStored=Math.max(maxCombinedStored,Buffer.byteLength(JSON.stringify(value)));}
-  catch(error){assert.match(error.message,/capacity/);combinedRefusals++;}
+  try {
+    const at=performance.now(),value=storage.pack(combined),text=JSON.stringify(value),restored=storage.unpack(JSON.parse(text));
+    combinedSamples.push(performance.now()-at);maxCombinedStored=Math.max(maxCombinedStored,Buffer.byteLength(text));
+    assert.deepEqual(restored,combined);
+  }
+  catch(error){assert.match(error.message,/invalid packed checkpoint or capacity|^state size$/);combinedRefusals++;}
 }
-const cpu=process.cpuUsage(cpuStart);samples.sort((a,b)=>a-b);
-console.log(JSON.stringify({clankers:count,frames:120,animationRecordLimit:codec.MAX_BYTES,rosterLimit:codec.ROSTER_BYTES,
+const cpu=process.cpuUsage(cpuStart);samples.sort((a,b)=>a-b);combinedSamples.sort((a,b)=>a-b);
+console.log(JSON.stringify({clankers:count,frames:120,variedControllers:process.argv.includes('--varied'),animationRecordLimit:codec.MAX_BYTES,rosterLimit:codec.ROSTER_BYTES,
   maxRawAnimationRosterBytes:maxRaw,maxPosePackedRosterBytes:maxRoster,maxStoragePackedRosterBytes:maxStored,
   combinedWithExisting106ActorFixture:{maxRawBytes:maxCombinedRaw,maxNodes:maxCombinedNodes,existingNodeLimit:PACK.nodes,
-    simulationBudget:64*1024,maxStoredBytes:maxCombinedStored,refusedFrames:combinedRefusals},
+    simulationBudget:64*1024,maxStoredBytes:maxCombinedStored,remainingBytes:64*1024-maxCombinedStored,refusedFrames:combinedRefusals,
+    packStorageRestoreMs:combinedSamples.length?{p50:combinedSamples[Math.floor(combinedSamples.length*.5)],p95:combinedSamples[Math.floor(combinedSamples.length*.95)],max:combinedSamples.at(-1)}:null},
   capturePackStorageRestoreMs:{p50:samples[60],p95:samples[114],max:samples.at(-1)},totalCPUIncludingWorldRigAndVerificationMs:(cpu.user+cpu.system)/1000,
   limitations:['authored work/flight/world inputs, not the full hub or player body state',
     'animation continuation is exact but outer Clanker AI, health, reservations and input authority are not included',
     'mock-free actual rig and packer in Node/VM; not Durable Object CPU, browser GPU or account billing',
-    'combined capacity refusal is an activation blocker, not permission to increase limits']},null,2));
+    'remaining capacity does not admit unmeasured full body/AI state; all original host limits remain unchanged']},null,2));
 for(const actor of [...actors,...resumed])actor.dispose();

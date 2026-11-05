@@ -1157,7 +1157,7 @@ and the existing authored work/flight fixture measured:
 | Combined JSON-tree nodes / existing cap | 17,644 / 13,000 |
 | Combined checkpoints refused | 120 / 120 |
 
-**Combined admission is blocked.** The animation roster fits alone; adding it to
+**The original representation blocked combined admission.** The animation roster fits alone; adding it to
 the current 106-actor fixture does not fit the existing representation. It is
 not valid to add these records to the previously measured 72,633-byte host
 checkpoint or claim its former margin still holds. The experiment deliberately
@@ -1167,6 +1167,67 @@ comparison from the listed path; total process CPU, including world/rig steps
 and verification, was 27,192.624 ms. These Node/VM results are not billed DO CPU,
 production duration or an affordability claim. Evidence:
 `verification-continuation-cost-final.json` in the task workspace.
+
+### Compact checkpoint redesign: explicit opt-in, still inactive
+
+The subsequent storage increment addresses that measured overflow without raising
+the 13,000-source-node, 256 KiB expanded, 64 KiB simulation or 96 KiB total host
+limits. `clankerState.packRoster(world, records, true)` selects roster version 2:
+fixed-schema sparse scalar rows omit only defined defaults and encode exact
+float32/float64 values, signed zero and explicit unset sentinels. Its bounded
+base64 chunks use the same complete pose packet. Version 1 remains the default
+and readable. Unknown versions, malformed scalar indices, noncanonical numeric
+tags/padding, duplicate actors and truncated/chunk-overrun data are refused.
+Each row expands to a fixed number of animation fields; no dynamic dictionary or
+run-length instruction can amplify it. This does not remove any actor state.
+
+`createCheckpointPack(bytes, { intern: true })` and the matching
+`compactSimulation` option explicitly select checkpoint version 2. The world
+version changes from `pack1-...` to `pack2-...`; existing worlds cannot silently
+switch or roll back. Source validation retains every existing structural bound.
+Up to 128 repeated scalar values share a dictionary; the tree uses tagged exact
+IEEE numbers, UTF-16 strings (including lone surrogates) and bounded array/object
+records. Strings/fields are data only. The decoder charges each original node,
+depth and expanded JSON byte count before allocating its subtree, including every
+dictionary occurrence and repeated property name. Wire bytes are bounded before
+decoding; neither metadata nor session reservations are borrowed. The opt-in
+reader accepts old version 1 records; the default reader refuses version 2.
+
+Profiling found repeated pose descriptor validation dominating the rig path.
+Only fully validated, deeply frozen pose/continuation snapshots now reuse private
+weak validation records. Mutable copies still undergo full validation. No actor
+or historical frame is retained by a strong global cache; capture/decode remains
+independent of previous frames. Default display capture stays mutable; continuation
+capture and roster decode return immutable snapshots.
+
+A 120-frame varied workload now uses distinct Ooga RNG seeds, starting positions
+and work phases, distinct Clanker flight trajectories, 53 varied actual rig poses
+and eight held vessels. This avoids relying on 53 copies of one controller state.
+It measured **12,412 nodes** and **51,343 stored bytes**, with **0/120 refusals**:
+14,193 bytes remain in the declared 64 KiB simulation profile. Rig capture,
+packing, storage round trip and restore measured **61.476 / 64.600 ms p50/p95**;
+the combined controller/rig storage round trip separately measured
+**8.527 / 11.164 ms**. Do not add percentiles or interpret these authored Node
+measurements as production CPU or billing. Earlier textual interning still failed
+the varied byte budget; the binary representation supersedes those intermediate
+results. Evidence: `verification-storage-binary-varied.json`.
+
+The actual VirtualHost test combines 106 varied controllers, 53 managed rigs and
+30 retained sessions, checks the 31st admission refusal, failed-write rollback,
+fresh host reconstruction, old-world refusal, exact animation capture, same-body
+reclaim at 59,999 ms with unchanged equipment and the other 29 expiry intents.
+It preserves simulation state throughout outage recovery without replaying NPC
+decisions. The measured host checkpoint peaked at 66,460 bytes in that fixture.
+Twelve serial successful host ticks, including validation and storage packing
+but excluding assertions, measured **149.919 / 158.738 ms p50/p95** locally.
+That cost is substantial within a 250 ms tick period; it is not evidence that an
+always-on production host is affordable. The smaller rig-only timings above
+must not be substituted for the full host operation. Evidence:
+`verification-storage-host-cost.log`.
+Storage remains mocked here; this is not an abrupt workerd or production test.
+Neither outer AI nor complete player body state is represented. The remaining
+588 source-node margin and measured byte margin must be reassessed when those
+states and real world geometry are included. **Activation remains blocked.**
 
 ### Disconnect presentation, not yet connected to live sessions
 
@@ -1206,8 +1267,21 @@ are loaded but unused by the live scene; no capability, preview flag or runner
 was activated. Evidence: `verification-presence-cost-final.json` and
 `verification-presence-{first,repair}.log` in the task workspace.
 
-Verified locally November 4, 2026 on Node v22.23.4:
+Verified locally November 4–5, 2026 on Node v22.23.4:
 
+- Storage redesign: **101/101** focused host checks, **408/408** unit checks,
+  the **320-script** build, all twelve touched JS/MJS syntax checks and whitespace
+  validation passed. The seven checkpoint tests include 200 deterministic diverse
+  JSON round trips, exact IEEE/Unicode/negative-zero cases, truncation, malformed
+  lengths/tags, expansion bombs, original node/depth limits and mixed versions.
+  The varied combined host test passed with unchanged session reservation and
+  restart deadlines. No test assertion failed in this increment; the initial
+  measurement harness recognized only structural-capacity errors and was updated
+  to record the byte-budget refusal too, without changing either budget.
+  The existing 20-entry browser ledger is unchanged; no Hub/full/browser check
+  reran. Logs: `verification-storage-{full-host,unit,build}.log`,
+  `verification-storage-binary-{integration,corruption}.log`,
+  `verification-storage-static.json`.
 - Managed continuation and disconnect presentation increment: **96/96** focused
   host checks, **408/408** unit checks, the final **320-script** build, eight
   touched JS/MJS syntax checks and whitespace validation passed. Subsequent

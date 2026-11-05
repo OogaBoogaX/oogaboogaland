@@ -1,14 +1,17 @@
 // Opt-in composition for actual data-only simulation adapters. The world version
 // includes packing and its declared maximum; changing either requires a new world.
 import { createCheckpointPack } from "./checkpoint-pack.js";
-export function compactSimulation(simulation, checkpointBytes) {
-  const codec = createCheckpointPack(checkpointBytes), version = `pack1-${checkpointBytes}:${simulation?.version}`;
+export function compactSimulation(simulation, checkpointBytes, { intern = false } = {}) {
+  const codec = createCheckpointPack(checkpointBytes, { intern }), version = `pack${intern ? 2 : 1}-${checkpointBytes}:${simulation?.version}`;
   if (!simulation || !/^[A-Za-z0-9_.:-]{1,64}$/.test(version)
     || !["initial", "validate", "step", "project", "npcFor", "handoff"].every(k => typeof simulation[k] === "function")) {
     throw new Error("compact simulation requires explicit adapters and a bounded world version");
   }
   const sync = value => { if (value?.then) throw new Error("simulation must be synchronous"); return value; };
-  const assign = (to, from) => { to.v = from.v; to.shapes = from.shapes; to.data = from.data; };
+  const assign = (to, from) => {
+    to.v = from.v; to.shapes = from.shapes; to.data = from.data;
+    if (from.v === 2) to.scalars = from.scalars; else delete to.scalars;
+  };
   const freeze = value => {
     if (value && typeof value === "object") {
       for (const child of Object.values(value)) freeze(child);

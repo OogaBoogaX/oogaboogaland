@@ -37,6 +37,66 @@ test("packing rejects ambiguous and oversized state; decoding rejects corrupt ta
   assert.throws(() => codec.pack(Array(PACK.nodes).fill(0)));
 });
 
+test("opt-in scalar interning preserves exact values and enforces the original expansion and node budgets", () => {
+  const codec=createCheckpointPack(65536,{intern:true}),legacy=createCheckpointPack(65536);
+  const state={rows:Array.from({length:200},(_,i)=>({x:1.23456789012345,y:i/7,label:'shared-controller-identity',literal:'~0',prefix:'~~7',negative:-0})),
+    tiny:Number.MIN_VALUE,large:Number.MAX_VALUE,unicode:'🌍\ud800\udfff',hostile:JSON.parse('{"__proto__":"safe"}')};
+  const saved=JSON.parse(JSON.stringify(codec.pack(state)));
+  assert.equal(saved.v,2);assert.deepEqual(codec.unpack(saved),state);
+  assert.ok(JSON.stringify(saved).length<JSON.stringify(legacy.pack(state)).length);
+  assert.deepEqual(codec.unpack(legacy.pack(state)),state,'new decoder still reads version one');
+  assert.throws(()=>legacy.unpack(saved),'old decoder refuses new encoding');
+  for(const edit of [s=>s.v=3,s=>s.scalars.push(s.scalars[0]),s=>s.scalars[0]={x:1},s=>s.scalars[0]=Infinity,
+    s=>s.scalars[0]='x'.repeat(PACK.stringChars+1),s=>s.data='~999',s=>s.data='~00',s=>s.data='~-1',s=>s.data='~1x',s=>s.extra=0]){
+    const bad=structuredClone(saved);edit(bad);assert.throws(()=>codec.unpack(bad));
+  }
+  const bomb=codec.pack(Array(65).fill('x'));bomb.scalars[0]='x'.repeat(4096);
+  assert.ok(JSON.stringify(bomb).length<8192);assert.throws(()=>codec.unpack(bomb),/capacity/);
+  const tooMany=codec.pack(Array(PACK.nodes-1).fill(0)),stream=Buffer.concat(tooMany.data.map(s=>Buffer.from(s,'base64')));
+  stream.writeUInt16LE(PACK.nodes,1);const overflow=Buffer.concat([stream,Buffer.from([3])]);
+  tooMany.data=[];for(let at=0;at<overflow.length;at+=3072)tooMany.data.push(overflow.subarray(at,at+3072).toString('base64'));
+  assert.throws(()=>codec.unpack(tooMany),/capacity/);
+  assert.throws(()=>codec.pack(Array(PACK.nodes).fill('long-repeated-string')),/capacity/);
+  let deep=0;for(let i=0;i<PACK.depth+1;i++)deep=[deep];assert.throws(()=>codec.pack(deep),/capacity/);
+  const input={v:'~0'},p=codec.pack(input);assert.deepEqual(codec.unpack(p),input);
+});
+
+test("scalar storage opt-in has a new world version and refreshes its dictionary across mutations and query phases",()=>{
+  const source={version:'scalar-fixture',initial:()=>({rows:Array.from({length:40},()=>({value:1.234567890123456}))}),
+    validate:()=>true,step(s){for(const row of s.rows)row.value=9.87654321098765;},project:s=>s.rows[0].value,
+    npcFor:s=>s.rows[0].value,handoff(s){for(const row of s.rows)row.value=2.34567890123456;return true;}};
+  const packed=compactSimulation(source,8192,{intern:true}),legacy=compactSimulation(source,8192),state=packed.initial();
+  assert.notEqual(packed.version,legacy.version);assert.match(packed.version,/^pack2-/);
+  const before=packed.readQueries(state);assert.equal(before.npcFor('body'),1.234567890123456);
+  packed.step(state,50);assert.equal(packed.project(state),9.87654321098765);
+  assert.equal(before.npcFor('body'),1.234567890123456);assert.equal(packed.readQueries(state).npcFor('body'),9.87654321098765);
+  packed.handoff(state,{});assert.equal(packed.project(JSON.parse(JSON.stringify(state))),2.34567890123456);
+  assert.equal(state.v,2);assert.equal(packed.validate(state),true);
+});
+
+test("binary checkpoint rejects malformed lengths, scalar tags and truncated data and preserves diverse exact JSON values",()=>{
+  const codec=createCheckpointPack(65536,{intern:true}),wire=bytes=>({v:2,shapes:[],scalars:[],data:[Buffer.from(bytes).toString('base64')]});
+  for(const bytes of [[255],[10,0],[12,0],[11,255,255],[9,1,16],[9,1,0],[13,0,0],[14,1,0],[0,0],
+    [7,0,0,128,127],[8,0,0,0,0,0,0,240,127],[7,0,0,0,128],[8,0,0,0,0,0,0,240,63]]){
+    assert.throws(()=>codec.unpack(wire(bytes)),/checkpoint/);
+  }
+  for(const chunks of [[],['AB=='],['AA==AAAA'],['!'],['AA==','AA=='],['A'.repeat(4100)]]){
+    const bad=wire([0]);bad.data=chunks;assert.throws(()=>codec.unpack(bad),/checkpoint/);
+  }
+  let word=0x173c92ab;const random=()=>{word=(Math.imul(word,1664525)+1013904223)>>>0;return word;};
+  const leaves=[null,false,true,0,-0,1,-1,65535,-65535,65536,.1,Math.fround(.1),Number.MIN_VALUE,Number.MAX_VALUE,'','~0','🌍','\ud800','\udfff'];
+  const make=depth=>{
+    const n=random();if(depth>=5||n%3===0)return leaves[n%leaves.length];
+    if(n%3===1)return Array.from({length:random()%6},()=>make(depth+1));
+    const result={};for(let i=0,count=random()%5;i<count;i++)Object.defineProperty(result,i===0?'__proto__':`f${i}`,{value:make(depth+1),enumerable:true});return result;
+  };
+  for(let i=0;i<200;i++){
+    const state=make(0),packed=JSON.parse(JSON.stringify(codec.pack(state)));assert.deepEqual(codec.unpack(packed),state);
+  }
+  const source={text:'🌍'.repeat(32),x:1.2345678901234567},packed=codec.pack(source),bytes=Buffer.concat(packed.data.map(s=>Buffer.from(s,'base64')));
+  for(let i=0;i<bytes.length;i++)assert.throws(()=>codec.unpack({...packed,data:[bytes.subarray(0,i).toString('base64')]}),/checkpoint/);
+});
+
 test("compact simulation follows the original Clanker flight exactly after every durable round trip", async () => {
   const f = await prepare();
   const source = { version: "packed-flight-fixture", initial() { const e = initial(); f.controller.prepareJump(e, 0, 0, -4, 1.5); return capture(e); },
