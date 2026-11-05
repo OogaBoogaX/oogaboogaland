@@ -317,7 +317,7 @@
     // The Ooga driven here goes to the room with where it stands and its health; other players here are shown.
     const drivenHere = people.player;
     BL.net.setBody(drivenHere ? drivenHere.traits.name : null);
-    if (drivenHere) { const p = drivenHere.root.position; BL.net.sendPose(p.x, p.y - drivenHere.baseY, p.z, drivenHere.root.rotation.y); BL.net.setHealth(drivenHere.health.value, drivenHere.health.stunned); }
+    if (drivenHere) { const p = drivenHere.root.position; BL.net.sendPose(p.x, p.y - drivenHere.baseY, p.z, drivenHere.root.rotation.y, null, 0, 0, BL.crew.visualState(drivenHere)); BL.net.setHealth(drivenHere.health.value, drivenHere.health.stunned); }
     remotes.update(dt);
     footsteps.update(drivenHere);
     mirror.phase.update(dt, elapsed); mirror.body.update(dt); mirror.body.time = mirror.phase.ripples.time;

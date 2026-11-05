@@ -2223,7 +2223,7 @@
     BL.net.setBody(drivenHere ? drivenHere.traits.name : null);
     if (drivenHere) {
       const p = drivenHere.root.position;
-      BL.net.sendPose(p.x, p.y - drivenHere.baseY, p.z, drivenHere.root.rotation.y, null, 0, BL.crew.weaponFlags(drivenHere));
+      BL.net.sendPose(p.x, p.y - drivenHere.baseY, p.z, drivenHere.root.rotation.y, null, 0, BL.crew.weaponFlags(drivenHere), BL.crew.visualState(drivenHere));
       BL.net.setHealth(drivenHere.health.value, drivenHere.health.stunned);
     }
     remotes.update(dt);

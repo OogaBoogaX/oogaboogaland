@@ -428,7 +428,7 @@
       BL.net.setBody(avatar ? avatar.traits.name : null);
       if (avatar) {
         const p = avatar.root.position;
-        BL.net.sendPose(p.x, p.y - avatar.baseY, p.z, avatar.root.rotation.y);
+        BL.net.sendPose(p.x, p.y - avatar.baseY, p.z, avatar.root.rotation.y, null, 0, 0, BL.crew.visualState(avatar));
       }
       BL.net.setZone(room.zone);
       if (guide.stage) BL.net.passDoor(room.zone, "in");
@@ -650,7 +650,7 @@
         BL.net.setBody(driven ? driven.traits.name : null);
         if (driven) {
           const p = driven.root.position;
-          BL.net.sendPose(p.x, p.y - driven.baseY, p.z, driven.root.rotation.y);
+          BL.net.sendPose(p.x, p.y - driven.baseY, p.z, driven.root.rotation.y, null, 0, 0, BL.crew.visualState(driven));
           BL.net.setHealth(driven.health.value, driven.health.stunned);
         }
       }

@@ -261,10 +261,10 @@
       return { node, end, tree, wrap, local, fan, ring: new Float64Array(3) };
     });
     const endpoint = new Float64Array(3), poseOffset = new Float64Array(3), anchorLocal = new Float64Array(3), bedInverse = mat4.create();
-    const bedRotation = quat.create(), restRotation = quat.create(), bodyRotation = quat.create();
+    const bedRotation = quat.create(), restRotation = quat.create(), bodyRotation = quat.create(), limbTarget = quat.create();
     // A bed sleeper lies on their back. Turn their long axis along the hammock's +x.
     quat.fromEuler(restRotation, -Math.PI / 2, -Math.PI / 2, 0);
-    const seats = p.seats.map((s, index) => ({ kind: "hammock", lying: true, index, x: 0, y: 0, z: 0, ry: p.seatRy, floor: s.floor, walkAt: { x: s.walkAt.x, z: s.walkAt.z }, sitter: null, remote: 0, restX: 0, restY: 0, restZ: 0 }));
+    const seats = p.seats.map((s, index) => ({ kind: "hammock", lying: true, keepEquipment: true, index, x: 0, y: 0, z: 0, ry: p.seatRy, floor: s.floor, walkAt: { x: s.walkAt.x, z: s.walkAt.z }, sitter: null, remote: 0, restX: 0, restY: 0, restZ: 0, wire: new Int16Array(6) }));
     let amp = REST, angle = 0;
     // A seat's place for an angle of swing: the bed turns about the virtual swing axis (+x in its frame), so a point `drop`
     // under it moves `drop` sin(angle) across and rises by drop (1 - cos(angle)).
@@ -275,9 +275,124 @@
       seat.y = p.y - down;
     };
     for (const seat of seats) { place(seat, 0); seat.restX = seat.x; seat.restY = seat.y; seat.restZ = seat.z; }
+    // Move the actual gear, with its character-specific geometry and magazine, to the ground.
+    // This is a visual parent change only: ownership, selection and ammunition stay with the Ooga.
+    // Each active body owns one holder; it is released with that body or seat, never on its own timer.
+    const parked = [];
+    let minX = 0, maxX = 0, minY = 0, minZ = 0, maxZ = 0;
+    const measureGear = (node) => {
+      if (!node.visible) return;
+      const v = node.geometry?.verts, m = node.world;
+      if (v) for (let i = 0; i < v.length; i += 3) {
+        const x = m[0] * v[i] + m[4] * v[i + 1] + m[8] * v[i + 2] + m[12];
+        const y = m[1] * v[i] + m[5] * v[i + 1] + m[9] * v[i + 2] + m[13];
+        const z = m[2] * v[i] + m[6] * v[i + 1] + m[10] * v[i + 2] + m[14];
+        minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y);
+        minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z);
+      }
+      for (const child of node.children) measureGear(child);
+    };
+    const parkPart = (gear, node, index, temporary = false) => {
+      if (!node) return;
+      const saved = { node, index, parent: node.parent, position: { ...node.position }, rotation: { ...node.rotation },
+        quaternion: node.quaternion, visible: node.visible, poseYaw: node.poseYaw, poseLean: node.poseLean, cameraHidden: node.cameraHidden, temporary };
+      gear.parts.push(saved);
+      if (node.parent) removeChild(node.parent, node);
+      addChild(gear.holder, node);
+      node.position.x = node.position.y = node.position.z = 0;
+      node.rotation.x = node.rotation.y = 0; node.rotation.z = index === 1 ? 0 : Math.PI / 2;
+      if (index === 1) node.rotation.y = Math.PI / 2;
+      node.quaternion = null;
+      node.poseYaw = node.poseLean = 0;
+      node.cameraHidden = false;
+      node.visible = true;
+      // Fit to the actual visible geometry, including attachments, in the holder's frame.
+      BL.scene.updateWorld(node);
+      minX = minY = minZ = Infinity; maxX = maxZ = -Infinity;
+      measureGear(node);
+      if (Number.isFinite(minY)) {
+        node.position.x = -(minX + maxX) / 2;
+        node.position.y = 0.025 - minY;
+        node.position.z = (index - 1) * 0.32 - (minZ + maxZ) / 2;
+      }
+    };
+    const releaseBody = (cave) => { if (cave.hammockRest) upright(cave); else releaseEquipment(cave); };
+    const parkEquipment = (cave, seat, shown = true) => {
+      let gear = cave.restEquipment;
+      if (!gear) {
+        const holder = createNode({ position: { x: p.x + p.ux * p.seats[seat.index].at, y: p.ground, z: p.z + p.uz * p.seats[seat.index].at },
+          rotation: { x: 0, y: p.yaw, z: 0 }, sightHidden: true });
+        gear = cave.restEquipment = { cave, seat, holder, parts: [], pack: null, release: releaseBody };
+        parked.push(gear); addChild(root, holder);
+        const parts = cave.parts;
+        if (parts.gunFlash) parts.gunFlash.visible = false;
+        if (cave.jet?.flame) cave.jet.flame.visible = false;
+        if (parts.jetFlame) parts.jetFlame.visible = false;
+        parkPart(gear, parts.club, 0);
+        parkPart(gear, parts.gun, 1);
+      }
+      if (!gear.pack && cave.jetpackOwned) {
+        let pack = cave.presentationJet?.node || cave.jet?.node || cave.parts.jetpack, temporary = false;
+        if (!pack && cave.jetpackGeometry && cave.jetpackFlameGeometry) {
+          pack = BL.crew.jetpackNode(cave.root, cave.traits.height, cave.viewLift || 0, cave.jetpackGeometry, cave.jetpackFlameGeometry);
+          temporary = true;
+        }
+        if (pack) { gear.pack = pack; parkPart(gear, pack, 2, temporary); }
+      }
+      const currentPack = cave.presentationJet?.node || cave.jet?.node || cave.parts.jetpack;
+      if (gear.pack && currentPack && currentPack !== gear.pack) {
+        for (let i = 0; i < gear.parts.length; i++) if (gear.parts[i].index === 2) {
+          restorePart(cave, gear.parts[i]); gear.parts.splice(i, 1); break;
+        }
+        gear.pack = currentPack; parkPart(gear, currentPack, 2);
+      }
+      gear.holder.visible = shown;
+      gear.holder.matrixLiving = !!cave.root.matrixLiving;
+      for (const saved of gear.parts) {
+        const node = saved.node;
+        if (node.parent !== gear.holder) { if (node.parent) removeChild(node.parent, node); addChild(gear.holder, node); }
+        node.visible = saved.index === 0 ? !!cave.weapon?.primaryOwned
+          : saved.index === 1 ? !!cave.weapon?.secondaryOwned : !!cave.jetpackOwned;
+      }
+      // Twirl afterimages are arm siblings, rather than children of the parked primary.
+      if (cave.parts.chukTrail) for (const trail of cave.parts.chukTrail) trail.visible = false;
+      if (cave.parts.gunFlash) cave.parts.gunFlash.visible = false;
+      if (cave.jet?.flame) cave.jet.flame.visible = false;
+      if (cave.parts.jetFlame) cave.parts.jetFlame.visible = false;
+    };
+    const restorePart = (cave, saved) => {
+      const node = saved.node, pack = saved.index === 2, worn = cave.jet?.node === node;
+      if (node.parent) removeChild(node.parent, node);
+      if (!saved.temporary && saved.parent && (!pack || worn || node === cave.parts.jetpack || node === cave.presentationJet?.node)) addChild(saved.parent, node);
+      for (const axis of AXES) { node.position[axis] = saved.position[axis]; node.rotation[axis] = saved.rotation[axis]; }
+      node.quaternion = saved.quaternion;
+      node.visible = pack ? worn && saved.visible : saved.visible && (saved.index === 0 ? !!cave.weapon?.primaryOwned : !!cave.weapon?.secondaryOwned);
+      node.poseYaw = saved.poseYaw; node.poseLean = saved.poseLean; node.cameraHidden = saved.cameraHidden;
+    };
+    const releaseEquipment = (cave) => {
+      const gear = cave.restEquipment;
+      if (!gear) return;
+      for (const saved of gear.parts) restorePart(cave, saved);
+      removeChild(root, gear.holder);
+      parked.splice(parked.indexOf(gear), 1);
+      cave.restEquipment = null;
+    };
+    for (const seat of seats) seat.releaseEquipment = releaseEquipment;
+    // Only the entry and exit use changing world transforms. Settled rest reports a stable seat,
+    // so its locally animated sway adds no traffic. A late observer can draw any current phase.
+    const stateFor = (cave) => {
+      const seat = cave?.camp?.seat;
+      if (!seat || !seats.includes(seat)) return 0;
+      const transition = seat.exit || seat.entry, out = seat.wire, q = cave.root.quaternion;
+      out[0] = seat.index; out[1] = seat.exit ? 3 : seat.entry ? 1 : 2;
+      out[2] = transition ? Math.round(Math.min(1, transition.time / ENTRY_SECONDS) * 255) : 255;
+      const sign = transition && q[3] < 0 ? -1 : 1;
+      for (let i = 0; i < 3; i++) out[i + 3] = transition ? Math.round(q[i] * sign * 1000) : 0;
+      return out;
+    };
     // Reuse the bed's face-up orientation, with straight legs and arms at the sides.
     // Shift the root along the cloth so the torso, head and feet share its length.
-    const posed = (cave, seat, entry = null) => {
+    const posed = (cave, seat, entry = null, shown = cave.root.visible) => {
       const r = cave.root, parts = cave.parts;
       r.quaternion = cave.sleepRotation || (cave.hammockRotation ||= quat.create());
       quat.copy(r.quaternion, bodyRotation);
@@ -285,12 +400,13 @@
       const height = cave.traits.height;
       quat.rotateVec(poseOffset, bedRotation, -height * 0.28, height * 0.18, 0);
       r.position.x = seat.x + poseOffset[0]; r.position.y = seat.y + poseOffset[1]; r.position.z = seat.z + poseOffset[2];
-      parts.legL.rotation.x = parts.legR.rotation.x = 0;
-      parts.armL.rotation.x = parts.armR.rotation.x = 0;
-      parts.head.rotation.x = parts.head.rotation.y = 0;
-      parts.head.quaternion = null;
+      for (const key of ENTRY_PARTS) {
+        parts[key].quaternion = null;
+        for (const axis of AXES) parts[key].rotation[axis] = 0;
+      }
       blendPose(cave, entry, bodyRotation);
       updateHead(cave);
+      parkEquipment(cave, seat, shown);
     };
     const blendPose = (cave, transition, targetRotation) => {
       const r = cave.root, parts = cave.parts;
@@ -301,9 +417,14 @@
         r.position.x = transition.position.x + (r.position.x - transition.position.x) * blend;
         r.position.y = transition.position.y + (r.position.y - transition.position.y) * blend + Math.sin(Math.PI * t) * 0.25;
         r.position.z = transition.position.z + (r.position.z - transition.position.z) * blend;
-        for (const key of ENTRY_PARTS) for (const axis of AXES) {
-          const from = transition.parts[key][axis], to = parts[key].rotation[axis];
-          parts[key].rotation[axis] = from + (to - from) * blend;
+        for (const key of ENTRY_PARTS) {
+          const from = transition.parts[key], part = parts[key];
+          quat.fromEuler(limbTarget, part.rotation.x, part.rotation.y, part.rotation.z);
+          for (const axis of AXES) part.rotation[axis] = from[axis] + (part.rotation[axis] - from[axis]) * blend;
+          if (from.quaternion) {
+            quat.copy(from.blend, from.quaternion); quat.slerpTo(from.blend, limbTarget, blend);
+            part.quaternion = from.blend;
+          }
         }
       }
     };
@@ -329,7 +450,10 @@
       if (r.quaternion) quat.copy(rotation, r.quaternion);
       else quat.fromEuler(rotation, r.rotation.x, r.rotation.y, r.rotation.z);
       const transition = { cave, time: 0, position: { ...r.position }, rotation, parts: {} };
-      for (const key of ENTRY_PARTS) transition.parts[key] = { ...cave.parts[key].rotation };
+      for (const key of ENTRY_PARTS) {
+        const part = cave.parts[key], from = transition.parts[key] = { ...part.rotation };
+        if (part.quaternion) { from.quaternion = quat.create(); quat.copy(from.quaternion, part.quaternion); from.blend = quat.create(); }
+      }
       return transition;
     };
     const uprightRotation = quat.create();
@@ -353,6 +477,7 @@
       parts.head.quaternion = null;
       blendPose(cave, exit, uprightRotation);
       updateHead(cave);
+      parkEquipment(cave, seat, cave.root.visible);
     };
     const aimCord = (node, x, y, z) => {
       const dx = x - node.position.x, dy = y - node.position.y, dz = z - node.position.z;
@@ -390,6 +515,11 @@
       }
     };
     const update = (dt, time, still, windTime = 0, windEnabled = true) => {
+      for (let i = parked.length - 1; i >= 0; i--) {
+        const gear = parked[i], cave = gear.cave;
+        if (!cave.root.parent || !cave.hammockRest && cave.camp?.seat !== gear.seat) releaseEquipment(cave);
+      }
+      for (let i = tipped.length - 1; i >= 0; i--) if (!tipped[i].root.parent) upright(tipped[i]);
       let held = false;
       for (const seat of seats) if (seat.sitter || seat.remote) held = true;
       const rest = held ? REST_HELD : REST;
@@ -429,8 +559,8 @@
     let shownBy = null;
     const claim = (rec) => {
       if (!rec.body || rec.bodyKind === "gorilla" || !shownBy(rec)) return;
-      const k = restingAt(rec.x, rec.y, rec.z);
-      if (k >= 0 && (!seats[k].remote || rec.id < seats[k].remote)) seats[k].remote = rec.id;
+      const k = rec.rest === 0 ? -1 : rec.rest ? rec.rest[0] : restingAt(rec.x, rec.y, rec.z);
+      if (k >= 0 && k < seats.length && (!seats[k].remote || rec.id < seats[k].remote)) seats[k].remote = rec.id;
     };
     const settle = (remotes, selfId, shown, move, stand) => {
       for (let i = 0; i < seats.length; i++) seats[i].remote = 0;
@@ -472,12 +602,16 @@
       cave.root.quaternion = null;
       cave.parts.head.quaternion = null;
       cave.hammockRest = false;
+      releaseEquipment(cave);
       tipped.splice(tipped.indexOf(cave), 1);
     };
     // Another page's resting Ooga, posed in this bed.
-    const poseRemote = (cave, feet) => {
-      const r = cave.root, k = restingAt(r.position.x, feet, r.position.z);
-      if (k < 0) {
+    const poseRemote = (cave, feet, rec = null, shown = true) => {
+      const r = cave.root, state = rec?.rest;
+      // The shared remote pose already smoothed the current look before the bed tips the body.
+      const headPitch = rec?.visual ? cave.parts.head.rotation.x : 0;
+      const k = state === 0 ? -1 : state ? state[0] : restingAt(r.position.x, feet, r.position.z);
+      if (k < 0 || k >= seats.length || rec && seats[k].remote && seats[k].remote !== rec.id) {
         if (cave.hammockRest) upright(cave);
         return false;
       }
@@ -485,22 +619,36 @@
         for (let i = tipped.length - 1; i >= 0; i--) if (!tipped[i].root.parent) upright(tipped[i]);
         tipped.push(cave);
       }
-      const parts = cave.parts;
-      parts.legL.rotation.x = parts.legR.rotation.x = -Math.PI / 2;
-      parts.armL.rotation.x = parts.armR.rotation.x = -0.75;
-      posed(cave, seats[k]);
+      if (state && state[1] !== 2) {
+        // Position already follows this phase through the ordinary pose transport.
+        r.quaternion = cave.hammockRotation ||= quat.create();
+        let sum = 0;
+        for (let i = 0; i < 3; i++) { r.quaternion[i] = state[i + 3] / 1000; sum += r.quaternion[i] ** 2; }
+        r.quaternion[3] = Math.sqrt(Math.max(0, 1 - sum));
+        quat.normalize(r.quaternion);
+        const t = state[2] / 255, blend = t * t * (3 - 2 * t), stand = state[1] === 1 ? 1 - blend : blend;
+        for (const key of ENTRY_PARTS) {
+          const part = cave.parts[key];
+          part.quaternion = null;
+          part.rotation.x = key === "armL" || key === "armR" ? -0.2 * stand : 0;
+          part.rotation.y = part.rotation.z = 0;
+        }
+        parkEquipment(cave, seats[k], shown);
+      } else posed(cave, seats[k], null, shown);
+      cave.parts.head.rotation.x = headPitch;
       cave.hammockRest = true;
       return true;
     };
     const dispose = () => {
       for (const seat of seats) { seat.sitter = null; seat.entry = seat.exit = null; }
       while (tipped.length) upright(tipped[0]);
+      while (parked.length) releaseEquipment(parked[0].cave);
       solids.remove(ridgeNode);
       removeChild(root, ridgeNode); removeChild(root, bedNode);
       for (const rope of ropes) { removeChild(root, rope.node); removeChild(rope.wrap.parent, rope.wrap); }
     };
     update(0, 0, false);
-    return { plan: p, seats, ridgeNode, bedNode, ropes, update, syncRopes, kick, enter, restingAt, settle, free, near, reachable, poseRemote, dispose, get angle() { return angle; }, get amp() { return amp; } };
+    return { plan: p, seats, ridgeNode, bedNode, ropes, update, syncRopes, kick, enter, restingAt, settle, free, near, reachable, poseRemote, stateFor, releaseEquipment, dispose, get angle() { return angle; }, get amp() { return amp; } };
   };
 
   BL.hubHammock = { SLOTS, TIE, SPAN_MIN, SPAN_MAX, SWAY_MAX, STAND, plan, create, ridgeY };
