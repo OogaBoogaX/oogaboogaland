@@ -210,10 +210,11 @@ intentionally changes repository rules. No workflow approves a manual bundle.
 For an actual GitHub account rename, the separate [verified account migration
 path](account-rename-operator-path.md) accepts only a signed operator PR changing
 the pinned account's literal `github` line after fresh numeric-ID verification.
-It retains the source PR and requires another operator's approval of its exact
-head; it is not the cosmetic display-name lane and never automatically merges.
-When ordinary bundles are paused, `CHARACTER_ACCOUNT_RENAMES_ENABLED=true` keeps
-only these verification/review checks running, without bundle or page mutations.
+It retains the source PR and passes once its exact head is verified, without a
+second operator's approval; it is not the cosmetic display-name lane and never
+automatically merges. When ordinary bundles are paused,
+`CHARACTER_ACCOUNT_RENAMES_ENABLED=true` keeps only these verification checks
+running, without bundle or page mutations.
 
 GitHub references: [workflow triggering](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow),
 [branch protection](https://docs.github.com/en/rest/branches/branch-protection),

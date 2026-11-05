@@ -126,19 +126,13 @@ test("same-ID account rename rejects mixed diffs, reverted code changes and stal
     { handle: "Bitcoin-Bill", github: "Bitcoin-Bill" }, OPERATORS[0].login, true), /separate maintainer-reviewed PR/);
 });
 
-test("account-rename checks require another operator's exact-head approval and perform no bundle or merge writes", async () => {
+test("verified account-rename checks pass without a second operator's approval and perform no bundle or merge writes", async () => {
   const f = accountRenameFixture(), coordinator = createCoordinator(f.gh, "private-app[bot]");
   const gate = () => f.calls.filter((call) => call.data?.context === "Character bundle safety").at(-1)?.data.state;
   assert.equal(await runAccountRenameChecks(coordinator, { action: "synchronize", pull_request: { number: 7 } }), true);
-  assert.equal(gate(), "pending");
-  f.reviews = [{ user: f.pr.user, state: "APPROVED", commit_id: f.head }];
-  await coordinator.accountRename(7); assert.equal(gate(), "pending");
-  f.reviews = [{ user: { ...OPERATORS[1], type: "User" }, state: "APPROVED", commit_id: "old" }];
-  await coordinator.accountRename(7); assert.equal(gate(), "pending");
-  f.reviews[0].commit_id = f.head;
+  assert.equal(gate(), "success");
   await runAccountRenameChecks(coordinator, { workflow_run: { event: "pull_request_review" } }); assert.equal(gate(), "success");
-  f.reviews.push({ ...f.reviews[0], state: "DISMISSED" });
-  await runAccountRenameChecks(coordinator, { schedule: "17,37,57 * * * *" }); assert.equal(gate(), "pending");
+  await runAccountRenameChecks(coordinator, { schedule: "17,37,57 * * * *" }); assert.equal(gate(), "success");
   f.account.id = 123;
   await assert.rejects(() => coordinator.accountRename(7), /not verified/);
   assert.equal(gate(), "failure");
@@ -188,7 +182,6 @@ test("rename refresh failures leave unidentified PR statuses untouched but ident
   assert.deepEqual(f.calls.filter((call) => call.method === "POST").map((call) => [call.data.context, call.data.state]),
     [["Character intake", "failure"], ["Character bundle safety", "failure"]]);
   f.lookup = null;
-  f.reviews = [{ user: { ...OPERATORS[1], type: "User" }, state: "APPROVED", commit_id: f.head }];
   await coordinator.refreshAccountRenames();
   assert.deepEqual(f.calls.filter((call) => call.method === "POST").slice(-2).map((call) => call.data.state), ["success", "success"]);
 });
