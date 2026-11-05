@@ -1,4 +1,4 @@
-// Finite exact-body continuation and component capacity measurement. The
+// Finite gameplay recovery and component capacity measurement. The
 // authored meadow has no other players, jobs, items, reservations or live route.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -8,11 +8,16 @@ import { createClankerBodyCheckpoint } from "../src/clanker-roaming.js";
 import { HOST, boundedJSON } from "../src/virtual-host.js";
 const world = "body-capacity-fixture-1";
 const make = () => {
-  const f = clankerController({ checkpointRandom: true, checkpointProfile: "body-1", start: false });
+  const f = clankerController({ checkpointRandom: true, checkpointProfile: "body-2", start: false });
   return { ...f, codec: createClankerBodyCheckpoint(f.sim, world, f.B.clankerState) };
 };
 const original = make(), rows = [];
 const nodes = v => 1 + (v && typeof v === "object" ? Object.values(v).reduce((sum, x) => sum + nodes(x), 0) : 0);
+const gameplay = f => {
+  const e = f.sim.player;
+  return JSON.parse(JSON.stringify({ position: e.root.position, heading: e.heading, drive: e.drive, health: e.health,
+    biped: e.biped, parked: e.parked, mode: e.mode, controlled: e.controlled }));
+};
 try {
   original.start(); assert.equal(original.sim.possess(original.sim.list[0]), true);
   original.codec.neutralize();
@@ -31,7 +36,8 @@ try {
       if (i === 0) for (const f of [original, restored]) f.sim.control({ x: 0, z: 0, heading: .7, jumpHeld: true, jumpPressed: true });
       restored.step(); restored.codec.neutralize(); const next = restored.codec.capture();
       const completeColdCycleMs = performance.now() - start;
-      original.step(); original.codec.neutralize(); assert.deepEqual(next, original.codec.capture());
+      original.step(); original.codec.neutralize(); assert.deepEqual(gameplay(restored), gameplay(original));
+      assert.ok(next); // Capture still enforces the supported profile after recovery.
       let existingSlotRefusal = null;
       try { boundedJSON(saved, HOST.sessionSlotBytes - 1, HOST.sessionSlotNodes); } catch (error) { existingSlotRefusal = error.message; }
       rows.push({ frame: i, checkpointBytes, packedNodes: nodes(saved), completeColdCycleMs, existingSlotRefusal,

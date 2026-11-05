@@ -1,5 +1,107 @@
 # Body checkpoint capacity audit (#377 / draft #467)
 
+## Current recovery policy: standard pose (supersedes the original rig audit)
+
+The user no longer requires a disconnected player's rig pose or animation
+continuation to survive recovery. The restricted controlled-Clanker profile is
+now **body-2**, with component schema 2. It omits the entire managed rig, the
+entry animation scheduler, and source-declared takeoff/landing, gait, grooming,
+sitting and office/lab animation phases. Geometry rebuilds from the character
+definition. It keeps root position explicitly, facing, drive/vertical velocity,
+jump credits, health/cooldown, form, identity binding, random stream, scheduler
+and remaining gameplay state. Fields that affect physics (including motion
+collision-envelope flags) are retained. Roaming NPC continuation is unchanged.
+
+Restore uses a fresh disposable controller and settles a standard rig without
+stepping physics, possessing again or replaying controls. It checks the rebuilt
+body through the world's clearance callback and rejects an overlapping body or
+incompatible floor. Failure poisons that controller; it cannot publish. It does
+not teleport to a fallback or claim generalized island depenetration. The source
+profile remains limited to the authored noncombat meadow. Old body-1 profiles,
+old component versions and rig-bearing snapshots are refused; no migration or
+live browser activation is introduced.
+
+### Full record measurements
+
+`worker/eval/body-storage-audit.mjs` measures 48 successive running/double-jump,
+health-recovery and landing states with a matching eight-field motion envelope,
+13-digit epoch timestamps, equipment metadata and all JSON/base64 overhead.
+These are finite local fixtures, not maximum possible full-island bodies.
+
+| Representation | Observed minimum | Observed maximum |
+| --- | ---: | ---: |
+| Packed body component | 660 B | 785 B |
+| Session + body inline, including continuation key | 1,221 B | **1,418 B** |
+| Departure + body inline | 1,197 B | 1,394 B |
+| Repacking the combined object | 1,290 B | 1,458 B |
+| Separate session + stamped body row | 1,385 B | 1,582 B |
+| Conservative maximum metadata + measured body | 1,640 B | 1,765 B |
+
+The maximum inline sample consists of **617 B session + 785 B body + 16 B
+continuation key/separator = 1,418 B**. The session's field/key bytes are:
+account 15, body id 17, kind 16, generation 14, token 42, zone 16, state 15,
+lastSeenAt 26, deadline 24, stepAt 22, motion 179, equipment 201, null occupancy
+16, and 14 punctuation bytes. The packed body's fields are version 5, shape
+table 113, data 503, scalar pool 159, and 5 punctuation bytes. Before final
+packing its semantic groups occupy: version 5, world 33, baseline 33, clocks 62,
+actor scalar deltas 593, typed-buffer deltas 101, position 68, punctuation 8 =
+903 bytes. Saved rig/animation continuation contributes **zero** bytes.
+
+Gzip level 6 of the full record is 796–933 binary bytes, but its versioned JSON
+base64 envelope is 1,096–1,276 bytes. Brotli quality 4 is 802–958 binary bytes and
+1,107–1,315 JSON/base64 bytes. Neither establishes a safe 1 KiB JSON reservation.
+No compression dependency or lossy numeric encoding is enabled.
+
+Removing the rig roughly halves the earlier measured body component; it does
+**not** make the combined record fit 1 KiB. A 2 KiB inline reservation would fit
+these samples and their conservative metadata expansion, but still halves the
+current 30-body admission to 15 at a 64 KiB world budget. It is not a proven
+maximum for Ooga, full-world interactions or future body schemas. Keep the
+atomic separate-record layout for now: 8 KiB component, 9 KiB row, 32-row hard
+cap and current 30-body host capacity. Its full-body refusal bound remains
+9,172 bytes including conservative metadata/key overhead. No bounds were raised.
+
+Focused verification covers fresh standard pose, repeated replacements through
+landing, the remaining midair jump, held-input neutralization, version refusal,
+collision rejection using the actual convex hull kernel and an obstructing body,
+and rejection when a changed floor would bury the player. Forty-eight independent
+rebuild samples preserve the measured gameplay values exactly through the next
+step. A richer cold reconstruction audit measures up to 785 B/32 packed nodes,
+with p50/p95/max 22.290/24.907/26.060 ms in Node VM. This includes cold module
+loading and is not workerd CPU or combined recovery certification.
+
+Browser reclaim/control binding, authenticated Room commands, production
+collision/support/occupancy, full Ooga recovery and combined world/body cost
+validation remain unfinished. Existing Hub STOP restrictions still block the
+browser lane. The red/green indicator and Tess exclusion remain intact.
+Local evidence: `verification-standard-pose-storage-audit.json`,
+`verification-standard-pose-rebuild.json`, `verification-standard-pose-body.json`.
+
+The updated local SQLite evaluator also passed all three 120-commit/30-body
+scenarios: unchanged body-2 components p95 **4.301 ms /one key written**,
+changing body-2 components **5.159 ms /31 keys**, and the 8 KiB ceiling fixture
+**4.496 ms /31 keys**. Rollback, orderly persisted restart and stale-owner
+fencing passed with no logs or outbound requests. Peak serialized write bytes
+were 80,501 /108,793 /331,633 respectively. As before, the world is padding and
+one body's snapshots are copied across synthetic identities; the ceiling string
+is a storage-size test, not worst-case controller CPU. Node/workerd dispatch and
+validation are included; full-world simulation and production billing are not.
+
+Verification: **126/126 host/recovery tests**, **408/408 local unit checks**,
+320-script build, nine changed JS/MJS syntax checks and whitespace pass. The
+final added upright-form collision case also passed the three body tests. The
+20-entry Hub STOP ledger is unchanged; no Hub/full/browser check was rerun.
+Additional evidence: `verification-standard-pose-storage-runtime.json`,
+`verification-standard-pose-host.log`, `verification-standard-pose-unit.log`,
+`verification-standard-pose-collision-final.log`.
+
+## Original storage decision and measurements (body-1, historical)
+
+The remainder records the original exact-rig audit. Its requirement to preserve
+animation continuation is superseded above; its storage atomicity, provider
+limits and capacity analysis still apply.
+
+
 The **1,024-byte slot is an internal reservation**, introduced by `d477e549` for
 session schema 2, before complete controlled-body continuation existed. It is
 not a Cloudflare or transport limit. Keep the existing metadata reservation and

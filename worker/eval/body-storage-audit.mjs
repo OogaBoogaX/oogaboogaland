@@ -8,6 +8,8 @@ import { createClankerBodyCheckpoint } from "../src/clanker-roaming.js";
 import { BODY_STORAGE } from "../src/host-body-storage.js";
 import { clankerController } from "../test/fixtures/clanker-controller-fixture.mjs";
 const world = "body-capacity-fixture-1", bytes = x => Buffer.byteLength(JSON.stringify(x));
+const parts = object => ({ fields: Object.fromEntries(Object.entries(object).map(([k, v]) => [k, bytes({ [k]: v }) - 2])),
+  punctuation: Object.keys(object).length + 1, total: bytes(object) });
 const pack = createCheckpointPack(16384, { intern: true }), componentPack = createCheckpointPack(8192, { intern: true });
 const equipment = { weapon: "gun", mode: "combat", magazine: 17, spareAmmo: [4, 22], primaryOwned: true,
   secondaryOwned: true, selectedSlot: 2, unlimited: false, jetpack: true, jetpackOwned: true, fuel: .37 };
@@ -45,15 +47,22 @@ const countNumbers = v => {
     else numeric.requiresFloat64++;
   } else if (v && typeof v === "object") for (const item of Object.values(v)) countNumbers(item);
 };
-const f = clankerController({ checkpointRandom: true, checkpointProfile: "body-1", start: false });
+const f = clankerController({ checkpointRandom: true, checkpointProfile: "body-2", start: false });
 const codec = createClankerBodyCheckpoint(f.sim, world, f.B.clankerState);
 try {
   f.start(); f.sim.possess(f.sim.list[0]); codec.neutralize(); for (let i = 0; i < 4; i++) f.step();
+  f.sim.player.health.value = 137; f.sim.player.health.delay = .7; f.sim.player.biped = true;
   f.sim.control({ x: .6, z: .8, heading: .7, run: true, jumpHeld: true, jumpPressed: true }); f.step(); codec.neutralize();
   for (let i = 0; i < 48; i++) {
     const component = codec.capture(), expanded = componentPack.unpack(component);
     if (!i) countNumbers(expanded);
-    const complete = { ...grace, continuation: component }, encoded = Buffer.from(JSON.stringify(complete));
+    const e = f.sim.player, p = e.root.position, d = e.drive;
+    const currentGrace = { ...grace, lastSeenAt: 1793836800000, stepAt: 1793836800000 + i * 250, deadline: 1793836860000,
+      motion: { x: p.x, y: p.y, z: p.z, yaw: e.heading,
+      vx: d.vx, vy: d.vy, vz: d.vz, grounded: d.grounded } };
+    const complete = { ...currentGrace, continuation: component }, encoded = Buffer.from(JSON.stringify(complete));
+    const bodyRow = { v: BODY_STORAGE.version, profile: 'clanker-body-2', world, fence: 1, revision: i + 1,
+      body: { accountId: currentGrace.accountId, bodyId: currentGrace.bodyId, generation: currentGrace.generation, kind: currentGrace.kind, checkpoint: component } };
     const start = performance.now(), packed = pack.pack(complete), packedMs = performance.now() - start;
     const decodeAt = performance.now(); assert.deepEqual(pack.unpack(packed), complete); const unpackMs = performance.now() - decodeAt;
     const compression = {};
@@ -68,8 +77,13 @@ try {
     }
     rows.push({ frame: i, componentBytes: bytes(component), expandedComponentBytes: bytes(expanded),
       encodedComponentParts: Object.fromEntries(Object.entries(component).map(([k, v]) => [k, bytes(v)])),
-      completeGraceBytes: encoded.length, completePendingBytes: bytes({ ...pending, continuation: component }),
+      componentBreakdown: parts(component), expandedBreakdown: parts(expanded), sessionBreakdown: parts(currentGrace),
+      separateCombinedBytes: bytes(currentGrace) + bytes(bodyRow), bodyRowBytes: bytes(bodyRow),
+      conservativeEnvelopeWithMeasuredBody: bytes(worst(grace)) + bytes(component) + 16,
+      completeGraceBytes: encoded.length, completePendingBytes: bytes({ ...pending, at: currentGrace.deadline,
+        body: { ...pending.body, motion: currentGrace.motion }, continuation: component }),
       completePackedBytes: bytes(packed), packedMs, unpackMs, compression });
+    if (!i) f.sim.control({ x: 0, z: 0, heading: .7, jumpHeld: true, jumpPressed: true });
     f.step(); codec.neutralize();
   }
 } finally { f.dispose(); }
@@ -82,7 +96,7 @@ console.log(JSON.stringify({ node: process.version, platform: process.platform, 
   slotCapacityAt64KiBWorld: [1024, 2048, 3072, 4096, 9216].map(slot => ({ slotBytes: slot, admitted: Math.floor((HOST.checkpointBytes - 65536 - HOST.metadataBytes) / slot) })),
   separateStorageBound: { root: BODY_STORAGE.rootBytes, row: BODY_STORAGE.rowBytes, rowsAt64KiBWorld: 30,
     aggregateAt30: BODY_STORAGE.rootBytes + 30 * BODY_STORAGE.rowBytes, aggregateAt32: BODY_STORAGE.rootBytes + 32 * BODY_STORAGE.rowBytes },
-  measurements: Object.fromEntries(["componentBytes", "expandedComponentBytes", "completeGraceBytes", "completePendingBytes", "completePackedBytes", "packedMs", "unpackMs"].map(k => [k, stats(rows.map(r => r[k]))])),
+  measurements: Object.fromEntries(["componentBytes", "expandedComponentBytes", "completeGraceBytes", "completePendingBytes", "completePackedBytes", "separateCombinedBytes", "bodyRowBytes", "conservativeEnvelopeWithMeasuredBody", "packedMs", "unpackMs"].map(k => [k, stats(rows.map(r => r[k]))])),
   compression: Object.fromEntries(Object.keys(compressions).map(k => [k, Object.fromEntries(["binaryBytes", "jsonBase64Bytes", "compressMs", "decompressMs", "encodeCpuUs", "decodeCpuUs"].map(field => [field, stats(rows.map(r => r.compression[k][field]))]))])),
   limitations: ["48 successive restricted Clanker states, one synthetic registry envelope; Ooga inventory here is metadata only, not an Ooga restoration test.",
     "Worst envelope overestimates JSON numeric length; component 8192-byte cap is a storage refusal bound, not proof all future body dynamics fit.",

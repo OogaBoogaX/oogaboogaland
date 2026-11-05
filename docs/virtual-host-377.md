@@ -2077,3 +2077,17 @@ The local handoff's `review-377/HUB-FAILURE-ATTRIBUTION.md` maps all twenty exac
 ledger entries to source and evidence; `source-comparison.json` records hashes.
 The RNG and work extractions postdate this Hub run and have separate focused
 verification; the prior result does not establish browser parity for them.
+
+
+### Standard-pose player recovery follow-up
+
+The user's revised requirement permits a standard pose and fresh animations on
+player recovery. The opt-in controlled Clanker body-2 profile removes saved rig
+and animation continuation while retaining gameplay state and explicitly stored
+position. Rebuilt collision clearance is required before recovery can succeed;
+old body-1 records refuse rather than silently migrate. The complete measured
+session-plus-body is 1,221–1,418 bytes, so the atomic separate-record layout and
+bounds remain pending wider world/body validation. See the current section of
+[the capacity audit](virtual-host-body-storage.md) for itemized sizes and gaps.
+This does not complete authenticated browser reclaim or enable the host. Tess
+remains excluded and #379's independent ghost-track login remains unimplemented.

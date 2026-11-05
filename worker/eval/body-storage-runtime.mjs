@@ -30,7 +30,7 @@ export class BodyStore extends DurableObject {
    delete:keys=>tx.delete(keys),
   }))};
   const pack=createCheckpointPack(8192,{intern:true});
-  const bank=createHostBodyStorage({storage,profile:'clanker-body-1',validate:v=>typeof v==='string'?input.worst===true:pack.unpack(v).world==='body-store-runtime',
+  const bank=createHostBodyStorage({storage,profile:'clanker-body-2',validate:v=>typeof v==='string'?input.worst===true:pack.unpack(v).world==='body-store-runtime',
    capture:(r,previous)=>[...(r.sessions?.sessions||[]),...(r.sessions?.pending||[])].sort((a,b)=>a.generation-b.generation).map(s=>({
     accountId:s.accountId,bodyId:s.bodyId,generation:s.generation,kind:s.kind||s.body.kind,checkpoint:component,
    }))});
@@ -61,7 +61,7 @@ const start = async path => {
   mf = new runtime.Miniflare(runtime.convertV4MiniflareOptions ? runtime.convertV4MiniflareOptions(options) : options); await mf.ready;
 };
 const stats = values => { const a = values.slice().sort((a,b)=>a-b); return { p50: a[Math.floor(a.length*.5)], p95: a[Math.floor(a.length*.95)], max: a.at(-1) }; };
-const f = clankerController({ checkpointRandom: true, checkpointProfile: "body-1", start: false });
+const f = clankerController({ checkpointRandom: true, checkpointProfile: "body-2", start: false });
 const actual = [];
 try {
   const codec = createClankerBodyCheckpoint(f.sim, "body-store-runtime", f.B.clankerState);

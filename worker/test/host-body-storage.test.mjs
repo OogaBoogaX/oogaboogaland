@@ -5,7 +5,7 @@ import { createHostBodyStorage, BODY_STORAGE } from "../src/host-body-storage.js
 import { createClankerBodyCheckpoint } from "../src/clanker-roaming.js";
 import { createCheckpointPack } from "../src/checkpoint-pack.js";
 import { clankerController } from "./fixtures/clanker-controller-fixture.mjs";
-const world = "body-store-fixture", profile = "clanker-body-1";
+const world = "body-store-fixture", profile = "clanker-body-2";
 const equipment = { weapon: null, mode: "carry", magazine: 0, spareAmmo: [], primaryOwned: false,
   secondaryOwned: false, selectedSlot: 1, unlimited: false, jetpack: false, jetpackOwned: false, fuel: 0 };
 const claim = i => ({ protocol: SESSION_PROTOCOL, world, accountId: i + 1, bodyId: `body-${i}`, zone: "outside",
@@ -51,7 +51,7 @@ function harness(component = { state: "fixture" }, validate = () => true) {
 }
 
 test("complete actual body survives host ownership replacement and timely reclaim with the original deadline", async () => {
-  const f = clankerController({ checkpointRandom: true, checkpointProfile: "body-1", start: false });
+  const f = clankerController({ checkpointRandom: true, checkpointProfile: "body-2", start: false });
   const codec = createClankerBodyCheckpoint(f.sim, world, f.B.clankerState), pack = createCheckpointPack(8192, { intern: true });
   let restored;
   try {
@@ -69,9 +69,11 @@ test("complete actual body survives host ownership replacement and timely reclai
     assert.equal((await h.make().disconnect(ticket, [next.session.token], ref, 100000)).result.state, "live");
     const rows = await h.bank().transaction(tx => tx.bodies());
     assert.equal(rows[0].generation, next.session.generation); assert.deepEqual(rows[0].checkpoint, component);
-    restored = clankerController({ checkpointRandom: true, checkpointProfile: "body-1", start: false });
+    restored = clankerController({ checkpointRandom: true, checkpointProfile: "body-2", start: false });
     const replacement = createClankerBodyCheckpoint(restored.sim, world, restored.B.clankerState);
-    replacement.restore(rows[0].checkpoint); assert.deepEqual(replacement.capture(), component);
+    replacement.restore(rows[0].checkpoint);
+    assert.deepEqual(pack.unpack(replacement.capture()).position, pack.unpack(component).position);
+    assert.equal(restored.sim.player.animation.updates, 0, 'host recovery starts a fresh standard pose');
     assert.equal(restored.sim.player.drive.jumps, 1); assert.equal(restored.sim.player.drive.airborne, true);
     const snapshot = (await h.make().tick(ticket, [next.session.token])).snapshot;
     assert.equal(JSON.stringify(snapshot).includes('checkpoint'), false);

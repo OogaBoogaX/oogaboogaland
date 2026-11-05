@@ -53,9 +53,9 @@
     if (ctx.checkpointProfile != null) {
       const allowed = new Set(["root", "crew", "sites", "checkpointRandom", "checkpointProfile", "groundAt", "clear",
         "combatEnabled", "meadowRadius", "roamRadius"]);
-      if (!["roaming-1", "body-1"].includes(ctx.checkpointProfile) || Object.keys(ctx).some(k => !allowed.has(k))
+      if (!["roaming-1", "body-2"].includes(ctx.checkpointProfile) || Object.keys(ctx).some(k => !allowed.has(k))
         || sites.length || ctx.checkpointRandom !== true || ctx.combatEnabled === true
-        || !crew.list.length || crew.list.length > 53 || ctx.checkpointProfile === "body-1" && crew.list.length !== 1
+        || !crew.list.length || crew.list.length > 53 || ctx.checkpointProfile === "body-2" && crew.list.length !== 1
         || crew.list.some(e => e.state !== "chilling"))
         throw new Error("unsupported Clanker checkpoint profile");
     }
@@ -7357,7 +7357,7 @@
     // No browser caller opts in, and broader worlds must supply their own full
     // reservation/search/body continuation before this profile can expand.
     const continuation = ctx.checkpointProfile != null ? (() => {
-      const body = ctx.checkpointProfile === "body-1";
+      const body = ctx.checkpointProfile === "body-2";
       const refuse = () => { throw new Error("unsupported Clanker checkpoint profile"); };
       const ready = (neutral = true) => {
         if (disposed || !body && player || allAway || combatEnabled || rage || checkingRest || labEscape || debugShuttle
@@ -7384,7 +7384,7 @@
         // Static lounge candidates are reconstructed by the same world boot.
         // The caller binds this complete seed, including radius and candidates,
         // into its trusted baseline; it is never supplied by stored data.
-        baseline() { ready(); prepareLounges(list[0]); return [...(body ? ["body-1"] : []), ctx.meadowRadius || 22, roamRadius, loungeCount, roofCount, loungeReady, ...loungeSpots]; },
+        baseline() { ready(); prepareLounges(list[0]); return [...(body ? ["body-2"] : []), ctx.meadowRadius || 22, roamRadius, loungeCount, roofCount, loungeReady, ...loungeSpots]; },
         capture() {
           ready(); return [elapsed, labPassAt, labRouteBudget, labRouteTurn, labRouteNext,
             roamBudget, roamNext, roamTurn, roamSerial, climbFrameBudget, climbTurn, climbNext,
@@ -7404,12 +7404,35 @@
           // velocities, jump credits and reservations and are not restore APIs.
           if (body) player = values[15] < 0 ? null : list[values[15]];
         },
-        ...(body ? { neutralize() { ready(false); if (!player) refuse(); cancelInput(); ready(); } } : {}),
+        ...(body ? {
+          // Recovery starts the display animation fresh. Physical drive state,
+          // support identity, health, form and gameplay counters remain saved.
+          transientFields: Object.freeze(["animation", "motion.takeoff", "motion.landing", "motion.walkPhase", "motion.walkGait",
+            "motion.groom", "motion.groomSide", "motion.groomPhase", "motion.sitWait", "motion.sitTime", "motion.sitLook",
+            "motion.sitShift", "motion.sitLookTarget", "motion.sitShiftTarget", "motion.officePhase", "motion.labPhase"]),
+          neutralize() { ready(false); if (!player) refuse(); cancelInput(); ready(); },
+          recoverPose(position) {
+            if (!player || !Array.isArray(position) || position.length !== 3
+              || position.some(n => !Number.isFinite(n) || Math.abs(n) >= 10000)) refuse();
+            const e = player, p = e.root.position;
+            [p.x, p.y, p.z] = position; e.root.visible = true;
+            // This controller is fresh. Settle its newly built rig in the
+            // standard form without advancing physics or replaying an action.
+            e.gorilla.poseManaged(2, p.x, p.y, p.z, e.heading, 0, false, e.biped, "", null);
+            e.radius = Math.max(e.radius, e.gorilla.bodyRadius + 0.1);
+            e.height = Math.max(e.height, e.gorilla.bodyHeight + 0.04);
+            ready();
+            const floor = groundAt(p.x, p.z, p.y);
+            if (floor !== -Infinity && !Number.isFinite(floor) || floor > p.y + 1e-6
+              || e.drive.grounded && Math.abs(p.y - floor) > 1e-6
+              || staticClear(e, p.x, p.y, p.z) !== true) refuse();
+          },
+        } : {}),
       };
     })() : null;
     return { list, sync, update, startleHill, target, companionTarget, hit, damage, bananaHit, debugRage, setCombatEnabled, plan, startLabShuttle, debugMove, cancelDebugMove, stats, liveGeometry, dispose, contactAt,
       debugLoungeSpots, wallSupported, roamingCheckpoint: ctx.checkpointProfile === "roaming-1" ? continuation : null,
-      bodyCheckpoint: ctx.checkpointProfile === "body-1" ? continuation : null,
+      bodyCheckpoint: ctx.checkpointProfile === "body-2" ? continuation : null,
       possess, release, sleeping, wake, setAway, cancelSleepBeams, setRemote, createRemote, respawn, travelRefusal, travel, control, cancelInput, smash, smashPower, quickSmash, chestBeat, ignite, dropRoll, supportRemoved,
       get combatEnabled() { return combatEnabled; }, get player() { return player; } };
   };

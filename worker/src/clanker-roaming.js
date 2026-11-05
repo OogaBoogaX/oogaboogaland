@@ -20,7 +20,7 @@ export function createClankerRoamingCheckpoint(sim, world, rigCodec) {
 // reservation; the host must measure/admit the complete body before integration.
 export function createClankerBodyCheckpoint(sim, world, rigCodec) {
   if (sim.list.length !== 1) bad();
-  const codec = createCheckpoint(sim, world, rigCodec, sim.bodyCheckpoint, 8 * 1024);
+  const codec = createCheckpoint(sim, world, rigCodec, sim.bodyCheckpoint, 8 * 1024, true);
   let invalid = false;
   const ready = () => { if (invalid) bad(); };
   return {
@@ -34,12 +34,17 @@ export function createClankerBodyCheckpoint(sim, world, rigCodec) {
   };
 }
 
-function createCheckpoint(sim, world, rigCodec, bridge, budget) {
+function createCheckpoint(sim, world, rigCodec, bridge, budget, standardBody = false) {
   const entries = sim.list;
-  if (!bridge || bridge.capture()[0] !== 0 || !rigCodec?.packRoster || !rigCodec?.unpackRoster) bad();
+  if (!bridge || bridge.capture()[0] !== 0 || (standardBody
+    ? typeof bridge.recoverPose !== "function" || !Array.isArray(bridge.transientFields)
+    : !rigCodec?.packRoster || !rigCodec?.unpackRoster)) bad();
   const ids = entries.map(e => e.owner.id), references = new Map(entries.map((e, i) => [e, i]));
   const buffers = createClankerBufferCheckpoint(world, ids), pack = createCheckpointPack(budget, { intern: true });
-  const rigs = entries.map(e => e.gorilla.createManagedCheckpoint(world));
+  const rigs = standardBody ? null : entries.map(e => e.gorilla.createManagedCheckpoint(world));
+  const transient = new Set(standardBody ? bridge.transientFields : []);
+  const keysOf = (value, path) => Object.keys(value).filter(k => (path.length || !excluded.has(k))
+    && (!standardBody || !transient.has([...path, k].join("."))));
   const token = value => {
     if (value === missing) return [-6];
     if (value === undefined) return [-5];
@@ -76,29 +81,29 @@ function createCheckpoint(sim, world, rigCodec, bridge, budget) {
       const index = fields.length; fields.push(field); return { index };
     }
     if (!value || Array.isArray(value) || ArrayBuffer.isView(value) || path.length > 6) bad();
-    const keys = Object.keys(value).filter(k => path.length || !excluded.has(k));
-    if (name === "motion" && !keys.includes("walkGait")) keys.push("walkGait");
+    const keys = keysOf(value, path);
+    if (name === "motion" && !transient.has("motion.walkGait") && !keys.includes("walkGait")) keys.push("walkGait");
     if (keys.length > 128 || keys.some(k => ["__proto__", "prototype", "constructor"].includes(k))) bad();
-    return { keys, children: keys.map(k => compile(Object.hasOwn(value, k) ? value[k] : missing, [...path, k])) };
+    return { keys, path, children: keys.map(k => compile(Object.hasOwn(value, k) ? value[k] : missing, [...path, k])) };
   };
   const shape = compile(entries[0]);
   const compatible = (field, value) => field.kind === "optional" ? value === missing || typeof value === "string" && value.length <= 80
     : field.kind === "reference" ? value === null || references.has(value) : typeof value === field.kind;
   const values = entry => {
     const out = [];
-    const walk = (value, node, root = false) => {
+    const walk = (value, node) => {
       if (node.buffer) return;
       if (node.index !== undefined) {
         if (!compatible(fields[node.index], value)) bad(); out[node.index] = token(value); return;
       }
       if (!value || typeof value !== "object") bad();
-      const keys = Object.keys(value).filter(k => !root || !excluded.has(k));
+      const keys = keysOf(value, node.path);
       if (keys.some(k => !node.keys.includes(k))) bad();
       for (let i = 0; i < node.keys.length; i++) {
         const k = node.keys[i]; walk(Object.hasOwn(value, k) ? value[k] : missing, node.children[i]);
       }
     };
-    walk(entry, shape, true); return out;
+    walk(entry, shape); return out;
   };
   const defaults = entries.map(values), staticState = Array.from(bridge.baseline());
   // This is an accidental-baseline mismatch guard, not authentication. The
@@ -124,8 +129,13 @@ function createCheckpoint(sim, world, rigCodec, bridge, budget) {
         for (let j = 0; j < fields.length; j++) if (!equal(current[j], defaults[i][j])) row.push(j, current[j]);
         return row;
       });
-      return pack.pack({ v: 1, world, baseline, clocks, actors, buffers: buffers.capture(entries),
-        rigs: structuredClone(rigCodec.packRoster(world, rigs.map((rig, index) => ({ index, snapshot: rig.capture() })), true)) });
+      const state = { v: standardBody ? 2 : 1, world, baseline, clocks, actors, buffers: buffers.capture(entries) };
+      if (standardBody) {
+        const p = entries[0].root.position;
+        state.position = [p.x, p.y, p.z];
+        if (state.position.some(n => !Number.isFinite(n) || Math.abs(n) >= 10000)) bad();
+      } else state.rigs = structuredClone(rigCodec.packRoster(world, rigs.map((rig, index) => ({ index, snapshot: rig.capture() })), true));
+      return pack.pack(state);
     },
     restore(saved) {
       ready();
@@ -133,8 +143,11 @@ function createCheckpoint(sim, world, rigCodec, bridge, budget) {
       // step. If application fails, poison this adapter; discard the controller.
       if (restored || bridge.capture()[0] !== 0) bad();
       const state = pack.unpack(saved);
-      if (Object.keys(state).sort().join() !== "actors,baseline,buffers,clocks,rigs,v,world" || state.v !== 1
+      if (Object.keys(state).sort().join() !== (standardBody ? "actors,baseline,buffers,clocks,position,v,world" : "actors,baseline,buffers,clocks,rigs,v,world")
+        || state.v !== (standardBody ? 2 : 1)
         || state.world !== world || state.baseline !== baseline || !dense(state.actors) || state.actors.length !== entries.length) bad();
+      if (standardBody && (!dense(state.position) || state.position.length !== 3
+        || state.position.some(n => !Number.isFinite(n) || Math.abs(n) >= 10000))) bad();
       const decoded = state.actors.map((row, i) => {
         if (!dense(row) || row.length % 2 !== 1 || row.length > fields.length * 2 + 1) bad();
         const random = restoreNpcRandom({ v: 1, word: row[0] }).next, result = defaults[i].map(decode);
@@ -147,8 +160,8 @@ function createCheckpoint(sim, world, rigCodec, bridge, budget) {
         }
         return { random, result };
       });
-      const arrays = buffers.restore(state.buffers), poses = rigCodec.unpackRoster(state.rigs);
-      if (poses.length !== entries.length || poses.some((p, i) => p.index !== i)) bad();
+      const arrays = buffers.restore(state.buffers), poses = standardBody ? null : rigCodec.unpackRoster(state.rigs);
+      if (poses && (poses.length !== entries.length || poses.some((p, i) => p.index !== i))) bad();
       invalid = true;
       bridge.restore(state.clocks);
       for (let i = 0; i < entries.length; i++) {
@@ -161,8 +174,9 @@ function createCheckpoint(sim, world, rigCodec, bridge, budget) {
         }
         for (const [group, members] of Object.entries(arrays[i])) Object.assign(e[group], members);
         e.random = decoded[i].random;
-        rigs[i].restore(poses[i].snapshot);
+        if (rigs) rigs[i].restore(poses[i].snapshot);
       }
+      if (standardBody) bridge.recoverPose(state.position);
       bridge.capture(); // Refuse a saved state outside this limited profile.
       restored = true; invalid = false;
       return true;
