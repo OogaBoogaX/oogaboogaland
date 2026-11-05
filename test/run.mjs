@@ -139,6 +139,7 @@ const gorillaSleepStallProof = () => {
       if (d > 0) { p.x += dx / d * go; p.z += dz / d * go; walked += go; if (actor.sleep.retrying) backwalk += go; }
     };
     for (; t < limit && !done; t += dt) {
+      beginSleepFrame();
       const p = e.root.position, s = e.sleep, x = p.x, z = p.z, leg = s.leg, stage = s.stage;
       walked = 0;
       if (jumpPause) e.jump.active = t >= 0.5 && t < 3.5;
@@ -213,7 +214,7 @@ const gorillaSleepStallProof = () => {
     e.sleep.path.set(path);
     e.gorilla.root = e.root; e.gorilla.form = "ape"; e.root.matrixNative = false;
     e.gorilla.setForm = form => { e.gorilla.form = form; };
-    const context = { e, dt: c.dt || 1 / 60, pace: c.pace || 1, limit: c.limit || 300, wakeAt: c.wakeAt ?? Infinity, open: c.open, bedDay: 0, SPEED: 2.7,
+    const context = { e, list: [e], dt: c.dt || 1 / 60, pace: c.pace || 1, limit: c.limit || 300, wakeAt: c.wakeAt ?? Infinity, open: c.open, bedDay: 0, SPEED: 2.7,
       sleepBeam: { show: (slot, x, y, z, heading, progress, incoming) => { context.visible = true; context[incoming ? "inFrames" : "outFrames"]++; }, hide: () => { context.visible = false; } },
       visible: false, outFrames: 0, inFrames: 0, blockedLanding: false, landingBlocked: !!c.landingBlocked,
       jumpPause: !!c.jumpPause, rageDuringBeam: !!c.rageDuringBeam, updateJump: noop,
@@ -227,6 +228,49 @@ const gorillaSleepStallProof = () => {
     runInNewContext(script, context);
     const r = context.out;
     return { name: c.name, ...r, ok: r.unexpected === 0 && r.skipped === 0 && (c.rageDuringBeam || r.form === "ape" && !r.native) && c.ok(r) };
+  });
+};
+// Simultaneous stalled sleepers share the production admission controller even
+// when one rendered update catches up eight physics steps. A blocked first bed
+// must not monopolize the queue, and every clear reservation must eventually land.
+const gorillaSleepBudgetProof = () => {
+  const source = readFileSync(join(root, "src/js/clankers.js"), "utf8");
+  const section = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
+  const controllers = section("    const SLEEP_POSES =", "\n") + "\n"
+    + section("    const sleepBeamLook =", "    // True while sleep owns");
+  return [1 / 60, 0.25].map(dt => {
+    const script = controllers + `
+      let peak = 0, maxChecks = 0, maxStarts = 0, first = -1, unsafe = false;
+      for (time = 0; time < 12 && list.some(e => e.sleep.stage !== "asleep"); time += dt) {
+        beginSleepFrame(); checks = 0; let starts = 0, remaining = dt;
+        while (remaining > 1e-8) {
+          const step = Math.min(remaining, 1 / 30); remaining -= step;
+          for (const e of list) {
+            const s = e.sleep;
+            s.beamWait = Math.max(0, s.beamWait - step);
+            if (s.stage === "go" && !s.beamWait) { beginSleepBeam(e); if (s.stage === "beamOut") starts++; }
+            else if (s.stage === "beamOut" || s.stage === "beamIn") updateSleepBeam(e, step);
+            if (s.stage === "beamIn" && first < 0) first = s.slot;
+            if (s.slot === 0 && time < 1 && e.root.position.x === 10) unsafe = true;
+          }
+          peak = Math.max(peak, list.filter(e => e.sleep.stage === "beamOut" || e.sleep.stage === "beamIn").length);
+        }
+        maxChecks = Math.max(maxChecks, checks); maxStarts = Math.max(maxStarts, starts);
+      }
+      globalThis.out = { peak, maxChecks, maxStarts, first, unsafe, time,
+        arrived: list.filter(e => e.sleep.stage === "asleep" && e.root.position.x === e.sleep.slot + 10 && e.gorilla.form === "ape").length };
+    `;
+    const list = Array.from({ length: 20 }, (_, slot) => {
+      const root = { position: { x: 0, y: 0, z: 0 }, matrixNative: false };
+      const gorilla = { root, form: "ape", setForm(form) { this.form = form; }, poseManaged() {} };
+      return { root, gorilla, sleep: { slot, stage: "go", beamWait: 0, beamTime: 0 }, motion: {} };
+    });
+    const context = { list, dt, time: 0, checks: 0, bedTaken: () => false, sleepBeam: { show() {}, hide() {}, clear() {} }, layDown() {} };
+    context.ctx = { sleep: { slots: list.map((e, i) => ({ x: i + 10, y: 0, z: 0, heading: 0 })) },
+      restPoseClear(e) { context.checks++; return e.sleep.slot !== 0 || context.time >= 1; } };
+    runInNewContext(script, context);
+    const r = context.out;
+    return { dt, ...r, ok: r.peak === 1 && r.maxChecks === 1 && r.maxStarts === 1 && r.first === 1 && !r.unsafe && r.arrived === 20 };
   });
 };
 // Run the hub's real landing/player predicate, including the NPC exception to walking collision.
@@ -11861,12 +11905,35 @@ const hubGorillaPopulation = { name: "gorilla population restoration", why: "reg
     beamEntry.sleep.stage = "beamOut"; beamEntry.sleep.beamTime = 0;
     C.update(1 / 60); C.cancelSleepBeams();
     const beamSuspend = noBeam() && beamEntry.sleep.stage === "go" && beamEntry.gorilla.form === "ape" && !beamEntry.root.matrixNative;
-    return { beamSuspend, lateSleepers, stable, capped, reused, heldWhileDriven, uniqueAfterRelease, hidden, restored, stableExit, beamPossession, beamArrivalPossession, beamRemote, beamReset,
+    // Use the real rigs, route reservations, collision predicates and effect pool
+    // for ten simultaneous spent stall budgets. Queuing must not overlap beams
+    // or keep trying to walk/animate the actor behind the active recovery.
+    const queued = entries.slice(3, 13); reset(queued); C.update(1 / 30);
+    for (const e of queued) {
+      const s = e.sleep, p = e.root.position;
+      e.lounge = ""; e.recover = 0; e.jump.active = e.climb.active = e.drive.airborne = false;
+      s.stage = "go"; s.leg = Math.max(0, s.count - 2); s.stall = 26; s.near = s.forwardNear = 0;
+      s.forwardLeg = s.leg; s.tries = 2; s.retrying = false; s.beamWait = 0;
+      p.x = s.path[s.leg * 2] + 1.5; p.z = s.path[s.leg * 2 + 1] + 1.5; p.y = B.island.surfaceAt(p.x, p.z);
+      e.gorilla.poseManaged(2, p.x, p.y, p.z, e.heading, 0, false, false, "", e.motion);
+    }
+    const last = queued[queued.length - 1], start = { ...last.root.position };
+    let maxBeams = 0;
+    C.update(1 / 60);
+    const heldQueue = last.sleep.stage === "go" && last.root.position.x === start.x && last.root.position.z === start.z;
+    for (let i = 0; i < 240; i++) {
+      maxBeams = Math.max(maxBeams, queued.filter(e => e.sleep.stage === "beamOut" || e.sleep.stage === "beamIn").length);
+      C.update(1 / 60);
+    }
+    const queuedArrival = queued.every(e => e.sleep.stage === "asleep" && e.sleep.slot >= 0 && e.gorilla.form === "ape" && !e.root.matrixNative);
+    const boundedRecovery = heldQueue && maxBeams === 1 && queuedArrival && noBeam();
+    return { boundedRecovery, maxBeams, heldQueue, queuedArrival, beamSuspend, lateSleepers, stable, capped, reused, heldWhileDriven, uniqueAfterRelease, hidden, restored, stableExit, beamPossession, beamArrivalPossession, beamRemote, beamReset,
       population: [worker, chiller, away, ...sleepers].map(e => ({ state: e.owner.state, mode: e.mode, active: e.active, visible: e.root.visible, bed: e.sleep.slot })) };
   })()`);
   record("gorilla population: late-roster sleepers get exclusive beds; working, chilling and away owners get none; overflow waits at the 20-bed cap, respects driven reservations and reuses released beds", r.lateSleepers && r.stable && r.capped && r.reused && r.heldWhileDriven && r.uniqueAfterRelease, JSON.stringify(r));
   record("gorilla population: island game mode hides companions and its exit immediately restores current working, chilling and sleeping gorillas; repeated exit keeps their beds", r.hidden && r.restored && r.stableExit, JSON.stringify(r));
   record("gorilla sleep beam: possession, remote takeover and population reset cancel both transfer stages without displacing a driven character", r.beamPossession && r.beamArrivalPossession && r.beamRemote && r.beamReset && r.beamSuspend, JSON.stringify(r));
+  record("gorilla sleep recovery: ten stalled real rigs hold position in the queue and reach their reserved beds with at most one active beam", r.boundedRecovery, JSON.stringify(r));
 } };
 const hubCombatGate = { name: "hub game-only combat", why: "rule: ordinary visits retain harmless weapons and both look modes while damage, health simulation, rage and grabs stay off, and ending a game clears its transient combat state", run: async b => {
   const r = await b.evaluate(`(() => {
@@ -25797,10 +25864,10 @@ const visibilitySourceBakeProof = () => {
   const math = readFileSync(new URL("../src/js/math.js", import.meta.url), "utf8");
   const source = readFileSync(new URL("../src/js/character-visibility.js", import.meta.url), "utf8");
   const compact = readFileSync(new URL("../src/js/compact-geometry.js", import.meta.url), "utf8");
-  const expose = source.slice(0, source.indexOf("  const create =")) + " window.__meshProof={meshOf,meshes};})();";
+  const expose = source.replace("BL.characterVisibility = { create };", "BL.characterVisibility = { create }; window.__meshProof={meshOf,meshes,startMesh,builds};");
   return runInNewContext(math + "\n" + compact + "\n" + expose + `
 (() => {
-    const {meshOf}=window.__meshProof;
+    const {meshOf,meshes,startMesh,builds}=window.__meshProof;
     const source={verts:new Float64Array([0,0,0, 1,0,0, 0,1,0, 0,0,1]),faces:[{i:[0,1,2]},{i:[0,2,3]}]};
     const wrapper=()=>({...source,faces:source.faces.map(f=>({...f,matrixCave:2,matrixLocalGlyphSurface:true})),matrixSourceGeometry:source});
     const first=wrapper(), baked=meshOf(first);let cases=0;
@@ -25862,8 +25929,81 @@ const visibilitySourceBakeProof = () => {
     check(refused===2 && C.storageOf(packed)===data,'Reassigning a packed mesh did not throw');
     const legacy=packed.faces[0];
     check(packed.faces[0]===legacy && Object.isFrozen(legacy) && Object.isFrozen(legacy.i) && legacy.color[3]===-1 && data.legacy.size===1,'Legacy compact access is not stable and bounded');
-    return { cases, failures: 0, wrapperVisits: 100, sharedSourceBVHs: 1 };
-  })()`, { window: { location: { search: "?compactGeometry=1" }, BL: { scene: { boundsOf() { throw Error("Unused"); } } } }, URLSearchParams });
+    // Median partitioning may reorder triangles, but every leaf must keep an
+    // exact, enclosing subset and answer the same rays as a brute-force scan.
+    const random = window.BL.math.mulberry32(731);
+    let rays = 0, warmGeometry, warmExpected;
+    for (const shape of ["random", "sorted", "reverse", "equal", "clustered"]) {
+      const geometry = { verts: [], faces: [] }, count = 1003;
+      for (let i = 0; i < count; i++) {
+        const x = shape === "equal" ? 0 : shape === "random" ? random() * 20 - 10 : shape === "clustered" ? i < 990 ? 0 : 20 : (shape === "sorted" ? i : count - i) / 50 - 10;
+        const y = shape === "equal" ? 0 : Math.floor(i / 25) / 2 - 10, z = i % 17, at = geometry.verts.length / 3;
+        geometry.verts.push(x - .4, y - .4, z, x + .4, y - .4, z, x, y + .4, z);
+        geometry.faces.push({ i: [at, at + 1, at + 2], visibility: i % 19 ? true : false });
+      }
+      const pending = startMesh(geometry); pending.slice.until = -1;
+      check(!pending.steps.next().done && !meshes.has(geometry), "Idle bake failed to yield without publishing partial triangles");
+      const mesh = meshOf(geometry), triangles = mesh.indices.length / 3, seen = new Uint8Array(triangles);
+      check(!builds.has(geometry) && meshes.get(geometry) === mesh, "On-demand query did not finish and publish the pending bake");
+      warmGeometry = { ...geometry }; warmExpected = mesh;
+      check(triangles === geometry.faces.filter(f => f.visibility).length, "Partition dropped visible triangles");
+      for (const node of mesh.nodes) {
+        for (let k = node.from; k < node.to; k++) {
+          const id = mesh.order[k];
+          if (node.left < 0) seen[id]++;
+          for (let v = 0; v < 3; v++) for (let axis = 0; axis < 3; axis++) {
+            const value = mesh.vertices[mesh.indices[id * 3 + v] + axis];
+            check(value >= node.box[axis] && value <= node.box[axis + 3], "Partition bounds exclude a triangle");
+          }
+        }
+        if (node.left >= 0) {
+          const left = mesh.nodes[node.left], right = mesh.nodes[node.right];
+          check(left.from === node.from && left.to === right.from && right.to === node.to && Math.abs((left.to - left.from) - (right.to - right.from)) <= 1, "Partition is not balanced and contiguous");
+        }
+      }
+      check(seen.every(n => n === 1), "Partition duplicates or loses a leaf triangle");
+      const hit = (id, x, y) => {
+        const at = mesh.indices[id * 3], vx = mesh.vertices[at], vy = mesh.vertices[at + 1];
+        const u = (y - vy) / .8, v = (x - vx - .4 * u) / .8;
+        return u >= 0 && v >= 0 && u + v <= 1 ? 20 - mesh.vertices[at + 2] : Infinity;
+      };
+      for (let i = 0; i < 100; i++) {
+        const x = i < 50 ? random() * 20 - 10 : 0, y = i < 50 ? random() * 20 - 10 : 0;
+        let expected = Infinity;
+        for (let id = 0; id < triangles; id++) expected = Math.min(expected, hit(id, x, y));
+        const visit = index => {
+          const n = mesh.nodes[index], box = n.box;
+          if (x < box[0] || x > box[3] || y < box[1] || y > box[4]) return Infinity;
+          if (n.left >= 0) return Math.min(visit(n.left), visit(n.right));
+          let nearest = Infinity;
+          for (let k = n.from; k < n.to; k++) nearest = Math.min(nearest, hit(mesh.order[k], x, y));
+          return nearest;
+        };
+        check(visit(0) === expected, "Partition ray differs from brute force"); rays++;
+      }
+    }
+    // The public warmer must schedule large meshes instead of discarding them,
+    // resume across idle slices, publish only a complete tree and cancel on exit.
+    const idle = new Map(); let nextIdle = 0, clock = 0, warmSlices = 0;
+    globalThis.requestIdleCallback = fn => { idle.set(++nextIdle, fn); return nextIdle; };
+    globalThis.cancelIdleCallback = id => idle.delete(id);
+    globalThis.performance = { now: () => clock++ };
+    const warmRoot = { children: [{ geometry: warmGeometry, children: [] }] };
+    const visibility = window.BL.characterVisibility.create({ root: warmRoot, renderer: {}, camera: {} });
+    visibility.warm();
+    while (idle.size && warmSlices < 1000) {
+      const [id, fn] = idle.entries().next().value; idle.delete(id); fn({ timeRemaining: () => 10 }); warmSlices++;
+    }
+    const warmed = meshes.get(warmGeometry);
+    check(warmSlices > 1 && warmSlices < 1000 && warmed && !builds.has(warmGeometry), "Large idle bake was skipped, did not yield or did not finish");
+    check(JSON.stringify(warmed.nodes) === JSON.stringify(warmExpected.nodes) && warmed.indices.every((v, i) => v === warmExpected.indices[i]), "Idle and synchronous bakes differ");
+    visibility.dispose();
+    warmRoot.children[0].geometry = { ...warmGeometry };
+    const leaving = window.BL.characterVisibility.create({ root: warmRoot, renderer: {}, camera: {} });
+    leaving.warm(); leaving.dispose();
+    check(idle.size === 0, "Disposed visibility retained an idle callback");
+    return { cases, failures: 0, rays, warmSlices, wrapperVisits: 100, sharedSourceBVHs: 1 };
+  })()`, { window: { location: { search: "?compactGeometry=1" }, BL: { scene: { boundsOf() { throw Error("Unused"); } } } }, URLSearchParams, performance: { now: () => 0 } });
 };
 
 // Run the shipped driver with synthetic processes, discovery and sockets; never launch Chrome.
@@ -26782,6 +26922,8 @@ const unitChecks = async () => {
   record("gorilla sleep beam: fixed pool, slot isolation, live reduced motion and scene cleanup", Object.values(sleepBeamPool).every(Boolean), JSON.stringify(sleepBeamPool));
   const sleepStalls = gorillaSleepStallProof();
   record("gorilla sleep stall regression: two seconds without forward progress permits a bounded beam to a clear reserved bed; progress, waits, cancellation and walking home retain their contracts", sleepStalls.every(row => row.ok), JSON.stringify(sleepStalls));
+  const sleepBudget = gorillaSleepBudgetProof();
+  record("gorilla sleep recovery: twenty simultaneous stalls share one beam and one landing check per rendered update, including catch-up; a blocked bed yields and all clear reservations arrive", sleepBudget.every(row => row.ok), JSON.stringify(sleepBudget));
   const rage = await gorillaRageProof();
   record("gorilla rage: distinct rolling hits, only agitating Oogas targeted, held capture through planning and swing, bounded throws, exact expiry, zero health and account/lifecycle cancellation", Object.values(rage).every(Boolean), JSON.stringify(rage));
   const reviewCrowd=await reviewCrowdAndFallbackProof();
