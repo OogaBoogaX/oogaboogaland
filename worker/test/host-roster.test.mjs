@@ -39,7 +39,7 @@ test("53 Ooga/Clanker pairs retain exact controller state through full slots, gr
   await host.sessions(ticket, tokens, (r, at) => joins.slice(0, 30).forEach(j => r.disconnect(j.session, at)));
   now += 59999; host = make(); ticket = await host.claim("restart");
   const resumed = await host.connect(ticket, [], claim(29)); assert.equal(resumed.result.resumed, true);
-  assert.deepEqual(resumed.result.view.equipment, equipment); assert.equal(resumed.result.view.motion.grounded, true);
+  assert.deepEqual(resumed.result.view.equipment, equipment); assert.equal(resumed.result.view.motion.grounded, false);
   now++; let result, commits = 0;
   do { result = await host.tick(ticket, [resumed.result.session.token]); assert.ok(++commits <= 10); } while (result.work.pendingSteps);
   assert.deepEqual(saved.simulation, actorsBefore, "outage recovery cannot replay NPC shots or decisions");
@@ -92,7 +92,7 @@ test("compact 106-actor plus rig checkpoints retain all session reservations thr
   await host.sessions(ticket,tokens,(r,at)=>joins.slice(0,30).forEach(j=>r.disconnect(j.session,at)));
   now+=59999;host=make();ticket=await host.claim('restart');
   const reclaimed=await host.connect(ticket,[],claim(29));assert.equal(reclaimed.result.resumed,true);assert.deepEqual(reclaimed.result.view.equipment,equipment);
-  assert.equal(reclaimed.result.view.motion.grounded,true);now++;
+  assert.equal(reclaimed.result.view.motion.grounded,false);now++;
   let result,commits=0;do{result=await host.tick(ticket,[reclaimed.result.session.token]);assert.ok(++commits<=10);}while(result.work.pendingSteps);
   assert.deepEqual(saved.simulation,retained);assert.equal(saved.sessions.pending.length,29);
   assert.ok(saved.sessions.pending.every(p=>p.applied&&p.handback===null));assert.ok(peak<HOST.checkpointBytes);assert.ok(worldPeak<=65536);

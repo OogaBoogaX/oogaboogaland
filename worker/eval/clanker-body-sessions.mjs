@@ -1,4 +1,4 @@
-// Finite actual-controller/session recovery cost. In-memory atomic storage and
+// Finite frozen-body/session recovery cost. In-memory atomic storage and
 // independent authored meadows; no production world, Room, browser or paid loop.
 import assert from 'node:assert/strict';
 import { VirtualHost, HOST, SESSION_PROTOCOL } from '../src/virtual-host.js';
@@ -28,12 +28,12 @@ try {
       body:{kind:'clanker',motion:structuredClone(prepared.codec.motion()),equipment} });
   }
 } finally { prepared.dispose(); }
-let data=new Map(),now=100000,constructions=0,disposals=0,peakControllers=0,active=0;
+let data=new Map(),now=100000,constructions=0,disposals=0,peakControllers=0,active=0,writes=0,writeBytes=0;
 const storage={async transaction(fn){
   const pending=structuredClone(data);
   const result=await fn({
     get:async k=>Array.isArray(k)?new Map(k.filter(k=>pending.has(k)).map(k=>[k,structuredClone(pending.get(k))])):structuredClone(pending.get(k)),
-    put:async values=>{for(const [k,v]of Object.entries(values))pending.set(k,structuredClone(v));},
+    put:async values=>{for(const [k,v]of Object.entries(values)){writes++;writeBytes+=Buffer.byteLength(JSON.stringify(v));pending.set(k,structuredClone(v));}},
     delete:async keys=>{for(const k of keys)pending.delete(k);},
   });data=pending;return result;
 }};
@@ -60,13 +60,13 @@ const closeMs=unknownClose ? null : performance.now()-closeAt;
 assert.equal(active,0); now=short?100250:160000;if(!short)ticket=await host().claim('replacement');
 const batches=[];
 for(let i=0;i<31;i++){
-  const before=constructions,cpu=process.cpuUsage(),at=performance.now(),result=await host().tick(ticket,[]);
+  const before=constructions,beforeWrites=writes,beforeBytes=writeBytes,cpu=process.cpuUsage(),at=performance.now(),result=await host().tick(ticket,[]);
   const wallMs=performance.now()-at,used=process.cpuUsage(cpu),root=data.get(HOST.key);
-  assert.ok(result.work.steps<=CLANKER_BODY_STEPS);assert.equal(active,0);
-  assert.ok(constructions-before<=CLANKER_BODY_LOADS);
+  assert.equal(result.work.steps,0);assert.equal(active,0);
+  assert.equal(constructions-before,0);
   assert.ok(root.host.sessions.sessions.every(r=>r.deadline===160000));
   batches.push({batch:i,wallMs,cpuUs:used.user+used.system,steps:result.work.steps,pendingSteps:result.work.pendingSteps,
-    controllers:constructions-before,rootBytes:Buffer.byteLength(JSON.stringify(root)),
+    controllers:constructions-before,keyWrites:writes-beforeWrites,jsonValueWriteBytes:writeBytes-beforeBytes,rootBytes:Buffer.byteLength(JSON.stringify(root)),
     totalStoredBytes:[...data.values()].reduce((sum,v)=>sum+Buffer.byteLength(JSON.stringify(v)),0)});
   if(!result.work.pendingSteps)break;
 }
@@ -75,9 +75,11 @@ const root=data.get(HOST.key).host,rows=await bank.transaction(tx=>tx.bodies());
 assert.equal(root.sessions.sessions.length,short?30:0);assert.equal(root.sessions.pending.length,short?0:30);
 for(const r of [...root.sessions.pending,...root.sessions.sessions]){
   const body=r.body||r;
-  if(!short){assert.equal(r.at,160000);assert.equal(r.reason,'expired');assert.equal(r.handback,null);assert.equal(body.motion.grounded,true);}
-  else {assert.equal(r.deadline,160000);assert.equal(r.stepAt,100250);}
+  if(!short){assert.equal(r.at,160000);assert.equal(r.reason,'expired');assert.equal(r.handback,null);assert.equal(body.motion.grounded,false);}
+  else {assert.equal(r.deadline,160000);assert.equal(r.stepAt,100000);}
   assert.deepEqual(body.equipment,equipment);
+  const admitted=claims.find(c=>c.bodyId===r.bodyId).body.motion;
+  assert.deepEqual(body.motion,{...admitted,vx:0,vy:0,vz:0});
   const recovered=make();
   try{recovered.codec.restore(rows.find(x=>x.bodyId===r.bodyId).checkpoint);
     assert.deepEqual(structuredClone(recovered.codec.motion()),body.motion);

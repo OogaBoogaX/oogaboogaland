@@ -69,7 +69,7 @@
     const matches = (m, value) => m.epoch === value.epoch && m.generation === value.view.generation && m.revision === value.revision;
     const transferText = (value, state) => {
       const view = value?.view;
-      if (!value || value.v !== 1 || value.protocol !== "host-session-v4" || value.world !== current.world
+      if (!value || value.v !== 1 || value.protocol !== "host-session-v5" || value.world !== current.world
         || value.epoch !== current.epoch || !positive(value.revision) || !positive(value.at)
         || !positive(value.expiresAt) || value.expiresAt <= value.at || value.expiresAt - value.at > PREPARE_MS
         || value.resetResources !== "defaults" || view?.accountId !== account || view.bodyId !== current.bodyId

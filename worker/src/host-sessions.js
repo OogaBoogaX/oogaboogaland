@@ -4,12 +4,13 @@
 // generation drawn from a persisted, strictly increasing counter, so a superseded (generation, token) can never match
 // again. A confirmed disconnect neutralizes the body's holds (the `neutralize` effect, applied by the host) and keeps it,
 // its equipment and mode for GRACE_MS from the confirmed close (or, unknown after a restart, the last confirmed presence);
-// the host's passive stepper may move it meanwhile. Strictly before the deadline the account reclaims it; at or after, the
+// the body stays frozen at its last accepted position with zero momentum. Strictly before the deadline the account
+// reclaims it; at or after, the
 // record becomes a `depart` intent keyed by its generation that carries the body as it was. The host applies the intent
 // (`markApplied`, in the same atomic commit as its simulation handback) and it then stays as a tombstone until its visual
 // delivery is acknowledged. Sessions and departures share MAX_SESSIONS slots. The parent checkpoints after a mutation and
 // before publishing its effects.
-export const CHECKPOINT_VERSION = 4, MAX_SESSIONS = 64, GRACE_MS = 60000, HANDOFF_MS = 1000;
+export const CHECKPOINT_VERSION = 5, MAX_SESSIONS = 64, GRACE_MS = 60000, HANDOFF_MS = 1000;
 export const PASSIVE_STEP_MS = 50;
 export const OCCUPANCY_KINDS = Object.freeze(["hammock", "cabinet"]);
 export const BODY_KINDS = Object.freeze(["ooga", "clanker"]);
@@ -73,30 +74,23 @@ export class SessionRegistry {
   #clock = 0;
   #next = 1;
   #ready = true;
-  #remaining = Infinity;
-  #used = 0;
 
-  // adapter (host-owned, trusted): stepPassive(motion & { bodyId, zone, kind }, dtMs) -> motion (with yaw);
-  // npcFor(bodyId) -> existing NPC id or null; validateOccupancy({ bodyId, zone, x, y, z }, { kind, id }) -> true to admit.
-  // A passive step requires a real collision adapter. passiveBudget, when supplied,
-  // is shared by every call on this registry instance: restore once per host
-  // transaction. The standalone default retains the original complete sweep
-  // (still bounded by 64 bodies * 1200 substeps). A budget must cover one body's
-  // full grace so authenticated reconnect priority cannot starve it.
+  // Host-owned NPC and occupancy lookups only. Frozen bodies never call a
+  // physics adapter. The legacy passiveBudget argument remains validated for
+  // inactive callers while their configuration is removed in later integration.
   constructor({ protocol, world, adapter = {}, passiveBudget, maxSessions = MAX_SESSIONS } = {}) {
     if (!isVersion(protocol) || !isVersion(world)) throw new TypeError("host-sessions needs protocol and world versions");
     if (passiveBudget !== undefined && (!Number.isSafeInteger(passiveBudget) || passiveBudget < GRACE_MS / PASSIVE_STEP_MS
       || passiveBudget > MAX_SESSIONS * GRACE_MS / PASSIVE_STEP_MS)) throw new TypeError("host-sessions: invalid passive budget");
     if (!Number.isSafeInteger(maxSessions) || maxSessions < 1 || maxSessions > MAX_SESSIONS) throw new TypeError("host-sessions: invalid capacity");
     this.maxSessions = maxSessions;
-    this.#remaining = passiveBudget ?? Infinity;
     this.protocol = protocol;
     this.world = world;
     this.adapter = adapter;
   }
 
   // A restored registry refuses every mutation until recover(now, liveTokens, closes) runs. Only CHECKPOINT_VERSION
-  // restores: older drafts cannot represent pending handoff ownership and are never silently migrated.
+  // restores: older drafts use passive physics and are never silently migrated.
   static restore(checkpoint, options) {
     const r = new SessionRegistry(options);
     if (!plain(checkpoint, TOP)) fail("shape");
@@ -121,7 +115,7 @@ export class SessionRegistry {
         if (s.deadline !== s.lastSeenAt + GRACE_MS || s.stepAt < s.lastSeenAt || s.stepAt >= s.deadline) fail("grace deadline");
       } else fail("session state");
       const motion = readMotion(s.motion), equipment = readEquipment(s.equipment);
-      if (!motion || !equipment) fail("session body data");
+      if (!motion || !equipment || s.state !== "live" && (motion.vx !== 0 || motion.vy !== 0 || motion.vz !== 0)) fail("session body data");
       let occupancy = null;
       if (s.occupancy !== null) {
         occupancy = readOccupancy(s.occupancy);
@@ -229,15 +223,12 @@ export class SessionRegistry {
     let resumed = false;
     if (r) {
       if (r.bodyId !== bodyId) return refuse("account-bound", effects);
-      // A bounded recovery may still be behind. Never reclaim an old pose or
-      // revive an expired body. The host's typed connect prioritizes this account
-      // before reaching here, so a timely authenticated reconnect need not wait
-      // behind unrelated recovery work.
+      // A grant in flight retains its original deadline and exclusive owner.
       if (r.state === "starting" || r.state === "offered" && !offered) return refuse("handoff", effects);
-      if (r.state !== "live" && (r.stepAt < Math.min(t, r.deadline) || t >= r.deadline)) return refuse("recovering", effects);
+      if (r.state !== "live" && t >= r.deadline) return refuse("recovering", effects);
       resumed = r.state !== "live";
       if (!resumed) {
-        r.motion.vx = r.motion.vz = 0;
+        r.motion.vx = r.motion.vy = r.motion.vz = 0;
         effects.push({ type: "replaced", accountId, generation: r.generation });
         effects.push({ type: "neutralize", accountId, bodyId: r.bodyId, generation: r.generation });
       }
@@ -257,7 +248,7 @@ export class SessionRegistry {
     r.deadline = offered ? deadline : null;
     r.lastSeenAt = offered ? lastSeenAt : t; r.stepAt = t;
     if (offered && !resumed) {
-      r.motion.vx = r.motion.vz = 0;
+      r.motion.vx = r.motion.vy = r.motion.vz = 0;
       if (!effects.some(e => e.type === "neutralize"))
         effects.push({ type: "neutralize", accountId, bodyId, generation: r.generation });
     }
@@ -265,20 +256,19 @@ export class SessionRegistry {
     return { ok: true, resumed, resetResources: "defaults", session: { accountId, bodyId, generation: r.generation, token }, view: this.#view(r), effects };
   }
 
-  // A grant offer is still host-owned: passive gravity/collision and the original
-  // grace deadline continue. A new generation fences every older socket/offer.
+  // A grant offer remains frozen and host-owned with its original deadline.
+  // A new generation fences every older socket/offer.
   offer(claim, now) { return this.connect(claim, now, true); }
 
   // After the authenticated browser validated its prepared body. Reserve a
   // short snapshot hold, not an unlimited live session. The final snapshot must
-  // accompany this result because the body may have fallen since the offer.
+  // accompany this result and preserve the exact frozen position.
   activate(ref, now) {
     const t = this.#at(now), effects = [];
     this.#sweep(t, effects, ref?.accountId); this.#clock = t;
     const r = this.#held(ref);
     if (!r || r.state !== "offered") return refuse("stale", effects);
-    if (r.stepAt < t) return refuse("recovering", effects);
-    r.state = "starting";
+    r.stepAt = t; r.state = "starting";
     return { ok: true, session: { accountId: r.accountId, bodyId: r.bodyId, generation: r.generation, token: r.token },
       controlUntil: Math.min(r.stepAt + HANDOFF_MS, r.deadline), view: this.#view(r), effects };
   }
@@ -408,7 +398,7 @@ export class SessionRegistry {
     return this.#leave(r, "revoke", t);
   }
 
-  // Steps grace bodies through the host's passive stepper and turns due records into departures.
+  // Event-driven expiry only: no timer or physics loop is required for a frozen body.
   advance(now) {
     const t = this.#at(now), effects = [];
     this.#sweep(t, effects);
@@ -469,13 +459,8 @@ export class SessionRegistry {
   get size() { return this.#sessions.size; }
 
   work(now = this.#clock) {
-    const t = this.#at(now);
-    let pendingBodies = 0, pendingSteps = 0;
-    for (const r of this.#sessions.values()) if ((r.state === "grace" || r.state === "offered"
-      || r.state === "starting" && t >= Math.min(r.stepAt + HANDOFF_MS, r.deadline)) && r.stepAt < Math.min(t, r.deadline)) {
-      pendingBodies++; pendingSteps += Math.ceil((Math.min(t, r.deadline) - r.stepAt) / PASSIVE_STEP_MS);
-    }
-    return { steps: this.#used, pendingBodies, pendingSteps };
+    this.#at(now);
+    return { steps: 0, pendingBodies: 0, pendingSteps: 0 };
   }
 
   checkpoint() {
@@ -503,14 +488,13 @@ export class SessionRegistry {
 
   #toGrace(r, at, effects) {
     // Even a confirmed socket close cannot prove the remote controller has
-    // stopped yet. Do not give physics back to the host before its lease ends.
+    // stopped yet. Do not reassign the body before its lease ends.
     if (r.state === "starting") return;
     if (r.state === "offered") { r.state = "grace"; return; }
     r.state = "grace";
     r.lastSeenAt = r.stepAt = at;
     r.deadline = at + GRACE_MS;
-    r.motion.vx = 0;
-    r.motion.vz = 0;
+    r.motion.vx = r.motion.vy = r.motion.vz = 0;
     effects.push({ type: "neutralize", accountId: r.accountId, bodyId: r.bodyId, generation: r.generation });
   }
 
@@ -546,51 +530,17 @@ export class SessionRegistry {
     return { npc };
   }
 
-  // Two phases, so an adapter that throws leaves the registry untouched.
-  #sweep(t, effects, priorityAccount = null) {
-    const due = [], steps = [], grace = [...this.#sessions.values()].filter(r => r.state === "grace" || r.state === "offered"
-      || r.state === "starting" && t >= Math.min(r.stepAt + HANDOFF_MS, r.deadline));
-    // Persisted cursors make older unfinished work first on the next operation.
-    // A reconnect gets up to its whole 60-second interval before other bodies.
-    if (this.#remaining !== Infinity || this.adapter.canStep) grace.sort((a, b) =>
-      Number(b.accountId === priorityAccount) - Number(a.accountId === priorityAccount) || a.stepAt - b.stepAt || a.generation - b.generation);
-    let remaining = this.#remaining, used = 0;
-    for (const r of grace) {
-      const until = Math.min(t, r.deadline, r.stepAt + remaining * PASSIVE_STEP_MS);
-      if (until > r.stepAt) {
-        // Expensive body restoration has its own transaction-local bound.
-        // Deferred bodies keep their cursor/deadline and stay unpublished.
-        if (this.adapter.canStep) {
-          const allowed = this.adapter.canStep({ bodyId: r.bodyId, zone: r.zone, kind: r.kind });
-          if (allowed === false) continue;
-          if (allowed !== true) throw new TypeError("host-sessions: invalid body work admission");
-        }
-        steps.push([r, this.#step(r, until - r.stepAt), until]);
-        const count = Math.ceil((until - r.stepAt) / PASSIVE_STEP_MS);
-        remaining -= count; used += count;
-      }
-      if (t >= r.deadline && until >= r.deadline) due.push([r, this.#handback(r.bodyId)]);
+  // Resolve every handback before mutating. A failed world lookup leaves the
+  // registry unchanged. Work is bounded by session capacity, not elapsed time.
+  #sweep(t, effects) {
+    const due = [], expiredLeases = [];
+    for (const r of this.#sessions.values()) {
+      if (r.state === "live") continue;
+      if (t >= r.deadline) due.push([r, this.#handback(r.bodyId)]);
+      else if (r.state === "starting" && t >= Math.min(r.stepAt + HANDOFF_MS, r.deadline)) expiredLeases.push(r);
     }
-    this.#remaining = remaining; this.#used += used;
-    for (const [r, motion, until] of steps) { r.motion = motion; r.stepAt = until; if (r.state === "starting") r.state = "grace"; }
+    for (const r of expiredLeases) r.state = "grace";
     for (const [r, handback] of due) this.#depart(r, "expired", r.deadline, handback, effects);
-  }
-
-  #step(r, dt) {
-    const step = this.adapter.stepPassive;
-    if (typeof step !== "function") throw new Error("host-sessions: passive collision adapter required");
-    // Never hand collision one enormous elapsed time after recovery. The complete grace window
-    // bounds this to 1200 calls per body; the adapter must use swept collision for each segment.
-    // Production admission still requires measuring this worst case with actual island geometry.
-    // Each call gets a fresh copy of plain values: no equipment, identity or deadline, and nothing it can alias.
-    let motion = { ...r.motion };
-    for (let left = dt; left > 0; left -= PASSIVE_STEP_MS) {
-      const out = step({ bodyId: r.bodyId, zone: r.zone, kind: r.kind, ...motion }, Math.min(left, PASSIVE_STEP_MS));
-      motion = out !== null && typeof out === "object"
-        ? readMotion({ x: out.x, y: out.y, z: out.z, yaw: out.yaw, vx: out.vx, vy: out.vy, vz: out.vz, grounded: out.grounded }) : null;
-      if (!motion) throw new TypeError("host-sessions: stepPassive returned invalid motion");
-    }
-    return motion;
   }
 
   #token() {

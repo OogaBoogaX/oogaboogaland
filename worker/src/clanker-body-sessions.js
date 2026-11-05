@@ -74,13 +74,13 @@ export function createClankerBodySessions({ create, admit, recordFor, bodyLoads 
                 || !same(equipmentOf(old), equipmentOf(row)))) fail();
             // Live browser motion requires its own authenticated complete-body
             // ingestion. Metadata-only updates cannot silently replace physics.
-            const stopped = ["grace", "offered"].includes(row.state) && (!old || old.state === "live")
+            const stopped = (["grace", "offered"].includes(row.state) || row.type === "depart" && row.reason === "expired") && (!old || old.state === "live")
               || old?.state === "live" && row.generation !== old.generation;
             let value = active.get(row.bodyId), checkpoint;
             if (!value && saved && stopped) {
-              // No physics time advances here: only the two held horizontal
-              // velocities change. Source-owned rules bind the trusted boot's
-              // world/baseline/owner and verify the old and new registry motion.
+              // No physics time advances here: all velocities become zero.
+              // Source-owned rules bind the trusted world/baseline/owner and
+              // verify the old and new registry motion.
               const codec = recordFor(identity(old));
               if (typeof codec?.disconnect !== "function") fail();
               const closed = codec.disconnect(saved.checkpoint, motionOf(old));

@@ -1,6 +1,20 @@
 # Body checkpoint capacity audit (#377 / draft #467)
 
-## Current recovery policy: minimal physical state (body-3)
+## Current policy: frozen disconnected bodies
+
+The approved pivot uses session schema 5 / `host-session-v5`. All three velocities
+are cleared on disconnect, offer and duplicate acquisition; the saved location
+stays fixed through grace, restart and expiry. The ten-slot body-3 component and
+bounded atomic storage remain, but no controller reconstruction or gravity step
+is needed to freeze or expire an admitted body. Historical sizes and physics
+benchmarks below describe their named checkpoints, not the new execution cost.
+
+[Current architecture, measurements and remaining gaps](virtual-host-frozen.md)
+include zero-momentum reclaim, support loss and the preserved physics commit.
+No capacity or rate safeguard was raised. This supersedes the passive-offer and
+recovery-cursor descriptions below; resource quantities and animation still reset.
+
+## Historical minimal physical state audit (body-3)
 
 The user's latest direction explicitly permits health, ammunition and jetpack
 fuel to reset when the player returns. This supersedes the preservation claims

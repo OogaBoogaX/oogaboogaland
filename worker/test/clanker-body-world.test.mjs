@@ -61,7 +61,7 @@ test('terrain revisions, unsupported queries and disappeared grounded support re
   } finally { f.dispose(); }
 });
 
-test('host replacement recovers a vanished prop through one atomic body/registry step with rollback', async () => {
+test('host replacement freezes over a vanished prop with atomic rollback and no controller restoration', async () => {
   const f = fixture(), seed = f.make(); f.seed(seed); const initial = seed.codec.capture();
   let data = new Map(), now = 100000, failCommit = false, constructed = 0, disposed = 0;
   const storage = { async transaction(fn) {
@@ -89,16 +89,17 @@ test('host replacement recovers a vanished prop through one atomic body/registry
     assert.equal(joined.result.ok, true); f.removeSupport(); now += 10001;
     const replacement = makeHost(), ticket = await replacement.claim('replacement');
     await assert.rejects(first.tick(oldTicket, []), /fenced/);
-    const before = structuredClone(data); failCommit = true;
+    const before = structuredClone(data), buildsBefore = constructed; failCommit = true;
     await assert.rejects(replacement.tick(ticket, []), /injected commit/);
     assert.deepEqual(data, before); assert.equal(constructed, disposed);
     await replacement.tick(ticket, []);
     const record = data.get(HOST.key).host.sessions.sessions[0];
-    assert.equal(record.deadline, 160000); assert.equal(record.motion.y, 0); assert.equal(record.motion.grounded, true);
+    assert.equal(record.deadline, 160000); assert.equal(record.motion.y, 2); assert.equal(record.motion.grounded, true);
     const bodies = [...data.values()].filter(v => v?.body?.bodyId === 'player:1');
     assert.equal(bodies.length, 1);
     const state = seed.codec.records.read(bodies[0].body.checkpoint);
     assert.equal(state.body[2], record.motion.y); assert.equal(Boolean(state.body[9] & 1), record.motion.grounded);
+    assert.equal(constructed, buildsBefore, 'disconnect/restart never constructs offline physics');
     assert.equal(constructed, disposed);
   } finally { f.dispose(); }
 });

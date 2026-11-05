@@ -25,7 +25,7 @@ const matchesReceipt = (m, t) => t && m.epoch === t.epoch && m.generation === t.
 function transferValid(t, r, state) {
   if (!exact(t, ["v", "protocol", "world", "epoch", "revision", "at", "expiresAt", "resetResources", "view", "checkpoint"])) return false;
   boundedJSON(t, ROOM_BODY.transferBytes, 512);
-  return t.v === 1 && t.protocol === "host-session-v4" && t.world === r.preparation.world && t.epoch === r.preparation.epoch
+  return t.v === 1 && t.protocol === "host-session-v5" && t.world === r.preparation.world && t.epoch === r.preparation.epoch
     && positive(t.revision) && integer(t.at) && positive(t.expiresAt) && t.expiresAt > t.at && t.expiresAt - t.at <= (state === "starting" ? 1000 : 10000)
     && t.resetResources === "defaults" && t.view?.state === state && t.view.accountId === r.accountId
     && t.view.bodyId === r.preparation.bodyId && t.view.kind === r.kind && t.view.generation === r.ref?.generation
@@ -45,7 +45,7 @@ function validate(r) {
   if (r.claim !== null) {
     boundedJSON(r.claim, 2048, 128);
     if (r.claim.accountId !== r.accountId || r.claim.bodyId !== p.bodyId || r.claim.world !== p.world
-      || r.claim.protocol !== "host-session-v4" || r.claim.body && r.claim.body.kind !== r.kind
+      || r.claim.protocol !== "host-session-v5" || r.claim.body && r.claim.body.kind !== r.kind
       || !["prepared", "offering", "closed"].includes(r.phase)) fail();
   }
   if (r.transfer !== null && (!r.ref || !transferValid(r.transfer, r, r.transfer.view?.state)

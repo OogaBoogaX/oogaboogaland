@@ -239,7 +239,7 @@ test('actual net gates old pose replay until body apply and matching activation,
   send({t:'body-prepare',v:2,request,accountId:1,bodyId:'a',kind:'ooga',world:'world-1',epoch:3,expiresAt:now+5000});
   for(let i=0;i<8;i++)await Promise.resolve();
   assert.equal(c.sent.at(-1).t,'body-ready');
-  const transfer={v:1,protocol:'host-session-v4',world:'world-1',epoch:3,revision:17,at:now,expiresAt:now+5000,
+  const transfer={v:1,protocol:'host-session-v5',world:'world-1',epoch:3,revision:17,at:now,expiresAt:now+5000,
     resetResources:'defaults',view:{accountId:1,bodyId:'a',kind:'ooga',generation:8,state:'offered',deadline:now+60000},checkpoint:{fixture:true}};
   send({t:'body-grant',request,transfer}); assert.equal(c.sent.at(-1).t,'body-applied'); assert.equal(applied,0);
   const count=c.sent.length; c.net.sendPose(51,0,0,0); assert.equal(c.sent.length,count);
@@ -506,7 +506,7 @@ test('Room burst preview persists debt across restart and migration without incr
 
 const bodyRequest = '1'.repeat(32);
 const bodyPrep = { v: 1, world: 'world-1', epoch: 1, accountId: 1, bodyId: 'player:1', generation: 0, nextGeneration: 1, expiresAt: 110000 };
-const bodyClaim = { protocol: 'host-session-v4', world: 'world-1', accountId: 1, bodyId: 'player:1', zone: 'outside' };
+const bodyClaim = { protocol: 'host-session-v5', world: 'world-1', accountId: 1, bodyId: 'player:1', zone: 'outside' };
 test('Room stages only authenticated compatible body work and persists close before a late claim result can be delivered', async () => {
   const h = host(), r = await h.room(true, false, true), ws = (await h.join(r, 1, true, true)).ws;
   const a = await start(r), t = ticket(a), p = r.players.get(1), i = { accountId: 1, connection: p.connectionToken };
@@ -524,7 +524,7 @@ test('Room stages only authenticated compatible body work and persists close bef
   const restart = await h.room(true, false, true);
   const after = await restart.pendingBodyHandoff(t, i); assert.equal(after.closed, true); assert.deepEqual(after.command, pending.command);
   const answer = { result: { ok: true, session: { accountId: 1, bodyId: 'player:1', generation: 1, token: '2'.repeat(32) } }, transfer: {
-    v: 1, protocol: 'host-session-v4', world: 'world-1', epoch: 1, revision: 2, at: 100000, expiresAt: 110000,
+    v: 1, protocol: 'host-session-v5', world: 'world-1', epoch: 1, revision: 2, at: 100000, expiresAt: 110000,
     resetResources: 'defaults', view: { state: 'offered', accountId: 1, bodyId: 'player:1', kind: 'clanker', generation: 1, deadline: 160000 }, checkpoint: {} } };
   const sent = ws.sent.length;
   const completed = await restart.completeBodyHandoff(t, i, pending.command.revision, answer);

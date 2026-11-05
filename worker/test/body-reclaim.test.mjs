@@ -8,7 +8,7 @@ const { create } = globalThis.BL.bodyReclaim;
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
 const offer = (request = 'a'.repeat(32)) => ({ t: 'body-prepare', v: 2, request, accountId: 1,
   bodyId: 'gorilla:fixture', kind: 'clanker', world: 'body-reclaim-fixture', epoch: 2, expiresAt: 11000 });
-const transfer = checkpoint => ({ v: 1, protocol: 'host-session-v4', world: 'body-reclaim-fixture',
+const transfer = checkpoint => ({ v: 1, protocol: 'host-session-v5', world: 'body-reclaim-fixture',
   epoch: 2, revision: 19, at: 1000, expiresAt: 11000, resetResources: 'defaults',
   view: { accountId: 1, bodyId: 'gorilla:fixture', kind: 'clanker', generation: 7, state: 'offered', deadline: 61000 }, checkpoint });
 const active = checkpoint => ({ t: 'body-active', request: offer().request, transfer: { ...transfer(checkpoint),
@@ -95,7 +95,7 @@ test('wrong identity, mixed versions, oversized or changed grants and a lost act
     h.client.message(offer()); await flush();
     const good = { t: 'body-grant', request: offer().request, transfer: transfer({ data: 'fixture' }) };
     const bad = structuredClone(good);
-    if (variant === 'version') bad.transfer.protocol = 'old';
+    if (variant === 'version') bad.transfer.protocol = 'host-session-v4';
     if (variant === 'identity') bad.transfer.view.accountId = 2;
     if (variant === 'oversize') bad.transfer.checkpoint.data = 'x'.repeat(32768);
     if (variant === 'private-token') bad.transfer.view.token = 'private-host-token';
@@ -216,9 +216,9 @@ test('independent source player factory follows grant/ACK ownership without cons
     assert.equal(clientBody.sim.control({ x: 1 }), false);
     h.client.message({ t: 'body-grant', request: offer().request, transfer: transfer(initial) });
     assert.equal(previews, 1); assert.equal(clientBody.sim.player, null);
-    // The host body falls/jumps between the older preflight and final grant.
+    // A newer authoritative frozen checkpoint must also resume with zero momentum.
     server.sim.control({ x: .6, z: .8, heading: .7, jumpPressed: true, jumpHeld: true });
-    server.sim.update(.25); server.codec.neutralize();
+    server.sim.update(.25); server.codec.disconnect();
     const final = active(snapshot());
     final.transfer.view.equipment = { mode: "carry" };
     assert.equal(h.client.message(final), true);
@@ -251,7 +251,7 @@ test('independent source player factory follows grant/ACK ownership without cons
 });
 
 test('page reclaim adapter fences changed placement and unwinds failed scene attachment without moving the restored body', async () => {
-  for (const change of ['unchanged', 'support-removed', 'obstacle-added', 'attach-failed', 'attach-threw', 'attach-suspended']) {
+  for (const change of ['unchanged', 'support-removed', 'support-before-apply', 'obstacle-added', 'attach-failed', 'attach-threw', 'attach-suspended']) {
     const f = terrainFixture(), source = f.make(); f.seed(source);
     let body, releases = 0, attached = 0, detached = 0;
     const h = harness(f.B.clankerBodyTransfer.reclaimAdapter({ world: terrainWorld,
@@ -274,6 +274,7 @@ test('page reclaim adapter fences changed placement and unwinds failed scene att
       assert.equal(h.client.message({ ...offer(), world: terrainWorld }), true); await flush();
       assert.equal(h.client.message({ t: 'body-grant', request: offer().request,
         transfer: { ...transfer(saved), world: terrainWorld } }), true);
+      if (change === "support-before-apply") f.removeSupport();
       const final = active(saved); final.transfer.world = terrainWorld;
       assert.equal(h.client.message(final), true);
       const entry = body.sim.player, before = structuredClone(body.codec.motion()), updates = entry.animation.updates;
@@ -284,14 +285,19 @@ test('page reclaim adapter fences changed placement and unwinds failed scene att
           position: { x: 0, y: 5, z: 0 } });
         f.B.scene.addChild(f.root, obstacle); f.props.add(obstacle); f.props.sync();
       }
-      const accepted = change === 'unchanged';
+      const accepted = ['unchanged', 'support-removed', 'support-before-apply'].includes(change);
       assert.equal(h.client.message(live()), accepted);
       assert.equal(body.sim.active, accepted); assert.equal(h.client.allows('pose', offer().bodyId), accepted);
       assert.equal(releases, accepted ? 0 : 1);
       assert.deepEqual([entry.root.position.x, entry.root.position.y, entry.root.position.z,
         entry.drive.vx, entry.drive.vy, entry.drive.vz, entry.drive.grounded],
-      [before.x, before.y, before.z, before.vx, before.vy, before.vz, before.grounded]);
+      [before.x, before.y, before.z, before.vx, before.vy, before.vz, change === "support-removed" ? false : before.grounded]);
       assert.equal(entry.animation.updates, updates, 'final validation cannot replay pose or animation');
+      if (change.startsWith('support-')) {
+        assert.equal(entry.drive.vy, 0, 'support correction adds no momentum');
+        assert.equal(body.sim.update(.05), true);
+        assert.ok(entry.root.position.y < before.y, 'gravity starts only after acknowledged live control');
+      }
       if (!accepted) {
         assert.equal(h.client.state.phase, 'blocked'); assert.equal(h.client.message(live()), false);
         assert.deepEqual(h.sent.at(-1), { t: 'body-decline', request: offer().request });
@@ -301,7 +307,7 @@ test('page reclaim adapter fences changed placement and unwinds failed scene att
       }
     } finally { h.client.close(); f.dispose(); }
     assert.equal(releases, 1);
-    assert.equal(attached, ['unchanged', 'attach-failed', 'attach-threw', 'attach-suspended'].includes(change) ? 1 : 0);
+    assert.equal(attached, ['unchanged', 'support-removed', 'support-before-apply', 'attach-failed', 'attach-threw', 'attach-suspended'].includes(change) ? 1 : 0);
     assert.equal(detached, attached, 'partial scene attachment is always unwound');
   }
 });

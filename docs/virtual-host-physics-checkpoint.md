@@ -5,11 +5,14 @@ its disconnected-player physics policy. It is deliberately incomplete and remain
 in draft PR #467 for issue #377. No activation, deployment or production migration
 is included. Tess is excluded. Burst delivery remains disabled.
 
-The planned preservation ref is
-`checkpoint/377-physics-before-freeze-20261105`; the parent of this checkpoint is
-`35163a93150491303f8c8b6b201ebacb83d9e34b`. The frozen-body pivot must start only
-after this complete checkpoint is committed successfully with existing signing
-settings. Preserve the ref rather than rewriting or amending its history.
+The signed preservation commit is
+`ea11f818712f3f29ba4a43aa3238a48fde0ce210`, retained by
+`checkpoint/377-physics-before-freeze-20261105`. Its parent is
+`35163a93150491303f8c8b6b201ebacb83d9e34b`. The signature verified with the
+existing security key, and a verified Git bundle is retained in the local task
+workspace. The working tree was clean after committing all 63 task files.
+The frozen-body pivot starts from this commit. Preserve the ref and commit;
+do not rewrite or amend them.
 
 The saved implementation includes bounded passive Clanker physics, separate body
 records, server ownership/recovery fencing, durable Room reclaim and movement
@@ -21,8 +24,9 @@ local task workspace, along with untracked source copies and verification logs.
 
 Verification before preservation: 77 focused Worker/source checks passed, followed
 by the 13-test Room suite with a coupled actual Clanker/VirtualHost/Room-inbox
-lost-reply recovery case. Build passed with 322 scripts; syntax and whitespace
-checks passed. The existing 20-entry Hub ledger is unchanged. Hub/browser/full/
+lost-reply recovery case. Build passed with 322 scripts; syntax and tracked-file whitespace
+checks passed. The final staged check additionally found one blank line at EOF in
+the newly tracked body-world fixture; it was preserved unchanged in the checkpoint. The existing 20-entry Hub ledger is unchanged. Hub/browser/full/
 scene checks remain STOP-restricted and were not run. UI behavior, real cross-DO
 concurrency, full-world AI/Ooga/occupancy/riders and production costs remain open.
 

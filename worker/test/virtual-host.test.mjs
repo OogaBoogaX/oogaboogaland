@@ -128,25 +128,24 @@ test("pose revision confirmation validates committed state and fences changes wi
   h.at(110250);await h.make().claim('next');await assert.rejects(h.host.confirmPoses(ticket,frame),/fenced/);
 });
 
-test("interleaved body recovery supersedes publication while preserving strict reads and ownership fencing", async () => {
+test("frozen bodies do not block NPC publication but lifecycle changes still fence old revisions", async () => {
   const actor = rig(), project = createNpcPose(123, 1);
   const h = harness({ ...simulation, poses: () => project([{ index: 0, actor }]) });
-  const ticket = await h.host.begin('owner', 60000);
+  const ticket = await h.host.begin('owner', 120000);
   await h.host.connect(ticket, [], bodyClaim());
   const snapshot = await h.host.poses(ticket);
-  h.host.sessionAdapter.canStep = () => false; h.at(100250);
-  const partial = await h.host.tick(ticket, []); assert.ok(partial.work.pendingSteps > 0);
-  assert.equal(await h.host.confirmPoses(ticket, snapshot, { skipPending: true }), false);
-  await assert.rejects(h.host.confirmPoses(ticket, snapshot), /body recovery pending/);
-  await assert.rejects(h.host.confirmPoses(ticket, snapshot, { skipPending: 1 }), /invalid pending/);
-  assert.equal(await h.host.poses(ticket, { skipPending: true }), null);
-  await assert.rejects(h.host.poses(ticket), /body recovery pending/);
-  await assert.rejects(h.host.poses(ticket, { skipPending: 1 }), /invalid pending/);
-  await assert.rejects(h.host.poses({ ...ticket, fence: 0 }, { skipPending: true }), /fenced/);
-  const before = h.store.read();
-  assert.equal(await h.host.confirmPoses(ticket, snapshot, { skipPending: true }), false); assert.deepEqual(h.store.read(), before);
-  h.host.sessionAdapter.canStep = () => true;
-  await h.host.tick(ticket, []); assert.ok(await h.host.poses(ticket, { skipPending: true }));
+  h.host.sessionAdapter.canStep = () => { throw Error('no disconnected physics admission'); }; h.at(100250);
+  const frozen = await h.host.tick(ticket, []);
+  assert.equal(frozen.work.pendingSteps, 0); assert.equal(frozen.work.steps, 0);
+  assert.equal(await h.host.confirmPoses(ticket, snapshot), false);
+  assert.ok(await h.host.poses(ticket));
+  await assert.rejects(h.host.poses({ ...ticket, fence: 0 }), /fenced/);
+  for (let at = 101000; at <= 159000; at += 1000) { h.at(at); await h.host.tick(ticket, []); }
+  h.at(160000); const fresh = ticket;
+  assert.equal(await h.host.poses(fresh, { skipPending: true }), null);
+  await assert.rejects(h.host.poses(fresh), /body recovery pending/);
+  await h.host.tick(fresh, []);
+  assert.ok(await h.host.poses(fresh));
 });
 
 test("host progresses with zero players and persists simulation before returning snapshots", async () => {
@@ -351,7 +350,7 @@ test("session ownership, deadlines and departure intents commit atomically with 
   assert.deepEqual((await h.host.sessions(expiryHost, [], registry => registry.pending())).result, []);
 });
 
-test("confirmed close after socket removal gets a full grace and ticks advance it with zero viewers", async () => {
+test("confirmed close retains a frozen body and expires on deadline with zero viewers", async () => {
   const h = harness(simulation, (m, ms) => ({ ...m, y: Math.max(0, m.y - ms / 1000) }));
   const ticket = await h.host.begin("a", 120000), claim = bodyClaim();
   const first = (await h.host.sessions(ticket, [], (r, now) => r.connect(claim, now))).result;
@@ -360,7 +359,7 @@ test("confirmed close after socket removal gets a full grace and ticks advance i
   assert.equal(closed.result.deadline, 165000);
   h.at(106000); await h.host.tick(ticket, []);
   let body = h.store.read().sessions.sessions[0];
-  assert.equal(body.stepAt, 106000); assert.ok(body.motion.y < 10);
+  assert.equal(body.stepAt, 105000); assert.equal(body.motion.y, 10);
   assert.deepEqual(body.equipment, claim.body.equipment);
   await h.host.disconnect(ticket, [], first.session, 106000);
   assert.equal(h.store.read().sessions.sessions[0].deadline, 165000, "duplicate close cannot extend grace");
@@ -370,7 +369,7 @@ test("confirmed close after socket removal gets a full grace and ticks advance i
   assert.equal(saved.sessions.sessions.length, 0);
   assert.equal(saved.sessions.pending.length, 1);
   assert.equal(saved.sessions.pending[0].at, 165000);
-  assert.equal(saved.sessions.pending[0].body.motion.y, 0);
+  assert.equal(saved.sessions.pending[0].body.motion.y, 10);
   assert.equal(saved.sessions.pending[0].zone, "outside");
   assert.deepEqual(saved.sessions.pending[0].body.equipment, claim.body.equipment);
   assert.equal(saved.sessions.pending[0].applied, true);

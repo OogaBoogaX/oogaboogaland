@@ -10,13 +10,21 @@ with #462 voice changes. Overlapping paths were reviewed; fixture prerequisite
 loading was placed away from the new voice context so both changes combine. This draft must not be described as an
 always-on NPC world or an enabled disconnect feature.
 
-**Current player recovery policy:** keep identity/form, location/facing, physical
-motion and remaining jump credits, selected equipment/mode, ownership and deadline.
-Ammo, spare magazines, fuel, health, animation and AI/controller history reset to
-normal defaults. This supersedes exact consumable/health claims in older progress
-sections below. Session schema/protocol 4 and controlled body-3 implement the
-reduced inactive format. See [the current capacity audit](virtual-host-body-storage.md)
-for complete sizes, reset semantics and the remaining browser/cost gaps.
+**Current player recovery policy (approved frozen-body pivot):** retain the
+last durably accepted position/facing, identity/form, selected equipment/mode,
+ownership and original 60-second deadline. Disconnect clears every velocity.
+No disconnected-body physics runs on the host or observers. Authenticated reclaim
+rebuilds a standard pose with normal resource defaults, checks current clearance,
+then resumes gravity only after the durable live acknowledgement. A vanished
+support changes the future airborne flag without relocating the frozen body.
+Session schema 5 / `host-session-v5` refuses the older physics-based format.
+
+See [frozen-body architecture and verification](virtual-host-frozen.md) and
+[the preserved signed physics checkpoint](virtual-host-physics-checkpoint.md).
+All progress sections below are historical; any claim about disconnected-body
+falling, passive catch-up, retained consumables or earlier schema versions is
+superseded. Shared NPC simulation and its failed strict delivery gate remain
+separate work. Live Hub/Room wiring is still disabled and incomplete.
 
 ## Pending body handoff: local checkpoint
 

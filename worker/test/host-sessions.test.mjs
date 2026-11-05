@@ -34,14 +34,14 @@ test("a body reconnects strictly before its deadline, and at the exact deadline 
   assert.equal(grace.state, "grace");
   assert.equal(grace.presentation, "open-hand");
   assert.equal(grace.deadline, T0 + 1000 + GRACE_MS);
-  assert.deepEqual(grace.motion, motion({ vx: 0, vz: 0 }), "holds neutralized, vertical velocity, yaw and position kept");
+  assert.deepEqual(grace.motion, motion({ vx: 0, vy: 0, vz: 0 }), "holds and momentum cleared; yaw and position kept");
 
   const back = reg.connect(claim(1, "ooga-a", { body: undefined }), T0 + 1000 + GRACE_MS - 1);
   assert.equal(back.ok, true);
   assert.equal(back.resumed, true);
   assert.equal(back.view.presentation, null);
   assert.equal(back.view.state, "live");
-  assert.deepEqual(back.view.motion, motion({ vx: 0, vz: 0 }));
+  assert.deepEqual(back.view.motion, motion({ vx: 0, vy: 0, vz: 0 }));
   assert.deepEqual(back.view.equipment, equipment(), "selected equipment and mode survive the reconnect");
   assert.ok(back.session.generation > a.session.generation);
 
@@ -54,7 +54,7 @@ test("a body reconnects strictly before its deadline, and at the exact deadline 
   assert.deepEqual(types(late.effects), ["depart"]);
   assert.equal(late.effects[0].at, deadline);
   assert.equal(late.effects[0].id, `depart:${back.session.generation}`);
-  assert.deepEqual(late.effects[0].body, { kind: "ooga", motion: motion({ vx: 0, vz: 0 }), equipment: equipment() });
+  assert.deepEqual(late.effects[0].body, { kind: "ooga", motion: motion({ vx: 0, vy: 0, vz: 0 }), equipment: equipment() });
   assert.equal(late.effects[0].zone, "outside");
   assert.equal(late.effects[0].applied, false);
   assert.equal(reg.view(1), null);
@@ -166,7 +166,7 @@ test("drain turns every live record into grace at the run's stop time, keeps ear
   const gone = next.drain(stop, stop + GRACE_MS).effects;
   assert.deepEqual(gone.map((e) => [e.type, e.accountId, e.at]), [["depart", 2, stop + GRACE_MS], ["depart", 3, stop + GRACE_MS]],
     "departures fall exactly on the run-end deadline");
-  assert.deepEqual(gone[0].body, { kind: "ooga", motion: motion({ vx: 0, vz: 0 }), equipment: equipment() });
+  assert.deepEqual(gone[0].body, { kind: "ooga", motion: motion({ vx: 0, vy: 0, vz: 0 }), equipment: equipment() });
 });
 
 test("a duplicate connect rotates the session and keeps the body; the old socket's input and close do nothing", () => {
@@ -276,59 +276,23 @@ test("occupancy is one per session, never shared, server admitted, kept through 
   assert.equal(reg.occupant("cabinet", "c2"), null);
 });
 
-test("the host's passive stepper moves a grace body and touches nothing else", () => {
-  const calls = [];
-  const adapter = {
-    stepPassive(m, dt) { // host-owned gravity against a ledge at y = 4, standing in for the island's collision
-      calls.push({ keys: Object.keys(m).sort(), dt, zone: m.zone, kind: m.kind });
-      const vy = m.vy - 9.8 * dt / 1000, y = Math.max(4, m.y + vy * dt / 1000);
-      const out = { ...m, y, vy: y === 4 ? 0 : vy, grounded: y === 4, magazine: 0, fuel: 0, deadline: 0, accountId: 99,
-        kind: "clanker", zone: "elsewhere", spareAmmo: [] };
-      m.x = 12345; // mutating its copy reaches nothing
-      return out;
-    },
-  };
-  const reg = registry(adapter);
-  const a = reg.connect(claim(1, "ooga-a"), T0).session;
-  reg.disconnect(ref(a), T0);
-  const before = reg.view(1);
-  reg.advance(T0 + 500);
-  reg.advance(T0 + 500);
-  reg.advance(T0 + 1500);
-  assert.equal(calls.length, 1500 / PASSIVE_STEP_MS, "no step without elapsed time");
-  assert.ok(calls.every(c => c.dt <= PASSIVE_STEP_MS), "recovery never tunnels via one giant timestep");
-  assert.deepEqual(calls[0].keys, ["bodyId", "grounded", "kind", "vx", "vy", "vz", "x", "y", "yaw", "z", "zone"]);
-  assert.deepEqual([calls[0].zone, calls[0].kind], ["outside", "ooga"]);
-  const after = reg.view(1);
-  assert.ok(after.motion.y < before.motion.y);
-  assert.equal(after.motion.x, 1);
-  assert.equal(after.motion.yaw, 0.5, "yaw survives the physics projection");
-  assert.deepEqual([after.kind, after.zone], ["ooga", "outside"]);
-  assert.deepEqual(after.equipment, equipment(), "equipment selection unchanged");
-  assert.equal(after.deadline, before.deadline);
-  assert.equal(after.accountId, 1);
-  assert.equal(after.generation, a.generation);
-  for (let t = 2000; t < 20000; t += 1000) reg.advance(T0 + t);
-  assert.deepEqual([reg.view(1).motion.y, reg.view(1).motion.grounded], [4, true]);
-  const resumed = reg.connect(claim(1, "ooga-a"), T0 + 20000);
-  assert.equal(resumed.view.motion.y, 4, "reconnect returns the resulting position");
+test("frozen grace preserves position across repeated reads, long restart and reclaim without physics", () => {
+  const forbidden = () => { throw Error("disconnected physics must not run"); };
+  const reg = registry({ stepPassive: forbidden, canStep: forbidden });
+  const old = reg.connect(claim(1, "ooga-a"), T0).session;
+  reg.disconnect(old, T0);
+  const before = reg.checkpoint().sessions[0];
+  for (const dt of [500, 500, 1500, GRACE_MS - 1]) reg.advance(T0 + dt);
+  assert.deepEqual(reg.checkpoint().sessions[0], before, "idle sweeps do not rewrite the body or its cursor");
+  assert.deepEqual(reg.work(), { steps: 0, pendingBodies: 0, pendingSteps: 0 });
+  const resumed = reg.connect(claim(1, "ooga-a"), T0 + GRACE_MS - 1);
+  assert.deepEqual(resumed.view.motion, motion({ vx: 0, vy: 0, vz: 0 }));
   assert.deepEqual(resumed.view.equipment, equipment());
-
-  for (const bad of [() => ({ x: NaN }), (m) => ({ ...m, yaw: 7 }), (m) => { const { yaw, ...rest } = m; return rest; }]) {
-    const broken = registry({ stepPassive: bad });
-    const s = broken.connect(claim(1, "ooga-a"), T0).session;
-    broken.disconnect(ref(s), T0);
-    const cp = broken.checkpoint();
-    assert.throws(() => broken.advance(T0 + 10), /invalid motion/);
-    assert.deepEqual(broken.checkpoint(), cp);
-  }
-
-  const still = new SessionRegistry({ protocol: PROTOCOL, world: WORLD });
-  const t = still.connect(claim(1, "ooga-a"), T0).session;
-  still.disconnect(ref(t), T0);
-  const unsupported = still.checkpoint();
-  assert.throws(() => still.advance(T0 + 30000), /collision adapter required/);
-  assert.deepEqual(still.checkpoint(), unsupported, "missing physics cannot claim to have advanced the body");
+  assert.equal(reg.update(old, T0 + GRACE_MS - 1, { motion: motion({ x: 99 }) }), false);
+  const next = restore(reg.checkpoint(), { stepPassive: forbidden });
+  next.recover(T0 + 10 * GRACE_MS);
+  assert.equal(next.pending()[0].at, T0 + 2 * GRACE_MS - 1);
+  assert.deepEqual(next.pending()[0].body.motion, before.motion);
 });
 
 test("equipment selection survives recovery while resource quantities are absent and return requests normal defaults", () => {
@@ -396,7 +360,7 @@ test("expiry hands back only an NPC the host reports, never spawns one, and keep
   reg.disconnect(ref(b), T0);
   const saved = reg.checkpoint();
   const { effects } = reg.advance(T0 + GRACE_MS);
-  const left = { kind: "ooga", motion: motion({ vx: 0, vz: 0 }), equipment: equipment() };
+  const left = { kind: "ooga", motion: motion({ vx: 0, vy: 0, vz: 0 }), equipment: equipment() };
   assert.deepEqual(effects, [
     { id: `depart:${a.generation}`, type: "depart", glyph: "green", accountId: 1, bodyId: "ooga-a", generation: a.generation, reason: "expired", at: T0 + GRACE_MS, handback: { npc: "npc-7" }, zone: "outside", body: left, applied: false },
     { id: `depart:${b.generation}`, type: "depart", glyph: "green", accountId: 2, bodyId: "ooga-b", generation: b.generation, reason: "expired", at: T0 + GRACE_MS, handback: null, zone: "outside", body: left, applied: false },
@@ -459,7 +423,7 @@ test("claims outside the limits are refused, and malformed checkpoints never res
   reg.disconnect(ref(a), T0);
   const good = json(reg.checkpoint());
   assert.equal(good.v, CHECKPOINT_VERSION);
-  assert.equal(CHECKPOINT_VERSION, 4);
+  assert.equal(CHECKPOINT_VERSION, 5);
   restore(good).recover(T0, [b.token]);
 
   const mutate = (fn) => { const cp = json(good); fn(cp); return cp; };
@@ -472,7 +436,8 @@ test("claims outside the limits are refused, and malformed checkpoints never res
     }
   });
   const broken = [
-    null, [], oldDraft, mutate((cp) => { cp.v = 1; }), mutate((cp) => { cp.v = 2; }), mutate((cp) => { cp.v = 3; }),
+    null, [], oldDraft, mutate((cp) => { cp.v = 1; }), mutate((cp) => { cp.v = 2; }), mutate((cp) => { cp.v = 3; }), mutate((cp) => { cp.v = 4; }),
+    mutate((cp) => { cp.sessions[0].motion.vy = -1; }),
     mutate((cp) => { cp.extra = 1; }), mutate((cp) => { delete cp.pending; }),
     mutate((cp) => { cp.clock = -1; }), mutate((cp) => { cp.clock = Number.MAX_SAFE_INTEGER; }),
     mutate((cp) => { cp.nextGeneration = cp.sessions[1].generation; }),
@@ -521,7 +486,7 @@ test("claims outside the limits are refused, and malformed checkpoints never res
 });
 
 
-test("offers keep physics, occupancy and the original deadline across replacement and restart", () => {
+test("offers keep frozen position, occupancy and the original deadline across replacement and restart", () => {
   let calls = 0;
   const adapter = { validateOccupancy: () => true, stepPassive: (m, ms) => {
     calls++; return { ...m, y: m.y + m.vy * ms / 1000 };
@@ -531,12 +496,12 @@ test("offers keep physics, occupancy and the original deadline across replacemen
   reg.disconnect(ref(live), T0);
   const offered = reg.offer(claim(1, "ooga-a"), T0 + 1000), held = ref(offered.session);
   assert.equal(offered.view.state, "offered"); assert.equal(offered.view.deadline, T0 + GRACE_MS);
-  assert.ok(Math.abs(offered.view.motion.y - 9) < 1e-12); assert.equal(reg.confirm(held, T0 + 1000), false);
+  assert.equal(offered.view.motion.y, 10); assert.equal(reg.confirm(held, T0 + 1000), false);
   assert.equal(reg.update(held, T0 + 1000, { motion: motion() }), false);
   assert.equal(reg.authorizedView(held), null); assert.equal(reg.transferView(held).state, "offered");
   assert.equal(reg.occupant("hammock", "bed-a"), 1);
   const next = restore(reg.checkpoint(), adapter); next.recover(T0 + 2000, [held.token]);
-  assert.ok(calls > 0); assert.ok(Math.abs(next.view(1).motion.y - 8) < 1e-12);
+  assert.equal(calls, 0); assert.equal(next.view(1).motion.y, 10);
   assert.equal(next.view(1).deadline, T0 + GRACE_MS);
   const newer = next.offer(claim(1, "ooga-a"), T0 + 2000);
   assert.equal(newer.view.deadline, T0 + GRACE_MS); assert.ok(newer.session.generation > held.generation);
@@ -552,10 +517,10 @@ test("lost activation ACK never creates dual ownership or renews the disconnect 
   const adapter = { stepPassive: (m, ms) => { steps++; return { ...m, y: m.y + m.vy * ms / 1000 }; } };
   const reg = registry(adapter), offered = reg.offer(claim(1, "ooga-a"), T0), held = ref(offered.session);
   assert.equal(offered.view.motion.vx, 0); assert.equal(offered.view.motion.vz, 0);
-  assert.equal(offered.view.motion.vy, -1); assert.ok(types(offered.effects).includes("neutralize"));
+  assert.equal(offered.view.motion.vy, 0); assert.ok(types(offered.effects).includes("neutralize"));
   const activated = reg.activate(held, T0 + 250);
   assert.equal(activated.ok, true); assert.equal(activated.controlUntil, T0 + 250 + HANDOFF_MS);
-  assert.ok(activated.view.motion.y < offered.view.motion.y, "activation carries the latest falling pose");
+  assert.deepEqual(activated.view.motion, offered.view.motion, "activation preserves the frozen pose");
   const atLease = steps, saved = reg.checkpoint();
   let next = restore(saved, adapter); next.recover(T0 + 500, []);
   assert.equal(next.view(1).state, "starting"); assert.equal(steps, atLease, "restart cannot take physics during a browser lease");
@@ -565,7 +530,7 @@ test("lost activation ACK never creates dual ownership or renews the disconnect 
   assert.equal(next.view(1).state, "starting", "socket close does not prove the controller has stopped");
   assert.equal(next.confirm(held, T0 + 500), false);
   next = restore(next.checkpoint(), adapter); next.recover(activated.controlUntil, []);
-  assert.equal(next.view(1).state, "grace"); assert.ok(steps > atLease);
+  assert.equal(next.view(1).state, "grace"); assert.equal(steps, 0);
   assert.equal(next.view(1).deadline, T0 + GRACE_MS);
   assert.equal(next.started(held, activated.controlUntil).ok, false);
   assert.equal(next.advance(T0 + GRACE_MS).effects[0].at, T0 + GRACE_MS);

@@ -43,10 +43,11 @@
     const codec = create({ world, baseline: bridge.baseline(), owner: sim.list[0].owner.id, rules: bridge.records });
     let consumed = false, restored = false;
     return Object.freeze({
-      restore(value) {
+      restore(value, { frozen = false } = {}) {
+        if (typeof frozen !== "boolean") fail();
         if (consumed || sim.player || bridge.capture()[0] !== 0) fail();
         consumed = true; // A failed/partial restore also requires a fresh body.
-        bridge.restoreBody(codec.read(value));
+        bridge.restoreBody(codec.read(value), false, frozen);
         if (!sim.player) fail();
         restored = true; return true;
       },
@@ -78,12 +79,12 @@
       },
       preflight(resource, transfer) {
         const value = owned(resource), preview = make(value.preparation, true);
-        try { return preview.decoder.restore(transfer.checkpoint); }
+        try { return preview.decoder.restore(transfer.checkpoint, { frozen: true }); }
         finally { preview.sim.dispose(); }
       },
       apply(resource, transfer) {
         const value = owned(resource);
-        if (!value.decoder.restore(transfer.checkpoint)) return false;
+        if (!value.decoder.restore(transfer.checkpoint, { frozen: true })) return false;
         value.view = JSON.parse(JSON.stringify(transfer.view));
         return true;
       },

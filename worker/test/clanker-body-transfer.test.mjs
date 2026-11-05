@@ -124,3 +124,26 @@ test('live physical capture neither stops held controls nor changes the source t
       finalPackedBytes: Buffer.byteLength(JSON.stringify(packed)), scope: 'physical components only, excludes session and movement envelope' }));
   } finally { for (const sim of bodies) sim.dispose(); f.dispose(); }
 });
+
+
+test('frozen reclaim refuses nonzero momentum before constructing a controlled player', () => {
+  const source = make();
+  try {
+    source.sim.bodyCheckpoint.restoreBody(['fixture-0', 0, 4, 0, 0, 0, -1, 0, 1, 4]);
+    const moving = source.codec.records.transfer(source.codec.capture());
+    const browser = make();
+    try {
+      const decoder = browser.B.clankerBodyTransfer.forBody(browser.sim, world);
+      assert.throws(() => decoder.restore(moving, { frozen: true }), /profile/);
+      assert.equal(browser.sim.player, null);
+    } finally { browser.dispose(); }
+    source.codec.disconnect();
+    const frozen = source.codec.records.transfer(source.codec.capture()), resumed = make();
+    try {
+      resumed.B.clankerBodyTransfer.forBody(resumed.sim, world).restore(frozen, { frozen: true });
+      assert.equal(resumed.codec.motion().y, 4); assert.equal(resumed.codec.motion().vy, 0);
+      assert.equal(resumed.sim.player.animation.updates, 0);
+      resumed.step(); assert.ok(resumed.codec.motion().y < 4);
+    } finally { resumed.dispose(); }
+  } finally { source.dispose(); }
+});

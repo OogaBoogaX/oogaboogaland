@@ -6,7 +6,7 @@ import { bodyOperationDigest, validateBodyOperation } from "./host-body-operatio
 import "../../src/js/npc-authority.js";
 import "../../src/js/clanker-pose.js";
 import "../../src/js/npc-pose-packet.js";
-export const SESSION_PROTOCOL = "host-session-v4";
+export const SESSION_PROTOCOL = "host-session-v5";
 export const HOST = Object.freeze({
   schema: 4, key: "virtual-host-v1", stepMs: 250, maxSteps: 8, maxLagMs: 30000,
   leaseMs: 10000, maxRunMs: 15 * 60000, checkpointBytes: 96 * 1024,
@@ -632,9 +632,10 @@ export class VirtualHost {
     const now = this.now(), r = await this.read(tx);
     this.owns(r, ticket, now);
     if (r.status !== "running" || now >= r.runUntil) fail("run closed to pose publication");
-    if (r.sessions?.sessions.some(s => (s.state === "grace" || s.state === "offered"
-      || s.state === "starting" && now >= Math.min(s.stepAt + HANDOFF_MS, s.deadline))
-      && s.stepAt < Math.min(s.state === "starting" ? now : r.sessions.clock, s.deadline))) {
+    // Frozen positions need no catch-up. Due departures and expired handoff
+    // leases still require durable lifecycle reconciliation before publication.
+    if (r.sessions?.sessions.some(s => s.state !== "live" && (now >= s.deadline
+      || s.state === "starting" && now >= Math.min(s.stepAt + HANDOFF_MS, s.deadline)))) {
       if (skipPending) return null;
       fail("body recovery pending");
     }

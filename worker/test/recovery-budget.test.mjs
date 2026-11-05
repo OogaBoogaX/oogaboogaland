@@ -40,76 +40,49 @@ async function harness(height = 4) {
     read: () => structuredClone(data), fail: () => { fail = true; }, retry: () => { retry = true; } };
 }
 
-test("maximum grace recovery is budgeted across durable commits, rollback and owner replacement", async t => {
-  const h = await harness(9000), original = h.read().sessions; h.at(160000);
-  let runner = h.make(), ticket = await runner.claim("restart"), before = h.read(), count = h.calls();
+test("maximum simultaneous expiry needs zero body physics across rollback and transaction retries", async t => {
+  const h = await harness(9000); h.at(160000);
+  const runner = h.make(), ticket = await runner.claim("restart"), before = h.read();
   h.fail(); await assert.rejects(runner.tick(ticket, []), /budget write failed/);
-  assert.deepEqual(h.read(), before); assert.ok(h.calls() - count <= HOST.passiveSteps);
-  count = h.calls(); h.retry();
-  await assert.rejects(runner.tick(ticket, []), /passive operation budget exhausted/);
-  assert.equal(h.calls() - count, HOST.passiveSteps, "storage retries cannot multiply the outer operation budget");
-  assert.deepEqual(h.read(), before, "retry exhaustion commits no speculative cursor or handback");
-  let work = 0, commits = 0, last;
-  do {
-    count = h.calls(); last = await runner.tick(ticket, []); commits++; work += last.work.steps;
-    assert.ok(h.calls() - count <= HOST.passiveSteps); assert.equal(last.work.steps, h.calls() - count);
-    assert.equal(last.snapshot, null);
-    assert.ok(h.read().sessions.sessions.every(s => s.deadline === 160000));
-    if (commits === 3) {
-      h.at(170000); const stale = ticket; runner = h.make(); ticket = await runner.claim("replacement");
-      await assert.rejects(h.host.tick(stale, []), /fenced/);
-    }
-    assert.ok(commits <= Math.ceil(76800 / HOST.passiveSteps));
-  } while (last.status !== "stopped");
-  assert.equal(work, 76800); assert.equal(commits, Math.ceil(76800 / HOST.passiveSteps));
+  assert.deepEqual(h.read(), before); assert.equal(h.calls(), 0);
+  h.retry(); const result = await runner.tick(ticket, []);
+  assert.equal(result.work.steps, 0); assert.equal(result.work.attemptedSteps, 0);
+  assert.equal(result.work.pendingSteps, 0); assert.equal(h.calls(), 0);
   const saved = h.read(); assert.equal(saved.sessions.pending.length, MAX_SESSIONS);
-  assert.ok(saved.sessions.pending.every(p => p.applied && p.at === 160000 && p.body.motion.y > 0 && !p.body.motion.grounded));
+  assert.ok(saved.sessions.pending.every(p => p.applied && p.at === 160000 && p.body.motion.y === 9000
+    && !p.body.motion.grounded && p.body.motion.vx === 0 && p.body.motion.vy === 0 && p.body.motion.vz === 0));
   assert.ok(saved.sessions.pending.every(p => JSON.stringify(p.body.equipment) === JSON.stringify(equipment)));
   assert.equal(saved.simulation.handbacks.length, 1); assert.equal(saved.sessions.pending.filter(p => p.handback).length, 1);
-  const f = await prepare(), world = { ...f.mesh, radius: 2.25, height: 2.8 };
-  const reference = SessionRegistry.restore(original, { protocol: SESSION_PROTOCOL, world: "budget-fixture",
-    adapter: { stepPassive: createPassiveBody({ world: () => world, gravity: 9.8 }), npcFor: id => id === "body-0" ? "npc-0" : null } });
-  reference.recover(160000, []);
-  for (const p of reference.pending()) reference.markApplied(p.id);
-  assert.deepEqual(saved.sessions.pending.sort((a,b) => a.generation-b.generation), reference.pending(),
-    "budgeted airborne continuation equals the uninterrupted original 50 ms steps exactly");
-  t.diagnostic(JSON.stringify({ commits, passiveSteps: work, perOperationLimit: HOST.passiveSteps }));
+  h.at(170000); const replacement = h.make(), fresh = await replacement.begin("replacement", 60000, { resumePaused: true });
+  await assert.rejects(runner.tick(ticket, []), /fenced/);
+  await replacement.tick(fresh, []);
+  assert.equal(h.read().simulation.handbacks.length, 1);
+  t.diagnostic(JSON.stringify({ frozenBodies: MAX_SESSIONS, physicsSteps: h.calls(), expiryCommits: 1 }));
 });
 
-test("a timely reconnect gets its own complete physics continuation ahead of unrelated backlog", async () => {
+test("timely reconnect reclaims the frozen body without waiting for unrelated bodies", async () => {
   const h = await harness(); h.at(159999); const ticket = await h.host.claim("restart");
-  let count = h.calls();
-  const generic = await h.host.sessions(ticket, [], (r, at) => { r.advance(at); r.advance(at); return r.connect(claim(63), at); });
-  assert.equal(generic.result.reason, "recovering"); assert.ok(h.calls() - count <= HOST.passiveSteps, "multiple callbacks cannot replenish the transaction budget");
-  count = h.calls(); const resumed = await h.host.connect(ticket, [], claim(63));
-  assert.ok(h.calls() - count <= HOST.passiveSteps); assert.equal(resumed.result.resumed, true);
-  assert.equal(resumed.result.view.motion.y, 0); assert.equal(resumed.result.view.motion.grounded, true);
+  const resumed = await h.host.connect(ticket, [], claim(63));
+  assert.equal(h.calls(), 0); assert.equal(resumed.result.resumed, true);
+  assert.equal(resumed.result.view.motion.y, 4); assert.equal(resumed.result.view.motion.grounded, false);
+  assert.equal(resumed.result.view.motion.vy, 0);
   assert.deepEqual(resumed.result.view.equipment, equipment); assert.equal(resumed.result.view.deadline, null);
-  assert.ok(resumed.work.pendingSteps > 0, "other bodies remain budgeted");
+  assert.equal(resumed.work.pendingSteps, 0);
   assert.notEqual(resumed.result.session.token, h.joined[63].session.token);
   h.at(160000);
   await h.host.disconnect(ticket, [resumed.result.session.token], h.joined[63].session, 160000);
-  assert.equal(h.read().sessions.sessions.find(s => s.accountId === 64).state, "live", "superseded close cannot cancel the reclaim");
+  assert.equal(h.read().sessions.sessions.find(s => s.accountId === 64).state, "live");
   const late = await h.host.connect(ticket, [resumed.result.session.token], claim(62));
-  assert.equal(late.result.reason, "departing", "priority cannot extend the exact deadline");
+  assert.equal(late.result.reason, "departing");
 });
 
-test("partially recovered state cannot publish poses or advance NPC time, and survives reconstruction", async () => {
-  const h = await harness(); h.at(100100); h.retry();
-  const retried = await h.host.tick(h.ticket, []);
-  assert.equal(retried.work.steps, 128); assert.equal(retried.work.attemptedSteps, 256);
-  assert.equal(h.calls(), 256, "successful retry reports all attempted physics work, not just committed progress");
-  h.at(125000); const ticket = await h.host.claim("restart");
-  let last = await h.host.tick(ticket, []);
-  assert.equal(last.recovering, true); assert.equal(last.steps, 0); assert.equal(h.read().simulation.steps, 0);
-  await assert.rejects(h.host.poses(ticket), /body recovery pending/);
-  await assert.rejects(h.host.confirmPoses(ticket,{sequence:h.read().revision,at:h.read().simulatedAt,runUntil:h.read().runUntil}), /body recovery pending/);
-  let commits = 1;
-  while (last.work.pendingSteps) {
-    last = await h.make().tick(ticket, []); commits++;
-    assert.ok(last.work.steps <= HOST.passiveSteps); assert.ok(commits <= 8);
-  }
-  assert.ok(h.read().simulation.steps > 0); assert.ok((await h.host.poses(ticket)).frame.byteLength > 0);
-  assert.ok(h.read().sessions.sessions.every(s => s.stepAt === 125000 && s.deadline === 160000));
-  assert.throws(() => new SessionRegistry({ protocol: "x", world: "x", passiveBudget: 1199 }), /budget/);
+test("frozen records survive reconstruction without cursor churn or blocking shared NPC progress", async () => {
+  const h = await harness(), original = h.read().sessions.sessions;
+  h.at(100100); h.retry(); const retried = await h.host.tick(h.ticket, []);
+  assert.equal(retried.work.steps, 0); assert.equal(retried.work.attemptedSteps, 0); assert.equal(h.calls(), 0);
+  assert.deepEqual(h.read().sessions.sessions, original);
+  h.at(125000); const ticket = await h.host.claim("restart"), last = await h.host.tick(ticket, []);
+  assert.ok(last.steps > 0); assert.ok(h.read().simulation.steps > 0);
+  assert.ok((await h.host.poses(ticket)).frame.byteLength > 0);
+  assert.deepEqual(h.read().sessions.sessions, original);
 });

@@ -391,7 +391,7 @@ test('actual Clanker movement with a lost host reply closes through the durable 
     assert.deepEqual(await closeBodyHandoff(host, room, ticket, authority, i, []), { status: 'resolved' });
     const offline = hostStorage.snapshot().get(HOST.key).host.sessions.sessions[0];
     assert.equal(offline.state, 'grace'); assert.equal(offline.deadline, 160200);
-    assert.equal(offline.motion.x, 2); assert.equal(offline.motion.vx, 0); assert.equal(offline.motion.vz, 0); assert.equal(offline.motion.vy, -1.5);
+    assert.equal(offline.motion.x, 2); assert.equal(offline.motion.vx, 0); assert.equal(offline.motion.vz, 0); assert.equal(offline.motion.vy, 0);
     const body = (await storage.transaction(tx => tx.bodies()))[0];
     assert.deepEqual(structuredClone(source.codec.records.motion(body.checkpoint)), offline.motion);
     assert.equal(await box.read(i), null); assert.equal(f.storage.snapshot().has(ROOM_MOVEMENT.prefix + 1), false);

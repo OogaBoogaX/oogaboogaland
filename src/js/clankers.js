@@ -72,7 +72,7 @@
         vx: values[5], vy: values[6], vz: values[7], grounded: !!(values[9] & 1) };
     },
     disconnect(values) {
-      validBodyRecord(values); const stopped = values.slice(); stopped[5] = stopped[7] = 0; return stopped;
+      validBodyRecord(values); const stopped = values.slice(); stopped[5] = stopped[6] = stopped[7] = 0; return stopped;
     },
   });
   const create = (ctx) => {
@@ -7392,7 +7392,7 @@
     // reservation/search/body continuation before this profile can expand.
     const continuation = ctx.checkpointProfile != null ? (() => {
       const body = bodyProfile;
-      let awaitingSupportStep = false;
+      let awaitingSupportStep = false, frozenRecovery = false;
       const refuse = () => { throw new Error("unsupported Clanker checkpoint profile"); };
       const ready = (neutral = true) => {
         if (disposed || !body && player || allAway || combatEnabled || rage || checkingRest || labEscape || debugShuttle
@@ -7460,10 +7460,12 @@
           // normal fresh-controller defaults, including full health and timers.
           bodyState() { return readBody(true); },
           liveBodyState() { return readBody(false); },
-          restoreBody(values, passive = false) {
+          restoreBody(values, passive = false, frozen = false) {
             ready();
-            if (typeof passive !== "boolean") refuse();
+            if (typeof passive !== "boolean" || typeof frozen !== "boolean" || passive && frozen) refuse();
             validBodyRecord(values);
+            if (frozen && values.slice(5, 8).some(v => v !== 0)) refuse();
+            frozenRecovery = frozen;
             if (player || elapsed !== 0 || values[0] !== list[0].owner.id) refuse();
             const e = list[0], d = e.drive, flags = values[9];
             player = e; e.controlled = e.active = true; e.mode = "chilling"; e.phase = "controlled";
@@ -7478,8 +7480,8 @@
           disconnect() {
             ready(false); if (!player) refuse(); cancelInput();
             // Match the registry's confirmed-close/duplicate-session policy.
-            // Vertical motion and remaining jump credits are untouched.
-            player.drive.vx = player.drive.vz = 0; ready();
+            // Frozen recovery resumes with zero momentum, including in midair.
+            player.drive.vx = player.drive.vy = player.drive.vz = 0; ready();
           },
           motion() {
             ready(); if (!player) refuse();
@@ -7505,18 +7507,33 @@
             e.gorilla.poseManaged(2, p.x, p.y, p.z, e.heading, 0, false, e.biped, "", terrainProfile ? e.motion : null);
             e.radius = Math.max(e.radius, e.gorilla.bodyRadius + 0.1);
             e.height = Math.max(e.height, e.gorilla.bodyHeight + 0.04);
-            awaitingSupportStep = continuation.validatePlacement(passive);
+            awaitingSupportStep = continuation.validatePlacement(passive, frozenRecovery);
+            if (frozenRecovery) continuation.frozenPlacement();
           },
-          validatePlacement(passive = false) {
+          frozenPlacement() {
+            if (continuation.validatePlacement(false, true)) {
+              // Lost support changes the future collision mode, never the
+              // stored position. Gravity starts only after acknowledged control.
+              const d = player.drive;
+              d.grounded = false; d.airborne = d.passiveFall = true; d.motionEnvelope = false;
+            }
+            awaitingSupportStep = false;
+          },
+          validateActivation() {
+            if (frozenRecovery) continuation.frozenPlacement();
+            else continuation.validatePlacement();
+            frozenRecovery = false;
+          },
+          validatePlacement(passive = false, frozen = false) {
             ready();
-            if (!player || typeof passive !== "boolean") refuse();
+            if (!player || typeof passive !== "boolean" || typeof frozen !== "boolean") refuse();
             const e = player, p = e.root.position;
             // The center ray may miss a tread or prop beneath the planted
             // footprint. Use the same support query as ordinary driven motion.
             const floor = terrainProfile ? support(e, p.x, p.z, p.y, 0) : groundAt(p.x, p.z, p.y);
             const lostSupport = e.drive.grounded && Math.abs(p.y - floor) > 1e-6;
             if (floor !== -Infinity && !Number.isFinite(floor) || floor > p.y + 1e-6
-              || lostSupport && !(terrainProfile && passive)
+              || lostSupport && !(terrainProfile && passive || frozen)
               || staticClear(e, p.x, p.y, p.z) !== true) refuse();
             return lostSupport;
           },
@@ -7565,7 +7582,7 @@
         sim.bodyCheckpoint.bodyState(); // No unstepped missing-support recovery may activate.
         // The world may change during grant/ACK transit. Check the current
         // geometry again without advancing physics or resetting the pose.
-        sim.bodyCheckpoint.validatePlacement();
+        sim.bodyCheckpoint.validateActivation();
         enabled = true; return true;
       },
       suspend() { enabled = false; if (!disposed) sim.cancelInput(); },

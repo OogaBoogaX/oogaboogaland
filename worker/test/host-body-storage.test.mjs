@@ -154,7 +154,7 @@ test("unchanged-row optimization preserves exact signed zero and small float cha
   }
 });
 
-test("actual passive Clanker body and session motion commit together through rollback, retry and reconnect", async () => {
+test("actual frozen Clanker body and session motion commit together through rollback, retry and reconnect", async () => {
   const create = () => {
     const f = clankerController({ checkpointRandom: true, checkpointProfile: 'body-3', start: false });
     return { ...f, codec: createClankerBodyCheckpoint(f.sim, world, f.B.clankerState) };
@@ -185,14 +185,12 @@ test("actual passive Clanker body and session motion commit together through rol
       finally { recovered.dispose(); }
     };
     h.at(100500); await host.tick(ticket, []);
-    for (let i = 0; i < 10; i++) reference.codec.stepPassive(reference.codec.motion(), 50);
     assert.deepEqual(committedMotion(), structuredClone(reference.codec.motion())); await assertBody();
     const before = h.read(); h.at(100750); h.fail(1);
     await assert.rejects(host.tick(ticket, []), /injected partial write/); assert.deepEqual(h.read(), before);
-    h.retry(); await assert.rejects(host.tick(ticket, []), /construction budget/);
-    assert.deepEqual(h.read(), before, 'retry construction budget cannot publish speculative physics');
+    h.retry(); await host.tick(ticket, []);
+    assert.equal(created, afterAdmission, 'retry does not reconstruct frozen bodies');
     await host.tick(ticket, []);
-    for (let i = 0; i < 5; i++) reference.codec.stepPassive(reference.codec.motion(), 50);
     assert.deepEqual(committedMotion(), structuredClone(reference.codec.motion())); await assertBody();
     assert.equal(created, disposed, 'every successful, failed and retried body scope is disposed');
     h.at(110750); ticket = await make().claim('replacement');
@@ -203,7 +201,7 @@ test("actual passive Clanker body and session motion commit together through rol
     assert.equal(resumed.transfer.view.generation, next.session.generation);
     assert.equal(resumed.transfer.revision, h.read().get(HOST.key).host.revision);
     assert.deepEqual(resumed.transfer.view.motion, committedMotion());
-    await assertBody(); assert.equal(committedMotion().grounded, true, 'retained body continued gravity to landing');
+    await assertBody(); assert.equal(committedMotion().grounded, false, 'retained body remains frozen in midair');
     const beforeTransfer = h.read(), transferConstructions = created;
     const transfer = await make().bodyForSession(ticket, next.session.accountId, next.session);
     assert.equal(transfer.resetResources, 'defaults'); assert.equal(transfer.view.generation, next.session.generation);
@@ -416,14 +414,15 @@ test("short-outage body work stays bounded, retains deadlines and prioritizes ti
     assert.deepEqual(h.read(), empty, 'multiple new bodies cannot bypass construction admission');
     for (const c of claims) refs.push((await host.connect(ticket, refs.map(r => r.token), c)).result.session);
     h.at(100250); const count = constructions, first = await host.tick(ticket, []);
-    assert.equal(constructions - count, 1, 'one controller despite three newly missing sockets');
-    assert.equal(first.work.steps, 5); assert.equal(first.work.pendingBodies, 2); assert.equal(first.snapshot, null);
+    assert.equal(constructions - count, 0, 'missing sockets freeze through data-only records');
+    assert.equal(first.work.steps, 0); assert.equal(first.work.pendingBodies, 0); assert.ok(first.snapshot);
     const sessions = () => h.read().get(HOST.key).host.sessions.sessions;
-    assert.deepEqual(sessions().map(r => r.stepAt), [100250, 100000, 100000]);
+    assert.deepEqual(sessions().map(r => r.stepAt), [100000, 100000, 100000]);
     assert.ok(sessions().every(r => r.deadline === 160000 && r.motion.vx === 0 && r.motion.vz === 0));
     const before = h.read(), attempted = constructions; h.retry();
-    await assert.rejects(host.tick(ticket, []), /construction budget/);
-    assert.equal(constructions - attempted, 1); assert.deepEqual(h.read(), before);
+    await host.tick(ticket, []);
+    assert.equal(constructions - attempted, 0);
+    assert.deepEqual(h.read().get(HOST.key).host.sessions.sessions, before.get(HOST.key).host.sessions.sessions);
     const resumed = (await host.connect(ticket, [], { ...claims[2], body: undefined })).result;
     assert.equal(resumed.resumed, true); assert.equal(resumed.view.bodyId, 'body-2');
     assert.equal(sessions().find(r => r.accountId === 2).stepAt, 100000, 'priority precedes older unrelated body work');
@@ -434,7 +433,7 @@ test("short-outage body work stays bounded, retains deadlines and prioritizes ti
 });
 
 
-test("opt-in body batching preserves serial physics and bounds speculative retry work", async () => {
+test("frozen disconnects need no construction under either bounded admission configuration", async () => {
   const create = () => {
     const f = clankerController({ checkpointRandom: true, checkpointProfile: 'body-3', start: false });
     return { ...f, codec: createClankerBodyCheckpoint(f.sim, world) };
@@ -461,16 +460,15 @@ test("opt-in body batching preserves serial physics and bounds speculative retry
         admitted = h.read();
       }
       h.at(100250); const before = h.read(), count = constructions; h.retry();
-      await assert.rejects(host.tick(ticket, []), /construction budget/);
-      assert.equal(constructions - count, bodyLoads, 'retries share the same construction budget');
-      assert.deepEqual(h.read(), before, 'speculative batch changes no committed body or clock');
+      await host.tick(ticket, []);
+      assert.equal(constructions - count, 0, 'even retries do not restore disconnected bodies');
       let result, operations = 0;
       do {
         const count = constructions; result = await host.tick(ticket, []); operations++;
         assert.ok(constructions - count <= bodyLoads);
         if (result.work.pendingSteps) assert.equal(result.snapshot, null);
       } while (result.work.pendingSteps);
-      assert.equal(operations, Math.ceil(5 / bodyLoads)); assert.ok(result.snapshot);
+      assert.equal(operations, 1); assert.ok(result.snapshot);
       const root = h.read().get(HOST.key).host, rows = await h.bank().transaction(tx => tx.bodies());
       outcomes.push({ sessions: root.sessions, simulation: root.simulation, rows });
       assert.equal(constructions, disposals, 'every speculative and committed controller is released');
@@ -486,7 +484,7 @@ test("pending handoff writes are atomic and a lost ACK retains its original dead
   h.fail(1); await assert.rejects(host.offerBody(ticket, [], 1, claim(0), prep), /injected partial write/);
   assert.deepEqual(h.read(), initial);
   const offer = await host.offerBody(ticket, [], 1, claim(0), prep), ref = offer.result.session;
-  assert.equal(offer.transfer.protocol, "host-session-v4"); assert.equal(offer.transfer.view.state, "offered");
+  assert.equal(offer.transfer.protocol, "host-session-v5"); assert.equal(offer.transfer.view.state, "offered");
   assert.equal(offer.transfer.view.deadline, 160000); assert.equal(await host.bodyForSession(ticket, 1, ref), null);
   const saved = h.read(); h.at(100250); h.fail(1);
   await assert.rejects(host.activateBody(ticket, [], 1, ref, offer.transfer), /injected partial write/);
@@ -535,7 +533,7 @@ test("final body ACK is fenced, exact, atomic and idempotent without presence re
   assert.deepEqual(h.read(), newer, "old receipt and census cannot disconnect a replacement");
 });
 
-test("real Clanker offer moves under host gravity; browser wire restores the final bounded control lease", async t => {
+test("real Clanker offer stays frozen; browser wire restores zero momentum for the bounded control lease", async t => {
   const create = () => {
     const f = clankerController({ checkpointRandom: true, checkpointProfile: "body-3", start: false });
     return { ...f, codec: createClankerBodyCheckpoint(f.sim, world, f.B.clankerState) };
@@ -552,12 +550,12 @@ test("real Clanker offer moves under host gravity; browser wire restores the fin
     const c = { ...claim(0), body: { ...claim(0).body, motion: structuredClone(source.codec.motion()) } };
     const offer = await host.offerBody(ticket, [], 1, c, await host.prepareBody(ticket, 1, "body-0")), ref = offer.result.session;
     assert.equal(offer.transfer.view.motion.vx, 0); assert.equal(offer.transfer.view.motion.vz, 0);
-    assert.equal(offer.transfer.view.motion.vy, c.body.motion.vy);
+    assert.equal(offer.transfer.view.motion.vy, 0);
     h.at(100250); await host.tick(ticket, []);
     h.at(100500); const active = await host.activateBody(ticket, [], 1, ref, offer.transfer);
     assert.equal(active.result.ok, true); assert.equal(active.transfer.expiresAt, 101500);
-    assert.notEqual(active.transfer.view.motion.y, offer.transfer.view.motion.y);
-    assert.notDeepEqual(active.transfer.checkpoint, offer.transfer.checkpoint, "final snapshot follows the host-owned body, not old preflight");
+    assert.equal(active.transfer.view.motion.y, offer.transfer.view.motion.y);
+    assert.deepEqual(active.transfer.checkpoint, offer.transfer.checkpoint, "frozen body does not move while grants are pending");
     const count = constructions, rows = await h.bank().transaction(tx => tx.bodies());
     h.at(100750); await host.tick(ticket, []);
     assert.equal(constructions, count); assert.deepEqual(await h.bank().transaction(tx => tx.bodies()), rows);
@@ -575,7 +573,7 @@ test("real Clanker offer moves under host gravity; browser wire restores the fin
     h.at(101500); await host.tick(ticket, []);
     const recovered = h.read().get(HOST.key).host.sessions.sessions[0];
     assert.equal(recovered.state, "grace"); assert.equal(recovered.deadline, 160000);
-    assert.ok(recovered.motion.y < active.transfer.view.motion.y, "lost ACK returns a falling body to host physics");
+    assert.equal(recovered.motion.y, active.transfer.view.motion.y, "lost ACK preserves the frozen position");
     assert.equal(constructions, disposals);
     const combined = Buffer.byteLength(JSON.stringify({ session: recovered, body: (await h.bank().transaction(tx => tx.bodies()))[0] }));
     assert.ok(combined < HOST.sessionSlotBytes, "representative minimal state, not a worst-case proof");
@@ -623,16 +621,16 @@ test("opt-in browser wire stays exact through host reconstruction, ACK compariso
   } finally { source.dispose(); }
 });
 
-test("deferred offer physics consumes no activation lease and cannot publish a stale body", async () => {
+test("frozen offers issue a fresh bounded activation lease without physics admission", async () => {
   const h = harness(), host = h.make(h.bank(), { stepPassive: m => m, canStep: () => false });
   const ticket = await host.begin("owner", 120000);
   const offer = await host.offerBody(ticket, [], 1, claim(0), await host.prepareBody(ticket, 1, "body-0"));
   h.at(100250); const active = await host.activateBody(ticket, [], 1, offer.result.session, offer.transfer);
-  assert.equal(active.result.reason, "recovering"); assert.equal(active.transfer, null);
+  assert.equal(active.result.ok, true); assert.ok(active.transfer);
   const session = h.read().get(HOST.key).host.sessions.sessions[0];
-  assert.equal(session.state, "offered"); assert.equal(session.stepAt, 100000); assert.equal(session.deadline, 160000);
-  assert.equal(active.work.pendingSteps, 5);
-  assert.equal(await host.transaction(tx => host.publicationRecord(tx, ticket, true)), null);
+  assert.equal(session.state, "starting"); assert.equal(session.stepAt, 100250); assert.equal(session.deadline, 160000);
+  assert.equal(active.work.pendingSteps, 0);
+  assert.ok(await host.transaction(tx => host.publicationRecord(tx, ticket, true)));
 });
 
 test('authenticated movement commits source physics atomically, fences replays across restart, and disconnects at the latest position', async t => {
@@ -686,7 +684,7 @@ test('authenticated movement commits source physics atomically, fences replays a
     assert.deepEqual(h.read(), newer, 'optimistic retries share the construction budget and cannot leak a receipt');
     await make().disconnect(ticket, [ref.token], ref, 100200);
     assert.equal(session().motion.x, 3); assert.equal(session().motion.vx, 0); assert.equal(session().motion.vz, 0);
-    assert.equal(session().motion.vy, -1.5); assert.equal(session().deadline, 160200);
+    assert.equal(session().motion.vy, 0); assert.equal(session().deadline, 160200);
     const offline = h.read();
     await assert.rejects(make().updateBody(ticket, [ref.token], 1, ref, { ...next, sequence: 3 }), /fenced/);
     assert.deepEqual(h.read(), offline);
@@ -733,8 +731,8 @@ test('Room observation time survives delayed movement processing and keeps the o
     assert.deepEqual(h.read(), accepted, 'changing the observed time changes the retained command digest');
     await make().disconnect(ticket, [], ref, 100200);
     const offline = h.read().get(HOST.key).host.sessions.sessions[0];
-    assert.equal(offline.deadline, 160200); assert.equal(offline.stepAt, 100600);
-    assert.equal(offline.motion.x, 3); assert.equal(offline.motion.vx, 0); assert.ok(offline.motion.y < 4);
+    assert.equal(offline.deadline, 160200); assert.equal(offline.stepAt, 100200);
+    assert.equal(offline.motion.x, 3); assert.equal(offline.motion.vx, 0); assert.equal(offline.motion.y, 4);
     assert.deepEqual(structuredClone(source.codec.records.motion((await h.bank().transaction(tx => tx.bodies()))[0].checkpoint)), offline.motion);
   } finally { source.dispose(); }
 });
