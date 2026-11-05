@@ -519,6 +519,8 @@
   const factoryWalk = { phase: 0, cave: null, t: 0, x: 0, z: 0, seen: false, through: false, beat: 0, grab: false, still: 0, hold: 0, settle: false };
   // Tess, the island's guide, for the visit (`hub-guide.js`).
   let islandGuide = null;
+  // The Goldbug in the bushes (`hub-goldbug.js`), for the visit: null while the mirror's four bushes are not all there.
+  let goldbug = null;
   let reuseHub = false, heldHub = false, heldDebug = null;
   let stateTimer = 0, now = 0, hour = 12, unsubscribeActivity = null, unsubscribeAccount = null, ownOogaClaimed = false;
   // The daylight inputs as last sampled; sampledDay starts at a never-true 0 so the first frame always samples.
@@ -5713,6 +5715,27 @@
     });
     return true;
   };
+  // The Goldbug's four bushes: the meadow bushes nearest the mirror cave's mouth on its open side (the seeded scatter
+  // puts four there), in loop order (`hubGoldbug.pickBushes`). Fewer than four, and he never comes.
+  const goldbugBushes = () => BL.hubGoldbug.pickBushes(scenery, mirrorCave.mouth);
+  const goldbugCalm = typeof window.matchMedia === "function" ? window.matchMedia("(prefers-reduced-motion: reduce)") : null;
+  const createGoldbug = () => {
+    const bushes = goldbugBushes();
+    if (!bushes) return;
+    goldbug = BL.hubGoldbug.create({
+      root, fx, bushes, mirror: mirrorCave, memory: world,
+      groundAt: (x, z) => Math.max(0, island.surfaceAt(x, z)),
+      // The bush's own rustle, as a tap or Space gives it, without its words or banana; Calm keeps the leaves still.
+      rustle: (b, calm) => {
+        if (!wobble(b.node, 0.25) || calm) return;
+        fx.burst(b.x, b.node.world[13] + 0.7, b.z, 6, [LEAF], 1.2);
+      },
+      calm: () => !!(goldbugCalm && goldbugCalm.matches),
+      // GAME MODE and the island's other events: Cloud Hopper, the whitepaper's show, a walk through a shield. (The ghost
+      // hunt is Ooga Arcade's now, in its own scene: walking there leaves the hub, which ends the show.)
+      busy: () => gameMode || !!cloudHopper?.active || wpTime >= 0 || wpRead || factoryDeparting || bifrostDeparting
+    });
+  };
   const dropBanana = (o, chance) => {
     if (now < o.ripe || Math.random() > chance) return false;
     o.ripe = now + RIPEN;
@@ -8665,6 +8688,10 @@
       else pilot.readInput(dt);
     }
     mirrorCave.ripples.update(dt, elapsed);
+    if (goldbug) {
+      const walker = !clankerPlay.active ? pilot.player : null;
+      goldbug.update(dt, walker ? walker.root.position : null, walker ? walker.root.position.y - walker.baseY : 0);
+    }
     updatePortalEffects(entropyLab.phase, dt);
     for (const veil of caveVeils) updatePortalEffects(veil.phase, dt);
     if (factoryMouth && !cloudPlaying()) factoryShield(dt, elapsed);
@@ -11451,6 +11478,8 @@
     if (hammock) vacateHammock();
     // A kept island ends its game as a full leave does, and lowers the ring at once.
     setGameMode(false);
+    // The Goldbug's show ends with the visit and his sound closes; a kept hub keeps his nodes for the next.
+    if (goldbug) goldbug.suspend();
     gameRingK = gameRingWait = ringPulseWait = 0; gameRing.visible = false;
     // The veils' waves and glyph outlines end with the visit as leave ends them; an outline is made again where a body
     // next touches its veil (`ringBodies`).
@@ -12630,6 +12659,7 @@
         get factory() { return factoryMouth && factoryMouth.hall ? factoryMouth.hall.debug : null; },
         get bifrost() { return bifrostIsle; },
         get footsteps() { return footsteps; },
+        get goldbug() { return goldbug ? goldbug.debug : null; },
         get chalkboardAt() { return chalkboardClearance; },
         slots: pile.slots, drops: pile.drops, core: pile.core, shell: pile.shell, delivery: pile.delivery, spillEffect: pile.spillEffect, cavemen: crew.cavemen, crates: crates.list, lab: null, hud, applyAllSwag: crew.applyAllSwag, renderLocker: crew.renderLocker, demoTip, setPileLevel: pile.setLevel, refreshStates: crew.refreshStates, trimPool: fx.trimPool,
         get shown() {
@@ -12725,6 +12755,7 @@
     });
     yield* pause(slice);
     cloudRememberNodes(cloudNodeStart);
+    createGoldbug();
     cloudIsland = BL.cloudHopperIsland.create({ root, island, solids });
     cloudPile = createNode({ geometry: pile.core.geometry });
     cloudPileSolids = BL.solidProps.create(); cloudPileSolids.add(cloudPile);
@@ -12807,6 +12838,7 @@
     selectDebugGorilla(null);
     islandGuide.dispose();
     islandGuide = null;
+    if (goldbug) { goldbug.dispose(); goldbug = null; }
     // GAME MODE ends with the visit; the island comes back built afresh.
     gameMode = gameCombatOnly = clankerOnPlayer = false;
     for (const node of ringPanels) { node.mirrorRipples.dispose(); if (node.mirrorBody) node.mirrorBody.dispose(); }
