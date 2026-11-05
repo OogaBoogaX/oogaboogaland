@@ -4,6 +4,19 @@
 const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/", CHUNK = 3072;
 const VALUES = [null, false, true, 0, 1, -1, -0];
 const fail = () => { throw Error("invalid binary checkpoint or capacity"); };
+// Count the actual JSON UTF-8 representation without allocating a byte array
+// for every scalar. JSON escapes lone surrogates; valid pairs occupy four bytes.
+export function scalarBytes(value) {
+  const text = JSON.stringify(value); let size = text.length;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    if (c < 128) continue;
+    if (c < 2048) size++;
+    else if (c >= 0xd800 && c <= 0xdbff && i + 1 < text.length && text.charCodeAt(i + 1) >= 0xdc00 && text.charCodeAt(i + 1) <= 0xdfff) { size += 2; i++; }
+    else size += 2;
+  }
+  return size;
+}
 export const scalarCost = v => typeof v === "string" ? 3 + v.length * 2 : typeof v !== "number" || v === 0 || v === 1 || v === -1 ? 1
   : Number.isInteger(v) && Math.abs(v) <= 65535 ? 3 : Math.fround(v) === v ? 5 : 9;
 const base64 = bytes => {
@@ -69,7 +82,7 @@ export function encodeCheckpoint(tree, scalars, limits) {
 }
 
 export function decodeCheckpoint(chunks, shapes, scalars, costs, limits, charge) {
-  const bytes = unbase64(chunks), view = new DataView(bytes.buffer), encoder = new TextEncoder(); let at = 0;
+  const bytes = unbase64(chunks), view = new DataView(bytes.buffer); let at = 0;
   const take = n => { if (at + n > bytes.length) fail(); const start = at; at += n; return start; };
   const byte = () => bytes[take(1)], word = () => view.getUint16(take(2), true);
   const read = depth => {
@@ -98,7 +111,7 @@ export function decodeCheckpoint(chunks, shapes, scalars, costs, limits, charge)
     } else if (tag === 10) { const index = byte(); if (index >= scalars.length) fail(); value = scalars[index]; }
     else if (tag === 13 || tag === 14) { value = word(); if (value < 2) fail(); if (tag === 14) value = -value; }
     else fail();
-    charge(depth, encoder.encode(JSON.stringify(value)).byteLength); return value;
+    charge(depth, scalarBytes(value)); return value;
   };
   const result = read(0); if (at !== bytes.length) fail(); return result;
 }

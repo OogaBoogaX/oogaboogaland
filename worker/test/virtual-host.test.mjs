@@ -126,6 +126,33 @@ test("host progresses with zero players and persists simulation before returning
   assert.equal(h.store.writes, 6);
 });
 
+test("simulation transaction scopes are fresh on storage retry, close on failure and never publish speculative steps",async()=>{
+  const adapter=compactSimulation(simulation,4096,{intern:true}),factory=adapter.forTransaction,scopes=[];
+  adapter.forTransaction=()=>{const scope=factory();scopes.push(scope);return scope;};
+  const h=harness(adapter),transaction=h.store.transaction.bind(h.store);let retry=false;
+  h.store.transaction=fn=>transaction(async tx=>{
+    if(retry){retry=false;let speculative=await tx.get(HOST.key);await fn({get:async()=>structuredClone(speculative),put:async(_,v)=>{speculative=structuredClone(v);}});}
+    return fn(tx);
+  });
+  const ticket=await h.host.begin('owner',60000);h.at(100250);retry=true;
+  const result=await h.host.tick(ticket);assert.equal(result.snapshot.npcs[0].x,.25);assert.equal(scopes.length,3);
+  for(const scope of scopes)assert.throws(()=>scope.project(h.store.read().simulation),/closed/);
+  const before=h.store.read();h.at(100500);h.store.failNext();await assert.rejects(h.host.tick(ticket),/storage unavailable/);
+  assert.deepEqual(h.store.read(),before);assert.throws(()=>scopes.at(-1).validate(before.simulation),/closed/);
+  assert.equal((await h.make().tick(ticket)).snapshot.npcs[0].x,.5);
+  const incompatible={...adapter,forTransaction:()=>({...factory(),version:'other'})};
+  await assert.rejects(harness(incompatible).host.begin('owner',60000),/invalid simulation transaction/);
+});
+
+test("committed pose reads share the validated immutable transaction snapshot and cannot mutate it",async()=>{
+  const actor=rig(),encode=createNpcPose(123,1);let validated,mutate=false;
+  const adapter=compactSimulation({...simulation,validate(s){validated=s;return simulation.validate(s);},
+    poses(s){assert.equal(s,validated);assert.ok(Object.isFrozen(s));if(mutate)s.x=99;return encode([{index:0,actor}]);}},4096,{intern:true});
+  const h=harness(adapter),ticket=await h.host.begin('owner',60000),before=h.store.read();
+  assert.ok((await h.host.poses(ticket)).frame.byteLength);assert.deepEqual(h.store.read(),before);
+  mutate=true;await assert.rejects(h.host.poses(ticket),TypeError);assert.deepEqual(h.store.read(),before);
+});
+
 test("competing hosts serialize acquisition; stale epochs cannot write after restart", async () => {
   const h = harness();
   const starts = await Promise.allSettled([h.host.begin("a", 60000), h.make().begin("b", 60000)]);

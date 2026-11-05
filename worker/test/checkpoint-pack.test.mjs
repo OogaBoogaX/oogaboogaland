@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createCheckpointPack, PACK } from "../src/checkpoint-pack.js";
+import { scalarBytes } from "../src/checkpoint-binary.js";
 import { compactSimulation } from "../src/simulation-checkpoint.js";
 import { initial, prepare, capture, restore } from "./fixtures/clanker-flight-fixture.mjs";
 
@@ -11,6 +12,12 @@ test("checkpoint packing preserves JSON values, hostile field names and negative
   assert.deepEqual(decoded, state); assert.equal(Object.getPrototypeOf(decoded), Object.prototype);
   assert.equal({}.safe, undefined); assert.ok(Object.is(decoded.array[5], -0));
   decoded.array[0].changed = true; assert.deepEqual(codec.unpack(packed), state);
+});
+
+test("scalar byte metering matches actual UTF-8 JSON across Unicode and numeric boundaries",()=>{
+  const encoder=new TextEncoder(),check=v=>assert.equal(scalarBytes(v),encoder.encode(JSON.stringify(v)).byteLength);
+  for(const value of [null,true,false,0,-0,Number.MIN_VALUE,Number.MAX_VALUE,1e-8,-1e25,'','🌍','\ud800','\udfff','\u2028\n"\\'])check(value);
+  for(let i=0;i<65536;i+=17)check(String.fromCharCode(i,(i*31)%65536,(i*149)%65536));
 });
 
 test("packing rejects ambiguous and oversized state; decoding rejects corrupt tags and expansion bombs", () => {
@@ -130,4 +137,28 @@ test("ownership queries share an immutable phase snapshot and a new phase observ
   adapter.handoff(state, {});
   assert.equal(adapter.readQueries(state).npcFor("body"), "replacement"); assert.equal(snapshots.size, 2);
   assert.equal(createCheckpointPack(4096).unpack(state).owners.body, "replacement");
+});
+
+test("transaction scopes reuse only frozen checkpoints, preserve query phases and discard rejected mutations",()=>{
+  let validations=0,mutateProject=false,stepState;
+  const source={version:'scope-fixture',initial:()=>({value:1,owner:'first'}),
+    validate:s=>{validations++;assert.ok(Object.isFrozen(s));return Number.isFinite(s.value);},
+    step(s){stepState=s;s.value++;},project(s){if(mutateProject)s.value=999;return s.value;},
+    npcFor:s=>s.owner,handoff(s,intent){s.owner=intent.owner;return intent.accept;}};
+  for(const intern of [false,true]){
+    const adapter=compactSimulation(source,4096,{intern}),scope=adapter.forTransaction(),state=scope.initial();
+    const baseline=validations;assert.equal(scope.validate(state),true);assert.equal(scope.validate(state),true);assert.equal(validations,baseline+1);
+    const query=scope.readQueries(state);assert.equal(query.npcFor('body'),'first');
+    assert.throws(()=>{state.data[0]='poison';},TypeError);scope.step(state,50);
+    assert.ok(Object.isFrozen(stepState));assert.throws(()=>{stepState.value=999;},TypeError);
+    assert.equal(scope.project(state),2);assert.equal(scope.validate(state),true);assert.equal(validations,baseline+2);
+    const before=JSON.stringify(state);assert.equal(scope.handoff(state,{owner:'wrong',accept:false}),false);assert.equal(JSON.stringify(state),before);
+    assert.equal(scope.handoff(state,{owner:'second',accept:true}),true);assert.equal(scope.npcFor(state,'body'),'second');assert.equal(query.npcFor('body'),'first');
+    mutateProject=true;assert.throws(()=>scope.project(state),TypeError);mutateProject=false;assert.equal(scope.project(state),2);
+    const replacement=adapter.initial();state.data=replacement.data;state.shapes=replacement.shapes;if(intern)state.scalars=replacement.scalars;
+    assert.equal(scope.project(state),1,'new wire children must not reuse the previous decoded state');
+    state.extra=true;assert.throws(()=>scope.validate(state));delete state.extra;assert.equal(scope.validate(state),true);
+    scope.dispose();assert.throws(()=>scope.project(state),/closed/);assert.throws(()=>query.npcFor('body'),/closed/);
+    const next=adapter.forTransaction();assert.equal(next.project(state),1);next.dispose();
+  }
 });

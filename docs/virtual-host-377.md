@@ -1229,6 +1229,68 @@ Neither outer AI nor complete player body state is represented. The remaining
 588 source-node margin and measured byte margin must be reassessed when those
 states and real world geometry are included. **Activation remains blocked.**
 
+### Transaction-local checkpoint reuse and measured tick cost
+
+`compactSimulation.forTransaction()` supplies a fresh scope inside every storage
+callback, including automatic retries. It retains one deeply frozen decoded view
+per unchanged packed object. Frozen wire children and exact own-field identity
+checks prevent a changed record from reusing that view. Read-only validation,
+ownership queries and pose projection share it; steps and accepted handbacks work
+on private mutable copies, pack within the existing limits, then replace the view.
+Rejected handbacks discard their edits. Old read phases keep their frozen view;
+all scopes and queries close after success or failure. Nothing survives a retry
+or becomes a global actor cache. Adapter validation and queries must remain pure,
+synchronous functions of checkpoint data and the versioned static world.
+
+Scalar size checks now count the UTF-8 JSON representation without creating a
+byte array per scalar. Numeric boundaries, valid surrogate pairs, lone surrogates
+and a deterministic sweep of UTF-16 combinations match TextEncoder exactly.
+No checkpoint format, node/byte limit, session reservation or activation gate
+changes. Committed pose reads also reuse the validated frozen view, while legacy
+adapters keep their defensive-copy path.
+
+In consecutive serial runs of the same 106-controller / 53-rig / 30-session
+fixture, the published baseline measured **152.124 / 157.498 ms p50/p95**, and
+this change measured **138.533 / 147.625 ms** (12 ticks each, identical Node flags).
+That is about 6.3% lower p95 in this small local comparison, not a production
+guarantee. An earlier baseline sample had a 683.008 ms p95 outlier; it is retained
+in the evidence rather than attributed to this code. Another optimized run was
+147.614 ms p95. The previous 158.738 ms measurement remains historical.
+Checkpoint sizes are unchanged at 66,460 total / 51,236 simulation bytes. These
+are wall-clock timings with mock storage; actual DO CPU, complete AI/body state,
+world geometry, memory residency and account costs still need validation.
+Evidence: `verification-host-tick-{matched,confirm}-{before,after}.log`.
+**Activation remains blocked; this modest optimization does not clear the gate.**
+
+### Committed mixed-frame publication, still an explicit preview
+
+`VirtualHost.poses(ticket, {format: "mixed-1"})` and `publishHostPoses` now accept
+an explicit mixed-format request. The simulation adapter receives that format
+when projecting its committed state; the host validates the complete packet,
+world identity and bounded codec before any Room mutation. Omitting the option
+preserves Ooga-only publication. Loading the codecs does not opt in any caller.
+The coordinator checks Room's format as well as ownership, including lost-reply
+reconciliation. A format change cannot occur inside the same authority epoch;
+it requires a separately fenced migration. Both Room preview flags and compatible
+occupants remain required. No browser advertises the new capability.
+
+The integration test uses the actual host, compact checkpoint, managed Clanker
+animation and Room with authored trajectories and mocked storage/sockets. Its
+53 Oogas / 53 Clankers survive failed host writes, lost publication replies,
+host/Room reconstruction, late join and owner replacement. Two clients receive
+identical complete frames; a stalled client retains one credit. A reconstructed
+Clanker matches the host's actual display transforms. Wrong worlds, unknown
+formats and an in-place downgrade are rejected. In this fixture the packet was
+5,235 bytes and the checkpoint 17,796 bytes; **these exclude full controllers,
+player sessions and world geometry** and must not replace the larger capacity
+measurements above. Publication never advances animation or replays actions.
+
+This closes the committed mixed-frame coordinator gap. Live scene authority
+freezing, full controller/body restoration, held-item binding, the browser's
+capability advertisement and disconnect presentation wiring remain unfinished.
+The renderer tests are headless scene-transform comparisons, not browser/GPU or
+production validation. Activation stays disabled and #377 remains open.
+
 ### Disconnect presentation, not yet connected to live sessions
 
 `host-presence.js` renders committed grace views and applied departure intents

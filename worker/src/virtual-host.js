@@ -3,6 +3,8 @@
 // storage transactions may retry. #379 owns independent NPC tracks; live movement and voice stay separate.
 import { SessionRegistry } from "./host-sessions.js";
 import "../../src/js/npc-authority.js";
+import "../../src/js/clanker-pose.js";
+import "../../src/js/npc-pose-packet.js";
 export const SESSION_PROTOCOL = "host-session-v2";
 export const HOST = Object.freeze({
   schema: 4, key: "virtual-host-v1", stepMs: 250, maxSteps: 8, maxLagMs: 30000,
@@ -84,6 +86,24 @@ export class VirtualHost {
 
   now() { const now = this.clock(); if (!time(now)) fail("host clock"); return now; }
 
+  transaction(callback) {
+    return this.storage.transaction(async tx => {
+      const source = this.simulation;
+      if (typeof source.forTransaction !== "function") return callback.call(this, tx);
+      const simulation = source.forTransaction();
+      try {
+        if (!simulation || simulation === source || simulation.then || simulation.version !== source.version
+          || simulation.checkpointBytes !== source.checkpointBytes
+          || typeof source.poses === "function" && typeof simulation.poses !== "function"
+          || !["initial", "validate", "step", "project", "npcFor", "handoff", "dispose"].every(k => typeof simulation[k] === "function")) fail("invalid simulation transaction");
+        const attempt = Object.create(this); attempt.simulation = simulation;
+        return await callback.call(attempt, tx);
+      } finally {
+        if (simulation !== source && !simulation?.then && typeof simulation?.dispose === "function") simulation.dispose();
+      }
+    });
+  }
+
   validate(r) {
     if (!exact(r, ["schema", "world", "budget", "fence", "revision", "owner", "leaseUntil", "runUntil", "wallAt", "wallCursor", "simulatedAt", "pausedMs", "status", "simulation", "sessions"])
       || r.schema !== HOST.schema || r.world !== this.simulation.version || r.budget !== this.checkpointBytes) fail("incompatible checkpoint");
@@ -130,7 +150,7 @@ export class VirtualHost {
   // Explicit, finite operator action. Never called by a browser join or auto-renewed by tick.
   async begin(owner, durationMs, { resumePaused = false } = {}) {
     if (!id(owner) || !Number.isSafeInteger(durationMs) || durationMs < HOST.stepMs || durationMs > HOST.maxRunMs) fail("bounded run required");
-    return this.storage.transaction(async tx => {
+    return this.transaction(async function(tx) {
       const now = this.now();
       let r = await this.read(tx);
       if (r && now < r.wallAt) fail("clock moved backwards");
@@ -155,7 +175,7 @@ export class VirtualHost {
   // A restarted runner obtains a new durable fence; an old runner can never overwrite it.
   async claim(owner) {
     if (!id(owner)) fail("host owner");
-    return this.storage.transaction(async tx => {
+    return this.transaction(async function(tx) {
       const now = this.now(), r = await this.read(tx);
       if (!r || !["running", "draining"].includes(r.status) || now < r.leaseUntil
         || now >= r.runUntil && !r.sessions?.sessions.length) fail("host unavailable");
@@ -170,7 +190,7 @@ export class VirtualHost {
   // Once session state exists, callers must provide the authenticated transport census explicitly.
   async tick(ticket, liveTokens) {
     const budget = { left: HOST.passiveSteps };
-    return this.storage.transaction(async tx => {
+    return this.transaction(async function(tx) {
       const now = this.now(), r = await this.read(tx);
       this.owns(r, ticket, now);
       const { registry, recovery } = this.registry(r, now, liveTokens, { budget });
@@ -218,7 +238,7 @@ export class VirtualHost {
   // returned effects only after this resolves; read/ack pending departures via the same method.
   async sessions(ticket, liveTokens, apply, closes = [], priorityAccount = null) {
     const budget = { left: HOST.passiveSteps };
-    return this.storage.transaction(async tx => {
+    return this.transaction(async function(tx) {
       const now = this.now(), r = await this.read(tx);
       this.owns(r, ticket, now);
       if (now >= r.runUntil || r.status !== "running") fail("run closed to session operations");
@@ -248,17 +268,21 @@ export class VirtualHost {
   // Project only a committed checkpoint, without stepping, renewing or writing it.
   // The optional full-rig adapter must be pure and deterministic. Public x/y/z
   // snapshots cannot substitute for it. A caller cannot publish uncommitted work.
-  async poses(ticket) {
+  async poses(ticket, { format } = {}) {
+    if (format !== undefined && format !== "mixed-1") fail("unsupported host pose format");
     if (typeof this.simulation.poses !== "function") fail("NPC pose adapter required");
-    return this.storage.transaction(async tx => {
+    return this.transaction(async function(tx) {
       const now = this.now(), r = await this.read(tx);
       this.owns(r, ticket, now);
       if (r.status !== "running" || now >= r.runUntil) fail("run closed to pose publication");
       if (r.sessions?.sessions.some(s => s.state === "grace" && s.stepAt < Math.min(r.sessions.clock, s.deadline))) fail("body recovery pending");
-      const frame = this.simulation.poses(structuredClone(r.simulation));
-      if (!globalThis.BL.npcAuthority.poses(frame)) fail("invalid host poses");
+      const queries = this.simulation.readQueries?.(r.simulation);
+      if (queries?.then || queries && typeof queries.npcFor !== "function") fail("invalid simulation queries");
+      const frame = typeof queries?.poses === "function" ? queries.poses(format) : this.simulation.poses(structuredClone(r.simulation), format);
+      const authority = { v: format ? 2 : 1, ...(format ? { format } : {}), mode: "server", world: r.world, epoch: r.fence, revision: r.revision };
+      if (!globalThis.BL.npcAuthority.posesFor(authority, frame, format === "mixed-1")) fail("invalid host poses");
       return { ticket: this.ticket(r), sequence: r.revision, at: r.simulatedAt,
-        runUntil: r.runUntil, frame: frame.slice(0) };
+        runUntil: r.runUntil, ...(format ? { format } : {}), frame: frame.slice(0) };
     });
   }
 
@@ -317,7 +341,7 @@ export class VirtualHost {
 
   async stop(ticket, liveTokens) {
     const budget = { left: HOST.passiveSteps };
-    return this.storage.transaction(async tx => {
+    return this.transaction(async function(tx) {
       const now = this.now(), r = await this.read(tx); this.owns(r, ticket, now);
       const { registry, recovery } = this.registry(r, now, liveTokens, { budget });
       const effects = registry ? registry.drain(Math.min(now, r.runUntil), now).effects : [];

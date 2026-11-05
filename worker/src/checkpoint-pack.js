@@ -1,10 +1,10 @@
 // Lossless JSON-state packing: object field names live once per ordered shape.
 // No quantization, compression dependency, executable schema or object references.
 import { boundedJSON } from "./virtual-host.js";
-import { encodeCheckpoint, decodeCheckpoint, scalarCost } from "./checkpoint-binary.js";
+import { encodeCheckpoint, decodeCheckpoint, scalarCost, scalarBytes } from "./checkpoint-binary.js";
 export const PACK = Object.freeze({ version: 1, nodes: 13000, depth: 20, shapes: 128, keys: 64, keyChars: 128,
   stringChars: 4096, expandedBytes: 256 * 1024 });
-const encoder = new TextEncoder(), fail = () => { throw new Error("invalid packed checkpoint or capacity"); };
+const fail = () => { throw new Error("invalid packed checkpoint or capacity"); };
 const plain = v => v && typeof v === "object" && !Array.isArray(v)
   && (Object.getPrototypeOf(v) === Object.prototype || Object.getPrototypeOf(v) === null);
 const dense = a => {
@@ -15,7 +15,7 @@ const dense = a => {
   }
   return true;
 };
-const bytes = v => encoder.encode(JSON.stringify(v)).byteLength;
+const bytes = scalarBytes;
 const shapeBytes = keys => 2 + Math.max(0, keys.length - 1) + keys.reduce((n,k) => n + bytes(k) + 1, 0);
 
 export function createCheckpointPack(maxBytes, { intern = false } = {}) {

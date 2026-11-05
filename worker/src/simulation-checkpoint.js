@@ -33,10 +33,10 @@ export function compactSimulation(simulation, checkpointBytes, { intern = false 
     // survives a transaction retry, step or handoff, and no actor is retained globally.
     readQueries(state) {
       let snapshot;
-      return { npcFor(id) {
-        if (snapshot === undefined) snapshot = freeze(codec.unpack(state));
-        return sync(simulation.npcFor(snapshot, id));
-      } };
+      const read = () => snapshot === undefined ? snapshot = freeze(codec.unpack(state)) : snapshot;
+      const queries = { npcFor: id => sync(simulation.npcFor(read(), id)) };
+      if (typeof simulation.poses === "function") queries.poses = format => sync(simulation.poses(read(), format));
+      return queries;
     },
     handoff(state, intent) {
       const runtime = codec.unpack(state), result = sync(simulation.handoff(runtime, intent));
@@ -44,6 +44,55 @@ export function compactSimulation(simulation, checkpointBytes, { intern = false 
       return result;
     },
   };
-  if (typeof simulation.poses === "function") wrapped.poses = state => sync(simulation.poses(codec.unpack(state)));
+  if (typeof simulation.poses === "function") wrapped.poses = (state, format) => sync(simulation.poses(codec.unpack(state), format));
+  // The host creates one scope INSIDE each storage callback, including retries.
+  // Frozen wire children make identity checks exact (no JSON hash collisions for
+  // -0/nonfinite values). The outer record stays writable for atomic assignment.
+  wrapped.forTransaction = () => {
+    let active = true, entries = new WeakMap();
+    const alive = () => { if (!active) throw Error("simulation transaction closed"); };
+    const fields = state => state.v === 2 ? ["v", "shapes", "data", "scalars"] : ["v", "shapes", "data"];
+    const remember = (state, runtime) => {
+      const keys = fields(state);
+      for (const key of keys) freeze(state[key]);
+      const entry = { runtime: freeze(runtime), keys, refs: keys.map(key => state[key]), valid: false };
+      entries.set(state, entry); return entry;
+    };
+    const entryFor = state => {
+      alive(); const entry = entries.get(state);
+      if (entry && (Object.getPrototypeOf(state) === Object.prototype || Object.getPrototypeOf(state) === null)
+        && Reflect.ownKeys(state).length === entry.keys.length && entry.keys.every((key, i) => {
+          const d = Object.getOwnPropertyDescriptor(state, key); return d && d.enumerable && "value" in d && Object.is(d.value, entry.refs[i]);
+        })) return entry;
+      return remember(state, codec.unpack(state));
+    };
+    const update = (state, mutate) => {
+      const runtime = structuredClone(entryFor(state).runtime), result = sync(mutate(runtime));
+      if (result === false) return false;
+      const packed = codec.pack(runtime); // Validate all bounds before assignment.
+      assign(state, packed); remember(state, runtime); return result;
+    };
+    const scope = { version, checkpointBytes,
+      initial(now) { alive(); const state = wrapped.initial(now); entryFor(state); return state; },
+      validate(state) {
+        const entry = entryFor(state);
+        if (!entry.valid) entry.valid = sync(simulation.validate(entry.runtime)) === true;
+        return entry.valid;
+      },
+      step(state, ms, now) { update(state, runtime => { sync(simulation.step(runtime, ms, now)); }); },
+      project: state => sync(simulation.project(entryFor(state).runtime)),
+      npcFor: (state, id) => sync(simulation.npcFor(entryFor(state).runtime, id)),
+      handoff: (state, intent) => update(state, runtime => sync(simulation.handoff(runtime, intent)) === true),
+      readQueries(state) {
+        const snapshot = entryFor(state).runtime;
+        const queries = { npcFor(id) { alive(); return sync(simulation.npcFor(snapshot, id)); } };
+        if (typeof simulation.poses === "function") queries.poses = format => { alive(); return sync(simulation.poses(snapshot, format)); };
+        return queries;
+      },
+      dispose() { active = false; entries = new WeakMap(); },
+    };
+    if (typeof simulation.poses === "function") scope.poses = (state, format) => sync(simulation.poses(entryFor(state).runtime, format));
+    return scope;
+  };
   return wrapped;
 }

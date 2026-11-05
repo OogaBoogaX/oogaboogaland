@@ -9,6 +9,7 @@ import "../../src/js/npc-pose.js";
 import { createNpcPose } from "../src/npc-pose.js";
 import { VirtualHost, HOST } from "../src/virtual-host.js";
 import { publishHostPoses } from "../src/host-room.js";
+import { compactSimulation } from "../src/simulation-checkpoint.js";
 import { rig } from "./fixtures/npc-pose-rig.mjs";
 import { managedRigs } from "./fixtures/clanker-pose-rig.mjs";
 import { sha256Hex } from "../src/crypto.js";
@@ -249,6 +250,61 @@ test('actual npc-sync freezes before crew update, including no frame, mismatched
   BL.net.npcFrame=frame(1,999);BL.net.state.npcVersion++;sync.update(.05);assert.equal(a.puppet,true,'incompatible roster cannot enable local AI');
   BL.net.state.npcAuthority={mode:'browser',revision:2};sync.prepare();sync.update(.05);assert.equal(a.puppet,false);
   sync.dispose();
+});
+
+test('committed mixed host poses reach two clients and a late join with exact Clanker recovery and explicit format fencing',async t=>{
+  const h=host(),room=await h.room(true,true),a=(await h.join(room,1,2)).ws,b=(await h.join(room,2,2)).ws;
+  h.send(room,a,{t:'hub',on:true});h.send(room,b,{t:'hub',on:true});
+  const f=managedRigs(),actors=Array.from({length:53},f.make),states=f.B.clankerState,encode=createNpcPose(123,53);
+  let world,controllers,now=100000,saved,failWrite=false,wrongWorld=false;
+  const capture=()=>JSON.parse(JSON.stringify(states.packRoster(world,controllers.map((c,index)=>({index,snapshot:c.capture()})),true)));
+  const source={version:'mixed-bridge-fixture',initial:()=>({x:0,rigs:capture()}),validate(s){return Number.isFinite(s.x)&&states.unpackRoster(s.rigs).length===53;},
+    step(s,ms){const records=states.unpackRoster(s.rigs);s.x++;
+      for(let i=0;i<53;i++){controllers[i].restore(records[i].snapshot);actors[i].poseManaged(ms/1000,i/7+s.x,0,i/11,.7,2.8,false,false,'',{climb:.8,climbStride:s.x/10+i/7});}s.rigs=capture();},
+    project:()=>({npcs:[],hub:{pile:0}}),npcFor:()=>null,handoff:()=>false,
+    poses(s,format){const ooga=encode(actors.map((_,index)=>{const actor=rig();actor.root.position.x=s.x+index/7;return {index,actor};}));
+      if(format===undefined)return ooga;
+      assert.equal(format,'mixed-1');return globalThis.BL.npcPosePacket.pack(wrongWorld?'other':world,ooga,
+        states.unpackRoster(s.rigs).map(({index,snapshot})=>{controllers[index].restore(snapshot);return {index,pose:actors[index].createPoseProjector(wrongWorld?'other':world).capture()};}));}};
+  const simulation=compactSimulation(source,65536,{intern:true});world=simulation.version;controllers=actors.map(actor=>actor.createManagedCheckpoint(world));
+  const storage={async transaction(fn){let next=structuredClone(saved);const out=await fn({get:async()=>structuredClone(next),put:async(_,v)=>{next=structuredClone(v);}});
+    if(failWrite){failWrite=false;throw Error('mixed host write failed');}saved=JSON.parse(JSON.stringify(next));return out;}};
+  const make=()=>new VirtualHost({storage,simulation,clock:()=>now,sessionAdapter:{stepPassive:m=>m}});
+  let runner=make(),ticket=await runner.begin('mixed-runner',60000),lost=true;
+  const rpc={npcAuthorityStatus:v=>room.npcAuthorityStatus(v),configureNpcAuthority:(...args)=>room.configureNpcAuthority(...args),
+    async publishNpcSnapshot(...args){const result=await room.publishNpcSnapshot(...args);if(lost){lost=false;throw Error('mixed reply lost');}return result;}};
+  const options={format:'mixed-1'};
+  await assert.rejects(runner.poses(ticket,{format:'future'}),/format/);
+  await assert.rejects(publishHostPoses(runner,rpc,ticket,{format:'future',acquire:true}),/format/);
+  assert.equal(room.npcAuthority,null);
+  assert.equal((await publishHostPoses(runner,rpc,ticket,{...options,acquire:true})).status,'reconciled');
+  const first=(await runner.poses(ticket,options)).frame,readers=[wire.create({mixed:true}),wire.create({mixed:true})];
+  for(const reader of readers)reader.accept(room.npcAuthorityStatus().authority);
+  assert.deepEqual(readers[0].frame(binary(a)[0]),first);assert.deepEqual(readers[1].frame(binary(b)[0]),first);
+  await assert.rejects(publishHostPoses(runner,room,ticket,{acquire:true}),/format mismatch/);
+  assert.equal(room.npcAuthority.v,2,'format cannot change inside the current authority epoch');
+  wrongWorld=true;await assert.rejects(publishHostPoses(runner,room,ticket,options),/invalid/);wrongWorld=false;
+  const before=structuredClone(saved);now+=250;h.at(now);failWrite=true;
+  await assert.rejects(runner.tick(ticket),/write failed/);assert.deepEqual(saved,before);
+  assert.equal((await publishHostPoses(runner,room,ticket,options)).duplicate,true);
+  await runner.tick(ticket);await publishHostPoses(runner,room,ticket,options);
+  assert.equal(binary(a).length,1);assert.equal(binary(b).length,1,'stalled clients retain one delivery credit');
+  h.send(room,a,{t:'npc-ack',revision:room.npcAuthority.revision,sequence:1});
+  const latest=(await runner.poses(ticket,options)).frame;assert.deepEqual(readers[0].frame(binary(a).at(-1)),latest);
+  const packet=globalThis.BL.npcPosePacket.unpack(latest),follower=f.make();
+  assert.equal(new Uint32Array(packet.ooga,0,4)[2],53);assert.equal(packet.clankers.length,53);assert.ok(latest.byteLength<=32768);
+  follower.createPoseProjector(world).apply(packet.clankers[52].pose);assert.equal(f.display(follower),f.display(actors[52]));
+  const restored=await h.room(true,true);runner=make();
+  assert.equal((await publishHostPoses(runner,restored,ticket,options)).duplicate,true);
+  const late=(await h.join(restored,3,2)).ws;h.send(restored,late,{t:'hub',on:true});const lateReader=wire.create({mixed:true});
+  lateReader.accept(restored.npcAuthorityStatus().authority);assert.deepEqual(lateReader.frame(binary(late)[0]),latest);
+  now+=10000;h.at(now);const old=ticket;ticket=await runner.claim('mixed-restart');
+  await assert.rejects(publishHostPoses(runner,restored,old,options),/fenced/);
+  assert.equal((await publishHostPoses(runner,restored,ticket,{...options,acquire:true})).status,'published');
+  assert.deepEqual((await runner.poses(ticket,options)).frame,latest,'host replacement cannot advance animation or replay actions');
+  t.diagnostic(JSON.stringify({scope:'authored trajectories, actual managed animation/host/Room; mock storage and sockets',actors:106,
+    packetBytes:latest.byteLength,checkpointBytes:Buffer.byteLength(JSON.stringify(saved)),stalledFramesBeforeTakeover:1}));
+  follower.dispose();for(const actor of actors)actor.dispose();
 });
 
 test('committed host poses reach actual Room, reconcile lost replies and recover without replaying simulation', async t => {
