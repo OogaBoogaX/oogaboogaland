@@ -9,7 +9,9 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
 import { HOST } from "../src/virtual-host.js";
-const smoke = process.argv.includes("--smoke"), pairs = smoke ? 1 : 53, viewers = smoke ? 2 : 32, samples = smoke ? 2 : 12;
+const smoke = process.argv.includes("--smoke"), roaming = process.argv.includes("--roaming"), spacious = process.argv.includes("--spacious");
+if (spacious && !roaming) throw Error("--spacious requires --roaming");
+const pairs = smoke ? 1 : 53, viewers = smoke ? 2 : 32, samples = smoke ? 2 : roaming ? 120 : 12;
 if (!process.env.HOST_RUNTIME_PACKAGE) throw Error("Set HOST_RUNTIME_PACKAGE to an existing Miniflare package.json");
 const packagePath = resolve(process.env.HOST_RUNTIME_PACKAGE), requireRuntime = createRequire(packagePath);
 const manifest = JSON.parse(await readFile(packagePath, "utf8")); assert.equal(manifest.name, "miniflare");
@@ -25,6 +27,9 @@ for (const name of ["virtual-host.js", "host-room.js"]) {
 }
 sourceHashes["simulation-checkpoint.js"] = createHash("sha256")
   .update(await readFile(new URL("../src/simulation-checkpoint.js", import.meta.url))).digest("hex");
+for (const path of ["./host-cycle-worker.mjs", "./host-cycle-prelude.mjs", "./clanker-roaming-simulation.mjs",
+  "../src/clanker-roaming.js", "../src/clanker-buffers.js", "../src/checkpoint-pack.js", "../../src/js/clankers.js", "../../src/js/agent.js"])
+  sourceHashes[path] = createHash("sha256").update(await readFile(new URL(path, import.meta.url))).digest("hex");
 let mf, deniedEgress = 0, now = Date.now(), maxCheckpoint = 0, maxFrame = 0, lastPublish = 0;
 const logs = [], failures = [], sockets = [], times = [], counters = { attemptedHostWrites: 0, attemptedHostWriteBytes: 0, deliveredBytes: 0, deliveredFrames: 0 };
 const delay = ms => new Promise(resolve => setTimeout(resolve, Math.max(0, ms)));
@@ -46,7 +51,7 @@ const start = async () => {
   await bounded(mf.ready);
 };
 const call = async (command, fields = {}, error = null) => {
-  const response = await bounded(mf.dispatchFetch("http://fixture.invalid/host", { method: "POST", body: JSON.stringify({ command, pairs, now, ...fields }) }));
+  const response = await bounded(mf.dispatchFetch("http://fixture.invalid/host", { method: "POST", body: JSON.stringify({ command, pairs, roaming, spacious, now, ...fields }) }));
   assert.equal(response.status, 200); const out = await response.json();
   if (error) assert.match(out.error, error); else assert.equal(out.error, null);
   assert.ok(out.checkpointBytes <= HOST.checkpointBytes); maxCheckpoint = Math.max(maxCheckpoint, out.checkpointBytes);
@@ -161,7 +166,10 @@ try {
   assert.deepEqual(finalJoin.errors, []); assert.deepEqual(finalJoin.frames[0], resumed.frames[1]);
   const recovery = { rows: recoveryRows, wallMs: performance.now() - recoveryAt, leaseWaitMs: actualLeaseWaitMs,
     explicitRoomReacquisition: true, staleHostAndRoomRejected: true, oldAckRejected: true, resumedDelivery: true, exactLateJoin: true };
-  result = { pairs, actors: pairs * 2, rigs: pairs, viewers, sessions: 30, samples, bootMs, restartReclaimMs,
+  const controllerStats = roaming ? (await call("controller-stats")).result : null;
+  if (roaming && spacious) assert.equal(controllerStats.active, pairs);
+  result = { profile: roaming ? "actual-roaming-1" : "partial-roster", spacious, pairs: roaming ? null : pairs,
+    actors: pairs * (roaming ? 1 : 2), rigs: pairs, controllerStats, viewers, sessions: 30, samples, bootMs, restartReclaimMs,
     maxCheckpointBytes: maxCheckpoint, maxFrameBytes: maxFrame, tick: distribution(times.map(x => x.tickMs)),
     publication: distribution(times.map(x => x.publishMs)), combinedActive: distribution(times.map(x => x.activeMs)),
     pacing: distribution(times.map(x => x.pacingMs)), counters, rollback: true, persistedRestart: true, timelyReclaim: true,
@@ -169,11 +177,13 @@ try {
   assert.equal(deniedEgress, 0); assert.equal(logs.length, 0);
 } catch (error) { failures.push(error.stack); process.exitCode = 1; }
 finally { for (const row of sockets) try { row.socket.close(); } catch {} if (mf) await mf.dispose(); await rm(dir, { recursive: true, force: true }); }
-console.log(JSON.stringify({ scope: "finite local workerd/SQLite host and actual Room RPC/WebSockets; authored simulation clock/world and Ooga display",
+console.log(JSON.stringify({ scope: roaming ? "finite local workerd/SQLite actual restricted Clanker roaming and real Room RPC/WebSockets; authored empty meadow/owners"
+  : "finite local workerd/SQLite host and actual Room RPC/WebSockets; authored simulation clock/world and Ooga display",
   measuredAt: new Date().toISOString(), node: process.version, platform: process.platform, arch: process.arch, sourceHashes,
   miniflare: manifest.version, workerd: requireRuntime("workerd/package.json").version, result, failures, deniedEgress, logs,
   limitations: ["cached runtime differs from repository Wrangler range; not production-runtime certification",
     "timings include local dispatch, storage, RPC, diagnostic responses and observer validation in one Node process; not DO CPU or billed duration",
-    "full outer AI, player bodies, island geometry, browser rendering, voice and phone costs remain excluded",
+    roaming ? "restricted roaming only; no Ooga AI, cave/work/sleep/combat/reservations, player bodies, island, browser, voice or phone costs"
+      : "full outer AI, player bodies, island geometry, browser rendering, voice and phone costs remain excluded",
     "authored accounts and cast; no production auth, data, account configuration or network requests",
     "orderly workerd reconstruction; not abrupt-kill or Cloudflare eviction", "no production billing/usage or permanent loop"] }, null, 2));

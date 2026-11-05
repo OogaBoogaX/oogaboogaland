@@ -1580,7 +1580,7 @@ cycle approaches a 250 ms step before Ooga AI, full island collision, SQLite or
 Room delivery. Neither this sample nor the earlier component margins establish a
 safe full-world storage or CPU profile. Do not reduce session reservations or raise
 limits based on these short runs. The 30-retained-session / 32-viewer boundary is
-unchanged. General work/sleep/world state, actual Worker/Room adapter integration,
+unchanged. General work/sleep/world state, live Worker/Room adapter integration,
 exact browser body restoration and live disconnect presentation remain unfinished;
 production CPU/memory/account cost remains unvalidated. No live capability,
 deployment, resource, permanent loop, movement/voice boundary or Tess behavior
@@ -1589,6 +1589,107 @@ changes. The test lane includes the new roaming recovery tests.
 Local verification passed 116 host/recovery tests, 408 unit checks and the
 320-script build. The Hub STOP ledger remains unchanged; no browser/full suite
 was rerun. Evidence: `verification-clanker-roaming-{full-host,unit,build}.log`.
+
+### Restricted roaming through local SQLite and Room
+
+The follow-up adds an explicit `--roaming` mode to the finite `host-cycle.mjs`
+evaluator; `--spacious` enables the complementary all-active scenario. The
+original partial-roster workload remains the default. This mode uses the actual
+restricted outer Clanker controller for both simulation and exact mixed-pose
+projection, with SQLite host checkpoints and real Room RPC/WebSocket delivery.
+`clanker-roaming-simulation.mjs` lives under `worker/eval/`, has no deployed
+import/binding. Its first version created a fresh disposable controller for each
+operation; the measured transaction-scoped follow-up is described below.
+Failed writes and retries cannot retain speculative actor state. Its world
+version binds the actor count and authored meadow profile. Each mutation captures
+and checks the existing packed limits before replacing the caller's state.
+
+The focused test compares uninterrupted actual AI against this adapter, including
+discarded speculative steps, exact subsequent checkpoint and rig packet bytes,
+public coordinates, changed-world refusal and operation isolation. Synthetic
+chilling owners are not player accounts: `npcFor` and `handoff` deliberately
+offer no player-body restoration. Retained session bodies still use the separately
+authored passive-collision mesh. These results do not prove a common island world.
+
+Each representative run advances 120 measured single-step cycles, then persists
+and reconstructs workerd, catches up a 10,001 ms authored outage in five eight-step
+operations, reclaims the registry body and explicitly reacquires Room authority.
+Final simulated time is 40.25 seconds. All 32 observers agree on committed frame
+bytes; one withholding ACKs remains at one outstanding frame. The tests also
+retain the original deadline/equipment, reject stale host/Room tickets and ACKs,
+and verify resumed delivery and exact late joins. Existing limits remain unchanged.
+
+Before transaction-scoped reuse, serial local observations on Node22.23.4/macOS arm64, cached
+Miniflare5.20261001.0-alpha/workerd1.20261001.1:
+
+| Scenario | Whole host checkpoint max | Packet max | Tick + publication p50 / p95 | Eight-step recovery range |
+| --- | ---: | ---: | --- | --- |
+| 53 entries, 37 active, crowded | 59,833 bytes | 6,802 bytes | 158.978 / 202.409 ms | 301.979–361.858 ms |
+| 53 entries, 53 active, spacious | 75,439 bytes | 8,464 bytes | 163.564 / 178.813 ms | 253.711–301.355 ms |
+
+Both retain 30 sessions and use 32 viewers. The checkpoint figures include host
+metadata and sessions; they are not available simulation capacity. The world
+still has a reserved 64 KiB limit. All 120 active timing samples exclude the
+separately reported Room pacing wait. This is a paced finite correctness workload,
+not evidence of sustained four-Hz production throughput or bounded billed CPU.
+Whole scenarios attempt 132 host writes totaling 7,339,733 / 8,623,647 serialized
+bytes (including an injected rolled-back write), and deliver 3,757 binary envelopes
+totaling 21,332,327 / 28,638,340 bytes respectively. These are diagnostic byte
+counts, not SQLite row charges, WebSocket billing units or account costs.
+
+Evidence: `verification-roaming-runtime-{smoke,crowded,spacious}.json`; no assertion
+failure, console log or external request. The actual adapter's five focused tests
+pass in `verification-roaming-runtime-test.log`. The original partial-roster smoke
+case also passes (`verification-roaming-runtime-compat.json`). The 320-script
+build, five JS/MJS syntax checks and whitespace pass; the Hub STOP ledger is
+unchanged and no browser/full suite ran. Runtime source hashes are included
+in each result. Cached runtime versions still differ from the declared Wrangler
+range; orderly reconstruction is not abrupt eviction. There is no authenticated
+browser body command/reclaim or live disconnect presentation, Ooga AI, full island,
+work/sleep/combat/reservation recovery, browser rendering, production memory or
+account-cost validation. The original per-operation reconstruction exceeds one
+250 ms step during recovery; the transaction-scoped follow-up below addresses
+that measured cost without claiming full-world safety. Activation stays off;
+Tess remains excluded and no permanent loop or production resource is enabled.
+
+#### Reuse only inside a storage transaction attempt
+
+The roaming evaluator adapter now implements the host's existing `forTransaction`
+contract. A scope restores one private controller and keeps it through that
+attempt's fixed steps, validation and projections. Every individual step still
+performs a bounded checkpoint capture before assigning its result. Frozen wire
+children and exact property identities bind the private controller to its current
+DTO; replacing fields or passing another DTO reconstructs from that checkpoint.
+No JSON hash or cross-request actor cache is used. Errors poison and dispose the
+scope; storage completion, rollback and each optimistic retry also dispose it.
+
+The added regression checks eight-step recovery allocates one controller, exact
+checkpoint/pose continuation against uninterrupted AI, deep freezing beneath an
+already shallow-frozen input, replacement of fields on the same DTO, rejection
+after malformed state or private-step failure, failed durable commit, a discarded
+optimistic attempt and owner replacement. A first test caught nine constructions
+instead of one: assignment happened after the scope remembered the old fields.
+Moving assignment inside the operation fixed the cause without changing limits.
+
+Serial reruns of the same 120-cycle local SQLite/Room scenarios:
+
+| Scenario | Tick p95 | Tick + publication p50 / p95 | Five eight-step recovery operations |
+| --- | --- | --- | --- |
+| Crowded, 37 active /53 entries | 75.952 ms | 124.304 /158.239 ms | 172.701–203.807 ms |
+| Spacious, 53 active | 54.648 ms | 130.063 /149.444 ms | 117.525–153.579 ms |
+
+All ten observed recovery batches are below 250 ms; the earlier ranges were
+301.979–361.858 and 253.711–301.355 ms. This is a local sample, not a production
+worst-case guarantee. Whole checkpoint and packet maxima remain exactly
+59,833/6,802 and 75,439/8,464 bytes. Rollback, persisted restart, unchanged deadline,
+Room reacquisition, stale-ticket/ACK refusal and exact client delivery still pass.
+Evidence: `verification-roaming-scope-{crowded,spacious}.json`. No live capability,
+host limit, world reservation, fixed-step count or packet precision changed.
+Full-world storage, aggregate CPU/memory and account billing remain unvalidated.
+Final verification: 118/118 host/recovery tests and the 320-script build pass;
+five JS/MJS syntax checks and whitespace pass. The existing Hub STOP ledger is
+unchanged; no Hub/full/browser check was rerun. Evidence:
+`verification-roaming-scope-full-host.log` and `verification-roaming-scope-build.log`.
 
 ### Disconnect presentation, not yet connected to live sessions
 

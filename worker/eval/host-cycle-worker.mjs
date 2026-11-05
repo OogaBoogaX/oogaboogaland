@@ -2,6 +2,9 @@
 // authored trajectories, Ooga display templates and collision world. No deploy.
 import "./host-cycle-prelude.mjs";
 import "../../src/js/agent.js";
+import "../../src/js/clanker-flight.js";
+import "../../src/js/clanker-rage.js";
+import "../../src/js/clankers.js";
 import { DurableObject } from "cloudflare:workers";
 import { Room } from "../src/room.js";
 import { VirtualHost, HOST, SESSION_PROTOCOL } from "../src/virtual-host.js";
@@ -11,6 +14,8 @@ import { createPassiveBody } from "../src/passive-body.js";
 import { createNpcPose } from "../src/npc-pose.js";
 import { rosterFixture } from "../test/fixtures/host-roster-fixture.mjs";
 import { rig } from "../test/fixtures/npc-pose-rig.mjs";
+import { roamingSimulation } from "./clanker-roaming-simulation.mjs";
+import { prepare as prepareFlight } from "../test/fixtures/clanker-flight-fixture.mjs";
 
 export { Room };
 async function fixture(pairs) {
@@ -57,9 +62,13 @@ const equipment = { weapon: "gun", mode: "combat", magazine: 17, spareAmmo: [4, 
 export class CycleHost extends DurableObject {
   constructor(ctx, env) { super(ctx, env); this.prepared = null; }
   async fetch(request) {
-    const input = await request.json(), { command, pairs } = input;
+    const input = await request.json(), { command, pairs, roaming = false, spacious = false } = input;
     if (![1, 53].includes(pairs) || !Number.isSafeInteger(input.now) || input.now < 0) return new Response("fixture only", { status: 400 });
-    this.prepared ||= fixture(pairs);
+    const key = JSON.stringify([pairs, roaming, spacious]);
+    if (typeof roaming !== "boolean" || typeof spacious !== "boolean" || spacious && !roaming
+      || this.prepared && this.preparedKey !== key) return new Response("fixture profile mismatch", { status: 400 });
+    this.preparedKey = key;
+    this.prepared ||= roaming ? prepareFlight().then(f => ({ simulation: roamingSimulation(globalThis.BL, pairs, spacious), mesh: f.mesh })) : fixture(pairs);
     const f = await this.prepared;
     let writes = 0, writeBytes = 0;
     const storage = { transaction: fn => this.ctx.storage.transaction(tx => fn({ get: key => tx.get(key), put: async (key, value) => {
@@ -86,6 +95,7 @@ export class CycleHost extends DurableObject {
       else if (command === "claim") result = await host.claim("cycle-restarted");
       else if (command === "connect") result = await host.connect(input.ticket, [], claim(input.index));
       else if (command === "poses") { const p = await host.poses(input.ticket, { format: "mixed-1" }); result = { sequence: p.sequence, frame: Array.from(new Uint8Array(p.frame)) }; }
+      else if (command === "controller-stats" && roaming) result = f.simulation.stats((await this.ctx.storage.get(HOST.key)).simulation);
       else if (command !== "inspect") throw Error("unknown fixture command");
     } catch (e) { error = e.message; }
     const saved = await this.ctx.storage.get(HOST.key);
