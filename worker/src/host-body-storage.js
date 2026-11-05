@@ -2,16 +2,23 @@
 // binding uses this adapter. The existing VirtualHost still owns fencing and
 // sessions; this layer only commits its record and bounded body rows atomically.
 import { HOST, boundedJSON, sameCheckpointValue } from "./virtual-host.js";
-import { createBodyMovementJournal } from './host-body-movement.js';
+import { createInlineBodyMovementJournal, validateMovementReceipt } from './host-body-movement.js';
 import { createBodyOperationJournal } from "./host-body-operations.js";
 
-export const BODY_STORAGE = Object.freeze({ version: 1, maxBodies: 32,
+export const BODY_STORAGE = Object.freeze({ version: 2, maxBodies: 32,
   componentBytes: 8 * 1024, componentNodes: 128, rowBytes: 9 * 1024,
   rootBytes: HOST.checkpointBytes + 1024, prefix: "virtual-host-body-v1:" });
 const fail = () => { throw Error("incompatible or incomplete host body storage"); };
 const exact = (v, keys) => v && typeof v === "object" && !Array.isArray(v)
   && Object.keys(v).length === keys.length && keys.every(k => Object.hasOwn(v, k));
 const key = i => BODY_STORAGE.prefix + i;
+const movementFor = (receipt, body) => {
+  if (receipt === null) return null;
+  const r = validateMovementReceipt(receipt);
+  if (!body) fail();
+  if (r.accountId !== body.accountId || r.bodyId !== body.bodyId || r.generation !== body.generation) fail();
+  return r;
+};
 const identities = host => {
   if (!host || host.schema !== HOST.schema || typeof host.world !== "string"
     || !Number.isSafeInteger(host.fence) || host.fence < 1
@@ -60,7 +67,7 @@ export function createHostBodyStorage({ storage, profile, capture, validate }) {
   return {
     transaction(callback) {
       return storage.transaction(async tx => {
-        let loaded = false, poisoned = false, host, rows = [], revisions = [], scopedCapture = null, wrote = false;
+        let loaded = false, poisoned = false, host, rows = [], revisions = [], movements = [], scopedCapture = null, wrote = false, pendingMovement = null;
         const load = async () => {
           if (loaded) return;
           const root = await tx.get(HOST.key);
@@ -82,17 +89,34 @@ export function createHostBodyStorage({ storage, profile, capture, validate }) {
           const next = keys.map((k, i) => {
             const value = values.get(k);
             boundedJSON(value, BODY_STORAGE.rowBytes, BODY_STORAGE.componentNodes + 24);
-            if (!exact(value, ["v", "profile", "world", "fence", "revision", "body"])
+            if (!exact(value, ["v", "profile", "world", "fence", "revision", "body", "movement"])
               || value.v !== BODY_STORAGE.version || value.profile !== profile || value.world !== root.host.world
               || !Number.isSafeInteger(value.fence) || value.fence < 1 || value.fence > root.host.fence
               || value.revision !== root.revisions[i]) fail();
+            movements.push(structuredClone(movementFor(value.movement, value.body)));
             return value.body;
           });
           rows = check(root.host, next); revisions = root.revisions.slice(); host = structuredClone(root.host); loaded = true;
         };
+        const movementJournal = createInlineBodyMovementJournal({
+            read: async accountId => {
+              await load(); const i = rows.findIndex(r => r.accountId === accountId);
+              if (i < 0) fail(); return structuredClone(movements[i]);
+            },
+            stage: receipt => {
+              if (!loaded || wrote || pendingMovement || poisoned) fail();
+              const body = rows.find(r => r.accountId === receipt.accountId);
+              pendingMovement = structuredClone(movementFor(receipt, body));
+            },
+          });
         const result = await callback({
           bodyOperations: createBodyOperationJournal(tx),
-          bodyMovements: createBodyMovementJournal(tx),
+          bodyMovements: { async run(...args) {
+            try {
+              if (poisoned) fail();
+              return await movementJournal.run(...args);
+            } catch (error) { poisoned = true; throw error; }
+          } },
           get: async k => {
             if (k !== HOST.key) fail(); await load(); return structuredClone(host);
           },
@@ -107,16 +131,21 @@ export function createHostBodyStorage({ storage, profile, capture, validate }) {
               const nextHost = structuredClone(value);
               wrote = true;
               const nextRows = check(nextHost, (scopedCapture || capture)(structuredClone(nextHost), structuredClone(rows)));
-              const nextRevisions = [], writes = {};
+              const nextRevisions = [], nextMovements = [], writes = {};
               for (let i = 0; i < nextRows.length; i++) {
+                const body = nextRows[i], previous = rows.findIndex(r => r.accountId === body.accountId
+                  && r.bodyId === body.bodyId && r.generation === body.generation);
+                const movement = pendingMovement?.accountId === body.accountId ? movementFor(pendingMovement, body)
+                  : previous < 0 ? null : movements[previous];
+                nextMovements.push(movement);
                 // The root commits the exact version of every row. An unchanged
                 // body need not be rewritten merely to renew the host lease.
-                if (rows[i] && sameCheckpointValue(rows[i], nextRows[i])) {
+                if (rows[i] && sameCheckpointValue(rows[i], nextRows[i]) && sameCheckpointValue(movements[i], movement)) {
                   nextRevisions.push(revisions[i]); continue;
                 }
                 nextRevisions.push(nextHost.revision);
                 const row = { v: BODY_STORAGE.version, profile, world: nextHost.world, fence: nextHost.fence,
-                  revision: nextHost.revision, body: nextRows[i] };
+                  revision: nextHost.revision, body: nextRows[i], movement };
                 boundedJSON(row, BODY_STORAGE.rowBytes, BODY_STORAGE.componentNodes + 24); writes[key(i)] = row;
               }
               const root = { v: BODY_STORAGE.version, profile, host: nextHost, count: nextRows.length, revisions: nextRevisions };
@@ -124,7 +153,7 @@ export function createHostBodyStorage({ storage, profile, capture, validate }) {
               // Validate all rows before the first write; at most 33 fixed keys.
               await tx.put(writes);
               if (rows.length > nextRows.length) await tx.delete(Array.from({ length: rows.length - nextRows.length }, (_, i) => key(nextRows.length + i)));
-              rows = nextRows; revisions = nextRevisions; host = nextHost;
+              rows = nextRows; revisions = nextRevisions; movements = nextMovements; host = nextHost;
             } catch (error) { poisoned = true; throw error; }
           },
           // Server-only recovery access; no token, deadline or inventory is

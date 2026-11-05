@@ -1050,3 +1050,27 @@ Host receipt shape/caps stay fixed; its digest now binds original Room observati
 time, so retained old-digest local receipts require explicit reconciliation/drain.
 Resources/rig/animation continuation remain excluded. Mixed-load performance,
 provider costs and full-world bounds still need validation before activation.
+
+
+## Frozen v54 inline movement receipts
+
+The inactive adapter now writes envelope version 2 at the existing fixed keys.
+Version 1 roots/rows are refused; no mixed writer or implicit migration may lose
+replay state. Existing preview worlds need explicit drain/migration before use.
+
+The body row additionally stores nullable `movement`: version, account ID, body
+ID, generation, sequence, SHA-256 digest and original server observation time.
+These bind the last accepted sample to its exact body generation. No gameplay,
+resource, pose or animation data is added. Maximum receipt JSON is 268 bytes.
+A maximum 8,192-byte component plus all maximum identity/metadata fields and the
+receipt occupies 8,875 bytes, leaving 341 of the unchanged 9,216-byte row cap.
+The component remains bounded to 128 nodes; 19 additional envelope/receipt nodes
+fit the existing 24-node allowance. Storage keys/provider overhead are excluded.
+
+Movement now writes two host keys atomically instead of three, with no separate
+receipt index initialization. Row compaction carries its receipt by identity;
+new generations clear it. Duplicate/restart recovery makes zero writes. Tests
+cover both partial-write failures, swallowed callback failures, corrupt receipts,
+missing atomic saves, compaction, replacement and actual source-controller motion.
+The separate legacy journal remains available for explicit old-layout tooling;
+it is not used by this v2 adapter and does not constitute a migration.

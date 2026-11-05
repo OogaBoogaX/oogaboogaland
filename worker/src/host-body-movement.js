@@ -7,7 +7,7 @@ export const BODY_MOVEMENT = Object.freeze({ key: 'host-body-movement-v1', prefi
 const fail = () => { throw Error('invalid or fenced body movement'); };
 const positive = n => Number.isSafeInteger(n) && n > 0;
 const key = id => BODY_MOVEMENT.prefix + id;
-function validate(row) {
+export function validateMovementReceipt(row) {
   boundedJSON(row, BODY_MOVEMENT.rowBytes, 32);
   if (!row || Object.keys(row).sort().join() !== 'accountId,at,bodyId,digest,generation,sequence,v'
     || row.v !== 1 || !positive(row.accountId) || !positive(row.generation) || !positive(row.sequence)
@@ -15,6 +15,32 @@ function validate(row) {
     || typeof row.digest !== 'string' || !/^[0-9a-f]{64}$/.test(row.digest)
     || !Number.isSafeInteger(row.at) || row.at < 0) fail();
   return row;
+}
+const validate = validateMovementReceipt;
+
+// The body-store v2 row has room for this bounded receipt. Stage it before the
+// same atomic body save, never as a second write or an independent success.
+export function createInlineBodyMovementJournal({ read, stage }) {
+  return { async run(command, activeAccounts, execute) {
+    const next = validate(command);
+    if (!Array.isArray(activeAccounts) || activeAccounts.length > BODY_MOVEMENT.max
+      || activeAccounts.some(id => !positive(id)) || !activeAccounts.includes(next.accountId)) fail();
+    const saved = await read(next.accountId);
+    if (saved !== null) {
+      const old = validate(saved);
+      if (old.accountId !== next.accountId || old.bodyId !== next.bodyId || old.generation !== next.generation
+        || next.sequence < old.sequence) fail();
+      if (next.sequence === old.sequence) {
+        if (next.digest !== old.digest) fail();
+        return { sequence: old.sequence, at: old.at };
+      }
+    }
+    stage(next);
+    await execute();
+    const committed = await read(next.accountId);
+    if (!committed || Object.keys(next).some(k => committed[k] !== next[k])) fail();
+    return { sequence: next.sequence, at: next.at };
+  } };
 }
 export function createBodyMovementJournal(tx) {
   return { async run(command, activeAccounts, execute) {

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { RoomBodyHandoff, ROOM_BODY, ROOM_MOVEMENT } from '../src/room-body-handoff.js';
 import { VirtualHost, HOST, SESSION_PROTOCOL } from '../src/virtual-host.js';
 import { createHostBodyStorage } from '../src/host-body-storage.js';
-import { closeBodyHandoff, advanceBodyMovement } from '../src/host-body-room.js';
+import { closeBodyHandoff, advanceBodyMovement, retireRecoveredBodyHandoff } from '../src/host-body-room.js';
 import { createClankerBodyCheckpoint } from '../src/clanker-roaming.js';
 import { createClankerBodySessions } from '../src/clanker-body-sessions.js';
 import { clankerController } from './fixtures/clanker-controller-fixture.mjs';
@@ -153,7 +153,7 @@ test('the outbox bounds simultaneous full-size transfers and retains unresolved 
 });
 
 const flush = async () => { for (let n = 0; n < 8; n++) await Promise.resolve(); };
-async function integrated({ activate = true } = {}) {
+async function integrated({ activate = true, journal = false } = {}) {
   const f = fixture(), i = identity(), room = f.make(), hostStorage = memory(); f.current.set(1, i.connection);
   const simulation = { version: 'handoff-fixture', checkpointBytes: 65536, initial: () => ({ ticks: 0 }),
     validate: s => Number.isSafeInteger(s.ticks), step: s => s.ticks++, project: () => ({ npcs: [], hub: { pile: 0 } }), npcFor: () => null, handoff: () => false };
@@ -168,13 +168,15 @@ async function integrated({ activate = true } = {}) {
   const client = globalThis.BL.bodyReclaim.create({ send: m => clientMessages.push(m), monotonic: f.clock, wall: f.clock, later: () => 1, cancel() {} });
   client.setAdapter({ prepare: () => ({}), preflight: () => true, apply: () => true, activate: () => (controls = activate), release: () => { controls = false; } });
   client.open(1, i.connection, true);
-  const prep = await host.prepareBody(ticket, 1, 'body-1'); await room.prepare(i, prep, 'clanker', request(1));
+  const prep = await host.prepareBody(ticket, 1, 'body-1'); await room.prepare(i, prep, 'clanker', request(1), journal ? claim : undefined);
   await room.deliver(i); client.message(f.sent.at(-1)); await flush();
   const ready = await room.receive(i, clientMessages.at(-1));
-  const offered = await host.offerBody(ticket, [], 1, claim, prep), ref = offered.result.session;
+  const offered = journal ? await host.bodyOperation(ticket, [], (await room.pending(i)).command)
+    : await host.offerBody(ticket, [], 1, claim, prep), ref = offered.result.session;
   await room.complete(i, ready.record.pending.revision, offered); await room.deliver(i); client.message(f.sent.at(-1));
   const preflight = await room.receive(i, clientMessages.at(-1));
-  f.at(100100); const active = await host.activateBody(ticket, [], 1, ref, offered.transfer);
+  f.at(100100); const active = journal ? await host.bodyOperation(ticket, [], (await room.pending(i)).command)
+    : await host.activateBody(ticket, [], 1, ref, offered.transfer);
   await room.complete(i, preflight.record.pending.revision, active); await room.deliver(i); client.message(f.sent.at(-1));
   assert.equal(controls, false); assert.equal(clientMessages.at(-1).t, 'body-started');
   return { ...f, i, room, host, ticket, hostStorage, client, clientMessages, active, ref, controls: () => controls,
@@ -377,11 +379,25 @@ test('actual Clanker movement with a lost host reply closes through the durable 
     await box.deliver(i);
     const checkpoint = source.codec.records.transfer(initial);
     checkpoint.body = ['fixture-0', 2, 3, 0, .5, .6, -1.5, .8, 1, 4];
+    const firstHostWrites = hostStorage.writes.length, firstRoomWrites = f.storage.writes.length;
     f.at(100100); await box.receiveMovement(i, { t: 'body-motion', request: request(1), sequence: 1, checkpoint });
     const room = { pendingBodyMovement: (_, who) => box.pendingMovement(who),
       completeBodyMovement: async (_, who, sequence, answer) => { await box.completeMovement(who, sequence, answer); return { delivered: await box.deliverMovement(who) }; },
       fenceBodyMovement: (_, who, sequence, proof) => box.fenceMovement(who, sequence, proof),
       closedBodyHandoff: (_, who) => box.cleanup(who), resolveBodyHandoff: (_, who, revision, proof) => box.resolveClosed(who, revision, proof) };
+    await advanceBodyMovement(host, room, ticket, authority, i, [active.result.session.token]);
+    assert.equal(hostStorage.writes.length - firstHostWrites, 2);
+    assert.equal(f.storage.writes.length - firstRoomWrites, 3, 'first sample also persists the Room movement marker');
+    const hostWrites = hostStorage.writes.length, roomWrites = f.storage.writes.length, startedAt = performance.now();
+    f.at(100125); await box.receiveMovement(i, { t: 'body-motion', request: request(1), sequence: 2, checkpoint });
+    await advanceBodyMovement(host, room, ticket, authority, i, [active.result.session.token]);
+    const elapsedMs = performance.now() - startedAt;
+    assert.equal(hostStorage.writes.length - hostWrites, 2); assert.equal(f.storage.writes.length - roomWrites, 2);
+    t.diagnostic(JSON.stringify({ steadyMovementLogicalWrites: 4, firstMovementLogicalWrites: 5, elapsedMs,
+      hostJSONBytes: hostStorage.writes.slice(hostWrites).reduce((a, b) => a + b, 0),
+      roomJSONBytes: f.storage.writes.slice(roomWrites).reduce((a, b) => a + b, 0),
+      scope: 'one actual Clanker movement through atomic in-memory host and Room stores; no RPC/provider/billing/scene load' }));
+    f.at(100150); await box.receiveMovement(i, { t: 'body-motion', request: request(1), sequence: 3, checkpoint });
     hostStorage.lose();
     await assert.rejects(advanceBodyMovement(host, room, ticket, authority, i, [active.result.session.token]), /lost committed/);
     assert.ok(await box.pendingMovement(i));
@@ -395,8 +411,71 @@ test('actual Clanker movement with a lost host reply closes through the durable 
     const body = (await storage.transaction(tx => tx.bodies()))[0];
     assert.deepEqual(structuredClone(source.codec.records.motion(body.checkpoint)), offline.motion);
     assert.equal(await box.read(i), null); assert.equal(f.storage.snapshot().has(ROOM_MOVEMENT.prefix + 1), false);
-    assert.equal(f.sent.some(m => m.t === 'body-motion-ack'), false);
+    assert.deepEqual(f.sent.filter(m => m.t === 'body-motion-ack').map(m => m.sequence), [1, 2], 'lost sequence 3 is never acknowledged after close');
     t.diagnostic(JSON.stringify({ roomPendingMovementRowBytes: Buffer.byteLength(JSON.stringify(retainedRow)),
       scope: 'representative actual Clanker wire plus Room inbox metadata; keys/provider overhead excluded' }));
   } finally { source.dispose(); }
+});
+
+
+test('expired Room retirement recovers uncertain work without reissuing control or resetting deadlines', async () => {
+  const h = await integrated({ journal: true });
+  await h.room.receive(h.i, h.clientMessages.at(-1)); // Final confirmation has not executed.
+  h.at(100200); await h.room.close(h.i);
+  const roomTicket = { world: h.ticket.world, epoch: h.ticket.fence, owner: h.ticket.owner };
+  const facade = {
+    async closedBodyRecovery(_, i) {
+      const close = await h.room.cleanup(i);
+      return close ? { close, pending: await h.room.pending(i), movement: await h.room.pendingMovement(i) } : null;
+    },
+    completeClosedBodyRecovery: (_, i, rev, answer) => h.room.complete(i, rev, answer),
+    fenceClosedBodyMovement: (_, i, seq, proof) => h.room.fenceMovement(i, seq, proof),
+    resolveClosedBodyRecovery: (_, i, rev, proof) => h.room.resolveClosed(i, rev, proof),
+  };
+  const sent = h.sent.length;
+  // Still starting: cancellation is durable, but retirement cannot confer control.
+  assert.equal((await retireRecoveredBodyHandoff(h.host, facade, h.ticket, roomTicket, h.i)).status, 'blocked');
+  assert.equal((await h.room.read(h.i)).pending, null);
+  h.at(230000); const recovered = await h.host.claim('replacement');
+  const before = h.hostStorage.snapshot().get(HOST.key).host;
+  await h.host.reconcileBodies(recovered, []);
+  assert.equal(h.session(), undefined);
+  const after = h.hostStorage.snapshot().get(HOST.key).host;
+  assert.equal(after.runUntil, before.runUntil); assert.equal(after.leaseUntil, before.leaseUntil);
+  assert.deepEqual(after.simulation, before.simulation);
+  const stable = h.storage.snapshot(); h.storage.fail(1);
+  await assert.rejects(retireRecoveredBodyHandoff(h.host, facade, recovered, roomTicket, h.i), /write failure/);
+  assert.deepEqual(h.storage.snapshot(), stable);
+  assert.equal((await retireRecoveredBodyHandoff(h.host, facade, recovered, roomTicket, h.i)).status, 'resolved');
+  assert.equal(await h.room.read(h.i), null); assert.equal(h.sent.length, sent); assert.equal(h.controls(), false);
+  assert.equal((await retireRecoveredBodyHandoff(h.host, facade, recovered, roomTicket, h.i)).status, 'idle');
+  await assert.rejects(retireRecoveredBodyHandoff(h.host, facade, h.ticket, roomTicket, h.i), /fenced/);
+  await assert.rejects(retireRecoveredBodyHandoff(h.host, facade, recovered, { ...roomTicket, epoch: recovered.fence + 1 }, h.i), /differ/);
+});
+
+
+test('recovered close keeps an uncertain movement until its exact generation is passive', async () => {
+  const f = fixture(), i = identity(), box = await liveMovement(f);
+  await box.receiveMovement(i, motion()); await box.close(i);
+  const owner = { world: preparation().world, fence: 2, owner: 'replacement' };
+  const authority = { world: owner.world, epoch: 1, owner: 'previous' };
+  let view = { ...transfer('live').view, deadline: null };
+  const host = { bodyLifecycleRevision: async () => 9, bodyReferenceState: async (_, account, reference) => {
+    assert.equal(account, 1); assert.deepEqual(reference, ref(1)); return view;
+  } };
+  const room = {
+    async closedBodyRecovery(_, who) {
+      const close = await box.cleanup(who);
+      return close ? { close, pending: await box.pending(who), movement: await box.pendingMovement(who) } : null;
+    },
+    fenceClosedBodyMovement: (_, who, sequence, proof) => box.fenceMovement(who, sequence, proof),
+    resolveClosedBodyRecovery: (_, who, revision, proof) => box.resolveClosed(who, revision, proof),
+  };
+  const before = f.storage.snapshot();
+  assert.equal((await retireRecoveredBodyHandoff(host, room, owner, authority, i)).status, 'blocked');
+  assert.deepEqual(f.storage.snapshot(), before);
+  view = { ...view, state: 'grace', deadline: 160000 };
+  assert.equal((await retireRecoveredBodyHandoff(host, room, owner, authority, i)).status, 'resolved');
+  assert.equal(await box.read(i), null); assert.equal(f.storage.snapshot().has(ROOM_MOVEMENT.prefix + 1), false);
+  assert.equal(f.sent.some(m => m.t === 'body-motion-ack'), false);
 });

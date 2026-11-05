@@ -61,8 +61,16 @@ absence inference while closed or uncertain handoff rows remain. The runner
 reads the host revision before that RPC and compares it inside reconciliation;
 a concurrent login, live ACK or movement supersedes the census instead of being
 mistaken for a disconnect. This remains an explicit server hook, not a deployed
-loop. Cleanup after Room's NPC lease/run expires remains blocked pending a
-separate cleanup-authority design.
+loop. A separate closed-only cleanup path now accepts the exact retained Room
+world/epoch/owner/revision after lease/run expiry. It neither renews that authority
+nor sends grants. `retireRecoveredBodyHandoff` uses a current host fence, recovers
+or durably cancels uncertain operations, and retires only an exact generation
+proved passive or absent. Pending movement is fenced, never replayed. A Room
+takeover fences old cleanup calls. Still-live/starting bodies remain blocked until
+ordinary lifecycle/close recovery handles their original deadlines. Automatic
+cleanup scheduling, no-live-send deadline restoration after an already-committed
+final ACK, and reacquisition when only pending departure records remain still
+need integration; this is not a general expired-run grant permission.
 
 `bodyPresence` reads a complete committed public frame with epoch, revision,
 logical deadlines and departure intents. It includes no private ownership token
@@ -196,3 +204,18 @@ this merge does not reset selected equipment or enable frozen-body presentation.
 The combined revision passes 157 focused tests, the 322-script build and 19
 changed-source syntax checks. The existing 20-entry test ledger is unchanged.
 Hub/browser/full/scene tests remain unrun under the STOP restriction.
+
+
+## Body storage version 2
+
+Replay metadata is now part of the existing bounded body row, committed with its
+position and host root. Steady accepted movement writes root/body once and Room
+inbox/completion once each; the first sample also writes a Room marker. A duplicate
+makes no host write and does not refresh presence. Receipts follow row compaction
+and reset only with a new body generation. Callback errors abort the transaction
+even when caught. No component, node, row, account or rate bound increased.
+
+Version 1 envelopes are refused without mutation. There is no implicit migration
+or deployed binding. Before any activation, old local preview worlds must be
+explicitly drained or migrated with their journal receipts; never delete a live
+root to bypass this gate. See [cost evidence](virtual-host-frozen-costs.md).

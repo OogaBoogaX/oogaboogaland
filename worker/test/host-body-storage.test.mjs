@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { VirtualHost, HOST, SESSION_PROTOCOL } from "../src/virtual-host.js";
+import { VirtualHost, HOST, SESSION_PROTOCOL, boundedJSON } from "../src/virtual-host.js";
 import { createHostBodyStorage, BODY_STORAGE } from "../src/host-body-storage.js";
 import { createClankerBodyCheckpoint } from "../src/clanker-roaming.js";
 import { createCheckpointPack } from "../src/checkpoint-pack.js";
@@ -15,7 +15,7 @@ const claim = i => ({ protocol: SESSION_PROTOCOL, world, accountId: i + 1, bodyI
 // Atomic map fixture, with partial writes, deletes and optimistic retry. This
 // tests storage composition; fixed session motion is not full-body simulation.
 function harness(component = { state: "fixture" }, validate = () => true) {
-  let data = new Map(), now = 100000, failAfter = Infinity, retry = false, captures = 0, captureOverride;
+  let data = new Map(), now = 100000, failAfter = Infinity, retry = false, captures = 0, captureOverride, lastWrites = 0;
   const execute = async callback => {
     const pending = structuredClone(data); let count = 0;
     const result = await callback({
@@ -27,11 +27,11 @@ function harness(component = { state: "fixture" }, validate = () => true) {
       },
       delete: async keys => { for (const k of keys) pending.delete(k); if (failAfter === -1) { failAfter = Infinity; throw Error("injected delete"); } },
     });
-    return { result, pending };
+    return { result, pending, writes: count };
   };
   const storage = { async transaction(callback) {
     if (retry) { retry = false; await execute(callback); }
-    const { result, pending } = await execute(callback); data = pending; return result;
+    const { result, pending, writes } = await execute(callback); data = pending; lastWrites = writes; return result;
   } };
   const capture = (r, previous) => {
     captures++;
@@ -48,7 +48,7 @@ function harness(component = { state: "fixture" }, validate = () => true) {
   return { storage, bank, make, read: () => structuredClone(data), at: t => { now = t; },
     corrupt: (k, v) => { if (v === undefined) data.delete(k); else data.set(k, structuredClone(v)); },
     fail: n => { failAfter = n; }, retry: () => { retry = true; }, captures: () => captures,
-    capture: fn => { captureOverride = fn; } };
+    capture: fn => { captureOverride = fn; }, writes: () => lastWrites };
 }
 
 test("complete actual body survives host ownership replacement and timely reclaim with the original deadline", async () => {
@@ -107,6 +107,56 @@ test("body slots reserve the component cap, stay bounded through departures, and
   await assert.rejects(host.tick(ticket, tokens.slice(1))); assert.deepEqual(h.read(), stable);
 });
 
+test('inline receipts follow row compaction, survive rollback and vanish on new ownership', async () => {
+  const h = harness(), host = h.make(), ticket = await host.begin('owner', 120000);
+  const refs = (await host.sessions(ticket, [], (r, at) => [r.connect(claim(0), at), r.connect(claim(1), at)])).result.map(r => r.session);
+  const receipt = { v: 1, accountId: 2, bodyId: refs[1].bodyId, generation: refs[1].generation,
+    sequence: 4, digest: 'a'.repeat(64), at: 100000 };
+  const record = async (command, execute) => h.bank().transaction(async tx => {
+    const root = await tx.get(HOST.key);
+    return tx.bodyMovements.run(command, [1, 2], execute || (async () => { root.revision++; await tx.put(HOST.key, root); }));
+  });
+  await record(receipt);
+  const before = h.read();
+  await assert.rejects(h.bank().transaction(async tx => {
+    const root = await tx.get(HOST.key);
+    try { await tx.bodyMovements.run({ ...receipt, sequence: 5 }, [1, 2], async () => {
+      root.revision++; await tx.put(HOST.key, root); throw Error('failed after save');
+    }); } catch {}
+  }), /body storage/);
+  assert.deepEqual(h.read(), before, 'caught movement errors still abort the entire transaction');
+  await assert.rejects(record({ ...receipt, sequence: 5 }, async () => {}), /movement/);
+  assert.deepEqual(h.read(), before, 'a staged receipt cannot succeed without the atomic body save');
+  await host.sessions(ticket, refs.map(r => r.token), (r, at) => r.release(refs[0], at));
+  const departure = h.read().get(HOST.key).host.sessions.pending[0];
+  await host.sessions(ticket, [refs[1].token], r => r.acknowledge(departure.id));
+  assert.deepEqual(h.read().get(BODY_STORAGE.prefix + 0).movement, receipt);
+  assert.equal(h.read().has(BODY_STORAGE.prefix + 1), false);
+  await record(receipt, () => { throw Error('duplicate must not execute'); });
+  assert.equal(h.writes(), 0);
+  const corrupt = h.read().get(BODY_STORAGE.prefix + 0);
+  h.corrupt(BODY_STORAGE.prefix + 0, { ...corrupt, movement: { ...receipt, generation: receipt.generation + 1 } });
+  const broken = h.read(); await assert.rejects(h.make().tick(ticket, [refs[1].token]), /body storage/);
+  assert.deepEqual(h.read(), broken); h.corrupt(BODY_STORAGE.prefix + 0, corrupt);
+  await host.connect(ticket, [refs[1].token], { ...claim(1), body: undefined });
+  assert.equal(h.read().get(BODY_STORAGE.prefix + 0).movement, null, 'new generation starts a new movement sequence');
+});
+
+test('maximum inline receipt fits the unchanged row byte and structural budgets', t => {
+  const max = Number.MAX_SAFE_INTEGER, bodyId = 'b'.repeat(64);
+  const movement = { v: 1, accountId: max, bodyId, generation: max, sequence: max, digest: 'f'.repeat(64), at: max };
+  const row = { v: BODY_STORAGE.version, profile: 'p'.repeat(64), world: 'w'.repeat(80), fence: max, revision: max,
+    body: { accountId: max, bodyId, generation: max, kind: 'clanker', checkpoint: 'x'.repeat(BODY_STORAGE.componentBytes - 2) }, movement };
+  const bytes = Buffer.byteLength(boundedJSON(row, BODY_STORAGE.rowBytes, BODY_STORAGE.componentNodes + 24));
+  // 128 component nodes + 19 metadata/receipt nodes; exercise that ceiling too.
+  row.body.checkpoint = Array(127).fill(0);
+  boundedJSON(row, BODY_STORAGE.rowBytes, BODY_STORAGE.componentNodes + 19);
+  assert.throws(() => boundedJSON(row, BODY_STORAGE.rowBytes, BODY_STORAGE.componentNodes + 18), /complexity/);
+  t.diagnostic(JSON.stringify({ componentBytes: BODY_STORAGE.componentBytes, receiptBytes: Buffer.byteLength(JSON.stringify(movement)),
+    completeRowBytes: bytes, rowLimitBytes: BODY_STORAGE.rowBytes, remainingBytes: BODY_STORAGE.rowBytes - bytes,
+    scope: 'maximum ASCII schema envelope and component cap; excludes storage keys/provider overhead' }));
+});
+
 test("failed writes and retries cannot split host authority from full bodies or leak speculative capture", async () => {
   const h = harness(), host = h.make(), ticket = await host.begin("owner", 120000);
   const ref = (await host.connect(ticket, [], claim(0))).result.session, before = h.read();
@@ -129,13 +179,15 @@ test("mixed versions, missing rows and wrong body generations refuse recovery wi
   const ref = (await host.connect(ticket, [], claim(0))).result.session;
   await assert.rejects(h.make(h.storage).tick(ticket, [ref.token]), /incompatible checkpoint/);
   const original = h.read(), k = BODY_STORAGE.prefix + 0, row = original.get(k);
-  for (const bad of [undefined, { ...row, revision: row.revision - 1 }, { ...row, fence: row.fence + 1 },
+  for (const bad of [undefined, { ...row, v: 1 }, { ...row, movement: {} }, { ...row, revision: row.revision - 1 }, { ...row, fence: row.fence + 1 },
     { ...row, world: "another" }, { ...row, profile: "another" }, { ...row, body: { ...row.body, generation: 99 } },
     { ...row, body: { ...row.body, checkpoint: "x".repeat(8192) } }]) {
     h.corrupt(k, bad); const broken = h.read();
     await assert.rejects(h.make().tick(ticket, [ref.token])); assert.deepEqual(h.read(), broken);
   }
-  h.corrupt(k, row); h.corrupt(HOST.key, original.get(HOST.key).host);
+  h.corrupt(k, row); h.corrupt(HOST.key, { ...original.get(HOST.key), v: 1 });
+  const oldLayout = h.read(); await assert.rejects(h.make().tick(ticket, [ref.token]), /body storage/); assert.deepEqual(h.read(), oldLayout);
+  h.corrupt(HOST.key, original.get(HOST.key).host);
   const legacy = h.read(); await assert.rejects(h.make().tick(ticket, [ref.token]), /body storage/); assert.deepEqual(h.read(), legacy);
   h.corrupt(HOST.key, undefined); const orphan = h.read();
   await assert.rejects(h.make().begin('replacement', 120000), /body storage/); assert.deepEqual(h.read(), orphan);
@@ -654,17 +706,20 @@ test('authenticated movement commits source physics atomically, fences replays a
       await assert.rejects(host.updateBody(ticket, tokens, account, reference, sample), /account|fenced/);
       assert.deepEqual(h.read(), original);
     }
-    for (const n of [1, 2, 3, 4]) {
+    for (const n of [1, 2]) {
       h.fail(n); await assert.rejects(host.updateBody(ticket, [ref.token], 1, ref, sample), /injected/);
       assert.deepEqual(h.read(), original, `partial write ${n} rolls back physics, clock and receipt`);
     }
     assert.deepEqual(await host.updateBody(ticket, [ref.token], 1, ref, sample), { sequence: 1, at: 100100 });
+    assert.equal(h.writes(), 2, 'body and replay receipt share one row; root is the only other write');
     const committed = h.read(), session = () => h.read().get(HOST.key).host.sessions.sessions[0];
+    assert.equal(committed.has('host-body-movement-v1:1'), false); assert.equal(committed.has('host-body-movement-v1'), false);
     assert.deepEqual(session().motion, structuredClone(moved.codec.motion()));
     const rows = await h.bank().transaction(tx => tx.bodies());
     assert.deepEqual(structuredClone(source.codec.records.motion(rows[0].checkpoint)), structuredClone(moved.codec.motion()));
     h.at(100200); const count = constructions;
     assert.deepEqual(await make().updateBody(ticket, [ref.token], 1, ref, sample), { sequence: 1, at: 100100 });
+    assert.equal(h.writes(), 0);
     assert.deepEqual(h.read(), committed); assert.equal(constructions, count, 'replay constructs no body or refreshes presence');
     const changed = structuredClone(sample); changed.checkpoint.body[1] = 3;
     await assert.rejects(make().updateBody(ticket, [ref.token], 1, ref, changed), /movement/);
@@ -697,7 +752,7 @@ test('authenticated movement commits source physics atomically, fences replays a
     assert.deepEqual(await make().updateBody(ticket, [resumed.token], 1, resumed, sample), { sequence: 1, at: 100200 });
     assert.equal(constructions, disposals);
     t.diagnostic(JSON.stringify({ sampleBytes: Buffer.byteLength(JSON.stringify(sample)),
-      receiptBytes: Buffer.byteLength(JSON.stringify(committed.get('host-body-movement-v1:1'))),
+      receiptBytes: Buffer.byteLength(JSON.stringify(committed.get(BODY_STORAGE.prefix + 0).movement)),
       scope: 'representative movement envelope and replay receipt; provider overhead excluded' }));
   } finally { source.dispose(); moved.dispose(); }
 });

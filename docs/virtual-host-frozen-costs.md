@@ -72,19 +72,27 @@ non-hibernating wall time also cost money. Active duration uses allocated
 128 MB, not the measured body size. Included allocations are shared with other
 account usage; excess units round upward. Actual plan/usage was not inspected.
 
-The current live-movement path performs five logical key writes per accepted
-sample. Assuming one billed row per key write, no retries/extra writes and all
+The v2 body store performs four logical key writes per steady accepted sample:
+Room inbox, host root, host body including its receipt, and Room completion. The
+first sample also writes the Room handoff marker (five total). A focused actual
+Clanker fixture counts these writes across both atomic stores. Its one steady
+sample took 24.60 ms and wrote 1,420 host JSON bytes plus 656 Room JSON bytes;
+this is in-memory Node, not SQLite/RPC, a percentile, or provider CPU. The prior
+five-write steady path and its separate receipt index are superseded. Assuming one billed row per key write, no retries/extra writes and all
 50 million included writes available, 30 continuously active players for a
 30-day month would produce:
 
 | Accepted samples/player/sec | Logical writes/month | Illustrative write overage alone |
 | ---: | ---: | ---: |
-| 1 | 388,800,000 | $339 |
-| 4 | 1,555,200,000 | $1,506 |
+| 1 | 311,040,000 | $262 |
+| 4 | 1,244,160,000 | $1,195 |
 
 These scenarios exclude compute, requests, reads, base plan, other services and
 other account usage. They are not selected production cadences or forecasts.
-Frozen-body savings cannot justify the current per-sample durable write design.
+This removes 20% of steady logical writes, but remains expensive for continuous
+movement. Frozen-body savings do not establish a safe production capture cadence.
+Changes before the last durable acceptance can still be lost; any lower cadence
+must explicitly quantify position staleness rather than promise exact continuity.
 
 ## Integration blockers and reproduction
 
@@ -95,12 +103,15 @@ RPC to prevent concurrent admission/ACK/movement being marked offline. Focused
 tests cover these paths. It does not add an HTTP route, timer or advertised
 client feature.
 
-Room's cleanup hooks currently require its live NPC lease and finite run window.
-After either expires, host-only lifecycle recovery can proceed under a new host
-fence, but Room handoff cleanup cannot. A separate bounded cleanup-authority
-design is required; this change deliberately does not renew NPC simulation or
-weaken the existing gate. The runner must also serialize/reconcile explicit
-close operations before taking its ready census.
+Closed-only Room cleanup now accepts its exact retained authority descriptor
+after lease/run expiry. The host coordinator requires a valid current host fence,
+recovers or cancels uncertain operations, and requires passive/absent proof for
+the exact generation before retiring the row. It does not renew the run/lease,
+send grants, replay movement or alter deadlines; takeover fences old calls.
+Live/starting references still block retirement. Automatic orchestration, original
+deadline restoration for a no-live-send final ACK after run expiry, and host
+reacquisition when only pending departures remain are unfinished. The runner must
+serialize/reconcile explicit close operations before taking its ready census.
 
 Other open gates: actual earliest-deadline alarms, public event delivery/ACK,
 stationary actor creation/cleanup and live scene binding, full-world collision
@@ -122,3 +133,44 @@ outputs as `verification-frozen-sqlite-events.json`,
 `verification-frozen-sqlite-npcs.json`, and
 `verification-frozen-strict-delivery.json`. Later source changes require fresh
 verification before reusing the numbers as evidence for that changed path.
+
+
+## Storage v2 follow-up measurements
+
+The maximum receipt is 268 JSON bytes. Together with the full 8,192-byte body
+component and all maximum identity/metadata fields, the v2 row is 8,875 bytes;
+341 bytes remain below the unchanged 9,216-byte cap. Component nodes remain 128
+with 19 envelope/receipt nodes within the existing 24-node allowance. Receipt
+retention, body position and root commit remain atomic. Version 1 envelopes are
+refused without mutation; an explicit drain/migration is required before reusing
+old preview storage. No production binding uses this layout.
+
+A fresh finite SQLite/workerd run with 53 restricted source NPCs and 30 player
+records measured known expiry 4.85 ms/1 write/39,387 JSON bytes; unknown expiry
+5.98 ms/31 writes/51,889 bytes; and unknown 250 ms absence 32.95 ms/31 writes/
+52,192 bytes. All used zero body constructions, offline physics and NPC steps.
+No-op and snapshot reads made zero writes; snapshot reads took 18.52–19.10 ms.
+Each event is a single observation, not a tail-latency bound. Restart and rollback
+passed; long cases replaced/fenced the owner, short recovery retained its lease.
+Evidence: `verification-v54-frozen-events.json`. These tests do not exercise Room
+closed-handoff retirement; that path is covered by focused in-memory tests.
+
+A separate 30-second diagnostic kept the strict 250 ms rule, 53 restricted NPCs,
+30 frozen records, 32 protocol connections and 20 ms synthetic downstream delay,
+but decoded only one client instead of 31 in one Node process. It still failed:
+112/120 emitted, eight superseded, 54 late. First-client p95 was 286.11 ms and
+last-client p95 286.26 ms, despite host completion p95 69.23 ms (zero host misses).
+First-to-last-client p95 fell to 0.65 ms, so serial multi-client decoding is not
+the only bottleneck. Waiting before publication was p95 142.19 ms; publication
+to first transport p95 152.10 ms. It wrote 150 host keys/7,910,636 JSON bytes and
+delivered 26,641,340 bytes including warmup; Room writes are not counted there.
+Evidence: `verification-v54-strict-one-decoder.json`, zero egress/runtime logs.
+
+The source schedules the next attempt 250 ms after the last attempt and the
+next commit 250 ms after the last actual commit. It waits before final host
+confirmation/Room RPC, so that work adds delay each cycle and eventually makes a
+prepared revision stale. Moving the wait past confirmation could widen the
+ownership race; that change needs an explicit atomic publication protocol, not
+an arbitrary earlier wake or relaxed rate guard. No such change is enabled.
+The one-decoder trial is diagnostic, not a substitute for representative clients,
+full-world geometry/AI, authenticated live movement or billed-resource validation.

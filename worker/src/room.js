@@ -820,6 +820,47 @@ export class Room extends DurableObject {
     });
   }
 
+  // Cleanup is fenced by the exact retained Room authority, even after its
+  // finite lease/run expires. It never renews either, delivers a grant or opens
+  // live commands. A takeover changes revision/owner and fences every old call.
+  checkBodyCleanup(ticket) {
+    if (this.env.VIRTUAL_HOST_BODY_PREVIEW !== "1" || !this.npcAuthorityStatus(ticket)?.owns)
+      throw Error("body cleanup preview disabled or fenced");
+  }
+
+  closedBodyRecovery(ticket, identity) {
+    return this.ctx.blockConcurrencyWhile(async () => {
+      this.checkBodyCleanup(ticket);
+      const box = this.bodyHandoffController(), close = await box.cleanup(identity);
+      if (!close) return null;
+      return { close, pending: await box.pending(identity), movement: await box.pendingMovement(identity) };
+    });
+  }
+
+  completeClosedBodyRecovery(ticket, identity, revision, answer) {
+    return this.ctx.blockConcurrencyWhile(async () => {
+      this.checkBodyCleanup(ticket);
+      const box = this.bodyHandoffController(), pending = await box.pending(identity);
+      if (!pending?.closed) throw Error("closed body recovery required");
+      // Recovered/cancelled host receipt only. Never call deliver here.
+      return box.complete(identity, revision, answer);
+    });
+  }
+
+  fenceClosedBodyMovement(ticket, identity, sequence, proof) {
+    return this.ctx.blockConcurrencyWhile(() => {
+      this.checkBodyCleanup(ticket);
+      return this.bodyHandoffController().fenceMovement(identity, sequence, proof);
+    });
+  }
+
+  resolveClosedBodyRecovery(ticket, identity, revision, proof) {
+    return this.ctx.blockConcurrencyWhile(() => {
+      this.checkBodyCleanup(ticket);
+      return this.bodyHandoffController().resolveClosed(identity, revision, proof);
+    });
+  }
+
   // One snapshot at most every 1/TICK_HZ while poses arrive, and nothing pending once they stop, so the
   // room can hibernate between bursts (a running interval would keep it awake, and billed, for good).
   scheduleFlush() {

@@ -93,3 +93,47 @@ export async function closeBodyHandoff(host, room, hostTicket, roomTicket, ident
   await room.resolveBodyHandoff(authority, who, close.revision, { ref: close.ref, view });
   return { status: "resolved" };
 }
+
+// Retire already-passive closed work after a Room lease/run has expired. The
+// caller first performs host lifecycle recovery with its authenticated census.
+// This finite path cannot create a body, replay movement, renew NPC ownership,
+// or change a grace deadline. Live/starting refs require ordinary close recovery.
+export async function retireRecoveredBodyHandoff(host, room, hostTicket, roomTicket, identity) {
+  const owner = { ...hostTicket }, authority = { ...roomTicket }, who = { ...identity };
+  if (owner.world !== authority.world || !Number.isSafeInteger(owner.fence)
+    || !Number.isSafeInteger(authority.epoch) || authority.epoch < 1 || owner.fence < authority.epoch
+    || owner.fence === authority.epoch && owner.owner !== authority.owner)
+    throw Error("body cleanup authorities differ");
+  await host.bodyLifecycleRevision(owner); // Current host fence, including idle retirement.
+  let work = await room.closedBodyRecovery(authority, who);
+  if (!work) return { status: "idle" };
+  if (work.pending) {
+    const command = work.pending.command;
+    if (!work.pending.closed || command?.accountId !== who.accountId || command.connection !== who.connection)
+      throw Error("closed body recovery mismatch");
+    const answer = await host.bodyOperation(owner, [], command, { recoverOnly: true });
+    await room.completeClosedBodyRecovery(authority, who, command.revision, answer);
+    work = await room.closedBodyRecovery(authority, who);
+  }
+  if (!work) return { status: "idle" };
+  if (work.close.kind === "reconcile") return { status: "blocked" };
+  if (work.close.kind === "movement") {
+    const m = work.movement;
+    if (!m?.closed || m.ref?.accountId !== who.accountId) throw Error("closed movement recovery mismatch");
+    const view = await host.bodyReferenceState(owner, who.accountId, m.ref);
+    if (view !== null && !["grace", "offered"].includes(view.state)) return { status: "blocked" };
+    await room.fenceClosedBodyMovement(authority, who, m.sample.sequence, { ref: m.ref, view });
+    work = await room.closedBodyRecovery(authority, who);
+  }
+  const close = work?.close;
+  if (!close) return { status: "idle" };
+  let proof = null;
+  if (close.kind !== "retire") {
+    if (!["abandon", "disconnect"].includes(close.kind)) return { status: "blocked" };
+    const view = await host.bodyReferenceState(owner, who.accountId, close.ref);
+    if (view !== null && !["grace", "offered"].includes(view.state)) return { status: "blocked" };
+    proof = { ref: close.ref, view };
+  }
+  await room.resolveClosedBodyRecovery(authority, who, close.revision, proof);
+  return { status: "resolved" };
+}

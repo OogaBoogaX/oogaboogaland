@@ -681,3 +681,37 @@ test('retained publication receipt cannot undo release or takeover even with acq
   await assert.rejects(publishHostPoses(source, rpc, hostTicket, { acquire: true, roomState }), /fenced/);
   assert.equal(room.npcAuthority.owner, 'host-b'); assert.equal(claims, 1);
 });
+
+
+test('closed-only recovery survives Room lease/run expiry but cannot send grants or cross an authority takeover', async () => {
+  const h = host(), r = await h.room(true, false, true), ws = (await h.join(r, 1, true, true)).ws;
+  const a = await start(r), t = ticket(a), i = { accountId: 1, connection: r.players.get(1).connectionToken };
+  await r.stageBodyHandoff(t, i, bodyPrep, 'clanker', bodyRequest, bodyClaim);
+  await h.send(r, ws, { t: 'body-ready', request: bodyRequest });
+  assert.equal(await r.closedBodyRecovery(t, i), null);
+  const cancel = { result: { ok: false, reason: 'cancelled' }, transfer: null };
+  await assert.rejects(r.completeClosedBodyRecovery(t, i, 2, cancel), /closed body/);
+  h.at(100200); await h.send(r, ws, { t: 'body-decline', request: bodyRequest });
+  const before = structuredClone(r.npcAuthority), sent = ws.sent.length;
+  h.at(210000); const restarted = await h.room(true, false, true);
+  assert.equal(ws.sent.slice(sent).some(m => ['body-grant', 'body-active', 'body-live'].includes(m.t)), false);
+  const afterWake = ws.sent.length;
+  const work = await restarted.closedBodyRecovery(t, i);
+  assert.equal(work.pending.closed, true); assert.equal(work.close.kind, 'reconcile');
+  await assert.rejects(restarted.pendingBodyHandoff(t, i), /disabled or fenced/);
+  await assert.rejects(restarted.deliverBodyHandoff(t, i), /disabled or fenced/);
+  await restarted.completeClosedBodyRecovery(t, i, work.pending.command.revision, cancel);
+  assert.equal(ws.sent.length, afterWake);
+  assert.deepEqual(structuredClone(restarted.npcAuthority), before, 'cleanup never renews simulation authority');
+  assert.equal(restarted.players.has(1), true, 'body cleanup does not close voice');
+  const closed = await restarted.closedBodyRecovery(t, i);
+  assert.equal(closed.close.kind, 'retire');
+  h.fail(); await assert.rejects(restarted.resolveClosedBodyRecovery(t, i, closed.close.revision, null), /storage unavailable/);
+  assert.ok(await restarted.closedBodyRecovery(t, i));
+  const newer = await restarted.configureNpcAuthority(a.revision, { mode: 'server', world: 'world-1', epoch: 2, owner: 'new', runUntil: 300000 });
+  await assert.rejects(restarted.resolveClosedBodyRecovery(t, i, closed.close.revision, null), /disabled or fenced/);
+  await restarted.resolveClosedBodyRecovery(ticket(newer, 'new'), i, closed.close.revision, null);
+  assert.equal(await restarted.closedBodyRecovery(ticket(newer, 'new'), i), null);
+  const disabled = await h.room(false);
+  await assert.rejects(disabled.closedBodyRecovery(ticket(newer, 'new'), i), /disabled or fenced/);
+});
