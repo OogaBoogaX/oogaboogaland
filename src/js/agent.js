@@ -197,8 +197,14 @@
     : e.gorilla.torsoSitCompact ? 4 : e.gorilla.torsoLabCompact ? 1 : e.gorilla.torsoStandCompact ? 2 : e.gorilla.torsoQuadCompact ? 3 : 0;
   const torso = {
     count: e => torsoProfile(e) === 3 ? 2 : 1,
-    radius: e => torsoProfile(e) ? (torsoProfile(e) === 1 ? 0.58 : 0.6) * e.root.scale.x : e.gorilla.torsoRadius,
-    offset: (e, i) => (torsoProfile(e) === 4 ? -0.1 : torsoProfile(e) === 1 ? 0.04 : torsoProfile(e) === 2 ? 0.105 : torsoProfile(e) === 3 ? i ? 0.65 : 0.05 : 0) * e.root.scale.x,
+    radius: e => {
+      const profile = torsoProfile(e);
+      return profile ? (profile === 1 ? 0.58 : 0.6) * e.root.scale.x : e.gorilla.torsoRadius;
+    },
+    offset: (e, i) => {
+      const profile = torsoProfile(e);
+      return (profile === 4 ? -0.1 : profile === 1 ? 0.04 : profile === 2 ? 0.105 : profile === 3 ? i ? 0.65 : 0.05 : 0) * e.root.scale.x;
+    },
     circleOverlaps: (e, x, y, z, h, ox, oy, oz, r, height, margin = 0) => footprintCircleOverlaps(e, x, y, z, h, ox, oy, oz, r, height, margin, torso),
     overlaps: (a, ax, ay, az, ah, b, bx, by, bz, bh, margin = 0) => footprintOverlaps(a, ax, ay, az, ah, b, bx, by, bz, bh, margin, torso),
     separates: (a, ax, ay, az, ah, nx, ny, nz, nh, b, bx, by, bz, bh, margin = 0) => footprintSeparates(a, ax, ay, az, ah, nx, ny, nz, nh, b, bx, by, bz, bh, margin, torso),

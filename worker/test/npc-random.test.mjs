@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createNpcRandom, restoreNpcRandom } from "../src/npc-random.js";
 import { VirtualHost, HOST } from "../src/virtual-host.js";
+import { clankerController } from "./fixtures/clanker-controller-fixture.mjs";
 
 // Recorded from the unmodified math.js at 17659dd before extraction. These
 // integer outputs are an independent compatibility fixture, not a second RNG.
@@ -46,6 +47,37 @@ test("NPC RNG refuses unknown versions and lossy or unbounded words", () => {
     Object.assign(Object.create({ v: 1 }), { word: 1, padding: 0 })]) {
     assert.throws(() => restoreNpcRandom(saved), /checkpoint/);
   }
+});
+
+test("actual Clanker AI keeps browser choices when random continuation is captured and replaced", () => {
+  const legacy = clankerController({ count: 3 }), saved = clankerController({ count: 3, checkpointRandom: true });
+  const views = f => f.sim.list.map(e => ({ position: { ...e.root.position }, heading: e.heading,
+    phase: e.phase, route: e.route, rest: e.rest, goal: [e.goalX, e.goalY, e.goalZ],
+    roam: { path: Array.from(e.roam.path), count: e.roam.count, index: e.roam.index, plans: e.roam.plans,
+      nextChoice: e.roam.nextChoice, pose: e.roam.pose, poseWait: e.roam.poseWait },
+    pose: e.gorilla.createManagedCheckpoint("rng-controller-fixture").capture() }));
+  try {
+    assert.ok(legacy.sim.list.every(e => e.random.capture === undefined));
+    // Agent construction initializes idleFor with Math.random independently of
+    // the outer AI stream. Bind identical initial rig state through its actual
+    // continuation API before comparing subsequent full animation state.
+    for (let i = 0; i < 3; i++) saved.sim.list[i].gorilla.createManagedCheckpoint("rng-controller-fixture")
+      .restore(legacy.sim.list[i].gorilla.createManagedCheckpoint("rng-controller-fixture").capture());
+    for (let frame = 0; frame < 32; frame++) {
+      // Capture is read-only. Replacing only this stream proves its next choice
+      // uses the persisted continuation; this is not whole-controller recovery.
+      for (const e of saved.sim.list) {
+        const checkpoint = JSON.parse(JSON.stringify({ v: 1, word: e.random.capture() }));
+        assert.equal(e.random.capture(), checkpoint.word);
+        e.random = restoreNpcRandom(checkpoint).next;
+      }
+      legacy.step(); saved.step();
+      assert.deepEqual(structuredClone(views(saved)), structuredClone(views(legacy)));
+    }
+    for (let i = 0; i < 3; i++) for (let draw = 0; draw < 128; draw++) {
+      assert.equal(saved.sim.list[i].random(), legacy.sim.list[i].random());
+    }
+  } finally { legacy.dispose(); saved.dispose(); }
 });
 
 test("VirtualHost retries and owner recovery preserve committed NPC random choices", async () => {

@@ -23,6 +23,8 @@ for (const name of ["virtual-host.js", "host-room.js"]) {
   const path = sourceDirectory ? join(sourceDirectory, name) : fileURLToPath(new URL(`../src/${name}`, import.meta.url));
   sourceHashes[name] = createHash("sha256").update(await readFile(path)).digest("hex");
 }
+sourceHashes["simulation-checkpoint.js"] = createHash("sha256")
+  .update(await readFile(new URL("../src/simulation-checkpoint.js", import.meta.url))).digest("hex");
 let mf, deniedEgress = 0, now = Date.now(), maxCheckpoint = 0, maxFrame = 0, lastPublish = 0;
 const logs = [], failures = [], sockets = [], times = [], counters = { attemptedHostWrites: 0, attemptedHostWriteBytes: 0, deliveredBytes: 0, deliveredFrames: 0 };
 const delay = ms => new Promise(resolve => setTimeout(resolve, Math.max(0, ms)));
@@ -104,6 +106,8 @@ try {
     for (const s of sockets.slice(1, -1)) assert.deepEqual(s.frames.at(-1), sockets[0].frames.at(-1));
   }
   const expected = (await call("poses", { ticket })).result.frame; assert.deepEqual(Array.from(new Uint8Array(sockets[0].frames.at(-1))), expected);
+  const oldTicket = { ...ticket }, oldRoom = (await call("room-status")).result;
+  const oldRoomTicket = { ...oldRoom.authority, owner: ticket.owner };
   await call("disconnect", { ticket, tokens, refs }); const disconnected = (await call("inspect")).saved;
   for (const row of sockets) row.socket.close(); await mf.dispose(); mf = null;
   const restartAt = performance.now(); await start(); assert.deepEqual((await call("inspect")).saved, disconnected);
@@ -116,11 +120,52 @@ try {
   await call("tick", { ticket: { ...ticket, fence: ticket.fence - 1 }, tokens: [] }, /fenced/);
   const late = await joinViewer(1, false); await until(() => late.frames.length === 1 || late.errors.length);
   assert.deepEqual(late.errors, []); assert.deepEqual(Array.from(new Uint8Array(late.frames[0])), expected);
+  // A reclaimed host cannot bypass the old Room lease or silently take over.
+  // Finish bounded passive recovery and NPC catch-up before requesting poses.
+  const recoveryAt = performance.now(), recoveryRows = [], live = [reclaimed.result.result.session.token];
+  for (let i = 0; i < 16; i++) {
+    const startAt = performance.now(), r = (await call("tick", { ticket, tokens: live })).result;
+    recoveryRows.push({ wallMs: performance.now() - startAt, steps: r.steps, lagMs: r.lagMs ?? null, work: r.work });
+    assert.equal(r.status, "running"); assert.ok(r.steps <= HOST.maxSteps);
+    assert.ok(r.work.attemptedSteps <= HOST.passiveSteps);
+    if (!r.recovering && r.lagMs < HOST.stepMs) break;
+  }
+  const settled = (await call("inspect")).saved;
+  assert.ok(now - settled.wallCursor < HOST.stepMs, "bounded recovery must catch up");
+  assert.equal(settled.sessions.sessions[0].deadline, disconnected.sessions.sessions[0].deadline);
+  assert.ok(settled.sessions.sessions.every(s => s.state !== "grace" || s.stepAt === now));
+  await call("publish", { ticket }, /explicit Room authority acquisition required/);
+  assert.deepEqual((await call("room-status")).result, oldRoom);
+  // Real Room wall time is never overwritten. Waiting for its existing lease
+  // is separate from measured recovery work and bounded by the 10-second lease.
+  const leaseWaitAt = performance.now(), leaseWaitMs = Math.max(0, oldRoom.leaseUntil - Date.now() + 1);
+  assert.ok(leaseWaitMs <= HOST.leaseMs + 1); await delay(leaseWaitMs);
+  const actualLeaseWaitMs = performance.now() - leaseWaitAt;
+  assert.equal((await call("publish", { ticket, acquire: true })).result.status, "published");
+  await until(() => late.frames.length === 2 || late.errors.length);
+  assert.deepEqual(late.errors, []); assert.ok(late.authority.revision > oldRoom.authority.revision);
+  assert.equal(late.authority.epoch, ticket.fence);
+  const recoveredFrame = (await call("poses", { ticket })).result.frame;
+  assert.deepEqual(Array.from(new Uint8Array(late.frames[1])), recoveredFrame);
+  await call("publish", { ticket: oldTicket, acquire: true }, /fenced/);
+  await call("room-publish", { ticket: oldRoomTicket, sequence: oldRoom.sequence, frame: expected }, /fenced/);
+  const resumed = await joinViewer(2); await until(() => resumed.frames.length === 1 || resumed.errors.length);
+  assert.deepEqual(resumed.errors, []); assert.deepEqual(resumed.frames[0], late.frames[1]);
+  // An old revision's ACK must not release the new revision's outstanding frame.
+  late.socket.send(JSON.stringify({ t: "npc-ack", revision: oldRoom.authority.revision, sequence: oldRoom.sequence }));
+  now += HOST.stepMs; await call("tick", { ticket, tokens: live }); await delay(HOST.deliveryMs);
+  assert.equal((await call("publish", { ticket })).result.status, "published");
+  await until(() => resumed.frames.length === 2 || resumed.errors.length);
+  assert.deepEqual(resumed.errors, []); assert.equal(late.frames.length, 2);
+  const finalJoin = await joinViewer(3, false); await until(() => finalJoin.frames.length === 1 || finalJoin.errors.length);
+  assert.deepEqual(finalJoin.errors, []); assert.deepEqual(finalJoin.frames[0], resumed.frames[1]);
+  const recovery = { rows: recoveryRows, wallMs: performance.now() - recoveryAt, leaseWaitMs: actualLeaseWaitMs,
+    explicitRoomReacquisition: true, staleHostAndRoomRejected: true, oldAckRejected: true, resumedDelivery: true, exactLateJoin: true };
   result = { pairs, actors: pairs * 2, rigs: pairs, viewers, sessions: 30, samples, bootMs, restartReclaimMs,
     maxCheckpointBytes: maxCheckpoint, maxFrameBytes: maxFrame, tick: distribution(times.map(x => x.tickMs)),
     publication: distribution(times.map(x => x.publishMs)), combinedActive: distribution(times.map(x => x.activeMs)),
     pacing: distribution(times.map(x => x.pacingMs)), counters, rollback: true, persistedRestart: true, timelyReclaim: true,
-    exactLateJoin: true, stalledFramesBeforeRestart: 1, rows: times };
+    exactLateJoin: true, stalledFramesBeforeRestart: 1, recovery, rows: times };
   assert.equal(deniedEgress, 0); assert.equal(logs.length, 0);
 } catch (error) { failures.push(error.stack); process.exitCode = 1; }
 finally { for (const row of sockets) try { row.socket.close(); } catch {} if (mf) await mf.dispose(); await rm(dir, { recursive: true, force: true }); }

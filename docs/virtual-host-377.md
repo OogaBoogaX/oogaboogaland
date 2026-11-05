@@ -1308,6 +1308,33 @@ orderly workerd/SQLite reconstruction, timely same-body registry reclaim with
 unchanged inventory, stale-host rejection and an exact retained late-join frame.
 It does not perform browser body reclaim or prove the complete NPC world.
 
+The follow-up evaluator extends this restart through actual Room reacquisition:
+bounded passive recovery and NPC catch-up, refusal of implicit acquisition, the
+existing Room lease's real wall-clock expiry, explicit newer-epoch acquisition,
+new-revision delivery, independent rejection of old host and Room tickets, rejection
+of an old-revision ACK, continued delivery and exact subsequent late joins. The
+stalled observer receives one frame in the new revision and remains bounded after
+the stale ACK. This does not simulate authenticated browser body commands.
+
+Both the two-actor smoke scenario and the full 106-actor/53-rig/30-session/32-viewer
+scenario pass. In the full scenario, five catch-up operations advance eight fixed
+NPC steps each after a 10,001 ms authored outage. Their local wall times are
+244.929, 204.275, 195.473, 202.588 and 193.491 ms. The first uses 1,934 passive
+substeps after prioritized reclaim; every operation stays within the existing
+4,096 passive / eight NPC-step limits. The original deadlines remain unchanged.
+The separate real Room lease wait is 8,591.899 ms; total recovery/check/delivery
+scenario time is 10,190.078 ms. This is a bounded correctness measurement, not a
+production recovery-latency guarantee. Host simulation time remains authored;
+Room time is real, and neither lease is shortened for the test.
+
+That extended run's steady-cycle p50/p95 is 136.671/162.426 ms, demonstrating the
+variation around the matched comparison below. Checkpoint and packet maxima stay
+67,156 and 6,359 bytes. Added recovery operations bring scenario totals to 24
+attempted host writes / 1,530,722 serialized bytes and 409 binary envelopes /
+2,234,172 bytes. These totals describe the extended scenario, not the shorter
+baseline/optimized comparison. Evidence: `verification-cycle-reacquire-{smoke,full}.json`.
+There were no assertion failures, external requests or console logs.
+
 Phase measurement identified publication as the larger cost. `confirmPoses`
 now re-reads and validates committed storage, checks ownership/lease/run deadlines
 and pending body recovery, and compares revision, logical time and run deadline.
@@ -1365,6 +1392,203 @@ integration (#379), complete body/occupancy capture and direct browser restore,
 shared player presentation (#464), live disconnect effects, locked-runtime memory
 and combined production/account costs are still required. No limit or reservation
 was raised, and Tess remains excluded.
+
+### Actual outer Clanker controller: state and cost boundary
+
+`worker/eval/clanker-world.mjs` now runs the existing `clankers.create/update`
+controller and actual managed rigs in a finite Node VM, not an extracted walker
+or flight substitute. Synthetic Ooga owners stand in an authored empty flat
+meadow with no caves, lab, office, sleeping, rage or production collision world.
+Initial rest timers are zero so the real planner chooses outings. No gameplay
+default changes. Each update retains the existing 250 ms / 1/30 s substep behavior;
+the authoritative scenario uses no camera-based animation throttling.
+
+The default controller meadow dimensions admitted only 37 of the 53 entries.
+The explicit `--spacious` scenario uses a radius-60 meadow and admitted all 53;
+it is a load case, not the production island. Over 120 updates / 30 simulated
+seconds, 36 versus 52 actors moved and chose new destinations; 31 versus 51
+planned paths. These active counts must accompany performance claims.
+
+The exposed state inventory contains 145,485 visited values, 110,293 typed-array
+values occupying 851,180 bytes, 53 random streams and nonfinite sentinels and
+actor references. Its diagnostic JSON is 811,159 bytes in the crowded case and
+817,530 bytes in the spacious case. This is **not a restorable checkpoint or an
+encoded-size measurement**. It excludes closure-owned clocks, planning cursors,
+portal/office/lab reservations, owner state and geometry. A naive generic capture
+cannot satisfy the current node/byte bounds; fixed controller schemas must
+distinguish durable continuation from reproducible scratch and bind references
+to versioned world identities before a storage profile can be selected.
+
+`checkpointRandom: true` on the existing Clanker constructor opts its existing
+per-actor stream into the already-supported RNG continuation word. Default
+browser construction is unchanged. Tests compare actual AI choices and managed
+animation across repeated capture/replacement against the ordinary browser
+stream. They bind identical initial managed-rig checkpoints because `agent.js`
+separately initializes `idleFor` with `Math.random`. Capturing the AI word alone
+does not restore full controller or rig state.
+
+Profiling the crowded case identified repeated torso-profile selection in peer
+collision queries. `agent.torso.radius/offset` now select that profile once per
+call. They retain the exact priority and capsule formulas, without a cache across
+calls or changes to poses, contact admission or AI. A pinned original-code fixture
+checks every planning/compact flag combination and scale plus actual animated
+rigs. Consecutive serial before/after measurements on Node22.23.4/macOS arm64:
+
+| Authored scenario | Before update p50 / p95 | After update p50 / p95 |
+| --- | --- | --- |
+| Crowded, 37 active of 53 entries | 34.696 / 208.218 ms | 30.221 / 150.971 ms |
+| Spacious, 53 active entries | 79.056 / 127.966 ms | 62.740 / 87.168 ms |
+
+Activity/movement/path counts and diagnostic sizes match in each pair. These are
+small local VM wall-time samples including execution-timeout overhead, not DO CPU
+or production cost. They cannot be added to the earlier partial-controller
+percentiles. Run `node worker/eval/clanker-world.mjs [--smoke] [--spacious]`;
+`CLANKER_AGENT_SOURCE` may name a saved local `agent.js` for comparison. Source
+hashes and individual timing rows are recorded. No dependency, API call, account
+configuration, renderer or permanent loop is used.
+
+Evidence: `verification-clanker-torso-{crowded,spacious}-{before,after}.json`
+and `clanker-world-crowded.cpuprofile`. The first smoke fixture incorrectly
+required path planning on an unobstructed direct route; it now observes actual
+destination changes and includes the lounge departure interval. The first RNG
+parity fixture had different random initial rig state; binding the existing rig
+checkpoint corrected it. No gameplay threshold or STOP-restricted check changed.
+Local validation passed 109 focused host/recovery tests, 408 unit checks, the
+320-script build, seven changed JavaScript/module syntax checks and whitespace
+validation. Hub/full/browser checks remain unrun under the unchanged STOP ledger;
+these local results do not establish live scene or device correctness.
+Full world checkpointing, exact browser body restore and live disconnect effects
+remain unfinished; activation is disabled and Tess is excluded.
+
+### Fixed Clanker typed-buffer continuation, not a full world checkpoint
+
+`worker/src/clanker-buffers.js` captures the twenty existing per-entry typed-buffer
+fields under a fixed versioned schema. It preserves every byte, including inactive
+path tails, negative zero and nonfinite sentinel bits. It does not infer scratch
+from a path's active count. The stored representation has one optional-allocation
+mask per actor followed by sorted field/block/hex triples; zero blocks and trailing
+zero bytes are implicit. Omitting empty per-field arrays avoids consuming over a
+thousand generic checkpoint nodes for a 53-entry roster. No executable schema,
+property path, constructor or allocation length comes from storage.
+
+The component binds exact ordered owner IDs, world version and native byte order.
+It refuses incompatible layouts, debug-sized climbing paths, allocated rage-search
+workspaces, shared buffers, malformed/duplicate blocks and capacity overruns.
+Restore validates the whole payload before allocating fresh typed buffers and
+never mutates a live controller. Optional rage roster arrays retain the distinction
+between null and allocated zero-filled buffers. Capturing these arrays does not
+restore rage's separate controller/closure state.
+
+Admission is capped at 53 entries, 32 KiB encoded JSON and 1 MiB expanded typed
+storage. These are **component refusal limits**, not a reservation in the world's
+64 KiB profile or an increase to generic packing's 13,000-node / 256 KiB expanded
+JSON limits. The typed allocation has its own explicit bound; aggregate isolate
+memory is still unmeasured. Dense legitimate paths can exceed component admission,
+and tests require refusal rather than truncation. A complete world must guarantee
+its supported profile fits before activation; these meadow samples do not do so.
+
+`node worker/eval/clanker-buffers.mjs [--smoke] [--spacious]` measures capture,
+generic packing and JSON round-trip restoration between actual controller updates.
+Each full run advances 120 updates / 30 simulated seconds and checks thirteen
+snapshots, including initialization. Every decoded buffer is byte-compared and
+installed for the next real AI update. Results on Node22.23.4/macOS arm64:
+
+| Scenario | Component JSON / generic-packed bytes, max | Component nodes, max | Capture p50 / p95 | Unpack + restore p50 / p95 |
+| --- | --- | ---: | --- | --- |
+| Crowded, 37 active / 53 entries | 2,669 / 3,023 | 258 | 0.690 / 4.037 ms | 0.398 / 0.847 ms |
+| Spacious, 53 active entries | 3,746 / 4,152 | 315 | 0.729 / 4.103 ms | 0.417 / 0.840 ms |
+
+Both restore 851,180 typed bytes exactly. Generic packing p95 is 0.536 / 0.533 ms.
+With thirteen samples, p95 is the maximum and includes cold initialization. The
+actual controller retains its other state throughout this evaluator; this is
+**not a host restart**, a full-world checkpoint or a production cost measurement.
+No timing is added to an unrelated fixture's percentile. Evidence:
+`verification-clanker-buffers-sparse-{crowded,spacious}.json`.
+
+Focused tests compare repeated persisted buffer replacement against uninterrupted
+actual Clanker AI and managed-rig animation, check source layout coverage and exact
+unusual bit patterns, and refuse malformed/oversized profiles. The host CI lane
+includes the new tests. No production caller imports the codec yet.
+
+Extending beyond the restricted roaming profile below still needs complete world
+schemas, stable owner/item/geometry bindings and portal/lab/office/bed reservations.
+Restoring those together must
+precede exact browser body reclaim and live disconnect presentation. Existing
+`possess`/`travel`/`control` entrypoints reset relevant state and remain unsuitable
+as restore APIs. Room authentication, body generation and durable departure ACKs
+must bind that eventual restore. Combined storage/CPU/memory and account billing
+remain unvalidated. Tess is excluded and activation remains disabled.
+
+### Actual roaming-controller restart, restricted and inactive
+
+`worker/src/clanker-roaming.js` now checkpoints the actual Clanker controller for
+an explicitly limited `roaming-1` profile. It composes source-owned scalar defaults,
+the typed-buffer component, per-actor RNG, managed rig/pose continuation and fifteen
+closure clock/scheduler values. Actor references rebind by ordered identity to the
+new controller's entries. Unknown source fields or changed boot defaults refuse
+recovery; no executable schema is accepted from storage. A baseline checksum
+detects accidental layout/default/static-world mismatches. It is not authentication:
+the enclosing host must still bind an explicit simulation/world implementation
+version and authenticated ownership.
+
+The profile permits only static meadow adapters and chilling owners; fixtures
+provide synthetic owners.
+Caves, work, sleep, combat/rage, debug climbing, player control, remote ownership,
+held world items and unsupported context callbacks are refused. Browser callers
+do not enable it. Explicit profile construction produces dormant rigs; a new world
+calls `sync()` to initialize, while recovery applies its committed bodies directly.
+Ordinary browser construction still activates normally. This avoids choosing
+temporary spawn positions, reservations and random outings just to overwrite them.
+Static lounge candidates are reconstructed and included in the baseline binding.
+
+Restoration is allowed only on a fresh controller before advancing or publishing.
+Decode validates the bounded checkpoint structure first. If application fails, the
+adapter becomes unusable and the transaction must discard that controller. The
+host test deliberately constructs a fresh controller for each operation, injects
+a failed write, retries from committed state, replaces ownership after lease expiry,
+performs bounded catch-up and compares against uninterrupted actual AI. It also
+refuses the old owner's ticket. Separate tests repeatedly replace the full VM,
+checking exact subsequent scalar state, paths, self/peer bindings, RNG and animation.
+This is actual **supported roaming recovery**, not just component replacement.
+
+`node worker/eval/clanker-roaming.mjs [--smoke] [--spacious]` measures that same
+restricted controller over 127 updates / 31.75 simulated seconds. Seven periodic
+restart checks are followed by seven complete cold-construction / restore / actual
+step / capture operations. Each result matches the uninterrupted controller.
+The complete-cycle timing is measured as a pair, not summed phase percentiles.
+Final serial Node22.23.4/macOS arm64 observations:
+
+| Scenario | Max packed checkpoint | Max expanded JSON nodes / bytes | Complete local cycle p50 / p95 |
+| --- | ---: | --- | --- |
+| Crowded, 37 active / 53 entries | 43,705 bytes | 4,932 / 55,901 | 135.430 / 228.531 ms |
+| Spacious, 53 active entries | 59,508 bytes | 6,485 / 74,569 | 153.588 / 164.383 ms |
+
+The existing 64 KiB storage, 13,000-node and 256 KiB expanded-JSON limits remain
+unchanged. Seven timing samples make p95 the maximum. An earlier complete-cycle
+pair measured 243.109 / 163.736 ms p95, demonstrating variation, not a guaranteed
+margin. Both final cases rebuilt cold controllers in at most 40 ms versus roughly
+200–243 ms before dormant construction. Capture p95 was 33.171 / 34.308 ms;
+restore p95 was 37.754 / 38.876 ms. The evaluator's periodic process observations
+reached 56.3 / 48.0 MB JS heap and 158.1 / 149.5 MB RSS. These include multiple
+Node VM contexts and tooling, are not high-water marks, and do not establish a
+Durable Object's isolate memory or billed duration. Data, source hashes and each
+sample are in `verification-clanker-roaming-complete-{crowded,spacious}.json`.
+
+**Activation remains blocked.** The spacious sample leaves only 6,028 bytes in the
+reserved world budget for everything outside this Clanker profile. The crowded
+cycle approaches a 250 ms step before Ooga AI, full island collision, SQLite or
+Room delivery. Neither this sample nor the earlier component margins establish a
+safe full-world storage or CPU profile. Do not reduce session reservations or raise
+limits based on these short runs. The 30-retained-session / 32-viewer boundary is
+unchanged. General work/sleep/world state, actual Worker/Room adapter integration,
+exact browser body restoration and live disconnect presentation remain unfinished;
+production CPU/memory/account cost remains unvalidated. No live capability,
+deployment, resource, permanent loop, movement/voice boundary or Tess behavior
+changes. The test lane includes the new roaming recovery tests.
+
+Local verification passed 116 host/recovery tests, 408 unit checks and the
+320-script build. The Hub STOP ledger remains unchanged; no browser/full suite
+was rerun. Evidence: `verification-clanker-roaming-{full-host,unit,build}.log`.
 
 ### Disconnect presentation, not yet connected to live sessions
 

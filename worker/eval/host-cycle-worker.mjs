@@ -78,6 +78,8 @@ export class CycleHost extends DurableObject {
         Array.from({ length: host.maxSessions }, (_, i) => r.connect(claim(i), at)));
       else if (command === "tick" || command === "fail-tick") result = await host.tick(input.ticket, input.tokens);
       else if (command === "publish") result = await publishHostPoses(host, room, input.ticket, { format: "mixed-1", acquire: input.acquire === true });
+      else if (command === "room-status") result = await room.npcAuthorityStatus();
+      else if (command === "room-publish") result = await room.publishNpcSnapshot(input.ticket, input.sequence, Uint8Array.from(input.frame).buffer);
       else if (command === "disconnect") result = await host.sessions(input.ticket, input.tokens, (r, at) => {
         for (const ref of input.refs) r.disconnect(ref, at); return true;
       });

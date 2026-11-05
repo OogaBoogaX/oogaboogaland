@@ -50,6 +50,14 @@
   const OFFICE_WORK = { type: [5, 9], look: [1, 2], abacus: [3, 5] }, OFFICE_NEXT = { type: "look", look: "abacus", abacus: "type" };
   const create = (ctx) => {
     const { crew, sites, groundAt, clear } = ctx;
+    if (ctx.checkpointProfile != null) {
+      const allowed = new Set(["root", "crew", "sites", "checkpointRandom", "checkpointProfile", "groundAt", "clear",
+        "combatEnabled", "meadowRadius", "roamRadius"]);
+      if (ctx.checkpointProfile !== "roaming-1" || Object.keys(ctx).some(k => !allowed.has(k))
+        || sites.length || ctx.checkpointRandom !== true || ctx.combatEnabled === true
+        || !crew.list.length || crew.list.length > 53 || crew.list.some(e => e.state !== "chilling"))
+        throw new Error("unsupported Clanker roaming checkpoint profile");
+    }
     let combatEnabled = ctx.combatEnabled === true;
     const footprint = BL.agent.footprint, torso = BL.agent.torso;
     const pointSupportAt = ctx.pointSupportAt || groundAt;
@@ -2098,7 +2106,9 @@
         radius: WALK_RADIUS, height: 2.7, foot: FOOT, minY: 0, biped: false, compact: owner.state === "working" && gorilla.compact, footprintMode: "walk",
         active: false, tracked: false, mode: "", phase: "", route: "", entryTurn: false, planningEntry: false, site: -1, fromSite: -1, portal: -1,
         hasSlot: false, slotIndex: -1, slotX: 0, slotY: 0, slotZ: 0, goalX: 0, goalY: 0, goalZ: 0,
-        random: mulberry32(fnv1a(`clanker/${owner.id || owner.traits.name || i}`)),
+        // Headless continuation may capture the existing stream without a draw.
+        // Ordinary browser callers keep the original closure and exact choices.
+        random: mulberry32(fnv1a(`clanker/${owner.id || owner.traits.name || i}`), ctx.checkpointRandom === true),
         // Its bed while its Ooga sleeps: see `updateSleep`.
         sleep: { stage: "", slot: -1, home: -1, leg: 0, count: 0, path: new Float64Array(SLEEP_POINTS * 2), mark: 0, pose: "", stall: 0, near: Infinity, stuck: -1, tries: 0, forwardLeg: -1, forwardNear: Infinity, retrying: false, retryX: 0, retryZ: 0, beamTime: 0, beamWait: 0, beamForm: "", beamNative: false },
         // Its desk or wait spot in B.C.A. and where it is in the routine: see `workOffice`.
@@ -2184,7 +2194,9 @@
       if (disposed) return;
       for (let i = 0; i < list.length; i++) if (!list[i].active && alive(list[i].owner)) activate(list[i]);
     };
-    sync();
+    // A recovery profile starts dormant: its saved bodies are restored before
+    // simulation. A new world explicitly calls sync; browsers retain auto-spawn.
+    if (ctx.checkpointProfile !== "roaming-1") sync();
     const startLabShuttle = (owner) => {
       const e = byOwner.get(owner);
       if (labSite < 0 || !e) return false;
@@ -7339,8 +7351,47 @@
       }
       return spots;
     };
+    // Explicit headless roaming profile only. The enclosing checkpoint owns
+    // entries, random streams, buffers and rigs; this bridge owns closure state.
+    // No browser caller opts in, and broader worlds must supply their own full
+    // reservation/search/body continuation before this profile can expand.
+    const roamingCheckpoint = ctx.checkpointProfile === "roaming-1" ? (() => {
+      const refuse = () => { throw new Error("unsupported Clanker roaming checkpoint profile"); };
+      const ready = () => {
+        if (disposed || player || allAway || combatEnabled || rage || checkingRest || labEscape || debugShuttle
+          || list.some((e, i) => e.index !== i || e.owner.state !== "chilling" || e.controlled || e.remoteControlled
+            || e.debugMove.active || e.sleep.stage || e.office.stage || e.motion.lab || e.rage.active
+            || e.rage.search || e.capture || e.climb.active || e.climb.searchPending
+            || e.motion.supportEntry !== e || e.motion.labItemGeometry || e.motion.labBench
+            || ![e.heading, e.goalX, e.goalY, e.goalZ, e.speed, e.radius, e.height].every(n => Number.isFinite(n) && Math.abs(n) < 10000)
+            || e.radius <= 0 || e.height <= 0 || !Number.isInteger(e.roam.count) || e.roam.count < 0 || e.roam.count > 4
+            || !Number.isInteger(e.roam.index) || e.roam.index < 0 || e.roam.index > e.roam.count)) refuse();
+      };
+      ready();
+      return {
+        // Static lounge candidates are reconstructed by the same world boot.
+        // The caller binds this complete seed, including radius and candidates,
+        // into its trusted baseline; it is never supplied by stored data.
+        baseline() { ready(); prepareLounges(list[0]); return [ctx.meadowRadius || 22, roamRadius, loungeCount, roofCount, loungeReady, ...loungeSpots]; },
+        capture() {
+          ready(); return [elapsed, labPassAt, labRouteBudget, labRouteTurn, labRouteNext,
+            roamBudget, roamNext, roamTurn, roamSerial, climbFrameBudget, climbTurn, climbNext,
+            debugRouteBudget, wallBudget, climbClaimSerial];
+        },
+        restore(values) {
+          ready();
+          if (!Array.isArray(values) || values.length !== 15 || Object.keys(values).length !== 15 || values.some((n, i) => !Number.isFinite(n)
+            || n > 1e9 || n < ([3, 7, 10].includes(i) ? -1 : 0)
+            || i > 1 && !Number.isSafeInteger(n))
+            || [3, 4, 6, 7, 10, 11].some(i => values[i] >= list.length)) refuse();
+          [elapsed, labPassAt, labRouteBudget, labRouteTurn, labRouteNext,
+            roamBudget, roamNext, roamTurn, roamSerial, climbFrameBudget, climbTurn, climbNext,
+            debugRouteBudget, wallBudget, climbClaimSerial] = values;
+        },
+      };
+    })() : null;
     return { list, sync, update, startleHill, target, companionTarget, hit, damage, bananaHit, debugRage, setCombatEnabled, plan, startLabShuttle, debugMove, cancelDebugMove, stats, liveGeometry, dispose, contactAt,
-      debugLoungeSpots, wallSupported,
+      debugLoungeSpots, wallSupported, roamingCheckpoint,
       possess, release, sleeping, wake, setAway, cancelSleepBeams, setRemote, createRemote, respawn, travelRefusal, travel, control, cancelInput, smash, smashPower, quickSmash, chestBeat, ignite, dropRoll, supportRemoved,
       get combatEnabled() { return combatEnabled; }, get player() { return player; } };
   };

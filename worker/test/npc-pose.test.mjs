@@ -12,6 +12,35 @@ import "../../src/js/npc-pose-packet.js";
 const pose = globalThis.BL.npcPose;
 const original = JSON.parse(readFileSync(new URL("fixtures/npc-pose-original.json", import.meta.url)));
 
+test("torso queries retain original capsule values while selecting each profile only once", () => {
+  const prior = JSON.parse(readFileSync(new URL("fixtures/torso-profile-original.json", import.meta.url)));
+  assert.equal(createHash("sha256").update(prior.source).digest("hex"), prior.sha256);
+  const old = runInNewContext(prior.source + "\ntorso;"), fixture = managedRigs(), shape = fixture.B.agent.torso;
+  // Exhaust priorities, including simultaneous flags, fallback radius and scales.
+  for (let mask = 0; mask < 128; mask++) for (const scale of [.5, 1, 1.15]) {
+    let reads = 0;
+    const gorilla = { torsoRadius: 2.125 };
+    for (const [i, key] of ["torsoSitCompact", "torsoLabCompact", "torsoStandCompact", "torsoQuadCompact"].entries()) {
+      Object.defineProperty(gorilla, key, { get() { reads++; return !!(mask & 1 << i); } });
+    }
+    const e = { root: { scale: { x: scale } }, gorilla, planningSeat: !!(mask & 16), planningRoam: !!(mask & 32), planningLab: !!(mask & 64) };
+    const radius = old.radius(e); reads = 0; assert.equal(shape.radius(e), radius); assert.ok(reads <= 4);
+    assert.equal(shape.count(e), old.count(e));
+    for (let i = 0; i < 2; i++) {
+      const offset = old.offset(e, i); reads = 0; assert.equal(shape.offset(e, i), offset); assert.ok(reads <= 4);
+    }
+  }
+  const actor = fixture.make(), e = { root: actor.root, gorilla: actor };
+  try {
+    for (let frame = 0; frame < 120; frame++) {
+      actor.poseManaged(.05, frame / 10, 0, 0, frame / 13, frame % 3, false, frame % 7 === 0,
+        frame % 4 === 0 ? "sit" : "", { roll: frame % 5 === 0 ? .6 : 0, rollAngle: frame / 9 });
+      assert.equal(shape.radius(e), old.radius(e)); assert.equal(shape.count(e), old.count(e));
+      for (let i = 0; i < shape.count(e); i++) assert.equal(shape.offset(e, i), old.offset(e, i));
+    }
+  } finally { actor.dispose(); }
+});
+
 test("shared Ooga display encoding preserves original bytes through pose and equipment transitions", () => {
   assert.equal(createHash("sha256").update(original.source).digest("hex"), original.sha256);
   const source = readFileSync(new URL("../../src/js/npc-pose.js", import.meta.url), "utf8");
