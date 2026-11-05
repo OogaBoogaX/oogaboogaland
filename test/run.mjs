@@ -24715,7 +24715,7 @@ const menuShellChecks = BL => {
 
 // net.js in a sandbox: a canned /api/me and fake sockets that record what the page sends.
 const netFixture=(BL,response,step=200,cookie="")=>{
-  const source=readFileSync(join(root,"src/js/npc-authority.js"),"utf8")+readFileSync(join(root,"src/js/body-reclaim.js"),"utf8")+readFileSync(join(root,"src/js/net.js"),"utf8");
+  const source=readFileSync(join(root,"src/js/npc-authority.js"),"utf8")+readFileSync(join(root,"src/js/body-reclaim.js"),"utf8")+readFileSync(join(root,"src/js/body-presence.js"),"utf8")+readFileSync(join(root,"src/js/net.js"),"utf8");
   const sockets=[],sent=[],events=new Map(),navigations=[];let calls=0,tick=1000,savedViews=0;
   class Socket {static OPEN=1;constructor(){this.readyState=1;sockets.push(this);}send(v){sent.push(typeof v==="string"?JSON.parse(v):v);}close(){this.readyState=3;}}
   const voice={setPeers:()=>{},restart:()=>{},stop:()=>{}};

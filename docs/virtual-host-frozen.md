@@ -5,6 +5,53 @@ player physics, not shared NPC simulation. Activation and burst remain disabled;
 Tess is excluded. No deployment, provisioning, permanent loop or billing change
 is included.
 
+The local v73 checkpoint verifies the reclaim coordinator, body decoder and
+Clanker controls together, and fixes input-listener cleanup when scene detachment
+throws. The v72 untouched-viewer quiescence hook and connection-bound receipts
+remain. Its client preview remains off. Live Hub body restoration, full-world
+validation and the strict publication/cost gates are still unfinished; this is
+not activation-ready.
+
+The combined controller check uses actual source modules over an empty authored
+meadow with fixture DOM/camera services. It verifies hidden preparation, no
+gravity or control before the committed live receipt, stale-generation refusal,
+duplicate-receipt handling, independent NPC ownership, movement capture, and
+cleanup after server stop, scene leave and socket close. It does not run the Hub,
+a browser or production terrain and does not validate visual appearance. The
+detachment regression reproduced 16 retained input listeners; disposal now fences
+new attachment before cleanup and removes listeners even when release throws.
+The exception still propagates to the reclaim owner rather than acknowledging
+uncertain cleanup as successful.
+
+### Remaining movement transport boundary (v74 local audit)
+
+The private `Room.stageBodyMovement`/`RoomBodyHandoff.receiveMovement` hooks accept
+a bounded checkpoint of up to 4 KiB. They are not WebSocket ingress. The ordinary
+`parseClientMessage` boundary allows 256 UTF-16 code units for non-chat messages
+and has no `body-motion` case. Oversized non-chat text returns `false`, which
+closes the socket; smaller unknown messages are ignored. Merely calling
+`bodyReclaim.captureMovement()` from Hub controls would not deliver durable
+movement. Do not raise the ordinary message limit or repurpose pose/voice frames
+to hide this missing integration.
+
+An offline candidate for the current Clanker tuple retains all seven floating
+point values as binary64 plus its two bounded integer slots: 58 binary bytes,
+80 base64 characters. With a fixed message type, 32-character request nonce and
+maximum-width sequence, the proposed JSON envelope is 184 ASCII characters.
+This is format arithmetic, not a verified running protocol. Omitting owner,
+world and profile is safe only if the server reconstructs them from the exact
+authenticated current connection and retained handoff record, validates the
+body with that profile, and preserves existing ownership and ACK ordering.
+Other character schemas need their own explicit versions. No candidate parser,
+capability, sender or rate change has been enabled.
+
+`worker/eval/body-movement-wire.mjs` preserves the local audit. Its first run
+failed during static-profile fixture placement; the corrected support-plane run
+then failed on a cross-VM array comparison. The comparison has been corrected
+by inspection, but further execution is stopped under the test rule. No complete
+size table or round-trip pass is claimed. Actual ingress cost, cadence, replay
+fencing and collision validation remain required before connecting this path.
+
 ## Preservation and reversion
 
 All previous task work is preserved in signed commit
@@ -518,3 +565,304 @@ STOP restriction. First-login production mapping, full-world recovery, adapter
 installation and deadline orchestration are still unfinished. This supersedes the
 missing equipment-refresh hook listed in the earlier checkpoint sections, without
 claiming the remaining integration is complete.
+
+## v65: reclaim controls after synchronous scene teardown
+
+The private Clanker attachment now retains the exact body/binding identity across
+the scene callback. If that callback releases, fences or disposes the body, the
+old attachment returns false without reacquiring the camera or controls. Refusal,
+suspension and callback exceptions release the original body; an obsolete callback
+cannot release a replacement binding. Independent NPC ownership stays untouched.
+
+Thirty-one focused checks pass across body reclaim, source transfer/world/body
+controllers and the new controls boundary. They exercise actual controller and rig
+modules with an authored empty meadow and fixture UI/camera services, including
+gravity after activation, synchronous release/disposal, input shutdown and listener
+cleanup. Build and syntax checks pass. These checks do not run the Hub, a scene,
+renderer or browser, and do not validate live visual behavior. The live adapter,
+production world/account mapping and full-world integration remain unfinished.
+Activation and burst remain disabled.
+
+## v66: coordinate host takeover with Room fencing
+
+`publishHostPoses` now requires the coordinated publication protocol. After Room
+has configured the matching authority, a one-time host transaction records its
+Room binding and checks the projected revision. A failed initial Room configuration
+does not bind the host; an intervening host mutation supersedes the frame. Steady
+publication still reads and confirms without adding a host write.
+
+A bound host refuses raw `claim`, `claimBodyCleanup` and `begin` transitions.
+`claimHostRoom` persists a pending takeover intent after host lease expiry, fences
+Room to the replacement epoch, then grants the replacement host ticket. Pending
+intent blocks ordinary host ownership checks. Room can accept an old in-flight
+frame before its fence commits, but the replacement host has no ticket yet. After
+the Room fence commits, old Room revisions reject even exact duplicate frames;
+the new host ticket is granted only afterward. This does not assume synchronized
+host and Room clocks or undo frames already sent on a socket.
+
+The intent and last completed claim are bounded metadata. Failed writes roll back;
+lost Room replies are reconciled against its exact authority. Recovery resumes a
+pending intent, or explicitly supplies the exact completed intent to reconcile a
+lost completion reply without renewing the lease. Reusing an owner name alone
+cannot join a live host lease. Competing replacement operations cannot displace
+the pending winner. The coordinator must durably identify recovery operations and
+route each host/world to the same trusted Room; this is an internal service
+protocol, not a browser-supplied capability.
+
+Room fencing preserves the negotiated pose format, cadence history, finite run
+deadline and previous publication's rate debt. It clears the old pose instead of
+fabricating a replacement snapshot. Cleanup after finite expiry can finish body
+departures with zero NPC steps and without opening a new run. An explicit
+coordinated *new-run* transition was not implemented at v66; v67 below adds
+an explicit drained close followed by a separate finite `begin`. Automatic lifecycle orchestration
+and the production host-to-Room mapping remain activation gates. Body-only entry
+points must be routed through the same bound authority before live integration.
+
+The reproduced delayed old-host publication is now rejected. Tests cover crashes
+between each durable step, competing owners, lost replies, initialization failure,
+rate debt, stale intents, mixed protocol refusal, and cleanup without extending
+grace. A finite workerd/SQLite smoke run also verifies restart, late joins, timely
+reclaim and old-ACK rejection with 30 frozen sessions, two actors and two viewers.
+It is not a full-world or production-load certification. The representative strict
+delivery gate still fails; see the cost document. Hub/browser tests remain stopped,
+Tess is excluded, and activation and burst remain disabled.
+
+
+## v67: independent review and bounded lifecycle recovery
+
+Claude Code reviewed the five host/Room source files at v66, read-only, through the
+user-authorized subscription session. The later fixes below were reviewed and
+checked locally; they were not sent for a second Claude review.
+
+Room's persisted `fencePending` marker allows the first frame of a newly fenced
+epoch to establish its lease after a crash outlasts the original Room lease. The
+first accepted frame consumes this permission. Subsequent expired publication,
+newer epochs and the finite run deadline still fence the caller. Replaying a
+fence or publication does not renew its lease. This marker cannot originate from
+ordinary authority configuration or survive a release to browser mode.
+
+Initial binding now records ownership even if a simulation mutation supersedes
+the projected frame, so frequent ticks cannot indefinitely leave the raw claim
+path open. Superseded bytes are not published. An unpublished host refuses cached
+Room receipts: first binding requires fresh Room evidence. Completion validates
+known exact authority descriptors, boolean ownership and the matching run deadline.
+The ordinary final host revision confirmation remains in place.
+
+`closeHostRoomRun` is a separate explicit operator action for **drained** worlds.
+After host lease expiry, it persists a version-2 release intent, releases Room by
+revision CAS, reconciles a lost reply, then marks the host stopped and removes its
+binding. It grants no live ticket and leaves the simulation checkpoint intact.
+The next run requires a separately requested finite `begin`, and a separately
+explicit Room acquisition. It never starts a recurring paid loop or automatically
+undoes an intentional browser release. Strict rate debt survives release and
+reacquisition, including a close immediately after a publication.
+
+The release intent can supersede a pending takeover owned by the same operation.
+An old takeover can fence Room once while the release is in flight; the release
+coordinator uses at most two CAS attempts to handle that race. A completed close
+increments the host fence, so old tickets and takeover completions cannot revive
+it. Lost completion replies recover with the exact persisted release intent;
+a newer finite run fences that intent. Trusted orchestration must serialize
+lifecycle operations and route each world to the same Room. These private receipts
+are not cryptographic proof and must never be accepted from a browser.
+
+Close refuses held bodies, unacknowledged departures and Room's existing body
+handoff/presence drain guards. **Occupied-world migration is still unfinished.**
+If an operator releases Room with retained host bodies, this close path cannot
+silently erase them or reacquire server authority. Their explicit recovery/migration
+policy and live routing remain activation blockers. Seamless finite-run rollover
+is also not provided: this path deliberately transitions through browser authority.
+
+Focused tests cover the expired-fence crash, stale receipts, superseded initial
+binding, drained stop and natural expiry, old takeover/release races, lost replies,
+invalid proofs, stale completion after a newer run, and refusal to discard bodies
+or departures. The 229-check combined Worker/source run passed. No Hub/browser
+checks ran, and no production readiness is claimed. The v66 strict-delivery failure
+still applies; v67 changes lifecycle handling, not steady publication scheduling.
+
+
+## v68: explicit occupied recovery and final empty-Room drain
+
+`recoverReleasedHostRoom` is a distinct trusted operator operation. Ordinary
+`claimHostRoom` and publication still refuse a browser-mode Room. Recovery requires
+an explicit supported pose format and the host's persisted takeover intent. Room
+reacquisition uses its current revision CAS, keeps the existing cadence and rate
+debt, and restores the **original** finite run deadline. Only the reconciled exact
+Room receipt grants the replacement host ticket. Lost replies resume that same
+operation; another owner/revision fences it. No body, equipment, session deadline,
+position, pending departure or NPC checkpoint is discarded by this transition.
+
+This also permits recovery after the original run has expired when held bodies or
+pending departures still require cleanup. The Room lease stays capped at the old
+run end, NPC publication remains closed, and the host can process bounded expiry
+and retained departure delivery. It does not authorize new live admission or a
+new paid simulation window. The Room RPC retains preview, mixed-format, cadence,
+capacity and occupant compatibility checks. Voice connections are left intact.
+Trusted lifecycle serialization and same-world/Room routing remain prerequisites.
+
+A final `releaseDrainedNpcAuthority` path now retires the Room's empty handoff index
+and retained body presentation atomically with authority release. It requires the
+host's version-2 drained release intent and an empty Room handoff outbox. If body
+preview was used, all Room occupants must have left. A failed write leaves both
+compatibility markers and server authority intact; restart after success permits
+legacy joins. NPC-only rooms can retain ordinary viewers. This clears the earlier
+permanent empty-index rollback block without silently migrating connected body
+clients or discarding a held body on the host.
+
+These hooks recover retained server state and finish an empty-room drain. They do
+not implement a seamless occupied browser-mode migration, live scene restoration,
+production identity/profile routing, or automatic lifecycle scheduling. First-login
+NPC placement with independent ghost tracks still needs live integration. Activation
+and burst remain disabled. The prior strict-delivery gate still fails.
+
+
+## v69: canonical account-body identity in presentation and reclaim
+
+Room stages authoritative bodies as `player:<accountId>`. The former scene and
+replica adapters instead inferred character and form from names such as
+`gorilla:<handle>`, so a valid canonical Clanker could not attach or render.
+`net.hostCharacter` now resolves a validated canonical body/account pair through
+the authenticated local/remote roster or canonical account identity map. Body kind
+comes from the explicit host view. A name belonging to a different canonical
+account, unsupported kind, mismatched ID or unknown mapping is refused.
+
+The Hub's independent Clanker attachment and NPC ghost lookup use that resolver.
+Frozen replicas and local reservations accept account-keyed bodies only with an
+explicit resolver. Live remote construction also takes name and form from the
+matching host view, overriding conflicting ordinary pose metadata. Stable body IDs
+still own reservations and generation fences; mapped character names only select
+the visual rig and the existing NPC to ghost. No NPC body is consumed or spawned.
+
+The final private live receipt installs the local canonical body name/form without
+sending a legacy body claim or replaying a cached pose. A later grant can replace
+Clanker with Ooga under the same stable account-body ID: the old controller is
+released, the old receipt cannot enable the replacement, and voice stays connected.
+Repeated unchanged scene body reports retain their allocation-free early return.
+
+262 focused source/Worker checks pass, including actual net/reclaim modules and
+remote rig presentation without loading Hub or a browser. CI's focused recovery
+step now includes body-reclaim and host-frozen-bodies checks. Hub edits have syntax
+and build validation only because its STOP restriction remains. This is identity
+and handoff integration, not a completed Hub adapter: trusted world/profile factories,
+Ooga control binding and full-world support/collision validation are still required.
+An offline body for an account absent from the canonical identity map and current
+roster cannot yet resolve its appearance for a late join; it fails closed rather
+than guessing. Production roster/profile provisioning must close that gap before
+activation. No capability flag, rate safeguard or deployment changed.
+
+## v70: durable stop barrier for a connected body
+
+The explicit preview-only `Room.requestBodyStop` RPC now retains a stop request
+before sending `body-stop` on the existing authenticated connection. It requires
+the exact retained Room authority and current connection, a fully live handoff,
+and no unresolved movement sample. After this commit, Room refuses further body
+movement and activation receipts for the request. The optional bounded `stopAt`
+field stays in the existing handoff row; older exact-schema readers refuse it.
+No new timer, subscription, recurring write or disconnected physics loop is added.
+
+The client stops and releases its controller before returning the existing
+`body-decline` acknowledgement. A duplicate stop retries that acknowledgement
+without releasing twice; old preparation and activation messages cannot restart
+the stopped request. A different valid request can subsequently prepare a new
+body. Stop receipts never cross a connection. Voice remains on the same socket.
+
+A send attempt is not proof of a stopped client. Until Room observes a matching
+acknowledgement (or ordinary transport loss), the host generation remains live.
+The first observed close time drives existing host reconciliation and its
+60-second grace deadline. A lost reply or repeated acknowledgement cannot reset
+that timestamp. Host cleanup must still prove the exact generation passive before
+Room retires its record. Stop delivery can be retried after the old grant/Room
+lease expires because it grants no control and cannot renew the finite run.
+
+This is a prerequisite for connected migration, not a completed browser-mode
+switch. No client capability advertises it; no path enables legacy controls after
+the acknowledgement, discards held bodies or removes the occupied-Room release
+guard. The trusted migration coordinator, final mode receipt and live Hub adapter
+remain unfinished. A client which never acknowledges must remain fenced pending
+ordinary close/recovery; there is no timeout that silently authorizes a second
+controller. The existing full-world, strict-delivery and production cost gates
+remain open, with activation and burst disabled.
+
+## v71: final connected release after a complete drain
+
+`closeHostRoomRun(..., { connected: true })` now explicitly selects the connected
+migration protocol. The default close still requires body-mode viewers to leave.
+Host release preparation must first prove that no sessions, held bodies or
+pending departures remain. Room additionally requires an empty handoff outbox,
+at most 32 recipients, the `body-migration=1` capability on every connection, no
+ordinary claimed body and a recorded stop for every handoff participant. A client
+without that capability blocks the transition. There is no forced expiry or
+discard of a player's remaining 60-second hold.
+An occupant marked for body handoff but never prepared/closed still blocks this
+path and must leave or complete a supported handoff/stop exchange. An empty host
+alone is not evidence that an unknown local controller has stopped.
+
+Room commits browser authority, the bounded recipient journal and deletion of
+body compatibility markers in one transaction. A failed authority or journal
+write rolls everything back. After commit, the ordinary authority descriptor
+precedes each private `body-release` receipt. A crash before updating socket
+attachments or notifying clients recovers from that journal on wake. Receipt
+retries match account and connection; they neither affect replacements nor reset
+a newly claimed ordinary body. A newer server authority fences the old receipt.
+Voice connections stay intact throughout this mode transition.
+
+The browser requires the exact separately accepted browser-authority descriptor,
+its current account/connection, no live or preparing body, and no unfinished
+asynchronous preparation. Only then can the explicit receipt clear the body-mode
+latch. Networking clears the old canonical body and movement cache; a fresh
+ordinary claim is required. No cached pose, shot or thrust is replayed. Repeated
+receipts do nothing. `BODY_MIGRATION_PREVIEW` is false, so deployed clients do not
+advertise or accept this migration yet.
+
+If controller disposal throws, the page keeps body controls fenced and does not
+acknowledge a successful stop, accept a replacement body or clear the latch on
+migration/reconnect. A fresh page is required to discard the failed controller;
+voice remains usable. This prevents a disposal failure from being mistaken for
+proof that a second controller may start.
+
+302 focused source/Worker checks and the build pass. These cover actual Room and
+net modules, failed writes, post-commit crash recovery, stale attachments,
+replacement sockets, changed authority, lost final receipts, client disposal
+failure and bounds. They do not execute Hub/browser tests or validate production
+latency. This completes the explicit drained-mode receipt path, not seamless
+transfer of an active world or live Hub integration. No rate policy, automatic
+fallback, production route or activation setting was enabled.
+
+## v72: untouched viewers prove quiescence before migration
+
+`Room.requestBodyQuiescence` handles a body-mode viewer which never received a
+body offer. It refuses any outstanding handoff for that account, claimed ordinary
+body, closing/stale connection or incompatible client. It persists a random
+request nonce, current authority revision and acknowledgement bit in the existing
+socket attachment before sending `body-quiesce`. Retry and Room wake reuse that
+request. A changed authority requires a fresh nonce and acknowledgement.
+
+The client requires the exact account, connection and already accepted server
+authority, plus no handoff/resource/preparation/disposal failure. It blocks new
+local possession before asking the active scene to prove it has no controller.
+Without a scene proof, or with an active/uncertain controller, it sends no ACK.
+Reentrant scene changes and connection loss invalidate a proof in progress.
+Repeated requests can resend the same receipt without repeating scene work.
+Voice stays connected. No unknown local controller is forcibly disposed.
+
+The Hub registers this proof after its controllers exist and on retained-scene
+resume, and unregisters it on leave. It checks the ordinary Ooga, Clanker and
+independent body controllers, crossings, doorway and Cloud Hopper state. The
+existing possession gate refuses new Ooga/Clanker selection while quiescing.
+This is a live-source lifecycle hook; Hub/browser execution remains prohibited
+by the STOP restriction, so scene interaction and teardown are not verified live.
+
+Room accepts only the current socket's exact nonce/revision receipt and saves the
+acknowledgement before using it as migration evidence. An attachment failure leaves
+both the previous durable value and the in-memory permission unchanged. A pending
+quiescence blocks new handoff staging. The connected-release transaction can then
+accept this proof in place of a nonexistent handoff close, while still requiring
+the host/session/departure drain and empty outbox. Final release clears the proof;
+only that separate receipt clears the client's possession latch. A replacement
+socket starts a fresh exchange; it cannot inherit the old acknowledgement.
+
+306 focused checks and the build pass, including actual Room/net paths, failed
+attachment persistence, stale/replaced connections, authority changes, no-scene
+and active-scene refusal, callback teardown and disabled-preview behavior. No
+Hub test or new workerd load run was performed. Full body adapter installation,
+trusted profiles and production orchestration remain unfinished.

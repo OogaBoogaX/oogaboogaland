@@ -263,6 +263,7 @@
   // Receiver wiring is inert until the scene integration and performance gates
   // pass. Never advertise an unfinished body protocol merely because it loads.
   const BODY_PRESENCE_PREVIEW = false;
+  const BODY_MIGRATION_PREVIEW = false;
   const bodyPresence = BL.bodyPresence.create({ send: msg => send(JSON.stringify(msg)),
     monotonic: () => performance.now(), wall: () => Date.now() });
   const bodyReclaim = BL.bodyReclaim.create({ send: msg => send(JSON.stringify(msg)), monotonic: () => performance.now(), wall: () => Date.now(),
@@ -411,9 +412,26 @@
       return;
     }
     if (msg?.t === "body-presence") { bodyPresence.message(msg); return; }
-    if (msg && ["body-prepare", "body-grant", "body-active", "body-live", "body-motion-ack"].includes(msg.t)) {
+    if (msg?.t === "body-quiesce") {
+      if (BODY_MIGRATION_PREVIEW) bodyReclaim.quiesce(msg, state.npcAuthority);
+      return;
+    }
+    if (msg?.t === "body-release") {
+      if (BODY_MIGRATION_PREVIEW && !cabinetAnchor && !holdingBody && bodyReclaim.release(msg, state.npcAuthority)) {
+        // A new ordinary claim may follow. Never replay the old canonical body
+        // ID, pose, shot or thrust when leaving the server handoff protocol.
+        setBody(null, true);
+      }
+      return;
+    }
+    if (msg && ["body-prepare", "body-grant", "body-active", "body-live", "body-motion-ack", "body-stop"].includes(msg.t)) {
       const active = bodyReclaim.active;
       if (bodyReclaim.message(msg) && !active && bodyReclaim.active) {
+        const granted = bodyReclaim.state;
+        if (granted.bodyId?.startsWith("player:")) {
+          if (!hostCharacter(granted)) { bodyReclaim.suspend(); return; }
+          setBody(granted.bodyId, true);
+        }
         // Only a fresh restored-controller report may populate the send cache.
         poseAt = 0; px = NaN; gKnown = poseHasG = false; jetSent = weaponSent = 0;
         hpSent = 100; koSent = false; hpAt = 0;
@@ -718,7 +736,7 @@
     retryTimer = 0;
     if (stopped || ws || !state.me) return;
     setRoom("connecting");
-    ws = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/room?npc-authority=1${BODY_PRESENCE_PREVIEW ? "&body-presence=1" : ""}`);
+    ws = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/room?npc-authority=1${BODY_PRESENCE_PREVIEW ? "&body-presence=1" : ""}${BODY_MIGRATION_PREVIEW ? "&body-migration=1" : ""}`);
     ws.binaryType = "arraybuffer";
     ws.onmessage = onMessage;
     ws.onopen = () => {
@@ -951,13 +969,22 @@
     catch (error) { holdingBody = false; setBody(null); throw error; }
     finally { holdingBody = false; }
   };
-  const setBody = (name) => {
+  const setBody = (name, refreshGrant = false) => {
     if (cabinetAnchor) return;
     if (holdingBody && name === null) return;
-    if (name === body) return;
+    // Called from scene updates: unchanged bodies allocate nothing. A new live
+    // grant can explicitly refresh the form while retaining the same account ID.
+    if (name === body && !refreshGrant) return;
+    const granted = bodyReclaim.required ? bodyReclaim.state : null;
+    const hostBody = granted?.bodyId === name && name?.startsWith("player:");
+    const character = hostBody ? hostCharacter(granted) : null;
+    if (hostBody && !character) return;
+    const kind = hostBody ? granted.kind === "clanker" ? "gorilla" : "ooga" : bodyKind(name);
+    const label = hostBody ? character.handle : bodyName(name);
+    if (name === body && state.bodyKind === kind && state.bodyName === label) return;
     body = state.body = name;
-    state.bodyKind = bodyKind(name);
-    state.bodyName = bodyName(name);
+    state.bodyKind = kind;
+    state.bodyName = label;
     poseAt = 0; px = NaN;
     gKnown = poseHasG = false;
     jetSent = weaponSent = 0; visualKnown = false; restKnown = restActive = false;
@@ -1097,6 +1124,15 @@
     return character && loginOf(character) === String(login).toLowerCase() ? character : null;
   };
   const ownCharacter = () => state.me && characterOf(state.me.login, state.me.id);
+  // Host body IDs identify an account, not a character name or rig form. Resolve
+  // appearance through the authenticated roster/canonical account map; never
+  // interpret player:<id> as a contributor handle or choose a neighbour's NPC.
+  const hostCharacter = view => {
+    if (!Number.isSafeInteger(view?.accountId) || view.accountId < 1
+      || view.bodyId !== `player:${view.accountId}` || !["ooga", "clanker"].includes(view.kind)) return null;
+    const who = state.me?.id === view.accountId ? state.me : remotes.get(view.accountId);
+    return characterOf(who?.login || "", view.accountId);
+  };
   // A local control preference only: never used by room, microphone or sign-in checks.
   const preferredCharacter = () => ownCharacter() || localCharacter;
   const prepareLocalCharacter = () => {
@@ -1120,6 +1156,7 @@
 
   /** null when this visitor may drive the Ooga named `name`; otherwise the words that say why not. */
   const mayDrive = (name) => {
+    if (bodyReclaim.quiescing) return "Body control is paused during the world handoff";
     const owner = BL.characters.get(name);
     if (state.me) return owner && ownCharacter() === owner ? null : "Drive your own Ooga";
     // Explicit debug fixtures prepare no local identity and keep their chosen cast: any bundled Ooga, locally.
@@ -1262,5 +1299,5 @@
     close("off");
   };
 
-  BL.net = { bodyPresence, bodyReclaim, cabinetSeats, takeCabinet, leaveCabinet, get cabinet() { return cabinetSeat; }, handoffBody, hockeyTables, subscribeHockey, sendHockey, subscribeHighscores, subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribeChalk, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendGhost, subscribeGhost, sendThump, subscribeThump, sendGhostState, subscribeGhostState, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
+  BL.net = { bodyPresence, bodyReclaim, cabinetSeats, takeCabinet, leaveCabinet, get cabinet() { return cabinetSeat; }, handoffBody, hockeyTables, subscribeHockey, sendHockey, subscribeHighscores, subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribeChalk, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendGhost, subscribeGhost, sendThump, subscribeThump, sendGhostState, subscribeGhostState, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, hostCharacter, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
 })();

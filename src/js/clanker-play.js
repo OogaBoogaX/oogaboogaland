@@ -403,12 +403,17 @@
         || !body.player?.active || !body.player.root.visible || clankers.list.includes(body.player)) return false;
       const incoming = captureControl(controlState);
       savedNear = camera.near;
-      bodyBinding = { body, onRelease }; player = body.player;
+      const binding = { body, onRelease }, entry = body.player;
+      bodyBinding = binding; player = entry;
       try {
-        if (attachPlayer(player, committed, scope) !== true) { release(false); return false; }
-        return acquireView(player, false, incoming, mode);
+        const attached = attachPlayer(entry, committed, scope);
+        // Scene attachment can synchronously fence/release this body or leave
+        // the scene. Never reacquire its camera/controls after that teardown.
+        if (disposed || bodyBinding !== binding || player !== entry) return false;
+        if (attached !== true || body.active !== true || body.player !== entry) { release(false); return false; }
+        return acquireView(entry, false, incoming, mode);
       }
-      catch (error) { try { release(false); } finally { throw error; } }
+      catch (error) { try { if (bodyBinding === binding) release(false); } finally { throw error; } }
     };
     const detachBody = body => bodyBinding?.body === body && release(false);
     const stepBody = dt => bodyBinding && dt > 0 ? bodyBinding.body.update(dt) : false;
@@ -1119,8 +1124,13 @@
     };
     const dispose = () => {
       if (disposed) return;
-      release(); disposed = true;
-      for (const [node, type, callback, options] of listeners) node.removeEventListener(type, callback, options);
+      // Fence reentrant attachment before scene/camera cleanup. A failed detach
+      // still has to remove input listeners; the reclaim owner retains the error.
+      disposed = true;
+      try { release(); }
+      finally {
+        for (const [node, type, callback, options] of listeners) node.removeEventListener(type, callback, options);
+      }
     };
     const resume = () => {
       if (!disposed) return;

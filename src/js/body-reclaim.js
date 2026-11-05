@@ -24,10 +24,13 @@
     let grant = null, grantText = "", final = null, finalText = "", highestEpoch = 0, world = "";
     let origin = null, requestAt = null, last = null, lifetime = PREPARE_MS;
     let movement = null, movementSequence = 0, sampling = false;
+    let stoppedRequest = null;
+    let disposalFailed = false;
+    let quiescing = false, quiescer = null, quiescence = null, checkingQuiescence = false;
     const stamp = () => ({ mono: monotonic(), wall: wall() });
     const validStamp = s => Number.isFinite(s.mono) && Number.isFinite(s.wall);
     const dispose = (owner, value) => {
-      if (value !== null && value !== undefined) try { owner.release(value); } catch { /* Stay blocked. */ }
+      if (value !== null && value !== undefined) try { owner.release(value); } catch { disposalFailed = true; }
     };
     const clear = next => {
       serial++;
@@ -43,7 +46,7 @@
       // Stop and dispose locally before notifying Room. This releases only the
       // body; transport and voice stay connected. Room owns time and identity.
       clear("blocked");
-      if (request && enabled) try { send({ t: "body-decline", request }); } catch { /* Transport close reconciles a failed send. */ }
+      if (request && enabled && !disposalFailed) try { send({ t: "body-decline", request }); } catch { /* Transport close reconciles a failed send. */ }
     };
     // Never compare the browser's epoch with the server's. Count from the FIRST
     // local request, before the host could issue its reply. Network/queue delay
@@ -84,9 +87,12 @@
         && (world !== m.world || m.epoch >= highestEpoch) && !prepareValid(m)) {
         clear("blocked"); world = m.world; highestEpoch = m.epoch; return false;
       }
-      if (!enabled || !prepareValid(m) || m.accountId !== account || world === m.world && m.epoch < highestEpoch) return false;
+      if (!enabled || quiescing || !prepareValid(m) || m.accountId !== account || m.request === stoppedRequest
+        || world === m.world && m.epoch < highestEpoch) return false;
       if (current?.request === m.request) return JSON.stringify(current) === JSON.stringify(m);
+      stoppedRequest = null;
       clear("blocked");
+      if (disposalFailed) return false; // A failed controller release needs a fresh page, never a second body.
       if (pending || !adapter) {
         // Keep one uncancellable preparation in flight. Refuse this new nonce
         // explicitly so Room can retire it without waiting for a timeout.
@@ -114,6 +120,15 @@
     };
     const message = m => {
       if (m?.t === "body-prepare") return offer(m);
+      if (m?.t === "body-stop") {
+        if (!enabled || Object.keys(m).sort().join(',') !== 'request,t' || !nonce(m.request)) return false;
+        if (current?.request === m.request) { stoppedRequest = m.request; failure(); return true; }
+        if (!current && !disposalFailed && phase === "blocked" && stoppedRequest === m.request) {
+          try { send({ t: "body-decline", request: stoppedRequest }); } catch { /* Retry the same retained stop after a lost ACK. */ }
+          return true;
+        }
+        return false;
+      }
       if (!enabled || !current || m?.request !== current.request) return false;
       if (phase !== "active" && !(remaining() > 0)) { failure(); return false; }
       if (m.t === 'body-motion-ack') {
@@ -187,11 +202,54 @@
     };
     return {
       open(id, token, negotiated, requiredByServer = negotiated) {
+        quiescence = null;
+        stoppedRequest = null;
         clear(required ? "blocked" : "legacy"); account = id; connection = token;
         enabled = negotiated === true && positive(id) && typeof token === "string" && token.length > 0;
         required ||= requiredByServer === true; phase = required ? "blocked" : "legacy";
       },
-      close() { enabled = false; connection = ""; clear(required ? "blocked" : "legacy"); },
+      close() { enabled = false; connection = ""; stoppedRequest = null; quiescence = null; clear(required ? "blocked" : "legacy"); },
+      setQuiescer(fn) {
+        if (typeof fn !== "function") throw Error("scene quiescence proof required");
+        quiescer = fn; quiescence = null;
+        return () => { if (quiescer === fn) { quiescer = null; quiescence = null; } };
+      },
+      quiesce(m, authority) {
+        const a = m?.authority, keys = a?.v === 2 ? 'epoch,format,mode,revision,v,world' : 'epoch,mode,revision,v,world';
+        if (current || pending || resource !== null || disposalFailed || checkingQuiescence || typeof quiescer !== "function"
+          || !connection || !m || Object.keys(m).sort().join(',') !== 'accountId,authority,connection,request,t,v'
+          || m.t !== "body-quiesce" || m.v !== 1 || m.accountId !== account || m.connection !== connection || !nonce(m.request)
+          || !a || Object.keys(a).sort().join(',') !== keys || a.mode !== "server"
+          || !(a.v === 1 || a.v === 2 && a.format === "mixed-1") || !positive(a.revision) || !positive(a.epoch)
+          || typeof a.world !== "string" || !/^[A-Za-z0-9_.:-]{1,80}$/.test(a.world)
+          || !authority || Object.keys(authority).sort().join(',') !== keys || Object.keys(a).some(k => a[k] !== authority[k])) return false;
+        required = quiescing = true;
+        clear("blocked");
+        const attempt = serial, socket = connection, proof = quiescer;
+        if (quiescence?.request !== m.request || quiescence.revision !== a.revision) {
+          checkingQuiescence = true;
+          try {
+            if (proof() !== true || serial !== attempt || socket !== connection || proof !== quiescer || disposalFailed) return false;
+            quiescence = { request: m.request, revision: a.revision };
+          } catch { return false; }
+          finally { checkingQuiescence = false; }
+        }
+        try { send({ t: "body-quiescent", ...quiescence }); } catch { /* Same nonce can retry after a lost ACK. */ }
+        return true;
+      },
+      // Separate final mode receipt, never an implicit fallback on timeout or
+      // missing capability. The caller supplies its already accepted NPC fence.
+      release(m, authority) {
+        const a = m?.authority;
+        if (!required || current || pending || disposalFailed || phase !== "blocked" || !connection
+          || !m || Object.keys(m).sort().join(',') !== 'accountId,authority,connection,t,v'
+          || m.t !== "body-release" || m.v !== 1 || m.accountId !== account || m.connection !== connection
+          || !a || Object.keys(a).sort().join(',') !== 'epoch,mode,revision,v,world'
+          || a.v !== 1 || !positive(a.revision) || a.mode !== "browser" || a.world !== null || a.epoch !== 0
+          || !authority || Object.keys(authority).sort().join(',') !== 'epoch,mode,revision,v,world'
+          || Object.keys(a).some(k => a[k] !== authority[k])) return false;
+        clear("legacy"); stoppedRequest = null; quiescence = null; required = enabled = quiescing = false; return true;
+      },
       suspend() { if (required) failure(); },
       setAdapter(value) {
         if (value !== null && !["prepare", "preflight", "apply", "activate", "release"].every(k => typeof value?.[k] === "function"))
@@ -231,8 +289,10 @@
         return phase === "active" && current.bodyId === bodyId;
       },
       get required() { return required; },
+      get quiescing() { return quiescing; },
       get active() { return phase === "active"; },
-      get state() { return { required, phase, bodyId: current?.bodyId ?? null }; },
+      get state() { return { required, phase, accountId: current?.accountId ?? null,
+        bodyId: current?.bodyId ?? null, kind: current?.kind ?? null }; },
     };
   }
   BL.bodyReclaim = { FEATURE, MAX_BYTES, create };

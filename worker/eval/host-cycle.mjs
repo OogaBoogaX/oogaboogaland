@@ -28,7 +28,7 @@ for (const name of ["virtual-host.js", "host-room.js"]) {
 sourceHashes["simulation-checkpoint.js"] = createHash("sha256")
   .update(await readFile(new URL("../src/simulation-checkpoint.js", import.meta.url))).digest("hex");
 for (const path of ["./host-cycle-worker.mjs", "./host-cycle-prelude.mjs", "./clanker-roaming-simulation.mjs",
-  "../src/clanker-roaming.js", "../src/clanker-buffers.js", "../src/checkpoint-pack.js", "../../src/js/clankers.js", "../../src/js/agent.js"])
+  "../src/host-room-claim.js", "../src/clanker-roaming.js", "../src/clanker-buffers.js", "../src/checkpoint-pack.js", "../../src/js/clankers.js", "../../src/js/agent.js"])
   sourceHashes[path] = createHash("sha256").update(await readFile(new URL(path, import.meta.url))).digest("hex");
 let mf, deniedEgress = 0, now = Date.now(), maxCheckpoint = 0, maxFrame = 0, lastPublish = 0;
 const logs = [], failures = [], sockets = [], times = [], counters = { attemptedHostWrites: 0, attemptedHostWriteBytes: 0, deliveredBytes: 0, deliveredFrames: 0 };
@@ -116,6 +116,8 @@ try {
   await call("disconnect", { ticket, tokens, refs }); const disconnected = (await call("inspect")).saved;
   for (const row of sockets) row.socket.close(); await mf.dispose(); mf = null;
   const restartAt = performance.now(); await start(); assert.deepEqual((await call("inspect")).saved, disconnected);
+  const late = await joinViewer(1, false); await until(() => late.frames.length === 1 || late.errors.length);
+  assert.deepEqual(late.errors, []); assert.deepEqual(Array.from(new Uint8Array(late.frames[0])), expected);
   now += HOST.leaseMs + 1; ticket = (await call("claim")).result;
   const reclaimed = await call("connect", { ticket, index: 29 });
   assert.equal(reclaimed.result.result.resumed, true); assert.deepEqual(reclaimed.result.result.view.equipment, disconnected.sessions.sessions[29].equipment);
@@ -123,10 +125,12 @@ try {
   const restartReclaimMs = performance.now() - restartAt, after = (await call("inspect")).saved;
   assert.deepEqual(after.simulation, disconnected.simulation); assert.equal(after.sessions.sessions[0].deadline, disconnected.sessions.sessions[0].deadline);
   await call("tick", { ticket: { ...ticket, fence: ticket.fence - 1 }, tokens: [] }, /fenced/);
-  const late = await joinViewer(1, false); await until(() => late.frames.length === 1 || late.errors.length);
-  assert.deepEqual(late.errors, []); assert.deepEqual(Array.from(new Uint8Array(late.frames[0])), expected);
-  // A reclaimed host cannot bypass the old Room lease or silently take over.
-  // Finish bounded passive recovery and NPC catch-up before requesting poses.
+  // The coordinated claim fenced Room before granting the new host ticket.
+  // Finish bounded recovery and catch-up before publishing a new pose.
+  const fencedRoom = (await call("room-status")).result;
+  assert.equal(fencedRoom.authority.epoch, ticket.fence);
+  assert.ok(fencedRoom.authority.revision > oldRoom.authority.revision);
+  assert.equal(fencedRoom.sequence, 0);
   const recoveryAt = performance.now(), recoveryRows = [], live = [reclaimed.result.result.session.token];
   for (let i = 0; i < 16; i++) {
     const startAt = performance.now(), r = (await call("tick", { ticket, tokens: live })).result;
@@ -138,15 +142,21 @@ try {
   const settled = (await call("inspect")).saved;
   assert.ok(now - settled.wallCursor < HOST.stepMs, "bounded recovery must catch up");
   assert.equal(settled.sessions.sessions[0].deadline, disconnected.sessions.sessions[0].deadline);
-  assert.ok(settled.sessions.sessions.every(s => s.state !== "grace" || s.stepAt === now));
-  await call("publish", { ticket }, /explicit Room authority acquisition required/);
-  assert.deepEqual((await call("room-status")).result, oldRoom);
-  // Real Room wall time is never overwritten. Waiting for its existing lease
-  // is separate from measured recovery work and bounded by the 10-second lease.
-  const leaseWaitAt = performance.now(), leaseWaitMs = Math.max(0, oldRoom.leaseUntil - Date.now() + 1);
-  assert.ok(leaseWaitMs <= HOST.leaseMs + 1); await delay(leaseWaitMs);
-  const actualLeaseWaitMs = performance.now() - leaseWaitAt;
-  assert.equal((await call("publish", { ticket, acquire: true })).result.status, "published");
+  // Frozen grace has no per-body physics/catch-up timestamp advancement.
+  // Preserve the complete last accepted motion and absolute grace deadline.
+  for (const session of settled.sessions.sessions) if (session.state === "grace") {
+    const prior = disconnected.sessions.sessions.find(s => s.accountId === session.accountId);
+    assert.ok(prior);
+    assert.deepEqual(session.motion, prior.motion);
+    assert.equal(session.stepAt, prior.stepAt);
+    assert.equal(session.deadline, prior.deadline);
+  }
+  // Fencing preserves the previous publication's rate debt. No old-owner
+  // lease wait is needed; the replacement cannot reset the 250 ms rate guard.
+  const gateWaitAt = performance.now(), gateWaitMs = Math.max(0, oldRoom.at + HOST.deliveryMs - Date.now() + 1);
+  assert.ok(gateWaitMs <= HOST.deliveryMs + 1); await delay(gateWaitMs);
+  const actualGateWaitMs = performance.now() - gateWaitAt;
+  assert.equal((await call("publish", { ticket })).result.status, "published");
   await until(() => late.frames.length === 2 || late.errors.length);
   assert.deepEqual(late.errors, []); assert.ok(late.authority.revision > oldRoom.authority.revision);
   assert.equal(late.authority.epoch, ticket.fence);
@@ -164,8 +174,8 @@ try {
   assert.deepEqual(resumed.errors, []); assert.equal(late.frames.length, 2);
   const finalJoin = await joinViewer(3, false); await until(() => finalJoin.frames.length === 1 || finalJoin.errors.length);
   assert.deepEqual(finalJoin.errors, []); assert.deepEqual(finalJoin.frames[0], resumed.frames[1]);
-  const recovery = { rows: recoveryRows, wallMs: performance.now() - recoveryAt, leaseWaitMs: actualLeaseWaitMs,
-    explicitRoomReacquisition: true, staleHostAndRoomRejected: true, oldAckRejected: true, resumedDelivery: true, exactLateJoin: true };
+  const recovery = { rows: recoveryRows, wallMs: performance.now() - recoveryAt, publicationGateWaitMs: actualGateWaitMs,
+    coordinatedRoomTakeover: true, staleHostAndRoomRejected: true, oldAckRejected: true, resumedDelivery: true, exactLateJoin: true };
   const controllerStats = roaming ? (await call("controller-stats")).result : null;
   if (roaming && spacious) assert.equal(controllerStats.active, pairs);
   result = { profile: roaming ? "actual-roaming-1" : "partial-roster", spacious, pairs: roaming ? null : pairs,

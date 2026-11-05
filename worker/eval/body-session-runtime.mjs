@@ -47,7 +47,7 @@ let deliveredBytes = 0, deliveredFrames = 0, clientWorkMs = 0;
 for (const path of ['./body-session-runtime.mjs', './body-session-runtime-worker.mjs', '../src/clanker-roaming.js', '../src/clanker-body-sessions.js',
   '../src/host-body-storage.js', '../src/host-body-operations.js', '../src/room-body-handoff.js', '../src/protocol.js',
   '../src/host-sessions.js', '../src/virtual-host.js', '../../src/js/clankers.js',
-  '../src/room.js', '../src/host-cadence.js', '../src/room-npc-authority.js', '../src/host-room.js', '../src/host-publication.js', './clanker-roaming-simulation.mjs'])
+  '../src/room.js', '../src/host-room-claim.js', '../src/host-cadence.js', '../src/room-npc-authority.js', '../src/host-room.js', '../src/host-publication.js', './clanker-roaming-simulation.mjs'])
   sourceHashes[path] = createHash('sha256').update(await readFile(sourceOverride && path === './clanker-roaming-simulation.mjs'
     ? sourceOverride : new URL(path, import.meta.url))).digest('hex');
 const bounded = async promise => {

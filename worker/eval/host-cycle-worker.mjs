@@ -9,7 +9,7 @@ import { DurableObject } from "cloudflare:workers";
 import { Room } from "../src/room.js";
 import { VirtualHost, HOST, SESSION_PROTOCOL } from "../src/virtual-host.js";
 import { compactSimulation } from "../src/simulation-checkpoint.js";
-import { publishHostPoses } from "../src/host-room.js";
+import { publishHostPoses, claimHostRoom } from "../src/host-room.js";
 import { createPassiveBody } from "../src/passive-body.js";
 import { createNpcPose } from "../src/npc-pose.js";
 import { rosterFixture } from "../test/fixtures/host-roster-fixture.mjs";
@@ -92,7 +92,7 @@ export class CycleHost extends DurableObject {
       else if (command === "disconnect") result = await host.sessions(input.ticket, input.tokens, (r, at) => {
         for (const ref of input.refs) r.disconnect(ref, at); return true;
       });
-      else if (command === "claim") result = await host.claim("cycle-restarted");
+      else if (command === "claim") result = await claimHostRoom(host, room, "cycle-restarted");
       else if (command === "connect") result = await host.connect(input.ticket, [], claim(input.index));
       else if (command === "poses") { const p = await host.poses(input.ticket, { format: "mixed-1" }); result = { sequence: p.sequence, frame: Array.from(new Uint8Array(p.frame)) }; }
       else if (command === "controller-stats" && roaming) result = f.simulation.stats((await this.ctx.storage.get(HOST.key)).simulation);

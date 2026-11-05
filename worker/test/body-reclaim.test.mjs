@@ -22,6 +22,104 @@ function harness(adapter) {
   return { client, sent, timers, at(t, options = {}) { now = t; mono = options.mono ?? t; wall = options.wall ?? t; if (options.runTimers !== false) for (const [id, timer] of [...timers]) if (timer.at <= t) { timers.delete(id); timer.fn(); } } };
 }
 
+test('server stop releases control before ACK, retries a lost ACK and fences stale grants without touching voice', async () => {
+  let released = 0;
+  const h = harness({ prepare: () => ({}), preflight: () => true, apply: () => true, activate: () => true,
+    capture: () => ({ fixture: true }), release() { released++; assert.notEqual(h.sent.at(-1)?.t, 'body-decline'); } });
+  h.client.message(offer()); await flush();
+  h.client.message({ t: 'body-grant', request: offer().request, transfer: transfer({}) });
+  h.client.message(active({})); h.client.message(live());
+  assert.ok(h.client.captureMovement());
+  const stop = { t: 'body-stop', request: offer().request };
+  assert.equal(h.client.message({ ...stop, request: 'b'.repeat(32) }), false);
+  assert.equal(h.client.message({ ...stop, accountId: 1 }), false);
+  assert.equal(h.client.active, true);
+  assert.equal(h.client.message(stop), true); assert.equal(released, 1);
+  assert.deepEqual(h.sent.at(-1), { t: 'body-decline', request: stop.request });
+  assert.equal(h.client.captureMovement(), null); assert.equal(h.client.active, false);
+  assert.equal(h.client.allows('pose', offer().bodyId), false); assert.equal(h.client.allows('mute'), true);
+  assert.equal(h.client.message(offer()), false, 'replayed preparation cannot restart a stopped request');
+  assert.equal(h.client.message(live()), false); assert.equal(h.client.message(active({})), false);
+  const sent = h.sent.length; assert.equal(h.client.message(stop), true);
+  assert.equal(h.sent.length, sent + 1); assert.equal(released, 1);
+  h.client.message({ ...offer('b'.repeat(32)), epoch: 3 }); await flush();
+  assert.equal(h.client.message(stop), false, 'old stop cannot revoke a replacement request');
+  assert.equal(h.client.state.phase, 'ready');
+  h.client.close(); h.client.open(1, 'replacement', true);
+  assert.equal(h.client.message(stop), false, 'stop receipt cannot cross a connection');
+  assert.equal(released, 2);
+});
+
+test('final browser release requires a stopped body, exact current authority and connection, and is idempotent', async () => {
+  let finish, disposed = 0;
+  const h = harness({ prepare: () => new Promise(resolve => { finish = resolve; }), preflight: () => true,
+    apply: () => true, activate: () => true, release() { disposed++; } });
+  const authority = { v: 1, revision: 3, mode: 'browser', world: null, epoch: 0 };
+  const receipt = { t: 'body-release', v: 1, accountId: 1, connection: 'connection', authority };
+  h.client.message(offer()); await flush();
+  assert.equal(h.client.release(receipt, authority), false, 'preparing body is not stopped');
+  h.client.message({ t: 'body-stop', request: offer().request });
+  assert.equal(h.client.release(receipt, authority), false, 'uncancellable preparation must drain');
+  finish({}); await flush(); assert.equal(disposed, 1);
+  for (const wrong of [{ ...receipt, connection: 'old' }, { ...receipt, accountId: 2 }, { ...receipt, v: 2 },
+    { ...receipt, extra: 1 }, { ...receipt, authority: { ...authority, revision: 2 } }])
+    assert.equal(h.client.release(wrong, authority), false);
+  assert.equal(h.client.release(receipt, { ...authority, mode: 'server', epoch: 3, world: 'body-reclaim-fixture' }), false);
+  assert.equal(h.client.release(receipt, { ...authority, incompatible: true }), false);
+  assert.equal(h.client.release(receipt, authority), true);
+  assert.equal(h.client.required, false); assert.equal(h.client.allows('body', 'ordinary'), true);
+  assert.equal(h.client.message(offer()), false, 'release cannot reactivate the old handoff protocol');
+  assert.equal(h.client.release(receipt, authority), false, 'duplicate must not reset a fresh ordinary body');
+  h.client.open(1, 'replacement', true);
+  assert.equal(h.client.release(receipt, authority), false, 'receipt cannot cross reconnect');
+});
+
+test('failed controller disposal cannot acknowledge stop or enable another body through migration or reconnect', async () => {
+  const h = harness({ prepare: () => ({}), preflight: () => true, apply: () => true, activate: () => true,
+    release() { throw Error('controller still attached'); } });
+  h.client.message(offer()); await flush();
+  h.client.message({ t: 'body-grant', request: offer().request, transfer: transfer({}) });
+  h.client.message(active({})); h.client.message(live());
+  const sent = h.sent.length, stop = { t: 'body-stop', request: offer().request };
+  h.client.message(stop); assert.equal(h.sent.length, sent);
+  assert.equal(h.client.message(stop), false); assert.equal(h.client.allows('pose', offer().bodyId), false);
+  const authority = { v: 1, revision: 3, mode: 'browser', world: null, epoch: 0 };
+  assert.equal(h.client.release({ t: 'body-release', v: 1, accountId: 1, connection: 'connection', authority }, authority), false);
+  assert.equal(h.client.message(offer('b'.repeat(32))), false);
+  h.client.close(); h.client.open(1, 'replacement', true);
+  assert.equal(h.client.message(offer('c'.repeat(32))), false); assert.equal(h.sent.length, sent);
+  assert.equal(h.client.allows('mute'), true);
+});
+
+test('untouched-viewer quiescence needs a current scene proof and fences new controls until explicit release', async () => {
+  const h = harness(null), authority = { v: 1, revision: 2, mode: 'server', world: 'body-reclaim-fixture', epoch: 1 };
+  const m = { t: 'body-quiesce', v: 1, accountId: 1, connection: 'connection', request: 'd'.repeat(32), authority };
+  assert.equal(h.client.quiesce(m, authority), false, 'no scene means no proof');
+  let idle = false, checks = 0;
+  const remove = h.client.setQuiescer(() => { checks++; return idle; });
+  for (const bad of [{ ...m, accountId: 2 }, { ...m, connection: 'old' }, { ...m, extra: 1 },
+    { ...m, request: 'bad' }, { ...m, authority: { ...authority, revision: 1 } }])
+    assert.equal(h.client.quiesce(bad, authority), false);
+  assert.equal(checks, 0);
+  assert.equal(h.client.quiesce(m, authority), false); assert.equal(h.sent.length, 0);
+  assert.equal(h.client.quiescing, true); assert.equal(h.client.allows('body', 'ordinary'), false);
+  idle = true; assert.equal(h.client.quiesce(m, authority), true);
+  assert.deepEqual(h.sent.at(-1), { t: 'body-quiescent', request: m.request, revision: 2 });
+  assert.equal(h.client.quiesce(m, authority), true); assert.equal(checks, 2, 'duplicate ACK does not repeat scene work');
+  assert.equal(h.client.message(offer()), false, 'quiescence cannot overlap a new body');
+  assert.equal(h.client.allows('mute'), true);
+  remove(); assert.equal(h.client.quiesce(m, authority), false, 'left scene cannot provide a receipt');
+  h.client.setQuiescer(() => { h.client.close(); return true; });
+  const sent = h.sent.length; assert.equal(h.client.quiesce(m, authority), false); assert.equal(h.sent.length, sent);
+  h.client.open(1, 'next-connection', true); assert.equal(h.client.quiescing, true);
+  h.client.setQuiescer(() => true);
+  assert.equal(h.client.quiesce(m, authority), false);
+  assert.equal(h.client.quiesce({ ...m, connection: 'next-connection', request: 'e'.repeat(32) }, authority), true);
+  const browser = { v: 1, revision: 3, mode: 'browser', world: null, epoch: 0 };
+  assert.equal(h.client.release({ t: 'body-release', v: 1, accountId: 1, connection: 'next-connection', authority: browser }, browser), true);
+  assert.equal(h.client.quiescing, false); assert.equal(h.client.allows('body', 'ordinary'), true);
+});
+
 test('final body is newer than preflight, restored once, and never driven before the committed live receipt', async () => {
   const make = () => {
     const f = clankerController({ checkpointRandom: true, checkpointProfile: 'body-3', start: false });

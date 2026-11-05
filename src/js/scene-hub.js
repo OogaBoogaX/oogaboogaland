@@ -11075,6 +11075,13 @@
   // One independently controlled body, never appended to the NPC roster or
   // its capture array. The reclaim adapter owns the body and its disposal.
   let independentClanker = null, independentClankerGhost = null, releaseFrozenClanker = null;
+  let releaseBodyQuiescer = null;
+  const installBodyQuiescer = () => {
+    releaseBodyQuiescer?.();
+    releaseBodyQuiescer = BL.net.bodyReclaim.setQuiescer(() =>
+      !pilot.player && !crew.player && !clankerPlay.active && !clankers.player && !independentClanker
+      && !entering && !factoryDeparting && !bifrostDeparting && !timechainIsland.gate.busy && !cloudHopper?.active);
+  };
   const detachPlayerClanker = entry => {
     if (!entry || independentClanker !== entry) return;
     independentClanker = null;
@@ -11089,9 +11096,10 @@
     entry.netBody = entry.netMotion = null;
   };
   const attachPlayerClanker = (entry, view, scope) => {
+    const character = BL.net.hostCharacter(view);
     if (independentClanker || !entry || entry.root.parent !== root || clankers.list.includes(entry)
       || entry.capture || entry.renderParts || view?.kind !== "clanker" || view.accountId !== BL.net.state.selfId
-      || view.bodyId !== BL.net.gorillaBody(entry.owner.traits.name)) return false;
+      || !character || character.handle.toLowerCase() !== entry.owner.traits.name.toLowerCase()) return false;
     independentClanker = entry;
     try {
       releaseFrozenClanker = remotes.acquireLocalBody(view, scope, () => BL.net.bodyReclaim.suspend());
@@ -11574,6 +11582,7 @@
     hud.restoreBoards(jumbotronBoard);
     hud.setDestinations(["pile", "lab", "mirror", "underground", "basement", "mempool", "factory", "arcade", "bca", "gate", "bifrost", "timechain"]);
     input.resume(); pilot.resume(); clankerPlay.resume(); chalkboard.resume();
+    installBodyQuiescer();
     islandGuide.resume();
     if (timechainIsland.gate.resume()) hud.toast(`Room ${timechainIsland.gate.preselected} is chosen at the keypad · walk up to it and press Enter to go in`);
     if (factoryMouth?.hall) factoryMouth.hall.resume();
@@ -12268,8 +12277,11 @@
     remotes = BL.remotePlayers.create({
       root, crew, fx, player: controlledGuideActor, visible: remoteShown,
       hostSource: BL.net.bodyPresence,
+      hostCharacterFor: BL.net.hostCharacter,
       hostNpcFor: view => {
-        const name = BL.net.bodyName(view.bodyId).toLowerCase();
+        const character = BL.net.hostCharacter(view);
+        if (!character) return null;
+        const name = character.handle.toLowerCase();
         return view.kind === "clanker"
           ? clankers?.list.find(e => e.owner.traits.name.toLowerCase() === name)?.gorilla || null
           : crew.list.find(c => c.traits.name.toLowerCase() === name) || null;
@@ -12449,6 +12461,7 @@
       birdsEyeMin: GORILLA_BIRDS_EYE_MIN, maxDistance: DIST_MAX
     });
     createClankerEquipment(shared.workSites);
+    installBodyQuiescer();
     clankers.equipment = clankerEquipment;
     clankers.sites = shared.workSites;
     clankers.clear = clankerClear;
@@ -12814,6 +12827,7 @@
     pilot.controls.reset(); input.reset(); pilot.setActive(true);
   };
   const leave = (destroy = false) => {
+    releaseBodyQuiescer?.(); releaseBodyQuiescer = null;
     wpVisit++; wpSignal = null;
     cloudHopper?.cancel();
     rememberCharacterLocations();

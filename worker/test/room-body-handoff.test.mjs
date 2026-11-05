@@ -196,6 +196,31 @@ test('actual host, durable outbox and client agree on final ACK, with no control
   assert.equal((await h.make().read(h.i)).liveSent, true); h.client.close();
 });
 
+test('server stop and lost client ACK recover through the real host without changing the observed grace deadline', async () => {
+  const h = await integrated(), ack = await h.room.receive(h.i, h.clientMessages.at(-1));
+  const answer = await h.host.startedBody(h.ticket, [], 1, h.ref, h.active.transfer);
+  await h.room.complete(h.i, ack.record.pending.revision, answer); await h.room.deliver(h.i);
+  h.client.message(h.sent.at(-1)); assert.equal(h.controls(), true);
+  h.at(100300); await h.room.requestStop(h.i); await h.room.deliver(h.i);
+  h.client.message(h.sent.at(-1)); assert.equal(h.controls(), false);
+  assert.equal(h.session().state, 'live', 'sending stop does not claim the host is already passive');
+  h.at(100600); const restarted = h.make();
+  await restarted.deliver(h.i); h.client.message(h.sent.at(-1));
+  await restarted.receive(h.i, h.clientMessages.at(-1));
+  const facade = { closedBodyHandoff: (_, i) => restarted.cleanup(i),
+    resolveBodyHandoff: (_, i, revision, proof) => restarted.resolveClosed(i, revision, proof) };
+  const authority = { world: h.ticket.world, owner: h.ticket.owner, epoch: h.ticket.fence };
+  h.at(100800); h.hostStorage.lose();
+  await assert.rejects(closeBodyHandoff(h.host, facade, h.ticket, authority, h.i, []), /lost committed/);
+  assert.equal(h.session().state, 'grace'); assert.equal(h.session().deadline, 160600);
+  h.at(101000);
+  assert.equal((await closeBodyHandoff(h.host, facade, h.ticket, authority, h.i, [])).status, 'resolved');
+  assert.equal(h.session().deadline, 160600); assert.equal(await restarted.read(h.i), null);
+  assert.equal(h.client.allows('mute'), true); assert.equal(h.current.get(1), h.i.connection);
+  assert.equal(h.session().motion.vx, 0); assert.equal(h.session().motion.vy, 0); assert.equal(h.session().motion.vz, 0);
+  h.client.close();
+});
+
 test('close racing the final host ACK restores the ORIGINAL deadline when live notification was never attempted', async () => {
   const h = await integrated(), ack = await h.room.receive(h.i, h.clientMessages.at(-1));
   h.at(100150); await h.room.receive(h.i, { t: 'body-decline', request: request(1) }); h.client.close();
@@ -255,6 +280,54 @@ async function liveMovement(f) {
   await box.deliver(i); return box;
 }
 const motion = (sequence = 1) => ({ t: 'body-motion', request: request(1), sequence, checkpoint: { wire: 'bounded fixture' } });
+
+test('durable body stop survives failed writes and lost replies without closing before the authenticated ACK', async t => {
+  const f = fixture(), i = identity(), box = await liveMovement(f);
+  f.at(100100); const before = f.storage.snapshot(), sent = f.sent.length;
+  f.storage.fail(1); await assert.rejects(box.requestStop(i), /write failure/);
+  assert.deepEqual(f.storage.snapshot(), before); assert.equal(f.sent.length, sent);
+  f.storage.lose(); await assert.rejects(box.requestStop(i), /lost committed/);
+  f.at(112000); const restart = f.make(), retained = f.storage.snapshot();
+  const stop = await restart.requestStop(i);
+  assert.equal(stop.stopAt, 100100); assert.equal(stop.closedAt, null);
+  assert.equal(stop.phase, 'live'); assert.equal(await restart.cleanup(i), null);
+  const bytes = value => Buffer.byteLength(JSON.stringify(value));
+  t.diagnostic(JSON.stringify({ scope: 'fixture full Room handoff row; JSON only, no provider overhead',
+    beforeBytes: bytes(before.get(ROOM_BODY.prefix + 1)), stoppedBytes: bytes(stop),
+    maxStopFieldBytes: bytes({ stopAt: Number.MAX_SAFE_INTEGER }) - bytes({}) + 1,
+    maxRowBytes: ROOM_BODY.rowBytes, newStopLogicalPuts: 1, recurringStopWrites: 0 }));
+  assert.deepEqual(f.storage.snapshot(), retained, 'retry does not rewrite the stop or grace deadline');
+  assert.equal(await restart.deliver(i), true, 'stop grants no control and survives the old activation expiry');
+  assert.deepEqual(f.sent.at(-1), { t: 'body-stop', request: request(1) });
+  await assert.rejects(restart.receiveMovement(i, motion()), /handoff/);
+  assert.equal((await restart.receive(i, receipt('body-started', stop))).status, 'refused');
+  f.current.set(1, 'replacement');
+  assert.equal(await restart.deliver(i), false);
+  assert.equal((await restart.receive(i, { t: 'body-decline', request: request(1) })).status, 'refused');
+  f.current.set(1, i.connection);
+  const ack = { t: 'body-decline', request: request(1) };
+  assert.equal((await restart.receive(i, ack)).status, 'closed');
+  assert.equal((await restart.read(i)).closedAt, 112000, 'only observed stop acknowledgement closes the live generation');
+  f.at(112300); await restart.receive(i, ack);
+  assert.equal((await restart.cleanup(i)).closedAt, 112000);
+  assert.equal((await restart.read(i)).stopAt, 100100); assert.equal(await restart.deliver(i), false);
+});
+
+test('stop refuses unresolved durable movement and retains the last accepted sample for cleanup', async () => {
+  const f = fixture(), i = identity(), box = await liveMovement(f);
+  f.at(100100); await box.receiveMovement(i, motion()); const pending = f.storage.snapshot();
+  await assert.rejects(box.requestStop(i), /handoff/);
+  assert.deepEqual(f.storage.snapshot(), pending);
+  await box.completeMovement(i, 1, { sequence: 1, at: 100100 });
+  const accepted = await box.movement(i);
+  f.at(100200); await box.requestStop(i);
+  await assert.rejects(box.receiveMovement(i, motion(2)), /handoff/);
+  assert.deepEqual(await box.movement(i), accepted);
+  await box.receive(i, { t: 'body-decline', request: request(1) });
+  const cleanup = await box.cleanup(i); assert.equal(cleanup.kind, 'disconnect');
+  await box.resolveClosed(i, cleanup.revision, { ref: ref(1), view: null });
+  assert.equal(await box.read(i), null); assert.equal(f.storage.snapshot().has(ROOM_MOVEMENT.prefix + 1), false);
+});
 
 test('Room movement keeps exactly one durable unresolved sample; restart, lost replies and duplicates preserve observation time', async () => {
   const f = fixture(), i = identity(), box = await liveMovement(f), message = motion();

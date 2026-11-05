@@ -70,8 +70,19 @@
   // swimmer's arms by it, from the position the pose transport already carries, with no simulation of its own.
   // A hub supplies its companion's style and hides its local copy through the gorilla hooks; other scenes
   // use a basic managed rig. Both bodies share the room pose, nameplate and collision actor lifecycle.
-  const create = ({ root, crew = null, fx = null, player = null, posed = null, visible = sameZone, hide = null, createGorilla = null, hideGorilla = null, hostSource = null, hostNpcFor = null }) => {
+  const create = ({ root, crew = null, fx = null, player = null, posed = null, visible = sameZone, hide = null, createGorilla = null, hideGorilla = null, hostSource = null, hostNpcFor = null, hostCharacterFor = null }) => {
     const net = BL.net;
+    const hostName = view => {
+      if (hostCharacterFor) {
+        const character = hostCharacterFor(view);
+        return typeof character?.handle === "string" && character.handle.length > 0 && character.handle.length <= 80
+          ? character.handle : null;
+      }
+      // Legacy source fixtures/scenes retain their name-keyed presentation.
+      // Account-keyed bodies always need an explicit authenticated resolver.
+      if (view?.bodyId?.startsWith("player:") || (net.bodyKind(view.bodyId) === "gorilla") !== (view.kind === "clanker")) return null;
+      return net.bodyName(view.bodyId);
+    };
     const bodies = new Map(), displayEntries = [];
     let liveBindings = null;
     // The chat subscription, taken on the first update and again after a kept hub's suspend disposed it; the
@@ -306,14 +317,15 @@
       npcFor: view => hostNpcFor ? hostNpcFor(view) : null, drop: disposeReplica,
       make(view) {
         const e = view.equipment, m = view.motion, gorilla = view.kind === "clanker";
-        if ((net.bodyKind(view.bodyId) === "gorilla") !== gorilla)
+        const name = hostName(view);
+        if (!name)
           throw Error("frozen body identity/form mismatch");
         // The current managed Clanker rig has no wearable weapon/jetpack
         // adapter. Refuse that unsupported state instead of silently losing it.
         if (gorilla && (e.weapon !== null || e.jetpack)) throw Error("unsupported frozen Clanker equipment");
         const visual = Array(17).fill(0);
         visual[3] = (e.primaryOwned ? 1 : 0) | (e.secondaryOwned ? 2 : 0) | (e.jetpackOwned ? 4 : 0);
-        const rec = { id: view.accountId, body: view.bodyId, bodyName: net.bodyName(view.bodyId),
+        const rec = { id: view.accountId, body: view.bodyId, bodyName: name,
           bodyKind: gorilla ? "gorilla" : "ooga", zone: view.zone, x: m.x, y: m.y, z: m.z, yaw: m.yaw,
           jet: e.jetpack ? 1 : 0, weapon: (e.weapon === "gun" ? 2 : e.weapon === "primary" ? 1 : 0) | (e.mode === "combat" ? 4 : 0),
           visual, visualAt: net.serverNow(), g: gorilla ? [2, 0, 0, 0, 0, 0] : null, voice: false, hp: 100, ko: false };
@@ -357,7 +369,9 @@
         if (!entry) {
           if (bodies.size >= liveCapacity) continue;
           const hostView = frozen?.active ? frozen.liveView(rec) : null;
-          entry = build(rec, !frozen?.active);
+          const name = hostView && hostName(hostView);
+          if (hostView && !name) continue;
+          entry = build(hostView ? { ...rec, bodyName: name, bodyKind: hostView.kind === "clanker" ? "gorilla" : "ooga" } : rec, !frozen?.active);
           if (frozen?.active) {
             bodies.set(rec.id, entry); entry.hostWorld = frozen.world; entry.hostEpoch = frozen.epoch;
           }
@@ -432,7 +446,7 @@
     };
     const acquireLocalBody = (view, scope, onFenced) => {
       if (!frozen || view?.accountId !== net.state.selfId || typeof view.bodyId !== "string"
-        || (net.bodyKind(view.bodyId) === "gorilla") !== (view.kind === "clanker")) throw Error("local body presentation identity");
+        || !hostName(view)) throw Error("local body presentation identity");
       let release;
       try {
         release = frozen.acquireLocal(view, scope, onFenced, capacity => {

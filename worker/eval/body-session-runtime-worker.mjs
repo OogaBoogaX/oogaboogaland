@@ -6,7 +6,7 @@ import '../../src/js/clanker-rage.js';
 import '../../src/js/clankers.js';
 import { DurableObject } from 'cloudflare:workers';
 import { Room } from '../src/room.js';
-import { publishHostPoses } from '../src/host-room.js';
+import { publishHostPoses, claimHostRoom } from '../src/host-room.js';
 // Diagnostic timestamp only: use Room's actual commit time for pacing instead
 // of adding another 250 ms after the RPC and client validation have completed.
 export class MeasuredRoom extends Room {
@@ -148,12 +148,14 @@ export class BodySessionHost extends DurableObject {
         for (const ref of input.refs) r.disconnect(ref, at); return true;
       });
       else if (command === 'publish') result = await publishHostPoses(
-        measured(host, ['poses', 'confirmPoses'], 'host'),
+        measured(host, ['poses', 'bindRoomPublication', 'confirmPoses'], 'host'),
         measured(this.env.ROOM.get(this.env.ROOM.idFromName('fixture')),
           ['npcAuthorityStatus', 'configureNpcAuthority', 'publishNpcSnapshot'], 'room'),
         input.ticket, { acquire: input.acquire === true, format: 'mixed-1', ...(input.roomState ? { roomState: input.roomState } : {}), ...(input.rolling || input.burst ? { cadence: input.burst ? 'rate-4-burst-2-v1' : 'rolling-4-v1' } : {}) });
-      else if (command === 'claim') result = await host.claim('replacement');
-      else if (command === 'cleanup-claim') result = await host.claimBodyCleanup('departure-cleanup');
+      else if (command === 'claim') result = (await host.storage.transaction(tx => host.read(tx))).room
+        ? await claimHostRoom(host, this.env.ROOM.get(this.env.ROOM.idFromName('fixture')), 'replacement') : await host.claim('replacement');
+      else if (command === 'cleanup-claim') result = (await host.storage.transaction(tx => host.read(tx))).room
+        ? await claimHostRoom(host, this.env.ROOM.get(this.env.ROOM.idFromName('fixture')), 'departure-cleanup') : await host.claimBodyCleanup('departure-cleanup');
       else if (command === 'ack' || command === 'fail-ack') result = await host.acknowledgeBodyDepartures(input.ticket, input.receipt);
       else if (command === 'retained-close') result = await host.closeRetainedBody(input.ticket, input.ref, input.closedAt);
       else if (command === 'event' || command === 'fail-event') result = await host.reconcileBodies(input.ticket, input.tokens, input.closes || []);

@@ -495,3 +495,234 @@ stale frame” would depend on enforcing a single coordinator and bounding in-fl
 requests; it is not a proven cross-process guarantee. The existing rate and final
 confirmation checks remain unchanged. No new throughput benchmark was run for
 this model-change hook, and the v63 strict delivery failure remains an open gate.
+
+## v65: reproduced host/Room takeover gap
+
+At v65, `worker/eval/publication-takeover.mjs` reproduced this gap in a finite
+source-level diagnostic. It uses the actual VirtualHost, RoomNpcAuthority and publication bridge with serial,
+rollback-capable in-memory stores, an authored data-only simulation and one shared
+logical clock. No Hub, browser, network, timer or production resource is involved.
+The v65 output is retained as `verification-v65-publication-takeover.json`.
+The v66 evaluator now asserts that the delayed frame is rejected instead.
+
+The host begins at 100000 with lease expiry 110000. Room first acquires authority
+and publishes at 109750, giving its separate lease expiry 119750. A host session
+mutation increments the revision at 109751 without renewing host ownership. That
+revision passes final confirmation, but its Room call is delayed until 110001.
+At that point runner B successfully acquires host epoch 2. Room nevertheless
+accepts the in-flight epoch-1 publication and renews its lease to 120001. Old host
+reads correctly fail with `host fenced`; new Room acquisition correctly refuses
+while the independent old Room lease remains live.
+
+This reproduces stale presentation after host takeover and delayed replacement
+Room acquisition in the existing cross-object protocol. It does not demonstrate
+two simultaneous Room owners, establish a production delay distribution, or prove
+a bound on stale requests across processes. Moving the rate wait after confirmation
+would widen an already-existing gap. A second check after publication cannot undo
+a frame already sent. A safe scheduling change therefore needs coordinated
+publication/takeover fencing, including delayed requests and lifecycle mutations;
+the separate leases and a timestamp alone do not provide that guarantee.
+
+No scheduler, lease, rate, capacity or activation policy changed. The latest strict
+runtime result remains v63's failed gate. This diagnostic adds no CPU or billing
+measurement. Activation stays disabled pending both ownership and performance
+validation.
+
+## v66: coordinated takeover verification and current strict-delivery result
+
+The host now persists a takeover intent, fences Room, then grants its replacement
+ticket. `node worker/eval/publication-takeover.mjs` reports both authorities at
+epoch 2, no replacement pose committed, and the delayed old frame rejected. Rate
+debt survives the fence. This resolves the v65 acceptance race for the coordinated
+NPC publication path; it does not make ordinary host revision/lifecycle changes
+atomic with every Room publication. The final host confirmation remains in place.
+
+Binding adds one initial host write. A successful takeover adds two host writes
+(intent and completion) plus one Room fence write; no new host write is added per
+steady publication. The tested typical pending binding encodes to 175 JSON bytes;
+maximum-width identifiers and counters encode to 421 bytes. The corresponding
+empty-session host metadata example is 917 bytes within the unchanged 2,048-byte
+reservation and 128-node cap. These are encoding measurements; the independent
+scalar maxima do not describe one simulated timeline. Every actual checkpoint
+continues to validate the full metadata and admitted-session reservations.
+
+The local SQLite/workerd smoke used two actors, two viewers and 30 frozen sessions.
+It passed restart, coordinated takeover, preserved frozen position/timestamp/grace,
+timely reclaim, bounded catch-up, late joins and rejection of old host/Room frames
+and old ACKs. Peak checkpoint/frame sizes were 18,705/523 bytes. Five catch-up
+operations each took at most eight NPC steps and zero disconnected-body steps.
+These small samples are correctness evidence, not a capacity or latency percentile
+claim. The first attempt was blocked by loopback permissions before assertions;
+the first executed run exposed an obsolete moving-body assertion, corrected to
+require unchanged frozen motion, timestamp and deadline. The corrected run passed.
+
+One representative strict trial used 53 restricted NPCs, 30 frozen records,
+32 protocol connections (31 serial Node decoders, one stalled) and 20 ms synthetic
+downstream delay, for 120 target frames. **The gate still fails:** 113 frames
+published, seven superseded and 99 late. First-client p95 was 282.64 ms and
+last-client p95 345.59 ms. Consecutive-sequence logical publication gaps were
+minimum/median/p95/maximum 254/256/257/259 ms. The takeover fix does not remove
+post-gate scheduling/confirmation work; neither cadence nor the rate guard changed.
+
+The steady sample recorded 150 host puts, 7,915,917 serialized write bytes and
+26,893,122 delivered application bytes including warmup. The one-time binding and
+admission writes are outside those steady host-put counters; Room, diagnostic,
+provider billing and browser costs remain excluded. Host completion p95 was
+109.39 ms. Egress attempts and runtime errors were zero. The cached runtime was
+Miniflare 5.20261001.0-alpha / workerd 1.20261001.1, not production certification.
+
+Artifacts: `verification-v66-workerd-smoke-fixed.json`,
+`verification-v66-strict.json` (SHA256
+`dcd8e494cacc28cd17beba651c4428375ee7f6874296c5a88b1c922f8586180c`), and
+`verification-v66-strict-summary.json`. Activation stays disabled pending live
+world/profile integration, lifecycle orchestration, coordinated finite-run
+rollover, strict delivery headroom and combined resource/cost validation. No paid
+loop, deployment, provisioning or production action occurred.
+
+
+## v67: review fixes and close-path cost bounds
+
+The independent v66 review identified release/restart liveness gaps, an expired
+first-publication lease, and initial-binding races. The later local fixes passed
+229 focused Worker/source checks. A drained close adds two host writes (intent and
+completion) plus one Room release write; an already browser-mode Room needs no
+release write. A racing old takeover may add one failed CAS attempt. An identical
+completed-close reconciliation adds no writes. No steady host publication write,
+recurring timer, larger capacity reservation or relaxed rate policy was added.
+
+The maximum-width release binding measures 440 JSON bytes, with its empty-session
+host metadata measuring 936 bytes, below the unchanged 2,048-byte/128-node bound.
+These are encoding bounds rather than one physically realizable timeline. Room's
+optional `fencePending` flag adds 20 JSON bytes while true and 21 while false,
+including its comma, and is removed on authority configuration/release. The
+explicit release also retains strict rate debt for records that never used a
+coordinated takeover.
+
+`verification-v67-checkpoint.log` records the combined checks. The v66 workerd
+smoke and representative throughput sample predate these lifecycle edits; they
+must not be described as validation of v67. No unchanged benchmark was repeated.
+There is still no production billing evidence, full-world browser validation or
+strict four-Hz pass. Occupied-world migration, live scene integration and realistic
+combined cost remain blockers. Activation and burst stay disabled.
+
+
+## v68: recovery costs and paired publication delay
+
+Explicit recovery from browser authority uses the existing two host takeover
+writes plus one Room reacquisition write, without changing the run deadline or
+adding steady-state writes. Final drained release uses one Room transaction for
+authority plus two compatibility-key deletions; the host retains its two-step
+release protocol. Outbox checking is bounded by its existing 32-entry index, and
+a nonempty index prevents release. No recurring task or paid loop was enabled.
+
+A post-analysis of the saved v66 strict trace (no new benchmark) measures paired
+spans within the local runtime. Across 113 emitted frames, final host confirmation
+was median 2 / p95 3 ms; Room entry to its recorded publication timestamp was
+median 2 / p95 3 ms. The paired total from pacing-gate wake to recorded publication
+was minimum 3 / median 4 / p95 5 / maximum 7 ms. Across 105 consecutive-sequence
+pairs, recorded publication gaps were 254/256/257/259 ms (minimum/median/p95/max).
+The timestamp is taken inside the Room transaction, before completion; its return
+followed median 9 / p95 10 ms later. These are integer-millisecond local spans,
+not Cloudflare production CPU or network measurements.
+
+The strict gate is tied to the prior actual publication. Positive work after that
+gate accumulates phase delay against fixed 250 ms input arrivals. Reducing other
+simulation work alone does not eliminate that scheduling structure. Moving the
+final host confirmation earlier would weaken the current freshness check; burst
+or rate changes remain unapproved. A different ownership-safe publication design
+or a separately considered service target is still needed before activation.
+The serial Node client harness adds a distinct median 64.95 / p95 68.26 ms from
+first to last decoder; it is not per-user CPU for independent real browsers.
+
+Artifact: `verification-v68-delivery-analysis.json`, derived from the unchanged
+v66 strict artifact hash above. The analysis does not turn the failed gate into a
+pass, and v68 source changes have not had a fresh workerd load or browser run.
+
+
+## v69: client identity bridge, unchanged delivery gate
+
+Account/body-to-character resolution is event-driven at replica creation, local
+attachment and grant change. It adds no durable writes or wire fields and no
+stationary-body physics. The existing unchanged-body early return avoids adding
+an allocation to every scene update. Live replica construction makes one resolved
+record copy when that replica is created, not per pose update. No production CPU
+measurement is claimed; source/rig checks retain the no-recurring-pose-work guard.
+
+The saved v66 timing evidence and v68 paired-delay analysis still apply to the
+publication investigation; v69 does not modify that algorithm. With a strict
+250 ms minimum measured from each actual Room publication, positive work after
+the gate creates drift against a 250 ms arrival stream. Moving the confirmation
+earlier or allowing burst would change the safety/rate contract. No such change
+was made. Co-locating the decisive ownership check with publication commit is a
+possible future design to assess, not an implemented or measured solution.
+Activation remains blocked by that gate and the live-world validation gaps.
+
+## v70: connected stop cost and unchanged pacing
+
+The stop barrier adds one logical write of the existing bounded handoff row per
+new stop request. Retries read that row and resend the same small control message;
+they do not rewrite its timestamp. The existing decline/cleanup path handles the
+acknowledgement. No per-body timer, extra durable record, recurring publication or
+physics loop is introduced. The handoff row remains capped at 34,816 bytes.
+
+The focused fixture measured the complete JSON handoff row at 748 bytes before
+stop and 764 bytes afterward. The new field adds at most 26 JSON bytes with a
+maximum-width safe integer timestamp; revision growth can also add a digit.
+This is metadata overhead, not a claim that every real transfer fits 764 bytes:
+the retained checkpoint determines the full row size, and the existing bound
+continues to reject oversized records. Provider key/encoding overhead, billed
+operations, network latency and production CPU were not measured here.
+
+The combined source checks still enforce strict publication delay/deadline rules.
+No new workerd benchmark was run, and the previously failed four-Hz result is
+unchanged. Connected mode switching and real Hub performance remain unverified.
+
+## v71: bounded connected migration journal
+
+One explicit migration commits two logical puts (Room authority and the release
+journal) and deletes the two retired body-mode markers in the same transaction.
+The journal holds at most 32 account/connection pairs in a 4,096-byte JSON bound.
+A one-recipient fixture uses 160 bytes; maximum-width IDs, 64-character connection
+tokens and a maximum-width authority revision use 3,659 bytes. The corresponding
+private message is at most 223 JSON bytes, or 7,136 bytes for all 32 recipients.
+These measurements exclude keys, provider encoding, transport and billed units.
+
+Successful receipt retries do not write the durable journal. Socket attachments
+are updated once per matching connection/revision, and the receipt can be resent
+without resetting a fresh ordinary body. Restart checks the journal only when a
+persisted browser-authority record exists; ordinary Rooms without such an
+authority gain no migration-journal read. There is no new recurring timer or
+simulation work. Production CPU and billing remain unmeasured.
+
+Strict delivery is unchanged. The deterministic delayed-commit tests still pass
+their safety contracts, while the saved load result still fails its throughput
+gate. With a 250 ms minimum from each actual publication, even a fixed additional
+3–7 ms after that gate yields approximately 3.89–3.95 publications per second,
+before other delays. Prefetch already overlaps work before the gate; moving the
+final host confirmation earlier changes the freshness guarantee. Co-locating the
+decisive ownership/freshness check and publication commit remains a larger design
+candidate, not a measured fix. No production-readiness claim or rate relaxation
+follows from the migration tests.
+
+## v72: quiescence uses existing socket attachments
+
+The request and acknowledgement each serialize the existing connection attachment
+once. Duplicate requests/acknowledgements perform no additional attachment writes.
+The fixed quiescence value is 80 JSON bytes with a one-digit revision, 95 bytes
+with a maximum-width revision, and adds at most 113 JSON bytes including its field
+name/comma to an existing object. The complete authored viewer fixture measures
+645 bytes before and 743 bytes after. These are JSON measurements, not provider
+serialization sizes or a worst-case bound on the existing voice/scene attachment.
+
+Cloudflare's current [WebSocket attachment documentation](https://developers.cloudflare.com/durable-objects/best-practices/websockets/#websocketserializeattachment)
+states a 16,384-byte serialized maximum and persistence only while the socket
+remains healthy. That lifetime fits this proof: replacement/disconnected viewers
+must not retain permission from a former connection. Host body continuity remains
+in the existing durable records. Full runtime attachment size, including existing
+voice and visual metadata and provider encoding, still requires validation before
+activation. Persistence failure refuses migration rather than dropping fields.
+
+This increment creates no SQL row, timer or recurring body update. It does add a
+nonce-bearing attachment field and bounded explicit control messages. Source tests
+validate retry behavior; production CPU/billing and strict publication throughput
+are unchanged and unverified by this increment.

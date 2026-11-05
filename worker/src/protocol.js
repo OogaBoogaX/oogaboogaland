@@ -308,6 +308,9 @@ export const parseClientMessage = (text) => {
   }
   if (msg.t === "npc-ack") return Number.isSafeInteger(msg.revision) && msg.revision > 0
     && Number.isSafeInteger(msg.sequence) && msg.sequence > 0 ? { t: "npc-ack", revision: msg.revision, sequence: msg.sequence } : null;
+  if (msg.t === "body-quiescent") return Object.keys(msg).sort().join(",") === "request,revision,t"
+    && typeof msg.request === "string" && /^[0-9a-f]{32}$/.test(msg.request)
+    && Number.isSafeInteger(msg.revision) && msg.revision > 0 ? msg : null;
   if (msg.t === "body-presence-ack") return Object.keys(msg).length === 4
     && ["authority", "epoch", "revision"].every(k => Number.isSafeInteger(msg[k]) && msg[k] > 0)
     ? { t: msg.t, authority: msg.authority, epoch: msg.epoch, revision: msg.revision } : null;

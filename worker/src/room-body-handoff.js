@@ -33,10 +33,12 @@ function transferValid(t, r, state) {
 }
 function validate(r) {
   boundedJSON(r, ROOM_BODY.rowBytes, 1024);
-  if (!exact(r, ["v", "revision", "accountId", "connection", "request", "kind", "preparation", "claim", "phase", "at", "ref", "transfer", "pending", "closedAt", "liveSent"])
+  if (!exact(r, ["v", "revision", "accountId", "connection", "request", "kind", "preparation", "claim", "phase", "at", "ref", "transfer", "pending", "closedAt", "liveSent", ...(Object.hasOwn(r || {}, "stopAt") ? ["stopAt"] : [])])
     || ![2, 3].includes(r.v) || r.v === 3 && !['live', 'closed'].includes(r.phase) || !positive(r.revision) || !identityValid({ accountId: r.accountId, connection: r.connection })
     || !token(r.request) || !["ooga", "clanker"].includes(r.kind) || !phases.includes(r.phase) || !integer(r.at)
     || typeof r.liveSent !== "boolean" || r.liveSent && !["live", "closed"].includes(r.phase)) fail();
+  if (Object.hasOwn(r, "stopAt") && (!integer(r.stopAt) || r.stopAt > r.at || !r.liveSent
+    || !["live", "closed"].includes(r.phase) || r.pending !== null)) fail();
   const p = r.preparation;
   if (!exact(p, ["v", "world", "epoch", "accountId", "bodyId", "generation", "nextGeneration", "expiresAt"])
     || p.v !== 1 || !name(p.world) || !name(p.bodyId) || p.accountId !== r.accountId || !positive(p.epoch)
@@ -146,6 +148,7 @@ export class RoomBodyHandoff {
         r.revision++; r.at = r.closedAt = now; r.phase = "closed";
         await tx.put(key(r.accountId), validate(r)); return { status: "closed", record: structuredClone(r) };
       }
+      if (Object.hasOwn(r, "stopAt")) return { status: "refused" };
       if (this.current(identity) !== true || r.phase === "closed") return { status: "refused" };
       const stage = { "body-ready": ["prepared", "offering"], "body-applied": ["offered", "activating"], "body-started": ["starting", "confirming"] }[m.t];
       if (m.t !== "body-ready" && !matchesReceipt(m, r.transfer)) return { status: "refused" };
@@ -206,7 +209,7 @@ export class RoomBodyHandoff {
     const input = structuredClone(message), who = { ...identity };
     return this.storage.transaction(async tx => {
       const r = await this.read(who, tx), now = this.now(r);
-      if (!r || r.phase !== 'live' || !r.liveSent || input.request !== r.request || this.current(who) !== true) fail();
+      if (!r || r.phase !== 'live' || !r.liveSent || Object.hasOwn(r, 'stopAt') || input.request !== r.request || this.current(who) !== true) fail();
       const old = await this.movement(who, tx, r);
       if (this.current(who) !== true) fail();
       if (old) {
@@ -283,6 +286,22 @@ export class RoomBodyHandoff {
       await tx.put(key(r.accountId), validate(r)); return structuredClone(r);
     });
   }
+  // Persist a stop request before notifying a connected controller. No new
+  // movement or handoff can start afterward. The authenticated decline ACK,
+  // not the send attempt, records the body close time for host reconciliation.
+  async requestStop(identity) {
+    if (!identityValid(identity)) fail();
+    return this.storage.transaction(async tx => {
+      const r = await this.read(identity, tx), now = this.now(r);
+      if (!r || this.current(identity) !== true) fail();
+      if (Object.hasOwn(r, "stopAt")) return r;
+      if (r.phase !== "live" || !r.liveSent || r.pending) fail();
+      const movement = await this.movement(identity, tx, r);
+      if (movement && !movement.receipt) fail();
+      r.stopAt = now; r.at = now; r.revision++;
+      await tx.put(key(r.accountId), validate(r)); return structuredClone(r);
+    });
+  }
   // Read the SAME durable command after an uncertain reply. Only the host's
   // atomic receipt API may retry it; raw offerBody must never be retried here.
   async command(identity) {
@@ -335,6 +354,8 @@ export class RoomBodyHandoff {
   }
   async deliver(identity) {
     let r = await this.read(identity); const now = this.now(r);
+    if (r?.phase === "live" && Object.hasOwn(r, "stopAt") && this.current(identity) === true)
+      return this.send(identity, { t: "body-stop", request: r.request }) === true;
     if (!r || r.pending || r.phase === "closed" || this.current(identity) !== true
       || now >= (r.transfer?.expiresAt ?? r.preparation.expiresAt)) return false;
     let message;

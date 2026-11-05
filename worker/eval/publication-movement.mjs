@@ -48,7 +48,7 @@ for (const movementHz of [0, 1, 4, 15]) for (const phaseMs of movementHz ? [0, 2
   const host = {
     async poses() {
       advance(now + 20); projectedAt.set(revision, simulatedAt);
-      return { sequence: revision, at: simulatedAt, runUntil, frame };
+      return { publicationProtocol: 1, sequence: revision, at: simulatedAt, runUntil, frame };
     },
     async confirmPoses(_, snapshot) {
       advance(Math.max(now, notBefore) + 1);

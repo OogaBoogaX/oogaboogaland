@@ -14,7 +14,7 @@ const frame = views => ({ v: 1, protocol: 'host-session-v5', world: 'fixture-wor
 const departed = v => ({ id: `depart:${v.generation}`, type: 'depart', glyph: 'green', accountId: v.accountId,
   bodyId: v.bodyId, generation: v.generation, reason: 'expired', at: 160000, handback: null, zone: v.zone,
   body: { kind: v.kind, motion: v.motion, equipment: v.equipment }, applied: true });
-function fixture(views, { missingNpc = false } = {}) {
+function fixture(views, { missingNpc = false, hostCharacterFor = null } = {}) {
   const f = managedRigs({ presence: true }), B = f.B, root = B.scene.createNode();
   let now = 100000, snapshot = frame(views), connected = true, hidden = 0, poses = 0, renders = 0, dropped = 0;
   B.characters = { all: () => [], get: () => null };
@@ -36,11 +36,12 @@ function fixture(views, { missingNpc = false } = {}) {
     bodyKind: id => id.startsWith('gorilla:') ? 'gorilla' : 'ooga', bodyName: id => id.replace(/^gorilla:/, ''),
     subscribeChat: () => () => {}, subscribeShots: () => () => {}, subscribeSwings: () => () => {} };
   runInNewContext(readFileSync(new URL('../../src/js/remote-players.js', import.meta.url), 'utf8'), context);
-  const pool = B.remotePlayers.create({ root, hostSource: source, hostNpcFor: v => npc.get(v.bodyId) || null,
-    createGorilla() { const a = f.make(), pose = a.poseManaged, dispose = a.dispose;
+  const names = [];
+  const pool = B.remotePlayers.create({ root, hostSource: source, hostNpcFor: v => npc.get(v.bodyId) || null, hostCharacterFor,
+    createGorilla(name) { names.push(name); const a = f.make(), pose = a.poseManaged, dispose = a.dispose;
       a.poseManaged = (...args) => { poses++; return pose(...args); };
       a.dispose = () => { dropped++; dispose(); }; return a; }, hideGorilla: () => hidden++ });
-  return { B, f, root, pool, npc, source,
+  return { B, f, root, pool, npc, source, names,
     at: value => { now = value; }, snapshot: value => { snapshot = value; }, connected: value => { connected = value; },
     counters: () => ({ hidden, poses, renders, dropped }),
     close() { pool.dispose(); for (const actor of npc.values()) actor.dispose(); } };
@@ -290,4 +291,37 @@ test('scene model-change hooks refresh added NPC gear for held and live ghosts w
     f.B.scene.addChild(npc.root, gear); f.pool.refreshNpc(npc.root);
     f.pool.dispose(); assert.equal(gear.smokeOpacity, .5); assert.equal(f.pool.refreshNpc(npc.root), false);
   } finally { f.close(); }
+});
+
+test('account-keyed host bodies use resolved character and explicit form across frozen, live and local reclaim', () => {
+  const held = { ...view(0), bodyId: 'player:1' };
+  const resolve = v => v.accountId === 1 && v.bodyId === 'player:1' ? { handle: 'fixture0' } : null;
+  const f = fixture([held], { hostCharacterFor: resolve }); let release;
+  try {
+    f.pool.update(.016);
+    assert.deepEqual(f.names, ['fixture0']); assert.equal(typeof f.pool.body(1).poseManaged, 'function');
+    assert.equal(f.npc.get(held.bodyId).root.smokeOpacity, .28);
+    const live = { ...held, state: 'live', presentation: null, deadline: null };
+    f.B.net.remotes.set(1, { id: 1, body: held.bodyId, bodyName: 'wrong-character', bodyKind: 'ooga',
+      x: 4, y: 12, z: -4, yaw: 0, zone: 'outside' });
+    f.snapshot({ ...frame([live]), revision: 2 }); f.pool.update(.016);
+    assert.deepEqual(f.names, ['fixture0', 'fixture0'], 'ordinary name/form fields cannot override host identity');
+    assert.equal(f.npc.get(held.bodyId).root.smokeOpacity, .28);
+    f.B.net.state.selfId = 1;
+    release = f.pool.acquireLocalBody({ ...held, state: 'starting' }, { world: 'fixture-world', epoch: 1, revision: 2 }, () => {});
+    assert.equal(f.pool.body(1), null, 'local reclaim removes the matching replica before attaching controls');
+    assert.throws(() => f.pool.acquireLocalBody({ ...held, bodyId: 'player:2' },
+      { world: 'fixture-world', epoch: 1, revision: 2 }, () => {}), /identity/);
+  } finally { release?.(); f.close(); }
+});
+
+test('unknown account-keyed body never guesses a model from player ID or a neighbouring NPC', () => {
+  for (const hostCharacterFor of [null, () => null]) {
+    const held = { ...view(0), bodyId: 'player:1' }, f = fixture([held], { hostCharacterFor });
+    try {
+      f.pool.update(.016);
+      assert.equal(f.pool.stats().frozenPresentationFailed, true); assert.equal(f.pool.body(1), null);
+      assert.deepEqual(f.names, []); assert.equal(f.npc.get(held.bodyId).root.smokeOpacity, undefined);
+    } finally { f.close(); }
+  }
 });

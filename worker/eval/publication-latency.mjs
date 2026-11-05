@@ -45,7 +45,7 @@ for (const producer of ['serial', 'independent']) for (const sweeps of [120, 120
     },
   };
   const host = {
-    async poses() { advance(now + 20); return { sequence, at: now, runUntil, frame }; },
+    async poses() { advance(now + 20); return { publicationProtocol: 1, sequence, at: now, runUntil, frame }; },
     async confirmPoses(_, revision) {
       waits.push(Math.max(0, notBefore - now)); advance(Math.max(now, notBefore) + confirmMs);
       return revision.sequence === sequence && now < runUntil;

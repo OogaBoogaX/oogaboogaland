@@ -3,6 +3,7 @@
 // storage transactions may retry. #379 owns independent NPC tracks; live movement and voice stay separate.
 import { SessionRegistry, GRACE_MS, HANDOFF_MS, PASSIVE_STEP_MS } from "./host-sessions.js";
 import { bodyOperationDigest, validateBodyOperation } from "./host-body-operations.js";
+import { validateRoomClaim, validateRoomBinding, validateRoomClaimReceipt, validateRoomReleaseReceipt, sameRoomClaim } from "./host-room-claim.js";
 import "../../src/js/npc-authority.js";
 import "../../src/js/clanker-pose.js";
 import "../../src/js/npc-pose-packet.js";
@@ -186,13 +187,15 @@ export class VirtualHost {
   }
 
   validate(r) {
-    if (!exact(r, ["schema", "world", "budget", "fence", "revision", "owner", "leaseUntil", "runUntil", "wallAt", "wallCursor", "simulatedAt", "pausedMs", "status", "simulation", "sessions"])
+    if (!exact(r, ["schema", "world", "budget", "fence", "revision", "owner", "leaseUntil", "runUntil", "wallAt", "wallCursor", "simulatedAt", "pausedMs", "status", "simulation", "sessions", ...(Object.hasOwn(r || {}, "room") ? ["room"] : [])])
       || r.schema !== HOST.schema || r.world !== this.simulation.version || r.budget !== this.checkpointBytes) fail("incompatible checkpoint");
     if (![r.fence, r.revision, r.leaseUntil, r.runUntil, r.wallAt, r.wallCursor, r.simulatedAt, r.pausedMs].every(time)
       || r.simulatedAt + r.pausedMs !== r.wallCursor || r.wallCursor > r.wallAt || !id(r.owner)
       || r.runUntil - r.wallAt > HOST.maxRunMs || r.leaseUntil - r.wallAt > HOST.leaseMs
       || r.fence < 1 || r.revision < 1
       || !["running", "draining", "stopped", "backlog"].includes(r.status)) fail("invalid checkpoint");
+    if (r.room) validateRoomBinding(r.room, r);
+    else if (Object.hasOwn(r, "room")) fail("invalid host Room binding");
     boundedJSON(r, HOST.checkpointBytes);
     boundedJSON(r.simulation, this.checkpointBytes, HOST.simulationNodes);
     // Reserve maximum future world growth and one worst-case schema-2 record per
@@ -223,7 +226,7 @@ export class VirtualHost {
 
   ticket(r) { return { owner: r.owner, fence: r.fence, world: r.world }; }
   owns(r, ticket, now) {
-    if (!r || !["running", "draining"].includes(r.status) || now >= r.leaseUntil
+    if (!r || r.room?.pending || !["running", "draining"].includes(r.status) || now >= r.leaseUntil
       || ticket?.world !== r.world || ticket.owner !== r.owner || ticket.fence !== r.fence) fail("host fenced");
     if (now < r.wallAt) fail("clock moved backwards");
   }
@@ -234,6 +237,7 @@ export class VirtualHost {
     return this.transaction(async function(tx) {
       const now = this.now();
       let r = await this.read(tx);
+      if (r?.room) fail("coordinated Room run transition required");
       if (r && now < r.wallAt) fail("clock moved backwards");
       if (r && r.status === "running" && now < r.runUntil) fail("run already active");
       if (r?.sessions?.sessions.length) fail("session drain required");
@@ -258,12 +262,119 @@ export class VirtualHost {
     if (!id(owner)) fail("host owner");
     return this.transaction(async function(tx) {
       const now = this.now(), r = await this.read(tx);
+      if (r?.room) fail("coordinated Room takeover required");
       if (!r || !["running", "draining"].includes(r.status) || now < r.leaseUntil
         || now >= r.runUntil && !r.sessions?.sessions.length) fail("host unavailable");
       if (now < r.wallAt) fail("clock moved backwards");
       r.owner = owner; r.fence++; r.leaseUntil = now + HOST.leaseMs; r.wallAt = now;
       await this.save(tx, r);
       return this.ticket(r);
+    });
+  }
+
+  // Step 1: persist the replacement intent without granting a new host ticket.
+  // Once published through Room, raw claim/begin cannot bypass this barrier.
+  async prepareRoomClaim(owner) {
+    if (!id(owner)) fail("host owner");
+    return this.transaction(async function(tx) {
+      const now = this.now(), r = await this.read(tx);
+      if (!r?.room || now < r.wallAt) fail("Room takeover unavailable");
+      if (r.room.pending) {
+        if (r.room.claim.v !== 1) fail("Room release pending");
+        if (r.room.claim.owner !== owner) fail("Room takeover already pending");
+        return structuredClone(r.room.claim);
+      }
+      const cleanup = now >= r.runUntil && !r.sessions?.sessions.length
+        && !!r.sessions?.pending.length && r.sessions.pending.every(p => p.applied);
+      if (now < r.leaseUntil || !["running", "draining", ...(cleanup ? ["stopped"] : [])].includes(r.status)
+        || now >= r.runUntil && !r.sessions?.sessions.length && !cleanup) fail("host unavailable");
+      const claim = validateRoomClaim({ v: 1, world: r.world, previousOwner: r.owner, previousEpoch: r.fence,
+        owner, epoch: r.fence + 1, runUntil: r.runUntil, cleanup });
+      r.room = { v: 1, pending: true, claim }; r.wallAt = now;
+      await this.save(tx, r);
+      return structuredClone(claim);
+    });
+  }
+
+  // Explicit lost-reply recovery names the exact persisted operation, not only
+  // an owner string that a second runner might reuse. It cannot renew a lease.
+  async resumeRoomClaim(intent) {
+    const claim = structuredClone(validateRoomClaim(intent));
+    if (claim.v !== 1) fail("Room release pending");
+    return this.transaction(async function(tx) {
+      const r = await this.read(tx);
+      if (!r?.room || !sameRoomClaim(r.room.claim, claim) || r.runUntil !== claim.runUntil) fail("Room takeover fenced");
+      return claim;
+    });
+  }
+
+  // Step 3: trusted coordinator has durably fenced Room and reconciled its
+  // exact receipt. No external calls occur in this retryable transaction.
+  async completeRoomClaim(intent, receipt) {
+    const claim = structuredClone(validateRoomClaim(intent));
+    validateRoomClaimReceipt(claim, receipt);
+    return this.transaction(async function(tx) {
+      const now = this.now(), r = await this.read(tx);
+      if (!r?.room || !sameRoomClaim(r.room.claim, claim) || now < r.wallAt) fail("Room takeover fenced");
+      if (!r.room.pending) return this.ticket(r);
+      r.owner = claim.owner; r.fence = claim.epoch; r.wallAt = now;
+      r.leaseUntil = now + HOST.leaseMs;
+      if (claim.cleanup) r.status = "draining";
+      r.room.pending = false;
+      await this.save(tx, r);
+      return this.ticket(r);
+    });
+  }
+
+  // Explicit close of a drained run. Persist the stop intent before releasing
+  // Room, including when an earlier takeover raced an operator's browser release.
+  // Never discard held bodies or unacknowledged departure delivery to unblock it.
+  async prepareRoomRelease(owner) {
+    if (!id(owner)) fail("host owner");
+    return this.transaction(async function(tx) {
+      const now = this.now(), r = await this.read(tx);
+      if (!r?.room || now < r.wallAt || now < r.leaseUntil) fail("Room release unavailable");
+      if (r.sessions?.sessions.length || r.sessions?.pending.length) fail("session drain required");
+      if (r.room.pending && r.room.claim.owner !== owner) fail("Room transition already pending");
+      if (r.room.pending && r.room.claim.v === 2) return structuredClone(r.room.claim);
+      const claim = validateRoomClaim({ v: 2, action: "release", world: r.world, previousOwner: r.owner,
+        previousEpoch: r.fence, owner, epoch: r.fence + 1, runUntil: r.runUntil, cleanup: false });
+      r.room = { v: 1, pending: true, claim }; r.wallAt = now;
+      await this.save(tx, r);
+      return structuredClone(claim);
+    });
+  }
+
+  async resumeRoomRelease(intent) {
+    const claim = structuredClone(validateRoomClaim(intent));
+    if (claim.v !== 2) fail("Room release intent required");
+    return this.transaction(async function(tx) {
+      const r = await this.read(tx);
+      if (!r || (r.room ? !r.room.pending || !sameRoomClaim(r.room.claim, claim)
+        : r.status !== "stopped" || r.fence !== claim.epoch || r.owner !== claim.owner || r.world !== claim.world
+          || r.runUntil > claim.runUntil)) fail("Room release fenced");
+      return claim;
+    });
+  }
+
+  async completeRoomRelease(intent, receipt) {
+    const claim = structuredClone(validateRoomClaim(intent));
+    if (claim.v !== 2) fail("Room release intent required");
+    validateRoomReleaseReceipt(receipt);
+    return this.transaction(async function(tx) {
+      const now = this.now(), r = await this.read(tx);
+      if (!r || now < r.wallAt || r.sessions?.sessions.length || r.sessions?.pending.length) fail("Room release unavailable");
+      if (!r.room) {
+        if (r.status !== "stopped" || r.fence !== claim.epoch || r.owner !== claim.owner || r.world !== claim.world
+          || r.runUntil > claim.runUntil) fail("Room release fenced");
+        return { status: "stopped", world: r.world, fence: r.fence };
+      }
+      if (!r.room.pending || !sameRoomClaim(r.room.claim, claim)) fail("Room release fenced");
+      r.owner = claim.owner; r.fence = claim.epoch; r.status = "stopped";
+      r.runUntil = Math.min(now, r.runUntil); r.wallAt = now; r.leaseUntil = now;
+      delete r.room;
+      await this.save(tx, r);
+      return { status: "stopped", world: r.world, fence: r.fence };
     });
   }
 
@@ -275,6 +386,7 @@ export class VirtualHost {
     if (!id(owner)) fail("host owner");
     return this.transaction(async function(tx) {
       const now = this.now(), r = await this.read(tx);
+      if (r?.room) fail("coordinated Room takeover required");
       if (!r || !["running", "draining", "stopped"].includes(r.status)
         || now < r.runUntil || now < r.leaseUntil || r.sessions?.sessions.length
         || !r.sessions?.pending.length || r.sessions.pending.some(p => !p.applied)) fail("body cleanup unavailable");
@@ -778,8 +890,24 @@ export class VirtualHost {
       const frame = typeof queries?.poses === "function" ? queries.poses(format) : this.simulation.poses(structuredClone(r.simulation), format);
       const authority = { v: format ? 2 : 1, ...(format ? { format } : {}), mode: "server", world: r.world, epoch: r.fence, revision: r.revision };
       if (!globalThis.BL.npcAuthority.posesFor(authority, frame, format === "mixed-1")) fail("invalid host poses");
-      return { ticket: this.ticket(r), sequence: r.revision, at: r.simulatedAt,
+      return { ticket: this.ticket(r), sequence: r.revision, at: r.simulatedAt, publicationProtocol: r.room ? 1 : 0,
         runUntil: r.runUntil, ...(format ? { format } : {}), frame: frame.slice(0) };
+    });
+  }
+
+  // Bind only after Room has committed the matching authority. A failed first
+  // configuration must not strand a host behind a nonexistent Room. Compare the
+  // projected revision; metadata-only binding may reuse those exact frame bytes.
+  async bindRoomPublication(ticket, { sequence, at, runUntil }) {
+    return this.transaction(async function(tx) {
+      const r = await this.publicationRecord(tx, ticket, true);
+      if (!r) return null;
+      const fresh = r.revision === sequence && r.simulatedAt === at && r.runUntil === runUntil;
+      if (!r.room) { r.room = { v: 1, pending: false, claim: null }; await this.save(tx, r); }
+      // A simulation write may obsolete these bytes, but must not starve the
+      // ownership barrier. The next projection observes the durable binding.
+      if (!fresh) return null;
+      return { publicationProtocol: 1, sequence: r.revision, at: r.simulatedAt, runUntil: r.runUntil };
     });
   }
 
