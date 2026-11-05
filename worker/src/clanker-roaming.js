@@ -1,8 +1,9 @@
-// Restricted actual-controller recovery. Static, noncombat meadow only; no
-// general-world bodies, caves, jobs, reservations or live browser activation.
+// Restricted actual-controller recovery: roaming meadow or static terrain
+// support for player bodies. No jobs, occupancy, climbing or live scene activation.
 import { createClankerBufferCheckpoint, CLANKER_BUFFER_FIELDS } from "./clanker-buffers.js";
 import { createCheckpointPack } from "./checkpoint-pack.js";
 import { restoreNpcRandom } from "./npc-random.js";
+import "../../src/js/clanker-body-transfer.js";
 const excluded = new Set(["owner", "cave", "tooltipOwner", "gorilla", "root", "parts", "random"]);
 const bufferFields = new Set(CLANKER_BUFFER_FIELDS);
 const missing = Symbol("missing");
@@ -16,35 +17,88 @@ export function createClankerRoamingCheckpoint(sim, world, rigCodec) {
   return createCheckpoint(sim, world, rigCodec, sim.roamingCheckpoint, 64 * 1024);
 }
 
+// Created from a trusted boot's source rules/baseline/owner, not stored data.
+// Its closure has no simulation or rig, so a world may retain these small codecs
+// after disposing its bootstrap controller. It changes no position or time.
+function bodyRecords(pack, world, baseline, owner, rules, sourceBaseline) {
+  if (!["validate", "motion", "disconnect"].every(k => typeof rules?.[k] === "function")) bad();
+  const wire = globalThis.BL.clankerBodyTransfer.create({ world, baseline: sourceBaseline, owner, rules });
+  const read = saved => {
+    const state = pack.unpack(saved);
+    if (Object.keys(state).sort().join() !== "baseline,body,v,world" || state.v !== 3
+      || state.world !== world || state.baseline !== baseline || rules.validate(state.body) !== true
+      || state.body[0] !== owner) bad();
+    return state;
+  };
+  return Object.freeze({
+    read,
+    motion(saved) { return rules.motion(read(saved).body); },
+    transfer(saved) { return wire.encode(read(saved).body); },
+    // Data conversion only. The caller must authenticate, order and atomically
+    // commit a live sample with its session; this does not grant ownership.
+    fromTransfer(value) { return pack.pack({ v: 3, world, baseline, body: wire.read(value) }); },
+    disconnect(saved, before) {
+      const state = read(saved), motion = rules.motion(state.body);
+      if (!before || Object.keys(before).length !== 8
+        || Object.keys(motion).some(k => !Object.hasOwn(before, k) || !Object.is(before[k], motion[k]))) bad();
+      state.body = rules.disconnect(state.body);
+      return { checkpoint: pack.pack(state), motion: rules.motion(state.body) };
+    },
+  });
+}
+
 // Isolated controlled body only. This component budget is NOT a session-slot
 // reservation; the host must measure/admit the complete body before integration.
-export function createClankerBodyCheckpoint(sim, world, rigCodec) {
-  if (sim.list.length !== 1) bad();
-  const codec = createCheckpoint(sim, world, rigCodec, sim.bodyCheckpoint, 8 * 1024, true);
-  let invalid = false;
+export function createClankerBodyCheckpoint(sim, world) {
+  const bridge = sim.bodyCheckpoint, pack = createCheckpointPack(8192, { intern: true });
+  if (sim.list.length !== 1 || !bridge || bridge.capture()[0] !== 0
+    || typeof bridge.bodyState !== "function" || typeof bridge.restoreBody !== "function"
+    || typeof world !== "string" || !/^[A-Za-z0-9_.:-]{1,80}$/.test(world)) bad();
+  const boot = JSON.stringify(bridge.baseline());
+  let h1 = 2166136261, h2 = 3335557771;
+  for (let i = 0; i < boot.length; i++) {
+    h1 = Math.imul(h1 ^ boot.charCodeAt(i), 16777619); h2 = Math.imul(h2 ^ boot.charCodeAt(i), 16777619);
+  }
+  const baseline = `${h1 >>> 0}:${h2 >>> 0}`;
+  const records = bodyRecords(pack, world, baseline, sim.list[0].owner.id, bridge.records, JSON.parse(boot));
+  let invalid = false, restored = false;
   const ready = () => { if (invalid) bad(); };
   return {
+    records,
     neutralize() { ready(); sim.bodyCheckpoint.neutralize(); },
-    capture() { ready(); if (!sim.player) bad(); return codec.capture(); },
-    restore(saved) {
+    disconnect() { ready(); sim.bodyCheckpoint.disconnect(); },
+    motion() { ready(); return sim.bodyCheckpoint.motion(); },
+    stepPassive(motion, ms) {
       ready();
-      try { codec.restore(saved); if (!sim.player) bad(); return true; }
+      const before = sim.bodyCheckpoint.motion();
+      if (!motion || Object.keys(before).some(k => !Object.is(before[k], motion[k]))) bad();
+      try { sim.bodyCheckpoint.stepPassive(ms); return sim.bodyCheckpoint.motion(); }
+      catch (error) { invalid = true; throw error; }
+    },
+    // Only physical continuity. Health, AI, RNG, timers, paths and animation
+    // start from source defaults; there is no generic actor-state serialization.
+    capture() { ready(); return pack.pack({ v: 3, world, baseline, body: bridge.bodyState() }); },
+    // Only the authoritative host may defer a vanished-footing correction to
+    // its next passive step. Source capture/live activation refuse until then.
+    restore(saved, { passive = false } = {}) {
+      ready();
+      try {
+        if (typeof passive !== "boolean") bad();
+        if (restored || bridge.capture()[0] !== 0 || sim.player) bad();
+        const state = records.read(saved);
+        bridge.restoreBody(state.body, passive); if (!sim.player) bad(); restored = true; return true;
+      }
       catch (error) { invalid = true; throw error; }
     },
   };
 }
 
-function createCheckpoint(sim, world, rigCodec, bridge, budget, standardBody = false) {
+function createCheckpoint(sim, world, rigCodec, bridge, budget) {
   const entries = sim.list;
-  if (!bridge || bridge.capture()[0] !== 0 || (standardBody
-    ? typeof bridge.recoverPose !== "function" || !Array.isArray(bridge.transientFields)
-    : !rigCodec?.packRoster || !rigCodec?.unpackRoster)) bad();
+  if (!bridge || bridge.capture()[0] !== 0 || !rigCodec?.packRoster || !rigCodec?.unpackRoster) bad();
   const ids = entries.map(e => e.owner.id), references = new Map(entries.map((e, i) => [e, i]));
   const buffers = createClankerBufferCheckpoint(world, ids), pack = createCheckpointPack(budget, { intern: true });
-  const rigs = standardBody ? null : entries.map(e => e.gorilla.createManagedCheckpoint(world));
-  const transient = new Set(standardBody ? bridge.transientFields : []);
-  const keysOf = (value, path) => Object.keys(value).filter(k => (path.length || !excluded.has(k))
-    && (!standardBody || !transient.has([...path, k].join("."))));
+  const rigs = entries.map(e => e.gorilla.createManagedCheckpoint(world));
   const token = value => {
     if (value === missing) return [-6];
     if (value === undefined) return [-5];
@@ -81,29 +135,29 @@ function createCheckpoint(sim, world, rigCodec, bridge, budget, standardBody = f
       const index = fields.length; fields.push(field); return { index };
     }
     if (!value || Array.isArray(value) || ArrayBuffer.isView(value) || path.length > 6) bad();
-    const keys = keysOf(value, path);
-    if (name === "motion" && !transient.has("motion.walkGait") && !keys.includes("walkGait")) keys.push("walkGait");
+    const keys = Object.keys(value).filter(k => path.length || !excluded.has(k));
+    if (name === "motion" && !keys.includes("walkGait")) keys.push("walkGait");
     if (keys.length > 128 || keys.some(k => ["__proto__", "prototype", "constructor"].includes(k))) bad();
-    return { keys, path, children: keys.map(k => compile(Object.hasOwn(value, k) ? value[k] : missing, [...path, k])) };
+    return { keys, children: keys.map(k => compile(Object.hasOwn(value, k) ? value[k] : missing, [...path, k])) };
   };
   const shape = compile(entries[0]);
   const compatible = (field, value) => field.kind === "optional" ? value === missing || typeof value === "string" && value.length <= 80
     : field.kind === "reference" ? value === null || references.has(value) : typeof value === field.kind;
   const values = entry => {
     const out = [];
-    const walk = (value, node) => {
+    const walk = (value, node, root = false) => {
       if (node.buffer) return;
       if (node.index !== undefined) {
         if (!compatible(fields[node.index], value)) bad(); out[node.index] = token(value); return;
       }
       if (!value || typeof value !== "object") bad();
-      const keys = keysOf(value, node.path);
+      const keys = Object.keys(value).filter(k => !root || !excluded.has(k));
       if (keys.some(k => !node.keys.includes(k))) bad();
       for (let i = 0; i < node.keys.length; i++) {
         const k = node.keys[i]; walk(Object.hasOwn(value, k) ? value[k] : missing, node.children[i]);
       }
     };
-    walk(entry, shape); return out;
+    walk(entry, shape, true); return out;
   };
   const defaults = entries.map(values), staticState = Array.from(bridge.baseline());
   // This is an accidental-baseline mismatch guard, not authentication. The
@@ -129,13 +183,8 @@ function createCheckpoint(sim, world, rigCodec, bridge, budget, standardBody = f
         for (let j = 0; j < fields.length; j++) if (!equal(current[j], defaults[i][j])) row.push(j, current[j]);
         return row;
       });
-      const state = { v: standardBody ? 2 : 1, world, baseline, clocks, actors, buffers: buffers.capture(entries) };
-      if (standardBody) {
-        const p = entries[0].root.position;
-        state.position = [p.x, p.y, p.z];
-        if (state.position.some(n => !Number.isFinite(n) || Math.abs(n) >= 10000)) bad();
-      } else state.rigs = structuredClone(rigCodec.packRoster(world, rigs.map((rig, index) => ({ index, snapshot: rig.capture() })), true));
-      return pack.pack(state);
+      return pack.pack({ v: 1, world, baseline, clocks, actors, buffers: buffers.capture(entries),
+        rigs: structuredClone(rigCodec.packRoster(world, rigs.map((rig, index) => ({ index, snapshot: rig.capture() })), true)) });
     },
     restore(saved) {
       ready();
@@ -143,11 +192,8 @@ function createCheckpoint(sim, world, rigCodec, bridge, budget, standardBody = f
       // step. If application fails, poison this adapter; discard the controller.
       if (restored || bridge.capture()[0] !== 0) bad();
       const state = pack.unpack(saved);
-      if (Object.keys(state).sort().join() !== (standardBody ? "actors,baseline,buffers,clocks,position,v,world" : "actors,baseline,buffers,clocks,rigs,v,world")
-        || state.v !== (standardBody ? 2 : 1)
+      if (Object.keys(state).sort().join() !== "actors,baseline,buffers,clocks,rigs,v,world" || state.v !== 1
         || state.world !== world || state.baseline !== baseline || !dense(state.actors) || state.actors.length !== entries.length) bad();
-      if (standardBody && (!dense(state.position) || state.position.length !== 3
-        || state.position.some(n => !Number.isFinite(n) || Math.abs(n) >= 10000))) bad();
       const decoded = state.actors.map((row, i) => {
         if (!dense(row) || row.length % 2 !== 1 || row.length > fields.length * 2 + 1) bad();
         const random = restoreNpcRandom({ v: 1, word: row[0] }).next, result = defaults[i].map(decode);
@@ -160,8 +206,8 @@ function createCheckpoint(sim, world, rigCodec, bridge, budget, standardBody = f
         }
         return { random, result };
       });
-      const arrays = buffers.restore(state.buffers), poses = standardBody ? null : rigCodec.unpackRoster(state.rigs);
-      if (poses && (poses.length !== entries.length || poses.some((p, i) => p.index !== i))) bad();
+      const arrays = buffers.restore(state.buffers), poses = rigCodec.unpackRoster(state.rigs);
+      if (poses.length !== entries.length || poses.some((p, i) => p.index !== i)) bad();
       invalid = true;
       bridge.restore(state.clocks);
       for (let i = 0; i < entries.length; i++) {
@@ -174,9 +220,8 @@ function createCheckpoint(sim, world, rigCodec, bridge, budget, standardBody = f
         }
         for (const [group, members] of Object.entries(arrays[i])) Object.assign(e[group], members);
         e.random = decoded[i].random;
-        if (rigs) rigs[i].restore(poses[i].snapshot);
+        rigs[i].restore(poses[i].snapshot);
       }
-      if (standardBody) bridge.recoverPose(state.position);
       bridge.capture(); // Refuse a saved state outside this limited profile.
       restored = true; invalid = false;
       return true;

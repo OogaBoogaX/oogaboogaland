@@ -2,8 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { VirtualHost, HOST, SESSION_PROTOCOL, boundedJSON } from "../src/virtual-host.js";
 
-const equipment = { weapon: "primary", mode: "combat", magazine: 30, spareAmmo: [30, 30], primaryOwned: false,
-  secondaryOwned: false, selectedSlot: 2, unlimited: false, jetpack: false, jetpackOwned: false, fuel: .0000012345678901234567 };
+const equipment = { weapon: "primary", mode: "combat", primaryOwned: false,
+  secondaryOwned: false, selectedSlot: 2, unlimited: false, jetpack: false, jetpackOwned: false };
 const motion = { x: -.0000012345678901234567, y: -.0000012345678901234567, z: -.0000012345678901234567,
   yaw: -.0000012345678901234567, vx: -.0000012345678901234567, vy: -.0000012345678901234567, vz: -.0000012345678901234567, grounded: false };
 const claim = i => ({ protocol: SESSION_PROTOCOL, world: "reserved-fixture", accountId: Number.MAX_SAFE_INTEGER - i,
@@ -24,7 +24,7 @@ function harness(budget = 30 * 1024) {
     at: t => { now = t; }, fail: () => { fail = true; }, grow: () => { grow = true; } };
 }
 
-test("admission reserves world growth and every retained body's occupancy, grace and departure", async () => {
+test("admission reserves world growth and every retained body's occupancy, grace and departure", async t => {
   const h = harness(), ticket = await h.host.begin("owner", 120000);
   const joined = (await h.host.sessions(ticket, [], (r, at) => Array.from({ length: 64 }, (_, i) => {
     const c = r.connect(claim(i), at); assert.equal(c.ok, true);
@@ -45,8 +45,11 @@ test("admission reserves world growth and every retained body's occupancy, grace
       if (Object.hasOwn(v, key)) v[key] = Number.MAX_SAFE_INTEGER;
     }
     if (v.type === "depart") { v.id = `depart:${Number.MAX_SAFE_INTEGER}`; v.applied = false; }
-    b.motion = padded(b.motion); b.equipment.fuel = "9".repeat(25); return v; };
-  for (const s of grace.sessions.sessions) boundedJSON(envelope(s), HOST.sessionSlotBytes - 1, HOST.sessionSlotNodes);
+    b.motion = padded(b.motion); return v; };
+  let maxPendingSlot = 0;
+  for (const s of grace.sessions.sessions) for (const state of ["grace", "offered", "starting"])
+    maxPendingSlot = Math.max(maxPendingSlot, Buffer.byteLength(boundedJSON(envelope({ ...s, state }), HOST.sessionSlotBytes - 1, HOST.sessionSlotNodes)));
+  t.diagnostic(`Conservatively padded pending-session JSON: ${maxPendingSlot} B, plus one array separator; reservation ${HOST.sessionSlotBytes} B.`);
   h.at(160250); const restart = await h.make().claim("restart"), before = h.read();
   h.fail(); await assert.rejects(h.host.tick(restart, []), /capacity write failed/); assert.deepEqual(h.read(), before);
   let result, count = 0;

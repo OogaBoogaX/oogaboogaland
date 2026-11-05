@@ -57,8 +57,8 @@ async function fixture(pairs) {
   world = simulation.version; controllers = actors.map(a => a.createManagedCheckpoint(world));
   return { simulation, mesh: f.mesh };
 }
-const equipment = { weapon: "gun", mode: "combat", magazine: 17, spareAmmo: [4, 22], primaryOwned: true,
-  secondaryOwned: true, selectedSlot: 2, unlimited: false, jetpack: true, jetpackOwned: true, fuel: .37 };
+const equipment = { weapon: "gun", mode: "combat", primaryOwned: true,
+  secondaryOwned: true, selectedSlot: 2, unlimited: false, jetpack: true, jetpackOwned: true };
 export class CycleHost extends DurableObject {
   constructor(ctx, env) { super(ctx, env); this.prepared = null; }
   async fetch(request) {

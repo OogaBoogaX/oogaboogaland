@@ -1,7 +1,9 @@
 // Opt-in storage layout for complete controlled-body components. No deployed
 // binding uses this adapter. The existing VirtualHost still owns fencing and
 // sessions; this layer only commits its record and bounded body rows atomically.
-import { HOST, boundedJSON } from "./virtual-host.js";
+import { HOST, boundedJSON, sameCheckpointValue } from "./virtual-host.js";
+import { createBodyMovementJournal } from './host-body-movement.js';
+import { createBodyOperationJournal } from "./host-body-operations.js";
 
 export const BODY_STORAGE = Object.freeze({ version: 1, maxBodies: 32,
   componentBytes: 8 * 1024, componentNodes: 128, rowBytes: 9 * 1024,
@@ -10,14 +12,6 @@ const fail = () => { throw Error("incompatible or incomplete host body storage")
 const exact = (v, keys) => v && typeof v === "object" && !Array.isArray(v)
   && Object.keys(v).length === keys.length && keys.every(k => Object.hasOwn(v, k));
 const key = i => BODY_STORAGE.prefix + i;
-// JSON text equality would collapse -0 into 0. Compare bounded data exactly;
-// this also avoids allocating a second string for every unchanged component.
-const sameData = (a, b) => {
-  if (Object.is(a, b)) return true;
-  if (!a || !b || typeof a !== "object" || typeof b !== "object" || Array.isArray(a) !== Array.isArray(b)) return false;
-  const keys = Object.keys(a), other = Object.keys(b);
-  return keys.length === other.length && keys.every((k, i) => k === other[i] && sameData(a[k], b[k]));
-};
 const identities = host => {
   if (!host || host.schema !== HOST.schema || typeof host.world !== "string"
     || !Number.isSafeInteger(host.fence) || host.fence < 1
@@ -66,7 +60,7 @@ export function createHostBodyStorage({ storage, profile, capture, validate }) {
   return {
     transaction(callback) {
       return storage.transaction(async tx => {
-        let loaded = false, poisoned = false, host, rows = [], revisions = [];
+        let loaded = false, poisoned = false, host, rows = [], revisions = [], scopedCapture = null, wrote = false;
         const load = async () => {
           if (loaded) return;
           const root = await tx.get(HOST.key);
@@ -97,6 +91,8 @@ export function createHostBodyStorage({ storage, profile, capture, validate }) {
           rows = check(root.host, next); revisions = root.revisions.slice(); host = structuredClone(root.host); loaded = true;
         };
         const result = await callback({
+          bodyOperations: createBodyOperationJournal(tx),
+          bodyMovements: createBodyMovementJournal(tx),
           get: async k => {
             if (k !== HOST.key) fail(); await load(); return structuredClone(host);
           },
@@ -109,12 +105,13 @@ export function createHostBodyStorage({ storage, profile, capture, validate }) {
               if (value?.revision !== (host?.revision || 0) + 1
                 || host && (value.world !== host.world || value.fence < host.fence)) fail();
               const nextHost = structuredClone(value);
-              const nextRows = check(nextHost, capture(structuredClone(nextHost), structuredClone(rows)));
+              wrote = true;
+              const nextRows = check(nextHost, (scopedCapture || capture)(structuredClone(nextHost), structuredClone(rows)));
               const nextRevisions = [], writes = {};
               for (let i = 0; i < nextRows.length; i++) {
                 // The root commits the exact version of every row. An unchanged
                 // body need not be rewritten merely to renew the host lease.
-                if (rows[i] && sameData(rows[i], nextRows[i])) {
+                if (rows[i] && sameCheckpointValue(rows[i], nextRows[i])) {
                   nextRevisions.push(revisions[i]); continue;
                 }
                 nextRevisions.push(nextHost.revision);
@@ -133,6 +130,12 @@ export function createHostBodyStorage({ storage, profile, capture, validate }) {
           // Server-only recovery access; no token, deadline or inventory is
           // exported into public snapshots by this storage adapter.
           bodies: async () => { await load(); return structuredClone(rows); },
+          // A transaction-local body controller may replace the pure fallback
+          // capture exactly once, before any write. Never cache it on storage.
+          captureBodies: fn => {
+            if (poisoned || scopedCapture || wrote || typeof fn !== "function") { poisoned = true; fail(); }
+            scopedCapture = fn;
+          },
         });
         if (poisoned) fail();
         return result;

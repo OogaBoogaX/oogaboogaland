@@ -1,11 +1,12 @@
 // Host authority and recovery, deliberately not imported by the deployed Worker yet (#377).
 // The simulation adapter must be deterministic, synchronous, data-only, and side-effect free:
 // storage transactions may retry. #379 owns independent NPC tracks; live movement and voice stay separate.
-import { SessionRegistry } from "./host-sessions.js";
+import { SessionRegistry, GRACE_MS, HANDOFF_MS, PASSIVE_STEP_MS } from "./host-sessions.js";
+import { bodyOperationDigest, validateBodyOperation } from "./host-body-operations.js";
 import "../../src/js/npc-authority.js";
 import "../../src/js/clanker-pose.js";
 import "../../src/js/npc-pose-packet.js";
-export const SESSION_PROTOCOL = "host-session-v2";
+export const SESSION_PROTOCOL = "host-session-v4";
 export const HOST = Object.freeze({
   schema: 4, key: "virtual-host-v1", stepMs: 250, maxSteps: 8, maxLagMs: 30000,
   leaseMs: 10000, maxRunMs: 15 * 60000, checkpointBytes: 96 * 1024,
@@ -18,6 +19,15 @@ const time = value => Number.isSafeInteger(value) && value >= 0;
 const fail = reason => { throw new Error(reason); };
 const exact = (value, keys) => value && typeof value === "object" && !Array.isArray(value)
   && Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
+
+// Inputs must already have passed their byte/node limits. JSON text equality
+// would silently equate -0 and 0; body storage and apply receipts need exact data.
+export function sameCheckpointValue(a, b) {
+  if (Object.is(a, b)) return true;
+  if (!a || !b || typeof a !== "object" || typeof b !== "object" || Array.isArray(a) !== Array.isArray(b)) return false;
+  const keys = Object.keys(a), other = Object.keys(b);
+  return keys.length === other.length && keys.every((k, i) => k === other[i] && sameCheckpointValue(a[k], b[k]));
+}
 
 // Reject non-JSON state instead of silently losing NaN, undefined, sparse arrays, or prototypes.
 // Limits bound validation work as well as encoded size. Checkpoints contain no executable objects.
@@ -69,11 +79,49 @@ export function publicSnapshot(record, projected) {
   return JSON.parse(boundedJSON(value, HOST.snapshotBytes));
 }
 
+async function readSessionBody(tx, r, now, accountId, ref, maxSessions, pending = false, expired = false, project) {
+  if (!r.sessions) return null;
+  const registry = SessionRegistry.restore(r.sessions, { protocol: SESSION_PROTOCOL, world: r.world, maxSessions });
+  const reference = { accountId, generation: ref?.generation, token: ref?.token };
+  const view = pending ? registry.transferView(reference) : registry.authorizedView(reference);
+  if (!view) return null;
+  const expiresAt = Math.min(r.runUntil, r.leaseUntil, view.deadline ?? Infinity, registry.controlUntil(reference) ?? Infinity);
+  if (now >= expiresAt && !expired) return null;
+  if (typeof tx.bodies !== "function") fail("complete body storage required");
+  const rows = await tx.bodies(), row = rows.find(body => body.bodyId === view.bodyId);
+  if (!row || row.accountId !== accountId || row.generation !== view.generation || row.kind !== view.kind)
+    fail("body transfer generation mismatch");
+  // Optional source-owned public recovery format. Stored components stay exact
+  // and internal; every read/ACK comparison uses the same deterministic mapping.
+  const checkpoint = project ? project(view, structuredClone(row.checkpoint)) : row.checkpoint;
+  if (!checkpoint || typeof checkpoint !== "object" || checkpoint.then) fail("invalid body transfer projection");
+  const transfer = { v: 1, protocol: SESSION_PROTOCOL, world: r.world, epoch: r.fence, revision: r.revision,
+    at: now, expiresAt, resetResources: "defaults", view, checkpoint };
+  boundedJSON(transfer, HOST.snapshotBytes);
+  return structuredClone(transfer);
+}
+
+// A preparation is an observation, never a reservation or browser capability.
+// Existing bodies bind their generation; an absent body binds the admission
+// counter too, preventing create/remove/recreate from looking absent again.
+function bodyPreparation(r, now, accountId, bodyId) {
+  const current = r.sessions?.sessions.find(s => s.accountId === accountId);
+  if (current && current.bodyId !== bodyId) fail("body preparation account-bound");
+  if (r.sessions?.pending.some(p => p.accountId === accountId || p.bodyId === bodyId)) fail("body preparation departing");
+  const expiresAt = Math.min(r.runUntil, r.leaseUntil, current?.deadline ?? Infinity);
+  if (now >= expiresAt) fail("body preparation expired");
+  return { v: 1, world: r.world, epoch: r.fence, accountId, bodyId, generation: current?.generation ?? 0,
+    nextGeneration: current ? 0 : r.sessions?.nextGeneration ?? 1, expiresAt };
+}
+
 export class VirtualHost {
   constructor({ storage, simulation, sessionAdapter = {}, clock = Date.now }) {
+    const passiveSteps = sessionAdapter.passiveSteps ?? HOST.passiveSteps, maxSteps = simulation?.maxSteps ?? HOST.maxSteps;
     if (!storage?.transaction || !id(simulation?.version)
       || !["initial", "validate", "step", "project", "npcFor", "handoff"].every(k => typeof simulation[k] === "function")
       || typeof sessionAdapter.stepPassive !== "function"
+      || !Number.isSafeInteger(maxSteps) || maxSteps < 1 || maxSteps > HOST.maxSteps
+      || !Number.isSafeInteger(passiveSteps) || passiveSteps < GRACE_MS / PASSIVE_STEP_MS || passiveSteps > HOST.passiveSteps
       || !Number.isSafeInteger(simulation.checkpointBytes) || simulation.checkpointBytes < 256
       || simulation.checkpointBytes > HOST.checkpointBytes - HOST.metadataBytes - HOST.sessionSlotBytes) fail("host adapters");
     this.storage = storage;
@@ -81,25 +129,40 @@ export class VirtualHost {
     this.checkpointBytes = simulation.checkpointBytes;
     this.maxSessions = Math.min(64, Math.floor((HOST.checkpointBytes - HOST.metadataBytes - this.checkpointBytes) / HOST.sessionSlotBytes));
     this.sessionAdapter = sessionAdapter;
+    this.passiveSteps = passiveSteps;
+    this.maxSteps = maxSteps;
     this.clock = clock;
   }
 
   now() { const now = this.clock(); if (!time(now)) fail("host clock"); return now; }
 
   transaction(callback) {
+    // Adapter construction work, like passive steps, is shared by every
+    // optimistic retry of this operation. It is never persisted or published.
+    const operation = {};
     return this.storage.transaction(async tx => {
-      const source = this.simulation;
-      if (typeof source.forTransaction !== "function") return callback.call(this, tx);
-      const simulation = source.forTransaction();
+      const source = this.simulation, sessions = this.sessionAdapter;
+      if (typeof source.forTransaction !== "function" && typeof sessions.forTransaction !== "function") return callback.call(this, tx);
+      let simulation = source, sessionAdapter = sessions;
       try {
-        if (!simulation || simulation === source || simulation.then || simulation.version !== source.version
-          || simulation.checkpointBytes !== source.checkpointBytes
-          || typeof source.poses === "function" && typeof simulation.poses !== "function"
-          || !["initial", "validate", "step", "project", "npcFor", "handoff", "dispose"].every(k => typeof simulation[k] === "function")) fail("invalid simulation transaction");
-        const attempt = Object.create(this); attempt.simulation = simulation;
+        if (typeof source.forTransaction === "function") {
+          simulation = source.forTransaction();
+          if (!simulation || simulation === source || simulation.then || simulation.version !== source.version
+            || simulation.checkpointBytes !== source.checkpointBytes
+            || typeof source.poses === "function" && typeof simulation.poses !== "function"
+            || !["initial", "validate", "step", "project", "npcFor", "handoff", "dispose"].every(k => typeof simulation[k] === "function")) fail("invalid simulation transaction");
+        }
+        if (typeof sessions.forTransaction === "function") {
+          sessionAdapter = await sessions.forTransaction(tx, operation);
+          if (!sessionAdapter || sessionAdapter === sessions || typeof sessionAdapter.stepPassive !== "function"
+            || typeof sessionAdapter.dispose !== "function"
+            || (sessionAdapter.passiveSteps ?? this.passiveSteps) !== this.passiveSteps) fail("invalid body transaction");
+        }
+        const attempt = Object.create(this); attempt.simulation = simulation; attempt.sessionAdapter = sessionAdapter;
         return await callback.call(attempt, tx);
       } finally {
-        if (simulation !== source && !simulation?.then && typeof simulation?.dispose === "function") simulation.dispose();
+        try { if (sessionAdapter !== sessions && typeof sessionAdapter?.dispose === "function") sessionAdapter.dispose(); }
+        finally { if (simulation !== source && !simulation?.then && typeof simulation?.dispose === "function") simulation.dispose(); }
       }
     });
   }
@@ -189,7 +252,7 @@ export class VirtualHost {
   // The same durable transaction advances grace even when there are no clients or NPC steps.
   // Once session state exists, callers must provide the authenticated transport census explicitly.
   async tick(ticket, liveTokens) {
-    const budget = { left: HOST.passiveSteps };
+    const budget = { left: this.passiveSteps };
     return this.transaction(async function(tx) {
       const now = this.now(), r = await this.read(tx);
       this.owns(r, ticket, now);
@@ -217,7 +280,7 @@ export class VirtualHost {
         await this.save(tx, r);
         return { status: r.status, recovering: true, steps: 0, snapshot: null, recovery, work: this.work(registry, now, budget) };
       }
-      const steps = Math.min(HOST.maxSteps, Math.floor(lag / HOST.stepMs));
+      const steps = Math.min(this.maxSteps, Math.floor(lag / HOST.stepMs));
       if (!steps && !registry) return { status: r.status, lagMs: lag, steps, snapshot: null, recovery };
       if (registry) this.settle(r, registry);
       for (let i = 0; i < steps; i++) {
@@ -236,19 +299,29 @@ export class VirtualHost {
   // liveTokens must come from the authenticated Room's surviving transports, never client input.
   // Recover + operation + the registry's bounded departure outbox share one commit. Publish the
   // returned effects only after this resolves; read/ack pending departures via the same method.
-  async sessions(ticket, liveTokens, apply, closes = [], priorityAccount = null) {
-    const budget = { left: HOST.passiveSteps };
+  async sessions(ticket, liveTokens, apply, closes = [], priorityAccount = null, transferAccount = null, admission = null) {
+    if (transferAccount !== null && (!Number.isSafeInteger(transferAccount) || transferAccount < 1)) fail("invalid body transfer account");
+    const budget = { left: this.passiveSteps };
     return this.transaction(async function(tx) {
       const now = this.now(), r = await this.read(tx);
       this.owns(r, ticket, now);
       if (now >= r.runUntil || r.status !== "running") fail("run closed to session operations");
+      // Check before recovery: stale reconnect observations must not disconnect
+      // a replacement by supplying an older set of live transport tokens.
+      if (admission && admission(r, now)?.then) fail("session admission must be synchronous");
       const { registry, recovery } = this.registry(r, now, liveTokens, { closes, create: true, priorityAccount, budget });
       this.settle(r, registry);
       const result = apply(registry, now);
       if (result?.then) fail("session operation must be synchronous");
       this.settle(r, registry); r.wallAt = now;
       await this.save(tx, r);
-      return structuredClone({ recovery, result, work: this.work(registry, now, budget) });
+      let transfer;
+      if (transferAccount !== null) {
+        transfer = result?.ok ? await readSessionBody(tx, r, now, transferAccount, result.session, this.maxSessions, true, false, this.sessionAdapter.transfer) : null;
+        if (result?.ok && !transfer) fail("missing committed body transfer");
+      }
+      return structuredClone({ recovery, result, work: this.work(registry, now, budget),
+        ...(transferAccount !== null ? { transfer } : {}) });
     });
   }
 
@@ -258,6 +331,264 @@ export class VirtualHost {
     return this.sessions(ticket, liveTokens, (registry, now) => registry.connect(claim, now), [], claim?.accountId);
   }
 
+  // Server-only observation taken before preparing browser assets. No body
+  // stops, presence is not confirmed, and no grace deadline or storage changes.
+  // Room must retain this against its current authenticated connection/nonce;
+  // never accept a browser-invented preparation. Expiry requires a fresh read.
+  async prepareBody(ticket, accountId, bodyId) {
+    if (!Number.isSafeInteger(accountId) || accountId < 1 || typeof bodyId !== "string"
+      || !/^[A-Za-z0-9._:/-]{1,64}$/.test(bodyId)) fail("invalid body preparation identity");
+    return this.transaction(async function(tx) {
+      const now = this.now(), r = await this.read(tx);
+      this.owns(r, ticket, now);
+      if (r.status !== "running" || now >= r.runUntil) fail("run closed to body preparation");
+      return bodyPreparation(r, now, accountId, bodyId);
+    });
+  }
+
+  // Legacy foundation admission; not a browser handoff. Browser integration
+  // must use offerBody / activateBody / startedBody and its current-socket outbox.
+  // The authenticated account is independent of message fields. Claim, neutralized
+  // body capture and transfer share one transaction; a failed transfer rolls
+  // back ownership too. Room must still bind delivery/ACK to its current socket.
+  async connectBody(ticket, liveTokens, accountId, claim, preparation, offered = false) {
+    if (typeof offered !== "boolean") fail("invalid body admission mode");
+    if (!Number.isSafeInteger(accountId) || accountId < 1 || accountId !== claim?.accountId)
+      fail("authenticated body account mismatch");
+    if (!exact(preparation, ["v", "world", "epoch", "accountId", "bodyId", "generation", "nextGeneration", "expiresAt"])
+      || preparation.v !== 1 || preparation.accountId !== accountId || preparation.bodyId !== claim.bodyId
+      || ![preparation.epoch, preparation.generation, preparation.nextGeneration, preparation.expiresAt].every(time)
+      || !Array.isArray(liveTokens))
+      fail("invalid body preparation");
+    const request = structuredClone(claim), observed = structuredClone(preparation), tokens = [...liveTokens];
+    const admission = (r, now) => {
+      const current = bodyPreparation(r, now, accountId, request.bodyId);
+      if (now >= observed.expiresAt || observed.expiresAt > current.expiresAt
+        || ["world", "epoch", "generation", "nextGeneration"].some(k => observed[k] !== current[k]))
+        fail("stale body preparation");
+    };
+    return this.sessions(ticket, tokens, (registry, now) => {
+      // Recovery can infer an old unobserved close and expire the body after
+      // the initial check. Never turn that reconnect into a fresh spawn.
+      if ((registry.view(accountId)?.generation ?? 0) !== observed.generation) fail("stale body preparation after recovery");
+      return offered ? registry.offer(request, now) : registry.connect(request, now);
+    }, [], accountId, accountId, admission);
+  }
+
+  // Asset preparation has finished, but the host still owns the falling body.
+  // The offered snapshot is only a preflight; activation returns a fresh one.
+  offerBody(ticket, liveTokens, accountId, claim, preparation) {
+    return this.connectBody(ticket, liveTokens, accountId, claim, preparation, true);
+  }
+
+  // Trusted Room only. The command is retained by Room before dispatch, never
+  // built from a browser-supplied claim/body/token. The current host ticket and
+  // transport census are deliberately not part of its stable operation identity.
+  async bodyOperation(ticket, liveTokens, command, { recoverOnly = false } = {}) {
+    if (!Array.isArray(liveTokens) || typeof recoverOnly !== "boolean") fail("invalid body operation recovery");
+    const c = structuredClone(validateBodyOperation(command)), tokens = [...liveTokens], owner = { ...ticket }, digest = await bodyOperationDigest(c);
+    const parent = this, scoped = Object.create(this);
+    scoped.storage = { transaction: callback => parent.storage.transaction(async tx => {
+      const now = parent.now(), r = await parent.read(tx); parent.owns(r, owner, now);
+      if (!tx.bodyOperations) fail("atomic body operation storage required");
+      return tx.bodyOperations.run(c, digest, now, () => callback(tx), recoverOnly);
+    }) };
+    if (c.phase === "offering") return scoped.offerBody(owner, tokens, c.accountId, c.input.claim, c.input.preparation);
+    return c.phase === "activating"
+      ? scoped.activateBody(owner, tokens, c.accountId, c.input.ref, c.input.issued)
+      : scoped.startedBody(owner, tokens, c.accountId, c.input.ref, c.input.issued);
+  }
+
+  async retireBodyOperation(ticket, accountId, connection, request) {
+    return this.storage.transaction(async tx => {
+      const now = this.now(), r = await this.read(tx); this.owns(r, ticket, now);
+      if (!tx.bodyOperations) fail("atomic body operation storage required");
+      return tx.bodyOperations.retire(accountId, connection, request, now);
+    });
+  }
+
+  activateBody(ticket, liveTokens, accountId, ref, issued) {
+    return this.bodyHandoff(ticket, liveTokens, accountId, ref, issued, false);
+  }
+
+  startedBody(ticket, liveTokens, accountId, ref, issued) {
+    return this.bodyHandoff(ticket, liveTokens, accountId, ref, issued, true);
+  }
+
+  // Room-only cleanup for a closed handoff with a durable liveSent=false marker.
+  // NEVER use this after a body-live send was attempted (even if its result is
+  // uncertain). A caller cannot derive that proof from a browser assertion.
+  async abandonBody(ticket, liveTokens, accountId, ref, issued) {
+    if (!Number.isSafeInteger(accountId) || accountId < 1 || accountId !== ref?.accountId || !Array.isArray(liveTokens))
+      fail("authenticated body account mismatch");
+    if (!exact(issued, ["v", "protocol", "world", "epoch", "revision", "at", "expiresAt", "resetResources", "view", "checkpoint"]))
+      fail("invalid abandoned body receipt");
+    boundedJSON(issued, HOST.snapshotBytes);
+    const transfer = structuredClone(issued), reference = { accountId, generation: ref.generation, token: ref.token };
+    const tokens = [...new Set([...liveTokens, reference.token])], budget = { left: this.passiveSteps };
+    return this.transaction(async function(tx) {
+      const now = this.now(), r = await this.read(tx); this.owns(r, ticket, now);
+      if (r.status !== "running" || now >= r.runUntil) fail("run closed to body abandonment");
+      const refused = () => ({ result: { ok: false, reason: "stale", effects: [] } });
+      // A replacement host may clean up an old committed hold, but may never
+      // deliver it as a new grant. Exact token/generation/body checks below and
+      // Room's durable no-live-send proof still apply. Reconcile before ticking.
+      if (transfer.v !== 1 || transfer.protocol !== SESSION_PROTOCOL || transfer.world !== r.world
+        || !time(transfer.epoch) || transfer.epoch < 1 || transfer.epoch > r.fence
+        || transfer.resetResources !== "defaults" || transfer.view?.state !== "starting"
+        || transfer.view.accountId !== accountId || transfer.view.generation !== reference.generation
+        || ![transfer.revision, transfer.at, transfer.expiresAt, transfer.view.deadline].every(time)
+        || transfer.revision < 1 || transfer.revision > r.revision || transfer.at > now
+        || transfer.expiresAt <= transfer.at || transfer.expiresAt - transfer.at > HANDOFF_MS) return refused();
+      const held = r.sessions?.sessions.find(s => s.accountId === accountId && s.generation === reference.generation && s.token === reference.token);
+      if (held?.state === "grace" && held.deadline === transfer.view.deadline) {
+        const registry = SessionRegistry.restore(r.sessions, { protocol: SESSION_PROTOCOL, world: r.world, maxSessions: this.maxSessions });
+        return { result: { ok: true, duplicate: true, effects: [], view: registry.view(accountId) } };
+      }
+      const current = await readSessionBody(tx, r, now, accountId, reference, this.maxSessions, true, true, this.sessionAdapter.transfer);
+      if (!current || !["starting", "live"].includes(current.view.state)) return refused();
+      const view = { ...current.view, state: "starting", deadline: transfer.view.deadline, presentation: transfer.view.presentation };
+      if (!sameCheckpointValue(view, transfer.view) || !sameCheckpointValue(current.checkpoint, transfer.checkpoint)) return refused();
+      const { registry, recovery } = this.registry(r, now, tokens, { priorityAccount: accountId, budget });
+      // Recovery may already have expired an unacknowledged starting hold.
+      const existing = registry.view(accountId);
+      const result = existing?.state === "grace" && existing.deadline === transfer.view.deadline
+        ? { ok: true, effects: [], view: existing }
+        : registry.abandon(reference, transfer.at, transfer.view.deadline, now);
+      this.settle(r, registry); r.wallAt = now; await this.save(tx, r);
+      return structuredClone({ result, recovery, work: this.work(registry, now, budget) });
+    });
+  }
+
+  // SERVER-retained transfer + current authenticated socket receipt only. Never
+  // accept a browser-supplied snapshot. Offered bodies can fall during preflight;
+  // the final short lease is bound to an unchanged exact body until its ACK.
+  // Room still needs durable delivery/close records and a current-socket CAS.
+  async bodyHandoff(ticket, liveTokens, accountId, ref, issued, started) {
+    if (typeof started !== "boolean" || !Number.isSafeInteger(accountId) || accountId < 1 || accountId !== ref?.accountId)
+      fail("authenticated body account mismatch");
+    if (!Array.isArray(liveTokens) || !exact(issued, ["v", "protocol", "world", "epoch", "revision", "at", "expiresAt", "resetResources", "view", "checkpoint"]))
+      fail("invalid body handoff receipt");
+    boundedJSON(issued, HOST.snapshotBytes);
+    const transfer = structuredClone(issued), reference = { accountId, generation: ref.generation, token: ref.token }, tokens = [...liveTokens];
+    const budget = { left: this.passiveSteps };
+    return this.transaction(async function(tx) {
+      const now = this.now(), r = await this.read(tx);
+      this.owns(r, ticket, now);
+      if (r.status !== "running" || now >= r.runUntil) fail("run closed to body handoff");
+      const refused = () => ({ result: { ok: false, reason: "stale", effects: [] }, transfer: null });
+      if (transfer.v !== 1 || transfer.protocol !== SESSION_PROTOCOL || transfer.world !== r.world
+        || transfer.epoch !== r.fence || transfer.resetResources !== "defaults"
+        || ![transfer.revision, transfer.at, transfer.expiresAt].every(time) || transfer.revision < 1
+        || transfer.revision > r.revision || transfer.at > now || transfer.expiresAt <= now
+        || transfer.view?.accountId !== accountId || transfer.view?.generation !== reference.generation
+        || transfer.view?.state !== (started ? "starting" : "offered")) return refused();
+      // Reject a stale socket before its old census can change newer sessions.
+      const current = await readSessionBody(tx, r, now, accountId, reference, this.maxSessions, true, false, this.sessionAdapter.transfer);
+      if (!current || current.view.bodyId !== transfer.view.bodyId || current.view.kind !== transfer.view.kind) return refused();
+      const duplicate = started && current.view.state === "live";
+      if (current.view.state !== (started ? "starting" : "offered") && !duplicate) return refused();
+      if (started) {
+        const view = duplicate ? { ...current.view, state: "starting", deadline: transfer.view.deadline, presentation: transfer.view.presentation } : current.view;
+        if (!sameCheckpointValue(view, transfer.view) || !sameCheckpointValue(current.checkpoint, transfer.checkpoint)) return refused();
+      }
+      if (duplicate) return { result: { ok: true, duplicate: true, view: current.view, effects: [] }, transfer: null };
+      const { registry, recovery } = this.registry(r, now, tokens, { priorityAccount: accountId, budget });
+      const result = started ? registry.started(reference, now) : registry.activate(reference, now);
+      this.settle(r, registry); r.wallAt = now;
+      await this.save(tx, r);
+      const final = !started && result.ok ? await readSessionBody(tx, r, now, accountId, reference, this.maxSessions, true, false, this.sessionAdapter.transfer) : null;
+      if (!started && result.ok && !final) fail("missing committed body activation");
+      return structuredClone({ result, transfer: final, recovery, work: this.work(registry, now, budget) });
+    });
+  }
+
+  // Server-only transfer read after connect has committed. accountId must come
+  // from Room authentication, never the message body. The current session and
+  // its exact component are read atomically; no other player's state or token
+  // leaves this method. This is not a browser control grant or an apply ACK.
+  async bodyForSession(ticket, accountId, ref) {
+    if (!Number.isSafeInteger(accountId) || accountId < 1 || accountId !== ref?.accountId)
+      fail("authenticated body account mismatch");
+    const reference = { accountId, generation: ref?.generation, token: ref?.token };
+    return this.transaction(async function(tx) {
+      const now = this.now(), r = await this.read(tx);
+      this.owns(r, ticket, now);
+      if (r.status !== "running" || now >= r.runUntil) fail("run closed to body transfer");
+      return readSessionBody(tx, r, now, accountId, reference, this.maxSessions, false, false, this.sessionAdapter.transfer);
+    });
+  }
+
+  // Room calls this only for an apply ACK from its current authenticated socket.
+  // `issued` is the exact transfer retained by the SERVER, not a browser body.
+  // Unrelated world commits may advance revision; changed physical/equipment or
+  // occupancy state, generation, epoch or an expired offer may never activate.
+  // This read confirms neither presence nor a new lease and changes no deadline.
+  async confirmBody(ticket, accountId, ref, issued) {
+    if (!Number.isSafeInteger(accountId) || accountId < 1 || accountId !== ref?.accountId)
+      fail("authenticated body account mismatch");
+    if (!exact(issued, ["v", "protocol", "world", "epoch", "revision", "at", "expiresAt", "resetResources", "view", "checkpoint"]))
+      fail("invalid body apply receipt");
+    boundedJSON(issued, HOST.snapshotBytes);
+    const transfer = structuredClone(issued), reference = { accountId, generation: ref.generation, token: ref.token };
+    return this.transaction(async function(tx) {
+      const now = this.now(), r = await this.read(tx);
+      this.owns(r, ticket, now);
+      if (r.status !== "running" || now >= r.runUntil) fail("run closed to body confirmation");
+      if (transfer.v !== 1 || transfer.protocol !== SESSION_PROTOCOL || transfer.world !== r.world
+        || transfer.epoch !== r.fence || transfer.resetResources !== "defaults"
+        || ![transfer.revision, transfer.at, transfer.expiresAt].every(time) || transfer.revision < 1
+        || transfer.revision > r.revision || transfer.at > now || transfer.expiresAt <= now) return false;
+      const current = await readSessionBody(tx, r, now, accountId, reference, this.maxSessions, false, false, this.sessionAdapter.transfer);
+      return !!current && sameCheckpointValue(current.view, transfer.view) && sameCheckpointValue(current.checkpoint, transfer.checkpoint);
+    });
+  }
+
+  // Server-only: account/ref and census come from the current authenticated
+  // Room connection. No browser route enables this boundary yet. A duplicate
+  // never refreshes presence; a stale generation is rejected before recovery.
+  async updateBody(ticket, liveTokens, accountId, ref, sample, { observedAt = null } = {}) {
+    if (!Number.isSafeInteger(accountId) || accountId < 1 || accountId !== ref?.accountId
+      || !exact(sample, ['sequence', 'checkpoint']) || !Number.isSafeInteger(sample.sequence) || sample.sequence < 1)
+      fail('invalid body movement account or sample');
+    if (observedAt !== null && !time(observedAt)) fail('invalid server movement observation');
+    boundedJSON(sample, 4096, 256);
+    boundedJSON(liveTokens, 4096, 64);
+    const input = structuredClone(sample), reference = { accountId, generation: ref.generation, token: ref.token }, tokens = structuredClone(liveTokens);
+    const budget = { left: this.passiveSteps };
+    return this.transaction(async function(tx) {
+      const now = this.now(), r = await this.read(tx); this.owns(r, ticket, now);
+      if (r.status !== 'running' || now >= r.runUntil) fail('run closed to body movement');
+      const row = r.sessions?.sessions.find(s => s.accountId === accountId);
+      if (!row || row.state !== 'live' || row.generation !== reference.generation || row.token !== reference.token
+        || !Array.isArray(tokens) || !tokens.includes(row.token)) fail('fenced body movement session');
+      if (!tx.bodyMovements || typeof this.sessionAdapter.readMovement !== 'function'
+        || typeof this.sessionAdapter.applyMovement !== 'function') fail('atomic body movement adapter required');
+      const candidate = this.sessionAdapter.readMovement(row, input.checkpoint);
+      // Source-owned packed scalars encode signed zero explicitly. Hash the
+      // canonical validated packed component, never unchecked browser JSON.
+      const bytes = encoder.encode(JSON.stringify([observedAt, candidate.checkpoint]));
+      const digest = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))]
+        .map(v => v.toString(16).padStart(2, '0')).join('');
+      return tx.bodyMovements.run({ v: 1, accountId, bodyId: row.bodyId, generation: row.generation,
+        sequence: input.sequence, digest, at: now },
+      [...r.sessions.sessions, ...r.sessions.pending].map(s => s.accountId), async () => {
+        this.sessionAdapter.applyMovement(row, candidate);
+        const { registry } = this.registry(r, now, tokens, { priorityAccount: accountId, budget });
+        const result = registry.updateObserved(reference, now, observedAt ?? now, { motion: candidate.motion });
+        if (result !== true) fail('body movement refused');
+        this.settle(r, registry); r.wallAt = now; await this.save(tx, r);
+      });
+    });
+  }
+
+  // A distinct RPC name makes an older host refuse instead of silently ignoring
+  // the Room observation option and moving presence past a confirmed close.
+  async updateObservedBody(ticket, liveTokens, accountId, ref, sample, observedAt) {
+    if (!time(observedAt)) fail('server movement observation required');
+    return this.updateBody(ticket, liveTokens, accountId, ref, sample, { observedAt });
+  }
+
   // A close is an explicit server observation, not an inferred missing transport. Retrying a
   // stale/already-grace generation cannot move its deadline. Never use a browser-supplied timestamp.
   async disconnect(ticket, liveTokens, ref, closedAt) {
@@ -265,14 +596,28 @@ export class VirtualHost {
     return this.sessions(ticket, liveTokens, registry => registry.view(closeRef.accountId), [{ ref: closeRef, at: closedAt }]);
   }
 
+  async bodyReferenceState(ticket, accountId, ref) {
+    if (!Number.isSafeInteger(accountId) || accountId < 1 || ref?.accountId !== accountId) fail("authenticated body account mismatch");
+    const reference = structuredClone(ref);
+    return this.storage.transaction(async tx => {
+      const now = this.now(), r = await this.read(tx); this.owns(r, ticket, now);
+      const held = r.sessions?.sessions.find(s => s.accountId === accountId && s.bodyId === reference.bodyId
+        && s.generation === reference.generation && s.token === reference.token);
+      if (!held) return null;
+      return SessionRegistry.restore(r.sessions, { protocol: SESSION_PROTOCOL, world: r.world, maxSessions: this.maxSessions }).view(accountId);
+    });
+  }
+
   // Project only a committed checkpoint, without stepping, renewing or writing it.
   // The optional full-rig adapter must be pure and deterministic. Public x/y/z
   // snapshots cannot substitute for it. A caller cannot publish uncommitted work.
-  async poses(ticket, { format } = {}) {
+  async poses(ticket, { format, skipPending = false } = {}) {
+    if (typeof skipPending !== "boolean") fail("invalid pending publication policy");
     if (format !== undefined && format !== "mixed-1") fail("unsupported host pose format");
     if (typeof this.simulation.poses !== "function") fail("NPC pose adapter required");
     return this.transaction(async function(tx) {
-      const r = await this.publicationRecord(tx, ticket);
+      const r = await this.publicationRecord(tx, ticket, skipPending);
+      if (!r) return null;
       const queries = this.simulation.readQueries?.(r.simulation);
       if (queries?.then || queries && typeof queries.npcFor !== "function") fail("invalid simulation queries");
       const frame = typeof queries?.poses === "function" ? queries.poses(format) : this.simulation.poses(structuredClone(r.simulation), format);
@@ -283,11 +628,16 @@ export class VirtualHost {
     });
   }
 
-  async publicationRecord(tx, ticket) {
+  async publicationRecord(tx, ticket, skipPending = false) {
     const now = this.now(), r = await this.read(tx);
     this.owns(r, ticket, now);
     if (r.status !== "running" || now >= r.runUntil) fail("run closed to pose publication");
-    if (r.sessions?.sessions.some(s => s.state === "grace" && s.stepAt < Math.min(r.sessions.clock, s.deadline))) fail("body recovery pending");
+    if (r.sessions?.sessions.some(s => (s.state === "grace" || s.state === "offered"
+      || s.state === "starting" && now >= Math.min(s.stepAt + HANDOFF_MS, s.deadline))
+      && s.stepAt < Math.min(s.state === "starting" ? now : r.sessions.clock, s.deadline))) {
+      if (skipPending) return null;
+      fail("body recovery pending");
+    }
     return r;
   }
 
@@ -295,17 +645,19 @@ export class VirtualHost {
   // same deterministic rigs again. Every persisted mutation increments revision;
   // this still validates storage, ownership, deadlines and pending body recovery.
   // It is not a frame validator or a substitute for Room's independent fence.
-  async confirmPoses(ticket, { sequence, at, runUntil }) {
+  async confirmPoses(ticket, { sequence, at, runUntil }, { skipPending = false } = {}) {
+    if (typeof skipPending !== "boolean") fail("invalid pending publication policy");
     if (!time(sequence) || !sequence || !time(at) || !time(runUntil)) fail("invalid pose revision");
     if (typeof this.simulation.poses !== "function") fail("NPC pose adapter required");
     return this.transaction(async function(tx) {
-      const r = await this.publicationRecord(tx, ticket);
+      const r = await this.publicationRecord(tx, ticket, skipPending);
+      if (!r) return false;
       return r.revision === sequence && r.simulatedAt === at && r.runUntil === runUntil;
     });
   }
 
   work(registry, now, budget) {
-    return registry ? { ...registry.work(now), attemptedSteps: HOST.passiveSteps - budget.left } : undefined;
+    return registry ? { ...registry.work(now), attemptedSteps: this.passiveSteps - budget.left } : undefined;
   }
 
   // A reader is valid only until the next simulation mutation. It is local to
@@ -317,10 +669,10 @@ export class VirtualHost {
     return bodyId => queries.npcFor(bodyId);
   }
 
-  registry(r, now, liveTokens, { closes = [], create = false, priorityAccount = null, budget = { left: HOST.passiveSteps } } = {}) {
+  registry(r, now, liveTokens, { closes = [], create = false, priorityAccount = null, budget = { left: this.passiveSteps } } = {}) {
     if (!r.sessions && !create) return { registry: null, recovery: { effects: [] } };
     if (!Array.isArray(liveTokens)) fail("authenticated transport census required");
-    const options = { protocol: SESSION_PROTOCOL, world: r.world, maxSessions: this.maxSessions, passiveBudget: HOST.passiveSteps, adapter: {
+    const options = { protocol: SESSION_PROTOCOL, world: r.world, maxSessions: this.maxSessions, passiveBudget: this.passiveSteps, adapter: {
       stepPassive: (motion, ms) => {
         // Storage can rerun this callback against a fresh checkpoint. Attempts
         // share the outer operation budget; exhaustion aborts without publishing
@@ -329,6 +681,7 @@ export class VirtualHost {
         budget.left--;
         return this.sessionAdapter.stepPassive(motion, ms, r.simulation);
       },
+      canStep: typeof this.sessionAdapter.canStep === "function" ? body => this.sessionAdapter.canStep(body) : undefined,
       validateOccupancy: (body, resource) => this.sessionAdapter.validateOccupancy?.(body, resource, r.simulation) === true,
       npcFor: this.npcLookup(r),
     } };
@@ -358,7 +711,7 @@ export class VirtualHost {
   }
 
   async stop(ticket, liveTokens) {
-    const budget = { left: HOST.passiveSteps };
+    const budget = { left: this.passiveSteps };
     return this.transaction(async function(tx) {
       const now = this.now(), r = await this.read(tx); this.owns(r, ticket, now);
       const { registry, recovery } = this.registry(r, now, liveTokens, { budget });

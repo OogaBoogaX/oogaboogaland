@@ -5,8 +5,8 @@ import { createPassiveBody } from "../src/passive-body.js";
 import { rosterFixture } from "../test/fixtures/host-roster-fixture.mjs";
 
 const body = { kind: "clanker", motion: { x: -4, y: 4, z: -4, yaw: .7, vx: 1, vy: -2, vz: 1, grounded: false },
-  equipment: { weapon: "gun", mode: "combat", magazine: 17, spareAmmo: [4, 22], primaryOwned: true,
-    secondaryOwned: true, selectedSlot: 2, unlimited: false, jetpack: true, jetpackOwned: true, fuel: .37 } };
+  equipment: { weapon: "gun", mode: "combat", primaryOwned: true,
+    secondaryOwned: true, selectedSlot: 2, unlimited: false, jetpack: true, jetpackOwned: true } };
 export class HostRuntimeFixture {
   constructor(ctx) { this.ctx = ctx; this.fixture = null; }
   async fetch(request) {

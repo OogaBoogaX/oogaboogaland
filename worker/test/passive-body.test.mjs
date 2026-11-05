@@ -5,7 +5,7 @@ import { SessionRegistry, GRACE_MS } from "../src/host-sessions.js";
 import { prepare } from "./fixtures/npc-walker-fixture.mjs";
 import { managedRigs } from "./fixtures/clanker-pose-rig.mjs";
 const motion = (o={}) => ({x:0,y:4,z:3,yaw:.7,vx:0,vy:0,vz:0,grounded:false,...o});
-const equipment = () => ({weapon:'gun',mode:'combat',magazine:17,spareAmmo:[4,22],primaryOwned:true,secondaryOwned:true,selectedSlot:2,unlimited:false,jetpack:true,jetpackOwned:true,fuel:.37});
+const equipment = () => ({weapon:'gun',mode:'combat',primaryOwned:true,secondaryOwned:true,selectedSlot:2,unlimited:false,jetpack:true,jetpackOwned:true});
 const claim = () => ({protocol:'body-test',world:'walker-fixture-1',accountId:1,bodyId:'resident',zone:'outside',body:{kind:'ooga',motion:motion(),equipment:equipment()}});
 const withId = m => ({bodyId:'resident',zone:'outside',kind:'ooga',...m});
 async function physics(radius=.2,height=1.8){const f=await prepare(),mesh=f.catalog.create();let calls=0;const step=createPassiveBody({gravity:12,world:()=>{calls++;return {...mesh,radius,height};}});return {mesh,step,get calls(){return calls;}};}
@@ -96,7 +96,7 @@ test('VirtualHost commits real passive landing with handback and rolls both back
   assert.equal(data.get(HOST.key).simulation.handbacks,1,'committed handback never replays after restart');
 });
 
-test('committed grace views raise only the free arm, keep equipment and falling bodies, and restore exactly on reclaim',()=>{
+test('grace and pending handoff views keep the free arm and red indicator until acknowledged reclaim',()=>{
   const f=managedRigs({presence:true}),B=f.B,root=B.scene.createNode(),clanker=f.make();B.scene.addChild(root,clanker.root);
   const ooga=B.models.caveman({name:'presence-fixture',skin:'#b08060',hair:'#38281c',fur:'#846040',height:1.4,belly:1,rand:B.math.mulberry32(3)});
   B.scene.addChild(root,ooga.root);ooga.parts.snack.visible=false;clanker.poseManaged(.05,1,4,3,.7,2,true);
@@ -117,7 +117,13 @@ test('committed grace views raise only the free arm, keep equipment and falling 
   presence.prepare();assert.deepEqual({...ooga.parts.armL.rotation},beforeOoga);
   assert.equal(B.hostPresence.colorFor(ooga),'#ef4444','pose preparation cannot flash the name green');
   clanker.root.position.y=4;assert.equal(JSON.stringify(clanker.createPoseProjector('presence').capture('vessel')),beforeClanker);
-  const back=reg.connect({...claim(),body:undefined},100050);assert.equal(back.resumed,true);
+  const back=reg.offer({...claim(),body:undefined},100050);assert.equal(back.resumed,true);
+  presence.render({now:100050,views:[reg.view(1),reg.view(2)],departures:[]});assert.equal(presence.hands,2);
+  assert.equal(B.hostPresence.colorFor(ooga),'#ef4444','an offer alone is not online');
+  presence.prepare();assert.equal(reg.activate(back.session,100050).ok,true);
+  presence.render({now:100050,views:[reg.view(1),reg.view(2)],departures:[]});assert.equal(presence.hands,2);
+  assert.equal(B.hostPresence.colorFor(ooga),'#ef4444','a pending final ACK must not flash green');
+  presence.prepare();assert.equal(reg.started(back.session,100050).ok,true);
   presence.render({now:100050,views:[reg.view(1),reg.view(2)],departures:[]});assert.equal(presence.hands,1);
   assert.equal(B.hostPresence.statusFor(ooga),'online');assert.equal(B.hostPresence.colorFor(ooga),'#22c55e');
   assert.equal(B.hostPresence.colorFor(clanker),'#ef4444');

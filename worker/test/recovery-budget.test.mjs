@@ -6,8 +6,8 @@ import { createPassiveBody } from "../src/passive-body.js";
 import { createNpcPose } from "../src/npc-pose.js";
 import { prepare } from "./fixtures/clanker-flight-fixture.mjs";
 
-const equipment = { weapon: "gun", mode: "combat", magazine: 17, spareAmmo: [4, 22], primaryOwned: true,
-  secondaryOwned: true, selectedSlot: 2, unlimited: false, jetpack: true, jetpackOwned: true, fuel: .37 };
+const equipment = { weapon: "gun", mode: "combat", primaryOwned: true,
+  secondaryOwned: true, selectedSlot: 2, unlimited: false, jetpack: true, jetpackOwned: true };
 const claim = i => ({ protocol: SESSION_PROTOCOL, world: "budget-fixture", accountId: i + 1, bodyId: `body-${i}`, zone: "outside",
   body: { kind: "clanker", motion: { x: -4, y: 4, z: -4, yaw: .7, vx: 1, vy: -2, vz: 1, grounded: false }, equipment } });
 

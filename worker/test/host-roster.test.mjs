@@ -20,8 +20,7 @@ test("53 Ooga/Clanker pairs retain exact controller state through full slots, gr
   const world = { ...f.mesh, radius: 2.25, height: 2.8 }, passive = createPassiveBody({ world: () => world, gravity: 9.8 });
   const make = () => new VirtualHost({ storage, simulation: f.simulation, clock: () => now, sessionAdapter: { stepPassive: passive } });
   let host = make(), ticket = await host.begin("first", 120000);
-  const reference = f.source.initial(), equipment = { weapon: "gun", mode: "combat", magazine: 17, spareAmmo: [4, 22],
-    primaryOwned: true, secondaryOwned: true, selectedSlot: 2, unlimited: false, jetpack: true, jetpackOwned: true, fuel: .37 };
+  const reference = f.source.initial(), equipment = { weapon: "gun", mode: "combat", primaryOwned: true, secondaryOwned: true, selectedSlot: 2, unlimited: false, jetpack: true, jetpackOwned: true };
   const claim = i => ({ protocol: SESSION_PROTOCOL, world: f.simulation.version, accountId: i + 1, bodyId: `body-${i}`, zone: "outside",
     body: { kind: "clanker", motion: { x: -4, y: 4, z: -4, yaw: .7, vx: 1, vy: -2, vz: 1, grounded: false }, equipment } });
   const joins = (await host.sessions(ticket, [], (r, at) => Array.from({ length: 31 }, (_, i) => r.connect(claim(i), at)))).result;
@@ -74,8 +73,8 @@ test("compact 106-actor plus rig checkpoints retain all session reservations thr
   const passive=createPassiveBody({world:()=>({...f.mesh,radius:2.25,height:2.8}),gravity:9.8});
   const make=()=>new VirtualHost({storage,simulation,clock:()=>now,sessionAdapter:{stepPassive:passive}});
   let host=make(),ticket=await host.begin('first',120000);
-  const equipment={weapon:'gun',mode:'combat',magazine:17,spareAmmo:[4,22],primaryOwned:true,secondaryOwned:true,
-    selectedSlot:2,unlimited:false,jetpack:true,jetpackOwned:true,fuel:.37};
+  const equipment={weapon:'gun',mode:'combat',primaryOwned:true,secondaryOwned:true,
+    selectedSlot:2,unlimited:false,jetpack:true,jetpackOwned:true};
   const claim=i=>({protocol:SESSION_PROTOCOL,world:simulation.version,accountId:i+1,bodyId:`body-${i}`,zone:'outside',
     body:{kind:'clanker',motion:{x:-4,y:4,z:-4,yaw:.7,vx:1,vy:-2,vz:1,grounded:false},equipment}});
   const joins=(await host.sessions(ticket,[],(r,at)=>Array.from({length:31},(_,i)=>r.connect(claim(i),at)))).result;

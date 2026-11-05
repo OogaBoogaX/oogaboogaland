@@ -220,8 +220,16 @@
   };
 
   const send = (text) => {
+    if (bodyReclaim.required && typeof text === "string" && text !== "ping"
+      && !bodyReclaim.allows(JSON.parse(text).t, body)) return;
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(text);
   };
+
+  // Capability is intentionally absent from deployed Room welcomes. The scene
+  // must install a complete prepare/preflight/apply/activate/release adapter before READY.
+  // A retained requirement never falls back to old pose replay on an older Room.
+  const bodyReclaim = BL.bodyReclaim.create({ send: msg => send(JSON.stringify(msg)), monotonic: () => performance.now(), wall: () => Date.now(),
+    later: (fn, ms) => window.setTimeout(fn, ms), cancel: id => window.clearTimeout(id) });
 
   const sendBody = () => send(JSON.stringify({ t: "body", name: body }));
   const sendZone = () => send(JSON.stringify({ t: "zone", name: zone }));
@@ -361,6 +369,15 @@
     } catch {
       return;
     }
+    if (msg && ["body-prepare", "body-grant", "body-active", "body-live", "body-motion-ack"].includes(msg.t)) {
+      const active = bodyReclaim.active;
+      if (bodyReclaim.message(msg) && !active && bodyReclaim.active) {
+        // Only a fresh restored-controller report may populate the send cache.
+        poseAt = 0; px = NaN; gKnown = poseHasG = false; jetSent = weaponSent = 0;
+        hpSent = 100; koSent = false; hpAt = 0;
+      }
+      return;
+    }
     if (msg.t === "cabinets") {
       cabinetSeats.clear();
       if (Array.isArray(msg.seats)) for (const seat of msg.seats) if (BL.arcadeCabinets.get(seat.id)) cabinetSeats.set(seat.id, seat);
@@ -434,6 +451,8 @@
       state.ghostFollowers = Number.isSafeInteger(msg.ghostFollowers) ? msg.ghostFollowers : 0;
       state.selfId = msg.you.id;
       state.connectionToken = typeof msg.connectionToken === "string" ? msg.connectionToken : "";
+      bodyReclaim.open(state.selfId, state.connectionToken, Array.isArray(msg.features) && msg.features.includes(BL.bodyReclaim.FEATURE),
+        Array.isArray(msg.features) && msg.features.some(f => typeof f === "string" && f.startsWith("host-body-reclaim-")));
       state.cabinets = Array.isArray(msg.features) && msg.features.includes(BL.arcadeCabinets.FEATURE);
       state.hockey = Array.isArray(msg.features) && msg.features.includes("hockey-v2");
       state.doorway = Array.isArray(msg.features) && msg.features.includes("door");
@@ -588,6 +607,7 @@
   };
 
   const close = (room) => {
+    bodyReclaim.close();
     window.clearInterval(pingTimer);
     pingTimer = 0;
     if (ws) {
@@ -771,6 +791,7 @@
   };
   // Hidden long enough, the tab leaves the room; shown again, it rejoins as a fresh connection.
   const onVisibility = () => {
+    if (document.hidden) bodyReclaim.suspend();
     sendHub();
     sendVisible();
     window.clearTimeout(hiddenTimer);
@@ -868,7 +889,7 @@
   // The driven Ooga's health, called every frame: sent only when its step or knockout changed, HP_MS apart, so a
   // fight costs a few messages a second and an Ooga at full health none.
   const setHealth = (value, stunned) => {
-    if (state.room !== "live" || !body) return;
+    if (state.room !== "live" || !body || !bodyReclaim.allows("hp", body)) return;
     const v = Math.max(0, Math.min(100, Math.round(value / HP_STEP) * HP_STEP)), ko = !!stunned;
     if (v === hpSent && ko === koSent) return;
     const now = performance.now();
@@ -899,6 +920,7 @@
 
   // Throttled to POSE_MS and skipped while nothing moved; a changed gorilla pose, jetpack or weapon also earns a report.
   const sendPose = (x, y, z, yaw, g = null, jet = 0, weapon = 0) => {
+    if (!bodyReclaim.allows("pose", body)) return;
     if (cabinetAnchor) {
       const at = cabinetAnchor;
       x = at.x; y = at.y; z = at.z; yaw = at.yaw; g = null; jet = weapon = 0;
@@ -1143,5 +1165,5 @@
     close("off");
   };
 
-  BL.net = { cabinetSeats, takeCabinet, leaveCabinet, get cabinet() { return cabinetSeat; }, handoffBody, hockeyTables, subscribeHockey, sendHockey, subscribeHighscores, subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribeChalk, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendGhost, subscribeGhost, sendThump, subscribeThump, sendGhostState, subscribeGhostState, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
+  BL.net = { bodyReclaim, cabinetSeats, takeCabinet, leaveCabinet, get cabinet() { return cabinetSeat; }, handoffBody, hockeyTables, subscribeHockey, sendHockey, subscribeHighscores, subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribeChalk, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendGhost, subscribeGhost, sendThump, subscribeThump, sendGhostState, subscribeGhostState, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
 })();

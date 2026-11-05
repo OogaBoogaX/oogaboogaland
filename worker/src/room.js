@@ -40,7 +40,8 @@ import { deliverHighscores } from "./highscore-store.js";
 import { sfuClient } from "./sfu.js";
 import { STUDIO_TRANSPORT, STUDIO_ZONE, studioState, studioHostAllowed, studioCanSpeak, studioPosition, studioSeatAllowed, studioSource } from "./studio-policy.js";
 import CAST_ROWS from "./characters.gen.json";
-import { RoomNpcAuthority, validateNpcAuthority, npcAuthorityView, npcProtocolSupports, packNpcSnapshot } from "./room-npc-authority.js";
+import { RoomNpcAuthority, validateNpcAuthority, npcAuthorityView, npcProtocolSupports, packNpcSnapshot, npcNextPublicationAt, npcCadenceName } from "./room-npc-authority.js";
+import { RoomBodyHandoff } from "./room-body-handoff.js";
 
 const CAST = castIndex(CAST_ROWS);
 
@@ -65,6 +66,8 @@ export class Room extends DurableObject {
     this.followers = 0;
     this.lastNpc = null;
     this.npcAuthority = null;
+    this.bodyHandoff = null;
+    this.bodyHandoffRequired = false;
     // The arcade's ghost arena: its own hunt's host, how many follow it, and its last state frame.
     this.ghostHostId = 0;
     this.ghostFollowers = 0;
@@ -89,6 +92,27 @@ export class Room extends DurableObject {
       // removed. Older builds need an explicit release before rollback.
       const authority = await ctx.storage.get("npc-authority-v1");
       if (authority !== undefined) this.applyNpcAuthority(validateNpcAuthority(authority));
+      if ([...this.players.values()].some(p => p.bodyHandoff)) this.bodyHandoffRequired = true;
+      // No body preview activation on wake. Retained records fence rollback;
+      // missing sockets use the last durable observation, never restart time.
+      if (authority?.mode === "server" || env.VIRTUAL_HOST_BODY_PREVIEW === "1"
+        || [...this.players.values()].some(p => p.bodyHandoff)) {
+        const ids = await ctx.storage.get("room-body-handoff-v1");
+        if (ids !== undefined) {
+          this.bodyHandoffRequired = true; // empty retained index still fences rollback
+          const outbox = this.bodyHandoffController();
+          for (const r of await outbox.records()) {
+            const p = this.players.get(r.accountId);
+            if (p?.connectionToken === r.connection) {
+              p.bodyHandoff = true;
+              if (r.phase === "closed") {
+                p.bodyClosedAt = r.closedAt;
+                p.ws.serializeAttachment(this.attachment(p));
+              } else if (Number.isSafeInteger(p.bodyClosedAt)) await outbox.close({ accountId: r.accountId, connection: r.connection }, p.bodyClosedAt);
+            } else if (r.phase !== "closed") await outbox.close({ accountId: r.accountId, connection: r.connection }, r.at);
+          }
+        }
+      }
       await hockey.loadLimits(this);
       hockey.restore(this);
       this.studio = (await ctx.storage.get("studio")) || this.studio;
@@ -154,7 +178,7 @@ export class Room extends DurableObject {
   }
 
   attachment(p) {
-    return { npcProtocol: p.npcProtocol || 0, npcSent: p.npcSent || null, npcAck: p.npcAck || null, cabinet: p.cabinet || null, cabinetBucket: p.cabinetBucket || null, hockey: p.hockey || null, hockeyBuckets: p.hockeyBuckets || null, id: p.id, login: p.login, display: p.display, contributor: p.contributor, body: p.body, connectionToken: p.connectionToken, studioSeat: p.studioSeat, studioRevoked: !!p.studioRevoked, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, j: p.j, w: p.w, voice: p.voice, muted: p.muted, hp: p.hp, ko: p.ko, sent: p.sent, zone: p.zone, pokerVoice: p.pokerVoice, inHub: p.inHub, visible: p.visible, joinedAt: p.joinedAt, door: p.door, passes: p.passes, blendTo: p.blendTo, blendK: p.blendK };
+    return { ...(p.bodyProtocol === 2 || p.bodyHandoff ? { bodyProtocol: p.bodyProtocol, bodyHandoff: !!p.bodyHandoff, bodyClosedAt: p.bodyClosedAt ?? null } : {}), npcProtocol: p.npcProtocol || 0, npcSent: p.npcSent || null, npcAck: p.npcAck || null, cabinet: p.cabinet || null, cabinetBucket: p.cabinetBucket || null, hockey: p.hockey || null, hockeyBuckets: p.hockeyBuckets || null, id: p.id, login: p.login, display: p.display, contributor: p.contributor, body: p.body, connectionToken: p.connectionToken, studioSeat: p.studioSeat, studioRevoked: !!p.studioRevoked, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, j: p.j, w: p.w, voice: p.voice, muted: p.muted, hp: p.hp, ko: p.ko, sent: p.sent, zone: p.zone, pokerVoice: p.pokerVoice, inHub: p.inHub, visible: p.visible, joinedAt: p.joinedAt, door: p.door, passes: p.passes, blendTo: p.blendTo, blendK: p.blendK };
   }
 
   view(p) {
@@ -333,6 +357,9 @@ export class Room extends DurableObject {
 
     const requestedProtocol = new URL(request.url).searchParams.get("npc-authority");
     const npcProtocol = requestedProtocol === "2" ? 2 : requestedProtocol === "1" ? 1 : 0;
+    const bodyProtocol = new URL(request.url).searchParams.get("body-reclaim") === "2" ? 2 : 0;
+    if (this.bodyHandoffRequired && (this.env.VIRTUAL_HOST_BODY_PREVIEW !== "1" || bodyProtocol !== 2))
+      return new Response("Body handoff requires explicit compatible recovery", { status: 409 });
     if (this.npcAuthority?.mode === "server" && (!npcProtocolSupports(npcProtocol, this.npcAuthority) || !this.players.has(who.id) && this.players.size >= 32)) {
       return new Response("NPC authority requires a compatible client and an available preview slot", { status: 409 });
     }
@@ -341,7 +368,10 @@ export class Room extends DurableObject {
     this.ctx.acceptWebSocket(server, [String(who.id)]);
 
     const older = this.players.get(who.id);
-    if (older) this.evict(older, "replaced");
+    if (older) {
+      const closing = this.evict(older, "replaced");
+      if (closing) await closing;
+    }
     if (this.players.size >= MAX_PLAYERS) {
       this.send(server, { t: "kick", reason: "full" });
       server.close(CLOSE_KICK, "full");
@@ -349,7 +379,7 @@ export class Room extends DurableObject {
     }
 
     const spawn = spawnPoint(this.spawnSlot++);
-    const p = this.record(server, { ...who, npcProtocol, connectionToken: crypto.randomUUID(), body: null, x: spawn.x, y: 0, z: spawn.z, yaw: spawn.yaw });
+    const p = this.record(server, { ...who, npcProtocol, bodyProtocol, ...(this.bodyHandoffRequired ? { bodyHandoff: true } : {}), connectionToken: crypto.randomUUID(), body: null, x: spawn.x, y: 0, z: spawn.z, yaw: spawn.yaw });
     server.serializeAttachment(this.attachment(p));
     // An owner arriving takes either body back from whoever holds it.
     const own = ownedBody(CAST, p.login, p.contributor, p.id);
@@ -397,6 +427,20 @@ export class Room extends DurableObject {
     }
     p.seenAt = Date.now();
     if (!msg) return;
+    if (["body-ready", "body-applied", "body-started", "body-decline"].includes(msg.t)) {
+      if (!p.bodyHandoff || p.bodyClosing || p.bodyProtocol !== 2) return;
+      return this.ctx.blockConcurrencyWhile(async () => {
+        const result = await this.bodyHandoffController().receive({ accountId: p.id, connection: p.connectionToken }, msg);
+        if (result.status === "closed") {
+          p.bodyClosedAt = result.record.closedAt;
+          p.ws.serializeAttachment(this.attachment(p));
+        }
+        return result;
+      });
+    }
+    // The live movement adapter is not integrated yet. A staged body cannot
+    // silently fall back to ordinary body/pose reports while testing handoff.
+    if (p.bodyHandoff && ["body", "pose", "zone", "blend", "hp", "shot", "swing", "cabinet", "hockey", "wallet"].includes(msg.t)) return;
     if (msg.t === "npc-ack") {
       if (p.npcSent && msg.revision === p.npcSent.revision && msg.sequence === p.npcSent.sequence) {
         p.npcAck = p.npcSent; p.npcSent = null;
@@ -544,12 +588,12 @@ export class Room extends DurableObject {
   // The prototype's note stands: on this compatibility date close handlers must not call ws.close().
   webSocketClose(ws) {
     const p = this.byWs(ws);
-    if (p) this.drop(p, "closed");
+    if (p) return this.drop(p, "closed");
   }
 
   webSocketError(ws) {
     const p = this.byWs(ws);
-    if (p) this.drop(p, "error");
+    if (p) return this.drop(p, "error");
   }
 
   sendCabinets(ws = null) {
@@ -591,6 +635,13 @@ export class Room extends DurableObject {
 
   drop(p, reason) {
     if (this.players.get(p.id) !== p) return;
+    let closed;
+    if (p.bodyHandoff) {
+      p.bodyClosing = true; p.bodyClosedAt ??= Date.now();
+      p.ws.serializeAttachment(this.attachment(p));
+      closed = this.ctx.blockConcurrencyWhile(() => this.bodyHandoffController()
+        .close({ accountId: p.id, connection: p.connectionToken }, p.bodyClosedAt));
+    }
     this.releaseCabinet(p);
     hockey.leave(this, p.id);
     this.cancelDoor(p);
@@ -607,6 +658,7 @@ export class Room extends DurableObject {
       clearTimeout(this.flushTimer);
       this.flushTimer = 0;
     }
+    return closed;
   }
 
   release(p, reason) {
@@ -627,13 +679,115 @@ export class Room extends DurableObject {
 
   // An explicit kick before the close: a server-initiated close alone can leave the client in CLOSING.
   evict(p, reason) {
-    this.drop(p, reason);
+    const closed = this.drop(p, reason);
     this.send(p.ws, { t: "kick", reason });
     try {
       p.ws.close(CLOSE_KICK, reason);
     } catch {
       // Already closed.
     }
+    return closed;
+  }
+
+  bodyHandoffController() {
+    if (!this.bodyHandoff) this.bodyHandoff = new RoomBodyHandoff({ storage: this.ctx.storage, clock: () => Date.now(),
+      current: i => {
+        const p = this.players.get(i.accountId);
+        return !!p && p.bodyHandoff === true && !p.bodyClosing && p.bodyClosedAt == null && p.connectionToken === i.connection;
+      }, send: (i, message) => {
+        const p = this.players.get(i.accountId);
+        if (!p || p.bodyClosing || p.bodyClosedAt != null || p.connectionToken !== i.connection) return false;
+        try { p.ws.send(JSON.stringify(message)); return true; } catch { return false; }
+      } });
+    return this.bodyHandoff;
+  }
+
+  checkBodyHandoff(ticket) {
+    const status = this.npcAuthorityStatus(ticket), now = Date.now();
+    if (this.env.VIRTUAL_HOST_BODY_PREVIEW !== "1" || !status?.owns || now >= status.leaseUntil || now >= status.runUntil)
+      throw Error("body handoff preview disabled or fenced");
+  }
+
+  // Explicit finite server hooks; no HTTP route, host loop or welcome feature
+  // enables them. Claim/body data comes from the authenticated host runner only.
+  stageBodyHandoff(ticket, identity, preparation, kind, request, claim) {
+    return this.ctx.blockConcurrencyWhile(async () => {
+      this.checkBodyHandoff(ticket);
+      const p = this.players.get(identity?.accountId);
+      if (!p || p.connectionToken !== identity.connection || p.bodyProtocol !== 2 || p.bodyClosing || p.body !== null
+        || preparation?.epoch !== ticket.epoch || preparation.world !== ticket.world
+        || preparation.bodyId !== `player:${p.id}` || claim?.accountId !== p.id || claim.bodyId !== preparation.bodyId)
+        throw Error("body handoff connection mismatch");
+      if (this.players.size > 32 || [...this.players.values()].some(o => o.bodyProtocol !== 2 || o.body !== null && !o.bodyHandoff))
+        throw Error("body handoff incompatible occupants");
+      const outbox = this.bodyHandoffController();
+      if (p.bodyClosedAt != null) {
+        // Only explicit server staging after durable cleanup may retry on the
+        // same voice connection. A retained close/uncertain operation blocks it.
+        // Absence also reconciles a crash after row retirement but before the
+        // attachment could be updated. Browser messages cannot clear this gate.
+        if (await outbox.read(identity)) throw Error("body handoff connection cleanup pending");
+        p.bodyClosedAt = null;
+      }
+      this.bodyHandoffRequired = true;
+      for (const o of this.players.values()) { o.bodyHandoff = true; o.ws.serializeAttachment(this.attachment(o)); }
+      const row = await outbox.prepare(identity, preparation, kind, request, claim);
+      await outbox.deliver(identity); return row;
+    });
+  }
+
+  async pendingBodyHandoff(ticket, identity) {
+    this.checkBodyHandoff(ticket);
+    return this.bodyHandoffController().pending(identity);
+  }
+
+  completeBodyHandoff(ticket, identity, revision, answer) {
+    return this.ctx.blockConcurrencyWhile(async () => {
+      this.checkBodyHandoff(ticket);
+      const outbox = this.bodyHandoffController(), row = await outbox.complete(identity, revision, answer);
+      return { phase: row.phase, delivered: await outbox.deliver(identity) };
+    });
+  }
+
+  deliverBodyHandoff(ticket, identity) {
+    return this.ctx.blockConcurrencyWhile(async () => {
+      this.checkBodyHandoff(ticket);
+      const outbox = this.bodyHandoffController(), row = await outbox.read(identity);
+      return { phase: row?.phase ?? null, delivered: await outbox.deliver(identity) };
+    });
+  }
+
+  // Finite server hooks only. No WebSocket message/capability enables movement
+  // ingestion yet; its cadence and publication interaction need validation.
+  stageBodyMovement(ticket, identity, message) {
+    return this.ctx.blockConcurrencyWhile(() => {
+      this.checkBodyHandoff(ticket); return this.bodyHandoffController().receiveMovement(identity, message);
+    });
+  }
+  pendingBodyMovement(ticket, identity) {
+    this.checkBodyHandoff(ticket); return this.bodyHandoffController().pendingMovement(identity);
+  }
+  completeBodyMovement(ticket, identity, sequence, answer) {
+    return this.ctx.blockConcurrencyWhile(async () => {
+      this.checkBodyHandoff(ticket);
+      const box = this.bodyHandoffController(); await box.completeMovement(identity, sequence, answer);
+      return { delivered: await box.deliverMovement(identity) };
+    });
+  }
+  fenceBodyMovement(ticket, identity, sequence, proof) {
+    return this.ctx.blockConcurrencyWhile(() => {
+      this.checkBodyHandoff(ticket); return this.bodyHandoffController().fenceMovement(identity, sequence, proof);
+    });
+  }
+
+  closedBodyHandoff(ticket, identity) {
+    this.checkBodyHandoff(ticket); return this.bodyHandoffController().cleanup(identity);
+  }
+
+  resolveBodyHandoff(ticket, identity, revision, proof) {
+    return this.ctx.blockConcurrencyWhile(() => {
+      this.checkBodyHandoff(ticket); return this.bodyHandoffController().resolveClosed(identity, revision, proof);
+    });
   }
 
   // One snapshot at most every 1/TICK_HZ while poses arrive, and nothing pending once they stop, so the
@@ -712,6 +866,7 @@ export class Room extends DurableObject {
     const r = this.npcAuthority;
     if (!r) return null;
     return { authority: npcAuthorityView(r), sequence: r.sequence, at: r.at,
+      ...(r.cadence ? { cadence: npcCadenceName(r), nextPublishAt: npcNextPublicationAt(r) } : {}),
       leaseUntil: r.leaseUntil, runUntil: r.runUntil,
       owns: r.mode === "server" && ticket?.revision === r.revision && ticket.v === r.v && ticket.format === r.format && ticket.world === r.world
         && ticket.epoch === r.epoch && ticket.owner === r.owner };
@@ -719,7 +874,10 @@ export class Room extends DurableObject {
 
   async configureNpcAuthority(expectedRevision, next) {
     if (this.env.VIRTUAL_HOST_PREVIEW !== "1") throw new Error("NPC authority preview disabled");
+    if (next?.cadence !== undefined && this.env[next.cadence === "rate-4-burst-2-v1"
+      ? "VIRTUAL_HOST_BURST_PREVIEW" : "VIRTUAL_HOST_ROLLING_PREVIEW"] !== "1") throw new Error("NPC cadence preview disabled");
     return this.ctx.blockConcurrencyWhile(async () => {
+      if (this.bodyHandoffRequired && next?.mode === "browser") throw new Error("body handoff drain required before authority release");
       // Check occupants while joins are blocked, not before entering the gate.
       // No deployed config or browser advertises the unfinished mixed format.
       if (next?.mode === "server" && next.format === "mixed-1" && this.env.VIRTUAL_HOST_MIXED_PREVIEW !== "1") throw new Error("NPC mixed preview disabled");
@@ -737,9 +895,12 @@ export class Room extends DurableObject {
     if (this.env.VIRTUAL_HOST_PREVIEW !== "1") throw new Error("NPC authority preview disabled");
     return this.ctx.blockConcurrencyWhile(async () => {
       if (this.npcAuthority?.v === 2 && this.env.VIRTUAL_HOST_MIXED_PREVIEW !== "1") throw new Error("NPC mixed preview disabled");
+      if (this.npcAuthority?.cadence && this.env[npcCadenceName(this.npcAuthority) === "rate-4-burst-2-v1"
+        ? "VIRTUAL_HOST_BURST_PREVIEW" : "VIRTUAL_HOST_ROLLING_PREVIEW"] !== "1") throw new Error("NPC cadence preview disabled");
       const { record, duplicate } = await new RoomNpcAuthority(this.ctx.storage, () => Date.now()).publish(ticket, sequence, frame);
       this.applyNpcAuthority(record);
-      return { revision: record.revision, sequence: record.sequence, duplicate };
+      return { revision: record.revision, sequence: record.sequence, publishedAt: record.at, duplicate,
+        ...(record.cadence ? { cadence: npcCadenceName(record), nextPublishAt: npcNextPublicationAt(record) } : {}) };
     });
   }
 

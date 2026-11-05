@@ -44,8 +44,8 @@ const reg=new SessionRegistry(options);
 for(let i=0;i<MAX_SESSIONS;i++){
   const joined=reg.connect({protocol:options.protocol,world:options.world,accountId:i+1,bodyId:`body-${i}`,zone:"outside",
     body:{kind:"clanker",motion:{x:-4,y:4,z:-4,yaw:.7,vx:0,vy:-2,vz:0,grounded:false},
-      equipment:{weapon:null,mode:"carry",magazine:0,spareAmmo:[],primaryOwned:false,secondaryOwned:false,
-        selectedSlot:1,unlimited:false,jetpack:false,jetpackOwned:false,fuel:.37}}},100000);
+      equipment:{weapon:null,mode:"carry",primaryOwned:false,secondaryOwned:false,
+        selectedSlot:1,unlimited:false,jetpack:false,jetpackOwned:false}}},100000);
   assert.equal(joined.ok,true); reg.disconnect(joined.session,100000);
 }
 const saved=reg.checkpoint(),times=[],startCPU=process.cpuUsage();

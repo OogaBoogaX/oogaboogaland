@@ -8,6 +8,7 @@
   const statusFor = actor => nameStates.get(actor?.root)?.state || null;
   const WEAPONS = ["club", "gun", "snack", "chuk"];
   const KINDS = new Set(["ooga", "clanker"]);
+  const STATES = new Set(["live", "grace", "offered", "starting"]);
   const id = value => typeof value === "string" && /^[A-Za-z0-9._:/-]{1,80}$/.test(value);
   const integer = value => Number.isSafeInteger(value) && value >= 0;
   const fail = () => { throw new Error("invalid host presence presentation"); };
@@ -68,13 +69,13 @@
         const departing = i >= frame.views.length, row = departing ? frame.departures[i - frame.views.length] : frame.views[i], p = plan[i];
         if (!row || !id(row.bodyId) || !integer(row.generation) || !row.generation
           || !(departing ? row.type === "depart" && row.glyph === "green" && typeof row.applied === "boolean" && integer(row.at)
-            : (row.state === "live" || row.state === "grace") && KINDS.has(row.kind)
+            : STATES.has(row.state) && KINDS.has(row.kind)
               && (row.state === "live" || row.presentation === "open-hand" && integer(row.deadline)))) fail();
         p.body = row.bodyId; p.generation = row.generation; p.kind = departing ? row.body?.kind : row.kind;
         if (!KINDS.has(p.kind)) fail();
         for (let j = 0; j < i; j++) if (plan[j].body === p.body) fail();
         p.actor = p.arm = null; p.beam = false; p.applied = departing && row.applied; p.at = departing ? row.at : row.deadline;
-        p.state = departing || row.state === "grace" ? "offline" : "online";
+        p.state = departing || row.state !== "live" ? "offline" : "online";
         if (departing && (!row.applied || frame.now < row.at || frame.now - row.at >= BEAM_MS)) continue;
         const binding = resolve(p.body, p.kind, p.generation);
         if (!binding) continue; // A late observer must never force an absent NPC to spawn.
@@ -84,7 +85,7 @@
         for (let j = 0; j < i; j++) if (plan[j].actor === actor) fail();
         if (!actor.root.visible) continue;
         p.actor = actor; p.beam = departing;
-        if (!departing && row.state === "grace" && frame.now < row.deadline && binding.freeArm !== null) {
+        if (!departing && row.state !== "live" && frame.now < row.deadline && binding.freeArm !== null) {
           if (binding.freeArm !== "armL" && binding.freeArm !== "armR") fail();
           const arm = actor.parts[binding.freeArm];
           if (!arm?.rotation || !arm.geometry || occupied(actor, arm)) fail();

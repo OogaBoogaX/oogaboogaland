@@ -6,14 +6,13 @@ import { createClankerBodyCheckpoint } from "../src/clanker-roaming.js";
 import { createCheckpointPack } from "../src/checkpoint-pack.js";
 const world = "body-rebuild-audit-2", pack = createCheckpointPack(8192, { intern: true });
 const make = () => {
-  const f = clankerController({ checkpointRandom: true, checkpointProfile: "body-2", start: false });
+  const f = clankerController({ checkpointRandom: true, checkpointProfile: "body-3", start: false });
   return { ...f, codec: createClankerBodyCheckpoint(f.sim, world, f.B.clankerState) };
 };
 const physics = f => {
   const e = f.sim.player, d = e.drive;
   return { x: e.root.position.x, y: e.root.position.y, z: e.root.position.z, heading: e.heading,
-    vx: d.vx, vy: d.vy, vz: d.vz, jumps: d.jumps, grounded: d.grounded, airborne: d.airborne,
-    health: e.health.value, healthDelay: e.health.delay, motionEnvelope: d.motionEnvelope };
+    vx: d.vx, vy: d.vy, vz: d.vz, jumps: d.jumps, grounded: d.grounded, airborne: d.airborne };
 };
 const a = make(), samples = [];
 try {
@@ -24,7 +23,7 @@ try {
   for (let i = 0; i < 48; i++) {
     const saved = a.codec.capture(), expanded = pack.unpack(saved), b = make(), c = make();
     try {
-      assert.equal(expanded.v, 2); assert.equal(Object.hasOwn(expanded, 'rigs'), false);
+      assert.equal(expanded.v, 3); assert.equal(Object.hasOwn(expanded, 'rigs'), false);
       b.codec.restore(saved); c.codec.restore(saved);
       assert.deepEqual(physics(b), physics(a));
       assert.equal(b.sim.player.animation.updates, 0);

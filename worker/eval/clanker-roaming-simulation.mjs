@@ -55,6 +55,32 @@ export function roamingSimulation(B, count, spacious = false) {
     const { sim, codec } = make(saved);
     try { return fn(sim, codec); } finally { sim.dispose(); }
   });
+  // One bounded, private, data-only validation memo per authored world. A
+  // byte/field change takes the full restore path; no digest, session, fence or
+  // mutable controller is cached across transactions. Compare descriptors so a
+  // getter, sparse array or prototype cannot masquerade as validated wire data.
+  let validated = null;
+  const freeze = value => {
+    if (value && typeof value === "object") {
+      for (const child of Object.values(value)) freeze(child);
+      Object.freeze(value);
+    }
+    return value;
+  };
+  const sameWire = (value, known) => {
+    if (Object.is(value, known)) return true;
+    if (!value || !known || typeof value !== "object" || typeof known !== "object"
+      || Array.isArray(value) !== Array.isArray(known)) return false;
+    const proto = Object.getPrototypeOf(value);
+    if (Array.isArray(value) ? proto !== Array.prototype : proto !== Object.prototype && proto !== null) return false;
+    const names = Reflect.ownKeys(known);
+    if (Reflect.ownKeys(value).length !== names.length) return false;
+    for (const key of names) {
+      const field = Object.getOwnPropertyDescriptor(value, key), original = Object.getOwnPropertyDescriptor(known, key);
+      if (!field || !("value" in field) || field.enumerable !== original.enumerable || !sameWire(field.value, original.value)) return false;
+    }
+    return true;
+  };
   // Exactly one private controller per transaction attempt. Wire children are
   // frozen and compared by identity, never a lossy hash. A changed DTO rebuilds
   // from that checkpoint; retries receive a new scope through VirtualHost.
@@ -63,28 +89,26 @@ export function roamingSimulation(B, count, spacious = false) {
     let active = true, runtime = null, previous = null, keys = [], refs = [];
     const alive = () => { if (!active) throw Error("roaming transaction closed"); };
     const discard = () => { runtime?.sim.dispose(); runtime = previous = null; keys = refs = []; };
-    const freeze = value => {
-      if (value && typeof value === "object") {
-        for (const child of Object.values(value)) freeze(child);
-        Object.freeze(value);
-      }
-    };
     const matches = saved => saved === previous && saved !== null
       && (Object.getPrototypeOf(saved) === Object.prototype || Object.getPrototypeOf(saved) === null)
       && Reflect.ownKeys(saved).length === keys.length && keys.every((key, i) => {
         const d = Object.getOwnPropertyDescriptor(saved, key);
         return d && d.enumerable && "value" in d && Object.is(d.value, refs[i]);
       });
+    const bind = saved => {
+      keys = Object.keys(saved); refs = keys.map(key => saved[key]);
+      for (const value of refs) freeze(value);
+      previous = saved;
+    };
     const scope = operations((saved, fn) => {
       alive();
       try {
-        if (!matches(saved)) { discard(); runtime = make(saved); }
+        if (!matches(saved) || !runtime) { discard(); runtime = make(saved); }
         const result = fn(runtime.sim, runtime.codec);
         if (saved === null) discard(); // Initial state gets validated on first read.
         else {
-          keys = Object.keys(saved); refs = keys.map(key => saved[key]);
-          for (const value of refs) freeze(value);
-          previous = saved;
+          if (!matches(saved)) validated = freeze(structuredClone(saved));
+          bind(saved);
         }
         return result;
       } catch (error) { active = false; discard(); throw error; }
@@ -92,6 +116,26 @@ export function roamingSimulation(B, count, spacious = false) {
     for (const key of Object.keys(scope)) if (typeof scope[key] === "function") {
       const fn = scope[key]; scope[key] = (...args) => { alive(); return fn(...args); };
     }
+    const validate = scope.validate;
+    scope.validate = saved => {
+      alive();
+      if (matches(saved)) return true;
+      if (validated && sameWire(saved, validated)) { discard(); bind(saved); return true; }
+      return validate(saved);
+    };
+    // Publication can read the already validated immutable checkpoint without
+    // cloning it and rebuilding all rigs a second time. Readers are bound to
+    // these exact wire children and expire on mutation or scope disposal.
+    scope.readQueries = saved => {
+      scope.validate(saved);
+      const names = Object.keys(saved), values = names.map(k => saved[k]);
+      const check = () => {
+        alive();
+        if (!matches(saved) || names.length !== keys.length || names.some((k, i) => k !== keys[i] || !Object.is(saved[k], values[i])))
+          throw Error("roaming query checkpoint changed");
+      };
+      return { npcFor() { check(); return null; }, poses(format) { check(); return scope.poses(saved, format); } };
+    };
     scope.dispose = () => { active = false; discard(); };
     return scope;
   };

@@ -9,8 +9,8 @@ const stats = values => {
   return { samples: values.length, p50ms: values[Math.floor(values.length * .5)], p95ms: values[Math.floor(values.length * .95)], maxMs: values.at(-1) };
 };
 const body = { kind: "clanker", motion: { x: -4, y: 4, z: -4, yaw: .7, vx: 1, vy: -2, vz: 1, grounded: false },
-  equipment: { weapon: "gun", mode: "combat", magazine: 17, spareAmmo: [4, 22], primaryOwned: true,
-    secondaryOwned: true, selectedSlot: 2, unlimited: false, jetpack: true, jetpackOwned: true, fuel: .37 } };
+  equipment: { weapon: "gun", mode: "combat", primaryOwned: true,
+    secondaryOwned: true, selectedSlot: 2, unlimited: false, jetpack: true, jetpackOwned: true } };
 async function measure(pairs, budget) {
   const f = await rosterFixture(pairs, budget), world = { ...f.mesh, radius: 2.25, height: 2.8 };
   const passive = createPassiveBody({ world: () => world, gravity: 9.8 });

@@ -30,7 +30,7 @@ export class BodyStore extends DurableObject {
    delete:keys=>tx.delete(keys),
   }))};
   const pack=createCheckpointPack(8192,{intern:true});
-  const bank=createHostBodyStorage({storage,profile:'clanker-body-2',validate:v=>typeof v==='string'?input.worst===true:pack.unpack(v).world==='body-store-runtime',
+  const bank=createHostBodyStorage({storage,profile:'clanker-body-3',validate:v=>typeof v==='string'?input.worst===true:pack.unpack(v).world==='body-store-runtime',
    capture:(r,previous)=>[...(r.sessions?.sessions||[]),...(r.sessions?.pending||[])].sort((a,b)=>a.generation-b.generation).map(s=>({
     accountId:s.accountId,bodyId:s.bodyId,generation:s.generation,kind:s.kind||s.body.kind,checkpoint:component,
    }))});
@@ -38,7 +38,7 @@ export class BodyStore extends DurableObject {
   const host=new VirtualHost({storage:bank,simulation,clock:()=>now,sessionAdapter:{stepPassive:m=>m}});
   try {
    if(command==='begin')result=await host.begin('owner',120000);
-   else if(command==='join')result=(await host.sessions(input.ticket,[],(r,at)=>Array.from({length:30},(_,i)=>r.connect({protocol:SESSION_PROTOCOL,world:simulation.version,accountId:i+1,bodyId:'body-'+i,zone:'outside',body:{kind:'clanker',motion:{x:0,y:0,z:0,yaw:0,vx:0,vy:0,vz:0,grounded:true},equipment:{weapon:null,mode:'carry',magazine:0,spareAmmo:[],primaryOwned:false,secondaryOwned:false,selectedSlot:1,unlimited:false,jetpack:false,jetpackOwned:false,fuel:0}}},at)))).result;
+   else if(command==='join')result=(await host.sessions(input.ticket,[],(r,at)=>Array.from({length:30},(_,i)=>r.connect({protocol:SESSION_PROTOCOL,world:simulation.version,accountId:i+1,bodyId:'body-'+i,zone:'outside',body:{kind:'clanker',motion:{x:0,y:0,z:0,yaw:0,vx:0,vy:0,vz:0,grounded:true},equipment:{weapon:null,mode:'carry',primaryOwned:false,secondaryOwned:false,selectedSlot:1,unlimited:false,jetpack:false,jetpackOwned:false}}},at)))).result;
    else if(command==='claim')result=await host.claim('replacement');
    else if(command==='tick'||command==='fail')result=await host.tick(input.ticket,input.tokens);
    else if(command!=='inspect')throw Error('unknown command');
@@ -61,7 +61,7 @@ const start = async path => {
   mf = new runtime.Miniflare(runtime.convertV4MiniflareOptions ? runtime.convertV4MiniflareOptions(options) : options); await mf.ready;
 };
 const stats = values => { const a = values.slice().sort((a,b)=>a-b); return { p50: a[Math.floor(a.length*.5)], p95: a[Math.floor(a.length*.95)], max: a.at(-1) }; };
-const f = clankerController({ checkpointRandom: true, checkpointProfile: "body-2", start: false });
+const f = clankerController({ checkpointRandom: true, checkpointProfile: "body-3", start: false });
 const actual = [];
 try {
   const codec = createClankerBodyCheckpoint(f.sim, "body-store-runtime", f.B.clankerState);

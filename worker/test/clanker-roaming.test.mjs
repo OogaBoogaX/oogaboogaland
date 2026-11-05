@@ -182,12 +182,16 @@ test("roaming transaction scopes bound reconstruction, reject mutation and isola
     const visit = value => { if (value && typeof value === "object") { assert.ok(Object.isFrozen(value)); Object.values(value).forEach(visit); } };
     Object.values(saved).forEach(visit);
     assert.throws(() => { saved.data[0] = null; }, TypeError);
+    const queries = scope.readQueries(saved), immutable = persist(saved);
+    assert.deepEqual(queries.poses("mixed-1"), scope.poses(saved, "mixed-1"));
+    assert.deepEqual(saved, immutable, "projection changes no persisted simulation state");
     for (let i = 0; i < 8; i++) {
       scope.step(saved, 250); reference.step();
       scope.validate(saved); scope.project(saved); scope.poses(saved, "mixed-1");
       assert.deepEqual(saved, codec.capture());
     }
-    assert.equal(constructions - before, 1, "eight-step recovery must not allocate eight full controllers");
+    assert.equal(constructions - before, 1, "eight-step recovery and publication must share one controller");
+    assert.throws(() => queries.poses("mixed-1"), /changed/, "old reader cannot project a newer revision");
     // Replacing DTO fields on the same object must not reuse a newer private body.
     Object.assign(saved, persist(initial));
     assert.equal(scope.validate(saved), true);
@@ -232,7 +236,52 @@ test("roaming transaction scopes bound reconstruction, reject mutation and isola
     for (let i = 0; i < 5; i++) await second.tick(replacement);
     for (let i = 0; i < 40; i++) reference.step();
     assert.deepEqual(data.simulation, codec.capture());
+    const beforeProjection = constructions, persistedBeforeProjection = persist(data);
+    const published = await second.poses(replacement, { format: "mixed-1" });
+    assert.ok(published.frame.byteLength > 0);
+    assert.equal(constructions - beforeProjection, 1, "host publication does not rebuild after validation");
+    assert.deepEqual(data, persistedBeforeProjection);
+    assert.throws(() => queries.poses("mixed-1"), /closed/);
     await assert.rejects(first.tick(ticket), /fenced/);
     for (const s of scopes) assert.throws(() => s.validate(initial), /closed/);
+  } finally { B.clankers.create = create; reference.dispose(); }
+});
+
+
+test("exact checkpoint validation reuse never retains a mutable controller or accepts a changed wire record", () => {
+  const reference = clankerController({ count: 3, checkpointRandom: true, checkpointProfile: 'roaming-1', start: false });
+  const B = reference.B, create = B.clankers.create; let constructions = 0, disposals = 0;
+  B.clankers.create = (...args) => {
+    constructions++; const sim = create(...args), dispose = sim.dispose;
+    sim.dispose = () => { disposals++; dispose(); }; return sim;
+  };
+  try {
+    const adapter = roamingSimulation(B, 3), initial = adapter.initial(), saved = persist(initial);
+    const first = adapter.forTransaction(); first.validate(saved); first.dispose();
+    const before = constructions, second = adapter.forTransaction(), same = persist(initial);
+    assert.equal(second.validate(same), true);
+    assert.equal(second.readQueries(same).npcFor('fixture-0'), null);
+    assert.equal(constructions, before, 'body-only transactions validate exact data without rebuilding NPC rigs');
+    assert.equal(disposals, constructions, 'no mutable controller survives scope disposal');
+    const projection = second.poses(same, 'mixed-1');
+    assert.equal(constructions, before + 1, 'actual projection lazily restores a fresh private controller');
+    second.dispose();
+    assert.deepEqual(projection, adapter.poses(initial, 'mixed-1'));
+    // Altering a caller-owned top-level record cannot mutate the private memo.
+    saved.v = -1;
+    for (const edit of [s => { s.v = -1; }, s => { delete s.data[0]; }, s => { s.scalars[0] = -0; }]) {
+      const broken = persist(initial); edit(broken);
+      const scope = adapter.forTransaction(), count = constructions;
+      assert.throws(() => scope.validate(broken));
+      assert.equal(constructions, count + 1, 'changed wire data takes the complete source validator');
+      assert.throws(() => scope.validate(initial), /closed/); scope.dispose();
+    }
+    const third = adapter.forTransaction(), count = constructions;
+    assert.equal(third.validate(persist(initial)), true);
+    assert.equal(constructions, count, 'failed attempts cannot poison an exact previously validated record');
+    third.dispose();
+    const cold = roamingSimulation(B, 3).forTransaction(); cold.validate(persist(initial)); cold.dispose();
+    assert.equal(constructions, count + 1, 'restart has no remembered validation and checks the complete body');
+    assert.equal(constructions, disposals);
   } finally { B.clankers.create = create; reference.dispose(); }
 });

@@ -48,14 +48,47 @@
   // each part of the desk routine's span in seconds, [least, most].
   const OFFICE_POINTS = 6, OFFICE_SPEED = 1.1, OFFICE_SIT = 1, OFFICE_SWIVEL = 0.8, OFFICE_STROKE = 1.1;
   const OFFICE_WORK = { type: [5, 9], look: [1, 2], abacus: [3, 5] }, OFFICE_NEXT = { type: "look", look: "abacus", abacus: "type" };
+  // Data-only body-3 operations. These retain no controller, rig or scene and
+  // may neutralize a previously admitted body without rebuilding its geometry.
+  const validBodyRecord = values => {
+    if (!Array.isArray(values) || values.length !== 10 || Reflect.ownKeys(values).length !== 11)
+      throw new Error("unsupported Clanker checkpoint profile");
+    for (let i = 0; i < 10; i++) {
+      const field = Object.getOwnPropertyDescriptor(values, i);
+      if (!field || !Object.hasOwn(field, "value")) throw new Error("unsupported Clanker checkpoint profile");
+    }
+    if (typeof values[0] !== "string" || !/^[A-Za-z0-9_.:-]{1,80}$/.test(values[0])
+      || values.slice(1, 8).some(n => !Number.isFinite(n) || Math.abs(n) >= 10000)
+      || !Number.isInteger(values[8]) || values[8] < 0 || values[8] > 2
+      || !Number.isInteger(values[9]) || values[9] < 0 || values[9] > 31
+      || (values[9] & 1) && values[8] !== 0) throw new Error("unsupported Clanker checkpoint profile");
+    return true;
+  };
+  const BODY_RECORD = Object.freeze({
+    validate: validBodyRecord,
+    motion(values) {
+      validBodyRecord(values);
+      return { x: values[1], y: values[2], z: values[3], yaw: values[4],
+        vx: values[5], vy: values[6], vz: values[7], grounded: !!(values[9] & 1) };
+    },
+    disconnect(values) {
+      validBodyRecord(values); const stopped = values.slice(); stopped[5] = stopped[7] = 0; return stopped;
+    },
+  });
   const create = (ctx) => {
     const { crew, sites, groundAt, clear } = ctx;
+    const terrainProfile = ctx.checkpointProfile === "body-terrain-3";
+    const bodyProfile = ctx.checkpointProfile === "body-3" || terrainProfile;
     if (ctx.checkpointProfile != null) {
       const allowed = new Set(["root", "crew", "sites", "checkpointRandom", "checkpointProfile", "groundAt", "clear",
         "combatEnabled", "meadowRadius", "roamRadius"]);
-      if (!["roaming-1", "body-2"].includes(ctx.checkpointProfile) || Object.keys(ctx).some(k => !allowed.has(k))
+      if (terrainProfile) for (const key of ["checkpointTerrain", "supportAt", "terrainSupportAt", "pointSupportAt", "groundPlaneAt"]) allowed.add(key);
+      if (terrainProfile && (typeof ctx.checkpointTerrain !== "string" || !/^[A-Za-z0-9_.:-]{1,80}$/.test(ctx.checkpointTerrain)
+        || ["supportAt", "terrainSupportAt", "pointSupportAt", "groundPlaneAt"].some(k => typeof ctx[k] !== "function")))
+        throw new Error("unsupported Clanker checkpoint profile");
+      if (!["roaming-1", "body-3", "body-terrain-3"].includes(ctx.checkpointProfile) || Object.keys(ctx).some(k => !allowed.has(k))
         || sites.length || ctx.checkpointRandom !== true || ctx.combatEnabled === true
-        || !crew.list.length || crew.list.length > 53 || ctx.checkpointProfile === "body-2" && crew.list.length !== 1
+        || !crew.list.length || crew.list.length > 53 || bodyProfile && crew.list.length !== 1
         || crew.list.some(e => e.state !== "chilling"))
         throw new Error("unsupported Clanker checkpoint profile");
     }
@@ -7353,11 +7386,13 @@
       return spots;
     };
     // Explicit restricted headless profiles only. The enclosing checkpoint owns
-    // entries, random streams, buffers and rigs; this bridge owns closure state.
+    // roaming entries, random streams, buffers and rigs. The body profile below
+    // exposes only physical continuity and rebuilds everything else from defaults.
     // No browser caller opts in, and broader worlds must supply their own full
     // reservation/search/body continuation before this profile can expand.
     const continuation = ctx.checkpointProfile != null ? (() => {
-      const body = ctx.checkpointProfile === "body-2";
+      const body = bodyProfile;
+      let awaitingSupportStep = false;
       const refuse = () => { throw new Error("unsupported Clanker checkpoint profile"); };
       const ready = (neutral = true) => {
         if (disposed || !body && player || allAway || combatEnabled || rage || checkingRest || labEscape || debugShuttle
@@ -7379,62 +7414,174 @@
               || d.run || d.jumpHeld || d.jumpDown || d.jumpPressed || d.jumpBuffer)) refuse();
         }
       };
+      // Live capture reads physical continuity without clearing held controls.
+      // It still refuses unsupported jobs, collision states and invalid scalars.
+      const readBody = neutral => {
+        ready(neutral); if (awaitingSupportStep || !player || typeof player.owner.id !== "string" || !/^[A-Za-z0-9_.:-]{1,80}$/.test(player.owner.id)) refuse();
+        const e = player, d = e.drive, p = e.root.position;
+        if (![p.x, p.y, p.z, e.heading, d.vx, d.vy, d.vz].every(n => Number.isFinite(n) && Math.abs(n) < 10000)
+          || ![d.grounded, d.airborne, d.passiveFall, e.biped, e.parked, d.wallRelease].every(v => typeof v === "boolean")
+          || d.grounded === d.airborne || d.grounded && d.jumps !== 0) refuse();
+        const flags = (d.grounded ? 1 : 0) | (d.passiveFall ? 2 : 0)
+          | (e.biped ? 4 : 0) | (e.parked ? 8 : 0) | (d.wallRelease ? 16 : 0);
+        const values = [e.owner.id, p.x, p.y, p.z, e.heading, d.vx, d.vy, d.vz, d.jumps, flags];
+        validBodyRecord(values); return values;
+      };
       ready();
       return {
         // Static lounge candidates are reconstructed by the same world boot.
         // The caller binds this complete seed, including radius and candidates,
         // into its trusted baseline; it is never supplied by stored data.
-        baseline() { ready(); prepareLounges(list[0]); return [...(body ? ["body-2"] : []), ctx.meadowRadius || 22, roamRadius, loungeCount, roofCount, loungeReady, ...loungeSpots]; },
+        baseline() {
+          ready();
+          if (body) return [ctx.checkpointProfile, SCALE, WALK_RADIUS, WALK_HEIGHT, MOTION_RADIUS, MOTION_HEIGHT, ctx.meadowRadius || 22, roamRadius,
+            ...(terrainProfile ? [ctx.checkpointTerrain] : [])];
+          prepareLounges(list[0]); return [ctx.meadowRadius || 22, roamRadius, loungeCount, roofCount, loungeReady, ...loungeSpots];
+        },
         capture() {
-          ready(); return [elapsed, labPassAt, labRouteBudget, labRouteTurn, labRouteNext,
+          ready(); if (body) return [elapsed];
+          return [elapsed, labPassAt, labRouteBudget, labRouteTurn, labRouteNext,
             roamBudget, roamNext, roamTurn, roamSerial, climbFrameBudget, climbTurn, climbNext,
-            debugRouteBudget, wallBudget, climbClaimSerial, ...(body ? [player ? player.index : -1] : [])];
+            debugRouteBudget, wallBudget, climbClaimSerial];
         },
         restore(values) {
-          ready();
-          const size = body ? 16 : 15;
-          if (!Array.isArray(values) || values.length !== size || Object.keys(values).length !== size || values.some((n, i) => !Number.isFinite(n)
-            || n > 1e9 || n < ([3, 7, 10, 15].includes(i) ? -1 : 0)
+          ready(); if (body) refuse();
+          if (!Array.isArray(values) || values.length !== 15 || Object.keys(values).length !== 15 || values.some((n, i) => !Number.isFinite(n)
+            || n > 1e9 || n < ([3, 7, 10].includes(i) ? -1 : 0)
             || i > 1 && !Number.isSafeInteger(n))
-            || [3, 4, 6, 7, 10, 11, ...(body ? [15] : [])].some(i => values[i] >= list.length)) refuse();
+            || [3, 4, 6, 7, 10, 11].some(i => values[i] >= list.length)) refuse();
           [elapsed, labPassAt, labRouteBudget, labRouteTurn, labRouteNext,
             roamBudget, roamNext, roamTurn, roamSerial, climbFrameBudget, climbTurn, climbNext,
             debugRouteBudget, wallBudget, climbClaimSerial] = values;
-          // Bind the saved controller directly. Ordinary possess/travel reset
-          // velocities, jump credits and reservations and are not restore APIs.
-          if (body) player = values[15] < 0 ? null : list[values[15]];
         },
         ...(body ? {
-          // Recovery starts the display animation fresh. Physical drive state,
-          // support identity, health, form and gameplay counters remain saved.
-          transientFields: Object.freeze(["animation", "motion.takeoff", "motion.landing", "motion.walkPhase", "motion.walkGait",
-            "motion.groom", "motion.groomSide", "motion.groomPhase", "motion.sitWait", "motion.sitTime", "motion.sitLook",
-            "motion.sitShift", "motion.sitLookTarget", "motion.sitShiftTarget", "motion.officePhase", "motion.labPhase"]),
+          records: BODY_RECORD,
+          // Fixed minimal physical state. All other player state comes from
+          // normal fresh-controller defaults, including full health and timers.
+          bodyState() { return readBody(true); },
+          liveBodyState() { return readBody(false); },
+          restoreBody(values, passive = false) {
+            ready();
+            if (typeof passive !== "boolean") refuse();
+            validBodyRecord(values);
+            if (player || elapsed !== 0 || values[0] !== list[0].owner.id) refuse();
+            const e = list[0], d = e.drive, flags = values[9];
+            player = e; e.controlled = e.active = true; e.mode = "chilling"; e.phase = "controlled";
+            e.heading = values[4]; [d.vx, d.vy, d.vz] = values.slice(5, 8); d.jumps = values[8];
+            d.grounded = !!(flags & 1); d.airborne = !d.grounded; d.passiveFall = !!(flags & 2);
+            e.biped = !!(flags & 4); e.parked = !!(flags & 8); d.wallRelease = !!(flags & 16);
+            d.motionEnvelope = d.airborne && !d.passiveFall; e.footprintMode = e.parked ? "stand" : "walk";
+            setGoal(e, values[1], values[2], values[3]);
+            continuation.recoverPose(values.slice(1, 4), passive);
+          },
           neutralize() { ready(false); if (!player) refuse(); cancelInput(); ready(); },
-          recoverPose(position) {
-            if (!player || !Array.isArray(position) || position.length !== 3
+          disconnect() {
+            ready(false); if (!player) refuse(); cancelInput();
+            // Match the registry's confirmed-close/duplicate-session policy.
+            // Vertical motion and remaining jump credits are untouched.
+            player.drive.vx = player.drive.vz = 0; ready();
+          },
+          motion() {
+            ready(); if (!player) refuse();
+            const p = player.root.position, d = player.drive;
+            return { x: p.x, y: p.y, z: p.z, yaw: player.heading,
+              vx: d.vx, vy: d.vy, vz: d.vz, grounded: d.grounded };
+          },
+          stepPassive(ms) {
+            ready(); if (!player || !Number.isSafeInteger(ms) || ms < 1 || ms > 50) refuse();
+            // Only authoritative passive recovery may temporarily retain the
+            // stored grounded flag after support disappeared. Normalize through
+            // actual source physics before any new snapshot or live activation.
+            if (terrainProfile) supportRemoved();
+            update(ms / 1000); ready(); awaitingSupportStep = false;
+          },
+          recoverPose(position, passive = false) {
+            if (!player || typeof passive !== "boolean" || !Array.isArray(position) || position.length !== 3
               || position.some(n => !Number.isFinite(n) || Math.abs(n) >= 10000)) refuse();
             const e = player, p = e.root.position;
             [p.x, p.y, p.z] = position; e.root.visible = true;
             // This controller is fresh. Settle its newly built rig in the
             // standard form without advancing physics or replaying an action.
-            e.gorilla.poseManaged(2, p.x, p.y, p.z, e.heading, 0, false, e.biped, "", null);
+            e.gorilla.poseManaged(2, p.x, p.y, p.z, e.heading, 0, false, e.biped, "", terrainProfile ? e.motion : null);
             e.radius = Math.max(e.radius, e.gorilla.bodyRadius + 0.1);
             e.height = Math.max(e.height, e.gorilla.bodyHeight + 0.04);
+            awaitingSupportStep = continuation.validatePlacement(passive);
+          },
+          validatePlacement(passive = false) {
             ready();
-            const floor = groundAt(p.x, p.z, p.y);
+            if (!player || typeof passive !== "boolean") refuse();
+            const e = player, p = e.root.position;
+            // The center ray may miss a tread or prop beneath the planted
+            // footprint. Use the same support query as ordinary driven motion.
+            const floor = terrainProfile ? support(e, p.x, p.z, p.y, 0) : groundAt(p.x, p.z, p.y);
+            const lostSupport = e.drive.grounded && Math.abs(p.y - floor) > 1e-6;
             if (floor !== -Infinity && !Number.isFinite(floor) || floor > p.y + 1e-6
-              || e.drive.grounded && Math.abs(p.y - floor) > 1e-6
+              || lostSupport && !(terrainProfile && passive)
               || staticClear(e, p.x, p.y, p.z) !== true) refuse();
+            return lostSupport;
           },
         } : {}),
       };
     })() : null;
     return { list, sync, update, startleHill, target, companionTarget, hit, damage, bananaHit, debugRage, setCombatEnabled, plan, startLabShuttle, debugMove, cancelDebugMove, stats, liveGeometry, dispose, contactAt,
       debugLoungeSpots, wallSupported, roamingCheckpoint: ctx.checkpointProfile === "roaming-1" ? continuation : null,
-      bodyCheckpoint: ctx.checkpointProfile === "body-2" ? continuation : null,
+      bodyCheckpoint: bodyProfile ? continuation : null,
       possess, release, sleeping, wake, setAway, cancelSleepBeams, setRemote, createRemote, respawn, travelRefusal, travel, control, cancelInput, smash, smashPower, quickSmash, chestBeat, ignite, dropRoll, supportRemoved,
       get combatEnabled() { return combatEnabled; }, get player() { return player; } };
   };
-  BL.clankers = { create, rageCarrying, WALK_RADIUS, WALK_HEIGHT, PROP_STEP, RAGE_SPEED };
+  // Separate controlled body: never append to the NPC roster or possess its
+  // owner. Static terrain/prop support is source-owned; jobs, moving support
+  // identities, beds, climbing and combat still need a broader adapter.
+  // The trusted reclaim coordinator restores the body before enabling input.
+  // There is no scene caller or advertised capability while that work is open.
+  const createPlayerBody = options => {
+    const terrain = options?.profile === "terrain-body-3", queries = options?.terrain;
+    const allowed = new Set(["profile", "root", "ownerId", "name", "groundAt", "clear", ...(terrain ? ["terrain"] : [])]);
+    if (terrain && (!queries || Object.keys(queries).sort().join(",") !== "groundPlaneAt,pointSupportAt,supportAt,terrainSupportAt,version"
+      || typeof queries.version !== "string" || !/^[A-Za-z0-9_.:-]{1,80}$/.test(queries.version)
+      || ["supportAt", "terrainSupportAt", "pointSupportAt", "groundPlaneAt"].some(k => typeof queries[k] !== "function")))
+      throw Error("unsupported independent player world");
+    if (!options || !["static-body-3", "terrain-body-3"].includes(options.profile) || Object.keys(options).some(k => !allowed.has(k))
+      || !options.root || !Array.isArray(options.root.children)
+      || typeof options.ownerId !== "string" || !/^[A-Za-z0-9_.:-]{1,80}$/.test(options.ownerId)
+      || typeof options.name !== "string" || !options.name.length || options.name.length > 80
+      || typeof options.groundAt !== "function" || typeof options.clear !== "function")
+      throw Error("unsupported independent player world");
+    // Own every mutable owner field; an NPC's work/state/root are never reused.
+    const owner = { id: options.ownerId, traits: { name: options.name }, state: "chilling",
+      work: { site: -1, plannedSite: -1 }, root: BL.scene.createNode(), camp: { burning: false } };
+    const crew = { list: [owner], cavemen: new Map([[options.name, owner]]), stateOf: value => value.state };
+    const sim = create({ root: options.root, crew, sites: [], groundAt: options.groundAt, clear: options.clear,
+      checkpointProfile: terrain ? "body-terrain-3" : "body-3", checkpointRandom: true, combatEnabled: false,
+      ...(terrain ? { checkpointTerrain: queries.version, supportAt: queries.supportAt, terrainSupportAt: queries.terrainSupportAt,
+        pointSupportAt: queries.pointSupportAt, groundPlaneAt: queries.groundPlaneAt } : {}) });
+    let enabled = false, disposed = false;
+    return {
+      // This narrow shape is also consumed by the existing body checkpoint codec.
+      list: sim.list, bodyCheckpoint: sim.bodyCheckpoint,
+      activate() {
+        if (disposed || !sim.player) return false;
+        enabled = false;
+        sim.bodyCheckpoint.bodyState(); // No unstepped missing-support recovery may activate.
+        // The world may change during grant/ACK transit. Check the current
+        // geometry again without advancing physics or resetting the pose.
+        sim.bodyCheckpoint.validatePlacement();
+        enabled = true; return true;
+      },
+      suspend() { enabled = false; if (!disposed) sim.cancelInput(); },
+      cancelInput() { if (!disposed) sim.cancelInput(); },
+      control(input) { return !disposed && enabled && sim.control(input); },
+      supportRemoved() { if (disposed || !enabled) return false; sim.supportRemoved(); return true; },
+      update(dt) {
+        if (disposed || !enabled) return false;
+        if (!Number.isFinite(dt) || dt <= 0 || dt > .25) throw Error("bounded player step required");
+        if (terrain) sim.supportRemoved();
+        sim.update(dt); return true;
+      },
+      dispose() { if (disposed) return; enabled = false; disposed = true; sim.dispose(); },
+      get active() { return enabled && !disposed; },
+      get player() { return sim.player; },
+    };
+  };
+  BL.clankers = { create, createPlayerBody, rageCarrying, WALK_RADIUS, WALK_HEIGHT, PROP_STEP, RAGE_SPEED };
 })();

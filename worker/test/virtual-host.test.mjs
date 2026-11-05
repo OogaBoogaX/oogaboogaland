@@ -58,7 +58,7 @@ function harness(adapter = simulation, passive = m => m) {
 
 const bodyClaim = () => ({ protocol: SESSION_PROTOCOL, world: simulation.version, accountId: 1, bodyId: "resident", zone: "outside",
   body: { kind: "ooga", motion: { x: 1, y: 10, z: 2, yaw: 0.7, vx: 3, vy: -1, vz: 2, grounded: false },
-    equipment: { weapon: "gun", mode: "combat", magazine: 17, spareAmmo: [5, 22], jetpack: true, fuel: 0.4,
+    equipment: { weapon: "gun", mode: "combat", jetpack: true,
       primaryOwned: true, secondaryOwned: true, selectedSlot: 2, unlimited: false, jetpackOwned: true } } });
 
 test("a cached ownership read cannot hand back a second body after the first handoff changes its NPC", async () => {
@@ -128,6 +128,27 @@ test("pose revision confirmation validates committed state and fences changes wi
   h.at(110250);await h.make().claim('next');await assert.rejects(h.host.confirmPoses(ticket,frame),/fenced/);
 });
 
+test("interleaved body recovery supersedes publication while preserving strict reads and ownership fencing", async () => {
+  const actor = rig(), project = createNpcPose(123, 1);
+  const h = harness({ ...simulation, poses: () => project([{ index: 0, actor }]) });
+  const ticket = await h.host.begin('owner', 60000);
+  await h.host.connect(ticket, [], bodyClaim());
+  const snapshot = await h.host.poses(ticket);
+  h.host.sessionAdapter.canStep = () => false; h.at(100250);
+  const partial = await h.host.tick(ticket, []); assert.ok(partial.work.pendingSteps > 0);
+  assert.equal(await h.host.confirmPoses(ticket, snapshot, { skipPending: true }), false);
+  await assert.rejects(h.host.confirmPoses(ticket, snapshot), /body recovery pending/);
+  await assert.rejects(h.host.confirmPoses(ticket, snapshot, { skipPending: 1 }), /invalid pending/);
+  assert.equal(await h.host.poses(ticket, { skipPending: true }), null);
+  await assert.rejects(h.host.poses(ticket), /body recovery pending/);
+  await assert.rejects(h.host.poses(ticket, { skipPending: 1 }), /invalid pending/);
+  await assert.rejects(h.host.poses({ ...ticket, fence: 0 }, { skipPending: true }), /fenced/);
+  const before = h.store.read();
+  assert.equal(await h.host.confirmPoses(ticket, snapshot, { skipPending: true }), false); assert.deepEqual(h.store.read(), before);
+  h.host.sessionAdapter.canStep = () => true;
+  await h.host.tick(ticket, []); assert.ok(await h.host.poses(ticket, { skipPending: true }));
+});
+
 test("host progresses with zero players and persists simulation before returning snapshots", async () => {
   const h = harness(), ticket = await h.host.begin("runner-a", 60000);
   for (let i = 1; i <= 5; i++) {
@@ -158,6 +179,10 @@ test("simulation transaction scopes are fresh on storage retry, close on failure
   assert.equal((await h.make().tick(ticket)).snapshot.npcs[0].x,.5);
   const incompatible={...adapter,forTransaction:()=>({...factory(),version:'other'})};
   await assert.rejects(harness(incompatible).host.begin('owner',60000),/invalid simulation transaction/);
+  const stable=h.store.read();
+  h.host.sessionAdapter={stepPassive:()=>{},forTransaction:async()=>{throw Error('body scope failed');}};
+  await assert.rejects(h.host.tick(ticket),/body scope failed/);
+  assert.deepEqual(h.store.read(),stable);assert.throws(()=>scopes.at(-1).validate(stable.simulation),/closed/);
 });
 
 test("committed pose reads share the validated immutable transaction snapshot and cannot mutate it",async()=>{
@@ -297,7 +322,7 @@ test("session ownership, deadlines and departure intents commit atomically with 
   h.store.failNext();
   const claim = { protocol: SESSION_PROTOCOL, world: simulation.version, accountId: 1, bodyId: "same-body", zone: "outside",
     body: { kind: "ooga", motion: { x: 1, y: 2, z: 3, yaw: 0, vx: 0, vy: 0, vz: 0, grounded: true },
-      equipment: { weapon: "gun", mode: "carry", magazine: 12, spareAmmo: [11, 19], jetpack: true, fuel: 0.4,
+      equipment: { weapon: "gun", mode: "carry", jetpack: true,
         primaryOwned: true, secondaryOwned: true, selectedSlot: 2, unlimited: false, jetpackOwned: true } } };
   const connect = (registry, now) => registry.connect(claim, now);
   await assert.rejects(h.host.sessions(old, [], connect), /storage unavailable/);
@@ -437,4 +462,28 @@ test("NPC handback and body tombstone application share a transaction, survive r
   saved = h.store.read();
   assert.equal(saved.simulation.npcs[0].handedBack, 1, "applied tombstone does not replay handback");
   assert.equal(saved.sessions.pending[1].handback, null);
+});
+
+
+test("expensive simulation profiles can lower catch-up work without changing recovered state", async () => {
+  for (const maxSteps of [0, -1, HOST.maxSteps + 1, NaN, 1.5])
+    assert.throws(() => harness({ ...simulation, maxSteps }), /host adapters/);
+  const ordinary = harness(), bounded = harness({ ...simulation, maxSteps: 4 });
+  const tickets = await Promise.all([ordinary.host.begin('ordinary', 60000), bounded.host.begin('bounded', 60000)]);
+  for (const h of [ordinary, bounded]) h.at(110001);
+  tickets[0] = await ordinary.host.claim('ordinary-restart'); tickets[1] = await bounded.host.claim('bounded-restart');
+  const before = bounded.store.read(); bounded.store.failNext();
+  await assert.rejects(bounded.host.tick(tickets[1]), /storage unavailable/); assert.deepEqual(bounded.store.read(), before);
+  const commits = [];
+  for (const [index, h] of [ordinary, bounded].entries()) {
+    let count = 0, result;
+    do {
+      result = await h.make().tick(tickets[index]); count++;
+      assert.ok(result.steps <= (index ? 4 : HOST.maxSteps)); assert.ok(count <= 10);
+    } while (result.lagMs >= HOST.stepMs);
+    commits.push(count);
+  }
+  assert.deepEqual(commits, [5, 10]);
+  assert.deepEqual(bounded.store.read().simulation, ordinary.store.read().simulation);
+  assert.equal(bounded.store.read().simulatedAt, ordinary.store.read().simulatedAt);
 });

@@ -8,14 +8,15 @@ import { createClankerBodyCheckpoint } from "../src/clanker-roaming.js";
 import { HOST, boundedJSON } from "../src/virtual-host.js";
 const world = "body-capacity-fixture-1";
 const make = () => {
-  const f = clankerController({ checkpointRandom: true, checkpointProfile: "body-2", start: false });
+  const f = clankerController({ checkpointRandom: true, checkpointProfile: "body-3", start: false });
   return { ...f, codec: createClankerBodyCheckpoint(f.sim, world, f.B.clankerState) };
 };
 const original = make(), rows = [];
 const nodes = v => 1 + (v && typeof v === "object" ? Object.values(v).reduce((sum, x) => sum + nodes(x), 0) : 0);
 const gameplay = f => {
   const e = f.sim.player;
-  return JSON.parse(JSON.stringify({ position: e.root.position, heading: e.heading, drive: e.drive, health: e.health,
+  return JSON.parse(JSON.stringify({ position: e.root.position, heading: e.heading, vx:e.drive.vx, vy:e.drive.vy, vz:e.drive.vz,
+    grounded:e.drive.grounded, airborne:e.drive.airborne, jumps:e.drive.jumps,
     biped: e.biped, parked: e.parked, mode: e.mode, controlled: e.controlled }));
 };
 try {

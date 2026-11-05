@@ -4,12 +4,12 @@
 // intents carrying the body and their applied tombstones, and strict checkpoint restore. Every check drives the module's API.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { SessionRegistry, CHECKPOINT_VERSION, MAX_SESSIONS, GRACE_MS, PASSIVE_STEP_MS, LIMITS } from "../src/host-sessions.js";
+import { SessionRegistry, CHECKPOINT_VERSION, MAX_SESSIONS, GRACE_MS, HANDOFF_MS, PASSIVE_STEP_MS, LIMITS } from "../src/host-sessions.js";
 
 const PROTOCOL = "host-v1", WORLD = 7, T0 = 1_700_000_000_000;
 const motion = (o = {}) => ({ x: 1, y: 10, z: 2, yaw: 0.5, vx: 3, vy: -1, vz: 4, grounded: false, ...o });
-const equipment = (o = {}) => ({ weapon: "gun", mode: "combat", magazine: 17, spareAmmo: [30, 12], primaryOwned: true,
-  secondaryOwned: true, selectedSlot: 2, unlimited: false, jetpack: true, jetpackOwned: true, fuel: 0.4, ...o });
+const equipment = (o = {}) => ({ weapon: "gun", mode: "combat", primaryOwned: true,
+  secondaryOwned: true, selectedSlot: 2, unlimited: false, jetpack: true, jetpackOwned: true, ...o });
 const body = (o = {}) => ({ kind: "ooga", motion: motion(), equipment: equipment(), ...o });
 const claim = (accountId, bodyId, o = {}) => ({ protocol: PROTOCOL, world: WORLD, accountId, bodyId, zone: "outside", body: body(), ...o });
 // Lifecycle-only fixtures opt into an explicit no-motion adapter; it is never a production fallback.
@@ -42,7 +42,7 @@ test("a body reconnects strictly before its deadline, and at the exact deadline 
   assert.equal(back.view.presentation, null);
   assert.equal(back.view.state, "live");
   assert.deepEqual(back.view.motion, motion({ vx: 0, vz: 0 }));
-  assert.deepEqual(back.view.equipment, equipment(), "ammunition and equipment survive the reconnect");
+  assert.deepEqual(back.view.equipment, equipment(), "selected equipment and mode survive the reconnect");
   assert.ok(back.session.generation > a.session.generation);
 
   reg.disconnect(ref(back.session), T0 + 2 * GRACE_MS);
@@ -172,7 +172,7 @@ test("drain turns every live record into grace at the run's stop time, keeps ear
 test("a duplicate connect rotates the session and keeps the body; the old socket's input and close do nothing", () => {
   const reg = registry();
   const first = reg.connect(claim(1, "ooga-a"), T0);
-  assert.equal(reg.update(ref(first.session), T0 + 10, { motion: motion({ x: 5 }), equipment: equipment({ weapon: "primary", mode: "carry", magazine: 3 }) }), true);
+  assert.equal(reg.update(ref(first.session), T0 + 10, { motion: motion({ x: 5 }), equipment: equipment({ weapon: "primary", mode: "carry" }) }), true);
   const second = reg.connect(claim(1, "ooga-a", { body: body({ kind: "clanker", motion: motion({ x: -50 }) }) }), T0 + 20);
   assert.equal(second.ok, true);
   assert.equal(second.resumed, false);
@@ -183,7 +183,7 @@ test("a duplicate connect rotates the session and keeps the body; the old socket
   assert.equal(second.view.motion.x, 5, "the claim's body is ignored for an owned body");
   assert.equal(second.view.kind, "ooga", "and so is its kind");
   assert.deepEqual([second.view.motion.vx, second.view.motion.vz], [0, 0], "old held movement cannot carry into the new session");
-  assert.deepEqual(second.view.equipment, equipment({ weapon: "primary", mode: "carry", magazine: 3 }));
+  assert.deepEqual(second.view.equipment, equipment({ weapon: "primary", mode: "carry" }));
 
   const before = reg.checkpoint();
   const stale = ref(first.session);
@@ -304,7 +304,7 @@ test("the host's passive stepper moves a grace body and touches nothing else", (
   assert.equal(after.motion.x, 1);
   assert.equal(after.motion.yaw, 0.5, "yaw survives the physics projection");
   assert.deepEqual([after.kind, after.zone], ["ooga", "outside"]);
-  assert.deepEqual(after.equipment, equipment(), "weapons, ammunition, slot, jetpack and fuel unchanged");
+  assert.deepEqual(after.equipment, equipment(), "equipment selection unchanged");
   assert.equal(after.deadline, before.deadline);
   assert.equal(after.accountId, 1);
   assert.equal(after.generation, a.generation);
@@ -331,44 +331,31 @@ test("the host's passive stepper moves a grace body and touches nothing else", (
   assert.deepEqual(still.checkpoint(), unsupported, "missing physics cannot claim to have advanced the body");
 });
 
-test("equipment and its spare magazines are copied in and out and kept through updates, grace, restarts and reconnects", () => {
-  const reg = registry();
-  const gear = equipment({ spareAmmo: [30, 4], selectedSlot: 1 });
+test("equipment selection survives recovery while resource quantities are absent and return requests normal defaults", () => {
+  const reg = registry(), gear = equipment({ selectedSlot: 1 });
   const a = reg.connect(claim(1, "ooga-a", { body: body({ equipment: gear }) }), T0);
-  gear.spareAmmo[0] = 0;
-  gear.spareAmmo.push(1);
-  a.view.equipment.spareAmmo[1] = 29;
-  reg.view(1).equipment.spareAmmo.pop();
-  assert.deepEqual(reg.view(1).equipment, equipment({ spareAmmo: [30, 4], selectedSlot: 1 }), "no alias reaches the record");
-
-  const lone = equipment({ weapon: null, spareAmmo: [], secondaryOwned: false, jetpack: false, jetpackOwned: false, fuel: 0 });
+  gear.selectedSlot = 2; a.view.equipment.weapon = null; reg.view(1).equipment.mode = "carry";
+  assert.deepEqual(reg.view(1).equipment, equipment({ selectedSlot: 1 }), "no alias reaches the record");
+  const lone = equipment({ weapon: null, secondaryOwned: false, jetpack: false, jetpackOwned: false });
   reg.connect(claim(2, "gorilla-b", { body: body({ kind: "clanker", equipment: lone }) }), T0);
-  const patch = equipment({ spareAmmo: [7], magazine: 0, selectedSlot: 2, unlimited: true, fuel: 1 });
+  const patch = equipment({ selectedSlot: 2, unlimited: true });
   assert.equal(reg.update(ref(a.session), T0 + 1, { equipment: patch }), true);
-  patch.spareAmmo[0] = 30;
-  const kept = equipment({ spareAmmo: [7], magazine: 0, selectedSlot: 2, unlimited: true, fuel: 1 });
-  assert.deepEqual(reg.view(1).equipment, kept);
-  assert.deepEqual(reg.view(2).equipment, lone, "unequal spare counts stay per body");
-  assert.equal(reg.view(2).kind, "clanker");
-
-  const cp = reg.checkpoint();
-  cp.sessions.find((s) => s.accountId === 1).equipment.spareAmmo.push(3);
+  patch.selectedSlot = 1;
+  const kept = equipment({ selectedSlot: 2, unlimited: true });
+  const cp = reg.checkpoint(); cp.sessions[0].equipment.weapon = null;
   assert.deepEqual(reg.view(1).equipment, kept, "a checkpoint is a copy");
-
-  reg.disconnect(ref(a.session), T0 + 2);
-  reg.advance(T0 + 5000);
-  const next = restore(reg.checkpoint());
-  next.recover(T0 + 6000);
-  assert.deepEqual(next.view(1).equipment, kept);
+  reg.disconnect(ref(a.session), T0 + 2); reg.advance(T0 + 5000);
+  const next = restore(reg.checkpoint()); next.recover(T0 + 6000);
   const back = next.connect(claim(1, "ooga-a", { body: undefined }), T0 + 7000);
-  assert.equal(back.resumed, true);
-  assert.deepEqual(back.view.equipment, kept, "ammunition survives grace, a restart and the reconnect");
-  assert.deepEqual(next.view(2).equipment, lone);
+  assert.equal(back.resumed, true); assert.equal(back.resetResources, "defaults");
+  assert.deepEqual(back.view.equipment, kept); assert.deepEqual(next.view(2).equipment, lone);
+  for (const key of ["magazine", "spareAmmo", "fuel", "health"])
+    assert.equal(Object.hasOwn(back.view.equipment, key), false, `${key} is not recovery state`);
 });
 
 test("a departure keeps the actual body, zone and kind, and its applied tombstone survives restarts until acknowledged", () => {
   const reg = registry({ npcFor: () => null });
-  const gear = { spareAmmo: [5], selectedSlot: 1, weapon: "primary", mode: "carry", unlimited: true, jetpack: false, fuel: 0 };
+  const gear = { selectedSlot: 1, weapon: "primary", mode: "carry", unlimited: true, jetpack: false };
   const a = reg.connect(claim(1, "gorilla-a", { zone: "arcade.hall", body: body({ kind: "clanker", motion: motion({ yaw: -6 }), equipment: equipment(gear) }) }), T0).session;
   reg.update(ref(a), T0 + 10, { motion: motion({ x: 7, yaw: 1.25 }) });
   const gone = reg.release(ref(a), T0 + 20).effects;
@@ -376,7 +363,7 @@ test("a departure keeps the actual body, zone and kind, and its applied tombston
     generation: a.generation, reason: "release", at: T0 + 20, handback: null, zone: "arcade.hall",
     body: { kind: "clanker", motion: motion({ x: 7, yaw: 1.25 }), equipment: equipment(gear) }, applied: false };
   assert.deepEqual(gone, [expected], "no NPC reported means no handback and no spawn");
-  gone[0].body.equipment.spareAmmo.push(9);
+  gone[0].body.equipment.weapon = null;
   gone[0].body.motion.x = 0;
   assert.deepEqual(reg.pending(), [expected], "the effect is a copy");
 
@@ -437,11 +424,7 @@ test("expiry hands back only an NPC the host reports, never spawns one, and keep
 
 test("claims outside the limits are refused, and malformed checkpoints never restore", () => {
   const reg = registry();
-  const { spareAmmo, ...lossy } = equipment();
-  const holey = [30];
-  holey[2] = 4; // too long, with a hole
-  const sparse = [];
-  sparse[1] = 5; // within the length, but not dense
+  const { selectedSlot, ...lossy } = equipment();
   for (const bad of [
     claim(0, "ooga-a"), claim("1", "ooga-a"), claim(1.5, "ooga-a"), claim(1, ""), claim(1, "x".repeat(65)), claim(1, "a b"),
     claim(1, "ooga-a", { zone: "" }),
@@ -452,23 +435,16 @@ test("claims outside the limits are refused, and malformed checkpoints never res
     claim(1, "ooga-a", { body: body({ motion: (({ yaw, ...m }) => m)(motion()) }) }),
     claim(1, "ooga-a", { body: body({ kind: "robot" }) }),
     claim(1, "ooga-a", { body: (({ kind, ...b }) => b)(body()) }),
-    claim(1, "ooga-a", { body: body({ equipment: equipment({ magazine: LIMITS.magazine + 1 }) }) }),
+    claim(1, "ooga-a", { body: body({ equipment: equipment({ magazine: 30 }) }) }),
     claim(1, "ooga-a", { body: body({ equipment: { ...lossy, reserve: 60 } }) }),
     claim(1, "ooga-a", { body: body({ equipment: equipment({ reserve: 60 }) }) }),
     claim(1, "ooga-a", { body: body({ equipment: equipment({ spareAmmo: [1, 2, 3] }) }) }),
-    claim(1, "ooga-a", { body: body({ equipment: equipment({ spareAmmo: [31] }) }) }),
-    claim(1, "ooga-a", { body: body({ equipment: equipment({ spareAmmo: [-1] }) }) }),
-    claim(1, "ooga-a", { body: body({ equipment: equipment({ spareAmmo: [1.5] }) }) }),
-    claim(1, "ooga-a", { body: body({ equipment: equipment({ spareAmmo: holey }) }) }),
-    claim(1, "ooga-a", { body: body({ equipment: equipment({ spareAmmo: sparse }) }) }),
-    claim(1, "ooga-a", { body: body({ equipment: equipment({ spareAmmo: 30 }) }) }),
     claim(1, "ooga-a", { body: body({ equipment: equipment({ selectedSlot: 0 }) }) }),
     claim(1, "ooga-a", { body: body({ equipment: equipment({ selectedSlot: 3 }) }) }),
     claim(1, "ooga-a", { body: body({ equipment: equipment({ primaryOwned: undefined }) }) }),
     claim(1, "ooga-a", { body: body({ equipment: equipment({ unlimited: "yes" }) }) }),
     claim(1, "ooga-a", { body: body({ equipment: equipment({ jetpackOwned: 1 }) }) }),
     claim(1, "ooga-a", { body: body({ equipment: equipment({ fuel: -0.1 }) }) }),
-    claim(1, "ooga-a", { body: body({ equipment: equipment({ fuel: 1.1 }) }) }),
     claim(1, "ooga-a", { body: body({ equipment: equipment({ weapon: "bazooka" }) }) }),
     claim(1, "ooga-a", { body: body({ motion: { ...motion(), shot: true } }) }),
     claim(1, "ooga-a", { body: { ...body(), thrust: 1 } }),
@@ -483,7 +459,7 @@ test("claims outside the limits are refused, and malformed checkpoints never res
   reg.disconnect(ref(a), T0);
   const good = json(reg.checkpoint());
   assert.equal(good.v, CHECKPOINT_VERSION);
-  assert.equal(CHECKPOINT_VERSION, 2);
+  assert.equal(CHECKPOINT_VERSION, 4);
   restore(good).recover(T0, [b.token]);
 
   const mutate = (fn) => { const cp = json(good); fn(cp); return cp; };
@@ -496,7 +472,7 @@ test("claims outside the limits are refused, and malformed checkpoints never res
     }
   });
   const broken = [
-    null, [], oldDraft, mutate((cp) => { cp.v = 1; }), mutate((cp) => { cp.v = 3; }),
+    null, [], oldDraft, mutate((cp) => { cp.v = 1; }), mutate((cp) => { cp.v = 2; }), mutate((cp) => { cp.v = 3; }),
     mutate((cp) => { cp.extra = 1; }), mutate((cp) => { delete cp.pending; }),
     mutate((cp) => { cp.clock = -1; }), mutate((cp) => { cp.clock = Number.MAX_SAFE_INTEGER; }),
     mutate((cp) => { cp.nextGeneration = cp.sessions[1].generation; }),
@@ -542,4 +518,82 @@ test("claims outside the limits are refused, and malformed checkpoints never res
   assert.equal(restored.connect(claim(4, "ooga-c"), T0).reason, "departing");
   assert.equal(restored.connect(claim(4, "ooga-d"), T0).session.generation, 10, "generations continue from the checkpoint");
   assert.throws(() => restored.recover(T0), /only follows restore/);
+});
+
+
+test("offers keep physics, occupancy and the original deadline across replacement and restart", () => {
+  let calls = 0;
+  const adapter = { validateOccupancy: () => true, stepPassive: (m, ms) => {
+    calls++; return { ...m, y: m.y + m.vy * ms / 1000 };
+  } };
+  const reg = registry(adapter), live = reg.connect(claim(1, "ooga-a"), T0).session;
+  reg.occupy(ref(live), { kind: "hammock", id: "bed-a" }, T0);
+  reg.disconnect(ref(live), T0);
+  const offered = reg.offer(claim(1, "ooga-a"), T0 + 1000), held = ref(offered.session);
+  assert.equal(offered.view.state, "offered"); assert.equal(offered.view.deadline, T0 + GRACE_MS);
+  assert.ok(Math.abs(offered.view.motion.y - 9) < 1e-12); assert.equal(reg.confirm(held, T0 + 1000), false);
+  assert.equal(reg.update(held, T0 + 1000, { motion: motion() }), false);
+  assert.equal(reg.authorizedView(held), null); assert.equal(reg.transferView(held).state, "offered");
+  assert.equal(reg.occupant("hammock", "bed-a"), 1);
+  const next = restore(reg.checkpoint(), adapter); next.recover(T0 + 2000, [held.token]);
+  assert.ok(calls > 0); assert.ok(Math.abs(next.view(1).motion.y - 8) < 1e-12);
+  assert.equal(next.view(1).deadline, T0 + GRACE_MS);
+  const newer = next.offer(claim(1, "ooga-a"), T0 + 2000);
+  assert.equal(newer.view.deadline, T0 + GRACE_MS); assert.ok(newer.session.generation > held.generation);
+  assert.equal(next.activate(held, T0 + 2000).ok, false);
+  const due = next.advance(T0 + GRACE_MS).effects;
+  assert.equal(next.occupant("hammock", "bed-a"), null);
+  assert.deepEqual(types(due), ["vacated", "depart"]);
+  assert.equal(due[1].at, T0 + GRACE_MS); assert.equal(due[1].handback, null);
+});
+
+test("lost activation ACK never creates dual ownership or renews the disconnect deadline", () => {
+  let steps = 0;
+  const adapter = { stepPassive: (m, ms) => { steps++; return { ...m, y: m.y + m.vy * ms / 1000 }; } };
+  const reg = registry(adapter), offered = reg.offer(claim(1, "ooga-a"), T0), held = ref(offered.session);
+  assert.equal(offered.view.motion.vx, 0); assert.equal(offered.view.motion.vz, 0);
+  assert.equal(offered.view.motion.vy, -1); assert.ok(types(offered.effects).includes("neutralize"));
+  const activated = reg.activate(held, T0 + 250);
+  assert.equal(activated.ok, true); assert.equal(activated.controlUntil, T0 + 250 + HANDOFF_MS);
+  assert.ok(activated.view.motion.y < offered.view.motion.y, "activation carries the latest falling pose");
+  const atLease = steps, saved = reg.checkpoint();
+  let next = restore(saved, adapter); next.recover(T0 + 500, []);
+  assert.equal(next.view(1).state, "starting"); assert.equal(steps, atLease, "restart cannot take physics during a browser lease");
+  assert.equal(next.offer(claim(1, "ooga-a"), T0 + 500).reason, "handoff");
+  assert.equal(next.revoke(1, T0 + 500).reason, "handoff");
+  next.disconnect(held, T0 + 500);
+  assert.equal(next.view(1).state, "starting", "socket close does not prove the controller has stopped");
+  assert.equal(next.confirm(held, T0 + 500), false);
+  next = restore(next.checkpoint(), adapter); next.recover(activated.controlUntil, []);
+  assert.equal(next.view(1).state, "grace"); assert.ok(steps > atLease);
+  assert.equal(next.view(1).deadline, T0 + GRACE_MS);
+  assert.equal(next.started(held, activated.controlUntil).ok, false);
+  assert.equal(next.advance(T0 + GRACE_MS).effects[0].at, T0 + GRACE_MS);
+});
+
+test("a final snapshot ACK alone restores live ownership; duplicate ACKs do not keep an absent player alive", () => {
+  const reg = registry(), offered = reg.offer(claim(1, "ooga-a"), T0), held = ref(offered.session);
+  assert.equal(reg.started(held, T0).ok, false);
+  const active = reg.activate(held, T0 + 250); assert.equal(active.ok, true);
+  assert.equal(reg.started({ ...held, token: "0".repeat(32) }, T0 + 300).ok, false);
+  const done = reg.started(held, T0 + 300);
+  assert.equal(done.ok, true); assert.equal(done.duplicate, false); assert.equal(done.view.state, "live");
+  assert.equal(done.view.presentation, null); assert.equal(done.view.deadline, null);
+  const before = reg.checkpoint();
+  assert.equal(reg.started(held, T0 + 500).duplicate, true); assert.deepEqual(reg.checkpoint(), before);
+  const next = restore(reg.checkpoint()); next.recover(T0 + 900);
+  assert.equal(next.view(1).deadline, T0 + 300 + GRACE_MS);
+});
+
+test("handoff lease is clipped to the original grace boundary and finite drain cannot extend it", () => {
+  const reg = registry(), held = ref(reg.offer(claim(1, "ooga-a"), T0).session);
+  const active = reg.activate(held, T0 + GRACE_MS - 1);
+  assert.equal(active.controlUntil, T0 + GRACE_MS);
+  const cp = reg.checkpoint(), next = restore(cp);
+  next.recover(T0 + GRACE_MS - 1);
+  next.drain(T0 + GRACE_MS - 1, T0 + GRACE_MS - 1);
+  assert.equal(next.view(1).state, "starting");
+  assert.equal(next.started(held, T0 + GRACE_MS).ok, false);
+  const out = next.drain(T0 + GRACE_MS - 1, T0 + GRACE_MS);
+  assert.equal(out.effects[0].at, T0 + GRACE_MS); assert.equal(next.size, 0);
 });

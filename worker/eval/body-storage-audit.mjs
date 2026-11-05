@@ -1,6 +1,7 @@
 // Finite Node size/codec-cost comparison. No account or runtime deployment.
 import assert from "node:assert/strict";
 import { gzipSync, gunzipSync, brotliCompressSync, brotliDecompressSync, constants } from "node:zlib";
+import { scalarCost } from "../src/checkpoint-binary.js";
 import { SessionRegistry } from "../src/host-sessions.js";
 import { HOST, SESSION_PROTOCOL } from "../src/virtual-host.js";
 import { createCheckpointPack } from "../src/checkpoint-pack.js";
@@ -11,8 +12,8 @@ const world = "body-capacity-fixture-1", bytes = x => Buffer.byteLength(JSON.str
 const parts = object => ({ fields: Object.fromEntries(Object.entries(object).map(([k, v]) => [k, bytes({ [k]: v }) - 2])),
   punctuation: Object.keys(object).length + 1, total: bytes(object) });
 const pack = createCheckpointPack(16384, { intern: true }), componentPack = createCheckpointPack(8192, { intern: true });
-const equipment = { weapon: "gun", mode: "combat", magazine: 17, spareAmmo: [4, 22], primaryOwned: true,
-  secondaryOwned: true, selectedSlot: 2, unlimited: false, jetpack: true, jetpackOwned: true, fuel: .37 };
+const equipment = { weapon: "gun", mode: "combat", primaryOwned: true,
+  secondaryOwned: true, selectedSlot: 2, unlimited: false, jetpack: true, jetpackOwned: true };
 const claim = { protocol: SESSION_PROTOCOL, world, accountId: 123, bodyId: "body-0", zone: "outside",
   body: { kind: "clanker", motion: { x: -4, y: 4, z: -4, yaw: .7, vx: 1, vy: -2, vz: 1, grounded: false }, equipment } };
 const registry = new SessionRegistry({ protocol: SESSION_PROTOCOL, world, adapter: { stepPassive: m => m } });
@@ -30,7 +31,7 @@ const worst = entry => {
   else { v.token = "f".repeat(32); v.occupancy = { kind: "hammock", id: "s".repeat(64) }; }
   // Conservative JSON byte upper bound, not a restorable registry record.
   for (const k of ["x", "y", "z", "yaw", "vx", "vy", "vz"]) b.motion[k] = "9".repeat(25);
-  b.equipment.fuel = "9".repeat(25); b.equipment.weapon = "primary"; b.equipment.spareAmmo = [30, 30];
+  b.equipment.weapon = "primary";
   for (const k of ["primaryOwned", "secondaryOwned", "unlimited", "jetpack", "jetpackOwned"]) b.equipment[k] = false;
   return v;
 };
@@ -47,7 +48,7 @@ const countNumbers = v => {
     else numeric.requiresFloat64++;
   } else if (v && typeof v === "object") for (const item of Object.values(v)) countNumbers(item);
 };
-const f = clankerController({ checkpointRandom: true, checkpointProfile: "body-2", start: false });
+const f = clankerController({ checkpointRandom: true, checkpointProfile: "body-3", start: false });
 const codec = createClankerBodyCheckpoint(f.sim, world, f.B.clankerState);
 try {
   f.start(); f.sim.possess(f.sim.list[0]); codec.neutralize(); for (let i = 0; i < 4; i++) f.step();
@@ -61,7 +62,7 @@ try {
       motion: { x: p.x, y: p.y, z: p.z, yaw: e.heading,
       vx: d.vx, vy: d.vy, vz: d.vz, grounded: d.grounded } };
     const complete = { ...currentGrace, continuation: component }, encoded = Buffer.from(JSON.stringify(complete));
-    const bodyRow = { v: BODY_STORAGE.version, profile: 'clanker-body-2', world, fence: 1, revision: i + 1,
+    const bodyRow = { v: BODY_STORAGE.version, profile: 'clanker-body-3', world, fence: 1, revision: i + 1,
       body: { accountId: currentGrace.accountId, bodyId: currentGrace.bodyId, generation: currentGrace.generation, kind: currentGrace.kind, checkpoint: component } };
     const start = performance.now(), packed = pack.pack(complete), packedMs = performance.now() - start;
     const decodeAt = performance.now(); assert.deepEqual(pack.unpack(packed), complete); const unpackMs = performance.now() - decodeAt;
@@ -78,6 +79,8 @@ try {
     rows.push({ frame: i, componentBytes: bytes(component), expandedComponentBytes: bytes(expanded),
       encodedComponentParts: Object.fromEntries(Object.entries(component).map(([k, v]) => [k, bytes(v)])),
       componentBreakdown: parts(component), expandedBreakdown: parts(expanded), sessionBreakdown: parts(currentGrace),
+      bodyFieldBytes: Object.fromEntries(["ownerId", "x", "y", "z", "facing", "vx", "vy", "vz", "jumpCredits", "flags"]
+        .map((name, index) => [name, { jsonValueBytes: bytes(expanded.body[index]), binaryScalarBytes: scalarCost(expanded.body[index]) }])),
       separateCombinedBytes: bytes(currentGrace) + bytes(bodyRow), bodyRowBytes: bytes(bodyRow),
       conservativeEnvelopeWithMeasuredBody: bytes(worst(grace)) + bytes(component) + 16,
       completeGraceBytes: encoded.length, completePendingBytes: bytes({ ...pending, at: currentGrace.deadline,
@@ -87,10 +90,29 @@ try {
     f.step(); codec.neutralize();
   }
 } finally { f.dispose(); }
+// Exercise maximum-length ids and distinct double-precision fields. This is
+// an admitted codec boundary, not evidence those coordinates occur in the island.
+const wide = clankerController({ checkpointRandom: true, checkpointProfile: "body-3", start: false });
+let wideRecord;
+try {
+  wide.sim.list[0].owner.id = "i".repeat(80);
+  const wideCodec = createClankerBodyCheckpoint(wide.sim, "w".repeat(80));
+  wide.start(); wide.sim.possess(wide.sim.list[0]); wideCodec.neutralize(); for (let i = 0; i < 4; i++) wide.step();
+  const e = wide.sim.player, d = e.drive;
+  [e.root.position.x, e.root.position.y, e.root.position.z, e.heading, d.vx, d.vy, d.vz] =
+    [1234.1234567890123, 2345.2345678901234, -3456.3456789012345, 1.2345678901234567,
+      -4567.456789012345, 5678.567890123456, -6789.678901234567];
+  d.grounded = false; d.airborne = d.passiveFall = d.wallRelease = e.biped = e.parked = true; d.jumps = 2;
+  const component = wideCodec.capture();
+  wideRecord = { componentBytes: bytes(component), expandedComponentBytes: bytes(componentPack.unpack(component)),
+    conservativeFullEnvelopeBytes: Math.max(bytes(worst(grace)), bytes(worst(pending))) + bytes(component) + 16,
+    description: "80-character owner/world, seven distinct float64 values, all independent movement flags and two jump credits; metadata uses the conservative bound." };
+} finally { wide.dispose(); }
 const stats = values => { const v = values.slice().sort((a, b) => a - b); return { min: v[0], p50: v[Math.floor(v.length * .5)], p95: v[Math.floor(v.length * .95)], max: v.at(-1) }; };
 console.log(JSON.stringify({ node: process.version, platform: process.platform, arch: process.arch, sourceHashes: f.hashes,
   internalBounds: { root: HOST.checkpointBytes, simulation: 65536, metadata: HOST.metadataBytes, slot: HOST.sessionSlotBytes, slotNodes: HOST.sessionSlotNodes },
   envelopes: Object.fromEntries(Object.entries({ live, grace, pending }).map(([k, v]) => [k, { bytes: bytes(v), conservativeUpperBytes: bytes(worst(v)), fields: Object.keys(v) }])),
+  widePhysicalRecord: wideRecord,
   currentMaximalBodyEnvelopeBytes: Math.max(bytes(worst(grace)), bytes(worst(pending))) + BODY_STORAGE.componentBytes + 16,
   numericWidthsFirstExpandedSample: numeric,
   slotCapacityAt64KiBWorld: [1024, 2048, 3072, 4096, 9216].map(slot => ({ slotBytes: slot, admitted: Math.floor((HOST.checkpointBytes - 65536 - HOST.metadataBytes) / slot) })),

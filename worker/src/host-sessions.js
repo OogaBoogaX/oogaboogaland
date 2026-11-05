@@ -9,18 +9,17 @@
 // (`markApplied`, in the same atomic commit as its simulation handback) and it then stays as a tombstone until its visual
 // delivery is acknowledged. Sessions and departures share MAX_SESSIONS slots. The parent checkpoints after a mutation and
 // before publishing its effects.
-export const CHECKPOINT_VERSION = 2, MAX_SESSIONS = 64, GRACE_MS = 60000;
+export const CHECKPOINT_VERSION = 4, MAX_SESSIONS = 64, GRACE_MS = 60000, HANDOFF_MS = 1000;
 export const PASSIVE_STEP_MS = 50;
 export const OCCUPANCY_KINDS = Object.freeze(["hammock", "cabinet"]);
 export const BODY_KINDS = Object.freeze(["ooga", "clanker"]);
 export const WEAPONS = Object.freeze([null, "primary", "gun"]);
 export const MODES = Object.freeze(["carry", "combat"]);
-export const LIMITS = Object.freeze({ position: 1e6, velocity: 1e4, yaw: 2 * Math.PI, magazine: 30, spares: 2, fuel: 1 });
+export const LIMITS = Object.freeze({ position: 1e6, velocity: 1e4, yaw: 2 * Math.PI });
 const REASONS = ["expired", "release", "revoke"];
 const ID = /^[A-Za-z0-9._:/-]{1,64}$/, TOKEN = /^[0-9a-f]{32}$/;
 const MOTION = ["x", "y", "z", "yaw", "vx", "vy", "vz", "grounded"];
-const EQUIPMENT = ["weapon", "mode", "magazine", "spareAmmo", "primaryOwned", "secondaryOwned", "selectedSlot", "unlimited",
-  "jetpack", "jetpackOwned", "fuel"];
+const EQUIPMENT = ["weapon", "mode", "primaryOwned", "secondaryOwned", "selectedSlot", "unlimited", "jetpack", "jetpackOwned"];
 const SESSION = ["accountId", "bodyId", "kind", "generation", "token", "zone", "state", "lastSeenAt", "deadline", "stepAt",
   "motion", "equipment", "occupancy"];
 const PENDING = ["id", "type", "glyph", "accountId", "bodyId", "generation", "reason", "at", "handback", "zone", "body", "applied"];
@@ -32,7 +31,6 @@ const isAccount = (v) => Number.isSafeInteger(v) && v > 0;
 const isTime = (v) => Number.isSafeInteger(v) && v >= 0 && Number.isSafeInteger(v + GRACE_MS);
 const isVersion = (v) => typeof v === "string" ? v.length > 0 && v.length <= 64 : Number.isSafeInteger(v) && v >= 0;
 const bounded = (v, max) => typeof v === "number" && Number.isFinite(v) && Math.abs(v) <= max;
-const count = (v, max) => Number.isSafeInteger(v) && v >= 0 && v <= max;
 const plain = (o, keys) => o !== null && typeof o === "object" && !Array.isArray(o)
   && Object.keys(o).length === keys.length && keys.every((k) => Object.hasOwn(o, k));
 const same = (a, b) => {
@@ -47,23 +45,17 @@ const readMotion = (m) => {
   if (![m.x, m.y, m.z].every((v) => bounded(v, LIMITS.position)) || ![m.vx, m.vy, m.vz].every((v) => bounded(v, LIMITS.velocity))) return null;
   return { x: m.x, y: m.y, z: m.z, yaw: m.yaw, vx: m.vx, vy: m.vy, vz: m.vz, grounded: m.grounded };
 };
-// Ordered and dense: one entry per spare magazine, in the order the body would load them.
-const readSpares = (a) => {
-  if (!Array.isArray(a) || a.length > LIMITS.spares || Object.keys(a).length !== a.length) return null;
-  for (let i = 0; i < a.length; i++) if (!Object.hasOwn(a, i) || !count(a[i], LIMITS.magazine)) return null;
-  return a.slice();
-};
+// Recovery keeps the selected equipment and mode, not consumable quantities.
+// A returned player uses normal resource defaults; no firing/thrust is replayed.
 const readEquipment = (e) => {
-  if (!plain(e, EQUIPMENT) || !WEAPONS.includes(e.weapon) || !MODES.includes(e.mode) || !count(e.magazine, LIMITS.magazine)) return null;
-  const spareAmmo = readSpares(e.spareAmmo);
-  if (!spareAmmo || (e.selectedSlot !== 1 && e.selectedSlot !== 2)
-    || ![e.primaryOwned, e.secondaryOwned, e.unlimited, e.jetpack, e.jetpackOwned].every((b) => typeof b === "boolean")
-    || typeof e.fuel !== "number" || !(e.fuel >= 0 && e.fuel <= LIMITS.fuel)) return null;
-  return { weapon: e.weapon, mode: e.mode, magazine: e.magazine, spareAmmo, primaryOwned: e.primaryOwned,
+  if (!plain(e, EQUIPMENT) || !WEAPONS.includes(e.weapon) || !MODES.includes(e.mode)
+    || (e.selectedSlot !== 1 && e.selectedSlot !== 2)
+    || ![e.primaryOwned, e.secondaryOwned, e.unlimited, e.jetpack, e.jetpackOwned].every((b) => typeof b === "boolean")) return null;
+  return { weapon: e.weapon, mode: e.mode, primaryOwned: e.primaryOwned,
     secondaryOwned: e.secondaryOwned, selectedSlot: e.selectedSlot, unlimited: e.unlimited, jetpack: e.jetpack,
-    jetpackOwned: e.jetpackOwned, fuel: e.fuel };
+    jetpackOwned: e.jetpackOwned };
 };
-const copyEquipment = (e) => ({ ...e, spareAmmo: e.spareAmmo.slice() });
+const copyEquipment = (e) => ({ ...e });
 const readOccupancy = (o) => plain(o, ["kind", "id"]) && OCCUPANCY_KINDS.includes(o.kind) && isId(o.id) ? { kind: o.kind, id: o.id } : null;
 const readBody = (b) => {
   if (!plain(b, ["kind", "motion", "equipment"]) || !BODY_KINDS.includes(b.kind)) return null;
@@ -104,7 +96,7 @@ export class SessionRegistry {
   }
 
   // A restored registry refuses every mutation until recover(now, liveTokens, closes) runs. Only CHECKPOINT_VERSION
-  // restores: an older draft checkpoint lacks the body's kind, yaw and equipment, and is never migrated.
+  // restores: older drafts cannot represent pending handoff ownership and are never silently migrated.
   static restore(checkpoint, options) {
     const r = new SessionRegistry(options);
     if (!plain(checkpoint, TOP)) fail("shape");
@@ -125,7 +117,7 @@ export class SessionRegistry {
       generation(s.generation);
       if (!isTime(s.lastSeenAt) || !isTime(s.stepAt) || s.lastSeenAt > clock || s.stepAt > clock) fail("session times");
       if (s.state === "live") { if (s.deadline !== null || s.stepAt !== s.lastSeenAt) fail("live deadline"); }
-      else if (s.state === "grace") {
+      else if (["grace", "offered", "starting"].includes(s.state)) {
         if (s.deadline !== s.lastSeenAt + GRACE_MS || s.stepAt < s.lastSeenAt || s.stepAt >= s.deadline) fail("grace deadline");
       } else fail("session state");
       const motion = readMotion(s.motion), equipment = readEquipment(s.equipment);
@@ -184,8 +176,9 @@ export class SessionRegistry {
     for (const c of closes) {
       if (!plain(c, ["ref", "at"]) || !readRef(c.ref)) throw new TypeError("host-sessions: a close is { ref, at }");
       if (!isTime(c.at) || c.at > now) throw new RangeError("host-sessions: a close must be epoch milliseconds no later than now");
-      const r = this.#live(c.ref);
+      const r = this.#held(c.ref);
       if (!r) continue;
+      if (r.state === "grace") continue;
       if (c.at < r.lastSeenAt) throw new RangeError("host-sessions: a close cannot precede its session's last presence");
       const prior = closing.get(r);
       if (prior === undefined || c.at < prior) closing.set(r, c.at);
@@ -212,7 +205,7 @@ export class SessionRegistry {
       if (r.state === "live" && r.lastSeenAt > at) throw new RangeError("host-sessions: drain cannot precede a session's last presence");
     }
     const effects = [];
-    for (const r of this.#sessions.values()) if (r.state === "live") this.#toGrace(r, at, effects);
+    for (const r of this.#sessions.values()) if (r.state !== "grace") this.#toGrace(r, at, effects);
     this.#sweep(t, effects);
     this.#clock = t;
     return { effects };
@@ -221,7 +214,8 @@ export class SessionRegistry {
   // claim: { protocol, world, accountId, bodyId, zone, body: { kind, motion, equipment } }. accountId must come from the
   // host's authentication. A new body needs `body` (host world state); a resumed or duplicated one keeps its own body,
   // kind, zone, equipment and mode and ignores the claim's.
-  connect(claim, now) {
+  connect(claim, now, offered = false) {
+    if (typeof offered !== "boolean") return refuse("invalid");
     if (claim === null || typeof claim !== "object") return refuse("invalid");
     if (claim.protocol !== this.protocol || claim.world !== this.world) return refuse("version");
     const { accountId, bodyId, zone } = claim;
@@ -239,8 +233,9 @@ export class SessionRegistry {
       // revive an expired body. The host's typed connect prioritizes this account
       // before reaching here, so a timely authenticated reconnect need not wait
       // behind unrelated recovery work.
-      if (r.state === "grace" && (r.stepAt < Math.min(t, r.deadline) || t >= r.deadline)) return refuse("recovering", effects);
-      resumed = r.state === "grace";
+      if (r.state === "starting" || r.state === "offered" && !offered) return refuse("handoff", effects);
+      if (r.state !== "live" && (r.stepAt < Math.min(t, r.deadline) || t >= r.deadline)) return refuse("recovering", effects);
+      resumed = r.state !== "live";
       if (!resumed) {
         r.motion.vx = r.motion.vz = 0;
         effects.push({ type: "replaced", accountId, generation: r.generation });
@@ -255,13 +250,62 @@ export class SessionRegistry {
         stepAt: t, motion: body.motion, equipment: body.equipment, occupancy: null };
     }
     const token = this.#token();
+    const lastSeenAt = resumed ? r.lastSeenAt : t, deadline = resumed ? r.deadline : t + GRACE_MS;
     r.generation = this.#generation();
     r.token = token;
-    r.state = "live";
-    r.deadline = null;
-    r.lastSeenAt = r.stepAt = t;
+    r.state = offered ? "offered" : "live";
+    r.deadline = offered ? deadline : null;
+    r.lastSeenAt = offered ? lastSeenAt : t; r.stepAt = t;
+    if (offered && !resumed) {
+      r.motion.vx = r.motion.vz = 0;
+      if (!effects.some(e => e.type === "neutralize"))
+        effects.push({ type: "neutralize", accountId, bodyId, generation: r.generation });
+    }
     this.#sessions.set(accountId, r);
-    return { ok: true, resumed, session: { accountId, bodyId, generation: r.generation, token }, view: this.#view(r), effects };
+    return { ok: true, resumed, resetResources: "defaults", session: { accountId, bodyId, generation: r.generation, token }, view: this.#view(r), effects };
+  }
+
+  // A grant offer is still host-owned: passive gravity/collision and the original
+  // grace deadline continue. A new generation fences every older socket/offer.
+  offer(claim, now) { return this.connect(claim, now, true); }
+
+  // After the authenticated browser validated its prepared body. Reserve a
+  // short snapshot hold, not an unlimited live session. The final snapshot must
+  // accompany this result because the body may have fallen since the offer.
+  activate(ref, now) {
+    const t = this.#at(now), effects = [];
+    this.#sweep(t, effects, ref?.accountId); this.#clock = t;
+    const r = this.#held(ref);
+    if (!r || r.state !== "offered") return refuse("stale", effects);
+    if (r.stepAt < t) return refuse("recovering", effects);
+    r.state = "starting";
+    return { ok: true, session: { accountId: r.accountId, bodyId: r.bodyId, generation: r.generation, token: r.token },
+      controlUntil: Math.min(r.stepAt + HANDOFF_MS, r.deadline), view: this.#view(r), effects };
+  }
+
+  // Only an applied final snapshot can acknowledge the short control lease.
+  // A lost ACK leaves the original grace deadline intact. Repeated successful
+  // ACKs are reads: they must not keep an absent player alive.
+  started(ref, now) {
+    const t = this.#at(now), r = this.#held(ref);
+    if (!r) return refuse("stale");
+    if (r.state === "live") return { ok: true, duplicate: true, view: this.#view(r), effects: [] };
+    if (r.state !== "starting" || t >= Math.min(r.stepAt + HANDOFF_MS, r.deadline)) return refuse("stale");
+    this.#clock = t; r.state = "live"; r.deadline = null; r.lastSeenAt = r.stepAt = t;
+    return { ok: true, duplicate: false, view: this.#view(r), effects: [] };
+  }
+
+  // Only for a server-proven final snapshot whose live notification was NEVER
+  // attempted. Room must persist that distinction before sending body-live.
+  // The host wrapper verifies the exact unchanged body; no browser may call it.
+  abandon(ref, issuedAt, deadline, now) {
+    const t = this.#at(now), r = this.#held(ref), start = deadline - GRACE_MS;
+    if (!r || !["live", "starting"].includes(r.state)) return refuse("stale");
+    if (!isTime(start) || !isTime(issuedAt) || issuedAt < start || issuedAt >= deadline || issuedAt > t
+      || r.state === "starting" && (r.stepAt !== issuedAt || r.deadline !== deadline)) return refuse("invalid");
+    r.state = "grace"; r.lastSeenAt = start; r.stepAt = issuedAt; r.deadline = deadline;
+    this.#clock = t;
+    return { ok: true, effects: [], view: this.view(r.accountId) };
   }
 
   // Authenticated presence confirmation (the host verifies the socket first). Also the gate for input: false means drop it.
@@ -284,6 +328,19 @@ export class SessionRegistry {
     r.motion = motion;
     r.equipment = equipment;
     r.lastSeenAt = r.stepAt = t;
+    return true;
+  }
+
+  // Server-observed live motion can wait in Room's durable inbox. Processing
+  // it later must not move last presence past an already observed socket close.
+  // Both times are trusted server clocks, never a browser-provided timestamp.
+  updateObserved(ref, now, observedAt, patch) {
+    const r = this.#live(ref), t = this.#at(now);
+    if (!r || !isTime(observedAt) || observedAt < r.lastSeenAt || observedAt > t
+      || patch === null || typeof patch !== "object") return false;
+    const motion = readMotion(patch.motion);
+    if (!motion) return false;
+    this.#clock = t; r.motion = motion; r.lastSeenAt = r.stepAt = observedAt;
     return true;
   }
 
@@ -328,8 +385,9 @@ export class SessionRegistry {
 
   // A transport close the host has confirmed for this exact session. A superseded socket's close does nothing.
   disconnect(ref, now) {
-    const r = this.#live(ref), t = this.#at(now);
+    const r = this.#held(ref), t = this.#at(now);
     if (!r) return refuse("stale");
+    if (r.state === "grace") return refuse("stale");
     this.#clock = t;
     const effects = [];
     this.#toGrace(r, t, effects);
@@ -383,6 +441,26 @@ export class SessionRegistry {
     return r ? this.#view(r) : null;
   }
 
+  // Read-only capability check for a server-authenticated body transfer. Does
+  // not confirm presence, extend grace, recover physics or change ownership.
+  authorizedView(ref) {
+    if (!readRef(ref)) return null;
+    const r = this.#live(ref);
+    return r ? this.#view(r) : null;
+  }
+
+  transferView(ref) {
+    if (!readRef(ref)) return null;
+    const r = this.#held(ref);
+    return r && r.state !== "grace" ? this.#view(r) : null;
+  }
+
+  controlUntil(ref) {
+    if (!readRef(ref)) return null;
+    const r = this.#held(ref);
+    return r?.state === "starting" ? Math.min(r.stepAt + HANDOFF_MS, r.deadline) : null;
+  }
+
   occupant(kind, id) {
     for (const r of this.#sessions.values()) if (r.occupancy && r.occupancy.kind === kind && r.occupancy.id === id) return r.accountId;
     return null;
@@ -393,7 +471,8 @@ export class SessionRegistry {
   work(now = this.#clock) {
     const t = this.#at(now);
     let pendingBodies = 0, pendingSteps = 0;
-    for (const r of this.#sessions.values()) if (r.state === "grace" && r.stepAt < Math.min(t, r.deadline)) {
+    for (const r of this.#sessions.values()) if ((r.state === "grace" || r.state === "offered"
+      || r.state === "starting" && t >= Math.min(r.stepAt + HANDOFF_MS, r.deadline)) && r.stepAt < Math.min(t, r.deadline)) {
       pendingBodies++; pendingSteps += Math.ceil((Math.min(t, r.deadline) - r.stepAt) / PASSIVE_STEP_MS);
     }
     return { steps: this.#used, pendingBodies, pendingSteps };
@@ -412,12 +491,21 @@ export class SessionRegistry {
   }
 
   #live(ref) {
+    const r = this.#held(ref);
+    return r?.state === "live" ? r : null;
+  }
+
+  #held(ref) {
     if (ref === null || typeof ref !== "object") return null;
     const r = this.#sessions.get(ref.accountId);
-    return r && r.state === "live" && r.generation === ref.generation && same(r.token, ref.token) ? r : null;
+    return r && r.generation === ref.generation && same(r.token, ref.token) ? r : null;
   }
 
   #toGrace(r, at, effects) {
+    // Even a confirmed socket close cannot prove the remote controller has
+    // stopped yet. Do not give physics back to the host before its lease ends.
+    if (r.state === "starting") return;
+    if (r.state === "offered") { r.state = "grace"; return; }
     r.state = "grace";
     r.lastSeenAt = r.stepAt = at;
     r.deadline = at + GRACE_MS;
@@ -433,6 +521,7 @@ export class SessionRegistry {
   }
 
   #leave(r, reason, t) {
+    if (r.state === "starting" && t < Math.min(r.stepAt + HANDOFF_MS, r.deadline)) return refuse("handoff");
     const handback = this.#handback(r.bodyId), effects = [];
     this.#clock = t;
     this.#depart(r, reason, t, handback, effects);
@@ -459,15 +548,23 @@ export class SessionRegistry {
 
   // Two phases, so an adapter that throws leaves the registry untouched.
   #sweep(t, effects, priorityAccount = null) {
-    const due = [], steps = [], grace = [...this.#sessions.values()].filter(r => r.state === "grace");
+    const due = [], steps = [], grace = [...this.#sessions.values()].filter(r => r.state === "grace" || r.state === "offered"
+      || r.state === "starting" && t >= Math.min(r.stepAt + HANDOFF_MS, r.deadline));
     // Persisted cursors make older unfinished work first on the next operation.
     // A reconnect gets up to its whole 60-second interval before other bodies.
-    if (this.#remaining !== Infinity) grace.sort((a, b) =>
+    if (this.#remaining !== Infinity || this.adapter.canStep) grace.sort((a, b) =>
       Number(b.accountId === priorityAccount) - Number(a.accountId === priorityAccount) || a.stepAt - b.stepAt || a.generation - b.generation);
     let remaining = this.#remaining, used = 0;
     for (const r of grace) {
       const until = Math.min(t, r.deadline, r.stepAt + remaining * PASSIVE_STEP_MS);
       if (until > r.stepAt) {
+        // Expensive body restoration has its own transaction-local bound.
+        // Deferred bodies keep their cursor/deadline and stay unpublished.
+        if (this.adapter.canStep) {
+          const allowed = this.adapter.canStep({ bodyId: r.bodyId, zone: r.zone, kind: r.kind });
+          if (allowed === false) continue;
+          if (allowed !== true) throw new TypeError("host-sessions: invalid body work admission");
+        }
         steps.push([r, this.#step(r, until - r.stepAt), until]);
         const count = Math.ceil((until - r.stepAt) / PASSIVE_STEP_MS);
         remaining -= count; used += count;
@@ -475,7 +572,7 @@ export class SessionRegistry {
       if (t >= r.deadline && until >= r.deadline) due.push([r, this.#handback(r.bodyId)]);
     }
     this.#remaining = remaining; this.#used += used;
-    for (const [r, motion, until] of steps) { r.motion = motion; r.stepAt = until; }
+    for (const [r, motion, until] of steps) { r.motion = motion; r.stepAt = until; if (r.state === "starting") r.state = "grace"; }
     for (const [r, handback] of due) this.#depart(r, "expired", r.deadline, handback, effects);
   }
 
@@ -513,7 +610,7 @@ export class SessionRegistry {
 
   #view(r) {
     return { accountId: r.accountId, bodyId: r.bodyId, kind: r.kind, generation: r.generation, zone: r.zone, state: r.state,
-      deadline: r.deadline, presentation: r.state === "grace" ? "open-hand" : null, motion: { ...r.motion },
+      deadline: r.deadline, presentation: r.state !== "live" ? "open-hand" : null, motion: { ...r.motion },
       equipment: copyEquipment(r.equipment), occupancy: r.occupancy && { ...r.occupancy } };
   }
 }

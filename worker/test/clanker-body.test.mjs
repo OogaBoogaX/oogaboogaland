@@ -6,11 +6,12 @@ import { createCheckpointPack } from "../src/checkpoint-pack.js";
 const world = "controlled-body-fixture-1", persist = s => JSON.parse(JSON.stringify(s));
 const gameplay = f => {
   const e = f.sim.player;
-  return persist({ position: e.root.position, heading: e.heading, drive: e.drive, health: e.health,
-    biped: e.biped, parked: e.parked, mode: e.mode, controlled: e.controlled });
+  return persist({ position: e.root.position, heading: e.heading,
+    vx: e.drive.vx, vy: e.drive.vy, vz: e.drive.vz, grounded: e.drive.grounded, airborne: e.drive.airborne, jumps: e.drive.jumps,
+    biped: e.biped, parked: e.parked, controlled: e.controlled });
 };
 const make = (start = false) => {
-  const f = clankerController({ checkpointRandom: true, checkpointProfile: "body-2", start: false });
+  const f = clankerController({ checkpointRandom: true, checkpointProfile: "body-3", start: false });
   const codec = createClankerBodyCheckpoint(f.sim, world, f.B.clankerState);
   if (start) {
     f.start(); assert.equal(f.sim.possess(f.sim.list[0]), true); codec.neutralize();
@@ -38,6 +39,8 @@ test("controlled Clanker recovers gameplay in a fresh standard pose without poss
     recovered.codec.restore(persist(saved));
     assert.equal(recovered.sim.player, recovered.sim.list[0]);
     assert.deepEqual(gameplay(recovered), gameplay(original));
+    assert.equal(recovered.sim.player.health.value, recovered.sim.player.health.max);
+    assert.equal(recovered.sim.player.health.delay, 0, "health restarts at normal defaults");
     assert.equal(recovered.sim.player.animation.updates, 0, "old animation progress is not recovered");
     for (let i = 0; i < 48; i++) {
       if (i === 0) for (const f of [original, recovered]) f.sim.control({ x: 0, z: 0, heading: .7, jumpPressed: true, jumpHeld: true });
@@ -56,17 +59,20 @@ test("controlled Clanker recovers gameplay in a fresh standard pose without poss
 });
 
 test("body restoration rejects incompatible ownership and unsupported world interactions before use", () => {
-  assert.throws(() => clankerController({ count: 2, checkpointRandom: true, checkpointProfile: "body-2" }), /unsupported/);
-  assert.throws(() => clankerController({ checkpointRandom: true, checkpointProfile: "body-1" }), /unsupported/);
+  assert.throws(() => clankerController({ count: 2, checkpointRandom: true, checkpointProfile: "body-3" }), /unsupported/);
+  for (const checkpointProfile of ["body-1", "body-2"])
+    assert.throws(() => clankerController({ checkpointRandom: true, checkpointProfile }), /unsupported/);
   const source = make(true), pack = createCheckpointPack(8 * 1024, { intern: true });
   try {
     assert.throws(() => createClankerRoamingCheckpoint(source.sim, world, source.B.clankerState), /profile/);
     const saved = source.codec.capture();
-    for (const corrupt of [s => { s.clocks[15] = -1; }, s => { s.clocks[15] = 1; }, s => { s.world = "wrong"; },
-      s => { s.v = 1; }, s => { s.rigs = {}; }, s => { s.position[0] = 10000; }]) {
+    for (const corrupt of [s => { s.body[0] = 'another-owner'; }, s => { s.body[8] = 3; }, s => { s.world = "wrong"; },
+      s => { s.v = 2; }, s => { s.baseline = "changed"; }, s => { s.rigs = {}; }, s => { s.body[1] = 10000; }, s => { s.body[9] = 32; }]) {
       const f = make();
       try {
         const state = pack.unpack(saved); corrupt(state);
+        assert.throws(() => source.codec.records.disconnect(pack.pack(state), source.codec.motion()), undefined,
+          'the data-only close path validates the same body profile before changing a record');
         assert.throws(() => f.codec.restore(pack.pack(state)));
         assert.throws(() => f.codec.capture(), /profile/, "failed restore must be discarded");
       } finally { f.dispose(); }
@@ -85,17 +91,18 @@ test("standard recovery omits display history and refuses a rebuilt torso overla
   try {
     source.sim.player.biped = source.sim.player.parked = true;
     const saved = source.codec.capture(), state = pack.unpack(saved);
-    assert.equal(state.v, 2); assert.equal(Object.hasOwn(state, 'rigs'), false);
+    assert.equal(state.v, 3); assert.equal(Object.hasOwn(state, 'rigs'), false);
     const e = source.sim.player, p = e.root.position;
     e.animation.pending = 7; e.animation.updates = 999; e.motion.takeoff = 1; e.motion.landing = 1; e.motion.labPhase = 333;
+    e.health.value = 3; e.health.delay = 3; e.random(); e.roam.plans = 999;
     e.gorilla.poseManaged(.2, p.x, p.y, p.z, e.heading, 4, true, e.biped, '', e.motion);
-    assert.deepEqual(source.codec.capture(), saved, 'display history does not enter the body record');
+    assert.deepEqual(source.codec.capture(), saved, 'display, health, AI counters and RNG do not enter the body record');
     safe = make(); safe.codec.restore(saved);
     assert.equal(safe.sim.player.biped, true); assert.equal(safe.sim.player.parked, true);
     const hull = Array.from(safe.sim.player.gorilla.bodyHull(new Float64Array(24)));
     assert.ok(hull.every(Number.isFinite));
     let checks = 0;
-    blocked = clankerController({ checkpointRandom: true, checkpointProfile: 'body-2', start: false,
+    blocked = clankerController({ checkpointRandom: true, checkpointProfile: 'body-3', start: false,
       clearance: (...args) => {
         checks++; const body = args[8], actual = body.gorilla.bodyHull(new Float64Array(24));
         assert.deepEqual(Array.from(actual), hull, 'clearance receives the rebuilt standard torso');
@@ -106,12 +113,63 @@ test("standard recovery omits display history and refuses a rebuilt torso overla
     assert.equal(checks, 1); assert.throws(() => codec.capture(), /profile/, 'failed placement cannot publish or reclaim');
     const recovered = safe.codec.capture();
     assert.equal(safe.sim.player.motion.takeoff, 0); assert.equal(safe.sim.player.animation.updates, 0);
-    assert.deepEqual(pack.unpack(recovered).position, state.position, 'recovery never silently relocates the player');
+    assert.deepEqual(pack.unpack(recovered).body.slice(1, 4), state.body.slice(1, 4), 'recovery never silently relocates the player');
     let floor = 0;
-    underground = clankerController({ checkpointRandom: true, checkpointProfile: 'body-2', start: false, ground: () => floor });
+    underground = clankerController({ checkpointRandom: true, checkpointProfile: 'body-3', start: false, ground: () => floor });
     const underCodec = createClankerBodyCheckpoint(underground.sim, world, underground.B.clankerState);
     floor = p.y + 1;
     assert.throws(() => underCodec.restore(saved), /unsupported/, 'a changed floor cannot bury the standard body');
     assert.throws(() => underCodec.capture(), /profile/);
   } finally { source.dispose(); safe?.dispose(); blocked?.dispose(); underground?.dispose(); }
+});
+
+// Compare against actual source disconnect, not a second copy of its formula.
+test("data-only disconnect matches real controller neutralization and outlives bootstrap disposal", () => {
+  const f = make(true); let last, motion, records;
+  try {
+    for (let i = 0; i < 24; i++) {
+      if (i < 2) f.sim.control({ x: .6, z: .8, heading: .7, jumpPressed: true, jumpHeld: true });
+      f.step(); f.codec.neutralize();
+      const saved = f.codec.capture(), before = structuredClone(f.codec.motion()), immutable = persist(saved);
+      const stopped = f.codec.records.disconnect(saved, before);
+      f.codec.disconnect();
+      assert.deepEqual(stopped.checkpoint, f.codec.capture());
+      assert.deepEqual(structuredClone(stopped.motion), structuredClone(f.codec.motion()));
+      assert.deepEqual(saved, immutable, 'speculative close never mutates its committed input');
+      assert.throws(() => f.codec.records.disconnect(saved, { ...before, y: before.y + 1 }), /profile/);
+      f.sim.player.drive.vx = before.vx; f.sim.player.drive.vz = before.vz;
+      last = saved; motion = before; records = f.codec.records;
+    }
+  } finally { f.dispose(); }
+  assert.ok(records.disconnect(last, motion).checkpoint, 'pure records do not call the disposed controller');
+});
+
+test('independent player factory refuses unsupported worlds and freezes input and simulation on suspension', () => {
+  const f = make(true), B = f.B, root = B.scene.createNode(); let body;
+  const options = { profile: 'static-body-3', root, ownerId: 'fixture-0', name: 'fixture-0', groundAt: () => 0, clear: () => true };
+  try {
+    for (const changed of [{ profile: 'hub' }, { sites: [] }, { sleep: {} }, { supportAt: () => 0 }, { clear: null }, { ownerId: '' }])
+      assert.throws(() => B.clankers.createPlayerBody({ ...options, ...changed }), /unsupported independent/);
+    assert.equal(root.children.length, 0, 'invalid world options allocate no attached body');
+    body = B.clankers.createPlayerBody(options);
+    const codec = createClankerBodyCheckpoint(body, world);
+    assert.equal(body.update(.25), false); assert.equal(body.control({ x: 1 }), false);
+    codec.restore(f.codec.capture()); assert.equal(body.active, false);
+    assert.equal(body.activate(), true); body.control({ x: 1, run: true }); body.update(.25);
+    assert.throws(() => body.update(.26), /bounded/);
+    const motion = () => {
+      const e = body.player, p = e.root.position, d = e.drive;
+      return [p.x, p.y, p.z, e.heading, d.vx, d.vy, d.vz, d.grounded, d.jumps];
+    };
+    const moving = motion();
+    body.cancelInput();
+    assert.equal(body.active, true, "clearing held controls does not surrender ownership");
+    assert.deepEqual(motion(), moving, "blur preserves the current physical motion");
+    assert.equal(body.player.drive.x, 0); assert.equal(body.player.drive.run, false);
+    body.suspend(); const before = structuredClone(codec.motion());
+    assert.equal(body.active, false); assert.equal(body.control({ x: -1 }), false); assert.equal(body.update(.25), false);
+    assert.deepEqual(structuredClone(codec.motion()), before);
+    assert.equal(body.player.drive.x, 0); assert.equal(body.player.drive.run, false);
+    body.dispose(); body.dispose(); assert.equal(root.children.length, 0); assert.equal(body.activate(), false);
+  } finally { body?.dispose(); f.dispose(); }
 });

@@ -3,12 +3,276 @@
 Part of #377; **does not close it**. Baseline: `rock` at
 `17659ddfa0079f24bea84d872e29e532530bd7e4`. Room now imports an authority adapter,
 and the client understands its preview negotiation. No configuration enables it;
-there is no new binding, HTTP route, migration, alarm, timer, dependency or production
+there is no new binding, HTTP route, migration, alarm, enabled host timer, dependency or production
 data change. The current browser host still runs by default.
 During this increment `rock` advanced to `1a87a4eb9d91330638f029b38e456188385d00a1`
 with #462 voice changes. Overlapping paths were reviewed; fixture prerequisite
 loading was placed away from the new voice context so both changes combine. This draft must not be described as an
 always-on NPC world or an enabled disconnect feature.
+
+**Current player recovery policy:** keep identity/form, location/facing, physical
+motion and remaining jump credits, selected equipment/mode, ownership and deadline.
+Ammo, spare magazines, fuel, health, animation and AI/controller history reset to
+normal defaults. This supersedes exact consumable/health claims in older progress
+sections below. Session schema/protocol 4 and controlled body-3 implement the
+reduced inactive format. See [the current capacity audit](virtual-host-body-storage.md)
+for complete sizes, reset semantics and the remaining browser/cost gaps.
+
+## Pending body handoff: local checkpoint
+
+**Current follow-up: atomic RPC receipts and Room lifecycle hooks.**
+`host-body-operations.js` stores the latest handoff result in the same transaction
+as its body/session mutation. Exact retries recover that result without another
+admission, hold or presence update. A canonical SHA-256 command digest preserves
+signed zero and detects changed retries without storing a second input snapshot.
+Closed work uses recovery-only dispatch: it either returns the committed result
+or records cancellation before an older in-flight request can create a body.
+Old-epoch results stay old; only the current fenced host can retrieve them.
+
+Room now parses receipt-only messages, persists trusted claim input until the
+offer completes, records close timestamps, and restores missing connections from
+their last durable observation. A closing socket is fenced synchronously while
+ordinary presence/voice cleanup remains immediate. Explicit server hooks and
+`host-body-room.js` drive one handoff/cleanup operation at a time. A lost Room
+completion reply can resume delivery from its stored phase. Before any live-send
+possibility, a replacement host can abandon an undelivered final ACK using the
+original deadline; this reconciliation must happen before ordinary recovery ticks.
+An empty retained index still fences legacy joins and authority rollback.
+
+These hooks require `VIRTUAL_HOST_BODY_PREVIEW`, an authenticated current Room
+authority and compatible socket. No configuration sets the flag and no welcome
+advertises the unfinished feature. Staged bodies refuse ordinary movement/body
+reports until the live adapter is implemented. This is not an enabled reconnect
+feature. Automatic runner recovery ordering, receipt retirement, independent
+player/ghost bodies, full-world restore and live presentation remain unfinished.
+Receipt slots cannot be discarded early: their original request window must end
+and Room must retain the outcome before explicit retirement. Without that runner
+step, unresolved work safely blocks a new request for the same account or capacity.
+
+The increment passes **75 distinct focused Node checks**, including actual Room
+source lifecycle tests, atomic rollback, lost replies, cancellation, replacement
+host cleanup and rollback fencing. No Hub/browser test was run. A new finite
+30-second strict four-Hz run still fails: **119/120 updates, 78 late**, last-client
+p95 **334.4 ms**, maximum **347.9 ms**, with 20 ms synthetic latency and 31 decoders
+sharing one Node process. First-client p95 also fails at **268.7 ms**. Simulation
+completion missed no deadline; rate bounds still hold. The run measured the
+restricted 53-NPC/30-player workload, not full-world or handoff churn. Later
+cleanup-only hooks are covered by focused checks, not this load sample. Activation
+and burst remain disabled; no threshold or policy was relaxed.
+
+The earlier sections below retain checkpoint history; this follow-up supersedes
+their claims that Room lifecycle hooks or uncertain-claim receipts are absent.
+
+**Latest follow-up: inactive browser v2 and durable Room outbox.** The browser
+preflights an offer, restores the newer final snapshot with controls off, and
+enables control only after the host commits `startedBody` and Room delivers the
+matching `body-live` receipt. The one-second starting interval is a snapshot
+hold, not browser control permission. It no longer depends on `net.serverNow()`.
+Local elapsed time bounds inactive waiting from the first outgoing apply request;
+duplicate replies never renew it. Monotonic and wall elapsed time, reversal checks,
+visibility suspension and receipt-time expiry checks cover the tested clock jumps,
+sleep and delayed timer cases. These checks do not prove ordinary live movement
+fencing during a network partition or host replacement.
+
+`worker/src/room-body-handoff.js` persists intent before host RPCs, retains private
+references and the latest transfer, and records possible live notification before
+sending it. A reply arriving after close is retained for cleanup, never sent to a
+replacement socket. Unknown RPC outcomes remain pending rather than being blindly
+redispatched. When live notification was never attempted, the host can abandon an
+ACK-committed handoff and restore the original disconnect deadline; once a live
+send was possible, cleanup must use the normal disconnect path instead.
+
+The component now has the explicit Room hooks described above; automatic lifecycle
+orchestration and the independent scene body adapter remain required.
+No reclaim capability is advertised. The component stores at most 32 records of
+34 KiB plus a 1 KiB index; 32 maximum-size transfers measured 1,063,362 JSON bytes
+across 33 records in the earlier schema, with a largest row of 33,229 bytes.
+Current schema-2 sizes and the separate host receipt journal are documented in
+the body storage audit. Provider overhead is extra.
+
+This follow-up passed 64 distinct focused Node checks: six client, 15 networking,
+and 43 host/session/storage/outbox checks. One initial networking fixture advanced
+its clock 200 ms on every read, exhausting the new wait budget; that fixture now
+uses an explicitly controlled clock and all 15 checks pass. No product deadline
+or assertion was relaxed. Build passes. No Hub/browser tests or new load run were
+performed. Combined runtime, storage billing and production cost remain unmeasured.
+The earlier checkpoint below describes the host foundation; its browser-v1 gap is
+superseded by this follow-up, while live integration and delivery gates remain open.
+
+Session schema 4 / `host-session-v4` adds two persisted states without adding
+fields. `offered` remains host-owned: held input is stopped, passive physics
+continues, and the original absolute grace deadline and occupancy are retained.
+An offer replacement changes generation/token but cannot renew that deadline.
+`activateBody` returns the latest body, after bounded recovery, and changes it to
+`starting`: a one-second snapshot hold clipped by the original deadline. The
+host does not step it during that hold. A confirmed socket close, duplicate
+session, revocation or host restart cannot take control early. A lost final ACK
+returns it to passive host recovery after the lease, with the original deadline.
+
+Only `startedBody`, bound to the authenticated account, private generation/token
+and exact server-retained final transfer, makes it live. Duplicate successful
+ACKs do not write or refresh presence. Failed writes roll back body and ownership
+together. Receipts for replaced generations are rejected before their stale
+transport census can alter newer sessions. Unfinished offer physics and expired
+leases block publication until recovery catches up. Full body and session size,
+controller-construction and passive-step budgets are unchanged. Old session
+schemas refuse; no automatic migration or production writer is enabled.
+
+The host-side increment passes **74 distinct focused Node tests** across session,
+body-storage, capacity, authority and recovery checks (64 initially, then 23
+body-storage/capacity checks including two new boundary checks, plus eight
+passive-physics/presentation checks). The real restricted
+Clanker fixture verifies horizontal neutralization, motion during an offer,
+transfer of the newer body, no host stepping within the lease, and falling recovery
+after an unacknowledged lease. Standard pose, default health and remaining jump
+credits survive. Pending offers and final ACKs keep the free-arm indicator and
+red name circle; the circle becomes green only after acknowledged live ownership.
+Those tests use actual rigs in Node, not a live browser or scene wiring.
+Conservative pending-session JSON is 898 bytes plus its separator,
+within the existing 1,024-byte session reservation; this excludes the separately
+bounded body record and is not a claim that every combined record fits 1 KiB.
+
+**Not a completed Room/browser handshake:** the new bounded durable outbox and v2
+client must still be integrated with real Room lifecycle and reconciliation.
+Separate Room and host commits are not atomic. Ordinary possession resets motion
+and is not a substitute for the independent body adapter. The browser does not
+use a server-clock estimate to authorize control during the starting hold.
+
+First-login NPC placement with a separate continuing ghost track, full-world
+collision/AI/recovery, Ooga restore and live disconnect presentation remain open.
+The strict four-Hz delivery failure below is unchanged. New handoff operations add
+commits; combined CPU, Room storage/write cost, network partitions and device/browser
+validation remain required. Burst and activation remain disabled; Tess is excluded.
+
+## Latest local throughput checkpoint
+
+The longer 120-sweep test with 20 ms synthetic client latency disproved the
+rolling preview's headroom: 119/120 updates arrived, 84 were late, and the last
+client took up to 352.2 ms. A separate, disabled `rate-4-burst-2-v1` preview
+passed the same stress case: 120/120, no late/coalesced/superseded updates,
+211.7 ms p95 /220.7 ms maximum last-client age. It earns four publications per
+second with two credits and a 125 ms minimum gap. This allows **five** in a rolling
+second, unlike the strict rolling policy. Sustained rate remains four/second;
+the short-window burst budget is explicitly larger and separately gated by
+`VIRTUAL_HOST_BURST_PREVIEW`. No deployed configuration enables either experiment.
+Both retain the same payload and one-unacknowledged-frame bounds and fencing.
+
+The new `connectBody` operation commits the ownership change and matching body
+transfer atomically; failure to produce the body rolls back the claim. The caller
+must authenticate the account and wait for browser preparation first. It does
+not implement Room's readiness/grant/ACK exchange or the separate player body.
+Those, real-world physics/work state, live disconnect visuals and production cost
+validation remain unfinished. Even the 29 ms stress margin is not full-world proof.
+
+`prepareBody` now supplies a server-retained, token-free observation for that
+preparation. It neither reserves a body nor confirms presence. `connectBody`
+requires the observation and rechecks its host epoch, body generation and expiry
+before recovery can use a transport census. A second check after recovery prevents
+an inferred expired disconnect from becoming a fresh spawn. A missing body binds
+the admission counter, so creation followed by removal cannot fool a stale request.
+Forty focused host/storage/recovery checks pass, including actual Clanker restore.
+Room still must bind readiness to its current authenticated socket and implement
+grant/apply/ACK and confirmed-close delivery; these server methods alone do not
+enable browser reclaim. See the current storage document for cost assumptions.
+
+### Inactive browser handoff contract
+
+`body-reclaim.js` is now loaded before `net.js`. It requires Room's explicit
+`host-body-reclaim-v1` capability, which **Room does not advertise**, and a complete
+scene adapter, which **no scene installs yet**. Thus it changes no deployed body
+ownership. It prepares an inactive resource, applies one bounded committed transfer,
+acknowledges that generation/revision, and activates controls only on a matching
+`body-active`. Duplicate grants do not reapply or refill resources. There is one
+asynchronous preparation and one expiry timer, at most ten seconds; stale completion,
+connection replacement and expiry release the resource. New incompatible authority
+blocks old controls. The network layer suppresses cached body/pose replay while
+blocked, invalidates pose caches on activation, and leaves voice messages separate.
+
+Eighteen focused Node checks pass, including the actual net module and restoration
+of an actual minimal Clanker checkpoint before ACK. This is not browser scene or
+render validation. `test/run.mjs` only loads the new dependency in its existing net
+fixture; that suite was not run because the Hub restriction remains in force.
+
+`VirtualHost.confirmBody` adds the server-side apply check. Room must retain the
+exact issued transfer and bind the browser's receipt to its current authenticated
+socket plus the private host generation/token. Confirmation compares the complete
+current session view and body component, preserving signed zero. Unrelated world
+revisions may advance; changed equipment, occupancy, body data, epoch or generation
+cannot activate an old receipt. It is read-only and renews neither presence nor
+grace. The storage adapter now shares the same bounded exact-value comparison.
+All 15 storage checks pass after correcting one new test's capture-injection setup;
+the 26 host/recovery checks passed on the first run. No production state changed.
+
+The missing Room half is material: it must authenticate/bind each offer and
+ACK to its current socket, persist outstanding close/grant work, and reconcile
+uncertain host commits. The pending handoff methods above now preserve the host
+deadline; legacy `connectBody` still marks the session live immediately and must
+not be exposed as the browser reconnect flow. Scene adapters also need independent player bodies
+alongside the continuing #379 NPC track, real world collision and Ooga restore.
+No capability, body route or scene adapter is enabled by this checkpoint.
+
+The burst policy has **not** been approved for activation. Its earlier timing pass
+does not satisfy the strict policy. Separate strict publication checks pass, while
+the saved 120-sweep strict rolling run still fails delivery (84 late, one omitted).
+No unchanged throughput run was repeated or reclassified as passing.
+An independent offline check of the saved strict run found a maximum of four
+publications per rolling second and a minimum 234 ms gap among its 119 commits;
+its worst last-client age was still 352.2 ms. The rate gate passes and the delivery
+gate fails. The separate publication suite has nine strict/legacy checks and two
+burst-bound checks; all eleven pass, without enabling any runtime configuration.
+
+### Earlier ten-second rolling result
+
+An explicit, disabled rolling-cadence preview now passed the finite local delivery
+gate: all 40 updates reached all 31 acknowledging clients within 250 ms, with no
+coalescing or supersession. Last-client age was 239.8 ms p95 /247.0 ms maximum,
+leaving only 3 ms margin. The fixture still excludes complete island/world work,
+browser rendering and real network/device costs; this is not activation approval.
+
+The preview enforces four publications in every rolling second, at least 125 ms
+apart, with persisted debt across restart and release/reacquisition. This explicitly
+changes the short-interval policy; the default still requires 250 ms spacing.
+No deployed configuration enables `VIRTUAL_HOST_ROLLING_PREVIEW`. Older Rooms
+must explicitly negotiate the mode; older persisted-record readers refuse it.
+See [the measured cadence and migration rules](virtual-host-body-storage.md#rolling-cadence-preview-and-body-transfer).
+
+The new server-only `bodyForSession` reads the matching current session and body
+component atomically, checks the authenticated account supplied by its caller plus
+the private generation/token, and returns no token or other player's state. Actual
+Clanker reconstruction from that transfer preserves motion and resets resources.
+It does not confirm presence or grant browser controls. Room authentication wiring,
+browser apply/ACK and separate player/NPC body lifecycle are still unfinished.
+
+### Prior strict-spacing result
+
+The explicit finite publication runner now keeps at most one RPC in flight and
+one newest pending revision. It prepares poses before the next delivery slot,
+then rechecks ownership before Room commits. A newer partial body sweep safely
+supersedes publication; ordinary host reads still reject incomplete recovery.
+Failures stop the runner without blind retries. No timer or live runner is enabled.
+
+With 53 restricted roaming NPCs, 30 player bodies, eight transactions per sweep
+and 32 Room sockets, all 40 simulation updates finished within 250 ms. Delivery
+still emitted only 38 updates; five reached even the first client late (264.5 ms
+maximum age). Ownership confirmation and RPC dispatch add roughly 5–7 ms after
+each 250 ms pacing wait, accumulating until newer recovery supersedes a frame.
+The strict end-to-end gate remains unmet. Activation stays disabled; no timing,
+transport, recovery or capacity limit was raised. This is a finite local fixture,
+not full-world or production throughput certification.
+See [the combined measurement](virtual-host-body-storage.md#four-hz-batching-and-combined-delivery-gate).
+
+Browser inspection confirms the remaining integration is substantial:
+`crew.control` may put an Ooga on the floor, `clankers.possess` clears velocity,
+and `pilot.restorePose` is a camera/debug replay operation. None is an exact
+physical reclaim API. The live controller also maps one Clanker per owner,
+so reusing possession cannot simultaneously preserve that NPC's ghost track.
+The next integration must provide a separate player body lifecycle, restore its
+minimal physical state against actual world/support geometry, then attach local
+controls only after an authenticated, current-generation grant. Room currently
+has NPC authority RPCs but no such body grant/ack channel. These paths remain
+unfinished; fixture recovery and `resetResources: "defaults"` do not implement
+them. First-login placement plus the continuing NPC ghost track remains part of
+#379 integration. Tess remains excluded.
 
 ## Implemented and still missing
 
@@ -88,7 +352,7 @@ No Tess source changes are included here.
 | `crew.js` builds model geometry at module load, drives rendering parts and uses random decisions; `clankers.js` depends on scene nodes, `agent`, support/clearance queries, authored routes and effects | Neither can simply be imported into a Durable Object. A DOM/window shim or a frozen pose relay does not solve headless simulation. |
 | `scene-hub.js` supplies work sites, terrain, buildings, stairs, ceilings, collision callbacks and update order | Extract versioned world data/query adapters before enabling headless AI. Preserve structural navigation and category-specific behavior. |
 | `npc-sync.js` excludes possessed bodies; gorilla work also reacts to crew events | #379 must supply the continuous independent tracks and possession representation. Do not duplicate their AI in this host. |
-| Room `pose` carries position/yaw and compact `g`, `j`, `w` display fields | It lacks vertical velocity, exact fuel/reserve ammunition and the complete controlled-body handoff. These must be explicitly added and validated; do not infer them from visual flags. |
+| Room `pose` carries position/yaw and compact `g`, `j`, `w` display fields | It lacks vertical velocity and the essential physical body handoff. Add and validate these explicitly; consumable quantities now reset and need not be inferred or saved. |
 | Room `drop` immediately releases body/cabinet and voice; a newer login currently evicts the previous one | Grace must integrate with these paths atomically. Changing only close handling would strand locks or permit duplicate bodies. |
 | Hub/remote presentation does not provide this lifecycle's free-arm indicator | #464 consumes semantic grace state; #453 supplies the green-glyph reference. No new competing visual transport here. |
 
@@ -158,8 +422,8 @@ body. Optional occupancy validation defaults to refusing a claim.
 Storage holds one overwritten checkpoint (96 KiB maximum), not an archive.
 Unknown/corrupt schema, world or state fails closed without deleting the stored
 record. Host schema 4 refuses earlier host schemas without migrating them; private
-session schema 2 still refuses schema 1 rather than inventing missing magazine/body
-fields. A stale runner cannot overwrite a new owner. Transaction tests cover
+session schema 3 refuses earlier schemas rather than silently changing their recovery
+policy. A stale runner cannot overwrite a new owner. Transaction tests cover
 rollback and competing claims; actual Durable Object storage/output gates and
 alarm execution still require a local Cloudflare runtime test.
 
@@ -170,8 +434,8 @@ for exactly 60,000 ms. Stale sockets cannot disconnect, update or release a
 replacement. A duplicate live connection rotates generation/token and neutralizes
 old held movement. Reconnect strictly before the deadline preserves the same body,
 resulting position and heading, Ooga/Clanker kind, selected weapon/slot, gear
-ownership, carry/combat mode, current magazine, ordered counts of up to two spare
-magazines, unlimited-ammo flag, jetpack ownership/equipment and normalized fuel.
+ownership, carry/combat mode, unlimited-ammo flag and jetpack ownership/equipment.
+Current/spare ammunition, fuel and health reset to normal defaults on return.
 At the deadline it cannot reclaim the old body. The actual client codec must still
 map these fields from current equipment without inferring them from pose flags.
 
@@ -184,8 +448,8 @@ is an explicit CPU measurement gate. A fixture ledge is not proof of island,
 Clanker support, water, ladder, abyss or game-scene collision.
 
 The body contains no saved held inputs, thrust, shots, swing/reload action or event
-history. The future handoff must cancel incomplete reload/firing/thrust without
-granting ammo/fuel; current finite inventory values remain. Ordinary connected
+history. The future handoff must cancel incomplete reload/firing/thrust and reset
+consumables to normal defaults under the revised recovery policy. Ordinary connected
 movement stays on its current path. Only grace-body passive motion changes owner.
 Voice disconnect/cleanup continues immediately on its existing path; grace is not
 permission to retain audio or route it through a host browser.
@@ -2091,3 +2355,591 @@ bounds remain pending wider world/body validation. See the current section of
 [the capacity audit](virtual-host-body-storage.md) for itemized sizes and gaps.
 This does not complete authenticated browser reclaim or enable the host. Tess
 remains excluded and #379's independent ghost-track login remains unimplemented.
+
+### Minimal player-body recovery and transaction follow-up
+
+The latest user direction drops exact ammo, fuel, health and other nonessential
+continuation. Body-3 is a fixed physical tuple with standard-pose reconstruction;
+session schema/protocol 3 removes consumable quantities and requests default
+resources on successful connect. Old schemas refuse. Actual passive Clanker
+controllers now live inside the same transaction as registry motion and body
+rows, align horizontal neutralization on close, and are disposed on retries and
+failures. No live browser reset or production host is enabled.
+
+Full inline sampled records are 712–828 B; the maximum-length-id conservative
+case is 1,287 B. Separate bounded storage remains. A 1,200-step operation budget
+puts already-closed 30-body recovery below 250 ms in the local fixture, but
+unreported simultaneous disconnect recovery still reaches 869 ms and batch
+close 650 ms. These are explicit activation blockers, not production cost proof.
+The current capacity audit records itemized bytes, 128 passing host tests,
+408 local unit checks, physical comparisons and all remaining integration gaps.
+
+### Bounded body work and combined local-runtime follow-up
+
+Body-3 now has source-owned data-only disconnect operations. They bind the trusted
+owner/world/baseline, verify prior motion and zero only horizontal velocity;
+ordinary gravity/collision still runs through actual controllers. Cold controller
+creation is bounded independently from physics steps and shared across retries.
+The inactive body adapter admits one controller per operation, defers other body
+work without changing deadlines, and rejects over-budget new-body batches.
+`simulation.maxSteps` may lower the default eight NPC steps per operation; the
+new expensive fixture uses four, keeping fixed-step physics unchanged.
+
+The finite new SQLite/workerd evaluator composes 30 distinct actual body controllers
+with session transactions and optionally 53 restricted roaming NPC entries. It
+passes exact body restoration, default health, partial-write rollback, persisted
+restart and stale-owner rejection. After a 10,001 ms outage it verifies all 30
+bodies and 40 NPC steps against saved-state continuation. Four NPC steps per
+operation reduced the observed maximum combined transaction from 250.45 to
+170.14 ms, at the cost of 39 rather than 34 operations and 1.73 rather than
+1.45 MB of serialized writes. The complete 30-body short sweep still takes about
+529 ms with NPCs, so four-Hz delivery and production cost are **not** certified.
+See the capacity audit for fixtures, cold Node/runtime differences and limitations.
+No signing retry, live browser activation, Tess change or production action is
+part of this follow-up. Browser reclaim, full-world integration and live visuals
+remain unfinished; signing is not the only remaining blocker.
+
+### Independent actor bindings and retained publication tickets (local v39)
+
+`host-actor-bindings.js` binds an already separate player rig and NPC rig, bounded
+at 32 bindings and 256 nodes per NPC. Ghost appearance uses reversible per-node
+opacity without changing shared geometry, pose, AI, collision or equipment state.
+Generation checks prevent stale releases and cross-account rig reuse. Equipment
+tree changes require an explicit refresh. Tests with actual Clanker rigs and
+controllers show the NPC track continues while only the player receives the
+raised hand and red/green indicator. This is an inactive presentation component:
+it does not create the independent controllable body, place first login from an
+authenticated NPC, or integrate full-world recovery. It is not in the scene script
+list. Renderer fidelity, including matrix modes and ghost shadows, is unverified.
+
+The optional private `publishHostPoses` receipt removes two Room status RPCs from
+steady publication. Fresh host revision confirmation and Room's transactional
+revision/owner/format/lease/rate checks remain. Stale receipts cannot reacquire
+authority, even if `acquire` is requested; lost replies still compare exact frame
+bytes. The receipt is only for the trusted runner, never a browser capability.
+No deployed caller opts in; `--cached-room` selects it in the finite evaluator.
+
+A 120-sweep local run with 53 restricted NPCs, 30 player controllers, 31 decoders
+and one stalled client still **fails** strict 250 ms delivery: 119/120 emitted,
+80 late, last-client p95 327.001 ms/max 352.407 ms and first-client p95 264.001 ms.
+There were no simulation completion misses, egress attempts or runtime logs.
+The two status reads disappeared, but pacing p95 remained 79 ms. Four-publication
+spans were 1,003 ms minimum/1,007 ms median: work after eligibility accumulates
+against a four-per-second arrival stream. The rate policy was not loosened.
+This restricted local result does not certify full-world, browser, handoff churn,
+real network or billable compute costs. Activation and burst remain disabled.
+
+48 distinct focused checks pass across the actor/publication/body/reclaim suite
+and Room suite. Hub/browser STOP restrictions remain in force. Full-world source
+adapters, independent player creation, live scene reclaim/presentation, bounded
+runner orchestration and migration/drain are still required. Tess remains excluded.
+
+### Source-owned independent player factory (local v40)
+
+`BL.clankers.createPlayerBody` now creates one dormant player controller with its
+own mutable owner and roster. It does not append to the NPC roster or possess,
+hide or modify the original NPC. The body checkpoint codec restores it directly;
+the reclaim coordinator enables input only after the committed live receipt.
+Suspension cancels input and freezes browser updates. Disposal removes only that
+body. Passive host recovery still uses the existing source-owned checkpoint
+bridge under host authority, independently of the browser input gate.
+
+The factory explicitly requires `static-body-3`, trusted ground/clearance callbacks,
+and a fresh owner identity. It rejects broader world options. It is exercised by
+the browser-free grant/ACK contract and finite headless evaluator, but no scene
+calls it. Actual controllers demonstrate a newer airborne final grant, independent
+NPC motion, default resources and safe cleanup. This is a working static-world
+player path, not completion of the hub's supports, climbing, jobs, occupancy,
+equipment interactions or source-owned Ooga recovery. Authenticated production
+NPC mapping and first-login placement remain unwired.
+
+A finite local SQLite/workerd test after a 10,001 ms unreported disconnect and
+host replacement verifies all 30 bodies and 40 restricted NPC steps. Recovery
+uses 17 operations, p95/max 139.510 ms each, 1,119.587 ms total; cold startup
+271.985 ms and cold restart 84.609 ms. It verifies original deadlines, rollback,
+persisted restart and stale-owner fencing, with zero egress or runtime logs.
+This is catch-up evidence, not sustained delivery, full-world or billing proof.
+
+`publication-latency.mjs` isolates final-check delay with the actual publication
+coordinator, Room rate transaction and latest-only runner, using authored logical
+time. Across 120 sweeps, a 0/1/4 ms final check produces final frame ages of
+20/50/140 ms respectively (20 ms authored preparation). Strict attempt and commit
+rate bounds remain enforced. These are model outputs, not CPU measurements.
+They explain how post-eligibility work can accumulate without network jitter.
+The last real strict delivery run still failed; the new factory has recovery
+verification only. Activation and burst remain disabled; Hub/browser STOP applies.
+
+### Footprint support and vanished-prop recovery (local v41)
+
+The independent factory additionally accepts explicit `terrain-body-3` queries:
+versioned footprint support, terrain-only support, point support and ground-plane
+fitting, plus the existing ground and clearance callbacks. These use the ordinary
+source controller. The profile/version enter the checkpoint baseline; static-only
+or changed-terrain readers refuse rather than misinterpret a body. Recovery now
+uses the same footprint support query as driven movement, so a ledge under the
+body can support it even when the center ray misses. The rebuilt standard pose
+is fitted before collision clearance is checked.
+
+A browser restore still refuses a grounded body whose support disappeared. The
+authoritative host may restore it with `passive: true`, retaining the stored
+motion for comparison with the registry. Capture and live activation remain
+blocked until actual source physics applies the support removal and gravity.
+The body and registry then commit together. Tests cover a vanished prop across
+host replacement, original deadlines, stale-owner rejection and rollback of the
+whole recovery transaction. No lost-support exception permits an overlapping
+body, silent relocation or capture before the required step.
+
+Focused tests use actual `solidProps` meshes for ledge support and wall collision,
+plus source controllers for airborne continuation and landing. A finite Node
+sample processes 32 distinct bodies after support loss in eight operations of
+four bodies: maximum operation 5.662 ms, total 24.487 ms, largest sampled body
+component 194 bytes. Modules/collision trees were already loaded; this excludes
+session envelopes, host/Room/SQLite/network overhead and peak-memory/billing
+proof. It is a small authored geometry set, not representative full-world load.
+
+Full hub integration still requires a common world snapshot and support identity,
+moving-platform/rider behavior, Ooga recovery, climbing/occupancy/equipment and
+live scene/camera/control wiring. World changes must be coordinated with body
+steps before offering a transfer. These callbacks do not implement that ordering.
+No live scene calls the new profile; activation and burst remain disabled. The
+strict delivery failure is unchanged and was not rerun. Hub/browser STOP remains.
+
+### Final placement fence and longer strict-cadence diagnosis (local v42)
+
+The independent Clanker factory now rechecks current footprint support and
+collision clearance when the committed live receipt enables control. Geometry
+may change after the final snapshot was restored. This check neither advances
+physics nor reposes the rig; a missing platform or new overlapping obstacle
+refuses activation. The browser coordinator disposes the prepared body and keeps
+movement blocked. The existing world version and unsupported-state checks remain.
+This is still an inactive source boundary, not scene integration.
+
+Focused Node verification: 17 checks pass across body-reclaim, clanker-body-world
+and clanker-body, including unchanged support, a removed support mesh, and a new
+intersecting mesh during grant/ACK. Build passes 321 scripts. No Hub/browser checks.
+A rejected final activation does not yet notify the host through a body-only
+release protocol: socket close/reconciliation remains the existing cleanup path.
+Do not enable the feature until that lifecycle is completed; do not close voice
+as a substitute or assume blocked browser input proves server-side grace.
+
+The finite publication-latency diagnostic now includes 1,200 authored sweeps over
+five logical minutes. With 20 ms preparation and respectively 0/1/4 ms of final
+confirmation after rate eligibility, the final ages are 20/320/1,220 ms. The 1 ms
+case first exceeds 250 ms at sweep 921; the 4 ms case at sweep 229. Both attempt
+and actual Room commit rates remain strict. This is an authored logical-clock
+model, not measured RPC cost or production throughput: it deliberately waits for
+each publication, whereas an independent simulation can supersede/coalesce. It
+shows why a short passing run cannot establish headroom for this ordering. The
+last real strict delivery run remains failing; no rate policy changed.
+
+Full-world AI/physics, authenticated account/NPC placement, scene control/camera
+and recovery presentation remain unfinished. Activation and burst remain off.
+
+### Durable body-only decline and same-connection retry (local v43)
+
+Browser reclaim failure, inactive timeout, suspension or adapter teardown now
+stops/releases the local controller and sends only `body-decline` plus the
+current request nonce. It never sends body state, identity, a private token or a
+client timestamp. Room binds that nonce to the authenticated connection and
+atomically closes the retained outbox row. Unknown host operations remain pending
+for the existing exact-command reconciliation path. The first close time survives
+duplicates, failed writes, uncertain committed replies and restart.
+
+The body remains fenced while the WebSocket, voice session and mute controls stay
+connected. Wake restores a durable close even if attachment update was lost.
+Explicit server staging can retry on that same connection only after the old row
+has been retired with host cleanup proof; an old nonce cannot close the new row.
+No browser packet clears that gate. Automatic host scheduling/census remains open.
+
+Cleanup uses the existing conservative live-send distinction. Before any live
+notification was attempted, an unchanged final hold can be abandoned with its
+original grace deadline. Once live notification might have reached the browser,
+cleanup disconnects the CURRENT body using Room's first observed close time. It
+does not trust a browser assertion that control never started, rewind physical
+state, or use the earlier snapshot; normal live-disconnect grace applies. This
+can start a new 60-second window after failed final activation, because the server
+had already confirmed live. That distinction is deliberate and covered by tests.
+
+49 distinct focused checks pass across browser coordinator, actual Room source,
+outbox and host operation tests. Final build passes 321 scripts. No Hub/browser
+scene tests or probes. Feature advertisement/activation remains disabled. The
+scene teardown contract is implemented in setAdapter(null); live scene wiring,
+full-world recovery and automatic finite runner integration are still unfinished.
+
+The logical timing diagnostic now also produces independent revisions every
+250 ms while preparation/pacing/confirmation runs. Over 1200 authored sweeps,
+1 ms final confirmation delivers 1199 frames with one superseded read and max
+committed-frame age 249 ms; 4 ms delivers 1195 with five superseded reads and
+max age 248 ms. Both retain strict attempt/commit rates. No client/network costs
+are present, so this is not a passing production latency result. The prior serial
+model's growing ages are conditional on serial production; independent production
+can discard obsolete work instead. Production strict delivery remains unresolved.
+
+### Browser recovery wire and scene adapter contract (local v44)
+
+The page now loads clanker-body-transfer.js, a bounded source-owned decoder and
+reclaim adapter. It has no Worker checkpoint/packing imports. The trusted world
+boot supplies the body owner, physics baseline and source rules. The payload has
+only v/world/profile/body: ten physical slots (owner, position, facing, velocity,
+jump credits and form/motion flags). Equipment/mode remain in the enclosing view;
+health/ammo/fuel/rig/animation/history are not added. Signed zero has an explicit
+JSON spelling, preserving exact scalar values without float quantization.
+
+The adapter reserves one fresh independent body and uses one temporary body for
+preflight. Final apply consumes the reserved decoder once. Only the live receipt
+activates source control and attaches the scene callback; failed/partial attach
+is suspended, detached and disposed. Teardown uses the v43 body-only release.
+The existing source tests now exercise this page adapter instead of importing a
+Worker decoder into the recipient. Independent NPC movement remains unaffected.
+No hub scene installs it yet: authenticated owner mapping, full-world queries,
+Ooga recovery and actual camera/control integration remain necessary. clankerPlay
+expects sleep/combat/travel/climbing methods beyond the restricted factory, so
+simply swapping that factory into the live scene would be incomplete.
+
+Host storage stays packed. An explicit browserTransfer:true session-adapter option
+projects a deterministic wire payload on reads and all ACK/abandon comparisons.
+It defaults false, has no deployed caller and enables no capability. Changing
+projection with outstanding old-format handoffs requires a drain; mixed formats
+refuse rather than silently migrate. Room's existing bounded envelope still
+applies, and the browser component has a separate internal 2048-byte cap.
+
+54 distinct focused checks pass. Representative JSON UTF-8 sizes: component194B,
+complete handoff829B, stored session+body row828B. An adversarial long-name/numeric
+component is340B; that is not a maximum combined-record proof. Host reconstruction,
+changed-receipt rejection, duplicate ACK and original-deadline abandonment are
+tested with the projected wire; storage retains its original packed component.
+Final build passes322scripts. No Hub/browser/scene probes.
+
+Final finite Node sample:32distinct bodies, eight serial four-body operations
+after removal of an authored platform. Recovery+wire encode maximum5.825917ms,
+total25.085708ms. Separate page-source construct/JSON-decode/placement-activate/
+dispose maximum2.20175ms, total11.681915ms. Largest sampled stored component194B,
+wire196B. One controller alive at a time per operation; preloaded source and
+small collision trees. Excludes session/Room/storage, full world, actual browser,
+camera, rendering, network, peak memory and billedCPU. It is not a sustained
+four-Hz or production readiness result. The previous strict delivery gate still
+fails; no rate policy changed. Activation and burst remain off, Tess excluded.
+
+After the final cost sample, adapter release cleanup was hardened with nested
+finally blocks so detach/dispose still run if suspension fails. That adapter
+release path is not exercised by the cost sample; recorded source hashes remain
+those actually measured. The focused reclaim tests and build were rerun.
+
+
+## Local v45: independent Clanker controls, still inactive
+
+clankerPlay now exposes attachBody/detachBody/stepBody for the trusted recovery
+adapter after the committed live receipt. It reuses the existing camera handoff
+and keyboard/touch input, but routes movement and cancellation to the independent
+body. It never possesses/releases the corresponding NPC. Duplicate attachment,
+existing local possession, combat-only scenes and unsupported methods refuse.
+The final acknowledged view is copied into the adapter's attachment callback,
+including equipment/mode, rather than using the older preparation. Clearing
+held input preserves physical position, facing and velocity. Escape/teardown
+can notify body reclaim after local detachment; detachBody suppresses recursive
+notification. Suspending the source body makes the camera release on update.
+
+Only walking/jumping are supported by this restricted body factory. Combat
+commands, chest beating, travel and legacy moving-player support are fenced;
+control help reflects that boundary. The Hub loop has a separate body step,
+currently a no-op because no scene installs a reclaim adapter. Full-world owner
+mapping, Ooga recovery, dynamic supports/occupancy, AI jobs, rendering registration,
+ordinary movement transmission, ghost/disconnect presentation and automatic Room
+runner integration remain unfinished. Do not advertise or activate this boundary.
+
+21 focused source/controller tests pass in verification-player-control-final.log.
+They cover physical motion preservation on input cancellation, final-view copying,
+independent NPC evolution, grant/ACK fencing, terrain placement and failed attach
+cleanup. The initial focused run had three failures: two from structuredClone
+being unavailable in the source VM and one from the new test attempting a neutral
+checkpoint read while controls were held. The adapter now copies its JSON view
+using the same JSON contract as the coordinator; the test reads physical fields
+before cancellation. The failed log is retained. No validation was weakened.
+Build passes 322 scripts. Hub/scene/browser tests and probes remain prohibited
+by the existing STOP restriction; camera/input/presentation changes have only
+static review and build/syntax verification, not a runtime UI pass.
+
+The finite strict-cadence model now reports authored downstream budgets. For
+1,200 independent productions, adding 20 ms after commit produces 76 late
+arrivals with 1 ms confirmation or 93 with 4 ms confirmation; maximum ages are
+269/268 ms. At 50 ms downstream, 196/237 are late, maxima 299/298 ms. The model
+retains the actual publisher/Room rate checks; these added delays are arithmetic
+budgets, not network or CPU measurements. It does not establish production cost
+or throughput. The previous actual end-to-end result still fails (119/120 frames,
+80 late, last-client p95 about 327 ms). No new workerd run, rate-policy change,
+burst activation or relaxed ownership check. Tess excluded; no deployment.
+
+
+## Local v46: recovery callback ownership
+
+The scene adapter may synchronously trigger teardown, suspension, a new socket or
+a new offer during preflight, final restoration or camera attachment. The reclaim
+coordinator now captures the attempt/adapter/resource before each callback and
+checks them again before retaining its result. An old callback return or exception
+cannot revive a disposed body or clear its replacement. Explicit in-progress
+phases prevent recursive receipts from invoking the same callback twice. Time
+spent in preflight and activation consumes the existing deadline, as final apply
+already did; expired work is released without opening ordinary movement. Voice
+remains available and the existing body-only decline handles host cleanup.
+
+31 focused source and Worker tests pass, including all three callback boundaries,
+close/suspend/adapter replacement/new-offer transitions, returning and throwing
+callbacks, recursive receipts and callbacks that cross their deadline. The real
+source-body adapter also tests suspension from its attachment callback: body
+control stays off, detachment/disposal happen once and the physical state is not
+replayed. These tests do not run the Hub or browser UI. Full-world scene wiring,
+rendering and the strict delivery gate remain open; activation and burst are off.
+
+
+The instrumented finite local workerd run (120 sweeps, 53 restricted roaming NPCs,
+30 retained bodies, four body loads per operation, 31 Node decoders plus one
+stalled follower, authored 20 ms delay, strict rolling cadence) still FAILS:
+119/120 emitted, one superseded, 80 late. Last-client p95 338.380 ms, max349.540;
+first-client p95 277.141 ms, max287.988. No simulation completion deadline misses;
+completion p95 140.561 ms. Recovery verification, rollback and persisted restart
+passed. 36.8667 host writes/target second, 62,510,497 serialized host write bytes
+in the measured window; excludes Room/provider overhead and is not billed CPU.
+
+Paired records now retain production completion, first transport callback,
+first decode start/finish and last receiver for each delivered sequence, all on
+one Node monotonic clock. Eight frames were already older than250ms at the first
+transport callback, 24 after first decode, 80 after last decode. Per-frame
+completion-to-first-transport p95 143.346ms, first decoder p95 3.156ms, first-to-last
+receiver p95 66.933ms. These are different distributions and MUST NOT be added.
+The single-process 31-decoder timer overshoot p95 67.611ms is a harness cost, not
+31 independent browser/network latency. It does not excuse the first-client
+failure. The next scheduling investigation should preserve these paired spans,
+address pre-delivery pacing/Room work and isolate client execution when practical;
+do not turn a reduced-decoder run into proof that the original gate passed.
+
+Artifacts: verification-reclaim-callback-strict-local.json and empty .stderr,
+verification-reclaim-callback-paired.json (derived, includes source artifact hash).
+The initial sandbox run failed with listen EPERM on127.0.0.1 before producing
+results; its stderr is retained. A reviewed escalation allowed the same finite
+loopback-only workload; zero external egress attempts and zero runtime logs.
+No Hub/browser probes, cloud resources, production data or deployment. No rate,
+ownership, capacity or activation gate changed. The 31 focused tests and final
+build pass; performance remains a blocker, not an improvement claim over v39.
+
+
+## Local v47: independent player scene registration, inactive
+
+The Hub now supplies attachPlayer/detachPlayer callbacks to clankerPlay. Its
+attachBody signature takes the copied final view, rather than only mode. Before
+camera attachment, the scene checks the authenticated local account, canonical
+Clanker body name, root membership and separate body identity. It keeps one local
+independent registration; it does not append to the fixed NPC roster or capture
+array. Registration supplies netBody and the six-slot ordinary-motion buffer,
+picking targets, part-owner lookup, collision mesh and mirror tracking. Matching
+teardown removes those references; the recovery adapter still owns root disposal.
+The source body is suspended before camera/DOM teardown; finally cleanup removes
+registration and invokes the body-release callback even if UI cleanup throws.
+Legacy NPC registration still creates its existing capture records.
+
+This connects the previously missing registration callbacks, not the whole live
+feature. No scene installs a reclaim adapter, capability remains unadvertised,
+and activation/burst remain off. Trusted world/NPC mapping, full-world recovery,
+Ooga bodies, moving supports, occupancy, ghost/disconnect rendering and authoritative
+movement integration remain unfinished. In particular Room currently blocks all
+ordinary movement from staged body-handoff clients, even after live delivery;
+removing that block without a durable last-body-state/recovery design is unsafe.
+The existing body-only release and voice boundary are preserved. No Tess changes.
+
+UI/Hub behavior is only statically reviewed and build/syntax checked under the
+existing STOP restriction; no scene/browser/Node scene probes were performed.
+The prior31focusedrecoverytests remain recorded in v46; they were not rerun to
+pretend this UI registration was runtime-tested. Build322scripts passed.
+
+The finite strict runtime evaluator now records publication start/return and
+post-operation fixture-audit time. It retains audits/capacity assertions and all
+actual rate/ownership checks. In the new120frame run:119/120 emitted,1superseded,
+82late,last-clientp95326.461ms/max352.492ms,first-clientp95264.422ms/max290.155ms.
+Restart/rollback pass,0simulationdeadline misses,0egress/0runtime logs. No production
+resources. The initial measured setup is unchanged:53restrictedroamingNPCs,
+30retainedbodies,4bodyloads/operation,31Node decoders+1stalled,20msauthoreddelay.
+
+Per-frame wait-before-publication p9571.078ms, publication-to-firsttransport p95
+104.030ms; fixtureaudit p951ms/max1ms for publication. The worst first-client frame
+finished simulation126.649ms afterits scheduledtime, startedpublication138.762ms,
+reachedfirsttransport267.192ms andfirstdecoded290.155ms. Its measured phases were
+19msprojection,95mspacing,1msconfirmation,15msRoompublication. The fixtureaudit is
+not the dominant delay. These overlapping spans/percentiles cannot be added.
+Single-process31decoderfanout remains a limitation, but first-clientfailure remains.
+No performance improvement or readiness claim from this unpaired sample. Fixing
+strict cadence needs scheduling/authority work, not deleting diagnostics or raising
+limits. Artifact verification-player-registration-strict.json, empty.stderr.
+
+
+## Local v48: minimal live-body capture, not network ingestion
+
+The restricted source body now has liveBodyState(), sharing the exact ten-slot
+physical validator with bodyState() but allowing held movement inputs. bodyState()
+remains neutral-only for host checkpoint/recovery. Capture reads identity,
+position/facing, velocity, jump credits and form/motion flags; it does not clear
+inputs, advance physics, pose the rig or include health/ammo/fuel/animation/history.
+Unsupported jobs/climbing/captures, invalid scalars and unstepped missing-support
+recovery still refuse. Existing standard-pose restoration remains unchanged.
+
+The page forBody codec can capture only after successful restore while its
+independent source body is active. The reclaim adapter exposes capture(resource)
+only for its held attached resource; release invalidates that access. Packed host
+records expose fromTransfer(value), a pure conversion using the source world,
+complete profile and owner validators. This retains no bootstrap controller.
+Neither operation authenticates a message, sends a packet, changes a session or
+writes durable state. Room continues to block ordinary movement for staged body
+handoffs. Authentication, monotonic sample ordering and atomic session/body storage
+must be integrated before using live captures; do not simply remove that fence.
+
+45 focused checks pass: source body, wire, terrain, reclaim and host body storage.
+A new sixty-step walking/jumping comparison proves repeated capture leaves held
+inputs, trajectory, animation and health unchanged relative to an uncaptured
+reference body. Fresh restoration preserves physical state, clears held inputs
+and resets health. Wrong owner/world/profile/version, extra fields, unsupported
+source actions and invalid velocities reject. Pre-live, suspended and released
+resources cannot capture. The largest component among those60samples was252B;
+the final packed component was205B. These exclude session/message/storage overhead
+and are not worst-case combined-record or CPU measurements. No resources or rig
+continuation added. Final build passes322scripts; Hub/browser tests remain barred.
+
+Scheduling review reuses the saved finite logical model (not a new performance
+run). With1ms post-eligibility confirmation, serial1200productions end at320ms
+age and first exceed250ms on delivery921; with4ms they end at1220ms and first
+exceed on229. Once the rolling four-commit bound is active, waiting for that bound
+and then paying an authored positive confirmation cost makes the next four-commit
+span exceed1000ms. Independent production bounds old-state queueing by superseding
+samples, but does not satisfy all-four-frames/250ms delivery. This is a limitation
+of the current ordering, not a proof against every possible architecture. Keep
+fresh ownership confirmation and the strict rate gate; a scheduling/authority
+integration change is needed. No rate or burst change was made, and no unchanged
+workerd rerun was performed. Latest actual strict result remains v47's failure.
+Full-world and live scene integration remain unfinished; activation stays off.
+
+
+## Local v49: atomic live movement boundary (inactive)
+
+`VirtualHost.updateBody` now accepts a bounded physical wire sample only against
+an authenticated server-supplied account, current live generation/private token,
+current host ticket, and trusted transport census containing that session. It
+checks these before recovery. This is a server method, not a new browser route.
+Room's movement fence remains in place. The scoped Clanker adapter validates the
+source profile/owner, reconstructs a fresh standard body, validates its placement,
+and commits exact registry motion and its packed body together. Equipment stays
+unchanged; no health/ammo/fuel/held controls/animation history is persisted.
+
+An atomic per-account receipt records generation, sequence, canonical packed-body
+SHA-256 and acceptance time. Equal samples return the original receipt without
+presence refresh, construction or writes; older/changed repeats reject. New
+sessions reset sequence only after live-session authentication. At most32 receipts
+exist; a new accepted commit atomically prunes accounts no longer retained in
+sessions/pending departures. This is bounded replay storage, not a message queue.
+The schema's maximum row is268B; the row cap is288B. Maximum32-id index545B, cap576B.
+These are UTF-8 JSON limits excluding keys/provider overhead. Explicit account
+removal cleanup still belongs in the inactive lifecycle integration.
+
+Verification:55 focused Worker/source tests passed, then24 focused tests passed
+with additional replacement-session/host-ticket cases, then2 journal tests passed
+with final288/576-byte caps and maximum-schema admission. New cases cover partial
+failure at all four initial writes, changed/lower duplicates across reconstruction,
+wrong account/token/generation, missing census membership, newest-position
+horizontal-stop/vertical-fall disconnect, stale host/replacement sessions,
+underground standard-pose rejection, shared speculative construction budget,
+receipt capacity and atomic pruning. An initial fixture mistakenly restored one
+controller twice; it now uses a separate source body. Another initial test found
+an oversize index reached generic complexity rejection before journal validation;
+shape/length now refuse first. Both logs are retained; neither was a Hub check.
+Build passed322scripts. No Hub/browser/scene execution or new workerd trial.
+
+Representative sample162B and receipt155B exclude the session/body/envelopes and
+are not total recovery storage, worst-case live traffic, CPU or billing results.
+Every accepted update currently constructs a source controller and rewrites the
+host root plus changed body and receipt (four writes for first receipt, normally
+three thereafter). A duplicate still pays bounded reads/validation/hash. Ingress
+rate, full-world collision validation and combined performance remain unmeasured.
+The default one-construction operation cap also means an optimistic retry may
+abort safely; the future Room adapter must reconcile uncertain results.
+
+Publication review: movement commits advance the same host revision checked by
+`confirmPoses`, so an interleaved movement sample can supersede an in-flight NPC
+frame. Do not relax that fence or the strict rate gate to hide this. Lifecycle
+coordination/publication architecture and representative mixed-load validation
+are required before enabling movement. Latest actual strict result remains v47:
+119/120 frames,82 late,last-client p95326.46ms and first-client p95264.42ms.
+It predates this code and does not measure movement ingress. No scheduling or
+rate-policy change was made. Full-world AI/Ooga/occupancy/riders, actual scene
+reclaim/ghost/disconnect presentation and production cost validation remain open.
+Activation/burst stay disabled; Tess excluded; nothing merged or deployed.
+
+
+## Local v50: Room movement inbox and close ordering (inactive)
+
+RoomBodyHandoff now retains one movement sample per existing handoff account.
+Authenticated current connection, live phase, live-send marker and request nonce
+are required; browser identities, host tokens and timestamps are never accepted.
+The durable Room receive time survives retries. A pending sample cannot be replaced
+by newer data. Identical retries keep its time and do no writes; changed/lower
+samples refuse. Completion retains the host receipt before an ACK can be sent;
+closed/replacement sockets receive no ACK. The inbox is bounded by the existing
+32-account handoff index,4KiB sample/5KiB row limits, and is deleted atomically with
+resolved handoff cleanup. First admission atomically upgrades the handoff row to
+v3 so older v2 writers refuse to ignore its pending movement. Missing/orphaned
+records fail closed. Server hooks are finite and still have no WebSocket route.
+
+The host now has a distinct `updateObservedBody` RPC: an older host cannot silently
+ignore an observation-time option. Source motion is saved with Room's original
+observation time as last presence, while registry/host processing clocks remain
+current. Observations before prior presence or after host processing refuse.
+The command digest binds that observation time. A delayed in-flight commit cannot
+move presence past a previously recorded socket close. Legacy direct updateBody
+calls keep their processing-time behavior and are not used by the new coordinator.
+Local v49 receipts with the former digest definition fail changed duplicate checks;
+no deployed data exists, and an activation/migration plan must reconcile or drain
+any retained local test operations rather than assume same-sequence compatibility.
+
+Close reconciliation deliberately does NOT replay a pending sample. It fences the
+host generation into grace first, preserving whichever body was already committed.
+A late in-flight update either committed before that fence or fails against the
+passive generation. Only a trusted host proof of passive/absent state permits
+Room to fence the unresolved inbox entry and retire it. This also allows cleanup
+of a malformed, never-committed sample without a permanent pending slot. A stale
+reply cannot ACK a replacement. The original close deadline remains authoritative;
+no later processing time or old snapshot is substituted. Automatic close/census
+ordering across the real deployed runner remains uninstalled.
+
+The browser coordinator exposes explicit `captureMovement()` data only. It keeps
+one sample until a matching request/generation/sequence ACK, returns copies on
+retry, and samples fresh state only after ACK. Capture/serialization callbacks
+cannot revive a closed/replaced body. net.js recognizes the ACK. There is no
+sampling timer, outgoing movement transmission, enabled capability, or Hub adapter
+installation. Existing body/pose movement fences remain.
+
+Verification:77 focused Worker/source checks passed, then the13-test Room suite
+passed with an additional coupled actual-Clanker/VirtualHost/Room-inbox case.
+That case commits physical movement, loses the host reply, closes Room, and proves
+latest committed position, stopped horizontal velocity, retained vertical motion,
+original60-second deadline, matching registry/body storage and atomic inbox cleanup.
+Representative actual-wire Room inbox row317B, excluding keys/provider overhead.
+Other cases cover partial admission writes, durable-format upgrade, lost Room
+replies, immutable pending samples, stale/invalid ACKs, replacement connections,
+older-host protocol refusal, delayed observation, changed observation digest,
+invalid placement, and callback teardown. Build322scripts passed. No Hub/browser/
+scene execution; no live Room WebSocket or real cross-DO concurrency/performance
+claim. The standard fixture validates destination placement, not swept-path/speed
+or complete moving-world collision safety. Earlier passing logs are retained.
+
+A new finite logical model (`worker/eval/publication-movement.mjs`) exercises the
+actual publisher/Room rate gate with1200 authored NPC signals,20ms preparation,
+1ms confirmation and shared-revision mutations at0/1/4/15Hz. With no movement it
+publishes1199/1200 and76 modeled arrivals exceed250ms after an authored20ms downstream
+budget. At4Hz movement offset25ms it publishes1130/1200 (70 superseded), with
+maximum commit age24ms; at15Hz offset0 it publishes1177/1200 (23 superseded), max33ms.
+Lower age here accompanies missing publications, not a delivery-gate pass. Timing
+phase changes results. All attempt/commit strict rolling-four and125ms minimum-gap
+bounds remain intact. This is authored scheduling diagnosis, NOT CPU/network/
+full-world throughput or a production probability distribution. Latest actual
+workerd result remains v47's failing119/120,82late result; no unchanged rerun.
+
+Remaining: outgoing transport negotiation/rate policy and protocol parser; real
+Room/current-socket/census runner wiring; account deletion; full-world AI/Ooga/
+occupancy/riders; scene reclaim/ghost/disconnect visuals under the Hub STOP
+restriction; combined mixed movement/publication load and production cost gates.
+Activation and burst stay disabled; Tess excluded; no merge/deployment/signing.

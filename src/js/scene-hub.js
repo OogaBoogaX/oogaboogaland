@@ -8667,6 +8667,7 @@
     if (!cloudPlaying()) {
       rideClankerPlayer();
       clankers.update(dt);
+      clankerPlay.stepBody(dt);
     }
     for (let i = 0; gameMode && i < clankerCaptures.length; i++) {
       const rec = clankerCaptures[i], entry = rec.entry, cave = rec.cave;
@@ -9902,6 +9903,9 @@
   const rideClankerPlayer = () => {
     const entry = clankerPlay && clankerPlay.active ? clankerPlay.player : null, riding = clankerOnPlayer;
     clankerOnPlayer = false;
+    // Restricted recovery bodies validate their own static support. The full
+    // world adapter must add moving-body support before enabling this path.
+    if (clankerPlay.independent) return;
     const bodies = clankerPlayers(entry);
     if (!bodies || !entry.active || entry.climb.active || entry.jump.active || entry.drive.airborne) return;
     const p = entry.root.position;
@@ -11024,17 +11028,19 @@
       }
     }
   };
-  const registerClanker = (entry) => {
-    entry.capture = {
-      entry, cave: null, autonomous: false, player: false, throwing: false, posed: false, aimed: false,
-      blocked: "", blockedPart: "", blockedStage: "", warpSpot: -1, warpVisit: false,
-      warpAnkleX: 0, warpAnkleY: 0, warpAnkleZ: 0, warpFromX: 0, warpFromY: 0, warpFromZ: 0, warpFromHeading: 0,
-      flightRadius: PLAYER_RADIUS, flightBottom: 0, flightTop: 0,
-      time: 0, charge: 0, x: 0, z: 0, safeX: 0, safeY: 0, safeZ: 0, side: 0, behind: 0,
-      aim: { ox: 0, oy: 0, oz: 0, dx: 0, dy: 0, dz: 0 },
-      bounds: new Float64Array(BODY_PARTS_SOLID.length * 6), nextBounds: new Float64Array(BODY_PARTS_SOLID.length * 6)
-    };
-    clankerCaptures.push(entry.capture);
+  const registerClanker = (entry, capture = true) => {
+    if (capture) {
+      entry.capture = {
+        entry, cave: null, autonomous: false, player: false, throwing: false, posed: false, aimed: false,
+        blocked: "", blockedPart: "", blockedStage: "", warpSpot: -1, warpVisit: false,
+        warpAnkleX: 0, warpAnkleY: 0, warpAnkleZ: 0, warpFromX: 0, warpFromY: 0, warpFromZ: 0, warpFromHeading: 0,
+        flightRadius: PLAYER_RADIUS, flightBottom: 0, flightTop: 0,
+        time: 0, charge: 0, x: 0, z: 0, safeX: 0, safeY: 0, safeZ: 0, side: 0, behind: 0,
+        aim: { ox: 0, oy: 0, oz: 0, dx: 0, dy: 0, dz: 0 },
+        bounds: new Float64Array(BODY_PARTS_SOLID.length * 6), nextBounds: new Float64Array(BODY_PARTS_SOLID.length * 6)
+      };
+      clankerCaptures.push(entry.capture);
+    }
     entry.renderParts = [];
     entry.fireFX.spread = new Float32Array(CLANKER_BURN_PARTS.length);
     entry.fireFX.burning = false;
@@ -11053,6 +11059,33 @@
     };
     visit(entry.root);
     clankerMeshes.add(entry.root);
+  };
+  // One independently controlled body, never appended to the NPC roster or
+  // its capture array. The reclaim adapter owns the body and its disposal.
+  let independentClanker = null;
+  const detachPlayerClanker = entry => {
+    if (!entry || independentClanker !== entry) return;
+    independentClanker = null;
+    untrackMirrorObject(entry.root);
+    clankerMeshes.remove(entry.root);
+    for (const node of entry.renderParts || []) {
+      removeTarget(node); clankerPartOwners.delete(node);
+    }
+    entry.renderParts = null;
+    entry.netBody = entry.netMotion = null;
+  };
+  const attachPlayerClanker = (entry, view) => {
+    if (independentClanker || !entry || entry.root.parent !== root || clankers.list.includes(entry)
+      || entry.capture || entry.renderParts || view?.kind !== "clanker" || view.accountId !== BL.net.state.selfId
+      || view.bodyId !== BL.net.gorillaBody(entry.owner.traits.name)) return false;
+    independentClanker = entry;
+    try {
+      entry.netBody = view.bodyId;
+      entry.netMotion = new Float64Array(6);
+      registerClanker(entry, false);
+      trackMirrorObject(entry.root, 3.6, 4248);
+      return true;
+    } catch (error) { try { detachPlayerClanker(entry); } finally { throw error; } }
   };
   const CLANKER_TALL_OBSTACLE = {
     node: null, minAlong: 0, maxAlong: 0, minAcross: 0, maxAcross: 0,
@@ -12378,6 +12411,7 @@
       grabOoga: grabClankerRider, releaseOoga: releaseClankerRider,
       mayPossess: entry => BL.net.mayDriveGorilla(entry.owner.traits.name),
       combatOnly: () => gameCombatOnly,
+      attachPlayer: attachPlayerClanker, detachPlayer: detachPlayerClanker,
       sightClear: shared.fireReachable, aimCeiling: entry => birdsEyeCeiling(entry, true), constrainCamera: constrainClankerCamera,
       groundAt: (x, z, y) => {
         // Sample below shoulder height in this layer, not a cave's roof or a

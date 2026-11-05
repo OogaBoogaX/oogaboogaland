@@ -13,7 +13,7 @@ export function clankerController({ count = 1, checkpointRandom = false, spaciou
       : readFileSync(new URL(`../../../src/js/${name}.js`, import.meta.url), "utf8");
     hashes[name] = createHash("sha256").update(source).digest("hex"); run(source);
   };
-  for (const name of ["math", "scene", "models", "convex", "npc-authority", "clanker-pose", "npc-pose-packet", "clanker-state"]) load(name);
+  for (const name of ["math", "scene", "models", "convex", "npc-authority", "clanker-pose", "npc-pose-packet", "clanker-state", "clanker-body-transfer"]) load(name);
   // Authored fixture constants matching pilot.WALK and crew's public constants.
   run(`Object.assign(window.BL, { pilot: { WALK: { speed: 7.75, gravity: 9.8, ledgeRise: 2.4 } },
     crew: { JUMP_SPEED: 4.8, HEALTH_MAX: 100, HEALTH_REGEN_DELAY: 4, HEALTH_REGEN_RATE: 20 } });`);

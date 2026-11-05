@@ -277,6 +277,13 @@ export const parseClientMessage = (text) => {
     if (msg.name === null) return { t: "body", name: null };
     return typeof msg.name === "string" && BODY_NAME.test(msg.name) ? { t: "body", name: msg.name } : null;
   }
+  if (["body-ready", "body-applied", "body-started", "body-decline"].includes(msg.t)) {
+    const keys = ["body-ready", "body-decline"].includes(msg.t) ? ["t", "request"] : ["t", "request", "epoch", "generation", "revision"];
+    if (Object.keys(msg).length !== keys.length || !keys.every(k => Object.hasOwn(msg, k))
+      || typeof msg.request !== "string" || !/^[0-9a-f]{32}$/.test(msg.request)
+      || keys.slice(2).some(k => !Number.isSafeInteger(msg[k]) || msg[k] <= 0)) return null;
+    return msg; // Receipts only. No account, claim, private token or body data.
+  }
   if (msg.t === "npc-ack") return Number.isSafeInteger(msg.revision) && msg.revision > 0
     && Number.isSafeInteger(msg.sequence) && msg.sequence > 0 ? { t: "npc-ack", revision: msg.revision, sequence: msg.sequence } : null;
   if (msg.t === "hub") return typeof msg.on === "boolean" ? { t: "hub", on: msg.on } : null;
