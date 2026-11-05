@@ -4,6 +4,8 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {}, MAX = 64, BEAM_MS = 700, GROUP = 16;
+  const nameStates = new WeakMap(), COLORS = { online: "#22c55e", offline: "#ef4444" };
+  const statusFor = actor => nameStates.get(actor?.root)?.state || null;
   const WEAPONS = ["club", "gun", "snack", "chuk"];
   const KINDS = new Set(["ooga", "clanker"]);
   const id = value => typeof value === "string" && /^[A-Za-z0-9._:/-]{1,80}$/.test(value);
@@ -26,7 +28,14 @@
     const beams = Array.from({ length: Math.ceil(capacity / GROUP) }, (_, i) => BL.sleepBeam.create({ root: layer, capacity: Math.min(GROUP, capacity - i * GROUP) }));
     const icons = Array.from({ length: capacity }, () => { const node = createNode({ geometry: handGeometry(), visible: false, sightHidden: true }); node.matrixNative = true; addChild(layer, node); return node; });
     const saved = Array.from({ length: capacity }, () => ({ arm: null, actor: null, x: 0, y: 0, z: 0, quaternion: null }));
-    const plan = Array.from({ length: capacity }, () => ({ body: null, kind: null, generation: 0, actor: null, arm: null, at: 0, beam: false, applied: false, rotation: BL.math.quat.create() }));
+    const plan = Array.from({ length: capacity }, () => ({ body: null, kind: null, generation: 0, actor: null, arm: null, at: 0, beam: false, applied: false, state: null, rotation: BL.math.quat.create() }));
+    const names = Array.from({ length: capacity }, () => ({ root: null, state: null }));
+    const clearNames = () => {
+      for (const n of names) {
+        if (n.root && nameStates.get(n.root) === n) nameStates.delete(n.root);
+        n.root = n.state = null;
+      }
+    };
     const local = BL.math.mat4.create(), inverse = BL.math.mat4.create(), parent = BL.math.mat4.create();
     let prepared = false, disposed = false, previousTime = 0, hands = 0, activeBeams = 0, expired = 0;
     const occupied = (actor, arm) => {
@@ -65,7 +74,8 @@
         if (!KINDS.has(p.kind)) fail();
         for (let j = 0; j < i; j++) if (plan[j].body === p.body) fail();
         p.actor = p.arm = null; p.beam = false; p.applied = departing && row.applied; p.at = departing ? row.at : row.deadline;
-        if (departing ? !row.applied || frame.now < row.at || frame.now - row.at >= BEAM_MS : row.state !== "grace" || frame.now >= row.deadline) continue;
+        p.state = departing || row.state === "grace" ? "offline" : "online";
+        if (departing && (!row.applied || frame.now < row.at || frame.now - row.at >= BEAM_MS)) continue;
         const binding = resolve(p.body, p.kind, p.generation);
         if (!binding) continue; // A late observer must never force an absent NPC to spawn.
         if (binding.generation !== p.generation) fail();
@@ -74,7 +84,7 @@
         for (let j = 0; j < i; j++) if (plan[j].actor === actor) fail();
         if (!actor.root.visible) continue;
         p.actor = actor; p.beam = departing;
-        if (!departing && binding.freeArm !== null) {
+        if (!departing && row.state === "grace" && frame.now < row.deadline && binding.freeArm !== null) {
           if (binding.freeArm !== "armL" && binding.freeArm !== "armR") fail();
           const arm = actor.parts[binding.freeArm];
           if (!arm?.rotation || !arm.geometry || occupied(actor, arm)) fail();
@@ -95,10 +105,14 @@
         }
       }
       prepared = false; previousTime = frame.now;
+      // Keep the last committed color through prepare/missing frames. Change
+      // every name only after all generation-bound actor bindings validate.
+      clearNames();
       for (let i = 0; i < total; i++) {
         const p = plan[i], actor = p.actor;
         if (p.applied && frame.now - p.at >= BEAM_MS) expired++;
         if (!actor) continue;
+        const name = names[i]; name.root = actor.root; name.state = p.state; nameStates.set(actor.root, name);
         if (p.beam) {
           const pos = actor.root.position;
           beams[Math.floor(i / GROUP)].show(i % GROUP, pos.x, pos.y, pos.z, actor.root.rotation.y, (frame.now - p.at) / BEAM_MS, false, actor.root);
@@ -117,11 +131,11 @@
     const liveGeometry = set => { if (!disposed) { for (const beam of beams) beam.liveGeometry(set); set.add(handGeometry()); } return set; };
     const dispose = () => {
       if (disposed) return;
-      prepare(); for (const beam of beams) beam.dispose(); removeChild(root, layer); disposed = true;
+      prepare(); clearNames(); for (const beam of beams) beam.dispose(); removeChild(root, layer); disposed = true;
       for (const p of plan) p.actor = p.arm = null;
     };
     return { prepare, render, liveGeometry, dispose,
       get hands() { return hands; }, get beams() { return activeBeams; }, get expired() { return expired; } };
   };
-  BL.hostPresence = { create, MAX, BEAM_MS };
+  BL.hostPresence = { create, MAX, BEAM_MS, statusFor, colorFor: actor => COLORS[statusFor(actor)] || null };
 })();

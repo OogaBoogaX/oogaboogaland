@@ -1759,6 +1759,16 @@ local angle failed the initial real-Clanker test; converting the raised directio
 through its actual parent transform fixed it. The same test now passes without
 moving the root, changing equipment or detaching the held vessel.
 
+The circle next to a retained player's name is red during committed disconnect
+grace and green again after a generation-validated live view confirms reconnect.
+World nameplates and name tooltips consume the same bounded, rig-root keyed
+status; pose preparation, deadline expiry and rejected stale frames cannot turn
+it green. Existing control flags cannot override this offline status. Voice and
+sidebar roster behavior are unchanged. Actual Ooga/Clanker tests cover reconnect,
+stale generations, malformed frame tails, expiry and disposal. This remains part
+of the disabled host path: live retained-body/nameplate delivery and browser
+visual verification are still outstanding, subject to the Hub STOP ledger.
+
 Bindings include the body generation. Mismatched generations, duplicate bodies,
 occupied hands and malformed tails are refused before changing limbs. A missing
 binding never creates an NPC. The helper currently requires direct actor children

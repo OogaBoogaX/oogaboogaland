@@ -367,7 +367,7 @@
         ctx.lineWidth = 1.5;
         ctx.stroke();
         ctx.lineWidth = 3;
-        ctx.fillStyle = ONLINE;
+        ctx.fillStyle = BL.hostPresence?.colorFor(entry.cave) || ONLINE;
         ctx.fill();
         if (showHealth) {
           const left = x - BAR_W / 2, top = y + BAR_GAP;

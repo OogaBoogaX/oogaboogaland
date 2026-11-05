@@ -4,11 +4,13 @@
   const { iconRenderer: iconRendererMod } = BL;
   const { formatLarge } = BL.game;
   const { createNode, addChild, createCamera, boundsOf } = BL.scene;
-  const STATE_LABELS = { working: "clank", chilling: "chill", sleeping: "sleep", away: "away", online: "online" };
+  const STATE_LABELS = { working: "clank", chilling: "chill", sleeping: "sleep", away: "away", online: "online", offline: "offline" };
   const ROSTER_ORDER = { working: 0, chilling: 1, sleeping: 2, away: 3 };
   const stampOf = (contributor) => contributor.lastContributionAt || contributor.lastCommitAt;
   // Local control is online only while signed in; remote presence remains independent.
   const statusFor = (cave) => {
+    const committed = BL.hostPresence?.statusFor(cave);
+    if (committed) return committed;
     const actor = cave.tooltipOwner || cave;
     const online = cave.remoteControlled || actor.remoteControlled
       || !!BL.net.state.me && (cave.controlled || actor.humanControlled);

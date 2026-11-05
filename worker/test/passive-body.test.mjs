@@ -104,23 +104,33 @@ test('committed grace views raise only the free arm, keep equipment and falling 
   const options={protocol:'body-test',world:'walker-fixture-1',adapter:{stepPassive:m=>({...m,y:m.y-.1})}},reg=new SessionRegistry(options);
   const first=reg.connect(claim(),100000).session,second=reg.connect({...claim(),accountId:2,bodyId:'clanker',body:{kind:'clanker',motion:motion(),equipment:equipment()}},100000).session;
   reg.disconnect(first,100000);reg.disconnect(second,100000);reg.advance(100050);
-  const presence=B.hostPresence.create({root,capacity:2,resolve:id=>({actor:id==='clanker'?clanker:ooga,freeArm:id==='clanker'?'armR':'armL',generation:id==='clanker'?2:1})});
+  const presence=B.hostPresence.create({root,capacity:2,resolve:id=>({actor:id==='clanker'?clanker:ooga,freeArm:id==='clanker'?'armR':'armL',generation:reg.view(id==='clanker'?2:1).generation})});
   const beforeOoga={...ooga.parts.armL.rotation},beforeClanker=JSON.stringify(clanker.createPoseProjector('presence').capture('vessel'));
   const views=[reg.view(1),reg.view(2)],equipmentBefore=JSON.stringify(views.map(v=>v.equipment));
   presence.prepare();clanker.root.position.y=views[1].motion.y;const y=clanker.root.position.y;
   presence.render({now:100050,views,departures:[]});assert.equal(presence.hands,2);assert.equal(clanker.root.position.y,y);
+  assert.equal(B.hostPresence.statusFor(ooga),'offline');assert.equal(B.hostPresence.colorFor(ooga),'#ef4444');
+  assert.equal(B.hostPresence.colorFor(clanker),'#ef4444');
   assert.equal(clanker.labItem,flask);assert.equal(flask.parent,clanker.parts.armL);assert.equal(JSON.stringify(views.map(v=>v.equipment)),equipmentBefore);
   assert.ok(clanker.parts.armR.world[5]<0,'raised arm points its down-axis up');
   assert.ok(ooga.parts.armL.world[5]<0);assert.throws(()=>presence.render({now:100050,views,departures:[]}),/presentation/,'prepare must precede the next pose');
   presence.prepare();assert.deepEqual({...ooga.parts.armL.rotation},beforeOoga);
+  assert.equal(B.hostPresence.colorFor(ooga),'#ef4444','pose preparation cannot flash the name green');
   clanker.root.position.y=4;assert.equal(JSON.stringify(clanker.createPoseProjector('presence').capture('vessel')),beforeClanker);
   const back=reg.connect({...claim(),body:undefined},100050);assert.equal(back.resumed,true);
   presence.render({now:100050,views:[reg.view(1),reg.view(2)],departures:[]});assert.equal(presence.hands,1);
+  assert.equal(B.hostPresence.statusFor(ooga),'online');assert.equal(B.hostPresence.colorFor(ooga),'#22c55e');
+  assert.equal(B.hostPresence.colorFor(clanker),'#ef4444');
   presence.prepare();const unchanged=JSON.stringify(clanker.createPoseProjector('presence').capture('vessel'));
   const bad=[reg.view(2),{...reg.view(1),state:'bad'}];assert.throws(()=>presence.render({now:100051,views:bad,departures:[]}),/presentation/);
   assert.throws(()=>presence.render({now:100051,views:[{...reg.view(2),generation:1}],departures:[]}),/presentation/,'old generation cannot pose a replacement body');
+  assert.equal(B.hostPresence.colorFor(ooga),'#22c55e');assert.equal(B.hostPresence.colorFor(clanker),'#ef4444','invalid frames cannot change committed colors');
+  assert.throws(()=>presence.render({now:100051,views:[views[0]],departures:[]}),/presentation/,'old grace generation cannot mark a reconnected body offline');
   assert.equal(JSON.stringify(clanker.createPoseProjector('presence').capture('vessel')),unchanged);
-  presence.dispose();assert.equal(root.children.length,2);assert.equal(presence.liveGeometry(new Set()).size,0);clanker.dispose();
+  presence.render({now:160000,views:[reg.view(2)],departures:[]});assert.equal(presence.hands,0);
+  assert.equal(B.hostPresence.colorFor(clanker),'#ef4444','deadline expiry alone is not a reconnect');
+  presence.dispose();assert.equal(B.hostPresence.statusFor(clanker),null);assert.equal(B.hostPresence.statusFor(ooga),null);
+  assert.equal(root.children.length,2);assert.equal(presence.liveGeometry(new Set()).size,0);clanker.dispose();
 });
 
 test('64 simultaneous departures use bounded existing glyph pools, original deadlines and reduced-motion cleanup',()=>{

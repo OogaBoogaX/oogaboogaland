@@ -3635,6 +3635,10 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
   background: var(--ok);
 }
 
+.tooltip--name[data-state="offline"]::before {
+  background: #ef4444;
+}
+
 .tooltip--name[data-state="chilling"]::before {
   background: var(--accent);
 }
