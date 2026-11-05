@@ -1738,6 +1738,13 @@ storage and admission must be redesigned and measured before integration; this
 component must not be appended to schema 2 or consume existing NPC reservations.
 Activation remains disabled, and Tess is unchanged.
 
+The follow-up [body storage audit](virtual-host-body-storage.md) inventories this
+internal slot bound, tests model reconstruction, compares lossless encodings and
+larger inline reservations, and implements an opt-in atomic separate-record
+layout. It preserves exact state and existing logical host/world limits, with
+explicit aggregate capacity and measured local SQLite costs. Live full-body
+physics, authenticated reclaim and production activation remain gated.
+
 The shared-source change was checked against both 53-entry local SQLite/Room
 workloads again. Recovery remained 171.055–200.477 ms crowded and
 116.895–154.151 ms all-active; paired active-cycle p95 was 155.087/142.620 ms.
