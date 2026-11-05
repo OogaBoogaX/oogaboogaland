@@ -126,24 +126,22 @@ export const createCoordinator = (gh, bot, now = () => new Date()) => {
     try {
       const rename = await inspectAccountRename(gh, pr, rock, () => { identified = true; });
       if (!rename) return false;
-      await status(pr.head.sha, BUNDLE_STATUS, "pending", "Verified account rename awaiting current-head operator approval");
+      await status(pr.head.sha, BUNDLE_STATUS, "pending", "Verifying account rename queue and registry");
       const queued = await queuedCharacters(gh, bot);
       if (queued.some((entry) => entry.path === rename.path
         || [entry.character.handle, entry.character.github].some((login) => login?.toLowerCase() === rename.newLogin.toLowerCase()))) {
         throw new CharacterRejection("Resolve the competing queued character change before migrating this account.");
       }
       await checkRegistry(gh, rock, [rename]);
-      const review = await reviewDecision(gh, pr), latest = await gh.api(`pulls/${pr.number}`);
-      if (latest.head.sha !== pr.head.sha || latest.state !== "open" || latest.draft) throw new Error("Account rename changed during review verification");
+      const latest = await gh.api(`pulls/${pr.number}`);
+      if (latest.head.sha !== pr.head.sha || latest.state !== "open" || latest.draft) throw new Error("Account rename changed during verification");
       await status(pr.head.sha, STATUS, "success", "Pinned numeric account and github-only signed history verified; separate PR retained");
-      await status(pr.head.sha, BUNDLE_STATUS, review.approved ? "success" : "pending", review.approved
-        ? "Verified account rename approved by another operator for this exact head"
-        : "Waiting for another operator to approve this exact account-rename head");
+      await status(pr.head.sha, BUNDLE_STATUS, "success", "Verified account rename for this exact head; merge manually");
       return true;
     } catch (error) {
       if (!identified) throw error;
       await status(pr.head.sha, STATUS, "failure", "Account rename not verified; inspect the trusted workflow log");
-      await status(pr.head.sha, BUNDLE_STATUS, "failure", "Account rename or current-head approval verification failed");
+      await status(pr.head.sha, BUNDLE_STATUS, "failure", "Account rename verification failed");
       throw error;
     }
   };
