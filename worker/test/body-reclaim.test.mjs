@@ -77,11 +77,13 @@ test('disconnect, replacement and expiry fence asynchronous preparation and keep
   h.client.message(offer()); await flush(); h.client.close(); h.client.open(1, 'replacement', true);
   const second = offer('b'.repeat(32));
   assert.equal(h.client.message(second), false); assert.equal(starts, 1);
-  finish('old-resource'); await flush(); assert.deepEqual(released, ['old-resource']); assert.equal(h.sent.length, 0);
-  assert.equal(h.client.message(second), true); await flush(); assert.equal(starts, 2);
+  finish('old-resource'); await flush(); assert.deepEqual(released, ['old-resource']);
+  assert.deepEqual(h.sent, [{ t: 'body-decline', request: second.request }]);
+  const third = offer('c'.repeat(32));
+  assert.equal(h.client.message(third), true); await flush(); assert.equal(starts, 2);
   h.at(11000); finish('expired-resource'); await flush();
     assert.deepEqual(released, ['old-resource', 'expired-resource']);
-    assert.deepEqual(h.sent, [{ t: 'body-decline', request: second.request }]); assert.equal(h.timers.size, 0);
+    assert.deepEqual(h.sent, [{ t: 'body-decline', request: second.request }, { t: 'body-decline', request: third.request }]); assert.equal(h.timers.size, 0);
   assert.equal(h.client.allows('pose', offer().bodyId), false);
   assert.equal(h.client.allows('mute', offer().bodyId), true, 'voice is not part of body reclaim');
 });
@@ -404,4 +406,30 @@ test('live movement capture retains one sample until the exact durable ACK and s
   client.message(active({ fixture: true })); client.message(live());
   closeOnCapture = 'encode';
   assert.equal(client.captureMovement(), null); assert.equal(client.active, false); assert.equal(releases, 2);
+});
+
+
+test('final activation cannot replace the original grace deadline or move server time backward', async () => {
+  let applied = 0;
+  const h = harness({ prepare: () => ({}), preflight: () => true, apply: () => { applied++; return true; },
+    activate: () => true, release() {} });
+  h.client.message(offer()); await flush();
+  assert.equal(h.client.message({ t: 'body-grant', request: offer().request, transfer: transfer({}) }), true);
+  for (const patch of [{ deadline: 62000 }, { deadline: 60000 }, { at: 999, expiresAt: 1999 }]) {
+    const message = active({});
+    if (patch.deadline) message.transfer.view.deadline = patch.deadline;
+    else Object.assign(message.transfer, patch);
+    assert.equal(h.client.message(message), false);
+    assert.equal(applied, 0); assert.equal(h.client.active, false);
+  }
+  assert.equal(h.client.message(active({})), true); assert.equal(applied, 1);
+  assert.equal(h.client.message(live()), true); assert.equal(h.client.active, true);
+});
+
+test('a negotiated offer without a scene adapter is explicitly declined without acquiring control', () => {
+  const h = harness(null);
+  const request = offer(); assert.equal(h.client.message(request), false);
+  assert.deepEqual(h.sent, [{ t: 'body-decline', request: request.request }]);
+  assert.equal(h.client.active, false); assert.equal(h.timers.size, 0);
+  assert.equal(h.client.allows('mute', request.bodyId), true);
 });

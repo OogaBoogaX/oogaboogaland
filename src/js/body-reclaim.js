@@ -87,7 +87,12 @@
       if (!enabled || !prepareValid(m) || m.accountId !== account || world === m.world && m.epoch < highestEpoch) return false;
       if (current?.request === m.request) return JSON.stringify(current) === JSON.stringify(m);
       clear("blocked");
-      if (pending || !adapter) return false;
+      if (pending || !adapter) {
+        // Keep one uncancellable preparation in flight. Refuse this new nonce
+        // explicitly so Room can retire it without waiting for a timeout.
+        try { send({ t: "body-decline", request: m.request }); } catch { /* Socket close reconciles it. */ }
+        return false;
+      }
       current = JSON.parse(JSON.stringify(m)); world = m.world; highestEpoch = m.epoch;
       origin = last = stamp();
       if (!validStamp(origin)) { failure(); return false; }
@@ -141,6 +146,7 @@
       if (m.t === "body-active" && grant) {
         const text = transferText(m.transfer, "starting"), value = m.transfer;
         if (!text || value.view.generation !== grant.view.generation || value.revision <= grant.revision
+          || value.view.deadline !== grant.view.deadline || value.at < grant.at
           || value.expiresAt - value.at > START_MS) return false;
         if (final) {
           if (text !== finalText) { failure(); return false; }

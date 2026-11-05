@@ -108,9 +108,10 @@ after lease/run expiry. The host coordinator requires a valid current host fence
 recovers or cancels uncertain operations, and requires passive/absent proof for
 the exact generation before retiring the row. It does not renew the run/lease,
 send grants, replay movement or alter deadlines; takeover fences old calls.
-Live/starting references still block retirement. Automatic orchestration, original
-deadline restoration for a no-live-send final ACK after run expiry, and host
-reacquisition when only pending departures remain are unfinished. The runner must
+Live/starting references still block retirement. The exact-body no-live-send
+rollback now works after run expiry, preserving the original deadline and finite
+run/lease. Automatic orchestration must still call it before drain; host
+reacquisition when only pending departures remain is unfinished. The runner must
 serialize/reconcile explicit close operations before taking its ready census.
 
 Other open gates: actual earliest-deadline alarms, public event delivery/ACK,

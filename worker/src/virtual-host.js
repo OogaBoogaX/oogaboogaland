@@ -446,7 +446,9 @@ export class VirtualHost {
     const tokens = [...new Set([...liveTokens, reference.token])], budget = { left: this.passiveSteps };
     return this.transaction(async function(tx) {
       const now = this.now(), r = await this.read(tx); this.owns(r, ticket, now);
-      if (r.status !== "running" || now >= r.runUntil) fail("run closed to body abandonment");
+      // Closed-only rollback may outlive the finite NPC run. Current host
+      // ownership and the exact unchanged issued body are still mandatory;
+      // this path grants no control and never renews the lease or run window.
       const refused = () => ({ result: { ok: false, reason: "stale", effects: [] } });
       // A replacement host may clean up an old committed hold, but may never
       // deliver it as a new grant. Exact token/generation/body checks below and

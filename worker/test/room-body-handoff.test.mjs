@@ -153,14 +153,14 @@ test('the outbox bounds simultaneous full-size transfers and retains unresolved 
 });
 
 const flush = async () => { for (let n = 0; n < 8; n++) await Promise.resolve(); };
-async function integrated({ activate = true, journal = false } = {}) {
+async function integrated({ activate = true, journal = false, duration = 120000 } = {}) {
   const f = fixture(), i = identity(), room = f.make(), hostStorage = memory(); f.current.set(1, i.connection);
   const simulation = { version: 'handoff-fixture', checkpointBytes: 65536, initial: () => ({ ticks: 0 }),
     validate: s => Number.isSafeInteger(s.ticks), step: s => s.ticks++, project: () => ({ npcs: [], hub: { pile: 0 } }), npcFor: () => null, handoff: () => false };
   const storage = createHostBodyStorage({ storage: hostStorage, profile: 'handoff-fixture', validate: () => true,
     capture: r => [...(r.sessions?.sessions || []), ...(r.sessions?.pending || [])].map(s => ({ accountId: s.accountId, bodyId: s.bodyId, generation: s.generation,
       kind: s.kind || s.body.kind, checkpoint: { fixture: true } })) });
-  const host = new VirtualHost({ storage, simulation, clock: f.clock, sessionAdapter: { stepPassive: m => m } }), ticket = await host.begin('host-a', 120000);
+  const host = new VirtualHost({ storage, simulation, clock: f.clock, sessionAdapter: { stepPassive: m => m } }), ticket = await host.begin('host-a', duration);
   const claim = { protocol: SESSION_PROTOCOL, world: 'handoff-fixture', accountId: 1, bodyId: 'body-1', zone: 'outside', body: { kind: 'clanker',
     motion: { x: 0, y: 0, z: 0, yaw: 0, vx: 0, vy: 0, vz: 0, grounded: true },
     equipment: { weapon: null, mode: 'carry', primaryOwned: false, secondaryOwned: false, selectedSlot: 1, unlimited: false, jetpack: false, jetpackOwned: false } } };
@@ -478,4 +478,30 @@ test('recovered close keeps an uncertain movement until its exact generation is 
   assert.equal((await retireRecoveredBodyHandoff(host, room, owner, authority, i)).status, 'resolved');
   assert.equal(await box.read(i), null); assert.equal(f.storage.snapshot().has(ROOM_MOVEMENT.prefix + 1), false);
   assert.equal(f.sent.some(m => m.t === 'body-motion-ack'), false);
+});
+
+
+test('a no-live-send final ACK restores the original grace after the finite run ends', async () => {
+  const h = await integrated({ journal: true, duration: 500 });
+  await h.room.receive(h.i, h.clientMessages.at(-1));
+  const command = (await h.room.pending(h.i)).command;
+  h.at(100200); const answer = await h.host.bodyOperation(h.ticket, [], command);
+  assert.equal(h.session().state, 'live');
+  await h.room.close(h.i);
+  await h.room.complete(h.i, command.revision, answer);
+  const close = await h.room.cleanup(h.i);
+  assert.equal(close.kind, 'abandon'); assert.equal((await h.room.read(h.i)).liveSent, false);
+  h.at(100600); const before = h.hostStorage.snapshot().get(HOST.key).host;
+  await assert.rejects(h.host.startedBody(h.ticket, [], 1, h.ref, h.active.transfer), /run closed/);
+  const abandoned = await h.host.abandonBody(h.ticket, [], 1, close.ref, close.issued);
+  assert.equal(abandoned.result.ok, true); assert.equal(h.session().deadline, 160000);
+  assert.equal(h.session().state, 'grace');
+  const after = h.hostStorage.snapshot().get(HOST.key).host;
+  assert.equal(after.runUntil, before.runUntil); assert.equal(after.leaseUntil, before.leaseUntil);
+  assert.deepEqual(after.simulation, before.simulation);
+  assert.equal(h.controls(), false);
+  h.at(160000); const replacement = await h.host.claim('cleanup');
+  await h.host.reconcileBodies(replacement, []);
+  assert.equal(h.session(), undefined);
+  assert.equal(h.hostStorage.snapshot().get(HOST.key).host.sessions.pending[0].at, 160000);
 });

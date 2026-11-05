@@ -68,9 +68,13 @@ or durably cancels uncertain operations, and retires only an exact generation
 proved passive or absent. Pending movement is fenced, never replayed. A Room
 takeover fences old cleanup calls. Still-live/starting bodies remain blocked until
 ordinary lifecycle/close recovery handles their original deadlines. Automatic
-cleanup scheduling, no-live-send deadline restoration after an already-committed
-final ACK, and reacquisition when only pending departure records remain still
-need integration; this is not a general expired-run grant permission.
+cleanup scheduling, sequencing the no-live-send rollback before ordinary drain,
+and reacquisition when only pending departure records remain still need
+integration; this is not a general expired-run grant permission. The narrow
+`abandonBody` rollback itself now works after run end: with current host ownership
+and the exact unchanged issued body, it restores the original grace deadline
+without extending the run or ownership lease. All live grant/ACK operations remain
+closed after run end.
 
 `bodyPresence` reads a complete committed public frame with epoch, revision,
 logical deadlines and departure intents. It includes no private ownership token
@@ -93,6 +97,11 @@ reclaim; it never silently teleports out. If an old support vanished, the saved
 position stays unchanged and the restored body becomes airborne with zero speed.
 Clearance is checked again before activation because the world can change during
 the acknowledgement exchange. Gravity begins only after live control is enabled.
+If another uncancellable preparation is still running, or no scene adapter is
+installed, a new valid offer is explicitly declined while retaining the single
+preparation bound. The final activation transfer must preserve the offered grace
+deadline and cannot move server issuance time backward. These checks supplement
+local elapsed-time bounds; browser wall time never authorizes control.
 Health, ammunition, fuel and animation history use normal fresh-player defaults;
 browser weapon/jetpack wiring still needs integration.
 
