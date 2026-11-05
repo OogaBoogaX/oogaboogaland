@@ -750,6 +750,27 @@ export class Room extends DurableObject {
     return this.bodyHandoffController().pending(identity);
   }
 
+  // Server-only census, never a browser-provided token list. Closed or uncertain
+  // outbox work must settle before absence may imply a disconnect. An RPC caller
+  // must also fence the host revision it read BEFORE requesting this census.
+  bodyCensus(ticket) {
+    return this.ctx.blockConcurrencyWhile(async () => {
+      this.checkBodyHandoff(ticket);
+      const tokens = [], closed = [], pending = [], unobserved = [];
+      for (const row of await this.bodyHandoffController().records()) {
+        const identity = { accountId: row.accountId, connection: row.connection };
+        const p = this.players.get(row.accountId);
+        if (row.phase === "closed") closed.push(identity);
+        else if (!p || p.connectionToken !== row.connection || p.bodyClosing || p.bodyClosedAt != null) unobserved.push(identity);
+        if (row.pending) pending.push(identity);
+        // Keep every known ref protected during explicit close reconciliation;
+        // otherwise closing one body could infer early closes for the others.
+        if (row.ref) tokens.push(row.ref.token);
+      }
+      return { ready: !closed.length && !pending.length && !unobserved.length, tokens, closed, pending, unobserved };
+    });
+  }
+
   completeBodyHandoff(ticket, identity, revision, answer) {
     return this.ctx.blockConcurrencyWhile(async () => {
       this.checkBodyHandoff(ticket);

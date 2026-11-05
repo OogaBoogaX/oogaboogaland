@@ -626,12 +626,25 @@ export class VirtualHost {
     });
   }
 
+  // Read before requesting a cross-object census; mutations must compare it.
+  async bodyLifecycleRevision(ticket) {
+    return this.storage.transaction(async tx => {
+      const now = this.now(), r = await this.read(tx); this.owns(r, ticket, now);
+      return r.revision;
+    });
+  }
+
   // Explicit server event after close observations/census are reconciled by
   // Room. No NPC tick, clock catch-up, ownership renewal, timer or physics loop.
   // A no-op remains read-only, including repeated wakes and lost-reply retries.
-  async reconcileBodies(ticket, liveTokens, closes = []) {
+  async reconcileBodies(ticket, liveTokens, closes = [], { expectedRevision } = {}) {
+    if (expectedRevision !== undefined && (!time(expectedRevision) || expectedRevision < 1)) fail("invalid body census revision");
     return this.transaction(async function(tx) {
       const now = this.now(), r = await this.read(tx); this.owns(r, ticket, now);
+      // A Room census is not an atomic cross-object read. Refuse if admission,
+      // live ACK or movement changed the host while that census was in flight.
+      if (expectedRevision !== undefined && expectedRevision !== r.revision)
+        return { changed: false, superseded: true, epoch: r.fence, revision: r.revision, wakeAt: null };
       const previous = r.sessions;
       // Validate the authenticated event even before the first body admission.
       const { registry } = this.registry(r, now, liveTokens, { closes, create: true });

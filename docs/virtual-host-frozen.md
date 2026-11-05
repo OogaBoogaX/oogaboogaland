@@ -56,6 +56,14 @@ finite run end), not a polling cadence. A future alarm owner must reacquire a
 valid host fence when necessary; this method never extends the run or ownership.
 No alarm is installed by this change.
 
+The inactive Room integration exposes an authenticated bounded census, blocking
+absence inference while closed or uncertain handoff rows remain. The runner
+reads the host revision before that RPC and compares it inside reconciliation;
+a concurrent login, live ACK or movement supersedes the census instead of being
+mistaken for a disconnect. This remains an explicit server hook, not a deployed
+loop. Cleanup after Room's NPC lease/run expires remains blocked pending a
+separate cleanup-authority design.
+
 `bodyPresence` reads a complete committed public frame with epoch, revision,
 logical deadlines and departure intents. It includes no private ownership token
 or packed controller state, refuses overdue lifecycle state until reconciliation,
@@ -95,6 +103,11 @@ mapping and full-world placement are not installed. Voice and ordinary live play
 movement retain their separate responsibilities.
 
 ## Measurement and verification
+
+See [the current SQLite/runtime cost report](virtual-host-frozen-costs.md) for
+the post-pivot 30-body recovery trials, combined strict-delivery failure,
+conditional live-movement write-cost scenarios and remaining integration gaps.
+The measurements below document the earlier in-memory checkpoint.
 
 Finite Node trials use 30 actual restricted Clanker body records and a padded
 64 KiB world, in independent authored meadows, with in-memory atomic storage:

@@ -4,6 +4,7 @@ import { HOST, BODY_VIEW, SESSION_PROTOCOL, VirtualHost, LatestHostDelivery, bou
 import { createNpcPose } from "../src/npc-pose.js";
 import { compactSimulation } from "../src/simulation-checkpoint.js";
 import { rig } from "./fixtures/npc-pose-rig.mjs";
+import { reconcileRoomBodies } from "../src/host-body-room.js";
 
 // A serial, rollback-capable storage fixture. It models transaction atomicity, not Cloudflare
 // scheduling, CPU billing, alarm precision or the production scene's collision geometry.
@@ -98,6 +99,29 @@ test("body events freeze once, survive restart and expire atomically without NPC
   const doneWrites = h.store.writes;
   assert.equal((await h.make().reconcileBodies(fresh, [])).changed, false);
   assert.equal(h.store.writes, doneWrites);
+});
+
+test("Room census reconciliation refuses uncertain closes and fences concurrent host admission", async () => {
+  const h = harness(), ticket = await h.host.begin("owner", 120000);
+  const authority = { owner: ticket.owner, epoch: ticket.fence, world: ticket.world };
+  const first = (await h.host.connect(ticket, [], bodyClaim())).result;
+  const blocked = { ready: false, tokens: [first.session.token], closed: [{ accountId: 1, connection: "old" }], pending: [], unobserved: [] };
+  let census = blocked, during = null;
+  const room = { async bodyCensus(t) { assert.deepEqual(t, authority); if (during) await during(); return census; } };
+  const before = h.store.read();
+  assert.equal((await reconcileRoomBodies(h.host, room, ticket, authority)).status, "blocked");
+  assert.deepEqual(h.store.read(), before, "known closes cannot fall back to an earlier inferred deadline");
+  census = { ...blocked, ready: true, tokens: [], closed: [] };
+  during = () => h.host.connect(ticket, [first.session.token], { ...bodyClaim(), accountId: 2, bodyId: "new-player" });
+  const stale = await reconcileRoomBodies(h.host, room, ticket, authority);
+  assert.equal(stale.status, "superseded");
+  assert.ok(h.store.read().sessions.sessions.every(s => s.state === "live"), "in-flight admission is never inferred offline");
+  during = null; const writes = h.store.writes;
+  assert.equal((await reconcileRoomBodies(h.host, room, ticket, authority)).status, "reconciled");
+  assert.equal(h.store.writes, writes + 1);
+  assert.ok(h.store.read().sessions.sessions.every(s => s.state === "grace"));
+  await assert.rejects(reconcileRoomBodies(h.host, room, ticket, { ...authority, epoch: 99 }), /authorities differ/);
+  await assert.rejects(h.host.reconcileBodies(ticket, [], [], { expectedRevision: NaN }), /census revision/);
 });
 
 test("body-only events validate empty censuses, preserve occupancy and apply an existing NPC handback once", async () => {

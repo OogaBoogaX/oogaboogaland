@@ -1,6 +1,19 @@
 // One explicit, bounded Room/host handoff operation. No timer or automatic run.
 // Retry the exact durable command through the atomic receipt API only. A closed
 // command recovers its result or records cancellation; it cannot create a body.
+export async function reconcileRoomBodies(host, room, hostTicket, roomTicket) {
+  const owner = { ...hostTicket }, authority = { ...roomTicket };
+  if (owner.world !== authority.world || owner.fence !== authority.epoch || owner.owner !== authority.owner)
+    throw Error("body census authorities differ");
+  // Read first, so a concurrent admission or live acknowledgement cannot be
+  // mistaken for an absent session by the subsequently observed Room census.
+  const revision = await host.bodyLifecycleRevision(owner);
+  const census = await room.bodyCensus(authority);
+  if (!census.ready) return { status: "blocked", closed: census.closed, pending: census.pending, unobserved: census.unobserved };
+  const result = await host.reconcileBodies(owner, census.tokens, [], { expectedRevision: revision });
+  return { status: result.superseded ? "superseded" : "reconciled", ...result };
+}
+
 export async function advanceBodyHandoff(host, room, hostTicket, roomTicket, identity, liveTokens) {
   const owner = { ...hostTicket }, authority = { ...roomTicket }, who = { ...identity }, tokens = [...liveTokens];
   if (owner.world !== authority.world || owner.fence !== authority.epoch || owner.owner !== authority.owner)

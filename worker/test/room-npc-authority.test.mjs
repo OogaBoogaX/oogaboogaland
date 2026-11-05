@@ -519,19 +519,28 @@ test('Room stages only authenticated compatible body work and persists close bef
   assert.equal(Object.hasOwn(ws.store, 'transfer'), false);
   await h.send(r, ws, { t: 'body-ready', request: bodyRequest });
   const pending = await r.pendingBodyHandoff(t, i); assert.equal(pending.command.accountId, 1); assert.equal(pending.closed, false);
+  const uncertain = await r.bodyCensus(t);
+  assert.equal(uncertain.ready, false); assert.deepEqual(structuredClone(uncertain.pending), [i]); assert.equal(uncertain.tokens.length, 0);
   h.send(r, ws, { t: 'pose', x: 999, y: 1, z: 999, yaw: 0 }); assert.notEqual(p.x, 999);
   h.at(100300); const closed = r.webSocketClose(ws);
   assert.equal(r.players.has(1), false, 'ordinary presence/voice release is immediate');
   assert.equal(p.bodyClosing, true); assert.equal(ws.store.bodyClosedAt, 100300); await closed; ws.close(1000, 'closed');
   const restart = await h.room(true, false, true);
+  const closing = await restart.bodyCensus(t);
+  assert.equal(closing.ready, false); assert.deepEqual(structuredClone(closing.closed), [i]);
   const after = await restart.pendingBodyHandoff(t, i); assert.equal(after.closed, true); assert.deepEqual(after.command, pending.command);
   const answer = { result: { ok: true, session: { accountId: 1, bodyId: 'player:1', generation: 1, token: '2'.repeat(32) } }, transfer: {
     v: 1, protocol: 'host-session-v5', world: 'world-1', epoch: 1, revision: 2, at: 100000, expiresAt: 110000,
     resetResources: 'defaults', view: { state: 'offered', accountId: 1, bodyId: 'player:1', kind: 'clanker', generation: 1, deadline: 160000 }, checkpoint: {} } };
   const sent = ws.sent.length;
   const completed = await restart.completeBodyHandoff(t, i, pending.command.revision, answer);
+  const retained = await restart.bodyCensus(t);
+  assert.equal(retained.ready, false); assert.deepEqual(structuredClone(retained.tokens), [answer.result.session.token]);
+  assert.equal(retained.pending.length, 0, 'known refs stay protected until explicit closed-row cleanup');
   assert.equal(completed.phase, 'closed'); assert.equal(completed.delivered, false); assert.equal(ws.sent.length, sent);
   assert.equal((await restart.bodyHandoffController().read(i)).closedAt, 100300);
+  await assert.rejects(restart.bodyCensus({ ...t, epoch: t.epoch + 1 }), /disabled or fenced/);
+  h.at(110001); await assert.rejects(restart.bodyCensus(t), /disabled or fenced/, 'census cannot silently renew an expired Room lease');
   const rollback = await h.room(false); assert.equal((await h.join(rollback, 1)).response.status, 409, 'removing configuration cannot reopen legacy body claims');
 });
 

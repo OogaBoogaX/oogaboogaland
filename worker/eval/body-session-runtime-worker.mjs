@@ -85,7 +85,7 @@ export class BodySessionHost extends DurableObject {
       },
       put: async values => {
         writes += Object.keys(values).length; for (const value of Object.values(values)) writeBytes += bytes(value);
-        await tx.put(values); if (command === 'fail-tick') throw Error('injected body rollback');
+        await tx.put(values); if (command === 'fail-tick' || command === 'fail-event') throw Error('injected body rollback');
       }, delete: keys => tx.delete(keys),
     })) };
     const bank = createHostBodyStorage({ storage, profile: 'clanker-body-3', capture: () => { throw Error('body scope required'); },
@@ -133,6 +133,8 @@ export class BodySessionHost extends DurableObject {
           ['npcAuthorityStatus', 'configureNpcAuthority', 'publishNpcSnapshot'], 'room'),
         input.ticket, { acquire: input.acquire === true, format: 'mixed-1', ...(input.roomState ? { roomState: input.roomState } : {}), ...(input.rolling || input.burst ? { cadence: input.burst ? 'rate-4-burst-2-v1' : 'rolling-4-v1' } : {}) });
       else if (command === 'claim') result = await host.claim('replacement');
+      else if (command === 'event' || command === 'fail-event') result = await host.reconcileBodies(input.ticket, input.tokens);
+      else if (command === 'presence') result = await host.bodyPresence(input.ticket);
       else if (command === 'tick' || command === 'fail-tick') result = await host.tick(input.ticket, input.tokens);
       else if (!['inspect', 'verify'].includes(command)) throw Error('unknown fixture command');
     } catch (e) { error = e.message; }

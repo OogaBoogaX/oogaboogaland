@@ -15,6 +15,8 @@ const manifest = JSON.parse(await readFile(packagePath, 'utf8')); assert.equal(m
 const runtime = await import(pathToFileURL(join(dirname(packagePath), manifest.main))), { build } = requireRuntime('esbuild');
 const dir = await mkdtemp(join(tmpdir(), 'body-session-runtime-')), bundle = join(dir, 'worker.mjs');
 const roaming = process.argv.includes('--roaming'), steady = process.argv.includes('--steady'), deliver = process.argv.includes('--deliver');
+const events = process.argv.includes('--events');
+assert.ok(!events || !steady && !deliver, '--events measures finite lifecycle recovery only');
 assert.ok(!deliver || steady && roaming, '--deliver requires --steady --roaming');
 const pipeline = process.argv.includes('--pipeline'), cachedRoom = process.argv.includes('--cached-room');
 assert.ok(!cachedRoom || pipeline, '--cached-room requires --pipeline');
@@ -197,7 +199,7 @@ try {
           if (!out.result.work.pendingSteps && out.result.lagMs < 250) { completeSequence = out.result.snapshot.sequence; break; }
           assert.equal(out.result.snapshot, null, 'partial body sweeps must not publish');
         }
-        assert.equal(batches.reduce((n, b) => n + b.steps, 0), 150);
+        assert.equal(batches.reduce((n, b) => n + b.steps, 0), 0, 'frozen bodies do no recurring physics');
         assert.equal(batches.reduce((n, b) => n + b.npcSteps, 0), 1);
         worldBusy = false;
         offered.set(completeSequence, { frame, scheduled, completedAt: performance.now() });
@@ -271,7 +273,7 @@ try {
       }
       const saved = (await call('inspect')).saved;
       assert.equal(saved.host.sessions.sessions.length, 30);
-      assert.ok(saved.host.sessions.sessions.every(s => s.state === 'grace' && s.deadline === epoch + 60000 && s.stepAt === now));
+      assert.ok(saved.host.sessions.sessions.every(s => s.state === 'grace' && s.deadline === epoch + 60000 && s.stepAt === epoch));
       const verified = await call('verify', { reference: before.host.simulation });
       assert.equal(verified.result.verified, 30); if (roaming) assert.equal(verified.result.npcSteps, frameCount);
       // Rollback and restart are outside the throughput window and preserve the
@@ -299,43 +301,65 @@ try {
       await mf.dispose(); mf = null; continue;
     }
     now = epoch + 250;
-    await call('fail-tick', { ticket, tokens: [] }, /injected body rollback/);
+    // A known-close no-op correctly writes nothing, so there is no event write
+    // to fault. Unknown closes still exercise atomic event rollback.
+    await call(events && scenario !== 'known-long' ? 'fail-event' : 'fail-tick', { ticket, tokens: [] }, /injected body rollback/);
     assert.deepEqual((await call('inspect')).saved, before);
     await mf.dispose(); mf = null;
     const restartAt = performance.now(); await start(disk);
     assert.deepEqual((await call('inspect')).saved, before); const coldRestartMs = performance.now() - restartAt;
     if (!short) {
       now = epoch + (medium ? 10001 : 60000); const old = ticket; ticket = (await call('claim')).result;
-      await call('tick', { ticket: old, tokens: [] }, /fenced/);
+      await call(events ? 'event' : 'tick', { ticket: old, tokens: [] }, /fenced/);
     }
     const batches = [];
     for (let i = 0; i < 40; i++) {
-      const out = await call('tick', { ticket, tokens: [] });
+      const out = await call(events ? 'event' : 'tick', { ticket, tokens: [] });
+      if (events) {
+        assert.equal(out.constructed, 0);
+        batches.push({ wallMs: out.wallMs, steps: 0, pendingSteps: 0, npcSteps: 0,
+          constructed: out.constructed, reads: out.reads, readBytes: out.readBytes, writes: out.writes,
+          writeBytes: out.writeBytes, rootBytes: out.rootBytes, rowBytes: out.rowBytes });
+        break;
+      }
       if (roaming) assert.ok(out.result.steps <= 4);
       batches.push({ wallMs: out.wallMs, steps: out.result.work.steps, pendingSteps: out.result.work.pendingSteps,
         npcSteps: out.result.steps, constructed: out.constructed, reads: out.reads, readBytes: out.readBytes,
         writes: out.writes, writeBytes: out.writeBytes, rootBytes: out.rootBytes, rowBytes: out.rowBytes });
       if (!out.result.work.pendingSteps && (!medium || out.result.lagMs < 250)) break;
     }
-    assert.equal(batches.at(-1).pendingSteps, 0); assert.equal(batches.reduce((n, b) => n + b.steps, 0), short ? 150 : medium ? 6030 : 36000);
+    assert.equal(batches.at(-1).pendingSteps, 0); assert.equal(batches.reduce((n, b) => n + b.steps, 0), 0);
     const saved = (await call('inspect')).saved;
     assert.equal(saved.host.sessions.sessions.length, expired ? 0 : 30);
     assert.equal(saved.host.sessions.pending.length, expired ? 30 : 0);
-    assert.ok(saved.host.sessions.sessions.every(s => s.deadline === epoch + 60000 && s.stepAt === now));
-    assert.ok(saved.host.sessions.pending.every(p => p.at === epoch + 60000 && p.handback === null && p.body.motion.grounded));
+    const original = new Map(before.host.sessions.sessions.map(s => [s.bodyId, s.motion]));
+    const frozen = s => {
+      const m = s.motion || s.body.motion, at = original.get(s.bodyId);
+      return ['x', 'y', 'z', 'yaw', 'grounded'].every(k => Object.is(m[k], at[k])) && m.vx === 0 && m.vy === 0 && m.vz === 0;
+    };
+    assert.ok(saved.host.sessions.sessions.every(s => s.deadline === epoch + 60000 && s.stepAt === epoch && frozen(s)));
+    assert.ok(saved.host.sessions.pending.every(p => p.at === epoch + 60000 && p.handback === null && frozen(p)));
+    let eventReads = null;
+    if (events) {
+      const noop = await call('event', { ticket, tokens: [] }); assert.equal(noop.writes, 0); assert.equal(noop.result.changed, false);
+      const presence = await call('presence', { ticket }); assert.equal(presence.writes, 0);
+      assert.equal(presence.result.frame.views.length + presence.result.frame.departures.length, 30);
+      eventReads = { noopMs: noop.wallMs, noopReadBytes: noop.readBytes, presenceMs: presence.wallMs,
+        presenceReadBytes: presence.readBytes, frameBytes: Buffer.byteLength(JSON.stringify(presence.result.frame)), writes: 0 };
+    }
     const verified = await call('verify', { reference: before.host.simulation }); assert.equal(verified.result.verified, 30);
-    if (roaming) assert.equal(verified.result.npcSteps, short ? 1 : medium ? 40 : 0);
+    if (roaming) assert.equal(verified.result.npcSteps, events ? 0 : short ? 1 : medium ? 40 : 0);
     results.push({ scenario, coldBeginMs, coldRestartMs, admissionsMs: stats(admissions), closeMs,
       recoveryMs: stats(batches.map(b => b.wallMs)), over250ms: batches.filter(b => b.wallMs > 250).length,
       totalRecoveryMs: batches.reduce((n, b) => n + b.wallMs, 0),
       attemptedRecoveryWrites: batches.reduce((n, b) => n + b.writes, 0),
       serializedRecoveryWriteBytes: batches.reduce((n, b) => n + b.writeBytes, 0),
-      verifiedBodies: verified.result.verified, verifiedNpcSteps: verified.result.npcSteps, rollback: true, persistedRestart: true, staleOwnerFenced: !short, batches });
+      verifiedBodies: verified.result.verified, verifiedNpcSteps: verified.result.npcSteps, rollback: true, persistedRestart: true, staleOwnerFenced: !short, eventReads, batches });
     await mf.dispose(); mf = null;
   }
   assert.equal(deniedEgress, 0); assert.equal(logs.length, 0);
   console.log(JSON.stringify({ node: process.version, platform: process.platform, arch: process.arch,
-    miniflare: manifest.version, roaming, steady, deliver, pipeline, cachedRoom, rolling, burst, frameCount, clientDelayMs, bodyLoads, clientDecoders, npcStepLimit: roaming ? 4 : 8, sourceHashes, deniedEgress, logs: logs.length, results,
+    miniflare: manifest.version, roaming, events, steady, deliver, pipeline, cachedRoom, rolling, burst, frameCount, clientDelayMs, bodyLoads, clientDecoders, npcStepLimit: roaming ? 4 : 8, sourceHashes, deniedEgress, logs: logs.length, results,
     limitations: ['30 distinct actual player-body controllers with SQLite/session transactions, in independent authored empty meadows.',
       roaming ? 'Also 53 actual restricted roaming NPCs, sharing the host transaction but not world collision/ownership with the player fixtures.' : 'World is 64 KiB padding; no full-world NPC simulation.',
       deliver ? 'Real Room RPC and 32 protocol clients including one stalled receiver; no browser, live body transport or authenticated body reclaim. Cold requests include disposable bootstrap rigs.'
