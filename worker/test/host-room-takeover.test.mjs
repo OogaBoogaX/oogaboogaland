@@ -6,6 +6,8 @@ import { VirtualHost, HOST, SESSION_PROTOCOL, boundedJSON } from '../src/virtual
 import { validateRoomBinding } from '../src/host-room-claim.js';
 import { RoomNpcAuthority, ROOM_NPC, npcAuthorityView, npcCadenceName, npcNextPublicationAt } from '../src/room-npc-authority.js';
 import { publishHostPoses, claimHostRoom, closeHostRoomRun, recoverReleasedHostRoom } from '../src/host-room.js';
+import { openHostWorldRunner } from '../src/host-world-runner.js';
+import { RoomBodyPresence, ROOM_BODY_PRESENCE } from '../src/room-body-presence.js';
 
 function storage() {
   let data = new Map(), tail = Promise.resolve(), failure = false, puts = 0;
@@ -54,8 +56,166 @@ function fixture() {
       }
     };
   };
-  return { hostStore, roomStore, makeHost, makeRoom, host: makeHost(), room: makeRoom(), at: value => { now = value; } };
+  return { hostStore, roomStore, makeHost, makeRoom, host: makeHost(), room: makeRoom(), now: () => now, at: value => { now = value; } };
 }
+
+test('bounded publication pacing confirms ownership after the wait and keeps the strict Room gate', async () => {
+  const f = fixture(), ticket = await f.host.begin('runner', 60000);
+  const first = await publishHostPoses(f.host, f.room, ticket, { acquire: true });
+  f.at(100125); await f.host.tick(ticket, []);
+  const calls = [], host = Object.create(f.host);
+  host.confirmPoses = async (...args) => { calls.push(['confirm', f.now()]); return f.host.confirmPoses(...args); };
+  const options = { roomState: first.roomState, notBefore: 100250, clock: f.now,
+    waitUntil: async deadline => { calls.push(['wait', deadline]); f.at(deadline); } };
+  // There is no new frame at 125 ms. Create a metadata-only revision; this
+  // tests publication timing independently of the source world's step size.
+  await f.host.sessions(ticket, [], () => true);
+  const published = await publishHostPoses(host, f.room, ticket, options);
+  assert.deepEqual(calls, [['wait', 100250], ['confirm', 100250]]);
+  assert.equal(published.publishedAt, 100250); assert.equal(published.cadence, undefined);
+  f.at(100375); await f.host.sessions(ticket, [], () => true);
+  await assert.rejects(publishHostPoses(host, f.room, ticket, { ...options, notBefore: 100499 }), /fenced/);
+  assert.equal((await f.roomStore.get(ROOM_NPC.key)).at, 100250, 'caller-supplied timing cannot bypass the durable 250ms gate');
+});
+
+// Real host/session/presentation storage and Room NPC authority; the transport
+// census below is authored, not a WebSocket or Hub integration test.
+function eventRoom(f, tokens = []) {
+  const presence = new RoomBodyPresence(f.roomStore, f.now);
+  let duringCensus = null, deliveries = 0;
+  return { room: { ...f.room,
+    bodyWork: async () => ({ tokens: [...tokens], events: [], nextDeadline: null, publicationPending: null }),
+    bodyCensus: async () => { if (duringCensus) await duringCensus(); return { ready: true, tokens: [...tokens], closed: [], pending: [], unobserved: [] }; },
+    retainBodyPresence: (...args) => presence.retain(...args),
+    bodyPresenceStatus: authority => presence.snapshot(authority),
+    deliverBodyPresence: async () => { deliveries++; },
+  }, during: fn => { duringCensus = fn; }, deliveries: () => deliveries };
+}
+
+test('world event runner separates body events from ticks and reattaches at a due frozen deadline', async () => {
+  const f = fixture(), ticket = await f.host.begin('runner-a', 120000);
+  await publishHostPoses(f.host, f.room, ticket, { acquire: true });
+  const joined = (await f.host.connect(ticket, [], { protocol: SESSION_PROTOCOL, world: ticket.world,
+    accountId: 1, bodyId: 'player:1', zone: 'outside', body: { kind: 'ooga',
+      motion: { x: 1, y: 8, z: 2, yaw: 0, vx: 0, vy: 0, vz: 0, grounded: false },
+      equipment: { weapon: null, mode: 'carry', primaryOwned: false, secondaryOwned: false,
+        selectedSlot: 1, unlimited: false, jetpack: false, jetpackOwned: false } } })).result;
+  const tokens = [joined.session.token], events = eventRoom(f, tokens);
+  const beforeOpen = [f.hostStore.writes(), f.roomStore.writes()];
+  const create = owner => openHostWorldRunner({ host: f.host, room: events.room, ticket: owner, clock: f.now, waitUntil: async at => f.at(at) });
+  const runner = await create(ticket);
+  assert.deepEqual([f.hostStore.writes(), f.roomStore.writes()], beforeOpen, 'attachment is read-only');
+  assert.equal((await runner.tick()).status, 'body-events-required');
+  assert.equal((await runner.publish()).status, 'body-events-required');
+  assert.equal((await runner.bodies()).status, 'reconciled');
+  const quiet = [f.hostStore.writes(), f.roomStore.writes(), events.deliveries()];
+  assert.equal((await runner.bodies({ refresh: false })).presence.status, 'unchanged');
+  assert.deepEqual([f.hostStore.writes(), f.roomStore.writes(), events.deliveries()], quiet,
+    'a recovery rescan inspects ownership without rewriting or redelivering unchanged bodies');
+  const roomWrites = f.roomStore.writes(); f.at(100250);
+  assert.equal((await runner.tick()).result.steps, 1);
+  assert.equal(f.roomStore.writes(), roomWrites, 'an ordinary world tick does not rewrite body presence');
+  assert.equal((await runner.publish()).status, 'published');
+  tokens.length = 0;
+  const disconnected = await runner.bodies();
+  assert.equal(disconnected.nextBodyAt, 160000);
+  const frozen = await f.roomStore.get(ROOM_BODY_PRESENCE.key);
+  assert.equal(frozen.frame.views[0].motion.y, 8); assert.equal(frozen.frame.views[0].state, 'grace');
+  assert.equal(frozen.frame.views[0].deadline, 160000);
+  const writes = [f.hostStore.writes(), f.roomStore.writes()];
+  for (let i = 0; i < 50; i++) runner.state();
+  assert.deepEqual([f.hostStore.writes(), f.roomStore.writes()], writes, 'no frozen-body polling loop is installed');
+  f.at(160000); runner.close();
+  const replacement = await claimHostRoom(f.host, f.room, 'runner-b');
+  assert.equal(await f.host.poses(replacement, { skipPending: true }), null, 'due lifecycle correctly blocks poses');
+  const restarted = await create(replacement);
+  assert.equal((await restarted.tick()).status, 'body-events-required');
+  assert.equal((await restarted.bodies()).status, 'reconciled');
+  const departed = await f.roomStore.get(ROOM_BODY_PRESENCE.key);
+  assert.equal(departed.frame.departures[0].at, 160000); assert.equal(departed.frame.departures[0].glyph, 'green');
+  assert.equal(departed.frame.departures[0].handback, null);
+  assert.equal((await f.hostStore.get(HOST.key)).simulation.steps, 1, 'expiry recovery performs no NPC or body physics tick');
+  assert.equal((await runner.tick()).status, 'closed');
+  f.at(220000); assert.equal((await restarted.tick()).status, 'closed');
+});
+
+test('world event runner bounds concurrent work and closes on uncertain errors without dropping durable state', async () => {
+  const f = fixture(), ticket = await f.host.begin('runner', 60000);
+  await publishHostPoses(f.host, f.room, ticket, { acquire: true });
+  const events = eventRoom(f); let release;
+  const paused = new Promise(resolve => { release = resolve; });
+  events.during(() => paused);
+  const runner = await openHostWorldRunner({ host: f.host, room: events.room, ticket, clock: f.now, waitUntil: async at => f.at(at) });
+  const first = runner.bodies();
+  assert.equal((await runner.bodies()).status, 'busy');
+  assert.equal((await runner.admit({ accountId: 1, connection: 'not-queued' })).status, 'busy');
+  assert.equal((await runner.tick()).status, 'busy');
+  release(); assert.equal((await first).status, 'reconciled');
+  const before = await f.hostStore.get(HOST.key);
+  events.during(() => { throw Error('uncertain transport read'); });
+  await assert.rejects(runner.bodies(), /uncertain transport/);
+  assert.equal(runner.state().closed, true);
+  assert.equal((await runner.publish()).status, 'closed');
+  assert.deepEqual(await f.hostStore.get(HOST.key), before);
+  assert.equal((await runner.admit({ accountId: 1, connection: 'not-queued' })).status, 'closed');
+});
+
+test('world event runner continues production during paced publication and retains only the latest revision', async () => {
+  const f = fixture(), ticket = await f.host.begin('runner', 60000);
+  await publishHostPoses(f.host, f.room, ticket, { acquire: true });
+  const events = eventRoom(f); let delay = true, release, entered;
+  const waiting = new Promise(resolve => { entered = resolve; });
+  const pause = new Promise(resolve => { release = resolve; });
+  const commit = events.room.publishNpcSnapshot;
+  events.room.publishNpcSnapshot = async (...args) => {
+    if (delay) { f.at(f.now() + 50); delay = false; } return commit(...args);
+  };
+  const runner = await openHostWorldRunner({ host: f.host, room: events.room, ticket, clock: f.now,
+    waitUntil: async () => { entered(); await pause; } });
+  await runner.bodies(); f.at(100250); await runner.tick();
+  assert.equal((await runner.publish()).publishedAt, 100300);
+  f.at(100500); await runner.tick();
+  const stale = runner.publish(); await waiting;
+  assert.equal(runner.state().publication.busy, true); assert.equal(runner.state().busy, false);
+  f.at(100750); const next = await runner.tick();
+  assert.equal(next.result.steps, 1);
+  assert.equal(runner.state().publication.pending, next.result.snapshot.sequence);
+  release(); assert.equal((await stale).status, 'superseded');
+  const fresh = await runner.publish();
+  assert.equal(fresh.sequence, next.result.snapshot.sequence);
+  assert.equal(runner.state().publication.pending, null);
+  assert.equal(runner.state().publication.stats.superseded, 1);
+  runner.close();
+});
+
+test('bounded publication pacing rejects clock faults, oversized waits and changes during the wait', async () => {
+  for (const change of ['tick', 'takeover', 'clock', 'early', 'deadline']) {
+    const f = fixture(), ticket = await f.host.begin('runner-a', 60000);
+    const started = change === 'takeover' ? 109750 : 100000;
+    f.at(started); const first = await publishHostPoses(f.host, f.room, ticket, { acquire: true });
+    await f.host.sessions(ticket, [], () => true);
+    const before = await f.roomStore.get(ROOM_NPC.key);
+    const operation = publishHostPoses(f.host, f.room, ticket, { roomState: first.roomState,
+      notBefore: started + 250, clock: f.now, waitUntil: async deadline => {
+        if (change === 'early') return;
+        f.at(change === 'clock' ? started - 1 : change === 'deadline' ? 160000 : deadline);
+        if (change === 'tick') await f.host.sessions(ticket, [], () => true);
+        if (change === 'takeover') await claimHostRoom(f.host, f.room, 'runner-b');
+      } });
+    if (change === 'clock' || change === 'early') await assert.rejects(operation, /wait incomplete/);
+    else if (change === 'takeover') await assert.rejects(operation, /fenced/);
+    else assert.equal((await operation).status, 'superseded');
+    const after = await f.roomStore.get(ROOM_NPC.key);
+    if (change === 'takeover') { assert.equal(after.epoch, 2); assert.equal(after.frame, null); }
+    else assert.deepEqual(after, before);
+  }
+  const f = fixture(), ticket = await f.host.begin('runner', 60000), before = await f.hostStore.get(HOST.key);
+  await assert.rejects(publishHostPoses(f.host, f.room, ticket, { notBefore: 100251, clock: f.now, waitUntil: async () => {} }), /bounded/);
+  await assert.rejects(publishHostPoses(f.host, f.room, ticket, { notBefore: 100250, clock: f.now }), /bounded/);
+  await assert.rejects(publishHostPoses(f.host, f.room, ticket, { waitUntil: async () => {} }), /deadline required/);
+  assert.deepEqual(await f.hostStore.get(HOST.key), before);
+  assert.equal(await f.roomStore.get(ROOM_NPC.key), undefined);
+});
 
 test('takeover fences a delayed old-host frame before granting the replacement ticket', async () => {
   const f = fixture(), old = await f.host.begin('runner-a', 60000);

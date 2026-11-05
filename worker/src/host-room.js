@@ -3,19 +3,32 @@
 // committed frame/ticket, never by starting a second run or falling back to AI.
 import { ROLLING_CADENCE, BURST_CADENCE } from "./host-cadence.js";
 import { validateRoomClaim, validateRoomClaimReceipt, validateRoomReleaseReceipt } from "./host-room-claim.js";
+import { HOST } from "./virtual-host.js";
 const fail = message => { throw new Error(message); };
 const same = (a, t) => a?.mode === "server" && a.world === t.world && a.epoch === t.fence;
 const compatible = (a, format) => a?.v === (format ? 2 : 1) && a.format === format;
 
-export async function publishHostPoses(host, room, ticket, { acquire = false, format, cadence, roomState } = {}) {
+export async function publishHostPoses(host, room, ticket, { acquire = false, format, cadence, roomState,
+  notBefore, waitUntil, clock = Date.now } = {}) {
   if (cadence !== undefined && ![ROLLING_CADENCE, BURST_CADENCE].includes(cadence)) fail("unsupported publication cadence");
   if (format !== undefined && format !== "mixed-1") fail("unsupported host pose format");
   if (typeof host.confirmPoses !== "function") fail("host revision confirmation required");
+  // The finite publication runner may prepare a frame during the remaining
+  // commit interval. Wait is explicit and bounded; final host confirmation
+  // stays AFTER the wait, and Room still enforces its own durable rate gate.
+  let scheduledAt;
+  if (notBefore !== undefined) {
+    scheduledAt = clock();
+    if (typeof waitUntil !== 'function' || !Number.isSafeInteger(notBefore) || notBefore < 0
+      || !Number.isSafeInteger(scheduledAt) || scheduledAt < 0 || notBefore - scheduledAt > HOST.deliveryMs)
+      fail('bounded publication pacing required');
+  } else if (waitUntil !== undefined) fail('publication pacing deadline required');
   ticket = { ...ticket };
   let snapshot = await host.poses(ticket, { format, skipPending: true });
   // A newer body recovery batch can interleave with the publication runner.
   // Keep the last committed Room frame; the next complete sweep will offer again.
   if (snapshot === null) return { status: "superseded" };
+  if (notBefore !== undefined && notBefore >= snapshot.runUntil) return { status: 'superseded' };
   if (![0, 1].includes(snapshot.publicationProtocol)
     || snapshot.publicationProtocol === 0 && typeof host.bindRoomPublication !== "function") fail("coordinated host publication protocol required");
   if (snapshot.format !== format) fail("host pose format mismatch");
@@ -74,7 +87,15 @@ export async function publishHostPoses(host, room, ticket, { acquire = false, fo
       || !Number.isSafeInteger(bound.sequence) || bound.sequence < snapshot.sequence) fail("invalid Room binding receipt");
     snapshot = { ...snapshot, ...bound };
   }
-  // Recheck host fencing after the RPCs. If a new owner took over while Room
+  if (notBefore !== undefined) {
+    const before = clock();
+    if (!Number.isSafeInteger(before) || before < scheduledAt) fail('publication clock moved backwards');
+    if (before < notBefore) await waitUntil(notBefore);
+    const after = clock();
+    if (!Number.isSafeInteger(after) || after < before || after < notBefore) fail('publication wait incomplete');
+    if (after >= snapshot.runUntil) return { status: 'superseded' };
+  }
+  // Recheck host fencing after the RPCs and optional wait. If a new owner took over while Room
   // was being configured, leave followers frozen for the new owner to recover.
   if (!await host.confirmPoses(ticket, { sequence: snapshot.sequence, at: snapshot.at, runUntil: snapshot.runUntil }, { skipPending: true })) {
     return { status: "superseded", revision: authority.revision };

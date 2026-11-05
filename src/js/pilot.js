@@ -233,6 +233,7 @@
     const handoff = cameraHandoff(camera, renderer);
     let solvingHandoff = false;
     let crew = null, fx = null, input = null, reticleTarget = null, active = true;
+    let boundSystems = null, bodyBinding = null;
     let ownAccount = null, ownCrew = null, ownOoga = null;
     const syncOwnOoga = () => {
       const account = BL.net.state.me;
@@ -288,6 +289,8 @@
       freeFallValid = freeFalling = false;
     };
     const bind = (systems) => {
+      if (bodyBinding && systems !== bodyBinding.systems) throw Error("independent pilot body still attached");
+      boundSystems = systems;
       crew = systems.crew;
       input = systems.input;
       reticleTarget = systems.reticleTarget || null;
@@ -299,6 +302,28 @@
       systems.onWeaponHit = weaponHit;
       fx = systems.fx;
       syncOwnOoga();
+    };
+    // The reclaim owner has already restored and activated this separate crew.
+    // Bind controls without possessing again (which would reset its saved height).
+    const attachBody = (systems, actor, onRelease) => {
+      if (disposed || bodyBinding || !boundSystems || crew?.player || !actor
+        || systems?.crew?.player !== actor || systems.crew.cavemen.get(actor.traits.name) !== actor
+        || typeof onRelease !== "function") throw Error("independent pilot body unavailable");
+      const previous = boundSystems, callbacks = ["aimTarget", "meleeTarget", "onWeaponHit"]
+        .map(key => [key, Object.getOwnPropertyDescriptor(systems, key)]);
+      const binding = { systems, onRelease }; bodyBinding = binding;
+      const detach = () => {
+        if (bodyBinding !== binding) return;
+        clearRightGesture(); unlockAim(); restoreHead();
+        bodyBinding = null;
+        for (const [key, descriptor] of callbacks) {
+          if (descriptor) Object.defineProperty(systems, key, descriptor); else delete systems[key];
+        }
+        bind(previous);
+      };
+      try { bind(systems); resetGroundView(); showAct(); syncAim(); syncWeaponHud(); }
+      catch (error) { detach(); throw error; }
+      return detach;
     };
     const player = () => crew ? crew.player : null;
     const controlTransition = {}, arrivalTransition = {}, arrivalKeep = { relYaw: 0, pitch: 0, distance: 0 };
@@ -2217,6 +2242,7 @@
       if (cave && !cave.weapon.aiming && ctx.combatOnly?.()) modeAction("mode-toggle");
     };
     const possess = (cave, transition = null) => {
+      if (bodyBinding && cave !== player()) { bodyBinding.onRelease(); return false; }
       if (cave && cave === player()) { requireCombat(); return true; }
       if (!cave || crew.cavemen.get(cave.traits.name) !== cave) { hud.toast("That Ooga is not available here"); return false; }
       // A scene may refuse an Ooga (whose it is, who is here): the refusal says why and nothing changes.
@@ -2355,6 +2381,7 @@
       return true;
     };
     const release = (quiet = false) => {
+      if (bodyBinding) { bodyBinding.onRelease(); return; }
       if (firstOnly && player() && !disposed) return;
       handoff.cancel();
       restoredPose = null;
@@ -3819,6 +3846,7 @@
       reticle.hidden = menuOpen || !value || !armed();
     };
     const dispose = (keep = false) => {
+      if (bodyBinding) bodyBinding.onRelease();
       if (player()) remember(player());
       handoff.cancel();
       if (saveActiveLoginView === saveLoginView) saveActiveLoginView = null;
@@ -4072,7 +4100,7 @@
       get shoulderEntryMix() { return aimMix; },
       // The view being kept: "first-person", "shoulder", "birds-eye", "orbit", or "detached" with nobody driven.
       get view() { return viewMode(); },
-      bind, setActive, refreshCombat, readInput, update, syncHeadVisibility, turnToward, goPreset, resetCamera, freeCursor, navigate, travelRefusal, travel, transformView, tiltView, framePoint, releaseFrame, pickCarryTarget, enterClose, exitClose, possess, release, escape, action, modeAction, weaponAction, weaponMode, showAct, suspend, resume, dispose, get player() {
+      bind, attachBody, setActive, refreshCombat, readInput, update, syncHeadVisibility, turnToward, goPreset, resetCamera, freeCursor, navigate, travelRefusal, travel, transformView, tiltView, framePoint, releaseFrame, pickCarryTarget, enterClose, exitClose, possess, release, escape, action, modeAction, weaponAction, weaponMode, showAct, suspend, resume, dispose, get player() {
       return player();
     }, get assistedTarget() {
       if (birdsEye() && assistedTargetActive) return assistedTargetHit;

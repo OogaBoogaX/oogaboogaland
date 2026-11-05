@@ -44,6 +44,7 @@ import { RoomNpcAuthority, validateNpcAuthority, npcAuthorityView, npcProtocolSu
 import { RoomBodyHandoff, ROOM_BODY } from "./room-body-handoff.js";
 import { RoomBodyPresence, ROOM_BODY_PRESENCE } from "./room-body-presence.js";
 import { ROOM_BODY_RELEASE, validateBodyRelease, validBodyQuiescence } from "./room-body-release.js";
+import { HUB_WORLD_OBJECT, createRoomWorldNotifier } from "./room-world-events.js";
 
 const CAST = castIndex(CAST_ROWS);
 
@@ -72,6 +73,7 @@ export class Room extends DurableObject {
     this.bodyHandoffRequired = false;
     this.bodyPresenceRequired = false;
     this.bodyPresenceCache = null;
+    this.worldNotifier = null;
     // The arcade's ghost arena: its own hunt's host, how many follow it, and its last state frame.
     this.ghostHostId = 0;
     this.ghostFollowers = 0;
@@ -92,6 +94,7 @@ export class Room extends DurableObject {
     // hear the same crackle at the same moment. Stored, so a woken or redeployed room keeps the phase.
     this.loopEpoch = 0;
     ctx.blockConcurrencyWhile(async () => {
+      const recoveredBodies = [];
       // A saved server assignment stays fenced even if preview configuration is
       // removed. Older builds need an explicit release before rollback.
       const authority = await ctx.storage.get("npc-authority-v1");
@@ -120,7 +123,11 @@ export class Room extends DurableObject {
                 p.bodyClosedAt = r.closedAt;
                 p.ws.serializeAttachment(this.attachment(p));
               } else if (Number.isSafeInteger(p.bodyClosedAt)) await outbox.close({ accountId: r.accountId, connection: r.connection }, p.bodyClosedAt);
-            } else if (r.phase !== "closed") await outbox.close({ accountId: r.accountId, connection: r.connection }, r.at);
+              recoveredBodies.push({ accountId: r.accountId, connection: r.connection });
+            } else if (r.phase !== "closed") {
+              const identity = { accountId: r.accountId, connection: r.connection }, movement = await outbox.movement(identity);
+              await outbox.close(identity, Math.max(r.at, movement?.receivedAt ?? 0));
+            }
           }
         }
       }
@@ -154,6 +161,8 @@ export class Room extends DurableObject {
         const set = await ctx.storage.getAlarm();
         if (set === null || set > this.cleanupAt) await ctx.storage.setAlarm(this.cleanupAt);
       }
+      for (const identity of recoveredBodies) await this.syncCommittedBodyParticipant(identity);
+      this.notifyWorld();
     });
     // A woken room rebuilds its roster from the attachments its sockets carry.
     for (const ws of ctx.getWebSockets()) {
@@ -189,7 +198,7 @@ export class Room extends DurableObject {
   }
 
   attachment(p) {
-    return { ...(p.bodyQuiescence ? { bodyQuiescence: p.bodyQuiescence } : {}), ...(p.bodyMigrationProtocol === 1 ? { bodyMigrationProtocol: 1, bodyReleasedRevision: p.bodyReleasedRevision || 0 } : {}), ...(p.bodyPresenceProtocol === 1 ? { bodyPresenceProtocol: 1, bodyPresenceSent: p.bodyPresenceSent || null, bodyPresenceAck: p.bodyPresenceAck || null } : {}), ...(p.bodyProtocol === 2 || p.bodyHandoff ? { bodyProtocol: p.bodyProtocol, bodyHandoff: !!p.bodyHandoff, bodyClosedAt: p.bodyClosedAt ?? null } : {}), npcProtocol: p.npcProtocol || 0, npcSent: p.npcSent || null, npcAck: p.npcAck || null, cabinet: p.cabinet || null, cabinetBucket: p.cabinetBucket || null, hockey: p.hockey || null, hockeyBuckets: p.hockeyBuckets || null, id: p.id, login: p.login, display: p.display, contributor: p.contributor, body: p.body, connectionToken: p.connectionToken, studioSeat: p.studioSeat, studioRevoked: !!p.studioRevoked, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, j: p.j, w: p.w, v: p.v, va: p.va, r: p.r, voice: p.voice, muted: p.muted, hp: p.hp, ko: p.ko, sent: p.sent, zone: p.zone, pokerVoice: p.pokerVoice, inHub: p.inHub, visible: p.visible, joinedAt: p.joinedAt, door: p.door, passes: p.passes, blendTo: p.blendTo, blendK: p.blendK };
+    return { ...(p.oogaMotionProtocol === 1 ? { oogaMotionProtocol: 1 } : {}), ...(p.bodyPresentedRequest ? { bodyPresentedRequest: p.bodyPresentedRequest } : {}), ...(p.bodyMotionProtocol === 1 ? { bodyMotionProtocol: 1 } : {}), ...(p.bodyQuiescence ? { bodyQuiescence: p.bodyQuiescence } : {}), ...(p.bodyMigrationProtocol === 1 ? { bodyMigrationProtocol: 1, bodyReleasedRevision: p.bodyReleasedRevision || 0 } : {}), ...(p.bodyPresenceProtocol === 1 ? { bodyPresenceProtocol: 1, bodyPresenceSent: p.bodyPresenceSent || null, bodyPresenceAck: p.bodyPresenceAck || null } : {}), ...(p.bodyProtocol === 2 || p.bodyHandoff ? { bodyProtocol: p.bodyProtocol, bodyHandoff: !!p.bodyHandoff, bodyClosedAt: p.bodyClosedAt ?? null } : {}), npcProtocol: p.npcProtocol || 0, npcSent: p.npcSent || null, npcAck: p.npcAck || null, cabinet: p.cabinet || null, cabinetBucket: p.cabinetBucket || null, hockey: p.hockey || null, hockeyBuckets: p.hockeyBuckets || null, id: p.id, login: p.login, display: p.display, contributor: p.contributor, body: p.body, connectionToken: p.connectionToken, studioSeat: p.studioSeat, studioRevoked: !!p.studioRevoked, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, j: p.j, w: p.w, v: p.v, va: p.va, r: p.r, voice: p.voice, muted: p.muted, hp: p.hp, ko: p.ko, sent: p.sent, zone: p.zone, pokerVoice: p.pokerVoice, inHub: p.inHub, visible: p.visible, joinedAt: p.joinedAt, door: p.door, passes: p.passes, blendTo: p.blendTo, blendK: p.blendK };
   }
 
   view(p) {
@@ -368,6 +377,8 @@ export class Room extends DurableObject {
 
     const requestedProtocol = new URL(request.url).searchParams.get("npc-authority");
     const npcProtocol = requestedProtocol === "2" ? 2 : requestedProtocol === "1" ? 1 : 0;
+    const bodyMotionProtocol = new URL(request.url).searchParams.get("body-motion") === "1" ? 1 : 0;
+    const oogaMotionProtocol = new URL(request.url).searchParams.get("ooga-motion") === "1" ? 1 : 0;
     const bodyProtocol = new URL(request.url).searchParams.get("body-reclaim") === "2" ? 2 : 0;
     const bodyPresenceProtocol = new URL(request.url).searchParams.get("body-presence") === "1" ? 1 : 0;
     const bodyMigrationProtocol = new URL(request.url).searchParams.get("body-migration") === "1" ? 1 : 0;
@@ -394,7 +405,7 @@ export class Room extends DurableObject {
     }
 
     const spawn = spawnPoint(this.spawnSlot++);
-    const p = this.record(server, { ...who, npcProtocol, bodyProtocol, bodyPresenceProtocol, bodyMigrationProtocol, ...(this.bodyHandoffRequired ? { bodyHandoff: true } : {}), connectionToken: crypto.randomUUID(), body: null, x: spawn.x, y: 0, z: spawn.z, yaw: spawn.yaw });
+    const p = this.record(server, { ...who, npcProtocol, bodyProtocol, bodyPresenceProtocol, bodyMigrationProtocol, bodyMotionProtocol, oogaMotionProtocol, ...(this.bodyHandoffRequired ? { bodyHandoff: true } : {}), connectionToken: crypto.randomUUID(), body: null, x: spawn.x, y: 0, z: spawn.z, yaw: spawn.yaw });
     server.serializeAttachment(this.attachment(p));
     // An owner arriving takes either body back from whoever holds it.
     const own = ownedBody(CAST, p.login, p.contributor, p.id);
@@ -407,7 +418,9 @@ export class Room extends DurableObject {
 
     const others = [];
     for (const o of this.players.values()) if (o !== p) others.push(this.view(o));
-    this.send(server, { t: "welcome", you: this.view(p), players: others, connectionToken: p.connectionToken, tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers, ghostHost: this.ghostHostId, ghostFollowers: this.ghostFollowers, features: [CABINETS.FEATURE, "door", CHAT_FEATURE, CHALK_FEATURE, "hockey-v4", ...(bodyPresenceProtocol === 1 ? ["host-body-presence-v1"] : [])] });
+    this.send(server, { t: "welcome", you: this.view(p), players: others, connectionToken: p.connectionToken, tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers, ghostHost: this.ghostHostId, ghostFollowers: this.ghostFollowers, features: [CABINETS.FEATURE, "door", CHAT_FEATURE, CHALK_FEATURE, "hockey-v4", ...(bodyPresenceProtocol === 1 ? ["host-body-presence-v1"] : []),
+      ...(this.env.VIRTUAL_HOST_BODY_PREVIEW === "1" && this.env.VIRTUAL_HOST_MOVEMENT_PREVIEW === "1" && bodyProtocol === 2 && bodyMotionProtocol === 1
+        ? ["host-body-reclaim-v2", "host-body-motion-v1", ...(oogaMotionProtocol === 1 ? ["host-ooga-motion-v1"] : [])] : [])] });
     // A message of its own after welcome, so a page that does not know chat ignores it; empty after the room slept.
     this.send(server, { t: "chat-history", messages: this.chat.list() });
     this.sendCabinets(server);
@@ -416,6 +429,7 @@ export class Room extends DurableObject {
     this.sendStudio(p);
     this.updateVoice();
     await this.ensureSweep();
+    this.notifyWorld();
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -458,6 +472,28 @@ export class Room extends DurableObject {
         return { status: "acknowledged" };
       });
     }
+    if (msg.t === "body-motion-1" || msg.t === "body-motion-ooga-1") {
+      if (this.env.VIRTUAL_HOST_BODY_PREVIEW !== "1" || this.env.VIRTUAL_HOST_MOVEMENT_PREVIEW !== "1"
+        || p.bodyMotionProtocol !== 1 || msg.t === "body-motion-ooga-1" && p.oogaMotionProtocol !== 1
+        || p.bodyProtocol !== 2 || !p.bodyHandoff || p.bodyClosing
+        || !takeToken(p.bucket, MOVE_HZ, p.seenAt)) return;
+      return this.ctx.blockConcurrencyWhile(async () => {
+        if (this.players.get(p.id) !== p || p.bodyClosing || p.bodyClosedAt != null || p.bodyQuiescence
+          || this.npcAuthority?.mode !== "server") return { status: "refused" };
+        const ticket = { ...npcAuthorityView(this.npcAuthority), owner: this.npcAuthority.owner };
+        this.checkBodyHandoff(ticket);
+        const identity = { accountId: p.id, connection: p.connectionToken }, box = this.bodyHandoffController();
+        const result = await box.receiveMovement(identity, msg);
+        // Only a retained HOST receipt earns an ACK. A Room inbox write alone
+        // never tells the browser its recovery position has been accepted.
+        if (result.status === "accepted") {
+          await this.syncCommittedBodyParticipant(identity);
+          await box.deliverMovement(identity);
+        }
+        if (result.status === 'pending' || result.status === 'busy') this.notifyWorld();
+        return result;
+      });
+    }
     if (["body-ready", "body-applied", "body-started", "body-decline"].includes(msg.t)) {
       if (!p.bodyHandoff || p.bodyClosing || p.bodyProtocol !== 2) return;
       return this.ctx.blockConcurrencyWhile(async () => {
@@ -465,7 +501,9 @@ export class Room extends DurableObject {
         if (result.status === "closed") {
           p.bodyClosedAt = result.record.closedAt;
           p.ws.serializeAttachment(this.attachment(p));
+          await this.syncCommittedBodyParticipant({ accountId: p.id, connection: p.connectionToken });
         }
+        if (['dispatch', 'pending', 'closed', 'expired'].includes(result.status)) this.notifyWorld();
         return result;
       });
     }
@@ -482,8 +520,8 @@ export class Room extends DurableObject {
         if (snapshot) this.sendBodyPresence(p, ticket, snapshot);
       });
     }
-    // The live movement adapter is not integrated yet. A staged body cannot
-    // silently fall back to ordinary body/pose reports while testing handoff.
+    // Negotiated compact movement is the only staged-body ingress. Unsupported
+    // actions cannot silently fall back to ordinary body/pose reports.
     if (p.bodyHandoff && ["body", "pose", "zone", "blend", "hp", "shot", "swing", "cabinet", "hockey", "wallet"].includes(msg.t)) return;
     if (msg.t === "npc-ack") {
       if (p.npcSent && msg.revision === p.npcSent.revision && msg.sequence === p.npcSent.sequence) {
@@ -718,7 +756,7 @@ export class Room extends DurableObject {
       clearTimeout(this.flushTimer);
       this.flushTimer = 0;
     }
-    return closed;
+    return closed?.then(result => { this.notifyWorld(); return result; });
   }
 
   release(p, reason) {
@@ -770,6 +808,58 @@ export class Room extends DurableObject {
 
   // Explicit finite server hooks; no HTTP route, host loop or welcome feature
   // enables them. Claim/body data comes from the authenticated host runner only.
+  // Server-only admission lookup. Account, connection and character mapping
+  // come from the authenticated socket; this is not a client message type.
+  notifyWorld() {
+    // Off by default, with no deployed binding. The notification is never
+    // awaited inside a Room concurrency block: its receiver calls back into
+    // Room to read durable work and must not deadlock this object's input gate.
+    if (this.env.VIRTUAL_HOST_RUNNER_PREVIEW !== '1' || this.env.VIRTUAL_HOST_PREVIEW !== '1'
+      || this.env.VIRTUAL_HOST_BODY_PREVIEW !== '1' || this.env.VIRTUAL_HOST_MOVEMENT_PREVIEW !== '1'
+      || typeof this.env.VIRTUAL_WORLD?.getByName !== 'function') return false;
+    this.worldNotifier ||= createRoomWorldNotifier({
+      clock: () => Date.now(),
+      current: () => {
+        const a = this.npcAuthority;
+        return a?.mode === 'server' ? { v: 1, room: HUB_WORLD_OBJECT, world: a.world,
+          epoch: a.epoch, revision: a.revision, owner: a.owner, runUntil: a.runUntil } : null;
+      },
+      send: hint => this.env.VIRTUAL_WORLD.getByName(HUB_WORLD_OBJECT).notifyRoomWorld(hint),
+      hold: promise => this.background(promise),
+    });
+    return this.worldNotifier.notify();
+  }
+
+  bodyAdmissionCandidates(ticket) {
+    return this.ctx.blockConcurrencyWhile(async () => {
+      this.checkBodyHandoff(ticket);
+      if (this.players.size > 32 || [...this.players.values()].some(p => p.bodyProtocol !== 2 || p.bodyPresenceProtocol !== 1
+        || p.body !== null && !p.bodyHandoff)) throw Error('body admission incompatible occupants');
+      const retained = new Set((await this.bodyHandoffController().records()).map(row => row.accountId));
+      const candidates = [...this.players.values()].filter(p => !retained.has(p.id) && p.body === null && !p.bodyClosing
+        && p.bodyClosedAt == null && !p.bodyQuiescence && p.bodyMotionProtocol === 1 && p.oogaMotionProtocol === 1)
+        .sort((a, b) => a.id - b.id);
+      return { identities: candidates.slice(0, 4).map(p => ({ accountId: p.id, connection: p.connectionToken })), more: candidates.length > 4 };
+    });
+  }
+
+  bodyCandidate(ticket, identity, kind = 'ooga') {
+    return this.ctx.blockConcurrencyWhile(async () => {
+      this.checkBodyHandoff(ticket);
+      const p = this.players.get(identity?.accountId);
+      if (!p || p.connectionToken !== identity.connection || p.bodyProtocol !== 2 || p.bodyClosing || p.bodyQuiescence
+        || !['ooga', 'clanker'].includes(kind)) throw Error('body candidate connection mismatch');
+      const row = await this.bodyHandoffController().read(identity);
+      if (row) return { status: row.phase === 'closed' ? 'blocked' : 'retained', kind: row.kind, request: row.request };
+      if (p.body !== null || p.bodyMotionProtocol !== 1 || kind === 'ooga' && p.oogaMotionProtocol !== 1
+        || this.players.size > 32 || [...this.players.values()].some(o => o.bodyProtocol !== 2 || o.body !== null && !o.bodyHandoff))
+        throw Error('body candidate incompatible occupants');
+      const handle = ownedBody(CAST, p.login, p.contributor, p.id);
+      if (!handle) throw Error('body candidate character unavailable');
+      return { status: 'available', candidate: { accountId: p.id, bodyId: `player:${p.id}`, handle, kind } };
+    });
+  }
+
   stageBodyHandoff(ticket, identity, preparation, kind, request, claim) {
     return this.ctx.blockConcurrencyWhile(async () => {
       this.checkBodyHandoff(ticket);
@@ -778,6 +868,9 @@ export class Room extends DurableObject {
         || preparation?.epoch !== ticket.epoch || preparation.world !== ticket.world
         || preparation.bodyId !== `player:${p.id}` || claim?.accountId !== p.id || claim.bodyId !== preparation.bodyId)
         throw Error("body handoff connection mismatch");
+      if (claim?.source && (claim.source.handle !== ownedBody(CAST, p.login, p.contributor, p.id)
+        || claim.source.kind !== kind || p.bodyMotionProtocol !== 1 || kind === 'ooga' && p.oogaMotionProtocol !== 1))
+        throw Error('body source identity or capability mismatch');
       if (this.players.size > 32 || [...this.players.values()].some(o => o.bodyProtocol !== 2 || o.body !== null && !o.bodyHandoff))
         throw Error("body handoff incompatible occupants");
       const outbox = this.bodyHandoffController();
@@ -822,10 +915,79 @@ export class Room extends DurableObject {
     });
   }
 
+  // A finite server work inventory. Expired preparation is closed at its
+  // original deadline; wake/retry cannot grant another preparation window.
+  // Frozen bodies whose outboxes were retired cause no work or socket writes.
+  bodyWork(ticket) {
+    return this.ctx.blockConcurrencyWhile(async () => {
+      this.checkBodyHandoff(ticket);
+      const box = this.bodyHandoffController(), tokens = [], events = [];
+      let nextDeadline = null;
+      for (let row of await box.records()) {
+        const identity = { accountId: row.accountId, connection: row.connection }, p = this.players.get(row.accountId);
+        const movement = await box.movement(identity, this.ctx.storage, row);
+        const deadline = row.transfer?.expiresAt ?? row.preparation.expiresAt;
+        if (row.phase !== "closed") {
+          const missing = !p || p.connectionToken !== row.connection || p.bodyClosing || p.bodyClosedAt != null;
+          const expired = !row.liveSent && Date.now() >= deadline;
+          if (missing || expired) {
+            // A missing socket uses the last durable observation. A known
+            // close attachment has the actual disconnect time instead.
+            const closedAt = missing ? p?.connectionToken === row.connection && Number.isSafeInteger(p.bodyClosedAt)
+              ? p.bodyClosedAt : Math.max(row.at, movement?.receivedAt ?? 0) : deadline;
+            row = await box.close(identity, closedAt);
+            await this.syncCommittedBodyParticipant(identity);
+          } else if (!row.liveSent) nextDeadline = Math.min(nextDeadline ?? Infinity, deadline);
+        }
+        if (row.ref) tokens.push(row.ref.token);
+        if (row.phase === "closed") events.push({ kind: "close", identity });
+        else if (row.pending) events.push({ kind: "handoff", identity });
+        else if (movement && !movement.receipt && !movement.fenced) events.push({ kind: "movement", identity });
+      }
+      const publication = await this.readBodyEventPublication();
+      return { tokens, events, nextDeadline, publicationPending: publication.pending ? publication.revision : null };
+    });
+  }
+
+  async readBodyEventPublication(tx = this.ctx.storage) {
+    const row = await tx.get("room-body-events-v1");
+    if (row === undefined) return { revision: 0, pending: false };
+    if (!row || Object.keys(row).sort().join() !== "pending,revision"
+      || !Number.isSafeInteger(row.revision) || row.revision < 1 || typeof row.pending !== "boolean")
+      throw Error("invalid body event publication marker");
+    return row;
+  }
+
+  beginBodyEventBatch(ticket) {
+    return this.ctx.blockConcurrencyWhile(() => {
+      this.checkBodyHandoff(ticket);
+      return this.ctx.storage.transaction(async tx => {
+        const old = await this.readBodyEventPublication(tx);
+        if (old.revision === Number.MAX_SAFE_INTEGER) throw Error("body event revision exhausted");
+        const revision = old.revision + 1;
+        await tx.put("room-body-events-v1", { revision, pending: true }); return revision;
+      });
+    });
+  }
+
+  completeBodyEventBatch(ticket, revision) {
+    return this.ctx.blockConcurrencyWhile(() => {
+      this.checkBodyHandoff(ticket);
+      if (!Number.isSafeInteger(revision) || revision < 1) throw Error("invalid body event revision");
+      return this.ctx.storage.transaction(async tx => {
+        const row = await this.readBodyEventPublication(tx);
+        if (row.revision !== revision) return false;
+        if (row.pending) await tx.put("room-body-events-v1", { revision, pending: false });
+        return true;
+      });
+    });
+  }
+
   completeBodyHandoff(ticket, identity, revision, answer) {
     return this.ctx.blockConcurrencyWhile(async () => {
       this.checkBodyHandoff(ticket);
       const outbox = this.bodyHandoffController(), row = await outbox.complete(identity, revision, answer);
+      await this.syncCommittedBodyParticipant(identity);
       return { phase: row.phase, delivered: await outbox.deliver(identity) };
     });
   }
@@ -834,6 +996,7 @@ export class Room extends DurableObject {
     return this.ctx.blockConcurrencyWhile(async () => {
       this.checkBodyHandoff(ticket);
       const outbox = this.bodyHandoffController(), row = await outbox.read(identity);
+      await this.syncCommittedBodyParticipant(identity);
       return { phase: row?.phase ?? null, delivered: await outbox.deliver(identity) };
     });
   }
@@ -875,8 +1038,8 @@ export class Room extends DurableObject {
     });
   }
 
-  // Finite server hooks only. No WebSocket message/capability enables movement
-  // ingestion yet; its cadence and publication interaction need validation.
+  // Finite private hooks and explicitly negotiated compact preview ingress.
+  // Production routing, cadence and combined costs still require validation.
   stageBodyMovement(ticket, identity, message) {
     return this.ctx.blockConcurrencyWhile(() => {
       this.checkBodyHandoff(ticket); return this.bodyHandoffController().receiveMovement(identity, message);
@@ -889,6 +1052,7 @@ export class Room extends DurableObject {
     return this.ctx.blockConcurrencyWhile(async () => {
       this.checkBodyHandoff(ticket);
       const box = this.bodyHandoffController(); await box.completeMovement(identity, sequence, answer);
+      await this.syncCommittedBodyParticipant(identity);
       return { delivered: await box.deliverMovement(identity) };
     });
   }
@@ -896,6 +1060,44 @@ export class Room extends DurableObject {
     return this.ctx.blockConcurrencyWhile(() => {
       this.checkBodyHandoff(ticket); return this.bodyHandoffController().fenceMovement(identity, sequence, proof);
     });
+  }
+
+  async syncCommittedBodyParticipant(identity) {
+    const p = this.players.get(identity.accountId);
+    if (!p || p.connectionToken !== identity.connection || !p.bodyHandoff) return false;
+    const box = this.bodyHandoffController(), row = await box.read(identity);
+    if (!row || this.players.get(p.id) !== p || p.connectionToken !== identity.connection) return false;
+    const bodyId = `player:${p.id}`;
+    if (row.phase === "closed" || p.bodyClosing || p.bodyClosedAt != null) {
+      if (p.body !== bodyId) return false;
+      p.ws.serializeAttachment(this.attachment({ ...p, body: null })); p.body = null;
+      this.broadcast({ t: "body", id: p.id, name: null }); this.updateVoice(); return true;
+    }
+    if (this.env.VIRTUAL_HOST_MOVEMENT_PREVIEW !== "1" || row.phase !== "live" || !["clanker", "ooga"].includes(row.kind)
+      || row.preparation.bodyId !== bodyId) return false;
+    const view = row.transfer.view, movement = await box.movement(identity);
+    const accepted = movement?.receipt && !movement.fenced;
+    // A new pending inbox sample replaces its predecessor. The attachment is
+    // the last published position; waking must not roll it back to the grant.
+    if (!accepted && p.body === bodyId && p.bodyPresentedRequest === row.request) return false;
+    const checkpoint = accepted ? movement.checkpoint : row.transfer.checkpoint;
+    const values = row.kind === "clanker" && Array.isArray(checkpoint?.body) && checkpoint.body.length === 10
+      ? checkpoint.body.slice(1, 5) : row.kind === "ooga" && checkpoint?.kind === "ooga" && checkpoint.position
+        ? [checkpoint.position.x, checkpoint.position.y, checkpoint.position.z, checkpoint.position.yaw] : null;
+    if (!values || checkpoint.v !== 1 || checkpoint.world !== row.preparation.world || typeof view.zone !== "string"
+      || !ZONE_NAME.test(view.zone)) throw Error("committed body presentation incompatible");
+    const position = values.map(v => v === "-0" ? -0 : v);
+    if (!position.every(Number.isFinite)) throw Error("committed body presentation invalid");
+    if (this.players.get(p.id) !== p || p.bodyClosing || p.bodyClosedAt != null) return false;
+    const changed = p.body !== bodyId || p.zone !== view.zone;
+    if (!changed && p.bodyPresentedRequest === row.request && p.x === position[0] && p.y === position[1] && p.z === position[2] && p.yaw === position[3]) return false;
+    const next = { ...p, body: bodyId, bodyPresentedRequest: row.request, zone: view.zone, x: position[0], y: position[1], z: position[2], yaw: position[3],
+      g: null, j: 0, w: 0, v: null, r: undefined, hp: 100, ko: false };
+    // A failed attachment write is recoverable from the durable row/host receipt
+    // on wake; never publish an uncommitted inbox sample as accepted movement.
+    p.ws.serializeAttachment(this.attachment(next)); Object.assign(p, next);
+    if (changed) { this.broadcast({ t: "body", id: p.id, name: bodyId }); this.updateVoice(); }
+    this.dirty = true; this.scheduleFlush(); return true;
   }
 
   closedBodyHandoff(ticket, identity) {
@@ -1217,6 +1419,7 @@ export class Room extends DurableObject {
     this.npcAuthority = r;
     this.npcPacked = null;
     if (changed) {
+      this.worldNotifier?.dispose(); this.worldNotifier = null;
       this.lastNpc = null;
       for (const p of this.players.values()) {
         // Credit survives hibernation too. Repeated wakes cannot enqueue another
@@ -1232,6 +1435,7 @@ export class Room extends DurableObject {
       // clients stay server-fenced until the replacement identity is known.
       this.electHost();
       this.broadcast({ t: "npc-authority", authority: npcAuthorityView(r) });
+      this.notifyWorld();
     }
     for (const p of this.players.values()) this.sendNpcSnapshot(p);
   }

@@ -139,6 +139,30 @@ test("ownership queries share an immutable phase snapshot and a new phase observ
   assert.equal(createCheckpointPack(4096).unpack(state).owners.body, "replacement");
 });
 
+test('world spawn queries survive packing and transaction scopes without mutating the NPC checkpoint', () => {
+  const source = { version: 'spawn-fixture', initial: () => ({ x: 1 }), validate: () => true,
+    step: state => { state.x++; }, project: state => state.x, npcFor: () => 'npc:a', handoff: () => false };
+  assert.equal(compactSimulation(source, 4096).playerSpawn, undefined);
+  for (const intern of [false, true]) {
+    const adapter = compactSimulation({ ...source, playerSpawn(state, who) {
+      if (who.mutate) state.x = 99;
+      return { x: state.x, accountId: who.accountId };
+    } }, 4096, { intern });
+    const state = adapter.initial(), before = structuredClone(state);
+    assert.deepEqual(adapter.playerSpawn(state, { accountId: 1 }), { x: 1, accountId: 1 });
+    adapter.playerSpawn(state, { mutate: true }); assert.deepEqual(state, before, 'unscoped queries use a private decoded copy');
+    const scope = adapter.forTransaction();
+    assert.throws(() => scope.playerSpawn(state, { mutate: true }), TypeError);
+    scope.step(state, 50);
+    assert.deepEqual(scope.playerSpawn(state, { accountId: 1 }), { x: 2, accountId: 1 });
+    scope.dispose(); assert.throws(() => scope.playerSpawn(state, {}), /closed/);
+    const asyncAdapter = compactSimulation({ ...source, playerSpawn: () => Promise.resolve({}) }, 4096, { intern });
+    assert.throws(() => asyncAdapter.playerSpawn(asyncAdapter.initial(), {}), /synchronous/);
+    const asyncScope = asyncAdapter.forTransaction();
+    assert.throws(() => asyncScope.playerSpawn(asyncScope.initial(), {}), /synchronous/); asyncScope.dispose();
+  }
+});
+
 test("transaction scopes reuse only frozen checkpoints, preserve query phases and discard rejected mutations",()=>{
   let validations=0,mutateProject=false,stepState;
   const source={version:'scope-fixture',initial:()=>({value:1,owner:'first'}),

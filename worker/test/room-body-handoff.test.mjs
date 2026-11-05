@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { RoomBodyHandoff, ROOM_BODY, ROOM_MOVEMENT } from '../src/room-body-handoff.js';
 import { VirtualHost, HOST, SESSION_PROTOCOL } from '../src/virtual-host.js';
 import { createHostBodyStorage } from '../src/host-body-storage.js';
-import { closeBodyHandoff, advanceBodyMovement, retireRecoveredBodyHandoff } from '../src/host-body-room.js';
+import { closeBodyHandoff, advanceBodyMovement, retireRecoveredBodyHandoff, drainBodyEvents } from '../src/host-body-room.js';
 import { createClankerBodyCheckpoint } from '../src/clanker-roaming.js';
 import { createClankerBodySessions } from '../src/clanker-body-sessions.js';
 import { clankerController } from './fixtures/clanker-controller-fixture.mjs';
@@ -49,6 +49,53 @@ async function offered(f, i = identity(), data = transfer('offered', i.accountId
   const op = await box.receive(i, { t: 'body-ready', request: request(i.accountId) });
   return box.complete(i, op.record.pending.revision, { result: { ok: true, session: ref(i.accountId) }, transfer: data });
 }
+
+test('bounded event pass retires durable closes with round-robin progress and no idle publication or admission', async () => {
+  const f = fixture(), box = f.make(), hostTicket = { world: 'handoff-fixture', fence: 1, owner: 'host-a' };
+  const roomTicket = { world: hostTicket.world, epoch: 1, owner: hostTicket.owner };
+  for (let id = 1; id <= 6; id++) {
+    const i = identity(id); f.current.set(id, i.connection);
+    await box.prepare(i, preparation(id), 'clanker', request(id)); await box.close(i);
+  }
+  let publications = 0, loseCleanupReply = false, publication = null, revision = 0, failPublication = false;
+  const host = { bodyLifecycleRevision: async () => 1,
+    bodyPresence: async () => ({ frame: { world: hostTicket.world, epoch: 1, revision: 1, departures: [] } }) };
+  const room = {
+    bodyWork: async () => ({ tokens: [], nextDeadline: null, publicationPending: publication,
+      events: (await box.records()).reverse().map(r => ({ kind: 'close', identity: identity(r.accountId, r.connection) })) }),
+    beginBodyEventBatch: async () => (publication = ++revision),
+    completeBodyEventBatch: async (_, expected) => { assert.equal(expected, publication); publication = null; return true; },
+    bodyCensus: async () => ({ tokens: [] }),
+    closedBodyHandoff: (_, who) => box.cleanup(who),
+    resolveBodyHandoff: (_, who, revision, proof) => {
+      if (loseCleanupReply) { loseCleanupReply = false; f.storage.lose(); }
+      return box.resolveClosed(who, revision, proof);
+    },
+    bodyPresenceStatus: async () => null,
+    retainBodyPresence: async (_, __, frame) => { if (failPublication) throw Error('publication unavailable'); publications++; return { duplicate: false,
+      receipt: { world: frame.world, epoch: frame.epoch, revision: frame.revision, ids: [] } }; },
+    deliverBodyPresence: async () => true,
+  };
+  await assert.rejects(drainBodyEvents(host, room, hostTicket, roomTicket, { limit: 5 }), /budget/);
+  const first = await drainBodyEvents(host, room, hostTicket, roomTicket, { limit: 2, after: 2 });
+  assert.deepEqual(first.results.map(r => r.identity.accountId), [3, 4]);
+  assert.equal(first.remaining, 4); assert.equal(first.after, 4); assert.equal(first.blocked, false);
+  assert.equal(await box.read(identity(3)), null); assert.equal(publications, 1);
+  loseCleanupReply = true;
+  await assert.rejects(drainBodyEvents(host, room, hostTicket, roomTicket, { limit: 1, after: first.after }), /lost committed reply/);
+  assert.equal(await box.read(identity(5)), null, 'committed cleanup is not recreated after a lost reply');
+  failPublication = true;
+  await assert.rejects(drainBodyEvents(host, room, hostTicket, roomTicket, { after: first.after }), /publication unavailable/);
+  assert.equal((await box.records()).length, 0); assert.notEqual(publication, null);
+  failPublication = false;
+  const recovered = await drainBodyEvents(host, room, hostTicket, roomTicket);
+  assert.equal(recovered.results.length, 0); assert.equal(recovered.presence.retained, true);
+  assert.equal(recovered.publicationPending, false, 'publication debt survives retirement of the final outbox row');
+  const count = publications, writes = f.storage.writes.length;
+  const idle = await drainBodyEvents(host, room, hostTicket, roomTicket);
+  assert.equal(idle.results.length, 0); assert.equal(idle.presence, null);
+  assert.equal(publications, count); assert.equal(f.storage.writes.length, writes);
+});
 
 test('Room persists each intent and transfer before delivery; restart and duplicate receipts do not dispatch twice', async () => {
   const f = fixture(), i = identity(), box = f.make(); f.current.set(1, i.connection);
@@ -271,15 +318,34 @@ test('failed final activation durably disconnects the current host body without 
   assert.equal(h.current.get(1), h.i.connection, 'body cleanup retains authenticated voice connection');
 });
 
-async function liveMovement(f) {
-  const i = identity(), box = f.make(), row = await offered(f);
+async function liveMovement(f, checkpoint = null) {
+  const i = identity(), box = f.make(), row = await offered(f, i, { ...transfer('offered'), ...(checkpoint ? { checkpoint } : {}) });
   const active = await box.receive(i, receipt('body-applied', row));
-  const starting = await box.complete(i, active.record.pending.revision, { result: { ok: true, session: ref(1) }, transfer: transfer('starting') });
+  const starting = await box.complete(i, active.record.pending.revision, { result: { ok: true, session: ref(1) }, transfer: { ...transfer('starting'), ...(checkpoint ? { checkpoint } : {}) } });
   const ack = await box.receive(i, receipt('body-started', starting));
   await box.complete(i, ack.record.pending.revision, { result: { ok: true, view: { ...starting.transfer.view, state: 'live', deadline: null } } });
   await box.deliver(i); return box;
 }
 const motion = (sequence = 1) => ({ t: 'body-motion', request: request(1), sequence, checkpoint: { wire: 'bounded fixture' } });
+
+test('compact socket movement derives identity/profile from retained handoff and persists its write pacing across wake', async () => {
+  const f = fixture(), i = identity(), codec = globalThis.BL.bodyMotion;
+  const checkpoint = { v: 1, world: 'handoff-fixture', profile: '["trusted-profile"]', body: ['trusted-owner', 0, 2, 3, 1, 0, 0, 0, 0, 1] };
+  const box = await liveMovement(f, checkpoint), body = [...checkpoint.body]; body[1] = -0; body[3] = 4.123456789012345;
+  const message = { t: codec.TYPE, request: request(1), sequence: 1, data: codec.pack(body) };
+  f.at(100100); assert.equal((await box.receiveMovement(i, message)).status, 'pending');
+  const pending = await box.pendingMovement(i);
+  assert.deepEqual(pending.sample.checkpoint, { ...checkpoint, body: codec.unpack(message.data, 'trusted-owner') });
+  const writes = f.storage.writes.length;
+  assert.equal((await box.receiveMovement(i, message)).status, 'pending'); assert.equal(f.storage.writes.length, writes);
+  assert.equal(await box.deliverMovement(i), false, 'inbox durability is not a host ACK');
+  await box.completeMovement(i, 1, { sequence: 1, at: 100100 });
+  f.at(100200); const next = { ...message, sequence: 2 };
+  assert.equal((await f.make().receiveMovement(i, next)).status, 'paced');
+  f.at(100350); assert.equal((await f.make().receiveMovement(i, next)).status, 'pending');
+  await assert.rejects(box.receiveMovement(i, { ...next, request: request(2) }), /handoff/);
+  f.current.set(1, 'replacement'); await assert.rejects(box.receiveMovement(i, next), /handoff/);
+});
 
 test('durable body stop survives failed writes and lost replies without closing before the authenticated ACK', async t => {
   const f = fixture(), i = identity(), box = await liveMovement(f);

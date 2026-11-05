@@ -516,6 +516,11 @@ test('live movement capture retains one sample until the exact durable ACK and s
   assert.equal(client.captureMovement().checkpoint.x, 2); assert.equal(captures, 2);
   assert.equal(client.message(ack), false, 'old ACK cannot clear a newer sample');
   assert.equal(client.message({ ...ack, sequence: 2 }), true);
+  assert.equal(client.captureMovement(), null, 'unchanged accepted body creates no new durable sample');
+  assert.equal(captures, 3);
+  x = 3;
+  assert.equal(client.captureMovement().sequence, 3, 'idle capture does not spend a sequence');
+  assert.equal(client.message({ ...ack, sequence: 3 }), true);
   closeOnCapture = true;
   assert.equal(client.captureMovement(), null); assert.equal(client.active, false); assert.equal(releases, 1);
   assert.equal(client.captureMovement(), null);

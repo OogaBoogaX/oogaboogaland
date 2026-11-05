@@ -5,7 +5,17 @@ player physics, not shared NPC simulation. Activation and burst remain disabled;
 Tess is excluded. No deployment, provisioning, permanent loop or billing change
 is included.
 
-The local v73 checkpoint verifies the reclaim coordinator, body decoder and
+The signed v74 checkpoint `c4e9b3285392c3c8c4008cb3fc2d65c140d37a42`
+is published on draft #467. Its browser-free Unit, bundle and identity checks
+passed; Character intake was still pending when checked. The local v75 follow-up
+adds compact movement ingress, committed public-position synchronization and a
+disabled Hub Clanker adapter. Local v76 adds explicit bounded event coordination;
+v77 adds minimal Ooga recovery and durable records; v78 adds negotiated Ooga
+socket capture and inactive Hub/pilot attachment; v79 adds mixed-body transaction
+routing and authenticated selection of owned Ooga equipment. These follow-ups are not
+committed or published and do not complete production orchestration.
+
+The v73 checkpoint verifies the reclaim coordinator, body decoder and
 Clanker controls together, and fixes input-listener cleanup when scene detachment
 throws. The v72 untouched-viewer quiescence hook and connection-bound receipts
 remain. Its client preview remains off. Live Hub body restoration, full-world
@@ -23,7 +33,7 @@ new attachment before cleanup and removes listeners even when release throws.
 The exception still propagates to the reclaim owner rather than acknowledging
 uncertain cleanup as successful.
 
-### Remaining movement transport boundary (v74 local audit)
+### Historical movement transport boundary (v74 local audit)
 
 The private `Room.stageBodyMovement`/`RoomBodyHandoff.receiveMovement` hooks accept
 a bounded checkpoint of up to 4 KiB. They are not WebSocket ingress. The ordinary
@@ -51,6 +61,477 @@ then failed on a cross-VM array comparison. The comparison has been corrected
 by inspection, but further execution is stopped under the test rule. No complete
 size table or round-trip pass is claimed. Actual ingress cost, cadence, replay
 fencing and collision validation remain required before connecting this path.
+
+### v75: compact movement and Hub attachment (inactive)
+
+`body-motion.js` now implements the 58-byte Clanker payload and 184-character
+maximum envelope without changing `MESSAGE_MAX`. Seven binary64 values retain
+signed zero; jump count and flags occupy one byte each. Account, world, profile
+and owner are reconstructed from the authenticated connection's retained grant.
+Other character formats are refused. The parser accepts only the exact versioned
+envelope and canonical encoding; the host's existing body decoder remains the
+gameplay/collision validator before durable acceptance.
+
+The browser sender requires both its disabled local preview and explicit Room
+capability. It captures no faster than every 250 ms, retains one unresolved
+sample, retries that same sequence until acknowledged, and suppresses unchanged
+accepted checkpoints. The Room retains the same single pending sample and a
+250 ms write interval across wake. The existing movement token bucket remains
+the ingress prefilter. Ordinary pose and voice protocols are unchanged.
+
+Only a host receipt permits the public player attachment to advance or the
+browser to receive its movement ACK. Attachment failure prevents ACK; an exact
+retry repairs presentation before acknowledging. A wake with a newer pending
+sample preserves the attachment's last accepted position instead of jumping
+back to the login grant. A connection-bound presented-request marker prevents
+that optimization from skipping a replacement grant. Body release clears the
+public body while retaining the socket and voice session.
+
+The disabled Hub adapter maps the authenticated character to the existing NPC
+owner, creates a separate Clanker body using Hub terrain queries and fixed
+`hub-terrain-body-1` profile version, and attaches the existing controls only
+through the reclaim protocol. It unregisters on scene leave without disposing a
+newer scene's adapter. Missing owner/world/profile compatibility fails closed.
+This source integration has not been run in Hub or a browser under the existing
+STOP restriction; placement, overlap, scene transitions and visuals remain
+unverified there.
+
+Focused checks cover the new codec, inbox pacing and identity reconstruction,
+actual Room socket ingress, pending-sample wake, attachment-failure repair and
+idle capture suppression. The new Room fixture initially used an object instead
+of the source schema's profile string; it passed after that fixture correction.
+The separate v74 audit remains stopped and was not rerun. These checks do not
+measure production CPU or writes. Remaining work includes trusted full-world
+startup/profile mapping, a bounded event coordinator to drain the Room inbox
+through the host, Ooga restoration, deadline scheduling, and combined throughput
+and cost validation. No production binding, alarm loop or activation was added.
+
+### v76: bounded event coordination (local, inactive)
+
+`Room.bodyWork` inventories the existing durable outboxes under the current
+Room authority. It closes expired preparations at their original deadline and
+missing sockets at the latest durable observation, including a later movement
+sample. It exposes the earliest remaining handshake deadline and exact private
+session refs to the trusted coordinator, never to a browser. Queues remain
+bounded by the existing 32-account cap. Frozen bodies whose outboxes have been
+retired do not generate work.
+
+`drainBodyEvents` processes at most four accounts per explicit invocation,
+prioritizing close reconciliation, then handoff commands, then movement. It
+retains the caller's round-robin cursor, refreshes protected refs between
+operations, stops on blocked cleanup, and rereads deadlines after activation
+changes the preparation window. The existing operation journals handle lost
+replies. A trusted runtime must serialize these passes with other host mutation;
+the function itself neither admits new accounts nor starts a loop or timer.
+
+A small durable Room marker is written before the pass mutates the host. Only
+successful durable public-frame retention clears that exact marker revision.
+If cleanup removes the last outbox row and publication then fails, the next pass
+still discovers the debt and publishes current state. An older pass cannot
+clear a newer marker. The idle path with no debt performs no publication or
+writes. This adds two marker writes per successful nonempty pass; inventory
+reads and refreshed censuses are bounded but their combined production cost
+has not been measured. The four-account cap is a work bound, not a throughput
+claim or a replacement for the strict publication gate.
+
+Focused checks cover bounded progress, lost cleanup replies, publication retry
+after the last row is retired, marker restart/write failure, original deadline
+expiry, and missing-socket recovery after a newer durable movement sample. The
+first coordinator test injected a lost reply into an inventory read rather
+than the cleanup transaction; that fixture was corrected once and passed.
+No Hub/browser or broad test was run. The stopped v74 audit remains stopped.
+
+Full-world startup, actual event routing and earliest-deadline alarm ownership
+remain unimplemented. Ooga investigation found that `crew.create({playerName})`
+can own a separate actor, but `crew.control` resets its vertical position to the
+support plane. Reusing ordinary possession would therefore break frozen-airborne
+reclaim; a source-owned restore path and independent pilot attachment are still
+required. No Ooga behavior was changed in this increment.
+
+### v77: independent Ooga recovery (local, inactive)
+
+`ooga-body.js` defines an exact, versioned identity/position/equipment record.
+There is no rig, animation, velocity, ammunition, fuel or health continuation.
+The scene supplies a canonical world/profile/name, terrain support and standing
+shape clearance. Missing support or overlap refuses recovery rather than guessing
+a new location. A fresh `crew.create({playerName})` supplies one independent actor
+with separate health and weapon maps; the NPC is not controlled or modified.
+
+Preparation remains hidden with no registered input or crew updates. Activation
+waits for the reclaim coordinator's committed live receipt, checks clearance again,
+then restores feet height after ordinary possession would snap it to the floor.
+Hop velocity and held actions start at zero. The source crew resumes gravity only
+when the eventual scene owner calls its update. Partial input registration and
+failed activation are cleaned up; a failed or suspended body cannot be reactivated.
+The adapter requires explicit attach/detach callbacks. No Hub pilot attachment is
+installed yet, and actual source crew geometry/gravity has not been executed under
+the Hub/browser STOP restriction. Its controller tests use an interface fixture.
+
+`createOogaBodySessions` commits minimal Ooga body records with the existing host
+session transaction. Authenticated movement cannot alter identity or equipment.
+Placement is validated before acceptance and transfer; failed writes leave both
+session and body unchanged. Frozen records run no passive physics. The shared
+body store's previous Clanker-only kind guard now admits Ooga while retaining
+profile-specific validation and all existing byte/node/account bounds. This is
+an Ooga-only transaction adapter, not yet a mixed-character runtime.
+
+Room's committed-position projection accepts Ooga feet coordinates. Pending
+private movement does not affect public presence; only the host receipt advances
+the socket attachment. Wake preserves the accepted position. The compact socket
+codec and browser sender remain Clanker-only: this Ooga test uses the private
+Room API, not a working Ooga WebSocket path.
+
+Five focused Ooga checks pass, plus the focused actual Room projection/wake check.
+The host check uses actual VirtualHost/storage/session modules with fixture world
+and clearance callbacks. It covers atomic write failure, obstructed placement,
+freeze and owner restart with the original 60-second deadline. Its first run found
+the shared store's Clanker-only guard; the guard was corrected once and the test
+passed. No Hub/browser, broad suite or stopped v74 audit was run.
+
+Measured UTF-8 JSON bytes in that single-account fixture (including the body
+record's encoding/envelope and movement receipt, excluding provider internals):
+
+| State | Body checkpoint | Session | Full body record | Session + body record | All stored values | Storage key bytes |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Accepted movement | 289 | 443 | 629 | 1,072 | 1,527 | 37 |
+| Offered after restart | 289 | 448 | 476 | 924 | 1,379 | 37 |
+
+Thus removing pose and resources does not guarantee the full combined state fits
+1 KiB. Keep the bounded separate records for now. These are fixture observations,
+not worst-case capacity or provider billing measurements; shared host metadata is
+included only in “All stored values.” Max-width identity/position codec coverage
+does not substitute for worst-case combined session and movement-journal sizing.
+
+Remaining integration includes canonical full-world startup/profile mapping,
+mixed character routing, Ooga socket capture, independent pilot attachment,
+trusted event/alarm ownership and end-to-end late join/reclaim presentation.
+Strict delivery, representative capacity and production cost validation remain
+open. Activation and burst remain disabled; no limits or deployed routes changed.
+
+### v78: Ooga socket capture and Hub control wiring (local, inactive)
+
+`ooga-motion.js` packs four exact binary64 coordinates and two equipment bytes:
+34 binary bytes, 48 base64 characters, and a maximum 157-character JSON envelope.
+Signed zero is retained. No account, world, profile, owner, timestamp or resource
+value is sent. Room reconstructs identity from the authenticated retained grant.
+Unknown flag bits, invalid equipment combinations, nonfinite coordinates and
+noncanonical base64 are refused. This preserves equipment data in transit; the
+host still decides whether a gameplay state change is authorized.
+
+The additional `ooga-motion=1` query and `host-ooga-motion-v1` welcome capability
+are required alongside the existing movement/reclaim negotiation and disabled
+preview gates. Older Clanker-only clients receive no Ooga capability. Socket
+attachments preserve the negotiation across wake. Ooga shares the existing
+single-sample inbox, 250 ms pacing, host-receipt ACK, stale-connection fencing and
+committed-position projection. No message/rate/account limit was raised. The
+browser retries the same pending capture, then suppresses unchanged ACKed state.
+
+The disabled Hub adapter now selects an Ooga branch with fixed
+`hub-ooga-standing-1` profile and source terrain/standing-clearance queries.
+It creates a separate crew, reserves local presentation, ghosts the existing NPC,
+and binds the pilot to the already activated body without possessing it again.
+Movement capture, ordinary guide selection and footsteps use that controlled
+actor. The NPC crew and its synchronization remain separate. Pilot release and
+disposal call the reclaim owner; detach restores the prior systems and callbacks.
+Another possession cannot silently switch away from this authoritative body.
+
+This is source integration only. Hub/pilot execution remains prohibited by the
+existing STOP. It is not evidence of correct live collision, visuals, camera,
+scene transitions, interaction or cleanup. Equipment changes still require an
+authenticated host command: the current Ooga host adapter rejects a movement
+sample which changes equipment. Some Hub interaction helpers still target the
+original crew directly. These are explicit integration gaps, not supported
+features or reasons to activate the preview. The fixed browser profile also needs
+the matching authoritative full-world implementation before a grant can succeed.
+
+Three focused Ooga checks pass: exact codec/parser bounds, actual net capture and
+ACK handling, and actual Room socket ingestion/wake/late join. The net fixture's
+first ACK omitted the required generation; the fixture was corrected once and the
+allowed retry passed. Four existing focused Clanker codec/inbox/Room compatibility
+checks also pass. No Hub/browser, broad suite, production benchmark, stopped audit
+or external Claude transmission was performed. Full-world boot, canonical routing,
+mixed body adapters, alarm ownership and strict delivery/cost gates remain open.
+
+### v79: mixed-body routing and equipment selection (local, inactive)
+
+The Ooga adapter now accepts weapon selection, carry/combat mode, selected slot
+and wearing/removing an already-owned jetpack through the authenticated movement
+sample. It still refuses changes to weapon ownership, jetpack ownership and the
+unlimited-resource entitlement. The strict codec rejects equipping an unowned
+item. Host motion, equipment, body record and replay receipt commit atomically;
+duplicate samples cannot refresh presence or replace an earlier selection. The
+registry uses the original server observation time, so processing a delayed
+selection cannot extend a known disconnect deadline. Resource quantities and
+animation continuation remain absent. This closes the selection gap described
+in v78; acquiring new equipment still needs a trusted entitlement path.
+
+`createMixedBodySessions` composes the source Ooga and Clanker adapters inside the
+same existing host/body-storage transaction. Each sees only its own body/session
+rows. Capture checks that every current or departing body is supplied exactly
+once by its correct adapter, then orders the combined result by generation.
+There is no independent per-kind commit or partial save. Partial startup and
+disposal failures clean up every constructed child; a controller/capture failure
+poisons the attempt. Clanker construction debt shares the existing operation
+object across optimistic retries, and the combined passive budget takes the
+smaller source limit. Account, storage and delivery bounds are unchanged.
+
+This is body routing, not world startup. The caller must supply both source
+adapters and a real compatible world. The new integration test uses the actual
+Clanker controller over authored props and the actual Ooga record adapter with
+fixture clearance/world callbacks. It verifies mixed admission, unchanged other
+body state, rollback, cleanup and restart recovery. It does not run Hub or claim
+representative full-world CPU, collisions or cost. Additional filtered session
+views and captures need combined resource measurement before activation.
+
+Hub jetpack selection and direct twirl/tint controls now target the independent
+player's crew; game combat-mode changes reach that crew too. Its context omits
+the shared NPC resident callback: that callback owns Sani's seat and can relocate
+him, so invoking it from the separate player would alter NPC state and recovery
+position. The existing NPC shot recorder uses object identity and does not record
+the separate player's shots as NPC events. Ordinary player shots retain their
+existing networking path. These scene changes are reviewed source only under the
+Hub/browser STOP restriction.
+
+Six unique focused checks pass for equipment/replay/restart, mixed routing and
+partial startup, plus existing Clanker movement, delayed-observation deadlines
+and registry equipment recovery. No new test failed in this increment. The
+single-account encoded sizes from v77 remain unchanged in this fixture.
+
+Still missing: the authoritative full Hub simulation and canonical account/world/
+profile boot, deployed event/alarm ownership, trusted entitlement acquisition,
+remaining seating/game/scene-transition integration, and integrated performance/
+cost validation. There is no production host-runtime implementation behind the
+finite evaluation workers. Activation and burst remain disabled, and those
+evaluation fixtures must not be used as the real-world startup implementation.
+
+### v80: trusted first-login placement and Room staging (local, inactive)
+
+`Room.bodyCandidate` derives the account, canonical body ID and character handle
+from its current authenticated socket. It requires the negotiated movement and
+handoff capabilities and a compatible room; a stale socket cannot prepare a new
+body. `stageWorldBody` is one explicit server-side admission event. It retains
+the preparation in the existing Room outbox and reconciles a lost staging reply
+by reading that outbox. Repeated calls reuse retained work instead of creating a
+second preparation. There is no new browser-selected claim, route or timer.
+
+`VirtualHost.prepareWorldBody` reads the retained kind and generation without
+changing the world. Fresh admission requires the source simulation's synchronous
+`playerSpawn(state, identity)` adapter. The position is sampled again inside the
+offer transaction, after asset preparation, so a moving NPC's earlier position
+is not used. The source returns exactly `npcId`, `feetOffset`, `zone` and `body`.
+The host checks the canonical NPC mapping, kind, x/z/yaw and projected y minus
+the authored root-to-feet offset; zero momentum is enforced. An explicit null
+NPC mapping permits the world's safe spawn rule without creating an NPC. The
+source must supply valid equipment and standing-shape placement through the body
+adapter. No NPC checkpoint or track is changed by admission. Compact simulation
+wrappers preserve this hook, reject asynchronous results and expose frozen query
+state within a transaction.
+
+Reconnect uses the retained body and original deadline, including retained kind;
+it does not call the first-login spawn adapter. Recovery that expires the retained
+generation refuses the stale preparation rather than silently spawning again.
+Source claims omit legacy `zone`/`body` fields so an older host cannot accidentally
+treat them as an ordinary browser handoff. New claims cannot include those fields.
+
+Three focused checks passed: actual host admission/reclaim against a moving NPC
+fixture; actual Room capability/current-socket staging and lost-reply recovery
+with a stub host preparation; and packed transaction query isolation. The host
+fixture initially used the wrong `npcFor` callback signature; correcting that
+fixture and the single permitted retry passed. These are not a live Hub test or
+a complete production-world test.
+
+Additional source-only Hub fixes route magazine pickup, ammo cleanup, fire-roll
+controls, underground jetpack removal, magazine HUD and first-person fire display
+through the independent player's owning crew. Bed-landing clearance reads the
+pilot's current body. This leaves the NPC roster and its gameplay state separate.
+These paths remain unexecuted under the existing Hub/browser testing restriction.
+
+Still missing: a real full-world `playerSpawn` implementation and canonical
+startup/profile mapping (including Clanker source seeding), trusted event/alarm
+routing, remaining seat/game/scene-transition interactions, and representative
+throughput/cost validation. The new explicit admission function is not installed
+as a production handler. The prior strict four-Hz failure remains an activation
+blocker. No activation, burst, rate or storage bounds changed.
+
+### v81: fenced world ticks and explicit publication pacing (local, inactive)
+
+`tickRoomWorld` now reads the host revision before requesting Room's authenticated
+body census. A pending handoff, uncertain close or inconsistent census blocks the
+tick. `VirtualHost.tick` accepts the observed revision and compares it inside
+every storage attempt, before session recovery or world stepping. If an admission,
+movement or live acknowledgement committed while the census was in flight, the
+tick returns superseded without inferring a disconnect, advancing NPCs or writing
+the checkpoint. The caller must drain the durable Room work before another
+explicit tick; this helper installs no loop or retry policy. Token inputs are
+copied before an asynchronous storage callback can observe caller mutations.
+
+The focused race test exercises concurrent admission and an optimistic storage
+retry using the actual host with a rollback-capable store. Both preserve the
+new live body and discard speculative simulation. A fresh census advances the
+world normally. This is an authored data-only world, not full Hub simulation.
+
+`publishHostPoses` accepts an optional `notBefore`, explicit `waitUntil` callback
+and clock for the finite publication runner. At entry the requested wait must
+be no more than one 250 ms delivery interval. Preparation can happen before that
+deadline; final host confirmation remains after the wait. Early/rewound clocks
+fail closed; reaching the finite run end suppresses publication. Room independently
+checks its durable rate budget and ownership, so a caller cannot select an
+earlier commit time. No timer is installed by the bridge itself. Tests exercise
+post-wait confirmation, takeover during the wait, superseded revisions, expiry,
+clock faults and the unchanged 250 ms Room gate. One fixture initially reached
+its lease expiry before the intended concurrent-write case; correcting its clock
+setup and the one permitted retry passed.
+
+This makes the pacing contract explicit outside the evaluator, but does not
+demonstrate a performance improvement. Re-reading the preserved v66/v68 evidence
+shows consecutive publication gaps of 254–259 ms: positive confirmation and Room
+work after the strict gate accumulate delay. No benchmark was rerun, rate policy
+relaxed, confirmation moved earlier, burst enabled or production cost inferred.
+The strict four-Hz gate remains unsatisfied. Full-world source startup, geometry,
+profile mapping and actual runner/event wiring remain separate unfinished work.
+
+### v82: finite event dispatcher and fresh strict measurement (local, inactive)
+
+`openHostWorldRunner` attaches read-only to an already acquired host and its
+matching Room authority. It checks the world, owner, epoch, format, finite run
+deadline, strict cadence and host revision. It never begins a run, takes over,
+renews a run, installs a timer or creates a cloud binding. `worldRunState` supplies
+metadata without projecting poses, so a runner can attach while an expired body
+correctly blocks pose publication and then reconcile that body's deadline.
+
+The dispatcher routes explicit admission, body-event, tick and publish calls.
+It accepts one mutation at a time, returns `busy` without accepting/queuing another
+identity or command, and uses the durable Room outbox on the next explicit event.
+Each body pass drains at most four accounts, reconciles the fenced census and
+retains the committed presentation, including after restart or a lost reply.
+The next original body deadline is returned to the caller; there is no recurring
+frozen-body loop. Ordinary ticks do not rewrite body presence. Unknown pending
+work or a due body deadline blocks ticking/publication until an explicit body
+pass resolves it. An uncertain error closes the local dispatcher, leaving durable
+body state for recovery. Local close does not release a body, voice or Room owner.
+
+Publication has its own single in-flight request, allowing simulation to advance
+while waiting. Only the latest pending revision is retained; final confirmation
+rejects a frame superseded during the wait. Three focused checks pass using the
+actual host, session registry, Room NPC authority and body-presence stores with an
+authored transport census: frozen expiry/restart with no physics, bounded busy/
+error behavior, and concurrent production with stale-frame rejection. They do
+not execute Hub or represent full WebSocket admission/reclaim coverage.
+
+The strict local workerd measurement now uses `publishHostPoses`' explicit pacing
+instead of injecting the wait into its final-confirmation wrapper. One finite
+120-sweep/30-second run used 53 restricted roaming Clankers, 30 frozen body records
+and 32 protocol clients (31 acknowledging decoders, one stalled). It emitted
+104 sweeps, superseded 16, and delivered 85 emitted sweeps later than 250 ms.
+First-client age was 271.1 ms p95; last-client age was 336.4 ms p95. The strict
+delivery gate **failed**. No unchanged rerun followed. The initial sandbox attempt
+could not open localhost (`listen EPERM`); the permitted localhost-only run
+completed with zero outbound requests and zero runtime log errors.
+
+Measured host transaction wall time was 82.95 ms p95 (96.25 ms maximum); all 120
+simulation steps completed within their target deadlines. The host-side counter
+recorded 150 writes and 7,915,917 serialized bytes in the window: 5 writes per
+target second. These counters exclude Room storage writes and are not billed CPU
+or billing units. Aggregate transport counted 24,733,135 bytes/3,256 deliveries,
+including the harness's warmup; this is not a per-browser CPU measurement.
+Rollback and persisted restart checks retained all 30 bodies and 120 NPC steps.
+The cached runtime was Miniflare 5.20261001.0-alpha, not the declared production
+Wrangler. Raw local evidence: `verification-v82-strict-local.json` and the derived
+`verification-v82-strict-summary.json` alongside the checkout.
+
+This dispatcher is not exported from the deployed Worker and has no production
+event/alarm binding. Full Hub construction remains unfinished: the browser crew
+and scene own additional interaction state, seats/reservations and geometry that
+the restricted adapters do not capture. A real world factory/profile mapping,
+Clanker spawn seeding, complete interaction recovery and production runner wiring
+remain necessary. The measurement exercises the pacing bridge, not this new
+dispatcher's complete end-to-end route. Activation and burst remain disabled.
+
+### v83: Room event ingress and bounded admission discovery (local, inactive)
+
+Room now has a gated wake path for current joins, authority changes/recovery,
+durably accepted handoff/movement work and persisted closes. The optional
+`VIRTUAL_WORLD.getByName('island').notifyRoomWorld(hint)` RPC uses one stable object
+name across world versions. Its hint contains only server-owned world, Room
+revision, owner, epoch and finite run deadline; no player identity, command,
+position, equipment or voice data. The RPC is not awaited inside Room's
+concurrency block because the receiver must call back into Room. It requires
+`VIRTUAL_HOST_RUNNER_PREVIEW`, all existing host/body/movement preview flags and
+an explicit binding. None is enabled or added to deployment configuration here.
+
+The notifier holds one request, one coalesced flag and at most one timer. Sends
+are at least 250 ms apart; an external event grants at most two further attempts,
+and a busy/remaining-work response cannot sustain a permanent retry loop. An
+uncertain error schedules no retry; a subsequent actual event may try again,
+with three failures quiescing that notifier. Authority changes dispose the old
+notifier. These are expendable wake hints: existing durable inbox/close records
+and authenticated socket attachments remain the source of truth. No additional
+durable row is written per movement merely to notify the host.
+
+`bodyAdmissionCandidates` reads at most the bounded Room roster/outbox and returns
+four current socket identities plus a `more` flag. Existing outboxes, nonempty
+bodies, closing/declined sockets and migration quiescence are excluded. The
+receiver helper `dispatchRoomWorldHint` checks its own retained host/Room tickets,
+reconciles body work, obtains that current inventory, validates every identity
+before staging, and requests Ooga admission through the existing trusted path.
+The notification cannot select a different account, body kind, Room or world.
+
+Eight focused checks passed: actual Room gating/committed notification/admission
+inventory and replacement sockets; the existing missing-transport wake check;
+fake-clock notifier coalescing/pacing/failure/expiry; and receiver fencing plus
+bounded inventory validation. The Room wiring test uses a recording notifier;
+the notifier and receiver have separate focused checks. This is not an actual
+cross-object RPC or full Hub end-to-end test. The three additional compatibility
+checks cover host-receipted movement, authenticated staging/close ordering and
+voice-preserving decline/restart cleanup. The build (328 scripts), 32 changed
+JavaScript syntax checks and diff whitespace check pass. No new test failed.
+
+Still required before activation: the receiving Durable Object backed by the
+real Hub world factory, its fixed-world bootstrap/migration, a bounded rescan of
+durable work **and current admissions** when a hint is lost or follow-up budget
+is exhausted, finite-run tick/deadline scheduling and cleanup. No deployment
+binding, receiver class or always-on process is installed here. In particular,
+the notifier alone cannot guarantee first-login progress after a failed wake.
+Delivery and combined costs must be remeasured after the full path is wired;
+the failed v82 result remains the current timing evidence. Hub/browser STOP and
+disabled activation/burst remain in force; Tess and voice behavior are unchanged.
+
+### v84: receiver recovery increment — paused at user cost boundary
+
+Local, uncommitted `HostWorldReceiver` adds finite persisted recovery scheduling
+for an already acquired host/Room pair. It cannot begin or renew a world from a
+notification. It reserves an attempt and alarm before external work, fences
+hints against retained tickets, resumes bounded admission scans after restart,
+and pauses after three failures. A run permits at most 3,600 scan attempts,
+spaced at least 250 ms; quiet recovery backstops use 1 second. This is inactive:
+no Worker export, deployment binding, real Hub factory or automatic startup exists.
+The SQLite adapter follows the provider's
+[transaction contract](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#transaction)
+and preserves retryable overlapping alarm delivery per the
+[alarm contract](https://developers.cloudflare.com/durable-objects/api/alarms/).
+The new scheduling itself is not yet verified in workerd/SQLite.
+
+Recovery scans request `bodies({refresh:false})`: current Room census is still
+checked, but unchanged bodies do not cause repeated presentation writes or
+socket delivery in a retained runner. Restart and actual body changes still
+reconcile presentation. Body-frame lease expiry/late-join freshness remains an
+integration concern for the eventual shared world driver; this does not claim
+complete static presentation or full Hub startup.
+
+Five new receiver interface tests pass (lost hints/restart, fencing/budgets,
+concurrency, failure limits and atomic reservation using an authored storage
+adapter). One extended actual host/Room-authority runner test passes, including
+no body writes/delivery on an unchanged rescan. After the stop request, the user explicitly authorized one signed checkpoint
+and push. Essential publication checks passed: the build (328 scripts), all 34
+changed JavaScript syntax checks and whitespace checks. No broad tests or new
+performance run were performed. Receiver metadata adds
+one bounded row and up to two row writes per attempted scan plus alarm changes;
+combined billed cost is unmeasured. The prior strict delivery failure remains.
+
+Work paused at the user's explicit credit/cost boundary. Preserve this increment
+and all earlier checkpoints, do not activate, and await direction before more
+implementation, tests or agents. The separately authorized checkpoint
+publication does not authorize further feature work.
 
 ## Preservation and reversion
 

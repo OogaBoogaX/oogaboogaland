@@ -107,6 +107,13 @@ export class BodySessionHost extends DurableObject {
       body: { kind: 'clanker', motion: f.entries[index].motion, equipment } });
     let result, error = null;
     const phases = {}, publicationTiming = {};
+    const waitForPublication = async deadline => {
+      const at = performance.now();
+      while (Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, deadline - Date.now()));
+      phases['runner.pacing'] = [performance.now() - at];
+      publicationTiming.notBefore = deadline;
+      publicationTiming.gateReleasedAt = Date.now();
+    };
     const measured = (target, names, prefix) => Object.fromEntries(names.map(name => [name, async (...args) => {
       // Bounded experimental arm only: capture closer to the existing gate to
       // reduce pose age and the interval in which a new tick can supersede it.
@@ -123,12 +130,16 @@ export class BodySessionHost extends DurableObject {
       // ownership check. Waiting before projection adds that CPU time to every
       // Room interval and cannot model a four-Hz pipeline correctly.
       if (prefix === 'host' && name === 'confirmPoses' && input.notBefore !== undefined) {
-        if (!Number.isSafeInteger(input.notBefore) || input.notBefore - Date.now() > 250) throw Error('bounded publication pacing required');
-        const at = performance.now();
-        while (Date.now() < input.notBefore) await new Promise(resolve => setTimeout(resolve, input.notBefore - Date.now()));
-        phases['runner.pacing'] = [performance.now() - at];
-        publicationTiming.notBefore = input.notBefore;
-        publicationTiming.gateReleasedAt = Date.now();
+        // Strict runs use the source bridge's explicit pacing. Preserve the
+        // separate, disabled cadence experiments without changing their policy.
+        if (input.rolling || input.burst) {
+          if (!Number.isSafeInteger(input.notBefore) || input.notBefore - Date.now() > 250) throw Error('bounded publication pacing required');
+          await waitForPublication(input.notBefore);
+        } else {
+          publicationTiming.notBefore ??= input.notBefore;
+          publicationTiming.gateReleasedAt ??= Date.now();
+          phases['runner.pacing'] ||= [0];
+        }
       }
       const started = performance.now();
       if (command === 'publish') publicationTiming[`${prefix}.${name}.startedAt`] = Date.now();
@@ -151,7 +162,9 @@ export class BodySessionHost extends DurableObject {
         measured(host, ['poses', 'bindRoomPublication', 'confirmPoses'], 'host'),
         measured(this.env.ROOM.get(this.env.ROOM.idFromName('fixture')),
           ['npcAuthorityStatus', 'configureNpcAuthority', 'publishNpcSnapshot'], 'room'),
-        input.ticket, { acquire: input.acquire === true, format: 'mixed-1', ...(input.roomState ? { roomState: input.roomState } : {}), ...(input.rolling || input.burst ? { cadence: input.burst ? 'rate-4-burst-2-v1' : 'rolling-4-v1' } : {}) });
+        input.ticket, { acquire: input.acquire === true, format: 'mixed-1', ...(input.roomState ? { roomState: input.roomState } : {}),
+          ...(input.notBefore !== undefined && !input.rolling && !input.burst ? { notBefore: input.notBefore, waitUntil: waitForPublication } : {}),
+          ...(input.rolling || input.burst ? { cadence: input.burst ? 'rate-4-burst-2-v1' : 'rolling-4-v1' } : {}) });
       else if (command === 'claim') result = (await host.storage.transaction(tx => host.read(tx))).room
         ? await claimHostRoom(host, this.env.ROOM.get(this.env.ROOM.idFromName('fixture')), 'replacement') : await host.claim('replacement');
       else if (command === 'cleanup-claim') result = (await host.storage.transaction(tx => host.read(tx))).room

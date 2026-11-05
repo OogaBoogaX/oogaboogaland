@@ -23,7 +23,7 @@
     let phase = "legacy", adapter = null, current = null, resource = null, pending = false, timer = null;
     let grant = null, grantText = "", final = null, finalText = "", highestEpoch = 0, world = "";
     let origin = null, requestAt = null, last = null, lifetime = PREPARE_MS;
-    let movement = null, movementSequence = 0, sampling = false;
+    let movement = null, movementSequence = 0, movementLast = null, sampling = false;
     let stoppedRequest = null;
     let disposalFailed = false;
     let quiescing = false, quiescer = null, quiescence = null, checkingQuiescence = false;
@@ -37,7 +37,7 @@
       if (timer !== null) cancel(timer);
       timer = null; current = grant = final = null; grantText = finalText = "";
       origin = requestAt = last = null; lifetime = PREPARE_MS;
-      movement = null; movementSequence = 0; sampling = false;
+      movement = null; movementSequence = 0; movementLast = null; sampling = false;
       const previous = resource; resource = null; phase = next;
       if (adapter) dispose(adapter, previous);
     };
@@ -134,6 +134,7 @@
       if (m.t === 'body-motion-ack') {
         if (phase !== 'active' || Object.keys(m).sort().join(',') !== 'generation,request,sequence,t'
           || m.generation !== final?.view.generation || !positive(m.sequence) || m.sequence !== movementSequence) return false;
+        if (movement) movementLast = JSON.stringify(movement.checkpoint);
         movement = null; return true;
       }
       if (m.t === "body-grant") {
@@ -259,6 +260,13 @@
         if (required && current) failure();
         else clear(required ? "blocked" : "legacy");
         adapter = value;
+        // Scene-scoped teardown cannot clear a newer scene's registration.
+        return () => {
+          if (adapter !== value) return;
+          if (required && current) failure();
+          else clear(required ? "blocked" : "legacy");
+          if (adapter === value) adapter = null;
+        };
       },
       message,
       // Explicit data capture only; no timer or transmission. One unacknowledged
@@ -277,6 +285,7 @@
           const text = JSON.stringify(next);
           if (attempt !== serial || owner !== adapter || body !== resource || phase !== 'active') return null;
           if (text.length > 4096 || encoder.encode(text).byteLength > 4096) throw Error('body capture size');
+          if (JSON.stringify(checkpoint) === movementLast) return null;
           movement = JSON.parse(text); movementSequence++;
           return JSON.parse(text);
         } catch { if (attempt === serial) failure(); return null; }

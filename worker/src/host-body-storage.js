@@ -36,7 +36,7 @@ const identities = host => {
     if (!Number.isSafeInteger(r.accountId) || r.accountId < 1
       || typeof r.bodyId !== "string" || !/^[A-Za-z0-9._:/-]{1,64}$/.test(r.bodyId) || bodies.has(r.bodyId)
       || !Number.isSafeInteger(r.generation) || r.generation < 1 || generations.has(r.generation)
-      || kind !== "clanker") fail();
+      || !["clanker", "ooga"].includes(kind)) fail();
     bodies.add(r.bodyId); generations.add(r.generation);
     return [r.accountId, r.bodyId, r.generation, kind];
   }).sort((a, b) => a[2] - b[2]);

@@ -4,7 +4,7 @@ import { HOST, BODY_VIEW, SESSION_PROTOCOL, VirtualHost, LatestHostDelivery, bou
 import { createNpcPose } from "../src/npc-pose.js";
 import { compactSimulation } from "../src/simulation-checkpoint.js";
 import { rig } from "./fixtures/npc-pose-rig.mjs";
-import { reconcileRoomBodies } from "../src/host-body-room.js";
+import { reconcileRoomBodies, tickRoomWorld } from "../src/host-body-room.js";
 
 // A serial, rollback-capable storage fixture. It models transaction atomicity, not Cloudflare
 // scheduling, CPU billing, alarm precision or the production scene's collision geometry.
@@ -122,6 +122,54 @@ test("Room census reconciliation refuses uncertain closes and fences concurrent 
   assert.ok(h.store.read().sessions.sessions.every(s => s.state === "grace"));
   await assert.rejects(reconcileRoomBodies(h.host, room, ticket, { ...authority, epoch: 99 }), /authorities differ/);
   await assert.rejects(h.host.reconcileBodies(ticket, [], [], { expectedRevision: NaN }), /census revision/);
+});
+
+test('Room world ticks fence stale censuses before recovery and simulation, including transaction retries', async () => {
+  const h = harness(), ticket = await h.host.begin('owner', 120000);
+  const authority = { owner: ticket.owner, epoch: ticket.fence, world: ticket.world };
+  const first = (await h.host.connect(ticket, [], bodyClaim())).result;
+  h.at(100250);
+  let census = { ready: false, tokens: [first.session.token], closed: [], pending: [{ accountId: 1, connection: 'pending' }], unobserved: [] };
+  let during;
+  const room = { async bodyCensus(t) { assert.deepEqual(t, authority); if (during) await during(); return structuredClone(census); } };
+  const before = h.store.read();
+  assert.equal((await tickRoomWorld(h.host, room, ticket, authority)).status, 'blocked');
+  assert.deepEqual(h.store.read(), before);
+  census = { ready: true, tokens: [first.session.token], closed: [], pending: [], unobserved: [] };
+  during = () => h.host.connect(ticket, [first.session.token], { ...bodyClaim(), accountId: 2, bodyId: 'new-player' });
+  const rejected = await tickRoomWorld(h.host, room, ticket, authority);
+  assert.equal(rejected.status, 'superseded'); assert.equal(rejected.result.steps, 0);
+  assert.equal(h.store.read().simulation.steps, 0);
+  assert.ok(h.store.read().sessions.sessions.every(s => s.state === 'live'));
+  during = null;
+  census.tokens = h.store.read().sessions.sessions.map(s => s.token);
+  const accepted = await tickRoomWorld(h.host, room, ticket, authority);
+  assert.equal(accepted.status, 'advanced'); assert.equal(accepted.result.steps, 1);
+  assert.ok(h.store.read().sessions.sessions.every(s => s.state === 'live'));
+  // The storage callback may be retried against a later commit. The same
+  // expected revision must fence that retry too, without rerunning simulation.
+  const expectedRevision = await h.host.bodyLifecycleRevision(ticket), store = h.store;
+  let attempts = 0, retry;
+  const competing = { ...store, transaction: fn => store.transaction(async tx => {
+    attempts++; const result = await fn(tx);
+    if (attempts === 1) { retry = result; throw Error('optimistic conflict'); }
+    return result;
+  }).catch(async error => {
+    if (error.message !== 'optimistic conflict') throw error;
+    await h.host.connect(ticket, census.tokens, { ...bodyClaim(), accountId: 3, bodyId: 'third-player' });
+    return store.transaction(fn);
+  }) };
+  h.at(100500);
+  const retriedHost = new VirtualHost({ storage: competing, simulation, sessionAdapter: { stepPassive: m => m }, clock: h.now });
+  const retried = await retriedHost.tick(ticket, census.tokens, { expectedRevision });
+  assert.equal(retry.steps, 1); assert.equal(retried.superseded, true);
+  assert.equal(store.read().simulation.steps, 1, 'rolled-back simulation cannot leak into the committed world');
+  assert.ok(store.read().sessions.sessions.every(s => s.state === 'live'));
+  await assert.rejects(h.host.tick(ticket, [], { expectedRevision: NaN }), /census revision/);
+  const saved = store.read(); census.ready = true; census.pending = [{}];
+  await assert.rejects(tickRoomWorld(h.host, room, ticket, authority), /invalid world census/);
+  assert.deepEqual(store.read(), saved);
+  await assert.rejects(tickRoomWorld(h.host, room, ticket, { ...authority, epoch: 99 }), /authorities differ/);
 });
 
 test("body-only events validate empty censuses, preserve occupancy and apply an existing NPC handback once", async () => {

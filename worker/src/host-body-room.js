@@ -3,6 +3,89 @@
 // command recovers its result or records cancellation; it cannot create a body.
 import { sameCheckpointValue } from "./virtual-host.js";
 
+// Explicit trusted admission event. Retained Room work wins over a fresh nonce;
+// lost replies are reconciled by reading the outbox, never by blind re-admission.
+export async function stageWorldBody(host, room, hostTicket, roomTicket, identity, kind = 'ooga') {
+  const owner = { ...hostTicket }, authority = { ...roomTicket }, who = { ...identity };
+  if (owner.world !== authority.world || owner.fence !== authority.epoch || owner.owner !== authority.owner)
+    throw Error('body admission authorities differ');
+  const inspect = () => room.bodyCandidate(authority, who, kind);
+  const before = await inspect();
+  if (before.status === 'blocked') return { status: 'blocked' };
+  if (before.status === 'retained') return { status: 'retained', ...await room.deliverBodyHandoff(authority, who) };
+  if (before.status !== 'available' || before.candidate?.accountId !== who.accountId) throw Error('invalid body admission candidate');
+  const prepared = await host.prepareWorldBody(owner, before.candidate);
+  const request = crypto.randomUUID().replaceAll('-', '');
+  try {
+    await room.stageBodyHandoff(authority, who, prepared.preparation, prepared.kind, request, prepared.claim);
+    return { status: 'staged', request };
+  } catch (error) {
+    // A concurrent event for this same connection may already own the outbox.
+    // Never clear or replace it; the current Room authority checks it again.
+    const after = await inspect();
+    if (after.status !== 'retained') throw error;
+    return { status: 'reconciled', ...await room.deliverBodyHandoff(authority, who) };
+  }
+}
+
+// One bounded coordinator pass, explicitly invoked by a trusted serialized
+// runner. No admission, timer, lease renewal or rate-policy change. Durable
+// Room records remain the queue, so an interrupted pass needs no local replay.
+export async function drainBodyEvents(host, room, hostTicket, roomTicket, { limit = 4, after = 0 } = {}) {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 4
+    || !Number.isSafeInteger(after) || after < 0) throw Error("invalid body event budget");
+  const owner = { ...hostTicket }, authority = { ...roomTicket };
+  if (owner.world !== authority.world || owner.fence !== authority.epoch || owner.owner !== authority.owner)
+    throw Error("body event authorities differ");
+  await host.bodyLifecycleRevision(owner);
+  const work = await room.bodyWork(authority), order = { close: 0, handoff: 1, movement: 2 };
+  if (!work || !Array.isArray(work.events) || work.events.length > 32 || !Array.isArray(work.tokens)
+    || work.tokens.length > 32 || new Set(work.tokens).size !== work.tokens.length
+    || work.tokens.some(t => typeof t !== "string" || !/^[0-9a-f]{32}$/.test(t))
+    || work.nextDeadline !== null && (!Number.isSafeInteger(work.nextDeadline) || work.nextDeadline < 0)
+    || work.publicationPending !== null && (!Number.isSafeInteger(work.publicationPending) || work.publicationPending < 1))
+    throw Error("invalid body event inventory");
+  const seen = new Set();
+  for (const event of work.events) {
+    const i = event?.identity;
+    if (!Object.hasOwn(order, event?.kind) || !Number.isSafeInteger(i?.accountId) || i.accountId < 1
+      || typeof i.connection !== "string" || !/^[A-Za-z0-9-]{1,64}$/.test(i.connection) || seen.has(i.accountId))
+      throw Error("invalid body event identity");
+    seen.add(i.accountId);
+  }
+  const events = work.events.slice().sort((a, b) => order[a.kind] - order[b.kind]
+    || Number(a.identity.accountId <= after) - Number(b.identity.accountId <= after)
+    || a.identity.accountId - b.identity.accountId);
+  const results = [];
+  // Mark BEFORE a host mutation. Cleanup can retire its last outbox row before
+  // a crash; the marker is then the durable evidence that publication is owed.
+  const publication = events.length ? await room.beginBodyEventBatch(authority) : work.publicationPending;
+  if (publication !== null && (!Number.isSafeInteger(publication) || publication < 1)) throw Error("invalid body event publication");
+  for (const event of events.slice(0, limit)) {
+    // A preceding offer may have created a ref. Protect the freshly retained
+    // refs before another operation can infer any unrelated absence.
+    const tokens = results.length ? (await room.bodyCensus(authority)).tokens : work.tokens;
+    if (!Array.isArray(tokens) || tokens.length > 32 || new Set(tokens).size !== tokens.length
+      || tokens.some(t => typeof t !== "string" || !/^[0-9a-f]{32}$/.test(t))) throw Error("invalid body event census");
+    const operation = event.kind === "close" ? closeBodyHandoff
+      : event.kind === "handoff" ? advanceBodyHandoff : advanceBodyMovement;
+    const result = await operation(host, room, owner, authority, event.identity, tokens);
+    results.push({ kind: event.kind, identity: { ...event.identity }, result });
+    if (result.status === "blocked") break;
+  }
+  // Publication follows host commits. A failed/uncertain publication remains
+  // recoverable through the existing retained frame/departure receipt protocol.
+  const presence = publication !== null ? await retainHostBodyPresence(host, room, owner, authority) : null;
+  const published = presence?.retained === true && await room.completeBodyEventBatch(authority, publication);
+  // Activation can replace a ten-second preparation with a one-second ACK
+  // deadline. Return the committed deadline, never the pre-operation estimate.
+  const next = results.length ? await room.bodyWork(authority) : work;
+  return { results, after: results.at(-1)?.identity.accountId ?? after,
+    blocked: results.at(-1)?.result.status === "blocked",
+    remaining: next.events.length, nextDeadline: next.nextDeadline, presence,
+    publicationPending: publication !== null && !published };
+}
+
 // One finite server publication. Host and Room commits are independent: retain
 // the exact complete public frame in Room before acknowledging host departures.
 // A lost Room reply is read/reconciled, never assumed successful or replayed as
@@ -41,6 +124,26 @@ export async function reconcileRoomBodies(host, room, hostTicket, roomTicket) {
   if (!census.ready) return { status: "blocked", closed: census.closed, pending: census.pending, unobserved: census.unobserved };
   const result = await host.reconcileBodies(owner, census.tokens, [], { expectedRevision: revision });
   return { status: result.superseded ? "superseded" : "reconciled", ...result };
+}
+
+// One explicit world step after Room's pending body work has been drained.
+// No timer, automatic retry or publication: the bounded publication runner is
+// independent, and a busy census asks the caller to finish its durable outbox.
+export async function tickRoomWorld(host, room, hostTicket, roomTicket) {
+  const owner = { ...hostTicket }, authority = { ...roomTicket };
+  if (owner.world !== authority.world || owner.fence !== authority.epoch || owner.owner !== authority.owner)
+    throw Error('world census authorities differ');
+  const revision = await host.bodyLifecycleRevision(owner);
+  const census = await room.bodyCensus(authority);
+  if (!census || typeof census.ready !== 'boolean' || !Array.isArray(census.tokens) || census.tokens.length > 32
+    || new Set(census.tokens).size !== census.tokens.length
+    || census.tokens.some(token => typeof token !== 'string' || !/^[0-9a-f]{32}$/.test(token))
+    || !['closed', 'pending', 'unobserved'].every(key => Array.isArray(census[key]) && census[key].length <= 32)
+    || census.ready && (census.closed.length || census.pending.length || census.unobserved.length))
+    throw Error('invalid world census');
+  if (!census.ready) return { status: 'blocked', closed: census.closed, pending: census.pending, unobserved: census.unobserved };
+  const result = await host.tick(owner, census.tokens, { expectedRevision: revision });
+  return { status: result.superseded ? 'superseded' : 'advanced', result };
 }
 
 export async function advanceBodyHandoff(host, room, hostTicket, roomTicket, identity, liveTokens) {

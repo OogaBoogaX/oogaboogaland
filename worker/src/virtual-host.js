@@ -399,12 +399,20 @@ export class VirtualHost {
 
   // The same durable transaction advances grace even when there are no clients or NPC steps.
   // Once session state exists, callers must provide the authenticated transport census explicitly.
-  async tick(ticket, liveTokens) {
+  async tick(ticket, liveTokens, { expectedRevision } = {}) {
+    if (expectedRevision !== undefined && (!time(expectedRevision) || expectedRevision < 1)) fail("invalid world census revision");
+    if (liveTokens !== undefined && !Array.isArray(liveTokens)) fail('authenticated transport census required');
+    const tokens = liveTokens === undefined ? undefined : [...liveTokens];
     const budget = { left: this.passiveSteps };
     return this.transaction(async function(tx) {
       const now = this.now(), r = await this.read(tx);
       this.owns(r, ticket, now);
-      const { registry, recovery } = this.registry(r, now, liveTokens, { budget });
+      // Room census and host ownership are separate durable reads. Admission,
+      // movement or an ACK during that read invalidates the entire tick, before
+      // either absence recovery or simulation can mutate the newer checkpoint.
+      if (expectedRevision !== undefined && expectedRevision !== r.revision)
+        return { status: r.status, superseded: true, steps: 0, snapshot: null, revision: r.revision };
+      const { registry, recovery } = this.registry(r, now, tokens, { budget });
       if (now >= r.runUntil || r.status === "draining") {
         const effects = registry ? registry.drain(r.runUntil, now).effects : [];
         if (registry) this.settle(r, registry);
@@ -456,7 +464,7 @@ export class VirtualHost {
       if (now >= r.runUntil || r.status !== "running") fail("run closed to session operations");
       // Check before recovery: stale reconnect observations must not disconnect
       // a replacement by supplying an older set of live transport tokens.
-      if (admission && admission(r, now)?.then) fail("session admission must be synchronous");
+      if (admission && admission(r, now, this)?.then) fail("session admission must be synchronous");
       const { registry, recovery } = this.registry(r, now, liveTokens, { closes, create: true, priorityAccount, budget });
       this.settle(r, registry);
       const result = apply(registry, now);
@@ -494,6 +502,27 @@ export class VirtualHost {
     });
   }
 
+  // Private Room candidate only: no browser-selected pose or world. Resolve
+  // retained kind before preparing assets; fresh placement is read at OFFER,
+  // not here, since the NPC may move while browser assets are being prepared.
+  async prepareWorldBody(ticket, candidate) {
+    if (!exact(candidate, ['accountId', 'bodyId', 'handle', 'kind'])
+      || !Number.isSafeInteger(candidate.accountId) || candidate.accountId < 1
+      || candidate.bodyId !== `player:${candidate.accountId}` || !id(candidate.handle)
+      || !['ooga', 'clanker'].includes(candidate.kind)) fail('invalid world body candidate');
+    const who = structuredClone(candidate);
+    return this.transaction(async function(tx) {
+      const now = this.now(), r = await this.read(tx); this.owns(r, ticket, now);
+      if (r.status !== 'running' || now >= r.runUntil) fail('run closed to world body preparation');
+      const preparation = bodyPreparation(r, now, who.accountId, who.bodyId);
+      const retained = r.sessions?.sessions.find(s => s.accountId === who.accountId);
+      if (!retained && typeof this.simulation.playerSpawn !== 'function') fail('authoritative world spawn adapter required');
+      const kind = retained?.kind ?? who.kind;
+      return { preparation, kind, claim: { protocol: SESSION_PROTOCOL, world: r.world,
+        accountId: who.accountId, bodyId: who.bodyId, source: { handle: who.handle, kind } } };
+    });
+  }
+
   // Legacy foundation admission; not a browser handoff. Browser integration
   // must use offerBody / activateBody / startedBody and its current-socket outbox.
   // The authenticated account is independent of message fields. Claim, neutralized
@@ -509,11 +538,46 @@ export class VirtualHost {
       || !Array.isArray(liveTokens))
       fail("invalid body preparation");
     const request = structuredClone(claim), observed = structuredClone(preparation), tokens = [...liveTokens];
-    const admission = (r, now) => {
+    const hasSource = Object.hasOwn(request, 'source'), source = hasSource ? structuredClone(request.source) : null;
+    if (hasSource && (!exact(request, ['protocol', 'world', 'accountId', 'bodyId', 'source'])
+      || !exact(source, ['handle', 'kind']) || !id(source.handle) || !['ooga', 'clanker'].includes(source.kind)
+      || request.bodyId !== `player:${accountId}`)) fail('invalid authoritative body source');
+    const admission = (r, now, host) => {
       const current = bodyPreparation(r, now, accountId, request.bodyId);
       if (now >= observed.expiresAt || observed.expiresAt > current.expiresAt
         || ["world", "epoch", "generation", "nextGeneration"].some(k => observed[k] !== current[k]))
         fail("stale body preparation");
+      if (source) {
+        // Recreate this derived claim on every transaction retry. Never retain
+        // a speculative NPC position or mutate the committed NPC track.
+        delete request.body; delete request.zone;
+        const retained = r.sessions?.sessions.find(s => s.accountId === accountId);
+        if (retained) {
+          if (retained.kind !== source.kind) fail('retained body kind mismatch');
+          request.zone = retained.zone;
+        } else {
+          if (typeof host.simulation.playerSpawn !== 'function') fail('authoritative world spawn adapter required');
+          const spawn = host.simulation.playerSpawn(structuredClone(r.simulation),
+            { accountId, bodyId: request.bodyId, handle: source.handle, kind: source.kind });
+          boundedJSON(spawn, 2048, 128);
+          if (!exact(spawn, ['npcId', 'feetOffset', 'zone', 'body']) || !id(spawn.zone) || spawn.body?.kind !== source.kind
+            || !Number.isFinite(spawn.feetOffset) || spawn.feetOffset < 0 || spawn.feetOffset > 10
+            || spawn.npcId !== null && !id(spawn.npcId)) fail('invalid world body spawn');
+          const npcId = host.npcLookup(r)(request.bodyId);
+          if (spawn.npcId !== npcId) fail('world body NPC mapping mismatch');
+          if (npcId !== null) {
+            const projected = publicSnapshot(r, host.simulation.project(structuredClone(r.simulation)));
+            const npc = projected.npcs.find(n => n.id === npcId);
+            // Ooga projection may report the rig root; body continuity uses
+            // feet. The source adapter supplies its authored root offset.
+            if (!npc || npc.kind !== source.kind || npc.y - spawn.feetOffset !== spawn.body.motion?.y
+              || ['x', 'z', 'yaw'].some(k => npc[k] !== spawn.body.motion?.[k])) fail('world body must start at its NPC');
+          }
+          request.zone = spawn.zone; request.body = structuredClone(spawn.body);
+          if (!request.body.motion) fail('world body motion required');
+          request.body.motion.vx = request.body.motion.vy = request.body.motion.vz = 0;
+        }
+      }
     };
     return this.sessions(ticket, tokens, (registry, now) => {
       // Recovery can infer an old unobserved close and expire the body after
@@ -730,7 +794,8 @@ export class VirtualHost {
       [...r.sessions.sessions, ...r.sessions.pending].map(s => s.accountId), async () => {
         this.sessionAdapter.applyMovement(row, candidate);
         const { registry } = this.registry(r, now, tokens, { priorityAccount: accountId, budget });
-        const result = registry.updateObserved(reference, now, observedAt ?? now, { motion: candidate.motion });
+        const result = registry.updateObserved(reference, now, observedAt ?? now, { motion: candidate.motion,
+          ...(candidate.equipment === undefined ? {} : { equipment: candidate.equipment }) });
         if (result !== true) fail('body movement refused');
         this.settle(r, registry); r.wallAt = now; await this.save(tx, r);
       });
@@ -794,6 +859,17 @@ export class VirtualHost {
     return this.storage.transaction(async tx => {
       const now = this.now(), r = await this.read(tx); this.owns(r, ticket, now);
       return r.revision;
+    });
+  }
+
+  // Runner attachment must be possible while a body deadline is due. Reading
+  // poses is deliberately blocked then; metadata grants no publication/control.
+  async worldRunState(ticket) {
+    return this.storage.transaction(async tx => {
+      const now = this.now(), r = await this.read(tx); this.owns(r, ticket, now);
+      return { world: r.world, epoch: r.fence, owner: r.owner, revision: r.revision,
+        status: r.status, runUntil: r.runUntil, publicationProtocol: r.room ? 1 : 0,
+        canPublish: typeof this.simulation.poses === 'function' };
     });
   }
 

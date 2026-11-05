@@ -323,14 +323,16 @@ export class SessionRegistry {
 
   // Server-observed live motion can wait in Room's durable inbox. Processing
   // it later must not move last presence past an already observed socket close.
-  // Both times are trusted server clocks, never a browser-provided timestamp.
+  // Both times and any equipment change are validated by the host adapter,
+  // never accepted directly from a browser-provided patch.
   updateObserved(ref, now, observedAt, patch) {
     const r = this.#live(ref), t = this.#at(now);
     if (!r || !isTime(observedAt) || observedAt < r.lastSeenAt || observedAt > t
       || patch === null || typeof patch !== "object") return false;
     const motion = readMotion(patch.motion);
-    if (!motion) return false;
-    this.#clock = t; r.motion = motion; r.lastSeenAt = r.stepAt = observedAt;
+    const equipment = patch.equipment === undefined ? r.equipment : readEquipment(patch.equipment);
+    if (!motion || !equipment) return false;
+    this.#clock = t; r.motion = motion; r.equipment = equipment; r.lastSeenAt = r.stepAt = observedAt;
     return true;
   }
 

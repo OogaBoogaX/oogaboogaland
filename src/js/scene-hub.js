@@ -3191,10 +3191,11 @@
     JETPACK_HUD_STATE.blocked = JETPACK_HUD_STATE.owned && (cave ? !jetpackAllowed(cave) : cameraCaveIndex !== 0);
     return JETPACK_HUD_STATE;
   };
+  const actorCrew = cave => independentOoga && independentOoga.actor === cave ? independentOoga.crew : crew;
   const equipJetpack = (cave) => {
     if (!cave || !cave.jetpackOwned) return false;
     if (cave.jet) return true;
-    if (!crew.wearJetpack(cave, hubModels.jetpack(), hubModels.jetFlame())) return false;
+    if (!actorCrew(cave).wearJetpack(cave, hubModels.jetpack(), hubModels.jetFlame())) return false;
     pilot.showAct();
     const p = cave.root.position;
     fx.burst(p.x, p.y + 0.7, p.z, 14, [SPARK, DUST], 2.2);
@@ -3205,19 +3206,19 @@
   };
   const grantJetpack = (cave, wear = false) => {
     if (!cave) return false;
-    crew.setJetpackOwnership(cave, true, hubModels.jetpack(), hubModels.jetFlame());
+    actorCrew(cave).setJetpackOwnership(cave, true, hubModels.jetpack(), hubModels.jetFlame());
     pilot.showAct();
     return !wear || equipJetpack(cave);
   };
   const toggleJetpack = () => {
-    const cave = crew.player;
+    const cave = pilot.player;
     if (cave?.grabbedBy) return false;
     if (!cave) {
       hud.toast("Double-tap an Ooga Booga first");
       return false;
     }
     if (cave.jet) {
-      crew.removeJetpack(cave);
+      actorCrew(cave).removeJetpack(cave);
       pilot.showAct();
       hud.toast("Jetpack off");
       return true;
@@ -3273,10 +3274,11 @@
     refreshObjectGuides();
   };
   const grantMagazine = (cave = pilot.player) => {
+    const owner = actorCrew(cave);
     // Debug grants still create a full spare after the hidden pickup is gone.
-    if (!magazine) return crew.collectMagazine(cave);
+    if (!magazine) return owner.collectMagazine(cave);
     const available = magazine.ammo;
-    const remaining = crew.collectGroundMagazine(available, cave);
+    const remaining = owner.collectGroundMagazine(available, cave);
     if (remaining === available) return false;
     const added = available - remaining;
     if (remaining) {
@@ -3288,12 +3290,12 @@
   };
   const loseAbyssAmmo = (cave = pilot.player) => {
     if (!cave) return false;
-    const hadMagazines = crew.hasMagazine(cave), hadAmmo = cave.weapon.ammo > 0;
+    const owner = actorCrew(cave), hadMagazines = owner.hasMagazine(cave), hadAmmo = cave.weapon.ammo > 0;
     if (!hadMagazines && !hadAmmo) return false;
-    crew.stopBurst(cave);
-    crew.stopReload(cave, true);
+    owner.stopBurst(cave);
+    owner.stopReload(cave, true);
     if (hadMagazines) {
-      crew.removeMagazines(cave);
+      owner.removeMagazines(cave);
       spawnMagazinePickup();
     }
     cave.weapon.ammo = 0;
@@ -5898,7 +5900,7 @@
   const useNearbyAction = (action) => {
     if (action === cloudHopper?.action) cloudHopper.launch();
     else if (action === WAKE_ACTION) crew.wakePlayer();
-    else if (action === ROLL_ACTION) crew.dropRoll();
+    else if (action === ROLL_ACTION) actorCrew(pilot.player).dropRoll();
     else if (action === STAND_ACTION) crew.standPlayer(pilot.player, true);
     else if (action.kind === "bench") crew.sitPlayer(action);
     else if (action === HAMMOCK_FULL) hud.toast("The hammock is occupied: one Ooga at a time");
@@ -8723,6 +8725,13 @@
     }
     npcSync.prepare();
     if (!cloudHopper.held) crew.update(dt, elapsed);
+    if (independentOoga && dt > 0) {
+      if (pilot.player !== independentOoga.actor) BL.net.bodyReclaim.suspend();
+      else {
+        try { independentOoga.update(dt, elapsed); }
+        catch (error) { BL.net.bodyReclaim.suspend(); throw error; }
+      }
+    }
     cloudHopper.postUpdate();
     if (hammock) {
       hammock.settle(BL.net.remotes, BL.net.state.selfId, remoteShown, moveHammockSeat, leaveFullHammock);
@@ -8734,7 +8743,7 @@
       const cave = crew.list[i];
       if (cave.root.visible) floatPose(cave, cave.root.position.y - cave.baseY, cave.bodyHeight, cave.phase, elapsed);
     }
-    footsteps.update(crew.player);
+    footsteps.update(pilot.player);
     if (!cloudPlaying()) npcSync.update(dt);
     shareDrivenActor(dt);
     remotes.update(dt);
@@ -8764,7 +8773,7 @@
     else if (!player && !pilot.poseHeld && pilot.freeFalling && camera.position.y - CLOSE_VIEW.eyeHeight < ABYSS_RESPAWN_Y && abyssAt(camera.position.x, camera.position.z, camera.position.y - CLOSE_VIEW.eyeHeight)) respawnAtPile();
     updatePlayerCave(player);
     if (player && player.jet && !cloudHopper.held && !jetpackAllowed(player)) {
-      crew.removeJetpack(player);
+      actorCrew(player).removeJetpack(player);
       pilot.showAct();
       hud.toast("No jetpacks under ground");
     }
@@ -8965,6 +8974,7 @@
     gameCombatOnly = combatOnly;
     if (!on) for (const rec of clankerCaptures) if (rec.cave) finishClankerRider(rec.entry, false);
     crew.setCombatEnabled(on);
+    independentOoga?.crew.setCombatEnabled(on);
     clankers.setCombatEnabled(on);
     pilot.refreshCombat();
     clankerPlay.refreshCombat();
@@ -9306,8 +9316,8 @@
   };
   const shareDrivenActor = (dt) => {
     if (cloudHopper?.active) { BL.net.setBlend(null, 0); return; }
-    const gorilla = clankerPlay && clankerPlay.player, driven = gorilla || crew.player;
-    BL.net.setBody(gorilla ? gorilla.netBody : driven ? driven.traits.name : null);
+    const gorilla = clankerPlay && clankerPlay.player, driven = gorilla || pilot.player;
+    BL.net.setBody(gorilla ? gorilla.netBody : independentOoga ? BL.net.bodyReclaim.state.bodyId : driven ? driven.traits.name : null);
     if (!driven) { BL.net.setBlend(null, 0); return; }
     const zone = zoneOf(driven, !!gorilla);
     if (zone === BL.net.state.zone) zoneHeld = null;
@@ -9321,7 +9331,7 @@
   // Publish those final values, while body/zone reporting above stays before remote visibility updates.
   const shareDrivenPose = () => {
     if (cloudHopper?.active) return;
-    const gorilla = clankerPlay && clankerPlay.player, driven = gorilla || crew.player;
+    const gorilla = clankerPlay && clankerPlay.player, driven = gorilla || pilot.player;
     if (!driven) return;
     const p = driven.root.position;
     if (gorilla) {
@@ -9440,7 +9450,7 @@
     return POOL_SEAMS[poolSeamIndex];
   };
   const GUIDE_RAMP_COLUMN = { floor: 0, ceiling: 0 }, GUIDE_EYE = new Float64Array(3);
-  const controlledGuideActor = () => clankerPlay.active ? clankerPlay.player : crew.player;
+  const controlledGuideActor = () => clankerPlay.active ? clankerPlay.player : pilot.player;
   const exteriorRampGuides = (player) => {
     const eye = camera.position, p = player.root.position, feet = p.y - (player.gorilla ? 0 : player.baseY);
     // The exception is for the descent, not the flat entrance corridor or an eye in another room/window.
@@ -9493,6 +9503,7 @@
   const refreshMirrorObject = (node) => {
     remotes?.refreshNpc(node);
     independentClankerGhost?.refreshNpc(node);
+    independentOogaGhost?.refreshNpc(node);
     mirrorCave?.body?.refresh(node);
     entropyLab?.phase?.body?.refresh(node);
     for (const veil of caveVeils) veil.phase?.body.refresh(node);
@@ -9886,7 +9897,7 @@
   // clear of both the locally driven Ooga and every remote player's current body.
   const clankerBedPlayersClear = (entry, bed) => {
     const radius = entry.gorilla.bodyRadius, height = entry.gorilla.bodyHeight;
-    const local = crew.player;
+    const local = pilot.player;
     if (local && local.root.visible) {
       const p = local.root.position, feet = p.y - local.baseY;
       if (!cylinderSegmentClear(bed.x, bed.y, bed.z, bed.x, bed.y, bed.z, radius, height,
@@ -11075,12 +11086,103 @@
   // One independently controlled body, never appended to the NPC roster or
   // its capture array. The reclaim adapter owns the body and its disposal.
   let independentClanker = null, independentClankerGhost = null, releaseFrozenClanker = null;
-  let releaseBodyQuiescer = null;
+  let independentOoga = null, independentOogaGhost = null, releaseFrozenOoga = null, detachOogaPilot = null, hubBodySystems = null;
+  const HUB_BODY_RECLAIM_PREVIEW = false, HUB_BODY_TERRAIN_VERSION = "hub-terrain-body-1";
+  let releaseBodyQuiescer = null, releaseHubBodyAdapter = null;
+  const hubBodyIdle = () => !pilot.player && !crew.player && !clankerPlay.active && !clankers.player && !independentClanker && !independentOoga
+    && !entering && !factoryDeparting && !bifrostDeparting && !timechainIsland.gate.busy && !cloudHopper?.active;
+  const installHubBodyAdapter = () => {
+    releaseHubBodyAdapter?.(); releaseHubBodyAdapter = null;
+    if (!HUB_BODY_RECLAIM_PREVIEW) return;
+    releaseHubBodyAdapter = BL.net.bodyReclaim.setAdapter({
+      prepare(preparation) {
+        const authority = BL.net.state.npcAuthority, character = BL.net.hostCharacter(preparation);
+        if (!hubBodyIdle() || !character || !["clanker", "ooga"].includes(preparation.kind) || preparation.accountId !== BL.net.state.selfId
+          || authority?.mode !== "server" || authority.incompatible || authority.world !== preparation.world
+          || authority.epoch !== preparation.epoch) throw Error("Hub body world or identity unavailable");
+        if (preparation.kind === "ooga") {
+          const npc = crew.list.find(c => c.traits.name.toLowerCase() === character.handle.toLowerCase());
+          if (!npc || !hubBodySystems) throw Error("Hub Ooga owner mapping unavailable");
+          const adapter = BL.oogaBody.reclaimAdapter({
+            createBody: () => BL.oogaBody.create({ world: preparation.world, profile: "hub-ooga-standing-1", name: npc.traits.name,
+              context: { ...hubBodySystems, fx, combatEnabled: gameMode,
+                // The shared resident callback owns the NPC's seat and can
+                // relocate Sani. An independent player must not invoke it.
+                residentName: null, residentPose: cave => grabbedOogaPose(cave) },
+              clear: (x, y, z, radius, height, actor) => Math.hypot(x, z) <= worldBound()
+                && y + height <= ceilingAt(x, z, y, actor) + 1e-7
+                && physicalClearAt(x, y + 1e-7, z, radius, height - 1e-7, actor)
+                && propSegmentClear(x, y + 1e-7, z, x, y + 1e-7, z, radius, height - 1e-7, actor)
+                && bedSegmentClear(x, y, z, x, y, z, radius, height)
+                && matrixGateSegmentClear(x, y, z, x, y, z, radius, height)
+                && mirrorActorSegmentClear(x, y, z, x, y, z, height, actor),
+              jetpack: () => ({ geometry: hubModels.jetpack(), flameGeometry: hubModels.jetFlame() }) }),
+            attach: (body, _, view, scope) => attachPlayerOoga(body, npc, view, scope),
+            detach: detachPlayerOoga });
+          return { adapter, body: adapter.prepare(preparation) };
+        }
+        const npc = clankers.list.find(e => e.owner.traits.name.toLowerCase() === character.handle.toLowerCase());
+        if (!npc) throw Error("Hub body owner mapping unavailable");
+        // Source-owned queries and a fixed terrain profile, never a collision
+        // profile selected from client checkpoint data. The host must boot the
+        // same version; the transfer decoder rejects a different baseline.
+        const adapter = BL.clankerBodyTransfer.reclaimAdapter({ world: preparation.world,
+          createBody() {
+            return BL.clankers.createPlayerBody({ profile: "terrain-body-3", root,
+              ownerId: npc.owner.id, name: character.handle,
+              groundAt: (x, z, y) => island.supportAt(x, z, y, .52), clear: clankerClear,
+              terrain: { version: HUB_BODY_TERRAIN_VERSION, supportAt: clankerSupportAt,
+                terrainSupportAt: clankerTerrainSupportAt, groundPlaneAt: clankerGroundPlaneAt,
+                pointSupportAt: (x, z, y) => Math.max(island.supportAt(x, z, y, .02, -Infinity),
+                  solids.supportAt(x, z, y, .02, 0)) } });
+          },
+          attach: (body, _, view, scope) => clankerPlay.attachBody(body, { view, scope, onRelease: () => BL.net.bodyReclaim.suspend() }),
+          detach: body => clankerPlay.detachBody(body) });
+        return { adapter, body: adapter.prepare(preparation) };
+      },
+      preflight: (r, t) => r.adapter.preflight(r.body, t),
+      apply: (r, t) => r.adapter.apply(r.body, t),
+      activate: r => r.adapter.activate(r.body),
+      capture: r => r.adapter.capture(r.body),
+      release: r => r.adapter.release(r.body),
+    });
+  };
+  const detachPlayerOoga = body => {
+    if (independentOoga !== body) return;
+    independentOoga = null;
+    // Every cleanup runs even if input/camera or a visual binding fails.
+    const ghost = independentOogaGhost;
+    const cleanups = [detachOogaPilot, () => ghost?.dispose(), releaseFrozenOoga,
+      () => untrackMirrorObject(body.actor.root)];
+    detachOogaPilot = null; releaseFrozenOoga = null; independentOogaGhost = null;
+    let error;
+    for (const cleanup of cleanups) { try { cleanup?.(); } catch (caught) { error ||= caught; } }
+    if (error) throw error;
+  };
+  const attachPlayerOoga = (body, npc, view, scope) => {
+    if (independentOoga || pilot.player || crew.player || clankerPlay.active || !body.active
+      || body.actor === npc || crew.list.includes(body.actor) || view.kind !== "ooga"
+      || view.accountId !== BL.net.state.selfId || !hubBodySystems) return false;
+    independentOoga = body;
+    try {
+      releaseFrozenOoga = remotes.acquireLocalBody(view, scope, () => BL.net.bodyReclaim.suspend());
+      independentOogaGhost = BL.hostActorBindings.create({ root, capacity: 1 });
+      // The recovery group keeps staging hidden; its actor remains independent.
+      independentOogaGhost.bind({ bodyId: view.bodyId, kind: "ooga", generation: view.generation,
+        actor: { root: body.actor.root.parent, parts: body.actor.parts }, npc, freeArm: null });
+      body.context.crew = body.crew;
+      const detach = pilot.attachBody(body.context, body.actor, () => BL.net.bodyReclaim.suspend());
+      if (independentOoga !== body) { detach(); return false; }
+      detachOogaPilot = detach;
+      trackMirrorObject(body.actor.root, body.actor.traits.height * 2,
+        Math.max(body.actor.headOpen.verts.length, body.actor.headClosed.verts.length));
+      return true;
+    } catch (error) { try { detachPlayerOoga(body); } finally { throw error; } }
+  };
   const installBodyQuiescer = () => {
     releaseBodyQuiescer?.();
-    releaseBodyQuiescer = BL.net.bodyReclaim.setQuiescer(() =>
-      !pilot.player && !crew.player && !clankerPlay.active && !clankers.player && !independentClanker
-      && !entering && !factoryDeparting && !bifrostDeparting && !timechainIsland.gate.busy && !cloudHopper?.active);
+    releaseBodyQuiescer = BL.net.bodyReclaim.setQuiescer(hubBodyIdle);
+    installHubBodyAdapter();
   };
   const detachPlayerClanker = entry => {
     if (!entry || independentClanker !== entry) return;
@@ -11226,7 +11328,7 @@
   };
   const drawFirstPersonFire = (player) => {
     if (!player || !pilot.closeWanted || pilot.closeMix < 0.98) return;
-    crew.fireView(player, FIRE_VIEW);
+    actorCrew(player).fireView(player, FIRE_VIEW);
     const coverage = FIRE_VIEW.coverage, ember = FIRE_VIEW.ember, soot = FIRE_VIEW.soot;
     if (coverage <= 0 && soot <= 0) return;
     const context = overlayCanvas.getContext("2d"), width = overlayCanvas.width, height = overlayCanvas.height;
@@ -11368,7 +11470,7 @@
     cameraCover.state.opacity = 0.22 * (1 - closeMix);
     cameraCover.draw(camera, bananaActor ? null : player?.root, touchesRock, occluded, cameraRockAt, cameraRockMaterialAt, cutawayPool && player ? null : guides, dt, 0, null, exteriorRamp ? guideActorVisibleAt : null);
     bananaCover.draw(camera, player, dt, guideActorVisibleAt, bananaGuides.state, null);
-    drawFirstPersonFire(crew.player);
+    drawFirstPersonFire(pilot.player);
     // The whitepaper's monolith breaks the crest under a flash that fades out slowly, gone as the view settles on the sheet.
     if (wpFlash > 0) {
       const context = overlayCanvas.getContext("2d");
@@ -11458,8 +11560,8 @@
     // J mirrors the carried jetpack button without changing its fuel.
     if (BL.controls.matches(e, "jetpack") && !e.repeat) toggleJetpack();
     // N spins a driven Ooga's nunchaku, C changes the colourway of one built with two.
-    if (BL.controls.matches(e, "twirl") && !e.repeat && crew.twirl()) return;
-    if (BL.controls.matches(e, "tint") && !e.repeat && crew.toggleTint(crew.player)) return;
+    if (BL.controls.matches(e, "twirl") && !e.repeat && actorCrew(pilot.player).twirl()) return;
+    if (BL.controls.matches(e, "tint") && !e.repeat && actorCrew(pilot.player).toggleTint(pilot.player)) return;
     if (BL.controls.matches(e, "swapWeapon")) pilot.weaponAction("weapon-toggle");
     if (BL.controls.matches(e, "attack")) pilot.weaponAction("weapon-fire");
     const digit = parseInt(e.key, 10);
@@ -11728,10 +11830,10 @@
     world.islandKeep = null;
     overlayCanvas = ctx.overlay;
     magazineState = {
-      get owned() { return !!crew && crew.hasMagazine(crew.player); },
-      get ammo() { return crew ? crew.magazineAmmo(crew.player) : 0; },
-      get count() { return crew ? crew.magazineCount(crew.player) : 0; },
-      get carrier() { return crew && crew.hasMagazine(crew.player) ? crew.player.traits.name : null; }
+      get owned() { const cave = pilot?.player; return !!cave && actorCrew(cave).hasMagazine(cave); },
+      get ammo() { const cave = pilot?.player; return cave ? actorCrew(cave).magazineAmmo(cave) : 0; },
+      get count() { const cave = pilot?.player; return cave ? actorCrew(cave).magazineCount(cave) : 0; },
+      get carrier() { const cave = pilot?.player; return cave && actorCrew(cave).hasMagazine(cave) ? cave.traits.name : null; }
     };
     magazine = null;
     camera = createCamera({ fov: 48, near: 0.5, far: 900 });
@@ -12349,6 +12451,7 @@
     mark("cavemen");
     crates = shared.crates = cratesMod.create(shared);
     pilot.bind(shared);
+    hubBodySystems = shared;
     // The doorway draws the island once from inside the passage for the way back out (`renderView`), sets the
     // sphere's heartbeat going while a room readies slowly (`show`), and hands a crossing the island's own meshes to
     // keep on the GPU while the visit lasts (`keep`). A released island must not stay pinned by a departing visit.
@@ -12827,6 +12930,7 @@
     pilot.controls.reset(); input.reset(); pilot.setActive(true);
   };
   const leave = (destroy = false) => {
+    releaseHubBodyAdapter?.(); releaseHubBodyAdapter = null;
     releaseBodyQuiescer?.(); releaseBodyQuiescer = null;
     wpVisit++; wpSignal = null;
     cloudHopper?.cancel();
@@ -12935,7 +13039,7 @@
     zoneHeld = null;
     BL.net.setHub(false);
     npcSync.dispose();
-    remotes = npcSync = null;
+    remotes = npcSync = null; hubBodySystems = null;
     crew.dispose();
     critters.dispose();
     fx.dispose();

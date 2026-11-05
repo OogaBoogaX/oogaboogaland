@@ -264,6 +264,8 @@
   // pass. Never advertise an unfinished body protocol merely because it loads.
   const BODY_PRESENCE_PREVIEW = false;
   const BODY_MIGRATION_PREVIEW = false;
+  const BODY_MOVEMENT_PREVIEW = false, BODY_MOTION_MS = 250;
+  let bodyMovementEnabled = false, oogaMovementEnabled = false, bodyMotionAt = -Infinity;
   const bodyPresence = BL.bodyPresence.create({ send: msg => send(JSON.stringify(msg)),
     monotonic: () => performance.now(), wall: () => Date.now() });
   const bodyReclaim = BL.bodyReclaim.create({ send: msg => send(JSON.stringify(msg)), monotonic: () => performance.now(), wall: () => Date.now(),
@@ -526,6 +528,9 @@
       state.selfId = msg.you.id;
       state.connectionToken = typeof msg.connectionToken === "string" ? msg.connectionToken : "";
       bodyPresence.open(BODY_PRESENCE_PREVIEW && Array.isArray(msg.features) && msg.features.includes(BL.bodyPresence.FEATURE));
+      bodyMovementEnabled = BODY_MOVEMENT_PREVIEW && Array.isArray(msg.features) && msg.features.includes(BL.bodyMotion.FEATURE);
+      oogaMovementEnabled = bodyMovementEnabled && msg.features.includes(BL.oogaMotion.FEATURE);
+      bodyMotionAt = -Infinity;
       bodyReclaim.open(state.selfId, state.connectionToken, Array.isArray(msg.features) && msg.features.includes(BL.bodyReclaim.FEATURE),
         Array.isArray(msg.features) && msg.features.some(f => typeof f === "string" && f.startsWith("host-body-reclaim-")));
       state.cabinets = Array.isArray(msg.features) && msg.features.includes(BL.arcadeCabinets.FEATURE);
@@ -696,6 +701,7 @@
   };
 
   const close = (room) => {
+    bodyMovementEnabled = oogaMovementEnabled = false; bodyMotionAt = -Infinity;
     bodyReclaim.close();
     bodyPresence.close();
     window.clearInterval(pingTimer);
@@ -736,7 +742,7 @@
     retryTimer = 0;
     if (stopped || ws || !state.me) return;
     setRoom("connecting");
-    ws = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/room?npc-authority=1${BODY_PRESENCE_PREVIEW ? "&body-presence=1" : ""}${BODY_MIGRATION_PREVIEW ? "&body-migration=1" : ""}`);
+    ws = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/room?npc-authority=1${BODY_PRESENCE_PREVIEW ? "&body-presence=1" : ""}${BODY_MIGRATION_PREVIEW ? "&body-migration=1" : ""}${BODY_MOVEMENT_PREVIEW ? "&body-reclaim=2&body-motion=1&ooga-motion=1" : ""}`);
     ws.binaryType = "arraybuffer";
     ws.onmessage = onMessage;
     ws.onopen = () => {
@@ -1029,6 +1035,24 @@
   // Throttled to POSE_MS and skipped while nothing moved; a changed gorilla pose, jetpack or weapon also earns a report.
   const sendPose = (x, y, z, yaw, g = null, jet = 0, weapon = 0, visual = null, rest = 0) => {
     if (!bodyReclaim.allows("pose", body)) return;
+    if (bodyReclaim.required) {
+      const kind = bodyReclaim.state.kind, format = kind === "clanker" ? BL.bodyMotion
+        : kind === "ooga" && oogaMovementEnabled ? BL.oogaMotion : null;
+      if (!bodyMovementEnabled || !bodyReclaim.active || !format
+        || state.room !== "live" || !ws || ws.readyState !== WebSocket.OPEN) return;
+      state.self.x = x; state.self.y = y; state.self.z = z; state.self.zone = zone;
+      const now = performance.now();
+      if (!Number.isFinite(now) || now < bodyMotionAt) { bodyReclaim.suspend(); return; }
+      if (now - bodyMotionAt < BODY_MOTION_MS) return;
+      bodyMotionAt = now;
+      try {
+        const sample = bodyReclaim.captureMovement();
+        if (sample) send(JSON.stringify({ t: format.TYPE, request: sample.request, sequence: sample.sequence,
+          data: format.pack(kind === "clanker" ? sample.checkpoint.body : sample.checkpoint) }));
+        if (sample) moved();
+      } catch { bodyReclaim.suspend(); }
+      return;
+    }
     if (cabinetAnchor) {
       const at = cabinetAnchor;
       x = at.x; y = at.y; z = at.z; yaw = at.yaw; g = null; jet = weapon = 0; visual = null; rest = 0;

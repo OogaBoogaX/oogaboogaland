@@ -19,6 +19,8 @@ import { RoomBodyHandoff, ROOM_BODY } from "../src/room-body-handoff.js";
 import { RoomBodyPresence, ROOM_BODY_PRESENCE } from "../src/room-body-presence.js";
 import { ROOM_BODY_RELEASE, validateBodyRelease, validBodyQuiescence } from "../src/room-body-release.js";
 import { SessionRegistry } from "../src/host-sessions.js";
+import { stageWorldBody } from "../src/host-body-room.js";
+import { HUB_WORLD_OBJECT, createRoomWorldNotifier } from "../src/room-world-events.js";
 const wire = globalThis.BL.npcAuthority;
 const frame = (x = 1, signature = 0) => {
   const data = new ArrayBuffer(16 + 112 * 4), h = new Uint32Array(data,0,4), f = new Float32Array(data,16);
@@ -26,13 +28,13 @@ const frame = (x = 1, signature = 0) => {
   return data;
 };
 const roomSource = readFileSync(new URL('../src/room.js',import.meta.url),'utf8').replace(/import\s+[\s\S]*?from\s+"[^"]+";/g,'').replace('export class Room','class Room')+'\nglobalThis.Room=Room;';
-function host() {
+function host({ notifierFactory = createRoomWorldNotifier } = {}) {
   let now=100000, failWrite=0, ready=Promise.resolve(),lastBlock=ready,wraps=0,presenceReads=0; const accepted=[], alarms=[], stored=new Map();
   const names=['a','b','c',...Array.from({length:31},(_,i)=>'fixture'+i)];
   const socket=()=>({sent:[],closed:null,store:null,send(value){this.sent.push(typeof value==='string'?JSON.parse(value):value.slice(0));},close(code,reason){this.closed={code,reason};},serializeAttachment(a){this.store=structuredClone(a);},deserializeAttachment(){return structuredClone(this.store);}});
   class Clock extends Date {static now(){return now;}}
   class Response {constructor(body,init={}){this.status=init.status;this.body=body;this.webSocket=init.webSocket;}}
-  const context={...protocol,...studioPolicy,...authority,sha256Hex,getPlayer,RoomBodyHandoff,ROOM_BODY,RoomBodyPresence,ROOM_BODY_PRESENCE,ROOM_BODY_RELEASE,validateBodyRelease,validBodyQuiescence,sfuClient:()=>null,
+  const context={...protocol,...studioPolicy,...authority,sha256Hex,getPlayer,RoomBodyHandoff,ROOM_BODY,RoomBodyPresence,ROOM_BODY_PRESENCE,ROOM_BODY_RELEASE,validateBodyRelease,validBodyQuiescence,HUB_WORLD_OBJECT,createRoomWorldNotifier:notifierFactory,sfuClient:()=>null,
     packNpcSnapshot:r=>{wraps++;return authority.packNpcSnapshot(r);},CAST_ROWS:names.map(handle=>({handle,github_login:handle})),
     DurableObject:class {constructor(ctx,env){this.ctx=ctx;this.env=env;}},
     WebSocketPair:class {constructor(){this[0]=socket();this[1]=socket();}},Response,WebSocketRequestResponsePair:class{},
@@ -42,8 +44,8 @@ function host() {
     put:async(k,v)=>stored.set(k,structuredClone(v)),delete:async k=>stored.delete(k),getAlarm:async()=>alarms.at(-1)??null,setAlarm:async t=>alarms.push(t),
     async transaction(fn){const copy=structuredClone(stored);const result=await fn({get:async k=>{if(k==='room-body-presence-v1')presenceReads++;return structuredClone(copy.get(k));},put:async(k,v)=>{if(failWrite && --failWrite === 0){throw Error('storage unavailable');}copy.set(k,structuredClone(v));},delete:async k=>copy.delete(k)});stored.clear();for(const [k,v]of copy)stored.set(k,v);return result;}};
   const ctx={storage,setWebSocketAutoResponse(){},blockConcurrencyWhile(fn){const result=ready.then(fn);lastBlock=result;ready=result.catch(()=>{});return result;},acceptWebSocket:ws=>accepted.push(ws),getWebSockets:()=>accepted.filter(ws=>!ws.closed),getWebSocketAutoResponseTimestamp:()=>null};
-  return {at:t=>{now=t;},fail:(nth=1)=>{failWrite=nth;},stored,accepted,wraps:()=>wraps,presenceReads:()=>presenceReads,async room(enabled=true,mixed=false,body=false){const r=new context.Room(ctx,enabled?{VIRTUAL_HOST_PREVIEW:'1',...(mixed?{VIRTUAL_HOST_MIXED_PREVIEW:'1'}:{}),...(body?{VIRTUAL_HOST_BODY_PREVIEW:'1'}:{})}:{});await lastBlock;return r;},
-    async join(r,id,version=true,body=false,presence=false,migration=false){const before=accepted.length;const response=await r.fetch({url:'https://test.invalid/room'+(version?'?npc-authority='+(version===true?1:version):'')+(body?'&body-reclaim=2':'')+(presence?'&body-presence=1':'')+(migration?'&body-migration=1':''),headers:new Headers({upgrade:'websocket','x-player-id':String(id),'x-player-login':names[id-1],'x-player-contributor':'0'})});return {ws:accepted[before],response};},
+  return {at:t=>{now=t;},fail:(nth=1)=>{failWrite=nth;},stored,accepted,wraps:()=>wraps,presenceReads:()=>presenceReads,async room(enabled=true,mixed=false,body=false,movement=false){const r=new context.Room(ctx,enabled?{VIRTUAL_HOST_PREVIEW:'1',...(mixed?{VIRTUAL_HOST_MIXED_PREVIEW:'1'}:{}),...(body?{VIRTUAL_HOST_BODY_PREVIEW:'1'}:{}),...(movement?{VIRTUAL_HOST_MOVEMENT_PREVIEW:'1'}:{})}:{});await lastBlock;return r;},
+    async join(r,id,version=true,body=false,presence=false,migration=false,motion=false,oogaMotion=false){const before=accepted.length;const response=await r.fetch({url:'https://test.invalid/room'+(version?'?npc-authority='+(version===true?1:version):'')+(body?'&body-reclaim=2':'')+(presence?'&body-presence=1':'')+(migration?'&body-migration=1':'')+(motion?'&body-motion=1':'')+(oogaMotion?'&ooga-motion=1':''),headers:new Headers({upgrade:'websocket','x-player-id':String(id),'x-player-login':names[id-1],'x-player-contributor':'0'})});return {ws:accepted[before],response};},
     send:(r,ws,msg)=>r.webSocketMessage(ws,JSON.stringify(msg))};
 }
 const start = (r, expected=0, epoch=1, owner='host-a') => r.configureNpcAuthority(expected,{mode:'server',world:'world-1',epoch,owner,runUntil:200000});
@@ -250,14 +252,14 @@ test('mixed Room preview gates occupants and persists exact 106-actor snapshots 
 });
 
 // Actual browser networking, with only account/voice/platform services authored.
-function client({manual=false,bodyPresencePreview=false,bodyMigrationPreview=false}={}){
+function client({manual=false,bodyPresencePreview=false,bodyMigrationPreview=false,bodyMovementPreview=false}={}){
   let tick=1000;
   const sockets=[],sent=[],timers=[];class Socket{static OPEN=1;constructor(url){this.url=url;this.readyState=1;sockets.push(this);}send(v){sent.push(typeof v==='string'&&v!=='ping'?JSON.parse(v):v);}close(){this.readyState=3;}}
   const BL={...globalThis.BL,voice:{setPeers(){},restart(){},stop(){}},characters:{get:()=>null},contributors:{addTemporary(){}},donations:{},accountIdentities:{accountForId:()=>null,accountForHandle:()=>null},pilot:{}};
   const context={window:{BL,setTimeout:fn=>{timers.push(fn);return 1;},clearTimeout(){},setInterval:()=>1,clearInterval(){}},document:{hidden:false,cookie:'',addEventListener(){},removeEventListener(){}},
     location:{protocol:'https:',host:'test.invalid',pathname:'/',search:''},fetch:async()=>({ok:true,headers:{get:()=> 'application/json'},json:async()=>({player:{id:1,login:'a',display:'a'}})}),AbortSignal,WebSocket:Socket,performance:{now:()=>manual?tick:tick+=200},Date,ArrayBuffer,DataView,Uint8Array,Uint32Array,Float32Array,URLSearchParams};
-  runInNewContext(readFileSync(new URL('../../src/js/net.js',import.meta.url),'utf8').replace('const BODY_PRESENCE_PREVIEW = false;', `const BODY_PRESENCE_PREVIEW = ${bodyPresencePreview};`).replace('const BODY_MIGRATION_PREVIEW = false;', `const BODY_MIGRATION_PREVIEW = ${bodyMigrationPreview};`),context);
-  return {net:BL.net,sockets,sent,BL,reconnect:()=>timers.at(-1)()};
+  runInNewContext(readFileSync(new URL('../../src/js/net.js',import.meta.url),'utf8').replace('const BODY_PRESENCE_PREVIEW = false;', `const BODY_PRESENCE_PREVIEW = ${bodyPresencePreview};`).replace('const BODY_MIGRATION_PREVIEW = false;', `const BODY_MIGRATION_PREVIEW = ${bodyMigrationPreview};`).replace('const BODY_MOVEMENT_PREVIEW = false,', `const BODY_MOVEMENT_PREVIEW = ${bodyMovementPreview},`),context);
+  return {net:BL.net,sockets,sent,BL,at:t=>{tick=t;},reconnect:()=>timers.at(-1)()};
 }
 test('actual net retains authority through close, refuses stale epochs and legacy sends, and acknowledges resumed snapshots',async()=>{
   const c=client();await c.net.start();const ws=c.sockets[0];assert.ok(ws.url.endsWith('?npc-authority=1'));
@@ -285,6 +287,46 @@ test('actual net retains authority through close, refuses stale epochs and legac
   const newer={...a,revision:2,epoch:2};assert.ok(tracker.accept(newer));assert.equal(tracker.frame(packed),null);
   assert.equal(tracker.accept({v:1,revision:1,mode:'browser',world:null,epoch:0}),false);
   assert.ok(tracker.accept({v:1,revision:3,mode:'browser',world:null,epoch:0}));
+  c.net.dispose();
+});
+
+test('actual net negotiates Ooga capture, retries one sample until host ACK and suppresses unchanged accepted state', async () => {
+  const c = client({ manual: true, bodyMovementPreview: true }), codec = globalThis.BL.oogaMotion;
+  c.BL.characters.get = name => name === 'a' ? { handle: 'a' } : null;
+  await c.net.start(); const ws = c.sockets[0], send = m => ws.onmessage({ data: JSON.stringify(m) });
+  assert.ok(ws.url.includes('ooga-motion=1'));
+  send({ t: 'welcome', you: { id: 1 }, players: [], features: [globalThis.BL.bodyReclaim.FEATURE,
+    globalThis.BL.bodyMotion.FEATURE, codec.FEATURE], host: 0, now: 1000, connectionToken: 'fixture-connection' });
+  let captured = 0;
+  const checkpoint = globalThis.BL.oogaBody.codec({ world: 'world-1', profile: 'standing-1', name: 'a' }).encode(
+    { x: 1, y: 8, z: 3, yaw: .5 }, { weapon: null, mode: 'carry', primaryOwned: false,
+      secondaryOwned: false, selectedSlot: 1, unlimited: false, jetpack: false, jetpackOwned: false });
+  c.net.bodyReclaim.setAdapter({ prepare: () => ({}), preflight: () => true, apply: () => true,
+    activate: () => true, release() {}, capture() { captured++; return checkpoint; } });
+  const request = '8'.repeat(32), now = Math.ceil(c.net.serverNow());
+  send({ t: 'body-prepare', v: 2, request, accountId: 1, bodyId: 'player:1', kind: 'ooga',
+    world: 'world-1', epoch: 1, expiresAt: now + 10000 });
+  for (let i = 0; i < 8; i++) await Promise.resolve();
+  const transfer = { v: 1, protocol: 'host-session-v5', world: 'world-1', epoch: 1, revision: 1,
+    at: now, expiresAt: now + 10000, resetResources: 'defaults',
+    view: { accountId: 1, bodyId: 'player:1', kind: 'ooga', generation: 1, state: 'offered', deadline: now + 60000 }, checkpoint };
+  send({ t: 'body-grant', request, transfer });
+  send({ t: 'body-active', request, transfer: { ...transfer, revision: 2, expiresAt: now + 1000,
+    view: { ...transfer.view, state: 'starting' } } });
+  c.net.sendPose(1, 8, 3, .5); assert.equal(captured, 0);
+  send({ t: 'body-live', request, epoch: 1, generation: 1, revision: 2 });
+  c.sent.length = 0; c.net.sendPose(1, 8, 3, .5);
+  const message = c.sent.at(-1); assert.equal(message.t, codec.TYPE); assert.equal(captured, 1);
+  assert.equal(codec.unpack(message.data, checkpoint).position.y, 8);
+  c.at(1100); c.net.sendPose(1, 8, 3, .5); assert.equal(c.sent.length, 1);
+  checkpoint.position.y = 10; c.at(1250); c.net.sendPose(1, 10, 3, .5);
+  assert.deepEqual(c.sent.at(-1), message); assert.equal(captured, 1, 'pending sample is immutable');
+  send({ t: 'body-motion-ack', request, generation: 1, sequence: 1 });
+  c.at(1500); c.net.sendPose(1, 10, 3, .5);
+  assert.equal(c.sent.at(-1).sequence, 2); assert.equal(codec.unpack(c.sent.at(-1).data, checkpoint).position.y, 10);
+  send({ t: 'body-motion-ack', request, generation: 1, sequence: 2 });
+  const count = c.sent.length; c.at(1750); c.net.sendPose(1, 10, 3, .5); assert.equal(c.sent.length, count);
+  c.net.setMuted(true); assert.equal(c.sent.at(-1).t, 'mute');
   c.net.dispose();
 });
 
@@ -573,6 +615,206 @@ test('Room burst preview persists debt across restart and migration without incr
 const bodyRequest = '1'.repeat(32);
 const bodyPrep = { v: 1, world: 'world-1', epoch: 1, accountId: 1, bodyId: 'player:1', generation: 0, nextGeneration: 1, expiresAt: 110000 };
 const bodyClaim = { protocol: 'host-session-v5', world: 'world-1', accountId: 1, bodyId: 'player:1', zone: 'outside' };
+test('Room world event binding derives bounded current admissions and signals committed work only behind the disabled gate', async () => {
+  let signals = 0, options, routed;
+  const h = host({ notifierFactory: configured => {
+    options = configured; return { notify() { signals++; return true; }, dispose() {} };
+  } }), r = await h.room(true, false, true, true);
+  const first = (await h.join(r, 1, true, true, true, false, true, true)).ws;
+  for (let id = 2; id <= 5; id++) await h.join(r, id, true, true, true, false, true, true);
+  const t = ticket(await start(r));
+  assert.equal(r.notifyWorld(), false); assert.equal(signals, 0);
+  r.env.VIRTUAL_HOST_RUNNER_PREVIEW = '1';
+  assert.equal(r.notifyWorld(), false, 'a preview flag cannot create a missing binding');
+  r.env.VIRTUAL_WORLD = { getByName(name) {
+    assert.equal(name, 'island'); return { notifyRoomWorld(hint) { routed = hint; return { status: 'handled', more: false }; } };
+  } };
+  await h.join(r, 6, true, true, true, false, true, true);
+  assert.equal(signals, 1);
+  await options.send(options.current());
+  assert.deepEqual(structuredClone(routed), { v: 1, room: 'island', world: 'world-1', epoch: 1, revision: t.revision, owner: 'host-a', runUntil: 200000 });
+  let inventory = await r.bodyAdmissionCandidates(t);
+  assert.deepEqual(Array.from(inventory.identities, i => i.accountId), [1, 2, 3, 4]); assert.equal(inventory.more, true);
+  const identity = { accountId: 1, connection: r.players.get(1).connectionToken };
+  await r.stageBodyHandoff(t, identity, bodyPrep, 'ooga', bodyRequest, bodyClaim);
+  r.players.get(2).bodyClosedAt = 100000; r.players.get(3).bodyQuiescence = { acknowledged: false };
+  inventory = await r.bodyAdmissionCandidates(t);
+  assert.deepEqual(Array.from(inventory.identities, i => i.accountId), [4, 5, 6]); assert.equal(inventory.more, false);
+  const before = signals;
+  const received = await h.send(r, first, { t: 'body-ready', request: bodyRequest });
+  assert.equal(received.status, 'dispatch'); assert.equal(signals, before + 1);
+  assert.ok(await r.pendingBodyHandoff(t, identity), 'notification follows the durable pending command');
+  await r.webSocketClose(first); assert.equal(signals, before + 2);
+  assert.equal((await r.bodyHandoffController().read(identity)).phase, 'closed');
+  const prior = r.players.get(4).connectionToken;
+  await h.join(r, 4, true, true, true, false, true, true);
+  inventory = await r.bodyAdmissionCandidates(t);
+  assert.equal(inventory.identities.find(i => i.accountId === 4).connection, r.players.get(4).connectionToken);
+  assert.notEqual(r.players.get(4).connectionToken, prior);
+  await assert.rejects(r.bodyAdmissionCandidates({ ...t, epoch: 99 }), /fenced|authority/);
+});
+test('Room world admission binds its current account and reconciles uncertain staging without a second preparation', async () => {
+  const h = host(), r = await h.room(true, false, true, true);
+  const ws = (await h.join(r, 1, true, true, false, false, true, true)).ws;
+  const t = ticket(await start(r)), owner = { world: t.world, fence: t.epoch, owner: t.owner };
+  const who = { accountId: 1, connection: r.players.get(1).connectionToken };
+  const candidate = await r.bodyCandidate(t, who);
+  assert.deepEqual(structuredClone(candidate), { status: 'available', candidate: { accountId: 1, bodyId: 'player:1', handle: 'a', kind: 'ooga' } });
+  await assert.rejects(r.bodyCandidate(t, { ...who, connection: 'stale' }), /connection/);
+  const claim = { protocol: bodyClaim.protocol, world: t.world, accountId: 1, bodyId: 'player:1', source: { handle: 'a', kind: 'ooga' } };
+  await assert.rejects(r.stageBodyHandoff(t, who, bodyPrep, 'ooga', bodyRequest,
+    { ...claim, source: { ...claim.source, handle: 'b' } }), /identity/);
+  let preparations = 0;
+  const authoritative = { async prepareWorldBody(given, observed) {
+    assert.deepEqual(given, owner); assert.deepEqual(structuredClone(observed), structuredClone(candidate.candidate));
+    preparations++; return { preparation: bodyPrep, kind: 'ooga', claim };
+  } };
+  const stage = r.stageBodyHandoff.bind(r);
+  r.stageBodyHandoff = async (...args) => { await stage(...args); throw Error('reply lost after commit'); };
+  assert.equal((await stageWorldBody(authoritative, r, owner, t, who)).status, 'reconciled');
+  const retained = await r.bodyCandidate(t, who);
+  assert.equal(retained.status, 'retained');
+  assert.equal((await stageWorldBody(authoritative, r, owner, t, who)).status, 'retained');
+  assert.equal(preparations, 1, 'an existing outbox owns the request and preparation');
+  assert.equal((await r.bodyCandidate(t, who)).request, retained.request);
+  assert.ok(ws.sent.some(message => message.t === 'body-prepare'));
+  await assert.rejects(stageWorldBody(authoritative, r, { ...owner, fence: owner.fence + 1 }, t, who), /authorities/);
+  const old = { ...who }; await h.join(r, 1, true, true, false, false, true, true);
+  await assert.rejects(r.bodyCandidate(t, old), /connection/);
+  const incompatible = host(), room = await incompatible.room(true, false, true, true);
+  await incompatible.join(room, 1, true, true, false, false, true, false);
+  const authority = ticket(await start(room));
+  await assert.rejects(room.bodyCandidate(authority, { accountId: 1, connection: room.players.get(1).connectionToken }), /incompatible/);
+});
+test('Room projects committed Ooga feet position for socket delivery, late join and wake without accepting uncommitted motion', async () => {
+  const h = host(), r = await h.room(true, false, true, true), ws = (await h.join(r, 1, true, true, false, false, true, true)).ws;
+  const t = ticket(await start(r)), p = r.players.get(1), i = { accountId: 1, connection: p.connectionToken };
+  await r.stageBodyHandoff(t, i, bodyPrep, 'ooga', bodyRequest, bodyClaim);
+  await h.send(r, ws, { t: 'body-ready', request: bodyRequest });
+  const session = { accountId: 1, bodyId: 'player:1', generation: 1, token: '2'.repeat(32) };
+  const checkpoint = { v: 1, kind: 'ooga', world: 'world-1', profile: 'standing-1', name: 'a',
+    position: { x: 1, y: 8, z: 3, yaw: .5 }, equipment: { weapon: null, mode: 'carry', primaryOwned: false, secondaryOwned: false, selectedSlot: 1, unlimited: false, jetpack: false, jetpackOwned: false } };
+  const transfer = { v: 1, protocol: 'host-session-v5', world: 'world-1', epoch: 1, revision: 2,
+    at: 100000, expiresAt: 110000, resetResources: 'defaults',
+    view: { state: 'offered', accountId: 1, bodyId: 'player:1', kind: 'ooga', generation: 1, deadline: 160000, zone: 'outside' }, checkpoint };
+  let pending = await r.pendingBodyHandoff(t, i);
+  await r.completeBodyHandoff(t, i, pending.command.revision, { result: { ok: true, session }, transfer });
+  await h.send(r, ws, { t: 'body-applied', request: bodyRequest, epoch: 1, generation: 1, revision: 2 });
+  pending = await r.pendingBodyHandoff(t, i);
+  await r.completeBodyHandoff(t, i, pending.command.revision, { result: { ok: true, session },
+    transfer: { ...transfer, revision: 3, expiresAt: 101000, view: { ...transfer.view, state: 'starting' } } });
+  await h.send(r, ws, { t: 'body-started', request: bodyRequest, epoch: 1, generation: 1, revision: 3 });
+  pending = await r.pendingBodyHandoff(t, i);
+  await r.completeBodyHandoff(t, i, pending.command.revision,
+    { result: { ok: true, view: { ...transfer.view, state: 'live', deadline: null } } });
+  assert.equal(p.y, 8); assert.equal(p.body, 'player:1');
+  const codec = globalThis.BL.oogaMotion, message = { t: codec.TYPE, request: bodyRequest, sequence: 1,
+    data: codec.pack({ ...checkpoint, position: { ...checkpoint.position, y: 12 } }) };
+  assert.ok(ws.sent.find(m => m.t === 'welcome').features.includes(codec.FEATURE));
+  p.oogaMotionProtocol = 0; await h.send(r, ws, message);
+  assert.equal(await r.pendingBodyMovement(t, i), null, 'unnegotiated format cannot write');
+  p.oogaMotionProtocol = 1; await h.send(r, ws, message);
+  const staged = await r.pendingBodyMovement(t, i);
+  assert.equal(staged.sample.checkpoint.name, 'a'); assert.equal(staged.sample.checkpoint.world, 'world-1');
+  assert.equal(ws.sent.filter(m => m.t === 'body-motion-ack').length, 0);
+  assert.equal(p.y, 8);
+  await r.completeBodyMovement(t, i, 1, { sequence: 1, at: 100000 });
+  assert.equal(p.y, 12); assert.equal(ws.store.y, 12);
+  const restored = await h.room(true, false, true, true); assert.equal(restored.players.get(1).y, 12);
+  assert.equal(restored.players.get(1).oogaMotionProtocol, 1);
+  const late = (await h.join(restored, 2, true, true, false, false, true)).ws;
+  assert.equal(late.sent.find(m => m.t === 'welcome').players.find(p => p.id === 1).y, 12);
+  assert.ok(!late.sent.find(m => m.t === 'welcome').features.includes(codec.FEATURE));
+  h.at(100100); await h.send(restored, ws, { ...message, sequence: 2 });
+  assert.equal(await restored.pendingBodyMovement(t, i), null, 'pacing survives wake');
+  h.at(100250); await h.send(restored, ws, { ...message, sequence: 2 });
+  assert.equal((await restored.pendingBodyMovement(t, i)).sample.sequence, 2);
+  for (const room of [r, restored]) clearTimeout(room.flushTimer);
+});
+
+test('Room event inventory closes expired preparation at its original deadline and never admits a replacement', async () => {
+  const h = host(), r = await h.room(true, false, true);
+  const ws = (await h.join(r, 1, true, true)).ws, t = ticket(await start(r));
+  const p = r.players.get(1), i = { accountId: 1, connection: p.connectionToken };
+  await r.stageBodyHandoff(t, i, { ...bodyPrep, expiresAt: 100500 }, 'clanker', bodyRequest, bodyClaim);
+  let work = await r.bodyWork(t);
+  assert.equal(work.events.length, 0); assert.equal(work.nextDeadline, 100500);
+  await h.send(r, ws, { t: 'body-ready', request: bodyRequest });
+  work = await r.bodyWork(t); assert.equal(work.events[0].kind, 'handoff');
+  h.at(100750); work = await r.bodyWork(t);
+  assert.equal(work.events[0].kind, 'close'); assert.equal(work.nextDeadline, null);
+  assert.equal((await r.bodyHandoffController().read(i)).closedAt, 100500);
+  assert.equal((await r.pendingBodyHandoff(t, i)).closed, true, 'uncertain command is retained for cancellation/recovery');
+  const writes = structuredClone(h.stored);
+  await r.bodyWork(t); assert.deepEqual(h.stored, writes, 'idle retry does not extend or rewrite the expired window');
+  await assert.rejects(r.bodyWork({ ...t, epoch: 2 }), /fenced/);
+  assert.equal(ws.closed, null, 'body preparation expiry does not drop voice transport');
+  const first = await r.beginBodyEventBatch(t), second = await r.beginBodyEventBatch(t);
+  assert.equal(await r.completeBodyEventBatch(t, first), false, 'an older pass cannot clear newer publication debt');
+  const restored = await h.room(true, false, true);
+  assert.equal((await restored.bodyWork(t)).publicationPending, second);
+  h.fail(); await assert.rejects(restored.completeBodyEventBatch(t, second), /storage/);
+  assert.equal((await restored.bodyWork(t)).publicationPending, second);
+  assert.equal(await restored.completeBodyEventBatch(t, second), true);
+  assert.equal((await restored.bodyWork(t)).publicationPending, null);
+});
+
+test('compact socket movement publishes only host receipts and preserves last position across pending-sample wake', async () => {
+  const h = host(), r = await h.room(true, false, true, true);
+  const ws = (await h.join(r, 1, true, true, false, false, true)).ws;
+  assert.ok(ws.sent.find(m => m.t === 'welcome').features.includes('host-body-motion-v1'));
+  const t = ticket(await start(r)), p = r.players.get(1), i = { accountId: 1, connection: p.connectionToken };
+  await r.stageBodyHandoff(t, i, bodyPrep, 'clanker', bodyRequest, bodyClaim);
+  await h.send(r, ws, { t: 'body-ready', request: bodyRequest });
+  const session = { accountId: 1, bodyId: 'player:1', generation: 1, token: '2'.repeat(32) };
+  const checkpoint = { v: 1, world: 'world-1', profile: '["trusted-profile"]', body: ['owner', 1, 2, 3, 0, 0, 0, 0, 0, 1] };
+  const transfer = { v: 1, protocol: 'host-session-v5', world: 'world-1', epoch: 1, revision: 2,
+    at: 100000, expiresAt: 110000, resetResources: 'defaults',
+    view: { state: 'offered', accountId: 1, bodyId: 'player:1', kind: 'clanker', generation: 1, deadline: 160000, zone: 'outside' }, checkpoint };
+  let pending = await r.pendingBodyHandoff(t, i);
+  await r.completeBodyHandoff(t, i, pending.command.revision, { result: { ok: true, session }, transfer });
+  await h.send(r, ws, { t: 'body-applied', request: bodyRequest, epoch: 1, generation: 1, revision: 2 });
+  pending = await r.pendingBodyHandoff(t, i);
+  await r.completeBodyHandoff(t, i, pending.command.revision, { result: { ok: true, session },
+    transfer: { ...transfer, revision: 3, expiresAt: 101000, view: { ...transfer.view, state: 'starting' } } });
+  await h.send(r, ws, { t: 'body-started', request: bodyRequest, epoch: 1, generation: 1, revision: 3 });
+  pending = await r.pendingBodyHandoff(t, i);
+  await r.completeBodyHandoff(t, i, pending.command.revision,
+    { result: { ok: true, view: { ...transfer.view, state: 'live', deadline: null } } });
+  assert.equal(p.body, 'player:1'); assert.equal(p.x, 1);
+  const motion = (sequence, x) => ({ t: 'body-motion-1', request: bodyRequest, sequence,
+    data: globalThis.BL.bodyMotion.pack(['owner', x, 2, 3, 0, 0, 0, 0, 0, 1]) });
+  await h.send(r, ws, motion(1, 8)); assert.equal(p.x, 1);
+  assert.equal(ws.sent.filter(m => m.t === 'body-motion-ack').length, 0);
+  await r.completeBodyMovement(t, i, 1, { sequence: 1, at: 100000 });
+  assert.equal(p.x, 8); assert.equal(ws.store.x, 8);
+  assert.equal(ws.sent.at(-1).t, 'body-motion-ack');
+  h.at(100250); await h.send(r, ws, motion(2, 12)); assert.equal(p.x, 8);
+  const restored = await h.room(true, false, true, true);
+  assert.equal(restored.players.get(1).x, 8, 'pending movement cannot rewind to grant or publish itself');
+  await restored.completeBodyMovement(t, i, 2, { sequence: 2, at: 100250 });
+  assert.equal(restored.players.get(1).x, 12);
+  h.at(100500); await h.send(restored, ws, motion(3, 16));
+  const serialize = ws.serializeAttachment, beforeAcks = ws.sent.filter(m => m.t === 'body-motion-ack').length;
+  ws.serializeAttachment = () => { throw Error('attachment unavailable'); };
+  await assert.rejects(restored.completeBodyMovement(t, i, 3, { sequence: 3, at: 100500 }), /attachment unavailable/);
+  assert.equal(restored.players.get(1).x, 12);
+  assert.equal(ws.sent.filter(m => m.t === 'body-motion-ack').length, beforeAcks);
+  ws.serializeAttachment = serialize;
+  await h.send(restored, ws, motion(3, 16));
+  assert.equal(restored.players.get(1).x, 16, 'retry repairs public attachment before acknowledging host receipt');
+  const beforeClose = structuredClone(h.stored);
+  await h.send(restored, ws, { t: 'body-decline', request: bodyRequest });
+  assert.equal(restored.players.get(1).body, null); assert.equal(ws.closed, null, 'body release keeps transport connected');
+  // Alternate crash: the socket vanishes before a close callback can persist.
+  h.stored.clear(); for (const [k, v] of beforeClose) h.stored.set(k, v);
+  ws.close(1006, 'lost'); h.at(100900);
+  const missing = await h.room(true, false, true, true);
+  assert.equal((await missing.bodyHandoffController().read(i)).closedAt, 100500,
+    'missing socket closes at latest durable movement observation, never old handoff time or restart time');
+  for (const room of [r, restored]) clearTimeout(room.flushTimer);
+});
+
 test('Room stop commits before sending, survives wake and retains voice and authority until explicit cleanup', async () => {
   const h = host(), r = await h.room(true, false, true), ws = (await h.join(r, 1, true, true)).ws;
   const t = ticket(await start(r)), p = r.players.get(1), i = { accountId: 1, connection: p.connectionToken };

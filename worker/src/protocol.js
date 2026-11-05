@@ -8,6 +8,9 @@ import "../../src/js/chat-policy.js";
 import "../../src/js/contributor-identities.js";
 import "../../src/js/chalk-board.js";
 import "../../src/js/voice-blend.js";
+import "../../src/js/body-motion.js";
+import "../../src/js/ooga-body.js";
+import "../../src/js/ooga-motion.js";
 // The room's wire format and the limits it enforces, as pure functions the tests can reach.
 //
 // Client → room:  { t: "pose", x, y, z, yaw }   the driven body's feet and heading, at most MOVE_HZ
@@ -299,6 +302,8 @@ export const parseClientMessage = (text) => {
     if (msg.name === null) return { t: "body", name: null };
     return typeof msg.name === "string" && BODY_NAME.test(msg.name) ? { t: "body", name: msg.name } : null;
   }
+  if (msg.t === globalThis.BL.bodyMotion.TYPE) return globalThis.BL.bodyMotion.envelope(msg) ? msg : null;
+  if (msg.t === globalThis.BL.oogaMotion.TYPE) return globalThis.BL.oogaMotion.envelope(msg) ? msg : null;
   if (["body-ready", "body-applied", "body-started", "body-decline"].includes(msg.t)) {
     const keys = ["body-ready", "body-decline"].includes(msg.t) ? ["t", "request"] : ["t", "request", "epoch", "generation", "revision"];
     if (Object.keys(msg).length !== keys.length || !keys.every(k => Object.hasOwn(msg, k))

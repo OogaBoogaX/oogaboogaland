@@ -45,6 +45,7 @@ export function compactSimulation(simulation, checkpointBytes, { intern = false 
     },
   };
   if (typeof simulation.poses === "function") wrapped.poses = (state, format) => sync(simulation.poses(codec.unpack(state), format));
+  if (typeof simulation.playerSpawn === "function") wrapped.playerSpawn = (state, who) => sync(simulation.playerSpawn(codec.unpack(state), who));
   // The host creates one scope INSIDE each storage callback, including retries.
   // Frozen wire children make identity checks exact (no JSON hash collisions for
   // -0/nonfinite values). The outer record stays writable for atomic assignment.
@@ -92,6 +93,7 @@ export function compactSimulation(simulation, checkpointBytes, { intern = false 
       dispose() { active = false; entries = new WeakMap(); },
     };
     if (typeof simulation.poses === "function") scope.poses = (state, format) => sync(simulation.poses(entryFor(state).runtime, format));
+    if (typeof simulation.playerSpawn === "function") scope.playerSpawn = (state, who) => sync(simulation.playerSpawn(entryFor(state).runtime, who));
     return scope;
   };
   return wrapped;

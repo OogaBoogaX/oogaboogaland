@@ -3,6 +3,9 @@
 // Persist intent BEFORE a host RPC; an uncertain reply leaves pending work for
 // reconciliation. It must never be turned into an automatic second admission.
 import { boundedJSON, sameCheckpointValue } from "./virtual-host.js";
+import "../../src/js/body-motion.js";
+import "../../src/js/ooga-body.js";
+import "../../src/js/ooga-motion.js";
 export const ROOM_BODY = Object.freeze({ key: "room-body-handoff-v1", prefix: "room-body-handoff-v1:",
   max: 32, indexBytes: 1024, rowBytes: 34 * 1024, transferBytes: 32 * 1024 });
 export const ROOM_MOVEMENT = Object.freeze({ prefix: 'room-body-movement-v1:', rowBytes: 5120, sampleBytes: 4096 });
@@ -203,25 +206,46 @@ export class RoomBodyHandoff {
   // no browser identity, token or timestamp is used. One unresolved sample blocks
   // newer samples, so an uncertain host reply cannot be overwritten on wake.
   async receiveMovement(identity, message) {
-    if (!identityValid(identity) || !exact(message, ['t', 'request', 'sequence', 'checkpoint'])
-      || message.t !== 'body-motion' || !token(message.request) || !positive(message.sequence)) fail();
-    boundedJSON({ sequence: message.sequence, checkpoint: message.checkpoint }, ROOM_MOVEMENT.sampleBytes, 256);
+    const format = message?.t === globalThis.BL.bodyMotion.TYPE ? globalThis.BL.bodyMotion
+      : message?.t === globalThis.BL.oogaMotion.TYPE ? globalThis.BL.oogaMotion : null;
+    const compact = !!format;
+    if (!identityValid(identity) || (compact ? !format.envelope(message)
+      : !exact(message, ['t', 'request', 'sequence', 'checkpoint'])
+        || message.t !== 'body-motion' || !token(message.request) || !positive(message.sequence))) fail();
+    if (!compact) boundedJSON({ sequence: message.sequence, checkpoint: message.checkpoint }, ROOM_MOVEMENT.sampleBytes, 256);
     const input = structuredClone(message), who = { ...identity };
     return this.storage.transaction(async tx => {
       const r = await this.read(who, tx), now = this.now(r);
       if (!r || r.phase !== 'live' || !r.liveSent || Object.hasOwn(r, 'stopAt') || input.request !== r.request || this.current(who) !== true) fail();
+      let checkpoint = input.checkpoint;
+      if (compact) {
+        const retained = r.transfer?.checkpoint;
+        if (format === globalThis.BL.oogaMotion) {
+          if (r.kind !== 'ooga' || retained?.world !== r.preparation.world) fail();
+          checkpoint = format.unpack(input.data, retained);
+        } else {
+          if (r.kind !== 'clanker' || !exact(retained, ['v', 'world', 'profile', 'body'])
+            || retained.v !== 1 || retained.world !== r.preparation.world || typeof retained.profile !== 'string'
+            || !Array.isArray(retained.body) || retained.body.length !== 10) fail();
+          checkpoint = { ...retained, body: format.unpack(input.data, retained.body[0]) };
+        }
+        boundedJSON({ sequence: input.sequence, checkpoint }, ROOM_MOVEMENT.sampleBytes, 256);
+      }
       const old = await this.movement(who, tx, r);
       if (this.current(who) !== true) fail();
       if (old) {
         if (now < old.receivedAt || old.fenced || input.sequence < old.sequence) fail();
         if (input.sequence === old.sequence) {
-          if (!sameCheckpointValue(old.checkpoint, input.checkpoint)) fail();
+          if (!sameCheckpointValue(old.checkpoint, checkpoint)) fail();
           return { status: old.receipt ? 'accepted' : 'pending', sequence: old.sequence };
         }
         if (!old.receipt) return { status: 'busy', sequence: old.sequence };
+        // Compact browser ingress retains its write debt through hibernation.
+        // Private server callers keep their existing explicit cadence contract.
+        if (compact && now - old.receivedAt < 250) return { status: 'paced', sequence: old.sequence };
       }
       const next = movementValid({ v: 1, ...who, request: r.request, generation: r.ref.generation,
-        sequence: input.sequence, receivedAt: now, checkpoint: input.checkpoint, receipt: null, fenced: false }, r);
+        sequence: input.sequence, receivedAt: now, checkpoint, receipt: null, fenced: false }, r);
       if (r.v !== 3) {
         // Older v2 writers refuse this row instead of deleting a pending sample
         // through their handoff-only cleanup. Both records commit atomically.
