@@ -13,6 +13,9 @@ export const HOST = Object.freeze({
   snapshotBytes: 32 * 1024, maxNpcs: 128, maxFollowers: 32, deliveryMs: 250,
   passiveSteps: 4096, metadataBytes: 2048, sessionSlotBytes: 1024, simulationNodes: 16000, sessionSlotNodes: 48, metadataNodes: 128,
 });
+// Matches the existing complete-body store's capacity; never truncate a world
+// that admitted more records through a different storage profile.
+export const BODY_VIEW = Object.freeze({ version: 1, maxBodies: 32, maxBytes: 32 * 1024 });
 const encoder = new TextEncoder();
 const id = value => typeof value === "string" && /^[a-zA-Z0-9_.:-]{1,80}$/.test(value);
 const time = value => Number.isSafeInteger(value) && value >= 0;
@@ -112,6 +115,21 @@ function bodyPreparation(r, now, accountId, bodyId) {
   if (now >= expiresAt) fail("body preparation expired");
   return { v: 1, world: r.world, epoch: r.fence, accountId, bodyId, generation: current?.generation ?? 0,
     nextGeneration: current ? 0 : r.sessions?.nextGeneration ?? 1, expiresAt };
+}
+
+// An event deadline, not a polling interval. Pending unapplied handbacks require
+// immediate reconciliation; an acknowledged/retained visual needs no wakeup.
+function bodyWake(r) {
+  let at = Infinity;
+  for (const s of r.sessions?.sessions || []) {
+    if (s.state === "live") at = Math.min(at, r.runUntil);
+    else {
+      at = Math.min(at, s.deadline);
+      if (s.state === "starting") at = Math.min(at, s.stepAt + HANDOFF_MS);
+    }
+  }
+  if (r.sessions?.pending.some(p => !p.applied)) at = Math.min(at, r.sessions.clock);
+  return at === Infinity ? null : at;
 }
 
 export class VirtualHost {
@@ -605,6 +623,48 @@ export class VirtualHost {
         && s.generation === reference.generation && s.token === reference.token);
       if (!held) return null;
       return SessionRegistry.restore(r.sessions, { protocol: SESSION_PROTOCOL, world: r.world, maxSessions: this.maxSessions }).view(accountId);
+    });
+  }
+
+  // Explicit server event after close observations/census are reconciled by
+  // Room. No NPC tick, clock catch-up, ownership renewal, timer or physics loop.
+  // A no-op remains read-only, including repeated wakes and lost-reply retries.
+  async reconcileBodies(ticket, liveTokens, closes = []) {
+    return this.transaction(async function(tx) {
+      const now = this.now(), r = await this.read(tx); this.owns(r, ticket, now);
+      const previous = r.sessions;
+      // Validate the authenticated event even before the first body admission.
+      const { registry } = this.registry(r, now, liveTokens, { closes, create: true });
+      if (!previous) return { changed: false, epoch: r.fence, revision: r.revision, wakeAt: null };
+      if (now >= r.runUntil) registry.drain(r.runUntil, now);
+      this.settle(r, registry);
+      // Ignore only the read-time registry clock. Every persisted ownership,
+      // position, deadline, occupancy and handback field remains compared.
+      const changed = !sameCheckpointValue(previous.sessions, r.sessions.sessions)
+        || !sameCheckpointValue(previous.pending, r.sessions.pending)
+        || previous.nextGeneration !== r.sessions.nextGeneration;
+      if (changed) { r.wallAt = now; await this.save(tx, r); }
+      return { changed, epoch: r.fence, revision: r.revision, wakeAt: bodyWake(r) };
+    });
+  }
+
+  // A complete, bounded committed view for Room/late-join delivery. This is not
+  // an enabled transport and grants no control. Tokens and private components
+  // never enter the frame. Consumers must fence its epoch/revision and expiry.
+  async bodyPresence(ticket) {
+    return this.storage.transaction(async tx => {
+      const now = this.now(), r = await this.read(tx); this.owns(r, ticket, now);
+      const wakeAt = bodyWake(r);
+      if (wakeAt !== null && now >= wakeAt) fail("body lifecycle due");
+      const count = (r.sessions?.sessions.length || 0) + (r.sessions?.pending.length || 0);
+      if (count > BODY_VIEW.maxBodies) fail("body presentation capacity");
+      const registry = r.sessions && SessionRegistry.restore(r.sessions,
+        { protocol: SESSION_PROTOCOL, world: r.world, maxSessions: this.maxSessions });
+      const frame = { v: BODY_VIEW.version, protocol: SESSION_PROTOCOL, world: r.world,
+        epoch: r.fence, revision: r.revision, now, expiresAt: Math.min(r.leaseUntil, wakeAt ?? Infinity),
+        views: registry ? r.sessions.sessions.map(s => registry.view(s.accountId)) : [],
+        departures: registry ? registry.pending() : [] };
+      return { wakeAt, frame: JSON.parse(boundedJSON(frame, BODY_VIEW.maxBytes)) };
     });
   }
 

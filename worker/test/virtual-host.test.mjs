@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { HOST, SESSION_PROTOCOL, VirtualHost, LatestHostDelivery, boundedJSON, publicSnapshot } from "../src/virtual-host.js";
+import { HOST, BODY_VIEW, SESSION_PROTOCOL, VirtualHost, LatestHostDelivery, boundedJSON, publicSnapshot } from "../src/virtual-host.js";
 import { createNpcPose } from "../src/npc-pose.js";
 import { compactSimulation } from "../src/simulation-checkpoint.js";
 import { rig } from "./fixtures/npc-pose-rig.mjs";
@@ -60,6 +60,124 @@ const bodyClaim = () => ({ protocol: SESSION_PROTOCOL, world: simulation.version
   body: { kind: "ooga", motion: { x: 1, y: 10, z: 2, yaw: 0.7, vx: 3, vy: -1, vz: 2, grounded: false },
     equipment: { weapon: "gun", mode: "combat", jetpack: true,
       primaryOwned: true, secondaryOwned: true, selectedSlot: 2, unlimited: false, jetpackOwned: true } } });
+
+test("body events freeze once, survive restart and expire atomically without NPC or physics ticks", async () => {
+  const h = harness({ ...simulation, step() { throw Error("no NPC tick"); } }, () => { throw Error("no physics"); });
+  const old = await h.host.begin("owner", 120000), first = (await h.host.connect(old, [], bodyClaim())).result;
+  h.at(105000); const before = h.store.read();
+  const close = { ref: first.session, at: 103000 };
+  // The public connect result includes bodyId; trusted close refs deliberately do not.
+  delete close.ref.bodyId;
+  h.store.failNext();
+  await assert.rejects(h.host.reconcileBodies(old, [], [close]), /storage unavailable/);
+  assert.deepEqual(h.store.read(), before);
+  const frozen = await h.host.reconcileBodies(old, [], [close]);
+  assert.equal(frozen.changed, true); assert.equal(frozen.wakeAt, 163000);
+  const committed = h.store.read(), writes = h.store.writes;
+  h.at(106000);
+  assert.equal((await h.host.reconcileBodies(old, [], [close])).changed, false);
+  assert.equal(h.store.writes, writes); assert.deepEqual(h.store.read(), committed);
+  assert.equal(committed.leaseUntil, before.leaseUntil, "a body event cannot extend host ownership");
+  assert.deepEqual(committed.simulation, before.simulation);
+  const frame = (await h.host.bodyPresence(old)).frame, view = frame.views[0];
+  assert.equal(view.motion.y, 10); assert.equal(view.motion.vx + view.motion.vy + view.motion.vz, 0);
+  assert.equal(view.deadline, 163000); assert.equal(view.state, "grace");
+  assert.equal(JSON.stringify(frame).includes(first.session.token), false);
+  h.at(163000); const fresh = await h.make().claim("restarted");
+  await assert.rejects(h.host.bodyPresence(old), /fenced/);
+  await assert.rejects(h.host.bodyPresence(fresh), /lifecycle due/);
+  const atExpiry = h.store.read(); h.store.failNext();
+  await assert.rejects(h.host.reconcileBodies(fresh, []), /storage unavailable/);
+  assert.deepEqual(h.store.read(), atExpiry);
+  const expired = await h.host.reconcileBodies(fresh, []);
+  assert.equal(expired.wakeAt, null); assert.equal(expired.changed, true);
+  const departure = (await h.host.bodyPresence(fresh)).frame.departures[0];
+  assert.equal(departure.at, 163000); assert.equal(departure.glyph, "green");
+  assert.equal(departure.handback, null); assert.equal(departure.applied, true);
+  assert.equal(departure.body.motion.y, 10);
+  const doneWrites = h.store.writes;
+  assert.equal((await h.make().reconcileBodies(fresh, [])).changed, false);
+  assert.equal(h.store.writes, doneWrites);
+});
+
+test("body-only events validate empty censuses, preserve occupancy and apply an existing NPC handback once", async () => {
+  const h = harness({ ...simulation, initial: () => ({ ...simulation.initial(), handbacks: 0 }),
+    npcFor: () => "existing-npc", handoff(s) { s.handbacks++; return true; } });
+  const ticket = await h.host.begin("owner", 120000), empty = h.store.read();
+  await assert.rejects(h.host.reconcileBodies(ticket), /census/);
+  await assert.rejects(h.host.reconcileBodies(ticket, [], [{ at: 100000 }]), /close/);
+  assert.equal((await h.host.reconcileBodies(ticket, [])).changed, false);
+  assert.deepEqual(h.store.read(), empty);
+  h.host.sessionAdapter.validateOccupancy = () => true;
+  const first = (await h.host.connect(ticket, [], bodyClaim())).result;
+  await h.host.sessions(ticket, [first.session.token], (r, at) => {
+    assert.equal(r.occupy(first.session, { kind: "hammock", id: "reserved" }, at).ok, true);
+  });
+  await h.host.reconcileBodies(ticket, []);
+  assert.deepEqual((await h.host.bodyPresence(ticket)).frame.views[0].occupancy, { kind: "hammock", id: "reserved" });
+  h.at(160000); const fresh = await h.make().claim("restart");
+  await h.host.reconcileBodies(fresh, []); await h.host.reconcileBodies(fresh, []);
+  assert.equal(h.store.read().simulation.handbacks, 1);
+  assert.equal(h.store.read().sessions.sessions.length, 0);
+  assert.equal((await h.host.bodyPresence(fresh)).frame.departures[0].handback.npc, "existing-npc");
+});
+
+test("lost body acknowledgement wakes at its short lease, retaining the original grace and run deadlines", async () => {
+  const h = harness(), ticket = await h.host.begin("owner", 500);
+  const offer = (await h.host.sessions(ticket, [], (r, at) => r.offer(bodyClaim(), at))).result;
+  await h.host.sessions(ticket, [], (r, at) => assert.equal(r.activate(offer.session, at).ok, true));
+  assert.equal((await h.host.bodyPresence(ticket)).wakeAt, 101000);
+  h.at(101000);
+  await assert.rejects(h.host.bodyPresence(ticket), /lifecycle due/);
+  const result = await h.host.reconcileBodies(ticket, []);
+  assert.equal(result.wakeAt, 160000, "lost ACK cannot restart the 60-second deadline");
+  const view = (await h.host.bodyPresence(ticket)).frame.views[0];
+  assert.equal(view.state, "grace"); assert.equal(view.motion.y, 10);
+  assert.equal(h.store.read().runUntil, 100500);
+  await assert.rejects(h.host.connect(ticket, [], bodyClaim()), /run closed/);
+  const live = harness(), t = await live.host.begin("owner", 500);
+  const joined = (await live.host.connect(t, [], bodyClaim())).result;
+  assert.equal((await live.host.bodyPresence(t)).wakeAt, 100500);
+  live.at(100500); await live.host.reconcileBodies(t, [joined.session.token]);
+  assert.equal((await live.host.bodyPresence(t)).frame.views[0].deadline, 160500);
+  assert.equal(live.store.read().simulation.steps, 0);
+});
+
+test("bounded body snapshots give concurrent late joiners one committed view and refuse excess capacity", async t => {
+  const h = harness(), ticket = await h.host.begin("owner", 120000);
+  await h.host.sessions(ticket, [], (r, at) => {
+    for (let i = 1; i <= BODY_VIEW.maxBodies; i++) {
+      const claim = bodyClaim(); claim.accountId = Number.MAX_SAFE_INTEGER - i;
+      claim.bodyId = String(i).padEnd(64, "b"); claim.zone = "z".repeat(64);
+      claim.body.motion = { x: -999999.123456789, y: 999999.123456789, z: -999999.123456789,
+        yaw: 6.123456789012345, vx: 9999.123456789, vy: -9999.123456789, vz: 9999.123456789, grounded: false };
+      assert.equal(r.connect(claim, at).ok, true);
+    }
+  });
+  await h.host.reconcileBodies(ticket, []);
+  const before = h.store.read(), writes = h.store.writes;
+  const frames = await Promise.all(Array.from({ length: 32 }, () => h.make().bodyPresence(ticket)));
+  for (const f of frames) assert.deepEqual(f, frames[0]);
+  assert.equal(frames[0].frame.views.length, BODY_VIEW.maxBodies);
+  const viewBytes = Buffer.byteLength(JSON.stringify(frames[0].frame));
+  assert.ok(viewBytes <= BODY_VIEW.maxBytes);
+  frames[0].frame.views[0].motion.x = 0;
+  assert.notEqual(frames[1].frame.views[0].motion.x, 0);
+  assert.deepEqual(h.store.read(), before); assert.equal(h.store.writes, writes);
+  assert.equal((await h.host.connect(ticket, [], bodyClaim())).result.ok, true);
+  await assert.rejects(h.host.bodyPresence(ticket), /presentation capacity/);
+  // The excess record is never silently omitted. Remove it explicitly before
+  // observing all 32 original departures at their original deadline.
+  await h.host.sessions(ticket, [], (r, at) => assert.equal(r.revoke(1, at).ok, true));
+  await h.host.sessions(ticket, [], r => assert.equal(r.acknowledge(r.pending()[0].id), true));
+  h.at(160000); const fresh = await h.make().claim("restarted");
+  await h.host.reconcileBodies(fresh, []);
+  const departed = (await h.host.bodyPresence(fresh)).frame;
+  assert.equal(departed.views.length, 0); assert.equal(departed.departures.length, BODY_VIEW.maxBodies);
+  const departureBytes = Buffer.byteLength(JSON.stringify(departed));
+  assert.ok(departureBytes <= BODY_VIEW.maxBytes);
+  t.diagnostic(`32 long-ID/high-precision records: ${viewBytes} view bytes, ${departureBytes} departure bytes`);
+});
 
 test("a cached ownership read cannot hand back a second body after the first handoff changes its NPC", async () => {
   const adapter = compactSimulation({ ...simulation, initial: () => ({ ...simulation.initial(), owners: { resident: "first", second: "second" } }),

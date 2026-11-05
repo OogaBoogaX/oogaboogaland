@@ -90,9 +90,9 @@ test('host replacement freezes over a vanished prop with atomic rollback and no 
     const replacement = makeHost(), ticket = await replacement.claim('replacement');
     await assert.rejects(first.tick(oldTicket, []), /fenced/);
     const before = structuredClone(data), buildsBefore = constructed; failCommit = true;
-    await assert.rejects(replacement.tick(ticket, []), /injected commit/);
+    await assert.rejects(replacement.reconcileBodies(ticket, []), /injected commit/);
     assert.deepEqual(data, before); assert.equal(constructed, disposed);
-    await replacement.tick(ticket, []);
+    await replacement.reconcileBodies(ticket, []);
     const record = data.get(HOST.key).host.sessions.sessions[0];
     assert.equal(record.deadline, 160000); assert.equal(record.motion.y, 2); assert.equal(record.motion.grounded, true);
     const bodies = [...data.values()].filter(v => v?.body?.bodyId === 'player:1');
@@ -101,5 +101,15 @@ test('host replacement freezes over a vanished prop with atomic rollback and no 
     assert.equal(state.body[2], record.motion.y); assert.equal(Boolean(state.body[9] & 1), record.motion.grounded);
     assert.equal(constructed, buildsBefore, 'disconnect/restart never constructs offline physics');
     assert.equal(constructed, disposed);
+    assert.equal(data.get(HOST.key).host.simulation.steps, 0, 'body reconciliation does not tick the NPC world');
+    const frozen = structuredClone(data);
+    assert.equal((await replacement.bodyPresence(ticket)).frame.views[0].motion.y, 2);
+    assert.equal((await replacement.reconcileBodies(ticket, [])).changed, false);
+    assert.deepEqual(data, frozen, 'read-only and duplicate events do not rewrite body components');
+    now = 160000; const expiry = await makeHost().claim('expiry');
+    await assert.rejects(replacement.bodyPresence(expiry), /lifecycle due/);
+    await replacement.reconcileBodies(expiry, []);
+    assert.equal((await replacement.bodyPresence(expiry)).frame.departures[0].body.motion.y, 2);
+    assert.equal(constructed, buildsBefore);
   } finally { f.dispose(); }
 });

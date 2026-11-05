@@ -47,6 +47,27 @@ deadline before issuing any grant. The lifecycle supports explicit event-driven
 expiry; a production earliest-deadline alarm and orchestration are **not wired**.
 There must be no polling or repeated frame solely to keep a frozen body present.
 
+The inactive `VirtualHost.reconcileBodies` entry point now accepts trusted close
+observations and the authenticated transport census independently of NPC ticks.
+It commits changed session/body state and existing-NPC handbacks atomically. A
+duplicate event leaves storage and the ownership lease unchanged. Its `wakeAt`
+is the earliest applicable body deadline (including a lost-ACK control lease or
+finite run end), not a polling cadence. A future alarm owner must reacquire a
+valid host fence when necessary; this method never extends the run or ownership.
+No alarm is installed by this change.
+
+`bodyPresence` reads a complete committed public frame with epoch, revision,
+logical deadlines and departure intents. It includes no private ownership token
+or packed controller state, refuses overdue lifecycle state until reconciliation,
+and caps the complete result at 32 retained records and 32 KiB. It refuses larger
+profiles rather than silently dropping records. The existing 64 KiB world profile
+admits 30 sessions; future admission/capability wiring must honor both bounds.
+Frame `expiresAt` bounds accepting a newly delivered snapshot under its host lease;
+it must not become a recurring body refresh requirement. Once accepted, stationary
+presentation persists to its absolute logical deadline or a newer authoritative
+event. Delayed-frame fencing, event delivery/acknowledgement and scene binding are
+still required. A past departure is a tombstone, not permission to replay its beam.
+
 ## Reclaim and presentation
 
 The inactive Clanker reclaim adapter builds a fresh standard pose with controls
@@ -102,6 +123,19 @@ independent NPC progress, source-controller freeze, authenticated movement and
 lost replies, protocol refusal, zero-momentum reclaim, support loss before apply
 or before live ACK, obstruction refusal, resource defaults and red/green markers.
 Hub/browser/full/scene checks remain prohibited by the existing STOP restriction.
+
+The event/snapshot increment passes 71 focused host, registry, body-storage and
+actual source-controller terrain checks. These cover write rollback, duplicate
+no-op events, zero NPC/physics ticks, occupancy and exactly-once existing-NPC
+handback, host replacement, lost ACK, finite run end and concurrent late joins.
+Thirty-two long-ID/high-precision fixture bodies serialize to 18,822 bytes;
+their complete departure frame is 20,157 bytes. These are measured fixture sizes,
+not a proof of every permitted metadata combination; runtime byte and record
+bounds still reject overflow. Thirty-two concurrent readers return identical
+independent frames without writes. Actual Clanker storage also passes the new
+event path without constructing an offline controller, including after terrain
+support disappears. No production timing or billed-resource claim follows from
+these focused tests.
 
 Frozen-body savings do not solve live-movement write amplification. The current
 steady movement path can perform five logical key writes per accepted sample
