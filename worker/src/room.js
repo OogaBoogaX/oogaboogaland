@@ -130,7 +130,7 @@ export class Room extends DurableObject {
   }
 
   record(ws, a) {
-    return { ws, voice: { pub: null, sub: null, track: null, gen: 0, mids: {}, pubMid: null }, muted: false, hp: 100, ko: false, g: null, j: 0, w: 0, sent: null, zone: OUTSIDE, pokerVoice: null, inHub: false, visible: true, joinedAt: Date.now(), door: null, passes: [], blendTo: null, blendK: 0, ...a, bucket: { tokens: MOVE_HZ, at: Date.now() }, npcBucket: { tokens: NPC_HZ, at: Date.now() }, hpBucket: { tokens: HP_HZ, at: Date.now() }, blendBucket: { tokens: BLEND_HZ, at: Date.now() }, doorBucket: { tokens: DOOR_BURST, at: Date.now() }, ghostBucket: { tokens: GHOST_BURST, at: Date.now() }, ghostFrameBucket: { tokens: GHOST_FRAME_BURST, at: Date.now() }, chatBucket: this.chatBucketFor(a.id, Date.now()), seenAt: Date.now() };
+    return { ws, voice: { pub: null, sub: null, track: null, gen: 0, mids: {}, pubMid: null }, muted: false, hp: 100, ko: false, g: null, j: 0, w: 0, v: null, va: 0, sent: null, zone: OUTSIDE, pokerVoice: null, inHub: false, visible: true, joinedAt: Date.now(), door: null, passes: [], blendTo: null, blendK: 0, ...a, bucket: { tokens: MOVE_HZ, at: Date.now() }, npcBucket: { tokens: NPC_HZ, at: Date.now() }, hpBucket: { tokens: HP_HZ, at: Date.now() }, blendBucket: { tokens: BLEND_HZ, at: Date.now() }, doorBucket: { tokens: DOOR_BURST, at: Date.now() }, ghostBucket: { tokens: GHOST_BURST, at: Date.now() }, ghostFrameBucket: { tokens: GHOST_FRAME_BURST, at: Date.now() }, chatBucket: this.chatBucketFor(a.id, Date.now()), seenAt: Date.now() };
   }
 
   // Retain account debt across socket records, only while awake. Reclaim fully replenished
@@ -148,11 +148,11 @@ export class Room extends DurableObject {
   }
 
   attachment(p) {
-    return { cabinet: p.cabinet || null, cabinetBucket: p.cabinetBucket || null, hockey: p.hockey || null, hockeyBuckets: p.hockeyBuckets || null, id: p.id, login: p.login, display: p.display, contributor: p.contributor, body: p.body, connectionToken: p.connectionToken, studioSeat: p.studioSeat, studioRevoked: !!p.studioRevoked, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, j: p.j, w: p.w, voice: p.voice, muted: p.muted, hp: p.hp, ko: p.ko, sent: p.sent, zone: p.zone, pokerVoice: p.pokerVoice, inHub: p.inHub, visible: p.visible, joinedAt: p.joinedAt, door: p.door, passes: p.passes, blendTo: p.blendTo, blendK: p.blendK };
+    return { cabinet: p.cabinet || null, cabinetBucket: p.cabinetBucket || null, hockey: p.hockey || null, hockeyBuckets: p.hockeyBuckets || null, id: p.id, login: p.login, display: p.display, contributor: p.contributor, body: p.body, connectionToken: p.connectionToken, studioSeat: p.studioSeat, studioRevoked: !!p.studioRevoked, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, j: p.j, w: p.w, v: p.v, va: p.va, r: p.r, voice: p.voice, muted: p.muted, hp: p.hp, ko: p.ko, sent: p.sent, zone: p.zone, pokerVoice: p.pokerVoice, inHub: p.inHub, visible: p.visible, joinedAt: p.joinedAt, door: p.door, passes: p.passes, blendTo: p.blendTo, blendK: p.blendK };
   }
 
   view(p) {
-    return { id: p.id, login: p.login, display: p.display, body: p.body, zone: p.zone, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, j: p.j, w: p.w, voice: !!p.voice.track, muted: p.muted, hp: p.hp, ko: p.ko, blendTo: p.blendTo, blendK: p.blendK };
+    return { id: p.id, login: p.login, display: p.display, body: p.body, zone: p.zone, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, j: p.j, w: p.w, v: p.v, va: p.va, r: p.r, voice: !!p.voice.track, muted: p.muted, hp: p.hp, ko: p.ko, blendTo: p.blendTo, blendK: p.blendK };
   }
 
   send(ws, msg) {
@@ -396,6 +396,8 @@ export class Room extends DurableObject {
       const ooga = !!p.body && !p.body.startsWith("gorilla:");
       p.j = ooga && msg.j ? msg.j : 0;
       p.w = ooga && msg.w ? msg.w : 0;
+      p.v = ooga && msg.v ? msg.v : null; p.va = p.v ? p.seenAt : 0;
+      p.r = ooga ? msg.r : undefined;
       if (Number.isInteger(p.studioSeat) && !studioSeatAllowed(p, p.studioSeat, this.players.values())) { delete p.studioSeat; this.removeStudioSpeaker(p.id); this.studio.revision++; this.persistStudio(); this.enforceStudio(); }
       if (this.chalkEditor && this.chalkEditor.id === p.id && this.chalkRefusal(p)) this.chalkLetGo(p);
       this.dirty = true;
@@ -516,7 +518,7 @@ export class Room extends DurableObject {
       p.hp = 100;
       p.ko = false;
       p.g = null;
-      p.j = p.w = 0;
+      p.j = p.w = 0; p.v = null; p.va = 0; p.r = undefined;
       if (!p.body) this.leaveStudio(p);
       this.broadcast({ t: "body", id: p.id, name: p.body });
       this.enforceStudio(); this.updateVoice();
@@ -563,7 +565,7 @@ export class Room extends DurableObject {
     // No await between checking and assigning: concurrent requests have exactly one winner.
     const at = CABINETS.get(msg.id);
     p.cabinet = { id: msg.id, q: msg.q };
-    p.x = at.x; p.y = at.y; p.z = at.z; p.yaw = at.yaw; p.g = null; p.j = p.w = 0;
+    p.x = at.x; p.y = at.y; p.z = at.z; p.yaw = at.yaw; p.g = null; p.j = p.w = 0; p.v = null; p.va = 0; p.r = undefined;
     p.blendTo = null; p.blendK = 0;
     p.ws.serializeAttachment(this.attachment(p));
     this.dirty = true;
@@ -600,7 +602,7 @@ export class Room extends DurableObject {
     this.send(p.ws, { t: "release", name: p.body, reason });
     p.body = null;
     p.g = null;
-    p.j = p.w = 0;
+    p.j = p.w = 0; p.v = null; p.va = 0; p.r = undefined;
     this.leaveStudio(p);
     this.chalkLetGo(p);
     p.ws.serializeAttachment(this.attachment(p));
@@ -632,17 +634,21 @@ export class Room extends DurableObject {
   snapshot() {
     if (!this.dirty) return;
     this.dirty = false;
-    const ps = [], gs = [], js = [], weapons = [];
+    const ps = [], gs = [], js = [], weapons = [], visuals = [], rests = [];
     for (const p of this.players.values()) {
       ps.push(p.id, p.x, p.y, p.z, p.yaw);
       if (p.g) gs.push(p.id, ...p.g);
       if (p.j) js.push(p.id, p.j);
       if (p.w) weapons.push(p.id, p.w);
+      if (p.v) visuals.push([p.id, p.va, ...p.v]);
+      if (p.r !== undefined) rests.push(p.r === 0 ? [p.id, 0] : [p.id, ...p.r]);
     }
     const state = { t: "state", now: Date.now(), ps };
     if (gs.length) state.gs = gs;
     if (js.length) state.js = js;
     if (weapons.length) state.ws = weapons;
+    if (visuals.length) state.vs = visuals;
+    if (rests.length) state.rs = rests;
     this.broadcast(state);
   }
 

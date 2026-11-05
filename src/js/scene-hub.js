@@ -1938,6 +1938,7 @@
       if (!cave || cave.camp.seat !== seat || crew.standPlayer(cave)) continue;
       seat.sitter = null;
       cave.camp.seat = null;
+      hammock.releaseEquipment(cave);
       cave.root.quaternion = null;
       cave.root.rotation.x = cave.root.rotation.z = 0;
       crew.recoverDragged(cave);
@@ -8823,6 +8824,7 @@
     if (!cloudPlaying()) timechainIsland.gate.view(dt);
     // Tess moves after the view is set, so a tour's glide has the last word on it.
     if (!cloudHopper.active) islandGuide.update(dt, elapsed);
+    shareDrivenPose();
     timechainIsland.site.view(camera.position);
     for (let i = 0; i < signDetails.length; i++) {
       const sign = signDetails[i], dx = camera.position.x - sign.x, dy = camera.position.y - sign.y, dz = camera.position.z - sign.z;
@@ -9329,6 +9331,13 @@
       zoneHeldFor = 0;
     } else if ((zoneHeldFor += dt) >= ZONE_HOLD) BL.net.setZone(zone);
     shareBlend(driven, !!gorilla, zone);
+  };
+  // The pilot writes the rendered head look and weapon aim after the crew resets its stand pose.
+  // Publish those final values, while body/zone reporting above stays before remote visibility updates.
+  const shareDrivenPose = () => {
+    if (cloudHopper?.active) return;
+    const gorilla = clankerPlay && clankerPlay.player, driven = gorilla || crew.player;
+    if (!driven) return;
     const p = driven.root.position;
     if (gorilla) {
       const g = gorilla.netMotion, m = gorilla.motion, d = gorilla.drive;
@@ -9340,12 +9349,13 @@
       BL.net.sendPose(p.x, p.y, p.z, gorilla.heading, g);
       BL.net.setHealth(gorilla.health.value / gorilla.health.max * 100, gorilla.health.value <= 0);
     } else if (driven.camp.seat && driven.camp.seat.kind === "hammock") {
-      // A resting Ooga reports the seat's still point, so its swing sends nothing; every page swings its own bed.
-      const seat = driven.camp.seat;
-      BL.net.sendPose(seat.restX, seat.restY + driven.traits.height * 0.08 - driven.baseY, seat.restZ, seat.ry, null, BL.crew.jetFlags(driven), BL.crew.weaponFlags(driven));
+      // Entry/exit share the actual body transform; settled rest shares a still seat, with no sway traffic.
+      const seat = driven.camp.seat, rest = hammock.stateFor(driven), moving = rest[1] !== 2;
+      BL.net.sendPose(moving ? p.x : seat.restX, moving ? p.y - driven.baseY : seat.restY + driven.traits.height * 0.08 - driven.baseY,
+        moving ? p.z : seat.restZ, seat.ry, null, BL.crew.jetFlags(driven), BL.crew.weaponFlags(driven), BL.crew.visualState(driven), rest);
       BL.net.setHealth(driven.health.value, driven.health.stunned);
     } else {
-      BL.net.sendPose(p.x, p.y - driven.baseY, p.z, driven.root.rotation.y, null, BL.crew.jetFlags(driven), BL.crew.weaponFlags(driven));
+      BL.net.sendPose(p.x, p.y - driven.baseY, p.z, driven.root.rotation.y, null, BL.crew.jetFlags(driven), BL.crew.weaponFlags(driven), BL.crew.visualState(driven));
       BL.net.setHealth(driven.health.value, driven.health.stunned);
     }
   };
@@ -12235,10 +12245,10 @@
       hideGorilla: (name, on) => {
         if (on && clankerPlay && clankerPlay.player?.owner.traits.name === name) clankerPlay.release();
         clankers.setRemote(name, on);
-      }, posed: (cave, feet) => {
+      }, posed: (cave, feet, rec) => {
         const p = cave.root.position, height = cave.bodyHeight || 1.4;
         floatPose(cave, feet, height, 0, now);
-        if (hammock) hammock.poseRemote(cave, feet);
+        if (hammock) hammock.poseRemote(cave, feet, rec, remoteShown(rec) && cave.root.visible);
         if (poolEffectsActive) mempoolIsland.wake(cave.root, p.x, feet, p.z, height, 0.35);
       }
     });
