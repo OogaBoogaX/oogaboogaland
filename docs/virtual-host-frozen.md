@@ -171,3 +171,15 @@ reclaim path's `TextEncoder`. The combined source passes 152 focused checks for
 host/session recovery, Room handoff/authority, body adapters and protocol/voice
 compatibility. Build and touched-source syntax checks pass. No prohibited
 Hub/browser/full/scene checks were run; activation and burst remain disabled.
+
+The next base update, `2eed79e3`, includes the upstream #464 equipment/pose and
+#461 hammock fixes. Conflict resolution keeps their visual/rest pose fields
+alongside the body-reclaim send gate, and retains both visual/rest fields and
+body/NPC authority fields in Room hibernation attachments. Focused regressions
+exercise pose blocking until live acknowledgement, forwarding visual/rest data
+after acknowledgement, and retaining those fields alongside body fencing across
+Room restart. The shared pose/hammock implementation remains the upstream work;
+this merge does not reset selected equipment or enable frozen-body presentation.
+The combined revision passes 157 focused tests, the 322-script build and 19
+changed-source syntax checks. The existing 20-entry test ledger is unchanged.
+Hub/browser/full/scene tests remain unrun under the STOP restriction.

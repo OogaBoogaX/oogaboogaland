@@ -232,6 +232,17 @@ export const sanitizeChat = (text) => globalThis.BL.chatPolicy.error(text) ? "" 
 
 const finite = (v) => typeof v === "number" && Number.isFinite(v);
 const round = (v) => Math.round(v * 1000) / 1000;
+// pose.v: centiradian head/aim angles, ownership/action flags and millisecond animation phases.
+export const VISUAL_LIMITS = [157, 157, 314, 8191, 240, 1200, 560, 440, 320, 1240, 100, 750, 1300, 280, 2000, 31, 31];
+export const validVisual = (v) => Array.isArray(v) && v.length === VISUAL_LIMITS.length
+  && v.every((n, i) => Number.isInteger(n) && n >= (i < 3 ? -VISUAL_LIMITS[i] : 0) && n <= VISUAL_LIMITS[i]);
+
+// pose.r: no rest (0), or seat, phase (entry/rest/exit), progress byte and the body's
+// signed quaternion xyz at 1/1000; nonnegative w is reconstructed by the renderer.
+export const validRest = r => r === 0 || Array.isArray(r) && r.length === 6
+  && r.every(Number.isInteger) && r[0] === 0 && r[1] >= 1 && r[1] <= 3 && r[2] >= 0 && r[2] <= 255
+  && Math.abs(r[3]) <= 1000 && Math.abs(r[4]) <= 1000 && Math.abs(r[5]) <= 1000
+  && r[3] ** 2 + r[4] ** 2 + r[5] ** 2 <= 1002001;
 
 /** A parsed client message, `null` for one to ignore, or `false` for one that should close the socket. */
 export const parseClientMessage = (text) => {
@@ -273,6 +284,14 @@ export const parseClientMessage = (text) => {
     if (msg.w !== undefined) {
       if (!Number.isInteger(msg.w) || msg.w < 0 || msg.w > 255) return null;
       if (msg.w) pose.w = msg.w;
+    }
+    if (msg.v !== undefined) {
+      if (!validVisual(msg.v)) return null;
+      pose.v = msg.v;
+    }
+    if (msg.r !== undefined) {
+      if (!validRest(msg.r)) return null;
+      pose.r = msg.r;
     }
     return pose;
   }

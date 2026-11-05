@@ -181,7 +181,37 @@
   let npcFrame = null, inHub = false, hubSent = null, visibleSent = null;
   let zone = "outside", body = null, muted = false, hpSent = 100, koSent = false, hpAt = 0, poseAt = 0, px = NaN, py = NaN, pz = NaN, pyaw = NaN;
   const gSent = new Float64Array(6);
-  let gKnown = false, poseHasG = false, jetSent = 0, weaponSent = 0;
+  let gKnown = false, poseHasG = false, jetSent = 0, weaponSent = 0, visualKnown = false;
+  const visualSent = new Int16Array(17);
+  const VISUAL_LIMITS = [157, 157, 314, 8191, 240, 1200, 560, 440, 320, 1240, 100, 750, 1300, 280, 2000, 31, 31];
+  const validVisual = (v) => {
+    if (!v || v.length !== 17) return false;
+    for (let i = 0; i < 17; i++) if (!Number.isInteger(v[i]) || v[i] < (i < 3 ? -VISUAL_LIMITS[i] : 0) || v[i] > VISUAL_LIMITS[i]) return false;
+    return true;
+  };
+  const restSent = new Int16Array(6);
+  let restKnown = false, restActive = false;
+  const validRest = r => {
+    if (r === 0) return true;
+    if (!r || r.length !== 6) return false;
+    for (let i = 0; i < 6; i++) if (!Number.isInteger(r[i])) return false;
+    return r[0] === 0 && r[1] >= 1 && r[1] <= 3 && r[2] >= 0 && r[2] <= 255
+      && Math.abs(r[3]) <= 1000 && Math.abs(r[4]) <= 1000 && Math.abs(r[5]) <= 1000
+      && r[3] ** 2 + r[4] ** 2 + r[5] ** 2 <= 1002001;
+  };
+  const readRest = (rec, r) => {
+    rec.rest = undefined;
+    if (r === 0) { rec.rest = 0; return; }
+    if (!Array.isArray(r) || !validRest(r)) return;
+    if (!rec.restData) rec.restData = new Int16Array(6);
+    rec.restData.set(r); rec.rest = rec.restData;
+  };
+  const readVisual = (rec, v, at) => {
+    rec.visual = null;
+    if (!validVisual(v) || !Number.isFinite(at)) return;
+    if (!rec.visualData) rec.visualData = new Int16Array(17);
+    rec.visualData.set(v); rec.visual = rec.visualData; rec.visualAt = at;
+  };
   let clockOffset = 0, clockKnown = false;
   let pokerVoice = null;
   // A server timestamp minus the arrival time is the true offset less the trip; the largest such
@@ -298,6 +328,8 @@
     if (Array.isArray(p.g) && p.g.length === 6) readGorillaPose(rec, p.g);
     rec.jet = Number.isInteger(p.j) && p.j > 0 && p.j <= 7 ? p.j : 0;
     rec.weapon = Number.isInteger(p.w) && p.w > 0 && p.w <= 255 ? p.w : 0;
+    readVisual(rec, p.v, p.va);
+    readRest(rec, p.r);
     rec.zone = typeof p.zone === "string" ? p.zone : "outside";
     rec.voice = p.voice === true;
     rec.hp = Number.isFinite(p.hp) ? p.hp : 100;
@@ -421,6 +453,8 @@
         rec.x = ps[i + 1]; rec.y = ps[i + 2]; rec.z = ps[i + 3]; rec.yaw = ps[i + 4];
         // `js` lists every jetpack and `ws` every weapon; anyone in the snapshot left out has none.
         rec.jet = rec.weapon = 0;
+        rec.visual = null;
+        rec.rest = undefined;
       }
       const gs = msg.gs;
       if (Array.isArray(gs)) for (let i = 0; i + 6 < gs.length; i += 7) {
@@ -436,6 +470,18 @@
       if (Array.isArray(ws)) for (let i = 0; i + 1 < ws.length; i += 2) {
         const rec = remotes.get(ws[i]), w = ws[i + 1];
         if (rec && Number.isInteger(w) && w > 0 && w <= 255) rec.weapon = w;
+      }
+      const vs = msg.vs;
+      if (Array.isArray(vs)) for (const row of vs) {
+        if (!Array.isArray(row) || row.length !== 19) continue;
+        const rec = remotes.get(row[0]);
+        if (rec) readVisual(rec, row.slice(2), row[1]);
+      }
+      const rs = msg.rs;
+      if (Array.isArray(rs)) for (const row of rs) {
+        if (!Array.isArray(row) || row.length !== 2 && row.length !== 7) continue;
+        const rec = remotes.get(row[0]);
+        if (rec) readRest(rec, row.length === 2 ? row[1] : row.slice(1));
       }
       if (changed) moved();
     } else if (msg.t === "npc-authority") {
@@ -473,8 +519,12 @@
       // appear, or become voice-eligible, in a room without its last bounded pose.
       const restoredPose = body && Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz) && Number.isFinite(pyaw);
       if (restoredPose) {
+        // Cached equipment/look survive reconnect; transient actions are reconciled by the next
+        // live sample rather than replayed with a fresh room timestamp.
+        if (visualKnown) { visualSent[3] &= 7; for (let i = 4; i < 15; i++) visualSent[i] = 0; }
         const extra = state.bodyKind === "gorilla" && poseHasG ? `,"g":[${gSent[0]},${gSent[1].toFixed(3)},${gSent[2].toFixed(3)},${gSent[3].toFixed(3)},${gSent[4].toFixed(3)},${gSent[5].toFixed(3)}]`
-          : (jetSent ? `,"j":${jetSent}` : "") + (weaponSent ? `,"w":${weaponSent}` : "");
+          : (jetSent ? `,"j":${jetSent}` : "") + (weaponSent ? `,"w":${weaponSent}` : "") + (visualKnown ? `,"v":[${visualSent.join(",")}]` : "")
+            + (restKnown ? restActive ? `,"r":[${restSent.join(",")}]` : ',"r":0' : "");
         send(`{"t":"pose","x":${px.toFixed(3)},"y":${py.toFixed(3)},"z":${pz.toFixed(3)},"yaw":${pyaw.toFixed(3)}${extra}}`);
       }
       sendZone();
@@ -508,6 +558,8 @@
         rec.bodyName = bodyName(rec.body);
         rec.g = null;
         rec.jet = rec.weapon = 0;
+        rec.visual = null;
+        rec.rest = undefined;
         rec.hp = 100;
         rec.ko = false;
       }
@@ -898,7 +950,7 @@
     state.bodyName = bodyName(name);
     poseAt = 0; px = NaN;
     gKnown = poseHasG = false;
-    jetSent = weaponSent = 0;
+    jetSent = weaponSent = 0; visualKnown = false; restKnown = restActive = false;
     sendBody();
     // The room starts another actor at full health.
     hpSent = 100; koSent = false; hpAt = 0;
@@ -938,11 +990,11 @@
   };
 
   // Throttled to POSE_MS and skipped while nothing moved; a changed gorilla pose, jetpack or weapon also earns a report.
-  const sendPose = (x, y, z, yaw, g = null, jet = 0, weapon = 0) => {
+  const sendPose = (x, y, z, yaw, g = null, jet = 0, weapon = 0, visual = null, rest = 0) => {
     if (!bodyReclaim.allows("pose", body)) return;
     if (cabinetAnchor) {
       const at = cabinetAnchor;
-      x = at.x; y = at.y; z = at.z; yaw = at.yaw; g = null; jet = weapon = 0;
+      x = at.x; y = at.y; z = at.z; yaw = at.yaw; g = null; jet = weapon = 0; visual = null; rest = 0;
     }
     const now = performance.now();
     if (state.bodyKind === "gorilla" && g && g.length === 6) {
@@ -957,11 +1009,20 @@
     x = Math.max(-BOUND_XZ, Math.min(BOUND_XZ, x));
     z = Math.max(-BOUND_XZ, Math.min(BOUND_XZ, z));
     y = Math.max(BOUND_Y_MIN, Math.min(BOUND_Y_MAX, y));
+    yaw = Math.atan2(Math.sin(yaw), Math.cos(yaw));
     if (state.bodyKind !== "gorilla") g = null;
     if (g) for (let i = 0; i < 6; i++) if (!Number.isFinite(g[i])) { g = null; break; }
     if (state.bodyKind === "gorilla" || !Number.isInteger(jet) || jet < 0 || jet > 7) jet = 0;
     if (state.bodyKind === "gorilla" || !Number.isInteger(weapon) || weapon < 0 || weapon > 255) weapon = 0;
-    let changed = !!g && !gKnown || jet !== jetSent || weapon !== weaponSent;
+    if (state.bodyKind === "gorilla" || !validVisual(visual)) visual = null;
+    if (state.bodyKind === "gorilla" || !validRest(rest)) rest = 0;
+    let changed = !!g && !gKnown || jet !== jetSent || weapon !== weaponSent || !!visual !== visualKnown
+      || state.bodyKind !== "gorilla" && (!restKnown || !!rest !== restActive);
+    if (rest && !changed) for (let i = 0; i < 6; i++) if (rest[i] !== restSent[i]) { changed = true; break; }
+    if (visual && !changed) for (let i = 0; i < 17; i++) if (visual[i] !== visualSent[i]) { changed = true; break; }
+    // A held wind-up can outlast its last changing sample. A bounded heartbeat keeps it live, and
+    // lets a silent/disconnected action expire without an extra timer or a new message type.
+    if (visual && (visual[3] & 40 || visual[14] > 0) && now - poseAt >= 300) changed = true;
     if (g && !changed) for (let i = 0; i < 6; i++) if (g[i] !== gSent[i]) { changed = true; break; }
     // Even when the complete pose is unchanged, remember that its cached locomotion is valid for reconnect.
     if (g) poseHasG = true;
@@ -978,6 +1039,13 @@
     jetSent = jet; weaponSent = weapon;
     if (jet) extra += `,"j":${jet}`;
     if (weapon) extra += `,"w":${weapon}`;
+    visualKnown = !!visual;
+    if (visual) { visualSent.set(visual); extra += `,"v":[${visualSent.join(",")}]`; }
+    restKnown = state.bodyKind !== "gorilla"; restActive = !!rest;
+    if (restKnown) {
+      if (rest) { restSent.set(rest); extra += `,"r":[${restSent.join(",")}]`; }
+      else extra += ',"r":0';
+    }
     if (state.room === "live") send(`{"t":"pose","x":${x.toFixed(3)},"y":${y.toFixed(3)},"z":${z.toFixed(3)},"yaw":${yaw.toFixed(3)}${extra}}`);
     moved();
   };

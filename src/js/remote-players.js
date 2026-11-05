@@ -28,7 +28,6 @@
   const { quat } = BL.math;
   // A remote strike's arm swing, raised then brought down, in seconds; and the scratch the gun hold works in.
   const SWING_TIME = 0.35;
-  const GUN_ARM = quat.create(), GUN_GRIP = quat.create(), GUN_HAND = quat.create(), GUN_AT = new Float64Array(3);
   const MAX = 32;
   const EASE = 10;
   const SNAP = 8;
@@ -121,6 +120,7 @@
         ? (createGorilla && createGorilla(name, rec)) || BL.agent.create({ managed: true, groundAt: () => rec.y, x: rec.x, z: rec.z, heading: rec.yaw })
         : BL.models.caveman(BL.contributors.traitsFor(name));
       if (!gorilla) {
+        BL.crew.preparePresentation(cave);
         const parts = cave.parts;
         for (const key of ["snack", "gun", "jetpack", "jetFlame"]) if (parts[key]) parts[key].visible = false;
       }
@@ -131,7 +131,7 @@
       const height = gorilla ? 0 : BL.crew.bodyHeightOf(cave);
       addChild(root, cave.root);
       const motion = gorilla ? { walkPhase: NaN, walkGait: "knuckle", climb: 0, climbStride: 0, climbDirection: 0, climbSide: 0, swim: 0, lab: false, labRunIn: false, office: false, officeRise: 0, workExit: false } : null;
-      const entry = { id: rec.id, body: rec.body, name, gorilla, cave, motion, baseY: gorilla ? 0 : cave.root.position.y, height, top: NaN, dTop: 0, jetNode: null, jetFlame: null, swing: 0, x: rec.x, y: rec.y, z: rec.z, yaw: rec.yaw, phase: 0, hidden: null, hiddenOverride: null, label: "", labelW: 0,
+      const entry = { id: rec.id, body: rec.body, name, gorilla, cave, motion, baseY: gorilla ? 0 : cave.root.position.y, height, top: NaN, dTop: 0, jetNode: null, jetFlame: null, swing: 0, shotAt: -Infinity, lastHeld: 0, lastMode: 0, lastMelee: 0, sampleAt: 0, sampleMelee: 0, sampleFlags: 0, sampleSwap: 0, sampleSwapIndex: 0, x: rec.x, y: rec.y, z: rec.z, yaw: rec.yaw, phase: 0, hidden: null, hiddenOverride: null, label: "", labelW: 0,
         still: false, thumpT: 0, icon: 0, screenX: NaN, beatOwned: false };
       bodies.set(rec.id, entry);
       hideLocal(entry);
@@ -139,6 +139,7 @@
     };
 
     const drop = (entry) => {
+      if (entry.cave.restEquipment) entry.cave.restEquipment.release(entry.cave);
       if (fx) fx.hush(entry.cave);
       if (entry.gorilla) entry.cave.dispose();
       else removeChild(root, entry.cave.root);
@@ -149,6 +150,8 @@
     const pose = (entry, dt) => {
       const { cave } = entry;
       const parts = cave.parts;
+      parts.armL.rotation.y = parts.armR.rotation.y = 0;
+      parts.armL.rotation.z = 0.12; parts.armR.rotation.z = -0.12;
       const moved = Math.hypot(entry.dx, entry.dz) / Math.max(dt, 1e-3);
       entry.still = moved <= WALK_SPEED;
       // A walk, a strike or a gun out (`showWeapon` hides the club) ends a tap at once.
@@ -201,48 +204,93 @@
     // Their jetpack from the room's `jet` (net.js): the character's built-in one, or the hub's model, put on as the
     // crew puts one on (`crew.jetpackNode`) the first time it shows. The flame flickers as the crew's does.
     let jetClock = 0;
-    const showJet = (entry, jet) => {
+    const showJet = (entry, rec) => {
+      const jet = rec.jet, owned = rec.visual && (rec.visual[3] & 4);
       const cave = entry.cave, parts = cave.parts;
       if (!entry.jetNode) {
-        if (!jet) return;
+        if (!jet && !owned) return;
         entry.jetNode = parts.jetpack || BL.crew.jetpackNode(cave.root, cave.traits.height, 0, BL.hubModels.jetpack(), BL.hubModels.jetFlame());
         entry.jetFlame = parts.jetpack ? parts.jetFlame : entry.jetNode.children[0];
+        cave.presentationJet = { node: entry.jetNode, flame: entry.jetFlame, power: 0 };
       }
       const power = jet >> 1, flame = entry.jetFlame;
+      cave.presentationJet.power = power;
+      cave.jet = jet & 1 ? cave.presentationJet : null;
       entry.jetNode.visible = (jet & 1) === 1;
       flame.visible = entry.jetNode.visible && power > 0;
       if (flame.visible) flame.scale.y = (0.7 + Math.sin(jetClock * 40 + entry.id) * 0.3) * power / 2;
     };
-    // Their weapons from the room's `weapon` (net.js), drawn in simple poses rather than the crew's own: the gun in
-    // place of the club while it is out (the club as their model carries it otherwise, as before, slung or drawn),
-    // the gun's bananas by the crew's rule, the gun in the right palm as the crew holds it to aim, the arm raised
-    // while they aim, and a strike's swing.
-    const showWeapon = (entry, weapon, dt) => {
-      const cave = entry.cave, parts = cave.parts, arm = parts.armR, gun = parts.gun, held = weapon & 3, h = cave.traits.height;
-      parts.club.visible = held !== 2;
-      gun.visible = held === 2;
+    // The same third-person grip, sling, recoil and reload poses as the local crew. Timers are sampled
+    // state, aged on the room's clock; a late join never starts an obsolete action from its beginning.
+    const showWeapon = (entry, rec, dt) => {
+      const cave = entry.cave, parts = cave.parts, w = cave.weapon, weapon = rec.weapon | 0;
+      const held = weapon & 3, mode = weapon & 4, v = rec.visual, now = net.serverNow();
+      const age = v ? Math.max(0, (now - rec.visualAt) / 1000) : 0, fresh = age < 0.5;
+      if (held !== entry.lastHeld || mode !== entry.lastMode) { entry.shotAt = -Infinity; entry.swing = 0; }
+      entry.lastHeld = held; entry.lastMode = mode;
+      const flags = v ? v[3] : 1 | (held === 2 ? 2 : 0);
+      w.primaryOwned = !!(flags & 1); w.secondaryOwned = !!(flags & 2); cave.jetpackOwned = !!(flags & 4);
+      w.equipped = held === 2; w.primaryEquipped = held === 1; w.aiming = !!mode;
+      w.ammo = weapon >> 3;
+      parts.head.quaternion = null;
+      parts.head.rotation.x += ((v ? v[0] / 100 : 0) - parts.head.rotation.x) * (1 - Math.exp(-EASE * dt));
+      w.aimPitch = v ? v[1] / 100 : parts.head.rotation.x;
+      w.aimYaw = v ? v[2] / 100 : 0;
+      w.recoil = held === 2 ? Math.max(v ? v[4] / 1000 - age : 0, 0.24 - (now - entry.shotAt) / 1000, 0) : 0;
+      w.reloading = held === 2 && fresh && !!(flags & 8);
+      w.reloadSpare = fresh && !!(flags & 16);
+      w.spareAmmo.length = v ? v[16] ? 2 : v[15] ? 1 : 0 : 0;
+      if (w.spareAmmo.length > 0) w.spareAmmo[0] = v[15] - 1;
+      if (w.spareAmmo.length > 1) w.spareAmmo[1] = v[16] - 1;
+      w.reloadMagazine = flags & 2048 ? 1 : 0; w.swapMagazine = flags & 4096 ? 1 : 0;
+      const handoff = flags >> 8 & 3;
+      w.reloadHandoffTime = v ? Math.max(0, v[6] / 1000 - age) : 0;
+      w.reloadHandoff = held === 2 && w.reloadHandoffTime > 0 ? handoff === 1 ? -1 : handoff === 2 ? 1 : handoff === 3 ? 2 : 0 : 0;
+      w.swapTime = held === 2 && v ? Math.max(0, v[7] / 1000 - age) : 0;
+      if (v && rec.visualAt !== entry.sampleAt && w.swapTime > 0 && (v[7] > entry.sampleSwap + 30 || w.swapMagazine !== entry.sampleSwapIndex)) {
+        const i = w.swapMagazine;
+        if (i < w.spareAmmo.length) {
+          const model = cave.magazineModels[i] || (cave.magazineModels[i] = BL.crew.createMagazineModel());
+          if (parts.armL.quaternion) model.armStart.set(parts.armL.quaternion);
+          else quat.fromEuler(model.armStart, parts.armL.rotation.x, parts.armL.rotation.y, parts.armL.rotation.z);
+        }
+      }
+      entry.sampleSwap = v ? v[7] : 0; entry.sampleSwapIndex = w.swapMagazine;
+      const melee = held === 1 && v ? Math.max(0, v[8] / 1000 - age * (cave.traits.nunchaku ? 1.9 : 1)) : 0;
+      if (held === 1 && v && rec.visualAt !== entry.sampleAt && (v[8] > entry.sampleMelee + 30 || (flags & 128) !== (entry.sampleFlags & 128) || flags & 32 && !w.meleeHeld)) {
+        BL.crew.captureMeleePose(cave);
+      }
+      entry.lastMelee = melee;
+      entry.sampleAt = rec.visualAt; entry.sampleMelee = v ? v[8] : 0; entry.sampleFlags = flags;
+      w.meleeTime = melee;
+      w.meleeHeld = held === 1 && fresh && !!(flags & 32);
+      if (w.meleeHeld) w.meleeTime = Math.max(0.24, w.meleeTime);
+      w.meleeQuick = !!(flags & 64); w.meleeSide = flags & 128 ? -1 : 1;
+      w.meleeHeldTime = v ? Math.min(1.24, v[9] / 1000 + (w.meleeHeld ? age : 0)) : 0;
+      w.meleeCharge = v ? v[10] / 100 : 0;
+      w.meleeStrikeTime = w.meleeQuick ? 0.09 : 0.128 * (1 + w.meleeCharge * 0.5);
+      w.meleeReadyTime = v ? Math.max(0, v[11] / 1000 - age) : 0;
+      w.axeIdle = v ? v[12] / 1000 : 1.3;
+      w.bashTime = held === 2 && v ? Math.max(0, v[13] / 1000 - age) : 0;
+      cave.twirlUntil = v ? now / 1000 + Math.max(0, v[14] / 1000 - age) : 0;
+      cave.twirlHand = flags & 1024 ? 1 : 0;
+      parts.snack.visible = false;
+      if (w.reloading && !w.reloadHandoff) BL.crew.poseReload(cave, ((v[5] / 1000 + age) % BL.crew.RELOAD_PERIOD) / BL.crew.RELOAD_PERIOD, false);
+      // Older pages still send the original strike event; new pages reconcile the action's actual phase.
       if (entry.swing > 0) entry.swing = Math.max(0, entry.swing - dt);
-      if (entry.swing > 0) {
-        const t = 1 - entry.swing / SWING_TIME;
-        arm.rotation.x = t < 0.35 ? -0.2 - 2.4 * t / 0.35 : -2.6 + 3.2 * (t - 0.35) / 0.65;
-      } else if (held === 2 && weapon & 4) arm.rotation.x = -Math.PI / 2;
-      if (held !== 2) return;
-      const rounds = weapon >> 3;
-      for (let i = 0; i < parts.gunBananas.length; i++) parts.gunBananas[i].visible = rounds > (i + 1) * BL.crew.BURST_ROUNDS;
-      // The crew's aim hold (poseWeapon): the palm at the end of the turned arm, the rifle pivoting round its grip.
-      quat.fromEuler(GUN_ARM, arm.rotation.x, arm.rotation.y, 0);
-      quat.fromEuler(GUN_GRIP, 0, Math.PI / 2, 0);
-      quat.multiply(GUN_HAND, GUN_ARM, GUN_GRIP);
-      quat.rotateVec(GUN_AT, GUN_HAND, 0, -0.625 * h, 0.15 * h);
-      const palmX = arm.position.x + GUN_AT[0], palmY = arm.position.y + GUN_AT[1], palmZ = arm.position.z + GUN_AT[2];
-      quat.fromEuler(GUN_GRIP, Math.PI / 2, 0, 0);
-      quat.multiply(gun.quaternion, GUN_ARM, GUN_GRIP);
-      quat.rotateVec(GUN_AT, gun.quaternion, 0, -0.14 * h, -0.184 * h);
-      gun.position.x = palmX - GUN_AT[0]; gun.position.y = palmY - GUN_AT[1]; gun.position.z = palmZ - GUN_AT[2];
+      if (!v && entry.swing > 0) {
+        w.primaryEquipped = true; w.meleeTime = entry.swing;
+      }
+      BL.crew.poseEquipment(cave, true, now / 1000);
+      if (parts.chuk) {
+        cave.chukAngle += ((parts.club.parent === parts.armR && w.primaryEquipped ? 0 : 2.4) - cave.chukAngle) * (1 - Math.exp(-12 * dt));
+        parts.chuk.rotation.x = cave.chukAngle;
+      }
     };
     // Another player's banana flies as the crew's replayed shots do, with no hits; their strike swings the arm.
     const shotHeard = (id, a) => {
       const entry = bodies.get(id);
+      if (entry && !entry.gorilla) entry.shotAt = net.serverNow();
       if (entry && !entry.gorilla && entry.cave.root.visible && crew && crew.showShot) crew.showShot(null, a[0], a[1], a[2], a[3], a[4], a[5]);
     };
     const swingHeard = (id) => {
@@ -269,6 +317,13 @@
           if (bodies.size >= MAX) continue;
           entry = build(rec);
         }
+        const restPhase = rec.rest ? rec.rest[1] : 0;
+        if (!entry.gorilla && entry.restPhase === 2 && restPhase !== 2) {
+          // Settled rest is reported at a canonical seat, but rendered at the body's cloth offset.
+          // Start exit/interruption from that visible body, rather than jumping back to the seat.
+          entry.x = entry.cave.root.position.x; entry.y = entry.cave.root.position.y - entry.baseY; entry.z = entry.cave.root.position.z;
+        }
+        entry.restPhase = restPhase;
         const far = Math.hypot(rec.x - entry.x, rec.y - entry.y, rec.z - entry.z) > SNAP;
         const t = far ? 1 : k;
         entry.dx = (rec.x - entry.x) * t;
@@ -279,18 +334,18 @@
         entry.yaw += Math.atan2(Math.sin(rec.yaw - entry.yaw), Math.cos(rec.yaw - entry.yaw)) * t;
         if (far) entry.dx = entry.dz = 0;
         if (entry.icon > 0) entry.icon = Math.max(0, entry.icon - dt);
+        entry.cave.root.visible = visible(rec) && !(!entry.gorilla && crew && crew.player && crew.player.traits.name === entry.name);
         if (entry.gorilla) poseGorilla(entry, rec, dt);
         else {
           pose(entry, dt);
-          showJet(entry, rec.jet);
-          showWeapon(entry, rec.weapon | 0, dt);
-          if (posed) posed(entry.cave, entry.cave.root.position.y - entry.baseY);
+          showJet(entry, rec);
+          showWeapon(entry, rec, dt);
+          if (posed) posed(entry.cave, entry.cave.root.position.y - entry.baseY, rec, dt);
         }
         // The top's move carries a player standing on it; a snap carries nobody.
         const height = entry.gorilla ? entry.cave.bodyHeight : entry.height, top = entry.y + height;
         entry.dTop = far || Number.isNaN(entry.top) ? 0 : top - entry.top;
         entry.top = top;
-        entry.cave.root.visible = visible(rec) && !(!entry.gorilla && crew && crew.player && crew.player.traits.name === entry.name);
         if (!entry.cave.root.visible) continue;
         const actor = actorPool[n++];
         actor.id = entry.id;

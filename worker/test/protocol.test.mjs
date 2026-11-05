@@ -1,7 +1,7 @@
 // Pure checks on the room's wire format and limits: no Durable Object, no sockets.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { castIndex, claimRefusal, BOUND_XZ, BOUND_Y_MIN, BOUND_Y_MAX, CHALK, MESSAGE_MAX, MOVE_HZ, parseClientMessage, playerFromHeaders, spawnPoint, takeToken } from "../src/protocol.js";
+import { castIndex, claimRefusal, BOUND_XZ, BOUND_Y_MIN, BOUND_Y_MAX, CHALK, VISUAL_LIMITS, MESSAGE_MAX, MOVE_HZ, parseClientMessage, playerFromHeaders, spawnPoint, takeToken } from "../src/protocol.js";
 
 test("poses inside the bounds are accepted, rounded and their yaw wrapped", () => {
   const m = parseClientMessage(JSON.stringify({ t: "pose", x: 1.23456, y: -7, z: 3, yaw: 7 }));
@@ -18,6 +18,23 @@ test("poses inside the bounds are accepted, rounded and their yaw wrapped", () =
   assert.equal("j" in parseClientMessage(JSON.stringify({ t: "pose", x: 0, y: 25, z: 0, yaw: 0, j: 0 })), false, "no jetpack adds nothing");
   assert.equal(parseClientMessage(JSON.stringify({ t: "pose", x: 0, y: 25, z: 0, yaw: 0, w: 255 })).w, 255, "the gun in hand, aimed, with every round, rides the pose");
   assert.equal("w" in parseClientMessage(JSON.stringify({ t: "pose", x: 0, y: 25, z: 0, yaw: 0, w: 0 })), false, "empty hands add nothing");
+});
+
+test("presentation phases are bounded integers and fit the existing pose envelope", () => {
+  const v = VISUAL_LIMITS.map((n, i) => i < 3 ? -n : n);
+  const wire = JSON.stringify({ t: "pose", x: -159.999, y: -129.999, z: -159.999, yaw: -3.142, j: 7, w: 255, v });
+  assert.ok(wire.length <= MESSAGE_MAX, "the largest bounded Ooga sample must not close its socket");
+  assert.deepEqual(parseClientMessage(wire).v, v);
+  const r = [0, 3, 255, -577, -577, -577], resting = JSON.stringify({ t: "pose", x: -159.999, y: -129.999, z: -159.999, yaw: -3.142, j: 7, w: 255, v, r });
+  assert.ok(resting.length <= MESSAGE_MAX, "all presentation fields plus a hammock transition keep the existing 256-byte cap");
+  assert.deepEqual(parseClientMessage(resting).r, r);
+  assert.equal(parseClientMessage('{"t":"pose","x":0,"y":0,"z":0,"yaw":0,"r":0}').r, 0);
+  for (const r of [null, [], [0, 1, 0], [1, 1, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0], [0, 4, 0, 0, 0, 0], [0, 1, 256, 0, 0, 0], [0, 1, 0, 1001, 0, 0], [0, 1, 0, 1000, 1000, 1000], [0, 1, 0, 0.5, 0, 0]])
+    assert.equal(parseClientMessage(JSON.stringify({ t: "pose", x: 0, y: 0, z: 0, yaw: 0, r })), null, "malformed rest never reserves a seat");
+  assert.equal("v" in parseClientMessage('{"t":"pose","x":0,"y":0,"z":0,"yaw":0}'), false);
+  for (const bad of [null, [], v.slice(1), [...v, 0], v.map((n, i) => i === 3 ? 8192 : n), v.map((n, i) => i === 4 ? -1 : n), v.map((n, i) => i === 0 ? 150.5 : n)]) {
+    assert.equal(parseClientMessage(JSON.stringify({ t: "pose", x: 0, y: 0, z: 0, yaw: 0, v: bad })), null);
+  }
 });
 
 test("a shot is six numbers inside the room's bounds and a shot's reach, rounded; a swing is just the strike", () => {

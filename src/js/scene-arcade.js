@@ -1995,11 +1995,7 @@
     // The Ooga driven here goes to the room with where it stands and its health; other players here are shown.
     const drivenHere = people && people.player;
     BL.net.setBody(drivenHere ? drivenHere.traits.name : null);
-    if (drivenHere) {
-      const p = drivenHere.root.position;
-      BL.net.sendPose(p.x, p.y - drivenHere.baseY, p.z, drivenHere.root.rotation.y, null, 0, BL.crew.weaponFlags(drivenHere));
-      BL.net.setHealth(drivenHere.health.value, drivenHere.health.stunned);
-    }
+    if (drivenHere) BL.net.setHealth(drivenHere.health.value, drivenHere.health.stunned);
     remotes.update(dt);
     footsteps.update(drivenHere);
     // The ghost arena: the rifle in hand inside it, and the voice zone it reports (Ghost Hunter's Arena, a hunt on or
@@ -2007,6 +2003,11 @@
     const feet = drivenHere ? drivenHere.root.position.y - drivenHere.baseY : 0;
     const inRing = !!drivenHere && drivenHere === avatar && inArenaRing(drivenHere.root.position.x, drivenHere.root.position.z, feet);
     if (inRing !== armed && avatar) arm(inRing);
+    // Arena entry/exit changes the held weapon after the pilot's pose; publish the final loadout.
+    if (drivenHere) {
+      const p = drivenHere.root.position;
+      BL.net.sendPose(p.x, p.y - drivenHere.baseY, p.z, drivenHere.root.rotation.y, null, 0, BL.crew.weaponFlags(drivenHere), BL.crew.visualState(drivenHere));
+    }
     // The hallway joins Ooga Arcade to Ghost Hunter's Arena (#422), a voice group of its own: each half is a zone of the
     // land it leads to (`arcade.haunt`, `ghost-arena.haunt`), so the room hands both the hunt and a spectator there
     // watches it through the fence. The half flips `HALLWAY_HOLD` past the midpoint, so a step there never flickers.

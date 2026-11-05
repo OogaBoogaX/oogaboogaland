@@ -229,6 +229,7 @@ test('actual net gates old pose replay until body apply and matching activation,
   // uses elapsed time, so clock reads themselves must not consume its budget.
   const c=client({manual:true}); await c.net.start(); const ws=c.sockets[0], send=m=>ws.onmessage({data:JSON.stringify(m)});
   const welcome=features=>send({t:'welcome',you:{id:1},players:[],features,host:1,now:1000,connectionToken:'fixture-connection'});
+  const visual=[0,0,0,7,0,0,0,0,0,0,0,0,0,0,0,31,31], rest=[0,2,255,0,0,0];
   welcome([]); c.net.setBody('a'); c.net.sendPose(51,0,0,0); assert.equal(c.sent.at(-1).t,'pose');
   c.sent.length=0; welcome([globalThis.BL.bodyReclaim.FEATURE]);
   assert.equal(c.sent.some(m=>m.t==='body'||m.t==='pose'),false,'welcome cannot replay cached body or pose');
@@ -242,13 +243,14 @@ test('actual net gates old pose replay until body apply and matching activation,
   const transfer={v:1,protocol:'host-session-v5',world:'world-1',epoch:3,revision:17,at:now,expiresAt:now+5000,
     resetResources:'defaults',view:{accountId:1,bodyId:'a',kind:'ooga',generation:8,state:'offered',deadline:now+60000},checkpoint:{fixture:true}};
   send({t:'body-grant',request,transfer}); assert.equal(c.sent.at(-1).t,'body-applied'); assert.equal(applied,0);
-  const count=c.sent.length; c.net.sendPose(51,0,0,0); assert.equal(c.sent.length,count);
+  const count=c.sent.length; c.net.sendPose(51,0,0,0,null,1,2,visual,rest); assert.equal(c.sent.length,count);
   const final={...transfer,revision:18,expiresAt:now+1000,view:{...transfer.view,state:'starting'}};
   send({t:'body-active',request,transfer:final}); assert.equal(applied,1); assert.equal(enabled,0);
   c.net.sendPose(51,0,0,0); assert.equal(c.sent.at(-1).t,'body-started');
   send({t:'body-live',request,epoch:3,generation:7,revision:18}); assert.equal(enabled,0);
   send({t:'body-live',request,epoch:3,generation:8,revision:18}); assert.equal(enabled,1);
-  c.net.sendPose(51,0,0,0); assert.equal(c.sent.at(-1).t,'pose','restored-controller report is not suppressed by old cache');
+  c.net.sendPose(51,0,0,0,null,1,2,visual,rest); assert.equal(c.sent.at(-1).t,'pose','restored-controller report is not suppressed by old cache');
+  assert.deepEqual(c.sent.at(-1).v,visual); assert.deepEqual(c.sent.at(-1).r,rest);
   const activeCount=c.sent.length; c.net.setBody('other'); c.net.sendPose(0,0,0,0); assert.equal(c.sent.length,activeCount);
   ws.onclose(); assert.equal(released,1); c.reconnect();
   c.sockets.at(-1).onmessage({data:JSON.stringify({t:'welcome',you:{id:1},players:[],features:[],now:1100,connectionToken:'older-room'})});
@@ -560,7 +562,9 @@ test('Room body decline preserves the socket and voice through restart while ret
   await r.stageBodyHandoff(t, i, bodyPrep, 'clanker', bodyRequest, bodyClaim);
   await h.send(r, ws, { t: 'body-ready', request: bodyRequest });
   const pending = await r.pendingBodyHandoff(t, i), decline = { t: 'body-decline', request: bodyRequest };
-  p.voice = 'existing-voice-session'; p.muted = false; ws.serializeAttachment(r.attachment(p));
+  p.voice = 'existing-voice-session'; p.muted = false;
+  p.v = [0,0,0,7,0,0,0,0,0,0,0,0,0,0,0,31,31]; p.va = 100000; p.r = [0,2,255,0,0,0];
+  ws.serializeAttachment(r.attachment(p));
   const before = structuredClone(h.stored);
   assert.equal((await h.send(r, ws, { ...decline, request: 'f'.repeat(32) })).status, 'refused');
   assert.deepEqual(h.stored, before); assert.equal(p.bodyClosedAt, undefined);
@@ -575,6 +579,8 @@ test('Room body decline preserves the socket and voice through restart while ret
   assert.equal(after.closed, true); assert.deepEqual(after.command, pending.command);
   assert.equal(restored.players.get(1).bodyClosedAt, 100400); assert.equal(ws.store.bodyClosedAt, 100400);
   assert.equal(restored.players.get(1).voice, 'existing-voice-session'); assert.equal(ws.closed, null);
+  assert.deepEqual(restored.players.get(1).v, p.v); assert.equal(restored.players.get(1).va, p.va);
+  assert.deepEqual(restored.players.get(1).r, p.r, 'hibernation retains upstream visual/rest data alongside body fencing');
   h.at(100600); assert.equal((await h.send(restored, ws, decline)).status, 'closed');
   assert.equal((await restored.bodyHandoffController().read(i)).closedAt, 100400);
   await h.send(restored, ws, { t: 'mute', on: true }); assert.equal(restored.players.get(1).muted, true);
