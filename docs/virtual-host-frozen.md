@@ -125,3 +125,15 @@ weapon/jetpack restoration, abrupt-failure tests, strict delivery headroom and
 combined production CPU/storage/request costs remain open. Full-world geometry,
 shared peers and mobile rendering are not covered by the authored fixtures.
 Keep the PR in draft and all activation flags off until these are demonstrated.
+
+
+## Current-base integration
+
+The draft now integrates `rock` at
+`e6d69aa4d9d93f1c90bf0a28c8899189d3f160a0` through a normal merge, preserving
+signed history and both checkpoint commits. The only textual conflict was the
+network fixture's context: it now retains both the base's `voiceBlend` and the
+reclaim path's `TextEncoder`. The combined source passes 152 focused checks for
+host/session recovery, Room handoff/authority, body adapters and protocol/voice
+compatibility. Build and touched-source syntax checks pass. No prohibited
+Hub/browser/full/scene checks were run; activation and burst remain disabled.

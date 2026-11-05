@@ -8,7 +8,7 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const ROOT = "outside";
-  const LANDS = { outside: "The island", sphere: "Timechain Sphere", rainforest: "Mempool Island", bifrost: "₿IFRÖST", lab: "EntropyLab", bca: "B.C.A.", factory: "Lightning Factory", arcade: "Ooga Arcade", mirror: "The Mirror cave", hq: "HQ", "ember-den": "Ember Den", none: "Between lands", "scene-transition": "Between lands" };
+  const LANDS = { outside: "The island", sphere: "Timechain Sphere", rainforest: "Mempool Island", bifrost: "₿IFRÖST", lab: "EntropyLab", bca: "B.C.A.", factory: "Lightning Factory", arcade: "Ooga Arcade", "ghost-arena": "Ghost Hunter's Arena", "arcade-hunt": "Ghost Hunter's Arena", mirror: "The Mirror cave", hq: "HQ", "ember-den": "Ember Den", none: "Between lands", "scene-transition": "Between lands" };
   // A routed game's title, or null for the arcade's other games and anything else.
   const gameTitle = (zone) => {
     const route = BL.routes.list.find((r) => r.scene === zone.slice(6) && !r.place);
@@ -17,6 +17,7 @@
   const landOf = (zone) => {
     if (zone === "factory.hangar") return "Lightning Jet Hangar";
     if (zone === "bifrost.chamber") return "₿IFRÖST chamber";
+    if (zone === "arcade.arena") return LANDS["ghost-arena"];
     const dot = zone.indexOf("."), group = dot < 0 ? zone : zone.slice(0, dot);
     if (Object.hasOwn(LANDS, group)) return LANDS[group];
     if (/^sphere-\d$/.test(zone)) return `Timechain Sphere · Room ${zone.slice(7)}`;
@@ -28,7 +29,11 @@
   // The arcade's games without an address of their own share one group: nobody stands anywhere in them, so they have
   // no distances to keep apart. Between scenes is nowhere.
   const GAMES = "scene:games";
-  const groupOf = (zone) => zone === "scene-transition" ? "none" : zone.startsWith("scene-") && !gameTitle(zone) ? GAMES : zone;
+  // The haunted hallway is listed with the end of it a player stands on (#422): its near half with Ooga Arcade's hall,
+  // its far half with Ghost Hunter's Arena, so each land is one heading; so too the arena's names from before #422 that a
+  // page loaded earlier still reports (`arcade-hunt`, `arcade.arena`).
+  const JOINED = { "arcade.haunt": "arcade.hall", "ghost-arena.haunt": "ghost-arena", "arcade-hunt": "ghost-arena", "arcade.arena": "ghost-arena" };
+  const groupOf = (zone) => zone === "scene-transition" ? "none" : Object.hasOwn(JOINED, zone) ? JOINED[zone] : zone.startsWith("scene-") && !gameTitle(zone) ? GAMES : zone;
   // A heading names its own zone where one land holds several, each with coordinates of its own.
   const HEADINGS = {
     factory: "Lightning Factory tunnel", arcade: "Ooga Arcade entrance", "lab.hall": "EntropyLab hall", [GAMES]: "Ooga Arcade games",
@@ -40,10 +45,12 @@
   const heading = (group) => Object.hasOwn(HEADINGS, group) ? HEADINGS[group] : landOf(group);
   // Each zone's way back toward the island. A bridge belongs to the island (`zoneOf` in scene-hub.js), so a bridged land
   // starts where its bridge ends. The games open from the arcade's hall; DSB Land and the Ember Den from the
-  // ₿IFRÖST chamber's windows; the Sphere's rooms from its doorway. Nowhere, and anything unknown, has no way.
+  // ₿IFRÖST chamber's windows; the Sphere's rooms from its doorway; Ghost Hunter's Arena down the arcade's haunted
+  // hallway, half by half. Nowhere, and anything unknown, has no way.
   const PARENTS = {
     lab: ROOT, bca: ROOT, mirror: ROOT, hq: ROOT, factory: ROOT, arcade: ROOT, sphere: ROOT, rainforest: ROOT, bifrost: ROOT,
     "lab.hall": "lab", "factory.hall": "factory", "factory.hangar": "factory.hall", "arcade.hall": "arcade",
+    "arcade.haunt": "arcade.hall", "ghost-arena.haunt": "arcade.haunt", "ghost-arena": "ghost-arena.haunt", "arcade-hunt": "ghost-arena", "arcade.arena": "ghost-arena",
     "bifrost.chamber": "bifrost", "ember-den": "bifrost.chamber", "dsb-outside": "bifrost.chamber", "dsb-transit": "bifrost.chamber"
   };
   // A zone is whatever a page reports, so the tables are read by their own keys alone, never their prototype's.

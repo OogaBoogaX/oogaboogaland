@@ -9,6 +9,8 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const MASTER = 0.35, LEVEL = 0.5, VOICES = 16, MUSIC_KEY = "ooga-ghost-music";
+  // A hallway spectator's level (#422) moves the master no more often than every LEVEL_STEP, easing over LEVEL_TAU s.
+  const LEVEL_STEP = 0.02, LEVEL_TAU = 0.05;
   // The hunt's playlist: each track's title, who made it and its key; its bytes come in its own deferred group,
   // `halloween-track-<key>`, fetched only as it comes up (each key listed in deferred.js's `PRESENT` too, or its fetch
   // throws). Played in a shuffled order from a hunt's start.
@@ -39,6 +41,14 @@
 
   const create = () => {
     let ctx = null, master = null, noise = null, voices = null, next = 0, muted = false, music = null, musicWanted = false, musicGain = null;
+    // How much of the hunt this page hears, 0 to 1 (`level`): all of it in the arena, a hallway spectator's share by
+    // where they stand (#422). At 0 no cue is played and no context is opened for it.
+    let hearing = 1;
+    // A page catching up on a hunt it did not see (a late join, or back from where no frames came) hushes its cues for
+    // the frame that applies the gap, so nothing that happened meanwhile sounds at once (`hush`). `played` counts the
+    // cues this page would sound (heard and not hushed), muted or not; `disposed` keeps a decode or fetch that finishes
+    // after `dispose` from opening or starting anything.
+    let hushed = false, played = 0, disposed = false;
     const clips = {};
     // The playlist's order, where in it we are, the one decoded track it holds at a time (a decoded track is tens of
     // megabytes) and whether the visitor wants music at all (this browser's choice, the mini player's toggle).
@@ -53,10 +63,10 @@
 
     const open = () => {
       if (ctx) return true;
-      if (muted || typeof AudioContext === "undefined" || navigator.userActivation && !navigator.userActivation.hasBeenActive) return false;
+      if (disposed || muted || typeof AudioContext === "undefined" || navigator.userActivation && !navigator.userActivation.hasBeenActive) return false;
       ctx = new AudioContext();
       master = ctx.createGain();
-      master.gain.value = MASTER;
+      master.gain.value = MASTER * hearing;
       master.connect(ctx.destination);
       const buffer = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate), data = buffer.getChannelData(0);
       for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
@@ -424,8 +434,19 @@
 
     /** Plays a cue by name; nothing while muted, before a gesture, or for a clip still decoding. */
     const play = (name, a) => {
+      if (!hearing || hushed) return;
+      played++;
       if (muted || !live()) return;
       cues[name](a);
+    };
+    const hush = (on) => { hushed = on; };
+    /** How much of the hunt this page hears (0 to 1), asked every frame: the master eases to it, rescheduled only when it
+     *  moves by LEVEL_STEP or reaches either end. */
+    const level = (k) => {
+      k = Math.max(0, Math.min(1, k));
+      if (k === hearing || Math.abs(k - hearing) < LEVEL_STEP && k > 0 && k < 1) return;
+      hearing = k;
+      if (master && !muted) master.gain.setTargetAtTime(MASTER * k, ctx.currentTime, LEVEL_TAU);
     };
     // The track now playing (or about to), from the shuffled order.
     const current = () => order[place % order.length];
@@ -435,7 +456,7 @@
     };
     // Plays the current track once its bytes are here and decoded, then moves on to the next when it ends.
     const startMusic = () => {
-      if (music || !ctx || !musicWanted || !musicOn) return;
+      if (disposed || music || !ctx || !musicWanted || !musicOn) return;
       const k = current();
       if (loaded !== k) {
         const bytes = bytesOf(k);
@@ -443,7 +464,7 @@
         if (loading === k) return;
         loading = k;
         song = null; loaded = -1;
-        decode(ctx, bytes).then((b) => { if (loading !== k) return; song = b; loaded = k; loading = -1; startMusic(); }, () => { loading = -1; place++; });
+        decode(ctx, bytes).then((b) => { if (disposed || loading !== k) return; song = b; loaded = k; loading = -1; startMusic(); }, () => { loading = -1; place++; });
         return;
       }
       if (!musicGain) { musicGain = ctx.createGain(); musicGain.gain.value = 0.7; musicGain.connect(master); }
@@ -503,17 +524,18 @@
     document.addEventListener("visibilitychange", update);
     const offSound = BL.sound.subscribe(on => {
       muted = on;
-      if (master) master.gain.setTargetAtTime(on ? 0 : MASTER, ctx.currentTime, 0.015);
+      if (master) master.gain.setTargetAtTime(on ? 0 : MASTER * hearing, ctx.currentTime, 0.015);
       if (!on && musicWanted) startMusic();
     });
     const dispose = () => {
+      disposed = true;
       offSound();
       document.removeEventListener("visibilitychange", update);
       setMusic(false);
       if (ctx) ctx.close().catch(() => {});
       ctx = master = noise = voices = null;
     };
-    return { open: () => !muted && live(), play, music: setMusic, newPlaylist, toggleMusic, skip, get tracks() { return order.length; }, get musicOn() { return musicOn; },
+    return { open: () => !muted && live(), play, level, hush, get hearing() { return hearing; }, get played() { return played; }, get musicWanted() { return musicWanted; }, get playing() { return !!music; }, music: setMusic, newPlaylist, toggleMusic, skip, get tracks() { return order.length; }, get musicOn() { return musicOn; },
       get nowPlaying() { return TRACKS[current()]; }, update, dispose, get opened() { return !!ctx; } };
   };
 

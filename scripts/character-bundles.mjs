@@ -4,7 +4,8 @@ import { fileURLToPath } from "node:url";
 import { createGitHub } from "./character-github.mjs";
 import { BOT, OPERATORS, isOperator } from "./character-operators.mjs";
 import { CharacterRejection, touchesCharacters } from "./character-safety.mjs";
-import { LANES, manifestPath, branchPrefix, dayOf, due, digest, inspectSubmission, readManifest, checkRegistry, isBundle, validateBundle, reviewDecision } from "./character-submissions.mjs";
+import { inspectAccountRename } from "./character-account-rename.mjs";
+import { LANES, manifestPath, branchPrefix, dayOf, due, digest, inspectSubmission, readManifest, checkRegistry, isBundle, validateBundle, reviewDecision, queuedCharacters } from "./character-submissions.mjs";
 
 const serializable = (entry) => Object.fromEntries(Object.entries(entry).filter(([key]) => key !== "source"));
 const manifestText = (state) => JSON.stringify(state, null, 2) + "\n";
@@ -120,6 +121,42 @@ export const createCoordinator = (gh, bot, now = () => new Date()) => {
       await gh.api(`pulls/${bundle.number}`, "PATCH", { body: body(lane, next) });
     }
   };
+  const checkAccountRename = async (pr, rock) => {
+    let identified = false;
+    try {
+      const rename = await inspectAccountRename(gh, pr, rock, () => { identified = true; });
+      if (!rename) return false;
+      await status(pr.head.sha, BUNDLE_STATUS, "pending", "Verifying account rename queue and registry");
+      const queued = await queuedCharacters(gh, bot);
+      if (queued.some((entry) => entry.path === rename.path
+        || [entry.character.handle, entry.character.github].some((login) => login?.toLowerCase() === rename.newLogin.toLowerCase()))) {
+        throw new CharacterRejection("Resolve the competing queued character change before migrating this account.");
+      }
+      await checkRegistry(gh, rock, [rename]);
+      const latest = await gh.api(`pulls/${pr.number}`);
+      if (latest.head.sha !== pr.head.sha || latest.state !== "open" || latest.draft) throw new Error("Account rename changed during verification");
+      await status(pr.head.sha, STATUS, "success", "Pinned numeric account and github-only signed history verified; separate PR retained");
+      await status(pr.head.sha, BUNDLE_STATUS, "success", "Verified account rename for this exact head; merge manually");
+      return true;
+    } catch (error) {
+      if (!identified) throw error;
+      await status(pr.head.sha, STATUS, "failure", "Account rename not verified; inspect the trusted workflow log");
+      await status(pr.head.sha, BUNDLE_STATUS, "failure", "Account rename verification failed");
+      throw error;
+    }
+  };
+  const accountRename = async (number) => {
+    const pr = await gh.api(`pulls/${number}`);
+    return checkAccountRename(pr, await ref("rock"));
+  };
+  const refreshAccountRenames = async () => {
+    const failures = [];
+    for (const pr of await gh.list("pulls?state=open&base=rock")) {
+      try { await accountRename(pr.number); }
+      catch (error) { failures.push(`#${pr.number}: ${error.message}`); }
+    }
+    if (failures.length) throw new Error(failures.join("\n"));
+  };
   const intake = async (submission) => {
     const rock = await ref("rock");
     const pr = submission.pr ? await gh.api(`pulls/${submission.pr}`) : null;
@@ -141,6 +178,7 @@ export const createCoordinator = (gh, bot, now = () => new Date()) => {
       return;
     }
     if (pr?.draft) { await status(pr.head.sha, STATUS, "pending", "Draft character submissions wait until ready for review"); return; }
+    if (pr && await checkAccountRename(pr, rock)) return;
     if (pr) submission = { pr: pr.number, head: pr.head.sha };
     await status(submission.head, BUNDLE_STATUS, "success", "Source PR; character extraction is gated by Character intake");
     await status(submission.head, STATUS, "pending", "Scanning character revisions and GitHub ownership");
@@ -268,6 +306,7 @@ export const createCoordinator = (gh, bot, now = () => new Date()) => {
     }
     // A stale custom submission must not prevent refreshing an independent
     // rename's review gate. Keep reporting every lane that failed validation.
+    try { await refreshAccountRenames(); } catch (error) { failures.push(error.message); }
     if (failures.length) throw new Error(failures.join("\n"));
   };
   const sweep = async () => {
@@ -305,7 +344,12 @@ export const createCoordinator = (gh, bot, now = () => new Date()) => {
       throw new Error("Direct rock character changes cannot be quarantined after a push. Require PRs and the character checks in branch rules.");
     }
   };
-  return { ensure, intake, mergeDaily, refreshReviews, sweep, auditRock, deployMerged };
+  return { ensure, intake, mergeDaily, refreshReviews, sweep, auditRock, deployMerged, accountRename, refreshAccountRenames };
+};
+
+export const runAccountRenameChecks = async (coordinator, event) => {
+  if (event.pull_request && event.action !== "closed") return coordinator.accountRename(event.pull_request.number);
+  return coordinator.refreshAccountRenames();
 };
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
@@ -316,7 +360,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8"));
   if (process.env.GITHUB_EVENT_NAME === "workflow_dispatch" && (!isOperator(event.sender)
     || !OPERATORS.some((operator) => operator.login === process.env.GITHUB_TRIGGERING_ACTOR))) throw new Error("Only w-s-bitcoin and 2140data may operate manual automation runs");
-  if (event.pull_request) {
+  if (process.env.CHARACTER_ACCOUNT_RENAMES_ONLY === "true") {
+    // Maintenance mode has no bundle creation, intake, merge, close, sweep or
+    // page dispatch. Reviews still arrive through the unprivileged signal job.
+    await runAccountRenameChecks(coordinator, event);
+  } else if (event.pull_request) {
     if (event.action === "closed") { for (const lane of LANES) await coordinator.ensure(lane); }
     else await coordinator.intake({ pr: event.pull_request.number, head: event.pull_request.head.sha });
   } else if (event.workflow_run) {

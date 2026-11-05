@@ -139,6 +139,7 @@ const gorillaSleepStallProof = () => {
       if (d > 0) { p.x += dx / d * go; p.z += dz / d * go; walked += go; if (actor.sleep.retrying) backwalk += go; }
     };
     for (; t < limit && !done; t += dt) {
+      beginSleepFrame();
       const p = e.root.position, s = e.sleep, x = p.x, z = p.z, leg = s.leg, stage = s.stage;
       walked = 0;
       if (jumpPause) e.jump.active = t >= 0.5 && t < 3.5;
@@ -213,7 +214,7 @@ const gorillaSleepStallProof = () => {
     e.sleep.path.set(path);
     e.gorilla.root = e.root; e.gorilla.form = "ape"; e.root.matrixNative = false;
     e.gorilla.setForm = form => { e.gorilla.form = form; };
-    const context = { e, dt: c.dt || 1 / 60, pace: c.pace || 1, limit: c.limit || 300, wakeAt: c.wakeAt ?? Infinity, open: c.open, bedDay: 0, SPEED: 2.7,
+    const context = { e, list: [e], dt: c.dt || 1 / 60, pace: c.pace || 1, limit: c.limit || 300, wakeAt: c.wakeAt ?? Infinity, open: c.open, bedDay: 0, SPEED: 2.7,
       sleepBeam: { show: (slot, x, y, z, heading, progress, incoming) => { context.visible = true; context[incoming ? "inFrames" : "outFrames"]++; }, hide: () => { context.visible = false; } },
       visible: false, outFrames: 0, inFrames: 0, blockedLanding: false, landingBlocked: !!c.landingBlocked,
       jumpPause: !!c.jumpPause, rageDuringBeam: !!c.rageDuringBeam, updateJump: noop,
@@ -227,6 +228,49 @@ const gorillaSleepStallProof = () => {
     runInNewContext(script, context);
     const r = context.out;
     return { name: c.name, ...r, ok: r.unexpected === 0 && r.skipped === 0 && (c.rageDuringBeam || r.form === "ape" && !r.native) && c.ok(r) };
+  });
+};
+// Simultaneous stalled sleepers share the production admission controller even
+// when one rendered update catches up eight physics steps. A blocked first bed
+// must not monopolize the queue, and every clear reservation must eventually land.
+const gorillaSleepBudgetProof = () => {
+  const source = readFileSync(join(root, "src/js/clankers.js"), "utf8");
+  const section = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
+  const controllers = section("    const SLEEP_POSES =", "\n") + "\n"
+    + section("    const sleepBeamLook =", "    // True while sleep owns");
+  return [1 / 60, 0.25].map(dt => {
+    const script = controllers + `
+      let peak = 0, maxChecks = 0, maxStarts = 0, first = -1, unsafe = false;
+      for (time = 0; time < 12 && list.some(e => e.sleep.stage !== "asleep"); time += dt) {
+        beginSleepFrame(); checks = 0; let starts = 0, remaining = dt;
+        while (remaining > 1e-8) {
+          const step = Math.min(remaining, 1 / 30); remaining -= step;
+          for (const e of list) {
+            const s = e.sleep;
+            s.beamWait = Math.max(0, s.beamWait - step);
+            if (s.stage === "go" && !s.beamWait) { beginSleepBeam(e); if (s.stage === "beamOut") starts++; }
+            else if (s.stage === "beamOut" || s.stage === "beamIn") updateSleepBeam(e, step);
+            if (s.stage === "beamIn" && first < 0) first = s.slot;
+            if (s.slot === 0 && time < 1 && e.root.position.x === 10) unsafe = true;
+          }
+          peak = Math.max(peak, list.filter(e => e.sleep.stage === "beamOut" || e.sleep.stage === "beamIn").length);
+        }
+        maxChecks = Math.max(maxChecks, checks); maxStarts = Math.max(maxStarts, starts);
+      }
+      globalThis.out = { peak, maxChecks, maxStarts, first, unsafe, time,
+        arrived: list.filter(e => e.sleep.stage === "asleep" && e.root.position.x === e.sleep.slot + 10 && e.gorilla.form === "ape").length };
+    `;
+    const list = Array.from({ length: 20 }, (_, slot) => {
+      const root = { position: { x: 0, y: 0, z: 0 }, matrixNative: false };
+      const gorilla = { root, form: "ape", setForm(form) { this.form = form; }, poseManaged() {} };
+      return { root, gorilla, sleep: { slot, stage: "go", beamWait: 0, beamTime: 0 }, motion: {} };
+    });
+    const context = { list, dt, time: 0, checks: 0, bedTaken: () => false, sleepBeam: { show() {}, hide() {}, clear() {} }, layDown() {} };
+    context.ctx = { sleep: { slots: list.map((e, i) => ({ x: i + 10, y: 0, z: 0, heading: 0 })) },
+      restPoseClear(e) { context.checks++; return e.sleep.slot !== 0 || context.time >= 1; } };
+    runInNewContext(script, context);
+    const r = context.out;
+    return { dt, ...r, ok: r.peak === 1 && r.maxChecks === 1 && r.maxStarts === 1 && r.first === 1 && !r.unsafe && r.arrived === 20 };
   });
 };
 // Run the hub's real landing/player predicate, including the NPC exception to walking collision.
@@ -6517,6 +6561,83 @@ const gameRulesChecks = async () => {
     // wedge, from a turn at rest and one far round after many spins, stops under the clapper wherever in it the spin
     // aims, after its whole turns and less than one more.
     for (const name of ["scene", "models", "blaze", "contributor-identities", "activity-repos", "jumbotron", "hub-models", "hockey-wire", "arcade-models", "arcade-scene-models"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
+    runInNewContext(await readFile(new URL("../src/js/arcade-games.js", import.meta.url), "utf8"), context);
+    // Solo smash assistance must never send an out-of-bounds authoritative frame at a rail.
+    const soloAim={x:1}, solo=BL.arcadeGames.airHockey({node:BL.scene.createNode(),aim:soloAim,onEnd(){},burst(){}});
+    solo.shared(true);solo.multiplayer(false);solo.start();let soloInvalid=0,soloEdge=false;
+    for(let i=0;i<18000&&solo.playing;i++){const old=solo.capture();soloAim.x=old[0]<0?-1:1;if(i%18===0)solo.act();solo.update(1/240);const f=solo.capture();soloInvalid+=!BL.hockeyWire.validFrame(f);soloEdge ||= Math.abs(f[4])===480;}
+    record("hockey solo: rail-assisted smashes retain radius clearance and valid shared frames",soloInvalid===0&&soloEdge,JSON.stringify({soloInvalid,soloEdge}));solo.stop();
+    // Put the real solo simulation at each rail, then trigger its actual smash-assist path.
+    const exposed={scene:BL.scene,arcadeModels:BL.arcadeModels,hockeyWire:BL.hockeyWire};
+    const hockeySource=await readFile(new URL("../src/js/arcade-games.js",import.meta.url),"utf8");
+    const instrumented=hockeySource.replace("    const put = (n, o) =>", "    host.railProbe = { P, M };\n    const put = (n, o) =>");
+    if(instrumented===hockeySource)throw Error("hockey rail probe anchor missing");
+    runInNewContext(instrumented,{window:{BL:exposed}});
+    const railCases=[];
+    for(const side of [-1,1]){
+      const host={node:BL.scene.createNode(),aim:{x:side},onEnd(){},burst(){}};
+      const game=exposed.arcadeGames.airHockey(host);game.shared(true);game.start();
+      host.railProbe.P.u=side*.5;host.railProbe.M.u=side*.48;game.act();game.update(1/240);
+      const a=game.capture().slice();railCases.push({side,u:a[4],accepted:!!BL.hockeyWire.parse({t:"hockey",v:4,k:"frame",i:0,s:"0123456789abcdef",q:0,a})});game.stop();
+    }
+    record("hockey solo rail regression: smash assist keeps both mallet edges and transmitted frames legal",railCases.every(r=>r.u===r.side*480&&r.accepted),JSON.stringify(railCases));
+    const aimH={x:0,depth:0}, rootH=BL.scene.createNode(), h=BL.arcadeGames.airHockey({node:rootH,aim:aimH,onEnd(){},burst(){}});
+    h.shared(true);h.multiplayer(true);h.start();
+    const edges=[];
+    for(const [x,y] of [[-2,-1],[-2,.5],[-2,2],[2,-1],[2,.5],[2,2],[0,-1],[0,2]]) {
+      aimH.x=x;aimH.depth=y;h.peerInput(x,y);h.update(1/60);edges.push(h.capture().slice(4,8));
+    }
+    const legal=edges.every(a=>Math.abs(a[0])<=480&&a[1]>=70&&a[1]<=1030&&Math.abs(a[2])<=480&&a[3]>=1170&&a[3]<=2130)
+      &&edges[0][0]===-480&&edges[1][0]===-480&&edges[0][1]!==edges[1][1]&&edges[2][1]===1030;
+    const mirrorRoot=BL.scene.createNode(), mirrorAim={x:0,depth:0}, mirror=BL.arcadeGames.airHockey({node:mirrorRoot,aim:mirrorAim,onEnd(){},burst(){}});
+    mirror.shared(true);mirror.multiplayer(true);mirror.start();mirror.update(1/60);const nearZ=mirrorRoot.children[1].position.z;
+    mirror.orientation(1);const farZ=mirrorRoot.children[1].position.z,opponentZ=mirrorRoot.children[2].position.z;
+    record("hockey chosen end: mirrored host and opponent mallets occupy opposite physical ends",farZ<opponentZ&&nearZ>opponentZ,JSON.stringify({nearZ,farZ,opponentZ}));mirror.stop();
+    const guestAim={x:1,depth:1}, guestRoot=BL.scene.createNode(), guest=BL.arcadeGames.airHockey({node:guestRoot,aim:guestAim,onEnd(){},burst(){}});
+    guest.multiplayer(true,1);guest.follow(.016);const initial=guestRoot.children[2].position.x;
+    const snap=[0,660,0,0,0,200,0,2000,0,0,-1,0,-1000,-1000,0,0,1,0];guest.receive(snap,1);guest.follow(.016);
+    const predicted=guestRoot.children[2].position.x===initial&&initial<0&&guest.capture()[6]===0;
+    const strikeAim={x:-1,depth:(.66-.07)/.96}, strike=BL.arcadeGames.airHockey({node:BL.scene.createNode(),aim:strikeAim,onEnd(){},burst(){}});
+    strike.shared(true);strike.multiplayer(true);strike.start();for(let i=0;i<456;i++)strike.update(1/240);
+    const before=strike.capture()[17];strikeAim.x=1;strike.update(1/240);const shot=strike.capture().slice();
+    const swept=shot[17]===before+1&&shot[2]>0&&Math.hypot(shot[2],shot[3])<=7501;
+    record("hockey responsiveness: immediate legal host targets and guest presentation survive a delayed snapshot, with swept capped fast strikes",legal&&predicted&&swept,JSON.stringify({edges,initial,predicted,shot,before}));
+    // The far mallet starts on one side of the puck, then crosses and returns within one host frame.
+    const remoteAim={x:0,depth:0}, remoteGame=BL.arcadeGames.airHockey({node:BL.scene.createNode(),aim:remoteAim,onEnd(){},burst(){}});
+    remoteGame.shared(true);remoteGame.multiplayer(true);remoteGame.start();remoteGame.peerInput(-1,.6);
+    let state;for(let i=0;i<1200;i++){remoteGame.update(1/240);state=remoteGame.capture().slice();if(state[1]>=1500&&state[1]<1600)break;}
+    const v=state[1], d=Math.round((2.2-v/1000-.07)/.96*1000);remoteGame.peerInput(-1,d/1000);remoteGame.update(1/240);
+    const beforeRemote=remoteGame.capture()[17];remoteGame.peerPath([1000,d,-1000,d],false);remoteGame.update(1/120);
+    const remoteShot=remoteGame.capture().slice(), reversal=remoteShot[17]>beforeRemote&&Math.hypot(remoteShot[2],remoteShot[3])<=7501&&remoteShot[6]===480;
+    record("hockey guest stroke: ordered out-and-back segments cross the puck within one host frame with a bounded strike",reversal,JSON.stringify({v,d,beforeRemote,remoteShot}));
+    remoteGame.stop();
+    const makeRemote=()=>{const game=BL.arcadeGames.airHockey({node:BL.scene.createNode(),aim:{x:0,depth:0},onEnd(){},burst(){}});game.shared(true);game.multiplayer(true);game.start();game.peerInput(-1,.6);for(let i=0;i<1200;i++){game.update(1/240);const a=game.capture();if(a[1]>=1500&&a[1]<1600)break;}const a=game.capture().slice(),y=Math.round((2.2-a[1]/1000-.07)/.96*1000);game.peerInput(-1,y/1000);game.update(1/240);return {game,y};};
+    const batched=makeRemote(), count=batched.game.capture()[17];batched.game.peerPath([1000,batched.y],false);batched.game.peerPath([-1000,batched.y],false);batched.game.update(1/120);
+    const twoPackets=batched.game.capture().slice();
+    const overflow=makeRemote(), clacksBefore=overflow.game.capture()[17], many=[];for(let i=0;i<32;i++)many.push(-1000,overflow.y);
+    overflow.game.peerPath(many,false);overflow.game.peerPath([1000,overflow.y],false);overflow.game.update(1/240);const afterOverflow=overflow.game.capture().slice();
+    record("hockey guest backlog: packets replay in order; overflow resynchronizes without a fabricated strike",twoPackets[17]>count&&twoPackets[6]===480&&afterOverflow[17]===clacksBefore&&afterOverflow[6]===-480,JSON.stringify({twoPackets,count,afterOverflow,clacksBefore}));
+    const gentle=makeRemote(), previous=gentle.game.capture().slice(), side=previous[0]>=0?-1:1;
+    const start=previous[0]/1000+side*.13, target=previous[0]/1000+side*.10;
+    gentle.game.peerPath([Math.round(-start/.48*1000),gentle.y],true);gentle.game.update(1/240);
+    const gentleBefore=gentle.game.capture()[17];gentle.game.peerPath([Math.round(-target/.48*1000),gentle.y],false);gentle.game.update(1/240);
+    const gentleShot=gentle.game.capture().slice();
+    record("hockey guest impact: a small sampled movement uses the packet interval rather than the replay step",gentleShot[17]===gentleBefore+1&&Math.hypot(gentleShot[2],gentleShot[3])<3000,JSON.stringify({previous,gentleBefore,gentleShot}));
+    gentle.game.stop();
+    batched.game.stop();overflow.game.stop();
+    const hostAim={x:-1,depth:(.66-.07)/.96}, hostGame=BL.arcadeGames.airHockey({node:BL.scene.createNode(),aim:hostAim,onEnd(){},burst(){}});
+    hostGame.shared(true);hostGame.multiplayer(true);hostGame.start();for(let i=0;i<456;i++)hostGame.update(1/240);
+    const hostBefore=hostGame.capture()[17];hostGame.localPoint(1,hostAim.depth);hostGame.localPoint(-1,hostAim.depth);hostGame.update(1/120);
+    const hostShot=hostGame.capture().slice();
+    record("hockey host stroke: an out-and-back between display frames sweeps the puck and returns to the cursor",hostShot[17]>hostBefore&&hostShot[4]===-480&&Math.hypot(hostShot[2],hostShot[3])<=7501,JSON.stringify({hostBefore,hostShot}));
+    hostGame.stop();
+    const hostOverflowAim={x:-1,depth:(.66-.07)/.96}, hostOverflow=BL.arcadeGames.airHockey({node:BL.scene.createNode(),aim:hostOverflowAim,onEnd(){},burst(){}});
+    hostOverflow.shared(true);hostOverflow.multiplayer(true);hostOverflow.start();for(let i=0;i<456;i++)hostOverflow.update(1/240);
+    const hostOverflowBefore=hostOverflow.capture()[17];for(let i=0;i<32;i++)hostOverflow.localPoint(i%2?-1:-.9,hostOverflowAim.depth);
+    hostOverflowAim.x=1;hostOverflow.localPoint(1,hostOverflowAim.depth);hostOverflow.update(1/240);const hostOverflowAfter=hostOverflow.capture().slice();
+    record("hockey host backlog: overflow resynchronizes without a fabricated strike",hostOverflowAfter[17]===hostOverflowBefore&&hostOverflowAfter[4]===480,JSON.stringify({hostOverflowBefore,hostOverflowAfter}));
+    hostOverflow.stop();
+    h.stop();guest.stop();strike.stop();
     const A = BL.arcadeModels, L = A.LAYOUT;
     const machines = { skee: L.skee, hoops: L.hoops, shy: [L.shy], claw: L.frames.claw,
       billiards: L.frames.pool, darts: L.frames.darts, pinball: L.frames.pinball, ride: L.frames.ride };
@@ -11784,12 +11905,35 @@ const hubGorillaPopulation = { name: "gorilla population restoration", why: "reg
     beamEntry.sleep.stage = "beamOut"; beamEntry.sleep.beamTime = 0;
     C.update(1 / 60); C.cancelSleepBeams();
     const beamSuspend = noBeam() && beamEntry.sleep.stage === "go" && beamEntry.gorilla.form === "ape" && !beamEntry.root.matrixNative;
-    return { beamSuspend, lateSleepers, stable, capped, reused, heldWhileDriven, uniqueAfterRelease, hidden, restored, stableExit, beamPossession, beamArrivalPossession, beamRemote, beamReset,
+    // Use the real rigs, route reservations, collision predicates and effect pool
+    // for ten simultaneous spent stall budgets. Queuing must not overlap beams
+    // or keep trying to walk/animate the actor behind the active recovery.
+    const queued = entries.slice(3, 13); reset(queued); C.update(1 / 30);
+    for (const e of queued) {
+      const s = e.sleep, p = e.root.position;
+      e.lounge = ""; e.recover = 0; e.jump.active = e.climb.active = e.drive.airborne = false;
+      s.stage = "go"; s.leg = Math.max(0, s.count - 2); s.stall = 26; s.near = s.forwardNear = 0;
+      s.forwardLeg = s.leg; s.tries = 2; s.retrying = false; s.beamWait = 0;
+      p.x = s.path[s.leg * 2] + 1.5; p.z = s.path[s.leg * 2 + 1] + 1.5; p.y = B.island.surfaceAt(p.x, p.z);
+      e.gorilla.poseManaged(2, p.x, p.y, p.z, e.heading, 0, false, false, "", e.motion);
+    }
+    const last = queued[queued.length - 1], start = { ...last.root.position };
+    let maxBeams = 0;
+    C.update(1 / 60);
+    const heldQueue = last.sleep.stage === "go" && last.root.position.x === start.x && last.root.position.z === start.z;
+    for (let i = 0; i < 240; i++) {
+      maxBeams = Math.max(maxBeams, queued.filter(e => e.sleep.stage === "beamOut" || e.sleep.stage === "beamIn").length);
+      C.update(1 / 60);
+    }
+    const queuedArrival = queued.every(e => e.sleep.stage === "asleep" && e.sleep.slot >= 0 && e.gorilla.form === "ape" && !e.root.matrixNative);
+    const boundedRecovery = heldQueue && maxBeams === 1 && queuedArrival && noBeam();
+    return { boundedRecovery, maxBeams, heldQueue, queuedArrival, beamSuspend, lateSleepers, stable, capped, reused, heldWhileDriven, uniqueAfterRelease, hidden, restored, stableExit, beamPossession, beamArrivalPossession, beamRemote, beamReset,
       population: [worker, chiller, away, ...sleepers].map(e => ({ state: e.owner.state, mode: e.mode, active: e.active, visible: e.root.visible, bed: e.sleep.slot })) };
   })()`);
   record("gorilla population: late-roster sleepers get exclusive beds; working, chilling and away owners get none; overflow waits at the 20-bed cap, respects driven reservations and reuses released beds", r.lateSleepers && r.stable && r.capped && r.reused && r.heldWhileDriven && r.uniqueAfterRelease, JSON.stringify(r));
   record("gorilla population: island game mode hides companions and its exit immediately restores current working, chilling and sleeping gorillas; repeated exit keeps their beds", r.hidden && r.restored && r.stableExit, JSON.stringify(r));
   record("gorilla sleep beam: possession, remote takeover and population reset cancel both transfer stages without displacing a driven character", r.beamPossession && r.beamArrivalPossession && r.beamRemote && r.beamReset && r.beamSuspend, JSON.stringify(r));
+  record("gorilla sleep recovery: ten stalled real rigs hold position in the queue and reach their reserved beds with at most one active beam", r.boundedRecovery, JSON.stringify(r));
 } };
 const hubCombatGate = { name: "hub game-only combat", why: "rule: ordinary visits retain harmless weapons and both look modes while damage, health simulation, rage and grabs stay off, and ending a game clears its transient combat state", run: async b => {
   const r = await b.evaluate(`(() => {
@@ -15441,9 +15585,9 @@ const arcadeRemoteWeapons = { name: "arcade remote weapons", why: "regression: t
       BL.models.caveman = build;
       for (const [place, x, y, z, zone] of [
         ["hall", 0, 0, 4, "arcade.hall"],
-        ["haunt", H.end - 4, H.y, A.z, "arcade.haunt"],
-        ["arena", A.x, H.y, A.z, "arcade.arena"],
-        ["below arena", A.x, H.y - 2, A.z, "arcade.arena"],
+        ["haunt", H.end - 4, H.y, A.z, "ghost-arena.haunt"],
+        ["arena", A.x, H.y, A.z, "ghost-arena"],
+        ["below arena", A.x, H.y - 2, A.z, "ghost-arena"],
         ["returned hall", 0, 0, 4, "arcade.hall"]
       ]) {
         Object.assign(peer, { x, y, z, zone });
@@ -15520,11 +15664,56 @@ const arcadeSpectatorAmmo = { name: "arcade hallway ammunition", why: "regressio
   })()`);
   await b.key("v");
   const after = await b.evaluate(`(() => { __ooga.advance(0.6, 1 / 60); const W = __hallAmmo, fired = W.read(); W.send("DAWN"); __ooga.advance(0.1, 1 / 60); return { fired, restored: W.read() }; })()`);
+  // #422: the same spectator, the hunt running again, walked from the gate to the Arcade end, into the hall and back: the
+  // zone each half reports, the voice crossing toward the other land, and the level the hunt's music and effects play at.
+  const walk = await b.evaluate(`(() => {
+    const B = __ooga, W = __hallAmmo, H = BL.arcadeModels.HAUNT, hall = BL.arcadeModels.HALL.halfW, z = (H.z0 + H.z1) / 2, G = B.halloween.audio, rows = [];
+    W.send("ACTIVE");
+    for (const [name, x] of [["gate", H.end - 1], ["far", H.end - 4], ["mid", (hall + H.end) / 2], ["near", hall + 4], ["mouth", hall + 0.5], ["hall", 0], ["back", H.end - 4]]) {
+      B.pilot.navigate({ position: name === "hall" ? { x: 0, y: 0, z: 4 } : { x, y: H.y, z }, yaw: -Math.PI / 2, pitch: 0.18, dist: 4 });
+      W.send("ACTIVE"); B.advance(0.5, 1 / 60);
+      const a = BL.scenes.arcade.debug.arena;
+      rows.push({ name, zone: a.zone, hearing: +a.hearing.toFixed(3), level: +G.hearing.toFixed(3), music: G.musicWanted, to: a.blendTo, t: +a.blendT.toFixed(3), state: B.halloween.state });
+    }
+    // Back near the gate: a hunter's rifle in the arena sounds once here; a shot reported from the hallway sounds nothing.
+    const N = BL.net, shot = JSON.stringify({ t: "shot", id: 2, a: [60, 4, -20, 62, 4, -20] }), sounds = {};
+    N.remotes.set(2, { id: 2, login: "hunter", display: "Hunter", body: "w-s-bitcoin", zone: "ghost-arena", x: 64, y: 3.2, z: -20, yaw: 0, weapon: 0, jet: 0, poseZone: "ghost-arena", blendTo: null, blendK: 0 });
+    let before = G.played; W.socket.onmessage({ data: shot }); sounds.arena = G.played - before;
+    N.remotes.get(2).zone = "ghost-arena.haunt";
+    before = G.played; W.socket.onmessage({ data: shot }); sounds.hallway = G.played - before;
+    N.remotes.delete(2);
+    // A hunter hurt in the snapshots: this spectator, in no hunt, hears it once; the first sight of them sounds nothing.
+    W.host.debug.results(2, { kills: 0, foes: 0 }, []);
+    const q = W.host.players.find(p => p.on && p.id === 2);
+    const frame = () => {
+      const bytes = new TextEncoder().encode(JSON.stringify(W.host.snapshot())), f = new Uint8Array(bytes.length + 4);
+      new DataView(f.buffer).setUint32(0, 0x54534847, true); f.set(bytes, 4);
+      W.socket.onmessage({ data: f.buffer });
+    };
+    q.seg = 5; frame(); B.advance(0.2, 1 / 60);
+    before = G.played; frame(); B.advance(0.2, 1 / 60); sounds.steady = G.played - before;
+    q.seg = 4; before = G.played; frame(); B.advance(0.2, 1 / 60); sounds.hurt = G.played - before;
+    W.send("DAWN"); B.advance(0.1, 1 / 60);
+    return { rows, sounds };
+  })()`);
   await b.evaluate(`(() => { const W = __hallAmmo; W.socket.close(); BL.net.state.room = "off"; window.fetch = W.fetch; window.WebSocket = W.WebSocket; })()`);
-  const kept = result.rows.every(r => !r.armed && r.zone === "arcade.haunt" && r.received === r.state && !r.unlimited && r.ammo === result.before.ammo && r.equipped === result.before.equipped && r.aiming === result.before.aiming);
+  const kept = result.rows.every(r => !r.armed && r.zone === "ghost-arena.haunt" && r.received === r.state && !r.unlimited && r.ammo === result.before.ammo && r.equipped === result.before.equipped && r.aiming === result.before.aiming);
   record("arcade hallway ammunition: a signed-in hallway-only spectator keeps weapon state through every hunt phase, rejects firing and keeps the same ammunition policy at dawn",
-    !result.before.armed && result.before.zone === "arcade.haunt" && result.role === "follow" && !result.hunter && kept && after.fired.ammo === result.before.ammo && !after.fired.equipped && !after.fired.unlimited && !after.restored.unlimited,
+    !result.before.armed && result.before.zone === "ghost-arena.haunt" && result.role === "follow" && !result.hunter && kept && after.fired.ammo === result.before.ammo && !after.fired.equipped && !after.fired.unlimited && !after.restored.unlimited,
     JSON.stringify({ ...result, ...after }));
+  const row = Object.fromEntries(walk.rows.map(r => [r.name, r]));
+  const hallway = ["gate", "far", "mid", "near", "mouth"].map(n => row[n]);
+  record("arcade hallway game sounds (#422): an arena hunter's rifle sounds once for a hallway spectator and a hallway shot not at all; a hunter's hurt sounds once, never on first sight or an unchanged snapshot",
+    walk.sounds.arena === 1 && walk.sounds.hallway === 0 && walk.sounds.steady === 0 && walk.sounds.hurt === 1, JSON.stringify(walk.sounds));
+  record("arcade hallway audio (#422): a spectator never in the hunt hears its music and effects louder toward the gate and fainter toward the Arcade, none in the hall and back on return, half by half in each land's zone with the voice crossing toward the other, equal power at the midpoint",
+    walk.rows.every(r => r.state === "ACTIVE" && Math.abs(r.level - r.hearing) <= 0.02)
+      && hallway.every((r, i) => r.music && r.hearing > 0 && (i === 0 || r.hearing < hallway[i - 1].hearing))
+      && row.gate.zone === "ghost-arena.haunt" && row.gate.to === "arcade" && row.far.zone === "ghost-arena.haunt"
+      && row.mid.zone === "ghost-arena.haunt" && row.mid.to === "arcade" && Math.abs(row.mid.t - 0.5) < 0.01 && Math.abs(row.mid.hearing - Math.SQRT1_2) < 0.01
+      && row.near.zone === "arcade.haunt" && row.near.to === "ghost-arena" && row.mouth.hearing < 0.1
+      && row.hall.zone === "arcade.hall" && row.hall.hearing === 0 && !row.hall.music && !row.hall.to
+      && row.back.music && row.back.hearing === row.far.hearing && row.back.zone === "ghost-arena.haunt",
+    JSON.stringify(walk.rows));
 } };
 // Carry aim intent and cursor focus across the real doorway, while parking weapons only during the visit.
 const arcadeCarry = { name: "arcade carry", why: "regression: Arcade transitions lost mouse-look focus, could leave combat players by the pile, and must restore the parked outside loadout", run: async (b) => {
@@ -15689,18 +15878,34 @@ const arcadePlay = { name: "arcade play", why: "rule: Cloud Hopper replaces the 
     record('arcade play: Cloud Hopper launches unarmed through the cabinet, preserves preview gear, returns safely twice and blocks Rally', false, JSON.stringify({ entered, state, layout })); return;
   }
   const before = await b.evaluate(`(() => { const B = __ooga, H = BL.scenes.hub.debug.cloudHopper, p = B.pilot.player;
-    const weapons = new Set([p.parts.club.geometry, p.parts.gun.geometry, ...p.parts.gun.children.map(n => n.geometry)]);
-    let armedPreview = false; const create = BL.iconRenderer.createRenderer;
-    BL.iconRenderer.createRenderer = (...args) => { const renderer = create(...args), render = renderer.render;
-      renderer.render = (root, camera) => { BL.scene.traverseVisible(root, node => { if (node.geometry && weapons.has(node.geometry)) armedPreview = true; }); return render(root,camera); }; return renderer; };
+    // Gun rounds share their mesh with spare belt magazines; use the actual weapon bodies
+    // as witnesses, and require the carried spare gear to remain in the unarmed portrait.
+    const weapons = new Set([p.parts.club.geometry, p.parts.gunBody.geometry]);
+    const spares = p.magazineModels.filter(m => m?.node.parent && m.node.visible).map(m => m.node.geometry);
+    const seenWeapons = new Set(), seenSpares = new Set(), create = BL.iconRenderer.createRenderer;
     const canvas = document.createElement('canvas'), club = p.parts.club.visible, gun = p.parts.gun.visible;
-    p.parts.club.visible = p.parts.gun.visible = true;
-    BL.hud.renderBodyIcon(canvas,p,96,128,false); BL.iconRenderer.createRenderer = create;
-    const previewSafe = !armedPreview && p.parts.club.visible && p.parts.gun.visible;
-    p.parts.club.visible = club; p.parts.gun.visible = gun;
+    let previewSafe = false, previewDetail;
+    BL.iconRenderer.createRenderer = (...args) => { const renderer = create(...args), render = renderer.render;
+      renderer.render = (root, camera) => { BL.scene.traverseVisible(root, node => {
+        if (weapons.has(node.geometry)) seenWeapons.add(node.geometry);
+        if (spares.includes(node.geometry)) seenSpares.add(node.geometry);
+      }); return render(root,camera); }; return renderer; };
+    try {
+      p.parts.club.visible = p.parts.gun.visible = true;
+      BL.hud.renderBodyIcon(canvas,p,96,128,true);
+      const detectsWeapons = seenWeapons.size === weapons.size;
+      seenWeapons.clear(); seenSpares.clear();
+      BL.hud.renderBodyIcon(canvas,p,96,128,false);
+      previewDetail = { detectsWeapons, weapons: seenWeapons.size, spares: spares.length,
+        preservesSpares: spares.every(g => seenSpares.has(g)), club: p.parts.club.visible, gun: p.parts.gun.visible };
+      previewSafe = detectsWeapons && !seenWeapons.size && previewDetail.preservesSpares && p.parts.club.visible && p.parts.gun.visible;
+    } finally {
+      BL.iconRenderer.createRenderer = create;
+      p.parts.club.visible = club; p.parts.gun.visible = gun;
+    }
     document.querySelector('.cloud-hopper-panel .game-intro-go:not([hidden])').click();
     return { who: p.traits.name, phase: H.phase, unarmed: !p.parts.club.visible && !p.parts.gun.visible,
-      previewSafe, y: H.platform.position.y, dockGone: !B.props.some(prop => prop.prop === 'dock') };
+      previewSafe, previewDetail, y: H.platform.position.y, dockGone: !B.props.some(prop => prop.prop === 'dock') };
   })()`);
   await b.evaluate(`__ooga.advance(2,1/60)`);
   const rising = await b.evaluate(`(() => { const H = BL.scenes.hub.debug.cloudHopper, p = __ooga.pilot.player;
@@ -15722,8 +15927,8 @@ const arcadePlay = { name: "arcade play", why: "rule: Cloud Hopper replaces the 
     layout.front === 'cloud-hopper' && layout.rally.x < layout.flame && layout.flame < layout.invaders.x && layout.rally.z === layout.invaders.z
     && layout.rally.y === 3.2 && layout.rally.turn === 0 && layout.rally.service
     && layout.deck === 3.2 && layout.walkable && layout.label.includes('out of order') && blocked && entered && before.who === 'portlandhodl'
-    && ['ready','briefing'].includes(before.phase) && before.unarmed && before.previewSafe && before.dockGone
-    && ['ready','briefing'].includes(rising.phase) && rising.y === before.y && rising.unarmed && returned && back.who === 'portlandhodl'
+    && before.phase === 'lifting' && before.unarmed && before.previewSafe && before.dockGone
+    && rising.phase === 'lifting' && rising.y > before.y && rising.unarmed && returned && back.who === 'portlandhodl'
     && back.off < 0.5 && back.unarmed && back.parked && again && cancelled && routed, JSON.stringify(state));
 
 } };
@@ -15773,6 +15978,8 @@ const arcadeMachine = { name: "arcade machine", why: "rule: Space at a carnival 
     return rows;
   })()`);
   record("arcade machine: every game requires grounded feet and a forward-facing player, including takeoff and descent",eligibility.length>12 && eligibility.every(r=>r.facing&&r.away&&r.sideways&&r.takeoff&&r.falling),JSON.stringify(eligibility));
+  const hockeyEnds=await b.evaluate(`(() => {const B=__ooga,A=B.arcade,W=BL.hockeyWire,actor=B.pilot.player;return W.TABLES.map((center,i)=>{const rows=A.stations.filter(s=>s.kind==="machine"&&s.game.kind==="hockey"&&s.index===i);return {i,count:rows.length,same:rows.length===2&&rows[0].game===rows[1].game,near:rows.some(s=>s.play.z>center[1]),far:rows.some(s=>s.play.z<center[1]),facing:rows.length===2&&Math.cos(rows[0].play.facing-rows[1].play.facing)<-.99,reachable:rows.every(s=>{const p=s.play;return [[-.8,0],[.8,0],[0,p.z>center[1]?.8:-.8]].some(([dx,dz])=>A.walkable(p.x+dx,p.z+dz,p.x,p.z,0,actor.bodyHeight,actor));})};});})()`);
+  record("arcade hockey: both opposite ends open the same physical table",hockeyEnds.length===3&&hockeyEnds.every(x=>x.count===2&&x.same&&x.near&&x.far&&x.facing&&x.reachable),JSON.stringify(hockeyEnds));
   await b.evaluate(`(() => {const B=__ooga,st=B.arcade.stations.find(s=>s.kind==="machine"&&s.game.kind==="skee");B.pilot.navigate({position:{x:st.play.x,y:0,z:st.play.z},yaw:st.play.facing-Math.PI,pitch:.2,dist:4});B.advance(.2,1/60);})()`);
   const invited=await b.evaluate(`document.getElementById("hint").classList.contains("show") && document.getElementById("hint").textContent.includes("Space:")`);
   await b.evaluate(`(() => {const B=__ooga,a=B.pilot.player;a.root.rotation.y+=Math.PI;B.advance(.02,1/60);})()`);
@@ -15824,18 +16031,44 @@ const hockeyHallSample = { name: "hockey hall sample", why: "rule: live table sn
   record("hockey hall sample: snapshots reached the actual hall nodes while rendered frames and avatars remained bounded",result.frames>0&&result.rows.length===2&&result.rows.every(r=>Number.isFinite(r.p95Ms)),JSON.stringify(result));
   console.log("HOCKEY_RENDER "+JSON.stringify(result));
 } };
+const hockeyChosenEnd = { name: "hockey chosen end", why: "regression: the player entering from the far end keeps that end and the other player occupies the opposite end", run: async b => {
+  await b.evaluate(`(() => {
+    const N=BL.net,B=__ooga,V=window.__hockeyEndFixture={listeners:new Set(),poses:[],messages:[]};
+    V.send=N.sendHockey;V.subscribe=N.subscribeHockey;V.pose=N.sendPose;V.me=N.state.me;V.room=N.state.room;V.id=N.state.selfId;V.feature=N.state.hockey;
+    N.state.me={id:1,login:"portlandhodl",display:"portlandhodl"};N.state.selfId=1;N.state.hockey=true;N.state.room="live";N.setBody("portlandhodl");
+    V.emit=m=>{for(const fn of V.listeners)fn(m);};N.subscribeHockey=fn=>{V.listeners.add(fn);return()=>V.listeners.delete(fn);};
+    N.sendPose=(x,y,z,yaw)=>{V.poses.push({x,y,z,yaw});return true;};
+    N.sendHockey=m=>{V.messages.push(JSON.parse(JSON.stringify(m)));if(m.k==="join")queueMicrotask(()=>V.emit({k:"table",i:0,s:"0123456789abcdef",e:V.forceEnd ?? m.e,ids:[1,2],ready:[false,false],phase:"lobby",q:-1}));if(m.k==="ready")queueMicrotask(()=>V.emit({k:"table",i:0,s:"0123456789abcdef",e:1,ids:[1,2],ready:[true,true],phase:"play",q:-1}));return true;};
+    const seat=BL.hockeyWire.seat(0,1,0,{});B.pilot.navigate({position:{x:seat.x,y:0,z:seat.z},yaw:seat.yaw-Math.PI,pitch:.2,dist:4});B.arcade.open("hockey",0);
+  })()`);
+  await untilPage(b,'B.scene === "hockey" && !B.transitioning && B.carnival?.side === 1',20000);
+  await b.key("Enter");await untilPage(b,'B.carnival?.phase === "count" || B.carnival?.phase === "play"',5000);
+  await b.evaluate(`__ooga.advance(3.5,1/60)`);
+  await b.evaluate(`(() => {const W=BL.hockeyWire,canvas=document.querySelector("canvas"),r=canvas.getBoundingClientRect(),p=__ooga.project(W.TABLES[0][0]+.2,.825,W.TABLES[0][1]-.5,{});canvas.dispatchEvent(new PointerEvent("pointermove",{clientX:r.left+p.x,clientY:r.top+p.y,pointerType:"mouse",isPrimary:true,bubbles:true}));__ooga.advance(1/60,1/60);})()`);
+  const result=await b.evaluate(`(() => {const V=__hockeyEndFixture,W=BL.hockeyWire,B=__ooga,positions=[];const visit=n=>{if(n.geometry===BL.arcadeModels.hockeyPieces().mallet)positions.push(n);for(const c of n.children)visit(c);};BL.scene.updateWorld(BL.scenes.hockey.root);visit(BL.scenes.hockey.root);const host=positions[0]?.world[14],guest=positions[1]?.world[14],hostX=positions[0]?.world[12];return {hostX,end:V.messages.find(m=>m.k==="join")?.e,side:B.carnival.side,pose:V.poses.at(-1),host,guest,center:W.TABLES[0][1],centerX:W.TABLES[0][0],up:BL.scenes.hockey.camera.up.z,phase:B.carnival.phase};})()`);
+  await b.evaluate(`__ooga.go("arcade",0)`);await untilPage(b,'B.scene === "arcade" && !B.transitioning',20000);
+  await b.evaluate(`(() => {const V=__hockeyEndFixture,N=BL.net,B=__ooga;N.state.me={id:2,login:"portlandhodl",display:"portlandhodl"};N.state.selfId=2;V.forceEnd=1;V.poses.length=0;V.messages.length=0;const p=BL.hockeyWire.seat(0,0,0,{});B.pilot.navigate({position:{x:p.x,y:0,z:p.z},yaw:p.yaw-Math.PI,pitch:.2,dist:4});B.arcade.open("hockey",0);})()`);
+  await untilPage(b,'B.scene === "hockey" && !B.transitioning && B.carnival?.shared',20000);
+  await b.key("Enter");await untilPage(b,'B.carnival?.phase === "count" || B.carnival?.phase === "play"',5000);await b.evaluate(`__ooga.advance(3.5,1/60)`);
+  await b.evaluate(`(() => {const W=BL.hockeyWire,canvas=document.querySelector("canvas"),r=canvas.getBoundingClientRect(),p=__ooga.project(W.TABLES[0][0]+.2,.825,W.TABLES[0][1]+.5,{});canvas.dispatchEvent(new PointerEvent("pointermove",{clientX:r.left+p.x,clientY:r.top+p.y,pointerType:"mouse",isPrimary:true,bubbles:true}));__ooga.advance(1/60,1/60);})()`);
+  const guest=await b.evaluate(`(() => {const V=__hockeyEndFixture,B=__ooga,W=BL.hockeyWire,positions=[];const visit=n=>{if(n.geometry===BL.arcadeModels.hockeyPieces().mallet)positions.push(n);for(const c of n.children)visit(c);};BL.scene.updateWorld(BL.scenes.hockey.root);visit(BL.scenes.hockey.root);return {side:B.carnival.side,pose:V.poses.at(-1),host:positions[0]?.world[14],guest:positions[1]?.world[14],guestX:positions[1]?.world[12],centerX:W.TABLES[0][0],center:W.TABLES[0][1],up:BL.scenes.hockey.camera.up.z,phase:B.carnival.phase};})()`);
+  await b.evaluate(`__ooga.go("arcade",0)`);await untilPage(b,'B.scene === "arcade" && !B.transitioning',20000);
+  await b.evaluate(`(() => {const V=__hockeyEndFixture,N=BL.net;N.sendHockey=V.send;N.subscribeHockey=V.subscribe;N.sendPose=V.pose;N.state.me=V.me;N.state.room=V.room;N.state.selfId=V.id;N.state.hockey=V.feature;delete window.__hockeyEndFixture;})()`);
+  record("hockey chosen end: a host entering from far remains there and the opponent mallet is opposite",result.end===1&&result.side===1&&result.pose?.z<result.center&&result.host<result.center&&result.guest>result.center&&Math.abs(result.hostX-result.centerX-.2)<.02&&result.up===1&&result.phase==="play"&&guest.side===0&&guest.pose?.z>guest.center&&guest.host<guest.center&&guest.guest>guest.center&&Math.abs(guest.guestX-guest.centerX-.2)<.02&&guest.up===-1&&guest.phase==="play",JSON.stringify({result,guest}));
+} };
 const hockeySharedVisit = { name: "hockey shared visit", why: "contract: lobby, opposite camera, keyboard input, ending and hall return preserve the claimed Ooga, audio preferences and subscriptions", run: async b => {
   await b.evaluate(`(() => {
     const N=BL.net, V=window.__hockeyVisit={listeners:new Set(),sent:[],releases:0,peerClears:0,side:1};
     V.send=N.sendHockey;V.subscribe=N.subscribeHockey;V.peers=BL.voice.setPeers;
     V.me=N.state.me;V.room=N.state.room;V.id=N.state.selfId;V.feature=N.state.hockey;
     N.state.me={id:2,login:"portlandhodl",display:"portlandhodl"};N.state.selfId=2;N.state.hockey=true;N.state.room="live";
+    V.noSocket=N.sendHockey({k:"join",i:0})===false;
     N.setBody("portlandhodl");V.off=N.subscribeRoster(()=>{if(!N.state.body)V.releases++;});
     BL.voice.setPeers=(...args)=>{if(!args[0].length)V.peerClears++;return V.peers(...args);};
     V.emit=m=>{for(const fn of V.listeners)fn(m);};
     N.subscribeHockey=fn=>{V.listeners.add(fn);return()=>V.listeners.delete(fn);};
     N.sendHockey=m=>{V.sent.push(m);if(m.k==="join")queueMicrotask(()=>V.emit({k:"table",i:0,s:"0123456789abcdef",ids:[1,2],ready:[false,false],phase:"lobby",q:-1}));if(m.k==="ready")queueMicrotask(()=>V.emit({k:"table",i:0,s:"0123456789abcdef",ids:[1,2],ready:[true,true],phase:"play",q:-1}));return true;};
-    V.muted=BL.sound.muted;BL.sound.setMuted(true);V.voiceMuted=BL.voice.stats.muted;V.radius=BL.voice.stats.radius;V.level=BL.voice.stats.receiveLevel;BL.voice.setMuted(true);BL.voice.setRadius(10);BL.voice.setReceiveLevel(.35);V.localMute=BL.voice.mutedLocally("hockey-fixture");BL.voice.muteLocal("hockey-fixture",true);
+    V.muted=BL.sound.muted;BL.sound.setMuted(true);V.voiceMuted=BL.voice.stats.muted;V.radius=BL.voice.stats.radius;V.level=BL.voice.stats.receiveLevel;BL.voice.setMuted(true);BL.voice.setRadius(10);BL.voice.setReceiveLevel(.35);V.localMute=BL.voice.mutedLocally(900000001);BL.voice.muteLocal(900000001,true);
     __ooga.go("hockey",0);
   })()`);
   await untilPage(b, 'B.scene === "hockey" && !B.transitioning && B.carnival?.side === 1', 20000);
@@ -15854,9 +16087,9 @@ const hockeySharedVisit = { name: "hockey shared visit", why: "contract: lobby, 
   await b.key("Enter");await untilPage(b,'B.carnival?.phase === "count"',5000);
   const earlyEnd=await b.evaluate(`(() => {const a=[0,660,0,0,0,200,0,2000,0,7,-1,0,-1000,-1000,0,7,0,0];__hockeyVisit.emit({k:"frame",i:0,s:"0123456789abcdef",q:2,a});__ooga.advance(1.5,1/60);return __ooga.carnival.phase;})()`);
   await b.evaluate(`__ooga.go("arcade",0)`);await untilPage(b,'B.scene === "arcade" && !B.transitioning',20000);
-  const back=await b.evaluate(`(() => {const V=__hockeyVisit,N=BL.net;const r={body:N.state.body,zone:N.state.zone,releases:V.releases,peerClears:V.peerClears,listeners:V.listeners.size,leave:V.sent.filter(m=>m.k==="leave").length,voice:BL.voice.stats.muted,radius:BL.voice.stats.radius,level:BL.voice.stats.receiveLevel,localMute:BL.voice.mutedLocally("hockey-fixture"),muted:BL.sound.muted};V.off();N.sendHockey=V.send;N.subscribeHockey=V.subscribe;BL.voice.setPeers=V.peers;BL.sound.setMuted(V.muted);BL.voice.setMuted(V.voiceMuted);BL.voice.setRadius(V.radius);BL.voice.setReceiveLevel(V.level);BL.voice.muteLocal("hockey-fixture",V.localMute);N.state.me=V.me;N.state.room=V.room;N.state.selfId=V.id;N.state.hockey=V.feature;return r;})()`);
-  record("hockey shared visit: the panel is a two-player lobby, overhead far-side camera and mouse send two-axis input without smash or meter",lobby.shown&&lobby.phase==="intro"&&lobby.text.includes("Both")&&play.side===1&&play.overhead&&play.upZ===1&&play.controlsHidden&&play.bestHidden&&play.inputs.some(x=>x>0)&&play.rightPixels>0,JSON.stringify({lobby,play}));
-  record("hockey shared visit: ending from the menu reaches results, the body and Arcade voice never drop, mute/radius/volume persist, server close preserves completed results and releases subscriptions",ending.phase==="results"&&back.body==="portlandhodl"&&back.zone==="arcade.hall"&&!back.releases&&!back.peerClears&&back.leave===1&&earlyEnd==="results"&&departed.phase==="results"&&!departed.results&&departed.pause&&back.listeners===1&&play.muted&&ending.muted&&back.muted&&play.voice&&back.voice&&back.localMute&&play.radius===10&&back.radius===10&&play.level===.35&&back.level===.35,JSON.stringify({play,ending,departed,earlyEnd,back}));
+  const back=await b.evaluate(`(() => {const V=__hockeyVisit,N=BL.net;const r={noSocket:V.noSocket,body:N.state.body,zone:N.state.zone,releases:V.releases,peerClears:V.peerClears,listeners:V.listeners.size,leave:V.sent.filter(m=>m.k==="leave").length,voice:BL.voice.stats.muted,radius:BL.voice.stats.radius,level:BL.voice.stats.receiveLevel,localMute:BL.voice.mutedLocally(900000001),muted:BL.sound.muted};V.off();N.sendHockey=V.send;N.subscribeHockey=V.subscribe;BL.voice.setPeers=V.peers;BL.sound.setMuted(V.muted);BL.voice.setMuted(V.voiceMuted);BL.voice.setRadius(V.radius);BL.voice.setReceiveLevel(V.level);BL.voice.muteLocal(900000001,V.localMute);N.state.me=V.me;N.state.room=V.room;N.state.selfId=V.id;N.state.hockey=V.feature;return r;})()`);
+  record("hockey shared visit: the panel is a two-player lobby, overhead far-side camera and mouse send two-axis input without smash or meter",lobby.shown&&lobby.phase==="intro"&&lobby.text.includes("Both")&&play.side===1&&play.overhead&&play.upZ===1&&play.controlsHidden&&play.bestHidden&&play.inputs.some(x=>x>0)&&Math.abs(play.rightPixels)<1,JSON.stringify({lobby,play}));
+  record("hockey shared visit: ending from the menu reaches results, the body and Arcade voice never drop, mute/radius/volume persist, server close preserves completed results and releases subscriptions",ending.phase==="results"&&back.noSocket&&back.body==="portlandhodl"&&back.zone==="arcade.hall"&&!back.releases&&!back.peerClears&&back.leave===1&&earlyEnd==="results"&&departed.phase==="results"&&!departed.results&&departed.pause&&back.listeners===1&&play.muted&&ending.muted&&back.muted&&play.voice&&back.voice&&back.localMute&&play.radius===10&&back.radius===10&&play.level===.35&&back.level===.35,JSON.stringify({play,ending,departed,earlyEnd,back}));
 } };
 const hockeyPilot = { name: "hockey pilot", why: "rule: the real hockey physics and shared session keep bounded frames, two human controls, interpolation, physical scale and cleanup", run: async b => {
   const result = await b.evaluate(`(() => {
@@ -20909,6 +21142,75 @@ scene("bifrost", { url: hubPage(src, "solo=1&character=portlandhodl"), steps: [b
 scene("bifrost", { label: "dsb round trip", query: "character=portlandhodl", steps: [bifrostDsb] });
 scene("bifrost", { label: "poker round trip", query: "character=portlandhodl", steps: [bifrostPoker] });
 scene("bifrost", { label: "canvas2d", url: hubPage(src, "canvas2d=1"), steps: [bifrostCanvas] });
+// Exercise the real Cloud Hopper controls between measured frames, including result-card starts.
+const cloudCabinetJourney = async (b, dir, shape) => {
+  await b.evaluate(`window.__cabinetRaf = requestAnimationFrame; window.requestAnimationFrame = () => 0`);
+  await b.sleep(50); // Let the already queued frame finish; advance now owns the displayed frames.
+  const state = `(() => { const B=__ooga,H=BL.scenes.hub.debug.cloudHopper,s=document.getElementById('stage'),r=s.getBoundingClientRect(),p=document.querySelector('.cloud-hopper-panel'),m=new DOMMatrix(getComputedStyle(s).transform); return {
+    phase:H.phase,cabinet:B.cabinet.phase,view:B.pilot.view,y:H.platform.position.y,top:H.start.y,level:H.level.id,time:H.time,
+    panel:p.open && !p.hidden && getComputedStyle(p).visibility!=='hidden',actor:H.actor.root.visible,
+    rider:(()=>{const a=H.actor,q=B.project(a.root.position.x,a.root.position.y-a.baseY+a.bodyHeight*.5,a.root.position.z,{});return !!q && q.x>0 && q.x<s.clientWidth && q.y>0 && q.y<s.clientHeight && a.parts.head.visible;})(),
+    width:r.width,height:r.height,ratio:r.width/r.height,viewport:innerWidth/innerHeight,scaleX:m.a,scaleY:m.d,
+    full:!s.classList.contains('cabinet-display'),backdrop:!document.getElementById('cabinet-backdrop').hidden
+  }; })()`;
+  const shot = async label => { await b.screenshot(join(dir, `cloud-hopper-${shape}-${label}.png`)); return b.evaluate(state); };
+  const click = label => b.evaluate(`(() => { const b=[...document.querySelectorAll('.cloud-hopper-panel .actions button')].find(b=>!b.hidden && b.textContent.trim()===${JSON.stringify(label)}); if(!b) throw new Error('Missing action: '+${JSON.stringify(label)}); b.click(); })()`);
+  const advance = seconds => b.evaluate(`__ooga.advance(${seconds},1/60)`);
+  const rows = [];
+  try {
+    await click('Play'); await advance(1/60); rows.push(await shot('ascent-start'));
+    await advance(2); rows.push(await shot('ascent-middle'));
+    await advance(4.1); rows.push(await shot('ascent-top'));
+    record(`Cloud Hopper cabinet ${shape}: Start closes selection and the live cloud rises during an undistorted zoom, immersive at the top`,
+      rows[0].phase==='lifting' && !rows[0].panel && rows[0].actor && rows[0].rider && rows[0].y<rows[0].top && rows[0].cabinet==='expanding'
+      && rows[1].phase==='lifting' && rows[1].y>rows[0].y && rows[1].width>rows[0].width && !rows[1].panel && rows[1].rider
+      && rows[2].y===rows[2].top && rows[2].cabinet==='playing' && rows[2].full && !rows[2].backdrop
+      && rows.every(r=>r.time===0 && Math.abs(r.ratio-r.viewport)<0.001 && r.scaleX===r.scaleY), JSON.stringify(rows));
+    const skip = async () => { await b.evaluate(`if(BL.scenes.hub.debug.cloudHopper.phase==='briefing') document.querySelector('.cloud-hopper-guide .actions button:last-child').click()`); await advance(1.1); };
+    await skip();
+    // Social checks wait for real rendered frames; resume the display loop while they run.
+    await b.evaluate(`window.requestAnimationFrame=window.__cabinetRaf;document.dispatchEvent(new Event('visibilitychange'))`);
+    await arcadeSocialPanels(b, `cabinet cloud-hopper ${shape}`);
+    await b.evaluate(`window.requestAnimationFrame=()=>0`); await b.sleep(50);
+    const finish = async won => b.evaluate(`(() => { const B=__ooga,H=BL.scenes.hub.debug.cloudHopper,a=H.actor;
+      a.hop=.1;a.hopV=1;H.postUpdate();
+      ${won ? "B.setPileLevel(0); B.advance(.1,1/60); Object.assign(a.root.position,{x:0,y:B.altar.height+.23+a.baseY,z:0});a.hop=a.hopV=0;" : "a.root.position.y=-1000;a.hopV=-20;"}
+      H.postUpdate(); B.advance(1/60,1/60);
+    })()`);
+    const rides = [];
+    for (const [label, won, action] of [['death',false,'Play again'],['complete',true,'Replay'],['levels',true,'Play level 2']]) {
+      await finish(won); const result = await shot(label);
+      if(label==='levels') {
+        await click('Level select');
+        await b.evaluate(`document.querySelectorAll('.cloud-hopper-level')[1].click()`);
+        rows.push(await shot('level-select'));
+      }
+      await click(action); const start = await b.evaluate(state);
+      await advance(2); const middle=await shot(label+'-ascent');
+      await advance(4.1); const top=await b.evaluate(state);
+      rides.push({label,result,start,middle,top}); await skip();
+    }
+    record(`Cloud Hopper cabinet ${shape}: death, completion, replay and another level stay immersed and every attempt ascends from home`,
+      rides.every(r=>r.result.phase===(r.label==='death'?'dq':'won') && r.result.panel
+        && r.start.phase==='lifting' && r.start.y<r.start.top && !r.start.panel
+        && r.middle.phase==='lifting' && r.middle.y>r.start.y && r.top.y===r.top.top
+        && [r.result,r.start,r.middle,r.top].every(v=>v.cabinet==='playing' && v.full && !v.backdrop))
+      && rows.at(-1).panel && rows.at(-1).full && rides.at(-1).top.level===2,JSON.stringify(rides));
+    await finish(false);
+    await click('Return to arcade');
+    const exit=[];
+    for(const [label,seconds] of [['exit-start',.0167],['exit-middle',.25],['exit-glass',.35]]) {
+      await advance(seconds); exit.push(await shot(label));
+    }
+    record(`Cloud Hopper cabinet ${shape}: explicit return withdraws continuously with a hidden result card and equal image scales`,
+      exit.every(r=>r.cabinet==='shrinking' && !r.panel && Math.abs(r.ratio-r.viewport)<.001 && r.scaleX===r.scaleY)
+      && exit[0].width>exit[1].width && exit[1].width>exit[2].width,JSON.stringify(exit));
+    writeFileSync(join(dir,`cloud-hopper-${shape}-transitions.json`),JSON.stringify({entry:rows,rides,exit},null,2));
+    return { expanded: rows[2].cabinet==='playing', full: rows[2].full && !rows[2].backdrop };
+  } finally {
+    await b.evaluate(`window.requestAnimationFrame=window.__cabinetRaf;delete window.__cabinetRaf;document.dispatchEvent(new Event('visibilitychange'))`);
+  }
+};
 const cabinetVisit = id => ({ name: `cabinet ${id}`, why: "rule: each cabinet contains usable menu controls, expands its game and returns the same player with combat mouse capture and no retained UI", run: async b => {
   const dir = join(root, "untracked", "cabinet-review", "visual-pass"); mkdirSync(dir, { recursive: true });
   const shape = await b.evaluate(`innerWidth < 600 ? 'phone' : __ooga.renderer.kind === 'canvas2d' ? 'canvas2d' : 'desktop'`);
@@ -20956,30 +21258,42 @@ const cabinetVisit = id => ({ name: `cabinet ${id}`, why: "rule: each cabinet co
     record(`cabinet ${id}: ${shape} attributed top ten fits the glass without starting play`, scores.fit && scores.phase==='menu' && scores.rows.length===10 && scores.rows[0].name==='same-player' && scores.rows[1].name==='same-player' && scores.rows[0].score==='1,000' && scores.rows[9].score==='775', JSON.stringify(scores));
     if (shape === "phone") { await activateToggle(); await b.evaluate(`document.querySelector('.cabinet-leaderboard-toggle').blur()`); }
   }
+  let cloudJourney = null;
   if (id === "cloud-hopper") {
     if (shape === "phone") await b.evaluate(`document.querySelector('.cabinet-scores-toggle').click()`);
     const leaderboard = await b.evaluate(`(() => { const e=document.querySelector('.cloud-hopper-panel .cloud-hopper-scores'), r=e.getBoundingClientRect(), p=e.closest('dialog').getBoundingClientRect();return !e.hidden && r.width>0 && r.height>40 && r.top>=p.top && r.bottom<=p.bottom; })()`);
     await b.screenshot(join(dir, `${id}-${shape}-leaderboard.png`));
     record(`cabinet Cloud Hopper: ${shape} leaderboard remains available inside glass`, leaderboard);
     if (shape === "phone") await b.evaluate(`document.querySelector('.cabinet-scores-toggle').click()`);
-    await b.evaluate(`document.querySelector('.cloud-hopper-panel .game-intro-go:not([hidden])').click()`);
+    cloudJourney = await cloudCabinetJourney(b, dir, shape);
   }
   else if (id === "mine") await b.evaluate(`document.querySelector('[data-action="mine-start"]').click()`);
   else await b.key("Enter");
-  const expanded = await untilPage(b, `B.cabinet.phase === 'playing'`, 10000);
-  const full = await b.evaluate(`document.getElementById('stage').clientWidth === innerWidth && document.getElementById('cabinet-backdrop').hidden && document.getElementById('cabinet-foreground').hidden && !document.querySelector('.cabinet-leaderboard') && __ooga.fade === 0`);
+  const expanded = cloudJourney ? cloudJourney.expanded : await untilPage(b, `B.cabinet.phase === 'playing'`, 10000);
+  const full = cloudJourney ? cloudJourney.full : await b.evaluate(`document.getElementById('stage').clientWidth === innerWidth && document.getElementById('cabinet-backdrop').hidden && document.getElementById('cabinet-foreground').hidden && !document.querySelector('.cabinet-leaderboard') && __ooga.fade === 0`);
   if (shape === "phone" && id !== "cloud-hopper") {
     const header = await b.evaluate(`(() => { const e=document.getElementById('equipment-hud'), p=document.querySelector('.topbar .presets:not([hidden])'); const buttons=p ? [...p.querySelectorAll('button')].filter(b=>!b.hidden && b.getClientRects().length) : []; return {equipment:e.getBoundingClientRect().top,presets:p?.getBoundingClientRect().top,tappable:buttons.every(b=>{const r=b.getBoundingClientRect();return b.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));})}; })()`);
     record(`cabinet ${id}: phone header controls return above the game`, header.equipment < 180 && (!header.presets || header.presets < 180) && header.tappable, JSON.stringify(header));
   }
-  await arcadeSocialPanels(b, `cabinet ${id} ${shape}`);
-  await b.screenshot(join(dir, `${id}-${shape}-play.png`));
-  await b.evaluate(`__ooga.go('arcade')`);
+  if (id !== "cloud-hopper") {
+    await arcadeSocialPanels(b, `cabinet ${id} ${shape}`);
+    await b.screenshot(join(dir, `${id}-${shape}-play.png`));
+    await b.evaluate(`__ooga.go('arcade')`);
+  }
   const returned = await untilPage(b, `B.scene === 'arcade' && !B.transitioning`, 30000);
   if (shape === "desktop") await untilPage(b, 'document.pointerLockElement === document.getElementById("scene")');
   const back = await b.evaluate(`(() => { const p=__ooga.pilot.player, at=BL.arcadeCabinets.get(${JSON.stringify(id)});return {who:p?.traits.name,locked:document.pointerLockElement===document.getElementById('scene'),off:p?Math.hypot(p.root.position.x-at.x,p.root.position.z-at.z):999,clean:!__ooga.cabinet.active && !document.getElementById('stage').classList.contains('cabinet-display')}; })()`);
   await b.screenshot(join(dir, `${id}-${shape}-return.png`));
   record(`cabinet ${id}: menu in glass, full-screen game, same Ooga at cabinet, clean return`, menu && framed.inside && !framed.fade && expanded && full && returned && back.who === 'portlandhodl' && back.off < .1 && back.clean && (shape !== 'desktop' || back.locked), JSON.stringify({framed,expanded,full,returned,back}));
+  if (id === "cloud-hopper") {
+    await b.evaluate(`__ooga.arcade.open('hub','cloud-hopper')`);
+    const reopened=await untilPage(b, `B.cabinet.phase==='menu'`,30000);
+    const partial=await b.evaluate(`(() => { document.querySelector('.cloud-hopper-panel .game-intro-go:not([hidden])').click();__ooga.advance(1.5,1/60);
+      const s=document.getElementById('stage'),before=s.getBoundingClientRect().width,phase=BL.scenes.hub.debug.cloudHopper.phase;
+      __ooga.go('arcade');__ooga.advance(.1,1/60);return {phase,before,after:s.getBoundingClientRect().width,panel:document.querySelector('.cloud-hopper-panel').open};})()`);
+    const cancelled=await untilPage(b,`B.scene==='arcade' && !B.transitioning`,30000);
+    record(`Cloud Hopper cabinet ${shape}: a later visit can cancel a partial ascent without expanding again or sticking`,reopened && cancelled && partial.phase==='lifting' && partial.after<partial.before && !partial.panel,JSON.stringify(partial));
+  }
 } });
 for (const id of ["cloud-hopper", "drop", "orbit", "mine", "invaders", "stampede", "pong", "snake", "flap", "breaker", "dash", "stacker"]) {
   scene("arcade", { label: `cabinet ${id} desktop`, exclusive: true, query: "character=portlandhodl&pos=0", opts: { motion: true }, steps: [cabinetVisit(id)] });
@@ -21030,6 +21344,7 @@ scene("shy", { steps: [carnivalPlay("shy", 0.7), trip("shy")] });
 scene("claw", { steps: [carnivalPlay("claw", 0.6), trip("claw")] });
 scene("hockey", { steps: [hockeyPilot, carnivalPlay("hockey", 0.5), trip("hockey")] });
 scene("arcade", { query: "character=portlandhodl", steps: [hockeySharedVisit] });
+scene("arcade", { query: "character=portlandhodl", steps: [hockeyChosenEnd] });
 scene("arcade", {query:"character=portlandhodl",opts:{w:1440,h:900,perf:true},steps:[hockeyHallSample]});
 scene("arcade", {query:"character=portlandhodl",opts:{w:390,h:844,mobile:true,perf:true},steps:[hockeyHallSample]});
 scene("arcade", { query: "character=portlandhodl", opts: {w:390,h:844,mobile:true}, steps: [hockeySharedVisit] });
@@ -23277,6 +23592,73 @@ const voiceHearingChecks = async () => {
   const cross={desk:await crossing(false),ios:await crossing(true)};
   record("voice crossing: along a bridge the island fades out as the land ahead fades in, equal-power, a second crosser plays by how near, the far side hears a crosser by its share, iOS sounds the same, and the hearing range reaches across",
     [cross.desk,cross.ios].every(c=>c.half==="0.707,0.707,1"&&c.near==="0.156,0.988,0.809"&&c.end==="0,1,0.707"&&c.over==="1,0.707"&&c.radius==="1,0.707"&&c.cutoff==="0,0.707"&&c.thump===c.cutoff),JSON.stringify(cross));
+  // #422: the arcade's haunted hallway, a listener halfway along with someone in the hall, someone in the arena and a
+  // second walker on the arena's half: equal power from either half, the same when the zone flips at the midpoint, a
+  // local mute holding, and the hearing range measured across the arcade scene's shared coordinates. The workload of the
+  // walk is counted from the rig: SFU calls and audio nodes made while walking (none; only gains move).
+  const hallway=async ios=>{
+    const r=rig(ios),V=r.V,s=r.state,out={};
+    r.remotes.clear();r.remotes.set(2,remote("hal","arcade.hall",5,0));r.remotes.set(3,remote("are","ghost-arena",5,30));
+    r.remotes.set(4,{...remote("wlk","ghost-arena.haunt",0,15),blendTo:"arcade",blendK:10});
+    Object.assign(s,{zone:"arcade.haunt",self:{x:0,y:0,z:0,zone:"arcade.haunt"},blendTo:"ghost-arena",blendT:0.5});
+    await V.enable();await settle();V.setPeers([2,3,4],[1,1,1]);await settle();r.land([2,3,4]);
+    const ops=r.ops.length,nodes=r.gains.length;
+    r.tick(10);out.mid=r.levels([2,3,4]);
+    Object.assign(s,{zone:"ghost-arena.haunt",blendTo:"arcade",blendT:0.5});s.self.zone="ghost-arena.haunt";r.tick(10);out.turned=r.levels([2,3,4]);
+    s.blendT=0.1;r.tick(10);out.gate=r.levels([2,3,4]);
+    V.muteLocal("are",true);r.tick();out.muted=r.levels([2,3,4]);V.muteLocal("are",false);
+    s.blendT=0.5;V.setRadius(10);r.tick(10);out.radius=r.levels([2,3,4]);V.setRadius(0);
+    out.work={sfu:r.ops.length-ops,nodes:r.gains.length-nodes};
+    V.stop();
+    return out;
+  };
+  const hall={desk:await hallway(false),ios:await hallway(true)};
+  record("voice hallway (#422): halfway along the arcade's haunted hallway the hall and the arena play at equal power from either half, toward the gate the arena takes over, a local mute holds, the hearing range reaches the hall through the shared coordinates, and walking costs no SFU call or audio node",
+    [hall.desk,hall.ios].every(h=>h.mid==="0.707,0.707,1"&&h.turned===h.mid&&h.gate==="0.156,0.988,0.809"&&h.muted==="0.156,0,0.809"&&h.radius==="0.707,0,0"&&h.work.sfu===0&&h.work.nodes===0),JSON.stringify(hall));
+};
+// #422: the hunt's sound as ghost-audio.js plays it, on a fake AudioContext: nothing opened or scheduled where the hunt
+// is not heard, the master following a spectator's level along the hallway at bounded cost (no decode or fetch from a
+// level), a hushed catch-up frame, and a track that finishes decoding after `dispose` starting nothing.
+const ghostAudioChecks = async () => {
+  const ctxs=[],pending=[],loads=[];
+  const param=()=>{const p={value:0,calls:0};for(const m of ["setValueAtTime","exponentialRampToValueAtTime","linearRampToValueAtTime","setTargetAtTime","cancelScheduledValues"])p[m]=v=>{p.calls++;if(m!=="cancelScheduledValues"&&m!=="exponentialRampToValueAtTime"&&m!=="linearRampToValueAtTime")p.value=v;};return p;};
+  const node=(extra)=>Object.assign({connect(){},disconnect(){},start(){},stop(){}},extra);
+  class Ctx {constructor(){ctxs.push(this);this.currentTime=0;this.state="running";this.sampleRate=800;this.destination=node({});this.gains=[];this.decodes=0;this.sources=0;}
+    createGain(){const g=node({gain:param()});this.gains.push(g);return g;}
+    createOscillator(){return node({frequency:param(),detune:param(),type:"sine"});}
+    createBiquadFilter(){return node({frequency:param(),Q:param(),type:"lowpass"});}
+    createBuffer(c,n){return {getChannelData:()=>new Float32Array(n)};}
+    createBufferSource(){this.sources++;return node({buffer:null,loop:false,onended:null});}
+    decodeAudioData(){this.decodes++;return new Promise(r=>pending.push(()=>r({})));}
+    resume(){return Promise.resolve();} close(){this.state="closed";return Promise.resolve();}}
+  const clips={},music={};
+  for(const name of ["wave","kaboom","screech","freeze","apples","double","banana","ooga","landing","network","fiatRush","tessZap","tessScream","monkeyGet","choir","gameOver1","gameOver2","gameOver3","gameOver4","gameOverLast"])clips[name]="AA==";
+  for(const key of ["boss","colt","martial","nightmare","synthed","nr"])music[key]="AA==";
+  let soundFn=null;
+  const window={BL:{sound:{muted:false,subscribe:fn=>{soundFn=fn;return()=>{soundFn=null;};}},ghostAudioData:clips,ghostMusic:music,deferred:{load:g=>{loads.push(g);return null;}}},setTimeout:()=>0};
+  const context={window,document:{hidden:false,addEventListener(){},removeEventListener(){}},navigator:{userActivation:{hasBeenActive:true}},AudioContext:Ctx,localStorage:{getItem:()=>null,setItem(){}},atob,Math,Float32Array,Uint8Array,Promise};
+  runInNewContext(readFileSync(join(root,"src/js/ghost-audio.js"),"utf8"),context);
+  const A=window.BL.ghostAudio.create(),out={};
+  A.level(0);A.play("shot");A.play("hurt");out.silent={played:A.played,contexts:ctxs.length};
+  A.level(1);A.play("shot");const ctx=ctxs[0],master=ctx.gains[0];out.heard={played:A.played,contexts:ctxs.length,master:+master.gain.value.toFixed(3)};
+  // A walk from the gate to the Arcade end, a level every frame for 1,000 frames.
+  const calls=master.gain.calls,decodes=ctx.decodes;
+  for(let i=0;i<=1000;i++)A.level(Math.sin(Math.PI/2*(1-i/1000)));
+  out.walk={reschedules:master.gain.calls-calls,decodes:ctx.decodes-decodes,loads:loads.length,end:master.gain.value};
+  A.level(Math.SQRT1_2);out.mid=+master.gain.value.toFixed(4);
+  A.hush(true);const p0=A.played;A.play("hurt");A.hush(false);out.hushed=A.played-p0;A.play("hurt");out.after=A.played-p0;
+  soundFn(true);out.muted=master.gain.value;soundFn(false);out.unmuted=+master.gain.value.toFixed(4);
+  // Music asked for, its track still decoding when the hunt is disposed.
+  A.music(true);const sources=ctx.sources;A.dispose();
+  for(const resolve of pending.splice(0))resolve();
+  await new Promise(r=>setTimeout(r,0));
+  A.play("shot");
+  out.disposed={playing:A.playing,sources:ctx.sources-sources,contexts:ctxs.length,state:ctx.state,sound:soundFn===null};
+  record("ghost hunt audio (#422): a page that hears nothing of the hunt opens no context and schedules no cue; heard, the master follows the spectator's level, rescheduled at most once a 0.02 step over a 1,000-frame walk with no decode or fetch, equal power at the midpoint, through mute and back; a hushed catch-up frame plays nothing; a track decoded after dispose starts nothing and opens no context",
+    out.silent.played===0&&out.silent.contexts===0&&out.heard.played===1&&out.heard.contexts===1&&out.heard.master===0.35
+      &&out.walk.reschedules>0&&out.walk.reschedules<=52&&out.walk.decodes===0&&out.walk.loads===0&&out.walk.end===0
+      &&Math.abs(out.mid-0.35*Math.SQRT1_2)<1e-4&&out.hushed===0&&out.after===1&&out.muted===0&&out.unmuted===out.mid
+      &&!out.disposed.playing&&out.disposed.sources===0&&out.disposed.contexts===1&&out.disposed.state==="closed"&&out.disposed.sound,JSON.stringify(out));
 };
 const exteriorEnrichmentChecks = BL => {
   const S=BL.scene,root=S.createNode(),land=BL.dsbGeography.build(),renderer={kind:"webgl2",quality:"high"},camera=S.createCamera();camera.position.y=110;
@@ -24254,7 +24636,7 @@ const netFixture=(BL,response,step=200,cookie="")=>{
   class Socket {static OPEN=1;constructor(){this.readyState=1;sockets.push(this);}send(v){sent.push(typeof v==="string"?JSON.parse(v):v);}close(){this.readyState=3;}}
   const voice={setPeers:()=>{},restart:()=>{},stop:()=>{}};
   const location={protocol:"https:",host:"fixture.invalid",pathname:"/",search:"",assign:url=>navigations.push(url)},pilot={saveLoginView(){savedViews++;}};
-  const context={window:{BL:{characters:BL.characters,accountIdentities:BL.accountIdentities,contributors:BL.contributors,donations:BL.donations,chatPolicy:BL.chatPolicy,arcadeCabinets:BL.arcadeCabinets,chalkBoard:BL.chalkBoard,voice,pilot},setTimeout:()=>1,clearTimeout(){},setInterval:()=>1,clearInterval(){}},document:{hidden:false,cookie,addEventListener:(k,v)=>events.set(k,v),removeEventListener:k=>events.delete(k)},location,fetch:async(...args)=>{calls++;return response(...args);},AbortSignal,WebSocket:Socket,performance:{now:()=>tick+=step},Date,ArrayBuffer,URLSearchParams,TextEncoder};
+  const context={window:{BL:{characters:BL.characters,accountIdentities:BL.accountIdentities,contributors:BL.contributors,donations:BL.donations,chatPolicy:BL.chatPolicy,arcadeCabinets:BL.arcadeCabinets,chalkBoard:BL.chalkBoard,voiceBlend:BL.voiceBlend,voice,pilot},setTimeout:()=>1,clearTimeout(){},setInterval:()=>1,clearInterval(){}},document:{hidden:false,cookie,addEventListener:(k,v)=>events.set(k,v),removeEventListener:k=>events.delete(k)},location,fetch:async(...args)=>{calls++;return response(...args);},AbortSignal,WebSocket:Socket,performance:{now:()=>tick+=step},Date,ArrayBuffer,URLSearchParams,TextEncoder};
   runInNewContext(source,context);
   return {net:context.window.BL.net,document:context.document,voice,sockets,sent,events,location,navigations,advance(ms){tick+=ms;},get calls(){return calls;},get savedViews(){return savedViews;}};
 };
@@ -24333,17 +24715,21 @@ const playersTabChecks = async BL => {
     ["outside", "dsb-studio", "bifrost"], ["outside", "scene-race", "arcade"], ["outside", "scene-skee", "arcade"], ["outside", "sphere-4", "sphere"], ["outside", "hq", "hq"],
     ["factory", "factory.hangar", "factory.hall"], ["factory.hangar", "outside", "factory.hall"], ["factory.hangar", "arcade.hall", "factory.hall"], ["lab", "rainforest", "outside"],
     ["bifrost.chamber", "ember-den", "ember-den"], ["ember-den", "dsb-maxis", "bifrost.chamber"], ["dsb-maxis", "dsb-studio", "dsb-outside"], ["sphere-4", "sphere-7", "sphere"],
-    ["outside", "none", null], ["none", "outside", null], ["scene-transition", "lab", null], ["lab", "lab", null], ["outside", "made-up", null], ["outside", "constructor", null], ["constructor", "lab", null]];
+    ["outside", "none", null], ["none", "outside", null], ["scene-transition", "lab", null], ["lab", "lab", null], ["outside", "made-up", null], ["outside", "constructor", null], ["constructor", "lab", null],
+    ["outside", "ghost-arena", "arcade"], ["arcade.hall", "arcade-hunt", "arcade.haunt"], ["arcade.haunt", "ghost-arena", "ghost-arena.haunt"], ["ghost-arena", "arcade.hall", "ghost-arena.haunt"], ["arcade-hunt", "outside", "ghost-arena"]];
   const routed = steps.map(([from, to, want]) => ({ from, to, want, got: Z.next(from, to) })).filter(r => r.got !== r.want);
   record("players tab routes: the first step between zones goes down toward the target or up toward the island (Factory before the hangar, ₿IFRÖST before the Ember Den and DSB Land, the Arcade before its games), and nowhere has no route",
     routed.length === 0, JSON.stringify(routed));
   const lands = { outside: "The island", "factory.hall": "Lightning Factory", factory: "Lightning Factory", "factory.hangar": "Lightning Jet Hangar", "arcade.hall": "Ooga Arcade", "bifrost.chamber": "\u20bfIFR\u00d6ST chamber",
-    "sphere-3": "Timechain Sphere \u00b7 Room 3", "dsb-maxis": "DSB Land", "cave-c9": "A cave on the island", "scene-race": "Ooga Rally", "scene-skee": "A game", none: "Between lands", "ember-den": "Ember Den" };
+    "sphere-3": "Timechain Sphere \u00b7 Room 3", "dsb-maxis": "DSB Land", "cave-c9": "A cave on the island", "scene-race": "Ooga Rally", "scene-skee": "A game", none: "Between lands", "ember-den": "Ember Den",
+    "arcade.haunt": "Ooga Arcade", "ghost-arena.haunt": "Ghost Hunter's Arena", "ghost-arena": "Ghost Hunter's Arena", "arcade-hunt": "Ghost Hunter's Arena" };
   const headings = { outside: "The island", factory: "Lightning Factory tunnel", "factory.hall": "Lightning Factory", arcade: "Ooga Arcade entrance", "arcade.hall": "Ooga Arcade",
+    "arcade.haunt": "Ooga Arcade", "ghost-arena.haunt": "Ghost Hunter's Arena", "ghost-arena": "Ghost Hunter's Arena", "arcade-hunt": "Ghost Hunter's Arena",
     "dsb-maxis": "DSB Land \u00b7 Maxis Club", "scene-race": "Ooga Rally", "scene-skee": "Ooga Arcade games", "scene-invaders": "Ooga Arcade games", "scene-transition": "Between lands" };
   const landMiss = Object.entries(lands).filter(([zone, want]) => Z.landOf(zone) !== want), headMiss = Object.entries(headings).filter(([zone, want]) => Z.heading(Z.groupOf(zone)) !== want);
-  record("players tab groups: the roster keeps its land names; the tab heads the Factory tunnel and the Arcade entrance apart from their halls, each DSB venue apart, and the arcade's unrouted games together",
-    !landMiss.length && !headMiss.length && Z.heading("constructor") === "constructor" && Z.groupOf("scene-skee") === Z.groupOf("scene-invaders") && Z.groupOf("scene-race") !== Z.groupOf("scene-skee") && Z.groupOf("scene-transition") === "none",
+  record("players tab groups: the roster keeps its land names; the tab heads the Factory tunnel and the Arcade entrance apart from their halls, each DSB venue apart, the arcade's unrouted games together, and each half of the haunted hallway with its own land, Ooga Arcade or Ghost Hunter's Arena (#422)",
+    !landMiss.length && !headMiss.length && Z.heading("constructor") === "constructor" && Z.groupOf("scene-skee") === Z.groupOf("scene-invaders") && Z.groupOf("scene-race") !== Z.groupOf("scene-skee") && Z.groupOf("scene-transition") === "none"
+      && Z.groupOf("arcade.haunt") === Z.groupOf("arcade.hall") && Z.groupOf("ghost-arena.haunt") === Z.groupOf("ghost-arena") && Z.groupOf("arcade-hunt") === Z.groupOf("ghost-arena") && Z.groupOf("ghost-arena") !== Z.groupOf("arcade.hall"),
     JSON.stringify({ landMiss, headMiss }));
   const row = (id, name, zone, self = false) => ({ id, name, group: Z.groupOf(zone), self });
   const rows = [row(5, "zed", "lab"), row(2, "Bea", "rainforest"), row(9, "amy", "lab"), row(1, "Me", "lab", true), row(4, "carl", "factory.hall"), row(3, "Al", "rainforest"), row(7, "Ánna", "factory")];
@@ -24380,6 +24766,49 @@ const playersTabChecks = async BL => {
   record("players tab positions: the visitor's own is their Ooga's last reported, kept after letting go, and stale once they change zone",
     placed.x === 3 && placed.z === 4 && placed.zone === "outside" && kept.x === 3 && kept.zone === "outside" && f.net.state.self.zone !== f.net.state.zone && moves > heard,
     JSON.stringify({ placed, kept, zone: f.net.state.zone }));
+  // #422: the arcade hallway's midpoint changes the zone (the land each half is listed under) while both lands are heard:
+  // the page keeps every voice and turns its crossing round, as the room does; a remote's position stays placed across
+  // the two halves' shared coordinates and goes stale on leaving them.
+  const dropped = [];
+  f.net.setBody("NickDaGreek"); f.net.setZone("arcade.haunt");
+  f.voice.setPeers = ids => dropped.push(ids.length);
+  f.net.setBlend("ghost-arena", 0.55);
+  const nearHalf = { to: f.net.state.blendTo, t: f.net.state.blendT };
+  f.net.setZone("ghost-arena.haunt");
+  const turned = { to: f.net.state.blendTo, t: +f.net.state.blendT.toFixed(3), dropped: dropped.length };
+  f.net.setBlend(null, 0); f.net.setZone("arcade.hall");
+  const leftHallway = dropped.length;
+  message({ t: "zone", id: 2, name: "arcade.haunt" }); message({ t: "state", now: Date.now(), ps: [2, 25, 3.2, -20, 0] });
+  message({ t: "blend", id: 2, to: "ghost-arena", k: 11 });
+  // What a listener in the hall plays that remote at (voice.js `nearness`), before its zone flips and in the gap between
+  // the room's `zone` and the `blend` that follows it.
+  const share = () => +BL.voiceBlend.gain("arcade.hall", null, 0, rec(2).zone, rec(2).blendTo, rec(2).blendK / BL.voiceBlend.STEPS).toFixed(6);
+  const shareBefore = share();
+  message({ t: "zone", id: 2, name: "ghost-arena.haunt" });
+  const gap = { to: rec(2).blendTo, k: rec(2).blendK, share: share(), poseZone: rec(2).poseZone };
+  message({ t: "blend", id: 2, to: "arcade", k: 9 });
+  const settled = share();
+  message({ t: "zone", id: 2, name: "outside" });
+  record("players tab hallway (#422): crossing the haunted hallway's midpoint keeps every voice and turns the crossing round, a remote's too before the room's next step arrives (no moment at another share), leaving the arena's half for the hall drops them, and a remote's position stays placed across the halves",
+    nearHalf.to === "ghost-arena" && turned.to === "arcade" && turned.t === 0.45 && turned.dropped === 0 && leftHallway === 1
+      && gap.to === "arcade" && gap.k === 9 && gap.share === shareBefore && settled === shareBefore && shareBefore > 0.6 && shareBefore < 0.7
+      && gap.poseZone === "ghost-arena.haunt" && rec(2).poseZone === "ghost-arena.haunt" && rec(2).zone === "outside" && !rec(2).blendTo,
+    JSON.stringify({ nearHalf, turned, leftHallway, shareBefore, gap, settled }));
+  // The exact local position can reach a bridge's end before the throttled wire step does. The room turns its last
+  // step round on the zone change, so the page must explicitly clear that remainder, once, even when its own is zero.
+  const exits = [];
+  for (const land of ["rainforest", "sphere", "bifrost", "hq"]) for (const [from, to] of [["outside", land], [land, "outside"]]) {
+    f.net.setBlend(null, 0); f.net.setZone(from); f.advance(1000);
+    f.net.setBlend(to, 0.95); const lastStep = f.sent.at(-1);
+    f.net.setBlend(to, 0.99); const throttled = f.sent.at(-1) === lastStep;
+    f.net.setZone(to); const at = f.sent.length;
+    f.net.setBlend(null, 0);
+    for (let i = 0; i < 4; i++) { f.advance(1000); f.net.setBlend(null, 0); }
+    const clears = f.sent.slice(at).filter(m => m.t === "blend");
+    exits.push({ from, to, lastStep, throttled, clears, local: f.net.state.blendTo });
+  }
+  record("voice bridge exit: a zone change with wire step 19 and exact progress past the endpoint explicitly clears the room's remaining crossing once in either direction",
+    exits.every(r => r.lastStep.t === "blend" && r.lastStep.k === 19 && r.throttled && r.local === null && r.clears.length === 1 && r.clears[0].to === null && r.clears[0].k === 0), JSON.stringify(exits));
   f.net.dispose();
 };
 const rememberedCharacterChecks = async BL => {
@@ -25435,10 +25864,10 @@ const visibilitySourceBakeProof = () => {
   const math = readFileSync(new URL("../src/js/math.js", import.meta.url), "utf8");
   const source = readFileSync(new URL("../src/js/character-visibility.js", import.meta.url), "utf8");
   const compact = readFileSync(new URL("../src/js/compact-geometry.js", import.meta.url), "utf8");
-  const expose = source.slice(0, source.indexOf("  const create =")) + " window.__meshProof={meshOf,meshes};})();";
+  const expose = source.replace("BL.characterVisibility = { create };", "BL.characterVisibility = { create }; window.__meshProof={meshOf,meshes,startMesh,builds};");
   return runInNewContext(math + "\n" + compact + "\n" + expose + `
 (() => {
-    const {meshOf}=window.__meshProof;
+    const {meshOf,meshes,startMesh,builds}=window.__meshProof;
     const source={verts:new Float64Array([0,0,0, 1,0,0, 0,1,0, 0,0,1]),faces:[{i:[0,1,2]},{i:[0,2,3]}]};
     const wrapper=()=>({...source,faces:source.faces.map(f=>({...f,matrixCave:2,matrixLocalGlyphSurface:true})),matrixSourceGeometry:source});
     const first=wrapper(), baked=meshOf(first);let cases=0;
@@ -25500,8 +25929,81 @@ const visibilitySourceBakeProof = () => {
     check(refused===2 && C.storageOf(packed)===data,'Reassigning a packed mesh did not throw');
     const legacy=packed.faces[0];
     check(packed.faces[0]===legacy && Object.isFrozen(legacy) && Object.isFrozen(legacy.i) && legacy.color[3]===-1 && data.legacy.size===1,'Legacy compact access is not stable and bounded');
-    return { cases, failures: 0, wrapperVisits: 100, sharedSourceBVHs: 1 };
-  })()`, { window: { location: { search: "?compactGeometry=1" }, BL: { scene: { boundsOf() { throw Error("Unused"); } } } }, URLSearchParams });
+    // Median partitioning may reorder triangles, but every leaf must keep an
+    // exact, enclosing subset and answer the same rays as a brute-force scan.
+    const random = window.BL.math.mulberry32(731);
+    let rays = 0, warmGeometry, warmExpected;
+    for (const shape of ["random", "sorted", "reverse", "equal", "clustered"]) {
+      const geometry = { verts: [], faces: [] }, count = 1003;
+      for (let i = 0; i < count; i++) {
+        const x = shape === "equal" ? 0 : shape === "random" ? random() * 20 - 10 : shape === "clustered" ? i < 990 ? 0 : 20 : (shape === "sorted" ? i : count - i) / 50 - 10;
+        const y = shape === "equal" ? 0 : Math.floor(i / 25) / 2 - 10, z = i % 17, at = geometry.verts.length / 3;
+        geometry.verts.push(x - .4, y - .4, z, x + .4, y - .4, z, x, y + .4, z);
+        geometry.faces.push({ i: [at, at + 1, at + 2], visibility: i % 19 ? true : false });
+      }
+      const pending = startMesh(geometry); pending.slice.until = -1;
+      check(!pending.steps.next().done && !meshes.has(geometry), "Idle bake failed to yield without publishing partial triangles");
+      const mesh = meshOf(geometry), triangles = mesh.indices.length / 3, seen = new Uint8Array(triangles);
+      check(!builds.has(geometry) && meshes.get(geometry) === mesh, "On-demand query did not finish and publish the pending bake");
+      warmGeometry = { ...geometry }; warmExpected = mesh;
+      check(triangles === geometry.faces.filter(f => f.visibility).length, "Partition dropped visible triangles");
+      for (const node of mesh.nodes) {
+        for (let k = node.from; k < node.to; k++) {
+          const id = mesh.order[k];
+          if (node.left < 0) seen[id]++;
+          for (let v = 0; v < 3; v++) for (let axis = 0; axis < 3; axis++) {
+            const value = mesh.vertices[mesh.indices[id * 3 + v] + axis];
+            check(value >= node.box[axis] && value <= node.box[axis + 3], "Partition bounds exclude a triangle");
+          }
+        }
+        if (node.left >= 0) {
+          const left = mesh.nodes[node.left], right = mesh.nodes[node.right];
+          check(left.from === node.from && left.to === right.from && right.to === node.to && Math.abs((left.to - left.from) - (right.to - right.from)) <= 1, "Partition is not balanced and contiguous");
+        }
+      }
+      check(seen.every(n => n === 1), "Partition duplicates or loses a leaf triangle");
+      const hit = (id, x, y) => {
+        const at = mesh.indices[id * 3], vx = mesh.vertices[at], vy = mesh.vertices[at + 1];
+        const u = (y - vy) / .8, v = (x - vx - .4 * u) / .8;
+        return u >= 0 && v >= 0 && u + v <= 1 ? 20 - mesh.vertices[at + 2] : Infinity;
+      };
+      for (let i = 0; i < 100; i++) {
+        const x = i < 50 ? random() * 20 - 10 : 0, y = i < 50 ? random() * 20 - 10 : 0;
+        let expected = Infinity;
+        for (let id = 0; id < triangles; id++) expected = Math.min(expected, hit(id, x, y));
+        const visit = index => {
+          const n = mesh.nodes[index], box = n.box;
+          if (x < box[0] || x > box[3] || y < box[1] || y > box[4]) return Infinity;
+          if (n.left >= 0) return Math.min(visit(n.left), visit(n.right));
+          let nearest = Infinity;
+          for (let k = n.from; k < n.to; k++) nearest = Math.min(nearest, hit(mesh.order[k], x, y));
+          return nearest;
+        };
+        check(visit(0) === expected, "Partition ray differs from brute force"); rays++;
+      }
+    }
+    // The public warmer must schedule large meshes instead of discarding them,
+    // resume across idle slices, publish only a complete tree and cancel on exit.
+    const idle = new Map(); let nextIdle = 0, clock = 0, warmSlices = 0;
+    globalThis.requestIdleCallback = fn => { idle.set(++nextIdle, fn); return nextIdle; };
+    globalThis.cancelIdleCallback = id => idle.delete(id);
+    globalThis.performance = { now: () => clock++ };
+    const warmRoot = { children: [{ geometry: warmGeometry, children: [] }] };
+    const visibility = window.BL.characterVisibility.create({ root: warmRoot, renderer: {}, camera: {} });
+    visibility.warm();
+    while (idle.size && warmSlices < 1000) {
+      const [id, fn] = idle.entries().next().value; idle.delete(id); fn({ timeRemaining: () => 10 }); warmSlices++;
+    }
+    const warmed = meshes.get(warmGeometry);
+    check(warmSlices > 1 && warmSlices < 1000 && warmed && !builds.has(warmGeometry), "Large idle bake was skipped, did not yield or did not finish");
+    check(JSON.stringify(warmed.nodes) === JSON.stringify(warmExpected.nodes) && warmed.indices.every((v, i) => v === warmExpected.indices[i]), "Idle and synchronous bakes differ");
+    visibility.dispose();
+    warmRoot.children[0].geometry = { ...warmGeometry };
+    const leaving = window.BL.characterVisibility.create({ root: warmRoot, renderer: {}, camera: {} });
+    leaving.warm(); leaving.dispose();
+    check(idle.size === 0, "Disposed visibility retained an idle callback");
+    return { cases, failures: 0, rays, warmSlices, wrapperVisits: 100, sharedSourceBVHs: 1 };
+  })()`, { window: { location: { search: "?compactGeometry=1" }, BL: { scene: { boundsOf() { throw Error("Unused"); } } } }, URLSearchParams, performance: { now: () => 0 } });
 };
 
 // Run the shipped driver with synthetic processes, discovery and sockets; never launch Chrome.
@@ -26421,6 +26923,8 @@ const unitChecks = async () => {
   record("gorilla sleep beam: fixed pool, slot isolation, live reduced motion and scene cleanup", Object.values(sleepBeamPool).every(Boolean), JSON.stringify(sleepBeamPool));
   const sleepStalls = gorillaSleepStallProof();
   record("gorilla sleep stall regression: two seconds without forward progress permits a bounded beam to a clear reserved bed; progress, waits, cancellation and walking home retain their contracts", sleepStalls.every(row => row.ok), JSON.stringify(sleepStalls));
+  const sleepBudget = gorillaSleepBudgetProof();
+  record("gorilla sleep recovery: twenty simultaneous stalls share one beam and one landing check per rendered update, including catch-up; a blocked bed yields and all clear reservations arrive", sleepBudget.every(row => row.ok), JSON.stringify(sleepBudget));
   const rage = await gorillaRageProof();
   record("gorilla rage: distinct rolling hits, only agitating Oogas targeted, held capture through planning and swing, bounded throws, exact expiry, zero health and account/lifecycle cancellation", Object.values(rage).every(Boolean), JSON.stringify(rage));
   const reviewCrowd=await reviewCrowdAndFallbackProof();
@@ -26630,6 +27134,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   footstepChecks(BL);
   await voiceAloneChecks();
   await voiceHearingChecks();
+  await ghostAudioChecks();
   exteriorEnrichmentChecks(BL);
   if(ARGS.includes("exterior-unit"))return;
   maxisChecks(BL);

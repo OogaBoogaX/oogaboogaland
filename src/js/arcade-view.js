@@ -84,7 +84,8 @@
       rw = Math.min(width * 0.94, height * 0.80 * 4 / 3); rh = rw * 3 / 4;
       rx = (width - rw) / 2; ry = (height - rh) / 2;
     };
-    const duration = () => reduced.matches ? 0 : 0.7;
+    const cloudRide = () => visit?.id === "cloud-hopper";
+    const duration = () => reduced.matches ? 0 : phase === "expanding" && cloudRide() ? BL.cloudHopper.LIFT_SECONDS : 0.7;
     const setPhase = value => {
       if (value !== "menu" && scores) { scores.dispose(); scores = null; }
       phase = value; age = 0; document.body.dataset.cabinetPhase = value;
@@ -93,7 +94,27 @@
     const screen = k => {
       zoom = k;
       rect();
-      const panel = visit?.id === "cloud-hopper" ? document.querySelector(".cloud-hopper-panel[open]") : null;
+      // Keep the game's viewport and the captured cabinet at one aspect throughout the trip.
+      // The image starts letterboxed in the glass. A uniform push covers the viewport;
+      // reversing that same push reveals the cabinet without reshaping a result card.
+      if (cloudRide() && phase !== "menu") {
+        const fit = Math.min(rw / width, rh / height), scale = fit + (1 - fit) * k;
+        const cx = rx + rw / 2, cy = ry + rh / 2;
+        stage.classList.add("cabinet-display");
+        stage.style.width = `${width}px`; stage.style.height = `${height}px`;
+        stage.style.left = `${(cx - width / 2) * (1 - k)}px`;
+        stage.style.top = `${(cy - height / 2) * (1 - k)}px`;
+        stage.style.transform = `scale(${scale})`;
+        backdrop.hidden = foreground.hidden = false;
+        if (foreground.parentElement !== document.body) document.body.append(foreground);
+        foreground.style.position = "fixed"; foreground.style.left = foreground.style.top = "0";
+        foreground.style.opacity = "1";
+        backdrop.style.transformOrigin = foreground.style.transformOrigin = `${cx}px ${cy}px`;
+        backdrop.style.transform = foreground.style.transform = `translate(${(width / 2 - cx) * k}px, ${(height / 2 - cy) * k}px) scale(${scale / fit})`;
+        if (shownW !== width || shownH !== height) { shownW = width; shownH = height; renderer.resize(); }
+        return;
+      }
+      const panel = cloudRide() ? document.querySelector(".cloud-hopper-panel[open]") : null;
       const parent = panel || document.body;
       const changedParent = foreground.parentElement !== parent;
       if (changedParent) parent.append(foreground);
@@ -117,7 +138,9 @@
     const full = () => {
       zoom = 1;
       stage.classList.remove("cabinet-display");
-      stage.style.left = stage.style.top = stage.style.width = stage.style.height = "";
+      stage.style.left = stage.style.top = stage.style.width = stage.style.height = stage.style.transform = "";
+      backdrop.style.transform = foreground.style.transform = "";
+      backdrop.style.transformOrigin = foreground.style.transformOrigin = "";
       backdrop.hidden = foreground.hidden = true;
       document.body.append(foreground);
       shownW = shownH = 0; renderer.resize();
@@ -185,7 +208,10 @@
       }
       else if (phase === "menu") {
         screen(0);
-        if (!menu) setPhase("expanding");
+        if (!menu) {
+          setPhase("expanding"); age = dt;
+          screen(ease(duration() ? Math.min(1, age / duration()) : 1));
+        }
       } else if (phase === "expanding") {
         screen(k);
         if (k === 1) { full(); setPhase("playing"); }
@@ -251,7 +277,7 @@
     };
     return { begin, route, arrived, update, afterDraw, failed,
       get active() { return !!visit; }, get phase() { return phase; },
-      get held() { return visit && phase !== "menu" && phase !== "playing"; },
+      get held() { return visit && phase !== "menu" && phase !== "playing" && !(cloudRide() && phase === "expanding"); },
       dispose() { clear(); unsubscribe(); backdrop.remove(); foreground.remove(); exitButton.remove(); } };
   };
   BL.arcadeView = { create };

@@ -4541,7 +4541,14 @@
       for (const s of [-1, 1]) for (const p of [torus(0.07, 0.02, brass, 0, 12, 5), turn([[0, 0.004], [0.062, 0.004], [0.055, 0.014], [0, 0.016]], 10, "#3d6266", 0.3)]) round.push(moved(turnedX(p, 1.02), s * 0.11, 0.745, z + 0.36));
       flat.push(beam(-0.045, 0.745, z + 0.375, 0.045, 0.745, z + 0.375, 0.02, brass));
     }
-    return shaded(round, flat);
+    // Pull the excess rear dome forward around the shallower skull. Taper the take-in to zero at its square
+    // corners so they and the crest stay covered; keep the front, visor, width and height as authored.
+    const cap = shaded(round, flat);
+    for (let n = 0; n < cap.verts.length; n += 3) {
+      const x = cap.verts[n], z = cap.verts[n + 2];
+      if (z < 0) cap.verts[n + 2] = z * (1 - 0.3 * Math.max(0, 1 - x * x / (0.24 * 0.24)));
+    }
+    return cap;
   });
   // A tooth or fang `len` long hanging down from its top at the origin, a charm for the prize crown. A round part.
   const charmTooth = (len, r) => turn([[0, 0], [r, 0], [r * 0.85, -len * 0.4], [0, -len]], 6, BONE);

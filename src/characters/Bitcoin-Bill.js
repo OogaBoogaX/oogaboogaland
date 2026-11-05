@@ -55,7 +55,7 @@
   };
   BL.characters.add({
     handle: "Bitcoin-Bill",
-    github: "Bitcoin-Bill",
+    github: "Bitclank-Bill",
     display: "Bitclank Bill",
     joined: 1792943472,
     lastCommit: 1792943472,

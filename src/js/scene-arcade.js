@@ -88,9 +88,10 @@
   let leaving = false, openingGame = false, people = null, avatar = null, playerWorld = null, screens = null, shownFrame = -1, prompt = null, promptOccupied = null;
   // HALLOWEEN: the ghost arena's hunt: its herald before the hunt loads, the hunt, its channel to the room, GAME MODE,
   // the iron fence across the hallway's mouth (how far up), the totems and their lit parts, whether the visitor's Ooga carries its rifle
-  // (in the arena), the voice zone it reports and the one it is turning to.
+  // (in the arena), the voice zone it reports and the one it is turning to, which half of the hallway it is on, how far
+  // along the hallway it stands and how loud the hunt's music and sound play for it (#422).
   let ghostEntry = null, ghosts = null, ghostChannel = null, tess = null, gameMode = false, fence = null, fenceK = 0, totemsAt = [], totemLife = [], lasers = [], armed = false, rifleWas = false;
-  let zoneNow = "arcade.hall", zoneHeld = 0, exitButton = null;
+  let zoneNow = "arcade.hall", zoneHeld = 0, exitButton = null, hallwayFar = false, hallwayAlong = 0, huntHearing = 0;
   let outsideWeapon = null;
   let stations = null, blocks = null, carnival = null, staff = null, orders = 0, ticketBoard = null, prizeUi = null;
   let crowd = null, spin = null;
@@ -162,7 +163,10 @@
     if (id === "race") { hud.toast("Ooga Rally · out of order"); return; }
     const cabinetId = id === "hub" && place === "cloud-hopper" ? "cloud-hopper" : id;
     const cabinet = LAYOUT.cabinets.find(c => (c.game >= 0 ? GAMES[c.game].id : AM.RETRO[c.retro].id) === cabinetId);
-    if (!cabinet) { if (go(id, place)) leaving = openingGame = true; return; }
+    if (!cabinet) {
+      const preferred = id === "hockey" && Number.isInteger(place) && BL.hockeyWire.TABLES[place] && avatar && avatar.root.position.z < BL.hockeyWire.TABLES[place][1] ? 1 : 0;
+      if (go(id, place)) { if (id === "hockey") world.hockeyEnd = preferred; leaving = openingGame = true; } return;
+    }
     const occupied = BL.net.cabinetSeats.get(cabinetId);
     if (occupied && occupied.player !== BL.net.state.selfId) { hud.toast(`${occupied.name} is playing · cabinet occupied`); return; }
     const actor = pilot.player || avatar;
@@ -351,6 +355,8 @@
         const bay = createNode({ geometry: AM.rallyRepairBay() });
         const panel = createNode({ geometry: AM.cabinetPanel(c.index), position: { x: -1.08, y: 0.1, z: 0.28 }, rotation: { x: -0.22, y: -0.4, z: -0.12 } });
         const clanker = BL.agent.create({ groundAt: () => 0, form: "ape", x: -0.32, z: 1.3, heading: Math.PI - 0.35, scale: 0.65 });
+        addChild(clanker.parts.head, createNode({ geometry: AM.staffHat(2) }));
+        addChild(clanker.parts.torso, createNode({ geometry: AM.staffVest(2) }));
         clanker.chest.rotation.x = 1.35;
         clanker.parts.head.rotation.x = -0.4;
         clanker.parts.armR.rotation.x = -2.65;
@@ -418,7 +424,12 @@
     // hockey scores float above players, leaving its former far-end board posts clear.
     F.claw.forEach((p, i) => machine(p, AM.clawBooth(i), BL.arcadeGames.clawGame, "claw", [-1.4, 1.4, -1.52, -0.28], i));
     F.pinball.forEach((p, i) => { const t = AM.pinball(i); machine(p, { body: t.body, glow: t.lit, glass: t.glass, dz: -1.05 }, BL.arcadeGames.pinballGame, "pinball", [-0.43, 0.43, -1.84, -0.2], i); });
-    F.hockey.forEach((p, i) => { const a = AM.airHockey(); machine(p, { body: a.body, glow: a.lit, dz: -AM.HOCKEY.w * AM.HOCKEY.scale / 2 - 0.65, turn: Math.PI / 2, scale: AM.HOCKEY.scale }, BL.arcadeGames.airHockey, "hockey", [-0.65 * AM.HOCKEY.scale, 0.65 * AM.HOCKEY.scale, -0.65 - (AM.HOCKEY.w + 0.1) * AM.HOCKEY.scale, -0.65 + 0.1 * AM.HOCKEY.scale], i); });
+    F.hockey.forEach((p, i) => {
+      const a = AM.airHockey(), station = machine(p, { body: a.body, glow: a.lit, dz: -AM.HOCKEY.w * AM.HOCKEY.scale / 2 - 0.65, turn: Math.PI / 2, scale: AM.HOCKEY.scale }, BL.arcadeGames.airHockey, "hockey", [-0.65 * AM.HOCKEY.scale, 0.65 * AM.HOCKEY.scale, -0.65 - (AM.HOCKEY.w + 0.1) * AM.HOCKEY.scale, -0.65 + 0.1 * AM.HOCKEY.scale], i);
+      // Both ends open the same physical table and the same two-seat session.
+      const far = BL.hockeyWire.seat(i, 1, 0, {});
+      stations.push({ ...station, play: { x: far.x, z: far.z, facing: far.yaw } });
+    });
     F.pool.forEach((p, i) => { const t = AM.poolTable(i); machine(p, { body: t.body, glow: t.glow, lamp: t.lamp, dz: -1.35 }, BL.arcadeGames.poolGame, "billiards", [-1.35, 1.35, -2.08, -0.62], i); blocks.push(blockOf(p, -1.03, 1.0, -2.35, -2.08)); });
     F.darts.forEach((p, i) => machine(p, { body: AM.dartBoard(), dz: -AM.DART.oche, dy: AM.DART.y, oche: true }, BL.arcadeGames.dartsGame, "darts", null, i));
     // Each board hangs at a walker's height on the back wall between two columns: in the way across its hide from the
@@ -927,7 +938,8 @@
   // the elixirs on the totems, no blight, at most four hunters, and those who wait walked out to the hallway. GAME
   // MODE turns combat on and raises the iron fence.
   const PARAMS = new URLSearchParams(location.search), DEBUG = PARAMS.get("debug") === "1";
-  const ARENA_ZONES = new Set(["arcade.arena", "arcade-hunt"]), HALL_ZONES = new Set(["arcade.hall", "arcade.haunt", "arcade.arena", "arcade-hunt"]);
+  // The arena's zone, and its older names a page loaded before #422 may still report (`arcade-hunt`, `arcade.arena`).
+  const ARENA_ZONES = new Set(["ghost-arena", "arcade-hunt", "arcade.arena"]), HALL_ZONES = new Set(["arcade.hall", "arcade.haunt", "ghost-arena.haunt", ...ARENA_ZONES]);
   const HUNTERS = 4, FENCE_S = 1.4;
   // Tess for the hunt's Tess drop: out of sight until the hunt flies her (`lend`), made with the hunt.
   const arenaTess = () => {
@@ -1038,6 +1050,7 @@
     },
     origin: { x: HAUNT.arena.x, y: HAUNT.y, z: HAUNT.arena.z }, spots: ARENA_SPOTS, heraldAt: (now) => heraldAt(now, 0, 0, 0),
     heraldHeight: HERALD_HEIGHT, inZone: (zone) => ARENA_ZONES.has(zone), arenaRadius: HAUNT.arena.r, maxPlayers: HUNTERS, gatherAt: "the ghost",
+    hearing: () => huntHearing,
     tapWakes: true, blight: false, waitingToast: "A hunt is on · wait in the hallway until the arena opens"
   });
   const attachHunt = () => {
@@ -1060,7 +1073,7 @@
   // (in a hunt the herald is gone and the hunters may cross it).
   // Its totems stand in the way, each `keep` round; while a hunt runs the iron fence closes the mouth, FENCE_GAP either
   // side of FENCE_X.
-  const ARENA = HAUNT.arena, HAUNT_SIDE = 0.65, ARENA_SIDE = 0.75, GHOST_KEEP = 3.7, FENCE_X = HAUNT.end - 0.05, FENCE_GAP = 0.15;
+  const ARENA = HAUNT.arena, HAUNT_SIDE = 0.65, ARENA_SIDE = 0.75, GHOST_KEEP = 3.7, FENCE_X = HAUNT.end - 0.05, FENCE_GAP = 0.15, HALLWAY_HOLD = 0.03;
   const wallDepth = (x, z, r, feet = 0) => {
     const hall = Math.max(Math.abs(x) + r - SIDE_FACE, BACK_FACE + r - z, Math.min(z + r - FRONT_FACE, Math.abs(x) + r - JAMB));
     if (feet < HAUNT.y - 1) return hall;
@@ -1891,7 +1904,7 @@
     });
     // HALLOWEEN: the ghost hunt, played in the arena: its herald over the middle until a click or a shot from inside
     // wakes it and its code loads, kept in step with the others in the arena through the room (`ghostChannel`).
-    zoneNow = "arcade.hall"; zoneHeld = 0; armed = false;
+    zoneNow = "arcade.hall"; zoneHeld = 0; armed = false; hallwayFar = false; hallwayAlong = 0; huntHearing = 0;
     exitButton = document.getElementById("ghost-exit");
     exitButton.hidden = true;
     ghostChannel = BL.ghostEntry.channel();
@@ -1945,7 +1958,7 @@
       arcade: { screens, crowd, walkers, bots, spin, play, open, stations, carnival, nearStation, supportAt, walkable: walkableFor, flyable: flyableFor, sightClear, pointHidden, blocks, audio, staff, life, get frame() { return shownFrame; } },
       // HALLOWEEN: the arena's hunt (its herald's until it has loaded).
       get halloween() { return ghosts ? ghosts.debug : ghostEntry && ghostEntry.debug; },
-      get arena() { return { armed, zone: zoneNow, fence: fenceK, gameMode }; }
+      get arena() { return { armed, zone: zoneNow, fence: fenceK, gameMode, along: hallwayAlong, hearing: huntHearing, blendTo: BL.net.state.blendTo, blendT: BL.net.state.blendT }; }
     };
   };
 
@@ -1989,17 +2002,28 @@
     }
     remotes.update(dt);
     footsteps.update(drivenHere);
-    // The ghost arena: the rifle in hand inside it, and the voice zone it reports (cut off from the hall's while a hunt
-    // runs), held a quarter second before it changes.
+    // The ghost arena: the rifle in hand inside it, and the voice zone it reports (Ghost Hunter's Arena, a hunt on or
+    // not), held a quarter second before it changes.
     const feet = drivenHere ? drivenHere.root.position.y - drivenHere.baseY : 0;
     const inRing = !!drivenHere && drivenHere === avatar && inArenaRing(drivenHere.root.position.x, drivenHere.root.position.z, feet);
     if (inRing !== armed && avatar) arm(inRing);
-    // The hallway is a zone of its own (still the hall's voice) so the room hands it the hunt too: a spectator there
-    // watches it through the fence.
+    // The hallway joins Ooga Arcade to Ghost Hunter's Arena (#422), a voice group of its own: each half is a zone of the
+    // land it leads to (`arcade.haunt`, `ghost-arena.haunt`), so the room hands both the hunt and a spectator there
+    // watches it through the fence. The half flips `HALLWAY_HOLD` past the midpoint, so a step there never flickers.
     const inHallway = !inRing && !!drivenHere && feet > HAUNT.y - 1 && inHaunt(drivenHere.root.position.x, drivenHere.root.position.z);
-    const zone = inRing ? ghosts && ghosts.hunting ? "arcade-hunt" : "arcade.arena" : inHallway ? "arcade.haunt" : "arcade.hall";
+    hallwayAlong = inHallway ? clamp((drivenHere.root.position.x - HALL.halfW) / (HAUNT.end - HALL.halfW), 0, 1) : inRing ? 1 : 0;
+    hallwayFar = inHallway ? hallwayAlong > 0.5 + (hallwayFar ? -HALLWAY_HOLD : HALLWAY_HOLD) : inRing;
+    const zone = inRing ? "ghost-arena" : inHallway ? hallwayFar ? "ghost-arena.haunt" : "arcade.haunt" : "arcade.hall";
     if (zone === zoneNow) zoneHeld = 0;
     else if ((zoneHeld += dt) >= 0.25) { zoneNow = zone; zoneHeld = 0; BL.net.setZone(zoneNow); }
+    // Along the hallway voices cross between the two by how far along the driven Ooga stands (voice-blend.js), each end
+    // its own land's alone; and the hunt's music and sound reach a spectator there by the arena's equal-power share of
+    // the same walk, full in the arena and nothing in the hall.
+    const reported = BL.voiceBlend.place(zoneNow);
+    if (inHallway && reported === "arcade") BL.net.setBlend("ghost-arena", hallwayAlong);
+    else if (inHallway && reported === "ghost-arena") BL.net.setBlend("arcade", 1 - hallwayAlong);
+    else BL.net.setBlend(null, 0);
+    huntHearing = inRing ? 1 : inHallway ? BL.voiceBlend.weight("ghost-arena", "arcade", "ghost-arena", hallwayAlong) : 0;
     // Exit hunt shows while this visitor hunts in the arena.
     const hunter = armed && !!ghosts && ghosts.inHunt;
     if (exitButton.hidden === hunter) exitButton.hidden = !hunter;
@@ -2100,7 +2124,8 @@
     unsubscribeAccount = null;
     for (const unsubscribe of scoreSubscriptions) unsubscribe();
     scoreSubscriptions.length = 0;
-    BL.net.setBody(null);
+    BL.net.setBody(null); BL.net.setBlend(null, 0);
+    huntHearing = 0;
     // HALLOWEEN: the hunt and its herald let go of (combat off, the view and the Ooga given back), the rifle put away.
     if (ghosts) { ghosts.dispose(); tess.dispose(); }
     ghostEntry.dispose();
