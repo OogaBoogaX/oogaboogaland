@@ -53,10 +53,11 @@
     if (ctx.checkpointProfile != null) {
       const allowed = new Set(["root", "crew", "sites", "checkpointRandom", "checkpointProfile", "groundAt", "clear",
         "combatEnabled", "meadowRadius", "roamRadius"]);
-      if (ctx.checkpointProfile !== "roaming-1" || Object.keys(ctx).some(k => !allowed.has(k))
+      if (!["roaming-1", "body-1"].includes(ctx.checkpointProfile) || Object.keys(ctx).some(k => !allowed.has(k))
         || sites.length || ctx.checkpointRandom !== true || ctx.combatEnabled === true
-        || !crew.list.length || crew.list.length > 53 || crew.list.some(e => e.state !== "chilling"))
-        throw new Error("unsupported Clanker roaming checkpoint profile");
+        || !crew.list.length || crew.list.length > 53 || ctx.checkpointProfile === "body-1" && crew.list.length !== 1
+        || crew.list.some(e => e.state !== "chilling"))
+        throw new Error("unsupported Clanker checkpoint profile");
     }
     let combatEnabled = ctx.combatEnabled === true;
     const footprint = BL.agent.footprint, torso = BL.agent.torso;
@@ -2196,7 +2197,7 @@
     };
     // A recovery profile starts dormant: its saved bodies are restored before
     // simulation. A new world explicitly calls sync; browsers retain auto-spawn.
-    if (ctx.checkpointProfile !== "roaming-1") sync();
+    if (ctx.checkpointProfile == null) sync();
     const startLabShuttle = (owner) => {
       const e = byOwner.get(owner);
       if (labSite < 0 || !e) return false;
@@ -7351,47 +7352,64 @@
       }
       return spots;
     };
-    // Explicit headless roaming profile only. The enclosing checkpoint owns
+    // Explicit restricted headless profiles only. The enclosing checkpoint owns
     // entries, random streams, buffers and rigs; this bridge owns closure state.
     // No browser caller opts in, and broader worlds must supply their own full
     // reservation/search/body continuation before this profile can expand.
-    const roamingCheckpoint = ctx.checkpointProfile === "roaming-1" ? (() => {
-      const refuse = () => { throw new Error("unsupported Clanker roaming checkpoint profile"); };
-      const ready = () => {
-        if (disposed || player || allAway || combatEnabled || rage || checkingRest || labEscape || debugShuttle
-          || list.some((e, i) => e.index !== i || e.owner.state !== "chilling" || e.controlled || e.remoteControlled
+    const continuation = ctx.checkpointProfile != null ? (() => {
+      const body = ctx.checkpointProfile === "body-1";
+      const refuse = () => { throw new Error("unsupported Clanker checkpoint profile"); };
+      const ready = (neutral = true) => {
+        if (disposed || !body && player || allAway || combatEnabled || rage || checkingRest || labEscape || debugShuttle
+          || list.some((e, i) => e.index !== i || e.owner.state !== "chilling" || (body ? e.controlled !== (player === e) : e.controlled) || e.remoteControlled
             || e.debugMove.active || e.sleep.stage || e.office.stage || e.motion.lab || e.rage.active
             || e.rage.search || e.capture || e.climb.active || e.climb.searchPending
             || e.motion.supportEntry !== e || e.motion.labItemGeometry || e.motion.labBench
             || ![e.heading, e.goalX, e.goalY, e.goalZ, e.speed, e.radius, e.height].every(n => Number.isFinite(n) && Math.abs(n) < 10000)
             || e.radius <= 0 || e.height <= 0 || !Number.isInteger(e.roam.count) || e.roam.count < 0 || e.roam.count > 4
             || !Number.isInteger(e.roam.index) || e.roam.index < 0 || e.roam.index > e.roam.count)) refuse();
+        if (body) for (const e of list) {
+          const d = e.drive, h = e.health;
+          if (player && (player !== e || !e.active || !e.root.visible) || e.actionControlled || e.pound || e.beat || e.motion.smash
+            || e.motion.dragging || e.fire.burning || e.fire.rolling || e.fire.requested || e.climb.mountPending
+            || e.climb.waitRelease || e.climb.claimPending || e.climb.crestPending || e.lounge || e.loungeDepart
+            || ![d.vx, d.vy, d.vz, h.value, h.max, h.delay].every(n => Number.isFinite(n) && Math.abs(n) < 10000)
+            || h.value < 0 || h.value > h.max || h.max <= 0 || h.delay < 0 || !Number.isInteger(d.jumps) || d.jumps < 0 || d.jumps > 2
+            || neutral && player && (d.x || d.z || d.climbAxis || d.climbSide || !Number.isNaN(d.heading)
+              || d.run || d.jumpHeld || d.jumpDown || d.jumpPressed || d.jumpBuffer)) refuse();
+        }
       };
       ready();
       return {
         // Static lounge candidates are reconstructed by the same world boot.
         // The caller binds this complete seed, including radius and candidates,
         // into its trusted baseline; it is never supplied by stored data.
-        baseline() { ready(); prepareLounges(list[0]); return [ctx.meadowRadius || 22, roamRadius, loungeCount, roofCount, loungeReady, ...loungeSpots]; },
+        baseline() { ready(); prepareLounges(list[0]); return [...(body ? ["body-1"] : []), ctx.meadowRadius || 22, roamRadius, loungeCount, roofCount, loungeReady, ...loungeSpots]; },
         capture() {
           ready(); return [elapsed, labPassAt, labRouteBudget, labRouteTurn, labRouteNext,
             roamBudget, roamNext, roamTurn, roamSerial, climbFrameBudget, climbTurn, climbNext,
-            debugRouteBudget, wallBudget, climbClaimSerial];
+            debugRouteBudget, wallBudget, climbClaimSerial, ...(body ? [player ? player.index : -1] : [])];
         },
         restore(values) {
           ready();
-          if (!Array.isArray(values) || values.length !== 15 || Object.keys(values).length !== 15 || values.some((n, i) => !Number.isFinite(n)
-            || n > 1e9 || n < ([3, 7, 10].includes(i) ? -1 : 0)
+          const size = body ? 16 : 15;
+          if (!Array.isArray(values) || values.length !== size || Object.keys(values).length !== size || values.some((n, i) => !Number.isFinite(n)
+            || n > 1e9 || n < ([3, 7, 10, 15].includes(i) ? -1 : 0)
             || i > 1 && !Number.isSafeInteger(n))
-            || [3, 4, 6, 7, 10, 11].some(i => values[i] >= list.length)) refuse();
+            || [3, 4, 6, 7, 10, 11, ...(body ? [15] : [])].some(i => values[i] >= list.length)) refuse();
           [elapsed, labPassAt, labRouteBudget, labRouteTurn, labRouteNext,
             roamBudget, roamNext, roamTurn, roamSerial, climbFrameBudget, climbTurn, climbNext,
             debugRouteBudget, wallBudget, climbClaimSerial] = values;
+          // Bind the saved controller directly. Ordinary possess/travel reset
+          // velocities, jump credits and reservations and are not restore APIs.
+          if (body) player = values[15] < 0 ? null : list[values[15]];
         },
+        ...(body ? { neutralize() { ready(false); if (!player) refuse(); cancelInput(); ready(); } } : {}),
       };
     })() : null;
     return { list, sync, update, startleHill, target, companionTarget, hit, damage, bananaHit, debugRage, setCombatEnabled, plan, startLabShuttle, debugMove, cancelDebugMove, stats, liveGeometry, dispose, contactAt,
-      debugLoungeSpots, wallSupported, roamingCheckpoint,
+      debugLoungeSpots, wallSupported, roamingCheckpoint: ctx.checkpointProfile === "roaming-1" ? continuation : null,
+      bodyCheckpoint: ctx.checkpointProfile === "body-1" ? continuation : null,
       possess, release, sleeping, wake, setAway, cancelSleepBeams, setRemote, createRemote, respawn, travelRefusal, travel, control, cancelInput, smash, smashPower, quickSmash, chestBeat, ignite, dropRoll, supportRemoved,
       get combatEnabled() { return combatEnabled; }, get player() { return player; } };
   };

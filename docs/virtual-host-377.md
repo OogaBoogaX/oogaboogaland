@@ -1691,6 +1691,63 @@ five JS/MJS syntax checks and whitespace pass. The existing Hub STOP ledger is
 unchanged; no Hub/full/browser check was rerun. Evidence:
 `verification-roaming-scope-full-host.log` and `verification-roaming-scope-build.log`.
 
+### Isolated controlled Clanker body continuation
+
+The explicit `body-1` construction profile extends the source-owned checkpoint
+bridge for **one** controlled Clanker in the same authored noncombat empty meadow.
+No ordinary browser construction enables it. `createClankerBodyCheckpoint` shares
+the lossless scalar/buffer/RNG/rig encoding with the roaming codec, but has a
+separate profile baseline, an 8 KiB component cap and one additional closure field:
+the controlled entry's index. Restoration binds the private controller directly
+after decoding into a fresh disposable controller, without calling `possess`,
+`travel` or `release`. Malformed application poisons the adapter; it must be
+discarded before publishing or binding it to a live world.
+
+Its explicit neutralization clears held direction, run, climb and jump inputs and
+queued jump buffers. Capture refuses nonneutral inputs; restoration cannot replay
+the disconnected hold. Position, facing, velocity, health, grounded/airborne state,
+jump allowance, form, typed continuation state and exact managed animation survive.
+The normal controller clears its internal `cancelled` latch after a neutral physics
+update; the validator permits that while still refusing held/queued input. This
+was corrected after the new rejection test exposed an overly strict latch check.
+
+The actual-source test starts a running jump, saves airborne state, reconstructs
+the controlled body and uses its remaining midair jump only after a **new** input.
+It compares 48 subsequent updates and repeated fresh restorations against the
+uninterrupted original, through gravity and landing. Methods for ordinary
+possession/travel/release are replaced with throwing functions during first
+restoration to prove they are not used. Tests also reject wrong world, missing or
+out-of-range ownership, multiple actors, remote control, climbing, held bodies,
+rolling/fire, invalid health or velocity and reuse after a failed restore.
+
+This is not an authenticated browser reconnect or a general player codec.
+The profile refuses combat, other actors, world jobs, sleep/seat/ladder/grab
+relationships, shared supports and world-item bindings. Ooga body and
+weapon/ammunition/fuel continuation remain separate unfinished work. No Room
+body command, session format, transport capability, deadline or occupancy behavior
+is changed. The existing roaming profile continues to refuse player ownership.
+
+`node worker/eval/clanker-body.mjs` measures 48 complete fresh-VM restore/step/capture
+comparisons. The largest component was **1,531 serialized bytes /39 packed nodes**;
+all 48 samples exceeded the existing **1,024-byte session slot**, even before its
+account/deadline/occupancy/departure envelope. Cold-cycle Node wall time p50/p95/max
+was 23.872/25.618/27.413 ms, including VM/module construction, not workerd CPU or
+browser latency. Evidence: `verification-clanker-body-capacity.json`. The 8 KiB cap
+is a standalone refusal bound, not a new session reservation. Complete body/world
+storage and admission must be redesigned and measured before integration; this
+component must not be appended to schema 2 or consume existing NPC reservations.
+Activation remains disabled, and Tess is unchanged.
+
+The shared-source change was checked against both 53-entry local SQLite/Room
+workloads again. Recovery remained 171.055–200.477 ms crowded and
+116.895–154.151 ms all-active; paired active-cycle p95 was 155.087/142.620 ms.
+Checkpoint/packet maxima were unchanged and all authority/restart/delivery checks
+passed with zero egress/logs. Evidence:
+`verification-clanker-body-roaming-{crowded,spacious}.json`. Final verification:
+120/120 host/recovery tests, 320-script build, four JS/MJS syntax checks and
+whitespace pass. The Hub STOP ledger is unchanged; browser/full checks were not
+rerun. Logs: `verification-clanker-body-{full-host,build}.log`.
+
 ### Disconnect presentation, not yet connected to live sessions
 
 `host-presence.js` renders committed grace views and applied departure intents

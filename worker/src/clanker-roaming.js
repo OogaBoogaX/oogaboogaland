@@ -1,5 +1,5 @@
 // Restricted actual-controller recovery. Static, noncombat meadow only; no
-// player bodies, caves, jobs, reservations or live browser activation.
+// general-world bodies, caves, jobs, reservations or live browser activation.
 import { createClankerBufferCheckpoint, CLANKER_BUFFER_FIELDS } from "./clanker-buffers.js";
 import { createCheckpointPack } from "./checkpoint-pack.js";
 import { restoreNpcRandom } from "./npc-random.js";
@@ -13,10 +13,32 @@ const dense = a => Array.isArray(a) && Reflect.ownKeys(a).length === a.length + 
   && Array.from({ length: a.length }, (_, i) => Object.getOwnPropertyDescriptor(a, i)).every(d => d && "value" in d);
 
 export function createClankerRoamingCheckpoint(sim, world, rigCodec) {
-  const bridge = sim.roamingCheckpoint, entries = sim.list;
+  return createCheckpoint(sim, world, rigCodec, sim.roamingCheckpoint, 64 * 1024);
+}
+
+// Isolated controlled body only. This component budget is NOT a session-slot
+// reservation; the host must measure/admit the complete body before integration.
+export function createClankerBodyCheckpoint(sim, world, rigCodec) {
+  if (sim.list.length !== 1) bad();
+  const codec = createCheckpoint(sim, world, rigCodec, sim.bodyCheckpoint, 8 * 1024);
+  let invalid = false;
+  const ready = () => { if (invalid) bad(); };
+  return {
+    neutralize() { ready(); sim.bodyCheckpoint.neutralize(); },
+    capture() { ready(); if (!sim.player) bad(); return codec.capture(); },
+    restore(saved) {
+      ready();
+      try { codec.restore(saved); if (!sim.player) bad(); return true; }
+      catch (error) { invalid = true; throw error; }
+    },
+  };
+}
+
+function createCheckpoint(sim, world, rigCodec, bridge, budget) {
+  const entries = sim.list;
   if (!bridge || bridge.capture()[0] !== 0 || !rigCodec?.packRoster || !rigCodec?.unpackRoster) bad();
   const ids = entries.map(e => e.owner.id), references = new Map(entries.map((e, i) => [e, i]));
-  const buffers = createClankerBufferCheckpoint(world, ids), pack = createCheckpointPack(64 * 1024, { intern: true });
+  const buffers = createClankerBufferCheckpoint(world, ids), pack = createCheckpointPack(budget, { intern: true });
   const rigs = entries.map(e => e.gorilla.createManagedCheckpoint(world));
   const token = value => {
     if (value === missing) return [-6];
