@@ -42,6 +42,7 @@ import { STUDIO_TRANSPORT, STUDIO_ZONE, studioState, studioHostAllowed, studioCa
 import CAST_ROWS from "./characters.gen.json";
 import { RoomNpcAuthority, validateNpcAuthority, npcAuthorityView, npcProtocolSupports, packNpcSnapshot, npcNextPublicationAt, npcCadenceName } from "./room-npc-authority.js";
 import { RoomBodyHandoff } from "./room-body-handoff.js";
+import { RoomBodyPresence } from "./room-body-presence.js";
 
 const CAST = castIndex(CAST_ROWS);
 
@@ -68,6 +69,8 @@ export class Room extends DurableObject {
     this.npcAuthority = null;
     this.bodyHandoff = null;
     this.bodyHandoffRequired = false;
+    this.bodyPresenceRequired = false;
+    this.bodyPresenceCache = null;
     // The arcade's ghost arena: its own hunt's host, how many follow it, and its last state frame.
     this.ghostHostId = 0;
     this.ghostFollowers = 0;
@@ -92,6 +95,9 @@ export class Room extends DurableObject {
       // removed. Older builds need an explicit release before rollback.
       const authority = await ctx.storage.get("npc-authority-v1");
       if (authority !== undefined) this.applyNpcAuthority(validateNpcAuthority(authority));
+      // Presence storage survives a preview rollback too. Require compatible
+      // presentation clients until an explicit migration/drain removes it.
+      if (await ctx.storage.get("room-body-presence-v1") !== undefined) this.bodyPresenceRequired = true;
       if ([...this.players.values()].some(p => p.bodyHandoff)) this.bodyHandoffRequired = true;
       // No body preview activation on wake. Retained records fence rollback;
       // missing sockets use the last durable observation, never restart time.
@@ -178,7 +184,7 @@ export class Room extends DurableObject {
   }
 
   attachment(p) {
-    return { ...(p.bodyProtocol === 2 || p.bodyHandoff ? { bodyProtocol: p.bodyProtocol, bodyHandoff: !!p.bodyHandoff, bodyClosedAt: p.bodyClosedAt ?? null } : {}), npcProtocol: p.npcProtocol || 0, npcSent: p.npcSent || null, npcAck: p.npcAck || null, cabinet: p.cabinet || null, cabinetBucket: p.cabinetBucket || null, hockey: p.hockey || null, hockeyBuckets: p.hockeyBuckets || null, id: p.id, login: p.login, display: p.display, contributor: p.contributor, body: p.body, connectionToken: p.connectionToken, studioSeat: p.studioSeat, studioRevoked: !!p.studioRevoked, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, j: p.j, w: p.w, v: p.v, va: p.va, r: p.r, voice: p.voice, muted: p.muted, hp: p.hp, ko: p.ko, sent: p.sent, zone: p.zone, pokerVoice: p.pokerVoice, inHub: p.inHub, visible: p.visible, joinedAt: p.joinedAt, door: p.door, passes: p.passes, blendTo: p.blendTo, blendK: p.blendK };
+    return { ...(p.bodyPresenceProtocol === 1 ? { bodyPresenceProtocol: 1, bodyPresenceSent: p.bodyPresenceSent || null, bodyPresenceAck: p.bodyPresenceAck || null } : {}), ...(p.bodyProtocol === 2 || p.bodyHandoff ? { bodyProtocol: p.bodyProtocol, bodyHandoff: !!p.bodyHandoff, bodyClosedAt: p.bodyClosedAt ?? null } : {}), npcProtocol: p.npcProtocol || 0, npcSent: p.npcSent || null, npcAck: p.npcAck || null, cabinet: p.cabinet || null, cabinetBucket: p.cabinetBucket || null, hockey: p.hockey || null, hockeyBuckets: p.hockeyBuckets || null, id: p.id, login: p.login, display: p.display, contributor: p.contributor, body: p.body, connectionToken: p.connectionToken, studioSeat: p.studioSeat, studioRevoked: !!p.studioRevoked, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, j: p.j, w: p.w, v: p.v, va: p.va, r: p.r, voice: p.voice, muted: p.muted, hp: p.hp, ko: p.ko, sent: p.sent, zone: p.zone, pokerVoice: p.pokerVoice, inHub: p.inHub, visible: p.visible, joinedAt: p.joinedAt, door: p.door, passes: p.passes, blendTo: p.blendTo, blendK: p.blendK };
   }
 
   view(p) {
@@ -358,6 +364,9 @@ export class Room extends DurableObject {
     const requestedProtocol = new URL(request.url).searchParams.get("npc-authority");
     const npcProtocol = requestedProtocol === "2" ? 2 : requestedProtocol === "1" ? 1 : 0;
     const bodyProtocol = new URL(request.url).searchParams.get("body-reclaim") === "2" ? 2 : 0;
+    const bodyPresenceProtocol = new URL(request.url).searchParams.get("body-presence") === "1" ? 1 : 0;
+    if (this.bodyPresenceRequired && (this.env.VIRTUAL_HOST_BODY_PREVIEW !== "1" || bodyPresenceProtocol !== 1))
+      return new Response("Body presence requires explicit compatible recovery", { status: 409 });
     if (this.bodyHandoffRequired && (this.env.VIRTUAL_HOST_BODY_PREVIEW !== "1" || bodyProtocol !== 2))
       return new Response("Body handoff requires explicit compatible recovery", { status: 409 });
     if (this.npcAuthority?.mode === "server" && (!npcProtocolSupports(npcProtocol, this.npcAuthority) || !this.players.has(who.id) && this.players.size >= 32)) {
@@ -379,7 +388,7 @@ export class Room extends DurableObject {
     }
 
     const spawn = spawnPoint(this.spawnSlot++);
-    const p = this.record(server, { ...who, npcProtocol, bodyProtocol, ...(this.bodyHandoffRequired ? { bodyHandoff: true } : {}), connectionToken: crypto.randomUUID(), body: null, x: spawn.x, y: 0, z: spawn.z, yaw: spawn.yaw });
+    const p = this.record(server, { ...who, npcProtocol, bodyProtocol, bodyPresenceProtocol, ...(this.bodyHandoffRequired ? { bodyHandoff: true } : {}), connectionToken: crypto.randomUUID(), body: null, x: spawn.x, y: 0, z: spawn.z, yaw: spawn.yaw });
     server.serializeAttachment(this.attachment(p));
     // An owner arriving takes either body back from whoever holds it.
     const own = ownedBody(CAST, p.login, p.contributor, p.id);
@@ -392,7 +401,7 @@ export class Room extends DurableObject {
 
     const others = [];
     for (const o of this.players.values()) if (o !== p) others.push(this.view(o));
-    this.send(server, { t: "welcome", you: this.view(p), players: others, connectionToken: p.connectionToken, tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers, ghostHost: this.ghostHostId, ghostFollowers: this.ghostFollowers, features: [CABINETS.FEATURE, "door", CHAT_FEATURE, CHALK_FEATURE, "hockey-v4"] });
+    this.send(server, { t: "welcome", you: this.view(p), players: others, connectionToken: p.connectionToken, tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers, ghostHost: this.ghostHostId, ghostFollowers: this.ghostFollowers, features: [CABINETS.FEATURE, "door", CHAT_FEATURE, CHALK_FEATURE, "hockey-v4", ...(bodyPresenceProtocol === 1 ? ["host-body-presence-v1"] : [])] });
     // A message of its own after welcome, so a page that does not know chat ignores it; empty after the room slept.
     this.send(server, { t: "chat-history", messages: this.chat.list() });
     this.sendCabinets(server);
@@ -438,6 +447,19 @@ export class Room extends DurableObject {
         return result;
       });
     }
+    if (msg.t === "body-presence-ack") {
+      if (this.env.VIRTUAL_HOST_BODY_PREVIEW !== "1" || p.bodyPresenceProtocol !== 1) return;
+      return this.ctx.blockConcurrencyWhile(async () => {
+        if (this.players.get(p.id) !== p || !this.npcAuthority || this.npcAuthority.mode !== "server") return;
+        const sent = p.bodyPresenceSent;
+        if (!sent || ["authority", "epoch", "revision"].some(k => msg[k] !== sent[k])) return;
+        p.bodyPresenceAck = sent; p.bodyPresenceSent = null;
+        p.ws.serializeAttachment(this.attachment(p));
+        const ticket = { ...npcAuthorityView(this.npcAuthority), owner: this.npcAuthority.owner };
+        const snapshot = await this.#readBodyPresence(ticket);
+        if (snapshot) this.sendBodyPresence(p, ticket, snapshot);
+      });
+    }
     // The live movement adapter is not integrated yet. A staged body cannot
     // silently fall back to ordinary body/pose reports while testing handoff.
     if (p.bodyHandoff && ["body", "pose", "zone", "blend", "hp", "shot", "swing", "cabinet", "hockey", "wallet"].includes(msg.t)) return;
@@ -476,6 +498,13 @@ export class Room extends DurableObject {
       // A page arriving on the island catches up with the NPCs at once rather than at the next frame.
       if (this.npcAuthority?.mode === "server") this.sendNpcSnapshot(p);
       else if (p.inHub && p.id !== this.hostId && this.lastNpc) this.send(p.ws, this.lastNpc);
+      if (p.inHub && this.bodyPresenceRequired && p.bodyPresenceProtocol === 1 && this.env.VIRTUAL_HOST_BODY_PREVIEW === "1")
+        return this.ctx.blockConcurrencyWhile(async () => {
+          if (this.players.get(p.id) !== p || !p.inHub || this.npcAuthority?.mode !== "server") return;
+          const ticket = { ...npcAuthorityView(this.npcAuthority), owner: this.npcAuthority.owner };
+          const snapshot = await this.#readBodyPresence(ticket);
+          if (snapshot) this.sendBodyPresence(p, ticket, snapshot);
+        });
     } else if (msg.t === "visible") {
       // HALLOWEEN: a page hidden in the ghost arena hands its hosting on; shown again, it comes back a follower.
       if (msg.on === p.visible) return;
@@ -861,6 +890,41 @@ export class Room extends DurableObject {
     });
   }
 
+  // Durably retain the bounded public presentation before the host frees any
+  // departure slots. This is an internal preview RPC, not a browser ACK or a
+  // control grant. Expired Room authority may finish cleanup, never renew it.
+  retainBodyPresence(ticket, hostTicket, frame) {
+    return this.ctx.blockConcurrencyWhile(async () => {
+      this.checkBodyCleanup(ticket);
+      if (this.players.size > 32 || [...this.players.values()].some(p => p.bodyPresenceProtocol !== 1))
+        throw Error("body presence incompatible occupants");
+      const retained = await new RoomBodyPresence(this.ctx.storage, () => Date.now()).retain(ticket, hostTicket, frame);
+      this.bodyPresenceRequired = true;
+      this.bodyPresenceCache = null;
+      return retained;
+    });
+  }
+
+  // Called only inside a Room concurrency block. One validated latest frame
+  // per authority, invalidated after every retained commit; socket ACKs and
+  // hub toggles must not multiply durable reads by the number of viewers.
+  async #readBodyPresence(ticket) {
+    this.checkBodyCleanup(ticket);
+    if (!this.bodyPresenceCache || this.bodyPresenceCache.revision !== ticket.revision) {
+      const snapshot = await new RoomBodyPresence(this.ctx.storage, () => Date.now()).snapshot(ticket);
+      this.bodyPresenceCache = { revision: ticket.revision, snapshot };
+    }
+    const snapshot = this.bodyPresenceCache.snapshot;
+    if (!snapshot) return null;
+    const now = Date.now();
+    if (!Number.isSafeInteger(now) || now < snapshot.frame.now) throw Error("invalid body presentation clock");
+    return { frame: snapshot.frame, stale: now >= snapshot.frame.expiresAt };
+  }
+
+  bodyPresenceStatus(ticket) {
+    return this.ctx.blockConcurrencyWhile(async () => structuredClone(await this.#readBodyPresence(ticket)));
+  }
+
   // One snapshot at most every 1/TICK_HZ while poses arrive, and nothing pending once they stop, so the
   // room can hibernate between bursts (a running interval would keep it awake, and billed, for good).
   scheduleFlush() {
@@ -953,6 +1017,7 @@ export class Room extends DurableObject {
       ? "VIRTUAL_HOST_BURST_PREVIEW" : "VIRTUAL_HOST_ROLLING_PREVIEW"] !== "1") throw new Error("NPC cadence preview disabled");
     return this.ctx.blockConcurrencyWhile(async () => {
       if (this.bodyHandoffRequired && next?.mode === "browser") throw new Error("body handoff drain required before authority release");
+      if (this.bodyPresenceRequired && next?.mode === "browser") throw new Error("body presence drain required before authority release");
       // Check occupants while joins are blocked, not before entering the gate.
       // No deployed config or browser advertises the unfinished mixed format.
       if (next?.mode === "server" && next.format === "mixed-1" && this.env.VIRTUAL_HOST_MIXED_PREVIEW !== "1") throw new Error("NPC mixed preview disabled");
@@ -1016,6 +1081,37 @@ export class Room extends DurableObject {
     // Validate/decompress and wrap once for the whole fanout, not per viewer.
     // The cache is only this committed latest frame and is cleared on replacement.
     this.send(p.ws, this.npcPacked || (this.npcPacked = packNpcSnapshot(r)));
+  }
+
+  // Explicit event delivery, one latest durable frame and one outstanding
+  // credit per compatible socket. No automatic cadence, retry timer or queue.
+  deliverBodyPresence(ticket) {
+    return this.ctx.blockConcurrencyWhile(async () => {
+      this.checkBodyCleanup(ticket);
+      if (this.players.size > 32) throw Error("body presence preview capacity");
+      const snapshot = await this.#readBodyPresence(ticket);
+      if (!snapshot) return { delivered: 0 };
+      let delivered = 0;
+      for (const p of this.players.values()) if (this.sendBodyPresence(p, ticket, snapshot)) delivered++;
+      return { delivered };
+    });
+  }
+
+  sendBodyPresence(p, ticket, snapshot) {
+    if (p.bodyPresenceProtocol !== 1 || !p.inHub) return false;
+    const next = { authority: ticket.revision, epoch: snapshot.frame.epoch, revision: snapshot.frame.revision };
+    // A Room takeover invalidates the old connection credit. Same-authority
+    // updates coalesce while one frame is unacknowledged, even across a restart.
+    if (p.bodyPresenceSent?.authority !== ticket.revision) p.bodyPresenceSent = null;
+    if (p.bodyPresenceAck?.authority !== ticket.revision) p.bodyPresenceAck = null;
+    if (p.bodyPresenceSent || p.bodyPresenceAck && ["authority", "epoch", "revision"].every(k => p.bodyPresenceAck[k] === next[k])) return false;
+    const sentAt = Date.now();
+    if (!Number.isSafeInteger(sentAt) || sentAt < snapshot.frame.now) return false;
+    p.bodyPresenceSent = next;
+    p.ws.serializeAttachment(this.attachment(p));
+    this.send(p.ws, { t: "body-presence", authority: npcAuthorityView(this.npcAuthority),
+      frame: snapshot.frame, stale: sentAt >= snapshot.frame.expiresAt, sentAt });
+    return true;
   }
 
   // Also after any page's `hub` flag changes: the host sends frames only while someone follows.

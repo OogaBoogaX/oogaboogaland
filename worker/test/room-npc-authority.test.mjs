@@ -16,6 +16,8 @@ import { managedRigs } from "./fixtures/clanker-pose-rig.mjs";
 import { sha256Hex } from "../src/crypto.js";
 import { getPlayer } from "../src/db.js";
 import { RoomBodyHandoff } from "../src/room-body-handoff.js";
+import { RoomBodyPresence } from "../src/room-body-presence.js";
+import { SessionRegistry } from "../src/host-sessions.js";
 const wire = globalThis.BL.npcAuthority;
 const frame = (x = 1, signature = 0) => {
   const data = new ArrayBuffer(16 + 112 * 4), h = new Uint32Array(data,0,4), f = new Float32Array(data,16);
@@ -24,23 +26,23 @@ const frame = (x = 1, signature = 0) => {
 };
 const roomSource = readFileSync(new URL('../src/room.js',import.meta.url),'utf8').replace(/import\s+[\s\S]*?from\s+"[^"]+";/g,'').replace('export class Room','class Room')+'\nglobalThis.Room=Room;';
 function host() {
-  let now=100000, failWrite=false, ready=Promise.resolve(),lastBlock=ready,wraps=0; const accepted=[], alarms=[], stored=new Map();
+  let now=100000, failWrite=false, ready=Promise.resolve(),lastBlock=ready,wraps=0,presenceReads=0; const accepted=[], alarms=[], stored=new Map();
   const names=['a','b','c',...Array.from({length:31},(_,i)=>'fixture'+i)];
   const socket=()=>({sent:[],closed:null,store:null,send(value){this.sent.push(typeof value==='string'?JSON.parse(value):value.slice(0));},close(code,reason){this.closed={code,reason};},serializeAttachment(a){this.store=structuredClone(a);},deserializeAttachment(){return structuredClone(this.store);}});
   class Clock extends Date {static now(){return now;}}
   class Response {constructor(body,init={}){this.status=init.status;this.body=body;this.webSocket=init.webSocket;}}
-  const context={...protocol,...studioPolicy,...authority,sha256Hex,getPlayer,RoomBodyHandoff,sfuClient:()=>null,
+  const context={...protocol,...studioPolicy,...authority,sha256Hex,getPlayer,RoomBodyHandoff,RoomBodyPresence,sfuClient:()=>null,
     packNpcSnapshot:r=>{wraps++;return authority.packNpcSnapshot(r);},CAST_ROWS:names.map(handle=>({handle,github_login:handle})),
     DurableObject:class {constructor(ctx,env){this.ctx=ctx;this.env=env;}},
     WebSocketPair:class {constructor(){this[0]=socket();this[1]=socket();}},Response,WebSocketRequestResponsePair:class{},
-    URL,crypto,Date:Clock,Map,Set,ArrayBuffer,DataView,Uint8Array,setTimeout,clearTimeout,console};
+    URL,crypto,Date:Clock,Map,Set,ArrayBuffer,DataView,Uint8Array,setTimeout,clearTimeout,console,structuredClone};
   runInNewContext(roomSource,context);
   const storage={get:async k=>Array.isArray(k)?new Map(k.filter(x=>stored.has(x)).map(x=>[x,structuredClone(stored.get(x))])):structuredClone(stored.get(k)),
     put:async(k,v)=>stored.set(k,structuredClone(v)),delete:async k=>stored.delete(k),getAlarm:async()=>alarms.at(-1)??null,setAlarm:async t=>alarms.push(t),
-    async transaction(fn){const copy=structuredClone(stored);const result=await fn({get:async k=>structuredClone(copy.get(k)),put:async(k,v)=>{if(failWrite){failWrite=false;throw Error('storage unavailable');}copy.set(k,structuredClone(v));},delete:async k=>copy.delete(k)});stored.clear();for(const [k,v]of copy)stored.set(k,v);return result;}};
+    async transaction(fn){const copy=structuredClone(stored);const result=await fn({get:async k=>{if(k==='room-body-presence-v1')presenceReads++;return structuredClone(copy.get(k));},put:async(k,v)=>{if(failWrite){failWrite=false;throw Error('storage unavailable');}copy.set(k,structuredClone(v));},delete:async k=>copy.delete(k)});stored.clear();for(const [k,v]of copy)stored.set(k,v);return result;}};
   const ctx={storage,setWebSocketAutoResponse(){},blockConcurrencyWhile(fn){const result=ready.then(fn);lastBlock=result;ready=result.catch(()=>{});return result;},acceptWebSocket:ws=>accepted.push(ws),getWebSockets:()=>accepted.filter(ws=>!ws.closed),getWebSocketAutoResponseTimestamp:()=>null};
-  return {at:t=>{now=t;},fail:()=>{failWrite=true;},stored,accepted,wraps:()=>wraps,async room(enabled=true,mixed=false,body=false){const r=new context.Room(ctx,enabled?{VIRTUAL_HOST_PREVIEW:'1',...(mixed?{VIRTUAL_HOST_MIXED_PREVIEW:'1'}:{}),...(body?{VIRTUAL_HOST_BODY_PREVIEW:'1'}:{})}:{});await lastBlock;return r;},
-    async join(r,id,version=true,body=false){const before=accepted.length;const response=await r.fetch({url:'https://test.invalid/room'+(version?'?npc-authority='+(version===true?1:version):'')+(body?'&body-reclaim=2':''),headers:new Headers({upgrade:'websocket','x-player-id':String(id),'x-player-login':names[id-1],'x-player-contributor':'0'})});return {ws:accepted[before],response};},
+  return {at:t=>{now=t;},fail:()=>{failWrite=true;},stored,accepted,wraps:()=>wraps,presenceReads:()=>presenceReads,async room(enabled=true,mixed=false,body=false){const r=new context.Room(ctx,enabled?{VIRTUAL_HOST_PREVIEW:'1',...(mixed?{VIRTUAL_HOST_MIXED_PREVIEW:'1'}:{}),...(body?{VIRTUAL_HOST_BODY_PREVIEW:'1'}:{})}:{});await lastBlock;return r;},
+    async join(r,id,version=true,body=false,presence=false){const before=accepted.length;const response=await r.fetch({url:'https://test.invalid/room'+(version?'?npc-authority='+(version===true?1:version):'')+(body?'&body-reclaim=2':'')+(presence?'&body-presence=1':''),headers:new Headers({upgrade:'websocket','x-player-id':String(id),'x-player-login':names[id-1],'x-player-contributor':'0'})});return {ws:accepted[before],response};},
     send:(r,ws,msg)=>r.webSocketMessage(ws,JSON.stringify(msg))};
 }
 const start = (r, expected=0, epoch=1, owner='host-a') => r.configureNpcAuthority(expected,{mode:'server',world:'world-1',epoch,owner,runUntil:200000});
@@ -186,13 +188,13 @@ test('mixed Room preview gates occupants and persists exact 106-actor snapshots 
 });
 
 // Actual browser networking, with only account/voice/platform services authored.
-function client({manual=false}={}){
+function client({manual=false,bodyPresencePreview=false}={}){
   let tick=1000;
   const sockets=[],sent=[],timers=[];class Socket{static OPEN=1;constructor(url){this.url=url;this.readyState=1;sockets.push(this);}send(v){sent.push(typeof v==='string'&&v!=='ping'?JSON.parse(v):v);}close(){this.readyState=3;}}
   const BL={...globalThis.BL,voice:{setPeers(){},restart(){},stop(){}},characters:{get:()=>null},contributors:{addTemporary(){}},donations:{},accountIdentities:{accountForId:()=>null,accountForHandle:()=>null},pilot:{}};
   const context={window:{BL,setTimeout:fn=>{timers.push(fn);return 1;},clearTimeout(){},setInterval:()=>1,clearInterval(){}},document:{hidden:false,cookie:'',addEventListener(){},removeEventListener(){}},
     location:{protocol:'https:',host:'test.invalid',pathname:'/',search:''},fetch:async()=>({ok:true,headers:{get:()=> 'application/json'},json:async()=>({player:{id:1,login:'a',display:'a'}})}),AbortSignal,WebSocket:Socket,performance:{now:()=>manual?tick:tick+=200},Date,ArrayBuffer,DataView,Uint8Array,Uint32Array,Float32Array,URLSearchParams};
-  runInNewContext(readFileSync(new URL('../../src/js/net.js',import.meta.url),'utf8'),context);
+  runInNewContext(readFileSync(new URL('../../src/js/net.js',import.meta.url),'utf8').replace('const BODY_PRESENCE_PREVIEW = false;', `const BODY_PRESENCE_PREVIEW = ${bodyPresencePreview};`),context);
   return {net:BL.net,sockets,sent,BL,reconnect:()=>timers.at(-1)()};
 }
 test('actual net retains authority through close, refuses stale epochs and legacy sends, and acknowledges resumed snapshots',async()=>{
@@ -714,4 +716,125 @@ test('closed-only recovery survives Room lease/run expiry but cannot send grants
   assert.equal(await restarted.closedBodyRecovery(ticket(newer, 'new'), i), null);
   const disabled = await h.room(false);
   await assert.rejects(disabled.closedBodyRecovery(ticket(newer, 'new'), i), /disabled or fenced/);
+});
+
+
+test('Room body presence persists before sending, bounds stalled credit across wake, and gives late joiners the latest frame', async () => {
+  const h = host(), room = await h.room(true, false, true);
+  const a = (await h.join(room, 1, true, false, true)).ws, b = (await h.join(room, 2, true, false, true)).ws;
+  h.send(room, a, { t: 'hub', on: true }); h.send(room, b, { t: 'hub', on: true });
+  const selected = await start(room), owner = ticket(selected), hostTicket = { owner: 'host-a', fence: 1, world: 'world-1' };
+  const registry = new SessionRegistry({ protocol: 'host-session-v5', world: 'world-1' });
+  const admitted = registry.connect({ protocol: 'host-session-v5', world: 'world-1', accountId: 1, bodyId: 'body-a', zone: 'outside',
+    body: { kind: 'ooga', motion: { x: 1, y: 10, z: 2, yaw: 0, vx: 0, vy: 0, vz: 0, grounded: false },
+      equipment: { weapon: 'gun', mode: 'combat', primaryOwned: true, secondaryOwned: false, selectedSlot: 1,
+        unlimited: false, jetpack: false, jetpackOwned: false } } }, 100000);
+  registry.disconnect({ accountId: admitted.session.accountId, generation: admitted.session.generation, token: admitted.session.token }, 100000);
+  const frame = { v: 1, protocol: 'host-session-v5', world: 'world-1', epoch: 1, revision: 1,
+    now: 100000, expiresAt: 110000, views: [registry.view(1)], departures: [] };
+  const delivered = ws => ws.sent.filter(m => m?.t === 'body-presence');
+  h.fail(); await assert.rejects(room.retainBodyPresence(owner, hostTicket, frame), /storage/);
+  assert.equal((await room.deliverBodyPresence(owner)).delivered, 0);
+  assert.equal(delivered(a).length, 0);
+  await room.retainBodyPresence(owner, hostTicket, frame);
+  assert.equal((await room.deliverBodyPresence(owner)).delivered, 2);
+  assert.equal(delivered(a).length, 1); assert.equal(delivered(b).length, 1);
+  assert.equal(JSON.stringify(delivered(a)).includes(admitted.session.token), false);
+  const initialReads = h.presenceReads();
+  const exposed = await room.bodyPresenceStatus(owner); exposed.frame.views[0].motion.x = 999;
+  assert.equal((await room.bodyPresenceStatus(owner)).frame.views[0].motion.x, 1, 'external status cannot mutate the cache');
+  assert.equal(h.presenceReads(), initialReads, 'repeated status reuses the single retained frame');
+
+  h.at(100250);
+  const next = { ...structuredClone(frame), revision: 2, now: 100250 }; next.views[0].motion.x = 2;
+  await room.retainBodyPresence(owner, hostTicket, next);
+  assert.equal((await room.deliverBodyPresence(owner)).delivered, 0, 'one outstanding frame per socket');
+  await h.send(room, a, { t: 'body-presence-ack', authority: owner.revision, epoch: 1, revision: 999 });
+  assert.equal(delivered(a).length, 1, 'forged ACK cannot free credit');
+  await h.send(room, a, { t: 'body-presence-ack', authority: owner.revision, epoch: 1, revision: 1 });
+  assert.equal(delivered(a).length, 2); assert.equal(delivered(a).at(-1).frame.revision, 2);
+  assert.equal(delivered(b).length, 1, 'stalled viewer never receives a queue');
+  const restored = await h.room(true, false, true);
+  assert.equal((await restored.deliverBodyPresence(owner)).delivered, 0, 'credit survives hibernation');
+  const late = (await h.join(restored, 3, true, false, true)).ws;
+  assert.equal((await h.join(restored, 4)).response.status, 409, 'retained presence refuses incompatible late joins');
+  await h.send(restored, late, { t: 'hub', on: true });
+  assert.equal(delivered(late).length, 1, 'hub entry automatically receives retained bodies');
+  assert.equal((await restored.deliverBodyPresence(owner)).delivered, 0);
+  assert.equal(delivered(late).at(-1).frame.views[0].motion.x, 2);
+
+  h.at(110001);
+  const later = (await h.join(restored, 5, true, false, true)).ws; await h.send(restored, later, { t: 'hub', on: true });
+  assert.equal((await restored.deliverBodyPresence(owner)).delivered, 0);
+  assert.equal(delivered(later).at(-1).stale, true, 'expired view is marked stale and grants no control');
+  assert.equal(delivered(later).at(-1).sentAt, 110001, 'late arrival is aged from send time, not snapshot creation');
+  assert.equal(delivered(later).at(-1).frame.now, 100250);
+  const disabled = await h.room(true, false, false);
+  await assert.rejects(disabled.deliverBodyPresence(owner), /disabled/);
+  assert.equal((await h.join(disabled, 4, true, false, true)).response.status, 409, 'rollback cannot silently omit retained presence');
+  await assert.rejects(restored.configureNpcAuthority(owner.revision, { mode: 'browser', owner: 'host-a', epoch: 1, world: 'world-1' }), /presence drain/);
+  const taken = await restored.configureNpcAuthority(owner.revision, { mode: 'server', world: 'world-1', epoch: 2,
+    owner: 'host-b', runUntil: 200000 });
+  await assert.rejects(restored.deliverBodyPresence(owner), /fenced/);
+  const replacement = { ...next, epoch: 2, revision: 3, now: 110001, expiresAt: 120001 };
+  await restored.retainBodyPresence(ticket(taken, 'host-b'), { owner: 'host-b', fence: 2, world: 'world-1' }, replacement);
+  assert.equal((await restored.deliverBodyPresence(ticket(taken, 'host-b'))).delivered, 4);
+  assert.equal(delivered(b).length, 2, 'Room takeover replaces the old credit');
+  const cohort = [], beforeJoinReads = h.presenceReads();
+  for (const id of [4, ...Array.from({ length: 27 }, (_, i) => i + 6)]) {
+    const ws = (await h.join(restored, id, true, false, true)).ws; cohort.push(ws);
+    await h.send(restored, ws, { t: 'hub', on: true });
+  }
+  const current = ticket(taken, 'host-b');
+  assert.equal((await restored.deliverBodyPresence(current)).delivered, 0, 'all late joiners received state on hub entry');
+  assert.equal(h.presenceReads(), beforeJoinReads, 'late joiners reuse the current committed cache');
+  for (let i = 0; i < 20; i++) {
+    await h.send(restored, late, { t: 'hub', on: false }); await h.send(restored, late, { t: 'hub', on: true });
+  }
+  assert.equal(h.presenceReads(), beforeJoinReads, 'hub toggles neither re-read storage nor reset delivery credit');
+  assert.ok(cohort.every(ws => delivered(ws).length === 1));
+  await restored.retainBodyPresence(current, { owner: 'host-b', fence: 2, world: 'world-1' }, { ...replacement, revision: 4 });
+  assert.equal((await restored.deliverBodyPresence(current)).delivered, 0, '32 connections do not create per-viewer queues');
+  assert.ok(cohort.every(ws => delivered(ws).length === 1));
+});
+
+test('net routes public body frames only after explicit preview negotiation and preserves the authority fence through reconnect', async () => {
+  const h = host(), room = await h.room(true, false, true), viewer = (await h.join(room, 1, true, false, true)).ws;
+  h.send(room, viewer, { t: 'hub', on: true });
+  const selected = await start(room), owner = ticket(selected);
+  const registry = new SessionRegistry({ protocol: 'host-session-v5', world: 'world-1' });
+  const connected = registry.connect({ protocol: 'host-session-v5', world: 'world-1', accountId: 1, bodyId: 'body-a', zone: 'outside',
+    body: { kind: 'clanker', motion: { x: 3, y: 12, z: 4, yaw: 1, vx: 2, vy: -4, vz: 1, grounded: false },
+      equipment: { weapon: null, mode: 'carry', primaryOwned: false, secondaryOwned: false, selectedSlot: 1,
+        unlimited: false, jetpack: false, jetpackOwned: false } } }, 100000);
+  const { accountId, generation, token } = connected.session;
+  registry.disconnect({ accountId, generation, token }, 100000);
+  const f = { v: 1, protocol: 'host-session-v5', world: 'world-1', epoch: 1, revision: 1,
+    now: 100000, expiresAt: 110000, views: [registry.view(1)], departures: [] };
+  await room.retainBodyPresence(owner, { world: 'world-1', owner: 'host-a', fence: 1 }, f);
+  await room.deliverBodyPresence(owner);
+  const message = viewer.sent.find(m => m?.t === 'body-presence');
+  const descriptor = viewer.sent.filter(m => m?.t === 'npc-authority').at(-1);
+  const welcome = viewer.sent.find(m => m?.t === 'welcome');
+  assert.ok(welcome.features.includes('host-body-presence-v1'));
+  for (const enabled of [false, true]) {
+    const c = client({ manual: true, bodyPresencePreview: enabled }); await c.net.start();
+    let ws = c.sockets[0]; const receive = m => ws.onmessage({ data: JSON.stringify(m) });
+    assert.equal(ws.url.includes('body-presence=1'), enabled);
+    receive(descriptor); receive(welcome); receive(message);
+    assert.equal(c.sent.filter(m => m?.t === 'body-presence-ack').length, enabled ? 1 : 0);
+    if (!enabled) { assert.equal(c.net.bodyPresence.sample(), null); c.net.dispose(); continue; }
+    const view = c.net.bodyPresence.sample();
+    assert.equal(view.now >= message.sentAt, true); assert.equal(view.frame.views[0].motion.y, 12);
+    assert.equal(view.frame.views[0].motion.vy, 0); assert.equal(c.net.bodyReclaim.active, false);
+    const count = c.sent.length, bad = structuredClone(message); bad.frame.views[0].token = token;
+    receive(bad); assert.equal(c.sent.length, count); assert.equal(c.net.bodyPresence.sample().frame.revision, 1);
+    ws.onclose(); assert.equal(c.net.bodyPresence.sample(), null);
+    c.reconnect(); ws = c.sockets.at(-1); receive(welcome); receive(message);
+    assert.equal(c.net.bodyPresence.sample().frame.revision, 1);
+    receive({ t: 'npc-authority', authority: { ...descriptor.authority, v: 2, format: 'mixed-1', revision: 2 } });
+    assert.equal(c.net.bodyPresence.sample(), null, 'net-incompatible mixed authority also fences presentation');
+    receive(message); assert.equal(c.net.bodyPresence.sample(), null);
+    c.net.dispose();
+  }
 });

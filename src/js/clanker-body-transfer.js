@@ -62,40 +62,76 @@
   }
   function reclaimAdapter({ world, createBody, attach, detach }) {
     if (!id(world) || ![createBody, attach, detach].every(f => typeof f === "function")) fail();
-    let held = null;
+    let held = null, preparing = false;
+    const { createNode, addChild, removeChild } = BL.scene;
+    const unstage = value => {
+      if (!value.stage) return;
+      const root = value.actor.root;
+      if (root.parent !== value.parent) {
+        if (root.parent) removeChild(root.parent, root);
+        addChild(value.parent, root);
+      }
+      if (value.stage.parent) removeChild(value.stage.parent, value.stage);
+      value.stage = null;
+    };
+    const destroy = value => {
+      // The source controller disposes against its original scene root.
+      // Reparent synchronously before disposal; no provisional rig is rendered.
+      try { unstage(value); } finally { value.sim.dispose(); }
+    };
     const make = (preparation, preview) => {
-      const sim = createBody(preparation, preview);
+      const sim = createBody(JSON.parse(JSON.stringify(preparation)), preview);
+      let value;
       try {
         if (!sim || sim.then || !["activate", "suspend", "dispose", "control", "update"].every(k => typeof sim[k] === "function")) fail();
-        return { sim, decoder: forBody(sim, world) };
-      } catch (error) { sim?.dispose?.(); throw error; }
+        value = { sim, decoder: forBody(sim, world), actor: sim.list[0], stage: null };
+        value.parent = value.actor.root?.parent;
+        if (!value.parent || !Array.isArray(value.parent.children)) fail();
+        // Keep the source root's visibility invariant for physics/checkpoint
+        // validation, but hide its entire subtree from the scene until live ACK.
+        value.stage = createNode({ visible: false });
+        addChild(value.parent, value.stage);
+        removeChild(value.parent, value.actor.root); addChild(value.stage, value.actor.root);
+        return value;
+      } catch (error) { if (value) destroy(value); else sim?.dispose?.(); throw error; }
     };
     const owned = resource => { if (!held || resource !== held) fail(); return held; };
     return {
       prepare(preparation) {
-        if (held || preparation.world !== world || preparation.kind !== "clanker") fail();
-        held = { ...make(preparation, false), preparation: { ...preparation }, attached: false };
-        return held;
+        if (held || preparing || preparation.world !== world || preparation.kind !== "clanker") fail();
+        const copy = JSON.parse(JSON.stringify(preparation));
+        preparing = true;
+        try { held = { ...make(copy, false), preparation: copy, attached: false }; return held; }
+        finally { preparing = false; }
       },
       preflight(resource, transfer) {
         const value = owned(resource), preview = make(value.preparation, true);
         try { return preview.decoder.restore(transfer.checkpoint, { frozen: true }); }
-        finally { preview.sim.dispose(); }
+        finally { destroy(preview); }
       },
       apply(resource, transfer) {
         const value = owned(resource);
+        const view = JSON.parse(JSON.stringify(transfer.view));
         if (!value.decoder.restore(transfer.checkpoint, { frozen: true })) return false;
-        value.view = JSON.parse(JSON.stringify(transfer.view));
+        value.view = view;
+        value.scope = { world: transfer.world, epoch: transfer.epoch, revision: transfer.revision };
         return true;
       },
       activate(resource) {
         const value = owned(resource);
+        if (value.attached) fail();
         if (!value.sim.activate()) return false;
         // Detach must also unwind a partially failed camera/control attachment.
-        value.attached = true;
-        try { if (attach(value.sim, value.preparation, value.view) === true) return true; }
-        catch (error) { value.sim.suspend(); throw error; }
-        value.sim.suspend(); return false;
+        try {
+          unstage(value); value.attached = true;
+          const accepted = attach(value.sim, JSON.parse(JSON.stringify(value.preparation)), value.view, { ...value.scope });
+          if (held !== value) return false; // A synchronous scene exit already disposed it.
+          if (accepted === true) return true;
+        } catch (error) {
+          if (held === value) { value.actor.root.visible = false; value.sim.suspend(); }
+          throw error;
+        }
+        value.actor.root.visible = false; value.sim.suspend(); return false;
       },
       capture(resource) {
         const value = owned(resource);
@@ -108,7 +144,7 @@
         try { value.sim.suspend(); }
         finally {
           try { if (value.attached) detach(value.sim, value.preparation); }
-          finally { value.sim.dispose(); }
+          finally { destroy(value); }
         }
       },
     };

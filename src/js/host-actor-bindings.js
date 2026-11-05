@@ -11,7 +11,7 @@
   const fail = () => { throw Error("invalid independent host actor binding"); };
   const create = ({ root, capacity = MAX }) => {
     if (!root || !Array.isArray(root.children) || !Number.isInteger(capacity) || capacity < 1 || capacity > MAX) fail();
-    const rows = new Map(); let disposed = false;
+    const rows = new Map(), npcRoots = new Map(); let disposed = false;
     const ready = () => { if (disposed) fail(); };
     const restore = row => {
       for (const saved of row.nodes) {
@@ -48,10 +48,10 @@
         || npc && (row.actor.root === npc.root || row.npc?.root === npc.root))) fail();
       // Validate the entire tree before changing any node or prior binding.
       const nodes = npc ? collect(npc, old?.npc === npc ? old : null) : [];
-      if (old) restore(old);
+      if (old) { restore(old); if (old.npc) npcRoots.delete(old.npc.root); }
       for (const saved of nodes) saved.node.smokeOpacity = saved.applied;
       const row = { bodyId, kind, generation, actor, npc, freeArm, nodes };
-      rows.set(bodyId, row); return true;
+      rows.set(bodyId, row); if (npc) npcRoots.set(npc.root, row); return true;
     };
     return {
       bind,
@@ -62,6 +62,12 @@
         if (!row || row.generation !== generation) return false;
         return bind(row);
       },
+      // Scene model-change hook: unknown props are an O(1) no-op. No polling or
+      // whole-roster traversal, and the same node/capacity validation still applies.
+      refreshNpc(node) {
+        ready(); const row = npcRoots.get(node);
+        return row ? bind(row) : false;
+      },
       resolve(bodyId, kind, generation) {
         ready(); const row = rows.get(bodyId);
         return row && row.kind === kind && row.generation === generation ? row : null;
@@ -69,12 +75,13 @@
       release(bodyId, generation) {
         ready(); const row = rows.get(bodyId);
         if (!row || row.generation !== generation) return false;
-        restore(row); row.nodes.length = 0; rows.delete(bodyId); return true;
+        restore(row); if (row.npc) npcRoots.delete(row.npc.root);
+        row.nodes.length = 0; rows.delete(bodyId); return true;
       },
       dispose() {
         if (disposed) return;
         for (const row of rows.values()) { restore(row); row.nodes.length = 0; }
-        rows.clear(); disposed = true;
+        rows.clear(); npcRoots.clear(); disposed = true;
       },
       get size() { return rows.size; },
     };

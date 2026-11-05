@@ -394,7 +394,7 @@
     };
     // Trusted reclaim adapter only, after the committed live receipt. Never
     // possess the corresponding NPC or replay its position/animation setup.
-    const attachBody = (body, { view: committed, onRelease } = {}) => {
+    const attachBody = (body, { view: committed, scope, onRelease } = {}) => {
       const mode = committed?.equipment?.mode;
       if (disposed || player || bodyBinding || pilot.player || clankers.player || combatOnly?.() || !body?.active
         || committed?.kind !== "clanker" || !["carry", "combat"].includes(mode) || typeof onRelease !== "function"
@@ -405,7 +405,7 @@
       savedNear = camera.near;
       bodyBinding = { body, onRelease }; player = body.player;
       try {
-        if (attachPlayer(player, committed) !== true) { release(false); return false; }
+        if (attachPlayer(player, committed, scope) !== true) { release(false); return false; }
         return acquireView(player, false, incoming, mode);
       }
       catch (error) { try { release(false); } finally { throw error; } }

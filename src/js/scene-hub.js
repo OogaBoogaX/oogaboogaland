@@ -9491,6 +9491,8 @@
     return mirrorCave?.body?.untrack(node);
   };
   const refreshMirrorObject = (node) => {
+    remotes?.refreshNpc(node);
+    independentClankerGhost?.refreshNpc(node);
     mirrorCave?.body?.refresh(node);
     entropyLab?.phase?.body?.refresh(node);
     for (const veil of caveVeils) veil.phase?.body.refresh(node);
@@ -11072,10 +11074,12 @@
   };
   // One independently controlled body, never appended to the NPC roster or
   // its capture array. The reclaim adapter owns the body and its disposal.
-  let independentClanker = null;
+  let independentClanker = null, independentClankerGhost = null, releaseFrozenClanker = null;
   const detachPlayerClanker = entry => {
     if (!entry || independentClanker !== entry) return;
     independentClanker = null;
+    independentClankerGhost?.dispose(); independentClankerGhost = null;
+    releaseFrozenClanker?.(); releaseFrozenClanker = null;
     untrackMirrorObject(entry.root);
     clankerMeshes.remove(entry.root);
     for (const node of entry.renderParts || []) {
@@ -11084,12 +11088,17 @@
     entry.renderParts = null;
     entry.netBody = entry.netMotion = null;
   };
-  const attachPlayerClanker = (entry, view) => {
+  const attachPlayerClanker = (entry, view, scope) => {
     if (independentClanker || !entry || entry.root.parent !== root || clankers.list.includes(entry)
       || entry.capture || entry.renderParts || view?.kind !== "clanker" || view.accountId !== BL.net.state.selfId
       || view.bodyId !== BL.net.gorillaBody(entry.owner.traits.name)) return false;
     independentClanker = entry;
     try {
+      releaseFrozenClanker = remotes.acquireLocalBody(view, scope, () => BL.net.bodyReclaim.suspend());
+      independentClankerGhost = BL.hostActorBindings.create({ root, capacity: 1 });
+      const npc = clankers.list.find(e => e.owner.traits.name.toLowerCase() === entry.owner.traits.name.toLowerCase());
+      independentClankerGhost.bind({ bodyId: view.bodyId, kind: "clanker", generation: view.generation,
+        actor: entry.gorilla || entry, npc: npc?.gorilla || null, freeArm: null });
       entry.netBody = view.bodyId;
       entry.netMotion = new Float64Array(6);
       registerClanker(entry, false);
@@ -12258,6 +12267,13 @@
     crew = shared.crew = crewMod.create(shared);
     remotes = BL.remotePlayers.create({
       root, crew, fx, player: controlledGuideActor, visible: remoteShown,
+      hostSource: BL.net.bodyPresence,
+      hostNpcFor: view => {
+        const name = BL.net.bodyName(view.bodyId).toLowerCase();
+        return view.kind === "clanker"
+          ? clankers?.list.find(e => e.owner.traits.name.toLowerCase() === name)?.gorilla || null
+          : crew.list.find(c => c.traits.name.toLowerCase() === name) || null;
+      },
       createGorilla: (name, rec) => clankers.createRemote(name, rec),
       hideGorilla: (name, on) => {
         if (on && clankerPlay && clankerPlay.player?.owner.traits.name === name) clankerPlay.release();

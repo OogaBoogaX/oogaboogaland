@@ -11,8 +11,10 @@ import { publishHostPoses } from '../src/host-room.js';
 // of adding another 250 ms after the RPC and client validation have completed.
 export class MeasuredRoom extends Room {
   async publishNpcSnapshot(...args) {
+    const enteredAt = Date.now();
     const result = await super.publishNpcSnapshot(...args);
-    return { ...result, publishedAt: this.npcAuthority.at };
+    return { ...result, publishedAt: this.npcAuthority.at,
+      roomTiming: { enteredAt, returnedAt: Date.now() } };
   }
 }
 import { VirtualHost, HOST, SESSION_PROTOCOL } from '../src/virtual-host.js';
@@ -77,7 +79,7 @@ export class BodySessionHost extends DurableObject {
         throw Error('fixture identity mismatch');
       return i;
     };
-    let writes = 0, writeBytes = 0, reads = 0, readBytes = 0, constructed = 0, disposed = 0;
+    let writes = 0, writeBytes = 0, deletes = 0, reads = 0, readBytes = 0, constructed = 0, disposed = 0;
     const storage = { transaction: fn => this.ctx.storage.transaction(tx => fn({
       get: async k => {
         const v = await tx.get(k), values = v instanceof Map ? [...v.values()] : v === undefined ? [] : [v];
@@ -85,8 +87,8 @@ export class BodySessionHost extends DurableObject {
       },
       put: async values => {
         writes += Object.keys(values).length; for (const value of Object.values(values)) writeBytes += bytes(value);
-        await tx.put(values); if (command === 'fail-tick' || command === 'fail-event') throw Error('injected body rollback');
-      }, delete: keys => tx.delete(keys),
+        await tx.put(values); if (['fail-tick', 'fail-event', 'fail-ack'].includes(command)) throw Error('injected body rollback');
+      }, delete: async keys => { const removed = await tx.delete(keys); deletes += Number(removed); return removed; },
     })) };
     const bank = createHostBodyStorage({ storage, profile: 'clanker-body-3', capture: () => { throw Error('body scope required'); },
       validate: saved => {
@@ -104,8 +106,19 @@ export class BodySessionHost extends DurableObject {
     const claim = index => ({ protocol: SESSION_PROTOCOL, world, accountId: index + 1, bodyId: `body-${index}`, zone: 'outside',
       body: { kind: 'clanker', motion: f.entries[index].motion, equipment } });
     let result, error = null;
-    const phases = {};
+    const phases = {}, publicationTiming = {};
     const measured = (target, names, prefix) => Object.fromEntries(names.map(name => [name, async (...args) => {
+      // Bounded experimental arm only: capture closer to the existing gate to
+      // reduce pose age and the interval in which a new tick can supersede it.
+      // 50ms leaves margin over the prior local 28ms p95 projection. This never
+      // moves the final ownership check or Room's minimum interval earlier.
+      if (input.projectNearGate && prefix === 'host' && name === 'poses' && input.notBefore !== undefined) {
+        if (input.rolling || input.burst || !Number.isSafeInteger(input.notBefore)
+          || input.notBefore - Date.now() > 250) throw Error('bounded strict projection pacing required');
+        const at = performance.now(), captureAt = input.notBefore - 50;
+        while (Date.now() < captureAt) await new Promise(resolve => setTimeout(resolve, captureAt - Date.now()));
+        phases['runner.projectionPacing'] = [performance.now() - at];
+      }
       // The finite runner paces after projection and before the final host
       // ownership check. Waiting before projection adds that CPU time to every
       // Room interval and cannot model a four-Hz pipeline correctly.
@@ -114,11 +127,18 @@ export class BodySessionHost extends DurableObject {
         const at = performance.now();
         while (Date.now() < input.notBefore) await new Promise(resolve => setTimeout(resolve, input.notBefore - Date.now()));
         phases['runner.pacing'] = [performance.now() - at];
+        publicationTiming.notBefore = input.notBefore;
+        publicationTiming.gateReleasedAt = Date.now();
       }
       const started = performance.now();
+      if (command === 'publish') publicationTiming[`${prefix}.${name}.startedAt`] = Date.now();
       try { return await target[name](...args); }
-      finally { (phases[`${prefix}.${name}`] ||= []).push(performance.now() - started); }
+      finally {
+        (phases[`${prefix}.${name}`] ||= []).push(performance.now() - started);
+        if (command === 'publish') publicationTiming[`${prefix}.${name}.returnedAt`] = Date.now();
+      }
     }]));
+    const operationAt = performance.now();
     try {
       if (command === 'begin') result = await host.begin('first', 120000);
       else if (command === 'join' || command === 'connect') {
@@ -133,12 +153,15 @@ export class BodySessionHost extends DurableObject {
           ['npcAuthorityStatus', 'configureNpcAuthority', 'publishNpcSnapshot'], 'room'),
         input.ticket, { acquire: input.acquire === true, format: 'mixed-1', ...(input.roomState ? { roomState: input.roomState } : {}), ...(input.rolling || input.burst ? { cadence: input.burst ? 'rate-4-burst-2-v1' : 'rolling-4-v1' } : {}) });
       else if (command === 'claim') result = await host.claim('replacement');
-      else if (command === 'event' || command === 'fail-event') result = await host.reconcileBodies(input.ticket, input.tokens);
+      else if (command === 'cleanup-claim') result = await host.claimBodyCleanup('departure-cleanup');
+      else if (command === 'ack' || command === 'fail-ack') result = await host.acknowledgeBodyDepartures(input.ticket, input.receipt);
+      else if (command === 'retained-close') result = await host.closeRetainedBody(input.ticket, input.ref, input.closedAt);
+      else if (command === 'event' || command === 'fail-event') result = await host.reconcileBodies(input.ticket, input.tokens, input.closes || []);
       else if (command === 'presence') result = await host.bodyPresence(input.ticket);
       else if (command === 'tick' || command === 'fail-tick') result = await host.tick(input.ticket, input.tokens);
       else if (!['inspect', 'verify'].includes(command)) throw Error('unknown fixture command');
     } catch (e) { error = e.message; }
-    const diagnosticAt = performance.now();
+    const diagnosticAt = performance.now(), operationMs = diagnosticAt - operationAt;
     const root = await this.ctx.storage.get(HOST.key), keys = Array.from({ length: root?.count || 0 }, (_, i) => BODY_STORAGE.prefix + i);
     const rows = keys.length ? [...(await this.ctx.storage.get(keys)).values()] : [];
     if (command === 'verify') try {
@@ -172,8 +195,8 @@ export class BodySessionHost extends DurableObject {
     } catch (e) { error = e.message; }
     const rootBytes = root ? bytes(root) : 0, rowBytes = rows.map(bytes);
     const diagnosticMs = performance.now() - diagnosticAt;
-    return Response.json({ error, result, phases, reads, readBytes, writes, writeBytes, constructed, disposed,
-      diagnosticMs, rootBytes, rowBytes,
+    return Response.json({ error, result, phases, publicationTiming, reads, readBytes, writes, writeBytes, deletes, constructed, disposed,
+      operationMs, diagnosticMs, rootBytes, rowBytes,
       saved: command === 'inspect' ? root : undefined });
   }
 }

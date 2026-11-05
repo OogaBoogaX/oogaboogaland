@@ -57,7 +57,7 @@ export class LatestHostPublication {
       if (result?.status === "superseded") this.stats.superseded++;
       else {
         if (!["published", "reconciled"].includes(result?.status) || !time(result.sequence) || result.sequence < offered
-          || !time(result.publishedAt) || result.publishedAt > finished
+          || !time(result.publishedAt) || result.publishedAt > finished || result.publishedAt >= this.until
           || result.publishedAt < notBefore && result.duplicate !== true) throw Error("invalid committed publication result");
         if (result.cadence !== this.cadence || this.cadence && (!time(result.nextPublishAt)
           || result.nextPublishAt < result.publishedAt + 125 || result.nextPublishAt > result.publishedAt + 1000))

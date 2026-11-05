@@ -72,12 +72,29 @@ test('new gear inherits ghost opacity once, removed gear and original opacity re
   const geometry = npc.parts.armL.geometry, keys = Reflect.ownKeys(geometry);
   bindings.bind({ bodyId: 'player:1', generation: 1, kind: 'clanker', actor: player, npc });
   const gear = B.scene.createNode({ geometry }); B.scene.addChild(npc.root, gear);
-  bindings.refresh('player:1', 1); bindings.refresh('player:1', 1);
+  assert.equal(bindings.refreshNpc(player.root), false, 'player and unrelated model changes do not refresh an NPC');
+  assert.equal(bindings.refreshNpc(npc.root), true); bindings.refreshNpc(npc.root);
   assert.equal(gear.smokeOpacity, api.GHOST); assert.equal(npc.parts.armL.smokeOpacity, .5 * api.GHOST);
-  B.scene.removeChild(npc.root, gear); bindings.refresh('player:1', 1); assert.equal(gear.smokeOpacity, undefined);
+  B.scene.removeChild(npc.root, gear); bindings.refreshNpc(npc.root); assert.equal(gear.smokeOpacity, undefined);
   assert.deepEqual(Reflect.ownKeys(geometry), keys); bindings.dispose();
   assert.equal(npc.parts.armL.smokeOpacity, .5); assert.equal(player.parts.armL.smokeOpacity, undefined);
   npc.dispose(); player.dispose();
+});
+
+test('NPC model-change lookup follows replacement generations and releases its old root', () => {
+  const f = managedRigs(), B = f.B, root = B.scene.createNode(), npc = f.make(), replacement = f.make(), player = f.make();
+  B.scene.addChild(root, npc.root, replacement.root, player.root);
+  const bindings = install(B).create({ root, capacity: 1 });
+  const args = { bodyId: 'player:1', generation: 1, kind: 'clanker', actor: player, npc };
+  try {
+    bindings.bind(args); bindings.bind({ ...args, generation: 2, npc: replacement });
+    assert.equal(npc.root.smokeOpacity, undefined); assert.equal(bindings.refreshNpc(npc.root), false);
+    const gear = B.scene.createNode({ smokeOpacity: .5 }); B.scene.addChild(replacement.root, gear);
+    assert.equal(bindings.refreshNpc(replacement.root), true); assert.equal(gear.smokeOpacity, .5 * B.hostActorBindings.GHOST);
+    assert.equal(bindings.release('player:1', 1), false); assert.equal(bindings.refreshNpc(replacement.root), true);
+    assert.equal(bindings.release('player:1', 2), true); assert.equal(gear.smokeOpacity, .5);
+    assert.equal(bindings.refreshNpc(replacement.root), false);
+  } finally { bindings.dispose(); npc.dispose(); replacement.dispose(); player.dispose(); }
 });
 
 test('bounded ghost tree and cross-account aliases refuse atomically, and later visual ownership survives release', () => {

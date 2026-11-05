@@ -267,6 +267,24 @@ export class VirtualHost {
     });
   }
 
+  // An explicit event-only recovery after the finite run has stopped. Retained
+  // applied departures still need durable presentation delivery; starting a new
+  // NPC run just to acknowledge them would incorrectly resume simulation. This
+  // lease grants no live admission and is never scheduled or renewed here.
+  async claimBodyCleanup(owner) {
+    if (!id(owner)) fail("host owner");
+    return this.transaction(async function(tx) {
+      const now = this.now(), r = await this.read(tx);
+      if (!r || !["running", "draining", "stopped"].includes(r.status)
+        || now < r.runUntil || now < r.leaseUntil || r.sessions?.sessions.length
+        || !r.sessions?.pending.length || r.sessions.pending.some(p => !p.applied)) fail("body cleanup unavailable");
+      if (now < r.wallAt) fail("clock moved backwards");
+      r.owner = owner; r.fence++; r.leaseUntil = now + HOST.leaseMs; r.wallAt = now; r.status = "draining";
+      await this.save(tx, r);
+      return this.ticket(r);
+    });
+  }
+
   // The same durable transaction advances grace even when there are no clients or NPC steps.
   // Once session state exists, callers must provide the authenticated transport census explicitly.
   async tick(ticket, liveTokens) {
@@ -443,7 +461,9 @@ export class VirtualHost {
       fail("invalid abandoned body receipt");
     boundedJSON(issued, HOST.snapshotBytes);
     const transfer = structuredClone(issued), reference = { accountId, generation: ref.generation, token: ref.token };
-    const tokens = [...new Set([...liveTokens, reference.token])], budget = { left: this.passiveSteps };
+    if (liveTokens.length > BODY_VIEW.maxBodies || liveTokens.some(token => typeof token !== "string"))
+      fail("invalid body cleanup census");
+    const budget = { left: this.passiveSteps };
     return this.transaction(async function(tx) {
       const now = this.now(), r = await this.read(tx); this.owns(r, ticket, now);
       // Closed-only rollback may outlive the finite NPC run. Current host
@@ -469,7 +489,10 @@ export class VirtualHost {
       if (!current || !["starting", "live"].includes(current.view.state)) return refused();
       const view = { ...current.view, state: "starting", deadline: transfer.view.deadline, presentation: transfer.view.presentation };
       if (!sameCheckpointValue(view, transfer.view) || !sameCheckpointValue(current.checkpoint, transfer.checkpoint)) return refused();
-      const { registry, recovery } = this.registry(r, now, tokens, { priorityAccount: accountId, budget });
+      // This is one confirmed closed handoff, not an absence census. Keep
+      // unrelated live generations protected until their own observation/event.
+      const protectedTokens = r.sessions.sessions.map(s => s.token);
+      const { registry, recovery } = this.registry(r, now, protectedTokens, { priorityAccount: accountId, budget });
       // Recovery may already have expired an unacknowledged starting hold.
       const existing = registry.view(accountId);
       const result = existing?.state === "grace" && existing.deadline === transfer.view.deadline
@@ -616,6 +639,32 @@ export class VirtualHost {
     return this.sessions(ticket, liveTokens, registry => registry.view(closeRef.accountId), [{ ref: closeRef, at: closedAt }]);
   }
 
+  // Trusted closed Room row only. Unlike sessions(), this finite cleanup may
+  // finish after the NPC run ends. It observes exactly one close, infers no
+  // other live absence, and cannot renew ownership, run AI or replay movement.
+  async closeRetainedBody(ticket, ref, closedAt) {
+    if (!ref || !Number.isSafeInteger(ref.accountId) || ref.accountId < 1
+      || !Number.isSafeInteger(ref.generation) || ref.generation < 1
+      || typeof ref.token !== "string" || !/^[0-9a-f]{32}$/.test(ref.token) || !time(closedAt)) fail("invalid retained body close");
+    const reference = { accountId: ref.accountId, generation: ref.generation, token: ref.token };
+    return this.transaction(async function(tx) {
+      const now = this.now(), r = await this.read(tx); this.owns(r, ticket, now);
+      if (closedAt > now) fail("future retained body close");
+      const previous = r.sessions;
+      if (!previous?.sessions.some(s => s.accountId === reference.accountId
+        && s.generation === reference.generation && s.token === reference.token)) return { changed: false };
+      const tokens = previous.sessions.map(s => s.token);
+      // The finite run already stopped authorizing live movement at runUntil.
+      const at = Math.min(closedAt, r.runUntil);
+      const { registry } = this.registry(r, now, tokens, { closes: [{ ref: reference, at }] });
+      this.settle(r, registry);
+      const changed = !sameCheckpointValue(previous.sessions, r.sessions.sessions)
+        || !sameCheckpointValue(previous.pending, r.sessions.pending);
+      if (changed) { r.wallAt = now; await this.save(tx, r); }
+      return { changed };
+    });
+  }
+
   async bodyReferenceState(ticket, accountId, ref) {
     if (!Number.isSafeInteger(accountId) || accountId < 1 || ref?.accountId !== accountId) fail("authenticated body account mismatch");
     const reference = structuredClone(ref);
@@ -680,6 +729,37 @@ export class VirtualHost {
         views: registry ? r.sessions.sessions.map(s => registry.view(s.accountId)) : [],
         departures: registry ? registry.pending() : [] };
       return { wakeAt, frame: JSON.parse(boundedJSON(frame, BODY_VIEW.maxBytes)) };
+    });
+  }
+
+  // Trusted server-only receipt after Room durably retains a presentation. No
+  // browser ACK can call this hook. Room delivery wiring is still required;
+  // passing IDs alone is not proof that a viewer received a frame. The exact
+  // host revision prevents a delayed receipt from deleting a newer departure.
+  async acknowledgeBodyDepartures(ticket, receipt) {
+    if (!exact(receipt, ["world", "epoch", "revision", "ids"]) || !id(receipt.world)
+      || !time(receipt.epoch) || !receipt.epoch || !time(receipt.revision) || !receipt.revision
+      || !Array.isArray(receipt.ids) || !receipt.ids.length || receipt.ids.length > BODY_VIEW.maxBodies
+      || receipt.ids.some(value => typeof value !== "string" || value.length > 23 || !/^depart:[1-9][0-9]*$/.test(value))
+      || new Set(receipt.ids).size !== receipt.ids.length) fail("invalid body departure receipt");
+    const observed = { ...receipt, ids: [...receipt.ids] };
+    return this.transaction(async function(tx) {
+      const now = this.now(), r = await this.read(tx); this.owns(r, ticket, now);
+      if (observed.world !== r.world || observed.epoch !== r.fence || observed.revision !== r.revision)
+        return { changed: false, superseded: true };
+      const pending = r.sessions?.pending || [], ids = new Set(observed.ids);
+      if (observed.ids.some(value => !pending.some(p => p.id === value && p.applied)))
+        fail("unapplied or unknown body departure");
+      // Only remove already-applied persisted intents. Recovering the registry
+      // here could sweep another due body and turn its delivery ACK into a new
+      // disconnect/handback operation; that belongs to explicit reconciliation.
+      r.sessions.pending = pending.filter(p => !ids.has(p.id));
+      r.wallAt = now;
+      if (now >= r.runUntil && !r.sessions.sessions.length && !r.sessions.pending.length) {
+        r.status = "stopped"; r.leaseUntil = now;
+      }
+      await this.save(tx, r);
+      return { changed: true, superseded: false };
     });
   }
 

@@ -546,8 +546,13 @@ test("a final snapshot ACK alone restores live ownership; duplicate ACKs do not 
   assert.equal(done.view.presentation, null); assert.equal(done.view.deadline, null);
   const before = reg.checkpoint();
   assert.equal(reg.started(held, T0 + 500).duplicate, true); assert.deepEqual(reg.checkpoint(), before);
+  assert.equal(reg.activate(held, T0 + 500).ok, false, 'a live generation cannot return to starting');
   const next = restore(reg.checkpoint()); next.recover(T0 + 900);
   assert.equal(next.view(1).deadline, T0 + 300 + GRACE_MS);
+  assert.equal(next.activate(held, T0 + 900).ok, false, 'grace cannot reuse an old starting generation');
+  const again = next.offer(claim(1, 'ooga-a'), T0 + 901);
+  assert.ok(again.session.generation > held.generation);
+  assert.equal(next.activate(ref(again.session), T0 + 902).view.state, 'starting');
 });
 
 test("handoff lease is clipped to the original grace boundary and finite drain cannot extend it", () => {

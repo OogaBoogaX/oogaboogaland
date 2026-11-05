@@ -628,3 +628,31 @@ test("expensive simulation profiles can lower catch-up work without changing rec
   assert.deepEqual(bounded.store.read().simulation, ordinary.store.read().simulation);
   assert.equal(bounded.store.read().simulatedAt, ordinary.store.read().simulatedAt);
 });
+
+
+test('one retained close after run expiry preserves unrelated live sessions and cannot renew or replay', async () => {
+  const h = harness({ ...simulation, step() { throw Error('no NPC step'); } }, () => { throw Error('no physics'); });
+  const ticket = await h.host.begin('owner', 500);
+  const first = (await h.host.connect(ticket, [], bodyClaim())).result.session;
+  const second = (await h.host.connect(ticket, [first.token], { ...bodyClaim(), accountId: 2, bodyId: 'second' })).result.session;
+  h.at(100800); const before = h.store.read();
+  await assert.rejects(h.host.closeRetainedBody(ticket, first, 100801), /future/);
+  h.store.failNext(); await assert.rejects(h.host.closeRetainedBody(ticket, first, 100700), /storage unavailable/);
+  assert.deepEqual(h.store.read(), before);
+  assert.equal((await h.host.closeRetainedBody(ticket, first, 100700)).changed, true);
+  const saved = h.store.read(), [a, b] = saved.sessions.sessions;
+  assert.equal(a.state, 'grace'); assert.equal(a.deadline, 160500, 'finite run stop bounds a later close');
+  assert.equal(a.motion.y, 10); assert.equal(a.motion.vy, 0);
+  assert.equal(b.state, 'live'); assert.equal(b.token, second.token);
+  assert.equal(saved.leaseUntil, before.leaseUntil); assert.equal(saved.runUntil, before.runUntil);
+  assert.deepEqual(saved.simulation, before.simulation);
+  const writes = h.store.writes;
+  assert.equal((await h.host.closeRetainedBody(ticket, first, 100700)).changed, false);
+  assert.equal((await h.host.closeRetainedBody(ticket, { ...second, generation: second.generation + 1 }, 100700)).changed, false);
+  assert.equal(h.store.writes, writes); assert.deepEqual(h.store.read(), saved);
+  await assert.rejects(h.host.connect(ticket, [], bodyClaim()), /run closed/);
+  h.at(160500); const replacement = await h.host.claim('cleanup');
+  await assert.rejects(h.host.closeRetainedBody(ticket, first, 100700), /fenced/);
+  await h.host.reconcileBodies(replacement, []);
+  assert.equal(h.store.read().sessions.sessions.length, 0);
+});

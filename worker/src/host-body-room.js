@@ -1,6 +1,35 @@
 // One explicit, bounded Room/host handoff operation. No timer or automatic run.
 // Retry the exact durable command through the atomic receipt API only. A closed
 // command recovers its result or records cancellation; it cannot create a body.
+import { sameCheckpointValue } from "./virtual-host.js";
+
+// One finite server publication. Host and Room commits are independent: retain
+// the exact complete public frame in Room before acknowledging host departures.
+// A lost Room reply is read/reconciled, never assumed successful or replayed as
+// a fresh admission. Explicit preview socket delivery remains credit-bounded.
+export async function retainHostBodyPresence(host, room, hostTicket, roomTicket) {
+  const owner = { ...hostTicket }, authority = { ...roomTicket };
+  if (owner.world !== authority.world || owner.fence < authority.epoch
+    || owner.fence === authority.epoch && owner.owner !== authority.owner) throw Error("body presentation authorities differ");
+  const { frame } = await host.bodyPresence(owner);
+  if (await host.bodyLifecycleRevision(owner) !== frame.revision) return { status: "superseded", retained: false };
+  const expected = { world: frame.world, epoch: frame.epoch, revision: frame.revision, ids: frame.departures.map(p => p.id) };
+  let retained;
+  try { retained = await room.retainBodyPresence(authority, owner, frame); }
+  catch (error) {
+    const after = await room.bodyPresenceStatus(authority);
+    if (!after || !sameCheckpointValue(after.frame, frame)) throw error;
+    retained = { duplicate: true, receipt: expected };
+  }
+  if (!sameCheckpointValue(retained?.receipt, expected)) throw Error("body presentation receipt mismatch");
+  // Socket receipts only release per-viewer credit. Host departure removal is
+  // justified by durable Room retention, never by an untrusted client ACK.
+  await room.deliverBodyPresence(authority);
+  if (!expected.ids.length) return { status: "retained", retained: true, duplicate: retained.duplicate };
+  const acknowledged = await host.acknowledgeBodyDepartures(owner, retained.receipt);
+  return { status: acknowledged.changed ? "acknowledged" : "superseded", retained: true, duplicate: retained.duplicate };
+}
+
 export async function reconcileRoomBodies(host, room, hostTicket, roomTicket) {
   const owner = { ...hostTicket }, authority = { ...roomTicket };
   if (owner.world !== authority.world || owner.fence !== authority.epoch || owner.owner !== authority.owner)
@@ -94,10 +123,10 @@ export async function closeBodyHandoff(host, room, hostTicket, roomTicket, ident
   return { status: "resolved" };
 }
 
-// Retire already-passive closed work after a Room lease/run has expired. The
-// caller first performs host lifecycle recovery with its authenticated census.
-// This finite path cannot create a body, replay movement, renew NPC ownership,
-// or change a grace deadline. Live/starting refs require ordinary close recovery.
+// Reconcile exactly one closed handoff after a Room lease/run has expired.
+// Recover/cancel uncertain operations before touching its body. This finite path
+// cannot create a body, replay movement, infer unrelated live disconnects or
+// renew NPC ownership. No-live-send rollback preserves the original deadline.
 export async function retireRecoveredBodyHandoff(host, room, hostTicket, roomTicket, identity) {
   const owner = { ...hostTicket }, authority = { ...roomTicket }, who = { ...identity };
   if (owner.world !== authority.world || !Number.isSafeInteger(owner.fence)
@@ -120,7 +149,11 @@ export async function retireRecoveredBodyHandoff(host, room, hostTicket, roomTic
   if (work.close.kind === "movement") {
     const m = work.movement;
     if (!m?.closed || m.ref?.accountId !== who.accountId) throw Error("closed movement recovery mismatch");
-    const view = await host.bodyReferenceState(owner, who.accountId, m.ref);
+    let view = await host.bodyReferenceState(owner, who.accountId, m.ref);
+    if (view?.state === "live") {
+      await host.closeRetainedBody(owner, m.ref, m.closedAt);
+      view = await host.bodyReferenceState(owner, who.accountId, m.ref);
+    }
     if (view !== null && !["grace", "offered"].includes(view.state)) return { status: "blocked" };
     await room.fenceClosedBodyMovement(authority, who, m.sample.sequence, { ref: m.ref, view });
     work = await room.closedBodyRecovery(authority, who);
@@ -130,7 +163,15 @@ export async function retireRecoveredBodyHandoff(host, room, hostTicket, roomTic
   let proof = null;
   if (close.kind !== "retire") {
     if (!["abandon", "disconnect"].includes(close.kind)) return { status: "blocked" };
-    const view = await host.bodyReferenceState(owner, who.accountId, close.ref);
+    let view = await host.bodyReferenceState(owner, who.accountId, close.ref);
+    if (view && !["grace", "offered"].includes(view.state)) {
+      if (close.kind === "abandon") {
+        await host.abandonBody(owner, [], who.accountId, close.ref, close.issued);
+        // Recovery may expire the old hold while processing abandonment. The
+        // fresh exact-ref proof below decides, never an old operation result.
+      } else await host.closeRetainedBody(owner, close.ref, close.closedAt);
+      view = await host.bodyReferenceState(owner, who.accountId, close.ref);
+    }
     if (view !== null && !["grace", "offered"].includes(view.state)) return { status: "blocked" };
     proof = { ref: close.ref, view };
   }

@@ -179,7 +179,7 @@ async function integrated({ activate = true, journal = false, duration = 120000 
     : await host.activateBody(ticket, [], 1, ref, offered.transfer);
   await room.complete(i, preflight.record.pending.revision, active); await room.deliver(i); client.message(f.sent.at(-1));
   assert.equal(controls, false); assert.equal(clientMessages.at(-1).t, 'body-started');
-  return { ...f, i, room, host, ticket, hostStorage, client, clientMessages, active, ref, controls: () => controls,
+  return { ...f, i, room, host, ticket, hostStorage, client, clientMessages, active, ref, claim, controls: () => controls,
     session: () => hostStorage.snapshot().get(HOST.key).host.sessions.sessions[0] };
 }
 
@@ -433,8 +433,10 @@ test('expired Room retirement recovers uncertain work without reissuing control 
     resolveClosedBodyRecovery: (_, i, rev, proof) => h.room.resolveClosed(i, rev, proof),
   };
   const sent = h.sent.length;
-  // Still starting: cancellation is durable, but retirement cannot confer control.
-  assert.equal((await retireRecoveredBodyHandoff(h.host, facade, h.ticket, roomTicket, h.i)).status, 'blocked');
+  // Recover cancellation independently, then simulate a pause before retirement.
+  const pending = await h.room.pending(h.i);
+  const cancelled = await h.host.bodyOperation(h.ticket, [], pending.command, { recoverOnly: true });
+  await h.room.complete(h.i, pending.command.revision, cancelled);
   assert.equal((await h.room.read(h.i)).pending, null);
   h.at(230000); const recovered = await h.host.claim('replacement');
   const before = h.hostStorage.snapshot().get(HOST.key).host;
@@ -460,7 +462,7 @@ test('recovered close keeps an uncertain movement until its exact generation is 
   const owner = { world: preparation().world, fence: 2, owner: 'replacement' };
   const authority = { world: owner.world, epoch: 1, owner: 'previous' };
   let view = { ...transfer('live').view, deadline: null };
-  const host = { bodyLifecycleRevision: async () => 9, bodyReferenceState: async (_, account, reference) => {
+  const host = { bodyLifecycleRevision: async () => 9, closeRetainedBody: async () => ({ changed: false }), bodyReferenceState: async (_, account, reference) => {
     assert.equal(account, 1); assert.deepEqual(reference, ref(1)); return view;
   } };
   const room = {
@@ -493,8 +495,16 @@ test('a no-live-send final ACK restores the original grace after the finite run 
   assert.equal(close.kind, 'abandon'); assert.equal((await h.room.read(h.i)).liveSent, false);
   h.at(100600); const before = h.hostStorage.snapshot().get(HOST.key).host;
   await assert.rejects(h.host.startedBody(h.ticket, [], 1, h.ref, h.active.transfer), /run closed/);
-  const abandoned = await h.host.abandonBody(h.ticket, [], 1, close.ref, close.issued);
-  assert.equal(abandoned.result.ok, true); assert.equal(h.session().deadline, 160000);
+  const facade = {
+    async closedBodyRecovery(_, who) {
+      const close = await h.room.cleanup(who);
+      return close ? { close, pending: await h.room.pending(who), movement: await h.room.pendingMovement(who) } : null;
+    },
+    resolveClosedBodyRecovery: (_, who, revision, proof) => h.room.resolveClosed(who, revision, proof),
+  };
+  const authority = { world: h.ticket.world, owner: h.ticket.owner, epoch: h.ticket.fence };
+  assert.equal((await retireRecoveredBodyHandoff(h.host, facade, h.ticket, authority, h.i)).status, 'resolved');
+  assert.equal(await h.room.read(h.i), null); assert.equal(h.session().deadline, 160000);
   assert.equal(h.session().state, 'grace');
   const after = h.hostStorage.snapshot().get(HOST.key).host;
   assert.equal(after.runUntil, before.runUntil); assert.equal(after.leaseUntil, before.leaseUntil);
@@ -504,4 +514,20 @@ test('a no-live-send final ACK restores the original grace after the finite run 
   await h.host.reconcileBodies(replacement, []);
   assert.equal(h.session(), undefined);
   assert.equal(h.hostStorage.snapshot().get(HOST.key).host.sessions.pending[0].at, 160000);
+});
+
+
+test('closed no-live-send rollback is not an absence census for another live player', async () => {
+  const h = await integrated({ journal: true, duration: 500 });
+  const other = (await h.host.connect(h.ticket, [h.ref.token], { ...h.claim, accountId: 2, bodyId: 'body-2' })).result.session;
+  await h.room.receive(h.i, h.clientMessages.at(-1));
+  const command = (await h.room.pending(h.i)).command;
+  h.at(100200); const answer = await h.host.bodyOperation(h.ticket, [other.token], command);
+  await h.room.close(h.i); await h.room.complete(h.i, command.revision, answer);
+  const close = await h.room.cleanup(h.i);
+  h.at(100600); await h.host.abandonBody(h.ticket, [], 1, close.ref, close.issued);
+  const rows = h.hostStorage.snapshot().get(HOST.key).host.sessions.sessions;
+  assert.equal(rows.find(r => r.accountId === 1).deadline, 160000);
+  const retained = rows.find(r => r.accountId === 2);
+  assert.equal(retained.state, 'live'); assert.equal(retained.deadline, null); assert.equal(retained.token, other.token);
 });

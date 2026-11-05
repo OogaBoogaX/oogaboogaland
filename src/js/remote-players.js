@@ -70,9 +70,10 @@
   // swimmer's arms by it, from the position the pose transport already carries, with no simulation of its own.
   // A hub supplies its companion's style and hides its local copy through the gorilla hooks; other scenes
   // use a basic managed rig. Both bodies share the room pose, nameplate and collision actor lifecycle.
-  const create = ({ root, crew = null, fx = null, player = null, posed = null, visible = sameZone, hide = null, createGorilla = null, hideGorilla = null }) => {
+  const create = ({ root, crew = null, fx = null, player = null, posed = null, visible = sameZone, hide = null, createGorilla = null, hideGorilla = null, hostSource = null, hostNpcFor = null }) => {
     const net = BL.net;
-    const bodies = new Map();
+    const bodies = new Map(), displayEntries = [];
+    let liveBindings = null;
     // The chat subscription, taken on the first update and again after a kept hub's suspend disposed it; the
     // shot and strike subscriptions the same way.
     let unheard = null, unshot = null, unswung = null;
@@ -111,7 +112,7 @@
       crew.refreshStates(true);
     };
 
-    const build = (rec) => {
+    const build = (rec, legacy = true) => {
       const gorilla = rec.bodyKind === "gorilla" || rec.body.startsWith("gorilla:");
       const decoded = rec.bodyName || (gorilla ? rec.body.slice(8) : rec.body);
       // Claims are case-insensitive; scene maps use the contributor's canonical handle.
@@ -131,20 +132,21 @@
       const height = gorilla ? 0 : BL.crew.bodyHeightOf(cave);
       addChild(root, cave.root);
       const motion = gorilla ? { walkPhase: NaN, walkGait: "knuckle", climb: 0, climbStride: 0, climbDirection: 0, climbSide: 0, swim: 0, lab: false, labRunIn: false, office: false, officeRise: 0, workExit: false } : null;
-      const entry = { id: rec.id, body: rec.body, name, gorilla, cave, motion, baseY: gorilla ? 0 : cave.root.position.y, height, top: NaN, dTop: 0, jetNode: null, jetFlame: null, swing: 0, shotAt: -Infinity, lastHeld: 0, lastMode: 0, lastMelee: 0, sampleAt: 0, sampleMelee: 0, sampleFlags: 0, sampleSwap: 0, sampleSwapIndex: 0, x: rec.x, y: rec.y, z: rec.z, yaw: rec.yaw, phase: 0, hidden: null, hiddenOverride: null, label: "", labelW: 0,
+      const entry = { id: rec.id, body: rec.body, name, gorilla, cave, legacy, motion, baseY: gorilla ? 0 : cave.root.position.y, height, top: NaN, dTop: 0, jetNode: null, jetFlame: null, swing: 0, shotAt: -Infinity, lastHeld: 0, lastMode: 0, lastMelee: 0, sampleAt: 0, sampleMelee: 0, sampleFlags: 0, sampleSwap: 0, sampleSwapIndex: 0, x: rec.x, y: rec.y, z: rec.z, yaw: rec.yaw, phase: 0, hidden: null, hiddenOverride: null, label: "", labelW: 0,
         still: false, thumpT: 0, icon: 0, screenX: NaN, beatOwned: false };
-      bodies.set(rec.id, entry);
-      hideLocal(entry);
+      if (legacy) { bodies.set(rec.id, entry); hideLocal(entry); }
       return entry;
     };
 
-    const drop = (entry) => {
+    const disposeReplica = (entry) => {
       if (entry.cave.restEquipment) entry.cave.restEquipment.release(entry.cave);
       if (fx) fx.hush(entry.cave);
       if (entry.gorilla) entry.cave.dispose();
       else removeChild(root, entry.cave.root);
-      restoreLocal(entry);
-      bodies.delete(entry.id);
+    };
+    const drop = entry => {
+      if (entry.hostView) liveBindings?.release(entry.body, entry.hostView.generation);
+      disposeReplica(entry); if (entry.legacy) restoreLocal(entry); bodies.delete(entry.id);
     };
 
     const pose = (entry, dt) => {
@@ -298,7 +300,37 @@
       if (entry && !entry.gorilla) entry.swing = SWING_TIME;
     };
 
+    // Host-held replicas use the existing rigs and equipment presentation, but
+    // never enter the legacy hide/AI path or consume shots, swings or voice.
+    const frozen = hostSource ? BL.hostFrozenBodies.create({ root, source: hostSource,
+      npcFor: view => hostNpcFor ? hostNpcFor(view) : null, drop: disposeReplica,
+      make(view) {
+        const e = view.equipment, m = view.motion, gorilla = view.kind === "clanker";
+        if ((net.bodyKind(view.bodyId) === "gorilla") !== gorilla)
+          throw Error("frozen body identity/form mismatch");
+        // The current managed Clanker rig has no wearable weapon/jetpack
+        // adapter. Refuse that unsupported state instead of silently losing it.
+        if (gorilla && (e.weapon !== null || e.jetpack)) throw Error("unsupported frozen Clanker equipment");
+        const visual = Array(17).fill(0);
+        visual[3] = (e.primaryOwned ? 1 : 0) | (e.secondaryOwned ? 2 : 0) | (e.jetpackOwned ? 4 : 0);
+        const rec = { id: view.accountId, body: view.bodyId, bodyName: net.bodyName(view.bodyId),
+          bodyKind: gorilla ? "gorilla" : "ooga", zone: view.zone, x: m.x, y: m.y, z: m.z, yaw: m.yaw,
+          jet: e.jetpack ? 1 : 0, weapon: (e.weapon === "gun" ? 2 : e.weapon === "primary" ? 1 : 0) | (e.mode === "combat" ? 4 : 0),
+          visual, visualAt: net.serverNow(), g: gorilla ? [2, 0, 0, 0, 0, 0] : null, voice: false, hp: 100, ko: false };
+        const entry = build(rec, false);
+        try {
+          entry.dx = entry.dz = 0; entry.frozenRecord = rec;
+          rec.display = BL.contributors.traitsFor(entry.name).display;
+          if (gorilla) poseGorilla(entry, rec, 0);
+          else { pose(entry, 0); showJet(entry, rec); showWeapon(entry, rec, 0); }
+          entry.cave.root.visible = visible(rec);
+          return entry;
+        } catch (error) { disposeReplica(entry); throw error; }
+      },
+    }) : null;
+
     const update = (dt) => {
+      frozen?.prepare();
       jetClock += dt;
       activePool = pool;
       if (selfIcon > 0) selfIcon = Math.max(0, selfIcon - dt);
@@ -306,16 +338,37 @@
       if (!unshot && net.subscribeShots) { unshot = net.subscribeShots(shotHeard); unswung = net.subscribeSwings(swingHeard); }
       for (const entry of bodies.values()) {
         const rec = net.remotes.get(entry.id);
-        if (!rec || rec.body !== entry.body) drop(entry);
+        if (!rec || rec.body !== entry.body || frozen && (!frozen.allows(rec)
+          || frozen.active && (entry.legacy || entry.hostWorld !== frozen.world || entry.hostEpoch !== frozen.epoch
+            || entry.hostView?.generation !== frozen.liveView(rec)?.generation))) drop(entry);
+      }
+      const liveCapacity = MAX - Math.max(frozen?.size || 0, frozen?.reserved || 0);
+      // A new held roster may arrive before the ordinary Room has removed old
+      // peers. Retire those excess visuals before allocating frozen replicas.
+      for (const entry of bodies.values()) {
+        if (bodies.size <= liveCapacity) break;
+        drop(entry);
       }
       const k = 1 - Math.exp(-EASE * dt);
       let n = 0;
       for (const rec of net.remotes.values()) {
-        if (!rec.body) continue;
+        if (!rec.body || frozen && !frozen.allows(rec)) continue;
         let entry = bodies.get(rec.id);
         if (!entry) {
-          if (bodies.size >= MAX) continue;
-          entry = build(rec);
+          if (bodies.size >= liveCapacity) continue;
+          const hostView = frozen?.active ? frozen.liveView(rec) : null;
+          entry = build(rec, !frozen?.active);
+          if (frozen?.active) {
+            bodies.set(rec.id, entry); entry.hostWorld = frozen.world; entry.hostEpoch = frozen.epoch;
+          }
+          if (hostView) {
+            entry.hostView = hostView;
+            if (!liveBindings) liveBindings = BL.hostActorBindings.create({ root, capacity: MAX });
+            try {
+              liveBindings.bind({ bodyId: rec.body, kind: hostView.kind, generation: hostView.generation,
+                actor: entry.cave, npc: hostNpcFor ? hostNpcFor(hostView) : null, freeArm: null });
+            } catch { drop(entry); continue; }
+          }
         }
         const restPhase = rec.rest ? rec.rest[1] : 0;
         if (!entry.gorilla && entry.restPhase === 2 && restPhase !== 2) {
@@ -354,11 +407,47 @@
         actor.radius = entry.gorilla ? entry.cave.bodyRadius : BODY_RADIUS;
         actor.height = height;
       }
+      for (const entry of frozen?.entries || []) entry.cave.root.visible = visible(entry.frozenRecord);
+      frozen?.render();
+      displayEntries.length = 0;
+      for (const entry of bodies.values()) displayEntries.push(entry);
+      for (const entry of frozen?.entries || []) {
+        displayEntries.push(entry);
+        if (!entry.cave.root.visible || n >= MAX) continue;
+        const actor = actorPool[n++];
+        actor.id = entry.id; actor.x = entry.x; actor.y = entry.y; actor.z = entry.z;
+        actor.dx = actor.dy = actor.dz = 0;
+        actor.radius = entry.gorilla ? entry.cave.bodyRadius : BODY_RADIUS;
+        actor.height = entry.gorilla ? entry.cave.bodyHeight : entry.height;
+      }
       actorList.length = 0;
       for (let i = 0; i < n; i++) actorList.push(actorPool[i]);
     };
 
     const actors = () => actorList;
+    const refreshNpc = node => {
+      const held = frozen?.refreshNpc(node) || false;
+      const live = liveBindings?.refreshNpc(node) || false;
+      return held || live;
+    };
+    const acquireLocalBody = (view, scope, onFenced) => {
+      if (!frozen || view?.accountId !== net.state.selfId || typeof view.bodyId !== "string"
+        || (net.bodyKind(view.bodyId) === "gorilla") !== (view.kind === "clanker")) throw Error("local body presentation identity");
+      let release;
+      try {
+        release = frozen.acquireLocal(view, scope, onFenced, capacity => {
+          for (const entry of bodies.values()) if (!frozen.allows({ id: entry.id, body: entry.body })) drop(entry);
+          for (const entry of bodies.values()) { if (bodies.size <= capacity) break; drop(entry); }
+        });
+        return release;
+      } finally {
+        // Remove obsolete collision/name references before attachment, including
+        // a partial rendering failure that disposed replicas during the acquire.
+        const retained = id => (!release || id !== view.accountId) && (bodies.has(id) || frozen.entries.some(e => e.id === id));
+        for (let i = actorList.length - 1; i >= 0; i--) if (!retained(actorList[i].id)) actorList.splice(i, 1);
+        for (let i = displayEntries.length - 1; i >= 0; i--) if (!retained(displayEntries[i].id)) displayEntries.splice(i, 1);
+      }
+    };
 
     // The head's top on screen and its middle across, from the corners of every visible mesh under the head as the
     // last frame drew them; false when none projects.
@@ -387,7 +476,7 @@
     };
     const drawNames = (ctx, project, showHealth = false) => {
       overlay = ctx.canvas;
-      if (!bodies.size && selfIcon <= 0) return;
+      if (!displayEntries.length && selfIcon <= 0) return;
       ctx.save();
       if (selfIcon > 0) {
         const rig = selfBody && (selfBody.parts ? selfBody : selfBody.gorilla);
@@ -401,8 +490,8 @@
       ctx.lineWidth = 3;
       ctx.lineJoin = "round";
       const lift = NAME_LIFT + (showHealth ? BAR_LIFT : 0);
-      for (const entry of bodies.values()) {
-        const rec = net.remotes.get(entry.id);
+      for (const entry of displayEntries) {
+        const rec = entry.frozenRecord || net.remotes.get(entry.id);
         if (!rec || !entry.cave.root.visible) continue;
         headMinX = Infinity; headMaxX = -Infinity; headTop = Infinity;
         projectHead(entry.cave.parts.head, project);
@@ -496,13 +585,14 @@
     };
 
     const liveGeometry = (set) => {
-      for (const entry of bodies.values()) {
+      for (const entry of displayEntries) {
         if (entry.gorilla) entry.cave.liveGeometry(set);
         else set.add(entry.cave.headOpen).add(entry.cave.headClosed);
       }
+      frozen?.liveGeometry(set);
     };
 
-    const stats = () => ({ remotePlayers: actorList.length, reservedPlayers: bodies.size, thumpIcons: (selfIcon > 0 ? 1 : 0) + [...bodies.values()].filter((e) => e.icon > 0).length,
+    const stats = () => ({ remotePlayers: actorList.length, reservedPlayers: bodies.size + (frozen?.size || 0), frozenPresentationFailed: !!frozen?.failed, thumpIcons: (selfIcon > 0 ? 1 : 0) + [...bodies.values()].filter((e) => e.icon > 0).length,
       thumpTaps: [...bodies.values()].filter((e) => e.thumpT > 0).length, thumpBeats: [...bodies.values()].filter((e) => e.gorilla && e.cave.beating).length });
 
     const dispose = () => {
@@ -511,8 +601,11 @@
       if (unheard) unheard();
       if (unshot) { unshot(); unswung(); }
       unheard = unshot = unswung = null;
-      for (const entry of [...bodies.values()]) drop(entry);
-      actorList.length = 0;
+      try { frozen?.dispose(); } finally {
+        for (const entry of [...bodies.values()]) drop(entry);
+        liveBindings?.dispose(); liveBindings = null;
+        actorList.length = displayEntries.length = 0;
+      }
     };
 
     // The override an Ooga hidden for its remote driver goes back to when they let go, for a scene that changed it
@@ -522,7 +615,7 @@
       return false;
     };
 
-    const pool = { update, actors, drawNames, liveGeometry, stats, setUnderlying, thumped, clearThumps, dispose, body: id => bodies.get(id)?.cave || null };
+    const pool = { update, actors, drawNames, liveGeometry, stats, setUnderlying, thumped, clearThumps, dispose, acquireLocalBody, refreshNpc, body: id => bodies.get(id)?.cave || frozen?.entries.find(e => e.id === id)?.cave || null };
     return pool;
   };
   const thumped = (id) => activePool ? activePool.thumped(id) : null;

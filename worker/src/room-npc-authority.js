@@ -14,7 +14,7 @@ export const npcAuthorityView = r => r ? { v: r.v, ...(r.v === 2 ? { format: r.f
 export const npcProtocolSupports = (protocol, r) => (protocol === 1 || protocol === 2) && (r.v === 1 || r.v === 2 && protocol === 2);
 export const npcNextPublicationAt = r => r?.cadence ? nextCadenceAt(r.cadence) : r?.sequence ? r.at + ROOM_NPC.deliveryMs : 0;
 export const npcCadenceName = r => cadenceName(r?.cadence);
-export function validateNpcAuthority(r) {
+function validateRecord(r, checkFrame) {
   const baseKeys = r?.v === 2 ? "at,epoch,format,frame,leaseUntil,mode,owner,revision,runUntil,sequence,v,world" : "at,epoch,frame,leaseUntil,mode,owner,revision,runUntil,sequence,v,world";
   const keys = Object.hasOwn(r || {}, 'cadence') ? baseKeys.replace('at,', 'at,cadence,') : baseKeys;
   if (!r || Object.keys(r).sort().join(",") !== keys || !wire.descriptor(r, true) || ![r.leaseUntil, r.runUntil, r.sequence, r.at].every(integer)) fail();
@@ -25,10 +25,11 @@ export function validateNpcAuthority(r) {
   }
   if (r.mode === "server") {
     if (!id(r.owner) || r.leaseUntil > r.runUntil || r.leaseUntil - r.at > ROOM_NPC.leaseMs || r.runUntil - r.at > ROOM_NPC.runMs
-      || (r.frame === null ? r.sequence !== 0 : !r.sequence || !wire.posesFor(r, r.frame, true))) fail();
+      || (r.frame === null ? r.sequence !== 0 : !r.sequence || checkFrame && !wire.posesFor(r, r.frame, true))) fail();
   } else if (r.owner !== null || r.frame !== null || r.sequence !== 0 || r.leaseUntil !== 0 || r.runUntil !== 0) fail();
   return r;
 }
+export const validateNpcAuthority = r => validateRecord(r, true);
 export class RoomNpcAuthority {
   constructor(storage, clock = Date.now) { this.storage = storage; this.clock = clock; }
   async read(tx = this.storage) { const r = await tx.get(ROOM_NPC.key); return r === undefined ? null : validateNpcAuthority(r); }
@@ -78,7 +79,11 @@ export class RoomNpcAuthority {
       if (sequence < r.sequence || now < npcNextPublicationAt(r)) fail();
       const result = { ...r, sequence, frame: copy, at: now, leaseUntil: Math.min(r.runUntil, now + ROOM_NPC.leaseMs),
         ...(r.cadence ? { cadence: advanceCadence(r.cadence, now) } : {}) };
-      await tx.put(ROOM_NPC.key, validateNpcAuthority(result));
+      // r was validated by read(); copy was validated against that exact
+      // authority above. Still recheck every structural/scalar/rate invariant.
+      // Do not decode the entire bounded mixed pose packet a second time in
+      // this transaction. Cold reads and external validation remain complete.
+      await tx.put(ROOM_NPC.key, validateRecord(result, false));
       return { record: result, duplicate: false };
     });
   }

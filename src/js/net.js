@@ -260,6 +260,11 @@
   // Capability is intentionally absent from deployed Room welcomes. The scene
   // must install a complete prepare/preflight/apply/activate/release adapter before READY.
   // A retained requirement never falls back to old pose replay on an older Room.
+  // Receiver wiring is inert until the scene integration and performance gates
+  // pass. Never advertise an unfinished body protocol merely because it loads.
+  const BODY_PRESENCE_PREVIEW = false;
+  const bodyPresence = BL.bodyPresence.create({ send: msg => send(JSON.stringify(msg)),
+    monotonic: () => performance.now(), wall: () => Date.now() });
   const bodyReclaim = BL.bodyReclaim.create({ send: msg => send(JSON.stringify(msg)), monotonic: () => performance.now(), wall: () => Date.now(),
     later: (fn, ms) => window.setTimeout(fn, ms), cancel: id => window.clearTimeout(id) });
 
@@ -363,6 +368,7 @@
     const before = npcAuthority.current;
     if (state.npcAuthority?.incompatible && !(value?.revision > state.npcAuthority.revision)) return false;
     if (!npcAuthority.accept(value)) {
+      bodyPresence.setAuthority({ ...value, v: 0 });
       // An unknown explicit authority version is incompatible, not permission
       // to elect ourselves. A later valid release can still clear this guard.
       const revision = Number.isSafeInteger(value?.revision) && value.revision > 0 ? value.revision : 0;
@@ -372,6 +378,7 @@
       }
       return false;
     }
+    bodyPresence.setAuthority(value);
     state.npcAuthority = npcAuthority.current;
     if (before !== npcAuthority.current) { npcFrame = null; state.npcVersion++; }
     return true;
@@ -403,6 +410,7 @@
     } catch {
       return;
     }
+    if (msg?.t === "body-presence") { bodyPresence.message(msg); return; }
     if (msg && ["body-prepare", "body-grant", "body-active", "body-live", "body-motion-ack"].includes(msg.t)) {
       const active = bodyReclaim.active;
       if (bodyReclaim.message(msg) && !active && bodyReclaim.active) {
@@ -499,6 +507,7 @@
       state.ghostFollowers = Number.isSafeInteger(msg.ghostFollowers) ? msg.ghostFollowers : 0;
       state.selfId = msg.you.id;
       state.connectionToken = typeof msg.connectionToken === "string" ? msg.connectionToken : "";
+      bodyPresence.open(BODY_PRESENCE_PREVIEW && Array.isArray(msg.features) && msg.features.includes(BL.bodyPresence.FEATURE));
       bodyReclaim.open(state.selfId, state.connectionToken, Array.isArray(msg.features) && msg.features.includes(BL.bodyReclaim.FEATURE),
         Array.isArray(msg.features) && msg.features.some(f => typeof f === "string" && f.startsWith("host-body-reclaim-")));
       state.cabinets = Array.isArray(msg.features) && msg.features.includes(BL.arcadeCabinets.FEATURE);
@@ -670,6 +679,7 @@
 
   const close = (room) => {
     bodyReclaim.close();
+    bodyPresence.close();
     window.clearInterval(pingTimer);
     pingTimer = 0;
     if (ws) {
@@ -708,7 +718,7 @@
     retryTimer = 0;
     if (stopped || ws || !state.me) return;
     setRoom("connecting");
-    ws = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/room?npc-authority=1`);
+    ws = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/room?npc-authority=1${BODY_PRESENCE_PREVIEW ? "&body-presence=1" : ""}`);
     ws.binaryType = "arraybuffer";
     ws.onmessage = onMessage;
     ws.onopen = () => {
@@ -1252,5 +1262,5 @@
     close("off");
   };
 
-  BL.net = { bodyReclaim, cabinetSeats, takeCabinet, leaveCabinet, get cabinet() { return cabinetSeat; }, handoffBody, hockeyTables, subscribeHockey, sendHockey, subscribeHighscores, subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribeChalk, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendGhost, subscribeGhost, sendThump, subscribeThump, sendGhostState, subscribeGhostState, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
+  BL.net = { bodyPresence, bodyReclaim, cabinetSeats, takeCabinet, leaveCabinet, get cabinet() { return cabinetSeat; }, handoffBody, hockeyTables, subscribeHockey, sendHockey, subscribeHighscores, subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribeChalk, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendGhost, subscribeGhost, sendThump, subscribeThump, sendGhostState, subscribeGhostState, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
 })();

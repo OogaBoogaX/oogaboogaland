@@ -199,20 +199,32 @@ test('independent source player factory follows grant/ACK ownership without cons
   server.sim.activate();
   const snapshot = () => server.codec.records.transfer(server.codec.capture());
   const adapter = B.clankerBodyTransfer.reclaimAdapter({ world: offer().world,
-    createBody(_, preview) {
+    createBody(preparation, preview) {
+      assert.equal(preparation.world, offer().world, 'factory receives an isolated preparation each time');
+      assert.throws(() => adapter.prepare(offer()), /transfer/, 'factory cannot reenter and leak a second preparation');
+      preparation.world = 'factory-mutated-copy';
       const body = makeBody(preview ? B.scene.createNode() : root);
       if (preview) previews++; else clientBody = body;
       return body.sim;
-    }, attach(body, preparation, view) {
+    }, attach(body, preparation, view, scope) {
       assert.equal(body, clientBody.sim); assert.equal(preparation.bodyId, offer().bodyId);
+      assert.equal(preparation.world, offer().world, 'factory mutation cannot change scene attachment identity');
+      assert.throws(() => adapter.activate(resource), /transfer/, 'attachment cannot recursively activate twice');
+      assert.deepEqual({ ...scope }, { world: offer().world, epoch: 2, revision: 20 }, 'scene gets the final private receipt scope');
+      scope.revision = 99;
+      assert.equal(body.player.root.parent, root, 'live attachment sees the original scene root');
+      assert.equal(body.player.root.visible, true);
       attachedView = view; activated++; return true;
     }, detach() {} });
   const prepare = adapter.prepare;
   adapter.prepare = preparation => (resource = prepare(preparation));
   const h = harness(adapter);
+  const shown = node => { let found = false; B.scene.traverseVisible(root, n => { if (n === node) found = true; }); return found; };
   try {
     const initial = snapshot();
     h.client.message(offer()); await flush();
+    const staging = clientBody.sim.list[0].root.parent;
+    assert.notEqual(staging, root); assert.equal(staging.parent, root); assert.equal(staging.visible, false);
     assert.equal(clientBody.sim.activate(), false, 'dormant body has no restored player');
     assert.throws(() => adapter.capture(resource), /transfer/);
     assert.equal(clientBody.sim.control({ x: 1 }), false);
@@ -224,6 +236,10 @@ test('independent source player factory follows grant/ACK ownership without cons
     const final = active(snapshot());
     final.transfer.view.equipment = { mode: "carry" };
     assert.equal(h.client.message(final), true);
+    assert.equal(clientBody.sim.player.root.parent, staging);
+    assert.equal(staging.visible, false, 'restoring a rig cannot show a second body before committed live ACK');
+    assert.equal(shown(clientBody.sim.player.root), false, 'actual visible traversal skips the provisional rig');
+    assert.equal(shown(npc.root), true, 'staging never hides the independent NPC');
     assert.equal(clientBody.sim.active, false); assert.equal(clientBody.sim.update(.25), false);
     assert.equal(clientBody.sim.control({ jumpPressed: true }), false);
     assert.throws(() => adapter.capture(resource), /transfer/, 'no live capture before final live attachment');
@@ -231,6 +247,8 @@ test('independent source player factory follows grant/ACK ownership without cons
     assert.notEqual(clientBody.sim.player, npc); assert.notEqual(clientBody.sim.player.owner, npc.owner);
     assert.equal(npc.controlled, false); assert.equal(npc.remoteControlled, false);
     h.client.message(live()); assert.equal(activated, 1); assert.equal(clientBody.sim.active, true);
+    assert.equal(staging.parent, null, 'staging node is removed at live attachment');
+    assert.equal(shown(clientBody.sim.player.root), true, 'committed live attachment reveals the restored rig');
     assert.deepEqual(structuredClone(attachedView), final.transfer.view);
     attachedView.equipment.mode = "combat";
     assert.equal(final.transfer.view.equipment.mode, "carry", "scene attachment cannot mutate the final receipt");
@@ -280,6 +298,8 @@ test('page reclaim adapter fences changed placement and unwinds failed scene att
       const final = active(saved); final.transfer.world = terrainWorld;
       assert.equal(h.client.message(final), true);
       const entry = body.sim.player, before = structuredClone(body.codec.motion()), updates = entry.animation.updates;
+      const staging = entry.root.parent;
+      assert.equal(staging.visible, false, 'pending body remains hidden while geometry can change');
       assert.equal(body.sim.active, false); assert.equal(body.sim.control({ jumpPressed: true }), false);
       if (change === 'support-removed') f.removeSupport();
       if (change === 'obstacle-added') {
@@ -290,6 +310,7 @@ test('page reclaim adapter fences changed placement and unwinds failed scene att
       const accepted = ['unchanged', 'support-removed', 'support-before-apply'].includes(change);
       assert.equal(h.client.message(live()), accepted);
       assert.equal(body.sim.active, accepted); assert.equal(h.client.allows('pose', offer().bodyId), accepted);
+      assert.equal(staging.parent, null, 'success and refusal both release staging resources');
       assert.equal(releases, accepted ? 0 : 1);
       assert.deepEqual([entry.root.position.x, entry.root.position.y, entry.root.position.z,
         entry.drive.vx, entry.drive.vy, entry.drive.vz, entry.drive.grounded],

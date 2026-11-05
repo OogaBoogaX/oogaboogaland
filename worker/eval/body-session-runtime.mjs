@@ -16,11 +16,17 @@ const runtime = await import(pathToFileURL(join(dirname(packagePath), manifest.m
 const dir = await mkdtemp(join(tmpdir(), 'body-session-runtime-')), bundle = join(dir, 'worker.mjs');
 const roaming = process.argv.includes('--roaming'), steady = process.argv.includes('--steady'), deliver = process.argv.includes('--deliver');
 const events = process.argv.includes('--events');
+const cleanupAck = process.argv.includes('--cleanup-ack');
+assert.ok(!cleanupAck || events, '--cleanup-ack requires --events');
+const closeStorm = process.argv.includes('--close-storm');
+assert.ok(!closeStorm || !events && !steady && !deliver, '--close-storm measures finite explicit closes only');
 assert.ok(!events || !steady && !deliver, '--events measures finite lifecycle recovery only');
 assert.ok(!deliver || steady && roaming, '--deliver requires --steady --roaming');
 const pipeline = process.argv.includes('--pipeline'), cachedRoom = process.argv.includes('--cached-room');
 assert.ok(!cachedRoom || pipeline, '--cached-room requires --pipeline');
 const rolling = process.argv.includes('--rolling'), burst = process.argv.includes('--burst');
+const projectNearGate = process.argv.includes('--project-near-gate');
+assert.ok(!projectNearGate || pipeline && !rolling && !burst, '--project-near-gate requires the strict pipeline');
 assert.ok(!burst || pipeline && !rolling, '--burst requires --pipeline and excludes --rolling');
 assert.ok(!rolling || pipeline, '--rolling requires --pipeline');
 assert.ok(!pipeline || deliver, '--pipeline requires --deliver');
@@ -73,12 +79,12 @@ try {
       build.onLoad({ filter: /^fixture-cast$/, namespace: 'body-fixture' }, () => ({ loader: 'json',
         contents: JSON.stringify(Array.from({ length: 32 }, (_, i) => ({ handle: `fixture${i + 1}`, github_login: `fixture${i + 1}` }))) }));
     } }] });
-  for (const scenario of steady ? ['steady'] : process.argv.includes('--medium') ? ['unknown-medium'] : ['known-long', 'unknown-long', 'unknown-short']) {
+  for (const scenario of closeStorm ? ['serial-1', 'serial-15', 'serial-30', 'batch-30'] : steady ? ['steady'] : process.argv.includes('--medium') ? ['unknown-medium'] : ['known-long', 'unknown-long', 'unknown-short']) {
     const disk = join(dir, scenario), short = scenario.endsWith('short'), medium = scenario.endsWith('medium'), expired = !short && !medium; const epoch = deliver ? Date.now() : 100000; let now = epoch;
     const call = async (command, fields = {}, expectedError = null) => {
       const at = performance.now();
       const response = await bounded(mf.dispatchFetch('http://fixture.invalid', { method: 'POST',
-        body: JSON.stringify({ command, roaming, bodyLoads, rolling, burst, frameCount, epoch, now, ...fields }) }));
+        body: JSON.stringify({ command, roaming, bodyLoads, rolling, burst, projectNearGate, frameCount, epoch, now, ...fields }) }));
       if (response.status !== 200) throw Error(`local status ${response.status}: ${await response.text()}`);
       const out = await response.json(); out.wallMs = performance.now() - at;
       if (expectedError) assert.match(out.error, expectedError); else assert.equal(out.error, null);
@@ -96,6 +102,50 @@ try {
     let closeMs = null;
     if (scenario === 'known-long') closeMs = (await call('close', { ticket, refs, tokens: refs.map(r => r.token) })).wallMs;
     const before = (await call('inspect')).saved;
+    if (closeStorm) {
+      const count = Number(scenario.split('-')[1]), batch = scenario.startsWith('batch');
+      const closes = refs.slice(0, count).map(ref => ({
+        ref: { accountId: ref.accountId, generation: ref.generation, token: ref.token }, at: epoch + 250,
+      }));
+      const survivors = refs.slice(count).map(ref => ref.token), observations = [];
+      now = epoch + 500;
+      if (batch) observations.push(await call('event', { ticket, tokens: survivors, closes }));
+      else for (const close of closes) observations.push(await call('retained-close', { ticket, ref: close.ref, closedAt: close.at }));
+      const saved = (await call('inspect')).saved, records = saved.host.sessions.sessions;
+      assert.equal(records.length, 30);
+      assert.equal(records.filter(s => s.state === 'grace').length, count);
+      assert.equal(records.filter(s => s.state === 'live').length, 30 - count);
+      assert.deepEqual(saved.host.simulation, before.host.simulation, 'closes do no NPC work');
+      assert.equal(saved.host.runUntil, before.host.runUntil);
+      assert.equal(saved.host.leaseUntil, before.host.leaseUntil);
+      for (const record of records) {
+        const original = before.host.sessions.sessions.find(s => s.accountId === record.accountId);
+        for (const key of ['x', 'y', 'z', 'yaw', 'grounded']) assert.equal(record.motion[key], original.motion[key]);
+        if (record.state === 'grace') {
+          assert.equal(record.deadline, epoch + 60250);
+          assert.equal(record.motion.vx, 0); assert.equal(record.motion.vy, 0); assert.equal(record.motion.vz, 0);
+        }
+      }
+      assert.ok(observations.every(o => o.constructed === 0), 'no per-close body construction');
+      const duplicates = [];
+      for (const close of closes) duplicates.push(await call('retained-close', { ticket, ref: close.ref, closedAt: close.at }));
+      assert.ok(duplicates.every(o => o.writes === 0 && o.result.changed === false));
+      assert.deepEqual((await call('inspect')).saved, saved);
+      await mf.dispose(); mf = null; await start(disk);
+      assert.deepEqual((await call('inspect')).saved, saved, 'all frozen records survive reconstruction');
+      const verified = await call('verify', { reference: before.host.simulation });
+      assert.equal(verified.result.verified, 30); assert.equal(verified.result.npcSteps, 0);
+      results.push({ scenario, closedBodies: count, survivingLiveBodies: 30 - count,
+        operations: observations.length, operationMs: stats(observations.map(o => o.operationMs)),
+        wallMs: stats(observations.map(o => o.wallMs)), totalWallMs: observations.reduce((n, o) => n + o.wallMs, 0),
+        writes: observations.reduce((n, o) => n + o.writes, 0), writeBytes: observations.reduce((n, o) => n + o.writeBytes, 0),
+        reads: observations.reduce((n, o) => n + o.reads, 0), readBytes: observations.reduce((n, o) => n + o.readBytes, 0),
+        duplicateOperations: duplicates.length, duplicateWrites: 0, verifiedBodies: verified.result.verified,
+        persistedRestart: true, npcSteps: 0, bodyConstructions: 0,
+        observations: observations.map(({ operationMs, wallMs, reads, readBytes, writes, writeBytes, rootBytes, rowBytes }) =>
+          ({ operationMs, wallMs, reads, readBytes, writes, writeBytes, rootBytes, rowBytes })) });
+      await mf.dispose(); mf = null; continue;
+    }
     if (steady) {
       const until = async predicate => {
         const end = performance.now() + 5000;
@@ -178,7 +228,7 @@ try {
         if (cachedRoom && publication.result.roomState) roomState = publication.result.roomState;
         const finishedAt = performance.now();
         publications.push({ ...publication.result, startedAt: at, finishedAt, wallMs: finishedAt - at,
-          diagnosticMs: publication.diagnosticMs, phases: publication.phases });
+          diagnosticMs: publication.diagnosticMs, phases: publication.phases, timing: publication.publicationTiming });
         assert.ok(publications.length <= frameCount * 2, 'finite publication attempt bound');
         return publication.result;
       } });
@@ -349,22 +399,59 @@ try {
     }
     const verified = await call('verify', { reference: before.host.simulation }); assert.equal(verified.result.verified, 30);
     if (roaming) assert.equal(verified.result.npcSteps, events ? 0 : short ? 1 : medium ? 40 : 0);
+    let departureCleanup = null;
+    if (cleanupAck && expired) {
+      // The last body is gone, and both the finite run and its ownership lease
+      // have ended. Reacquire only to retain/acknowledge already-applied events.
+      now = epoch + 120001; const old = ticket;
+      ticket = (await call('cleanup-claim')).result;
+      await call('presence', { ticket: old }, /fenced/);
+      const retained = (await call('inspect')).saved;
+      const first = (await call('presence', { ticket })).result.frame;
+      assert.equal(first.views.length, 0); assert.equal(first.departures.length, 30);
+      const receipt = frame => ({ world: frame.world, epoch: frame.epoch, revision: frame.revision,
+        ids: frame.departures.slice(0, 15).map(p => p.id) });
+      await call('fail-ack', { ticket, receipt: receipt(first) }, /injected body rollback/);
+      assert.deepEqual((await call('inspect')).saved, retained);
+      const partial = await call('ack', { ticket, receipt: receipt(first) });
+      assert.equal(partial.result.changed, true); assert.equal(partial.constructed, 0);
+      const stale = await call('ack', { ticket, receipt: receipt(first) });
+      assert.equal(stale.result.superseded, true); assert.equal(stale.writes, 0);
+      assert.equal((await call('verify', { reference: before.host.simulation })).result.verified, 15);
+      const rest = (await call('presence', { ticket })).result.frame;
+      assert.equal(rest.departures.length, 15);
+      const final = await call('ack', { ticket, receipt: receipt(rest) });
+      assert.equal(final.result.changed, true); assert.equal(final.constructed, 0);
+      const empty = (await call('inspect')).saved;
+      assert.equal(empty.count, 0); assert.equal(empty.host.status, 'stopped');
+      assert.equal(empty.host.leaseUntil, now); assert.equal(empty.host.runUntil, retained.host.runUntil);
+      assert.deepEqual(empty.host.simulation, retained.host.simulation);
+      await call('cleanup-claim', {}, /cleanup unavailable/);
+      await mf.dispose(); mf = null; await start(disk);
+      assert.deepEqual((await call('inspect')).saved, empty);
+      assert.equal((await call('verify', { reference: before.host.simulation })).result.verified, 0);
+      departureCleanup = { acknowledged: 30, rollback: true, staleReceiptWrites: 0, stopped: true,
+        persistedRestart: true, bodyConstructions: 0,
+        partial: { wallMs: partial.wallMs, writes: partial.writes, writeBytes: partial.writeBytes, deletes: partial.deletes },
+        final: { wallMs: final.wallMs, writes: final.writes, writeBytes: final.writeBytes, deletes: final.deletes } };
+    }
     results.push({ scenario, coldBeginMs, coldRestartMs, admissionsMs: stats(admissions), closeMs,
       recoveryMs: stats(batches.map(b => b.wallMs)), over250ms: batches.filter(b => b.wallMs > 250).length,
       totalRecoveryMs: batches.reduce((n, b) => n + b.wallMs, 0),
       attemptedRecoveryWrites: batches.reduce((n, b) => n + b.writes, 0),
       serializedRecoveryWriteBytes: batches.reduce((n, b) => n + b.writeBytes, 0),
-      verifiedBodies: verified.result.verified, verifiedNpcSteps: verified.result.npcSteps, rollback: true, persistedRestart: true, staleOwnerFenced: !short, eventReads, batches });
+      verifiedBodies: verified.result.verified, verifiedNpcSteps: verified.result.npcSteps, rollback: true, persistedRestart: true, staleOwnerFenced: !short, eventReads, departureCleanup, batches });
     await mf.dispose(); mf = null;
   }
   assert.equal(deniedEgress, 0); assert.equal(logs.length, 0);
   console.log(JSON.stringify({ node: process.version, platform: process.platform, arch: process.arch,
-    miniflare: manifest.version, roaming, events, steady, deliver, pipeline, cachedRoom, rolling, burst, frameCount, clientDelayMs, bodyLoads, clientDecoders, npcStepLimit: roaming ? 4 : 8, sourceHashes, deniedEgress, logs: logs.length, results,
+    miniflare: manifest.version, roaming, events, closeStorm, cleanupAck, steady, deliver, pipeline, cachedRoom, rolling, burst, projectNearGate, frameCount, clientDelayMs, bodyLoads, clientDecoders, npcStepLimit: roaming ? 4 : 8, sourceHashes, deniedEgress, logs: logs.length, results,
     limitations: ['30 distinct actual player-body controllers with SQLite/session transactions, in independent authored empty meadows.',
       roaming ? 'Also 53 actual restricted roaming NPCs, sharing the host transaction but not world collision/ownership with the player fixtures.' : 'World is 64 KiB padding; no full-world NPC simulation.',
       deliver ? 'Real Room RPC and 32 protocol clients including one stalled receiver; no browser, live body transport or authenticated body reclaim. Cold requests include disposable bootstrap rigs.'
         : 'No browser, Room or live body transport. Cold requests include disposable bootstrap rigs; verify commands rebuild all30 outside host mutations.',
       'Measured wall time includes dispatch and diagnostic reads, not billed CPU, actual billing units or peak-memory certification.',
+      ...(projectNearGate ? ['Harness-only projection delayed until 50ms before the existing strict gate; final confirmation still waits for that gate. Fixed simulation arrival grid and production policy unchanged.'] : []),
       'Short recovery retains the same valid owner lease across orderly runtime reconstruction; long recovery obtains a replacement fence.',
       steady ? `Finite ${frameCount / 4}-second scheduled four-Hz trial, ${clientDelayMs}ms synthetic client delay; not full-world/network certification or abrupt eviction. Cached runtime differs from declared Wrangler.`
         : 'Finite fixed-clock recovery is not sustained four-Hz throughput or abrupt eviction. Cached runtime differs from declared Wrangler.',
