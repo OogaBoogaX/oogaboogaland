@@ -6446,9 +6446,21 @@
       return !!bed && !bedTaken(s.slot, e) && (!ctx.restPoseClear
         || ctx.restPoseClear(e, 2, s.pose, true, bed.x, bed.y, bed.z, bed.heading, null, 0, bed));
     };
+    let sleepBeamBudget = 1, sleepBeamBusy = false;
+    // Share one recovery across the population, including catch-up substeps. A
+    // blocked bed spends this frame's check too, then its usual retry delay lets
+    // other sleepers through. Queued gorillas hold their position instead of
+    // repeatedly collision-testing the same stalled route while another beams.
+    const beginSleepFrame = () => {
+      sleepBeamBudget = 1; sleepBeamBusy = false;
+      for (const e of list) if (e.sleep.stage === "beamOut" || e.sleep.stage === "beamIn") { sleepBeamBusy = true; break; }
+    };
     const beginSleepBeam = (e) => {
       const s = e.sleep;
+      if (sleepBeamBusy || sleepBeamBudget <= 0) return;
+      sleepBeamBudget--;
       if (e.controlled || e.remoteControlled || e.rage?.active || e.fire?.burning || e.fire?.rolling || !sleepLandingClear(e)) { s.beamWait = 1; return; }
+      sleepBeamBusy = true;
       s.stage = "beamOut"; s.beamTime = 0; e.speed = 0;
     };
     const updateSleepBeam = (e, dt) => {
@@ -6456,6 +6468,10 @@
       if (e.rage?.active || e.fire?.burning || e.fire?.rolling) { cancelSleepBeam(e); return; }
       s.beamTime += dt;
       if (s.stage === "beamOut" && s.beamTime >= SLEEP_BEAM) {
+        // Admission may have spent this rendered frame's clearance check in an
+        // earlier physics substep. Hold departure until the next frame's check.
+        if (sleepBeamBudget <= 0) { s.beamTime = SLEEP_BEAM; return; }
+        sleepBeamBudget--;
         if (!sleepLandingClear(e)) { cancelSleepBeam(e); s.beamWait = 1; return; }
         const bed = ctx.sleep.slots[s.slot];
         p.x = bed.x; p.y = bed.y; p.z = bed.z;
@@ -6510,6 +6526,13 @@
       if (s.stage === "beamOut" || s.stage === "beamIn") { updateSleepBeam(e, dt); return true; }
       if (s.stage === "go") {
         s.beamWait = Math.max(0, s.beamWait - dt);
+        if (s.stall >= SLEEP_BLOCKED && !s.beamWait && !e.jump.active && !e.climb.active && e.recover <= 0) {
+          e.speed = 0;
+          beginSleepBeam(e);
+          // Hold the last safe pose too; animating it would repeat full body
+          // collision checks for every queued sleeper in every substep.
+          return true;
+        }
         const last = !s.retrying && s.leg >= s.count - 1, gx = s.retrying ? s.retryX : s.path[s.leg * 2], gz = s.retrying ? s.retryZ : s.path[s.leg * 2 + 1], d = Math.hypot(gx - p.x, gz - p.z);
         if (d < (last || s.retrying ? SLEEP_ARRIVE : SLEEP_REACH)) {
           if (s.retrying) { s.retrying = false; s.stall += dt; }
@@ -7284,6 +7307,7 @@
     };
     const update = (dt) => {
       if (disposed || !(dt > 0)) return;
+      beginSleepFrame();
       if (ctx.sleep && !allAway) bedsToday();
       if (combatEnabled && rage) rage.frame(elapsed);
       if (labEscape && (!labEscape.active || labEscape.controlled || labEscape.fire.burning
