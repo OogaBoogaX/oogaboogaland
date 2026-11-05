@@ -556,8 +556,10 @@ publication at the instant another host takes over; Room's independent lease/CAS
 is the final admission gate. A future runner must account for the temporary frozen
 interval while an old Room lease expires, and explicitly drain sessions before
 release/migration. The helper deliberately never releases to browser AI on errors.
-It projects twice to detect superseded host state; the local projection measurement
-below excludes that coordinator, checkpoint validation/copying and RPC/storage cost.
+The original helper projected twice to detect superseded host state; the revision
+confirmation described below now avoids that duplicate projection. The local
+projection measurement below excludes coordination, checkpoint validation/copying
+and RPC/storage cost.
 
 The actual Room test now consumes committed VirtualHost frames and covers lost
 configure/publish replies, failed host writes, reconstruction of both objects,
@@ -1290,6 +1292,79 @@ freezing, full controller/body restoration, held-item binding, the browser's
 capability advertisement and disconnect presentation wiring remain unfinished.
 The renderer tests are headless scene-transform comparisons, not browser/GPU or
 production validation. Activation stays disabled and #377 remains open.
+
+### Combined local runtime cost and revision confirmation
+
+`worker/eval/host-cycle.mjs` runs a finite local workerd/SQLite host plus the actual
+Room RPC and WebSocket path. The bundle uses the actual managed rig/geometry code
+without a DOM; only its evaluator build maps `window` to `globalThis`. It supplies
+an authored cast, collision world, simulation clock, Ooga display templates and
+pilot/crew constants. No deployed file or environment gets that shim or preview
+configuration. The workload has 106 partial controllers, 53 managed Clanker rigs,
+30 retained sessions and 32 viewers for 12 measured cycles. One viewer withholds
+acknowledgments; the others validate persistent authority and sequence state.
+The evaluator also checks failed-write rollback, identical observer bytes,
+orderly workerd/SQLite reconstruction, timely same-body registry reclaim with
+unchanged inventory, stale-host rejection and an exact retained late-join frame.
+It does not perform browser body reclaim or prove the complete NPC world.
+
+Phase measurement identified publication as the larger cost. `confirmPoses`
+now re-reads and validates committed storage, checks ownership/lease/run deadlines
+and pending body recovery, and compares revision, logical time and run deadline.
+The coordinator uses this after Room RPCs instead of projecting the same immutable
+revision a second time. Every persisted mutation increments revision; pure,
+versioned projection remains required. The original frame and Room's independent
+packet/ownership checks are unchanged. A commit during the RPCs returns
+`superseded` without sending the older frame. This is still not an atomic commit
+across two objects. A publisher paired with an older host lacking revision
+confirmation refuses before configuring Room; it never falls back to browser AI.
+
+Consecutive final baseline (`383b23a4`) and changed runs on Node22.23.4/macOS arm64,
+Miniflare5.20261001.0-alpha/workerd1.20261001.1 measured:
+
+| Local wall time | Baseline p50 / p95 | Changed p50 / p95 |
+| --- | --- | --- |
+| Host tick | 40.647 / 63.757 ms | 43.062 / 56.308 ms |
+| Publication | 105.710 / 115.087 ms | 85.905 / 98.984 ms |
+| Paired tick + publication | 146.366 / 173.888 ms | 128.825 / 152.938 ms |
+
+Paired totals are measured per cycle, not sums of percentiles. A previous matched
+comparison measured 166.280→161.339 ms combined p95; the initial comparison was
+174.727→158.630 ms. The consistent reduction in publication work is supported by
+a regression requiring one projection, but these small samples do not establish
+a guaranteed speedup. The older 147.625 ms Node/mock tick result is a different
+runtime/fixture and must not be compared directly with these numbers. Local times
+include dispatch, SQLite, RPC, diagnostic responses and observer validation sharing
+one Node process. They are not isolated DO CPU or billed duration. Conservative
+Room rate-limit pacing is reported separately; this is not a demonstrated sustained
+4 Hz whole-world loop. The cached runtime differs from the declared Wrangler range.
+
+Both final runs retain the same 67,156-byte maximum host checkpoint and 6,359-byte
+maximum packet. They deliver 2,212,188 binary bytes in 405 envelopes across the
+bounded scenario (including initial/late-join frames); control/ACK bytes, browser
+rendering and voice are excluded. There are 18 attempted host writes / 1,139,635
+serialized bytes, including the intentionally rolled-back write. Those are
+logical instrumentation counters, **not billed storage writes/bytes**, and do not
+include Room's writes or platform overhead. Peak isolate memory, physical-phone
+cost and actual account usage remain unmeasured. No external request was attempted;
+no dependency was installed, account configuration read, resource provisioned or
+production loop enabled. Temporary SQLite and processes are disposed afterward.
+
+Run with `HOST_RUNTIME_PACKAGE` pointing to an already installed Miniflare package;
+`--smoke` uses two actors and two viewers. `HOST_CYCLE_SOURCE` may name local copies
+of exactly `virtual-host.js` and `host-room.js` for the baseline. The output records
+source hashes, environment, individual timings, assertions and failures. Runtime
+operations have 15-second timeouts and socket waits have 5-second limits. The
+initial evaluator build needed its synthetic cast import resolved explicitly;
+no assertion failed. Evidence: `verification-cycle-final-{before,after}.json` and
+`verification-cycle-{full-host,unit,build}.log`. Local checks:107host,408unit,
+320-script build. Existing Hub/browser STOP restrictions remain unchanged.
+
+**Activation remains blocked.** Full outer AI/world state, independent-track
+integration (#379), complete body/occupancy capture and direct browser restore,
+shared player presentation (#464), live disconnect effects, locked-runtime memory
+and combined production/account costs are still required. No limit or reservation
+was raised, and Tess remains excluded.
 
 ### Disconnect presentation, not yet connected to live sessions
 

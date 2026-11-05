@@ -319,10 +319,10 @@ test('committed host poses reach actual Room, reconcile lost replies and recover
     return result;
   } };
   // The world step is deliberately authored; projection and both authority implementations are real.
-  const project = createNpcPose(123, 1), actor = rig();
+  const project = createNpcPose(123, 1), actor = rig(); let projections = 0;
   const simulation = { checkpointBytes: 30 * 1024, version: 'bridge-fixture-1', initial: () => ({ x: 0, steps: 0 }), validate: s => Number.isFinite(s.x) && Number.isInteger(s.steps),
     step(s) { s.x++; s.steps++; }, project: () => ({ npcs: [], hub: { pile: 0 } }), npcFor: () => null, handoff: () => false,
-    poses(s) { actor.root.position.x = s.x; return project([{ index: 0, actor }]); } };
+    poses(s) { projections++; actor.root.position.x = s.x; return project([{ index: 0, actor }]); } };
   const make = () => new VirtualHost({ storage: store, simulation, sessionAdapter: { stepPassive: m => m }, clock: () => now });
   const first = make(), ticket = await first.begin('runner-a', 60000);
   let lostClaim = true, lostPublish = true;
@@ -331,7 +331,10 @@ test('committed host poses reach actual Room, reconcile lost replies and recover
     async publishNpcSnapshot(...args) { const result = await room.publishNpcSnapshot(...args); if (lostPublish) { lostPublish = false; throw Error('publish reply lost'); } return result; } };
   await assert.rejects(publishHostPoses(first, rpc, ticket), /explicit Room/);
   assert.equal(room.npcAuthority, null);
+  await assert.rejects(publishHostPoses({poses:()=>{throw Error('must not project');}},rpc,ticket,{acquire:true}),/confirmation required/);
+  const projectedBefore = projections;
   assert.equal((await publishHostPoses(first, rpc, ticket, { acquire: true })).status, 'reconciled');
+  assert.equal(projections, projectedBefore + 1, 'lost replies reconcile one validated projection, not two full rig rebuilds');
   assert.equal(saved.simulation.steps, 0); assert.equal(writes, 1, 'publication cannot step or rewrite host state');
   assert.equal(binary(a).length, 1); assert.equal(binary(b).length, 1);
   const read = wire.create(); read.accept(room.npcAuthorityStatus().authority);
@@ -361,6 +364,13 @@ test('committed host poses reach actual Room, reconcile lost replies and recover
   assert.equal(saved.simulation.steps, 28, 'bounded catch-up occurs only in tick');
   assert.equal(restoredRoom.npcAuthority.epoch, next.fence);
   assert.equal(binary(b).length, 2, 'one new credit after explicit authority replacement');
+  const deliveries = binary(a).length; let intervening = true;
+  const interleaved = { npcAuthorityStatus: async value => {
+    if (intervening) { intervening = false; now += 250; h.at(now); await resumed.tick(next); }
+    return restoredRoom.npcAuthorityStatus(value);
+  }, publishNpcSnapshot: (...args) => restoredRoom.publishNpcSnapshot(...args) };
+  assert.equal((await publishHostPoses(resumed,interleaved,next)).status,'superseded');
+  assert.equal(binary(a).length, deliveries, 'a commit during Room RPCs cannot publish the previously projected revision');
   const beforeRelease = restoredRoom.npcAuthorityStatus().authority, latestRoomFrameBytes = h.stored.get(authority.ROOM_NPC.key).frame.byteLength;
   await restoredRoom.configureNpcAuthority(beforeRelease.revision, { mode: 'browser', world: next.world, epoch: next.fence, owner: next.owner });
   await assert.rejects(publishHostPoses(resumed, restoredRoom, next), /explicit Room/);

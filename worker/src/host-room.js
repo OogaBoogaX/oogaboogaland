@@ -7,6 +7,7 @@ const compatible = (a, format) => a?.v === (format ? 2 : 1) && a.format === form
 
 export async function publishHostPoses(host, room, ticket, { acquire = false, format } = {}) {
   if (format !== undefined && format !== "mixed-1") fail("unsupported host pose format");
+  if (typeof host.confirmPoses !== "function") fail("host revision confirmation required");
   ticket = { ...ticket };
   const snapshot = await host.poses(ticket, { format });
   if (snapshot.format !== format) fail("host pose format mismatch");
@@ -39,9 +40,9 @@ export async function publishHostPoses(host, room, ticket, { acquire = false, fo
   const roomTicket = { ...authority, owner: ticket.owner };
   // Recheck host fencing after the RPCs. If a new owner took over while Room
   // was being configured, leave followers frozen for the new owner to recover.
-  const fresh = await host.poses(ticket, { format });
-  if (fresh.format !== format) fail("host pose format mismatch");
-  if (fresh.sequence !== snapshot.sequence) return { status: "superseded", revision: authority.revision };
+  if (!await host.confirmPoses(ticket, { sequence: snapshot.sequence, at: snapshot.at, runUntil: snapshot.runUntil })) {
+    return { status: "superseded", revision: authority.revision };
+  }
   try {
     return { status: "published", ...await room.publishNpcSnapshot(roomTicket, snapshot.sequence, snapshot.frame) };
   } catch (error) {

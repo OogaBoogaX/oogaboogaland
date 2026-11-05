@@ -103,6 +103,7 @@ test("partially recovered state cannot publish poses or advance NPC time, and su
   let last = await h.host.tick(ticket, []);
   assert.equal(last.recovering, true); assert.equal(last.steps, 0); assert.equal(h.read().simulation.steps, 0);
   await assert.rejects(h.host.poses(ticket), /body recovery pending/);
+  await assert.rejects(h.host.confirmPoses(ticket,{sequence:h.read().revision,at:h.read().simulatedAt,runUntil:h.read().runUntil}), /body recovery pending/);
   let commits = 1;
   while (last.work.pendingSteps) {
     last = await h.make().tick(ticket, []); commits++;

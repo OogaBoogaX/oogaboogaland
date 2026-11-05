@@ -109,7 +109,23 @@ test("pose publication requires a valid adapter, cannot mutate saved state, and 
   adapter.poses = () => project([{ index: 0, actor }]);
   h.at(101000);
   await assert.rejects(h.host.poses(t), /closed/);
+  await assert.rejects(h.host.confirmPoses(t, first), /closed/);
   assert.equal(h.store.writes, 1);
+});
+
+test("pose revision confirmation validates committed state and fences changes without reprojecting or renewing",async()=>{
+  const actor=rig(),project=createNpcPose(123,1);let projections=0;
+  const h=harness({...simulation,poses(){projections++;return project([{index:0,actor}]);}}),ticket=await h.host.begin('owner',60000);
+  const frame=await h.host.poses(ticket),before=h.store.read();
+  assert.equal(await h.host.confirmPoses(ticket,frame),true);assert.equal(projections,1);assert.deepEqual(h.store.read(),before);
+  for(const delta of [{at:frame.at+1},{runUntil:frame.runUntil+1},{sequence:frame.sequence+1}])assert.equal(await h.host.confirmPoses(ticket,{...frame,...delta}),false);
+  await assert.rejects(h.host.confirmPoses(ticket,{...frame,sequence:NaN}),/invalid pose revision/);
+  h.at(100250);h.store.failNext();await assert.rejects(h.host.tick(ticket),/storage unavailable/);
+  assert.equal(await h.make().confirmPoses(ticket,frame),true,'failed write cannot invalidate the committed revision');
+  await h.host.tick(ticket);assert.equal(await h.host.confirmPoses(ticket,frame),false);assert.equal(projections,1);
+  const valid=h.store.read();h.store.corrupt({...valid,simulation:{...valid.simulation,x:Infinity}});
+  await assert.rejects(h.host.confirmPoses(ticket,frame),/nonfinite/);h.store.corrupt(valid);
+  h.at(110250);await h.make().claim('next');await assert.rejects(h.host.confirmPoses(ticket,frame),/fenced/);
 });
 
 test("host progresses with zero players and persists simulation before returning snapshots", async () => {

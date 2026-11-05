@@ -272,10 +272,7 @@ export class VirtualHost {
     if (format !== undefined && format !== "mixed-1") fail("unsupported host pose format");
     if (typeof this.simulation.poses !== "function") fail("NPC pose adapter required");
     return this.transaction(async function(tx) {
-      const now = this.now(), r = await this.read(tx);
-      this.owns(r, ticket, now);
-      if (r.status !== "running" || now >= r.runUntil) fail("run closed to pose publication");
-      if (r.sessions?.sessions.some(s => s.state === "grace" && s.stepAt < Math.min(r.sessions.clock, s.deadline))) fail("body recovery pending");
+      const r = await this.publicationRecord(tx, ticket);
       const queries = this.simulation.readQueries?.(r.simulation);
       if (queries?.then || queries && typeof queries.npcFor !== "function") fail("invalid simulation queries");
       const frame = typeof queries?.poses === "function" ? queries.poses(format) : this.simulation.poses(structuredClone(r.simulation), format);
@@ -283,6 +280,27 @@ export class VirtualHost {
       if (!globalThis.BL.npcAuthority.posesFor(authority, frame, format === "mixed-1")) fail("invalid host poses");
       return { ticket: this.ticket(r), sequence: r.revision, at: r.simulatedAt,
         runUntil: r.runUntil, ...(format ? { format } : {}), frame: frame.slice(0) };
+    });
+  }
+
+  async publicationRecord(tx, ticket) {
+    const now = this.now(), r = await this.read(tx);
+    this.owns(r, ticket, now);
+    if (r.status !== "running" || now >= r.runUntil) fail("run closed to pose publication");
+    if (r.sessions?.sessions.some(s => s.state === "grace" && s.stepAt < Math.min(r.sessions.clock, s.deadline))) fail("body recovery pending");
+    return r;
+  }
+
+  // Recheck the exact committed revision after Room RPCs without projecting the
+  // same deterministic rigs again. Every persisted mutation increments revision;
+  // this still validates storage, ownership, deadlines and pending body recovery.
+  // It is not a frame validator or a substitute for Room's independent fence.
+  async confirmPoses(ticket, { sequence, at, runUntil }) {
+    if (!time(sequence) || !sequence || !time(at) || !time(runUntil)) fail("invalid pose revision");
+    if (typeof this.simulation.poses !== "function") fail("NPC pose adapter required");
+    return this.transaction(async function(tx) {
+      const r = await this.publicationRecord(tx, ticket);
+      return r.revision === sequence && r.simulatedAt === at && r.runUntil === runUntil;
     });
   }
 
