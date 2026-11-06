@@ -4857,6 +4857,7 @@ const mempoolFeedChecks = async () => {
 // The totems' feed in Node: the Worker's summary as the Worker answers it, and a host without it, no network.
 const totemFeedChecks = async () => {
   const source = await readFile(new URL("../src/js/totem-feed.js", import.meta.url), "utf8");
+  const layout = await readFile(new URL("../src/js/totem-layout.js", import.meta.url), "utf8");
   const settle = () => new Promise((r) => setTimeout(r, 0));
   const reply = (status, body, headers = {}) => ({ status, ok: status >= 200 && status < 300, headers: { get: (k) => headers[k] ?? null }, json: async () => body });
   let clock = Date.now();
@@ -4866,6 +4867,7 @@ const totemFeedChecks = async () => {
     const context = { Date: Clock, location: { protocol }, document: { hidden: false, addEventListener() {}, removeEventListener() {} },
       window: { setInterval: (fn) => { ticks.push(fn); return 1; }, clearInterval() {} },
       fetch: async (url, options = {}) => { asked.push({ url, tag: options.headers?.["if-none-match"] || "" }); return answer(url, asked.length); } };
+    runInNewContext(layout, context);
     runInNewContext(source, context);
     const feed = context.window.BL.totemFeed;
     feed.subscribe((e) => events.push(e));
