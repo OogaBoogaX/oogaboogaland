@@ -697,7 +697,10 @@
       el.bananaRecent.append(li);
       return { li, name, label, badge, amountText, message, messageText };
     }));
-    const leaderRows = donorRows || (donorRows = Array.from({ length: 10 }, (_, i) => {
+    // One row a ranked donor, made as the board first grows to it and kept for the page life: the board scrolls inside
+    // its five-row window, and both boards it shows hold at most 256 (the API's and the game's demo donors).
+    const leaderRows = donorRows || (donorRows = []);
+    const leaderRow = (i) => {
       const li = document.createElement("li"), rank = document.createElement("span"), name = document.createElement("span"), amount = document.createElement("strong");
       const nameText = document.createTextNode(""), amountText = document.createTextNode("");
       rank.className = "banana-rank"; rank.textContent = String(i + 1).padStart(2, "0");
@@ -705,11 +708,12 @@
       amount.className = "banana-amount"; amount.append(amountText);
       li.append(rank, name, amount); li.hidden = true; el.bananaLeaders.append(li);
       return { li, name, nameText, amountText };
-    }));
-    // The recent list's checkbox keeps it to tips at or above the message bar, remembered in this browser.
+    };
+    // The recent list's checkbox keeps it to tips at or above the message bar: on until the visitor turns it off,
+    // and their choice either way remembered in this browser.
     const RECENT_BAR_KEY = "ooga-recent-bar";
-    let recentBarOnly = false;
-    try { recentBarOnly = localStorage.getItem(RECENT_BAR_KEY) === "1"; } catch { /* no storage: shown unfiltered */ }
+    let recentBarOnly = true;
+    try { recentBarOnly = localStorage.getItem(RECENT_BAR_KEY) !== "0"; } catch { /* no storage: on, as for a first visit */ }
     el.bananaRecentBar.checked = recentBarOnly;
     on(el.bananaRecentBar, "change", () => {
       recentBarOnly = el.bananaRecentBar.checked;
@@ -739,6 +743,7 @@
       const ranked = missingSats ? [] : real ? entries || [] : (entries || []).slice().sort((a, b) =>
         b[donorUnit] - a[donorUnit] || b[donorUnit === "bananas" ? "sats" : "bananas"] - a[donorUnit === "bananas" ? "sats" : "bananas"]
         || a.handle.localeCompare(b.handle));
+      while (leaderRows.length < ranked.length) leaderRows.push(leaderRow(leaderRows.length));
       for (let i = 0; i < leaderRows.length; i++) {
         const entry = ranked[i], row = leaderRows[i];
         row.li.hidden = !entry;
