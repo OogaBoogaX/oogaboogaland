@@ -1000,6 +1000,18 @@ body[data-active-scene="hub"] .home-link {
   padding: 12px 12px 10px;
 }
 .banana-slab > section { flex: none; }
+/* A phone on its side leaves the drawer under 100px: too short to stack the title, the slab and a 44px Feed the
+   Oogas. There the three stand side by side, the slab taking the height and scrolling, Feed at the panel's foot. */
+@media (pointer: coarse) and (orientation: landscape) and (max-height: 500px) {
+  .sheet[data-dock="bottom"] .panel[data-panel="bananas"] {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .sheet[data-dock="bottom"] .panel[data-panel="bananas"] > .panel-title { grid-column: 2; align-self: start; }
+  .sheet[data-dock="bottom"] .panel[data-panel="bananas"] > .banana-slab { grid-column: 1; grid-row: 1; }
+  .sheet[data-dock="bottom"] .panel[data-panel="bananas"] > .feed-open { grid-column: 3; align-self: end; width: auto; }
+}
 .banana-leaders,
 .banana-recent-list {
   /* One height for both, however few entries either holds. */

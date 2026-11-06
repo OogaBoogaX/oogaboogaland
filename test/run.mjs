@@ -8913,10 +8913,12 @@ const BANANA_LISTS = `(() => {
     const last = items.at(-1).getBoundingClientRect(), ok = inside(last, list.getBoundingClientRect()) && inside(last, slab.getBoundingClientRect()) && footed();
     list.scrollTop = 0; slab.scrollTop = 0; return ok;
   };
-  // Feed the Oogas whole inside the panel and the drawer, with the slab ending above it.
+  // Feed the Oogas whole at the foot of the panel and inside the drawer, at its full touch height, the slab
+  // ending above it or, on a drawer too short to stack them, beside it, never under it.
   const footed = () => {
-    const f = feed.getBoundingClientRect(), p = panel.getBoundingClientRect(), d = body.getBoundingClientRect();
-    return !!feed.getClientRects().length && f.height > 0 && inside(f, p) && inside(f, d) && slab.getBoundingClientRect().bottom <= f.top + 0.5;
+    const f = feed.getBoundingClientRect(), p = panel.getBoundingClientRect(), d = body.getBoundingClientRect(), s = slab.getBoundingClientRect();
+    const apart = s.bottom <= f.top + 0.5 || s.right <= f.left + 0.5;
+    return !!feed.getClientRects().length && f.height >= 44 && inside(f, p) && inside(f, d) && p.bottom - f.bottom <= 16 && apart;
   };
   panel.scrollTop = 0; body.scrollTop = 0; slab.scrollTop = 0;
   const out = { visible: BL.sheet.visible(panel), donors: __ooga.game.state.donors.length, rows: rows.length,
@@ -14544,10 +14546,23 @@ const phone = (id, { card = null, play = null, required, sheet = false }) => ({ 
     seen.empty = await b.evaluate(BANANA_LISTS);
     await b.evaluate(SEED_DONORS(12, "phone"));
     seen.lists = await b.evaluate(BANANA_LISTS);
+    // The same phone on its side, 844x390, where the default drawer is shortest: Feed the Oogas still stands whole.
+    if (id === "hub") {
+      await b.send("Emulation.setDeviceMetricsOverride", { width: PHONE_SIZE.h, height: PHONE_SIZE.w, deviceScaleFactor: 2, mobile: true });
+      try {
+        await b.evaluate(`window.dispatchEvent(new Event("resize"))`); await b.sleep(300);
+        seen.landscape = await b.evaluate(`(() => { const s = document.getElementById("sheet");
+          return { coarse: matchMedia("(pointer: coarse)").matches, open: s.dataset.open === "true", sized: s.dataset.sized, drawer: Math.round(s.getBoundingClientRect().height), width: innerWidth, height: innerHeight, lists: ${BANANA_LISTS} }; })()`);
+      } finally {
+        await b.send("Emulation.setDeviceMetricsOverride", { width: PHONE_SIZE.w, height: PHONE_SIZE.h, deviceScaleFactor: 2, mobile: true });
+        await b.evaluate(`window.dispatchEvent(new Event("resize"))`); await b.sleep(300);
+      }
+    }
     await b.evaluate(`__ooga.hud.selectTab("roster")`);
   }
   const ok = (!card || seen.card.touch.coarse && seen.card.touch.touchWording && seen.card.bad.length === 0 && seen.card.closed) && seen.play.length === 0 && (!sheet || seen.sheet.length === 0 && seen.actions
     && footMatches(seen.feet.login) && footMatches(seen.feet.signedIn) && footMatches(seen.feet.feed) && bananaListsHold(seen.lists) && seen.lists.slabScrolls && bananaFeedFooted(seen.empty)
+    && (id !== "hub" || seen.landscape.coarse && seen.landscape.open && seen.landscape.width === 844 && seen.landscape.drawer <= Math.ceil(390 * 0.24) && bananaListsHold(seen.landscape.lists))
     && seen.empty.rows === seen.empty.donors && seen.empty.latest === seen.empty.retained && bananaWindowsMatch(seen.empty, seen.lists));
   record(`${id} phone: ${card ? "the title card reads in touch words and its go button starts the game, then " : ""}nothing is clipped, wrapped by accident or off screen, and every control is under a thumb${sheet ? ", with the sheet open and the sticks still free, its footers as roomy under as over them, and the Bananas slab scrolling above Feed the Oogas, which stays whole at the panel's foot, over lists that each scroll in a five-row window" : ""}`, ok, JSON.stringify(seen));
 } });
