@@ -22257,7 +22257,136 @@ scene("hangar", { label: "controls reference forklift", query: "character=portla
   record("controls reference forklift: running cab shows drive, forks and horn, powered-off cab omits them, and touch names real cab targets", r.seated&&["w","a","s","d","r","f","h"].every(k=>keys(r.keyboard).includes(k))&&!keys(r.keyboard).includes("shiftleft")&&!/Walk|Run/.test(text(r.keyboard))&&["Tap fork stick","Tap steering wheel","Tap ignition key"].every(s=>text(r.touch).includes(s))&&!keys(r.off).some(k=>["w","r","f","h"].includes(k)),JSON.stringify(r));
 } }] });
 scene("hub", { label: "side panel", query: "pos=0", steps: [hubSheetPersistence, hubMuteKey, hubChat] });
+// Private conversations (#188) on a signed-in page: the room is a stand-in, and the other person, Anna, is the real
+// sealing code on the same pad, so what the page sends is read as Anna's page would read it.
+const hubPrivateChat = { name: "private chat", why: "rule: two players who hold the same pad talk privately from the Players tab while the room carries only sealed frames; a pad for someone else is refused by name, the talk carries on across a scene trip, and a pad made here downloads for the two of them", run: async (b) => {
+  await openWithSheetState(b, hubPage(src, "pos=0"), { open: true, tab: "players" });
+  await b.evaluate(`(async () => {
+    const W = window.__pm = { fetch: window.fetch, WebSocket: window.WebSocket, sockets: [], out: [], wire: [], heard: [], downloads: [] };
+    window.fetch = (url, options) => String(url) === "/api/me" ? Promise.resolve({ ok: true, status: 200, headers: { get: () => "application/json" }, json: async () => ({ player: { id: 71, login: "Tester", display: "Tester" } }) }) : W.fetch(url, options);
+    window.WebSocket = class { static OPEN = 1; constructor() { this.readyState = 1; W.sockets.push(this); } send(text) { W.out.push(text); } close() { this.readyState = 3; } };
+    BL.net.state.started = true; BL.net.state.resolved = false;
+    await BL.net.recheck();
+    W.room = (m) => W.sockets.at(-1).onmessage({ data: JSON.stringify(m) });
+    W.room({ t: "welcome", you: { id: 71 }, now: Date.now(), features: ["chat-unicode-v1", "pm-v1"], players: [{ id: 2, login: "anna", display: "Anna", zone: "outside" }] });
+    const P = BL.oneTimePad, random = (v) => crypto.getRandomValues(v), mem = new Map();
+    W.file = P.make("anna", "tester", 16384, random);
+    W.wrong = P.make("anna", "cy", 16384, random);
+    const pad = P.parse(W.file.slice()), b64 = (u) => btoa(String.fromCharCode(...u)), unb64 = (t) => Uint8Array.from(atob(t), (ch) => ch.charCodeAt(0));
+    W.anna = P.session({ subtle: crypto.subtle, pad, role: 0, sum: await P.digest(crypto.subtle, pad), random,
+      ledger: P.ledger({ get: (k) => mem.has(k) ? mem.get(k) : null, set: (k, v) => mem.set(k, v) }, (n, fn) => Promise.resolve().then(fn), pad, 0),
+      send: (frame) => W.room({ t: "pm", op: "data", from: 2, d: b64(frame) }) });
+    // What the page sent, read as the room would: frames go to Anna, and the room answers each one ok.
+    W.flush = async () => {
+      const sent = [];
+      for (const text of W.out.splice(0)) {
+        const m = JSON.parse(text);
+        if (m.t !== "pm") continue;
+        W.wire.push(text); sent.push(m.op === "data" ? { op: m.op, to: m.to } : m);
+        // W.refuse frames are refused for the room's rate instead: they never reach Anna.
+        if (m.op === "data" && W.refuse > 0) { W.refuse--; W.room({ t: "pm", op: "refused", to: 2, n: m.n, reason: "rate" }); }
+        else if (m.op === "data") { W.heard.push(await W.anna.heard(unb64(m.d))); W.room({ t: "pm", op: "ok", to: 2, n: m.n }); }
+      }
+      return sent;
+    };
+    W.load = (bytes) => { const dt = new DataTransfer(); dt.items.add(new File([bytes], "pad.oogapad")); const input = document.getElementById("pm-file"); input.files = dt.files; input.dispatchEvent(new Event("change")); };
+    W.wait = async (test) => { for (let i = 0; i < 150 && !test(); i++) await new Promise((r) => setTimeout(r, 20)); return !!test(); };
+    W.lock = () => document.querySelector('#players-panel li[data-id="2"] .players-private');
+    W.view = () => { const s = BL.privateChat.stats(), panel = document.getElementById("chat-panel");
+      return { phase: s.phase, ready: s.ready, padLoaded: s.padLoaded, started: s.started, unrecorded: s.unrecorded, queued: s.queued, lines: s.lines, note: document.getElementById("pm-note").textContent, shown: BL.sheet.visible(panel), privateView: panel.dataset.view === "private",
+        input: !document.getElementById("pm-input").disabled, switcher: !document.getElementById("pm-switch").hidden }; };
+    W.say = (text) => { const input = document.getElementById("pm-input"); input.value = text; input.dispatchEvent(new Event("input")); document.getElementById("pm-form").requestSubmit(); };
+  })()`);
+  const asked = await b.evaluate(`(async () => { const W = __pm; await W.wait(() => W.lock() && !W.lock().hidden); const offered = !!W.lock() && !W.lock().hidden; W.lock().click();
+    const sent = await W.flush(); W.room({ t: "pm", op: "inviting", to: 2 }); const waiting = W.view();
+    W.room({ t: "pm", op: "open", with: 2 }); await W.anna.start({ fresh: true }); const open = W.view();
+    W.load(W.wrong); await W.wait(() => W.view().note.includes("not you")); const wrong = W.view();
+    // A file this browser has no record of waits for the visitor to say it is new.
+    W.load(W.file); await W.wait(() => W.view().unrecorded); const unrecorded = { ...W.view(), confirm: !document.getElementById("pm-confirm").hidden, sent: W.out.length };
+    document.getElementById("pm-fresh").click(); await W.wait(() => W.view().started); await W.flush(); await W.wait(() => W.view().ready); await W.flush();
+    return { offered, sent, waiting, open, wrong, unrecorded, ready: W.view(), annaHeard: W.heard.map((r) => r.kind), annaReady: W.anna.ready }; })()`);
+  record("private chat: the lock on another player's row asks them, the Ooga Chat panel turns to the private view, a pad made for someone else is refused by name, a file this browser never used waits for the visitor to say it is new, and the line opens once both sides acknowledge",
+    asked.offered && asked.sent.length === 1 && asked.sent[0].op === "invite" && asked.sent[0].to === 2 && asked.waiting.phase === "inviting" && asked.waiting.shown && asked.waiting.privateView && asked.waiting.switcher
+      && asked.open.phase === "open" && asked.open.queued === 1 && !asked.open.input && /delete every copy when you're done/.test(asked.open.note) && asked.wrong.note === "That pad is for anna and cy, not you." && !asked.wrong.padLoaded
+      && asked.unrecorded.unrecorded && asked.unrecorded.confirm && !asked.unrecorded.started && asked.unrecorded.sent === 0 && /no record of this pad/.test(asked.unrecorded.note)
+      && asked.ready.ready && asked.ready.input && asked.annaHeard.includes("hello") && asked.annaHeard.includes("ready") && asked.annaReady, JSON.stringify(asked));
+  const talk = await b.evaluate(`(async () => { const W = __pm; W.say("hi anna, ünïcode 🦍"); await W.wait(() => W.view().lines.length === 1); await W.flush(); await W.wait(() => W.view().lines[0].state === "sent");
+    await W.anna.say("hello tester"); await W.wait(() => W.view().lines.length === 2);
+    const records = Object.keys(localStorage).filter((k) => k.startsWith("oogaboogaland.pad.")).map((k) => localStorage.getItem(k));
+    return { view: W.view(), anna: W.heard.at(-1), wire: W.wire.join("\\n"), records }; })()`);
+  record("private chat: a line reaches Anna intact while the room carries only a sealed frame of it, Anna's answer shows, and the page keeps only how much of the pad is used",
+    talk.anna.kind === "text" && talk.anna.text === "hi anna, ünïcode 🦍" && !talk.wire.includes("hi anna") && !talk.wire.includes("ünïcode") && talk.view.lines.map((l) => l.text).join() === "hi anna, ünïcode 🦍,hello tester"
+      && talk.view.lines[0].own && talk.view.lines[0].state === "sent" && !talk.view.lines[1].own && talk.records.length === 1 && /^\{"v":1,"sk":\d+,"send":\d+,"rk":\d+,"recv":\d+,"stop":""\}$/.test(talk.records[0]), JSON.stringify(talk));
+  const retry = await b.evaluate(`(async () => { const W = __pm;
+    W.refuse = 1; W.say("one more"); await W.wait(() => W.view().lines.length === 3); await W.flush(); await W.wait(() => W.view().lines[2].state === "failed");
+    const refused = W.view().lines[2], button = !!document.querySelector("#pm-log .pm-retry");
+    W.say("and another"); await W.wait(() => W.view().lines.length === 4); await W.flush();
+    document.querySelector("#pm-log .pm-retry").click(); await W.wait(() => W.out.length > 0); await W.flush();
+    await W.wait(() => W.view().lines[3].state === "sent");
+    return { refused, button, anna: W.heard.slice(-2), stopped: W.anna.stopped, lines: W.view().lines.slice(2), ready: W.view().ready }; })()`);
+  record("private chat: a line the room refused shows Not sent with Retry, and Retry after a later line got through reaches Anna on fresh bytes without stopping the pad",
+    retry.refused.state === "failed" && retry.button && retry.anna.map((r) => r.text || r.kind).join() === "and another,one more" && !retry.stopped && retry.ready
+      && retry.lines.map((l) => l.text + ":" + l.state).join() === "and another:sent,one more:sent", JSON.stringify(retry));
+  // A second pad in the same conversation, as when the first runs out: its lines are numbered afresh, so the room's
+  // answers and Retry must reach only the new session's lines, and the old pad's unsent line can't be retried.
+  const second = await b.evaluate(`(async () => { const W = __pm, P = BL.oneTimePad, random = (v) => crypto.getRandomValues(v);
+    W.refuse = 1; W.say("lost with the old pad"); await W.wait(() => W.view().lines.length === 5); await W.flush(); await W.wait(() => W.view().lines[4].state === "failed");
+    // Anna's frames wait until this page has the new pad, then go straight through.
+    const file = P.make("anna", "tester", 16384, random), pad = P.parse(file.slice()), mem = new Map(), held = [];
+    let direct = false;
+    const b64 = (u) => btoa(String.fromCharCode(...u)), annaSend = (frame) => { const m = { t: "pm", op: "data", from: 2, d: b64(frame) }; if (direct) W.room(m); else held.push(m); };
+    W.anna = P.session({ subtle: crypto.subtle, pad, role: 0, sum: await P.digest(crypto.subtle, pad), random,
+      ledger: P.ledger({ get: (k) => mem.has(k) ? mem.get(k) : null, set: (k, v) => mem.set(k, v) }, (n, fn) => Promise.resolve().then(fn), pad, 0),
+      send: (frame) => annaSend(frame) });
+    await W.anna.start({ fresh: true });
+    W.load(file); await W.wait(() => W.view().unrecorded); document.getElementById("pm-fresh").click(); await W.wait(() => W.view().started);
+    direct = true; for (const m of held.splice(0)) W.room(m);
+    await W.flush(); await W.wait(() => W.view().ready); await W.flush();
+    W.say("on the new pad"); await W.wait(() => W.view().lines.length === 6); await W.flush();
+    await W.wait(() => W.view().lines[5]?.state === "sent", 2000);
+    const rows = [...document.querySelectorAll("#pm-log .chat-row")];
+    const before = { lines: W.view().lines.slice(4), retries: document.querySelectorAll("#pm-log .pm-retry").length, anna: W.heard.at(-1), ready: W.view().ready, rows: rows.length };
+    // The room holds one of Anna's lines back: the page says it hasn't arrived once her next line shows, then shows it late.
+    direct = false; await W.anna.say("held back"); direct = true;
+    await W.anna.say("after it"); await W.wait(() => W.view().lines.length === 8);
+    const gap = W.view().lines.slice(6);
+    for (const m of held.splice(0)) W.room(m);
+    await W.wait(() => W.view().lines.some((l) => l.text === "held back"));
+    return { ...before, gap, filled: W.view().lines.slice(6), lateTime: [...document.querySelectorAll("#pm-log .chat-time")].at(-1).textContent }; })()`);
+  record("private chat: a second pad in the same conversation numbers its lines afresh without touching the old pad's: its line shows Sent, and the old pad's unsent line can no longer be retried",
+    second.ready && second.anna?.text === "on the new pad" && second.lines[1]?.text === "on the new pad" && second.lines[1]?.state === "sent"
+      && second.lines[0]?.state === "failed" && second.retries === 0, JSON.stringify(second));
+  // MrHodlX's review of #436: a line the room drops or holds back is never lost without a word.
+  record("private chat: a line the room holds back is noted as not arrived once a later one shows, then shows marked late and the note goes",
+    second.gap[0]?.note === "A line from Anna hasn't arrived." && second.gap[1]?.text === "after it"
+      && second.filled.map((l) => l.note || l.text).join() === "after it,held back" && second.filled[1].late && / · late$/.test(second.lateTime), JSON.stringify(second));
+  await tourGo(b, "lab");
+  await tourGo(b, "hub");
+  const after = await b.evaluate(`(async () => { const W = __pm; const kept = W.view(); await W.anna.say("still here"); await W.wait(() => W.view().lines.length === 9);
+    document.getElementById("pm-end").click(); const ended = await W.flush(); const view = W.view();
+    // A second conversation, with a pad made here: one download for the two of them, and this page loads its own copy.
+    const click = HTMLAnchorElement.prototype.click, made = URL.createObjectURL;
+    HTMLAnchorElement.prototype.click = function () { W.downloads.push({ name: this.download }); };
+    URL.createObjectURL = (blob) => { W.blob = blob; return made.call(URL, blob); };
+    // This time Anna asks, and the private view holds while the accept is on its way.
+    W.room({ t: "pm", op: "invite", from: 2 }); document.querySelector('[data-pm-view="private"]').click(); const invited = W.view();
+    document.getElementById("pm-accept").click(); const accepting = { ...W.view(), sent: await W.flush() };
+    W.room({ t: "pm", op: "open", with: 2 }); document.getElementById("pm-size").value = "262144"; document.getElementById("pm-make").click();
+    await W.wait(() => W.view().padLoaded); HTMLAnchorElement.prototype.click = click; URL.createObjectURL = made;
+    const pad = BL.oneTimePad.parse(new Uint8Array(await W.blob.arrayBuffer()));
+    const noteRow = document.querySelector('#pm-log [data-note="true"]'), input = document.getElementById("pm-input");
+    return { kept, ended, view, invited, accepting, made: W.view(), downloads: W.downloads, logins: pad.logins, bytes: pad.bytes.length,
+      note: !!noteRow && !noteRow.querySelector(".chat-name"), spellcheck: input.spellcheck }; })()`);
+  await b.evaluate(`(() => { const W = __pm; window.fetch = W.fetch; window.WebSocket = W.WebSocket; })()`);
+  record("private chat: the conversation carries on across a trip to another scene and End tells the room and clears it; an invite accepted keeps the private view until it opens, and a pad made here downloads once for the two of them and loads on this page",
+    after.kept.phase === "open" && after.kept.ready && after.kept.lines.length === 8 && after.ended.length === 1 && after.ended[0].op === "end" && after.view.phase === "idle" && after.view.lines.length === 0
+      && after.invited.privateView && after.accepting.phase === "accepting" && after.accepting.privateView && after.accepting.switcher && after.accepting.sent.length === 1 && after.accepting.sent[0].op === "accept"
+      && after.downloads.length === 1 && after.downloads[0].name === "ooga-pad-tester-anna.oogapad" && after.logins.join() === "tester,anna" && after.bytes > 262144 && after.made.padLoaded && after.made.started
+      && after.note && after.spellcheck === false,
+    JSON.stringify(after));
+} };
 scene("hub", { label: "join alerts", query: "pos=0", steps: [hubJoinAlerts] });
+scene("hub", { label: "private chat", query: "pos=0", steps: [hubPrivateChat] });
 scene("hub", { label: "player preferences", query: "pos=0", steps: [hubPlayerPreferences] });
 scene("hub", { label: "player preferences", query: "pos=0", opts: PHONE_SIZE, steps: [hubPlayerPreferences] });
 scene("hub", { label: "clock and block height", query: "pos=0&time=0900", steps: [hubBlockHeight, hubDestinationNames] });
@@ -25354,6 +25483,237 @@ const rememberedCharacterChecks = async BL => {
   record("arrival identity: malformed or denied cookies fall back safely and cannot break sign-in", bad && blocked && denied.net.ownCharacter()?.handle === "NickDaGreek");
   for (const f of [fresh, signed, returning, unknown, forged, invalid, denied]) f.net.dispose();
 };
+// Private conversations' pads (#188), as one-time-pad.js keeps them: run in Node over a store and lock that behave
+// as localStorage and Web Locks do, with two sides talking through arrays that stand for the room. The relay's attacks
+// come from the review of #436: forging from a known line, both browsers losing their records, a record rolled back by
+// one short line, an old ack played again, a pad zeroed mid-send, a copy cut short, and old frames played again.
+const privatePadChecks = async () => {
+  const context = { TextEncoder, TextDecoder, DataView, Uint8Array, JSON, Error, Promise, Object, Array, String, Number, Math, Map };
+  runInNewContext(await readFile(join(root, "src/js/one-time-pad.js"), "utf8"), context);
+  const P = context.BL.oneTimePad, subtle = webcrypto.subtle, random = (v) => webcrypto.getRandomValues(v);
+  const memory = () => { const m = new Map(); return { m, get: (k) => m.has(k) ? m.get(k) : null, set: (k, v) => m.set(k, v) }; };
+  // A lock that runs one holder at a time per name, as navigator.locks does across tabs.
+  const locks = () => { const held = new Map(); return (name, fn) => { const run = (held.get(name) || Promise.resolve()).then(fn); held.set(name, run.catch(() => {})); return run; }; };
+  const code = (fn) => { try { fn(); return "none"; } catch (e) { return e.code; } };
+  const file = P.make("Anna", "bob", 8192, random), padA = P.parse(file), padB = P.parse(file.slice());
+  const sums = new Map();
+  const sumOf = async (pad) => { if (!sums.has(pad)) sums.set(pad, await P.digest(subtle, pad)); return sums.get(pad); };
+  const side = async (pad, role, store = memory(), lock = locks()) => {
+    const wire = [], s = P.session({ subtle, pad, role, sum: await sumOf(pad), random, ledger: P.ledger(store, lock, pad, role), send: (frame, n) => wire.push({ frame, n }) });
+    return Object.assign(s, { wire, store, lock });
+  };
+  const deliver = async (from, to) => { const out = []; for (const { frame } of from.wire.splice(0)) out.push(await to.heard(frame)); return out; };
+  // Hellos and acks back and forth until both sides fall quiet.
+  const talk = async (a, b) => { const seen = []; for (let i = 0; i < 6 && (a.wire.length || b.wire.length); i++) seen.push(...await deliver(a, b), ...await deliver(b, a)); return seen.map((r) => r.kind); };
+  const pair = async () => { const a = await side(padA, 0), b = await side(padB, 1); await a.start({ fresh: true }); await b.start({ fresh: true }); return { a, b, kinds: await talk(a, b) }; };
+  const head = (frame) => { const v = new DataView(frame.buffer, frame.byteOffset); return { type: frame[1], slot: v.getUint32(19), offset: v.getUint32(23), len: v.getUint16(27) }; };
+
+  const [h0, h1] = padA.halves, end = (u) => u.byteOffset + u.length;
+  const layout = end(h0.keys) === h0.stream.byteOffset && end(h0.stream) <= h1.keys.byteOffset && end(h1.keys) === h1.stream.byteOffset && h0.slots > 0 && h0.keys.length === h0.slots * 32;
+  const bad = (edit) => { const f = file.slice(); edit(f); return code(() => P.parse(f)); };
+  const files = { magic: bad((f) => { f[0] = 0; }), login: bad((f) => { f[25] = 33; }), short: code(() => P.parse(file.subarray(0, 600))), same: code(() => P.make("a", "A", 8192, random)),
+    size: code(() => P.make("a", "b", P.PAD.MAX + 1, random)), roles: [P.roleOf(padA, "ANNA", "Bob"), P.roleOf(padA, "bob", "anna"), code(() => P.roleOf(padA, "cy", "anna")), code(() => P.roleOf(padA, "anna", "cy"))] };
+  record("private pads: a pad file names its two people and splits into one half per sender, each a key region then a stream, never sharing a byte; a damaged or foreign file, a pad for others and the wrong partner are refused by name",
+    layout && files.magic === "magic" && files.login === "login" && files.short === "short" && files.same === "same" && files.size === "size" && files.roles.join() === "0,1,not-you,not-peer", JSON.stringify({ layout, files }));
+
+  const { a, b, kinds } = await pair();
+  const early = await (await side(padA, 0)).say("too soon");
+  const first = await a.say("héllo 🦍"), plain = new TextEncoder().encode("héllo 🦍"), frame = a.wire[0].frame;
+  const hidden = !Buffer.from(frame).includes(Buffer.from(plain));
+  const heard = await deliver(a, b);
+  const prints = [P.fingerprint(await sumOf(padA)), P.fingerprint(await sumOf(padB))];
+  record("private pads: two who load the same pad trade hellos and acks before either may speak, a line arrives intact and unreadable on the wire, and both sides show the same fingerprint",
+    kinds.filter((k) => k === "hello").length === 2 && kinds.filter((k) => k === "ready").length === 2 && a.ready && b.ready && early.kind === "refused" && early.error === "not-ready"
+      && first.kind === "sent" && hidden && heard[0].kind === "text" && heard[0].text === "héllo 🦍" && prints[0] === prints[1] && /^[0-9a-f]{4}( [0-9a-f]{4}){4}$/.test(prints[0]),
+    JSON.stringify({ kinds, early, first, heard, prints }));
+
+  // Two lines sealed at once, a send the room refused, its exact retry, a reflected frame, and tampering.
+  const [one, two] = await Promise.all([a.say("one"), a.say("two")]);
+  const sealed = a.wire.splice(0), heads = sealed.map(({ frame }) => head(frame));
+  const lost = await a.say("lost"); a.wire.length = 0;
+  const after = await a.say("after"); const late = a.wire.splice(0);
+  const order = [];
+  for (const { frame } of [...sealed, ...late]) order.push(await b.heard(frame));
+  const exact = await a.retry(after.n), resent = a.wire.at(-1).frame, again = await b.heard(resent);
+  const flip = (i) => { const f = resent.slice(); f[i] ^= 1; return f; };
+  const tampered = [await b.heard(flip(30)), await b.heard(flip(22)), await b.heard(flip(2)), await b.heard(resent.subarray(0, 40))].map((r) => r.error || r.kind);
+  const reflected = (await a.heard(resent)).error;
+  const stranger = await side(P.parse(P.make("anna", "bob", 8192, random)), 0);
+  await stranger.start({ fresh: true }); const foreign = (await b.heard(stranger.wire[0].frame)).error;
+  record("private pads: lines sealed at once take separate key slots and bytes, a refused send's stay used, an exact retry is known as a repeat, and a changed, cut, reflected or foreign frame is dropped unread",
+    one.n !== two.n && heads[1].slot === heads[0].slot + 1 && heads[1].offset === heads[0].offset + P.PAD.LINE_ID + 3 && lost.kind === "sent" && order.map((r) => r.text || r.kind).join() === "one,two,after"
+      && exact.n === after.n && resent === late[0].frame && again.kind === "duplicate" && tampered.join() === "auth,auth,pad,malformed" && reflected === "direction" && foreign === "pad",
+    JSON.stringify({ heads, order, tampered, reflected, foreign }));
+
+  // The room refuses a line (its rate), a later line gets through, then the first is retried.
+  const rated = await pair();
+  const refusedLine = await rated.a.say("first"); rated.a.wire.length = 0;
+  await rated.a.say("second"); const through = await deliver(rated.a, rated.b);
+  const retried = await rated.a.retry(refusedLine.n), afterRetry = await deliver(rated.a, rated.b);
+  const kept = await rated.a.say("third"), next = await deliver(rated.a, rated.b);
+  record("private pads: a line the room refused, retried after a later line got through, arrives on a fresh slot and fresh bytes and the pad keeps working",
+    through[0].text === "second" && retried.kind === "sent" && retried.n !== refusedLine.n && afterRetry.length === 1 && afterRetry[0].text === "first"
+      && !rated.b.stopped && kept.kind === "sent" && next[0].text === "third", JSON.stringify({ through, retried, afterRetry, next, stopped: rated.b.stopped }));
+
+  // Two tabs on one record never take the same slot or bytes; a reload carries on past them and greets the other side again.
+  const store = memory(), lock = locks(), tabs = [P.ledger(store, lock, padA, 0), P.ledger(store, lock, padA, 0)];
+  await tabs[0].start(true);
+  const taken = await Promise.all(Array.from({ length: 12 }, (_, i) => tabs[i % 2].reserve(true, 40)));
+  const disjoint = new Set(taken.map((t) => t.slot)).size === 12 && taken.map((t) => t.offset).sort((x, y) => x - y).every((v, i) => v === i * 40);
+  const reloadA = await side(padA, 0, a.store, a.lock), reloadB = await side(padB, 1, b.store, b.lock);
+  await reloadA.start(); await reloadB.start();
+  const resumedAt = head(reloadA.wire[0].frame).slot, reTalk = await talk(reloadA, reloadB);
+  record("private pads: two tabs never take the same slot or bytes, and a reload carries on past every one this device used and opens the line again",
+    disjoint && resumedAt === (await a.ledger?.peek?.() || { sk: resumedAt }).sk && reloadA.ready && reloadB.ready && reTalk.includes("ready"), JSON.stringify({ taken: taken.length, resumedAt, reTalk }));
+
+  // Review finding: a relay that holds back a line whose text it knows learns that line's stream bytes. They are never
+  // a key here, so a frame forged with them as one, at any slot, fails its tag; later lines still arrive.
+  const known = "send me your pad file over email please, it is fine", forge = await pair();
+  await forge.a.say(known); const held = forge.a.wire.splice(0)[0].frame, hh = head(held);
+  // The relay knows the whole body: the line's number is where its bytes start, in the header too.
+  const knownBody = new Uint8Array(hh.len); new DataView(knownBody.buffer).setUint32(0, hh.offset); knownBody.set(new TextEncoder().encode(known), P.PAD.LINE_ID);
+  const stream = new Uint8Array(hh.len); for (let i = 0; i < hh.len; i++) stream[i] = held[29 + i] ^ knownBody[i];
+  const forged = [];
+  for (const slot of [hh.slot, hh.slot + 1]) {
+    const wanted = new TextEncoder().encode("ok"), f = new Uint8Array(29 + wanted.length + 32), v = new DataView(f.buffer);
+    f.set(held.subarray(0, 19)); v.setUint32(19, slot); v.setUint32(23, hh.offset + 32); v.setUint16(27, wanted.length);
+    for (let i = 0; i < wanted.length; i++) f[29 + i] = wanted[i] ^ stream[32 + i];
+    const key = await subtle.importKey("raw", stream.subarray(0, 32), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    f.set(new Uint8Array(await subtle.sign("HMAC", key, f.subarray(0, 29 + wanted.length))), 29 + wanted.length);
+    forged.push((await forge.b.heard(f)).error);
+  }
+  await forge.a.say("still real"); const stillReal = await deliver(forge.a, forge.b);
+  record("private pads: a relay that knows a held-back line's text can't forge a line with its bytes: they are never a key, so the forgery fails and later lines still arrive",
+    forged.join() === "auth,auth" && stillReal[0].text === "still real" && !forge.b.stopped, JSON.stringify({ forged, stillReal }));
+
+  // Review finding: a browser with no record of a pad (storage cleared, a private window) never takes it for new unless
+  // told so, and spends nothing until then; so two browsers that both lost their records can't use the pad again unawares.
+  const used = await pair(); await used.a.say("an old line"); await deliver(used.a, used.b);
+  const blankA = await side(padA, 0), blankB = await side(padB, 1);
+  const asked = [await blankA.start(), await blankB.start()].map((r) => r.kind);
+  const spent = blankA.wire.length + blankB.wire.length + blankA.store.m.size + blankB.store.m.size;
+  const told = await blankA.start({ fresh: true });
+  record("private pads: a pad with no record on this device starts only when the visitor says the file is new, and asking spends nothing",
+    asked.join() === "unrecorded,unrecorded" && spent === 0 && told.kind === "started", JSON.stringify({ asked, spent, told }));
+
+  // Review finding: a record rolled back by one short line, the hello's own bytes, and an old ack played again.
+  const ra = await side(padA, 0), rb = await side(padB, 1);
+  await ra.start({ fresh: true }); await rb.start({ fresh: true }); await deliver(ra, rb);
+  const oldAck = rb.wire.find(({ frame }) => frame[1] === 2).frame;
+  await talk(ra, rb);
+  const older = new Map(ra.store.m);
+  await ra.say("hi!"); await deliver(ra, rb);
+  const restored = memory(); for (const [k, v] of older) restored.set(k, v);
+  const back = await side(padA, 0, restored), sendBefore = JSON.parse([...restored.m.values()][0]).send;
+  await back.start();
+  const helloHead = head(back.wire[0].frame), sendAfter = JSON.parse([...restored.m.values()][0]).send;
+  // The relay plays the other side's ack to an earlier hello instead of a fresh one: it proves nothing.
+  const replayed = await back.heard(oldAck);
+  const peer = await side(padB, 1, rb.store, rb.lock); await peer.start();
+  await deliver(back, peer); const answer = await deliver(peer, back);
+  const stoppedFor = back.stopped, again2 = await (await side(padA, 0, restored)).start();
+  record("private pads: a record rolled back by a single short line is caught before it says a word, its hello spends no stream bytes, an old ack proves nothing, and the stop is kept",
+    helloHead.type === 1 && helloHead.len === 32 && sendAfter === sendBefore && replayed.kind === "duplicate" && !back.ready && stoppedFor === "behind-here"
+      && answer.some((r) => r.kind === "stopped" && r.error === "behind-here") && again2.kind === "stopped" && again2.error === "behind-here",
+    JSON.stringify({ helloHead, sendBefore, sendAfter, replayed, answer, stoppedFor, again2 }));
+
+  // Review finding: a session closed while a line waits on its record seals and sends nothing, and reads nothing after.
+  // The record's lock is held while `holding`, as a slow storage or another tab would hold it.
+  let holding = false, release = null;
+  const gate = (name, fn) => holding ? new Promise((r) => { release = r; }).then(fn) : Promise.resolve().then(fn);
+  const ca = await side(padA, 0, memory(), gate), cb = await side(padB, 1);
+  await ca.start({ fresh: true }); await cb.start({ fresh: true }); await talk(ca, cb);
+  holding = true;
+  const pending = ca.say("a secret on its way");
+  for (let i = 0; i < 40 && !release; i++) await new Promise((r) => setTimeout(r, 5));
+  const waited = !!release;
+  ca.close(); holding = false; if (release) release();
+  const closedSay = await pending, sentAfterClose = ca.wire.length;
+  const afterClose = await ca.heard(new Uint8Array(80));
+  record("private pads: a session closed while a line waits on its record seals and sends nothing, and reads nothing after it closes",
+    ca.wire.length === 0 && waited && closedSay.kind === "closed" && sentAfterClose === 0 && afterClose.kind === "closed", JSON.stringify({ waited, closedSay, sentAfterClose, afterClose }));
+
+  // Review finding: a copy cut short shows another fingerprint and never opens the line, so neither side sends a word.
+  const cut = P.parse(file.slice(0, file.length - 1000)), shortB = await side(cut, 1), fullA = await side(padA, 0);
+  await fullA.start({ fresh: true }); await shortB.start({ fresh: true });
+  const cutTalk = await talk(fullA, shortB), cutPrints = [P.fingerprint(await sumOf(padA)), P.fingerprint(await sumOf(cut))];
+  const cutSay = [await fullA.say("x"), await shortB.say("x")].map((r) => r.kind + ":" + (r.error || ""));
+  record("private pads: a copy cut short shows a different fingerprint and never opens the line, so neither side says a word",
+    cutPrints[0] !== cutPrints[1] && !fullA.ready && !shortB.ready && cutSay.every((k) => k === "refused:not-ready" || k.startsWith("stopped")), JSON.stringify({ cutTalk, cutPrints, cutSay }));
+
+  // Review finding: old frames played again, from this conversation or an earlier one, are dropped and stop nothing.
+  const replay = await pair(), oldHello = replay.a.wire.length; await replay.a.say("line 1"); const keep1 = replay.a.wire[0].frame; await deliver(replay.a, replay.b);
+  for (let i = 2; i <= 40; i++) { await replay.a.say("line " + i); await deliver(replay.a, replay.b); }
+  const replays = [await replay.b.heard(keep1), await replay.b.heard(sealed[0].frame)].map((r) => r.kind + ":" + (r.error || ""));
+  record("private pads: old frames played again, from long ago in this conversation or from another, are dropped without stopping the pad",
+    replays[0] === "duplicate:" && !replay.b.stopped && replay.b.ready && oldHello === 0, JSON.stringify({ replays, stopped: replay.b.stopped }));
+
+  // MrHodlX's review: the room plays a hello again after the line opened. It is answered once, so a loop of replays
+  // spends no slots, and an ack that comes after the line opened, even a true one, proves nothing and stops nothing.
+  const rh = { a: await side(padA, 0), b: await side(padB, 1) };
+  await rh.a.start({ fresh: true }); const firstHello = rh.a.wire[0].frame; await rh.b.start({ fresh: true }); await talk(rh.a, rh.b);
+  const slotsBefore = rh.b.slotsLeft, replayedHellos = [];
+  for (let i = 0; i < 20; i++) replayedHellos.push((await rh.b.heard(firstHello)).kind);
+  const acksSent = rh.b.wire.length; rh.b.wire.length = 0;
+  const reloadedB = await side(padB, 1, rh.b.store, rh.b.lock); await reloadedB.start();
+  await reloadedB.heard(firstHello); const lateAck = await deliver(reloadedB, rh.a);
+  await rh.a.say("still talking"); const stillTalking = await deliver(rh.a, rh.b);
+  record("private pads: a hello played again after the line opened is answered once and spends no slots, and an ack after the line opened stops nothing",
+    replayedHellos.every((k) => k === "duplicate") && acksSent === 0 && rh.b.slotsLeft === slotsBefore && lateAck.every((r) => r.kind !== "stopped")
+      && rh.a.ready && !rh.a.stopped && stillTalking.some((r) => r.text === "still talking"),
+    JSON.stringify({ replayedHellos, acksSent, slots: [slotsBefore, rh.b.slotsLeft], lateAck, stopped: rh.a.stopped, stillTalking }));
+
+  // MrHodlX's review, and one way further: the room holds a hello back until after the ack its side sent next. The other
+  // side has then read one slot past the hello, which is this side's own and no sign its record is behind.
+  const ro = { a: await side(padA, 0), b: await side(padB, 1) };
+  await ro.a.start({ fresh: true }); const heldHello = ro.a.wire.splice(0);
+  await ro.b.start({ fresh: true }); await deliver(ro.b, ro.a);
+  ro.a.wire.unshift(...ro.a.wire.splice(0), ...heldHello);
+  const reordered = await talk(ro.a, ro.b);
+  await ro.a.say("after the shuffle"); const shuffled = await deliver(ro.a, ro.b);
+  record("private pads: a hello the room delivers after its side's next frame still opens the line, and stops nothing",
+    ro.a.ready && ro.b.ready && !ro.a.stopped && !ro.b.stopped && shuffled[0].text === "after the shuffle", JSON.stringify({ reordered, a: ro.a.stopped, b: ro.b.stopped, shuffled }));
+
+  // MrHodlX's review: a line the room drops, or delivers after a later one, is never lost without a word. The reader is
+  // told a line hasn't arrived once a later one shows; one that comes late shows marked late and clears that word; a
+  // copy of a line already shown, as a retry sealed again after a send the room answered, is dropped.
+  const dl = await pair();
+  for (const t of ["L1", "L2", "L3"]) await dl.a.say(t);
+  const [f1, f2, f3] = dl.a.wire.splice(0).map((w) => w.frame);
+  const r1 = await dl.b.heard(f1), r3 = await dl.b.heard(f3), r2 = await dl.b.heard(f2), r2again = await dl.b.heard(f2);
+  const shownOnce = await dl.a.say("shown once"); await deliver(dl.a, dl.b);
+  await dl.a.say("then this"); await deliver(dl.a, dl.b);
+  const resealed = await dl.a.retry(shownOnce.n), twice = await deliver(dl.a, dl.b);
+  await dl.a.say("never comes"); dl.a.wire.length = 0; await dl.a.say("comes"); const passed = await deliver(dl.a, dl.b);
+  record("private pads: a dropped or reordered line is noted once a later one shows, a late one shows marked late and clears the note, and a line already shown never shows twice",
+    r1.text === "L1" && !r1.gaps.length && r3.text === "L3" && r3.gaps.length === 1 && r2.text === "L2" && r2.late && r2.filled.join() === r3.gaps.join() && r2again.kind === "duplicate"
+      && resealed.kind === "sent" && resealed.n !== shownOnce.n && twice[0].kind === "duplicate" && passed[0].text === "comes" && passed[0].gaps.length === 1 && !dl.b.stopped,
+    JSON.stringify({ r1, r3, r2, r2again, resealed, twice, passed }));
+
+  // MrHodlX's review: a hello the room drops is said again, with a fresh nonce, a few times at most.
+  const hd = { a: await side(padA, 0), b: await side(padB, 1) };
+  await hd.a.start({ fresh: true }); hd.a.wire.length = 0;
+  await hd.b.start({ fresh: true }); await talk(hd.a, hd.b);
+  const stuck = hd.a.ready, again3 = await hd.a.hello(); await talk(hd.a, hd.b);
+  const tries = []; for (let i = 0; i < 6; i++) tries.push((await hd.a.hello()).kind);
+  const unanswered = await side(padA, 0); await unanswered.start({ fresh: true });
+  const capped = []; for (let i = 0; i < 6; i++) capped.push((await unanswered.hello()).kind);
+  record("private pads: a hello the room dropped is said again, and opens the line; once the line is open, or after a few tries, no more are said",
+    !stuck && again3.kind === "sent" && hd.a.ready && hd.b.ready && tries.every((k) => k === "none") && capped.join() === "sent,sent,sent,none,none,none",
+    JSON.stringify({ stuck, again3, tries, capped }));
+
+  // Records that can't be kept or read stop the pad; a pad used up stops it.
+  const refusing ={ get: () => null, set: () => { throw new Error("quota"); } }, dropping = { get: () => null, set: () => {} };
+  const unwritable = await (await side(padA, 0, refusing)).start({ fresh: true }), dropped = await (await side(padA, 0, dropping)).start({ fresh: true });
+  const corrupt = memory(); corrupt.set(P.PAD.STORE + padA.idHex + ".0", "{\"v\":1,\"sk\":-4}");
+  const unreadable = await (await side(padA, 0, corrupt)).start();
+  const small = P.parse(P.make("anna", "bob", 4096, random)), tiny = await side(small, 0), tinyB = await side(P.parse(small.bytes.slice()), 1);
+  await tiny.start({ fresh: true }); await tinyB.start({ fresh: true }); await talk(tiny, tinyB);
+  let usedUp = null;
+  for (let i = 0; i < 200 && !usedUp; i++) { const r = await tiny.say("x".repeat(100)); if (r.kind === "stopped") usedUp = r.error; }
+  record("private pads: a record that can't be written, kept or read stops the pad, and so does a pad used up",
+    unwritable.error === "storage" && dropped.error === "storage" && unreadable.error === "record" && usedUp === "exhausted", JSON.stringify({ unwritable, dropped, unreadable, usedUp }));
+};
 // Rule (#391): the chalkboard on the page edits only through the shared contract. Alone it keeps the visitor's own
 // board; signed in to a room that shares it, it opens only once the room says this page holds it, sends what it
 // draws and types, follows another's writing, and shuts with a reason when the board is taken from it.
@@ -27636,7 +27996,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
     renderer.dispose();I.dispose();W.dispose();document.createElement=oldCreate;console.log("Exported "+rows.length+" actual Canvas water review views to "+out);return;
   }
   if(ARGS.includes("highscores-unit")){await highscoreClientChecks();return;}
-  if(ARGS.includes("chat-unit")){await chatNetChecks(BL);await chatClientChecks();await chatAccountChecks(BL);return;}
+  if(ARGS.includes("chat-unit")){await chatNetChecks(BL);await chatClientChecks();await privatePadChecks();await chatAccountChecks(BL);return;}
   if(ARGS.includes("integration-unit")){await reviewCaptureChecks();await integrationChecks(BL);return;}
   if(ARGS.includes("svrn-unit")){svrnChecks(BL);menuShellChecks(BL);return;}
   if(ARGS.includes("vacancy-unit")){await vacancyChecks(BL);return;}
@@ -27689,6 +28049,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   await cabinetNetworkChecks(BL);
   await chatNetChecks(BL);
   await chatClientChecks();
+  await privatePadChecks();
   await thumpChecks(BL);
   await chalkboardClientChecks(BL);
   await chatAccountChecks(BL);
