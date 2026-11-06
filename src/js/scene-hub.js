@@ -904,8 +904,8 @@
     if (!entranceSegmentClear(eye.x, eye.y, eye.z, x, y, z, 0.002) || !bedSegmentClear(eye.x, eye.y, eye.z, x, y, z, 0.002, 0.004)) return false;
     // Short exact sweeps keep long sight rays from scanning an island-sized box.
     // The point checks also include the continuous ramp surfaces.
-    const distance = Math.hypot(dx, dy, dz);
-    const outside = Math.max(0, Math.hypot(eye.x, eye.y, eye.z) - Math.hypot(island.radius, island.undersideDepth, terrain.MAX_HEIGHT) - island.unit);
+    const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    const outside = Math.max(0, Math.sqrt(eye.x * eye.x + eye.y * eye.y + eye.z * eye.z) - Math.sqrt(island.radius * island.radius + island.undersideDepth * island.undersideDepth + terrain.MAX_HEIGHT * terrain.MAX_HEIGHT) - island.unit);
     const start = Math.min(1, outside / Math.max(distance, 1e-7));
     // The pieces are walked from the sleeper back toward the eye: a mark indoors is usually blocked near it, and the
     // answer is the same in either order.

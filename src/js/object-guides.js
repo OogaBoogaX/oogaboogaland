@@ -13,6 +13,9 @@
   // A bake reads only verts and each face's index list and is never written after build; shared vertex arrays
   // reuse one bake per page instead of per registry.
   const bakes = new WeakMap();
+  // Scene coordinates and transforms are bounded. The fixed-arity norm avoids
+  // the temporary numeric arguments in Chrome's variadic hypot hot path.
+  const length3 = (x, y, z) => Math.sqrt(x * x + y * y + z * z);
   const create = ({ roots, crew, actorRoots = [], exclude = [], providers = [], propsBlockActor = true, perceptionThrough = null }) => {
     const excluded = new Set(exclude), geometries = new Map(), registered = [], seen = new Set(), entries = new Map(), ownerEntries = new Map(), ownerGroups = [];
     const aliases = new Map(), providerOwners = new Map(), descriptorUsers = new Map();
@@ -669,7 +672,7 @@
       if (camera) {
         BL.math.mat4.lookAt(cameraView, camera.position, camera.target, camera.up || worldUp);
         near = camera.near; far = camera.far; tanY = Math.tan(camera.fov / 2); tanX = tanY * aspect;
-        planeX = Math.hypot(1, tanX); planeY = Math.hypot(1, tanY);
+        planeX = Math.sqrt(1 + tanX * tanX); planeY = Math.sqrt(1 + tanY * tanY);
       }
       for (let n = 0; n < registered.length; n++) {
         const entry = registered[n], node = entry.node, geometry = geometries.get(node.geometry), w = node.world;
@@ -678,7 +681,7 @@
         let worldChanged = false;
         for (let i = 0; i < 16; i++) if (entry.world[i] !== w[i]) { worldChanged = true; entry.world[i] = w[i]; }
         // Scale and vertical bounds follow the matrix and geometry only; visibility is still read every frame.
-        if (worldChanged) { entry.scaleX = Math.hypot(w[0], w[1], w[2]); entry.scaleY = Math.hypot(w[4], w[5], w[6]); entry.scaleZ = Math.hypot(w[8], w[9], w[10]); }
+        if (worldChanged) { entry.scaleX = length3(w[0], w[1], w[2]); entry.scaleY = length3(w[4], w[5], w[6]); entry.scaleZ = length3(w[8], w[9], w[10]); }
         if (worldChanged || entry.boundsGeometry !== geometry) {
           const b = geometry && geometry.sphere, p = b && b.center;
           entry.centerY = b ? w[1] * p[0] + w[5] * p[1] + w[9] * p[2] + w[13] : 0;
@@ -718,7 +721,7 @@
             entry.hz = Math.abs(w[2]) * hx + Math.abs(w[6]) * hy + Math.abs(w[10]) * hz;
             if (worldMinY !== -Infinity || worldMaxY !== Infinity) {
               const low = Math.max(entry.y - entry.hy, worldMinY), high = Math.min(entry.y + entry.hy, worldMaxY);
-              entry.y = (low + high) / 2; entry.hy = (high - low) / 2; entry.radius = Math.hypot(entry.hx, entry.hy, entry.hz);
+              entry.y = (low + high) / 2; entry.hy = (high - low) / 2; entry.radius = length3(entry.hx, entry.hy, entry.hz);
             }
           }
         }
@@ -731,7 +734,10 @@
         const dx = entry.x - ex, dy = entry.y - ey, dz = entry.z - ez;
         const group = entry.group;
         group.active = true;
-        if (Math.hypot(dx, dy, dz) - entry.radius <= RANGE) group.near = true;
+        // Once one piece establishes relevance the owner's remaining pieces
+        // need no further range tests. Keep the exact norm at the boundary.
+        if (!group.near && Math.abs(dx) <= RANGE + entry.radius && Math.abs(dy) <= RANGE + entry.radius
+          && Math.abs(dz) <= RANGE + entry.radius && length3(dx, dy, dz) - entry.radius <= RANGE) group.near = true;
       }
       let nearCount = 0, nearChanged = false;
       for (let n = 0; n < ownerGroups.length; n++) {
@@ -749,7 +755,7 @@
       let guideRange = RANGE;
       for (let n = 0; n < occluderCount; n++) {
         const entry = occluders[n];
-        if (entry.group.near) guideRange = Math.max(guideRange, Math.hypot(entry.x - ex, entry.y - ey, entry.z - ez) + entry.radius);
+        if (entry.group.near) guideRange = Math.max(guideRange, length3(entry.x - ex, entry.y - ey, entry.z - ez) + entry.radius);
       }
       for (let n = 0; n < occluderCount; n++) {
         const entry = occluders[n];
@@ -912,8 +918,8 @@
         const e = group[n];
         if (!e.visible) continue;
         const dx = x - e.x, dy = y - e.y, dz = z - e.z;
-        const box = Math.hypot(Math.max(0, Math.abs(dx) - e.hx), Math.max(0, Math.abs(dy) - e.hy), Math.max(0, Math.abs(dz) - e.hz));
-        nearest = Math.min(nearest, Math.max(0, box, Math.hypot(dx, dy, dz) - e.radius));
+        const box = length3(Math.max(0, Math.abs(dx) - e.hx), Math.max(0, Math.abs(dy) - e.hy), Math.max(0, Math.abs(dz) - e.hz));
+        nearest = Math.min(nearest, Math.max(0, box, length3(dx, dy, dz) - e.radius));
       }
       if (group && group.providerActive) nearest = Math.min(nearest, group.provider.distance(x, y, z));
       return nearest;
