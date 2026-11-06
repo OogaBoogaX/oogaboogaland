@@ -13,6 +13,7 @@
 // Unread lines (#430): a line from someone else that this page had not had, heard while the visitor is not in the
 // panel, counts on the tab until they look at it (`sheet.watchViews`). The first lines the room hands over on arrival
 // do not count; on a rejoin (a reconnect, a tab back from the background), only lines newer than any this page had.
+// While the panel shows its private view (#188), the island's lines are out of sight and still count.
 // Exports account (fed `BL.net.state`), heard (fed the room's lines) and stats.
 (() => {
   "use strict";
@@ -114,7 +115,8 @@
       if (line.id > newest && line.login.toLowerCase() !== me) fresh++;
     }
     for (const line of list) if (line.id > newest) newest = line.id;
-    if (fresh && !BL.sheet.attending(panel)) setUnread(unread + fresh);
+    // The panel's private view (private-chat.js) hides the island's lines, so they still count there.
+    if (fresh && (!BL.sheet.attending(panel) || panel.dataset.view === "private")) setUnread(unread + fresh);
     const over = Math.max(0, lines.length - CHAT_KEEP);
     if (over) lines.splice(0, over);
     if (!showing) {
@@ -296,7 +298,10 @@
     if (viewport && (document.activeElement === input || document.activeElement === displayInput)) fit();
   });
 
-  BL.sheet.watchViews(panel, () => { if (unread) setUnread(0); });
+  BL.sheet.watchViews(panel, () => { if (unread && panel.dataset.view !== "private") setUnread(0); });
+  // Turning back from the private view to the island's lines, with the panel up, is looking at them.
+  new MutationObserver(() => { if (unread && panel.dataset.view !== "private" && BL.sheet.visible(panel)) setUnread(0); })
+    .observe(panel, { attributes: true, attributeFilter: ["data-view"] });
   net.subscribe(account);
   net.subscribeChat(heard);
   BL.chat = { account, heard, get stats() { return { lines: lines.length, rows: log.childElementCount, showing, drawn, live, unread }; } };
