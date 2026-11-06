@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { hubTerrainQueries } from '../src/hub-terrain-queries.js';
-import { buildHubTerrainSnapshot, restorePrivateHubTerrain } from '../src/ooga-crew.js';
+import { buildHubTerrainSnapshot, restorePrivateHubTerrain, compilePrivateHubTerrain } from '../src/ooga-crew.js';
 
 test('host terrain keeps exact ramp triangles and shared support/clearance while dropping render-only terrain faces', () => {
   const generator = buildHubTerrainSnapshot();
@@ -41,4 +41,47 @@ test('host terrain keeps exact ramp triangles and shared support/clearance while
     assert.equal(reduced[key], original[key], `${key} retained without reinterpretation`);
   const invalid = { ...original, rampFaceOffset: sourceFaces.length };
   assert.throws(() => hubTerrainQueries(invalid), /invalid host terrain/);
+
+  // The validated factory owns its template. Mutating the caller's source or
+  // any returned world's query buffers, mouths or paths cannot affect a later
+  // world. This is required before skipping repeat static-template validation.
+  const factory = compilePrivateHubTerrain(reduced), first = factory();
+  assert.deepEqual(first.cutawaySource.data, reduced.gridData, 'compiled grid retains every material byte');
+  const index = reduced.gridData.findIndex(value => value !== 0), cell = reduced.gridData[index];
+  assert.ok(index >= 0);
+  const mouthX = reduced.mouths[0].x;
+  first.cutawaySource.data[index] = 0;
+  first.mouths[0].x += 10;
+  reduced.gridData[index] = 0;
+  const second = factory();
+  reduced.gridData[index] = cell;
+  assert.equal(second.cutawaySource.data[index], cell);
+  assert.equal(second.mouths[0].x, mouthX);
+  const radius = second.path.debug.ringCenterRadius;
+  first.path.setRadius(radius + 2);
+  assert.equal(second.path.debug.ringCenterRadius, radius);
+  assert.notEqual(first.cutawaySource.data.buffer, second.cutawaySource.data.buffer);
+  assert.throws(() => compilePrivateHubTerrain({ ...reduced, gridData: new Uint8Array(1) }), /Invalid terrain gridData/);
+
+  // Exercise both an efficiently compressible nonbinary grid and the noisy
+  // fallback. Materials must never be reduced to a boolean occupancy mask.
+  const grid = new Uint8Array(reduced.gridData.length);
+  grid.fill(255, 0, 4097); grid.fill(128, 4097, 8193); grid[grid.length - 1] = 17;
+  const materialFactory = compilePrivateHubTerrain({ ...reduced, gridData: grid });
+  assert.deepEqual(materialFactory().cutawaySource.data, grid);
+  for (let i = 0; i < grid.length; i++) grid[i] = i & 255;
+  const noisyFactory = compilePrivateHubTerrain({ ...reduced, gridData: grid });
+  const noisy = noisyFactory();
+  assert.deepEqual(noisy.cutawaySource.data, grid);
+  noisy.cutawaySource.data[1] = 0;
+  assert.equal(noisyFactory().cutawaySource.data[1], 1);
+
+  grid.fill(0);
+  const mask = new Uint8Array(grid.buffer, 0, reduced.birdseyeWindowMask.length);
+  const aliasFactory = compilePrivateHubTerrain({ ...reduced, gridData: grid, birdseyeWindowMask: mask });
+  const aliased = aliasFactory().cutawaySource;
+  assert.equal(aliased.data.buffer, aliased.birdseyeWindows.mask.buffer, 'unusual shared-buffer snapshots keep native clone aliases');
+  aliased.data[0] = 9;
+  assert.equal(aliased.birdseyeWindows.mask[0], 9);
+  assert.equal(aliasFactory().cutawaySource.data[0], 0, 'aliases never cross private worlds');
 });

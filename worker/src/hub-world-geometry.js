@@ -1,7 +1,7 @@
 // Private startup assembly of the authored terrain, work interiors and satellite
 // islands. This is a construction stage, not a complete simulation factory: the
 // caller still owns actor creation, projection, mutable world events and recovery.
-import { buildHubTerrainSnapshot, restorePrivateHubTerrain, hubSlots, hubScene,
+import { buildHubTerrainSnapshot, compilePrivateHubTerrain, hubSlots, hubScene,
   hubModels, hubPoolModels, hubPoolLayout, hubWalkRules,
   createHubSolids, createHubHeadquarters, createHubCavePhysics,
   createHubLab, createHubOffice, createHubFactoryMouth, createMempoolSite,
@@ -11,19 +11,31 @@ import { buildHubTerrainSnapshot, restorePrivateHubTerrain, hubSlots, hubScene,
   createHubStructuralSupport, createHubClankerSupport,
   createHubPileCore, scaleHubPileCore, createHubPileVolume, findHubFireSpot, createHubFireRig, createHubLadder, hubTotemLayout, hubTotemModels,
   createHubJumbotronCabinet, hubJumbotronDrop, hubBoardLayout,
-  hubMouthDressing, hubDressing, hubGroundLayout } from './ooga-crew.js';
+  hubMouthDressing, hubDressing, hubGroundLayout, withHubFoliageDetails } from './ooga-crew.js';
 import { buildHubMainland } from './hub-world-mainland.js';
 import { validateHubLayout } from './hub-layout-history.js';
 import { hubTerrainQueries } from './hub-terrain-queries.js';
 
 // A single data-only template; each world receives its own mutable terrain/path
 // and query scratch state. Never share the browser terrain cache across retries.
-let terrainTemplate = null;
+let terrainFactory = null;
 const MAX_TARGETS = 8192, MAX_PROPS = 1024;
 const POOL_SOLIDS = new Set(['poolbridge', 'poolsign', 'poolrock', 'canopy']);
 const fail = message => { throw Error(message); };
 
-export function* buildHubWorldGeometry({ layout, getRosterCount }) {
+export function* buildHubWorldGeometry(options) {
+  const construction = buildGeometry(options);
+  try {
+    let next;
+    do {
+      next = withHubFoliageDetails(false, () => construction.next());
+      if (!next.done) yield next.value;
+    } while (!next.done);
+    return next.value;
+  } finally { withHubFoliageDetails(false, () => construction.return()); }
+}
+
+function* buildGeometry({ layout, getRosterCount }) {
   if (typeof getRosterCount !== 'function') fail('authoritative Hub roster required');
   const checkLevel = value => {
     if (!Number.isFinite(value) || value < 0 || value > hubPileMaximum) fail('invalid Hub pile level');
@@ -31,10 +43,10 @@ export function* buildHubWorldGeometry({ layout, getRosterCount }) {
   validateHubLayout(layout);
   layout = structuredClone(layout);
   const { createNode, addChild, removeChild, updateWorld } = hubScene;
-  if (!terrainTemplate) terrainTemplate = hubTerrainQueries(yield* buildHubTerrainSnapshot());
+  if (!terrainFactory) terrainFactory = compilePrivateHubTerrain(hubTerrainQueries(yield* buildHubTerrainSnapshot()));
   yield;
-  const island = restorePrivateHubTerrain(terrainTemplate), root = createNode();
-  const solids = createHubSolids(), sleepSolids = createHubSolids();
+  const island = terrainFactory(), root = createNode();
+  const solids = createHubSolids({ lazyShoulders: true }), sleepSolids = createHubSolids({ lazyShoulders: true });
   const placed = [], props = [], targets = new Map(), fireRigs = [], fireHazards = [];
   const matrixGates = [], sealedCaves = [], closedCaveZones = [], headquartersRimLintels = [], climbMasonry = [];
   const mouths = new Map(), offices = [];

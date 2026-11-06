@@ -1264,7 +1264,7 @@
     return geo;
   };
   // Tree is TREE_HEIGHT units tall.
-  const tree = variants((i) => {
+  const tree = BL.models.foliageVariants((i) => {
     const rand = mulberry32(101 + i);
     const v = vox();
     const bark = pick(rand, 0, 1, 0.3);
@@ -1315,9 +1315,10 @@
     geometry.treeSolidRadius = solidRadius;
     geometry.treeCanopyFloor = canopyFloor * QUARTER;
     geometry.treeSolidCanopyFloor = middle * QUARTER;
-    let sample = 0;
-    const coarse = cartoonTree(i, () => canopySamples[sample++], null, middle * QUARTER, 1, geometry.collisionGeometry);
-    return BL.models.foliageLods(geometry, coarse);
+    return BL.models.foliageLods(geometry, () => {
+      let sample = 0;
+      return cartoonTree(i, () => canopySamples[sample++], null, middle * QUARTER, 1, geometry.collisionGeometry);
+    });
   });
   const CLUMPS = [
     [[0, 1.0, 0, 1.9, 1.8, 1.7], [0.7, 1.4, -0.5, 1.3, 1.3, 1.2]],
@@ -1343,7 +1344,7 @@
     return Object.assign(geo, { sway: 0.03 });
   };
   // Keep the closed coarse clumps at distance; crossed silhouette cards look like upright fins on low bushes.
-  const bush = variants((i) => BL.models.foliageLods(cartoonBush(i), cartoonBush(i, 1), false));
+  const bush = BL.models.foliageVariants((i) => BL.models.foliageLods(cartoonBush(i), () => cartoonBush(i, 1), false));
   // The voxel boulder the mine's crack rock is veined for; everywhere else takes the cartoon `rock`.
   const ROCK_SHAPES = [{ rx: 3.2, ry: 3.6, rz: 2.8 }, { rx: 5, ry: 3.8, rz: 4.2 }];
   const voxelRock = variants((i) => {

@@ -60,6 +60,7 @@ import "../../src/js/hub-headquarters.js";
 export const createHubHeadquarters = B.hubHeadquarters.create;
 export const createHubTerrain = B.terrain.island;
 export const createHubSolids = B.solidProps.create;
+export const withHubFoliageDetails = B.models.withFoliageDetails;
 
 import "../../src/js/bca-models.js";
 import "../../src/js/factory-kiosk-core.js";
@@ -112,6 +113,7 @@ export const hubPoolLayout = B.poolLayout;
 export const hubWalkRules = B.walkRules;
 export const buildHubTerrainSnapshot = () => B.terrain.islandSnapshotSteps(hubTerrainOptions(), null);
 export const restorePrivateHubTerrain = snapshot => B.terrainSnapshot.create(structuredClone(snapshot));
+export const compilePrivateHubTerrain = snapshot => B.terrainSnapshot.compile(snapshot);
 
 export const createMempoolSleep = B.poolSiteProps.sleep;
 

@@ -8,6 +8,7 @@ import { HOST, boundedJSON, sameCheckpointValue } from '../src/virtual-host.js';
 // distinguishes cached validity from sharing a mutable world or trusting identity.
 function fixture() {
   let constructions = 0, disposed = 0;
+  const starts = [];
   const source = readFileSync(new URL('../src/hub-world-simulation.js', import.meta.url), 'utf8')
     .replace(/^import .*;\n/gm, '').replace('export function createHubWorldSimulation', 'function createHubWorldSimulation');
   const create = runInNewContext(`${source}\ncreateHubWorldSimulation;`, {
@@ -17,6 +18,7 @@ function fixture() {
     createHubWorldState: () => ({ clock: () => 1000 }),
     createContributorRoster: () => ({ validateCheckpoint: () => true }),
     *buildHubWorld(config, saved) {
+      starts.push(constructions - disposed);
       constructions++;
       const state = structuredClone(saved || { value: 0 });
       if (Object.keys(state).join() !== 'value' || !Number.isFinite(state.value) || state.value < 0) throw Error('invalid fixture state');
@@ -29,7 +31,7 @@ function fixture() {
   const adapter = create({ version: 'validation-test', seed: 1, checkpointBytes: 4096,
     source: { observedAt: 1000, revision: 1 }, activity: { rows: [] },
     state: { elapsed: 0, at: 1000, inventory: [], assignments: [] } });
-  return { adapter, counts: () => ({ constructions, disposed }) };
+  return { adapter, starts, counts: () => ({ constructions, disposed }) };
 }
 
 test('unchanged validation avoids reconstruction but changed, malformed and disposed reads cannot reuse it', () => {
@@ -89,8 +91,10 @@ test('only a committed private world can be lent, with exact-state matching and 
   assert.deepEqual(Array.from(f.adapter.poses(saved)), [0]);
   assert.equal(f.counts().constructions, 2);
   // A different checkpoint cannot borrow an older runtime, including -0/0.
-  const next = f.adapter.forTransaction(); next.validate(saved); next.committed(); next.dispose();
-  const before = f.counts().constructions;
+  const next = f.adapter.forTransaction(); next.poses(saved); next.committed(); next.dispose();
+  const before = f.counts();
   assert.deepEqual(Array.from(f.adapter.poses({ value: -0 })), [-0]);
-  assert.equal(f.counts().constructions, before + 1);
+  assert.equal(f.counts().constructions, before.constructions + 1);
+  assert.equal(f.starts.at(-1), 0, 'obsolete cache is released before replacement construction starts');
+  assert.equal(f.counts().disposed, before.disposed + 2, 'mismatched warm cache and temporary replacement both release');
 });

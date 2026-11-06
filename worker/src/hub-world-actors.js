@@ -2,7 +2,8 @@
 // Movement, placement and routine selection are composed over the real private
 // geometry here. There is no flat-ground or permissive-clearance fallback.
 import { createOogaCrew, createNpcClankers, createNpcLabEquipment, createNpcWorkSites,
-  createHubOutdoorBeds, createNpcClankerLayout, hubSlots, hubModels } from './ooga-crew.js';
+  createNpcClankerLayout, hubSlots, hubModels } from './ooga-crew.js';
+import { createHubForestBeds } from './hub-forest-beds.js';
 import { createHubWorldRecovery } from './hub-world-recovery.js';
 import { createHubWorldArrivals } from './hub-world-arrivals.js';
 import { createHubWorldClearance } from './hub-world-clearance.js';
@@ -67,11 +68,10 @@ function constructHubWorldActors({ geometry, roster, execution, world, clock,
   const { island, root, solids, headquarters, mempool, lab } = geometry;
   const walkIn = { x: 0, z: -(island.meadowRadius + 0.5) };
   const paths = createHubRoutinePaths(island);
-  const forest = createHubOutdoorBeds(mempool,
-    (x, y, z) => island.clearAt(x, y, z, 0.15, 1.5) && mempool.sleepClear(x, y, z), island);
-  // Enumerate at most one overflow anchor per actor, so a fresh recovery can
-  // resolve every saved bed without searching an unbounded number of anchors.
-  for (let i = 0; i < roster.activeRoster.length; i++) if (!forest.more()) break;
+  // Stable bed IDs require the same bounded search order after recovery. Reuse
+  // its result only after replaying its clearance decisions in this world.
+  const forest = createHubForestBeds(mempool,
+    (x, y, z) => island.clearAt(x, y, z, 0.15, 1.5) && mempool.sleepClear(x, y, z), roster.activeRoster.length);
   const beds = new Map(), bedIds = new Map();
   const register = (prefix, entries) => entries.forEach((bed, i) => {
     const id = `${prefix}:${i}`; beds.set(id, bed); bedIds.set(bed, id);

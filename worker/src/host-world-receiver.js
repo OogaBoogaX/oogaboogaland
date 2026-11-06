@@ -109,6 +109,7 @@ export class HostWorldReceiver {
     value.scans++; value.lastAt = now;
     value.nextAt = Math.min(value.hint.runUntil, now + WORLD_RECEIVER.scanMs);
     await this.save(value);
+    const reserved = JSON.stringify(value);
     let result;
     try {
       const { runner, room, ticket, roomTicket } = await this.opened(value.hint);
@@ -131,7 +132,10 @@ export class HostWorldReceiver {
       result = { status: 'busy', more: true };
       // Keep only a counter, not arbitrary exception data or player state.
     }
-    await this.save(value);
+    // The reservation already durably holds this exact record and wake-up.
+    // An unchanged successful scan must not rewrite both once more. Changed
+    // deadlines, failure counters and terminal states still commit together.
+    if (JSON.stringify(value) !== reserved) await this.save(value);
     if (value.status !== 'running') { this.runtime?.runner.close(); this.runtime = null; return { status: 'stale', more: false }; }
     return result;
   }

@@ -4,12 +4,12 @@ import { HostWorldReceiver, WORLD_RECEIVER } from '../src/host-world-receiver.js
 
 const hint = { v: 1, room: 'island', world: 'world-1', epoch: 1, revision: 2, owner: 'host-a', runUntil: 110000 };
 function fixture() {
-  let now = 100000, alarm = null, writes = 0, opens = 0, bodies = 0, closed = 0, pending, failWrite = false;
+  let now = 100000, alarm = null, writes = 0, alarmWrites = 0, opens = 0, bodies = 0, closed = 0, pending, failWrite = false, due = null;
   let identities = [], retained = new Set(), map = new Map(); const admitted = [];
   const storage = { sql: {},
     get: async k => structuredClone(map.get(k)),
     put: async (k, value) => { if (failWrite) throw Error('disk failed'); writes++; map.set(k, structuredClone(value)); },
-    setAlarm: async at => { alarm = at; }, deleteAlarm: async () => { alarm = null; },
+    setAlarm: async at => { alarmWrites++; alarm = at; }, deleteAlarm: async () => { alarm = null; },
     async transaction(fn) { const old = structuredClone(map), prior = alarm; try { return await fn(); } catch (e) { map = old; alarm = prior; throw e; } },
   };
   const open = async h => {
@@ -18,15 +18,15 @@ function fixture() {
       roomTicket: { world: h.world, epoch: h.epoch, owner: h.owner, revision: h.revision },
       room: { bodyAdmissionCandidates: async () => { const current = identities.filter(i => !retained.has(i.accountId));
         return { identities: current.slice(0, 4), more: current.length > 4 }; } },
-      runner: { state: () => ({ until: h.runUntil, closed: stopped, ready: true, nextBodyAt: null }),
+      runner: { state: () => ({ until: h.runUntil, closed: stopped, ready: true, nextBodyAt: due }),
         close: () => { stopped = true; closed++; },
         bodies: async () => { bodies++; if (pending) await pending(); return { status: 'reconciled' }; },
         admit: async who => { retained.add(who.accountId); admitted.push(who); return { status: 'staged' }; } } };
   };
   const receiver = () => new HostWorldReceiver({ storage, open, clock: () => now });
   return { receiver, storage, admitted, at: t => { now = t; }, identities: value => { identities = value; },
-    pending: value => { pending = value; }, failWrite: value => { failWrite = value; },
-    stats: () => ({ alarm, writes, opens, bodies, closed }), record: () => storage.get(WORLD_RECEIVER.key) };
+    pending: value => { pending = value; }, due: value => { due = value; }, failWrite: value => { failWrite = value; },
+    stats: () => ({ alarm, writes, alarmWrites, opens, bodies, closed }), record: () => storage.get(WORLD_RECEIVER.key) };
 }
 
 test('receiver recovers lost Room wake and admission batches after restart within the original finite run', async () => {
@@ -86,4 +86,31 @@ test('receiver commits recovery reservation and alarm atomically before any body
   assert.equal((await f.record()).scans, 0); assert.equal(f.stats().bodies, 0); assert.equal(f.stats().alarm, 100000);
   f.failWrite(false); await receiver.alarm();
   assert.equal((await f.record()).scans, 1); assert.equal(f.stats().bodies, 1);
+});
+
+
+test('unchanged scans keep the committed backstop without duplicate writes, but persist changed outcomes', async () => {
+  const f = fixture(), receiver = f.receiver(); await receiver.attach(hint);
+  let before = f.stats();
+  await receiver.alarm();
+  assert.equal(f.stats().writes - before.writes, 1);
+  assert.equal(f.stats().alarmWrites - before.alarmWrites, 1);
+  assert.equal(f.stats().alarm, 101000);
+  assert.equal((await f.record()).scans, 1);
+
+  f.at(101000); f.due(101400); before = f.stats();
+  await receiver.alarm();
+  assert.equal(f.stats().writes - before.writes, 2, 'earlier body deadline must replace the reserved backstop');
+  assert.equal(f.stats().alarmWrites - before.alarmWrites, 2);
+  assert.equal(f.stats().alarm, 101400);
+  assert.equal((await f.record()).nextAt, 101400);
+
+  f.at(101400); f.due(null); f.pending(async () => { throw Error('lost reply'); });
+  await receiver.alarm();
+  assert.equal((await f.record()).failures, 1, 'failed RPC outcome is persisted');
+  f.at(f.stats().alarm); f.pending(null); before = f.stats();
+  await receiver.alarm();
+  assert.equal(f.stats().writes - before.writes, 2, 'successful recovery durably clears the prior failure');
+  assert.equal((await f.record()).failures, 0);
+  assert.equal((await f.record()).status, 'running');
 });

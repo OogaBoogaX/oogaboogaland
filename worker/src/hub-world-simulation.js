@@ -80,7 +80,14 @@ export function createHubWorldSimulation(configuration) {
           discard();
           if (warm && sameCheckpointValue(saved, warm.saved)) {
             runtime = warm.runtime; warm = null;
-          } else runtime = construct(saved);
+          } else {
+            // A mismatched committed cache is only an optimization, not a
+            // recovery authority. Release it before allocating its replacement
+            // so cold takeover/revision changes do not pin two full worlds.
+            const obsolete = warm; warm = null;
+            obsolete?.runtime.dispose();
+            runtime = construct(saved);
+          }
           remember(saved);
         }
         return run(runtime);

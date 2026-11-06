@@ -1205,7 +1205,7 @@
     geo.sway = 0.0035;
     return geo;
   };
-  const palm = BL.models.variants((v) => BL.models.foliageLods(palmGeometry(v), palmGeometry(v, 1)));
+  const palm = BL.models.foliageVariants((v) => BL.models.foliageLods(palmGeometry(v), () => palmGeometry(v, 1)));
   // The islands on the horizon: terraced sea stacks on the island's own grid mesher, two metres a cell, a sand
   // ring at the waterline, rock cliffs and grass tops; variant 1 has a sea arch through it. Built once a page.
   const islets = [];

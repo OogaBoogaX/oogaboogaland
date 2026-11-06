@@ -1,5 +1,217 @@
 # Frozen-body measurements and remaining cost gates
 
+## Unchanged receiver-scan writes — v142
+
+The receiver still atomically reserves its scan counter and alarm before any
+Room RPC. When the successful result leaves that exact bounded record unchanged,
+it now retains the committed reservation instead of writing the same row and
+alarm a second time. Failure counters, pending-work deadlines, recovered failure
+state and terminal outcomes still commit their changes. No scan interval, retry
+budget, ownership fence, body deadline or publication rate changed.
+
+Six receiver tests and three Room-event tests passed, including loss of a wake,
+restart, concurrent work, atomic reservation, changed deadlines and error/reset
+persistence. The regression counts one row put plus one alarm set for an unchanged
+scan, rather than two of each. Syntax, whitespace and the build passed.
+
+At an assumed one unchanged scan per second, this removes 5,184,000 storage-write
+API calls over 30 days. That is arithmetic from the source/fixture, not a measured
+production invoice. The checked-in Room migrations use SQLite and the host
+receiver explicitly requires SQLite; host activation remains absent. Cloudflare
+[documents SQLite puts and alarm updates as write-billed operations](https://developers.cloudflare.com/durable-objects/platform/pricing/),
+with account-level included usage. Actual bills, retries, occupied-world cadence
+and total host/Room traffic still require validation.
+
+The saved no-player 106-NPC trial separately measured one root put per warm host
+tick, 41,940–43,535 JSON bytes in the final eight samples, and no writes for pose
+confirmation. Four ticks per second would mean 10,368,000 such puts per 30 days;
+these are repeated checkpoint updates, not accumulating retained storage. This
+partial count excludes Room publications, body movement, acknowledgements,
+service inputs and receiver work. It is not a total-cost forecast.
+
+## Mismatched warm-world retirement — v141, focused validation complete
+
+The adapter now disposes an unused warm world before reconstructing a different
+persisted checkpoint. Previously the old cache survived until a later commit,
+so replacement construction could retain two complete worlds. The cache is only
+an optimization: authoritative state still comes from fresh durable reads, and
+actively borrowed transaction worlds remain separate. Failed attempts continue
+to discard their speculative state; no checkpoint is dropped or reinterpreted.
+
+The regression now explicitly populates the warm cache through a pose read,
+then verifies a different exact checkpoint releases it before construction.
+Previously that fixture's validation-cache hit could leave no warm world to test.
+The adapter and transaction tests passed (34/34), including release before
+replacement allocation, with syntax/whitespace and the build also passing.
+No memory or latency saving is measured for this path yet.
+
+The latest saved rollback profile attributes 160.59 ms to geometry construction,
+38.84 ms to actor construction (including 27.23 ms forest proof replay), 19.61 ms
+to logical restoration, 50.06 ms to simulation and 10.12 ms to capture within the
+289.89 ms operation. Nested phase timings must not be added twice.
+
+Cloudflare's current [memory documentation](https://developers.cloudflare.com/workers/platform/limits/#memory)
+continues to specify 128 MB per isolate. Successful completion of an in-flight
+local request is insufficient evidence of sustainable fit: the documented
+production response to memory pressure can include isolate replacement. Both
+retained/peak memory and repeated cold-recovery costs therefore remain gates.
+
+## Private terrain-grid template — v140, focused validation complete
+
+The compiled template now attempts lossless run-length encoding of its standalone
+9,594,624-byte material grid. Encoding uses two fixed passes and fixed-size typed
+arrays, and is retained only when its payload is at most half the original grid
+size. High-entropy grids use native cloning. Grids with shared buffer aliases,
+subarray storage or resizable buffers also keep native clone semantics.
+
+Each recovered world still gets a fresh full-sized Uint8Array containing all
+material values, not a boolean occupancy approximation. No world shares mutable
+collision cells with another. This changes only the private static template;
+checkpoint schemas, authority checks, placement and rate limits are unchanged.
+
+The terrain regression passed, covering every byte of the authored grid,
+nonbinary long runs, noisy fallback, shared-buffer alias preservation and
+cross-world isolation. Syntax, whitespace and the build passed. The actual grid
+encoded into 149,927 runs, retaining 749,635 bytes of typed payload instead of
+9,594,624: an exact 8,844,989-byte payload reduction, excluding object metadata.
+
+The finite 106-actor rollback/restart trial passed its correctness assertions.
+Cold reads took 231.96 and 200.39 ms, rollback recovery 289.89 ms, and eight warm
+ticks 32.30–55.66 ms. Rollback recovery still exceeds the 250 ms target.
+
+Local workerd built the world and advanced eight ticks with a valid 42,868-byte
+checkpoint, no external requests and no runtime errors. Post-tick used JS heap
+was 151,021,916 bytes and backing storage was 52,274,157 bytes before collection.
+These observations do not establish retained/peak heap or provider memory fit.
+Startup/dispatch took 2,217 ms and simulation-only ticks took 15–33 ms; no speed
+improvement or strict Room-delivery success is claimed. The runtime was disposed
+and the coordinated Mac window released. No signing or publication occurred.
+
+## Host foliage alternatives — v139, focused validation complete
+
+Host geometry construction now requests base foliage without the medium/far
+render alternatives or their atlas-source graph. The coarse builders are deferred
+and are not called in that mode. The base vertices, faces, collision shells,
+normals, climb data and placement metadata are retained. This is intentionally
+narrower than replacing authored models with approximate collision shapes.
+
+Foliage builders keep separate base-only and ordinary-render caches, so host-first
+construction cannot remove a later browser's alternatives. The host policy is
+restored after each synchronous construction step, including exceptions; it is
+not held across generator yields. Browser construction defaults to full detail.
+
+All three focused collision/foliage regressions passed, including exact authored
+base-geometry equality in both cache orders, nesting, exceptions and deferred
+construction. Syntax, whitespace and the build passed. The bounded full-world
+rollback/restart trial passed its correctness assertions; cold reads took 200.51
+and 237.69 ms, rollback recovery took 298.72 ms, and eight subsequent warm ticks
+took 32.74–50.11 ms. Recovery headroom is still insufficient.
+
+The local workerd run built 106 actors and advanced eight ticks, validating a
+42,868-byte checkpoint with no egress or runtime errors. Post-tick used JS heap
+was 145,282,544 bytes and backing storage was 60,839,482 bytes, before collection.
+The earlier base-only-scratch run observed 159,052,956 and 61,413,806 bytes
+respectively; these individual heap observations do not measure retained-memory
+savings or peak allocation. Simulation-only ticks were 15–33 ms. Provider fit,
+strict Room delivery and total cost remain unresolved. The runtime was disposed
+and the coordinated Mac window released; nothing was signed or published.
+
+## Bounded exposed-geometry census — v138
+
+One coordinated local workerd run completed with 106 actors, eight simulation
+ticks, a valid 42,868-byte checkpoint, zero egress and no runtime errors. Before
+the diagnostic walk, post-tick used JS heap was 168,328,568 bytes and backing
+storage was 61,413,806 bytes. Simulation-only ticks took 15–34 ms; this does not
+measure Room delivery. No forced collection or production quota test occurred.
+
+The read-only graph census reached its 250,000-object cap before covering the
+whole world. It is explicitly incomplete: the visited portion contained 1,502,690
+plain-array slots, including 1,387,999 numeric entries. It encountered render
+normals, foliage level-of-detail geometry and image-atlas source references in
+the host scene. These identify candidates for a narrower collision-only model
+representation; they do not establish their total retained size or prove that
+removing them would satisfy the memory limit. Closure and WeakMap caches are
+outside this census. The cap was not raised and no geometry was removed.
+
+The runtime was disposed and the coordinated performance window released.
+Provider memory fit, rollback headroom and strict delivery remain open.
+
+## Host collision scratch allocation — v136–137
+
+The two host collision registries now allocate shoulder-query scratch only when
+querying a surface that needs it. Browser registries retain their previous eager
+allocation. Growth preserves collected polygons and contacts, remains bounded by
+the registered mesh's triangle count, and never drops collision candidates. A
+focused regression compares eager and lazy results across connected surfaces,
+multiple growth steps and reuse. It passed, as did the build.
+
+Matched finite local workerd runs built the same 106-actor world and advanced it
+for eight ticks. The eager baseline reserved 5,594,034 bytes of shoulder scratch
+in each registry. The optimized world needed none in this particular workload.
+Backing storage decreased by exactly 11,188,068 bytes both after construction
+(72,296,652 to 61,108,584 bytes) and after eight ticks (72,601,874 to 61,413,806).
+Both worlds validated, with the same 42,868-byte checkpoint size after the ticks.
+The source collision test separately exercises queries that require growth.
+
+Simulation-only tick samples were 16–34 ms for eager allocation and 16–38 ms for
+lazy allocation; these short runs establish neither a speed improvement nor
+end-to-end delivery performance. The optimized post-tick JS heap observation was
+159,052,956 bytes before collection. Retained and peak memory remain unknown,
+and the provider's 128 MB fit is still unproven. The local runtime is not enforcing
+a verified production memory quota. Both runs blocked external egress, produced
+no runtime errors and disposed their runtimes. No provider resources were created.
+
+The bounded Node rollback/restart trial also passed after this change, preserving
+the durable record through the injected failed commit and cold reads. Cold pose
+operations measured 201.52 and 234.30 ms; recovery after rollback still took
+294.42 ms. Eight subsequent warm ticks measured 32.80–51.32 ms. These are individual
+local operations, not sustained provider results, and the recovery gate still
+lacks consistent headroom. Strict Room delivery has not been remeasured or fixed.
+
+## Private compiled terrain template — v135
+
+The terrain factory now validates and owns one private template, then deep-copies
+it into each world. External snapshots still undergo full validation; the
+unchecked restoration function is private. Worlds share no mutable query buffer,
+mouth record or path state. The terrain regression verifies caller mutation,
+cross-world mutation isolation and malformed-input rejection alongside existing
+query parity. All four terrain/forest checks passed.
+
+The bounded full-world rollback/restart trial also passed. Cold pose reads took
+271.23 and 224.21 ms; the rollback recovery tick took 309.92 ms. Eight warm ticks
+were 39.25–63.51 ms. Startup took 2,621 ms. These individual local Node samples
+do not establish consistent sub-250 ms recovery or quantify a stable saving
+against another run. Memory fit and strict end-to-end delivery remain open.
+No schema, publication rate, ownership check or activation gate changed.
+
+## Forest-anchor recovery search — v132–134
+
+Finer attribution corrected the earlier description of actor construction:
+enumerating outdoor sleeping anchors costs 236–243 ms per reconstructed world;
+cached Ooga and Clanker rig construction together costs only about 8–10 ms.
+The host previously repeated the deterministic forest search to establish stable
+bed IDs even when no NPC was sleeping outdoors.
+
+The host now retains one bounded search proof for the fixed authored layout,
+placement and roster count. Each new private world rechecks every accepted
+footprint sample and the blocking witness for every rejected candidate against
+its current terrain/props. A changed answer reruns the original search. Returned
+bed/node/sleeper records are fresh; no world or mutable reservation is cached.
+The cache holds at most 16,384 four-double query records (512 KiB) plus 53 anchor
+rows. An oversized proof disables reuse without truncating the search. The real
+fixture retained 5,183 queries (165,856 bytes), including 451 rejection witnesses,
+and 52 available anchors. This is a bounded memory addition, not a memory fix.
+
+The final finite 106-actor run passed the injected commit rollback, two cold
+recoveries/confirmations and eight subsequent ticks. Forest revalidation took
+23.69–27.30 ms. Cold pose operations took 283.91 and 245.99 ms; the rollback
+recovery tick took 321.19 ms. These single local samples still lack reliable
+headroom under 250 ms. First-isolate startup still performs the full search.
+Three focused regressions cover new-world clearance, changed obstacles, bed
+isolation/order, cache key changes and bounded fallback. No rate, placement,
+activation or checkpoint-schema limit changed. Memory fit and strict Room
+delivery remain unresolved.
+
 ## Construction attribution and updated isolate memory — v130–131
 
 A bounded run measured the phases within each cold operation. For the first
