@@ -6032,8 +6032,8 @@ const hammockChecks = async () => {
   for (const handle of ["w-s-bitcoin", "MrHodlX", "2140data"])
     runInNewContext(await readFile(new URL(`../src/characters/${handle}.js`, import.meta.url), "utf8"), real);
   R.contributors = { roster: [] };
-  // This fixture runs the real equipment poser, without creating movement or NPC systems.
-  R.pilot = { WALK: { speed: 0, gravity: 1, step: 0 } };
+  // Load the crew's shared constants without creating movement or NPC systems.
+  runInNewContext(await readFile(new URL("../src/js/hub-locomotion.js", import.meta.url), "utf8"), real);
   runInNewContext(await readFile(new URL("../src/js/crew.js", import.meta.url), "utf8"), real);
   const gearRows = [];
   for (const handle of ["hammock-club", "w-s-bitcoin", "MrHodlX", "2140data"]) {
