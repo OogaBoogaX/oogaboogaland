@@ -157,14 +157,19 @@ export class VirtualHost {
 
   now() { const now = this.clock(); if (!time(now)) fail("host clock"); return now; }
 
-  transaction(callback) {
+  async transaction(callback) {
     // Adapter construction work, like passive steps, is shared by every
     // optimistic retry of this operation. It is never persisted or published.
     const operation = {};
-    return this.storage.transaction(async tx => {
+    let completed = null;
+    try {
+    const result = await this.storage.transaction(async tx => {
+      // A storage retry invalidates the prior attempt even if its callback
+      // returned successfully. Never recycle a world before durable commit.
+      if (completed) { completed.dispose(); completed = null; }
       const source = this.simulation, sessions = this.sessionAdapter;
       if (typeof source.forTransaction !== "function" && typeof sessions.forTransaction !== "function") return callback.call(this, tx);
-      let simulation = source, sessionAdapter = sessions;
+      let simulation = source, sessionAdapter = sessions, succeeded = false;
       try {
         if (typeof source.forTransaction === "function") {
           simulation = source.forTransaction();
@@ -181,12 +186,22 @@ export class VirtualHost {
             || (sessionAdapter.passiveSteps ?? this.passiveSteps) !== this.passiveSteps) fail("invalid body transaction");
         }
         const attempt = Object.create(this); attempt.simulation = simulation; attempt.sessionAdapter = sessionAdapter;
-        return await callback.call(attempt, tx);
+        const result = await callback.call(attempt, tx);
+        succeeded = true;
+        return result;
       } finally {
         try { if (sessionAdapter !== sessions && typeof sessionAdapter?.dispose === "function") sessionAdapter.dispose(); }
-        finally { if (simulation !== source && !simulation?.then && typeof simulation?.dispose === "function") simulation.dispose(); }
+        finally {
+          if (simulation !== source && !simulation?.then && typeof simulation?.dispose === "function") {
+            if (succeeded && typeof simulation.committed === "function") completed = simulation;
+            else simulation.dispose();
+          }
+        }
       }
     });
+    completed?.committed();
+    return result;
+    } finally { completed?.dispose(); }
   }
 
   validate(r) {

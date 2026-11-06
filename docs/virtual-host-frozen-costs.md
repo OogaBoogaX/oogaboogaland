@@ -1,5 +1,256 @@
 # Frozen-body measurements and remaining cost gates
 
+## Construction attribution and updated isolate memory — v130–131
+
+A bounded run measured the phases within each cold operation. For the first
+cold pose read, geometry construction took 197.50 ms, actor construction
+251.08 ms, and logical restoration 14.16 ms, within a 485.87 ms operation.
+The later cold read measured 155.03 / 246.94 / 13.16 ms respectively, within
+435.77 ms. Thus rebuilding geometry and rigs dominates this sample, rather than
+decoding/restoring saved logical state. Initial startup still took 2,212 ms.
+
+An updated local workerd probe with reduced terrain completed with 106 actors,
+zero egress and no runtime error logs. It reported 138,701,388 bytes used JS heap
+and 71,785,977 bytes backing storage, before forced GC; build/dispatch took
+2,114 ms. This improves on the prior 180,688,888-byte heap observation but still
+does not demonstrate fit within the documented 128 MB isolate budget. No forced
+GC was attempted, because the earlier inspector GC command timed out. Neither
+retained heap after collection nor peak memory is established by this sample.
+The local runtime was disposed. No production resource was provisioned.
+
+## Cold walking recovery correction — 2026-11-06 (v127–129)
+
+Following approval to diagnose and resume the stopped recovery check, the
+rejected `pdubl22` position was traced to a collision-contract mismatch. Its
+ordinary outdoor movement admitted the position using the live collision core;
+recovery instead tested a wider idle-pose slice against props. The diagnostic
+confirmed live clearance passed at the exact position where that slice failed.
+
+Recovery now applies the same center/prop admission to ordinary outdoor walkers
+and explicitly checks the stationary forward trunk core against terrain. Live
+planted turns normally skip that second query; recovery must prove it. Lab,
+office, biped, climbing, airborne and resting poses retain their pose checks.
+No actor is relocated, reservation dropped, or checkpoint state discarded. A
+focused regression verifies terrain, core, sweeps, props, land boundary, sealed
+caves and gates still refuse invalid placement, and specialized poses retain
+their existing admission. Player placement is unchanged.
+
+The final finite 106-actor run passed late-commit rollback, cold recovery and
+confirmation, eight further ticks, and a second cold recovery/confirmation.
+Failed commit and both cold reads left the durable data unchanged. Warm ticks
+after the first restart ranged from 31.04 to 53.43 ms; the earlier warm tick was
+65.43 ms. Cold pose reads took 485.34 and 434.17 ms, still above the separate
+250 ms recovery target. The final stored record was 43,535 JSON bytes. These are
+Node/in-memory observations, not sustained Room delivery, provider CPU or billed
+cost. No egress occurred. The build and focused collision regression passed.
+
+The v126 placement failure below is resolved in this local patch; its logs and
+STOP history remain preserved. Memory fit, cold-recovery latency, live browser
+integration, strict delivery and combined cost remain open. Activation remains
+disabled.
+
+## Committed-runtime reuse and current blocker — 2026-11-06 (v125–126)
+
+The host now lends one previously committed private world to a later transaction
+only when its exact logical checkpoint matches freshly read storage. Taking the
+loan removes it from the cache. Storage retry, callback failure or failure after
+callback completion discards the attempt; only resolution of the storage
+transaction invokes the commit hook. Concurrent attempts cannot share mutable
+actors. Root ownership, revision, deadlines and bounded state validation remain
+fresh. `VirtualWorld.setup()` retains this adapter across RPCs. No checkpoint
+write frequency, rate limit, activation setting or storage schema changed.
+
+The host-only terrain template also retains just the faces and exact Float64
+vertices used by continuous-ramp queries. Voxel, window, sight and cave query
+data remain unchanged. Terrain parity and the initial 106-actor logical recovery
+check passed. Browser render geometry is unaffected.
+
+One instrumented local host run measured phases **inside the same operation**:
+
+| Warm operation/phase | Elapsed time |
+| --- | ---: |
+| Complete tick | 67.77 ms |
+| Actual world simulation within that tick | 53.48 ms |
+| Capture within that tick | 11.22 ms |
+| World validation within that tick | 0.07 ms |
+| Public projection within that tick | 0.20 ms |
+| Pose reads, separate operations | 18.01 / 14.28 ms |
+| Confirmation, separate operations | 1.09 / 1.23 ms |
+
+No reconstruction occurred during that warm tick. Initial construction took
+2,194 ms of the 2,210 ms begin operation. These are single in-memory Node
+observations with 106 all-working NPCs, no player sessions and no Room/network;
+they are not sustained four-Hz or production billing results. In particular,
+the older 60.5 ms simulation and 538 ms full tick came from separate runs and
+must not be subtracted as a measured phase breakdown.
+
+The real-world late-commit failure trial confirmed unchanged durable data and
+discarded speculative state. The following tick rebuilt/restored in 468 ms,
+simulated in 48 ms and completed in 530 ms. The next cold pose read then failed:
+`invalid Clanker world recovery placement: pdubl22 (working/travel, site 0)`.
+A diagnostic rerun reproduced it. That check is paused under the repository's
+two-failure STOP rule; the collision guard is unchanged. This blocks recovery
+readiness despite the warm speedup. The 61 focused transaction/cache/takeover
+checks pass, but do not replace that failed full-world trial.
+
+Reduced-terrain Node retained memory is still approximately 183 MiB heap plus
+68 MiB of array buffers. Provider memory fit, cold recovery, live browser flow,
+strict end-to-end delivery and combined cost remain open. All activation stays
+disabled; the changes are not a production-readiness claim.
+
+## Actual host operations and confirmation correction — 2026-11-06 (v121)
+
+One finite local profile used `createHubHost`, the real 106-actor Hub factory,
+an atomic cloned in-memory store, and the all-working activity/pile fixture.
+The clock advanced once by 250 ms. These are single samples, not percentiles,
+SQLite/provider timings, or a sustained delivery pass. No external requests.
+
+| Operation | Before | With bounded validation cache |
+| --- | ---: | ---: |
+| Begin | 2,488 ms | 2,452 ms |
+| Initial poses | 774 ms | 753 ms |
+| Confirm initial frame | 696 ms | 1.33 ms |
+| Tick | 818 ms | 736 ms |
+| Post-tick poses | 706 ms | 702 ms |
+| Confirm new frame | 648 ms | 1.45 ms |
+| Reject obsolete frame | 725 ms | 1.34 ms |
+
+The correction retains one bounded immutable copy of the last successfully
+validated simulation DTO. Exact scalar/structure comparison, including negative
+zero, avoids rebuilding an unchanged world solely to confirm validity. Fresh
+host storage, ownership, revision and session/deadline checks still run. Changed
+state reconstructs and validates; query/mutation operations still use private
+transaction worlds. The cache does not assert that a speculative checkpoint
+committed and never retains a mutable simulation. Focused checks cover changed
+and malformed inputs, cache mutation, discarded attempts, disposed scopes and
+query invalidation. The paired actual-host run still rejects obsolete frames.
+
+Tick and pose reconstruction remain far above the 250 ms budget. This correction
+does not establish four-Hz delivery or solve cold recovery.
+
+### Actual local workerd memory observation (v120)
+
+Cached Miniflare `5.20261001.0-alpha` / workerd `1.20261001.1` constructed one
+real Hub with all 106 actors, held it live for inspector measurement, and captured
+a 28,543-byte checkpoint. Construction/dispatch took 2,362 ms. Inspector reported:
+
+| Isolate metric | Before construction | Live world, before forced GC |
+| --- | ---: | ---: |
+| Used JS heap | 8,805,172 B | 180,688,888 B |
+| Heap backing storage | 230,058 B | 80,462,636 B |
+| Embedder heap | 515,872 B | 258,128 B |
+
+The used JS heap alone is about 172 MiB, above the documented 128 MB Workers
+budget; backing storage adds about 77 MiB. This is direct local isolate evidence
+of a serious capacity problem, not the earlier Node RSS comparison. Local
+workerd completion does not establish production fit or enforce the same quota.
+The forced-GC inspector command timed out after 15 seconds; retained live-world
+memory after GC and the peak remain unverified. The runtime was disposed, with
+zero attempted egress and no runtime error logs. No deployment or activation.
+
+Memory and cold reconstruction require further reduction before readiness.
+Terrain geometry also supplies ramp/support queries; it cannot all be removed
+as decorative data. Neither this probe nor a confirmation cache justifies
+raising limits, relaxing the strict publication gate, or enabling the host.
+
+### Retained allocation attribution (v122)
+
+A separate bounded Node run explicitly collected garbage after yielding out of
+the constructor's job. One live world retained 265,504,568 B of JS heap and
+79,642,128 B of array buffers (about 253 and 76 MiB respectively). These are
+Node allocations, not another Workers quota measurement. The scene graph held
+3,847 nodes, 833 distinct geometries, 928,864 vertices and 451,676 faces. The
+main terrain alone contributed 167,208 faces; the largest satellite branch
+added 59,623. Geometry is therefore a concrete reduction target, but collision
+and placement consumers must keep equivalent query results.
+
+After disposal and another collection, heap and array buffers remained near
+265 MB and 80 MB. The module retains a terrain template and model data; this
+observation does not isolate their individual sizes or establish a leak. It
+does show that disposal alone did not return this process to its approximately
+11 MB pre-construction heap. An immutable validity cache cannot address this
+world representation cost.
+
+## Readiness audit — 2026-11-06 (v118)
+
+Published implementation/test head `aaa05c8952018f0764b06c63ddfe4003fbebee19`
+passes [exact-head CI](https://github.com/OogaBoogaX/oogaboogaland/actions/runs/42211381067):
+433 unit, 41 Cloud Hopper, 281 host/recovery and 79 Room checks. This does not
+validate live browser behavior, sustained delivery, runtime memory or billing.
+No new browser/performance run accompanied this audit: another task owns the
+local testing window. The maintainer has now explicitly approved resuming the
+Hub/browser checks and necessary readiness fixes; the coordinated window is
+still pending, with PR 488 active and PR 489 queued.
+
+### Full-world reconstruction is on ordinary operations
+
+`VirtualHost.transaction()` creates a private simulation scope for each storage
+attempt and disposes it afterward. `VirtualHost.read()` invokes simulation
+validation; `createHubWorldSimulation().forTransaction().validate()` calls
+`use()`, which constructs and restores the actual Hub on its first access.
+The scope reuses that world only within the same transaction. Consequently,
+separate tick, pose, confirmation and body-movement transactions can each pay
+construction/recovery costs, even when only reading. Storage retries can repeat
+that work. This is source inspection, not a new timing measurement.
+
+The v110 measurement below times a step on an already constructed world. Its
+61 ms must not be presented as full host-operation latency. The measured 848 ms
+reconstruction already exceeds the 250 ms target before the complete operation
+is measured. Transaction isolation currently prevents speculative simulation
+from leaking after failed writes; an optimization must retain that guarantee.
+The next bounded profile should measure actual host operations and isolate heap,
+not repeat the existing step-only probe or introduce an unverified global cache.
+
+Cloudflare documents [128 MB per isolate](https://developers.cloudflare.com/workers/platform/limits/#memory),
+including JavaScript and WebAssembly allocations. The saved 740,032 KiB Node
+process RSS includes different runtime/process costs and is not an isolate-heap
+measurement. It neither establishes fit nor proves a provider limit violation.
+Likewise, constructing a world during an invocation is distinct from the
+provider's top-level script-startup limit.
+
+### Conditional cost arithmetic, not a production forecast
+
+Current [SQLite pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/)
+includes 50 million written rows per month, then $1 per million, with billable
+usage rounded to billing units. KV-style methods on SQLite count as rows;
+deletes and alarms also incur writes. Duration uses allocated 0.128 GB while
+active, includes 400,000 GB-s/month, then $12.50/million GB-s. Requests/RPCs,
+reads, retained storage, plan charges and other account usage are separate.
+
+Source inspection still finds four steady logical writes per accepted player
+sample: Room pending sample, host root, host body/receipt, Room receipt. First
+samples and lifecycle events add work. Assuming one billed row per written key,
+no retries and the full included write allowance available:
+
+| Continuously changing players | Accepted samples/player/s | Writes in 30 days | Write overage only |
+| --- | ---: | ---: | ---: |
+| 30 | 1 | 311,040,000 | $262 |
+| 30 | 4 | 1,244,160,000 | $1,195 |
+
+For a single 15-minute run these cases imply 108,000 and 432,000 writes. These
+are scenarios, not chosen cadences or measured provider charges. Client capture
+suppresses unchanged accepted state; disconnected frozen bodies do not generate
+a recurring movement/physics loop. NPC publication and lifecycle writes are
+additional. Two continuously active objects would use 663,552 GB-s/30 days,
+giving $12.50 duration overage under the same unused-allowance assumption;
+that does not include any request or write charges, and no such loop is enabled.
+
+### Delivery and access gates
+
+The unchanged strict runner waits until the previous actual publication plus
+250 ms, then confirms host freshness and submits to Room. Existing v68 evidence
+measured 3–7 ms after that gate: those positive delays accumulate against fixed
+250 ms arrivals. Faster simulation alone does not remove this pacing issue.
+Burst remains disabled; final ownership confirmation and rate safeguards remain.
+Co-locating authoritative publication checks is a design candidate requiring
+race/recovery validation, not an approved shortcut or a measured solution.
+
+Required next access: a coordinated local performance window. Resuming the
+STOP-restricted live Hub/browser checks has been explicitly approved. Local
+workerd can validate runtime behavior without deployment, but production cost
+and latency remain unknown without provider evidence. No deployment, activation,
+paid loop, rate relaxation or production-data access was performed.
+
 Historical restricted measurements below: 2026-11-05. All activation remains disabled. These are finite local
 workerd/SQLite trials, not production telemetry or a permission to start a loop.
 The cached runtime is Miniflare `5.20261001.0-alpha`, which differs from the

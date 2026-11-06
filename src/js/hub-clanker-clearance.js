@@ -143,12 +143,14 @@
     out.x = x + sine * forward + cosine * side;
     out.y = y + lift; out.z = z + cosine * forward - sine * side;
   };
-  const clankerWalkCoreClear = (entry, x, y, z, toX, toY, toZ, fromHeading, toHeading) => {
+  const clankerWalkCoreClear = (entry, x, y, z, toX, toY, toZ, fromHeading, toHeading, stationary = false) => {
     // Protect the trunk near the middle of the support rectangle, not just
     // the pelvis point behind it. This extra core applies to island stone;
     // props keep their existing center clearance and blended support.
     // A planted turn remains available to face away from a contacted wall.
-    if (x === toX && z === toZ || entry.drive.airborne || entry.fire.rolling) return true;
+    // Live planted turns may face away from contact. Recovery has no previously
+    // admitted body, so its stationary query must prove the core itself clear.
+    if (!stationary && x === toX && z === toZ || entry.drive.airborne || entry.fire.rolling) return true;
     const scale = entry.root.scale.x, radius = 0.34 * scale, height = 0.12 * scale;
     const turn = Math.atan2(Math.sin(toHeading - fromHeading), Math.cos(toHeading - fromHeading));
     const steps = Math.max(1, Math.ceil(Math.abs(turn) / 0.15));

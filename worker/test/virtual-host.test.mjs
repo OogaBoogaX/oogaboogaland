@@ -391,6 +391,39 @@ test("committed pose reads share the validated immutable transaction snapshot an
   mutate=true;await assert.rejects(h.host.poses(ticket),TypeError);assert.deepEqual(h.store.read(),before);
 });
 
+test('simulation reuse is notified only after storage commits, never after a retry or late failure', async () => {
+  const adapter = compactSimulation(simulation, 4096, { intern: true }), factory = adapter.forTransaction;
+  const events = [];
+  adapter.forTransaction = () => {
+    const scope = factory(), dispose = scope.dispose;
+    scope.committed = () => events.push('committed');
+    scope.dispose = () => { events.push('disposed'); dispose(); };
+    return scope;
+  };
+  const h = harness(adapter), original = h.store.transaction.bind(h.store);
+  let retry = false, lateFailure = false;
+  h.store.transaction = fn => original(async tx => {
+    if (retry) {
+      retry = false;
+      let speculative = await tx.get(HOST.key);
+      await fn({ get: async () => structuredClone(speculative), put: async (_, v) => { speculative = structuredClone(v); } });
+      assert.ok(!events.includes('committed'));
+    }
+    const result = await fn(tx);
+    assert.ok(!events.includes('committed'), 'callback completion is not durable commit');
+    if (lateFailure) { lateFailure = false; throw Error('commit failed after callback'); }
+    return result;
+  });
+  const ticket = await h.host.begin('owner', 60000);
+  assert.deepEqual(events, ['committed', 'disposed']); events.length = 0;
+  h.at(100250); retry = true;
+  await h.host.tick(ticket);
+  assert.deepEqual(events, ['disposed', 'committed', 'disposed']); events.length = 0;
+  const saved = h.store.read(); h.at(100500); lateFailure = true;
+  await assert.rejects(h.host.tick(ticket), /commit failed after callback/);
+  assert.deepEqual(events, ['disposed']); assert.deepEqual(h.store.read(), saved);
+});
+
 test("competing hosts serialize acquisition; stale epochs cannot write after restart", async () => {
   const h = harness();
   const starts = await Promise.allSettled([h.host.begin("a", 60000), h.make().begin("b", 60000)]);

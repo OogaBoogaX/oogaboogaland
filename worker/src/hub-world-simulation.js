@@ -1,7 +1,8 @@
 // VirtualHost's synchronous simulation contract over the real Hub factory.
 // Each storage attempt owns one private world; failed attempts discard it.
+// A single committed world may be lent to a later matching storage attempt.
 // This module is deliberately not installed in a deployed Worker binding.
-import { HOST, boundedJSON } from './virtual-host.js';
+import { HOST, boundedJSON, sameCheckpointValue } from './virtual-host.js';
 import { buildHubWorld } from './hub-world.js';
 import { hubNpcFor } from './hub-world-identity.js';
 import { createHubWorldState } from './hub-world-state.js';
@@ -48,6 +49,13 @@ export function createHubWorldSimulation(configuration) {
       return next.value;
     } finally { construction.return(); }
   };
+  // One bounded, immutable validation result, never a live world. Confirming an
+  // unchanged persisted checkpoint must not rebuild terrain/rigs. Exact values
+  // (including -0) are compared; revisions, ownership and deadlines still come
+  // from the fresh host record. A valid speculative DTO is safe to remember:
+  // this cache proves validity only, never that a transaction committed it.
+  let validated = null;
+  let warm = null;
   const forTransaction = () => {
     let active = true, runtime = null, previous = null, keys = [], refs = [];
     const alive = () => { if (!active) fail(); };
@@ -69,7 +77,11 @@ export function createHubWorldSimulation(configuration) {
       alive();
       try {
         if (!runtime || !matches(saved)) {
-          discard(); runtime = construct(saved); remember(saved);
+          discard();
+          if (warm && sameCheckpointValue(saved, warm.saved)) {
+            runtime = warm.runtime; warm = null;
+          } else runtime = construct(saved);
+          remember(saved);
         }
         return run(runtime);
       } catch (error) { active = false; discard(); throw error; }
@@ -92,7 +104,16 @@ export function createHubWorldSimulation(configuration) {
           const saved = runtime.capture(); remember(saved); return saved;
         } catch (error) { active = false; discard(); throw error; }
       },
-      validate: saved => use(saved, world => world.validate()),
+      validate(saved) {
+        alive();
+        try {
+          boundedJSON(saved, config.checkpointBytes, HOST.simulationNodes);
+          if (validated !== null && sameCheckpointValue(saved, validated)) return true;
+          const valid = use(saved, world => world.validate());
+          if (valid === true) validated = freeze(structuredClone(saved));
+          return valid;
+        } catch (error) { active = false; discard(); throw error; }
+      },
       step: (saved, ms, now, timing) => persist(saved, world => world.step(ms, now, timing)),
       project: saved => use(saved, world => world.project()),
       poses: (saved, format) => use(saved, world => world.poses(format)),
@@ -105,7 +126,9 @@ export function createHubWorldSimulation(configuration) {
         return result;
       },
       readQueries(saved) {
-        scope.validate(saved);
+        // Query readers need the transaction's own runtime/reference fence even
+        // when metadata-only validation was satisfied from the immutable DTO.
+        use(saved, world => world.validate());
         const savedRefs = [...refs];
         const check = () => {
           alive();
@@ -117,6 +140,18 @@ export function createHubWorldSimulation(configuration) {
         };
       },
       dispose() { active = false; discard(); },
+      committed() {
+        alive();
+        if (!runtime) return;
+        // Only VirtualHost's post-storage-success hook calls this. The loan is
+        // removed from the pool before use, so overlapping attempts never share
+        // mutable actors. Fresh persisted state must match every exact value.
+        const saved = freeze(structuredClone(previous));
+        const old = warm;
+        warm = { saved, runtime };
+        runtime = previous = null; keys = refs = [];
+        old?.runtime.dispose();
+      },
     };
     return scope;
   };

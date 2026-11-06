@@ -61,6 +61,15 @@ export function createHubWorldClearance({ geometry, getClankers, navigation }) {
       const p = entry.root.position;
       if (![p.x, p.y, p.z, entry.heading].every(n => Number.isFinite(n) && Math.abs(n) < 10000)
         || !g.npcLandSegmentClear(p.x, p.z, p.x, p.z, entry.radius)) return false;
+      // Outdoor walking admits a collision core, not the wider animated rig.
+      // Rebuilding an idle pose must not reject an otherwise legal saved walk
+      // beside a prop. Apply the live center/prop gate and also prove the trunk
+      // core at rest (live planted turns normally skip that second query).
+      if (!entry.climb.active && !entry.jump.active && !entry.drive.airborne
+        && !entry.biped && !entry.parked && !entry.lounge && !entry.motion.lab
+        && !entry.planningLab && !entry.motion.office && !g.lab.inside(p.x, p.y, p.z))
+        return clear.clankerCenterClear(entry, p.x, p.y, p.z, p.x, p.y, p.z)
+          && clear.clankerWalkCoreClear(entry, p.x, p.y, p.z, p.x, p.y, p.z, entry.heading, entry.heading, true);
       // Recovery already rebuilt this rig from the logical snapshot. Prove the
       // complete static pose against the real terrain and per-part prop sweeps,
       // including the assigned screen/held-equipment contact exceptions. Do

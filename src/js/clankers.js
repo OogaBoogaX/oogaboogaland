@@ -7613,7 +7613,8 @@
           }
           // Static lounge geometry is derived from the same versioned world.
           loungeReady = false; loungeCount = roofCount = 0;
-          for (const e of list) if (e.active && ctx.npcPlacement(e, list) !== true) fail();
+          for (const e of list) if (e.active && ctx.npcPlacement(e, list) !== true)
+            throw Error(`invalid Clanker world recovery placement: ${e.owner.traits.name} (${e.mode}/${e.phase}, site ${e.site})`);
           recoveryPending = false;
         }
       };

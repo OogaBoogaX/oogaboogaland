@@ -14,6 +14,7 @@ import { buildHubTerrainSnapshot, restorePrivateHubTerrain, hubSlots, hubScene,
   hubMouthDressing, hubDressing, hubGroundLayout } from './ooga-crew.js';
 import { buildHubMainland } from './hub-world-mainland.js';
 import { validateHubLayout } from './hub-layout-history.js';
+import { hubTerrainQueries } from './hub-terrain-queries.js';
 
 // A single data-only template; each world receives its own mutable terrain/path
 // and query scratch state. Never share the browser terrain cache across retries.
@@ -30,7 +31,7 @@ export function* buildHubWorldGeometry({ layout, getRosterCount }) {
   validateHubLayout(layout);
   layout = structuredClone(layout);
   const { createNode, addChild, removeChild, updateWorld } = hubScene;
-  if (!terrainTemplate) terrainTemplate = yield* buildHubTerrainSnapshot();
+  if (!terrainTemplate) terrainTemplate = hubTerrainQueries(yield* buildHubTerrainSnapshot());
   yield;
   const island = restorePrivateHubTerrain(terrainTemplate), root = createNode();
   const solids = createHubSolids(), sleepSolids = createHubSolids();
