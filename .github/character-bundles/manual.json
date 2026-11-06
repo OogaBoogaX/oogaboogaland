@@ -12,6 +12,15 @@
       "base": null,
       "hash": "57bf5ee8bee431a194d849cc80fa39425a3941d342c7e7db02c5ce24b4268a5b",
       "lane": "manual"
+    },
+    {
+      "pr": 484,
+      "head": "dfd2fbb7e2b9ecbe1d00d32683186aac87bf8372",
+      "author": "tiffanyvarty",
+      "path": "src/characters/tiffanyvarty.js",
+      "base": null,
+      "hash": "254a3ced9c965f9ba5e78bcf819ce8c34a690e7dc824214bbb53a5b5590a3d2f",
+      "lane": "manual"
     }
   ]
 }
