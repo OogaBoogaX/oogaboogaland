@@ -355,22 +355,23 @@
         <button type="button" class="sheet-toggle sheet-toggle-bananas" id="sheet-bananas" role="tab"
           data-tab="bananas" aria-selected="false" aria-controls="bananas-panel" aria-label="Bananas and top donors">
           <span class="sheet-tab-face">
-          <svg class="banana-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true">
-            <path fill="#211b14" d="M0 0h1v5H0zM2 0h1v2H2zM3 2h1v2H3zM4 4h1v1H4zM1 5h1v2H1zM5 5h1v1H5zM6 6h1v1H6zM2 7h2v1H2zM7 7h1v1H7zM4 8h4v1H4z" />
-            <path fill="#ffd84a" d="M1 2h2v2H1zM1 4h3v1H1zM2 5h3v1H2zM2 6h4v1H2zM4 7h3v1H4z" />
-            <path fill="#789a3b" d="M1 0h1v2H1z" />
+          <svg class="banana-icon" viewBox="-0.5 0 9 10" shape-rendering="crispEdges" aria-hidden="true">
+            <path fill="#2b1b10" d="M0 0h3v1H0zM0 1h1v1H0zM2 1h1v1H2zM0 2h1v1H0zM2 2h2v1H2zM0 3h1v1H0zM3 3h1v1H3zM0 4h1v1H0zM3 4h2v1H3zM0 5h1v1H0zM4 5h2v1H4zM0 6h2v1H0zM5 6h2v1H5zM1 7h1v1H1zM6 7h2v1H6zM1 8h3v1H1zM7 8h1v1H7zM3 9h5v1H3z" />
+            <path fill="#ffd84a" d="M1 3h2v2H1zM1 5h3v1H1zM2 6h3v1H2zM2 7h4v1H2zM4 8h3v1H4z" />
+            <path fill="#789a3b" d="M1 1h1v2H1z" />
           </svg>
           </span>
         </button>
         <button type="button" class="sheet-toggle" id="sheet-toggle" role="tab" data-tab="roster"
           aria-selected="true" aria-controls="roster-panel" aria-label="Contributing Oogas">
           <span class="sheet-tab-face">
-          <svg class="caveman-icon" viewBox="0 0 7 9" shape-rendering="crispEdges" aria-hidden="true">
-            <path fill="#2b1b10" d="M1 0h5v1H1zM0 1h7v2H0zM0 3h1v2H0zM6 3h1v2H6z" />
-            <path fill="#c98a5b" d="M1 3h5v3H1zM2 6h3v1H2z" />
-            <path fill="#141414" d="M2 3h1v1H2zM4 3h1v1H4z" />
-            <path fill="#4a2c14" d="M1 6h1v1H1zM5 6h1v1H5zM1 7h5v1H1zM2 8h3v1H2z" />
-            <path fill="#f2efe4" d="M1 8h1v1H1zM5 8h1v1H5z" />
+          <svg class="caveman-icon" viewBox="0 0 9 10" shape-rendering="crispEdges" aria-hidden="true">
+            <path fill="#2b1b10" d="M0 0h9v1H0zM0 1h1v6H0zM8 1h1v6H8zM0 7h2v1H0zM7 7h2v1H7zM1 8h1v1H1zM7 8h1v1H7zM1 9h7v1H1z" />
+            <path fill="#d9a06b" d="M1 1h7v1H1z" />
+            <path fill="#151312" d="M1 2h7v1H1zM1 5h7v1H1zM1 6h1v1H1zM3 6h3v1H3zM7 6h1v1H7zM2 7h5v2H2z" />
+            <path fill="#ffbd7e" d="M3 3h3v2H3z" />
+            <path fill="#f2efe4" d="M1 3h2v1H1zM6 3h2v1H6zM1 4h1v1H1zM7 4h1v1H7zM2 6h1v1H2zM6 6h1v1H6z" />
+            <path fill="#141414" d="M2 4h1v1H2zM6 4h1v1H6z" />
           </svg>
           </span>
         </button>
@@ -378,6 +379,7 @@
           aria-selected="false" id="players-tab" aria-controls="players-panel" aria-label="Online Oogas" hidden>
           <span class="sheet-tab-face">
           <svg viewBox="0 0 9 9" aria-hidden="true">
+            <circle cx="4.5" cy="4.5" r="3.5" fill="#2b1b10" />
             <circle cx="4.5" cy="4.5" r="2.5" fill="#22c55e" />
           </svg><span class="tab-count" hidden></span>
           </span>
@@ -448,6 +450,7 @@
         </details>
         <div class="players slab" id="players-list"></div>
         <p class="help players-status" id="players-status" hidden></p>
+        <div data-account-copy="players"></div>
       </section>
       <section class="panel" data-panel="bananas" id="bananas-panel" role="tabpanel" aria-labelledby="sheet-bananas" hidden>
         <header class="panel-title">
@@ -514,19 +517,59 @@
       <section class="panel" data-panel="chat" id="chat-panel" role="tabpanel" aria-labelledby="chat-tab" hidden>
         <header class="panel-title">
           <h2><span data-sign>Ooga Chat</span></h2>
+          <details class="chat-about">
+            <summary aria-label="About Ooga Chat" title="About Ooga Chat">?</summary>
+            <p class="chat-retention">Shared while the room is awake. Your page keeps up to 100 lines until reload or sign-out. No chat database.</p>
+          </details>
           <span class="panel-chip" id="chat-room" data-tone="idle">Offline</span>
         </header>
-        <details class="chat-about">
-          <summary aria-label="About Ooga Chat" title="About Ooga Chat">?</summary>
-          <p class="chat-retention">Shared while the room is awake. Your page keeps up to 100 lines until reload or sign-out. No chat database.</p>
-        </details>
+        <div class="pm-switch" id="pm-switch" role="group" aria-label="Which conversation" hidden>
+          <button type="button" class="pm-switch-button" data-pm-view="island" aria-pressed="true">Island</button>
+          <button type="button" class="pm-switch-button" data-pm-view="private" aria-pressed="false"><svg class="pm-lock" viewBox="0 0 7 8" shape-rendering="crispEdges" aria-hidden="true"><path fill="currentColor" d="M2 0h3v1H2zM1 1h1v2H1zM5 1h1v2H5zM0 3h7v5H0z" /><path fill="#2b1b10" d="M3 4h1v2H3z" /></svg><span id="pm-switch-name">Private</span><span class="tab-count pm-count" id="pm-count" hidden></span></button>
+        </div>
+        <section class="pm" id="pm" aria-labelledby="pm-title">
+          <div class="pm-head">
+            <p class="pm-title"><svg class="pm-lock" viewBox="0 0 7 8" shape-rendering="crispEdges" aria-hidden="true"><path fill="currentColor" d="M2 0h3v1H2zM1 1h1v2H1zM5 1h1v2H5zM0 3h7v5H0z" /><path fill="#2b1b10" d="M3 4h1v2H3z" /></svg><span id="pm-title">Private</span></p>
+            <button type="button" class="pm-button pm-quiet pm-end" id="pm-end" hidden>End</button>
+          </div>
+          <p class="help pm-note" id="pm-note" role="status" aria-live="polite"></p>
+          <div class="pm-actions" id="pm-answer" hidden>
+            <button type="button" class="pm-button" id="pm-accept">Accept</button>
+            <button type="button" class="pm-button" id="pm-decline">Decline</button>
+            <button type="button" class="pm-button pm-quiet" id="pm-block">Block</button>
+          </div>
+          <div class="pm-actions" id="pm-pad" hidden>
+            <label class="pm-button pm-file">Load pad file<input type="file" id="pm-file" accept=".oogapad,application/octet-stream"></label>
+            <span class="pm-make">
+              <select id="pm-size" aria-label="Pad size">
+                <option value="262144">256 KB</option>
+                <option value="1048576" selected>1 MB</option>
+                <option value="16777216">16 MB</option>
+              </select>
+              <button type="button" class="pm-button" id="pm-make">Make a pad</button>
+            </span>
+          </div>
+          <div class="pm-actions" id="pm-confirm" hidden>
+            <button type="button" class="pm-button" id="pm-fresh">It's new: use it</button>
+            <button type="button" class="pm-button pm-quiet" id="pm-other">Choose another file</button>
+          </div>
+          <p class="pm-print" id="pm-print-line" title="A digest of the whole pad file: the same digits on both sides mean the same file. Compare them outside Ooga." hidden>Check with <span id="pm-print-peer"></span>: <code id="pm-print"></code></p>
+          <ol class="chat-log slab pm-log" id="pm-log" role="log" aria-live="polite" aria-label="Private conversation" tabindex="0"></ol>
+          <p class="help pm-budget" id="pm-budget"></p>
+          <form class="chat-form pm-form" id="pm-form" autocomplete="off">
+            <span class="chat-field">
+              <input type="text" id="pm-input" aria-label="Say something privately" aria-describedby="pm-left pm-budget" maxlength="320" enterkeyhint="send" spellcheck="false" autocorrect="off" autocapitalize="sentences" disabled>
+              <span class="chat-left" id="pm-left" title="Characters left">160</span>
+            </span>
+            <button type="submit" class="chat-send" id="pm-send" disabled>Send</button>
+          </form>
+        </section>
         <div class="chat-identity" id="chat-identity" hidden>
           <form class="chat-display-form" id="chat-display-form" autocomplete="off">
             <label for="chat-display">Name</label>
-            <input id="chat-display" type="text" minlength="3" maxlength="24" aria-describedby="chat-display-status chat-account-login">
+            <input id="chat-display" type="text" minlength="3" maxlength="24" aria-describedby="chat-display-status">
             <button type="submit" class="chat-display-save" id="chat-display-save">Save</button>
           </form>
-          <span class="chat-account" title="Your GitHub account">signed in as <strong id="chat-account-login"></strong></span>
           <p class="chat-display-status" id="chat-display-status" role="status" aria-live="polite"></p>
         </div>
         <ol class="chat-log slab" id="chat-log" role="log" aria-live="off" aria-label="Island chat" tabindex="0"></ol>
@@ -539,10 +582,21 @@
           </span>
           <button type="submit" class="chat-send" id="chat-send" disabled>Send</button>
         </form>
+        <div data-account-copy="chat"></div>
       </section>
       </div>
       </div>
     </aside>
+
+    <template id="sheet-notifications">
+      <div class="sheet-notifications" hidden>
+        <button type="button" class="sheet-bell" aria-label="Notifications" title="Notifications" aria-expanded="false">
+          <svg viewBox="0 0.25 16 16" aria-hidden="true" focusable="false"><path d="M3 11h10l-1.5-2V6a3.5 3.5 0 0 0-7 0v3L3 11Zm3.5 2a1.6 1.6 0 0 0 3 0" fill="none" stroke="currentColor" stroke-linejoin="round"/></svg>
+          <span class="tab-count" aria-hidden="true" hidden></span>
+        </button>
+        <div class="sheet-unread" hidden></div>
+      </div>
+    </template>
 
     <template id="sheet-chrome">
       <button type="button" class="sheet-drag" aria-label="Move panel" title="Drag top edge to move · arrow keys move · double-click to reset"></button>
@@ -1867,6 +1921,8 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/lab-wallpaper.js"></script>
   <script src="js/lab-wallpaper-data.js" data-defer="lab-wallpaper"></script>
   <script src="js/hub-models.js"></script>
+  <script src="js/goldbug-models.js"></script>
+  <script src="js/hub-goldbug.js"></script>
   <script src="js/sleep-beam.js"></script>
   <script src="js/host-presence.js"></script>
   <script src="js/dressing.js"></script>
@@ -1936,6 +1992,8 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/studio-catalogue.js"></script>
   <script src="js/studio-session.js"></script>
   <script src="js/chat.js"></script>
+  <script src="js/one-time-pad.js"></script>
+  <script src="js/private-chat.js"></script>
   <script src="js/players.js"></script>
   <script src="js/thump.js"></script>
   <script src="js/fx.js"></script>

@@ -5977,8 +5977,9 @@ const environmentSoundChecks = async () => {
 };
 // Single occupancy and direct suspension: exercise the real geometry and seat contracts.
 const hammockChecks = async () => {
-  const real = { window: {}, document: { createElement: () => ({ getContext: () => null }) }, performance, console };
-  for (const name of ["math", "scene", "models", "hub-models", "solid-props", "hub-hammock"])
+  // The page's default: finished character bakes are packed compactly, as the live crew's are.
+  const real = { window: { location: { search: "" } }, location: { search: "" }, URLSearchParams, document: { createElement: () => ({ getContext: () => null }) }, performance, console };
+  for (const name of ["math", "compact-geometry", "scene", "models", "hub-models", "convex", "solid-props", "hub-hammock"])
     runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), real);
   const R = real.window.BL, H = R.hubHammock, flat = () => 0, clear = (x, z, r) => z > 1 + r;
   const plan = (a, b, fits = clear) => H.plan({ a: { ...a, ground: 0 }, b: { ...b, ground: 0 }, clear: fits, surfaceAt: flat });
@@ -6007,11 +6008,52 @@ const hammockChecks = async () => {
       outside = Math.max(outside, Math.hypot(along - target[0], side - target[1]));
     }
   }
-  props.sync();
+  ham.update(0, 0, true); R.scene.updateWorld(root); props.sync();
   const floor = props.supportAt(fit.x, fit.z, 4, 0, 0.3);
-  record("hub hammock: direct ropes remain joined at both ends through bounded sway, the cloth stays within its shell, and there is no floor at tree-tie height",
-    ham.ropes.length === 2 && ropeError < 1e-5 && outside < 1e-6 && peak <= H.SWAY_MAX && floor > 0.5 && floor < 1.1,
+  record("hub hammock: direct ropes remain joined at both ends through bounded sway, the cloth stays within its planned swing, and there is no floor at tree-tie height",
+    ham.ropes.length === 2 && ropeError < 1e-5 && outside < 1e-6 && peak <= H.SWAY_MAX && floor > 0.3 && floor < 0.7,
     JSON.stringify({ ropeError, outside, peak, floor }));
+  // A walker (the hub's 0.3 m radius, the pilot's step) heading straight at the bed from 2 m out, a centimetre at a time,
+  // through the real collision shell: its support, then its body above the step, as the hub's `walkable` asks.
+  const STEP = Number(/WALK = \{[^}]*step: ([\d.]+)/.exec(await readFile(new URL("../src/js/pilot.js", import.meta.url), "utf8"))[1]);
+  // The gap from a walker's footprint to the nearest drawn part of the resting bed (cloth, edge cords, spreaders), seen
+  // from above: every face edge of the bed's own mesh, in its frame (x along, z across).
+  // Each face's corner indices, through the compact reader where a mesh is packed.
+  const eachFace = (g, fn) => {
+    const cursor = g.compactGeometry ? R.compactGeometry.createCursor(g) : null;
+    for (let f = 0; f < g.faces.length; f++) fn(Array.from((cursor ? R.compactGeometry.readFace(g, f, cursor) : g.faces[f]).i));
+  };
+  const bedEdges = [];
+  { const g = ham.bedNode.geometry, v = g.verts;
+    eachFace(g, ids => { for (let k = 0; k < ids.length; k++) { const a = ids[k] * 3, b = ids[(k + 1) % ids.length] * 3; bedEdges.push(v[a], v[a + 2], v[b], v[b + 2]); } }); }
+  const drawnGap = (along, across) => {
+    let best = Infinity;
+    for (let k = 0; k < bedEdges.length; k += 4) {
+      const ax = bedEdges[k], az = bedEdges[k + 1], dx = bedEdges[k + 2] - ax, dz = bedEdges[k + 3] - az, l = dx * dx + dz * dz;
+      const t = l ? Math.max(0, Math.min(1, ((along - ax) * dx + (across - az) * dz) / l)) : 0;
+      best = Math.min(best, Math.hypot(along - ax - dx * t, across - az - dz * t));
+    }
+    return best - 0.3;
+  };
+  const approach = (along, side) => {
+    let feet = 0, across = 2, top = 0;
+    for (; across > 0.005; across -= 0.01) {
+      const x = fit.x + fit.ux * along + fit.nx * side * (across - 0.01), z = fit.z + fit.uz * along + fit.nz * side * (across - 0.01);
+      const support = Math.max(0, props.supportAt(x, z, feet, STEP, 0.3));
+      if (support - feet > STEP || !props.clearAt(x, support + STEP, z, 0.3, 0.9)) break;
+      feet = support; top = Math.max(top, feet);
+    }
+    // The bed's +z is the plan's `n`.
+    return { along, side, across: +across.toFixed(2), gap: +drawnGap(along, side * across).toFixed(3), top: +top.toFixed(3) };
+  };
+  const middle = [0, 0.4].flatMap(along => [1, -1].map(side => approach(along, side)));
+  // Beside the high part of the bed, from where its cloth rises past a step to the spreader bars at its very ends. The
+  // walker stops short of whatever it would touch first by no more than the occupied swing's sideways travel (about
+  // 0.08 m) and the centimetre walked at a time.
+  const ends = [0.85, 1.05, 1.25].flatMap(along => [along, -along]).flatMap(along => [1, -1].map(side => approach(along, side)));
+  record("hub hammock: walking at either side of its middle steps up onto the cloth and on across it, while beside its high cloth and spreader ends the walker stops just short of the nearest drawn part of the bed, under its occupied sway",
+    middle.every(r => r.across < 0.01 && r.top > 0.3 && r.top <= STEP) && ends.every(r => r.top === 0 && r.gap > 0 && r.gap < 0.1),
+    JSON.stringify({ middle, ends }));
   const feet = seat.restY + 0.1 - 0.35;
   const rec = (id, bodyKind = "ooga") => ({ id, body: "resting", bodyKind, x: seat.restX, y: feet, z: seat.restZ });
   let stood = 0;
@@ -6037,6 +6079,59 @@ const hammockChecks = async () => {
   // Load the crew's shared constants without creating movement or NPC systems.
   runInNewContext(await readFile(new URL("../src/js/walk-rules.js", import.meta.url), "utf8"), real);
   runInNewContext(await readFile(new URL("../src/js/crew.js", import.meta.url), "utf8"), real);
+  // The drawn cloth's own footprint at rest, from the bed's mesh in its frame (x along, z across, the holder's too): as
+  // long as the cloth and the spreaders' thickness, as wide as the cloth and its edge cords away from the spreaders.
+  let clothLong = 0, clothWide = 0;
+  { const v = ham.bedNode.geometry.verts;
+    for (let k = 0; k < v.length; k += 3) if (Math.abs(v[k + 2]) < 0.3) clothLong = Math.max(clothLong, Math.abs(v[k]));
+    for (let k = 0; k < v.length; k += 3) if (Math.abs(v[k]) < clothLong - 0.2) clothWide = Math.max(clothWide, Math.abs(v[k + 2])); }
+  // Stowed gear as drawn, every visible triangle in the holder's frame: each part flat (no taller than it is wide),
+  // on the ground, under the cloth's underside, every drawn point inside the cloth's footprint, and no part's
+  // triangles meeting another's seen from above.
+  const inverse = R.math.mat4.create(), point = new Float64Array(3);
+  const separated = (A, B) => {
+    const axes = [1, 0, 0, 1];
+    for (const P of [A, B]) for (let e = 0; e < 6; e += 2) { const dx = P[(e + 2) % 6] - P[e], dz = P[(e + 3) % 6] - P[e + 1]; axes.push(dz, -dx, dx, dz); }
+    for (let a = 0; a < axes.length; a += 2) {
+      const nx = axes[a], nz = axes[a + 1];
+      if (!nx && !nz) continue;
+      let aLo = Infinity, aHi = -Infinity, bLo = Infinity, bHi = -Infinity;
+      for (let k = 0; k < 6; k += 2) { const da = nx * A[k] + nz * A[k + 1], db = nx * B[k] + nz * B[k + 1]; aLo = Math.min(aLo, da); aHi = Math.max(aHi, da); bLo = Math.min(bLo, db); bHi = Math.max(bHi, db); }
+      if (aHi < bLo - 1e-12 || bHi < aLo - 1e-12) return true;
+    }
+    return false;
+  };
+  const gearUnderCloth = (holder, nodes) => {
+    R.scene.updateWorld(root);
+    R.math.mat4.invert(inverse, holder.world);
+    const parts = nodes.map((n) => {
+      const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity], tris = [];
+      const visit = (node) => {
+        if (!node.visible) return;
+        const g = node.geometry, v = g?.verts;
+        if (v) {
+          const at = [];
+          for (let k = 0; k < v.length; k += 3) {
+            R.math.mat4.transformPoint(point, node.world, v[k], v[k + 1], v[k + 2]);
+            R.math.mat4.transformPoint(point, inverse, point[0], point[1], point[2]);
+            at.push(point[0], point[2]);
+            for (let axis = 0; axis < 3; axis++) { lo[axis] = Math.min(lo[axis], point[axis]); hi[axis] = Math.max(hi[axis], point[axis]); }
+          }
+          eachFace(g, ids => { for (let k = 1; k + 1 < ids.length; k++) tris.push([ids[0], ids[k], ids[k + 1]].flatMap(c => [at[c * 2], at[c * 2 + 1]])); });
+        }
+        for (const child of node.children) visit(child);
+      };
+      visit(n);
+      return Number.isFinite(lo[0]) ? { lo, hi, tris } : null;
+    }).filter(Boolean);
+    let overlaps = 0;
+    for (let i = 0; i < parts.length; i++) for (let j = i + 1; j < parts.length; j++) for (const A of parts[i].tris) for (const B of parts[j].tris) if (!separated(A, B)) overlaps++;
+    const flat = parts.every(({ lo, hi }) => hi[1] - lo[1] <= Math.min(hi[0] - lo[0], hi[2] - lo[2]) + 1e-9 && lo[1] > 0 && lo[1] < 0.02 && hi[1] < seat.restY - fit.ground - 0.05);
+    const inside = parts.every(({ lo, hi }) => -lo[0] <= clothLong + 1e-9 && hi[0] <= clothLong + 1e-9 && -lo[2] <= clothWide + 1e-9 && hi[2] <= clothWide + 1e-9);
+    const along = [Math.min(...parts.map(q => q.lo[0])), Math.max(...parts.map(q => q.hi[0]))].map(x => +x.toFixed(3));
+    const across = [Math.min(...parts.map(q => q.lo[2])), Math.max(...parts.map(q => q.hi[2]))].map(x => +x.toFixed(3));
+    return { ok: parts.length >= 2 && flat && inside && !overlaps, flat, inside, overlaps, along, across };
+  };
   const gearRows = [];
   for (const handle of ["hammock-club", "w-s-bitcoin", "MrHodlX", "2140data"]) {
     const definition = R.characters.get(handle), look = definition?.look || {};
@@ -6069,6 +6164,7 @@ const hammockChecks = async () => {
     const rested = ham.poseRemote(cave, feet, peer, true), holder = cave.restEquipment?.holder;
     const actual = rested && !!holder && holder.parent === root && nodes.every((n, i) =>
       n.parent === holder && n.geometry === originalGeometry[i] && n.visible) && cave.weapon.ammo === 7;
+    const laid = gearUnderCloth(holder, nodes).ok;
     if (parts.chukTrail) R.crew.poseEquipment(cave, true, 1.1);
     const trailsHidden = !parts.chukTrail || parts.chukTrail.every(n => !n.visible);
     const lookPeer = { ...peer, visual: new Int16Array(17) };
@@ -6102,10 +6198,34 @@ const hammockChecks = async () => {
     R.scene.removeChild(root, cave.root);
     ham.update(0, 10, false);
     const dropped = !cave.restEquipment && !droppedHolder.parent && !cave.hammockRest;
-    gearRows.push({ handle, actual, hidden, absent, entering, exiting, restored, dropped, trailsStarted, trailsHidden, trailsResumed, lookedUp, lookedDown, legacyNeutral });
+    gearRows.push({ handle, actual, laid, hidden, absent, entering, exiting, restored, dropped, trailsStarted, trailsHidden, trailsResumed, lookedUp, lookedDown, legacyNeutral });
   }
-  record("hub hammock: the actual club, authored axe or hockey stick, rifle and owned pack stay together under rest, including late entry/exit poses; absent gear and active twirl afterimages stay hidden, and get-up or removal restores attachments and the current twirl without changing ammo; modern rest/exit retains shared up/down head look while legacy peers remain neutral",
+  record("hub hammock: the actual club, authored axe or hockey stick, rifle and owned pack stay together under rest, laid flat under the cloth, including late entry/exit poses; absent gear and active twirl afterimages stay hidden, and get-up or removal restores attachments and the current twirl without changing ammo; modern rest/exit retains shared up/down head look while legacy peers remain neutral",
     gearRows.every(row => Object.entries(row).every(([key, value]) => key === "handle" || value)), JSON.stringify(gearRows));
+  // Every Ooga on the roster as the live crew builds it (its hashed or authored traits, so its own height scales its
+  // club, rifle and jetpack), its own pack or the hub's put on as the crew puts it on, stowed by a resting peer's pose.
+  for (const file of readdirSync(new URL("../src/characters/", import.meta.url)))
+    if (!R.characters.get(file.replace(/\.js$/, ""))) runInNewContext(await readFile(new URL(`../src/characters/${file}`, import.meta.url), "utf8"), real);
+  for (const name of ["caves", "contributor-identities", "activity-repos", "contributors"])
+    runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), real);
+  const roster = R.characters.all().map((definition) => {
+    const handle = definition.handle, cave = R.models.caveman(R.contributors.traitsFor(handle));
+    const pack = cave.parts.jetpack || R.crew.jetpackNode(cave.root, cave.traits.height, 0, R.hubModels.jetpack(), R.hubModels.jetFlame());
+    pack.visible = true;
+    cave.jet = { node: pack, flame: null }; cave.jetpackOwned = true;
+    cave.weapon ||= {}; Object.assign(cave.weapon, { primaryOwned: true, secondaryOwned: true });
+    cave.camp ||= { seat: null };
+    R.scene.addChild(root, cave.root);
+    seat.remote = 1;
+    ham.poseRemote(cave, feet, { id: 1, rest: [0, 2, 255, 0, 0, 0] }, true);
+    const row = { handle, height: +cave.traits.height.toFixed(3), ...gearUnderCloth(cave.restEquipment.holder, [cave.parts.club, cave.parts.gun, pack]) };
+    ham.poseRemote(cave, feet, { id: 1, rest: 0 }, true);
+    R.scene.removeChild(root, cave.root);
+    return row;
+  });
+  record("hub hammock: every roster Ooga's actual club, rifle and jetpack lie flat on the ground inside the drawn cloth's footprint, no drawn triangle of one meeting another's",
+    roster.length >= 50 && roster.every(row => row.ok), JSON.stringify({ cloth: [clothLong, clothWide].map(x => +x.toFixed(3)), failing: roster.filter(row => !row.ok), widest: roster.reduce((w, row) => Math.max(w, row.across[1] - row.across[0]), 0) }));
+  seat.remote = 0;
   ham.dispose();
   record("hub hammock: dropped and disposed remote resting poses become upright and every hammock node is removed",
     pruned && !b.hammockRest && !b.root.quaternion && root.children.length === 0);
@@ -8679,7 +8799,7 @@ const hubHammock = { name: "hub hammock", why: "rule: one face-up Ooga rests off
   const walking=await b.evaluate('({seat:!!__ooga.crew.player.camp.seat,q:!!__ooga.crew.player.root.quaternion})');
   record("hub hammock: movement also stands the occupant up",moved&&!walking.seat&&!walking.q,JSON.stringify(walking));
 } };
-const hubHammockEntry = { name: "hub hammock entry", why: "regression: Space must reach the cloth from beside or above and ease into rest without snapping", run: async (b) => {
+const hubHammockEntry = { name: "hub hammock entry", why: "regression: walking at the side must reach the cloth's edge and step onto its middle, and Space must reach the cloth from beside or above and ease into rest without snapping", run: async (b) => {
   const result = await b.evaluate(`(() => {
     const B=__ooga,H=BL.scenes.hub.debug.hammock,s=H.seats[0],p=H.plan,a=B.cavemen.get("portlandhodl"),q=BL.math.quat;
     B.pilot.possess(a);if(B.crew.sleeping)B.crew.wakePlayer();if(a.camp.seat)B.crew.standPlayer();
@@ -8692,7 +8812,7 @@ const hubHammockEntry = { name: "hub hammock entry", why: "regression: Space mus
     for(const spot of [
       {name:"opposite side",x:p.x-p.nx*(p.envelope.across+0.7)*p.side,z:p.z-p.nz*(p.envelope.across+0.7)*p.side,y:p.ground},
       {name:"cloth end",x:p.x+p.ux*(p.envelope.half+0.6),z:p.z+p.uz*(p.envelope.half+0.6),y:p.ground},
-      {name:"on top",x:p.x,z:p.z,y:p.y+p.envelope.top}
+      {name:"on top",x:p.x,z:p.z,y:p.y+p.shell.high}
     ]) {
       B.pilot.navigate({position:spot,yaw:s.ry+0.7,pitch:.5,dist:6});B.advance(.3,1/60);
       const before=snap(),feet=before.y-a.baseY,act=document.getElementById("act").textContent;
@@ -8703,6 +8823,24 @@ const hubHammockEntry = { name: "hub hammock entry", why: "regression: Space mus
       rows.push({name:spot.name,act,feet,reserved,held,snap:dist(before,immediate),middleMove:dist(before,middle),middleFace:middle.face,face:end.face,animating,finished});
       space();B.advance(1.1,1/60);
     }
+    // Held W from either side, straight at the bed: its middle is stepped onto and walked across, and nearer its ends,
+    // out to the spreader bars, the Ooga comes right up to the bed on foot (the hub may then lead it round), never into it.
+    // The bed's drawn edges seen from above in its own frame (x along, z across the plan's n), for the gap from the
+    // walker's 0.3 m footprint to the nearest drawn part while its feet are on the ground.
+    const g=H.bedNode.geometry,v=g.verts,C=BL.compactGeometry,cur=g.compactGeometry?C.createCursor(g):null,edges=[];
+    for(let f=0;f<g.faces.length;f++){const ids=(cur?C.readFace(g,f,cur):g.faces[f]).i;for(let k=0;k<ids.length;k++){const a0=ids[k]*3,b0=ids[(k+1)%ids.length]*3;edges.push(v[a0],v[a0+2],v[b0],v[b0+2]);}}
+    const gapAt=(x,z)=>{const al=(x-p.x)*p.ux+(z-p.z)*p.uz,ac=(x-p.x)*p.nx+(z-p.z)*p.nz;let best=Infinity;
+      for(let k=0;k<edges.length;k+=4){const dx=edges[k+2]-edges[k],dz=edges[k+3]-edges[k+1],l=dx*dx+dz*dz,t=l?Math.max(0,Math.min(1,((al-edges[k])*dx+(ac-edges[k+1])*dz)/l)):0;best=Math.min(best,Math.hypot(al-edges[k]-dx*t,ac-edges[k+1]-dz*t));}
+      return best-0.3;};
+    const walks=[1,-1].flatMap(side=>[0,0.85,-0.85,1.05,-1.05,1.25,-1.25].map(along=>{
+      const x0=p.x+p.ux*along+p.nx*side*1.6,z0=p.z+p.uz*along+p.nz*side*1.6;
+      B.pilot.navigate({position:{x:x0,y:p.ground,z:z0},yaw:Math.atan2(x0-p.x-p.ux*along,z0-p.z-p.uz*along),pitch:.5,dist:6});B.advance(.3,1/60);
+      key("keydown","w","KeyW");let top=0,crossed=false,gap=Infinity;
+      for(let i=0;i<60;i++){B.advance(1/60,1/60);const q=a.root.position,feet=q.y-a.baseY-p.ground;top=Math.max(top,feet);
+        if(((q.x-p.x)*p.nx+(q.z-p.z)*p.nz)*side<0)crossed=true;if(feet<0.05)gap=Math.min(gap,gapAt(q.x,q.z));}
+      key("keyup","w","KeyW");B.advance(.3,1/60);
+      return {side,along,top:+top.toFixed(3),crossed,gap:+gap.toFixed(3)};
+    }));
     B.pilot.navigate({position:{x:s.walkAt.x,y:s.floor,z:s.walkAt.z},yaw:s.ry,pitch:.5,dist:6});B.advance(.3,1/60);
     const input=document.createElement("input");document.body.append(input);input.focus();key("keydown"," ","Space",false,input);key("keyup"," ","Space",false,input);
     const typing=!a.camp.seat;input.blur();input.remove();
@@ -8710,10 +8848,12 @@ const hubHammockEntry = { name: "hub hammock entry", why: "regression: Space mus
     const cancelled=!a.camp.seat&&!a.root.quaternion&&!s.entry&&H.free(a.root.position)===s;
     space();B.advance(.2,1/60);key("keydown","w","KeyW");B.advance(1.1,1/60);key("keyup","w","KeyW");
     const moved=!a.camp.seat&&!a.root.quaternion&&!s.entry&&H.free(a.root.position)===s;
-    return {rows,typing,cancelled,moved};
+    return {rows,walks,typing,cancelled,moved};
   })()`);
   record("hub hammock entry: beside either edge and standing on top offer REST and smoothly reach face-up rest while reserving one place",
     result.rows.every(r=>r.act==="REST"&&r.reserved&&r.held&&r.snap<1e-5&&r.middleMove>.05&&r.middleFace>.05&&r.middleFace<.95&&r.face>.98&&r.animating&&r.finished),JSON.stringify(result.rows));
+  record("hub hammock entry: held W at either side steps up onto the middle of the cloth and across it, and nearer its ends comes within 0.1 m of the drawn bed on foot without ever entering it",
+    result.walks.every(w=>w.along?w.top<.05&&w.gap>-.005&&w.gap<.1:w.top>.3&&w.crossed&&w.gap>-.005),JSON.stringify(result.walks));
   record("hub hammock entry: typing does not enter; repeated Space and movement interrupt entry with no lingering pose or reservation",
     result.typing&&result.cancelled&&result.moved,JSON.stringify(result));
 } };
@@ -8898,8 +9038,80 @@ const hubHammockExit = { name: "hub hammock exit", why: "rule: an Ooga resting i
   })()`);
   record("hub hammock exit: the departing occupant becomes upright and unseated; the rebuilt island has an empty hammock and only normal bed poses", before.hammock && before.sat && back.hammock && back.empty && !back.seated && back.restored && back.hung && !departed.seated && departed.upright, JSON.stringify({ before, departed, back }));
 } };
+// Demo donations at or over the 1,000 sat message bar, each from a donor of its own, through the game as a tip lands.
+const SEED_DONORS = (count, prefix) => `(() => { const B = __ooga;
+  for (let i = 0; i < ${count}; i++) B.game.recordDonation({ id: "${prefix}-" + i, sats: 1000 + i * 137, handle: "${prefix}" + String(i).padStart(2, "0"), message: "", at: Date.now() + i });
+  BL.hud.setDonationStats(B.game.state); })()`;
+// The Bananas panel as rendered, with the panel open: every ranked donor's row in order, each list's window (exactly
+// five donor rows tall for both), what scrolling each list into the slab's view brings into view, and whether Feed the
+// Oogas stands whole at the panel's foot, under the slab and never over it, before and after the slab scrolls.
+const BANANA_LISTS = `(() => {
+  const panel = document.getElementById("bananas-panel"), slab = panel.querySelector(".banana-slab"), feed = panel.querySelector('[data-action="feed"]');
+  const leaders = document.getElementById("banana-leaders"), recent = document.getElementById("banana-recent-list"), note = document.getElementById("banana-board-note");
+  const body = panel.closest(".sheet-body") || panel;
+  const shown = (list) => [...list.children].filter(n => !n.hidden), top = (list) => list.getBoundingClientRect().top + list.clientTop;
+  const rows = shown(leaders), latest = shown(recent), amounts = rows.map(n => parseFloat(n.querySelector(".banana-amount").textContent.replace(/,/g, "")));
+  const fifth = rows.length >= 5 ? rows[4].getBoundingClientRect().bottom - top(leaders) : null, sixth = rows.length >= 6 ? rows[5].getBoundingClientRect().top - top(leaders) : null;
+  const inside = (r, box) => r.top >= box.top - 1 && r.bottom <= box.bottom + 1;
+  // A list's last entry, scrolled to inside its own window and the window scrolled into the slab's view.
+  const reach = (list, items) => {
+    list.scrollTop = list.scrollHeight;
+    const l = list.getBoundingClientRect(), s = slab.getBoundingClientRect();
+    if (l.bottom > s.bottom) slab.scrollTop += l.bottom - s.bottom; else if (l.top < s.top) slab.scrollTop -= s.top - l.top;
+    const last = items.at(-1).getBoundingClientRect(), ok = inside(last, list.getBoundingClientRect()) && inside(last, slab.getBoundingClientRect()) && footed();
+    list.scrollTop = 0; slab.scrollTop = 0; return ok;
+  };
+  // Feed the Oogas whole at the foot of the panel and inside the drawer, at its full touch height, the slab ending
+  // above it.
+  const footed = () => {
+    const f = feed.getBoundingClientRect(), p = panel.getBoundingClientRect(), d = body.getBoundingClientRect();
+    return !!feed.getClientRects().length && f.height >= 44 && inside(f, p) && inside(f, d) && p.bottom - f.bottom <= 16 && slab.getBoundingClientRect().bottom <= f.top + 0.5;
+  };
+  panel.scrollTop = 0; body.scrollTop = 0; slab.scrollTop = 0;
+  const out = { visible: BL.sheet.visible(panel), donors: __ooga.game.state.donors.length, rows: rows.length,
+    names: rows.map(n => n.querySelector(".banana-donor").textContent).sort().join() === __ooga.game.state.donors.map(d => d.handle ? "@" + d.handle : "Anonymous").sort().join(),
+    ordered: amounts.every((a, i) => !i || a <= amounts[i - 1]), latest: latest.length, retained: __ooga.game.state.recentDonations.length,
+    window: leaders.clientHeight, fifth, sixth, recentWindow: recent.clientHeight, scrolls: leaders.scrollHeight > leaders.clientHeight && recent.scrollHeight > recent.clientHeight,
+    feedFirst: footed(), lastDonor: rows.length ? reach(leaders, rows) : false, lastTip: latest.length ? reach(recent, latest) : false,
+    slabScrolls: slab.scrollHeight > slab.clientHeight + 1, slabRoom: slab.clientHeight, panelScrolls: panel.scrollHeight > panel.clientHeight + 1,
+    sheetHeight: Math.round(panel.closest(".sheet").getBoundingClientRect().height) };
+  slab.scrollTop = slab.scrollHeight;
+  out.feedScrolled = footed(); out.noteReached = inside(note.getBoundingClientRect(), slab.getBoundingClientRect());
+  slab.scrollTop = 0;
+  return out;
+})()`;
+// Five donor rows fill the donors' window exactly and the latest tips' window is the same height; both scroll to
+// their last entry, every donor is listed in rank order, and the slab scrolls above Feed the Oogas, which stays whole
+// at the panel's foot without the panel scrolling, the slab's foot reachable over it and never under it.
+// However few entries either list holds, even none, both keep the same window, the one five donor rows fill.
+const bananaWindowsMatch = (short, full) => short.visible && short.window > 0 && Math.abs(short.window - full.window) <= 0.5 && Math.abs(short.recentWindow - full.window) <= 0.5;
+// A signed-in contributor's sheet, whose notification bell (40px on a touch screen) makes every panel's title as tall:
+// the account the sheet reads its bell and tabs from, laid out again through its own resize path, and put back after.
+const BANANA_SIGN_IN = `window.__bananaAccount = BL.net.state.me; BL.net.state.me = { id: 5, login: "footer", display: "Footer" }; window.dispatchEvent(new Event("resize"))`;
+const BANANA_SIGN_OUT = `BL.net.state.me = window.__bananaAccount; delete window.__bananaAccount; window.dispatchEvent(new Event("resize"))`;
+const BANANA_BELL = `(() => { const bell = document.querySelector("#bananas-panel .sheet-bell"), r = bell.getBoundingClientRect(), t = document.querySelector("#bananas-panel > .panel-title").getBoundingClientRect();
+  return { bell: !bell.closest("[hidden]") && bell.checkVisibility({ visibilityProperty: true, opacityProperty: true }), bellSize: Math.round(r.width) + "x" + Math.round(r.height), title: Math.round(t.height) }; })()`;
+const bananaBelled = (s) => s.bell && s.bellSize === "40x40" && s.title >= 40;
+const bananaFeedFooted = (s) => s.visible && s.feedFirst && s.feedScrolled && s.noteReached && !s.panelScrolls && s.slabRoom > 0;
+const bananaListsHold = (s) => s.visible && s.rows === s.donors && s.rows > 5 && s.names && s.ordered && s.latest === s.retained && s.latest > 5
+  && Math.abs(s.fifth - s.window) <= 1 && s.sixth >= s.window - 1 && Math.abs(s.recentWindow - s.window) <= 0.5 && s.scrolls && s.lastDonor && s.lastTip && bananaFeedFooted(s);
+// A panel's last control, read with the panel scrolled to its end: the space above it to the control before it, and
+// below it to the inside of the panel's border, which may be larger only by the room a button's drop shadow takes.
+const FOOT_SPACE = (selector) => `(() => {
+  const el = document.querySelector(${JSON.stringify(selector)}), panel = el.closest(".panel"), body = el.closest(".sheet-body");
+  panel.scrollTop = panel.scrollHeight; body.scrollTop = body.scrollHeight;
+  let prev = el.previousElementSibling; while (prev && !prev.getClientRects().length) prev = prev.previousElementSibling;
+  const r = el.getBoundingClientRect(), b = body.getBoundingClientRect(), inside = b.bottom - parseFloat(getComputedStyle(body).borderBottomWidth);
+  // The suite's screens have no safe-area inset, so a docked drawer's inset adds nothing here.
+  const above = r.top - prev.getBoundingClientRect().bottom, below = inside - r.bottom;
+  panel.scrollTop = 0;
+  return { above: +above.toFixed(2), below: +below.toFixed(2), shown: !!el.getClientRects().length };
+})()`;
+const footMatches = (s) => s.shown && s.above > 0 && s.below - s.above >= 0 && s.below - s.above <= 4;
 // Keep the real sheet controls working while their rows survive a scene's lifetime.
 const hudVisit = { name: "hub HUD lifetime", why: "regression: scene visits recreated roster SVGs and donor rows; their handlers must end on leave while the attached rows keep their identity", run: async (b) => {
+  // A donor's row is made when the board first reaches it, so one is seeded before the visit whose identity is kept.
+  await b.evaluate(SEED_DONORS(1, "hud-seed"));
   await b.evaluate(`(() => {
     const H = window.__hudVisit = { rows: [...document.querySelectorAll("#roster [data-name]")], leaders: [...document.getElementById("banana-leaders").children], signals: [], calls: 0 }, S = BL.scenes;
     H.keep = __ooga.hubPolicy === "keep";
@@ -8939,13 +9151,33 @@ const hudVisit = { name: "hub HUD lifetime", why: "regression: scene visits recr
         && B.headquarters.objectGuides === H.guides && BL.scenes.hub.debug.terrainRampRoof === H.roof;
       return { painted, graph: graph === H.keep, ended: H.signals[0].aborted && !H.signals[1].aborted, calls: H.calls,
         roster: rows.length === H.rows.length && rows.every(n => H.rows.includes(n)),
-        leaders: [...leaders.children].every((n, i) => n === H.leaders[i]),
+        leaders: H.leaders.length >= 1 && H.leaders.every((n, i) => leaders.children[i] === n) && leaders.children.length === B.game.state.donors.length,
         visible: visible.length, ranked: visible[0].querySelector(".banana-donor").textContent === "@hud-diff",
         sats: visible[0].querySelector(".banana-amount").textContent.replace(/[^0-9]/g, "") === "987654",
         hidden: [...leaders.children].filter(n => n.hidden).every(n => getComputedStyle(n).display === "none"),
         away: away.getAttribute("aria-expanded") !== closed };
     })()`);
     record("HUD lifetime: leaving releases input and audio, the chosen policy retains or rebuilds the graph, fresh visit handlers fire once, and reused rows retain sorting, units and the away toggle", parked.policy && parked.empty && parked.quiet && parked.targets === 0 && !parked.audio && r.painted && r.graph && r.ended && r.calls === 1 && r.roster && r.leaders && r.visible > 0 && r.ranked && r.sats && r.hidden && r.away, JSON.stringify({ parked, resumed: r }));
+    // The few donors so far, then more donors than the old ten-row board held and a full recent list over the message bar.
+    const was = await b.evaluate(`(() => { const s = document.getElementById("sheet"), tab = s.dataset.open === "true" ? s.querySelector("[data-tab][aria-selected='true']")?.dataset.tab || null : null; __ooga.hud.selectTab("bananas"); return tab; })()`);
+    const short = await b.evaluate(BANANA_LISTS);
+    await b.evaluate(SEED_DONORS(12, "lister"));
+    const lists = await b.evaluate(BANANA_LISTS);
+    // The shortest desktop drawer a resize allows (sheet.js's 263px): the slab scrolls over Feed the Oogas, which
+    // stays whole at the foot.
+    const cramped = await b.evaluate(`(() => {
+      const sheet = document.getElementById("bananas-panel").closest(".sheet"), was = sheet.style.getPropertyValue("height"), prio = sheet.style.getPropertyPriority("height");
+      sheet.style.setProperty("height", "263px", "important");
+      const out = ${BANANA_LISTS};
+      if (was) sheet.style.setProperty("height", was, prio); else sheet.style.removeProperty("height");
+      return out;
+    })()`);
+    // The later steps on this page find the panel as it was.
+    await b.evaluate(was ? `__ooga.hud.selectTab(${JSON.stringify(was)})` : `document.getElementById("sheet-bananas").click()`);
+    record("HUD lifetime: the Bananas panel lists every donor in rank order inside a five-row window, the latest tips in a window of the same height however few either holds, and each scrolls to its last entry",
+      short.rows < 5 && short.rows === short.donors && short.names && bananaWindowsMatch(short, lists) && bananaListsHold(lists) && lists.rows > 10, JSON.stringify({ short, lists }));
+    record("HUD lifetime: in a short desktop drawer the Bananas slab scrolls above Feed the Oogas, which stays whole at the panel's foot over nothing, and both lists still reach their last entry",
+      bananaListsHold(cramped) && cramped.slabScrolls && cramped.sheetHeight <= 264 && bananaWindowsMatch(cramped, lists), JSON.stringify(cramped));
   } finally {
     await b.evaluate(`(() => { const H = window.__hudVisit; BL.scenes.lab.enter = H.enters[0]; BL.scenes.hub.enter = H.enters[1]; BL.scenes.hub.enterSteps = H.hubSteps; delete window.__hudVisit; })()`);
   }
@@ -9797,6 +10029,10 @@ const hubSheetPersistence = { name: "side panel persistence", why: "rule: panels
       saved: saved && JSON.parse(saved) };
   })()`;
   const first = await b.evaluate(read);
+  // The recent list's "1,000 sats and up only" box: on with no saved choice, and each choice kept across a reload.
+  const bar = `(() => { const box = document.getElementById("banana-recent-bar"); return { checked: box.checked, saved: localStorage.getItem("ooga-recent-bar") }; })()`;
+  const flip = `(() => { document.getElementById("banana-recent-bar").click(); return ${bar}; })()`;
+  const bars = { first: await b.evaluate(bar), off: await b.evaluate(flip) };
   await b.evaluate(`document.getElementById("sheet-bananas").click()`);
   if (!await settled()) throw Error("The opened panel did not finish docking");
   const opened = await b.evaluate(read);
@@ -9804,10 +10040,15 @@ const hubSheetPersistence = { name: "side panel persistence", why: "rule: panels
   await untilReady(b);
   if (!await settled()) throw Error("The restored panel did not finish docking");
   const restored = await b.evaluate(read);
+  bars.keptOff = await b.evaluate(bar); bars.on = await b.evaluate(flip);
   await toggle("#sheet-bananas");
   await b.open(url);
   await untilReady(b);
   const closed = await b.evaluate(read);
+  bars.keptOn = await b.evaluate(bar);
+  record("side panel: the recent donations' 1,000 sats box starts on with no saved choice, and turning it off or back on is kept across reloads",
+    bars.first.checked && bars.first.saved === null && !bars.off.checked && bars.off.saved === "0" && !bars.keptOff.checked && bars.keptOff.saved === "0"
+      && bars.on.checked && bars.on.saved === "1" && bars.keptOn.checked && bars.keptOn.saved === "1", JSON.stringify(bars));
   record("side panel: first load has no selection, reloads restore its open tab, and closing slides the panel offscreen with its rail still reachable", first.open === "false" && first.tab === null && !first.panel && first.panels.length === 0 && first.shown.length === 0
     && (first.saved === null || first.saved.open === false && first.saved.tab === "roster" && first.saved.rect === null && first.saved.windows.length === 0)
     && opened.open === "true" && opened.tab === "bananas" && opened.saved?.open && opened.saved.tab === "bananas"
@@ -9816,7 +10057,27 @@ const hubSheetPersistence = { name: "side panel persistence", why: "rule: panels
     && !closed.saved.open && closed.saved.tab === "bananas" && closed.saved.rect
     && Math.abs(opened.all[0].rect.x + opened.all[0].rect.width - opened.width) < 0.01
     && railAtEdge(closed.all[0], opened.all[0], closed) && closed.all[0].inert, JSON.stringify({ first, opened, restored, closed }));
-  const layout = { open: true, tab: "bananas", rect: { x: 900, y: 90, width: 420, height: 480 },
+  // A first visit opens Bananas by itself a beat after the world shows; a saved layout, a choice made first or
+  // unreadable storage keeps the panel as it is. Only the first case waits on the director's own timer.
+  const welcomed = async (state, before = "") => {
+    await openWithSheetState(b, url + (state === undefined ? "&welcome=1" : "&welcome=0"), state === undefined ? null : state);
+    if (state === undefined) await untilPage(b, `document.getElementById("sheet").dataset.open === "true"`);
+    return b.evaluate(`(() => { ${before}; const opened = BL.sheet.welcome(), s = document.getElementById("sheet"); let saved = null;
+      try { saved = localStorage.getItem("oogaboogaland.sheet.v1"); } catch { /* the blocked case */ }
+      return { opened, open: s.dataset.open, tab: s.querySelector("[data-tab][aria-selected='true']")?.dataset.tab || null, after: performance.now() - performance.getEntriesByName("ooga:drawn")[0].startTime, saved: saved && JSON.parse(saved).tab }; })()`);
+  };
+  const fresh = await welcomed(undefined);
+  const kept = await welcomed({ open: false, tab: "roster" });
+  const chosen = await welcomed(null, '__ooga.hud.selectTab("roster")');
+  const blockedScript = await b.send("Page.addScriptToEvaluateOnNewDocument", { source: '(() => { const get = Storage.prototype.getItem; Storage.prototype.getItem = function(key) { if (key === "oogaboogaland.sheet.v1") throw new DOMException("blocked", "SecurityError"); return get.call(this, key); }; })();' });
+  let blocked;
+  try { blocked = await welcomed(null); } finally { await b.send("Page.removeScriptToEvaluateOnNewDocument", { identifier: blockedScript.result.identifier }); }
+  record("side panel: a first visit opens Bananas after the world shows, never over a saved layout, an earlier choice or unreadable storage",
+    fresh.open === "true" && fresh.tab === "bananas" && fresh.saved === "bananas" && !fresh.opened && fresh.after >= 1800
+    && !kept.opened && kept.open === "false" && kept.saved === "roster"
+    && !chosen.opened && chosen.open === "true" && chosen.tab === "roster"
+    && !blocked.opened && blocked.open === "false", JSON.stringify({ fresh, kept, chosen, blocked }));
+  const layout ={ open: true, tab: "bananas", rect: { x: 900, y: 90, width: 420, height: 480 },
     windows: [{ tab: "roster", rect: { x: 140, y: 130, width: 360, height: 430 } }] };
   await openWithSheetState(b, url, layout);
   const multiple = await b.evaluate(read);
@@ -9898,14 +10159,22 @@ const hubSheetPersistence = { name: "side panel persistence", why: "rule: panels
       && login.closest("[data-panel]").dataset.panel === "roster" && feed.closest("[data-panel]").dataset.panel === "bananas"
       && document.querySelectorAll("#account-login").length === 1 && document.querySelectorAll('.sheet [data-action="feed"]').length === 1
       && !document.querySelector('.sheet-foot, #quality, .sheet [data-action="reset"]');
+    const feet = { login: ${FOOT_SPACE("#account")} };
+    BL.hud.showAccount({ backend: true, me: { id: 5, login: "footer", display: "Footer" }, room: "live", online: 1 });
+    feet.signedIn = ${FOOT_SPACE("#account")};
+    BL.hud.showAccount({ backend: true, me: null, room: "off", online: 0 });
     H.selectTab("bananas");
+    feet.feed = ${FOOT_SPACE('#bananas-panel [data-action="feed"]')};
     const returned = login.closest(".sheet") === owner && feed.closest(".sheet").id === "sheet"
       && !!feed.getClientRects().length && getComputedStyle(feed).visibility === "visible"
       && getComputedStyle(login).minHeight === getComputedStyle(feed).minHeight && parseFloat(getComputedStyle(login).minHeight) >= 44;
     BL.hud.showAccount(BL.net.state);
-    return { hidden, folded, same, account, returned, count: document.querySelectorAll(".sheet").length };
+    return { hidden, folded, same, account, returned, count: document.querySelectorAll(".sheet").length, feet };
   })()`);
+  const { feet } = held; delete held.feet;
   record("side panel: temporary suppression and folding survive resize, reopening restores the saved layout, and donation/account actions stay with their own panels at the same button height", Object.values(held).every(Boolean) && held.count === 2, JSON.stringify(held));
+  record("side panel: Feed the Oogas, Contributor sign-in and the signed-in name, online and Join voice row leave as much room under them as above them, but for a button's shadow",
+    footMatches(feet.login) && footMatches(feet.signedIn) && footMatches(feet.feed), JSON.stringify(feet));
   if (!await settled()) throw Error("The restored panels did not finish opening");
   // A closed source rail can be merged into another panel, focusing its tab and removing only its own rail.
   await toggle(".sheet:not(#sheet) [data-tab='roster']");
@@ -14417,9 +14686,79 @@ const phone = (id, { card = null, play = null, required, sheet = false }) => ({ 
       return roster && bananas && a.height >= 44 && a.width === b.width && a.height === b.height
         && !document.querySelector('.sheet-foot, #quality, .sheet [data-action="reset"]');
     })()`);
+    // The drawer's foot in both account states, and the Bananas panel's lists, on the phone's short drawer.
+    seen.feet = await b.evaluate(`(() => {
+      const H = __ooga.hud;
+      BL.hud.showAccount({ backend: true, me: null, room: "off", online: 0 }); H.selectTab("roster");
+      const feet = { login: ${FOOT_SPACE("#account")} };
+      BL.hud.showAccount({ backend: true, me: { id: 5, login: "footer", display: "Footer" }, room: "live", online: 1 });
+      feet.signedIn = ${FOOT_SPACE("#account")};
+      BL.hud.showAccount(BL.net.state); H.selectTab("bananas");
+      feet.feed = ${FOOT_SPACE('#bananas-panel [data-action="feed"]')};
+      return feet;
+    })()`);
+    seen.empty = await b.evaluate(BANANA_LISTS);
+    await b.evaluate(SEED_DONORS(12, "phone"));
+    seen.lists = await b.evaluate(BANANA_LISTS);
+    // Signed in, the title carries the 40px bell, and Feed the Oogas still stands whole under the slab.
+    const signedIn = `(() => { ${BANANA_SIGN_IN}; try { __ooga.hud.selectTab("bananas"); return { ...${BANANA_BELL}, lists: ${BANANA_LISTS} }; } finally { ${BANANA_SIGN_OUT}; } })()`;
+    seen.signedIn = await b.evaluate(signedIn);
+    // The same phone on its side, 844x390, where the default drawer is 94px: the Bananas panel's drawer stands 200px
+    // tall, Feed the Oogas whole under the slab, the sticks and act button put away rather than over the topbar;
+    // another panel goes back to the default drawer with the sticks over it, clear of it.
+    if (id === "hub") {
+      await b.send("Emulation.setDeviceMetricsOverride", { width: PHONE_SIZE.h, height: PHONE_SIZE.w, deviceScaleFactor: 2, mobile: true });
+      try {
+        await b.evaluate(`window.dispatchEvent(new Event("resize"))`); await b.sleep(300);
+        const read = `(() => { const s = document.getElementById("sheet"), r = s.getBoundingClientRect(), stick = document.getElementById("joy-move"), act = document.querySelector(".bottom-hud > .act");
+          const sr = stick.getBoundingClientRect();
+          return { coarse: matchMedia("(pointer: coarse)").matches, open: s.dataset.open === "true", sized: s.dataset.sized, drawer: Math.round(r.height), top: Math.round(r.top), width: innerWidth, height: innerHeight,
+            stick: stick.getClientRects().length > 0, act: !!act && act.getClientRects().length > 0, stickClear: sr.bottom <= r.top - 39 + 0.5 && sr.top >= 0 }; })()`;
+        seen.landscape = await b.evaluate(`(() => { __ooga.hud.selectTab("bananas"); return { ...${read}, lists: ${BANANA_LISTS} }; })()`);
+        seen.landscapeIn = await b.evaluate(`(() => { ${BANANA_SIGN_IN}; try { __ooga.hud.selectTab("bananas"); return { ...${read}, ...${BANANA_BELL}, lists: ${BANANA_LISTS} }; } finally { ${BANANA_SIGN_OUT}; } })()`);
+        seen.landscapeOther = await b.evaluate(`(() => { __ooga.hud.selectTab("roster"); return ${read}; })()`);
+        // A drawer resized to its shortest (the top edge's arrow key, as a resize writes and a reload restores the
+        // saved rectangle): the Bananas panel still stands 200px tall from the screen's foot over the saved size,
+        // which the roster then gets back, unchanged in storage. A double-click on the drag bar resets the drawer.
+        seen.resized = await b.evaluate(`(() => {
+          const H = __ooga.hud, s = document.getElementById("sheet"), savedHeight = () => JSON.parse(localStorage.getItem("oogaboogaland.sheet.v1"))?.rect?.height ?? null;
+          H.selectTab("roster");
+          s.querySelector(".sheet-edge-n").dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }));
+          const before = { ...${read}, saved: savedHeight() };
+          H.selectTab("bananas");
+          const bananas = { ...${read}, sticks: s.dataset.sticks, bottom: Math.round(s.getBoundingClientRect().bottom), saved: savedHeight(), lists: ${BANANA_LISTS} };
+          let bananasIn;
+          ${BANANA_SIGN_IN};
+          try { H.selectTab("bananas"); bananasIn = { ...${read}, ...${BANANA_BELL}, sticks: s.dataset.sticks, bottom: Math.round(s.getBoundingClientRect().bottom), saved: savedHeight(), lists: ${BANANA_LISTS} }; }
+          finally { ${BANANA_SIGN_OUT}; }
+          H.selectTab("roster");
+          const after = { ...${read}, saved: savedHeight() };
+          s.querySelector(".sheet-drag").dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+          return { before, bananas, bananasIn, after, reset: s.dataset.sized };
+        })()`);
+      } finally {
+        await b.send("Emulation.setDeviceMetricsOverride", { width: PHONE_SIZE.w, height: PHONE_SIZE.h, deviceScaleFactor: 2, mobile: true });
+        await b.evaluate(`window.dispatchEvent(new Event("resize"))`); await b.sleep(300);
+      }
+    }
+    await b.evaluate(`__ooga.hud.selectTab("roster")`);
   }
-  const ok = (!card || seen.card.touch.coarse && seen.card.touch.touchWording && seen.card.bad.length === 0 && seen.card.closed) && seen.play.length === 0 && (!sheet || seen.sheet.length === 0 && seen.actions);
-  record(`${id} phone: ${card ? "the title card reads in touch words and its go button starts the game, then " : ""}nothing is clipped, wrapped by accident or off screen, and every control is under a thumb${sheet ? ", with the sheet open and the sticks still free" : ""}`, ok, JSON.stringify(seen));
+  const ok = (!card || seen.card.touch.coarse && seen.card.touch.touchWording && seen.card.bad.length === 0 && seen.card.closed) && seen.play.length === 0 && (!sheet || seen.sheet.length === 0 && seen.actions
+    && footMatches(seen.feet.login) && footMatches(seen.feet.signedIn) && footMatches(seen.feet.feed) && bananaListsHold(seen.lists) && seen.lists.slabScrolls && bananaFeedFooted(seen.empty)
+    && bananaBelled(seen.signedIn) && bananaListsHold(seen.signedIn.lists) && bananaWindowsMatch(seen.signedIn.lists, seen.lists)
+    && (id !== "hub" || bananaBelled(seen.landscapeIn) && seen.landscapeIn.drawer >= 200 && seen.landscapeIn.top >= 39 && !seen.landscapeIn.stick && !seen.landscapeIn.act && bananaListsHold(seen.landscapeIn.lists)
+      && bananaBelled(seen.resized.bananasIn) && seen.resized.bananasIn.sized === "true" && seen.resized.bananasIn.drawer >= 200 && seen.resized.bananasIn.bottom === 390
+      && seen.resized.bananasIn.sticks === "false" && !seen.resized.bananasIn.stick && seen.resized.bananasIn.saved === seen.resized.before.saved && bananaListsHold(seen.resized.bananasIn.lists))
+    && (id !== "hub" || seen.landscape.coarse && seen.landscape.open && seen.landscape.sized === "false" && seen.landscape.width === 844
+      && seen.landscape.drawer >= 200 && seen.landscape.top >= 39 && !seen.landscape.stick && !seen.landscape.act && bananaListsHold(seen.landscape.lists)
+      && seen.landscapeOther.open && seen.landscapeOther.drawer === Math.ceil(390 * 0.24) && seen.landscapeOther.stick && seen.landscapeOther.stickClear
+      && seen.resized.before.sized === "true" && seen.resized.before.drawer === Math.ceil(390 * 0.24) && Math.round(seen.resized.before.saved) === seen.resized.before.drawer
+      && seen.resized.bananas.sized === "true" && seen.resized.bananas.drawer >= 200 && seen.resized.bananas.bottom === 390 && seen.resized.bananas.top >= 39
+      && seen.resized.bananas.sticks === "false" && !seen.resized.bananas.stick && !seen.resized.bananas.act && seen.resized.bananas.saved === seen.resized.before.saved && bananaListsHold(seen.resized.bananas.lists)
+      && seen.resized.after.drawer === seen.resized.before.drawer && seen.resized.after.saved === seen.resized.before.saved && seen.resized.after.stick && seen.resized.after.stickClear
+      && seen.resized.reset === "false")
+    && seen.empty.rows === seen.empty.donors && seen.empty.latest === seen.empty.retained && bananaWindowsMatch(seen.empty, seen.lists));
+  record(`${id} phone: ${card ? "the title card reads in touch words and its go button starts the game, then " : ""}nothing is clipped, wrapped by accident or off screen, and every control is under a thumb${sheet ? ", with the sheet open and the sticks still free, its footers as roomy under as over them, and the Bananas slab scrolling above Feed the Oogas, which stays whole at the panel's foot signed out and signed in under the 40px bell, over lists that each scroll in a five-row window" : ""}`, ok, JSON.stringify(seen));
 } });
 
 // ---- The Lightning Factory ----
@@ -16956,6 +17295,143 @@ const tessCacheChecks = async BL => {
 };
 
 // Regression: one hub variant pinned every other index built by a later scene.
+// The Goldbug in the bushes: the loop that calls him and the coins he drops, measured through hub-goldbug.js itself.
+const goldbugChecks = BL => {
+  const G = BL.hubGoldbug, S = BL.scene;
+  // Each row is the bushes entered in turn (-1 between them: out of every bush), one a second unless timed.
+  const walk = (loop, entries, at = (i) => i) => { let fired = 0; entries.forEach((index, i) => { if (loop.step(index, at(i))) fired++; }); return fired; };
+  const out = (seq) => seq.flatMap((i) => [i, -1]);
+  const cases = {
+    forward: walk(G.loop(), out([0, 1, 2, 3, 0])) === 1,
+    backward: walk(G.loop(), out([2, 1, 0, 3, 2])) === 1,
+    anyStart: walk(G.loop(), out([3, 0, 1, 2, 3])) === 1,
+    short: walk(G.loop(), out([0, 1, 2, 3])) === 0,
+    wrongOrder: walk(G.loop(), out([0, 2, 1, 3, 0])) === 0 && walk(G.loop(), out([0, 1, 3, 2, 1, 0])) === 0,
+    // A wrong bush starts a new loop from itself; a step back reverses nothing, it restarts there.
+    restartsFromWrong: walk(G.loop(), out([0, 1, 3, 0, 1, 2, 3])) === 1,
+    reversal: walk(G.loop(), out([0, 1, 0, 3, 2, 1, 0])) === 1,
+    // Standing still in a bush, or stepping out and back into it, counts once.
+    reentry: walk(G.loop(), [0, 0, 0, -1, 0, 1, 1, -1, 1, 2, -1, 3, 3, -1, 0]) === 1,
+    timeout: walk(G.loop(), out([0, 1, 2, 3, 0]), (i) => i * 2.6) === 0,
+    withinWindow: walk(G.loop(), out([0, 1, 2, 3, 0]), (i) => i * 2.45) === 1,
+    timeoutRestarts: walk(G.loop(), out([0, 1, 2, 3, 0, 1, 2, 3, 0]), (i) => i < 9 ? i * 2.6 : 12 + i) === 1
+  };
+  {
+    // Cooldown: a second loop right after the first is ignored, the same loop after `cooldown` fires.
+    const loop = G.loop(), first = walk(loop, out([0, 1, 2, 3, 0]));
+    const soon = walk(loop, out([0, 1, 2, 3, 0]), (i) => 20 + i);
+    const later = walk(loop, out([0, 1, 2, 3, 0]), (i) => 10 + G.LOOP.cooldown + i);
+    cases.cooldown = first === 1 && soon === 0 && later === 1 && loop.fired === 2;
+    const custom = G.loop({ cooldown: 5 });
+    cases.customCooldown = walk(custom, out([0, 1, 2, 3, 0])) === 1 && walk(custom, out([0, 1, 2, 3, 0]), (i) => 9 + i) === 0 && walk(custom, out([0, 1, 2, 3, 0]), (i) => 60 + i) === 1;
+  }
+  record("goldbug loop: all four bushes in cyclic order either way round, back to the start within the window, fires once; wrong order, a short loop or a stale one never fires, and the cooldown holds", Object.values(cases).every(Boolean), JSON.stringify(cases));
+
+  const parent = S.createNode(), geometry = BL.models.particleGeometry("#f4d26a", 0.05, 0.3);
+  const pool = G.coinPool({ parent, geometry, capacity: 5, life: 1.5 });
+  const spawned = [];
+  for (let i = 0; i < 8; i++) spawned.push(!!pool.spawn(0, 0.5, 0, 0.4, 1.2, -0.3, 0.012));
+  const bounds = { nodes: parent.children.length === 5, accepted: spawned.filter(Boolean).length === 5, refused: pool.refused === 3, live: pool.live === 5 };
+  let lowest = Infinity, maxLive = 0;
+  for (let f = 0; f < 120; f++) {
+    pool.update(1 / 120);
+    for (const c of pool.coins) if (c.life > 0) lowest = Math.min(lowest, c.node.position.y);
+    maxLive = Math.max(maxLive, pool.live);
+  }
+  bounds.restsOnFloor = lowest >= 0.012 - 1e-9 && pool.coins.every((c) => c.node.position.y === 0.012 && !c.vy);
+  for (let f = 0; f < 120; f++) pool.update(1 / 120);
+  bounds.reclaimed = pool.live === 0 && pool.coins.every((c) => !c.node.visible && c.life === 0) && maxLive === 5;
+  for (let round = 0; round < 50; round++) { pool.spawn(0, 0.5, 0, 0, 1, 0, 0); pool.update(0.2); }
+  bounds.steady = parent.children.length === 5 && pool.live <= 5 && pool.live > 0;
+  pool.clear();
+  bounds.cleared = pool.live === 0 && pool.coins.every((c) => !c.node.visible);
+  record("goldbug coins: a fixed pool that refuses past capacity, lands coins on their floor, returns every one after its life and never adds nodes", Object.values(bounds).every(Boolean), JSON.stringify(bounds));
+
+  // The show through create's own update, driven by positions as a walking Ooga gives them: a loop fires it, it runs to
+  // the end within the coin pool and the scene's particle pool, and leaves the scene's children as they were.
+  // feet: the height the walker's feet stand at over the bushes (3 m is a jetpack's or a jump's).
+  const run = (calm, busyAt = Infinity, feet = 0) => {
+    const root = S.createNode(), mirrorNode = S.createNode({ position: { x: 0, y: 1.5, z: 0.5 } });
+    S.addChild(root, mirrorNode);
+    const tally = { puffs: 0, pulses: 0, rustles: 0, maxCoins: 0, phases: new Set(), frames: 0, lines: [] };
+    const bushes = [[-2, 8], [2, 8], [2, 12], [-2, 12]].map(([x, z]) => ({ x, z, footprint: 0.7, node: S.createNode({ position: { x, y: 0, z } }) }));
+    let busy = false;
+    const egg = G.create({
+      root, bushes, memory: {}, groundAt: () => 0, calm: () => calm, busy: () => busy, random: () => 0.5,
+      fx: { puff: () => { tally.puffs++; }, sayAt: (x, y, z, text) => { tally.lines.push(text); } },
+      mirror: { mouth: { x: 0, z: 0, ry: 0 }, node: mirrorNode, ripples: { pulse: () => { tally.pulses++; return true; } } },
+      rustle: () => { tally.rustles++; }
+    });
+    // Built with the visit, off the graph until a show.
+    const before = root.children.length, point = { x: 0, y: 0, z: 0 }, builtDetached = egg.debug.built && !egg.debug.attached;
+    for (const i of [0, 1, 2, 3, 0]) {
+      Object.assign(point, { x: 0, z: 10 }); egg.update(1, point, feet);
+      Object.assign(point, { x: bushes[i].x, z: bushes[i].z }); egg.update(1, point, feet);
+    }
+    const fired = egg.active;
+    for (let f = 0; f < 60 * 20 && egg.active; f++) {
+      tally.frames++;
+      if (tally.frames === busyAt) busy = true;
+      egg.update(1 / 60, point, feet);
+      tally.phases.add(egg.debug.phase);
+      tally.maxCoins = Math.max(tally.maxCoins, egg.debug.coins.live);
+    }
+    const rig = egg.debug.rig, ended = !egg.active && root.children.length === before;
+    const result = { fired, ended, phases: [...tally.phases].join(","), puffs: tally.puffs, pulses: tally.pulses, rustles: tally.rustles,
+      coins: egg.debug.coins, maxCoins: tally.maxCoins, aborted: egg.debug.aborted, golden: rig && rig.golden, seconds: +(tally.frames / 60).toFixed(2), builtDetached,
+      lines: tally.lines.join("|"), unarmed: !egg.debug.armed, heard: { ...egg.debug.heard } };
+    // A kept hub's suspend ends a show and keeps the nodes, which play again; a full leave lets them go.
+    egg.debug.fire(false); egg.update(1 / 60, point, feet);
+    egg.suspend();
+    result.suspendKeeps = !egg.active && egg.debug.built && root.children.length === before && egg.debug.fire(false) && egg.debug.attached;
+    egg.dispose();
+    result.disposed = !egg.debug.built && root.children.length === before;
+    return result;
+  };
+  const full = run(false), calm = run(true), cut = run(false, 90), flown = run(false, Infinity, 3), hopped = run(false, Infinity, G.FEET_REACH - 0.05);
+  // His suit's parts (sleeves, trousers, pockets) turn gold with his voxels and back again.
+  const suit = (() => {
+    const M = BL.goldbugModels, g = M.create(), parts = [];
+    const visit = (n) => { if (n.goldTwin) parts.push(n); n.children.forEach(visit); };
+    visit(g.root);
+    M.setGolden(g, true); const gold = parts.every((n) => n.geometry === n.goldTwin);
+    M.setGolden(g, false); const back = parts.every((n) => n.geometry === n.plainGeometry);
+    return { parts: parts.length, gold, back };
+  })();
+  const show = {
+    suit: suit.parts === 5 && suit.gold && suit.back,
+    builtOnce: full.builtDetached && full.suspendKeeps && full.disposed,
+    feetOnGround: !flown.fired && hopped.fired,
+    full: full.fired && full.ended && /run/.test(full.phases) && /look/.test(full.phases) && /melt/.test(full.phases) && /puddle/.test(full.phases)
+      && full.pulses === 1 && full.rustles === 1 && full.lines === "Wait, I'm..." && full.unarmed && full.puffs > 10
+      && full.heard.womp === 1 && full.heard.squeak === 0 && full.heard.rustle === 1 && full.heard.sizzle === 1 && full.heard.clink > 0 && full.heard.clink <= full.coins.spawned && full.coins.spawned > 0 && full.maxCoins <= G.COINS.capacity && !full.golden && full.seconds < 15,
+    calm: calm.fired && calm.ended && !/melt|run|puddle/.test(calm.phases) && /walk/.test(calm.phases) && /fade/.test(calm.phases)
+      && calm.puffs === 0 && calm.pulses === 0 && calm.lines === "" && calm.coins.spawned === 0
+      && calm.heard.squeak === 1 && calm.heard.womp === 0 && calm.heard.rustle === 1 && calm.heard.sizzle === 0 && calm.heard.clink === 0 && calm.seconds < 4,
+    busyCuts: cut.fired && cut.ended && cut.aborted === 1 && cut.seconds < 1.6
+  };
+  record("goldbug show: the loop calls him, walked with feet on the ground, never flown over; he runs unarmed in his suit (which turns gold with him), rustling out and clinking coins, starts his one line at the glass to a sad womp, double-takes, ripples the glass once and melts to nothing within the pools, sizzling; Calm only walks and fades; an island event ends him at once; his nodes are built once a visit and kept through a suspend", Object.values(show).every(Boolean), JSON.stringify({ show, suit, full, calm, cut, flown: flown.fired, hopped: hopped.fired }));
+
+  // The current island's bushes round the mirror cave's mouth (c1), as the hub's seeded scatter places them (read from the
+  // built hub once rock's ca6024d was merged in): the meadow's four in front of it, two more meadow bushes further out,
+  // and cliff bushes on ledges (y above 0), plus one hidden, one inactive and one behind the mouth. pickBushes must
+  // yield exactly the four, in loop order. Re-read it from the hub when the scatter moves.
+  const mouth = { x: 11, z: -19.052558883257653, ry: -Math.PI / 6 };
+  const bush = (x, y, z, footprint, extra = {}) => ({ prop: "bush", active: true, x, z, footprint, node: { visible: true, position: { x, y, z } }, ...extra });
+  const four = [[-1.49, -16.14], [2.68, -16.21], [4.61, -11.32], [2.15, -10.27]];
+  const scatter = [
+    bush(2.68, 0, -16.21, 0.7), bush(4.61, 0, -11.32, 0.7), bush(3.79, 2, -23.53, 0.5), bush(20.7, 6.75, -15.56, 0.5),
+    bush(2.15, 0, -10.27, 0.7), bush(-1.49, 0, -16.14, 0.7), bush(2.7, 0, -6.91, 0.7), bush(-2.48, 0, -11.03, 0.7), bush(-3.16, 2, -23.63, 0.5),
+    bush(13.39, 0, -2.21, 0.7), bush(6, 0, -14, 0.7, { active: false }), bush(5, 0, -15, 0.7, { node: { visible: false, position: { x: 5, y: 0, z: -15 } } }),
+    bush(14, 0, -24, 0.7), { prop: "flower", active: true, x: 4, z: -14, footprint: 0.35, node: { visible: true, position: { x: 4, y: 0, z: -14 } } }
+  ];
+  const picked = G.pickBushes(scatter, mouth), at = picked ? picked.map((b) => [b.x, b.z]) : [];
+  const key = (p) => p.join(","), ring = four.map(key), start = picked ? ring.indexOf(key(at[0])) : -1;
+  const forward = at.every((p, i) => key(p) === ring[(start + i) % 4]), backward = at.every((p, i) => key(p) === ring[(start - i + 8) % 4]);
+  const pick = { four: !!picked && picked.length === 4, theFour: at.every((p) => ring.includes(key(p))), loopOrder: start >= 0 && (forward || backward),
+    footprints: !!picked && picked.every((b) => b.footprint === 0.7), tooFew: G.pickBushes(scatter.slice(0, 3), mouth) === null };
+  record("goldbug bushes: the current island's scatter round the mirror cave yields exactly its four meadow bushes, in loop order, past cliff, hidden, inactive and far ones", Object.values(pick).every(Boolean), JSON.stringify({ pick, at }));
+};
 const variantCacheChecks = BL => {
   const M = BL.models, builds = new Map(), read = M.variants(i => ({ i, serial: builds.set(i, (builds.get(i) || 0) + 1).get(i) }));
   M.setScope("hub"); const hub = read();
@@ -21638,10 +22114,25 @@ scene("hub", { label: "reset storage race", steps: [{ name: "reset storage race"
     record("browser reset: the same pooled browser clears final timer and pagehide writes before the next task", reused && kept.marker === null && kept.timer === null && kept.pagehide === null, JSON.stringify({ reused, ...kept }));
   } finally { next?.close(true); first?.close(true); rmSync(dir, { recursive: true, force: true }); }
 } }] });
+// The notification bells as rendered: which panels carry one, how many show, how many are expanded, and, while the
+// Players panel's shows, its button's size and how far its drawn bell sits from the middle of the circle's inside.
+const bellState = `(() => {
+  const views = [...document.querySelectorAll(".panel .sheet-notifications")], bell = document.querySelector("#players-panel .sheet-bell");
+  const r = bell.getBoundingClientRect(), icon = bell.querySelector("svg path").getBoundingClientRect(), drawn = r.width > 0 && icon.width > 0;
+  return { panels: views.map(v => v.closest(".panel").dataset.panel).sort().join(), shown: views.filter(v => !v.hidden).length,
+    expanded: views.filter(v => !v.querySelector(".sheet-unread").hidden || v.querySelector("button").getAttribute("aria-expanded") !== "false").length,
+    coarse: matchMedia("(pointer: coarse)").matches, size: drawn ? Math.round(r.width) + "x" + Math.round(r.height) : "",
+    dx: drawn ? Math.abs(icon.left + icon.width / 2 - (r.left + bell.clientLeft + bell.clientWidth / 2)) : null,
+    dy: drawn ? Math.abs(icon.top + icon.height / 2 - (r.top + bell.clientTop + bell.clientHeight / 2)) : null };
+})()`;
+const BELL_PANELS = "bananas,chat,loot,players,roster";
+// Every panel's bell shows, closed, with the drawn bell within half a pixel of its circle's middle at the pointer's size.
+const bellsCentred = (s) => s.panels === BELL_PANELS && s.shown === 5 && s.expanded === 0 && s.size === (s.coarse ? "40x40" : "26x26") && s.dx <= 0.5 && s.dy <= 0.5;
 // #430: joins named and counted, chat lines counted, each count cleared only by looking at its tab, joins read aloud on request.
 const hubJoinAlerts = { name: "join alerts", why: "rule: a player who comes online is named on screen and counted on the Players tab, new chat lines are counted on the Ooga Chat tab, each count clears only when its tab is looked at, and joins are read aloud only when asked", run: async (b) => {
   // The Players panel is the saved selection, so it shows as soon as the visitor is signed in, without being looked at.
   await openWithSheetState(b, hubPage(src, "pos=0"), { open: true, tab: "players" });
+  const signedOutBells = await b.evaluate(bellState);
   await b.evaluate(`(async () => {
     const W = window.__joins = { fetch: window.fetch, WebSocket: window.WebSocket, said: [], lines: [], cancelled: 0, sockets: [] };
     window.fetch = (url, options) => String(url) === "/api/me" ? Promise.resolve({ ok: true, status: 200, headers: { get: () => "application/json" }, json: async () => ({ player: { id: 71, login: "Tester", display: "Tester" } }) })
@@ -21656,21 +22147,31 @@ const hubJoinAlerts = { name: "join alerts", why: "rule: a player who comes onli
     W.join = (id, display) => W.room({ t: "join", p: { id, login: "p" + id, display, zone: "outside" } });
     W.line = (id, login) => W.room({ t: "chat", id, at: 0, login, name: login, text: "hi" });
     W.welcome = () => W.room({ t: "welcome", you: { id: 71 }, now: Date.now(), features: ["chat-unicode-v1"], players: [{ id: 2, login: "anna", display: "Anna", zone: "outside" }] });
-    W.read = () => { const badge = (n) => { const e = document.querySelector("#" + n + "-tab .tab-count"); return e.hidden ? "" : e.textContent; }, toast = document.getElementById("toast");
-      return { players: badge("players"), chat: badge("chat"), label: document.getElementById("players-tab").getAttribute("aria-label"), toast: toast.hidden ? "" : toast.textContent, toastTags: toast.children.length,
-        shown: BL.sheet.visible(document.getElementById("players-panel")), said: W.said.slice() }; };
+    W.read = () => {
+      const bell = document.querySelector(".panel:not([hidden]) .sheet-bell"), detail = bell?.nextElementSibling;
+      const [players, chat] = detail ? detail.textContent.match(/[0-9]+[+]?(?= new)/g) : ["0", "0"];
+      const total = bell?.querySelector(".tab-count"), toast = document.getElementById("toast");
+      const tab = document.querySelector("#players-tab .tab-count");
+      return { players: players === "0" ? "" : players, chat: chat === "0" ? "" : chat, tabBadge: tab.hidden ? "" : tab.textContent,
+        total: !total || total.hidden ? "" : total.textContent, breakdown: !!detail && !detail.hidden, bell: bell?.getAttribute("aria-label"),
+        toast: toast.hidden ? "" : toast.textContent, toastTags: toast.children.length,
+        shown: BL.sheet.visible(document.getElementById("players-panel")), said: W.said.slice() };
+    };
     W.welcome();
     W.room({ t: "chat-history", messages: [{ id: 10, at: 0, login: "anna", name: "Anna", text: "earlier" }] });
   })()`);
   const arrived = await b.evaluate(`__joins.read()`);
+  const signedInBells = await b.evaluate(bellState);
+  record("join alerts: a signed-out arrival shows no notification bell on any panel, and signing in puts one on all five panels, centred in its circle",
+    signedOutBells.panels === BELL_PANELS && signedOutBells.shown === 0 && bellsCentred(signedInBells), JSON.stringify({ signedOutBells, signedInBells }));
   const joins = await b.evaluate(`(() => { const W = __joins, out = {};
     W.join(3, "<b>Bea</b>"); out.one = W.read();
     W.join(3, "<b>Bea</b>"); W.room({ t: "leave", id: 3 }); W.join(3, "<b>Bea</b>"); out.again = W.read();
     W.join(4, "Cy"); out.two = W.read();
     return out; })()`);
-  record("join alerts: a join after arrival is named on screen as plain text and counted on the Players tab, though its panel shows; those already there, a repeat and a quick rejoin are not, and close joins share one message",
-    arrived.players === "" && arrived.chat === "" && arrived.shown && !arrived.toast.includes("online") && joins.one.toast === "<b>Bea</b> is online" && joins.one.toastTags === 0
-      && joins.one.players === "1" && joins.one.label === "Online Oogas, 1 new" && joins.again.players === "1" && joins.two.players === "2" && joins.two.toast === "<b>Bea</b> and Cy are online",
+  record("join alerts: a join after arrival is named on screen as plain text and counted on the bell while the panel shows; those already there, a repeat and a quick rejoin are not, and close joins share one message",
+    arrived.players === "" && arrived.chat === "" && arrived.shown && arrived.bell === "Notifications" && arrived.total === "" && !arrived.toast.includes("online") && joins.one.toast === "<b>Bea</b> is online" && joins.one.toastTags === 0
+      && joins.one.players === "1" && joins.one.total === "1" && joins.one.tabBadge === "" && joins.again.players === "1" && joins.two.players === "2" && joins.two.toast === "<b>Bea</b> and Cy are online",
     JSON.stringify({ arrived, joins }));
   const lines = await b.evaluate(`(() => { const W = __joins, out = {};
     W.line(11, "anna"); W.line(12, "Tester"); out.live = W.read();
@@ -21680,7 +22181,29 @@ const hubJoinAlerts = { name: "join alerts", why: "rule: a player who comes onli
   await tourGo(b, "hub");
   const back = await b.evaluate(`__joins.read()`);
   record("join alerts: chat lines from others count on the Ooga Chat tab, the visitor's own and a rejoin's lines already had do not, and both counts survive a rejoin and a trip to another scene",
-    lines.live.chat === "1" && lines.rejoin.chat === "2" && lines.rejoin.players === "2" && back.players === "2" && back.chat === "2" && back.shown, JSON.stringify({ lines, back }));
+    lines.live.chat === "1" && lines.rejoin.chat === "2" && lines.rejoin.players === "2" && back.players === "2" && back.chat === "2" && back.shown && back.total === "4" && back.tabBadge === "", JSON.stringify({ lines, back }));
+  const notifications = await b.evaluate(`(() => {
+    const W = __joins, bell = document.querySelector("#players-panel .sheet-bell");
+    bell.dispatchEvent(new PointerEvent("pointerenter", { pointerType: "mouse" }));
+    const hovered = W.read();
+    bell.dispatchEvent(new PointerEvent("pointerleave", { pointerType: "mouse" }));
+    const restored = W.read();
+    bell.dispatchEvent(new PointerEvent("pointerenter", { pointerType: "touch" }));
+    bell.click(); const tapped = W.read();
+    bell.click();
+    document.getElementById("players-tab").click();
+    const closed = W.read();
+    document.getElementById("players-tab").click();
+    const reopened = W.read();
+    return { hovered, restored, tapped, closed, reopened };
+  })()`);
+  const { hovered, restored, tapped, closed, reopened } = notifications;
+  record("join alerts: hover and tap reveal both unread counts without acknowledgement, and closing restores the tab badge",
+    hovered.breakdown && hovered.players === "2" && hovered.chat === "2" && hovered.total === ""
+      && !restored.breakdown && restored.total === "4" && tapped.breakdown && tapped.total === ""
+      && closed.tabBadge === "2" && reopened.players === "" && reopened.chat === "2" && reopened.total === "2",
+    JSON.stringify(notifications));
+  await b.evaluate(`__joins.join(26, "Flo"); __joins.join(27, "Gus")`);
   const tab = (name) => b.evaluate(`(() => { const r = document.getElementById("${name}-tab").getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
   await b.focus(true);
   let viewed;
@@ -21729,9 +22252,15 @@ const hubJoinAlerts = { name: "join alerts", why: "rule: a player who comes onli
   })()`);
   await b.focus(true);
   const out = await b.evaluate(`(async () => {
-    const W = __joins; document.getElementById("players-speak-input").focus(); W.join(24, "Pat"); W.join(25, "Quin");
-    const before = W.read(), stale = W.lines.at(-1), count = W.said.length; await BL.net.logout();
-    if (stale.onend) stale.onend(); const r = { ...W.read(), stoppedWithoutBadge: before.players === "" && W.cancelled === 2 && W.said.length === count };
+    const W = __joins, unread = W.read().players;
+    document.getElementById("players-speak-input").focus(); W.join(24, "Pat"); W.join(25, "Quin");
+    const before = W.read(), stale = W.lines.at(-1), count = W.said.length;
+    // A breakdown tapped open before signing out closes with every bell; signing back in returns them all, closed.
+    document.querySelector("#players-panel .sheet-bell").click(); const bellsPinned = ${bellState};
+    await BL.net.logout(); const bellsOut = ${bellState};
+    if (stale.onend) stale.onend(); const r = { ...W.read(), stoppedWithoutNewBadge: before.players === unread && W.cancelled === 2 && W.said.length === count };
+    BL.net.state.resolved = false; await BL.net.recheck(); r.bells = { pinned: bellsPinned, out: bellsOut, back: ${bellState}, me: !!BL.net.state.me };
+    await BL.net.logout(); r.bells.again = ${bellState};
     delete speechSynthesis.speak; delete speechSynthesis.cancel; window.fetch = W.fetch; window.WebSocket = W.WebSocket;
     Object.assign(BL.net.state, { backend: false, started: false, resolved: true }); BL.hud.showAccount(BL.net.state); delete window.__joins; return r;
   })()`);
@@ -21739,7 +22268,10 @@ const hubJoinAlerts = { name: "join alerts", why: "rule: a player who comes onli
   record("join alerts: enabled speech continues and queues across environmental mute; disabling cancels current and waiting joins, stale callbacks cannot revive them, and signing out clears both counts",
     collapsed && settings.closed && settings.grouped && settings.step === "1" && settings.min === "1" && settings.max === "61" && box.shown && box.said === 0 && spoken.saved === "on" && spoken.queuedWhileMuted && spoken.disabled && spoken.cancelledQueue && spoken.staleIgnored
       && spoken.said.join("|") === "Joins will be read aloud|Eve is online|Fay and Gus are online|Hal is online|Ivy is online|Joins will be read aloud|Lou is online"
-      && spoken.muted.toast === "Dee, Eve, Fay and 3 others are online" && out.players === "" && out.chat === "" && out.stoppedWithoutBadge, JSON.stringify({ box, spoken, out }));
+      && spoken.muted.toast === "Dee, Eve, Fay and 3 others are online" && out.players === "" && out.chat === "" && out.stoppedWithoutNewBadge, JSON.stringify({ box, spoken, out }));
+  const { pinned, out: bellsOut, back: bellsBack, again } = out.bells;
+  record("join alerts: signing out hides and closes every panel's bell, even one tapped open, and signing back in returns all five closed and centred",
+    pinned.expanded === 1 && pinned.shown === 5 && bellsOut.shown === 0 && bellsOut.expanded === 0 && out.bells.me && bellsCentred(bellsBack) && again.shown === 0, JSON.stringify(out.bells));
   await b.open(hubPage(src, "pos=0")); await untilReady(b);
   record("join alerts: the enabled reading choice survives reload", await b.evaluate('BL.players.stats.speakOn&&document.getElementById("players-speak-input").checked'));
 
@@ -21747,6 +22279,7 @@ const hubJoinAlerts = { name: "join alerts", why: "rule: a player who comes onli
 // #443: operate the real controls with native keyboard/touch events while voice has never connected.
 const hubPlayerPreferences = { name: "player preferences", why: "regression: hearing range and individual mute were hidden before voice, and player names had no independent volume disclosure", run: async b => {
   await openWithSheetState(b, hubPage(src, "pos=0"), { open: true, tab: "players" });
+  const signedOutBells = await b.evaluate(bellState);
   await b.evaluate(`(async () => {
     const W = window.__playerPrefs = { fetch: window.fetch, WebSocket: window.WebSocket, gum: navigator.mediaDevices.getUserMedia, aim: BL.pilot.turnToward, captures: 0, voiceCalls: 0, turns: 0, sockets: [], activations: [] };
     window.fetch = (url, options) => String(url) === "/api/me" ? Promise.resolve({ ok: true, status: 200, headers: { get: () => "application/json" }, json: async () => ({ player: { id: 71, login: "listener", display: "Listener" } }) })
@@ -21761,6 +22294,9 @@ const hubPlayerPreferences = { name: "player preferences", why: "regression: hea
     W.peer = (id, zone) => ({ id, login: "peer" + id, display: "Peer " + id, zone, x: 2, y: 0, z: 3, yaw: 0 });
     W.mobile = matchMedia("(pointer: coarse)").matches;
   })()`);
+  const signedInBells = await b.evaluate(bellState);
+  record("player preferences: the bell is hidden on every panel signed out, and signed in shows on all five at the pointer's size (26px, or 40px on a touch screen), centred in its circle",
+    signedOutBells.panels === BELL_PANELS && signedOutBells.shown === 0 && bellsCentred(signedInBells), JSON.stringify({ signedOutBells, signedInBells }));
   await b.evaluate(`document.getElementById("players-settings").open = true`);
   const alone = await b.evaluate(`(() => { const e = document.getElementById("players-hearing-range"); return { shown: !document.getElementById("players-hearing").hidden, enabled: !e.disabled, voice: BL.voice.stats.enabled, peers: BL.net.remotes.size }; })()`);
   await b.focus(true);
@@ -21870,7 +22406,136 @@ scene("hangar", { label: "controls reference forklift", query: "character=portla
   record("controls reference forklift: running cab shows drive, forks and horn, powered-off cab omits them, and touch names real cab targets", r.seated&&["w","a","s","d","r","f","h"].every(k=>keys(r.keyboard).includes(k))&&!keys(r.keyboard).includes("shiftleft")&&!/Walk|Run/.test(text(r.keyboard))&&["Tap fork stick","Tap steering wheel","Tap ignition key"].every(s=>text(r.touch).includes(s))&&!keys(r.off).some(k=>["w","r","f","h"].includes(k)),JSON.stringify(r));
 } }] });
 scene("hub", { label: "side panel", query: "pos=0", steps: [hubSheetPersistence, hubMuteKey, hubChat] });
+// Private conversations (#188) on a signed-in page: the room is a stand-in, and the other person, Anna, is the real
+// sealing code on the same pad, so what the page sends is read as Anna's page would read it.
+const hubPrivateChat = { name: "private chat", why: "rule: two players who hold the same pad talk privately from the Players tab while the room carries only sealed frames; a pad for someone else is refused by name, the talk carries on across a scene trip, and a pad made here downloads for the two of them", run: async (b) => {
+  await openWithSheetState(b, hubPage(src, "pos=0"), { open: true, tab: "players" });
+  await b.evaluate(`(async () => {
+    const W = window.__pm = { fetch: window.fetch, WebSocket: window.WebSocket, sockets: [], out: [], wire: [], heard: [], downloads: [] };
+    window.fetch = (url, options) => String(url) === "/api/me" ? Promise.resolve({ ok: true, status: 200, headers: { get: () => "application/json" }, json: async () => ({ player: { id: 71, login: "Tester", display: "Tester" } }) }) : W.fetch(url, options);
+    window.WebSocket = class { static OPEN = 1; constructor() { this.readyState = 1; W.sockets.push(this); } send(text) { W.out.push(text); } close() { this.readyState = 3; } };
+    BL.net.state.started = true; BL.net.state.resolved = false;
+    await BL.net.recheck();
+    W.room = (m) => W.sockets.at(-1).onmessage({ data: JSON.stringify(m) });
+    W.room({ t: "welcome", you: { id: 71 }, now: Date.now(), features: ["chat-unicode-v1", "pm-v1"], players: [{ id: 2, login: "anna", display: "Anna", zone: "outside" }] });
+    const P = BL.oneTimePad, random = (v) => crypto.getRandomValues(v), mem = new Map();
+    W.file = P.make("anna", "tester", 16384, random);
+    W.wrong = P.make("anna", "cy", 16384, random);
+    const pad = P.parse(W.file.slice()), b64 = (u) => btoa(String.fromCharCode(...u)), unb64 = (t) => Uint8Array.from(atob(t), (ch) => ch.charCodeAt(0));
+    W.anna = P.session({ subtle: crypto.subtle, pad, role: 0, sum: await P.digest(crypto.subtle, pad), random,
+      ledger: P.ledger({ get: (k) => mem.has(k) ? mem.get(k) : null, set: (k, v) => mem.set(k, v) }, (n, fn) => Promise.resolve().then(fn), pad, 0),
+      send: (frame) => W.room({ t: "pm", op: "data", from: 2, d: b64(frame) }) });
+    // What the page sent, read as the room would: frames go to Anna, and the room answers each one ok.
+    W.flush = async () => {
+      const sent = [];
+      for (const text of W.out.splice(0)) {
+        const m = JSON.parse(text);
+        if (m.t !== "pm") continue;
+        W.wire.push(text); sent.push(m.op === "data" ? { op: m.op, to: m.to } : m);
+        // W.refuse frames are refused for the room's rate instead: they never reach Anna.
+        if (m.op === "data" && W.refuse > 0) { W.refuse--; W.room({ t: "pm", op: "refused", to: 2, n: m.n, reason: "rate" }); }
+        else if (m.op === "data") { W.heard.push(await W.anna.heard(unb64(m.d))); W.room({ t: "pm", op: "ok", to: 2, n: m.n }); }
+      }
+      return sent;
+    };
+    W.load = (bytes) => { const dt = new DataTransfer(); dt.items.add(new File([bytes], "pad.oogapad")); const input = document.getElementById("pm-file"); input.files = dt.files; input.dispatchEvent(new Event("change")); };
+    W.wait = async (test) => { for (let i = 0; i < 150 && !test(); i++) await new Promise((r) => setTimeout(r, 20)); return !!test(); };
+    W.lock = () => document.querySelector('#players-panel li[data-id="2"] .players-private');
+    W.view = () => { const s = BL.privateChat.stats(), panel = document.getElementById("chat-panel");
+      return { phase: s.phase, ready: s.ready, padLoaded: s.padLoaded, started: s.started, unrecorded: s.unrecorded, queued: s.queued, lines: s.lines, note: document.getElementById("pm-note").textContent, shown: BL.sheet.visible(panel), privateView: panel.dataset.view === "private",
+        input: !document.getElementById("pm-input").disabled, switcher: !document.getElementById("pm-switch").hidden }; };
+    W.say = (text) => { const input = document.getElementById("pm-input"); input.value = text; input.dispatchEvent(new Event("input")); document.getElementById("pm-form").requestSubmit(); };
+  })()`);
+  const asked = await b.evaluate(`(async () => { const W = __pm; await W.wait(() => W.lock() && !W.lock().hidden); const offered = !!W.lock() && !W.lock().hidden; W.lock().click();
+    const sent = await W.flush(); W.room({ t: "pm", op: "inviting", to: 2 }); const waiting = W.view();
+    W.room({ t: "pm", op: "open", with: 2 }); await W.anna.start({ fresh: true }); const open = W.view();
+    W.load(W.wrong); await W.wait(() => W.view().note.includes("not you")); const wrong = W.view();
+    // A file this browser has no record of waits for the visitor to say it is new.
+    W.load(W.file); await W.wait(() => W.view().unrecorded); const unrecorded = { ...W.view(), confirm: !document.getElementById("pm-confirm").hidden, sent: W.out.length };
+    document.getElementById("pm-fresh").click(); await W.wait(() => W.view().started); await W.flush(); await W.wait(() => W.view().ready); await W.flush();
+    return { offered, sent, waiting, open, wrong, unrecorded, ready: W.view(), annaHeard: W.heard.map((r) => r.kind), annaReady: W.anna.ready }; })()`);
+  record("private chat: the lock on another player's row asks them, the Ooga Chat panel turns to the private view, a pad made for someone else is refused by name, a file this browser never used waits for the visitor to say it is new, and the line opens once both sides acknowledge",
+    asked.offered && asked.sent.length === 1 && asked.sent[0].op === "invite" && asked.sent[0].to === 2 && asked.waiting.phase === "inviting" && asked.waiting.shown && asked.waiting.privateView && asked.waiting.switcher
+      && asked.open.phase === "open" && asked.open.queued === 1 && !asked.open.input && /delete every copy when you're done/.test(asked.open.note) && asked.wrong.note === "That pad is for anna and cy, not you." && !asked.wrong.padLoaded
+      && asked.unrecorded.unrecorded && asked.unrecorded.confirm && !asked.unrecorded.started && asked.unrecorded.sent === 0 && /no record of this pad/.test(asked.unrecorded.note)
+      && asked.ready.ready && asked.ready.input && asked.annaHeard.includes("hello") && asked.annaHeard.includes("ready") && asked.annaReady, JSON.stringify(asked));
+  const talk = await b.evaluate(`(async () => { const W = __pm; W.say("hi anna, ünïcode 🦍"); await W.wait(() => W.view().lines.length === 1); await W.flush(); await W.wait(() => W.view().lines[0].state === "sent");
+    await W.anna.say("hello tester"); await W.wait(() => W.view().lines.length === 2);
+    const records = Object.keys(localStorage).filter((k) => k.startsWith("oogaboogaland.pad.")).map((k) => localStorage.getItem(k));
+    return { view: W.view(), anna: W.heard.at(-1), wire: W.wire.join("\\n"), records }; })()`);
+  record("private chat: a line reaches Anna intact while the room carries only a sealed frame of it, Anna's answer shows, and the page keeps only how much of the pad is used",
+    talk.anna.kind === "text" && talk.anna.text === "hi anna, ünïcode 🦍" && !talk.wire.includes("hi anna") && !talk.wire.includes("ünïcode") && talk.view.lines.map((l) => l.text).join() === "hi anna, ünïcode 🦍,hello tester"
+      && talk.view.lines[0].own && talk.view.lines[0].state === "sent" && !talk.view.lines[1].own && talk.records.length === 1 && /^\{"v":1,"sk":\d+,"send":\d+,"rk":\d+,"recv":\d+,"stop":""\}$/.test(talk.records[0]), JSON.stringify(talk));
+  const retry = await b.evaluate(`(async () => { const W = __pm;
+    W.refuse = 1; W.say("one more"); await W.wait(() => W.view().lines.length === 3); await W.flush(); await W.wait(() => W.view().lines[2].state === "failed");
+    const refused = W.view().lines[2], button = !!document.querySelector("#pm-log .pm-retry");
+    W.say("and another"); await W.wait(() => W.view().lines.length === 4); await W.flush();
+    document.querySelector("#pm-log .pm-retry").click(); await W.wait(() => W.out.length > 0); await W.flush();
+    await W.wait(() => W.view().lines[3].state === "sent");
+    return { refused, button, anna: W.heard.slice(-2), stopped: W.anna.stopped, lines: W.view().lines.slice(2), ready: W.view().ready }; })()`);
+  record("private chat: a line the room refused shows Not sent with Retry, and Retry after a later line got through reaches Anna on fresh bytes without stopping the pad",
+    retry.refused.state === "failed" && retry.button && retry.anna.map((r) => r.text || r.kind).join() === "and another,one more" && !retry.stopped && retry.ready
+      && retry.lines.map((l) => l.text + ":" + l.state).join() === "and another:sent,one more:sent", JSON.stringify(retry));
+  // A second pad in the same conversation, as when the first runs out: its lines are numbered afresh, so the room's
+  // answers and Retry must reach only the new session's lines, and the old pad's unsent line can't be retried.
+  const second = await b.evaluate(`(async () => { const W = __pm, P = BL.oneTimePad, random = (v) => crypto.getRandomValues(v);
+    W.refuse = 1; W.say("lost with the old pad"); await W.wait(() => W.view().lines.length === 5); await W.flush(); await W.wait(() => W.view().lines[4].state === "failed");
+    // Anna's frames wait until this page has the new pad, then go straight through.
+    const file = P.make("anna", "tester", 16384, random), pad = P.parse(file.slice()), mem = new Map(), held = [];
+    let direct = false;
+    const b64 = (u) => btoa(String.fromCharCode(...u)), annaSend = (frame) => { const m = { t: "pm", op: "data", from: 2, d: b64(frame) }; if (direct) W.room(m); else held.push(m); };
+    W.anna = P.session({ subtle: crypto.subtle, pad, role: 0, sum: await P.digest(crypto.subtle, pad), random,
+      ledger: P.ledger({ get: (k) => mem.has(k) ? mem.get(k) : null, set: (k, v) => mem.set(k, v) }, (n, fn) => Promise.resolve().then(fn), pad, 0),
+      send: (frame) => annaSend(frame) });
+    await W.anna.start({ fresh: true });
+    W.load(file); await W.wait(() => W.view().unrecorded); document.getElementById("pm-fresh").click(); await W.wait(() => W.view().started);
+    direct = true; for (const m of held.splice(0)) W.room(m);
+    await W.flush(); await W.wait(() => W.view().ready); await W.flush();
+    W.say("on the new pad"); await W.wait(() => W.view().lines.length === 6); await W.flush();
+    await W.wait(() => W.view().lines[5]?.state === "sent", 2000);
+    const rows = [...document.querySelectorAll("#pm-log .chat-row")];
+    const before = { lines: W.view().lines.slice(4), retries: document.querySelectorAll("#pm-log .pm-retry").length, anna: W.heard.at(-1), ready: W.view().ready, rows: rows.length };
+    // The room holds one of Anna's lines back: the page says it hasn't arrived once her next line shows, then shows it late.
+    direct = false; await W.anna.say("held back"); direct = true;
+    await W.anna.say("after it"); await W.wait(() => W.view().lines.length === 8);
+    const gap = W.view().lines.slice(6);
+    for (const m of held.splice(0)) W.room(m);
+    await W.wait(() => W.view().lines.some((l) => l.text === "held back"));
+    return { ...before, gap, filled: W.view().lines.slice(6), lateTime: [...document.querySelectorAll("#pm-log .chat-time")].at(-1).textContent }; })()`);
+  record("private chat: a second pad in the same conversation numbers its lines afresh without touching the old pad's: its line shows Sent, and the old pad's unsent line can no longer be retried",
+    second.ready && second.anna?.text === "on the new pad" && second.lines[1]?.text === "on the new pad" && second.lines[1]?.state === "sent"
+      && second.lines[0]?.state === "failed" && second.retries === 0, JSON.stringify(second));
+  // MrHodlX's review of #436: a line the room drops or holds back is never lost without a word.
+  record("private chat: a line the room holds back is noted as not arrived once a later one shows, then shows marked late and the note goes",
+    second.gap[0]?.note === "A line from Anna hasn't arrived." && second.gap[1]?.text === "after it"
+      && second.filled.map((l) => l.note || l.text).join() === "after it,held back" && second.filled[1].late && / · late$/.test(second.lateTime), JSON.stringify(second));
+  await tourGo(b, "lab");
+  await tourGo(b, "hub");
+  const after = await b.evaluate(`(async () => { const W = __pm; const kept = W.view(); await W.anna.say("still here"); await W.wait(() => W.view().lines.length === 9);
+    document.getElementById("pm-end").click(); const ended = await W.flush(); const view = W.view();
+    // A second conversation, with a pad made here: one download for the two of them, and this page loads its own copy.
+    const click = HTMLAnchorElement.prototype.click, made = URL.createObjectURL;
+    HTMLAnchorElement.prototype.click = function () { W.downloads.push({ name: this.download }); };
+    URL.createObjectURL = (blob) => { W.blob = blob; return made.call(URL, blob); };
+    // This time Anna asks, and the private view holds while the accept is on its way.
+    W.room({ t: "pm", op: "invite", from: 2 }); document.querySelector('[data-pm-view="private"]').click(); const invited = W.view();
+    document.getElementById("pm-accept").click(); const accepting = { ...W.view(), sent: await W.flush() };
+    W.room({ t: "pm", op: "open", with: 2 }); document.getElementById("pm-size").value = "262144"; document.getElementById("pm-make").click();
+    await W.wait(() => W.view().padLoaded); HTMLAnchorElement.prototype.click = click; URL.createObjectURL = made;
+    const pad = BL.oneTimePad.parse(new Uint8Array(await W.blob.arrayBuffer()));
+    const noteRow = document.querySelector('#pm-log [data-note="true"]'), input = document.getElementById("pm-input");
+    return { kept, ended, view, invited, accepting, made: W.view(), downloads: W.downloads, logins: pad.logins, bytes: pad.bytes.length,
+      note: !!noteRow && !noteRow.querySelector(".chat-name"), spellcheck: input.spellcheck }; })()`);
+  await b.evaluate(`(() => { const W = __pm; window.fetch = W.fetch; window.WebSocket = W.WebSocket; })()`);
+  record("private chat: the conversation carries on across a trip to another scene and End tells the room and clears it; an invite accepted keeps the private view until it opens, and a pad made here downloads once for the two of them and loads on this page",
+    after.kept.phase === "open" && after.kept.ready && after.kept.lines.length === 8 && after.ended.length === 1 && after.ended[0].op === "end" && after.view.phase === "idle" && after.view.lines.length === 0
+      && after.invited.privateView && after.accepting.phase === "accepting" && after.accepting.privateView && after.accepting.switcher && after.accepting.sent.length === 1 && after.accepting.sent[0].op === "accept"
+      && after.downloads.length === 1 && after.downloads[0].name === "ooga-pad-tester-anna.oogapad" && after.logins.join() === "tester,anna" && after.bytes > 262144 && after.made.padLoaded && after.made.started
+      && after.note && after.spellcheck === false,
+    JSON.stringify(after));
+} };
 scene("hub", { label: "join alerts", query: "pos=0", steps: [hubJoinAlerts] });
+scene("hub", { label: "private chat", query: "pos=0", steps: [hubPrivateChat] });
 scene("hub", { label: "player preferences", query: "pos=0", steps: [hubPlayerPreferences] });
 scene("hub", { label: "player preferences", query: "pos=0", opts: PHONE_SIZE, steps: [hubPlayerPreferences] });
 scene("hub", { label: "clock and block height", query: "pos=0&time=0900", steps: [hubBlockHeight, hubDestinationNames] });
@@ -24782,22 +25447,30 @@ const sheetRailChecks = async () => {
   const make = tab => ({ tab, rect: {}, open: false, tabs: names.map(name => ({ dataset: { tab: name }, setAttribute() {}, style: { setProperty() {} } })),
     node: { dataset: { dock: "right" } }, body: { setAttribute() {} }, nav: { setAttribute() {} } });
   const main = make("roster"), detached = make("players"), windows = [main, detached];
-  const context = { panels: [], windows, main, folded: false, hidden: false, signedIn: true, phone: { matches: false },
+  // Every panel carries a bell, the signed-out Bananas and Contributing Oogas panels among them.
+  const bells = names.map(name => ({ panel: name, view: { hidden: true }, resets: 0, reset() { this.resets++; } }));
+  const context = { panels: [], notificationViews: bells, windows, main, folded: false, hidden: false, signedIn: true, phone: { matches: false },
     available: name => name !== "players" && name !== "chat" || context.signedIn, ownerOf: name => windows.find(w => w.tab === name),
+    belled: () => context.signedIn, visible: () => true,
     isOpen: w => !context.folded && w.open, fit() {}, showCounts() {}, showExpand() {}, notify() {} };
   runInNewContext(refresh + ";this.refresh = refresh;", context);
   const read = () => windows.filter(w => !w.node.hidden).map(w => w.tabs.filter(t => !t.hidden).map(t => t.dataset.tab));
-  context.refresh(); const closed = read();
+  const rung = () => bells.filter(b => !b.view.hidden).map(b => b.panel).join();
+  context.refresh(); const closed = read(), bellIn = rung();
   detached.open = true; context.refresh(); const opened = read();
   context.folded = true; context.refresh(); const folded = read();
-  context.folded = false; context.signedIn = false; context.refresh(); const signedOut = read();
-  context.signedIn = true; context.refresh(); const signedIn = read();
+  const before = bells.map(b => b.resets);
+  context.folded = false; context.signedIn = false; context.refresh(); const signedOut = read(), bellOut = rung();
+  const closedOut = bells.every((b, i) => b.resets > before[i]);
+  context.signedIn = true; context.refresh(); const signedIn = read(), bellBack = rung();
   const unique = rows => rows.flat().length === new Set(rows.flat()).size;
   record("side panel rails: unowned tabs stay on main, detached Players keeps only its own tab, folding gathers tabs, and sign-out/in restores ownership without duplicates",
     [closed, opened, folded, signedOut, signedIn].every(unique) && closed[0].join() === "bananas,roster,loot,chat" && closed[1].join() === "players"
       && opened[1].join() === "players" && folded.length === 1 && folded[0].length === names.length
       && signedOut.length === 1 && !signedOut[0].includes("players") && !signedOut[0].includes("chat") && signedIn[1].join() === "players",
     JSON.stringify({ closed, opened, folded, signedOut, signedIn }));
+  record("side panel bells: every panel's notification bell shows for a signed-in contributor, all of them hide and close when signed out (Bananas and Contributing Oogas too), and they return on sign-in",
+    bellIn === names.join() && bellOut === "" && closedOut && bellBack === names.join(), JSON.stringify({ bellIn, bellOut, closedOut, bellBack }));
 };
 const playersTabChecks = async BL => {
   const context = { window: { BL: {} } };
@@ -24958,6 +25631,237 @@ const rememberedCharacterChecks = async BL => {
   await denied.net.start();
   record("arrival identity: malformed or denied cookies fall back safely and cannot break sign-in", bad && blocked && denied.net.ownCharacter()?.handle === "NickDaGreek");
   for (const f of [fresh, signed, returning, unknown, forged, invalid, denied]) f.net.dispose();
+};
+// Private conversations' pads (#188), as one-time-pad.js keeps them: run in Node over a store and lock that behave
+// as localStorage and Web Locks do, with two sides talking through arrays that stand for the room. The relay's attacks
+// come from the review of #436: forging from a known line, both browsers losing their records, a record rolled back by
+// one short line, an old ack played again, a pad zeroed mid-send, a copy cut short, and old frames played again.
+const privatePadChecks = async () => {
+  const context = { TextEncoder, TextDecoder, DataView, Uint8Array, JSON, Error, Promise, Object, Array, String, Number, Math, Map };
+  runInNewContext(await readFile(join(root, "src/js/one-time-pad.js"), "utf8"), context);
+  const P = context.BL.oneTimePad, subtle = webcrypto.subtle, random = (v) => webcrypto.getRandomValues(v);
+  const memory = () => { const m = new Map(); return { m, get: (k) => m.has(k) ? m.get(k) : null, set: (k, v) => m.set(k, v) }; };
+  // A lock that runs one holder at a time per name, as navigator.locks does across tabs.
+  const locks = () => { const held = new Map(); return (name, fn) => { const run = (held.get(name) || Promise.resolve()).then(fn); held.set(name, run.catch(() => {})); return run; }; };
+  const code = (fn) => { try { fn(); return "none"; } catch (e) { return e.code; } };
+  const file = P.make("Anna", "bob", 8192, random), padA = P.parse(file), padB = P.parse(file.slice());
+  const sums = new Map();
+  const sumOf = async (pad) => { if (!sums.has(pad)) sums.set(pad, await P.digest(subtle, pad)); return sums.get(pad); };
+  const side = async (pad, role, store = memory(), lock = locks()) => {
+    const wire = [], s = P.session({ subtle, pad, role, sum: await sumOf(pad), random, ledger: P.ledger(store, lock, pad, role), send: (frame, n) => wire.push({ frame, n }) });
+    return Object.assign(s, { wire, store, lock });
+  };
+  const deliver = async (from, to) => { const out = []; for (const { frame } of from.wire.splice(0)) out.push(await to.heard(frame)); return out; };
+  // Hellos and acks back and forth until both sides fall quiet.
+  const talk = async (a, b) => { const seen = []; for (let i = 0; i < 6 && (a.wire.length || b.wire.length); i++) seen.push(...await deliver(a, b), ...await deliver(b, a)); return seen.map((r) => r.kind); };
+  const pair = async () => { const a = await side(padA, 0), b = await side(padB, 1); await a.start({ fresh: true }); await b.start({ fresh: true }); return { a, b, kinds: await talk(a, b) }; };
+  const head = (frame) => { const v = new DataView(frame.buffer, frame.byteOffset); return { type: frame[1], slot: v.getUint32(19), offset: v.getUint32(23), len: v.getUint16(27) }; };
+
+  const [h0, h1] = padA.halves, end = (u) => u.byteOffset + u.length;
+  const layout = end(h0.keys) === h0.stream.byteOffset && end(h0.stream) <= h1.keys.byteOffset && end(h1.keys) === h1.stream.byteOffset && h0.slots > 0 && h0.keys.length === h0.slots * 32;
+  const bad = (edit) => { const f = file.slice(); edit(f); return code(() => P.parse(f)); };
+  const files = { magic: bad((f) => { f[0] = 0; }), login: bad((f) => { f[25] = 33; }), short: code(() => P.parse(file.subarray(0, 600))), same: code(() => P.make("a", "A", 8192, random)),
+    size: code(() => P.make("a", "b", P.PAD.MAX + 1, random)), roles: [P.roleOf(padA, "ANNA", "Bob"), P.roleOf(padA, "bob", "anna"), code(() => P.roleOf(padA, "cy", "anna")), code(() => P.roleOf(padA, "anna", "cy"))] };
+  record("private pads: a pad file names its two people and splits into one half per sender, each a key region then a stream, never sharing a byte; a damaged or foreign file, a pad for others and the wrong partner are refused by name",
+    layout && files.magic === "magic" && files.login === "login" && files.short === "short" && files.same === "same" && files.size === "size" && files.roles.join() === "0,1,not-you,not-peer", JSON.stringify({ layout, files }));
+
+  const { a, b, kinds } = await pair();
+  const early = await (await side(padA, 0)).say("too soon");
+  const first = await a.say("héllo 🦍"), plain = new TextEncoder().encode("héllo 🦍"), frame = a.wire[0].frame;
+  const hidden = !Buffer.from(frame).includes(Buffer.from(plain));
+  const heard = await deliver(a, b);
+  const prints = [P.fingerprint(await sumOf(padA)), P.fingerprint(await sumOf(padB))];
+  record("private pads: two who load the same pad trade hellos and acks before either may speak, a line arrives intact and unreadable on the wire, and both sides show the same fingerprint",
+    kinds.filter((k) => k === "hello").length === 2 && kinds.filter((k) => k === "ready").length === 2 && a.ready && b.ready && early.kind === "refused" && early.error === "not-ready"
+      && first.kind === "sent" && hidden && heard[0].kind === "text" && heard[0].text === "héllo 🦍" && prints[0] === prints[1] && /^[0-9a-f]{4}( [0-9a-f]{4}){4}$/.test(prints[0]),
+    JSON.stringify({ kinds, early, first, heard, prints }));
+
+  // Two lines sealed at once, a send the room refused, its exact retry, a reflected frame, and tampering.
+  const [one, two] = await Promise.all([a.say("one"), a.say("two")]);
+  const sealed = a.wire.splice(0), heads = sealed.map(({ frame }) => head(frame));
+  const lost = await a.say("lost"); a.wire.length = 0;
+  const after = await a.say("after"); const late = a.wire.splice(0);
+  const order = [];
+  for (const { frame } of [...sealed, ...late]) order.push(await b.heard(frame));
+  const exact = await a.retry(after.n), resent = a.wire.at(-1).frame, again = await b.heard(resent);
+  const flip = (i) => { const f = resent.slice(); f[i] ^= 1; return f; };
+  const tampered = [await b.heard(flip(30)), await b.heard(flip(22)), await b.heard(flip(2)), await b.heard(resent.subarray(0, 40))].map((r) => r.error || r.kind);
+  const reflected = (await a.heard(resent)).error;
+  const stranger = await side(P.parse(P.make("anna", "bob", 8192, random)), 0);
+  await stranger.start({ fresh: true }); const foreign = (await b.heard(stranger.wire[0].frame)).error;
+  record("private pads: lines sealed at once take separate key slots and bytes, a refused send's stay used, an exact retry is known as a repeat, and a changed, cut, reflected or foreign frame is dropped unread",
+    one.n !== two.n && heads[1].slot === heads[0].slot + 1 && heads[1].offset === heads[0].offset + P.PAD.LINE_ID + 3 && lost.kind === "sent" && order.map((r) => r.text || r.kind).join() === "one,two,after"
+      && exact.n === after.n && resent === late[0].frame && again.kind === "duplicate" && tampered.join() === "auth,auth,pad,malformed" && reflected === "direction" && foreign === "pad",
+    JSON.stringify({ heads, order, tampered, reflected, foreign }));
+
+  // The room refuses a line (its rate), a later line gets through, then the first is retried.
+  const rated = await pair();
+  const refusedLine = await rated.a.say("first"); rated.a.wire.length = 0;
+  await rated.a.say("second"); const through = await deliver(rated.a, rated.b);
+  const retried = await rated.a.retry(refusedLine.n), afterRetry = await deliver(rated.a, rated.b);
+  const kept = await rated.a.say("third"), next = await deliver(rated.a, rated.b);
+  record("private pads: a line the room refused, retried after a later line got through, arrives on a fresh slot and fresh bytes and the pad keeps working",
+    through[0].text === "second" && retried.kind === "sent" && retried.n !== refusedLine.n && afterRetry.length === 1 && afterRetry[0].text === "first"
+      && !rated.b.stopped && kept.kind === "sent" && next[0].text === "third", JSON.stringify({ through, retried, afterRetry, next, stopped: rated.b.stopped }));
+
+  // Two tabs on one record never take the same slot or bytes; a reload carries on past them and greets the other side again.
+  const store = memory(), lock = locks(), tabs = [P.ledger(store, lock, padA, 0), P.ledger(store, lock, padA, 0)];
+  await tabs[0].start(true);
+  const taken = await Promise.all(Array.from({ length: 12 }, (_, i) => tabs[i % 2].reserve(true, 40)));
+  const disjoint = new Set(taken.map((t) => t.slot)).size === 12 && taken.map((t) => t.offset).sort((x, y) => x - y).every((v, i) => v === i * 40);
+  const reloadA = await side(padA, 0, a.store, a.lock), reloadB = await side(padB, 1, b.store, b.lock);
+  await reloadA.start(); await reloadB.start();
+  const resumedAt = head(reloadA.wire[0].frame).slot, reTalk = await talk(reloadA, reloadB);
+  record("private pads: two tabs never take the same slot or bytes, and a reload carries on past every one this device used and opens the line again",
+    disjoint && resumedAt === (await a.ledger?.peek?.() || { sk: resumedAt }).sk && reloadA.ready && reloadB.ready && reTalk.includes("ready"), JSON.stringify({ taken: taken.length, resumedAt, reTalk }));
+
+  // Review finding: a relay that holds back a line whose text it knows learns that line's stream bytes. They are never
+  // a key here, so a frame forged with them as one, at any slot, fails its tag; later lines still arrive.
+  const known = "send me your pad file over email please, it is fine", forge = await pair();
+  await forge.a.say(known); const held = forge.a.wire.splice(0)[0].frame, hh = head(held);
+  // The relay knows the whole body: the line's number is where its bytes start, in the header too.
+  const knownBody = new Uint8Array(hh.len); new DataView(knownBody.buffer).setUint32(0, hh.offset); knownBody.set(new TextEncoder().encode(known), P.PAD.LINE_ID);
+  const stream = new Uint8Array(hh.len); for (let i = 0; i < hh.len; i++) stream[i] = held[29 + i] ^ knownBody[i];
+  const forged = [];
+  for (const slot of [hh.slot, hh.slot + 1]) {
+    const wanted = new TextEncoder().encode("ok"), f = new Uint8Array(29 + wanted.length + 32), v = new DataView(f.buffer);
+    f.set(held.subarray(0, 19)); v.setUint32(19, slot); v.setUint32(23, hh.offset + 32); v.setUint16(27, wanted.length);
+    for (let i = 0; i < wanted.length; i++) f[29 + i] = wanted[i] ^ stream[32 + i];
+    const key = await subtle.importKey("raw", stream.subarray(0, 32), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    f.set(new Uint8Array(await subtle.sign("HMAC", key, f.subarray(0, 29 + wanted.length))), 29 + wanted.length);
+    forged.push((await forge.b.heard(f)).error);
+  }
+  await forge.a.say("still real"); const stillReal = await deliver(forge.a, forge.b);
+  record("private pads: a relay that knows a held-back line's text can't forge a line with its bytes: they are never a key, so the forgery fails and later lines still arrive",
+    forged.join() === "auth,auth" && stillReal[0].text === "still real" && !forge.b.stopped, JSON.stringify({ forged, stillReal }));
+
+  // Review finding: a browser with no record of a pad (storage cleared, a private window) never takes it for new unless
+  // told so, and spends nothing until then; so two browsers that both lost their records can't use the pad again unawares.
+  const used = await pair(); await used.a.say("an old line"); await deliver(used.a, used.b);
+  const blankA = await side(padA, 0), blankB = await side(padB, 1);
+  const asked = [await blankA.start(), await blankB.start()].map((r) => r.kind);
+  const spent = blankA.wire.length + blankB.wire.length + blankA.store.m.size + blankB.store.m.size;
+  const told = await blankA.start({ fresh: true });
+  record("private pads: a pad with no record on this device starts only when the visitor says the file is new, and asking spends nothing",
+    asked.join() === "unrecorded,unrecorded" && spent === 0 && told.kind === "started", JSON.stringify({ asked, spent, told }));
+
+  // Review finding: a record rolled back by one short line, the hello's own bytes, and an old ack played again.
+  const ra = await side(padA, 0), rb = await side(padB, 1);
+  await ra.start({ fresh: true }); await rb.start({ fresh: true }); await deliver(ra, rb);
+  const oldAck = rb.wire.find(({ frame }) => frame[1] === 2).frame;
+  await talk(ra, rb);
+  const older = new Map(ra.store.m);
+  await ra.say("hi!"); await deliver(ra, rb);
+  const restored = memory(); for (const [k, v] of older) restored.set(k, v);
+  const back = await side(padA, 0, restored), sendBefore = JSON.parse([...restored.m.values()][0]).send;
+  await back.start();
+  const helloHead = head(back.wire[0].frame), sendAfter = JSON.parse([...restored.m.values()][0]).send;
+  // The relay plays the other side's ack to an earlier hello instead of a fresh one: it proves nothing.
+  const replayed = await back.heard(oldAck);
+  const peer = await side(padB, 1, rb.store, rb.lock); await peer.start();
+  await deliver(back, peer); const answer = await deliver(peer, back);
+  const stoppedFor = back.stopped, again2 = await (await side(padA, 0, restored)).start();
+  record("private pads: a record rolled back by a single short line is caught before it says a word, its hello spends no stream bytes, an old ack proves nothing, and the stop is kept",
+    helloHead.type === 1 && helloHead.len === 32 && sendAfter === sendBefore && replayed.kind === "duplicate" && !back.ready && stoppedFor === "behind-here"
+      && answer.some((r) => r.kind === "stopped" && r.error === "behind-here") && again2.kind === "stopped" && again2.error === "behind-here",
+    JSON.stringify({ helloHead, sendBefore, sendAfter, replayed, answer, stoppedFor, again2 }));
+
+  // Review finding: a session closed while a line waits on its record seals and sends nothing, and reads nothing after.
+  // The record's lock is held while `holding`, as a slow storage or another tab would hold it.
+  let holding = false, release = null;
+  const gate = (name, fn) => holding ? new Promise((r) => { release = r; }).then(fn) : Promise.resolve().then(fn);
+  const ca = await side(padA, 0, memory(), gate), cb = await side(padB, 1);
+  await ca.start({ fresh: true }); await cb.start({ fresh: true }); await talk(ca, cb);
+  holding = true;
+  const pending = ca.say("a secret on its way");
+  for (let i = 0; i < 40 && !release; i++) await new Promise((r) => setTimeout(r, 5));
+  const waited = !!release;
+  ca.close(); holding = false; if (release) release();
+  const closedSay = await pending, sentAfterClose = ca.wire.length;
+  const afterClose = await ca.heard(new Uint8Array(80));
+  record("private pads: a session closed while a line waits on its record seals and sends nothing, and reads nothing after it closes",
+    ca.wire.length === 0 && waited && closedSay.kind === "closed" && sentAfterClose === 0 && afterClose.kind === "closed", JSON.stringify({ waited, closedSay, sentAfterClose, afterClose }));
+
+  // Review finding: a copy cut short shows another fingerprint and never opens the line, so neither side sends a word.
+  const cut = P.parse(file.slice(0, file.length - 1000)), shortB = await side(cut, 1), fullA = await side(padA, 0);
+  await fullA.start({ fresh: true }); await shortB.start({ fresh: true });
+  const cutTalk = await talk(fullA, shortB), cutPrints = [P.fingerprint(await sumOf(padA)), P.fingerprint(await sumOf(cut))];
+  const cutSay = [await fullA.say("x"), await shortB.say("x")].map((r) => r.kind + ":" + (r.error || ""));
+  record("private pads: a copy cut short shows a different fingerprint and never opens the line, so neither side says a word",
+    cutPrints[0] !== cutPrints[1] && !fullA.ready && !shortB.ready && cutSay.every((k) => k === "refused:not-ready" || k.startsWith("stopped")), JSON.stringify({ cutTalk, cutPrints, cutSay }));
+
+  // Review finding: old frames played again, from this conversation or an earlier one, are dropped and stop nothing.
+  const replay = await pair(), oldHello = replay.a.wire.length; await replay.a.say("line 1"); const keep1 = replay.a.wire[0].frame; await deliver(replay.a, replay.b);
+  for (let i = 2; i <= 40; i++) { await replay.a.say("line " + i); await deliver(replay.a, replay.b); }
+  const replays = [await replay.b.heard(keep1), await replay.b.heard(sealed[0].frame)].map((r) => r.kind + ":" + (r.error || ""));
+  record("private pads: old frames played again, from long ago in this conversation or from another, are dropped without stopping the pad",
+    replays[0] === "duplicate:" && !replay.b.stopped && replay.b.ready && oldHello === 0, JSON.stringify({ replays, stopped: replay.b.stopped }));
+
+  // MrHodlX's review: the room plays a hello again after the line opened. It is answered once, so a loop of replays
+  // spends no slots, and an ack that comes after the line opened, even a true one, proves nothing and stops nothing.
+  const rh = { a: await side(padA, 0), b: await side(padB, 1) };
+  await rh.a.start({ fresh: true }); const firstHello = rh.a.wire[0].frame; await rh.b.start({ fresh: true }); await talk(rh.a, rh.b);
+  const slotsBefore = rh.b.slotsLeft, replayedHellos = [];
+  for (let i = 0; i < 20; i++) replayedHellos.push((await rh.b.heard(firstHello)).kind);
+  const acksSent = rh.b.wire.length; rh.b.wire.length = 0;
+  const reloadedB = await side(padB, 1, rh.b.store, rh.b.lock); await reloadedB.start();
+  await reloadedB.heard(firstHello); const lateAck = await deliver(reloadedB, rh.a);
+  await rh.a.say("still talking"); const stillTalking = await deliver(rh.a, rh.b);
+  record("private pads: a hello played again after the line opened is answered once and spends no slots, and an ack after the line opened stops nothing",
+    replayedHellos.every((k) => k === "duplicate") && acksSent === 0 && rh.b.slotsLeft === slotsBefore && lateAck.every((r) => r.kind !== "stopped")
+      && rh.a.ready && !rh.a.stopped && stillTalking.some((r) => r.text === "still talking"),
+    JSON.stringify({ replayedHellos, acksSent, slots: [slotsBefore, rh.b.slotsLeft], lateAck, stopped: rh.a.stopped, stillTalking }));
+
+  // MrHodlX's review, and one way further: the room holds a hello back until after the ack its side sent next. The other
+  // side has then read one slot past the hello, which is this side's own and no sign its record is behind.
+  const ro = { a: await side(padA, 0), b: await side(padB, 1) };
+  await ro.a.start({ fresh: true }); const heldHello = ro.a.wire.splice(0);
+  await ro.b.start({ fresh: true }); await deliver(ro.b, ro.a);
+  ro.a.wire.unshift(...ro.a.wire.splice(0), ...heldHello);
+  const reordered = await talk(ro.a, ro.b);
+  await ro.a.say("after the shuffle"); const shuffled = await deliver(ro.a, ro.b);
+  record("private pads: a hello the room delivers after its side's next frame still opens the line, and stops nothing",
+    ro.a.ready && ro.b.ready && !ro.a.stopped && !ro.b.stopped && shuffled[0].text === "after the shuffle", JSON.stringify({ reordered, a: ro.a.stopped, b: ro.b.stopped, shuffled }));
+
+  // MrHodlX's review: a line the room drops, or delivers after a later one, is never lost without a word. The reader is
+  // told a line hasn't arrived once a later one shows; one that comes late shows marked late and clears that word; a
+  // copy of a line already shown, as a retry sealed again after a send the room answered, is dropped.
+  const dl = await pair();
+  for (const t of ["L1", "L2", "L3"]) await dl.a.say(t);
+  const [f1, f2, f3] = dl.a.wire.splice(0).map((w) => w.frame);
+  const r1 = await dl.b.heard(f1), r3 = await dl.b.heard(f3), r2 = await dl.b.heard(f2), r2again = await dl.b.heard(f2);
+  const shownOnce = await dl.a.say("shown once"); await deliver(dl.a, dl.b);
+  await dl.a.say("then this"); await deliver(dl.a, dl.b);
+  const resealed = await dl.a.retry(shownOnce.n), twice = await deliver(dl.a, dl.b);
+  await dl.a.say("never comes"); dl.a.wire.length = 0; await dl.a.say("comes"); const passed = await deliver(dl.a, dl.b);
+  record("private pads: a dropped or reordered line is noted once a later one shows, a late one shows marked late and clears the note, and a line already shown never shows twice",
+    r1.text === "L1" && !r1.gaps.length && r3.text === "L3" && r3.gaps.length === 1 && r2.text === "L2" && r2.late && r2.filled.join() === r3.gaps.join() && r2again.kind === "duplicate"
+      && resealed.kind === "sent" && resealed.n !== shownOnce.n && twice[0].kind === "duplicate" && passed[0].text === "comes" && passed[0].gaps.length === 1 && !dl.b.stopped,
+    JSON.stringify({ r1, r3, r2, r2again, resealed, twice, passed }));
+
+  // MrHodlX's review: a hello the room drops is said again, with a fresh nonce, a few times at most.
+  const hd = { a: await side(padA, 0), b: await side(padB, 1) };
+  await hd.a.start({ fresh: true }); hd.a.wire.length = 0;
+  await hd.b.start({ fresh: true }); await talk(hd.a, hd.b);
+  const stuck = hd.a.ready, again3 = await hd.a.hello(); await talk(hd.a, hd.b);
+  const tries = []; for (let i = 0; i < 6; i++) tries.push((await hd.a.hello()).kind);
+  const unanswered = await side(padA, 0); await unanswered.start({ fresh: true });
+  const capped = []; for (let i = 0; i < 6; i++) capped.push((await unanswered.hello()).kind);
+  record("private pads: a hello the room dropped is said again, and opens the line; once the line is open, or after a few tries, no more are said",
+    !stuck && again3.kind === "sent" && hd.a.ready && hd.b.ready && tries.every((k) => k === "none") && capped.join() === "sent,sent,sent,none,none,none",
+    JSON.stringify({ stuck, again3, tries, capped }));
+
+  // Records that can't be kept or read stop the pad; a pad used up stops it.
+  const refusing ={ get: () => null, set: () => { throw new Error("quota"); } }, dropping = { get: () => null, set: () => {} };
+  const unwritable = await (await side(padA, 0, refusing)).start({ fresh: true }), dropped = await (await side(padA, 0, dropping)).start({ fresh: true });
+  const corrupt = memory(); corrupt.set(P.PAD.STORE + padA.idHex + ".0", "{\"v\":1,\"sk\":-4}");
+  const unreadable = await (await side(padA, 0, corrupt)).start();
+  const small = P.parse(P.make("anna", "bob", 4096, random)), tiny = await side(small, 0), tinyB = await side(P.parse(small.bytes.slice()), 1);
+  await tiny.start({ fresh: true }); await tinyB.start({ fresh: true }); await talk(tiny, tinyB);
+  let usedUp = null;
+  for (let i = 0; i < 200 && !usedUp; i++) { const r = await tiny.say("x".repeat(100)); if (r.kind === "stopped") usedUp = r.error; }
+  record("private pads: a record that can't be written, kept or read stops the pad, and so does a pad used up",
+    unwritable.error === "storage" && dropped.error === "storage" && unreadable.error === "record" && usedUp === "exhausted", JSON.stringify({ unwritable, dropped, unreadable, usedUp }));
 };
 // Rule (#391): the chalkboard on the page edits only through the shared contract. Alone it keeps the visitor's own
 // board; signed in to a room that shares it, it opens only once the room says this page holds it, sends what it
@@ -27242,7 +28146,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
     renderer.dispose();I.dispose();W.dispose();document.createElement=oldCreate;console.log("Exported "+rows.length+" actual Canvas water review views to "+out);return;
   }
   if(ARGS.includes("highscores-unit")){await highscoreClientChecks();return;}
-  if(ARGS.includes("chat-unit")){await chatNetChecks(BL);await chatClientChecks();await chatAccountChecks(BL);return;}
+  if(ARGS.includes("chat-unit")){await chatNetChecks(BL);await chatClientChecks();await privatePadChecks();await chatAccountChecks(BL);return;}
   if(ARGS.includes("integration-unit")){await reviewCaptureChecks();await integrationChecks(BL);return;}
   if(ARGS.includes("svrn-unit")){svrnChecks(BL);menuShellChecks(BL);return;}
   if(ARGS.includes("vacancy-unit")){await vacancyChecks(BL);return;}
@@ -27295,6 +28199,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   await cabinetNetworkChecks(BL);
   await chatNetChecks(BL);
   await chatClientChecks();
+  await privatePadChecks();
   await thumpChecks(BL);
   await chalkboardClientChecks(BL);
   await chatAccountChecks(BL);
@@ -27445,6 +28350,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   }
   factoryChecks(BL);
   tessAnswerChecks(BL);
+  goldbugChecks(BL);
   const clearance = claimClearanceProof();
   record("hub footprint clearance: conservative rejection preserves circular boundaries, live reservations and exceptional numbers", clearance.failures === 0 && clearance.cases >= 4000, JSON.stringify(clearance));
   await cloudHopperFailureChecks(BL);

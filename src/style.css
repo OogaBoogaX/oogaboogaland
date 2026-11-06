@@ -419,7 +419,8 @@ body[data-active-scene="hub"] .home-link {
   border: 3px solid var(--wood-edge);
   border-radius: inherit;
   box-shadow: 0 6px 0 rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.35);
-  padding-bottom: 14px;
+  /* With the panel's own 10px, room for a footer button's 3px drop shadow and then the same 10px seen above it. */
+  padding-bottom: 3px;
   transition: visibility 0s;
   overflow: auto;
 }
@@ -616,7 +617,9 @@ body[data-active-scene="hub"] .home-link {
   touch-action: none;
 }
 
-/* Keep the whole tab clickable while its face slides behind the panel body. */
+/* Keep the whole tab clickable while its face slides behind the panel body. A side tab's face has a border only on
+   its outer side and meets the panel's own border (or the screen's edge) on the other, so even padding centres the
+   artwork between the two in both side docks; each icon's viewBox centres its own pixels. */
 .sheet-tab-face {
   position: relative;
   display: flex;
@@ -624,7 +627,7 @@ body[data-active-scene="hub"] .home-link {
   width: 100%;
   height: 100%;
   pointer-events: none;
-  padding: 0 4px 0 2px;
+  padding: 0 3px;
   border: 3px solid var(--wood-edge);
   border-right: 0;
   border-radius: 8px 0 0 8px;
@@ -697,7 +700,7 @@ body[data-active-scene="hub"] .home-link {
 
 .sheet[data-dock="bottom"] .sheet-body {
   border-bottom: 0;
-  padding-bottom: var(--safe-bottom);
+  padding-bottom: calc(3px + var(--safe-bottom));
   box-shadow: 0 -6px 30px rgba(0, 0, 0, 0.35);
 }
 
@@ -824,8 +827,6 @@ body[data-active-scene="hub"] .home-link {
   .sheet[data-open="true"]:is(:hover, .virtual-hover) { --sheet-tab-slide: 0px; --sheet-tab-opacity: 1; }
   .sheet-panels:hover,
   .sheet-panels:has(.virtual-hover, :focus-visible) { --sheet-tab-slide: 0px; --sheet-tab-opacity: 1; }
-  /* A players or chat tab with a new count stays out, so the count is seen while a panel is open (#430). */
-  .sheet[data-open="true"] :is(.sheet-toggle-players, .sheet-toggle-chat):has(.tab-count:not([hidden])) { --sheet-tab-slide: 0px; --sheet-tab-opacity: 1; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -889,6 +890,45 @@ body[data-active-scene="hub"] .home-link {
   filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.6));
 }
 
+.sheet-notifications { position: relative; flex: none; }
+.sheet-bell {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  /* The browser's button padding would leave the bell's track 12px wide and push the 16px bell right. */
+  padding: 0;
+  border: 1px solid rgba(243, 239, 228, 0.28);
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--accent-text);
+  cursor: pointer;
+}
+/* The viewBox starts a quarter unit down, lifting the stroked bell (2 to 14.5) onto the circle's middle. */
+.sheet-bell svg { display: block; width: 16px; height: 16px; pointer-events: none; }
+.sheet-bell .tab-count { position: absolute; top: -5px; right: -8px; pointer-events: none; }
+.sheet-bell:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sheet-unread {
+  position: absolute;
+  z-index: 3;
+  top: calc(100% + 5px);
+  right: 0;
+  width: max-content;
+  padding: 6px 9px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: #241810;
+  color: #f3efe4;
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: pre-line;
+  pointer-events: none;
+}
+@media (pointer: coarse) {
+  .sheet-bell { width: 40px; height: 40px; }
+}
+
 .panel-chip {
   flex: none;
   display: inline-flex;
@@ -949,11 +989,35 @@ body[data-active-scene="hub"] .home-link {
 
 .roster-hint:not(:has(> :not([hidden]))) { display: none; }
 
-/* Bananas: the all-time total on top, its count and sats beneath, then the top ten in the same slab. */
-.banana-slab {
+/* Bananas: the all-time total on top, its count and sats beneath, then the donors and the latest tips in the same
+   slab. Like every panel's slab it scrolls above the panel's action, so Feed the Oogas stays at the foot as
+   Contributor sign-in does; its sections never shrink, and each list scrolls inside a window five donor rows tall
+   (`--banana-five`), both lists the same height. The slab may shrink to nothing, so even a phone's short drawer
+   keeps the action whole; only a drawer shorter than the title and the action scrolls the panel. */
+.panel > .banana-slab {
+  --banana-five: calc(5 * (17px + 12px + 1px));
   display: flex;
   flex-direction: column;
+  min-height: 0;
   padding: 12px 12px 10px;
+}
+.banana-slab > section { flex: none; }
+/* A phone on its side leaves the default drawer under 100px: too short to stack the title, a row of the slab and a
+   44px Feed the Oogas. While the Bananas panel shows there, its untouched drawer stands at least 200px tall
+   (sheet.js's BANANA_DRAWER, which also holds a resized or saved drawer to it and, that drawer too tall to leave the
+   sticks room over it, takes data-sticks away). Other panels keep their drawer. */
+@media (pointer: coarse) and (orientation: landscape) and (max-height: 500px) {
+  :root:has(#sheet[data-dock="bottom"][data-sized="false"] #bananas-panel:not([hidden])) {
+    --drawer-height: max(calc(var(--drawer-share) * 1vh), 200px);
+  }
+}
+.banana-leaders,
+.banana-recent-list {
+  /* One height for both, however few entries either holds. */
+  height: var(--banana-five);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.45) transparent;
 }
 
 .banana-hero {
@@ -1110,7 +1174,7 @@ body[data-active-scene="hub"] .home-link {
 .banana-board-labels,
 .banana-leaders li {
   display: grid;
-  grid-template-columns: 2.5ch minmax(0, 1fr) auto;
+  grid-template-columns: 3ch minmax(0, 1fr) auto;
   column-gap: 10px;
   align-items: baseline;
 }
@@ -1121,11 +1185,13 @@ body[data-active-scene="hub"] .home-link {
 .banana-leaders { margin: 0; padding: 0; list-style: none; }
 .banana-leaders li[hidden] { display: none; }
 
+/* A row's 17px line, 12px of padding and 1px rule are the `--banana-five` unit. */
 .banana-leaders li {
   padding: 6px 2px;
   border-top: 1px solid rgba(0, 0, 0, 0.35);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
   font-size: 12px;
+  line-height: 17px;
 }
 
 .banana-rank { color: rgba(243, 239, 228, 0.5); font-size: 10px; font-variant-numeric: tabular-nums; }
@@ -1190,17 +1256,11 @@ body[data-active-scene="hub"] .home-link {
 
 /* Ooga Chat: the log takes the height, the composer is pinned under it, and the account's name and the
    room's memory sit above it in one line each. */
-.panel[data-panel="chat"] { position: relative; }
-.panel[data-panel="chat"] > .panel-title { padding-right: 30px; }
-
-/* The about mark sits in the title's corner; what it opens drops into the flow under the title. */
-.chat-about { flex: none; margin-top: -10px; }
-.chat-about[open] { margin-top: 0; }
+.panel[data-panel="chat"] > .panel-title { position: relative; }
+.panel[data-panel="chat"] > .panel-title h2 { margin-right: 0; }
+.chat-about { flex: none; margin-right: auto; }
 
 .chat-about summary {
-  position: absolute;
-  top: 12px;
-  right: 14px;
   display: grid;
   place-items: center;
   width: 22px;
@@ -1221,12 +1281,17 @@ body[data-active-scene="hub"] .home-link {
 .chat-about summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .chat-retention {
+  position: absolute;
+  z-index: 2;
+  top: calc(100% + 5px);
+  left: 0;
+  right: 0;
   margin: 0;
   padding: 7px 10px;
   border-left: 2px solid var(--accent);
   border-radius: 0 6px 6px 0;
-  background: rgba(0, 0, 0, 0.25);
-  color: rgba(243, 239, 228, 0.72);
+  background: #241810;
+  color: rgba(243, 239, 228, 0.9);
   font-size: 10px;
   line-height: 1.5;
 }
@@ -1234,9 +1299,7 @@ body[data-active-scene="hub"] .home-link {
 .chat-identity {
   flex: none;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 4px 10px;
+  gap: 4px;
 }
 
 .chat-display-form { display: flex; align-items: center; gap: 6px; min-width: 0; }
@@ -1286,9 +1349,7 @@ body[data-active-scene="hub"] .home-link {
 .chat-display-save:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
 .chat-display-save:disabled { opacity: 0.5; cursor: default; }
 
-.chat-account { color: rgba(243, 239, 228, 0.5); font-size: 9.5px; text-align: right; overflow-wrap: anywhere; }
-.chat-account strong { color: rgba(243, 239, 228, 0.82); font-weight: 500; }
-.chat-display-status { grid-column: 1 / -1; margin: 0; color: var(--accent-text); font-size: 10px; }
+.chat-display-status { margin: 0; color: var(--accent-text); font-size: 10px; }
 .chat-display-status:empty { display: none; }
 
 .chat-log {
@@ -1422,13 +1483,99 @@ body[data-active-scene="hub"] .home-link {
   cursor: default;
 }
 
+/* Private conversations (#188): a switch between the island's chat and the private one, which has its own blue tint
+   and lock, so a line meant for one person is never typed into the island's by mistake. */
+.pm-switch { display: flex; flex: none; gap: 6px; }
+.pm-switch[hidden] { display: none; }
+.pm-switch-button {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--wood-edge);
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.22);
+  color: rgba(243, 239, 228, 0.72);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.pm-switch-button[aria-pressed="true"] { border-color: var(--accent); background: rgba(216, 137, 43, 0.12); color: var(--accent-text); }
+.pm-switch-button[data-pm-view="private"][aria-pressed="true"] { border-color: #7aa8e8; background: rgba(90, 140, 220, 0.16); color: #cfe0ff; }
+.pm-switch-button:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 1px; }
+.pm-switch .pm-count { position: static; margin: 0 0 0 2px; }
+.pm-lock { flex: none; width: 9px; height: 10px; }
+
+.pm { display: none; flex: 1 1 auto; flex-direction: column; gap: 6px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.pm [hidden] { display: none; }
+.panel[data-panel="chat"][data-view="private"] .pm { display: flex; }
+.panel[data-panel="chat"][data-view="private"] > :is(.chat-identity, .chat-log, .chat-status, .chat-form),
+.panel[data-panel="chat"][data-view="private"] > .panel-title > .chat-about { display: none; }
+.pm-head { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 8px; }
+.pm-head .pm-end { min-height: 24px; }
+.pm-title { display: flex; align-items: center; gap: 6px; min-width: 0; margin: 0; color: #cfe0ff; font-size: 11px; font-weight: 600; overflow-wrap: anywhere; }
+.pm .pm-note, .pm .pm-budget { flex: none; margin: 0; white-space: pre-line; }
+.pm .pm-note:empty, .pm .pm-budget:empty { display: none; }
+.pm-actions { display: flex; flex: none; flex-wrap: wrap; align-items: center; gap: 6px; }
+.pm-actions[hidden] { display: none; }
+.pm-button {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--wood-edge);
+  border-radius: 5px;
+  background: linear-gradient(var(--plank), var(--wood));
+  color: var(--paper);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.pm-button:hover, .pm-button:focus-visible, .pm-file:focus-within { background: linear-gradient(#b8844a, var(--plank)); outline: none; box-shadow: 0 0 0 2px var(--accent); }
+.pm-button:disabled { opacity: 0.5; cursor: default; }
+.pm-quiet { background: rgba(0, 0, 0, 0.22); color: rgba(243, 239, 228, 0.78); }
+.pm-file input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); opacity: 0; }
+.pm-make { display: inline-flex; gap: 6px; }
+.pm-make select {
+  min-height: 30px;
+  padding: 0 6px;
+  border: 1px solid rgba(0, 0, 0, 0.5);
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--paper);
+  font-size: 11px;
+}
+.pm-print { flex: none; margin: 0; color: rgba(243, 239, 228, 0.72); font-size: 10px; overflow-wrap: anywhere; }
+.pm-print[hidden] { display: none; }
+.pm-print code { color: #cfe0ff; font-size: 10.5px; letter-spacing: 0.02em; white-space: nowrap; }
+.pm-log { flex: 1 1 auto; min-height: 44px; overflow: auto; overscroll-behavior: contain; border-color: rgba(90, 140, 220, 0.55); }
+.pm-log:empty::before { content: "Sealed with your pad: only the two of you can read what is said here. The island passes it on and sees who talks to whom, when, and how long each line is."; }
+.pm-log .chat-row[data-own="true"] { border-left-color: rgba(122, 168, 232, 0.8); background: linear-gradient(90deg, rgba(90, 140, 220, 0.1), transparent 60%); }
+.pm-log .chat-row[data-own="true"] .chat-name { color: #cfe0ff; }
+.pm-log .chat-row[data-note="true"] .chat-text { color: rgba(243, 239, 228, 0.62); font-size: 10.5px; }
+/* The page's own notes carry no name, so a display name can never pass for one. */
+.pm-note-tag { color: rgba(243, 239, 228, 0.5); font-size: 8.5px; letter-spacing: 0.1em; text-transform: uppercase; }
+.pm-state { color: rgba(243, 239, 228, 0.5); font-size: 9px; white-space: nowrap; }
+.pm-state[data-failed="true"] { color: #ffb4a6; }
+.pm-retry { min-height: 22px; margin-left: 6px; padding: 0 6px; font-size: 8.5px; }
+.pm-form .chat-send { background: linear-gradient(#a9c6f2, #6f9be0); }
+
 @media (pointer: coarse) {
   .chat-send,
   .chat-form input { min-height: 44px; }
   .chat-display-form input,
   .chat-display-save { min-height: 40px; }
-  .chat-about summary { width: 30px; height: 30px; top: 8px; right: 10px; }
-  .panel[data-panel="chat"] > .panel-title { padding-right: 36px; }
+  .chat-about summary { width: 30px; height: 30px; }
 }
 
 .panel h2 {
@@ -1828,6 +1975,19 @@ body[data-active-scene="hub"] .home-link {
 .roster-voice:disabled {
   cursor: default;
 }
+
+.players-private {
+  display: inline-flex;
+  padding: 0 0 0 6px;
+  border: 0;
+  background: none;
+  color: #9fbfee;
+  cursor: pointer;
+}
+.players-private[hidden] { display: none; }
+.players-private svg { width: 10px; height: 11px; shape-rendering: crispEdges; }
+.players-private:hover, .players-private:focus-visible { color: #cfe0ff; outline: none; }
+.players-private:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
 
 .roster-voice:focus-visible {
   outline: 2px solid var(--accent);
@@ -2371,7 +2531,7 @@ body[data-active-scene="hub"] .home-link {
   cursor: not-allowed;
 }
 
-/* Account controls stay with the Contributing Oogas panel, including when detached. */
+/* Account controls stay with their panel, including when detached. */
 .account {
   display: flex;
   flex: none;
@@ -6910,8 +7070,9 @@ body[data-active-scene] .mic-note { top: var(--hub-equipment-bottom, calc(72px +
     display: none;
   }
 
+  /* The foot keeps the wide panel's 10px, so the room under a footer matches the gap over it. */
   .panel {
-    padding: 12px 14px;
+    padding: 12px 14px 10px;
   }
 
   /* Under 16px a phone zooms the page into the input. */

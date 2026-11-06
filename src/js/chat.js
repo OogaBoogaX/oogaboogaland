@@ -13,6 +13,7 @@
 // Unread lines (#430): a line from someone else that this page had not had, heard while the visitor is not in the
 // panel, counts on the tab until they look at it (`sheet.watchViews`). The first lines the room hands over on arrival
 // do not count; on a rejoin (a reconnect, a tab back from the background), only lines newer than any this page had.
+// While the panel shows its private view (#188), the island's lines are out of sight and still count.
 // Exports account (fed `BL.net.state`), heard (fed the room's lines) and stats.
 (() => {
   "use strict";
@@ -31,7 +32,7 @@
   const announce = (text) => { if (announcement && announcement.textContent !== text) announcement.textContent = text; };
   const viewport = window.visualViewport, fine = window.matchMedia("(pointer: fine)");
   const lines = [];
-  const identity = $("chat-identity"), accountLogin = $("chat-account-login"), displayForm = $("chat-display-form"), displayInput = $("chat-display"), displaySave = $("chat-display-save"), displayStatus = $("chat-display-status");
+  const identity = $("chat-identity"), displayForm = $("chat-display-form"), displayInput = $("chat-display"), displaySave = $("chat-display-save"), displayStatus = $("chat-display-status");
   let identityId = "", identityDisplay = "", displaySaving = false, displayComposing = false;
   let showing = false, drawn = true, live = false, me = "", composing = false, pending = null, notice = "", revision = 0, logoutEpoch = 0, ackTimer = 0;
   let unread = 0, newest = -1, synced = false;
@@ -114,7 +115,8 @@
       if (line.id > newest && line.login.toLowerCase() !== me) fresh++;
     }
     for (const line of list) if (line.id > newest) newest = line.id;
-    if (fresh && !BL.sheet.attending(panel)) setUnread(unread + fresh);
+    // The panel's private view (private-chat.js) hides the island's lines, so they still count there.
+    if (fresh && (!BL.sheet.attending(panel) || panel.dataset.view === "private")) setUnread(unread + fresh);
     const over = Math.max(0, lines.length - CHAT_KEEP);
     if (over) lines.splice(0, over);
     if (!showing) {
@@ -156,7 +158,7 @@
     if (live) statusText.textContent = feedback;
     announce(statusText.textContent);
   };
-  const account = ({ me: player, room, logoutEpoch: epoch = logoutEpoch }) => {
+  const account = ({ me: player, room, online = 0, logoutEpoch: epoch = logoutEpoch }) => {
     if (epoch !== logoutEpoch) {
       logoutEpoch = epoch;
       stopWaiting(); pending = null; notice = ""; revision++; input.value = "";
@@ -166,7 +168,6 @@
     }
     if (identity) {
       identity.hidden = !player;
-      accountLogin.textContent = player ? "@" + player.login : "";
       const id = player ? String(player.id) : "", display = player ? player.display || player.login : "";
       if (id !== identityId || display !== identityDisplay) { displayInput.value = display; displayStatus.textContent = ""; }
       identityId = id; identityDisplay = display;
@@ -178,11 +179,11 @@
     input.disabled = !live;
     input.placeholder = live ? "Say something" : "";
     status.hidden = live;
-    const chip = live ? "Live" : !player ? "Signed out" : room === "connecting" ? "Joining" : room === "paused" ? "Paused" : "Offline";
+    const chip = live ? `${online} online` : "Offline";
     if (roomChip.textContent !== chip) {
       roomChip.textContent = chip;
-      roomChip.dataset.tone = live ? "live" : room === "connecting" ? "wait" : "idle";
     }
+    roomChip.dataset.tone = live ? "live" : "idle";
     statusText.textContent = room === "revoked" ? ROOM_WORDS.revoked : !player ? (logoutEpoch ? "Signed out. Local chat and draft cleared. Sign in to chat." : "Sign in to chat with everyone on the island.") : ROOM_WORDS[room] || "";
     update();
   };
@@ -297,7 +298,10 @@
     if (viewport && (document.activeElement === input || document.activeElement === displayInput)) fit();
   });
 
-  BL.sheet.watchViews(panel, () => { if (unread) setUnread(0); });
+  BL.sheet.watchViews(panel, () => { if (unread && panel.dataset.view !== "private") setUnread(0); });
+  // Turning back from the private view to the island's lines, with the panel up, is looking at them.
+  new MutationObserver(() => { if (unread && panel.dataset.view !== "private" && BL.sheet.visible(panel)) setUnread(0); })
+    .observe(panel, { attributes: true, attributeFilter: ["data-view"] });
   net.subscribe(account);
   net.subscribeChat(heard);
   BL.chat = { account, heard, get stats() { return { lines: lines.length, rows: log.childElementCount, showing, drawn, live, unread }; } };

@@ -618,6 +618,12 @@
   let lastRender = 0;
   let renderedFrames = 0;
   let firstDraw = false;
+  // A first visit opens the Bananas panel a beat after the curtain (0.9 s) has parted on the world (`sheet.welcome`),
+  // unless the visitor chose a panel, left the scene or began a game meanwhile. Quiet `nosim` pages (the suite, the
+  // cards) opt out unless `welcome=1` asks; `welcome=0` turns it off anywhere.
+  const WELCOME_MS = 1800;
+  const WELCOME = params.get("welcome") === "1" || params.get("welcome") !== "0" && !params.has("nosim");
+  let welcomeTimer = 0;
   const openCurtain = () => {
     curtain.addEventListener("transitionend", (e) => {
       if (e.propertyName === "transform") curtain.remove();
@@ -658,6 +664,13 @@
       firstDraw = true;
       mark("drawn");
       openCurtain();
+      if (WELCOME) {
+        const landed = active;
+        welcomeTimer = window.setTimeout(() => {
+          welcomeTimer = 0;
+          if (!transition && active === landed) window.BL.sheet.welcome();
+        }, WELCOME_MS);
+      }
       if (params.get("signin") === "contributor-required") {
         window.BL.hud.toast("Sign-in is for contributors with their own Ooga. Keep exploring signed out.");
         params.delete("signin");
@@ -1084,6 +1097,7 @@
     terrainController?.abort();
     window.cancelAnimationFrame(raf);
     window.clearInterval(housekeepTimer);
+    window.clearTimeout(welcomeTimer);
     overlayObserver.disconnect();
     if (unsubscribeDonations) unsubscribeDonations();
     unsubscribeBlockFeed();

@@ -22,24 +22,19 @@
     badges[name] = count;
     if (paintBadges) paintBadges();
   };
-  // Calls `fn` when the visitor shows they are looking at `panel`: a click or a keyboard press on its tab in any
-  // window, the tab taking focus while the panel shows, or a press, a scroll or focus inside the shown panel. A panel
-  // put back on screen by a scene change, a fold or a layout restore is not looked at.
-  const watchViews = (panel, fn) => {
-    const name = panel.dataset.panel, onTab = (e) => e.target.closest?.(`.sheet [data-tab="${name}"]`);
-    document.addEventListener("click", (e) => { if (onTab(e) || e.target.closest?.(".sheet-expand") && visible(panel)) fn(); });
-    document.addEventListener("focusin", (e) => { if (onTab(e) && visible(panel)) fn(); });
-    for (const type of ["pointerdown", "focusin", "wheel", "touchstart"])
-      panel.addEventListener(type, () => { if (visible(panel)) fn(); }, { passive: true });
-  };
-  // Whether the visitor is in `panel` now, so a new arrival there needs no count: the page has focus and so does the panel.
-  const attending = (panel) => visible(panel) && document.hasFocus() && panel.contains(document.activeElement);
+  // Only an explicit tab opening acknowledges that tab. Layout and notification inspection leave counts alone.
+  const watchViews = (panel, fn) => panel.addEventListener("sheetview", fn);
+  const attending = (panel) => visible(panel) && document.hasFocus() && panel.contains(document.activeElement)
+    && !document.activeElement.closest(".sheet-notifications");
   const readRect = (rect) => rect && [rect.x, rect.y, rect.width, rect.height].every(Number.isFinite)
     && Math.abs(rect.x) <= 100000 && Math.abs(rect.y) <= 100000 && rect.width > 0 && rect.width <= 10000
     && rect.height > 0 && rect.height <= 10000 ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : null;
   // Scene HUDs come and go, but the latest choice belongs to this page even when
   // storage is blocked. Only explicit panel changes update it; game hiding does not.
   let shared = null;
+  // A first visit is a readable storage holding no saved layout, judged once a page. The director asks `welcome`
+  // a beat after the world shows; any panel choice before then, here or by a shortcut, wins instead.
+  let firstVisit = null, live = null;
   const create = ({ lootEnabled, signal }) => {
     const root = document.getElementById("sheet"), parent = root.parentElement;
     const content = root.querySelector(".sheet-content"), nav = root.querySelector(".sheet-panels");
@@ -51,15 +46,28 @@
     const drawerHeight = (b) => Math.ceil(b.height * drawerShare);
     // Where a phone's up tab lifts the drawer: the default, or in landscape, where that shows hardly anything, most of the screen.
     const fullHeight = (b) => b.width > b.height ? Math.ceil(b.height * 0.6) : drawerHeight(b);
+    // A phone on its side leaves too short a drawer to stack the Bananas panel's title, a row of its slab and its 44px
+    // Feed the Oogas, so while that panel shows there its drawer stands at least BANANA_DRAWER tall (style.css gives
+    // the untouched drawer the same), its saved size untouched for the other tabs.
+    const BANANA_DRAWER = 200, shortLandscape = window.matchMedia("(pointer: coarse) and (orientation: landscape) and (max-height: 500px)");
+    const bananaTall = (w) => w.node === root && w.tab === "bananas" && shortLandscape.matches;
     let serial = 0, gesture = null, mergeTarget = null, suppressClick = false, hidden = false, folded = false, disposed = false, lootCount = 0, saveTimer = 0;
     if (!shared) {
-      try { shared = JSON.parse(localStorage.getItem(KEY)); } catch { /* Storage may be unavailable. */ }
+      try {
+        const raw = localStorage.getItem(KEY);
+        if (firstVisit === null) firstVisit = raw === null;
+        shared = JSON.parse(raw);
+      } catch {
+        // Storage may be unavailable, which is no first visit: a choice to close could not be remembered.
+        if (firstVisit === null) firstVisit = false;
+      }
     }
     const saved = shared;
     folded = saved?.folded === true;
     // Online Oogas and Ooga Chat are for signed-in visitors only.
     const available = (name) => NAMES.includes(name) && (name !== "loot" || lootEnabled)
       && (name !== "players" && name !== "chat" || !!BL.net.state.me);
+    const belled = () => !!BL.net.state.me;
     const isOpen = (w) => !folded && w.open && available(w.tab);
     // On a phone every tab folds into the main drawer; separate panels stay saved, hidden, for a larger screen.
     const ownerOf = (name) => windows.find((w) => (w.node === root || !phone.matches) && w.tab === name && (w.open || w.rect || w.kept));
@@ -96,7 +104,8 @@
         for (const name of ["left", "top", "width", "height"]) w.node.style.removeProperty(name);
         w.node.dataset.sized = "false";
         w.node.dataset.dock = bottom.matches ? "bottom" : "right";
-        if (w.node === root) { root.dataset.sticks = "true"; parent.style.removeProperty("--drawer-height"); }
+        // The sticks need room over the drawer, which the Bananas panel's taller one leaves them too little of.
+        if (w.node === root) { root.dataset.sticks = String(!(bottom.matches && bananaTall(w))); parent.style.removeProperty("--drawer-height"); }
         if (phone.matches) w.node.style.setProperty("--sheet-tab-step", `${Math.min(72, (viewport().width - PHONE_TAB_INSET) / Math.max(1, w.tabCount || NAMES.length))}px`);
         else w.node.style.removeProperty("--sheet-tab-step");
         return;
@@ -108,7 +117,7 @@
       // Fitting a keyboard-reduced viewport must not overwrite the saved size.
       // Minimum sizes belong to explicit resizing, not closing a short default drawer.
       r.width = phone.matches ? width : Math.min(width, Math.max(1, preferred.width));
-      r.height = Math.min(height, Math.max(1, preferred.height));
+      r.height = Math.min(height, Math.max(1, preferred.height, atBottom && bananaTall(w) ? BANANA_DRAWER : 0));
       r.x = dock === "left" || phone.matches ? b.x : dock === "right" ? b.x + b.width - r.width : Math.max(b.x, Math.min(b.x + b.width - r.width, preferred.x));
       r.y = atBottom ? b.y + b.height - r.height : Math.max(b.y, Math.min(b.y + b.height - r.height, preferred.y));
       w.node.dataset.sized = "true"; w.node.dataset.dock = dock;
@@ -169,14 +178,60 @@
       // Keep those saved panels so a temporary absence never deletes a layout.
       if (rect && NAMES.includes(entry.tab) && !ownerOf(entry.tab)) addWindow(entry.tab, rect, entry.dock, entry.open !== false);
     }
-    // Each counted tab's badge, in every window; a tab's name reads its count too, as the badge itself is not read.
+    const notificationTemplate = document.getElementById("sheet-notifications");
+    const badgeText = (count) => count > 99 ? "99+" : String(count);
+    const showBadge = (badge, count) => {
+      const text = badgeText(count);
+      if (badge.hidden !== !count) badge.hidden = !count;
+      if (badge.textContent !== text) badge.textContent = text;
+    };
+    const notificationViews = panels.map((panel) => {
+      const view = notificationTemplate.content.firstElementChild.cloneNode(true);
+      const button = view.querySelector("button"), detail = view.querySelector(".sheet-unread"), badge = view.querySelector(".tab-count");
+      detail.id = panel.id + "-unread";
+      button.setAttribute("aria-describedby", detail.id);
+      panel.querySelector(".panel-title").append(view);
+      let hovered = false, focused = false, pinned = false;
+      const paint = () => {
+        const shown = hovered || focused || pinned;
+        if (detail.hidden === shown) {
+          button.setAttribute("aria-expanded", String(shown));
+          detail.hidden = !shown;
+        }
+        showBadge(badge, shown ? 0 : badges.players + badges.chat);
+      };
+      const reset = () => { hovered = focused = pinned = false; paint(); };
+      on(button, "pointerenter", (e) => { if (e.pointerType !== "touch") { hovered = true; paint(); } });
+      on(button, "pointerleave", () => { hovered = false; paint(); });
+      on(button, "focus", () => { focused = button.matches(":focus-visible"); paint(); });
+      on(button, "blur", reset);
+      on(button, "click", () => {
+        if (hovered || focused) return;
+        pinned = !pinned;
+        paint();
+      });
+      on(button, "keydown", (e) => {
+        if (e.key !== "Escape" || detail.hidden) return;
+        e.preventDefault(); e.stopPropagation();
+        reset();
+      });
+      return { panel, view, detail, paint, reset };
+    });
+    on(document, "pointerdown", (e) => {
+      for (const item of notificationViews) if (!item.view.contains(e.target)) item.reset();
+    }, { capture: true });
     const showCounts = () => {
+      const detail = `Online Oogas: ${badgeText(badges.players)} new\nOoga Chat: ${badgeText(badges.chat)} new`;
+      for (const item of notificationViews) {
+        if (item.detail.textContent !== detail) item.detail.textContent = detail;
+        item.paint();
+      }
       for (const w of windows) for (const badge of w.nav.querySelectorAll(".tab-count")) {
-        const tab = badge.closest("[data-tab]"), name = tab.dataset.tab, count = name === "loot" ? lootCount : badges[name] || 0;
-        const text = count > 99 ? "99+" : String(count), label = tab.dataset.label || (tab.dataset.label = tab.getAttribute("aria-label"));
-        if (badge.hidden !== !count) badge.hidden = !count;
-        if (badge.textContent !== text) badge.textContent = text;
-        if (name !== "loot") tab.setAttribute("aria-label", count ? `${label}, ${text} new` : label);
+        const tab = badge.closest("[data-tab]"), name = tab.dataset.tab;
+        const count = name === "loot" ? lootCount : isOpen(w) ? 0 : badges[name] || 0;
+        showBadge(badge, count);
+        const label = tab.dataset.label || (tab.dataset.label = tab.getAttribute("aria-label"));
+        if (name !== "loot") tab.setAttribute("aria-label", count ? `${label}, ${badgeText(count)} new` : label);
       }
     };
     const expand = root.querySelector(".sheet-expand");
@@ -217,10 +272,17 @@
         w.body.inert = !open || w.node.hidden;
         w.body.setAttribute("aria-hidden", String(w.body.inert));
       }
+      // The bell counts Online Oogas and Ooga Chat, so it shows on every panel for signed-in contributors alone.
+      const bell = belled();
+      for (const item of notificationViews) {
+        if (item.view.hidden === bell) item.view.hidden = !bell;
+        if (!bell || !visible(item.panel)) item.reset();
+      }
       showCounts(); showExpand();
       notify();
     };
     const close = (w) => {
+      firstVisit = false;
       if (w.node.contains(document.activeElement)) document.activeElement.blur();
       // A phone's untouched drawer stays untouched, so the sticks keep riding above it.
       if (!coarse.matches || w.node.dataset.dock !== "bottom") measure(w);
@@ -236,11 +298,13 @@
       observe.disconnect();
       for (const current of windows) observe.observe(current.node, { attributes: true, attributeFilter: ["data-open", "hidden"] });
     };
-    const select = (w, name) => {
+    const select = (w, name, viewed = false) => {
       if (!available(name)) return;
+      firstVisit = false;
       w = ownerOf(name) || w; folded = false;
       w.tab = name; w.open = true; w.node.dataset.open = "true";
       refresh(); front(w); save();
+      if (viewed) panels.find((panel) => panel.dataset.panel === name)?.dispatchEvent(new Event("sheetview"));
     };
     const measure = (w) => {
       if (w.rect) return;
@@ -289,7 +353,7 @@
     on(parent, "pointerdown", (e) => {
       const w = findWindow(e.target);
       if (!w || hidden || e.button !== 0 || !e.isPrimary || gesture) return;
-      front(w); suppressClick = false;
+      front(w); suppressClick = false; firstVisit = false;
       const handle = e.target.closest("[data-tab], .sheet-drag, .sheet-corner, .sheet-edge, .sheet-panels");
       if (!handle) return;
       e.preventDefault(); e.stopPropagation();
@@ -367,7 +431,7 @@
       if (suppressClick && e.detail !== 0) { suppressClick = false; e.preventDefault(); e.stopImmediatePropagation(); return; }
       if (e.target.closest(".sheet-expand")) {
         expand.blur();
-        if (!isOpen(main)) select(main, available(main.tab) ? main.tab : "roster");
+        if (!isOpen(main)) select(main, available(main.tab) ? main.tab : "roster", true);
         else if (expand.dataset.dir === "up") raise();
         else close(main);
         return;
@@ -375,7 +439,7 @@
       const tab = e.target.closest("[data-tab]");
       if (tab) {
         if (tab.dataset.tab === w.tab && w.node.dataset.open === "true") close(w);
-        else select(w, tab.dataset.tab);
+        else select(w, tab.dataset.tab, true);
       }
     });
     on(parent, "keydown", (e) => {
@@ -387,9 +451,9 @@
         e.preventDefault(); e.stopPropagation();
         const tabs = w.tabs.filter((t) => !t.hidden), i = tabs.indexOf(tab);
         const next = e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : (i + (e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 1) + tabs.length) % tabs.length;
-        select(w, tabs[next].dataset.tab); tabs[next].focus({ preventScroll: true });
+        select(w, tabs[next].dataset.tab, true); tabs[next].focus({ preventScroll: true });
       } else if (handle && arrows.includes(e.key)) {
-        e.preventDefault(); e.stopPropagation(); measure(w);
+        e.preventDefault(); e.stopPropagation(); measure(w); firstVisit = false;
         const step = e.shiftKey ? 32 : 10, dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
         const dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
         if (handle.dataset.corner || handle.dataset.edge) resize(w, w.bounds, handle.dataset.corner || handle.dataset.edge, dx, dy);
@@ -400,7 +464,7 @@
     on(parent, "dblclick", (e) => {
       const w = findWindow(e.target);
       if (!w || !e.target.closest(".sheet-drag")) return;
-      finish();
+      finish(); firstVisit = false;
       if (w === main) {
         w.rect = null; w.dock = null; savedHeight = null;
         root.style.removeProperty("--sheet-height");
@@ -441,11 +505,17 @@
       for (let i = 0; i < windows.length; i++) windows[i].node.style.zIndex = String((playing ? 90 : 13) + i);
       refresh();
     };
-    return {
+    const api = {
+      // The first visit's Bananas, only while panels are neither hidden nor folded for a game.
+      welcome() {
+        if (!firstVisit || disposed || hidden || playing || folded) return false;
+        select(main, "bananas");
+        return true;
+      },
       setPlaying,
       setLootCount(count) { lootCount = count; showCounts(); },
       selectTab(name) { select(ownerOf(name) || main, name); },
-      fold() { finish(); folded = true; if (document.activeElement?.closest(".sheet")) document.activeElement.blur(); refresh(); save(); },
+      fold() { finish(); firstVisit = false; folded = true; if (document.activeElement?.closest(".sheet")) document.activeElement.blur(); refresh(); save(); },
       escape() {
         const w = [...windows].reverse().find((w) => !w.node.hidden && w.node.dataset.open === "true" && w.node.getClientRects().length);
         if (!w) return false;
@@ -457,15 +527,25 @@
         if (paintBadges === showCounts) paintBadges = null;
         for (const off of listeners) off();
         listeners.length = 0;
+        for (const { view } of notificationViews) view.remove();
         for (const panel of panels) { content.append(panel); panel.hidden = !available(panel.dataset.panel) || panel.dataset.panel !== main.tab; }
         main.body.inert = false; main.body.removeAttribute("aria-hidden");
         for (const w of windows) if (w !== main) w.node.remove();
         root.querySelector(".sheet-drag").remove();
         for (const handle of root.querySelectorAll(".sheet-corner, .sheet-edge")) handle.remove();
         root.hidden = false;
+        if (live === api) live = null;
         notify();
       }
     };
+    live = api;
+    return api;
   };
-  BL.sheet = { create, visible, tabFor, setBadge, watchViews, attending };
+  // Asked once by the director: a missed moment (no sheet up, a game, a choice already made) is not tried again.
+  const welcome = () => {
+    const opened = !!live && live.welcome();
+    firstVisit = false;
+    return opened;
+  };
+  BL.sheet = { create, visible, tabFor, setBadge, watchViews, attending, welcome };
 })();
