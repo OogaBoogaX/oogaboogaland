@@ -1,0 +1,385 @@
+{
+  "sourceRevision": "30b1244037fbdef424462c88fa920eafd7fcae9a",
+  "runtimeChanges": false,
+  "scope": "One CPU diagnostic and one clean suite acceptance attempt after explicit maintainer clearance; no further performance rerun.",
+  "conditions": {
+    "power": "AC, 100 percent charged",
+    "lowPowerMode": false,
+    "personalBrowserPreserved": true,
+    "personalChromeProcessCountBeforeClean": 15,
+    "personalChromeAggregateSampledCpuPercentBeforeClean": 34.8,
+    "otherTestBrowserObserved": false,
+    "measurementLimit": "Personal Chrome background work remained active; no isolated-machine or before/after speedup claim."
+  },
+  "diagnostic": {
+    "capturedAt": "2026-11-06T20:05:08.867Z",
+    "workloadSha256": "371c8dac6687ccf96689f49d11f2660ad957489c24cc47c40bb5c1247e670a31",
+    "suiteSha256": "944240c02900421e4d020bb1f6634abcd2b743281dcdaf187a0900adfdc2e902",
+    "pageSha256": "56d469a5bfaefc1ef4964b3fac45d84813adb273a54f8b7cd049a453205b34df",
+    "browser": "Chrome/157.0.8103.39",
+    "cpuProfilerEnabled": true,
+    "rows": [
+      {
+        "name": "wall movement performance: ordinary movement stays responsive at a high-density desktop size",
+        "pass": false,
+        "details": {
+          "fps": 60.003189538314324,
+          "p95": 16.799999999999272,
+          "max": 16.80000000000109,
+          "worst": {
+            "gap": 26.299999997019768,
+            "at": 766.5999999999995,
+            "updateMs": 10.299999997019768,
+            "renderMs": 3.7000000029802322,
+            "overlayMs": 2.0999999940395355,
+            "donated": false
+          },
+          "outlined": 0,
+          "samples": 301,
+          "travel": 3.4890499999999953,
+          "donated": false,
+          "quality": "medium"
+        }
+      },
+      {
+        "name": "wall movement performance: moving behind cave walls during a donation stays responsive at a high-density desktop size",
+        "pass": true,
+        "details": {
+          "fps": 59.20462473836342,
+          "p95": 16.799999999999272,
+          "max": 33.399999999999636,
+          "worst": {
+            "gap": 39,
+            "at": 3833.1000000000004,
+            "updateMs": 28.399999991059303,
+            "renderMs": 3.5,
+            "overlayMs": 6.600000008940697,
+            "donated": true
+          },
+          "outlined": 297,
+          "samples": 297,
+          "travel": 3.48905000000002,
+          "donated": true,
+          "quality": "high"
+        }
+      }
+    ],
+    "hot": [
+      {
+        "function": "(idle)",
+        "file": "",
+        "line": 0,
+        "column": 0,
+        "samples": 2256,
+        "paths": 1
+      },
+      {
+        "function": "build",
+        "file": "oogaboogaland.html",
+        "line": 14557,
+        "column": 29,
+        "samples": 760,
+        "paths": 36
+      },
+      {
+        "function": "partition",
+        "file": "oogaboogaland.html",
+        "line": 14534,
+        "column": 33,
+        "samples": 464,
+        "paths": 31
+      },
+      {
+        "function": "sightClearAt",
+        "file": "oogaboogaland.html",
+        "line": 27369,
+        "column": 26,
+        "samples": 273,
+        "paths": 8
+      },
+      {
+        "function": "render",
+        "file": "oogaboogaland.html",
+        "line": 19433,
+        "column": 20,
+        "samples": 200,
+        "paths": 3
+      },
+      {
+        "function": "drawStructure",
+        "file": "oogaboogaland.html",
+        "line": 58827,
+        "column": 27,
+        "samples": 200,
+        "paths": 1
+      },
+      {
+        "function": "fill",
+        "file": "",
+        "line": 0,
+        "column": 0,
+        "samples": 179,
+        "paths": 3
+      },
+      {
+        "function": "drawNode",
+        "file": "oogaboogaland.html",
+        "line": 59183,
+        "column": 22,
+        "samples": 164,
+        "paths": 3
+      },
+      {
+        "function": "(program)",
+        "file": "",
+        "line": 0,
+        "column": 0,
+        "samples": 161,
+        "paths": 1
+      },
+      {
+        "function": "drawImage",
+        "file": "",
+        "line": 0,
+        "column": 0,
+        "samples": 159,
+        "paths": 6
+      },
+      {
+        "function": "entryBoundaryHit",
+        "file": "oogaboogaland.html",
+        "line": 38813,
+        "column": 30,
+        "samples": 145,
+        "paths": 3
+      },
+      {
+        "function": "collect",
+        "file": "oogaboogaland.html",
+        "line": 37827,
+        "column": 21,
+        "samples": 141,
+        "paths": 3
+      },
+      {
+        "function": "drawParts",
+        "file": "oogaboogaland.html",
+        "line": 18821,
+        "column": 23,
+        "samples": 137,
+        "paths": 10
+      },
+      {
+        "function": "boundaryTriangle",
+        "file": "oogaboogaland.html",
+        "line": 38795,
+        "column": 30,
+        "samples": 119,
+        "paths": 4
+      },
+      {
+        "function": "traverseVisible",
+        "file": "oogaboogaland.html",
+        "line": 13671,
+        "column": 27,
+        "samples": 111,
+        "paths": 19
+      },
+      {
+        "function": "updateSurface",
+        "file": "oogaboogaland.html",
+        "line": 36954,
+        "column": 27,
+        "samples": 104,
+        "paths": 1
+      },
+      {
+        "function": "updateStone",
+        "file": "oogaboogaland.html",
+        "line": 58650,
+        "column": 25,
+        "samples": 100,
+        "paths": 1
+      },
+      {
+        "function": "ownerBoundaryAt",
+        "file": "oogaboogaland.html",
+        "line": 38892,
+        "column": 29,
+        "samples": 93,
+        "paths": 3
+      },
+      {
+        "function": "closePath",
+        "file": "",
+        "line": 0,
+        "column": 0,
+        "samples": 87,
+        "paths": 4
+      },
+      {
+        "function": "lineTo",
+        "file": "",
+        "line": 0,
+        "column": 0,
+        "samples": 87,
+        "paths": 5
+      },
+      {
+        "function": "fromTRS",
+        "file": "oogaboogaland.html",
+        "line": 13008,
+        "column": 14,
+        "samples": 83,
+        "paths": 16
+      },
+      {
+        "function": "buildMesh",
+        "file": "oogaboogaland.html",
+        "line": 14504,
+        "column": 31,
+        "samples": 81,
+        "paths": 3
+      },
+      {
+        "function": "grain",
+        "file": "oogaboogaland.html",
+        "line": 58518,
+        "column": 17,
+        "samples": 80,
+        "paths": 3
+      },
+      {
+        "function": "surfaceAt",
+        "file": "oogaboogaland.html",
+        "line": 76919,
+        "column": 23,
+        "samples": 78,
+        "paths": 53
+      },
+      {
+        "function": "uploadInstances",
+        "file": "oogaboogaland.html",
+        "line": 18236,
+        "column": 29,
+        "samples": 72,
+        "paths": 4
+      },
+      {
+        "function": "add",
+        "file": "oogaboogaland.html",
+        "line": 14614,
+        "column": 17,
+        "samples": 71,
+        "paths": 3
+      },
+      {
+        "function": "multiply",
+        "file": "oogaboogaland.html",
+        "line": 12983,
+        "column": 15,
+        "samples": 70,
+        "paths": 14
+      },
+      {
+        "function": "transformTriangle",
+        "file": "oogaboogaland.html",
+        "line": 76888,
+        "column": 31,
+        "samples": 65,
+        "paths": 39
+      },
+      {
+        "function": "renderMirrorCapture",
+        "file": "oogaboogaland.html",
+        "line": 19072,
+        "column": 33,
+        "samples": 59,
+        "paths": 3
+      },
+      {
+        "function": "stroke",
+        "file": "",
+        "line": 0,
+        "column": 0,
+        "samples": 57,
+        "paths": 4
+      }
+    ],
+    "stats": {
+      "geometries": 707,
+      "registered": 2862,
+      "candidates": 19,
+      "occluders": 804,
+      "cameraOccluders": 221,
+      "limit": 1357864,
+      "nodes": 2862,
+      "owners": 556,
+      "nearOwners": 14,
+      "triangles": 51745,
+      "triangleBytes": 620940,
+      "samples": 159815,
+      "perceptionQueries": 824,
+      "perceptionCacheHits": 16,
+      "perceptionWitnessHits": 344,
+      "cameraWitnessHits": 0,
+      "cameraCertificates": 3,
+      "boundaryTriangles": 9065460,
+      "boundaryBuilds": 727,
+      "boundaryEntries": 5061144,
+      "boundaryNodes": 0,
+      "boundaryGridBuilds": 727,
+      "boundaryGridQueries": 1365058,
+      "boundaryGridBytes": 644064,
+      "boundaryGridReferences": 153024
+    },
+    "logs": []
+  },
+  "clean": {
+    "command": "ONLY='wall movement performance' LANES=1 node test/run.mjs perf",
+    "delivery": "src/index.html",
+    "cpuProfilerEnabled": false,
+    "workloadSha256": "371c8dac6687ccf96689f49d11f2660ad957489c24cc47c40bb5c1247e670a31",
+    "suiteSha256": "944240c02900421e4d020bb1f6634abcd2b743281dcdaf187a0900adfdc2e902",
+    "result": "2/3",
+    "failed": [
+      {
+        "name": "wall movement performance: moving behind cave walls during a donation stays responsive at a high-density desktop size",
+        "details": {
+          "fps": 59.603309080035885,
+          "p95": 16.799999999999272,
+          "max": 50,
+          "worst": {
+            "gap": 54.900000005960464,
+            "at": 4183.200000000001,
+            "updateMs": 34.1000000089407,
+            "renderMs": 2.5999999940395355,
+            "overlayMs": 17.200000002980232,
+            "donated": true
+          },
+          "outlined": 299,
+          "samples": 299,
+          "travel": 3.4882750000000122,
+          "donated": true,
+          "quality": "high"
+        }
+      }
+    ],
+    "note": "Ordinary movement and clean-console checks passed; successful per-row numeric details were not retained by the quiet suite.",
+    "ledger": {
+      "wall movement performance: moving behind cave walls during a donation stays responsive at a high-density desktop size": {
+        "streak": 1,
+        "first": "2026-11-06T20:06:49.655Z",
+        "last": "2026-11-06T20:06:49.655Z",
+        "detail": "{\"fps\":59.603309080035885,\"p95\":16.799999999999272,\"max\":50,\"worst\":{\"gap\":54.900000005960464,\"at\":4183.200000000001,\"updateMs\":34.1000000089407,\"renderMs\":2.5999999940395355,\"overlayMs\":17.200000002980232,\"donated\":true},\"outlined\":299,\"samples\":299,\"travel\":3.4882750000000122,\"donated\":true,\"quality\":\"high\"}"
+      }
+    }
+  },
+  "analysis": {
+    "buildPartitionSelfSamples": 1226,
+    "idleWarmSelfSamples": 390,
+    "allProfileSamples": 9599,
+    "lead": "Character visibility build/partition samples include synchronous meshOf/nearest/exposed/anchor/drawOverlay stacks. This does not establish the cause of the clean run worst update-time spike.",
+    "decision": "No safe covered-wall runtime fix established. No code or workload changes. Stop after the failed newly cleared attempt."
+  }
+}
