@@ -19,7 +19,8 @@
     iris: k.color("#3f7fc4"),
     lip: k.color("#c8525e"),
     blush: k.color("#f4a3a0"),
-    noseTip: k.color("#eaa98f")
+    noseTip: k.color("#eaa98f"),
+    ink: k.color("#27324f")
   });
   // Hashed from the cell so the gown's folds never draw from the shared rand.
   const fold = (x, y, z) => ((Math.imul(x + 11, 73856093) ^ Math.imul(y + 7, 19349663) ^ Math.imul(z + 5, 83492791)) >>> 0) % 5;
@@ -48,6 +49,15 @@
     v.fill(-1, 3, 8, 10, -1, 3, gownAt(C));
     v.fill(0, 2, 11, 11, 0, 2, C.gownLt);
     v.fill(-1, 3, 0, 1, -1, 3, C.glove);
+    return v;
+  };
+  // An N inked on the outside of her right forearm, in the island signs' 3x5 letter,
+  // read from beside her: the arm's outer face is x = 0, its back at z = 0.
+  const N = ["101", "111", "101", "101", "101"];
+  const tattooed = (arm, C) => {
+    const v = makeVox();
+    for (const [key, c] of arm.map) v.map.set(key, c);
+    for (let row = 0; row < 5; row++) for (let z = 0; z < 3; z++) if (N[row][z] === "1") v.set(0, 6 - row, z, C.ink);
     return v;
   };
   const fingerVox = (C) => {
@@ -120,8 +130,9 @@
         const C = colors(k), u = k.u;
         k.parts.legR.geometry = k.vg(legVox(C, -1), { x: -2 * u, y: -5 * u, z: -2.5 * u });
         k.parts.legL.geometry = k.vg(legVox(C, 1), { x: -2 * u, y: -5 * u, z: -2.5 * u });
-        const arm = k.vg(armVox(k, C), { x: -1.5 * u, y: -11 * u, z: -1.5 * u });
-        k.parts.armR.geometry = k.parts.armL.geometry = arm;
+        const armOrigin = { x: -1.5 * u, y: -11 * u, z: -1.5 * u }, arm = armVox(k, C);
+        k.parts.armL.geometry = k.vg(arm, armOrigin);
+        k.parts.armR.geometry = k.vg(tattooed(arm, C), armOrigin);
         const fingers = k.vg(fingerVox(C), { x: -1.5 * u, y: -u, z: -1.5 * u });
         k.parts.fingersR.geometry = k.parts.fingersL.geometry = fingers;
       },
