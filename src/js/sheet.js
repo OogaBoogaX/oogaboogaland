@@ -22,18 +22,10 @@
     badges[name] = count;
     if (paintBadges) paintBadges();
   };
-  // Calls `fn` when the visitor shows they are looking at `panel`: a click or a keyboard press on its tab in any
-  // window, the tab taking focus while the panel shows, or a press, a scroll or focus inside the shown panel. A panel
-  // put back on screen by a scene change, a fold or a layout restore is not looked at.
-  const watchViews = (panel, fn) => {
-    const name = panel.dataset.panel, onTab = (e) => e.target.closest?.(`.sheet [data-tab="${name}"]`);
-    document.addEventListener("click", (e) => { if (onTab(e) || e.target.closest?.(".sheet-expand") && visible(panel)) fn(); });
-    document.addEventListener("focusin", (e) => { if (onTab(e) && visible(panel)) fn(); });
-    for (const type of ["pointerdown", "focusin", "wheel", "touchstart"])
-      panel.addEventListener(type, () => { if (visible(panel)) fn(); }, { passive: true });
-  };
-  // Whether the visitor is in `panel` now, so a new arrival there needs no count: the page has focus and so does the panel.
-  const attending = (panel) => visible(panel) && document.hasFocus() && panel.contains(document.activeElement);
+  // Only an explicit tab opening acknowledges that tab. Layout and notification inspection leave counts alone.
+  const watchViews = (panel, fn) => panel.addEventListener("sheetview", fn);
+  const attending = (panel) => visible(panel) && document.hasFocus() && panel.contains(document.activeElement)
+    && !document.activeElement.closest(".sheet-notifications");
   const readRect = (rect) => rect && [rect.x, rect.y, rect.width, rect.height].every(Number.isFinite)
     && Math.abs(rect.x) <= 100000 && Math.abs(rect.y) <= 100000 && rect.width > 0 && rect.width <= 10000
     && rect.height > 0 && rect.height <= 10000 ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : null;
@@ -169,14 +161,60 @@
       // Keep those saved panels so a temporary absence never deletes a layout.
       if (rect && NAMES.includes(entry.tab) && !ownerOf(entry.tab)) addWindow(entry.tab, rect, entry.dock, entry.open !== false);
     }
-    // Each counted tab's badge, in every window; a tab's name reads its count too, as the badge itself is not read.
+    const notificationTemplate = document.getElementById("sheet-notifications");
+    const badgeText = (count) => count > 99 ? "99+" : String(count);
+    const showBadge = (badge, count) => {
+      const text = badgeText(count);
+      if (badge.hidden !== !count) badge.hidden = !count;
+      if (badge.textContent !== text) badge.textContent = text;
+    };
+    const notificationViews = panels.map((panel) => {
+      const view = notificationTemplate.content.firstElementChild.cloneNode(true);
+      const button = view.querySelector("button"), detail = view.querySelector(".sheet-unread"), badge = view.querySelector(".tab-count");
+      detail.id = panel.id + "-unread";
+      button.setAttribute("aria-describedby", detail.id);
+      panel.querySelector(".panel-title").append(view);
+      let hovered = false, focused = false, pinned = false;
+      const paint = () => {
+        const shown = hovered || focused || pinned;
+        if (detail.hidden === shown) {
+          button.setAttribute("aria-expanded", String(shown));
+          detail.hidden = !shown;
+        }
+        showBadge(badge, shown ? 0 : badges.players + badges.chat);
+      };
+      const reset = () => { hovered = focused = pinned = false; paint(); };
+      on(button, "pointerenter", (e) => { if (e.pointerType !== "touch") { hovered = true; paint(); } });
+      on(button, "pointerleave", () => { hovered = false; paint(); });
+      on(button, "focus", () => { focused = button.matches(":focus-visible"); paint(); });
+      on(button, "blur", reset);
+      on(button, "click", () => {
+        if (hovered || focused) return;
+        pinned = !pinned;
+        paint();
+      });
+      on(button, "keydown", (e) => {
+        if (e.key !== "Escape" || detail.hidden) return;
+        e.preventDefault(); e.stopPropagation();
+        reset();
+      });
+      return { panel, view, detail, paint, reset };
+    });
+    on(document, "pointerdown", (e) => {
+      for (const item of notificationViews) if (!item.view.contains(e.target)) item.reset();
+    }, { capture: true });
     const showCounts = () => {
+      const detail = `Online Oogas: ${badgeText(badges.players)} new\nOoga Chat: ${badgeText(badges.chat)} new`;
+      for (const item of notificationViews) {
+        if (item.detail.textContent !== detail) item.detail.textContent = detail;
+        item.paint();
+      }
       for (const w of windows) for (const badge of w.nav.querySelectorAll(".tab-count")) {
-        const tab = badge.closest("[data-tab]"), name = tab.dataset.tab, count = name === "loot" ? lootCount : badges[name] || 0;
-        const text = count > 99 ? "99+" : String(count), label = tab.dataset.label || (tab.dataset.label = tab.getAttribute("aria-label"));
-        if (badge.hidden !== !count) badge.hidden = !count;
-        if (badge.textContent !== text) badge.textContent = text;
-        if (name !== "loot") tab.setAttribute("aria-label", count ? `${label}, ${text} new` : label);
+        const tab = badge.closest("[data-tab]"), name = tab.dataset.tab;
+        const count = name === "loot" ? lootCount : isOpen(w) ? 0 : badges[name] || 0;
+        showBadge(badge, count);
+        const label = tab.dataset.label || (tab.dataset.label = tab.getAttribute("aria-label"));
+        if (name !== "loot") tab.setAttribute("aria-label", count ? `${label}, ${badgeText(count)} new` : label);
       }
     };
     const expand = root.querySelector(".sheet-expand");
@@ -217,6 +255,7 @@
         w.body.inert = !open || w.node.hidden;
         w.body.setAttribute("aria-hidden", String(w.body.inert));
       }
+      for (const item of notificationViews) if (!visible(item.panel)) item.reset();
       showCounts(); showExpand();
       notify();
     };
@@ -236,11 +275,12 @@
       observe.disconnect();
       for (const current of windows) observe.observe(current.node, { attributes: true, attributeFilter: ["data-open", "hidden"] });
     };
-    const select = (w, name) => {
+    const select = (w, name, viewed = false) => {
       if (!available(name)) return;
       w = ownerOf(name) || w; folded = false;
       w.tab = name; w.open = true; w.node.dataset.open = "true";
       refresh(); front(w); save();
+      if (viewed) panels.find((panel) => panel.dataset.panel === name)?.dispatchEvent(new Event("sheetview"));
     };
     const measure = (w) => {
       if (w.rect) return;
@@ -367,7 +407,7 @@
       if (suppressClick && e.detail !== 0) { suppressClick = false; e.preventDefault(); e.stopImmediatePropagation(); return; }
       if (e.target.closest(".sheet-expand")) {
         expand.blur();
-        if (!isOpen(main)) select(main, available(main.tab) ? main.tab : "roster");
+        if (!isOpen(main)) select(main, available(main.tab) ? main.tab : "roster", true);
         else if (expand.dataset.dir === "up") raise();
         else close(main);
         return;
@@ -375,7 +415,7 @@
       const tab = e.target.closest("[data-tab]");
       if (tab) {
         if (tab.dataset.tab === w.tab && w.node.dataset.open === "true") close(w);
-        else select(w, tab.dataset.tab);
+        else select(w, tab.dataset.tab, true);
       }
     });
     on(parent, "keydown", (e) => {
@@ -387,7 +427,7 @@
         e.preventDefault(); e.stopPropagation();
         const tabs = w.tabs.filter((t) => !t.hidden), i = tabs.indexOf(tab);
         const next = e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : (i + (e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 1) + tabs.length) % tabs.length;
-        select(w, tabs[next].dataset.tab); tabs[next].focus({ preventScroll: true });
+        select(w, tabs[next].dataset.tab, true); tabs[next].focus({ preventScroll: true });
       } else if (handle && arrows.includes(e.key)) {
         e.preventDefault(); e.stopPropagation(); measure(w);
         const step = e.shiftKey ? 32 : 10, dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
@@ -457,6 +497,7 @@
         if (paintBadges === showCounts) paintBadges = null;
         for (const off of listeners) off();
         listeners.length = 0;
+        for (const { view } of notificationViews) view.remove();
         for (const panel of panels) { content.append(panel); panel.hidden = !available(panel.dataset.panel) || panel.dataset.panel !== main.tab; }
         main.body.inert = false; main.body.removeAttribute("aria-hidden");
         for (const w of windows) if (w !== main) w.node.remove();

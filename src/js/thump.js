@@ -98,7 +98,8 @@
     BL.thump = { createMixer };
     return;
   }
-  button.prepend(BL.hud.malletIcon.cloneNode(true));
+  const buttons = [button, $("players-account-thump"), $("chat-account-thump")].filter(Boolean);
+  for (const control of buttons) control.prepend(BL.hud.malletIcon.cloneNode(true));
   const bucket = { tokens: SEND_BURST, at: -Infinity };
   // shown: thumps drawn; dropped: refused by the gates (hidden, not live, settling); unheard: shown with no sound due
   // (the room's word, a local mute, past the hearing range); sounded and unsounded: due a sound, and whether it played.
@@ -144,7 +145,10 @@
   };
   const render = () => {
     const hidden = !participant();
-    if (hidden !== shownHidden) { shownHidden = hidden; button.hidden = hidden; }
+    if (hidden !== shownHidden) {
+      shownHidden = hidden;
+      for (const control of buttons) control.hidden = hidden;
+    }
   };
 
   // A new voice membership: none of the last one's marks or reactions carry over.
