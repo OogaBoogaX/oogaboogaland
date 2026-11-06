@@ -16913,8 +16913,9 @@ const timechainDataChecks = async () => {
 };
 // Regression: a rest-site probe kept its gorilla, whose groundAt closure held the departed hub's graph.
 const hubScratchChecks = async () => {
-  const source = await readFile(new URL("../src/js/scene-hub.js", import.meta.url), "utf8");
-  const start = source.indexOf("  const CLANKER_REST_SLOPE ="), end = source.indexOf("  const clankerClimbSolidAt =", start);
+  const source = await readFile(new URL("../src/js/hub-clanker-clearance.js", import.meta.url), "utf8");
+  const start = source.indexOf("  const CLANKER_REST_SLOPE ="), end = source.indexOf("    return { clankerSatelliteLandAt,", start);
+  if (start < 0 || end < 0) throw Error("rest-site fixture source boundary missing");
   let fire = true, walkable = true, clear = true, thrown = false;
   const failure = new Error("ground probe"), entry = {}, rows = [];
   const probe = new Function("clankerFireClear", "clankerGroundPlaneAt", "clankerCylinderClear",
