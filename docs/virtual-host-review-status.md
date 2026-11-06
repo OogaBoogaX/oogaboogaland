@@ -20,18 +20,86 @@ changed here.
 
 ## Host (this repository)
 
-- Published `23ca440e3b19c91be3da272806c9060b7bb1c94e`, including the source
-  reconciliation (v159) and its corrections (v160 to v162). Exact-head CI 896
-  (run 42292487081) succeeds: Unit 452, replay 41, Host/recovery 287,
-  terrain/cache 11, Room compatibility 79. Earlier: `5554166a` (v157, v158),
-  CI 894.
-- What CI 896 proves: only the files the workflow names (`tests.yml` lists
-  every file; there is no wildcard). That does not include `hub-pile-source`,
-  `host-world-receiver` or `hub-source-reconcile`. Those pass locally (23, 6
-  and 2), but CI has not enforced them.
-- Pending wiring, local, not yet pushed: one new step in the browser-free job
-  runs exactly those three files. It will enforce them from the next push
-  onward; it has not run in CI yet.
+- Published `1a04da8f`, which adds the CI step for the private pile source
+  checks. Exact-head CI 897 (run 42293556952) succeeds: Unit 452, replay 41,
+  Host/recovery 287, terrain/cache 11, Room compatibility 79, plus the 31 new
+  source checks (`hub-pile-source` 23, `host-world-receiver` 6,
+  `hub-source-reconcile` 2), now enforced by CI. Earlier: `23ca440e` (v159 to
+  v162), CI 896, which did not yet name those three files.
+- Neither allocation candidate investigated since (v165 portrait heads, v166
+  packed collision cursor) is published. This does not affect earlier
+  published memory work, such as the v148 retention fix or the v152 headless
+  compact geometry.
+
+### Allocation candidates investigated (excluded)
+
+- Packed collision reads (v166, excluded). `solid-props` `geometryOf` iterates
+  `geometry.faces`, which on a packed mesh would cache a frozen plain copy of
+  every face (`data.legacy`). An experimental cursor read removed that:
+  - A synthetic 3-face mesh's `data.legacy.size` went from 0 to 3 after
+    `prepare`, add, sync and query before the change, and stayed 0 after it.
+  - Focused tests passed: `hub-solid-scratch` 4/4 (after one fixture
+    correction), `headless-compact-geometry` 3/3, `npc-collision` 7/7.
+  - On the actual host (`verification-v167-host-solid-packed.json`): 106
+    actors, eight ticks, a valid 42,868-byte checkpoint. The 68 unique
+    geometries `geometryOf` examined were all unpacked: 0 packed, 0 legacy
+    entries.
+  - So the change has no effect in this workload. It is excluded from the
+    host PR. The complete patch and files are preserved outside the repository
+    (`checkpoint-v167-excluded-*`, with SHA256). `src/js/solid-props.js` and
+    `worker/test/hub-solid-scratch.test.mjs` are as published at `1a04da8f`.
+    The experiment's counts and test passes are not part of the PR.
+- Render-only portrait heads (inventory only, no change). Across 53
+  contributor templates there are 55 portrait geometries: 1,246,036 packed
+  bytes. All rig geometries total 9,371,744 packed bytes, plus 237 unpacked
+  meshes that were counted but not sized. These are packed payload bytes, not
+  retained heap. No heap, quota or cost saving is claimed or published.
+
+### Static collision shell packing (v173, local experiment, not promoted)
+
+- Correctness only (`verification-v173-static-pack.json`). Two fresh baseline
+  processes, then one experiment that packed the 68 static collision shells in
+  place at registration, before their first tree build. The experiment used
+  Float64, a diagnostic-only collision ownership flag injected into a
+  temporary bundle, and the excluded v167 cursor reader.
+- All three matched exactly: full checkpoint, projection and query hashes
+  through build, eight ticks, v2 pile growth and reversal, and a restore, with
+  106 actors. There were no observed vertex byte changes and no legacy face
+  copies.
+- The restore phase disposes the world and rebuilds it from its checkpoint in
+  the same child process and isolate. It reused 58 already-cached collision
+  meshes. It does not show a host restart in a fresh isolate.
+- Limits: this is one synthetic fixture. Vertex integrity covers only writes
+  observed in those runs, and runtime-mutable geometry was recognised by
+  identity from known roots. It is not exhaustive ownership proof.
+- Local workerd memory, one matched pair (v174,
+  `verification-v174-static-memory.json`). Baseline and experiment both
+  completed with no errors, current source, 106 actors and equal checkpoint
+  bytes. Live world after explicit GC:
+  - JS heap used: 112,096,596 B baseline and 97,345,620 B experiment
+    (−14,750,976 B).
+  - Backing store: 60,727,866 B and 67,895,341 B (+7,167,475 B).
+
+  These are separate counters moving in opposite directions; they are not
+  summed and give no net figure. This is one pair with no repeat
+  distribution, no Room, sessions or bodies, and no provider fit or billing
+  claim. The disposed-world values varied substantially and are not reliable
+  retention attribution, so they are not presented as a saving.
+- Node transaction recovery, matched (v175,
+  `verification-v175-static-recovery.json`). Baseline A, baseline B and the
+  experiment ran in fresh Node processes with the v129 transaction path.
+  Every original assertion passed: a failed transaction leaves durable state
+  unchanged, a stale frame is refused, and recovered frames are confirmed.
+  All 10 committed-state and frame hashes matched across all three runs.
+  - Rollback: 286.302625 ms and 290.106625 ms baseline, 305.665542 ms
+    experiment. All are still over the 250 ms gate.
+  - Startup: 2427.52 ms and 2401.10 ms baseline, 2489.39 ms experiment.
+  - No speedup is claimed. Warm tick timings are not strict delivery proof.
+    Later hosts reused the same process caches, so this is not a
+    cold-isolate restart.
+- Experimental packing remains excluded. The v174 heap and backing-store
+  trade-off stands. No production change is made or promoted: runtime source
+  is unchanged; only this documentation changed.
 
 ### Private pile consumer (v2)
 
@@ -124,9 +192,9 @@ changed here.
   - Second run, after that correction alone: 2/2 pass. That covers the cold
     restore of the grown pile in that one fixture world. It is not a general
     proof for every layout.
-  - CI has not run it: the workflow names its files and did not include this
-    one. The pending step above adds it, together with `hub-pile-source` and
-    `host-world-receiver`.
+  - CI now enforces it. CI 896 on `23ca440e` did not name it. The step added in
+    `1a04da8f` runs it with `hub-pile-source` and `host-world-receiver`, and
+    exact-head CI 897 passed all 31 of those checks.
 - The clanker support check (`supportRemoved`): when the mainland's walkable
   surface changes, it marks a clanker whose floor fell away as passively
   falling, with zero velocity. It moves no actor and advances no time; gravity
@@ -151,6 +219,8 @@ changed here.
 | Run identity (v161) | hub-pile-source 23/23 and host-world-receiver 6/6 (source-timer fix, 29/29) |
 | Full-Hub reconcile (v162) | hub-source-reconcile: first run 1/2 (layout-recipe fixture error); after the assertion correction, 2/2 |
 | CI 896 on `23ca440e` | Unit 452, replay 41, Host/recovery 287, terrain/cache 11, Room compatibility 79; the three files above not yet in the workflow |
+| CI 897 on `1a04da8f` | Unit 452, replay 41, Host/recovery 287, terrain/cache 11, Room compatibility 79, plus 31 new source checks |
+| Packed collision reads (v166, experiment, excluded) | first run: hub-solid-scratch 3/4, headless-compact-geometry 3/3, npc-collision 7/7; the failure was the new test's VM fixture missing `convex.js`, and the rerun after that correction alone passed 4/4 (`verification-v166-solid-retry.log`). The actual-host inventory (`verification-v167-host-solid-packed.json`) found 68 geometries, all unpacked: no applicability. Not in the PR |
 
 The version rows are local runs at the time; each ran only `node --check` on
 touched files and the files listed. `host-room-takeover`, `hub-world-validation`
