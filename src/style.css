@@ -1483,6 +1483,93 @@ body[data-active-scene="hub"] .home-link {
   cursor: default;
 }
 
+/* Private conversations (#188): a switch between the island's chat and the private one, which has its own blue tint
+   and lock, so a line meant for one person is never typed into the island's by mistake. */
+.pm-switch { display: flex; flex: none; gap: 6px; }
+.pm-switch[hidden] { display: none; }
+.pm-switch-button {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--wood-edge);
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.22);
+  color: rgba(243, 239, 228, 0.72);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.pm-switch-button[aria-pressed="true"] { border-color: var(--accent); background: rgba(216, 137, 43, 0.12); color: var(--accent-text); }
+.pm-switch-button[data-pm-view="private"][aria-pressed="true"] { border-color: #7aa8e8; background: rgba(90, 140, 220, 0.16); color: #cfe0ff; }
+.pm-switch-button:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 1px; }
+.pm-switch .pm-count { position: static; margin: 0 0 0 2px; }
+.pm-lock { flex: none; width: 9px; height: 10px; }
+
+.pm { display: none; flex: 1 1 auto; flex-direction: column; gap: 6px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.pm [hidden] { display: none; }
+.panel[data-panel="chat"][data-view="private"] .pm { display: flex; }
+.panel[data-panel="chat"][data-view="private"] > :is(.chat-identity, .chat-log, .chat-status, .chat-form),
+.panel[data-panel="chat"][data-view="private"] > .panel-title > .chat-about { display: none; }
+.pm-head { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 8px; }
+.pm-head .pm-end { min-height: 24px; }
+.pm-title { display: flex; align-items: center; gap: 6px; min-width: 0; margin: 0; color: #cfe0ff; font-size: 11px; font-weight: 600; overflow-wrap: anywhere; }
+.pm .pm-note, .pm .pm-budget { flex: none; margin: 0; white-space: pre-line; }
+.pm .pm-note:empty, .pm .pm-budget:empty { display: none; }
+.pm-actions { display: flex; flex: none; flex-wrap: wrap; align-items: center; gap: 6px; }
+.pm-actions[hidden] { display: none; }
+.pm-button {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--wood-edge);
+  border-radius: 5px;
+  background: linear-gradient(var(--plank), var(--wood));
+  color: var(--paper);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.pm-button:hover, .pm-button:focus-visible, .pm-file:focus-within { background: linear-gradient(#b8844a, var(--plank)); outline: none; box-shadow: 0 0 0 2px var(--accent); }
+.pm-button:disabled { opacity: 0.5; cursor: default; }
+.pm-quiet { background: rgba(0, 0, 0, 0.22); color: rgba(243, 239, 228, 0.78); }
+.pm-file input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); opacity: 0; }
+.pm-make { display: inline-flex; gap: 6px; }
+.pm-make select {
+  min-height: 30px;
+  padding: 0 6px;
+  border: 1px solid rgba(0, 0, 0, 0.5);
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--paper);
+  font-size: 11px;
+}
+.pm-print { flex: none; margin: 0; color: rgba(243, 239, 228, 0.72); font-size: 10px; overflow-wrap: anywhere; }
+.pm-print[hidden] { display: none; }
+.pm-print code { color: #cfe0ff; font-size: 10.5px; letter-spacing: 0.02em; white-space: nowrap; }
+.pm-log { flex: 1 1 auto; min-height: 44px; overflow: auto; overscroll-behavior: contain; border-color: rgba(90, 140, 220, 0.55); }
+.pm-log:empty::before { content: "Sealed with your pad: only the two of you can read what is said here. The island passes it on and sees who talks to whom, when, and how long each line is."; }
+.pm-log .chat-row[data-own="true"] { border-left-color: rgba(122, 168, 232, 0.8); background: linear-gradient(90deg, rgba(90, 140, 220, 0.1), transparent 60%); }
+.pm-log .chat-row[data-own="true"] .chat-name { color: #cfe0ff; }
+.pm-log .chat-row[data-note="true"] .chat-text { color: rgba(243, 239, 228, 0.62); font-size: 10.5px; }
+/* The page's own notes carry no name, so a display name can never pass for one. */
+.pm-note-tag { color: rgba(243, 239, 228, 0.5); font-size: 8.5px; letter-spacing: 0.1em; text-transform: uppercase; }
+.pm-state { color: rgba(243, 239, 228, 0.5); font-size: 9px; white-space: nowrap; }
+.pm-state[data-failed="true"] { color: #ffb4a6; }
+.pm-retry { min-height: 22px; margin-left: 6px; padding: 0 6px; font-size: 8.5px; }
+.pm-form .chat-send { background: linear-gradient(#a9c6f2, #6f9be0); }
+
 @media (pointer: coarse) {
   .chat-send,
   .chat-form input { min-height: 44px; }
@@ -1888,6 +1975,19 @@ body[data-active-scene="hub"] .home-link {
 .roster-voice:disabled {
   cursor: default;
 }
+
+.players-private {
+  display: inline-flex;
+  padding: 0 0 0 6px;
+  border: 0;
+  background: none;
+  color: #9fbfee;
+  cursor: pointer;
+}
+.players-private[hidden] { display: none; }
+.players-private svg { width: 10px; height: 11px; shape-rendering: crispEdges; }
+.players-private:hover, .players-private:focus-visible { color: #cfe0ff; outline: none; }
+.players-private:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
 
 .roster-voice:focus-visible {
   outline: 2px solid var(--accent);
