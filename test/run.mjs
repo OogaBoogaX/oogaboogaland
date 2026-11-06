@@ -276,17 +276,23 @@ const gorillaSleepBudgetProof = () => {
 // Run the hub's real landing/player predicate, including the NPC exception to walking collision.
 const sleepLandingPlayersProof = () => {
   const source = readFileSync(join(root, "src/js/scene-hub.js"), "utf8");
-  const section = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
-  const bodies = [], crew = { player: null }, context = { crew, remotes: { actors: () => bodies } };
+  const clearance = readFileSync(join(root, "src/js/hub-clanker-clearance.js"), "utf8");
+  const section = (start, end, text = source) => {
+    const from = text.indexOf(start), to = text.indexOf(end, from);
+    if (from < 0 || to < 0) throw Error("sleep landing fixture source boundary missing");
+    return text.slice(from, to);
+  };
+  const bodies = [], pilot = { player: null }, context = { pilot, remotes: { actors: () => bodies } };
+  runInNewContext(readFileSync(join(root, "src/js/hub-locomotion.js"), "utf8"), context);
   runInNewContext(section("  const cylinderSegmentClear =", "  const actorBounds =")
     + section("  const clankerBedPlayersClear =", "  const clankerPlayersSupportAt =")
     + "globalThis.clear = clankerBedPlayersClear;", context);
   const e = { controlled: false, gorilla: { bodyRadius: 1.9, bodyHeight: 2.2 } }, bed = { x: 4, y: 2, z: 6 };
   const rows = { empty: context.clear(e, bed) };
-  crew.player = { root: { visible: true, position: { x: 4, y: 2.5, z: 6 } }, baseY: 0.5, bodyHeight: 1.8, bodyRadius: 0.4 };
+  pilot.player = { root: { visible: true, position: { x: 4, y: 2.5, z: 6 } }, baseY: 0.5, bodyHeight: 1.8, bodyRadius: 0.4 };
   rows.local = !context.clear(e, bed);
-  crew.player.root.position.y = 6; rows.above = context.clear(e, bed);
-  crew.player = null;
+  pilot.player.root.position.y = 6; rows.above = context.clear(e, bed);
+  pilot.player = null;
   bodies.push({ player: true, x: 4, y: 2, z: 6, height: 1.8, radius: 0.4 });
   rows.remote = !context.clear(e, bed);
   bodies[0].x = 8; rows.cleared = context.clear(e, bed);
@@ -299,8 +305,8 @@ const sleepLandingPlayersProof = () => {
   bodies[0].x = bed.x + 2.8;
   rows.standingGap = context.clear(actor, bed);
   Object.assign(context, { clankerCenterClear: () => true, clankerPeersClear: () => true,
-    clankerClimbTransitionClear: () => true, island: { solidAt: () => false } });
-  runInNewContext(section("  let clankerBedLanding =", "  let clankerExitBodyPending =")
+    clankerClimbTransitionClear: () => true, getIsland: () => ({ solidAt: () => false }) });
+  runInNewContext(section("  let clankerBedLanding =", "  let clankerExitBodyPending =", clearance)
     + "globalThis.poseClear = clankerRestPoseClear; globalThis.landingHeld = () => clankerBedLanding;", context);
   rows.lyingBlocked = !context.poseClear(actor, 2, "left", true, bed.x, bed.y, bed.z, 0, null, 0, bed);
   rows.previewReset = context.landingHeld() === null && actor.gorilla.bodyRadius === 1.9
