@@ -5979,7 +5979,8 @@ const environmentSoundChecks = async () => {
 const hammockChecks = async () => {
   // The page's default: finished character bakes are packed compactly, as the live crew's are.
   const real = { window: { location: { search: "" } }, location: { search: "" }, URLSearchParams, document: { createElement: () => ({ getContext: () => null }) }, performance, console };
-  for (const name of ["math", "compact-geometry", "scene", "models", "hub-models", "convex", "solid-props", "hub-hammock"])
+  // walk-rules: the pilot's and crew's shared walking constants, read below without creating movement or NPC systems.
+  for (const name of ["math", "compact-geometry", "scene", "models", "hub-models", "convex", "solid-props", "hub-hammock", "walk-rules"])
     runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), real);
   const R = real.window.BL, H = R.hubHammock, flat = () => 0, clear = (x, z, r) => z > 1 + r;
   const plan = (a, b, fits = clear) => H.plan({ a: { ...a, ground: 0 }, b: { ...b, ground: 0 }, clear: fits, surfaceAt: flat });
@@ -6015,7 +6016,7 @@ const hammockChecks = async () => {
     JSON.stringify({ ropeError, outside, peak, floor }));
   // A walker (the hub's 0.3 m radius, the pilot's step) heading straight at the bed from 2 m out, a centimetre at a time,
   // through the real collision shell: its support, then its body above the step, as the hub's `walkable` asks.
-  const STEP = Number(/WALK = \{[^}]*step: ([\d.]+)/.exec(await readFile(new URL("../src/js/pilot.js", import.meta.url), "utf8"))[1]);
+  const STEP = R.walkRules.step;
   // The gap from a walker's footprint to the nearest drawn part of the resting bed (cloth, edge cords, spreaders), seen
   // from above: every face edge of the bed's own mesh, in its frame (x along, z across).
   // Each face's corner indices, through the compact reader where a mesh is packed.
@@ -6076,8 +6077,6 @@ const hammockChecks = async () => {
   for (const handle of ["w-s-bitcoin", "MrHodlX", "2140data"])
     runInNewContext(await readFile(new URL(`../src/characters/${handle}.js`, import.meta.url), "utf8"), real);
   R.contributors = { roster: [] };
-  // Load the crew's shared constants without creating movement or NPC systems.
-  runInNewContext(await readFile(new URL("../src/js/walk-rules.js", import.meta.url), "utf8"), real);
   runInNewContext(await readFile(new URL("../src/js/crew.js", import.meta.url), "utf8"), real);
   // The drawn cloth's own footprint at rest, from the bed's mesh in its frame (x along, z across, the holder's too): as
   // long as the cloth and the spreaders' thickness, as wide as the cloth and its edge cords away from the spreaders.
