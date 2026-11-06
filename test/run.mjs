@@ -25242,7 +25242,7 @@ const thumpChecks = async BL => {
   // Reactions already running, on the real crew, remote pool and gorilla rig: a membership change ends the visitor's
   // own club tap and a beat a thump started, restoring the stand pose, and leaves movement and an unrelated beat alone.
   const noop = () => {}, oldNet = BL.net, records = new Map(), sceneRoot = BL.scene.createNode();
-  BL.net = { remotes: records };
+  BL.net = { state: { npcAuthority: null }, remotes: records };
   const crew = BL.crew.create({ root: BL.scene.createNode(), world: { level: 0 }, playerName: "YellowBrokeIt", input: { add: noop, remove: noop }, hud: { setRosterRow: noop },
     game: { state: { assignments: {}, inventory: [] } }, viewYaw: 0, groundAt: () => 0, walkable: () => true, fx: { say: noop, zzzAt: noop, burst: noop, puff: noop, spawnParticle: noop, damageNumber: noop } });
   const own = crew.cavemen.get("YellowBrokeIt");
