@@ -22,6 +22,8 @@
 // The NPC host: the room elects one page showing the island (`setHub`, which also counts a hidden tab
 // out) to run the Oogas for everyone. `state.hostId` names it; the host sends its binary pose frames with
 // `sendNpc`, and every other page reads the latest one from `npcFrame` (with `state.npcVersion` counting).
+// An explicit server-authority preview is separately latched in `state.npcAuthority`;
+// its pose snapshots are fenced and acknowledged, and transport close never releases that authority.
 // `state.followers` is how many pages follow the host; with none, the host sends nothing.
 // A tab hidden for HIDDEN_PAUSE_MS leaves the room (`paused`, voice stopped) and comes back when it is
 // looked at again, so a forgotten tab does not hold the room, the host role or voice.
@@ -178,10 +180,43 @@
   const offline = new URLSearchParams(location.search);
   const state = { backend: false, me: null, donations: false, tess: false, highscores: false, highscoreSnapshots: false, logoutEpoch: 0, started: false,
     resolved: offline.has("nosim") || offline.get("net") === "0" || location.protocol !== "http:" && location.protocol !== "https:",
-    room: "off", selfId: 0, online: 0, released: null, loopEpoch: 0, zone: "outside", body: null, bodyKind: null, bodyName: null, hostId: 0, followers: 0, ghostHostId: 0, ghostFollowers: 0, npcVersion: 0, doorway: false, pokerVoice: null,
+    room: "off", selfId: 0, online: 0, released: null, loopEpoch: 0, zone: "outside", body: null, bodyKind: null, bodyName: null, hostId: 0, followers: 0, ghostHostId: 0, ghostFollowers: 0, npcVersion: 0, npcAuthority: null, doorway: false, pokerVoice: null,
     self: { x: NaN, y: NaN, z: NaN, zone: "" }, chatUnicode: false, privateChat: false, chalk: null, blendTo: null, blendT: 0 };
   let ws = null, retry = 0, retryTimer = 0, pingTimer = 0, hiddenTimer = 0, stopped = false;
+  const NPC_MIXED_PREVIEW = false;
+  const npcAuthority = BL.npcAuthority.create({ mixed: NPC_MIXED_PREVIEW });
   let npcFrame = null, inHub = false, hubSent = null, visibleSent = null;
+  const layoutListeners = new Set();
+  let hostLayout = null, lastHostLayout = null, hubInterestRevision = 0;
+  const layoutChanged = () => { for (const fn of layoutListeners) fn(); };
+  const waitHostLayout = signal => {
+    if (state.npcAuthority?.mode !== "server") return Promise.resolve(null);
+    return new Promise((resolve, reject) => {
+      let timer, done = false;
+      const wasInHub = inHub;
+      // Room sends snapshots only to Hub viewers. This is presentation interest,
+      // not a body claim; construction cannot wait for its own later setHub.
+      setHub(true);
+      const interestRevision = hubInterestRevision;
+      const finish = (error, value) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer); layoutListeners.delete(check); signal?.removeEventListener("abort", abort);
+        if (error && !wasInHub && hubInterestRevision === interestRevision) setHub(false);
+        if (error) reject(error); else resolve(value);
+      };
+      const abort = () => finish(signal.reason || new DOMException("Layout cancelled", "AbortError"));
+      const check = () => {
+        const a = state.npcAuthority;
+        if (a?.mode !== "server") finish(null, null);
+        else if (a.incompatible || a.v !== 4) finish(Error("World layout protocol unavailable"));
+        else if (hostLayout?.world === a.world) finish(null, hostLayout);
+      };
+      timer = setTimeout(() => finish(Error("World layout snapshot unavailable")), 5000);
+      layoutListeners.add(check); signal?.addEventListener("abort", abort, { once: true });
+      if (signal?.aborted) abort(); else check();
+    });
+  };
   let zone = "outside", body = null, muted = false, hpSent = 100, koSent = false, hpAt = 0, poseAt = 0, px = NaN, py = NaN, pz = NaN, pyaw = NaN;
   const gSent = new Float64Array(6);
   let gKnown = false, poseHasG = false, jetSent = 0, weaponSent = 0, visualKnown = false;
@@ -257,8 +292,24 @@
   };
 
   const send = (text) => {
+    if (bodyReclaim.required && typeof text === "string" && text !== "ping"
+      && !bodyReclaim.allows(JSON.parse(text).t, body)) return;
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(text);
   };
+
+  // Capability is intentionally absent from deployed Room welcomes. The scene
+  // must install a complete prepare/preflight/apply/activate/release adapter before READY.
+  // A retained requirement never falls back to old pose replay on an older Room.
+  // Receiver wiring is inert until the scene integration and performance gates
+  // pass. Never advertise an unfinished body protocol merely because it loads.
+  const BODY_PRESENCE_PREVIEW = false;
+  const BODY_MIGRATION_PREVIEW = false;
+  const BODY_MOVEMENT_PREVIEW = false, BODY_MOTION_MS = 250;
+  let bodyMovementEnabled = false, oogaMovementEnabled = false, bodyMotionAt = -Infinity;
+  const bodyPresence = BL.bodyPresence.create({ send: msg => send(JSON.stringify(msg)),
+    monotonic: () => performance.now(), wall: () => Date.now() });
+  const bodyReclaim = BL.bodyReclaim.create({ send: msg => send(JSON.stringify(msg)), monotonic: () => performance.now(), wall: () => Date.now(),
+    later: (fn, ms) => window.setTimeout(fn, ms), cancel: id => window.clearTimeout(id) });
 
   const sendBody = () => send(JSON.stringify({ t: "body", name: body }));
   const sendZone = () => send(JSON.stringify({ t: "zone", name: zone }));
@@ -356,10 +407,54 @@
     && (m.dir === "in" || m.dir === "out") && Number.isFinite(m.at) && Number.isFinite(m.exp)
     ? { t: "transit", cycle: m.cycle, actor: m.actor, door: m.door, dir: m.dir, at: m.at, exp: m.exp } : null;
 
+  const acceptNpcAuthority = value => {
+    const before = npcAuthority.current;
+    if (state.npcAuthority?.incompatible && !(value?.revision > state.npcAuthority.revision)) return false;
+    if (!npcAuthority.accept(value)) {
+      bodyPresence.setAuthority({ ...value, v: 0 });
+      // An unknown explicit authority version is incompatible, not permission
+      // to elect ourselves. A later valid release can still clear this guard.
+      const revision = Number.isSafeInteger(value?.revision) && value.revision > 0 ? value.revision : 0;
+      if (!state.npcAuthority || revision > state.npcAuthority.revision) {
+        state.npcAuthority = { mode: "server", revision, incompatible: true };
+        npcFrame = null; state.npcVersion++;
+        hostLayout = null; layoutChanged();
+      }
+      return false;
+    }
+    bodyPresence.setAuthority(value);
+    state.npcAuthority = npcAuthority.current;
+    if (before !== npcAuthority.current) { npcFrame = null; state.npcVersion++; hostLayout = null; layoutChanged(); }
+    return true;
+  };
+
   const onMessage = (e) => {
     if (e.data instanceof ArrayBuffer) {
       if (e.data.byteLength >= 4 && new DataView(e.data).getUint32(0, true) === GHOST_MAGIC) { ghostFrame(e.data); return; } // HALLOWEEN
-      npcFrame = e.data;
+      if (state.npcAuthority?.mode === "server") {
+        if (state.npcAuthority.incompatible) return;
+        const frame = npcAuthority.frame(e.data);
+        if (!frame) return;
+        if (state.npcAuthority.v === 4) {
+          try {
+            const packet = BL.npcPosePacket.unpack(frame, true), layout = packet.layout;
+            if (!layout || lastHostLayout?.world === packet.world
+              && (!BL.npcWorldLayout.sameRecipe(lastHostLayout.snapshot.history, layout.history)
+                || layout.history.ring < lastHostLayout.snapshot.history.ring)) throw Error("World layout regression");
+            Object.freeze(layout.history); Object.freeze(layout);
+            hostLayout = lastHostLayout = Object.freeze({ world: packet.world, snapshot: layout });
+            layoutChanged();
+          } catch { hostLayout = null; layoutChanged(); return; }
+        }
+        npcFrame = frame;
+        const header = new DataView(e.data);
+        send(JSON.stringify({ t: "npc-ack", revision: header.getFloat64(8, true), sequence: header.getFloat64(24, true) }));
+      } else {
+        // An authority frame received before its descriptor must never become
+        // a legacy frame or implicitly authorize this browser to run NPC AI.
+        if (e.data.byteLength >= 4 && new DataView(e.data).getUint32(0, true) === BL.npcAuthority.MAGIC) return;
+        npcFrame = e.data;
+      }
       state.npcVersion++;
       return;
     }
@@ -368,6 +463,33 @@
     try {
       msg = JSON.parse(e.data);
     } catch {
+      return;
+    }
+    if (msg?.t === "body-presence") { bodyPresence.message(msg); return; }
+    if (msg?.t === "body-quiesce") {
+      if (BODY_MIGRATION_PREVIEW) bodyReclaim.quiesce(msg, state.npcAuthority);
+      return;
+    }
+    if (msg?.t === "body-release") {
+      if (BODY_MIGRATION_PREVIEW && !cabinetAnchor && !holdingBody && bodyReclaim.release(msg, state.npcAuthority)) {
+        // A new ordinary claim may follow. Never replay the old canonical body
+        // ID, pose, shot or thrust when leaving the server handoff protocol.
+        setBody(null, true);
+      }
+      return;
+    }
+    if (msg && ["body-prepare", "body-grant", "body-active", "body-live", "body-motion-ack", "body-stop"].includes(msg.t)) {
+      const active = bodyReclaim.active;
+      if (bodyReclaim.message(msg) && !active && bodyReclaim.active) {
+        const granted = bodyReclaim.state;
+        if (granted.bodyId?.startsWith("player:")) {
+          if (!hostCharacter(granted)) { bodyReclaim.suspend(); return; }
+          setBody(granted.bodyId, true);
+        }
+        // Only a fresh restored-controller report may populate the send cache.
+        poseAt = 0; px = NaN; gKnown = poseHasG = false; jetSent = weaponSent = 0;
+        hpSent = 100; koSent = false; hpAt = 0;
+      }
       return;
     }
     if (msg.t === "cabinets") {
@@ -442,7 +564,11 @@
         if (rec) readRest(rec, row.length === 2 ? row[1] : row.slice(1));
       }
       if (changed) moved();
+    } else if (msg.t === "npc-authority") {
+      if (acceptNpcAuthority(msg.authority)) emit();
     } else if (msg.t === "welcome") {
+      // Missing/older authority on a reconnect never releases a server latch.
+      if (msg.npcAuthority) acceptNpcAuthority(msg.npcAuthority);
       retry = 0;
       clockKnown = false;
       clockSample(msg.now);
@@ -453,6 +579,12 @@
       state.ghostFollowers = Number.isSafeInteger(msg.ghostFollowers) ? msg.ghostFollowers : 0;
       state.selfId = msg.you.id;
       state.connectionToken = typeof msg.connectionToken === "string" ? msg.connectionToken : "";
+      bodyPresence.open(BODY_PRESENCE_PREVIEW && Array.isArray(msg.features) && msg.features.includes(BL.bodyPresence.FEATURE));
+      bodyMovementEnabled = BODY_MOVEMENT_PREVIEW && Array.isArray(msg.features) && msg.features.includes(BL.bodyMotion.FEATURE);
+      oogaMovementEnabled = bodyMovementEnabled && msg.features.includes(BL.oogaMotion.FEATURE);
+      bodyMotionAt = -Infinity;
+      bodyReclaim.open(state.selfId, state.connectionToken, Array.isArray(msg.features) && msg.features.includes(BL.bodyReclaim.FEATURE),
+        Array.isArray(msg.features) && msg.features.some(f => typeof f === "string" && f.startsWith("host-body-reclaim-")));
       state.cabinets = Array.isArray(msg.features) && msg.features.includes(BL.arcadeCabinets.FEATURE);
       state.hockey = Array.isArray(msg.features) && msg.features.includes("hockey-v4");
       state.doorway = Array.isArray(msg.features) && msg.features.includes("door");
@@ -624,6 +756,9 @@
   };
 
   const close = (room) => {
+    bodyMovementEnabled = oogaMovementEnabled = false; bodyMotionAt = -Infinity;
+    bodyReclaim.close();
+    bodyPresence.close();
     window.clearInterval(pingTimer);
     pingTimer = 0;
     if (ws) {
@@ -644,6 +779,7 @@
     else if (state.chalk) { state.chalk = null; chalkEmit("board"); }
     state.doorway = false;
     npcFrame = null;
+    hostLayout = null; layoutChanged();
     hubSent = null;
     // Out of the room for good (signed out, another tab, full): voice goes with it.
     if (room !== "connecting") BL.voice.stop();
@@ -662,7 +798,7 @@
     retryTimer = 0;
     if (stopped || ws || !state.me) return;
     setRoom("connecting");
-    ws = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/room`);
+    ws = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/room?npc-authority=${NPC_MIXED_PREVIEW ? 4 : 1}${BODY_PRESENCE_PREVIEW ? "&body-presence=1" : ""}${BODY_MIGRATION_PREVIEW ? "&body-migration=1" : ""}${BODY_MOVEMENT_PREVIEW ? "&body-reclaim=2&body-motion=1&ooga-motion=1" : ""}`);
     ws.binaryType = "arraybuffer";
     ws.onmessage = onMessage;
     ws.onopen = () => {
@@ -811,11 +947,13 @@
 
   // The hub says when it shows the island; a hidden tab stops counting until it is looked at again.
   const setHub = (on) => {
+    hubInterestRevision++;
     inHub = on;
     sendHub();
   };
   // Hidden long enough, the tab leaves the room; shown again, it rejoins as a fresh connection.
   const onVisibility = () => {
+    if (document.hidden) bodyReclaim.suspend();
     sendHub();
     sendVisible();
     window.clearTimeout(hiddenTimer);
@@ -883,7 +1021,7 @@
 
   // The host's frame of Oogas, sent as bytes (a typed array view is sent as just its own bytes).
   const sendNpc = (view) => {
-    if (ws && ws.readyState === WebSocket.OPEN && state.hostId === state.selfId) ws.send(view);
+    if (state.npcAuthority?.mode !== "server" && ws && ws.readyState === WebSocket.OPEN && state.hostId === state.selfId) ws.send(view);
   };
 
   // A synchronous handoff between Arcade hall scenes keeps the same driven body and voice subscriptions.
@@ -894,13 +1032,22 @@
     catch (error) { holdingBody = false; setBody(null); throw error; }
     finally { holdingBody = false; }
   };
-  const setBody = (name) => {
+  const setBody = (name, refreshGrant = false) => {
     if (cabinetAnchor) return;
     if (holdingBody && name === null) return;
-    if (name === body) return;
+    // Called from scene updates: unchanged bodies allocate nothing. A new live
+    // grant can explicitly refresh the form while retaining the same account ID.
+    if (name === body && !refreshGrant) return;
+    const granted = bodyReclaim.required ? bodyReclaim.state : null;
+    const hostBody = granted?.bodyId === name && name?.startsWith("player:");
+    const character = hostBody ? hostCharacter(granted) : null;
+    if (hostBody && !character) return;
+    const kind = hostBody ? granted.kind === "clanker" ? "gorilla" : "ooga" : bodyKind(name);
+    const label = hostBody ? character.handle : bodyName(name);
+    if (name === body && state.bodyKind === kind && state.bodyName === label) return;
     body = state.body = name;
-    state.bodyKind = bodyKind(name);
-    state.bodyName = bodyName(name);
+    state.bodyKind = kind;
+    state.bodyName = label;
     poseAt = 0; px = NaN;
     gKnown = poseHasG = false;
     jetSent = weaponSent = 0; visualKnown = false; restKnown = restActive = false;
@@ -913,7 +1060,7 @@
   // The driven Ooga's health, called every frame: sent only when its step or knockout changed, HP_MS apart, so a
   // fight costs a few messages a second and an Ooga at full health none.
   const setHealth = (value, stunned) => {
-    if (state.room !== "live" || !body) return;
+    if (state.room !== "live" || !body || !bodyReclaim.allows("hp", body)) return;
     const v = Math.max(0, Math.min(100, Math.round(value / HP_STEP) * HP_STEP)), ko = !!stunned;
     if (v === hpSent && ko === koSent) return;
     const now = performance.now();
@@ -955,6 +1102,25 @@
 
   // Throttled to POSE_MS and skipped while nothing moved; a changed gorilla pose, jetpack or weapon also earns a report.
   const sendPose = (x, y, z, yaw, g = null, jet = 0, weapon = 0, visual = null, rest = 0) => {
+    if (!bodyReclaim.allows("pose", body)) return;
+    if (bodyReclaim.required) {
+      const kind = bodyReclaim.state.kind, format = kind === "clanker" ? BL.bodyMotion
+        : kind === "ooga" && oogaMovementEnabled ? BL.oogaMotion : null;
+      if (!bodyMovementEnabled || !bodyReclaim.active || !format
+        || state.room !== "live" || !ws || ws.readyState !== WebSocket.OPEN) return;
+      state.self.x = x; state.self.y = y; state.self.z = z; state.self.zone = zone;
+      const now = performance.now();
+      if (!Number.isFinite(now) || now < bodyMotionAt) { bodyReclaim.suspend(); return; }
+      if (now - bodyMotionAt < BODY_MOTION_MS) return;
+      bodyMotionAt = now;
+      try {
+        const sample = bodyReclaim.captureMovement();
+        if (sample) send(JSON.stringify({ t: format.TYPE, request: sample.request, sequence: sample.sequence,
+          data: format.pack(kind === "clanker" ? sample.checkpoint.body : sample.checkpoint) }));
+        if (sample) moved();
+      } catch { bodyReclaim.suspend(); }
+      return;
+    }
     if (cabinetAnchor) {
       const at = cabinetAnchor;
       x = at.x; y = at.y; z = at.z; yaw = at.yaw; g = null; jet = weapon = 0; visual = null; rest = 0;
@@ -1050,6 +1216,15 @@
     return character && loginOf(character) === String(login).toLowerCase() ? character : null;
   };
   const ownCharacter = () => state.me && characterOf(state.me.login, state.me.id);
+  // Host body IDs identify an account, not a character name or rig form. Resolve
+  // appearance through the authenticated roster/canonical account map; never
+  // interpret player:<id> as a contributor handle or choose a neighbour's NPC.
+  const hostCharacter = view => {
+    if (!Number.isSafeInteger(view?.accountId) || view.accountId < 1
+      || view.bodyId !== `player:${view.accountId}` || !["ooga", "clanker"].includes(view.kind)) return null;
+    const who = state.me?.id === view.accountId ? state.me : remotes.get(view.accountId);
+    return characterOf(who?.login || "", view.accountId);
+  };
   // A local control preference only: never used by room, microphone or sign-in checks.
   const preferredCharacter = () => ownCharacter() || localCharacter;
   const prepareLocalCharacter = () => {
@@ -1073,6 +1248,7 @@
 
   /** null when this visitor may drive the Ooga named `name`; otherwise the words that say why not. */
   const mayDrive = (name) => {
+    if (bodyReclaim.quiescing) return "Body control is paused during the world handoff";
     const owner = BL.characters.get(name);
     if (state.me) return owner && ownCharacter() === owner ? null : "Drive your own Ooga";
     // Explicit debug fixtures prepare no local identity and keep their chosen cast: any bundled Ooga, locally.
@@ -1215,5 +1391,5 @@
     close("off");
   };
 
-  BL.net = { cabinetSeats, takeCabinet, leaveCabinet, get cabinet() { return cabinetSeat; }, handoffBody, hockeyTables, subscribeHockey, sendHockey, subscribeHighscores, subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribePrivate, subscribeChalk, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendPrivate, sendGhost, subscribeGhost, sendThump, subscribeThump, sendGhostState, subscribeGhostState, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
+  BL.net = { get hostLayout() { return hostLayout; }, waitHostLayout, bodyPresence, bodyReclaim, cabinetSeats, takeCabinet, leaveCabinet, get cabinet() { return cabinetSeat; }, handoffBody, hockeyTables, subscribeHockey, sendHockey, subscribeHighscores, subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribePrivate, subscribeChalk, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendPrivate, sendGhost, subscribeGhost, sendThump, subscribeThump, sendGhostState, subscribeGhostState, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, hostCharacter, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
 })();

@@ -31,7 +31,8 @@
 // dusk, and the falls, crystals, vine tips, tiles and sparkles glow on their own.
 (() => {
   "use strict";
-  const BL = window.BL = window.BL || {};
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
   const { models, math } = BL;
   const { createNode, addChild } = BL.scene;
   const { cached, variants, geometry, box, bevelBox, merge, moved, turnedX, turnedY, noShadow, makeVox, voxelGeometry } = models;

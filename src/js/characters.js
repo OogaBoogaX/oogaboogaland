@@ -1,6 +1,7 @@
 (() => {
   "use strict";
-  const BL = window.BL = window.BL || {};
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
   // One file per contributor in src/characters/ calls add(); the build (and the
   // suite) concatenates them into js/characters.gen.js, loaded right after this.
   // Adding a character therefore touches no shared file.

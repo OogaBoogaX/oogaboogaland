@@ -1,6 +1,7 @@
 (() => {
   "use strict";
-  const BL = window.BL = window.BL || {};
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
   const { models } = BL;
   const { mat4, lerp, damp, ease, mulberry32 } = BL.math;
   const { createNode, addChild, removeChild, addTween } = BL.scene;
@@ -66,6 +67,21 @@
     out.slope = 0;
     return out;
   };
+  // Host navigation needs only this immutable core and its exact level scaling,
+  // not shells, particles, camera state or a renderer.
+  const createCore = (scale = 0.45, faceSize = CORE_FACE_SIZE) => {
+    const key = `${scale}/${faceSize}`;
+    let geometry = coreGeometries.get(key);
+    if (!geometry) coreGeometries.set(key, geometry = models.bananaPileCoreGeometry(scale * 6, BASE_HEIGHT * 6, faceSize));
+    return createNode({ geometry, visible: false });
+  };
+  const scaleCore = (core, count, scale = 0.45, y = 0.02) => {
+    const growth = count <= DISK_BANANAS ? PACKING_HEIGHT * count / DISK_BANANAS : heightGrowthFor(count);
+    const footprint = footprintFor(count, scale);
+    core.visible = count > 0;
+    core.position.y = y;
+    setVec(core.scale, footprint, BASE_HEIGHT * growth, footprint);
+  };
   const create = (ctx) => {
     const { root, world, pileScale: SCALE = 0.45, pileY: BASE_Y = 0.02 } = ctx;
     const source = ctx.deliverySource || null;
@@ -77,10 +93,7 @@
     const coreFaceSize = ctx.renderer.kind === "canvas2d" ? CORE_FACE_SIZE * 1.75 : CORE_FACE_SIZE;
     // The supporting dome stays an ordinary Matrix receiver so code runs down between the bright bananas instead
     // of turning the entire pile into a glow.
-    const coreKey = `${SCALE}/${coreFaceSize}`;
-    let coreGeometry = coreGeometries.get(coreKey);
-    if (!coreGeometry) coreGeometries.set(coreKey, coreGeometry = models.bananaPileCoreGeometry(SCALE * 6, BASE_HEIGHT * 6, coreFaceSize));
-    const core = createNode({ geometry: coreGeometry, visible: false });
+    const core = createCore(SCALE, coreFaceSize);
     const bananaGeometry = models.bananaGeometry();
     const shellGeometry = models.bananaTileGeometry();
     const distantShellGeometry = models.bananaTileGeometry(true);
@@ -400,9 +413,7 @@
       const growth = target <= DISK_BANANAS ? PACKING_HEIGHT * target / DISK_BANANAS : heightGrowthFor(target);
       const coreFootprint = footprintFor(target, SCALE);
       footprint = visualFootprintFor(target, SCALE);
-      core.visible = target > 0;
-      core.position.y = BASE_Y;
-      setVec(core.scale, coreFootprint, BASE_HEIGHT * growth, coreFootprint);
+      scaleCore(core, target, SCALE, BASE_Y);
       rebuildSurface(target, growth, coreFootprint);
       if (ctx.onLayout) ctx.onLayout(footprint, target);
       // Every level re-spreads the bases: they are the pile's measured shape, not just chooseLanding's input, so
@@ -738,5 +749,5 @@
       }
     };
   };
-  BL.pile = { create, DROP_HEIGHT, BANANA_DROP_HEIGHT, DROP_POOL_SIZE, DROP_RATE, DROP_DURATION_MAX, BACKLOG_SECONDS, BACKLOG_VISUAL_CAPACITY, MAX_BANANAS, DISK_BANANAS, PACKING_HEIGHT, footprintFor, visualFootprintFor, MAX_WEBGL_TILES, MAX_CANVAS_TILES };
+  BL.pile = { create, createCore, scaleCore, DROP_HEIGHT, BANANA_DROP_HEIGHT, DROP_POOL_SIZE, DROP_RATE, DROP_DURATION_MAX, BACKLOG_SECONDS, BACKLOG_VISUAL_CAPACITY, MAX_BANANAS, DISK_BANANAS, PACKING_HEIGHT, footprintFor, visualFootprintFor, MAX_WEBGL_TILES, MAX_CANVAS_TILES };
 })();

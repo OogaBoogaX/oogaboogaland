@@ -21,7 +21,8 @@
 // Set `lineWidth` on a merged geometry, not on the polylines going into it: `merge` does not carry it.
 (() => {
   "use strict";
-  const BL = window.BL = window.BL || {};
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
   // Construction checkpoints (see build-tasks.js). They reach it only when sliced, so an unsliced build runs without it.
   const due = (slice, mask) => !!slice && BL.buildTasks.due(slice, mask);
   const pause = function* (slice) { if (slice) yield* BL.buildTasks.pause(slice); };
@@ -713,9 +714,9 @@
     geo.collisionGeometry = collision || merge(canopyShell(seed, height, spread), canopySupport(geo, canopyStart, canopyEnd));
     return geo;
   };
-  const canopy = (seed, height, spread) => cached(() => {
+  const canopy = (seed, height, spread) => models.foliageCached(() => {
     const high = canopyGeometry(seed, height, spread);
-    return models.foliageLods(high, canopyGeometry(seed, height, spread, 1, high.collisionGeometry));
+    return models.foliageLods(high, () => canopyGeometry(seed, height, spread, 1, high.collisionGeometry));
   });
   const CANOPY = [canopy(71, 7.5, 3.2), canopy(72, 5.4, 2.6), canopy(73, 9.2, 3.8)];
 
@@ -746,7 +747,7 @@
     geo.normals = Float32Array.from(geo.normals);
     return Object.assign(noShadow(geo), { sway: 0.06 });
   };
-  const fern = cached(() => models.foliageLods(fernGeometry(), fernGeometry(1)));
+  const fern = models.foliageCached(() => models.foliageLods(fernGeometry(), () => fernGeometry(1)));
   // A jungle shrub: two faceted clumps over a skirt of broad elephant-ear leaves.
   const SHRUB = ["#143b29", "#22583a", "#3a7949", "#619a52"].map(hexToRgb);
   const shrubGeometry = (lod = 0) => {
@@ -761,7 +762,7 @@
     geo.normals = Float32Array.from(geo.normals);
     return Object.assign(geo, { sway: 0.03 });
   };
-  const shrub = cached(() => models.foliageLods(shrubGeometry(), shrubGeometry(1)));
+  const shrub = models.foliageCached(() => models.foliageLods(shrubGeometry(), () => shrubGeometry(1)));
   // Substantial understory, built at its natural proportions rather than stretching a small round shrub.
   // The broad blades arch in 3D with a folded midrib, notched edges and two painted halves. All three plants
   // share the same bounded footprint, but their leaf heights, fans and accents give the scatter different silhouettes.
@@ -862,11 +863,14 @@
     }
     return Object.assign(geo, { sway: 0.0045, plantRadius: radius, plantHeight: height });
   };
-  const undergrowth = (kind) => cached(() => {
-    const high = undergrowthGeometry(kind), coarse = undergrowthGeometry(kind, 1);
-    // Placement and thicket collision retain the original authored plant envelope at every render level.
-    coarse.plantRadius = high.plantRadius; coarse.plantHeight = high.plantHeight;
-    return models.foliageLods(high, coarse);
+  const undergrowth = (kind) => models.foliageCached(() => {
+    const high = undergrowthGeometry(kind);
+    return models.foliageLods(high, () => {
+      const coarse = undergrowthGeometry(kind, 1);
+      // Placement and thicket collision retain the original authored plant envelope at every render level.
+      coarse.plantRadius = high.plantRadius; coarse.plantHeight = high.plantHeight;
+      return coarse;
+    });
   });
   const UNDERGROWTH = [undergrowth(0), undergrowth(1), undergrowth(2)];
   // The hub's rounded boulder in its jungle variant, walked against as the old block rock.

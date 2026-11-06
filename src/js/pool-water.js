@@ -27,34 +27,7 @@
   const TAU = Math.PI * 2;
   const WATER = P.WATER, FOAM = P.FOAM, WATER_RGB = WATER.map(hexToRgb), FOAM_RGB = hexToRgb(FOAM), CALM = WATER_RGB[1];
 
-  // Tuning. POINTS is [waiting vB, level]: an empty mempool stands at the low water, NORMAL_VB at the normal
-  // water, OVERFLOW_VB reaches the spill crest and FULL_VB the highest flood. Between them it is linear.
-  const NORMAL_VB = 20e6, OVERFLOW_VB = 60e6, FULL_VB = 200e6;
-  const HYDRO = {
-    NORMAL_VB, OVERFLOW_VB, FULL_VB,
-    POINTS: [[0, L.WATER.low], [NORMAL_VB, L.WATER.normal], [OVERFLOW_VB, L.WATER.spill], [FULL_VB, L.WATER.flood]],
-    // The standing level closes on its reading over EASE seconds, never faster than RATE metres a second.
-    EASE: 5, RATE: 0.16,
-    // A backlog reading older than this is held and called stale.
-    FRESH_MS: 120000,
-    // Stage hysteresis on the eased level: the shore floods above `on` and drains below `off`, the lowland
-    // above `highOn` and below `highOff`. `SHOWN` keeps the drawn level off the terraces' own heights.
-    STAGE: { on: 0.04, off: -0.04, highOn: L.LEVEL.lowland + 0.04, highOff: L.LEVEL.lowland - 0.04 },
-    SHOWN: { under: -0.03, over: 0.05, belowLowland: L.LEVEL.lowland - 0.05, aboveLowland: L.LEVEL.lowland + 0.05 },
-    // How fast the drawn water rises and falls into place, and how far under its bed a drained flood is parked.
-    FILL: 0.3, PARK: L.LEVEL.bed - 0.06
-  };
-  const levelFor = (vsize) => {
-    const points = HYDRO.POINTS, v = Math.max(0, vsize);
-    for (let i = 1; i < points.length; i++) if (v <= points[i][0]) return lerp(points[i - 1][1], points[i][1], (v - points[i - 1][0]) / (points[i][0] - points[i - 1][0]));
-    return points[points.length - 1][1];
-  };
-  // Cover the cell corners at the stepped banks, as well as their centre-sampled width.
-  const BANK_COVER = L.UNIT * Math.SQRT1_2;
-  // Bifrost's four quarter-metre streaks establish the shared maximum waterfall width.
-  const FALL_WIDTH = 1;
-  const channelHalf = (level) => (level > L.LEVEL.lowland ? L.CHANNEL.low : level > L.LEVEL.shore ? L.CHANNEL.bank : L.CHANNEL.bed) + BANK_COVER;
-  const outletAt = (channel) => L.channelOutlet(channel) + 0.02;
+  const { HYDRO, levelFor, BANK_COVER, FALL_WIDTH, channelHalf, outletAt, createMouth, measureMouth, createSurfaceQuery } = BL.poolHydrology;
   const SEQUENCES = 4, QUEUE = 3, DROPLETS = 20, BLOCK_GAP = 0.35;
   // The cube gathers from the lake, travels through it at a steady pull, then hovers below the bowl
   // until the charge fronts meet. Its spin never waits for separation.
@@ -526,24 +499,7 @@
         geometry: { ...fallSheet(length, both, falls.length, channel.inner), lakeFlow: fallingFlow }, visible: false });
       // The cliff mesh folds the last voxel columns onto the mouth plane. Any high ground in
       // that strip still covers the mouth, so only its contiguous wet opening may feed the fall.
-      const mouthHalf = L.CHANNEL.low + BANK_COVER, mouthCount = Math.ceil(mouthHalf / (L.UNIT / 16)) * 2;
-      const mouthStep = mouthHalf * 2 / mouthCount, mouth = new Float32Array(mouthCount);
-      const back = L.channelOutlet(channel) - L.UNIT / 2, front = channel.inner ? channel.to + L.UNIT * 0.75 : L.edgeAt(channel.bearing) + L.UNIT * 2;
-      const samples = Math.ceil((front - back) / (L.UNIT / 8));
-      for (let j = 0; j < mouthCount; j++) {
-        let high = -Infinity;
-        // Sample both edges as well as the centre so a bank corner cannot leak into the sheet.
-        for (let side = 0; side <= 2; side++) {
-          const across = -mouthHalf + (j + side / 2) * mouthStep;
-          for (let k = 0; k <= samples; k++) {
-            const along = lerp(back, front, k / samples);
-            const x = ux * along + uz * across, z = uz * along - ux * across;
-            // A roof over an interior culvert is not a bank covering its opening.
-            high = Math.max(high, channel.inner ? (L.solidAt(x, L.WATER.flood, z) ? L.LEVEL.ground : L.LEVEL.bed) : L.groundAt(x, z));
-          }
-        }
-        mouth[j] = high;
-      }
+      const { mouth, mouthHalf, mouthStep } = createMouth(channel);
       const fall = { node, inner: channel.inner, floor: channel.floor, length, residuals: [], wetWidth: 0, wetCentre: 0, outlet: r, ux, uz, mouth, mouthHalf, mouthStep, stream: streamNode,
         lip: Math.max(L.LEVEL.bed, channel.lip), flow: fallingFlow, widthClip, vx, vz, acrossOffset };
       for (let d = 0; d < node.geometry.strandTips.length; d++) {
@@ -587,20 +543,14 @@
     let parked = false, stillParked = false, chargeNewest = false, clipLake = NaN;
 
     // The reading and the level. `reading` is false until any backlog figure has been seen at all.
-    let target = L.WATER.low, level = L.WATER.low, shown = L.WATER.low, floodY = HYDRO.PARK, stage = 0, reading = false, observedAt = 0, vsize = 0, status = "unavailable", preview = null, settle = false;
-    const bright = 1;
-    let fill = null;
-    const apply = (snapshot) => {
-      if (!snapshot || preview !== null || fill !== null) return;
-      const observed = snapshot.backlogAt > 0;
-      // A reading restored from the last visit counts as a held one: its stamp is zero until the feed confirms it.
-      if (!observed && !(snapshot.vsize > 0)) return;
-      vsize = Math.max(0, snapshot.vsize);
-      target = levelFor(vsize);
-      observedAt = snapshot.backlogAt;
-      // The first reading stands where it reads: the lake does not fill from empty in front of the visitor.
-      if (!reading) { reading = true; level = target; settle = true; }
+    const hydrology = BL.poolHydrology.create();
+    let target, level, shown, floodY, stage, reading, observedAt, vsize, status, preview, settle, fill;
+    const syncHydrology = () => {
+      ({ target, level, shown, floodY, stage, reading, observedAt, vsize, status, preview, settle, fill } = hydrology.state);
     };
+    syncHydrology();
+    const bright = 1;
+    const apply = snapshot => { hydrology.apply(snapshot); syncHydrology(); };
     const begin = (seq, height, label) => {
       lastStart = sequenceClock;
       seq.active = true; seq.t = 0; seq.sourceY = shown; seq.formY = shown - 0.65;
@@ -812,7 +762,6 @@
       }
     };
 
-    const walk = (value, to, step) => value > to ? Math.max(to, value - step) : Math.min(to, value + step);
     const chargeEnd = CHARGE.pool + CHARGE.ramp + CHARGE.bend + CHARGE.ring;
     const updateCharge = (reach) => {
       let newest = null;
@@ -863,18 +812,7 @@
     const update = (dt, elapsed, now = Date.now()) => {
       rippleDt = dt;
       if (dt > 0) rippleFrame++;
-      status = fill !== null || preview !== null ? "live" : !reading ? "unavailable" : observedAt > 0 && now - observedAt < HYDRO.FRESH_MS ? "live" : "stale";
-      // The standing level: toward its reading, bounded.
-      level = walk(level, target, Math.min(HYDRO.RATE * dt, Math.abs(target - level) * Math.min(1, dt / HYDRO.EASE) + 1e-4));
-      const S = HYDRO.STAGE, D = HYDRO.SHOWN;
-      if (stage === 0 && level > S.on) stage = 1;
-      else if (stage === 1 && level < S.off) stage = 0;
-      else if (stage === 1 && level > S.highOn) stage = 2;
-      else if (stage === 2 && level < S.highOff) stage = 1;
-      const want = fill !== null ? level : stage === 0 ? Math.min(level, D.under) : stage === 1 ? clamp(level, D.over, D.belowLowland) : Math.max(level, D.aboveLowland);
-      shown = settle ? want : walk(shown, want, HYDRO.FILL * dt);
-      floodY = settle ? (stage ? shown : HYDRO.PARK) : walk(floodY, stage ? shown : HYDRO.PARK, HYDRO.FILL * dt * (stage ? 2.5 : 1.5));
-      settle = false;
+      hydrology.update(dt, now); syncHydrology();
       const lake = Math.min(shown, stage ? Math.max(floodY, L.WATER.spill - 0.01) : shown), reach = L.waterRadius(lake);
       surfaceNode.position.y = lake;
       surfaceNode.scale.x = surfaceNode.scale.z = reach;
@@ -936,12 +874,8 @@
           fall.stream.glow = bright;
           fall.widthClip[0] = fall.vx / half; fall.widthClip[1] = 0;
           fall.widthClip[2] = fall.vz / half; fall.widthClip[3] = fall.acrossOffset / half;
-          let left = fall.mouth.length / 2, right = left;
-          while (left > 0 && fall.mouth[left - 1] < floodY - 0.02) left--;
-          while (right < fall.mouth.length && fall.mouth[right] < floodY - 0.02) right++;
-          const width = Math.min(FALL_WIDTH, (right - left) * fall.mouthStep);
-          const centre = -fall.mouthHalf + (left + right) * fall.mouthStep / 2;
-          fall.wetWidth = width; fall.wetCentre = centre;
+          measureMouth(fall, floodY);
+          const width = fall.wetWidth, centre = fall.wetCentre;
           if (fall.inner) {
             const wetHalf = Math.max(0.025, width / 2);
             fall.widthClip[0] = fall.vx / wetHalf; fall.widthClip[2] = fall.vz / wetHalf;
@@ -980,26 +914,8 @@
     };
     // The water's surface over a point of the island's frame, or -Infinity where there is none: the lake inside
     // its waterline, and the flood wherever the sheet stands over lower ground.
-    const levelAt = (x, z) => {
-      const r = Math.hypot(x, z), lake = surfaceNode.position.y;
-      if (r < surfaceNode.scale.x) return lake;
-      if (!floodNode.visible || r < L.LAKE_R) return -Infinity;
-      if (r > L.RING.lowland + 0.25) {
-        let inChannel = false;
-        for (let i = 0; i < L.CHANNELS.length; i++) {
-          const channel = L.CHANNELS[i], fall = falls[i];
-          const ux = Math.sin(channel.bearing), uz = Math.cos(channel.bearing), along = x * ux + z * uz;
-          if (channel.inner && Math.abs(x * uz - z * ux - fall.wetCentre) >= fall.wetWidth / 2) continue;
-          if (along >= L.RING.lowland && along <= outletAt(channel) && Math.abs(x * uz - z * ux) < channelHalf(floodY)) {
-            if (channel.inner && r >= L.RING.ridge) return L.solidAt(x, floodY - 0.02, z) ? -Infinity : floodY;
-            inChannel = true; break;
-          }
-        }
-        // Past the cliff the channel has no bed: the water falls there, and holds up no one, on a ledge or in the air.
-        if (!inChannel || L.groundAt(x, z) < L.LEVEL.bed) return -Infinity;
-      }
-      return L.groundAt(x, z) < floodY - 0.02 ? floodY : -Infinity;
-    };
+    const levelAt = createSurfaceQuery({ lakeAt: () => surfaceNode.position.y, reachAt: () => surfaceNode.scale.x,
+      floodAt: () => floodY, visible: () => floodNode.visible, mouths: falls });
     const dispose = () => {
       removeChild(site.node, group);
       site.membrane.glow = 1;
@@ -1017,12 +933,7 @@
     };
     return {
       apply, block, update, levelAt, rain, wake, dispose, state, picks,
-      resume() {
-        // The feed has updated the target while effects rested; return at that level without replaying the absence.
-        level = target;
-        stage = level > HYDRO.STAGE.highOn ? 2 : level > HYDRO.STAGE.on ? 1 : 0;
-        settle = true;
-      },
+      resume() { hydrology.resume(); syncHydrology(); },
       liveGeometry(set) {
         set.add(surfaceNode.geometry).add(floodNode.geometry).add(site.membrane.geometry).add(site.membraneRock.geometry).add(rillNode.geometry);
         for (const fall of falls) {
@@ -1037,20 +948,8 @@
         }
       },
       // Debug only: stand the lake at a waiting size without the feed, or hand it back with null.
-      preview(vB) {
-        fill = null;
-        preview = vB === null || vB === undefined ? null : Math.max(0, vB);
-        if (preview !== null) { reading = true; vsize = preview; target = levelFor(preview); }
-        else target = reading ? levelFor(vsize) : L.WATER.low;
-      },
-      // Debug depth runs from 0 to 200: empty bowl through full overflow, including partial trench filling.
-      previewFill(value) {
-        if (value !== null && !Number.isFinite(value)) return;
-        fill = value === null ? null : clamp(value, 0, 200);
-        preview = null;
-        target = fill === null ? (reading ? levelFor(vsize) : L.WATER.low) : lerp(-L.MEMBRANE_DEPTH, L.WATER.flood, fill / 200);
-        level = target; stage = target > HYDRO.STAGE.highOn ? 2 : target > HYDRO.STAGE.on ? 1 : 0; settle = true;
-      },
+      preview(vB) { hydrology.preview(vB); syncHydrology(); },
+      previewFill(value) { hydrology.previewFill(value); syncHydrology(); },
       get active() { if (rippleCount) return true; for (const seq of sequences) if (seq.active) return true; return Math.abs(level - target) > 1e-3 || Math.abs(shown - level) > 0.11; },
       stats: () => ({ waterCubes: state.cubes, waterQueued: queued, waterRipples: rippleCount })
     };

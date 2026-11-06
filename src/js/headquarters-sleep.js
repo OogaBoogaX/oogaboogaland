@@ -7,7 +7,8 @@
 // `outdoorNavigation` joins the existing bridge, ridge, nest and chamber corridors to outdoor anchors.
 (() => {
   "use strict";
-  const BL = window.BL = window.BL || {};
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
   const RADIUS = 0.3, HEIGHT = 2, STEP = 0.6, SAMPLE = 0.125;
   // The validated waypoint graph depends only on the island's architecture; later visits reuse it and map
   // fresh bed objects onto its nodes.

@@ -4,7 +4,9 @@
 // (`cave.puppet`, which makes crew.update skip their AI) and are eased toward the latest frame here, after
 // the crew's update. An Ooga someone drives is never in a frame and never a puppet: the driver's page
 // runs it and the others show it through remote-players.js. With no room, no host or when hosting, every
-// Ooga runs its own AI as before.
+// Ooga runs its own AI as before. An explicit server-authority preview instead
+// keeps undriven Oogas as puppets through missing frames and reconnect; prepare()
+// runs before crew.update so negotiation never grants a frame of local AI.
 //
 // A frame: a Uint32 header [FORMAT, signature of ordered crew names and work sites, record count, event bytes], one RECORD
 // of floats per Ooga, then the events since the last frame as UTF-8 JSON. A record carries what shows:
@@ -22,20 +24,16 @@
   const BL = window.BL = window.BL || {};
   const { quat, fnv1a } = BL.math;
   const { addChild, removeChild } = BL.scene;
-  const FORMAT = 2, HEADER = 4, RECORD = 112, SEND_S = 0.25, KEEP_S = 2;
+  const SEND_S = 0.25, KEEP_S = 2;
+  const { FORMAT, HEADER, RECORD, BODY, STATES, PHASES, F_VISIBLE, F_CLOSED, F_ROOT_Q, F_ARM_L_Q, F_ARM_R_Q, F_HEAD_Q, F_CLUB, F_CLUB_Q, F_GUN, F_GUN_Q, F_FLASH, F_SNACK, F_STUNNED, F_FLAME, F_BED_GEAR, F_OUTDOOR_SLEEP } = BL.npcPose;
   const EASE = 8, SNAP = 4, EVENTS_MAX = 96, SAY_MAX = 120;
-  const F_VISIBLE = 1, F_CLOSED = 2, F_ROOT_Q = 4, F_ARM_L_Q = 8, F_ARM_R_Q = 16, F_HEAD_Q = 32;
-  const F_CLUB = 64, F_CLUB_Q = 128, F_GUN = 256, F_GUN_Q = 512, F_FLASH = 1024, F_SNACK = 2048;
-  const F_STUNNED = 4096, F_FLAME = 8192, F_BED_GEAR = 16384, F_OUTDOOR_SLEEP = 32768;
-  const BODY = ["torso", "head", "legL", "legR", "armL", "armR"];
-  const STATES = ["working", "chilling", "sleeping", "away"];
-  const PHASES = ["", "outbound", "station", "shoot", "return", "reload"];
   const encoder = new TextEncoder(), decoder = new TextDecoder();
 
   const wrap = (d) => Math.atan2(Math.sin(d), Math.cos(d));
 
-  const create = ({ crew, fx, onPlan, onHit, onModelChange, animationInterval }) => {
+  const create = ({ crew, fx, onPlan, onHit, onModelChange, animationInterval, getClankers, getLab, releaseLabItem, layoutReady = () => false }) => {
     const net = BL.net;
+    const companions = BL.npcClankerSync.create({ getClankers, getLab, releaseLabItem, onModelChange });
     const list = crew.list.filter((cave) => !cave.contributor.temporary), n = list.length;
     const index = new Map(list.map((cave, i) => [cave, i]));
     const signature = fnv1a(JSON.stringify([list.map((cave) => cave.traits.name),
@@ -46,7 +44,7 @@
     // Each puppet's own quaternions: the crew's are never written from here.
     const quats = list.map(() => ({ root: quat.create(), armL: quat.create(), armR: quat.create(), head: quat.create(), club: quat.create(), gun: quat.create() }));
     const TQ = quat.create();
-    let role = "solo", hostId = null, sendIn = 0, sinceSent = 0, sentFloats = -1, seen = -1, frames = 0, events = [], elapsed = 0;
+    let role = "solo", hostId = null, authorityRevision = 0, sendIn = 0, sinceSent = 0, sentFloats = -1, seen = -1, frames = 0, events = [], elapsed = 0;
     const poseFlags = new Int32Array(n).fill(-1);
 
     const driven = (cave) => cave === crew.player || !!cave.remoteControlled;
@@ -138,64 +136,7 @@
       }
     };
 
-    const writeQuat = (o, q) => {
-      if (!q) return false;
-      out[o] = q[0]; out[o + 1] = q[1]; out[o + 2] = q[2]; out[o + 3] = q[3];
-      return true;
-    };
-    const writeXYZ = (o, v) => {
-      out[o] = v.x; out[o + 1] = v.y; out[o + 2] = v.z;
-    };
-    const encodeCave = (o, i, cave) => {
-      const r = cave.root, p = cave.parts;
-      let flags = 0;
-      if (r.visible) flags |= F_VISIBLE;
-      if (p.head.geometry === cave.headClosed) flags |= F_CLOSED;
-      out[o] = i;
-      writeXYZ(o + 2, r.position); writeXYZ(o + 5, r.rotation);
-      if (writeQuat(o + 8, r.quaternion)) flags |= F_ROOT_Q;
-      writeXYZ(o + 12, r.scale);
-      out[o + 15] = p.legL.rotation.x; out[o + 16] = p.legL.rotation.z;
-      out[o + 17] = p.legR.rotation.x; out[o + 18] = p.legR.rotation.z;
-      writeXYZ(o + 19, p.armL.rotation);
-      if (writeQuat(o + 22, p.armL.quaternion)) flags |= F_ARM_L_Q;
-      writeXYZ(o + 26, p.armR.rotation);
-      if (writeQuat(o + 29, p.armR.quaternion)) flags |= F_ARM_R_Q;
-      writeXYZ(o + 33, p.head.rotation); writeXYZ(o + 36, p.head.position);
-      if (writeQuat(o + 39, p.head.quaternion)) flags |= F_HEAD_Q;
-      out[o + 43] = p.torso.scale.y; out[o + 44] = p.torso.rotation.x; out[o + 45] = p.torso.rotation.z;
-      writeXYZ(o + 46, p.armL.position); writeXYZ(o + 49, p.armR.position);
-      out[o + 52] = holderCode(i, p.club); writeXYZ(o + 53, p.club.position); writeXYZ(o + 56, p.club.rotation);
-      if (p.club.visible) flags |= F_CLUB;
-      if (writeQuat(o + 59, p.club.quaternion)) flags |= F_CLUB_Q;
-      out[o + 63] = holderCode(i, p.gun); writeXYZ(o + 64, p.gun.position); writeXYZ(o + 67, p.gun.rotation);
-      if (p.gun.visible) flags |= F_GUN;
-      if (writeQuat(o + 70, p.gun.quaternion)) flags |= F_GUN_Q;
-      let mask = 0;
-      for (let b = 0; b < p.gunBananas.length; b++) if (p.gunBananas[b].visible) mask |= 1 << b;
-      out[o + 74] = mask;
-      if (p.gunFlash.visible) flags |= F_FLASH;
-      if (p.snack.visible) flags |= F_SNACK;
-      out[o + 75] = p.snack.scale.x;
-      writeXYZ(o + 76, cave.sleepWeapons.position); writeXYZ(o + 79, cave.sleepWeapons.rotation);
-      if (cave.sleepWeapons.visible) flags |= F_BED_GEAR;
-      if (cave.state === "sleeping" && cave.bedroll?.outdoor) flags |= F_OUTDOOR_SLEEP;
-      for (let b = 0; b < BODY.length; b++) {
-        const node = p[BODY[b]];
-        out[o + 82 + b] = node.ember || 0;
-        out[o + 88 + b] = node.scorch || 0;
-      }
-      out[o + 94] = p.chuk ? p.chuk.rotation.x : 0;
-      out[o + 95] = p.jetFlame ? p.jetFlame.scale.y : 0;
-      if (p.jetFlame && p.jetFlame.visible) flags |= F_FLAME;
-      if (cave.stunBirds.visible) flags |= F_STUNNED;
-      out[o + 96] = STATES.indexOf(cave.state);
-      out[o + 97] = PHASES.indexOf(cave.work.phase);
-      out[o + 98] = cave.work.site;
-      out[o + 99] = cave.work.plannedSite;
-      out[o + 100] = cave.tintState || 0;
-      out[o + 1] = flags;
-    };
+    const encodeCave = BL.npcPose.create({ out, holderCode });
     const encode = () => {
       let k = 0;
       for (let i = 0; i < n; i++) {
@@ -304,7 +245,9 @@
       const t = target, o = i * RECORD, r = cave.root, p = cave.parts, q = quats[i];
       const flags = t[o + 1];
       const distance = Math.hypot(t[o + 2] - r.position.x, t[o + 3] - r.position.y, t[o + 4] - r.position.z);
-      const far = fresh[i] || distance > SNAP;
+      // Status relocation is a beam, including short pile/chill moves. Never
+      // interpolate a status change through the terrain between destinations.
+      const far = fresh[i] || distance > SNAP || cave.nonInteractive && cave.state !== STATES[t[o + 96]];
       let k = far ? 1 : 1 - Math.exp(-EASE * dt);
       fresh[i] = 0;
       r.visible = (flags & F_VISIBLE) !== 0;
@@ -406,16 +349,19 @@
     const update = (dt) => {
       elapsed += dt;
       const st = net.state;
-      const next = st.room !== "live" || !st.hostId ? "solo" : st.hostId === st.selfId ? "host" : "follow";
+      const server = st.npcAuthority?.mode === "server";
+      const revision = st.npcAuthority?.revision || 0;
+      const next = server ? "server" : st.room !== "live" || !st.hostId ? "solo" : st.hostId === st.selfId ? "host" : "follow";
       const hostChanged = hostId !== null && st.hostId !== hostId;
-      if (next !== role || hostChanged) {
+      if (next !== role || hostChanged || authorityRevision !== revision) {
         // A new host or leaving follow hands the Oogas back to their own AI where they stand.
-        if (role === "follow") release();
-        role = next; hostId = st.hostId;
+        if (role === "follow" || role === "server") release();
+        if (server) companions.reset(true);
+        role = next; hostId = st.hostId; authorityRevision = revision;
         sendIn = 0;
         sentFloats = -1;
         // net retains the previous host's frame until another binary message arrives.
-        seen = hostChanged ? st.npcVersion : -1;
+        seen = hostChanged && !server ? st.npcVersion : -1;
         resetEvents();
       }
       if (role === "host") {
@@ -434,18 +380,29 @@
         }
         return;
       }
-      if (role !== "follow") return;
+      if (role !== "follow" && role !== "server") return;
       if (st.npcVersion !== seen) {
         seen = st.npcVersion;
-        decode(net.npcFrame);
+        if (server && ["mixed-1", "mixed-2", "mixed-3"].includes(st.npcAuthority.format)) {
+          try {
+            const packet = BL.npcPosePacket.unpack(net.npcFrame, true);
+            const header = new Uint32Array(packet.ooga, 0, HEADER);
+            const floats = new Float32Array(packet.ooga);
+            if (packet.world !== st.npcAuthority.world || header[1] !== signature || header[2] !== n
+              || Array.from({ length: n }, (_, i) => floats[HEADER + i * RECORD]).some((value, i) => value !== i))
+              throw Error("NPC cast mismatch");
+            if (packet.layout && !layoutReady()) throw Error("NPC world layout not attached");
+            if (companions.apply(packet)) decode(packet.ooga);
+          } catch { companions.reset(true); }
+        } else decode(net.npcFrame);
       }
       for (let i = 0; i < n; i++) {
         const cave = list[i];
-        if (driven(cave)) {
+        if (role !== "server" && driven(cave)) {
           cave.puppet = false;
           continue;
         }
-        cave.puppet = !!have[i];
+        cave.puppet = role === "server" || !!have[i];
         if (have[i]) apply(i, cave, dt);
       }
       if (pendingEvents) {
@@ -455,13 +412,24 @@
       }
     };
 
+    // Called before crew.update, including the first frame after negotiation.
+    // Missing/stale/mismatched snapshots freeze NPCs, never release local AI.
+    // Server NPC tracks always follow the NPC stream. Independent player
+    // bodies are outside this roster, even when they share the same identity.
+    const prepare = () => {
+      companions.prepare(net.state.npcAuthority?.mode === "server");
+      if (net.state.npcAuthority?.mode === "server") for (let i = 0; i < n; i++) list[i].puppet = true;
+    };
+    prepare();
+
     const dispose = () => {
+      companions.dispose();
       release();
       role = "solo";
       resetEvents();
     };
 
-    return { update, dispose, fx: recordingFx, recordShot, recordPlan, recordHit, get role() { return role; }, get frames() { return frames; } };
+    return { prepare, update, dispose, fx: recordingFx, recordShot, recordPlan, recordHit, get role() { return role; }, get frames() { return frames; } };
   };
 
   BL.npcSync = { create, FORMAT, RECORD };

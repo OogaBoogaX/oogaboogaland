@@ -17,12 +17,7 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const REPOS = [
-    { name: "Bitcoin Core", word: "CORE", repo: "bitcoin/bitcoin", importance: 1 },
-    { name: "BTCPay Server", word: "BTCPAY", repo: "btcpayserver/btcpayserver", importance: 0.52 },
-    { name: "LND", word: "LND", repo: "lightningnetwork/lnd", importance: 0.7 },
-    { name: "CLN", word: "CLN", repo: "ElementsProject/lightning", importance: 0.62 }
-  ];
+  const REPOS = BL.totemLayout.repos;
   const API = "https://api.github.com/repos/";
   const STEP_MS = 90000, RECENT = 24 * 3600000;
   const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;

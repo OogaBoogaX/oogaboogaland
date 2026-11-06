@@ -6,7 +6,7 @@
   const THROW_CHARGE_TIME = 1, THROW_MIN_POWER = 1 / 3, THROW_RESULT_TIME = 0.35;
   const PITCH_LIMIT = Math.PI / 2 - 0.0001, ZOOM_PAUSE = 220;
   const create = ({ canvas, camera, renderer, pilot, hud, clankers, input = null, constrainCamera = null,
-    reticleTarget = null, sightClear = null, aimCeiling = null, groundAt = null, grabOoga = null, releaseOoga = null, mayPossess = null, combatOnly = null, birdsEyeMin = 5, maxDistance = 32 }) => {
+    reticleTarget = null, sightClear = null, aimCeiling = null, groundAt = null, grabOoga = null, releaseOoga = null, mayPossess = null, combatOnly = null, attachPlayer = null, detachPlayer = null, birdsEyeMin = 5, maxDistance = 32 }) => {
     const orbit = pilot.orbit, cameraHandoff = pilot.cameraHandoff, target = { x: 0, y: 0, z: 0 };
     const smashMin = clankers.smashPower(0, true), smashBase = clankers.smashPower(0, false);
     const smashMax = clankers.smashPower(1, false), smashRate = (smashMax - smashBase) / POUND_CHARGE_TIME;
@@ -23,6 +23,11 @@
     const ray = { ox: 0, oy: 0, oz: 0, dx: 0, dy: 0, dz: 0 };
     const hit = { node: null, owner: null, x: 0, y: 0, z: 0, distance: 0, type: "object" };
     const reticle = document.getElementById("weapon-reticle");
+    let bodyBinding = null;
+    const controller = () => bodyBinding ? bodyBinding.body : clankers;
+    // Recovery currently supports walking/jumping, not combat actions or travel.
+    // This boundary is inactive until the full world adapter is installed.
+    const combatEnabled = () => !bodyBinding && clankers.combatEnabled;
     let savedNear = camera.near;
     const listeners = [];
     let player = null, view = "orbit", combat = false, disposed = false, jumpKey = false, jumpTap = false, run = false;
@@ -90,7 +95,7 @@
         }
       } else { orbit.tDist = zoomDistance === null ? Math.max(SHOULDER_DISTANCE, orbit.dist) : zoomDistance; orbit.tPitch = orbitPitch; }
       camera.near = view === "first-person" ? 0.05 : savedNear;
-      syncCursor(); hud.setGorilla(player, view, isCombat(), clankers.combatEnabled);
+      syncCursor(); hud.setGorilla(player, view, isCombat(), combatEnabled());
     };
     const viewRay = () => {
       const size = renderer.size;
@@ -200,7 +205,7 @@
       updateSmashGauge();
       if (input) input.reset();
       pilot.controls.clearPointer();
-      clankers.cancelInput();
+      controller().cancelInput();
       moving = false;
     };
     const blurCombat = (nativeUnlock = false) => {
@@ -253,10 +258,10 @@
     };
     const beginJump = () => {
       shoulderPointActive = carryShoulderAim = false;
-      if (clankers.wake()) { jumpTap = false; syncCursor(); }
-      else if (player.fire.burning) {
+      if (!bodyBinding && clankers.wake()) { jumpTap = false; syncCursor(); }
+      else if (!bodyBinding && player.fire.burning) {
         jumpTap = false;
-        clankers.cancelInput();
+        controller().cancelInput();
         clankers.dropRoll();
       } else {
         // Preserve even a down/up pair between simulation frames as one jump.
@@ -273,30 +278,45 @@
       out.fov = camera.fov; out.side = Math.sign(shoulderSide); out.focused = focused;
       return cameraHandoff.capture(out, headHidden, savedHeadHidden, player.root);
     };
-    const release = () => {
+    const release = (notify = true) => {
       if (!player) return false;
-      cameraHandoff.cancel();
-      blurCombat();
-      restoreHead(); resetReticle();
-      clankers.release();
-      player = null; combat = false; wasLocked = false;
-      shoulderPointActive = carryShoulderAim = false;
-      holdingFollow = handoffBefore = pinnedFollow = viewChanged = moving = false;
-      acquisitionHold = false;
-      overheadEntry = false;
-      followOffset.x = followOffset.y = followOffset.z = 0;
-      pilot.setExternalControl(false);
-      rebasePilot();
-      camera.near = savedNear; camera.orthoMix = camera.orthoHeight = 0;
-      hud.setGorilla(null);
-      hud.el.act.hidden = true;
-      return true;
+      const binding = bodyBinding, entry = player;
+      try {
+        // Stop the source body before any camera/DOM cleanup can throw.
+        if (binding) binding.body.suspend();
+        cameraHandoff.cancel();
+        blurCombat();
+        restoreHead(); resetReticle();
+        if (!binding) clankers.release();
+        bodyBinding = null;
+        player = null; combat = false; wasLocked = false;
+        shoulderPointActive = carryShoulderAim = false;
+        holdingFollow = handoffBefore = pinnedFollow = viewChanged = moving = false;
+        acquisitionHold = false;
+        overheadEntry = false;
+        followOffset.x = followOffset.y = followOffset.z = 0;
+        pilot.setExternalControl(false);
+        rebasePilot();
+        camera.near = savedNear; camera.orthoMix = camera.orthoHeight = 0;
+        hud.setGorilla(null);
+        hud.el.act.hidden = true;
+        return true;
+      } finally {
+        if (binding) {
+          bodyBinding = null; player = null;
+          try { pilot.setExternalControl(false); }
+          finally {
+            try { detachPlayer(entry); }
+            finally { if (notify) binding.onRelease(); }
+          }
+        }
+      }
     };
     const requireCombat = () => {
       if (player && !combat && combatOnly?.()) action("mode-toggle");
     };
     const possess = (entry, atBoot = false, transition = null) => {
-      if (disposed || !entry || !entry.active || !entry.root.visible) return false;
+      if (bodyBinding || disposed || !entry || !entry.active || !entry.root.visible) return false;
       if (entry === player) { requireCombat(); return true; }
       const refusal = mayPossess && mayPossess(entry);
       if (refusal) { hud.toast(refusal); return false; }
@@ -304,6 +324,9 @@
       if (!player) savedNear = camera.near;
       if (player) { blurCombat(); restoreHead(); }
       if (!clankers.possess(entry)) return false;
+      return acquireView(entry, atBoot, incoming);
+    };
+    const acquireView = (entry, atBoot, incoming, mode = null) => {
       cameraHandoff.cancel();
       pilot.release(true);
       rebasePilot();
@@ -311,7 +334,7 @@
       shoulderPointActive = carryShoulderAim = false;
       smashMeter = smashBase;
       pilot.setExternalControl(true, isCombat);
-      combat = incoming.active && incoming.combat; focused = wasLocked = false;
+      combat = mode === null ? incoming.active && incoming.combat : mode === "combat"; focused = wasLocked = false;
       view = incoming.active ? incoming.view : "orbit";
       if (combat && view === "orbit") view = BL.pilot.combatEntryView(camera.position, entry.root.position);
       overheadEntry = false;
@@ -361,7 +384,7 @@
       camera.orthoHeight = Math.max(0.1, orbit.dist * 2 * Math.tan(camera.fov / 2));
       holdingFollow = handoffBefore = climbHandoff();
       if (!atBoot) cameraHandoff.begin(incoming);
-      hud.setGorilla(player, view, isCombat(), clankers.combatEnabled);
+      hud.setGorilla(player, view, isCombat(), combatEnabled());
       syncCursor();
       hud.tooltip.hide();
       showAct();
@@ -369,16 +392,41 @@
       requireCombat();
       return true;
     };
+    // Trusted reclaim adapter only, after the committed live receipt. Never
+    // possess the corresponding NPC or replay its position/animation setup.
+    const attachBody = (body, { view: committed, scope, onRelease } = {}) => {
+      const mode = committed?.equipment?.mode;
+      if (disposed || player || bodyBinding || pilot.player || clankers.player || combatOnly?.() || !body?.active
+        || committed?.kind !== "clanker" || !["carry", "combat"].includes(mode) || typeof onRelease !== "function"
+        || typeof attachPlayer !== "function" || typeof detachPlayer !== "function"
+        || !["control", "cancelInput", "update", "suspend"].every(k => typeof body[k] === "function")
+        || !body.player?.active || !body.player.root.visible || clankers.list.includes(body.player)) return false;
+      const incoming = captureControl(controlState);
+      savedNear = camera.near;
+      const binding = { body, onRelease }, entry = body.player;
+      bodyBinding = binding; player = entry;
+      try {
+        const attached = attachPlayer(entry, committed, scope);
+        // Scene attachment can synchronously fence/release this body or leave
+        // the scene. Never reacquire its camera/controls after that teardown.
+        if (disposed || bodyBinding !== binding || player !== entry) return false;
+        if (attached !== true || body.active !== true || body.player !== entry) { release(false); return false; }
+        return acquireView(entry, false, incoming, mode);
+      }
+      catch (error) { try { if (bodyBinding === binding) release(false); } finally { throw error; } }
+    };
+    const detachBody = body => bodyBinding?.body === body && release(false);
+    const stepBody = dt => bodyBinding && dt > 0 ? bodyBinding.body.update(dt) : false;
     const action = (name) => {
       if (!player) return false;
       if (name === "gorilla-smash") {
-        if (!clankers.combatEnabled) return false;
+        if (!combatEnabled()) return false;
         if (grabHeld) return true;
         if (clankers.smash(0, clankers.quickSmash(player), smashMeter)) {
           smashMeter = smashMin;
           updateSmashGauge();
         }
-      } else if (name === "gorilla-beat") clankers.chestBeat();
+      } else if (name === "gorilla-beat") { if (bodyBinding) return false; clankers.chestBeat(); }
       else if (name === "mode-release") release();
       else if (name === "mode-toggle") {
         const required = !!combatOnly?.();
@@ -410,7 +458,7 @@
         if (combat) focusCombat();
         else blurCombat();
         syncCursor();
-        hud.setGorilla(player, view, isCombat(), clankers.combatEnabled);
+        hud.setGorilla(player, view, isCombat(), combatEnabled());
         if (entryView) {
           // Rebase the shared full-pose blend before solving the new boom so
           // X keeps the exact displayed eye, roll and projection at time zero.
@@ -450,7 +498,7 @@
         if (!jumpKey && !event.repeat) { jumpKey = true; beginJump(); }
       } else if (key === "shift" && event.code !== "ShiftRight" && event.location !== 2) { run = true; consume(event); }
       else if (BL.controls.matches(event, "grab")) {
-        if (!clankers.combatEnabled) return;
+        if (!combatEnabled()) return;
         consume(event);
         if (clankers.sleeping(player)) return;
         if (!grabHeld && !event.repeat) {
@@ -608,7 +656,7 @@
       }
     };
     const beginSmash = (event, fromButton) => {
-      if (!clankers.combatEnabled || clankers.sleeping(player) || smashPointer >= 0 || throwPointer >= 0) return;
+      if (!combatEnabled() || clankers.sleeping(player) || smashPointer >= 0 || throwPointer >= 0) return;
       if (grabHeld) {
         if (grabActive) {
           throwPointer = event.pointerId;
@@ -830,7 +878,7 @@
       if (!player) return;
       handoffBefore = climbHandoff();
       if (grabActive && !player.motion.dragging) grabActive = false;
-      if (clankers.combatEnabled && !clankers.sleeping(player) && grabHeld && !grabActive && !grabSpent && smashPointer < 0) grabActive = !!(grabOoga && grabOoga(player));
+      if (combatEnabled() && !clankers.sleeping(player) && grabHeld && !grabActive && !grabSpent && smashPointer < 0) grabActive = !!(grabOoga && grabOoga(player));
       if (throwPointer >= 0) {
         throwCharge = Math.min(1, throwCharge + dt / THROW_CHARGE_TIME);
         throwMeter = THROW_MIN_POWER + (1 - THROW_MIN_POWER) * throwCharge;
@@ -872,7 +920,7 @@
       command.jumpPressed = jumpTap;
       moving ||= command.jumpPressed;
       command.run = run;
-      clankers.control(command);
+      controller().control(command);
       jumpTap = false;
     };
     const finishView = (dt) => {
@@ -898,12 +946,12 @@
         if (Math.hypot(camera.position.x - eye[0], camera.position.y - eye[1], camera.position.z - eye[2]) > bounds.radius * scale + camera.near) restoreHead();
       }
       updateReticle(dt);
-      hud.setGorilla(player, view, isCombat(), clankers.combatEnabled);
+      hud.setGorilla(player, view, isCombat(), combatEnabled());
       showAct();
     };
     const update = (dt) => {
       if (!player) return;
-      if (clankers.player !== player || !player.active || !player.root.visible) { release(); return; }
+      if (bodyBinding && !bodyBinding.body.active || controller().player !== player || !player.active || !player.root.visible) { release(); return; }
       cameraHandoff.restore();
       updateSmashGauge();
       const p = player.root.position;
@@ -1008,7 +1056,7 @@
       if (!player) return "Choose a gorilla before travelling.";
       if (grabHeld || grabActive || throwPointer >= 0) return "Let go of the Ooga before travelling.";
       if (actPointer >= 0 || jumpKey || jumpTap || smashPointer >= 0) return "Finish your action before travelling.";
-      return clankers.travelRefusal();
+      return bodyBinding ? "Travel is unavailable right now." : clankers.travelRefusal();
     };
     const travel = (position) => {
       if (travelRefusal()) return false;
@@ -1036,7 +1084,7 @@
       return true;
     };
     const resetCamera = () => {
-      if (!player || clankers.player !== player || !player.active || !player.root.visible) return false;
+      if (!player || controller().player !== player || !player.active || !player.root.visible) return false;
       cameraHandoff.cancel();
       clearRight();
       shoulderPointActive = carryShoulderAim = false;
@@ -1060,7 +1108,7 @@
     const refreshCombat = () => {
       if (!player) return;
       requireCombat();
-      if (!clankers.combatEnabled) {
+      if (!combatEnabled()) {
         if (grabActive && releaseOoga) releaseOoga(player, false);
         grabHeld = grabActive = grabSpent = false;
         const smash = smashPointer, throwing = throwPointer;
@@ -1072,12 +1120,17 @@
       }
       shownPower = -1;
       updateSmashGauge(); syncCursor();
-      hud.setGorilla(player, view, isCombat(), clankers.combatEnabled);
+      hud.setGorilla(player, view, isCombat(), combatEnabled());
     };
     const dispose = () => {
       if (disposed) return;
-      release(); disposed = true;
-      for (const [node, type, callback, options] of listeners) node.removeEventListener(type, callback, options);
+      // Fence reentrant attachment before scene/camera cleanup. A failed detach
+      // still has to remove input listeners; the reclaim owner retains the error.
+      disposed = true;
+      try { release(); }
+      finally {
+        for (const [node, type, callback, options] of listeners) node.removeEventListener(type, callback, options);
+      }
     };
     const resume = () => {
       if (!disposed) return;
@@ -1085,7 +1138,8 @@
       for (const [node, type, callback, options] of listeners) node.addEventListener(type, callback, options);
     };
     const controlsHelp = touch => {
-      const H = BL.controlsHelp, rows = [touch ? H.row([], "Walk / climb", "Left stick") : H.movement("Walk / climb")];
+      const H = BL.controlsHelp, movement = bodyBinding ? "Walk" : "Walk / climb";
+      const rows = [touch ? H.row([], movement, "Left stick") : H.movement(movement)];
       rows.push(H.row(touch ? [] : [" "], clankers.sleeping(player) ? "Wake up" : "Jump / double jump", touch ? "Action button" : ""));
       if (!touch) {
         rows.push(H.row(["shiftleft"], "Run"), H.row(BL.controls.keysFor("yawLeft", "yawRight"), "Turn the view"));
@@ -1093,10 +1147,11 @@
         if (view === "birds-eye") rows.push(H.row(BL.controls.shortcutKeys("north"), "Face north"));
         if (isCombat() && view === "shoulder") rows.push(H.row(["shiftright"], "Tap to swap shoulder · hold with A/D to peek"));
         if (!combatOnly?.() && !clankers.sleeping(player)) rows.push(H.row(BL.controls.shortcutKeys("view"), "Toggle view control"));
-        rows.push(H.row(BL.controls.shortcutKeys("chest"), "Beat chest"), H.row(BL.controls.shortcutKeys("resetView"), "Reset camera"));
+        if (!bodyBinding) rows.push(H.row(BL.controls.shortcutKeys("chest"), "Beat chest"));
+        rows.push(H.row(BL.controls.shortcutKeys("resetView"), "Reset camera"));
       }
       rows.push(H.row([], "Look around / change distance", touch ? "Drag / pinch" : "Drag / scroll"));
-      if (clankers.combatEnabled && !clankers.sleeping(player)) {
+      if (combatEnabled() && !clankers.sleeping(player)) {
         rows.push(H.row(touch ? [] : BL.controls.shortcutKeys("smash"), "Smash · hold and release the button to charge", touch ? "Smash button" : isCombat() ? "Smash button / left mouse" : "Smash button"));
         if (!touch) rows.push(H.row(BL.controls.shortcutKeys("grab"), "Hold to grab a nearby Ooga · release to drop"), H.row(BL.controls.shortcutKeys("grab"), "Keep G held, then charge and release the mouse to throw", "Left mouse"));
       }
@@ -1106,8 +1161,8 @@
       }
       return { title: "Island · Controlling a gorilla", rows };
     };
-    return { controlsHelp, possess, release, escape, respawn, travelRefusal, travel, freeCursor, resetCamera, captureControl, readInput, update, action, orbit: moveView, zoom, cancelInput, refreshCombat, resume, dispose,
-      get active() { return !!player; }, get player() { return player; }, get view() { return view; },
+    return { controlsHelp, possess, attachBody, detachBody, stepBody, release, escape, respawn, travelRefusal, travel, freeCursor, resetCamera, captureControl, readInput, update, action, orbit: moveView, zoom, cancelInput, refreshCombat, resume, dispose,
+      get active() { return !!player; }, get independent() { return !!bodyBinding; }, get player() { return player; }, get view() { return view; },
       get birdsEye() { return !!player && view === "birds-eye"; }, get birdsEyeMix() { return player ? camera.orthoMix || 0 : 0; },
       get firstPerson() { return !!player && view === "first-person"; },
       get combat() { return isCombat(); }, get focused() { return focused; } };

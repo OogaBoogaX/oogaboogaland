@@ -20,7 +20,8 @@
 // Mempool cave's wall panels both set from it, and an unknown character draws as a box.
 (() => {
   "use strict";
-  const BL = window.BL = window.BL || {};
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
   const { box, bevelBox, merge, cached } = BL.models;
   const { createNode, addChild } = BL.scene;
   const { mat4 } = BL.math;
@@ -525,6 +526,17 @@
     return geo;
   };
 
+  // Shared physical cabinet. Canvas-backed screens and navigation chrome are
+  // browser presentation; private host geometry does not allocate canvases.
+  const createCabinet = ({ position, ry = 0, scale = 1, width = 1, curved = false }) => {
+    return createNode({
+      position: { x: position.x, y: position.y, z: position.z },
+      rotation: { x: 0, y: ry, z: 0 },
+      scale: { x: scale * width, y: scale, z: scale },
+      geometry: curved ? curvedCabinetGeometry() : cabinetGeometry()
+    });
+  };
+
   const create = ({ data, position = { x: 0, y: 0, z: 0 }, ry = 0, scale = 1, width = 1, curved = false } = {}) => {
     const canvas = document.createElement("canvas");
     canvas.width = BOARD_W;
@@ -643,12 +655,7 @@
       (VIEWS[view.name] || VIEWS.totals)(target, model, view.params, recentNow);
     };
 
-    const node = createNode({
-      position: { x: position.x, y: position.y, z: position.z },
-      rotation: { x: 0, y: ry, z: 0 },
-      scale: { x: scale * width, y: scale, z: scale },
-      geometry: curved ? curvedCabinetGeometry() : cabinetGeometry()
-    });
+    const node = createCabinet({ position, ry, scale, width, curved });
     // Drawn at board size then scaled in to clear the rails; z is left alone.
     const screenNode = createNode({ geometry: screenGeometryFrom(worldContext, curved), scale: { x: FX, y: FY, z: 1 } });
     const backing = { verts: [], faces: [], lines: [], castShadow: false };
@@ -974,5 +981,5 @@
 
   // The 5x7 bitmap font and its helpers are the island's only readable type; the Mempool cave
   // carves its wall panels with the same glyphs so both boards read alike.
-  BL.jumbotron = { create, parseStats, PALETTE, DROP, text: { FONT, GLYPH_W, GLYPH_H, TRACKING, glyphOf, measureText, drawText, fitText } };
+  BL.jumbotron = { create, createCabinet, parseStats, PALETTE, DROP, text: { FONT, GLYPH_W, GLYPH_H, TRACKING, glyphOf, measureText, drawText, fitText } };
 })();

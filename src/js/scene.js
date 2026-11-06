@@ -1,6 +1,7 @@
 (() => {
   "use strict";
-  const BL = window.BL = window.BL || {};
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
   const { mat4 } = BL.math;
   const createNode = (options = {}) => ({
     position: { x: 0, y: 0, z: 0 },

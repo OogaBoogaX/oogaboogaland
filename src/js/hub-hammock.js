@@ -5,7 +5,8 @@
 // `lying` so the pilot uses the bed's bounded, head-relative first-person view.
 (() => {
   "use strict";
-  const BL = window.BL = window.BL || {};
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
   const { hexToRgb } = BL.math;
   // Metres. TIE is the height of the fixed trunk attachments. The virtual swing axis lies
   // just below them. The bed is BED_LEN along that axis and BED_W across, its ends END_Y above ground and its middle

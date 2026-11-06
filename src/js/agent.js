@@ -10,7 +10,8 @@
 // its palette inside the Matrix.
 (() => {
   "use strict";
-  const BL = window.BL = window.BL || {};
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
   const { makeVox, voxelGeometry: buildVoxel, cached, characterGeometry } = BL.models;
   // Mark both palettes and clipped clothing before any visit chooses a form.
   const voxelGeometry = (voxels, options) => characterGeometry(buildVoxel(voxels, options));
@@ -33,7 +34,7 @@
   // Per gait: chest lean, limb swing, then a roaming and a driven pair of ground
   // speed (m/s) and stride per cycle (m). Driven it keeps up with an Ooga
   // (pilot.WALK.speed) and the gallop outruns one; roaming it ambles.
-  const WALK_SPEED = BL.pilot.WALK.speed;
+  const WALK_SPEED = (BL.walkRules || BL.pilot.WALK).speed;
   const GAITS = {
     idle: { pitch: QUAD, speed: 0, stride: 1, drive: 0, driveStride: 1, legs: 0, arms: 0 },
     knuckle: { pitch: QUAD, speed: 0.9, stride: 0.9, drive: WALK_SPEED, driveStride: 2.4, legs: 0.45, arms: 0.4 },
@@ -197,8 +198,14 @@
     : e.gorilla.torsoSitCompact ? 4 : e.gorilla.torsoLabCompact ? 1 : e.gorilla.torsoStandCompact ? 2 : e.gorilla.torsoQuadCompact ? 3 : 0;
   const torso = {
     count: e => torsoProfile(e) === 3 ? 2 : 1,
-    radius: e => torsoProfile(e) ? (torsoProfile(e) === 1 ? 0.58 : 0.6) * e.root.scale.x : e.gorilla.torsoRadius,
-    offset: (e, i) => (torsoProfile(e) === 4 ? -0.1 : torsoProfile(e) === 1 ? 0.04 : torsoProfile(e) === 2 ? 0.105 : torsoProfile(e) === 3 ? i ? 0.65 : 0.05 : 0) * e.root.scale.x,
+    radius: e => {
+      const profile = torsoProfile(e);
+      return profile ? (profile === 1 ? 0.58 : 0.6) * e.root.scale.x : e.gorilla.torsoRadius;
+    },
+    offset: (e, i) => {
+      const profile = torsoProfile(e);
+      return (profile === 4 ? -0.1 : profile === 1 ? 0.04 : profile === 2 ? 0.105 : profile === 3 ? i ? 0.65 : 0.05 : 0) * e.root.scale.x;
+    },
     circleOverlaps: (e, x, y, z, h, ox, oy, oz, r, height, margin = 0) => footprintCircleOverlaps(e, x, y, z, h, ox, oy, oz, r, height, margin, torso),
     overlaps: (a, ax, ay, az, ah, b, bx, by, bz, bh, margin = 0) => footprintOverlaps(a, ax, ay, az, ah, b, bx, by, bz, bh, margin, torso),
     separates: (a, ax, ay, az, ah, nx, ny, nz, nh, b, bx, by, bz, bh, margin = 0) => footprintSeparates(a, ax, ay, az, ah, nx, ny, nz, nh, b, bx, by, bz, bh, margin, torso),
@@ -492,7 +499,7 @@
   // cliff edges stop the Agent instead of lifting it or dropping it off the island.
   // BODY is what it needs overhead, so it is barred by the same rock and props an Ooga is.
   const STEP_UP = 0.6, STEP_DOWN = 1.2, BODY = 13 * U;
-  const GRAVITY = BL.pilot.WALK.gravity, JUMP_SPEED = BL.crew.JUMP_SPEED * Math.sqrt(1.5), REVEAL_TIME = 9;
+  const GRAVITY = (BL.walkRules || BL.pilot.WALK).gravity, JUMP_SPEED = BL.crew.JUMP_SPEED * Math.sqrt(1.5), REVEAL_TIME = 9;
   // A click this soon after taking the Agent was the third of a triple: a look, not a drive.
   const TRIPLE_MS = 500;
   // groundAt(x, z) is the walking surface; walkable(fromX, fromZ, toX, toZ, y, height),
@@ -1699,9 +1706,68 @@
       state.pace = null;
       onIdle = null;
     };
+    // Display-only snapshots of the actual rig, including clipped clothes and
+    // the held vessel's glass shell. World code must bind matching item identities
+    // before applying a pose. This never possesses, advances or restores AI.
+    const createPoseProjector = (world) => {
+      if (!managed || !BL.clankerPose) throw new Error("managed Clanker projection unavailable");
+      const clip = value => value ? [value.mouth.x, value.mouth.z, value.mouth.ry, value.mouth.floorY] : [0, 0, 0, 0];
+      const profile = [scale, (coatClip ? 1 : 0) + (suitClip ? 2 + 4 * (suitColor % SUITS.length) : 0), ...clip(coatClip), ...clip(suitClip)];
+      const projection = BL.clankerPose.create({ world, profile, held: () => labFlask !== labPlaceholder,
+        nodes: () => {
+          const list = previewNodes.slice();
+          const children = node => { for (const child of node.children) {
+            if (list.length >= BL.clankerPose.MAX_NODES || list.includes(child)) throw new Error("invalid Clanker pose projection");
+            list.push(child); children(child);
+          } };
+          children(labFlask);
+          for (const node of list) if (new Set(node.children).size !== node.children.length
+            || node.children.some(child => child.parent !== node || !list.includes(child))) throw new Error("invalid Clanker pose projection");
+          return list;
+        },
+        appearance: () => [state.form, +state.lab, +state.coatSplit, +state.suit, +state.suitSplit, +state.seatLegs],
+        setAppearance: values => {
+          if (values[2] && !coatClip || (values[3] || values[4] || values[5]) && !suitClip) throw new Error("invalid Clanker pose projection");
+          state.lab = !!values[1]; state.coatSplit = !!values[2]; state.suit = !!values[3]; state.suitSplit = !!values[4]; state.seatLegs = !!values[5];
+          setForm(values[0], true);
+        } });
+      return { capture: projection.capture, validate: projection.validate, apply(snapshot, item = null) {
+        projection.apply(snapshot, item);
+        for (const node of previewNodes) updateLocal(node);
+        refreshGeometry(); measureBody(false); return true;
+      } };
+    };
+    // Unlike display projection, continuation restores the state used by the
+    // next poseManaged step. World code must first bind the exact held item and
+    // bench identity. This does not claim a body or restore its outer controller.
+    const createManagedCheckpoint = (world) => {
+      if (!managed || !BL.clankerState) throw new Error("managed Clanker continuation unavailable");
+      const projection = createPoseProjector(world);
+      return {
+        capture({ item = null, bench = null } = {}) {
+          if (onIdle) throw new Error("invalid managed Clanker continuation");
+          return BL.clankerState.capture(state, projection.capture(item, true), officeHands, labGripY, bench);
+        },
+        restore(snapshot, { item = null, bench = null } = {}) {
+          if (onIdle) throw new Error("invalid managed Clanker continuation");
+          const saved = BL.clankerState.restore(snapshot, bench);
+          // All state/identity checks precede the projection's own atomic checks.
+          // It changes only this rig's existing geometry and transforms.
+          if (!Object.is(saved.grip, labGripY)) throw new Error("invalid managed Clanker continuation");
+          projection.apply(saved.pose, item);
+          Object.assign(state, saved.state); officeHands.set(saved.hands);
+          // The pose decoder may have created quaternion arrays. Rebind the
+          // buffers that the next animation step writes, without losing values.
+          if (hips.quaternion) { rollQuaternion.set(hips.quaternion); hips.quaternion = rollQuaternion; }
+          if (labFlask.quaternion) { labItemRotation.set(labFlask.quaternion); labFlask.quaternion = labItemRotation; }
+          refreshGeometry(); measureBody(false);
+          return true;
+        }
+      };
+    };
     const agent = {
       root, parts, hips, chest, update, setForm, setGait, walk, pace, place, poke, jump, reveal, setDriven, drive, toggleStyle, liveGeometry, dispose,
-      managed, poseManaged, climbPoseClear, climbCenter, bodyHull, walkPoseClear, walkSupportAt, labPoseClear, mouth, bodyTarget, envelope, feed, pound, cancelSmash, beat, holdLabItem, releaseLabItem,
+      managed, poseManaged, createPoseProjector, createManagedCheckpoint, climbPoseClear, climbCenter, bodyHull, walkPoseClear, walkSupportAt, labPoseClear, mouth, bodyTarget, envelope, feed, pound, cancelSmash, beat, holdLabItem, releaseLabItem,
       get labFlask() { return labFlask; },
       get labItem() { return labFlask === labPlaceholder ? null : labFlask; },
       get labPickupBench() { return state.labBench; },

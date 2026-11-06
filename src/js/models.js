@@ -8,7 +8,8 @@
 // draws from `k.rand`, so no character's existing draws move.
 (() => {
   "use strict";
-  const BL = window.BL = window.BL || {};
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
   const { hexToRgb, damp } = BL.math;
   const { createNode, addChild } = BL.scene;
   const geometry = () => ({ verts: [], faces: [], lines: [] });
@@ -501,6 +502,26 @@
       entry.use();
       return cache[i] || (cache[i] = build(i));
     };
+  };
+  // Host construction can omit render-only foliage alternatives. Separate
+  // caches keep a host-first build from stripping a later browser's LODs.
+  // Scope each synchronous generator step, never the interval between yields.
+  let foliageDetails = true;
+  const withFoliageDetails = (enabled, build) => {
+    if (typeof enabled !== "boolean" || typeof build !== "function") throw Error("invalid foliage build scope");
+    const previous = foliageDetails;
+    foliageDetails = enabled;
+    try { return build(); } finally { foliageDetails = previous; }
+  };
+  const foliageCached = (build) => {
+    const plain = cached(build), detailed = cached(build);
+    const read = () => (foliageDetails ? detailed : plain)();
+    read.clear = () => { plain.clear(); detailed.clear(); };
+    return read;
+  };
+  const foliageVariants = (build) => {
+    const plain = variants(build), detailed = variants(build);
+    return (i = 0) => (foliageDetails ? detailed : plain)(i);
   };
   const noShadow = (geo) => {
     geo.castShadow = false;
@@ -1791,6 +1812,8 @@
   // WebGL collector selects one of these render meshes. Canvas continues drawing that original source.
   // Flat distant silhouettes are optional for low, rounded plants that expose the crossed planes.
   const foliageLods = (high, coarse, flatFar = true) => {
+    if (!foliageDetails) return high;
+    if (typeof coarse === "function") coarse = coarse();
     const medium = { ...high, ...coarse, collisionGeometry: high.collisionGeometry };
     let far = medium;
     if (flatFar) {
@@ -1856,5 +1879,5 @@
     for (const geo of set) if (geo.foliageLods?.owner === geo) { set.add(geo.foliageLods.medium); set.add(geo.foliageLods.far); }
     return set;
   };
-  BL.models = { characterGeometry, foliageLods, paintFoliageAtlas, addLods, beam, forwardLathe, turn, shaded, torus, along, chain, railParts, columnParts, deckGrid, deckPosts, deckParts, deckRailSpans, stairParts, stairTreads, lanternParts, LANTERN_GLASS, geometry, pushVert, face, cutCylinder, voxCoords, box, bevelBox, panel, lathe, glassVessel, attachGlassShell, tube, ring, polyline, merge, forward, moved, turnedX, turnedY, turnedZ, prism, cached, cachedSteps, variants, scopedMap, track, setScope, withScope, release, assertReleased, noShadow, makeVox, voxelGeometry, voxelFaces, banana, bananaGeometry, bananaTileGeometry, bananaPileCoreGeometry, bananaPileRadiusScale, bananaPileHeightOffset, BANANA_AMMO_SCALE, BANANA_PILE_PROFILE, particleGeometry, spareMagazine, caveman, CLUB_PALETTE, GOLD_CLUB_PALETTE, labRoom, buildableGeos, crate, die, dieRotationFor, SWAG, TIER_COLORS };
+  BL.models = { characterGeometry, withFoliageDetails, foliageCached, foliageVariants, foliageLods, paintFoliageAtlas, addLods, beam, forwardLathe, turn, shaded, torus, along, chain, railParts, columnParts, deckGrid, deckPosts, deckParts, deckRailSpans, stairParts, stairTreads, lanternParts, LANTERN_GLASS, geometry, pushVert, face, cutCylinder, voxCoords, box, bevelBox, panel, lathe, glassVessel, attachGlassShell, tube, ring, polyline, merge, forward, moved, turnedX, turnedY, turnedZ, prism, cached, cachedSteps, variants, scopedMap, track, setScope, withScope, release, assertReleased, noShadow, makeVox, voxelGeometry, voxelFaces, banana, bananaGeometry, bananaTileGeometry, bananaPileCoreGeometry, bananaPileRadiusScale, bananaPileHeightOffset, BANANA_AMMO_SCALE, BANANA_PILE_PROFILE, particleGeometry, spareMagazine, caveman, CLUB_PALETTE, GOLD_CLUB_PALETTE, labRoom, buildableGeos, crate, die, dieRotationFor, SWAG, TIER_COLORS };
 })();

@@ -1,7 +1,8 @@
 // Stable screen dimensions and asset identity stay available before the original JPEG is needed.
 (() => {
   "use strict";
-  const BL = window.BL = window.BL || {};
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
   let image = null, pending = false, retryAt = 0;
   BL.labWallpaper = {
     width: 1241, height: 741,

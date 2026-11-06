@@ -1,0 +1,561 @@
+// Host-owned session lifecycle (#377, draft foundation; nothing wires it yet). Pure and synchronous: every mutator takes
+// the authoritative time in epoch milliseconds, and nothing here runs a timer, stores input, shots or thrust, or keeps
+// history. One record per authenticated account binds its one body (an Ooga or a clanker) to a server-made token and a
+// generation drawn from a persisted, strictly increasing counter, so a superseded (generation, token) can never match
+// again. A confirmed disconnect neutralizes the body's holds (the `neutralize` effect, applied by the host) and keeps it,
+// its equipment and mode for GRACE_MS from the confirmed close (or, unknown after a restart, the last confirmed presence);
+// the body stays frozen at its last accepted position with zero momentum. Strictly before the deadline the account
+// reclaims it; at or after, the
+// record becomes a `depart` intent keyed by its generation that carries the body as it was. The host applies the intent
+// (`markApplied`, without changing any NPC track) and it then stays as a tombstone until its visual
+// delivery is acknowledged. Sessions and departures share MAX_SESSIONS slots. The parent checkpoints after a mutation and
+// before publishing its effects.
+export const CHECKPOINT_VERSION = 5, MAX_SESSIONS = 64, GRACE_MS = 60000, HANDOFF_MS = 1000;
+export const PASSIVE_STEP_MS = 50;
+export const OCCUPANCY_KINDS = Object.freeze(["hammock", "cabinet"]);
+export const BODY_KINDS = Object.freeze(["ooga", "clanker"]);
+export const WEAPONS = Object.freeze([null, "primary", "gun"]);
+export const MODES = Object.freeze(["carry", "combat"]);
+export const LIMITS = Object.freeze({ position: 1e6, velocity: 1e4, yaw: 2 * Math.PI });
+const REASONS = ["expired", "release", "revoke"];
+const ID = /^[A-Za-z0-9._:/-]{1,64}$/, TOKEN = /^[0-9a-f]{32}$/;
+const MOTION = ["x", "y", "z", "yaw", "vx", "vy", "vz", "grounded"];
+const EQUIPMENT = ["weapon", "mode", "primaryOwned", "secondaryOwned", "selectedSlot", "unlimited", "jetpack", "jetpackOwned"];
+const SESSION = ["accountId", "bodyId", "kind", "generation", "token", "zone", "state", "lastSeenAt", "deadline", "stepAt",
+  "motion", "equipment", "occupancy"];
+const PENDING = ["id", "type", "glyph", "accountId", "bodyId", "generation", "reason", "at", "handback", "zone", "body", "applied"];
+const TOP = ["v", "protocol", "world", "clock", "nextGeneration", "sessions", "pending"];
+
+const isId = (v) => typeof v === "string" && ID.test(v);
+const isAccount = (v) => Number.isSafeInteger(v) && v > 0;
+// Every time can become a grace start, so its deadline must stay a safe integer too.
+const isTime = (v) => Number.isSafeInteger(v) && v >= 0 && Number.isSafeInteger(v + GRACE_MS);
+const isVersion = (v) => typeof v === "string" ? v.length > 0 && v.length <= 64 : Number.isSafeInteger(v) && v >= 0;
+const bounded = (v, max) => typeof v === "number" && Number.isFinite(v) && Math.abs(v) <= max;
+const plain = (o, keys) => o !== null && typeof o === "object" && !Array.isArray(o)
+  && Object.keys(o).length === keys.length && keys.every((k) => Object.hasOwn(o, k));
+const same = (a, b) => {
+  if (typeof a !== "string" || typeof b !== "string" || a.length !== b.length) return false;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return d === 0;
+};
+
+const readMotion = (m) => {
+  if (!plain(m, MOTION) || typeof m.grounded !== "boolean" || !bounded(m.yaw, LIMITS.yaw)) return null;
+  if (![m.x, m.y, m.z].every((v) => bounded(v, LIMITS.position)) || ![m.vx, m.vy, m.vz].every((v) => bounded(v, LIMITS.velocity))) return null;
+  return { x: m.x, y: m.y, z: m.z, yaw: m.yaw, vx: m.vx, vy: m.vy, vz: m.vz, grounded: m.grounded };
+};
+// Recovery keeps the selected equipment and mode, not consumable quantities.
+// A returned player uses normal resource defaults; no firing/thrust is replayed.
+const readEquipment = (e) => {
+  if (!plain(e, EQUIPMENT) || !WEAPONS.includes(e.weapon) || !MODES.includes(e.mode)
+    || (e.selectedSlot !== 1 && e.selectedSlot !== 2)
+    || ![e.primaryOwned, e.secondaryOwned, e.unlimited, e.jetpack, e.jetpackOwned].every((b) => typeof b === "boolean")) return null;
+  return { weapon: e.weapon, mode: e.mode, primaryOwned: e.primaryOwned,
+    secondaryOwned: e.secondaryOwned, selectedSlot: e.selectedSlot, unlimited: e.unlimited, jetpack: e.jetpack,
+    jetpackOwned: e.jetpackOwned };
+};
+const copyEquipment = (e) => ({ ...e });
+const readOccupancy = (o) => plain(o, ["kind", "id"]) && OCCUPANCY_KINDS.includes(o.kind) && isId(o.id) ? { kind: o.kind, id: o.id } : null;
+const readBody = (b) => {
+  if (!plain(b, ["kind", "motion", "equipment"]) || !BODY_KINDS.includes(b.kind)) return null;
+  const motion = readMotion(b.motion), equipment = readEquipment(b.equipment);
+  return motion && equipment ? { kind: b.kind, motion, equipment } : null;
+};
+const readRef = (ref) => plain(ref, ["accountId", "generation", "token"]) && isAccount(ref.accountId)
+  && Number.isSafeInteger(ref.generation) && ref.generation >= 1 && typeof ref.token === "string" && TOKEN.test(ref.token);
+const refuse = (reason, effects = []) => ({ ok: false, reason, effects });
+const fail = (why) => { throw new TypeError(`invalid host-sessions checkpoint: ${why}`); };
+
+export class SessionRegistry {
+  #sessions = new Map(); // accountId -> record, every field plain data
+  #pending = [];
+  #clock = 0;
+  #next = 1;
+  #ready = true;
+
+  // Host-owned NPC and occupancy lookups only. Frozen bodies never call a
+  // physics adapter. The legacy passiveBudget argument remains validated for
+  // inactive callers while their configuration is removed in later integration.
+  constructor({ protocol, world, adapter = {}, passiveBudget, maxSessions = MAX_SESSIONS } = {}) {
+    if (!isVersion(protocol) || !isVersion(world)) throw new TypeError("host-sessions needs protocol and world versions");
+    if (passiveBudget !== undefined && (!Number.isSafeInteger(passiveBudget) || passiveBudget < GRACE_MS / PASSIVE_STEP_MS
+      || passiveBudget > MAX_SESSIONS * GRACE_MS / PASSIVE_STEP_MS)) throw new TypeError("host-sessions: invalid passive budget");
+    if (!Number.isSafeInteger(maxSessions) || maxSessions < 1 || maxSessions > MAX_SESSIONS) throw new TypeError("host-sessions: invalid capacity");
+    this.maxSessions = maxSessions;
+    this.protocol = protocol;
+    this.world = world;
+    this.adapter = adapter;
+  }
+
+  // A restored registry refuses every mutation until recover(now, liveTokens, closes) runs. Only CHECKPOINT_VERSION
+  // restores: older drafts use passive physics and are never silently migrated.
+  static restore(checkpoint, options) {
+    const r = new SessionRegistry(options);
+    if (!plain(checkpoint, TOP)) fail("shape");
+    const { v, protocol, world, clock, nextGeneration, sessions, pending } = checkpoint;
+    if (v !== CHECKPOINT_VERSION) fail("version");
+    if (protocol !== r.protocol || world !== r.world) fail("protocol or world mismatch");
+    if (!isTime(clock) || !Number.isSafeInteger(nextGeneration) || nextGeneration < 1) fail("counters");
+    if (!Array.isArray(sessions) || !Array.isArray(pending) || sessions.length + pending.length > r.maxSessions) fail("capacity");
+    const bodies = new Set(), tokens = new Set(), generations = new Set(), held = new Set();
+    const generation = (g) => {
+      if (!Number.isSafeInteger(g) || g < 1 || g >= nextGeneration || generations.has(g)) fail("generation");
+      generations.add(g);
+    };
+    for (const s of sessions) {
+      if (!plain(s, SESSION) || !isAccount(s.accountId) || r.#sessions.has(s.accountId)) fail("session account");
+      if (!isId(s.bodyId) || bodies.has(s.bodyId) || !isId(s.zone) || !BODY_KINDS.includes(s.kind)) fail("session body");
+      if (typeof s.token !== "string" || !TOKEN.test(s.token) || tokens.has(s.token)) fail("session token");
+      generation(s.generation);
+      if (!isTime(s.lastSeenAt) || !isTime(s.stepAt) || s.lastSeenAt > clock || s.stepAt > clock) fail("session times");
+      if (s.state === "live") { if (s.deadline !== null || s.stepAt !== s.lastSeenAt) fail("live deadline"); }
+      else if (["grace", "offered", "starting"].includes(s.state)) {
+        if (s.deadline !== s.lastSeenAt + GRACE_MS || s.stepAt < s.lastSeenAt || s.stepAt >= s.deadline) fail("grace deadline");
+      } else fail("session state");
+      const motion = readMotion(s.motion), equipment = readEquipment(s.equipment);
+      if (!motion || !equipment || s.state !== "live" && (motion.vx !== 0 || motion.vy !== 0 || motion.vz !== 0)) fail("session body data");
+      let occupancy = null;
+      if (s.occupancy !== null) {
+        occupancy = readOccupancy(s.occupancy);
+        const key = occupancy && `${occupancy.kind}:${occupancy.id}`;
+        if (!occupancy || held.has(key)) fail("occupancy");
+        held.add(key);
+      }
+      bodies.add(s.bodyId);
+      tokens.add(s.token);
+      r.#sessions.set(s.accountId, { accountId: s.accountId, bodyId: s.bodyId, kind: s.kind, generation: s.generation,
+        token: s.token, zone: s.zone, state: s.state, lastSeenAt: s.lastSeenAt, deadline: s.deadline, stepAt: s.stepAt,
+        motion, equipment, occupancy });
+    }
+    for (const p of pending) {
+      if (!plain(p, PENDING) || p.type !== "depart" || p.glyph !== "green" || !REASONS.includes(p.reason)) fail("pending shape");
+      if (!isAccount(p.accountId) || !isId(p.bodyId) || bodies.has(p.bodyId) || !isTime(p.at) || p.at > clock) fail("pending fields");
+      if (!isId(p.zone) || typeof p.applied !== "boolean") fail("pending fields");
+      generation(p.generation);
+      if (p.id !== `depart:${p.generation}`) fail("pending id");
+      let handback = null;
+      if (p.handback !== null) {
+        if (!plain(p.handback, ["npc"]) || !isId(p.handback.npc)) fail("pending handback");
+        handback = { npc: p.handback.npc };
+      }
+      const body = readBody(p.body);
+      if (!body) fail("pending body");
+      bodies.add(p.bodyId);
+      r.#pending.push({ id: p.id, type: "depart", glyph: "green", accountId: p.accountId, bodyId: p.bodyId,
+        generation: p.generation, reason: p.reason, at: p.at, handback, zone: p.zone, body, applied: p.applied });
+    }
+    r.#clock = clock;
+    r.#next = nextGeneration;
+    r.#ready = false;
+    return r;
+  }
+
+  // After restore. closes: at most MAX_SESSIONS trusted server observations { ref: { accountId, generation, token }, at }
+  // of transport closes the checkpoint may not hold. A close matching a live record enters grace at its own time (the
+  // earliest, if repeated), before anything is inferred; a close for a record already in grace, superseded or gone does
+  // nothing and never extends a deadline. Then records whose token is in liveTokens keep their transport, every other live
+  // record enters grace from its persisted lastSeenAt (never from now), grace deadlines stay as saved, and anything already
+  // due departs. Malformed input throws before anything changes; if an adapter throws, discard this instance and restore again.
+  recover(now, liveTokens = [], closes = [], priorityAccount = null) {
+    if (this.#ready) throw new Error("host-sessions: recover() only follows restore()");
+    if (!isTime(now)) throw new TypeError("host-sessions: time must be epoch milliseconds");
+    if (priorityAccount !== null && !isAccount(priorityAccount)) throw new TypeError("host-sessions: invalid recovery priority");
+    if (!Array.isArray(liveTokens) || liveTokens.length > MAX_SESSIONS || !liveTokens.every((t) => typeof t === "string")) {
+      throw new TypeError("host-sessions: liveTokens must be at most MAX_SESSIONS strings");
+    }
+    if (!Array.isArray(closes) || closes.length > MAX_SESSIONS) throw new TypeError("host-sessions: closes must be at most MAX_SESSIONS observations");
+    const closing = new Map(); // live record -> its earliest confirmed close
+    for (const c of closes) {
+      if (!plain(c, ["ref", "at"]) || !readRef(c.ref)) throw new TypeError("host-sessions: a close is { ref, at }");
+      if (!isTime(c.at) || c.at > now) throw new RangeError("host-sessions: a close must be epoch milliseconds no later than now");
+      const r = this.#held(c.ref);
+      if (!r) continue;
+      if (r.state === "grace") continue;
+      if (c.at < r.lastSeenAt) throw new RangeError("host-sessions: a close cannot precede its session's last presence");
+      const prior = closing.get(r);
+      if (prior === undefined || c.at < prior) closing.set(r, c.at);
+    }
+    const live = new Set(liveTokens), effects = [];
+    const t = this.#clock = Math.max(this.#clock, now);
+    for (const [r, at] of closing) this.#toGrace(r, at, effects);
+    for (const r of this.#sessions.values()) {
+      if (r.state !== "live" || live.has(r.token)) continue;
+      this.#toGrace(r, r.lastSeenAt, effects);
+    }
+    this.#sweep(t, effects, priorityAccount);
+    this.#ready = true;
+    return { effects };
+  }
+
+  // Parent-only finite-run shutdown: every still-live record enters grace at the persisted run stop time `at`, existing
+  // grace deadlines stay, and the registry advances to now. It admits and reconnects nobody, and repeating it (after a
+  // restore and recover too) changes nothing more. The parent blocks every other session operation after its run ends.
+  drain(at, now) {
+    const t = this.#at(now);
+    if (!isTime(at) || at > now) throw new TypeError("host-sessions: drain time must be epoch milliseconds no later than now");
+    for (const r of this.#sessions.values()) {
+      if (r.state === "live" && r.lastSeenAt > at) throw new RangeError("host-sessions: drain cannot precede a session's last presence");
+    }
+    const effects = [];
+    for (const r of this.#sessions.values()) if (r.state !== "grace") this.#toGrace(r, at, effects);
+    this.#sweep(t, effects);
+    this.#clock = t;
+    return { effects };
+  }
+
+  // claim: { protocol, world, accountId, bodyId, zone, body: { kind, motion, equipment } }. accountId must come from the
+  // host's authentication. A new body needs `body` (host world state); a resumed or duplicated one keeps its own body,
+  // kind, zone, equipment and mode and ignores the claim's.
+  connect(claim, now, offered = false) {
+    if (typeof offered !== "boolean") return refuse("invalid");
+    if (claim === null || typeof claim !== "object") return refuse("invalid");
+    if (claim.protocol !== this.protocol || claim.world !== this.world) return refuse("version");
+    const { accountId, bodyId, zone } = claim;
+    if (!isAccount(accountId) || !isId(bodyId) || !isId(zone)) return refuse("invalid");
+    const body = claim.body === undefined ? null : readBody(claim.body);
+    if (claim.body !== undefined && !body) return refuse("invalid");
+    const t = this.#at(now), effects = [];
+    this.#sweep(t, effects);
+    this.#clock = t;
+    let r = this.#sessions.get(accountId);
+    let resumed = false;
+    if (r) {
+      if (r.bodyId !== bodyId) return refuse("account-bound", effects);
+      // A grant in flight retains its original deadline and exclusive owner.
+      if (r.state === "starting" || r.state === "offered" && !offered) return refuse("handoff", effects);
+      if (r.state !== "live" && t >= r.deadline) return refuse("recovering", effects);
+      resumed = r.state !== "live";
+      if (!resumed) {
+        r.motion.vx = r.motion.vy = r.motion.vz = 0;
+        effects.push({ type: "replaced", accountId, generation: r.generation });
+        effects.push({ type: "neutralize", accountId, bodyId: r.bodyId, generation: r.generation });
+      }
+    } else {
+      if (this.#pending.some((p) => p.bodyId === bodyId)) return refuse("departing", effects);
+      for (const o of this.#sessions.values()) if (o.bodyId === bodyId) return refuse("body-owned", effects);
+      if (this.#sessions.size + this.#pending.length >= this.maxSessions) return refuse("full", effects);
+      if (!body) return refuse("invalid", effects);
+      r = { accountId, bodyId, kind: body.kind, generation: 0, token: "", zone, state: "live", lastSeenAt: t, deadline: null,
+        stepAt: t, motion: body.motion, equipment: body.equipment, occupancy: null };
+    }
+    const token = this.#token();
+    const lastSeenAt = resumed ? r.lastSeenAt : t, deadline = resumed ? r.deadline : t + GRACE_MS;
+    r.generation = this.#generation();
+    r.token = token;
+    r.state = offered ? "offered" : "live";
+    r.deadline = offered ? deadline : null;
+    r.lastSeenAt = offered ? lastSeenAt : t; r.stepAt = t;
+    if (offered && !resumed) {
+      r.motion.vx = r.motion.vy = r.motion.vz = 0;
+      if (!effects.some(e => e.type === "neutralize"))
+        effects.push({ type: "neutralize", accountId, bodyId, generation: r.generation });
+    }
+    this.#sessions.set(accountId, r);
+    return { ok: true, resumed, resetResources: "defaults", session: { accountId, bodyId, generation: r.generation, token }, view: this.#view(r), effects };
+  }
+
+  // A grant offer remains frozen and host-owned with its original deadline.
+  // A new generation fences every older socket/offer.
+  offer(claim, now) { return this.connect(claim, now, true); }
+
+  // After the authenticated browser validated its prepared body. Reserve a
+  // short snapshot hold, not an unlimited live session. The final snapshot must
+  // accompany this result and preserve the exact frozen position.
+  activate(ref, now) {
+    const t = this.#at(now), effects = [];
+    this.#sweep(t, effects, ref?.accountId); this.#clock = t;
+    const r = this.#held(ref);
+    if (!r || r.state !== "offered") return refuse("stale", effects);
+    r.stepAt = t; r.state = "starting";
+    return { ok: true, session: { accountId: r.accountId, bodyId: r.bodyId, generation: r.generation, token: r.token },
+      controlUntil: Math.min(r.stepAt + HANDOFF_MS, r.deadline), view: this.#view(r), effects };
+  }
+
+  // Only an applied final snapshot can acknowledge the short control lease.
+  // A lost ACK leaves the original grace deadline intact. Repeated successful
+  // ACKs are reads: they must not keep an absent player alive.
+  started(ref, now) {
+    const t = this.#at(now), r = this.#held(ref);
+    if (!r) return refuse("stale");
+    if (r.state === "live") return { ok: true, duplicate: true, view: this.#view(r), effects: [] };
+    if (r.state !== "starting" || t >= Math.min(r.stepAt + HANDOFF_MS, r.deadline)) return refuse("stale");
+    this.#clock = t; r.state = "live"; r.deadline = null; r.lastSeenAt = r.stepAt = t;
+    return { ok: true, duplicate: false, view: this.#view(r), effects: [] };
+  }
+
+  // Only for a server-proven final snapshot whose live notification was NEVER
+  // attempted. Room must persist that distinction before sending body-live.
+  // The host wrapper verifies the exact unchanged body; no browser may call it.
+  abandon(ref, issuedAt, deadline, now) {
+    const t = this.#at(now), r = this.#held(ref), start = deadline - GRACE_MS;
+    if (!r || !["live", "starting"].includes(r.state)) return refuse("stale");
+    if (!isTime(start) || !isTime(issuedAt) || issuedAt < start || issuedAt >= deadline || issuedAt > t
+      || r.state === "starting" && (r.stepAt !== issuedAt || r.deadline !== deadline)) return refuse("invalid");
+    r.state = "grace"; r.lastSeenAt = start; r.stepAt = issuedAt; r.deadline = deadline;
+    this.#clock = t;
+    return { ok: true, effects: [], view: this.view(r.accountId) };
+  }
+
+  // Authenticated presence confirmation (the host verifies the socket first). Also the gate for input: false means drop it.
+  confirm(ref, now) {
+    const r = this.#live(ref), t = this.#at(now);
+    if (!r) return false;
+    this.#clock = t;
+    r.lastSeenAt = r.stepAt = t;
+    return true;
+  }
+
+  // The host's authoritative body state while live: { motion?, equipment? }. Also confirms presence.
+  update(ref, now, patch) {
+    const r = this.#live(ref), t = this.#at(now);
+    if (!r || patch === null || typeof patch !== "object") return false;
+    const motion = patch.motion === undefined ? r.motion : readMotion(patch.motion);
+    const equipment = patch.equipment === undefined ? r.equipment : readEquipment(patch.equipment);
+    if (!motion || !equipment) return false;
+    this.#clock = t;
+    r.motion = motion;
+    r.equipment = equipment;
+    r.lastSeenAt = r.stepAt = t;
+    return true;
+  }
+
+  // Server-observed live motion can wait in Room's durable inbox. Processing
+  // it later must not move last presence past an already observed socket close.
+  // Both times and any equipment change are validated by the host adapter,
+  // never accepted directly from a browser-provided patch.
+  updateObserved(ref, now, observedAt, patch) {
+    const r = this.#live(ref), t = this.#at(now);
+    if (!r || !isTime(observedAt) || observedAt < r.lastSeenAt || observedAt > t
+      || patch === null || typeof patch !== "object") return false;
+    const motion = readMotion(patch.motion);
+    const equipment = patch.equipment === undefined ? r.equipment : readEquipment(patch.equipment);
+    if (!motion || !equipment) return false;
+    this.#clock = t; r.motion = motion; r.equipment = equipment; r.lastSeenAt = r.stepAt = observedAt;
+    return true;
+  }
+
+  // Zone departure releases any occupancy.
+  setZone(ref, zone, now) {
+    const r = this.#live(ref), t = this.#at(now);
+    if (!r || !isId(zone)) return refuse(r ? "invalid" : "stale");
+    this.#clock = t;
+    const effects = [];
+    if (zone !== r.zone) this.#vacate(r, effects);
+    r.zone = zone;
+    return { ok: true, effects };
+  }
+
+  // resource: { kind: "hammock" | "cabinet", id }. One per session, never shared, admitted only by the host adapter.
+  occupy(ref, resource, now) {
+    const r = this.#live(ref), t = this.#at(now);
+    if (!r) return refuse("stale");
+    const o = readOccupancy(resource);
+    if (!o) return refuse("invalid");
+    if (r.occupancy) return r.occupancy.kind === o.kind && r.occupancy.id === o.id ? { ok: true, effects: [] } : refuse("occupied");
+    for (const other of this.#sessions.values()) {
+      if (other.occupancy && other.occupancy.kind === o.kind && other.occupancy.id === o.id) return refuse("taken");
+    }
+    const check = this.adapter.validateOccupancy;
+    if (typeof check !== "function" || check({ bodyId: r.bodyId, zone: r.zone, x: r.motion.x, y: r.motion.y, z: r.motion.z }, { kind: o.kind, id: o.id }) !== true) {
+      return refuse("refused");
+    }
+    this.#clock = t;
+    r.occupancy = o;
+    return { ok: true, effects: [] };
+  }
+
+  vacate(ref, now) {
+    const r = this.#live(ref), t = this.#at(now);
+    if (!r) return refuse("stale");
+    this.#clock = t;
+    const effects = [];
+    this.#vacate(r, effects);
+    return { ok: true, effects };
+  }
+
+  // A transport close the host has confirmed for this exact session. A superseded socket's close does nothing.
+  disconnect(ref, now) {
+    const r = this.#held(ref), t = this.#at(now);
+    if (!r) return refuse("stale");
+    if (r.state === "grace") return refuse("stale");
+    this.#clock = t;
+    const effects = [];
+    this.#toGrace(r, t, effects);
+    return { ok: true, effects };
+  }
+
+  // Explicit release or logout from the live session.
+  release(ref, now) {
+    const r = this.#live(ref), t = this.#at(now);
+    if (!r) return refuse("stale");
+    return this.#leave(r, "release", t);
+  }
+
+  // Server-side revocation (account deleted, signed out elsewhere), in any state.
+  revoke(accountId, now) {
+    const t = this.#at(now), r = this.#sessions.get(accountId);
+    if (!r) return refuse("unknown");
+    return this.#leave(r, "revoke", t);
+  }
+
+  // Event-driven expiry only: no timer or physics loop is required for a frozen body.
+  advance(now) {
+    const t = this.#at(now), effects = [];
+    this.#sweep(t, effects);
+    this.#clock = t;
+    return { effects };
+  }
+
+  pending() { return this.#pending.map((p) => structuredClone(p)); }
+
+  // The host durably recorded this player departure; NPC tracks are untouched.
+  markApplied(id) {
+    if (!this.#ready) throw new Error("host-sessions: recover() first");
+    const p = this.#pending.find((q) => q.id === id);
+    if (!p) return false;
+    p.applied = true;
+    return true;
+  }
+
+  // Visual delivery of an applied departure; refused (false) while it is unknown or not yet applied.
+  acknowledge(id) {
+    if (!this.#ready) throw new Error("host-sessions: recover() first");
+    const i = this.#pending.findIndex((p) => p.id === id);
+    if (i < 0 || !this.#pending[i].applied) return false;
+    this.#pending.splice(i, 1);
+    return true;
+  }
+
+  view(accountId) {
+    const r = this.#sessions.get(accountId);
+    return r ? this.#view(r) : null;
+  }
+
+  // Read-only capability check for a server-authenticated body transfer. Does
+  // not confirm presence, extend grace, recover physics or change ownership.
+  authorizedView(ref) {
+    if (!readRef(ref)) return null;
+    const r = this.#live(ref);
+    return r ? this.#view(r) : null;
+  }
+
+  transferView(ref) {
+    if (!readRef(ref)) return null;
+    const r = this.#held(ref);
+    return r && r.state !== "grace" ? this.#view(r) : null;
+  }
+
+  controlUntil(ref) {
+    if (!readRef(ref)) return null;
+    const r = this.#held(ref);
+    return r?.state === "starting" ? Math.min(r.stepAt + HANDOFF_MS, r.deadline) : null;
+  }
+
+  occupant(kind, id) {
+    for (const r of this.#sessions.values()) if (r.occupancy && r.occupancy.kind === kind && r.occupancy.id === id) return r.accountId;
+    return null;
+  }
+
+  get size() { return this.#sessions.size; }
+
+  work(now = this.#clock) {
+    this.#at(now);
+    return { steps: 0, pendingBodies: 0, pendingSteps: 0 };
+  }
+
+  checkpoint() {
+    const sessions = [...this.#sessions.values()].sort((a, b) => a.generation - b.generation).map((r) => structuredClone(r));
+    return { v: CHECKPOINT_VERSION, protocol: this.protocol, world: this.world, clock: this.#clock,
+      nextGeneration: this.#next, sessions, pending: this.pending() };
+  }
+
+  #at(now) {
+    if (!this.#ready) throw new Error("host-sessions: recover() first");
+    if (!isTime(now)) throw new TypeError("host-sessions: time must be epoch milliseconds");
+    return Math.max(this.#clock, now); // a clock stepping back never extends a deadline
+  }
+
+  #live(ref) {
+    const r = this.#held(ref);
+    return r?.state === "live" ? r : null;
+  }
+
+  #held(ref) {
+    if (ref === null || typeof ref !== "object") return null;
+    const r = this.#sessions.get(ref.accountId);
+    return r && r.generation === ref.generation && same(r.token, ref.token) ? r : null;
+  }
+
+  #toGrace(r, at, effects) {
+    // Even a confirmed socket close cannot prove the remote controller has
+    // stopped yet. Do not reassign the body before its lease ends.
+    if (r.state === "starting") return;
+    if (r.state === "offered") { r.state = "grace"; return; }
+    r.state = "grace";
+    r.lastSeenAt = r.stepAt = at;
+    r.deadline = at + GRACE_MS;
+    r.motion.vx = r.motion.vy = r.motion.vz = 0;
+    effects.push({ type: "neutralize", accountId: r.accountId, bodyId: r.bodyId, generation: r.generation });
+  }
+
+  #vacate(r, effects) {
+    if (!r.occupancy) return;
+    effects.push({ type: "vacated", accountId: r.accountId, bodyId: r.bodyId, kind: r.occupancy.kind, id: r.occupancy.id });
+    r.occupancy = null;
+  }
+
+  #leave(r, reason, t) {
+    if (r.state === "starting" && t < Math.min(r.stepAt + HANDOFF_MS, r.deadline)) return refuse("handoff");
+    const effects = [];
+    this.#clock = t;
+    this.#depart(r, reason, t, effects);
+    return { ok: true, effects };
+  }
+
+  #depart(r, reason, at, effects) {
+    this.#vacate(r, effects);
+    this.#sessions.delete(r.accountId);
+    const intent = { id: `depart:${r.generation}`, type: "depart", glyph: "green", accountId: r.accountId, bodyId: r.bodyId,
+      // Reserved legacy field for stored/wire compatibility, never an NPC
+      // control transfer. The independently simulated counterpart stays put.
+      generation: r.generation, reason, at, handback: null, zone: r.zone,
+      body: { kind: r.kind, motion: { ...r.motion }, equipment: copyEquipment(r.equipment) }, applied: false };
+    this.#pending.push(intent);
+    effects.push(structuredClone(intent));
+  }
+
+  // Expiry retires only the player body. NPC tracks never consult this sweep.
+  #sweep(t, effects) {
+    const due = [], expiredLeases = [];
+    for (const r of this.#sessions.values()) {
+      if (r.state === "live") continue;
+      if (t >= r.deadline) due.push(r);
+      else if (r.state === "starting" && t >= Math.min(r.stepAt + HANDOFF_MS, r.deadline)) expiredLeases.push(r);
+    }
+    for (const r of expiredLeases) r.state = "grace";
+    for (const r of due) this.#depart(r, "expired", r.deadline, effects);
+  }
+
+  #token() {
+    const bytes = new Uint8Array(16);
+    let token;
+    do {
+      crypto.getRandomValues(bytes);
+      token = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+    } while ([...this.#sessions.values()].some((r) => r.token === token));
+    return token;
+  }
+
+  #generation() {
+    if (this.#next >= Number.MAX_SAFE_INTEGER) throw new RangeError("host-sessions: generations exhausted");
+    return this.#next++;
+  }
+
+  #view(r) {
+    return { accountId: r.accountId, bodyId: r.bodyId, kind: r.kind, generation: r.generation, zone: r.zone, state: r.state,
+      deadline: r.deadline, presentation: r.state !== "live" ? "open-hand" : null, motion: { ...r.motion },
+      equipment: copyEquipment(r.equipment), occupancy: r.occupancy && { ...r.occupancy } };
+  }
+}

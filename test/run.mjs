@@ -276,17 +276,23 @@ const gorillaSleepBudgetProof = () => {
 // Run the hub's real landing/player predicate, including the NPC exception to walking collision.
 const sleepLandingPlayersProof = () => {
   const source = readFileSync(join(root, "src/js/scene-hub.js"), "utf8");
-  const section = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
-  const bodies = [], crew = { player: null }, context = { crew, remotes: { actors: () => bodies } };
+  const clearance = readFileSync(join(root, "src/js/hub-clanker-clearance.js"), "utf8");
+  const section = (start, end, text = source) => {
+    const from = text.indexOf(start), to = text.indexOf(end, from);
+    if (from < 0 || to < 0) throw Error("sleep landing fixture source boundary missing");
+    return text.slice(from, to);
+  };
+  const bodies = [], pilot = { player: null }, context = { pilot, remotes: { actors: () => bodies } };
+  runInNewContext(readFileSync(join(root, "src/js/hub-locomotion.js"), "utf8"), context);
   runInNewContext(section("  const cylinderSegmentClear =", "  const actorBounds =")
     + section("  const clankerBedPlayersClear =", "  const clankerPlayersSupportAt =")
     + "globalThis.clear = clankerBedPlayersClear;", context);
   const e = { controlled: false, gorilla: { bodyRadius: 1.9, bodyHeight: 2.2 } }, bed = { x: 4, y: 2, z: 6 };
   const rows = { empty: context.clear(e, bed) };
-  crew.player = { root: { visible: true, position: { x: 4, y: 2.5, z: 6 } }, baseY: 0.5, bodyHeight: 1.8, bodyRadius: 0.4 };
+  pilot.player = { root: { visible: true, position: { x: 4, y: 2.5, z: 6 } }, baseY: 0.5, bodyHeight: 1.8, bodyRadius: 0.4 };
   rows.local = !context.clear(e, bed);
-  crew.player.root.position.y = 6; rows.above = context.clear(e, bed);
-  crew.player = null;
+  pilot.player.root.position.y = 6; rows.above = context.clear(e, bed);
+  pilot.player = null;
   bodies.push({ player: true, x: 4, y: 2, z: 6, height: 1.8, radius: 0.4 });
   rows.remote = !context.clear(e, bed);
   bodies[0].x = 8; rows.cleared = context.clear(e, bed);
@@ -299,8 +305,8 @@ const sleepLandingPlayersProof = () => {
   bodies[0].x = bed.x + 2.8;
   rows.standingGap = context.clear(actor, bed);
   Object.assign(context, { clankerCenterClear: () => true, clankerPeersClear: () => true,
-    clankerClimbTransitionClear: () => true, island: { solidAt: () => false } });
-  runInNewContext(section("  let clankerBedLanding =", "  let clankerExitBodyPending =")
+    clankerClimbTransitionClear: () => true, getIsland: () => ({ solidAt: () => false }) });
+  runInNewContext(section("  let clankerBedLanding =", "  let clankerExitBodyPending =", clearance)
     + "globalThis.poseClear = clankerRestPoseClear; globalThis.landingHeld = () => clankerBedLanding;", context);
   rows.lyingBlocked = !context.poseClear(actor, 2, "left", true, bed.x, bed.y, bed.z, 0, null, 0, bed);
   rows.previewReset = context.landingHeld() === null && actor.gorilla.bodyRadius === 1.9
@@ -1004,12 +1010,12 @@ const northTrajectoryProof = async () => {
     return { maxStep, residual, monotonic, finite, resets, variableSteps };
   })()`);
 };
-// Exercise the real private clearance predicate against the original circular oracle.
+// Exercise the shared clearance predicate against the original circular oracle.
 const claimClearanceProof = () => {
-  const source = readFileSync(new URL("../src/js/scene-hub.js", import.meta.url), "utf8");
-  const start = source.indexOf("  const free = (x, z, r) => {");
-  const context = { claimed: [], Math, Number };
-  const free = runInNewContext(`${source.slice(start, source.indexOf("  const nearPath =", start))}; free`, context);
+  const source = readFileSync(new URL("../src/js/hub-layout.js", import.meta.url), "utf8");
+  const context = { BL: {}, claimed: [], Math, Number };
+  runInNewContext(source, context);
+  const free = (x, z, r) => context.BL.hubLayout.free(context.claimed, x, z, r);
   let cases = 0, failures = 0, seed = 1739;
   const random = () => { seed = Math.imul(seed ^ seed >>> 15, 2246822519); seed = Math.imul(seed ^ seed >>> 13, 3266489917); return (seed >>> 0) / 4294967296; };
   const check = (x, z, r) => {
@@ -4851,6 +4857,7 @@ const mempoolFeedChecks = async () => {
 // The totems' feed in Node: the Worker's summary as the Worker answers it, and a host without it, no network.
 const totemFeedChecks = async () => {
   const source = await readFile(new URL("../src/js/totem-feed.js", import.meta.url), "utf8");
+  const layout = await readFile(new URL("../src/js/totem-layout.js", import.meta.url), "utf8");
   const settle = () => new Promise((r) => setTimeout(r, 0));
   const reply = (status, body, headers = {}) => ({ status, ok: status >= 200 && status < 300, headers: { get: (k) => headers[k] ?? null }, json: async () => body });
   let clock = Date.now();
@@ -4860,6 +4867,7 @@ const totemFeedChecks = async () => {
     const context = { Date: Clock, location: { protocol }, document: { hidden: false, addEventListener() {}, removeEventListener() {} },
       window: { setInterval: (fn) => { ticks.push(fn); return 1; }, clearInterval() {} },
       fetch: async (url, options = {}) => { asked.push({ url, tag: options.headers?.["if-none-match"] || "" }); return answer(url, asked.length); } };
+    runInNewContext(layout, context);
     runInNewContext(source, context);
     const feed = context.window.BL.totemFeed;
     feed.subscribe((e) => events.push(e));
@@ -5971,7 +5979,8 @@ const environmentSoundChecks = async () => {
 const hammockChecks = async () => {
   // The page's default: finished character bakes are packed compactly, as the live crew's are.
   const real = { window: { location: { search: "" } }, location: { search: "" }, URLSearchParams, document: { createElement: () => ({ getContext: () => null }) }, performance, console };
-  for (const name of ["math", "compact-geometry", "scene", "models", "hub-models", "convex", "solid-props", "hub-hammock"])
+  // walk-rules: the pilot's and crew's shared walking constants, read below without creating movement or NPC systems.
+  for (const name of ["math", "compact-geometry", "scene", "models", "hub-models", "convex", "solid-props", "hub-hammock", "walk-rules"])
     runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), real);
   const R = real.window.BL, H = R.hubHammock, flat = () => 0, clear = (x, z, r) => z > 1 + r;
   const plan = (a, b, fits = clear) => H.plan({ a: { ...a, ground: 0 }, b: { ...b, ground: 0 }, clear: fits, surfaceAt: flat });
@@ -6007,7 +6016,7 @@ const hammockChecks = async () => {
     JSON.stringify({ ropeError, outside, peak, floor }));
   // A walker (the hub's 0.3 m radius, the pilot's step) heading straight at the bed from 2 m out, a centimetre at a time,
   // through the real collision shell: its support, then its body above the step, as the hub's `walkable` asks.
-  const STEP = Number(/WALK = \{[^}]*step: ([\d.]+)/.exec(await readFile(new URL("../src/js/pilot.js", import.meta.url), "utf8"))[1]);
+  const STEP = R.walkRules.step;
   // The gap from a walker's footprint to the nearest drawn part of the resting bed (cloth, edge cords, spreaders), seen
   // from above: every face edge of the bed's own mesh, in its frame (x along, z across).
   // Each face's corner indices, through the compact reader where a mesh is packed.
@@ -6068,8 +6077,6 @@ const hammockChecks = async () => {
   for (const handle of ["w-s-bitcoin", "MrHodlX", "2140data"])
     runInNewContext(await readFile(new URL(`../src/characters/${handle}.js`, import.meta.url), "utf8"), real);
   R.contributors = { roster: [] };
-  // This fixture runs the real equipment poser, without creating movement or NPC systems.
-  R.pilot = { WALK: { speed: 0, gravity: 1, step: 0 } };
   runInNewContext(await readFile(new URL("../src/js/crew.js", import.meta.url), "utf8"), real);
   // The drawn cloth's own footprint at rest, from the bed's mesh in its frame (x along, z across, the holder's too): as
   // long as the cloth and the spreaders' thickness, as wide as the cloth and its edge cords away from the spreaders.
@@ -6322,7 +6329,7 @@ const poolLayoutChecks = async () => {
     JSON.stringify({ graded, open, roofed, linked, beds, apart, lake, slots: L.SLOTS.length, along, hidden, doorways, mouths, chamber, fallLedges, boxes }));
   // The water over that layout, through its own module: what the backlog floods and what it never reaches.
   Object.assign(context, { document: { createElement: () => ({ getContext: () => null }) }, performance, console });
-  for (const file of ["scene", "models", "convex", "terrain", "hub-models", "pool-models", "pool-water"]) runInNewContext(await readFile(new URL(`../src/js/${file}.js`, import.meta.url), "utf8"), context);
+  for (const file of ["scene", "models", "convex", "terrain", "hub-models", "pool-models", "pool-hydrology", "pool-water"]) runInNewContext(await readFile(new URL(`../src/js/${file}.js`, import.meta.url), "utf8"), context);
   const { poolWater: W, scene: S } = context.window.BL, H = W.HYDRO;
   let rising = true, last = -Infinity;
   for (let mvb = 0; mvb <= 400; mvb += 0.5) { const level = W.levelFor(mvb * 1e6); rising &&= level >= last; last = level; }
@@ -17246,8 +17253,9 @@ const timechainDataChecks = async () => {
 };
 // Regression: a rest-site probe kept its gorilla, whose groundAt closure held the departed hub's graph.
 const hubScratchChecks = async () => {
-  const source = await readFile(new URL("../src/js/scene-hub.js", import.meta.url), "utf8");
-  const start = source.indexOf("  const CLANKER_REST_SLOPE ="), end = source.indexOf("  const clankerClimbSolidAt =", start);
+  const source = await readFile(new URL("../src/js/hub-clanker-clearance.js", import.meta.url), "utf8");
+  const start = source.indexOf("  const CLANKER_REST_SLOPE ="), end = source.indexOf("    return { clankerSatelliteLandAt,", start);
+  if (start < 0 || end < 0) throw Error("rest-site fixture source boundary missing");
   let fire = true, walkable = true, clear = true, thrown = false;
   const failure = new Error("ground probe"), entry = {}, rows = [];
   const probe = new Function("clankerFireClear", "clankerGroundPlaneAt", "clankerCylinderClear",
@@ -25380,12 +25388,12 @@ const menuShellChecks = BL => {
 
 // net.js in a sandbox: a canned /api/me and fake sockets that record what the page sends.
 const netFixture=(BL,response,step=200,cookie="")=>{
-  const source=readFileSync(join(root,"src/js/net.js"),"utf8");
+  const source=readFileSync(join(root,"src/js/npc-authority.js"),"utf8")+readFileSync(join(root,"src/js/body-reclaim.js"),"utf8")+readFileSync(join(root,"src/js/body-presence.js"),"utf8")+readFileSync(join(root,"src/js/net.js"),"utf8");
   const sockets=[],sent=[],events=new Map(),navigations=[];let calls=0,tick=1000,savedViews=0;
   class Socket {static OPEN=1;constructor(){this.readyState=1;sockets.push(this);}send(v){sent.push(typeof v==="string"?JSON.parse(v):v);}close(){this.readyState=3;}}
   const voice={setPeers:()=>{},restart:()=>{},stop:()=>{}};
   const location={protocol:"https:",host:"fixture.invalid",pathname:"/",search:"",assign:url=>navigations.push(url)},pilot={saveLoginView(){savedViews++;}};
-  const context={window:{BL:{characters:BL.characters,accountIdentities:BL.accountIdentities,contributors:BL.contributors,donations:BL.donations,chatPolicy:BL.chatPolicy,arcadeCabinets:BL.arcadeCabinets,chalkBoard:BL.chalkBoard,voiceBlend:BL.voiceBlend,voice,pilot},setTimeout:()=>1,clearTimeout(){},setInterval:()=>1,clearInterval(){}},document:{hidden:false,cookie,addEventListener:(k,v)=>events.set(k,v),removeEventListener:k=>events.delete(k)},location,fetch:async(...args)=>{calls++;return response(...args);},AbortSignal,WebSocket:Socket,performance:{now:()=>tick+=step},Date,ArrayBuffer,URLSearchParams};
+  const context={window:{BL:{characters:BL.characters,accountIdentities:BL.accountIdentities,contributors:BL.contributors,donations:BL.donations,chatPolicy:BL.chatPolicy,arcadeCabinets:BL.arcadeCabinets,chalkBoard:BL.chalkBoard,voiceBlend:BL.voiceBlend,voice,pilot},setTimeout:()=>1,clearTimeout(){},setInterval:()=>1,clearInterval(){}},document:{hidden:false,cookie,addEventListener:(k,v)=>events.set(k,v),removeEventListener:k=>events.delete(k)},location,fetch:async(...args)=>{calls++;return response(...args);},AbortSignal,WebSocket:Socket,performance:{now:()=>tick+=step},Date,ArrayBuffer,URLSearchParams,TextEncoder};
   runInNewContext(source,context);
   return {net:context.window.BL.net,document:context.document,voice,sockets,sent,events,location,navigations,advance(ms){tick+=ms;},get calls(){return calls;},get savedViews(){return savedViews;}};
 };
@@ -26139,7 +26147,7 @@ const thumpChecks = async BL => {
   // Reactions already running, on the real crew, remote pool and gorilla rig: a membership change ends the visitor's
   // own club tap and a beat a thump started, restoring the stand pose, and leaves movement and an unrelated beat alone.
   const noop = () => {}, oldNet = BL.net, records = new Map(), sceneRoot = BL.scene.createNode();
-  BL.net = { remotes: records };
+  BL.net = { state: { npcAuthority: null }, remotes: records };
   const crew = BL.crew.create({ root: BL.scene.createNode(), world: { level: 0 }, playerName: "YellowBrokeIt", input: { add: noop, remove: noop }, hud: { setRosterRow: noop },
     game: { state: { assignments: {}, inventory: [] } }, viewYaw: 0, groundAt: () => 0, walkable: () => true, fx: { say: noop, zzzAt: noop, burst: noop, puff: noop, spawnParticle: noop, damageNumber: noop } });
   const own = crew.cavemen.get("YellowBrokeIt");
@@ -26543,7 +26551,7 @@ const integrationChecks = async BL => {
   const oldNet=BL.net,sceneRoot=BL.scene.createNode(),records=new Map(),cavemen=new Map();
   const replayed=[],crew={cavemen,player:null,refreshStates(){},showShot:(...a)=>replayed.push(a)};
   let shotHeard=null,swingHeard=null,remoteNow=Date.now();
-  BL.net={serverNow:()=>remoteNow,sendSwing:()=>true,remotes:records,subscribeShots:fn=>(shotHeard=fn,()=>{shotHeard=null;}),subscribeSwings:fn=>(swingHeard=fn,()=>{swingHeard=null;})};
+  BL.net={state:{npcAuthority:null},serverNow:()=>remoteNow,sendSwing:()=>true,remotes:records,subscribeShots:fn=>(shotHeard=fn,()=>{shotHeard=null;}),subscribeSwings:fn=>(swingHeard=fn,()=>{swingHeard=null;})};
   const pool=BL.remotePlayers.create({root:sceneRoot,crew,visible:r=>r.zone==="dsb-outside"});
   records.set(72,{id:72,login:"peer",display:"Peer",body:"w-s-bitcoin",zone:"outside",x:1,y:0,z:2,yaw:0});pool.update(.1);
   record("integration remotes: hub actors stay out of DSB",pool.stats().remotePlayers===0&&sceneRoot.children.every(n=>!n.visible));
@@ -27448,9 +27456,9 @@ const shaderDerivationProof = async () => {
 // Exercise the production recovery and DSB support gates with a corner whose
 // final destination is across a wall, and with a level platform over deep water.
 const reviewMovementProof = async () => {
-  const crewSource = await readFile(join(root, "src/js/crew.js"), "utf8");
-  const recovery = crewSource.slice(crewSource.indexOf("    const recoverWalker ="), crewSource.indexOf("    const jumpWalker ="));
-  const jump = crewSource.slice(crewSource.indexOf("    const jumpWalker ="), crewSource.indexOf("    const walkToward ="));
+  const walkerSource = await readFile(join(root, "src/js/npc-walker.js"), "utf8");
+  const recovery = walkerSource.slice(walkerSource.indexOf("    const recoverWalker ="), walkerSource.indexOf("    const jumpWalker ="));
+  const jump = walkerSource.slice(walkerSource.indexOf("    const jumpWalker ="), walkerSource.indexOf("    const walkToward ="));
   const nav = { mode: 0, costs: new Float32Array(441), parents: new Int16Array(441), closed: new Uint8Array(441), heights: new Float32Array(441), path: new Int16Array(441), searches: 0, expansions: 0 };
   const a = { tx: NaN, tz: NaN, goalX: NaN, goalZ: NaN, pathIndex: -1, pathVersion: -1, best: Infinity, stalled: 0, navigation: nav };
   const cave = { root: { position: { x: 0, y: 0, z: 0 } }, baseY: 0, avoidance: a, traffic: { waiting: false },
@@ -27502,13 +27510,14 @@ this.near = () => recoverWalker(cave, 0, 0.25, 0.1); this.search = () => searchW
 
 const reviewCrowdAndFallbackProof = async () => {
   const source = await readFile(join(root,"src/js/crew.js"),"utf8");
+  const walkerSource = await readFile(join(root,"src/js/npc-walker.js"),"utf8");
   const body = { root:{visible:true,position:{x:0,y:0,z:0}},baseY:0,bodyHeight:1.5,bodyRadius:.4,state:"chilling",camp:{seat:null} };
   const far = Array.from({length:1000},(_,i)=>({...body,root:{visible:true,position:{x:20+i,y:0,z:20}}}));
   const near = {...body,root:{visible:true,position:{x:.1,y:0,z:.1}}};
   let fetches=0,gaps=0;
   const c={player:null,crewList:[body,...far,near],ctx:{outsideActorHeight:1.5,outsideActors:()=>{fetches++;return [{x:20,y:0,z:20}];}},SHOULDER_GAP:.68,OUTSIDE_GAP:1,NAV_STEP:.025,STEP:.6,
     gapClear:()=>{gaps++;return true;},npcWalkable:()=>true,groundAt:()=>0};
-  const edge=source.slice(source.indexOf("    const recoveryBodies ="),source.indexOf("    const searchWalker ="));
+  const edge=walkerSource.slice(walkerSource.indexOf("    const recoveryBodies ="),walkerSource.indexOf("    const searchWalker ="));
   const playerBody=source.slice(source.indexOf("    const playerBody ="),source.indexOf("    const shoulderNeighbor ="));
   runInNewContext(playerBody+edge+"this.edge=recoveryHeight;",c);
   const clear=c.edge(body,0,0,0,.5,0,.025)===0;

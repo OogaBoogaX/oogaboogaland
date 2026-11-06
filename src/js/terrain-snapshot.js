@@ -2,7 +2,8 @@
 // Query source SHA256: f7f958ea9b3ef1b8ee4e09369c5ce36b8072db1d86c94e806328c37b6e64f497
 (() => {
   "use strict";
-  const BL = window.BL;
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL;
   const { clamp } = BL.math;
   const validate = state => {
     const c = state?.constants;
@@ -58,8 +59,7 @@
     if (bytes > 64 * 1024 * 1024) throw new Error("Oversized terrain buffers");
     return bytes;
   };
-  const create = state => {
-    validate(state);
+  const restore = state => {
     const { UNIT, SX, SY, SZ, PX, PZ, SURFACE, ORIGIN, RADIUS, MEADOW, DEPTH, RING_HALF, PATH_UNIT, PATH_CAPACITY, PATH_LIFT, GATE_Z, PASS_HALF, STAIR_TERRACE, TIMECHAIN, TIMECHAIN_X, TIMECHAIN_Z, POOL_APPROACH, POOL_X, POOL_Z, P, PALETTE, PATH_TILE, UNDER_SPHERE_CENTER, UNDER_SPHERE_RADIUS, HEADQUARTERS_CAVE, HEADQUARTERS_FLOOR, HEADQUARTERS_CEILING, HEADQUARTERS_HEIGHT, HEADQUARTERS_ROCK, HEADQUARTERS_ROOM } = state.constants;
     const { cavities, lowerCavities, basementCavities, basementCells, basementHeights, basementCollision, rampCells, rampHeights, rampCollision, frontageCells, height, surface, land, meadow, windowColumns, windowSightPlanes, windowSightRefs, headquartersRamps, headquartersRooms, headquartersWindows, headquartersGallery, headquartersBalconies, headquartersFronts, cutawayPaths, birdseyeWindowMask, birdseyeWindowTops, birdseyeWindowCeilings, geometry, roofOpening, rampFaceOffset, rockCaves, rampSight, sightColumnWork, masterList, masterPathCount, masterPathHash, centerlines, mouths, windowFragmentCount } = state;
     // Structured clone returns every plain array with generic elements, so a double in one is a boxed number. The road
@@ -886,5 +886,65 @@
     };
     return built;
   };
-  BL.terrainSnapshot = { create, validate };
+  const create = state => { validate(state); return restore(state); };
+  // Own a fully validated template, not the caller's mutable snapshot. Each
+  // invocation receives a deep private copy, including typed query buffers and
+  // path scratch; no returned world can modify the next world's source. The
+  // unchecked restore stays private, so ordinary snapshots still validate.
+  // Only compress a standalone byte grid. An unusual snapshot can alias its
+  // grid/buffer through other fields; keep native clone semantics in that case.
+  const standaloneGrid = state => {
+    const grid = state.gridData, pending = [], seen = new Set();
+    if (!(grid.buffer instanceof ArrayBuffer) || grid.byteOffset !== 0
+      || grid.byteLength !== grid.buffer.byteLength || grid.buffer.resizable) return false;
+    for (const key of Object.keys(state)) if (key !== "gridData") pending.push(state[key]);
+    while (pending.length) {
+      const value = pending.pop();
+      if (!value || typeof value !== "object") continue;
+      if (value === grid || value === grid.buffer || ArrayBuffer.isView(value) && value.buffer === grid.buffer) return false;
+      if (seen.has(value)) continue;
+      seen.add(value);
+      if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer) continue;
+      if (value instanceof Map) for (const [key, child] of value) { pending.push(key, child); }
+      else if (value instanceof Set) for (const child of value) pending.push(child);
+      else for (const key of Object.keys(value)) pending.push(value[key]);
+    }
+    return true;
+  };
+  const packGrid = data => {
+    // Two fixed passes, no expanding run arrays. Require at least 50% savings;
+    // noisy grids retain their native byte representation rather than inflate.
+    const maxRuns = Math.floor(data.length / 10);
+    let runs = 0, previous = -1;
+    for (let i = 0; i < data.length; i++) if (data[i] !== previous) {
+      previous = data[i];
+      if (++runs > maxRuns) return null;
+    }
+    const ends = new Uint32Array(runs), values = new Uint8Array(runs);
+    let run = 0;
+    for (let i = 1; i <= data.length; i++) if (i === data.length || data[i] !== data[i - 1]) {
+      ends[run] = i; values[run++] = data[i - 1];
+    }
+    return { ends, values, length: data.length };
+  };
+  const unpackGrid = packed => {
+    const data = new Uint8Array(packed.length);
+    for (let run = 0, start = 0; run < packed.ends.length; run++) {
+      const end = packed.ends[run];
+      if (packed.values[run]) data.fill(packed.values[run], start, end);
+      start = end;
+    }
+    return data;
+  };
+  const compile = state => {
+    validate(state);
+    const packed = standaloneGrid(state) ? packGrid(state.gridData) : null;
+    const template = structuredClone(packed ? { ...state, gridData: null } : state);
+    return () => {
+      const copy = structuredClone(template);
+      if (packed) copy.gridData = unpackGrid(packed);
+      return restore(copy);
+    };
+  };
+  BL.terrainSnapshot = { create, compile, validate };
 })();

@@ -24,7 +24,8 @@
 // on pedestals at the towers' feet, and vines over it all; in the gate's parts, with the records the hub places it by.
 (() => {
   "use strict";
-  const BL = window.BL = window.BL || {};
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
   const { models } = BL, { hexToRgb } = BL.math;
   const { cached, variants, geometry, box, bevelBox, lathe, tube, merge, moved, turnedX, turnedY, turnedZ, noShadow, makeVox, voxelGeometry } = models;
   const BM = BL.bifrostModels, FM = BL.factoryModels;

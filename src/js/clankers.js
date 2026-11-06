@@ -2,9 +2,18 @@
 // its Ooga reloads. Routes, leaps and reservations are bounded by the roster.
 (() => {
   "use strict";
-  const BL = window.BL = window.BL || {};
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
   const { clamp, damp, mulberry32, fnv1a } = BL.math;
   const { addChild } = BL.scene;
+  // Cached object shapes must not own a getter closure over a departed world.
+  // Keep the dynamic policy behind its receiver's weak key instead.
+  const interactionPolicies = new WeakMap();
+  const interactionProperty = { get() { return interactionPolicies.get(this)(); } };
+  const interactionGetter = (object, name, read) => {
+    interactionPolicies.set(object, read);
+    Object.defineProperty(object, name, interactionProperty);
+  };
   // The tallest shootable meadow rocks reach 1.11; a prop step must clear their real mesh.
   const SCALE = 1, SPEED = 2.7, CHILL_SPEED = 0.9, STEP = 0.52, PROP_STEP = 1.16, JUMP_BUFFER = 0.18, PLAYER_SMASH_RECOVER = 0.12;
   const RAGE_SPEED = 12, RAGE_STEP = 0.1;
@@ -28,7 +37,7 @@
   const WALL_RECT_SAMPLES = 4, WALL_ENTER_SHARE = 0.25, TOP_EXIT_SHARE = 0.75;
   const ROLL_SECONDS = 3, ROLL_ENTRY_SECONDS = 0.45, ROLL_RECOVER_SECONDS = 0.8, SOOT_SECONDS = 10, MOTION_RADIUS = BL.agent.MANAGED_MOTION_RADIUS, MOTION_HEIGHT = BL.agent.MANAGED_MOTION_HEIGHT;
   const FIRE_FLEE_REACH = 8, FIRE_FLEE_CLEAR = 10, FIRE_MEMORY = 1.5;
-  const GRAVITY = BL.pilot.WALK.gravity, LEDGE_RISE = BL.pilot.WALK.ledgeRise;
+  const GRAVITY = (BL.walkRules || BL.pilot.WALK).gravity, LEDGE_RISE = (BL.walkRules || BL.pilot.WALK).ledgeRise;
   const PLAYER_JUMP_SPEED = BL.crew.JUMP_SPEED * Math.sqrt(1.5);
   const ROOF_JUMP_HEIGHT = 7.5, ROOF_RUN_UP = 1.5;
   const STEERING = [0, 0.45, -0.45, 0.9, -0.9, 1.4, -1.4];
@@ -48,8 +57,65 @@
   // each part of the desk routine's span in seconds, [least, most].
   const OFFICE_POINTS = 6, OFFICE_SPEED = 1.1, OFFICE_SIT = 1, OFFICE_SWIVEL = 0.8, OFFICE_STROKE = 1.1;
   const OFFICE_WORK = { type: [5, 9], look: [1, 2], abacus: [3, 5] }, OFFICE_NEXT = { type: "look", look: "abacus", abacus: "type" };
+  // Data-only body-3 operations. These retain no controller, rig or scene and
+  // may neutralize a previously admitted body without rebuilding its geometry.
+  const validBodyRecord = values => {
+    if (!Array.isArray(values) || values.length !== 10 || Reflect.ownKeys(values).length !== 11)
+      throw new Error("unsupported Clanker checkpoint profile");
+    for (let i = 0; i < 10; i++) {
+      const field = Object.getOwnPropertyDescriptor(values, i);
+      if (!field || !Object.hasOwn(field, "value")) throw new Error("unsupported Clanker checkpoint profile");
+    }
+    if (typeof values[0] !== "string" || !/^[A-Za-z0-9_.:-]{1,80}$/.test(values[0])
+      || values.slice(1, 8).some(n => !Number.isFinite(n) || Math.abs(n) >= 10000)
+      || !Number.isInteger(values[8]) || values[8] < 0 || values[8] > 2
+      || !Number.isInteger(values[9]) || values[9] < 0 || values[9] > 31
+      || (values[9] & 1) && values[8] !== 0) throw new Error("unsupported Clanker checkpoint profile");
+    return true;
+  };
+  const BODY_RECORD = Object.freeze({
+    validate: validBodyRecord,
+    motion(values) {
+      validBodyRecord(values);
+      return { x: values[1], y: values[2], z: values[3], yaw: values[4],
+        vx: values[5], vy: values[6], vz: values[7], grounded: !!(values[9] & 1) };
+    },
+    disconnect(values) {
+      validBodyRecord(values); const stopped = values.slice(); stopped[5] = stopped[6] = stopped[7] = 0; return stopped;
+    },
+  });
+  // Shared browser/server compatibility descriptor; no rig construction is
+  // needed to validate a frozen body record against this source-owned profile.
+  const bodyBaseline = (terrain = null, meadowRadius = 22, roamRadius = 28) => {
+    if (terrain !== null && (typeof terrain !== "string" || !/^[A-Za-z0-9_.:-]{1,80}$/.test(terrain))
+      || ![meadowRadius, roamRadius].every(n => Number.isFinite(n) && n > 0 && n < 10000))
+      throw Error("unsupported Clanker body baseline");
+    return [terrain === null ? "body-3" : "body-terrain-3", SCALE, WALK_RADIUS, WALK_HEIGHT,
+      MOTION_RADIUS, MOTION_HEIGHT, meadowRadius, roamRadius, ...(terrain === null ? [] : [terrain])];
+  };
   const create = (ctx) => {
     const { crew, sites, groundAt, clear } = ctx;
+    const authoritative = ctx.npcExecution != null;
+    const passiveNpcs = authoritative || ctx.npcPassive === true || crew.passiveNpcs === true;
+    if (authoritative && (crew.authoritative !== true || typeof ctx.npcClock !== "function"
+      || typeof ctx.npcPlacement !== "function" || ctx.checkpointProfile != null || crew.list.length > 53 || ctx.debugMovement || ctx.debugRage))
+      throw Error("authoritative Clanker world inputs required");
+    const clock = authoritative ? ctx.npcClock : Date.now;
+    const terrainProfile = ctx.checkpointProfile === "body-terrain-3";
+    const bodyProfile = ctx.checkpointProfile === "body-3" || terrainProfile;
+    if (ctx.checkpointProfile != null) {
+      const allowed = new Set(["root", "crew", "sites", "checkpointRandom", "checkpointProfile", "groundAt", "clear",
+        "combatEnabled", "meadowRadius", "roamRadius"]);
+      if (terrainProfile) for (const key of ["checkpointTerrain", "supportAt", "terrainSupportAt", "pointSupportAt", "groundPlaneAt"]) allowed.add(key);
+      if (terrainProfile && (typeof ctx.checkpointTerrain !== "string" || !/^[A-Za-z0-9_.:-]{1,80}$/.test(ctx.checkpointTerrain)
+        || ["supportAt", "terrainSupportAt", "pointSupportAt", "groundPlaneAt"].some(k => typeof ctx[k] !== "function")))
+        throw new Error("unsupported Clanker checkpoint profile");
+      if (!["roaming-1", "body-3", "body-terrain-3"].includes(ctx.checkpointProfile) || Object.keys(ctx).some(k => !allowed.has(k))
+        || sites.length || ctx.checkpointRandom !== true || ctx.combatEnabled === true
+        || !crew.list.length || crew.list.length > 53 || bodyProfile && crew.list.length !== 1
+        || crew.list.some(e => e.state !== "chilling"))
+        throw new Error("unsupported Clanker checkpoint profile");
+    }
     let combatEnabled = ctx.combatEnabled === true;
     const footprint = BL.agent.footprint, torso = BL.agent.torso;
     const pointSupportAt = ctx.pointSupportAt || groundAt;
@@ -67,7 +133,7 @@
         || walkingRampAt(p.x, p.y, p.z, heading);
     };
     const inClimbArea = (e) => !ctx.climbAreaAt || ctx.climbAreaAt(e.root.position.x, e.root.position.y, e.root.position.z);
-    const sleepBeam = ctx.sleep ? BL.sleepBeam.create({ root: ctx.root, capacity: ctx.sleep.slots.length }) : null;
+    const sleepBeam = ctx.sleep && !authoritative && !passiveNpcs ? BL.sleepBeam.create({ root: ctx.root, capacity: ctx.sleep.slots.length }) : null;
     const list = [], byOwner = new Map(), portals = new Array(sites.length).fill(null);
     // Stations are authored once in world space: { x, y, z, heading, kind,
     // side, enabled? }. labInside owns the entrance plane, independently of assignment.
@@ -96,7 +162,7 @@
     const roamPath = new Float64Array(12), roamPoint = { x: 0, y: 0, z: 0, heading: 0 };
     const climbWallDepths = new Float64Array(CLIMB_POINTS);
     let roamBudget = 1, roamNext = 0, roamTurn = -1, roamSerial = 0;
-    let disposed = false, elapsed = 0, player = null, fireThreatsActive = false, rage = null;
+    let disposed = false, elapsed = 0, player = null, fireThreatsActive = false, rage = null, recoveryPending = false;
     let debugShuttle = null, debugShuttleAt = 0, debugShuttleUntil = 0;
     let climbFrameBudget = 0, climbTurn = -1, climbNext = 0, debugRouteBudget = 0, wallBudget = 0;
     const WALL_GRID = 49, WALL_HALF = 24, WALL_STEP = 0.55, WALL_COUNT = WALL_GRID * WALL_GRID;
@@ -340,6 +406,7 @@
     // Surface NPCs reserve their trunks against peers, leaving arms and
     // shoulders free to overlap. Player movement keeps centre clearance.
     const occupied = (e, x, y, z, destinations = true, heading = e.heading) => {
+      if (e.nonInteractive) return false;
       // Workers pass companions through the entrance and shared lab aisles.
       // Equipment claims keep their work positions distinct; scenery stays solid.
       if (enteringCave(e) || labWorker(e)) return false;
@@ -350,7 +417,7 @@
       if (!e.motion.lab && !e.planningLabTraffic && !e.climb.active) {
         for (let i = 0; i < list.length; i++) {
           const other = list[i];
-          if (other === e || !other.active) continue;
+          if (other.nonInteractive || other === e || !other.active) continue;
           const p = other.root.position, dx = x - p.x, dz = z - p.z;
           if (!e.controlled) {
             const shape = torso || footprint;
@@ -367,7 +434,7 @@
       }
       for (let i = 0; i < list.length; i++) {
         const other = list[i];
-        if (other === e || !other.active) continue;
+        if (other.nonInteractive || other === e || !other.active) continue;
         const p = e.planningLabTraffic ? labFuture(other, e.labPlanTime, labFuturePoint) : other.root.position;
         const otherHeading = e.planningLabTraffic ? p.heading : other.heading;
         const margin = e.motion.lab || other.motion.lab ? 0.03 : SPACE, radius = e.radius + other.radius + margin;
@@ -876,6 +943,7 @@
       e.speed = step / dt * (dx * Math.sin(heading) + dz * Math.cos(heading) < 0 ? -1 : 1); e.blocked = 0;
     };
     const requestLabPass = (requester, tx, tz) => {
+      if (requester.nonInteractive) return false;
       if (enteringCave(requester) || labWorker(requester) || elapsed < labPassAt || labSite < 0) return false;
       // Ask for clearance along the route actually being walked. The straight
       // chord to a distant workstation may cross an unrelated occupied desk.
@@ -887,7 +955,7 @@
       let nearest = Infinity, blocker = null;
       for (let i = 0; i < list.length; i++) {
         const other = list[i], q = other.root.position;
-        if (other === requester || !other.active || other.controlled || other === labEscape || other.site !== labSite || other.phase !== "work"
+        if (other.nonInteractive || other === requester || !other.active || other.controlled || other === labEscape || other.site !== labSite || other.phase !== "work"
           || other.lab.yielding || !other.motion.lab || other.climb.active || other.fire.rolling) continue;
         // A worker already following its reservation is about to clear this
         // space. Do not cancel that plan by asking it to yield mid-crossing.
@@ -1499,6 +1567,7 @@
         || elapsed < r.wallFailedUntil && (x - r.wallFailedX) ** 2 + (z - r.wallFailedZ) ** 2 < 4;
     };
     const nearbyLounge = (e, roof, spawn, stayLevel = false) => {
+      if (e.nonInteractive) return false;
       const first = Math.floor(e.random() * Math.max(1, list.length));
       for (let i = 0; i < list.length; i++) {
         const other = list[(first + i) % list.length];
@@ -1640,6 +1709,7 @@
     };
     const spawnLounge = (e) => chooseChill(e, true);
     const groomLounge = (e, dt) => {
+      if (e.nonInteractive) { e.loungePartner = null; e.motion.groom = 0; }
       const partner = e.loungePartner, p = e.root.position;
       const seated = e.lounge === "sit" && Math.abs(e.speed) < 0.05 && !e.fire.burning;
       let near = false;
@@ -2084,6 +2154,8 @@
       if (ctx.track && !e.tracked) { ctx.track(e); e.tracked = true; }
       if (e === debugShuttle) { debugShuttleAt = elapsed + 4; debugShuttleUntil = 0; }
     };
+    // Authoritative recovery compiles defaults before activation. Keep those
+    // defaults independent of activity that may have changed since original boot.
     for (let i = 0; i < crew.list.length; i++) {
       const owner = crew.list[i], seed = fnv1a(`office/${owner.traits.name || i}`);
       const gorilla = BL.agent.create({ managed: true, groundAt, groundPlaneAt: ctx.groundPlaneAt, torsoClearAt: ctx.climbTorsoClear, scale: SCALE, coatClip,
@@ -2095,10 +2167,12 @@
         health: { value: BL.crew.HEALTH_MAX * 2, max: BL.crew.HEALTH_MAX * 2, delay: 0 }, index: i,
         rage: BL.clankerRage.state(),
         startled: { active: false, planned: false, time: 0, heading: 0, fromY: 0 },
-        radius: WALK_RADIUS, height: 2.7, foot: FOOT, minY: 0, biped: false, compact: owner.state === "working" && gorilla.compact, footprintMode: "walk",
+        radius: WALK_RADIUS, height: 2.7, foot: FOOT, minY: 0, biped: false, compact: !authoritative && owner.state === "working" && gorilla.compact, footprintMode: "walk",
         active: false, tracked: false, mode: "", phase: "", route: "", entryTurn: false, planningEntry: false, site: -1, fromSite: -1, portal: -1,
         hasSlot: false, slotIndex: -1, slotX: 0, slotY: 0, slotZ: 0, goalX: 0, goalY: 0, goalZ: 0,
-        random: mulberry32(fnv1a(`clanker/${owner.id || owner.traits.name || i}`)),
+        // Headless continuation may capture the existing stream without a draw.
+        // Ordinary browser callers keep the original closure and exact choices.
+        random: mulberry32(fnv1a(`clanker/${owner.id || owner.traits.name || i}`), ctx.checkpointRandom === true || authoritative),
         // Its bed while its Ooga sleeps: see `updateSleep`.
         sleep: { stage: "", slot: -1, home: -1, leg: 0, count: 0, path: new Float64Array(SLEEP_POINTS * 2), mark: 0, pose: "", stall: 0, near: Infinity, stuck: -1, tries: 0, forwardLeg: -1, forwardNear: Infinity, retrying: false, retryX: 0, retryZ: 0, beamTime: 0, beamWait: 0, beamForm: "", beamNative: false },
         // Its desk or wait spot in B.C.A. and where it is in the routine: see `workOffice`.
@@ -2173,6 +2247,11 @@
           toX: 0, toY: 0, toZ: 0, lift: 0, wall: false, caveExit: false,
           points: new Float64Array((JUMP_SAMPLES + 1) * 3) }
       };
+      if (authoritative) Object.assign(entry, { labPendingTraffic: false, labPlanTime: 0,
+        labTrafficBlocked: false, planningLabTraffic: false, rageTraversal: false });
+      interactionGetter(entry, "nonInteractive", () => passiveNpcs
+        && (authoritative || !entry.controlled && !entry.remoteControlled));
+      interactionGetter(entry.root, "collisionDisabled", () => entry.nonInteractive);
       entry.motion.supportEntry = entry;
       gorilla.root.visible = false;
       gorilla.root.matrixNative = false;
@@ -2181,10 +2260,16 @@
       list.push(entry); byOwner.set(owner, entry);
     }
     const sync = () => {
-      if (disposed) return;
-      for (let i = 0; i < list.length; i++) if (!list[i].active && alive(list[i].owner)) activate(list[i]);
+      if (disposed || ctx.presentationOnly?.()) return;
+      if (passiveNpcs && ctx.sleep) bedsToday();
+      for (let i = 0; i < list.length; i++) {
+        if (list[i].nonInteractive) beamStatus(list[i], 0);
+        else if (!list[i].active && alive(list[i].owner)) activate(list[i]);
+      }
     };
-    sync();
+    // A recovery profile starts dormant: its saved bodies are restored before
+    // simulation. A new world explicitly calls sync; browsers retain auto-spawn.
+    if (ctx.checkpointProfile == null && !authoritative && !passiveNpcs) sync();
     const startLabShuttle = (owner) => {
       const e = byOwner.get(owner);
       if (labSite < 0 || !e) return false;
@@ -2195,6 +2280,7 @@
       return true;
     };
     const plan = (cave, index) => {
+      if (ctx.presentationOnly?.()) return;
       const e = byOwner.get(cave);
       if (!e || e.remoteControlled || !sites[index]) return;
       if (e === debugShuttle && index !== labSite) return;
@@ -2208,67 +2294,15 @@
       e.rest = e.stand = e.beat = 0;
       beginTravel(e, index);
     };
-    const jumpPoint = (jump, t, out) => {
-      out.x = jump.fromX + (jump.toX - jump.fromX) * t;
-      out.y = jump.fromY + (jump.toY - jump.fromY) * t + jump.lift * 4 * t * (1 - t);
-      out.z = jump.fromZ + (jump.toZ - jump.fromZ) * t;
-    };
-    const prepareJump = (e, x, y, z, lift = 0, vault = false, running = false, wall = false) => {
-      if (e.motion.lab && !e.controlled) return false;
-      const p = e.root.position, jump = e.jump, distance = Math.hypot(x - p.x, z - p.z);
-      if (distance > MAX_JUMP || y > p.y + (running ? ROOF_JUMP_HEIGHT : 1.7) || y < p.y - 7.5
-        || (wall ? wallContactShare(e, x, y, z, e.heading) < WALL_ENTER_SHARE
-          || !climbClear(e, x, y, z, x, y, z, e.heading) : !landing(x, y, z))
-        || e.phase === "work" && caveAt(x, y, z, AIR_RADIUS) !== e.site) return false;
-      let duration = running ? distance / SPEED : Math.max(vault ? 1 : 0.52, distance / (vault ? 2.4 : 3.3));
-      const rageAscent = running && e.rageTraversal && y > p.y;
-      if (rageAscent) {
-        // Rage approaches can use the full jump reach to a high landing. Do not
-        // stretch that arc to the ordinary stroll speed. The longest legal
-        // flight rises to the maximum apex, then descends to this landing.
-        const rise = y - p.y, apexTime = Math.sqrt(2 * ROOF_JUMP_HEIGHT / GRAVITY);
-        duration = clamp(duration, Math.sqrt(2 * rise / GRAVITY),
-          apexTime + Math.sqrt(2 * (ROOF_JUMP_HEIGHT - rise) / GRAVITY));
-      }
-      if (running) {
-        // Keep a gravity-shaped arc at the chosen running speed. Reject
-        // landings above the apex or beyond the bounded running-jump height.
-        const velocity = (y - p.y) / duration + GRAVITY * duration * 0.5;
-        const tolerance = rageAscent ? 1e-9 : 0;
-        if (velocity <= 0 || velocity - GRAVITY * duration > tolerance
-          || velocity * velocity / (2 * GRAVITY) > ROOF_JUMP_HEIGHT + tolerance) return false;
-        lift = GRAVITY * duration * duration / 8;
-      }
-      // A voluntary jump must not bypass the fireplace detour just because
-      // its airborne arc clears the flame. Walk around the pit and rim.
-      if (!e.controlled && ctx.fireClear && !ctx.fireClear(e, p.x, p.y, p.z, x, y, z)) return false;
-      const previousRadius = e.radius, previousHeight = e.height, previousCompact = e.compact;
-      e.compact = false;
-      // Use the same measured envelope that poseEntry retains throughout flight.
-      e.radius = Math.max(MOTION_RADIUS, previousRadius); e.height = Math.max(MOTION_HEIGHT, previousHeight);
-      if (occupied(e, p.x, p.y, p.z) || !staticClear(e, p.x, p.y, p.z) || occupied(e, x, y, z)) {
-        e.radius = previousRadius; e.height = previousHeight; e.compact = previousCompact; return false;
-      }
-      jump.fromX = p.x; jump.fromY = p.y; jump.fromZ = p.z;
-      jump.toX = x; jump.toY = y; jump.toZ = z;
-      jump.lift = lift || 0.5 + distance * 0.16;
-      jump.duration = duration;
-      if (y < p.y - 1.7) {
-        jump.lift = Math.max(jump.lift, (p.y - y) * 0.55 + 0.4);
-        jump.duration = Math.max(jump.duration, Math.sqrt((p.y - y) * 2 / 9.8) + 0.45);
-      }
-      const points = jump.points;
-      points[0] = p.x; points[1] = p.y; points[2] = p.z;
-      for (let i = 1; i <= JUMP_SAMPLES; i++) {
-        jumpPoint(jump, i / JUMP_SAMPLES, POINT);
-        const j = i * 3;
-        if (!staticClear(e, points[j - 3], points[j - 2], points[j - 1], POINT.x, POINT.y, POINT.z)
-          || occupied(e, POINT.x, POINT.y, POINT.z)) { e.radius = previousRadius; e.height = previousHeight; e.compact = previousCompact; return false; }
-        points[j] = POINT.x; points[j + 1] = POINT.y; points[j + 2] = POINT.z;
-      }
-      jump.active = true; jump.wall = wall; jump.caveExit = false; jump.progress = 0; jump.reverse = false; jump.blocked = 0; e.jumps++;
-      return true;
-    };
+    const { prepareJump, updateJump } = BL.clankerFlight.create({
+      ctx, clamp, POINT, MAX_JUMP, ROOF_JUMP_HEIGHT, WALL_ENTER_SHARE, AIR_RADIUS,
+      SPEED, GRAVITY, MOTION_RADIUS, MOTION_HEIGHT, JUMP_SAMPLES, landing, caveAt,
+      occupied, staticClear, rageCarrying,
+      // These controllers are declared later in this same construction scope.
+      wallContactShare: (e, x, y, z, heading) => wallContactShare(e, x, y, z, heading),
+      climbClear: (e, x, y, z, nx, ny, nz, heading) => climbClear(e, x, y, z, nx, ny, nz, heading),
+      attachContactWall: e => attachContactWall(e),
+    });
     const tryRoofHop = (e, heading, destination) => {
       const p = e.root.position, previousHeading = e.heading;
       if (Math.cos(heading - previousHeading) < 0.85) return false;
@@ -2324,67 +2358,6 @@
         if (prepareJump(e, x, y, z) || prepareJump(e, x, y, z, vaultLift, true)) return true;
       }
       return false;
-    };
-    const updateJump = (e, dt) => {
-      const jump = e.jump, p = e.root.position;
-      let next = jump.progress, moved = false;
-      for (let attempt = 0; attempt < 2; attempt++) {
-        next = clamp(jump.progress + (jump.reverse ? -dt : dt) / jump.duration, 0, 1);
-        jumpPoint(jump, next, POINT);
-        // Reservations prevent a new leap from crossing an existing route.
-        // In flight, sweep the actual bodies: conservative future corridors
-        // must not pin an already-airborne clanker in both directions.
-        if (staticClear(e, p.x, p.y, p.z, POINT.x, POINT.y, POINT.z)
-          // Admit the actual next animated hand/captive pose before advancing
-          // the arc cursor. A refusal reverses through the same checked arc.
-          && (!rageCarrying(e) || ctx.rageJumpPoseClear?.(e, dt, POINT.x, POINT.y, POINT.z,
-            Math.hypot(jump.toX - jump.fromX, jump.toZ - jump.fromZ) / jump.duration,
-            next !== 1 && !(next === 0 && jump.reverse)) !== false)) { moved = true; break; }
-        // Moving actors can temporarily obstruct either end. Recheck both
-        // directions, so a blocked retreat can resume a now-clear landing.
-        jump.reverse = !jump.reverse;
-      }
-      if (!moved) {
-        e.speed = 0; jump.blocked += dt;
-        if (jump.blocked >= 0.4) {
-          // A moving neighbour can close both directions of an authored arc.
-          // Release that arc into the same swept gravity/landing controller as
-          // a player jump instead of suspending the clanker in midair forever.
-          const d = e.drive;
-          d.vx = d.vz = 0;
-          d.vy = Math.min(0, ((jump.toY - jump.fromY) + jump.lift * 4 * (1 - jump.progress * 2)) / jump.duration);
-          d.airborne = d.resume = d.motionEnvelope = true; d.passiveFall = d.grounded = false; d.motionRecover = 0.6;
-          jump.active = false; e.motion.takeoff = 0;
-          if (e.rage.active) {
-            // A refused rage arc needs the same checked outward recovery as
-            // a released wall grip. Keep the flying pose if its held body
-            // cannot yet fit the passive-fall pose at this height.
-            d.wallRelease = true;
-            d.passiveFall = !rageCarrying(e) || ctx.rageJumpPoseClear?.(e, dt, p.x, p.y, p.z, 0, false) !== false;
-            e.climb.airAttachAfter = Infinity;
-          }
-        }
-        return;
-      }
-      jump.blocked = 0;
-      p.x = POINT.x; p.y = POINT.y; p.z = POINT.z; jump.progress = next;
-      e.speed = Math.hypot(jump.toX - jump.fromX, jump.toZ - jump.fromZ) / jump.duration;
-      if (next === 1 && jump.wall) {
-        const d = e.drive;
-        d.airborne = true;
-        d.vx = (jump.toX - jump.fromX) / jump.duration;
-        d.vz = (jump.toZ - jump.fromZ) / jump.duration;
-        d.vy = (jump.toY - jump.fromY - jump.lift * 4) / jump.duration;
-        if (attachContactWall(e)) {
-          jump.active = false; e.climb.fromTop = false; return;
-        }
-        // A moved obstruction can invalidate the grip during flight. Retrace
-        // the checked arc to the takeoff footing instead of standing in air.
-        d.airborne = false; d.vx = d.vy = d.vz = 0; jump.reverse = true; return;
-      }
-      if (next === 1 || next === 0 && jump.reverse) {
-        jump.active = false; e.blocked = 0; e.rest = Math.max(e.rest, 0.12);
-      }
     };
     // One bounded, reversible wall route per gorilla. Endpoints reserve its body;
     // the wall rectangle supplies support independently of the limb animation.
@@ -2456,6 +2429,7 @@
       return CLIMB_GROUND_POINT;
     };
     const climbClaimOccupied = (e, x, y, z, heading, owner) => {
+      if (e.nonInteractive || owner.nonInteractive) return false;
       const c = owner.climb;
       if (!c.active || c.free) return false;
       const planning = owner.planningRoam, height = owner.height;
@@ -4523,6 +4497,7 @@
           p.x + sx * 2, p.y, p.z + sz * 2, e.heading, heading);
     };
     const separateSurfacePeers = (e, dt) => {
+      if (e.nonInteractive) return;
       if (enteringCave(e) || e.controlled || e.motion.lab || e.climb.active || e.jump.active || e.drive.airborne
         || e.lounge || e.loungeDepart || e.fire.burning || e.fire.rolling || e.pound || e.beat
         || e.gorilla.motionActive) return false;
@@ -4939,7 +4914,7 @@
       const roof = roofAt(x, y, z);
       for (const e of list) {
         const p = e.root.position, s = e.startled;
-        if (!e.active || !e.root.visible || e.controlled || e.remoteControlled || e.sleep.stage || sleeps(e.owner)
+        if (e.nonInteractive || !e.active || !e.root.visible || e.controlled || e.remoteControlled || e.sleep.stage || sleeps(e.owner)
           || e.rage.active || e.fire.burning || e.fire.rolling || e.climb.active || e.jump.active || e.drive.airborne
           || e.actionControlled || (p.x - x) ** 2 + (p.z - z) ** 2 > 12 ** 2
           || (roof >= 0 ? roofAt(p.x, p.y, p.z) !== roof : Math.abs(p.y - y) > 2)) continue;
@@ -5222,6 +5197,7 @@
     const release = () => {
       if (!player) return false;
       const e = player;
+      if (passiveNpcs) clearCombatEffects(e);
       cancelInput(); player = null; e.controlled = false;
       if (sleeping(e)) { e.drive.resume = false; return true; }
       if (e.sleep.slot >= 0 && !sleeps(e.owner)) releaseBed(e);
@@ -5232,6 +5208,7 @@
     // The room owns this companion while its player is elsewhere. Free its AI
     // reservations before hiding it; the remote pool supplies the one visible rig.
     const setRemote = (name, on) => {
+      if (authoritative) return false;
       if (disposed) return;
       const e = byOwner.get(crew.cavemen.get(name));
       if (!e || e.remoteControlled === on) return;
@@ -5318,6 +5295,7 @@
       return true;
     };
     const possess = (value) => {
+      if (authoritative) return false;
       const e = entryFor(value);
       if (!e || e.remoteControlled || !e.active || !e.root.visible) return false;
       if (player === e) return true;
@@ -5457,7 +5435,7 @@
     };
     const ignite = (value) => {
       const e = entryFor(value);
-      if (!combatEnabled || !e || !e.active || !e.root.visible || e.fire.burning || e.fire.rolling || e.fire.cooldown > 0) return false;
+      if (!combatEnabled || !e || e.nonInteractive || !e.active || !e.root.visible || e.fire.burning || e.fire.rolling || e.fire.cooldown > 0) return false;
       const f = e.fire;
       f.burning = true; f.requested = f.escaping = false; f.retry = f.escapeRetry = 0; f.age = 0; f.heat = 0.05; f.reaction = 1 + e.random() * 2;
       f.panic.active = false; fireThreatsActive = true;
@@ -6116,7 +6094,7 @@
         && !e.rage.active && !e.fire.burning && !e.fire.rolling && !e.fire.rollRecover
         && !e.loungeDepart && !e.recover && !e.climb.active && !e.jump.active && !e.drive.airborne
         && !e.gorilla.motionActive && !e.gorilla.pounding && !e.gorilla.beating && !e.gorilla.chewing;
-      const interval = quiet && ctx.animationInterval ? ctx.animationInterval(e) : 0;
+      const interval = !authoritative && quiet && ctx.animationInterval ? ctx.animationInterval(e) : 0;
       animation.pending += dt;
       animation.due = !interval || interval < animation.interval || changed || elapsed >= animation.at;
       animation.dt = animation.due ? animation.pending : 0;
@@ -6166,7 +6144,7 @@
         && !e.drive.motionRecover && !e.fire.rolling && !e.fire.rollRecover) e.drive.motionEnvelope = false;
       labEnvelope(e);
       if (combatEnabled && ctx.fireContact && ctx.fireContact(e, beforeX, beforeY, beforeZ)) ignite(e);
-      if (ctx.onMove && (beforeX !== p.x || beforeY !== p.y || beforeZ !== p.z)) ctx.onMove(e, beforeX, beforeY, beforeZ, dt);
+      if (!e.nonInteractive && ctx.onMove && (beforeX !== p.x || beforeY !== p.y || beforeZ !== p.z)) ctx.onMove(e, beforeX, beforeY, beforeZ, dt);
     };
     const shareLabStation = (e) => {
       // A completed job releases its desk for an interior coworker. Keep the
@@ -6340,7 +6318,9 @@
     const bedOf = new Int16Array(list.length).fill(-1), bedSleeping = new Uint8Array(list.length);
     const bedUsed = new Uint8Array(ctx.sleep ? ctx.sleep.slots.length : 0);
     const bedsToday = () => {
-      const day = Math.floor(Date.now() / DAY_MS), beds = ctx.sleep.slots.length;
+      const now = clock();
+      if (!Number.isSafeInteger(now) || now < 0) throw Error("invalid NPC world clock");
+      const day = Math.floor(now / DAY_MS), beds = ctx.sleep.slots.length;
       let changed = day !== bedDay;
       for (let i = 0; i < list.length; i++) {
         const asleep = sleeps(list[i].owner) && !list[i].remoteControlled ? 1 : 0;
@@ -6852,7 +6832,59 @@
         syncLab(e);
       }
     });
+    const beamStatus = (e, dt) => {
+      if (!e.nonInteractive || e.remoteControlled || e.controlled) return false;
+      const state = allAway ? "away" : e.owner.state, s = e.sleep, p = e.root.position;
+      if (state === "away") {
+        if (e.mode === "away" && !e.active && !s.stage) return true;
+        releaseBed(e); releasePortal(e); releaseLab(e); releaseOffice(e); clearWallSearch(e);
+        e.mode = "away"; e.active = e.root.visible = e.hasSlot = false;
+        e.jump.active = e.climb.active = e.drive.airborne = false;
+        e.drive.vx = e.drive.vy = e.drive.vz = e.speed = 0;
+        if (e.tracked && ctx.untrack) ctx.untrack(e);
+        e.tracked = false;
+        return true;
+      }
+      if (state === "sleeping" && s.stage === "asleep" && e.active) return false;
+      if (state !== "sleeping" && !s.stage && e.active && e.mode === state) return false;
+      if (e.retry > 0) { e.retry = Math.max(0, e.retry - dt); return true; }
+      releasePortal(e); releaseLab(e); releaseOffice(e); clearWallSearch(e);
+      if (state === "sleeping") {
+        if (!ctx.sleep || !reserveBed(e)) { e.active = e.root.visible = false; e.retry = 1; return true; }
+        activate(e, true);
+        if (!sleepLandingClear(e)) { e.active = e.root.visible = false; e.retry = 1; return true; }
+        const bed = ctx.sleep.slots[s.slot];
+        p.x = bed.x; p.y = bed.y; p.z = bed.z;
+        s.count = s.leg = 0; s.retrying = false; s.beamWait = 0;
+        e.mode = "sleeping"; e.phase = "sleep"; e.route = ""; e.parked = e.biped = false;
+        layDown(e);
+        e.gorilla.poseManaged(2, p.x, p.y, p.z, e.heading, 0, false, false, e.lounge, e.motion);
+        return true;
+      }
+      releaseBed(e);
+      if (state === "chilling") { activate(e); return true; }
+      // Working starts at the pile, including an away actor returning. Use a
+      // bounded endpoint search with the actual body/terrain clearance, never
+      // a sweep across the entire island or another actor's saved position.
+      activate(e, true);
+      const slot = e.owner.slot;
+      let placed = false;
+      for (let i = 0; slot && i < 33; i++) {
+        const a = (i - 1) * Math.PI / 8 + e.index * 0.61803398875;
+        const r = i ? 0.75 + Math.floor((i - 1) / 16) * 0.75 : 0;
+        const x = slot.x + Math.sin(a) * r, z = slot.z + Math.cos(a) * r;
+        const y = groundAt(x, z, Infinity);
+        if (!Number.isFinite(y) || !landing(x, y, z) || !staticClear(e, x, y, z)) continue;
+        p.x = x; p.y = y; p.z = z; placed = true; break;
+      }
+      if (!placed) { e.active = e.root.visible = false; e.retry = 1; return true; }
+      e.phase = "chill"; e.route = ""; e.rest = 0;
+      if (sites[e.site]) beginTravel(e, e.site);
+      e.gorilla.poseManaged(2, p.x, p.y, p.z, e.heading, 0, false, false, "", e.motion);
+      return true;
+    };
     const updateEntry = (e, dt) => {
+      if (beamStatus(e, dt)) return;
       if ((e.sleep.stage === "beamOut" || e.sleep.stage === "beamIn")
         && (e.remoteControlled || e.controlled || allAway || !sleeps(e.owner) || e.fire.burning || e.fire.rolling
           || e.climb.active || e.jump.active || e.drive.airborne || e.rage.active)) cancelSleepBeam(e);
@@ -6860,7 +6892,7 @@
       if (e.controlled || e.rage.active || e.fire.burning || e.fire.rolling || !e.active) e.startled.active = false;
       // Expiry, health and account/activity cancellation precede regeneration
       // and every movement controller, including swimming or climbing.
-      if (combatEnabled && rage) rage.check(e, elapsed);
+      if (combatEnabled && !e.nonInteractive && rage) rage.check(e, elapsed);
       // A certified cliff warp during check starts a new local movement step;
       // its final pose must not sweep or roll back to the previous location.
       const p = e.root.position, beforeX = p.x, beforeY = p.y, beforeZ = p.z;
@@ -6950,7 +6982,7 @@
           && liveFloor >= p.y - STEP && liveFloor <= p.y + PROP_STEP) setSupportY(e, liveFloor, p.x, p.z, e.heading, dt * 3);
       }
       if (e.fire.rolling || escapeForRoll(e, dt)) { poseEntry(e, dt, beforeX, beforeY, beforeZ); return; }
-      if (combatEnabled && fleeFire(e, dt)) { poseEntry(e, dt, beforeX, beforeY, beforeZ); return; }
+      if (combatEnabled && !e.nonInteractive && fleeFire(e, dt)) { poseEntry(e, dt, beforeX, beforeY, beforeZ); return; }
       if (rage && e.rage.active) {
         e.phase = "rage"; e.biped = false;
         let advanced = false;
@@ -7306,6 +7338,10 @@
       if (ctx.onRecovery && e.active) ctx.onRecovery(e, hard);
     };
     const update = (dt) => {
+      if (ctx.presentationOnly?.()) return;
+      if (authoritative && (recoveryPending || !Number.isFinite(dt) || dt < 0 || dt > 0.25 || player
+        || list.some(e => e.controlled || e.remoteControlled || e.owner.humanControlled || e.owner.remoteControlled)))
+        throw Error("invalid authoritative Clanker step");
       if (disposed || !(dt > 0)) return;
       beginSleepFrame();
       if (ctx.sleep && !allAway) bedsToday();
@@ -7397,41 +7433,45 @@
     };
     const hit = (cave) => {
       const e = byOwner.get(cave);
-      if (!e || !e.active) return false;
+      if (!e || !e.active || e.nonInteractive) return false;
       e.activity = Math.min(9, e.activity + 1); e.hits++;
       if (e.site !== labSite && !officeOf[e.site] && e.activity >= 3) e.rest = Math.min(e.rest, 0.7);
       return true;
     };
     const damage = (entry, power) => {
-      if (!combatEnabled || !entry || !entry.active || !(power > 0)) return false;
+      if (!combatEnabled || !entry || entry.nonInteractive || !entry.active || !(power > 0)) return false;
       entry.health.value = Math.max(0, entry.health.value - power * 4);
       entry.health.delay = BL.crew.HEALTH_REGEN_DELAY;
       if (rage && entry.health.value === 0) rage.cancel(entry, "health");
       return true;
     };
-    const bananaHit = (entry, source, serial) => combatEnabled && !!rage && !!entry && rage.bananaHit(entry, source, serial);
-    const debugRage = (entry, on = true) => !disposed && (!on || combatEnabled) && !!rage && rage.debugRage(entryFor(entry), on);
+    const bananaHit = (entry, source, serial) => combatEnabled && !!rage && !!entry && !entry.nonInteractive && rage.bananaHit(entry, source, serial);
+    const debugRage = (entry, on = true) => !disposed && !entryFor(entry)?.nonInteractive && (!on || combatEnabled) && !!rage && rage.debugRage(entryFor(entry), on);
+    const clearCombatEffects = (e) => {
+      if (rage) rage.cancel(e, "game-ended");
+      if (ctx.rageRelease) ctx.rageRelease(e);
+      e.health.value = e.health.max; e.health.delay = 0;
+      if (e.actionControlled || e.motion.smash) {
+        e.pound = e.recover = 0; e.poundHit = true;
+        e.actionControlled = e.motion.smash = false;
+        e.gorilla.cancelSmash();
+      }
+      const f = e.fire, m = e.motion;
+      f.burning = f.contactBurning = f.rolling = f.requested = f.escaping = f.panic.active = false;
+      f.retry = f.escapeRetry = f.age = f.heat = f.soot = f.cooldown = f.rollRecover = 0;
+      m.poundCharge = m.throwProgress = m.roll = m.rollAngle = m.rollSide = 0;
+      m.dragging = m.rage = false;
+      if (e.renderParts) for (const part of e.renderParts) part.ember = part.scorch = 0;
+      if (e.fireFX.spread) e.fireFX.spread.fill(0);
+      e.fireFX.burning = false;
+    };
     const setCombatEnabled = (on) => {
       on = on === true;
       if (on === combatEnabled) return;
       combatEnabled = on;
       if (on) return;
       fireThreatsActive = false;
-      for (const e of list) {
-        if (rage) rage.cancel(e, "game-ended");
-        if (ctx.rageRelease) ctx.rageRelease(e);
-        e.health.value = e.health.max; e.health.delay = 0;
-        if (e.actionControlled || e.motion.smash) {
-          e.pound = e.recover = 0; e.poundHit = true;
-          e.actionControlled = e.motion.smash = false;
-          e.gorilla.cancelSmash();
-        }
-        const f = e.fire, m = e.motion;
-        f.burning = f.contactBurning = f.rolling = f.requested = f.escaping = f.panic.active = false;
-        f.retry = f.escapeRetry = f.age = f.heat = f.soot = f.cooldown = f.rollRecover = 0;
-        m.poundCharge = m.throwProgress = m.roll = m.rollAngle = m.rollSide = 0;
-        m.dragging = m.rage = false;
-      }
+      for (const e of list) clearCombatEffects(e);
     };
     const stats = () => {
       let active = 0, working = 0, chilling = 0, overflow = 0, airborne = 0, hits = 0, pounds = 0, beats = 0, stuck = 0, replans = 0, recoveries = 0;
@@ -7476,10 +7516,330 @@
       }
       return spots;
     };
+    // Source-owned controller clocks and shared reservations. Actor records,
+    // lab equipment and the rest of the Hub must commit in the same world record.
+    const logicalCheckpoint = authoritative ? (() => {
+      const fail = () => { throw Error("invalid Clanker world recovery"); };
+      const index = entry => { if (entry == null) return -1; const i = list.indexOf(entry); if (i < 0) fail(); return i; };
+      const actorIndex = i => Number.isInteger(i) && i >= -1 && i < list.length;
+      const dense = (a, n) => Array.isArray(a) && a.length === n && Object.keys(a).length === n;
+      const ids = list.map(e => e.owner.traits.name);
+      if (!list.length || list.length > 53 || new Set(ids).size !== ids.length || sites.length > 32
+        || labEquipment.length > 128 || labStations.length > 128 || bedUsed.length > 20
+        || officeOf.some(o => o && (o.desks.length > 32 || o.waiting.length > 128))) fail();
+      const refs = [...new Set(labEquipment.flatMap(item => [item.node.geometry, item.bench]).filter(Boolean))];
+      const ready = () => {
+        if (disposed || player || checkingRest || debugShuttle || combatEnabled || rage?.active
+          || list.some(e => e.controlled || e.remoteControlled || e.actionControlled || e.debugMove.active
+            || e.rage.active || e.rage.search || e.capture || e.fire.burning || e.fire.rolling || e.fire.panic.active)) fail();
+      };
+      const validate = value => {
+        if (!dense(value, 2) || !Number.isFinite(value[0]) || value[0] < 0 || value[0] > 1e9) fail();
+        const r = value[1];
+        if (!r || Object.keys(r).sort().join() !== "beds,clocks,offices,portals,v" || r.v !== 1
+          || !dense(r.clocks, 20) || !dense(r.portals, sites.length) || !r.portals.every(actorIndex)
+          || !dense(r.beds, 3) || !dense(r.beds[0], list.length) || !dense(r.beds[1], list.length)
+          || !dense(r.beds[2], bedUsed.length) || !r.beds[0].every(n => Number.isInteger(n) && n >= -1 && n < bedUsed.length)
+          || !r.beds[1].every(n => n === 0 || n === 1) || !r.beds[2].every(n => n === 0 || n === 1)
+          || !dense(r.offices, officeOf.length)) fail();
+        if (r.clocks.some((n, i) => [16, 17, 19].includes(i) ? typeof n !== "boolean"
+          : !Number.isFinite(n) || n < -1 || n > 1e9 || i > 0 && !Number.isSafeInteger(n))
+          || !actorIndex(r.clocks[14])) fail();
+        const held = r.portals.filter(i => i >= 0);
+        if (new Set(held).size !== held.length) fail();
+        const bedClaims = r.beds[0].filter(i => i >= 0);
+        if (new Set(bedClaims).size !== bedClaims.length) fail();
+        for (let i = 0; i < officeOf.length; i++) {
+          const o = officeOf[i], row = r.offices[i];
+          if (!o) { if (row !== null) fail(); continue; }
+          if (!dense(row, 3) || !dense(row[0], o.desks.length) || !dense(row[1], o.waiting.length)
+            || !row[0].every(actorIndex) || !row[1].every(actorIndex) || !dense(row[2], o.stations.length)
+            || !row[2].every(n => Number.isFinite(n) && Math.abs(n) <= Math.PI * 4)) fail();
+          const claims = [...row[0], ...row[1]].filter(n => n >= 0);
+          if (new Set(claims).size !== claims.length) fail();
+        }
+      };
+      return {
+        ids, references: () => refs,
+        baseline: () => ["hub-logical-1", sites.length, labSite, labStations.length, labEquipment.length, bedUsed.length, ...ids],
+        capture() {
+          ready();
+          const saved = [elapsed, { v: 1,
+            clocks: [labPassAt, labRouteBudget, labRouteTurn, labRouteNext, roamBudget, roamNext, roamTurn, roamSerial,
+              climbFrameBudget, climbTurn, climbNext, debugRouteBudget, wallBudget, climbClaimSerial,
+              index(labEscape), bedDay, allAway, fireThreatsActive, sleepBeamBudget, sleepBeamBusy],
+            portals: portals.map(index), beds: [Array.from(bedOf), Array.from(bedSleeping), Array.from(bedUsed)],
+            offices: officeOf.map(o => o ? [o.desks.map(index), o.waiting.map(index), o.stations.map(s => s.chairYaw)] : null) }];
+          validate(saved); return saved;
+        },
+        restore(saved) {
+          ready(); validate(saved); if (elapsed !== 0) fail();
+          recoveryPending = true; elapsed = saved[0]; const r = saved[1];
+          [labPassAt, labRouteBudget, labRouteTurn, labRouteNext, roamBudget, roamNext, roamTurn, roamSerial,
+            climbFrameBudget, climbTurn, climbNext, debugRouteBudget, wallBudget, climbClaimSerial] = r.clocks;
+          labEscape = r.clocks[14] < 0 ? null : list[r.clocks[14]];
+          [bedDay, allAway, fireThreatsActive, sleepBeamBudget, sleepBeamBusy] = r.clocks.slice(15);
+          for (let i = 0; i < portals.length; i++) portals[i] = r.portals[i] < 0 ? null : list[r.portals[i]];
+          bedOf.set(r.beds[0]); bedSleeping.set(r.beds[1]); bedUsed.set(r.beds[2]);
+          for (let i = 0; i < officeOf.length; i++) {
+            const o = officeOf[i]; if (!o) continue;
+            for (const [field, column] of [["desks", 0], ["waiting", 1]]) for (let j = 0; j < o[field].length; j++)
+              o[field][j] = r.offices[i][column][j] < 0 ? null : list[r.offices[i][column][j]];
+            for (let j = 0; j < o.stations.length; j++) o.stations[j].chairYaw = r.offices[i][2][j];
+          }
+        },
+        rebuild() {
+          ready();
+          const beds = new Set();
+          for (let i = 0; i < portals.length; i++) if (portals[i] && portals[i].portal !== i) fail();
+          for (let i = 0; i < officeOf.length; i++) {
+            const o = officeOf[i]; if (!o) continue;
+            for (const [field, member] of [["desks", "desk"], ["waiting", "wait"]])
+              for (let j = 0; j < o[field].length; j++) {
+                const e = o[field][j]; if (e && (e.site !== i || e.office[member] !== j)) fail();
+              }
+          }
+          for (let i = 0; i < labEquipment.length; i++) {
+            const holder = labEquipment[i].holder;
+            if (holder && (!list.includes(holder) || holder.lab.item !== i)) fail();
+          }
+          for (const e of list) {
+            if (!Number.isInteger(e.lab.item) || e.lab.item < -1 || e.lab.item >= labEquipment.length
+              || e.lab.item >= 0 && labEquipment[e.lab.item].holder !== e) fail();
+            if (!Number.isInteger(e.portal) || e.portal < -1 || e.portal >= portals.length
+              || e.portal >= 0 && portals[e.portal] !== e || !Number.isInteger(e.sleep.slot)
+              || e.sleep.slot < -1 || e.sleep.slot >= bedUsed.length) fail();
+            if (e.sleep.slot >= 0) { if (beds.has(e.sleep.slot)) fail(); beds.add(e.sleep.slot); }
+            if (e.office.desk >= 0 && officeOf[e.site]?.desks[e.office.desk] !== e
+              || e.office.wait >= 0 && officeOf[e.site]?.waiting[e.office.wait] !== e) fail();
+            const p = e.root.position;
+            if (![p.x, p.y, p.z, e.heading].every(n => Number.isFinite(n) && Math.abs(n) < 10000)) fail();
+            e.animation.pending = e.animation.at = 0; e.animation.due = true;
+            e.gorilla.poseManaged(2, p.x, p.y, p.z, e.heading, 0,
+              e.jump.active || e.drive.airborne && !e.drive.passiveFall, e.biped, e.lounge, e.motion);
+            labEnvelope(e);
+          }
+          // Static lounge geometry is derived from the same versioned world.
+          loungeReady = false; loungeCount = roofCount = 0;
+          for (const e of list) if (e.active && ctx.npcPlacement(e, list) !== true)
+            throw Error(`invalid Clanker world recovery placement: ${e.owner.traits.name} (${e.mode}/${e.phase}, site ${e.site})`);
+          recoveryPending = false;
+        }
+      };
+    })() : null;
+    // Explicit restricted headless profiles only. The enclosing checkpoint owns
+    // roaming entries, random streams, buffers and rigs. The body profile below
+    // exposes only physical continuity and rebuilds everything else from defaults.
+    // No browser caller opts in, and broader worlds must supply their own full
+    // reservation/search/body continuation before this profile can expand.
+    const continuation = ctx.checkpointProfile != null ? (() => {
+      const body = bodyProfile;
+      let awaitingSupportStep = false, frozenRecovery = false;
+      const refuse = () => { throw new Error("unsupported Clanker checkpoint profile"); };
+      const ready = (neutral = true) => {
+        if (disposed || !body && player || allAway || combatEnabled || rage || checkingRest || labEscape || debugShuttle
+          || list.some((e, i) => e.index !== i || e.owner.state !== "chilling" || (body ? e.controlled !== (player === e) : e.controlled) || e.remoteControlled
+            || e.debugMove.active || e.sleep.stage || e.office.stage || e.motion.lab || e.rage.active
+            || e.rage.search || e.capture || e.climb.active || e.climb.searchPending
+            || e.motion.supportEntry !== e || e.motion.labItemGeometry || e.motion.labBench
+            || ![e.heading, e.goalX, e.goalY, e.goalZ, e.speed, e.radius, e.height].every(n => Number.isFinite(n) && Math.abs(n) < 10000)
+            || e.radius <= 0 || e.height <= 0 || !Number.isInteger(e.roam.count) || e.roam.count < 0 || e.roam.count > 4
+            || !Number.isInteger(e.roam.index) || e.roam.index < 0 || e.roam.index > e.roam.count)) refuse();
+        if (body) for (const e of list) {
+          const d = e.drive, h = e.health;
+          if (player && (player !== e || !e.active || !e.root.visible) || e.actionControlled || e.pound || e.beat || e.motion.smash
+            || e.motion.dragging || e.fire.burning || e.fire.rolling || e.fire.requested || e.climb.mountPending
+            || e.climb.waitRelease || e.climb.claimPending || e.climb.crestPending || e.lounge || e.loungeDepart
+            || ![d.vx, d.vy, d.vz, h.value, h.max, h.delay].every(n => Number.isFinite(n) && Math.abs(n) < 10000)
+            || h.value < 0 || h.value > h.max || h.max <= 0 || h.delay < 0 || !Number.isInteger(d.jumps) || d.jumps < 0 || d.jumps > 2
+            || neutral && player && (d.x || d.z || d.climbAxis || d.climbSide || !Number.isNaN(d.heading)
+              || d.run || d.jumpHeld || d.jumpDown || d.jumpPressed || d.jumpBuffer)) refuse();
+        }
+      };
+      // Live capture reads physical continuity without clearing held controls.
+      // It still refuses unsupported jobs, collision states and invalid scalars.
+      const readBody = neutral => {
+        ready(neutral); if (awaitingSupportStep || !player || typeof player.owner.id !== "string" || !/^[A-Za-z0-9_.:-]{1,80}$/.test(player.owner.id)) refuse();
+        const e = player, d = e.drive, p = e.root.position;
+        if (![p.x, p.y, p.z, e.heading, d.vx, d.vy, d.vz].every(n => Number.isFinite(n) && Math.abs(n) < 10000)
+          || ![d.grounded, d.airborne, d.passiveFall, e.biped, e.parked, d.wallRelease].every(v => typeof v === "boolean")
+          || d.grounded === d.airborne || d.grounded && d.jumps !== 0) refuse();
+        const flags = (d.grounded ? 1 : 0) | (d.passiveFall ? 2 : 0)
+          | (e.biped ? 4 : 0) | (e.parked ? 8 : 0) | (d.wallRelease ? 16 : 0);
+        const values = [e.owner.id, p.x, p.y, p.z, e.heading, d.vx, d.vy, d.vz, d.jumps, flags];
+        validBodyRecord(values); return values;
+      };
+      ready();
+      return {
+        // Static lounge candidates are reconstructed by the same world boot.
+        // The caller binds this complete seed, including radius and candidates,
+        // into its trusted baseline; it is never supplied by stored data.
+        baseline() {
+          ready();
+          if (body) return bodyBaseline(terrainProfile ? ctx.checkpointTerrain : null, ctx.meadowRadius || 22, roamRadius);
+          prepareLounges(list[0]); return [ctx.meadowRadius || 22, roamRadius, loungeCount, roofCount, loungeReady, ...loungeSpots];
+        },
+        capture() {
+          ready(); if (body) return [elapsed];
+          return [elapsed, labPassAt, labRouteBudget, labRouteTurn, labRouteNext,
+            roamBudget, roamNext, roamTurn, roamSerial, climbFrameBudget, climbTurn, climbNext,
+            debugRouteBudget, wallBudget, climbClaimSerial];
+        },
+        restore(values) {
+          ready(); if (body) refuse();
+          if (!Array.isArray(values) || values.length !== 15 || Object.keys(values).length !== 15 || values.some((n, i) => !Number.isFinite(n)
+            || n > 1e9 || n < ([3, 7, 10].includes(i) ? -1 : 0)
+            || i > 1 && !Number.isSafeInteger(n))
+            || [3, 4, 6, 7, 10, 11].some(i => values[i] >= list.length)) refuse();
+          [elapsed, labPassAt, labRouteBudget, labRouteTurn, labRouteNext,
+            roamBudget, roamNext, roamTurn, roamSerial, climbFrameBudget, climbTurn, climbNext,
+            debugRouteBudget, wallBudget, climbClaimSerial] = values;
+        },
+        ...(body ? {
+          records: BODY_RECORD,
+          // Fixed minimal physical state. All other player state comes from
+          // normal fresh-controller defaults, including full health and timers.
+          bodyState() { return readBody(true); },
+          liveBodyState() { return readBody(false); },
+          restoreBody(values, passive = false, frozen = false) {
+            ready();
+            if (typeof passive !== "boolean" || typeof frozen !== "boolean" || passive && frozen) refuse();
+            validBodyRecord(values);
+            if (frozen && values.slice(5, 8).some(v => v !== 0)) refuse();
+            frozenRecovery = frozen;
+            if (player || elapsed !== 0 || values[0] !== list[0].owner.id) refuse();
+            const e = list[0], d = e.drive, flags = values[9];
+            player = e; e.controlled = e.active = true; e.mode = "chilling"; e.phase = "controlled";
+            e.heading = values[4]; [d.vx, d.vy, d.vz] = values.slice(5, 8); d.jumps = values[8];
+            d.grounded = !!(flags & 1); d.airborne = !d.grounded; d.passiveFall = !!(flags & 2);
+            e.biped = !!(flags & 4); e.parked = !!(flags & 8); d.wallRelease = !!(flags & 16);
+            d.motionEnvelope = d.airborne && !d.passiveFall; e.footprintMode = e.parked ? "stand" : "walk";
+            setGoal(e, values[1], values[2], values[3]);
+            continuation.recoverPose(values.slice(1, 4), passive);
+          },
+          neutralize() { ready(false); if (!player) refuse(); cancelInput(); ready(); },
+          disconnect() {
+            ready(false); if (!player) refuse(); cancelInput();
+            // Match the registry's confirmed-close/duplicate-session policy.
+            // Frozen recovery resumes with zero momentum, including in midair.
+            player.drive.vx = player.drive.vy = player.drive.vz = 0; ready();
+          },
+          motion() {
+            ready(); if (!player) refuse();
+            const p = player.root.position, d = player.drive;
+            return { x: p.x, y: p.y, z: p.z, yaw: player.heading,
+              vx: d.vx, vy: d.vy, vz: d.vz, grounded: d.grounded };
+          },
+          stepPassive(ms) {
+            ready(); if (!player || !Number.isSafeInteger(ms) || ms < 1 || ms > 50) refuse();
+            // Only authoritative passive recovery may temporarily retain the
+            // stored grounded flag after support disappeared. Normalize through
+            // actual source physics before any new snapshot or live activation.
+            if (terrainProfile) supportRemoved();
+            update(ms / 1000); ready(); awaitingSupportStep = false;
+          },
+          recoverPose(position, passive = false) {
+            if (!player || typeof passive !== "boolean" || !Array.isArray(position) || position.length !== 3
+              || position.some(n => !Number.isFinite(n) || Math.abs(n) >= 10000)) refuse();
+            const e = player, p = e.root.position;
+            [p.x, p.y, p.z] = position; e.root.visible = true;
+            // This controller is fresh. Settle its newly built rig in the
+            // standard form without advancing physics or replaying an action.
+            e.gorilla.poseManaged(2, p.x, p.y, p.z, e.heading, 0, false, e.biped, "", terrainProfile ? e.motion : null);
+            e.radius = Math.max(e.radius, e.gorilla.bodyRadius + 0.1);
+            e.height = Math.max(e.height, e.gorilla.bodyHeight + 0.04);
+            awaitingSupportStep = continuation.validatePlacement(passive, frozenRecovery);
+            if (frozenRecovery) continuation.frozenPlacement();
+          },
+          frozenPlacement() {
+            if (continuation.validatePlacement(false, true)) {
+              // Lost support changes the future collision mode, never the
+              // stored position. Gravity starts only after acknowledged control.
+              const d = player.drive;
+              d.grounded = false; d.airborne = d.passiveFall = true; d.motionEnvelope = false;
+            }
+            awaitingSupportStep = false;
+          },
+          validateActivation() {
+            if (frozenRecovery) continuation.frozenPlacement();
+            else continuation.validatePlacement();
+            frozenRecovery = false;
+          },
+          validatePlacement(passive = false, frozen = false) {
+            ready();
+            if (!player || typeof passive !== "boolean" || typeof frozen !== "boolean") refuse();
+            const e = player, p = e.root.position;
+            // The center ray may miss a tread or prop beneath the planted
+            // footprint. Use the same support query as ordinary driven motion.
+            const floor = terrainProfile ? support(e, p.x, p.z, p.y, 0) : groundAt(p.x, p.z, p.y);
+            const lostSupport = e.drive.grounded && Math.abs(p.y - floor) > 1e-6;
+            if (floor !== -Infinity && !Number.isFinite(floor) || floor > p.y + 1e-6
+              || lostSupport && !(terrainProfile && passive || frozen)
+              || staticClear(e, p.x, p.y, p.z) !== true) refuse();
+            return lostSupport;
+          },
+        } : {}),
+      };
+    })() : null;
     return { list, sync, update, startleHill, target, companionTarget, hit, damage, bananaHit, debugRage, setCombatEnabled, plan, startLabShuttle, debugMove, cancelDebugMove, stats, liveGeometry, dispose, contactAt,
-      debugLoungeSpots, wallSupported,
+      debugLoungeSpots, wallSupported, roamingCheckpoint: ctx.checkpointProfile === "roaming-1" ? continuation : null,
+      bodyCheckpoint: bodyProfile ? continuation : null, logicalCheckpoint,
       possess, release, sleeping, wake, setAway, cancelSleepBeams, setRemote, createRemote, respawn, travelRefusal, travel, control, cancelInput, smash, smashPower, quickSmash, chestBeat, ignite, dropRoll, supportRemoved,
       get combatEnabled() { return combatEnabled; }, get player() { return player; } };
   };
-  BL.clankers = { create, rageCarrying, WALK_RADIUS, WALK_HEIGHT, PROP_STEP, RAGE_SPEED };
+  // Separate controlled body: never append to the NPC roster or possess its
+  // owner. Static terrain/prop support is source-owned; jobs, moving support
+  // identities, beds, climbing and combat still need a broader adapter.
+  // The trusted reclaim coordinator restores the body before enabling input.
+  // There is no scene caller or advertised capability while that work is open.
+  const createPlayerBody = options => {
+    const terrain = options?.profile === "terrain-body-3", queries = options?.terrain;
+    const allowed = new Set(["profile", "root", "ownerId", "name", "groundAt", "clear", ...(terrain ? ["terrain"] : [])]);
+    if (terrain && (!queries || Object.keys(queries).sort().join(",") !== "groundPlaneAt,pointSupportAt,supportAt,terrainSupportAt,version"
+      || typeof queries.version !== "string" || !/^[A-Za-z0-9_.:-]{1,80}$/.test(queries.version)
+      || ["supportAt", "terrainSupportAt", "pointSupportAt", "groundPlaneAt"].some(k => typeof queries[k] !== "function")))
+      throw Error("unsupported independent player world");
+    if (!options || !["static-body-3", "terrain-body-3"].includes(options.profile) || Object.keys(options).some(k => !allowed.has(k))
+      || !options.root || !Array.isArray(options.root.children)
+      || typeof options.ownerId !== "string" || !/^[A-Za-z0-9_.:-]{1,80}$/.test(options.ownerId)
+      || typeof options.name !== "string" || !options.name.length || options.name.length > 80
+      || typeof options.groundAt !== "function" || typeof options.clear !== "function")
+      throw Error("unsupported independent player world");
+    // Own every mutable owner field; an NPC's work/state/root are never reused.
+    const owner = { id: options.ownerId, traits: { name: options.name }, state: "chilling",
+      work: { site: -1, plannedSite: -1 }, root: BL.scene.createNode(), camp: { burning: false } };
+    const crew = { list: [owner], cavemen: new Map([[options.name, owner]]), stateOf: value => value.state };
+    const sim = create({ root: options.root, crew, sites: [], groundAt: options.groundAt, clear: options.clear,
+      checkpointProfile: terrain ? "body-terrain-3" : "body-3", checkpointRandom: true, combatEnabled: false,
+      ...(terrain ? { checkpointTerrain: queries.version, supportAt: queries.supportAt, terrainSupportAt: queries.terrainSupportAt,
+        pointSupportAt: queries.pointSupportAt, groundPlaneAt: queries.groundPlaneAt } : {}) });
+    let enabled = false, disposed = false;
+    return {
+      // This narrow shape is also consumed by the existing body checkpoint codec.
+      list: sim.list, bodyCheckpoint: sim.bodyCheckpoint,
+      activate() {
+        if (disposed || !sim.player) return false;
+        enabled = false;
+        sim.bodyCheckpoint.bodyState(); // No unstepped missing-support recovery may activate.
+        // The world may change during grant/ACK transit. Check the current
+        // geometry again without advancing physics or resetting the pose.
+        sim.bodyCheckpoint.validateActivation();
+        enabled = true; return true;
+      },
+      suspend() { enabled = false; if (!disposed) sim.cancelInput(); },
+      cancelInput() { if (!disposed) sim.cancelInput(); },
+      control(input) { return !disposed && enabled && sim.control(input); },
+      supportRemoved() { if (disposed || !enabled) return false; sim.supportRemoved(); return true; },
+      update(dt) {
+        if (disposed || !enabled) return false;
+        if (!Number.isFinite(dt) || dt <= 0 || dt > .25) throw Error("bounded player step required");
+        if (terrain) sim.supportRemoved();
+        sim.update(dt); return true;
+      },
+      dispose() { if (disposed) return; enabled = false; disposed = true; sim.dispose(); },
+      get active() { return enabled && !disposed; },
+      get player() { return sim.player; },
+    };
+  };
+  BL.clankers = { create, createPlayerBody, bodyBaseline, bodyRecords: BODY_RECORD, rageCarrying, WALK_RADIUS, WALK_HEIGHT, PROP_STEP, RAGE_SPEED };
 })();

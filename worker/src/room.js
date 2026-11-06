@@ -44,6 +44,11 @@ import { deliverHighscores } from "./highscore-store.js";
 import { sfuClient } from "./sfu.js";
 import { STUDIO_TRANSPORT, STUDIO_ZONE, studioState, studioHostAllowed, studioCanSpeak, studioPosition, studioSeatAllowed, studioSource } from "./studio-policy.js";
 import CAST_ROWS from "./characters.gen.json";
+import { RoomNpcAuthority, validateNpcAuthority, npcAuthorityView, npcProtocolSupports, packNpcSnapshot, npcNextPublicationAt, npcCadenceName } from "./room-npc-authority.js";
+import { RoomBodyHandoff, ROOM_BODY } from "./room-body-handoff.js";
+import { RoomBodyPresence, ROOM_BODY_PRESENCE } from "./room-body-presence.js";
+import { ROOM_BODY_RELEASE, validateBodyRelease, validBodyQuiescence } from "./room-body-release.js";
+import { HUB_WORLD_OBJECT, createRoomWorldNotifier } from "./room-world-events.js";
 
 const CAST = castIndex(CAST_ROWS);
 
@@ -67,6 +72,12 @@ export class Room extends DurableObject {
     this.hostId = 0;
     this.followers = 0;
     this.lastNpc = null;
+    this.npcAuthority = null;
+    this.bodyHandoff = null;
+    this.bodyHandoffRequired = false;
+    this.bodyPresenceRequired = false;
+    this.bodyPresenceCache = null;
+    this.worldNotifier = null;
     // The arcade's ghost arena: its own hunt's host, how many follow it, and its last state frame.
     this.ghostHostId = 0;
     this.ghostFollowers = 0;
@@ -88,6 +99,43 @@ export class Room extends DurableObject {
     // hear the same crackle at the same moment. Stored, so a woken or redeployed room keeps the phase.
     this.loopEpoch = 0;
     ctx.blockConcurrencyWhile(async () => {
+      const recoveredBodies = [];
+      // A saved server assignment stays fenced even if preview configuration is
+      // removed. Older builds need an explicit release before rollback.
+      const authority = await ctx.storage.get("npc-authority-v1");
+      if (authority !== undefined) this.applyNpcAuthority(validateNpcAuthority(authority));
+      if (authority?.mode === "browser") {
+        const released = await ctx.storage.get("room-body-release-v1");
+        if (released !== undefined) this.applyBodyRelease(validateBodyRelease(released));
+      }
+      // Presence storage survives a preview rollback too. Require compatible
+      // presentation clients until an explicit migration/drain removes it.
+      if (await ctx.storage.get("room-body-presence-v1") !== undefined) this.bodyPresenceRequired = true;
+      if ([...this.players.values()].some(p => p.bodyHandoff)) this.bodyHandoffRequired = true;
+      // No body preview activation on wake. Retained records fence rollback;
+      // missing sockets use the last durable observation, never restart time.
+      if (authority?.mode === "server" || env.VIRTUAL_HOST_BODY_PREVIEW === "1"
+        || [...this.players.values()].some(p => p.bodyHandoff)) {
+        const ids = await ctx.storage.get("room-body-handoff-v1");
+        if (ids !== undefined) {
+          this.bodyHandoffRequired = true; // empty retained index still fences rollback
+          const outbox = this.bodyHandoffController();
+          for (const r of await outbox.records()) {
+            const p = this.players.get(r.accountId);
+            if (p?.connectionToken === r.connection) {
+              p.bodyHandoff = true;
+              if (r.phase === "closed") {
+                p.bodyClosedAt = r.closedAt;
+                p.ws.serializeAttachment(this.attachment(p));
+              } else if (Number.isSafeInteger(p.bodyClosedAt)) await outbox.close({ accountId: r.accountId, connection: r.connection }, p.bodyClosedAt);
+              recoveredBodies.push({ accountId: r.accountId, connection: r.connection });
+            } else if (r.phase !== "closed") {
+              const identity = { accountId: r.accountId, connection: r.connection }, movement = await outbox.movement(identity);
+              await outbox.close(identity, Math.max(r.at, movement?.receivedAt ?? 0));
+            }
+          }
+        }
+      }
       await hockey.loadLimits(this);
       hockey.restore(this);
       this.studio = (await ctx.storage.get("studio")) || this.studio;
@@ -118,6 +166,8 @@ export class Room extends DurableObject {
         const set = await ctx.storage.getAlarm();
         if (set === null || set > this.cleanupAt) await ctx.storage.setAlarm(this.cleanupAt);
       }
+      for (const identity of recoveredBodies) await this.syncCommittedBodyParticipant(identity);
+      this.notifyWorld();
     });
     // A woken room rebuilds its roster from the attachments its sockets carry.
     for (const ws of ctx.getWebSockets()) {
@@ -161,7 +211,7 @@ export class Room extends DurableObject {
   }
 
   attachment(p) {
-    return { cabinet: p.cabinet || null, cabinetBucket: p.cabinetBucket || null, hockey: p.hockey || null, hockeyBuckets: p.hockeyBuckets || null, id: p.id, login: p.login, display: p.display, contributor: p.contributor, body: p.body, connectionToken: p.connectionToken, studioSeat: p.studioSeat, studioRevoked: !!p.studioRevoked, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, j: p.j, w: p.w, v: p.v, va: p.va, r: p.r, voice: p.voice, muted: p.muted, hp: p.hp, ko: p.ko, sent: p.sent, zone: p.zone, pokerVoice: p.pokerVoice, inHub: p.inHub, visible: p.visible, joinedAt: p.joinedAt, door: p.door, passes: p.passes, blendTo: p.blendTo, blendK: p.blendK, pm: p.pm };
+    return { ...(p.oogaMotionProtocol === 1 ? { oogaMotionProtocol: 1 } : {}), ...(p.bodyPresentedRequest ? { bodyPresentedRequest: p.bodyPresentedRequest } : {}), ...(p.bodyMotionProtocol === 1 ? { bodyMotionProtocol: 1 } : {}), ...(p.bodyQuiescence ? { bodyQuiescence: p.bodyQuiescence } : {}), ...(p.bodyMigrationProtocol === 1 ? { bodyMigrationProtocol: 1, bodyReleasedRevision: p.bodyReleasedRevision || 0 } : {}), ...(p.bodyPresenceProtocol === 1 ? { bodyPresenceProtocol: 1, bodyPresenceSent: p.bodyPresenceSent || null, bodyPresenceAck: p.bodyPresenceAck || null } : {}), ...(p.bodyProtocol === 2 || p.bodyHandoff ? { bodyProtocol: p.bodyProtocol, bodyHandoff: !!p.bodyHandoff, bodyClosedAt: p.bodyClosedAt ?? null } : {}), npcProtocol: p.npcProtocol || 0, npcSent: p.npcSent || null, npcAck: p.npcAck || null, cabinet: p.cabinet || null, cabinetBucket: p.cabinetBucket || null, hockey: p.hockey || null, hockeyBuckets: p.hockeyBuckets || null, id: p.id, login: p.login, display: p.display, contributor: p.contributor, body: p.body, connectionToken: p.connectionToken, studioSeat: p.studioSeat, studioRevoked: !!p.studioRevoked, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, j: p.j, w: p.w, v: p.v, va: p.va, r: p.r, voice: p.voice, muted: p.muted, hp: p.hp, ko: p.ko, sent: p.sent, zone: p.zone, pokerVoice: p.pokerVoice, inHub: p.inHub, visible: p.visible, joinedAt: p.joinedAt, door: p.door, passes: p.passes, blendTo: p.blendTo, blendK: p.blendK, pm: p.pm };
   }
 
   view(p) {
@@ -338,12 +388,29 @@ export class Room extends DurableObject {
     const who = playerFromHeaders(request.headers);
     if (!who || !ownedBody(CAST, who.login, who.contributor, who.id)) return new Response("Contributors with an Ooga only", { status: 403 });
 
+    const requestedProtocol = new URL(request.url).searchParams.get("npc-authority");
+    const npcProtocol = requestedProtocol === "4" ? 4 : requestedProtocol === "3" ? 3 : requestedProtocol === "2" ? 2 : requestedProtocol === "1" ? 1 : 0;
+    const bodyMotionProtocol = new URL(request.url).searchParams.get("body-motion") === "1" ? 1 : 0;
+    const oogaMotionProtocol = new URL(request.url).searchParams.get("ooga-motion") === "1" ? 1 : 0;
+    const bodyProtocol = new URL(request.url).searchParams.get("body-reclaim") === "2" ? 2 : 0;
+    const bodyPresenceProtocol = new URL(request.url).searchParams.get("body-presence") === "1" ? 1 : 0;
+    const bodyMigrationProtocol = new URL(request.url).searchParams.get("body-migration") === "1" ? 1 : 0;
+    if (this.bodyPresenceRequired && (this.env.VIRTUAL_HOST_BODY_PREVIEW !== "1" || bodyPresenceProtocol !== 1))
+      return new Response("Body presence requires explicit compatible recovery", { status: 409 });
+    if (this.bodyHandoffRequired && (this.env.VIRTUAL_HOST_BODY_PREVIEW !== "1" || bodyProtocol !== 2))
+      return new Response("Body handoff requires explicit compatible recovery", { status: 409 });
+    if (this.npcAuthority?.mode === "server" && (!npcProtocolSupports(npcProtocol, this.npcAuthority) || !this.players.has(who.id) && this.players.size >= 32)) {
+      return new Response("NPC authority requires a compatible client and an available preview slot", { status: 409 });
+    }
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     this.ctx.acceptWebSocket(server, [String(who.id)]);
 
     const older = this.players.get(who.id);
-    if (older) this.evict(older, "replaced");
+    if (older) {
+      const closing = this.evict(older, "replaced");
+      if (closing) await closing;
+    }
     if (this.players.size >= MAX_PLAYERS) {
       this.send(server, { t: "kick", reason: "full" });
       server.close(CLOSE_KICK, "full");
@@ -351,7 +418,7 @@ export class Room extends DurableObject {
     }
 
     const spawn = spawnPoint(this.spawnSlot++);
-    const p = this.record(server, { ...who, connectionToken: crypto.randomUUID(), body: null, x: spawn.x, y: 0, z: spawn.z, yaw: spawn.yaw });
+    const p = this.record(server, { ...who, npcProtocol, bodyProtocol, bodyPresenceProtocol, bodyMigrationProtocol, bodyMotionProtocol, oogaMotionProtocol, ...(this.bodyHandoffRequired ? { bodyHandoff: true } : {}), connectionToken: crypto.randomUUID(), body: null, x: spawn.x, y: 0, z: spawn.z, yaw: spawn.yaw });
     const kept = this.pmAccounts.get(p.id);
     if (kept) p.pm.blocked = kept.blocked.slice();
     server.serializeAttachment(this.attachment(p));
@@ -360,9 +427,15 @@ export class Room extends DurableObject {
     if (own) for (const o of this.players.values()) if (o.body && bodyName(o.body).toLowerCase() === own) this.release(o, "owner-here");
     this.players.set(p.id, p);
 
+    // Fence before welcome: ordered delivery prevents a frame of browser AI and
+    // keeps feature negotiation independent of this optional preview.
+    if (this.npcAuthority) this.send(server, { t: "npc-authority", authority: npcAuthorityView(this.npcAuthority) });
+
     const others = [];
     for (const o of this.players.values()) if (o !== p) others.push(this.view(o));
-    this.send(server, { t: "welcome", you: this.view(p), players: others, connectionToken: p.connectionToken, tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers, ghostHost: this.ghostHostId, ghostFollowers: this.ghostFollowers, features: [CABINETS.FEATURE, "door", CHAT_FEATURE, PM_FEATURE, CHALK_FEATURE, "hockey-v4"] });
+    this.send(server, { t: "welcome", you: this.view(p), players: others, connectionToken: p.connectionToken, tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers, ghostHost: this.ghostHostId, ghostFollowers: this.ghostFollowers, features: [CABINETS.FEATURE, "door", CHAT_FEATURE, PM_FEATURE, CHALK_FEATURE, "hockey-v4", ...(bodyPresenceProtocol === 1 ? ["host-body-presence-v1"] : []),
+      ...(this.env.VIRTUAL_HOST_BODY_PREVIEW === "1" && this.env.VIRTUAL_HOST_MOVEMENT_PREVIEW === "1" && bodyProtocol === 2 && bodyMotionProtocol === 1
+        ? ["host-body-reclaim-v2", "host-body-motion-v1", ...(oogaMotionProtocol === 1 ? ["host-ooga-motion-v1"] : [])] : [])] });
     // A message of its own after welcome, so a page that does not know chat ignores it; empty after the room slept.
     this.send(server, { t: "chat-history", messages: this.chat.list() });
     this.sendCabinets(server);
@@ -371,6 +444,7 @@ export class Room extends DurableObject {
     this.sendStudio(p);
     this.updateVoice();
     await this.ensureSweep();
+    this.notifyWorld();
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -397,6 +471,81 @@ export class Room extends DurableObject {
     }
     p.seenAt = Date.now();
     if (!msg) return;
+    if (msg.t === "body-quiescent") {
+      if (this.env.VIRTUAL_HOST_BODY_PREVIEW !== "1") return;
+      return this.ctx.blockConcurrencyWhile(() => {
+        const q = p.bodyQuiescence;
+        if (this.players.get(p.id) !== p || p.bodyMigrationProtocol !== 1 || !p.bodyHandoff || p.bodyClosing
+          || this.npcAuthority?.mode !== "server" || !validBodyQuiescence(q)
+          || q.revision !== this.npcAuthority.revision || msg.revision !== q.revision || msg.request !== q.request)
+          return { status: "refused" };
+        if (!q.acknowledged) {
+          const next = { ...q, acknowledged: true };
+          p.ws.serializeAttachment(this.attachment({ ...p, bodyQuiescence: next }));
+          p.bodyQuiescence = next;
+        }
+        return { status: "acknowledged" };
+      });
+    }
+    if (msg.t === "body-motion-1" || msg.t === "body-motion-ooga-1") {
+      if (this.env.VIRTUAL_HOST_BODY_PREVIEW !== "1" || this.env.VIRTUAL_HOST_MOVEMENT_PREVIEW !== "1"
+        || p.bodyMotionProtocol !== 1 || msg.t === "body-motion-ooga-1" && p.oogaMotionProtocol !== 1
+        || p.bodyProtocol !== 2 || !p.bodyHandoff || p.bodyClosing
+        || !takeToken(p.bucket, MOVE_HZ, p.seenAt)) return;
+      return this.ctx.blockConcurrencyWhile(async () => {
+        if (this.players.get(p.id) !== p || p.bodyClosing || p.bodyClosedAt != null || p.bodyQuiescence
+          || this.npcAuthority?.mode !== "server") return { status: "refused" };
+        const ticket = { ...npcAuthorityView(this.npcAuthority), owner: this.npcAuthority.owner };
+        this.checkBodyHandoff(ticket);
+        const identity = { accountId: p.id, connection: p.connectionToken }, box = this.bodyHandoffController();
+        const result = await box.receiveMovement(identity, msg);
+        // Only a retained HOST receipt earns an ACK. A Room inbox write alone
+        // never tells the browser its recovery position has been accepted.
+        if (result.status === "accepted") {
+          await this.syncCommittedBodyParticipant(identity);
+          await box.deliverMovement(identity);
+        }
+        if (result.status === 'pending' || result.status === 'busy') this.notifyWorld();
+        return result;
+      });
+    }
+    if (["body-ready", "body-applied", "body-started", "body-decline"].includes(msg.t)) {
+      if (!p.bodyHandoff || p.bodyClosing || p.bodyProtocol !== 2) return;
+      return this.ctx.blockConcurrencyWhile(async () => {
+        const result = await this.bodyHandoffController().receive({ accountId: p.id, connection: p.connectionToken }, msg);
+        if (result.status === "closed") {
+          p.bodyClosedAt = result.record.closedAt;
+          p.ws.serializeAttachment(this.attachment(p));
+          await this.syncCommittedBodyParticipant({ accountId: p.id, connection: p.connectionToken });
+        }
+        if (['dispatch', 'pending', 'closed', 'expired'].includes(result.status)) this.notifyWorld();
+        return result;
+      });
+    }
+    if (msg.t === "body-presence-ack") {
+      if (this.env.VIRTUAL_HOST_BODY_PREVIEW !== "1" || p.bodyPresenceProtocol !== 1) return;
+      return this.ctx.blockConcurrencyWhile(async () => {
+        if (this.players.get(p.id) !== p || !this.npcAuthority || this.npcAuthority.mode !== "server") return;
+        const sent = p.bodyPresenceSent;
+        if (!sent || ["authority", "epoch", "revision"].some(k => msg[k] !== sent[k])) return;
+        p.bodyPresenceAck = sent; p.bodyPresenceSent = null;
+        p.ws.serializeAttachment(this.attachment(p));
+        const ticket = { ...npcAuthorityView(this.npcAuthority), owner: this.npcAuthority.owner };
+        const snapshot = await this.#readBodyPresence(ticket);
+        if (snapshot) this.sendBodyPresence(p, ticket, snapshot);
+      });
+    }
+    // Negotiated compact movement is the only staged-body ingress. Unsupported
+    // actions cannot silently fall back to ordinary body/pose reports.
+    if (p.bodyHandoff && ["body", "pose", "zone", "blend", "hp", "shot", "swing", "cabinet", "hockey", "wallet"].includes(msg.t)) return;
+    if (msg.t === "npc-ack") {
+      if (p.npcSent && msg.revision === p.npcSent.revision && msg.sequence === p.npcSent.sequence) {
+        p.npcAck = p.npcSent; p.npcSent = null;
+        p.ws.serializeAttachment(this.attachment(p));
+        this.sendNpcSnapshot(p);
+      }
+      return;
+    }
     if (msg.t === "cabinet") { this.cabinetMessage(p, msg); return; }
     // While playing, the room owns the floor pose and body, regardless of game-scene reports.
     if (p.cabinet && ["pose", "zone", "body", "blend", "hp", "shot", "swing", "hockey"].includes(msg.t)) return;
@@ -422,7 +571,15 @@ export class Room extends DurableObject {
       p.inHub = msg.on;
       this.electHost();
       // A page arriving on the island catches up with the NPCs at once rather than at the next frame.
-      if (p.inHub && p.id !== this.hostId && this.lastNpc) this.send(p.ws, this.lastNpc);
+      if (this.npcAuthority?.mode === "server") this.sendNpcSnapshot(p);
+      else if (p.inHub && p.id !== this.hostId && this.lastNpc) this.send(p.ws, this.lastNpc);
+      if (p.inHub && this.bodyPresenceRequired && p.bodyPresenceProtocol === 1 && this.env.VIRTUAL_HOST_BODY_PREVIEW === "1")
+        return this.ctx.blockConcurrencyWhile(async () => {
+          if (this.players.get(p.id) !== p || !p.inHub || this.npcAuthority?.mode !== "server") return;
+          const ticket = { ...npcAuthorityView(this.npcAuthority), owner: this.npcAuthority.owner };
+          const snapshot = await this.#readBodyPresence(ticket);
+          if (snapshot) this.sendBodyPresence(p, ticket, snapshot);
+        });
     } else if (msg.t === "visible") {
       // HALLOWEEN: a page hidden in the ghost arena hands its hosting on; shown again, it comes back a follower.
       if (msg.on === p.visible) return;
@@ -547,12 +704,12 @@ export class Room extends DurableObject {
   // The prototype's note stands: on this compatibility date close handlers must not call ws.close().
   webSocketClose(ws) {
     const p = this.byWs(ws);
-    if (p) this.drop(p, "closed");
+    if (p) return this.drop(p, "closed");
   }
 
   webSocketError(ws) {
     const p = this.byWs(ws);
-    if (p) this.drop(p, "error");
+    if (p) return this.drop(p, "error");
   }
 
   sendCabinets(ws = null) {
@@ -594,6 +751,13 @@ export class Room extends DurableObject {
 
   drop(p, reason) {
     if (this.players.get(p.id) !== p) return;
+    let closed;
+    if (p.bodyHandoff) {
+      p.bodyClosing = true; p.bodyClosedAt ??= Date.now();
+      p.ws.serializeAttachment(this.attachment(p));
+      closed = this.ctx.blockConcurrencyWhile(() => this.bodyHandoffController()
+        .close({ accountId: p.id, connection: p.connectionToken }, p.bodyClosedAt));
+    }
     this.releaseCabinet(p);
     hockey.leave(this, p.id);
     this.cancelDoor(p);
@@ -611,6 +775,7 @@ export class Room extends DurableObject {
       clearTimeout(this.flushTimer);
       this.flushTimer = 0;
     }
+    return closed?.then(result => { this.notifyWorld(); return result; });
   }
 
   release(p, reason) {
@@ -631,13 +796,436 @@ export class Room extends DurableObject {
 
   // An explicit kick before the close: a server-initiated close alone can leave the client in CLOSING.
   evict(p, reason) {
-    this.drop(p, reason);
+    const closed = this.drop(p, reason);
     this.send(p.ws, { t: "kick", reason });
     try {
       p.ws.close(CLOSE_KICK, reason);
     } catch {
       // Already closed.
     }
+    return closed;
+  }
+
+  bodyHandoffController() {
+    if (!this.bodyHandoff) this.bodyHandoff = new RoomBodyHandoff({ storage: this.ctx.storage, clock: () => Date.now(),
+      current: i => {
+        const p = this.players.get(i.accountId);
+        return !!p && p.bodyHandoff === true && !p.bodyClosing && p.bodyClosedAt == null && p.connectionToken === i.connection;
+      }, send: (i, message) => {
+        const p = this.players.get(i.accountId);
+        if (!p || p.bodyClosing || p.bodyClosedAt != null || p.connectionToken !== i.connection) return false;
+        try { p.ws.send(JSON.stringify(message)); return true; } catch { return false; }
+      } });
+    return this.bodyHandoff;
+  }
+
+  checkBodyHandoff(ticket) {
+    const status = this.npcAuthorityStatus(ticket), now = Date.now();
+    if (this.env.VIRTUAL_HOST_BODY_PREVIEW !== "1" || !status?.owns || now >= status.leaseUntil || now >= status.runUntil)
+      throw Error("body handoff preview disabled or fenced");
+  }
+
+  // Explicit finite server hooks; no HTTP route, host loop or welcome feature
+  // enables them. Claim/body data comes from the authenticated host runner only.
+  // Server-only admission lookup. Account, connection and character mapping
+  // come from the authenticated socket; this is not a client message type.
+  notifyWorld() {
+    // Off by default, with no deployed binding. The notification is never
+    // awaited inside a Room concurrency block: its receiver calls back into
+    // Room to read durable work and must not deadlock this object's input gate.
+    if (this.env.VIRTUAL_HOST_RUNNER_PREVIEW !== '1' || this.env.VIRTUAL_HOST_PREVIEW !== '1'
+      || this.env.VIRTUAL_HOST_BODY_PREVIEW !== '1' || this.env.VIRTUAL_HOST_MOVEMENT_PREVIEW !== '1'
+      || typeof this.env.VIRTUAL_WORLD?.getByName !== 'function') return false;
+    this.worldNotifier ||= createRoomWorldNotifier({
+      clock: () => Date.now(),
+      current: () => {
+        const a = this.npcAuthority;
+        return a?.mode === 'server' ? { v: 1, room: HUB_WORLD_OBJECT, world: a.world,
+          epoch: a.epoch, revision: a.revision, owner: a.owner, runUntil: a.runUntil } : null;
+      },
+      send: hint => this.env.VIRTUAL_WORLD.getByName(HUB_WORLD_OBJECT).notifyRoomWorld(hint),
+      hold: promise => this.background(promise),
+    });
+    return this.worldNotifier.notify();
+  }
+
+  bodyAdmissionCandidates(ticket) {
+    return this.ctx.blockConcurrencyWhile(async () => {
+      this.checkBodyHandoff(ticket);
+      if (this.players.size > 32 || [...this.players.values()].some(p => p.bodyProtocol !== 2 || p.bodyPresenceProtocol !== 1
+        || p.body !== null && !p.bodyHandoff)) throw Error('body admission incompatible occupants');
+      const retained = new Set((await this.bodyHandoffController().records()).map(row => row.accountId));
+      const candidates = [...this.players.values()].filter(p => !retained.has(p.id) && p.body === null && !p.bodyClosing
+        && p.bodyClosedAt == null && !p.bodyQuiescence && p.bodyMotionProtocol === 1 && p.oogaMotionProtocol === 1)
+        .sort((a, b) => a.id - b.id);
+      return { identities: candidates.slice(0, 4).map(p => ({ accountId: p.id, connection: p.connectionToken })), more: candidates.length > 4 };
+    });
+  }
+
+  bodyCandidate(ticket, identity, kind = 'ooga') {
+    return this.ctx.blockConcurrencyWhile(async () => {
+      this.checkBodyHandoff(ticket);
+      const p = this.players.get(identity?.accountId);
+      if (!p || p.connectionToken !== identity.connection || p.bodyProtocol !== 2 || p.bodyClosing || p.bodyQuiescence
+        || !['ooga', 'clanker'].includes(kind)) throw Error('body candidate connection mismatch');
+      const row = await this.bodyHandoffController().read(identity);
+      if (row) return { status: row.phase === 'closed' ? 'blocked' : 'retained', kind: row.kind, request: row.request };
+      if (p.body !== null || p.bodyMotionProtocol !== 1 || kind === 'ooga' && p.oogaMotionProtocol !== 1
+        || this.players.size > 32 || [...this.players.values()].some(o => o.bodyProtocol !== 2 || o.body !== null && !o.bodyHandoff))
+        throw Error('body candidate incompatible occupants');
+      const handle = ownedBody(CAST, p.login, p.contributor, p.id);
+      if (!handle) throw Error('body candidate character unavailable');
+      return { status: 'available', candidate: { accountId: p.id, bodyId: `player:${p.id}`, handle, kind } };
+    });
+  }
+
+  stageBodyHandoff(ticket, identity, preparation, kind, request, claim) {
+    return this.ctx.blockConcurrencyWhile(async () => {
+      this.checkBodyHandoff(ticket);
+      const p = this.players.get(identity?.accountId);
+      if (!p || p.connectionToken !== identity.connection || p.bodyProtocol !== 2 || p.bodyClosing || p.bodyQuiescence || p.body !== null
+        || preparation?.epoch !== ticket.epoch || preparation.world !== ticket.world
+        || preparation.bodyId !== `player:${p.id}` || claim?.accountId !== p.id || claim.bodyId !== preparation.bodyId)
+        throw Error("body handoff connection mismatch");
+      if (claim?.source && (claim.source.handle !== ownedBody(CAST, p.login, p.contributor, p.id)
+        || claim.source.kind !== kind || p.bodyMotionProtocol !== 1 || kind === 'ooga' && p.oogaMotionProtocol !== 1))
+        throw Error('body source identity or capability mismatch');
+      if (this.players.size > 32 || [...this.players.values()].some(o => o.bodyProtocol !== 2 || o.body !== null && !o.bodyHandoff))
+        throw Error("body handoff incompatible occupants");
+      const outbox = this.bodyHandoffController();
+      if (p.bodyClosedAt != null) {
+        // Only explicit server staging after durable cleanup may retry on the
+        // same voice connection. A retained close/uncertain operation blocks it.
+        // Absence also reconciles a crash after row retirement but before the
+        // attachment could be updated. Browser messages cannot clear this gate.
+        if (await outbox.read(identity)) throw Error("body handoff connection cleanup pending");
+        p.bodyClosedAt = null;
+      }
+      this.bodyHandoffRequired = true;
+      for (const o of this.players.values()) { o.bodyHandoff = true; o.ws.serializeAttachment(this.attachment(o)); }
+      const row = await outbox.prepare(identity, preparation, kind, request, claim);
+      await outbox.deliver(identity); return row;
+    });
+  }
+
+  async pendingBodyHandoff(ticket, identity) {
+    this.checkBodyHandoff(ticket);
+    return this.bodyHandoffController().pending(identity);
+  }
+
+  // Server-only census, never a browser-provided token list. Closed or uncertain
+  // outbox work must settle before absence may imply a disconnect. An RPC caller
+  // must also fence the host revision it read BEFORE requesting this census.
+  bodyCensus(ticket) {
+    return this.ctx.blockConcurrencyWhile(async () => {
+      this.checkBodyHandoff(ticket);
+      const tokens = [], closed = [], pending = [], unobserved = [];
+      for (const row of await this.bodyHandoffController().records()) {
+        const identity = { accountId: row.accountId, connection: row.connection };
+        const p = this.players.get(row.accountId);
+        if (row.phase === "closed") closed.push(identity);
+        else if (!p || p.connectionToken !== row.connection || p.bodyClosing || p.bodyClosedAt != null) unobserved.push(identity);
+        if (row.pending) pending.push(identity);
+        // Keep every known ref protected during explicit close reconciliation;
+        // otherwise closing one body could infer early closes for the others.
+        if (row.ref) tokens.push(row.ref.token);
+      }
+      return { ready: !closed.length && !pending.length && !unobserved.length, tokens, closed, pending, unobserved };
+    });
+  }
+
+  // A finite server work inventory. Expired preparation is closed at its
+  // original deadline; wake/retry cannot grant another preparation window.
+  // Frozen bodies whose outboxes were retired cause no work or socket writes.
+  bodyWork(ticket) {
+    return this.ctx.blockConcurrencyWhile(async () => {
+      this.checkBodyHandoff(ticket);
+      const box = this.bodyHandoffController(), tokens = [], events = [];
+      let nextDeadline = null;
+      for (let row of await box.records()) {
+        const identity = { accountId: row.accountId, connection: row.connection }, p = this.players.get(row.accountId);
+        const movement = await box.movement(identity, this.ctx.storage, row);
+        const deadline = row.transfer?.expiresAt ?? row.preparation.expiresAt;
+        if (row.phase !== "closed") {
+          const missing = !p || p.connectionToken !== row.connection || p.bodyClosing || p.bodyClosedAt != null;
+          const expired = !row.liveSent && Date.now() >= deadline;
+          if (missing || expired) {
+            // A missing socket uses the last durable observation. A known
+            // close attachment has the actual disconnect time instead.
+            const closedAt = missing ? p?.connectionToken === row.connection && Number.isSafeInteger(p.bodyClosedAt)
+              ? p.bodyClosedAt : Math.max(row.at, movement?.receivedAt ?? 0) : deadline;
+            row = await box.close(identity, closedAt);
+            await this.syncCommittedBodyParticipant(identity);
+          } else if (!row.liveSent) nextDeadline = Math.min(nextDeadline ?? Infinity, deadline);
+        }
+        if (row.ref) tokens.push(row.ref.token);
+        if (row.phase === "closed") events.push({ kind: "close", identity });
+        else if (row.pending) events.push({ kind: "handoff", identity });
+        else if (movement && !movement.receipt && !movement.fenced) events.push({ kind: "movement", identity });
+      }
+      const publication = await this.readBodyEventPublication();
+      return { tokens, events, nextDeadline, publicationPending: publication.pending ? publication.revision : null };
+    });
+  }
+
+  async readBodyEventPublication(tx = this.ctx.storage) {
+    const row = await tx.get("room-body-events-v1");
+    if (row === undefined) return { revision: 0, pending: false };
+    if (!row || Object.keys(row).sort().join() !== "pending,revision"
+      || !Number.isSafeInteger(row.revision) || row.revision < 1 || typeof row.pending !== "boolean")
+      throw Error("invalid body event publication marker");
+    return row;
+  }
+
+  beginBodyEventBatch(ticket) {
+    return this.ctx.blockConcurrencyWhile(() => {
+      this.checkBodyHandoff(ticket);
+      return this.ctx.storage.transaction(async tx => {
+        const old = await this.readBodyEventPublication(tx);
+        if (old.revision === Number.MAX_SAFE_INTEGER) throw Error("body event revision exhausted");
+        const revision = old.revision + 1;
+        await tx.put("room-body-events-v1", { revision, pending: true }); return revision;
+      });
+    });
+  }
+
+  completeBodyEventBatch(ticket, revision) {
+    return this.ctx.blockConcurrencyWhile(() => {
+      this.checkBodyHandoff(ticket);
+      if (!Number.isSafeInteger(revision) || revision < 1) throw Error("invalid body event revision");
+      return this.ctx.storage.transaction(async tx => {
+        const row = await this.readBodyEventPublication(tx);
+        if (row.revision !== revision) return false;
+        if (row.pending) await tx.put("room-body-events-v1", { revision, pending: false });
+        return true;
+      });
+    });
+  }
+
+  completeBodyHandoff(ticket, identity, revision, answer) {
+    return this.ctx.blockConcurrencyWhile(async () => {
+      this.checkBodyHandoff(ticket);
+      const outbox = this.bodyHandoffController(), row = await outbox.complete(identity, revision, answer);
+      await this.syncCommittedBodyParticipant(identity);
+      return { phase: row.phase, delivered: await outbox.deliver(identity) };
+    });
+  }
+
+  deliverBodyHandoff(ticket, identity) {
+    return this.ctx.blockConcurrencyWhile(async () => {
+      this.checkBodyHandoff(ticket);
+      const outbox = this.bodyHandoffController(), row = await outbox.read(identity);
+      await this.syncCommittedBodyParticipant(identity);
+      return { phase: row?.phase ?? null, delivered: await outbox.deliver(identity) };
+    });
+  }
+
+  // Explicit migration preparation only. It stops body control through the
+  // retained request; voice stays connected and no Room authority is released.
+  requestBodyStop(ticket, identity) {
+    return this.ctx.blockConcurrencyWhile(async () => {
+      this.checkBodyCleanup(ticket);
+      const p = this.players.get(identity?.accountId);
+      if (!p || p.connectionToken !== identity.connection || !p.bodyHandoff || p.bodyProtocol !== 2
+        || p.bodyClosing || p.bodyClosedAt != null) throw Error("body stop connection mismatch");
+      const box = this.bodyHandoffController(), row = await box.requestStop(identity);
+      return { phase: row.phase, requestedAt: row.stopAt, delivered: await box.deliver(identity) };
+    });
+  }
+
+  // A viewer never offered a body has no handoff request to stop. Its scene
+  // must explicitly prove quiescence before a connected mode release instead.
+  requestBodyQuiescence(ticket, identity) {
+    return this.ctx.blockConcurrencyWhile(async () => {
+      this.checkBodyCleanup(ticket);
+      const p = this.players.get(identity?.accountId);
+      if (!p || p.connectionToken !== identity.connection || !p.bodyHandoff || p.bodyMigrationProtocol !== 1
+        || p.bodyProtocol !== 2 || p.bodyClosing || p.bodyClosedAt != null || p.body !== null
+        || (await this.bodyHandoffController().index(this.ctx.storage)).includes(p.id))
+        throw Error("body quiescence requires an untouched current viewer");
+      let q = p.bodyQuiescence;
+      if (q && !validBodyQuiescence(q)) throw Error("invalid body quiescence attachment");
+      if (!q || q.revision !== this.npcAuthority.revision) {
+        q = { request: crypto.randomUUID().replaceAll("-", ""), revision: this.npcAuthority.revision, acknowledged: false };
+        // Attachment commit precedes notification and the in-memory proof.
+        p.ws.serializeAttachment(this.attachment({ ...p, bodyQuiescence: q }));
+        p.bodyQuiescence = q;
+      }
+      this.send(p.ws, { t: "body-quiesce", v: 1, accountId: p.id, connection: p.connectionToken,
+        request: q.request, authority: npcAuthorityView(this.npcAuthority) });
+      return { acknowledged: q.acknowledged, request: q.request, revision: q.revision };
+    });
+  }
+
+  // Finite private hooks and explicitly negotiated compact preview ingress.
+  // Production routing, cadence and combined costs still require validation.
+  stageBodyMovement(ticket, identity, message) {
+    return this.ctx.blockConcurrencyWhile(() => {
+      this.checkBodyHandoff(ticket); return this.bodyHandoffController().receiveMovement(identity, message);
+    });
+  }
+  pendingBodyMovement(ticket, identity) {
+    this.checkBodyHandoff(ticket); return this.bodyHandoffController().pendingMovement(identity);
+  }
+  completeBodyMovement(ticket, identity, sequence, answer) {
+    return this.ctx.blockConcurrencyWhile(async () => {
+      this.checkBodyHandoff(ticket);
+      const box = this.bodyHandoffController(); await box.completeMovement(identity, sequence, answer);
+      await this.syncCommittedBodyParticipant(identity);
+      return { delivered: await box.deliverMovement(identity) };
+    });
+  }
+  fenceBodyMovement(ticket, identity, sequence, proof) {
+    return this.ctx.blockConcurrencyWhile(() => {
+      this.checkBodyHandoff(ticket); return this.bodyHandoffController().fenceMovement(identity, sequence, proof);
+    });
+  }
+
+  async syncCommittedBodyParticipant(identity) {
+    const p = this.players.get(identity.accountId);
+    if (!p || p.connectionToken !== identity.connection || !p.bodyHandoff) return false;
+    const box = this.bodyHandoffController(), row = await box.read(identity);
+    if (!row || this.players.get(p.id) !== p || p.connectionToken !== identity.connection) return false;
+    const bodyId = `player:${p.id}`;
+    if (row.phase === "closed" || p.bodyClosing || p.bodyClosedAt != null) {
+      if (p.body !== bodyId) return false;
+      p.ws.serializeAttachment(this.attachment({ ...p, body: null })); p.body = null;
+      this.broadcast({ t: "body", id: p.id, name: null }); this.updateVoice(); return true;
+    }
+    if (this.env.VIRTUAL_HOST_MOVEMENT_PREVIEW !== "1" || row.phase !== "live" || !["clanker", "ooga"].includes(row.kind)
+      || row.preparation.bodyId !== bodyId) return false;
+    const view = row.transfer.view, movement = await box.movement(identity);
+    const accepted = movement?.receipt && !movement.fenced;
+    // A new pending inbox sample replaces its predecessor. The attachment is
+    // the last published position; waking must not roll it back to the grant.
+    if (!accepted && p.body === bodyId && p.bodyPresentedRequest === row.request) return false;
+    const checkpoint = accepted ? movement.checkpoint : row.transfer.checkpoint;
+    const values = row.kind === "clanker" && Array.isArray(checkpoint?.body) && checkpoint.body.length === 10
+      ? checkpoint.body.slice(1, 5) : row.kind === "ooga" && checkpoint?.kind === "ooga" && checkpoint.position
+        ? [checkpoint.position.x, checkpoint.position.y, checkpoint.position.z, checkpoint.position.yaw] : null;
+    if (!values || checkpoint.v !== 1 || checkpoint.world !== row.preparation.world || typeof view.zone !== "string"
+      || !ZONE_NAME.test(view.zone)) throw Error("committed body presentation incompatible");
+    const position = values.map(v => v === "-0" ? -0 : v);
+    if (!position.every(Number.isFinite)) throw Error("committed body presentation invalid");
+    if (this.players.get(p.id) !== p || p.bodyClosing || p.bodyClosedAt != null) return false;
+    const changed = p.body !== bodyId || p.zone !== view.zone;
+    if (!changed && p.bodyPresentedRequest === row.request && p.x === position[0] && p.y === position[1] && p.z === position[2] && p.yaw === position[3]) return false;
+    const next = { ...p, body: bodyId, bodyPresentedRequest: row.request, zone: view.zone, x: position[0], y: position[1], z: position[2], yaw: position[3],
+      g: null, j: 0, w: 0, v: null, r: undefined, hp: 100, ko: false };
+    // A failed attachment write is recoverable from the durable row/host receipt
+    // on wake; never publish an uncommitted inbox sample as accepted movement.
+    p.ws.serializeAttachment(this.attachment(next)); Object.assign(p, next);
+    if (changed) { this.broadcast({ t: "body", id: p.id, name: bodyId }); this.updateVoice(); }
+    this.dirty = true; this.scheduleFlush(); return true;
+  }
+
+  closedBodyHandoff(ticket, identity) {
+    this.checkBodyHandoff(ticket); return this.bodyHandoffController().cleanup(identity);
+  }
+
+  resolveBodyHandoff(ticket, identity, revision, proof) {
+    return this.ctx.blockConcurrencyWhile(() => {
+      this.checkBodyHandoff(ticket); return this.bodyHandoffController().resolveClosed(identity, revision, proof);
+    });
+  }
+
+  // Cleanup is fenced by the exact retained Room authority, even after its
+  // finite lease/run expires. It never renews either, delivers a grant or opens
+  // live commands. A takeover changes revision/owner and fences every old call.
+  checkBodyCleanup(ticket) {
+    if (this.env.VIRTUAL_HOST_BODY_PREVIEW !== "1" || !this.npcAuthorityStatus(ticket)?.owns)
+      throw Error("body cleanup preview disabled or fenced");
+  }
+
+  closedBodyRecovery(ticket, identity) {
+    return this.ctx.blockConcurrencyWhile(async () => {
+      this.checkBodyCleanup(ticket);
+      const box = this.bodyHandoffController(), close = await box.cleanup(identity);
+      if (!close) return null;
+      return { close, pending: await box.pending(identity), movement: await box.pendingMovement(identity) };
+    });
+  }
+
+  // Private finite-run retirement. No live grants, voice teardown or new
+  // admission. Retry reads the retained closed rows and original run deadline.
+  bodyRetirementWork(ticket) {
+    return this.ctx.blockConcurrencyWhile(async () => {
+      this.checkBodyCleanup(ticket);
+      const status = this.npcAuthorityStatus(ticket), now = Date.now();
+      if (!Number.isSafeInteger(status.runUntil) || now < status.runUntil)
+        throw Error('world run has not ended');
+      const box = this.bodyHandoffController(), rows = await box.records();
+      if (rows.length > 32) throw Error('body retirement capacity');
+      const identities = [];
+      for (const row of rows.slice(0, 4)) {
+        const identity = { accountId: row.accountId, connection: row.connection };
+        if (row.phase !== 'closed') {
+          await box.close(identity, status.runUntil);
+          await this.syncCommittedBodyParticipant(identity);
+        }
+        identities.push(identity);
+      }
+      return { identities, more: rows.length > identities.length };
+    });
+  }
+
+  completeClosedBodyRecovery(ticket, identity, revision, answer) {
+    return this.ctx.blockConcurrencyWhile(async () => {
+      this.checkBodyCleanup(ticket);
+      const box = this.bodyHandoffController(), pending = await box.pending(identity);
+      if (!pending?.closed) throw Error("closed body recovery required");
+      // Recovered/cancelled host receipt only. Never call deliver here.
+      return box.complete(identity, revision, answer);
+    });
+  }
+
+  fenceClosedBodyMovement(ticket, identity, sequence, proof) {
+    return this.ctx.blockConcurrencyWhile(() => {
+      this.checkBodyCleanup(ticket);
+      return this.bodyHandoffController().fenceMovement(identity, sequence, proof);
+    });
+  }
+
+  resolveClosedBodyRecovery(ticket, identity, revision, proof) {
+    return this.ctx.blockConcurrencyWhile(() => {
+      this.checkBodyCleanup(ticket);
+      return this.bodyHandoffController().resolveClosed(identity, revision, proof);
+    });
+  }
+
+  // Durably retain the bounded public presentation before the host frees any
+  // departure slots. This is an internal preview RPC, not a browser ACK or a
+  // control grant. Expired Room authority may finish cleanup, never renew it.
+  retainBodyPresence(ticket, hostTicket, frame) {
+    return this.ctx.blockConcurrencyWhile(async () => {
+      this.checkBodyCleanup(ticket);
+      if (this.players.size > 32 || [...this.players.values()].some(p => p.bodyPresenceProtocol !== 1))
+        throw Error("body presence incompatible occupants");
+      const retained = await new RoomBodyPresence(this.ctx.storage, () => Date.now()).retain(ticket, hostTicket, frame);
+      this.bodyPresenceRequired = true;
+      this.bodyPresenceCache = null;
+      return retained;
+    });
+  }
+
+  // Called only inside a Room concurrency block. One validated latest frame
+  // per authority, invalidated after every retained commit; socket ACKs and
+  // hub toggles must not multiply durable reads by the number of viewers.
+  async #readBodyPresence(ticket) {
+    this.checkBodyCleanup(ticket);
+    if (!this.bodyPresenceCache || this.bodyPresenceCache.revision !== ticket.revision) {
+      const snapshot = await new RoomBodyPresence(this.ctx.storage, () => Date.now()).snapshot(ticket);
+      this.bodyPresenceCache = { revision: ticket.revision, snapshot };
+    }
+    const snapshot = this.bodyPresenceCache.snapshot;
+    if (!snapshot) return null;
+    const now = Date.now();
+    if (!Number.isSafeInteger(now) || now < snapshot.frame.now) throw Error("invalid body presentation clock");
+    return { frame: snapshot.frame, stale: now >= snapshot.frame.expiresAt };
+  }
+
+  bodyPresenceStatus(ticket) {
+    return this.ctx.blockConcurrencyWhile(async () => structuredClone(await this.#readBodyPresence(ticket)));
   }
 
   // One snapshot at most every 1/TICK_HZ while poses arrive, and nothing pending once they stop, so the
@@ -820,8 +1408,236 @@ export class Room extends DurableObject {
     for (const q of peers) this.send(q.ws, thumpAudible(q, p, this.studio) ? heard : seen);
   }
 
+  // Internal RPCs, deliberately unavailable unless explicitly enabled in a
+  // local preview. No deployed config sets this flag and no HTTP route calls it.
+  npcAuthorityStatus(ticket) {
+    const r = this.npcAuthority;
+    if (!r) return null;
+    return { authority: npcAuthorityView(r), sequence: r.sequence, at: r.at,
+      ...(r.cadence ? { cadence: npcCadenceName(r), nextPublishAt: npcNextPublicationAt(r) } : {}),
+      leaseUntil: r.leaseUntil, runUntil: r.runUntil,
+      owns: r.mode === "server" && ticket?.revision === r.revision && ticket.v === r.v && ticket.format === r.format && ticket.world === r.world
+        && ticket.epoch === r.epoch && ticket.owner === r.owner };
+  }
+
+  async configureNpcAuthority(expectedRevision, next) {
+    if (this.env.VIRTUAL_HOST_PREVIEW !== "1") throw new Error("NPC authority preview disabled");
+    if (next?.cadence !== undefined && this.env[next.cadence === "rate-4-burst-2-v1"
+      ? "VIRTUAL_HOST_BURST_PREVIEW" : "VIRTUAL_HOST_ROLLING_PREVIEW"] !== "1") throw new Error("NPC cadence preview disabled");
+    return this.ctx.blockConcurrencyWhile(async () => {
+      if (this.bodyHandoffRequired && next?.mode === "browser") throw new Error("body handoff drain required before authority release");
+      if (this.bodyPresenceRequired && next?.mode === "browser") throw new Error("body presence drain required before authority release");
+      // Check occupants while joins are blocked, not before entering the gate.
+      // No deployed config or browser advertises the unfinished mixed format.
+      if (next?.mode === "server" && ["mixed-1", "mixed-2", "mixed-3"].includes(next.format) && this.env.VIRTUAL_HOST_MIXED_PREVIEW !== "1") throw new Error("NPC mixed preview disabled");
+      const requested = { v: next?.format === "mixed-3" ? 4 : next?.format === "mixed-2" ? 3 : next?.format === "mixed-1" ? 2 : 1 };
+      if (next?.mode === "server" && (this.players.size > 32 || [...this.players.values()].some(p => !npcProtocolSupports(p.npcProtocol, requested)))) {
+        throw new Error("NPC authority incompatible occupants");
+      }
+      const r = await new RoomNpcAuthority(this.ctx.storage, () => Date.now()).change(expectedRevision, next);
+      this.applyNpcAuthority(r);
+      return npcAuthorityView(r);
+    });
+  }
+
+  async publishNpcSnapshot(ticket, sequence, frame) {
+    if (this.env.VIRTUAL_HOST_PREVIEW !== "1") throw new Error("NPC authority preview disabled");
+    return this.ctx.blockConcurrencyWhile(async () => {
+      if (this.npcAuthority?.v >= 2 && this.env.VIRTUAL_HOST_MIXED_PREVIEW !== "1") throw new Error("NPC mixed preview disabled");
+      if (this.npcAuthority?.cadence && this.env[npcCadenceName(this.npcAuthority) === "rate-4-burst-2-v1"
+        ? "VIRTUAL_HOST_BURST_PREVIEW" : "VIRTUAL_HOST_ROLLING_PREVIEW"] !== "1") throw new Error("NPC cadence preview disabled");
+      const { record, duplicate } = await new RoomNpcAuthority(this.ctx.storage, () => Date.now()).publish(ticket, sequence, frame);
+      this.applyNpcAuthority(record);
+      return { revision: record.revision, sequence: record.sequence, publishedAt: record.at, duplicate,
+        ...(record.cadence ? { cadence: npcCadenceName(record), nextPublishAt: npcNextPublicationAt(record) } : {}) };
+    });
+  }
+
+  async fenceNpcAuthority(intent) {
+    if (this.env.VIRTUAL_HOST_PREVIEW !== "1") throw new Error("NPC authority preview disabled");
+    return this.ctx.blockConcurrencyWhile(async () => {
+      // This preserves the negotiated format/cadence and only removes the old
+      // publisher. It neither grants a browser body nor restarts a finite run.
+      const r = await new RoomNpcAuthority(this.ctx.storage, () => Date.now()).fence(intent);
+      this.applyNpcAuthority(r);
+      return npcAuthorityView(r);
+    });
+  }
+
+  // Only explicit trusted recovery may undo an operator's browser release.
+  // Preserve every handoff/presence record and retain the negotiated rate policy.
+  async reacquireNpcAuthority(expectedRevision, intent, format) {
+    if (this.env.VIRTUAL_HOST_PREVIEW !== "1") throw Error("NPC authority preview disabled");
+    return this.ctx.blockConcurrencyWhile(async () => {
+      if (!["legacy-1", "mixed-1", "mixed-2", "mixed-3"].includes(format)
+        || format !== "legacy-1" && this.env.VIRTUAL_HOST_MIXED_PREVIEW !== "1") throw Error("NPC recovery format disabled");
+      const cadence = npcCadenceName(this.npcAuthority);
+      if (cadence && this.env[cadence === "rate-4-burst-2-v1"
+        ? "VIRTUAL_HOST_BURST_PREVIEW" : "VIRTUAL_HOST_ROLLING_PREVIEW"] !== "1") throw Error("NPC cadence preview disabled");
+      if ((this.bodyHandoffRequired || this.bodyPresenceRequired) && this.env.VIRTUAL_HOST_BODY_PREVIEW !== "1")
+        throw Error("body recovery preview disabled");
+      const requested = { v: format === "mixed-3" ? 4 : format === "mixed-2" ? 3 : format === "mixed-1" ? 2 : 1 };
+      if (this.players.size > 32 || [...this.players.values()].some(p => !npcProtocolSupports(p.npcProtocol, requested)
+        || this.bodyHandoffRequired && p.bodyProtocol !== 2 || this.bodyPresenceRequired && p.bodyPresenceProtocol !== 1))
+        throw Error("NPC recovery incompatible occupants");
+      const r = await new RoomNpcAuthority(this.ctx.storage, () => Date.now()).reacquire(expectedRevision, intent, format);
+      this.applyNpcAuthority(r);
+      return npcAuthorityView(r);
+    });
+  }
+
+  // Default release still requires body-mode viewers to leave. The separate
+  // connected operation requires an explicit capability and stopped bodies.
+  async releaseDrainedNpcAuthority(expectedRevision, intent) {
+    return this.releaseBodyAuthority(expectedRevision, intent, false);
+  }
+
+  async releaseConnectedNpcAuthority(expectedRevision, intent) {
+    return this.releaseBodyAuthority(expectedRevision, intent, true);
+  }
+
+  async releaseBodyAuthority(expectedRevision, intent, connected) {
+    if (typeof connected !== "boolean") throw Error("explicit body migration required");
+    if (this.env.VIRTUAL_HOST_PREVIEW !== "1") throw Error("NPC authority preview disabled");
+    const claim = structuredClone(intent);
+    return this.ctx.blockConcurrencyWhile(async () => {
+      if (!connected && (this.bodyHandoffRequired || this.bodyPresenceRequired) && this.players.size)
+        throw Error("Room occupants must leave before body-mode release");
+      if ((connected || this.bodyHandoffRequired || this.bodyPresenceRequired) && this.env.VIRTUAL_HOST_BODY_PREVIEW !== "1")
+        throw Error("body recovery preview disabled");
+      if (connected && (this.players.size > ROOM_BODY_RELEASE.max || [...this.players.values()].some(p =>
+        p.bodyMigrationProtocol !== 1 || p.body !== null || p.bodyClosing
+        || p.bodyHandoff && !Number.isSafeInteger(p.bodyClosedAt) && !(validBodyQuiescence(p.bodyQuiescence)
+          && p.bodyQuiescence.acknowledged && p.bodyQuiescence.revision === this.npcAuthority?.revision))))
+        throw Error("body migration incompatible or unstopped occupants");
+      const state = new RoomNpcAuthority(this.ctx.storage, () => Date.now());
+      let release = null;
+      const r = await this.ctx.storage.transaction(async tx => {
+        if ((await this.bodyHandoffController().index(tx)).length) throw Error("body handoff drain required before authority release");
+        const next = await state.releaseDrained(tx, expectedRevision, claim);
+        if (connected) {
+          release = validateBodyRelease(structuredClone({ v: 1, authority: npcAuthorityView(next),
+            clients: [...this.players.values()].map(p => ({ accountId: p.id, connection: p.connectionToken })) }));
+          await tx.put(ROOM_BODY_RELEASE.key, release);
+        } else await tx.delete(ROOM_BODY_RELEASE.key);
+        // No host bodies/departures (persisted release intent), no Room outbox.
+        // Connected recipients keep the durable receipt until explicit replacement.
+        await tx.delete(ROOM_BODY.key); await tx.delete(ROOM_BODY_PRESENCE.key);
+        return next;
+      });
+      this.bodyHandoffRequired = this.bodyPresenceRequired = false;
+      this.bodyPresenceCache = null;
+      this.applyNpcAuthority(r);
+      if (release) this.applyBodyRelease(release);
+      return npcAuthorityView(r);
+    });
+  }
+
+  applyBodyRelease(record) {
+    const r = validateBodyRelease(record), a = this.npcAuthority;
+    if (!a || r.authority.revision > a.revision) throw Error("body release authority missing");
+    if (a.mode !== "browser" || a.revision !== r.authority.revision) return false;
+    for (const c of r.clients) {
+      const p = this.players.get(c.accountId);
+      if (!p || p.connectionToken !== c.connection || p.bodyMigrationProtocol !== 1) continue;
+      if (p.bodyReleasedRevision !== a.revision) {
+        p.bodyHandoff = false; p.bodyClosedAt = null; p.bodyClosing = false;
+        p.bodyQuiescence = null;
+        p.bodyPresenceSent = p.bodyPresenceAck = null; p.bodyReleasedRevision = a.revision;
+        p.ws.serializeAttachment(this.attachment(p));
+      }
+      this.send(p.ws, { t: "body-release", v: 1, ...c, authority: r.authority });
+    }
+    return true;
+  }
+
+  deliverBodyRelease(revision) {
+    return this.ctx.blockConcurrencyWhile(async () => {
+      if (this.npcAuthority?.mode !== "browser" || this.npcAuthority.revision !== revision) throw Error("body release fenced");
+      const record = await this.ctx.storage.get(ROOM_BODY_RELEASE.key);
+      if (!record || record.authority?.revision !== revision) throw Error("body release receipt missing");
+      return this.applyBodyRelease(record);
+    });
+  }
+
+  applyNpcAuthority(r) {
+    const old = this.npcAuthority;
+    if (old && (r.revision < old.revision || r.revision === old.revision && r.sequence < old.sequence)) return;
+    const changed = !old || old.revision !== r.revision;
+    this.npcAuthority = r;
+    this.npcPacked = null;
+    if (changed) {
+      this.worldNotifier?.dispose(); this.worldNotifier = null;
+      this.lastNpc = null;
+      for (const p of this.players.values()) {
+        // Credit survives hibernation too. Repeated wakes cannot enqueue another
+        // frame for a socket still holding the previous unacknowledged one.
+        if (p.npcSent?.revision !== r.revision) p.npcSent = null;
+        if (p.npcAck?.revision !== r.revision) p.npcAck = null;
+        p.ws.serializeAttachment(this.attachment(p));
+      }
+      // Incompatible sockets can survive a deployment in attachments. Their
+      // ordinary close path still releases voice and unrelated occupancy now.
+      if (r.mode === "server") for (const p of this.players.values()) if (!npcProtocolSupports(p.npcProtocol, r)) this.evict(p, "protocol");
+      // Announce the selected browser host before its release descriptor, so
+      // clients stay server-fenced until the replacement identity is known.
+      this.electHost();
+      this.broadcast({ t: "npc-authority", authority: npcAuthorityView(r) });
+      this.notifyWorld();
+    }
+    for (const p of this.players.values()) this.sendNpcSnapshot(p);
+  }
+
+  sendNpcSnapshot(p) {
+    const r = this.npcAuthority;
+    if (r?.mode !== "server" || !r.frame || !p.inHub || !npcProtocolSupports(p.npcProtocol, r) || p.npcSent
+      || p.npcAck?.revision === r.revision && p.npcAck.sequence === r.sequence) return;
+    // One unacknowledged frame per socket, one latest durable frame for the room.
+    // Slow clients skip intermediate states; no per-client frame queue or timer.
+    p.npcSent = { revision: r.revision, sequence: r.sequence };
+    p.ws.serializeAttachment(this.attachment(p));
+    // Validate/decompress and wrap once for the whole fanout, not per viewer.
+    // The cache is only this committed latest frame and is cleared on replacement.
+    this.send(p.ws, this.npcPacked || (this.npcPacked = packNpcSnapshot(r)));
+  }
+
+  // Explicit event delivery, one latest durable frame and one outstanding
+  // credit per compatible socket. No automatic cadence, retry timer or queue.
+  deliverBodyPresence(ticket) {
+    return this.ctx.blockConcurrencyWhile(async () => {
+      this.checkBodyCleanup(ticket);
+      if (this.players.size > 32) throw Error("body presence preview capacity");
+      const snapshot = await this.#readBodyPresence(ticket);
+      if (!snapshot) return { delivered: 0 };
+      let delivered = 0;
+      for (const p of this.players.values()) if (this.sendBodyPresence(p, ticket, snapshot)) delivered++;
+      return { delivered };
+    });
+  }
+
+  sendBodyPresence(p, ticket, snapshot) {
+    if (p.bodyPresenceProtocol !== 1 || !p.inHub) return false;
+    const next = { authority: ticket.revision, epoch: snapshot.frame.epoch, revision: snapshot.frame.revision };
+    // A Room takeover invalidates the old connection credit. Same-authority
+    // updates coalesce while one frame is unacknowledged, even across a restart.
+    if (p.bodyPresenceSent?.authority !== ticket.revision) p.bodyPresenceSent = null;
+    if (p.bodyPresenceAck?.authority !== ticket.revision) p.bodyPresenceAck = null;
+    if (p.bodyPresenceSent || p.bodyPresenceAck && ["authority", "epoch", "revision"].every(k => p.bodyPresenceAck[k] === next[k])) return false;
+    const sentAt = Date.now();
+    if (!Number.isSafeInteger(sentAt) || sentAt < snapshot.frame.now) return false;
+    p.bodyPresenceSent = next;
+    p.ws.serializeAttachment(this.attachment(p));
+    this.send(p.ws, { t: "body-presence", authority: npcAuthorityView(this.npcAuthority),
+      frame: snapshot.frame, stale: sentAt >= snapshot.frame.expiresAt, sentAt });
+    return true;
+  }
+
   // Also after any page's `hub` flag changes: the host sends frames only while someone follows.
   electHost() {
+    if (this.npcAuthority?.mode === "server") {
+      this.hostId = 0; this.followers = 0; this.lastNpc = null;
+      return;
+    }
     const id = electHost(this.players.values(), this.hostId);
     const followers = npcFollowers(this.players.values(), id);
     if (id === this.hostId && followers === this.followers) return;
@@ -858,7 +1674,7 @@ export class Room extends DurableObject {
   // A binary frame is the NPC host's poses: taken only from the current host, capped in size and rate,
   // and relayed unchanged to every other page showing the island.
   npcFrame(p, data) {
-    if (p.id !== this.hostId || !p.inHub) return;
+    if (this.npcAuthority?.mode === "server" || p.id !== this.hostId || !p.inHub) return;
     if (!(data instanceof ArrayBuffer) || data.byteLength > NPC_FRAME_MAX) return;
     if (!takeToken(p.npcBucket, NPC_HZ, Date.now())) return;
     p.seenAt = Date.now();

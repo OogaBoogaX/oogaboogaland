@@ -1,6 +1,7 @@
 (() => {
   "use strict";
-  const BL = window.BL = window.BL || {};
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
   // Construction checkpoints (see build-tasks.js). They reach it only when sliced, so an unsliced build runs without it.
   const due = (slice, mask) => !!slice && BL.buildTasks.due(slice, mask);
   const pause = function* (slice) { if (slice) yield* BL.buildTasks.pause(slice); };

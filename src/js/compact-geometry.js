@@ -2,8 +2,10 @@
 // remains available for context restoration and Canvas 2D; this does not change either renderer's GPU upload format.
 (() => {
   "use strict";
-  const BL = window.BL = window.BL || {};
-  const enabled = new URLSearchParams(window.location.search).get("compactGeometry") !== "0";
+  // Headless (no window), there is no page address to opt out with: on, as in a browser without the flag.
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
+  const enabled = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search).get("compactGeometry") !== "0";
   const CORE = new Set(["i", "color"]);
   const own = Object.prototype.hasOwnProperty, INDEX = /^(0|[1-9][0-9]*)$/;
   const indexOf = (key) => typeof key === "string" && INDEX.test(key) ? Number(key) : -1;

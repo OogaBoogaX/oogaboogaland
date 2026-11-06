@@ -19,7 +19,8 @@
 (() => {
   "use strict";
 
-  const BL = window.BL = window.BL || {};
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
   const { models, math } = BL;
   const { cached, box, bevelBox, lathe, tube, merge, noShadow, geometry, pushVert, face, makeVox, voxelGeometry, moved, turnedX, turnedY, turnedZ, prism, beam, forwardLathe, turn, shaded, torus, along, chain, railParts, columnParts, deckGrid, deckPosts, deckParts, stairParts, lanternParts, LANTERN_GLASS } = models;
   const { mulberry32, hexToRgb } = math;

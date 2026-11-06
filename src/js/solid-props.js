@@ -3,7 +3,8 @@
 // `shoulderAt` and `isActive`.
 (() => {
   "use strict";
-  const BL = window.BL = window.BL || {};
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
   const { mat4 } = BL.math;
   const EPS = 1e-7, geometries = new WeakMap();
   // Props use their render mesh or an explicit collision shell; a shared local-space tree preserves openings in
@@ -51,11 +52,23 @@
     geometries.set(geometry, cached);
     return cached;
   };
-  const create = () => {
+  const create = ({ lazyShoulders = false } = {}) => {
+    if (typeof lazyShoulders !== "boolean") throw Error("invalid shoulder scratch policy");
     const entries = [], registered = new Map(), transforms = new WeakMap(), stack = new Int32Array(64), triangle = new Float64Array(9), query = new Float64Array(6);
     const clipA = new Float64Array(15), clipB = new Float64Array(15);
     let shoulderPolygons = new Float64Array(0), shoulderAcross = new Float64Array(0), shoulderSeen = new Uint8Array(0), shoulderQueue = new Int32Array(0);
-    const stats = { nodes: 0, active: 0, transforms: 0, triangles: 0, queries: 0, triangleTests: 0, candidates: 0 };
+    const stats = { nodes: 0, active: 0, transforms: 0, triangles: 0, queries: 0, triangleTests: 0, candidates: 0, shoulderBytes: 0 };
+    const reserveShoulders = (count, limit = count) => {
+      if (count <= shoulderSeen.length) return;
+      const size = lazyShoulders ? Math.min(limit, Math.max(count, 64, shoulderSeen.length * 2)) : count;
+      const polygons = new Float64Array(size * 15), across = new Float64Array(size * 2);
+      // Host queries may grow while collecting a connected surface. Preserve
+      // every earlier polygon/contact; the queue and seen flags start afterward.
+      if (lazyShoulders) { polygons.set(shoulderPolygons); across.set(shoulderAcross); }
+      shoulderPolygons = polygons; shoulderAcross = across;
+      shoulderSeen = new Uint8Array(size); shoulderQueue = new Int32Array(size);
+      stats.shoulderBytes = polygons.byteLength + across.byteLength + shoulderSeen.byteLength + shoulderQueue.byteLength;
+    };
     let generation = 0;
     // Broad phase: a uniform XZ grid of entry indices over the union of entry boxes, rebuilt by counting sort
     // (so every cell lists ascending indices) on the first query after the entry list changes or a box leaves
@@ -78,7 +91,7 @@
       if (!state) { state = transformState(); transforms.set(node, state); }
       if (state.stamp === generation) return state.active;
       state.stamp = generation;
-      const active = node.visible && (!node.parent || refreshWorld(node.parent));
+      const active = node.visible && !node.collisionDisabled && (!node.parent || refreshWorld(node.parent));
       state.active = active;
       if (!active) return false;
       const values = state.values, p = node.position, r = node.rotation, s = node.scale, q = node.quaternion;
@@ -112,11 +125,7 @@
           const geometry = geometryOf(node.geometry);
           if (geometry.nodes.length) {
             const count = geometry.triangles.length / 3;
-            if (count > shoulderSeen.length) {
-              shoulderPolygons = new Float64Array(count * 15);
-              shoulderAcross = new Float64Array(count * 2);
-              shoulderSeen = new Uint8Array(count); shoulderQueue = new Int32Array(count);
-            }
+            if (!lazyShoulders) reserveShoulders(count);
             const entry = { node, geometry, world: mat4.create(), inverse: mat4.create(), inverseStale: true, box: new Float64Array(6), span: new Int32Array(4), active: false, initialized: false, orientation: 1, shoulderOnly,
               gorillaSteps: node.gorillaSteps || node.geometry.gorillaSteps, gorillaStepAll: !!node.gorillaStepAll, ragePass };
             entries.push(entry); registered.set(node, entry); gridDirty = true;
@@ -572,6 +581,7 @@
             transformTriangle(entry, index);
             const top = Math.max(triangle[1], triangle[4], triangle[7]);
             if (top <= bottomY + EPS || Math.min(triangle[1], triangle[4], triangle[7]) >= y + height - EPS) continue;
+            if (lazyShoulders) reserveShoulders(count + 1, entry.geometry.triangles.length / 3);
             const start = count * 15, contact = count * 2;
             shoulderAcross[contact] = Infinity; shoulderAcross[contact + 1] = -Infinity;
             let distance = Infinity;

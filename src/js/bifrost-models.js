@@ -14,7 +14,8 @@
 // floor, shared by the scene's walkers and its tests.
 (() => {
   "use strict";
-  const BL = window.BL = window.BL || {};
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
   const { models, math } = BL;
   const { cached, variants, geometry, pushVert, face, box, bevelBox, lathe, ring, tube, merge, forward, moved, turnedX, turnedY, turnedZ, noShadow, makeVox, voxelGeometry } = models;
   const { hexToRgb, mulberry32 } = math;

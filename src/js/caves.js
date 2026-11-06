@@ -5,7 +5,8 @@
 // `navigate` view of that name (B.C.A. at c10).
 (() => {
   "use strict";
-  const BL = window.BL = window.BL || {};
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
   // Ring slot position is a clock angle: 12 is far, 3 is right.
   const slot = (id, clock, scene = null, status = "dark", name = null, repo = null) => ({ id, clock, scene, status, name, repo });
   // `theme` picks the facade the hub dresses the mouth with; `soon` marks a sealed cave that already wears one.
