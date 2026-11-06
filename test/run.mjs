@@ -8924,7 +8924,8 @@ const BANANA_LISTS = `(() => {
     ordered: amounts.every((a, i) => !i || a <= amounts[i - 1]), latest: latest.length, retained: __ooga.game.state.recentDonations.length,
     window: leaders.clientHeight, fifth, sixth, recentWindow: recent.clientHeight, scrolls: leaders.scrollHeight > leaders.clientHeight && recent.scrollHeight > recent.clientHeight,
     feedFirst: footed(), lastDonor: rows.length ? reach(leaders, rows) : false, lastTip: latest.length ? reach(recent, latest) : false,
-    slabScrolls: slab.scrollHeight > slab.clientHeight + 1, panelScrolls: panel.scrollHeight > panel.clientHeight + 1 };
+    slabScrolls: slab.scrollHeight > slab.clientHeight + 1, slabRoom: slab.clientHeight, panelScrolls: panel.scrollHeight > panel.clientHeight + 1,
+    sheetHeight: Math.round(panel.closest(".sheet").getBoundingClientRect().height) };
   slab.scrollTop = slab.scrollHeight;
   out.feedScrolled = footed(); out.noteReached = inside(note.getBoundingClientRect(), slab.getBoundingClientRect());
   slab.scrollTop = 0;
@@ -8935,7 +8936,7 @@ const BANANA_LISTS = `(() => {
 // at the panel's foot without the panel scrolling, the slab's foot reachable over it and never under it.
 // However few entries either list holds, even none, both keep the same window, the one five donor rows fill.
 const bananaWindowsMatch = (short, full) => short.visible && short.window > 0 && Math.abs(short.window - full.window) <= 0.5 && Math.abs(short.recentWindow - full.window) <= 0.5;
-const bananaFeedFooted = (s) => s.visible && s.feedFirst && s.feedScrolled && s.noteReached && !s.panelScrolls;
+const bananaFeedFooted = (s) => s.visible && s.feedFirst && s.feedScrolled && s.noteReached && !s.panelScrolls && s.slabRoom > 0;
 const bananaListsHold = (s) => s.visible && s.rows === s.donors && s.rows > 5 && s.names && s.ordered && s.latest === s.retained && s.latest > 5
   && Math.abs(s.fifth - s.window) <= 1 && s.sixth >= s.window - 1 && Math.abs(s.recentWindow - s.window) <= 0.5 && s.scrolls && s.lastDonor && s.lastTip && bananaFeedFooted(s);
 // A panel's last control, read with the panel scrolled to its end: the space above it to the control before it, and
@@ -9006,10 +9007,11 @@ const hudVisit = { name: "hub HUD lifetime", why: "regression: scene visits recr
     const short = await b.evaluate(BANANA_LISTS);
     await b.evaluate(SEED_DONORS(12, "lister"));
     const lists = await b.evaluate(BANANA_LISTS);
-    // A short desktop drawer: the slab scrolls over Feed the Oogas, which stays whole at the foot.
+    // The shortest desktop drawer a resize allows (sheet.js's 263px): the slab scrolls over Feed the Oogas, which
+    // stays whole at the foot.
     const cramped = await b.evaluate(`(() => {
       const sheet = document.getElementById("bananas-panel").closest(".sheet"), was = sheet.style.getPropertyValue("height"), prio = sheet.style.getPropertyPriority("height");
-      sheet.style.setProperty("height", "360px", "important");
+      sheet.style.setProperty("height", "263px", "important");
       const out = ${BANANA_LISTS};
       if (was) sheet.style.setProperty("height", was, prio); else sheet.style.removeProperty("height");
       return out;
@@ -9019,7 +9021,7 @@ const hudVisit = { name: "hub HUD lifetime", why: "regression: scene visits recr
     record("HUD lifetime: the Bananas panel lists every donor in rank order inside a five-row window, the latest tips in a window of the same height however few either holds, and each scrolls to its last entry",
       short.rows < 5 && short.rows === short.donors && short.names && bananaWindowsMatch(short, lists) && bananaListsHold(lists) && lists.rows > 10, JSON.stringify({ short, lists }));
     record("HUD lifetime: in a short desktop drawer the Bananas slab scrolls above Feed the Oogas, which stays whole at the panel's foot over nothing, and both lists still reach their last entry",
-      bananaListsHold(cramped) && cramped.slabScrolls && bananaWindowsMatch(cramped, lists), JSON.stringify(cramped));
+      bananaListsHold(cramped) && cramped.slabScrolls && cramped.sheetHeight <= 264 && bananaWindowsMatch(cramped, lists), JSON.stringify(cramped));
   } finally {
     await b.evaluate(`(() => { const H = window.__hudVisit; BL.scenes.lab.enter = H.enters[0]; BL.scenes.hub.enter = H.enters[1]; BL.scenes.hub.enterSteps = H.hubSteps; delete window.__hudVisit; })()`);
   }
