@@ -27,7 +27,12 @@ export function createHubWorldClearance({ geometry, getClankers, navigation }) {
     labInside: g.lab.inside, crossesSealedCave: g.cavePhysics.crossesSealedCave,
     matrixGateSegmentClear: g.cavePhysics.matrixGateSegmentClear,
     npcFireClear: navigation.npcFireClear, npcRampRoofAt: navigation.npcRampRoofAt,
-    clankerPlayersClear: passive, clankerPeersClear: passive, clankerBedPlayersClear: passive,
+    // No peer avoidance. These hooks enforce only the fixed NPC land boundary.
+    clankerPlayersClear: (entry, x, y, z, tx, ty, tz) => passive(entry)
+      && g.npcLandSegmentClear(x, z, tx, tz, entry?.radius || .3),
+    clankerPeersClear: passive,
+    clankerBedPlayersClear: (entry, bed) => passive(entry)
+      && g.npcLandSegmentClear(bed.x, bed.z, bed.x, bed.z, entry?.radius || .3),
     clankerPassingPeer: (entry, other) => passive(entry) && passive(other),
     clankerBodySegmentClear: passive, clankerEntering: entering, clankerLabWorker: labWorker,
     clankerGroundPlaneAt: support.clankerGroundPlaneAt,
@@ -35,17 +40,27 @@ export function createHubWorldClearance({ geometry, getClankers, navigation }) {
     fireHazards: g.fireHazards, step: hubWalkRules.step, abyss: -120, fireBottom: .12, fireTop: .85 });
   return {
     clear(...args) { passive(args[8]); return clear.clankerClear(...args); },
-    climbClear: clear.clankerClimbClear,
+    climbClear(entry, x, y, z, nx, ny, nz, radius, ...rest) {
+      return passive(entry) && g.npcLandSegmentClear(x, z, nx, nz, radius)
+        && clear.clankerClimbClear(entry, x, y, z, nx, ny, nz, radius, ...rest);
+    },
     climbOpeningClear: clear.clankerOpeningClear,
-    climbTransitionClear: clear.clankerClimbTransitionClear,
+    climbTransitionClear(entry, x, y, z, nx, ny, nz, radius, ...rest) {
+      return passive(entry) && g.npcLandSegmentClear(x, z, nx, nz, radius)
+        && clear.clankerClimbTransitionClear(entry, x, y, z, nx, ny, nz, radius, ...rest);
+    },
     restPoseClear: clear.clankerRestPoseClear,
     restFootingClear: clear.clankerRestFootingClear,
-    restSiteClear: clear.clankerRestSiteClear,
+    restSiteClear(entry, x, y, z, heading) {
+      return passive(entry) && g.npcLandSegmentClear(x, z, x, z, entry.radius)
+        && clear.clankerRestSiteClear(entry, x, y, z, heading);
+    },
     restSurfaceClear: clear.clankerRestSurfaceClear,
     npcPlacement(entry) {
       passive(entry);
       const p = entry.root.position;
-      if (![p.x, p.y, p.z, entry.heading].every(n => Number.isFinite(n) && Math.abs(n) < 10000)) return false;
+      if (![p.x, p.y, p.z, entry.heading].every(n => Number.isFinite(n) && Math.abs(n) < 10000)
+        || !g.npcLandSegmentClear(p.x, p.z, p.x, p.z, entry.radius)) return false;
       // Recovery already rebuilt this rig from the logical snapshot. Prove the
       // complete static pose against the real terrain and per-part prop sweeps,
       // including the assigned screen/held-equipment contact exceptions. Do

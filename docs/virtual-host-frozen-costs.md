@@ -1,10 +1,63 @@
 # Frozen-body measurements and remaining cost gates
 
-Measured 2026-11-05. All activation remains disabled. These are finite local
+Historical restricted measurements below: 2026-11-05. All activation remains disabled. These are finite local
 workerd/SQLite trials, not production telemetry or a permission to start a loop.
 The cached runtime is Miniflare `5.20261001.0-alpha`, which differs from the
 repository's declared Wrangler. External egress was blocked; all trials recorded
 zero attempted external requests and zero runtime error logs.
+
+## Focused capacity correction — 2026-11-06 (v110)
+
+The v109 failure was 68,603 bytes, exceeding the 63,488-byte budget by 5,115.
+Using the existing lossless codec for Ooga logical state removes repeated JSON
+keys and encodes exact scalars. No state was dropped and no cap was raised.
+
+| Post-tick component | Before | After |
+| --- | ---: | ---: |
+| Ooga logical state | 44,496 B | 17,021 B |
+| Clanker state | 19,946 B | 19,946 B |
+| Activity | 2,454 B | 2,454 B |
+| Lab equipment | 1,330 B | 1,330 B |
+| World, inputs, layout, offices, identity/version and outer JSON overhead | 377 B | 377 B |
+| Complete world | 68,603 B | 41,128 B |
+
+After restart and another tick: 41,561 bytes, leaving 21,927 bytes (34.5%) of the
+same budget. This is the reproduced all-working case, not a worst-case bound.
+All 106 actors restored; both streams' logical position/job/reservation checks,
+activity, equipment, offices and layout matched. Packed Ooga state decoded
+exactly to the source DTO. Existing codec tests passed 10/10 after updating stale
+input-mutation fixtures; no codec algorithm or limits changed.
+
+Latest bounded Node result: construction 2,863 ms, initial capture 16.8 ms,
+one tick 61.0 ms, packet 12.8 ms / 9,772 bytes, restore 848 ms (previous paired
+run 778 ms), peak process RSS 740,032 KiB. Recovery exceeds the existing 250 ms
+target. Transaction-by-transaction construction, steady-state performance,
+mixed-status capacity and workerd memory/billing remain unresolved. No further
+stress loop or activation was started. Earlier v109 failure below is historical.
+
+## Full Hub probe — 2026-11-06 (v109)
+
+One bounded local Node run, 53 Oogas plus 53 gorillas, actual authored Hub,
+synthetic all-working activity and 69-banana pile; no external requests or DO
+activation. Construction 2,825 ms; process CPU 4,903 ms user plus 238 ms system;
+peak RSS 624,576 KiB (610 MiB). Initial capture 14.7 ms and 54,177 bytes against
+63,488 bytes available. One tick 62.5 ms; packet assembly 12.9 ms; packet 9,772
+bytes with an 81-byte land/pile layout. The next capture refused `state size`
+before restart. There is no measured successful recovery or steady-state sample.
+
+This does not satisfy the production gates. In particular, reconstructing this
+world per durable mutation cannot be justified by the one-tick figure. Cold
+construction, post-tick capacity and Workers memory/CPU must be resolved before
+billing estimates or activation. Earlier restricted-world results below do not
+represent this full scene. No caps or rate policy were relaxed.
+
+The host now has zero mempool/backlog reads or water-state writes. It retains
+only the existing bounded Oogatron and private BananaPay aggregate reads within
+an explicitly started finite run. Hosted Ooga path state has two 512-element
+Float64 waypoint arrays (8,192 bytes/actor), replacing the general planner's
+81,920-byte per-actor arrays and shared graph; this is allocated storage, not a
+measured whole-world memory saving. NPC collision/support and rendered rigs
+still dominate substantial work and have not been optimized by this change.
 
 ## Recovery events
 

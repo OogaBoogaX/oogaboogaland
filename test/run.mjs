@@ -25646,7 +25646,7 @@ const integrationChecks = async BL => {
   const oldNet=BL.net,sceneRoot=BL.scene.createNode(),records=new Map(),cavemen=new Map();
   const replayed=[],crew={cavemen,player:null,refreshStates(){},showShot:(...a)=>replayed.push(a)};
   let shotHeard=null,swingHeard=null,remoteNow=Date.now();
-  BL.net={serverNow:()=>remoteNow,sendSwing:()=>true,remotes:records,subscribeShots:fn=>(shotHeard=fn,()=>{shotHeard=null;}),subscribeSwings:fn=>(swingHeard=fn,()=>{swingHeard=null;})};
+  BL.net={state:{npcAuthority:null},serverNow:()=>remoteNow,sendSwing:()=>true,remotes:records,subscribeShots:fn=>(shotHeard=fn,()=>{shotHeard=null;}),subscribeSwings:fn=>(swingHeard=fn,()=>{swingHeard=null;})};
   const pool=BL.remotePlayers.create({root:sceneRoot,crew,visible:r=>r.zone==="dsb-outside"});
   records.set(72,{id:72,login:"peer",display:"Peer",body:"w-s-bitcoin",zone:"outside",x:1,y:0,z:2,yaw:0});pool.update(.1);
   record("integration remotes: hub actors stay out of DSB",pool.stats().remotePlayers===0&&sceneRoot.children.every(n=>!n.visible));

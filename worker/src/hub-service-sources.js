@@ -9,7 +9,7 @@ export function hubActivityUpdate(saved, stats, observedAt) {
   const generatedAt = Date.parse(stats.meta.generated_at);
   if (!Number.isSafeInteger(observedAt) || generatedAt > observedAt) throw Error('future Hub activity source');
   const simulation = saved?.simulation, inputs = simulation?.inputs;
-  if (!inputs || inputs.v !== 2 || simulation.state.at > observedAt) throw Error('Hub source checkpoint unavailable');
+  if (!inputs || inputs.v !== 3 || simulation.state.at > observedAt) throw Error('Hub source checkpoint unavailable');
   const previous = inputs.pending?.input;
   const activity = previous?.activity || simulation.activity;
   const roster = createContributorRoster({ registry: hubCharacters, clock: () => observedAt,
@@ -33,7 +33,7 @@ export function hubPileUpdate(saved, value, observedAt) {
   if (!Number.isSafeInteger(observedAt) || observedAt < value.at || observedAt - value.at > 60000)
     throw Error('stale or future private pile source');
   const simulation = saved?.simulation, inputs = simulation?.inputs;
-  if (!inputs || inputs.v !== 2 || simulation.state.at > observedAt) throw Error('Hub source checkpoint unavailable');
+  if (!inputs || inputs.v !== 3 || simulation.state.at > observedAt) throw Error('Hub source checkpoint unavailable');
   const previous = inputs.pending?.input, state = previous?.state || simulation.state;
   if (state.pile && value.at < state.pile.at) return null;
   if (state.pile && value.at === state.pile.at) {

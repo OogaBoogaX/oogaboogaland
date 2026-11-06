@@ -5,6 +5,7 @@
 import "../../src/js/math.js";
 import "../../src/js/scene.js";
 import "../../src/js/models.js";
+import "../../src/js/lab-wallpaper.js";
 import "../../src/js/hub-models.js";
 import "../../src/js/characters.js";
 import "../../src/js/characters.gen.js";
@@ -36,6 +37,7 @@ export const createNpcWorkSites = B.npcWorkSites.create;
 import "../../src/js/agent.js";
 import "../../src/js/wall-panels.js";
 import "../../src/js/clanker-rage.js";
+import "../../src/js/clanker-flight.js";
 import "../../src/js/clankers.js";
 export function createNpcClankers(context) {
   if (!context?.npcExecution || context.crew?.authoritative !== true || typeof context.npcClock !== "function")
@@ -60,6 +62,7 @@ export const createHubTerrain = B.terrain.island;
 export const createHubSolids = B.solidProps.create;
 
 import "../../src/js/bca-models.js";
+import "../../src/js/factory-kiosk-core.js";
 import "../../src/js/factory-models.js";
 import "../../src/js/hub-work-interiors.js";
 export const createHubLab = B.hubWorkInteriors.lab;
@@ -93,9 +96,6 @@ export function createMempoolSite(island) {
 export const createMempoolSupport = B.poolSupport.create;
 export const createTimechainSite = B.timechainModels.build;
 export const createBifrostSite = island => B.bifrostIsle.site(B.bifrostIsle.spot(island));
-
-import "../../src/js/pool-hydrology.js";
-export const createHubHydrology = () => B.poolHydrology.create({ authoritative: true });
 
 export const buildMempoolForest = B.poolSiteProps.forest;
 export const createMempoolBoards = B.poolSiteProps.boards;

@@ -10,7 +10,7 @@ export function createHubWorldNavigation({ geometry: g, getCrew }) {
   if (!g?.pileVolume || !g.mirror || !g.structuralSupport || typeof getCrew !== 'function')
     throw Error('complete Hub navigation geometry required');
   const RADIUS = .3, STEP = hubWalkRules.step, ABYSS = -120;
-  const { island, solids, altar, mempool, cavePhysics } = g;
+  const { island, solids, altar, cavePhysics } = g;
   const { bedSupportAt, bedCeilingAt, bedSegmentClear, entranceCeilingAt } = g.structuralSupport;
   const { matrixGateSegmentClear, matrixGateCeilingAt, crossesSealedCave,
     npcClosedCaveAt, npcClosedCaveClear } = cavePhysics;
@@ -31,15 +31,16 @@ export function createHubWorldNavigation({ geometry: g, getCrew }) {
     passive(actor);
     const from = Math.max(y, previousY), rise = !actor || actor.hop === 0 && actor.hopV <= 0 ? STEP : 0;
     return Math.max(island.supportAt(x, z, y, STEP, ABYSS, RADIUS),
-      bedSupportAt(x, z, from, STEP, RADIUS), propSupportAt(x, z, from, rise),
-      mempool.floatAt(x, z, from, rise, (actor?.bodyHeight || 1.1) * .55));
+      bedSupportAt(x, z, from, STEP, RADIUS), propSupportAt(x, z, from, rise));
   };
   const propCeilingAt = (x, z, y, radius) => Math.min(solids.ceilingAt(x, z, y, radius),
     y < altar.height - 1e-7 && Math.hypot(x, z) < altar.platformRadius + radius - 1e-7 ? 0 : Infinity);
   const propSegmentClear = (x, y, z, tx, ty, tz, radius, height) =>
-    solids.segmentClear(x, y, z, tx, ty, tz, radius, height)
+    g.npcLandSegmentClear(x, z, tx, tz, radius)
+    && solids.segmentClear(x, y, z, tx, ty, tz, radius, height)
     && hubCylinderSegmentClear(x, y, z, tx, ty, tz, radius, height, 0, 0, 0, altar.height, altar.platformRadius);
-  const physicalClearAt = (x, y, z, radius, height) => island.clearAt(x, y, z, radius, height)
+  const physicalClearAt = (x, y, z, radius, height) => g.npcLandSegmentClear(x, z, x, z, radius)
+    && island.clearAt(x, y, z, radius, height)
     && y + height <= Math.min(entranceCeilingAt(x, z, y, radius), bedCeilingAt(x, z, y, radius),
       propCeilingAt(x, z, y, radius)) + 1e-7
     && solids.segmentClear(x, y, z, x, y, z, radius, height);
@@ -85,13 +86,15 @@ export function createHubWorldNavigation({ geometry: g, getCrew }) {
         } }, out, true);
     },
     npcWalkable: navigation.npcWalkable, npcDestinationBlocked: navigation.npcDestinationBlocked,
-    npcLandingAllowed: navigation.npcLandingAllowed, npcCaveRoofAt: navigation.npcCaveRoofAt,
-    npcDetour: navigation.npcWorkDetour,
+    npcLandingAllowed: (x, y, z, height, cave) => g.npcLandSegmentClear(x, z, x, z, cave?.bodyRadius || RADIUS)
+      && navigation.npcLandingAllowed(x, y, z, height, cave), npcCaveRoofAt: navigation.npcCaveRoofAt,
+    npcDetour: () => false,
     npcRouteBlocked: (cave, x, y, z) => npcClosedCaveAt(x, z, y, cave.bodyHeight)
       || navigation.npcWorkZoneAt(cave, x, y, z) || navigation.npcRampRoofAt(x, y, z)
       || cave.state === 'chilling' && Math.hypot(x, z) < island.path.debug.ringOuterRadius + 1.5,
     npcStrandedAt: (cave, x, y, z) => navigation.npcRampRoofAt(x, y, z),
-    npcHazardClear: (x, y, z, tx, ty, tz, height, cave) => npcClosedCaveClear(x, y, z, tx, ty, tz, height)
+    npcHazardClear: (x, y, z, tx, ty, tz, height, cave) => g.npcLandSegmentClear(x, z, tx, tz, cave?.bodyRadius || RADIUS)
+      && npcClosedCaveClear(x, y, z, tx, ty, tz, height)
       && navigation.npcFireClear(x, y, z, tx, ty, tz, height) && navigation.npcWorkZoneClear(cave, x, y, z, tx, ty, tz),
     inBananas: (cave, x = cave.root.position.x, z = cave.root.position.z) =>
       g.pileVolume.intersectsBody(x, cave.root.position.y - (cave.gorilla ? 0 : cave.baseY), z,

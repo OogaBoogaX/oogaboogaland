@@ -3,9 +3,10 @@
 // activate a world. The host commits the returned value as one simulation record.
 import { boundedJSON, HOST } from './virtual-host.js';
 import { createClankerLogicalCheckpoint } from './clanker-roaming.js';
+import { createCheckpointPack } from './checkpoint-pack.js';
 
 export function createHubWorldRecovery({ version, checkpointBytes, crew, clankers, roster,
-  labEquipment, offices, hydrology, inputs, bedId, bedFor, placement, worldState, layoutState, validateWorld, syncWorld, disposeWorld }) {
+  labEquipment, offices, inputs, bedId, bedFor, placement, worldState, layoutState, validateWorld, syncWorld, disposeWorld }) {
   const fail = () => { throw Error('invalid combined Hub recovery'); };
   if (typeof version !== 'string' || !/^[A-Za-z0-9_.:-]{1,64}$/.test(version)
     || !Number.isSafeInteger(checkpointBytes) || checkpointBytes < 256 || checkpointBytes > HOST.checkpointBytes
@@ -13,13 +14,14 @@ export function createHubWorldRecovery({ version, checkpointBytes, crew, clanker
     || typeof crew.createLogicalCheckpoint !== 'function' || !clankers?.logicalCheckpoint
     || typeof labEquipment?.createCheckpoint !== 'function'
     || typeof inputs?.capture !== 'function' || typeof inputs?.restore !== 'function'
-    || hydrology?.authoritative !== true || typeof hydrology.checkpoint?.capture !== 'function'
-    || typeof hydrology.checkpoint?.restore !== 'function'
     || !Array.isArray(offices) || offices.length > 32 || Object.keys(offices).length !== offices.length
     || offices.some(office => typeof office?.checkpoint?.capture !== 'function' || typeof office?.checkpoint?.restore !== 'function')
     || [bedId, bedFor, placement, validateWorld, syncWorld, disposeWorld, worldState?.capture, worldState?.restore,
       layoutState?.capture, layoutState?.restore, roster.capture, roster.restore].some(fn => typeof fn !== 'function')) fail();
   const ooga = crew.createLogicalCheckpoint({ world: version, bedId, bedFor, placement });
+  // Ooga's source-owned logical DTO has repeated field names across actors.
+  // Reuse the existing bounded lossless codec; do not drop state or round poses.
+  const oogaPack = createCheckpointPack(Math.min(checkpointBytes, 64 * 1024), { intern: true });
   const companion = createClankerLogicalCheckpoint(clankers, version);
   const equipment = labEquipment.createCheckpoint(version);
   let poisoned = false, restored = false, restoring = false;
@@ -27,8 +29,8 @@ export function createHubWorldRecovery({ version, checkpointBytes, crew, clanker
   const ready = () => { if (poisoned || restoring) fail(); };
   const bound = saved => {
     boundedJSON(saved, checkpointBytes, HOST.simulationNodes);
-    if (!saved || Object.keys(saved).sort().join() !== 'activity,clankers,equipment,inputs,layout,offices,ooga,state,v,water,world'
-      || saved.v !== 5 || saved.world !== version || !Array.isArray(saved.offices)
+    if (!saved || Object.keys(saved).sort().join() !== 'activity,clankers,equipment,inputs,layout,offices,ooga,state,v,world'
+      || saved.v !== 7 || saved.world !== version || !Array.isArray(saved.offices)
       || saved.offices.length !== offices.length || Object.keys(saved.offices).length !== offices.length) fail();
   };
   const poison = error => {
@@ -43,8 +45,8 @@ export function createHubWorldRecovery({ version, checkpointBytes, crew, clanker
       ready();
       try {
         if (sync(validateWorld()) !== true) fail();
-        const saved = { v: 5, world: version, activity: sync(roster.capture()), layout: sync(layoutState.capture()),
-          inputs: sync(inputs.capture()), water: sync(hydrology.checkpoint.capture()), state: sync(worldState.capture()), ooga: ooga.capture(), clankers: companion.capture(),
+        const saved = { v: 7, world: version, activity: sync(roster.capture()), layout: sync(layoutState.capture()),
+          inputs: sync(inputs.capture()), state: sync(worldState.capture()), ooga: oogaPack.pack(ooga.capture()), clankers: companion.capture(),
           equipment: equipment.capture(), offices: offices.map(office => sync(office.checkpoint.capture())) };
         bound(saved);
         return structuredClone(saved);
@@ -56,7 +58,6 @@ export function createHubWorldRecovery({ version, checkpointBytes, crew, clanker
         bound(saved); restoring = true;
         // World state includes the authoritative clock and mutable collision/
         // interaction state. Rebuild it before the actors consult that geometry.
-        sync(hydrology.checkpoint.restore(saved.water));
         sync(inputs.restore(saved.inputs));
         sync(worldState.restore(saved.state));
         sync(roster.restore(saved.activity));
@@ -64,7 +65,7 @@ export function createHubWorldRecovery({ version, checkpointBytes, crew, clanker
         for (let i = 0; i < offices.length; i++) sync(offices[i].checkpoint.restore(saved.offices[i]));
         // Both source controllers inhibit simulation during partial restoration.
         companion.restore(saved.clankers);
-        ooga.restore(saved.ooga, { deferPlacement: true });
+        ooga.restore(oogaPack.unpack(saved.ooga), { deferPlacement: true });
         // Attach held lab objects only after their owners and jobs are restored.
         equipment.restore(saved.equipment);
         // Held equipment and reconstructed resting rigs changed their parents

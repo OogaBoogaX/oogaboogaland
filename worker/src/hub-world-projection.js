@@ -13,7 +13,7 @@ export const hubNpcId = (kind, handle) => {
   return `${kind}:${handle.toLowerCase()}`;
 };
 
-export function createHubWorldProjection({ version, actors, geometry, world, hydrology }) {
+export function createHubWorldProjection({ version, actors, geometry, world }) {
   const { crew, clankers } = actors, list = crew.list.filter(cave => !cave.contributor.temporary);
   if (!list.length || list.length > 53 || list.length !== crew.list.length || clankers.list.length !== list.length) fail();
   const signature = hubMath.fnv1a(JSON.stringify([list.map(cave => cave.traits.name),
@@ -54,7 +54,7 @@ export function createHubWorldProjection({ version, actors, geometry, world, hyd
         return { index, pose: projector.capture(held) };
       });
       return globalThis.BL.npcPosePacket.pack(version, encode(oogas), poses, lab.capture(),
-        { v: 1, history: geometry.captureLayout(), pile: world.level, count: actors.rosterCount(), water: hydrology.checkpoint.capture() });
+        { v: 1, history: geometry.captureLayout(), pile: world.level, count: actors.rosterCount() });
     },
   };
 }

@@ -432,9 +432,8 @@
             const packet = BL.npcPosePacket.unpack(frame, true), layout = packet.layout;
             if (!layout || lastHostLayout?.world === packet.world
               && (!BL.npcWorldLayout.sameRecipe(lastHostLayout.snapshot.history, layout.history)
-                || layout.history.ring < lastHostLayout.snapshot.history.ring
-                || layout.water.values[12] < lastHostLayout.snapshot.water.values[12])) throw Error("World layout regression");
-            Object.freeze(layout.history); Object.freeze(layout.water.values); Object.freeze(layout.water); Object.freeze(layout);
+                || layout.history.ring < lastHostLayout.snapshot.history.ring)) throw Error("World layout regression");
+            Object.freeze(layout.history); Object.freeze(layout);
             hostLayout = lastHostLayout = Object.freeze({ world: packet.world, snapshot: layout });
             layoutChanged();
           } catch { hostLayout = null; layoutChanged(); return; }

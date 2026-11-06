@@ -544,15 +544,13 @@
 
     // The reading and the level. `reading` is false until any backlog figure has been seen at all.
     const hydrology = BL.poolHydrology.create();
-    let hostWater = false;
     let target, level, shown, floodY, stage, reading, observedAt, vsize, status, preview, settle, fill;
     const syncHydrology = () => {
       ({ target, level, shown, floodY, stage, reading, observedAt, vsize, status, preview, settle, fill } = hydrology.state);
     };
     syncHydrology();
     const bright = 1;
-    const apply = snapshot => { if (!hostWater) { hydrology.apply(snapshot); syncHydrology(); } };
-    const applyHost = snapshot => { hydrology.present(snapshot); hostWater = true; syncHydrology(); };
+    const apply = snapshot => { hydrology.apply(snapshot); syncHydrology(); };
     const begin = (seq, height, label) => {
       lastStart = sequenceClock;
       seq.active = true; seq.t = 0; seq.sourceY = shown; seq.formY = shown - 0.65;
@@ -814,7 +812,7 @@
     const update = (dt, elapsed, now = Date.now()) => {
       rippleDt = dt;
       if (dt > 0) rippleFrame++;
-      if (!hostWater) { hydrology.update(dt, now); syncHydrology(); }
+      hydrology.update(dt, now); syncHydrology();
       const lake = Math.min(shown, stage ? Math.max(floodY, L.WATER.spill - 0.01) : shown), reach = L.waterRadius(lake);
       surfaceNode.position.y = lake;
       surfaceNode.scale.x = surfaceNode.scale.z = reach;
@@ -934,8 +932,8 @@
       get queued() { return queued; }, get dropped() { return dropped; }, get started() { return started; }, get preview() { return preview; }
     };
     return {
-      apply, applyHost, block, update, levelAt, rain, wake, dispose, state, picks,
-      resume() { if (!hostWater) { hydrology.resume(); syncHydrology(); } },
+      apply, block, update, levelAt, rain, wake, dispose, state, picks,
+      resume() { hydrology.resume(); syncHydrology(); },
       liveGeometry(set) {
         set.add(surfaceNode.geometry).add(floodNode.geometry).add(site.membrane.geometry).add(site.membraneRock.geometry).add(rillNode.geometry);
         for (const fall of falls) {
@@ -950,8 +948,8 @@
         }
       },
       // Debug only: stand the lake at a waiting size without the feed, or hand it back with null.
-      preview(vB) { if (!hostWater) { hydrology.preview(vB); syncHydrology(); } },
-      previewFill(value) { if (!hostWater) { hydrology.previewFill(value); syncHydrology(); } },
+      preview(vB) { hydrology.preview(vB); syncHydrology(); },
+      previewFill(value) { hydrology.previewFill(value); syncHydrology(); },
       get active() { if (rippleCount) return true; for (const seq of sequences) if (seq.active) return true; return Math.abs(level - target) > 1e-3 || Math.abs(shown - level) > 0.11; },
       stats: () => ({ waterCubes: state.cubes, waterQueued: queued, waterRipples: rippleCount })
     };

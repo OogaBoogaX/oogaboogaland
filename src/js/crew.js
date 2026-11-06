@@ -4178,6 +4178,9 @@
         }
         progress.roofTime = 6;
       }
+      // Hosted fixed-waypoint routines retain roof recovery above, but never
+      // launch obstacle searches, hop planning or long-journey route repair.
+      if (ctx.npcFixedPaths && cave.nonInteractive) return;
       // Retain the navigation intent through its landing frame, when the
       // ordinary traffic snapshot is still paused and mode 4 has just ended.
       const navigationHop = cave.avoidance.navigation.mode === 4 || progress.navigationHop;

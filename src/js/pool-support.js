@@ -1,15 +1,17 @@
 // Mempool island footing and rock queries in the authored island frame.
-// Water level is supplied by the actual hydrology controller, never guessed.
+// Browser water comes from its hydrology controller. Explicit land-only hosts
+// expose static footing and no water support; they never guess a lake level.
 (() => {
   "use strict";
   const scope = typeof window === "undefined" ? globalThis : window;
   const BL = scope.BL = scope.BL || {};
-  const create = ({ island, site, place, water, step: STEP_MAX }) => {
+  const create = ({ island, site, place, water, landOnly = false, step: STEP_MAX }) => {
     const L = BL.poolLayout, S = BL.poolModels.SITE;
     if (!place || ![place.x, place.y, place.z, place.ry, STEP_MAX].every(Number.isFinite) || STEP_MAX < 0
-      || typeof water?.levelAt !== "function" || typeof island?.onLand !== "function"
+      || typeof landOnly !== "boolean" || !landOnly && typeof water?.levelAt !== "function" || typeof island?.onLand !== "function"
       || typeof island?.surfaceAt !== "function" || !site?.ground?.geometry?.cutawaySource)
       throw Error("Mempool island support providers required");
+    const waterLevelAt = landOnly ? () => -Infinity : (x, z) => water.levelAt(x, z);
     const cos = Math.cos(place.ry), sin = Math.sin(place.ry);
     const localX = (wx, wz) => (wx - place.x) * cos - (wz - place.z) * sin;
     const localZ = (wx, wz) => (wx - place.x) * sin + (wz - place.z) * cos;
@@ -17,7 +19,7 @@
       const lx = localX(gx, gz), lz = localZ(gx, gz), r = Math.hypot(lx, lz);
       if (r < S.reach) {
         const ground = r < L.LAKE_R ? L.membraneY(r) : L.groundAt(lx, lz);
-        if (ground > -Infinity) return place.y + Math.max(ground, water.levelAt(lx, lz));
+        if (ground > -Infinity) return place.y + Math.max(ground, waterLevelAt(lx, lz));
       }
       return island.onLand(gx, gz) ? island.surfaceAt(gx, gz) : -Infinity;
     };
@@ -35,7 +37,7 @@
     const floatAt = (wx, wz, y, rise, draught) => {
       const dx = wx - place.x, dz = wz - place.z;
       if (dx * dx + dz * dz > S.reach * S.reach) return -Infinity;
-      const lx = localX(wx, wz), lz = localZ(wx, wz), level = water.levelAt(lx, lz);
+      const lx = localX(wx, wz), lz = localZ(wx, wz), level = waterLevelAt(lx, lz);
       if (level === -Infinity) return -Infinity;
       const r = Math.hypot(lx, lz), feet = y - place.y;
       // A shore cell whose centre lies inside the lake reports the chamber floor. That lower room is
@@ -52,7 +54,7 @@
     const afloat = (wx, wz, y, draught) => {
       const dx = wx - place.x, dz = wz - place.z;
       if (dx * dx + dz * dz > S.reach * S.reach) return false;
-      const level = water.levelAt(localX(wx, wz), localZ(wx, wz));
+      const level = waterLevelAt(localX(wx, wz), localZ(wx, wz));
       return level > -Infinity && Math.abs(y - place.y - (level - draught)) < 0.12;
     };
     const sightClear = (ax, ay, az, bx, by, bz) => L.sightClear(localX(ax, az), ay - place.y, localZ(ax, az), localX(bx, bz), by - place.y, localZ(bx, bz));

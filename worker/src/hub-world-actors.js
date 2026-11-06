@@ -2,13 +2,14 @@
 // Movement, placement and routine selection are composed over the real private
 // geometry here. There is no flat-ground or permissive-clearance fallback.
 import { createOogaCrew, createNpcClankers, createNpcLabEquipment, createNpcWorkSites,
-  createHubPaths, createHubOutdoorBeds, createNpcClankerLayout, hubSlots, hubModels } from './ooga-crew.js';
+  createHubOutdoorBeds, createNpcClankerLayout, hubSlots, hubModels } from './ooga-crew.js';
 import { createHubWorldRecovery } from './hub-world-recovery.js';
 import { createHubWorldArrivals } from './hub-world-arrivals.js';
 import { createHubWorldClearance } from './hub-world-clearance.js';
 import { createHubWorldNavigation } from './hub-world-navigation.js';
 import { createHubWorldDestinations } from './hub-world-destinations.js';
 import { createHubWorldPlacement } from './hub-world-placement.js';
+import { createHubRoutinePaths } from './hub-routine-paths.js';
 
 const OOGA_QUERIES = ['groundAt', 'ceilingAt', 'walkable', 'npcWalkable', 'flyable',
   'wanderSpot', 'npcDestinationBlocked', 'npcLandingAllowed', 'npcRecoverySpot',
@@ -62,12 +63,10 @@ function constructHubWorldActors({ geometry, roster, execution, world, clock,
     climbTorsoClear: geometry.clankerSupport?.clankerClimbTorsoClear,
     platformEntryAt: geometry.clankerSupport?.clankerPlatformEntryAt,
     tallObstacleAhead: geometry.clankerSupport?.clankerTallObstacleAhead }, CLANKER_QUERIES);
-  const navigation = { ...createHubWorldPlacement(geometry), pathPointAllowed: worldNavigation.pathPointAllowed };
+  const navigation = createHubWorldPlacement(geometry);
   const { island, root, solids, headquarters, mempool, lab } = geometry;
   const walkIn = { x: 0, z: -(island.meadowRadius + 0.5) };
-  const paths = createHubPaths({ island, walkable: oogaMovement.npcWalkable,
-    pointAllowed: navigation.pathPointAllowed,
-    surfaceAt: (x, z, y) => island.supportAt(x, z, y, 1e-6, null, 0.3) });
+  const paths = createHubRoutinePaths(island);
   const forest = createHubOutdoorBeds(mempool,
     (x, y, z) => island.clearAt(x, y, z, 0.15, 1.5) && mempool.sleepClear(x, y, z), island);
   // Enumerate at most one overflow anchor per actor, so a fresh recovery can
@@ -79,6 +78,18 @@ function constructHubWorldActors({ geometry, roster, execution, world, clock,
   });
   register('hq', headquarters.mattresses); register('forest', forest.beds);
   const alive = () => { if (disposed) fail('Hub actors disposed'); };
+  const validateNpcLand = () => {
+    // Final admission covers beams, routine endpoints and rebuilt checkpoints,
+    // including movement providers that do not use the ordinary walking sweep.
+    for (const cave of crew.list) if (cave.root.visible) {
+      const p = cave.root.position;
+      if (!geometry.npcLandSegmentClear(p.x, p.z, p.x, p.z, cave.bodyRadius)) fail('Ooga outside NPC land');
+    }
+    for (const entry of clankers.list) if (entry.active && entry.root.visible) {
+      const p = entry.root.position;
+      if (!geometry.npcLandSegmentClear(p.x, p.z, p.x, p.z, entry.radius)) fail('Clanker outside NPC land');
+    }
+  };
   const dispose = () => {
     if (disposed) return;
     disposed = true;
@@ -99,7 +110,7 @@ function constructHubWorldActors({ geometry, roster, execution, world, clock,
     labEquipment = createNpcLabEquipment({ getLab: () => lab, getClankers: () => clankers });
     const shared = { ...oogaMovement, root, world, game,
       npcExecution: execution, npcContributors: roster, npcTintWanted: tintWanted,
-      npcPassive: true, npcPaths: paths, bedrolls: headquarters.mattresses,
+      npcPassive: true, npcFixedPaths: true, npcPaths: paths, bedrolls: headquarters.mattresses,
       outdoorBedrolls: forest.beds, viewYaw: 0, walkIn, buildSpots: [], workSites: sites,
       weaponsEnabled: true, combatEnabled: false,
       reloadSlotRadius: () => island.path.debug.ringLoadingRadius,
@@ -136,7 +147,7 @@ function constructHubWorldActors({ geometry, roster, execution, world, clock,
       },
       initialize() {
         alive(); if (initialized) fail('Hub actors already initialized');
-        crew.applyAllSwag(); crew.refreshStates(true); clankers.sync(); geometry.sync();
+        crew.applyAllSwag(); crew.refreshStates(true); clankers.sync(); validateNpcLand(); geometry.sync();
         initialized = true;
       },
       composeRecovery(options) {
@@ -152,7 +163,7 @@ function constructHubWorldActors({ geometry, roster, execution, world, clock,
           capture: () => { alive(); if (!initialized) fail('Hub actors not initialized'); return recovery.capture(); },
           restore(saved) {
             alive(); if (initialized) fail('Hub actors already initialized');
-            crew.applyAllSwag(); recovery.restore(saved); geometry.sync(); initialized = true;
+            crew.applyAllSwag(); recovery.restore(saved); validateNpcLand(); geometry.sync(); initialized = true;
             return true;
           },
           get usable() { return !disposed && initialized && recovery.usable; },
@@ -173,6 +184,7 @@ function constructHubWorldActors({ geometry, roster, execution, world, clock,
         // Preserve the source Hub order: companions and held lab equipment,
         // then the owner Ooga routines. Each advances exactly once per step.
         clankers.update(dt); labEquipment.update(dt); crew.update(dt, elapsed);
+        validateNpcLand();
         geometry.sync();
       },
       dispose,

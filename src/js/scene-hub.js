@@ -747,8 +747,7 @@
     if (!hostLayoutCompatible() || layoutBuilding) return false;
     if (!builtHostLayout) return true;
     const applied = builtHostLayout.snapshot, latest = currentHostLayout().snapshot;
-    return applied.pile === latest.pile && applied.count === latest.count && applied.history.ring === latest.history.ring
-      && applied.water === latest.water;
+    return applied.pile === latest.pile && applied.count === latest.count && applied.history.ring === latest.history.ring;
   };
   const clouds = [];
   const lamps = [];
@@ -7054,9 +7053,6 @@
     }
     if (builtHostLayout) {
       const next = currentHostLayout(), previous = builtHostLayout.snapshot;
-      mempoolIsland.water.applyHost(next.snapshot.water);
-      // Refresh collision/presentation even when distant effects are sleeping.
-      if (previous.water !== next.snapshot.water) mempoolIsland.water.update(0, poolEffectsTime);
       builtHostLayout = next; world.level = next.snapshot.pile;
       if (previous.pile !== next.snapshot.pile || previous.count !== next.snapshot.count
         || previous.history.ring !== next.snapshot.history.ring) {
@@ -9868,8 +9864,7 @@
     footsteps = BL.footsteps.create();
     // The snapshot outlives the visit, so a re-entered hub opens in the weather it left.
     weather.apply(chain.snapshot);
-    if (builtHostLayout) mempoolIsland.water.applyHost(builtHostLayout.snapshot.water);
-    else mempoolIsland.water.apply(chain.snapshot);
+    mempoolIsland.water.apply(chain.snapshot);
     // Give the distant island its standing lake and cloud deck before its first proximity check.
     mempoolIsland.water.update(0, 0);
     weather.update(0, null);

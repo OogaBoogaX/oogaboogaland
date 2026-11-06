@@ -4,7 +4,6 @@ import { createVirtualWorldClass } from './virtual-world.js';
 import { openHubHost, createHubHost, HUB_CONFIGURATION_KEY } from './hub-host.js';
 import { HOST, sameCheckpointValue } from './virtual-host.js';
 import { readContributorSnapshot } from './contributor-policy.js';
-import { readHubBacklog } from './hub-backlog-source.js';
 import { hubActivityUpdate, hubPileUpdate } from './hub-service-sources.js';
 const SOURCE_CURSOR = 'hub-activity-source-v1', SOURCE_INTERVAL = 60000;
 export class HubVirtualWorld extends createVirtualWorldClass(openHubHost) {
@@ -23,7 +22,7 @@ export class HubVirtualWorld extends createVirtualWorldClass(openHubHost) {
       })]);
     } finally { clearTimeout(timer); }
   }
-  // At most one Oogatron, aggregate backlog and private pile read per minute, inside the existing
+  // At most one Oogatron and one private pile read per minute, inside the existing
   // explicitly started finite run. No alarm, automatic start or lease renewal.
   async queueServices(ticket, until) {
     await this.setup();
@@ -51,8 +50,8 @@ export class HubVirtualWorld extends createVirtualWorldClass(openHubHost) {
               return true;
             });
             if (!allowed || !current()) return;
-            const [activity, pile, backlog] = await Promise.allSettled([
-              readContributorSnapshot(), this.#readPileSnapshot(), readHubBacklog(),
+            const [activity, pile] = await Promise.allSettled([
+              readContributorSnapshot(), this.#readPileSnapshot(),
             ]);
             if (!current()) return;
             await this.serialLifecycle(async () => {
@@ -69,10 +68,6 @@ export class HubVirtualWorld extends createVirtualWorldClass(openHubHost) {
                     await this.ctx.storage.put(SOURCE_CURSOR, { at: cursor.at, generatedAt: update.generatedAt });
                   }
                 } catch { /* Retain the last accepted activity. */ }
-              }
-              if (backlog.status === 'fulfilled' && current()) {
-                try { await this.host.worldInput(ticket, backlog.value); }
-                catch { /* Keep the durable water reading on failure or a lost lease. */ }
               }
               if (pile.status === 'fulfilled' && current()) {
                 try {

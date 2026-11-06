@@ -1,11 +1,9 @@
 // Trusted absolute state from one versioned service source. Donations/inventory
 // are reflected in totals, never replayed as increments on retry. No polling.
 import { boundedJSON, sameCheckpointValue as same } from './virtual-host.js';
-import { createHubWorldInputs, validateHubInput } from './hub-world-inputs.js';
 const fail = () => { throw Error('invalid authoritative Hub event'); };
 const stamp = n => Number.isSafeInteger(n) && n >= 0;
-export function createHubWorldEvents({ hydrology, state, roster, changed, source }) {
-  const backlog = createHubWorldInputs(hydrology);
+export function createHubWorldEvents({ state, roster, changed, source }) {
   if (typeof state?.validateUpdate !== 'function' || typeof roster?.validateCheckpoint !== 'function'
     || typeof changed !== 'function') fail();
   if (!source || Object.keys(source).sort().join() !== 'observedAt,revision'
@@ -41,7 +39,6 @@ export function createHubWorldEvents({ hydrology, state, roster, changed, source
   return {
     enqueue(input, timing) {
       used = true;
-      if (input?.kind === 'backlog') { validateHubInput(input); return backlog.enqueue(input, timing); }
       validate(input);
       if (!timing || !stamp(timing.acceptedAt) || !stamp(timing.effectiveAt)
         || timing.effectiveAt > timing.acceptedAt || input.observedAt > timing.acceptedAt) fail();
@@ -57,8 +54,7 @@ export function createHubWorldEvents({ hydrology, state, roster, changed, source
     },
     drain(simulatedAt, wallAt) {
       used = true;
-      const waterChanged = backlog.drain(simulatedAt, wallAt);
-      if (!pending || wallAt < pending.acceptedAt) return waterChanged;
+      if (!pending || wallAt < pending.acceptedAt) return false;
       validPending(pending);
       const value = pending.input;
       state.applyUpdate(value.state); roster.restore(value.activity);
@@ -67,14 +63,14 @@ export function createHubWorldEvents({ hydrology, state, roster, changed, source
     },
     capture() {
       validPending(pending);
-      return { v: 2, backlog: backlog.capture(), revision, observedAt, pending: structuredClone(pending) };
+      return { v: 3, revision, observedAt, pending: structuredClone(pending) };
     },
     restore(saved) {
-      if (used || !saved || Object.keys(saved).sort().join() !== 'backlog,observedAt,pending,revision,v'
-        || saved.v !== 2 || !stamp(saved.revision) || !stamp(saved.observedAt)
+      if (used || !saved || Object.keys(saved).sort().join() !== 'observedAt,pending,revision,v'
+        || saved.v !== 3 || !stamp(saved.revision) || !stamp(saved.observedAt)
         || saved.revision < source.revision || saved.observedAt < source.observedAt) fail();
       revision = saved.revision; observedAt = saved.observedAt; validPending(saved.pending);
-      backlog.restore(saved.backlog); pending = structuredClone(saved.pending); used = true;
+      pending = structuredClone(saved.pending); used = true;
     },
   };
 }

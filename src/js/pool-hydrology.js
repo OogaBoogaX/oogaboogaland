@@ -178,15 +178,7 @@
     const lakeAt = () => Math.min(shown, stage ? Math.max(floodY, L.WATER.spill - 0.01) : shown);
     const surfaceQuery = authoritative ? createSurfaceQuery({ lakeAt, reachAt: () => L.waterRadius(lakeAt()),
       floodAt: () => floodY, visible: () => floodY > HYDRO.PARK + 0.01, mouths }) : null;
-    const present = saved => {
-      if (authoritative) throw Error("authoritative water cannot accept presentation");
-      validate(saved);
-      const r = saved.values;
-      if (r[9] !== null || r[11] !== null || r[12] < lastNow) throw Error("invalid water presentation");
-      [target, level, shown, floodY, stage, reading, observedAt, vsize, status, preview, settle, fill, lastNow] = r;
-      used = true; refreshMouths();
-    };
-    return { authoritative, apply, update, state, checkpoint, present,
+    return { authoritative, apply, update, state, checkpoint,
       levelAt: authoritative ? (x, z) => { refreshMouths(); return surfaceQuery(x, z); } : null,
       resume() {
         if (authoritative) throw Error("authoritative water cannot snap on viewer resume");

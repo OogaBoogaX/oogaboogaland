@@ -22,9 +22,7 @@ const MAX_TARGETS = 8192, MAX_PROPS = 1024;
 const POOL_SOLIDS = new Set(['poolbridge', 'poolsign', 'poolrock', 'canopy']);
 const fail = message => { throw Error(message); };
 
-export function* buildHubWorldGeometry({ hydrology, layout, getRosterCount }) {
-  if (hydrology?.authoritative !== true || typeof hydrology.levelAt !== 'function')
-    fail('authoritative Hub hydrology required');
+export function* buildHubWorldGeometry({ layout, getRosterCount }) {
   if (typeof getRosterCount !== 'function') fail('authoritative Hub roster required');
   const checkLevel = value => {
     if (!Number.isFinite(value) || value < 0 || value > hubPileMaximum) fail('invalid Hub pile level');
@@ -211,11 +209,18 @@ export function* buildHubWorldGeometry({ hydrology, layout, getRosterCount }) {
     atNode('weathersign', boards.infoNode, 1);
     for (const torch of site.torches) atNode('torch', torch, 0.5);
     const forest = yield* buildMempoolForest({ site, ...boards, atNode });
-    const support = createMempoolSupport({ island, site, place, water: hydrology, step: hubWalkRules.step });
+    const support = createMempoolSupport({ island, site, place, landOnly: true, step: hubWalkRules.step });
     sleepSolids.sync();
-    const mempool = { site, place, layout: L, water: hydrology, walked, forest, boards,
+    const mempool = { site, place, layout: L, walked, forest, boards,
       cos, sin, worldX, worldZ, localX, localZ, ...support,
       sleepClear: (x, y, z) => sleepSolids.segmentClear(x, y, z, x, y, z, 0.15, 1.5) };
+    // NPCs never enter the authored lake footprint, regardless of client water level.
+    const npcLandSegmentClear = (x, z, tx = x, tz = z, radius = .3) => {
+      if (![x, z, tx, tz, radius].every(Number.isFinite) || radius < 0) return false;
+      const dx = tx - x, dz = tz - z, length = dx * dx + dz * dz;
+      const t = length ? Math.max(0, Math.min(1, ((place.x - x) * dx + (place.z - z) * dz) / length)) : 0;
+      return Math.hypot(x + t * dx - place.x, z + t * dz - place.z) >= L.LAKE_R + radius;
+    };
     const sleep = createMempoolSleep(mempool);
     yield;
     const timechain = createTimechainSite(island);
@@ -281,7 +286,7 @@ export function* buildHubWorldGeometry({ hydrology, layout, getRosterCount }) {
         return -Infinity;
       } });
     complete = true;
-    return { root, island, solids, placed, targets, props, headquarters, mouths,
+    return { npcLandSegmentClear, root, island, solids, placed, targets, props, headquarters, mouths,
       lab, offices, factory, mirror, mempool, timechain, bifrost, sleep, cavePhysics,
       altar, pileCore, pileVolume, pathNode, gate, library, setPileLevel, get pileLevel() { return pileLevel; },
       matrixGates, sealedCaves, closedCaveZones, headquartersRimLintels, climbMasonry,

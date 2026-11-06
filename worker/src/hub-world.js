@@ -2,7 +2,7 @@
 // or synthetic terrain. The generator permits a bounded startup runner to yield
 // between construction stages; it does not schedule or activate that runner.
 import { boundedJSON, HOST } from './virtual-host.js';
-import { createHubHydrology, createNpcExecution, createContributorRoster,
+import { createNpcExecution, createContributorRoster,
   hubCharacters, hubSlots, hubRepositoryOf, normalizeHubStats } from './ooga-crew.js';
 import { buildHubWorldGeometry } from './hub-world-geometry.js';
 import { createHubWorldState } from './hub-world-state.js';
@@ -24,20 +24,19 @@ export function* buildHubWorld(config, saved = null, now = null) {
   if (saved !== null) boundedJSON(saved, config.checkpointBytes, HOST.simulationNodes);
   else if (!Number.isSafeInteger(now) || now < 1) fail();
   const state = createHubWorldState(saved === null ? { ...config.state, at: now, elapsed: 0 } : saved.state);
-  const hydrology = createHubHydrology();
   const execution = createNpcExecution({ seed: config.seed });
   const roster = createContributorRoster({ registry: hubCharacters, clock: state.clock,
     repositoryOf: hubRepositoryOf, normalizeStats: normalizeHubStats, slots: hubSlots, authoritative: true });
   // Explicit trusted activity is required at first boot; never start all NPCs
   // from a viewer's local activity snapshot or silently use stale bundled dates.
   roster.restore(saved === null ? config.activity : saved.activity);
-  // Older checkpoints lack the planting recipe; never guess it from today's
-  // pile/roster and silently move collision geometry under retained bodies.
-  if (saved !== null && saved.v !== 5) throw Error('Hub layout migration required');
+  // Earlier world records include shared water or different route semantics.
+  // Refuse them explicitly; never silently reinterpret retained actor state.
+  if (saved !== null && saved.v !== 7) throw Error('Hub packed logical recovery migration required');
   const layout = validateHubLayout(saved === null
     ? { v: 1, level: state.world.level, count: roster.activeRoster.length, ring: 0 } : saved.layout);
   let geometry = null, actors = null, completed = false, disposed = false;
-  const inputs = createHubWorldEvents({ hydrology, state, roster, source: config.source,
+  const inputs = createHubWorldEvents({ state, roster, source: config.source,
     changed() {
       geometry.setPileLevel(state.world.level);
       if (geometry.refreshMainland()) actors.clankers.supportRemoved();
@@ -50,7 +49,7 @@ export function* buildHubWorld(config, saved = null, now = null) {
   };
   const alive = () => { if (disposed) fail(); };
   try {
-    geometry = yield* buildHubWorldGeometry({ hydrology, layout,
+    geometry = yield* buildHubWorldGeometry({ layout,
       getRosterCount: () => roster.activeRoster.length });
     geometry.setPileLevel(state.world.level); geometry.refreshMainland(); geometry.sync();
     if (saved !== null) assertHubLayout(geometry.captureLayout(), saved.layout);
@@ -59,13 +58,13 @@ export function* buildHubWorld(config, saved = null, now = null) {
       clock: state.clock, tintWanted: state.tintWanted, game: state.game, stars: state.stars,
       npcIdFor: who => hubNpcFor(who.bodyId, who) });
     const recovery = actors.composeRecovery({ version: config.version, checkpointBytes: config.checkpointBytes,
-      hydrology, inputs, worldState: state, layoutState: {
+      inputs, worldState: state, layoutState: {
         capture: geometry.captureLayout,
         restore: value => assertHubLayout(geometry.captureLayout(), value),
       }, validateWorld: () => state.validate()
         && geometry.pileLevel === state.world.level, disposeWorld: dispose });
     if (saved === null) actors.initialize(); else recovery.restore(saved);
-    const projection = createHubWorldProjection({ version: config.version, actors, geometry, world: state.world, hydrology });
+    const projection = createHubWorldProjection({ version: config.version, actors, geometry, world: state.world });
     const placement = createHubWorldPlacement(geometry);
     const placeBody = createHubBodyPlacement(actors, placement);
     completed = true;
@@ -80,7 +79,7 @@ export function* buildHubWorld(config, saved = null, now = null) {
         if (ms !== HOST.stepMs || !Number.isSafeInteger(simulatedAt) || simulatedAt < 0
           || !Number.isSafeInteger(wallAt) || wallAt < simulatedAt) fail();
         state.advance(ms, wallAt);
-        inputs.drain(simulatedAt, wallAt); hydrology.update(ms / 1000, wallAt);
+        inputs.drain(simulatedAt, wallAt);
         // Clock-driven pile decay is also a geometry change; refresh before
         // either actor controller plans against the new level.
         if (geometry.pileLevel !== state.world.level) {

@@ -5,10 +5,90 @@ player physics, not shared NPC simulation. Activation and burst remain disabled;
 Tess is excluded. No deployment, provisioning, permanent loop or billing change
 is included.
 
-The latest published checkpoint before this pass is signed `2e42d59a886b0a2dca64780b3ac269fe01f0af24`
-on draft #467. It preserves v75–v84; the local v85 corrections below are newer.
-Earlier numbered sections describe historical checkpoints and may retain
-superseded NPC handback language. The current requirement is independent streams.
+## Current scope (v110)
+
+The previous published head is `177ed3c7df7ce55556e5402c118ecf83755ec3b5`.
+This checkpoint removes the host mempool fetch, backlog queue, hydrology
+checkpoint and water field from NPC layout delivery. The browser's existing
+chain feed, lake simulation and visuals remain independent. The BananaPay
+aggregate pile, decay schedule, growing pile edge and durable mainland planting
+recipe remain authoritative inputs. Historical sections below describe earlier
+experiments; this section supersedes their shared-water and travel policies.
+
+Ooga status changes already beam to the pile, chill destination or assigned bed;
+away actors disappear. Passive gorillas use `beamStatus` before ordinary update.
+There is no hosted HQ/basement/rainforest sleep journey. Away login still uses the
+pile, and player bodies never take ownership of the independently running NPC.
+
+Hosted Ooga work movement now uses `hub-routine-paths.js`: authored mainland
+spokes plus the pile ring, bounded to 512 waypoints per actor. It replaces the
+4,096-node general graph, heap/search and passing lanes. Local movement toward
+routine positions remains. `npcFixedPaths` bypasses obstacle search, shoulder
+avoidance, detours and stall-driven jump/route repair for hosted passive Oogas;
+a blocked fixed segment waits. Existing browser/player solvers remain available.
+Gorilla local rooftop departures, cave/office/lab movements and clearance remain;
+this is not a claim that all local gorilla planning has been removed.
+
+NPC endpoint admission and ordinary movement guards exclude the fixed authored
+lake footprint; they do not plan routes around it or consult water levels.
+Forest beds and static rock/support geometry remain for placement. This is a
+code guard, not a completed all-status play-test. Host player restoration uses
+static support only. Browser preflight and activation independently check live
+support and overlap; a live water/support surface above saved feet refuses
+reclaim rather than relocating the player. Successful frozen recovery retains
+position with zero momentum. Water-level changes and both body kinds still need
+restricted-scope end-to-end validation before activation.
+
+Combined recovery is schema 7, input state schema 3. Old shared-water records
+fail closed; no live migration or configuration overwrite is performed. The
+layout decoder rejects the removed water field. Operators must use an explicit
+compatible world version and satisfy migration/capability gates before use.
+
+Three missing headless dependencies (kiosk dimensions, wallpaper metadata and
+Clanker flight) now load in source order. Logical Clanker recovery rebuilds
+support-rectangle scratch instead of treating its lazily populated geometry as
+persistent state. The existing integration fixture now provides
+`net.state.npcAuthority = null`, matching the real legacy-network contract.
+
+The v109 bounded probe found a 68,603-byte post-tick record against the
+63,488-byte limit. Raw Ooga JSON accounted for 44,496 bytes; Clankers were already
+packed (19,946 bytes). v110 applies the existing bounded lossless codec to the
+Ooga logical DTO as well. It preserves all scalar values and state, including
+negative zero, with the existing node/depth/expanded-byte guards. It changes no
+resource budget. Schema 7 refuses earlier uncompressed world envelopes.
+
+The same 106-actor all-working fixture now captures 28,543 bytes initially,
+41,128 after a tick, and 41,561 after restart plus another tick. The original
+source Ooga DTO equals the decoded packed DTO. Restart checks preserve Ooga
+identity, position, state, work destination, bed/slot reservations and walk
+intent; Clanker identity, position, heading, job/destination, portal, bed, lab and
+office ownership also match. Activity, equipment, office state and layout match.
+Both actor streams contain all 106 actors after restore.
+
+Latest bounded Node run: construction 2,863 ms; capture 16.8 ms; tick 61.0 ms;
+packet assembly 12.8 ms, 9,772 bytes including 81-byte layout; restore 848 ms;
+peak RSS 740,032 KiB. Earlier packed run restored in 778 ms. This is not workerd,
+sustained four-Hz throughput, worst-case capacity or production billing evidence.
+Recovery remains over the existing 250 ms target and whole-world construction/
+memory remain substantial. Activation stays disabled. The size reproduction is
+fixed; mixed-status, long-running capacity and production cost gates remain.
+
+The existing checkpoint-codec test file passed 10/10 after four stale adapter
+fixtures were changed from removed `handoff` calls to the current accepted-input
+API. Rollback, immutable query snapshots and exact scalar checks remain. No new
+test cases, browser/Hub suite or broad stress campaign were added.
+
+Publication is blocked: the authorized signing retries returned `device not
+found?`, with no pending prompt or commit. Read-only USB enumeration and FIDO
+capability reads see the key, including outside the sandbox. This does not prove
+that the configured SSH credential can sign. No identity or signing settings
+were changed, and there was no unsigned bypass. The v109 backup remains intact;
+v110 is preserved separately before any later signing attempt.
+
+BananaPay companion draft [#30](https://github.com/OogaBoogaX/bananapayserver/pull/30)
+is published at `95ef5695d267f9286e0fe6a11a3fff47598030b0`; its existing CI passed.
+Its private aggregate RPC has not been deployed or validated across Workers.
+No browser/Hub suite or broad stress campaign was run for this pass.
 
 ## Passive NPC interactions and shared forest construction (v94, local)
 

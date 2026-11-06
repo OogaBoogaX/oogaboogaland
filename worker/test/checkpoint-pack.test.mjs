@@ -71,13 +71,13 @@ test("opt-in scalar interning preserves exact values and enforces the original e
 test("scalar storage opt-in has a new world version and refreshes its dictionary across mutations and query phases",()=>{
   const source={version:'scalar-fixture',initial:()=>({rows:Array.from({length:40},()=>({value:1.234567890123456}))}),
     validate:()=>true,step(s){for(const row of s.rows)row.value=9.87654321098765;},project:s=>s.rows[0].value,
-    npcFor:s=>s.rows[0].value,handoff(s){for(const row of s.rows)row.value=2.34567890123456;return true;}};
+    npcFor:s=>s.rows[0].value,enqueueInput(s){for(const row of s.rows)row.value=2.34567890123456;return "accepted";}};
   const packed=compactSimulation(source,8192,{intern:true}),legacy=compactSimulation(source,8192),state=packed.initial();
   assert.notEqual(packed.version,legacy.version);assert.match(packed.version,/^pack2-/);
   const before=packed.readQueries(state);assert.equal(before.npcFor('body'),1.234567890123456);
   packed.step(state,50);assert.equal(packed.project(state),9.87654321098765);
   assert.equal(before.npcFor('body'),1.234567890123456);assert.equal(packed.readQueries(state).npcFor('body'),9.87654321098765);
-  packed.handoff(state,{});assert.equal(packed.project(JSON.parse(JSON.stringify(state))),2.34567890123456);
+  packed.enqueueInput(state,{});assert.equal(packed.project(JSON.parse(JSON.stringify(state))),2.34567890123456);
   assert.equal(state.v,2);assert.equal(packed.validate(state),true);
 });
 
@@ -108,20 +108,20 @@ test("compact simulation follows the original Clanker flight exactly after every
   const f = await prepare();
   const source = { version: "packed-flight-fixture", initial() { const e = initial(); f.controller.prepareJump(e, 0, 0, -4, 1.5); return capture(e); },
     validate: s => { restore(s); return true; }, step(s, ms) { const e = restore(s); if (e.jump.active) f.controller.updateJump(e, ms / 1000); Object.assign(s, capture(e)); },
-    project: s => structuredClone(s.root.position), npcFor: () => null, handoff: () => false };
+    project: s => structuredClone(s.root.position), npcFor: () => null, enqueueInput: () => "retained" };
   const packed = compactSimulation(source, 4096), codec = createCheckpointPack(4096), reference = source.initial();
   let state = packed.initial();
   for (let i = 0; i < 120; i++) {
     source.step(reference, 50); packed.step(state, 50); state = JSON.parse(JSON.stringify(state));
     assert.deepEqual(codec.unpack(state), reference); assert.deepEqual(packed.project(state), source.project(reference));
   }
-  const before = structuredClone(state); assert.equal(packed.handoff(state, {}), false); assert.deepEqual(state, before);
+  const before = structuredClone(state); assert.equal(packed.enqueueInput(state, {}), "retained"); assert.deepEqual(state, before);
   const broken = compactSimulation({ ...source, step(s) { s.root.position.x = 99; throw Error("failed frame"); } }, 4096);
   assert.throws(() => broken.step(state, 50), /failed frame/); assert.deepEqual(state, before);
   assert.throws(() => compactSimulation({ ...source, step: () => Promise.resolve() }, 4096).step(state, 50), /synchronous/);
 });
 
-test("ownership queries share an immutable phase snapshot and a new phase observes handoff changes", () => {
+test("ownership queries share an immutable phase snapshot and a new phase observes accepted input changes", () => {
   const snapshots = new Set();
   const source = { version: "query-fixture", initial: () => ({ owners: { body: "npc" } }), validate: () => true,
     step() {}, project: () => ({}), npcFor(s, id) {
@@ -129,19 +129,19 @@ test("ownership queries share an immutable phase snapshot and a new phase observ
       assert.ok(Object.isFrozen(s) && Object.isFrozen(s.owners));
       if (id === "mutate") s.owners.body = "poisoned";
       return s.owners[id] || null;
-    }, handoff(s) { s.owners.body = "replacement"; return true; } };
+    }, enqueueInput(s) { s.owners.body = "replacement"; return "accepted"; } };
   const adapter = compactSimulation(source, 4096), state = adapter.initial(), first = adapter.readQueries(state);
   for (let i = 0; i < 64; i++) assert.equal(first.npcFor("body"), "npc");
   assert.equal(snapshots.size, 1, "one decode per read phase, not one per departing body");
   assert.throws(() => first.npcFor("mutate"), TypeError); assert.equal(first.npcFor("body"), "npc");
-  adapter.handoff(state, {});
+  adapter.enqueueInput(state, {});
   assert.equal(adapter.readQueries(state).npcFor("body"), "replacement"); assert.equal(snapshots.size, 2);
   assert.equal(createCheckpointPack(4096).unpack(state).owners.body, "replacement");
 });
 
 test('world spawn queries survive packing and transaction scopes without mutating the NPC checkpoint', () => {
   const source = { version: 'spawn-fixture', initial: () => ({ x: 1 }), validate: () => true,
-    step: state => { state.x++; }, project: state => state.x, npcFor: () => 'npc:a', handoff: () => false };
+    step: state => { state.x++; }, project: state => state.x, npcFor: () => 'npc:a', enqueueInput: () => "retained" };
   assert.equal(compactSimulation(source, 4096).playerSpawn, undefined);
   for (const intern of [false, true]) {
     const adapter = compactSimulation({ ...source, playerSpawn(state, who) {
@@ -168,7 +168,7 @@ test("transaction scopes reuse only frozen checkpoints, preserve query phases an
   const source={version:'scope-fixture',initial:()=>({value:1,owner:'first'}),
     validate:s=>{validations++;assert.ok(Object.isFrozen(s));return Number.isFinite(s.value);},
     step(s){stepState=s;s.value++;},project(s){if(mutateProject)s.value=999;return s.value;},
-    npcFor:s=>s.owner,handoff(s,intent){s.owner=intent.owner;return intent.accept;}};
+    npcFor:s=>s.owner,enqueueInput(s,intent){s.owner=intent.owner;return intent.accept ? "accepted" : "retained";}};
   for(const intern of [false,true]){
     const adapter=compactSimulation(source,4096,{intern}),scope=adapter.forTransaction(),state=scope.initial();
     const baseline=validations;assert.equal(scope.validate(state),true);assert.equal(scope.validate(state),true);assert.equal(validations,baseline+1);
@@ -176,8 +176,8 @@ test("transaction scopes reuse only frozen checkpoints, preserve query phases an
     assert.throws(()=>{state.data[0]='poison';},TypeError);scope.step(state,50);
     assert.ok(Object.isFrozen(stepState));assert.throws(()=>{stepState.value=999;},TypeError);
     assert.equal(scope.project(state),2);assert.equal(scope.validate(state),true);assert.equal(validations,baseline+2);
-    const before=JSON.stringify(state);assert.equal(scope.handoff(state,{owner:'wrong',accept:false}),false);assert.equal(JSON.stringify(state),before);
-    assert.equal(scope.handoff(state,{owner:'second',accept:true}),true);assert.equal(scope.npcFor(state,'body'),'second');assert.equal(query.npcFor('body'),'first');
+    const before=JSON.stringify(state);assert.equal(scope.enqueueInput(state,{owner:'wrong',accept:false}),'retained');assert.equal(JSON.stringify(state),before);
+    assert.equal(scope.enqueueInput(state,{owner:'second',accept:true}),'accepted');assert.equal(scope.npcFor(state,'body'),'second');assert.equal(query.npcFor('body'),'first');
     mutateProject=true;assert.throws(()=>scope.project(state),TypeError);mutateProject=false;assert.equal(scope.project(state),2);
     const replacement=adapter.initial();state.data=replacement.data;state.shapes=replacement.shapes;if(intern)state.scalars=replacement.scalars;
     assert.equal(scope.project(state),1,'new wire children must not reuse the previous decoded state');

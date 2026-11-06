@@ -139,7 +139,10 @@ function createCheckpoint(sim, world, rigCodec, bridge, budget, logical = false)
   // from storage. A changed layout/default/world boot changes the baseline.
   const compile = (value, path = []) => {
     const name = path.join(".");
-    if (bufferFields.has(name)) return { buffer: true };
+    // Full-Hub support queries populate these rectangle samples lazily. They
+    // are derived collision/pose scratch, rebuilt by finishRecovery, not job
+    // state. Do not compile an incomplete first-actor rectangle into the schema.
+    if (bufferFields.has(name) || logical && name === "motion.groundRects") return { buffer: true };
     if (path.length && (value === null || typeof value !== "object" || references.has(value))) {
       if (fields.length >= 700 || path.length > 6) bad();
       const field = { path, kind: value === missing ? "optional" : value === null || references.has(value) ? "reference" : typeof value };

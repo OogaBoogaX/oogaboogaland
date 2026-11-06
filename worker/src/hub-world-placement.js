@@ -36,14 +36,18 @@ export function createHubWorldPlacement(g) {
         solids.supportAt(p.x, p.z, p.y, 0, shape.radius),
         support.bedSupportAt(p.x, p.z, p.y, 0, shape.radius),
         altar.height <= p.y + 1e-7 && Math.hypot(p.x, p.z) < altar.platformRadius + shape.radius
-          ? altar.height : -Infinity,
-        g.mempool.floatAt(p.x, p.z, p.y, 0, shape.height * (who.kind === 'ooga' ? .55 : .9)));
+          ? altar.height : -Infinity);
+      // Only static support is authoritative here. Browser preflight separately
+      // checks its live support/clearance before ACK; a raised water support
+      // above these saved feet refuses reclaim rather than snapping the body.
       return { grounded: floor > -120 && Math.abs(p.y - floor) <= .04 };
     },
     oogaPlacement(cave) {
       if (!cave?.nonInteractive || cave.humanControlled || cave.remoteControlled
         || ![cave.root.position.x, cave.root.position.y, cave.root.position.z, cave.root.rotation.y].every(finite)) return false;
       if (!cave.root.visible) return ['away', 'working', 'chilling', 'sleeping'].includes(cave.state);
+      if (!g.npcLandSegmentClear(cave.root.position.x, cave.root.position.z,
+        cave.root.position.x, cave.root.position.z, cave.bodyRadius)) return false;
       hubScene.updateWorld(cave.root, cave.root.parent?.world);
       // Recovery rebuilds the standard/rest pose first. Reserve the actual
       // transformed six body parts, including head accessories, rather than

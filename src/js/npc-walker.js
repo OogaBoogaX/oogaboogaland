@@ -21,6 +21,7 @@
     SHOULDER_REACH, JUMP_SPEED, WALK, PLAYER_STEP, NPC_PASS_REACH, RUSH_SPEED }) => {
     const recoverWalker = (cave, tx, tz, dt, usePath = false) => {
       const a = cave.avoidance, nav = a.navigation, p = cave.root.position, path = cave.pathing;
+      if (ctx.npcFixedPaths && cave.nonInteractive) { nav.mode = 0; return; }
       // Keep the route identity stable and recover toward its current segment.
       // The path index advances within a route; replans and explicit route
       // resets invalidate the cached target before restarting stall tracking.
@@ -200,6 +201,16 @@
       }
     };
     const walkToward = (cave, tx, tz, distance) => {
+      if (ctx.npcFixedPaths && cave.nonInteractive) {
+        const p = cave.root.position, dx = tx - p.x, dz = tz - p.z, left = Math.hypot(dx, dz);
+        if (left < 1e-7) return 0;
+        const step = Math.min(distance, PLAYER_STEP, left), x = p.x + dx / left * step, z = p.z + dz / left * step;
+        if (!walkerClear(cave, x, z)) return 0;
+        p.x = x; p.z = z; p.y = groundY(cave);
+        const angle = Math.atan2(dx, dz);
+        cave.root.rotation.y += Math.atan2(Math.sin(angle - cave.root.rotation.y), Math.cos(angle - cave.root.rotation.y)) * .35;
+        return step;
+      }
       if (cave.traffic.yielding) return 0;
       const progress = cave.progress;
       if (progress.backoff > 0) {
