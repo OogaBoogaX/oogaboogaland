@@ -34,22 +34,38 @@ export class HubVirtualWorld extends createVirtualWorldClass(openHubHost) {
       })]);
     } finally { clearTimeout(timer); }
   }
-  // Startup and recovery gate, called by the lifecycle before any run is bought,
-  // Room acquired, body reclaimed or frame published. One read, through the same
-  // latch and timeout. It passes only a known v2 snapshot that is no older than,
-  // and doesn't conflict with, the latest accepted or queued pile, and renders the
-  // same level as the state the first frame would show. Otherwise it refuses with
-  // a fixed code and nothing is exposed.
-  // Missing: a queued input is applied only by a simulation tick, which needs an
-  // acquired Room, so a fresher level can't be applied before first publication.
-  // A snapshot matching only a queued input, or any other level, is refused
-  // ('queued', 'mismatch'); that world can't start until this path exists.
-  async verifyStartup(saved) {
+  // Startup and recovery gate. One read, through the same latch and timeout.
+  // It refuses, with a fixed code, a snapshot that is unknown, unreadable,
+  // invalid, legacy, older than or conflicting with the latest accepted or queued
+  // pile. Without a ticket (preflight, before any run is bought or Room acquired)
+  // a valid changed level passes: it is reconciled once the pair is acquired.
+  // With a ticket (the runner opener, after Room acquisition and the runner's own
+  // ownership checks, before any body work or frame), a changed level is applied
+  // durably through the host's fenced source-only reconciliation, and the state
+  // then retained must show this same snapshot's level. Nothing is cached.
+  async verifyStartup(saved, { ticket } = {}) {
     const refuse = kind => { throw Object.assign(Error(`private pile source refuses exposure: ${kind}`), { code: kind }); };
     let value;
     try { value = validateHubPile(await this.#readPileSnapshot()); }
     catch (error) { refuse(failure(error, 'transport')); }
     if (value.bananas === null) refuse(value.cutover === 'pending' ? 'pending' : 'review');
+    // An accounting time after trusted host time is refused at intake, never stretched.
+    if (value.at > Date.now()) refuse('invalid');
+    const changed = await this.#sourceDiffers(saved, value, refuse);
+    if (!changed || !ticket) return;
+    let receipt;
+    try { receipt = await this.host.reconcileSource(ticket, value); }
+    catch (error) { refuse(failure(error, 'reconcile')); }
+    if (!['applied', 'queued', 'unchanged'].includes(receipt?.status)) refuse(receipt?.status === 'stale' ? 'stale' : 'reconcile');
+    // Strict, against what the host actually retained, never only what it queued.
+    const after = await this.#sourceDiffers(await this.retained(), value, refuse);
+    if (after) refuse(after);
+  }
+  // null when the state the first frame would show holds exactly this v2
+  // aggregate (health, uncertainty and revision included) and renders its level;
+  // otherwise 'queued' (only the queue does) or 'mismatch'. Refuses what no
+  // reconciliation may accept. Same-level health or revision changes reconcile too.
+  async #sourceDiffers(saved, value, refuse) {
     const now = Date.now(), inputs = saved?.simulation?.inputs;
     // The state the first frame shows: retained, or the configured first boot.
     const shown = saved ? saved.simulation?.state : (await this.ctx.storage.get(HUB_CONFIGURATION_KEY))?.state;
@@ -67,7 +83,9 @@ export class HubVirtualWorld extends createVirtualWorldClass(openHubHost) {
       exposed = shown.pile ? hubPileLevel(shown.pile, now) : shown.level;
       pending = latest.pile ? hubPileLevel(latest.pile, now) : latest.level;
     } catch { refuse('checkpoint'); }
-    if (fresh !== exposed) refuse(fresh === pending ? 'queued' : 'mismatch');
+    // The stored geometry level must agree with both the pile and this snapshot.
+    const holds = (state, level) => !!state.pile && sameCheckpointValue(state.pile, value) && level === fresh && state.level === fresh;
+    return holds(shown, exposed) ? null : holds(latest, pending) ? 'queued' : 'mismatch';
   }
   // The lifecycle, tick and publication already in flight, waited on once and
   // for at most BUSY_WAIT. Source reads are none of these, so this never waits on itself.
@@ -77,6 +95,15 @@ export class HubVirtualWorld extends createVirtualWorldClass(openHubHost) {
       await Promise.race([Promise.allSettled([this.lifecycle, this.turn, this.publication].filter(Boolean)),
         new Promise(resolve => { timer = setTimeout(resolve, BUSY_WAIT); })]);
     } finally { clearTimeout(timer); }
+  }
+  // Whether a live producer loop already serves exactly this run: the same world,
+  // fence, owner and end, its own generation still current, not halted and not
+  // past its end. Another owner or fence with the same deadline, or a superseded,
+  // halted or ended loop, never suppresses a needed restart.
+  servicesRunning(ticket, until) {
+    const run = this.serviceRun;
+    return !!run && run.generation === this.sourceGeneration && !this.halted && Date.now() < run.runUntil
+      && run.world === ticket.world && run.fence === ticket.fence && run.owner === ticket.owner && run.runUntil === until;
   }
   // At most one Oogatron and one private pile read per minute, inside the existing
   // explicitly started finite run. No alarm, automatic start or lease renewal.
@@ -88,6 +115,8 @@ export class HubVirtualWorld extends createVirtualWorldClass(openHubHost) {
       || until - Date.now() > HOST.maxRunMs) throw Error('finite acquired Hub service run required');
     if (this.sourceTimer) clearTimeout(this.sourceTimer);
     const generation = this.sourceGeneration = (this.sourceGeneration || 0) + 1;
+    // The exact finite run these producers serve; see servicesRunning.
+    this.serviceRun = { world: ticket.world, fence: ticket.fence, owner: ticket.owner, runUntil: until, generation };
     const current = () => generation === this.sourceGeneration && !this.halted && Date.now() < until;
     const schedule = delay => {
       if (!current()) return;

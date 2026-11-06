@@ -9,10 +9,16 @@ const stamp = n => Number.isSafeInteger(n) && n >= 0 && n <= 8640000000000000;
 const id = s => typeof s === 'string' && /^[A-Za-z0-9_.:-]{1,80}$/.test(s);
 const exact = (o, keys) => o && Object.keys(o).sort().join() === keys;
 
-export function createHubWorldState(initial) {
+// sourceAt() is the latest validated source observation (accepted or queued),
+// itself bounded by trusted host time at intake. A pile's accounting time is
+// bounded by the observation that delivered it, never by the NPC world clock,
+// which may legitimately lag it (a stopped world catching up). No decay.
+export function createHubWorldState(initial, sourceAt) {
+  if (typeof sourceAt !== 'function') fail();
   const names = new Set(hubCharacters.all().map(row => row.handle));
   const catalog = new Map(hubSwag.map(item => [item.id, item]));
-  const validate = saved => {
+  const bound = () => { const value = sourceAt(); if (!stamp(value) || value < 1) fail(); return value; };
+  const validate = (saved, limit = bound()) => {
     boundedJSON(saved, 16 * 1024, 2048);
     if (!(saved?.v === 1 && exact(saved, 'assignments,at,elapsed,inventory,level,tint,v')
       || saved?.v === 2 && exact(saved, 'assignments,at,elapsed,inventory,level,pile,tint,v'))
@@ -23,7 +29,7 @@ export function createHubWorldState(initial) {
       || !Array.isArray(saved.assignments) || saved.assignments.length > names.size) fail();
     if (saved.v === 2 && saved.pile !== null) {
       validateHubPile(saved.pile);
-      if (saved.pile.at > saved.at) fail();
+      if (saved.pile.bananas === null || saved.pile.at > limit) fail();
     }
     const entries = new Set(), owners = new Set(), assigned = new Set();
     for (const row of saved.inventory) {
@@ -44,7 +50,7 @@ export function createHubWorldState(initial) {
   const apply = saved => {
     at = saved.at; elapsed = saved.elapsed; tint = saved.tint; world.level = saved.level;
     pile = saved.pile ? structuredClone(saved.pile) : null;
-    if (pile) world.level = hubPileLevel(pile, at);
+    if (pile) world.level = hubPileLevel(pile, bound());
     state.inventory = saved.inventory.map(([id, itemId]) => ({ id, itemId }));
     for (const name of Object.keys(state.assignments)) delete state.assignments[name];
     for (const [name, entry] of saved.assignments) state.assignments[name] = entry;
@@ -75,15 +81,26 @@ export function createHubWorldState(initial) {
     advance(ms, wallAt) {
       if (ms !== 250 || !stamp(wallAt) || wallAt < at || !Number.isFinite(elapsed + ms / 1000)) fail();
       at = wallAt; elapsed += ms / 1000;
-      if (pile) world.level = hubPileLevel(pile, at);
+      if (pile) world.level = hubPileLevel(pile, bound());
     },
     capture,
-    validateUpdate(value) {
+    // observedAt is the incoming input's own validated observation, which bounds
+    // its pile. The world's clock is never advanced or compared here.
+    validateUpdate(value, observedAt) {
       if (!exact(value, 'assignments,inventory,level,tint') && !exact(value, 'assignments,inventory,level,pile,tint')) fail();
-      // Intake may arrive between simulation ticks. Event timing separately
-      // bounds the source timestamp; this does not advance the world's clock.
-      return validate({ ...capture(), ...value, at: Math.max(at, value.pile?.at || 0) });
+      if (!stamp(observedAt) || observedAt < 1) fail();
+      return validate({ ...capture(), ...value }, observedAt);
     },
+    // Source-only reconciliation: the pile and its level, nothing else. No clock,
+    // elapsed time, inventory, tint or assignment changes. The caller refreshes
+    // geometry; the pile must already be bounded by the current observation.
+    applyPile(next) {
+      const candidate = { ...capture(), pile: structuredClone(next) };
+      candidate.level = hubPileLevel(candidate.pile, bound());
+      validate(candidate);
+      pile = candidate.pile; world.level = candidate.level;
+    },
+    pile: () => pile && structuredClone(pile),
     applyUpdate(value) {
       if (!exact(value, 'assignments,inventory,level,tint') && !exact(value, 'assignments,inventory,level,pile,tint')) fail();
       const next = { ...capture(), ...value }; validate(next); apply(next);

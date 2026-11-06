@@ -35,7 +35,7 @@ export function createHubWorldSimulation(configuration) {
     || config.checkpointBytes > HOST.checkpointBytes - HOST.metadataBytes - HOST.sessionSlotBytes) fail();
   // Validate trusted configuration before it can be durably installed; this
   // constructs no terrain, rig, timer or network subscription.
-  const bootstrapState = createHubWorldState(config.state);
+  const bootstrapState = createHubWorldState(config.state, () => config.source.observedAt);
   if (config.state.elapsed !== 0 || config.state.at !== config.source.observedAt) fail();
   const bootstrapRoster = createContributorRoster({ registry: hubCharacters, clock: bootstrapState.clock,
     repositoryOf: hubRepositoryOf, normalizeStats: normalizeHubStats, slots: hubSlots, authoritative: true });
@@ -132,6 +132,12 @@ export function createHubWorldSimulation(configuration) {
         persist(saved, world => { result = world.enqueueInput(value, timing); return result === 'accepted'; });
         return result;
       },
+      // Only a changed queue or applied pile replaces the committed DTO.
+      applySource(saved, snapshot, timing) {
+        let result;
+        persist(saved, world => { result = world.applySource(snapshot, timing); return result === 'applied' || result === 'queued'; });
+        return result;
+      },
       readQueries(saved) {
         // Query readers need the transaction's own runtime/reference fence even
         // when metadata-only validation was satisfied from the immutable DTO.
@@ -163,7 +169,7 @@ export function createHubWorldSimulation(configuration) {
     return scope;
   };
   const adapter = { version: config.version, checkpointBytes: config.checkpointBytes, forTransaction };
-  for (const method of ['initial', 'validate', 'step', 'project', 'poses', 'playerSpawn', 'npcFor', 'enqueueInput', 'bodyPlacement']) {
+  for (const method of ['initial', 'validate', 'step', 'project', 'poses', 'playerSpawn', 'npcFor', 'enqueueInput', 'applySource', 'bodyPlacement']) {
     adapter[method] = (...args) => {
       const scope = forTransaction();
       try { return scope[method](...args); } finally { scope.dispose(); }

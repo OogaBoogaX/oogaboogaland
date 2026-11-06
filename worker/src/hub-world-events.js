@@ -18,7 +18,7 @@ export function createHubWorldEvents({ state, roster, changed, source }) {
     if (!value || Object.keys(value).sort().join() !== 'activity,kind,observedAt,revision,state,v'
       || value.v !== 1 || value.kind !== 'hub-state' || !stamp(value.revision) || value.revision < 1
       || !stamp(value.observedAt) || value.observedAt < 1) fail();
-    state.validateUpdate(value.state); roster.validateCheckpoint(value.activity);
+    state.validateUpdate(value.state, value.observedAt); roster.validateCheckpoint(value.activity);
     if (value.state.pile && value.state.pile.at > value.observedAt) fail();
     // The trusted source still cannot advance contributor activity into its
     // future. Per-repository stamps are bounded by each row's last commit.
@@ -37,6 +37,14 @@ export function createHubWorldEvents({ state, roster, changed, source }) {
     if (p.input.observedAt > p.acceptedAt || p.input.revision <= revision || p.input.observedAt < observedAt) fail();
   };
   return {
+    // The latest validated source observation, queued or accepted. It only
+    // grows: a queued input never observes earlier than the accepted one.
+    sourceAt: () => pending ? pending.input.observedAt : observedAt,
+    // The pile the queue will leave applied: the queued input's, else the current.
+    queuedPile: () => pending ? structuredClone(pending.input.state.pile ?? null) : null,
+    queued: () => pending !== null,
+    // Whether this queue now holds the world's source state (restored or changed).
+    used: () => used,
     enqueue(input, timing) {
       used = true;
       validate(input);

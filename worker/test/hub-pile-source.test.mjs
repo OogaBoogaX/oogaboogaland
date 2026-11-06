@@ -297,7 +297,7 @@ test("a failed diagnostic write stops local publication and still attempts the d
 test("world state captures never share the pile's nested uncertainty", () => {
   const at = Date.now();
   const pile = known({ at: at - DAY, uncertain: { sats: 1000, bananas: 1 }, reconciliation: "review" });
-  const state = createHubWorldState({ v: 2, at, elapsed: 0, level: 0, tint: 0, pile, inventory: [], assignments: [] });
+  const state = createHubWorldState({ v: 2, at, elapsed: 0, level: 0, tint: 0, pile, inventory: [], assignments: [] }, () => at);
   assert.equal(state.world.level, 4321, "the no-decay level from the restored pile");
   pile.uncertain.sats = 1;
   const first = state.capture();
@@ -308,7 +308,39 @@ test("world state captures never share the pile's nested uncertainty", () => {
   assert.deepEqual(second.pile, known({ at: at - DAY, uncertain: { sats: 1000, bananas: 1 }, reconciliation: "review" }));
   // A legacy v1 pile is refused, not migrated.
   assert.throws(() => createHubWorldState({ v: 2, at, elapsed: 0, level: 0, tint: 0,
-    pile: { v: 1, type: "pile", bananas: 5, at, eatPerHour: 0 }, inventory: [], assignments: [] }), /legacy/);
+    pile: { v: 1, type: "pile", bananas: 5, at, eatPerHour: 0 }, inventory: [], assignments: [] }, () => at), /legacy/);
+});
+
+test("a pile is bounded by its source observation, not the NPC world clock, and source-only application touches nothing else", () => {
+  // A stopped world lags real time: its clock is a day behind the trusted observation.
+  const worldAt = Date.now() - DAY, observed = Date.now();
+  let bound = observed;
+  const inventory = [], assignments = [];
+  const state = createHubWorldState({ v: 2, at: worldAt, elapsed: 12.5, level: 3, tint: 1, pile: null, inventory, assignments }, () => bound);
+  const before = state.capture();
+  const ahead = known({ at: observed - 1000, bananas: 6000 });
+  state.applyPile(ahead);
+  const after = state.capture();
+  assert.deepEqual(after.pile, ahead);
+  assert.equal(state.world.level, 6000, "the new level, with no decay");
+  assert.deepEqual([after.at, after.elapsed, after.tint, after.inventory, after.assignments, state.clock()],
+    [before.at, before.elapsed, before.tint, before.inventory, before.assignments, worldAt], "no clock, elapsed time or other state moves");
+  // A future accounting time, past the observation, is refused, never stretched.
+  assert.throws(() => state.applyPile(known({ at: observed + 1, bananas: 7000 })));
+  assert.throws(() => state.applyPile({ ...PENDING }), "unknown never applies");
+  assert.deepEqual(state.capture().pile, ahead, "a refused pile changes nothing");
+  // An incoming input is bounded by its own observation.
+  const update = { level: 6000, tint: 1, inventory: [], assignments: [], pile: ahead };
+  assert.equal(state.validateUpdate(update, observed - 1000), true);
+  assert.throws(() => state.validateUpdate(update, observed - 1001));
+  // Cold reconstruction revalidates against the retained observation; a smaller
+  // bound is refused, never reinterpreted.
+  const restored = createHubWorldState(after, () => observed);
+  assert.equal(restored.world.level, 6000);
+  assert.throws(() => createHubWorldState(after, () => observed - 2000));
+  assert.throws(() => createHubWorldState(after), "the bound is required");
+  bound = observed - 2000;
+  assert.throws(() => state.capture(), "a shrinking bound is invalid state, not a silent pass");
 });
 
 test("a read superseded by a newer run writes nothing of its own", async () => {
@@ -320,8 +352,9 @@ test("a read superseded by a newer run writes nothing of its own", async () => {
 
 // A cold instance inside a live lease: alarm and Room hints open a fresh runner
 // through the real receiver and opener, never through startRun or recoverRun.
-const READ_ONLY = ["read", "host.worldRunState", "host.bodyLifecycleRevision", "room.npcAuthorityStatus"];
-function coldWorld({ snapshot, saved }) {
+const READ_ONLY = ["read", "host.worldRunState", "host.bodyLifecycleRevision", "room.npcAuthorityStatus", "host.reconcileSource"];
+// reconcile(saved, value): what the host durably retains after its source-only reconciliation.
+function coldWorld({ snapshot, saved, reconcile = () => "unchanged" }) {
   const data = new Map(), calls = [], runUntil = saved.runUntil, revision = 2;
   const hint = { v: 1, room: "island", world: saved.world, epoch: saved.fence, revision, owner: saved.owner, runUntil };
   data.set("host-world-receiver-v1", { v: 1, hint, status: "running", scans: 0, failures: 0, lastAt: Date.now() - 5000, nextAt: Date.now() - 5000 });
@@ -333,7 +366,8 @@ function coldWorld({ snapshot, saved }) {
   globalThis.__hubPileFixtureHost = proxy("host", { storage, simulation: { playerSpawn() {}, poses() {} }, read: () => structuredClone(saved),
     worldRunState: async () => { calls.push("host.worldRunState"); return { world: saved.world, epoch: saved.fence, owner: saved.owner, revision: 5,
       status: "running", runUntil, publicationProtocol: 1, canPublish: true }; },
-    bodyLifecycleRevision: async () => { calls.push("host.bodyLifecycleRevision"); return 5; } });
+    bodyLifecycleRevision: async () => { calls.push("host.bodyLifecycleRevision"); return 5; },
+    reconcileSource: async (ticket, value) => { calls.push("host.reconcileSource"); return { status: reconcile(saved, value, ticket) }; } });
   const room = proxy("room", { npcAuthorityStatus: async (ticket) => {
     calls.push("room.npcAuthorityStatus");
     return ticket ? { owns: true, runUntil, cadence: undefined }
@@ -342,36 +376,113 @@ function coldWorld({ snapshot, saved }) {
   const env = { VIRTUAL_HOST_PREVIEW: "1", VIRTUAL_HOST_BODY_PREVIEW: "1", VIRTUAL_HOST_MOVEMENT_PREVIEW: "1",
     VIRTUAL_HOST_RUNNER_PREVIEW: "1", ROOM: { getByName: () => room },
     DONATIONS: { pileSnapshot: async () => { calls.push("read"); return snapshot(); } } };
-  const world = new HubVirtualWorld({ storage, waitUntil() {} }, env);
-  return { world, data, calls, hint };
+  const waits = [];
+  const world = new HubVirtualWorld({ storage, waitUntil: (p) => waits.push(p) }, env);
+  return { world, data, calls, hint, waits };
 }
+// The host durably retaining exactly the reconciled aggregate and its level.
+const retain = (retained, value) => {
+  retained.simulation.state.pile = value; retained.simulation.state.level = Math.floor(value.bananas); return "applied";
+};
 
 test("a cold alarm or Room hint inside a live lease gates its newly opened runner before any body work", async () => {
   const held = known({ at: Date.now() - DAY, revision: 7 });
   const saved = () => retainedWorld({ pile: held, owner: "run-cold" });
+  const changed = () => known({ at: held.at, revision: 8, bananas: 5000 });
+  // Same rendered level, but not the same aggregate: both must reconcile too.
+  const health = () => ({ ...held, reconciliation: "behind", uncertain: { sats: 1000, bananas: 1 } });
+  const revised = () => ({ ...held, revision: 8, bananas: held.bananas + 0.4 });
   for (const [name, wake] of [["alarm", (c) => c.world.alarm()], ["Room hint", (c) => c.world.notifyRoomWorld(c.hint)]]) {
-    for (const refused of [() => REVIEW, () => known({ at: held.at, revision: 8, bananas: 5000 })]) {
-      const cold = coldWorld({ snapshot: refused, saved: saved() });
+    // Unknown, and a change the host reports applied but did not retain: the
+    // final check reads the actual retained aggregate, never the receipt.
+    for (const [kind, refused, reconcile] of [["unknown", () => REVIEW, undefined], ["unretained change", changed, () => "applied"],
+      ["unretained same-revision health", health, () => "applied"], ["unretained same-level revision", revised, () => "applied"],
+      ["stale reconciliation", changed, () => "stale"]]) {
+      const cold = coldWorld({ snapshot: refused, saved: saved(), reconcile });
       await wake(cold);
-      const label = `${name}, ${refused().bananas === null ? "unknown" : "changed level"}`;
+      const label = `${name}, ${kind}`;
       assert.deepEqual(cold.calls.filter((c) => !READ_ONLY.includes(c)), [], `${label}: no body dispatch, reclaim, tick or publication`);
       assert.ok(cold.calls.indexOf("read") > cold.calls.lastIndexOf("host.bodyLifecycleRevision"), `${label}: read after the runner's own ownership checks`);
       assert.equal(cold.data.get(FAULT)?.phase, "source", `${label}: a durable fault`);
       assert.deepEqual([cold.world.halted, cold.world.timer, cold.world.receiver.runtime], [true, null, null], `${label}: no runner or timer left`);
+      assert.deepEqual([cold.world.serviceRun, cold.world.sourceTimer ?? null], [undefined, null], `${label}: no service producers for a refused world`);
       // A later wake never reaches the refused opener again.
       const reads = cold.calls.length;
       await cold.world.alarm();
       assert.equal((await cold.world.notifyRoomWorld(cold.hint)).status, "stale");
       assert.equal(cold.calls.length, reads, `${label}: nothing after the fault`);
     }
-    // A matching snapshot lets the same opener hand its runner to body dispatch.
-    const cold = coldWorld({ snapshot: () => held, saved: saved() });
-    await wake(cold);
-    clearTimeout(cold.world.timer); cold.world.halted = true;
-    const firstWork = cold.calls.findIndex((c) => !READ_ONLY.includes(c));
-    assert.ok(firstWork > cold.calls.indexOf("read") && cold.calls.indexOf("read") >= 0, `${name}: dispatch only after the gate`);
-    assert.equal(cold.data.get(FAULT), undefined);
+    // A matching snapshot, or a changed one the host durably applied, lets the
+    // same opener hand its runner to body dispatch, only after reconciliation.
+    for (const [kind, snapshot, reconcile] of [["matching", () => held, undefined], ["changed and applied", changed, retain],
+      ["same-revision health applied", health, retain], ["same-level revision applied", revised, retain]]) {
+      const cold = coldWorld({ snapshot, saved: saved(), reconcile });
+      await wake(cold);
+      clearTimeout(cold.world.timer); clearTimeout(cold.world.sourceTimer); cold.world.halted = true;
+      const firstWork = cold.calls.findIndex((c) => !READ_ONLY.includes(c));
+      assert.ok(firstWork > cold.calls.indexOf("read") && cold.calls.indexOf("read") >= 0, `${name}, ${kind}: dispatch only after the gate`);
+      assert.equal(cold.calls.includes("host.reconcileSource"), kind !== "matching", `${name}, ${kind}: reconciled only when changed`);
+      if (kind !== "matching") assert.ok(cold.calls.indexOf("host.reconcileSource") < firstWork, `${name}, ${kind}: reconciled before body work`);
+      assert.equal(cold.data.get(FAULT), undefined, `${name}, ${kind}`);
+    }
   }
+});
+
+test("a cold opener inside a live lease restores the source producers once, through the durable cursor, and never past the run's end", async () => {
+  const held = known({ at: Date.now() - DAY, revision: 7 });
+  const RECEIVER = "host-world-receiver-v1", CURSOR = "hub-activity-source-v1";
+  const cold = coldWorld({ snapshot: () => held, saved: retainedWorld({ pile: held, owner: "run-cold" }) });
+  await cold.world.alarm();
+  clearTimeout(cold.world.timer); // No NPC tick here: the source producer runs alone.
+  assert.deepEqual(cold.world.serviceRun, { world: cold.hint.world, fence: cold.hint.epoch, owner: cold.hint.owner,
+    runUntil: cold.hint.runUntil, generation: 1 }, "restored for exactly this finite run");
+  // One producer cycle: the durable minute cursor, one source read, a run-scoped record.
+  while (!cold.waits.length) await new Promise((resolve) => setTimeout(resolve, 1));
+  await Promise.all(cold.waits.splice(0));
+  const cursor = cold.data.get(CURSOR), diagnostic = cold.data.get(PILE_SOURCE);
+  assert.ok(Number.isSafeInteger(cursor?.at), "the durable rate cursor is used");
+  assert.deepEqual([diagnostic.world, diagnostic.epoch, diagnostic.status, diagnostic.kind], [cold.hint.world, cold.hint.epoch, "available", "unchanged"]);
+  assert.equal(cold.calls.filter((c) => c === "read").length, 2, "the opener's read, then the producer's");
+  assert.equal(cold.data.get(FAULT), undefined);
+  assert.ok(cold.world.sourceTimer, "the next minute is scheduled within the run");
+  clearTimeout(cold.world.sourceTimer);
+  // Reopening the same run (its runtime closed after the fixture's body step)
+  // reads through the gate again but never starts a second producer loop.
+  const record = cold.data.get(RECEIVER);
+  cold.data.set(RECEIVER, { ...record, lastAt: record.lastAt - 5000, nextAt: record.lastAt - 5000 });
+  await cold.world.notifyRoomWorld(cold.hint);
+  clearTimeout(cold.world.timer); clearTimeout(cold.world.sourceTimer); cold.world.halted = true;
+  assert.equal(cold.calls.filter((c) => c === "read").length, 3, "one more gate read");
+  assert.equal(cold.world.sourceGeneration, 1, "no second producer loop");
+  // The same deadline under another owner and fence (a takeover) is another run:
+  // the old loop's closures hold the old ticket, so a cold reopen must replace it.
+  const taken = retainedWorld({ pile: held, owner: "run-cold" });
+  const shared = coldWorld({ snapshot: () => held, saved: taken });
+  await shared.world.alarm();
+  clearTimeout(shared.world.timer); clearTimeout(shared.world.sourceTimer);
+  assert.deepEqual([shared.world.serviceRun.owner, shared.world.serviceRun.fence, shared.world.sourceGeneration], ["run-cold", 1, 1]);
+  taken.owner = "run-cold-b"; taken.fence = 2;
+  const prior = shared.data.get(RECEIVER), replacement = { ...prior.hint, epoch: 2, owner: "run-cold-b" };
+  shared.data.set(RECEIVER, { ...prior, hint: replacement, lastAt: prior.lastAt - 5000, nextAt: prior.lastAt - 5000 });
+  await shared.world.alarm();
+  clearTimeout(shared.world.timer); clearTimeout(shared.world.sourceTimer);
+  assert.equal(replacement.runUntil, prior.hint.runUntil, "the same deadline");
+  assert.deepEqual(shared.world.serviceRun, { world: replacement.world, fence: 2, owner: "run-cold-b", runUntil: replacement.runUntil, generation: 2 },
+    "restarted for the replacement run, not suppressed by the shared deadline");
+  const ticketB = { world: replacement.world, fence: 2, owner: "run-cold-b" };
+  assert.equal(shared.world.servicesRunning(ticketB, replacement.runUntil), true);
+  assert.equal(shared.world.servicesRunning({ ...ticketB, fence: 1, owner: "run-cold" }, replacement.runUntil), false, "the old run is not this one");
+  // A halted or superseded loop never counts as running, so it cannot suppress a restart.
+  shared.world.halted = true;
+  assert.equal(shared.world.servicesRunning(ticketB, replacement.runUntil), false);
+  shared.world.halted = false; shared.world.sourceGeneration++;
+  assert.equal(shared.world.servicesRunning(ticketB, replacement.runUntil), false);
+  shared.world.halted = true;
+  // A run already past its end is never reopened, and its producers never restart.
+  const ended = retainedWorld({ pile: held, owner: "run-cold" }); ended.runUntil = Date.now() - 1;
+  const late = coldWorld({ snapshot: () => held, saved: ended });
+  await late.world.alarm();
+  assert.deepEqual([late.calls.includes("read"), late.world.serviceRun, late.world.sourceTimer ?? null], [false, undefined, null]);
 });
 
 // Startup and recovery, through the real lifecycle: every host and Room step the
@@ -408,14 +519,18 @@ const retainedWorld = ({ pile, level = pile ? Math.floor(pile.bananas) : 0, pend
       state: { at, level, tint: 0, inventory: [], assignments: [], pile }, activity: { v: 1, rows: [] } } };
 };
 
-test("first boot reads a fresh known pile before buying a run, and refuses one it would contradict", async () => {
+test("first boot reads a fresh known pile before buying a run, letting a changed level through to reconciliation and refusing what none may accept", async () => {
   const configuration = { state: { v: 1, at: 1, elapsed: 0, level: 4321, tint: 0, inventory: [], assignments: [] } };
-  const matching = gateWorld({ snapshot: () => known({ at: Date.now() - DAY }), configuration });
-  assert.equal((await matching.start()).code, "passed");
-  assert.deepEqual(matching.calls, ["read", "begin"], "the read precedes the run, and no Room call precedes either");
-  assert.ok(matching.data.has(BOOT));
+  // The configured level or a changed one: both buy the run. The changed level is
+  // reconciled after acquisition, in the opener, before any body or frame.
+  for (const bananas of [4321.5, 5000]) {
+    const matching = gateWorld({ snapshot: () => known({ bananas, at: Date.now() - DAY }), configuration });
+    assert.equal((await matching.start()).code, "passed", `level ${bananas}`);
+    assert.deepEqual(matching.calls, ["read", "begin"], "the read precedes the run, and no Room call precedes either");
+    assert.ok(matching.data.has(BOOT));
+  }
   for (const [name, snapshot, code] of [
-    ["another level", () => known({ bananas: 5000, at: Date.now() - DAY }), "mismatch"],
+    ["future accounting time", () => known({ at: Date.now() + DAY }), "invalid"],
     ["pending", () => PENDING, "pending"], ["review", () => REVIEW, "review"],
     ["legacy v1", () => ({ v: 1, type: "pile", bananas: 4321, at: Date.now(), eatPerHour: 0 }), "legacy"],
     ["transport", () => { throw Error("synthetic transport failure"); }, "transport"],
@@ -428,11 +543,12 @@ test("first boot reads a fresh known pile before buying a run, and refuses one i
   }
 });
 
-test("a retained restart checks the shown state: old accounting, health changes and an unchanged level pass", async () => {
+test("a retained restart checks the shown state: old accounting, health changes and a newer level pass; older or conflicting refuse", async () => {
   const held = known({ at: Date.now() - 300 * DAY, revision: 7 });
   const prior = { request: REQUEST, durationMs: 60000 };
   for (const [name, snapshot] of [["identical", held], ["health changed", { ...held, reconciliation: "behind" }],
-    ["newer revision, same level", { ...held, revision: 8, bananas: held.bananas + 0.4 }]]) {
+    ["newer revision, same level", { ...held, revision: 8, bananas: held.bananas + 0.4 }],
+    ["reversal below, reconciled after acquisition", { ...held, revision: 8, bananas: held.bananas - 2 }]]) {
     const restart = gateWorld({ snapshot: () => snapshot, saved: retainedWorld({ pile: held }), prior });
     assert.equal((await restart.start()).code, "passed", name);
     assert.deepEqual(restart.calls, ["read", "ticket"], `${name}: gate before the retained ticket`);
@@ -441,7 +557,6 @@ test("a retained restart checks the shown state: old accounting, health changes 
     ["older revision", { ...held, revision: 6 }, "stale"],
     ["same revision, other amount", { ...held, bananas: held.bananas + 1 }, "conflict"],
     ["same revision, other time", { ...held, at: held.at + 1 }, "conflict"],
-    ["reversal below", { ...held, revision: 8, bananas: held.bananas - 2 }, "mismatch"],
   ]) {
     const refused = gateWorld({ snapshot: () => snapshot, saved: retainedWorld({ pile: held }), prior });
     assert.equal((await refused.start()).code, code, name);
@@ -449,14 +564,14 @@ test("a retained restart checks the shown state: old accounting, health changes 
   }
 });
 
-test("a fresher level waiting in the input queue is refused at startup, not shown stale first", async () => {
+test("a fresher level waiting in the input queue passes preflight for reconciliation; an older one is stale", async () => {
   const held = known({ at: Date.now() - DAY, revision: 7 });
   const newer = known({ at: Date.now() - 1000, revision: 8, bananas: 4400 });
   const pending = pendingInput(newer, Date.now() - 500);
   const prior = { request: REQUEST, durationMs: 60000 };
   const queued = gateWorld({ snapshot: () => newer, saved: retainedWorld({ pile: held, pending }), prior });
-  assert.equal((await queued.start()).code, "queued", "the queued level can't reach the first frame yet");
-  assert.deepEqual(queued.calls, ["read"]);
+  assert.equal((await queued.start()).code, "passed", "the opener reconciles it before any frame");
+  assert.deepEqual(queued.calls, ["read", "ticket"]);
   // The queued revision is the latest: anything older than it is stale.
   const older = gateWorld({ snapshot: () => held, saved: retainedWorld({ pile: held, pending }), prior });
   assert.equal((await older.start()).code, "stale");

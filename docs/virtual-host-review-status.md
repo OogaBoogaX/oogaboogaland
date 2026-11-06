@@ -7,10 +7,11 @@ changed here.
 
 ## Producer (BananaPayServer)
 
-- Producer #30 `b784ec8127318ad7be983007531ed0f98dd64b3c` integrates signed
-  #31 `391d67968adb2a863d55c10c12416ff6ce053d23`.
-- Combined 47/47 Node checks pass; CI 124 (run 42283858121) passes on Node 22
-  and 24.
+- #30 now integrates #31's published `4ea6c046` through signed `457c595`;
+  exact-head CI 126 succeeds, with 58 focused integration checks. (Earlier, #30
+  `b784ec81` integrated #31 `391d679`: 47/47 Node checks, CI 124.)
+- #31's anchor and rebuild policy is under material review and not
+  architecturally approved. There is no policy pivot.
 - A local workerd RPC test, on an earlier producer checkpoint, passed a fresh
   unknown pile through the named `PageApi` -> `Donations` -> SQLite path.
 - Unverified: an anchored pile in the runtime, staging bindings, billing.
@@ -19,15 +20,12 @@ changed here.
 
 ## Host (this repository)
 
-- Published `619adb863114adcab7b7e5ce8063740766dc4cc3` (v151 to v154, the
-  base merge and the hammock fixture repair). CI 893 (run 42287343520): Unit,
-  replay and all 284 Host/recovery checks pass; terrain fails 10/11 at the
-  host-foliage parity check (`hub-solid-scratch.test.mjs`), which compared the
-  browser build's compact storage with the host's plain arrays.
-- Local, pending, not published: the acquisition primitive below, and that
-  check's repair. It now compares every vertex, face (read through the compact
-  API) and other field exactly, regardless of storage, with a negative control.
-  Run locally it finds no geometry or metadata difference.
+- Published `5554166aae4c0d0439ec93d68bd1ed043291d1ea`, with the acquisition
+  primitive (v157) and the foliage parity repair (v158). Exact-head CI 894
+  (run 42288960847) is all green: Unit 452, replay 41, Host/recovery 286,
+  terrain/cache 11, Room compatibility 79.
+- Local, pending, not published or reviewed: the source reconciliation below
+  (v159) and its review corrections (v160, v161).
 
 ### Private pile consumer (v2)
 
@@ -40,14 +38,16 @@ changed here.
   simulation tick drains it. Diagnostics say queued, never applied or current.
 - An unknown, invalid or unreachable read halts the finite run (durable fault).
 
-### Startup and recovery gate (v153, v154)
+### Startup and recovery gate (v153, v154, v159)
 
-- `verifyStartup` reads once, through the existing latch and 4 s timeout, and
-  passes only a known v2 pile no older than, and not conflicting with, the
-  latest accepted or queued pile, that renders the same level as the state the
-  first frame shows. Otherwise it refuses with a fixed code.
-- v153 gates `startRun` (before the startup record, `begin`, Room and first
-  frame) and `recoverRun` (before Room takeover, `ticket` and reclaim).
+- `verifyStartup` reads once, through the existing latch and 4 s timeout. It
+  refuses, with a fixed code, a pile that is unknown, unreadable, invalid,
+  legacy, has an accounting time after trusted host time, or is older than or
+  conflicting with the latest accepted or queued pile.
+- Preflight, before any run is bought: `startRun` (before the startup record,
+  `begin` and Room) and `recoverRun` (before Room takeover, `ticket` and
+  reclaim). A valid changed level passes preflight (v159); before v159 it was
+  refused.
 - v154 also gates every newly opened runner in the receiver opener: attach,
   cold alarm, cold Room hint and tick reopen, after the runner's own ownership
   checks and before any body dispatch, reclaim, tick or publication. A refusal
@@ -57,39 +57,77 @@ changed here.
   attach opener); each cold open reads once. A transient failure at a cold
   open is now a durable fault needing operator recovery, not a receiver retry.
 
-### Room acquisition without publication (local)
+### Changed-pile reconciliation (v159, local)
 
-- `acquireHostRoom` (`host-room.js`) acquires Room authority and binds the
-  host with every check `publishHostPoses` makes: occupancy and format, CAS
-  and lost-reply reconciliation, host binding, and the fenced host
-  confirmation. It sends no frame: Room keeps `frame: null`, `sequence: 0`,
-  followers stay frozen, and the durable rate gate is untouched. A retry after
-  a lost reply re-verifies and writes nothing. Only an explicit, fresh,
-  unpaced acquisition may skip the frame.
-- Nothing calls it yet. `startRun` still acquires through the first publish,
-  and the startup gate is unchanged.
+- `startRun` now acquires Room authority and binds the host with
+  `acquireHostRoom` (v157), sending no frame. The first frame comes from the
+  runner, after body reconciliation.
+- The runner opener, after the runner's own ownership checks and before any
+  body dispatch, reclaim, tick or frame, reconciles any snapshot whose full v2
+  aggregate differs from the retained one, including same-revision health or
+  uncertainty and a higher revision at the same rendered level (v160). It calls
+  `VirtualHost.reconcileSource`, then re-reads what the host retained. It must
+  find exactly this aggregate (an exact comparison) and its level in the stored
+  state, never only a receipt or a queue. The same read is compared; nothing is
+  reread.
+- A cold opener (alarm, Room hint or tick reopen inside a still-valid lease) now
+  restores the source producers once for its finite run (v160). Before this, an
+  evicted run resumed NPC ticks with no source timers, because only `attach`
+  started them. They use the same durable minute cursor and end at `runUntil`.
+  An explicit attach starts its own and its opener does not. A refused or
+  faulted world gets none. The same run means exact identity (v161): world,
+  fence, owner and `runUntil`, with that loop's generation still current, not
+  halted and not past its end. A takeover sharing the deadline, or a halted,
+  superseded or ended loop, gets a fresh loop; only a live loop for exactly this
+  run is kept.
+- `reconcileSource` is one host transaction for an owned, Room-bound, running
+  world within the maximum lag. The Hub world queues the fresh absolute input as
+  usual, merged from any queued input so the queued activity payload is kept.
+  As a replacement input it takes this reconciliation's acceptance and
+  effective times, not the earlier input's. It then applies only the pile and the geometry it
+  shapes: pile level, mainland refresh, a clanker support check, collision sync.
+  There is no step, census, absence recovery, session, deadline, lease,
+  `wallCursor` or `simulatedAt` change, and no roster or swag change. Unchanged
+  or stale source writes nothing. A failed application or commit leaves the last
+  committed state.
+- Clock: a pile's accounting time is bounded by the latest validated source
+  observation (the queue's, else the configuration's at first boot), itself
+  bounded by trusted host time at intake. It is no longer bounded by the NPC
+  world clock, which may lag after a stop. This replaces a `Math.max` that let
+  intake stretch the bound. Cold reconstruction revalidates against the
+  retained queue's observation; a pile ahead of it is refused, not
+  reinterpreted. No new persisted field.
+- A refusal after acquisition (unknown, unreadable, stale, conflicting, or a
+  change not retained) closes the runner, sends no frame or body grant, and is
+  a durable fault for explicit recovery.
 
 ### Not resolved
 
-- A changed level is still refused, not reconciled. Remaining wiring, not done:
-  1. `startRun`: `acquireHostRoom` in place of `publishHostPoses({ acquire })`.
-  2. Queue the fresh v2 input (`worldInput`) and let the attached runner
-     drain it with real ticks against Room's authenticated census.
-  3. The runner refuses ticks until body events reconcile (`bodyDue`), and
-     body reconciliation would place against the stale level. It needs a
-     tick-before-bodies startup mode, or source application ahead of body
-     work, without an empty census or invented time.
-  4. The gate in `verifyStartup` and in the opener then compares the drained
-     state, not the retained one, before bodies and the first publish.
-  5. `hub-world-state` refuses a pile whose `at` is after the world clock.
-     A world that was stopped while donations arrived lags real time, so the
-     input can drain only after catch-up ticks pass `at`. Draining is bounded
-     by the maximum lag (`maxLagMs`), beyond which a run needs explicit
-     outage recovery.
-- The first configuration is immutable, so once the live pile differs from it,
-  first boot is refused.
-- Strict 4 Hz: no new success. The delivery gate, total cost, memory fit and
-  live browser integration are unresolved.
+- Full-Hub reconciliation, `worker/test/hub-source-reconcile.test.mjs`, builds
+  real worlds (terrain, pile geometry, Oogas, Clankers).
+  - It covers growth with an accounting time ahead of the world clock, NPCs and
+    actor state unchanged, queued activity kept, future and unknown refused
+    atomically, duplicate no-op, exact cold restore, reversal, and a later
+    normal drain.
+  - First run (independent, after the donation UI window): 1 pass, 1 fail. The
+    failure was a fixture error: it expected the layout record's level to
+    follow the pile. That record is the immutable construction recipe, with its
+    irreversible ring, and keeps the level the world was built at. The
+    assertion now checks the current state and geometry level (5000), and that
+    the recipe level is unchanged. Production layout is untouched.
+  - Second run, after that correction alone: 2/2 pass. That covers the cold
+    restore of the grown pile in that one fixture world. It is not a general
+    proof for every layout.
+  - CI would also run it on the next push.
+- The clanker support check (`supportRemoved`): when the mainland's walkable
+  surface changes, it marks a clanker whose floor fell away as passively
+  falling, with zero velocity. It moves no actor and advances no time; gravity
+  acts at the next step. It is the reaction a normal drain already makes.
+- Reads: `startRun` and `recoverRun` read twice (preflight, then the opener);
+  each cold open reads once. The opener's reconciliation uses that one read.
+- Strict 4 Hz: no new success. Recovery rollback 295.45 ms (over the 250 ms
+  gate), the memory quota, delivery, runtime, total cost and live browser
+  integration are unresolved. Not review-ready, not activated.
 
 ## Checks
 
@@ -99,7 +137,11 @@ changed here.
 | v153 pile-source tests | 20/20 |
 | v154 pile-source tests | 21/21 (20 kept, plus the cold alarm/hint regression) |
 | Acquisition primitive (local) | host-room-takeover 29/29 (27 kept, 2 new); pile-source 21/21; host-world-receiver 6/6 |
-| Foliage parity repair (local) | hub-solid-scratch 3/3; terrain lane not yet rerun in CI |
+| Foliage parity repair (v158) | hub-solid-scratch 3/3; terrain lane 62/62 locally |
+| Source reconciliation (v159, local) | hub-pile-source 22/22; host-room-takeover 30/30; host-world-receiver 6/6; hub-world-validation 3/3 |
+| Review corrections (v160, local) | hub-pile-source 23/23; host-room-takeover 30/30; host-world-receiver 6/6; hub-world-validation 3/3; hub-source-reconcile authored, syntax only, not run |
+| Run identity (v161, local) | hub-pile-source 23/23 and host-world-receiver 6/6 (source-timer fix, 29/29) |
+| Full-Hub reconcile (v162, local) | hub-source-reconcile: first run 1/2 (layout-recipe fixture error); after the assertion correction, 2/2 |
 
 Each pass ran only `node --check` on touched files and the files listed.
 

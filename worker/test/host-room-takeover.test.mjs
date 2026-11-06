@@ -36,7 +36,13 @@ function fixture() {
     version: 'takeover-fixture-1', checkpointBytes: 30 * 1024,
     initial: () => ({ steps: 0 }), validate: s => Number.isSafeInteger(s.steps),
     step(s) { s.steps++; }, project: () => ({ npcs: [], hub: { pile: 0 } }),
-    npcFor: () => null, handoff: () => false, poses: frame };
+    npcFor: () => null, handoff: () => false, poses: frame,
+    // Data-only source reconciliation, called only by reconcileSource.
+    applySource(s, source, timing) {
+      if (source.fail) throw Error('fixture source failure');
+      if (s.level === source.level) return 'unchanged';
+      s.level = source.level; s.sourceAt = timing.observedAt; return 'applied';
+    } };
   const makeHost = () => new VirtualHost({ storage: hostStore, simulation, clock: () => now, sessionAdapter: { stepPassive: m => m } });
   const makeRoom = () => {
     const authority = new RoomNpcAuthority(roomStore, () => now);
@@ -117,6 +123,38 @@ test('Room acquisition without publication keeps uncertain-reply reconciliation,
     { publish: false, acquire: true, roomState: { authority: {}, owner: 'runner', runUntil: 0, cadence: null } }, { publish: 0, acquire: true }])
     await assert.rejects(publishHostPoses(h.host, h.room, t, options), /explicit fresh acquisition/, JSON.stringify(options));
   assert.equal(await h.roomStore.get(ROOM_NPC.key), undefined, 'nothing acquired by a refused form');
+});
+
+test('source-only reconciliation needs an owned Room-bound run and changes only source state, never clocks, sessions or deadlines', async () => {
+  const f = fixture(), ticket = await f.host.begin('runner', 60000);
+  await assert.rejects(f.host.reconcileSource(ticket, { level: 7 }), /acquired running world/, 'never before Room acquisition');
+  await acquireHostRoom(f.host, f.room, ticket);
+  await f.host.connect(ticket, [], { protocol: SESSION_PROTOCOL, world: ticket.world, accountId: 1, bodyId: 'player:1', zone: 'outside',
+    body: { kind: 'ooga', motion: { x: 1, y: 8, z: 2, yaw: 0, vx: 0, vy: 0, vz: 0, grounded: false },
+      equipment: { weapon: null, mode: 'carry', primaryOwned: false, secondaryOwned: false, selectedSlot: 1, unlimited: false, jetpack: false, jetpackOwned: false } } });
+  f.at(100100);
+  const before = await f.hostStore.get(HOST.key);
+  assert.ok(before.sessions.sessions.length === 1, 'a live body with its deadlines');
+  const applied = await f.host.reconcileSource(ticket, { level: 7 });
+  assert.deepEqual([applied.status, applied.epoch], ['applied', ticket.fence]);
+  const after = await f.hostStore.get(HOST.key);
+  const kept = ({ revision, wallAt, simulation, ...rest }) => rest;
+  assert.deepEqual(kept(after), kept(before), 'sessions, deadlines, lease, run end, wallCursor and simulatedAt untouched');
+  assert.equal(after.revision, before.revision + 1);
+  assert.deepEqual(after.simulation, { ...before.simulation, level: 7, sourceAt: 100100 }, 'no step: only source state, at trusted host time');
+  assert.equal((await f.roomStore.get(ROOM_NPC.key)).frame, null, 'no frame is sent');
+  // Unchanged source writes nothing; a failed application or commit changes nothing.
+  const writes = f.hostStore.writes();
+  assert.equal((await f.host.reconcileSource(ticket, { level: 7 })).status, 'unchanged');
+  await assert.rejects(f.host.reconcileSource(ticket, { level: 8, fail: true }), /fixture source failure/);
+  f.hostStore.fail();
+  await assert.rejects(f.host.reconcileSource(ticket, { level: 9 }), /fixture write failure/);
+  assert.equal(f.hostStore.writes(), writes);
+  assert.deepEqual(await f.hostStore.get(HOST.key), after, 'retained exactly as last committed');
+  // After a takeover, the old owner can no longer reconcile.
+  f.at(110001); const next = await claimHostRoom(f.host, f.room, 'runner-b');
+  await assert.rejects(f.host.reconcileSource(ticket, { level: 9 }), /fenced/);
+  assert.equal((await f.host.reconcileSource(next, { level: 9 })).status, 'applied');
 });
 
 // Real host/session/presentation storage and Room NPC authority; the transport

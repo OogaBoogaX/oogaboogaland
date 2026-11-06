@@ -6,7 +6,7 @@ import { DurableObject } from 'cloudflare:workers';
 import { HOST } from './virtual-host.js';
 import { HostWorldReceiver } from './host-world-receiver.js';
 import { openHostWorldRunner } from './host-world-runner.js';
-import { publishHostPoses, claimHostRoom, closeHostRoomRun } from './host-room.js';
+import { acquireHostRoom, claimHostRoom, closeHostRoomRun } from './host-room.js';
 import { HUB_WORLD_OBJECT } from './room-world-events.js';
 import { retireRecoveredBodyHandoff, retainHostBodyPresence } from './host-body-room.js';
 
@@ -44,10 +44,22 @@ export function createVirtualWorldClass(createHost) {
               waitUntil: at => new Promise(resolve => setTimeout(resolve, Math.max(0, at - Date.now()))) });
             // Every newly opened runner, from attach, an alarm, a Room hint or a
             // tick, after its own ownership checks and before any body dispatch,
-            // reclaim, tick or publication. A refusal closes it unreturned and is
-            // a durable fault: no timer or later wake reaches a refused world.
+            // reclaim, tick or publication. With its ticket, the world may first
+            // reconcile its sources durably, then must verify the applied state.
+            // A refusal closes it unreturned and is a durable fault: no timer or
+            // later wake reaches a refused world.
             if (this.verifyStartup) {
-              try { await this.verifyStartup(await this.retained()); }
+              try { await this.verifyStartup(await this.retained(), { ticket }); }
+              catch (error) { runner.close(); await this.fault('source').catch(() => {}); throw error; }
+            }
+            // A cold instance (alarm, Room hint, tick reopen) inside a still-valid
+            // lease has no service producers: attach, which normally starts them,
+            // never ran here. Restore them once for this finite run, through the
+            // same durable rate cursor; never during attach, which starts its own.
+            // A FAULT never reaches this opener, and the producers end at runUntil.
+            // Only a live loop for exactly this run (world, fence, owner, end) skips it.
+            if (!this.attaching && this.queueServices && !this.servicesRunning?.(ticket, hint.runUntil)) {
+              try { await this.queueServices(ticket, hint.runUntil); }
               catch (error) { runner.close(); await this.fault('source').catch(() => {}); throw error; }
             }
             return { runner, room: this.room, ticket,
@@ -71,8 +83,12 @@ export function createVirtualWorldClass(createHost) {
       const a = status.authority;
       if (a?.mode !== 'server' || a.world !== ticket.world || a.epoch !== ticket.fence
         || a.v !== 4 || a.format !== 'mixed-3') fail('Hub Room mapping mismatch');
-      await this.receiver.attach({ v: 1, room: HUB_WORLD_OBJECT, world: ticket.world,
-        epoch: ticket.fence, revision: a.revision, owner: ticket.owner, runUntil: state.runUntil });
+      // attach starts its own service producers below; its opener must not.
+      this.attaching = true;
+      try {
+        await this.receiver.attach({ v: 1, room: HUB_WORLD_OBJECT, world: ticket.world,
+          epoch: ticket.fence, revision: a.revision, owner: ticket.owner, runUntil: state.runUntil });
+      } finally { this.attaching = false; }
       this.halted = false;
       this.queue();
       await this.queueServices?.(ticket, state.runUntil);
@@ -129,8 +145,10 @@ export function createVirtualWorldClass(createHost) {
           ticket = this.host.ticket(saved);
         }
         // Acquisition itself keeps the existing compatible-viewer/occupancy
-        // checks. A failed migration does not force browser players out.
-        await publishHostPoses(this.host, this.room, ticket, { acquire: true, format: 'mixed-3' });
+        // checks. A failed migration does not force browser players out. No
+        // frame yet: the opener reconciles sources first, and the runner's first
+        // publication follows body reconciliation against the reconciled world.
+        await acquireHostRoom(this.host, this.room, ticket, { format: 'mixed-3' });
         return this.attach(ticket);
       });
     }

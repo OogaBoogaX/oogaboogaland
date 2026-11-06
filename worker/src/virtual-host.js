@@ -177,6 +177,7 @@ export class VirtualHost {
             || simulation.checkpointBytes !== source.checkpointBytes
             || typeof source.poses === "function" && typeof simulation.poses !== "function"
             || typeof source.enqueueInput === "function" && typeof simulation.enqueueInput !== "function"
+            || typeof source.applySource === "function" && typeof simulation.applySource !== "function"
             || !["initial", "validate", "step", "project", "npcFor", "dispose"].every(k => typeof simulation[k] === "function")) fail("invalid simulation transaction");
         }
         if (typeof sessions.forTransaction === "function") {
@@ -496,6 +497,27 @@ export class VirtualHost {
         { acceptedAt: now, effectiveAt: now - r.pausedMs });
       if (!["accepted", "retained", "stale"].includes(result)) fail("invalid world input receipt");
       if (result === "accepted") { r.wallAt = now; await this.save(tx, r); }
+      return { status: result, revision: r.revision, world: r.world, epoch: r.fence };
+    });
+  }
+
+  // Source-only reconciliation for an owned, Room-bound running world. One host
+  // transaction: the simulation queues the trusted source as a normal input and
+  // applies only its absolute source state, observed at trusted host time. No
+  // step, census, absence recovery, session, deadline, lease, wallCursor or
+  // simulatedAt change. Unchanged or stale source writes nothing.
+  async reconcileSource(ticket, source) {
+    if (typeof this.simulation.applySource !== "function") fail("source reconciliation adapter required");
+    boundedJSON(source, 1024, 32);
+    const value = structuredClone(source);
+    return this.transaction(async function(tx) {
+      const now = this.now(), r = await this.read(tx);
+      this.owns(r, ticket, now);
+      if (!r.room || r.room.pending || r.status !== "running" || now >= r.runUntil || now - r.wallCursor > HOST.maxLagMs)
+        fail("source reconciliation requires an acquired running world");
+      const result = this.simulation.applySource(r.simulation, value, { acceptedAt: now, effectiveAt: now - r.pausedMs, observedAt: now });
+      if (!["applied", "queued", "unchanged", "stale", "unknown"].includes(result)) fail("invalid source reconciliation receipt");
+      if (result === "applied" || result === "queued") { r.wallAt = now; await this.save(tx, r); }
       return { status: result, revision: r.revision, world: r.world, epoch: r.fence };
     });
   }
