@@ -1,7 +1,8 @@
 (() => {
   "use strict";
   const BL = window.BL;
-  const { makeVox } = BL.models;
+  const { makeVox, voxelGeometry } = BL.models;
+  const { createNode, addChild } = BL.scene;
   // A Victorian explorer in a yellow gown, drawn cute: a big round head, sparkly blue
   // eyes and rosy cheeks, brown hair up in a bun with loose locks framing her face,
   // puffed sleeves with cream cuffs, white gloves, a lilac bow at her collar, beige
@@ -19,8 +20,7 @@
     iris: k.color("#3f7fc4"),
     lip: k.color("#c8525e"),
     blush: k.color("#f4a3a0"),
-    noseTip: k.color("#eaa98f"),
-    ink: k.color("#27324f")
+    noseTip: k.color("#eaa98f")
   });
   // Hashed from the cell so the gown's folds never draw from the shared rand.
   const fold = (x, y, z) => ((Math.imul(x + 11, 73856093) ^ Math.imul(y + 7, 19349663) ^ Math.imul(z + 5, 83492791)) >>> 0) % 5;
@@ -51,14 +51,15 @@
     v.fill(-1, 3, 0, 1, -1, 3, C.glove);
     return v;
   };
-  // An N inked on the outside of her right forearm, in the island signs' 3x5 letter,
-  // read from beside her: the arm's outer face is x = 0, its back at z = 0.
-  const N = ["101", "111", "101", "101", "101"];
-  const tattooed = (arm, C) => {
+  // A small N tattoo on the outside of her left forearm, drawn in half-size voxels so
+  // its diagonal shows: a thin plate whose outer face sits just proud of the skin.
+  // Read from beside her, the arm's front (+z) is on the left.
+  const N = ["1001", "1101", "1011", "1001"];
+  const INK = [BL.math.hexToRgb("#27324f")];
+  const tattoo = (u) => {
     const v = makeVox();
-    for (const [key, c] of arm.map) v.map.set(key, c);
-    for (let row = 0; row < 5; row++) for (let z = 0; z < 3; z++) if (N[row][z] === "1") v.set(0, 6 - row, z, C.ink);
-    return v;
+    for (let row = 0; row < 4; row++) for (let col = 0; col < 4; col++) if (N[row][col] === "1") v.set(0, 3 - row, 3 - col, 0);
+    return voxelGeometry(v, { unit: u / 2, palette: INK, origin: { x: 1.5 * u + 0.002 - u / 2, y: -7.5 * u, z: -u } });
   };
   const fingerVox = (C) => {
     const v = makeVox();
@@ -130,9 +131,9 @@
         const C = colors(k), u = k.u;
         k.parts.legR.geometry = k.vg(legVox(C, -1), { x: -2 * u, y: -5 * u, z: -2.5 * u });
         k.parts.legL.geometry = k.vg(legVox(C, 1), { x: -2 * u, y: -5 * u, z: -2.5 * u });
-        const armOrigin = { x: -1.5 * u, y: -11 * u, z: -1.5 * u }, arm = armVox(k, C);
-        k.parts.armL.geometry = k.vg(arm, armOrigin);
-        k.parts.armR.geometry = k.vg(tattooed(arm, C), armOrigin);
+        const arm = k.vg(armVox(k, C), { x: -1.5 * u, y: -11 * u, z: -1.5 * u });
+        k.parts.armR.geometry = k.parts.armL.geometry = arm;
+        addChild(k.parts.armL, createNode({ geometry: tattoo(u) }));
         const fingers = k.vg(fingerVox(C), { x: -1.5 * u, y: -u, z: -1.5 * u });
         k.parts.fingersR.geometry = k.parts.fingersL.geometry = fingers;
       },
