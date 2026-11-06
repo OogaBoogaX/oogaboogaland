@@ -419,7 +419,8 @@ body[data-active-scene="hub"] .home-link {
   border: 3px solid var(--wood-edge);
   border-radius: inherit;
   box-shadow: 0 6px 0 rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.35);
-  padding-bottom: 14px;
+  /* With the panel's own 10px, room for a footer button's 3px drop shadow and then the same 10px seen above it. */
+  padding-bottom: 3px;
   transition: visibility 0s;
   overflow: auto;
 }
@@ -697,7 +698,7 @@ body[data-active-scene="hub"] .home-link {
 
 .sheet[data-dock="bottom"] .sheet-body {
   border-bottom: 0;
-  padding-bottom: var(--safe-bottom);
+  padding-bottom: calc(3px + var(--safe-bottom));
   box-shadow: 0 -6px 30px rgba(0, 0, 0, 0.35);
 }
 
@@ -894,13 +895,16 @@ body[data-active-scene="hub"] .home-link {
   place-items: center;
   width: 26px;
   height: 26px;
+  /* The browser's button padding would leave the bell's track 12px wide and push the 16px bell right. */
+  padding: 0;
   border: 1px solid rgba(243, 239, 228, 0.28);
   border-radius: 50%;
   background: rgba(0, 0, 0, 0.25);
   color: var(--accent-text);
   cursor: pointer;
 }
-.sheet-bell svg { width: 16px; height: 16px; pointer-events: none; }
+/* The viewBox starts a quarter unit down, lifting the stroked bell (2 to 14.5) onto the circle's middle. */
+.sheet-bell svg { display: block; width: 16px; height: 16px; pointer-events: none; }
 .sheet-bell .tab-count { position: absolute; top: -5px; right: -8px; pointer-events: none; }
 .sheet-bell:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .sheet-unread {
@@ -983,11 +987,24 @@ body[data-active-scene="hub"] .home-link {
 
 .roster-hint:not(:has(> :not([hidden]))) { display: none; }
 
-/* Bananas: the all-time total on top, its count and sats beneath, then the top ten in the same slab. */
-.banana-slab {
+/* Bananas: the all-time total on top, its count and sats beneath, then the donors and the latest tips in the same
+   slab. Like every panel's slab it scrolls above the panel's action, so Feed the Oogas stays at the foot as
+   Contributor sign-in does; its sections never shrink, and each list scrolls inside a window five donor rows tall
+   (`--banana-five`), both lists the same height. */
+.panel > .banana-slab {
+  --banana-five: calc(5 * (17px + 12px + 1px));
   display: flex;
   flex-direction: column;
   padding: 12px 12px 10px;
+}
+.banana-slab > section { flex: none; }
+.banana-leaders,
+.banana-recent-list {
+  /* One height for both, however few entries either holds. */
+  height: var(--banana-five);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.45) transparent;
 }
 
 .banana-hero {
@@ -1144,7 +1161,7 @@ body[data-active-scene="hub"] .home-link {
 .banana-board-labels,
 .banana-leaders li {
   display: grid;
-  grid-template-columns: 2.5ch minmax(0, 1fr) auto;
+  grid-template-columns: 3ch minmax(0, 1fr) auto;
   column-gap: 10px;
   align-items: baseline;
 }
@@ -1155,11 +1172,13 @@ body[data-active-scene="hub"] .home-link {
 .banana-leaders { margin: 0; padding: 0; list-style: none; }
 .banana-leaders li[hidden] { display: none; }
 
+/* A row's 17px line, 12px of padding and 1px rule are the `--banana-five` unit. */
 .banana-leaders li {
   padding: 6px 2px;
   border-top: 1px solid rgba(0, 0, 0, 0.35);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
   font-size: 12px;
+  line-height: 17px;
 }
 
 .banana-rank { color: rgba(243, 239, 228, 0.5); font-size: 10px; font-variant-numeric: tabular-nums; }
@@ -6934,8 +6953,9 @@ body[data-active-scene] .mic-note { top: var(--hub-equipment-bottom, calc(72px +
     display: none;
   }
 
+  /* The foot keeps the wide panel's 10px, so the room under a footer matches the gap over it. */
   .panel {
-    padding: 12px 14px;
+    padding: 12px 14px 10px;
   }
 
   /* Under 16px a phone zooms the page into the input. */
