@@ -20,12 +20,18 @@ changed here.
 
 ## Host (this repository)
 
-- Published `5554166aae4c0d0439ec93d68bd1ed043291d1ea`, with the acquisition
-  primitive (v157) and the foliage parity repair (v158). Exact-head CI 894
-  (run 42288960847) is all green: Unit 452, replay 41, Host/recovery 286,
-  terrain/cache 11, Room compatibility 79.
-- Local, pending, not published or reviewed: the source reconciliation below
-  (v159) and its review corrections (v160, v161).
+- Published `23ca440e3b19c91be3da272806c9060b7bb1c94e`, including the source
+  reconciliation (v159) and its corrections (v160 to v162). Exact-head CI 896
+  (run 42292487081) succeeds: Unit 452, replay 41, Host/recovery 287,
+  terrain/cache 11, Room compatibility 79. Earlier: `5554166a` (v157, v158),
+  CI 894.
+- What CI 896 proves: only the files the workflow names (`tests.yml` lists
+  every file; there is no wildcard). That does not include `hub-pile-source`,
+  `host-world-receiver` or `hub-source-reconcile`. Those pass locally (23, 6
+  and 2), but CI has not enforced them.
+- Pending wiring, local, not yet pushed: one new step in the browser-free job
+  runs exactly those three files. It will enforce them from the next push
+  onward; it has not run in CI yet.
 
 ### Private pile consumer (v2)
 
@@ -57,7 +63,7 @@ changed here.
   attach opener); each cold open reads once. A transient failure at a cold
   open is now a durable fault needing operator recovery, not a receiver retry.
 
-### Changed-pile reconciliation (v159, local)
+### Changed-pile reconciliation (v159 to v162, published in `23ca440e`)
 
 - `startRun` now acquires Room authority and binds the host with
   `acquireHostRoom` (v157), sending no frame. The first frame comes from the
@@ -118,7 +124,9 @@ changed here.
   - Second run, after that correction alone: 2/2 pass. That covers the cold
     restore of the grown pile in that one fixture world. It is not a general
     proof for every layout.
-  - CI would also run it on the next push.
+  - CI has not run it: the workflow names its files and did not include this
+    one. The pending step above adds it, together with `hub-pile-source` and
+    `host-world-receiver`.
 - The clanker support check (`supportRemoved`): when the mainland's walkable
   surface changes, it marks a clanker whose floor fell away as passively
   falling, with zero velocity. It moves no actor and advances no time; gravity
@@ -136,14 +144,17 @@ changed here.
 | v152 focused Node checks | 29/29, build passed (before v153) |
 | v153 pile-source tests | 20/20 |
 | v154 pile-source tests | 21/21 (20 kept, plus the cold alarm/hint regression) |
-| Acquisition primitive (local) | host-room-takeover 29/29 (27 kept, 2 new); pile-source 21/21; host-world-receiver 6/6 |
+| Acquisition primitive (v157) | host-room-takeover 29/29 (27 kept, 2 new); pile-source 21/21; host-world-receiver 6/6 |
 | Foliage parity repair (v158) | hub-solid-scratch 3/3; terrain lane 62/62 locally |
-| Source reconciliation (v159, local) | hub-pile-source 22/22; host-room-takeover 30/30; host-world-receiver 6/6; hub-world-validation 3/3 |
-| Review corrections (v160, local) | hub-pile-source 23/23; host-room-takeover 30/30; host-world-receiver 6/6; hub-world-validation 3/3; hub-source-reconcile authored, syntax only, not run |
-| Run identity (v161, local) | hub-pile-source 23/23 and host-world-receiver 6/6 (source-timer fix, 29/29) |
-| Full-Hub reconcile (v162, local) | hub-source-reconcile: first run 1/2 (layout-recipe fixture error); after the assertion correction, 2/2 |
+| Source reconciliation (v159) | hub-pile-source 22/22; host-room-takeover 30/30; host-world-receiver 6/6; hub-world-validation 3/3 |
+| Review corrections (v160) | hub-pile-source 23/23; host-room-takeover 30/30; host-world-receiver 6/6; hub-world-validation 3/3; hub-source-reconcile authored, syntax only, not run |
+| Run identity (v161) | hub-pile-source 23/23 and host-world-receiver 6/6 (source-timer fix, 29/29) |
+| Full-Hub reconcile (v162) | hub-source-reconcile: first run 1/2 (layout-recipe fixture error); after the assertion correction, 2/2 |
+| CI 896 on `23ca440e` | Unit 452, replay 41, Host/recovery 287, terrain/cache 11, Room compatibility 79; the three files above not yet in the workflow |
 
-Each pass ran only `node --check` on touched files and the files listed.
+The version rows are local runs at the time; each ran only `node --check` on
+touched files and the files listed. `host-room-takeover`, `hub-world-validation`
+and `hub-solid-scratch` are also in CI's existing steps.
 
 ## Measurements (local, not provider proof)
 

@@ -40,3 +40,5 @@ jobs:
         run: node --test worker/test/hub-world-validation.test.mjs worker/test/hub-terrain-queries.test.mjs worker/test/hub-world-clearance.test.mjs worker/test/hub-forest-beds.test.mjs worker/test/hub-solid-scratch.test.mjs
       - name: Check Room compatibility around authority negotiation
         run: node --test worker/test/protocol.test.mjs worker/test/doorway.test.mjs worker/test/voice-blend.test.mjs worker/test/hockey.test.mjs worker/test/chat.test.mjs
+      - name: Check private pile source gates and full-Hub source reconciliation
+        run: node --test worker/test/hub-pile-source.test.mjs worker/test/host-world-receiver.test.mjs worker/test/hub-source-reconcile.test.mjs
