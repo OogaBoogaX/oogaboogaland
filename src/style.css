@@ -824,8 +824,6 @@ body[data-active-scene="hub"] .home-link {
   .sheet[data-open="true"]:is(:hover, .virtual-hover) { --sheet-tab-slide: 0px; --sheet-tab-opacity: 1; }
   .sheet-panels:hover,
   .sheet-panels:has(.virtual-hover, :focus-visible) { --sheet-tab-slide: 0px; --sheet-tab-opacity: 1; }
-  /* A players or chat tab with a new count stays out, so the count is seen while a panel is open (#430). */
-  .sheet[data-open="true"] :is(.sheet-toggle-players, .sheet-toggle-chat):has(.tab-count:not([hidden])) { --sheet-tab-slide: 0px; --sheet-tab-opacity: 1; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -887,6 +885,42 @@ body[data-active-scene="hub"] .home-link {
   line-height: 1;
   white-space: nowrap;
   filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.6));
+}
+
+.sheet-notifications { position: relative; flex: none; }
+.sheet-bell {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid rgba(243, 239, 228, 0.28);
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--accent-text);
+  cursor: pointer;
+}
+.sheet-bell svg { width: 16px; height: 16px; pointer-events: none; }
+.sheet-bell .tab-count { position: absolute; top: -5px; right: -8px; pointer-events: none; }
+.sheet-bell:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sheet-unread {
+  position: absolute;
+  z-index: 3;
+  top: calc(100% + 5px);
+  right: 0;
+  width: max-content;
+  padding: 6px 9px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: #241810;
+  color: #f3efe4;
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: pre-line;
+  pointer-events: none;
+}
+@media (pointer: coarse) {
+  .sheet-bell { width: 40px; height: 40px; }
 }
 
 .panel-chip {
@@ -1190,17 +1224,11 @@ body[data-active-scene="hub"] .home-link {
 
 /* Ooga Chat: the log takes the height, the composer is pinned under it, and the account's name and the
    room's memory sit above it in one line each. */
-.panel[data-panel="chat"] { position: relative; }
-.panel[data-panel="chat"] > .panel-title { padding-right: 30px; }
-
-/* The about mark sits in the title's corner; what it opens drops into the flow under the title. */
-.chat-about { flex: none; margin-top: -10px; }
-.chat-about[open] { margin-top: 0; }
+.panel[data-panel="chat"] > .panel-title { position: relative; }
+.panel[data-panel="chat"] > .panel-title h2 { margin-right: 0; }
+.chat-about { flex: none; margin-right: auto; }
 
 .chat-about summary {
-  position: absolute;
-  top: 12px;
-  right: 14px;
   display: grid;
   place-items: center;
   width: 22px;
@@ -1221,12 +1249,17 @@ body[data-active-scene="hub"] .home-link {
 .chat-about summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .chat-retention {
+  position: absolute;
+  z-index: 2;
+  top: calc(100% + 5px);
+  left: 0;
+  right: 0;
   margin: 0;
   padding: 7px 10px;
   border-left: 2px solid var(--accent);
   border-radius: 0 6px 6px 0;
-  background: rgba(0, 0, 0, 0.25);
-  color: rgba(243, 239, 228, 0.72);
+  background: #241810;
+  color: rgba(243, 239, 228, 0.9);
   font-size: 10px;
   line-height: 1.5;
 }
@@ -1234,9 +1267,7 @@ body[data-active-scene="hub"] .home-link {
 .chat-identity {
   flex: none;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 4px 10px;
+  gap: 4px;
 }
 
 .chat-display-form { display: flex; align-items: center; gap: 6px; min-width: 0; }
@@ -1286,9 +1317,7 @@ body[data-active-scene="hub"] .home-link {
 .chat-display-save:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
 .chat-display-save:disabled { opacity: 0.5; cursor: default; }
 
-.chat-account { color: rgba(243, 239, 228, 0.5); font-size: 9.5px; text-align: right; overflow-wrap: anywhere; }
-.chat-account strong { color: rgba(243, 239, 228, 0.82); font-weight: 500; }
-.chat-display-status { grid-column: 1 / -1; margin: 0; color: var(--accent-text); font-size: 10px; }
+.chat-display-status { margin: 0; color: var(--accent-text); font-size: 10px; }
 .chat-display-status:empty { display: none; }
 
 .chat-log {
@@ -1427,8 +1456,7 @@ body[data-active-scene="hub"] .home-link {
   .chat-form input { min-height: 44px; }
   .chat-display-form input,
   .chat-display-save { min-height: 40px; }
-  .chat-about summary { width: 30px; height: 30px; top: 8px; right: 10px; }
-  .panel[data-panel="chat"] > .panel-title { padding-right: 36px; }
+  .chat-about summary { width: 30px; height: 30px; }
 }
 
 .panel h2 {
@@ -2371,7 +2399,7 @@ body[data-active-scene="hub"] .home-link {
   cursor: not-allowed;
 }
 
-/* Account controls stay with the Contributing Oogas panel, including when detached. */
+/* Account controls stay with their panel, including when detached. */
 .account {
   display: flex;
   flex: none;
