@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { createContext, Script } from "node:vm";
 import { createHash } from "node:crypto";
 export function clankerController({ count = 1, checkpointRandom = false, spacious = false, agentSource = null, checkpointProfile = null, start = true,
-  clearance = null, ground = null } = {}) {
+  clearance = null, ground = null, passiveNpcs = false } = {}) {
   if (!Number.isInteger(count) || count < 1 || count > 53) throw Error("bounded fixture roster required");
   const hashes = {}, context = createContext({ window: {}, TextEncoder });
   const run = code => new Script(code).runInContext(context, { timeout: 5000 });
@@ -18,13 +18,13 @@ export function clankerController({ count = 1, checkpointRandom = false, spaciou
   run(`Object.assign(window.BL, { pilot: { WALK: { speed: 7.75, gravity: 9.8, ledgeRise: 2.4 } },
     crew: { JUMP_SPEED: 4.8, HEALTH_MAX: 100, HEALTH_REGEN_DELAY: 4, HEALTH_REGEN_RATE: 20 } });`);
   for (const name of ["agent", "clanker-flight", "clanker-rage", "clankers"]) load(name);
-  Object.assign(context, { actorCount: count, checkpointRandom, spacious, checkpointProfile, startActors: start, clearance, ground });
+  Object.assign(context, { actorCount: count, checkpointRandom, spacious, checkpointProfile, startActors: start, clearance, ground, passiveNpcs });
   const startedAt = performance.now();
   run(`const B = window.BL;
     const owners = Array.from({ length: actorCount }, (_, i) => ({ id: 'fixture-' + i,
       traits: { name: 'fixture-' + i }, state: 'chilling', work: { site: -1, plannedSite: -1 },
       root: B.scene.createNode(), camp: { burning: false } }));
-    const crew = { list: owners, cavemen: new Map(owners.map(o => [o.traits.name, o])), stateOf: o => o.state };
+    const crew = { list: owners, cavemen: new Map(owners.map(o => [o.traits.name, o])), stateOf: o => o.state, passiveNpcs };
     const sim = B.clankers.create({ root: B.scene.createNode(), crew, sites: [], checkpointRandom, checkpointProfile,
       groundAt: (...args) => ground ? ground(...args) : 0, clear: (...args) => clearance ? clearance(...args) : true, combatEnabled: false,
       ...(spacious ? { meadowRadius: 60, roamRadius: 68 } : {}) });

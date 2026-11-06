@@ -6,6 +6,14 @@
   const BL = scope.BL = scope.BL || {};
   const { clamp, damp, mulberry32, fnv1a } = BL.math;
   const { addChild } = BL.scene;
+  // Cached object shapes must not own a getter closure over a departed world.
+  // Keep the dynamic policy behind its receiver's weak key instead.
+  const interactionPolicies = new WeakMap();
+  const interactionProperty = { get() { return interactionPolicies.get(this)(); } };
+  const interactionGetter = (object, name, read) => {
+    interactionPolicies.set(object, read);
+    Object.defineProperty(object, name, interactionProperty);
+  };
   // The tallest shootable meadow rocks reach 1.11; a prop step must clear their real mesh.
   const SCALE = 1, SPEED = 2.7, CHILL_SPEED = 0.9, STEP = 0.52, PROP_STEP = 1.16, JUMP_BUFFER = 0.18, PLAYER_SMASH_RECOVER = 0.12;
   const RAGE_SPEED = 12, RAGE_STEP = 0.1;
@@ -2241,9 +2249,9 @@
       };
       if (authoritative) Object.assign(entry, { labPendingTraffic: false, labPlanTime: 0,
         labTrafficBlocked: false, planningLabTraffic: false, rageTraversal: false });
-      Object.defineProperty(entry, "nonInteractive", { get: () => passiveNpcs
-        && (authoritative || !entry.controlled && !entry.remoteControlled) });
-      Object.defineProperty(entry.root, "collisionDisabled", { get: () => entry.nonInteractive });
+      interactionGetter(entry, "nonInteractive", () => passiveNpcs
+        && (authoritative || !entry.controlled && !entry.remoteControlled));
+      interactionGetter(entry.root, "collisionDisabled", () => entry.nonInteractive);
       entry.motion.supportEntry = entry;
       gorilla.root.visible = false;
       gorilla.root.matrixNative = false;

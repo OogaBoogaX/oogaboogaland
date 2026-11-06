@@ -1,5 +1,40 @@
 # Frozen-body measurements and remaining cost gates
 
+## Disposed-world getter retention — v148
+
+A bounded local workerd heap snapshot found a strong path from
+`BL.clankers.create` through V8 allocation-site/shape metadata and a per-actor
+accessor closure into the disposed controller, terrain and recovery callbacks.
+Ooga and Clanker interaction properties now use a shared accessor descriptor
+with policies stored behind weak receiver keys. The policy still reads current
+possession/remote state, and remains non-enumerable and non-configurable. No
+collision mesh, routine, recovery state or ownership check was removed.
+
+Fourteen focused body/reclaim checks and the build passed, including passive
+Clanker possession, release and remote transitions. The matched local workerd
+probe constructed 106 working NPCs, advanced eight ticks and validated a
+42,868-byte checkpoint, with no external traffic. After explicit GC:
+
+| Stage | Before: JS heap / backing bytes | After: JS heap / backing bytes |
+| --- | ---: | ---: |
+| Live world | 127,549,852 / 51,360,585 | 126,987,680 / 51,360,585 |
+| Ordinary world disposal | 126,131,080 / 51,223,517 | 101,656,072 / 20,996,630 |
+| Diagnostic model-cache and template clearing | 107,724,652 / 36,231,534 | 16,727,628 / 1,477,657 |
+
+Only the getter fix is production source. Cache clearing and explicit GC were
+temporary diagnostic operations, not a new production eviction policy. These
+are separate inspector counters, not a provider quota or billing sum. Ordinary
+disposal now releases more data; the live-world footprint is substantially
+unchanged and still does not establish provider memory fit or peak safety.
+
+The bounded Node rollback/restart trial preserved durable state through an
+injected late commit failure and cold reads. Rollback recovery took 307.56 ms;
+cold reads took 252.24/208.25 ms and eight warm ticks 33.23–56.23 ms. The 250 ms
+recovery gate remains unmet; no latency improvement is claimed. This trial uses
+cloned in-memory storage, no players or Room delivery, and is not a production
+CPU/cost measurement. Strict delivery, live browser flow and combined costs
+remain unresolved. Activation remains disabled.
+
 ## Unchanged receiver-scan writes — v142
 
 The receiver still atomically reserves its scan counter and alarm before any

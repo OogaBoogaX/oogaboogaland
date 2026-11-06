@@ -20,6 +20,29 @@ const make = (start = false) => {
   return { ...f, codec };
 };
 
+test("passive interaction getters keep possession and remote changes without per-actor accessor closures", () => {
+  const f = clankerController({ count: 2, passiveNpcs: true });
+  try {
+    f.start();
+    const [first, second] = f.sim.list;
+    const policy = Object.getOwnPropertyDescriptor(first, 'nonInteractive');
+    assert.equal(policy.enumerable, false);
+    assert.equal(policy.configurable, false);
+    assert.equal(policy.get, Object.getOwnPropertyDescriptor(second, 'nonInteractive').get,
+      'cached accessor metadata must not capture a controller or individual actor');
+    assert.equal(first.nonInteractive, true); assert.equal(first.root.collisionDisabled, true);
+    assert.equal(f.sim.possess(first), true);
+    assert.equal(first.nonInteractive, false); assert.equal(first.root.collisionDisabled, false);
+    assert.equal(second.nonInteractive, true);
+    assert.equal(f.sim.release(), true);
+    assert.equal(first.nonInteractive, true); assert.equal(first.root.collisionDisabled, true);
+    f.sim.setRemote(first.owner.traits.name, true);
+    assert.equal(first.nonInteractive, false); assert.equal(first.root.collisionDisabled, false);
+    f.sim.setRemote(first.owner.traits.name, false);
+    assert.equal(first.nonInteractive, true); assert.equal(first.root.collisionDisabled, true);
+  } finally { f.dispose(); }
+});
+
 test("controlled Clanker recovers gameplay in a fresh standard pose without possession resets or held input replay", () => {
   const original = make(true); let recovered;
   try {

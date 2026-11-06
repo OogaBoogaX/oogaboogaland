@@ -11,6 +11,14 @@
   const { math, models } = BL;
   const { clamp, lerp, damp, ease } = math;
   const { createNode, addChild, removeChild, addTween } = BL.scene;
+  // A cached accessor descriptor must not retain a departed controller scope.
+  // The receiver owns its policy through a weak key, including player changes.
+  const interactionPolicies = new WeakMap();
+  const interactionProperty = { get() { return interactionPolicies.get(this)(); } };
+  const interactionGetter = (object, name, read) => {
+    interactionPolicies.set(object, read);
+    Object.defineProperty(object, name, interactionProperty);
+  };
   const EAT_RATE = 1 / 20;
   const CHEW_PERIOD = 3.2;
   const AMMO_MAX = 30, AMMO_PER_BANANA = 3, RELOAD_PERIOD = 1.2, BURST_ROUNDS = 3, BURST_STEP = 0.09, SHOT_PERIOD = 0.44;
@@ -1474,9 +1482,9 @@
       });
       // Non-enumerable policy stays out of recovery payloads. A separately
       // controlled player keeps normal interactions; hosted roster tracks never do.
-      Object.defineProperty(cave, "nonInteractive", { get: () => passiveNpcs && !ctx.playerName
-        && (!!execution || cave !== player && !cave.humanControlled && !cave.remoteControlled) });
-      Object.defineProperty(cave.root, "collisionDisabled", { get: () => cave.nonInteractive });
+      interactionGetter(cave, "nonInteractive", () => passiveNpcs && !ctx.playerName
+        && (!!execution || cave !== player && !cave.humanControlled && !cave.remoteControlled));
+      interactionGetter(cave.root, "collisionDisabled", () => cave.nonInteractive);
       // A character built with its own pack wears it from the first frame and
       // uses the same flight, fuel, recovery and toggle as every other pack.
       if (cave.parts.jetpack && !cave.traits.footRockets) cave.jet = { node: cave.parts.jetpack, flame: cave.parts.jetFlame, thrust: false, spending: false, power: 0, puff: 0 };
