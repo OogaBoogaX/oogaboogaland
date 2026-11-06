@@ -46,6 +46,11 @@
     const drawerHeight = (b) => Math.ceil(b.height * drawerShare);
     // Where a phone's up tab lifts the drawer: the default, or in landscape, where that shows hardly anything, most of the screen.
     const fullHeight = (b) => b.width > b.height ? Math.ceil(b.height * 0.6) : drawerHeight(b);
+    // A phone on its side leaves too short a drawer to stack the Bananas panel's title, a row of its slab and its 44px
+    // Feed the Oogas, so while that panel shows there its drawer stands at least BANANA_DRAWER tall (style.css gives
+    // the untouched drawer the same), its saved size untouched for the other tabs.
+    const BANANA_DRAWER = 200, shortLandscape = window.matchMedia("(pointer: coarse) and (orientation: landscape) and (max-height: 500px)");
+    const bananaTall = (w) => w.node === root && w.tab === "bananas" && shortLandscape.matches;
     let serial = 0, gesture = null, mergeTarget = null, suppressClick = false, hidden = false, folded = false, disposed = false, lootCount = 0, saveTimer = 0;
     if (!shared) {
       try {
@@ -99,7 +104,8 @@
         for (const name of ["left", "top", "width", "height"]) w.node.style.removeProperty(name);
         w.node.dataset.sized = "false";
         w.node.dataset.dock = bottom.matches ? "bottom" : "right";
-        if (w.node === root) { root.dataset.sticks = "true"; parent.style.removeProperty("--drawer-height"); }
+        // The sticks need room over the drawer, which the Bananas panel's taller one leaves them too little of.
+        if (w.node === root) { root.dataset.sticks = String(!(bottom.matches && bananaTall(w))); parent.style.removeProperty("--drawer-height"); }
         if (phone.matches) w.node.style.setProperty("--sheet-tab-step", `${Math.min(72, (viewport().width - PHONE_TAB_INSET) / Math.max(1, w.tabCount || NAMES.length))}px`);
         else w.node.style.removeProperty("--sheet-tab-step");
         return;
@@ -111,7 +117,7 @@
       // Fitting a keyboard-reduced viewport must not overwrite the saved size.
       // Minimum sizes belong to explicit resizing, not closing a short default drawer.
       r.width = phone.matches ? width : Math.min(width, Math.max(1, preferred.width));
-      r.height = Math.min(height, Math.max(1, preferred.height));
+      r.height = Math.min(height, Math.max(1, preferred.height, atBottom && bananaTall(w) ? BANANA_DRAWER : 0));
       r.x = dock === "left" || phone.matches ? b.x : dock === "right" ? b.x + b.width - r.width : Math.max(b.x, Math.min(b.x + b.width - r.width, preferred.x));
       r.y = atBottom ? b.y + b.height - r.height : Math.max(b.y, Math.min(b.y + b.height - r.height, preferred.y));
       w.node.dataset.sized = "true"; w.node.dataset.dock = dock;

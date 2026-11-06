@@ -617,7 +617,9 @@ body[data-active-scene="hub"] .home-link {
   touch-action: none;
 }
 
-/* Keep the whole tab clickable while its face slides behind the panel body. */
+/* Keep the whole tab clickable while its face slides behind the panel body. A side tab's face has a border only on
+   its outer side and meets the panel's own border (or the screen's edge) on the other, so even padding centres the
+   artwork between the two in both side docks; each icon's viewBox centres its own pixels. */
 .sheet-tab-face {
   position: relative;
   display: flex;
@@ -625,7 +627,7 @@ body[data-active-scene="hub"] .home-link {
   width: 100%;
   height: 100%;
   pointer-events: none;
-  padding: 0 4px 0 2px;
+  padding: 0 3px;
   border: 3px solid var(--wood-edge);
   border-right: 0;
   border-radius: 8px 0 0 8px;
@@ -990,14 +992,25 @@ body[data-active-scene="hub"] .home-link {
 /* Bananas: the all-time total on top, its count and sats beneath, then the donors and the latest tips in the same
    slab. Like every panel's slab it scrolls above the panel's action, so Feed the Oogas stays at the foot as
    Contributor sign-in does; its sections never shrink, and each list scrolls inside a window five donor rows tall
-   (`--banana-five`), both lists the same height. */
+   (`--banana-five`), both lists the same height. The slab may shrink to nothing, so even a phone's short drawer
+   keeps the action whole; only a drawer shorter than the title and the action scrolls the panel. */
 .panel > .banana-slab {
   --banana-five: calc(5 * (17px + 12px + 1px));
   display: flex;
   flex-direction: column;
+  min-height: 0;
   padding: 12px 12px 10px;
 }
 .banana-slab > section { flex: none; }
+/* A phone on its side leaves the default drawer under 100px: too short to stack the title, a row of the slab and a
+   44px Feed the Oogas. While the Bananas panel shows there, its untouched drawer stands at least 200px tall
+   (sheet.js's BANANA_DRAWER, which also holds a resized or saved drawer to it and, that drawer too tall to leave the
+   sticks room over it, takes data-sticks away). Other panels keep their drawer. */
+@media (pointer: coarse) and (orientation: landscape) and (max-height: 500px) {
+  :root:has(#sheet[data-dock="bottom"][data-sized="false"] #bananas-panel:not([hidden])) {
+    --drawer-height: max(calc(var(--drawer-share) * 1vh), 200px);
+  }
+}
 .banana-leaders,
 .banana-recent-list {
   /* One height for both, however few entries either holds. */
