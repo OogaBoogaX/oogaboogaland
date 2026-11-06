@@ -115,10 +115,10 @@
   // Each building frames its own room at its door, as before.
   const walk=()=>{overview=false;pilot.arrive(avatar);pilot.navigate({position:{x:avatar.root.position.x,y:avatar.root.position.y-avatar.baseY,z:avatar.root.position.z},yaw:Math.PI,pitch:.22,dist:7});pilot.setActive(true);};
   const presetView=name=>{
-    if(leaving||gate?.isOpen||interiors?.transitioning)return;
-    if(interiors?.active){detachedExit=!pilot.player;interiors.request(interiors.active.room.exit);return;}
-    if(!VIEW_NAMES[name])return;
-    overview=true;pilot.freeCursor();pilot.goPreset(name);hud.setDetachedView(name);hud.el.modeDestination.title="DSB island · "+VIEW_NAMES[name]+" · cycle views";
+    if(leaving||gate?.isOpen||interiors?.transitioning)return false;
+    if(interiors?.active){detachedExit=!pilot.player;interiors.request(interiors.active.room.exit);return true;}
+    if(!VIEW_NAMES[name])return false;
+    overview=true;pilot.freeCursor();pilot.goPreset(name);hud.setDetachedView(name);hud.el.modeDestination.title="DSB island · "+VIEW_NAMES[name]+" · choose a viewpoint";return true;
   };
   const overviewView=()=>presetView("overview");
   const escapeView=()=>{
@@ -193,7 +193,7 @@
   const act=()=>{if(menuOpen())return true;if(!interiors?.transitioning&&studioAct())return true;if(nearTv()){tv.open();return true;}if(!overview&&interiors?.request(avatar.root.position,avatar.root.rotation.y))return true;if(interiors?.active)return false;if(nearGate()&&!overview){gate.open();return true;}return false;};
   const mute=()=>{const on=weather.toggleMuted();interiors?.audio.update(on);};
   const modeAction=name=>!leaving&&!gate?.isOpen&&!interiors?.transitioning&&pilot.modeAction(name);
-  const action=(name,value)=>{if(entrance?.action(name))return;if(menuOpen())return;if(modeAction(name)||(name.startsWith("weapon-primary")||seatRoom())&&pilot.weaponAction(name))return;if(name==="dsb-mute")mute();else if(name==="jetpack-toggle")toggleJetpack();else if(interiors?.transitioning)return;else if(name==="mode-preset")presetView(value);else if(name==="reset-view")pilot.resetCamera();else if(name==="dsb-context")act();else if(name==="act")pilot.action();else if(name==="leave")hud.toast("Return through the Portara at the summit.");};
+  const action=(name,value)=>{if(entrance?.action(name))return;if(menuOpen())return;if(modeAction(name)||(name.startsWith("weapon-primary")||seatRoom())&&pilot.weaponAction(name))return;if(name==="dsb-mute")mute();else if(name==="jetpack-toggle")toggleJetpack();else if(interiors?.transitioning)return;else if(name==="mode-preset")return presetView(value);else if(name==="reset-view")pilot.resetCamera();else if(name==="dsb-context")act();else if(name==="act")pilot.action();else if(name==="leave")hud.toast("Return through the Portara at the summit.");};
   const shore={x:0,z:0,nx:0,nz:0};
   const deepWaterReturn=()=>{
     if(overview||crew.player!==avatar)return false;
@@ -234,8 +234,8 @@
     hud=BL.hud.create({signal:ctx.signal,roster:BL.contributors.roster,catalog:BL.models.SWAG,tierColors:BL.models.TIER_COLORS,renderIcon:BL.hud.renderIcon,lootEnabled:false});
     hud.setDestinations(Object.keys(VIEW_NAMES),VIEW_NAMES);
     hud.setAreaLabel("CHORA");
-    hud.el.modeDestination.title="DSB island · cycle views";
-    hud.el.modeDestinationLabel.textContent="DSB island. Cycle views";
+    hud.el.modeDestination.title="DSB island · choose a viewpoint";
+    hud.el.modeDestinationLabel.textContent="DSB island. Open Map to choose a viewpoint";
     const hooks={};input=BL.interact.create({canvas:ctx.canvas,renderer:ctx.renderer,camera,hooks});
     const STEP=BL.pilot.WALK.step;
     const loginContexts=BL.dsbInteriors.definitions.filter(d=>land.buildings.some(b=>b.name===d.building)).map(d=>d.id);
@@ -382,9 +382,10 @@
         walletSpace=interiors.active?1+BL.dsbInteriors.definitions.findIndex(d=>d.id===interiors.active.room.id):0;walletWalk.on=false;
         if(interiors.active)tv?.close();
         scene.renderOpts=lighting||renderOpts;hud.setAreaLabel(interiors.active?label:"CHORA");
+        hud.setDestinations(interiors.active?["outside"]:Object.keys(VIEW_NAMES),interiors.active?{outside:"Return outside to CHORA"}:VIEW_NAMES);
         hud.el.modeDestination.disabled=interiors.transitioning;
-        hud.el.modeDestination.title=interiors.active?"Return outside to CHORA":"DSB island · cycle views";
-        hud.el.modeDestinationLabel.textContent=interiors.active?"Return outside to CHORA":"DSB island. Cycle views";
+        hud.el.modeDestination.title=interiors.active?"Return outside to CHORA":"DSB island · choose a viewpoint";
+        hud.el.modeDestinationLabel.textContent=interiors.active?"Map. Return outside to CHORA":"DSB island. Open Map to choose a viewpoint";
         BL.net.setZone(voiceZone());
       }
     });
@@ -601,5 +602,6 @@
     help.title = "DSB Land · " + help.title; return help;
   };
   scene.controlsHelpHold = on => { pilot.controls.reset(); pilot.setMenuOpen(on, false); };
+  Object.defineProperty(scene,"navigationReady",{get:()=>!leaving&&!gate?.isOpen&&!interiors?.transitioning&&!menuOpen()&&(!entrance||entrance.phase==="done")});
   BL.scenes.dsb=scene;
 })();

@@ -69,6 +69,7 @@
     soundButton.setAttribute("aria-label", label); soundButton.title = voice.enabled || voice.joining ? label : `${label} · M`;
     soundButton.setAttribute("aria-pressed", String(sound.muted));
   };
+  BL.destinationMap = BL.destinationMap.create({ current: () => active, ready: () => !!active && !transition });
   let helpHeld = false;
   const controlsHelp = BL.controlsHelp.create({ current: () => active, ready: () => !!active && !transition,
     hold: on => { helpHeld = on; rightShift = false; gamepad.hold(on); } });
@@ -640,6 +641,7 @@
   // Shared by the display loop and the debug `advance`, so a stepped frame is exactly a displayed one.
   const step = (dt, now) => {
     gamepad.poll();
+    BL.destinationMap.update(now);
     elapsed += dt;
     if (transition) stepTransition(dt);
     // Hold the fully black frame while resumable pure builders run; the old visit keeps its graph and controls.
@@ -1088,6 +1090,7 @@
   }
   const destroy = () => {
     cabinetView.dispose();
+    BL.destinationMap.dispose();
     controlsHelp.dispose();
     destroyed = true;
     bootBuildController.abort();

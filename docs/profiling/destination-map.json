@@ -1,0 +1,402 @@
+{
+  "sourceCommit": "eca32c74",
+  "notes": [
+    "Native ARM headless Chrome 156, normal vsync and motion enabled; desktop device emulation is not a real phone or a screen-reader review.",
+    "720 px viewport is a layout proxy, not actual 200% browser zoom.",
+    "Latency is a programmatic click followed by two animation frames, not production INP."
+  ],
+  "rows": [
+    {
+      "name": "desktop",
+      "open": true,
+      "bounds": {
+        "left": 300,
+        "top": 30.78125,
+        "right": 1140,
+        "bottom": 782.21875
+      },
+      "viewport": [
+        1440,
+        813
+      ],
+      "overflow": false,
+      "focus": "destination-map-close",
+      "buttons": [
+        {
+          "name": "\u00d7",
+          "height": 44,
+          "width": 44
+        },
+        {
+          "name": "View Ooga ArcadeGames and prizes \u00b7 enter through the cave, then choose a cabinet.",
+          "height": 64,
+          "width": 802
+        },
+        {
+          "name": "View PileThe heart of the island \u00b7 meet the Oogas. \u00b7 Current destination",
+          "height": 78.78125,
+          "width": 394
+        },
+        {
+          "name": "View MirrorThe mirror cave.",
+          "height": 64,
+          "width": 394
+        },
+        {
+          "name": "View HQHeadquarters and its sleeping crew.",
+          "height": 64,
+          "width": 394
+        },
+        {
+          "name": "View BasementThe rooms beneath headquarters.",
+          "height": 64,
+          "width": 394
+        },
+        {
+          "name": "View North gateThe north pass and its arch.",
+          "height": 64,
+          "width": 394
+        },
+        {
+          "name": "View \u20bfIFR\u00d6STWalk through the gateway to other worlds.",
+          "height": 64,
+          "width": 394
+        },
+        {
+          "name": "View LabEntropyLab's contributors at work.",
+          "height": 64,
+          "width": 394
+        },
+        {
+          "name": "View MempoolA rainforest shaped by Bitcoin's waiting transactions.",
+          "height": 78.78125,
+          "width": 394
+        },
+        {
+          "name": "View LN FactoryA Lightning node at work \u00b7 enter through its shield.",
+          "height": 78.78125,
+          "width": 394
+        },
+        {
+          "name": "View B.C.A.Banana Certified Accounting.",
+          "height": 64,
+          "width": 394
+        },
+        {
+          "name": "View TC SphereLive Bitcoin charts \u00b7 choose a room at the keypad.",
+          "height": 64,
+          "width": 394
+        }
+      ],
+      "contrast": "rgb(255, 217, 160)",
+      "latency": [
+        19.700000047683716,
+        26.100000023841858,
+        28.5,
+        27.40000009536743,
+        28.399999976158142,
+        27.700000047683716,
+        28,
+        29.100000023841858,
+        27.5,
+        28
+      ],
+      "touch": null,
+      "logs": []
+    },
+    {
+      "name": "phone",
+      "open": true,
+      "bounds": {
+        "left": 16,
+        "top": 16,
+        "right": 374,
+        "bottom": 828
+      },
+      "viewport": [
+        390,
+        844
+      ],
+      "overflow": false,
+      "focus": "destination-map-close",
+      "buttons": [
+        {
+          "name": "\u00d7",
+          "height": 44,
+          "width": 44
+        },
+        {
+          "name": "View Ooga ArcadeGames and prizes \u00b7 enter through the cave, then choose a cabinet.",
+          "height": 78.78125,
+          "width": 320
+        },
+        {
+          "name": "View PileThe heart of the island \u00b7 meet the Oogas. \u00b7 Current destination",
+          "height": 78.78125,
+          "width": 320
+        },
+        {
+          "name": "View MirrorThe mirror cave.",
+          "height": 64,
+          "width": 320
+        },
+        {
+          "name": "View HQHeadquarters and its sleeping crew.",
+          "height": 64,
+          "width": 320
+        },
+        {
+          "name": "View BasementThe rooms beneath headquarters.",
+          "height": 64,
+          "width": 320
+        },
+        {
+          "name": "View North gateThe north pass and its arch.",
+          "height": 64,
+          "width": 320
+        },
+        {
+          "name": "View \u20bfIFR\u00d6STWalk through the gateway to other worlds.",
+          "height": 64,
+          "width": 320
+        },
+        {
+          "name": "View LabEntropyLab's contributors at work.",
+          "height": 64,
+          "width": 320
+        },
+        {
+          "name": "View MempoolA rainforest shaped by Bitcoin's waiting transactions.",
+          "height": 78.78125,
+          "width": 320
+        },
+        {
+          "name": "View LN FactoryA Lightning node at work \u00b7 enter through its shield.",
+          "height": 78.78125,
+          "width": 320
+        },
+        {
+          "name": "View B.C.A.Banana Certified Accounting.",
+          "height": 64,
+          "width": 320
+        },
+        {
+          "name": "View TC SphereLive Bitcoin charts \u00b7 choose a room at the keypad.",
+          "height": 78.78125,
+          "width": 320
+        }
+      ],
+      "contrast": "rgb(255, 217, 160)",
+      "latency": [
+        19.899999976158142,
+        28.299999952316284,
+        26.5,
+        27.399999976158142,
+        28.600000023841858,
+        26.799999952316284,
+        26.899999976158142,
+        28.300000071525574,
+        26.700000047683716,
+        27.600000023841858
+      ],
+      "touch": true,
+      "logs": []
+    },
+    {
+      "name": "narrow",
+      "open": true,
+      "bounds": {
+        "left": 16,
+        "top": 16,
+        "right": 304,
+        "bottom": 624
+      },
+      "viewport": [
+        320,
+        640
+      ],
+      "overflow": false,
+      "focus": "destination-map-close",
+      "buttons": [
+        {
+          "name": "\u00d7",
+          "height": 44,
+          "width": 44
+        },
+        {
+          "name": "View Ooga ArcadeGames and prizes \u00b7 enter through the cave, then choose a cabinet.",
+          "height": 95.578125,
+          "width": 250
+        },
+        {
+          "name": "View PileThe heart of the island \u00b7 meet the Oogas. \u00b7 Current destination",
+          "height": 95.578125,
+          "width": 250
+        },
+        {
+          "name": "View MirrorThe mirror cave.",
+          "height": 64,
+          "width": 250
+        },
+        {
+          "name": "View HQHeadquarters and its sleeping crew.",
+          "height": 78.78125,
+          "width": 250
+        },
+        {
+          "name": "View BasementThe rooms beneath headquarters.",
+          "height": 64,
+          "width": 250
+        },
+        {
+          "name": "View North gateThe north pass and its arch.",
+          "height": 64,
+          "width": 250
+        },
+        {
+          "name": "View \u20bfIFR\u00d6STWalk through the gateway to other worlds.",
+          "height": 78.78125,
+          "width": 250
+        },
+        {
+          "name": "View LabEntropyLab's contributors at work.",
+          "height": 78.78125,
+          "width": 250
+        },
+        {
+          "name": "View MempoolA rainforest shaped by Bitcoin's waiting transactions.",
+          "height": 78.78125,
+          "width": 250
+        },
+        {
+          "name": "View LN FactoryA Lightning node at work \u00b7 enter through its shield.",
+          "height": 78.78125,
+          "width": 250
+        },
+        {
+          "name": "View B.C.A.Banana Certified Accounting.",
+          "height": 64,
+          "width": 250
+        },
+        {
+          "name": "View TC SphereLive Bitcoin charts \u00b7 choose a room at the keypad.",
+          "height": 78.78125,
+          "width": 250
+        }
+      ],
+      "contrast": "rgb(255, 217, 160)",
+      "latency": [
+        32.10000002384186,
+        26.5,
+        27.5,
+        29.200000047683716,
+        26.100000023841858,
+        27.700000047683716,
+        27.899999976158142,
+        26.59999990463257,
+        27.199999928474426,
+        29
+      ],
+      "touch": true,
+      "logs": []
+    },
+    {
+      "name": "zoom-equivalent",
+      "open": true,
+      "bounds": {
+        "left": 16,
+        "top": 16,
+        "right": 704,
+        "bottom": 347
+      },
+      "viewport": [
+        720,
+        363
+      ],
+      "overflow": false,
+      "focus": "destination-map-close",
+      "buttons": [
+        {
+          "name": "\u00d7",
+          "height": 44,
+          "width": 44
+        },
+        {
+          "name": "View Ooga ArcadeGames and prizes \u00b7 enter through the cave, then choose a cabinet.",
+          "height": 64,
+          "width": 650
+        },
+        {
+          "name": "View PileThe heart of the island \u00b7 meet the Oogas. \u00b7 Current destination",
+          "height": 78.78125,
+          "width": 318
+        },
+        {
+          "name": "View MirrorThe mirror cave.",
+          "height": 64,
+          "width": 318
+        },
+        {
+          "name": "View HQHeadquarters and its sleeping crew.",
+          "height": 64,
+          "width": 318
+        },
+        {
+          "name": "View BasementThe rooms beneath headquarters.",
+          "height": 64,
+          "width": 318
+        },
+        {
+          "name": "View North gateThe north pass and its arch.",
+          "height": 64,
+          "width": 318
+        },
+        {
+          "name": "View \u20bfIFR\u00d6STWalk through the gateway to other worlds.",
+          "height": 78.78125,
+          "width": 318
+        },
+        {
+          "name": "View LabEntropyLab's contributors at work.",
+          "height": 64,
+          "width": 318
+        },
+        {
+          "name": "View MempoolA rainforest shaped by Bitcoin's waiting transactions.",
+          "height": 78.78125,
+          "width": 318
+        },
+        {
+          "name": "View LN FactoryA Lightning node at work \u00b7 enter through its shield.",
+          "height": 78.78125,
+          "width": 318
+        },
+        {
+          "name": "View B.C.A.Banana Certified Accounting.",
+          "height": 64,
+          "width": 318
+        },
+        {
+          "name": "View TC SphereLive Bitcoin charts \u00b7 choose a room at the keypad.",
+          "height": 78.78125,
+          "width": 318
+        }
+      ],
+      "contrast": "rgb(255, 217, 160)",
+      "latency": [
+        27.800000071525574,
+        27.600000023841858,
+        27.799999952316284,
+        25.799999952316284,
+        29,
+        27.799999952316284,
+        28,
+        27.700000047683716,
+        28.100000023841858,
+        26.600000023841858
+      ],
+      "touch": null,
+      "logs": []
+    }
+  ]
+}

@@ -8380,6 +8380,14 @@ const gamepadHoldProof = async () => {
   const disconnected = !S.connected && neutral();
   connected = true; G.poll(); G.hold(false); G.poll();
   const reconnected = S.connected && !(S.held | S.pressed | S.released);
+  // Map navigation consumes raw pad input while gameplay stays held; closing
+  // it requires neutral sticks before movement can resume.
+  G.hold(true, true); buttons[1].pressed = false; G.poll(); buttons[0].pressed = true; G.poll();
+  const mapInput = !!(G.ui.pressed & B.a) && !!G.ui.lx && neutral();
+  G.hold(false); G.poll(); const mapHeld = !S.lx && !S.ly && !S.rx && !S.ry;
+  hardware.axes.fill(0); G.poll(); hardware.axes[0] = 0.6; G.poll();
+  const mapReleased = S.lx > 0;
+  buttons[0].pressed = false; G.poll();
   context.window.removeEventListener = () => {};
   for (const name of ["math", "controls"]) runInNewContext(await readFile(join(root, `src/js/${name}.js`), "utf8"), context);
   buttons[1].pressed = false; G.poll();
@@ -8396,7 +8404,7 @@ const gamepadHoldProof = async () => {
   const pilot = await readFile(join(root, "src/js/pilot.js"), "utf8");
   const reset = new Function("pad", `let padFrame = -1, padFire = true, padAds = true, mouseAds = true, ads = true; ${pilot.match(/const resetPad = [^\n]+/)[0]} resetPad(); return { padFrame, padFire, padAds, mouseAds, ads };`)(S);
   const pilotReset = reset.padFrame === S.frame && !reset.padFire && !reset.padAds && !reset.mouseAds && !reset.ads;
-  return { initiallyLive: !!initiallyLive, synchronous, heldNeutral, noReplay, fresh, idempotent, betweenFrames, afterRelease, disconnected, reconnected, controlsResume, pilotReset };
+  return { initiallyLive: !!initiallyLive, synchronous, heldNeutral, noReplay, fresh, idempotent, betweenFrames, afterRelease, disconnected, reconnected, mapInput, mapHeld, mapReleased, controlsResume, pilotReset };
 };
 
 
@@ -9925,9 +9933,11 @@ const sharedPanelBuildings = { name: "shared panel buildings", why: "regression:
     for (const id of ids) {
       const r = await b.evaluate(`(() => { const I = __ooga.dsb.interiors; I.review(${JSON.stringify(id)}, true); __ooga.advance(.5,1/60);
         const s = document.getElementById("sheet"), inside = I.active?.definition.id, shown = !s.hidden && getComputedStyle(s).display !== "none", open = s.dataset.open;
-        I.request(I.active.room.exit); __ooga.advance(.5,1/60); return { inside, shown, open, exited: !I.active, after: s.dataset.open, panels: document.querySelectorAll(".sheet").length }; })()`);
+        document.getElementById("destination-hud").click();
+        const map = document.getElementById("destination-map"), entries = map.querySelectorAll("[data-destination]"), outside = map.open && entries.length === 1 && entries[0].dataset.destination === "outside";
+        entries[0]?.click(); __ooga.advance(.5,1/60); return { inside, shown, open, outside, exited: !I.active && !map.open, after: s.dataset.open, panels: document.querySelectorAll(".sheet").length }; })()`);
       rows.push(r);
-      record("shared panel: " + id + " preserves " + (pass ? "closed" : "open") + " state on entry and exit", r.inside === id && r.shown && r.open === String(!pass) && r.after === r.open && r.exited && r.panels === 1, JSON.stringify(r));
+      record("shared panel: " + id + " preserves " + (pass ? "closed" : "open") + " state on entry and exit", r.inside === id && r.shown && r.open === String(!pass) && r.after === r.open && r.outside && r.exited && r.panels === 1, JSON.stringify(r));
     }
   }
   await tourGo(b, "bifrost");
@@ -10528,26 +10538,109 @@ const hubBlockHeight = { name: "header clock and block height", why: "rule: the 
   const after = await b.evaluate(`(() => { const height = document.getElementById("world-block-height"), block = document.getElementById("world-block"); const shown = height.textContent; return { shown, label: block.getAttribute("aria-label"), bananas: !!document.getElementById("world-banana-count"), icon: !!block.querySelector(".banana-icon") }; })()`);
   record("header: a single-digit clock is centered from its displayed time and local zone, while the chain feed paints block height below it", before.height === "\u2014" && before.namedImage && !before.bananas && before.text === `9:00 AM ${before.zone}` && before.viewWidth === before.cells && Math.abs(before.cssWidth - before.cells / 6) < 1e-6 && after.shown === "900,123" && after.label === "Bitcoin block height 900123" && !after.bananas && !after.icon, JSON.stringify({ before, after }));
 } };
-const hubDestinationNames = { name: "destination accessible names", why: "regression: each visible destination label must occur in the button's accessible name", run: async (b) => {
+const hubDestinationNames = { name: "destination accessible names", why: "regression: destinations need explicit accessible actions without moving the player when the map opens", run: async (b) => {
   await b.send("Accessibility.enable");
-  await b.evaluate(`__ooga.pilot.release(true); __ooga.hud.setDetachedView("pile", true)`);
-  const expected = ["Lab", "Mirror", "HQ", "Basement", "Mempool", "LN Factory", "Ooga Arcade", "B.C.A.", "North gate", "₿IFRÖST", "TC Sphere", "Pile"], rows = [];
-  for (const label of expected) {
-    const row = await b.evaluate(`(() => {
-      const map = document.getElementById("destination-hud"); map.click();
-      return { label: document.getElementById("detached-destination-name").textContent, action: map.dataset.action,
-        detached: !__ooga.pilot.player && !__ooga.clankerPlay.active,
-        removed: !document.getElementById("destination-picker") && !document.getElementById("reset-camera-hud"),
-        noPopup: !map.hasAttribute("aria-haspopup") && !map.hasAttribute("aria-controls") };
-    })()`);
-    const tree = await b.send("Accessibility.getFullAXTree");
-    rows.push({ ...row, expected: label, named: tree.result.nodes.some(node => node.role?.value === "button"
-      // CSS paints the destination in uppercase; Chrome's labelled-by name
-      // contains that rendered text rather than the title-case DOM source.
-      && node.name?.value.includes(label.toUpperCase()) && /map/i.test(node.name.value)) });
+  await b.evaluate(`__ooga.pilot.release(true); __ooga.hud.setDetachedView("pile", true); document.getElementById("destination-hud").click()`);
+  const tree = await b.send("Accessibility.getFullAXTree");
+  const names = ["Pile", "Lab", "Mirror", "HQ", "Basement", "Mempool", "LN Factory", "Ooga Arcade", "B.C.A.", "North gate", "₿IFRÖST", "TC Sphere"];
+  const opened = await b.evaluate(`(() => {
+    const dialog = document.getElementById("destination-map"), map = document.getElementById("destination-hud");
+    return { open: dialog.open, count: dialog.querySelectorAll("[data-destination]").length,
+      stayed: document.getElementById("detached-destination-name").textContent === "Pile",
+      focus: document.activeElement.id === "destination-map-close", expanded: map.getAttribute("aria-expanded"),
+      current: dialog.querySelector('[aria-current="location"]')?.dataset.destination };
+  })()`);
+  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape" });
+  await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
+  const closed = await b.evaluate(`!document.getElementById("destination-map").open && document.activeElement.id === "destination-hud" && __ooga.scene === "hub"`);
+  record("destinations: Map lists all twelve named actions with current location, opens without travelling and Escape restores its focus",
+    opened.open && opened.count === 12 && opened.stayed && opened.focus && opened.expanded === "true" && opened.current === "pile" && closed
+      && names.every(name => tree.result.nodes.some(node => node.role?.value === "button" && node.name?.value.startsWith("View " + name))), JSON.stringify({ opened, closed }));
+  await b.evaluate(`document.getElementById("destination-hud").click(); window.__mapElapsed = BL.scenes.hub.elapsed`);
+  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "w", code: "KeyW" });
+  const held = await b.evaluate(`(__ooga.advance(.2, 1/60), { quiet: __ooga.pilot.controls.read().y === 0, moving: BL.scenes.hub.elapsed > __mapElapsed })`);
+  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape" });
+  await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
+  await b.evaluate(`document.getElementById("scene").focus()`);
+  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "w", code: "KeyW", autoRepeat: true });
+  const noReplay = await b.evaluate(`__ooga.pilot.controls.read().y === 0`);
+  await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "w", code: "KeyW" });
+  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "w", code: "KeyW" });
+  const resumed = await b.evaluate(`__ooga.pilot.controls.read().y !== 0`);
+  await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "w", code: "KeyW" });
+  await b.evaluate(`delete window.__mapElapsed`);
+  record("destination controls: the world advances behind Map, held movement stays quiet after Escape and a fresh press resumes it", held.quiet && held.moving && noReplay && resumed, JSON.stringify({ held, noReplay, resumed }));
+  const gamepad = await b.evaluate(`(() => {
+    const descriptor = Object.getOwnPropertyDescriptor(navigator, "getGamepads"), P = BL.gamepad;
+    const pad = { connected:true, mapping:"standard", axes:[0,0,0,0], buttons:Array.from({length:16},()=>({pressed:false,value:0})) };
+    const event = type => { const e = new Event(type); Object.defineProperty(e,"gamepad",{value:pad}); window.dispatchEvent(e); };
+    let now = performance.now();
+    const tick = () => { P.poll(); BL.destinationMap.update(now += 20); };
+    const press = i => { pad.buttons[i].pressed=true; tick(); pad.buttons[i].pressed=false; tick(); };
+    Object.defineProperty(navigator,"getGamepads",{configurable:true,value:()=>[pad]}); event("gamepadconnected");
+    try {
+      press(9); const opened = document.getElementById("destination-map").open;
+      press(13); const ordered = document.activeElement.dataset.destination === "arcade";
+      pad.axes[0]=1; press(1); const closed = !document.getElementById("destination-map").open;
+      tick(); const quiet = P.state.lx === 0;
+      pad.axes[0]=0; tick(); pad.axes[0]=1; tick(); const resumed = P.state.lx > 0;
+      press(9); pad.axes[2]=1; pad.buttons[2].pressed=true; tick();
+      pad.connected=false; event("gamepaddisconnected"); tick();
+      const disconnected = !P.state.connected && !P.state.held && !P.state.lx && !P.state.rx;
+      pad.connected=true; event("gamepadconnected"); tick(); press(1); tick();
+      const reconnectHeld = !document.getElementById("destination-map").open && !P.state.lx && !P.state.rx && !(P.state.held & P.BUTTON.x);
+      press(9); pad.connected=false; event("gamepaddisconnected"); tick();
+      BL.destinationMap.close(); tick();
+      pad.connected=true; event("gamepadconnected"); tick();
+      const closeAbsent = !document.getElementById("destination-map").open && !P.state.lx && !P.state.rx;
+      // The neutral requirement also survives an absence after the dialog closes.
+      pad.connected=false; event("gamepaddisconnected"); tick();
+      pad.connected=true; event("gamepadconnected"); tick();
+      const reconnectClosed = !P.state.lx && !P.state.rx;
+      pad.axes[0]=0; tick(); const bothRequired = !P.state.rx;
+      pad.axes[2]=0; pad.buttons[2].pressed=false; tick();
+      pad.axes[0]=pad.axes[2]=1; pad.buttons[2].pressed=true; tick();
+      const neutralRelease = P.state.lx > 0 && P.state.rx > 0 && !!(P.state.pressed & P.BUTTON.x);
+      pad.connected=false; event("gamepaddisconnected"); tick();
+      const ordinaryDisconnect = !P.state.connected && !P.state.lx && !P.state.rx && !P.state.held && !!(P.state.released & P.BUTTON.x);
+      pad.buttons[2].pressed=false; pad.connected=true; event("gamepadconnected"); tick();
+      const ordinaryReconnect = P.state.connected && P.state.lx > 0 && P.state.rx > 0;
+      return {opened,ordered,closed,quiet,resumed,disconnected,reconnectHeld,closeAbsent,reconnectClosed,bothRequired,neutralRelease,ordinaryDisconnect,ordinaryReconnect};
+    } finally {
+      BL.destinationMap.close(); event("gamepaddisconnected");
+      if(descriptor)Object.defineProperty(navigator,"getGamepads",descriptor);else delete navigator.getGamepads;
+      P.poll();
+    }
+  })()`);
+  record("destination gamepad: Menu opens Map, Down follows visible order, B closes and a held stick waits for neutral", Object.values(gamepad).every(Boolean), JSON.stringify(gamepad));
+  const keyboardReplay = [];
+  for (const [key, code] of [["Enter", "Enter"], [" ", "Space"]]) {
+    await b.evaluate(`document.getElementById("controls-help-button").click(); document.getElementById("controls-learn").focus()`);
+    const keyCode = key === "Enter" ? 13 : 32;
+    await b.send("Input.dispatchKeyEvent", { type: "keyDown", key, code, windowsVirtualKeyCode: keyCode, text: key === "Enter" ? "\r" : " " });
+    await b.send("Input.dispatchKeyEvent", { type: "keyUp", key, code, windowsVirtualKeyCode: keyCode });
+    keyboardReplay.push(await b.evaluate(`(() => {
+      const replayed = !document.getElementById("controls-help").open && BL.destinationMap.coaching;
+      document.getElementById("explore-coach-skip").click(); return replayed;
+    })()`));
   }
-  record("destinations: each Map click advances through all twelve places and wraps to Pile, with matching accessible labels including LN Factory and TC Sphere and no picker or reset button",
-    rows.every(row => row.label === row.expected && row.action === "mode-preset" && row.detached && row.removed && row.noPopup && row.named), JSON.stringify(rows));
+  record("destination coaching: Enter and Space activate the Controls replay button", keyboardReplay.every(Boolean), JSON.stringify(keyboardReplay));
+  const coaching = await b.evaluate(`(() => {
+    const start = document.getElementById("explore-coach-start"), skip = document.getElementById("explore-coach-skip");
+    document.getElementById("controls-help-button").click(); document.getElementById("controls-learn").click();
+    const offered = BL.destinationMap.coaching;
+    skip.click(); const dismissed = !BL.destinationMap.coaching && document.getElementById("explore-coach").hidden;
+    document.getElementById("controls-help-button").click(); document.getElementById("controls-learn").click();
+    start.click(); document.getElementById("scene").focus();
+    __ooga.advance(.1,1/60);
+    window.dispatchEvent(new KeyboardEvent("keydown", {key:"w",code:"KeyW"})); __ooga.advance(1,1/60);
+    window.dispatchEvent(new KeyboardEvent("keyup", {key:"w",code:"KeyW"})); __ooga.advance(.1,1/60);
+    const moved = start.textContent === "Open Map";
+    start.click(); document.querySelector('[data-destination="arcade"]')?.click();
+    const completed = start.textContent === "Done" && localStorage.getItem("ooga-explore-coach-v1") === "1";
+    start.click(); return {offered,dismissed,moved,completed};
+  })()`);
+  record("destination coaching: Controls replays a dismissible guide, actual movement advances it and successful Arcade travel completes it", Object.values(coaching).every(Boolean), JSON.stringify(coaching));
 } };
 const hubWalking = { name: "hub walking", why: "regression: steering keys came out mirrored, and the removed hub Agent could still be summoned", run: async (b) => {
   // Seeded scenery places a rock at the old (-8, 8) direction-check start.
@@ -10863,6 +10956,7 @@ const hubMapNavigation = { name: "hub map navigation", why: "regression: choosin
   const r = await b.evaluate(`(() => {
     const B = __ooga, P = B.pilot, H = B.hud, a = B.cavemen.get("portlandhodl");
     const map = document.getElementById("destination-hud"), label = document.getElementById("detached-destination-name");
+    const choose = name => { if (!document.getElementById("destination-map").open) map.click(); document.querySelector('[data-destination="' + name + '"]')?.click(); };
     const rows = [], net = BL.net.state, account = net.me, backend = net.backend;
     const character = BL.characters.get(a.traits.name), xyz = p => [p.x, p.y, p.z];
     const snapshot = () => ({ actor: xyz(a.root.position), eye: xyz(B.camera.position), target: xyz(B.camera.target), mode: P.mode, combat: P.aiming, player: P.player === a });
@@ -10887,7 +10981,7 @@ const hubMapNavigation = { name: "hub map navigation", why: "regression: choosin
           && before.combat === mode.startsWith("combat");
         // Use the native keyboard/assistive activation path. A lone detail-one
         // click has no matching pointer press and can be a suppressed compatibility event.
-        map.click();
+        choose("lab");
         const after = snapshot(), delta = after.actor.map((n, i) => n - before.actor[i]);
         const translated = !before.player || error(after.eye.map((n, i) => n - before.eye[i]), delta) < 1e-5
           && error(after.target.map((n, i) => n - before.target[i]), delta) < 1e-5;
@@ -10909,14 +11003,14 @@ const hubMapNavigation = { name: "hub map navigation", why: "regression: choosin
     let refusal;
     try {
       a.grabbedBy = {};
-      map.click();
-      const blocked = unchanged(beforeRefusal, snapshot()) && document.getElementById("toast").textContent.includes("released");
-      a.grabbedBy = grabbedBy; map.click();
+      choose("lab");
+      const blocked = document.getElementById("destination-map").open && unchanged(beforeRefusal, snapshot()) && document.getElementById("toast").textContent.includes("released");
+      a.grabbedBy = grabbedBy; choose("mirror");
       refusal = { blocked, nextDestination: label.textContent === "Mirror" && P.player === a, selected: P.player === a, toast: document.getElementById("toast").textContent };
     } finally { a.grabbedBy = grabbedBy; }
     P.goPreset("pile"); P.possess(a); if (B.crew.sleeping) B.crew.wakePlayer();
     if (P.aiming) P.modeAction("mode-toggle");
-    H.setDetachedView("pile"); map.click(); B.advance(0.1, 1 / 60);
+    H.setDetachedView("pile"); choose("lab"); B.advance(0.1, 1 / 60);
     P.hooks.onOrbit(10, 0); P.hooks.onZoom(1.05); B.advance(0.1, 1 / 60);
     const looking = label.textContent === "Lab";
     const lab = B.mouths.find(mouth => mouth.id === "c11");
@@ -10930,17 +11024,17 @@ const hubMapNavigation = { name: "hub map navigation", why: "regression: choosin
     // be refused by the enclosed HQ or Basement's arrival geometry.
     P.release(true); P.goPreset("pile");
     for (const name of ["underground", "basement", "timechain"]) {
-      H.setDetachedView({ underground: "mirror", basement: "underground", timechain: "bifrost" }[name]); map.click();
+      choose(name);
       B.advance(0.1, 1 / 60); H.fadeDetachedName(true); B.advance(0.1, 1 / 60);
       areas.push({ name, label: label.textContent });
     }
     P.release(true); P.goPreset("pile");
     return { rows, refusal, looking, departed, areas };
   })()`);
-  record("hub map: signed in or out, one Map click travels to the next destination while retaining the Ooga, carry/combat and view family and translating its camera", r.rows.length === 14
+  record("hub map: signed in or out, a chosen Map destination travels directly while retaining the Ooga, carry/combat and view family and translating its camera", r.rows.length === 14
     && r.rows.every(row => row.prepared && row.arrived && row.translated && row.moved > 1), JSON.stringify(r.rows));
   record("hub reset: 0 resets framing without relocating an Ooga, changing its mode or view family, or acquiring an actor while detached", r.rows.every(row => row.resetKept && row.resetChanged), JSON.stringify(r.rows));
-  record("hub map refusal: a held Ooga stays put with an explanation, and the next click advances to Mirror once released instead of retrying Lab", r.refusal.blocked && r.refusal.nextDestination, JSON.stringify(r.refusal));
+  record("hub map refusal: a held Ooga stays put with an explanation, and the map stays open and allows choosing Mirror once released", r.refusal.blocked && r.refusal.nextDestination, JSON.stringify(r.refusal));
   record("hub map: looking keeps the arrival label; actual travel shows HUB, and underground and sphere arrivals resolve to their broader areas", r.looking && r.departed.distance > 1.5 && r.departed.label === "HUB" && r.departed.visible
     && r.areas.map(row => row.label).join(",") === "HQ,B1,SPHERE", JSON.stringify({ looking: r.looking, departed: r.departed, areas: r.areas }));
 } };
@@ -16969,7 +17063,7 @@ const hubEntryHold = { name: "hub entry hold", why: "regression: a released hub 
     await untilPage(b, 'B.scene === "hub" && !B.transitioning', 20000);
     resumed = await b.evaluate(`(() => {
       const S = __entryHold, map = document.getElementById("destination-hud"), pad = BL.gamepad.state, axes = S.pilot.controls.read();
-      map.click();
+      map.click(); document.querySelector('[data-destination="lab"]')?.click();
       for (const fn of S.callbacks) fn({ type: "change", index: 0, fresh: true, changedAt: Date.now() });
       return { scene: __ooga.scene, live: !document.getElementById("equipment-hud").inert, actions: S.actions,
         subscriptions: S.callbacks.size, flare: __ooga.totems.list[0].flare, toast: document.getElementById("toast").textContent,
@@ -17048,7 +17142,7 @@ const hubBootHold = { name: "hub boot hold", why: "regression: sliced cold boot 
   await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "w", code: "KeyW" });
   await b.evaluate(`__bootHold.released=true`);
   const resumed = await untilPage(b, 'B.scene==="hub"', 20000);
-  const live = await b.evaluate(`(()=>{const map=document.getElementById("destination-hud");map.click();return {live:!document.getElementById("equipment-hud").inert,actions:__bootHold.actions};})()`);
+  const live = await b.evaluate(`(()=>{const map=document.getElementById("destination-hud");map.click();document.querySelector('[data-destination="lab"]')?.click();return {live:!document.getElementById("equipment-hud").inert,actions:__bootHold.actions};})()`);
   record("hub boot hold: cold construction refuses HUD, wheel, canvas and Space/W input, then restores a live island", paused && held.scene === null && held.actions === 0 && held.inert && held.quiet && held.unchanged && resumed && live.live && live.actions === 1, JSON.stringify({ held, resumed, live, before }));
 } };
 const hubBootFailure = { name: "hub boot failure", why: "regression: a sliced cold-boot exception left a spinning curtain and live partial controls without recovery", run: async (b) => {
@@ -21006,6 +21100,7 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1"
         BL.scenes.hub.debug.setGameMode(false);
       }
       const mapRows = [], mapCrowds = [], map = document.getElementById("destination-hud"), label = document.getElementById("detached-destination-name");
+      const choose = name => { if (!document.getElementById("destination-map").open) map.click(); document.querySelector('[data-destination="' + name + '"]')?.click(); };
       // Camera-only updates above do not finish the preceding charged smash.
       // Travel is tested from an idle body, after the world advances its recovery.
       P.cancelInput(); B.advance(2, 1 / 60);
@@ -21026,7 +21121,7 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1"
           P.update(2);
           if (view !== "shoulder") { P.zoom(view === "first-person" ? 0.5 : 2, {}); P.update(2); }
           B.hud.setDetachedView(mapRows.length % 2 ? "pile" : "lab");
-          const before = mapState(); map.click();
+          const before = mapState(); choose(mapRows.length % 2 ? "lab" : "mirror");
           const after = mapState(), delta = after.actor.map((n, i) => n - before.actor[i]);
           const arrived = label.textContent === (mapRows.length % 2 ? "Lab" : "Mirror") && after.controlled && after.view === view && after.combat === combat
             && Math.hypot(...delta) > 1 && error(after.eye.map((n, i) => n - before.eye[i]), delta) < 1e-5
@@ -21041,7 +21136,7 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1"
             delta, resetKept, resetChanged: error(keyboard.eye.concat(keyboard.target), keyboardBefore.eye.concat(keyboardBefore.target)) > 1e-5 });
         }
         // Start away from the Lab so a successful arrival has visible travel.
-        B.hud.setDetachedView("lab"); map.click();
+        B.hud.setDetachedView("lab"); choose("mirror");
         // Fill the arrivals the real Map chooses, without copying its search
         // geometry. Real crew bodies eventually occupy every available spot.
         for (const signedIn of [false, true]) {
@@ -21049,13 +21144,13 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1"
           const origin = { ...e.root.position };
           let blockers = 0, refused = false, unchanged = false, restored = true;
           for (const [cave] of mapTraffic) {
-            B.hud.setDetachedView("pile"); const before = mapState(); map.click();
+            B.hud.setDetachedView("pile"); const before = mapState(); choose("lab");
             const after = mapState(), moved = error(after.actor, before.actor) > 1;
             if (!moved) {
               refused = document.getElementById("toast").textContent === "That arrival is blocked. Choose another destination.";
               unchanged = after.controlled && after.view === before.view && after.combat === before.combat
                 && error(after.actor.concat(after.eye, after.target), before.actor.concat(before.eye, before.target)) < 1e-6
-                && label.textContent === "Lab";
+                && document.getElementById("destination-map").open;
               break;
             }
             Object.assign(cave.root.position, { x: e.root.position.x, y: e.root.position.y + cave.baseY, z: e.root.position.z });
@@ -21063,9 +21158,9 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1"
             restored = P.travel(origin) && restored;
           }
           for (const [cave, , position] of mapTraffic) { cave.root.visible = false; Object.assign(cave.root.position, position); }
-          B.hud.setDetachedView("pile"); const before = mapState(); map.click(); const after = mapState();
+          B.hud.setDetachedView("pile"); const before = mapState(); choose("lab"); const after = mapState();
           const reopened = after.controlled && after.view === before.view && after.combat === before.combat
-            && error(after.actor, before.actor) > 1 && label.textContent === "Lab";
+            && error(after.actor, before.actor) > 1 && label.textContent === "Lab" && !document.getElementById("destination-map").open;
           mapCrowds.push({ signedIn, blockers, refused, unchanged, restored, reopened });
           P.travel(origin);
         }
@@ -21327,7 +21422,7 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1"
     state.gestures.every(row => row.nativeTab && row.tabs.rows.length === 2
       && row.tabs.rows.every((r, i) => r.view === (i ? "birds-eye" : "shoulder") && Object.entries(r).every(([key, value]) => key === "kind" || key === "view" || value === true))
       && row.tabs.ui.length === 4 && row.tabs.ui.every(r => r.native && r.stopped)), JSON.stringify(state.gestures.map(({ signedIn, tabs }) => ({ signedIn, tabs }))));
-  record("gorilla map: signed in or out, one Map click travels to the next destination while retaining the gorilla, mode and view family and translating the camera", state.mapRows.length === 12
+  record("gorilla map: signed in or out, a chosen Map destination travels directly while retaining the gorilla, mode and view family and translating the camera", state.mapRows.length === 12
     && state.mapRows.every(row => row.prepared && row.arrived)
     && state.mapCrowds.length === 2 && state.mapCrowds.every(row => row.blockers > 0 && row.refused && row.unchanged && row.restored && row.reopened),
     JSON.stringify({ arrivals: state.mapRows, crowds: state.mapCrowds }));
@@ -22829,7 +22924,7 @@ scene("dsb", { label: "dsb shared player", url: hubPage(dist), steps: [{ name: "
   record("dsb shared player: canonical selected actor is possessed with the rounds it left the island with (#421: no door refills them)", await b.evaluate(`__ooga.dsb.phase === "land" && __ooga.pilot.player === __ooga.dsb.avatar && __ooga.pilot.player.traits.name === "rules-without-rulers" && __ooga.pilot.player.weapon.ammo === __hubAmmo.ammo && __ooga.pilot.player.weapon.spareAmmo.join() === __hubAmmo.spare && __ooga.pilot.player.headOpen === BL.models.caveman(BL.contributors.traitsFor("rules-without-rulers")).headOpen`));
   const move = await b.evaluate(`(() => { const c = __ooga.pilot.player, z = c.root.position.z; window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); __ooga.advance(0.3); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" })); return Math.abs(c.root.position.z - z); })()`);
   record("dsb shared player: shared walking moves the actor", move > 0.2, String(move));
-  await b.evaluate(`document.getElementById("destination-hud").click(); __ooga.advance(0.4)`);
+  await b.evaluate(`document.getElementById("destination-hud").click(); document.querySelector("#destination-map [data-destination]")?.click(); __ooga.advance(0.4)`);
   record("dsb shared player: the island view selector starts at overview as a free camera and keeps its CHORA label", await b.evaluate('__ooga.pilot.player === null && __ooga.camera.position.y > 5 && document.getElementById("detached-destination-name").textContent === "CHORA"'));
   const reset = await b.evaluate(`(() => {
     const B = __ooga, a = B.dsb.avatar, p = { ...a.root.position }, mode = B.pilot.mode;
