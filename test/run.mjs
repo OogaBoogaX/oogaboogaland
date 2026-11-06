@@ -1010,12 +1010,12 @@ const northTrajectoryProof = async () => {
     return { maxStep, residual, monotonic, finite, resets, variableSteps };
   })()`);
 };
-// Exercise the real private clearance predicate against the original circular oracle.
+// Exercise the shared clearance predicate against the original circular oracle.
 const claimClearanceProof = () => {
-  const source = readFileSync(new URL("../src/js/scene-hub.js", import.meta.url), "utf8");
-  const start = source.indexOf("  const free = (x, z, r) => {");
-  const context = { claimed: [], Math, Number };
-  const free = runInNewContext(`${source.slice(start, source.indexOf("  const nearPath =", start))}; free`, context);
+  const source = readFileSync(new URL("../src/js/hub-layout.js", import.meta.url), "utf8");
+  const context = { BL: {}, claimed: [], Math, Number };
+  runInNewContext(source, context);
+  const free = (x, z, r) => context.BL.hubLayout.free(context.claimed, x, z, r);
   let cases = 0, failures = 0, seed = 1739;
   const random = () => { seed = Math.imul(seed ^ seed >>> 15, 2246822519); seed = Math.imul(seed ^ seed >>> 13, 3266489917); return (seed >>> 0) / 4294967296; };
   const check = (x, z, r) => {
