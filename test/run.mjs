@@ -6033,7 +6033,7 @@ const hammockChecks = async () => {
     runInNewContext(await readFile(new URL(`../src/characters/${handle}.js`, import.meta.url), "utf8"), real);
   R.contributors = { roster: [] };
   // Load the crew's shared constants without creating movement or NPC systems.
-  runInNewContext(await readFile(new URL("../src/js/hub-locomotion.js", import.meta.url), "utf8"), real);
+  runInNewContext(await readFile(new URL("../src/js/walk-rules.js", import.meta.url), "utf8"), real);
   runInNewContext(await readFile(new URL("../src/js/crew.js", import.meta.url), "utf8"), real);
   const gearRows = [];
   for (const handle of ["hammock-club", "w-s-bitcoin", "MrHodlX", "2140data"]) {
