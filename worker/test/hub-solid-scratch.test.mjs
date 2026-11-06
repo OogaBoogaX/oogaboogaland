@@ -30,9 +30,27 @@ test('host shoulder scratch grows only for queried surfaces and matches eager co
 });
 
 
+// A browser build packs its final render mesh compactly (exact Float64 positions,
+// a read-only face store); the host's plain build skips that with its render
+// alternatives. Compare what each holds, not how it is stored: every vertex as
+// stored, every face read back through the compact API, and every other field.
+// Only the storage itself and the render alternatives are left out.
+const compact = globalThis.BL.compactGeometry;
+const STORAGE = new Set(['verts', 'faces', 'compactGeometry', 'foliageLods']);
+const canonical = geometry => {
+  const fields = {}, faces = [];
+  for (const key of Object.keys(geometry)) if (!STORAGE.has(key)) fields[key] = geometry[key];
+  const packed = !!compact.storageOf(geometry);
+  for (let n = 0; n < geometry.faces.length; n++) faces.push(packed ? compact.copyFace(geometry, n) : geometry.faces[n]);
+  return { fields, verts: Array.from(geometry.verts), faces };
+};
+// The next representable double: the smallest change to a coordinate.
+const nextDouble = value => { const f = new Float64Array([value]), bits = new BigInt64Array(f.buffer); bits[0] += 1n; return f[0]; };
+
 test('host foliage omits only render alternatives and keeps browser caches independent', () => {
   const builders = [() => hubModels.tree(0), () => hubModels.bush(1), () => hubDressing.palm(0),
     hubPoolModels.CANOPY[0], hubPoolModels.fern, hubPoolModels.shrub, hubPoolModels.UNDERGROWTH[1]];
+  let control = null;
   for (const [index, build] of builders.entries()) {
     // Cover both cache orders: a renderer may already have built a model in
     // the same process, or it may arrive after private host construction.
@@ -43,11 +61,30 @@ test('host foliage omits only render alternatives and keeps browser caches indep
     assert.ok(rendered.foliageLods, 'ordinary builder retains render alternatives');
     assert.equal(hosted.foliageLods, undefined);
     assert.notStrictEqual(hosted, rendered);
-    const { foliageLods, ...authored } = rendered;
-    assert.deepEqual(hosted, authored, 'all base geometry and collision/placement metadata stay exact');
+    assert.ok(compact.enabled && compact.storageOf(rendered), 'the browser build is packed, as live');
+    const expected = canonical(rendered);
+    assert.ok(expected.verts.length > 0 && expected.faces.length > 0);
+    assert.deepEqual(canonical(hosted), expected, 'all base geometry and collision/placement metadata stay exact');
     assert.deepEqual(hubScene.boundsOf(hosted), hubScene.boundsOf(rendered));
     assert.strictEqual(build(), rendered);
     assert.strictEqual(withHubFoliageDetails(false, build), hosted);
+    if (!control && expected.fields.collisionGeometry && expected.faces.some(f => Object.keys(f).some(k => k !== 'i' && k !== 'color')))
+      control = { hosted, expected };
+  }
+  // Negative control: the comparison catches the smallest coordinate change, a
+  // changed face tag, a changed face colour and changed collision metadata.
+  assert.ok(control, 'a builder with collision metadata and face tags exercises the control');
+  const tagged = control.expected.faces.findIndex(f => Object.keys(f).some(k => k !== 'i' && k !== 'color'));
+  const tag = Object.keys(control.expected.faces[tagged]).find(k => k !== 'i' && k !== 'color');
+  for (const [name, change] of [
+    ['coordinate', c => { c.verts[0] = nextDouble(c.verts[0]); }],
+    ['face tag', c => { const v = c.faces[tagged][tag]; c.faces[tagged][tag] = typeof v === 'number' ? nextDouble(v) : typeof v === 'boolean' ? !v : `${v}-changed`; }],
+    ['face colour', c => { c.faces[0].color[0] = c.faces[0].color[0] === 0 ? 1 : c.faces[0].color[0] - 1; }],
+    ['collision metadata', c => { const g = c.fields.collisionGeometry; g.verts[0] = nextDouble(g.verts[0]); }],
+  ]) {
+    const changed = structuredClone(control.expected);
+    change(changed);
+    assert.throws(() => assert.deepEqual(canonical(control.hosted), changed), assert.AssertionError, `${name} change detected`);
   }
 });
 

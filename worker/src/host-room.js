@@ -9,7 +9,10 @@ const same = (a, t) => a?.mode === "server" && a.world === t.world && a.epoch ==
 const compatible = (a, format) => a?.v === (format === "mixed-3" ? 4 : format === "mixed-2" ? 3 : format ? 2 : 1) && a.format === format;
 
 export async function publishHostPoses(host, room, ticket, { acquire = false, format, cadence, roomState,
-  notBefore, waitUntil, clock = Date.now } = {}) {
+  notBefore, waitUntil, clock = Date.now, publish = true } = {}) {
+  // Acquisition without a frame: only an explicit, unpaced, fresh acquisition.
+  if (publish !== true && (publish !== false || acquire !== true || roomState !== undefined
+    || notBefore !== undefined || waitUntil !== undefined)) fail("Room acquisition without publication requires an explicit fresh acquisition");
   if (cadence !== undefined && ![ROLLING_CADENCE, BURST_CADENCE].includes(cadence)) fail("unsupported publication cadence");
   if (format !== undefined && !["mixed-1", "mixed-2", "mixed-3"].includes(format)) fail("unsupported host pose format");
   if (typeof host.confirmPoses !== "function") fail("host revision confirmation required");
@@ -100,6 +103,9 @@ export async function publishHostPoses(host, room, ticket, { acquire = false, fo
   if (!await host.confirmPoses(ticket, { sequence: snapshot.sequence, at: snapshot.at, runUntil: snapshot.runUntil }, { skipPending: true })) {
     return { status: "superseded", revision: authority.revision };
   }
+  // Room authority is held and the host bound, but no frame is sent: followers
+  // stay frozen, and the durable rate gate is untouched, until a later publish.
+  if (!publish) return { status: "acquired", revision: authority.revision, roomState: verifiedState };
   try {
     return { status: "published", ...await room.publishNpcSnapshot(roomTicket, snapshot.sequence, snapshot.frame), roomState: verifiedState };
   } catch (error) {
@@ -109,6 +115,15 @@ export async function publishHostPoses(host, room, ticket, { acquire = false, fo
     // payload before accepting this duplicate, even after its lease expires.
     return { status: "reconciled", ...await room.publishNpcSnapshot(roomTicket, snapshot.sequence, snapshot.frame), roomState: verifiedState };
   }
+}
+
+// Explicit Room acquisition and host binding with every check publishHostPoses
+// makes, including uncertain-reply reconciliation and the final fenced host
+// confirmation, but no frame. A retry after a lost reply re-verifies the held
+// authority. The caller publishes the first frame separately, after it has
+// brought the world's durable state up to date.
+export function acquireHostRoom(host, room, ticket, { format, cadence, clock } = {}) {
+  return publishHostPoses(host, room, ticket, { acquire: true, publish: false, format, cadence, clock });
 }
 
 // A single trusted router must always pair this host/world with the same Room.

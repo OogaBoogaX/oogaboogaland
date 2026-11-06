@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { VirtualHost, HOST, SESSION_PROTOCOL, boundedJSON } from '../src/virtual-host.js';
 import { validateRoomBinding } from '../src/host-room-claim.js';
 import { RoomNpcAuthority, ROOM_NPC, npcAuthorityView, npcCadenceName, npcNextPublicationAt } from '../src/room-npc-authority.js';
-import { publishHostPoses, claimHostRoom, closeHostRoomRun, recoverReleasedHostRoom } from '../src/host-room.js';
+import { publishHostPoses, acquireHostRoom, claimHostRoom, closeHostRoomRun, recoverReleasedHostRoom } from '../src/host-room.js';
 import { openHostWorldRunner } from '../src/host-world-runner.js';
 import { RoomBodyPresence, ROOM_BODY_PRESENCE } from '../src/room-body-presence.js';
 
@@ -76,6 +76,47 @@ test('bounded publication pacing confirms ownership after the wait and keeps the
   f.at(100375); await f.host.sessions(ticket, [], () => true);
   await assert.rejects(publishHostPoses(host, f.room, ticket, { ...options, notBefore: 100499 }), /fenced/);
   assert.equal((await f.roomStore.get(ROOM_NPC.key)).at, 100250, 'caller-supplied timing cannot bypass the durable 250ms gate');
+});
+
+test('Room acquisition without publication binds the host and holds authority with no frame, so the first frame follows a later commit', async () => {
+  const f = fixture(), ticket = await f.host.begin('runner', 60000);
+  const acquired = await acquireHostRoom(f.host, f.room, ticket);
+  assert.equal(acquired.status, 'acquired');
+  const held = await f.roomStore.get(ROOM_NPC.key);
+  assert.deepEqual([held.mode, held.owner, held.epoch, held.frame, held.sequence], ['server', 'runner', ticket.fence, null, 0], 'authority held, no frame sent');
+  assert.equal((await f.host.worldRunState(ticket)).publicationProtocol, 1, 'host bound to the Room before any frame');
+  // A lost reply: retrying re-verifies the held authority without changing it.
+  const roomWrites = f.roomStore.writes();
+  assert.deepEqual(await acquireHostRoom(f.host, f.room, ticket), acquired);
+  assert.equal(f.roomStore.writes(), roomWrites, 'a retry writes nothing to Room');
+  // The runner opens on the bound pair, and the world advances before anything is shown.
+  await openHostWorldRunner({ host: f.host, room: f.room, ticket, clock: f.now, waitUntil: async at => f.at(at) });
+  f.at(100250); const tick = await f.host.tick(ticket, []);
+  assert.ok(tick.steps > 0 && tick.snapshot);
+  const first = await publishHostPoses(f.host, f.room, ticket, { roomState: acquired.roomState });
+  assert.equal(first.status, 'published');
+  assert.equal(first.sequence, tick.snapshot.sequence, 'the first frame shown is the committed post-tick revision');
+});
+
+test('Room acquisition without publication keeps uncertain-reply reconciliation, fencing and its explicit-only form', async () => {
+  // Room commits the claim, then the reply is lost: reconciled by reading, never retried blindly.
+  const f = fixture(), ticket = await f.host.begin('runner', 60000);
+  let lost = 0;
+  const flaky = { ...f.room, async configureNpcAuthority(...args) { await f.room.configureNpcAuthority(...args); lost++; throw Error('lost reply'); } };
+  const acquired = await acquireHostRoom(f.host, flaky, ticket);
+  assert.deepEqual([acquired.status, lost], ['acquired', 1]);
+  assert.equal((await f.roomStore.get(ROOM_NPC.key)).frame, null);
+  // A newer Room owner fences an older host's acquisition.
+  const g = fixture(), old = await g.host.begin('runner-old', 60000);
+  await g.room.configureNpcAuthority(0, { mode: 'server', world: old.world, epoch: old.fence + 1, owner: 'runner-newer', runUntil: 160000 });
+  await assert.rejects(acquireHostRoom(g.host, g.room, old), /fenced/);
+  assert.equal((await g.hostStore.get(HOST.key)).room, undefined, 'a fenced acquisition never binds the host');
+  // Never implicit, retained or paced.
+  const h = fixture(), t = await h.host.begin('runner', 60000);
+  for (const options of [{ publish: false }, { publish: false, acquire: true, notBefore: 100250, waitUntil: async () => {} },
+    { publish: false, acquire: true, roomState: { authority: {}, owner: 'runner', runUntil: 0, cadence: null } }, { publish: 0, acquire: true }])
+    await assert.rejects(publishHostPoses(h.host, h.room, t, options), /explicit fresh acquisition/, JSON.stringify(options));
+  assert.equal(await h.roomStore.get(ROOM_NPC.key), undefined, 'nothing acquired by a refused form');
 });
 
 // Real host/session/presentation storage and Room NPC authority; the transport

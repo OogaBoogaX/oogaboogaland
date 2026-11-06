@@ -19,8 +19,15 @@ changed here.
 
 ## Host (this repository)
 
-- Published `96d688fe9d9674ba4ad5db31bd0298686cd61a2c`; CI 874 passes.
-- v151 to v154 are a local, pending checkpoint, not published.
+- Published `619adb863114adcab7b7e5ce8063740766dc4cc3` (v151 to v154, the
+  base merge and the hammock fixture repair). CI 893 (run 42287343520): Unit,
+  replay and all 284 Host/recovery checks pass; terrain fails 10/11 at the
+  host-foliage parity check (`hub-solid-scratch.test.mjs`), which compared the
+  browser build's compact storage with the host's plain arrays.
+- Local, pending, not published: the acquisition primitive below, and that
+  check's repair. It now compares every vertex, face (read through the compact
+  API) and other field exactly, regardless of storage, with a negative control.
+  Run locally it finds no geometry or metadata difference.
 
 ### Private pile consumer (v2)
 
@@ -50,11 +57,35 @@ changed here.
   attach opener); each cold open reads once. A transient failure at a cold
   open is now a durable fault needing operator recovery, not a receiver retry.
 
+### Room acquisition without publication (local)
+
+- `acquireHostRoom` (`host-room.js`) acquires Room authority and binds the
+  host with every check `publishHostPoses` makes: occupancy and format, CAS
+  and lost-reply reconciliation, host binding, and the fenced host
+  confirmation. It sends no frame: Room keeps `frame: null`, `sequence: 0`,
+  followers stay frozen, and the durable rate gate is untouched. A retry after
+  a lost reply re-verifies and writes nothing. Only an explicit, fresh,
+  unpaced acquisition may skip the frame.
+- Nothing calls it yet. `startRun` still acquires through the first publish,
+  and the startup gate is unchanged.
+
 ### Not resolved
 
-- A changed level is refused, not reconciled. Applying a fresher level before
-  first exposure needs Room acquisition split from first publication and a
-  tick against an authenticated census. Not attempted.
+- A changed level is still refused, not reconciled. Remaining wiring, not done:
+  1. `startRun`: `acquireHostRoom` in place of `publishHostPoses({ acquire })`.
+  2. Queue the fresh v2 input (`worldInput`) and let the attached runner
+     drain it with real ticks against Room's authenticated census.
+  3. The runner refuses ticks until body events reconcile (`bodyDue`), and
+     body reconciliation would place against the stale level. It needs a
+     tick-before-bodies startup mode, or source application ahead of body
+     work, without an empty census or invented time.
+  4. The gate in `verifyStartup` and in the opener then compares the drained
+     state, not the retained one, before bodies and the first publish.
+  5. `hub-world-state` refuses a pile whose `at` is after the world clock.
+     A world that was stopped while donations arrived lags real time, so the
+     input can drain only after catch-up ticks pass `at`. Draining is bounded
+     by the maximum lag (`maxLagMs`), beyond which a run needs explicit
+     outage recovery.
 - The first configuration is immutable, so once the live pile differs from it,
   first boot is refused.
 - Strict 4 Hz: no new success. The delivery gate, total cost, memory fit and
@@ -67,8 +98,10 @@ changed here.
 | v152 focused Node checks | 29/29, build passed (before v153) |
 | v153 pile-source tests | 20/20 |
 | v154 pile-source tests | 21/21 (20 kept, plus the cold alarm/hint regression) |
+| Acquisition primitive (local) | host-room-takeover 29/29 (27 kept, 2 new); pile-source 21/21; host-world-receiver 6/6 |
+| Foliage parity repair (local) | hub-solid-scratch 3/3; terrain lane not yet rerun in CI |
 
-v154 ran only `node --check` on touched files and `hub-pile-source.test.mjs`.
+Each pass ran only `node --check` on touched files and the files listed.
 
 ## Measurements (local, not provider proof)
 
