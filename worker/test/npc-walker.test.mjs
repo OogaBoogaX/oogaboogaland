@@ -11,6 +11,46 @@ const original = JSON.parse(readFileSync(new URL("fixtures/npc-walker-original.j
 const baseline = hooks => runInNewContext(original.constants + original.source
   + "\n({ recoverWalker, walkToward, walkWorkTo });", { ...hooks });
 
+test("passive Oogas bypass peer scans and shoulder poses while retaining scenery clearance", () => {
+  const source = readFileSync(new URL('../../src/js/crew.js', import.meta.url), 'utf8');
+  const section = (from, to) => {
+    const start = source.indexOf(`    const ${from} =`), end = source.indexOf(`    const ${to} =`, start);
+    assert.ok(start >= 0 && end > start);
+    return source.slice(start, end);
+  };
+  const forbidden = () => { throw Error('passive NPC queried another body'); };
+  const crewList = new Proxy([], { get: forbidden });
+  let scenery = true, terrainChecks = 0, floorChecks = 0;
+  const api = runInNewContext(section('clearShoulder', 'takeBedWeapons')
+    + section('snapshotTraffic', 'waitingFor') + section('shoulderClear', 'actorClear')
+    + section('poseShoulder', 'resetWalkerRoute')
+    + '\n({ shoulderClear, poseShoulder, walkerClear, snapshotTraffic });', {
+    crewList, ctx: { npcFixedPaths: true }, shoulderNeighbor: forbidden, outsideClear: forbidden,
+    damp: forbidden, npcWalkable: () => { terrainChecks++; return scenery; },
+    groundAt: () => { floorChecks++; return 0; }, STEP: .5,
+  });
+  const cave = { nonInteractive: true, baseY: 0, bodyHeight: 1.8,
+    root: { position: { x: 0, y: 0, z: 0 }, children: [{ poseYaw: .4 }] },
+    camp: { panic: { active: true, threat: { get root() { forbidden(); } } } },
+    shoulder: { phase: 1, yaw: .4, targetYaw: .4, attempted: true, other: {}, obstacle: { node: {} } },
+    traffic: { moving: true, waiting: true, yielding: true, leader: {}, crossing: {} },
+    bedTravel: {}, work: {},
+  };
+  assert.equal(api.shoulderClear(cave, 0, 0), true, 'coincident bodies do not reserve a gap');
+  assert.equal(api.walkerClear(cave, .125, 0), true);
+  assert.equal(terrainChecks, 1); assert.equal(floorChecks, 1);
+  scenery = false;
+  assert.equal(api.walkerClear(cave, .125, 0), false, 'solid scenery still blocks movement');
+  api.poseShoulder(cave, .25);
+  assert.equal(cave.root.children[0].poseYaw, 0);
+  assert.equal(cave.shoulder.other, null); assert.equal(cave.shoulder.yaw, 0);
+  Object.defineProperty(cave.root, 'children', { get: forbidden });
+  api.poseShoulder(cave, .25);
+  api.snapshotTraffic(cave);
+  assert.equal(cave.traffic.moving || cave.traffic.waiting || cave.traffic.yielding, false);
+  assert.equal(cave.traffic.leader, null); assert.equal(cave.traffic.crossing, null);
+});
+
 test("shared walker packaging matches original decisions across authored work trips and traffic", async () => {
   assert.equal(typeof window, "undefined");
   assert.equal(createHash("sha256").update(original.source).digest("hex"), original.sha256);

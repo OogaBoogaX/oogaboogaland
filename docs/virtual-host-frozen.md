@@ -29,6 +29,14 @@ a blocked fixed segment waits. Existing browser/player solvers remain available.
 Gorilla local rooftop departures, cave/office/lab movements and clearance remain;
 this is not a claim that all local gorilla planning has been removed.
 
+Passive Oogas pass through one another and other character bodies. Their movement
+clearance returns before scanning peer gaps; they do not dodge a threat body,
+shift shoulders, or query another character as standing support. Any old shoulder
+pose is cleared once, and hosted fixed-path actors skip traffic-intent snapshots
+and clear stale waiting/yielding state. Terrain/floor clearance and scheduled
+screen, lab and bed routines remain. These are source changes in this inactive
+draft, not a claim about the currently deployed production behavior.
+
 NPC endpoint admission and ordinary movement guards exclude the fixed authored
 lake footprint; they do not plan routes around it or consult water levels.
 Forest beds and static rock/support geometry remain for placement. This is a

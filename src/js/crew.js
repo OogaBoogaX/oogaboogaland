@@ -3780,6 +3780,11 @@
     const snapshotTraffic = (cave) => {
       const traffic = cave.traffic, travel = cave.bedTravel, work = cave.work, p = cave.root.position;
       traffic.moving = false;
+      if (cave.nonInteractive && ctx.npcFixedPaths) {
+        traffic.waiting = traffic.yielding = false;
+        traffic.leader = traffic.crossing = null;
+        return;
+      }
       if (cave === player || !cave.root.visible || cave.grabbedBy || cave.camp.seat || cave.camp.panic.active || cave.hop > 0 || cave.hopV > 0) return;
       let target = null;
       if (cave.roofEscape.active) { traffic.tx = traffic.tz = 0; traffic.moving = true; }
@@ -3947,8 +3952,9 @@
       const t = length ? clamp(-(ox * dx + oz * dz) / length, 0, 1) : 0;
       return (ox + dx * t) ** 2 + (oz + dz * t) ** 2 >= gap * gap - 1e-8;
     };
-    // NPCs pass through players; all other pairs retain their swept body gaps.
+    // Passive NPCs have no peer/body gap, including scene-owned characters.
     const shoulderClear = (cave, x, z) => {
+      if (cave.nonInteractive) return true;
       const p = cave.root.position;
       for (let otherIndex = 0; otherIndex < crewList.length; otherIndex++) {
         const other = crewList[otherIndex];
@@ -4124,6 +4130,11 @@
     };
     const poseShoulder = (cave, dt) => {
       const s = cave.shoulder;
+      if (cave.nonInteractive) {
+        if (s.phase || s.yaw || s.targetYaw || s.attempted || s.other || s.outside || s.outsideId || s.obstacle.node)
+          clearShoulder(cave);
+        return;
+      }
       if (cave.root.quaternion || cave.camp.seat || cave.hop > 0 || cave.hopV > 0 || cave.camp.panic.active) { clearShoulder(cave); return; }
       if (!s.attempted) { s.phase = 0; s.other = s.outside = s.outsideId = null; s.obstacle.node = null; }
       s.yaw = damp(s.yaw, s.attempted ? s.targetYaw : 0, 16, dt);
@@ -4133,11 +4144,11 @@
         part.poseYaw = part === cave.parts.head ? 0 : s.yaw;
       }
     };
-    // Walkers keep swept clearance from scenery and NPCs; players are passable.
+    // Passive walkers retain scenery/floor checks without peer avoidance.
     const walkerClear = (cave, x, z) => {
       const p = cave.root.position, feet = p.y - cave.baseY;
       const panic = cave.camp.panic;
-      if (panic.active && panic.threat) {
+      if (!cave.nonInteractive && panic.active && panic.threat) {
         const threat = panic.threat.root.position;
         if (Math.hypot(x - threat.x, z - threat.z) < Math.min(1.1, Math.hypot(p.x - threat.x, p.z - threat.z)) - 1e-7) return false;
       }
@@ -6316,7 +6327,7 @@
           BL.scene.updateWorld(cave.root);
         }
       }
-      if (ctx.characterSupportAt) riding.support = ctx.characterSupportAt(cave);
+      if (!cave.nonInteractive && ctx.characterSupportAt) riding.support = ctx.characterSupportAt(cave);
       if (dt > 0 && cave.root.visible && (cave.state === "working" || cave.state === "chilling") && ctx.onBodyMove) ctx.onBodyMove(cave, x, y, z, dt);
       if (dt > 0) {
         const s = cave.shoulder, speed = PLAYER_SPEED * (cave === player ? steer.speed : 1);
@@ -6382,7 +6393,7 @@
       for (let i = 0; i < crewList.length; i++) if (!crewList[i].puppet && (!npcPaused || crewList[i] === player)) spaceWalker(crewList[i]);
       if (!npcPaused && dt > 0 && ctx.characterSupportAt) for (let i = 0; i < crewList.length; i++) {
         const cave = crewList[i];
-        cave.riding.support = ctx.characterSupportAt(cave);
+        if (!cave.nonInteractive) cave.riding.support = ctx.characterSupportAt(cave);
       }
       // The driven Ooga on another player's head rides their move, where the scene carries passengers.
       if (dt > 0 && player && ctx.carryCharacter && !player.riding.support) player.riding.outside = outsideRide(player);
