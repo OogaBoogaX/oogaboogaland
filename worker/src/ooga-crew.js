@@ -4,6 +4,7 @@
 // These exports are not a VirtualHost simulation or a complete world checkpoint.
 import "../../src/js/math.js";
 import "../../src/js/scene.js";
+import "../../src/js/compact-geometry.js";
 import "../../src/js/models.js";
 import "../../src/js/lab-wallpaper.js";
 import "../../src/js/hub-models.js";

@@ -42,6 +42,14 @@ export function createVirtualWorldClass(createHost) {
             const ticket = { world: hint.world, fence: hint.epoch, owner: hint.owner };
             const runner = await openHostWorldRunner({ host: this.host, room: this.room, ticket, format: 'mixed-3',
               waitUntil: at => new Promise(resolve => setTimeout(resolve, Math.max(0, at - Date.now()))) });
+            // Every newly opened runner, from attach, an alarm, a Room hint or a
+            // tick, after its own ownership checks and before any body dispatch,
+            // reclaim, tick or publication. A refusal closes it unreturned and is
+            // a durable fault: no timer or later wake reaches a refused world.
+            if (this.verifyStartup) {
+              try { await this.verifyStartup(await this.retained()); }
+              catch (error) { runner.close(); await this.fault('source').catch(() => {}); throw error; }
+            }
             return { runner, room: this.room, ticket,
               roomTicket: { v: 4, format: 'mixed-3', mode: 'server', world: hint.world,
                 epoch: hint.epoch, owner: hint.owner, revision: hint.revision } };
@@ -98,6 +106,9 @@ export function createVirtualWorldClass(createHost) {
           fail('new startup must explicitly name the stopped predecessor');
         if (!prior && saved) fail('existing world requires startup reconciliation');
         if (!prior && request.previousFence !== undefined) fail('initial startup has no predecessor');
+        // Before any run is bought, Room acquired, body reclaimed or frame
+        // published: a world may refuse to expose state its sources contradict.
+        await this.verifyStartup?.(saved);
         // Retain the operation identity before beginning. A lost startup reply
         // reuses the same run; it never calls begin a second time blindly.
         // A subsequent explicit start also retains the exact stopped predecessor.
@@ -130,6 +141,8 @@ export function createVirtualWorldClass(createHost) {
         if (!saved || Date.now() >= saved.runUntil) fail('no finite run to resume');
         if (await this.ctx.storage.get(FAULT) && Date.now() < saved.leaseUntil)
           fail('fault recovery waits for the prior lease to expire');
+        // The same gate before Room takeover, body reclaim or resumed ticks.
+        await this.verifyStartup?.(saved);
         let ticket;
         if (!saved.room?.pending && Date.now() < saved.leaseUntil) ticket = this.host.ticket(saved);
         else {

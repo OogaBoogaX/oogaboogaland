@@ -55,7 +55,8 @@ export function createHubWorldState(initial) {
   for (const key of ['clear', 'horizon', 'zenith', 'sky', 'ground', 'sun', 'direct']) light[key] = new Float32Array(3);
   let sampledAt = -1;
   const capture = () => {
-    const saved = { v: 2, at, elapsed, level: world.level, tint, pile: pile && { ...pile },
+    // An exact deep copy: a capture never shares the pile's nested uncertainty.
+    const saved = { v: 2, at, elapsed, level: world.level, tint, pile: pile && structuredClone(pile),
       inventory: state.inventory.map(row => [row.id, row.itemId]), assignments: Object.entries(state.assignments) };
     validate(saved); return saved;
   };

@@ -28,26 +28,40 @@ export function hubActivityUpdate(saved, stats, observedAt) {
   return { generatedAt, input: structuredClone(input) };
 }
 
+const refused = (code, message) => { throw Object.assign(Error(message), { code }); };
+// One private pile snapshot against the latest retained/pending state, observed by
+// the host at observedAt. Returns { status, input }; only 'accepted' has an input.
+// - 'unknown': a valid snapshot with no level. Never stored, never turned into 0.
+// - 'stale': a lower producer revision, or a host observation older than one
+//   already accepted or pending. The later observation stands.
+// - 'unchanged': the identical aggregate at the same revision.
+// - 'accepted': a higher revision (which may lower the level, as a reversal does),
+//   or new health/uncertainty at the same revision with the same accounting.
+// Throws, with a code, for an invalid or legacy snapshot, conflicting accounting at
+// one revision, or a checkpoint that cannot take it.
 export function hubPileUpdate(saved, value, observedAt) {
-  validateHubPile(value);
-  if (!Number.isSafeInteger(observedAt) || observedAt < value.at || observedAt - value.at > 60000)
-    throw Error('stale or future private pile source');
+  const pile = validateHubPile(value);
+  if (!Number.isSafeInteger(observedAt) || observedAt < 1) refused('invalid', 'invalid private pile observation');
+  if (pile.at !== null && pile.at > observedAt) refused('invalid', 'future private pile snapshot');
   const simulation = saved?.simulation, inputs = simulation?.inputs;
-  if (!inputs || inputs.v !== 3 || simulation.state.at > observedAt) throw Error('Hub source checkpoint unavailable');
+  if (!inputs || inputs.v !== 3 || simulation.state.at > observedAt) refused('checkpoint', 'Hub source checkpoint unavailable');
   const previous = inputs.pending?.input, state = previous?.state || simulation.state;
-  if (state.pile && value.at < state.pile.at) return null;
-  if (state.pile && value.at === state.pile.at) {
-    if (!sameCheckpointValue(value, state.pile)) throw Error('conflicting private pile snapshot');
-    return null;
+  if (observedAt < (previous ? previous.observedAt : inputs.observedAt)) return { status: 'stale', input: null };
+  const held = state.pile;
+  if (held && held.v !== 2) refused('legacy', 'legacy private pile checkpoint requires migration');
+  if (held && pile.revision < held.revision) return { status: 'stale', input: null };
+  if (held && pile.revision === held.revision) {
+    if (pile.bananas !== held.bananas || pile.at !== held.at || pile.cutover !== held.cutover)
+      refused('conflict', 'conflicting private pile accounting');
+    if (sameCheckpointValue(pile, held)) return { status: 'unchanged', input: null };
   }
-  if (state.pile && value.eatPerHour === 0 && state.pile.eatPerHour === 0
-    && value.bananas === state.pile.bananas) return null;
+  if (pile.bananas === null) return { status: 'unknown', input: null };
   const revision = (previous?.revision || inputs.revision) + 1;
   if (!Number.isSafeInteger(revision)) throw Error('Hub source revision exhausted');
   const input = { v: 1, kind: 'hub-state', observedAt, revision,
-    state: { level: hubPileLevel(value, observedAt), tint: state.tint,
-      inventory: state.inventory, assignments: state.assignments, pile: structuredClone(value) },
+    state: { level: hubPileLevel(pile, observedAt), tint: state.tint,
+      inventory: state.inventory, assignments: state.assignments, pile },
     activity: previous?.activity || simulation.activity };
   boundedJSON(input, 32 * 1024, 4096);
-  return input;
+  return { status: 'accepted', input: structuredClone(input) };
 }
