@@ -108,7 +108,7 @@
     if (typeof r.request !== "string" || !inv || typeof inv.id !== "string" || typeof inv.bolt11 !== "string" && inv.bolt11 != null || !isNumber(inv.expires)) return { error: "invalid" };
     const accounting = inv.accounting === undefined ? "legacy" : inv.accounting;
     if (accounting !== "legacy" && accounting !== "receipt-v1" || body.accounting === 1 && accounting !== "receipt-v1"
-      || accounting === "receipt-v1" && !ID.test(inv.id)) return { error: "invalid" };
+      || accounting === "receipt-v1" && (!ID.test(inv.id) || !isExpiry(inv.expires))) return { error: "invalid" };
     // An account change while the invoice was being made: its token belongs to the account that asked.
     if (gen !== generation) return { error: "closed" };
     if (accounting === "receipt-v1") viewFor(inv.id, r.request);
@@ -239,6 +239,9 @@
   const INVOICE_STATES = ["review", "paid", "confirming", "partial", "unpaid"];
   const RECONCILIATION = ["off", "current", "behind", "review"], LIGHTNING = ["available", "limit", "unavailable", "expired"];
   const isCount = (v) => Number.isSafeInteger(v) && v >= 0;
+  // A receipt-mode invoice's original expiry, in Unix seconds: a positive safe integer, never null, zero or a guess. The
+  // API answers 503 `closed` for a status or history page it can't state one for, rather than leave it out.
+  const isExpiry = (v) => Number.isSafeInteger(v) && v > 0;
   const cursorOk = (c) => c === null || typeof c === "string" && c.length > 0 && c.length <= CURSOR_MAX;
   // Keeps `key` last in insertion order, dropping the oldest past `max`.
   const keep = (map, key, value, max) => {
@@ -307,19 +310,39 @@
   const touch = (v) => { v.version++; notify(); };
   // A tracked invoice. `receipts` and `addresses` are one server page each (`receiptsFrom`/`addressesFrom` the cursor
   // that page was read with, null for the newest); `payableRevision` is the totals revision its payable address was
-  // read at, so an amount is offered only while the two agree.
+  // read at, so an amount is offered only while the two agree. `navReceipts`/`navAddresses` count each list's navigation,
+  // and `newestReceipts`/`newestAddresses` ask the next first-page read to bring that list back to its newest page.
   const viewFor = (id, request) => {
     let v = views.get(id);
     if (!v) {
       v = { id, request: null, issued: null, due: 0, received: 0, credited: 0, review: 0, left: null, state: "unpaid", revision: -1,
         expires: 0, lightning: null, bolt11: null, payableAddress: null, payableRevision: -1,
         receipts: [], receiptsFrom: null, next: null, addresses: [], addressesFrom: null, nextAddress: null, observed: false,
-        fresh: false, awaiting: false, loading: false, again: null, nav: 0, staleReads: 0, pending: null, read: false, error: "", version: 0 };
-      keep(views, id, v, VIEW_MAX);
+        fresh: false, awaiting: false, loading: false, again: null, navReceipts: 0, navAddresses: 0, newestReceipts: false, newestAddresses: false,
+        staleReads: 0, pending: null, read: false, retired: false, error: "", version: 0 };
+      views.set(id, v);
+      // Past the cap the oldest goes untracked, but a screen may still hold it: it keeps its records as history and loses,
+      // for good, every claim to being current.
+      if (views.size > VIEW_MAX) {
+        const oldest = views.keys().next().value;
+        retire(views.get(oldest));
+        views.delete(oldest);
+      }
     }
     if (request) v.request = request;
     return v;
   };
+  // A view no longer tracked (dropped past the cap, or the account changed): nothing hears for it again, so nothing it holds
+  // is current from now on, and it never names a payable address or amount. Its records stay for whoever shows them.
+  const retire = (v) => {
+    v.retired = true;
+    v.fresh = false;
+    v.awaiting = true;
+    v.payableRevision = -1;
+    v.version++;
+  };
+  // The stream is up and caught up (exported as `streamCurrent`: the address issued on a visit carries a QR before its
+  // invoice's first read only while this holds).
   const freshNow = () => state.connected && state.caughtUp;
   // Some receipt has been seen for the invoice: from now on, for the view's life, its original full-target Lightning
   // code is never offered, even if every receipt is later reversed or found invalid and the totals fall back to zero.
@@ -347,10 +370,14 @@
     v.receipts.unshift(r);
     return true;
   };
-  // The amount an amount-bearing QR may ask for at `address`: the fresh remainder, only at the payable address read at
-  // the same totals revision, of an unpaid, unexpired invoice. Otherwise 0, and the page shows the address alone.
-  const payableSats = (v, address, now = Date.now()) => v && v.fresh && address && v.payableAddress === address && v.payableRevision === v.revision
-    && v.state !== "paid" && Number.isSafeInteger(v.left) && v.left > 0 && (!v.expires || v.expires * 1000 > now) ? v.left : 0;
+  // The address the invoice is taking payment at now: its payable address, only from a tracked, fresh view read at the
+  // same totals revision, of an unpaid invoice whose known expiry is still ahead. Otherwise null: a failed, refused or
+  // behind read, a disconnect, an expiry or an untracked view leaves every address history, never "paying".
+  const payingAddress = (v, now = Date.now()) => v && !v.retired && v.fresh && v.payableAddress && v.payableRevision === v.revision
+    && v.state !== "paid" && isExpiry(v.expires) && v.expires * 1000 > now ? v.payableAddress : null;
+  // The amount an amount-bearing QR may ask for at `address`: the fresh remainder, only at the paying address. Otherwise
+  // 0, and the page shows the address alone.
+  const payableSats = (v, address, now = Date.now()) => address && payingAddress(v, now) === address && Number.isSafeInteger(v.left) && v.left > 0 ? v.left : 0;
   // A private read that failed or fell behind: nothing about the invoice counts as current, its payable address included,
   // until a later read succeeds.
   const unread = (v, error) => {
@@ -362,7 +389,7 @@
   };
   const statusOf = (r) => {
     const inv = r && r.invoice, t = totalsOf(inv);
-    if (!t || inv.accounting !== "receipt-v1" || !isNumber(inv.expires) || !LIGHTNING.includes(inv.lightning) || inv.bolt11 !== null && typeof inv.bolt11 !== "string"
+    if (!t || inv.accounting !== "receipt-v1" || !isExpiry(inv.expires) ||!LIGHTNING.includes(inv.lightning) || inv.bolt11 !== null && typeof inv.bolt11 !== "string"
       || !Array.isArray(r.addresses) || r.addresses.length > PAGE_MAX || !Array.isArray(r.receipts) || r.receipts.length > PAGE_MAX
       || r.payableAddress !== null && !(typeof r.payableAddress === "string" && ADDRESS.test(r.payableAddress))
       || !cursorOk(r.next) || !cursorOk(r.nextAddress)) return null;
@@ -381,8 +408,8 @@
   // One private status read of `v` at a time: `first` (totals and payable address, with the newest receipts and
   // addresses for whichever list shows its newest page), `receipts` (the next older receipts) or `addresses` (the next
   // older addresses), one cursor a call. Every reply carries the totals and payable address, so a read asked for while
-  // one is out waits for it (a page asked for wins over a plain refresh), and a page reply applies its list only if no
-  // navigation came since (`nav`). A stale or refused cursor sends both lists back to their newest page and reads again,
+  // one is out waits for it (a page asked for wins over a plain refresh), and a page reply applies its list only if that
+  // list was not navigated since (`navReceipts`, `navAddresses`). A stale or refused cursor sends both lists back to their newest page and reads again,
   // once. A reply older than the totals held is dropped whole, address evidence and all, and read again, at most
   // STALE_READS times in a row. Replies from before an account change, or for a view since dropped, are ignored.
   const readStatus = (v, page = "first", restarted = false) => {
@@ -395,7 +422,7 @@
       return Promise.resolve({ error: "signin" });
     }
     if (page === "receipts" && !v.next || page === "addresses" && !v.nextAddress) page = "first";
-    const gen = generation, began = epoch, nav = v.nav, cursor = page === "receipts" ? v.next : page === "addresses" ? v.nextAddress : null;
+    const gen = generation, began = epoch, navReceipts = v.navReceipts, navAddresses = v.navAddresses, cursor = page === "receipts" ? v.next : page === "addresses" ? v.nextAddress : null;
     const body = v.request ? { request: v.request } : { invoice: v.id };
     if (page === "receipts") body.cursor = cursor;
     else if (page === "addresses") body.addressCursor = cursor;
@@ -440,16 +467,20 @@
       if (s.receipts.length) observe(v);
       v.bolt11 = v.observed ? null : s.bolt11;
       v.payableAddress = s.payableAddress; v.payableRevision = s.totals.revision;
-      if (page === "receipts" ? nav === v.nav : page === "first" && v.receiptsFrom === null) {
+      if (page === "receipts" ? navReceipts === v.navReceipts : page === "first" && (v.receiptsFrom === null || v.newestReceipts)) {
         v.receipts = s.receipts; v.receiptsFrom = page === "receipts" ? cursor : null; v.next = s.next;
+        if (page === "first") v.newestReceipts = false;
       }
-      if (page === "addresses" ? nav === v.nav : page === "first" && v.addressesFrom === null) {
+      if (page === "addresses" ? navAddresses === v.navAddresses : page === "first" && (v.addressesFrom === null || v.newestAddresses)) {
         v.addresses = s.addresses; v.addressesFrom = page === "addresses" ? cursor : null; v.nextAddress = s.nextAddress;
+        if (page === "first") v.newestAddresses = false;
       }
       v.read = true;
       v.awaiting = false;
       v.fresh = freshNow();
       touch(v);
+      // A list asked back to its newest page while an older page was on its way still gets its first-page read.
+      if (!v.again && (v.newestReceipts || v.newestAddresses)) v.again = "first";
       if (v.again) {
         const next = v.again;
         v.again = null;
@@ -464,7 +495,7 @@
   // newest, and says so (`restarted`). Signed in only. No address or token is in it.
   const historyRowOf = (h) => {
     const t = totalsOf(h);
-    return t && h.accounting === "receipt-v1" && isNumber(h.createdAt) && isNumber(h.expires)
+    return t && h.accounting === "receipt-v1" && isNumber(h.createdAt) && isExpiry(h.expires)
       ? { ...t, accounting: "receipt-v1", createdAt: h.createdAt, expires: h.expires, handle: sanitize(h.handle, HANDLE_MAX) } : null;
   };
   const historyOf = (r) => {
@@ -530,6 +561,7 @@
     if (next === state.account) return;
     generation++;
     state.account = next;
+    for (const v of views.values()) retire(v);
     views.clear(); ownInvoices.clear(); ownRequestSats.clear(); waiting.clear(); remembered.clear();
     state.history = null;
     notify();
@@ -548,9 +580,10 @@
     }
     if (gap) historyPage();
   };
-  // The socket went: nothing tracked is current until the next connection has caught up.
+  // The socket went: nothing tracked is current until the next connection has caught up. Every view moves on, read or
+  // not, so a screen showing one not yet read hears the connection go too.
   const stale = () => {
-    for (const v of views.values()) if (v.fresh) { v.fresh = false; v.version++; }
+    for (const v of views.values()) { v.fresh = false; v.version++; }
     notify();
   };
   const seqOk = (data) => isCount(data.seq) && typeof data.replay === "boolean";
@@ -680,12 +713,16 @@
     } else if (data.type === "recentReceipts" && Array.isArray(data.entries)) {
       // A snapshot: never animated, now or when a duplicate of one of its receipts arrives later. A row the stream has
       // already moved past (a correction heard before the snapshot) keeps that newer revision, or stays out if it left.
+      // Only a receipt the snapshot shows already credited once is marked animated: one listed before any credit (none
+      // is today; bananapayserver lists only receipts with a first credit) can still animate its live first credit.
       const rows = [], held = state.recentReceipts || [];
       for (const raw of data.entries.slice(0, RECENT_MAX)) {
         const r = receiptOf(raw);
         if (!r) continue;
-        animated.add(r.id);
-        if (animated.size > ANIMATED) animated.delete(animated.values().next().value);
+        if (r.firstCreditedSeq !== null) {
+          animated.add(r.id);
+          if (animated.size > ANIMATED) animated.delete(animated.values().next().value);
+        }
         if ((revisions.get(r.id) || 0) > r.revision) {
           const newer = held.find((row) => row.id === r.id);
           if (newer) rows.push(newer);
@@ -840,21 +877,27 @@
   // when simulated.
   const testNetwork = () => real && state.network && state.network !== "mainnet" ? state.network : "";
   // `view(id)` is a tracked receipt-mode invoice (null for others); `refresh(id)` reads its private status again, and
-  // `more(id, page)` pages it: "receipts" or "addresses" to the next older page, "newest" back to both newest pages.
-  // `payableSats(view, address)` is what an amount-bearing QR may ask for there (0: the address alone), `reopen(id)`
+  // `more(id, page, list)` pages it: "receipts" or "addresses" to the next older page, "newest" back to that `list`'s
+  // newest page ("receipts" or "addresses"; both when none is named), the other list left where it is.
+  // `payingAddress(view)` is the address taking payment now, or null, and `payableSats(view, address)` what an
+  // amount-bearing QR may ask for there (0: the address alone), `reopen(id)`
   // tracks a signed-in donor's own invoice from its history, `historyPage("newest" | "older")` pages that history, and
   // `setAccount(id)` follows sign-in.
   const view = (id) => views.get(id) || null;
   const refresh = (id) => views.has(id) ? readStatus(views.get(id)) : Promise.resolve({ error: "unknown" });
-  const more = (id, page) => {
+  const more = (id, page, list) => {
     const v = views.get(id);
     if (!v) return Promise.resolve({ error: "unknown" });
-    v.nav++;
-    if (page !== "newest") return readStatus(v, page);
-    v.receiptsFrom = v.addressesFrom = null;
+    if (page !== "newest") {
+      if (page === "receipts") v.navReceipts++;
+      else v.navAddresses++;
+      return readStatus(v, page);
+    }
+    if (list !== "addresses") { v.navReceipts++; v.newestReceipts = true; }
+    if (list !== "receipts") { v.navAddresses++; v.newestAddresses = true; }
     return readStatus(v);
   };
   BL.donations = { config, get real() { return real; }, get testNetwork() { return testNetwork(); }, get messageMinSats() { return messageMinSats(); }, get generation() { return generation; },
     state, useOrigin, createRequest, invoice, note, onchain, waitFor, waitingOn, waited, receivedOwnInvoice, ownReceipt, subscribe, subscribeState,
-    view, refresh, more, reopen, historyPage, setAccount, payableSats, sanitize, carried, HANDLE_MAX, MESSAGE_MAX, MESSAGE_MIN_SATS, RECENT_MAX };
+    view, refresh, more, reopen, historyPage, setAccount, streamCurrent: freshNow, payingAddress, payableSats, sanitize, carried, HANDLE_MAX, MESSAGE_MAX, MESSAGE_MIN_SATS, RECENT_MAX };
 })();

@@ -195,6 +195,33 @@ invoice's authoritative view every frame and apply it only when its revision mov
   and `left` is never applied to another address or derived from `due − received`. Otherwise the
   QR holds the address alone and the screen says the remaining amount is unavailable (or that
   nothing is left to send). After completion no QR is drawn at all.
+- **Expiry:** a receipt-mode invoice's original `expires` is a positive safe integer of Unix
+  seconds at issuance, in every status reply and in every history row; v1 has no nullable expiry.
+  A missing, null, zero, negative, fractional or non-number one refuses the whole issuance, status
+  reply or history page (never a row dropped). Where bananapayserver can't state it, it answers 503
+  `closed` for that status or history page: the page keeps every record it holds and withdraws
+  freshness and the amount until a later read succeeds. An amount needs a known expiry still ahead;
+  there is no "no expiry means payable". Legacy invoices keep their own rule (any finite number).
+- **The paying address** (`payingAddress`) is named, labelled "paying" and drawn as a QR only from
+  a current view: tracked, fresh, its payable address read at the current totals revision, unpaid,
+  expiry ahead. A failed, refused (503 `closed` included) or behind read, a disconnect, an expiry or
+  an account change leaves every address as history: text to see and copy, no QR, no amount, no
+  "paying" label. The address `/donations/onchain` issued on this visit has its QR (never an amount)
+  only until the invoice's first read, only while the stream is up and caught up and the invoice's
+  issued expiry is ahead, and never after that read fails. An expiry passing with no event at all
+  (no revision, no socket message) is caught on the kiosk's next frame on any screen, the ledger's
+  included: the paying label, QR and amount go, "LEFT TO SEND" reads EXPIRED rather than a
+  remainder, and the receipts and addresses stay. A view dropped past the 32-view cap (or by
+  an account change) is retired for good: a screen still holding it keeps its records as history,
+  and no late reply, catch-up or frame makes it current again.
+- **Paging lists:** NEWEST on the receipts or the addresses brings back that list alone; the other
+  stays on its page, even with a page of it on its way.
+- **Account at issuance:** the kiosk fixes the account generation when an invoice is asked for. A
+  change while it is on its way resets the kiosk without showing it; an invoice asked for after a
+  change belongs to the new account.
+- **Snapshot animation (defensive):** `recentReceipts` marks animated only receipts it shows with a
+  `firstCreditedSeq`. bananapayserver lists only ever-credited receipts today; the contract does not
+  promise that, so one listed before any credit still animates its live first credit.
 - **The address stays:** visible and copyable after a partial payment, completion, expiry and a
   reopen, with the line "Payments to this address count for this invoice's donor once credited.
   That is not proof of who sent them." Expiry never erases the address or the receipts.
@@ -325,21 +352,304 @@ know the fences, and turning `issuance` off never reverts an invoice's mode.
 
 ## Checks
 
-The browser suite is not run for this work (standing stop). Coverage is `node test/run.mjs
-donations-unit`, which runs the existing donation client checks and the receipt checks in Node VM
-contexts and nothing else, plus `node --test worker/test/donations.test.mjs` for the Worker's
-proxy. They cover underpayment, excess, split and repeat receipts, late receipts after expiry,
-tiny receipts, mixed methods and several receipts in one transaction (distinct receipt ids),
-duplicate, out-of-order and replayed frames, `invoiceStatus` frames, reconnect and gap recovery,
-reload recovery for a signed-in donor, both status cursors and their 409/400 restarts, pending
-and unpriced pricing, quarantine, reversal and reconfirmation, account switches, the
-`payableAddress` QR rule, and the absence of clock decay. Visual layout of the new kiosk lines and panel rows is left to the
-maintainer's play-test.
+Coverage is `node test/run.mjs donations-unit`, which runs the existing donation client checks, the
+receipt checks and the shared-vector checks in Node VM contexts and nothing else, plus `node --test
+worker/test/donations.test.mjs` for the Worker's proxy. They cover underpayment, excess, split and
+repeat receipts, late receipts after expiry, tiny receipts, mixed methods and several receipts in one
+transaction (distinct receipt ids), duplicate, out-of-order and replayed frames, `invoiceStatus`
+frames, reconnect and gap recovery, reload recovery for a signed-in donor, both status cursors and
+their 409/400 restarts, pending and unpriced pricing, quarantine, reversal and reconfirmation, account
+switches, the `payableAddress` QR rule, and the absence of clock decay.
 
-**Integrated contract validation is pending.** The page and the backend agreed on shared vectors
-(`tests/fixtures/receipt-accounting-v1.json` and `tests/receipt-contract.test.mjs` in
-bananapayserver, an emitter-equality fixture pinned at a committed SHA). That artifact does not
-exist yet, so no check here validates against what the backend actually emits: the checks above
-use synthetic frames and replies written from the contract text. When the fixture lands, a check
-reading it at its pinned SHA joins `donations-unit`; until then that check is missing, not passed
-and not skipped. The page has not run against a real receipt-accounting endpoint.
+**Shared vectors.** bananapayserver's fixture is copied byte for byte into
+[`docs/vectors/receipt-accounting-v1.json`](vectors/receipt-accounting-v1.json) from bananapayserver
+`4deab73fc44665a50b81d5975ba1e1d3e9095cfc` (signed), `tests/fixtures/receipt-accounting-v1.json`
+(81803 bytes, SHA-256 `cbeb711339e7feb84c6526e43c5f9771e6d27be336ad8b9d9c694ec2b455baea`; provenance in
+[`docs/vectors/README.md`](vectors/README.md)). `donations-unit` refuses any other size or hash, then
+feeds every reply and socket message in it unchanged to the page's real `donations.js` and the HUD's
+pile text, and checks each socket request the page makes against the producer's recorded one where
+the fixture records it; the check's own setup is only which invoice and account are asked for and the
+page's clock.
+
+Its core part (unchanged from the earlier `ea14695` fixture):
+
+- the emitted receipt revisions in feed order (price pending, price frozen, credited, review,
+  reversed) and the invoiceStatus totals, applied to a tracked invoice by revision; first credit,
+  the frozen price and the message kept through review and reversal; a duplicate ignored;
+- every feed frame as emitted, `replay: true`, so nothing animates;
+- the raw replay results (`replay.complete`, `replay.gap`, `replay.firstConnect`), which carry no
+  socket `type`: fed to the socket, none is taken for a connect marker;
+- the raw private-status cores, which lack `accounting`, `expires`, `lightning` and `bolt11`:
+  returned as a status reply, each is refused and leaves the invoice unread;
+- the emitted piles (pending, anchored, anchored without a count) in order, never back to an older
+  revision, reading pending, a whole count and unavailable.
+
+Its endpoints part (`read-endpoints`), what bananapayserver's real front door and socket send:
+
+- **First connect** (status, `recentReceipts`, marker `after: null`): the capability, network and
+  limits parse; the marker sets the cursor (6) and catches up; nothing animates; the snapshot's three
+  credited rows are listed with their own bananas and message.
+- **History:** a page, its next page by its own cursor, then 401 `signin` and 503 `closed`, each
+  keeping the rows shown and saying why, then the page again.
+- **Status** for a reopened invoice: the first page; the receipts page by `cursor` and the addresses
+  page by `addressCursor`, each moving only its own list (the other reply's list ignored); NEWEST on the
+  receipts alone; 400 `cursor` and 409 `resync` restarting at the newest; 404 `unknown` and 503
+  `closed` keeping every record held but nothing current. No status reply here names a payable
+  address, so none is ever offered.
+- **Live first credit** (`replay: false`): the detection animates nothing, the first credit animates
+  exactly once with its own bananas and received time, a duplicate never does, the status replies
+  the moved totals prompt (revision 12, older than the live 15) never take the totals back and leave
+  the invoice not current, the pile message that follows (no count yet, `cutover: "pending"`)
+  reads pending rather than zero and animates nothing, a reconnect resumes at `receipts=8`, and the
+  same frame after it never animates again.
+- **Replay from zero** on a page holding nothing: snapshot, six replayed frames and the marker apply
+  in order with nothing animated and no row taken back to an older revision.
+- **Invoice** 503 `closed` is returned as `closed`, once, never retried as legacy. (The fixture's
+  issuance is off, so the receipt-mode request itself, with `accounting: 1`, is not exercised by it.)
+- An account change drops the donor's private reads, a status reply on its way for the old account
+  included.
+
+Its projection part (`projection-publication`), each publication's messages in order, its tally
+compared with `d1`, the lifetime figure D1 holds afterwards:
+
+- **First credit:** the detection animates nothing; the live first credit animates once with its own
+  bananas and received time; the board and tally that follow replace the page's (tally equal to `d1`).
+- **Stopped after a durable batch** (its refresh never went out): the second receipt's live first
+  credit animates once, and the tally and board stay as the last publication left them, behind
+  `d1`; the page adds nothing of its own.
+- **Crash recovery** (the restart's refresh) and **the same refresh repeated:** tally and board equal
+  to `d1` each time; nothing animates, nothing is added twice.
+- **Reversal** (review, then reversed) and **reconfirmation** at the frozen price: no animation (the
+  reconfirmed credit's seq is not its first credit's); tally and board back down to `d1`, then up to
+  it again.
+
+Its payable part (`read-endpoints-payable`). Context set up by the check, not producer output: the
+page's clock from the fixture's own times (created 1790856000000 ms, expiring 1790856900 s) and the
+signed-in account. Every socket request the page makes is checked against the producer's recorded one.
+
+- **First connect:** the page asks `/donations/socket`, exactly the producer's `initialConnect`
+  request, and its messages (status, a pending pile, an empty board and tally, empty lists, the marker
+  with `through: null`) catch the page up with no cursor and nothing animated.
+- **Live first credit** for the payable invoice: animates once; its detection and a duplicate don't.
+- **Payable:** the donor signs in after the credit, and the reopened invoice's status (asked for by
+  invoice id alone) names its bound address as paying with 6,000 sats to ask for there and nothing at
+  the invoice's other address; the history row shows 6,000 left. With the clock past expiry the same
+  reply offers no address or amount.
+- **Withdrawn live:** the freshness frame alone takes the address and amount away, and the history
+  row's remainder, before any read; the status and history replies after it say the same at the
+  newer revision, with the addresses and receipt kept.
+- **Current reconnect:** the page reconnects from its own cursor, `/donations/socket?receipts=3`,
+  exactly the request the producer answered with `socket.currentReconnect`: caught up with no gap, the
+  invoice read again.
+- **The early gap**, on a separate page from the start of that world: `earlyConnect` for exactly its
+  request, the live detection (seq 1), a drop; past the invoice's expiry the donor signs in and reopens
+  the invoice (`status.atEarlyGap`, `history.atEarlyGap`); the reconnect asks
+  `/donations/socket?receipts=1`, exactly the producer's `earlyGap` request, and its marker (through 4,
+  incomplete) resyncs once, the invoice and history read again, nothing animated (the first credit,
+  seq 2, happened while the page was away); the next reconnect asks `/donations/socket?receipts=4`,
+  exactly `earlyCurrent`'s request, and catches up with no further resync.
+- **Expired:** Lightning reads `expired`, nothing is payable, the addresses and receipt stay, and the
+  history keeps the invoice.
+- An account change then retires the view.
+
+The older `socket.gapMarker`, which the producer sent to a page asking from cursor 0, is no longer
+fed: no message the producer sends leaves this page holding cursor 0 (its first marker is `through:
+null`), so that request is one this client never makes, and the early gap above is the one it does.
+
+Its pile part (`anchored-pile`), each step's messages in order:
+
+- The pile follows the API's figure, revision and health at every step: 10 on connect, 11 for a credit
+  read behind and then current (a new revision at the same level), 11 in review with its 1,000 sats
+  uncertain, 10 for the reversal, 11 for the reconfirmation, unchanged while a second credit is bridged
+  before a stop, 13.5 from the next start's recovery; the HUD shows each whole count
+  (`10|11|11|11|10|11|11|13|13`).
+- The reconnect's equal revision confirms the pile held rather than handing it on again; an older
+  revision is refused; nothing animates and the page adds, decays or counts nothing of its own.
+
+No incompatibility was found: the client parsed every reply and message as sent.
+
+**Still not proven by any vector:** an issuance reply with `accounting: "receipt-v1"` and an
+available Lightning code (issuance stays off in production and no BOLT11 is verified, so the corpus
+has neither, and nothing here closes that gap); how an operator applies the pile's anchor (the
+producer's test applies it directly); and anything about provider ingestion, real D1, Durable Object or
+socket runtime behaviour, or reconciliation, which the fixture says it does not prove. The producer's
+per-page enqueue positions and bounded retry of failed sends need no page change (no new
+acknowledgement), and nothing here tests them.
+
+**Pile health, and what the pile vectors can and cannot show.** The panel's pile note warns "behind"
+or "review" when either the latest pile message or the latest status frame's
+`accounting.reconciliation` says so, taking the worse of the two. That is intended: the producer
+publishes both. In the signed producer
+([`worker/object.mjs` at 4deab73](https://github.com/OogaBoogaX/bananapayserver/blob/4deab73fc44665a50b81d5975ba1e1d3e9095cfc/worker/object.mjs)),
+`projectReceipts()` recomputes the accounting capability and broadcasts a changed status message
+before it publishes the pile, and `pushReceiptFrames` likewise broadcasts a changed capability before
+the pile, so on the real wire a page whose pile turns current also hears the status that says so. The
+`pile` vectors are filtered to pile messages only, so they cannot show that pairing. The pile-only probe
+run proves the pile's own count and health handling (behind and review warn, review naming its
+uncertain sats, current clears); the run that first fed the payable world's first-connect status
+(`behind`) and then the pile vectors proves an old global `behind` stays a warning when no newer status
+arrives. Neither is the complete same-world wire sequence, and neither runs the producer's runtime or a
+staging deployment.
+
+**Visual check (synthetic, outside the suite).** A probe outside the repository served the source
+tree locally and replaced `fetch` for `/donations/*` and the donation `WebSocket` before the page
+loaded, so the real client, popup, kiosk and HUD ran against the fixture's replies and messages. It
+ran at 1440x900 and at 390x844 with touch, and logged every request and which reply answered it. It
+is a simulation of the endpoint, not a real provider: nothing was paid or issued by bananapayserver.
+The page clock was set from the fixture's own timestamps (invoices created at 1790856000000 ms,
+expiring at 1790856900 s): 1790856300000 for current states, 1790856960000 for expiry.
+
+From the fixture's bytes alone:
+
+- Bananas panel: "PILE NOW 12" (the anchored pile) beside the lifetime totals (BANANAS · CURRENT
+  VALUE, DONATIONS, SATS DONATED, shown as "—" since the fixture holds no tally), with the
+  reconciliation and offline notes; history rows from `history.page`.
+- Shared popup, reopened from the history row's own button: the ledger from `status.byToken` with
+  its address labelled "ADDRESS" (no payable address, so no QR) and "< ADDRESS" disabled.
+- Paging by real taps on the screen: receipts OLDER sent `cursor` and took `status.receiptPage`; the
+  first addresses OLDER stepped through the page held, the second sent `addressCursor` and took
+  `status.addressPage` while the receipts stayed on their page; receipts NEWEST and addresses NEWEST
+  each brought back only their own list.
+- `status.metadataClosed` (503): records kept, "LEFT TO SEND NOT CURRENT", CHECK AGAIN.
+- The Factory's own kiosk (opened through the scene's own way to it, since the page drove no Ooga):
+  the fixture's first status says `open: false`, so the kiosk shows CLOSED and refuses Enter; no
+  invoice is asked for.
+
+With synthetic replies (named SYNTHETIC in the probe's log and files), because the signed corpus has
+no issuance reply and no status naming a payable address:
+
+- `status.byToken` with `payableAddress` set to its own first listed address: PAYING ADDRESS, then
+  the amount QR (7,000 sats) on "< ADDRESS".
+- Passive expiry on the ledger screen: the clock moved past expiry with no request and no socket
+  message; the next frame withdrew PAYING ADDRESS, disabled "< ADDRESS", and showed LEFT TO SEND as
+  EXPIRED, rows kept.
+- The socket closed (stale): NOT CURRENT, "CHECKING FOR CURRENT FIGURES...", no paying label. Then
+  reconnected: the page reconnected with `receipts=6` and was sent the fixture's first-connect
+  messages (which the producer sends to a cursor-less connect, so the request context differs); its
+  catch-up read made the view current and paying again.
+- The Factory kiosk with a status frame whose `open` and `issuance` were switched on, a synthetic
+  receipt-mode invoice and on-chain reply: the invoice request carried `accounting: 1`; the chain
+  screen showed the amount QR at the paying address; past expiry it moved to INVOICE EXPIRED with no
+  QR or amount.
+
+No console errors or warnings in either size. That pass found the Factory booth's touch sticks lying
+over the kiosk's BACK and RECEIPTS buttons on a phone. They now stand aside while the booth has the
+screen (`booth-held` on the body, set and cleared with the booth's other held controls in
+`boothHud`, so a close, the walk away, `endBooth` and the scene's `leave` all bring them back, and a
+stick held as it opens is let go); this is not yet confirmed in a browser. Not looked at: the hub's donation arrival and the cooker's show for a receipt
+credit in a browser.
+
+**Second visual pass (5b05e90 vectors, after one build).** The probe (outside the repository) ran at
+1440x900 and at 390x844 with touch against the served source, with every `/donations/*` reply and socket
+message taken unmodified from the pinned fixture. SYNTHETIC-CONTEXT, not producer output: the page clock
+from the fixture's own times (1790856300000 ms current, 1790856960000 ms past expiry), account 9, the
+capability frame (the endpoints' first status frame), the payable stream marked caught up before its
+first read, the booth opened through the scene's own `toKiosk` entry, and the payable invoice shown in
+the booth through the flow's own `reopen` (the booth has no history list). No issuance reply exists or
+was made, and nothing here is a real provider. Results, at both sizes:
+
+- Projection on the Bananas panel: after each publication the tally and board equal `d1`; after the
+  stopped batch they stay at the previous publication until the restart's refresh; the reversal brings
+  them down and the reconfirmation back up.
+- Payable: the history row (6,000 left), PAYING ADDRESS, and the 6,000-sat QR at the bound address;
+  passive expiry on the ledger with no request sent (LEFT TO SEND reads EXPIRED, "< ADDRESS"
+  disabled); the live freshness withdrawal and the withdrawn replies (no paying address, UNAVAILABLE);
+  `socket.expired` with the expired replies (Lightning `expired`), the history keeping the invoice.
+- The Factory booth with the current payable invoice: the sticks hidden while it is open (move stick
+  reads 0,0), and on the in-world screen, by real touch on the phone and clicks on the desktop, "<
+  ADDRESS" to the QR, RECEIPTS back to the ledger, "< ADDRESS" again and BACK, each answered as expected
+  with the sticks still hidden; the sticks back after DONE, after Escape from the attract screen, after a
+  tap beside the screen (walking away) and after leaving the scene. The phone's walk-away was checked
+  in a second small run, because the first run's "beside" point fell outside a 390 px viewport (the
+  booth correctly stayed open).
+- No console errors or warnings. Gap: the phone's "history retained" screenshot shows the drawer
+  folded; that state is evidenced by the recorded history (`PayableInv1` kept at revision 9), not the
+  picture.
+
+**Scoped browser validation.** `ONLY="signed-out donation" node test/run.mjs hub lab factory` (after
+one `npm run build`): 470/470, exit 0, with the hub, lab and factory receipt-delivery extension passing
+(9 bananas shown once for the two first credits, nothing more, the pile at 26 and the ledger at 0, the
+tally ending as D1's).
+
+These browser results were taken with the `5b05e90` fixture. Moving to `4deab73` changed no frontend
+source, and every vector they used (`projection`, the payable replies and frames) is the same value in
+`4deab73`, so they were not repeated.
+
+**Pile probe (4deab73 vectors, served source, no build).** A small probe outside the repository fed the
+`pile` section's messages, unmodified, to the hub through a stubbed donation socket and read the Bananas
+panel and the scene after each step, advancing 90 frames each time. The figure and the scene's level
+followed every revision (10, 11, 11, 11, 10, 11, 11, 13, 13: 13.5 drawn as 13), nothing moved between
+messages and nothing landed. With no status frame, the note followed the pile's own health; with the
+payable world's first-connect status first (`behind`, a different producer world's, deliberately left
+stale), it stayed "behind" (see "Pile health" above). Evidence: `/tmp/obl-visual/final2/pile-probe.json`, `pile-probe-pile-only.json` and four
+screenshots.
+
+**The broad runs' stopped checks.** An earlier `npm test -- factory hub` gave 1005/1037 (many from a hung
+and lost Chrome); the reruns gave Factory 538/539 and hub 950/973, and the runner stopped 22 checks that
+failed twice (`untracked/test-ledger.json` keeps their evidence; none was fixed, rerun in place, marked
+open or weakened). The maintainer has directed that unrelated scene failures not be the sole review
+blocker, so the broad suites were not run again.
+
+**Before-and-after comparison of the crew-related ones.** By the user's explicit exception to the
+STOP rule ("you can resume tests under the repo rules", for one bounded comparison of the checks that
+touch the changed crew, pile and shared-scene paths), six stopped groups were compared on the pre-PR
+commit `f5b38586748f9d1f0659aeeb5127758cc830346b` and this branch: `hub distant effects` (its `hub
+distant animations` record), `hub working arrival`, `chilling Ooga placement`, `hub round trip`, `lab
+work rotation` and `gorilla work apron descent`. The worktree's own STOP ledger was not touched.
+
+*First round, diagnostic only* (`/tmp/obl-compare`): one unfrozen run per side through `node
+test/run.mjs hub` with those step names in `ONLY`. Its clock was the real `Date.now()` (the query's
+`hour=12&day=80` sets the scene's clock, not the one `contributors` ages activity by), its randomness
+unseeded, and it ran the global unit tier needlessly. Both sides failed the same five groups; it shows
+those five fail before the PR, nothing more.
+
+*Controlled round* (`/tmp/obl-controlled`, `manifest.json` there):
+
+- Two fresh copies: `git archive` of the pre-PR commit, and this branch's working tree. The same three
+  instrumentation patches to the copies' runner, each asserted to apply exactly once on both: the
+  global unit tier off; one control script added to every session before its own init script and
+  navigation; a guard that throws if any step outside the six, or any non-scene task, would run.
+- The control script (SHA-256 `a3ce74d4…d9b7`), installed before any page script: `Date` from a fixed
+  epoch (2026-11-06T17:00:00Z) advanced by elapsed `performance.now()`; `Math.random`,
+  `crypto.getRandomValues` and `crypto.randomUUID` from one seeded mulberry32 stream (seed `0x5eed0b1`).
+- Identical on both sides, by hash: the six selected steps' source, the inputs the pages read
+  (`jumbotron-data.js`, `characters.js`, `contributors.js`, `math.js`, `scripts/characters.mjs`), each
+  scene's query, `LANES=1`. The 11 hunks that differ between the two patched runners are all donation
+  code.
+- One run per side: 21/26 checks on both (exit 1 on both), the same pass/fail set, and the five
+  failures' recorded details byte-identical on both sides. The round trip passed in all four of its
+  sessions on both.
+
+| Group | Pre-PR (controlled) | This branch (controlled) | Reading |
+|---|---|---|---|
+| hub distant animations | fail | fail, identical detail | same signature before the PR |
+| working arrival | fail | fail, identical detail | same signature before the PR |
+| chilling arrival | fail | fail, identical detail | same signature before the PR |
+| lab work | fail | fail, identical detail | same signature before the PR |
+| gorilla work apron descent | fail | fail, identical detail | same signature before the PR |
+| hub round trip | pass ×4 | pass ×4 | its broad-run failure not reproduced on either side |
+
+What this shows: under the same clock, seed, assertions and thresholds, the branch behaves identically
+to the pre-PR commit on these six groups; the five failures carry the same signature before the PR.
+What it does not: the random stream starts identically but how many draws happen before each step
+depends on how many real animation frames run, so the two sides' streams are not guaranteed aligned
+(their identical details suggest they were); real-frame timing was not controlled. The round trip's
+failure in the broad run stays unresolved and unattributed. The intended change (Oogas no longer eat
+from the pile) shows no difference in these checks, none of which measures the pile's level; the
+probe's simulated pile (50 bananas) held at 50 over 30 s with an Ooga eating in every frame (before
+this PR, eating took `EAT_RATE` from it by the source; that side was not measured). The other 16 stopped
+checks (the Cloud Hopper camera and framing, hammock, jetpack, matrix, player stacking, guide,
+canvas2d tour and `factory lifecycle`) exercise code this work doesn't touch and were not compared;
+whether any of them is introduced remains unknown, and by the user's direction they are disclosed
+rather than made the sole blocker.
+
+**Coverage of the published PR's own changes.** The crew no longer eats from the pile, `pile.js`'s
+`eatFromPile` and `setLevel` leave a real pile alone, `game.recordDonation` keeps no ledger in real
+mode, and the director holds the API's pile. In real mode the existing signed-out donation check covers
+these through the running app: the pile stays the API's (no frame moves it), a duplicate counts once,
+and the page's ledger stays put; the receipt extension above adds the same for receipt frames. Not
+covered by a suite check: the crew not eating from a simulated pile. The real-mode check can't show it
+(the director rewrites the level every frame), the only suite check is the source-text `noDecay` one,
+and a hub check that waits on an eating Ooga would lean on arrival behaviour that fails before this PR
+too. The probe recorded it instead: the simulated pile held at 50 over 30 s with an eating Ooga in
+every frame.

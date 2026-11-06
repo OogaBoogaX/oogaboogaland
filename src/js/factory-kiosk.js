@@ -303,7 +303,7 @@
     let viewVersion = -1, codeKey = "";
     const flow = { canvas, W, H, open: false, state: "idle", digits: "", sats: 0, bananas: 0, invoice: null, reply: null, error: "", left: 0, settle: 0, hold: 0, who: "", chain: null, chainNote: null, got: 0, due: 0, rest: 0, savedDetails: null, detailsDirty: false, detailsSaving: false, detailsError: "", limits: null,
       view: null, reopened: false, generation: 0, ledgerQr: null, ledgerAddress: "", ledgerAmount: 0, ledgerBananas: null, receiptOffset: 0,
-      addressIndex: -1, ledgerHistorical: false };
+      addressIndex: -1, ledgerHistorical: false, ledgerCurrent: false, ledgerPaying: false, ledgerUntil: 0 };
     const bananaAmount = () => real ? BANANAS.format(flow.bananas) : sats(flow.bananas);
     flow.rate = flow.frozenPricing = null;
     const estimate = () => {
@@ -474,10 +474,19 @@
         if (flow.state === "invoice") set("confirming");
       }
       // A listed address the provider no longer takes payment at (a payable one is known and this isn't it) shows as
-      // text alone: never a QR, never an amount. Only the payable address with a fresh `left` carries an amount.
+      // text alone: never a QR, never an amount. A QR is drawn only for the address taking payment now (`paying`, from a
+      // current view), or for the one just issued on this visit before the invoice's first read, and that only while the
+      // stream is up and caught up (`live`) and the invoice's issued expiry is ahead; once a read has failed, been refused
+      // or fallen behind, the socket has gone, the invoice has expired or the view is no longer tracked, every address is
+      // history: text to see and copy, never "paying". Only the paying address with a fresh `left` carries an amount; the
+      // issued address never does (no issuance amount is ever reused).
+      const now = Date.now(), paying = hooks.paying ? hooks.paying(v, now) : null;
       const address = selectedAddress(), historical = !!address && !!v.payableAddress && address !== v.payableAddress;
-      const amount = address && !historical && hooks.payable ? hooks.payable(v, address, Date.now()) : 0;
-      const key = address && !historical && v.state !== "paid" ? `${address}|${amount}` : "";
+      const issued = !v.read && !v.error && !v.retired && !!flow.chain && address === flow.chain.address
+        && !!hooks.live && hooks.live() && Number.isSafeInteger(flow.invoice.expires) && flow.invoice.expires * 1000 > now;
+      const current = !!address && !historical && (address === paying || issued);
+      const amount = current && hooks.payable ? hooks.payable(v, address, now) : 0;
+      const key = current && v.state !== "paid" ? `${address}|${amount}` : "";
       if (key !== codeKey) {
         codeKey = key;
         flow.ledgerQr = key ? BL.qr.encode(amount ? `bitcoin:${address}?amount=${btc(amount)}` : `bitcoin:${address}`) : null;
@@ -485,6 +494,12 @@
       flow.ledgerAddress = address;
       flow.ledgerAmount = amount;
       flow.ledgerHistorical = historical;
+      flow.ledgerCurrent = current;
+      // When what this shows next stops being so with no event: the invoice's expiry (the issued one before its first
+      // read), or 0 once it has passed.
+      const until = (v.read ? v.expires : flow.invoice.expires) * 1000;
+      flow.ledgerUntil = until > now ? until : 0;
+      flow.ledgerPaying = !!paying && address === paying;
       flow.ledgerBananas = ledgerBananas(v);
       if (v.state === "paid" && flow.state !== "paid" && !flow.reopened) {
         const credited = v.receipts.find((r) => r.credit > 0);
@@ -517,7 +532,7 @@
     const newestReceipts = () => {
       const v = flow.view;
       flow.receiptOffset = 0;
-      if (v && v.receiptsFrom !== null && hooks.more) hooks.more(v.id, "newest");
+      if (v && v.receiptsFrom !== null && hooks.more) hooks.more(v.id, "newest", "receipts");
       dirty = true;
     };
     // The invoice's addresses, newest issued first: the next older one on the page held, then the server's next page;
@@ -534,7 +549,7 @@
     const newestAddress = () => {
       const v = flow.view;
       flow.addressIndex = -1;
-      if (v && v.addressesFrom !== null && hooks.more) hooks.more(v.id, "newest");
+      if (v && v.addressesFrom !== null && hooks.more) hooks.more(v.id, "newest", "addresses");
       syncLedger();
     };
     const invoice = () => {
@@ -553,18 +568,25 @@
     };
     // Real mode: the API's invoice for this amount, then `next`. A reply that finds the visitor gone on is dropped.
     const ask = (next) => {
-      const t = ++ticket, value = hooks.details ? taken() : { handle: "", message: "" };
+      // The account the invoice is made under: one that changes before the reply makes the reply another account's, so
+      // the flow resets rather than show it, and an invoice it accepts belongs to this generation from then on.
+      const t = ++ticket, value = hooks.details ? taken() : { handle: "", message: "" }, gen = hooks.generation ? hooks.generation() : 0;
       saving = null; saveQueued = false;
       flow.detailsSaving = false;
       flow.error = "";
       set("quoting");
       hooks.invoice(flow.sats, value).then((r) => {
         if (t !== ticket || flow.state !== "quoting") return;
+        if (hooks.generation && hooks.generation() !== gen) {
+          flow.stop();
+          return hooks.close();
+        }
         if (r.error) {
           flow.error = r.error;
           return set(r.error === "amount" ? "amount" : "problem");
         }
         letGo();
+        flow.generation = gen;
         flow.reply = r;
         flow.frozenPricing = null;
         flow.savedDetails = value;
@@ -679,7 +701,7 @@
         return set("quote");
       }
       if (receiptMode() && (s === "chain" || s === "confirming" || s === "paid" || s === "expired")) {
-        const v = flow.view, payable = !!flow.ledgerAddress && !flow.ledgerHistorical && !!v && v.state !== "paid" && flow.invoice.expires * 1000 > Date.now();
+        const v = flow.view, payable = flow.ledgerCurrent && !!v && v.state !== "paid" && flow.invoice.expires * 1000 > Date.now();
         if (a === "copy") return flow.ledgerAddress ? hooks.copy(flow.ledgerAddress, "Address") : undefined;
         if (a === "older") return olderReceipts();
         if (a === "newest") return newestReceipts();
@@ -750,7 +772,7 @@
       saving = null; saveQueued = flow.detailsDirty = flow.detailsSaving = false; flow.detailsError = "";
       flow.got = flow.due = flow.rest = 0;
       flow.view = null; flow.reopened = false; flow.ledgerQr = null; flow.ledgerAddress = ""; flow.ledgerAmount = 0; flow.ledgerBananas = null; flow.receiptOffset = 0;
-      flow.addressIndex = -1; flow.ledgerHistorical = false;
+      flow.addressIndex = -1; flow.ledgerHistorical = flow.ledgerCurrent = flow.ledgerPaying = false; flow.ledgerUntil = 0;
       viewVersion = -1; codeKey = "";
       flow.generation = hooks.generation ? hooks.generation() : 0;
       if (hooks.startDetails) hooks.startDetails();
@@ -771,7 +793,7 @@
       // Nothing of the donation stays behind once the flow stops (a sign-out or another account stops it too): its
       // address, amounts, bananas, donor, details and what its screen last showed.
       flow.view = null; flow.reopened = false; flow.ledgerQr = null; flow.ledgerAddress = ""; flow.ledgerAmount = 0; flow.ledgerBananas = null;
-      flow.ledgerHistorical = false; flow.addressIndex = -1; flow.receiptOffset = 0;
+      flow.ledgerHistorical = flow.ledgerCurrent = flow.ledgerPaying = false; flow.ledgerUntil = 0; flow.addressIndex = -1; flow.receiptOffset = 0;
       flow.digits = flow.error = flow.who = flow.detailsError = ""; flow.sats = flow.bananas = flow.hold = 0;
       flow.savedDetails = flow.rate = flow.frozenPricing = null; flow.detailsDirty = false;
       viewVersion = -1; codeKey = "";
@@ -820,6 +842,9 @@
         return hooks.close();
       }
       if (receiptMode() && flow.view && flow.view.version !== viewVersion) { viewVersion = flow.view.version; syncLedger(); }
+      // An expiry can pass with no revision or socket event, on any screen (the ledger's too, whose clock is not run
+      // below): the ledger is synced once more at it, which withdraws a current address, its amount and the remainder.
+      else if (receiptMode() && flow.view && flow.ledgerUntil && Date.now() >= flow.ledgerUntil) syncLedger();
       const s = flow.state;
       estimate();
       if (flow.limits !== limits()) { flow.limits = limits(); dirty = true; }
@@ -933,12 +958,13 @@
       g.strokeRect(359.5, y + 10.5, 9, 11);
     };
     // The invoice's authoritative totals, a label and a value a row. What is left to send is shown only while the view
-    // is current (read since the socket last caught up, no failed read); otherwise it says it is not current, never a
-    // remainder held over from before.
+    // is current (read since the socket last caught up, no failed read) and the unpaid invoice has not expired;
+    // otherwise it says it has expired or is not current, never a remainder held over from before.
     const totalsRows = (x, y, w, v) => {
-      const leftShown = v.fresh && !v.error && v.left !== null;
+      const ended = v.state !== "paid" && !(v.expires * 1000 > Date.now());
+      const leftShown = v.fresh && !v.error && v.left !== null && !ended;
       const rows = [["DUE", sats(v.due)], ["RECEIVED", sats(v.received)], ["CREDITED", sats(v.credited)], ["IN REVIEW", sats(v.review)],
-        ["LEFT TO SEND", leftShown ? sats(v.left) : v.fresh && !v.error ? "UNAVAILABLE" : "NOT CURRENT"]];
+        ["LEFT TO SEND", leftShown ? sats(v.left) : ended ? "EXPIRED" : v.fresh && !v.error ? "UNAVAILABLE" : "NOT CURRENT"]];
       for (let i = 0; i < rows.length; i++) {
         write(g, rows[i][0], x, y + i * 13, 1, INK.dim);
         writeFit(g, rows[i][1], x + w, y + i * 13, 1, i === 3 && v.review || i === 4 && !leftShown ? INK.amber : INK.white, w - 80, "right");
@@ -955,6 +981,9 @@
             write(g, "AN EARLIER ADDRESS", 120, 120, 1, INK.amber, "center");
             write(g, "NOT THE ONE TAKING", 120, 134, 1, INK.dim, "center");
             write(g, "PAYMENT NOW", 120, 148, 1, INK.dim, "center");
+          } else if (flow.ledgerAddress && v && v.state !== "paid") {
+            write(g, "NOT CONFIRMED AS", 120, 127, 1, INK.amber, "center");
+            write(g, "TAKING PAYMENT NOW", 120, 141, 1, INK.dim, "center");
           }
         }
         // Nothing left is said only from a current view; a stale one says so instead of repeating an old remainder.
@@ -1005,13 +1034,12 @@
         if (!rows.length) write(g, read ? "NO PAYMENTS YET" : "", 42, 164, 1, INK.dim);
         // Which of the invoice's addresses this is: the payable one, or an earlier one shown as text alone.
         const list = v ? v.addresses : [], picked = list.findIndex((a) => a.address === flow.ledgerAddress);
-        write(g, flow.ledgerHistorical ? "EARLIER ADDRESS" : v && v.payableAddress && flow.ledgerAddress === v.payableAddress
-          ? "PAYING ADDRESS" : "ADDRESS", 30, 238, 1, flow.ledgerHistorical ? INK.amber : INK.dim);
+        write(g, flow.ledgerHistorical ? "EARLIER ADDRESS" : flow.ledgerPaying ? "PAYING ADDRESS" : "ADDRESS", 30, 238, 1, flow.ledgerHistorical ? INK.amber : INK.dim);
         if (picked >= 0 && picked + 1 < list.length || v && v.nextAddress) button(302, 233, 64, 16, "OLDER", "", "addr-older", 1);
         if (flow.addressIndex >= 0 || v && v.addressesFrom !== null) button(234, 233, 64, 16, "NEWEST", "", "addr-newest", 1);
         addressRow(254);
         notes(292);
-        const payable = !!flow.ledgerAddress && !flow.ledgerHistorical && read && v.state !== "paid" && flow.invoice.expires * 1000 > Date.now();
+        const payable = flow.ledgerCurrent && read && v.state !== "paid" && flow.invoice.expires * 1000 > Date.now();
         button(30, 326, 120, 52, "< ADDRESS", payable ? "" : "off", "back");
         button(160, 326, 210, 52, "DONE", "primary", "done");
         closeButton();

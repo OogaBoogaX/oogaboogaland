@@ -772,7 +772,11 @@
   // has the view, and come back as they were.
   const boothHud = (s, held) => {
     const b = s.booth, reticle = document.getElementById("weapon-reticle"), equipment = document.getElementById("equipment-hud");
+    // The touch sticks stand aside while the booth has the screen (they lie over its buttons on a phone), and any
+    // stick held as it opens lets go; `endBooth` and the end of the walk away bring them back.
+    document.body.classList.toggle("booth-held", held);
     if (held) {
+      pilot.controls.reset();
       b.act = hud.el.act.hidden;
       b.reticle = reticle.hidden;
       b.equipment = equipment.hidden;
@@ -953,7 +957,7 @@
       note: (request, value, changedHandle) => donations.note(request, value.message, changedHandle ? value.handle : undefined),
       onchain: (request) => donations.onchain(request),
       waitFor: (id) => donations.waitFor(id),
-      ledger: donations.view, payable: donations.payableSats, more: donations.more, refresh: donations.refresh, generation: () => donations.generation,
+      ledger: donations.view, paying: donations.payingAddress, live: donations.streamCurrent, payable: donations.payableSats, more: donations.more, refresh: donations.refresh, generation: () => donations.generation,
       open: () => donations.state.open,
       testNetwork: () => donations.testNetwork,
       limits: () => donations.state.limits,
